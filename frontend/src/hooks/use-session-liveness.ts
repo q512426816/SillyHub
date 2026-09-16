@@ -126,11 +126,18 @@ export interface UseSessionLivenessReturn {
   isLoading: boolean;
 }
 
-export function useSessionLiveness(): UseSessionLivenessReturn {
+/**
+ * quick（ql-20260916-007）：空闲降频——opts.enabled 条件轮询。活性灯只在列表存在
+ * 进行中会话时才有渲染意义（行不命中 map 不亮灯），全空闲列表挂 30s 轮询是纯
+ * 噪音；宿主传 hasActiveSessions（由列表数据派生，无需新请求）。缺省 true 零回归
+ * （既有挂载点显式传值）。
+ */
+export function useSessionLiveness(opts: { enabled?: boolean } = {}): UseSessionLivenessReturn {
   const query = useQuery({
     queryKey: SESSION_LIVENESS_QUERY_KEY,
     queryFn: () => listWorkspaceAgentLogs(LIVENESS_LIST_LIMIT),
     refetchInterval: LIVENESS_POLL_INTERVAL_MS,
+    enabled: opts.enabled ?? true,
   });
 
   const entries = useMemo(() => query.data?.items ?? [], [query.data]);

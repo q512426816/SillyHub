@@ -78,3 +78,19 @@
 方案：①listProviders 裸调用统一 queryKey [llmProviders,basic]（容量类消费方 ctx-usage-bar quota-pill 保持独立键）；②workspaces 统一 [workspace-switcher-list] 键，queryFn 统一 items+my-bindings 超集、limit=100 对齐原 session-list 口径。machines 双份属设计内分离（门户含会话计数 vs 面板裸列表，ql-20260909-013）不动
 结果：sessions 组件测试 353 用例绿，tsc 0 错，eslint 0 错误（config-bar 8 个 unused-args 警告为既有测试桩，非本次引入）；会话页进入 llm-providers 2→1、workspaces 2→1，machines 维持 2（设计内）
 审计：[gate] L1（跨 0 模块 · 5 文件：4 代码/0 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量缺失（4 个代码文件无测试改动）
+
+## ql-20260916-007-df22 | 2026-09-16 09:40:05 | 会话页空闲降频（队列轮询 5s→30s + 活性灯条件轮询）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/hooks/use-message-queue.ts（队列轮询 5s→30s）
+- frontend/src/hooks/use-session-liveness.ts（新增 opts.enabled 条件轮询）
+- frontend/src/components/sessions/session-list-panel.tsx（传 hasActiveSessions 派生值）
+- frontend/src/hooks/__tests__/use-message-queue.test.ts（两用例按 30s 口径重写）
+- .sillyspec/docs/frontend/modules/hooks-message-queue.md（增量节）
+- .sillyspec/docs/frontend/modules/components-sessions.md（活性灯条目）
+需求：会话页空闲降频（队列轮询 5s→30s + 活性灯条件轮询）
+根因：消息队列兜底轮询固定 5s——队列实时性主链本是 SSE queue_changed 事件驱动即时刷新，5s 轮询纯兜底，空闲会话每 5s 白打一次；会话列表活性小灯 useSessionLiveness 固定 30s 轮询，但全空闲列表灯无渲染意义（行不命中 map 不亮）仍白拉 agent-logs
+方案：①use-message-queue POLL_INTERVAL_MS 5s→30s（SSE 事件驱动为主链、重连 resync 自带对账，30s 兜底足够；非 active 不轮询/后台跳 tick 语义保留）；②useSessionLiveness 新增 opts.enabled（缺省 true 零回归），session-list-panel 按列表数据派生 hasActiveSessions 传入——全空闲停 30s 轮询。测试按 30s 口径重写两用例（29s 零轮询/满 30s 恰一次/后台 61s 零轮询）
+结果：hooks+session-list-panel+message-queue-bar 相关 164 用例绿，tsc 0 错，eslint 0 错误（use-message-queue 6 个 unused-args 警告为既有接口定义行）；空闲会话队列请求频率 5s→30s（降 83%）、全空闲列表省 30s 一次的 agent-logs 轮询
+审计：[gate] L1（跨 0 模块 · 6 文件：3 代码/1 测试）advisory；每文件注记已全覆盖；测试增量已含

@@ -987,7 +987,14 @@ function WorkspaceTreeList({
   // working/blocked→idle 转移检测（未读标记）。本面板调一次建 map，经
   // WorkspaceGroupNode → SessionRow props 链按 session.id 命中下发（map 未命
   // 中不传 → 不渲染灯，fail-open 与无日志会话现状一致）。
-  const { bySessionId: livenessBySessionId } = useSessionLiveness();
+  // quick（ql-20260916-007）：活性灯条件轮询——全空闲列表灯无渲染意义
+  // （行不命中 map 不亮），hasActiveSessions=false 时停 30s 轮询省空闲噪音。
+  const hasActiveSessionsForLiveness = sessions.some(
+    (s) => s.status !== "ended" && s.status !== "failed",
+  );
+  const { bySessionId: livenessBySessionId } = useSessionLiveness({
+    enabled: hasActiveSessionsForLiveness,
+  });
 
   // ── task-07（2026-09-01-session-group-chat / FR-01）：群聊分区 ──────────
   // 独立 useQuery 供数（不掺单聊 agentSessions 数据源——design §5.3 群列表

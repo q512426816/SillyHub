@@ -123,8 +123,11 @@ export const QUEUE_MAX_PENDING = 5;
 /** 已知竞态状态码：catch 后静默（随后 load 以服务端为准收敛），其余真实失败 toast（ql-20260903-014）。 */
 const RECONCILE_SILENT_STATUSES = new Set([404, 409, 422]);
 
-/** 轮询间隔（ms）：active 会话低频兜底（主要靠 SSE 事件触发的 refresh）。 */
-const POLL_INTERVAL_MS = 5000;
+/** 轮询间隔（ms）：active 会话低频兜底（主要靠 SSE 事件触发的 refresh）。
+ * quick（ql-20260916-007）：5s → 30s——队列实时性主链是 SSE queue_changed 事件驱动
+ * 即时刷新（page/dialog onQueueChanged 同款接线），轮询纯兜底；30s 足够覆盖
+ * 「SSE 断连重连窗口」场景（重连 resync 自带对账），空闲会话网络噪音减半以上。 */
+const POLL_INTERVAL_MS = 30_000;
 
 export function useMessageQueue({
   sessionId,

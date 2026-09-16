@@ -102,6 +102,8 @@ CtxUsageRing 分母: roleMapping.one_m → 1_000_000
 
 - QuicklogScope 第四态（2026-08-25-session-spec-binding）：session-list-panel 判别联合加 {kind:'quicklog', workspaceId, qlId}（六处 if-chain 消费点需逐一补齐，TS 不做穷尽检查）；「关联」筛选下拉仅 scope?.kind==='workspace' 渲染（分组选项变更/快速修复，透传 change_id/ql_id 服务端过滤）；sessions-portal quicklog 分支合成 preContext {workspaceId, quickId, runtimeId}。
 
+- **session-list-panel 活性灯条件轮询（ql-20260916-007-df22）**：`useSessionLiveness` 新增 `opts.enabled`（缺省 true 零回归），宿主按列表数据派生 `hasActiveSessions`（无 ended/failed 会话）传入——全空闲列表活性灯无渲染意义（行不命中 map 不亮灯），停 30s 轮询省空闲请求。
+
 ## quick-c0640c5b 增量（会话页周边请求缓存键去重，ql-20260916-006-48e2）
 
 - **sessions-portal / session-config-bar**：`listProviders` 裸调用统一 queryKey `["llmProviders","basic"]`（原各按场景名 `sessions-portal`/`sessions-config-bar` 分键，同函数同参缓存不命中，会话页进入 llm-providers ×2）；容量类消费方 `ctx-usage-bar` 的 `quota-pill` 键保持独立（含 quota/capacity 字段，不同源语义）。

@@ -1,0 +1,87 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-79b13fde",
+  "totals": {
+    "files": 6,
+    "additions": 38,
+    "deletions": 10
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/frontend/modules/components-sessions.md",
+      "declared": true,
+      "additions": 2,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/hooks-message-queue.md",
+      "declared": true,
+      "additions": 5,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-list-panel.tsx",
+      "declared": true,
+      "additions": 8,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/hooks/__tests__/use-message-queue.test.ts",
+      "declared": true,
+      "additions": 10,
+      "deletions": 6,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/hooks/use-message-queue.ts",
+      "declared": true,
+      "additions": 5,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/hooks/use-session-liveness.ts",
+      "declared": true,
+      "additions": 8,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 6,
+    "codeFileCount": 3,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260916-007-df22",
+  "sessionId": "quick-79b13fde",
+  "savedAt": "2026-09-16T01:49:37.300Z",
+  "patchSha256": "691f7a30626557676653dbc85d0da1a1038c6df49875f63a70af4c5be77b4112",
+  "patchStatus": "ok"
+}

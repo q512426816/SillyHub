@@ -135,7 +135,7 @@ describe("useMessageQueue（ql-20260825-011 服务端排队）", () => {
     expect(mockedFetch).toHaveBeenLastCalledWith("sess-2");
   });
 
-  it("sessionActive 期间 5s 轮询兜底，非 active 不轮询", async () => {
+  it("sessionActive 期间 30s 轮询兜底，非 active 不轮询（ql-20260916-007 降频）", async () => {
     vi.useFakeTimers();
     mockedFetch.mockResolvedValue([]);
     const { rerender } = renderHook(
@@ -144,11 +144,15 @@ describe("useMessageQueue（ql-20260825-011 服务端排队）", () => {
       { initialProps: { active: false } },
     );
     // 初始挂载一次拉取后，非 active 不再轮询。
-    await act(async () => vi.advanceTimersByTimeAsync(12000));
+    await act(async () => vi.advanceTimersByTimeAsync(12_000));
     expect(mockedFetch).toHaveBeenCalledTimes(1);
 
     rerender({ active: true });
-    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    // 30s 间隔（原 5s，ql-20260916-007：SSE queue_changed 事件驱动为主链，轮询纯兜底）：
+    // 29s 内不轮询，满 30s 恰一次。
+    await act(async () => vi.advanceTimersByTimeAsync(29_000));
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
     expect(mockedFetch.mock.calls.filter((c) => c[0] === "sess-1").length).toBeGreaterThanOrEqual(2);
   });
 
@@ -374,8 +378,8 @@ describe("后台标签页轮询暂停（ql-20260904-009）", () => {
     });
     try {
       renderHook(() => useMessageQueue({ sessionId: "sess-1", sessionActive: true }));
-      await act(async () => vi.advanceTimersByTimeAsync(20_000));
-      // 后台 20s（4 个 5s 拍）零轮询——只有挂载首拉。
+      // 30s 间隔（ql-20260916-007 降频）：后台 61s（跨 2 个 30s 拍）零轮询——只有挂载首拉。
+      await act(async () => vi.advanceTimersByTimeAsync(61_000));
       expect(mockedFetch).toHaveBeenCalledTimes(1);
 
       // 回前台：下一拍恢复。
@@ -383,7 +387,7 @@ describe("后台标签页轮询暂停（ql-20260904-009）", () => {
         configurable: true,
         get: () => false,
       });
-      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      await act(async () => vi.advanceTimersByTimeAsync(30_000));
       expect(mockedFetch.mock.calls.filter((c) => c[0] === "sess-1").length).toBeGreaterThanOrEqual(2);
     } finally {
       if (desc) Object.defineProperty(document, "hidden", desc);

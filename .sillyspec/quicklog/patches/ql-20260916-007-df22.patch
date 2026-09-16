@@ -1,0 +1,142 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-sessions.md b/.sillyspec/docs/frontend/modules/components-sessions.md
+index 1944a0c2f..c83461522 100644
+--- a/.sillyspec/docs/frontend/modules/components-sessions.md
++++ b/.sillyspec/docs/frontend/modules/components-sessions.md
+@@ -102,6 +102,8 @@ CtxUsageRing 分母: roleMapping.one_m → 1_000_000
+ 
+ - QuicklogScope 第四态（2026-08-25-session-spec-binding）：session-list-panel 判别联合加 {kind:'quicklog', workspaceId, qlId}（六处 if-chain 消费点需逐一补齐，TS 不做穷尽检查）；「关联」筛选下拉仅 scope?.kind==='workspace' 渲染（分组选项变更/快速修复，透传 change_id/ql_id 服务端过滤）；sessions-portal quicklog 分支合成 preContext {workspaceId, quickId, runtimeId}。
+ 
++- **session-list-panel 活性灯条件轮询（ql-20260916-007-df22）**：`useSessionLiveness` 新增 `opts.enabled`（缺省 true 零回归），宿主按列表数据派生 `hasActiveSessions`（无 ended/failed 会话）传入——全空闲列表活性灯无渲染意义（行不命中 map 不亮灯），停 30s 轮询省空闲请求。
++
+ ## quick-c0640c5b 增量（会话页周边请求缓存键去重，ql-20260916-006-48e2）
+ 
+ - **sessions-portal / session-config-bar**：`listProviders` 裸调用统一 queryKey `["llmProviders","basic"]`（原各按场景名 `sessions-portal`/`sessions-config-bar` 分键，同函数同参缓存不命中，会话页进入 llm-providers ×2）；容量类消费方 `ctx-usage-bar` 的 `quota-pill` 键保持独立（含 quota/capacity 字段，不同源语义）。
+diff --git a/.sillyspec/docs/frontend/modules/hooks-message-queue.md b/.sillyspec/docs/frontend/modules/hooks-message-queue.md
+index adf511755..f34cc98b4 100644
+--- a/.sillyspec/docs/frontend/modules/hooks-message-queue.md
++++ b/.sillyspec/docs/frontend/modules/hooks-message-queue.md
+@@ -44,6 +44,11 @@ SessionPanel（page/dialog 双模式）消费。
+ - 调用方（SessionPanel）的发送必须在 resolve 前置好 currentRunId（占位 id 同步置位），
+   否则破坏 turn 串行。
+ 
++## quick-79b13fde 增量（队列轮询降频 5s→30s，ql-20260916-007-df22）
++
++- `POLL_INTERVAL_MS` 5_000 → 30_000：队列实时性主链是 SSE `queue_changed` 事件驱动即时刷新（page/dialog `onQueueChanged` 接线），轮询纯兜底；30s 足够覆盖 SSE 断连重连窗口（重连 resync 自带对账），空闲会话网络噪音显著下降。既有语义保留：非 active 不轮询、后台标签页跳过 tick（ql-20260904-009）。
++- 测试同步更新：「sessionActive 期间轮询兜底」与「后台暂停」两用例的推进时长按 30s 口径重写（29s 内零轮询 / 满 30s 恰一次 / 后台 61s 跨两拍零轮询）。
++
+ ## 人工备注
+ 
+ （无）
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index 800970735..07be43f55 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -987,7 +987,14 @@ function WorkspaceTreeList({
+   // working/blocked→idle 转移检测（未读标记）。本面板调一次建 map，经
+   // WorkspaceGroupNode → SessionRow props 链按 session.id 命中下发（map 未命
+   // 中不传 → 不渲染灯，fail-open 与无日志会话现状一致）。
+-  const { bySessionId: livenessBySessionId } = useSessionLiveness();
++  // quick（ql-20260916-007）：活性灯条件轮询——全空闲列表灯无渲染意义
++  // （行不命中 map 不亮），hasActiveSessions=false 时停 30s 轮询省空闲噪音。
++  const hasActiveSessionsForLiveness = sessions.some(
++    (s) => s.status !== "ended" && s.status !== "failed",
++  );
++  const { bySessionId: livenessBySessionId } = useSessionLiveness({
++    enabled: hasActiveSessionsForLiveness,
++  });
+ 
+   // ── task-07（2026-09-01-session-group-chat / FR-01）：群聊分区 ──────────
+   // 独立 useQuery 供数（不掺单聊 agentSessions 数据源——design §5.3 群列表
+diff --git a/frontend/src/hooks/__tests__/use-message-queue.test.ts b/frontend/src/hooks/__tests__/use-message-queue.test.ts
+index b7248d989..b0bf50924 100644
+--- a/frontend/src/hooks/__tests__/use-message-queue.test.ts
++++ b/frontend/src/hooks/__tests__/use-message-queue.test.ts
+@@ -135,7 +135,7 @@ describe("useMessageQueue（ql-20260825-011 服务端排队）", () => {
+     expect(mockedFetch).toHaveBeenLastCalledWith("sess-2");
+   });
+ 
+-  it("sessionActive 期间 5s 轮询兜底，非 active 不轮询", async () => {
++  it("sessionActive 期间 30s 轮询兜底，非 active 不轮询（ql-20260916-007 降频）", async () => {
+     vi.useFakeTimers();
+     mockedFetch.mockResolvedValue([]);
+     const { rerender } = renderHook(
+@@ -144,11 +144,15 @@ describe("useMessageQueue（ql-20260825-011 服务端排队）", () => {
+       { initialProps: { active: false } },
+     );
+     // 初始挂载一次拉取后，非 active 不再轮询。
+-    await act(async () => vi.advanceTimersByTimeAsync(12000));
++    await act(async () => vi.advanceTimersByTimeAsync(12_000));
+     expect(mockedFetch).toHaveBeenCalledTimes(1);
+ 
+     rerender({ active: true });
+-    await act(async () => vi.advanceTimersByTimeAsync(5000));
++    // 30s 间隔（原 5s，ql-20260916-007：SSE queue_changed 事件驱动为主链，轮询纯兜底）：
++    // 29s 内不轮询，满 30s 恰一次。
++    await act(async () => vi.advanceTimersByTimeAsync(29_000));
++    expect(mockedFetch).toHaveBeenCalledTimes(1);
++    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+     expect(mockedFetch.mock.calls.filter((c) => c[0] === "sess-1").length).toBeGreaterThanOrEqual(2);
+   });
+ 
+@@ -374,8 +378,8 @@ describe("后台标签页轮询暂停（ql-20260904-009）", () => {
+     });
+     try {
+       renderHook(() => useMessageQueue({ sessionId: "sess-1", sessionActive: true }));
+-      await act(async () => vi.advanceTimersByTimeAsync(20_000));
+-      // 后台 20s（4 个 5s 拍）零轮询——只有挂载首拉。
++      // 30s 间隔（ql-20260916-007 降频）：后台 61s（跨 2 个 30s 拍）零轮询——只有挂载首拉。
++      await act(async () => vi.advanceTimersByTimeAsync(61_000));
+       expect(mockedFetch).toHaveBeenCalledTimes(1);
+ 
+       // 回前台：下一拍恢复。
+@@ -383,7 +387,7 @@ describe("后台标签页轮询暂停（ql-20260904-009）", () => {
+         configurable: true,
+         get: () => false,
+       });
+-      await act(async () => vi.advanceTimersByTimeAsync(5_000));
++      await act(async () => vi.advanceTimersByTimeAsync(30_000));
+       expect(mockedFetch.mock.calls.filter((c) => c[0] === "sess-1").length).toBeGreaterThanOrEqual(2);
+     } finally {
+       if (desc) Object.defineProperty(document, "hidden", desc);
+diff --git a/frontend/src/hooks/use-message-queue.ts b/frontend/src/hooks/use-message-queue.ts
+index 95fcee8e2..c49f4cbee 100644
+--- a/frontend/src/hooks/use-message-queue.ts
++++ b/frontend/src/hooks/use-message-queue.ts
+@@ -123,8 +123,11 @@ export const QUEUE_MAX_PENDING = 5;
+ /** 已知竞态状态码：catch 后静默（随后 load 以服务端为准收敛），其余真实失败 toast（ql-20260903-014）。 */
+ const RECONCILE_SILENT_STATUSES = new Set([404, 409, 422]);
+ 
+-/** 轮询间隔（ms）：active 会话低频兜底（主要靠 SSE 事件触发的 refresh）。 */
+-const POLL_INTERVAL_MS = 5000;
++/** 轮询间隔（ms）：active 会话低频兜底（主要靠 SSE 事件触发的 refresh）。
++ * quick（ql-20260916-007）：5s → 30s——队列实时性主链是 SSE queue_changed 事件驱动
++ * 即时刷新（page/dialog onQueueChanged 同款接线），轮询纯兜底；30s 足够覆盖
++ * 「SSE 断连重连窗口」场景（重连 resync 自带对账），空闲会话网络噪音减半以上。 */
++const POLL_INTERVAL_MS = 30_000;
+ 
+ export function useMessageQueue({
+   sessionId,
+diff --git a/frontend/src/hooks/use-session-liveness.ts b/frontend/src/hooks/use-session-liveness.ts
+index 758ee68be..eaa46790c 100644
+--- a/frontend/src/hooks/use-session-liveness.ts
++++ b/frontend/src/hooks/use-session-liveness.ts
+@@ -126,11 +126,18 @@ export interface UseSessionLivenessReturn {
+   isLoading: boolean;
+ }
+ 
+-export function useSessionLiveness(): UseSessionLivenessReturn {
++/**
++ * quick（ql-20260916-007）：空闲降频——opts.enabled 条件轮询。活性灯只在列表存在
++ * 进行中会话时才有渲染意义（行不命中 map 不亮灯），全空闲列表挂 30s 轮询是纯
++ * 噪音；宿主传 hasActiveSessions（由列表数据派生，无需新请求）。缺省 true 零回归
++ * （既有挂载点显式传值）。
++ */
++export function useSessionLiveness(opts: { enabled?: boolean } = {}): UseSessionLivenessReturn {
+   const query = useQuery({
+     queryKey: SESSION_LIVENESS_QUERY_KEY,
+     queryFn: () => listWorkspaceAgentLogs(LIVENESS_LIST_LIMIT),
+     refetchInterval: LIVENESS_POLL_INTERVAL_MS,
++    enabled: opts.enabled ?? true,
+   });
+ 
+   const entries = useMemo(() => query.data?.items ?? [], [query.data]);

@@ -44,6 +44,11 @@ SessionPanel（page/dialog 双模式）消费。
 - 调用方（SessionPanel）的发送必须在 resolve 前置好 currentRunId（占位 id 同步置位），
   否则破坏 turn 串行。
 
+## quick-79b13fde 增量（队列轮询降频 5s→30s，ql-20260916-007-df22）
+
+- `POLL_INTERVAL_MS` 5_000 → 30_000：队列实时性主链是 SSE `queue_changed` 事件驱动即时刷新（page/dialog `onQueueChanged` 接线），轮询纯兜底；30s 足够覆盖 SSE 断连重连窗口（重连 resync 自带对账），空闲会话网络噪音显著下降。既有语义保留：非 active 不轮询、后台标签页跳过 tick（ql-20260904-009）。
+- 测试同步更新：「sessionActive 期间轮询兜底」与「后台暂停」两用例的推进时长按 30s 口径重写（29s 内零轮询 / 满 30s 恰一次 / 后台 61s 跨两拍零轮询）。
+
 ## 人工备注
 
 （无）
