@@ -164,3 +164,15 @@
 方案：①后端 close_run_steps._close_apply_terminal：failed 且 result_summary 空时按 error_code 补写可读中文原因到 output_redacted（经 SessionRunRead.failure_summary 透出，写前非空不覆盖防冲掉执行摘要）；映射 interactive_failed/interactive_unknown_status/interactive_interrupted/interactive_inject_send_failed；②前端 buildSystemFailureItem 映射表补 daemon_interrupted（执行端离线）/SERVICE_RESTART_INTERRUPTED（服务重启）可读文案
 结果：后端新增 3 用例（无摘要补写/有摘要保留/成功轮不补）+ 既有 7 用例共 10 passed，相邻 interactive_lifecycle/apply_session_terminal 40 用例绿，ruff/mypy 过；前端 agent-log 相关 164 用例绿，tsc 0；模块文档 daemon.md 增量节
 审计：[gate] L1（跨 0 模块 · 4 文件：2 代码/1 测试）advisory；每文件注记已全覆盖；测试增量已含
+
+## ql-20260916-012-b5b2 | 2026-09-16 12:08:32 | 全路由 force-dynamic 根治部署后旧 HTML 壳一年缓存坑
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/layout.tsx（根布局 force-dynamic + 坑位注释）
+- frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx（mock 类型修正）
+- .sillyspec/docs/frontend/modules/app-layouts.md（增量节）
+需求：全路由 force-dynamic 根治部署后旧 HTML 壳一年缓存坑
+根因：Next 默认把客户端页面 static 预渲染打 s-maxage=31536000（实测全站含 /login），重新部署后浏览器/代理继续用旧壳引用旧 chunk，新代码永不生效——用户实证 /sessions 部署后无变化、后端日志 11:58 仍见旧版 200ms 内 6 条 /runs 扇出；公网 chunk 验证新代码可下载但浏览器拿旧 HTML
+方案：根布局 export const dynamic = force-dynamic 一次覆盖全部路由（workbench 逐页先例的全站化）：壳 HTML 每次 SSR + no-store，/_next/static 内容哈希 immutable 不受影响；附带修 Quick E 测试 mock 类型（SessionRunRead 标注）
+结果：tsc 0；dedup 测试 5 用例绿；page.test 7 失败 stash 对照证并行既有债非本次引入；已部署验证：公网 /sessions 响应头从 s-maxage=31536000 变为 private,no-cache,no-store,must-revalidate，onHeartbeat chunk 公网可下载

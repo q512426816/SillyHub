@@ -6,6 +6,18 @@ import { AppProviders } from "@/lib/providers";
 import { inter } from "@/styles/fonts";
 import "./globals.css";
 
+/**
+ * quick（ql-20260916-012）：全路由 force-dynamic——根治「重新部署后浏览器/代理
+ * 仍用旧 HTML 壳」的部署级坑。Next 默认把客户端页面当 static 预渲染，HTML 壳打
+ * Cache-Control: s-maxage=31536000, stale-while-revalidate（一年共享缓存），
+ * 引用旧 chunk → 新代码永远不生效（用户实测 /sessions 部署后无变化；后端日志
+ * 仍见旧版 /runs 扇出）。ppm/workbench/layout.tsx 当年逐页修过同款（先例注释），
+ * 本次在根布局一次覆盖全部路由：壳 HTML 每次 SSR + no-store，静态资源
+ * /_next/static/* 仍走内容哈希 immutable 缓存不受影响。全站页面均为客户端运行时
+ * 取数（"use client" + fetch），无 SSG 内容诉求，SSR 壳为空壳代价可忽略。
+ */
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "SillyHub",
   description: "SillySpec 原生查看器 + 多智能体执行平台。",

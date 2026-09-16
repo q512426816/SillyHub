@@ -13,6 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { SessionPanel } from "../session-panel";
+import type { SessionRunRead } from "@/lib/daemon";
 
 vi.mock("@/components/ui/markdown-text", () => ({
   MarkdownText: ({ content }: { content: string }) => (
@@ -221,7 +222,7 @@ describe("未加载历史轮占位骨架（ql-20260916-010）", () => {
     // makeHistory 只含 run-h1..h3 的日志；HISTORY_RUNS 快照同集——无未加载轮。
     // 追加一个不在日志里的 run-h4 快照行（历史窗口外），其占位骨架应渲染。
     sessionApi.listSessionRuns.mockImplementation(async () => {
-      const rows = HISTORY_RUNS.map((id) => ({
+      const rows: SessionRunRead[] = HISTORY_RUNS.map((id) => ({
         id,
         created_at: "2026-09-16T10:00:00Z",
         spec_strategy: null,

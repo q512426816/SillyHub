@@ -1,0 +1,15 @@
+diff --git a/.sillyspec/docs/frontend/modules/app-layouts.md b/.sillyspec/docs/frontend/modules/app-layouts.md
+index a4ca5a200..c60b5970f 100644
+--- a/.sillyspec/docs/frontend/modules/app-layouts.md
++++ b/.sillyspec/docs/frontend/modules/app-layouts.md
+@@ -37,6 +37,10 @@ WorkspaceDetailLayout: isStandalone(changes|components) ? <children/> : guard+ta
+ - `suppressHydrationWarning` 容忍 html 属性 hydration 差异，勿移除。
+ - `dynamic = "force-dynamic"` 只能写在 server layout；给 client 页面加需沿用 workbench 本模式。
+ 
++## quick-5621ff55 增量（全路由 force-dynamic 根治部署旧壳缓存，ql-20260916-012-b5b2）
++
++- **根布局 `export const dynamic = "force-dynamic"`**：Next 默认把客户端页面 static 预渲染并打 `Cache-Control: s-maxage=31536000, stale-while-revalidate`（实测全站含 /login），重新部署后浏览器/共享缓存继续用旧 HTML 壳（引用旧 chunk）→ 新代码永不生效（用户实证 /sessions 部署后无变化、后端日志仍见旧版 /runs 扇出；ppm/workbench/layout.tsx 当年逐页修过同款）。根布局一次覆盖全部路由：壳 HTML 每次 SSR + `private, no-cache, no-store`；`/_next/static/*` 内容哈希 immutable 缓存不受影响。全站页面均为客户端运行时取数，无 SSG 诉求，SSR 空壳代价可忽略。
++
+ ## 人工备注
+ <!-- MANUAL_NOTES_START -->
+ <!-- MANUAL_NOTES_END -->
