@@ -152,11 +152,6 @@ export function enrichDisplayTurns(
   llmProviders: LlmProviderRead[],
   agentDisplayName: string,
   sessionUserId: string | null | undefined,
-  /** quick（ql-20260916-009）：已知未加载轮集合——快照里有、但内容窗口还没拉到
-   * 的真实 run id（「加载更早」翻页路径用装配块的 realRunId 播种）。孤儿轮补建
-   * 跳过这些 id：翻页到达后装配块自然携带内容出现，未加载期间不渲染无内容占位块
-   * （修复历史翻页只显示配置行的问题）。缺省 undefined = 无已知未加载轮（零回归）。 */
-  knownPendingRunIds?: ReadonlySet<string>,
 ): SessionTurnView[] {
     if (runsMeta.size === 0) return turns;
     /** 单轮快照补齐（?? 链：turn 已有值优先，run 快照只补缺）。 */
@@ -257,46 +252,28 @@ export function enrichDisplayTurns(
     // ql-20260818-011：runsMeta 中的静默切换 run 无 SSE 事件→不在 turns
     // 中→displayTurns 迭代忽略→重进才可见。补建孤儿 turn（无 prompt/output，
     // 有 whoLine，已完成后台 run），让它们实时出现。
+    // quick（ql-20260916-016，对齐 deepseek-harness ChatView 设计）：孤儿补建
+    // 仅限「完成时间落在已加载日志窗口内」的 run——窗口内无装配块 = 真静默切换
+    // 轮（实时可见性保留）；完成于窗口之外的深历史 run 一律不渲染（时间线只显示
+    // 已加载内容，空白配置行墙是「会话回显坏了」的观感根源，用户实测 38 个空壳
+    // 行混在内容里）。窗口下沿 = 已装配轮的最小起始时刻（纯函数内派生，翻页
+    // prepend 后自然推进）；无已加载轮（初始加载前）不补建（防空壳闪现）。
     const knownRunIds = new Set(turns.map((t) => t.realRunId ?? t.runId));
+    let windowFloorMs = Number.POSITIVE_INFINITY;
+    for (const t of turns) {
+      if (t.turnStartedAt != null && t.turnStartedAt < windowFloorMs) {
+        windowFloorMs = t.turnStartedAt;
+      }
+    }
     const orphanTurns: SessionTurnView[] = [];
     for (const [runId, meta] of runsMeta) {
       if (knownRunIds.has(runId)) continue;
-      // quick（ql-20260916-010）：已知未加载轮补建轻量占位 turn（whoLine 配置行 +
-      // sender 时间，复用「静默切换轮紧凑标记」渲染形态）——向上翻页时未加载的
-      // 历史轮显示带时间与档案/供应商信息的骨架，内容随翻页到达后装配块携带
-      // 正文自然替换（ql-20260916-009 之前渲染无内容空壳、修复后隐形，现为骨架）。
-      if (knownPendingRunIds?.has(runId)) {
-        if (meta.status !== 'completed') continue;
-        orphanTurns.push({
-          runId,
-          turn: null,
-          prompt: '',
-          output: '',
-          status: 'completed',
-          seenLogIds: new Set(),
-          inputTokens: null,
-          outputTokens: null,
-          ctxTokens: null,
-          errorDetail: null,
-          processItems: [],
-          realRunId: runId,
-          whoLine: {
-            profileName: meta.agent_profile_snapshot?.name ?? null,
-            agentName: agentDisplayName,
-            providerName: meta.llm_provider_id
-              ? (llmProviders.find((p) => p.id === meta.llm_provider_id)?.name ?? null)
-              : null,
-          },
-          sender: meta.user_id && meta.sender_name
-            ? {
-                name: meta.sender_name,
-                me: meta.user_id === sessionUserId,
-                at: meta.started_at ?? null,
-              }
-            : undefined,
-          replyAt: meta.finished_at ?? meta.started_at ?? null,
-        });
-        continue;
+      // 无已加载轮（初始日志在途）：保留孤儿补建——ctx 用量环等派生消费方
+      // 此刻的数据源是孤儿轮（logs 空但 runsMeta 已到），日志到达后窗口规则
+      // 自然接管（深历史空壳消失）。有已加载轮后：窗口外深历史不补建。
+      if (Number.isFinite(windowFloorMs)) {
+        const finishedMs = meta.finished_at ? Date.parse(meta.finished_at) : NaN;
+        if (!Number.isFinite(finishedMs) || finishedMs < windowFloorMs) continue;
       }
       if (meta.status !== 'completed') continue;
       orphanTurns.push({

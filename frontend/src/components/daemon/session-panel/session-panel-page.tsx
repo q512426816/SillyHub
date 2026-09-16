@@ -1120,6 +1120,9 @@ export function SessionPanelPage({
    *  直接刷新（await 间隙 passive effect 不保证已提交，仅靠 effect 循环内会读到
    *  过期 true，空页后多空转甚至误判 toast 档位）。 */
   const hasEarlierRef = useRef(false);
+  // quick（ql-20260916-017）：跳转抑制贴底跟随（TurnTimeline props）——跳转
+  // 翻页/定位期间 true，定位 settle 后 1s 解除（smooth 滚动余量）。
+  const [jumpFollowSuppress, setJumpFollowSuppress] = useState(false);
   const handleLoadEarlierRef = useRef<() => Promise<void>>(async () => {});
   const handleLoadEarlier = useCallback(async () => {
     if (!sessionId || historyLoadingRef.current || !hasEarlier) return;
@@ -1397,6 +1400,10 @@ export function SessionPanelPage({
   //    先例双 rAF，但锚点按 data-turn-key 属性精确匹配——FR-07 禁类名匹配）。 ----
   const handleJumpToTurn = useCallback(
     async (entry: TurnCatalogEntry) => {
+      setJumpFollowSuppress(true);
+      const settleFollow = () => {
+        setTimeout(() => setJumpFollowSuppress(false), 1000);
+      };
       const container = timelineScrollEl();
       // quick（ql-20260916-014）：命中行须**有内容**——孤儿/骨架配置行（快照补建的
       // 空壳，文本极短）从首屏就存在于 DOM，旧 hit() 命中空壳即认为已加载直接滚
@@ -1419,14 +1426,16 @@ export function SessionPanelPage({
         // 从机制上杜绝挂起。suppress 全程置位，所有出口（含卸载）恢复。
         jumpSuppressLoadEarlierRef.current = true;
         let pages = 0;
+        let timer: ReturnType<typeof setInterval> | undefined;
         const stop = () => {
           jumpSuppressLoadEarlierRef.current = false;
-          clearInterval(timer);
+          if (timer !== undefined) clearInterval(timer);
         };
-        const timer = setInterval(() => {
+        const tick = () => {
           if (!mountedRef.current) { stop(); return; } // 卸载即停
           if (hit() || !hasEarlierRef.current || pages >= JUMP_LOAD_EARLIER_MAX_PAGES) {
             stop();
+            settleFollow();
             if (!mountedRef.current) return;
             if (!hit()) {
               if (!hasEarlierRef.current) notify.error("该轮次日志不存在（可能已被清理）");
@@ -1438,7 +1447,9 @@ export function SessionPanelPage({
           if (historyLoadingRef.current) return;
           pages += 1;
           void loadEarlierOnce();
-        }, 300);
+        };
+        tick(); // 首页立即发起（对齐旧 async 循环的即时性），其后 40ms 间隔续翻。
+        timer = setInterval(tick, 40);
         return;
       }
       // 命中：先即时置当前轮（design §9 刻度即时 active；smooth 滚动途中
@@ -1448,6 +1459,7 @@ export function SessionPanelPage({
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           hit()?.scrollIntoView({ behavior: "smooth", block: "start" });
+          settleFollow();
           setHighlightTurnKey(entry.key);
           if (highlightTimerRef.current !== null) {
             clearTimeout(highlightTimerRef.current);
@@ -1648,18 +1660,6 @@ export function SessionPanelPage({
   // 按 run 快照补 whoLine / 历史 usage（派生体外提 page-helpers.enrichDisplayTurns，
   // 依赖数组逐项保留）：只补缺（?? 链），实时 SSE 值优先；run 快照缺失（拉取失败 /
   // 占位 turn）原样返回——whoLine 不渲染（零回归）。
-  // quick（ql-20260916-009）：已知未加载轮集合——「加载更早」装配块携带真实
-  // realRunId，其 run 在快照里存在但内容未全量到达（大 run 跨页/首见块在窗口外）。
-  // 传 enrichDisplayTurns 孤儿补建跳过这些 id：翻页到达前不渲染无内容占位块。
-  const knownPendingRunIds = useMemo(
-    () =>
-      new Set(
-        turnState.turns
-          .map((t) => t.realRunId)
-          .filter((id): id is string => !!id && runsMeta.has(id)),
-      ),
-    [turnState.turns, runsMeta],
-  );
   const displayTurns = useMemo(
     () =>
       enrichDisplayTurns(
@@ -1668,9 +1668,8 @@ export function SessionPanelPage({
         llmProviders,
         agentDisplayName,
         session?.user_id,
-        knownPendingRunIds,
       ),
-    [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id, knownPendingRunIds],
+    [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id],
   );
 
   // ── task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design
@@ -3116,6 +3115,7 @@ export function SessionPanelPage({
         onToggleLocalReport: () => setLocalReportOpen((v) => !v),
       })}
       <TurnTimeline
+        suppressFollowBottom={jumpFollowSuppress}
         turns={dialogTurns}
         viewMode={viewMode}
         errorMsg={errorMsg}

@@ -4,7 +4,7 @@ doc_type: module-card
 module_id: components-daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-09-16 14:55:00
+updated_at: 2026-09-16 17:30:00
 ---
 
 # Daemon 运行时交互组件（components-daemon）
@@ -250,6 +250,13 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 - **turn-timeline content-visibility**：完整轮块/紧凑配置行加 `[content-visibility:auto] [contain-intrinsic-size:auto_80000px]`——浏览器原生虚拟化，屏外轮次跳过布局与绘制（先例 deepseek-harness ChatView）。线上实证单轮最长 13.7 万字符（1.2MB markdown），全量渲染是翻页/跳转卡死根因（async/MessageChannel/setInterval 三种等待机制全部在大 run 装配页冻结——主线程持续长阻塞）。
 - **HugeOutputBlock 折叠**：单轮 markdown 超 3 万字符首屏只渲染前 3 万 + 截断提示 + 「展开全文」按钮（用户显式展开时才全量 parse）。与 content-visibility 互补：后者救屏外，前者救屏内大块。
 - headless 终验（此前 100% 卡死的最严苛场景）：点第 32 轮跳转 **4 秒完成**（翻 6 页、4 目标轮全部有内容、视口落位 scrollTop 138 万 px）。
+
+## quick 增量（空壳墙真根因 + 跳转弹回，ql-20260916-017）
+
+- **syncGapFromDb 终态合成缺口门控（空壳墙真根因）**：旧实现首连对快照**全量**终态 run 合成 turn_completed，upsertTurn 给每个历史 run 建空轮（无 prompt/output）→ 渲染成配置行墙（6e213eb3 会话 47 run 中 43 空壳）。这些空轮在 turns 里**不是孤儿**——此前孤儿门控（016）管不到（真实数据本地复现实证：孤儿路径只出 1 个窗口内静默轮，43 空壳全部来自合成路径）。修复：终态合成仅限 finished_at > 本轮 sync 的日志游标（真缺口：历史快照→SSE 订阅间完成），5s 复核同款门控；无游标（initialSync 全量兜底）维持全量（logs 全量回放 upsert 幂等）。
+- **跳转贴底弹回修复**：TurnTimeline [turns] effect 在 isNearBottom=true 时每次 turns 更新强制滚底——用户原在底部点刻度跳转，每次翻页 prepend 都被拉回底部（实测跳 30 轮落位后弹回第 47 轮）。新增 suppressFollowBottom props，跳转全程置位、定位 settle 后 1s 解除。
+- headless 终验：首屏 total=4 compact=0（旧 47/38）；跳第 30 轮翻 8 页落位后 scrollTop 稳定不弹回。
+- 附带（016 收尾）：孤儿窗口规则保留（窗口内静默轮可见性 + ctx 环初始数据源），knownPendingRunIds 死代码清除；跳转轮询 40ms + 首页立即发起（对齐旧 async 循环即时性，page.test 导航 8 用例回归绿）。
 
 ## 人工备注
 

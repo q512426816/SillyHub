@@ -218,7 +218,7 @@ async function renderAndSettle() {
 // 会话快照含未加载轮（log 窗口外的历史 run）时，翻页前显示带配置行/时间的
 // 轻量占位 turn（复用「静默切换轮紧凑标记」渲染），翻页到达后装配块替换。
 describe("未加载历史轮占位骨架（ql-20260916-010）", () => {
-  it("快照含未加载历史轮 → 渲染配置行骨架（时间+档案+供应商）", async () => {
+  it("快照含未加载深历史轮 → 不再渲染空壳行（ql-20260916-016 对齐 deepseek-harness：时间线只显示已加载内容）", async () => {
     // makeHistory 只含 run-h1..h3 的日志；HISTORY_RUNS 快照同集——无未加载轮。
     // 追加一个不在日志里的 run-h4 快照行（历史窗口外），其占位骨架应渲染。
     sessionApi.listSessionRuns.mockImplementation(async () => {
@@ -261,13 +261,13 @@ describe("未加载历史轮占位骨架（ql-20260916-010）", () => {
       return rows;
     });
     await renderAndSettle();
-    // 占位骨架渲染配置行（档案名 chip）——文本被 <span>· <svg/> 档案名</span>
-    // 拆成「· 」「测试档案」两段（紧凑行 render 结构），用函数匹配跨段取含档案名的段。
+    // 深历史 run（finished 09-15 09:00 早于已加载窗口下沿 09-16 10:00）不再
+    // 渲染任何行（旧设计渲染空壳配置行墙——「会话回显坏了」观感根源）。
     await waitFor(() =>
-      expect(
-        screen.getAllByText((_, el) => el?.textContent === "·  测试档案").length,
-      ).toBeGreaterThan(0),
+      expect(screen.getAllByText(/回答\d/).length).toBe(HISTORY_RUNS.length),
     );
+    expect(screen.queryByText(/测试档案/)).toBeNull();
+    expect(screen.queryByText(/09-15/)).toBeNull();
   });
 });
 

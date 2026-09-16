@@ -226,6 +226,9 @@ export function streamSession(
   // quick（ql-20260916-005）：最近一次缺口同步快照里是否存在非终态 run——5s 复核
   // 的拉取门控（「快照 → 订阅」窗口内能完成的前提是快照时它在跑）。
   let sawRunningRunAtSync = false;
+  // quick（ql-20260916-017）：最近一次缺口同步时的日志游标——终态合成的缺口下沿
+  // （finished_at 早于它的轮已在调用方历史回灌里，合成只产空轮污染时间线）。
+  let synthFloorTs: string | null = null;
   // task-09 / design A6：连接状态外露（onStatusChange）。初值 live——首连（未断
   // 过线）不上报，调用方初始态即视为 live（不显示横幅）。
   let connStatus: SessionStreamStatus = "live";
@@ -558,6 +561,7 @@ export function streamSession(
     // 窗口内可能完成的只有这类 run；全终态时 5s 复核无从补起（见 reconcileTerminalRuns
     // 门控），空闲会话进入不再多发一次 /runs。
     sawRunningRunAtSync = runs.some((run) => !TERMINAL_RUN_STATUSES.has(run.status));
+    synthFloorTs = lastLogTs; // 缺口下沿（见上方 017 注释）
     for (const run of runs) {
       if (!TERMINAL_RUN_STATUSES.has(run.status)) {
         dispatchRunSynth(run, "turn_started");
@@ -567,6 +571,19 @@ export function streamSession(
     if (closed) return;
     for (const run of runs) {
       if (TERMINAL_RUN_STATUSES.has(run.status)) {
+        // quick（ql-20260916-017）：终态合成仅限「缺口窗口内完成」的轮
+        // （finished_at 晚于调用方历史游标）——旧实现全量合成 turn_completed，
+        // upsertTurn 给每个历史 run 建空轮（无 prompt/output），渲染成配置行
+        // 墙（6e213eb3 会话 47 run 中 43 个空壳——用户实测「回显不行」真根因
+        // ；孤儿门控管不到它们，它们在 turns 里不是孤儿）。无游标（initialSync
+        // 全量兜底）维持全量合成（logs 全量回放，upsert 幂等合并语义不变）。
+        if (
+          synthFloorTs !== null &&
+          run.finished_at !== null &&
+          run.finished_at <= synthFloorTs
+        ) {
+          continue;
+        }
         dispatchRunSynth(run, "turn_completed");
       }
     }
@@ -623,6 +640,15 @@ export function streamSession(
       if (closed) return;
       for (const run of runs) {
         if (TERMINAL_RUN_STATUSES.has(run.status)) {
+          // quick（ql-20260916-017）：同 syncGapFromDb 缺口门控——只补「sync 后
+          // 完成」的轮（finished_at > 本轮 sync 游标下沿），历史轮不合成空轮。
+          if (
+            synthFloorTs !== null &&
+            run.finished_at !== null &&
+            run.finished_at <= synthFloorTs
+          ) {
+            continue;
+          }
           dispatchRunSynth(run, "turn_completed");
         }
       }

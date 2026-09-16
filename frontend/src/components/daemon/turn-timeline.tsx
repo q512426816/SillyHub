@@ -371,6 +371,13 @@ export interface TurnTimelineProps {
    * isHighlighted（R-07：字符串 prop 直传会在值变化时击穿全部行 memo）。
    */
   highlightTurnKey?: string | null;
+  /**
+   * quick（ql-20260916-017）：跳转翻页/定位期间暂停「贴底跟随」——用户原在底部
+   * （isNearBottom=true）时点刻度跳转，每次翻页 prepend 都触发 [turns] effect
+   * 强制滚回底部，与跳转 scrollIntoView 抢滚动（实测：跳 30 轮落位后被弹回
+   * 第 47 轮）。跳转方全程置位，定位 settle 后解除。
+   */
+  suppressFollowBottom?: boolean;
 }
 
 /** ql-20260903-026：单轮行 memo 组件——配合 session-panel displayTurns 的引用
@@ -859,6 +866,7 @@ export function TurnTimeline({
   emptyProviderLabel,
   streamFooter,
   highlightTurnKey,
+  suppressFollowBottom = false,
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -950,10 +958,12 @@ export function TurnTimeline({
         return sel != null && !sel.isCollapsed && sel.toString().length > 0;
       })();
     if (selecting) return;
+    // quick（ql-20260916-017）：跳转进行中不贴底（见 props 注释）。
+    if (suppressFollowBottom) return;
     if (isNewPendingTurn || isNearBottomRef.current) {
       el.scrollTo(0, el.scrollHeight);
     }
-  }, [turns]);
+  }, [turns, suppressFollowBottom]);
 
   // ── ql-20260825-006：pending 提问卡最小化（对齐 SessionPermissionPanel 的
   // task-08 FR-04 / D-003 交互）───────────────────────────────────────────
