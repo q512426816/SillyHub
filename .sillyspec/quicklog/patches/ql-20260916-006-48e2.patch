@@ -1,0 +1,129 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-sessions.md b/.sillyspec/docs/frontend/modules/components-sessions.md
+index c2cd6767c..1944a0c2f 100644
+--- a/.sillyspec/docs/frontend/modules/components-sessions.md
++++ b/.sillyspec/docs/frontend/modules/components-sessions.md
+@@ -4,7 +4,7 @@ doc_type: module-card
+ module_id: components-sessions
+ author: qinyi
+ created_at: 2026-08-18 01:45:00
+-updated_at: 2026-08-23 12:58:00
++updated_at: 2026-09-16 09:45:00
+ ---
+ 
+ # 会话门户组件（components-sessions）
+@@ -102,6 +102,12 @@ CtxUsageRing 分母: roleMapping.one_m → 1_000_000
+ 
+ - QuicklogScope 第四态（2026-08-25-session-spec-binding）：session-list-panel 判别联合加 {kind:'quicklog', workspaceId, qlId}（六处 if-chain 消费点需逐一补齐，TS 不做穷尽检查）；「关联」筛选下拉仅 scope?.kind==='workspace' 渲染（分组选项变更/快速修复，透传 change_id/ql_id 服务端过滤）；sessions-portal quicklog 分支合成 preContext {workspaceId, quickId, runtimeId}。
+ 
++## quick-c0640c5b 增量（会话页周边请求缓存键去重，ql-20260916-006-48e2）
++
++- **sessions-portal / session-config-bar**：`listProviders` 裸调用统一 queryKey `["llmProviders","basic"]`（原各按场景名 `sessions-portal`/`sessions-config-bar` 分键，同函数同参缓存不命中，会话页进入 llm-providers ×2）；容量类消费方 `ctx-usage-bar` 的 `quota-pill` 键保持独立（含 quota/capacity 字段，不同源语义）。
++- **session-list-panel / workspace-switcher**：工作区列表统一 queryKey `["workspace-switcher-list"]`（原 session-list 键 `workspaces.session-list` 带 limit=100 与 switcher 裸调用不同源→各发一次）；queryFn 统一为 items+my-bindings 超集（session-list 只消费 items），limit=100 对齐原 session-list 口径（switcher 下拉同样受 100 上限，语义对齐）。
++- **machines 双份不在本次范围**：门户 useDaemonMachines includeSessions（含会话计数）与面板裸列表属设计内分离（ql-20260909-013 轮询拆分）。
++
+ ## 人工备注
+ 
+ <!-- MANUAL_NOTES_START -->
+diff --git a/.sillyspec/quicklog/QUICKLOG-qinyi.md b/.sillyspec/quicklog/QUICKLOG-qinyi.md
+index 0e9233e74..4706b6957 100644
+--- a/.sillyspec/quicklog/QUICKLOG-qinyi.md
++++ b/.sillyspec/quicklog/QUICKLOG-qinyi.md
+@@ -68,3 +68,13 @@
+ 审计：   ❌ [docs/sillyspec/verify-sandbox-overlay-partial-state-importerror.md:0]  → 文档不存在
+ 审计：[gate] L1（跨 0 模块 · 13 文件：3 代码/2 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+ 审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/execute-concurrent-done-skips-next-wave.md, docs/sillyspec/verify-sandbox-overlay-partial-state-importerror.md, docs/sillyspec/finished/execute-concurrent-done-skips-next-wave.md, docs/sillyspec/finished/verify-sandbox-overlay-partial-state-importerror.md
++
++## ql-20260916-006-48e2 | 2026-09-16 09:34:10 | 会话页周边请求缓存键去重（providers/workspaces 统一键）
++状态：已完成
++关联变更：（无）
++文件：.sillyspec/docs/frontend/modules/components-sessions.md（+7/-1）, frontend/src/components/sessions/session-config-bar.tsx（+3/-1）, frontend/src/components/sessions/session-list-panel.tsx（+13/-2）, frontend/src/components/sessions/sessions-portal.tsx（+5/-1）, frontend/src/components/workspace-switcher.tsx（+4/-1）
++需求：会话页周边请求缓存键去重（providers/workspaces 统一键）
++根因：listProviders 裸调用两处（sessions-portal/session-config-bar）按场景名分键缓存不命中各发一次；workspaces limit=100（session-list）与 switcher 裸调用不同源各发一次——用户截图实测会话页进入 machines/workspaces/llm-providers 各重复 2 次
++方案：①listProviders 裸调用统一 queryKey [llmProviders,basic]（容量类消费方 ctx-usage-bar quota-pill 保持独立键）；②workspaces 统一 [workspace-switcher-list] 键，queryFn 统一 items+my-bindings 超集、limit=100 对齐原 session-list 口径。machines 双份属设计内分离（门户含会话计数 vs 面板裸列表，ql-20260909-013）不动
++结果：sessions 组件测试 353 用例绿，tsc 0 错，eslint 0 错误（config-bar 8 个 unused-args 警告为既有测试桩，非本次引入）；会话页进入 llm-providers 2→1、workspaces 2→1，machines 维持 2（设计内）
++审计：[gate] L1（跨 0 模块 · 5 文件：4 代码/0 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量缺失（4 个代码文件无测试改动）
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 2a64c8a65..35d82b17a 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -322,8 +322,10 @@ export function SessionConfigBar({
+   const { profiles } = useMineAgentProfiles();
+   const notify = useNotify();
+   const qc = useQueryClient();
++  // quick（ql-20260916-006）：裸 listProviders() 统一 basic 键（与 sessions-portal
++  // 共享缓存，见该处注释——原场景名分键致会话页进入各发一次）。
+   const providersQ = useQuery({
+-    queryKey: ["llmProviders", "sessions-config-bar"],
++    queryKey: ["llmProviders", "basic"],
+     queryFn: listProviders,
+     staleTime: 30_000,
+   });
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index efb802bc9..800970735 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -149,6 +149,7 @@ import { PROVIDER_META } from "@/lib/daemon/runtimes";
+ import type { SessionExportTier } from "@/lib/daemon/session-export";
+ import { listQuicklogEntries } from "@/lib/quicklog";
+ import { useDaemonMachines } from "@/lib/use-daemon-machines";
++import { fetchMyBindings } from "@/lib/workspace-binding";
+ import { listWorkspaces } from "@/lib/workspaces";
+ import {
+   AGENT_SESSIONS_TREE_FETCH_LIMIT,
+@@ -677,9 +678,19 @@ function useSessionListSharedData() {
+   const machines = useMemo(() => machineCandidates ?? [], [machineCandidates]);
+ 
+   // 工作区列表（树分组 / chips 工作区名解析）。
++  // quick（ql-20260916-006）：与 workspace-switcher 统一键——原 session-list 键
++  // （limit=100）与 switcher 键（裸调用）不同源不命中，会话页进入 workspaces ×2；
++  // 现统一走 switcher 的 queryFn（items + my-bindings 超集），本组件只消费 items，
++  // 加载状态判 workspacesQuery.data 未受影响。
+   const workspacesQuery = useQuery({
+-    queryKey: ["workspaces", "session-list"],
+-    queryFn: () => listWorkspaces({ limit: 100 }),
++    queryKey: ["workspace-switcher-list"] as const,
++    queryFn: async () => {
++      const [{ items }, bindings] = await Promise.all([
++        listWorkspaces({ limit: 100 }),
++        fetchMyBindings(),
++      ]);
++      return { items, bindings };
++    },
+     staleTime: 60_000,
+   });
+ 
+diff --git a/frontend/src/components/sessions/sessions-portal.tsx b/frontend/src/components/sessions/sessions-portal.tsx
+index 2b098d6e6..6677f0854 100644
+--- a/frontend/src/components/sessions/sessions-portal.tsx
++++ b/frontend/src/components/sessions/sessions-portal.tsx
+@@ -327,8 +327,12 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+   }, [sessions]);
+ 
+   // 供应商列表：CtxUsageRing 分母派生（role mapping one_m / fallback model）。
++  // quick（ql-20260916-006）：裸 listProviders() 调用统一 basic 键——与
++  // session-config-bar 同函数同参原按场景名分键，缓存不命中各发一次（会话页
++  // 进入 llm-providers ×2 根因）；容量类消费方（ctx-usage-bar quota-pill）仍
++  // 独立键（含 capacity/quota 字段，与裸列表不同源语义）。
+   const providersQ = useQuery({
+-    queryKey: ["llmProviders", "sessions-portal"],
++    queryKey: ["llmProviders", "basic"],
+     queryFn: listProviders,
+     staleTime: 30_000,
+   });
+diff --git a/frontend/src/components/workspace-switcher.tsx b/frontend/src/components/workspace-switcher.tsx
+index e0396f60e..9f1130b96 100644
+--- a/frontend/src/components/workspace-switcher.tsx
++++ b/frontend/src/components/workspace-switcher.tsx
+@@ -121,8 +121,11 @@ export function WorkspaceSwitcher(): JSX.Element {
+   const listQuery = useQuery({
+     queryKey: ["workspace-switcher-list"] as const,
+     queryFn: async () => {
++      // quick（ql-20260916-006）：统一键后按 session-list 原口径 limit=100——
++      // 会话树分组只取前 100 工作区（超量工作区树分组缺名回退现状行为保留），
++      // switcher 下拉消费同样受 100 上限（原裸调用默认分页 limit，语义对齐）。
+       const [{ items }, bindings] = await Promise.all([
+-        listWorkspaces(),
++        listWorkspaces({ limit: 100 }),
+         fetchMyBindings(),
+       ]);
+       return { items, bindings };

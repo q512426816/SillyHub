@@ -68,3 +68,13 @@
 审计：   ❌ [docs/sillyspec/verify-sandbox-overlay-partial-state-importerror.md:0]  → 文档不存在
 审计：[gate] L1（跨 0 模块 · 13 文件：3 代码/2 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
 审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/execute-concurrent-done-skips-next-wave.md, docs/sillyspec/verify-sandbox-overlay-partial-state-importerror.md, docs/sillyspec/finished/execute-concurrent-done-skips-next-wave.md, docs/sillyspec/finished/verify-sandbox-overlay-partial-state-importerror.md
+
+## ql-20260916-006-48e2 | 2026-09-16 09:34:10 | 会话页周边请求缓存键去重（providers/workspaces 统一键）
+状态：已完成
+关联变更：（无）
+文件：.sillyspec/docs/frontend/modules/components-sessions.md（+7/-1）, frontend/src/components/sessions/session-config-bar.tsx（+3/-1）, frontend/src/components/sessions/session-list-panel.tsx（+13/-2）, frontend/src/components/sessions/sessions-portal.tsx（+5/-1）, frontend/src/components/workspace-switcher.tsx（+4/-1）
+需求：会话页周边请求缓存键去重（providers/workspaces 统一键）
+根因：listProviders 裸调用两处（sessions-portal/session-config-bar）按场景名分键缓存不命中各发一次；workspaces limit=100（session-list）与 switcher 裸调用不同源各发一次——用户截图实测会话页进入 machines/workspaces/llm-providers 各重复 2 次
+方案：①listProviders 裸调用统一 queryKey [llmProviders,basic]（容量类消费方 ctx-usage-bar quota-pill 保持独立键）；②workspaces 统一 [workspace-switcher-list] 键，queryFn 统一 items+my-bindings 超集、limit=100 对齐原 session-list 口径。machines 双份属设计内分离（门户含会话计数 vs 面板裸列表，ql-20260909-013）不动
+结果：sessions 组件测试 353 用例绿，tsc 0 错，eslint 0 错误（config-bar 8 个 unused-args 警告为既有测试桩，非本次引入）；会话页进入 llm-providers 2→1、workspaces 2→1，machines 维持 2（设计内）
+审计：[gate] L1（跨 0 模块 · 5 文件：4 代码/0 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量缺失（4 个代码文件无测试改动）

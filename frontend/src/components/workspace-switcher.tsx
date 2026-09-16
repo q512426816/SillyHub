@@ -121,8 +121,11 @@ export function WorkspaceSwitcher(): JSX.Element {
   const listQuery = useQuery({
     queryKey: ["workspace-switcher-list"] as const,
     queryFn: async () => {
+      // quick（ql-20260916-006）：统一键后按 session-list 原口径 limit=100——
+      // 会话树分组只取前 100 工作区（超量工作区树分组缺名回退现状行为保留），
+      // switcher 下拉消费同样受 100 上限（原裸调用默认分页 limit，语义对齐）。
       const [{ items }, bindings] = await Promise.all([
-        listWorkspaces(),
+        listWorkspaces({ limit: 100 }),
         fetchMyBindings(),
       ]);
       return { items, bindings };

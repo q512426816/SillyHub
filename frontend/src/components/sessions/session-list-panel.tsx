@@ -149,6 +149,7 @@ import { PROVIDER_META } from "@/lib/daemon/runtimes";
 import type { SessionExportTier } from "@/lib/daemon/session-export";
 import { listQuicklogEntries } from "@/lib/quicklog";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
+import { fetchMyBindings } from "@/lib/workspace-binding";
 import { listWorkspaces } from "@/lib/workspaces";
 import {
   AGENT_SESSIONS_TREE_FETCH_LIMIT,
@@ -677,9 +678,19 @@ function useSessionListSharedData() {
   const machines = useMemo(() => machineCandidates ?? [], [machineCandidates]);
 
   // 工作区列表（树分组 / chips 工作区名解析）。
+  // quick（ql-20260916-006）：与 workspace-switcher 统一键——原 session-list 键
+  // （limit=100）与 switcher 键（裸调用）不同源不命中，会话页进入 workspaces ×2；
+  // 现统一走 switcher 的 queryFn（items + my-bindings 超集），本组件只消费 items，
+  // 加载状态判 workspacesQuery.data 未受影响。
   const workspacesQuery = useQuery({
-    queryKey: ["workspaces", "session-list"],
-    queryFn: () => listWorkspaces({ limit: 100 }),
+    queryKey: ["workspace-switcher-list"] as const,
+    queryFn: async () => {
+      const [{ items }, bindings] = await Promise.all([
+        listWorkspaces({ limit: 100 }),
+        fetchMyBindings(),
+      ]);
+      return { items, bindings };
+    },
     staleTime: 60_000,
   });
 

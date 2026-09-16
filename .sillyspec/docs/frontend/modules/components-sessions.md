@@ -4,7 +4,7 @@ doc_type: module-card
 module_id: components-sessions
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-08-23 12:58:00
+updated_at: 2026-09-16 09:45:00
 ---
 
 # 会话门户组件（components-sessions）
@@ -101,6 +101,12 @@ CtxUsageRing 分母: roleMapping.one_m → 1_000_000
 - NewSessionForm/WorkspaceSessionPicker 已删（2026-08-23-sessions-workspace-hub）：旧 import/测试引用须改走 PreSessionPicker + 预会话态链路，勿复活表单形态。
 
 - QuicklogScope 第四态（2026-08-25-session-spec-binding）：session-list-panel 判别联合加 {kind:'quicklog', workspaceId, qlId}（六处 if-chain 消费点需逐一补齐，TS 不做穷尽检查）；「关联」筛选下拉仅 scope?.kind==='workspace' 渲染（分组选项变更/快速修复，透传 change_id/ql_id 服务端过滤）；sessions-portal quicklog 分支合成 preContext {workspaceId, quickId, runtimeId}。
+
+## quick-c0640c5b 增量（会话页周边请求缓存键去重，ql-20260916-006-48e2）
+
+- **sessions-portal / session-config-bar**：`listProviders` 裸调用统一 queryKey `["llmProviders","basic"]`（原各按场景名 `sessions-portal`/`sessions-config-bar` 分键，同函数同参缓存不命中，会话页进入 llm-providers ×2）；容量类消费方 `ctx-usage-bar` 的 `quota-pill` 键保持独立（含 quota/capacity 字段，不同源语义）。
+- **session-list-panel / workspace-switcher**：工作区列表统一 queryKey `["workspace-switcher-list"]`（原 session-list 键 `workspaces.session-list` 带 limit=100 与 switcher 裸调用不同源→各发一次）；queryFn 统一为 items+my-bindings 超集（session-list 只消费 items），limit=100 对齐原 session-list 口径（switcher 下拉同样受 100 上限，语义对齐）。
+- **machines 双份不在本次范围**：门户 useDaemonMachines includeSessions（含会话计数）与面板裸列表属设计内分离（ql-20260909-013 轮询拆分）。
 
 ## 人工备注
 

@@ -1,0 +1,87 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-c0640c5b",
+  "totals": {
+    "files": 6,
+    "additions": 42,
+    "deletions": 6
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/frontend/modules/components-sessions.md",
+      "declared": true,
+      "additions": 7,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/quicklog/QUICKLOG-qinyi.md",
+      "declared": true,
+      "additions": 10,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-config-bar.tsx",
+      "declared": true,
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-list-panel.tsx",
+      "declared": true,
+      "additions": 13,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/sessions-portal.tsx",
+      "declared": true,
+      "additions": 5,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/workspace-switcher.tsx",
+      "declared": true,
+      "additions": 4,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 5,
+    "codeFileCount": 4,
+    "testFileCount": 0,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "missing",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260916-006-48e2",
+  "sessionId": "quick-c0640c5b",
+  "savedAt": "2026-09-16T01:39:10.111Z",
+  "patchSha256": "36f22cd2d963d1d8ce8c540deba6bd13d0fbc7e3cbfeb9086728a48d8dbea9cb",
+  "patchStatus": "ok"
+}

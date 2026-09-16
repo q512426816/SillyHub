@@ -327,8 +327,12 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   }, [sessions]);
 
   // 供应商列表：CtxUsageRing 分母派生（role mapping one_m / fallback model）。
+  // quick（ql-20260916-006）：裸 listProviders() 调用统一 basic 键——与
+  // session-config-bar 同函数同参原按场景名分键，缓存不命中各发一次（会话页
+  // 进入 llm-providers ×2 根因）；容量类消费方（ctx-usage-bar quota-pill）仍
+  // 独立键（含 capacity/quota 字段，与裸列表不同源语义）。
   const providersQ = useQuery({
-    queryKey: ["llmProviders", "sessions-portal"],
+    queryKey: ["llmProviders", "basic"],
     queryFn: listProviders,
     staleTime: 30_000,
   });

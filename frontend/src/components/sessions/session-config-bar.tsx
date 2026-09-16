@@ -322,8 +322,10 @@ export function SessionConfigBar({
   const { profiles } = useMineAgentProfiles();
   const notify = useNotify();
   const qc = useQueryClient();
+  // quick（ql-20260916-006）：裸 listProviders() 统一 basic 键（与 sessions-portal
+  // 共享缓存，见该处注释——原场景名分键致会话页进入各发一次）。
   const providersQ = useQuery({
-    queryKey: ["llmProviders", "sessions-config-bar"],
+    queryKey: ["llmProviders", "basic"],
     queryFn: listProviders,
     staleTime: 30_000,
   });
