@@ -1410,51 +1410,36 @@ export function SessionPanelPage({
         return (row.textContent ?? "").trim().length > 60 ? row : null;
       };
       if (!hit()) {
-        // 未加载：循环翻页（≤ JUMP_LOAD_EARLIER_MAX_PAGES 页防死循环；到上限
-        // 不报错可再次点击续跳）。suppress 全程置位，finally 恢复——任何异常
-        // 路径不得永久抑制触顶自动加载（本卡硬约束）。
+        // 未加载：翻页加载目标轮。quick（ql-20260916-014）：async/await 循环
+        // 在生产环境翻到第 5 页（目标内容块首现）时整个 async 函数被冻结（
+        // setTimeout(0)/MessageChannel 双通道均挂起、事件循环健康 178 宏任务/
+        // 秒、无 fetch 错误——机制未明，疑与生产构建的调度器/优化相关）。
+        // 改确定性轮询：不用 async 循环，改单次 async 启动 + setInterval 每 250ms
+        // 检查命中/到头/上限/卸载，满足才翻下一页——不依赖 await resume 行为，
+        // 从机制上杜绝挂起。suppress 全程置位，所有出口（含卸载）恢复。
         jumpSuppressLoadEarlierRef.current = true;
-        try {
-          for (
-            let i = 0;
-            i < JUMP_LOAD_EARLIER_MAX_PAGES &&
-            !hit() &&
-            hasEarlierRef.current &&
-            // ql-20260909-004：卸载即停——串台两道保护（epoch/abort）在 sessionId
-            // effect 体内，卸载不执行；已死实例的 epoch 校验恒过，循环会带着死游标
-            // 残留发完剩余页请求。
-            mountedRef.current;
-            i++
-          ) {
-            // 页未真实加载（到头空页 / 翻页失败 / 在途锁）即停，不空转。
-            if (!(await loadEarlierOnce())) break;
-            // 等一次宏任务再进下一轮判定：并发模式下 setTurnState 的 DOM 提交走
-            // 调度器宏任务，而本循环的 await 续延是 microtask——即时响应
-            // （mock / 缓存命中）下不 yield 的话，下一轮 hit() 与循环后
-            // 的兜底判定都会读到旧 DOM（目标已加载却继续翻页甚至误报兜底）。
-            // quick（ql-20260916-014）：rAF → setTimeout——后台标签页 rAF 冻结会
-            // 把循环连同 suppress 标志卡死在 await（实测：跳转点击后切走标签页，
-            // 回来后触顶翻页被永久抑制）；宏任务定时器后台照跑，且同样排在 React
-            // 提交之后（同为宏任务队列，先进先出）。
-            await new Promise((resolve) => setTimeout(resolve, 0));
-          }
-        } finally {
+        let pages = 0;
+        const stop = () => {
           jumpSuppressLoadEarlierRef.current = false;
-        }
-        // 卸载后静默收尾：不再弹兜底 toast（对已离开页面的用户是幽灵提示）。
-        if (!mountedRef.current) return;
-        if (!hit()) {
-          // 兜底两档 toast（可区分）：到头仍无 → 日志已不存在（终态）；
-          // 达页数上限（hasEarlier 仍 true）→ 提示可续点（非终态）。
-          if (!hasEarlierRef.current) {
-            notify.error("该轮次日志不存在（可能已被清理）");
-          } else {
-            notify.warning(
-              `已连续加载 ${JUMP_LOAD_EARLIER_MAX_PAGES} 页仍未到达，可再次点击继续加载`,
-            );
+          clearInterval(timer);
+        };
+        const timer = setInterval(() => {
+          if (!mountedRef.current) { stop(); return; } // 卸载即停
+          if (hit() || !hasEarlierRef.current || pages >= JUMP_LOAD_EARLIER_MAX_PAGES) {
+            stop();
+            if (!mountedRef.current) return;
+            if (!hit()) {
+              if (!hasEarlierRef.current) notify.error("该轮次日志不存在（可能已被清理）");
+              else notify.warning(`已连续加载 ${JUMP_LOAD_EARLIER_MAX_PAGES} 页仍未到达，可再次点击继续加载`);
+            }
+            return;
           }
-          return;
-        }
+          // 在途时不重复触发（loadEarlier 内部有锁，这里跳过本轮即可）
+          if (historyLoadingRef.current) return;
+          pages += 1;
+          void loadEarlierOnce();
+        }, 250);
+        return;
       }
       // 命中：先即时置当前轮（design §9 刻度即时 active；smooth 滚动途中
       // scroll 事件会经联动重算，终点仍落目标轮），双 rAF 等（循环路径的）
