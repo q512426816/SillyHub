@@ -16547,7 +16547,7 @@
           "daemon"
         ],
         "summary": "Get Session Logs",
-        "description": "Return all logs of a session, aggregated across AgentRuns (D-005@v1).\n\nRead-only. Ownership / existence follow the same resource-hiding 404 as\nthe other session endpoints (no existence leak for missing / cross-user).\nResponse items reuse the existing ``AgentRunLogEntry`` DTO; ``run_id`` is\npreserved so the frontend can delineate turn boundaries.\n\nql-20260827-018：客户端 Accept-Encoding 含 gzip 且正文超过阈值时返回 gzip\n编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本\n压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与\nContent-Encoding，无需调用方改动。\n\n群聊体验 quick（2026-09-02）：``before``/``q``/``limit`` 分页与搜索参数\n（语义见各 Query description）；缺省时调用形态与原端点逐字节等价\n（after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读\n放行普通群成员读 logs，见 get_group_accessible_session）。",
+        "description": "Return all logs of a session, aggregated across AgentRuns (D-005@v1).\n\nRead-only. Ownership / existence follow the same resource-hiding 404 as\nthe other session endpoints (no existence leak for missing / cross-user).\nResponse items reuse the existing ``AgentRunLogEntry`` DTO; ``run_id`` is\npreserved so the frontend can delineate turn boundaries.\n\nql-20260827-018：客户端 Accept-Encoding 含 gzip 且正文超过阈值时返回 gzip\n编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本\n压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与\nContent-Encoding，无需调用方改动。\n\n群聊体验 quick（2026-09-02）：``before``/``q``/``limit`` 分页与搜索参数\n（语义见各 Query description）；缺省时调用形态与原端点逐字节等价\n（after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读\n放行普通群成员读 logs，见 get_group_accessible_session）。\n\n2026-09-16-logs-cursor-tiebreaker / D-001@v1：``before_id``——与\n``before`` 组合的复合游标 id tiebreaker（``(ts < before) OR (ts ==\nbefore AND id < before_id)``），同 timestamp 批次向上翻页在批内逐页\n可达且边界零重叠；缺省时行为与原 ``<=`` 游标逐字节等价（旧客户端零\n回归）。``before_id`` 仅作为 ``before`` 的 tiebreaker 存在，无锚点\ntimestamp 无消费语义——单独传（无 ``before``）422 fail-explicit，\n不静默忽略（参数组合 422 写法对齐 session_team.py:420-436 /\nmachines.py:488-494 先例）。",
         "operationId": "get_session_logs_api_daemon_sessions__session_id__logs_get",
         "parameters": [
           {
@@ -16597,6 +16597,25 @@
               "title": "Before"
             },
             "description": "向上加载游标（ISO timestamp，群聊体验 quick）：只返回 timestamp 严格更早的日志；与 limit 组合取「游标之前的最新 N 条」升序返回"
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "与 before 组合的复合游标 id tiebreaker（2026-09-16-logs-cursor-tiebreaker）：同 timestamp 批次逐页可达；仅与 before 同时传，单独传 before_id 而无 before 将 422",
+              "title": "Before Id"
+            },
+            "description": "与 before 组合的复合游标 id tiebreaker（2026-09-16-logs-cursor-tiebreaker）：同 timestamp 批次逐页可达；仅与 before 同时传，单独传 before_id 而无 before 将 422"
           },
           {
             "name": "q",

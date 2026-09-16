@@ -635,7 +635,8 @@ export async function getSessionUsage(
  * 群聊体验 quick（2026-09-02）新增可选查询参数（后端已就绪，语义见
  * openapi get_session_logs 注释）：
  *   - before：向上加载游标（只返回 timestamp 严格更早的日志，与 limit 组合取
- *     「游标之前的最新 N 条」升序返回）；
+ *     「游标之前的最新 N 条」升序返回）；beforeId 与 before 组合实现 (ts,id)
+ *     复合游标，同 timestamp 批次逐页可达；
  *   - q：内容搜索（content ILIKE %q%，可与 after/before 组合）；
  *   - limit：最新 N 条语义（按 timestamp desc 取 N 再反转升序；缺省=旧全量行为，
  *     不传参数的既有调用方零影响）。
@@ -645,6 +646,7 @@ export async function getAgentSessionLogs(
   opts?: {
     after?: string;
     before?: string;
+    beforeId?: string;
     q?: string;
     limit?: number;
     signal?: AbortSignal;
@@ -653,6 +655,7 @@ export async function getAgentSessionLogs(
   const params = new URLSearchParams();
   if (opts?.after) params.set("after", opts.after);
   if (opts?.before) params.set("before", opts.before);
+  if (opts?.before && opts?.beforeId) params.set("before_id", opts.beforeId);
   if (opts?.q) params.set("q", opts.q);
   if (opts?.limit != null) params.set("limit", String(opts.limit));
   const paramStr = params.toString();

@@ -6357,6 +6357,15 @@ export interface paths {
          *     （语义见各 Query description）；缺省时调用形态与原端点逐字节等价
          *     （after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读
          *     放行普通群成员读 logs，见 get_group_accessible_session）。
+         *
+         *     2026-09-16-logs-cursor-tiebreaker / D-001@v1：``before_id``——与
+         *     ``before`` 组合的复合游标 id tiebreaker（``(ts < before) OR (ts ==
+         *     before AND id < before_id)``），同 timestamp 批次向上翻页在批内逐页
+         *     可达且边界零重叠；缺省时行为与原 ``<=`` 游标逐字节等价（旧客户端零
+         *     回归）。``before_id`` 仅作为 ``before`` 的 tiebreaker 存在，无锚点
+         *     timestamp 无消费语义——单独传（无 ``before``）422 fail-explicit，
+         *     不静默忽略（参数组合 422 写法对齐 session_team.py:420-436 /
+         *     machines.py:488-494 先例）。
          */
         get: operations["get_session_logs_api_daemon_sessions__session_id__logs_get"];
         put?: never;
@@ -36485,6 +36494,8 @@ export interface operations {
                 after?: string | null;
                 /** @description 向上加载游标（ISO timestamp，群聊体验 quick）：只返回 timestamp 严格更早的日志；与 limit 组合取「游标之前的最新 N 条」升序返回 */
                 before?: string | null;
+                /** @description 与 before 组合的复合游标 id tiebreaker（2026-09-16-logs-cursor-tiebreaker）：同 timestamp 批次逐页可达；仅与 before 同时传，单独传 before_id 而无 before 将 422 */
+                before_id?: string | null;
                 /** @description 内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before 组合 */
                 q?: string | null;
                 /** @description 最新 N 条语义（群聊体验 quick）：按 timestamp desc 取 N 再反转升序返回；无 before=全量最新 N，有 before=游标之前最新 N。缺省=全量（服务层上限 5000，维持既有行为） */

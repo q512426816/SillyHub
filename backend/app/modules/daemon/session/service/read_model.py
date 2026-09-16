@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlmodel import col
 
 from app.modules.agent.model import (
@@ -295,6 +295,10 @@ async def get_agent_session_logs(
     limit: int = 5000,
     after: datetime | None = None,
     before: datetime | None = None,
+    # 2026-09-16-logs-cursor-tiebreaker / D-001@v1：与 before 组合的复合游标
+    # id tiebreaker——同 timestamp 批次逐页可达；仅与 before 同时消费，单独
+    # 传（无 before）由 router 层 422 fail-explicit，service 层不单独解释。
+    before_id: uuid.UUID | None = None,
     q: str | None = None,
 ) -> list[AgentRunLog]:
     """Return all AgentRunLog rows for an owned session, cross-run aggregate.
@@ -312,6 +316,15 @@ async def get_agent_session_logs(
       由 ``<`` 放宽为 ``<=``：同批日志共用同一 timestamp，严格小于会永久跳过与
       游标同 ts 的批次；配合 ``limit`` 取「游标之前（含边界行）的最新 N 条」实现
       向上翻页，首行可能与已加载重叠）；
+    - ``before_id``（2026-09-16-logs-cursor-tiebreaker / D-001@v1）：与
+      ``before`` 组合的复合游标 id tiebreaker——同时传入时过滤收紧为
+      ``(timestamp < before) OR (timestamp == before AND id < before_id)``，
+      同 timestamp 批次（单 run 事务批量写入共用 ts）在批内逐页可达且翻页
+      边界零重叠（id 为 PG uuid 全序比较，直接 ``<``）；缺省（仅 ``before``）
+      保持上行 ``<=`` 语义逐字不动，旧客户端零回归。排序前提：ORDER BY 是
+      run 块序（anchor_ts → timestamp → id，:409-414），与裸 ts 过滤键不对齐
+      为既有已接受局限；本复合过滤仅在 run 块内收紧，不扩大该局限。单独传
+      ``before_id`` 而无 ``before`` 由 router 层 422（本层不单独消费）；
     - ``q``：``content_redacted`` ILIKE %q% 内容过滤（会话内搜索，模式
       拼接口径同 change/service 搜索先例）；
     - ``limit``：**最新 N 条**语义——排序先 desc 取 N 再反转回升序返回
@@ -403,7 +416,19 @@ async def get_agent_session_logs(
     # 永久跳过与游标同 ts 的批次——改 <= 让边界行可到达（首行可能与已加载
     # 重叠，前端 logsToTurns 按 run_id 分组可容忍）。
     if before is not None:
-        stmt = stmt.where(AgentRunLog.timestamp <= before)
+        if before_id is not None:
+            # 2026-09-16-logs-cursor-tiebreaker / D-001@v1：复合游标——
+            # (ts < before) OR (ts == before AND id < before_id)。同 ts 批次
+            # 在批内按 id 逐页推进且边界零重叠（PG uuid 全序比较直接 <）；
+            # 仅与 before 组合有效（单独传由 router 层 422）。
+            stmt = stmt.where(
+                or_(
+                    AgentRunLog.timestamp < before,
+                    and_(AgentRunLog.timestamp == before, AgentRunLog.id < before_id),
+                )
+            )
+        else:
+            stmt = stmt.where(AgentRunLog.timestamp <= before)
     if q:
         stmt = stmt.where(AgentRunLog.content_redacted.ilike(f"%{q}%"))
     stmt = (

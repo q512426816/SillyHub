@@ -296,3 +296,8 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
 ## quick-f96d4e81 增量（定时消息终态条目删除）
 
 - **DELETE /sessions/{id}/scheduled/{mid} 语义扩展**（`session/service/scheduled_messages.py`）：pending 仍取消留档（置 cancelled + cancelled_at，与 sweeper 行锁串行化不变）；终态（dispatched/cancelled/failed）物理删行——原设计终态行永久留档、列表全状态返回且无任何清除手段，线上终态条目永久残留只能删库（会话 6e213eb3 实证）。`cancel_scheduled_message` 全链改名 `delete_scheduled_message`（router/facade/域方法），`DaemonScheduledMessageNotPending`（409）成死代码删除；sweeper / auto_resume origin 幂等只读 pending，不受终态删行影响。
+
+## 2026-09-16-logs-cursor-tiebreaker 增量（日志翻页 before_id 复合游标）
+
+- **GET /sessions/{id}/logs 新增可选 `before_id`（uuid）查询参数**：与 `before` 组合实现 (ts,id) 复合游标——过滤 `(timestamp < before) OR (timestamp == before AND id < before_id)`（read_model.get_agent_session_logs，经 DaemonService/SessionService 两层门面透传）；缺省不传保持现行 `timestamp <= before` 逐字一致（旧客户端零回归）；单独传 before_id 无 before → 422（参数组合校验，先例 session_team/machines）。修 c318553a6 遗留：单事务 ≥页大小（100）同 timestamp 批次游标停摆（重复拉页+批内前段行不可达）。
+- **ORDER BY（run 块序 anchor_ts→timestamp→id）与 logsToTurns 轮序派生零改动**；排序键与裸 ts 过滤键不对齐的既有局限不变（复合过滤仅在 run 块内收紧）。测试：test_group_logs_pagination 17 passed（150 行同 ts 批两页取尽零交集/缺省 <= 回归/单独 422 三新用例）。

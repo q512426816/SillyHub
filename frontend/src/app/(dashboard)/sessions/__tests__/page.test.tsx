@@ -1429,6 +1429,9 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     await waitFor(() => {
       expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
         before: "2026-08-15T08:00:00Z",
+        // 2026-09-16-logs-cursor-tiebreaker task-07 校准：翻页请求带复合游标
+        // id 分量（= 初始窗口最旧行 q-inj 的 id，与 before 同传）。
+        beforeId: "q-inj",
         limit: 100,
         // ql-20260903-018 加载更早请求自带 AbortController（换会话 abort 在途）。
         signal: expect.any(AbortSignal),
@@ -1617,6 +1620,9 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     await waitFor(() => {
       expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
         before: "2026-08-15T08:00:00Z",
+        // 2026-09-16-logs-cursor-tiebreaker task-07 校准：复合游标 id 分量
+        //（初始窗口最旧行 w-inj）。
+        beforeId: "w-inj",
         limit: 100,
         // ql-20260903-018 加载更早请求自带 AbortController（换会话 abort 在途）。
         signal: expect.any(AbortSignal),
@@ -2035,6 +2041,9 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     await waitFor(() => expect(beforeCallCount()).toBe(2));
     expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
       before: "2026-08-15T07:30:00Z",
+      // 2026-09-16-logs-cursor-tiebreaker task-07 校准：复合游标 id 分量
+      //（第二次翻页游标 = 中间轮页首行 r-mid-in）。
+      beforeId: "r-mid-in",
       limit: 100,
       // ql-20260903-018：加载更早请求自带 AbortController。
       signal: expect.any(AbortSignal),

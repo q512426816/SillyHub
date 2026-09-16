@@ -4,7 +4,9 @@
 
 - ``GET /sessions/{id}/logs`` 分页与搜索：``before`` 向上游标 / ``q`` 内容
   ILIKE 过滤 / ``limit`` 最新 N 语义（desc 取 N 反转升序）；三参与 ``after``
-  任意组合；缺省不传 = 原全量行为（after 兼容零回归）；
+  任意组合；缺省不传 = 原全量行为（after 兼容零回归）；2026-09-16-logs-
+  cursor-tiebreaker 增补：``before_id`` 复合游标 id tiebreaker（同 ts 批次
+  逐页可达 + 边界零重叠 / 缺省 ``<=`` 回归 / 单独传 422）；
 - 影子会话（kind='group_member'）只读放行：群用户成员（非属主）读影子
   logs 200、非群成员 404、会话详情仍 404（放行仅 logs 读路径）、写路径
   inject 不放行（404 资源隐藏）；
@@ -87,6 +89,65 @@ async def _seed_chat_session_with_logs(
         )
     await db_session.commit()
     return sess, stamps
+
+
+async def _seed_chat_session_same_ts_logs(
+    db_session: AsyncSession,
+    *,
+    owner_user_id: uuid.UUID,
+    runtime_id: uuid.UUID,
+    contents: list[str],
+) -> tuple[AgentSession, datetime, list[uuid.UUID]]:
+    """单 run 落一批 timestamp **完全相同**的日志（事务批量写入共用 ts 的替身）。
+
+    2026-09-16-logs-cursor-tiebreaker：``before_id`` 复合游标用例的数据源——
+    同 ts 批次在纯 ``<=`` 游标下要么整批重复要么整批跳过，必须靠 id
+    tiebreaker 才能批内逐页推进。返回 (会话, 批 ts, 逐行 id) 供取尽断言。
+    """
+    now = datetime.now(UTC)
+    sess = AgentSession(
+        id=uuid.uuid4(),
+        user_id=owner_user_id,
+        runtime_id=runtime_id,
+        lease_id=None,
+        provider="claude",
+        status="ended",
+        agent_session_id=None,
+        config=None,
+        turn_count=1,
+        created_at=now,
+        last_active_at=now,
+        ended_at=now,
+    )
+    db_session.add(sess)
+    await db_session.flush()
+    run = AgentRun(
+        id=uuid.uuid4(),
+        agent_type="claude_code",
+        provider="claude",
+        status="completed",
+        agent_session_id=sess.id,
+        session_id=None,
+        started_at=now,
+    )
+    db_session.add(run)
+    await db_session.flush()
+    batch_ts = now - timedelta(minutes=5)
+    log_ids: list[uuid.UUID] = []
+    for content in contents:
+        log_id = uuid.uuid4()
+        log_ids.append(log_id)
+        db_session.add(
+            AgentRunLog(
+                id=log_id,
+                run_id=run.id,
+                timestamp=batch_ts,  # 整批共用同一 timestamp（同 ts 批次替身）
+                channel="stdout",
+                content_redacted=content,
+            )
+        )
+    await db_session.commit()
+    return sess, batch_ts, log_ids
 
 
 async def _seed_timeline_row(
@@ -209,6 +270,82 @@ class TestSessionLogsPagination:
         assert code == 200
         # <= 修复：before=ts 包含同 ts 行（desc 取最新 limit=1 → row 2 自身）
         assert [e["content_redacted"] for e in body] == ["hello world 2"]
+
+    async def test_before_id_same_ts_batch_reachable(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """2026-09-16-logs-cursor-tiebreaker：同 ts 批次逐页可达。
+
+        150 行共用同一 timestamp（单 run 事务批量写入替身），limit=100 两页
+        取尽且边界零重叠——纯 ``<=`` 游标下页 2 会把边界批整批重复（150 行
+        只能翻到 50 行新内容都做不到），``before_id`` tiebreaker 让批内按
+        id 逐页推进。
+        """
+        env = await _make_env(db_session, owner_name="pg-owner")
+        sess, _batch_ts, log_ids = await _seed_chat_session_same_ts_logs(
+            db_session,
+            owner_user_id=env.owner.id,
+            runtime_id=env.runtime.id,
+            contents=[f"batch {i}" for i in range(150)],
+        )
+
+        # 页1：无游标取最新 100（同 ts 批内 id 最大的 100 行；升序返回，
+        # 列表首行 = 页1最旧行 = 页内 id 最小者）。
+        code, page1 = await _get_logs(client, env.owner_token, sess.id, limit=100)
+        assert code == 200
+        assert len(page1) == 100
+        assert {e["timestamp"] for e in page1} == {page1[0]["timestamp"]}  # 整批同 ts
+        oldest = page1[0]
+
+        # 页2：复合游标 before=批 ts + before_id=页1最旧行 id → 批内 id
+        # 更小的剩余 50 行。
+        code, page2 = await _get_logs(
+            client,
+            env.owner_token,
+            sess.id,
+            before=oldest["timestamp"],
+            before_id=oldest["id"],
+            limit=100,
+        )
+        assert code == 200
+        assert len(page2) == 50
+
+        page1_ids = {e["id"] for e in page1}
+        page2_ids = {e["id"] for e in page2}
+        assert page1_ids & page2_ids == set()  # 翻页边界零重叠
+        assert page1_ids | page2_ids == {str(i) for i in log_ids}  # 批内 150 行两页取尽
+
+    async def test_before_without_before_id_keeps_le_boundary(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """缺省回归：只带 before 不带 before_id → 边界 ts 批整批包含（<= 语义不动）。"""
+        env = await _make_env(db_session, owner_name="pg-owner")
+        sess, _batch_ts, log_ids = await _seed_chat_session_same_ts_logs(
+            db_session,
+            owner_user_id=env.owner.id,
+            runtime_id=env.runtime.id,
+            contents=[f"batch {i}" for i in range(5)],
+        )
+        _code, full = await _get_logs(client, env.owner_token, sess.id)
+        batch_ts = full[0]["timestamp"]  # 响应回读的批 ts（JSON 往返精确）
+        code, body = await _get_logs(client, env.owner_token, sess.id, before=batch_ts)
+        assert code == 200
+        # <= 缺省语义：与游标同 ts 的边界批整批返回（旧客户端零回归）。
+        assert {e["id"] for e in body} == {str(i) for i in log_ids}
+
+    async def test_before_id_without_before_rejected_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """只传 before_id 不传 before → 422（无锚点 timestamp 无消费语义，fail-explicit）。"""
+        env = await _make_env(db_session, owner_name="pg-owner")
+        sess, _batch_ts, _log_ids = await _seed_chat_session_same_ts_logs(
+            db_session,
+            owner_user_id=env.owner.id,
+            runtime_id=env.runtime.id,
+            contents=["x"],
+        )
+        code, _body = await _get_logs(client, env.owner_token, sess.id, before_id=str(uuid.uuid4()))
+        assert code == 422
 
     async def test_q_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """q 内容搜索：命中 / 大小写不敏感 / 不命中为空。"""

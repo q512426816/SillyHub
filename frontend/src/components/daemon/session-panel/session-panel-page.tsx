@@ -367,6 +367,10 @@ export function SessionPanelPage({
   const [historyLoading, setHistoryLoading] = useState(false);
   const [hasEarlier, setHasEarlier] = useState(false);
   const historyCursorRef = useRef<string | null>(null);
+  // task-06（2026-09-16-logs-cursor-tiebreaker）：复合游标 id 分量，与 ts 分量
+  // （historyCursorRef）同步写/清——同 ts 满 100 行批翻页靠 id 推进（后端
+  // (ts,id) 复合过滤），漏写则 before_id 缺省走旧 <= 分支整页重复。
+  const historyCursorIdRef = useRef<string | null>(null);
   // 会话内搜索（头部搜索 icon → 输入回车 q 查询 → 结果浮层；点击条目即关闭，
   // 不做跳转定位——最小可用）。
   const [searchOpen, setSearchOpen] = useState(false);
@@ -668,6 +672,7 @@ export function SessionPanelPage({
     attachmentMetaRef.current.clear();
     // quick 历史窗口化：换会话重置「加载更早」游标/翻页态 + 清搜索浮层状态。
     historyCursorRef.current = null;
+    historyCursorIdRef.current = null;
     setHasEarlier(false);
     setHistoryLoading(false);
     historyLoadingRef.current = false;
@@ -694,7 +699,10 @@ export function SessionPanelPage({
         if (cancelled) return;
         streamCursor = maxLogTimestamp(logs);
         // 翻页游标 = 窗口内最早行 ts；满页即可能还有更早（按钮可见）。
+        // id 分量必须同点写（task-06）——漏设则首次翻页 beforeId=undefined
+        // 走后端旧 <= 分支，同 ts 满 100 行批首页整页重复。
         historyCursorRef.current = logs[0]?.timestamp ?? null;
+        historyCursorIdRef.current = logs[0]?.id ?? null;
         setHasEarlier(logs.length >= HISTORY_PAGE_SIZE);
         // 触顶补口：内容不满视口（无滚动条）时 scroll 事件永不触发——满页
         // 且初始内容撑不满一屏时自动续拉直至可滚动/到头（见 maybeAutoFill）。
@@ -1106,6 +1114,9 @@ export function SessionPanelPage({
     try {
       const older = await getAgentSessionLogs(sessionId, {
         before: cursor,
+        // task-06：复合游标 id 分量透传——sessions.ts 仅与 before 同传才发
+        // before_id（后端 (ts<before) OR (ts=before AND id<before_id)）。
+        beforeId: historyCursorIdRef.current ?? undefined,
         limit: HISTORY_PAGE_SIZE,
         signal: abort.signal,
       });
@@ -1117,6 +1128,7 @@ export function SessionPanelPage({
       const scrollEl = scrollElQueryRef.current();
       if (scrollEl) pendingAnchorRef.current = scrollEl.scrollHeight;
       historyCursorRef.current = older[0]?.timestamp ?? null;
+      historyCursorIdRef.current = older[0]?.id ?? null;
       setHasEarlier(older.length >= HISTORY_PAGE_SIZE);
       // task-04：hasEarlierRef 同步刷新（跳转循环 await 间隙读它判档位；
       // passive effect 提交晚于循环续延，仅靠 effect 镜像会读到过期值）。
@@ -1124,22 +1136,26 @@ export function SessionPanelPage({
       chainedMore = older.length >= HISTORY_PAGE_SIZE;
       const olderTurns = logsToTurns(older);
       if (olderTurns.length > 0) {
+        // pageKey 在 updater 外派生（task-06）：updater 须保持纯函数，内读 ref
+        // 会因 React 延迟执行读到已再前进的游标；取 older[0]?.id 局部变量，
+        // 与上方刚写入的 historyCursorIdRef 一致。
+        const pageKey = `${cursor.replace(/[^0-9]/g, "")}-${(older[0]?.id ?? "").slice(0, 8)}`;
+        const decorated = olderTurns.map((t) => ({
+          ...t,
+          runId: `${t.runId}#e${pageKey}`,
+        }));
         setTurnState((prev) => {
           // 每页伪 runId 统一加游标后缀（ql-20260903-002）：logsToTurns 每次调用
           // 的 __attach_history_N__ 都从 1 重新编号——此前只给「realRunId 已在
           // 当前窗口」的轮（同 run 跨游标）加后缀，多 run 会话更早页的**不同
           // run** 保留原伪 id，与当前窗口 1..N 同名撞 React key（列表行为未
-          // 定义，触顶自动加载 + 连拉放大到多页）。后缀取全量数字游标（页首
-          // 日志时间戳，微秒精度）：before 链单调递减 → 跨页唯一（秒级短码在
-          // 同秒高吞吐日志下仍可能撞）。realRunId 保持原值——SSE 增量与孤儿
-          // run 补建按 realRunId 匹配不受影响（upsertTurn 实时增量取最末块）。
-          // 同一 run 跨页展示为多个轮块（时间序正确）；原整 turn 丢弃对单 run
-          // 会话 = 永远丢弃，按钮点了没反应（ee24ba15 用户实证）。
-          const pageKey = cursor.replace(/[^0-9]/g, "");
-          const decorated = olderTurns.map((t) => ({
-            ...t,
-            runId: `${t.runId}#e${pageKey}`,
-          }));
+          // 定义，触顶自动加载 + 连拉放大到多页）。后缀取复合游标（请求边界
+          // ts 全量数字串 + 本页首行 id 前 8 位，task-06）——纯 ts 数字串在
+          // 「同 ts 满 100 行批跨页」时两页撞 key。realRunId 保持原值——SSE
+          // 增量与孤儿 run 补建按 realRunId 匹配不受影响（upsertTurn 实时
+          // 增量取最末块）。同一 run 跨页展示为多个轮块（时间序正确）；原整
+          // turn 丢弃对单 run 会话 = 永远丢弃，按钮点了没反应（ee24ba15
+          // 用户实证）。
           return { ...prev, turns: [...decorated, ...prev.turns] };
         });
       }
@@ -1167,13 +1183,18 @@ export function SessionPanelPage({
 
   /** task-04：单页「加载更早」Promise 化复用（跳转循环每页 await 一次）。
    *  返回本次是否真实加载了一页——handleLoadEarlier 本体返回 void 且多路
-   *  早退（到头 / 失败静默 / 在途锁 / 无游标），以翻页游标是否前进为准：
-   *  成功路径必写 historyCursorRef（含空页 → null 的到头写法），早退/异常
-   *  路径不动游标。 */
+   *  早退（到头 / 失败静默 / 在途锁 / 无游标），以翻页游标（ts,id 复合二元
+   *  组，task-06）任一分量是否前进为准：成功路径必写 historyCursorRef /
+   *  historyCursorIdRef（含空页 → null 的到头写法），早退/异常路径不动游标。 */
   const loadEarlierOnce = useCallback(async (): Promise<boolean> => {
     const cursorBefore = historyCursorRef.current;
+    const idBefore = historyCursorIdRef.current;
     await handleLoadEarlierRef.current();
-    return historyCursorRef.current !== cursorBefore;
+    // 同 ts 不同 id = 有进度（同 ts 满页批次逐页推进时仅 id 前进）。
+    return (
+      historyCursorRef.current !== cursorBefore ||
+      historyCursorIdRef.current !== idBefore
+    );
   }, []);
 
   /** 视口补拉（触顶补口）：内容不满视口且可能还有更早 → 自动续拉一页。

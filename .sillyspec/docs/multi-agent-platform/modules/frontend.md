@@ -181,3 +181,4 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 ### 2026-09-07-agent-liveness-states（agent 会话活性状态推导）
 
 - `components/agent-log/liveness-badge.tsx` 五态视觉单源（语义色阶+呼吸动画，badge/dot/悬浮详情）；`agent-liveness-overview-card.tsx` 工作台「Agent 状态总览」卡（D-004 第二层：分组计数+在等人组跳转，30s 轮询）；日志面板行尾徽章；通知铃 agent_blocked 类型。api-types 经 gen:types 同步。已知缺口：会话列表小灯/idle 小红点待 SessionsPortal 联表管道（见 verify-result NOTES）。
+- 2026-09-16-logs-cursor-tiebreaker | 会话日志向上翻页复合游标：getAgentSessionLogs 增 opts.beforeId（仅与 before 同传）；session-panel-page 游标二元组化（historyCursorIdRef 与 ts 游标三写点同步——初始加载/翻页/换会话重置，请求透传 before_id，pageKey 加游标 id 前 8 位后缀并外提 setTurnState updater 消 ref 竞态，loadEarlierOnce 进度判定二元组——同 ts 不同 id=有进度跳转循环不误 break）。修单事务 ≥100 行同 timestamp 批次：重复拉页+React key 撞号+批内前段行不可达。测试：session-history-scroll 6/6（首翻复合游标/同 ts 双页 id 推进无 key 告警/换会话重置）+page.test 三处断言校准；api-types 经 gen:types 再生成（before_id 参数）。

@@ -1110,6 +1110,7 @@ class SessionService(BackgroundTaskMixin):
         limit: int = 5000,
         after: datetime | None = None,
         before: datetime | None = None,
+        before_id: uuid.UUID | None = None,
         q: str | None = None,
     ) -> list[AgentRunLog]:
         return await _read_model.get_agent_session_logs(
@@ -1119,6 +1120,7 @@ class SessionService(BackgroundTaskMixin):
             limit=limit,
             after=after,
             before=before,
+            before_id=before_id,
             q=q,
         )
 

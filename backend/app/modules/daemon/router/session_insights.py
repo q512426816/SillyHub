@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime
 
-from fastapi import Query, Request
+from fastapi import HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -383,6 +383,14 @@ async def get_session_logs(
             "严格更早的日志；与 limit 组合取「游标之前的最新 N 条」升序返回"
         ),
     ),
+    before_id: uuid.UUID | None = Query(
+        None,
+        description=(
+            "与 before 组合的复合游标 id tiebreaker（2026-09-16-logs-cursor-"
+            "tiebreaker）：同 timestamp 批次逐页可达；仅与 before 同时传，"
+            "单独传 before_id 而无 before 将 422"
+        ),
+    ),
     q: str | None = Query(
         None,
         max_length=200,
@@ -415,13 +423,30 @@ async def get_session_logs(
     （语义见各 Query description）；缺省时调用形态与原端点逐字节等价
     （after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读
     放行普通群成员读 logs，见 get_group_accessible_session）。
+
+    2026-09-16-logs-cursor-tiebreaker / D-001@v1：``before_id``——与
+    ``before`` 组合的复合游标 id tiebreaker（``(ts < before) OR (ts ==
+    before AND id < before_id)``），同 timestamp 批次向上翻页在批内逐页
+    可达且边界零重叠；缺省时行为与原 ``<=`` 游标逐字节等价（旧客户端零
+    回归）。``before_id`` 仅作为 ``before`` 的 tiebreaker 存在，无锚点
+    timestamp 无消费语义——单独传（无 ``before``）422 fail-explicit，
+    不静默忽略（参数组合 422 写法对齐 session_team.py:420-436 /
+    machines.py:488-494 先例）。
     """
+    # 单独传 before_id（无 before）→ 422：fail-explicit 优于静默忽略
+    # （新参数无既有单独消费方；写法对齐 session_team.py:435 / machines.py:493）。
+    if before_id is not None and before is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="before_id 是与 before 组合的复合游标 id tiebreaker，不支持单独传 before_id，请同时传 before（ISO timestamp）。",
+        )
     svc = DaemonService(session)
     logs = await svc.get_agent_session_logs(
         session_id,
         user.id,
         after=after,
         before=before,
+        before_id=before_id,
         q=(q.strip() or None) if q else None,
         limit=limit,
     )

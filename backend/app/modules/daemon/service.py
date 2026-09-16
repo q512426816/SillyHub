@@ -1089,16 +1089,19 @@ class DaemonService:
         *,
         after: datetime | None = None,
         before: datetime | None = None,
+        before_id: uuid.UUID | None = None,
         q: str | None = None,
         limit: int | None = None,
     ) -> list[AgentRunLog]:
         # 群聊体验 quick（2026-09-02）：before/q/limit 透传（limit None=维持
         # 服务层默认 5000 全量行为，见 SessionService.get_agent_session_logs）。
+        # 2026-09-16-logs-cursor-tiebreaker：before_id 透传（before 的 id tiebreaker）。
         return await self._sess.get_agent_session_logs(
             session_id,
             user_id,
             after=after,
             before=before,
+            before_id=before_id,
             q=q,
             **({"limit": limit} if limit is not None else {}),
         )
