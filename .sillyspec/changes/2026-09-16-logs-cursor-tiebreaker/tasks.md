@@ -19,7 +19,7 @@ change: 2026-09-16-logs-cursor-tiebreaker
 
 - [ ] task-05: sessions.ts getAgentSessionLogs opts+params 加 beforeId（仅与 before 同时传）
 - [ ] task-06: session-panel-page.tsx 游标二元组化——新 historyCursorIdRef；**翻页 :1074 与初始加载 :689 两写点均设 id**；换会话重置 :662 同步清；请求透传 :1053；pageKey 加游标 id 前 8 位后缀 :1093；loadEarlierOnce 进度判定二元组比较 :1129-1131 (depends_on: task-04, task-05)
-- [ ] task-07: frontend 翻页测试——before_id 透传 / 同 ts 不同 id 判定有进度（跳转循环不误 break）/ 换会话游标重置 / 初始加载后首翻带 beforeId (depends_on: task-06)
+- [ ] task-07: frontend 翻页测试——before_id 透传 / 同 ts 不同 id 判定有进度（跳转循环不误 break）/ 换会话游标重置 / 初始加载后首翻带 beforeId；**连带回归**：session-history-scroll.test.tsx 三场景（触顶 loadEarlier+prepend/连续 3 页 cursor 递减/overflowAnchor）与既有 getAgentSessionLogs mock 参数断言套件随改校准 (depends_on: task-06)
 
 ## 验收
 
