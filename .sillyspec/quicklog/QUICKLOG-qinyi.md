@@ -272,3 +272,14 @@
 结果：7 测试文件 102 用例绿，tsc 0，eslint 0 error（1 既有 warning），ruff 过，后端 change-file 2 用例绿；dev 栈浏览器实测 json 树/diff 红绿/log 纯文本/MD 全屏滚轮 0→240px 全部验收通过
 审计：[gate] L1（跨 0 模块 · 17 文件：10 代码/5 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
 审计：🔍 软归属：5 个窗口内未声明同模块测试文件已补入文件行（若属并行会话改动请手工剔除）：frontend/src/components/__tests__/change-file-tree.test.tsx（+75/-0）, frontend/src/components/files/__tests__/file-preview-modal.test.tsx（+42/-0）, frontend/src/components/files/__tests__/preview-registry.test.ts（+32/-0）, frontend/src/components/files/__tests__/structured-views.test.tsx（+95/-0）, frontend/src/components/files/__tests__/wheel-scroll-unlock.test.ts（+107/-0）
+
+## ql-20260917-005-b065 | 2026-09-17 10:59:13 | doRefresh 刷新请求无超时，网络僵死时单飞 Promise 永久挂起致 apiFetch 401 收口与调用方永久加载。根因…
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/token-refresh.ts（doRefresh 增 15s AbortController 超时）
+- frontend/src/lib/__tests__/token-refresh.test.ts（新增用例 5b/5c）
+需求：doRefresh 刷新请求无超时，网络僵死时单飞 Promise 永久挂起致 apiFetch 401 收口与调用方永久加载。
+根因：POST /api/auth/refresh 无 signal 无超时，apiFetch 的 GET 30s 超时不覆盖刷新等待。
+方案：15s AbortController 超时抛 ApiError(timeout) 交既有 catch 链展示，不清会话不强制跳登录，网络异常传播不变。
+结果：token-refresh 11 用例绿（5b 先红后绿）+ api.test 12 零回归 + tsc 0 + eslint 0 error（3 既有 warning）

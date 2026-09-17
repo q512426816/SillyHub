@@ -22,7 +22,7 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
   - `ApiError{code, status, requestId, details}` — 后端错误 payload 结构化透传；网络层异常抛 `code="network_error"`
   - 可选请求超时（ql-20260831-006-6d67）：`timeoutMs` 到时 abort 并抛 `code="timeout"`（文案经 `timeoutMessage` 定制，缺省「请求超时，请重试」）；调用方自带 `signal` 的外部 abort 仍走 `network_error`（streamSession resync 静默语义不回归）。当前接入点：`injectSession` 30s + 「草稿已保留」专用文案——后端劣化请求挂起时撤占位轮 + 错误横幅兜底，占位轮不再永久「排队中」
   - 401 处理：非 /api/auth/* 端点且未带 `x-auth-retry` 时单飞刷新拿新 token 重试一次（防无限重试）
-- `token-refresh.ts`：`ensureFreshAccessToken()` — 模块级 inflight 单飞，并发 401 风暴只发一次 POST /api/auth/refresh 并写回 store；未登录/未 hydrate/refresh 失败返 null；`decodeJwtExp` 解析过期时间。
+- `token-refresh.ts`：`ensureFreshAccessToken()` — 模块级 inflight 单飞，并发 401 风暴只发一次 POST /api/auth/refresh 并写回 store；未登录/未 hydrate/refresh 失败返 null；doRefresh 带 15s AbortController 超时（ql-20260917-005：apiFetch 的 GET 30s 超时不覆盖刷新等待，连接僵死曾致 inflight 永久挂起、调用方永久加载态——超时抛 ApiError(timeout) 交调用方 catch 展示，不清会话不强制跳登录，网络异常传播行为不变）；`decodeJwtExp` 解析过期时间。
 - `fetch-sse.ts`：fetch + ReadableStream 的 EventSource 替代品。
   - 动机：EventSource 无法自定义请求头，token 只能拼 URL query 会被访问日志明文记录；本 helper 把 token 放 Authorization header（backend auth_deps 已 header-only）。
   - 接口形状贴齐 EventSource（onopen/onmessage/onerror/addEventListener/readyState/close），从 EventSource 迁移只改构造方式。

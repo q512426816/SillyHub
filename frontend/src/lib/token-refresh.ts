@@ -8,10 +8,19 @@
  * task-09(AppShell 主动刷新)决定。
  */
 import { useSession, type SessionTokens } from "@/stores/session";
-import { getApiBaseUrl } from "@/lib/api";
+import { ApiError, getApiBaseUrl } from "@/lib/api";
 
 /** 模块级单飞 Promise:存在时所有新调用复用它,而非发起新请求。 */
 let inflight: Promise<SessionTokens | null> | null = null;
+
+/**
+ * 刷新请求超时（ql-20260917-005）：apiFetch 的 30s GET 超时只覆盖原请求、
+ * 不覆盖这里的刷新等待——连接僵死（挂起不回包）时 inflight 永久挂起，
+ * 401 收口 await 它的调用方（变更文件树等）会永久停在加载态。
+ * 超时抛 ApiError(timeout) 交既有调用方 catch 链展示错误；不清会话、
+ * 不强制跳登录（区别于 refresh 失败的 clear+redirect），用户可重试自愈。
+ */
+const REFRESH_TIMEOUT_MS = 15_000;
 
 /**
  * 确保拿到一个"尽可能新鲜"的 access token:若当前没有进行中的刷新则发起一次,
@@ -44,16 +53,36 @@ export async function ensureFreshAccessToken(): Promise<string | null> {
   }
 }
 
-/** 实际发起 refresh 请求。返回新 token 对,失败返回 null(不抛,交由调用方判定)。 */
+/** 实际发起 refresh 请求。返回新 token 对,失败返回 null(不抛,交由调用方判定);
+ * 超时抛 ApiError(timeout)(ql-20260917-005,防僵死挂起)。 */
 async function doRefresh(): Promise<SessionTokens | null> {
   const { refreshToken } = useSession.getState();
   if (!refreshToken) return null;
 
-  const resp = await fetch(`${getApiBaseUrl()}/api/auth/refresh`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ refresh_token: refreshToken }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+  let resp: Response;
+  try {
+    resp = await fetch(`${getApiBaseUrl()}/api/auth/refresh`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    // 仅超时转 ApiError；其余网络异常保持既有传播行为（调用方 catch 展示，会话不清）
+    if (controller.signal.aborted) {
+      throw new ApiError(0, {
+        code: "timeout",
+        message: "登录状态续期超时，请重试",
+        request_id: null,
+        details: null,
+      });
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!resp.ok) return null;
 
   const pair = (await resp.json()) as {

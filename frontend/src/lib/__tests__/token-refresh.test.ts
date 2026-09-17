@@ -249,6 +249,93 @@ describe("ensureFreshAccessToken · single-flight (FR-04)", () => {
     expect(r2).toBe("new-access");
     expect(fetchMock.mock.calls.length).toBe(2); // 两次调用各发 1 次
   });
+
+  // ── ql-20260917-005：刷新请求超时（防单飞永久挂起）────────────────────
+  /** 永不主动 resolve、仅响应 signal.abort 的 fetch mock（模拟连接僵死）。 */
+  function mockStalledFetch(): ReturnType<typeof vi.fn> {
+    return vi.fn().mockImplementation(
+      (_url: unknown, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          // 真实 fetch 在 signal abort 时以 AbortError reject——mock 对齐该语义，
+          // 否则 abort 后 Promise 仍悬挂，超时链路无从触发
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        }),
+    );
+  }
+
+  it("用例5b:刷新僵死 15s 超时抛 ApiError(timeout),会话不清,后续可重试", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockReset();
+      const stalled = mockStalledFetch();
+      fetchMock.mockImplementation(stalled);
+      const { ensureFreshAccessToken } = await loadTokenRefresh(useSession);
+
+      const observed = ensureFreshAccessToken().then(
+        (v) => ({ ok: true as const, v }),
+        (e: unknown) => ({ ok: false as const, e }),
+      );
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      const result = await observed;
+      expect(result.ok).toBe(false);
+      const err = (result as { ok: false; e: unknown }).e;
+      expect(err).toBeInstanceOf(Error);
+      expect((err as { code?: string }).code).toBe("timeout");
+      // 会话不清（区别于 refresh 失败的 clear+redirect 链）：token 原样保留
+      expect(useSession.getState().accessToken).toBe("old-access");
+      expect(useSession.getState().refreshToken).toBe("rt-1");
+
+      // inflight 已随 rejection 清空（finally）：再次调用会发起新的 refresh 并成功
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(refreshRespBody), { status: 200 }),
+        ),
+      );
+      const r2 = await ensureFreshAccessToken();
+      expect(r2).toBe("new-access");
+      expect(fetchMock.mock.calls.length).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("用例5c:刷新 15s 内正常返回不受超时影响", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockReset();
+      // 3s 后返回成功（远小于 15s 超时窗）
+      fetchMock.mockImplementation(
+        () =>
+          new Promise<Response>((resolve) =>
+            setTimeout(
+              () =>
+                resolve(
+                  new Response(JSON.stringify(refreshRespBody), { status: 200 }),
+                ),
+              3_000,
+            ),
+          ),
+      );
+      const { ensureFreshAccessToken } = await loadTokenRefresh(useSession);
+
+      const observed = ensureFreshAccessToken().then(
+        (v) => ({ ok: true as const, v }),
+        (e: unknown) => ({ ok: false as const, e }),
+      );
+      await vi.advanceTimersByTimeAsync(3_500);
+      const result = (await observed) as { ok: true; v: string | null };
+      expect(result.ok).toBe(true);
+      expect(result.v).toBe("new-access");
+      // 超时计时器已清（再快进 20s 无副作用、fetch 不被补调）
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("decodeJwtExp (FR-04 辅助 / task-09 依赖)", () => {

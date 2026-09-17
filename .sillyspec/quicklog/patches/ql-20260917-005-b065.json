@@ -1,0 +1,63 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-ea5ab568",
+  "totals": {
+    "files": 3,
+    "additions": 124,
+    "deletions": 8
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/frontend_lib.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/token-refresh.test.ts",
+      "declared": true,
+      "additions": 87,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/token-refresh.ts",
+      "declared": true,
+      "additions": 36,
+      "deletions": 7,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 3,
+    "codeFileCount": 1,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260917-005-b065",
+  "sessionId": "quick-ea5ab568",
+  "savedAt": "2026-09-17T03:06:29.593Z",
+  "patchSha256": "ab0e2a71bef373147d7b446ea9611998ac7dda9bd26d164f89165eb117311af2",
+  "patchStatus": "ok"
+}
