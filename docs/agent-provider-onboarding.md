@@ -565,7 +565,7 @@ caps.subagent 维持 false。扩展的 ExtensionAPI 面与 pi 版本强耦合，
     前端 normalize **对 cursor 零协议特判**。**必改点**（同 PI 踩坑回写）：
     cli.ts drivers 装配 `cursor: new CursorDriver()`；
     `VALID_PROVIDERS` 加 cursor（sillyhub-daemon/src/interactive/session-store-persistence.ts:86）；
-    backend `InteractiveProviderLiteral` 加 `"cursor"`（backend/app/modules/daemon/schema.py:113）。
+    backend `InteractiveProviderLiteral` 加 `"cursor"`（backend/app/modules/daemon/schema.py:120）。
 11. [x] 测试：`cursor-events.test.ts` + `cursor-driver.test.ts` 新增；
     `provider-registry.test.ts` 键集含 cursor；三端 caps 对齐 4/4；frontend
     picker / normalize 相关用例全绿（task-09 验证区间）。

@@ -129,7 +129,7 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 
 ## 增量（ql-20260917-006：上下文压缩状态帧事件化）
 
-- **背景**：Claude SDK 自动/手动 context compaction 期间会发 `system/status` 帧（`status='compacting'` 进行中；结束帧 `compact_result='success'|'failed'`，失败附 `compact_error`，SDK 0.3.247 sdk.d.ts:4812-4824），daemon 此前在 `claude-events.ts _normalizeSystemMessage` 尾部静默丢弃——前端无法在压缩过程中显示「上下文正在重新压缩」实时提示（线上会话 6e213eb3 两天 16 次压缩，用户明确要求压缩中回显 + 对话区隐藏续接摘要大段文本）。
+- **背景**：Claude SDK 自动/手动 context compaction 期间会发 `system/status` 帧（`status='compacting'` 进行中；结束帧 `compact_result='success'|'failed'`，失败附 `compact_error`，SDK 0.3.247 @anthropic-ai/sdk 类型声明（node_modules，略）），daemon 此前在 `claude-events.ts _normalizeSystemMessage` 尾部静默丢弃——前端无法在压缩过程中显示「上下文正在重新压缩」实时提示（线上会话 6e213eb3 两天 16 次压缩，用户明确要求压缩中回显 + 对话区隐藏续接摘要大段文本）。
 - **归一化器**（`interactive/claude-events.ts`）：`subtype==='status'` 帧分流——`status==='compacting'` → `status/context_compacting`（metadata.phase=compacting）；`compact_result` 为 success/failed → 同 subtype（metadata.phase + 可选 error）；`status==='requesting'` 等其余帧维持丢弃（零回归）。`types.ts AgentStatusSubtype` 增 `context_compacting`（types/agent-event-schema zod 枚举/注释三处同步——schema 有「与 types.ts 一字面对齐」纪律）。`_normalizeSystemMessage` docstring 分派清单同步。
 - **消费侧**（`interactive/session-manager/events.ts dispatchStatusEvent` 新 case）：无 active run 丢弃（口径同 bash_*）；经 `mgr.deps.onTurnMessage` 落 **stdout 协议行** `[COMPACT_STATUS] {"phase":...,"error":...}`——legacy flat 形态（`event_type:'text'`），backend 零改动（按 stdout 文本行持久 + SSE 推送）；前端 `classifySessionLog` 识别该前缀归 kind=compact_status。不走 eventToReportDict 透传：落行路径语义由消费侧显式声明，避免 status 事件被当作 status 文本行双写。
 - **测试**：claude-events.test 增 1 用例（compacting/success/failed 三事件 + requesting 维持丢弃 + zod 校验过）；agent-event-schema.test 闭合枚举 7→8。

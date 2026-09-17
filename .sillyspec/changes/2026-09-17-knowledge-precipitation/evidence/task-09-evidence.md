@@ -40,7 +40,7 @@ uv run pytest tests/modules/auth/test_permissions.py tests/test_migrations_graph
 
 ## 2. 应用装配冒烟（import 链 + 路由装配 + 通配顺序）
 
-**验证内容**：`app.main` 完整 import 链可装配；5 个新写端点 + 2 个 distill 端点已注册；字面量路由全部注册在 `GET /knowledge/{filename:path}` 通配**之前**（FastAPI 按声明序匹配，通配在前会吞掉同形字面量路径——router.py:47-53 声明的铁律）。
+**验证内容**：`app.main` 完整 import 链可装配；5 个新写端点 + 2 个 distill 端点已注册；字面量路由全部注册在 `GET /knowledge/{filename:path}` 通配**之前**（FastAPI 按声明序匹配，通配在前会吞掉同形字面量路径——backend/app/modules/knowledge/router.py 的端点装饰器区 声明的铁律）。
 
 **命令**：
 
@@ -76,7 +76,7 @@ TOTAL_ROUTES 624
 
 **验证内容**：平台 writer 生成的 INDEX.md 路由行 / 目标文件追加段，能否被 sillyspec CLI 的 `knowledge validate`（结构合法、引用完整）与 `knowledge search`（关键词命中）接受——「平台写入 ↔ CLI 消费」同源硬证据。
 
-**方法**：在 `%TEMP%\sillyspec-task09-sandbox\` 构造最小 `.sillyspec/knowledge` 树（INDEX.md 含 `## Known Issues` 段 + known-issues.md + 一份**逐字对齐 CLI `cmdPropose` 输出形态**的候选文件）；用 worktree 代码真实调用 writer 的 `build_route_line` / `_insert_route_line` / `_build_append_block` / `_extract_proposed_body` / `CATEGORY_SECTIONS` 模拟 `KnowledgeWriterService.merge` 的落盘计算（绕过 DB/apply_ops，写计算逻辑 100% 真源码）；再从主仓根目录跑真实 CLI 比对（`--spec-dir` 全局旗标指向 sandbox，CLI 源码 index.js:2631 确认透传）。
+**方法**：在 `%TEMP%\sillyspec-task09-sandbox\` 构造最小 `.sillyspec/knowledge` 树（INDEX.md 含 `## Known Issues` 段 + known-issues.md + 一份**逐字对齐 CLI `cmdPropose` 输出形态**的候选文件）；用 worktree 代码真实调用 writer 的 `build_route_line` / `_insert_route_line` / `_build_append_block` / `_extract_proposed_body` / `CATEGORY_SECTIONS` 模拟 `KnowledgeWriterService.merge` 的落盘计算（绕过 DB/apply_ops，写计算逻辑 100% 真源码）；再从主仓根目录跑真实 CLI 比对（`--spec-dir` 全局旗标指向 sandbox，CLI 源码 sillyspec CLI 入口（node_modules 内，略） 确认透传）。
 
 **命令与关键输出摘录**：
 
@@ -106,9 +106,9 @@ sillyspec knowledge search --query 毫无关系的查询词 --spec-dir <sandbox>
 **格式同源源码对照**（字面一致）：
 
 - 平台侧 `backend/app/modules/knowledge/writer.py:158-165`：`f"- {'|'.join(keywords)} → [{display}]({display})"`
-- CLI 侧 `sillyspec/src/knowledge-classify.js:252`：`` `- ${kws.join('|')} → [${display}](${display})` ``
+- CLI 侧 `knowledge-classify.js 的 routeLine（sillyspec 仓）`：`` `- ${kws.join('|')} → [${display}](${display})` ``
 
-**过程记录（如实）**：首版 sandbox 候选文件的尾注块写成 `---` 与 blockquote 之间带空行，导致 `_extract_proposed_body` 剥除守卫未命中（尾注混入合并正文）。核对 CLI `cmdPropose` 源码（`stages/knowledge.js:451-457`：`'---', '> This is a proposed...'` 相邻无空行）后修正 sandbox 构造，剥除即生效——**属 sandbox 构造偏差而非代码缺陷**，反向证明了剥除逻辑与真实 CLI propose 格式逐字对齐。
+**过程记录（如实）**：首版 sandbox 候选文件的尾注块写成 `---` 与 blockquote 之间带空行，导致 `_extract_proposed_body` 剥除守卫未命中（尾注混入合并正文）。核对 CLI `cmdPropose` 源码（`stages/knowledge.js 的 cmdPropose 尾注块（sillyspec 仓）`：`'---', '> This is a proposed...'` 相邻无空行）后修正 sandbox 构造，剥除即生效——**属 sandbox 构造偏差而非代码缺陷**，反向证明了剥除逻辑与真实 CLI propose 格式逐字对齐。
 
 **可复现工件**：`%TEMP%\sillyspec-task09-sandbox\simulate_merge.py`（模拟脚本）与该目录下整棵 `.sillyspec/knowledge` 结果树。
 

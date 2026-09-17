@@ -9,7 +9,7 @@ scale: large
 
 ## 背景
 
-平台知识库页（/workspaces/{id}/knowledge）现状是**纯只读**：backend knowledge 模块实时解析 spec_root 下 `knowledge/` 目录**第一层**的 `*.md`（`parser.py:46` 非递归 `glob("*.md")`），无 DB 无索引；知识的产生只能靠 agent 在会话里跑 sillyspec CLI（archive 蒸馏 / `knowledge propose` / decision-distill）后经上行同步回流。
+平台知识库页（/workspaces/{id}/knowledge）现状是**纯只读**：backend knowledge 模块实时解析 spec_root 下 `knowledge/` 目录**第一层**的 `*.md`（`backend/app/modules/knowledge/parser.py 的非递归 glob` 非递归 `glob("*.md")`），无 DB 无索引；知识的产生只能靠 agent 在会话里跑 sillyspec CLI（archive 蒸馏 / `knowledge propose` / decision-distill）后经上行同步回流。
 
 两个实证问题（workspace b97f8231，repo-native junction 直连主仓 `.sillyspec`）：
 
@@ -151,8 +151,8 @@ REST 端点（prefix=/workspaces/{workspace_id}，tag=knowledge；**字面量路
 ## 数据模型
 
 - **无新表**（D-003）。候选知识即 `knowledge/proposed/*.md` 文件。
-- `AgentRun` 复用承载蒸馏任务（Grill X-04 源码核实）：`metadata_` JSON 列（agent/model.py:369-372）写 `{kind: "knowledge-distill", source_type, source_ref, focus}`；workspace 关联复用 `AgentRunWorkspace`（bootstrap.py:144-150 先例）。daemon 离线时创建后立即 failed（no_online_daemon，bootstrap.py:462-476 先例）。
-- 权限：`Permission` 枚举增 `KNOWLEDGE_WRITE`（auth/permissions.py:68 KNOWLEDGE_READ 先例）+ 角色-权限播种 migration——存量角色按 key SELECT 后授予权限（现库无完全同构先例，migration 202607251600 为 bulk_insert 新角色先例，写法参照其风格）。
+- `AgentRun` 复用承载蒸馏任务（Grill X-04 源码核实）：`metadata_` JSON 列（backend/app/modules/agent/model.py:369）写 `{kind: "knowledge-distill", source_type, source_ref, focus}`；workspace 关联复用 `AgentRunWorkspace`（backend/app/modules/spec_workspace/bootstrap.py:144 先例）。daemon 离线时创建后立即 failed（no_online_daemon，backend/app/modules/spec_workspace/bootstrap.py:462 先例）。
+- 权限：`Permission` 枚举增 `KNOWLEDGE_WRITE`（backend/app/modules/auth/permissions.py:68 KNOWLEDGE_READ 先例）+ 角色-权限播种 migration——存量角色按 key SELECT 后授予权限（现库无完全同构先例，migration 202607251600 为 bulk_insert 新角色先例，写法参照其风格）。
 
 ## 兼容策略（brownfield 必填）
 
@@ -166,8 +166,8 @@ REST 端点（prefix=/workspaces/{workspace_id}，tag=knowledge；**字面量路
 | 编号 | 风险 | 等级 | 应对策略 |
 |---|---|---|---|
 | R-01 | 平台直写与 daemon 上行同步并发改同一知识文件 → apply_ops 冲突（base_version 不匹配） | P0 | 写端点检测 apply_ops 返回 conflict 后统一翻译 HTTP 409 + 冲突详情（见接口定义冲突响应契约），前端提示"文件在别处被修改，请刷新后重试"；知识写入低频，不做自动合并 |
-| R-02 | merge 多文件 op 半态：apply_ops 冲突为逐 op 跳过非整批中止（service.py:1894/2072-2080，DB 侧单事务成立 :2263-2314），单批混装 update+delete 时 delete 会照常执行 → 候选被删但 INDEX 缺行 | P1 | merge 两段式（Wave 3）：第一段仅 updates、确认无 conflict 后第二段才 delete；第二段失败=候选残留幂等可重试，不产生知识丢失（Grill B-1 修正） |
-| R-03 | INDEX.md 路由行格式/落点与 CLI knowledge-match.js 不兼容（缩进/锚点/分类段错位 → CLI 检索失效） | P0 | 行格式逐字复刻 classify 输出（`- 关键词|关键词 → [标题](文件.md#锚点)`，knowledge-classify.js:251-252）；merge 目标限定三类映射文件 known-issues/patterns/conventions（CLI categoryForTarget 之外无分类段落点，Grill B-3）；路由关键词人工填写不做自动派生；合并预览明示最终行文本；verify 用真实 INDEX 跑 `sillyspec knowledge validate` 佐证 |
+| R-02 | merge 多文件 op 半态：apply_ops 冲突为逐 op 跳过非整批中止（backend/app/modules/spec_workspace/service.py:1894/2072-2080，DB 侧单事务成立 :2263-2314），单批混装 update+delete 时 delete 会照常执行 → 候选被删但 INDEX 缺行 | P1 | merge 两段式（Wave 3）：第一段仅 updates、确认无 conflict 后第二段才 delete；第二段失败=候选残留幂等可重试，不产生知识丢失（Grill B-1 修正） |
+| R-03 | INDEX.md 路由行格式/落点与 CLI knowledge-match.js 不兼容（缩进/锚点/分类段错位 → CLI 检索失效） | P0 | 行格式逐字复刻 classify 输出（`- 关键词|关键词 → [标题](文件.md#锚点)`，knowledge-classify.js 的 routeLine 生成（sillyspec 仓））；merge 目标限定三类映射文件 known-issues/patterns/conventions（CLI categoryForTarget 之外无分类段落点，Grill B-3）；路由关键词人工填写不做自动派生；合并预览明示最终行文本；verify 用真实 INDEX 跑 `sillyspec knowledge validate` 佐证 |
 | R-04 | repo-native junction 场景下行应用改用户 git 工作树（未提交改动出现在用户仓库） | P2 | 与 CLI 直接写盘行为一致；页面提示"已写入仓库工作树，请随代码提交"；不自动 git commit（不引入 change_writer） |
 | R-05 | 蒸馏 agent 会话失败/超时/产出不合规格（proposed 文件缺 frontmatter 等） | P1 | prompt 模板固化 propose 命令用法；daemon 离线时任务创建后立即 failed/no_online_daemon（bootstrap 先例），任务条透出失败态与日志入口；列表读取对坏文件沿用 parser 容错（跳过不炸列表） |
 | R-06 | 权限播种遗漏 → 授权用户 403 | P1 | migration 对存量角色按 key SELECT 授予（现库无同构先例，写法参照 202607251600 bulk_insert 风格）；verify 含"管理员可见写按钮"用例 |
@@ -190,7 +190,7 @@ REST 端点（prefix=/workspaces/{workspace_id}，tag=knowledge；**字面量路
 
 > 本节记录 execute 完成后独立探索会话（2026-09-17）发现的蒸馏链路断链。平台侧传指针（session_id）不搬运对话内容本身正确——100MB 不经后端蒸馏代码；真正的问题是 agent 侧读不到。三个洞：
 
-**洞一（会话源，最根本）**：对话内容存后端 `agent_run_logs` 表（`agent/model.py:485`，DB 非文件树），prompt（`distill.py:81`）只内嵌 session_id + 可选关注点。daemon 侧 MCP 工具集（`sillyhub-daemon/src/mcp-server.ts`，仅 upload_file/list_uploaded_files + dispatch_worker 等派工工具）**无查会话记录入口**——prompt 说「请读取该会话的完整对话记录」，但 agent 工作目录里既无此文件也无接口可取。会话源蒸馏在真实环境大概率跑不出东西。
+**洞一（会话源，最根本）**：对话内容存后端 `agent_run_logs` 表（`backend/app/modules/agent/model.py 的 AgentRunLog 表`，DB 非文件树），prompt（`backend/app/modules/knowledge/distill.py 的 prompt 会话式模板`）只内嵌 session_id + 可选关注点。daemon 侧 MCP 工具集（`sillyhub-daemon/src/mcp-server.ts`，仅 upload_file/list_uploaded_files + dispatch_worker 等派工工具）**无查会话记录入口**——prompt 说「请读取该会话的完整对话记录」，但 agent 工作目录里既无此文件也无接口可取。会话源蒸馏在真实环境大概率跑不出东西。
 
 **洞二（变更源回流）**：prompt 指 workspace `.sillyspec/changes/archive/`（本地文件树可读，无洞一问题），但平台知识库写在**服务器 spec_root**——platform-managed 策略下 daemon 本地无该树，agent 执行 `sillyspec knowledge propose` 写的 `knowledge/proposed/*.md` 落在 daemon 本地缓存，可能不进上行同步集。repo-native junction 场景下两边是同一目录则无此问题，但默认 platform-managed 策略受影响。
 
@@ -206,7 +206,7 @@ REST 端点（prefix=/workspaces/{workspace_id}，tag=knowledge；**字面量路
 
 > 用户提出并确认（2026-09-17）：会话源蒸馏**默认让原 agent 会话续接去沉淀**——有完整上下文，快（prompt cache 命中）+ 省 token（不重喂记录）+ 高质量（agent 自己知道哪些是真坑）。同时保留换其他 agent 的选项。
 
-**技术链路（平台既有机制，源码核实）**：`reopen_session`（`daemon/session/service/session_lifecycle.py:41`）续接**已结束**的 claude/codex 会话——SDK resume 保留完整对话历史 + prompt cache；续接后用 `inject_session(prompt=...)`（`daemon/service.py:764`）把「请提炼本会话为知识」指令发进原会话。**一举化解 R-08 洞一**：原会话读自己，无需取数通道。
+**技术链路（平台既有机制，源码核实）**：`reopen_session`（`backend/app/modules/daemon/session/service/（续接入口 reopen_session，见 backend/app/modules/daemon/session/service/session_lifecycle.py）`）续接**已结束**的 claude/codex 会话——SDK resume 保留完整对话历史 + prompt cache；续接后用 `inject_session(prompt=...)`（`backend/app/modules/daemon/（inject_session，见 backend/app/modules/daemon/service.py）`）把「请提炼本会话为知识」指令发进原会话。**一举化解 R-08 洞一**：原会话读自己，无需取数通道。
 
 **路由矩阵**：
 
@@ -229,9 +229,9 @@ REST 端点（prefix=/workspaces/{workspace_id}，tag=knowledge；**字面量路
 
 **② 快速修复日志为第三来源**：quicklog 与 knowledge 同构（`GET /quicklog` 现成），数据在 `.sillyspec/quicklog/` 文件树——新 agent 直接读，**无 R-08 洞一取数问题**。来源类型 `source_type` 扩 `quick`；单条 ql 体量小（一次修复记录），来源选择从单选改**多选**（一次勾多条 ql 合并提炼）。
 
-**③ 新建 agent 复用 create_session 完整形态**：不再用裸 bootstrap AgentRun，改走 `create_session`（`session/service/create.py:42` 原生双入口：`runtime_id` 钉机器+智能体，优先于 `provider`，另有 `agent_profile_id`/`llm_provider_id`/`model`）——用户像常规会话新建一样先选**机器（runtime）**再选 **agent 类型**，后端代触发（非用户手点），title 自动带「提炼」前缀。有据可循：完整机器+引擎+模型配置可查。
+**③ 新建 agent 复用 create_session 完整形态**：不再用裸 bootstrap AgentRun，改走 `create_session`（`backend/app/modules/daemon/session/service/（create_session 入口，见 backend/app/modules/daemon/session/service/create.py）` 原生双入口：`runtime_id` 钉机器+智能体，优先于 `provider`，另有 `agent_profile_id`/`llm_provider_id`/`model`）——用户像常规会话新建一样先选**机器（runtime）**再选 **agent 类型**，后端代触发（非用户手点），title 自动带「提炼」前缀。有据可循：完整机器+引擎+模型配置可查。
 
-**④ 蒸馏会话隔离**：`AgentSession.metadata_`（`model.py:457` JSON 列）写 `origin="knowledge-distill"`——常规会话页列表查询过滤排除（老会话无 origin 字段默认可见，零回归兜底）；知识库侧 `DistillTaskRead` 保留 `agent_session_id`，提炼记录可跳转到该会话。**双兑现**：会话有据可循（③）+ 不污染常规会话列表（④）。
+**④ 蒸馏会话隔离**：`AgentSession.metadata_`（`backend/app/modules/daemon/model.py:457` JSON 列）写 `origin="knowledge-distill"`——常规会话页列表查询过滤排除（老会话无 origin 字段默认可见，零回归兜底）；知识库侧 `DistillTaskRead` 保留 `agent_session_id`，提炼记录可跳转到该会话。**双兑现**：会话有据可循（③）+ 不污染常规会话列表（④）。
 
 ## 遗留与后续
 

@@ -56,7 +56,7 @@ scale: large
 | full × 多会话 | `application/zip` | 每会话一目录（标题 + id 前 8 位防重名） |
 
   zip 文件名统一 `会话导出_{档位中文}_{YYYYMMDD_HHMMSS}.zip`；md 单文件同名模式。
-- 权限：逐会话对齐详情端点口径——`AgentSession.user_id == 当前用户` 且 `deleted_at IS NULL`；未命中再走 `get_group_accessible_session`（参与者/workspace admin，含 `allow_shadow_member_read` 影子成员读，同 `get_agent_session_logs` 的探测顺序）。注：logs 端点的 owner 探测不过滤软删（`backend/app/modules/daemon/session/service/read_model.py:340-347`），导出**选详情口径**（软删 404）。任一会话不可访问则整个请求 404（单条语义清晰；不做部分成功，避免用户以为导全了）。
+- 权限：逐会话对齐详情端点口径——`AgentSession.user_id == 当前用户` 且 `deleted_at IS NULL`；未命中再走 `get_group_accessible_session`（参与者/workspace admin，含 `allow_shadow_member_read` 影子成员读，同 `get_agent_session_logs` 的探测顺序）。注：logs 端点的 owner 探测不过滤软删（`backend/app/modules/daemon/session/service/read_model.py:376`），导出**选详情口径**（软删 404）。任一会话不可访问则整个请求 404（单条语义清晰；不做部分成功，避免用户以为导全了）。
 - chat Markdown 组装：按 `AgentRun`（`agent_session_id` FK 聚合，**绝不**用 `AgentRun.session_id`——resume id 语义不同，这是 `read_model.get_agent_session_logs` 明确标注的坑）分轮；轮内正文派生规则：
   - `user_input` 行 → 用户消息（附件标记行原样保留；群聊行从 `metadata_` 取 `member_name` 做前缀）
   - `stdout` 行 → **经噪声排除后为助手正文**。排除/剥离规则与前端装配器同源对齐（锚点 `frontend/src/components/daemon/session-log-assembler.ts:288-366` `classifySessionLog`），后端独立实现为纯函数 helper `_assistant_text_from_stdout()`：跳过空行、含 `AskUserQuestion` 行、`[TOOL_RESULT]` 全部文本行（通用形态与 `User answered` 形态，前端均归 tool_result 段不进正文）、`[(SYSTEM|RESULT)...]` 前缀行、`[TOOL_USE]` 文本行（daemon 双发，tool_call JSON 为权威源）、`[TASK_*]` 任务生命周期行、技能装载载荷行（`[ASSISTANT] Base directory for this skill:`）、CLI 合成鉴权/网关错误行、`[ASSISTANT_OVERRIDE]`/`[THINKING_OVERRIDE]` 撤回标记行（不渲染正文）；`[THINKING]` 前缀行 chat 档排除（属 full 档）；幸存行剥 `[ASSISTANT]`/`[LOG:\w+]` 前缀后作为助手正文。该规则用表驱动测试固化（样例直接搬 `__tests__/session-log-assembler.test.ts` 判定用例），防止与前端语义漂移

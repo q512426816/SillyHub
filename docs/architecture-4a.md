@@ -200,7 +200,7 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
   2. `transition` 推进（`backend/app/modules/change/service.py:944`）
   3. CLI 进度回灌写 `change.current_stage`（`backend/app/modules/change/dispatch.py:1511`）
   4. **只读投影**：列表/详情显示时 `_project_current_stage`（`backend/app/modules/change/service.py:2383`）read-only join `platform_change_progress` 表，用 CLI 上行的 `latest_progress` 覆盖显示值（D-002，不改 changes 表）。即“工具上行权威值”覆盖“平台字段”。
-- **源阶段完成度前置校验** `_check_source_stage_completion`（`backend/app/modules/change/service.py:3436`）：手动推进前强制用 sillyspec.db 客观进度证明“干完了”，堵住“没干活就推进”。
+- **源阶段完成度前置校验** `_check_source_stage_completion`（`backend/app/modules/change/service.py:3443`）：手动推进前强制用 sillyspec.db 客观进度证明“干完了”，堵住“没干活就推进”。
 
 > 关键设计：平台**不自动推进**状态机——形态 A（change db5d0ed3）砍掉 `auto_dispatch`，改为按需显式触发（`transition` / `advance-stage` / 对外 MCP `advance_change_stage`）。落库 `current_stage` 与投影值可能短暂不一致（change-stage-control-ownership 记忆）。
 
@@ -338,7 +338,7 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 | `agent_run_logs` | run 流式日志行 | `channel`(stdout/stderr/tool_call) / `dedup_key`(部分唯一索引幂等去重) / `parent_tool_use_id`+`subagent_type`+`depth`(子代理归属) / `tool_kind`(结构化筛选) / `segment_id`(partial 去重) — `backend/app/modules/agent/model.py:488` |
 | `agent_sessions` | 交互式 SDK 驱动会话（跨多 run） | `agent_session_id`(SDK session) / `lease_id`(kind=interactive) / `change_id`/`workspace_id`(SET NULL) / `status` / `deleted_at`(软删) — `backend/app/modules/agent/model.py:371` |
 | `agent_missions` | 多 agent 委派聚合根（状态不落库，派生自子 run） | `objective` / `worker_preset`/`main_agent_config`(JSON) / `converged_at`(收敛守卫) — `backend/app/modules/agent/model.py:363` |
-| `agent_run_dependencies` / `agent_artifacts` | run 间 DAG 边 / worker 结构化产出 | `(run_id,depends_on_run_id)` / `kind`(summary/patch/test_result/evidence) — `backend/app/modules/agent/model.py:1905,700` |
+| `agent_run_dependencies` / `agent_artifacts` | run 间 DAG 边 / worker 结构化产出 | `(run_id,depends_on_run_id)` / `kind`(summary/patch/test_result/evidence) — `backend/app/modules/agent/model.py:1919,700` |
 | `daemon_borrow_audit` | 业务/管理人员借用开发人员 daemon 的审计行 | borrower/lender/workspace/agent_run 均 CASCADE；`daemon_instance_id` **RESTRICT**（审计红线） — `backend/app/modules/agent/model.py` |
 | `agent_profiles` | AgentProfile 配置层（人格+工具引用，增强非替代） | `visibility`(private/workspace/platform) / `llm_provider_id`(SET NULL) / `tool_policy_id`/`mcp_refs`/`skill_refs` / `allowed_roots_overlay`(只能收紧) / `is_system_default` — `backend/app/modules/agent/profile/model.py:59` |
 
@@ -481,7 +481,7 @@ Redis 缓存 `rbac.has_permission` 与 PPM `data_scope` 热路径。**三键分�
 - `stored > base_ts`（字典序，不转 datetime）→ **409 冲突**，返回平台当前完整六表，**绝不 auto-merge**
 - 否则 → upsert
 
-`latest_progress` 按裸 JSON 透传客户端 `serializeForSync` 六表（`platform_change_progress.latest_progress`，NG-6 不强类型化）。并发自愈（`backend/app/modules/platform_sync/service.py:464`）：客户端新建 change 首推并发双发撞复合唯一约束 → catch `IntegrityError` 回退 UPDATE（跨 SQLite/PG 方言一致，免 `ON CONFLICT` 分支）。`list_lightweight`（`backend/app/modules/platform_sync/service.py:826`）从裸 JSON 抽 `changes[0].current_stage` 供变更中心轻量列表。
+`latest_progress` 按裸 JSON 透传客户端 `serializeForSync` 六表（`platform_change_progress.latest_progress`，NG-6 不强类型化）。并发自愈（`backend/app/modules/platform_sync/service.py:483`）：客户端新建 change 首推并发双发撞复合唯一约束 → catch `IntegrityError` 回退 UPDATE（跨 SQLite/PG 方言一致，免 `ON CONFLICT` 分支）。`list_lightweight`（`backend/app/modules/platform_sync/service.py:847`）从裸 JSON 抽 `changes[0].current_stage` 供变更中心轻量列表。
 
 ### 2.5 运行时数据与存储目录
 

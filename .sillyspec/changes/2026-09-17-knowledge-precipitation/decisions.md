@@ -87,7 +87,7 @@ created_at: 2026-09-17 09:37:28
 - answer: 两段式：第一段 apply_ops([update(目标文件), update(INDEX.md)])，确认返回无 conflict 后第二段 apply_ops([delete(proposed)])；第二段失败=候选残留幂等可重试。合并目标 v1 限定三类 INDEX 映射文件（known-issues.md/patterns.md/conventions.md）；路由关键词由审核人人工填写（KnowledgeMergeIn.keywords），不做自动派生。另定 path 字段规范：entry.path 保留 .sillyspec/knowledge/ 前缀（顶层条目值不变，兑现兼容承诺），filename 扩展为含子目录段的相对路径，zone 由 filename 首段派生（Grill B-2 定论）。
 - normalized_requirement: merge 必须两段式提交且第二段以第一段无 conflict 为前置；merge 目标文件白名单=三类映射文件；KnowledgeMergeIn 必含 keywords；entry.path 永远带 .sillyspec/knowledge/ 前缀。
 - impacts: [FR-05, FR-06, task-3.1, task-3.2]
-- evidence: spec_workspace/service.py:2072-2080（conflict 逐 op continue）/:2115-2131（delete 独立执行）/:2263-2314（单 commit）；knowledge-classify.js:32-33（categoryForTarget 四类外 fail）；parser.py:62（现 path 带前缀）。
+- evidence: backend/app/modules/spec_workspace/service.py 的 apply_ops 冲突逐 op 跳过段（conflict 逐 op continue）/:2115-2131（delete 独立执行）/:2263-2314（单 commit）；knowledge-classify.js 的 categoryForTarget（sillyspec 仓）（categoryForTarget 四类外 fail）；backend/app/modules/knowledge/parser.py 的 rel_path 前缀拼接（现 path 带前缀）。
 - 故障面: 两段间窗口内另一端同步改动 proposed 文件 → 第二段 conflict，候选残留（可重试，无知识丢失）。
 - 退役判据: apply_ops 若未来提供事务性整批中止（all-or-nothing）语义，可合并回单段。
 
@@ -100,7 +100,7 @@ created_at: 2026-09-17 09:37:28
 - answer: 首选方向 1「补取数通道」：后端把会话记录分页导出为临时文件落 workspace（如 .sillyspec/.runtime/distill-sources/<session_id>.md），prompt 从「读会话 session_id」改为「读这个文件路径」，agent 用 grep/分片增量读取。变更源回流（平台直写候选下行预置到 daemon 本地）与超阈值分段 map-reduce 列为后续增强。平台侧传指针（不搬运对话内容）的设计本身正确保留。
 - normalized_requirement: 会话源蒸馏的 prompt 必须指向一个 agent 可读的文件路径（而非裸 session_id）；导出文件必须分页生成（防 100MB 全量重放撑爆）；变更源蒸馏在 platform-managed 策略下的候选回流必须经既有 spec 同步下行可达。
 - impacts: [R-08, design-蒸馏源记录交付断链节, task-09 部署期 M2]
-- evidence: 探索会话结论（2026-09-17 16:03）+ 主代理核实：agent_run_logs=DB 表（agent/model.py:485）、prompt 只内嵌 session_id（distill.py:81）、mcp-server.ts 无查会话工具、distill.py:84 变更源指文件树但平台知识库在服务器 spec_root。
+- evidence: 探索会话结论（2026-09-17 16:03）+ 主代理核实：agent_run_logs=DB 表（backend/app/modules/agent/model.py 的 AgentRunLog 表）、prompt 只内嵌 session_id（backend/app/modules/knowledge/distill.py 的 prompt 会话式模板）、mcp-server.ts 无查会话工具、backend/app/modules/knowledge/distill.py 的 prompt 变更式模板 变更源指文件树但平台知识库在服务器 spec_root。
 - 故障面: 导出文件落 workspace 增加磁盘占用（需清理策略）；超大导出文件需分页与体量护栏（洞三）。
 - 退役判据: 若未来 daemon 侧提供查会话记录的 MCP 工具，可弃文件导出通道直接走接口（减少落盘）。
 
@@ -110,10 +110,10 @@ created_at: 2026-09-17 09:37:28
 - status: accepted
 - source: user
 - question: 会话源蒸馏派谁去干？用户提出并确认：最好让原 agent 会话续接去沉淀（有完整上下文——快+省 token+高质量），同时保留换其他 agent 的选项。
-- answer: 会话源默认=原会话续接——平台既有 reopen_session（session_lifecycle.py:41，续接已结束 claude/codex 会话，SDK resume 保留完整对话历史+prompt cache）+ inject_session(prompt=...)（service.py:764）把提炼指令发进原会话。一举兑现三好处（快/省 token/高质量）并化解 R-08 洞一（原会话读自己，无需取数通道）。新 agent（现状 bootstrap 新建 AgentRun）保留为可选项，用于：会话已删/引擎不支持 resume/用户想换视角。变更源天然走新 agent（文件树无"原会话"概念）。引擎限制：续接仅 claude/codex（provider caps 门控）+ 仅已结束会话可 reopen（进行中用 inject）+ 归档区禁写。原型未体现"谁去干"——前端补选择 UI（会话源默认勾选"原会话续接（推荐）"，旁保留"新建 agent"）。
+- answer: 会话源默认=原会话续接——平台既有 reopen_session（（续接入口 reopen_session，见 backend/app/modules/daemon/session/service/session_lifecycle.py），续接已结束 claude/codex 会话，SDK resume 保留完整对话历史+prompt cache）+ inject_session(prompt=...)（（inject_session，见 backend/app/modules/daemon/service.py））把提炼指令发进原会话。一举兑现三好处（快/省 token/高质量）并化解 R-08 洞一（原会话读自己，无需取数通道）。新 agent（现状 bootstrap 新建 AgentRun）保留为可选项，用于：会话已删/引擎不支持 resume/用户想换视角。变更源天然走新 agent（文件树无"原会话"概念）。引擎限制：续接仅 claude/codex（provider caps 门控）+ 仅已结束会话可 reopen（进行中用 inject）+ 归档区禁写。原型未体现"谁去干"——前端补选择 UI（会话源默认勾选"原会话续接（推荐）"，旁保留"新建 agent"）。
 - normalized_requirement: 会话源蒸馏必须默认走原会话续接路径（reopen+inject），新建 agent 为显式可选降级；前端必须暴露"谁去干"的选择且默认推荐续接；引擎不支持 resume/会话已删时自动或引导降级到新 agent 路径。
 - impacts: [R-08 洞一化解, FR-01, task-08 UI 增选项, design-蒸馏派发节]
-- evidence: 用户提出并确认（2026-09-17 16:34）；源码核实：reopen_session session_lifecycle.py:41（claude/codex resume+prompt cache 保留）、inject_session service.py:764（带 prompt 下发）、AgentRun.agent_session_id 关联（model.py:267）；D-008 取数通道降级为新 agent 路径专用。
+- evidence: 用户提出并确认（2026-09-17 16:34）；源码核实：reopen_session （续接入口 reopen_session，见 backend/app/modules/daemon/session/service/session_lifecycle.py）（claude/codex resume+prompt cache 保留）、inject_session （inject_session，见 backend/app/modules/daemon/service.py）（带 prompt 下发）、AgentRun.agent_session_id 关联（backend/app/modules/agent/model.py:267）；D-008 取数通道降级为新 agent 路径专用。
 - 故障面: 续接会话可能比新 agent 更"固执"于原上下文视角（用户已有认知，故保留换 agent 选项）；reopen 对进行中会话报错需引导用 inject 而非 reopen。
 - 退役判据: 若后续所有引擎均支持 resume 且用户实测续接质量稳定，可收窄新 agent 选项为高级设置。
 
@@ -123,10 +123,10 @@ created_at: 2026-09-17 09:37:28
 - status: accepted
 - source: user
 - question: ①已沉淀的会话/变更要有标签提示并可指向知识点；②快速修复日志也应作为来源；③新建 agent 应像会话新建一样先选机器再选 agent 类型、有据可循；④这类会话不要在常规会话页展示、只在知识库侧有提炼记录跳转。
-- answer: 四项全做，源码可行性已核实：①已沉淀标签=查该源有无 distill run（AgentRun.agent_session_id 关联+metadata_.kind 落档，无需新表），proposed frontmatter 的 source 字段为反链载体（writer.py:350 现写 manual，蒸馏写 session:<id>/change:<key>/quick:<id>）；合并时把目标小节锚点记入反链（因合并后 proposed 文件删除入备份区，反链须指到合并后目标小节 known-issues.md#某节而非已删 proposed 文件）；②quicklog 与 knowledge 同构（GET /quicklog 现成 router.py:197），数据在文件树 .sillyspec/quicklog/，新 agent 直接读、连 R-08 洞一取数问题都没有——来源类型扩 quick，单条 ql 小故来源多选；③新建 agent 复用 create_session（session/service/create.py:42 原生支持 runtime_id 钉机器+provider/agent_profile_id/llm_provider_id/model 完整形态），后端代触发而非用户手点，title 带「提炼」前缀；④AgentSession.metadata_（model.py:457 JSON 列）写 origin=knowledge-distill，常规会话页列表过滤排除，知识库侧 DistillTaskRead 保留 agent_session_id 可跳转——会话有据可循+不污染常规列表双兑现。
+- answer: 四项全做，源码可行性已核实：①已沉淀标签=查该源有无 distill run（AgentRun.agent_session_id 关联+metadata_.kind 落档，无需新表），proposed frontmatter 的 source 字段为反链载体（backend/app/modules/knowledge/writer.py 的 frontmatter source 行 现写 manual，蒸馏写 session:<id>/change:<key>/quick:<id>）；合并时把目标小节锚点记入反链（因合并后 proposed 文件删除入备份区，反链须指到合并后目标小节 known-issues.md#某节而非已删 proposed 文件）；②quicklog 与 knowledge 同构（GET /quicklog 现成 backend/app/modules/knowledge/router.py:197），数据在文件树 .sillyspec/quicklog/，新 agent 直接读、连 R-08 洞一取数问题都没有——来源类型扩 quick，单条 ql 小故来源多选；③新建 agent 复用 create_session（backend/app/modules/daemon/session/service/（create_session 入口，见 backend/app/modules/daemon/session/service/create.py） 原生支持 runtime_id 钉机器+provider/agent_profile_id/llm_provider_id/model 完整形态），后端代触发而非用户手点，title 带「提炼」前缀；④AgentSession.metadata_（backend/app/modules/daemon/model.py:457 JSON 列）写 origin=knowledge-distill，常规会话页列表过滤排除，知识库侧 DistillTaskRead 保留 agent_session_id 可跳转——会话有据可循+不污染常规列表双兑现。
 - normalized_requirement: 来源选择须含会话/变更归档/快速修复三类且 quicklog 支持多选；已沉淀标签须基于真实 distill run 判定（非前端假标）；合并动作须把目标小节锚点写入反链供来源侧跳转；新建 agent 蒸馏会话须经 create_session 完整链路（可追机器+agent 类型）且 AgentSession.metadata_.origin=knowledge-distill 使其在常规会话页不可见、仅知识库提炼记录可跳转。
 - impacts: [FR-01/FR-03 扩, task-07 扩 source_type, task-08 UI 扩来源+标记+跳转, design-蒸馏派谁去干节扩]
-- evidence: 用户提出并确认（2026-09-17 16:46）；源码核实：create_session create.py:42（runtime_id 优先于 provider 双入口）、AgentSession.metadata_ model.py:457、quicklog 同构 router.py:197、AgentRun.agent_session_id 关联 model.py:267。
+- evidence: 用户提出并确认（2026-09-17 16:46）；源码核实：create_session （create_session 入口，见 backend/app/modules/daemon/session/service/create.py）（runtime_id 优先于 provider 双入口）、AgentSession.metadata_ backend/app/modules/daemon/model.py:457、quicklog 同构 backend/app/modules/knowledge/router.py:197、AgentRun.agent_session_id 关联 backend/app/modules/agent/model.py:267。
 - 故障面: 反链映射在合并时若目标小节重命名会失效（锚点漂移，需以 file+section_title 双键而非裸锚点）；蒸馏会话过滤若靠 metadata 判空，老会话（无 origin 字段）默认可见需零回归兜底。
 - 退役判据: 若常规会话页引入通用「会话用途」过滤维度，蒸馏隔离可并入该维度不再单列 origin 键。
 
@@ -140,6 +140,6 @@ created_at: 2026-09-17 09:37:28
 - answer: 实现期调查（2026-09-17，commit 2c7873e5e）修正前提：**spec 树三策略统一下发 daemon 本地 `~/.sillyhub/daemon/specs/{ws_id}`（交互会话启动 pull + 会话结束 postSpecSync 增量回传，`knowledge/` 在同步集内）**——v1 判断"platform-managed 下 daemon 本地无树"不成立，洞二实为"树在缺指路"。修正落定：①洞一取数走**附件通道**（导出会话日志为 Markdown→SessionAttachmentService 上传→create_session attachment_ids→daemon 落盘 {cwd}/attachments/ 供 agent 读，不污染知识库树；替代 v1 的 .runtime 导出方案——.runtime 在同步排除集内送不到 daemon，v1 方案不可行）；②洞二回流=prompt 统一带 `--spec-dir ~/.sillyhub/daemon/specs/{ws_id}` 指路（CLI 实测 propose 只认 --spec-dir 不认 --spec-root，scan 参数不可照搬）；③洞三护栏=turn>2000 422/单条 8KB 截断/总量 19MB 422 引导 resume；④非多模态引擎（附件通道依赖 provider_caps.multimodal，仅 claude/pi）fresh 会话源 422 守卫。
 - normalized_requirement: fresh 会话源蒸馏必须经附件通道携带导出记录（agent 可读路径）；所有 propose 命令必须带 --spec-dir 指向 daemon 本地 spec 目录；体量护栏三重（turn/单条/总量）；附件引擎门控必须前置校验。
 - impacts: [R-08 闭环, FR-01, task-09 部署期 M2 验证范围]
-- evidence: commit 2c7873e5e（81 测试绿）；源码锚点：daemon.ts _startInteractiveSession（pull 落点三策略统一）、spec-sync.ts UPLOAD_EXCLUDE_TOP_BASE（knowledge/ 在同步集）、turn-control.ts（附件落盘 {cwd}/attachments）、CLI `sillyspec knowledge propose --help` 实测（只认 --spec-dir）；config.py:271 spec_transport=tar。
+- evidence: commit 2c7873e5e（81 测试绿）；源码锚点：daemon.ts _startInteractiveSession（pull 落点三策略统一）、spec-sync.ts UPLOAD_EXCLUDE_TOP_BASE（knowledge/ 在同步集）、turn-control.ts（附件落盘 {cwd}/attachments）、CLI `sillyspec knowledge propose --help` 实测（只认 --spec-dir）；backend/app/core/config.py:271 spec_transport=tar。
 - 故障面: 附件下载 daemon 侧 60s 超时（既有链路）；postSpecSync 乐观锁冲突靠 pending_push 自愈（既有）；超大对话 resume 模式上下文超限由引擎 compact 兜底。
 - 退役判据: 若 daemon 侧未来提供会话记录查询 MCP 工具，可弃附件导出通道。

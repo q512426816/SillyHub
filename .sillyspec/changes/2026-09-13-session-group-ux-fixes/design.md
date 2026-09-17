@@ -13,7 +13,7 @@ scale: large
 
 1. **输入框草稿跨会话串台**：在一个会话输入未发送的内容，切到另一个会话输入框仍出现。代码查证：真会话草稿按 sessionId 隔离且七宿主均 key 重挂载，隔离正确；唯预会话（sessionId=null）草稿用固定键 `__pre__`（`frontend/src/components/daemon/session-panel/turn-state.ts:332`），跨工作区/跨机器入口共享，任一入口的未发送内容必然带入下一入口——与用户「a 会话内容带到 b 会话」实测吻合（D-001）。
 2. **移动端输入框高度拖拽手柄无响应**：`handleHeightDragStart` 只绑 `onMouseDown` + window `mousemove/mouseup`，触摸屏不触发；CSS `touch-none` 禁了默认手势但 JS 层无触摸监听（D-002）。`session-input-bar.tsx` 与 `group-chat-panel.tsx` 两处同款副本。
-3. **群聊跨工作区不可见**：群挂项目 A（`project_id`），项目 A 关联工作区 D/F（`PpmProjectWorkspace` M:N），用户期望 D/F 都能看到群聊；现前端过滤只匹配群聊直接 `workspace_id`（`frontend/src/components/sessions/session-list-panel.tsx:952`、`frontend/src/components/mobile/mobile-session-list.tsx:250-256`），挂 D 的群在 F 不可见（D-003）。
+3. **群聊跨工作区不可见**：群挂项目 A（`project_id`），项目 A 关联工作区 D/F（`PpmProjectWorkspace` M:N），用户期望 D/F 都能看到群聊；现前端过滤只匹配群聊直接 `workspace_id`（`frontend/src/components/sessions/session-list-panel.tsx:963`、`frontend/src/components/mobile/mobile-session-list.tsx:250-256`），挂 D 的群在 F 不可见（D-003）。
 
 ## 设计目标
 

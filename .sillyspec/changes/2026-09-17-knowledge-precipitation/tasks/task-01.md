@@ -30,7 +30,7 @@ provides:
   - contract: KnowledgeEntryRead
     fields: [zone, filename, path, title, last_modified_at]
 goal: >
-  知识库读侧由顶层非递归 glob（parser.py:46）改为 rglob 递归解析并按 zone
+  知识库读侧由顶层非递归 glob（backend/app/modules/knowledge/parser.py 的非递归 glob）改为 rglob 递归解析并按 zone
   （top/decisions/generated/proposed）透出，使 decisions/、generated/、proposed/
   子目录知识对网页可见（D-004 缺陷修复）；顶层条目 filename/path 值与响应字段
   保持逐字兼容——只增 zone 不删不改（D-007 path 前缀规范 + X-02 兼容承诺）。
