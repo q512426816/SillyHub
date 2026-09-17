@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, apiFetch } from "@/lib/api";
+// ql-20260917-011：apiFetch 已接熔断上报——既有 5xx/网络错用例会喂计数，
+// 用例间重置防串扰（否则计数跨用例累计会触发 circuit_open 短路炸后续用例）
+import { __resetCircuitForTest } from "@/lib/api-circuit";
 
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
 afterEach(() => {
   fetchMock.mockReset();
+  __resetCircuitForTest();
 });
 
 describe("apiFetch", () => {
@@ -211,5 +215,56 @@ describe("apiFetch 非 JSON 错误体中文兜底（ql-20260903-012）", () => {
       code: "session_not_found",
       message: "会话不存在或已被删除",
     });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  全局熔断接线（ql-20260917-011）                                     */
+/* ------------------------------------------------------------------ */
+
+describe("apiFetch × api-circuit", () => {
+  it("连续 5xx 喂满阈值后：非 auth 请求被短路（不发网络），auth 放行", async () => {
+    // 喂 5 次 502 开闸
+    for (let i = 0; i < 5; i++) {
+      fetchMock.mockResolvedValueOnce(new Response("bad gateway", { status: 502 }));
+      await expect(apiFetch("/api/example")).rejects.toMatchObject({ status: 502 });
+    }
+    fetchMock.mockClear();
+    // 非 auth：短路 circuit_open，fetch 不被调
+    await expect(apiFetch("/api/workspaces")).rejects.toMatchObject({
+      code: "circuit_open",
+      status: 0,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    // auth 端点放行（登录/刷新是熔断期自救通道）
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const r = await apiFetch("/api/auth/me");
+    expect(r).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("网络错误同样计入开闸（部署窗口连接拒绝场景）", async () => {
+    for (let i = 0; i < 5; i++) {
+      fetchMock.mockRejectedValueOnce(new TypeError("fetch failed"));
+      await expect(apiFetch("/api/example")).rejects.toMatchObject({ code: "network_error" });
+    }
+    fetchMock.mockClear();
+    await expect(apiFetch("/api/example")).rejects.toMatchObject({ code: "circuit_open" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("4xx 不开闸（业务态链路健康）", async () => {
+    for (let i = 0; i < 6; i++) {
+      fetchMock.mockResolvedValueOnce(new Response("not found", { status: 404 }));
+      await expect(apiFetch("/api/example")).rejects.toMatchObject({ status: 404 });
+    }
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    await expect(apiFetch("/api/example")).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

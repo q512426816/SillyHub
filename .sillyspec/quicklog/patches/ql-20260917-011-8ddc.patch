@@ -1,0 +1,626 @@
+diff --git a/.zcode/skills/sillyhub-docker-deploy/SKILL.md b/.zcode/skills/sillyhub-docker-deploy/SKILL.md
+index 1cc8575f7..4333a7979 100644
+--- a/.zcode/skills/sillyhub-docker-deploy/SKILL.md
++++ b/.zcode/skills/sillyhub-docker-deploy/SKILL.md
+@@ -224,6 +224,28 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml up --build --
+ >
+ > ⚠️ **务必带 `--force-recreate`**（或确认 compose 报告 `Recreated`）。若镜像重建了但容器没重建，运行的仍是旧代码。重建后用「验证」节的容器内代码校验确认改动确实生效。
+ 
++## 低中断更新（日常重建前后端时优先用）
++
++`up --build --force-recreate` 一步走时，旧容器在镜像构建完成前仍在服务，真正的服务
++中断窗口只有容器切换的几秒；但页面上的查询重试 + SSE 重连会在中断窗口内滚雪球，
++直到浏览器 ERR_INSUFFICIENT_RESOURCES（连接资源耗尽），且该状态不自愈——用户必须
++关页签重开（2026-09-17 实证）。两层防护：
++
++1. **客户端全局熔断已内置**（ql-20260917-011，`frontend/src/lib/api-circuit.ts`）：
++   连续 5 次网络错误/5xx 开闸，15s 冷却内非 auth 请求全部短路（不发网络）、SSE 重连
++   对齐冷却终点、顶部横幅提示；半开探测成功自动恢复。中断窗口对用户退化为
++   「横幅出现十几秒后自动恢复」，不再报废页签。**部署前无需额外操作。**
++2. **操作侧缩窗**：更新部署时把「构建」与「换容器」拆开——先构建（旧容器持续服务）：
++
++   ```bash
++   docker compose --env-file deploy/.env -f deploy/docker-compose.yml build backend frontend
++   docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --no-deps --force-recreate backend frontend
++   ```
++
++   换容器一步只做 stop+start（秒级）；避免在构建慢（冷缓存/网络抖动）时把 recreate
++   和 build 串在一起增加排队时间。真零停机需要前置反向代理双实例轮换（nginx/traefik），
++   当前单机开发部署不引入——记录为已知取舍。
++
+ ## Docker Desktop 卡在 Created 的修复
+ 
+ 症状：
+diff --git a/frontend/src/components/__tests__/circuit-banner.test.tsx b/frontend/src/components/__tests__/circuit-banner.test.tsx
+new file mode 100644
+index 000000000..177e39d07
+--- /dev/null
++++ b/frontend/src/components/__tests__/circuit-banner.test.tsx
+@@ -0,0 +1,44 @@
++/**
++ * CircuitBreakerBanner 单测（ql-20260917-011）：开闸出现 / 关闸消失。
++ */
++
++import { render, screen, act } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import { __resetCircuitForTest, reportApiFailure, reportApiSuccess } from "@/lib/api-circuit";
++import { ApiError } from "@/lib/api";
++import { CircuitBreakerBanner } from "@/components/circuit-banner";
++
++const netErr = () => new ApiError(0, { code: "network_error", message: "x", request_id: null, details: null });
++
++beforeEach(() => {
++  __resetCircuitForTest();
++});
++
++afterEach(() => {
++  __resetCircuitForTest();
++  vi.restoreAllMocks();
++});
++
++describe("CircuitBreakerBanner", () => {
++  it("默认不渲染；开闸出现横幅；半开探测成功后消失", () => {
++    const { container } = render(<CircuitBreakerBanner />);
++    expect(screen.queryByTestId("circuit-banner")).toBeNull();
++
++    for (let i = 0; i < 5; i++) {
++      act(() => reportApiFailure(netErr()));
++    }
++    expect(screen.getByTestId("circuit-banner").textContent).toContain("与服务器的连接暂时中断");
++
++    // 冷却过后半开探测成功 → 关闸 → 横幅消失
++    vi.useFakeTimers();
++    try {
++      vi.advanceTimersByTime(15_001);
++      act(() => reportApiSuccess());
++      expect(screen.queryByTestId("circuit-banner")).toBeNull();
++    } finally {
++      vi.useRealTimers();
++    }
++    expect(container).toBeInTheDocument;
++  });
++});
+diff --git a/frontend/src/components/app-shell.tsx b/frontend/src/components/app-shell.tsx
+index e0f80679d..49e9ec772 100644
+--- a/frontend/src/components/app-shell.tsx
++++ b/frontend/src/components/app-shell.tsx
+@@ -46,6 +46,8 @@ import {
+ } from "lucide-react";
+ 
+ import { Button } from "@/components/ui/button";
++// ql-20260917-011：全局熔断横幅（部署窗口/后端劣化时解释数据静止）
++import { CircuitBreakerBanner } from "@/components/circuit-banner";
+ import { LogoutConfirmDialog } from "@/components/logout-confirm-dialog";
+ import { TopBar } from "@/components/top-bar";
+ import {
+@@ -376,6 +378,8 @@ export function AppShell({ children }: { children: ReactNode }) {
+         backgroundAttachment: "fixed",
+       }}
+     >
++      {/* ql-20260917-011：熔断开闸期顶部细条提示（关闸自动消失） */}
++      <CircuitBreakerBanner />
+       {/* Sidebar */}
+       <aside
+         /* task-09：侧栏玻璃化（半透 + blur + saturate，极光透出）。 */
+diff --git a/frontend/src/components/circuit-banner.tsx b/frontend/src/components/circuit-banner.tsx
+new file mode 100644
+index 000000000..f57ee5439
+--- /dev/null
++++ b/frontend/src/components/circuit-banner.tsx
+@@ -0,0 +1,34 @@
++"use client";
++
++/**
++ * CircuitBreakerBanner — 全局熔断横幅（ql-20260917-011）。
++ *
++ * 订阅 api-circuit：开闸时在视口顶部显示细条提示「连接中断、已暂停自动
++ * 请求、稍后自动恢复」；半开探测成功关闸后自动消失。用户无操作负担——
++ * 部署窗口/后端劣化的几分钟里，查询与 SSE 已被熔断暂停，横幅解释页面
++ * 数据为何静止。
++ */
++
++import { useEffect, useState } from "react";
++import { CloudOff } from "lucide-react";
++
++import { subscribeCircuit } from "@/lib/api-circuit";
++
++export function CircuitBreakerBanner() {
++  const [open, setOpen] = useState(false);
++
++  useEffect(() => {
++    return subscribeCircuit((s) => setOpen(s.open));
++  }, []);
++
++  if (!open) return null;
++  return (
++    <div
++      data-testid="circuit-banner"
++      className="fixed inset-x-0 top-0 z-[1100] flex items-center justify-center gap-2 border-b border-warning/40 bg-warning/15 px-4 py-1.5 text-xs text-warning backdrop-blur-sm"
++    >
++      <CloudOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
++      <span>与服务器的连接暂时中断，已暂停自动请求，稍后自动恢复…</span>
++    </div>
++  );
++}
+diff --git a/frontend/src/lib/__tests__/api-circuit.test.ts b/frontend/src/lib/__tests__/api-circuit.test.ts
+new file mode 100644
+index 000000000..b4c346d70
+--- /dev/null
++++ b/frontend/src/lib/__tests__/api-circuit.test.ts
+@@ -0,0 +1,110 @@
++/**
++ * api-circuit 单测（ql-20260917-011）：阈值开闸 / 冷却半开 / 探测成败闭合重开 /
++ * 订阅通知。fake timers 驱动 Date.now 与冷却窗口。
++ */
++
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import { ApiError } from "@/lib/api";
++import {
++  __resetCircuitForTest,
++  circuitSnapshot,
++  isCircuitOpen,
++  isSystemicApiFailure,
++  reportApiFailure,
++  reportApiSuccess,
++  subscribeCircuit,
++} from "@/lib/api-circuit";
++
++const netErr = () => new ApiError(0, { code: "network_error", message: "x", request_id: null, details: null });
++const serverErr = (status = 502) =>
++  new ApiError(status, { code: `http_${status}`, message: "x", request_id: null, details: null });
++const bizErr = (status = 404) =>
++  new ApiError(status, { code: `http_${status}`, message: "x", request_id: null, details: null });
++
++beforeEach(() => {
++  vi.useFakeTimers();
++  __resetCircuitForTest();
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++});
++
++describe("isSystemicApiFailure", () => {
++  it("网络错误（status=0）/超时与 5xx 算系统性失败", () => {
++    expect(isSystemicApiFailure(netErr())).toBe(true);
++    expect(isSystemicApiFailure(serverErr(500))).toBe(true);
++    expect(isSystemicApiFailure(serverErr(503))).toBe(true);
++  });
++
++  it("4xx 业务态与普通 Error 不算（连接本身健康）", () => {
++    expect(isSystemicApiFailure(bizErr(401))).toBe(false);
++    expect(isSystemicApiFailure(bizErr(404))).toBe(false);
++    expect(isSystemicApiFailure(bizErr(422))).toBe(false);
++    expect(isSystemicApiFailure(new Error("plain"))).toBe(false);
++  });
++});
++
++describe("熔断状态机", () => {
++  it("连续 5 次系统性失败开闸；snapshot 带冷却终点", () => {
++    for (let i = 0; i < 4; i++) reportApiFailure(netErr());
++    expect(isCircuitOpen()).toBe(false);
++    reportApiFailure(netErr()); // 第 5 次
++    expect(isCircuitOpen()).toBe(true);
++    const s = circuitSnapshot();
++    expect(s.open).toBe(true);
++    expect(s.retryAt).toBe(Date.now() + 15_000);
++  });
++
++  it("不足阈值时 success 清零计数", () => {
++    for (let i = 0; i < 4; i++) reportApiFailure(netErr());
++    reportApiSuccess();
++    reportApiFailure(netErr());
++    expect(isCircuitOpen()).toBe(false); // 清零后仅 1 次
++  });
++
++  it("4xx 失败不计入（不会误开闸）", () => {
++    for (let i = 0; i < 20; i++) reportApiFailure(bizErr(401));
++    expect(isCircuitOpen()).toBe(false);
++  });
++
++  it("冷却过后半开放行（isCircuitOpen=false）", () => {
++    for (let i = 0; i < 5; i++) reportApiFailure(netErr());
++    expect(isCircuitOpen()).toBe(true);
++    vi.advanceTimersByTime(15_001);
++    expect(isCircuitOpen()).toBe(false); // half-open 放行探测
++  });
++
++  it("半开探测成功 → 关闸清零（后续需重新累计）", () => {
++    for (let i = 0; i < 5; i++) reportApiFailure(netErr());
++    vi.advanceTimersByTime(15_001);
++    reportApiSuccess();
++    expect(circuitSnapshot().open).toBe(false);
++    expect(circuitSnapshot().retryAt).toBeNull();
++    for (let i = 0; i < 4; i++) reportApiFailure(netErr());
++    expect(isCircuitOpen()).toBe(false); // 计数已清零，4 次不够
++  });
++
++  it("半开探测失败 → 立即重开（重新计冷却）", () => {
++    for (let i = 0; i < 5; i++) reportApiFailure(netErr());
++    vi.advanceTimersByTime(15_001);
++    reportApiFailure(serverErr(502)); // 半开期一次失败即重开
++    expect(isCircuitOpen()).toBe(true);
++    expect(circuitSnapshot().retryAt).toBe(Date.now() + 15_000);
++  });
++});
++
++describe("subscribeCircuit", () => {
++  it("开闸与关闸各通知一次（重开不重复弹）", () => {
++    const events: boolean[] = [];
++    subscribeCircuit((s) => events.push(s.open));
++    for (let i = 0; i < 5; i++) reportApiFailure(netErr());
++    expect(events).toEqual([true]); // 开闸一次
++    reportApiFailure(netErr()); // 已 open 的继续失败不再通知
++    expect(events).toEqual([true]);
++    vi.advanceTimersByTime(15_001);
++    reportApiSuccess(); // 半开探测成功关闸
++    expect(events).toEqual([true, false]);
++  });
++});
+diff --git a/frontend/src/lib/__tests__/api.test.ts b/frontend/src/lib/__tests__/api.test.ts
+index 3ec671dcf..939cf61de 100644
+--- a/frontend/src/lib/__tests__/api.test.ts
++++ b/frontend/src/lib/__tests__/api.test.ts
+@@ -1,12 +1,16 @@
+ import { afterEach, describe, expect, it, vi } from "vitest";
+ 
+ import { ApiError, apiFetch } from "@/lib/api";
++// ql-20260917-011：apiFetch 已接熔断上报——既有 5xx/网络错用例会喂计数，
++// 用例间重置防串扰（否则计数跨用例累计会触发 circuit_open 短路炸后续用例）
++import { __resetCircuitForTest } from "@/lib/api-circuit";
+ 
+ const fetchMock = vi.fn();
+ vi.stubGlobal("fetch", fetchMock);
+ 
+ afterEach(() => {
+   fetchMock.mockReset();
++  __resetCircuitForTest();
+ });
+ 
+ describe("apiFetch", () => {
+@@ -213,3 +217,54 @@ describe("apiFetch 非 JSON 错误体中文兜底（ql-20260903-012）", () => {
+     });
+   });
+ });
++
++/* ------------------------------------------------------------------ */
++/*  全局熔断接线（ql-20260917-011）                                     */
++/* ------------------------------------------------------------------ */
++
++describe("apiFetch × api-circuit", () => {
++  it("连续 5xx 喂满阈值后：非 auth 请求被短路（不发网络），auth 放行", async () => {
++    // 喂 5 次 502 开闸
++    for (let i = 0; i < 5; i++) {
++      fetchMock.mockResolvedValueOnce(new Response("bad gateway", { status: 502 }));
++      await expect(apiFetch("/api/example")).rejects.toMatchObject({ status: 502 });
++    }
++    fetchMock.mockClear();
++    // 非 auth：短路 circuit_open，fetch 不被调
++    await expect(apiFetch("/api/workspaces")).rejects.toMatchObject({
++      code: "circuit_open",
++      status: 0,
++    });
++    expect(fetchMock).not.toHaveBeenCalled();
++    // auth 端点放行（登录/刷新是熔断期自救通道）
++    fetchMock.mockResolvedValueOnce(
++      new Response(JSON.stringify({ ok: true }), { status: 200 }),
++    );
++    const r = await apiFetch("/api/auth/me");
++    expect(r).toEqual({ ok: true });
++    expect(fetchMock).toHaveBeenCalledTimes(1);
++  });
++
++  it("网络错误同样计入开闸（部署窗口连接拒绝场景）", async () => {
++    for (let i = 0; i < 5; i++) {
++      fetchMock.mockRejectedValueOnce(new TypeError("fetch failed"));
++      await expect(apiFetch("/api/example")).rejects.toMatchObject({ code: "network_error" });
++    }
++    fetchMock.mockClear();
++    await expect(apiFetch("/api/example")).rejects.toMatchObject({ code: "circuit_open" });
++    expect(fetchMock).not.toHaveBeenCalled();
++  });
++
++  it("4xx 不开闸（业务态链路健康）", async () => {
++    for (let i = 0; i < 6; i++) {
++      fetchMock.mockResolvedValueOnce(new Response("not found", { status: 404 }));
++      await expect(apiFetch("/api/example")).rejects.toMatchObject({ status: 404 });
++    }
++    fetchMock.mockClear();
++    fetchMock.mockResolvedValueOnce(
++      new Response(JSON.stringify({ ok: true }), { status: 200 }),
++    );
++    await expect(apiFetch("/api/example")).resolves.toEqual({ ok: true });
++    expect(fetchMock).toHaveBeenCalledTimes(1);
++  });
++});
+diff --git a/frontend/src/lib/__tests__/notifications.test.ts b/frontend/src/lib/__tests__/notifications.test.ts
+index 1d0e67ce1..5f9167a63 100644
+--- a/frontend/src/lib/__tests__/notifications.test.ts
++++ b/frontend/src/lib/__tests__/notifications.test.ts
+@@ -28,6 +28,8 @@ import {
+   useUnreadCount,
+ } from "@/lib/notifications";
+ import { queryKeys } from "@/lib/query-keys";
++import { __resetCircuitForTest, reportApiFailure } from "@/lib/api-circuit";
++import { ApiError } from "@/lib/api";
+ 
+ // --- mock session store（apiFetch / fetchSse 取 accessToken）---
+ const hoisted = vi.hoisted(() => ({ sessionState: { accessToken: "tok-1" } }));
+@@ -105,6 +107,8 @@ beforeEach(() => {
+   nextStatus = 200;
+   jsonBody = null;
+   lastStream = null;
++  // ql-20260917-011：SSE 重连已对齐全局熔断——用例间重置防跨用例串扰
++  __resetCircuitForTest();
+   installFetchMock();
+ });
+ afterEach(() => {
+@@ -316,3 +320,31 @@ describe("useNotificationsStream", () => {
+     );
+   });
+ });
++
++/* ------------------------------------------------------------------ */
++/*  SSE 重连 × 全局熔断（ql-20260917-011）                              */
++/* ------------------------------------------------------------------ */
++
++describe("subscribeNotificationsEvents × api-circuit", () => {
++  it("熔断开闸期断连：重连对齐冷却终点（冷却内不发连接），冷却过后恢复", async () => {
++    vi.useFakeTimers();
++    sseMode = true;
++    const sub = subscribeNotificationsEvents({ onEvent: vi.fn(), onConnected: vi.fn() });
++    await vi.advanceTimersByTimeAsync(0);
++    expect(fetchCalls).toHaveLength(1);
++
++    // 开闸（连续 5 次网络错误；SSE 自身不算 apiFetch，直接喂熔断模块）
++    const netErr = new ApiError(0, { code: "network_error", message: "x", request_id: null, details: null });
++    for (let i = 0; i < 5; i++) reportApiFailure(netErr);
++
++    // 流中断 → scheduleReconnect：熔断期重连应对齐 retryAt（15s 冷却 + 500ms），
++    // 而非退避表的 1s——冷却窗口内不发起任何连接
++    lastStream!.end();
++    await vi.advanceTimersByTimeAsync(10_000);
++    expect(fetchCalls).toHaveLength(1); // 冷却中：未重连
++
++    await vi.advanceTimersByTimeAsync(6_000); // 过冷却（半开放行）
++    expect(fetchCalls.length).toBeGreaterThanOrEqual(2);
++    sub.close();
++  });
++});
+diff --git a/frontend/src/lib/api-circuit.ts b/frontend/src/lib/api-circuit.ts
+new file mode 100644
+index 000000000..3b2f46de4
+--- /dev/null
++++ b/frontend/src/lib/api-circuit.ts
+@@ -0,0 +1,106 @@
++/**
++ * api-circuit — API 全局熔断（ql-20260917-011）。
++ *
++ * 背景：部署窗口（容器 recreate）或后端劣化时，页面上的查询重试 + SSE 重连
++ * 在浏览器里滚雪球，直到 ERR_INSUFFICIENT_RESOURCES（连接资源耗尽）——即使
++ * 服务恢复，该页签也会恶性循环到被关闭。
++ *
++ * 机制（经典熔断三态）：
++ * - closed（正常）：apiFetch 上报成败；连续 N 次系统性失败 → open。
++ * - open（熔断）：apiFetch 对非 /api/auth/* 请求直接抛 circuit_open（不发
++ *   网络，浏览器连接池不再被占用）；SSE 重连对齐冷却终点；冷却过后自动
++ *   进入 half-open。
++ * - half-open（半开）：放行请求探测；成功 → closed（清零计数），失败 →
++ *   重新 open 计时。
++ *
++ * 「系统性失败」= 网络错误/超时（ApiError status=0）或 HTTP ≥500——连接层
++ * 或服务层不可用；4xx（401/403/404/422…）是业务态，连接本身健康，不计入。
++ *
++ * 纯模块级单例（页面生命周期一份）；UI（circuit-banner）与 SSE
++ * （notifications.ts）经 subscribeCircuit / snapshot 消费。
++ */
++
++// 值导入（非 type-only）：isSystemicApiFailure 的 instanceof 需要运行时构造器。
++// 与 api.ts 构成 ESM 循环引用，但本模块仅在函数体内使用 ApiError（调用时
++// 双方模块均已初始化完成），顶层无求值依赖，安全。
++import { ApiError } from "@/lib/api";
++
++/** 连续系统性失败阈值（达到即开闸）。 */
++const FAILURE_THRESHOLD = 5;
++/** 开闸冷却时长：期间所有非 auth 请求短路，期满自动半开探测。 */
++const OPEN_COOLDOWN_MS = 15_000;
++
++export interface CircuitSnapshot {
++  /** 是否处于熔断（open；half-open 视为放行探测不算 open）。 */
++  open: boolean;
++  /** 冷却终点时间戳（ms，Date.now()）；非 open 为 null。SSE 重连对齐用。 */
++  retryAt: number | null;
++}
++
++type Listener = (_snapshot: CircuitSnapshot) => void;
++
++let consecutiveFailures = 0;
++let openedAt: number | null = null;
++const listeners = new Set<Listener>();
++
++function snapshot(): CircuitSnapshot {
++  const open = openedAt !== null && Date.now() - openedAt < OPEN_COOLDOWN_MS;
++  return open ? { open: true, retryAt: openedAt! + OPEN_COOLDOWN_MS } : { open: false, retryAt: null };
++}
++
++function notify(): void {
++  const s = snapshot();
++  for (const cb of listeners) cb(s);
++}
++
++/** 系统性失败判定：网络/超时（status=0）或 5xx；4xx 业务态不算。 */
++export function isSystemicApiFailure(err: unknown): boolean {
++  if (!(err instanceof ApiError)) return false;
++  return err.status === 0 || err.status >= 500;
++}
++
++/** apiFetch 成功路径上报：任何拿到 HTTP 响应且 <500 的请求都说明链路活着。 */
++export function reportApiSuccess(): void {
++  if (consecutiveFailures === 0 && openedAt === null) return;
++  // 处于熔断周期（open 或冷却已过的 half-open）都算——半开探测成功也要
++  // 通知关闸（横幅撤下），不能只看 snapshot().open（半开期它是 false）
++  const inCircuitCycle = openedAt !== null;
++  consecutiveFailures = 0;
++  openedAt = null;
++  if (inCircuitCycle) notify();
++}
++
++/** apiFetch 失败路径上报：仅系统性失败计数；到阈值开闸（含半开探测失败重开）。 */
++export function reportApiFailure(err: unknown): void {
++  if (!isSystemicApiFailure(err)) return;
++  const wasOpen = snapshot().open;
++  consecutiveFailures += 1;
++  if (consecutiveFailures >= FAILURE_THRESHOLD || wasOpen) {
++    openedAt = Date.now();
++  }
++  if (snapshot().open && !wasOpen) notify(); // 新开闸才通知（重开不重复弹）
++}
++
++/** 当前是否熔断（open）。half-open（冷却已过）返回 false 放行探测。 */
++export function isCircuitOpen(): boolean {
++  // 冷却已过但未清零：视为半开，放行；成功/失败上报会把它闭合/重开
++  return snapshot().open;
++}
++
++/** 当前快照（SSE 重连对齐 retryAt、UI 展示用）。 */
++export function circuitSnapshot(): CircuitSnapshot {
++  return snapshot();
++}
++
++/** 订阅熔断状态变化（开闸/关闸各通知一次）。返回退订函数。 */
++export function subscribeCircuit(cb: Listener): () => void {
++  listeners.add(cb);
++  return () => listeners.delete(cb);
++}
++
++/** 测试辅助：重置模块状态（仅测试文件使用，业务代码禁调）。 */
++export function __resetCircuitForTest(): void {
++  consecutiveFailures = 0;
++  openedAt = null;
++  listeners.clear();
++}
+diff --git a/frontend/src/lib/api.ts b/frontend/src/lib/api.ts
+index d75613531..c0232035e 100644
+--- a/frontend/src/lib/api.ts
++++ b/frontend/src/lib/api.ts
+@@ -6,6 +6,9 @@
+  */
+ import { useSession } from "@/stores/session";
+ import { ensureFreshAccessToken } from "@/lib/token-refresh";
++// ql-20260917-011：全局熔断——部署窗口 5xx/网络错误风暴下短路请求，护住
++// 浏览器连接池（此前风暴直到 ERR_INSUFFICIENT_RESOURCES 页签报废）
++import { isCircuitOpen, reportApiFailure, reportApiSuccess } from "@/lib/api-circuit";
+ 
+ /** Absolute backend URL — used only for SSR / direct server-side fetches. */
+ const SERVER_API_BASE_URL = (
+@@ -167,22 +170,37 @@ export async function apiFetch<T = unknown>(
+ 
+   let resp: Response;
+   try {
++    // ql-20260917-011：熔断开闸期短路非 auth 请求（不发网络，连接池不再被
++    // 占用；auth 放行——登录/刷新是熔断期用户自救与恢复探测的通道）
++    if (isCircuitOpen() && !isAuthEndpoint(url.pathname)) {
++      throw new ApiError(0, {
++        code: "circuit_open",
++        message: "与服务器的连接暂时中断，正在自动恢复…",
++        request_id: finalHeaders["x-request-id"] ?? null,
++        details: null,
++      });
++    }
+     resp = await fetch(url.toString(), init);
+   } catch (err) {
++    if (err instanceof ApiError) throw err; // circuit_open 短路：未发网络不上报
+     if (timedOut) {
+-      throw new ApiError(0, {
++      const timeoutErr = new ApiError(0, {
+         code: "timeout",
+         message: timeoutMessage ?? "请求超时，请重试",
+         request_id: finalHeaders["x-request-id"] ?? null,
+         details: null,
+       });
++      reportApiFailure(timeoutErr);
++      throw timeoutErr;
+     }
+-    throw new ApiError(0, {
++    const networkErr = new ApiError(0, {
+       code: "network_error",
+       message: err instanceof Error ? err.message : "Network error",
+       request_id: finalHeaders["x-request-id"] ?? null,
+       details: null,
+     });
++    reportApiFailure(networkErr);
++    throw networkErr;
+   } finally {
+     if (timeoutTimer !== null) clearTimeout(timeoutTimer);
+     if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
+@@ -203,6 +221,10 @@ export async function apiFetch<T = unknown>(
+             request_id: resp.headers.get("x-request-id"),
+             details: payload,
+           };
++    // 熔断上报：5xx 系统性失败计数（4xx 业务态说明链路活着，按成功清零）
++    const apiErr = new ApiError(resp.status, errorPayload);
++    if (resp.status >= 500) reportApiFailure(apiErr);
++    else reportApiSuccess();
+     // Token expired? Try refresh+retry once.
+     if (
+       resp.status === 401 &&
+@@ -230,9 +252,11 @@ export async function apiFetch<T = unknown>(
+       }
+     }
+ 
+-    throw new ApiError(resp.status, errorPayload);
++    throw apiErr;
+   }
+ 
++  // 2xx：链路健康，熔断计数清零（含半开探测成功关闸）
++  reportApiSuccess();
+   return payload as T;
+ }
+ 
+diff --git a/frontend/src/lib/notifications.ts b/frontend/src/lib/notifications.ts
+index c24bd693c..5c58c7a21 100644
+--- a/frontend/src/lib/notifications.ts
++++ b/frontend/src/lib/notifications.ts
+@@ -22,6 +22,8 @@
+ import { useEffect } from "react";
+ import { useQuery, useQueryClient } from "@tanstack/react-query";
+ import { ApiError, apiFetch, getApiBaseUrl } from "@/lib/api";
++// ql-20260917-011：SSE 重连对齐全局熔断冷却（风暴防护）
++import { circuitSnapshot, isCircuitOpen } from "@/lib/api-circuit";
+ import type { components } from "@/lib/api-types";
+ import { RECONNECT_BACKOFF_MS } from "@/lib/daemon";
+ import { fetchSse } from "@/lib/fetch-sse";
+@@ -205,15 +207,28 @@ export function subscribeNotificationsEvents(opts: {
+ 
+   const scheduleReconnect = () => {
+     if (closed) return;
+-    const delay =
++    const backoff =
+       RECONNECT_BACKOFF_MS[
+         Math.min(retryCount, RECONNECT_BACKOFF_MS.length - 1)
+       ]!;
++    // ql-20260917-011：全局熔断开闸时，重连对齐冷却终点（冷却内连 fetch-sse
++    // 都不发——连接池让给熔断恢复探测），且到期复查（可能又被重开）
++    const circuit = circuitSnapshot();
++    const delay = circuit.open
++      ? Math.max(backoff, circuit.retryAt !== null ? circuit.retryAt - Date.now() + 500 : backoff)
++      : backoff;
+     retryCount += 1;
+     reconnectTimer = setTimeout(() => {
+       reconnectTimer = null;
+-      if (!closed) wireConnection();
+-    }, delay);
++      if (!closed) {
++        if (isCircuitOpen()) {
++          // 冷却未到（或被重开）：不发起连接，按当前冷却重排
++          scheduleReconnect();
++          return;
++        }
++        wireConnection();
++      }
++    }, Math.max(delay, 0));
+   };
+ 
+   wireConnection();

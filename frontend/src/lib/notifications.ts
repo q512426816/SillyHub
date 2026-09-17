@@ -22,6 +22,8 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiFetch, getApiBaseUrl } from "@/lib/api";
+// ql-20260917-011：SSE 重连对齐全局熔断冷却（风暴防护）
+import { circuitSnapshot, isCircuitOpen } from "@/lib/api-circuit";
 import type { components } from "@/lib/api-types";
 import { RECONNECT_BACKOFF_MS } from "@/lib/daemon";
 import { fetchSse } from "@/lib/fetch-sse";
@@ -205,15 +207,28 @@ export function subscribeNotificationsEvents(opts: {
 
   const scheduleReconnect = () => {
     if (closed) return;
-    const delay =
+    const backoff =
       RECONNECT_BACKOFF_MS[
         Math.min(retryCount, RECONNECT_BACKOFF_MS.length - 1)
       ]!;
+    // ql-20260917-011：全局熔断开闸时，重连对齐冷却终点（冷却内连 fetch-sse
+    // 都不发——连接池让给熔断恢复探测），且到期复查（可能又被重开）
+    const circuit = circuitSnapshot();
+    const delay = circuit.open
+      ? Math.max(backoff, circuit.retryAt !== null ? circuit.retryAt - Date.now() + 500 : backoff)
+      : backoff;
     retryCount += 1;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
-      if (!closed) wireConnection();
-    }, delay);
+      if (!closed) {
+        if (isCircuitOpen()) {
+          // 冷却未到（或被重开）：不发起连接，按当前冷却重排
+          scheduleReconnect();
+          return;
+        }
+        wireConnection();
+      }
+    }, Math.max(delay, 0));
   };
 
   wireConnection();

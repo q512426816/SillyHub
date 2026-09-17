@@ -347,10 +347,14 @@
 审计：[gate] L2（跨 0 模块 · 12 文件：9 代码/3 测试）advisory；模块文档认领不适用（无可认领模块）；风险命中 1 处（migration←backend/migrations/versions/20260917160000_add_queued_model_and_pending_thinking_level.py）需运行时证据
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/openapi.json, frontend/src/lib/api-types.ts
 
-## ql-20260917-009-7220 | 2026-09-17 21:44:30 | agent_run_logs 入库 NUL 字节清洗——daemon 上报日志内容含 \x00（UTF-16 宽字符输出）被 PG CharacterNotInRepertoireError 拒收丢单条日志，入库边界 strip
-状态：进行中
+## ql-20260917-009-7220 | 2026-09-17 21:44:30 | agent_run_logs 入库剥 NUL 字节防 PG CharacterNotInRepertoireError 丢单条日志（daemon 上报 Wind…
+状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：backend/app/modules/agent/model.py（+61/-8）, backend/app/modules/agent/tests/test_agent_run_log_nul.py（+121/-0）, backend/app/modules/agent/tests/test_group_chat_models.py（+8/-1）
+需求：agent_run_logs 入库剥 NUL 字节防 PG CharacterNotInRepertoireError 丢单条日志（daemon 上报 Windows 命令 UTF-16 宽字符残段含 \x00）。
+根因：PG VARCHAR/TEXT/JSON 不接受 U+0000，整条 INSERT 拒收。
+方案：NulSafeStr/NulSafeText/NulSafeJSON TypeDecorator 挂 8 列 bind 参数层剥 \x00（照 ConstraintsJSON 先例；SQLModel table 模型不走 pydantic 验证故 field_validator 无效已弃）；impl 不变 DDL 零变化无迁移。
+结果：6 新用例 + agent 全量 1248 绿 + ruff 过；已提交 03a4667b9 推送 origin。
 
 ## ql-20260917-010-5b44 | 2026-09-17 21:50:31 | 变更文件预览三改进——diff 去 5000 硬顶改懒加载、去掉变化比对按钮、三个固定结构 json 表格化。根因：DiffView 渲染上限截断大 diff…
 状态：已完成
@@ -367,3 +371,18 @@
 结果：6 测试文件 107 用例绿，tsc 0，eslint 0 error（1 既有 warning）；浏览器实测内联+全屏四视图、按钮消失、2604 行 patch 点击续渲至全量、哨兵消失全通过
 审计：[gate] L1（跨 0 模块 · 9 文件：5 代码/3 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/tests/test_group_chat_models.py
+
+## ql-20260917-011-8ddc | 2026-09-17 22:11:31 | 部署窗口 5xx/网络错误风暴两层防护（此前 recreate 窗口用户页签被 ERR_INSUFFICIENT_RESOURCES 打废）。根因…
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/api-circuit.ts（新增全局熔断模块（阈值/冷却/半开/订阅））
+- frontend/src/lib/api.ts（apiFetch 接线（开闸短路非 auth、成败上报、5xx/4xx 分型））
+- frontend/src/lib/notifications.ts（SSE 重连对齐熔断冷却+到期复查）
+- frontend/src/components/circuit-banner.tsx（新增熔断横幅（订阅开合））
+- frontend/src/components/app-shell.tsx（挂载横幅）
+需求：部署窗口 5xx/网络错误风暴两层防护（此前 recreate 窗口用户页签被 ERR_INSUFFICIENT_RESOURCES 打废）。
+根因：中断窗口内查询重试+SSE 重连滚雪球占满浏览器连接池，服务恢复后也不自愈。
+方案：①api-circuit 全局熔断——连续 5 次系统性失败（网络错/超时/5xx，4xx 不计）开闸 15s 冷却，开闸期 apiFetch 短路非 auth 请求（不发网络）、SSE 重连对齐冷却、顶部横幅提示，半开探测成功自动恢复；②部署操作指引落 sillyhub-docker-deploy 技能文档（本地 .zcode 不入库，改动已生效）。
+结果：熔断 5 文件 49 用例绿（状态机/短路/auth 放行/SSE 对齐/横幅），壳层回归 48 用例绿，tsc 0，eslint 0 error
+审计：[gate] L1（跨 0 模块 · 12 文件：5 代码/4 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含

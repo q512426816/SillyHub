@@ -6,6 +6,9 @@
  */
 import { useSession } from "@/stores/session";
 import { ensureFreshAccessToken } from "@/lib/token-refresh";
+// ql-20260917-011：全局熔断——部署窗口 5xx/网络错误风暴下短路请求，护住
+// 浏览器连接池（此前风暴直到 ERR_INSUFFICIENT_RESOURCES 页签报废）
+import { isCircuitOpen, reportApiFailure, reportApiSuccess } from "@/lib/api-circuit";
 
 /** Absolute backend URL — used only for SSR / direct server-side fetches. */
 const SERVER_API_BASE_URL = (
@@ -167,22 +170,37 @@ export async function apiFetch<T = unknown>(
 
   let resp: Response;
   try {
+    // ql-20260917-011：熔断开闸期短路非 auth 请求（不发网络，连接池不再被
+    // 占用；auth 放行——登录/刷新是熔断期用户自救与恢复探测的通道）
+    if (isCircuitOpen() && !isAuthEndpoint(url.pathname)) {
+      throw new ApiError(0, {
+        code: "circuit_open",
+        message: "与服务器的连接暂时中断，正在自动恢复…",
+        request_id: finalHeaders["x-request-id"] ?? null,
+        details: null,
+      });
+    }
     resp = await fetch(url.toString(), init);
   } catch (err) {
+    if (err instanceof ApiError) throw err; // circuit_open 短路：未发网络不上报
     if (timedOut) {
-      throw new ApiError(0, {
+      const timeoutErr = new ApiError(0, {
         code: "timeout",
         message: timeoutMessage ?? "请求超时，请重试",
         request_id: finalHeaders["x-request-id"] ?? null,
         details: null,
       });
+      reportApiFailure(timeoutErr);
+      throw timeoutErr;
     }
-    throw new ApiError(0, {
+    const networkErr = new ApiError(0, {
       code: "network_error",
       message: err instanceof Error ? err.message : "Network error",
       request_id: finalHeaders["x-request-id"] ?? null,
       details: null,
     });
+    reportApiFailure(networkErr);
+    throw networkErr;
   } finally {
     if (timeoutTimer !== null) clearTimeout(timeoutTimer);
     if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
@@ -203,6 +221,10 @@ export async function apiFetch<T = unknown>(
             request_id: resp.headers.get("x-request-id"),
             details: payload,
           };
+    // 熔断上报：5xx 系统性失败计数（4xx 业务态说明链路活着，按成功清零）
+    const apiErr = new ApiError(resp.status, errorPayload);
+    if (resp.status >= 500) reportApiFailure(apiErr);
+    else reportApiSuccess();
     // Token expired? Try refresh+retry once.
     if (
       resp.status === 401 &&
@@ -230,9 +252,11 @@ export async function apiFetch<T = unknown>(
       }
     }
 
-    throw new ApiError(resp.status, errorPayload);
+    throw apiErr;
   }
 
+  // 2xx：链路健康，熔断计数清零（含半开探测成功关闸）
+  reportApiSuccess();
   return payload as T;
 }
 

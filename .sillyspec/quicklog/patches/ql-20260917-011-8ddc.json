@@ -1,0 +1,119 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-0518c8f0",
+  "totals": {
+    "files": 10,
+    "additions": 452,
+    "deletions": 6
+  },
+  "rows": [
+    {
+      "path": ".zcode/skills/sillyhub-docker-deploy/SKILL.md",
+      "declared": true,
+      "additions": 22,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/__tests__/circuit-banner.test.tsx",
+      "declared": true,
+      "additions": 44,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/app-shell.tsx",
+      "declared": true,
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/circuit-banner.tsx",
+      "declared": true,
+      "additions": 34,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/api-circuit.test.ts",
+      "declared": true,
+      "additions": 110,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/api.test.ts",
+      "declared": true,
+      "additions": 55,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/notifications.test.ts",
+      "declared": true,
+      "additions": 32,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/api-circuit.ts",
+      "declared": true,
+      "additions": 106,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/api.ts",
+      "declared": true,
+      "additions": 27,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/notifications.ts",
+      "declared": true,
+      "additions": 18,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 12,
+    "codeFileCount": 5,
+    "testFileCount": 4,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260917-011-8ddc",
+  "sessionId": "quick-0518c8f0",
+  "savedAt": "2026-09-17T14:24:52.782Z",
+  "patchSha256": "dc274badf4b127a43fd7456682a4463fa720f691f9e6db304dadf78931630824",
+  "patchStatus": "ok"
+}

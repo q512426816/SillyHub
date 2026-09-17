@@ -28,6 +28,8 @@ import {
   useUnreadCount,
 } from "@/lib/notifications";
 import { queryKeys } from "@/lib/query-keys";
+import { __resetCircuitForTest, reportApiFailure } from "@/lib/api-circuit";
+import { ApiError } from "@/lib/api";
 
 // --- mock session store（apiFetch / fetchSse 取 accessToken）---
 const hoisted = vi.hoisted(() => ({ sessionState: { accessToken: "tok-1" } }));
@@ -105,6 +107,8 @@ beforeEach(() => {
   nextStatus = 200;
   jsonBody = null;
   lastStream = null;
+  // ql-20260917-011：SSE 重连已对齐全局熔断——用例间重置防跨用例串扰
+  __resetCircuitForTest();
   installFetchMock();
 });
 afterEach(() => {
@@ -314,5 +318,33 @@ describe("useNotificationsStream", () => {
           fetchCalls.filter((c) => c.url.includes("unread-count")).length,
         ).toBeGreaterThan(before),
     );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  SSE 重连 × 全局熔断（ql-20260917-011）                              */
+/* ------------------------------------------------------------------ */
+
+describe("subscribeNotificationsEvents × api-circuit", () => {
+  it("熔断开闸期断连：重连对齐冷却终点（冷却内不发连接），冷却过后恢复", async () => {
+    vi.useFakeTimers();
+    sseMode = true;
+    const sub = subscribeNotificationsEvents({ onEvent: vi.fn(), onConnected: vi.fn() });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchCalls).toHaveLength(1);
+
+    // 开闸（连续 5 次网络错误；SSE 自身不算 apiFetch，直接喂熔断模块）
+    const netErr = new ApiError(0, { code: "network_error", message: "x", request_id: null, details: null });
+    for (let i = 0; i < 5; i++) reportApiFailure(netErr);
+
+    // 流中断 → scheduleReconnect：熔断期重连应对齐 retryAt（15s 冷却 + 500ms），
+    // 而非退避表的 1s——冷却窗口内不发起任何连接
+    lastStream!.end();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchCalls).toHaveLength(1); // 冷却中：未重连
+
+    await vi.advanceTimersByTimeAsync(6_000); // 过冷却（半开放行）
+    expect(fetchCalls.length).toBeGreaterThanOrEqual(2);
+    sub.close();
   });
 });

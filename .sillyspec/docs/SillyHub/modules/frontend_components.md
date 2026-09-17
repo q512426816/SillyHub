@@ -160,6 +160,7 @@ active = matchLength 是 sidebarSections 全部菜单中的最大值
 
 ## 变更索引
 
+- ql-20260917-011-8ddc | 部署中断两层防护：①api-circuit 全局熔断（api.ts 接线——连续 5 次网络错/5xx 开闸、15s 冷却短路非 auth 请求、半开探测自愈；notifications SSE 重连对齐冷却终点；circuit-banner 顶部横幅随开合出现/消失，挂 app-shell 根部）；②sillyhub-docker-deploy 技能补「低中断更新」节（build 与换容器分离缩窗 + 熔断已兜底 + 真零停机需前置代理的取舍记录）
 - ql-20260917-010-5b44 | 变更文件预览三改进：①DiffView 去 5000 行硬顶改增量懒加载（首屏 2000 行 + IntersectionObserver 触底 600px 预载 + 点击兜底按钮，无总量上限，content 切换重置）；②「变化比对」按钮连同 changeKey prop 链（change-file-tree/change-files-card/变更详情页）整体移除——ScopeFileDiffModal 组件与快速修复抽屉入口保留；③knownJsonView 分发器 + 三个固定结构报告表格视图（scope-audit 裁决徽章+文件表、apply-manifest 哈希清单、verify-facts 探针/测试/一致性/移交分段），文件名+结构特征不命中回落 JsonView 折叠树，内联 FilePreview 与全屏 JsonPreviewer 共用
 - ql-20260917-004-d437 | 变更文件预览四修：①structured-views 共享视图（JsonView 递归折叠树+DiffView 红绿行，parseUnifiedDiff 复用）；②preview-registry/previewers 增 json/patch/text 渲染器——scope-audit.json/apply-manifest/verify-facts 全屏可视化、scope-audit.patch 红绿、.log 纯文本（此前均落 fallback 下载卡）；③change-file-tree FilePreview 内联同款 json/diff 分支（非法 JSON/非 diff 均回落纯文本）；④wheel-scroll-unlock：antd 弹窗叠 radix Dialog 时 react-remove-scroll 吞滚轮（实测 scrollTop 恒 0）——捕获段手动滚动+preventDefault，无锁零介入。配套后端 _TEXT_SUFFIXES 补 .log/.patch/.diff（is_text 误判修复）
 - ql-20260912-003-4506 | 任务执行面板「轮次历史」tokens 列改四维独立展示：原 input+output 合并单值（不含缓存，口径易误读）改主行下「输入/输出/缓存读取/缓存写入」标签 meta 行（对齐 TaskListRow meta 设计语言，flex-wrap 窄容器安全；null 维不渲染防编造 0）；后端 runs DTO 同批扩 cache_read_tokens/cache_creation_tokens 两 nullable 字段（from_attributes 零查询改动）+gen:types；同 bullet 修正文档陈旧断言「轮次页签惰性取数」——实现本就挂载即拉（折叠条轮次计数依赖）。

@@ -46,6 +46,8 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+// ql-20260917-011：全局熔断横幅（部署窗口/后端劣化时解释数据静止）
+import { CircuitBreakerBanner } from "@/components/circuit-banner";
 import { LogoutConfirmDialog } from "@/components/logout-confirm-dialog";
 import { TopBar } from "@/components/top-bar";
 import {
@@ -376,6 +378,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         backgroundAttachment: "fixed",
       }}
     >
+      {/* ql-20260917-011：熔断开闸期顶部细条提示（关闸自动消失） */}
+      <CircuitBreakerBanner />
       {/* Sidebar */}
       <aside
         /* task-09：侧栏玻璃化（半透 + blur + saturate，极光透出）。 */
