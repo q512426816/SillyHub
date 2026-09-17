@@ -93,6 +93,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - `mission-console.tsx` / `mission-summary-card.tsx` — 任务执行控制台与摘要
   - `AgentModelInput` / `AgentProviderSelect` — 模型与供应商选择
 - 交互问答：`ask-user-dialog-card` — codex request_user_input / 可归一化 MCP elicitation 的 question/options 问答（每问下方常驻手动输入框；复杂 schema daemon 侧 fail-closed）。
+- 知识域（knowledge/，2026-09-17-knowledge-precipitation）：`precipitate-dialog.tsx` — 沉淀弹层双 tab（从记录提炼：源类型切换+会话/已归档变更单选+关注点 textarea 派发蒸馏；手工录入：标题/分类/正文表单落候选；tab 用原生 button+role=tab 非 antd Tabs——antd v6 Tabs 的 `:has()` 选择器 jsdom 无法解析，原型亦为原生条）；`entry-editor.tsx` — 条目编辑态（正文 Markdown textarea，frontmatter 只读展示、提交拼回保字节不动，decisions 兜底只读态 D-006）；`merge-dialog.tsx` — 合并弹层（目标文件三类白名单+小节标题+关键词人工填写，debounce 调 preview-merge 渲染后端预览零前端拼接，dupRe 命中如实展示「已存在将跳过」，409 固定文案保留表单可重试）；`distill-task-bar.tsx` — 蒸馏任务条（5s/15s 双档轮询 distill-tasks，完成 toast+回调刷新列表、失败统一「daemon 离线或执行中断」文案，终态停留 8s 后由 timer 主动清除）。
 - 移动端（mobile/）：`mobile-app-shell` / `mobile-top-bar` / `mobile-tab-bar`（底部导航）、`mobile-card-list`（卡片列表替代表格）、`mobile-filter-drawer` / `mobile-detail-sheet` / `milestone-sheet`（筛选/详情抽屉）、`mobile-batch-bar` / `mobile-action-menu` / `mobile-export-button`（批量/操作/导出）。ql-20260827-012：外壳容器改 `fixed inset-0 + overflow-hidden`（body 锁死不可滚，内容区自管滚动）；`mobile-top-bar` 加 actions 动作槽，外壳默认注入桌面同款 `ThemeToggle`（移动端主题切换入口，useThemeStore persist 同源）。
 - 基础件（ui/，shadcn 模式）：button / input / badge / card / dialog / dropdown-menu / avatar / empty-state / json-editor / markdown-text / status-badge / confirm-captcha。
 - 其余独立件：

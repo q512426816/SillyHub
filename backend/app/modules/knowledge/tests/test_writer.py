@@ -1,0 +1,431 @@
+"""KnowledgeWriterService 单测（change 2026-09-17-knowledge-precipitation task-04）。
+
+覆盖（task-04 acceptance）：
+- propose：落盘 proposed/<slug>.md、frontmatter 四字段（author/created_at/
+  proposed_at/source=manual）、slug 冲突追加 -2/-3 序号、列表侧待审核 zone 可见
+- update_entry：decisions zone → 422（由归档流程维护）；top zone 正常编辑
+- merge 两段式：段一 conflict 时候选保留未删（409 契约 details 三键）
+- merge 幂等重试：段 1 已生效后重试不重复追加同名小节与 INDEX 路由行（dupRe）
+- merge 目标白名单外 → 422
+- reject：单段 delete（读侧 404）
+
+author: qinyi
+created_at: 2026-09-17
+"""
+
+from __future__ import annotations
+
+import base64
+import uuid
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from app.core.errors import WorkspaceNotFound
+from app.modules.auth.model import User
+from app.modules.knowledge.service import KnowledgeService
+from app.modules.knowledge.writer import (
+    KnowledgeEditForbidden,
+    KnowledgeMergeTargetNotAllowed,
+    KnowledgeWriteConflict,
+    KnowledgeWriterService,
+    KnowledgeZoneNotAllowed,
+)
+from app.modules.spec_workspace.model import SpecWorkspace
+from app.modules.spec_workspace.schema import FileOp
+from app.modules.spec_workspace.service import SpecWorkspaceService
+from app.modules.workspace.model import Workspace
+
+INDEX_MD = (
+    "# Knowledge Index\n"
+    "\n"
+    "## Known Issues\n"
+    "\n"
+    "- 旧问题|legacy → [known-issues.md#旧问题](known-issues.md#旧问题)\n"
+    "\n"
+    "## Patterns\n"
+    "\n"
+    "- 既有|seed → [patterns.md#既有](patterns.md#既有)\n"
+)
+KNOWN_ISSUES_MD = "# Known Issues\n\n## 旧问题\n\n旧内容。\n"
+PATTERNS_MD = "# Patterns\n\n## 既有\n\n已有小节。\n"
+DECISION_MD = "# Decision Daemon\n\n决策正文。\n"
+
+
+def _b64(text: str) -> str:
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+async def _manifest_row(session: Any, ws_id: uuid.UUID, op_path: str) -> Any:
+    from sqlalchemy import select
+
+    from app.modules.spec_workspace.model import SpecFileManifest
+
+    return (
+        await session.execute(
+            select(SpecFileManifest).where(
+                SpecFileManifest.workspace_id == ws_id,
+                SpecFileManifest.path == op_path,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+@pytest.fixture()
+async def env(db_session, tmp_path):
+    """平台管理 spec_root + 经 apply_ops 铺底的知识树（manifest 行随建，base_version 链路真实）。"""
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="knowledge-writer",
+        slug=f"kw-{uuid.uuid4().hex[:8]}",
+        root_path=str(tmp_path / "client-machine-path"),
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    spec_root = tmp_path / "writer-spec"
+    db_session.add(
+        SpecWorkspace(
+            id=uuid.uuid4(),
+            workspace_id=ws.id,
+            spec_root=str(spec_root),
+            strategy="platform-managed",
+            sync_status="clean",
+        )
+    )
+    await db_session.commit()
+
+    await SpecWorkspaceService(db_session).apply_ops(
+        ws.id,
+        [
+            FileOp(op="add", path="knowledge/INDEX.md", content=_b64(INDEX_MD), base_version=0),
+            FileOp(
+                op="add",
+                path="knowledge/known-issues.md",
+                content=_b64(KNOWN_ISSUES_MD),
+                base_version=0,
+            ),
+            FileOp(
+                op="add", path="knowledge/patterns.md", content=_b64(PATTERNS_MD), base_version=0
+            ),
+            FileOp(
+                op="add",
+                path="knowledge/decisions/daemon.md",
+                content=_b64(DECISION_MD),
+                base_version=0,
+            ),
+        ],
+    )
+
+    user = User(
+        id=uuid.uuid4(),
+        display_name="张三",
+        email="zhang@example.com",
+        status="active",
+        is_platform_admin=True,
+    )
+    return SimpleNamespace(ws=ws, spec_root=spec_root, user=user, session=db_session)
+
+
+class TestProposeManual:
+    async def test_propose_manual_frontmatter_and_proposed_zone(self, env, db_session) -> None:
+        writer = KnowledgeWriterService(db_session)
+        entry = await writer.propose_manual(
+            env.ws.id,
+            env.user,
+            title="部署端口冲突处理",
+            category="known-issue",
+            body="端口被占用时，先查占用进程再换端口。",
+            tags=["部署", "端口"],
+        )
+
+        assert entry.zone == "proposed"
+        assert entry.filename == "proposed/部署端口冲突处理.md"
+        assert entry.title == "部署端口冲突处理"
+
+        raw = (env.spec_root / "knowledge" / "proposed" / "部署端口冲突处理.md").read_text(
+            encoding="utf-8"
+        )
+        # frontmatter 四字段契约（author/created_at/proposed_at/source=manual）
+        assert "author: 张三" in raw
+        assert "created_at: " in raw
+        assert "proposed_at: " in raw
+        assert "source: manual" in raw
+        assert "category: known-issue" in raw
+        assert "tags: 部署, 端口" in raw
+        assert "# 部署端口冲突处理" in raw
+        assert "端口被占用时" in raw
+
+        # 列表侧待审核 zone 可见
+        listing = await KnowledgeService(db_session).list_knowledge(env.ws.id)
+        proposed = [i for i in listing.items if i.zone == "proposed"]
+        assert [i.filename for i in proposed] == ["proposed/部署端口冲突处理.md"]
+
+    async def test_propose_slug_conflict_appends_sequence(self, env, db_session) -> None:
+        writer = KnowledgeWriterService(db_session)
+        first = await writer.propose_manual(env.ws.id, env.user, title="端口规范", body="一")
+        second = await writer.propose_manual(env.ws.id, env.user, title="端口规范", body="二")
+        third = await writer.propose_manual(env.ws.id, env.user, title="端口规范", body="三")
+
+        assert first.filename == "proposed/端口规范.md"
+        assert second.filename == "proposed/端口规范-2.md"
+        assert third.filename == "proposed/端口规范-3.md"
+        # 第二份不是覆盖第一份
+        second_entry = await KnowledgeService(db_session).get_knowledge(
+            env.ws.id, "proposed/端口规范-2.md"
+        )
+        assert "二" in (second_entry.content or "")
+
+
+class TestUpdateEntry:
+    async def test_update_decisions_zone_rejected_422(self, env, db_session) -> None:
+        writer = KnowledgeWriterService(db_session)
+        with pytest.raises(KnowledgeEditForbidden) as ei:
+            await writer.update_entry(
+                env.ws.id,
+                env.user,
+                filename="decisions/daemon.md",
+                content="# Decision Daemon\n\n篡改。\n",
+            )
+        assert "由归档流程维护" in ei.value.message
+        assert ei.value.http_status == 422
+
+        # 原文未被改动
+        raw = (env.spec_root / "knowledge" / "decisions" / "daemon.md").read_text(encoding="utf-8")
+        assert raw == DECISION_MD
+
+    async def test_update_top_zone_roundtrip(self, env, db_session) -> None:
+        writer = KnowledgeWriterService(db_session)
+        updated = await writer.update_entry(
+            env.ws.id,
+            env.user,
+            filename="patterns.md",
+            content="# Patterns\n\n## 既有\n\n改写后的小节。\n",
+        )
+        assert updated.zone == "top"
+        assert "改写后的小节" in (updated.content or "")
+
+
+class TestMerge:
+    async def _propose(
+        self, db_session, env, *, title: str = "候选知识", body: str = "候选正文，待合并。"
+    ):
+        writer = KnowledgeWriterService(db_session)
+        return await writer.propose_manual(
+            env.ws.id, env.user, title=title, category="pattern", body=body
+        )
+
+    async def test_merge_stage1_conflict_keeps_candidate(
+        self, env, db_session, monkeypatch
+    ) -> None:
+        """段一 conflict → 409（details 含 conflict/server_versions）、候选保留未删、目标未追加。"""
+        await self._propose(db_session, env)
+
+        orig = KnowledgeWriterService._manifest_version
+
+        async def stale(self, workspace_id, op_path):
+            v = await orig(self, workspace_id, op_path)
+            return max(v - 1, 0)  # 模拟读版本后别处已改（base_version 过期）
+
+        monkeypatch.setattr(KnowledgeWriterService, "_manifest_version", stale)
+
+        writer = KnowledgeWriterService(db_session)
+        with pytest.raises(KnowledgeWriteConflict) as ei:
+            await writer.merge(
+                env.ws.id,
+                env.user,
+                filename="proposed/候选知识.md",
+                target_file="patterns.md",
+                section_title="新小节",
+                keywords=["关键词"],
+            )
+
+        assert ei.value.http_status == 409
+        assert ei.value.message == "文件在别处被修改，请刷新后重试"
+        assert ei.value.details["conflict"] is True
+        assert "server_versions" in ei.value.details
+        assert ei.value.details["server_versions"]  # 非空（含冲突路径当前版本）
+
+        monkeypatch.undo()
+
+        # 候选保留（两段式：段一失败不会走到段二 delete）
+        entry = await KnowledgeService(db_session).get_knowledge(env.ws.id, "proposed/候选知识.md")
+        assert "候选正文" in (entry.content or "")
+        # 目标 / INDEX 未被改动
+        assert (env.spec_root / "knowledge" / "patterns.md").read_text(
+            encoding="utf-8"
+        ) == PATTERNS_MD
+        assert (env.spec_root / "knowledge" / "INDEX.md").read_text(encoding="utf-8") == INDEX_MD
+
+    async def test_merge_success_appends_section_and_index_route(self, env, db_session) -> None:
+        await self._propose(db_session, env, title="端口守卫", body="合并正文：先查端口占用。")
+
+        writer = KnowledgeWriterService(db_session)
+        result = await writer.merge(
+            env.ws.id,
+            env.user,
+            filename="proposed/端口守卫.md",
+            target_file="patterns.md",
+            section_title="端口冲突处理",
+            keywords=["端口", "部署"],
+        )
+
+        assert result.merged is True
+        assert result.section_appended is True
+        assert result.index_updated is True
+
+        patterns = (env.spec_root / "knowledge" / "patterns.md").read_text(encoding="utf-8")
+        # 追加小节：既有字节不动 + 空行/## 标题/空行/正文 结构（CLI appendBlock 复刻）
+        assert patterns == (PATTERNS_MD + "\n## 端口冲突处理\n\n合并正文：先查端口占用。\n")
+
+        index = (env.spec_root / "knowledge" / "INDEX.md").read_text(encoding="utf-8")
+        route_line = "- 端口|部署 → [patterns.md#端口冲突处理](patterns.md#端口冲突处理)"
+        assert route_line in index
+        # 路由行落在 ## Patterns 分类段内（段内最后一个非空行后）
+        patterns_seg = index.split("## Patterns", 1)[1]
+        assert route_line in patterns_seg
+        assert index.count(route_line) == 1
+
+        # 段二：候选已删（读侧 404）
+        with pytest.raises(WorkspaceNotFound):
+            await KnowledgeService(db_session).get_knowledge(env.ws.id, "proposed/端口守卫.md")
+
+    async def test_merge_retry_after_stage1_applied_is_idempotent(self, env, db_session) -> None:
+        """dupRe 幂等守卫：段 1 已生效（候选残留）后重试，不重复追加小节与路由行。"""
+        await self._propose(db_session, env, title="幂等候选", body="只应出现一次的正文。")
+        writer = KnowledgeWriterService(db_session)
+        await writer.merge(
+            env.ws.id,
+            env.user,
+            filename="proposed/幂等候选.md",
+            target_file="known-issues.md",
+            section_title="幂等小节",
+            keywords=["幂等"],
+        )
+
+        # 模拟「段二失败候选残留」：候选文件复活（同内容重新落盘，走 apply_ops 通道）
+        candidate_op = "knowledge/proposed/幂等候选.md"
+        row = await _manifest_row(db_session, env.ws.id, candidate_op)
+        assert row is not None
+        content = (
+            "---\n"
+            "author: 张三\n"
+            "proposed_at: 2026-09-17T00:00:00+00:00\n"
+            "category: pattern\n"
+            "source: manual\n"
+            "---\n"
+            "\n"
+            "# 幂等候选\n"
+            "\n"
+            "只应出现一次的正文。\n"
+        )
+        await SpecWorkspaceService(db_session).apply_ops(
+            env.ws.id,
+            [
+                FileOp(
+                    op="add",
+                    path=candidate_op,
+                    content=_b64(content),
+                    base_version=row.version,
+                )
+            ],
+        )
+
+        # 重试 merge：dupRe 守卫 → 不重复追加，仅完成段二删除
+        result = await writer.merge(
+            env.ws.id,
+            env.user,
+            filename="proposed/幂等候选.md",
+            target_file="known-issues.md",
+            section_title="幂等小节",
+            keywords=["幂等"],
+        )
+        assert result.merged is True
+        assert result.section_appended is False
+        assert result.index_updated is False
+
+        known = (env.spec_root / "knowledge" / "known-issues.md").read_text(encoding="utf-8")
+        assert known.count("## 幂等小节") == 1
+        assert known.count("只应出现一次的正文") == 1
+
+        index = (env.spec_root / "knowledge" / "INDEX.md").read_text(encoding="utf-8")
+        assert index.count("- 幂等 → [known-issues.md#幂等小节](known-issues.md#幂等小节)") == 1
+
+        with pytest.raises(WorkspaceNotFound):
+            await KnowledgeService(db_session).get_knowledge(env.ws.id, "proposed/幂等候选.md")
+
+    async def test_merge_target_outside_whitelist_rejected_422(self, env, db_session) -> None:
+        await self._propose(db_session, env)
+        writer = KnowledgeWriterService(db_session)
+        for target in ("INDEX.md", "uncategorized.md", "decisions/daemon.md", "manual/guide.md"):
+            with pytest.raises(KnowledgeMergeTargetNotAllowed):
+                await writer.preview_merge(
+                    env.ws.id,
+                    filename="proposed/候选知识.md",
+                    target_file=target,
+                    section_title="小节",
+                    keywords=["关键词"],
+                )
+            with pytest.raises(KnowledgeMergeTargetNotAllowed):
+                await writer.merge(
+                    env.ws.id,
+                    env.user,
+                    filename="proposed/候选知识.md",
+                    target_file=target,
+                    section_title="小节",
+                    keywords=["关键词"],
+                )
+
+    async def test_merge_source_not_proposed_zone_rejected_422(self, env, db_session) -> None:
+        writer = KnowledgeWriterService(db_session)
+        with pytest.raises(KnowledgeZoneNotAllowed):
+            await writer.merge(
+                env.ws.id,
+                env.user,
+                filename="patterns.md",
+                target_file="known-issues.md",
+                section_title="小节",
+                keywords=["关键词"],
+            )
+
+    async def test_preview_merge_dry_run_shape(self, env, db_session) -> None:
+        await self._propose(db_session, env, title="预览候选", body="预览正文。")
+        writer = KnowledgeWriterService(db_session)
+        preview = await writer.preview_merge(
+            env.ws.id,
+            filename="proposed/预览候选.md",
+            target_file="patterns.md",
+            section_title="预览小节",
+            keywords=["预览", "关键词"],
+        )
+        # 段落文本（将追加块）+ 路由行（逐字 CLI 格式），不落盘
+        assert preview.section_text == "\n## 预览小节\n\n预览正文。\n"
+        assert preview.index_line == (
+            "- 预览|关键词 → [patterns.md#预览小节](patterns.md#预览小节)"
+        )
+        assert preview.section_skipped is False
+        assert preview.index_line_skipped is False
+        assert (env.spec_root / "knowledge" / "patterns.md").read_text(
+            encoding="utf-8"
+        ) == PATTERNS_MD
+
+
+class TestReject:
+    async def test_reject_deletes_candidate(self, env, db_session) -> None:
+        writer = KnowledgeWriterService(db_session)
+        entry = await writer.propose_manual(env.ws.id, env.user, title="待拒绝", body="内容")
+        assert entry.zone == "proposed"
+
+        await writer.reject(env.ws.id, env.user, filename="proposed/待拒绝.md")
+
+        with pytest.raises(WorkspaceNotFound):
+            await KnowledgeService(db_session).get_knowledge(env.ws.id, "proposed/待拒绝.md")
+        assert not (env.spec_root / "knowledge" / "proposed" / "待拒绝.md").exists()
+
+    async def test_reject_non_proposed_zone_rejected_422(self, env, db_session) -> None:
+        writer = KnowledgeWriterService(db_session)
+        with pytest.raises(KnowledgeZoneNotAllowed):
+            await writer.reject(env.ws.id, env.user, filename="patterns.md")

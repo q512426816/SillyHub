@@ -45,6 +45,12 @@ core.auth_deps 承接；平台同步 `shpsync_`（platform_sync）与 MCP token�
   `has_permission` / `list_user_workspace_roles` / `allowed_workspace_ids`——
   供 core.permission_cache 与各模块（file 等）复用的权限集合查询层。
 - `permissions.py`：`PermissionGroup` + `Permission`（StrEnum，~73 个权限点）。
+- `KNOWLEDGE_WRITE = "knowledge:write"`（2026-09-17-knowledge-precipitation task-02 / R-06）：
+  knowledge 前缀命中既有 group 分支自动归 **WORKSPACE 组**；migration
+  `20260917104400_add_knowledge_write_permission`（down_revision=20260914100000 单头）
+  按 `roles.key` SELECT 给存量 `platform_admin` / `workspace_owner` 幂等补授
+  （先判存再 INSERT，不 import app.*——字面量与枚举一致性由
+  tests/modules/auth/test_permissions.py 断言对齐；不调 Redis，对齐 202607251600 范式）。
 - bootstrap：`bootstrap_admin_and_seed_rbac` / `seed_platform_admin_role`
   启动期建管理员与 RBAC 种子（main.py lifespan 调用）。
 - 模型：users / sessions（含 rotate 轮换字段）/ roles / role_permissions /

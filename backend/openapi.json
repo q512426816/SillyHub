@@ -19508,12 +19508,404 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/knowledge/propose": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Propose Knowledge",
+        "description": "手工录入知识候选（落 knowledge/proposed/<slug>.md）。",
+        "operationId": "propose_knowledge_api_workspaces__workspace_id__knowledge_propose_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeProposeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeEntry"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/knowledge/entries/{filename}": {
+      "patch": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Update Knowledge Entry",
+        "description": "编辑知识条目正文（decisions zone 由归档流程维护，返回 422）。",
+        "operationId": "update_knowledge_entry_api_workspaces__workspace_id__knowledge_entries__filename__patch",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeEntry"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/knowledge/proposed/{filename}/preview-merge": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Preview Merge Knowledge",
+        "description": "合并预览（dry-run 不落盘）：将追加的段落文本与 INDEX 路由行。",
+        "operationId": "preview_merge_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__preview_merge_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeMergeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MergePreviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/knowledge/proposed/{filename}/merge": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Merge Knowledge",
+        "description": "执行两段式合并（段一 updates 无冲突才段二删候选）。",
+        "operationId": "merge_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__merge_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeMergeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMergeResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/knowledge/proposed/{filename}/reject": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Reject Knowledge",
+        "description": "拒绝候选（单段 delete，入 spec-backups 备份区）。",
+        "operationId": "reject_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__reject_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/knowledge/distill": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Dispatch Distill",
+        "description": "派发蒸馏任务（源校验 + 创建 knowledge-distill 类 AgentRun，后台派发）。",
+        "operationId": "dispatch_distill_api_workspaces__workspace_id__knowledge_distill_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DistillDispatchIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DistillTaskRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/knowledge/distill/tasks": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "List Distill Tasks",
+        "description": "该工作区的蒸馏任务列表（按 created_at 倒序，仅 knowledge-distill 类）。",
+        "operationId": "list_distill_tasks_api_workspaces__workspace_id__knowledge_distill_tasks_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DistillTaskRead"
+                  },
+                  "title": "Response List Distill Tasks Api Workspaces  Workspace Id  Knowledge Distill Tasks Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/knowledge/{filename}": {
       "get": {
         "tags": [
           "knowledge"
         ],
         "summary": "Get Knowledge",
+        "description": "单条读取。\n\ntask-04（task-01 遗留的跨目录 get HTTP 化）：``{filename}`` 改 ``:path``\n通配——filename 已扩展为含子目录段（如 ``decisions/daemon.md``），单段参数\n无法命中斜杠路径。前端编码按段 ``encodeURIComponent`` 拼 ``/``。",
         "operationId": "get_knowledge_api_workspaces__workspace_id__knowledge__filename__get",
         "parameters": [
           {
@@ -41708,6 +42100,79 @@
         "title": "DispatchWorkerRequest",
         "description": "主 agent 派 worker 的请求体（D-002@v2）。\n\n字段对齐 worker_preset 单条结构（{agent_type, model, objective, role}），\n主 agent 可在 mission 启动时的 preset 之外动态补派（如发现新子任务）。"
       },
+      "DistillDispatchIn": {
+        "properties": {
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "session",
+              "change"
+            ],
+            "title": "Source Type"
+          },
+          "source_ref": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Source Ref"
+          },
+          "focus": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Focus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_type",
+          "source_ref"
+        ],
+        "title": "DistillDispatchIn",
+        "description": "POST /knowledge/distill 请求体（派发蒸馏任务）。\n\n``source_ref``：会话源为 session_id（UUID 字符串）；变更源为 change_key。"
+      },
+      "DistillTaskRead": {
+        "properties": {
+          "agent_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Agent Run Id"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type"
+          },
+          "source_ref": {
+            "type": "string",
+            "title": "Source Ref"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_run_id",
+          "source_type",
+          "source_ref",
+          "status",
+          "created_at"
+        ],
+        "title": "DistillTaskRead",
+        "description": "蒸馏任务条（AgentRun 与 metadata_ 投影；dispatch 响应复用同形状）。"
+      },
       "DocumentsSyncOk": {
         "properties": {
           "synced": {
@@ -46340,6 +46805,10 @@
       },
       "KnowledgeEntry": {
         "properties": {
+          "zone": {
+            "type": "string",
+            "title": "Zone"
+          },
           "filename": {
             "type": "string",
             "title": "Filename"
@@ -46385,6 +46854,7 @@
         },
         "type": "object",
         "required": [
+          "zone",
           "filename",
           "path"
         ],
@@ -46411,6 +46881,125 @@
           "total"
         ],
         "title": "KnowledgeList"
+      },
+      "KnowledgeMergeIn": {
+        "properties": {
+          "target_file": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Target File"
+          },
+          "section_title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Section Title"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Keywords"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target_file",
+          "section_title",
+          "keywords"
+        ],
+        "title": "KnowledgeMergeIn",
+        "description": "合并请求体（preview-merge / merge 共用）。\n\n``target_file`` 限定三类 INDEX 映射文件（known-issues.md / patterns.md /\nconventions.md，D-007@v1）；``keywords`` 由审核人在表单人工填写（不做自动\n派生，design 约束），用于生成 INDEX.md 路由行 ``- 关键词|关键词 → [标题](…)``。"
+      },
+      "KnowledgeMergeResult": {
+        "properties": {
+          "merged": {
+            "type": "boolean",
+            "title": "Merged"
+          },
+          "target_file": {
+            "type": "string",
+            "title": "Target File"
+          },
+          "section_title": {
+            "type": "string",
+            "title": "Section Title"
+          },
+          "index_line": {
+            "type": "string",
+            "title": "Index Line"
+          },
+          "section_appended": {
+            "type": "boolean",
+            "title": "Section Appended"
+          },
+          "index_updated": {
+            "type": "boolean",
+            "title": "Index Updated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "merged",
+          "target_file",
+          "section_title",
+          "index_line",
+          "section_appended",
+          "index_updated"
+        ],
+        "title": "KnowledgeMergeResult",
+        "description": "merge 执行结果（两段式合并终态）。"
+      },
+      "KnowledgeProposeIn": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Category",
+            "default": "uncategorized"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body",
+            "default": ""
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "KnowledgeProposeIn",
+        "description": "POST /knowledge/propose 请求体（手工录入候选）。"
+      },
+      "KnowledgeUpdateIn": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "KnowledgeUpdateIn",
+        "description": "PATCH /knowledge/entries/{filename} 请求体（整文件正文替换）。"
       },
       "LeaseClaimRequest": {
         "properties": {
@@ -49135,6 +49724,35 @@
         ],
         "title": "MemberBindingView"
       },
+      "MergePreviewOut": {
+        "properties": {
+          "section_text": {
+            "type": "string",
+            "title": "Section Text"
+          },
+          "index_line": {
+            "type": "string",
+            "title": "Index Line"
+          },
+          "section_skipped": {
+            "type": "boolean",
+            "title": "Section Skipped",
+            "default": false
+          },
+          "index_line_skipped": {
+            "type": "boolean",
+            "title": "Index Line Skipped",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "section_text",
+          "index_line"
+        ],
+        "title": "MergePreviewOut",
+        "description": "合并预览（dry-run，不落盘）：将追加的段落文本与 INDEX 路由行。\n\n``section_skipped`` / ``index_line_skipped``：dupRe 幂等守卫命中（目标已含\n同名 ``##`` 小节 / INDEX 已含同锚点路由行）时对应动作将被跳过。"
+      },
       "MissionArtifactResponse": {
         "properties": {
           "id": {
@@ -50666,6 +51284,7 @@
           "scan-docs:read",
           "runtime:read",
           "knowledge:read",
+          "knowledge:write",
           "incident:read",
           "change:create",
           "change:read",

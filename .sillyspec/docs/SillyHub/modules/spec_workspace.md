@@ -94,6 +94,13 @@ delete = move 到 spec-backups/{ws}/{ts}/{path} + exists=False（30 天机会式
 - 冲突语义：base_version 过期且 hash 不同 → 该 op 跳过不落盘、
   整体返回 conflict=True + server_versions；同 hash no-op 豁免（D-008@v2）让
   第二成员 init 骨架文件静默对齐，旧 daemon 不传 hash 行为不变（仍 conflict）
+- knowledge writer 成为 apply_ops **新调用方**（2026-09-17-knowledge-precipitation /
+  D-005@v1）：`KnowledgeWriterService`（backend/app/modules/knowledge/writer.py）
+  作为**服务端平台直写**调用方加入——手工录入 / 条目编辑 / 审核合并 / 拒绝全部
+  构造 FileOp（path 限 `knowledge/` 前缀）走 apply_ops 落盘。**D-011 单写者语义
+  不变**：manifest 行版本乐观锁 / spec_version bump / delete 入备份区 / 冲突
+  conflict 字段全部照旧；apply_ops 入参契约零改动（merge 两段式 = 两次独立调用
+  依赖「段一无 conflict 才发段二」由 writer 侧保证，非 apply_ops 新语义）。
 - 预校验先验后解：任一 op 越界整体 422，不留半落盘状态
 - local.yaml 属服务器排除项：写 op 静默丢弃且不进 new_versions / 不置 conflict，
   生产者幂等重推无副作用（ql-20260818-002）

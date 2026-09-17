@@ -93,7 +93,10 @@ class KnowledgeService:
 
     @staticmethod
     def _to_knowledge_entry(e: ParsedEntry, *, include_content: bool) -> KnowledgeEntry:
+        # task-01（2026-09-17-knowledge-precipitation）：透传 zone；get_knowledge 按
+        # filename（含子目录段后值天然唯一）精确匹配，消除跨 zone 同名歧义。
         return KnowledgeEntry(
+            zone=e.zone,
             filename=e.filename,
             path=e.path,
             title=e.title,

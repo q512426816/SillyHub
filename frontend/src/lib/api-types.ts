@@ -7403,6 +7403,146 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/knowledge/propose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Knowledge
+         * @description 手工录入知识候选（落 knowledge/proposed/<slug>.md）。
+         */
+        post: operations["propose_knowledge_api_workspaces__workspace_id__knowledge_propose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/entries/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Knowledge Entry
+         * @description 编辑知识条目正文（decisions zone 由归档流程维护，返回 422）。
+         */
+        patch: operations["update_knowledge_entry_api_workspaces__workspace_id__knowledge_entries__filename__patch"];
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/proposed/{filename}/preview-merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Merge Knowledge
+         * @description 合并预览（dry-run 不落盘）：将追加的段落文本与 INDEX 路由行。
+         */
+        post: operations["preview_merge_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__preview_merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/proposed/{filename}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merge Knowledge
+         * @description 执行两段式合并（段一 updates 无冲突才段二删候选）。
+         */
+        post: operations["merge_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/proposed/{filename}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Knowledge
+         * @description 拒绝候选（单段 delete，入 spec-backups 备份区）。
+         */
+        post: operations["reject_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/distill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispatch Distill
+         * @description 派发蒸馏任务（源校验 + 创建 knowledge-distill 类 AgentRun，后台派发）。
+         */
+        post: operations["dispatch_distill_api_workspaces__workspace_id__knowledge_distill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/distill/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Distill Tasks
+         * @description 该工作区的蒸馏任务列表（按 created_at 倒序，仅 knowledge-distill 类）。
+         */
+        get: operations["list_distill_tasks_api_workspaces__workspace_id__knowledge_distill_tasks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/knowledge/{filename}": {
         parameters: {
             query?: never;
@@ -7410,7 +7550,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Knowledge */
+        /**
+         * Get Knowledge
+         * @description 单条读取。
+         *
+         *     task-04（task-01 遗留的跨目录 get HTTP 化）：``{filename}`` 改 ``:path``
+         *     通配——filename 已扩展为含子目录段（如 ``decisions/daemon.md``），单段参数
+         *     无法命中斜杠路径。前端编码按段 ``encodeURIComponent`` 拼 ``/``。
+         */
         get: operations["get_knowledge_api_workspaces__workspace_id__knowledge__filename__get"];
         put?: never;
         post?: never;
@@ -14485,6 +14632,45 @@ export interface components {
             target_workspace_id?: string | null;
         };
         /**
+         * DistillDispatchIn
+         * @description POST /knowledge/distill 请求体（派发蒸馏任务）。
+         *
+         *     ``source_ref``：会话源为 session_id（UUID 字符串）；变更源为 change_key。
+         */
+        DistillDispatchIn: {
+            /**
+             * Source Type
+             * @enum {string}
+             */
+            source_type: "session" | "change";
+            /** Source Ref */
+            source_ref: string;
+            /** Focus */
+            focus?: string | null;
+        };
+        /**
+         * DistillTaskRead
+         * @description 蒸馏任务条（AgentRun 与 metadata_ 投影；dispatch 响应复用同形状）。
+         */
+        DistillTaskRead: {
+            /**
+             * Agent Run Id
+             * Format: uuid
+             */
+            agent_run_id: string;
+            /** Source Type */
+            source_type: string;
+            /** Source Ref */
+            source_ref: string;
+            /** Status */
+            status: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
          * DocumentsSyncOk
          * @description POST documents 200 响应（CLI 不读 body，任意 2xx 即可，synced 供人工核对）。
          */
@@ -16527,6 +16713,8 @@ export interface components {
          * @description A single knowledge file entry.
          */
         KnowledgeEntry: {
+            /** Zone */
+            zone: string;
             /** Filename */
             filename: string;
             /** Path */
@@ -16544,6 +16732,68 @@ export interface components {
             items: components["schemas"]["KnowledgeEntry"][];
             /** Total */
             total: number;
+        };
+        /**
+         * KnowledgeMergeIn
+         * @description 合并请求体（preview-merge / merge 共用）。
+         *
+         *     ``target_file`` 限定三类 INDEX 映射文件（known-issues.md / patterns.md /
+         *     conventions.md，D-007@v1）；``keywords`` 由审核人在表单人工填写（不做自动
+         *     派生，design 约束），用于生成 INDEX.md 路由行 ``- 关键词|关键词 → [标题](…)``。
+         */
+        KnowledgeMergeIn: {
+            /** Target File */
+            target_file: string;
+            /** Section Title */
+            section_title: string;
+            /** Keywords */
+            keywords: string[];
+        };
+        /**
+         * KnowledgeMergeResult
+         * @description merge 执行结果（两段式合并终态）。
+         */
+        KnowledgeMergeResult: {
+            /** Merged */
+            merged: boolean;
+            /** Target File */
+            target_file: string;
+            /** Section Title */
+            section_title: string;
+            /** Index Line */
+            index_line: string;
+            /** Section Appended */
+            section_appended: boolean;
+            /** Index Updated */
+            index_updated: boolean;
+        };
+        /**
+         * KnowledgeProposeIn
+         * @description POST /knowledge/propose 请求体（手工录入候选）。
+         */
+        KnowledgeProposeIn: {
+            /** Title */
+            title: string;
+            /**
+             * Category
+             * @default uncategorized
+             */
+            category: string;
+            /**
+             * Body
+             * @default
+             */
+            body: string;
+            /** Tags */
+            tags?: string[];
+        };
+        /**
+         * KnowledgeUpdateIn
+         * @description PATCH /knowledge/entries/{filename} 请求体（整文件正文替换）。
+         */
+        KnowledgeUpdateIn: {
+            /** Content */
+            content: string;
         };
         /**
          * LeaseClaimRequest
@@ -17780,6 +18030,29 @@ export interface components {
             /** Init Synced Spec Version */
             init_synced_spec_version: number | null;
         };
+        /**
+         * MergePreviewOut
+         * @description 合并预览（dry-run，不落盘）：将追加的段落文本与 INDEX 路由行。
+         *
+         *     ``section_skipped`` / ``index_line_skipped``：dupRe 幂等守卫命中（目标已含
+         *     同名 ``##`` 小节 / INDEX 已含同锚点路由行）时对应动作将被跳过。
+         */
+        MergePreviewOut: {
+            /** Section Text */
+            section_text: string;
+            /** Index Line */
+            index_line: string;
+            /**
+             * Section Skipped
+             * @default false
+             */
+            section_skipped: boolean;
+            /**
+             * Index Line Skipped
+             * @default false
+             */
+            index_line_skipped: boolean;
+        };
         /** MissionArtifactResponse */
         MissionArtifactResponse: {
             /**
@@ -18514,7 +18787,7 @@ export interface components {
          * Permission
          * @enum {string}
          */
-        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "daemon:borrow" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view";
+        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "daemon:borrow" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view";
         /**
          * PermissionResponseRead
          * @description REST response body for POST /sessions/{id}/permissions/{req}/response.
@@ -38385,6 +38658,245 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    propose_knowledge_api_workspaces__workspace_id__knowledge_propose_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeProposeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_knowledge_entry_api_workspaces__workspace_id__knowledge_entries__filename__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_merge_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__preview_merge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeMergeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergePreviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__merge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeMergeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeMergeResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dispatch_distill_api_workspaces__workspace_id__knowledge_distill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DistillDispatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DistillTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_distill_tasks_api_workspaces__workspace_id__knowledge_distill_tasks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DistillTaskRead"][];
                 };
             };
             /** @description Validation Error */

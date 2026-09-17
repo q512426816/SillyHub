@@ -66,6 +66,10 @@ class Permission(StrEnum):
     SCAN_DOCS_READ = "scan-docs:read"
     RUNTIME_READ = "runtime:read"
     KNOWLEDGE_READ = "knowledge:read"
+    # change 2026-09-17-knowledge-precipitation task-02 / FR-02 / D-005@v1：
+    # 知识库写权限（写端点 require_permission 门控归 task-04，前端权限驱动
+    # 写按钮归 task-05）。knowledge 前缀命中既有 group 分支自动归 WORKSPACE 组。
+    KNOWLEDGE_WRITE = "knowledge:write"
     INCIDENT_READ = "incident:read"
 
     # ── Change ──────────────────────────────────────────────
