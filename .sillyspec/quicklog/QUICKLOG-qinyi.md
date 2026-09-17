@@ -225,3 +225,14 @@
 方案：①handleLoadEarlier 对空页提前关闸（游标二元组置空+hasEarlier false+锚点作废，对齐初始加载写法）；②锚 effect 补 cleanup（rAF 双帧/watch interval/30s 硬上限/anchorPinRef 全清）；③新增 lastEventRef 只计真实事件+300s 安静门（对账双门：90s 无任何信号判死连接/300s 无真实事件兜底丢终态），心跳只重置活动时间与 stalledHint，停表后新真实事件经 watchdogRearmRef 重启计时链，注释与 hook 文档同步修正
 结果：新增回归 5 用例（scroll 2+connection 3）先红后绿验证（patch 对照修复前全失败）；两测试文件 24/24 绿，相邻面 history-race/dialog/pre-session/ctx-tokens 101 用例绿，tsc 0 错误，eslint 0 错误（12 警告既有）
 审计：[gate] L1（跨 0 模块 · 6 文件：2 代码/2 测试）advisory；每文件注记已全覆盖；测试增量已含
+
+## ql-20260917-002-a5c0 | 2026-09-17 09:10:24 | 手机端群聊页样式优化（用户截图四问题）。根因：grid 隐式行 auto 高度不受 min-h-0 flex-1 约束致长时间线整列溢出（输入区出视口、消息穿…
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/group-chat/group-chat-panel.tsx（grid-rows minmax(0,1fr) 锁行高治溢出 + 顶栏 flex-1 标题块/窄屏短摘要/群id钮 md 起显 + self 头像顶对齐）
+- frontend/src/components/ui/markdown-text.tsx（hr 锁 1px 主题色细线（compact/reading 两档））
+需求：手机端群聊页样式优化（用户截图四问题）。
+根因：grid 隐式行 auto 高度不受 min-h-0 flex-1 约束致长时间线整列溢出（输入区出视口、消息穿 TabBar）；顶栏固定宽元素 390px 挤爆标题块至 0 宽逐字竖排；self 行 items-end 头像吊右下；markdown hr 库 light 变量反超成亮白粗条。
+方案：根 grid 加 grid-rows-[minmax(0,1fr)]；标题块 flex-1+去 spacer+窄屏短摘要+群id钮 md 起显+gap 收紧；self 头像 self-start；MarkdownText 两档补 hr 锁 1px bg-border。
+结果：tsc 0，group-chat 123+markdown-text 13 用例全绿，eslint 0 error（5 warning 既有），已暂存待提交部署

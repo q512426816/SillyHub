@@ -1,0 +1,119 @@
+diff --git a/frontend/src/components/group-chat/group-chat-panel.tsx b/frontend/src/components/group-chat/group-chat-panel.tsx
+index 75b154f73..45e76e57d 100644
+--- a/frontend/src/components/group-chat/group-chat-panel.tsx
++++ b/frontend/src/components/group-chat/group-chat-panel.tsx
+@@ -2286,7 +2286,11 @@ export function GroupChatPanel({
+       className={cn(
+         /* 手机端群聊 quick（2026-09-02）：窄屏（<768px）单列——右列成员面板
+          * 不再常驻挤掉对话区，改顶栏「成员」按钮开 Drawer；宽屏维持双列。 */
+-        "grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_320px] gap-3.5",
++        /* ql-20260917-xxx：grid-rows minmax(0,1fr) 锁行高——隐式 auto 行会被
++         * 时间线内容撑高（grid 条目 min-height:auto 地板），整列溢出 group view：
++         * 输入区被顶出视口、消息从底部悬浮 TabBar 后穿过（手机端实测截图）。
++         * 行高锁死后条目贴行高，时间线 overflow-y-auto 在列内自滚。 */
++        "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] md:grid-cols-[minmax(0,1fr)_320px] gap-3.5",
+         className,
+       )}
+     >
+@@ -2301,24 +2305,34 @@ export function GroupChatPanel({
+         {/* 顶栏：群名 + 成员摘要 + facepile（原型 .chat-head）。
+             ql-20260911-030：玻璃头对齐会话 PANEL_HEADER_CLS（bg-card/60 半透
+             + blur，边框降透明 /60）；z-20 抬层防消息流盖头部内浮层。 */}
+-        <header className="relative z-20 flex flex-none items-center gap-3 border-b border-border/60 bg-card/60 px-4 py-2.5 backdrop-blur-md">
++        <header className="relative z-20 flex flex-none items-center gap-2 border-b border-border/60 bg-card/60 px-3 py-2.5 backdrop-blur-md md:gap-3 md:px-4">
+           <span
+             aria-hidden
+             className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px] bg-gradient-to-br from-brand-600 to-info text-xs font-bold text-white shadow-primary"
+           >
+             群
+           </span>
+-          <div className="min-w-0">
++          {/* ql-20260917-xxx：标题块 flex-1 接管弹性空间（原 spacer + 固定宽兄弟
++              元素在 390px 挤到 0 宽，群名/成员摘要逐字竖排）；窄屏摘要只留
++              「N 名成员」，Agent/用户计数 sm 起屏再显。 */}
++          <div className="min-w-0 flex-1">
+             <h3 className="truncate text-[15px] font-semibold text-foreground">
+               {group?.title?.trim() || detail?.title?.trim() || "群聊"}
+             </h3>
+-            <p className="text-xs text-muted-foreground">
+-              {members.length > 0
+-                ? `${members.length} 名成员 · ${agentCount} 位 Agent · ${userCount} 位用户`
+-                : "成员加载中…"}
++            <p className="truncate text-xs text-muted-foreground">
++              {members.length > 0 ? (
++                <>
++                  {members.length} 名成员
++                  <span className="hidden sm:inline">
++                    {" "}
++                    · {agentCount} 位 Agent · {userCount} 位用户
++                  </span>
++                </>
++              ) : (
++                "成员加载中…"
++              )}
+             </p>
+           </div>
+-          <div className="flex-1" />
+           {/* facepile 头像堆叠（+N 溢出；avatar 有值→图片，无值 agent 分色/
+               用户 muted 首字，原型 .facepile；运行成员右下小绿点呼吸动画——
+               群聊运行态可见 quick 2026-09-02）。 */}
+@@ -2366,7 +2380,9 @@ export function GroupChatPanel({
+           </div>
+           {/* quick-fdd8219a：会话工具栏要素对齐——#群id 短码复制（session-panel
+               :3458 惯例）+ 群内搜索（后端 logs q 参数，回车全量查 100 条命中，
+-              <mark> 高亮，清除恢复；照 session-panel 搜索浮层形态）。 */}
++              <mark> 高亮，清除恢复；照 session-panel 搜索浮层形态）。
++              ql-20260917-xxx：#群id 短码钮窄屏隐藏（390px 顶栏固定宽预算不够，
++              挤压标题块；群 id 可从成员抽屉获取，桌面保持直显）。 */}
+           <button
+             type="button"
+             aria-label="复制群聊 ID"
+@@ -2380,7 +2396,7 @@ export function GroupChatPanel({
+                   /* 剪贴板不可用静默（http 环境） */
+                 });
+             }}
+-            className="flex-none rounded-md border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++            className="hidden flex-none rounded-md border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:inline-flex"
+           >
+             #{groupId.slice(0, 8)}
+           </button>
+@@ -3250,13 +3266,15 @@ function GroupTimelineRowInner({
+           </div>
+           {/* 2026-09-09-sessions-visual-refresh task-10（D-006@v2）：共享头像构件
+               （自定义图片保留 avatar 入参优先；无图首字回退，isSelf 沿用 brand 底
+-              区分自己 vs 他人）。 */}
++              区分自己 vs 他人）。ql-20260917-xxx：self-start 顶对齐（原随行
++              items-end 吊在气泡右下角，长气泡时视觉脱节；对齐他人行 items-start
++              的 IM 头像惯例）。 */}
+           <ChatMessageAvatar
+             kind="user"
+             name={entry.senderName}
+             avatar={avatar}
+             size={28}
+-            className={cn(entry.isSelf && "bg-brand-600! text-white!")}
++            className={cn("self-start", entry.isSelf && "bg-brand-600! text-white!")}
+             title={entry.senderName}
+           />
+         </div>
+diff --git a/frontend/src/components/ui/markdown-text.tsx b/frontend/src/components/ui/markdown-text.tsx
+index 55fc4594a..3819a7e72 100644
+--- a/frontend/src/components/ui/markdown-text.tsx
++++ b/frontend/src/components/ui/markdown-text.tsx
+@@ -123,6 +123,9 @@ const COMPACT_CLASS = cn(
+   "[&_.wmde-markdown_pre_code]:!bg-transparent [&_.wmde-markdown_pre_code]:!p-0 [&_.wmde-markdown_pre_code]:!text-xs",
+   // 行内 code 衬浅底小胶囊（pre 内 code 由上方 pre_code 规则压回透明/零边距，特异度更高不冲突）
+   "[&_.wmde-markdown_code]:!font-mono [&_.wmde-markdown_code]:!text-[11px] [&_.wmde-markdown_code]:!rounded [&_.wmde-markdown_code]:!bg-muted/70 [&_.wmde-markdown_code]:!px-1 [&_.wmde-markdown_code]:!py-0.5",
++  // ql-20260917-xxx：hr 锁 1px 主题色细线——库默认 hr 走 --color-border-default，
++  // 系统浅色用户暗主题下变量被库 light 值反超，气泡里渲染成亮白粗条（群聊实测截图）
++  "[&_.wmde-markdown_hr]:!my-2 [&_.wmde-markdown_hr]:!h-px [&_.wmde-markdown_hr]:!border-0 [&_.wmde-markdown_hr]:!bg-border",
+   "[&_a]:!text-primary [&_a]:!underline [&_a]:!underline-offset-2",
+ );
+ 
+@@ -144,6 +147,7 @@ const READING_CLASS = cn(
+   "[&_.wmde-markdown_pre]:!my-3 [&_.wmde-markdown_pre]:!overflow-x-auto [&_.wmde-markdown_pre]:!rounded-lg [&_.wmde-markdown_pre]:!px-3.5 [&_.wmde-markdown_pre]:!py-3",
+   "[&_.wmde-markdown_pre_code]:!bg-transparent [&_.wmde-markdown_pre_code]:!p-0 [&_.wmde-markdown_pre_code]:!text-xs",
+   "[&_.wmde-markdown_code]:!font-mono [&_.wmde-markdown_code]:!text-xs [&_.wmde-markdown_code]:!rounded [&_.wmde-markdown_code]:!bg-muted/70 [&_.wmde-markdown_code]:!px-1 [&_.wmde-markdown_code]:!py-0.5",
++  "[&_.wmde-markdown_hr]:!my-3 [&_.wmde-markdown_hr]:!h-px [&_.wmde-markdown_hr]:!border-0 [&_.wmde-markdown_hr]:!bg-border",
+   "[&_a]:!text-primary [&_a]:!underline [&_a]:!underline-offset-2",
+ );
+ 

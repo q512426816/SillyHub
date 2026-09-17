@@ -1,0 +1,55 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-b5f2ab98",
+  "totals": {
+    "files": 2,
+    "additions": 34,
+    "deletions": 12
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+      "declared": true,
+      "additions": 30,
+      "deletions": 12,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/ui/markdown-text.tsx",
+      "declared": true,
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 2,
+    "codeFileCount": 2,
+    "testFileCount": 0,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "missing",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260917-002-a5c0",
+  "sessionId": "quick-b5f2ab98",
+  "savedAt": "2026-09-17T01:14:53.764Z",
+  "patchSha256": "a0f92fe2d7a0f7a29d8b4762c59eec9b7ffde0c8e01e4ec6b58052c1f9ef9848",
+  "patchStatus": "ok"
+}
