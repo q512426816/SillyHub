@@ -622,4 +622,24 @@ async def _close_finish(
                 dispatch_next_queued_message(agent_run.agent_session_id),
                 run_id=agent_run.id,
             )
+        # ql-20260917-008：忙轮暂存的思考档位同样在轮终态应用——与排队
+        # 派发并列的独立后台任务（无排队条目也可能有暂存档）。apply 内部
+        # 自查会话态/活跃轮，失败保留暂存等下一触发点。
+        session_pending_level = (
+            await svc._session.execute(
+                select(AgentSession.pending_thinking_level).where(
+                    AgentSession.id == agent_run.agent_session_id,
+                    AgentSession.pending_thinking_level.is_not(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if session_pending_level is not None:
+            from app.modules.daemon.session.service.thinking_level import (
+                apply_pending_thinking_level,
+            )
+
+            svc._fire_background_task(
+                apply_pending_thinking_level(agent_run.agent_session_id),
+                run_id=agent_run.id,
+            )
     return agent_run

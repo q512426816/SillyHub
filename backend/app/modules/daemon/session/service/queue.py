@@ -174,6 +174,55 @@ async def _handle_busy_turn(
             queued=True,
             queue_entry_id=existing_notification.id,
         )
+    # ql-20260917-008（会话执行中直接切换）：纯切换条目的**覆盖式合并**——
+    # 新请求是纯切换（空 prompt、无附件、带至少一个配置维度）且同发送者已有
+    # pending 的纯切换行（prompt="" 是静默切换行的唯一形态）→ 逐字段覆盖
+    # （新请求非 None 的 profile/provider/model 快照盖旧值，None 不动——
+    # 「最后一次为准」按维度独立生效：切供应商的伴生 model="" 重置与后续
+    # 单独切模型可组合），不新建行、position 不变。防连续切换排多条切换轮。
+    # 与任务通知 merge 同款行锁内查询 + 更新同事务原子。
+    is_pure_switch = (
+        not (prompt or "").strip()
+        and not attachment_ids
+        and (agent_profile_id is not None or llm_provider_id is not None or model is not None)
+    )
+    if is_pure_switch:
+        existing_switch = (
+            await svc._session.execute(
+                select(AgentSessionQueuedMessage).where(
+                    AgentSessionQueuedMessage.agent_session_id == session.id,
+                    AgentSessionQueuedMessage.status == "pending",
+                    AgentSessionQueuedMessage.prompt == "",
+                    AgentSessionQueuedMessage.sender_user_id
+                    == (queue_sender_user_id or run_sender_user_id or session.user_id),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_switch is not None:
+            if agent_profile_id is not None:
+                existing_switch.agent_profile_id = agent_profile_id
+            if llm_provider_id is not None:
+                existing_switch.llm_provider_id = llm_provider_id
+            if model is not None:
+                existing_switch.model = model
+            svc._session.add(existing_switch)
+            await svc._session.commit()
+            await svc._publish_session_event(
+                session.id,
+                {
+                    "event": "queue_changed",
+                    "session_id": str(session.id),
+                    "queue_entry_id": str(existing_switch.id),
+                    "action": "merged",
+                },
+            )
+            return SessionDispatchResult(
+                agent_session=session,
+                agent_run=None,
+                lease_id=None,
+                queued=True,
+                queue_entry_id=existing_switch.id,
+            )
     # 2026-08-31-session-queue-ux D-002（R-01）：入队序键 = 会话现有
     # 条目 MAX(position)+1（空队列首条=0）。查询在调用方
     # _get_owned_session_for_update 会话行锁内、与满员检查/merge
@@ -205,6 +254,9 @@ async def _handle_busy_turn(
         ),
         agent_profile_id=agent_profile_id,
         llm_provider_id=llm_provider_id,
+        # ql-20260917-008：切模型快照落列（此前缺口——忙轮切模型入队后丢失，
+        # 派发重放静默无效）。
+        model=model,
         # 2026-09-12：自动续跑转排队保留 origin（R-08——忙轮 INSERT 此前丢
         # origin，G10/幂等/徽标全断链）。
         origin=(make_auto_resume_origin(auto_resume_of) if auto_resume_of is not None else None),
@@ -729,6 +781,8 @@ async def dispatch_queued_messages(svc, session_id: uuid.UUID) -> None:
                 run_sender_user_id=entry.sender_user_id,
                 agent_profile_id=entry.agent_profile_id,
                 llm_provider_id=entry.llm_provider_id,
+                # ql-20260917-008：排队行的切模型快照重放（与入队快照成对）。
+                model=entry.model,
                 attachment_ids=attachment_ids,
                 attachment_owner_user_id=attachment_owner_user_id,
                 page_context=page_context,

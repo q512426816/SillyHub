@@ -228,10 +228,12 @@ class TestThinkingLevelGuards:
         hub.send_rpc.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_post_turn_running_409(
+    async def test_post_turn_running_queued_pending(
         self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
     ) -> None:
-        """POST 忙轮（首 run pending 即活跃轮，D-002「仅空闲」）→ 409 TurnConflict。"""
+        """ql-20260917-008：POST 忙轮不再 409——覆盖式暂存 pending_thinking_level，
+        返回 {ok:true, queued:true}，RPC 不派发（run 终态钩子 apply_pending_
+        thinking_level 负责应用）。"""
         hub = _hub()
         with patch(_WS_HUB_GETTER, return_value=hub):
             # finish_first=False：首轮保持 pending（活跃轮）。
@@ -239,13 +241,49 @@ class TestThinkingLevelGuards:
                 db_session, provider="claude", finish_first=False
             )
 
-        resp = await client.post(
-            f"/api/daemon/sessions/{sid}/thinking-level",
-            json={"level": "high"},
-            headers=auth_headers,
+            resp = await client.post(
+                f"/api/daemon/sessions/{sid}/thinking-level",
+                json={"level": "high"},
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["queued"] is True
+        hub.send_rpc.assert_not_awaited()
+        # 暂存覆盖式落列
+        row = (
+            (await db_session.execute(select(AgentSession).where(AgentSession.id == sid)))
+            .scalars()
+            .one()
         )
-        assert resp.status_code == 409, resp.text
-        assert resp.json()["code"] == "HTTP_409_DAEMON_SESSION_TURN_CONFLICT"
+        assert row.pending_thinking_level == "high"
+
+    @pytest.mark.asyncio
+    async def test_post_turn_running_overwrite_last_wins(
+        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """ql-20260917-008：忙轮连续切档覆盖式——最后一次为准（不排多条）。"""
+        hub = _hub()
+        with patch(_WS_HUB_GETTER, return_value=hub):
+            sid, _rt = await _seed_thinking_session(
+                db_session, provider="claude", finish_first=False
+            )
+            for level in ("low", "max"):
+                resp = await client.post(
+                    f"/api/daemon/sessions/{sid}/thinking-level",
+                    json={"level": level},
+                    headers=auth_headers,
+                )
+                assert resp.status_code == 200, resp.text
+
+        row = (
+            (await db_session.execute(select(AgentSession).where(AgentSession.id == sid)))
+            .scalars()
+            .one()
+        )
+        assert row.pending_thinking_level == "max"
         hub.send_rpc.assert_not_awaited()
 
     @pytest.mark.asyncio

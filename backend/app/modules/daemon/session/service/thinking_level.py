@@ -12,8 +12,10 @@ task-05 / FR-04 / FR-05）。
   引擎，task-01 @generated 表）。校验持锁完成、commit 释放行锁后再派发（照
   interrupt_session「先 commit 再发 WS」模式，RPC 最长 15s 不拖行锁）。
 - GET（FR-04）状态校验轻于 POST：查询不打断语义，只查归属/活跃/caps，不加
-  忙轮守卫；POST（FR-05）额外做七档词表校验（400）+ 忙轮守卫（D-002 前轮
-  拍板「仅空闲」——思考档切换不打断在跑轮，``_get_current_run`` 活跃轮拒）。
+  忙轮守卫；POST（FR-05）额外做七档词表校验（400）。ql-20260917-008 起忙轮
+  不再 409——覆盖式暂存 ``session.pending_thinking_level``（「最后一次为准」），
+  run 终态钩子（close_run_steps）经本模块 ``apply_pending_thinking_level``
+  应用到 daemon 后清列。
 - RPC 派发（D-002 总体方案）：``ws_hub.send_rpc(daemon_id, "session_get_
   thinking_levels" / "session_set_thinking_level", {"session_id", ...},
   timeout=15)``（task-03 daemon 侧 registerRpcHandler 契约按名对接，跨 wave
@@ -46,7 +48,6 @@ from app.modules.daemon.schema import (
 from .errors import (
     DaemonSessionInvariantViolation,
     DaemonSessionNotActive,
-    DaemonSessionTurnConflict,
 )
 from .helpers import _resolve_daemon_id_for_runtime
 
@@ -195,17 +196,16 @@ async def set_session_thinking_level(
                 f"会话引擎 '{provider}' 不支持思考级别。",
                 details={"session_id": str(session_id), "provider": provider},
             )
-        # D-002「仅空闲」约束：思考档切换不打断在跑轮（照 compact turn 空闲
-        # 守卫先例）——活跃轮拒 409，本轮结束后再切。
+        # ql-20260917-008：忙轮不再 409——覆盖式暂存 session.pending_thinking_level
+        # （「最后一次为准」，连续切档后者盖前者），返回 queued=True 由前端提示
+        # 「本轮结束后生效」；run 终态钩子（close_run_steps）取暂存档经 RPC 应用
+        # 后清列。应用失败保留暂存（下一轮重试/用户重切覆盖），不丢用户意图。
         current = await svc._get_current_run(session.id)
         if current is not None:
-            raise DaemonSessionTurnConflict(
-                f"Session '{session_id}' already has an active run '{current.id}'.",
-                details={
-                    "session_id": str(session_id),
-                    "current_run_id": str(current.id),
-                },
-            )
+            session.pending_thinking_level = level
+            svc._session.add(session)
+            await svc._session.commit()
+            return SessionThinkingLevelResponse(ok=True, queued=True)
         # 释放行锁再派发（照 compact.py 先例）：RPC 最长挂 15s，不拖会话行锁。
         await svc._session.commit()
     except AppError:
@@ -335,3 +335,55 @@ def _map_set_result(result: dict) -> SessionThinkingLevelResponse:
         ok=bool(result.get("ok", False)),
         error=(error_raw if isinstance(error_raw, str) else None),
     )
+
+
+async def apply_pending_thinking_level(session_id: uuid.UUID) -> None:
+    """run 终态钩子入口（ql-20260917-008）：应用忙轮暂存的思考档位。
+
+    独立 DB session（对齐 ``dispatch_next_queued_message`` H1 模式）——后台
+    任务生命周期独立于触发它的 run 收尾事务。流程：取会话 → 无暂存/非
+    active/有活跃 run（下一终态钩子会再触发）均直接返回 → 取暂存档走
+    ``_set_via_rpc``（复用空闲切换全部分支语义）→ 成功清 ``pending_thinking_
+    level`` 列，失败**保留暂存**（daemon 瞬态离线时下轮重试，或用户重切
+    覆盖）仅记日志——不丢用户意图。
+
+    异常 fail-loud 交 ``_fire_background_task`` 的 done_callback 记日志，
+    不影响已提交的 run 终态（照 dispatch_next_queued_message 先例）。
+    """
+    from app.core.db import get_session_factory
+    from app.modules.agent.model import AgentSession
+
+    from .helpers import _get_current_run
+
+    session_factory = get_session_factory()
+    async with session_factory() as db:
+        svc = _SessionServiceShim(db)
+        session = await db.get(AgentSession, session_id)
+        if session is None:
+            return
+        pending = session.pending_thinking_level
+        if not pending:
+            return
+        if session.status != "active":
+            return
+        if await _get_current_run(svc, session.id) is not None:
+            return
+        result = await _set_via_rpc(svc, session, level=pending)
+        if result.ok:
+            fresh = await db.get(AgentSession, session_id)
+            if fresh is not None:
+                fresh.pending_thinking_level = None
+                db.add(fresh)
+                await db.commit()
+
+
+class _SessionServiceShim:
+    """``_set_via_rpc`` 的最小 svc 适配（只需 ``_session`` 属性）。
+
+    独立 session 工厂路径没有 SessionService 实例（对齐
+    ``dispatch_next_queued_message`` 的轻量用法；``_resolve_daemon_id_for_
+    runtime`` 与 helpers ``_get_current_run`` 均只经 ``svc._session`` 取数）。
+    """
+
+    def __init__(self, db) -> None:
+        self._session = db

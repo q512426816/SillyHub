@@ -129,3 +129,17 @@ created_at: 2026-09-17 09:37:28
 - evidence: 用户提出并确认（2026-09-17 16:46）；源码核实：create_session create.py:42（runtime_id 优先于 provider 双入口）、AgentSession.metadata_ model.py:457、quicklog 同构 router.py:197、AgentRun.agent_session_id 关联 model.py:267。
 - 故障面: 反链映射在合并时若目标小节重命名会失效（锚点漂移，需以 file+section_title 双键而非裸锚点）；蒸馏会话过滤若靠 metadata 判空，老会话（无 origin 字段）默认可见需零回归兜底。
 - 退役判据: 若常规会话页引入通用「会话用途」过滤维度，蒸馏隔离可并入该维度不再单列 origin 键。
+
+## D-008@v2: R-08 三洞修复落定——附件通道取数 + --spec-dir 指路回流 + 三重护栏（supersedes D-008@v1）
+- type: architecture
+- priority: P0
+- status: accepted
+- supersedes: D-008@v1
+- source: design-grill
+- question: D-008@v1 的修复方向在实现期经源码调查发现洞二前提不成立，修复方案如何修正落定？
+- answer: 实现期调查（2026-09-17，commit 2c7873e5e）修正前提：**spec 树三策略统一下发 daemon 本地 `~/.sillyhub/daemon/specs/{ws_id}`（交互会话启动 pull + 会话结束 postSpecSync 增量回传，`knowledge/` 在同步集内）**——v1 判断"platform-managed 下 daemon 本地无树"不成立，洞二实为"树在缺指路"。修正落定：①洞一取数走**附件通道**（导出会话日志为 Markdown→SessionAttachmentService 上传→create_session attachment_ids→daemon 落盘 {cwd}/attachments/ 供 agent 读，不污染知识库树；替代 v1 的 .runtime 导出方案——.runtime 在同步排除集内送不到 daemon，v1 方案不可行）；②洞二回流=prompt 统一带 `--spec-dir ~/.sillyhub/daemon/specs/{ws_id}` 指路（CLI 实测 propose 只认 --spec-dir 不认 --spec-root，scan 参数不可照搬）；③洞三护栏=turn>2000 422/单条 8KB 截断/总量 19MB 422 引导 resume；④非多模态引擎（附件通道依赖 provider_caps.multimodal，仅 claude/pi）fresh 会话源 422 守卫。
+- normalized_requirement: fresh 会话源蒸馏必须经附件通道携带导出记录（agent 可读路径）；所有 propose 命令必须带 --spec-dir 指向 daemon 本地 spec 目录；体量护栏三重（turn/单条/总量）；附件引擎门控必须前置校验。
+- impacts: [R-08 闭环, FR-01, task-09 部署期 M2 验证范围]
+- evidence: commit 2c7873e5e（81 测试绿）；源码锚点：daemon.ts _startInteractiveSession（pull 落点三策略统一）、spec-sync.ts UPLOAD_EXCLUDE_TOP_BASE（knowledge/ 在同步集）、turn-control.ts（附件落盘 {cwd}/attachments）、CLI `sillyspec knowledge propose --help` 实测（只认 --spec-dir）；config.py:271 spec_transport=tar。
+- 故障面: 附件下载 daemon 侧 60s 超时（既有链路）；postSpecSync 乐观锁冲突靠 pending_push 自愈（既有）；超大对话 resume 模式上下文超限由引擎 compact 兜底。
+- 退役判据: 若 daemon 侧未来提供会话记录查询 MCP 工具，可弃附件导出通道。

@@ -649,3 +649,153 @@ class TestAutoResumeDispatch:
 
         await svc.delete_queued_message(session_id, rows[0].id, uid)
         assert await _queue_rows(db_session, session_id) == []
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# ql-20260917-008：忙轮纯切换条目的覆盖式合并 + model 快照
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestPureSwitchMerge:
+    """ql-20260917-008（会话执行中直接切换，下一轮生效）：
+
+    - 纯切换请求（空 prompt 无附件带配置维度）忙轮入队时，若同发送者已有
+      pending 的纯切换行 → 逐字段覆盖合并（None 不动，「最后一次为准」按
+      维度独立生效），不新建行、position 不变；
+    - 普通消息（有正文）与纯切换互不合并（merge 谓词双向守卫）；
+    - 排队行快照新列 model 落列，派发重放原样透传 _inject_into_session。
+    """
+
+    @pytest.mark.asyncio
+    async def test_consecutive_switches_merge_overwrite_per_field(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        svc, uid, session_id, _busy = await _setup_busy_session(db_session)
+        # 切供应商（级联重置 model=""）→ 建首行
+        r1 = await svc.inject_session(
+            session_id,
+            uid,
+            prompt="",
+            llm_provider_id="prov-a",
+            model="",
+            queue_when_busy=True,
+        )
+        assert r1.queued is True
+        # 切模型（伴生供应商）→ 合并进首行
+        r2 = await svc.inject_session(
+            session_id,
+            uid,
+            prompt="",
+            llm_provider_id="prov-a",
+            model="glm-x",
+            queue_when_busy=True,
+        )
+        # 切档案 → 合并进首行
+        r3 = await svc.inject_session(
+            session_id,
+            uid,
+            prompt="",
+            agent_profile_id="prof-1",
+            queue_when_busy=True,
+        )
+        assert r2.queue_entry_id == r1.queue_entry_id
+        assert r3.queue_entry_id == r1.queue_entry_id
+
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.llm_provider_id == "prov-a"
+        assert row.model == "glm-x"
+        assert row.agent_profile_id == "prof-1"
+        assert row.prompt == ""
+        assert row.position == 0
+
+    @pytest.mark.asyncio
+    async def test_normal_message_not_merged_with_switch(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """merge 谓词守卫：普通消息与纯切换双向都不合并（防误盖正文）。"""
+        svc, uid, session_id, _busy = await _setup_busy_session(db_session)
+        await svc.inject_session(session_id, uid, prompt="普通消息", queue_when_busy=True)
+        await svc.inject_session(
+            session_id,
+            uid,
+            prompt="",
+            llm_provider_id="prov-a",
+            queue_when_busy=True,
+        )
+        await svc.inject_session(session_id, uid, prompt="又一条普通", queue_when_busy=True)
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 3
+
+    @pytest.mark.asyncio
+    async def test_switch_not_merged_into_prompt_entry(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """既有 pending 行有正文时，后续纯切换不合并（新建行）。"""
+        svc, uid, session_id, _busy = await _setup_busy_session(db_session)
+        await svc.inject_session(
+            session_id,
+            uid,
+            prompt="",
+            llm_provider_id="prov-a",
+            queue_when_busy=True,
+        )
+        # 反序：先切换后普通消息已由上例覆盖；此处锁「切换行保持独立快照」
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 1
+        assert rows[0].model is None
+
+    @pytest.mark.asyncio
+    async def test_dispatch_replays_model_snapshot(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """派发重放透传 model 快照（ql-20260917-008 缺口修复断言）。"""
+        svc, uid, session_id, busy_run = await _setup_busy_session(db_session)
+        # 派发路径校验 provider 行归属（inject_gates）——建真实 LlmProvider 行
+        # （照 test_e2e_model_usage_flow 先例）。
+        from app.core.crypto import get_cipher
+        from app.modules.llm_provider.model import LlmProvider
+
+        cipher = get_cipher()
+        ct, key_id = cipher.encrypt("sk-test")
+        prov_row = LlmProvider(
+            id=uuid.uuid4(),
+            user_id=uid,
+            name="测试供应商",
+            agent_kind="claude",
+            encrypted_api_key=ct,
+            key_id=key_id,
+            model="glm-x",
+            api_format="anthropic",
+            is_default=False,
+        )
+        db_session.add(prov_row)
+        await db_session.commit()
+        prov = str(prov_row.id)
+        await svc.inject_session(
+            session_id,
+            uid,
+            prompt="",
+            llm_provider_id=prov,
+            model="glm-x",
+            queue_when_busy=True,
+        )
+        await _finish_run(db_session, busy_run)
+
+        captured: dict = {}
+
+        async def _spy(self, *args, **kwargs):
+            captured.update(kwargs)
+            # 走真实实现会派发 daemon 控制消息——mock hub 已接好，直接调原方法
+            return await _spy.orig(self, *args, **kwargs)
+
+        from app.modules.daemon.session.service import SessionService
+
+        _spy.orig = SessionService._inject_into_session
+        with patch.object(SessionService, "_inject_into_session", _spy):
+            await svc.dispatch_queued_messages(session_id)
+
+        assert captured.get("model") == "glm-x"
+        assert captured.get("llm_provider_id") == prov
+        assert captured.get("prompt") == ""

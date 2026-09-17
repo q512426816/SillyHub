@@ -1,0 +1,860 @@
+diff --git a/backend/app/modules/agent/model.py b/backend/app/modules/agent/model.py
+index 0495ecb61..03981a543 100644
+--- a/backend/app/modules/agent/model.py
++++ b/backend/app/modules/agent/model.py
+@@ -744,6 +744,13 @@ class AgentSession(BaseModel, table=True):
+         default=None,
+         sa_column=Column(Integer, nullable=True),
+     )
++    # ql-20260917-008：忙轮暂存的思考档位（七档词表值；None = 无暂存）——
++    # 用户运行中切档不再 409，覆盖式暂存于此，run 终态钩子（close_run_steps）
++    # 经 RPC 应用到 daemon 后清列；连续切档后者覆盖前者（「最后一次为准」）。
++    pending_thinking_level: str | None = Field(
++        default=None,
++        sa_column=Column(String(16), nullable=True),
++    )
+     status: str = Field(
+         default="pending",
+         sa_column=Column(String(20), nullable=False, default="pending"),
+@@ -1168,6 +1175,13 @@ class AgentSessionQueuedMessage(BaseModel, table=True):
+         default=None,
+         sa_column=Column(String(64), nullable=True),
+     )
++    # ql-20260917-008：切模型快照（str 形态模型名；None = 发送时未携带）——
++    # 补齐 task-11 会话级选模型的排队快照缺口：此前忙轮切模型入队后 model
++    # 维度丢失，派发重放只带 profile/provider，切模型静默无效。
++    model: str | None = Field(
++        default=None,
++        sa_column=Column(String(128), nullable=True),
++    )
+     status: str = Field(
+         default="pending",
+         sa_column=Column(String(16), nullable=False, default="pending"),
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index bcf46c08e..c28c559dd 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -622,4 +622,24 @@ async def _close_finish(
+                 dispatch_next_queued_message(agent_run.agent_session_id),
+                 run_id=agent_run.id,
+             )
++        # ql-20260917-008：忙轮暂存的思考档位同样在轮终态应用——与排队
++        # 派发并列的独立后台任务（无排队条目也可能有暂存档）。apply 内部
++        # 自查会话态/活跃轮，失败保留暂存等下一触发点。
++        session_pending_level = (
++            await svc._session.execute(
++                select(AgentSession.pending_thinking_level).where(
++                    AgentSession.id == agent_run.agent_session_id,
++                    AgentSession.pending_thinking_level.is_not(None),
++                )
++            )
++        ).scalar_one_or_none()
++        if session_pending_level is not None:
++            from app.modules.daemon.session.service.thinking_level import (
++                apply_pending_thinking_level,
++            )
++
++            svc._fire_background_task(
++                apply_pending_thinking_level(agent_run.agent_session_id),
++                run_id=agent_run.id,
++            )
+     return agent_run
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index 211fa1069..307d76dc3 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -410,10 +410,13 @@ class SessionThinkingLevelResponse(BaseModel):
+     ``error`` 携带结构化文案（旧 daemon method_not_found →「daemon 未支持
+     思考级别，请升级 daemon」；离线/超时/业务错误各有中文文案），HTTP 恒 200
+     （照 compact 口径：调用方可修复的失败不抛 5xx）。
++    ql-20260917-008：``queued=True`` = 忙轮覆盖式暂存（pending_thinking_level），
++    本轮结束后由 run 终态钩子应用——前端据此提示「本轮结束后生效」。
+     """
+ 
+     ok: bool
+     error: str | None = None
++    queued: bool = False
+ 
+ 
+ class SessionAutoResumeUpdateRequest(BaseModel):
+diff --git a/backend/app/modules/daemon/session/service/queue.py b/backend/app/modules/daemon/session/service/queue.py
+index 6b64673d9..d08d73248 100644
+--- a/backend/app/modules/daemon/session/service/queue.py
++++ b/backend/app/modules/daemon/session/service/queue.py
+@@ -174,6 +174,55 @@ async def _handle_busy_turn(
+             queued=True,
+             queue_entry_id=existing_notification.id,
+         )
++    # ql-20260917-008（会话执行中直接切换）：纯切换条目的**覆盖式合并**——
++    # 新请求是纯切换（空 prompt、无附件、带至少一个配置维度）且同发送者已有
++    # pending 的纯切换行（prompt="" 是静默切换行的唯一形态）→ 逐字段覆盖
++    # （新请求非 None 的 profile/provider/model 快照盖旧值，None 不动——
++    # 「最后一次为准」按维度独立生效：切供应商的伴生 model="" 重置与后续
++    # 单独切模型可组合），不新建行、position 不变。防连续切换排多条切换轮。
++    # 与任务通知 merge 同款行锁内查询 + 更新同事务原子。
++    is_pure_switch = (
++        not (prompt or "").strip()
++        and not attachment_ids
++        and (agent_profile_id is not None or llm_provider_id is not None or model is not None)
++    )
++    if is_pure_switch:
++        existing_switch = (
++            await svc._session.execute(
++                select(AgentSessionQueuedMessage).where(
++                    AgentSessionQueuedMessage.agent_session_id == session.id,
++                    AgentSessionQueuedMessage.status == "pending",
++                    AgentSessionQueuedMessage.prompt == "",
++                    AgentSessionQueuedMessage.sender_user_id
++                    == (queue_sender_user_id or run_sender_user_id or session.user_id),
++                )
++            )
++        ).scalar_one_or_none()
++        if existing_switch is not None:
++            if agent_profile_id is not None:
++                existing_switch.agent_profile_id = agent_profile_id
++            if llm_provider_id is not None:
++                existing_switch.llm_provider_id = llm_provider_id
++            if model is not None:
++                existing_switch.model = model
++            svc._session.add(existing_switch)
++            await svc._session.commit()
++            await svc._publish_session_event(
++                session.id,
++                {
++                    "event": "queue_changed",
++                    "session_id": str(session.id),
++                    "queue_entry_id": str(existing_switch.id),
++                    "action": "merged",
++                },
++            )
++            return SessionDispatchResult(
++                agent_session=session,
++                agent_run=None,
++                lease_id=None,
++                queued=True,
++                queue_entry_id=existing_switch.id,
++            )
+     # 2026-08-31-session-queue-ux D-002（R-01）：入队序键 = 会话现有
+     # 条目 MAX(position)+1（空队列首条=0）。查询在调用方
+     # _get_owned_session_for_update 会话行锁内、与满员检查/merge
+@@ -205,6 +254,9 @@ async def _handle_busy_turn(
+         ),
+         agent_profile_id=agent_profile_id,
+         llm_provider_id=llm_provider_id,
++        # ql-20260917-008：切模型快照落列（此前缺口——忙轮切模型入队后丢失，
++        # 派发重放静默无效）。
++        model=model,
+         # 2026-09-12：自动续跑转排队保留 origin（R-08——忙轮 INSERT 此前丢
+         # origin，G10/幂等/徽标全断链）。
+         origin=(make_auto_resume_origin(auto_resume_of) if auto_resume_of is not None else None),
+@@ -729,6 +781,8 @@ async def dispatch_queued_messages(svc, session_id: uuid.UUID) -> None:
+                 run_sender_user_id=entry.sender_user_id,
+                 agent_profile_id=entry.agent_profile_id,
+                 llm_provider_id=entry.llm_provider_id,
++                # ql-20260917-008：排队行的切模型快照重放（与入队快照成对）。
++                model=entry.model,
+                 attachment_ids=attachment_ids,
+                 attachment_owner_user_id=attachment_owner_user_id,
+                 page_context=page_context,
+diff --git a/backend/app/modules/daemon/session/service/thinking_level.py b/backend/app/modules/daemon/session/service/thinking_level.py
+index 7c1be1e4d..6a888a35f 100644
+--- a/backend/app/modules/daemon/session/service/thinking_level.py
++++ b/backend/app/modules/daemon/session/service/thinking_level.py
+@@ -12,8 +12,10 @@ task-05 / FR-04 / FR-05）。
+   引擎，task-01 @generated 表）。校验持锁完成、commit 释放行锁后再派发（照
+   interrupt_session「先 commit 再发 WS」模式，RPC 最长 15s 不拖行锁）。
+ - GET（FR-04）状态校验轻于 POST：查询不打断语义，只查归属/活跃/caps，不加
+-  忙轮守卫；POST（FR-05）额外做七档词表校验（400）+ 忙轮守卫（D-002 前轮
+-  拍板「仅空闲」——思考档切换不打断在跑轮，``_get_current_run`` 活跃轮拒）。
++  忙轮守卫；POST（FR-05）额外做七档词表校验（400）。ql-20260917-008 起忙轮
++  不再 409——覆盖式暂存 ``session.pending_thinking_level``（「最后一次为准」），
++  run 终态钩子（close_run_steps）经本模块 ``apply_pending_thinking_level``
++  应用到 daemon 后清列。
+ - RPC 派发（D-002 总体方案）：``ws_hub.send_rpc(daemon_id, "session_get_
+   thinking_levels" / "session_set_thinking_level", {"session_id", ...},
+   timeout=15)``（task-03 daemon 侧 registerRpcHandler 契约按名对接，跨 wave
+@@ -46,7 +48,6 @@ from app.modules.daemon.schema import (
+ from .errors import (
+     DaemonSessionInvariantViolation,
+     DaemonSessionNotActive,
+-    DaemonSessionTurnConflict,
+ )
+ from .helpers import _resolve_daemon_id_for_runtime
+ 
+@@ -195,17 +196,16 @@ async def set_session_thinking_level(
+                 f"会话引擎 '{provider}' 不支持思考级别。",
+                 details={"session_id": str(session_id), "provider": provider},
+             )
+-        # D-002「仅空闲」约束：思考档切换不打断在跑轮（照 compact turn 空闲
+-        # 守卫先例）——活跃轮拒 409，本轮结束后再切。
++        # ql-20260917-008：忙轮不再 409——覆盖式暂存 session.pending_thinking_level
++        # （「最后一次为准」，连续切档后者盖前者），返回 queued=True 由前端提示
++        # 「本轮结束后生效」；run 终态钩子（close_run_steps）取暂存档经 RPC 应用
++        # 后清列。应用失败保留暂存（下一轮重试/用户重切覆盖），不丢用户意图。
+         current = await svc._get_current_run(session.id)
+         if current is not None:
+-            raise DaemonSessionTurnConflict(
+-                f"Session '{session_id}' already has an active run '{current.id}'.",
+-                details={
+-                    "session_id": str(session_id),
+-                    "current_run_id": str(current.id),
+-                },
+-            )
++            session.pending_thinking_level = level
++            svc._session.add(session)
++            await svc._session.commit()
++            return SessionThinkingLevelResponse(ok=True, queued=True)
+         # 释放行锁再派发（照 compact.py 先例）：RPC 最长挂 15s，不拖会话行锁。
+         await svc._session.commit()
+     except AppError:
+@@ -335,3 +335,55 @@ def _map_set_result(result: dict) -> SessionThinkingLevelResponse:
+         ok=bool(result.get("ok", False)),
+         error=(error_raw if isinstance(error_raw, str) else None),
+     )
++
++
++async def apply_pending_thinking_level(session_id: uuid.UUID) -> None:
++    """run 终态钩子入口（ql-20260917-008）：应用忙轮暂存的思考档位。
++
++    独立 DB session（对齐 ``dispatch_next_queued_message`` H1 模式）——后台
++    任务生命周期独立于触发它的 run 收尾事务。流程：取会话 → 无暂存/非
++    active/有活跃 run（下一终态钩子会再触发）均直接返回 → 取暂存档走
++    ``_set_via_rpc``（复用空闲切换全部分支语义）→ 成功清 ``pending_thinking_
++    level`` 列，失败**保留暂存**（daemon 瞬态离线时下轮重试，或用户重切
++    覆盖）仅记日志——不丢用户意图。
++
++    异常 fail-loud 交 ``_fire_background_task`` 的 done_callback 记日志，
++    不影响已提交的 run 终态（照 dispatch_next_queued_message 先例）。
++    """
++    from app.core.db import get_session_factory
++    from app.modules.agent.model import AgentSession
++
++    from .helpers import _get_current_run
++
++    session_factory = get_session_factory()
++    async with session_factory() as db:
++        svc = _SessionServiceShim(db)
++        session = await db.get(AgentSession, session_id)
++        if session is None:
++            return
++        pending = session.pending_thinking_level
++        if not pending:
++            return
++        if session.status != "active":
++            return
++        if await _get_current_run(svc, session.id) is not None:
++            return
++        result = await _set_via_rpc(svc, session, level=pending)
++        if result.ok:
++            fresh = await db.get(AgentSession, session_id)
++            if fresh is not None:
++                fresh.pending_thinking_level = None
++                db.add(fresh)
++                await db.commit()
++
++
++class _SessionServiceShim:
++    """``_set_via_rpc`` 的最小 svc 适配（只需 ``_session`` 属性）。
++
++    独立 session 工厂路径没有 SessionService 实例（对齐
++    ``dispatch_next_queued_message`` 的轻量用法；``_resolve_daemon_id_for_
++    runtime`` 与 helpers ``_get_current_run`` 均只经 ``svc._session`` 取数）。
++    """
++
++    def __init__(self, db) -> None:
++        self._session = db
+diff --git a/backend/app/modules/daemon/tests/test_session_queue.py b/backend/app/modules/daemon/tests/test_session_queue.py
+index 6b27f8e79..0148587bc 100644
+--- a/backend/app/modules/daemon/tests/test_session_queue.py
++++ b/backend/app/modules/daemon/tests/test_session_queue.py
+@@ -649,3 +649,153 @@ class TestAutoResumeDispatch:
+ 
+         await svc.delete_queued_message(session_id, rows[0].id, uid)
+         assert await _queue_rows(db_session, session_id) == []
++
++
++# ────────────────────────────────────────────────────────────────────────────
++# ql-20260917-008：忙轮纯切换条目的覆盖式合并 + model 快照
++# ────────────────────────────────────────────────────────────────────────────
++
++
++class TestPureSwitchMerge:
++    """ql-20260917-008（会话执行中直接切换，下一轮生效）：
++
++    - 纯切换请求（空 prompt 无附件带配置维度）忙轮入队时，若同发送者已有
++      pending 的纯切换行 → 逐字段覆盖合并（None 不动，「最后一次为准」按
++      维度独立生效），不新建行、position 不变；
++    - 普通消息（有正文）与纯切换互不合并（merge 谓词双向守卫）；
++    - 排队行快照新列 model 落列，派发重放原样透传 _inject_into_session。
++    """
++
++    @pytest.mark.asyncio
++    async def test_consecutive_switches_merge_overwrite_per_field(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        svc, uid, session_id, _busy = await _setup_busy_session(db_session)
++        # 切供应商（级联重置 model=""）→ 建首行
++        r1 = await svc.inject_session(
++            session_id,
++            uid,
++            prompt="",
++            llm_provider_id="prov-a",
++            model="",
++            queue_when_busy=True,
++        )
++        assert r1.queued is True
++        # 切模型（伴生供应商）→ 合并进首行
++        r2 = await svc.inject_session(
++            session_id,
++            uid,
++            prompt="",
++            llm_provider_id="prov-a",
++            model="glm-x",
++            queue_when_busy=True,
++        )
++        # 切档案 → 合并进首行
++        r3 = await svc.inject_session(
++            session_id,
++            uid,
++            prompt="",
++            agent_profile_id="prof-1",
++            queue_when_busy=True,
++        )
++        assert r2.queue_entry_id == r1.queue_entry_id
++        assert r3.queue_entry_id == r1.queue_entry_id
++
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == 1
++        row = rows[0]
++        assert row.llm_provider_id == "prov-a"
++        assert row.model == "glm-x"
++        assert row.agent_profile_id == "prof-1"
++        assert row.prompt == ""
++        assert row.position == 0
++
++    @pytest.mark.asyncio
++    async def test_normal_message_not_merged_with_switch(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """merge 谓词守卫：普通消息与纯切换双向都不合并（防误盖正文）。"""
++        svc, uid, session_id, _busy = await _setup_busy_session(db_session)
++        await svc.inject_session(session_id, uid, prompt="普通消息", queue_when_busy=True)
++        await svc.inject_session(
++            session_id,
++            uid,
++            prompt="",
++            llm_provider_id="prov-a",
++            queue_when_busy=True,
++        )
++        await svc.inject_session(session_id, uid, prompt="又一条普通", queue_when_busy=True)
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == 3
++
++    @pytest.mark.asyncio
++    async def test_switch_not_merged_into_prompt_entry(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """既有 pending 行有正文时，后续纯切换不合并（新建行）。"""
++        svc, uid, session_id, _busy = await _setup_busy_session(db_session)
++        await svc.inject_session(
++            session_id,
++            uid,
++            prompt="",
++            llm_provider_id="prov-a",
++            queue_when_busy=True,
++        )
++        # 反序：先切换后普通消息已由上例覆盖；此处锁「切换行保持独立快照」
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == 1
++        assert rows[0].model is None
++
++    @pytest.mark.asyncio
++    async def test_dispatch_replays_model_snapshot(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """派发重放透传 model 快照（ql-20260917-008 缺口修复断言）。"""
++        svc, uid, session_id, busy_run = await _setup_busy_session(db_session)
++        # 派发路径校验 provider 行归属（inject_gates）——建真实 LlmProvider 行
++        # （照 test_e2e_model_usage_flow 先例）。
++        from app.core.crypto import get_cipher
++        from app.modules.llm_provider.model import LlmProvider
++
++        cipher = get_cipher()
++        ct, key_id = cipher.encrypt("sk-test")
++        prov_row = LlmProvider(
++            id=uuid.uuid4(),
++            user_id=uid,
++            name="测试供应商",
++            agent_kind="claude",
++            encrypted_api_key=ct,
++            key_id=key_id,
++            model="glm-x",
++            api_format="anthropic",
++            is_default=False,
++        )
++        db_session.add(prov_row)
++        await db_session.commit()
++        prov = str(prov_row.id)
++        await svc.inject_session(
++            session_id,
++            uid,
++            prompt="",
++            llm_provider_id=prov,
++            model="glm-x",
++            queue_when_busy=True,
++        )
++        await _finish_run(db_session, busy_run)
++
++        captured: dict = {}
++
++        async def _spy(self, *args, **kwargs):
++            captured.update(kwargs)
++            # 走真实实现会派发 daemon 控制消息——mock hub 已接好，直接调原方法
++            return await _spy.orig(self, *args, **kwargs)
++
++        from app.modules.daemon.session.service import SessionService
++
++        _spy.orig = SessionService._inject_into_session
++        with patch.object(SessionService, "_inject_into_session", _spy):
++            await svc.dispatch_queued_messages(session_id)
++
++        assert captured.get("model") == "glm-x"
++        assert captured.get("llm_provider_id") == prov
++        assert captured.get("prompt") == ""
+diff --git a/backend/app/modules/daemon/tests/test_session_thinking_level_endpoint.py b/backend/app/modules/daemon/tests/test_session_thinking_level_endpoint.py
+index ca187f88c..64b36c303 100644
+--- a/backend/app/modules/daemon/tests/test_session_thinking_level_endpoint.py
++++ b/backend/app/modules/daemon/tests/test_session_thinking_level_endpoint.py
+@@ -228,10 +228,12 @@ class TestThinkingLevelGuards:
+         hub.send_rpc.assert_not_awaited()
+ 
+     @pytest.mark.asyncio
+-    async def test_post_turn_running_409(
++    async def test_post_turn_running_queued_pending(
+         self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
+     ) -> None:
+-        """POST 忙轮（首 run pending 即活跃轮，D-002「仅空闲」）→ 409 TurnConflict。"""
++        """ql-20260917-008：POST 忙轮不再 409——覆盖式暂存 pending_thinking_level，
++        返回 {ok:true, queued:true}，RPC 不派发（run 终态钩子 apply_pending_
++        thinking_level 负责应用）。"""
+         hub = _hub()
+         with patch(_WS_HUB_GETTER, return_value=hub):
+             # finish_first=False：首轮保持 pending（活跃轮）。
+@@ -239,13 +241,49 @@ class TestThinkingLevelGuards:
+                 db_session, provider="claude", finish_first=False
+             )
+ 
+-        resp = await client.post(
+-            f"/api/daemon/sessions/{sid}/thinking-level",
+-            json={"level": "high"},
+-            headers=auth_headers,
++            resp = await client.post(
++                f"/api/daemon/sessions/{sid}/thinking-level",
++                json={"level": "high"},
++                headers=auth_headers,
++            )
++
++        assert resp.status_code == 200, resp.text
++        body = resp.json()
++        assert body["ok"] is True
++        assert body["queued"] is True
++        hub.send_rpc.assert_not_awaited()
++        # 暂存覆盖式落列
++        row = (
++            (await db_session.execute(select(AgentSession).where(AgentSession.id == sid)))
++            .scalars()
++            .one()
+         )
+-        assert resp.status_code == 409, resp.text
+-        assert resp.json()["code"] == "HTTP_409_DAEMON_SESSION_TURN_CONFLICT"
++        assert row.pending_thinking_level == "high"
++
++    @pytest.mark.asyncio
++    async def test_post_turn_running_overwrite_last_wins(
++        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """ql-20260917-008：忙轮连续切档覆盖式——最后一次为准（不排多条）。"""
++        hub = _hub()
++        with patch(_WS_HUB_GETTER, return_value=hub):
++            sid, _rt = await _seed_thinking_session(
++                db_session, provider="claude", finish_first=False
++            )
++            for level in ("low", "max"):
++                resp = await client.post(
++                    f"/api/daemon/sessions/{sid}/thinking-level",
++                    json={"level": level},
++                    headers=auth_headers,
++                )
++                assert resp.status_code == 200, resp.text
++
++        row = (
++            (await db_session.execute(select(AgentSession).where(AgentSession.id == sid)))
++            .scalars()
++            .one()
++        )
++        assert row.pending_thinking_level == "max"
+         hub.send_rpc.assert_not_awaited()
+ 
+     @pytest.mark.asyncio
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index fa582d237..a2e561307 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -229,10 +229,10 @@ describe("SessionConfigBar 两控件渲染", () => {
+   });
+ });
+ 
+-// ── 2. running / ended 置灰（FR-05） ─────────────────────────────────────
++// ── 2. running / ended 置灰（FR-05；ql-20260917-008 起 running 放开） ──────
+ 
+ describe("SessionConfigBar 状态置灰", () => {
+-  it("running：两控件全禁用 + 「本轮完成后解锁切换」(Lock 图标)提示，下拉不可开", () => {
++  it("running：两控件可点（受理即排队，本轮结束后生效）+ Timer 提示，下拉可开", () => {
+     renderBar({ running: true });
+     for (const name of [
+       "配置-供应商 本机默认",
+@@ -240,27 +240,28 @@ describe("SessionConfigBar 状态置灰", () => {
+     ]) {
+       expect(
+         (screen.getByRole("button", { name }) as HTMLButtonElement).disabled,
+-      ).toBe(true);
++      ).toBe(false);
+     }
+-    expect(screen.getByText("本轮完成后解锁切换")).toBeInTheDocument();
+-    // 点击置灰控件不开下拉
++    expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
++    // ql-20260917-008：运行中点开下拉可正常选择（请求落忙轮排队）
+     fireEvent.click(screen.getByRole("button", { name: "配置-供应商 本机默认" }));
+-    expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
++    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
+   });
+ 
+-  it("ended：全部禁用且无解锁提示（只读浏览）", () => {
++  it("ended：全部禁用且无运行中提示（只读浏览）", () => {
+     renderBar({ ended: true });
+     expect(
+       (screen.getByRole("button", { name: "配置-供应商 本机默认" }) as HTMLButtonElement)
+         .disabled,
+     ).toBe(true);
+     expect(
+-      screen.queryByText("本轮完成后解锁切换"),
++      screen.queryByText("运行中切换将于本轮结束后生效"),
+     ).not.toBeInTheDocument();
+   });
+ 
+   // ql-20260909-005：禁用态 title 按原因说明（原恒静态说明，点了没反应零解释）。
+-  it("禁用态 title 说明原因：ended→已结束或机器离线；running→本轮后可切换；idle→原默认说明", () => {
++  // ql-20260917-008：running title 改「可切换，本轮结束后生效」（控件不再禁用）。
++  it("title 说明：ended→已结束或机器离线；running→可切换本轮后生效；idle→原默认说明", () => {
+     const { unmount: u1 } = renderBar({ ended: true });
+     expect(
+       screen.getByRole("button", { name: "配置-供应商 本机默认" }),
+@@ -273,7 +274,7 @@ describe("SessionConfigBar 状态置灰", () => {
+     const { unmount: u2 } = renderBar({ running: true });
+     expect(
+       screen.getByRole("button", { name: "配置-供应商 本机默认" }),
+-    ).toHaveAttribute("title", "会话运行中，本轮结束后可切换供应商");
++    ).toHaveAttribute("title", "运行中可切换，将于本轮结束后生效");
+     u2();
+ 
+     renderBar();
+@@ -290,9 +291,11 @@ describe("SessionConfigBar 状态置灰", () => {
+     });
+     const slot = screen.getByTestId("trailing-slot-content");
+     expect(slot).toBeInTheDocument();
+-    // 与 running 解锁提示同行——共享同一行容器（flex 行）。
++    // 与 running 提示同行——共享同一行容器（flex 行）。
+     expect(
+-      slot.closest("div")?.contains(screen.getByText("本轮完成后解锁切换")),
++      slot.closest("div")?.contains(
++        screen.getByText("运行中切换将于本轮结束后生效"),
++      ),
+     ).toBe(true);
+ 
+     cleanup();
+@@ -554,13 +557,24 @@ describe("SessionConfigBar providerOpenSignal（ql-20260904-010）", () => {
+     expect(screen.queryByTestId("config-dd-profile")).not.toBeInTheDocument();
+   });
+ 
+-  it("running 锁定 → 信号被吞不开下拉；解锁后不凭旧信号重放", () => {
++  it("running → 信号打开下拉（ql-20260917-008 运行中放开）；ended 才吞信号，解锁后不凭旧信号重放", () => {
+     const { rerenderWith } = renderSignalBar({
+       running: true,
+       providerOpenSignal: 1,
+     });
+-    expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
++    // 运行中不再锁定——信号照常开下拉
++    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
+     rerenderWith({ running: false });
++    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
++
++    cleanup();
++    // ended 吞信号；会话重开（新实例 ended=false）不凭旧信号重放
++    const { rerenderWith: rerender2 } = renderSignalBar({
++      ended: true,
++      providerOpenSignal: 1,
++    });
++    expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
++    rerender2({ ended: false });
+     expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
+   });
+ 
+@@ -1154,6 +1168,43 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+     expect(mocks.getSessionThinkingLevels).toHaveBeenCalledTimes(1);
+   });
+ 
++  it("ql-20260917-008：running 时切档受理——queued=True 提示「已排队…本轮结束后生效」+ 乐观缓存照写", async () => {
++    mocks.setSessionThinkingLevel.mockResolvedValue({ ok: true, queued: true });
++    renderBar({ running: true, thinkingLevel: {} });
++    const select = (await screen.findByTestId(
++      "config-thinking-select",
++    )) as HTMLSelectElement;
++    await waitFor(() => expect(select.value).toBe("medium"));
++    expect(select.disabled).toBe(false); // 运行中不再禁用
++    fireEvent.change(select, { target: { value: "high" } });
++    await waitFor(() =>
++      expect(mocks.setSessionThinkingLevel).toHaveBeenCalledWith("sess-1", "high"),
++    );
++    await waitFor(() =>
++      expect(mocks.messageSuccess).toHaveBeenCalledWith(
++        "已排队切换思考级别：高（本轮结束后生效）",
++      ),
++    );
++    await waitFor(() => expect(select.value).toBe("high"));
++  });
++
++  it("ql-20260917-008：running 时切换供应商照常受理——injectSession 调用 + 提示「已排队…本轮结束后生效」", async () => {
++    renderBar({ running: true, llmProviderId: "prov-kimi" });
++    openCtrl("配置-供应商");
++    fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
++    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
++    await waitFor(() =>
++      expect(mocks.messageSuccess).toHaveBeenCalledWith(
++        expect.stringContaining("已排队切换供应商"),
++      ),
++    );
++    await waitFor(() =>
++      expect(mocks.messageSuccess).toHaveBeenCalledWith(
++        expect.stringContaining("本轮结束后生效"),
++      ),
++    );
++  });
++
+   it("200 结构化失败（ok=false + error）→ notify error 带 error 原文（如旧 daemon 升级提示）", async () => {
+     mocks.setSessionThinkingLevel.mockResolvedValue({
+       ok: false,
+@@ -1274,13 +1325,15 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
+     expect(screen.queryByTestId("config-thinking-select")).not.toBeInTheDocument();
+   });
+ 
+-  it("mobile：running 不渲染「本轮完成后解锁切换」文字提示（ql-20260915-013 一行化，禁用态+title 已表意）", () => {
++  it("mobile：running 不渲染「运行中切换将于本轮结束后生效」文字提示（ql-20260915-013 一行化，控件 title 已表意）", () => {
+     renderBar({ variant: "mobile", running: true });
+-    expect(screen.queryByText("本轮完成后解锁切换")).not.toBeInTheDocument();
++    expect(
++      screen.queryByText("运行中切换将于本轮结束后生效"),
++    ).not.toBeInTheDocument();
+   });
+ 
+-  it("desktop：running 锁提示照旧（零回归锚）", () => {
++  it("desktop：running 提示照旧（零回归锚；ql-20260917-008 文案改排队说明）", () => {
+     renderBar({ running: true });
+-    expect(screen.getByText("本轮完成后解锁切换")).toBeInTheDocument();
++    expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
+   });
+ });
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 35d82b17a..150bf837b 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -18,7 +18,10 @@
+  *     行/输入提示消息步骤；prompt 用默认文案或 props switchPrompt 覆盖）→
+  *     injectSession(sessionId, prompt, 带新配置)；供应商含「不指定（本机默认）」
+  *     选项 → llm_provider_id: "" 切回本机默认（task-16 契约）。
+- *   - running 全置灰 + 「🔒 本轮完成后解锁切换」；ended/failed 同样不可切（无锁提示）。
++ *   - ql-20260917-008：running 不再置灰——四控件（供应商/模型/思考级别/档案）
++ *     运行中可点，请求即受理：切换维度经忙轮排队/覆盖合并，**本轮结束后生效**
++ *     （提示行「运行中切换将于本轮结束后生效」替代原 🔒 锁提示）；连续切换
++ *     覆盖式（最后一次为准，后端纯切换条目逐字段合并）。ended/failed 仍不可切。
+  *   - 切换 toast：下一轮生效，历史消息保留当时配置（who 行按轮快照渲染，D-008，
+  *     渲染归 turn-timeline.tsx whoLine，本组件不管消息流）。
+  *
+@@ -49,7 +52,7 @@
+ import { useEffect, useMemo, useRef, useState } from "react";
+ import { useQuery, useQueryClient } from "@tanstack/react-query";
+ import { Switch, Tag } from "antd";
+-import { ChevronDown, Cloud, Lock, Settings2, User } from "lucide-react";
++import { ChevronDown, Cloud, Settings2, Timer, User } from "lucide-react";
+ 
+ import { ApiError } from "@/lib/api";
+ import type { components } from "@/lib/api-types";
+@@ -361,7 +364,9 @@ export function SessionConfigBar({
+   }, [openKind]);
+ 
+   const effectiveEngine = engine ?? configSnapshot?.engine ?? null;
+-  const canSwitch = !running && !ended;
++  // ql-20260917-008：running 不再锁切换——canSwitch 仅排除 ended/failed；
++  // 运行中点选即受理（后端忙轮排队/覆盖合并，本轮结束后生效），提示行见底部。
++  const canSwitch = !ended;
+   // 2026-09-11-session-provider-switch-codex-pi task-05（FR-03 / D-002@v1）：
+   // PROVIDER_SWITCH_ENGINES 白名单外引擎（cursor/未知）无会话级供应商 →
+   // 控件锁定（下拉不可开；task-10 起模型子下拉同锁——直接不渲染）；原 D-010
+@@ -522,7 +527,13 @@ export function SessionConfigBar({
+       qc.setQueryData(["sessionThinkingLevels", sessionId], (old: { levels: string[]; current: string | null } | undefined) =>
+         old ? { ...old, current: level } : { levels: [level], current: level },
+       );
+-      notify.success(`已切换思考级别：${thinkingLevelLabel(level)}`);
++      // ql-20260917-008：resp.queued=True = 忙轮覆盖式暂存（后端 pending_thinking_
++      // level，run 终态钩子应用）——提示「本轮结束后生效」而非「已切换」。
++      notify.success(
++        resp.queued
++          ? `已排队切换思考级别：${thinkingLevelLabel(level)}（本轮结束后生效）`
++          : `已切换思考级别：${thinkingLevelLabel(level)}`,
++      );
+     } catch (err) {
+       notify.error(err, "思考级别切换失败");
+     } finally {
+@@ -595,7 +606,13 @@ export function SessionConfigBar({
+         ...companion,
+         [p.field]: p.value,
+       });
+-      notify.success(`已切换${what} → ${name}（下一轮生效，历史消息保留当时配置）`);
++      // ql-20260917-008：运行中受理为忙轮排队（本轮结束后派发生效）；空闲照旧
++      // 下一轮生效。提示区分两态，避免用户误以为运行中点了没反应。
++      notify.success(
++        running
++          ? `已排队切换${what} → ${name}（本轮结束后生效，历史消息保留当时配置）`
++          : `已切换${what} → ${name}（下一轮生效，历史消息保留当时配置）`,
++      );
+       onSwitched?.(resp, p.field, p.value);
+     } catch (err) {
+       notify.error(err, "切换失败，请重试");
+@@ -665,7 +682,8 @@ export function SessionConfigBar({
+         {/* task-10（FR-03-2 / 原型 .cascade）：供应商+模型级联——两「select」并排
+             在供应商 Ctrl 内（供应商=既有按钮+上弹下拉，模型=紧凑原生 select）。
+             模型子下拉仅选中具体供应商且引擎未锁供应商时渲染——「不指定（本机
+-            默认）」与 providerLocked 两态隐藏；running/ended 同供应商控件置灰。 */}
++            默认）」与 providerLocked 两态隐藏；ql-20260917-008 起 running 不再
++            置灰（受理即排队，本轮结束后生效），仅 ended 禁用。 */}
+         <span className="inline-flex items-center gap-0.5">
+             {ctrlButton(
+               "provider",
+@@ -680,7 +698,7 @@ export function SessionConfigBar({
+                 : ended
+                   ? "会话已结束或机器离线，不可切换供应商"
+                   : running
+-                    ? "会话运行中，本轮结束后可切换供应商"
++                    ? "运行中可切换，将于本轮结束后生效"
+                     : "供应商（不选=本机默认配置）",
+             <ConfigDropdown
+               testId="config-dd-provider"
+@@ -731,10 +749,10 @@ export function SessionConfigBar({
+               // 时点了没反应零解释）。
+               title={
+                 !canSwitch
+-                  ? ended
+-                    ? "会话已结束或机器离线，不可切换模型"
+-                    : "会话运行中，本轮结束后可切换模型"
+-                  : "模型（默认=跟随供应商配置）"
++                  ? "会话已结束或机器离线，不可切换模型"
++                  : running
++                    ? "运行中可切换，将于本轮结束后生效"
++                    : "模型（默认=跟随供应商配置）"
+               }
+               onChange={(e) => {
+                 const v = e.target.value;
+@@ -778,13 +796,16 @@ export function SessionConfigBar({
+             disabled={
+               !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false))
+             }
+-            // ql-20260909-005 同款：禁用态 title 按原因说明。
++            // ql-20260909-005 同款：禁用态 title 说明原因（ql-20260917-008：
++            // 运行中不再禁用——仅 ended/providerLocked 禁）。
+             title={
+               !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false))
+                 ? ended
+                   ? "会话已结束或机器离线，不可切换思考级别"
+-                  : "会话运行中，本轮结束后可切换思考级别（档位切换仅空闲）"
+-                : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
++                  : "思考级别切换不可用"
++                : running && !provisional
++                  ? "运行中可切换，将于本轮结束后生效"
++                  : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
+             }
+             onChange={(e) => {
+               const v = e.target.value;
+@@ -833,7 +854,7 @@ export function SessionConfigBar({
+             ended
+               ? "会话已结束或机器离线，不可切换档案"
+               : running
+-                ? "会话运行中，本轮结束后可切换档案"
++                ? "运行中可切换，将于本轮结束后生效"
+                 : "智能体档案",
+           <ConfigDropdown
+             testId="config-dd-profile"
+@@ -911,12 +932,13 @@ export function SessionConfigBar({
+             中断自动续跑
+           </label>
+         )}
+-        {/* running 锁提示：desktop 文字说明；mobile 收（ql-20260915-013 一行化
+-            ——禁用态本身可见，控件 title 已带原因，不占行）。 */}
++        {/* ql-20260917-008：running 不再是锁——四控件运行中可点（受理即排队/
++            暂存，本轮结束后生效），提示行改信息性说明；desktop 文字，mobile 收
++            （ql-20260915-013 一行化——控件 title 已带说明，不占行）。 */}
+         {running && !mobile && (
+-          <span className="inline-flex items-center gap-1 text-[10.5px] text-warning">
+-            <Lock aria-hidden className="h-3 w-3" />
+-            本轮完成后解锁切换
++          <span className="inline-flex items-center gap-1 text-[10.5px] text-muted-foreground">
++            <Timer aria-hidden className="h-3 w-3" />
++            运行中切换将于本轮结束后生效
+           </span>
+         )}
+         {/* ql-20260915-011：mobile「设置」展开钮——默认收起的思考档位/档案/
+diff --git a/backend/migrations/versions/20260917160000_add_queued_model_and_pending_thinking_level.py b/backend/migrations/versions/20260917160000_add_queued_model_and_pending_thinking_level.py
+new file mode 100644
+--- /dev/null
++++ b/backend/migrations/versions/20260917160000_add_queued_model_and_pending_thinking_level.py
+@@ -0,0 +1,42 @@
++"""add queued message model snapshot + session pending thinking level
++
++Revision ID: 20260917160000
++Revises: 20260917104400
++Create Date: 2026-09-17 16:00:00.000000
++
++ql-20260917-008（会话执行中允许直接切换供应商/模型/思考等级/智能体档案，
++下一轮生效）：
++
++- ``agent_session_queued_messages.model``：排队行的切模型快照（task-11 会话级
++  选模型的排队快照缺口——此前忙轮切模型入队后 model 维度丢失，派发重放静默
++  无效）。存量行 NULL = 发送时未携带，语义不变。
++- ``agent_sessions.pending_thinking_level``：忙轮暂存的思考档位（覆盖式，「最后
++  一次为准」）——用户运行中切档不再 409；run 终态钩子（close_run_steps）经
++  RPC 应用到 daemon 后清列。存量行 NULL = 无暂存，语义不变。
++"""
++
++from __future__ import annotations
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "20260917160000"
++down_revision: str = "20260917104400"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.add_column(
++        "agent_session_queued_messages",
++        sa.Column("model", sa.String(length=128), nullable=True),
++    )
++    op.add_column(
++        "agent_sessions",
++        sa.Column("pending_thinking_level", sa.String(length=16), nullable=True),
++    )
++
++
++def downgrade() -> None:
++    op.drop_column("agent_sessions", "pending_thinking_level")
++    op.drop_column("agent_session_queued_messages", "model")

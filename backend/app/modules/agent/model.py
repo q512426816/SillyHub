@@ -744,6 +744,13 @@ class AgentSession(BaseModel, table=True):
         default=None,
         sa_column=Column(Integer, nullable=True),
     )
+    # ql-20260917-008：忙轮暂存的思考档位（七档词表值；None = 无暂存）——
+    # 用户运行中切档不再 409，覆盖式暂存于此，run 终态钩子（close_run_steps）
+    # 经 RPC 应用到 daemon 后清列；连续切档后者覆盖前者（「最后一次为准」）。
+    pending_thinking_level: str | None = Field(
+        default=None,
+        sa_column=Column(String(16), nullable=True),
+    )
     status: str = Field(
         default="pending",
         sa_column=Column(String(20), nullable=False, default="pending"),
@@ -1167,6 +1174,13 @@ class AgentSessionQueuedMessage(BaseModel, table=True):
     llm_provider_id: str | None = Field(
         default=None,
         sa_column=Column(String(64), nullable=True),
+    )
+    # ql-20260917-008：切模型快照（str 形态模型名；None = 发送时未携带）——
+    # 补齐 task-11 会话级选模型的排队快照缺口：此前忙轮切模型入队后 model
+    # 维度丢失，派发重放只带 profile/provider，切模型静默无效。
+    model: str | None = Field(
+        default=None,
+        sa_column=Column(String(128), nullable=True),
     )
     status: str = Field(
         default="pending",

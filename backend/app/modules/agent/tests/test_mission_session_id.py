@@ -239,6 +239,8 @@ def test_agent_sessions_model_fields_unchanged() -> None:
         "session_kind",
         # 2026-09-07-session-pin-rename-scheduled-send task-01：会话置顶时间戳列。
         "pinned_at",
+        # ql-20260917-008：忙轮暂存的思考档位列（run 终态钩子应用后清列）。
+        "pending_thinking_level",
     }
     assert set(AgentSession.model_fields.keys()) == expected
 

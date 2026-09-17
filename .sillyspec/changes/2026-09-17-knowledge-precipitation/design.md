@@ -83,6 +83,9 @@ scale: large
 | 修改 | .sillyspec/docs/backend/modules/auth.md | 模块卡增量：KNOWLEDGE_WRITE 枚举与播种 migration 说明 |
 | 修改 | .sillyspec/docs/SillyHub/modules/spec_workspace.md | 模块卡增量：knowledge writer 成为 apply_ops 新调用方（D-011 不变） |
 | 修改 | .sillyspec/docs/SillyHub/modules/frontend_components.md | 模块卡增量：knowledge/ 四新组件一行式职责（紧凑增量不重排超预算卡） |
+| 修改 | backend/app/modules/daemon/schema.py | D-010④：新增 DISTILL_SESSION_ORIGIN="k-distill" 常量（origin 列 String(16) 限长取短码） |
+| 修改 | backend/app/modules/daemon/session/service/create.py | D-010③：create_session 增 origin 入参落 AgentSession.origin（缺省 chat 零回归） |
+| 修改 | backend/app/modules/daemon/session/service/read_model.py | D-010④：list_agent_sessions 增 exclude_origin 默认排除蒸馏会话（None=admin debug） |
 
 daemon（sillyhub-daemon/）：**零改动**（蒸馏走既有会话基建，同步走既有 pull/push）。
 
@@ -194,6 +197,7 @@ REST 端点（prefix=/workspaces/{workspace_id}，tag=knowledge；**字面量路
 **洞三（体量护栏缺失）**：R-05 只覆盖失败兜底，无 turn 数/字节预检与分段策略；且数据库读侧注释已写全量重放代价（5000 行 × 50KB），100MB ≈ 两千多行日志，即使补了取数通道也必须分页。
 
 **修复方向（map-reduce，供后续 Wave/变更）**：
+> ⚠️ **实现期修正（D-008@v2，commit 2c7873e5e）**：方向 2 的前提经源码调查不成立——spec 树三策略统一下发 daemon 本地 `~/.sillyhub/daemon/specs/{ws_id}` 且 `knowledge/` 在上行同步集内，洞二实为「树在缺指路」已用 `--spec-dir` 指路修复；洞一实际落定走**附件通道**（导出→attachment_ids→daemon 落盘 attachments/，`.runtime` 方案因同步排除集不可行）；洞三三重护栏已落地（turn>2000/单条 8KB/总量 19MB）。详见 decisions.md D-008@v2。以下原文保留作探索记录：
 1. **补取数通道（首选）**：后端把会话记录分页导出为临时文件落 workspace（如 `.sillyspec/.runtime/distill-sources/<session_id>.md`），prompt 从「读会话 session_id」改为「读这个文件路径」——agent 用 grep/head/tail/分片增量啃，CLI agent 天生工具支持。代价最小。
 2. **变更源回流**：平台直写候选后，经既有 spec 同步下行 bundle 预置到 daemon 本地（或明确 repo-native 场景为受支持路径）。
 3. **超阈值分段派发**：turn 数超阈值的会话按区间拆多个蒸馏任务各自出候选，人工审核流天然合并（reduce）；prompt 模板增「先看目录/结构→grep 关键段落→分段提炼」增量读取指引。

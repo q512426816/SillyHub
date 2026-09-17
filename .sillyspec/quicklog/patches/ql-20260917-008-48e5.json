@@ -1,0 +1,124 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-f99ee820",
+  "totals": {
+    "files": 10,
+    "additions": 506,
+    "deletions": 58
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/agent/model.py",
+      "declared": true,
+      "additions": 14,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+      "declared": true,
+      "additions": 20,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/schema.py",
+      "declared": true,
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/queue.py",
+      "declared": true,
+      "additions": 54,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/thinking_level.py",
+      "declared": true,
+      "additions": 64,
+      "deletions": 12,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_queue.py",
+      "declared": true,
+      "additions": 150,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_thinking_level_endpoint.py",
+      "declared": true,
+      "additions": 46,
+      "deletions": 8,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+      "declared": true,
+      "additions": 71,
+      "deletions": 18,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-config-bar.tsx",
+      "declared": true,
+      "additions": 42,
+      "deletions": 20,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/migrations/versions/20260917160000_add_queued_model_and_pending_thinking_level.py",
+      "declared": true,
+      "additions": 42,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 12,
+    "codeFileCount": 9,
+    "testFileCount": 3,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [
+      {
+        "pattern": "migration",
+        "file": "backend/migrations/versions/20260917160000_add_queued_model_and_pending_thinking_level.py"
+      }
+    ],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "required"
+    }
+  },
+  "qlId": "ql-20260917-008-48e5",
+  "sessionId": "quick-f99ee820",
+  "savedAt": "2026-09-17T09:22:58.800Z",
+  "patchSha256": "e7fcda356d579e89c24eed9bfc1efc57238252db4dfa28645600ba26d01a4dfb",
+  "patchStatus": "ok"
+}

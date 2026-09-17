@@ -65,12 +65,15 @@ def test_agent_session_has_all_29_fields() -> None:
         # 2026-09-07-session-pin-rename-scheduled-send task-01：会话置顶时间戳列
         # （NULL=未置顶，排序前置谓词消费）。
         "pinned_at",
+        # ql-20260917-008：忙轮暂存的思考档位（七档词表值；None = 无暂存）——
+        # run 终态钩子经 RPC 应用到 daemon 后清列。
+        "pending_thinking_level",
     }
     actual = set(AgentSession.model_fields.keys())
     assert actual == expected, (
         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
-    assert len(AgentSession.model_fields) == 29
+    assert len(AgentSession.model_fields) == 30
 
 
 def test_agent_session_defaults() -> None:

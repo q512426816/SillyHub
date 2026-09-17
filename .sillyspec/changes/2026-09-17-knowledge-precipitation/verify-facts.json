@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-17-knowledge-precipitation",
+  "generatedAt": "2026-09-17T11:32:41.693Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-17-knowledge-precipitation",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 2
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-17-knowledge-precipitation",
+      "metrics": {
+        "tasks": 10,
+        "hasTest": 10
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-17-knowledge-precipitation",
+      "metrics": {
+        "backendEndpoints": 5892,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-17-knowledge-precipitation",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-17-knowledge-precipitation",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    }
+  }
+}
