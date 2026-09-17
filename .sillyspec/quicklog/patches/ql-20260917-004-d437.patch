@@ -1,0 +1,1125 @@
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index eb84bedae..efd5a67ad 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -411,7 +411,9 @@ class ChangeService:
+ 
+     # ── File tree (task-03/04/05/07, 2026-07-02-change-detail-file-tree-editor) ──
+ 
+-    # is_text 判定的文本扩展名（编辑器对非文本只读，D-007）
++    # is_text 判定的文本扩展名（编辑器对非文本只读，D-007）。
++    # ql-20260917-004：补 .log/.patch/.diff——verify-logs/*.log 与 scope-audit.patch
++    # 此前被误判非文本，文件树给「非文本文件」占位、全屏预览落 fallback。
+     _TEXT_SUFFIXES = frozenset(
+         {
+             ".md",
+@@ -422,6 +424,9 @@ class ChangeService:
+             ".yml",
+             ".json",
+             ".txt",
++            ".log",
++            ".patch",
++            ".diff",
+         }
+     )
+ 
+diff --git a/frontend/src/components/__tests__/change-file-tree.test.tsx b/frontend/src/components/__tests__/change-file-tree.test.tsx
+index 6d2b1abe2..bab408168 100644
+--- a/frontend/src/components/__tests__/change-file-tree.test.tsx
++++ b/frontend/src/components/__tests__/change-file-tree.test.tsx
+@@ -175,6 +175,81 @@ describe("ChangeFileTree", () => {
+     await waitFor(() => expect(screen.getByDisplayValue("key: value")).toBeInTheDocument());
+   });
+ 
++  // ── ql-20260917-004：固定结构产物可视化（json 折叠树 / diff 红绿）──────
++  it("json 文件默认预览渲染折叠树（scope-audit 等固定结构产物）", async () => {
++    mockedListChangeFiles.mockResolvedValue({
++      change_id: "c1",
++      items: [
++        { path: "scope-audit.json", name: "scope-audit.json", size: 40, last_modified_at: null, is_text: true },
++      ],
++    });
++    mockedGetContent.mockResolvedValue({
++      path: "scope-audit.json",
++      content: '{"ok": true, "totals": {"files": 9}}',
++      exists: true,
++    });
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("scope-audit.json")).toBeInTheDocument());
++    fireEvent.click(screen.getByText("scope-audit.json"));
++    await waitFor(() => expect(screen.getByTestId("json-view")).toBeInTheDocument());
++    expect(screen.getByText("ok:")).toBeInTheDocument();
++    expect(screen.getByText("true")).toBeInTheDocument();
++  });
++
++  it("非法 json 内容回落纯文本源码", async () => {
++    mockedListChangeFiles.mockResolvedValue({
++      change_id: "c1",
++      items: [
++        { path: "broken.json", name: "broken.json", size: 10, last_modified_at: null, is_text: true },
++      ],
++    });
++    mockedGetContent.mockResolvedValue({ path: "broken.json", content: "{oops", exists: true });
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("broken.json")).toBeInTheDocument());
++    fireEvent.click(screen.getByText("broken.json"));
++    await waitFor(() => expect(screen.getByText("{oops")).toBeInTheDocument());
++    expect(screen.queryByTestId("json-view")).not.toBeInTheDocument();
++  });
++
++  it("patch 文件默认预览渲染红绿 diff（scope-audit.patch）", async () => {
++    mockedListChangeFiles.mockResolvedValue({
++      change_id: "c1",
++      items: [
++        { path: "scope-audit.patch", name: "scope-audit.patch", size: 60, last_modified_at: null, is_text: true },
++      ],
++    });
++    mockedGetContent.mockResolvedValue({
++      path: "scope-audit.patch",
++      content: "--- a/x.ts\n+++ b/x.ts\n@@ -1,1 +1,2 @@\n-old\n+new\n ctx",
++      exists: true,
++    });
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("scope-audit.patch")).toBeInTheDocument());
++    fireEvent.click(screen.getByText("scope-audit.patch"));
++    const diff = await waitFor(() => screen.getByTestId("diff-view"));
++    expect(diff.querySelectorAll('[data-diff-kind="add"]').length).toBe(1);
++    expect(diff.querySelectorAll('[data-diff-kind="del"]').length).toBe(1);
++  });
++
++  it("log 文件按纯文本预览（不再判非文本）", async () => {
++    mockedListChangeFiles.mockResolvedValue({
++      change_id: "c1",
++      items: [
++        { path: "verify-logs/daemon-start.log", name: "daemon-start.log", size: 20, last_modified_at: null, is_text: true },
++      ],
++    });
++    mockedGetContent.mockResolvedValue({
++      path: "verify-logs/daemon-start.log",
++      content: "[2026-09-17] daemon started",
++      exists: true,
++    });
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("daemon-start.log")).toBeInTheDocument());
++    fireEvent.click(screen.getByText("daemon-start.log"));
++    await waitFor(() => expect(screen.getByText("[2026-09-17] daemon started")).toBeInTheDocument());
++    expect(screen.queryByText(/非文本文件/)).not.toBeInTheDocument();
++  });
++
+   it("编辑后点「预览」切回，渲染最新未保存内容（不丢改动）", async () => {
+     renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+     await waitFor(() => expect(screen.getByText("proposal.md")).toBeInTheDocument());
+diff --git a/frontend/src/components/change-file-tree.tsx b/frontend/src/components/change-file-tree.tsx
+index 28b16b0a2..be44d2360 100644
+--- a/frontend/src/components/change-file-tree.tsx
++++ b/frontend/src/components/change-file-tree.tsx
+@@ -18,6 +18,8 @@ import { FileNodeIcon, fileExt } from "@/components/ui/file-node-icon";
+ // 交付物，仅按契约消费，不改本体）
+ import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
+ import { useObjectUrl } from "@/components/files/use-object-url";
++// ql-20260917-004：固定结构产物可视化视图（json 折叠树 / diff 红绿）
++import { DiffView, JsonView, tryParseJson } from "@/components/files/structured-views";
+ // ql-20260910-017-2006：单文件变化比对弹窗（changeKey 提供时选中文件头部入口）
+ import { ScopeFileDiffModal } from "@/components/changes/scope-file-diff-modal";
+ import { ApiError } from "@/lib/api";
+@@ -110,6 +112,23 @@ function FilePreview({
+       </div>
+     );
+   }
++  // ql-20260917-004：固定结构产物可视化——.json 折叠树（scope-audit/
++  // apply-manifest/verify-facts 等）；非法 json 落下方纯文本分支。
++  if (fileExt(path) === "json") {
++    const parsed = tryParseJson(content);
++    if (parsed !== null) {
++      return (
++        <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40">
++          <JsonView value={parsed} />
++        </div>
++      );
++    }
++  }
++  // .patch/.diff 红绿视图（scope-audit.patch 等）；非 diff 格式由 DiffView
++  // 内部回落纯文本
++  if (fileExt(path) === "patch" || fileExt(path) === "diff") {
++    return <DiffView content={content} />;
++  }
+   // 其他纯文本：只读源码预览（点「编辑」才可改）。whitespace-pre：不折行，超宽横向滚动
+   return (
+     <pre className="min-w-0 flex-1 overflow-auto rounded-md border border-input bg-background p-3 font-mono text-xs leading-relaxed whitespace-pre">
+diff --git a/frontend/src/components/files/__tests__/file-preview-modal.test.tsx b/frontend/src/components/files/__tests__/file-preview-modal.test.tsx
+index ad927e101..a0ba64e6d 100644
+--- a/frontend/src/components/files/__tests__/file-preview-modal.test.tsx
++++ b/frontend/src/components/files/__tests__/file-preview-modal.test.tsx
+@@ -27,6 +27,10 @@ vi.mock("../previewers", () => ({
+   MarkdownPreviewer: () => <div data-testid="markdown-previewer" />,
+   HtmlPreviewer: () => <div data-testid="html-previewer" />,
+   FallbackPreviewer: () => <div data-testid="fallback-previewer" />,
++  // ql-20260917-004：json/patch/text 渲染器 stub（匹配规则见 preview-registry 单测）
++  JsonPreviewer: () => <div data-testid="json-previewer" />,
++  PatchPreviewer: () => <div data-testid="patch-previewer" />,
++  TextPreviewer: () => <div data-testid="text-previewer" />,
+ }));
+ 
+ const mockFetch = vi.fn(() => Promise.resolve(new Blob(["test"], { type: "text/plain" })));
+@@ -137,6 +141,44 @@ describe("FilePreviewModal", () => {
+     );
+     expect(screen.getByTestId("html-previewer")).toBeInTheDocument();
+   });
++
++  // ── ql-20260917-004：json / patch / text 渲染器接入 RENDERER_MAP ──
++  it("json blob 分发到 JsonPreviewer", () => {
++    mockOk(new Blob(["{}"], { type: "application/json" }));
++    render(
++      <FilePreviewModal
++        target={{ fetch: mockFetch, meta: { name: "scope-audit.json", size: 10 } }}
++        open
++        onClose={vi.fn()}
++      />,
++    );
++    expect(screen.getByTestId("json-previewer")).toBeInTheDocument();
++  });
++
++  it("octet-stream blob + .patch 扩展名分发到 PatchPreviewer", () => {
++    mockOk(new Blob(["diff --git"], { type: "application/octet-stream" }));
++    render(
++      <FilePreviewModal
++        target={{ fetch: mockFetch, meta: { name: "scope-audit.patch", size: 10 } }}
++        open
++        onClose={vi.fn()}
++      />,
++    );
++    expect(screen.getByTestId("patch-previewer")).toBeInTheDocument();
++  });
++
++  it("text/plain blob + .log 扩展名分发到 TextPreviewer（此前落 fallback）", () => {
++    mockOk(new Blob(["[log]"], { type: "text/plain" }));
++    render(
++      <FilePreviewModal
++        target={{ fetch: mockFetch, meta: { name: "daemon-start.log", size: 10 } }}
++        open
++        onClose={vi.fn()}
++      />,
++    );
++    expect(screen.getByTestId("text-previewer")).toBeInTheDocument();
++    expect(screen.queryByTestId("fallback-previewer")).not.toBeInTheDocument();
++  });
+ });
+ 
+ // ── ql-20260826-011：office-config mode=pdf（LibreOffice→PDF）分支 ──
+diff --git a/frontend/src/components/files/__tests__/preview-registry.test.ts b/frontend/src/components/files/__tests__/preview-registry.test.ts
+index 3f3ac1ba7..6084cc36b 100644
+--- a/frontend/src/components/files/__tests__/preview-registry.test.ts
++++ b/frontend/src/components/files/__tests__/preview-registry.test.ts
+@@ -104,4 +104,36 @@ describe("matchRenderer", () => {
+   it("doc → fallback（旧格式不在范围——纯前端无 Word 二进制保真渲染）", () => {
+     expect(matchRenderer(null, "legacy.doc")).toBe("fallback");
+   });
++
++  // ---- ql-20260917-004：json/patch/text 三类结构化渲染器 ----
++  it("application/json MIME → json", () => {
++    expect(matchRenderer("application/json", "scope-audit.bin")).toBe("json");
++  });
++
++  it.each(["scope-audit.json", "apply-manifest.json", "verify-facts.json"])(
++    "%s 扩展名 → json",
++    (filename) => {
++      expect(matchRenderer(null, filename)).toBe("json");
++    },
++  );
++
++  it.each(["scope-audit.patch", "ql-1abc2345.patch", "changes.diff"])(
++    "%s 扩展名 → patch",
++    (filename) => {
++      expect(matchRenderer(null, filename)).toBe("patch");
++    },
++  );
++
++  it.each(["text/plain", "text/x-log"])("%s MIME → text", (mime) => {
++    expect(matchRenderer(mime, "file.bin")).toBe("text");
++  });
++
++  it.each(["daemon-start.log", "README.txt"])("%s 扩展名 → text", (filename) => {
++    expect(matchRenderer(null, filename)).toBe("text");
++  });
++
++  it("八进制流 mime + log 扩展名 → text（raw 端点对 .patch/.log 可能回 octet-stream，扩展名兜底）", () => {
++    expect(matchRenderer("application/octet-stream", "scope-audit.patch")).toBe("patch");
++    expect(matchRenderer("application/octet-stream", "daemon-start.log")).toBe("text");
++  });
+ });
+diff --git a/frontend/src/components/files/__tests__/structured-views.test.tsx b/frontend/src/components/files/__tests__/structured-views.test.tsx
+new file mode 100644
+index 000000000..d14ad5313
+--- /dev/null
++++ b/frontend/src/components/files/__tests__/structured-views.test.tsx
+@@ -0,0 +1,95 @@
++/**
++ * structured-views 单测（ql-20260917-004）：JsonView 折叠树 / DiffView 红绿渲染。
++ */
++
++import { fireEvent, render, screen } from "@testing-library/react";
++import { describe, expect, it } from "vitest";
++
++import { DiffView, JsonView, tryParseJson } from "../structured-views";
++
++describe("tryParseJson", () => {
++  it("合法 json → 解析值", () => {
++    expect(tryParseJson('{"a":1}')).toEqual({ a: 1 });
++  });
++
++  it("非法 json → null（调用方回落纯文本）", () => {
++    expect(tryParseJson("{oops")).toBeNull();
++    expect(tryParseJson("")).toBeNull();
++  });
++});
++
++describe("JsonView", () => {
++  const sample = {
++    mode: "full-flow",
++    ok: true,
++    totals: { files: 9, additions: 1916 },
++    rows: [
++      { path: "a.tsx", additions: 3, deletions: 3, verdict: "planned" },
++      { path: "b.tsx", additions: 7, deletions: 0, verdict: "planned" },
++    ],
++    degradedReason: null,
++  };
++
++  it("渲染顶层键与嵌套值（前两层默认展开）", () => {
++    render(<JsonView value={sample} />);
++    expect(screen.getByText("mode:")).toBeInTheDocument();
++    expect(screen.getByText('"full-flow"')).toBeInTheDocument();
++    expect(screen.getByText("totals:")).toBeInTheDocument();
++    expect(screen.getByText("files:")).toBeInTheDocument();
++    expect(screen.getByText("1916")).toBeInTheDocument();
++    expect(screen.getAllByTestId("json-branch").length).toBeGreaterThan(0);
++  });
++
++  it("第三层默认折叠（rows 内对象收起），点击可收起父层", () => {
++    render(<JsonView value={sample} />);
++    // rows（depth 1）默认展开，其元素分支（depth 2）默认折叠——path 键不可见
++    expect(screen.queryByText("path:")).toBeNull();
++    const rowsBranch = screen.getByText("rows:").closest("button");
++    expect(rowsBranch).not.toBeNull();
++    fireEvent.click(rowsBranch!);
++    // 收起后以摘要呈现
++    expect(screen.getByText("[ … ] 2 项")).toBeInTheDocument();
++  });
++
++  it("数组摘要与原始值类型着色（null 斜体类）", () => {
++    render(<JsonView value={sample} />);
++    expect(screen.getByText("degradedReason:")).toBeInTheDocument();
++    const nullValue = screen.getByText("null");
++    expect(nullValue.className).toContain("italic");
++  });
++});
++
++describe("DiffView", () => {
++  const diffText = [
++    "diff --git a/x.ts b/x.ts",
++    "index 123..456 100644",
++    "--- a/x.ts",
++    "+++ b/x.ts",
++    "@@ -1,3 +1,4 @@",
++    " context line",
++    "-removed line",
++    "+added line",
++    " tail line",
++  ].join("\n");
++
++  it("解析 unified diff：hunk/add/del/ctx 行齐全且跳过文件头", () => {
++    render(<DiffView content={diffText} />);
++    const root = screen.getByTestId("diff-view");
++    expect(root.textContent).toContain("@@ -1,3 +1,4 @@");
++    expect(root.querySelectorAll('[data-diff-kind="add"]').length).toBe(1);
++    expect(root.querySelectorAll('[data-diff-kind="del"]').length).toBe(1);
++    expect(root.querySelectorAll('[data-diff-kind="ctx"]').length).toBe(2);
++    // 文件头（diff --git / index / --- / +++）不渲染
++    expect(root.textContent).not.toContain("diff --git");
++  });
++
++  it("非 diff 内容回落纯文本（无 hunk）", () => {
++    render(<DiffView content="就是一段普通文本" />);
++    expect(screen.getByTestId("diff-view-raw").textContent).toContain("就是一段普通文本");
++  });
++
++  it("空内容回落（空文件）", () => {
++    render(<DiffView content="" />);
++    expect(screen.getByTestId("diff-view-raw").textContent).toContain("（空文件）");
++  });
++});
+diff --git a/frontend/src/components/files/__tests__/wheel-scroll-unlock.test.ts b/frontend/src/components/files/__tests__/wheel-scroll-unlock.test.ts
+new file mode 100644
+index 000000000..682fb4875
+--- /dev/null
++++ b/frontend/src/components/files/__tests__/wheel-scroll-unlock.test.ts
+@@ -0,0 +1,107 @@
++/**
++ * wheel-scroll-unlock 单测（ql-20260917-004）。
++ *
++ * jsdom 无真实布局：scrollHeight/clientHeight 默认 0，需在元素上直接赋值
++ * 模拟溢出；getComputedStyle 只回内联样式，overflow 用内联 style 设置。
++ * 事件从内容元素自然派发（冒泡经 document 捕获监听），不伪造 target。
++ */
++
++import { describe, expect, it, afterEach } from "vitest";
++
++import { attachWheelUnlock, findScrollableAncestor, wheelDeltaPixels } from "../wheel-scroll-unlock";
++
++function buildDom() {
++  document.body.innerHTML = "";
++  const root = document.createElement("div");
++  root.className = "file-preview-modal-root";
++  const wrapper = document.createElement("div");
++  wrapper.style.overflowY = "auto";
++  // jsdom 布局度量缺省 0：手工赋值模拟「可滚 100px 溢出」
++  Object.defineProperty(wrapper, "scrollHeight", { value: 800, configurable: true });
++  Object.defineProperty(wrapper, "clientHeight", { value: 400, configurable: true });
++  const content = document.createElement("p");
++  content.textContent = "markdown 行";
++  wrapper.appendChild(content);
++  root.appendChild(wrapper);
++  document.body.appendChild(root);
++  return { root, wrapper, content };
++}
++
++describe("findScrollableAncestor", () => {
++  it("从深层节点向上找到可滚容器", () => {
++    const { root, wrapper, content } = buildDom();
++    expect(findScrollableAncestor(content, root, "y")).toBe(wrapper);
++  });
++
++  it("无可滚祖先 → null", () => {
++    const { root, wrapper, content } = buildDom();
++    // 去掉 overflow（保持 DOM 祖先链完整——remove 会留下 detached 父子关系）
++    wrapper.removeAttribute("style");
++    expect(findScrollableAncestor(content, root, "y")).toBeNull();
++  });
++});
++
++describe("wheelDeltaPixels", () => {
++  it("像素模式原样返回", () => {
++    expect(wheelDeltaPixels(120, 0, document.body)).toBe(120);
++  });
++
++  it("行模式 ×16", () => {
++    expect(wheelDeltaPixels(3, 1, document.body)).toBe(48);
++  });
++
++  it("页模式 × clientHeight", () => {
++    const el = document.createElement("div");
++    Object.defineProperty(el, "clientHeight", { value: 500, configurable: true });
++    expect(wheelDeltaPixels(2, 2, el)).toBe(1000);
++  });
++});
++
++describe("attachWheelUnlock", () => {
++  let detach: (() => void) | null = null;
++
++  afterEach(() => {
++    detach?.();
++    detach = null;
++    document.body.removeAttribute("data-scroll-locked");
++    document.body.innerHTML = "";
++  });
++
++  it("锁激活 + 事件在弹窗根内 → 手动滚动并接管默认行为", () => {
++    const { content, wrapper } = buildDom();
++    document.body.setAttribute("data-scroll-locked", "1");
++    detach = attachWheelUnlock(".file-preview-modal-root");
++    const ev = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
++    content.dispatchEvent(ev);
++    expect(ev.defaultPrevented).toBe(true);
++    expect(wrapper.scrollTop).toBe(120);
++  });
++
++  it("无锁时不介入（默认行为交还浏览器）", () => {
++    const { content, wrapper } = buildDom();
++    detach = attachWheelUnlock(".file-preview-modal-root");
++    const ev = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
++    content.dispatchEvent(ev);
++    expect(ev.defaultPrevented).toBe(false);
++    expect(wrapper.scrollTop).toBe(0);
++  });
++
++  it("锁激活但事件在弹窗外 → 不动", () => {
++    document.body.setAttribute("data-scroll-locked", "1");
++    const outside = document.createElement("div");
++    document.body.appendChild(outside);
++    detach = attachWheelUnlock(".file-preview-modal-root");
++    const ev = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
++    outside.dispatchEvent(ev);
++    expect(ev.defaultPrevented).toBe(false);
++  });
++
++  it("ctrl+滚轮（缩放）不接管", () => {
++    const { content } = buildDom();
++    document.body.setAttribute("data-scroll-locked", "1");
++    detach = attachWheelUnlock(".file-preview-modal-root");
++    const ev = new WheelEvent("wheel", { deltaY: 120, ctrlKey: true, bubbles: true, cancelable: true });
++    content.dispatchEvent(ev);
++    expect(ev.defaultPrevented).toBe(false);
++  });
++});
+diff --git a/frontend/src/components/files/file-preview-modal.tsx b/frontend/src/components/files/file-preview-modal.tsx
+index 33449fa2d..a255c5167 100644
+--- a/frontend/src/components/files/file-preview-modal.tsx
++++ b/frontend/src/components/files/file-preview-modal.tsx
+@@ -27,6 +27,8 @@ import { apiFetch } from "@/lib/api";
+ import { FileTypeIcon, formatFileSize } from "@/lib/file/utils";
+ import { useObjectUrl } from "./use-object-url";
+ import { matchRenderer } from "./preview-registry";
++// ql-20260917-004：json/patch/text 渲染器 + radix 滚轮锁解锁（见 wheel-scroll-unlock 头注）
++import { attachWheelUnlock } from "./wheel-scroll-unlock";
+ import {
+   HtmlPreviewer,
+   ImagePreviewer,
+@@ -35,6 +37,9 @@ import {
+   XlsxPreviewer,
+   MarkdownPreviewer,
+   FallbackPreviewer,
++  JsonPreviewer,
++  PatchPreviewer,
++  TextPreviewer,
+   type PreviewerProps,
+ } from "./previewers";
+ import { OnlyofficePreviewer } from "./previewers/onlyoffice-previewer";
+@@ -78,6 +83,10 @@ const RENDERER_MAP: Record<string, ComponentType<PreviewerProps>> = {
+   xlsx: XlsxPreviewer,
+   markdown: MarkdownPreviewer,
+   html: HtmlPreviewer,
++  // ql-20260917-004：json 折叠树 / diff 红绿 / 纯文本（.log 等此前落 fallback）
++  json: JsonPreviewer,
++  patch: PatchPreviewer,
++  text: TextPreviewer,
+   fallback: FallbackPreviewer,
+ };
+ 
+@@ -88,6 +97,9 @@ const RENDERER_MAP: Record<string, ComponentType<PreviewerProps>> = {
+  */
+ const OFFICE_EXTS = new Set(["doc", "docx", "ppt", "pptx"]);
+ 
++/** 弹窗根类名：滚轮解锁监听按它界定「事件在本弹窗内」（ql-20260917-004）。 */
++const MODAL_ROOT_CLASS = "file-preview-modal-root";
++
+ function extOf(name: string): string {
+   const dot = name.lastIndexOf(".");
+   return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+@@ -121,6 +133,14 @@ export function FilePreviewModal({
+     if (open) setFullscreen(defaultFullscreen);
+   }, [open, defaultFullscreen]);
+ 
++  // ql-20260917-004：滚轮解锁——本弹窗叠在 radix Dialog 上时，后者的
++  // react-remove-scroll 会吞掉弹窗内滚轮/触摸滚动的默认行为（见
++  // wheel-scroll-unlock 头注），捕获阶段手动完成滚动。无锁时不介入。
++  useEffect(() => {
++    if (!open || typeof document === "undefined") return;
++    return attachWheelUnlock(`.${MODAL_ROOT_CLASS}`);
++  }, [open]);
++
+   // 进入全屏锁 body 滚动、退出/卸载还原（agent-log-viewer.tsx L836-842 先例）。
+   // antd Modal 打开本身已锁滚动，此处仅兜底嵌套二次弹层场景；open=false 时
+   // 立即解锁，防 Esc 直接关窗后 fullscreen 残留 hidden。
+@@ -325,6 +345,8 @@ export function FilePreviewModal({
+       open={open}
+       onCancel={onClose}
+       footer={null}
++      // 弹窗根打标（ql-20260917-004）：滚轮解锁监听按此类界定事件归属
++      classNames={{ root: MODAL_ROOT_CLASS }}
+       width={fullscreen ? "100vw" : "min(960px, 94vw)"}
+       // 全屏需一并覆盖 .ant-modal 根默认的 top:100 与 max-width: calc(100vw-32px)
+       // （antd v6 中 width 挂根节点 style，但被默认 max-width 截窄）。普通态不传 style。
+diff --git a/frontend/src/components/files/preview-registry.ts b/frontend/src/components/files/preview-registry.ts
+index dfe5464be..26a5a437f 100644
+--- a/frontend/src/components/files/preview-registry.ts
++++ b/frontend/src/components/files/preview-registry.ts
+@@ -10,7 +10,7 @@
+  * 依据：design.md §5 + §7。
+  */
+ 
+-export type RendererKey = "image" | "pdf" | "docx" | "xlsx" | "markdown" | "html" | "fallback";
++export type RendererKey = "image" | "pdf" | "docx" | "xlsx" | "markdown" | "html" | "json" | "patch" | "text" | "fallback";
+ 
+ // svg/bmp/ico（2026-08-26-file-fullscreen-preview）：explorer 内联图片含这三类，
+ // 统一预览需一致可看（Design Grill C-05）。
+@@ -30,6 +30,11 @@ const MIME_MAP: Record<string, RendererKey> = {
+   "text/markdown": "markdown",
+   // 2026-08-26-file-fullscreen-preview：HTML 原型走 iframe sandbox 渲染（此前落 fallback）
+   "text/html": "html",
++  // ql-20260917-004：json 结构化视图 / 纯文本渲染器（.log 全屏此前落 fallback）
++  "application/json": "json",
++  "text/plain": "text",
++  // mimetypes.guess_type 对 .log 在部分平台返回 text/x-log
++  "text/x-log": "text",
+ };
+ 
+ const EXT_MAP: Record<string, RendererKey> = {
+@@ -41,6 +46,10 @@ const EXT_MAP: Record<string, RendererKey> = {
+   // SheetJS 表格还原度差、OnlyOffice 已退役；预览弹窗内下载本机查看。
+   md: "markdown", markdown: "markdown",
+   html: "html", htm: "html",
++  // ql-20260917-004：json 折叠树 / unified diff 红绿视图 / 纯文本
++  json: "json",
++  patch: "patch", diff: "patch",
++  log: "text", txt: "text",
+ };
+ 
+ function matchByMime(mime: string): RendererKey | null {
+diff --git a/frontend/src/components/files/previewers/index.ts b/frontend/src/components/files/previewers/index.ts
+index 26a237b2d..5344d21b1 100644
+--- a/frontend/src/components/files/previewers/index.ts
++++ b/frontend/src/components/files/previewers/index.ts
+@@ -25,3 +25,8 @@ export { DocxPreviewer } from "./docx-previewer";
+ export { XlsxPreviewer } from "./xlsx-previewer";
+ export { MarkdownPreviewer } from "./markdown-previewer";
+ export { HtmlPreviewer } from "./html-previewer";
++// ql-20260917-004：json/patch/text 三类结构化渲染器（固定结构产物可视化 +
++// .log 等文本文件全屏预览，此前落 fallback 下载卡片）
++export { JsonPreviewer } from "./json-previewer";
++export { PatchPreviewer } from "./patch-previewer";
++export { TextPreviewer } from "./text-previewer";
+diff --git a/frontend/src/components/files/previewers/json-previewer.tsx b/frontend/src/components/files/previewers/json-previewer.tsx
+new file mode 100644
+index 000000000..a458929fb
+--- /dev/null
++++ b/frontend/src/components/files/previewers/json-previewer.tsx
+@@ -0,0 +1,73 @@
++"use client";
++
++/**
++ * JsonPreviewer — JSON 渲染器（ql-20260917-004）。
++ *
++ * blob.text() → tryParseJson → JsonView（共享结构化视图：折叠/着色）；
++ * 解析失败回落纯文本（json 扩展名不保证内容合法）。
++ * 统一消费 PreviewerProps。
++ */
++
++import { useEffect, useState } from "react";
++
++import { JsonView, tryParseJson } from "@/components/files/structured-views";
++import type { PreviewerProps } from "./index";
++
++export function JsonPreviewer({ blob, fill }: PreviewerProps) {
++  const [text, setText] = useState<string | null>(null);
++  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
++  const [error, setError] = useState<string | null>(null);
++
++  useEffect(() => {
++    let cancelled = false;
++    setStatus("loading");
++    setError(null);
++    blob
++      .text()
++      .then((t: string) => {
++        if (!cancelled) {
++          setText(t);
++          setStatus("ok");
++        }
++      })
++      .catch((e: unknown) => {
++        if (!cancelled) {
++          setError(e instanceof Error ? e.message : "读取失败");
++          setStatus("error");
++        }
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, [blob]);
++
++  if (status === "loading") {
++    return (
++      <div className="flex min-h-[420px] items-center justify-center p-8 text-slate-500">
++        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
++        <span className="ml-3">正在读取 JSON…</span>
++      </div>
++    );
++  }
++  if (status === "error") {
++    return (
++      <div className="flex min-h-[420px] flex-col items-center justify-center gap-2 p-8 text-center">
++        <p className="text-sm font-semibold text-slate-700">JSON 读取失败</p>
++        <p className="max-w-md text-xs text-slate-500">{error}</p>
++      </div>
++    );
++  }
++
++  const parsed = text !== null ? tryParseJson(text) : null;
++  const wrap = fill ? "h-full min-h-[420px] w-full overflow-auto p-4" : "max-h-[60vh] w-full overflow-auto p-4";
++  return (
++    <div className={wrap}>
++      {parsed !== null ? (
++        <JsonView value={parsed} />
++      ) : (
++        // 非法 JSON：纯文本兜底（json 扩展名不保证内容合法）
++        <pre className="min-w-0 font-mono text-xs leading-relaxed whitespace-pre-wrap">{text}</pre>
++      )}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/files/previewers/patch-previewer.tsx b/frontend/src/components/files/previewers/patch-previewer.tsx
+new file mode 100644
+index 000000000..9b7022193
+--- /dev/null
++++ b/frontend/src/components/files/previewers/patch-previewer.tsx
+@@ -0,0 +1,67 @@
++"use client";
++
++/**
++ * PatchPreviewer — unified diff 渲染器（ql-20260917-004）。
++ *
++ * scope-audit.patch / quicklog patches 等统一 diff 文本：DiffView 共享
++ * 红绿渲染（parseUnifiedDiff + 行号）；非 diff 格式由 DiffView 内部回落
++ * 纯文本。统一消费 PreviewerProps。
++ */
++
++import { useEffect, useState } from "react";
++
++import { DiffView } from "@/components/files/structured-views";
++import type { PreviewerProps } from "./index";
++
++export function PatchPreviewer({ blob, fill }: PreviewerProps) {
++  const [text, setText] = useState<string | null>(null);
++  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
++  const [error, setError] = useState<string | null>(null);
++
++  useEffect(() => {
++    let cancelled = false;
++    setStatus("loading");
++    setError(null);
++    blob
++      .text()
++      .then((t: string) => {
++        if (!cancelled) {
++          setText(t);
++          setStatus("ok");
++        }
++      })
++      .catch((e: unknown) => {
++        if (!cancelled) {
++          setError(e instanceof Error ? e.message : "读取失败");
++          setStatus("error");
++        }
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, [blob]);
++
++  if (status === "loading") {
++    return (
++      <div className="flex min-h-[420px] items-center justify-center p-8 text-slate-500">
++        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
++        <span className="ml-3">正在读取 diff…</span>
++      </div>
++    );
++  }
++  if (status === "error") {
++    return (
++      <div className="flex min-h-[420px] flex-col items-center justify-center gap-2 p-8 text-center">
++        <p className="text-sm font-semibold text-slate-700">diff 读取失败</p>
++        <p className="max-w-md text-xs text-slate-500">{error}</p>
++      </div>
++    );
++  }
++
++  const wrap = fill ? "flex h-full min-h-[420px] w-full flex-col p-4" : "flex max-h-[60vh] w-full flex-col p-4";
++  return (
++    <div className={wrap}>
++      <DiffView content={text ?? ""} />
++    </div>
++  );
++}
+diff --git a/frontend/src/components/files/previewers/text-previewer.tsx b/frontend/src/components/files/previewers/text-previewer.tsx
+new file mode 100644
+index 000000000..0cb8c524c
+--- /dev/null
++++ b/frontend/src/components/files/previewers/text-previewer.tsx
+@@ -0,0 +1,69 @@
++"use client";
++
++/**
++ * TextPreviewer — 纯文本渲染器（ql-20260917-004）。
++ *
++ * .log / .txt 等文本文件此前全屏预览落 fallback 下载卡片；此渲染器按
++ * 等宽字体直出（长行折行——全屏弹窗内横向滚动看日志体验差）。统一消费
++ * PreviewerProps。
++ */
++
++import { useEffect, useState } from "react";
++
++import type { PreviewerProps } from "./index";
++
++export function TextPreviewer({ blob, fill }: PreviewerProps) {
++  const [text, setText] = useState<string | null>(null);
++  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
++  const [error, setError] = useState<string | null>(null);
++
++  useEffect(() => {
++    let cancelled = false;
++    setStatus("loading");
++    setError(null);
++    blob
++      .text()
++      .then((t: string) => {
++        if (!cancelled) {
++          setText(t);
++          setStatus("ok");
++        }
++      })
++      .catch((e: unknown) => {
++        if (!cancelled) {
++          setError(e instanceof Error ? e.message : "读取失败");
++          setStatus("error");
++        }
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, [blob]);
++
++  if (status === "loading") {
++    return (
++      <div className="flex min-h-[420px] items-center justify-center p-8 text-slate-500">
++        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
++        <span className="ml-3">正在读取文本…</span>
++      </div>
++    );
++  }
++  if (status === "error") {
++    return (
++      <div className="flex min-h-[420px] flex-col items-center justify-center gap-2 p-8 text-center">
++        <p className="text-sm font-semibold text-slate-700">文本读取失败</p>
++        <p className="max-w-md text-xs text-slate-500">{error}</p>
++      </div>
++    );
++  }
++
++  const wrap = fill ? "h-full min-h-[420px] w-full overflow-auto p-4" : "max-h-[60vh] w-full overflow-auto p-4";
++  return (
++    <pre
++      data-testid="text-previewer"
++      className={`min-w-0 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words ${wrap}`}
++    >
++      {text || "（空文件）"}
++    </pre>
++  );
++}
+diff --git a/frontend/src/components/files/structured-views.tsx b/frontend/src/components/files/structured-views.tsx
+new file mode 100644
+index 000000000..c81fa2638
+--- /dev/null
++++ b/frontend/src/components/files/structured-views.tsx
+@@ -0,0 +1,197 @@
++"use client";
++
++/**
++ * structured-views — 固定结构文件的可视化视图（ql-20260917-004）。
++ *
++ * 变更目录里的 scope-audit.json / apply-manifest.json / verify-facts.json /
++ * scope-audit.patch 等产物结构固定，纯文本 dump 对人类不友好。本模块提供
++ * 两个共享视图，内联预览（change-file-tree FilePreview）与全屏弹窗
++ * （previewers/json/patch）共用同一渲染，不做两套：
++ * - JsonView：JSON.parse 后的递归折叠树——键/值按类型着色（主题语义
++ *   token），对象/数组可折叠，默认展开前两层，长字符串（sha256）截断。
++ * - DiffView：unified diff 红绿渲染——解析复用 git-log/file-tree 的
++ *   parseUnifiedDiff（维护双侧行号），行样式对齐 scope-file-diff-modal
++ *   （add 绿底/del 红底/hunk muted），5000 行渲染上限同款护栏。
++ *
++ * 视图自身不限高：垂直滚动交给外层容器（内联 flex 链 / 全屏弹窗 body），
++ * 仅横向在 DiffView 行容器出滚动条。
++ */
++
++import { useMemo, useState } from "react";
++import { ChevronRight } from "lucide-react";
++
++import { parseUnifiedDiff } from "@/components/git-log/file-tree";
++import { cn } from "@/lib/utils";
++
++// ── JSON 视图 ─────────────────────────────────────────────────────────
++
++type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
++
++/** 尝试解析；失败返回 null（调用方回落纯文本）。 */
++export function tryParseJson(text: string): JsonValue | null {
++  try {
++    return JSON.parse(text) as JsonValue;
++  } catch {
++    return null;
++  }
++}
++
++/** 折叠态摘要：对象/数组给计数，原始值给截断字面量。 */
++function summaryOf(v: JsonValue): string {
++  if (Array.isArray(v)) return `[ … ] ${v.length} 项`;
++  if (v !== null && typeof v === "object") return `{ … } ${Object.keys(v).length} 键`;
++  return literalOf(v);
++}
++
++function literalOf(v: string | number | boolean | null): string {
++  if (typeof v === "string") return `"${v.length > 48 ? v.slice(0, 48) + "…" : v}"`;
++  return String(v);
++}
++
++function valueClass(v: string | number | boolean | null): string {
++  if (typeof v === "string") return "text-success";
++  if (typeof v === "number") return "text-primary";
++  if (typeof v === "boolean") return "text-warning";
++  return "italic text-muted-foreground"; // null
++}
++
++/** 原始值行：`键: "值"`（键可缺省——数组元素）。 */
++function PrimitiveRow({ k, v }: { k?: string; v: string | number | boolean | null }) {
++  return (
++    <div className="flex min-w-0 items-baseline gap-1.5 py-px font-mono text-xs leading-relaxed">
++      {k !== undefined && <span className="shrink-0 font-medium text-foreground">{k}:</span>}
++      <span className={cn("min-w-0 truncate", valueClass(v))} title={typeof v === "string" ? v : undefined}>
++        {literalOf(v)}
++      </span>
++    </div>
++  );
++}
++
++/** 对象/数组节点行：折叠按钮 + 键 + 结构摘要，展开时缩进渲染子节点。 */
++function BranchNode({ k, v, depth }: { k?: string; v: JsonValue[] | { [key: string]: JsonValue }; depth: number }) {
++  // 默认展开前两层（root=0），更深层折叠——大文件（files 数组等）不一次铺满
++  const [open, setOpen] = useState(depth < 2);
++  const entries = useMemo(() => {
++    if (Array.isArray(v)) return v.map((item, i) => [String(i), item] as const);
++    return Object.entries(v);
++  }, [v]);
++
++  const label = Array.isArray(v) ? `[ ]` : `{ }`;
++
++  return (
++    <div className="min-w-0" data-testid="json-branch">
++      <button
++        type="button"
++        onClick={() => setOpen((o) => !o)}
++        className="flex min-w-0 items-baseline gap-1 rounded py-px text-left font-mono text-xs leading-relaxed hover:bg-muted/60"
++        aria-expanded={open}
++      >
++        <ChevronRight
++          className={cn("h-3 w-3 shrink-0 self-center text-muted-foreground transition-transform", open && "rotate-90")}
++          aria-hidden
++        />
++        {k !== undefined && <span className="shrink-0 font-medium text-foreground">{k}:</span>}
++        <span className="shrink-0 text-muted-foreground">{label}</span>
++        {!open && <span className="min-w-0 truncate text-muted-foreground">{summaryOf(v)}</span>}
++      </button>
++      {open && entries.length > 0 && (
++        <div className="ml-1 border-l border-border pl-3">
++          {entries.map(([ck, cv]) =>
++            Array.isArray(cv) || (cv !== null && typeof cv === "object") ? (
++              <BranchNode key={ck} k={ck} v={cv} depth={depth + 1} />
++            ) : (
++              <PrimitiveRow key={ck} k={ck} v={cv} />
++            ),
++          )}
++        </div>
++      )}
++      {open && entries.length === 0 && (
++        <div className="ml-1 border-l border-border pl-3 font-mono text-xs text-muted-foreground">（空）</div>
++      )}
++    </div>
++  );
++}
++
++/**
++ * JSON 可视化视图。输入原始文本（内部 parse），解析失败由调用方回落纯文本。
++ */
++export function JsonView({ value }: { value: JsonValue }) {
++  if (Array.isArray(value) || (value !== null && typeof value === "object")) {
++    return (
++      <div data-testid="json-view" className="min-w-0 p-1 font-mono">
++        <BranchNode v={value} depth={0} />
++      </div>
++    );
++  }
++  // 顶层是原始值（少见）：单行呈现
++  return (
++    <div data-testid="json-view" className="p-1">
++      <PrimitiveRow v={value} />
++    </div>
++  );
++}
++
++// ── unified diff 视图 ─────────────────────────────────────────────────
++
++/** diff 渲染行数上限（对齐 scope-file-diff-modal 的 5000 行护栏）。 */
++const DIFF_RENDER_MAX_LINES = 5000;
++
++/**
++ * unified diff 可视化视图（scope-audit.patch 等）。解析复用
++ * parseUnifiedDiff；无 hunk（非 diff 格式）时渲染原始文本不炸。
++ */
++export function DiffView({ content }: { content: string }) {
++  const lines = useMemo(() => parseUnifiedDiff(content), [content]);
++  const truncated = lines.length > DIFF_RENDER_MAX_LINES;
++
++  if (lines.length === 0) {
++    return (
++      <pre
++        data-testid="diff-view-raw"
++        className="min-w-0 flex-1 overflow-auto rounded-md border border-input bg-background p-3 font-mono text-xs leading-relaxed whitespace-pre"
++      >
++        {content || "（空文件）"}
++      </pre>
++    );
++  }
++  return (
++    <div
++      data-testid="diff-view"
++      className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-card font-mono text-xs leading-relaxed"
++    >
++      {truncated && (
++        <p className="border-b border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[11px] text-warning">
++          差异行数超出展示上限（{DIFF_RENDER_MAX_LINES} 行），以下仅展示部分。
++        </p>
++      )}
++      {(truncated ? lines.slice(0, DIFF_RENDER_MAX_LINES) : lines).map((l, i) =>
++        l.kind === "hunk" ? (
++          <div key={i} className="bg-muted px-2.5 py-0.5 text-[11px] text-muted-foreground">
++            {l.text}
++          </div>
++        ) : (
++          <div
++            key={i}
++            data-diff-kind={l.kind}
++            className={cn(
++              "flex whitespace-pre",
++              l.kind === "add"
++                ? "bg-success/10 text-success"
++                : l.kind === "del"
++                  ? "bg-error/10 text-error"
++                  : "text-muted-foreground",
++            )}
++          >
++            <span className="w-10 flex-none select-none pr-2 text-right text-[11px] text-muted-foreground/70">
++              {l.oldNo ?? ""}
++            </span>
++            <span className="w-10 flex-none select-none pr-2 text-right text-[11px] text-muted-foreground/70">
++              {l.newNo ?? ""}
++            </span>
++            <span className="flex-1 py-0.5 pl-1 pr-3">{l.text}</span>
++          </div>
++        ),
++      )}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/files/wheel-scroll-unlock.ts b/frontend/src/components/files/wheel-scroll-unlock.ts
+new file mode 100644
+index 000000000..a4f65a3a5
+--- /dev/null
++++ b/frontend/src/components/files/wheel-scroll-unlock.ts
+@@ -0,0 +1,109 @@
++/**
++ * wheel-scroll-unlock — antd 弹窗叠 radix Dialog 时的滚轮解锁（ql-20260917-004）。
++ *
++ * 根因：antd Modal portal 到 body，不在 radix DialogContent 的 React 子树内；
++ * radix 的 react-remove-scroll 在 document（冒泡、non-passive）上拦截 wheel/
++ * touchmove，凡目标不在其 shards（DialogContent DOM）内的滚动一律
++ * preventDefault——叠加在上层的全屏预览弹窗滚轮被整体吞掉（实测 scrollTop
++ * 恒 0，body 带 data-scroll-locked）。
++ *
++ * 修法：document 捕获阶段（先于其冒泡监听）对「目标在本弹窗根内」的事件
++ * 手动完成滚动并自己 preventDefault——默认行为不再依赖被吞的 default
++ * action；弹窗内其他监听器照常触发（捕获在 document、未 stopPropagation）。
++ * 无锁（body 无 data-scroll-locked）时不介入——所有既有入口零回归。
++ */
++
++/** body 上的滚动锁标记（react-remove-scroll-bar 设置）。 */
++function scrollLocked(): boolean {
++  return typeof document !== "undefined" && document.body.hasAttribute("data-scroll-locked");
++}
++
++/**
++ * 从 start 向上找 root 内第一个可滚容器（overflow auto/scroll 且该轴有溢出）。
++ * 纯 DOM 遍历，供单测直接构造 DOM 断言。
++ */
++export function findScrollableAncestor(
++  start: Node,
++  root: Element,
++  axis: "x" | "y",
++): HTMLElement | null {
++  let el: Element | null = start instanceof Element ? start : start.parentElement;
++  while (el && el !== root) {
++    const cs = getComputedStyle(el);
++    const overflow = axis === "y" ? cs.overflowY : cs.overflowX;
++    if (overflow === "auto" || overflow === "scroll") {
++      const hasOverflow =
++        axis === "y" ? el.scrollHeight - el.clientHeight > 0 : el.scrollWidth - el.clientWidth > 0;
++      if (hasOverflow && el instanceof HTMLElement) {
++        return el;
++      }
++    }
++    el = el.parentElement;
++  }
++  return null;
++}
++
++/** wheel delta 归一为像素（deltaMode：0 像素 / 1 行 / 2 页）。 */
++export function wheelDeltaPixels(delta: number, mode: number, element: Element): number {
++  if (mode === 1) return delta * 16; // 行高近似
++  if (mode === 2) {
++    return delta * (element.clientHeight || 400);
++  }
++  return delta;
++}
++
++/**
++ * 挂载解锁监听（wheel + touchmove）。返回清理函数。
++ *
++ * @param rootSelector 弹窗根选择器（事件目标须在其内）
++ */
++export function attachWheelUnlock(rootSelector: string): () => void {
++  let lastTouchY: number | null = null;
++
++  const scrollBy = (target: Node, dy: number): void => {
++    const root = target instanceof Element ? target.closest(rootSelector) : target.parentElement?.closest(rootSelector);
++    if (!root) return;
++    const el = findScrollableAncestor(target, root, "y");
++    if (!el) return;
++    el.scrollTop += wheelDeltaPixels(dy, 0, el);
++  };
++
++  const onWheel = (e: Event): void => {
++    const ev = e as WheelEvent;
++    if (ev.defaultPrevented || ev.ctrlKey || !scrollLocked()) return;
++    if (!(ev.target instanceof Node)) return;
++    const root = ev.target instanceof Element ? ev.target.closest(rootSelector) : null;
++    if (!root) return;
++    const dy = wheelDeltaPixels(ev.deltaY, ev.deltaMode, root);
++    scrollBy(ev.target, dy);
++    ev.preventDefault();
++  };
++
++  const onTouchStart = (e: Event): void => {
++    const ev = e as TouchEvent;
++    lastTouchY = ev.touches.length > 0 ? ev.touches[0]!.clientY : null;
++  };
++
++  const onTouchMove = (e: Event): void => {
++    const ev = e as TouchEvent;
++    if (ev.defaultPrevented || !scrollLocked() || ev.touches.length !== 1) return;
++    if (!(ev.target instanceof Node)) return;
++    const root = ev.target instanceof Element ? ev.target.closest(rootSelector) : null;
++    if (!root) return;
++    const y = ev.touches[0]!.clientY;
++    if (lastTouchY !== null) {
++      scrollBy(ev.target, lastTouchY - y); // 上滑（y 减小）→ 正向滚动
++    }
++    lastTouchY = y;
++    ev.preventDefault();
++  };
++
++  document.addEventListener("wheel", onWheel, { capture: true, passive: false });
++  document.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
++  document.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
++  return () => {
++    document.removeEventListener("wheel", onWheel, { capture: true });
++    document.removeEventListener("touchstart", onTouchStart, { capture: true });
++    document.removeEventListener("touchmove", onTouchMove, { capture: true });
++  };
++}

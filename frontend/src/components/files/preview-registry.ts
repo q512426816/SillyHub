@@ -10,7 +10,7 @@
  * 依据：design.md §5 + §7。
  */
 
-export type RendererKey = "image" | "pdf" | "docx" | "xlsx" | "markdown" | "html" | "fallback";
+export type RendererKey = "image" | "pdf" | "docx" | "xlsx" | "markdown" | "html" | "json" | "patch" | "text" | "fallback";
 
 // svg/bmp/ico（2026-08-26-file-fullscreen-preview）：explorer 内联图片含这三类，
 // 统一预览需一致可看（Design Grill C-05）。
@@ -30,6 +30,11 @@ const MIME_MAP: Record<string, RendererKey> = {
   "text/markdown": "markdown",
   // 2026-08-26-file-fullscreen-preview：HTML 原型走 iframe sandbox 渲染（此前落 fallback）
   "text/html": "html",
+  // ql-20260917-004：json 结构化视图 / 纯文本渲染器（.log 全屏此前落 fallback）
+  "application/json": "json",
+  "text/plain": "text",
+  // mimetypes.guess_type 对 .log 在部分平台返回 text/x-log
+  "text/x-log": "text",
 };
 
 const EXT_MAP: Record<string, RendererKey> = {
@@ -41,6 +46,10 @@ const EXT_MAP: Record<string, RendererKey> = {
   // SheetJS 表格还原度差、OnlyOffice 已退役；预览弹窗内下载本机查看。
   md: "markdown", markdown: "markdown",
   html: "html", htm: "html",
+  // ql-20260917-004：json 折叠树 / unified diff 红绿视图 / 纯文本
+  json: "json",
+  patch: "patch", diff: "patch",
+  log: "text", txt: "text",
 };
 
 function matchByMime(mime: string): RendererKey | null {

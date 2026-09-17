@@ -18,6 +18,8 @@ import { FileNodeIcon, fileExt } from "@/components/ui/file-node-icon";
 // 交付物，仅按契约消费，不改本体）
 import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import { useObjectUrl } from "@/components/files/use-object-url";
+// ql-20260917-004：固定结构产物可视化视图（json 折叠树 / diff 红绿）
+import { DiffView, JsonView, tryParseJson } from "@/components/files/structured-views";
 // ql-20260910-017-2006：单文件变化比对弹窗（changeKey 提供时选中文件头部入口）
 import { ScopeFileDiffModal } from "@/components/changes/scope-file-diff-modal";
 import { ApiError } from "@/lib/api";
@@ -109,6 +111,23 @@ function FilePreview({
         />
       </div>
     );
+  }
+  // ql-20260917-004：固定结构产物可视化——.json 折叠树（scope-audit/
+  // apply-manifest/verify-facts 等）；非法 json 落下方纯文本分支。
+  if (fileExt(path) === "json") {
+    const parsed = tryParseJson(content);
+    if (parsed !== null) {
+      return (
+        <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40">
+          <JsonView value={parsed} />
+        </div>
+      );
+    }
+  }
+  // .patch/.diff 红绿视图（scope-audit.patch 等）；非 diff 格式由 DiffView
+  // 内部回落纯文本
+  if (fileExt(path) === "patch" || fileExt(path) === "diff") {
+    return <DiffView content={content} />;
   }
   // 其他纯文本：只读源码预览（点「编辑」才可改）。whitespace-pre：不折行，超宽横向滚动
   return (

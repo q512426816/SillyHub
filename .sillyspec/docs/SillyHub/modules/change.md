@@ -19,7 +19,7 @@ created_at: 2026-08-18 01:45:00
   - 列表（排序白名单防 SQL 注入、pending_review 状态镜像 platform 进度、按名/态过滤；pending_review_only 过滤的 `_resolve_pending_change_keys` 走 Redis read-through 缓存——`change/pending_cache.py`，epoch 失效挂 progress 推送/平台删除/归档投影/reparse 四处 commit 后 bump，TTL 300s 兜底，Redis 不可用回退现算，ql-20260909-017；ql-20260910-002：get 返回读时 epoch、set 按它盖章且任何路径不重读当前值（读后 set 前 bump 会把新 epoch 盖到旧集合上中毒缓存直至 TTL），读时键不存在走 NX 初始化防 epoch 回卷）/详情（key 或 id）。
   - 文档矩阵与单文档内容；重解析（全量重扫 + rename 检测 + `_sync_docs` 增量同步入库 + 占位行过滤）。
   - 阶段档案配置更新（update_stage_profile）、agent 状态视图（get_agent_status）。
-- **变更文件**：文件树列表 / 读内容 / 写内容（`_enqueue_edit_write` 经 daemon host_fs 通道下发，写后 `_resync_change_docs` 回灌文档矩阵）/ pending 文件列表——会话驱动模式下平台侧读写 agent 写盘结果的口。
+- **变更文件**：文件树列表 / 读内容 / 写内容（`_enqueue_edit_write` 经 daemon host_fs 通道下发，写后 `_resync_change_docs` 回灌文档矩阵）/ pending 文件列表——会话驱动模式下平台侧读写 agent 写盘结果的口。is_text 判定 = `_TEXT_SUFFIXES` 白名单（md/mdx/html/htm/yaml/yml/json/txt + ql-20260917-004 补 log/patch/diff——verify-logs/*.log 与 scope-audit.patch 此前被误判非文本，文件树给只读占位且全屏预览落 fallback）。
 - **阶段流转与审核**：
   - `transition`（FSM `can_transition` 校验）/ `advance_stage`（阶段推进，可带 agent_profile_id 透传派发）/ `complete_stage` + `rerun_stage`（返回结构化结果）。
   - 四类人工审核面板：`proposal_review / plan_review / human_test / archive_confirm`（pending_review 停靠态的放行/打回，打回走 `_record_stage_rework`）。

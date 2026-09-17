@@ -104,4 +104,36 @@ describe("matchRenderer", () => {
   it("doc → fallback（旧格式不在范围——纯前端无 Word 二进制保真渲染）", () => {
     expect(matchRenderer(null, "legacy.doc")).toBe("fallback");
   });
+
+  // ---- ql-20260917-004：json/patch/text 三类结构化渲染器 ----
+  it("application/json MIME → json", () => {
+    expect(matchRenderer("application/json", "scope-audit.bin")).toBe("json");
+  });
+
+  it.each(["scope-audit.json", "apply-manifest.json", "verify-facts.json"])(
+    "%s 扩展名 → json",
+    (filename) => {
+      expect(matchRenderer(null, filename)).toBe("json");
+    },
+  );
+
+  it.each(["scope-audit.patch", "ql-1abc2345.patch", "changes.diff"])(
+    "%s 扩展名 → patch",
+    (filename) => {
+      expect(matchRenderer(null, filename)).toBe("patch");
+    },
+  );
+
+  it.each(["text/plain", "text/x-log"])("%s MIME → text", (mime) => {
+    expect(matchRenderer(mime, "file.bin")).toBe("text");
+  });
+
+  it.each(["daemon-start.log", "README.txt"])("%s 扩展名 → text", (filename) => {
+    expect(matchRenderer(null, filename)).toBe("text");
+  });
+
+  it("八进制流 mime + log 扩展名 → text（raw 端点对 .patch/.log 可能回 octet-stream，扩展名兜底）", () => {
+    expect(matchRenderer("application/octet-stream", "scope-audit.patch")).toBe("patch");
+    expect(matchRenderer("application/octet-stream", "daemon-start.log")).toBe("text");
+  });
 });

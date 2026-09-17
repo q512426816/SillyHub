@@ -1,0 +1,159 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-5d619e37",
+  "totals": {
+    "files": 15,
+    "additions": 928,
+    "deletions": 2
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/change/service.py",
+      "declared": true,
+      "additions": 6,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/change-file-tree.tsx",
+      "declared": true,
+      "additions": 19,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/files/file-preview-modal.tsx",
+      "declared": true,
+      "additions": 22,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/files/preview-registry.ts",
+      "declared": true,
+      "additions": 10,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/files/previewers/index.ts",
+      "declared": true,
+      "additions": 5,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/files/previewers/json-previewer.tsx",
+      "declared": true,
+      "additions": 73,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/files/previewers/patch-previewer.tsx",
+      "declared": true,
+      "additions": 67,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/files/previewers/text-previewer.tsx",
+      "declared": true,
+      "additions": 69,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/files/structured-views.tsx",
+      "declared": true,
+      "additions": 197,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/files/wheel-scroll-unlock.ts",
+      "declared": true,
+      "additions": 109,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/__tests__/change-file-tree.test.tsx",
+      "declared": false,
+      "additions": 75,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "soft"
+    },
+    {
+      "path": "frontend/src/components/files/__tests__/file-preview-modal.test.tsx",
+      "declared": false,
+      "additions": 42,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "soft"
+    },
+    {
+      "path": "frontend/src/components/files/__tests__/preview-registry.test.ts",
+      "declared": false,
+      "additions": 32,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "soft"
+    },
+    {
+      "path": "frontend/src/components/files/__tests__/structured-views.test.tsx",
+      "declared": false,
+      "additions": 95,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "soft"
+    },
+    {
+      "path": "frontend/src/components/files/__tests__/wheel-scroll-unlock.test.ts",
+      "declared": false,
+      "additions": 107,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "soft"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 17,
+    "codeFileCount": 10,
+    "testFileCount": 5,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260917-004-d437",
+  "sessionId": "quick-5d619e37",
+  "savedAt": "2026-09-17T02:40:46.384Z",
+  "patchSha256": "1887663351c8b7bc9d507df1c4df5b073baf74f29c517d4bada26fc92f8e45e3",
+  "patchStatus": "ok"
+}

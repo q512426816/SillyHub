@@ -175,6 +175,81 @@ describe("ChangeFileTree", () => {
     await waitFor(() => expect(screen.getByDisplayValue("key: value")).toBeInTheDocument());
   });
 
+  // ── ql-20260917-004：固定结构产物可视化（json 折叠树 / diff 红绿）──────
+  it("json 文件默认预览渲染折叠树（scope-audit 等固定结构产物）", async () => {
+    mockedListChangeFiles.mockResolvedValue({
+      change_id: "c1",
+      items: [
+        { path: "scope-audit.json", name: "scope-audit.json", size: 40, last_modified_at: null, is_text: true },
+      ],
+    });
+    mockedGetContent.mockResolvedValue({
+      path: "scope-audit.json",
+      content: '{"ok": true, "totals": {"files": 9}}',
+      exists: true,
+    });
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("scope-audit.json")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("scope-audit.json"));
+    await waitFor(() => expect(screen.getByTestId("json-view")).toBeInTheDocument());
+    expect(screen.getByText("ok:")).toBeInTheDocument();
+    expect(screen.getByText("true")).toBeInTheDocument();
+  });
+
+  it("非法 json 内容回落纯文本源码", async () => {
+    mockedListChangeFiles.mockResolvedValue({
+      change_id: "c1",
+      items: [
+        { path: "broken.json", name: "broken.json", size: 10, last_modified_at: null, is_text: true },
+      ],
+    });
+    mockedGetContent.mockResolvedValue({ path: "broken.json", content: "{oops", exists: true });
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("broken.json")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("broken.json"));
+    await waitFor(() => expect(screen.getByText("{oops")).toBeInTheDocument());
+    expect(screen.queryByTestId("json-view")).not.toBeInTheDocument();
+  });
+
+  it("patch 文件默认预览渲染红绿 diff（scope-audit.patch）", async () => {
+    mockedListChangeFiles.mockResolvedValue({
+      change_id: "c1",
+      items: [
+        { path: "scope-audit.patch", name: "scope-audit.patch", size: 60, last_modified_at: null, is_text: true },
+      ],
+    });
+    mockedGetContent.mockResolvedValue({
+      path: "scope-audit.patch",
+      content: "--- a/x.ts\n+++ b/x.ts\n@@ -1,1 +1,2 @@\n-old\n+new\n ctx",
+      exists: true,
+    });
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("scope-audit.patch")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("scope-audit.patch"));
+    const diff = await waitFor(() => screen.getByTestId("diff-view"));
+    expect(diff.querySelectorAll('[data-diff-kind="add"]').length).toBe(1);
+    expect(diff.querySelectorAll('[data-diff-kind="del"]').length).toBe(1);
+  });
+
+  it("log 文件按纯文本预览（不再判非文本）", async () => {
+    mockedListChangeFiles.mockResolvedValue({
+      change_id: "c1",
+      items: [
+        { path: "verify-logs/daemon-start.log", name: "daemon-start.log", size: 20, last_modified_at: null, is_text: true },
+      ],
+    });
+    mockedGetContent.mockResolvedValue({
+      path: "verify-logs/daemon-start.log",
+      content: "[2026-09-17] daemon started",
+      exists: true,
+    });
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("daemon-start.log")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("daemon-start.log"));
+    await waitFor(() => expect(screen.getByText("[2026-09-17] daemon started")).toBeInTheDocument());
+    expect(screen.queryByText(/非文本文件/)).not.toBeInTheDocument();
+  });
+
   it("编辑后点「预览」切回，渲染最新未保存内容（不丢改动）", async () => {
     renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
     await waitFor(() => expect(screen.getByText("proposal.md")).toBeInTheDocument());

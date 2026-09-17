@@ -411,7 +411,9 @@ class ChangeService:
 
     # ── File tree (task-03/04/05/07, 2026-07-02-change-detail-file-tree-editor) ──
 
-    # is_text 判定的文本扩展名（编辑器对非文本只读，D-007）
+    # is_text 判定的文本扩展名（编辑器对非文本只读，D-007）。
+    # ql-20260917-004：补 .log/.patch/.diff——verify-logs/*.log 与 scope-audit.patch
+    # 此前被误判非文本，文件树给「非文本文件」占位、全屏预览落 fallback。
     _TEXT_SUFFIXES = frozenset(
         {
             ".md",
@@ -422,6 +424,9 @@ class ChangeService:
             ".yml",
             ".json",
             ".txt",
+            ".log",
+            ".patch",
+            ".diff",
         }
     )
 

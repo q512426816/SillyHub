@@ -27,6 +27,10 @@ vi.mock("../previewers", () => ({
   MarkdownPreviewer: () => <div data-testid="markdown-previewer" />,
   HtmlPreviewer: () => <div data-testid="html-previewer" />,
   FallbackPreviewer: () => <div data-testid="fallback-previewer" />,
+  // ql-20260917-004：json/patch/text 渲染器 stub（匹配规则见 preview-registry 单测）
+  JsonPreviewer: () => <div data-testid="json-previewer" />,
+  PatchPreviewer: () => <div data-testid="patch-previewer" />,
+  TextPreviewer: () => <div data-testid="text-previewer" />,
 }));
 
 const mockFetch = vi.fn(() => Promise.resolve(new Blob(["test"], { type: "text/plain" })));
@@ -136,6 +140,44 @@ describe("FilePreviewModal", () => {
       />,
     );
     expect(screen.getByTestId("html-previewer")).toBeInTheDocument();
+  });
+
+  // ── ql-20260917-004：json / patch / text 渲染器接入 RENDERER_MAP ──
+  it("json blob 分发到 JsonPreviewer", () => {
+    mockOk(new Blob(["{}"], { type: "application/json" }));
+    render(
+      <FilePreviewModal
+        target={{ fetch: mockFetch, meta: { name: "scope-audit.json", size: 10 } }}
+        open
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("json-previewer")).toBeInTheDocument();
+  });
+
+  it("octet-stream blob + .patch 扩展名分发到 PatchPreviewer", () => {
+    mockOk(new Blob(["diff --git"], { type: "application/octet-stream" }));
+    render(
+      <FilePreviewModal
+        target={{ fetch: mockFetch, meta: { name: "scope-audit.patch", size: 10 } }}
+        open
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("patch-previewer")).toBeInTheDocument();
+  });
+
+  it("text/plain blob + .log 扩展名分发到 TextPreviewer（此前落 fallback）", () => {
+    mockOk(new Blob(["[log]"], { type: "text/plain" }));
+    render(
+      <FilePreviewModal
+        target={{ fetch: mockFetch, meta: { name: "daemon-start.log", size: 10 } }}
+        open
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("text-previewer")).toBeInTheDocument();
+    expect(screen.queryByTestId("fallback-previewer")).not.toBeInTheDocument();
   });
 });
 

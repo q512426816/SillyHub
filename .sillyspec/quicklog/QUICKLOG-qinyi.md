@@ -246,3 +246,29 @@
 根因：群聊视图面板父级 wrapper 是 block div，面板根 flex-1 无 flex 上下文是死代码，面板高度塌到内容高溢出视口——输入区被顶出屏幕；预会话视图同结构却正常，因 SessionPanel 根用 h-full（百分比定高生效）而面板用 flex-1（需 flex 上下文）。
 方案：群聊视图 wrapper 改 flex min-h-0 flex-1 flex-col——面板 flex-1 生效拿满剩余高度，配合上轮面板根 grid-rows-[minmax(0,1fr)] 锁行高，时间线 min-h-0 flex-1 列内自滚、输入区 flex-none 常驻视口底部（pb-28 之上、悬浮 TabBar 之下）。
 结果：tsc 0，m-sessions+group-chat 134 用例全绿；按用户要求未部署，桌面悬浮宿主同款 block wrapper 隐患已记录待后续
+
+## ql-20260917-004-d437 | 2026-09-17 09:52:27 | 变更文件预览四修——scope-audit.json/apply-manifest/verify-facts/scope-audit.patch 结构化可视化、…
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/service.py（_TEXT_SUFFIXES 补 .log/.patch/.diff（is_text 判定修复））
+- frontend/src/components/files/structured-views.tsx（新增 JsonView 折叠树 + DiffView 红绿视图（内联与全屏共享））
+- frontend/src/components/files/wheel-scroll-unlock.ts（新增 radix 滚轮锁解锁（捕获段手动滚动））
+- frontend/src/components/files/preview-registry.ts（增 json/patch/text 三 RendererKey）
+- frontend/src/components/files/file-preview-modal.tsx（RENDERER_MAP 接线 + 挂载滚轮解锁 + 弹窗根类标记）
+- frontend/src/components/files/previewers/json-previewer.tsx（新增 JSON 渲染器（非法 JSON 回落纯文本））
+- frontend/src/components/files/previewers/patch-previewer.tsx（新增 unified diff 渲染器）
+- frontend/src/components/files/previewers/text-previewer.tsx（新增纯文本渲染器（.log/.txt））
+- frontend/src/components/files/previewers/index.ts（导出三新渲染器）
+- frontend/src/components/change-file-tree.tsx（内联预览接 json/diff 分支）
+- frontend/src/components/__tests__/change-file-tree.test.tsx（软归属·同模块测试，未声明）
+- frontend/src/components/files/__tests__/file-preview-modal.test.tsx（软归属·同模块测试，未声明）
+- frontend/src/components/files/__tests__/preview-registry.test.ts（软归属·同模块测试，未声明）
+- frontend/src/components/files/__tests__/structured-views.test.tsx（软归属·同模块测试，未声明）
+- frontend/src/components/files/__tests__/wheel-scroll-unlock.test.ts（软归属·同模块测试，未声明）
+需求：变更文件预览四修——scope-audit.json/apply-manifest/verify-facts/scope-audit.patch 结构化可视化、.log 误判非文本、全屏文本类落 fallback、全屏 MD 滚轮失效。
+根因：后端 _TEXT_SUFFIXES 白名单缺 .log/.patch/.diff；preview-registry 无 json/patch/text 渲染器；antd 全屏弹窗叠 radix Dialog 时 react-remove-scroll 在 document 冒泡段 preventDefault 掉弹窗内全部滚轮/触摸滚动（实测 body data-scroll-locked=1、scrollTop 恒 0）。
+方案：structured-views 共享视图（JsonView 递归折叠树+DiffView 红绿行复用 parseUnifiedDiff）+ 三渲染器接入 registry/弹窗/文件树内联；wheel-scroll-unlock 捕获段手动滚动+preventDefault（无锁零介入）；后端白名单补三后缀。
+结果：7 测试文件 102 用例绿，tsc 0，eslint 0 error（1 既有 warning），ruff 过，后端 change-file 2 用例绿；dev 栈浏览器实测 json 树/diff 红绿/log 纯文本/MD 全屏滚轮 0→240px 全部验收通过
+审计：[gate] L1（跨 0 模块 · 17 文件：10 代码/5 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：🔍 软归属：5 个窗口内未声明同模块测试文件已补入文件行（若属并行会话改动请手工剔除）：frontend/src/components/__tests__/change-file-tree.test.tsx（+75/-0）, frontend/src/components/files/__tests__/file-preview-modal.test.tsx（+42/-0）, frontend/src/components/files/__tests__/preview-registry.test.ts（+32/-0）, frontend/src/components/files/__tests__/structured-views.test.tsx（+95/-0）, frontend/src/components/files/__tests__/wheel-scroll-unlock.test.ts（+107/-0）

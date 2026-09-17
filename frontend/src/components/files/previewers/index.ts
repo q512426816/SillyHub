@@ -25,3 +25,8 @@ export { DocxPreviewer } from "./docx-previewer";
 export { XlsxPreviewer } from "./xlsx-previewer";
 export { MarkdownPreviewer } from "./markdown-previewer";
 export { HtmlPreviewer } from "./html-previewer";
+// ql-20260917-004：json/patch/text 三类结构化渲染器（固定结构产物可视化 +
+// .log 等文本文件全屏预览，此前落 fallback 下载卡片）
+export { JsonPreviewer } from "./json-previewer";
+export { PatchPreviewer } from "./patch-previewer";
+export { TextPreviewer } from "./text-previewer";

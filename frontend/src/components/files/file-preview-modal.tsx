@@ -27,6 +27,8 @@ import { apiFetch } from "@/lib/api";
 import { FileTypeIcon, formatFileSize } from "@/lib/file/utils";
 import { useObjectUrl } from "./use-object-url";
 import { matchRenderer } from "./preview-registry";
+// ql-20260917-004：json/patch/text 渲染器 + radix 滚轮锁解锁（见 wheel-scroll-unlock 头注）
+import { attachWheelUnlock } from "./wheel-scroll-unlock";
 import {
   HtmlPreviewer,
   ImagePreviewer,
@@ -35,6 +37,9 @@ import {
   XlsxPreviewer,
   MarkdownPreviewer,
   FallbackPreviewer,
+  JsonPreviewer,
+  PatchPreviewer,
+  TextPreviewer,
   type PreviewerProps,
 } from "./previewers";
 import { OnlyofficePreviewer } from "./previewers/onlyoffice-previewer";
@@ -78,6 +83,10 @@ const RENDERER_MAP: Record<string, ComponentType<PreviewerProps>> = {
   xlsx: XlsxPreviewer,
   markdown: MarkdownPreviewer,
   html: HtmlPreviewer,
+  // ql-20260917-004：json 折叠树 / diff 红绿 / 纯文本（.log 等此前落 fallback）
+  json: JsonPreviewer,
+  patch: PatchPreviewer,
+  text: TextPreviewer,
   fallback: FallbackPreviewer,
 };
 
@@ -87,6 +96,9 @@ const RENDERER_MAP: Record<string, ComponentType<PreviewerProps>> = {
  * 渲染方案），直接走本地链（registry → fallback 下载引导）。
  */
 const OFFICE_EXTS = new Set(["doc", "docx", "ppt", "pptx"]);
+
+/** 弹窗根类名：滚轮解锁监听按它界定「事件在本弹窗内」（ql-20260917-004）。 */
+const MODAL_ROOT_CLASS = "file-preview-modal-root";
 
 function extOf(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -120,6 +132,14 @@ export function FilePreviewModal({
   useEffect(() => {
     if (open) setFullscreen(defaultFullscreen);
   }, [open, defaultFullscreen]);
+
+  // ql-20260917-004：滚轮解锁——本弹窗叠在 radix Dialog 上时，后者的
+  // react-remove-scroll 会吞掉弹窗内滚轮/触摸滚动的默认行为（见
+  // wheel-scroll-unlock 头注），捕获阶段手动完成滚动。无锁时不介入。
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return;
+    return attachWheelUnlock(`.${MODAL_ROOT_CLASS}`);
+  }, [open]);
 
   // 进入全屏锁 body 滚动、退出/卸载还原（agent-log-viewer.tsx L836-842 先例）。
   // antd Modal 打开本身已锁滚动，此处仅兜底嵌套二次弹层场景；open=false 时
@@ -325,6 +345,8 @@ export function FilePreviewModal({
       open={open}
       onCancel={onClose}
       footer={null}
+      // 弹窗根打标（ql-20260917-004）：滚轮解锁监听按此类界定事件归属
+      classNames={{ root: MODAL_ROOT_CLASS }}
       width={fullscreen ? "100vw" : "min(960px, 94vw)"}
       // 全屏需一并覆盖 .ant-modal 根默认的 top:100 与 max-width: calc(100vw-32px)
       // （antd v6 中 width 挂根节点 style，但被默认 max-width 截窄）。普通态不传 style。
