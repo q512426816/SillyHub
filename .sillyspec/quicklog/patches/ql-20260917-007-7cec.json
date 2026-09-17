@@ -1,0 +1,71 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-83937277",
+  "totals": {
+    "files": 4,
+    "additions": 203,
+    "deletions": 11
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/multi-agent-platform/modules/backend.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/workspace/router.py",
+      "declared": true,
+      "additions": 20,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/workspace/tests/test_platform_grant_list.py",
+      "declared": true,
+      "additions": 173,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/workspace/tests/test_workspace_admin_management.py",
+      "declared": true,
+      "additions": 9,
+      "deletions": 7,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 6,
+    "codeFileCount": 1,
+    "testFileCount": 2,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260917-007-7cec",
+  "sessionId": "quick-83937277",
+  "savedAt": "2026-09-17T08:47:59.302Z",
+  "patchSha256": "1b4d812d4fc38954a4c4aa2fc1a8b3ba11a977bff6b2c07ca154b2d395efafbd",
+  "patchStatus": "ok"
+}
