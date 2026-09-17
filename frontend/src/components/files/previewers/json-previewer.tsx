@@ -1,19 +1,20 @@
 "use client";
 
 /**
- * JsonPreviewer — JSON 渲染器（ql-20260917-004）。
+ * JsonPreviewer — JSON 渲染器（ql-20260917-004/010）。
  *
- * blob.text() → tryParseJson → JsonView（共享结构化视图：折叠/着色）；
- * 解析失败回落纯文本（json 扩展名不保证内容合法）。
+ * blob.text() → tryParseJson → 三个固定结构报告文件（scope-audit/
+ * apply-manifest/verify-facts，按 meta.name 分发）走表格摘要视图，其余
+ * 合法 json 走 JsonView 折叠树；解析失败回落纯文本。
  * 统一消费 PreviewerProps。
  */
 
 import { useEffect, useState } from "react";
 
-import { JsonView, tryParseJson } from "@/components/files/structured-views";
+import { JsonView, knownJsonView, tryParseJson } from "@/components/files/structured-views";
 import type { PreviewerProps } from "./index";
 
-export function JsonPreviewer({ blob, fill }: PreviewerProps) {
+export function JsonPreviewer({ blob, meta, fill }: PreviewerProps) {
   const [text, setText] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -60,14 +61,16 @@ export function JsonPreviewer({ blob, fill }: PreviewerProps) {
 
   const parsed = text !== null ? tryParseJson(text) : null;
   const wrap = fill ? "h-full min-h-[420px] w-full overflow-auto p-4" : "max-h-[60vh] w-full overflow-auto p-4";
+  // 三个固定结构报告文件（按文件名分发）走表格摘要视图，其余走折叠树
+  const known = parsed !== null ? knownJsonView(meta.name, parsed) : null;
   return (
     <div className={wrap}>
-      {parsed !== null ? (
+      {known ?? (parsed !== null ? (
         <JsonView value={parsed} />
       ) : (
         // 非法 JSON：纯文本兜底（json 扩展名不保证内容合法）
         <pre className="min-w-0 font-mono text-xs leading-relaxed whitespace-pre-wrap">{text}</pre>
-      )}
+      ))}
     </div>
   );
 }

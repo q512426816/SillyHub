@@ -18,10 +18,8 @@ import { FileNodeIcon, fileExt } from "@/components/ui/file-node-icon";
 // 交付物，仅按契约消费，不改本体）
 import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import { useObjectUrl } from "@/components/files/use-object-url";
-// ql-20260917-004：固定结构产物可视化视图（json 折叠树 / diff 红绿）
-import { DiffView, JsonView, tryParseJson } from "@/components/files/structured-views";
-// ql-20260910-017-2006：单文件变化比对弹窗（changeKey 提供时选中文件头部入口）
-import { ScopeFileDiffModal } from "@/components/changes/scope-file-diff-modal";
+// ql-20260917-004/010：固定结构产物可视化视图（json 表格/折叠树 + diff 红绿懒加载）
+import { DiffView, JsonView, knownJsonView, tryParseJson } from "@/components/files/structured-views";
 import { ApiError } from "@/lib/api";
 // 变更名自动链接（2026-08-31 变更关联审计 P3）：变更文档正文提名的变更名
 // 渲染为详情页直链（含归档变更；名单 staleTime 5 分钟，见 lib/change-autolink）
@@ -44,12 +42,6 @@ interface Props {
   changeId: string;
   lastSyncedAt?: string | null;
   daemonOnline?: boolean;
-  /**
-   * 变更名（change_key，ql-20260910-017-2006）：提供时选中文件头部出现
-   * 「变化比对」按钮，打开单文件 diff 弹窗（scope-audit --file 同源锚点）；
-   * 缺省不渲染按钮（零回归——非变更中心挂载点不受影响）。
-   */
-  changeKey?: string | null;
 }
 
 type SaveStatus = "idle" | "saving" | "done" | "pending" | "failed";
@@ -112,11 +104,14 @@ function FilePreview({
       </div>
     );
   }
-  // ql-20260917-004：固定结构产物可视化——.json 折叠树（scope-audit/
-  // apply-manifest/verify-facts 等）；非法 json 落下方纯文本分支。
+  // ql-20260917-004/010：固定结构产物可视化——三个报告 json（scope-audit/
+  // apply-manifest/verify-facts）走表格摘要视图，其余合法 json 走折叠树；
+  // 非法 json 落下方纯文本分支。
   if (fileExt(path) === "json") {
     const parsed = tryParseJson(content);
     if (parsed !== null) {
+      const known = knownJsonView(path, parsed);
+      if (known !== null) return <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40 p-2">{known}</div>;
       return (
         <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40">
           <JsonView value={parsed} />
@@ -338,7 +333,7 @@ function TreeView({
   );
 }
 
-export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnline = true, changeKey = null }: Props) {
+export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnline = true }: Props) {
   const [tree, setTree] = useState<ChangeFileTreeNode[]>([]);
   const [selected, setSelected] = useState<ChangeFileEntry | null>(null);
   const [content, setContent] = useState<string>("");
@@ -350,8 +345,6 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [pending, setPending] = useState<PendingFileEntry[]>([]);
-  // ql-20260910-017-2006：单文件变化比对弹窗开关（target 取 selected）
-  const [diffOpen, setDiffOpen] = useState(false);
   // 统一预览弹窗态（2026-08-26-file-fullscreen-preview / FR-03b）：target 常驻
   // state、关闭仅收 open，避免弹窗内容闪重建；以 defaultFullscreen 打开即全屏。
   const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
@@ -593,18 +586,6 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
                       {statusLabel[saveStatus].text}
                     </span>
                   )}
-                  {/* ql-20260910-017-2006：单文件变化比对（scope-audit --file 同源
-                      锚点 diff）；changeKey 由变更中心挂载点提供，缺省不渲染 */}
-                  {changeKey && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      data-testid="change-file-diff-entry"
-                      onClick={() => setDiffOpen(true)}
-                    >
-                      变化比对
-                    </Button>
-                  )}
                   {/* 全屏预览（2026-08-26-file-fullscreen-preview / FR-03b）：以
                       defaultFullscreen 打开统一弹窗，文本/图片/HTML 原型均可全屏；
                       置于模式按钮组（预览/编辑）之前 */}
@@ -664,16 +645,6 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
         open={previewOpen}
         onClose={() => setPreviewOpen(false)}
         defaultFullscreen
-      />
-
-      {/* ql-20260910-017-2006：单文件变化比对弹窗（对账同源锚点 diff，弹窗内
-          自取数；target=当前选中文件，change=变更名） */}
-      <ScopeFileDiffModal
-        open={diffOpen && selected !== null}
-        onClose={() => setDiffOpen(false)}
-        workspaceId={workspaceId}
-        change={changeKey}
-        filePath={selected?.path ?? null}
       />
     </section>
   );

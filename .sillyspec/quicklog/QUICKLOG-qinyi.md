@@ -346,3 +346,24 @@
 审计：📝 文档欠账（D-8）：12 个源码文件改动未同步任何模块文档（涉及模块：backend · frontend）
 审计：[gate] L2（跨 0 模块 · 12 文件：9 代码/3 测试）advisory；模块文档认领不适用（无可认领模块）；风险命中 1 处（migration←backend/migrations/versions/20260917160000_add_queued_model_and_pending_thinking_level.py）需运行时证据
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/openapi.json, frontend/src/lib/api-types.ts
+
+## ql-20260917-009-7220 | 2026-09-17 21:44:30 | agent_run_logs 入库 NUL 字节清洗——daemon 上报日志内容含 \x00（UTF-16 宽字符输出）被 PG CharacterNotInRepertoireError 拒收丢单条日志，入库边界 strip
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260917-010-5b44 | 2026-09-17 21:50:31 | 变更文件预览三改进——diff 去 5000 硬顶改懒加载、去掉变化比对按钮、三个固定结构 json 表格化。根因：DiffView 渲染上限截断大 diff…
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/files/structured-views.tsx（DiffView 增量懒加载+knownJsonView 三表格视图分发）
+- frontend/src/components/files/previewers/json-previewer.tsx（全屏接 knownJsonView 分发）
+- frontend/src/components/change-file-tree.tsx（内联 json 分发+变化比对按钮与 changeKey 移除）
+- frontend/src/components/changes/detail/change-files-card.tsx（changeKey prop 移除）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx（ChangeFilesCard 调用去 changeKey）
+需求：变更文件预览三改进——diff 去 5000 硬顶改懒加载、去掉变化比对按钮、三个固定结构 json 表格化。
+根因：DiffView 渲染上限截断大 diff；变化比对按钮按用户要求移除（prop 链三层）；折叠树对固定结构报告可读性差。
+方案：DiffView 首屏 2000 行+触底 600px 预载+点击兜底续渲（无总量上限）；changeKey prop 链整体删除（ScopeFileDiffModal 组件与快速修复抽屉入口保留）；knownJsonView 按文件名+结构特征分发三个表格视图（scope-audit 裁决徽章+文件表/apply-manifest 哈希清单/verify-facts 探针·测试·一致性·移交），不命中回落折叠树，内联与全屏共用。
+结果：6 测试文件 107 用例绿，tsc 0，eslint 0 error（1 既有 warning）；浏览器实测内联+全屏四视图、按钮消失、2604 行 patch 点击续渲至全量、哨兵消失全通过
+审计：[gate] L1（跨 0 模块 · 9 文件：5 代码/3 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/tests/test_group_chat_models.py

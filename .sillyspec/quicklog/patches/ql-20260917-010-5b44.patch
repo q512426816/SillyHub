@@ -1,0 +1,772 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index 6821c0691..2911a0732 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -416,11 +416,7 @@ export default function ChangeDetailPage({ params }: Props) {
+ 
+         {/* 次线：变更文件 / 关联快速任务 / 会话调试 / 范围对账命令 */}
+         <aside className="space-y-3">
+-          <ChangeFilesCard
+-            workspaceId={workspaceId}
+-            changeId={changeId}
+-            changeKey={change.change_key}
+-          />
++          <ChangeFilesCard workspaceId={workspaceId} changeId={changeId} />
+           <QuicklogLinkedCard
+             workspaceId={workspaceId}
+             changeKey={change.change_key}
+diff --git a/frontend/src/components/__tests__/change-file-tree.test.tsx b/frontend/src/components/__tests__/change-file-tree.test.tsx
+index bab408168..08db70efc 100644
+--- a/frontend/src/components/__tests__/change-file-tree.test.tsx
++++ b/frontend/src/components/__tests__/change-file-tree.test.tsx
+@@ -175,8 +175,8 @@ describe("ChangeFileTree", () => {
+     await waitFor(() => expect(screen.getByDisplayValue("key: value")).toBeInTheDocument());
+   });
+ 
+-  // ── ql-20260917-004：固定结构产物可视化（json 折叠树 / diff 红绿）──────
+-  it("json 文件默认预览渲染折叠树（scope-audit 等固定结构产物）", async () => {
++  // ── ql-20260917-004/010：固定结构产物可视化（报告 json 表格 / diff 红绿懒加载）──
++  it("scope-audit.json 默认预览渲染表格摘要视图（裁决徽章+文件表）", async () => {
+     mockedListChangeFiles.mockResolvedValue({
+       change_id: "c1",
+       items: [
+@@ -185,15 +185,38 @@ describe("ChangeFileTree", () => {
+     });
+     mockedGetContent.mockResolvedValue({
+       path: "scope-audit.json",
+-      content: '{"ok": true, "totals": {"files": 9}}',
++      content: JSON.stringify({
++        mode: "full-flow",
++        ok: true,
++        totals: { files: 1, additions: 9, deletions: 1 },
++        rows: [{ path: "frontend/x.tsx", additions: 9, deletions: 1, kind: "modified", verdict: "planned" }],
++      }),
+       exists: true,
+     });
+     renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+     await waitFor(() => expect(screen.getByText("scope-audit.json")).toBeInTheDocument());
+     fireEvent.click(screen.getByText("scope-audit.json"));
++    await waitFor(() => expect(screen.getByTestId("scope-audit-view")).toBeInTheDocument());
++    expect(screen.getByText("✓ 计划内")).toBeInTheDocument();
++  });
++
++  it("普通 json 仍渲染折叠树（不命中固定结构分发）", async () => {
++    mockedListChangeFiles.mockResolvedValue({
++      change_id: "c1",
++      items: [
++        { path: "config.json", name: "config.json", size: 40, last_modified_at: null, is_text: true },
++      ],
++    });
++    mockedGetContent.mockResolvedValue({
++      path: "config.json",
++      content: '{"ok": true, "totals": {"files": 9}}',
++      exists: true,
++    });
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("config.json")).toBeInTheDocument());
++    fireEvent.click(screen.getByText("config.json"));
+     await waitFor(() => expect(screen.getByTestId("json-view")).toBeInTheDocument());
+-    expect(screen.getByText("ok:")).toBeInTheDocument();
+-    expect(screen.getByText("true")).toBeInTheDocument();
++    expect(screen.queryByTestId("scope-audit-view")).not.toBeInTheDocument();
+   });
+ 
+   it("非法 json 内容回落纯文本源码", async () => {
+diff --git a/frontend/src/components/change-file-tree.tsx b/frontend/src/components/change-file-tree.tsx
+index be44d2360..6aa61bf9e 100644
+--- a/frontend/src/components/change-file-tree.tsx
++++ b/frontend/src/components/change-file-tree.tsx
+@@ -18,10 +18,8 @@ import { FileNodeIcon, fileExt } from "@/components/ui/file-node-icon";
+ // 交付物，仅按契约消费，不改本体）
+ import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
+ import { useObjectUrl } from "@/components/files/use-object-url";
+-// ql-20260917-004：固定结构产物可视化视图（json 折叠树 / diff 红绿）
+-import { DiffView, JsonView, tryParseJson } from "@/components/files/structured-views";
+-// ql-20260910-017-2006：单文件变化比对弹窗（changeKey 提供时选中文件头部入口）
+-import { ScopeFileDiffModal } from "@/components/changes/scope-file-diff-modal";
++// ql-20260917-004/010：固定结构产物可视化视图（json 表格/折叠树 + diff 红绿懒加载）
++import { DiffView, JsonView, knownJsonView, tryParseJson } from "@/components/files/structured-views";
+ import { ApiError } from "@/lib/api";
+ // 变更名自动链接（2026-08-31 变更关联审计 P3）：变更文档正文提名的变更名
+ // 渲染为详情页直链（含归档变更；名单 staleTime 5 分钟，见 lib/change-autolink）
+@@ -44,12 +42,6 @@ interface Props {
+   changeId: string;
+   lastSyncedAt?: string | null;
+   daemonOnline?: boolean;
+-  /**
+-   * 变更名（change_key，ql-20260910-017-2006）：提供时选中文件头部出现
+-   * 「变化比对」按钮，打开单文件 diff 弹窗（scope-audit --file 同源锚点）；
+-   * 缺省不渲染按钮（零回归——非变更中心挂载点不受影响）。
+-   */
+-  changeKey?: string | null;
+ }
+ 
+ type SaveStatus = "idle" | "saving" | "done" | "pending" | "failed";
+@@ -112,11 +104,14 @@ function FilePreview({
+       </div>
+     );
+   }
+-  // ql-20260917-004：固定结构产物可视化——.json 折叠树（scope-audit/
+-  // apply-manifest/verify-facts 等）；非法 json 落下方纯文本分支。
++  // ql-20260917-004/010：固定结构产物可视化——三个报告 json（scope-audit/
++  // apply-manifest/verify-facts）走表格摘要视图，其余合法 json 走折叠树；
++  // 非法 json 落下方纯文本分支。
+   if (fileExt(path) === "json") {
+     const parsed = tryParseJson(content);
+     if (parsed !== null) {
++      const known = knownJsonView(path, parsed);
++      if (known !== null) return <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40 p-2">{known}</div>;
+       return (
+         <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40">
+           <JsonView value={parsed} />
+@@ -338,7 +333,7 @@ function TreeView({
+   );
+ }
+ 
+-export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnline = true, changeKey = null }: Props) {
++export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnline = true }: Props) {
+   const [tree, setTree] = useState<ChangeFileTreeNode[]>([]);
+   const [selected, setSelected] = useState<ChangeFileEntry | null>(null);
+   const [content, setContent] = useState<string>("");
+@@ -350,8 +345,6 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
+   const [error, setError] = useState<string | null>(null);
+   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+   const [pending, setPending] = useState<PendingFileEntry[]>([]);
+-  // ql-20260910-017-2006：单文件变化比对弹窗开关（target 取 selected）
+-  const [diffOpen, setDiffOpen] = useState(false);
+   // 统一预览弹窗态（2026-08-26-file-fullscreen-preview / FR-03b）：target 常驻
+   // state、关闭仅收 open，避免弹窗内容闪重建；以 defaultFullscreen 打开即全屏。
+   const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
+@@ -593,18 +586,6 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
+                       {statusLabel[saveStatus].text}
+                     </span>
+                   )}
+-                  {/* ql-20260910-017-2006：单文件变化比对（scope-audit --file 同源
+-                      锚点 diff）；changeKey 由变更中心挂载点提供，缺省不渲染 */}
+-                  {changeKey && (
+-                    <Button
+-                      size="sm"
+-                      variant="outline"
+-                      data-testid="change-file-diff-entry"
+-                      onClick={() => setDiffOpen(true)}
+-                    >
+-                      变化比对
+-                    </Button>
+-                  )}
+                   {/* 全屏预览（2026-08-26-file-fullscreen-preview / FR-03b）：以
+                       defaultFullscreen 打开统一弹窗，文本/图片/HTML 原型均可全屏；
+                       置于模式按钮组（预览/编辑）之前 */}
+@@ -665,16 +646,6 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
+         onClose={() => setPreviewOpen(false)}
+         defaultFullscreen
+       />
+-
+-      {/* ql-20260910-017-2006：单文件变化比对弹窗（对账同源锚点 diff，弹窗内
+-          自取数；target=当前选中文件，change=变更名） */}
+-      <ScopeFileDiffModal
+-        open={diffOpen && selected !== null}
+-        onClose={() => setDiffOpen(false)}
+-        workspaceId={workspaceId}
+-        change={changeKey}
+-        filePath={selected?.path ?? null}
+-      />
+     </section>
+   );
+ }
+diff --git a/frontend/src/components/changes/detail/change-files-card.tsx b/frontend/src/components/changes/detail/change-files-card.tsx
+index d00dfa7e1..9fc0df683 100644
+--- a/frontend/src/components/changes/detail/change-files-card.tsx
++++ b/frontend/src/components/changes/detail/change-files-card.tsx
+@@ -26,18 +26,9 @@ import {
+ export interface ChangeFilesCardProps {
+   workspaceId: string;
+   changeId: string;
+-  /**
+-   * 变更名（change_key，ql-20260910-017-2006）：透传给 ChangeFileTree 挂
+-   * 「变化比对」按钮（scope-audit --file 同源锚点 diff）；缺省无按钮零回归。
+-   */
+-  changeKey?: string | null;
+ }
+ 
+-export function ChangeFilesCard({
+-  workspaceId,
+-  changeId,
+-  changeKey = null,
+-}: ChangeFilesCardProps) {
++export function ChangeFilesCard({ workspaceId, changeId }: ChangeFilesCardProps) {
+   const [open, setOpen] = useState(false);
+   return (
+     <section className="rounded-md border bg-card px-3 py-2.5">
+@@ -61,11 +52,7 @@ export function ChangeFilesCard({
+             </DialogDescription>
+           </DialogHeader>
+           <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+-            <ChangeFileTree
+-              workspaceId={workspaceId}
+-              changeId={changeId}
+-              changeKey={changeKey}
+-            />
++            <ChangeFileTree workspaceId={workspaceId} changeId={changeId} />
+           </div>
+         </DialogContent>
+       </Dialog>
+diff --git a/frontend/src/components/files/__tests__/structured-views.test.tsx b/frontend/src/components/files/__tests__/structured-views.test.tsx
+index d14ad5313..4f4dbbc31 100644
+--- a/frontend/src/components/files/__tests__/structured-views.test.tsx
++++ b/frontend/src/components/files/__tests__/structured-views.test.tsx
+@@ -5,7 +5,7 @@
+ import { fireEvent, render, screen } from "@testing-library/react";
+ import { describe, expect, it } from "vitest";
+ 
+-import { DiffView, JsonView, tryParseJson } from "../structured-views";
++import { DiffView, JsonView, knownJsonView, tryParseJson } from "../structured-views";
+ 
+ describe("tryParseJson", () => {
+   it("合法 json → 解析值", () => {
+@@ -92,4 +92,113 @@ describe("DiffView", () => {
+     render(<DiffView content="" />);
+     expect(screen.getByTestId("diff-view-raw").textContent).toContain("（空文件）");
+   });
++
++  // ── ql-20260917-010：增量懒加载（去 5000 硬顶）────────────────────
++  it("超大 diff 首屏 2000 行 + 续渲染按钮，点击增量加载直至全量（无总量上限）", () => {
++    // 构造 5001 行 diff（1 hunk + 5000 ctx）
++    const big = ["--- a/x", "+++ b/x", "@@ -1,5000 +1,5000 @@", ...Array.from({ length: 5000 }, (_, i) => ` line-${i}`)].join("\n");
++    render(<DiffView content={big} />);
++    const root = screen.getByTestId("diff-view");
++    // 首屏渲染 2000 行（1 hunk + 1999 ctx；hunk 行不带 data-diff-kind），无截断警告
++    expect(root.querySelectorAll("[data-diff-kind]").length).toBe(1999);
++    expect(root.textContent).not.toContain("展示上限");
++    // 哨兵按钮在，点击续渲染 +2000
++    const more = screen.getByTestId("diff-view-more");
++    expect(more.textContent).toContain("已渲染 2000/5001 行");
++    fireEvent.click(more);
++    expect(screen.getByTestId("diff-view").querySelectorAll("[data-diff-kind]").length).toBe(3999);
++    // 再点到全量：哨兵消失
++    fireEvent.click(screen.getByTestId("diff-view-more"));
++    const root2 = screen.getByTestId("diff-view");
++    expect(root2.querySelectorAll("[data-diff-kind]").length).toBe(5000);
++    expect(screen.queryByTestId("diff-view-more")).toBeNull();
++  });
++
++  it("内容切换重置增量进度", () => {
++    const { rerender } = render(<DiffView content={"--- a\n+++ b\n@@ -1,3 +1,3 @@\n a\n-b\n+c"} />);
++    expect(screen.queryByTestId("diff-view-more")).toBeNull(); // 小 diff 无哨兵
++    const big = ["--- a/x", "+++ b/x", "@@ -1,3000 +1,3000 @@", ...Array.from({ length: 3000 }, (_, i) => ` l${i}`)].join("\n");
++    rerender(<DiffView content={big} />);
++    // 3001 行（1 hunk + 3000 ctx）→ 首屏 2000 行 = 1 hunk + 1999 ctx
++    expect(screen.getByTestId("diff-view").querySelectorAll("[data-diff-kind]").length).toBe(1999);
++  });
++});
++
++// ── ql-20260917-010：固定结构报告 json 的表格视图分发 ─────────────────
++describe("knownJsonView", () => {
++  const scopeAudit = {
++    mode: "full-flow",
++    ok: true,
++    degradedReason: null,
++    baseAnchor: "4c6f5191c3af096df936810ce6fe996076e1e6e5",
++    totals: { files: 2, additions: 30, deletions: 3 },
++    rows: [
++      { path: "frontend/src/a.tsx", additions: 3, deletions: 3, kind: "modified", planned: "修改", verdict: "planned" },
++      { path: "docs/x.md", additions: 27, deletions: 0, kind: "new", planned: "新增", verdict: "unplanned" },
++    ],
++  };
++  const applyManifest = {
++    schemaVersion: 1,
++    change: "demo",
++    appliedAt: "2026-09-16T15:02:03.073Z",
++    baseHash: "e3a25a76cb1d8d9acec3d048e99b40cd65920ea1bae0367701c737eff24a39b",
++    files: [{ path: "frontend/src/a.tsx", sha256: "c7af2fed6b71372b3e9162ed9e551e7046c1ebf52304540805cfe70b3c5c4ab7" }],
++  };
++  const verifyFacts = {
++    schemaVersion: 2,
++    change: "demo",
++    generatedAt: "2026-09-16T14:59:42.848Z",
++    conclusion: "PASS WITH NOTES",
++    probes: {
++      probe1: { command: "sillyspec verify-probes --change demo", metrics: { matches: 0, skippedFiles: 0 } },
++    },
++    tests: { command: "module[frontend]", exitCode: 0, strategy: "module-subset", failedRemaining: [], passedAt: "2026-09-16T15:00:34.494Z" },
++    factsConsistency: { checked: ["probe1"], verdict: "match", detail: null },
++    handover: {
++      count: 1,
++      items: [{ type: "manual-acceptance", item: "390px 视觉冒烟", condition: "手机访问 /m/..." }],
++    },
++  };
++
++  it("scope-audit.json → 裁决表格（徽章/路径/统计齐全）", () => {
++    const node = knownJsonView("scope-audit.json", scopeAudit);
++    expect(node).not.toBeNull();
++    const { container } = render(<div>{node}</div>);
++    expect(container.querySelector('[data-testid="scope-audit-view"]')).not.toBeNull();
++    expect(container.textContent).toContain("✓ 计划内");
++    expect(container.textContent).toContain("⚠️ 计划外");
++    expect(container.textContent).toContain("frontend/src/a.tsx");
++    expect(container.textContent).toContain("+30");
++    expect(container.textContent).toContain("−3");
++  });
++
++  it("apply-manifest.json → 哈希清单表格", () => {
++    const node = knownJsonView("apply-manifest.json", applyManifest);
++    expect(node).not.toBeNull();
++    const { container } = render(<div>{node}</div>);
++    expect(container.querySelector('[data-testid="apply-manifest-view"]')).not.toBeNull();
++    expect(container.textContent).toContain("frontend/src/a.tsx");
++    expect(container.textContent).toContain("c7af2fed6b71372b…");
++  });
++
++  it("verify-facts.json → 探针/测试/一致性/移交分段", () => {
++    const node = knownJsonView("verify-facts.json", verifyFacts);
++    expect(node).not.toBeNull();
++    const { container } = render(<div>{node}</div>);
++    const el = container.querySelector('[data-testid="verify-facts-view"]');
++    expect(el).not.toBeNull();
++    expect(el!.textContent).toContain("PASS WITH NOTES");
++    expect(el!.textContent).toContain("probe1");
++    expect(el!.textContent).toContain("matches=0");
++    expect(el!.textContent).toContain("退出码 0");
++    expect(el!.textContent).toContain("390px 视觉冒烟");
++  });
++
++  it("其他 json 名 / 结构不符 → null（调用方回落 JsonView 折叠树）", () => {
++    expect(knownJsonView("config.json", scopeAudit)).toBeNull();
++    // 名字命中但结构漂移（rows 缺失）→ null
++    expect(knownJsonView("scope-audit.json", { mode: "full-flow", ok: true })).toBeNull();
++    // 完整路径按 basename 分发
++    expect(knownJsonView("some/dir/verify-facts.json", verifyFacts)).not.toBeNull();
++  });
+ });
+diff --git a/frontend/src/components/files/previewers/json-previewer.tsx b/frontend/src/components/files/previewers/json-previewer.tsx
+index a458929fb..b446e2d4a 100644
+--- a/frontend/src/components/files/previewers/json-previewer.tsx
++++ b/frontend/src/components/files/previewers/json-previewer.tsx
+@@ -1,19 +1,20 @@
+ "use client";
+ 
+ /**
+- * JsonPreviewer — JSON 渲染器（ql-20260917-004）。
++ * JsonPreviewer — JSON 渲染器（ql-20260917-004/010）。
+  *
+- * blob.text() → tryParseJson → JsonView（共享结构化视图：折叠/着色）；
+- * 解析失败回落纯文本（json 扩展名不保证内容合法）。
++ * blob.text() → tryParseJson → 三个固定结构报告文件（scope-audit/
++ * apply-manifest/verify-facts，按 meta.name 分发）走表格摘要视图，其余
++ * 合法 json 走 JsonView 折叠树；解析失败回落纯文本。
+  * 统一消费 PreviewerProps。
+  */
+ 
+ import { useEffect, useState } from "react";
+ 
+-import { JsonView, tryParseJson } from "@/components/files/structured-views";
++import { JsonView, knownJsonView, tryParseJson } from "@/components/files/structured-views";
+ import type { PreviewerProps } from "./index";
+ 
+-export function JsonPreviewer({ blob, fill }: PreviewerProps) {
++export function JsonPreviewer({ blob, meta, fill }: PreviewerProps) {
+   const [text, setText] = useState<string | null>(null);
+   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+   const [error, setError] = useState<string | null>(null);
+@@ -60,14 +61,16 @@ export function JsonPreviewer({ blob, fill }: PreviewerProps) {
+ 
+   const parsed = text !== null ? tryParseJson(text) : null;
+   const wrap = fill ? "h-full min-h-[420px] w-full overflow-auto p-4" : "max-h-[60vh] w-full overflow-auto p-4";
++  // 三个固定结构报告文件（按文件名分发）走表格摘要视图，其余走折叠树
++  const known = parsed !== null ? knownJsonView(meta.name, parsed) : null;
+   return (
+     <div className={wrap}>
+-      {parsed !== null ? (
++      {known ?? (parsed !== null ? (
+         <JsonView value={parsed} />
+       ) : (
+         // 非法 JSON：纯文本兜底（json 扩展名不保证内容合法）
+         <pre className="min-w-0 font-mono text-xs leading-relaxed whitespace-pre-wrap">{text}</pre>
+-      )}
++      ))}
+     </div>
+   );
+ }
+diff --git a/frontend/src/components/files/structured-views.tsx b/frontend/src/components/files/structured-views.tsx
+index c81fa2638..3d39359dd 100644
+--- a/frontend/src/components/files/structured-views.tsx
++++ b/frontend/src/components/files/structured-views.tsx
+@@ -5,19 +5,23 @@
+  *
+  * 变更目录里的 scope-audit.json / apply-manifest.json / verify-facts.json /
+  * scope-audit.patch 等产物结构固定，纯文本 dump 对人类不友好。本模块提供
+- * 两个共享视图，内联预览（change-file-tree FilePreview）与全屏弹窗
++ * 共享视图，内联预览（change-file-tree FilePreview）与全屏弹窗
+  * （previewers/json/patch）共用同一渲染，不做两套：
+  * - JsonView：JSON.parse 后的递归折叠树——键/值按类型着色（主题语义
+  *   token），对象/数组可折叠，默认展开前两层，长字符串（sha256）截断。
+  * - DiffView：unified diff 红绿渲染——解析复用 git-log/file-tree 的
+  *   parseUnifiedDiff（维护双侧行号），行样式对齐 scope-file-diff-modal
+- *   （add 绿底/del 红底/hunk muted），5000 行渲染上限同款护栏。
++ *   （add 绿底/del 红底/hunk muted）；增量懒加载（首屏 2000 行 + 触底/
++ *   点击续渲染，ql-20260917-010 起无总量上限）。
++ * - knownJsonView：三个固定结构报告文件的表格摘要视图分发（ql-20260917-010）
++ *   ——scope-audit（裁决徽章+文件表格）、apply-manifest（哈希清单）、
++ *   verify-facts（探针/测试/一致性/移交）；文件名+结构特征不命中回落 JsonView。
+  *
+  * 视图自身不限高：垂直滚动交给外层容器（内联 flex 链 / 全屏弹窗 body），
+  * 仅横向在 DiffView 行容器出滚动条。
+  */
+ 
+-import { useMemo, useState } from "react";
++import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+ import { ChevronRight } from "lucide-react";
+ 
+ import { parseUnifiedDiff } from "@/components/git-log/file-tree";
+@@ -133,8 +137,14 @@ export function JsonView({ value }: { value: JsonValue }) {
+ 
+ // ── unified diff 视图 ─────────────────────────────────────────────────
+ 
+-/** diff 渲染行数上限（对齐 scope-file-diff-modal 的 5000 行护栏）。 */
+-const DIFF_RENDER_MAX_LINES = 5000;
++/**
++ * 增量渲染步长（ql-20260917-010）：首屏渲染 2000 行，滚动触底（或点击
++ * 兜底按钮）自动续渲染——不再设总量上限，超大 diff 也不会一次性铺满 DOM。
++ */
++const DIFF_RENDER_STEP = 2000;
++
++/** 懒加载哨兵提前触发的余量（视口外 600px 即开始续渲染，减少等待）。 */
++const DIFF_SENTINEL_ROOT_MARGIN = "600px";
+ 
+ /**
+  * unified diff 可视化视图（scope-audit.patch 等）。解析复用
+@@ -142,7 +152,27 @@ const DIFF_RENDER_MAX_LINES = 5000;
+  */
+ export function DiffView({ content }: { content: string }) {
+   const lines = useMemo(() => parseUnifiedDiff(content), [content]);
+-  const truncated = lines.length > DIFF_RENDER_MAX_LINES;
++  // 增量渲染：content 切换重置；触底（IntersectionObserver/点击）续加一步
++  const [visible, setVisible] = useState(DIFF_RENDER_STEP);
++  const sentinelRef = useRef<HTMLButtonElement>(null);
++  useEffect(() => {
++    setVisible(DIFF_RENDER_STEP);
++  }, [content]);
++  useEffect(() => {
++    const el = sentinelRef.current;
++    if (!el || visible >= lines.length) return;
++    if (typeof IntersectionObserver === "undefined") return; // jsdom 等
++    const io = new IntersectionObserver(
++      (entries) => {
++        if (entries.some((e) => e.isIntersecting)) {
++          setVisible((v) => Math.min(v + DIFF_RENDER_STEP, lines.length));
++        }
++      },
++      { rootMargin: DIFF_SENTINEL_ROOT_MARGIN },
++    );
++    io.observe(el);
++    return () => io.disconnect();
++  }, [visible, lines.length]);
+ 
+   if (lines.length === 0) {
+     return (
+@@ -154,17 +184,13 @@ export function DiffView({ content }: { content: string }) {
+       </pre>
+     );
+   }
++  const remaining = lines.length - visible;
+   return (
+     <div
+       data-testid="diff-view"
+       className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-card font-mono text-xs leading-relaxed"
+     >
+-      {truncated && (
+-        <p className="border-b border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[11px] text-warning">
+-          差异行数超出展示上限（{DIFF_RENDER_MAX_LINES} 行），以下仅展示部分。
+-        </p>
+-      )}
+-      {(truncated ? lines.slice(0, DIFF_RENDER_MAX_LINES) : lines).map((l, i) =>
++      {lines.slice(0, visible).map((l, i) =>
+         l.kind === "hunk" ? (
+           <div key={i} className="bg-muted px-2.5 py-0.5 text-[11px] text-muted-foreground">
+             {l.text}
+@@ -192,6 +218,286 @@ export function DiffView({ content }: { content: string }) {
+           </div>
+         ),
+       )}
++      {remaining > 0 && (
++        <button
++          ref={sentinelRef}
++          type="button"
++          data-testid="diff-view-more"
++          className="w-full border-t border-border bg-muted/40 px-2.5 py-2 text-[11px] text-muted-foreground hover:bg-muted"
++          onClick={() => setVisible((v) => Math.min(v + DIFF_RENDER_STEP, lines.length))}
++        >
++          已渲染 {visible}/{lines.length} 行，滚动自动加载更多（点击立即加载下 {DIFF_RENDER_STEP} 行）
++        </button>
++      )}
+     </div>
+   );
+ }
++
++// ── 固定结构 JSON 表格视图（ql-20260917-010）──────────────────────────
++//
++// scope-audit / apply-manifest / verify-facts 是 sillyspec 产出的固定结构
++// 报告文件，折叠树对人类不友好——按文件名 + 结构特征分发到专用摘要视图；
++// 不命中（结构漂移/其他 json）回落 JsonView 折叠树。
++
++/** full-flow 裁决徽章（label/配色与变更中心 scope-audit-command-card 同款）。 */
++const VERDICT_BADGE: Record<string, { label: string; className: string }> = {
++  planned: { label: "✓ 计划内", className: "bg-success/15 text-success" },
++  unplanned: { label: "⚠️ 计划外", className: "bg-warning/15 text-warning" },
++  untouched: { label: "⚠️ 计划未动", className: "bg-muted text-muted-foreground" },
++};
++
++/** 文件改动类型中文（scope-audit rows.kind 值域：modified/new/deleted）。 */
++const KIND_LABEL: Record<string, string> = {
++  modified: "修改",
++  new: "新增",
++  deleted: "删除",
++};
++
++type JsonRecord = { [key: string]: JsonValue };
++
++function isRecord(v: JsonValue | undefined): v is JsonRecord {
++  return v !== undefined && v !== null && typeof v === "object" && !Array.isArray(v);
++}
++
++/** 摘要行：`标签 值` 的紧凑键值条（哈希等长值截断 + title 全量）。 */
++function MetaItem({ label, value, mono, title }: { label: string; value: string; mono?: boolean; title?: string }) {
++  return (
++    <span className="inline-flex min-w-0 items-baseline gap-1.5">
++      <span className="shrink-0 text-muted-foreground">{label}</span>
++      <span className={cn("min-w-0 truncate font-medium text-foreground", mono && "font-mono text-[11px]")} title={title ?? value}>
++        {value}
++      </span>
++    </span>
++  );
++}
++
++/** 小节标题（verify-facts 报告分段用）。 */
++function SectionTitle({ children }: { children: string }) {
++  return <h4 className="mb-1.5 mt-4 text-xs font-semibold text-foreground">{children}</h4>;
++}
++
++/** 通用表格壳：粘性表头 + 行分隔，语义 token 配色。 */
++function DataTable({ head, children }: { head: string[]; children: React.ReactNode }) {
++  return (
++    <div className="overflow-x-auto rounded-md border border-border">
++      <table className="w-full border-collapse text-left text-xs">
++        <thead>
++          <tr className="bg-muted/50">
++            {head.map((h) => (
++              <th key={h} className="whitespace-nowrap px-2.5 py-1.5 font-medium text-muted-foreground">
++                {h}
++              </th>
++            ))}
++          </tr>
++        </thead>
++        <tbody>{children}</tbody>
++      </table>
++    </div>
++  );
++}
++
++/** scope-audit.json：审计摘要 + 文件裁决表格。 */
++function ScopeAuditView({ value }: { value: JsonRecord }) {
++  const totals = isRecord(value.totals) ? value.totals : {};
++  const rows = Array.isArray(value.rows)
++    ? (value.rows as JsonValue[]).filter(isRecord)
++    : [];
++  const num = (v: JsonValue | undefined) => (typeof v === "number" ? v : 0);
++  return (
++    <div data-testid="scope-audit-view" className="flex flex-col gap-3">
++      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs">
++        <MetaItem label="模式" value={typeof value.mode === "string" ? value.mode : "—"} />
++        <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", value.ok ? "bg-success/15 text-success" : "bg-error/15 text-error")}>
++          {value.ok ? "✓ 审计通过" : "✗ 审计未通过"}
++        </span>
++        <MetaItem label="文件" value={String(num(totals.files))} />
++        <span className="text-success">+{num(totals.additions)}</span>
++        <span className="text-error">−{num(totals.deletions)}</span>
++        {typeof value.baseAnchor === "string" && (
++          <MetaItem label="锚点" value={value.baseAnchor.slice(0, 12) + "…"} mono title={value.baseAnchor} />
++        )}
++        {value.degradedReason != null && typeof value.degradedReason === "string" && (
++          <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning">降级：{value.degradedReason}</span>
++        )}
++      </div>
++      <DataTable head={["裁决", "类型", "文件路径", "+ 新增", "− 删除"]}>
++        {rows.map((r, i) => {
++          const verdict = typeof r.verdict === "string" ? VERDICT_BADGE[r.verdict] : undefined;
++          return (
++            <tr key={i} className="border-t border-border align-top">
++              <td className="px-2.5 py-1.5">
++                {verdict ? (
++                  <span className={cn("whitespace-nowrap rounded px-1.5 py-0.5 text-[11px]", verdict.className)}>
++                    {verdict.label}
++                  </span>
++                ) : (
++                  <span className="text-muted-foreground">—</span>
++                )}
++              </td>
++              <td className="whitespace-nowrap px-2.5 py-1.5 text-muted-foreground">
++                {typeof r.kind === "string" ? (KIND_LABEL[r.kind] ?? r.kind) : "—"}
++              </td>
++              <td className="px-2.5 py-1.5 font-mono text-[11px] break-all">
++                {typeof r.path === "string" ? r.path : "—"}
++              </td>
++              <td className="px-2.5 py-1.5 text-right font-mono text-success">{num(r.additions) || ""}</td>
++              <td className="px-2.5 py-1.5 text-right font-mono text-error">{num(r.deletions) || ""}</td>
++            </tr>
++          );
++        })}
++      </DataTable>
++    </div>
++  );
++}
++
++/** apply-manifest.json：应用清单摘要 + 文件哈希表格。 */
++function ApplyManifestView({ value }: { value: JsonRecord }) {
++  const files = Array.isArray(value.files) ? (value.files as JsonValue[]).filter(isRecord) : [];
++  return (
++    <div data-testid="apply-manifest-view" className="flex flex-col gap-3">
++      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs">
++        {typeof value.change === "string" && <MetaItem label="变更" value={value.change} mono />}
++        {typeof value.appliedAt === "string" && (
++          <MetaItem label="应用时间" value={new Date(value.appliedAt).toLocaleString("zh-CN")} />
++        )}
++        {typeof value.baseHash === "string" && (
++          <MetaItem label="基线哈希" value={value.baseHash.slice(0, 12) + "…"} mono title={value.baseHash} />
++        )}
++        <MetaItem label="文件数" value={String(files.length)} />
++      </div>
++      <DataTable head={["#", "文件路径", "sha256"]}>
++        {files.map((f, i) => {
++          const sha = typeof f.sha256 === "string" ? f.sha256 : "—";
++          return (
++            <tr key={i} className="border-t border-border">
++              <td className="px-2.5 py-1.5 text-right text-muted-foreground">{i + 1}</td>
++              <td className="px-2.5 py-1.5 font-mono text-[11px] break-all">{typeof f.path === "string" ? f.path : "—"}</td>
++              <td className="px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground" title={sha}>
++                {sha === "—" ? sha : sha.slice(0, 16) + "…"}
++              </td>
++            </tr>
++          );
++        })}
++      </DataTable>
++    </div>
++  );
++}
++
++/** verify-facts.json：验证事实报告（结论徽章 + 探针指标 + 测试 + 移交）。 */
++function VerifyFactsView({ value }: { value: JsonRecord }) {
++  const conclusion = typeof value.conclusion === "string" ? value.conclusion : "";
++  const conclusionClass = conclusion.startsWith("PASS")
++    ? "bg-success/15 text-success"
++    : conclusion.startsWith("FAIL")
++      ? "bg-error/15 text-error"
++      : "bg-warning/15 text-warning";
++  const probes = isRecord(value.probes) ? value.probes : {};
++  const tests = isRecord(value.tests) ? value.tests : null;
++  const consistency = isRecord(value.factsConsistency) ? value.factsConsistency : null;
++  const handover = isRecord(value.handover) ? value.handover : null;
++  const handoverItems = handover && Array.isArray(handover.items) ? (handover.items as JsonValue[]).filter(isRecord) : [];
++
++  return (
++    <div data-testid="verify-facts-view" className="flex flex-col">
++      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs">
++        <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold", conclusionClass)}>{conclusion || "—"}</span>
++        {typeof value.change === "string" && <MetaItem label="变更" value={value.change} mono />}
++        {typeof value.generatedAt === "string" && (
++          <MetaItem label="生成时间" value={new Date(value.generatedAt).toLocaleString("zh-CN")} />
++        )}
++      </div>
++
++      <SectionTitle>探针指标</SectionTitle>
++      <DataTable head={["探针", "命令", "指标"]}>
++        {Object.entries(probes).map(([name, p]) => {
++          const probe = isRecord(p) ? p : {};
++          const metrics = isRecord(probe.metrics) ? probe.metrics : {};
++          return (
++            <tr key={name} className="border-t border-border align-top">
++              <td className="whitespace-nowrap px-2.5 py-1.5 font-medium">{name}</td>
++              <td className="px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground">
++                {typeof probe.command === "string" ? probe.command : "—"}
++              </td>
++              <td className="px-2.5 py-1.5">
++                <span className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px]">
++                  {Object.entries(metrics).map(([k, v]) => (
++                    <span key={k}>
++                      <span className="text-muted-foreground">{k}=</span>
++                      <span className="font-medium text-foreground">{String(v)}</span>
++                    </span>
++                  ))}
++                </span>
++              </td>
++            </tr>
++          );
++        })}
++      </DataTable>
++
++      {tests && (
++        <>
++          <SectionTitle>测试</SectionTitle>
++          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md border border-border px-3 py-2 text-xs">
++            {typeof tests.command === "string" && <MetaItem label="命令" value={tests.command} mono />}
++            {typeof tests.strategy === "string" && <MetaItem label="策略" value={tests.strategy} />}
++            {typeof tests.exitCode === "number" && (
++              <span className={cn("rounded px-1.5 py-0.5 text-[11px]", tests.exitCode === 0 ? "bg-success/15 text-success" : "bg-error/15 text-error")}>
++                退出码 {tests.exitCode}
++              </span>
++            )}
++            {typeof tests.passedAt === "string" && <MetaItem label="通过时间" value={new Date(tests.passedAt).toLocaleString("zh-CN")} />}
++          </div>
++        </>
++      )}
++
++      {consistency && (
++        <>
++          <SectionTitle>事实一致性</SectionTitle>
++          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md border border-border px-3 py-2 text-xs">
++            <span className={cn("rounded px-1.5 py-0.5 text-[11px]", consistency.verdict === "match" ? "bg-success/15 text-success" : "bg-warning/15 text-warning")}>
++              {typeof consistency.verdict === "string" ? consistency.verdict : "—"}
++            </span>
++            {Array.isArray(consistency.checked) && (
++              <MetaItem label="核对探针" value={consistency.checked.map(String).join("、")} />
++            )}
++            {typeof consistency.detail === "string" && consistency.detail && (
++              <MetaItem label="说明" value={consistency.detail} />
++            )}
++          </div>
++        </>
++      )}
++
++      {handoverItems.length > 0 && (
++        <>
++          <SectionTitle>{`移交事项（${handoverItems.length}）`}</SectionTitle>
++          <ul className="flex flex-col gap-1.5">
++            {handoverItems.map((h, i) => (
++              <li key={i} className="rounded-md border border-border px-3 py-1.5 text-xs">
++                {typeof h.type === "string" && <span className="mr-2 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{h.type}</span>}
++                <span className="text-foreground">{typeof h.item === "string" ? h.item : "—"}</span>
++                {typeof h.condition === "string" && h.condition && (
++                  <span className="mt-0.5 block text-[11px] text-muted-foreground">条件：{h.condition}</span>
++                )}
++              </li>
++            ))}
++          </ul>
++        </>
++      )}
++    </div>
++  );
++}
++
++/** 已知固定结构 json → 专用视图；不命中返回 null（调用方回落 JsonView）。 */
++export function knownJsonView(name: string, value: JsonValue): ReactNode | null {
++  const basename = name.split("/").pop() ?? name;
++  if (!isRecord(value)) return null;
++  if (basename === "scope-audit.json" && Array.isArray(value.rows) && isRecord(value.totals)) {
++    return <ScopeAuditView value={value} />;
++  }
++  if (basename === "apply-manifest.json" && Array.isArray(value.files)) {
++    return <ApplyManifestView value={value} />;
++  }
++  if (basename === "verify-facts.json" && isRecord(value.probes)) {
++    return <VerifyFactsView value={value} />;
++  }
++  return null;
++}

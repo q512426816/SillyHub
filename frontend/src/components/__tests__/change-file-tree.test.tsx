@@ -175,8 +175,8 @@ describe("ChangeFileTree", () => {
     await waitFor(() => expect(screen.getByDisplayValue("key: value")).toBeInTheDocument());
   });
 
-  // ── ql-20260917-004：固定结构产物可视化（json 折叠树 / diff 红绿）──────
-  it("json 文件默认预览渲染折叠树（scope-audit 等固定结构产物）", async () => {
+  // ── ql-20260917-004/010：固定结构产物可视化（报告 json 表格 / diff 红绿懒加载）──
+  it("scope-audit.json 默认预览渲染表格摘要视图（裁决徽章+文件表）", async () => {
     mockedListChangeFiles.mockResolvedValue({
       change_id: "c1",
       items: [
@@ -185,15 +185,38 @@ describe("ChangeFileTree", () => {
     });
     mockedGetContent.mockResolvedValue({
       path: "scope-audit.json",
-      content: '{"ok": true, "totals": {"files": 9}}',
+      content: JSON.stringify({
+        mode: "full-flow",
+        ok: true,
+        totals: { files: 1, additions: 9, deletions: 1 },
+        rows: [{ path: "frontend/x.tsx", additions: 9, deletions: 1, kind: "modified", verdict: "planned" }],
+      }),
       exists: true,
     });
     renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
     await waitFor(() => expect(screen.getByText("scope-audit.json")).toBeInTheDocument());
     fireEvent.click(screen.getByText("scope-audit.json"));
+    await waitFor(() => expect(screen.getByTestId("scope-audit-view")).toBeInTheDocument());
+    expect(screen.getByText("✓ 计划内")).toBeInTheDocument();
+  });
+
+  it("普通 json 仍渲染折叠树（不命中固定结构分发）", async () => {
+    mockedListChangeFiles.mockResolvedValue({
+      change_id: "c1",
+      items: [
+        { path: "config.json", name: "config.json", size: 40, last_modified_at: null, is_text: true },
+      ],
+    });
+    mockedGetContent.mockResolvedValue({
+      path: "config.json",
+      content: '{"ok": true, "totals": {"files": 9}}',
+      exists: true,
+    });
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("config.json")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("config.json"));
     await waitFor(() => expect(screen.getByTestId("json-view")).toBeInTheDocument());
-    expect(screen.getByText("ok:")).toBeInTheDocument();
-    expect(screen.getByText("true")).toBeInTheDocument();
+    expect(screen.queryByTestId("scope-audit-view")).not.toBeInTheDocument();
   });
 
   it("非法 json 内容回落纯文本源码", async () => {

@@ -1,0 +1,95 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-2dc4825a",
+  "totals": {
+    "files": 7,
+    "additions": 477,
+    "deletions": 82
+  },
+  "rows": [
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+      "declared": true,
+      "additions": 1,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/__tests__/change-file-tree.test.tsx",
+      "declared": true,
+      "additions": 28,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/change-file-tree.tsx",
+      "declared": true,
+      "additions": 8,
+      "deletions": 37,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-files-card.tsx",
+      "declared": true,
+      "additions": 2,
+      "deletions": 15,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/files/__tests__/structured-views.test.tsx",
+      "declared": true,
+      "additions": 110,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/files/previewers/json-previewer.tsx",
+      "declared": true,
+      "additions": 10,
+      "deletions": 7,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/files/structured-views.tsx",
+      "declared": true,
+      "additions": 318,
+      "deletions": 12,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 9,
+    "codeFileCount": 5,
+    "testFileCount": 3,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260917-010-5b44",
+  "sessionId": "quick-2dc4825a",
+  "savedAt": "2026-09-17T14:04:15.992Z",
+  "patchSha256": "a9cd472ad0959ed5220583e66ff3fdb612628a571eec0ea0979780602c856340",
+  "patchStatus": "ok"
+}

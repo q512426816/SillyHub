@@ -416,11 +416,7 @@ export default function ChangeDetailPage({ params }: Props) {
 
         {/* 次线：变更文件 / 关联快速任务 / 会话调试 / 范围对账命令 */}
         <aside className="space-y-3">
-          <ChangeFilesCard
-            workspaceId={workspaceId}
-            changeId={changeId}
-            changeKey={change.change_key}
-          />
+          <ChangeFilesCard workspaceId={workspaceId} changeId={changeId} />
           <QuicklogLinkedCard
             workspaceId={workspaceId}
             changeKey={change.change_key}
