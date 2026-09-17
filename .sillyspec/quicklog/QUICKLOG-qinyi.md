@@ -386,3 +386,31 @@
 方案：①api-circuit 全局熔断——连续 5 次系统性失败（网络错/超时/5xx，4xx 不计）开闸 15s 冷却，开闸期 apiFetch 短路非 auth 请求（不发网络）、SSE 重连对齐冷却、顶部横幅提示，半开探测成功自动恢复；②部署操作指引落 sillyhub-docker-deploy 技能文档（本地 .zcode 不入库，改动已生效）。
 结果：熔断 5 文件 49 用例绿（状态机/短路/auth 放行/SSE 对齐/横幅），壳层回归 48 用例绿，tsc 0，eslint 0 error
 审计：[gate] L1（跨 0 模块 · 12 文件：5 代码/4 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+
+## ql-20260918-001-fa01 | 2026-09-18 07:24:09 | 知识库大文件编辑/合并截断丢失与会话纯切换合并 500 修复
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/knowledge/writer.py（KnowledgeFileTooLarge 守卫+merge/preview 原样读+_knowledge_path helper）
+- backend/app/modules/daemon/session/service/queue.py（纯切换合并查询改 Python 侧筛真切换行）
+- backend/app/modules/knowledge/tests/test_writer.py（新增 3 用例+修 2 处既有 mypy 债）
+- backend/app/modules/daemon/tests/test_session_queue.py（新增 2 用例（附件行不炸 500/不被误并入））
+- frontend/src/components/knowledge/entry-editor.tsx（保存提示去虚假备份文案）
+- frontend/src/components/knowledge/__tests__/entry-editor.test.tsx（toast 断言同步）
+- .sillyspec/docs/SillyHub/modules/knowledge.md（注意事项+增量条目）
+- .sillyspec/docs/SillyHub/modules/daemon.md（增量条目（修正 ql-008 不变量断言））
+需求：知识库大文件编辑/合并截断丢失与会话纯切换合并 500 修复
+根因：读侧 _read_file_safe 防 OOM 截断（>1MB 只回前 250KB）的内容成为写侧基底：网页编辑保存即整文件替换、update 不进 spec-backups 不可恢复，merge 截断体并入目标后随即删候选；queue 纯切换合并假设 prompt='' 是切换行唯一形态，D-7 附件豁免同落空 prompt pending 行，两行附件即 scalar_one_or_none 抛 MultipleResultsFound 500、单行附件被误并入改写快照
+方案：writer.update_entry 磁盘超 MAX_CONTENT_BYTES 抛 KnowledgeFileTooLarge 422（新增错误类+_knowledge_path helper）；merge/preview_merge 候选正文改 _read_raw 原样读；queue 合并查询改 .scalars().all() 后 Python 侧按无附件+带切换维度筛真切换行、多条取 position 最大；前端保存提示去掉与事实不符的旧内容已备份
+结果：后端 test_writer 14 + test_session_queue 29 + 相邻面 test_router/inject_silent_switch/inject_empty_prompt 38 全绿，前端 entry-editor 5 绿 + tsc 0，ruff/scoped mypy 0（顺手修 test_writer 2 处既有 mypy 债）
+审计：[gate] L1（跨 0 模块 · 8 文件：3 代码/3 测试）advisory；每文件注记已全覆盖；测试增量已含
+
+## ql-20260918-002-4bb4 | 2026-09-18 07:36:12 | (quick 任务)
+状态：已取消
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260918-003-4b16 | 2026-09-18 07:36:29 | 修复排队消息『立即发送』两个缺陷：①打断轮显示『轮次失败』应为『已中止』语义 ②立即发送的消息气泡实时不可见需刷新（user_input 落库无 Redis 发布+前端实时路径不写 prompt）
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）

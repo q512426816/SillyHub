@@ -176,28 +176,52 @@ async def _handle_busy_turn(
         )
     # ql-20260917-008（会话执行中直接切换）：纯切换条目的**覆盖式合并**——
     # 新请求是纯切换（空 prompt、无附件、带至少一个配置维度）且同发送者已有
-    # pending 的纯切换行（prompt="" 是静默切换行的唯一形态）→ 逐字段覆盖
-    # （新请求非 None 的 profile/provider/model 快照盖旧值，None 不动——
-    # 「最后一次为准」按维度独立生效：切供应商的伴生 model="" 重置与后续
-    # 单独切模型可组合），不新建行、position 不变。防连续切换排多条切换轮。
-    # 与任务通知 merge 同款行锁内查询 + 更新同事务原子。
+    # pending 的纯切换行 → 逐字段覆盖（新请求非 None 的 profile/provider/model
+    # 快照盖旧值，None 不动——「最后一次为准」按维度独立生效：切供应商的伴生
+    # model="" 重置与后续单独切模型可组合），不新建行、position 不变。防连续
+    # 切换排多条切换轮。与任务通知 merge 同款行锁内查询 + 更新同事务原子。
     is_pure_switch = (
         not (prompt or "").strip()
         and not attachment_ids
         and (agent_profile_id is not None or llm_provider_id is not None or model is not None)
     )
     if is_pure_switch:
-        existing_switch = (
-            await svc._session.execute(
-                select(AgentSessionQueuedMessage).where(
-                    AgentSessionQueuedMessage.agent_session_id == session.id,
-                    AgentSessionQueuedMessage.status == "pending",
-                    AgentSessionQueuedMessage.prompt == "",
-                    AgentSessionQueuedMessage.sender_user_id
-                    == (queue_sender_user_id or run_sender_user_id or session.user_id),
+        # ql-20260918-001：prompt="" 的 pending 行不止切换一种形态——D-7 附件豁免
+        # （看图说话）同样落空 prompt 行（其 is_pure_switch=False，走下方新建行
+        # 路径），SQL 侧只按 prompt/sender 过滤可能命中多条（scalar_one_or_none
+        # 抛 MultipleResultsFound → 接口 500），单条附件行也会被误并入改写快照。
+        # 改为取全部候选后 Python 侧按「无附件 + 带切换维度」筛真切换行（注入侧
+        # 空 prompt 豁免仅切换/附件两形态），多条时取 position 最大（最后一次为准）。
+        empty_prompt_rows = (
+            (
+                await svc._session.execute(
+                    select(AgentSessionQueuedMessage).where(
+                        AgentSessionQueuedMessage.agent_session_id == session.id,
+                        AgentSessionQueuedMessage.status == "pending",
+                        AgentSessionQueuedMessage.prompt == "",
+                        AgentSessionQueuedMessage.sender_user_id
+                        == (queue_sender_user_id or run_sender_user_id or session.user_id),
+                    )
                 )
             )
-        ).scalar_one_or_none()
+            .scalars()
+            .all()
+        )
+        switch_rows = [
+            row
+            for row in empty_prompt_rows
+            if not (row.attachment_ids or [])
+            and (
+                row.agent_profile_id is not None
+                or row.llm_provider_id is not None
+                or row.model is not None
+            )
+        ]
+        existing_switch = (
+            max(switch_rows, key=lambda row: (row.position, row.created_at))
+            if switch_rows
+            else None
+        )
         if existing_switch is not None:
             if agent_profile_id is not None:
                 existing_switch.agent_profile_id = agent_profile_id

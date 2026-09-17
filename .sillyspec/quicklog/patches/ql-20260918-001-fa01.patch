@@ -1,0 +1,433 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.md b/.sillyspec/docs/SillyHub/modules/daemon.md
+index c58960d9d..e0d11cd58 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.md
+@@ -141,3 +141,9 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容
+ - **纯切换覆盖合并**（`queue.py _handle_busy_turn`）：新请求为纯切换（空 prompt/无附件/带配置维度）且同发送者已有 pending 纯切换行（prompt="" 唯一形态）→ 逐字段覆盖（新请求非 None 的 profile/provider/model 盖旧值，None 不动——按维度「最后一次为准」，切供应商伴生 model="" 与后续单独切模型可组合），不新建行、position 不变；与任务通知 merge 同款行锁内原子。普通消息与切换双向不合并。
+ - **思考档忙轮暂存**（`agent_sessions.pending_thinking_level`，同迁移）：`set_session_thinking_level` 忙轮分支 409 → 覆盖式暂存 + 返回 `{ok:true, queued:true}`（schema 加 `queued` 字段，gen:types 同步）；`close_run_steps` run 终态钩子与排队派发并列 fire `apply_pending_thinking_level`（独立 session，复用 `_set_via_rpc` 全分支语义，成功清列、失败保留暂存下轮重试）。
+ - **验证**：queue 23（含新增合并 4 用例：逐字段覆盖/双向不合并/派发重放 model 快照——派发断言走 `_inject_into_session` spy）；thinking endpoint 24（忙轮 409 用例改 queued 契约 + 覆盖 last-wins 新增）；inject/switch_config/queue_actions 等相关套件共 100 绿；ruff+mypy 0；迁移 offline SQL 校验过。
++
++## 增量（ql-20260918-001：纯切换合并查询修复——附件行不再炸 500/被误并入）
++
++- **背景**：上节「prompt="" 是静默切换行的唯一形态」的断言不成立——inject 的 D-7 附件豁免（看图说话）同样落 `prompt=""` 的 pending 行（其本身 `is_pure_switch=False` 走新建行路径）。原 `scalar_one_or_none()` 按 prompt/sender 过滤：两条附件行存量下任一次纯切换命中 2 行抛 `MultipleResultsFound` → 接口 500；单条附件行时切换静默并入附件消息行、改写其 profile/provider/model 快照。
++- **修法**（`queue.py _handle_busy_turn` 纯切换段）：查询改 `.scalars().all()` 取全部空 prompt 候选，Python 侧按「无附件 + 带切换维度（profile/provider/model 任一非 None）」筛真切换行（注入侧空 prompt 豁免仅切换/附件两形态，此谓词精确还原），多条时取 `(position, created_at)` 最大（最后一次为准）。行锁串行语义不变。
++- **验证**：test_session_queue 新增 2 用例（两附件行 + 切换不 500 且附件行快照原样、切换只并入真切换行）；queue 25 + inject_silent_switch/inject_empty_prompt/knowledge 相邻面全绿；ruff/mypy（scoped）0。
+diff --git a/.sillyspec/docs/SillyHub/modules/knowledge.md b/.sillyspec/docs/SillyHub/modules/knowledge.md
+index dbf1f65fe..557994da1 100644
+--- a/.sillyspec/docs/SillyHub/modules/knowledge.md
++++ b/.sillyspec/docs/SillyHub/modules/knowledge.md
+@@ -39,9 +39,18 @@ get(ws, filename) → 同上全量解析后按 filename 匹配（include_content
+ - 文件名即知识 key，重命名文件会令前端旧链接 404。
+ - 本模块永不写盘；写入口在 archive（distill_knowledge）与 CLI（quicklog）。
+ - knowledge 与 quicklog 是两套平行目录、共用一套解析逻辑，新增第三种目录只需在 parser 加别名。
++- **截断内容不得成为写侧基底**（ql-20260918-001）：读侧 `_read_file_safe` 为防 OOM 对 >1MB 文件只回前 1/4 字节——writer 的 `update_entry` 对磁盘超限文件直接 422（`KnowledgeFileTooLarge`，update 不进 spec-backups，整文件替换会静默丢截断后内容且不可恢复）；`merge`/`preview_merge` 候选正文走 `_read_raw` 原样读（合并后随即删候选，截断即永久丢失）。新增写侧入口必须沿用这两条口径。
+ 
+ ## 人工备注
+ 
+ <!-- MANUAL_NOTES_START -->
+ 
+ <!-- MANUAL_NOTES_END -->
++
++## 增量（ql-20260918-001：写侧防截断守卫——大文件编辑 422 + 合并原样读）
++
++- **背景**：读侧防 OOM 截断（>1MB 只回前 250KB）的内容此前直接成为写侧基底——网页编辑 >1MB 知识文件保存即被静默截断且 update 无备份不可恢复（合并同理：截断体并入目标后随即删候选，原件仅 30 天 spec-backups 兜底）。
++- **update_entry 守卫**（writer.py）：磁盘文件 > `MAX_CONTENT_BYTES` → `KnowledgeFileTooLarge` 422（中文文案提示本地编辑后同步），文件不动；新增 `_knowledge_path` helper 与 `_read_raw` 共用路径构造。
++- **merge / preview_merge 原样读**：候选正文从 `entry.content`（parser 截断路径）改 `_read_raw(workspace_id, filename)`，截断边界外内容完整并入目标/预览；zone 校验仍走 reader。
++- **前端配套**（entry-editor.tsx）：保存成功提示去掉「旧内容已备份」——apply_ops 的 update 不进 spec-backups（仅 delete 备份），原文案与实际语义不符。
++- **验证**：test_writer 新增 3 用例（超限编辑 422 + 磁盘原文未动、merge/preview 合并内容含 >250KB 处尾部标记、候选删除断言）；test_writer 14 + test_router 24 + queue/inject 相邻面全绿；ruff/mypy（scoped）0。
+diff --git a/backend/app/modules/daemon/session/service/queue.py b/backend/app/modules/daemon/session/service/queue.py
+index d08d73248..24670c98c 100644
+--- a/backend/app/modules/daemon/session/service/queue.py
++++ b/backend/app/modules/daemon/session/service/queue.py
+@@ -176,28 +176,52 @@ async def _handle_busy_turn(
+         )
+     # ql-20260917-008（会话执行中直接切换）：纯切换条目的**覆盖式合并**——
+     # 新请求是纯切换（空 prompt、无附件、带至少一个配置维度）且同发送者已有
+-    # pending 的纯切换行（prompt="" 是静默切换行的唯一形态）→ 逐字段覆盖
+-    # （新请求非 None 的 profile/provider/model 快照盖旧值，None 不动——
+-    # 「最后一次为准」按维度独立生效：切供应商的伴生 model="" 重置与后续
+-    # 单独切模型可组合），不新建行、position 不变。防连续切换排多条切换轮。
+-    # 与任务通知 merge 同款行锁内查询 + 更新同事务原子。
++    # pending 的纯切换行 → 逐字段覆盖（新请求非 None 的 profile/provider/model
++    # 快照盖旧值，None 不动——「最后一次为准」按维度独立生效：切供应商的伴生
++    # model="" 重置与后续单独切模型可组合），不新建行、position 不变。防连续
++    # 切换排多条切换轮。与任务通知 merge 同款行锁内查询 + 更新同事务原子。
+     is_pure_switch = (
+         not (prompt or "").strip()
+         and not attachment_ids
+         and (agent_profile_id is not None or llm_provider_id is not None or model is not None)
+     )
+     if is_pure_switch:
+-        existing_switch = (
+-            await svc._session.execute(
+-                select(AgentSessionQueuedMessage).where(
+-                    AgentSessionQueuedMessage.agent_session_id == session.id,
+-                    AgentSessionQueuedMessage.status == "pending",
+-                    AgentSessionQueuedMessage.prompt == "",
+-                    AgentSessionQueuedMessage.sender_user_id
+-                    == (queue_sender_user_id or run_sender_user_id or session.user_id),
++        # ql-20260918-001：prompt="" 的 pending 行不止切换一种形态——D-7 附件豁免
++        # （看图说话）同样落空 prompt 行（其 is_pure_switch=False，走下方新建行
++        # 路径），SQL 侧只按 prompt/sender 过滤可能命中多条（scalar_one_or_none
++        # 抛 MultipleResultsFound → 接口 500），单条附件行也会被误并入改写快照。
++        # 改为取全部候选后 Python 侧按「无附件 + 带切换维度」筛真切换行（注入侧
++        # 空 prompt 豁免仅切换/附件两形态），多条时取 position 最大（最后一次为准）。
++        empty_prompt_rows = (
++            (
++                await svc._session.execute(
++                    select(AgentSessionQueuedMessage).where(
++                        AgentSessionQueuedMessage.agent_session_id == session.id,
++                        AgentSessionQueuedMessage.status == "pending",
++                        AgentSessionQueuedMessage.prompt == "",
++                        AgentSessionQueuedMessage.sender_user_id
++                        == (queue_sender_user_id or run_sender_user_id or session.user_id),
++                    )
+                 )
+             )
+-        ).scalar_one_or_none()
++            .scalars()
++            .all()
++        )
++        switch_rows = [
++            row
++            for row in empty_prompt_rows
++            if not (row.attachment_ids or [])
++            and (
++                row.agent_profile_id is not None
++                or row.llm_provider_id is not None
++                or row.model is not None
++            )
++        ]
++        existing_switch = (
++            max(switch_rows, key=lambda row: (row.position, row.created_at))
++            if switch_rows
++            else None
++        )
+         if existing_switch is not None:
+             if agent_profile_id is not None:
+                 existing_switch.agent_profile_id = agent_profile_id
+diff --git a/backend/app/modules/daemon/tests/test_session_queue.py b/backend/app/modules/daemon/tests/test_session_queue.py
+index 0148587bc..286edc9c6 100644
+--- a/backend/app/modules/daemon/tests/test_session_queue.py
++++ b/backend/app/modules/daemon/tests/test_session_queue.py
+@@ -799,3 +799,89 @@ class TestPureSwitchMerge:
+         assert captured.get("model") == "glm-x"
+         assert captured.get("llm_provider_id") == prov
+         assert captured.get("prompt") == ""
++
++    @pytest.mark.asyncio
++    async def test_two_attachment_rows_then_switch_no_multi_result_500(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """ql-20260918-001：D-7 附件豁免（看图说话）同样落 prompt="" 的 pending 行。
++
++        两条附件行存量下纯切换不得 MultipleResultsFound（修复前 scalar_one_or_none
++        命中 2 行抛异常 → 接口 500），也不并入附件行改写其快照。
++        """
++        svc, uid, session_id, _busy = await _setup_busy_session(db_session)
++        # 直接落两条「看图说话」忙轮行（绕过附件预读上传——本用例测合并 SELECT
++        # 语义，非附件链路本身）
++        for i in range(2):
++            db_session.add(
++                AgentSessionQueuedMessage(
++                    agent_session_id=session_id,
++                    sender_user_id=uid,
++                    prompt="",
++                    attachment_ids=[str(uuid.uuid4())],
++                    status="pending",
++                    position=i,
++                )
++            )
++        await db_session.commit()
++
++        r = await svc.inject_session(
++            session_id, uid, prompt="", llm_provider_id="prov-a", queue_when_busy=True
++        )
++
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == 3
++        att_rows = [row for row in rows if row.attachment_ids]
++        assert len(att_rows) == 2
++        # 附件行快照原样（未被切换覆盖）
++        assert all(row.agent_profile_id is None for row in att_rows)
++        assert all(row.llm_provider_id is None for row in att_rows)
++        assert all(row.model is None for row in att_rows)
++        # 切换单独新建行
++        switch_rows = [row for row in rows if not row.attachment_ids]
++        assert len(switch_rows) == 1
++        assert switch_rows[0].llm_provider_id == "prov-a"
++        assert r.queue_entry_id == switch_rows[0].id
++
++    @pytest.mark.asyncio
++    async def test_switch_merges_into_switch_row_not_attachment_row(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """ql-20260918-001：附件行（prompt="" + attachment_ids）与切换行并存时，
++        纯切换合并只命中真切换行，附件行快照不被改写。"""
++        svc, uid, session_id, _busy = await _setup_busy_session(db_session)
++        r1 = await svc.inject_session(
++            session_id, uid, prompt="", llm_provider_id="prov-a", queue_when_busy=True
++        )
++        db_session.add(
++            AgentSessionQueuedMessage(
++                agent_session_id=session_id,
++                sender_user_id=uid,
++                prompt="",
++                attachment_ids=[str(uuid.uuid4())],
++                status="pending",
++                position=1,
++            )
++        )
++        await db_session.commit()
++
++        # model 非空须伴生供应商（inject 入口守卫），与既有切换测试同款参数
++        r2 = await svc.inject_session(
++            session_id,
++            uid,
++            prompt="",
++            llm_provider_id="prov-a",
++            model="glm-x",
++            queue_when_busy=True,
++        )
++
++        assert r2.queue_entry_id == r1.queue_entry_id
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == 2
++        att = next(row for row in rows if row.attachment_ids)
++        assert att.llm_provider_id is None
++        assert att.model is None
++        assert att.agent_profile_id is None
++        switch = next(row for row in rows if not row.attachment_ids)
++        assert switch.llm_provider_id == "prov-a"
++        assert switch.model == "glm-x"
+diff --git a/backend/app/modules/knowledge/tests/test_writer.py b/backend/app/modules/knowledge/tests/test_writer.py
+index f49de8f47..4a14c0ac4 100644
+--- a/backend/app/modules/knowledge/tests/test_writer.py
++++ b/backend/app/modules/knowledge/tests/test_writer.py
+@@ -245,9 +245,11 @@ class TestMerge:
+ 
+         assert ei.value.http_status == 409
+         assert ei.value.message == "文件在别处被修改，请刷新后重试"
+-        assert ei.value.details["conflict"] is True
+-        assert "server_versions" in ei.value.details
+-        assert ei.value.details["server_versions"]  # 非空（含冲突路径当前版本）
++        # details 类型可空（dict | None），先收窄再索引（mypy）
++        details = ei.value.details or {}
++        assert details["conflict"] is True
++        assert "server_versions" in details
++        assert details["server_versions"]  # 非空（含冲突路径当前版本）
+ 
+         monkeypatch.undo()
+ 
+@@ -553,3 +555,88 @@ class TestMergeBacklink:
+             keywords=["手工"],
+         )
+         assert result.merged is True
++
++
++class TestOversizedFileGuard:
++    """ql-20260918-001：读侧防 OOM 截断（parser._read_file_safe >1MB 只回前 250KB）
++    的内容不得成为写侧基底——
++
++    - update_entry 整文件替换：编辑基底即 GET 回传的截断内容，保存会把 250KB 之后
++      的内容静默截掉，且 apply_ops 的 update 不进 spec-backups（仅 delete 备份）
++      → 磁盘超限时直接拒绝编辑（422）；
++    - merge 候选正文：改走 _read_raw 原样读，>1MB 候选的截断边界外内容也完整
++      并入目标（合并后随即删候选，截断即永久丢失）。
++    """
++
++    async def test_update_entry_rejects_oversized_file(self, env, db_session) -> None:
++        from app.modules.knowledge.writer import KnowledgeFileTooLarge
++
++        big_path = env.spec_root / "knowledge" / "patterns.md"
++        big_content = "# Patterns\n\n## 既有\n\n" + ("x" * 1_100_000) + "\n"
++        big_path.write_text(big_content, encoding="utf-8")
++        # 前置自检：磁盘文件确实超读侧阈值（>1MB → GET 内容被截断）
++        assert big_path.stat().st_size > 1_000_000
++
++        writer = KnowledgeWriterService(db_session)
++        with pytest.raises(KnowledgeFileTooLarge) as ei:
++            await writer.update_entry(
++                env.ws.id,
++                env.user,
++                filename="patterns.md",
++                content="# Patterns\n\n篡改后。\n",
++            )
++        assert ei.value.http_status == 422
++        assert "超过" in ei.value.message
++
++        # 磁盘原文未被触碰
++        assert big_path.read_text(encoding="utf-8") == big_content
++
++    async def test_merge_uses_raw_candidate_body_beyond_truncation(self, env, db_session) -> None:
++        tail_marker = "尾部唯一标记-TAIL-END-MARKER"
++        body = "正文开头。\n" + ("填充行内容若干。\n" * 80_000) + tail_marker + "\n"
++        writer = KnowledgeWriterService(db_session)
++        proposed = await writer.propose_manual(
++            env.ws.id, env.user, title="超大候选", category="pattern", body=body
++        )
++
++        candidate_path = env.spec_root / "knowledge" / proposed.filename
++        # 前置自检：候选超读侧阈值，且 GET 回传内容确已截断（尾部标记不可见）
++        assert candidate_path.stat().st_size > 1_000_000
++        truncated = await KnowledgeService(db_session).get_knowledge(env.ws.id, proposed.filename)
++        assert tail_marker not in (truncated.content or "")
++
++        await writer.merge(
++            env.ws.id,
++            env.user,
++            filename=proposed.filename,
++            target_file="patterns.md",
++            section_title="超大候选",
++            keywords=["大"],
++        )
++
++        target_raw = (env.spec_root / "knowledge" / "patterns.md").read_text(encoding="utf-8")
++        # 截断边界外的内容完整并入目标（修复前候选正文来自 parser 截断读）
++        assert tail_marker in target_raw
++        assert "正文开头。" in target_raw
++        # 候选已删（两段式段二）
++        assert not candidate_path.exists()
++
++    async def test_preview_merge_uses_raw_candidate_body_beyond_truncation(
++        self, env, db_session
++    ) -> None:
++        tail_marker = "预览尾部标记-PREVIEW-TAIL"
++        body = "正文开头。\n" + ("预览填充内容。\n" * 80_000) + tail_marker + "\n"
++        writer = KnowledgeWriterService(db_session)
++        proposed = await writer.propose_manual(
++            env.ws.id, env.user, title="超大预览", category="pattern", body=body
++        )
++        assert (env.spec_root / "knowledge" / proposed.filename).stat().st_size > 1_000_000
++
++        preview = await writer.preview_merge(
++            env.ws.id,
++            filename=proposed.filename,
++            target_file="patterns.md",
++            section_title="超大预览",
++            keywords=["预览"],
++        )
++        assert tail_marker in (preview.section_text or "")
+diff --git a/backend/app/modules/knowledge/writer.py b/backend/app/modules/knowledge/writer.py
+index c6698bcc0..6af728548 100644
+--- a/backend/app/modules/knowledge/writer.py
++++ b/backend/app/modules/knowledge/writer.py
+@@ -36,6 +36,7 @@ from app.core.logging import get_logger
+ from app.modules.agent.model import AgentRun
+ from app.modules.auth.model import User
+ from app.modules.knowledge.distill import DISTILL_RUN_KIND
++from app.modules.knowledge.parser import MAX_CONTENT_BYTES
+ from app.modules.knowledge.schema import (
+     KnowledgeEntry,
+     KnowledgeMergeResult,
+@@ -132,6 +133,19 @@ class KnowledgeWriteConflict(AppError):
+         )
+ 
+ 
++class KnowledgeFileTooLarge(AppError):
++    """知识文件超过网页编辑安全大小（ql-20260918-001）。
++
++    读侧 ``parser._read_file_safe`` 为防 OOM 对超过 ``MAX_CONTENT_BYTES`` 的文件
++    只回传前 1/4 字节——网页编辑器拿到的基底已是截断内容，整文件替换保存会把
++    截断边界外的内容静默丢掉，且 apply_ops 的 update 不进 spec-backups（仅
++    delete 备份，不可恢复）。磁盘文件超限时在写入口直接拒绝。
++    """
++
++    code = "HTTP_422_KNOWLEDGE_FILE_TOO_LARGE"
++    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
++
++
+ # ── CLI 语义复刻工具（与 knowledge-classify.js 逐字对齐，R-03）────────────────
+ 
+ 
+@@ -330,11 +344,15 @@ class KnowledgeWriterService:
+             )
+         return result
+ 
+-    async def _read_raw(self, workspace_id: uuid.UUID, filename: str) -> str:
+-        """原样读 knowledge/ 下文件（不经 parser——保留 CRLF/LF 原始字节，R-03）。"""
++    async def _knowledge_path(self, workspace_id: uuid.UUID, filename: str) -> Path:
++        """knowledge/ 下文件的磁盘绝对路径（含 filename 合法性校验）。"""
+         _validate_knowledge_filename(filename)
+         spec_ws = await self._spec_ws.get(workspace_id)
+-        target = Path(spec_ws.spec_root) / "knowledge" / filename.replace("\\", "/")
++        return Path(spec_ws.spec_root) / "knowledge" / filename.replace("\\", "/")
++
++    async def _read_raw(self, workspace_id: uuid.UUID, filename: str) -> str:
++        """原样读 knowledge/ 下文件（不经 parser——保留 CRLF/LF 原始字节，R-03）。"""
++        target = await self._knowledge_path(workspace_id, filename)
+         if not target.is_file():
+             raise WorkspaceNotFound(
+                 "知识库文件不存在，请刷新文件列表后重试。",
+@@ -420,6 +438,18 @@ class KnowledgeWriterService:
+                 details={"filename": filename, "zone": entry.zone},
+             )
+ 
++        # ql-20260918-001：读侧截断守卫——GET 回传内容对超过 MAX_CONTENT_BYTES 的
++        # 文件已被 _read_file_safe 截到前 1/4 字节，网页编辑基底即截断内容；整文件
++        # 替换会把余下内容静默丢掉且 update 不进 spec-backups。磁盘超限即拒绝
++        # （文件不动，提示本地编辑后经同步链路落盘）。
++        disk_path = await self._knowledge_path(workspace_id, filename)
++        if disk_path.is_file() and disk_path.stat().st_size > MAX_CONTENT_BYTES:
++            raise KnowledgeFileTooLarge(
++                "文件超过网页编辑的大小上限，网页加载的内容已截断、保存会丢失"
++                "截断之后的部分，请在本机编辑该文件后再同步。",
++                details={"filename": filename},
++            )
++
+         op_path = f"{KNOWLEDGE_PREFIX}{filename}"
+         ops = [
+             FileOp(
+@@ -449,7 +479,9 @@ class KnowledgeWriterService:
+                 "仅待审核（proposed）候选支持合并预览。",
+                 details={"filename": filename, "zone": entry.zone},
+             )
+-        body = _extract_proposed_body(entry.content or "")
++        # ql-20260918-001：候选正文取 _read_raw 原样读——经 reader（parser 截断）
++        # 取超过 MAX_CONTENT_BYTES 的候选只拿到前 1/4 字节，预览/合并的内容不完整。
++        body = _extract_proposed_body(await self._read_raw(workspace_id, filename))
+ 
+         target_raw = await self._read_raw(workspace_id, target)
+         index_raw = await self._read_raw(workspace_id, "INDEX.md")
+@@ -491,7 +523,10 @@ class KnowledgeWriterService:
+                 "仅待审核（proposed）候选支持合并操作。",
+                 details={"filename": filename, "zone": entry.zone},
+             )
+-        body = _extract_proposed_body(entry.content or "")
++        # ql-20260918-001：候选正文取 _read_raw 原样读——经 reader（parser 截断）
++        # 取超过 MAX_CONTENT_BYTES 的候选只拿到前 1/4 字节，且段二随后删除候选，
++        # 截断边界外的内容会随原件进备份区被静默丢弃（30 天后彻底不可恢复）。
++        body = _extract_proposed_body(await self._read_raw(workspace_id, filename))
+ 
+         target_raw = await self._read_raw(workspace_id, target)
+         index_raw = await self._read_raw(workspace_id, "INDEX.md")
+diff --git a/frontend/src/components/knowledge/__tests__/entry-editor.test.tsx b/frontend/src/components/knowledge/__tests__/entry-editor.test.tsx
+index e91da8b80..0e5ac2a61 100644
+--- a/frontend/src/components/knowledge/__tests__/entry-editor.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/entry-editor.test.tsx
+@@ -99,7 +99,9 @@ describe("EntryEditor · 编辑保存（frontmatter 不动）", () => {
+     expect(onSaved).toHaveBeenCalledWith(
+       "---\nauthor: qinyi\nsource: manual\n---\n\n# 候选标题\n\n## 问题\n新正文\n",
+     );
+-    expect(notify.success).toHaveBeenCalledWith("已保存（版本 +1，旧内容已备份）");
++    // ql-20260918-001：去掉「旧内容已备份」——apply_ops 的 update 不进
++    // spec-backups（仅 delete 备份），原文案与实际语义不符。
++    expect(notify.success).toHaveBeenCalledWith("已保存（版本 +1）");
+   });
+ 
+   it("无 frontmatter 文件：提交体 = 正文原样", async () => {
+diff --git a/frontend/src/components/knowledge/entry-editor.tsx b/frontend/src/components/knowledge/entry-editor.tsx
+index 7b3a74753..e65d0f5e0 100644
+--- a/frontend/src/components/knowledge/entry-editor.tsx
++++ b/frontend/src/components/knowledge/entry-editor.tsx
+@@ -78,7 +78,9 @@ export function EntryEditor({
+       const updated = await updateKnowledge(workspaceId, filename, {
+         content: fullContent,
+       });
+-      notify.success("已保存（版本 +1，旧内容已备份）");
++      // ql-20260918-001：去掉「旧内容已备份」——apply_ops 的 update 不进
++      // spec-backups（仅 delete 备份），原文案与实际语义不符。
++      notify.success("已保存（版本 +1）");
+       onSaved(updated.content ?? fullContent);
+     } catch (err) {
+       setError(errMessage(err, "保存失败，请重试"));

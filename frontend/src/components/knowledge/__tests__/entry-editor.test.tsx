@@ -99,7 +99,9 @@ describe("EntryEditor · 编辑保存（frontmatter 不动）", () => {
     expect(onSaved).toHaveBeenCalledWith(
       "---\nauthor: qinyi\nsource: manual\n---\n\n# 候选标题\n\n## 问题\n新正文\n",
     );
-    expect(notify.success).toHaveBeenCalledWith("已保存（版本 +1，旧内容已备份）");
+    // ql-20260918-001：去掉「旧内容已备份」——apply_ops 的 update 不进
+    // spec-backups（仅 delete 备份），原文案与实际语义不符。
+    expect(notify.success).toHaveBeenCalledWith("已保存（版本 +1）");
   });
 
   it("无 frontmatter 文件：提交体 = 正文原样", async () => {

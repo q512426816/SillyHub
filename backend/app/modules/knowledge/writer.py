@@ -36,6 +36,7 @@ from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun
 from app.modules.auth.model import User
 from app.modules.knowledge.distill import DISTILL_RUN_KIND
+from app.modules.knowledge.parser import MAX_CONTENT_BYTES
 from app.modules.knowledge.schema import (
     KnowledgeEntry,
     KnowledgeMergeResult,
@@ -130,6 +131,19 @@ class KnowledgeWriteConflict(AppError):
             message or "文件在别处被修改，请刷新后重试",
             details=merged,
         )
+
+
+class KnowledgeFileTooLarge(AppError):
+    """知识文件超过网页编辑安全大小（ql-20260918-001）。
+
+    读侧 ``parser._read_file_safe`` 为防 OOM 对超过 ``MAX_CONTENT_BYTES`` 的文件
+    只回传前 1/4 字节——网页编辑器拿到的基底已是截断内容，整文件替换保存会把
+    截断边界外的内容静默丢掉，且 apply_ops 的 update 不进 spec-backups（仅
+    delete 备份，不可恢复）。磁盘文件超限时在写入口直接拒绝。
+    """
+
+    code = "HTTP_422_KNOWLEDGE_FILE_TOO_LARGE"
+    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
 # ── CLI 语义复刻工具（与 knowledge-classify.js 逐字对齐，R-03）────────────────
@@ -330,11 +344,15 @@ class KnowledgeWriterService:
             )
         return result
 
-    async def _read_raw(self, workspace_id: uuid.UUID, filename: str) -> str:
-        """原样读 knowledge/ 下文件（不经 parser——保留 CRLF/LF 原始字节，R-03）。"""
+    async def _knowledge_path(self, workspace_id: uuid.UUID, filename: str) -> Path:
+        """knowledge/ 下文件的磁盘绝对路径（含 filename 合法性校验）。"""
         _validate_knowledge_filename(filename)
         spec_ws = await self._spec_ws.get(workspace_id)
-        target = Path(spec_ws.spec_root) / "knowledge" / filename.replace("\\", "/")
+        return Path(spec_ws.spec_root) / "knowledge" / filename.replace("\\", "/")
+
+    async def _read_raw(self, workspace_id: uuid.UUID, filename: str) -> str:
+        """原样读 knowledge/ 下文件（不经 parser——保留 CRLF/LF 原始字节，R-03）。"""
+        target = await self._knowledge_path(workspace_id, filename)
         if not target.is_file():
             raise WorkspaceNotFound(
                 "知识库文件不存在，请刷新文件列表后重试。",
@@ -420,6 +438,18 @@ class KnowledgeWriterService:
                 details={"filename": filename, "zone": entry.zone},
             )
 
+        # ql-20260918-001：读侧截断守卫——GET 回传内容对超过 MAX_CONTENT_BYTES 的
+        # 文件已被 _read_file_safe 截到前 1/4 字节，网页编辑基底即截断内容；整文件
+        # 替换会把余下内容静默丢掉且 update 不进 spec-backups。磁盘超限即拒绝
+        # （文件不动，提示本地编辑后经同步链路落盘）。
+        disk_path = await self._knowledge_path(workspace_id, filename)
+        if disk_path.is_file() and disk_path.stat().st_size > MAX_CONTENT_BYTES:
+            raise KnowledgeFileTooLarge(
+                "文件超过网页编辑的大小上限，网页加载的内容已截断、保存会丢失"
+                "截断之后的部分，请在本机编辑该文件后再同步。",
+                details={"filename": filename},
+            )
+
         op_path = f"{KNOWLEDGE_PREFIX}{filename}"
         ops = [
             FileOp(
@@ -449,7 +479,9 @@ class KnowledgeWriterService:
                 "仅待审核（proposed）候选支持合并预览。",
                 details={"filename": filename, "zone": entry.zone},
             )
-        body = _extract_proposed_body(entry.content or "")
+        # ql-20260918-001：候选正文取 _read_raw 原样读——经 reader（parser 截断）
+        # 取超过 MAX_CONTENT_BYTES 的候选只拿到前 1/4 字节，预览/合并的内容不完整。
+        body = _extract_proposed_body(await self._read_raw(workspace_id, filename))
 
         target_raw = await self._read_raw(workspace_id, target)
         index_raw = await self._read_raw(workspace_id, "INDEX.md")
@@ -491,7 +523,10 @@ class KnowledgeWriterService:
                 "仅待审核（proposed）候选支持合并操作。",
                 details={"filename": filename, "zone": entry.zone},
             )
-        body = _extract_proposed_body(entry.content or "")
+        # ql-20260918-001：候选正文取 _read_raw 原样读——经 reader（parser 截断）
+        # 取超过 MAX_CONTENT_BYTES 的候选只拿到前 1/4 字节，且段二随后删除候选，
+        # 截断边界外的内容会随原件进备份区被静默丢弃（30 天后彻底不可恢复）。
+        body = _extract_proposed_body(await self._read_raw(workspace_id, filename))
 
         target_raw = await self._read_raw(workspace_id, target)
         index_raw = await self._read_raw(workspace_id, "INDEX.md")

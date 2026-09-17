@@ -1,0 +1,103 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-9f0e32a3",
+  "totals": {
+    "files": 8,
+    "additions": 275,
+    "deletions": 24
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/daemon.md",
+      "declared": true,
+      "additions": 6,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/knowledge.md",
+      "declared": true,
+      "additions": 9,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/queue.py",
+      "declared": true,
+      "additions": 38,
+      "deletions": 14,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_queue.py",
+      "declared": true,
+      "additions": 86,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_writer.py",
+      "declared": true,
+      "additions": 90,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/knowledge/writer.py",
+      "declared": true,
+      "additions": 40,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/entry-editor.test.tsx",
+      "declared": true,
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/knowledge/entry-editor.tsx",
+      "declared": true,
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 8,
+    "codeFileCount": 3,
+    "testFileCount": 3,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260918-001-fa01",
+  "sessionId": "quick-9f0e32a3",
+  "savedAt": "2026-09-17T23:36:58.791Z",
+  "patchSha256": "7d9578aa41cac6b5c1408b5b9401cfffc4b6ac19ad255fe9f0992ec5642d3474",
+  "patchStatus": "ok"
+}

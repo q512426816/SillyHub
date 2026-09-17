@@ -799,3 +799,89 @@ class TestPureSwitchMerge:
         assert captured.get("model") == "glm-x"
         assert captured.get("llm_provider_id") == prov
         assert captured.get("prompt") == ""
+
+    @pytest.mark.asyncio
+    async def test_two_attachment_rows_then_switch_no_multi_result_500(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """ql-20260918-001：D-7 附件豁免（看图说话）同样落 prompt="" 的 pending 行。
+
+        两条附件行存量下纯切换不得 MultipleResultsFound（修复前 scalar_one_or_none
+        命中 2 行抛异常 → 接口 500），也不并入附件行改写其快照。
+        """
+        svc, uid, session_id, _busy = await _setup_busy_session(db_session)
+        # 直接落两条「看图说话」忙轮行（绕过附件预读上传——本用例测合并 SELECT
+        # 语义，非附件链路本身）
+        for i in range(2):
+            db_session.add(
+                AgentSessionQueuedMessage(
+                    agent_session_id=session_id,
+                    sender_user_id=uid,
+                    prompt="",
+                    attachment_ids=[str(uuid.uuid4())],
+                    status="pending",
+                    position=i,
+                )
+            )
+        await db_session.commit()
+
+        r = await svc.inject_session(
+            session_id, uid, prompt="", llm_provider_id="prov-a", queue_when_busy=True
+        )
+
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 3
+        att_rows = [row for row in rows if row.attachment_ids]
+        assert len(att_rows) == 2
+        # 附件行快照原样（未被切换覆盖）
+        assert all(row.agent_profile_id is None for row in att_rows)
+        assert all(row.llm_provider_id is None for row in att_rows)
+        assert all(row.model is None for row in att_rows)
+        # 切换单独新建行
+        switch_rows = [row for row in rows if not row.attachment_ids]
+        assert len(switch_rows) == 1
+        assert switch_rows[0].llm_provider_id == "prov-a"
+        assert r.queue_entry_id == switch_rows[0].id
+
+    @pytest.mark.asyncio
+    async def test_switch_merges_into_switch_row_not_attachment_row(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """ql-20260918-001：附件行（prompt="" + attachment_ids）与切换行并存时，
+        纯切换合并只命中真切换行，附件行快照不被改写。"""
+        svc, uid, session_id, _busy = await _setup_busy_session(db_session)
+        r1 = await svc.inject_session(
+            session_id, uid, prompt="", llm_provider_id="prov-a", queue_when_busy=True
+        )
+        db_session.add(
+            AgentSessionQueuedMessage(
+                agent_session_id=session_id,
+                sender_user_id=uid,
+                prompt="",
+                attachment_ids=[str(uuid.uuid4())],
+                status="pending",
+                position=1,
+            )
+        )
+        await db_session.commit()
+
+        # model 非空须伴生供应商（inject 入口守卫），与既有切换测试同款参数
+        r2 = await svc.inject_session(
+            session_id,
+            uid,
+            prompt="",
+            llm_provider_id="prov-a",
+            model="glm-x",
+            queue_when_busy=True,
+        )
+
+        assert r2.queue_entry_id == r1.queue_entry_id
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 2
+        att = next(row for row in rows if row.attachment_ids)
+        assert att.llm_provider_id is None
+        assert att.model is None
+        assert att.agent_profile_id is None
+        switch = next(row for row in rows if not row.attachment_ids)
+        assert switch.llm_provider_id == "prov-a"
+        assert switch.model == "glm-x"

@@ -78,7 +78,9 @@ export function EntryEditor({
       const updated = await updateKnowledge(workspaceId, filename, {
         content: fullContent,
       });
-      notify.success("已保存（版本 +1，旧内容已备份）");
+      // ql-20260918-001：去掉「旧内容已备份」——apply_ops 的 update 不进
+      // spec-backups（仅 delete 备份），原文案与实际语义不符。
+      notify.success("已保存（版本 +1）");
       onSaved(updated.content ?? fullContent);
     } catch (err) {
       setError(errMessage(err, "保存失败，请重试"));

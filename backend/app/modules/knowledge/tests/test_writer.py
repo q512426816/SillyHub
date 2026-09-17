@@ -245,9 +245,11 @@ class TestMerge:
 
         assert ei.value.http_status == 409
         assert ei.value.message == "文件在别处被修改，请刷新后重试"
-        assert ei.value.details["conflict"] is True
-        assert "server_versions" in ei.value.details
-        assert ei.value.details["server_versions"]  # 非空（含冲突路径当前版本）
+        # details 类型可空（dict | None），先收窄再索引（mypy）
+        details = ei.value.details or {}
+        assert details["conflict"] is True
+        assert "server_versions" in details
+        assert details["server_versions"]  # 非空（含冲突路径当前版本）
 
         monkeypatch.undo()
 
@@ -553,3 +555,88 @@ class TestMergeBacklink:
             keywords=["手工"],
         )
         assert result.merged is True
+
+
+class TestOversizedFileGuard:
+    """ql-20260918-001：读侧防 OOM 截断（parser._read_file_safe >1MB 只回前 250KB）
+    的内容不得成为写侧基底——
+
+    - update_entry 整文件替换：编辑基底即 GET 回传的截断内容，保存会把 250KB 之后
+      的内容静默截掉，且 apply_ops 的 update 不进 spec-backups（仅 delete 备份）
+      → 磁盘超限时直接拒绝编辑（422）；
+    - merge 候选正文：改走 _read_raw 原样读，>1MB 候选的截断边界外内容也完整
+      并入目标（合并后随即删候选，截断即永久丢失）。
+    """
+
+    async def test_update_entry_rejects_oversized_file(self, env, db_session) -> None:
+        from app.modules.knowledge.writer import KnowledgeFileTooLarge
+
+        big_path = env.spec_root / "knowledge" / "patterns.md"
+        big_content = "# Patterns\n\n## 既有\n\n" + ("x" * 1_100_000) + "\n"
+        big_path.write_text(big_content, encoding="utf-8")
+        # 前置自检：磁盘文件确实超读侧阈值（>1MB → GET 内容被截断）
+        assert big_path.stat().st_size > 1_000_000
+
+        writer = KnowledgeWriterService(db_session)
+        with pytest.raises(KnowledgeFileTooLarge) as ei:
+            await writer.update_entry(
+                env.ws.id,
+                env.user,
+                filename="patterns.md",
+                content="# Patterns\n\n篡改后。\n",
+            )
+        assert ei.value.http_status == 422
+        assert "超过" in ei.value.message
+
+        # 磁盘原文未被触碰
+        assert big_path.read_text(encoding="utf-8") == big_content
+
+    async def test_merge_uses_raw_candidate_body_beyond_truncation(self, env, db_session) -> None:
+        tail_marker = "尾部唯一标记-TAIL-END-MARKER"
+        body = "正文开头。\n" + ("填充行内容若干。\n" * 80_000) + tail_marker + "\n"
+        writer = KnowledgeWriterService(db_session)
+        proposed = await writer.propose_manual(
+            env.ws.id, env.user, title="超大候选", category="pattern", body=body
+        )
+
+        candidate_path = env.spec_root / "knowledge" / proposed.filename
+        # 前置自检：候选超读侧阈值，且 GET 回传内容确已截断（尾部标记不可见）
+        assert candidate_path.stat().st_size > 1_000_000
+        truncated = await KnowledgeService(db_session).get_knowledge(env.ws.id, proposed.filename)
+        assert tail_marker not in (truncated.content or "")
+
+        await writer.merge(
+            env.ws.id,
+            env.user,
+            filename=proposed.filename,
+            target_file="patterns.md",
+            section_title="超大候选",
+            keywords=["大"],
+        )
+
+        target_raw = (env.spec_root / "knowledge" / "patterns.md").read_text(encoding="utf-8")
+        # 截断边界外的内容完整并入目标（修复前候选正文来自 parser 截断读）
+        assert tail_marker in target_raw
+        assert "正文开头。" in target_raw
+        # 候选已删（两段式段二）
+        assert not candidate_path.exists()
+
+    async def test_preview_merge_uses_raw_candidate_body_beyond_truncation(
+        self, env, db_session
+    ) -> None:
+        tail_marker = "预览尾部标记-PREVIEW-TAIL"
+        body = "正文开头。\n" + ("预览填充内容。\n" * 80_000) + tail_marker + "\n"
+        writer = KnowledgeWriterService(db_session)
+        proposed = await writer.propose_manual(
+            env.ws.id, env.user, title="超大预览", category="pattern", body=body
+        )
+        assert (env.spec_root / "knowledge" / proposed.filename).stat().st_size > 1_000_000
+
+        preview = await writer.preview_merge(
+            env.ws.id,
+            filename=proposed.filename,
+            target_file="patterns.md",
+            section_title="超大预览",
+            keywords=["预览"],
+        )
+        assert tail_marker in (preview.section_text or "")

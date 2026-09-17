@@ -141,3 +141,9 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 - **纯切换覆盖合并**（`queue.py _handle_busy_turn`）：新请求为纯切换（空 prompt/无附件/带配置维度）且同发送者已有 pending 纯切换行（prompt="" 唯一形态）→ 逐字段覆盖（新请求非 None 的 profile/provider/model 盖旧值，None 不动——按维度「最后一次为准」，切供应商伴生 model="" 与后续单独切模型可组合），不新建行、position 不变；与任务通知 merge 同款行锁内原子。普通消息与切换双向不合并。
 - **思考档忙轮暂存**（`agent_sessions.pending_thinking_level`，同迁移）：`set_session_thinking_level` 忙轮分支 409 → 覆盖式暂存 + 返回 `{ok:true, queued:true}`（schema 加 `queued` 字段，gen:types 同步）；`close_run_steps` run 终态钩子与排队派发并列 fire `apply_pending_thinking_level`（独立 session，复用 `_set_via_rpc` 全分支语义，成功清列、失败保留暂存下轮重试）。
 - **验证**：queue 23（含新增合并 4 用例：逐字段覆盖/双向不合并/派发重放 model 快照——派发断言走 `_inject_into_session` spy）；thinking endpoint 24（忙轮 409 用例改 queued 契约 + 覆盖 last-wins 新增）；inject/switch_config/queue_actions 等相关套件共 100 绿；ruff+mypy 0；迁移 offline SQL 校验过。
+
+## 增量（ql-20260918-001：纯切换合并查询修复——附件行不再炸 500/被误并入）
+
+- **背景**：上节「prompt="" 是静默切换行的唯一形态」的断言不成立——inject 的 D-7 附件豁免（看图说话）同样落 `prompt=""` 的 pending 行（其本身 `is_pure_switch=False` 走新建行路径）。原 `scalar_one_or_none()` 按 prompt/sender 过滤：两条附件行存量下任一次纯切换命中 2 行抛 `MultipleResultsFound` → 接口 500；单条附件行时切换静默并入附件消息行、改写其 profile/provider/model 快照。
+- **修法**（`queue.py _handle_busy_turn` 纯切换段）：查询改 `.scalars().all()` 取全部空 prompt 候选，Python 侧按「无附件 + 带切换维度（profile/provider/model 任一非 None）」筛真切换行（注入侧空 prompt 豁免仅切换/附件两形态，此谓词精确还原），多条时取 `(position, created_at)` 最大（最后一次为准）。行锁串行语义不变。
+- **验证**：test_session_queue 新增 2 用例（两附件行 + 切换不 500 且附件行快照原样、切换只并入真切换行）；queue 25 + inject_silent_switch/inject_empty_prompt/knowledge 相邻面全绿；ruff/mypy（scoped）0。
