@@ -17,21 +17,32 @@
  *    react-query 共享缓存不双请求，驱动顶栏标题与整页加载骨架 / 错误重试态；
  *  - ⋯ 菜单（MobileActionMenu 承载，design §5.3 对齐桌面既有动作）：重解析
  *    （reparseChanges + invalidate ["changes", wid] 前缀与本详情 key，语义对齐
- *    桌面列表页 handleReparse）/ 复制变更名（clipboard，展示名口径同标题）。
- *    MobileTopBar 无动作槽——页面以 sticky 包裹层 + 右侧预留 44px 热区组合 ⋯
- *    触发，不侵入组件内部；
+ *    桌面列表页 handleReparse）/ 复制变更名（clipboard，展示名口径同标题）/
+ *    删除变更（task-07 / 2026-09-16-mobile-changes-parity FR-07 / D-004：change
+ *    非空且 canDeleteChange 三判其一才追加 danger 项——加载态与无权限不出现；
+ *    DeleteChangeConfirm 末段防呆确认，成功失效 ["changes", wid] 前缀后跳回
+ *    移动列表，失败中文 toast 留本页，范式对齐桌面 DetailDeleteAction，弹层/
+ *    权限判定/删除请求全部复用既有实现 D-005）。MobileTopBar 无动作槽——页面
+ *    以 sticky 包裹层 + 右侧预留 44px 热区组合 ⋯ 触发，不侵入组件内部；
  *  - 关联会话入口：onOpenSession → /m/workspaces/[id]/sessions（会话列表）。
  */
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MoreVertical } from "lucide-react";
 
+import {
+  canDeleteChange,
+  DeleteChangeConfirm,
+  useChangeDeleteAccess,
+  type DeleteChangeTarget,
+} from "@/components/delete-change-confirm";
 import { MobileActionMenu, type MobileAction } from "@/components/mobile/mobile-action-menu";
 import { MobileChangeDetail } from "@/components/mobile/mobile-change-detail";
 import { MobileTopBar } from "@/components/mobile/mobile-top-bar";
 import { ApiError } from "@/lib/api";
-import { getChange, reparseChanges } from "@/lib/changes";
+import { deleteChange, getChange, reparseChanges } from "@/lib/changes";
+import { useNotify } from "@/lib/errors";
 
 export default function MobileChangeDetailPage() {
   const params = useParams<{ id: string; cid: string }>();
@@ -56,11 +67,19 @@ export default function MobileChangeDetailPage() {
         : "加载变更详情失败"
       : null;
 
-  // ── ⋯ 菜单 state（重解析 / 复制变更名）─────────────────────────────────────
+  // ── ⋯ 菜单 state（重解析 / 复制变更名 / 删除变更）───────────────────────────
   const [menuOpen, setMenuOpen] = useState(false);
   const [reparsing, setReparsing] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // ── 删除变更（task-07 / FR-07 / D-004）：入口可见性 canDeleteChange 三判启发式
+  //    （owner 本人 / 平台管理员 / 工作区所有者，后端 DELETE 组合权限为权威，
+  //    前端判漏由 403 兜底中文 toast）；弹层 / 权限判定 / 删除请求全部复用既有
+  //    实现（D-005），本页只做接线。deleteTarget=null 即弹层关闭。
+  const notify = useNotify();
+  const deleteAccess = useChangeDeleteAccess(workspaceId);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteChangeTarget | null>(null);
 
   const handleBackToList = () => {
     router.push(`/m/workspaces/${workspaceId}/changes`);
@@ -103,6 +122,29 @@ export default function MobileChangeDetailPage() {
     }
   };
 
+  // 删除 mutation（对齐桌面 DetailDeleteAction 范式）：成功 → toast +
+  // await 失效 ["changes", workspaceId] 前缀（列表行消失）→ 跳回移动列表；
+  // 失败（403/404/409）→ 中文 toast 留在本页不白屏（errMessage 取
+  // ApiError.message 兜底「删除变更失败」）。changeKey 口径与桌面一致取
+  // change.change_key，query 数据在成功回调时仍在缓存，null 兜底 changeId。
+  const deleteChangeKey = change?.change_key ?? changeId;
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteChange(workspaceId, changeId),
+    onSuccess: async () => {
+      notify.success(`变更 ${deleteChangeKey} 已删除`);
+      // 列表前缀失效完成后再跳转（与桌面同语义，共享缓存失效口径）
+      await queryClient.invalidateQueries({
+        queryKey: ["changes", workspaceId],
+      });
+      router.push(`/m/workspaces/${workspaceId}/changes`);
+    },
+    onError: (err) => {
+      notify.error(err, "删除变更失败");
+    },
+  });
+
+  // change 非空且 canDeleteChange 三判其一才追加 danger 项——change=null
+  // 加载态与无权限不追加，重解析 / 复制动作不受影响。
   const menuActions: MobileAction[] = [
     {
       key: "reparse",
@@ -118,6 +160,21 @@ export default function MobileChangeDetailPage() {
         void handleCopyName();
       },
     },
+    ...(change && canDeleteChange(change, deleteAccess)
+      ? [
+          {
+            key: "delete-change",
+            label: "删除变更",
+            danger: true,
+            onPress: () => {
+              setDeleteTarget({
+                change_key: change.change_key,
+                owner_name: change.owner_name,
+              });
+            },
+          },
+        ]
+      : []),
   ];
 
   const barTitle = loading
@@ -214,13 +271,26 @@ export default function MobileChangeDetailPage() {
         )}
       </main>
 
-      {/* ⋯ 菜单（底部 ActionSheet）：重解析 / 复制变更名（design §5.3） */}
+      {/* ⋯ 菜单（底部 ActionSheet）：重解析 / 复制变更名 / 删除变更（权限门控） */}
       <MobileActionMenu
         open={menuOpen}
         actions={menuActions}
         onClose={() => setMenuOpen(false)}
         title="变更操作"
       />
+
+      {/* 删除确认弹层（复用删除入口域组件，末段输入防呆）：确认先关弹层再
+          mutate，失败路径走 onError toast 不重开弹层（对齐桌面范式） */}
+      {deleteTarget ? (
+        <DeleteChangeConfirm
+          target={deleteTarget}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            setDeleteTarget(null);
+            deleteMutation.mutate();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

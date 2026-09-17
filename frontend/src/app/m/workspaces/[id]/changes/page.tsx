@@ -20,14 +20,36 @@
  *    quicklog Tab（task-07 增量续作）：listQuicklogEntries + quicklogPollInterval
  *    数据层 100% 复用（零复制实现），卡片点击 MobileDetailSheet 全屏详情
  *    （getQuicklogDetail，对齐原型快速修复屏；桌面 QuicklogDrawer 右抽屉不适配手机）；
- *  - 搜索框 + MobileFilterDrawer（阶段 + 只看待我处理，应用即改 state → key 变化
- *    自动重取；重置对齐桌面 handleResetClick 连搜索词一并清空）；
+ *  - 搜索框 + MobileFilterDrawer（阶段 + 排序 + 只看待我处理，应用即改 state →
+ *    key 变化自动重取；重置对齐桌面 handleResetClick 连搜索词一并清空）；
+ *  - 排序切换 + URL 参数初始化（task-04 / FR-03 / D-003@v1 清单项 3/4）：
+ *    sortDir 从模块常量升为 state 进主列表 key sort 槽位（默认值不变——默认
+ *    参数下 key 与改造前逐字相同，R-03）；桌面表头 toggleSort（:399-404）的
+ *    移动形态收进筛选抽屉「排序（更新时间）」chips（移动无表头，排序入口仅在
+ *    抽屉）；?tab=（白名单 quicklog/archive，非法回 active）与 ?search=（双
+ *    state 同步初始化）URL 深链对齐桌面 :230-239。抽屉「重置」裁定：桌面
+ *    handleResetClick（:384-391）不动排序（表头态不在筛选重置范围），移动排序
+ *    chip 就在抽屉内，随「抽屉内维度全部回默认」一并回 DEFAULT_SORT；
+ *  - quicklog 筛选抽屉（task-05 / FR-04 / D-003@v1 清单项 5）：quicklog tab
+ *    搜索行挂独立 MobileFilterDrawer（open/草稿态与主列表抽屉完全分离——独立
+ *    state 最简且零串扰，见 state 声明处注释）：状态 4 态 chips（值与文案对齐
+ *    桌面 STATUS_OPTIONS）/ 作者 chips（既有 quicklogItems 按 owner_name→
+ *    author_name→author_raw 聚合去重，口径照抄桌面 :197-203，零新增请求）/
+ *    显示空壳占位开关（默认开，取消=收窄，语义对齐桌面 ql-20260818-008）；
+ *    quicklog query key 的 status/author/showPlaceholder 槽位从固定默认值升为
+ *    state 真值（默认 ""/""/true 不漂移——默认参数下 key 与改造前逐字相同，
+ *    R-03 与桌面共享缓存）；「重置」tab 互斥：quicklog 抽屉只清 quicklog 维度
+ *    （占位回 true），主列表「重置」不动 quicklog 维度；
+ *  - 重新扫描（task-03 / FR-01 / D-003@v1 清单项 1）：两 Tab 工具栏搜索行
+ *    「↻ 重新扫描」全局入口（桌面 PageHeader 唯一操作的全 tab 语义），逻辑照抄
+ *    桌面 handleReparse（:406-423）——stats/warnings 反馈文案逐字对齐桌面
+ *    :701-720，成功后仅失效 ["changes", workspaceId] 前缀（不含 changesTabTotals）；
  *  - 分页不用桌面 Table 分页器，底部「加载更多」递增 page：每页一个独立 query
  *    （key 含 page 与桌面同构，useQueries 组合），已加载页累积渲染；
  *  - 空态引导跳移动会话列表（对齐桌面 :443 行为，路由换 /m/ 前缀）。
  */
 import { useEffect, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   keepPreviousData,
   useMutation,
@@ -64,8 +86,11 @@ import { ApiError } from "@/lib/api";
 import {
   deleteChange,
   listChanges,
+  reparseChanges,
   type ChangeList,
+  type ChangeReparseStats,
   type ChangeSummary,
+  type ChangeWarning,
 } from "@/lib/changes";
 import { useNotify } from "@/lib/errors";
 import {
@@ -74,6 +99,7 @@ import {
   quicklogPollInterval,
   type QuicklogEntryListItem,
   type QuicklogEntryRead,
+  type QuicklogStatus,
 } from "@/lib/quicklog";
 import { getWorkspace, type Workspace } from "@/lib/workspaces";
 import { cn } from "@/lib/utils";
@@ -101,9 +127,22 @@ const STAGE_OPTIONS = [
   { value: "archive", label: "归档" },
 ] as const;
 
-/** 排序方向（桌面 page.tsx:80 SortDir 同名同值）。移动版不暴露切换 UI，固定默认值。 */
+/**
+ * 排序方向（桌面 page.tsx:187 SortDir 同名同值）。task-04 起移动版在筛选抽屉
+ * 暴露切换（sortDir state 默认值取 DEFAULT_SORT，与桌面 :243 默认一致）。
+ */
 type SortDir = "updated_at_desc" | "updated_at_asc";
 const DEFAULT_SORT: SortDir = "updated_at_desc";
+
+/**
+ * 排序方向选项（task-04 / FR-03 / D-003@v1 清单项 3）：桌面表头 toggleSort
+ * 两态切换的移动形态——抽屉内单选 chips，文案对齐原型筛选抽屉屏（↓ 最近优先 /
+ * ↑ 最早优先）；chip 为 data-testid 后缀（m-changes-sort-chip-<chip>）。
+ */
+const SORT_OPTIONS = [
+  { value: "updated_at_desc", label: "↓ 最近优先", chip: "desc" },
+  { value: "updated_at_asc", label: "↑ 最早优先", chip: "asc" },
+] as const;
 
 /** 每页条数（与桌面默认 pageSize 一致）。 */
 const PAGE_SIZE = 20;
@@ -127,6 +166,19 @@ const QL_STATUS_META: Record<
   partial_done: { label: "已暂存", kind: "warning" },
   stale: { label: "疑似中断", kind: "error" },
 };
+
+/**
+ * quicklog 状态筛选项（task-05 / FR-04）：值与文案逐字对齐桌面 quicklog-table
+ * STATUS_OPTIONS（:31-37，模块私有未导出——就地内联同值副本，先例 STAGE_OPTIONS /
+ * QL_STATUS_META）。chip 为 data-testid 后缀（m-quicklog-status-chip-<value>）。
+ */
+const QL_STATUS_OPTIONS = [
+  { value: "", label: "全部状态" },
+  { value: "completed", label: "已完成" },
+  { value: "in_progress", label: "进行中" },
+  { value: "partial_done", label: "已暂存" },
+  { value: "stale", label: "疑似中断" },
+] as const;
 
 /** quicklog 详情四段正文渲染顺序固定（桌面 quicklog-drawer BODY_ORDER 同值，design FR-06）。 */
 const QL_BODY_ORDER = ["需求", "根因", "方案", "结果"] as const;
@@ -409,24 +461,61 @@ export default function MobileChangesPage() {
   });
 
   // ── 查询条件 state（语义对齐桌面：搜索词输入/提交分离、聚焦仅进行中视图）────
-  const [tab, setTab] = useState<ChangesTab>("active");
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  // task-04（FR-03）：?tab= 初始 tab（仅 quicklog/archive 合法，非法/缺失回
+  // active）+ ?search= 初始搜索词（?? "" 兜底，输入/提交双 state 同步初始化）
+  // ——URL 深链初始化逐字对齐桌面 :230-239（仅初始化不回写 URL）。
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab");
+  const initialSearch = searchParams.get("search") ?? "";
+  const [tab, setTab] = useState<ChangesTab>(
+    initialTab === "quicklog" || initialTab === "archive" ? initialTab : "active",
+  );
+  const [searchInput, setSearchInput] = useState(initialSearch);
+  const [search, setSearch] = useState(initialSearch);
   const [stageFilter, setStageFilter] = useState("");
   const [focusMine, setFocusMine] = useState(false);
+  // task-04（FR-03 / D-003@v1 清单项 3）：排序方向从固定常量升为 state，进主列表
+  // key sort 槽位与 listChanges sort 参数；移动切换入口仅在筛选抽屉（桌面是表头
+  // toggleSort :399-404，移动无表头）。默认值仍取 DEFAULT_SORT——默认参数下
+  // query key 与请求参数和改造前逐字相同（R-03 桌面共享缓存语义）。
+  const [sortDir, setSortDir] = useState<SortDir>(DEFAULT_SORT);
   // 「加载更多」已加载页数（递增 page；任意查询条件变化回 1）
   const [pagesLoaded, setPagesLoaded] = useState(1);
   // 筛选抽屉草稿态：打开时从生效值拷贝，「确定」才落到查询 state
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftStage, setDraftStage] = useState("");
   const [draftFocusMine, setDraftFocusMine] = useState(false);
+  // task-04：排序草稿态（沿用 draftStage 范式——取消不点确定不污染生效排序）
+  const [draftSort, setDraftSort] = useState<SortDir>(DEFAULT_SORT);
+  // ── quicklog 筛选（task-05 / FR-04 / D-003@v1 清单项 5）：状态/作者/空壳占位 ──
+  // 三组生效值默认 "" / "" / true——quicklog query key 同名槽位真值化的基准，
+  // 默认值下 key 与改造前逐字相同（R-03 与桌面共享缓存不破坏）。占位开关语义
+  // 对齐桌面 ql-20260818-008：默认显示（进行中 quick 会话全程可见），取消=收窄。
+  const [qlStatus, setQlStatus] = useState("");
+  const [qlAuthor, setQlAuthor] = useState("");
+  const [showPlaceholder, setShowPlaceholder] = useState(true);
+  // quicklog 抽屉独立 open + 草稿态，不复用主列表 filterOpen/草稿：两 Tab 渲染
+  // 分支互斥本不会同屏，但共用一组草稿会让「打开拷贝/确定落盘」互相踩维度
+  // （主列表抽屉拷不到 quicklog 三态），独立 state 实现最简且状态零串扰。
+  const [qlFilterOpen, setQlFilterOpen] = useState(false);
+  const [draftQlStatus, setDraftQlStatus] = useState("");
+  const [draftQlAuthor, setDraftQlAuthor] = useState("");
+  const [draftShowPlaceholder, setDraftShowPlaceholder] = useState(true);
   // quicklog Tab（task-07 / FR-05）：选中条目即详情 Sheet 的 openId（null = 关闭）
   const [quicklogSelected, setQuicklogSelected] =
     useState<QuicklogEntryListItem | null>(null);
+  // ── 重新扫描（task-03 / FR-01）：state 与桌面 :246/:254-256 同名同语义 ─────────
+  const [reparsing, setReparsing] = useState(false);
+  // reparse 错误横幅（主列表加载错误走 query 派生的 listError，两者分离呈现）
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [stats, setStats] = useState<ChangeReparseStats | null>(null);
+  const [warnings, setWarnings] = useState<ChangeWarning[]>([]);
 
   // 主列表分页 query key（page 槽位变化即新查询，形态逐字对齐桌面 page.tsx:149）。
   // 就地拼数组（不经 queryKeys 工厂）：桌面同 key 就是就地字面量，工厂化反而制造
   // 两个"权威来源"漂移面——与桌面逐字一致是本页硬约束。
+  // task-04：sort 槽位改用 sortDir state（默认值 = DEFAULT_SORT，默认参数下
+  // key 与改造前逐字相同，R-03 桌面/移动共享缓存不破坏）。
   const pageQueryKey = (page: number) =>
     [
       "changes",
@@ -435,7 +524,7 @@ export default function MobileChangesPage() {
         location: tab,
         search,
         currentStage: stageFilter,
-        sort: DEFAULT_SORT,
+        sort: sortDir,
         // D-007：进行中 + 聚焦 → 只看待我处理（pending_review 非空）
         pendingReviewOnly: tab === "active" && focusMine,
         page,
@@ -459,7 +548,7 @@ export default function MobileChangesPage() {
               location: tab,
               search: search || undefined,
               currentStage: stageFilter || undefined,
-              sort: DEFAULT_SORT,
+              sort: sortDir,
               pendingReviewOnly: tab === "active" && focusMine,
               page,
               pageSize: PAGE_SIZE,
@@ -517,18 +606,20 @@ export default function MobileChangesPage() {
 
   // ── quicklog Tab 列表（task-07 / FR-05）────────────────────────────────────
   // 数据层 100% 复用 lib/quicklog.ts 既有函数（零复制实现）；key 结构对齐桌面
-  // QuicklogTable 默认形态（["quicklogEntries", ws, { search/status/author/
-  // showPlaceholder/page/pageSize }]——移动端无状态/负责人筛选，固定默认槽位值），
-  // 与桌面共享缓存与失效前缀；search 与页内搜索词联动（tab 内共享 search state）。
+  // QuicklogTable（["quicklogEntries", ws, { search/status/author/showPlaceholder/
+  // page/pageSize }]），与桌面共享缓存与失效前缀。task-05（FR-04）起 status/
+  // author/showPlaceholder 槽位从固定默认值升为筛选 state 真值——默认 ""/""/true
+  // 不漂移，默认参数下 key 与改造前逐字相同（R-03 不产生额外请求）；queryFn
+  // 传参形态逐字对齐桌面 :174-182（空值转 undefined、占位 true 才带参数）。
   const quicklogListQuery = useQuery({
     queryKey: [
       "quicklogEntries",
       workspaceId,
       {
         search,
-        status: "",
-        author: "",
-        showPlaceholder: true,
+        status: qlStatus,
+        author: qlAuthor,
+        showPlaceholder,
         page: 1,
         pageSize: PAGE_SIZE,
       },
@@ -536,7 +627,9 @@ export default function MobileChangesPage() {
     queryFn: () =>
       listQuicklogEntries(workspaceId, {
         search: search || undefined,
-        include_placeholder: true,
+        status: (qlStatus || undefined) as QuicklogStatus | undefined,
+        author: qlAuthor || undefined,
+        include_placeholder: showPlaceholder || undefined,
         page: 1,
         page_size: PAGE_SIZE,
       }),
@@ -548,6 +641,17 @@ export default function MobileChangesPage() {
       quicklogPollInterval(query.state.data?.items ?? []),
   });
   const quicklogItems = quicklogListQuery.data?.items ?? [];
+  // 作者筛选候选（task-05 / FR-04 / R-05）：口径照抄桌面 QuicklogTable :197-203
+  // ——owner_name（关联变更 owner，与进行中/已归档同源）优先 → author_name →
+  // author_raw 兜底链 + Boolean 过滤 + Set 去重；数据源为页面既有 quicklogItems
+  // （当前列表响应），零新增请求，不另造口径。
+  const qlAuthors = Array.from(
+    new Set(
+      quicklogItems
+        .map((it) => it.owner_name || it.author_name || it.author_raw)
+        .filter((a): a is string => Boolean(a)),
+    ),
+  );
   const quicklogLoading = tab === "quicklog" && quicklogListQuery.isPending;
   const quicklogError =
     tab === "quicklog" && quicklogListQuery.isError
@@ -563,10 +667,12 @@ export default function MobileChangesPage() {
     enabled: Boolean(quicklogSelected),
   });
 
-  // 任意查询条件（tab/搜索词/阶段/聚焦）变化 → 已加载页数回 1（新条件下重新累积）。
+  // 任意查询条件（tab/搜索词/阶段/聚焦/排序）变化 → 已加载页数回 1（新条件下
+  // 重新累积）。task-04 补 sortDir：排序变 = 新查询条件（对齐桌面 toggleSort
+  // 内 setPage(1) 的语义）。
   useEffect(() => {
     setPagesLoaded(1);
-  }, [tab, search, stageFilter, focusMine]);
+  }, [tab, search, stageFilter, focusMine, sortDir]);
 
   const handleTabChange = (newTab: ChangesTab) => {
     if (newTab === tab) return;
@@ -591,6 +697,7 @@ export default function MobileChangesPage() {
       // 打开时从生效值拷贝草稿，取消（不点确定）不污染生效筛选
       setDraftStage(stageFilter);
       setDraftFocusMine(focusMine);
+      setDraftSort(sortDir);
     }
     setFilterOpen(open);
   };
@@ -598,8 +705,12 @@ export default function MobileChangesPage() {
   const handleFilterApply = () => {
     setStageFilter(draftStage);
     if (tab === "active") setFocusMine(draftFocusMine);
+    setSortDir(draftSort);
   };
-  // 「重置」对齐桌面 handleResetClick：搜索词/阶段/聚焦全部回默认（page 经 effect 回 1）
+  // 「重置」对齐桌面 handleResetClick：搜索词/阶段/聚焦全部回默认（page 经 effect 回 1）。
+  // task-04 裁定：桌面 handleResetClick（:384-391）不动排序（排序是表头态不在
+  // 筛选重置范围）；移动排序 chip 就在抽屉内，随「抽屉内维度全部回默认」语义
+  // 一并回 DEFAULT_SORT（任务卡验收明定：重置后排序回默认 ↓ 最近优先）。
   const handleFilterReset = () => {
     setSearchInput("");
     setSearch("");
@@ -607,6 +718,37 @@ export default function MobileChangesPage() {
     setFocusMine(false);
     setDraftStage("");
     setDraftFocusMine(false);
+    setSortDir(DEFAULT_SORT);
+    setDraftSort(DEFAULT_SORT);
+  };
+
+  // ── quicklog 筛选抽屉（task-05 / FR-04）：草稿范式沿用主列表抽屉 ──────────────
+  // 打开拷生效值 → 「确定」草稿落生效（key 变化自动重取）；取消不点确定不污染。
+  const handleQlFilterOpenChange = (open: boolean) => {
+    if (open) {
+      setDraftQlStatus(qlStatus);
+      setDraftQlAuthor(qlAuthor);
+      setDraftShowPlaceholder(showPlaceholder);
+    }
+    setQlFilterOpen(open);
+  };
+  const handleQlFilterApply = () => {
+    setQlStatus(draftQlStatus);
+    setQlAuthor(draftQlAuthor);
+    setShowPlaceholder(draftShowPlaceholder);
+  };
+  // 「重置」：搜索词/状态/作者/占位全部回默认（占位回 true，草稿与生效态一并清）；
+  // tab 互斥——只清 quicklog 维度，不动主列表的阶段/聚焦/排序（主列表「重置」
+  // handleFilterReset 同样不动 quicklog 维度）。
+  const handleQlFilterReset = () => {
+    setSearchInput("");
+    setSearch("");
+    setQlStatus("");
+    setQlAuthor("");
+    setShowPlaceholder(true);
+    setDraftQlStatus("");
+    setDraftQlAuthor("");
+    setDraftShowPlaceholder(true);
   };
 
   // quicklog 关联变更 chip → 钻取变更详情路由：linked_changes 存的是 change_key，
@@ -626,6 +768,27 @@ export default function MobileChangesPage() {
       }
     } catch {
       /* 解析失败静默 */
+    }
+  };
+
+  // ── 重新扫描（task-03 / FR-01 / D-003@v1）：流程照抄桌面 handleReparse ──────────
+  // 成功后失效主列表 key 前缀 ["changes", workspaceId]（移动分页各页 query 与桌面
+  // 共享该前缀自动重取；不含 changesTabTotals——对齐桌面 reparse 既有语义，tab
+  // 计数不随 reparse 刷新）；失败 ApiError.message 中文红条兜底「重新解析失败」。
+  const handleReparse = async () => {
+    setReparsing(true);
+    setPageError(null);
+    try {
+      const resp = await reparseChanges(workspaceId);
+      setStats(resp.stats);
+      setWarnings(resp.warnings ?? []);
+      await queryClient.invalidateQueries({
+        queryKey: ["changes", workspaceId],
+      });
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "重新解析失败");
+    } finally {
+      setReparsing(false);
     }
   };
 
@@ -693,9 +856,11 @@ export default function MobileChangesPage() {
     );
   };
 
-  // quicklog Tab 空态（对齐桌面 QuicklogTable renderEmpty 两分场景）
+  // quicklog Tab 空态（对齐桌面 QuicklogTable renderEmpty 两分场景）。task-05 起
+  // 筛选维度补齐 status/author/占位——口径同桌面 hasFilter（:329）：任一筛选激活
+  // 时无匹配走「没有匹配」短文案，避免误导性的「还没有记录」全量引导。
   const renderQuicklogEmpty = (): ReactNode =>
-    search ? (
+    search || qlStatus || qlAuthor || !showPlaceholder ? (
       <p className="py-10 text-center text-[14px] text-muted-foreground">
         没有匹配的快速修复记录。
       </p>
@@ -737,9 +902,52 @@ export default function MobileChangesPage() {
         </div>
       )}
 
+      {/* 重新扫描反馈区（task-03 / FR-01）：reparse 错误红条 → stats 成功条 →
+          警告卡（顺序对齐桌面 :699-720 bannerError → stats → warnings）；文案与
+          桌面逐字一致；置于 Tab 行前 = 全 tab 可见（入口两 Tab 均在，反馈同域） */}
+      {pageError ? (
+        <p
+          role="alert"
+          className="rounded-[var(--radius-md)] border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+        >
+          {pageError}
+        </p>
+      ) : null}
+
+      {stats ? (
+        <div
+          data-testid="m-changes-reparse-stats"
+          className="rounded-[var(--radius-md)] border border-success/30 bg-success/10 px-3 py-2 text-xs text-success"
+        >
+          已重新扫描：解析 {stats.parsed}，新增 {stats.created} · 更新{" "}
+          {stats.updated} · 删除 {stats.deleted}。
+          {warnings.length > 0 && ` ${warnings.length} 个警告。`}
+        </div>
+      ) : null}
+
+      {warnings.length > 0 ? (
+        <div
+          data-testid="m-changes-reparse-warnings"
+          className="rounded-[var(--radius-md)] border border-border bg-card px-3 py-2.5"
+        >
+          <p className="mb-1 text-xs font-medium text-warning">
+            解析警告（{warnings.length}）
+          </p>
+          {/* 内容对齐桌面 SectionCard「解析警告」：[code] change_key: detail（缺失 —） */}
+          <ul className="flex flex-col gap-0.5 text-xs text-warning">
+            {warnings.map((w, i) => (
+              <li key={i}>
+                <span className="font-mono">[{w.code}]</span>{" "}
+                {w.change_key ?? "—"}: {w.detail}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {/* 平台同步处理区（2026-09-04-conflict-resolve-entry task-09）：与桌面
-          changes 页「解析警告」卡后同位镜像（本页无解析警告卡，置于顶栏后、
-          Tab 前的对应位置）；compact 紧凑布局（行纵向堆叠 + 44px 触摸热区）。
+          changes 页「解析警告」卡后同位镜像（task-03 起上方有重新扫描反馈区，
+          置于反馈区后、Tab 前）；compact 紧凑布局（行纵向堆叠 + 44px 触摸热区）。
           无绑定或无 sillyspec_status 时组件自渲染 null，页面行为与现状一致 */}
       <PlatformSyncSection workspaceId={workspaceId} compact />
 
@@ -784,8 +992,9 @@ export default function MobileChangesPage() {
       </div>
 
       {tab === "quicklog" ? (
-        // ── 快速修复 Tab（task-07 / FR-05）：搜索与页内搜索词联动；无阶段/聚焦
-        //    概念不挂筛选抽屉；卡片点击 MobileDetailSheet 全屏详情 ──────────────
+        // ── 快速修复 Tab（task-07 / FR-05）：搜索与页内搜索词联动；task-05
+        //    （FR-04）起挂独立筛选抽屉（状态/作者/空壳占位，与主列表抽屉分离）；
+        //    卡片点击 MobileDetailSheet 全屏详情 ─────────────────────────────────
         <>
           <div className="flex items-center gap-2">
             <input
@@ -805,6 +1014,105 @@ export default function MobileChangesPage() {
               className="inline-flex min-h-[44px] shrink-0 items-center justify-center rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground transition-colors hover:bg-muted"
             >
               搜索
+            </button>
+            {/* task-05（FR-04 / D-003@v1 清单项 5）：quicklog 筛选抽屉——独立实例
+                （qlFilterOpen/ql 草稿与主列表抽屉分离，理由见 state 声明处注释），
+                对齐 PC QuicklogTable 三个筛选项（状态 Select / 负责人 Select /
+                占位 Checkbox）的移动 chips 形态，对齐原型屏 4；不引入 antd
+                Select/Checkbox（R-04 移动原生控件） */}
+            <MobileFilterDrawer
+              open={qlFilterOpen}
+              onOpenChange={handleQlFilterOpenChange}
+              onApply={handleQlFilterApply}
+              onReset={handleQlFilterReset}
+            >
+              {/* 状态（单选 chips，值与文案对齐桌面 STATUS_OPTIONS :31-37） */}
+              <p className="mb-2 text-xs text-muted-foreground">状态</p>
+              <div className="mb-4 flex flex-wrap gap-2">
+                {QL_STATUS_OPTIONS.map((opt) => {
+                  const active = draftQlStatus === opt.value;
+                  return (
+                    <button
+                      key={opt.value || "all"}
+                      type="button"
+                      aria-pressed={active}
+                      data-testid={`m-quicklog-status-chip-${opt.value || "all"}`}
+                      onClick={() => setDraftQlStatus(opt.value)}
+                      className={cn(
+                        "inline-flex min-h-[38px] items-center justify-center rounded-full border px-3.5 text-[13px] transition-colors",
+                        active
+                          ? "border-primary bg-primary/10 font-medium text-primary"
+                          : "border-border bg-card text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* 作者（单选 chips：全部作者 + 当前列表响应 items 聚合去重，
+                  qlAuthors 口径见声明处注释——零新增请求） */}
+              <p className="mb-2 text-xs text-muted-foreground">作者</p>
+              <div className="mb-4 flex flex-wrap gap-2">
+                {["", ...qlAuthors].map((a) => {
+                  const active = draftQlAuthor === a;
+                  return (
+                    <button
+                      key={a || "all"}
+                      type="button"
+                      aria-pressed={active}
+                      data-testid={`m-quicklog-author-chip-${a || "all"}`}
+                      onClick={() => setDraftQlAuthor(a)}
+                      className={cn(
+                        "inline-flex min-h-[38px] items-center justify-center rounded-full border px-3.5 text-[13px] transition-colors",
+                        active
+                          ? "border-primary bg-primary/10 font-medium text-primary"
+                          : "border-border bg-card text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {a || "全部作者"}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* 其他：显示空壳占位开关（默认开；取消=收窄，语义对齐桌面
+                  ql-20260818-008 Checkbox；样式沿用本页「只看待我处理」toggle） */}
+              <p className="mb-2 text-xs text-muted-foreground">其他</p>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={draftShowPlaceholder}
+                data-testid="m-quicklog-placeholder-toggle"
+                onClick={() => setDraftShowPlaceholder((v) => !v)}
+                className="flex min-h-[44px] w-full items-center justify-between rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground"
+              >
+                <span>显示空壳占位条目</span>
+                <span
+                  aria-hidden
+                  className={cn(
+                    "inline-flex h-6 w-11 items-center rounded-full px-0.5 transition-colors",
+                    draftShowPlaceholder ? "bg-primary" : "bg-muted",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "h-5 w-5 rounded-full bg-card shadow-[var(--shadow-sm)] transition-transform",
+                      draftShowPlaceholder && "translate-x-5",
+                    )}
+                  />
+                </span>
+              </button>
+            </MobileFilterDrawer>
+            {/* task-03（FR-01 / D-003@v1）：重新扫描全局入口（桌面 PageHeader 唯一
+                操作对全 tab 生效 → 本 Tab 工具栏同样渲染；解析中 disabled 防重入） */}
+            <button
+              type="button"
+              onClick={() => void handleReparse()}
+              disabled={reparsing}
+              data-testid="m-changes-rescan-btn"
+              className="inline-flex min-h-[44px] shrink-0 items-center justify-center rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {reparsing ? "解析中…" : "↻ 重新扫描"}
             </button>
           </div>
 
@@ -841,7 +1149,7 @@ export default function MobileChangesPage() {
         </>
       ) : (
         <>
-          {/* 工具栏：搜索框 + 筛选抽屉入口（阶段 / 只看待我处理收进抽屉） */}
+          {/* 工具栏：搜索框 + 筛选抽屉入口（阶段 / 排序 / 只看待我处理收进抽屉） */}
           <div className="flex items-center gap-2">
             <input
               value={searchInput}
@@ -891,6 +1199,33 @@ export default function MobileChangesPage() {
                   );
                 })}
               </div>
+              {/* 排序（更新时间）（task-04 / FR-03）：桌面表头 ↑↓ 切换的移动形态，
+                  单选 chips 对齐原型筛选抽屉屏（阶段 → 排序 → 其他 顺序） */}
+              <p className="mb-2 text-xs text-muted-foreground">
+                排序（更新时间）
+              </p>
+              <div className="mb-4 flex flex-wrap gap-2">
+                {SORT_OPTIONS.map((opt) => {
+                  const active = draftSort === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      aria-pressed={active}
+                      data-testid={`m-changes-sort-chip-${opt.chip}`}
+                      onClick={() => setDraftSort(opt.value)}
+                      className={cn(
+                        "inline-flex min-h-[38px] items-center justify-center rounded-full border px-3.5 text-[13px] transition-colors",
+                        active
+                          ? "border-primary bg-primary/10 font-medium text-primary"
+                          : "border-border bg-card text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
               {/* 只看待我处理（仅进行中视图，对齐桌面 ql-20260818-004 查询条件） */}
               {tab === "active" && (
                 <button
@@ -919,6 +1254,17 @@ export default function MobileChangesPage() {
                 </button>
               )}
             </MobileFilterDrawer>
+            {/* task-03（FR-01 / D-003@v1）：重新扫描全局入口（搜索/筛选入口之后，
+                对齐原型屏 2 搜索行尾位；解析中 disabled 防重入） */}
+            <button
+              type="button"
+              onClick={() => void handleReparse()}
+              disabled={reparsing}
+              data-testid="m-changes-rescan-btn"
+              className="inline-flex min-h-[44px] shrink-0 items-center justify-center rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {reparsing ? "解析中…" : "↻ 重新扫描"}
+            </button>
           </div>
 
           {listError ? (

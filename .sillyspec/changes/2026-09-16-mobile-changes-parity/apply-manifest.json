@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-16-mobile-changes-parity",
+  "appliedAt": "2026-09-16T15:02:03.073Z",
+  "baseHash": "4c6f5191c3af096df936810ce6fe996076e1e6e5",
+  "files": [
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+      "sha256": "e3a25a76cb1d8d9acec3d048e99cb40cd65920ea1bae0396701c737eff24a39a"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/[id]/changes/[cid]/__tests__/page.m-change-detail.test.tsx",
+      "sha256": "7c2af6fed37b132e4e9162ed9e551e70fc4691ebf52304540805cfe7047c5ab7"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/[id]/changes/[cid]/page.tsx",
+      "sha256": "af4dc12807cbd65b54beb2bb3089fece337d58509141e2a5f49b9f7118b59aba"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx",
+      "sha256": "ccba1b3ddd195100d820609e2b4a56684f085e1727e077a27b4542a8d6e8f825"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/[id]/changes/page.tsx",
+      "sha256": "da7c92c7c1ed885657fd31680e088bb86c01002ab76f03b898849f3d5d060a75"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-change-card.test.tsx",
+      "sha256": "ee2c41b4acb43b069ad3a65c6c07852679697b36721ebb430561c345d090e81b"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-change-card.tsx",
+      "sha256": "36f636e7249fdce9c1a6ff7c5e3be41f5a8910c1cf57e6b1a8dfad5df47d2a89"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-change-detail.test.tsx",
+      "sha256": "0584536ff9b55e38485d1ecc3b2e20313f55440560ca4356b911e6a1a5deb3da"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-change-detail.tsx",
+      "sha256": "90d052840fedb22e4479ac72dd7b38ec5ff3efe7d9d57dfd92a77bc36d9d6ea7"
+    }
+  ]
+}

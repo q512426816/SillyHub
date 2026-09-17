@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-16-mobile-changes-parity",
+  "generatedAt": "2026-09-16T14:59:42.848Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-16-mobile-changes-parity",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 5
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-16-mobile-changes-parity",
+      "metrics": {
+        "tasks": 8,
+        "hasTest": 8
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-16-mobile-changes-parity",
+      "metrics": {
+        "backendEndpoints": 2204,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-16-mobile-changes-parity",
+      "metrics": {
+        "deletions": 3,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-16-mobile-changes-parity",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "tests": {
+    "command": "module[frontend]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-16T15:00:34.494Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "handover": {
+    "count": 4,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "390px 真机/浏览器视觉冒烟（R-01 残余）",
+        "condition": "手机访问 /m/workspaces/<id>/changes 与 /m/workspaces/<id>/changes/<cid>：确认三卡（最后信号/执行用量/范围对账）与增强卡片无横向溢出。结构性证据已备（ScopeAuditCommandCard 桌面即渲染于 320px 固定侧栏，窄于 390px）"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "原型对照走查",
+        "condition": "打开 .sillyspec/changes/2026-09-16-mobile-changes-parity/prototype-mobile-changes-parity.html 七屏与真机对照，确认交互形态符合预期"
+      },
+      {
+        "type": "other",
+        "item": "筛选按钮激活点（dot）未实现",
+        "condition": "task-05 裁定：需改 mobile-filter-drawer.tsx（超出本变更 allowed_paths）且非验收项；后续变更给 MobileFilterDrawer 加 active prop"
+      },
+      {
+        "type": "other",
+        "item": "3 条新增 eslint warning 清理",
+        "condition": "mobile-change-detail.tsx:215（stage 未用）、m/changes/__tests__/page.test.tsx:465/565（q 未用）——改 _ 前缀即可，顺手变更处理"
+      }
+    ]
+  }
+}

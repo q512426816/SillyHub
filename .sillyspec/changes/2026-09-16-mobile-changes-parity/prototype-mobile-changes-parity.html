@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · 变更中心移动端功能对齐（列表补齐 + 详情补齐）</title>
+<style>
+  /* 设计 token 对齐 frontend/src/styles/themes.ts「AI 紫」浅色主题（沿用
+     2026-08-26-mobile-workspace-page prototype 同源取值，不自调） */
+  :root {
+    --primary: #7C3AED; --primary-hover: #6D28D9;
+    --bg: #FAF5FF; --card: #FFFFFF; --border: #DDD6FE;
+    --brand-50: #f5f3ff; --brand-100: #ede9fe; --brand-600: #7c3aed;
+    --text: #0f172a; --muted: #64748b; --muted-2: #94a3b8;
+    --success: #10b981; --warning: #f59e0b; --error: #ef4444; --info: #06b6d4;
+    --shadow-card: 0 1px 2px rgba(80,50,140,.06), 0 1px 6px rgba(80,50,140,.05);
+    --shadow-pop: 0 8px 30px rgba(60,30,120,.18);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#1c1230; color:var(--text); display:flex; overflow:hidden; }
+  .viewer { width:250px; height:100%; overflow-y:auto; padding:20px 14px; background:#150d26; color:#d8ccf5; flex-shrink:0; }
+  .viewer h1 { font-size:14px; font-weight:600; color:#fff; margin-bottom:4px; }
+  .viewer .sub { font-size:11px; color:#8f7fc0; margin-bottom:14px; line-height:1.6; }
+  .viewer .grp { font-size:10px; letter-spacing:.12em; color:#7a68ab; margin:14px 0 6px; }
+  .nav-btn { display:block; width:100%; text-align:left; padding:9px 10px; margin-bottom:4px; border:0; border-radius:9px; background:transparent; color:#cbbcf0; font-size:12.5px; cursor:pointer; line-height:1.45; }
+  .nav-btn small { display:block; font-size:10px; color:#7a68ab; }
+  .nav-btn.on { background:rgba(124,58,237,.35); color:#fff; }
+  .nav-btn.on small { color:#c9b8f2; }
+  .new-tag { display:inline-block; margin-left:5px; padding:0 5px; border-radius:6px; background:#10b981; color:#fff; font-size:9px; font-weight:600; vertical-align:1px; }
+  .phone-wrap { flex:1; display:flex; align-items:center; justify-content:center; height:100%; }
+  .phone { position:relative; width:390px; height:844px; background:#000; border-radius:54px; padding:12px; box-shadow:0 30px 80px rgba(0,0,0,.55), inset 0 0 0 2px #333; flex-shrink:0; }
+  .phone .screen-area { position:relative; width:100%; height:100%; background:var(--bg); border-radius:42px; overflow:hidden; display:flex; flex-direction:column; }
+  .statusbar { position:absolute; top:0; left:0; right:0; height:44px; z-index:60; display:flex; align-items:flex-end; justify-content:space-between; padding:0 26px 4px; font-size:13px; font-weight:600; color:var(--text); pointer-events:none; }
+  .statusbar .island { position:absolute; top:10px; left:50%; transform:translateX(-50%); width:118px; height:32px; background:#000; border-radius:20px; }
+  .home-indicator { position:absolute; bottom:7px; left:50%; transform:translateX(-50%); width:130px; height:5px; border-radius:3px; background:var(--text); opacity:.85; z-index:60; pointer-events:none; }
+  .screen { position:absolute; inset:0; display:none; flex-direction:column; background:var(--bg); }
+  .screen.on { display:flex; }
+  .app-top { flex-shrink:0; padding:52px 16px 0; background:var(--card); border-bottom:1px solid var(--border); }
+  .app-top .bar { display:flex; align-items:center; gap:10px; min-height:44px; }
+  .app-top .back { width:36px; height:36px; margin-left:-8px; border:0; background:transparent; border-radius:10px; font-size:19px; color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .app-top .title { font-size:16px; font-weight:600; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .app-top .title small { display:block; font-size:11px; font-weight:400; color:var(--muted); margin-top:1px; }
+  .icon-btn { width:36px; height:36px; border:1px solid var(--border); background:var(--card); border-radius:10px; font-size:15px; cursor:pointer; color:var(--muted); display:flex; align-items:center; justify-content:center; }
+  .app-main { flex:1; min-height:0; overflow-y:auto; padding:12px 14px 20px; }
+  .app-main::-webkit-scrollbar, .drawer-body::-webkit-scrollbar { width:0; }
+  .tabbar { flex-shrink:0; display:flex; background:var(--card); border-top:1px solid var(--border); padding:6px 4px 22px; }
+  .tabbar .t { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:4px 0; font-size:10px; color:var(--muted-2); cursor:pointer; min-height:44px; justify-content:center; }
+  .tabbar .t .ic { font-size:19px; line-height:1; }
+  .tabbar .t.on { color:var(--brand-600); font-weight:600; }
+
+  /* 列表工具栏：搜索 + 筛选 + 重新扫描（新增） */
+  .search-row { display:flex; gap:8px; margin-bottom:10px; }
+  .search { flex:1; display:flex; align-items:center; gap:7px; background:var(--card); border:1px solid var(--border); border-radius:11px; padding:0 12px; min-height:44px; color:var(--muted-2); font-size:14px; }
+  .btn44 { border:1px solid var(--border); background:var(--card); border-radius:11px; cursor:pointer; font-size:13px; color:var(--text); display:flex; align-items:center; justify-content:center; min-height:44px; }
+  .filter-btn { width:44px; font-size:15px; color:var(--muted); position:relative; }
+  .filter-btn .dot { position:absolute; top:8px; right:9px; width:7px; height:7px; border-radius:50%; background:var(--primary); }
+  .rescan-btn { padding:0 12px; flex-shrink:0; }
+  .rescan-btn:active { background:var(--brand-50); }
+
+  /* 三 Tab（下划线式，对齐现网 m/changes） */
+  .list-tabs { display:flex; margin-bottom:10px; }
+  .list-tabs button { flex:1; background:transparent; border:0; border-bottom:2px solid transparent; padding:8px 0 10px; font-size:14px; color:var(--muted); cursor:pointer; min-height:44px; font-weight:500; }
+  .list-tabs button.on { border-color:var(--primary); color:var(--primary); font-weight:600; }
+  .list-tabs .cnt { display:inline-block; min-width:17px; margin-left:4px; padding:0 4px; border-radius:999px; background:rgba(0,0,0,.08); font-size:10.5px; line-height:17px; text-align:center; }
+
+  /* 增强变更卡片（对齐 MobileChangeCard + 本次补齐信息行） */
+  .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:13px 14px; margin-bottom:10px; box-shadow:var(--shadow-card); cursor:pointer; }
+  .card .row1 { display:flex; align-items:flex-start; gap:10px; }
+  .card .lead-ic { width:40px; height:40px; border-radius:12px; border:1px solid rgba(124,58,237,.25); background:var(--brand-50); color:var(--brand-600); display:flex; align-items:center; justify-content:center; font-size:17px; flex-shrink:0; }
+  .card .lead-ic.warn { border-color:rgba(245,158,11,.3); background:rgba(245,158,11,.1); color:var(--warning); }
+  .card .main { flex:1; min-width:0; }
+  .card .name { font-size:14.5px; font-weight:600; line-height:1.35; }
+  .card .key { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; color:var(--muted); margin-top:1px; }
+  .card .time { font-size:11px; color:var(--muted); white-space:nowrap; }
+  .badge-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; align-items:center; }
+  .badge { display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; }
+  .badge.stage { background:var(--brand-50); color:var(--brand-600); border:1px solid var(--brand-100); }
+  .badge.stage small { font-weight:400; color:var(--muted); }
+  .badge.todo { background:rgba(245,158,11,.12); color:#b45309; }
+  .badge.act { background:rgba(16,185,129,.12); color:#047857; }
+  .badge.act.stale { background:rgba(239,68,68,.1); color:#b91c1c; }
+  /* 新增：元信息行（负责人 + 影响组件）与执行用量行 */
+  .meta-row { display:flex; flex-wrap:wrap; gap:4px 12px; margin-top:7px; font-size:11.5px; color:var(--muted); }
+  .meta-row b { font-weight:500; color:var(--text); }
+  .usage-row { display:flex; align-items:center; gap:8px; margin-top:7px; padding-top:7px; border-top:1px dashed var(--border); font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .usage-row .dur { font-weight:600; color:var(--text); }
+  .usage-row .run { padding:0 6px; border-radius:999px; background:var(--brand-50); color:var(--brand-600); font-size:10px; font-weight:600; }
+
+  /* 重新扫描反馈条（新增） */
+  .rescan-ok { display:flex; gap:8px; align-items:flex-start; border:1px solid rgba(16,185,129,.3); background:rgba(16,185,129,.08); color:#047857; border-radius:11px; padding:9px 12px; font-size:12px; line-height:1.5; margin-bottom:10px; }
+
+  /* 筛选抽屉（底部，对齐 MobileFilterDrawer） */
+  .scrim { position:absolute; inset:0; background:rgba(15,10,30,.45); z-index:70; }
+  .drawer { position:absolute; left:0; right:0; bottom:0; z-index:71; background:var(--card); border-radius:20px 20px 0 0; box-shadow:var(--shadow-pop); max-height:82%; display:flex; flex-direction:column; }
+  .drawer .grab { width:36px; height:4px; border-radius:2px; background:var(--border); margin:8px auto 2px; }
+  .drawer .dt { text-align:center; font-size:14px; font-weight:600; padding:6px 0 2px; }
+  .drawer-body { overflow-y:auto; padding:8px 16px 8px; }
+  .flabel { font-size:12px; color:var(--muted); margin:12px 0 8px; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; }
+  .chip { border:1px solid var(--border); background:var(--card); border-radius:999px; padding:0 14px; min-height:38px; font-size:13px; color:var(--muted); cursor:pointer; }
+  .chip.on { border-color:var(--primary); background:var(--brand-50); color:var(--primary); font-weight:600; }
+  .switch-row { display:flex; align-items:center; justify-content:space-between; border:1px solid var(--border); border-radius:11px; padding:0 12px; min-height:44px; font-size:14px; margin-top:4px; }
+  .sw { width:44px; height:24px; border-radius:999px; background:var(--border); position:relative; transition:.15s; }
+  .sw::after { content:""; position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.2); transition:.15s; }
+  .sw.on { background:var(--primary); } .sw.on::after { left:22px; }
+  .drawer-actions { display:flex; gap:10px; padding:10px 16px calc(18px + env(safe-area-inset-bottom)); }
+  .drawer-actions button { flex:1; min-height:44px; border-radius:11px; font-size:14px; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); }
+  .drawer-actions .ok { background:var(--primary); border-color:var(--primary); color:#fff; font-weight:600; }
+
+  /* 详情页区块 */
+  .sec { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px 14px; margin-bottom:10px; box-shadow:var(--shadow-card); }
+  .sec .sh { display:flex; align-items:center; gap:6px; font-size:14px; font-weight:600; }
+  .sec .sh .cnt { color:var(--muted); font-weight:400; font-size:12px; }
+  .signal { display:flex; gap:8px; align-items:center; padding:8px 2px 2px; font-size:12px; color:var(--muted); }
+  .signal .dotp { width:8px; height:8px; border-radius:50%; background:var(--success); }
+  .usage-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px; }
+  .usage-grid .u { background:var(--brand-50); border:1px solid var(--brand-100); border-radius:10px; padding:8px 6px; text-align:center; }
+  .usage-grid .u b { display:block; font-size:15px; font-variant-numeric:tabular-nums; }
+  .usage-grid .u span { font-size:10.5px; color:var(--muted); }
+  .audit-row { display:flex; align-items:center; justify-content:space-between; padding:9px 0; border-bottom:1px dashed var(--border); font-size:12.5px; }
+  .audit-row:last-child { border-bottom:0; }
+  .audit-row .k { color:var(--muted); }
+  .audit-row .ok { color:#047857; font-weight:600; }
+  .audit-row .bad { color:#b91c1c; font-weight:600; }
+
+  /* 阶段步骤条（可点节点 + 筛选中态，新增） */
+  .stepper { display:flex; gap:4px; overflow-x:auto; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:10px; margin-bottom:10px; box-shadow:var(--shadow-card); scrollbar-width:none; }
+  .stepper::-webkit-scrollbar { height:0; }
+  .step-node { display:flex; align-items:center; gap:5px; border:0; background:transparent; padding:4px 6px; border-radius:999px; cursor:pointer; flex-shrink:0; }
+  .step-node .n { width:24px; height:24px; border-radius:50%; background:#eae6f8; color:var(--muted); font-size:11px; font-weight:600; display:flex; align-items:center; justify-content:center; }
+  .step-node.done .n { background:rgba(16,185,129,.15); color:#047857; }
+  .step-node.cur .n { background:var(--primary); color:#fff; }
+  .step-node .lb { font-size:12px; color:var(--muted); white-space:nowrap; }
+  .step-node.cur .lb { color:var(--text); font-weight:600; }
+  .step-node:focus .n { outline:2px dashed rgba(124,58,237,.4); outline-offset:2px; }
+  .focus-chip { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--brand-200); background:var(--brand-50); color:var(--brand-600); border-radius:999px; padding:2px 9px; font-size:11px; margin-left:8px; cursor:pointer; }
+
+  /* ⋯ ActionSheet（新增删除项） */
+  .sheet { position:absolute; left:0; right:0; bottom:0; z-index:71; background:var(--card); border-radius:20px 20px 0 0; box-shadow:var(--shadow-pop); padding:10px 16px calc(20px + env(safe-area-inset-bottom)); }
+  .sheet .grab { width:36px; height:4px; border-radius:2px; background:var(--border); margin:0 auto 10px; }
+  .sheet .st { text-align:center; font-size:12px; color:var(--muted); margin-bottom:8px; }
+  .sheet button.act { width:100%; min-height:48px; border:0; border-bottom:1px solid var(--border); background:transparent; font-size:15px; color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px; }
+  .sheet button.act.danger { color:var(--error); font-weight:600; }
+  .sheet button.cancel { width:100%; min-height:48px; margin-top:10px; border:1px solid var(--border); border-radius:12px; background:var(--brand-50); font-size:15px; font-weight:600; color:var(--text); cursor:pointer; }
+
+  .hint { position:absolute; left:12px; right:12px; bottom:14px; z-index:65; background:rgba(15,10,30,.82); color:#e8e0fb; border-radius:10px; padding:8px 12px; font-size:11px; line-height:1.55; pointer-events:none; }
+</style>
+</head>
+<body>
+<nav class="viewer">
+  <h1>变更中心移动端对齐</h1>
+  <div class="sub">2026-09-16-mobile-changes-parity<br>绿标 = 本次新增/增强</div>
+  <div class="grp">列表页</div>
+  <button class="nav-btn on" data-s="s1">变更列表 · 增强卡片<small>负责人 / 执行用量 / 活动徽标 / 影响组件</small><span class="new-tag">新增</span></button>
+  <button class="nav-btn" data-s="s2">重新扫描 + 统计反馈<small>列表工具栏入口 + 解析结果条</small><span class="new-tag">新增</span></button>
+  <button class="nav-btn" data-s="s3">筛选抽屉 · 排序<small>阶段 + 排序方向 + 只看待我处理</small><span class="new-tag">新增排序</span></button>
+  <button class="nav-btn" data-s="s4">快速修复筛选<small>状态 / 作者 / 空壳占位开关</small><span class="new-tag">新增</span></button>
+  <div class="grp">详情页</div>
+  <button class="nav-btn" data-s="s5">变更详情 · 补齐区块<small>最后信号 / 执行用量卡 / 范围对账</small><span class="new-tag">新增</span></button>
+  <button class="nav-btn" data-s="s6">阶段联动筛选<small>步骤条节点可点 → 时间线筛选</small><span class="new-tag">新增</span></button>
+  <button class="nav-btn" data-s="s7">⋯ 菜单 · 删除变更<small>danger 项 + 确认弹层 + 回列表</small><span class="new-tag">新增</span></button>
+</nav>
+
+<div class="phone-wrap"><div class="phone"><div class="screen-area">
+  <div class="statusbar"><span>20:59</span><div class="island"></div><span>5G ▪▪▪</span></div>
+
+  <!-- S1 列表 · 增强卡片 -->
+  <section class="screen on" id="s1">
+    <div class="app-top"><div class="bar">
+      <button class="back">‹</button>
+      <div class="title">SillyHub<small>multi-agent-platform</small></div>
+      <button class="icon-btn">⟳</button>
+    </div></div>
+    <div class="app-main">
+      <div class="list-tabs">
+        <button class="on">进行中<span class="cnt">6</span></button>
+        <button>已归档<span class="cnt">29</span></button>
+        <button>快速修复<span class="cnt">14</span></button>
+      </div>
+      <div class="search-row">
+        <div class="search">🔍 搜索 Key / 标题 / 组件…</div>
+        <button class="btn44 filter-btn">⚙<span class="dot"></span></button>
+      </div>
+      <!-- 增强卡片 1：进行中 + 有执行用量 -->
+      <div class="card">
+        <div class="row1">
+          <div class="lead-ic">⑂</div>
+          <div class="main">
+            <div class="name">会话超长输出渲染优化</div>
+            <div class="key">2026-09-14-session-visual</div>
+          </div>
+          <div class="time">3 分钟前</div>
+        </div>
+        <div class="badge-row">
+          <span class="badge stage">执行 <small>step 3/7 · 渲染分片</small></span>
+          <span class="badge todo">待人工测试</span>
+          <span class="badge act">● 进行中</span>
+        </div>
+        <div class="meta-row"><span>负责人 <b>qinyi</b></span><span>影响 <b>frontend/sessions</b></span></div>
+        <div class="usage-row"><span class="dur">3.6 小时</span><span class="run">进行中</span><span>1.2M tok · 156 次</span></div>
+      </div>
+      <!-- 增强卡片 2：停滞 + 无执行 -->
+      <div class="card">
+        <div class="row1">
+          <div class="lead-ic warn">⑂</div>
+          <div class="main">
+            <div class="name">供应商适配层抽象</div>
+            <div class="key">2026-09-03-provider-abstraction</div>
+          </div>
+          <div class="time">2 天前</div>
+        </div>
+        <div class="badge-row">
+          <span class="badge stage">验证 <small>step 5/6</small></span>
+          <span class="badge act stale">◐ 停滞 · 最后信号 26 小时前</span>
+        </div>
+        <div class="meta-row"><span>负责人 <b>qinyi</b></span><span>影响 <b>daemon/adapters</b></span></div>
+        <div class="usage-row"><span class="dur">12.4 小时</span><span>8.7M tok · 1,204 次</span></div>
+      </div>
+      <button class="btn44" style="width:100%">加载更多（已显示 2 / 共 6 条）</button>
+    </div>
+    <div class="hint">卡片新增：活动徽标（进行中/停滞）、负责人、影响组件、执行用量行（耗时 · 进行中标记 · token · 次数）——对齐 PC 列表「待办状态/负责人/影响组件/执行」四列信息。</div>
+    <div class="tabbar">
+      <div class="t"><span class="ic">🏠</span>工作区</div>
+      <div class="t on"><span class="ic">⑂</span>变更</div>
+      <div class="t"><span class="ic">💬</span>会话</div>
+      <div class="t"><span class="ic">👤</span>我的</div>
+    </div>
+    <div class="home-indicator"></div>
+  </section>
+
+  <!-- S2 重新扫描 -->
+  <section class="screen" id="s2">
+    <div class="app-top"><div class="bar">
+      <button class="back">‹</button>
+      <div class="title">SillyHub<small>multi-agent-platform</small></div>
+      <button class="icon-btn">⟳</button>
+    </div></div>
+    <div class="app-main">
+      <div class="list-tabs">
+        <button class="on">进行中<span class="cnt">6</span></button>
+        <button>已归档<span class="cnt">29</span></button>
+        <button>快速修复<span class="cnt">14</span></button>
+      </div>
+      <div class="search-row">
+        <div class="search">🔍 搜索 Key / 标题 / 组件…</div>
+        <button class="btn44 filter-btn">⚙</button>
+        <button class="btn44 rescan-btn">↻ 重新扫描</button>
+      </div>
+      <div class="rescan-ok">✅ 已重新扫描：解析 35，新增 1 · 更新 4 · 删除 0。 1 个警告。</div>
+      <div class="card" style="cursor:default">
+        <div style="font-size:12px;font-weight:600;color:var(--warning);margin-bottom:6px">⚠ 解析警告（1）</div>
+        <div style="font-size:11.5px;color:var(--muted);line-height:1.6"><code style="font-family:ui-monospace,monospace">[missing_title]</code> 2026-09-01-legacy-change: 前言缺少标题段</div>
+      </div>
+      <div class="card">
+        <div class="row1"><div class="lead-ic">⑂</div>
+          <div class="main"><div class="name">会话超长输出渲染优化</div><div class="key">2026-09-14-session-visual</div></div>
+          <div class="time">3 分钟前</div></div>
+        <div class="badge-row"><span class="badge stage">执行 <small>step 3/7</small></span></div>
+      </div>
+    </div>
+    <div class="hint">列表工具栏新增「重新扫描」按钮（44px 热区，对齐 PC PageHeader 唯一操作）；成功后显示解析统计条，有警告时追加警告卡——文案与 PC 完全一致。</div>
+    <div class="home-indicator"></div>
+  </section>
+
+  <!-- S3 筛选抽屉（排序新增） -->
+  <section class="screen" id="s3">
+    <div class="app-top"><div class="bar">
+      <button class="back">‹</button>
+      <div class="title">SillyHub<small>multi-agent-platform</small></div>
+    </div></div>
+    <div class="app-main" style="filter:blur(1px)">
+      <div class="list-tabs"><button class="on">进行中<span class="cnt">6</span></button><button>已归档<span class="cnt">29</span></button><button>快速修复<span class="cnt">14</span></button></div>
+      <div class="search-row"><div class="search">🔍 会话</div><button class="btn44 filter-btn">⚙<span class="dot"></span></button></div>
+    </div>
+    <div class="scrim"></div>
+    <div class="drawer">
+      <div class="grab"></div><div class="dt">筛选</div>
+      <div class="drawer-body">
+        <div class="flabel">阶段</div>
+        <div class="chips">
+          <button class="chip on">全部阶段</button><button class="chip">需求分析</button><button class="chip">规划</button><button class="chip">执行</button><button class="chip">验证</button><button class="chip">归档</button>
+        </div>
+        <div class="flabel">排序（更新时间）</div>
+        <div class="chips">
+          <button class="chip on">↓ 最近优先</button><button class="chip">↑ 最早优先</button>
+        </div>
+        <div class="flabel">其他</div>
+        <div class="switch-row"><span>只看待我处理</span><div class="sw on"></div></div>
+      </div>
+      <div class="drawer-actions"><button>重置</button><button class="ok">确定</button></div>
+    </div>
+    <div class="hint">筛选抽屉新增「排序」chip 组（PC 表头 ↑↓ 切换的移动形态）；?tab= / ?search= URL 参数同步支持（桌面同款深链）。</div>
+    <div class="home-indicator"></div>
+  </section>
+
+  <!-- S4 quicklog 筛选 -->
+  <section class="screen" id="s4">
+    <div class="app-top"><div class="bar">
+      <button class="back">‹</button>
+      <div class="title">SillyHub<small>multi-agent-platform</small></div>
+    </div></div>
+    <div class="app-main" style="filter:blur(1px)">
+      <div class="list-tabs"><button>进行中<span class="cnt">6</span></button><button>已归档<span class="cnt">29</span></button><button class="on">快速修复<span class="cnt">14</span></button></div>
+      <div class="search-row"><div class="search">🔍 搜索标题 / 正文全文…</div><button class="btn44">搜索</button><button class="btn44 filter-btn">⚙<span class="dot"></span></button></div>
+    </div>
+    <div class="scrim"></div>
+    <div class="drawer">
+      <div class="grab"></div><div class="dt">筛选</div>
+      <div class="drawer-body">
+        <div class="flabel">状态</div>
+        <div class="chips">
+          <button class="chip on">全部状态</button><button class="chip">已完成</button><button class="chip">进行中</button><button class="chip">已暂存</button><button class="chip">疑似中断</button>
+        </div>
+        <div class="flabel">作者</div>
+        <div class="chips">
+          <button class="chip on">全部作者</button><button class="chip">qinyi</button><button class="chip">zcode</button>
+        </div>
+        <div class="flabel">其他</div>
+        <div class="switch-row"><span>显示空壳占位条目</span><div class="sw on"></div></div>
+      </div>
+      <div class="drawer-actions"><button>重置</button><button class="ok">确定</button></div>
+    </div>
+    <div class="hint">快速修复 tab 新增筛选抽屉：状态 4 态 / 作者 / 显示空壳占位开关——对齐 PC QuicklogTable 三个筛选项；query key 槽位与桌面同构共享缓存。</div>
+    <div class="home-indicator"></div>
+  </section>
+
+  <!-- S5 详情补齐 -->
+  <section class="screen" id="s5">
+    <div class="app-top"><div class="bar">
+      <button class="back">‹</button>
+      <div class="title">会话超长输出渲染优化<small>2026-09-14-session-visual</small></div>
+      <button class="icon-btn">⋯</button>
+    </div></div>
+    <div class="app-main">
+      <!-- 最后信号（新增） -->
+      <div class="sec" style="padding:9px 14px">
+        <div class="signal"><span class="dotp"></span>最后信号 25 分钟前 · 智能体活跃中</div>
+      </div>
+      <!-- 阶段步骤条（S6 联动入口） -->
+      <div class="stepper">
+        <button class="step-node done"><span class="n">✓</span><span class="lb">需求</span></button><span style="color:var(--border)">─</span>
+        <button class="step-node done"><span class="n">✓</span><span class="lb">规划</span></button><span style="color:var(--border)">─</span>
+        <button class="step-node cur"><span class="n">3</span><span class="lb">执行</span></button><span style="color:var(--border)">─</span>
+        <button class="step-node"><span class="n">4</span><span class="lb">验证</span></button><span style="color:var(--border)">─</span>
+        <button class="step-node"><span class="n">5</span><span class="lb">归档</span></button>
+      </div>
+      <!-- 执行用量卡（新增） -->
+      <div class="sec">
+        <div class="sh">📊 执行用量<span class="cnt">近 7 天</span></div>
+        <div class="usage-grid">
+          <div class="u"><b>1.2M</b><span>token 总量</span></div>
+          <div class="u"><b>156</b><span>请求次数</span></div>
+          <div class="u"><b>3.6h</b><span>累计耗时</span></div>
+        </div>
+      </div>
+      <!-- 范围对账卡（新增） -->
+      <div class="sec">
+        <div class="sh">🧮 范围对账<span class="cnt">对 quicklog 提交与变更范围</span></div>
+        <div class="audit-row"><span class="k">范围内文件</span><span class="ok">12 ✓</span></div>
+        <div class="audit-row"><span class="k">范围外文件</span><span class="bad">2 ✕</span></div>
+        <div style="margin-top:9px"><button class="btn44" style="width:100%;font-size:13px">查看对账明细</button></div>
+      </div>
+      <!-- 既有区块占位 -->
+      <div class="sec"><div class="sh">⏳ 待人工测试 · 需要你确认</div><div style="font-size:11.5px;color:var(--muted);margin-top:4px">审批卡 / 时间线 / 执行日志 / 文档 / 会话 / 快速任务 —— 均为现网既有区块</div></div>
+    </div>
+    <div class="hint">详情页新增三区块（组件直接复用 PC）：ChangeLastSignal 最后信号、ChangeUsageCard 执行用量卡、ScopeAuditCommandCard 范围对账卡；位置对齐 PC 页面顺序（步骤条下方）。</div>
+    <div class="home-indicator"></div>
+  </section>
+
+  <!-- S6 阶段联动 -->
+  <section class="screen" id="s6">
+    <div class="app-top"><div class="bar">
+      <button class="back">‹</button>
+      <div class="title">会话超长输出渲染优化<small>2026-09-14-session-visual</small></div>
+      <button class="icon-btn">⋯</button>
+    </div></div>
+    <div class="app-main">
+      <div class="stepper">
+        <button class="step-node done"><span class="n">✓</span><span class="lb">需求</span></button><span style="color:var(--border)">─</span>
+        <button class="step-node done"><span class="n">✓</span><span class="lb">规划</span></button><span style="color:var(--border)">─</span>
+        <button class="step-node cur" style="background:var(--brand-50);border:1px solid var(--primary);border-radius:999px"><span class="n">3</span><span class="lb">执行</span></button><span style="color:var(--border)">─</span>
+        <button class="step-node"><span class="n">4</span><span class="lb">验证</span></button><span style="color:var(--border)">─</span>
+        <button class="step-node"><span class="n">5</span><span class="lb">归档</span></button>
+      </div>
+      <div class="sec">
+        <div class="sh">🧭 步骤时间线（5）<button class="focus-chip">执行 ✕</button></div>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.8">
+          ① 分片装配方案落地 <span style="color:var(--success)">✓</span><br>② content-visibility 虚拟化 <span style="color:var(--success)">✓</span><br>③ 渲染分片回归测试 <span style="color:var(--warning)">进行中</span><br><span style="opacity:.45">（需求/规划阶段步骤已按筛选隐藏）</span>
+        </div>
+      </div>
+    </div>
+    <div class="hint">步骤条节点可点（有步骤数据的阶段）→ 时间线按阶段筛选，头部出现「阶段 ✕」清除 chip；再次点击同阶段取消——PC ql-20260821-017 同款联动。</div>
+    <div class="home-indicator"></div>
+  </section>
+
+  <!-- S7 ⋯ 菜单删除 -->
+  <section class="screen" id="s7">
+    <div class="app-top"><div class="bar">
+      <button class="back">‹</button>
+      <div class="title">会话超长输出渲染优化<small>2026-09-14-session-visual</small></div>
+      <button class="icon-btn">⋯</button>
+    </div></div>
+    <div class="app-main" style="filter:blur(1px)">
+      <div class="stepper">
+        <button class="step-node done"><span class="n">✓</span><span class="lb">需求</span></button>
+        <button class="step-node cur"><span class="n">2</span><span class="lb">规划</span></button>
+        <button class="step-node"><span class="n">3</span><span class="lb">执行</span></button>
+      </div>
+      <div class="sec"><div class="sh">📄 规范文档 · 4</div></div>
+    </div>
+    <div class="scrim"></div>
+    <div class="sheet">
+      <div class="grab"></div><div class="st">变更操作</div>
+      <button class="act">↻ 重新解析变更</button>
+      <button class="act">⧉ 复制变更名</button>
+      <button class="act danger">🗑 删除变更</button>
+      <button class="cancel">取消</button>
+    </div>
+    <div class="hint">⋯ 菜单新增「删除变更」（danger 红色项）：仅 owner/管理员可见（canDeleteChange 启发式，后端权限权威）；点击弹 DeleteChangeConfirm 确认，成功后 toast + 返回列表——PC 详情页删除按钮的移动形态。</div>
+    <div class="home-indicator"></div>
+  </section>
+</div></div></div>
+
+<script>
+  const btns = document.querySelectorAll('.nav-btn');
+  btns.forEach(b => b.onclick = () => {
+    btns.forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('on'));
+    document.getElementById(b.dataset.s).classList.add('on');
+  });
+  document.querySelectorAll('.sw').forEach(s => s.onclick = () => s.classList.toggle('on'));
+</script>
+</body>
+</html>

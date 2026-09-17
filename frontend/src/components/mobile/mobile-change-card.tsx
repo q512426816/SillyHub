@@ -14,10 +14,22 @@
  *   status 为自由字符串（api-types ChangeSummary.status: string），宽松映射 +
  *   默认兜底，不穷举后端枚举。
  *
+ * task-02（2026-09-16-mobile-changes-parity / FR-02，D-003 ②）补齐桌面列表同源信息：
+ * - 徽标行追加活动徽标 ChangeActivityBadge（与桌面「待办状态」列同源：
+ *   currentStepStatus=step_progress.current_step_status、lastPushedAt=last_pushed_at）；
+ * - 元信息行：负责人三态（对齐桌面 renderOwner：owner_name → owner_id 前 8 位
+ *   mono → 「—」）+ 影响组件（join(", ")，空数组整段省略 + truncate 单行）；
+ * - 执行用量行（UsageExecCell 移动化）：usage undefined → 整行不渲染 / null →
+ *   「—」/ 有值 → 耗时 + 进行中 pill（started_at 有且 finished_at 缺）+ token·次；
+ *   起止时间不展示（移动无 hover，详情页用量卡兜底）。
+ *
  * 复用约束（禁止复制第二份实现）：
  * - 待办徽标映射 PENDING_REVIEW_LABEL 从桌面 changes/page.tsx import（Grill C-10
  *   为其加 export），三态语义逐字对齐桌面 renderTodoBadge：
  *   blocked → 「阻塞中」error / pending_review 命中 → 映射文案 warning / 否则空占位 —。
+ * - 用量格式化 formatTokensCompact / formatCount / formatDurationZh 同样从桌面
+ *   changes/page.tsx import（task-01 导出，D-005 复用挂载路线），卡片内自绘移动
+ *   用量行——不复制桌面 UsageExecCell 为独立组件。
  * - 阶段徽标复用 ChangeStepBadge（自带 STAGE_KIND/STAGE_LABELS 与 stepProgress 副行）；
  *   stage 缺省 "scan"、stepProgress 缺省 null 的降级口径与桌面列表阶段列一致。
  * - 相对时间复用 formatRelativeTime（runtime-card-helpers）。
@@ -27,7 +39,13 @@
  * 无写死色值。
  */
 
-import { PENDING_REVIEW_LABEL } from "@/app/(dashboard)/workspaces/[id]/changes/page";
+import {
+  formatCount,
+  formatDurationZh,
+  formatTokensCompact,
+  PENDING_REVIEW_LABEL,
+} from "@/app/(dashboard)/workspaces/[id]/changes/page";
+import { ChangeActivityBadge } from "@/components/changes/change-activity-badge";
 import { ChangeStepBadge } from "@/components/changes/change-step-badge";
 import { formatRelativeTime } from "@/components/daemon/runtime-card-helpers";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -92,6 +110,70 @@ function renderTodoBadge(c: ChangeSummary) {
   return <span className="text-xs text-muted-foreground">—</span>;
 }
 
+/**
+ * 负责人三态（task-02 / FR-02，语义逐字对齐桌面 renderOwner）：owner_name 非空 →
+ * 用户名（前景色，弱化行内可读）；owner_name 空且 owner_id 有值 → UUID 前 8 位
+ * 短标识降级（mono）；双空 → 「—」（从未上行过 owner 的存量变更）。
+ */
+function renderOwner(c: ChangeSummary) {
+  if (c.owner_name) {
+    return <span className="text-foreground">{c.owner_name}</span>;
+  }
+  if (c.owner_id) {
+    return (
+      <span className="font-mono text-primary">{c.owner_id.slice(0, 8)}</span>
+    );
+  }
+  return <span>—</span>;
+}
+
+/**
+ * 执行用量行（task-02 / FR-02，桌面 UsageExecCell 移动化自绘，复用 task-01 导出
+ * helper，不复制组件）。usage 判空两档（桌面先例，兼容策略基线）：
+ * - undefined（字段整体缺失：旧后端响应 / mock 未带）→ 整行不渲染；
+ * - null（后端显式无关联执行）→ 分隔行内「—」占位；
+ * - 有值 → 耗时 formatDurationZh + 进行中 pill（started_at 有值且 finished_at 缺，
+ *   R-05 时间三元组语义）+ token·次（四维 token 之和 + api_requests）。
+ * 起止时间不展示——移动端无 hover，详情页 ChangeUsageCard 兜底。
+ */
+function renderUsageRow(usage: ChangeSummary["usage"]) {
+  if (usage === undefined) return null;
+  if (usage === null) {
+    return (
+      <span
+        data-testid="mobile-change-usage-row"
+        className="flex border-t border-dashed border-border pt-1.5 text-xs text-muted-foreground"
+      >
+        —
+      </span>
+    );
+  }
+  // 进行中 = started_at 有值且 finished_at 缺（与桌面 UsageExecCell 同源判定）
+  const running = Boolean(usage.started_at) && !usage.finished_at;
+  // token 总量 = totals 四维之和（input + output + cache_read + cache_creation）
+  const tokenTotal =
+    usage.totals.input_tokens +
+    usage.totals.output_tokens +
+    usage.totals.cache_read_tokens +
+    usage.totals.cache_creation_tokens;
+  return (
+    <span
+      data-testid="mobile-change-usage-row"
+      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-dashed border-border pt-1.5 text-xs tabular-nums text-muted-foreground"
+    >
+      <span className="font-semibold text-foreground">
+        {formatDurationZh(usage.duration_ms)}
+      </span>
+      {running && (
+        <span className="rounded-full bg-brand-50 px-1.5 text-[10px] text-brand-700">
+          进行中
+        </span>
+      )}
+      <span>{`${formatTokensCompact(tokenTotal)} tok · ${formatCount(usage.totals.api_requests)} 次`}</span>
+    </span>
+  );
+}
+
 export function MobileChangeCard({ change, onClick }: MobileChangeCardProps) {
   // 变更名：title 优先（人类可读），缺省降级 change_key；title 存在时 change_key
   // 作 mono 副行保留唯一标识（对齐桌面列表标题列 change_key/title 两行信息结构）。
@@ -137,14 +219,46 @@ export function MobileChangeCard({ change, onClick }: MobileChangeCardProps) {
             {formatRelativeTime(change.updated_at)}
           </span>
         </span>
-        {/* 阶段徽标（ChangeStepBadge：stage 主行 + step 摘要副行）+ 待办徽标 */}
+        {/* 阶段徽标（ChangeStepBadge：stage 主行 + step 摘要副行）+ 待办徽标 + 活动徽标 */}
         <span className="flex flex-wrap items-center gap-2">
           <ChangeStepBadge
             stage={change.current_stage ?? "scan"}
             stepProgress={change.step_progress ?? null}
           />
-          {renderTodoBadge(change)}
+          {/* 待办徽标（testid 槽位便于与负责人/用量「—」占位区分断言） */}
+          <span data-testid="mobile-change-todo-badge">
+            {renderTodoBadge(change)}
+          </span>
+          {/* 活动徽标（task-02：真值表三态进行中/停滞/空闲，与桌面「待办状态」列同源） */}
+          <ChangeActivityBadge
+            currentStepStatus={
+              change.step_progress?.current_step_status ?? null
+            }
+            lastPushedAt={change.last_pushed_at ?? null}
+          />
         </span>
+        {/* 元信息行（task-02）：负责人三态 + 影响组件（空数组整段省略） */}
+        <span
+          data-testid="mobile-change-meta-row"
+          className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground"
+        >
+          <span className="whitespace-nowrap">
+            负责人 {renderOwner(change)}
+          </span>
+          {change.affected_components.length > 0 && (
+            <span
+              className="min-w-0 max-w-full truncate"
+              title={change.affected_components.join(", ")}
+            >
+              影响{" "}
+              <span className="text-foreground">
+                {change.affected_components.join(", ")}
+              </span>
+            </span>
+          )}
+        </span>
+        {/* 执行用量行（task-02）：usage undefined 整行不渲染（renderUsageRow 内判空） */}
+        {renderUsageRow(change.usage)}
       </span>
     </button>
   );

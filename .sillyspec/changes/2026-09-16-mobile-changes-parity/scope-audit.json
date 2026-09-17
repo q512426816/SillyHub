@@ -1,0 +1,92 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "4c6f5191c3af096df936810ce6fe996076e1e6e5",
+  "totals": {
+    "files": 9,
+    "additions": 1916,
+    "deletions": 101
+  },
+  "rows": [
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+      "additions": 3,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/[id]/changes/[cid]/__tests__/page.m-change-detail.test.tsx",
+      "additions": 266,
+      "deletions": 7,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/[id]/changes/[cid]/page.tsx",
+      "additions": 77,
+      "deletions": 7,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx",
+      "additions": 437,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/[id]/changes/page.tsx",
+      "additions": 372,
+      "deletions": 26,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-change-card.test.tsx",
+      "additions": 201,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-change-card.tsx",
+      "additions": 117,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-change-detail.test.tsx",
+      "additions": 273,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-change-detail.tsx",
+      "additions": 170,
+      "deletions": 46,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "e30470f8bf64484ec8db9de6eda80b363244e8a93b59711af8e981a82e2ad542",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-16T14:33:40.183Z"
+}

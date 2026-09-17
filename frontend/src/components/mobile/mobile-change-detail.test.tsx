@@ -14,11 +14,21 @@
  *  6. 时间线纯内容复用（change-step-timeline 挂载渲染 steps）；
  *  7. quicklog 关联折叠卡（有条目渲染 / 失败静默隐藏）；
  *  8. 详情 query key 逐字对齐桌面 ["change", workspaceId, changeId]（缓存落键）。
+ *  9. 三卡挂载（task-06 / FR-05 / D-005@v1）：最后信号 / 执行用量 / 范围对账按
+ *     桌面顺序挂 StageStepper 下方，props 接线经契约桩 data-* 断言；
+ *     steps 无 completed_at / 缺失 → change-last-signal 不渲染（真组件）。
+ * 10. 阶段联动（task-06 / FR-06 / D-004@v1）：点有步骤的阶段节点 → 时间线仅显
+ *     该阶段 + 卡头「阶段名 ✕」清除 chip + aria-pressed；再点同节点或点 chip
+ *     恢复全量；无步骤数据的阶段不可点（非 button 无筛选）。
  *
  * mock 范式：importActual 部分 mock（数据层只换页面用到的请求函数）+ 真实
  * QueryClient；FilePreviewModal 打桩断言 props 契约（open/target/
  * defaultFullscreen，stub 内按钮触发 target.fetch 断言 raw 封装接线）——真弹窗
  * 依赖 URL.createObjectURL（jsdom 未实现），契约桩是既有测试惯例。
+ * ChangeUsageCard / ScopeAuditCommandCard 同范式契约桩（真实组件 useQuery
+ * 自取数会在 jsdom 发真请求，scope-audit 真实 Modal+明细表还触发 role 查询
+ * 坏选择器——照 delete-change-confirm.test 隔离先例）；ChangeLastSignal 为
+ * 纯展示真组件直测（无信号不渲染断言依赖真实现）。
  * stores/session 打桩提供当前用户 id（仅本人过滤依据）。
  */
 import {
@@ -50,6 +60,38 @@ vi.mock("@/components/files/file-preview-modal", () => ({
       </button>
     </div>
   ),
+}));
+
+// ── 三卡契约桩（task-06）：props 直出 data-*，断言挂载接线（kind/workspaceId/
+//    refKey、target.changeKey）；真实组件自取数 + antd Modal 在 jsdom 的隔离
+//    先例见 delete-change-confirm.test.tsx（scope-audit 真卡破坏 role 查询）。──
+vi.mock("@/components/changes/detail/change-usage-card", () => ({
+  ChangeUsageCard: (props: {
+    kind: string;
+    workspaceId: string;
+    refKey: string;
+  }) => (
+    <div
+      data-testid="change-usage-card-stub"
+      data-kind={props.kind}
+      data-workspace-id={props.workspaceId}
+      data-ref-key={props.refKey}
+    />
+  ),
+}));
+vi.mock("@/components/changes/scope-audit-command-card", () => ({
+  ScopeAuditCommandCard: (props: {
+    target: { kind: string; workspaceId: string; changeKey?: string };
+  }) => (
+    <div
+      data-testid="scope-audit-command-card-stub"
+      data-target-kind={props.target.kind}
+      data-workspace-id={props.target.workspaceId}
+      data-change-key={props.target.changeKey ?? ""}
+    />
+  ),
+  // 同模块导出的 quick 反查 hook 一并补空实现（模块级 mock 需覆盖全部导出面）
+  useQuickSessionName: () => null,
 }));
 
 // ── 数据层部分 mock ─────────────────────────────────────────────────────────
@@ -519,5 +561,236 @@ describe("MobileChangeDetail 文档卡 / 引导条 / 步骤条 / 会话 / 时间
     renderDetail();
     await screen.findByTestId("m-change-desktop-guide");
     expect(screen.queryByTestId("m-change-quicklog-card")).not.toBeInTheDocument();
+  });
+});
+
+// ── task-06：三卡挂载 + 阶段联动（FR-05 / FR-06 / D-004@v1 / D-005@v1）────────
+
+/** 双阶段 steps fixture（brainstorm ×2 + plan ×1）：联动可点集合 = {需求分析, 规划}。 */
+function makeLinkageSteps(): NonNullable<ChangeRead["steps"]> {
+  return [
+    {
+      name: "代码扫描完成",
+      stage: "brainstorm",
+      status: "completed",
+      output: null,
+      completed_at: "2026-08-26T15:00:00Z",
+      ordering: 1,
+      wait_reason: null,
+      kind: "step",
+    },
+    {
+      name: "需求探索",
+      stage: "brainstorm",
+      status: "in-progress",
+      output: null,
+      completed_at: null,
+      ordering: 2,
+      wait_reason: null,
+      kind: "step",
+    },
+    {
+      name: "规划方案定稿",
+      stage: "plan",
+      status: "completed",
+      output: null,
+      completed_at: "2026-08-26T16:00:00Z",
+      ordering: 3,
+      wait_reason: null,
+      kind: "step",
+    },
+  ];
+}
+
+describe("MobileChangeDetail 三卡挂载 + 阶段联动（task-06 / FR-05 / FR-06）", () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    changesApi.getChange.mockResolvedValue(makeChange());
+    changesApi.getAgentStatus.mockResolvedValue({
+      has_active_run: false,
+      config_enabled: false,
+      last_dispatch: null,
+    });
+    changeFilesApi.listChangeFiles.mockResolvedValue({ change_id: "c1", items: [] });
+    daemonApi.listChangeSessions.mockResolvedValue([]);
+    quicklogApi.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+  });
+
+  afterEach(() => {
+    cleanup();
+    queryClient.clear();
+    vi.clearAllMocks();
+  });
+
+  function renderDetail() {
+    const onOpenSession = vi.fn();
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <MobileChangeDetail
+          changeId="c1"
+          workspaceId="ws-1"
+          onOpenSession={onOpenSession}
+        />
+      </QueryClientProvider>,
+    );
+    return { onOpenSession, ...view };
+  }
+
+  it("三卡挂载：步骤条下方依次 最后信号行 → 执行用量卡 → 范围对账卡（props 接线对齐桌面）", async () => {
+    renderDetail();
+    const stepper = await screen.findByTestId("m-change-stage-steps");
+    // 最后信号行（真组件：fixture steps 有 completed_at → 渲染，取最大时点派生）
+    const lastSignal = await screen.findByTestId("change-last-signal");
+    expect(lastSignal).toHaveTextContent("最后信号：");
+    // 执行用量卡契约桩：kind=change + workspaceId/refKey 接线（对齐桌面 :338）
+    const usage = screen.getByTestId("change-usage-card-stub");
+    expect(usage.getAttribute("data-kind")).toBe("change");
+    expect(usage.getAttribute("data-workspace-id")).toBe("ws-1");
+    expect(usage.getAttribute("data-ref-key")).toBe("c1");
+    // 范围对账卡契约桩：target.kind=change + changeKey 接线（对齐桌面 :432-437）
+    const scope = screen.getByTestId("scope-audit-command-card-stub");
+    expect(scope.getAttribute("data-target-kind")).toBe("change");
+    expect(scope.getAttribute("data-workspace-id")).toBe("ws-1");
+    expect(scope.getAttribute("data-change-key")).toBe(
+      "2026-08-26-mobile-workspace-page",
+    );
+    // DOM 顺序（FR-05 / 桌面总体方案点 6）：步骤条 → 最后信号 → 用量 → 对账 → 审批卡
+    const ordered = [
+      stepper,
+      lastSignal,
+      usage,
+      scope,
+      screen.getByTestId("m-change-review-card"),
+    ];
+    for (let i = 1; i < ordered.length; i++) {
+      const prev = ordered[i - 1]!;
+      const next = ordered[i]!;
+      expect(
+        prev.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    }
+  });
+
+  it("无信号不渲染：steps 全无 completed_at / steps 缺失 → change-last-signal 整行缺席", async () => {
+    changesApi.getChange.mockResolvedValue(
+      makeChange({
+        steps: [
+          {
+            name: "需求探索",
+            stage: "brainstorm",
+            status: "in-progress",
+            output: null,
+            completed_at: null,
+            ordering: 1,
+            wait_reason: null,
+            kind: "step",
+          },
+        ],
+      }),
+    );
+    renderDetail();
+    await screen.findByTestId("m-change-desktop-guide");
+    expect(screen.queryByTestId("change-last-signal")).not.toBeInTheDocument();
+    // steps 缺失（旧变更未上行）同样不渲染
+    changesApi.getChange.mockResolvedValue(makeChange({ steps: null }));
+    cleanup();
+    renderDetail();
+    await screen.findByTestId("m-change-desktop-guide");
+    expect(screen.queryByTestId("change-last-signal")).not.toBeInTheDocument();
+  });
+
+  it("阶段联动：点有步骤的阶段节点 → 时间线仅显该阶段 + 卡头清除 chip + 节点 aria-pressed", async () => {
+    changesApi.getChange.mockResolvedValue(
+      makeChange({
+        current_stage: "execute",
+        pending_review: null,
+        steps: makeLinkageSteps(),
+      }),
+    );
+    renderDetail();
+    const stepper = await screen.findByTestId("m-change-stage-steps");
+    // 初始全量：三步齐显（时间线默认展开），无清除 chip
+    expect(screen.getByText("代码扫描完成")).toBeInTheDocument();
+    expect(screen.getByText("需求探索")).toBeInTheDocument();
+    expect(screen.getByText("规划方案定稿")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("m-change-stage-focus-chip"),
+    ).not.toBeInTheDocument();
+    // 点「规划」（steps 有 plan 条目）→ 时间线仅显 plan 组
+    fireEvent.click(within(stepper).getByRole("button", { name: "规划" }));
+    expect(screen.getByText("规划方案定稿")).toBeInTheDocument();
+    expect(screen.queryByText("需求探索")).not.toBeInTheDocument();
+    expect(screen.queryByText("代码扫描完成")).not.toBeInTheDocument();
+    // 卡头清除 chip：aria-label 语义 + 「阶段名 ✕」文案（STAGE_LABELS 映射）
+    const chip = screen.getByTestId("m-change-stage-focus-chip");
+    expect(chip).toHaveAttribute("aria-label", "清除阶段筛选");
+    expect(chip).toHaveTextContent("规划 ✕");
+    // 节点选中态：aria-pressed（选中节点 true，其余可点节点 false）
+    expect(
+      within(stepper).getByRole("button", { name: "规划" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(stepper).getByRole("button", { name: "需求分析" }),
+    ).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("清除：再点同节点取消 或 点「阶段名 ✕」chip → 时间线恢复全量、chip 消失", async () => {
+    changesApi.getChange.mockResolvedValue(
+      makeChange({
+        current_stage: "execute",
+        pending_review: null,
+        steps: makeLinkageSteps(),
+      }),
+    );
+    renderDetail();
+    const stepper = await screen.findByTestId("m-change-stage-steps");
+    // 再点同节点取消（对齐桌面 toggle 语义，:320-322）
+    const planBtn = within(stepper).getByRole("button", { name: "规划" });
+    fireEvent.click(planBtn);
+    expect(screen.queryByText("需求探索")).not.toBeInTheDocument(); // 已筛选
+    fireEvent.click(within(stepper).getByRole("button", { name: "规划" }));
+    expect(screen.getByText("代码扫描完成")).toBeInTheDocument();
+    expect(screen.getByText("规划方案定稿")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("m-change-stage-focus-chip"),
+    ).not.toBeInTheDocument();
+    // chip 清除路径：筛选「需求分析」后点 chip 恢复全量
+    fireEvent.click(within(stepper).getByRole("button", { name: "需求分析" }));
+    expect(screen.queryByText("规划方案定稿")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("m-change-stage-focus-chip"));
+    expect(screen.getByText("规划方案定稿")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("m-change-stage-focus-chip"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("无步骤数据的阶段不可点：非 button 无筛选入口（仅 stepStages 内阶段升 button）", async () => {
+    changesApi.getChange.mockResolvedValue(
+      makeChange({
+        current_stage: "execute",
+        pending_review: null,
+        steps: makeLinkageSteps(),
+      }),
+    );
+    renderDetail();
+    const stepper = await screen.findByTestId("m-change-stage-steps");
+    // 可点集合 = steps 出现过的阶段（需求分析 / 规划），恰好两个 button
+    expect(
+      within(stepper).getByRole("button", { name: "需求分析" }),
+    ).toBeInTheDocument();
+    expect(
+      within(stepper).getByRole("button", { name: "规划" }),
+    ).toBeInTheDocument();
+    expect(within(stepper).getAllByRole("button")).toHaveLength(2);
+    // 无条目阶段（扫描/执行/验证/归档，含当前阶段「执行」）保持纯展示不可点
+    for (const label of ["扫描", "执行", "验证", "归档"]) {
+      expect(
+        within(stepper).queryByRole("button", { name: label }),
+      ).not.toBeInTheDocument();
+    }
   });
 });

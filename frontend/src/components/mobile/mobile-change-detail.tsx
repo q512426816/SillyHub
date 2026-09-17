@@ -4,9 +4,12 @@
  * MobileChangeDetail — 移动版变更详情区块组件（task-08 / FR-04 / design §5.3 详情页 /
  * §7，D-001@V1 / D-002@V1，change 2026-08-26-mobile-workspace-page）。
  *
- * 区块组（自上而下）：阶段步骤条（横向滚动）/ 审批操作卡（pending_review 驱动默认
+ * 区块组（自上而下）：阶段步骤条（横向滚动，有步骤数据的节点可点筛选时间线）/
+ * 最后信号行 + 执行用量卡 + 范围对账卡（三卡 import 复用，2026-09-16-mobile-
+ * changes-parity task-06）/ 审批操作卡（pending_review 驱动默认
  * 展开，通过/驳回走 submitStageReview + 内联二次确认）/ 规范文档卡（chip →
- * FilePreviewModal 全屏直出）/ 阶段时间线（折叠，复用 ChangeStepTimeline）/
+ * FilePreviewModal 全屏直出）/ 阶段时间线（折叠，复用 ChangeStepTimeline，
+ * focusStage 联动 + 卡头「阶段名 ✕」清除 chip）/
  * 智能体执行日志（默认折叠，复用 ChangeAgentRunLog）/ 关联会话卡（onOpenSession
  * 回调，宿主跳移动会话列表）/ 任务区桌面引导条（D-002）。
  *
@@ -41,6 +44,15 @@
  * 10. run-file-artifacts：**不移植**（任务详情页「产出文件」区，属 D-002 任务域
  *     裁剪范围，变更详情桌面页也未挂载）。
  * 11. file-preview-modal：**原样复用**（constraints：不改 components/files/）。
+ * 12. change-activity-badge（ChangeLastSignal + lastSignalFromSteps）/
+ *     detail/change-usage-card（ChangeUsageCard）/ scope-audit-command-card
+ *     （ScopeAuditCommandCard）：**import 复用原样挂载**（2026-09-16-mobile-changes-
+ *     parity task-06 / FR-05 / D-005@v1 禁重写禁复制数据层）：按桌面 [cid]/page.tsx
+ *     顺序挂 StageStepper 下方（最后信号纯前端派生 steps 最大 completed_at，无信号
+ *     组件内自不渲染；用量/对账卡自取数不加门控）；阶段-时间线联动（FR-06 /
+ *     D-004@v1，对齐桌面 ql-20260821-017）：stepStages 派生逐字对齐桌面
+ *     [cid]/page.tsx:249-252，focusStage toggle（再点同阶段取消），时间线卡头
+ *     「阶段名 ✕」清除 chip（SecCard 加 actions 槽避 button 嵌套）。
  *
  * 审批约束（task-08）：一律走 submitStageReview（submitReview/approveChange 为退役
  * 链路，禁用）；成功后 invalidate ["changes", workspaceId] 前缀 + 详情 key 重取。
@@ -53,10 +65,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { PENDING_REVIEW_LABEL } from "@/app/(dashboard)/workspaces/[id]/changes/page";
 import { isTerminalChange } from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
+import {
+  ChangeLastSignal,
+  lastSignalFromSteps,
+} from "@/components/changes/change-activity-badge";
 import { STAGE_LABELS } from "@/components/changes/change-step-badge";
 import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
 import { WORKFLOW_STAGES } from "@/components/changes/detail/change-stage-header";
 import { ChangeStepTimeline } from "@/components/changes/detail/change-step-timeline";
+import { ChangeUsageCard } from "@/components/changes/detail/change-usage-card";
+import { ScopeAuditCommandCard } from "@/components/changes/scope-audit-command-card";
 import {
   FilePreviewModal,
   type FilePreviewTarget,
@@ -126,16 +144,21 @@ const STEPPER_STAGES: readonly string[] = ["scan", ...WORKFLOW_STAGES];
 
 // ── 自绘基础壳 ───────────────────────────────────────────────────────────────
 
-/** 折叠卡壳（sec-card 模式，design §5.3）：头部整条为按钮（触摸 ≥44px），点击切换折叠。 */
+/** 折叠卡壳（sec-card 模式，design §5.3）：头部折叠按钮（触摸 ≥44px）+ 右侧
+ *  actions 槽（时间线「阶段名 ✕」清除 chip 等——渲染为折叠按钮兄弟节点，
+ *  避免 button 嵌套 button 非法结构）。 */
 function SecCard({
   title,
   defaultOpen = true,
   testId,
+  actions,
   children,
 }: {
   title: ReactNode;
   defaultOpen?: boolean;
   testId: string;
+  /** 卡头动作槽（可选）：不占折叠按钮语义，点击不触发折叠。 */
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -144,17 +167,22 @@ function SecCard({
       data-testid={testId}
       className="rounded-[var(--radius-lg)] border border-border bg-card shadow-[var(--shadow-sm)]"
     >
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="flex min-h-[44px] w-full items-center justify-between gap-2 px-3 py-2 text-left text-[14px] font-medium text-foreground"
-      >
-        {title}
-        <span aria-hidden className="shrink-0 text-xs text-muted-foreground">
-          {open ? "▾" : "▸"}
-        </span>
-      </button>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-h-[44px] min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2 text-left text-[14px] font-medium text-foreground"
+        >
+          {title}
+          <span aria-hidden className="shrink-0 text-xs text-muted-foreground">
+            {open ? "▾" : "▸"}
+          </span>
+        </button>
+        {actions ? (
+          <div className="flex shrink-0 items-center pr-2.5">{actions}</div>
+        ) : null}
+      </div>
       {open ? <div className="px-3 pb-3">{children}</div> : null}
     </section>
   );
@@ -164,8 +192,28 @@ function SecCard({
  * 阶段步骤条（自绘横向滚动紧凑版，X-03 #1 / C-15）：节点 = 序号圆点 + 中文标签，
  * 已完成 ✓、当前高亮、未到弱化；容器 overflow-x-auto 横向滚动不折行。
  * 非线性阶段（quick 等）或 current_stage 缺失时不渲染（对齐桌面 null 降级）。
+ *
+ * 阶段-时间线联动（task-06 / FR-06 / D-004@v1，对齐桌面 ql-20260821-017 范式）：
+ * stepStages 含有的阶段节点升级为 button（触摸热区 ≥44px、aria-pressed 表选中、
+ * focus 态 brand ring + 标签 brand 高亮，样式范式对齐桌面 change-stage-header），
+ * 点击由父组件 toggle focusStage 筛选下方时间线；无步骤数据阶段保持纯展示 div
+ * 不可点（无 title 提示与筛选效果）。stepStages 含 quick 等非线性值时仅参与
+ * includes 可点判定（步骤条只渲染 STEPPER_STAGES 节点）。
  */
-function StageStepper({ currentStage }: { currentStage: string | null }) {
+function StageStepper({
+  currentStage,
+  stepStages,
+  focusStage,
+  onStageClick,
+}: {
+  currentStage: string | null;
+  /** steps 中实际有条目的阶段集合（可点范围；含非线性值，仅参与 includes 判断）。 */
+  stepStages: readonly string[];
+  /** 当前筛选聚焦的阶段（null = 全部）；选中节点 brand ring 高亮。 */
+  focusStage: string | null;
+  /** 节点点击回调（父组件 toggle focusStage）。 */
+  onStageClick: (stage: string) => void;
+}) {
   if (!currentStage) return null;
   // 终态别名兼容：CLI 归档会把 current_stage 写成 'archived'（对齐桌面 :56）
   const displayStage = currentStage === "archived" ? "archive" : currentStage;
@@ -180,36 +228,64 @@ function StageStepper({ currentStage }: { currentStage: string | null }) {
       {STEPPER_STAGES.map((stage, i) => {
         const isCompleted = currentIndex > i;
         const isCurrent = currentIndex === i;
-        return (
-          <div key={stage} className="flex shrink-0 items-center">
-            <div className="flex items-center gap-1">
-              <span
-                aria-hidden
-                data-status={
-                  isCompleted ? "completed" : isCurrent ? "current" : "pending"
-                }
-                className={cn(
-                  "flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-medium",
-                  isCurrent
-                    ? "bg-primary text-primary-foreground"
-                    : isCompleted
-                      ? "bg-success/15 text-success"
-                      : "bg-muted text-muted-foreground",
-                )}
-              >
-                {isCompleted ? "✓" : i + 1}
-              </span>
-              <span
-                className={cn(
-                  "whitespace-nowrap text-[12px]",
-                  isCurrent
+        const hasSteps = stepStages.includes(stage);
+        const isFocused = focusStage === stage;
+        // 节点内层：圆点 + 标签保持兄弟结构（data-status 锚点供测试定位）
+        const nodeInner = (
+          <>
+            <span
+              aria-hidden
+              data-status={
+                isCompleted ? "completed" : isCurrent ? "current" : "pending"
+              }
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-medium",
+                isCurrent
+                  ? "bg-primary text-primary-foreground"
+                  : isCompleted
+                    ? "bg-success/15 text-success"
+                    : "bg-muted text-muted-foreground",
+                // 联动 focus 态：brand ring 高亮（对齐桌面 ring 范式）
+                isFocused &&
+                  "ring-2 ring-brand-500 ring-offset-2 ring-offset-card",
+              )}
+            >
+              {isCompleted ? "✓" : i + 1}
+            </span>
+            <span
+              className={cn(
+                "whitespace-nowrap text-[12px]",
+                isFocused
+                  ? "font-medium text-brand-600"
+                  : isCurrent
                     ? "font-medium text-foreground"
                     : "text-muted-foreground",
-                )}
+              )}
+            >
+              {STAGE_LABELS[stage] ?? stage}
+            </span>
+          </>
+        );
+        return (
+          <div key={stage} className="flex min-h-[44px] shrink-0 items-center">
+            {hasSteps ? (
+              <button
+                type="button"
+                aria-pressed={isFocused}
+                title={
+                  isFocused
+                    ? "点击取消筛选，显示全部步骤"
+                    : "点击筛选该阶段步骤"
+                }
+                onClick={() => onStageClick(stage)}
+                className="flex items-center gap-1 rounded-[var(--radius-md)] px-1 py-1 transition-colors hover:bg-muted/60"
               >
-                {STAGE_LABELS[stage] ?? stage}
-              </span>
-            </div>
+                {nodeInner}
+              </button>
+            ) : (
+              /* 无步骤数据的阶段：纯展示不可点（无筛选效果），保持 div 语义 */
+              <div className="flex items-center gap-1 px-1">{nodeInner}</div>
+            )}
             {i < STEPPER_STAGES.length - 1 && (
               <span aria-hidden className="mx-1 h-px w-3 shrink-0 bg-border" />
             )}
@@ -306,6 +382,11 @@ export function MobileChangeDetail({
     refetchOnWindowFocus: false,
   });
 
+  // ── 阶段-时间线联动（task-06 / FR-06 / D-004@v1，对齐桌面 ql-20260821-017）──
+  // 点击步骤条节点筛选时间线，再点同阶段取消；current_stage 非线性（quick 等）
+  // 时步骤条不渲染，联动入口自然缺席，focusStage 恒为 null 无副作用。
+  const [focusStage, setFocusStage] = useState<string | null>(null);
+
   // 审批唯一入口 submitStageReview（退役链路 submitReview/approveChange 禁用）：
   // 成功后 invalidate ["changes", workspaceId] 前缀（列表）+ 详情 key 重取（refetch）。
   const handleReviewAction = async (action: string) => {
@@ -380,10 +461,39 @@ export function MobileChangeDetail({
   const steps = change.steps ?? null;
   const quicklogItems = quicklogQuery.data?.items ?? [];
 
+  // 阶段-步骤联动派生：steps 条目出现的阶段去重（含 quick 等非线性 stage，但
+  // 步骤条只渲染 STEPPER_STAGES 节点，非线性值仅参与 includes 可点判定）——
+  // 口径逐字对齐桌面 [cid]/page.tsx:249-252
+  const stepStages =
+    change.steps && change.steps.length > 0
+      ? Array.from(new Set(change.steps.map((e) => e.stage)))
+      : [];
+
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      {/* 阶段步骤条（自绘横向滚动，X-03 #1） */}
-      <StageStepper currentStage={change.current_stage ?? null} />
+      {/* 阶段步骤条（自绘横向滚动，X-03 #1；节点可点筛选时间线，task-06/FR-06） */}
+      <StageStepper
+        currentStage={change.current_stage ?? null}
+        stepStages={stepStages}
+        focusStage={focusStage}
+        onStageClick={(stage) =>
+          setFocusStage((prev) => (prev === stage ? null : stage))
+        }
+      />
+
+      {/* 最后信号行（task-06 / FR-05 / X-03 #12：import 复用；数据源 = steps 明细
+          最大 completed_at 纯前端派生，无信号组件内自不渲染，对齐桌面 :330） */}
+      <ChangeLastSignal lastPushedAt={lastSignalFromSteps(change.steps)} />
+
+      {/* 执行用量卡（task-06 / FR-05 / D-005@v1：import 复用原样挂载，组件
+          useQuery 自取数不加门控，接线对齐桌面 :338） */}
+      <ChangeUsageCard kind="change" workspaceId={workspaceId} refKey={changeId} />
+
+      {/* 范围对账卡（task-06 / FR-05 / D-005@v1：import 复用原样挂载，
+          identifier=change_key 已归档也可查，接线对齐桌面 :432-437） */}
+      <ScopeAuditCommandCard
+        target={{ kind: "change", workspaceId, changeKey: change.change_key }}
+      />
 
       {/* 审批操作卡（X-03 #2 自绘：有待办默认展开；无待办折叠只读说明） */}
       {reviewMeta ? (
@@ -553,13 +663,27 @@ export function MobileChangeDetail({
         )}
       </SecCard>
 
-      {/* 阶段时间线（X-03 #4 纯内容复用 ChangeStepTimeline；折叠壳） */}
+      {/* 阶段时间线（X-03 #4 纯内容复用 ChangeStepTimeline；折叠壳；focusStage
+          联动筛选 + 卡头「阶段名 ✕」清除 chip，样式范式对齐桌面 :376-386 移动化） */}
       {steps && steps.length > 0 ? (
         <SecCard
           testId="m-change-timeline-card"
           title={<>🧭 阶段时间线（{steps.length}）</>}
+          actions={
+            focusStage ? (
+              <button
+                type="button"
+                data-testid="m-change-stage-focus-chip"
+                onClick={() => setFocusStage(null)}
+                aria-label="清除阶段筛选"
+                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-brand-300 bg-brand-500/10 px-2.5 py-1 text-[11px] font-medium text-brand-600 transition-colors hover:bg-brand-500/20"
+              >
+                {STAGE_LABELS[focusStage] ?? focusStage} ✕
+              </button>
+            ) : undefined
+          }
         >
-          <ChangeStepTimeline steps={steps} />
+          <ChangeStepTimeline steps={steps} focusStage={focusStage} />
         </SecCard>
       ) : null}
 

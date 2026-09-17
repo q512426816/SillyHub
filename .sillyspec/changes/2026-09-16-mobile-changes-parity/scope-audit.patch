@@ -1,0 +1,2607 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index 41a6e2c76..16e648573 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -98,7 +98,7 @@ type UsageSummaryRead = components["schemas"]["UsageSummaryRead"];
+ 
+ /** token 数紧凑格式化（session-usage-bar formatTokensCompact 同款；ql-20260904-012
+  * 单位统一 K/M 废除「万」）：>= 1M →「X.XM」；>= 1K →「X.XK」（一位小数）；K 以下原值直显。 */
+-function formatTokensCompact(n: number): string {
++export function formatTokensCompact(n: number): string {
+   if (!Number.isFinite(n) || n === 0) return "0";
+   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+@@ -106,13 +106,13 @@ function formatTokensCompact(n: number): string {
+ }
+ 
+ /** 请求次数千分位（计数语义不做 K/M 缩写，session-usage-bar 同款）。 */
+-function formatCount(n: number): string {
++export function formatCount(n: number): string {
+   return Number.isFinite(n) ? n.toLocaleString("en-US") : "0";
+ }
+ 
+ /** 耗时紧凑中文格式化（原型「3.6 小时 / 34 分钟」）：>= 1 小时一位小数，
+  * 不足 1 小时取整分钟（不足 1 分钟按 1 分钟起步）；null/缺 →「—」。 */
+-function formatDurationZh(ms: number | null | undefined): string {
++export function formatDurationZh(ms: number | null | undefined): string {
+   if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
+   if (ms >= 3_600_000) return `${(ms / 3_600_000).toFixed(1)} 小时`;
+   return `${Math.max(1, Math.round(ms / 60_000))} 分钟`;
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/[cid]/__tests__/page.m-change-detail.test.tsx b/frontend/src/app/m/workspaces/[id]/changes/[cid]/__tests__/page.m-change-detail.test.tsx
+index 776995b71..ecec76ed6 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/[cid]/__tests__/page.m-change-detail.test.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/[cid]/__tests__/page.m-change-detail.test.tsx
+@@ -12,14 +12,23 @@
+  *  4. 加载骨架（pending → m-change-detail-page-loading，详情桩不挂载）；
+  *  5. 错误重试态（reject → m-change-detail-page-error + 重试 refetch 恢复）；
+  *  6. ⋯ 菜单（MobileActionMenu）：重解析（reparseChanges + invalidate + 反馈）/
+- *     复制变更名（clipboard 写展示名）。
++ *     复制变更名（clipboard 写展示名）；
++ *  7. 删除入口（task-07 / FR-07 / D-004）：canDeleteChange 三判门控（管理员 /
++ *     owner 本人 / 工作区所有者出现 danger 项；无权限 / change=null 加载态不
++ *     出现，其余动作不受影响）+ DeleteChangeConfirm 末段防呆确认流（取消不
++ *     发请求；成功 → toast + ["changes", ws] 前缀失效完成后跳回移动列表；
++ *     403 失败 → notify.error 中文兜底，留在本页不跳转）。
+  *
+- * mock 范式对齐 page.test.tsx / page.m-sessions-fallback.test.tsx：importActual
+- * 部分 mock（@/lib/changes 只换 getChange/reparseChanges）+ 真实 QueryClient +
+- * next/navigation mock（useRouter push/replace + useParams）；MobileChangeDetail
+- * 打桩断言透传契约（页面壳零重复实现详情，桩即哨兵）。
++ * mock 范式对齐 page.test.tsx / page.m-sessions-fallback / page.m-workspaces：
++ * importActual 部分 mock（@/lib/changes 只换 getChange/reparseChanges/deleteChange
++ * 、@/lib/auth 只换 fetchMe）+ 真实 QueryClient + next/navigation mock（useRouter
++ * push/replace + useParams）；MobileChangeDetail 打桩断言透传契约（页面壳零重复
++ * 实现详情，桩即哨兵）。删除门控三要素：@/stores/session stub（可变 user 供
++ * 用例切换登录态）+ fetchMe stub（workspaces[].role_key）+ @/lib/errors useNotify
++ * stub（toast 哨兵，复用删除入口域组件实件 canDeleteChange/useChangeDeleteAccess/
++ * DeleteChangeConfirm 验真实判定与防呆）。
+  */
+-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+@@ -50,7 +59,11 @@ vi.mock("@/components/mobile/mobile-change-detail", () => ({
+ }));
+ 
+ // ── 数据层部分 mock（保留 actual，仅替换页面用到的请求函数）──────────────────
+-const changesApi = vi.hoisted(() => ({ getChange: vi.fn(), reparseChanges: vi.fn() }));
++const changesApi = vi.hoisted(() => ({
++  getChange: vi.fn(),
++  reparseChanges: vi.fn(),
++  deleteChange: vi.fn(),
++}));
+ vi.mock("@/lib/changes", async () => {
+   const actual =
+     await vi.importActual<typeof import("@/lib/changes")>("@/lib/changes");
+@@ -58,10 +71,43 @@ vi.mock("@/lib/changes", async () => {
+     ...actual,
+     getChange: changesApi.getChange,
+     reparseChanges: changesApi.reparseChanges,
++    deleteChange: changesApi.deleteChange,
+   };
+ });
+ 
++// ── 删除门控三要素 stub（task-07）：session user / fetchMe workspaceRole ──────
++// useChangeDeleteAccess / canDeleteChange / DeleteChangeConfirm 走实件（真判定），
++// 仅 stub 数据源与 toast。sessionStub.user 可变，用例内切换登录态/管理员。
++const sessionStub = vi.hoisted(() => ({
++  user: null as { id: string; is_platform_admin?: boolean } | null,
++}));
++vi.mock("@/stores/session", () => ({
++  useSession: (
++    sel: (_state: { user: typeof sessionStub.user }) => unknown,
++  ) => sel({ user: sessionStub.user }),
++  getState: () => ({ user: sessionStub.user }),
++}));
++
++const authApi = vi.hoisted(() => ({ fetchMe: vi.fn() }));
++vi.mock("@/lib/auth", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/auth")>("@/lib/auth");
++  return { ...actual, fetchMe: authApi.fetchMe };
++});
++
++// toast 哨兵（useNotify 依赖 antd App 上下文，stub 成 spy 断言文案）
++const notify = vi.hoisted(() => ({
++  success: vi.fn(),
++  error: vi.fn(),
++  warning: vi.fn(),
++}));
++vi.mock("@/lib/errors", () => ({
++  useNotify: () => notify,
++  errMessage: (err: unknown, fallback?: string) =>
++    err instanceof Error && err.message ? err.message : (fallback ?? "操作失败"),
++}));
++
+ import Page from "@/app/m/workspaces/[id]/changes/[cid]/page";
++import { ApiError } from "@/lib/api";
+ import type { ChangeRead } from "@/lib/changes";
+ 
+ // ── fixtures ────────────────────────────────────────────────────────────────
+@@ -107,6 +153,18 @@ describe("m/workspaces/[id]/changes/[cid] 变更详情移动钻取页", () => {
+       workspace_id: "ws-1",
+       stats: {},
+     });
++    // 删除门控默认态：未登录（fetchMe 不发请求、无删除项）；各用例按需切换
++    sessionStub.user = null;
++    authApi.fetchMe.mockResolvedValue({
++      user: { id: "user-1", is_platform_admin: false },
++      workspaces: [],
++      permissions: [],
++    });
++    changesApi.deleteChange.mockResolvedValue({
++      ok: true,
++      backup_dir: "/tmp/backup/c1",
++      file_count: 0,
++    });
+     nav.push.mockReset();
+     nav.replace.mockReset();
+   });
+@@ -225,4 +283,205 @@ describe("m/workspaces/[id]/changes/[cid] 变更详情移动钻取页", () => {
+       "复制",
+     );
+   });
++
++  // ── 删除入口（task-07 / FR-07 / D-004）────────────────────────────────────
++
++  it("删除入口门控（三判其一）：管理员 / owner 本人 / 工作区所有者 → danger 项「删除变更」出现，其余动作不受影响", async () => {
++    const judges: Array<{
++      name: string;
++      user: { id: string; is_platform_admin?: boolean };
++      ownerId: string | null;
++      roleKey: string;
++    }> = [
++      {
++        name: "平台管理员",
++        user: { id: "admin-1", is_platform_admin: true },
++        ownerId: null,
++        roleKey: "member",
++      },
++      {
++        name: "owner 本人",
++        user: { id: "user-1", is_platform_admin: false },
++        ownerId: "user-1",
++        roleKey: "member",
++      },
++      {
++        name: "工作区所有者",
++        user: { id: "user-2", is_platform_admin: false },
++        ownerId: "owner-9",
++        roleKey: "workspace_owner",
++      },
++    ];
++    for (const judge of judges) {
++      sessionStub.user = judge.user;
++      changesApi.getChange.mockResolvedValue(
++        makeChangeRead({ owner_id: judge.ownerId }),
++      );
++      authApi.fetchMe.mockResolvedValue({
++        user: { id: judge.user.id, is_platform_admin: false },
++        workspaces: [{ workspace_id: "ws-1", role_key: judge.roleKey }],
++        permissions: [],
++      });
++      const { unmount } = renderPage();
++      await screen.findByTestId("mobile-change-detail-stub");
++      fireEvent.click(screen.getByTestId("m-change-menu-trigger"));
++      const item = await screen.findByRole("menuitem", { name: "删除变更" });
++      // danger 项（MobileAction.danger → text-destructive 红色文案）
++      expect(item).toHaveAttribute("data-action-key", "delete-change");
++      expect(item.className).toContain("text-destructive");
++      // 重解析 / 复制动作不受影响
++      expect(
++        screen.getByRole("menuitem", { name: "重新解析变更" }),
++      ).toBeInTheDocument();
++      expect(
++        screen.getByRole("menuitem", { name: "复制变更名" }),
++      ).toBeInTheDocument();
++      unmount();
++      cleanup();
++      // ["me","workspaceRoles"] 有 5min staleTime，跨迭代清缓存防上一轮角色
++      // 拦截本轮 fetchMe（三判各自独立取角色）
++      queryClient.clear();
++    }
++  });
++
++  it("删除入口门控（无权限）：member 且非本人 → 不出现，重解析/复制不受影响", async () => {
++    sessionStub.user = { id: "user-1", is_platform_admin: false };
++    changesApi.getChange.mockResolvedValue(makeChangeRead({ owner_id: "owner-9" }));
++    authApi.fetchMe.mockResolvedValue({
++      user: { id: "user-1", is_platform_admin: false },
++      workspaces: [{ workspace_id: "ws-1", role_key: "member" }],
++      permissions: [],
++    });
++    renderPage();
++    await screen.findByTestId("mobile-change-detail-stub");
++    // 等 fetchMe 角色落定再开门（确认走了 workspaceRole 判定而非提前 false）
++    await waitFor(() => expect(authApi.fetchMe).toHaveBeenCalled());
++    fireEvent.click(screen.getByTestId("m-change-menu-trigger"));
++    await screen.findByRole("menuitem", { name: "重新解析变更" });
++    expect(
++      screen.queryByRole("menuitem", { name: "删除变更" }),
++    ).not.toBeInTheDocument();
++    expect(
++      screen.getByRole("menuitem", { name: "复制变更名" }),
++    ).toBeInTheDocument();
++  });
++
++  it("删除入口门控（加载态）：change=null → ⋯ 菜单不出现删除项", async () => {
++    sessionStub.user = { id: "admin-1", is_platform_admin: true };
++    changesApi.getChange.mockImplementation(
++      () => new Promise<ChangeRead>(() => {}),
++    );
++    renderPage();
++    await screen.findByTestId("m-change-detail-page-loading");
++    fireEvent.click(screen.getByTestId("m-change-menu-trigger"));
++    await screen.findByRole("menuitem", { name: "重新解析变更" });
++    expect(
++      screen.queryByRole("menuitem", { name: "删除变更" }),
++    ).not.toBeInTheDocument();
++  });
++
++  it("删除确认弹层：取消 → 关闭弹层且不触发 deleteChange", async () => {
++    sessionStub.user = { id: "admin-1", is_platform_admin: true };
++    renderPage();
++    await screen.findByTestId("mobile-change-detail-stub");
++    fireEvent.click(screen.getByTestId("m-change-menu-trigger"));
++    fireEvent.click(
++      await screen.findByRole("menuitem", { name: "删除变更" }),
++    );
++    const dialog = await screen.findByTestId("delete-change-confirm");
++    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
++    await waitFor(() =>
++      expect(
++        screen.queryByTestId("delete-change-confirm"),
++      ).not.toBeInTheDocument(),
++    );
++    expect(changesApi.deleteChange).not.toHaveBeenCalled();
++  });
++
++  it("删除确认流（成功）：末段防呆 → deleteChange → toast + changes 前缀失效完成后跳回移动列表", async () => {
++    sessionStub.user = { id: "admin-1", is_platform_admin: true };
++    // 失效顺序哨兵：invalidateQueries 手动 resolve，验证「先失效完成再跳转」
++    let resolveInvalidate!: () => void;
++    const invalidateSpy = vi
++      .spyOn(queryClient, "invalidateQueries")
++      .mockImplementation(
++        () =>
++          new Promise<void>((resolve) => {
++            resolveInvalidate = resolve;
++          }),
++      );
++    renderPage();
++    await screen.findByTestId("mobile-change-detail-stub");
++    fireEvent.click(screen.getByTestId("m-change-menu-trigger"));
++    fireEvent.click(
++      await screen.findByRole("menuitem", { name: "删除变更" }),
++    );
++
++    const dialog = await screen.findByTestId("delete-change-confirm");
++    // 末段防呆：change_key 去日期前缀 → mobile-workspace-page，输入前确认禁用
++    const confirmBtn = within(dialog).getByRole("button", { name: "确认删除" });
++    expect(confirmBtn).toBeDisabled();
++    fireEvent.change(
++      within(dialog).getByTestId("delete-change-confirm-input"),
++      { target: { value: "mobile-workspace-page" } },
++    );
++    expect(confirmBtn).toBeEnabled();
++    fireEvent.click(confirmBtn);
++
++    // 确认先关弹层再 mutate
++    await waitFor(() =>
++      expect(changesApi.deleteChange).toHaveBeenCalledWith("ws-1", "c1"),
++    );
++    expect(
++      screen.queryByTestId("delete-change-confirm"),
++    ).not.toBeInTheDocument();
++    await waitFor(() =>
++      expect(notify.success).toHaveBeenCalledWith(
++        "变更 2026-08-26-mobile-workspace-page 已删除",
++      ),
++    );
++    // ["changes", ws-1] 前缀失效（列表行消失口径）未完成前不跳转
++    expect(nav.push).not.toHaveBeenCalled();
++    resolveInvalidate();
++    await waitFor(() =>
++      expect(nav.push).toHaveBeenCalledWith("/m/workspaces/ws-1/changes"),
++    );
++    expect(invalidateSpy).toHaveBeenCalledWith({
++      queryKey: ["changes", "ws-1"],
++    });
++  });
++
++  it("删除确认流（失败）：403 → notify.error 中文兜底，留在详情页不跳转", async () => {
++    sessionStub.user = { id: "admin-1", is_platform_admin: true };
++    const apiErr = new ApiError(403, {
++      code: "forbidden",
++      message: "无权限删除该变更",
++      request_id: null,
++      details: null,
++    });
++    changesApi.deleteChange.mockRejectedValue(apiErr);
++    renderPage();
++    await screen.findByTestId("mobile-change-detail-stub");
++    fireEvent.click(screen.getByTestId("m-change-menu-trigger"));
++    fireEvent.click(
++      await screen.findByRole("menuitem", { name: "删除变更" }),
++    );
++    const dialog = await screen.findByTestId("delete-change-confirm");
++    fireEvent.change(
++      within(dialog).getByTestId("delete-change-confirm-input"),
++      { target: { value: "mobile-workspace-page" } },
++    );
++    fireEvent.click(
++      within(dialog).getByRole("button", { name: "确认删除" }),
++    );
++    await waitFor(() =>
++      expect(notify.error).toHaveBeenCalledWith(apiErr, "删除变更失败"),
++    );
++    // 留在详情页不白屏、不跳转；弹层已关不重开
++    expect(nav.push).not.toHaveBeenCalled();
++    expect(screen.getByTestId("mobile-change-detail-stub")).toBeInTheDocument();
++    expect(
++      screen.queryByTestId("delete-change-confirm"),
++    ).not.toBeInTheDocument();
++  });
+ });
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/m/workspaces/[id]/changes/[cid]/page.tsx
+index 4dd242c0f..5854580fd 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/[cid]/page.tsx
+@@ -17,21 +17,32 @@
+  *    react-query 共享缓存不双请求，驱动顶栏标题与整页加载骨架 / 错误重试态；
+  *  - ⋯ 菜单（MobileActionMenu 承载，design §5.3 对齐桌面既有动作）：重解析
+  *    （reparseChanges + invalidate ["changes", wid] 前缀与本详情 key，语义对齐
+- *    桌面列表页 handleReparse）/ 复制变更名（clipboard，展示名口径同标题）。
+- *    MobileTopBar 无动作槽——页面以 sticky 包裹层 + 右侧预留 44px 热区组合 ⋯
+- *    触发，不侵入组件内部；
++ *    桌面列表页 handleReparse）/ 复制变更名（clipboard，展示名口径同标题）/
++ *    删除变更（task-07 / 2026-09-16-mobile-changes-parity FR-07 / D-004：change
++ *    非空且 canDeleteChange 三判其一才追加 danger 项——加载态与无权限不出现；
++ *    DeleteChangeConfirm 末段防呆确认，成功失效 ["changes", wid] 前缀后跳回
++ *    移动列表，失败中文 toast 留本页，范式对齐桌面 DetailDeleteAction，弹层/
++ *    权限判定/删除请求全部复用既有实现 D-005）。MobileTopBar 无动作槽——页面
++ *    以 sticky 包裹层 + 右侧预留 44px 热区组合 ⋯ 触发，不侵入组件内部；
+  *  - 关联会话入口：onOpenSession → /m/workspaces/[id]/sessions（会话列表）。
+  */
+ import { useState } from "react";
+ import { useParams, useRouter } from "next/navigation";
+-import { useQuery, useQueryClient } from "@tanstack/react-query";
++import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { MoreVertical } from "lucide-react";
+ 
++import {
++  canDeleteChange,
++  DeleteChangeConfirm,
++  useChangeDeleteAccess,
++  type DeleteChangeTarget,
++} from "@/components/delete-change-confirm";
+ import { MobileActionMenu, type MobileAction } from "@/components/mobile/mobile-action-menu";
+ import { MobileChangeDetail } from "@/components/mobile/mobile-change-detail";
+ import { MobileTopBar } from "@/components/mobile/mobile-top-bar";
+ import { ApiError } from "@/lib/api";
+-import { getChange, reparseChanges } from "@/lib/changes";
++import { deleteChange, getChange, reparseChanges } from "@/lib/changes";
++import { useNotify } from "@/lib/errors";
+ 
+ export default function MobileChangeDetailPage() {
+   const params = useParams<{ id: string; cid: string }>();
+@@ -56,12 +67,20 @@ export default function MobileChangeDetailPage() {
+         : "加载变更详情失败"
+       : null;
+ 
+-  // ── ⋯ 菜单 state（重解析 / 复制变更名）─────────────────────────────────────
++  // ── ⋯ 菜单 state（重解析 / 复制变更名 / 删除变更）───────────────────────────
+   const [menuOpen, setMenuOpen] = useState(false);
+   const [reparsing, setReparsing] = useState(false);
+   const [actionMsg, setActionMsg] = useState<string | null>(null);
+   const [actionError, setActionError] = useState<string | null>(null);
+ 
++  // ── 删除变更（task-07 / FR-07 / D-004）：入口可见性 canDeleteChange 三判启发式
++  //    （owner 本人 / 平台管理员 / 工作区所有者，后端 DELETE 组合权限为权威，
++  //    前端判漏由 403 兜底中文 toast）；弹层 / 权限判定 / 删除请求全部复用既有
++  //    实现（D-005），本页只做接线。deleteTarget=null 即弹层关闭。
++  const notify = useNotify();
++  const deleteAccess = useChangeDeleteAccess(workspaceId);
++  const [deleteTarget, setDeleteTarget] = useState<DeleteChangeTarget | null>(null);
++
+   const handleBackToList = () => {
+     router.push(`/m/workspaces/${workspaceId}/changes`);
+   };
+@@ -103,6 +122,29 @@ export default function MobileChangeDetailPage() {
+     }
+   };
+ 
++  // 删除 mutation（对齐桌面 DetailDeleteAction 范式）：成功 → toast +
++  // await 失效 ["changes", workspaceId] 前缀（列表行消失）→ 跳回移动列表；
++  // 失败（403/404/409）→ 中文 toast 留在本页不白屏（errMessage 取
++  // ApiError.message 兜底「删除变更失败」）。changeKey 口径与桌面一致取
++  // change.change_key，query 数据在成功回调时仍在缓存，null 兜底 changeId。
++  const deleteChangeKey = change?.change_key ?? changeId;
++  const deleteMutation = useMutation({
++    mutationFn: () => deleteChange(workspaceId, changeId),
++    onSuccess: async () => {
++      notify.success(`变更 ${deleteChangeKey} 已删除`);
++      // 列表前缀失效完成后再跳转（与桌面同语义，共享缓存失效口径）
++      await queryClient.invalidateQueries({
++        queryKey: ["changes", workspaceId],
++      });
++      router.push(`/m/workspaces/${workspaceId}/changes`);
++    },
++    onError: (err) => {
++      notify.error(err, "删除变更失败");
++    },
++  });
++
++  // change 非空且 canDeleteChange 三判其一才追加 danger 项——change=null
++  // 加载态与无权限不追加，重解析 / 复制动作不受影响。
+   const menuActions: MobileAction[] = [
+     {
+       key: "reparse",
+@@ -118,6 +160,21 @@ export default function MobileChangeDetailPage() {
+         void handleCopyName();
+       },
+     },
++    ...(change && canDeleteChange(change, deleteAccess)
++      ? [
++          {
++            key: "delete-change",
++            label: "删除变更",
++            danger: true,
++            onPress: () => {
++              setDeleteTarget({
++                change_key: change.change_key,
++                owner_name: change.owner_name,
++              });
++            },
++          },
++        ]
++      : []),
+   ];
+ 
+   const barTitle = loading
+@@ -214,13 +271,26 @@ export default function MobileChangeDetailPage() {
+         )}
+       </main>
+ 
+-      {/* ⋯ 菜单（底部 ActionSheet）：重解析 / 复制变更名（design §5.3） */}
++      {/* ⋯ 菜单（底部 ActionSheet）：重解析 / 复制变更名 / 删除变更（权限门控） */}
+       <MobileActionMenu
+         open={menuOpen}
+         actions={menuActions}
+         onClose={() => setMenuOpen(false)}
+         title="变更操作"
+       />
++
++      {/* 删除确认弹层（复用删除入口域组件，末段输入防呆）：确认先关弹层再
++          mutate，失败路径走 onError toast 不重开弹层（对齐桌面范式） */}
++      {deleteTarget ? (
++        <DeleteChangeConfirm
++          target={deleteTarget}
++          onCancel={() => setDeleteTarget(null)}
++          onConfirm={() => {
++            setDeleteTarget(null);
++            deleteMutation.mutate();
++          }}
++        />
++      ) : null}
+     </div>
+   );
+ }
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx
+index 282d67de9..3b6e9e835 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -20,6 +20,18 @@
+  *     搜索词联动、点击卡片 MobileDetailSheet 全屏详情（getQuicklogDetail 内容 +
+  *     「关闭」submitText）、关联变更 chip 经 listChanges(search) 解析 id 后钻取；
+  * 10. 「加载更多」递增 page 追加第二页（key 含 page 槽位与桌面同构）。
++ * 11. task-08（FR-01）：重新扫描成功反馈条（文案与桌面 :701-720 逐字一致）+
++ *     警告卡（[code] change_key: detail）+ 失效 ["changes", ws] 前缀 +
++ *     ApiError 中文兜底 / 非 ApiError 兜底「重新解析失败」+ 解析中 disabled 防重入；
++ * 12. task-08（FR-03）：筛选抽屉排序 chip 切「↑ 最早优先」→ sort=updated_at_asc
++ *     进请求与 key；?tab=quicklog / ?search= URL 初始化（非法 tab 回 active）；
++ *     R-03 断言：默认参数下主列表 / quicklog key 槽位与桌面逐字同构（字面量
++ *     key 精确命中缓存即证 hash 相等，sortDir / status·author·showPlaceholder
++ *     默认真值与改造前逐字一致，AC-03 兼容基线）；
++ * 13. task-08（FR-04）：quicklog 筛选抽屉状态 chip（status=stale 进 key 与请求）、
++ *     作者聚合口径（owner_name→author_name→author_raw 去重，对齐桌面
++ *     quicklog-table.tsx:197-203）+ 作者 chip 筛选、占位开关关闭收窄
++ *     （include_placeholder 不带参）、重置全部回默认（占位回 true）。
+  *
+  * mock 范式对齐 layout.m-workspace-id.test / quicklog-drawer.test：
+  * importActual 部分 mock（@/lib/changes 只换 listChanges、@/lib/workspaces 只换
+@@ -40,17 +52,38 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ // ── next/navigation mock：useRouter 提供 push/replace spy ────────────────────
+-const nav = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
++// task-08（FR-03）：searchParams 升为可变槽位（桌面测试 mocks.searchParams 同款
++// 范式）——URL 参数用例按需覆写 nav.searchParams，beforeEach 重置回空参数；
++// 既有用例默认无参数行为不变
++const nav = vi.hoisted(() => ({
++  push: vi.fn(),
++  replace: vi.fn(),
++  searchParams: new URLSearchParams(),
++}));
+ vi.mock("next/navigation", () => ({
+   useRouter: () => ({ push: nav.push, replace: nav.replace }),
++  // task-04（2026-09-16-mobile-changes-parity）：页面新增 ?tab=/?search= URL
++  // 初始化消费 useSearchParams（对齐桌面 :230-239 与桌面测试 :72-73 范式）——
++  // mock 补空 URLSearchParams 接线，既有用例默认无参数行为不变（仅 mock 接线，
++  // 不改既有用例断言语义；task-08 补 URL 参数用例时按用例覆写）
++  useSearchParams: () => nav.searchParams,
+ }));
+ 
+ // ── 数据层部分 mock（保留 actual，仅替换页面用到的请求函数）──────────────────
+-const changesApi = vi.hoisted(() => ({ listChanges: vi.fn() }));
++// task-08（FR-01）：补 reparseChanges mock 接线——页面 handleReparse 消费该函数，
++// 不 mock 会发真请求；既有用例不触发重新扫描，行为不变
++const changesApi = vi.hoisted(() => ({
++  listChanges: vi.fn(),
++  reparseChanges: vi.fn(),
++}));
+ vi.mock("@/lib/changes", async () => {
+   const actual =
+     await vi.importActual<typeof import("@/lib/changes")>("@/lib/changes");
+-  return { ...actual, listChanges: changesApi.listChanges };
++  return {
++    ...actual,
++    listChanges: changesApi.listChanges,
++    reparseChanges: changesApi.reparseChanges,
++  };
+ });
+ 
+ const workspacesApi = vi.hoisted(() => ({ getWorkspace: vi.fn() }));
+@@ -86,6 +119,7 @@ vi.mock("@/lib/workspace-binding", () => ({
+ 
+ import MobileChangesPage from "@/app/m/workspaces/[id]/changes/page";
+ import { MobileWorkspaceContext } from "@/app/m/workspaces/[id]/layout";
++import { ApiError } from "@/lib/api";
+ import type { ChangeList, ChangeSummary } from "@/lib/changes";
+ import type {
+   QuicklogEntryListItem,
+@@ -246,6 +280,14 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+     quicklogApi.listQuicklogEntries.mockResolvedValue(makeList([], 3));
+     quicklogApi.getQuicklogDetail.mockResolvedValue(makeQlDetail());
+     workspacesApi.getWorkspace.mockResolvedValue(makeWorkspace());
++    // task-08（FR-01）：重新扫描默认成功零警告（用例按需覆写）
++    changesApi.reparseChanges.mockResolvedValue({
++      workspace_id: "ws-1",
++      stats: { parsed: 0, created: 0, updated: 0, deleted: 0 },
++      warnings: [],
++    });
++    // task-08（FR-03）：URL 参数槽位每用例重置回空（用例内覆写生效不串扰）
++    nav.searchParams = new URLSearchParams();
+     nav.push.mockReset();
+     nav.replace.mockReset();
+   });
+@@ -671,4 +713,396 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+     });
+     expect(screen.getByText("变更 c1")).toBeInTheDocument();
+   });
++
++  // ── task-08（FR-01 / D-003@v1 清单项 1）：重新扫描 ──────────────────────────
++
++  it("FR-01 重新扫描成功：stats 反馈条文案与桌面逐字一致 + 警告卡 + 失效 [changes, ws] 前缀", async () => {
++    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
++    changesApi.reparseChanges.mockResolvedValue({
++      workspace_id: "ws-1",
++      stats: { parsed: 3, created: 1, updated: 1, deleted: 1 },
++      warnings: [
++        {
++          code: "missing_field",
++          detail: "缺少 title 字段",
++          change_key: "2026-09-16-demo",
++          doc_type: null,
++        },
++        {
++          code: "bad_stage",
++          detail: "未知阶段 typo",
++          change_key: null,
++          doc_type: null,
++        },
++      ],
++    });
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("变更 c1")).toBeInTheDocument();
++    });
++    fireEvent.click(screen.getByTestId("m-changes-rescan-btn"));
++    await waitFor(() => {
++      expect(changesApi.reparseChanges).toHaveBeenCalledWith("ws-1");
++    });
++    // stats 反馈条文案逐字对齐桌面 :701-720（含警告计数后缀，注意「。」后空格）
++    const statsBanner = await screen.findByTestId("m-changes-reparse-stats");
++    expect(statsBanner.textContent).toBe(
++      "已重新扫描：解析 3，新增 1 · 更新 1 · 删除 1。 2 个警告。",
++    );
++    // 警告卡：[code] change_key: detail 列表（change_key 缺失降级 —）
++    const warningsCard = screen.getByTestId("m-changes-reparse-warnings");
++    expect(warningsCard.textContent).toContain("解析警告（2）");
++    expect(warningsCard.textContent).toContain(
++      "[missing_field] 2026-09-16-demo: 缺少 title 字段",
++    );
++    expect(warningsCard.textContent).toContain("[bad_stage] —: 未知阶段 typo");
++    // 成功后仅失效 ["changes", workspaceId] 前缀（不含 changesTabTotals，桌面同语义）
++    await waitFor(() => {
++      expect(invalidateSpy).toHaveBeenCalledWith({
++        queryKey: ["changes", "ws-1"],
++      });
++    });
++  });
++
++  it("FR-01 重新扫描失败：ApiError → 中文红条（ApiError.message）；非 ApiError → 兜底「重新解析失败」，均不白屏", async () => {
++    changesApi.reparseChanges
++      .mockRejectedValueOnce(
++        new ApiError(422, {
++          code: "reparse_failed",
++          message: "变更目录读取失败",
++          request_id: null,
++          details: null,
++        }),
++      )
++      .mockRejectedValueOnce(new Error("boom"));
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("变更 c1")).toBeInTheDocument();
++    });
++    fireEvent.click(screen.getByTestId("m-changes-rescan-btn"));
++    // ApiError.message 中文红条（role=alert）
++    expect(await screen.findByRole("alert")).toHaveTextContent(
++      "变更目录读取失败",
++    );
++    // 列表不受影响（不白屏）
++    expect(screen.getByText("变更 c1")).toBeInTheDocument();
++    // 非 ApiError → 兜底「重新解析失败」
++    fireEvent.click(screen.getByTestId("m-changes-rescan-btn"));
++    await waitFor(() => {
++      expect(screen.getByRole("alert")).toHaveTextContent("重新解析失败");
++    });
++  });
++
++  it("FR-01 解析中防重入：pending 期间按钮 disabled 且文案「解析中…」", async () => {
++    changesApi.reparseChanges.mockImplementation(() => new Promise(() => {}));
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("变更 c1")).toBeInTheDocument();
++    });
++    fireEvent.click(screen.getByTestId("m-changes-rescan-btn"));
++    const btn = screen.getByTestId("m-changes-rescan-btn");
++    expect(btn).toBeDisabled();
++    expect(btn.textContent).toBe("解析中…");
++  });
++
++  // ── task-08（FR-03 / D-003@v1 清单项 3/4）：排序切换与 URL 参数 ──────────────
++
++  it("FR-03 排序切换：抽屉切「↑ 最早优先」确定 → sort=updated_at_asc 进请求与 key（默认 chip ↓ 最近优先）", async () => {
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("变更 c1")).toBeInTheDocument();
++    });
++    fireEvent.click(screen.getByTestId("mobile-filter-trigger"));
++    const body = await screen.findByTestId("mobile-filter-body");
++    // 默认选中 ↓ 最近优先（DEFAULT_SORT 真值，R-03 基线）
++    expect(
++      within(body).getByTestId("m-changes-sort-chip-desc"),
++    ).toHaveAttribute("aria-pressed", "true");
++    fireEvent.click(within(body).getByTestId("m-changes-sort-chip-asc"));
++    fireEvent.click(screen.getByTestId("mobile-filter-apply"));
++    await waitFor(() => {
++      expect(changesApi.listChanges).toHaveBeenCalledWith(
++        "ws-1",
++        expect.objectContaining({ sort: "updated_at_asc" }),
++      );
++    });
++    await waitFor(() => {
++      expect(
++        queryClient.getQueryData(mainKey({ sort: "updated_at_asc" })),
++      ).toBeTruthy();
++    });
++  });
++
++  it("FR-03 URL ?tab=quicklog：初始 tab 为快速修复（tab 选中 + 不发主列表请求）", async () => {
++    nav.searchParams = new URLSearchParams("tab=quicklog");
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByTestId("m-changes-tab-quicklog")).toHaveAttribute(
++        "aria-selected",
++        "true",
++      );
++    });
++    // quicklog 列表请求发出（page:1 全参）
++    await waitFor(() => {
++      expect(quicklogApi.listQuicklogEntries).toHaveBeenCalledWith(
++        "ws-1",
++        expect.objectContaining({ page: 1, page_size: 20 }),
++      );
++    });
++    // 主列表不发请求（enabled: tab !== "quicklog"）——listChanges 仅 tabTotals
++    // 的 pageSize:1 探测调用（无 page 参数）
++    const listCalls = changesApi.listChanges.mock.calls;
++    expect(
++      listCalls.every(
++        ([, params]) =>
++          (params as { page?: number } | undefined)?.page === undefined,
++      ),
++    ).toBe(true);
++  });
++
++  it("FR-03 URL ?tab=非法值：回 active 默认 tab（主列表照常请求）", async () => {
++    nav.searchParams = new URLSearchParams("tab=bogus");
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByTestId("m-changes-tab-active")).toHaveAttribute(
++        "aria-selected",
++        "true",
++      );
++    });
++    await waitFor(() => {
++      expect(queryClient.getQueryData(mainKey())).toBeTruthy();
++    });
++  });
++
++  it("FR-03 URL ?search=词：搜索词初始化（输入框与已提交 state 同步 → 请求与 key 带 search）", async () => {
++    nav.searchParams = new URLSearchParams("search=白屏");
++    renderPage();
++    // 输入框与已提交 state 双同步（不点搜索按钮即随初始 load 携带）
++    expect(screen.getByTestId("m-changes-search-input")).toHaveValue("白屏");
++    await waitFor(() => {
++      expect(changesApi.listChanges).toHaveBeenCalledWith(
++        "ws-1",
++        expect.objectContaining({ search: "白屏" }),
++      );
++    });
++    await waitFor(() => {
++      expect(
++        queryClient.getQueryData(mainKey({ search: "白屏" })),
++      ).toBeTruthy();
++    });
++  });
++
++  it("R-03 默认参数 key 同构：主列表/quicklog 默认 key 槽位与桌面逐字一致，请求参数与改造前默认值逐字相同", async () => {
++    renderPage();
++    // 主列表：字面量默认 key 精确命中缓存（hash 相等即证 key 同构；sort 槽位
++    // 真值 updated_at_desc = task-04 改造前固定常量 DEFAULT_SORT）
++    await waitFor(() => {
++      expect(queryClient.getQueryData(mainKey())).toBeTruthy();
++    });
++    // 主列表请求参数与改造前默认值逐字相同（search/currentStage 空串转
++    // undefined 不带参——toEqual 语义对 undefined 键与缺失键等价）
++    expect(changesApi.listChanges).toHaveBeenCalledWith("ws-1", {
++      location: "active",
++      sort: "updated_at_desc",
++      pendingReviewOnly: false,
++      page: 1,
++      pageSize: 20,
++    });
++    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    // quicklog：默认 key 槽位 status:""/author:""/showPlaceholder:true 与桌面
++    // QuicklogTable 同构（task-05 改造前固定默认值，不产生额外请求）
++    await waitFor(() => {
++      expect(queryClient.getQueryData(quicklogKey())).toBeTruthy();
++    });
++    expect(quicklogApi.listQuicklogEntries).toHaveBeenCalledWith("ws-1", {
++      include_placeholder: true,
++      page: 1,
++      page_size: 20,
++    });
++  });
++
++  // ── task-08（FR-04 / D-003@v1 清单项 5）：quicklog 筛选抽屉 ──────────────────
++
++  it("FR-04 状态筛选：抽屉选「疑似中断」确定 → quicklog key 与请求带 status=stale", async () => {
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("变更 c1")).toBeInTheDocument();
++    });
++    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    await screen.findByTestId("m-quicklog-search-input");
++    fireEvent.click(screen.getByTestId("mobile-filter-trigger"));
++    const body = await screen.findByTestId("mobile-filter-body");
++    fireEvent.click(within(body).getByTestId("m-quicklog-status-chip-stale"));
++    fireEvent.click(screen.getByTestId("mobile-filter-apply"));
++    await waitFor(() => {
++      expect(quicklogApi.listQuicklogEntries).toHaveBeenLastCalledWith(
++        "ws-1",
++        expect.objectContaining({ status: "stale" }),
++      );
++    });
++    await waitFor(() => {
++      expect(
++        queryClient.getQueryData(quicklogKey({ status: "stale" })),
++      ).toBeTruthy();
++    });
++  });
++
++  it("FR-04 作者聚合：owner_name → author_name → author_raw 去重链（口径对齐桌面 quicklog-table:197-203）+ 作者 chip 筛选进 key 与请求", async () => {
++    quicklogApi.listQuicklogEntries.mockImplementation(
++      async (_ws: string, params?: { page?: number }) => {
++        if (params?.page) {
++          return makeQlList(
++            [
++              makeQl("ql-1", { owner_name: "张三" }),
++              makeQl("ql-2", { owner_name: null, author_name: "李四" }),
++              makeQl("ql-3", {
++                owner_name: null,
++                author_name: null,
++                author_raw: "raw-9",
++              }),
++              // owner_name 优先：author_name 不同也不进候选，且重复张三去重
++              makeQl("ql-4", { owner_name: "张三", author_name: "author-x" }),
++              // 三值全空 falsy（author_raw 类型为非空 string，空串即空值）
++              // → 不进候选
++              makeQl("ql-5", {
++                owner_name: null,
++                author_name: null,
++                author_raw: "",
++              }),
++            ],
++            5,
++          );
++        }
++        return makeQlList([], 5);
++      },
++    );
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("变更 c1")).toBeInTheDocument();
++    });
++    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    await waitFor(() => {
++      expect(screen.getByText("修复 ql-1")).toBeInTheDocument();
++    });
++    fireEvent.click(screen.getByTestId("mobile-filter-trigger"));
++    const body = await screen.findByTestId("mobile-filter-body");
++    // 候选 = 全部作者 + 张三/李四/raw-9（空值过滤 + Set 去重 + owner 优先链）
++    expect(
++      within(body).getAllByTestId(/^m-quicklog-author-chip-/),
++    ).toHaveLength(4);
++    expect(
++      within(body).getByTestId("m-quicklog-author-chip-张三"),
++    ).toBeInTheDocument();
++    expect(
++      within(body).getByTestId("m-quicklog-author-chip-李四"),
++    ).toBeInTheDocument();
++    expect(
++      within(body).getByTestId("m-quicklog-author-chip-raw-9"),
++    ).toBeInTheDocument();
++    expect(
++      within(body).queryByTestId("m-quicklog-author-chip-author-x"),
++    ).not.toBeInTheDocument();
++    // 选作者张三 → 确定 → key 与请求带 author
++    fireEvent.click(within(body).getByTestId("m-quicklog-author-chip-张三"));
++    fireEvent.click(screen.getByTestId("mobile-filter-apply"));
++    await waitFor(() => {
++      expect(quicklogApi.listQuicklogEntries).toHaveBeenLastCalledWith(
++        "ws-1",
++        expect.objectContaining({ author: "张三" }),
++      );
++    });
++    await waitFor(() => {
++      expect(
++        queryClient.getQueryData(quicklogKey({ author: "张三" })),
++      ).toBeTruthy();
++    });
++  });
++
++  it("FR-04 占位开关：关闭「显示空壳占位」确定 → key showPlaceholder=false + 请求不带占位参数", async () => {
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("变更 c1")).toBeInTheDocument();
++    });
++    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    await screen.findByTestId("m-quicklog-search-input");
++    fireEvent.click(screen.getByTestId("mobile-filter-trigger"));
++    const body = await screen.findByTestId("mobile-filter-body");
++    // 默认开（占位默认 true = task-05 改造前固定值）
++    expect(
++      within(body).getByTestId("m-quicklog-placeholder-toggle"),
++    ).toHaveAttribute("aria-checked", "true");
++    fireEvent.click(within(body).getByTestId("m-quicklog-placeholder-toggle"));
++    fireEvent.click(screen.getByTestId("mobile-filter-apply"));
++    await waitFor(() => {
++      expect(
++        queryClient.getQueryData(quicklogKey({ showPlaceholder: false })),
++      ).toBeTruthy();
++    });
++    // include_placeholder 收窄：false → 不带参（showPlaceholder || undefined）
++    const qlCalls = quicklogApi.listQuicklogEntries.mock.calls;
++    const lastParams = qlCalls[qlCalls.length - 1]?.[1] as
++      | { include_placeholder?: boolean }
++      | undefined;
++    expect(lastParams?.include_placeholder).toBeUndefined();
++  });
++
++  it("FR-04 重置：quicklog 抽屉筛选态全部回默认（状态/作者清空、占位回 true、搜索词一并清空）", async () => {
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("变更 c1")).toBeInTheDocument();
++    });
++    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    await screen.findByTestId("m-quicklog-search-input");
++    // 先制造筛选态：搜索词 + 状态=疑似中断 + 占位关闭
++    fireEvent.change(screen.getByTestId("m-quicklog-search-input"), {
++      target: { value: "白屏" },
++    });
++    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
++    await waitFor(() => {
++      expect(quicklogApi.listQuicklogEntries).toHaveBeenLastCalledWith(
++        "ws-1",
++        expect.objectContaining({ search: "白屏" }),
++      );
++    });
++    fireEvent.click(screen.getByTestId("mobile-filter-trigger"));
++    const body = await screen.findByTestId("mobile-filter-body");
++    fireEvent.click(within(body).getByTestId("m-quicklog-status-chip-stale"));
++    fireEvent.click(within(body).getByTestId("m-quicklog-placeholder-toggle"));
++    fireEvent.click(screen.getByTestId("mobile-filter-apply"));
++    await waitFor(() => {
++      expect(
++        queryClient.getQueryData(
++          quicklogKey({
++            search: "白屏",
++            status: "stale",
++            showPlaceholder: false,
++          }),
++        ),
++      ).toBeTruthy();
++    });
++    // 重置：抽屉保持打开（MobileFilterDrawer 语义），草稿与生效态全部回默认
++    fireEvent.click(screen.getByTestId("mobile-filter-trigger"));
++    const body2 = await screen.findByTestId("mobile-filter-body");
++    fireEvent.click(screen.getByTestId("mobile-filter-reset"));
++    expect(
++      within(body2).getByTestId("m-quicklog-placeholder-toggle"),
++    ).toHaveAttribute("aria-checked", "true");
++    expect(
++      within(body2).getByTestId("m-quicklog-status-chip-all"),
++    ).toHaveAttribute("aria-pressed", "true");
++    // 搜索词一并清空（生效值与输入框同步）
++    expect(screen.getByTestId("m-quicklog-search-input")).toHaveValue("");
++    fireEvent.click(screen.getByTestId("mobile-filter-apply"));
++    // 重置后请求回默认形态（status/author 不带参、占位 true）
++    await waitFor(() => {
++      expect(quicklogApi.listQuicklogEntries).toHaveBeenLastCalledWith(
++        "ws-1",
++        expect.objectContaining({
++          include_placeholder: true,
++          page: 1,
++          page_size: 20,
++        }),
++      );
++    });
++  });
+ });
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/page.tsx b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+index 39c18d3b4..dcb054280 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+@@ -20,14 +20,36 @@
+  *    quicklog Tab（task-07 增量续作）：listQuicklogEntries + quicklogPollInterval
+  *    数据层 100% 复用（零复制实现），卡片点击 MobileDetailSheet 全屏详情
+  *    （getQuicklogDetail，对齐原型快速修复屏；桌面 QuicklogDrawer 右抽屉不适配手机）；
+- *  - 搜索框 + MobileFilterDrawer（阶段 + 只看待我处理，应用即改 state → key 变化
+- *    自动重取；重置对齐桌面 handleResetClick 连搜索词一并清空）；
++ *  - 搜索框 + MobileFilterDrawer（阶段 + 排序 + 只看待我处理，应用即改 state →
++ *    key 变化自动重取；重置对齐桌面 handleResetClick 连搜索词一并清空）；
++ *  - 排序切换 + URL 参数初始化（task-04 / FR-03 / D-003@v1 清单项 3/4）：
++ *    sortDir 从模块常量升为 state 进主列表 key sort 槽位（默认值不变——默认
++ *    参数下 key 与改造前逐字相同，R-03）；桌面表头 toggleSort（:399-404）的
++ *    移动形态收进筛选抽屉「排序（更新时间）」chips（移动无表头，排序入口仅在
++ *    抽屉）；?tab=（白名单 quicklog/archive，非法回 active）与 ?search=（双
++ *    state 同步初始化）URL 深链对齐桌面 :230-239。抽屉「重置」裁定：桌面
++ *    handleResetClick（:384-391）不动排序（表头态不在筛选重置范围），移动排序
++ *    chip 就在抽屉内，随「抽屉内维度全部回默认」一并回 DEFAULT_SORT；
++ *  - quicklog 筛选抽屉（task-05 / FR-04 / D-003@v1 清单项 5）：quicklog tab
++ *    搜索行挂独立 MobileFilterDrawer（open/草稿态与主列表抽屉完全分离——独立
++ *    state 最简且零串扰，见 state 声明处注释）：状态 4 态 chips（值与文案对齐
++ *    桌面 STATUS_OPTIONS）/ 作者 chips（既有 quicklogItems 按 owner_name→
++ *    author_name→author_raw 聚合去重，口径照抄桌面 :197-203，零新增请求）/
++ *    显示空壳占位开关（默认开，取消=收窄，语义对齐桌面 ql-20260818-008）；
++ *    quicklog query key 的 status/author/showPlaceholder 槽位从固定默认值升为
++ *    state 真值（默认 ""/""/true 不漂移——默认参数下 key 与改造前逐字相同，
++ *    R-03 与桌面共享缓存）；「重置」tab 互斥：quicklog 抽屉只清 quicklog 维度
++ *    （占位回 true），主列表「重置」不动 quicklog 维度；
++ *  - 重新扫描（task-03 / FR-01 / D-003@v1 清单项 1）：两 Tab 工具栏搜索行
++ *    「↻ 重新扫描」全局入口（桌面 PageHeader 唯一操作的全 tab 语义），逻辑照抄
++ *    桌面 handleReparse（:406-423）——stats/warnings 反馈文案逐字对齐桌面
++ *    :701-720，成功后仅失效 ["changes", workspaceId] 前缀（不含 changesTabTotals）；
+  *  - 分页不用桌面 Table 分页器，底部「加载更多」递增 page：每页一个独立 query
+  *    （key 含 page 与桌面同构，useQueries 组合），已加载页累积渲染；
+  *  - 空态引导跳移动会话列表（对齐桌面 :443 行为，路由换 /m/ 前缀）。
+  */
+ import { useEffect, useState, type ReactNode } from "react";
+-import { useRouter } from "next/navigation";
++import { useRouter, useSearchParams } from "next/navigation";
+ import {
+   keepPreviousData,
+   useMutation,
+@@ -64,8 +86,11 @@ import { ApiError } from "@/lib/api";
+ import {
+   deleteChange,
+   listChanges,
++  reparseChanges,
+   type ChangeList,
++  type ChangeReparseStats,
+   type ChangeSummary,
++  type ChangeWarning,
+ } from "@/lib/changes";
+ import { useNotify } from "@/lib/errors";
+ import {
+@@ -74,6 +99,7 @@ import {
+   quicklogPollInterval,
+   type QuicklogEntryListItem,
+   type QuicklogEntryRead,
++  type QuicklogStatus,
+ } from "@/lib/quicklog";
+ import { getWorkspace, type Workspace } from "@/lib/workspaces";
+ import { cn } from "@/lib/utils";
+@@ -101,10 +127,23 @@ const STAGE_OPTIONS = [
+   { value: "archive", label: "归档" },
+ ] as const;
+ 
+-/** 排序方向（桌面 page.tsx:80 SortDir 同名同值）。移动版不暴露切换 UI，固定默认值。 */
++/**
++ * 排序方向（桌面 page.tsx:187 SortDir 同名同值）。task-04 起移动版在筛选抽屉
++ * 暴露切换（sortDir state 默认值取 DEFAULT_SORT，与桌面 :243 默认一致）。
++ */
+ type SortDir = "updated_at_desc" | "updated_at_asc";
+ const DEFAULT_SORT: SortDir = "updated_at_desc";
+ 
++/**
++ * 排序方向选项（task-04 / FR-03 / D-003@v1 清单项 3）：桌面表头 toggleSort
++ * 两态切换的移动形态——抽屉内单选 chips，文案对齐原型筛选抽屉屏（↓ 最近优先 /
++ * ↑ 最早优先）；chip 为 data-testid 后缀（m-changes-sort-chip-<chip>）。
++ */
++const SORT_OPTIONS = [
++  { value: "updated_at_desc", label: "↓ 最近优先", chip: "desc" },
++  { value: "updated_at_asc", label: "↑ 最早优先", chip: "asc" },
++] as const;
++
+ /** 每页条数（与桌面默认 pageSize 一致）。 */
+ const PAGE_SIZE = 20;
+ 
+@@ -128,6 +167,19 @@ const QL_STATUS_META: Record<
+   stale: { label: "疑似中断", kind: "error" },
+ };
+ 
++/**
++ * quicklog 状态筛选项（task-05 / FR-04）：值与文案逐字对齐桌面 quicklog-table
++ * STATUS_OPTIONS（:31-37，模块私有未导出——就地内联同值副本，先例 STAGE_OPTIONS /
++ * QL_STATUS_META）。chip 为 data-testid 后缀（m-quicklog-status-chip-<value>）。
++ */
++const QL_STATUS_OPTIONS = [
++  { value: "", label: "全部状态" },
++  { value: "completed", label: "已完成" },
++  { value: "in_progress", label: "进行中" },
++  { value: "partial_done", label: "已暂存" },
++  { value: "stale", label: "疑似中断" },
++] as const;
++
+ /** quicklog 详情四段正文渲染顺序固定（桌面 quicklog-drawer BODY_ORDER 同值，design FR-06）。 */
+ const QL_BODY_ORDER = ["需求", "根因", "方案", "结果"] as const;
+ 
+@@ -409,24 +461,61 @@ export default function MobileChangesPage() {
+   });
+ 
+   // ── 查询条件 state（语义对齐桌面：搜索词输入/提交分离、聚焦仅进行中视图）────
+-  const [tab, setTab] = useState<ChangesTab>("active");
+-  const [searchInput, setSearchInput] = useState("");
+-  const [search, setSearch] = useState("");
++  // task-04（FR-03）：?tab= 初始 tab（仅 quicklog/archive 合法，非法/缺失回
++  // active）+ ?search= 初始搜索词（?? "" 兜底，输入/提交双 state 同步初始化）
++  // ——URL 深链初始化逐字对齐桌面 :230-239（仅初始化不回写 URL）。
++  const searchParams = useSearchParams();
++  const initialTab = searchParams.get("tab");
++  const initialSearch = searchParams.get("search") ?? "";
++  const [tab, setTab] = useState<ChangesTab>(
++    initialTab === "quicklog" || initialTab === "archive" ? initialTab : "active",
++  );
++  const [searchInput, setSearchInput] = useState(initialSearch);
++  const [search, setSearch] = useState(initialSearch);
+   const [stageFilter, setStageFilter] = useState("");
+   const [focusMine, setFocusMine] = useState(false);
++  // task-04（FR-03 / D-003@v1 清单项 3）：排序方向从固定常量升为 state，进主列表
++  // key sort 槽位与 listChanges sort 参数；移动切换入口仅在筛选抽屉（桌面是表头
++  // toggleSort :399-404，移动无表头）。默认值仍取 DEFAULT_SORT——默认参数下
++  // query key 与请求参数和改造前逐字相同（R-03 桌面共享缓存语义）。
++  const [sortDir, setSortDir] = useState<SortDir>(DEFAULT_SORT);
+   // 「加载更多」已加载页数（递增 page；任意查询条件变化回 1）
+   const [pagesLoaded, setPagesLoaded] = useState(1);
+   // 筛选抽屉草稿态：打开时从生效值拷贝，「确定」才落到查询 state
+   const [filterOpen, setFilterOpen] = useState(false);
+   const [draftStage, setDraftStage] = useState("");
+   const [draftFocusMine, setDraftFocusMine] = useState(false);
++  // task-04：排序草稿态（沿用 draftStage 范式——取消不点确定不污染生效排序）
++  const [draftSort, setDraftSort] = useState<SortDir>(DEFAULT_SORT);
++  // ── quicklog 筛选（task-05 / FR-04 / D-003@v1 清单项 5）：状态/作者/空壳占位 ──
++  // 三组生效值默认 "" / "" / true——quicklog query key 同名槽位真值化的基准，
++  // 默认值下 key 与改造前逐字相同（R-03 与桌面共享缓存不破坏）。占位开关语义
++  // 对齐桌面 ql-20260818-008：默认显示（进行中 quick 会话全程可见），取消=收窄。
++  const [qlStatus, setQlStatus] = useState("");
++  const [qlAuthor, setQlAuthor] = useState("");
++  const [showPlaceholder, setShowPlaceholder] = useState(true);
++  // quicklog 抽屉独立 open + 草稿态，不复用主列表 filterOpen/草稿：两 Tab 渲染
++  // 分支互斥本不会同屏，但共用一组草稿会让「打开拷贝/确定落盘」互相踩维度
++  // （主列表抽屉拷不到 quicklog 三态），独立 state 实现最简且状态零串扰。
++  const [qlFilterOpen, setQlFilterOpen] = useState(false);
++  const [draftQlStatus, setDraftQlStatus] = useState("");
++  const [draftQlAuthor, setDraftQlAuthor] = useState("");
++  const [draftShowPlaceholder, setDraftShowPlaceholder] = useState(true);
+   // quicklog Tab（task-07 / FR-05）：选中条目即详情 Sheet 的 openId（null = 关闭）
+   const [quicklogSelected, setQuicklogSelected] =
+     useState<QuicklogEntryListItem | null>(null);
++  // ── 重新扫描（task-03 / FR-01）：state 与桌面 :246/:254-256 同名同语义 ─────────
++  const [reparsing, setReparsing] = useState(false);
++  // reparse 错误横幅（主列表加载错误走 query 派生的 listError，两者分离呈现）
++  const [pageError, setPageError] = useState<string | null>(null);
++  const [stats, setStats] = useState<ChangeReparseStats | null>(null);
++  const [warnings, setWarnings] = useState<ChangeWarning[]>([]);
+ 
+   // 主列表分页 query key（page 槽位变化即新查询，形态逐字对齐桌面 page.tsx:149）。
+   // 就地拼数组（不经 queryKeys 工厂）：桌面同 key 就是就地字面量，工厂化反而制造
+   // 两个"权威来源"漂移面——与桌面逐字一致是本页硬约束。
++  // task-04：sort 槽位改用 sortDir state（默认值 = DEFAULT_SORT，默认参数下
++  // key 与改造前逐字相同，R-03 桌面/移动共享缓存不破坏）。
+   const pageQueryKey = (page: number) =>
+     [
+       "changes",
+@@ -435,7 +524,7 @@ export default function MobileChangesPage() {
+         location: tab,
+         search,
+         currentStage: stageFilter,
+-        sort: DEFAULT_SORT,
++        sort: sortDir,
+         // D-007：进行中 + 聚焦 → 只看待我处理（pending_review 非空）
+         pendingReviewOnly: tab === "active" && focusMine,
+         page,
+@@ -459,7 +548,7 @@ export default function MobileChangesPage() {
+               location: tab,
+               search: search || undefined,
+               currentStage: stageFilter || undefined,
+-              sort: DEFAULT_SORT,
++              sort: sortDir,
+               pendingReviewOnly: tab === "active" && focusMine,
+               page,
+               pageSize: PAGE_SIZE,
+@@ -517,18 +606,20 @@ export default function MobileChangesPage() {
+ 
+   // ── quicklog Tab 列表（task-07 / FR-05）────────────────────────────────────
+   // 数据层 100% 复用 lib/quicklog.ts 既有函数（零复制实现）；key 结构对齐桌面
+-  // QuicklogTable 默认形态（["quicklogEntries", ws, { search/status/author/
+-  // showPlaceholder/page/pageSize }]——移动端无状态/负责人筛选，固定默认槽位值），
+-  // 与桌面共享缓存与失效前缀；search 与页内搜索词联动（tab 内共享 search state）。
++  // QuicklogTable（["quicklogEntries", ws, { search/status/author/showPlaceholder/
++  // page/pageSize }]），与桌面共享缓存与失效前缀。task-05（FR-04）起 status/
++  // author/showPlaceholder 槽位从固定默认值升为筛选 state 真值——默认 ""/""/true
++  // 不漂移，默认参数下 key 与改造前逐字相同（R-03 不产生额外请求）；queryFn
++  // 传参形态逐字对齐桌面 :174-182（空值转 undefined、占位 true 才带参数）。
+   const quicklogListQuery = useQuery({
+     queryKey: [
+       "quicklogEntries",
+       workspaceId,
+       {
+         search,
+-        status: "",
+-        author: "",
+-        showPlaceholder: true,
++        status: qlStatus,
++        author: qlAuthor,
++        showPlaceholder,
+         page: 1,
+         pageSize: PAGE_SIZE,
+       },
+@@ -536,7 +627,9 @@ export default function MobileChangesPage() {
+     queryFn: () =>
+       listQuicklogEntries(workspaceId, {
+         search: search || undefined,
+-        include_placeholder: true,
++        status: (qlStatus || undefined) as QuicklogStatus | undefined,
++        author: qlAuthor || undefined,
++        include_placeholder: showPlaceholder || undefined,
+         page: 1,
+         page_size: PAGE_SIZE,
+       }),
+@@ -548,6 +641,17 @@ export default function MobileChangesPage() {
+       quicklogPollInterval(query.state.data?.items ?? []),
+   });
+   const quicklogItems = quicklogListQuery.data?.items ?? [];
++  // 作者筛选候选（task-05 / FR-04 / R-05）：口径照抄桌面 QuicklogTable :197-203
++  // ——owner_name（关联变更 owner，与进行中/已归档同源）优先 → author_name →
++  // author_raw 兜底链 + Boolean 过滤 + Set 去重；数据源为页面既有 quicklogItems
++  // （当前列表响应），零新增请求，不另造口径。
++  const qlAuthors = Array.from(
++    new Set(
++      quicklogItems
++        .map((it) => it.owner_name || it.author_name || it.author_raw)
++        .filter((a): a is string => Boolean(a)),
++    ),
++  );
+   const quicklogLoading = tab === "quicklog" && quicklogListQuery.isPending;
+   const quicklogError =
+     tab === "quicklog" && quicklogListQuery.isError
+@@ -563,10 +667,12 @@ export default function MobileChangesPage() {
+     enabled: Boolean(quicklogSelected),
+   });
+ 
+-  // 任意查询条件（tab/搜索词/阶段/聚焦）变化 → 已加载页数回 1（新条件下重新累积）。
++  // 任意查询条件（tab/搜索词/阶段/聚焦/排序）变化 → 已加载页数回 1（新条件下
++  // 重新累积）。task-04 补 sortDir：排序变 = 新查询条件（对齐桌面 toggleSort
++  // 内 setPage(1) 的语义）。
+   useEffect(() => {
+     setPagesLoaded(1);
+-  }, [tab, search, stageFilter, focusMine]);
++  }, [tab, search, stageFilter, focusMine, sortDir]);
+ 
+   const handleTabChange = (newTab: ChangesTab) => {
+     if (newTab === tab) return;
+@@ -591,6 +697,7 @@ export default function MobileChangesPage() {
+       // 打开时从生效值拷贝草稿，取消（不点确定）不污染生效筛选
+       setDraftStage(stageFilter);
+       setDraftFocusMine(focusMine);
++      setDraftSort(sortDir);
+     }
+     setFilterOpen(open);
+   };
+@@ -598,8 +705,12 @@ export default function MobileChangesPage() {
+   const handleFilterApply = () => {
+     setStageFilter(draftStage);
+     if (tab === "active") setFocusMine(draftFocusMine);
++    setSortDir(draftSort);
+   };
+-  // 「重置」对齐桌面 handleResetClick：搜索词/阶段/聚焦全部回默认（page 经 effect 回 1）
++  // 「重置」对齐桌面 handleResetClick：搜索词/阶段/聚焦全部回默认（page 经 effect 回 1）。
++  // task-04 裁定：桌面 handleResetClick（:384-391）不动排序（排序是表头态不在
++  // 筛选重置范围）；移动排序 chip 就在抽屉内，随「抽屉内维度全部回默认」语义
++  // 一并回 DEFAULT_SORT（任务卡验收明定：重置后排序回默认 ↓ 最近优先）。
+   const handleFilterReset = () => {
+     setSearchInput("");
+     setSearch("");
+@@ -607,6 +718,37 @@ export default function MobileChangesPage() {
+     setFocusMine(false);
+     setDraftStage("");
+     setDraftFocusMine(false);
++    setSortDir(DEFAULT_SORT);
++    setDraftSort(DEFAULT_SORT);
++  };
++
++  // ── quicklog 筛选抽屉（task-05 / FR-04）：草稿范式沿用主列表抽屉 ──────────────
++  // 打开拷生效值 → 「确定」草稿落生效（key 变化自动重取）；取消不点确定不污染。
++  const handleQlFilterOpenChange = (open: boolean) => {
++    if (open) {
++      setDraftQlStatus(qlStatus);
++      setDraftQlAuthor(qlAuthor);
++      setDraftShowPlaceholder(showPlaceholder);
++    }
++    setQlFilterOpen(open);
++  };
++  const handleQlFilterApply = () => {
++    setQlStatus(draftQlStatus);
++    setQlAuthor(draftQlAuthor);
++    setShowPlaceholder(draftShowPlaceholder);
++  };
++  // 「重置」：搜索词/状态/作者/占位全部回默认（占位回 true，草稿与生效态一并清）；
++  // tab 互斥——只清 quicklog 维度，不动主列表的阶段/聚焦/排序（主列表「重置」
++  // handleFilterReset 同样不动 quicklog 维度）。
++  const handleQlFilterReset = () => {
++    setSearchInput("");
++    setSearch("");
++    setQlStatus("");
++    setQlAuthor("");
++    setShowPlaceholder(true);
++    setDraftQlStatus("");
++    setDraftQlAuthor("");
++    setDraftShowPlaceholder(true);
+   };
+ 
+   // quicklog 关联变更 chip → 钻取变更详情路由：linked_changes 存的是 change_key，
+@@ -629,6 +771,27 @@ export default function MobileChangesPage() {
+     }
+   };
+ 
++  // ── 重新扫描（task-03 / FR-01 / D-003@v1）：流程照抄桌面 handleReparse ──────────
++  // 成功后失效主列表 key 前缀 ["changes", workspaceId]（移动分页各页 query 与桌面
++  // 共享该前缀自动重取；不含 changesTabTotals——对齐桌面 reparse 既有语义，tab
++  // 计数不随 reparse 刷新）；失败 ApiError.message 中文红条兜底「重新解析失败」。
++  const handleReparse = async () => {
++    setReparsing(true);
++    setPageError(null);
++    try {
++      const resp = await reparseChanges(workspaceId);
++      setStats(resp.stats);
++      setWarnings(resp.warnings ?? []);
++      await queryClient.invalidateQueries({
++        queryKey: ["changes", workspaceId],
++      });
++    } catch (err) {
++      setPageError(err instanceof ApiError ? err.message : "重新解析失败");
++    } finally {
++      setReparsing(false);
++    }
++  };
++
+   // 空态引导：进行中无变更 → 去移动会话列表（对齐桌面 :443 行为，路由换 /m/ 前缀）
+   const sessionGuide = (    <div className="flex flex-col items-center gap-2 py-6 text-center">
+       <p className="text-xs leading-relaxed text-muted-foreground">
+@@ -693,9 +856,11 @@ export default function MobileChangesPage() {
+     );
+   };
+ 
+-  // quicklog Tab 空态（对齐桌面 QuicklogTable renderEmpty 两分场景）
++  // quicklog Tab 空态（对齐桌面 QuicklogTable renderEmpty 两分场景）。task-05 起
++  // 筛选维度补齐 status/author/占位——口径同桌面 hasFilter（:329）：任一筛选激活
++  // 时无匹配走「没有匹配」短文案，避免误导性的「还没有记录」全量引导。
+   const renderQuicklogEmpty = (): ReactNode =>
+-    search ? (
++    search || qlStatus || qlAuthor || !showPlaceholder ? (
+       <p className="py-10 text-center text-[14px] text-muted-foreground">
+         没有匹配的快速修复记录。
+       </p>
+@@ -737,9 +902,52 @@ export default function MobileChangesPage() {
+         </div>
+       )}
+ 
++      {/* 重新扫描反馈区（task-03 / FR-01）：reparse 错误红条 → stats 成功条 →
++          警告卡（顺序对齐桌面 :699-720 bannerError → stats → warnings）；文案与
++          桌面逐字一致；置于 Tab 行前 = 全 tab 可见（入口两 Tab 均在，反馈同域） */}
++      {pageError ? (
++        <p
++          role="alert"
++          className="rounded-[var(--radius-md)] border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
++        >
++          {pageError}
++        </p>
++      ) : null}
++
++      {stats ? (
++        <div
++          data-testid="m-changes-reparse-stats"
++          className="rounded-[var(--radius-md)] border border-success/30 bg-success/10 px-3 py-2 text-xs text-success"
++        >
++          已重新扫描：解析 {stats.parsed}，新增 {stats.created} · 更新{" "}
++          {stats.updated} · 删除 {stats.deleted}。
++          {warnings.length > 0 && ` ${warnings.length} 个警告。`}
++        </div>
++      ) : null}
++
++      {warnings.length > 0 ? (
++        <div
++          data-testid="m-changes-reparse-warnings"
++          className="rounded-[var(--radius-md)] border border-border bg-card px-3 py-2.5"
++        >
++          <p className="mb-1 text-xs font-medium text-warning">
++            解析警告（{warnings.length}）
++          </p>
++          {/* 内容对齐桌面 SectionCard「解析警告」：[code] change_key: detail（缺失 —） */}
++          <ul className="flex flex-col gap-0.5 text-xs text-warning">
++            {warnings.map((w, i) => (
++              <li key={i}>
++                <span className="font-mono">[{w.code}]</span>{" "}
++                {w.change_key ?? "—"}: {w.detail}
++              </li>
++            ))}
++          </ul>
++        </div>
++      ) : null}
++
+       {/* 平台同步处理区（2026-09-04-conflict-resolve-entry task-09）：与桌面
+-          changes 页「解析警告」卡后同位镜像（本页无解析警告卡，置于顶栏后、
+-          Tab 前的对应位置）；compact 紧凑布局（行纵向堆叠 + 44px 触摸热区）。
++          changes 页「解析警告」卡后同位镜像（task-03 起上方有重新扫描反馈区，
++          置于反馈区后、Tab 前）；compact 紧凑布局（行纵向堆叠 + 44px 触摸热区）。
+           无绑定或无 sillyspec_status 时组件自渲染 null，页面行为与现状一致 */}
+       <PlatformSyncSection workspaceId={workspaceId} compact />
+ 
+@@ -784,8 +992,9 @@ export default function MobileChangesPage() {
+       </div>
+ 
+       {tab === "quicklog" ? (
+-        // ── 快速修复 Tab（task-07 / FR-05）：搜索与页内搜索词联动；无阶段/聚焦
+-        //    概念不挂筛选抽屉；卡片点击 MobileDetailSheet 全屏详情 ──────────────
++        // ── 快速修复 Tab（task-07 / FR-05）：搜索与页内搜索词联动；task-05
++        //    （FR-04）起挂独立筛选抽屉（状态/作者/空壳占位，与主列表抽屉分离）；
++        //    卡片点击 MobileDetailSheet 全屏详情 ─────────────────────────────────
+         <>
+           <div className="flex items-center gap-2">
+             <input
+@@ -806,6 +1015,105 @@ export default function MobileChangesPage() {
+             >
+               搜索
+             </button>
++            {/* task-05（FR-04 / D-003@v1 清单项 5）：quicklog 筛选抽屉——独立实例
++                （qlFilterOpen/ql 草稿与主列表抽屉分离，理由见 state 声明处注释），
++                对齐 PC QuicklogTable 三个筛选项（状态 Select / 负责人 Select /
++                占位 Checkbox）的移动 chips 形态，对齐原型屏 4；不引入 antd
++                Select/Checkbox（R-04 移动原生控件） */}
++            <MobileFilterDrawer
++              open={qlFilterOpen}
++              onOpenChange={handleQlFilterOpenChange}
++              onApply={handleQlFilterApply}
++              onReset={handleQlFilterReset}
++            >
++              {/* 状态（单选 chips，值与文案对齐桌面 STATUS_OPTIONS :31-37） */}
++              <p className="mb-2 text-xs text-muted-foreground">状态</p>
++              <div className="mb-4 flex flex-wrap gap-2">
++                {QL_STATUS_OPTIONS.map((opt) => {
++                  const active = draftQlStatus === opt.value;
++                  return (
++                    <button
++                      key={opt.value || "all"}
++                      type="button"
++                      aria-pressed={active}
++                      data-testid={`m-quicklog-status-chip-${opt.value || "all"}`}
++                      onClick={() => setDraftQlStatus(opt.value)}
++                      className={cn(
++                        "inline-flex min-h-[38px] items-center justify-center rounded-full border px-3.5 text-[13px] transition-colors",
++                        active
++                          ? "border-primary bg-primary/10 font-medium text-primary"
++                          : "border-border bg-card text-muted-foreground hover:text-foreground",
++                      )}
++                    >
++                      {opt.label}
++                    </button>
++                  );
++                })}
++              </div>
++              {/* 作者（单选 chips：全部作者 + 当前列表响应 items 聚合去重，
++                  qlAuthors 口径见声明处注释——零新增请求） */}
++              <p className="mb-2 text-xs text-muted-foreground">作者</p>
++              <div className="mb-4 flex flex-wrap gap-2">
++                {["", ...qlAuthors].map((a) => {
++                  const active = draftQlAuthor === a;
++                  return (
++                    <button
++                      key={a || "all"}
++                      type="button"
++                      aria-pressed={active}
++                      data-testid={`m-quicklog-author-chip-${a || "all"}`}
++                      onClick={() => setDraftQlAuthor(a)}
++                      className={cn(
++                        "inline-flex min-h-[38px] items-center justify-center rounded-full border px-3.5 text-[13px] transition-colors",
++                        active
++                          ? "border-primary bg-primary/10 font-medium text-primary"
++                          : "border-border bg-card text-muted-foreground hover:text-foreground",
++                      )}
++                    >
++                      {a || "全部作者"}
++                    </button>
++                  );
++                })}
++              </div>
++              {/* 其他：显示空壳占位开关（默认开；取消=收窄，语义对齐桌面
++                  ql-20260818-008 Checkbox；样式沿用本页「只看待我处理」toggle） */}
++              <p className="mb-2 text-xs text-muted-foreground">其他</p>
++              <button
++                type="button"
++                role="switch"
++                aria-checked={draftShowPlaceholder}
++                data-testid="m-quicklog-placeholder-toggle"
++                onClick={() => setDraftShowPlaceholder((v) => !v)}
++                className="flex min-h-[44px] w-full items-center justify-between rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground"
++              >
++                <span>显示空壳占位条目</span>
++                <span
++                  aria-hidden
++                  className={cn(
++                    "inline-flex h-6 w-11 items-center rounded-full px-0.5 transition-colors",
++                    draftShowPlaceholder ? "bg-primary" : "bg-muted",
++                  )}
++                >
++                  <span
++                    className={cn(
++                      "h-5 w-5 rounded-full bg-card shadow-[var(--shadow-sm)] transition-transform",
++                      draftShowPlaceholder && "translate-x-5",
++                    )}
++                  />
++                </span>
++              </button>
++            </MobileFilterDrawer>
++            {/* task-03（FR-01 / D-003@v1）：重新扫描全局入口（桌面 PageHeader 唯一
++                操作对全 tab 生效 → 本 Tab 工具栏同样渲染；解析中 disabled 防重入） */}
++            <button
++              type="button"
++              onClick={() => void handleReparse()}
++              disabled={reparsing}
++              data-testid="m-changes-rescan-btn"
++              className="inline-flex min-h-[44px] shrink-0 items-center justify-center rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
++            >
++              {reparsing ? "解析中…" : "↻ 重新扫描"}
++            </button>
+           </div>
+ 
+           {quicklogError ? (
+@@ -841,7 +1149,7 @@ export default function MobileChangesPage() {
+         </>
+       ) : (
+         <>
+-          {/* 工具栏：搜索框 + 筛选抽屉入口（阶段 / 只看待我处理收进抽屉） */}
++          {/* 工具栏：搜索框 + 筛选抽屉入口（阶段 / 排序 / 只看待我处理收进抽屉） */}
+           <div className="flex items-center gap-2">
+             <input
+               value={searchInput}
+@@ -891,6 +1199,33 @@ export default function MobileChangesPage() {
+                   );
+                 })}
+               </div>
++              {/* 排序（更新时间）（task-04 / FR-03）：桌面表头 ↑↓ 切换的移动形态，
++                  单选 chips 对齐原型筛选抽屉屏（阶段 → 排序 → 其他 顺序） */}
++              <p className="mb-2 text-xs text-muted-foreground">
++                排序（更新时间）
++              </p>
++              <div className="mb-4 flex flex-wrap gap-2">
++                {SORT_OPTIONS.map((opt) => {
++                  const active = draftSort === opt.value;
++                  return (
++                    <button
++                      key={opt.value}
++                      type="button"
++                      aria-pressed={active}
++                      data-testid={`m-changes-sort-chip-${opt.chip}`}
++                      onClick={() => setDraftSort(opt.value)}
++                      className={cn(
++                        "inline-flex min-h-[38px] items-center justify-center rounded-full border px-3.5 text-[13px] transition-colors",
++                        active
++                          ? "border-primary bg-primary/10 font-medium text-primary"
++                          : "border-border bg-card text-muted-foreground hover:text-foreground",
++                      )}
++                    >
++                      {opt.label}
++                    </button>
++                  );
++                })}
++              </div>
+               {/* 只看待我处理（仅进行中视图，对齐桌面 ql-20260818-004 查询条件） */}
+               {tab === "active" && (
+                 <button
+@@ -919,6 +1254,17 @@ export default function MobileChangesPage() {
+                 </button>
+               )}
+             </MobileFilterDrawer>
++            {/* task-03（FR-01 / D-003@v1）：重新扫描全局入口（搜索/筛选入口之后，
++                对齐原型屏 2 搜索行尾位；解析中 disabled 防重入） */}
++            <button
++              type="button"
++              onClick={() => void handleReparse()}
++              disabled={reparsing}
++              data-testid="m-changes-rescan-btn"
++              className="inline-flex min-h-[44px] shrink-0 items-center justify-center rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
++            >
++              {reparsing ? "解析中…" : "↻ 重新扫描"}
++            </button>
+           </div>
+ 
+           {listError ? (
+diff --git a/frontend/src/components/mobile/mobile-change-card.test.tsx b/frontend/src/components/mobile/mobile-change-card.test.tsx
+index 9b01d8f09..98586c3a3 100644
+--- a/frontend/src/components/mobile/mobile-change-card.test.tsx
++++ b/frontend/src/components/mobile/mobile-change-card.test.tsx
+@@ -1,25 +1,36 @@
+ /**
+- * task-05 · MobileChangeCard 单测（2026-08-26-mobile-workspace-page design §5.3 / §7 / FR-03）。
++ * task-05 · MobileChangeCard 单测（2026-08-26-mobile-workspace-page design §5.3 / §7 / FR-03；
++ * task-02 / 2026-09-16-mobile-changes-parity 扩充信息行用例）。
+  *
+  * 覆盖卡片契约：
+  *  - 待办徽标三态映射（对齐桌面 renderTodoBadge）：
+  *    blocked → 「阻塞中」 / pending_review 命中 → PENDING_REVIEW_LABEL 映射文案 /
+- *    否则空占位 —；
++ *    否则空占位 —（槽位内断言，与新增负责人/用量「—」占位区分）；
++ *  - 活动徽标（task-02；task-08 补停滞态）：ChangeActivityBadge 真组件挂载
++ *    （空闲/进行中/停滞三态真值表，FR-02）；
++ *  - 元信息行（task-02）：负责人三态（owner_name / owner_id 前 8 位 mono / 「—」）+
++ *    影响组件（join 展示 / 空数组整段省略）；
++ *  - 执行用量行（task-02）：usage 两档判空（undefined 整行不渲染 / null 「—」）+
++ *    有值（耗时 + token·次）+ 进行中 pill（started_at 有且 finished_at 缺）；
+  *  - 阶段徽标：ChangeStepBadge 渲染 stage 中文标签 + stepProgress 副行（step x/y）；
+  *  - 相对时间：updated_at 经 formatRelativeTime 渲染（5 分钟前 → 「5 分钟前」）；
+  *  - 变更名：title 优先展示、title 空降级 change_key；
+  *  - 整卡可点 → onClick 回调触发一次。
+  *
+  * 不 mock 映射/时间函数：组件 import 真实 PENDING_REVIEW_LABEL（桌面页导出）与
+- * formatRelativeTime，直接锁「复用而非复制」契约。
++ * formatRelativeTime / formatTokensCompact / formatDurationZh（task-01 桌面页导出），
++ * 直接锁「复用而非复制」契约。
+  */
+ 
+ import { describe, expect, it, vi } from "vitest";
+-import { fireEvent, render, screen } from "@testing-library/react";
++import { fireEvent, render, screen, within } from "@testing-library/react";
+ 
+ import { MobileChangeCard } from "@/components/mobile/mobile-change-card";
+ import type { ChangeSummary } from "@/lib/changes";
+ 
++/** 桌面同源用量摘要类型（ChangeSummary.usage 去 null/undefined）。 */
++type UsageSummary = NonNullable<ChangeSummary["usage"]>;
++
+ function makeChange(overrides: Partial<ChangeSummary> = {}): ChangeSummary {
+   return {
+     id: "c1",
+@@ -34,12 +45,34 @@ function makeChange(overrides: Partial<ChangeSummary> = {}): ChangeSummary {
+     pending_review: null,
+     step_progress: null,
+     owner_name: null,
++    last_pushed_at: null,
++    // task-02：usage 两档判空显式声明——缺省 undefined（整行不渲染），
++    // 用例按需覆写 null（「—」占位）或 makeUsage()（有值渲染）。
++    usage: undefined,
+     // 5 分钟前 → formatRelativeTime「< 1h」分支稳定输出「5 分钟前」
+     updated_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+     ...overrides,
+   };
+ }
+ 
++/** 用量摘要 fixture：token 四维之和 1,234,567 → 「1.2M」；156 次；3.6 小时。 */
++function makeUsage(overrides: Partial<UsageSummary> = {}): UsageSummary {
++  return {
++    started_at: "2026-09-16T10:00:00Z",
++    finished_at: "2026-09-16T11:00:00Z",
++    duration_ms: 12_960_000, // 3.6 小时
++    totals: {
++      input_tokens: 600_000,
++      output_tokens: 500_000,
++      cache_read_tokens: 100_000,
++      cache_creation_tokens: 34_567,
++      api_requests: 156,
++      num_turns: 12,
++    },
++    ...overrides,
++  };
++}
++
+ describe("MobileChangeCard 待办徽标三态（对齐桌面 renderTodoBadge）", () => {
+   it("status=blocked → 「阻塞中」error 徽标", () => {
+     render(
+@@ -61,13 +94,175 @@ describe("MobileChangeCard 待办徽标三态（对齐桌面 renderTodoBadge）"
+     expect(screen.getByText("待计划审核")).toBeInTheDocument();
+   });
+ 
+-  it("无 blocked 且无 pending_review → 空占位 —", () => {
++  it("无 blocked 且无 pending_review → 空占位 —（todo 槽位内，与负责人/用量占位区分）", () => {
+     render(<MobileChangeCard change={makeChange()} onClick={vi.fn()} />);
+-    expect(screen.getByText("—")).toBeInTheDocument();
++    expect(
++      within(screen.getByTestId("mobile-change-todo-badge")).getByText("—"),
++    ).toBeInTheDocument();
+     expect(screen.queryByText("阻塞中")).not.toBeInTheDocument();
+   });
+ });
+ 
++describe("MobileChangeCard 活动徽标（task-02 · ChangeActivityBadge 真组件挂载）", () => {
++  it("step_progress 缺失（current_step_status=null）→ 空闲态徽标挂载", () => {
++    render(<MobileChangeCard change={makeChange()} onClick={vi.fn()} />);
++    const badge = screen.getByTestId("activity-idle");
++    expect(badge).toBeInTheDocument();
++    expect(badge.textContent).toBe("空闲");
++  });
++
++  it("current_step_status=active + 最近信号 → 进行中徽标挂载（props 同源透传）", () => {
++    render(
++      <MobileChangeCard
++        change={makeChange({
++          step_progress: {
++            step_total: 5,
++            steps_completed: 2,
++            current_step_name: "task-02",
++            current_step_status: "active",
++            current_step_desc: null,
++          },
++          last_pushed_at: new Date(Date.now() - 2 * 60_000).toISOString(),
++        })}
++        onClick={vi.fn()}
++      />,
++    );
++    const badge = screen.getByTestId("activity-active");
++    expect(badge).toBeInTheDocument();
++    expect(badge.textContent).toContain("进行中");
++    expect(badge.textContent).toContain("2 分钟前");
++  });
++
++  // task-08（FR-02）：真值表第三态补齐——active 但最后信号超 30min 阈值（ACTIVITY_STALE_MS）
++  it("current_step_status=active 但最后信号 > 30min → 「停滞」徽标挂载（activity-stale）", () => {
++    render(
++      <MobileChangeCard
++        change={makeChange({
++          step_progress: {
++            step_total: 5,
++            steps_completed: 2,
++            current_step_name: "task-02",
++            current_step_status: "active",
++            current_step_desc: null,
++          },
++          last_pushed_at: new Date(Date.now() - 45 * 60_000).toISOString(),
++        })}
++        onClick={vi.fn()}
++      />,
++    );
++    const badge = screen.getByTestId("activity-stale");
++    expect(badge).toBeInTheDocument();
++    expect(badge.textContent).toBe("停滞 · 最后信号 45 分钟前");
++  });
++});
++
++describe("MobileChangeCard 元信息行（task-02 · 负责人三态 + 影响组件）", () => {
++  const metaRow = () => screen.getByTestId("mobile-change-meta-row");
++
++  it("owner_name 非空 → 用户名（前景色，非 mono）", () => {
++    render(
++      <MobileChangeCard
++        change={makeChange({ owner_name: "qinyi" })}
++        onClick={vi.fn()}
++      />,
++    );
++    const owner = within(metaRow()).getByText("qinyi");
++    expect(owner).toBeInTheDocument();
++    expect(owner.className).toContain("text-foreground");
++    expect(owner.className).not.toContain("font-mono");
++  });
++
++  it("owner_name 空且 owner_id 有值 → 前 8 位 mono 降级（对齐桌面 renderOwner）", () => {
++    render(
++      <MobileChangeCard
++        change={makeChange({ owner_id: "11111111-2222-3333-4444-555555555555" })}
++        onClick={vi.fn()}
++      />,
++    );
++    const owner = within(metaRow()).getByText("11111111");
++    expect(owner).toBeInTheDocument();
++    expect(owner.className).toContain("font-mono");
++    // 不展示完整 UUID
++    expect(
++      within(metaRow()).queryByText("11111111-2222-3333-4444-555555555555"),
++    ).not.toBeInTheDocument();
++  });
++
++  it("owner_name / owner_id 双空 → 元信息行内「—」占位", () => {
++    render(<MobileChangeCard change={makeChange()} onClick={vi.fn()} />);
++    expect(within(metaRow()).getByText("—")).toBeInTheDocument();
++    expect(metaRow().textContent).toContain("负责人");
++  });
++
++  it("affected_components 非空 → join(\", \") 单行展示", () => {
++    render(
++      <MobileChangeCard
++        change={makeChange({
++          affected_components: ["frontend/sessions", "daemon/api"],
++        })}
++        onClick={vi.fn()}
++      />,
++    );
++    // getByText 只匹配元素直接文本节点：标签段「影响 」与值段（子 span）分别断言
++    expect(within(metaRow()).getByText(/影响/)).toBeInTheDocument();
++    expect(
++      within(metaRow()).getByText("frontend/sessions, daemon/api"),
++    ).toBeInTheDocument();
++  });
++
++  it("affected_components 空数组 → 「影响」整段省略不占行", () => {
++    render(<MobileChangeCard change={makeChange()} onClick={vi.fn()} />);
++    expect(within(metaRow()).queryByText(/影响/)).not.toBeInTheDocument();
++  });
++});
++
++describe("MobileChangeCard 执行用量行（task-02 · usage 两档判空 + 进行中 pill）", () => {
++  const usageRow = () => screen.getByTestId("mobile-change-usage-row");
++
++  it("usage undefined（字段缺失）→ 整行不渲染", () => {
++    render(
++      <MobileChangeCard
++        change={makeChange({ usage: undefined })}
++        onClick={vi.fn()}
++      />,
++    );
++    expect(
++      screen.queryByTestId("mobile-change-usage-row"),
++    ).not.toBeInTheDocument();
++  });
++
++  it("usage null（显式无关联执行）→ 分隔行内「—」占位", () => {
++    render(
++      <MobileChangeCard change={makeChange({ usage: null })} onClick={vi.fn()} />,
++    );
++    expect(usageRow().textContent).toBe("—");
++  });
++
++  it("usage 有值 → 耗时 + 四维 token 之和 · 次数（已结束无 pill）", () => {
++    render(
++      <MobileChangeCard
++        change={makeChange({ usage: makeUsage() })}
++        onClick={vi.fn()}
++      />,
++    );
++    expect(within(usageRow()).getByText("3.6 小时")).toBeInTheDocument();
++    // 600K + 500K + 100K + 34,567 = 1,234,567 → formatTokensCompact「1.2M」
++    expect(within(usageRow()).getByText("1.2M tok · 156 次")).toBeInTheDocument();
++    expect(within(usageRow()).queryByText("进行中")).not.toBeInTheDocument();
++  });
++
++  it("started_at 有值且 finished_at 缺 → 「进行中」pill（R-05 时间三元组）", () => {
++    render(
++      <MobileChangeCard
++        change={makeChange({ usage: makeUsage({ finished_at: null }) })}
++        onClick={vi.fn()}
++      />,
++    );
++    expect(within(usageRow()).getByText("进行中")).toBeInTheDocument();
++    expect(usageRow().className).toContain("border-dashed");
++  });
++});
++
+ describe("MobileChangeCard 阶段徽标（ChangeStepBadge 复用）", () => {
+   it("渲染 stage 中文标签（execute → 执行）", () => {
+     render(<MobileChangeCard change={makeChange()} onClick={vi.fn()} />);
+diff --git a/frontend/src/components/mobile/mobile-change-card.tsx b/frontend/src/components/mobile/mobile-change-card.tsx
+index 6ff82fe17..f5f1043b3 100644
+--- a/frontend/src/components/mobile/mobile-change-card.tsx
++++ b/frontend/src/components/mobile/mobile-change-card.tsx
+@@ -14,10 +14,22 @@
+  *   status 为自由字符串（api-types ChangeSummary.status: string），宽松映射 +
+  *   默认兜底，不穷举后端枚举。
+  *
++ * task-02（2026-09-16-mobile-changes-parity / FR-02，D-003 ②）补齐桌面列表同源信息：
++ * - 徽标行追加活动徽标 ChangeActivityBadge（与桌面「待办状态」列同源：
++ *   currentStepStatus=step_progress.current_step_status、lastPushedAt=last_pushed_at）；
++ * - 元信息行：负责人三态（对齐桌面 renderOwner：owner_name → owner_id 前 8 位
++ *   mono → 「—」）+ 影响组件（join(", ")，空数组整段省略 + truncate 单行）；
++ * - 执行用量行（UsageExecCell 移动化）：usage undefined → 整行不渲染 / null →
++ *   「—」/ 有值 → 耗时 + 进行中 pill（started_at 有且 finished_at 缺）+ token·次；
++ *   起止时间不展示（移动无 hover，详情页用量卡兜底）。
++ *
+  * 复用约束（禁止复制第二份实现）：
+  * - 待办徽标映射 PENDING_REVIEW_LABEL 从桌面 changes/page.tsx import（Grill C-10
+  *   为其加 export），三态语义逐字对齐桌面 renderTodoBadge：
+  *   blocked → 「阻塞中」error / pending_review 命中 → 映射文案 warning / 否则空占位 —。
++ * - 用量格式化 formatTokensCompact / formatCount / formatDurationZh 同样从桌面
++ *   changes/page.tsx import（task-01 导出，D-005 复用挂载路线），卡片内自绘移动
++ *   用量行——不复制桌面 UsageExecCell 为独立组件。
+  * - 阶段徽标复用 ChangeStepBadge（自带 STAGE_KIND/STAGE_LABELS 与 stepProgress 副行）；
+  *   stage 缺省 "scan"、stepProgress 缺省 null 的降级口径与桌面列表阶段列一致。
+  * - 相对时间复用 formatRelativeTime（runtime-card-helpers）。
+@@ -27,7 +39,13 @@
+  * 无写死色值。
+  */
+ 
+-import { PENDING_REVIEW_LABEL } from "@/app/(dashboard)/workspaces/[id]/changes/page";
++import {
++  formatCount,
++  formatDurationZh,
++  formatTokensCompact,
++  PENDING_REVIEW_LABEL,
++} from "@/app/(dashboard)/workspaces/[id]/changes/page";
++import { ChangeActivityBadge } from "@/components/changes/change-activity-badge";
+ import { ChangeStepBadge } from "@/components/changes/change-step-badge";
+ import { formatRelativeTime } from "@/components/daemon/runtime-card-helpers";
+ import { StatusBadge } from "@/components/ui/status-badge";
+@@ -92,6 +110,70 @@ function renderTodoBadge(c: ChangeSummary) {
+   return <span className="text-xs text-muted-foreground">—</span>;
+ }
+ 
++/**
++ * 负责人三态（task-02 / FR-02，语义逐字对齐桌面 renderOwner）：owner_name 非空 →
++ * 用户名（前景色，弱化行内可读）；owner_name 空且 owner_id 有值 → UUID 前 8 位
++ * 短标识降级（mono）；双空 → 「—」（从未上行过 owner 的存量变更）。
++ */
++function renderOwner(c: ChangeSummary) {
++  if (c.owner_name) {
++    return <span className="text-foreground">{c.owner_name}</span>;
++  }
++  if (c.owner_id) {
++    return (
++      <span className="font-mono text-primary">{c.owner_id.slice(0, 8)}</span>
++    );
++  }
++  return <span>—</span>;
++}
++
++/**
++ * 执行用量行（task-02 / FR-02，桌面 UsageExecCell 移动化自绘，复用 task-01 导出
++ * helper，不复制组件）。usage 判空两档（桌面先例，兼容策略基线）：
++ * - undefined（字段整体缺失：旧后端响应 / mock 未带）→ 整行不渲染；
++ * - null（后端显式无关联执行）→ 分隔行内「—」占位；
++ * - 有值 → 耗时 formatDurationZh + 进行中 pill（started_at 有值且 finished_at 缺，
++ *   R-05 时间三元组语义）+ token·次（四维 token 之和 + api_requests）。
++ * 起止时间不展示——移动端无 hover，详情页 ChangeUsageCard 兜底。
++ */
++function renderUsageRow(usage: ChangeSummary["usage"]) {
++  if (usage === undefined) return null;
++  if (usage === null) {
++    return (
++      <span
++        data-testid="mobile-change-usage-row"
++        className="flex border-t border-dashed border-border pt-1.5 text-xs text-muted-foreground"
++      >
++        —
++      </span>
++    );
++  }
++  // 进行中 = started_at 有值且 finished_at 缺（与桌面 UsageExecCell 同源判定）
++  const running = Boolean(usage.started_at) && !usage.finished_at;
++  // token 总量 = totals 四维之和（input + output + cache_read + cache_creation）
++  const tokenTotal =
++    usage.totals.input_tokens +
++    usage.totals.output_tokens +
++    usage.totals.cache_read_tokens +
++    usage.totals.cache_creation_tokens;
++  return (
++    <span
++      data-testid="mobile-change-usage-row"
++      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-dashed border-border pt-1.5 text-xs tabular-nums text-muted-foreground"
++    >
++      <span className="font-semibold text-foreground">
++        {formatDurationZh(usage.duration_ms)}
++      </span>
++      {running && (
++        <span className="rounded-full bg-brand-50 px-1.5 text-[10px] text-brand-700">
++          进行中
++        </span>
++      )}
++      <span>{`${formatTokensCompact(tokenTotal)} tok · ${formatCount(usage.totals.api_requests)} 次`}</span>
++    </span>
++  );
++}
++
+ export function MobileChangeCard({ change, onClick }: MobileChangeCardProps) {
+   // 变更名：title 优先（人类可读），缺省降级 change_key；title 存在时 change_key
+   // 作 mono 副行保留唯一标识（对齐桌面列表标题列 change_key/title 两行信息结构）。
+@@ -137,14 +219,46 @@ export function MobileChangeCard({ change, onClick }: MobileChangeCardProps) {
+             {formatRelativeTime(change.updated_at)}
+           </span>
+         </span>
+-        {/* 阶段徽标（ChangeStepBadge：stage 主行 + step 摘要副行）+ 待办徽标 */}
++        {/* 阶段徽标（ChangeStepBadge：stage 主行 + step 摘要副行）+ 待办徽标 + 活动徽标 */}
+         <span className="flex flex-wrap items-center gap-2">
+           <ChangeStepBadge
+             stage={change.current_stage ?? "scan"}
+             stepProgress={change.step_progress ?? null}
+           />
+-          {renderTodoBadge(change)}
++          {/* 待办徽标（testid 槽位便于与负责人/用量「—」占位区分断言） */}
++          <span data-testid="mobile-change-todo-badge">
++            {renderTodoBadge(change)}
++          </span>
++          {/* 活动徽标（task-02：真值表三态进行中/停滞/空闲，与桌面「待办状态」列同源） */}
++          <ChangeActivityBadge
++            currentStepStatus={
++              change.step_progress?.current_step_status ?? null
++            }
++            lastPushedAt={change.last_pushed_at ?? null}
++          />
++        </span>
++        {/* 元信息行（task-02）：负责人三态 + 影响组件（空数组整段省略） */}
++        <span
++          data-testid="mobile-change-meta-row"
++          className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground"
++        >
++          <span className="whitespace-nowrap">
++            负责人 {renderOwner(change)}
++          </span>
++          {change.affected_components.length > 0 && (
++            <span
++              className="min-w-0 max-w-full truncate"
++              title={change.affected_components.join(", ")}
++            >
++              影响{" "}
++              <span className="text-foreground">
++                {change.affected_components.join(", ")}
++              </span>
++            </span>
++          )}
+         </span>
++        {/* 执行用量行（task-02）：usage undefined 整行不渲染（renderUsageRow 内判空） */}
++        {renderUsageRow(change.usage)}
+       </span>
+     </button>
+   );
+diff --git a/frontend/src/components/mobile/mobile-change-detail.test.tsx b/frontend/src/components/mobile/mobile-change-detail.test.tsx
+index cc05d66bb..55a94909a 100644
+--- a/frontend/src/components/mobile/mobile-change-detail.test.tsx
++++ b/frontend/src/components/mobile/mobile-change-detail.test.tsx
+@@ -14,11 +14,21 @@
+  *  6. 时间线纯内容复用（change-step-timeline 挂载渲染 steps）；
+  *  7. quicklog 关联折叠卡（有条目渲染 / 失败静默隐藏）；
+  *  8. 详情 query key 逐字对齐桌面 ["change", workspaceId, changeId]（缓存落键）。
++ *  9. 三卡挂载（task-06 / FR-05 / D-005@v1）：最后信号 / 执行用量 / 范围对账按
++ *     桌面顺序挂 StageStepper 下方，props 接线经契约桩 data-* 断言；
++ *     steps 无 completed_at / 缺失 → change-last-signal 不渲染（真组件）。
++ * 10. 阶段联动（task-06 / FR-06 / D-004@v1）：点有步骤的阶段节点 → 时间线仅显
++ *     该阶段 + 卡头「阶段名 ✕」清除 chip + aria-pressed；再点同节点或点 chip
++ *     恢复全量；无步骤数据的阶段不可点（非 button 无筛选）。
+  *
+  * mock 范式：importActual 部分 mock（数据层只换页面用到的请求函数）+ 真实
+  * QueryClient；FilePreviewModal 打桩断言 props 契约（open/target/
+  * defaultFullscreen，stub 内按钮触发 target.fetch 断言 raw 封装接线）——真弹窗
+  * 依赖 URL.createObjectURL（jsdom 未实现），契约桩是既有测试惯例。
++ * ChangeUsageCard / ScopeAuditCommandCard 同范式契约桩（真实组件 useQuery
++ * 自取数会在 jsdom 发真请求，scope-audit 真实 Modal+明细表还触发 role 查询
++ * 坏选择器——照 delete-change-confirm.test 隔离先例）；ChangeLastSignal 为
++ * 纯展示真组件直测（无信号不渲染断言依赖真实现）。
+  * stores/session 打桩提供当前用户 id（仅本人过滤依据）。
+  */
+ import {
+@@ -52,6 +62,38 @@ vi.mock("@/components/files/file-preview-modal", () => ({
+   ),
+ }));
+ 
++// ── 三卡契约桩（task-06）：props 直出 data-*，断言挂载接线（kind/workspaceId/
++//    refKey、target.changeKey）；真实组件自取数 + antd Modal 在 jsdom 的隔离
++//    先例见 delete-change-confirm.test.tsx（scope-audit 真卡破坏 role 查询）。──
++vi.mock("@/components/changes/detail/change-usage-card", () => ({
++  ChangeUsageCard: (props: {
++    kind: string;
++    workspaceId: string;
++    refKey: string;
++  }) => (
++    <div
++      data-testid="change-usage-card-stub"
++      data-kind={props.kind}
++      data-workspace-id={props.workspaceId}
++      data-ref-key={props.refKey}
++    />
++  ),
++}));
++vi.mock("@/components/changes/scope-audit-command-card", () => ({
++  ScopeAuditCommandCard: (props: {
++    target: { kind: string; workspaceId: string; changeKey?: string };
++  }) => (
++    <div
++      data-testid="scope-audit-command-card-stub"
++      data-target-kind={props.target.kind}
++      data-workspace-id={props.target.workspaceId}
++      data-change-key={props.target.changeKey ?? ""}
++    />
++  ),
++  // 同模块导出的 quick 反查 hook 一并补空实现（模块级 mock 需覆盖全部导出面）
++  useQuickSessionName: () => null,
++}));
++
+ // ── 数据层部分 mock ─────────────────────────────────────────────────────────
+ const changesApi = vi.hoisted(() => ({
+   getChange: vi.fn(),
+@@ -521,3 +563,234 @@ describe("MobileChangeDetail 文档卡 / 引导条 / 步骤条 / 会话 / 时间
+     expect(screen.queryByTestId("m-change-quicklog-card")).not.toBeInTheDocument();
+   });
+ });
++
++// ── task-06：三卡挂载 + 阶段联动（FR-05 / FR-06 / D-004@v1 / D-005@v1）────────
++
++/** 双阶段 steps fixture（brainstorm ×2 + plan ×1）：联动可点集合 = {需求分析, 规划}。 */
++function makeLinkageSteps(): NonNullable<ChangeRead["steps"]> {
++  return [
++    {
++      name: "代码扫描完成",
++      stage: "brainstorm",
++      status: "completed",
++      output: null,
++      completed_at: "2026-08-26T15:00:00Z",
++      ordering: 1,
++      wait_reason: null,
++      kind: "step",
++    },
++    {
++      name: "需求探索",
++      stage: "brainstorm",
++      status: "in-progress",
++      output: null,
++      completed_at: null,
++      ordering: 2,
++      wait_reason: null,
++      kind: "step",
++    },
++    {
++      name: "规划方案定稿",
++      stage: "plan",
++      status: "completed",
++      output: null,
++      completed_at: "2026-08-26T16:00:00Z",
++      ordering: 3,
++      wait_reason: null,
++      kind: "step",
++    },
++  ];
++}
++
++describe("MobileChangeDetail 三卡挂载 + 阶段联动（task-06 / FR-05 / FR-06）", () => {
++  let queryClient: QueryClient;
++
++  beforeEach(() => {
++    queryClient = new QueryClient({
++      defaultOptions: { queries: { retry: false } },
++    });
++    changesApi.getChange.mockResolvedValue(makeChange());
++    changesApi.getAgentStatus.mockResolvedValue({
++      has_active_run: false,
++      config_enabled: false,
++      last_dispatch: null,
++    });
++    changeFilesApi.listChangeFiles.mockResolvedValue({ change_id: "c1", items: [] });
++    daemonApi.listChangeSessions.mockResolvedValue([]);
++    quicklogApi.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
++  });
++
++  afterEach(() => {
++    cleanup();
++    queryClient.clear();
++    vi.clearAllMocks();
++  });
++
++  function renderDetail() {
++    const onOpenSession = vi.fn();
++    const view = render(
++      <QueryClientProvider client={queryClient}>
++        <MobileChangeDetail
++          changeId="c1"
++          workspaceId="ws-1"
++          onOpenSession={onOpenSession}
++        />
++      </QueryClientProvider>,
++    );
++    return { onOpenSession, ...view };
++  }
++
++  it("三卡挂载：步骤条下方依次 最后信号行 → 执行用量卡 → 范围对账卡（props 接线对齐桌面）", async () => {
++    renderDetail();
++    const stepper = await screen.findByTestId("m-change-stage-steps");
++    // 最后信号行（真组件：fixture steps 有 completed_at → 渲染，取最大时点派生）
++    const lastSignal = await screen.findByTestId("change-last-signal");
++    expect(lastSignal).toHaveTextContent("最后信号：");
++    // 执行用量卡契约桩：kind=change + workspaceId/refKey 接线（对齐桌面 :338）
++    const usage = screen.getByTestId("change-usage-card-stub");
++    expect(usage.getAttribute("data-kind")).toBe("change");
++    expect(usage.getAttribute("data-workspace-id")).toBe("ws-1");
++    expect(usage.getAttribute("data-ref-key")).toBe("c1");
++    // 范围对账卡契约桩：target.kind=change + changeKey 接线（对齐桌面 :432-437）
++    const scope = screen.getByTestId("scope-audit-command-card-stub");
++    expect(scope.getAttribute("data-target-kind")).toBe("change");
++    expect(scope.getAttribute("data-workspace-id")).toBe("ws-1");
++    expect(scope.getAttribute("data-change-key")).toBe(
++      "2026-08-26-mobile-workspace-page",
++    );
++    // DOM 顺序（FR-05 / 桌面总体方案点 6）：步骤条 → 最后信号 → 用量 → 对账 → 审批卡
++    const ordered = [
++      stepper,
++      lastSignal,
++      usage,
++      scope,
++      screen.getByTestId("m-change-review-card"),
++    ];
++    for (let i = 1; i < ordered.length; i++) {
++      const prev = ordered[i - 1]!;
++      const next = ordered[i]!;
++      expect(
++        prev.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING,
++      ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
++    }
++  });
++
++  it("无信号不渲染：steps 全无 completed_at / steps 缺失 → change-last-signal 整行缺席", async () => {
++    changesApi.getChange.mockResolvedValue(
++      makeChange({
++        steps: [
++          {
++            name: "需求探索",
++            stage: "brainstorm",
++            status: "in-progress",
++            output: null,
++            completed_at: null,
++            ordering: 1,
++            wait_reason: null,
++            kind: "step",
++          },
++        ],
++      }),
++    );
++    renderDetail();
++    await screen.findByTestId("m-change-desktop-guide");
++    expect(screen.queryByTestId("change-last-signal")).not.toBeInTheDocument();
++    // steps 缺失（旧变更未上行）同样不渲染
++    changesApi.getChange.mockResolvedValue(makeChange({ steps: null }));
++    cleanup();
++    renderDetail();
++    await screen.findByTestId("m-change-desktop-guide");
++    expect(screen.queryByTestId("change-last-signal")).not.toBeInTheDocument();
++  });
++
++  it("阶段联动：点有步骤的阶段节点 → 时间线仅显该阶段 + 卡头清除 chip + 节点 aria-pressed", async () => {
++    changesApi.getChange.mockResolvedValue(
++      makeChange({
++        current_stage: "execute",
++        pending_review: null,
++        steps: makeLinkageSteps(),
++      }),
++    );
++    renderDetail();
++    const stepper = await screen.findByTestId("m-change-stage-steps");
++    // 初始全量：三步齐显（时间线默认展开），无清除 chip
++    expect(screen.getByText("代码扫描完成")).toBeInTheDocument();
++    expect(screen.getByText("需求探索")).toBeInTheDocument();
++    expect(screen.getByText("规划方案定稿")).toBeInTheDocument();
++    expect(
++      screen.queryByTestId("m-change-stage-focus-chip"),
++    ).not.toBeInTheDocument();
++    // 点「规划」（steps 有 plan 条目）→ 时间线仅显 plan 组
++    fireEvent.click(within(stepper).getByRole("button", { name: "规划" }));
++    expect(screen.getByText("规划方案定稿")).toBeInTheDocument();
++    expect(screen.queryByText("需求探索")).not.toBeInTheDocument();
++    expect(screen.queryByText("代码扫描完成")).not.toBeInTheDocument();
++    // 卡头清除 chip：aria-label 语义 + 「阶段名 ✕」文案（STAGE_LABELS 映射）
++    const chip = screen.getByTestId("m-change-stage-focus-chip");
++    expect(chip).toHaveAttribute("aria-label", "清除阶段筛选");
++    expect(chip).toHaveTextContent("规划 ✕");
++    // 节点选中态：aria-pressed（选中节点 true，其余可点节点 false）
++    expect(
++      within(stepper).getByRole("button", { name: "规划" }),
++    ).toHaveAttribute("aria-pressed", "true");
++    expect(
++      within(stepper).getByRole("button", { name: "需求分析" }),
++    ).toHaveAttribute("aria-pressed", "false");
++  });
++
++  it("清除：再点同节点取消 或 点「阶段名 ✕」chip → 时间线恢复全量、chip 消失", async () => {
++    changesApi.getChange.mockResolvedValue(
++      makeChange({
++        current_stage: "execute",
++        pending_review: null,
++        steps: makeLinkageSteps(),
++      }),
++    );
++    renderDetail();
++    const stepper = await screen.findByTestId("m-change-stage-steps");
++    // 再点同节点取消（对齐桌面 toggle 语义，:320-322）
++    const planBtn = within(stepper).getByRole("button", { name: "规划" });
++    fireEvent.click(planBtn);
++    expect(screen.queryByText("需求探索")).not.toBeInTheDocument(); // 已筛选
++    fireEvent.click(within(stepper).getByRole("button", { name: "规划" }));
++    expect(screen.getByText("代码扫描完成")).toBeInTheDocument();
++    expect(screen.getByText("规划方案定稿")).toBeInTheDocument();
++    expect(
++      screen.queryByTestId("m-change-stage-focus-chip"),
++    ).not.toBeInTheDocument();
++    // chip 清除路径：筛选「需求分析」后点 chip 恢复全量
++    fireEvent.click(within(stepper).getByRole("button", { name: "需求分析" }));
++    expect(screen.queryByText("规划方案定稿")).not.toBeInTheDocument();
++    fireEvent.click(screen.getByTestId("m-change-stage-focus-chip"));
++    expect(screen.getByText("规划方案定稿")).toBeInTheDocument();
++    expect(
++      screen.queryByTestId("m-change-stage-focus-chip"),
++    ).not.toBeInTheDocument();
++  });
++
++  it("无步骤数据的阶段不可点：非 button 无筛选入口（仅 stepStages 内阶段升 button）", async () => {
++    changesApi.getChange.mockResolvedValue(
++      makeChange({
++        current_stage: "execute",
++        pending_review: null,
++        steps: makeLinkageSteps(),
++      }),
++    );
++    renderDetail();
++    const stepper = await screen.findByTestId("m-change-stage-steps");
++    // 可点集合 = steps 出现过的阶段（需求分析 / 规划），恰好两个 button
++    expect(
++      within(stepper).getByRole("button", { name: "需求分析" }),
++    ).toBeInTheDocument();
++    expect(
++      within(stepper).getByRole("button", { name: "规划" }),
++    ).toBeInTheDocument();
++    expect(within(stepper).getAllByRole("button")).toHaveLength(2);
++    // 无条目阶段（扫描/执行/验证/归档，含当前阶段「执行」）保持纯展示不可点
++    for (const label of ["扫描", "执行", "验证", "归档"]) {
++      expect(
++        within(stepper).queryByRole("button", { name: label }),
++      ).not.toBeInTheDocument();
++    }
++  });
++});
+diff --git a/frontend/src/components/mobile/mobile-change-detail.tsx b/frontend/src/components/mobile/mobile-change-detail.tsx
+index 436e7ff4f..dbc58a530 100644
+--- a/frontend/src/components/mobile/mobile-change-detail.tsx
++++ b/frontend/src/components/mobile/mobile-change-detail.tsx
+@@ -4,9 +4,12 @@
+  * MobileChangeDetail — 移动版变更详情区块组件（task-08 / FR-04 / design §5.3 详情页 /
+  * §7，D-001@V1 / D-002@V1，change 2026-08-26-mobile-workspace-page）。
+  *
+- * 区块组（自上而下）：阶段步骤条（横向滚动）/ 审批操作卡（pending_review 驱动默认
++ * 区块组（自上而下）：阶段步骤条（横向滚动，有步骤数据的节点可点筛选时间线）/
++ * 最后信号行 + 执行用量卡 + 范围对账卡（三卡 import 复用，2026-09-16-mobile-
++ * changes-parity task-06）/ 审批操作卡（pending_review 驱动默认
+  * 展开，通过/驳回走 submitStageReview + 内联二次确认）/ 规范文档卡（chip →
+- * FilePreviewModal 全屏直出）/ 阶段时间线（折叠，复用 ChangeStepTimeline）/
++ * FilePreviewModal 全屏直出）/ 阶段时间线（折叠，复用 ChangeStepTimeline，
++ * focusStage 联动 + 卡头「阶段名 ✕」清除 chip）/
+  * 智能体执行日志（默认折叠，复用 ChangeAgentRunLog）/ 关联会话卡（onOpenSession
+  * 回调，宿主跳移动会话列表）/ 任务区桌面引导条（D-002）。
+  *
+@@ -41,6 +44,15 @@
+  * 10. run-file-artifacts：**不移植**（任务详情页「产出文件」区，属 D-002 任务域
+  *     裁剪范围，变更详情桌面页也未挂载）。
+  * 11. file-preview-modal：**原样复用**（constraints：不改 components/files/）。
++ * 12. change-activity-badge（ChangeLastSignal + lastSignalFromSteps）/
++ *     detail/change-usage-card（ChangeUsageCard）/ scope-audit-command-card
++ *     （ScopeAuditCommandCard）：**import 复用原样挂载**（2026-09-16-mobile-changes-
++ *     parity task-06 / FR-05 / D-005@v1 禁重写禁复制数据层）：按桌面 [cid]/page.tsx
++ *     顺序挂 StageStepper 下方（最后信号纯前端派生 steps 最大 completed_at，无信号
++ *     组件内自不渲染；用量/对账卡自取数不加门控）；阶段-时间线联动（FR-06 /
++ *     D-004@v1，对齐桌面 ql-20260821-017）：stepStages 派生逐字对齐桌面
++ *     [cid]/page.tsx:249-252，focusStage toggle（再点同阶段取消），时间线卡头
++ *     「阶段名 ✕」清除 chip（SecCard 加 actions 槽避 button 嵌套）。
+  *
+  * 审批约束（task-08）：一律走 submitStageReview（submitReview/approveChange 为退役
+  * 链路，禁用）；成功后 invalidate ["changes", workspaceId] 前缀 + 详情 key 重取。
+@@ -53,10 +65,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
+ 
+ import { PENDING_REVIEW_LABEL } from "@/app/(dashboard)/workspaces/[id]/changes/page";
+ import { isTerminalChange } from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
++import {
++  ChangeLastSignal,
++  lastSignalFromSteps,
++} from "@/components/changes/change-activity-badge";
+ import { STAGE_LABELS } from "@/components/changes/change-step-badge";
+ import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
+ import { WORKFLOW_STAGES } from "@/components/changes/detail/change-stage-header";
+ import { ChangeStepTimeline } from "@/components/changes/detail/change-step-timeline";
++import { ChangeUsageCard } from "@/components/changes/detail/change-usage-card";
++import { ScopeAuditCommandCard } from "@/components/changes/scope-audit-command-card";
+ import {
+   FilePreviewModal,
+   type FilePreviewTarget,
+@@ -126,16 +144,21 @@ const STEPPER_STAGES: readonly string[] = ["scan", ...WORKFLOW_STAGES];
+ 
+ // ── 自绘基础壳 ───────────────────────────────────────────────────────────────
+ 
+-/** 折叠卡壳（sec-card 模式，design §5.3）：头部整条为按钮（触摸 ≥44px），点击切换折叠。 */
++/** 折叠卡壳（sec-card 模式，design §5.3）：头部折叠按钮（触摸 ≥44px）+ 右侧
++ *  actions 槽（时间线「阶段名 ✕」清除 chip 等——渲染为折叠按钮兄弟节点，
++ *  避免 button 嵌套 button 非法结构）。 */
+ function SecCard({
+   title,
+   defaultOpen = true,
+   testId,
++  actions,
+   children,
+ }: {
+   title: ReactNode;
+   defaultOpen?: boolean;
+   testId: string;
++  /** 卡头动作槽（可选）：不占折叠按钮语义，点击不触发折叠。 */
++  actions?: ReactNode;
+   children: ReactNode;
+ }) {
+   const [open, setOpen] = useState(defaultOpen);
+@@ -144,17 +167,22 @@ function SecCard({
+       data-testid={testId}
+       className="rounded-[var(--radius-lg)] border border-border bg-card shadow-[var(--shadow-sm)]"
+     >
+-      <button
+-        type="button"
+-        aria-expanded={open}
+-        onClick={() => setOpen((v) => !v)}
+-        className="flex min-h-[44px] w-full items-center justify-between gap-2 px-3 py-2 text-left text-[14px] font-medium text-foreground"
+-      >
+-        {title}
+-        <span aria-hidden className="shrink-0 text-xs text-muted-foreground">
+-          {open ? "▾" : "▸"}
+-        </span>
+-      </button>
++      <div className="flex items-center gap-1">
++        <button
++          type="button"
++          aria-expanded={open}
++          onClick={() => setOpen((v) => !v)}
++          className="flex min-h-[44px] min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2 text-left text-[14px] font-medium text-foreground"
++        >
++          {title}
++          <span aria-hidden className="shrink-0 text-xs text-muted-foreground">
++            {open ? "▾" : "▸"}
++          </span>
++        </button>
++        {actions ? (
++          <div className="flex shrink-0 items-center pr-2.5">{actions}</div>
++        ) : null}
++      </div>
+       {open ? <div className="px-3 pb-3">{children}</div> : null}
+     </section>
+   );
+@@ -164,8 +192,28 @@ function SecCard({
+  * 阶段步骤条（自绘横向滚动紧凑版，X-03 #1 / C-15）：节点 = 序号圆点 + 中文标签，
+  * 已完成 ✓、当前高亮、未到弱化；容器 overflow-x-auto 横向滚动不折行。
+  * 非线性阶段（quick 等）或 current_stage 缺失时不渲染（对齐桌面 null 降级）。
++ *
++ * 阶段-时间线联动（task-06 / FR-06 / D-004@v1，对齐桌面 ql-20260821-017 范式）：
++ * stepStages 含有的阶段节点升级为 button（触摸热区 ≥44px、aria-pressed 表选中、
++ * focus 态 brand ring + 标签 brand 高亮，样式范式对齐桌面 change-stage-header），
++ * 点击由父组件 toggle focusStage 筛选下方时间线；无步骤数据阶段保持纯展示 div
++ * 不可点（无 title 提示与筛选效果）。stepStages 含 quick 等非线性值时仅参与
++ * includes 可点判定（步骤条只渲染 STEPPER_STAGES 节点）。
+  */
+-function StageStepper({ currentStage }: { currentStage: string | null }) {
++function StageStepper({
++  currentStage,
++  stepStages,
++  focusStage,
++  onStageClick,
++}: {
++  currentStage: string | null;
++  /** steps 中实际有条目的阶段集合（可点范围；含非线性值，仅参与 includes 判断）。 */
++  stepStages: readonly string[];
++  /** 当前筛选聚焦的阶段（null = 全部）；选中节点 brand ring 高亮。 */
++  focusStage: string | null;
++  /** 节点点击回调（父组件 toggle focusStage）。 */
++  onStageClick: (stage: string) => void;
++}) {
+   if (!currentStage) return null;
+   // 终态别名兼容：CLI 归档会把 current_stage 写成 'archived'（对齐桌面 :56）
+   const displayStage = currentStage === "archived" ? "archive" : currentStage;
+@@ -180,36 +228,64 @@ function StageStepper({ currentStage }: { currentStage: string | null }) {
+       {STEPPER_STAGES.map((stage, i) => {
+         const isCompleted = currentIndex > i;
+         const isCurrent = currentIndex === i;
+-        return (
+-          <div key={stage} className="flex shrink-0 items-center">
+-            <div className="flex items-center gap-1">
+-              <span
+-                aria-hidden
+-                data-status={
+-                  isCompleted ? "completed" : isCurrent ? "current" : "pending"
+-                }
+-                className={cn(
+-                  "flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-medium",
+-                  isCurrent
+-                    ? "bg-primary text-primary-foreground"
+-                    : isCompleted
+-                      ? "bg-success/15 text-success"
+-                      : "bg-muted text-muted-foreground",
+-                )}
+-              >
+-                {isCompleted ? "✓" : i + 1}
+-              </span>
+-              <span
+-                className={cn(
+-                  "whitespace-nowrap text-[12px]",
+-                  isCurrent
++        const hasSteps = stepStages.includes(stage);
++        const isFocused = focusStage === stage;
++        // 节点内层：圆点 + 标签保持兄弟结构（data-status 锚点供测试定位）
++        const nodeInner = (
++          <>
++            <span
++              aria-hidden
++              data-status={
++                isCompleted ? "completed" : isCurrent ? "current" : "pending"
++              }
++              className={cn(
++                "flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-medium",
++                isCurrent
++                  ? "bg-primary text-primary-foreground"
++                  : isCompleted
++                    ? "bg-success/15 text-success"
++                    : "bg-muted text-muted-foreground",
++                // 联动 focus 态：brand ring 高亮（对齐桌面 ring 范式）
++                isFocused &&
++                  "ring-2 ring-brand-500 ring-offset-2 ring-offset-card",
++              )}
++            >
++              {isCompleted ? "✓" : i + 1}
++            </span>
++            <span
++              className={cn(
++                "whitespace-nowrap text-[12px]",
++                isFocused
++                  ? "font-medium text-brand-600"
++                  : isCurrent
+                     ? "font-medium text-foreground"
+                     : "text-muted-foreground",
+-                )}
++              )}
++            >
++              {STAGE_LABELS[stage] ?? stage}
++            </span>
++          </>
++        );
++        return (
++          <div key={stage} className="flex min-h-[44px] shrink-0 items-center">
++            {hasSteps ? (
++              <button
++                type="button"
++                aria-pressed={isFocused}
++                title={
++                  isFocused
++                    ? "点击取消筛选，显示全部步骤"
++                    : "点击筛选该阶段步骤"
++                }
++                onClick={() => onStageClick(stage)}
++                className="flex items-center gap-1 rounded-[var(--radius-md)] px-1 py-1 transition-colors hover:bg-muted/60"
+               >
+-                {STAGE_LABELS[stage] ?? stage}
+-              </span>
+-            </div>
++                {nodeInner}
++              </button>
++            ) : (
++              /* 无步骤数据的阶段：纯展示不可点（无筛选效果），保持 div 语义 */
++              <div className="flex items-center gap-1 px-1">{nodeInner}</div>
++            )}
+             {i < STEPPER_STAGES.length - 1 && (
+               <span aria-hidden className="mx-1 h-px w-3 shrink-0 bg-border" />
+             )}
+@@ -306,6 +382,11 @@ export function MobileChangeDetail({
+     refetchOnWindowFocus: false,
+   });
+ 
++  // ── 阶段-时间线联动（task-06 / FR-06 / D-004@v1，对齐桌面 ql-20260821-017）──
++  // 点击步骤条节点筛选时间线，再点同阶段取消；current_stage 非线性（quick 等）
++  // 时步骤条不渲染，联动入口自然缺席，focusStage 恒为 null 无副作用。
++  const [focusStage, setFocusStage] = useState<string | null>(null);
++
+   // 审批唯一入口 submitStageReview（退役链路 submitReview/approveChange 禁用）：
+   // 成功后 invalidate ["changes", workspaceId] 前缀（列表）+ 详情 key 重取（refetch）。
+   const handleReviewAction = async (action: string) => {
+@@ -380,10 +461,39 @@ export function MobileChangeDetail({
+   const steps = change.steps ?? null;
+   const quicklogItems = quicklogQuery.data?.items ?? [];
+ 
++  // 阶段-步骤联动派生：steps 条目出现的阶段去重（含 quick 等非线性 stage，但
++  // 步骤条只渲染 STEPPER_STAGES 节点，非线性值仅参与 includes 可点判定）——
++  // 口径逐字对齐桌面 [cid]/page.tsx:249-252
++  const stepStages =
++    change.steps && change.steps.length > 0
++      ? Array.from(new Set(change.steps.map((e) => e.stage)))
++      : [];
++
+   return (
+     <div className="flex min-w-0 flex-col gap-3">
+-      {/* 阶段步骤条（自绘横向滚动，X-03 #1） */}
+-      <StageStepper currentStage={change.current_stage ?? null} />
++      {/* 阶段步骤条（自绘横向滚动，X-03 #1；节点可点筛选时间线，task-06/FR-06） */}
++      <StageStepper
++        currentStage={change.current_stage ?? null}
++        stepStages={stepStages}
++        focusStage={focusStage}
++        onStageClick={(stage) =>
++          setFocusStage((prev) => (prev === stage ? null : stage))
++        }
++      />
++
++      {/* 最后信号行（task-06 / FR-05 / X-03 #12：import 复用；数据源 = steps 明细
++          最大 completed_at 纯前端派生，无信号组件内自不渲染，对齐桌面 :330） */}
++      <ChangeLastSignal lastPushedAt={lastSignalFromSteps(change.steps)} />
++
++      {/* 执行用量卡（task-06 / FR-05 / D-005@v1：import 复用原样挂载，组件
++          useQuery 自取数不加门控，接线对齐桌面 :338） */}
++      <ChangeUsageCard kind="change" workspaceId={workspaceId} refKey={changeId} />
++
++      {/* 范围对账卡（task-06 / FR-05 / D-005@v1：import 复用原样挂载，
++          identifier=change_key 已归档也可查，接线对齐桌面 :432-437） */}
++      <ScopeAuditCommandCard
++        target={{ kind: "change", workspaceId, changeKey: change.change_key }}
++      />
+ 
+       {/* 审批操作卡（X-03 #2 自绘：有待办默认展开；无待办折叠只读说明） */}
+       {reviewMeta ? (
+@@ -553,13 +663,27 @@ export function MobileChangeDetail({
+         )}
+       </SecCard>
+ 
+-      {/* 阶段时间线（X-03 #4 纯内容复用 ChangeStepTimeline；折叠壳） */}
++      {/* 阶段时间线（X-03 #4 纯内容复用 ChangeStepTimeline；折叠壳；focusStage
++          联动筛选 + 卡头「阶段名 ✕」清除 chip，样式范式对齐桌面 :376-386 移动化） */}
+       {steps && steps.length > 0 ? (
+         <SecCard
+           testId="m-change-timeline-card"
+           title={<>🧭 阶段时间线（{steps.length}）</>}
++          actions={
++            focusStage ? (
++              <button
++                type="button"
++                data-testid="m-change-stage-focus-chip"
++                onClick={() => setFocusStage(null)}
++                aria-label="清除阶段筛选"
++                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-brand-300 bg-brand-500/10 px-2.5 py-1 text-[11px] font-medium text-brand-600 transition-colors hover:bg-brand-500/20"
++              >
++                {STAGE_LABELS[focusStage] ?? focusStage} ✕
++              </button>
++            ) : undefined
++          }
+         >
+-          <ChangeStepTimeline steps={steps} />
++          <ChangeStepTimeline steps={steps} focusStage={focusStage} />
+         </SecCard>
+       ) : null}

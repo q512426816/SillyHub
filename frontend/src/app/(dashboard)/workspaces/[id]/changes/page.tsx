@@ -98,7 +98,7 @@ type UsageSummaryRead = components["schemas"]["UsageSummaryRead"];
 
 /** token 数紧凑格式化（session-usage-bar formatTokensCompact 同款；ql-20260904-012
  * 单位统一 K/M 废除「万」）：>= 1M →「X.XM」；>= 1K →「X.XK」（一位小数）；K 以下原值直显。 */
-function formatTokensCompact(n: number): string {
+export function formatTokensCompact(n: number): string {
   if (!Number.isFinite(n) || n === 0) return "0";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
@@ -106,13 +106,13 @@ function formatTokensCompact(n: number): string {
 }
 
 /** 请求次数千分位（计数语义不做 K/M 缩写，session-usage-bar 同款）。 */
-function formatCount(n: number): string {
+export function formatCount(n: number): string {
   return Number.isFinite(n) ? n.toLocaleString("en-US") : "0";
 }
 
 /** 耗时紧凑中文格式化（原型「3.6 小时 / 34 分钟」）：>= 1 小时一位小数，
  * 不足 1 小时取整分钟（不足 1 分钟按 1 分钟起步）；null/缺 →「—」。 */
-function formatDurationZh(ms: number | null | undefined): string {
+export function formatDurationZh(ms: number | null | undefined): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
   if (ms >= 3_600_000) return `${(ms / 3_600_000).toFixed(1)} 小时`;
   return `${Math.max(1, Math.round(ms / 60_000))} 分钟`;
