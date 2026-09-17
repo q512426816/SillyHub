@@ -236,3 +236,13 @@
 根因：grid 隐式行 auto 高度不受 min-h-0 flex-1 约束致长时间线整列溢出（输入区出视口、消息穿 TabBar）；顶栏固定宽元素 390px 挤爆标题块至 0 宽逐字竖排；self 行 items-end 头像吊右下；markdown hr 库 light 变量反超成亮白粗条。
 方案：根 grid 加 grid-rows-[minmax(0,1fr)]；标题块 flex-1+去 spacer+窄屏短摘要+群id钮 md 起显+gap 收紧；self 头像 self-start；MarkdownText 两档补 hr 锁 1px bg-border。
 结果：tsc 0，group-chat 123+markdown-text 13 用例全绿，eslint 0 error（5 warning 既有），已暂存待提交部署
+
+## ql-20260917-003-42be | 2026-09-17 09:36:09 | 群聊输入框要固定在最下方（上轮 grid-rows 修复后仍未生效）。根因：群聊视图面板父级 wrapper 是 block div…
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/m/workspaces/[id]/sessions/page.tsx（群聊视图 wrapper block→flex-col，面板 flex-1 生效+grid-rows 锁行高=输入区常驻视口底部）
+需求：群聊输入框要固定在最下方（上轮 grid-rows 修复后仍未生效）。
+根因：群聊视图面板父级 wrapper 是 block div，面板根 flex-1 无 flex 上下文是死代码，面板高度塌到内容高溢出视口——输入区被顶出屏幕；预会话视图同结构却正常，因 SessionPanel 根用 h-full（百分比定高生效）而面板用 flex-1（需 flex 上下文）。
+方案：群聊视图 wrapper 改 flex min-h-0 flex-1 flex-col——面板 flex-1 生效拿满剩余高度，配合上轮面板根 grid-rows-[minmax(0,1fr)] 锁行高，时间线 min-h-0 flex-1 列内自滚、输入区 flex-none 常驻视口底部（pb-28 之上、悬浮 TabBar 之下）。
+结果：tsc 0，m-sessions+group-chat 134 用例全绿；按用户要求未部署，桌面悬浮宿主同款 block wrapper 隐患已记录待后续

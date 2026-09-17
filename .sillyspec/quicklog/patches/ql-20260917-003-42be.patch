@@ -1,0 +1,28 @@
+diff --git a/frontend/src/app/m/workspaces/[id]/sessions/page.tsx b/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
+index 2ae1ea342..f5151f7f8 100644
+--- a/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
+@@ -145,7 +145,13 @@ export default function MobileWorkspaceSessionsPage() {
+ 
+   // ── 群聊视图（2026-09-02 quick）：整页切 GroupChatPanel（形态照预会话视图：
+   //    顶栏返回列表 + 面板 min-h-0 flex-1 贴底；面板本体 flex 布局天然缩宽，
+-  //    移动端直接渲染——key=groupId 换群即清 SSE/时间线/typing 状态，照门户）。 ──
++  //    移动端直接渲染——key=groupId 换群即清 SSE/时间线/typing 状态，照门户）。
++  //    ql-20260917-003：wrapper 改 flex-col——原 block 容器里面板根的 flex-1
++  //    是死代码（无 flex 上下文），面板高度塌到内容高：长时间线整列溢出视口，
++  //    输入区被顶出屏幕（用户截图「输入框应该固定在最下方」）。flex 化后面板
++  //    flex-1 生效拿满剩余高度，配合面板根 grid-rows-[minmax(0,1fr)]（见
++  //    group-chat-panel.tsx）锁行高——时间线列内自滚，输入区 flex-none 常驻
++  //    视口底部（主区 pb-28 之上、悬浮 TabBar 之下）。 ──
+   if (selectedGroup) {
+     return (
+       <div
+@@ -168,7 +174,7 @@ export default function MobileWorkspaceSessionsPage() {
+             {selectedGroup.title?.trim() || "未命名群聊"}
+           </span>
+         </div>
+-        <div className="min-h-0 flex-1">
++        <div className="flex min-h-0 flex-1 flex-col">
+           <GroupChatPanel
+             key={selectedGroup.id}
+             groupId={selectedGroup.id}
