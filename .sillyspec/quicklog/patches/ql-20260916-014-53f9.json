@@ -1,0 +1,79 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-ab206504",
+  "totals": {
+    "files": 5,
+    "additions": 107,
+    "deletions": 41
+  },
+  "rows": [
+    {
+      "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+      "declared": true,
+      "additions": 58,
+      "deletions": 29,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-usage-panel-mount.test.tsx",
+      "declared": true,
+      "additions": 10,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+      "declared": true,
+      "additions": 12,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/daemon-session.test.ts",
+      "declared": true,
+      "additions": 10,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/daemon-provider-config-changed-handler.test.ts",
+      "declared": true,
+      "additions": 17,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 5,
+    "codeFileCount": 0,
+    "testFileCount": 5,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260916-014-53f9",
+  "sessionId": "quick-ab206504",
+  "savedAt": "2026-09-16T05:46:04.649Z",
+  "patchSha256": "f82d2f17d2a9a5dd4b718f10303a24abf6d36102a039dbc7b38b028bc6bbd8bd",
+  "patchStatus": "ok"
+}

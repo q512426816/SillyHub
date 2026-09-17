@@ -32,10 +32,14 @@ import { PrecipitateDialog } from "@/components/knowledge/precipitate-dialog";
 const knowledgeApi = vi.hoisted(() => ({
   proposeKnowledge: vi.fn(),
   dispatchDistill: vi.fn(),
+  listQuicklog: vi.fn(),
+  listDistillTasks: vi.fn(),
 }));
 vi.mock("@/lib/knowledge", () => ({
   proposeKnowledge: knowledgeApi.proposeKnowledge,
   dispatchDistill: knowledgeApi.dispatchDistill,
+  listQuicklog: knowledgeApi.listQuicklog,
+  listDistillTasks: knowledgeApi.listDistillTasks,
 }));
 
 const sessionApi = vi.hoisted(() => ({ listAgentSessions: vi.fn() }));
@@ -47,6 +51,13 @@ const changesApi = vi.hoisted(() => ({ listChanges: vi.fn() }));
 vi.mock("@/lib/changes", () => ({
   listChanges: changesApi.listChanges,
 }));
+
+// D-010③ fresh 配置数据源：listDaemonRuntimes 换 mock，PROVIDER_META 保留真实实现。
+const daemonApi = vi.hoisted(() => ({ listDaemonRuntimes: vi.fn() }));
+vi.mock("@/lib/daemon", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
+  return { ...actual, listDaemonRuntimes: daemonApi.listDaemonRuntimes };
+});
 
 const notify = vi.hoisted(() => ({
   success: vi.fn(),
@@ -61,12 +72,21 @@ vi.mock("@/lib/errors", async () => {
 
 const SESSION_ID = "9a8b7c6d-1111-2222-3333-444455556666";
 const CHANGE_KEY = "2026-09-04-conflict-resolve-entry";
+const QUICK_REF_A = "ql-20260917-001-a1b2";
+const QUICK_REF_B = "ql-20260917-002-c3d4";
+
+/** 提炼 tab 默认激活 → 反链/机器列表随同拉取，提供静默缺省。 */
+function mockDistillSideData() {
+  knowledgeApi.listDistillTasks.mockResolvedValue([]);
+  daemonApi.listDaemonRuntimes.mockResolvedValue([]);
+}
 
 function renderDialog(
   overrides: Partial<{
     onProposed: () => void;
     onClose: () => void;
     onDistilled: () => void;
+    onJumpToKnowledge: (filename: string) => void;
   }> = {},
 ) {
   return render(
@@ -75,6 +95,7 @@ function renderDialog(
       onProposed={overrides.onProposed ?? (() => {})}
       onClose={overrides.onClose ?? (() => {})}
       onDistilled={overrides.onDistilled}
+      onJumpToKnowledge={overrides.onJumpToKnowledge}
     />,
   );
 }
@@ -137,6 +158,7 @@ beforeEach(() => {
     source_ref: SESSION_ID,
     status: "pending",
     created_at: "2026-09-17T10:00:00Z",
+    mode: "resume",
   });
   sessionApi.listAgentSessions.mockReset();
   sessionApi.listAgentSessions.mockResolvedValue({
@@ -155,6 +177,29 @@ beforeEach(() => {
     limit: 50,
     offset: 0,
   });
+  knowledgeApi.listQuicklog.mockReset();
+  knowledgeApi.listQuicklog.mockResolvedValue({
+    items: [
+      {
+        filename: `${QUICK_REF_A}.md`,
+        path: `.sillyspec/quicklog/${QUICK_REF_A}.md`,
+        title: "会话列表心跳三缺陷",
+        content: null,
+        last_modified_at: "2026-09-17T08:00:00Z",
+      },
+      {
+        filename: `${QUICK_REF_B}.md`,
+        path: `.sillyspec/quicklog/${QUICK_REF_B}.md`,
+        title: null,
+        content: null,
+        last_modified_at: null,
+      },
+    ],
+    total: 2,
+  });
+  knowledgeApi.listDistillTasks.mockReset();
+  daemonApi.listDaemonRuntimes.mockReset();
+  mockDistillSideData();
 });
 
 afterEach(() => {
@@ -271,8 +316,8 @@ describe("PrecipitateDialog · 从记录提炼 tab（task-08 / FR-01 / FR-03）"
     // title 缺失兜底到「会话 <id 前 8 位>」。
     expect(screen.getByText("会话 22222222")).toBeInTheDocument();
 
-    // 未选源 → 「派发提炼任务」禁用。
-    expect(screen.getByRole("button", { name: "派发提炼任务" })).toBeDisabled();
+    // 未选源 → 「续接原会话提炼」禁用（会话源默认 resume，D-009 推荐项）。
+    expect(screen.getByRole("button", { name: "续接原会话提炼" })).toBeDisabled();
   });
 
   it("切「变更归档」→ listChanges(status=archived) 渲染变更名；切回会话记录回到会话列表", async () => {
@@ -290,8 +335,9 @@ describe("PrecipitateDialog · 从记录提炼 tab（task-08 / FR-01 / FR-03）"
     expect(screen.getByText("feat(mobile): 变更中心与 PC 端功能对齐")).toBeInTheDocument();
     expect(screen.getByText("已归档变更")).toBeInTheDocument();
 
-    // 切换来源类型清空已选源（派发仍禁用直到重新选择）。
-    expect(screen.getByRole("button", { name: "派发提炼任务" })).toBeDisabled();
+    // 切换来源类型清空已选源（派发仍禁用直到重新选择）；变更源强制 fresh，
+    // 按钮文案为「新建 agent 提炼」。
+    expect(screen.getByRole("button", { name: "新建 agent 提炼" })).toBeDisabled();
 
     fireEvent.click(screen.getByTestId("distill-source-type-session"));
     await waitFor(() =>
@@ -299,29 +345,30 @@ describe("PrecipitateDialog · 从记录提炼 tab（task-08 / FR-01 / FR-03）"
     );
   });
 
-  it("选中源后派发成功 → dispatchDistill 载荷含 source_type/source_ref（focus 缺省 null）+ toast + onDistilled + onClose", async () => {
+  it("选中源后派发成功 → 载荷含 source_type/source_ref/mode=resume（会话默认续接）+ toast + onDistilled + onClose", async () => {
     const onDistilled = vi.fn();
     const onClose = vi.fn();
     renderDialog({ onDistilled, onClose });
 
     const items = await screen.findAllByTestId("distill-source-item");
     fireEvent.click(items[0]!);
-    expect(screen.getByRole("button", { name: "派发提炼任务" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "续接原会话提炼" })).toBeEnabled();
 
-    fireEvent.click(screen.getByRole("button", { name: "派发提炼任务" }));
+    fireEvent.click(screen.getByRole("button", { name: "续接原会话提炼" }));
 
     await waitFor(() => expect(knowledgeApi.dispatchDistill).toHaveBeenCalledTimes(1));
     expect(knowledgeApi.dispatchDistill).toHaveBeenCalledWith("ws-1", {
       source_type: "session",
       source_ref: SESSION_ID,
       focus: null,
+      mode: "resume",
     });
     expect(notify.success).toHaveBeenCalledWith("已派发提炼任务，完成后进入待审核");
     expect(onDistilled).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("填写关注点随载荷透传（trim）；变更源派发载荷 source_type=change + change_key", async () => {
+  it("填写关注点随载荷透传（trim）；变更源派发载荷 source_type=change + change_key + 强制 mode=fresh", async () => {
     renderDialog();
 
     fireEvent.click(screen.getByTestId("distill-source-type-change"));
@@ -331,13 +378,14 @@ describe("PrecipitateDialog · 从记录提炼 tab（task-08 / FR-01 / FR-03）"
       target: { value: "  只提取踩坑与解法  " },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "派发提炼任务" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建 agent 提炼" }));
 
     await waitFor(() => expect(knowledgeApi.dispatchDistill).toHaveBeenCalledTimes(1));
     expect(knowledgeApi.dispatchDistill).toHaveBeenCalledWith("ws-1", {
       source_type: "change",
       source_ref: CHANGE_KEY,
       focus: "只提取踩坑与解法",
+      mode: "fresh",
     });
   });
 
@@ -349,7 +397,7 @@ describe("PrecipitateDialog · 从记录提炼 tab（task-08 / FR-01 / FR-03）"
 
     const items = await screen.findAllByTestId("distill-source-item");
     fireEvent.click(items[0]!);
-    fireEvent.click(screen.getByRole("button", { name: "派发提炼任务" }));
+    fireEvent.click(screen.getByRole("button", { name: "续接原会话提炼" }));
 
     await waitFor(() =>
       expect(screen.getByText(/该会话还没有对话记录/)).toBeInTheDocument(),
@@ -357,7 +405,7 @@ describe("PrecipitateDialog · 从记录提炼 tab（task-08 / FR-01 / FR-03）"
     expect(onDistilled).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     // 失败后按钮回到可用（非 dispatching 卡死）。
-    expect(screen.getByRole("button", { name: "派发提炼任务" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "续接原会话提炼" })).toBeEnabled();
   });
 
   it("源列表加载失败 → 错误文案展示，派发按钮保持禁用", async () => {
@@ -368,6 +416,191 @@ describe("PrecipitateDialog · 从记录提炼 tab（task-08 / FR-01 / FR-03）"
       expect(screen.getByText(/网络连接失败/)).toBeInTheDocument(),
     );
     expect(screen.queryByTestId("distill-source-item")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "派发提炼任务" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "续接原会话提炼" })).toBeDisabled();
+  });
+});
+
+describe("PrecipitateDialog · D-010 快速修复多选 + D-009 派谁去干", () => {
+  it("切「快速修复」→ listQuicklog 拉取；checkbox 多选两条 → 载荷 source_ref 为 list + 强制 mode=fresh", async () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByTestId("distill-source-type-quick"));
+
+    await waitFor(() => expect(knowledgeApi.listQuicklog).toHaveBeenCalledWith("ws-1"));
+    const items = await screen.findAllByTestId("distill-source-item");
+    expect(items).toHaveLength(2);
+    // ql 标题展示（title 缺失回退 filename）；source_ref 为 filename 去 .md 的自然键。
+    expect(screen.getByText("会话列表心跳三缺陷")).toBeInTheDocument();
+    expect(screen.getByText(`${QUICK_REF_B}.md`)).toBeInTheDocument();
+
+    // 多选两条（对应 source_ref list[str]，D-010②）。
+    fireEvent.click(items[0]!);
+    fireEvent.click(items[1]!);
+    expect(screen.getByRole("button", { name: "新建 agent 提炼" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建 agent 提炼" }));
+
+    await waitFor(() => expect(knowledgeApi.dispatchDistill).toHaveBeenCalledTimes(1));
+    expect(knowledgeApi.dispatchDistill).toHaveBeenCalledWith("ws-1", {
+      source_type: "quick",
+      source_ref: [QUICK_REF_A, QUICK_REF_B],
+      focus: null,
+      mode: "fresh",
+    });
+  });
+
+  it("快速修复未选任何条 → 派发禁用；单选一条也可派发（list 单元素形态）", async () => {
+    renderDialog();
+    fireEvent.click(screen.getByTestId("distill-source-type-quick"));
+    const items = await screen.findAllByTestId("distill-source-item");
+
+    expect(screen.getByRole("button", { name: "新建 agent 提炼" })).toBeDisabled();
+
+    fireEvent.click(items[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "新建 agent 提炼" }));
+    await waitFor(() => expect(knowledgeApi.dispatchDistill).toHaveBeenCalledTimes(1));
+    expect(knowledgeApi.dispatchDistill).toHaveBeenCalledWith("ws-1", {
+      source_type: "quick",
+      source_ref: [QUICK_REF_A],
+      focus: null,
+      mode: "fresh",
+    });
+  });
+
+  it("会话源默认 resume（推荐徽标）；变更/快速修复 resume 选项禁用并提示无原会话概念", async () => {
+    renderDialog();
+    await screen.findAllByTestId("distill-source-item");
+
+    // 会话源：resume 可选且带推荐徽标；fresh 配置区缺省隐藏。
+    expect(screen.getByText("推荐")).toBeInTheDocument();
+    expect(screen.getByLabelText("原会话续接")).toBeEnabled();
+    expect(screen.queryByLabelText("机器（runtime）")).not.toBeInTheDocument();
+
+    // 变更源：resume 禁用 + 提示；fresh 配置区强制展开。
+    fireEvent.click(screen.getByTestId("distill-source-type-change"));
+    await screen.findAllByTestId("distill-source-item");
+    expect(screen.getByLabelText("原会话续接")).toBeDisabled();
+    expect(screen.getByText(/变更归档没有「原会话」概念/)).toBeInTheDocument();
+    expect(screen.getByLabelText("机器（runtime）")).toBeInTheDocument();
+    expect(screen.getByLabelText("agent 类型")).toBeInTheDocument();
+
+    // 快速修复源：同样强制 fresh，提示文案为快速修复口径。
+    fireEvent.click(screen.getByTestId("distill-source-type-quick"));
+    await screen.findAllByTestId("distill-source-item");
+    expect(screen.getByLabelText("原会话续接")).toBeDisabled();
+    expect(screen.getByText(/快速修复是零散记录/)).toBeInTheDocument();
+  });
+
+  it("会话源切 fresh → 配置区展开；选定机器+agent 类型随载荷下发（runtime_id/agent_type）", async () => {
+    daemonApi.listDaemonRuntimes.mockResolvedValue([
+      {
+        id: "rt-1",
+        name: "DESKTOP-HJ0AM09",
+        display_alias: "本机",
+        provider: "claude",
+        status: "online",
+      },
+      {
+        id: "rt-2",
+        name: "runtime-prod-01",
+        display_alias: null,
+        provider: "codex",
+        status: "online",
+      },
+    ]);
+    renderDialog();
+    const items = await screen.findAllByTestId("distill-source-item");
+    fireEvent.click(items[0]!);
+
+    // 默认 resume → 无配置区；切 fresh → 机器/agent 类型下拉出现（在线 runtime 同源）。
+    expect(screen.queryByLabelText("机器（runtime）")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("新建 agent"));
+    const runtimeSelect = await screen.findByLabelText("机器（runtime）");
+    expect(screen.getByLabelText("agent 类型")).toBeInTheDocument();
+
+    fireEvent.change(runtimeSelect, { target: { value: "rt-1" } });
+    fireEvent.change(screen.getByLabelText("agent 类型"), { target: { value: "claude" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "新建 agent 提炼" }));
+    await waitFor(() => expect(knowledgeApi.dispatchDistill).toHaveBeenCalledTimes(1));
+    expect(knowledgeApi.dispatchDistill).toHaveBeenCalledWith("ws-1", {
+      source_type: "session",
+      source_ref: SESSION_ID,
+      focus: null,
+      mode: "fresh",
+      runtime_id: "rt-1",
+      agent_type: "claude",
+    });
+  });
+
+  it("已沉淀反链（D-010①）：命中已合并任务 → 「已沉淀 ↗」点击跳 merged_to 文件段 + 关弹层", async () => {
+    knowledgeApi.listDistillTasks.mockResolvedValue([
+      {
+        agent_run_id: "11111111-1111-1111-1111-111111111111",
+        source_type: "session",
+        source_ref: SESSION_ID,
+        status: "completed",
+        created_at: "2026-09-17T10:00:00Z",
+        mode: "fresh",
+        merged_to: "known-issues.md#Windows 控制台码页导致日志乱码",
+        degraded_reason: null,
+      },
+    ]);
+    const onJumpToKnowledge = vi.fn();
+    const onClose = vi.fn();
+    renderDialog({ onJumpToKnowledge, onClose });
+    await screen.findAllByTestId("distill-source-item");
+
+    const badge = screen.getByTestId("distill-precipitated-badge");
+    expect(badge).toHaveTextContent("已沉淀 ↗");
+    fireEvent.click(badge);
+
+    // 双键取文件段跳转，弹层关闭（merged_to 双键防锚点漂移，D-010①）。
+    expect(onJumpToKnowledge).toHaveBeenCalledWith("known-issues.md");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("已沉淀反链：proposed 候选（无 merged_to）点击仅关弹层回知识库页，不触发跳转", async () => {
+    knowledgeApi.listDistillTasks.mockResolvedValue([
+      {
+        agent_run_id: "11111111-1111-1111-1111-111111111111",
+        source_type: "session",
+        source_ref: SESSION_ID,
+        status: "completed",
+        created_at: "2026-09-17T10:00:00Z",
+        mode: "resume",
+        merged_to: null,
+        degraded_reason: null,
+      },
+    ]);
+    const onJumpToKnowledge = vi.fn();
+    const onClose = vi.fn();
+    renderDialog({ onJumpToKnowledge, onClose });
+    await screen.findAllByTestId("distill-source-item");
+
+    fireEvent.click(screen.getByTestId("distill-precipitated-badge"));
+    expect(onJumpToKnowledge).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("已沉淀反链：quick 多选任务 source_ref 为 list 投影，成员命中即打标", async () => {
+    knowledgeApi.listDistillTasks.mockResolvedValue([
+      {
+        agent_run_id: "11111111-1111-1111-1111-111111111111",
+        source_type: "quick",
+        source_ref: JSON.stringify([QUICK_REF_B]),
+        status: "completed",
+        created_at: "2026-09-17T10:00:00Z",
+        mode: "fresh",
+        merged_to: "known-issues.md#心跳三缺陷",
+        degraded_reason: null,
+      },
+    ]);
+    renderDialog();
+    fireEvent.click(screen.getByTestId("distill-source-type-quick"));
+    await screen.findAllByTestId("distill-source-item");
+
+    const badges = screen.getAllByTestId("distill-precipitated-badge");
+    expect(badges).toHaveLength(1);
   });
 });

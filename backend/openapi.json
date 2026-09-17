@@ -588,7 +588,7 @@
           "workspace"
         ],
         "summary": "List Workspaces",
-        "description": "List workspaces with server-side filter + pagination (task-05 / FR-01/02/04).\n\n平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。\n普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。\n\nchange 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增\n``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——\n``?type=`` 等值匹配表达不了 NULL，语义互斥。\n\nchange 2026-09-14-workspace-drag-sort（task-02 / FR-03）：两分支均透传\n``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序\n（每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。",
+        "description": "List workspaces with server-side filter + pagination (task-05 / FR-01/02/04).\n\n平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。\n普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。\n\nchange 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增\n``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——\n``?type=`` 等值匹配表达不了 NULL，语义互斥。\n\nchange 2026-09-14-workspace-drag-sort（task-02 / FR-03）：两分支均透传\n``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序\n（每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。\n\nql-20260917-007：非管理员分支先看**平台级授权**（``user_roles`` 持\n``workspace:read`` 或 ``platform:admin``）——与 ``has_permission`` 段 2、\n通知广播收件人查找（``list_user_ids_with_permission`` 段 2）口径对齐：\n这类用户对所有工作区有真实读权限，列表按全量返回；否则维持\n``allowed_workspace_ids`` 工作区级限定。修复「列表看不到工作区，\n却能收到其通知、点进其内容」的三处口径割裂。",
         "operationId": "list_workspaces_api_workspaces_get",
         "parameters": [
           {
@@ -19803,7 +19803,7 @@
           "knowledge"
         ],
         "summary": "Dispatch Distill",
-        "description": "派发蒸馏任务（源校验 + 创建 knowledge-distill 类 AgentRun，后台派发）。",
+        "description": "派发蒸馏任务（源校验 + mode 分流：resume 续接 / fresh 新建蒸馏会话）。",
         "operationId": "dispatch_distill_api_workspaces__workspace_id__knowledge_distill_post",
         "parameters": [
           {
@@ -42106,12 +42106,23 @@
             "type": "string",
             "enum": [
               "session",
-              "change"
+              "change",
+              "quick"
             ],
             "title": "Source Type"
           },
           "source_ref": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
             "maxLength": 200,
             "minLength": 1,
             "title": "Source Ref"
@@ -42127,6 +42138,59 @@
               }
             ],
             "title": "Focus"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "resume",
+              "fresh"
+            ],
+            "title": "Mode",
+            "default": "fresh"
+          },
+          "runtime_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Id"
+          },
+          "agent_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Type"
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
           }
         },
         "type": "object",
@@ -42135,7 +42199,7 @@
           "source_ref"
         ],
         "title": "DistillDispatchIn",
-        "description": "POST /knowledge/distill 请求体（派发蒸馏任务）。\n\n``source_ref``：会话源为 session_id（UUID 字符串）；变更源为 change_key。"
+        "description": "POST /knowledge/distill 请求体（派发蒸馏任务）。\n\n``source_ref``：会话源为 session_id（UUID 字符串，单条）；变更源为\nchange_key（单条）；快速修复源为 ql 自然键短码（ql-YYYYMMDD-NNN-后缀），\n单条 ql 体量小故来源**多选**（list[str]，D-010②）。\n``mode``：会话源可选 ``resume``（原会话续接，D-009——进行中直接 inject、\n已结束 reopen+inject，引擎/状态不满足自动降级 fresh 并记降级原因）；\n``fresh`` 为默认（零回归），change/quick 强制走 fresh。\nfresh 配置字段（D-010③，复用 create_session 双入口）：\n``runtime_id`` 钉机器（优先于 ``agent_type``/provider）、``agent_type``\n（provider）、``agent_profile_id``、``model``。"
       },
       "DistillTaskRead": {
         "properties": {
@@ -42160,6 +42224,45 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "fresh"
+          },
+          "agent_session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Session Id"
+          },
+          "merged_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merged To"
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
           }
         },
         "type": "object",
@@ -42171,7 +42274,7 @@
           "created_at"
         ],
         "title": "DistillTaskRead",
-        "description": "蒸馏任务条（AgentRun 与 metadata_ 投影；dispatch 响应复用同形状）。"
+        "description": "蒸馏任务条（AgentRun 与 metadata_ 投影；dispatch 响应复用同形状）。\n\n``agent_session_id``：蒸馏实际执行的 AgentSession（D-009/D-010——resume\n为续接的原会话、fresh 为 create_session 新建的蒸馏会话），供知识库侧\n跳转；后台离线兜底失败时无会话为 null。\n``merged_to``：合并后知识点位置（``目标文件#小节标题`` 双键，D-010①\n反链，防锚点漂移）；未合并=null。\n``mode``：实际执行形态（resume 请求被降级守卫改写时为 ``fresh``）。\n``degraded_reason``：resume 降级原因（未降级=null）。"
       },
       "DocumentsSyncOk": {
         "properties": {
@@ -64035,6 +64138,11 @@
               }
             ],
             "title": "Error"
+          },
+          "queued": {
+            "type": "boolean",
+            "title": "Queued",
+            "default": false
           }
         },
         "type": "object",
@@ -64042,7 +64150,7 @@
           "ok"
         ],
         "title": "SessionThinkingLevelResponse",
-        "description": "POST /api/daemon/sessions/{id}/thinking-level 响应体（FR-05 / design §接口定义）。\n\ndaemon RPC ``session_set_thinking_level`` 回执映射：``ok=False`` 时\n``error`` 携带结构化文案（旧 daemon method_not_found →「daemon 未支持\n思考级别，请升级 daemon」；离线/超时/业务错误各有中文文案），HTTP 恒 200\n（照 compact 口径：调用方可修复的失败不抛 5xx）。"
+        "description": "POST /api/daemon/sessions/{id}/thinking-level 响应体（FR-05 / design §接口定义）。\n\ndaemon RPC ``session_set_thinking_level`` 回执映射：``ok=False`` 时\n``error`` 携带结构化文案（旧 daemon method_not_found →「daemon 未支持\n思考级别，请升级 daemon」；离线/超时/业务错误各有中文文案），HTTP 恒 200\n（照 compact 口径：调用方可修复的失败不抛 5xx）。\nql-20260917-008：``queued=True`` = 忙轮覆盖式暂存（pending_thinking_level），\n本轮结束后由 run 终态钩子应用——前端据此提示「本轮结束后生效」。"
       },
       "SessionThinkingLevelsResponse": {
         "properties": {

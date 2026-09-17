@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>知识库 · 知识沉淀 原型 — 2026-09-17-knowledge-precipitation</title>
+<style>
+:root {
+  --primary: #7C3AED; --primary-hover: #6D28D9;
+  --primary-soft: #EDE9FE; --primary-soft-2: #F5F3FF;
+  --secondary: #A78BFA; --accent: #0891B2; --accent-soft: #CFFAFE; --accent-text: #0E7490;
+  --brand-gradient: linear-gradient(135deg, #7C3AED 0%, #0891B2 100%);
+  --bg: #FAF5FF; --fg: #1E1B4B; --card: #FFFFFF;
+  --muted: #ECEEF9; --muted-fg: #475569; --faint: #94A3B8;
+  --border: #DDD6FE; --border-weak: #EEE9F8;
+  --success: #059669; --success-soft: #D1FAE5; --success-text: #065F46;
+  --warning: #D97706; --warning-soft: #FEF3C7; --warning-text: #92400E;
+  --error: #DC2626;   --error-soft: #FEE2E2;   --error-text: #991B1B;
+  --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px;
+  --shadow-sm: 0 1px 2px rgba(30,27,75,.06);
+  --shadow-md: 0 4px 14px rgba(30,27,75,.08);
+  --shadow-primary: 0 4px 14px rgba(124,58,237,.32);
+  --shadow-lg: 0 16px 40px rgba(109,40,217,.16);
+  --dur-fast: 150ms; --dur: 200ms; --ease: cubic-bezier(.2,0,0,1);
+  --font-sans: Inter, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); background: var(--bg); color: var(--fg); font-size: 13px; line-height: 1.6; padding: 20px; }
+.page { max-width: 1280px; margin: 0 auto; }
+
+/* ── 页头 ── */
+.backlink { font-size: 11px; color: var(--muted-fg); text-decoration: none; }
+.backlink:hover { text-decoration: underline; }
+.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.page-header h1 { font-size: 20px; font-weight: 700; }
+.header-actions { display: flex; gap: 8px; align-items: center; }
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--card); color: var(--fg); border-radius: var(--radius-md); padding: 6px 12px; font-size: 12px; cursor: pointer; transition: all var(--dur-fast) var(--ease); font-family: inherit; }
+.btn:hover { border-color: var(--primary); color: var(--primary); }
+.btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; box-shadow: var(--shadow-primary); }
+.btn-primary:hover { background: var(--primary-hover); color: #fff; }
+.btn-ghost-danger { border-color: transparent; color: var(--error); background: transparent; }
+.btn-ghost-danger:hover { background: var(--error-soft); border-color: transparent; color: var(--error); }
+.btn-sm { padding: 3px 9px; font-size: 11px; }
+
+/* ── 卡片 ── */
+.card { background: var(--card); border: 1px solid var(--border-weak); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+
+/* ── 蒸馏任务条 ── */
+.distill-bar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; margin-bottom: 12px; font-size: 12px; }
+.spinner { width: 13px; height: 13px; border: 2px solid var(--primary-soft); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.distill-bar .meta { color: var(--muted-fg); flex: 1; }
+.distill-bar .meta b { color: var(--fg); font-weight: 600; }
+.tag { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 99px; font-size: 10.5px; font-weight: 500; }
+.tag-running { background: var(--primary-soft); color: var(--primary-hover); }
+
+/* ── 主体三栏 ── */
+.layout { display: flex; gap: 0; align-items: stretch; }
+.tree-panel { width: 300px; flex-shrink: 0; padding: 8px; }
+.resizer { width: 9px; cursor: col-resize; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.resizer::after { content: ""; width: 3px; height: 48px; border-radius: 3px; background: var(--border); }
+.resizer:hover::after { background: var(--primary); }
+.content-panel { flex: 1; min-width: 0; padding: 16px 18px; }
+
+/* ── 树 ── */
+.zone-label { display: flex; align-items: center; gap: 6px; padding: 6px 8px 3px; font-size: 10.5px; font-weight: 600; color: var(--faint); letter-spacing: .04em; text-transform: uppercase; }
+.zone-badge { background: var(--warning-soft); color: var(--warning-text); border-radius: 99px; padding: 0 7px; font-size: 10px; font-weight: 600; }
+.zone-badge-zero { background: var(--muted); color: var(--faint); }
+.tree-node { display: flex; align-items: center; gap: 7px; padding: 4px 8px; border-radius: var(--radius-sm); cursor: pointer; color: var(--fg); white-space: nowrap; }
+.tree-node:hover { background: var(--primary-soft-2); }
+.tree-node.active { background: var(--primary-soft); color: var(--primary-hover); font-weight: 600; }
+.tree-node .icon { font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; }
+.tree-node .date { font-size: 10.5px; color: var(--faint); margin-left: auto; }
+.tree-dir { font-weight: 600; }
+.tree-children { padding-left: 16px; border-left: 1px solid var(--border-weak); margin-left: 12px; }
+.tree-proposed .icon { color: var(--warning); }
+.collapsible .tree-dir { cursor: pointer; }
+.count-note { font-size: 10.5px; color: var(--faint); padding: 2px 8px; }
+
+/* ── 内容区 ── */
+.content-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.content-head h2 { font-size: 16px; font-weight: 700; }
+.breadcrumb { font-size: 11px; color: var(--muted-fg); font-family: var(--font-mono); }
+.proposed-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.md-body { background: var(--muted); border-radius: var(--radius-md); padding: 14px 16px; max-height: 56vh; overflow: auto; font-size: 12.5px; }
+.md-body h1 { font-size: 15px; margin-bottom: 8px; }
+.md-body h2 { font-size: 13px; margin: 10px 0 6px; color: var(--primary-hover); }
+.md-body code { font-family: var(--font-mono); background: var(--card); border: 1px solid var(--border-weak); border-radius: 4px; padding: 0 4px; font-size: 11px; }
+.frontmatter { background: var(--card); border: 1px dashed var(--border); border-radius: var(--radius-md); padding: 8px 12px; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-fg); margin-bottom: 10px; }
+.empty { text-align: center; color: var(--muted-fg); padding: 60px 0; font-size: 12px; }
+
+/* ── 弹层 ── */
+.overlay { position: fixed; inset: 0; background: rgba(30,27,75,.4); backdrop-filter: blur(2px); display: none; align-items: center; justify-content: center; z-index: 50; }
+.overlay.open { display: flex; }
+.modal { width: 640px; max-width: calc(100vw - 40px); max-height: calc(100vh - 80px); overflow: auto; background: var(--card); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); padding: 20px 22px; }
+.modal h3 { font-size: 16px; margin-bottom: 4px; }
+.modal .sub { font-size: 11.5px; color: var(--muted-fg); margin-bottom: 14px; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-weak); margin-bottom: 14px; }
+.tab { padding: 7px 14px; font-size: 12.5px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--muted-fg); }
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 11.5px; font-weight: 600; margin-bottom: 4px; }
+.field label .req { color: var(--error); }
+.field input[type=text], .field select, .field textarea { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 7px 10px; font-size: 12.5px; font-family: inherit; background: var(--card); color: var(--fg); }
+.field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft-2); }
+.field textarea { min-height: 110px; resize: vertical; }
+.hint { font-size: 10.5px; color: var(--faint); margin-top: 3px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+.seg button { border: none; background: var(--card); padding: 6px 16px; font-size: 12px; cursor: pointer; color: var(--muted-fg); font-family: inherit; }
+.seg button.active { background: var(--primary-soft); color: var(--primary-hover); font-weight: 600; }
+.src-list { border: 1px solid var(--border-weak); border-radius: var(--radius-md); max-height: 168px; overflow: auto; }
+.executor-opts { display: flex; flex-direction: column; gap: 8px; }
+.executor-opt { display: flex; align-items: flex-start; gap: 8px; border: 1px solid var(--border-weak); border-radius: var(--radius-md); padding: 9px 11px; cursor: pointer; transition: all var(--dur-fast) var(--ease); }
+.executor-opt:hover { border-color: var(--primary); background: var(--primary-soft-2); }
+.executor-opt.picked { border-color: var(--primary); background: var(--primary-soft); }
+.executor-opt input[type=radio] { margin-top: 3px; accent-color: var(--primary); flex-shrink: 0; }
+.executor-opt.disabled { opacity: .5; cursor: not-allowed; }
+.executor-opt.disabled:hover { border-color: var(--border-weak); background: transparent; }
+.opt-body { display: flex; flex-direction: column; gap: 2px; }
+.opt-title { font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.opt-desc { font-size: 11px; color: var(--muted-fg); line-height: 1.5; }
+.hint-inline { font-weight: 400; font-size: 10.5px; color: var(--faint); }
+.precip-badge { display: inline-flex; align-items: center; gap: 2px; background: var(--success-soft); color: var(--success-text); border-radius: 99px; padding: 1px 8px; font-size: 10px; font-weight: 600; cursor: pointer; flex-shrink: 0; margin-left: 6px; }
+.precip-badge:hover { background: var(--success); color: #fff; }
+.fresh-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fresh-field label { display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px; }
+.fresh-field select { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 7px 10px; font-size: 12.5px; font-family: inherit; background: var(--card); color: var(--fg); }
+.src-item .check { width: 14px; height: 14px; accent-color: var(--primary); flex-shrink: 0; }
+.src-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; border-bottom: 1px solid var(--border-weak); }
+.src-item:last-child { border-bottom: none; }
+.src-item:hover { background: var(--primary-soft-2); }
+.src-item.selected { background: var(--primary-soft); }
+.src-item .name { font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-item .sub { font-size: 10.5px; color: var(--faint); flex-shrink: 0; }
+.modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+/* ── 合并面板 ── */
+.merge-preview { border: 1px solid var(--border-weak); border-radius: var(--radius-md); background: var(--muted); padding: 12px 14px; font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; line-height: 1.7; }
+.diff-add { background: var(--success-soft); color: var(--success-text); border-radius: 3px; padding: 0 3px; }
+.preview-note { font-size: 11px; color: var(--muted-fg); margin: 10px 0 6px; }
+
+/* ── toast ── */
+.toast { position: fixed; bottom: 24px; right: 24px; background: var(--fg); color: #fff; border-radius: var(--radius-md); padding: 10px 16px; font-size: 12px; box-shadow: var(--shadow-lg); opacity: 0; transform: translateY(8px); transition: all var(--dur) var(--ease); z-index: 99; pointer-events: none; }
+.toast.show { opacity: 1; transform: none; }
+
+.note { margin-top: 16px; font-size: 11px; color: var(--faint); border-top: 1px dashed var(--border); padding-top: 10px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="page-header">
+    <div>
+      <a class="backlink" href="#">← 工作空间</a>
+      <h1>知识库</h1>
+    </div>
+    <div class="header-actions">
+      <button class="btn" onclick="toast('刷新列表')">↻ 刷新</button>
+      <button class="btn btn-primary" onclick="openModal('precipitateModal')">✦ 沉淀知识</button>
+    </div>
+  </div>
+
+  <!-- 蒸馏任务条（演示：点「派发提炼任务」后才出现；真实实现=派发 AgentRun 后展示进度） -->
+  <div class="card distill-bar" id="distillBar" style="display:none">
+    <span class="spinner"></span>
+    <span class="tag tag-running">蒸馏进行中</span>
+    <span class="meta">正在从会话 <b>「fix(mobile): 群聊手机端样式四修」</b> 提炼知识 —— agent 已读取 263 条对话记录，正在整理候选条目…<span style="color:var(--faint)">（原型演示文案）</span></span>
+    <button class="btn btn-sm" onclick="toast('打开任务详情')">详情</button>
+  </div>
+
+  <div class="layout">
+    <!-- 左：文件树（zone 分组） -->
+    <div class="card tree-panel">
+      <div class="zone-label">待审核 <span class="zone-badge" id="proposedBadge">2</span></div>
+      <div id="zone-proposed"></div>
+      <div class="zone-label">知识手册</div>
+      <div id="zone-manual"></div>
+      <div class="zone-label">决策库 <span class="zone-badge zone-badge-zero">decisions/</span></div>
+      <div id="zone-decisions" class="collapsible"></div>
+      <div class="zone-label">自动生成 <span class="zone-badge zone-badge-zero">generated/</span></div>
+      <div id="zone-generated" class="collapsible"></div>
+    </div>
+    <div class="resizer" title="拖拽调宽"></div>
+
+    <!-- 右：内容区 -->
+    <div class="card content-panel" id="contentPanel">
+      <div class="empty">选择左侧文档查看内容</div>
+    </div>
+  </div>
+
+  <p class="note">
+    原型说明（2026-09-17-knowledge-precipitation）：①树按 zone 分组——待审核（proposed/）置顶带计数徽标，修复原先 decisions/、generated/ 子目录完全不显示的缺陷；②「沉淀知识」弹层两个入口：手工录入表单 / 从记录提炼（选会话或变更 + 提示词 → 派发 agent 后台蒸馏）；③待审核条目支持 编辑 / 合并（预览追加段落与 INDEX 路由行）/ 拒绝；④蒸馏任务条展示进行中的派发任务。主题遵循 AI-Native 设计系统。
+  </p>
+</div>
+
+<!-- 沉淀知识弹层 -->
+<div class="overlay" id="precipitateModal">
+  <div class="modal">
+    <h3>沉淀知识</h3>
+    <p class="sub">生成候选知识进入「待审核」，人工确认后合并进正式知识文件（与 sillyspec CLI 同一份知识库）。</p>
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab(this,'tab-distill')">从记录提炼</div>
+      <div class="tab" onclick="switchTab(this,'tab-manual')">手工录入</div>
+    </div>
+
+    <div id="tab-distill">
+      <div class="field">
+        <label>来源类型</label>
+        <div class="seg">
+          <button class="active" onclick="segPick(this,'session')">会话记录</button>
+          <button onclick="segPick(this,'change')">变更归档</button>
+          <button onclick="segPick(this,'quick')">快速修复</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>选择记录 <span class="req">*</span> <span class="hint-inline" id="multiHint" style="display:none">（快速修复可勾选多条一起提炼）</span></label>
+        <div class="src-list">
+          <div class="src-item selected" data-kind="session" onclick="pickSrc(this)">
+            <span class="icon">💬</span><span class="name">fix(mobile): 群聊手机端样式四修 —— ql-20260917-002-a5c0</span>
+            <span class="precip-badge" title="已沉淀 2 条知识点，点击查看" onclick="event.stopPropagation();jumpToKnowledge(event)">已沉淀 · 2 ↗</span>
+          </div>
+          <div class="src-item" data-kind="session" onclick="pickSrc(this)">
+            <span class="icon">💬</span><span class="name">fix(session): 24h 风险审查三缺陷修复</span>
+          </div>
+          <div class="src-item" data-kind="change" style="display:none" onclick="pickSrc(this)">
+            <span class="icon">📦</span><span class="name">feat(mobile): 变更中心与 PC 端功能对齐</span>
+            <span class="precip-badge" title="已沉淀 5 条知识点，点击查看" onclick="event.stopPropagation();jumpToKnowledge(event)">已沉淀 · 5 ↗</span>
+          </div>
+          <div class="src-item" data-kind="change" style="display:none" onclick="pickSrc(this)">
+            <span class="icon">📦</span><span class="name">fix(session): 上拉读历史弹回最新轮根治</span>
+          </div>
+          <div class="src-item" data-kind="quick" style="display:none" onclick="pickMulti(this)"><input type="checkbox" class="check" onclick="event.stopPropagation()"> <span class="icon">🩹</span><span class="name">ql-20260917-001：会话列表心跳三缺陷</span>
+          </div>
+          <div class="src-item" data-kind="quick" style="display:none" onclick="pickMulti(this)"><input type="checkbox" class="check" onclick="event.stopPropagation()"> <span class="icon">🩹</span><span class="name">ql-20260917-002：群聊手机端样式四修</span>
+            <span class="precip-badge" title="已沉淀 1 条知识点" onclick="event.stopPropagation();jumpToKnowledge(event)">已沉淀 · 1 ↗</span>
+          </div>
+          <div class="src-item" data-kind="quick" style="display:none" onclick="pickMulti(this)"><input type="checkbox" class="check" onclick="event.stopPropagation()"> <span class="icon">🩹</span><span class="name">ql-20260916-018：上拉读历史弹回根治</span>
+          </div>
+        </div>
+      </div>
+      <div class="field" id="executorField">
+        <label>派谁去干</label>
+        <div class="executor-opts" id="executorOpts">
+          <label class="executor-opt" data-mode="resume">
+            <input type="radio" name="executor" value="resume" checked onchange="pickExecutor(this)">
+            <span class="opt-body">
+              <span class="opt-title">🔁 原会话续接 <span class="tag tag-running">推荐</span></span>
+              <span class="opt-desc">在原 agent 会话里继续干——有完整上下文，<b>快、省 token、质量高</b>（仅已结束的 claude/codex 会话）</span>
+            </span>
+          </label>
+          <label class="executor-opt" data-mode="fresh">
+            <input type="radio" name="executor" value="fresh" onchange="pickExecutor(this)">
+            <span class="opt-body">
+              <span class="opt-title">✨ 新建 agent</span>
+              <span class="opt-desc">开一个新 agent 去读记录——适合想换个视角、或会话已删/引擎不支持续接</span>
+            </span>
+          </label>
+        </div>
+        <p class="hint" id="executorHint">变更归档没有「原会话」概念，固定走新建 agent。</p>
+      </div>
+      <div class="field" id="freshConfig" style="display:none">
+        <label>新建 agent 配置 <span class="req">*</span> <span class="hint-inline">（像常规会话新建一样选，有据可循）</span></label>
+        <div class="fresh-grid">
+          <div class="fresh-field">
+            <label>机器（runtime）</label>
+            <select id="freshRuntime"><option>本机 · DESKTOP-HJ0AM09（daemon 在线）</option><option>阿里云生产 · runtime-prod-01</option></select>
+          </div>
+          <div class="fresh-field">
+            <label>agent 类型</label>
+            <select id="freshAgent"><option>claude_code</option><option>codex</option><option>gemini</option></select>
+          </div>
+        </div>
+        <p class="hint">触发后建一个正式会话去干活（标题带「提炼」前缀），不在常规会话页展示，仅在这边有提炼记录可跳转。</p>
+      </div>
+      <div class="field">
+        <label>提炼关注点（可选）</label>
+        <textarea placeholder="告诉 agent 这次重点提炼什么，例如：只提取踩坑与解法，忽略功能描述……"></textarea>
+        <p class="hint" id="dispatchHint">续接原会话派发后任务在后台执行，完成后候选知识出现在「待审核」区。</p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" onclick="closeModal('precipitateModal')">取消</button>
+        <button class="btn btn-primary" id="dispatchBtn" onclick="dispatchDistill()">🔁 续接原会话提炼</button>
+      </div>
+    </div>
+
+    <div id="tab-manual" style="display:none">
+      <div class="field">
+        <label>标题 <span class="req">*</span></label>
+        <input type="text" placeholder="例如：Windows 控制台码页导致日志乱码">
+      </div>
+      <div class="field">
+        <label>分类</label>
+        <select>
+          <option>Conventions（约定）</option>
+          <option>Patterns（模式）</option>
+          <option>Known Issues（已知坑）</option>
+          <option>未分类</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>正文 <span class="req">*</span></label>
+        <textarea placeholder="Markdown 正文：问题、解法、证据（文件/提交）、适用条件……"></textarea>
+        <p class="hint">保存后进入「待审核」区，可继续编辑，审核合并时自动追加到目标知识文件并更新 INDEX 路由。</p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" onclick="closeModal('precipitateModal')">取消</button>
+        <button class="btn btn-primary" onclick="saveManual()">存为候选知识</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 合并弹层 -->
+<div class="overlay" id="mergeModal">
+  <div class="modal">
+    <h3>合并进正式知识库</h3>
+    <p class="sub">复刻 sillyspec classify 语义：正文追加到目标文件的 <b>## 小节</b>，并在 INDEX.md 补路由行；proposed 文件随后移除。</p>
+    <div class="field">
+      <label>目标文件</label>
+      <select onchange="renderMergePreview()">
+        <option>known-issues.md</option>
+        <option>patterns.md</option>
+        <option>conventions.md</option>
+        <option>+ 新建文件…</option>
+      </select>
+    </div>
+    <p class="preview-note">将追加到 known-issues.md 末尾：</p>
+    <div class="merge-preview" id="mergePreview"></div>
+    <p class="preview-note">并更新 INDEX.md：</p>
+    <div class="merge-preview">## Known Issues
+<span class="diff-add">- 控制台码页|乱码|GBK|PYTHONIOENCODING → [Windows 控制台码页导致日志乱码](known-issues.md#windows-控制台码页导致日志乱码)</span></div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('mergeModal')">取消</button>
+      <button class="btn btn-primary" onclick="doMerge()">确认合并</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ── 演示数据：真实目录结构抽样 ── */
+const zones = {
+  proposed: [
+    { path: "proposed/mobile-grid-row-overflow.md", name: "mobile-grid-row-overflow.md", title: "移动端 grid 隐式行高度不受 min-h-0 约束", date: "09-17", icon: "✎" },
+    { path: "proposed/spec-sync-budget-fuse.md", name: "spec-sync-budget-fuse.md", title: "spec 同步总预算熔断的观测与恢复", date: "09-16", icon: "✎" },
+  ],
+  manual: [
+    { path: "INDEX.md", name: "INDEX.md", date: "09-12", icon: "📇" },
+    { path: "conventions.md", name: "conventions.md", date: "09-01", icon: "📘" },
+    { path: "patterns.md", name: "patterns.md", date: "08-28", icon: "🧩" },
+    { path: "known-issues.md", name: "known-issues.md", date: "09-08", icon: "⚠️" },
+    { path: "sillyspec-gotchas.md", name: "sillyspec-gotchas.md", date: "09-02", icon: "🌀" },
+    { path: "testing-gotchas.md", name: "testing-gotchas.md", date: "08-30", icon: "🧪" },
+  ],
+  decisions: [
+    { path: "decisions/daemon.md", name: "daemon.md", date: "09-05", icon: "📄" },
+    { path: "decisions/backend.md", name: "backend.md", date: "09-05", icon: "📄" },
+    { path: "decisions/frontend.md", name: "frontend.md", date: "08-25", icon: "📄" },
+    { path: "… 其余 10 个", name: "… 其余 10 个", more: true },
+  ],
+  generated: [
+    { path: "generated/INDEX.md", name: "INDEX.md", date: "09-11", icon: "📇" },
+    { path: "generated/1-frontend-backend-rest-sse.md", name: "1-frontend-backend-rest-sse.md", date: "07-11", icon: "📄" },
+    { path: "… 其余 37 个", name: "… 其余 37 个", more: true },
+  ],
+};
+let selected = null;
+
+function node(item, zone) {
+  const div = document.createElement("div");
+  div.className = "tree-node" + (zone === "proposed" ? " tree-proposed" : "") + (selected === item.path ? " active" : "");
+  div.innerHTML = `<span class="icon">${item.icon || "📄"}</span><span>${item.name}</span>` +
+    (item.more ? "" : `<span class="date">${item.date}</span>`);
+  if (!item.more) div.onclick = () => { selected = item.path; renderTree(); renderContent(item, zone); };
+  return div;
+}
+function renderZone(id, list, zone) {
+  const box = document.getElementById(id);
+  box.innerHTML = "";
+  list.forEach(i => box.appendChild(node(i, zone)));
+}
+function renderTree() {
+  renderZone("zone-proposed", zones.proposed, "proposed");
+  renderZone("zone-manual", zones.manual, "manual");
+  renderZone("zone-decisions", zones.decisions, "decisions");
+  renderZone("zone-generated", zones.generated, "generated");
+}
+function renderContent(item, zone) {
+  const p = document.getElementById("contentPanel");
+  const isProposed = zone === "proposed";
+  const isDecisions = zone === "decisions";
+  p.innerHTML = `
+    <div class="content-head">
+      <div>
+        <h2>${item.title || item.name}</h2>
+        <span class="breadcrumb">.sillyspec/knowledge/${item.path}</span>
+      </div>
+      <div class="proposed-actions">
+        ${isProposed ? `
+        <button class="btn btn-sm" onclick="editEntry()">✎ 编辑</button>
+        <button class="btn btn-sm btn-primary" onclick="openModal('mergeModal')">⇥ 合并</button>
+        <button class="btn btn-sm btn-ghost-danger" onclick="rejectEntry()">✕ 拒绝</button>` : isDecisions ? `
+        <span class="tag tag-running" title="决策条目由归档流程自动维护，网页暂只读">由归档流程维护 · 只读</span>` : `
+        <button class="btn btn-sm" onclick="editEntry()">✎ 编辑</button>`}
+      </div>
+    </div>
+    <div class="frontmatter">--- source: session:024a9fc2 · proposed_at: 2026-09-17 09:12 · author: qinyi ---</div>
+    <div class="md-body" id="mdBody">
+      <h1>${item.title || item.name}</h1>
+      <h2>问题</h2>
+      <p>GroupChatPanel 根 grid 隐式行 auto 高度不受 <code>min-h-0 flex-1</code> 约束，长时间线把整列撑到内容高溢出视图……</p>
+      <h2>解法</h2>
+      <p>根 grid 加 <code>grid-rows-[minmax(0,1fr)]</code> 锁行高，时间线列内自滚、输入区常驻。</p>
+      <h2>证据</h2>
+      <p><code>frontend/src/components/…/group-chat-panel.tsx</code> · dd8fce1a8</p>
+    </div>`;
+}
+/* ── 已有知识（手册/自动生成）与候选均可编辑：编辑态 = 原文 markdown 编辑器 + 保存走平台直写（版本+1、旧内容入备份区） ── */
+let editing = false;
+function editEntry() {
+  editing = true;
+  const body = document.getElementById("mdBody");
+  body.innerHTML = `
+    <textarea style="width:100%;min-height:300px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;font-family:var(--font-mono);font-size:11.5px;line-height:1.7;background:var(--card);color:var(--fg)" ># 移动端 grid 隐式行高度不受 min-h-0 约束
+
+## 问题
+GroupChatPanel 根 grid 隐式行 auto 高度不受 min-h-0 flex-1 约束……
+
+## 解法
+根 grid 加 grid-rows-[minmax(0,1fr)] 锁行高。</textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+      <button class="btn btn-sm" onclick="cancelEdit()">取消</button>
+      <button class="btn btn-sm btn-primary" onclick="saveEdit()">保存修改</button>
+    </div>
+    <p class="hint">保存经平台直写落盘（文件版本 +1，旧内容进 30 天备份区），各端下次连接自动同步；frontmatter 保持不动。</p>`;
+}
+function cancelEdit() { editing = false; toast("已取消编辑"); renderTree(); selected && renderContent(zones.proposed.find(i => i.path === selected) || { path: selected, name: selected.split("/").pop() }, zones.proposed.some(i => i.path === selected) ? "proposed" : "manual"); }
+function saveEdit() { editing = false; toast("已保存（版本 +1，旧内容已备份）"); }
+function rejectEntry() {
+  if (confirm("拒绝后将移除该候选知识文件（进入 30 天备份区），确认拒绝？")) {
+    zones.proposed = zones.proposed.filter(i => i.path !== selected);
+    document.getElementById("proposedBadge").textContent = zones.proposed.length;
+    selected = null; renderTree();
+    document.getElementById("contentPanel").innerHTML = `<div class="empty">已拒绝，候选已移入备份区</div>`;
+    toast("已拒绝该候选知识");
+  }
+}
+
+/* ── 弹层与交互 ── */
+function openModal(id) { document.getElementById(id).classList.add("open"); }
+function closeModal(id) { document.getElementById(id).classList.remove("open"); }
+function switchTab(el, id) {
+  el.parentElement.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  el.classList.add("active");
+  document.getElementById("tab-distill").style.display = id === "tab-distill" ? "" : "none";
+  document.getElementById("tab-manual").style.display = id === "tab-manual" ? "" : "none";
+}
+function segPick(el, kind) {
+  el.parentElement.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+  el.classList.add("active");
+  currentSrcKind = kind;
+  // 按来源类型显隐记录项
+  document.querySelectorAll(".src-item").forEach(s => {
+    s.style.display = s.dataset.kind === kind ? "" : "none";
+    if (kind !== "quick") s.classList.remove("selected");
+  });
+  document.getElementById("multiHint").style.display = kind === "quick" ? "" : "none";
+  // 默认选中第一条可见项
+  const first = document.querySelector(`.src-item[data-kind="${kind}"]`);
+  if (first && kind !== "quick") first.classList.add("selected");
+  syncExecutor();
+}
+/* ── D-010：来源单选（会话/变更）与多选（快速修复）；已沉淀标签反链跳转 ── */
+let currentSrcKind = "session";
+function pickSrc(el) {
+  if (el.dataset.kind === "quick") return pickMulti(el);
+  el.parentElement.querySelectorAll('.src-item:not([data-kind="quick"])').forEach(s => s.classList.remove("selected"));
+  el.classList.add("selected");
+  syncExecutor();
+}
+function pickMulti(el) {
+  el.classList.toggle("selected");
+}
+function jumpToKnowledge(e) {
+  toast("跳转到对应知识点（按 source 反链定位合并后的小节）");
+}
+/* ── D-009+D-010 派谁去干：会话源默认续接（推荐）/新建可选（配机器+类型）；变更/快速修复固定新建 ── */
+let executorMode = "resume";
+function pickExecutor(radio) {
+  if (radio.closest(".executor-opt").classList.contains("disabled")) return;
+  executorMode = radio.value;
+  document.querySelectorAll("#executorOpts .executor-opt").forEach(o => o.classList.toggle("picked", o.querySelector("input").checked));
+  syncDispatchBtn();
+}
+function isChangeSrc() { return currentSrcKind === "change"; }
+function isQuickSrc() { return currentSrcKind === "quick"; }
+function isFreshForced() { return isChangeSrc() || isQuickSrc(); }  // 变更/快速修复无"原会话"，固定新建
+function syncExecutor() {
+  const forced = isFreshForced();
+  const resumeOpt = document.querySelector('.executor-opt[data-mode="resume"]');
+  const resumeRadio = resumeOpt.querySelector("input");
+  document.getElementById("executorHint").textContent = isQuickSrc()
+    ? "快速修复是零散记录，固定走新建 agent（可多选多条一起提炼）。"
+    : "变更归档没有「原会话」概念，固定走新建 agent。";
+  document.getElementById("executorHint").style.display = forced ? "" : "none";
+  if (forced) {
+    resumeOpt.classList.add("disabled");
+    resumeRadio.disabled = true;
+    document.querySelector('.executor-opt[data-mode="fresh"] input').checked = true;
+    executorMode = "fresh";
+  } else {
+    resumeOpt.classList.remove("disabled");
+    resumeRadio.disabled = false;
+    document.querySelector(`#executorOpts input[value="${executorMode}"]`).checked = true;
+  }
+  document.querySelectorAll("#executorOpts .executor-opt").forEach(o => o.classList.toggle("picked", o.querySelector("input").checked));
+  document.getElementById("freshConfig").style.display = executorMode === "fresh" ? "" : "none";
+  syncDispatchBtn();
+}
+function syncDispatchBtn() {
+  const btn = document.getElementById("dispatchBtn");
+  const forced = isFreshForced();
+  btn.textContent = forced || executorMode === "fresh" ? "✨ 新建 agent 提炼" : "🔁 续接原会话提炼";
+  document.getElementById("dispatchHint").textContent =
+    executorMode === "resume" && !forced
+      ? "续接原会话派发后任务在后台执行，完成后候选知识出现在「待审核」区。"
+      : "新建 agent 在后台读取记录并提炼，完成后候选知识出现在「待审核」区。";
+}
+function dispatchDistill() {
+  const forced = isFreshForced();
+  const mode = forced ? "fresh" : executorMode;
+  closeModal("precipitateModal");
+  document.getElementById("distillBar").style.display = "flex";
+  const bar = document.querySelector("#distillBar .meta");
+  if (bar) bar.innerHTML = mode === "resume"
+    ? `正在<b>续接原会话</b>提炼知识 —— 原 agent 带着完整上下文继续干，命中 prompt cache 更快更省（演示文案）`
+    : `正在<b>新建 agent</b>提炼知识 —— 已选机器+类型触发正式会话（标题带「提炼」前缀，常规会话页不可见），读取源记录整理候选条目（演示文案）`;
+  toast(mode === "resume" ? "已续接原会话派发提炼任务" : "已新建 agent 会话派发提炼任务");
+}
+function saveManual() { closeModal("precipitateModal"); toast("已存为候选知识，进入待审核区"); }
+function renderMergePreview() {
+  document.getElementById("mergePreview").innerHTML =
+`<span style="color:var(--faint)">## 已有小节……</span>
+
+<span class="diff-add">## 移动端 grid 隐式行高度不受 min-h-0 约束
+根 grid 隐式行 auto 高度不受 min-h-0 flex-1 约束，长时间线把整列撑到内容高。
+解法：grid-rows-[minmax(0,1fr)] 锁行高。证据：dd8fce1a8</span>`;
+}
+function doMerge() { closeModal("mergeModal"); toast("已合并进 known-issues.md 并更新 INDEX 路由"); }
+let toastTimer;
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 2400);
+}
+document.querySelectorAll(".overlay").forEach(o => o.addEventListener("click", e => { if (e.target === o) o.classList.remove("open"); }));
+renderTree(); renderMergePreview(); syncExecutor();
+</script>
+</body>
+</html>

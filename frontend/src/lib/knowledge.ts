@@ -170,11 +170,21 @@ export async function rejectKnowledge(
 }
 
 /**
- * 派发蒸馏任务（task-08 / FR-01 / FR-03 / D-002@v1）：POST /knowledge/distill。
+ * 派发蒸馏任务（task-08 / FR-01 / FR-03 / D-002@v1；D-009/D-010 扩展）：
+ * POST /knowledge/distill。
  *
- * 后端源校验（无记录会话 / 未归档变更 → 422）后创建 knowledge-distill 类
- * AgentRun 并 fire-and-forget 派发（daemon 离线时任务创建成功但立即收敛为
- * failed，经任务列表可见）；响应复用 DistillTaskRead（创建时刻 pending）。
+ * 后端源校验（无记录会话 / 未归档变更 / ql 文件缺失 → 422）后创建
+ * knowledge-distill 类 AgentRun 并 fire-and-forget 派发（daemon 离线时任务
+ * 创建成功但立即收敛为 failed，经任务列表可见）；响应复用 DistillTaskRead
+ * （创建时刻 pending；resume 被降级守卫改写时 mode/degraded_reason 为实际值）。
+ *
+ * D-009 续接分流：mode="resume" 仅会话源可选（原会话 inject/reopen 续接；
+ * 引擎不支持 / 状态不可 reopen 自动降级 fresh 并记 degraded_reason）；
+ * change/quick 无原会话概念，强制 fresh。D-010③ fresh 配置：
+ * runtime_id（钉机器，优先于 agent_type）/ agent_type（provider）/
+ * agent_profile_id / model，缺省回落 workspace.default_agent/default_model
+ * （对齐 create_session 双入口）。quick 多选时 source_ref 传 list[str]。
+ * 入参即生成版 DistillDispatchIn（禁手写窄化类型），调用方按 mode 组装。
  */
 export async function dispatchDistill(
   workspaceId: string,
@@ -194,9 +204,12 @@ export async function dispatchDistill(
  * 蒸馏任务列表（task-08）：GET /knowledge/distill/tasks。
  *
  * 该工作区全部 knowledge-distill 类任务按 created_at 倒序（含终态历史，
- * 进行中过滤归任务条渲染层）；字段仅 agent_run_id/source_type/source_ref/
- * status/created_at——列表投影不含 error_code/错误信息（task-07 契约），
- * 失败原因前端不可区分，统一按「daemon 离线或执行中断」文案提示。
+ * 进行中过滤归任务条渲染层）。除基础五字段外投影 mode / agent_session_id /
+ * merged_to / degraded_reason（D-009/D-010）：merged_to 为「目标文件#小节标题」
+ * 双键反链（未合并=null）；degraded_reason 为 resume 降级原因（未降级=null）；
+ * 列表投影不含 error_code/错误信息（task-07 契约），失败原因前端不可区分，
+ * 统一按「daemon 离线或执行中断」文案提示。已沉淀反链（弹层来源列表
+ * 「已沉淀 ↗」标签）亦以本端点按 source_ref 匹配判定。
  */
 export async function listDistillTasks(
   workspaceId: string,
@@ -206,6 +219,14 @@ export async function listDistillTasks(
   );
 }
 
+/**
+ * 快速修复文件列表（D-010② quick 蒸馏来源）：GET /quicklog。
+ *
+ * 返回 ql 文件条目（filename 为 basename 如 ql-20260917-002-a5c0.md）；
+ * 蒸馏 source_ref 取 filename 去 `.md` 后缀的自然键短码（后端按
+ * `{ref}.md` 校验文件存在性）。已沉淀反链亦需要本列表 + listDistillTasks
+ * 联合判定（弹层来源列表「已沉淀 ↗」标签，task-08 扩展）。
+ */
 export async function listQuicklog(
   workspaceId: string,
 ): Promise<QuicklogList> {

@@ -155,7 +155,7 @@ async def dispatch_distill(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_WRITE))],
 ) -> DistillTaskRead:
-    """派发蒸馏任务（源校验 + 创建 knowledge-distill 类 AgentRun，后台派发）。"""
+    """派发蒸馏任务（源校验 + mode 分流：resume 续接 / fresh 新建蒸馏会话）。"""
     service = DistillDispatchService(session)
     return await service.dispatch(
         workspace_id,
@@ -163,6 +163,11 @@ async def dispatch_distill(
         source_type=payload.source_type,
         source_ref=payload.source_ref,
         focus=payload.focus,
+        mode=payload.mode,
+        runtime_id=payload.runtime_id,
+        agent_type=payload.agent_type,
+        agent_profile_id=payload.agent_profile_id,
+        model=payload.model,
     )
 
 

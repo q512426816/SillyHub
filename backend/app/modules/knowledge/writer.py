@@ -32,7 +32,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, WorkspaceNotFound
+from app.core.logging import get_logger
+from app.modules.agent.model import AgentRun
 from app.modules.auth.model import User
+from app.modules.knowledge.distill import DISTILL_RUN_KIND
 from app.modules.knowledge.schema import (
     KnowledgeEntry,
     KnowledgeMergeResult,
@@ -42,6 +45,7 @@ from app.modules.knowledge.service import KnowledgeService
 from app.modules.spec_workspace.model import SpecFileManifest
 from app.modules.spec_workspace.schema import FileOp
 from app.modules.spec_workspace.service import SpecWorkspaceService
+from app.modules.workspace.model import AgentRunWorkspace
 
 # ── 常量（对齐 CLI knowledge-classify.js / design D-007@v1）─────────────────────
 
@@ -67,6 +71,8 @@ CATEGORY_SECTIONS: dict[str, str] = {
 _PROPOSED_FOOTER = (
     "> This is a proposed knowledge entry. Review and merge into manual/ or generated/."
 )
+
+log = get_logger(__name__)
 
 
 # ── 领域错误（事件命名 + 中文文案，沿用 AppError 体系）────────────────────────
@@ -208,6 +214,36 @@ def _build_append_block(target_raw: str, section_title: str, body: str) -> str:
     if target_raw and not target_raw.endswith("\n"):
         block = eol + block
     return block
+
+
+def _extract_proposed_source(content: str) -> str | None:
+    """从候选文件 frontmatter 提取 ``source`` 字段（蒸馏反链载体，D-010①）。
+
+    取值形态：``manual`` / ``session:<id>`` / ``change:<key>`` / ``quick:<id>``
+    （quick 多选蒸馏时可为逗号分隔多个 ql id）。
+    """
+    norm = content.replace("\r\n", "\n")
+    lines = norm.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return None
+        m = re.match(r"^source:\s*(.+?)\s*$", line)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _backlink_targets(source: str | None) -> tuple[str, list[str]] | None:
+    """frontmatter source → (source_type, refs)；manual / 无法识别 → None。"""
+    if not source or source == "manual" or ":" not in source:
+        return None
+    source_type, _, ref = source.partition(":")
+    if source_type not in ("session", "change", "quick") or not ref.strip():
+        return None
+    refs = [r.strip() for r in ref.split(",") if r.strip()]
+    return source_type, refs
 
 
 def _extract_proposed_body(content: str) -> str:
@@ -507,6 +543,19 @@ class KnowledgeWriterService:
                 )
             ],
         )
+        # ── D-010① 反链：合并后候选即入备份区，须把「目标文件#小节标题」双键
+        # （非裸锚点，防重命名漂移）写回来源对应蒸馏任务条的 metadata_.merged_to，
+        # 供来源侧「已沉淀」标签跳转到合并后的正式知识点。反链失败不阻断合并
+        # 主流程（知识已落盘），仅 warning。
+        try:
+            await self._record_merge_backlink(workspace_id, entry, f"{target}#{section_title}")
+        except Exception as exc:
+            log.warning(
+                "knowledge_merge_backlink_failed",
+                workspace_id=str(workspace_id),
+                filename=filename,
+                error=str(exc),
+            )
         return KnowledgeMergeResult(
             merged=True,
             target_file=target,
@@ -536,6 +585,52 @@ class KnowledgeWriterService:
                 )
             ],
         )
+
+    # ── 反链（D-010①）───────────────────────────────────────────────────
+
+    async def _record_merge_backlink(
+        self,
+        workspace_id: uuid.UUID,
+        entry: KnowledgeEntry,
+        merged_to: str,
+    ) -> None:
+        """把合并落点（``目标文件#小节标题``）写回来源对应蒸馏任务条。
+
+        匹配口径 = AgentRunWorkspace 关联 + ``metadata_.kind=knowledge-distill``
+        + ``metadata_.source_type/source_ref`` 与候选 frontmatter ``source``
+        字段一致（``session:<id>`` / ``change:<key>`` / ``quick:<id>``，quick
+        多选蒸馏的 list 形态逐条命中）。命中 run 的 ``metadata_.merged_to``
+        即被更新（DistillTaskRead 投影透出，供来源侧跳转）。
+        """
+        mapped = _backlink_targets(_extract_proposed_source(entry.content or ""))
+        if mapped is None:
+            return
+        source_type, refs = mapped
+        stmt = (
+            select(AgentRun)
+            .join(
+                AgentRunWorkspace,
+                AgentRunWorkspace.agent_run_id == AgentRun.id,
+            )
+            .where(AgentRunWorkspace.workspace_id == workspace_id)
+        )
+        runs = list((await self._session.execute(stmt)).scalars().all())
+        updated = False
+        for run in runs:
+            meta = run.metadata_ or {}
+            if meta.get("kind") != DISTILL_RUN_KIND or meta.get("source_type") != source_type:
+                continue
+            raw_ref = meta.get("source_ref")
+            run_refs = raw_ref if isinstance(raw_ref, list) else [str(raw_ref)]
+            if not any(ref in run_refs for ref in refs):
+                continue
+            new_meta = dict(meta)
+            new_meta["merged_to"] = merged_to
+            run.metadata_ = new_meta
+            self._session.add(run)
+            updated = True
+        if updated:
+            await self._session.commit()
 
     # ── 校验 ──────────────────────────────────────────────────────────────
 

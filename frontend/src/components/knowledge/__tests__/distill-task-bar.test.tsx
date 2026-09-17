@@ -15,7 +15,7 @@
  * advanceTimersByTimeAsync（platform-sync-section 150s 回显用例同款）。
  */
 
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -45,13 +45,14 @@ vi.mock("@/lib/errors", async () => {
 
 const WS = "ws-1";
 
-/** 任务 fixture（字段对齐 task-07 DistillTaskRead 生成类型）。 */
+/** 任务 fixture（字段对齐 task-07 DistillTaskRead 生成类型；mode 为 D-009 必填投影）。 */
 function task(p: Partial<DistillTaskRead> & { agent_run_id: string }): DistillTaskRead {
   return {
     source_type: "session",
     source_ref: "9a8b7c6d-1111-2222-3333-444455556666",
     status: "running",
     created_at: "2026-09-17T10:00:00Z",
+    mode: "fresh",
     ...p,
   };
 }
@@ -60,12 +61,17 @@ let queryClient: QueryClient;
 /** 本轮用例的任务列表（mock 每次读取快照，切换即模拟下一轮轮询数据）。 */
 let tasksHolder: DistillTaskRead[];
 const onCompleted = vi.fn();
+const onJumpToEntry = vi.fn();
 
-function renderBar() {
+function renderBar(options: { onJumpToEntry?: (filename: string) => void } = {}) {
   mocks.listDistillTasks.mockImplementation(() => Promise.resolve([...tasksHolder]));
   return render(
     <QueryClientProvider client={queryClient}>
-      <DistillTaskBar workspaceId={WS} onCompleted={onCompleted} />
+      <DistillTaskBar
+        workspaceId={WS}
+        onCompleted={onCompleted}
+        onJumpToEntry={options.onJumpToEntry ?? onJumpToEntry}
+      />
     </QueryClientProvider>,
   );
 }
@@ -89,6 +95,7 @@ async function flush() {
 beforeEach(() => {
   vi.clearAllMocks();
   onCompleted.mockClear();
+  onJumpToEntry.mockClear();
   tasksHolder = [];
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -253,5 +260,97 @@ describe("DistillTaskBar（task-08）", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("DistillTaskBar · D-009 降级提示 + D-010 merged_to 反链（task-08 扩展）", () => {
+  it("进行中任务带 degraded_reason（resume 被降级 fresh）→ 行内展示「已降级」提示", async () => {
+    tasksHolder = [
+      task({
+        agent_run_id: "11111111-1111-1111-1111-111111111111",
+        degraded_reason: "provider_no_resume",
+      }),
+    ];
+    renderBar();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("distill-task-row-active")).toBeInTheDocument(),
+    );
+    const degrade = screen.getByTestId("distill-row-degraded");
+    expect(degrade).toHaveTextContent("已降级：引擎不支持续接");
+    expect(degrade).toHaveTextContent("已改为新建 agent");
+  });
+
+  it("completed 且 merged_to 非空 → 终态行「已合并到 <文件#小节>」可点击，点击跳文件段", async () => {
+    tasksHolder = [task({ agent_run_id: "11111111-1111-1111-1111-111111111111" })];
+    renderBar();
+    await waitFor(() =>
+      expect(screen.getByTestId("distill-task-row-active")).toBeInTheDocument(),
+    );
+
+    tasksHolder = [
+      task({
+        agent_run_id: "11111111-1111-1111-1111-111111111111",
+        status: "completed",
+        merged_to: "known-issues.md#Windows 控制台码页导致日志乱码",
+      }),
+    ];
+    await pollTasks();
+
+    const link = await screen.findByTestId("distill-merged-link");
+    expect(link).toHaveTextContent("已合并到 known-issues.md#Windows 控制台码页导致日志乱码");
+    fireEvent.click(link);
+    // merged_to 双键取文件段反链（防锚点漂移，D-010①）。
+    expect(onJumpToEntry).toHaveBeenCalledWith("known-issues.md");
+  });
+
+  it("completed 且无 merged_to → 终态行展示待审核文案，无反链按钮", async () => {
+    tasksHolder = [task({ agent_run_id: "11111111-1111-1111-1111-111111111111" })];
+    renderBar();
+    await waitFor(() =>
+      expect(screen.getByTestId("distill-task-row-active")).toBeInTheDocument(),
+    );
+
+    tasksHolder = [
+      task({ agent_run_id: "11111111-1111-1111-1111-111111111111", status: "completed" }),
+    ];
+    await pollTasks();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("distill-task-row-terminal")).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/候选知识已进入「待审核」区/)).toBeInTheDocument();
+    expect(screen.queryByTestId("distill-merged-link")).not.toBeInTheDocument();
+  });
+
+  it("quick 多选任务来源摘要按条数展示（source_ref list 投影）", async () => {
+    tasksHolder = [
+      task({
+        agent_run_id: "11111111-1111-1111-1111-111111111111",
+        source_type: "quick",
+        source_ref: JSON.stringify(["ql-20260917-001-a1b2", "ql-20260917-002-c3d4"]),
+      }),
+    ];
+    renderBar();
+
+    await waitFor(() =>
+      expect(screen.getByText(/正在从 2 条快速修复记录提炼知识/)).toBeInTheDocument(),
+    );
+  });
+
+  it("splitMergedTo / distillDegradedText 纯函数：双键拆分与未知降级原因兜底", async () => {
+    const { splitMergedTo, distillDegradedText } = await import(
+      "@/components/knowledge/distill-task-bar"
+    );
+    expect(splitMergedTo("known-issues.md#Windows 码页")).toEqual({
+      file: "known-issues.md",
+      section: "Windows 码页",
+    });
+    expect(splitMergedTo("decisions/daemon.md")).toEqual({
+      file: "decisions/daemon.md",
+      section: null,
+    });
+    expect(distillDegradedText("provider_no_resume")).toContain("引擎不支持续接");
+    expect(distillDegradedText("some_future_reason")).toBe("已降级：some_future_reason");
   });
 });

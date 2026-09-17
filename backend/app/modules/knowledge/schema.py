@@ -116,19 +116,59 @@ class KnowledgeMergeResult(BaseModel):
 class DistillDispatchIn(BaseModel):
     """POST /knowledge/distill 请求体（派发蒸馏任务）。
 
-    ``source_ref``：会话源为 session_id（UUID 字符串）；变更源为 change_key。
+    ``source_ref``：会话源为 session_id（UUID 字符串，单条）；变更源为
+    change_key（单条）；快速修复源为 ql 自然键短码（ql-YYYYMMDD-NNN-后缀），
+    单条 ql 体量小故来源**多选**（list[str]，D-010②）。
+    ``mode``：会话源可选 ``resume``（原会话续接，D-009——进行中直接 inject、
+    已结束 reopen+inject，引擎/状态不满足自动降级 fresh 并记降级原因）；
+    ``fresh`` 为默认（零回归），change/quick 强制走 fresh。
+    fresh 配置字段（D-010③，复用 create_session 双入口）：
+    ``runtime_id`` 钉机器（优先于 ``agent_type``/provider）、``agent_type``
+    （provider）、``agent_profile_id``、``model``。
     """
 
-    source_type: Literal["session", "change"]
-    source_ref: str = Field(min_length=1, max_length=200)
+    source_type: Literal["session", "change", "quick"]
+    source_ref: str | list[str] = Field(min_length=1, max_length=200)
     focus: str | None = Field(default=None, max_length=2000)
+    mode: Literal["resume", "fresh"] = "fresh"
+    runtime_id: str | None = None
+    agent_type: str | None = None
+    agent_profile_id: str | None = None
+    model: str | None = None
+
+    @field_validator("source_ref")
+    @classmethod
+    def _source_ref_clean(cls, v: str | list[str]) -> str | list[str]:
+        # 单串形态去空白；list 形态逐条去空白并滤空（全空视为未提供 422）。
+        if isinstance(v, str):
+            cleaned = v.strip()
+            if not cleaned:
+                raise ValueError("source_ref 不能为空")
+            return cleaned
+        cleaned_list = [item.strip() for item in v if item and item.strip()]
+        if not cleaned_list:
+            raise ValueError("source_ref 不能为空")
+        return cleaned_list
 
 
 class DistillTaskRead(BaseModel):
-    """蒸馏任务条（AgentRun 与 metadata_ 投影；dispatch 响应复用同形状）。"""
+    """蒸馏任务条（AgentRun 与 metadata_ 投影；dispatch 响应复用同形状）。
+
+    ``agent_session_id``：蒸馏实际执行的 AgentSession（D-009/D-010——resume
+    为续接的原会话、fresh 为 create_session 新建的蒸馏会话），供知识库侧
+    跳转；后台离线兜底失败时无会话为 null。
+    ``merged_to``：合并后知识点位置（``目标文件#小节标题`` 双键，D-010①
+    反链，防锚点漂移）；未合并=null。
+    ``mode``：实际执行形态（resume 请求被降级守卫改写时为 ``fresh``）。
+    ``degraded_reason``：resume 降级原因（未降级=null）。
+    """
 
     agent_run_id: uuid.UUID
     source_type: str
     source_ref: str
     status: str
     created_at: datetime
+    mode: str = "fresh"
+    agent_session_id: uuid.UUID | None = None
+    merged_to: str | None = None
+    degraded_reason: str | None = None

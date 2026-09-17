@@ -1,0 +1,383 @@
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index 5bc22bc8d..80ac0dbe2 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -50,6 +50,10 @@ import type * as React from "react";
+ 
+ import SessionsPortalPage from "@/app/(dashboard)/sessions/page";
+ import { SessionPanel } from "@/components/daemon/session-panel";
++// quick（ql-20260916-014）：翻页/初始窗口夹具与断言单源引用页距常量——
++// ql-20260916-013 把 HISTORY_PAGE_SIZE 50→400 后本文件硬编码 100 的夹具全旧
++// （满页判定 logs.length >= HISTORY_PAGE_SIZE 不成立 → 翻页链路用例全红）。
++import { HISTORY_PAGE_SIZE } from "@/components/daemon/session-panel/turn-state";
+ import { ApiError } from "@/lib/api";
+ import type {
+   AgentSessionRead,
+@@ -165,6 +169,14 @@ vi.mock("@/lib/workspaces", () => ({
+   listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
+ }));
+ 
++// quick（ql-20260916-014）：SessionListPanel 工作区查询统一 workspace-switcher 键
++// 后 queryFn 并拉 my-bindings（ql-20260916-006）——不 mock 时真实 fetch 失败路径
++// 的异步延迟在 CI 慢机上晚于组头名称断言（兜底「当前工作区」误显）。对齐
++// sessions-portal.test 同款 mock。
++vi.mock("@/lib/workspace-binding", () => ({
++  fetchMyBindings: vi.fn(async () => []),
++}));
++
+ // task-08（2026-08-22-workspace-sessions-portal / D-004@v1）：薄壳页经
+ // SessionsPortal 消费 useSearchParams 解析 ?session= 深链——jsdom 无 app
+ // router 上下文时返回 null（sessions-portal.tsx:78 即原 18 红根因）。
+@@ -187,10 +199,19 @@ vi.mock("@/lib/agent-profiles", async () => {
+   };
+ });
+ 
+-vi.mock("@/lib/api/llm-providers", () => ({
+-  listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+-  getProviderQuota: (...args: unknown[]) => mocks.getProviderQuota(...args),
+-}));
++// quick（ql-20260916-014）：importActual 透传 detectUsageProvider 等纯函数——
++// ctx-usage-bar QuotaPill 渲染期调用它，仅 mock 两个数据函数时模块缺导出，
++// React 渲染直接崩（「No "detectUsageProvider" export is defined on the mock」）。
++vi.mock("@/lib/api/llm-providers", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
++    "@/lib/api/llm-providers",
++  );
++  return {
++    ...actual,
++    listProviders: (...args: unknown[]) => mocks.listProviders(...args),
++    getProviderQuota: (...args: unknown[]) => mocks.getProviderQuota(...args),
++  };
++});
+ 
+ // task-08（2026-08-21-session-reopen-resume / FR-09）：useNotify 改 mock 捕获——
+ // jsdom 无 antd <App> 上下文时 message.* 是 no-op 桩，409 中文文案断言只能看调用
+@@ -597,8 +618,11 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄
+         expect.any(Object),
+       );
+     });
+-    // quick（2026-09-02 群聊体验）：初始历史改 limit=100 窗口（更早走「加载更早」）。
+-    expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1", { limit: 100 });
++    // quick（2026-09-02 群聊体验）：初始历史窗口化（limit=HISTORY_PAGE_SIZE，
++    // 更早走「加载更早」；ql-20260916-014 起单源引用常量）。
++    expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1", {
++      limit: HISTORY_PAGE_SIZE,
++    });
+     expect(mocks.getAgentSession).toHaveBeenCalledWith("s-1");
+   });
+ 
+@@ -818,8 +842,10 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
+       expect(screen.getByTitle("我（WhaleFall）")).toHaveTextContent("W");
+     });
+     expect(screen.getByTitle("张三")).toHaveTextContent("张");
+-    // 裸时间元素：用户侧 2 + agent 答复侧 2
+-    expect(screen.getAllByText(new RegExp(`^${timePat}$`))).toHaveLength(4);
++    // 裸时间元素：仅用户侧 2（ql-20260916-014 适配——agent 答复侧时间行已被
++    // 轮次时间三段显示改造为「开始 HH:MM:SS · 结束 HH:MM:SS · 历时」，不再裸
++    // HH:MM；三段形态由 turn-time-display.test.tsx 专项覆盖）。
++    expect(screen.getAllByText(new RegExp(`^${timePat}$`))).toHaveLength(2);
+   });
+ });
+ 
+@@ -1060,9 +1086,9 @@ describe("SessionPanel attach 运行中轮恢复竞态（ql-20260820-007）", ()
+     // 历史先回灌：detail 未到前面板显 Spin（!session 分支），但 logs 恢复在
+     // mount effect 内已落 turnState（此刻 logsToTurns 全 completed）。
+     await waitFor(() => {
+-      // quick：初始历史窗口化（limit=100，同 :580 适配）。
++      // quick：初始历史窗口化（limit=HISTORY_PAGE_SIZE，同 :580 适配）。
+       expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1", {
+-        limit: 100,
++        limit: HISTORY_PAGE_SIZE,
+       });
+     });
+     await act(async () => {}); // flush 回灌 microtask 链（确保先于 detail 落地）
+@@ -1391,11 +1417,12 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+     };
+   }
+ 
+-  it("满页（100 条）→ 触顶自动加载更早 prepend + 加载提示；到头后触顶不再请求", async () => {
+-    // 初始窗口满页：1 run 内 100 条（1 user_input + 99 stdout，turn DOM 轻）。
++  it(`满页（${HISTORY_PAGE_SIZE} 条）→ 触顶自动加载更早 prepend + 加载提示；到头后触顶不再请求`, async () => {
++    // 初始窗口满页：1 run 内 HISTORY_PAGE_SIZE 条（1 user_input + 其余 stdout，
++    // turn DOM 轻；ql-20260916-014 起页距单源引用常量）。
+     const fullPage = [
+       quickLog("q-inj", "r-cur", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
+-      ...Array.from({ length: 99 }, (_, i) =>
++      ...Array.from({ length: HISTORY_PAGE_SIZE - 1 }, (_, i) =>
+         quickLog(
+           `q-out-${i}`,
+           "r-cur",
+@@ -1421,7 +1448,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+         (c) => c[1] && "before" in (c[1] as Record<string, unknown>),
+       ).length;
+ 
+-    // 触顶（jsdom scrollTop=0 ≤ 48px）→ before=窗口最早 ts + limit=100；
++    // 触顶（jsdom scrollTop=0 ≤ 48px）→ before=窗口最早 ts + limit=页距常量；
+     // 同步加载提示出现。
+     const scroller = await screen.findByTestId("turn-timeline-scroll");
+     fireEvent.scroll(scroller);
+@@ -1432,7 +1459,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+         // 2026-09-16-logs-cursor-tiebreaker task-07 校准：翻页请求带复合游标
+         // id 分量（= 初始窗口最旧行 q-inj 的 id，与 before 同传）。
+         beforeId: "q-inj",
+-        limit: 100,
++        limit: HISTORY_PAGE_SIZE,
+         // ql-20260903-018 加载更早请求自带 AbortController（换会话 abort 在途）。
+         signal: expect.any(AbortSignal),
+       });
+@@ -1443,7 +1470,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+     await waitFor(() => {
+       expect(screen.queryByTestId("session-load-earlier-hint")).toBeNull();
+     });
+-    // 第二页不满（2 < 100）→ 到头：再触顶不再发起 before 请求。
++    // 第二页不满（2 < HISTORY_PAGE_SIZE）→ 到头：再触顶不再发起 before 请求。
+     expect(beforeCallCount()).toBe(1);
+     fireEvent.scroll(scroller);
+     await new Promise((r) => setTimeout(r, 0));
+@@ -1476,7 +1503,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+     try {
+       const fullPage = [
+         quickLog("a-inj", "r-cur", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
+-        ...Array.from({ length: 99 }, (_, i) =>
++        ...Array.from({ length: HISTORY_PAGE_SIZE - 1 }, (_, i) =>
+           quickLog(
+             `a-out-${i}`,
+             "r-cur",
+@@ -1550,7 +1577,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+     try {
+       const fullPage = [
+         quickLog("b-inj", "r-cur", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
+-        ...Array.from({ length: 99 }, (_, i) =>
++        ...Array.from({ length: HISTORY_PAGE_SIZE - 1 }, (_, i) =>
+           quickLog(
+             `b-out-${i}`,
+             "r-cur",
+@@ -1595,7 +1622,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+     // 变体插入该 turn 之前（before 游标保证内容不重叠）。
+     const fullPage = [
+       quickLog("w-inj", "r-long", "user_input", "分身首句", "2026-08-15T08:00:00Z"),
+-      ...Array.from({ length: 99 }, (_, i) =>
++      ...Array.from({ length: HISTORY_PAGE_SIZE - 1 }, (_, i) =>
+         quickLog(
+           `w-out-${i}`,
+           "r-long",
+@@ -1623,7 +1650,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+         // 2026-09-16-logs-cursor-tiebreaker task-07 校准：复合游标 id 分量
+         //（初始窗口最旧行 w-inj）。
+         beforeId: "w-inj",
+-        limit: 100,
++        limit: HISTORY_PAGE_SIZE,
+         // ql-20260903-018 加载更早请求自带 AbortController（换会话 abort 在途）。
+         signal: expect.any(AbortSignal),
+       });
+@@ -1642,11 +1669,11 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+     try {
+       const fullPage = [
+         quickLog("m-a-in", "r-a", "user_input", "当前窗口提问A", "2026-08-15T08:00:00Z"),
+-        ...Array.from({ length: 49 }, (_, i) =>
++        ...Array.from({ length: HISTORY_PAGE_SIZE / 2 - 1 }, (_, i) =>
+           quickLog(`m-a-out-${i}`, "r-a", "stdout", `窗口A输出 ${i}`, "2026-08-15T08:00:10Z"),
+         ),
+         quickLog("m-b-in", "r-b", "user_input", "当前窗口提问B", "2026-08-15T08:01:00Z"),
+-        ...Array.from({ length: 49 }, (_, i) =>
++        ...Array.from({ length: HISTORY_PAGE_SIZE / 2 - 1 }, (_, i) =>
+           quickLog(`m-b-out-${i}`, "r-b", "stdout", `窗口B输出 ${i}`, "2026-08-15T08:01:10Z"),
+         ),
+       ];
+@@ -1690,7 +1717,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+     );
+     const fullPage = [
+       quickLog("v-inj", "r-live", "user_input", "分身首句", "2026-08-15T08:00:00Z"),
+-      ...Array.from({ length: 99 }, (_, i) =>
++      ...Array.from({ length: HISTORY_PAGE_SIZE - 1 }, (_, i) =>
+         quickLog(`v-out-${i}`, "r-live", "stdout", `窗口内输出 ${i}`, "2026-08-15T08:00:10Z"),
+       ),
+     ];
+@@ -1734,7 +1761,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+     ).toBeTruthy();
+   });
+ 
+-  it("不满页（<100 条）→ 无加载提示；触顶不发起 before 请求（旧短会话零变化）", async () => {
++  it(`不满页（<${HISTORY_PAGE_SIZE} 条）→ 无加载提示；触顶不发起 before 请求（旧短会话零变化）`, async () => {
+     mocks.getAgentSessionLogs.mockResolvedValue([
+       quickLog("s-inj", "r-1", "user_input", "短会话提问", "2026-08-15T08:00:00Z"),
+       quickLog("s-out", "r-1", "stdout", "答复。", "2026-08-15T08:00:05Z"),
+@@ -1858,11 +1885,12 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+     };
+   }
+ 
+-  /** 满页日志（100 条 = HISTORY_PAGE_SIZE → hasEarlier=true 的最小构造）。 */
++  /** 满页日志（HISTORY_PAGE_SIZE 条 → hasEarlier=true 的最小构造；
++   *  ql-20260916-014 起单源引用页距常量，防再改页距时夹具漂移）。 */
+   function fullPage(runId: string, prompt: string, timestamp: string) {
+     return [
+       navLog(`${runId}-in`, runId, "user_input", prompt, timestamp),
+-      ...Array.from({ length: 99 }, (_, i) =>
++      ...Array.from({ length: HISTORY_PAGE_SIZE - 1 }, (_, i) =>
+         navLog(`${runId}-out-${i}`, runId, "stdout", `输出 ${i}`, timestamp),
+       ),
+     ];
+@@ -2044,7 +2072,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+       // 2026-09-16-logs-cursor-tiebreaker task-07 校准：复合游标 id 分量
+       //（第二次翻页游标 = 中间轮页首行 r-mid-in）。
+       beforeId: "r-mid-in",
+-      limit: 100,
++      limit: HISTORY_PAGE_SIZE,
+       // ql-20260903-018：加载更早请求自带 AbortController。
+       signal: expect.any(AbortSignal),
+     });
+@@ -2061,8 +2089,9 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+       .mockResolvedValueOnce(
+         fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
+       )
+-      // 翻页恒满页（hasEarlier 恒 true）且永不出现 r-old → 跳转循环 8 页达
+-      // 上限；每页时间戳随序号递减（跨页 pageKey 唯一防 React 撞 key）。
++      // 翻页恒满页（hasEarlier 恒 true）且永不出现 r-old → 跳转循环 50 页达
++      // 上限（JUMP_LOAD_EARLIER_MAX_PAGES）；每页时间戳随序号递减（跨页 pageKey
++      // 唯一防 React 撞 key）。
+       .mockImplementation(() => {
+         fillerSeq += 1;
+         return fullPage(
+diff --git a/frontend/src/components/daemon/__tests__/session-usage-panel-mount.test.tsx b/frontend/src/components/daemon/__tests__/session-usage-panel-mount.test.tsx
+index c4349c3a6..e56e0772a 100644
+--- a/frontend/src/components/daemon/__tests__/session-usage-panel-mount.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-usage-panel-mount.test.tsx
+@@ -169,11 +169,15 @@ function usageStub(): HTMLElement {
+   return screen.getByTestId("session-usage-bar-stub");
+ }
+ 
+-/** fire 轮次终态（SSE turn_completed 处理路径；async act 冲刷队列刷新链）。 */
+-async function fireTurnCompleted(): Promise<void> {
++/** fire 轮次终态（SSE turn_completed 处理路径；async act 冲刷队列刷新链）。
++ *  quick（ql-20260916-014）：可传覆盖项——刷新类副作用经「同 run 首条完成」门控
++ *  （ql-20260916-005），同 run_id 的第二次终态不再递增信号，逐轮递增须换新 run。 */
++async function fireTurnCompleted(
++  over: Partial<SessionStreamEnvelope> = {},
++): Promise<void> {
+   await act(async () => {
+     streamHandlers!.onTurnCompleted!(
+-      env("turn_completed", { status: "completed" }),
++      env("turn_completed", { status: "completed", ...over }),
+     );
+   });
+ }
+@@ -256,8 +260,9 @@ describe("SessionUsageBar 挂载点（2026-08-29-session-usage-stats task-04）"
+     await fireTurnCompleted();
+     expect(usageStub()).toHaveAttribute("data-refresh-signal", "1");
+ 
+-    // 再一轮终态：继续递增（每轮触发一次重取信号）。
+-    await fireTurnCompleted();
++    // 再一轮终态（新 run）：继续递增（每轮触发一次重取信号；同 run 重复合成
++    // 被首条完成门控去重——ql-20260916-005）。
++    await fireTurnCompleted({ run_id: "r-2", turn: 2 });
+     expect(usageStub()).toHaveAttribute("data-refresh-signal", "2");
+   });
+ 
+diff --git a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+index 6c4110a3e..19ef0055d 100644
+--- a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+@@ -101,6 +101,10 @@ const mocks = vi.hoisted(() => ({
+   // liveness hook 经 listWorkspaceAgentLogs 拉取——既有 mock 集没有该模块，防
+   // jsdom 真实 fetch 噪声，Grill CC-12）。
+   listWorkspaceAgentLogs: vi.fn(),
++  // quick（ql-20260916-014）：工作区查询统一 workspace-switcher 键后 queryFn
++  // 并拉 my-bindings（ql-20260916-006）——不 mock 时真实 fetch 失败路径的异步
++  // 延迟在 CI 慢机上晚于组头名称断言（兜底「当前工作区」误显 6 用例红）。
++  fetchMyBindings: vi.fn(),
+ }));
+ 
+ // 组件只消费 listAgentSessions + 树拉取上限常量（类型导入编译期擦除），
+@@ -147,6 +151,12 @@ vi.mock("@/lib/workspaces", () => ({
+   listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
+ }));
+ 
++// quick（ql-20260916-014）：工作区 queryFn 的 my-bindings 数据源（组件只消费
++// items，bindings 供 workspace-switcher 超集；默认空集零干扰）。
++vi.mock("@/lib/workspace-binding", () => ({
++  fetchMyBindings: (...args: unknown[]) => mocks.fetchMyBindings(...args),
++}));
++
+ // task-10（X-009）：「关联」下拉选项数据源 mock（组件仅消费两个列表函数）。
+ vi.mock("@/lib/changes", () => ({
+   listChanges: (...args: unknown[]) => mocks.listChanges(...args),
+@@ -459,6 +469,8 @@ beforeEach(() => {
+   // task-07：群分区默认成功空集（既有用例零渲染干扰）。
+   mocks.listGroupChats.mockReset().mockResolvedValue([]);
+   mocks.listWorkspaces.mockReset();
++  // quick（ql-20260916-014）：my-bindings 默认成功空集（queryFn Promise.all 不挂）。
++  mocks.fetchMyBindings.mockReset().mockResolvedValue([]);
+   // task-10（X-009）：选项数据源默认成功空集（workspace scope 既有用例零干扰）。
+   mocks.listChanges.mockReset().mockResolvedValue({ items: [], total: 0 });
+   mocks.listQuicklogEntries.mockReset().mockResolvedValue({ items: [], total: 0 });
+diff --git a/frontend/src/lib/__tests__/daemon-session.test.ts b/frontend/src/lib/__tests__/daemon-session.test.ts
+index ba6fdca8e..aefb2af55 100644
+--- a/frontend/src/lib/__tests__/daemon-session.test.ts
++++ b/frontend/src/lib/__tests__/daemon-session.test.ts
+@@ -765,15 +765,22 @@ describe("streamSession 断线重连（ql-20260820-009）", () => {
+     conn.close();
+   });
+ 
+-  it("重连后 5s 延迟复核：再次合成终态（幂等，页面侧终态守卫消化）", async () => {
++  it("重连后 5s 延迟复核：快照含 running run 且窗口内完成 → 复核补合成终态（ql-20260916-005 门控后语义）", async () => {
+     const handlers = makeHandlers();
+     const conn = streamSession("sess-1", handlers);
+     await vi.advanceTimersByTimeAsync(0);
++    // resync 快照时 r-1 仍在运行（「快照 → 订阅」窗口内完成的正是这类 run——
++    // 5s 复核兜的缺口；全终态快照被 sawRunningRunAtSync 门控直接跳过）。
++    runsFixture[0]!.status = "running";
+     streams[0]!.close!();
+     await vi.advanceTimersByTimeAsync(1000);
+-    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(1);
++    // resync：running 轮只合成 turn_started（非终态不合成 completed）。
++    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(0);
++    // 窗口内 r-1 完成（复核时的新鲜快照已终态）。
++    runsFixture[0]!.status = "completed";
+     await vi.advanceTimersByTimeAsync(5000);
+-    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(2);
++    // 复核补合成 turn_completed（页面终态守卫消化，幂等）。
++    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(1);
+     conn.close();
+   });
+ 
+diff --git a/sillyhub-daemon/tests/daemon-provider-config-changed-handler.test.ts b/sillyhub-daemon/tests/daemon-provider-config-changed-handler.test.ts
+index ab76b2dfe..29b1d0bf2 100644
+--- a/sillyhub-daemon/tests/daemon-provider-config-changed-handler.test.ts
++++ b/sillyhub-daemon/tests/daemon-provider-config-changed-handler.test.ts
+@@ -524,9 +524,16 @@ describe('task-04 / D-009+D-011: PROVIDER_CONFIG_CHANGED 热切换按会话重
+       type: MSG.PROVIDER_CONFIG_CHANGED,
+       payload: { session_id: SESSION_ID, provider_config: codexSwitchConfig() },
+     } as DaemonMessage);
++    // quick（ql-20260916-014）：等 handler 完成信号而非首个文件——写盘是
++    // mkdir→auth.json→config.toml 多段 await，慢机上轮询到首文件就断言会在
++    // 中间态抢跑（config.toml 仍旧值 / 日志未发）。hot_switch_rewrite 日志在
++    // 全部文件写盘后同步发出，等它即等齐整条写盘链。
+     await waitForCond(() =>
+-      existsSync(join(codexHome, 'auth.json')) &&
+-      readFileSync(join(codexHome, 'auth.json'), 'utf-8').includes('sk-codex-hot-new'),
++      sawLog('hot_switch_rewrite', [
++        'session_id=' + SESSION_ID,
++        'agent_kind=codex',
++        'rewritten=true',
++      ]),
+     );
+ 
+     // 产物按新供应商重写（auth key + config.toml 端点/模型）。
+@@ -589,9 +596,15 @@ describe('task-04 / D-009+D-011: PROVIDER_CONFIG_CHANGED 热切换按会话重
+       type: MSG.PROVIDER_CONFIG_CHANGED,
+       payload: { session_id: SESSION_ID, provider_config: piSwitchConfig() },
+     } as DaemonMessage);
++    // quick（ql-20260916-014）：同 codex 用例——等 handler 完成信号（日志在
++    // 三文件全部写盘后发出），避免轮询到 settings.json 就读 auth/models.json
++    // 与日志断言抢跑中间态。
+     await waitForCond(() =>
+-      existsSync(join(piDir, 'settings.json')) &&
+-      readFileSync(join(piDir, 'settings.json'), 'utf-8').includes('kimi-k3'),
++      sawLog('hot_switch_rewrite', [
++        'session_id=' + SESSION_ID,
++        'agent_kind=pi',
++        'rewritten=true',
++      ]),
+     );
+ 
+     const settings = JSON.parse(readFileSync(join(piDir, 'settings.json'), 'utf-8')) as Record<string, unknown>;

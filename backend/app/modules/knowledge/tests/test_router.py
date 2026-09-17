@@ -843,17 +843,6 @@ async def _admin_session_record(db_session, auth_admin_token: str) -> str:
     return str(session.id)
 
 
-async def _drain_distill_tasks() -> None:
-    """等全部 distill 后台任务跑完（test_distill.py 同款确定性收口）。"""
-    import asyncio
-
-    from app.modules.knowledge.distill import _BACKGROUND_DISTILL_TASKS
-
-    tasks = list(_BACKGROUND_DISTILL_TASKS)
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-
 async def test_distill_write_endpoint_permission_states(
     client, db_session, writer_ws: dict, auth_admin_token: str
 ) -> None:
@@ -885,7 +874,7 @@ async def test_distill_dispatch_and_tasks_list_shape(
     auth_headers: dict[str, str],
     auth_admin_token: str,
 ) -> None:
-    """dispatch 响应形状（DistillTaskRead 五字段）+ 离线立即 failed + 列表只含 distill 类。"""
+    """dispatch 响应形状（DistillTaskRead 全字段）+ 离线同步收敛 failed + 列表只含 distill 类。"""
 
     from sqlalchemy import select as _select
 
@@ -906,12 +895,26 @@ async def test_distill_dispatch_and_tasks_list_shape(
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert set(body) == {"agent_run_id", "source_type", "source_ref", "status", "created_at"}
+    # D-009/D-010 扩展字段：mode/agent_session_id/merged_to/degraded_reason。
+    assert set(body) == {
+        "agent_run_id",
+        "source_type",
+        "source_ref",
+        "status",
+        "created_at",
+        "mode",
+        "agent_session_id",
+        "merged_to",
+        "degraded_reason",
+    }
     assert body["source_type"] == "session"
     assert body["source_ref"] == session_id
-    assert body["status"] in ("pending", "failed")  # fire-and-forget 与响应序列化竞态
-
-    await _drain_distill_tasks()
+    # fresh 离线兜底：同步收敛 failed/no_online_daemon（无后台任务竞态）。
+    assert body["status"] == "failed"
+    assert body["mode"] == "fresh"
+    assert body["agent_session_id"] is None
+    assert body["merged_to"] is None
+    assert body["degraded_reason"] is None
 
     # 任务列表（GET 字面量路由命中，未被 {filename:path} 通配吞）：只含 distill 类、
     # 离线终态立即可查。

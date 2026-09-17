@@ -16,6 +16,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 # 直接 422，router 的 GET /sessions query 参数同用本定义）。
 PpmItemKindLiteral = Literal["plan_task", "problem"]
 
+# ── 蒸馏会话来源常量（change 2026-09-17-knowledge-precipitation D-010④）───────
+# AgentSession.origin 第三枚举值：知识蒸馏会话（fresh 路径经 create_session 创建，
+# origin 落档使其被常规会话列表默认排除，知识库侧经 DistillTaskRead.agent_session_id
+# 跳转）。注意取值必须 ≤16 字符（agent_sessions.origin 列为 String(16)，
+# "knowledge-distill" 为 17 字符超长，故取短码 "k-distill"——语义注释锚点在此）。
+DISTILL_SESSION_ORIGIN = "k-distill"
+
 # ── Interactive session list / read (task-12, FR-10 / D-005@v1) ──────────────
 # DTO for GET /api/daemon/sessions. Field nullability aligns with the actual
 # AgentSession ORM (runtime_id / lease_id are nullable in model.py), so we do
@@ -410,10 +417,13 @@ class SessionThinkingLevelResponse(BaseModel):
     ``error`` 携带结构化文案（旧 daemon method_not_found →「daemon 未支持
     思考级别，请升级 daemon」；离线/超时/业务错误各有中文文案），HTTP 恒 200
     （照 compact 口径：调用方可修复的失败不抛 5xx）。
+    ql-20260917-008：``queued=True`` = 忙轮覆盖式暂存（pending_thinking_level），
+    本轮结束后由 run 终态钩子应用——前端据此提示「本轮结束后生效」。
     """
 
     ok: bool
     error: str | None = None
+    queued: bool = False
 
 
 class SessionAutoResumeUpdateRequest(BaseModel):

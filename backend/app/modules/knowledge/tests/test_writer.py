@@ -429,3 +429,127 @@ class TestReject:
         writer = KnowledgeWriterService(db_session)
         with pytest.raises(KnowledgeZoneNotAllowed):
             await writer.reject(env.ws.id, env.user, filename="patterns.md")
+
+
+class TestMergeBacklink:
+    """merge 反链（D-010①）：合并落点「目标文件#小节标题」双键写回来源蒸馏
+    任务条的 metadata_.merged_to（候选合并后即入备份区，反链须指合并后位置）。"""
+
+    async def _seed_distill_run(self, db_session, ws_id, source_type, source_ref):
+        from app.modules.agent.model import AgentRun
+        from app.modules.knowledge.distill import DISTILL_RUN_KIND
+        from app.modules.workspace.model import AgentRunWorkspace
+
+        run = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            metadata_={
+                "kind": DISTILL_RUN_KIND,
+                "source_type": source_type,
+                "source_ref": source_ref,
+                "focus": None,
+                "mode": "fresh",
+            },
+        )
+        db_session.add(run)
+        db_session.add(AgentRunWorkspace(agent_run_id=run.id, workspace_id=ws_id))
+        return run
+
+    async def _seed_candidate(self, db_session, ws_id, filename: str, frontmatter: str) -> None:
+        content = f"---\n{frontmatter}---\n\n# 蒸馏候选\n\n合并正文。\n"
+        await SpecWorkspaceService(db_session).apply_ops(
+            ws_id,
+            [
+                FileOp(
+                    op="add",
+                    path=f"knowledge/proposed/{filename}",
+                    content=_b64(content),
+                    base_version=0,
+                )
+            ],
+        )
+
+    async def test_merge_records_merged_to_on_distill_run(self, env, db_session) -> None:
+        source_session_id = uuid.uuid4()
+        hit_run = await self._seed_distill_run(
+            db_session, env.ws.id, "session", str(source_session_id)
+        )
+        # 不相关 run：source 不匹配，不应被写反链。
+        miss_run = await self._seed_distill_run(db_session, env.ws.id, "change", "other-change")
+        await db_session.commit()
+
+        await self._seed_candidate(
+            db_session,
+            env.ws.id,
+            "蒸馏候选.md",
+            f"author: 蒸馏\nsource: session:{source_session_id}\n",
+        )
+
+        writer = KnowledgeWriterService(db_session)
+        result = await writer.merge(
+            env.ws.id,
+            env.user,
+            filename="proposed/蒸馏候选.md",
+            target_file="known-issues.md",
+            section_title="蒸馏小节",
+            keywords=["蒸馏"],
+        )
+        assert result.merged is True
+
+        await db_session.refresh(hit_run)
+        assert hit_run.metadata_["merged_to"] == "known-issues.md#蒸馏小节"
+        await db_session.refresh(miss_run)
+        assert "merged_to" not in (miss_run.metadata_ or {})
+
+        # DistillTaskRead 投影透出 merged_to（未合并任务条仍为 null）。
+        from app.modules.knowledge.distill import _to_task_read
+
+        assert _to_task_read(hit_run).merged_to == "known-issues.md#蒸馏小节"
+
+    async def test_merge_quick_multi_ref_backlink_hits_matching_run(self, env, db_session) -> None:
+        """quick 多选蒸馏：候选 frontmatter source=quick:<id>（多选逗号分隔），
+        命中 source_ref list 中含该 ql 的任务条。"""
+        hit_run = await self._seed_distill_run(
+            db_session,
+            env.ws.id,
+            "quick",
+            ["ql-20260917-001-a", "ql-20260917-002-b"],
+        )
+        await db_session.commit()
+
+        await self._seed_candidate(
+            db_session,
+            env.ws.id,
+            "ql候选.md",
+            "author: 蒸馏\nsource: quick:ql-20260917-002-b\n",
+        )
+
+        writer = KnowledgeWriterService(db_session)
+        await writer.merge(
+            env.ws.id,
+            env.user,
+            filename="proposed/ql候选.md",
+            target_file="patterns.md",
+            section_title="ql 小节",
+            keywords=["ql"],
+        )
+
+        await db_session.refresh(hit_run)
+        assert hit_run.metadata_["merged_to"] == "patterns.md#ql 小节"
+
+    async def test_merge_manual_source_no_backlink_no_error(self, env, db_session) -> None:
+        """手工录入候选（source=manual）合并：无反链目标，静默跳过不炸。"""
+        writer = KnowledgeWriterService(db_session)
+        entry = await writer.propose_manual(env.ws.id, env.user, title="手工候选", body="正文")
+
+        result = await writer.merge(
+            env.ws.id,
+            env.user,
+            filename=entry.filename,
+            target_file="patterns.md",
+            section_title="手工小节",
+            keywords=["手工"],
+        )
+        assert result.merged is True

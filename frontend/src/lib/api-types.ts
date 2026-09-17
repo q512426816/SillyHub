@@ -372,6 +372,13 @@ export interface paths {
          *     change 2026-09-14-workspace-drag-sort（task-02 / FR-03）：两分支均透传
          *     ``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序
          *     （每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。
+         *
+         *     ql-20260917-007：非管理员分支先看**平台级授权**（``user_roles`` 持
+         *     ``workspace:read`` 或 ``platform:admin``）——与 ``has_permission`` 段 2、
+         *     通知广播收件人查找（``list_user_ids_with_permission`` 段 2）口径对齐：
+         *     这类用户对所有工作区有真实读权限，列表按全量返回；否则维持
+         *     ``allowed_workspace_ids`` 工作区级限定。修复「列表看不到工作区，
+         *     却能收到其通知、点进其内容」的三处口径割裂。
          */
         get: operations["list_workspaces_api_workspaces_get"];
         put?: never;
@@ -7514,7 +7521,7 @@ export interface paths {
         put?: never;
         /**
          * Dispatch Distill
-         * @description 派发蒸馏任务（源校验 + 创建 knowledge-distill 类 AgentRun，后台派发）。
+         * @description 派发蒸馏任务（源校验 + mode 分流：resume 续接 / fresh 新建蒸馏会话）。
          */
         post: operations["dispatch_distill_api_workspaces__workspace_id__knowledge_distill_post"];
         delete?: never;
@@ -14635,22 +14642,52 @@ export interface components {
          * DistillDispatchIn
          * @description POST /knowledge/distill 请求体（派发蒸馏任务）。
          *
-         *     ``source_ref``：会话源为 session_id（UUID 字符串）；变更源为 change_key。
+         *     ``source_ref``：会话源为 session_id（UUID 字符串，单条）；变更源为
+         *     change_key（单条）；快速修复源为 ql 自然键短码（ql-YYYYMMDD-NNN-后缀），
+         *     单条 ql 体量小故来源**多选**（list[str]，D-010②）。
+         *     ``mode``：会话源可选 ``resume``（原会话续接，D-009——进行中直接 inject、
+         *     已结束 reopen+inject，引擎/状态不满足自动降级 fresh 并记降级原因）；
+         *     ``fresh`` 为默认（零回归），change/quick 强制走 fresh。
+         *     fresh 配置字段（D-010③，复用 create_session 双入口）：
+         *     ``runtime_id`` 钉机器（优先于 ``agent_type``/provider）、``agent_type``
+         *     （provider）、``agent_profile_id``、``model``。
          */
         DistillDispatchIn: {
             /**
              * Source Type
              * @enum {string}
              */
-            source_type: "session" | "change";
+            source_type: "session" | "change" | "quick";
             /** Source Ref */
-            source_ref: string;
+            source_ref: string | string[];
             /** Focus */
             focus?: string | null;
+            /**
+             * Mode
+             * @default fresh
+             * @enum {string}
+             */
+            mode: "resume" | "fresh";
+            /** Runtime Id */
+            runtime_id?: string | null;
+            /** Agent Type */
+            agent_type?: string | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Model */
+            model?: string | null;
         };
         /**
          * DistillTaskRead
          * @description 蒸馏任务条（AgentRun 与 metadata_ 投影；dispatch 响应复用同形状）。
+         *
+         *     ``agent_session_id``：蒸馏实际执行的 AgentSession（D-009/D-010——resume
+         *     为续接的原会话、fresh 为 create_session 新建的蒸馏会话），供知识库侧
+         *     跳转；后台离线兜底失败时无会话为 null。
+         *     ``merged_to``：合并后知识点位置（``目标文件#小节标题`` 双键，D-010①
+         *     反链，防锚点漂移）；未合并=null。
+         *     ``mode``：实际执行形态（resume 请求被降级守卫改写时为 ``fresh``）。
+         *     ``degraded_reason``：resume 降级原因（未降级=null）。
          */
         DistillTaskRead: {
             /**
@@ -14669,6 +14706,17 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Mode
+             * @default fresh
+             */
+            mode: string;
+            /** Agent Session Id */
+            agent_session_id?: string | null;
+            /** Merged To */
+            merged_to?: string | null;
+            /** Degraded Reason */
+            degraded_reason?: string | null;
         };
         /**
          * DocumentsSyncOk
@@ -22794,12 +22842,19 @@ export interface components {
          *     ``error`` 携带结构化文案（旧 daemon method_not_found →「daemon 未支持
          *     思考级别，请升级 daemon」；离线/超时/业务错误各有中文文案），HTTP 恒 200
          *     （照 compact 口径：调用方可修复的失败不抛 5xx）。
+         *     ql-20260917-008：``queued=True`` = 忙轮覆盖式暂存（pending_thinking_level），
+         *     本轮结束后由 run 终态钩子应用——前端据此提示「本轮结束后生效」。
          */
         SessionThinkingLevelResponse: {
             /** Ok */
             ok: boolean;
             /** Error */
             error?: string | null;
+            /**
+             * Queued
+             * @default false
+             */
+            queued: boolean;
         };
         /**
          * SessionThinkingLevelsResponse

@@ -70,3 +70,9 @@ read_only PI worker 正常完成（分支产物已 commit、`output_redacted` 50
 
 - 已知断裂点修复已验证在 main（d879ea247：resolve_mission_for_session run 归属回退 + external 首 run 锚成员资格，守护测试锚点齐）；本文件定位为「双形态契约守则」参考文档，长期有效。
 - 待补建议（report_progress / mission_status 的 external 冒烟用例）属防回归增强，留属主/后续认领；守则本身随每次新写解析/治理逻辑复用。保持活跃（守则文档属性，不随单点修复归档）。
+
+## 巡检注记（2026-09-16 定时扫描复核）
+
+- 已知断裂点守护锚点再核全在 main：`resolve_mission_for_session` run 归属回退 + external 首 run 锚（`_mission_from_session_runs`）+ `_worker_done_core` 首 run 锚成员资格 + 守护测试 `test_mission_external_mode.py`（AC-04/05）/ `test_worker_subsession_done.py::TestExternalModeWorkerDone`，源头修复未回退。
+- **待补建议（report_progress / mission_status 的 external 冒烟用例）已转正式登记**：grep 实证两仓在途 change（`2026-09-16-mobile-changes-parity` 等）与 quicklog 均无该测试的认领记录，不再「留属主」口头挂着。正式转登记到 sillyspec 改进债单 `docs/sillyspec/prompt-control-debt.md`（下次编辑该债单时补入「external 冒烟用例」一项），由债单例行跟踪认领。
+- 本文件仍定位「双形态契约守则」参考文档，长期有效；随每次新写解析/治理逻辑复用。保持活跃。

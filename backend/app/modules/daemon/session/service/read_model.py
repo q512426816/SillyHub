@@ -19,7 +19,11 @@ from app.modules.agent.model import (
 )
 from app.modules.change.model import ChangeSessionLink, QuicklogSessionLink
 from app.modules.daemon.model import DaemonRuntime
-from app.modules.daemon.schema import SessionUsageModelItemRead, SessionUsageRead
+from app.modules.daemon.schema import (
+    DISTILL_SESSION_ORIGIN,
+    SessionUsageModelItemRead,
+    SessionUsageRead,
+)
 from app.modules.ppm.common.session_binding import PpmItemKind, PpmItemSessionLink
 
 from .errors import DaemonSessionNotFound
@@ -56,6 +60,11 @@ async def list_agent_sessions(
     # None=不过滤（admin debug 等显式覆盖）。存量行迁移后 server_default
     # 'chat'，默认过滤对既有查询零行为变化。
     session_kind: str | None = "chat",
+    # 2026-09-17-knowledge-precipitation D-010④：会话来源排除——蒸馏会话
+    # （origin=DISTILL_SESSION_ORIGIN）默认不进常规会话列表（知识库侧经
+    # DistillTaskRead.agent_session_id 跳转）；None=显式不过滤（admin debug）。
+    # 存量行 origin server_default 'chat'，默认排除对既有查询零行为变化。
+    exclude_origin: str | None = DISTILL_SESSION_ORIGIN,
 ) -> tuple[list[AgentSession], int]:
     """Owner-scoped list of AgentSession with stable paging.
 
@@ -125,6 +134,9 @@ async def list_agent_sessions(
     # 群会话与 group_member 影子会话不进普通列表）。
     if session_kind is not None:
         base_filters.append(AgentSession.session_kind == session_kind)
+    # D-010④：默认排除蒸馏会话（exclude_origin=None 时显式不过滤）。
+    if exclude_origin is not None:
+        base_filters.append(AgentSession.origin != exclude_origin)
     if status_filter is not None:
         base_filters.append(AgentSession.status == status_filter)
     if runtime_id is not None:

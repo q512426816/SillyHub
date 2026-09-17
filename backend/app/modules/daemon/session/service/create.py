@@ -101,6 +101,11 @@ async def create_session(
     # 既有逻辑（D-6 引擎门控 / 归属 404 / 数量 422 / marker 行回显 /
     # SESSION_INJECT attachments）。缺省 None = 旧调用行为逐字节不变。
     attachment_ids: list[uuid.UUID] | None = None,
+    # 2026-09-17-knowledge-precipitation D-010④：会话来源落档（origin 列第三
+    # 枚举值——知识蒸馏会话 DISTILL_SESSION_ORIGIN，使常规会话列表可过滤隔离；
+    # 调用方 = knowledge.distill fresh 路径）。缺省 None = 落 server_default
+    # 'chat'（存量三路调用行为逐字节不变，零回归）。
+    origin: str | None = None,
 ) -> SessionDispatchResult:
     """Create an interactive session + first-turn run + interactive lease.
 
@@ -277,6 +282,9 @@ async def create_session(
             # task-04 / FR-02 / design §5.B：分身子会话挂 parent（D-001@v1 会话
             # 树）；缺省 None = 现状（非分身会话恒 NULL，零回归）。
             parent_session_id=parent_session_id,
+            # D-010④：会话来源落档（origin=None 时 'chat' 同 server_default，
+            # 存量调用行为逐字节不变）。
+            origin=origin or "chat",
         )
         svc._session.add(session)
         await svc._session.flush()

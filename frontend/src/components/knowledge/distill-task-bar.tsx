@@ -19,6 +19,10 @@
  *     error_code / 错误信息（task-07 契约字段仅 agent_run_id / source_type /
  *     source_ref / status / created_at），前端无法区分 no_online_daemon 与
  *     其它失败——失败文案统一覆盖「daemon 离线或执行中断」（R-05 主因透出）。
+ *   - D-009/D-010 增量（task-08 扩展）：进行中/终态行展示 degraded_reason
+ *     降级提示（resume 被降级守卫改写 fresh）；completed 且 merged_to 非空的
+ *     终态行渲染「已合并到 <目标小节>」反链按钮，点击经 onJumpToEntry 跳
+ *     目标知识文件（merged_to 为「文件#小节」双键，防锚点漂移）。
  *   - 终态短暂停留后消失（卡片原话）：完成 / 失败行自转移观测时刻起
  *     DISTILL_TERMINAL_LINGER_MS 窗内继续渲染，到期由 timer 主动清除（不依赖
  *     下一轮轮询——react-query 结构共享对内容不变的重拉保持旧数组引用，
@@ -61,10 +65,26 @@ function isTerminalStatus(status: string): boolean {
   return status !== "pending" && status !== "running";
 }
 
-/** 来源摘要（原型 .meta 文案）：会话引用是 UUID 取前 8 位，变更引用即 change_key。 */
+/** 来源摘要（原型 .meta 文案）：会话引用是 UUID 取前 8 位，变更引用即 change_key；
+ *  quick 多选的 source_ref 为 list 投影（JSON 串或单条），按条数摘要（D-010②）。 */
 function sourceSummary(task: DistillTaskRead): string {
   if (task.source_type === "change") {
     return `正在从变更归档「${task.source_ref}」提炼知识`;
+  }
+  if (task.source_type === "quick") {
+    let count = 1;
+    const raw = task.source_ref;
+    if (raw && raw.trim().startsWith("[")) {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (Array.isArray(parsed)) count = parsed.length;
+      } catch {
+        /* 非 JSON 按单条兜底 */
+      }
+    }
+    return count > 1
+      ? `正在从 ${count} 条快速修复记录提炼知识`
+      : "正在从快速修复记录提炼知识";
   }
   const ref = task.source_ref ? task.source_ref.slice(0, 8) : "—";
   return `正在从会话记录（${ref}…）提炼知识`;
@@ -72,6 +92,31 @@ function sourceSummary(task: DistillTaskRead): string {
 
 /** 失败文案（含 daemon 离线，acceptance「失败态可见 daemon 离线对应文案」）。 */
 export const DISTILL_FAILURE_TEXT = "提炼任务失败：daemon 离线或执行中断，可重新派发";
+
+/**
+ * resume 降级文案（D-009/D-010，后端 degraded_reason 字面量 → 中文提示；
+ * 未知原因按「已降级：<原值>」兜底，宁宽勿断）。resume 请求被降级守卫改写为
+ * fresh 时任务自创建起即带该字段，进行中行与终态行都会展示。
+ */
+const DEGRADED_REASON_TEXT: Record<string, string> = {
+  provider_no_resume: "已降级：引擎不支持续接，已改为新建 agent",
+  session_status_not_reopenable: "已降级：会话状态不可续接，已改为新建 agent",
+  resume_only_for_session_source: "已降级：仅会话来源支持续接，已改为新建 agent",
+};
+
+export function distillDegradedText(reason: string): string {
+  return DEGRADED_REASON_TEXT[reason] ?? `已降级：${reason}`;
+}
+
+/**
+ * merged_to 双键拆分（D-010①）：「目标文件#小节标题」→ 文件段用于反链跳转
+ * （父级选中并加载该知识条目）；小节段仅展示。无 `#` 时整串当文件段。
+ */
+export function splitMergedTo(mergedTo: string): { file: string; section: string | null } {
+  const idx = mergedTo.indexOf("#");
+  if (idx < 0) return { file: mergedTo, section: null };
+  return { file: mergedTo.slice(0, idx), section: mergedTo.slice(idx + 1) || null };
+}
 
 /** 终态行停留条目（任务快照 + 转移观测时刻）。 */
 interface TerminalLinger {
@@ -83,10 +128,15 @@ export interface DistillTaskBarProps {
   workspaceId: string;
   /** 任务转 completed 后的回调（父级刷新知识列表，蒸馏产物出现在待审核区）。 */
   onCompleted: () => void;
+  /**
+   * merged_to 反链跳转（D-010①）：点击终态行「已合并到 <目标小节>」时回父级，
+   * 入参为 merged_to 的文件段（目标知识文件名），父级选中并加载该条目。
+   */
+  onJumpToEntry?: (filename: string) => void;
   className?: string;
 }
 
-export function DistillTaskBar({ workspaceId, onCompleted, className }: DistillTaskBarProps) {
+export function DistillTaskBar({ workspaceId, onCompleted, onJumpToEntry, className }: DistillTaskBarProps) {
   const notify = useNotify();
 
   const tasksQ = useQuery({
@@ -192,7 +242,8 @@ export function DistillTaskBar({ workspaceId, onCompleted, className }: DistillT
         className,
       )}
     >
-      {/* 进行中行（原型 .distill-bar：spinner + 「蒸馏进行中」标签 + 来源摘要） */}
+      {/* 进行中行（原型 .distill-bar：spinner + 「蒸馏进行中」标签 + 来源摘要；
+          D-009：resume 被降级守卫改写 fresh 的任务行内展示降级原因） */}
       {activeTasks.map((task) => (
         <div
           key={task.agent_run_id}
@@ -209,10 +260,19 @@ export function DistillTaskBar({ workspaceId, onCompleted, className }: DistillT
           <span className="min-w-0 flex-1 truncate text-muted-foreground">
             {sourceSummary(task)}，完成后候选进入「待审核」
           </span>
+          {task.degraded_reason && (
+            <span
+              data-testid="distill-row-degraded"
+              className="shrink-0 rounded-full bg-warning/10 px-2 py-0.5 text-[10.5px] font-medium leading-4 text-warning"
+            >
+              {distillDegradedText(task.degraded_reason)}
+            </span>
+          )}
         </div>
       ))}
 
-      {/* 终态停留行（完成/失败短暂展示，随轮询消失） */}
+      {/* 终态停留行（完成/失败短暂展示，随轮询消失）；D-010①：completed 且
+          merged_to 非空时展示「已合并到 <目标小节>」反链，点击跳目标文件 */}
       {terminalRows.map(({ task }) => (
         <div
           key={`terminal-${task.agent_run_id}`}
@@ -224,9 +284,26 @@ export function DistillTaskBar({ workspaceId, onCompleted, className }: DistillT
               <span className="shrink-0 rounded-full bg-success/10 px-2 py-0.5 text-[10.5px] font-medium leading-4 text-success">
                 提炼完成
               </span>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                候选知识已进入「待审核」区，请前往审核合并。
-              </span>
+              {task.merged_to ? (
+                <button
+                  type="button"
+                  data-testid="distill-merged-link"
+                  title={`已合并到 ${task.merged_to}，点击跳转`}
+                  onClick={() => onJumpToEntry?.(splitMergedTo(task.merged_to as string).file)}
+                  className="min-w-0 flex-1 truncate text-left text-brand-600 hover:underline"
+                >
+                  已合并到 {task.merged_to}
+                </button>
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                  候选知识已进入「待审核」区，请前往审核合并。
+                </span>
+              )}
+              {task.degraded_reason && (
+                <span className="shrink-0 rounded-full bg-warning/10 px-2 py-0.5 text-[10.5px] font-medium leading-4 text-warning">
+                  {distillDegradedText(task.degraded_reason)}
+                </span>
+              )}
             </>
           ) : (
             <>

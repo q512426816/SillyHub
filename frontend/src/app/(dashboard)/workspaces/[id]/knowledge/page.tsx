@@ -291,20 +291,27 @@ export default function KnowledgePage({ params }: Props) {
     setExpandedKeys(collectDirPaths(tree));
   }, [tree]);
 
+  /** 选中并加载某个知识条目（树选择 onSelectTree 与 D-010① 反链跳转共用）。 */
+  const selectEntry = useCallback(
+    (filename: string) => {
+      setSelectedFilename(filename);
+      setEditing(false);
+      getKnowledge(workspaceId, filename)
+        .then((entry) => {
+          setSelectedContent(entry.content ?? null);
+          setSelectedTitle(entry.title ?? entry.filename);
+          setSelectedZone(zoneOf(entry));
+        })
+        .catch((err) => {
+          setPageError(err instanceof ApiError ? err.message : "加载文档失败");
+        });
+    },
+    [workspaceId],
+  );
+
   const onSelectTree: TreeProps["onSelect"] = (_keys, info) => {
     if (!info.node.isLeaf) return;
-    const filename = String(info.node.key);
-    setSelectedFilename(filename);
-    setEditing(false);
-    getKnowledge(workspaceId, filename)
-      .then((entry) => {
-        setSelectedContent(entry.content ?? null);
-        setSelectedTitle(entry.title ?? entry.filename);
-        setSelectedZone(zoneOf(entry));
-      })
-      .catch((err) => {
-        setPageError(err instanceof ApiError ? err.message : "加载文档失败");
-      });
+    selectEntry(String(info.node.key));
   };
 
   const isMarkdown = selectedFilename?.toLowerCase().endsWith(".md") ?? false;
@@ -370,10 +377,12 @@ export default function KnowledgePage({ params }: Props) {
       )}
 
       {/* 蒸馏任务条（task-08 / 原型 .distill-bar 位）：无进行中任务时不渲染；
-          任务完成经 onCompleted 重拉列表，候选出现在待审核区。 */}
+          任务完成经 onCompleted 重拉列表，候选出现在待审核区；D-010① merged_to
+          反链点击选中目标知识条目。 */}
       <DistillTaskBar
         workspaceId={workspaceId}
         onCompleted={() => loadList(workspaceId)}
+        onJumpToEntry={selectEntry}
       />
 
       {loading ? (
@@ -518,6 +527,8 @@ export default function KnowledgePage({ params }: Props) {
               queryKey: distillTasksQueryKey(workspaceId),
             });
           }}
+          // D-010① 已沉淀反链：来源项「已沉淀 ↗」点击选中 merged_to 目标条目。
+          onJumpToKnowledge={selectEntry}
         />
       )}
 
