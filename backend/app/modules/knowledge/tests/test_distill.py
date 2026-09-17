@@ -1,10 +1,11 @@
-"""DistillDispatchService 单测（task-07 + D-009 续接分流 + D-010 闭环增强）。
+"""DistillDispatchService 单测（task-07 + D-009 续接分流 + D-010 闭环增强 +
+D-008 取数通道/回流指引/体量护栏）。
 
 覆盖（卡片 verify 契约）：
 1. 源校验分支：无记录会话（turn_count=0）422 / 未归档变更 422 / ql 文件缺失
    422（D-010②）/ session、change 多来源 422 /
    不存在的会话、变更沿既有 404 语义（DaemonSessionNotFound / ChangeNotFound）
-2. fresh 派发（默认，零回归）：复用 create_session——离线环境
+2. fresh 派发（默认）：复用 create_session——离线环境
    NoOnlineDaemonError/DaemonRuntimeOffline 收敛为 failed/no_online_daemon
    蒸馏任务条（R-05），metadata_ 落 kind/source_type/source_ref/focus/mode
 3. mode=resume（D-009）：已结束会话 reopen+inject、进行中会话仅 inject、
@@ -17,6 +18,10 @@
 6. 任务列表：仅 knowledge-distill 类、created_at 倒序、DistillTaskRead 新字段
    （mode/agent_session_id/merged_to/degraded_reason）投影
 7. prompt 模板（R-05）：会话/变更/快速修复三式 + resume 式 + focus 嵌入
+8. D-008：fresh 会话源导出附件取数通道（attachment_ids 透传 + prompt 指读
+   附件文件）；导出渲染（轮分节/噪声排除/单条截断/行数保最早）；体量护栏
+   （turn 预检 422 / 导出字节超限 422 / 非多模态引擎 422）；prompt 的
+   --spec-dir 回流指引（洞二）
 
 service 层直测（HTTP 权限/路由序用例见 test_router.py task-07 段）。
 """
@@ -24,12 +29,14 @@ service 层直测（HTTP 权限/路由序用例见 test_router.py task-07 段）
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
 
-from app.modules.agent.model import AgentRun, AgentSession
+from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
 from app.modules.change.model import Change
 from app.modules.daemon.schema import DISTILL_SESSION_ORIGIN, SessionReopenResponse
@@ -47,6 +54,24 @@ from app.modules.knowledge.distill import (
 )
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
+
+
+def _fake_distill_attachment(source_session_id: uuid.UUID) -> SimpleNamespace:
+    """上传 patch 的假附件（duck-type id/name——dispatch 只取这两属性）。"""
+    return SimpleNamespace(id=uuid.uuid4(), name=f"distill-source-{str(source_session_id)[:8]}.md")
+
+
+def _patch_upload(monkeypatch, uploaded: dict | None = None) -> None:
+    """把 _upload_distill_source 换成假上传（单测无 MinIO；记录入参供断言）。"""
+
+    async def _fake_upload(db, user_id, source_session_id, data):
+        if uploaded is not None:
+            uploaded["user_id"] = user_id
+            uploaded["source_session_id"] = source_session_id
+            uploaded["data"] = data
+        return _fake_distill_attachment(source_session_id)
+
+    monkeypatch.setattr(distill_module, "_upload_distill_source", _fake_upload)
 
 
 async def _make_distill_env(
@@ -130,6 +155,41 @@ def _make_run(db_session, *, metadata_: dict | None = None, status: str = "pendi
     )
     db_session.add(run)
     return run
+
+
+async def _seed_session_logs(
+    db_session,
+    agent_session_id: uuid.UUID,
+    turns: list[list[tuple[str, str]]],
+    *,
+    base_time: datetime | None = None,
+) -> None:
+    """按轮播种会话日志：turns[i] = 第 i 轮 (channel, content) 列表（每轮一个 run）。
+
+    started_at / 逐条 timestamp 递增，保证导出的跨 run 时序确定（锚排序可复现）。
+    """
+    base = base_time or datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
+    for turn_index, messages in enumerate(turns):
+        run = AgentRun(
+            id=uuid.uuid4(),
+            agent_session_id=agent_session_id,
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            model="test-model",
+            started_at=base + timedelta(minutes=turn_index),
+        )
+        db_session.add(run)
+        for seq, (channel, content) in enumerate(messages):
+            db_session.add(
+                AgentRunLog(
+                    run_id=run.id,
+                    channel=channel,
+                    content_redacted=content,
+                    timestamp=base + timedelta(minutes=turn_index, seconds=seq),
+                )
+            )
+    await db_session.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -250,11 +310,13 @@ async def test_dispatch_fresh_offline_daemon_creates_failed_run_with_metadata(
     db_session, tmp_path, auth_admin_token, monkeypatch
 ) -> None:
     """fresh 默认路径：create_session 离线（NoOnlineDaemonError）→ 补建
-    failed/no_online_daemon 蒸馏任务条（R-05），metadata_ 六键齐全。"""
+    failed/no_online_daemon 蒸馏任务条（R-05），metadata_ 六键齐全。
+    D-008：fresh 会话源先走导出+附件上传（patch 假上传，单测无 MinIO）。"""
     from app.modules.agent.placement import NoOnlineDaemonError
 
     ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
     session = await _make_session_record(db_session, user.id, turn_count=5)
+    _patch_upload(monkeypatch)
 
     async def _fake_create_session(*args, **kwargs):
         raise NoOnlineDaemonError(user_id=uuid.uuid4())
@@ -498,13 +560,15 @@ async def test_dispatch_resume_degrades_to_fresh_with_reason(
     db_session, tmp_path, auth_admin_token, monkeypatch, provider, status, expected_reason
 ) -> None:
     """降级守卫：provider 无 resume 能力 / 状态不可 reopen → 自动降级 fresh
-    并在任务条记 degraded_reason（D-009）。"""
+    并在任务条记 degraded_reason（D-009）。降级后走 fresh 会话源导出链
+    （D-008：patch 假上传）。"""
     from app.modules.agent.placement import NoOnlineDaemonError
 
     ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
     session = await _make_session_record(
         db_session, user.id, turn_count=5, status=status, provider=provider
     )
+    _patch_upload(monkeypatch)
 
     async def _fake_create_session(*args, **kwargs):
         raise NoOnlineDaemonError(user_id=uuid.uuid4())
@@ -595,6 +659,7 @@ async def test_list_tasks_filters_distill_kind_and_sorts_desc(
     ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
     session = await _make_session_record(db_session, user.id, turn_count=1)
     change_key = await _make_change(db_session, ws.id, status="archived")
+    _patch_upload(monkeypatch)
 
     async def _fake_create_session(svc, user_id, **kwargs):
         agent_session = AgentSession(
@@ -649,23 +714,72 @@ async def test_list_tasks_filters_distill_kind_and_sorts_desc(
 
 
 def test_build_distill_prompt_three_variants() -> None:
-    """会话/变更/快速修复三式 + focus 可选嵌入 + propose 命令用法固化。"""
-    session_prompt = build_distill_prompt("session", "024a9fc2", "只提取踩坑")
-    assert "session_id：024a9fc2" in session_prompt
+    """会话/变更/快速修复三式 + focus 可选嵌入 + propose 命令用法固化。
+
+    D-008：fresh 会话式必须指读导出附件（不再指裸 session_id 读取通道——
+    DB 指针 agent 不可读）；change/quick 式带 spec_dir 时来源路径指平台同步树。"""
+    session_prompt = build_distill_prompt(
+        "session", "024a9fc2", "只提取踩坑", export_name="distill-source-024a9fc2.md"
+    )
+    assert "distill-source-024a9fc2.md" in session_prompt
+    assert "attachments/" in session_prompt
+    assert "session_id：024a9fc2" in session_prompt  # 仅背景参考保留
     assert "只提取踩坑" in session_prompt
     assert "sillyspec knowledge propose --title" in session_prompt
     assert "--category" in session_prompt and "--body" in session_prompt
 
-    change_prompt = build_distill_prompt("change", "2026-09-17-demo", None)
+    change_prompt = build_distill_prompt(
+        "change", "2026-09-17-demo", None, spec_dir="~/.sillyhub/daemon/specs/ws-1"
+    )
     assert "change_key：2026-09-17-demo" in change_prompt
+    assert "~/.sillyhub/daemon/specs/ws-1/changes/archive/2026-09-17-demo/" in change_prompt
     assert "关注点" not in change_prompt
     assert "sillyspec knowledge propose" in change_prompt
 
-    quick_prompt = build_distill_prompt("quick", ["ql-20260917-001-a", "ql-20260917-002-b"], None)
-    assert ".sillyspec/quicklog/ql-20260917-001-a.md" in quick_prompt
-    assert ".sillyspec/quicklog/ql-20260917-002-b.md" in quick_prompt
+    quick_prompt = build_distill_prompt(
+        "quick",
+        ["ql-20260917-001-a", "ql-20260917-002-b"],
+        None,
+        spec_dir="~/.sillyhub/daemon/specs/ws-1",
+    )
+    assert "~/.sillyhub/daemon/specs/ws-1/quicklog/ql-20260917-001-a.md" in quick_prompt
+    assert "~/.sillyhub/daemon/specs/ws-1/quicklog/ql-20260917-002-b.md" in quick_prompt
     assert "共 2 条" in quick_prompt
     assert "sillyspec knowledge propose" in quick_prompt
+
+    # 无 spec_dir 的旧形（直调兼容）：quick 路径回落 cwd 相对 .sillyspec。
+    quick_legacy = build_distill_prompt("quick", ["ql-20260917-001-a"], None)
+    assert ".sillyspec/quicklog/ql-20260917-001-a.md" in quick_legacy
+
+
+def test_build_distill_prompt_session_fresh_requires_export_name() -> None:
+    """fresh 会话式缺 export_name → ValueError（防回归裸 session_id 断链 prompt）。"""
+    with pytest.raises(ValueError, match="export_name"):
+        build_distill_prompt("session", "024a9fc2", None)
+
+
+def test_build_distill_prompt_spec_dir_propose_guidance() -> None:
+    """洞二回流指引：全来源（含 resume 式）propose 命令带 --spec-dir 平台同步树。"""
+    spec_dir = "~/.sillyhub/daemon/specs/ws-1"
+    fresh_session = build_distill_prompt(
+        "session", "sid-1", None, export_name="distill-source-sid-1.md", spec_dir=spec_dir
+    )
+    resume_session = build_distill_prompt(
+        "session", "sid-1", None, for_resume=True, spec_dir=spec_dir
+    )
+    change = build_distill_prompt("change", "key-1", None, spec_dir=spec_dir)
+    quick = build_distill_prompt("quick", "ql-a", None, spec_dir=spec_dir)
+    for label, prompt in (
+        ("fresh_session", fresh_session),
+        ("resume_session", resume_session),
+        ("change", change),
+        ("quick", quick),
+    ):
+        assert f"--spec-dir {spec_dir}" in prompt, label
+        assert "上行回流" in prompt, label
+    # 无 spec_dir 旧形不带该参数（零回归直调路径）。
+    legacy = build_distill_prompt("change", "key-1", None)
+    assert "--spec-dir" not in legacy
 
 
 def test_build_distill_prompt_resume_variant() -> None:
@@ -673,3 +787,248 @@ def test_build_distill_prompt_resume_variant() -> None:
     resume_prompt = build_distill_prompt("session", "024a9fc2", None, for_resume=True)
     assert "本会话本身的完整对话记录" in resume_prompt
     assert "session_id" not in resume_prompt
+
+
+# ---------------------------------------------------------------------------
+# D-008 洞一：导出渲染 + 附件取数通道 / 洞三：体量护栏
+# ---------------------------------------------------------------------------
+
+
+async def test_export_session_transcript_renders_turns_noise_and_clip(
+    db_session, tmp_path, auth_admin_token
+) -> None:
+    """导出渲染：run 分轮 + 用户/助手正文 + 噪声排除（与导出档同源）+ 单条 8KB 截断。"""
+    _ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
+    session = await _make_session_record(db_session, user.id, turn_count=2)
+    # 超长单条：逐行可区分（首尾行不同），断言截断保留头部、丢弃尾部。
+    long_body = "\n".join(
+        f"行{i}：" + "坑" * 80
+        for i in range(distill_module.DISTILL_EXPORT_MESSAGE_CHARS // 60 + 20)
+    )
+    await _seed_session_logs(
+        db_session,
+        session.id,
+        [
+            [
+                ("user_input", "帮我修登录超时的问题"),
+                ("stdout", "[TOOL_USE] Bash(cd /tmp)"),  # 噪声：工具双发文本行
+                ("stdout", "[ASSISTANT] 已定位：刷新请求缺超时"),
+                ("stderr", "some noise"),  # 非 chat channel 不进正文
+            ],
+            [
+                ("user_input", "继续"),
+                ("stdout", f"[ASSISTANT] {long_body}"),  # 超长单条 → 截断
+            ],
+        ],
+    )
+
+    markdown, total_rows = await distill_module._export_session_transcript(db_session, session.id)
+    assert total_rows == 6
+    assert "## 第 1 轮" in markdown and "## 第 2 轮" in markdown
+    assert "帮我修登录超时的问题" in markdown
+    assert "已定位：刷新请求缺超时" in markdown
+    assert "刷新请求缺超时" in markdown
+    # 噪声排除：TOOL_USE 文本行 / stderr / [ASSISTANT] 发言方前缀都不出现。
+    assert "[TOOL_USE]" not in markdown
+    assert "some noise" not in markdown
+    assert "[ASSISTANT]" not in markdown
+    # 单条截断标注（洞三）：保留截断头部、丢弃尾部、标注原文长度。
+    assert "已截断" in markdown
+    assert "行0：" in markdown
+    assert f"行{len(long_body.splitlines()) - 1}：" not in markdown
+    # 头部含来源会话与收录口径说明。
+    assert str(session.id) in markdown
+    assert "知识蒸馏源" in markdown
+
+
+async def test_export_session_transcript_row_limit_keeps_earliest(
+    db_session, tmp_path, auth_admin_token, monkeypatch
+) -> None:
+    """洞三行数护栏：超上限保最早 + 尾注丢弃行数（阈值缩到 3 便测）。"""
+    _ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
+    session = await _make_session_record(db_session, user.id, turn_count=2)
+    await _seed_session_logs(
+        db_session,
+        session.id,
+        [
+            [("user_input", "第一条-最早"), ("stdout", "[ASSISTANT] 第二条")],
+            [
+                ("user_input", "第三条"),
+                ("user_input", "第四条-被丢弃"),
+                ("user_input", "第五条-被丢弃"),
+            ],
+        ],
+    )
+    monkeypatch.setattr(distill_module, "DISTILL_EXPORT_ROW_LIMIT", 3)
+
+    markdown, total_rows = await distill_module._export_session_transcript(db_session, session.id)
+    assert total_rows == 5
+    assert "第一条-最早" in markdown
+    assert "第三条" in markdown
+    assert "第四条-被丢弃" not in markdown
+    assert "第五条-被丢弃" not in markdown
+    assert "已保留最早" in markdown and "丢弃 2 行" in markdown
+
+
+async def test_dispatch_fresh_session_exports_and_attaches_transcript(
+    db_session, tmp_path, auth_admin_token, monkeypatch
+) -> None:
+    """洞一取数通道端到端（逻辑级）：导出 → 假上传 → create_session 带
+    attachment_ids；prompt 指读附件文件 + propose 带 --spec-dir（洞二）。"""
+    ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
+    session = await _make_session_record(db_session, user.id, turn_count=1)
+    await _seed_session_logs(
+        db_session,
+        session.id,
+        [[("user_input", "帮我修登录超时的问题"), ("stdout", "[ASSISTANT] 修好了")]],
+    )
+    uploaded: dict = {}
+    _patch_upload(monkeypatch, uploaded)
+    captured: dict = {}
+
+    async def _fake_create_session(svc, user_id, **kwargs):
+        captured.update(kwargs)
+        agent_session = AgentSession(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            provider=kwargs.get("provider") or "claude",
+            status="active",
+            turn_count=1,
+            origin=kwargs.get("origin") or "chat",
+        )
+        db_session.add(agent_session)
+        run = _make_run(db_session)
+        await db_session.commit()
+        return SessionDispatchResult(
+            agent_session=agent_session, agent_run=run, lease_id=uuid.uuid4()
+        )
+
+    monkeypatch.setattr(distill_module, "_create_session", _fake_create_session)
+
+    task_read = await DistillDispatchService(db_session).dispatch(
+        ws.id, user, source_type="session", source_ref=str(session.id)
+    )
+    assert task_read.mode == "fresh"
+
+    # 上传的是来源会话的导出 Markdown（含对话正文）。
+    assert uploaded["source_session_id"] == session.id
+    transcript = uploaded["data"].decode("utf-8")
+    assert "帮我修登录超时的问题" in transcript
+    assert "修好了" in transcript
+
+    # create_session 收到附件 id（daemon deliver=disk 落盘 {cwd}/attachments/）。
+    assert captured["attachment_ids"] is not None and len(captured["attachment_ids"]) == 1
+
+    # prompt：指读附件文件（附件名 + attachments/ 路径指引）+ --spec-dir 回流。
+    prompt = captured["prompt"]
+    assert f"distill-source-{str(session.id)[:8]}.md" in prompt
+    assert "attachments/" in prompt
+    assert "附件已落盘" in prompt
+    assert f"--spec-dir ~/.sillyhub/daemon/specs/{ws.id}" in prompt
+
+
+async def test_dispatch_fresh_runtime_derived_engine_unsupported_converts_422(
+    db_session, tmp_path, auth_admin_token, monkeypatch
+) -> None:
+    """洞一引擎门控兜底：runtime_id 派生引擎非多模态（dispatch 预检覆盖不到）
+    → create_session 附件校验抛 DaemonSessionAttachmentsUnsupported，转蒸馏源
+    422 并给 resume 引导。"""
+    from app.modules.daemon.session.service.errors import (
+        DaemonSessionAttachmentsUnsupported,
+    )
+
+    ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
+    session = await _make_session_record(db_session, user.id, turn_count=5)
+    _patch_upload(monkeypatch)
+
+    async def _fake_create_session(*args, **kwargs):
+        raise DaemonSessionAttachmentsUnsupported(
+            "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
+            details={"provider": "codex"},
+        )
+
+    monkeypatch.setattr(distill_module, "_create_session", _fake_create_session)
+
+    with pytest.raises(DistillSourceInvalid) as exc_info:
+        await DistillDispatchService(db_session).dispatch(
+            ws.id,
+            user,
+            source_type="session",
+            source_ref=str(session.id),
+            runtime_id=str(uuid.uuid4()),  # 预检覆盖不到的路径
+        )
+    assert "不支持会话附件" in exc_info.value.message
+    assert "mode=resume" in exc_info.value.message
+
+
+async def test_dispatch_session_too_many_turns_returns_422(
+    db_session, tmp_path, auth_admin_token, monkeypatch
+) -> None:
+    """洞三 turn 预检：超过阈值 → 422 引导 resume，且不触导出/上传/建会话。"""
+    ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
+    session = await _make_session_record(
+        db_session, user.id, turn_count=distill_module.DISTILL_MAX_SESSION_TURNS + 1
+    )
+
+    async def _fail_upload(*args, **kwargs):
+        pytest.fail("turn 超限应在上传前 422")
+
+    monkeypatch.setattr(distill_module, "_upload_distill_source", _fail_upload)
+
+    with pytest.raises(DistillSourceInvalid) as exc_info:
+        await DistillDispatchService(db_session).dispatch(
+            ws.id, user, source_type="session", source_ref=str(session.id)
+        )
+    assert "轮数过多" in exc_info.value.message
+    assert "mode=resume" in exc_info.value.message
+
+    runs = (await db_session.execute(select(AgentRun))).scalars().all()
+    assert runs == []
+
+
+async def test_dispatch_fresh_session_export_over_byte_cap_returns_422(
+    db_session, tmp_path, auth_admin_token, monkeypatch
+) -> None:
+    """洞三字节护栏：导出超总字节上限 → 422（引导 resume），且不触上传。"""
+    ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
+    session = await _make_session_record(db_session, user.id, turn_count=1)
+    await _seed_session_logs(
+        db_session, session.id, [[("user_input", "内容足够超过 10 字节的上限")]]
+    )
+    monkeypatch.setattr(distill_module, "DISTILL_EXPORT_MAX_BYTES", 10)
+
+    async def _fail_upload(*args, **kwargs):
+        pytest.fail("导出超限应在上传前 422")
+
+    monkeypatch.setattr(distill_module, "_upload_distill_source", _fail_upload)
+
+    with pytest.raises(DistillSourceInvalid) as exc_info:
+        await DistillDispatchService(db_session).dispatch(
+            ws.id, user, source_type="session", source_ref=str(session.id)
+        )
+    assert "导出超过" in exc_info.value.message
+    assert "mode=resume" in exc_info.value.message
+
+
+async def test_dispatch_fresh_session_non_multimodal_provider_returns_422(
+    db_session, tmp_path, auth_admin_token, monkeypatch
+) -> None:
+    """洞一引擎门控：非多模态引擎（codex）fresh 会话源 → 422 引导 resume/换引擎。"""
+    ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
+    session = await _make_session_record(db_session, user.id, turn_count=5)
+
+    async def _fail_upload(*args, **kwargs):
+        pytest.fail("引擎门控应在导出/上传前 422")
+
+    monkeypatch.setattr(distill_module, "_upload_distill_source", _fail_upload)
+
+    with pytest.raises(DistillSourceInvalid) as exc_info:
+        await DistillDispatchService(db_session).dispatch(
+            ws.id,
+            user,
+            source_type="session",
+            source_ref=str(session.id),
+            agent_type="codex",
+        )
+    assert "不支持会话附件" in exc_info.value.message
+    assert "mode=resume" in exc_info.value.message

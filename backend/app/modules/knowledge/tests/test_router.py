@@ -873,16 +873,43 @@ async def test_distill_dispatch_and_tasks_list_shape(
     writer_ws: dict,
     auth_headers: dict[str, str],
     auth_admin_token: str,
+    monkeypatch,
 ) -> None:
-    """dispatch 响应形状（DistillTaskRead 全字段）+ 离线同步收敛 failed + 列表只含 distill 类。"""
+    """dispatch 响应形状（DistillTaskRead 全字段）+ 离线同步收敛 failed + 列表只含 distill 类。
+
+    D-008：fresh 会话源先导出+上传附件（patch 假上传——单测无 MinIO，且本用例
+    只验 HTTP 形状）。"""
 
     from sqlalchemy import select as _select
 
     from app.modules.agent.model import AgentRun
     from app.modules.auth.model import User
+    from app.modules.knowledge import distill as distill_module
 
     ws_id = writer_ws["ws_id"]
     session_id = await _admin_session_record(db_session, auth_admin_token)
+
+    async def _fake_upload(db, user_id, source_session_id, data):
+        # 建真实草稿附件行（HTTP 链路里 create_session 的附件归属校验会查库；
+        # 只跳过 MinIO 落对象这一步）。经 dispatch 的请求级 db 写入保证可见。
+        from app.modules.session_attachment.model import SessionAttachment
+
+        row = SessionAttachment(
+            user_id=user_id,
+            session_id=None,
+            kind="file",
+            media_type="text/markdown",
+            bytes=len(data),
+            name=f"distill-source-{str(source_session_id)[:8]}.md",
+            object_key=f"attachments/{user_id}/distill-fake-{source_session_id}.md",
+            sha256=f"{source_session_id}".replace("-", "")[:64],
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+        return row
+
+    monkeypatch.setattr(distill_module, "_upload_distill_source", _fake_upload)
 
     resp = await client.post(
         f"/api/workspaces/{ws_id}/knowledge/distill",
