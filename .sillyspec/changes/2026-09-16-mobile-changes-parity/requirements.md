@@ -76,7 +76,7 @@ When quicklog 列表请求发出
 Then query key 与请求参数带 status="stale"（槽位与桌面 QuicklogTable 同构）
 Given 作者选项数据
 When quicklog 列表响应到达
-Then 作者 chips 从响应 items 按 owner_name→author_name→author_raw 去重聚合（口径与桌面 quicklog-table.tsx:197-203 一致）
+Then 作者 chips 从响应 items 按 owner_name→author_name→author_raw 去重聚合（口径与桌面 frontend/src/components/changes/quicklog-table.tsx:197-203 一致）
 Given 用户关闭「显示空壳占位」并确定
 When 请求发出
 Then include_placeholder 收窄（false 时请求不带占位）

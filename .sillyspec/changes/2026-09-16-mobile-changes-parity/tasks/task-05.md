@@ -25,13 +25,13 @@ implementation:
   - 新增 quicklog 筛选 state：qlStatus / qlAuthor / showPlaceholder（默认 "" / "" / true）+ 抽屉草稿态（打开时拷贝生效值、确定落生效），沿用本页既有筛选抽屉草稿范式（:589-601）
   - quicklog query（:523-549）key 的 status/author/showPlaceholder 槽位从固定默认值升为 state 真值；queryFn 参数联动（status=qlStatus || undefined（QuicklogStatus）、author=qlAuthor || undefined、include_placeholder=showPlaceholder || undefined，传参形态对齐桌面 QuicklogTable :174-182）
   - quicklog tab 搜索行（:790-809）搜索按钮旁挂 MobileFilterDrawer（独立开关 state，不与主列表抽屉共用），children 三段
-  - 状态 chips：全部状态（""）/ 已完成（completed）/ 进行中（in_progress）/ 已暂存（partial_done）/ 疑似中断（stale），值与文案对齐桌面 STATUS_OPTIONS（quicklog-table.tsx:31-37）
+  - 状态 chips：全部状态（""）/ 已完成（completed）/ 进行中（in_progress）/ 已暂存（partial_done）/ 疑似中断（stale），值与文案对齐桌面 STATUS_OPTIONS（frontend/src/components/changes/quicklog-table.tsx:31-37）
   - 作者 chips：由页面既有 quicklogItems 聚合去重（owner_name || author_name || author_raw → Boolean 过滤 → Set 去重，照抄桌面 :197-203 口径，零新增请求）
   - 「显示空壳占位」开关（role=switch，默认开，语义对齐桌面 Checkbox ql-20260818-008：取消勾选=收窄筛选）
   - 抽屉「重置」：搜索词/状态/作者/占位全部回默认（占位回 true，草稿与生效态一并清）
 acceptance:
   - 选择状态=疑似中断并确定后，quicklog query key 槽位 status="stale"，请求带 status 参数
-  - 作者 chips 选项来自当前 quicklog 列表响应 items，按 owner_name→author_name→author_raw 去重聚合，口径与桌面 quicklog-table.tsx:197-203 一致
+  - 作者 chips 选项来自当前 quicklog 列表响应 items，按 owner_name→author_name→author_raw 去重聚合，口径与桌面 frontend/src/components/changes/quicklog-table.tsx:197-203 一致
   - 关闭「显示空壳占位」并确定后 include_placeholder 收窄（false 时请求不带占位条目）
   - 抽屉「重置」后搜索词/状态/作者/占位全部回默认（占位回 true）
   - 未筛选时 quicklog query key 与改造前逐字相同（status="" / author="" / showPlaceholder=true 槽位值不变）
@@ -39,7 +39,7 @@ verify:
   - cd frontend && pnpm exec tsc --noEmit
   - cd frontend && pnpm test -- "src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx"
 constraints:
-  - 作者聚合口径照抄桌面 quicklog-table.tsx:197-203（owner_name→author_name→author_raw 兜底链 + Boolean 过滤 + Set 去重），不另造口径（R-05）；数据源为页面既有 quicklogItems，零新增请求
+  - 作者聚合口径照抄桌面 frontend/src/components/changes/quicklog-table.tsx:197-203（owner_name→author_name→author_raw 兜底链 + Boolean 过滤 + Set 去重），不另造口径（R-05）；数据源为页面既有 quicklogItems，零新增请求
   - R-03：query key 槽位结构与桌面 QuicklogTable :168-173 同构（["quicklogEntries", ws, { search/status/author/showPlaceholder/page/pageSize }]），默认值不漂移，默认参数下与旧 key 深度相等不产生额外请求
   - 状态选项 4 态值与文案对齐桌面 STATUS_OPTIONS；本页既有 QL_STATUS_META 映射不改
   - chips/开关 44px 触摸热区、沿用抽屉内既有 chip 范式与 focusMine 开关范式；不引入 antd Select/Checkbox

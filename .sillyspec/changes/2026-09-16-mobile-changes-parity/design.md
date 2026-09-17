@@ -32,18 +32,18 @@ scale: large
 
 **Wave 1 — 列表页（m/changes/page.tsx + MobileChangeCard）**
 
-1. 重新扫描：工具栏搜索行右侧加 `↻ 重新扫描` 按钮（44px 热区）。逻辑照抄桌面 `handleReparse`（frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx:406-423）：`reparseChanges(workspaceId)` → `setStats/setWarnings` → 失效 `["changes", workspaceId]` 前缀（不含 changesTabTotals，与桌面语义一致）。stats 成功条 + warnings 列表卡的移动化样式（`rounded-[var(--radius-md)] border` 范式），文案与桌面逐字一致。
+1. 重新扫描：工具栏搜索行右侧加 `↻ 重新扫描` 按钮（44px 热区）。逻辑照抄桌面 `handleReparse`（frontend/src/app/(dashboard)/workspaces/.../page.tsx:406-423）：`reparseChanges(workspaceId)` → `setStats/setWarnings` → 失效 `["changes", workspaceId]` 前缀（不含 changesTabTotals，与桌面语义一致）。stats 成功条 + warnings 列表卡的移动化样式（`rounded-[var(--radius-md)] border` 范式），文案与桌面逐字一致。
 2. MobileChangeCard 增强（3 个新信息区，均复用既有实现）：
    - 活动徽标：`ChangeActivityBadge`（@/components/changes/change-activity-badge）直接挂载到徽标行，消费 `step_progress.current_step_status + last_pushed_at`，与桌面「待办状态」列同源。
    - 元信息行：负责人三态（owner_name → owner_id 前 8 位 mono → —，对齐桌面 renderOwner）+ 影响组件（`affected_components.join(", ")`，空则省略整段；truncate 单行）。
    - 执行用量行：`usage` 字段（null → 「—」；undefined → 整行不渲染，对齐桌面 UsageExecCell 两档判空）→ 耗时（formatDurationZh 同款）+ 进行中 pill（started_at 有且 finished_at 缺）+ token·次（formatTokensCompact/formatCount 同款）。格式化 helper 从桌面页 import 复用（需 export，桌面页已有 PENDING_REVIEW_LABEL export 先例）；起止时间无 hover，移动端不展示（详情页用量卡兜底）。
 3. 排序：`MobileFilterDrawer` 加「排序（更新时间）」chip 组（↓ 最近优先 / ↑ 最早优先），`sortDir` 从常量 DEFAULT_SORT 升为 state，进 query key 第 5 槽位（与桌面 key 同构）。
 4. URL 参数：`useSearchParams` 读 `?tab=`（active/archive/quicklog 白名单）与 `?search=` 初始化（对齐桌面 :230-239）。
-5. quicklog 筛选：quicklog tab 搜索行也挂 `MobileFilterDrawer`（状态 4 态 chips / 作者 chips / 显示空壳占位开关）。作者选项数据源 = quicklog 列表响应 items 聚合去重（owner_name→author_name→author_raw 兜底链，口径与桌面 QuicklogTable quicklog-table.tsx:197-203 逐字一致，移动页已有同源 quicklogItems 零新增请求）；quicklog query key 的 `status/author/showPlaceholder` 槽位从固定默认值升为 state 真值。
+5. quicklog 筛选：quicklog tab 搜索行也挂 `MobileFilterDrawer`（状态 4 态 chips / 作者 chips / 显示空壳占位开关）。作者选项数据源 = quicklog 列表响应 items 聚合去重（owner_name→author_name→author_raw 兜底链，口径与桌面 QuicklogTable（frontend/src/components/changes/quicklog-table.tsx 第 197-203 行）逐字一致，移动页已有同源 quicklogItems 零新增请求）；quicklog query key 的 `status/author/showPlaceholder` 槽位从固定默认值升为 state 真值。
 
 **Wave 2 — 详情页（m/changes/[cid]/page.tsx + MobileChangeDetail）**
 
-6. 三卡复用挂载（MobileChangeDetail 内、StageStepper 下方；PC 对应位置：ChangeLastSignal [cid]/page.tsx:330、ChangeUsageCard :338 在主线上方，ScopeAuditCommandCard :432-437 在右辅栏——移动单列堆叠按此顺序排在详情区块流中）：
+6. 三卡复用挂载（MobileChangeDetail 内、StageStepper 下方；PC 对应位置：ChangeLastSignal（frontend/src/app/(dashboard)/workspaces/.../page.tsx:330）、ChangeUsageCard（同文件 :338）在主线上方，ScopeAuditCommandCard（:432-437）在右辅栏——移动单列堆叠按此顺序排在详情区块流中）：
    - `ChangeLastSignal lastPushedAt={lastSignalFromSteps(change.steps)}`（纯前端派生，无信号不渲染）；
    - `ChangeUsageCard kind="change" workspaceId refKey={changeId}`（组件自取数）；
    - `ScopeAuditCommandCard target={{ kind: "change", workspaceId, changeKey }}`（已归档也可查）。

@@ -22,9 +22,9 @@ goal: >
   DeleteChangeConfirm 受控确认弹层 + 删除成功后失效 ["changes", workspaceId] 前缀并跳回
   移动列表；确认弹层/权限判定/删除请求全部复用既有实现（D-005@v1）。
 implementation:
-  - '页面级接线（m/[cid]/page.tsx）：import { DeleteChangeConfirm, canDeleteChange, useChangeDeleteAccess } from "@/components/delete-change-confirm"、deleteChange（lib/changes.ts:199）、useMutation 与 useNotify（lib/errors.ts），全部复用既有实现（D-005）'
+  - '页面级接线（m/[cid]/page.tsx）：import { DeleteChangeConfirm, canDeleteChange, useChangeDeleteAccess } from "@/components/delete-change-confirm"、deleteChange（frontend/src/lib/changes.ts:199）、useMutation 与 useNotify（lib/errors.ts），全部复用既有实现（D-005）'
   - 'const deleteAccess = useChangeDeleteAccess(workspaceId)；menuActions（:106-121）在 change 非空且 canDeleteChange(change, deleteAccess) 为 true 时追加 { key: "delete-change", label: "删除变更", danger: true, onPress: 打开确认弹层 }（MobileAction.danger 已支持红色文案）——change=null 加载态与无权限时不追加，重解析/复制动作不受影响'
-  - '受控弹层：deleteTarget state（null=关闭），删除项 onPress 置 { change_key: change.change_key, owner_name: change.owner_name }；DeleteChangeConfirm onCancel 关闭、onConfirm 先关弹层再 deleteMutation.mutate()（对齐桌面 DetailDeleteAction [cid]/page.tsx:453-507 范式）'
+  - '受控弹层：deleteTarget state（null=关闭），删除项 onPress 置 { change_key: change.change_key, owner_name: change.owner_name }；DeleteChangeConfirm onCancel 关闭、onConfirm 先关弹层再 deleteMutation.mutate()（对齐桌面 DetailDeleteAction frontend/src/app/(dashboard)/workspaces/.../page.tsx:453-507 范式）'
   - 'deleteMutation = useMutation({ mutationFn: () => deleteChange(workspaceId, changeId) })：onSuccess → notify.success(`变更 ${changeKey} 已删除`) + invalidateQueries({ queryKey: ["changes", workspaceId] }) 前缀 + router.push(`/m/workspaces/${workspaceId}/changes`)；onError → notify.error(err, "删除变更失败")（403/404/409 统一中文 toast，留在详情页不白屏）'
   - '更新页面头注释 ⋯ 菜单动作清单（补删除项）；跑既有 page.m-change-detail.test.tsx 确认无回归（新用例归 task-08）'
 acceptance:

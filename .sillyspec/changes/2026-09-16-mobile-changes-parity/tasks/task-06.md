@@ -22,10 +22,10 @@ goal: >
   筛选联动（FR-05/FR-06，D-004@v1），三卡全部 import 既有组件复用挂载（D-005@v1）。
 implementation:
   - 'import 复用（D-005 禁重写）：ChangeLastSignal + lastSignalFromSteps（@/components/changes/change-activity-badge，lastSignalFromSteps 为已导出纯函数）、ChangeUsageCard（@/components/changes/detail/change-usage-card）、ScopeAuditCommandCard（@/components/changes/scope-audit-command-card）'
-  - 'StageStepper（mobile-change-detail.tsx:168-221 模块私有）签名扩为 { currentStage, stepStages, focusStage, onStageClick }（design 接口定义）：节点从纯 span 升为 button——仅 stepStages 含有的阶段可点（触摸热区 ≥44px、aria-pressed 标选中），未含阶段保持纯展示不可点'
-  - 'MobileChangeDetail 内新增 focusStage state 与 stepStages 派生：stepStages 对齐桌面 [cid]/page.tsx:249-252（steps 非空时 Array.from(new Set(steps.map(e => e.stage)))，否则 []）；onStageClick 对齐桌面 :320-322（setFocusStage(prev => prev === stage ? null : stage)，再点同阶段取消）'
+  - 'StageStepper（frontend/src/components/mobile/mobile-change-detail.tsx:168-221 模块私有）签名扩为 { currentStage, stepStages, focusStage, onStageClick }（design 接口定义）：节点从纯 span 升为 button——仅 stepStages 含有的阶段可点（触摸热区 ≥44px、aria-pressed 标选中），未含阶段保持纯展示不可点'
+  - 'MobileChangeDetail 内新增 focusStage state 与 stepStages 派生：stepStages 对齐桌面 frontend/src/app/(dashboard)/workspaces/.../page.tsx:249-252（steps 非空时 Array.from(new Set(steps.map(e => e.stage)))，否则 []）；onStageClick 对齐桌面 :320-322（setFocusStage(prev => prev === stage ? null : stage)，再点同阶段取消）'
   - 'StageStepper 下方区块流按桌面顺序（总体方案点 6）挂三卡：ChangeLastSignal lastPushedAt={lastSignalFromSteps(change.steps)}（无信号组件内不渲染）→ ChangeUsageCard kind="change" workspaceId refKey={changeId}（组件自取数不加门控）→ ScopeAuditCommandCard target={{ kind: "change", workspaceId, changeKey: change.change_key }}（已归档也可查）'
-  - '时间线卡（SecCard m-change-timeline-card）卡头加清除 chip：focusStage 非空时渲染「{STAGE_LABELS[focusStage] ?? focusStage} ✕」按钮（aria-label 清除阶段筛选，onClick setFocusStage(null)）；ChangeStepTimeline 透传 focusStage（prop 已支持，change-step-timeline.tsx:262）'
+  - '时间线卡（SecCard m-change-timeline-card）卡头加清除 chip：focusStage 非空时渲染「{STAGE_LABELS[focusStage] ?? focusStage} ✕」按钮（aria-label 清除阶段筛选，onClick setFocusStage(null)）；ChangeStepTimeline 透传 focusStage（prop 已支持，frontend/src/components/changes/detail/change-step-timeline.tsx:262）'
   - '更新文件头区块清单注释（补三卡与联动）；跑既有 mobile-change-detail.test.tsx 修正受新增区块影响的既有断言（不新增用例，新用例归 task-08）'
 acceptance:
   - '详情渲染时 StageStepper 下方依次出现最后信号行（data-testid=change-last-signal）、执行用量卡、范围对账卡；steps 无 completed_at（或 steps 缺失）时最后信号不渲染（FR-05）'
@@ -39,7 +39,7 @@ verify:
 constraints:
   - 'D-005：三卡直接 import 复用，禁止重写组件或复制数据层实现；小屏 390px 实测溢出时就地加移动断点样式，不重写组件（R-01）'
   - 'ChangeLastSignal 无信号（steps 缺失/全部无 completed_at）不渲染；ChangeUsageCard/ScopeAuditCommandCard 挂载不加门控（对齐桌面接线惯例）'
-  - 'stepStages 派生口径与桌面 [cid]/page.tsx:249-252 逐字一致；非线性 stage（quick 等）步骤条不渲染、联动自然缺席'
+  - 'stepStages 派生口径与桌面 frontend/src/app/(dashboard)/workspaces/.../page.tsx:249-252 逐字一致；非线性 stage（quick 等）步骤条不渲染、联动自然缺席'
   - 'StageStepper 保持模块私有组件；不改 STEPPER_STAGES / STAGE_LABELS / WORKFLOW_STAGES 等复用常量来源与既有审批/文档/时间线区块顺序'
   - '不含删除入口（task-07 范围）与新增测试用例（task-08 范围）；仅允许修正既有测试受新增区块影响的断言'
 ---

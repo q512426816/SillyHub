@@ -18,7 +18,7 @@ target_files:
   - frontend/src/app/m/workspaces/[id]/changes/page.tsx
 goal: >
   移动列表页（active/archive 分支）补「重新扫描」入口：工具栏搜索行右侧按钮，
-  逻辑照抄桌面 handleReparse（frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx:406-423），
+  逻辑照抄桌面 handleReparse（frontend/src/app/(dashboard)/workspaces/.../page.tsx:406-423），
   成功显示 stats 反馈条与 warnings 警告卡并失效 ["changes", workspaceId] 前缀，
   补齐 FR-01 列表页缺口（D-003@v1 清单项 1）。
 implementation:
