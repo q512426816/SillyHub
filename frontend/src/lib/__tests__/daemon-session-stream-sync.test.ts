@@ -126,10 +126,13 @@ describe("streamSession — 首连缺口同步（ql-20260827-018）", () => {
     harness.runsJson = [
       { id: "run-live", status: "running", started_at: CURSOR, finished_at: null },
       {
+        // ql-20260916-017 门控：终态合成仅限「缺口窗口内完成」（finished_at 晚于
+        // 游标下沿）的轮——早于 cursor 完成的历史轮不合成空轮。fixture 让
+        // run-done 在 cursor 之后完成，才在「快照合成 turn_completed」覆盖面内。
         id: "run-done",
         status: "completed",
         started_at: "2026-08-27T09:00:00.000Z",
-        finished_at: "2026-08-27T09:05:00.000Z",
+        finished_at: "2026-08-27T10:00:30.000Z",
       },
     ];
     harness.logsJson = [logEntry()];

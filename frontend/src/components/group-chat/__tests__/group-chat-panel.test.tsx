@@ -142,6 +142,19 @@ vi.mock("@/lib/api/session-attachments", () => ({
   fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
 }));
 
+// jsdom Blob 缺 text()，补 polyfill（同 previewers-basic.test.tsx 既有范式）——
+// 附件 chip 点击在线预览走 TextPreviewer 的 blob.text() 链路。
+if (typeof Blob !== "undefined" && !Blob.prototype.text) {
+  Blob.prototype.text = function (this: Blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsText(this);
+    });
+  };
+}
+
 vi.mock("@/lib/use-daemon-machines", () => ({
   useDaemonMachines: () => mocks.machinesHook(),
 }));

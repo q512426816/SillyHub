@@ -30,6 +30,9 @@ vi.mock("../previewers", () => ({
   XlsxPreviewer: () => <div data-testid="xlsx-previewer" />,
   MarkdownPreviewer: () => <div data-testid="markdown-previewer" />,
   HtmlPreviewer: () => <div data-testid="html-previewer" />,
+  JsonPreviewer: () => <div data-testid="json-previewer" />,
+  PatchPreviewer: () => <div data-testid="patch-previewer" />,
+  TextPreviewer: () => <div data-testid="text-previewer" />,
   FallbackPreviewer: () => <div data-testid="fallback-previewer" />,
 }));
 vi.mock("../previewers/onlyoffice-previewer", () => ({
