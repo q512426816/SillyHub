@@ -27,6 +27,15 @@ const TURN_WATCHDOG_HINT_ROUNDS = 3;
  * （约 12 轮 ≈ 6min：3 轮提示门槛 ×4，给用户足够观察窗又不无限轮询）。
  */
 const TURN_WATCHDOG_MAX_ROUNDS = 12;
+/**
+ * quick（2026-09-17 24h 风险审查）：安静对账阈值——连接健康（心跳在场）但无
+ * 真实 SSE 事件持续本时长时，仍对账 DB 一次。Redis publish 是 best-effort
+ * （session-stream.ts AC-06 注释自证实测丢过尾部事件），健康连接也可能丢
+ * turn_completed；若心跳把轮活动时间一并重置，90s 连接门永不开启，丢终态的轮
+ * 将永久卡「运行中」。本阈值的轮活动时间只由真实事件重置（见 lastEventRef）。
+ * 取 300s 折中：常规思考间隙（<5min）零额外请求，保留 ql-008 健康连接免打扰收益。
+ */
+const TURN_QUIET_RECONCILE_MS = 300_000;
 /** 「连接已恢复」横幅自动消失时长（design A6：约 2 秒）。 */
 const RECONNECTED_BANNER_MS = 2_000;
 
@@ -62,11 +71,14 @@ interface StreamConnectionGuard {
  *
  * - 横幅：onStatusChange('reconnecting', N) → warning 常驻「正在重连…（第 N 次）」；
  *   'reconnected' → success「连接已恢复，正在同步…」2s 自动消失（期间转 live 同样收起）。
- * - 看门狗：currentRunId 非空（turn running）且 90s 无事件 → getAgentSession +
- *   listSessionRuns 对账；此后每 30s 复核一轮，连续 3 轮仍 running 且 SSE 断开 →
+ * - 看门狗：currentRunId 非空（turn running）且满足任一门槛 → getAgentSession +
+ *   listSessionRuns 对账：①90s 无任何信号（含心跳，疑似死连接）；②300s 无真实
+ *   事件但心跳在场（疑似丢终态——Redis publish best-effort，quick 2026-09-17）。
+ *   此后每 30s 复核一轮，连续 3 轮仍 running 且 SSE 断开 →
  *   stalledHint（accent 提示，不伪造终态）。对账发现 run 已终态 → 走既有 resync
  *   路径（connection.resync()，streamSession DB 缺口同步合成 turn_completed）刷新
  *   轮次；发现会话非 active → onSessionReconciled（page：invalidate 详情查询）。
+ *   连续 12 轮无终态停表；新真实事件重启（心跳不重启，详见 effect 注释）。
  * - 清理：轮终态（currentRunId 清空）/ 会话切换 / 卸载即停看门狗计时器。
  */
 export function useStreamConnectionGuard(opts: {
@@ -81,9 +93,16 @@ export function useStreamConnectionGuard(opts: {
   const [stalledHint, setStalledHint] = useState(false);
 
   const lastActivityRef = useRef(Date.now());
+  // quick（2026-09-17 24h 风险审查）：轮活动时间——只由真实 SSE 事件推进；心跳
+  // 不重置（心跳只证明连接活着，不证明轮在推进——丢终态兜底依赖本 ref 计安静时长）。
+  const lastEventRef = useRef(Date.now());
   const sseDownRef = useRef(false);
   const roundsRef = useRef(0);
   const watchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // quick（2026-09-17 24h 风险审查）：停表重启钩子——轮次上限停表后计时链已断，
+  // 新真实事件（进度唯一证据）经包装层重置轮次并重挂计时链；由看门狗 effect
+  // 装载/清空（cleanup 置空防停表后复活陈旧 tick）。
+  const watchdogRearmRef = useRef<() => void>(() => {});
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   // 看门狗 timer / SSE 回调闭包读 ref（避免重建计时器 / 捕获过期 props）。
@@ -123,6 +142,7 @@ export function useStreamConnectionGuard(opts: {
     roundsRef.current = 0;
     sseDownRef.current = false;
     lastActivityRef.current = Date.now();
+    lastEventRef.current = Date.now();
     if (bannerTimerRef.current) {
       clearTimeout(bannerTimerRef.current);
       bannerTimerRef.current = null;
@@ -163,6 +183,9 @@ export function useStreamConnectionGuard(opts: {
 
   // 运行轮看门狗主体：90s 首查、每 30s 复核；任一 SSE 事件（tapStreamHandlers）
   // 推进活动时间并归零连续轮次；轮终态 / 预会话态停表并清提示。
+  // quick（2026-09-17 24h 风险审查）：双门对账——①连接门：90s 无任何信号（含
+  // 心跳）→ 疑似死连接，对账兜底；②安静门：连接健康但 300s 无真实事件 → 疑似
+  // 丢终态（Redis publish best-effort），对账兜底。心跳只重置连接门计时。
   useEffect(() => {
     if (!opts.sessionId || !opts.currentRunId) {
       if (watchdogTimerRef.current) {
@@ -174,27 +197,39 @@ export function useStreamConnectionGuard(opts: {
       return;
     }
     lastActivityRef.current = Date.now();
+    lastEventRef.current = Date.now();
     const tick = () => {
       watchdogTimerRef.current = null;
-      if (Date.now() - lastActivityRef.current >= TURN_WATCHDOG_FIRST_MS) {
+      const connQuiet = Date.now() - lastActivityRef.current >= TURN_WATCHDOG_FIRST_MS;
+      const turnQuiet = Date.now() - lastEventRef.current >= TURN_QUIET_RECONCILE_MS;
+      if (connQuiet || turnQuiet) {
         roundsRef.current += 1;
         reconcileRef.current();
         if (roundsRef.current >= TURN_WATCHDOG_HINT_ROUNDS && sseDownRef.current) {
           setStalledHint(true);
         }
         // quick（ql-20260916-008）：对账轮次上限——stale run 永不终态时（对账永远
-        // 查不出终态）不再无限 30s 一轮，停表只留 stalledHint；新事件/心跳/换轮
-        // 经包装层重置 roundsRef 后由下方常驻 setTimeout 自然重启。
+        // 查不出终态）不再无限 30s 一轮，停表只留 stalledHint。quick（2026-09-17
+        // 24h 风险审查）：停表后由**新真实事件**重启（watchdogRearmRef，轮次归零
+        // + 重挂计时链）；心跳不重启——心跳不是进度证据，重启只会让 stale run
+        // 白烧新一轮上限。
         if (roundsRef.current >= TURN_WATCHDOG_MAX_ROUNDS) return;
       }
       watchdogTimerRef.current = setTimeout(tick, TURN_WATCHDOG_INTERVAL_MS);
     };
     watchdogTimerRef.current = setTimeout(tick, TURN_WATCHDOG_FIRST_MS);
+    watchdogRearmRef.current = () => {
+      if (watchdogTimerRef.current) return; // 计时链未断（正常巡检中）
+      if (!sessionIdRef.current || !currentRunIdRef.current) return;
+      watchdogTimerRef.current = setTimeout(tick, TURN_WATCHDOG_INTERVAL_MS);
+    };
     return () => {
       if (watchdogTimerRef.current) {
         clearTimeout(watchdogTimerRef.current);
         watchdogTimerRef.current = null;
       }
+      // 防停表/换轮后陈旧 rearm 复活已清理的计时链
+      watchdogRearmRef.current = () => {};
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.sessionId, opts.currentRunId]);
@@ -206,22 +241,30 @@ export function useStreamConnectionGuard(opts: {
         const fn = (handlers as unknown as Record<string, unknown>)[key];
         if (typeof fn !== "function") continue;
         wrapped[key] = (...args: unknown[]) => {
-          // 任一事件回调触发 = SSE 有新事件：活动时间推进 + 连续轮次归零。
+          // 任一事件回调触发 = SSE 有新事件：活动时间推进 + 连续轮次归零 +
+          // 重启已停表的计时链（quick 2026-09-17 24h 风险审查；心跳不享受此
+          // 待遇——见 onHeartbeat）。
           lastActivityRef.current = Date.now();
+          lastEventRef.current = Date.now();
           roundsRef.current = 0;
           setStalledHint(false);
+          watchdogRearmRef.current();
           (fn as (...a: unknown[]) => void)(...args);
         };
       }
-      // quick（ql-20260916-008）：心跳注释帧计存活——backend 每 25-30s 发
+      // quick（ql-20260916-008）：心跳注释帧计连接存活——backend 每 25-30s 发
       // `: keepalive`，fetch-sse 不解析注释帧、handler onmessage 永不触发，原实现
       // 下健康空闲连接 90s 后必触发对账。无 event 字段的 envelope 即心跳帧（dispatch
-      // 对非 session 事件提前 return，见 session-stream.ts）：重置活动时间 + 连续
-      // 轮次（较对账重置更轻），SSE 断连时本包装层不再被调用、死连接仍走对账兜底。
+      // 对非 session 事件提前 return，见 session-stream.ts）。
+      // quick（2026-09-17 24h 风险审查）：心跳**只**计连接存活——仅重置活动时间
+      // （连接门）与 stalledHint；不重置轮活动时间（lastEventRef，安静门计时时基）
+      // 与连续轮次：健康连接也可能丢终态事件（Redis publish best-effort，实测过
+      // 尾事件未发布），若心跳连这两项一并重置，丢终态兜底与轮次上限会被 25-30s
+      // 一拍的心跳 perpetual 重置成永不生效的死状态。SSE 断连时本包装层不再被
+      // 调用，死连接仍走连接门对账兜底。
       // onHeartbeat 由 streamSession 在注释帧到达时显式调用（经 tap 包装注入）。
       wrapped.onHeartbeat = () => {
         lastActivityRef.current = Date.now();
-        roundsRef.current = 0;
         setStalledHint(false);
       };
       wrapped.onStatusChange = (status: SessionStreamStatus, attempt?: number) => {

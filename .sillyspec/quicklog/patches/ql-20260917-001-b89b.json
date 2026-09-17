@@ -1,0 +1,87 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-cbe014d9",
+  "totals": {
+    "files": 6,
+    "additions": 283,
+    "deletions": 14
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/frontend/modules/components-daemon.changelog.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/components-daemon.md",
+      "declared": true,
+      "additions": 8,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx",
+      "declared": true,
+      "additions": 108,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx",
+      "declared": true,
+      "additions": 82,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "declared": true,
+      "additions": 31,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts",
+      "declared": true,
+      "additions": 53,
+      "deletions": 10,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 6,
+    "codeFileCount": 2,
+    "testFileCount": 2,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260917-001-b89b",
+  "sessionId": "quick-cbe014d9",
+  "savedAt": "2026-09-17T00:51:54.799Z",
+  "patchSha256": "1d0329363cc2e2627e4916516fa2ef22ed9ad466277110257622ae08622c485f",
+  "patchStatus": "ok"
+}

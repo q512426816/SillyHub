@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { SessionPanel } from "../session-panel";
@@ -241,6 +241,113 @@ describe("scroll-up history integration", () => {
       expect(opts.beforeId).toBe(s6Init[0]!.id);
       expect(opts.beforeId).not.toBe(s5Older[0]!.id);
     });
+  });
+
+  // ── quick（2026-09-17 24h 风险审查回归）──
+  // 依据 session-panel-page.tsx handleLoadEarlier：上一页满页置 hasEarlier 后下一页
+  // 可能为空（日志总数 = 400 整数倍）。旧实现 older.reduce 初始值 older[0]! 在空页
+  // 实为 undefined，下行 .timestamp 抛 TypeError 被 catch 静默——游标不动、
+  // hasEarlier 恒真，触顶翻页永久死循环（初始加载 :705 有空守卫，翻页路径漏了）。
+  it("full page then empty page (total = 400 multiple): gate closes, repeated scroll-to-top sends no further before requests", async () => {
+    const beforeCalls: string[] = [];
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { before?: string }) => {
+        if (opts?.before) {
+          beforeCalls.push(opts.before);
+          return []; // 到头：剩余历史恰好为 0（空页返回 [] 不抛错）
+        }
+        return makePage("init", PAGE_SIZE, 13 * 3600);
+      },
+    );
+    render(<Host sessionId="s7" />);
+    await waitFor(() => expect(screen.getAllByText(/init-msg/).length).toBeGreaterThan(0));
+    await scrollTimelineToTop();
+    await waitFor(() => expect(beforeCalls.length).toBe(1), { timeout: 5000 });
+    // 空页处理落地（游标置空 + hasEarlier 关闸）需要一拍冲刷 setState
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    // 再次触顶两次：修复前 hasEarlier 恒真（TypeError 静默跳过 setHasEarlier），
+    // 每次触顶都重发同一 before 请求；修复后守卫拦住，零新请求。
+    await scrollTimelineToTop();
+    await scrollTimelineToTop();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    expect(beforeCalls.length).toBe(1);
+  });
+
+  // ── quick（2026-09-17 24h 风险审查回归）──
+  // 依据 session-panel-page.tsx prepend 锚点 effect（依赖 [turnState]）：旧实现无
+  // cleanup，流式期间每个 SSE 提交新建 setInterval(300ms)，anchor.until 每次延期 +
+  // apply 恒真把自清条件钉死 → watch interval 无限堆积（单个 30s 硬上限，创建速率
+  // 无界；流式 5 提交/s 稳态约 150 个，每 300ms 读 offsetTop 强制布局）。修复后
+  // effect cleanup 每次重跑先清旧 watch/rAF/硬上限——任意时刻净存活恒 ≤1。
+  it("anchor period: streaming commits do not accumulate watch intervals (effect cleanup)", async () => {
+    const captured: Record<string, ((...args: unknown[]) => void) | undefined> = {};
+    sessionApi.streamSession.mockImplementation(
+      (_sid: string, handlers: Record<string, unknown>) => {
+        for (const [k, v] of Object.entries(handlers)) {
+          if (typeof v === "function") captured[k] = v as (...args: unknown[]) => void;
+        }
+        return { close: vi.fn(), getLastEventId: () => null };
+      },
+    );
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { before?: string }) =>
+        opts?.before ? makePage("older", PAGE_SIZE, 0) : makePage("init", PAGE_SIZE, 13 * 3600),
+    );
+    // interval 净存活追踪（create/clear 配对）
+    const activeIds = new Set<ReturnType<typeof setInterval>>();
+    const realSI = globalThis.setInterval.bind(globalThis);
+    const realCI = globalThis.clearInterval.bind(globalThis);
+    const siSpy = vi.spyOn(globalThis, "setInterval").mockImplementation(
+      ((fn: (...a: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+        const id = realSI(fn, ms, ...args);
+        activeIds.add(id);
+        return id;
+      }) as typeof setInterval,
+    );
+    const ciSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(
+      ((id: ReturnType<typeof setInterval>) => {
+        activeIds.delete(id);
+        return realCI(id);
+      }) as typeof clearInterval,
+    );
+    try {
+      render(<Host sessionId="s8" />);
+      await waitFor(() => expect(screen.getAllByText(/init-msg/).length).toBeGreaterThan(0));
+      // jsdom 全 0 rect：锚捕获需 r.bottom > containerTop + 4——给已有行桩 rect
+      document.querySelectorAll("[data-turn-key]").forEach((row) => {
+        row.getBoundingClientRect = () =>
+          ({ top: 10, bottom: 50, left: 0, right: 100, width: 100, height: 40, x: 0, y: 10, toJSON: () => ({}) }) as DOMRect;
+      });
+      await scrollTimelineToTop();
+      await waitFor(() => expect(screen.getAllByText(/older-msg/).length).toBeGreaterThan(0));
+      // 锚 effect 已随 prepend 提交跑过一轮（基线含其 watch interval）
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+      const baseline = activeIds.size;
+      // 流式 5 次提交（新轮 onTurnStarted → setTurnState → 锚 effect 重跑）
+      for (let i = 0; i < 5; i++) {
+        await act(async () => {
+          captured.onTurnStarted?.({
+            event: "turn_started", session_id: "s8", run_id: `run-live-${i}`,
+            turn: 100 + i, log_id: null, timestamp: "2026-08-26T14:00:00.000Z",
+            channel: null, content: null, status: null, exit_code: null, reason: null,
+          });
+        });
+      }
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+      // 修复前：5 次 effect 各新建 watch 不清旧 → 净增 5；修复后 cleanup 配对 → 净增 0
+      expect(activeIds.size).toBe(baseline);
+    } finally {
+      siSpy.mockRestore();
+      ciSpy.mockRestore();
+    }
   });
 
   it("scroll container has overflowAnchor=none (double-anchoring fix)", async () => {

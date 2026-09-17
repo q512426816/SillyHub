@@ -1,0 +1,466 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.changelog.md b/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
+index 2d394412c..f018e0779 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
+@@ -11,3 +11,4 @@ created_at: 2026-09-04 13:58:00
+ - ql-20260916-010-560c | 未加载历史轮占位骨架——enrichDisplayTurns 对 knownPendingRunIds 轮补建轻量占位 turn（whoLine+sender 时间，复用静默切换轮紧凑标记渲染），翻页前未加载历史轮显示配置骨架不再是隐形（ql-20260916-009 的迭代）。新增回归用例，session-panel 211 用例绿，tsc 0，eslint 0
+ - ql-20260916-013-c032 | /runs 扇出线上根治（快照播种替代日志窗口播种）+ 翻页覆盖（HISTORY_PAGE_SIZE 50→400）+ prepend 锚点竞态（高度未增不消费+空页清锚）——浏览器实测定位三问题（20ms 36+ 条并发/1.1 万条日志滚 220 页/滚顶弹回）。dedup 6/6 + session-panel 全套 212 + scroll/race 9/9 绿，tsc 0
+ - ql-20260916-014-c032 | 翻页游标块序错位根治（初始+翻页游标取时间最旧行，修重复拉取/留洞致孤儿空壳）+ 跳转 hit 要求内容行（空壳命中不翻页）+ 跳转循环 rAF→setTimeout（后台标签页卡死 suppress）。浏览器实测：6400 请求 3217 深度→12 页 12 次无重复，32 轮附近四轮内容全出。session-panel 218 用例绿，tsc 0
++- ql-20260917-cbe014d9 | 24h 风险审查三缺陷修复——①翻页空页守卫（older.reduce 空数组 TypeError 被静默，400 整数倍会话翻页永久死循环，对齐初始加载关闸写法）；②prepend 锚 effect cleanup（流式提交无界堆积 watch interval，anchor.until 延期+apply 恒真钉死自清）；③看门狗心跳语义拆分（lastEventRef 只计真实事件 + 300s 安静门兜底丢终态，心跳不重置轮次/轮活动；停表后新真实事件经 watchdogRearmRef 重启）。新增回归 5 用例先红后绿（修复前全失败），两测试文件 24/24 + 相邻面 101 用例绿，tsc 0，eslint 0 错误
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.md b/.sillyspec/docs/frontend/modules/components-daemon.md
+index d3e417c61..1be6d1472 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.md
+@@ -227,7 +227,7 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 
+   sessions/pre-session-picker（NewSessionForm 删除后接棒，2026-08-23-sessions-
+   workspace-hub）两处内联，扩展 provider 两处同步。
+ 
+-- **use-stream-connection-guard（ql-20260916-008-407e）**：心跳帧经 `tapStreamHandlers` 包装视为连接存活（`wrapped.onHeartbeat` 重置活动时间/连续轮次/清提示）——原实现仅 handler 事件推进活动时间，backend 25-30s 心跳注释帧不被 fetch-sse 解析，健康空闲连接 90s 后必触发对账；对账加 `TURN_WATCHDOG_MAX_ROUNDS=12` 上限，stale running 轮不再无限 30s 轮询（停表留 stalledHint，新事件/心跳/换轮自然重启）。
++- **use-stream-connection-guard（ql-20260916-008-407e；2026-09-17 24h 风险审查修正语义）**：心跳帧经 `tapStreamHandlers` 包装**只计连接存活**（`wrapped.onHeartbeat` 仅重置活动时间/清提示）——原实现仅 handler 事件推进活动时间，backend 25-30s 心跳注释帧不被 fetch-sse 解析，健康空闲连接 90s 后必触发对账。心跳曾连带重置连续轮次/轮活动时间是缺陷（会吞掉丢终态兜底，见下方 2026-09-17 增量）；对账 `TURN_WATCHDOG_MAX_ROUNDS=12` 上限，stale running 轮不再无限 30s 轮询（停表留 stalledHint，**仅新真实事件**重启计时链——换轮经 effect 重挂）。
+ 
+ ## quick-ab951f4e 增量（会话页 /runs 请求扇出收敛，ql-20260916-005-0fc5）
+ 
+@@ -258,6 +258,13 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 
+ - headless 终验：首屏 total=4 compact=0（旧 47/38）；跳第 30 轮翻 8 页落位后 scrollTop 稳定不弹回。
+ - 附带（016 收尾）：孤儿窗口规则保留（窗口内静默轮可见性 + ctx 环初始数据源），knownPendingRunIds 死代码清除；跳转轮询 40ms + 首页立即发起（对齐旧 async 循环即时性，page.test 导航 8 用例回归绿）。
+ 
++## quick 增量（24h 风险审查三缺陷修复：翻页空页/锚点 interval 堆积/看门狗心跳语义，2026-09-17）
++
++- **session-panel-page 翻页空页守卫**：`handleLoadEarlier` 在 epoch 校验后对 `older.length === 0` 提前关闸（游标二元组置空 + `hasEarlier` false + `hasEarlierRef` 镜像 + 锚点作废）——旧实现走到 `older.reduce`（初始值 `older[0]!` 空数组时实为 undefined）读 `.timestamp` 抛 TypeError 被 catch 静默，游标不动 hasEarlier 恒真，日志总数 400 整数倍的会话触顶翻页永久死循环（初始加载有空守卫，翻页路径漏了，6e5de0347 引入）。
++- **session-panel-page 锚点 effect cleanup**：prepend 元素锚 effect（依赖 `[turnState]`）补 cleanup（清本轮 watch interval/rAF 双帧/30s 硬上限 + anchorPinRef 让位）——此前无 cleanup，流式期间每个 SSE 提交新建 interval 而 `anchor.until` 每次延期 + `apply()` 恒真把自清条件钉死，watch interval 随提交数无界堆积（流式 5 提交/s 稳态约 150 个，各每 300ms 读 `offsetTop` 强制布局，74a175960 引入）。
++- **use-stream-connection-guard 心跳语义拆分 + 停表重启**：新增 `lastEventRef`（轮活动时间，**只由真实事件推进**）与 `TURN_QUIET_RECONCILE_MS=300s` 安静门——对账双门：①90s 无任何信号（含心跳，死连接）；②连接健康但 300s 无真实事件（Redis publish best-effort 丢终态兜底，session-stream.ts AC-06 注释自证）。心跳只重置活动时间/清提示（不再重置轮次与轮活动时间——否则丢终态兜底与轮次上限被心跳 perpetual 重置成死状态）；`TURN_WATCHDOG_MAX_ROUNDS` 停表后由**新真实事件**重启计时链（`watchdogRearmRef`，包装层重置轮次 + 重挂；原注释宣称「新事件/心跳/换轮自然重启」实为不存在，161471394 引入）。
++- 回归：session-history-scroll 新增 2 用例（满页后空页关闸零重发 / 流式提交不堆积 watch interval——globalThis setInterval/clearInterval 配对追踪）；session-panel-connection 新增 3 用例（心跳不阻断安静对账 / 心跳不重置轮次上限 12 轮停表 / 停表后真实事件重启）。先红后绿验证：5 用例在修复前代码全部失败。
++
+ ## 人工备注
+ 
+ <!-- MANUAL_NOTES_START -->
+diff --git a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+index 68238e4ae..e703c4d3b 100644
+--- a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+@@ -1,5 +1,5 @@
+ import { describe, it, expect, beforeEach, vi } from "vitest";
+-import { render, screen, waitFor } from "@testing-library/react";
++import { act, render, screen, waitFor } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import type { ReactNode } from "react";
+ import { SessionPanel } from "../session-panel";
+@@ -243,6 +243,113 @@ describe("scroll-up history integration", () => {
+     });
+   });
+ 
++  // ── quick（2026-09-17 24h 风险审查回归）──
++  // 依据 session-panel-page.tsx handleLoadEarlier：上一页满页置 hasEarlier 后下一页
++  // 可能为空（日志总数 = 400 整数倍）。旧实现 older.reduce 初始值 older[0]! 在空页
++  // 实为 undefined，下行 .timestamp 抛 TypeError 被 catch 静默——游标不动、
++  // hasEarlier 恒真，触顶翻页永久死循环（初始加载 :705 有空守卫，翻页路径漏了）。
++  it("full page then empty page (total = 400 multiple): gate closes, repeated scroll-to-top sends no further before requests", async () => {
++    const beforeCalls: string[] = [];
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { before?: string }) => {
++        if (opts?.before) {
++          beforeCalls.push(opts.before);
++          return []; // 到头：剩余历史恰好为 0（空页返回 [] 不抛错）
++        }
++        return makePage("init", PAGE_SIZE, 13 * 3600);
++      },
++    );
++    render(<Host sessionId="s7" />);
++    await waitFor(() => expect(screen.getAllByText(/init-msg/).length).toBeGreaterThan(0));
++    await scrollTimelineToTop();
++    await waitFor(() => expect(beforeCalls.length).toBe(1), { timeout: 5000 });
++    // 空页处理落地（游标置空 + hasEarlier 关闸）需要一拍冲刷 setState
++    await act(async () => {
++      await new Promise((r) => setTimeout(r, 50));
++    });
++    // 再次触顶两次：修复前 hasEarlier 恒真（TypeError 静默跳过 setHasEarlier），
++    // 每次触顶都重发同一 before 请求；修复后守卫拦住，零新请求。
++    await scrollTimelineToTop();
++    await scrollTimelineToTop();
++    await act(async () => {
++      await new Promise((r) => setTimeout(r, 200));
++    });
++    expect(beforeCalls.length).toBe(1);
++  });
++
++  // ── quick（2026-09-17 24h 风险审查回归）──
++  // 依据 session-panel-page.tsx prepend 锚点 effect（依赖 [turnState]）：旧实现无
++  // cleanup，流式期间每个 SSE 提交新建 setInterval(300ms)，anchor.until 每次延期 +
++  // apply 恒真把自清条件钉死 → watch interval 无限堆积（单个 30s 硬上限，创建速率
++  // 无界；流式 5 提交/s 稳态约 150 个，每 300ms 读 offsetTop 强制布局）。修复后
++  // effect cleanup 每次重跑先清旧 watch/rAF/硬上限——任意时刻净存活恒 ≤1。
++  it("anchor period: streaming commits do not accumulate watch intervals (effect cleanup)", async () => {
++    const captured: Record<string, ((...args: unknown[]) => void) | undefined> = {};
++    sessionApi.streamSession.mockImplementation(
++      (_sid: string, handlers: Record<string, unknown>) => {
++        for (const [k, v] of Object.entries(handlers)) {
++          if (typeof v === "function") captured[k] = v as (...args: unknown[]) => void;
++        }
++        return { close: vi.fn(), getLastEventId: () => null };
++      },
++    );
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { before?: string }) =>
++        opts?.before ? makePage("older", PAGE_SIZE, 0) : makePage("init", PAGE_SIZE, 13 * 3600),
++    );
++    // interval 净存活追踪（create/clear 配对）
++    const activeIds = new Set<ReturnType<typeof setInterval>>();
++    const realSI = globalThis.setInterval.bind(globalThis);
++    const realCI = globalThis.clearInterval.bind(globalThis);
++    const siSpy = vi.spyOn(globalThis, "setInterval").mockImplementation(
++      ((fn: (...a: unknown[]) => void, ms?: number, ...args: unknown[]) => {
++        const id = realSI(fn, ms, ...args);
++        activeIds.add(id);
++        return id;
++      }) as typeof setInterval,
++    );
++    const ciSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(
++      ((id: ReturnType<typeof setInterval>) => {
++        activeIds.delete(id);
++        return realCI(id);
++      }) as typeof clearInterval,
++    );
++    try {
++      render(<Host sessionId="s8" />);
++      await waitFor(() => expect(screen.getAllByText(/init-msg/).length).toBeGreaterThan(0));
++      // jsdom 全 0 rect：锚捕获需 r.bottom > containerTop + 4——给已有行桩 rect
++      document.querySelectorAll("[data-turn-key]").forEach((row) => {
++        row.getBoundingClientRect = () =>
++          ({ top: 10, bottom: 50, left: 0, right: 100, width: 100, height: 40, x: 0, y: 10, toJSON: () => ({}) }) as DOMRect;
++      });
++      await scrollTimelineToTop();
++      await waitFor(() => expect(screen.getAllByText(/older-msg/).length).toBeGreaterThan(0));
++      // 锚 effect 已随 prepend 提交跑过一轮（基线含其 watch interval）
++      await act(async () => {
++        await new Promise((r) => setTimeout(r, 50));
++      });
++      const baseline = activeIds.size;
++      // 流式 5 次提交（新轮 onTurnStarted → setTurnState → 锚 effect 重跑）
++      for (let i = 0; i < 5; i++) {
++        await act(async () => {
++          captured.onTurnStarted?.({
++            event: "turn_started", session_id: "s8", run_id: `run-live-${i}`,
++            turn: 100 + i, log_id: null, timestamp: "2026-08-26T14:00:00.000Z",
++            channel: null, content: null, status: null, exit_code: null, reason: null,
++          });
++        });
++      }
++      await act(async () => {
++        await new Promise((r) => setTimeout(r, 50));
++      });
++      // 修复前：5 次 effect 各新建 watch 不清旧 → 净增 5；修复后 cleanup 配对 → 净增 0
++      expect(activeIds.size).toBe(baseline);
++    } finally {
++      siSpy.mockRestore();
++      ciSpy.mockRestore();
++    }
++  });
++
+   it("scroll container has overflowAnchor=none (double-anchoring fix)", async () => {
+     sessionApi.getAgentSessionLogs.mockResolvedValue(makePage("anc", 20, 0));
+     render(<Host sessionId="s3" />);
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx
+index 2b7e710f3..fc9519e58 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx
+@@ -452,6 +452,88 @@ describe("SessionPanel（dialog）运行轮看门狗（task-09 / design A6）",
+       vi.useRealTimers();
+     }
+   });
++
++  // ── quick（2026-09-17 24h 风险审查回归）：心跳语义拆分 ──
++  // 依据 use-stream-connection-guard.ts：Redis publish 是 best-effort（session-stream.ts
++  // AC-06 注释自证），健康连接也可能丢 turn_completed——心跳若把轮活动时间一并重置，
++  // 90s 对账门永不开启，该轮 UI 永久卡运行中（ql-20260916-008 引入的回归）。修复后
++  // 心跳只计「连接存活」（不动轮活动时间/轮次），另设 300s 安静阈值兜底对账。
++
++  it("心跳计连接存活但不计轮活动：健康连接仅心跳无事件 → 安静阈值后仍对账（丢终态兜底）", async () => {
++    vi.useFakeTimers();
++    try {
++      await renderRunningDialog();
++      const runsBase = daemonMock.listSessionRuns.mock.calls.length;
++
++      // 健康连接：每 25s 心跳，90s 连接门（无任何信号）永不开启
++      for (let i = 0; i < 12; i++) {
++        await advance(25_000);
++        act(() => {
++          streamHandlers!.onHeartbeat!();
++        });
++      }
++      // 300s 已过且无真实事件 → 安静对账已触发（修复前：心跳重置活动时间，两门均永不开）
++      expect(daemonMock.listSessionRuns.mock.calls.length).toBeGreaterThan(runsBase);
++      // run 仍 running（默认 mock）：不 resync、不伪造终态
++      expect(connMock.resync).not.toHaveBeenCalled();
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
++  it("心跳不重置对账轮次上限：安静对账 12 轮后停表，持续心跳不再触发对账", async () => {
++    vi.useFakeTimers();
++    try {
++      await renderRunningDialog();
++      const runsBase = daemonMock.listSessionRuns.mock.calls.length;
++
++      // 心跳每 10s（连接恒健康）；安静门 300s 开 → 此后每 30s 一轮，12 轮（630s 处）停表
++      for (let i = 0; i < 63; i++) {
++        await advance(10_000);
++        act(() => {
++          streamHandlers!.onHeartbeat!();
++        });
++      }
++      // 12 轮对账后停表（修复前若心跳重置轮次，将无限 30s 一轮）
++      const stopped = daemonMock.listSessionRuns.mock.calls.length;
++      expect(stopped).toBe(runsBase + 12);
++
++      // 再 5min 心跳：无新对账（心跳不是进度证据，不重启计时链）
++      for (let i = 0; i < 30; i++) {
++        await advance(10_000);
++        act(() => {
++          streamHandlers!.onHeartbeat!();
++        });
++      }
++      expect(daemonMock.listSessionRuns.mock.calls.length).toBe(stopped);
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
++  it("停表后真实事件到达 → 轮次归零且计时链重启（对账兜底恢复）", async () => {
++    vi.useFakeTimers();
++    try {
++      await renderRunningDialog();
++      const runsBase = daemonMock.listSessionRuns.mock.calls.length;
++
++      // 纯静默（无心跳无事件）：90s 连接门开 → 12 轮（t=420s）停表
++      await advance(425_000);
++      const stopped = daemonMock.listSessionRuns.mock.calls.length;
++      expect(stopped).toBe(runsBase + 12);
++
++      // 同 run 真实日志事件到达：包装层重置轮次 + 重挂计时链（currentRunId 不变，
++      // 只能经重启路径复活——修复前计时链已死、对账永久关闭）
++      await act(async () => {
++        streamHandlers!.onLog!(env("log", { channel: "stdout", content: "hi" }), null);
++      });
++      // 事件后 90s 无新事件 → 对账恢复（≥1 次）
++      await advance(91_000);
++      expect(daemonMock.listSessionRuns.mock.calls.length).toBeGreaterThan(stopped);
++    } finally {
++      vi.useRealTimers();
++    }
++  });
+ });
+ 
+ /* ────────────────────── run 流预算重置（agent-stream） ────────────────────── */
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index f4f29c65d..34f58d8e6 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -1159,6 +1159,20 @@ export function SessionPanelPage({
+       // 会话身份校验（ql-20260903-018）：请求在途切换会话（新会话 effect 已
+       // 重置 turnState）时，旧响应直接丢弃，不 prepend 进新会话时间线。
+       if (epochAtStart !== sessionEpochRef.current) return;
++      // quick（2026-09-17 24h 风险审查）：空页 = 到头。旧实现走到下方
++      // older.reduce（初始值 older[0]! 在空数组时实为 undefined）后读 .timestamp
++      // 抛 TypeError 被 catch 静默——游标不动、hasEarlier 恒真，日志总数 400
++      // 整数倍的会话触顶翻页永久死循环（每次触顶重发同一请求）。此处对齐初始
++      // 加载空结果写法关闸（游标置空 + hasEarlier false + hasEarlierRef 镜像），
++      // 锚点作废（无 prepend，同下方 olderTurns 空分支语义）。
++      if (older.length === 0) {
++        historyCursorRef.current = null;
++        historyCursorIdRef.current = null;
++        setHasEarlier(false);
++        hasEarlierRef.current = false;
++        pendingAnchorRef.current = null;
++        return;
++      }
+       // 滚动锚：记录 prepend 前 scrollHeight，加载后按增量补回（正在读的
+       // 内容不被新段顶走，向上滚动自然续读更早）。
+       // quick（ql-20260916-018/019）：锚定期内不重复捕获（连页后续加载在污染
+@@ -1448,7 +1462,10 @@ export function SessionPanelPage({
+       return true;
+     };
+     apply();
+-    requestAnimationFrame(() => requestAnimationFrame(apply));
++    let raf2 = 0;
++    const raf1 = requestAnimationFrame(() => {
++      raf2 = requestAnimationFrame(apply);
++    });
+     anchorPinRef.current = apply; // 滚动事件重申钩子（onScroll 消费）
+     const watch = setInterval(() => {
+       const alive = Date.now() <= anchor.until && apply();
+@@ -1457,10 +1474,22 @@ export function SessionPanelPage({
+         if (anchorPinRef.current === apply) anchorPinRef.current = null;
+       }
+     }, 300);
+-    setTimeout(() => {
++    const hardCap = setTimeout(() => {
+       clearInterval(watch);
+       if (anchorPinRef.current === apply) anchorPinRef.current = null;
+     }, 30_000); // 硬上限兜底
++    // quick（2026-09-17 24h 风险审查）：cleanup——本 effect 依赖 [turnState]，活跃
++    // 流式期间每个 SSE 提交重跑一次；此前无 cleanup，每次新建 watch interval +
++    // 硬上限 timer，而 anchor.until 每次延期 + apply 恒真把自清条件钉死，interval
++    // 随提交数无界堆积（流式 5 提交/s 稳态约 150 个，各每 300ms 读 offsetTop 强制
++    // 布局）。重跑/卸载先清本轮 watch/rAF/硬上限——任意时刻至多一个存活。
++    return () => {
++      cancelAnimationFrame(raf1);
++      cancelAnimationFrame(raf2);
++      clearInterval(watch);
++      clearTimeout(hardCap);
++      if (anchorPinRef.current === apply) anchorPinRef.current = null;
++    };
+   }, [turnState, timelineScrollEl]);
+ 
+   // ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05 / D-002@v1 D-005@v1）：
+diff --git a/frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts b/frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts
+index 194fe1419..0859bf303 100644
+--- a/frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts
++++ b/frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts
+@@ -27,6 +27,15 @@ const TURN_WATCHDOG_HINT_ROUNDS = 3;
+  * （约 12 轮 ≈ 6min：3 轮提示门槛 ×4，给用户足够观察窗又不无限轮询）。
+  */
+ const TURN_WATCHDOG_MAX_ROUNDS = 12;
++/**
++ * quick（2026-09-17 24h 风险审查）：安静对账阈值——连接健康（心跳在场）但无
++ * 真实 SSE 事件持续本时长时，仍对账 DB 一次。Redis publish 是 best-effort
++ * （session-stream.ts AC-06 注释自证实测丢过尾部事件），健康连接也可能丢
++ * turn_completed；若心跳把轮活动时间一并重置，90s 连接门永不开启，丢终态的轮
++ * 将永久卡「运行中」。本阈值的轮活动时间只由真实事件重置（见 lastEventRef）。
++ * 取 300s 折中：常规思考间隙（<5min）零额外请求，保留 ql-008 健康连接免打扰收益。
++ */
++const TURN_QUIET_RECONCILE_MS = 300_000;
+ /** 「连接已恢复」横幅自动消失时长（design A6：约 2 秒）。 */
+ const RECONNECTED_BANNER_MS = 2_000;
+ 
+@@ -62,11 +71,14 @@ interface StreamConnectionGuard {
+  *
+  * - 横幅：onStatusChange('reconnecting', N) → warning 常驻「正在重连…（第 N 次）」；
+  *   'reconnected' → success「连接已恢复，正在同步…」2s 自动消失（期间转 live 同样收起）。
+- * - 看门狗：currentRunId 非空（turn running）且 90s 无事件 → getAgentSession +
+- *   listSessionRuns 对账；此后每 30s 复核一轮，连续 3 轮仍 running 且 SSE 断开 →
++ * - 看门狗：currentRunId 非空（turn running）且满足任一门槛 → getAgentSession +
++ *   listSessionRuns 对账：①90s 无任何信号（含心跳，疑似死连接）；②300s 无真实
++ *   事件但心跳在场（疑似丢终态——Redis publish best-effort，quick 2026-09-17）。
++ *   此后每 30s 复核一轮，连续 3 轮仍 running 且 SSE 断开 →
+  *   stalledHint（accent 提示，不伪造终态）。对账发现 run 已终态 → 走既有 resync
+  *   路径（connection.resync()，streamSession DB 缺口同步合成 turn_completed）刷新
+  *   轮次；发现会话非 active → onSessionReconciled（page：invalidate 详情查询）。
++ *   连续 12 轮无终态停表；新真实事件重启（心跳不重启，详见 effect 注释）。
+  * - 清理：轮终态（currentRunId 清空）/ 会话切换 / 卸载即停看门狗计时器。
+  */
+ export function useStreamConnectionGuard(opts: {
+@@ -81,9 +93,16 @@ export function useStreamConnectionGuard(opts: {
+   const [stalledHint, setStalledHint] = useState(false);
+ 
+   const lastActivityRef = useRef(Date.now());
++  // quick（2026-09-17 24h 风险审查）：轮活动时间——只由真实 SSE 事件推进；心跳
++  // 不重置（心跳只证明连接活着，不证明轮在推进——丢终态兜底依赖本 ref 计安静时长）。
++  const lastEventRef = useRef(Date.now());
+   const sseDownRef = useRef(false);
+   const roundsRef = useRef(0);
+   const watchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
++  // quick（2026-09-17 24h 风险审查）：停表重启钩子——轮次上限停表后计时链已断，
++  // 新真实事件（进度唯一证据）经包装层重置轮次并重挂计时链；由看门狗 effect
++  // 装载/清空（cleanup 置空防停表后复活陈旧 tick）。
++  const watchdogRearmRef = useRef<() => void>(() => {});
+   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+   const mountedRef = useRef(true);
+   // 看门狗 timer / SSE 回调闭包读 ref（避免重建计时器 / 捕获过期 props）。
+@@ -123,6 +142,7 @@ export function useStreamConnectionGuard(opts: {
+     roundsRef.current = 0;
+     sseDownRef.current = false;
+     lastActivityRef.current = Date.now();
++    lastEventRef.current = Date.now();
+     if (bannerTimerRef.current) {
+       clearTimeout(bannerTimerRef.current);
+       bannerTimerRef.current = null;
+@@ -163,6 +183,9 @@ export function useStreamConnectionGuard(opts: {
+ 
+   // 运行轮看门狗主体：90s 首查、每 30s 复核；任一 SSE 事件（tapStreamHandlers）
+   // 推进活动时间并归零连续轮次；轮终态 / 预会话态停表并清提示。
++  // quick（2026-09-17 24h 风险审查）：双门对账——①连接门：90s 无任何信号（含
++  // 心跳）→ 疑似死连接，对账兜底；②安静门：连接健康但 300s 无真实事件 → 疑似
++  // 丢终态（Redis publish best-effort），对账兜底。心跳只重置连接门计时。
+   useEffect(() => {
+     if (!opts.sessionId || !opts.currentRunId) {
+       if (watchdogTimerRef.current) {
+@@ -174,27 +197,39 @@ export function useStreamConnectionGuard(opts: {
+       return;
+     }
+     lastActivityRef.current = Date.now();
++    lastEventRef.current = Date.now();
+     const tick = () => {
+       watchdogTimerRef.current = null;
+-      if (Date.now() - lastActivityRef.current >= TURN_WATCHDOG_FIRST_MS) {
++      const connQuiet = Date.now() - lastActivityRef.current >= TURN_WATCHDOG_FIRST_MS;
++      const turnQuiet = Date.now() - lastEventRef.current >= TURN_QUIET_RECONCILE_MS;
++      if (connQuiet || turnQuiet) {
+         roundsRef.current += 1;
+         reconcileRef.current();
+         if (roundsRef.current >= TURN_WATCHDOG_HINT_ROUNDS && sseDownRef.current) {
+           setStalledHint(true);
+         }
+         // quick（ql-20260916-008）：对账轮次上限——stale run 永不终态时（对账永远
+-        // 查不出终态）不再无限 30s 一轮，停表只留 stalledHint；新事件/心跳/换轮
+-        // 经包装层重置 roundsRef 后由下方常驻 setTimeout 自然重启。
++        // 查不出终态）不再无限 30s 一轮，停表只留 stalledHint。quick（2026-09-17
++        // 24h 风险审查）：停表后由**新真实事件**重启（watchdogRearmRef，轮次归零
++        // + 重挂计时链）；心跳不重启——心跳不是进度证据，重启只会让 stale run
++        // 白烧新一轮上限。
+         if (roundsRef.current >= TURN_WATCHDOG_MAX_ROUNDS) return;
+       }
+       watchdogTimerRef.current = setTimeout(tick, TURN_WATCHDOG_INTERVAL_MS);
+     };
+     watchdogTimerRef.current = setTimeout(tick, TURN_WATCHDOG_FIRST_MS);
++    watchdogRearmRef.current = () => {
++      if (watchdogTimerRef.current) return; // 计时链未断（正常巡检中）
++      if (!sessionIdRef.current || !currentRunIdRef.current) return;
++      watchdogTimerRef.current = setTimeout(tick, TURN_WATCHDOG_INTERVAL_MS);
++    };
+     return () => {
+       if (watchdogTimerRef.current) {
+         clearTimeout(watchdogTimerRef.current);
+         watchdogTimerRef.current = null;
+       }
++      // 防停表/换轮后陈旧 rearm 复活已清理的计时链
++      watchdogRearmRef.current = () => {};
+     };
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [opts.sessionId, opts.currentRunId]);
+@@ -206,22 +241,30 @@ export function useStreamConnectionGuard(opts: {
+         const fn = (handlers as unknown as Record<string, unknown>)[key];
+         if (typeof fn !== "function") continue;
+         wrapped[key] = (...args: unknown[]) => {
+-          // 任一事件回调触发 = SSE 有新事件：活动时间推进 + 连续轮次归零。
++          // 任一事件回调触发 = SSE 有新事件：活动时间推进 + 连续轮次归零 +
++          // 重启已停表的计时链（quick 2026-09-17 24h 风险审查；心跳不享受此
++          // 待遇——见 onHeartbeat）。
+           lastActivityRef.current = Date.now();
++          lastEventRef.current = Date.now();
+           roundsRef.current = 0;
+           setStalledHint(false);
++          watchdogRearmRef.current();
+           (fn as (...a: unknown[]) => void)(...args);
+         };
+       }
+-      // quick（ql-20260916-008）：心跳注释帧计存活——backend 每 25-30s 发
++      // quick（ql-20260916-008）：心跳注释帧计连接存活——backend 每 25-30s 发
+       // `: keepalive`，fetch-sse 不解析注释帧、handler onmessage 永不触发，原实现
+       // 下健康空闲连接 90s 后必触发对账。无 event 字段的 envelope 即心跳帧（dispatch
+-      // 对非 session 事件提前 return，见 session-stream.ts）：重置活动时间 + 连续
+-      // 轮次（较对账重置更轻），SSE 断连时本包装层不再被调用、死连接仍走对账兜底。
++      // 对非 session 事件提前 return，见 session-stream.ts）。
++      // quick（2026-09-17 24h 风险审查）：心跳**只**计连接存活——仅重置活动时间
++      // （连接门）与 stalledHint；不重置轮活动时间（lastEventRef，安静门计时时基）
++      // 与连续轮次：健康连接也可能丢终态事件（Redis publish best-effort，实测过
++      // 尾事件未发布），若心跳连这两项一并重置，丢终态兜底与轮次上限会被 25-30s
++      // 一拍的心跳 perpetual 重置成永不生效的死状态。SSE 断连时本包装层不再被
++      // 调用，死连接仍走连接门对账兜底。
+       // onHeartbeat 由 streamSession 在注释帧到达时显式调用（经 tap 包装注入）。
+       wrapped.onHeartbeat = () => {
+         lastActivityRef.current = Date.now();
+-        roundsRef.current = 0;
+         setStalledHint(false);
+       };
+       wrapped.onStatusChange = (status: SessionStreamStatus, attempt?: number) => {

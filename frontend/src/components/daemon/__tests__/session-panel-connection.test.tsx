@@ -452,6 +452,88 @@ describe("SessionPanel（dialog）运行轮看门狗（task-09 / design A6）", 
       vi.useRealTimers();
     }
   });
+
+  // ── quick（2026-09-17 24h 风险审查回归）：心跳语义拆分 ──
+  // 依据 use-stream-connection-guard.ts：Redis publish 是 best-effort（session-stream.ts
+  // AC-06 注释自证），健康连接也可能丢 turn_completed——心跳若把轮活动时间一并重置，
+  // 90s 对账门永不开启，该轮 UI 永久卡运行中（ql-20260916-008 引入的回归）。修复后
+  // 心跳只计「连接存活」（不动轮活动时间/轮次），另设 300s 安静阈值兜底对账。
+
+  it("心跳计连接存活但不计轮活动：健康连接仅心跳无事件 → 安静阈值后仍对账（丢终态兜底）", async () => {
+    vi.useFakeTimers();
+    try {
+      await renderRunningDialog();
+      const runsBase = daemonMock.listSessionRuns.mock.calls.length;
+
+      // 健康连接：每 25s 心跳，90s 连接门（无任何信号）永不开启
+      for (let i = 0; i < 12; i++) {
+        await advance(25_000);
+        act(() => {
+          streamHandlers!.onHeartbeat!();
+        });
+      }
+      // 300s 已过且无真实事件 → 安静对账已触发（修复前：心跳重置活动时间，两门均永不开）
+      expect(daemonMock.listSessionRuns.mock.calls.length).toBeGreaterThan(runsBase);
+      // run 仍 running（默认 mock）：不 resync、不伪造终态
+      expect(connMock.resync).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("心跳不重置对账轮次上限：安静对账 12 轮后停表，持续心跳不再触发对账", async () => {
+    vi.useFakeTimers();
+    try {
+      await renderRunningDialog();
+      const runsBase = daemonMock.listSessionRuns.mock.calls.length;
+
+      // 心跳每 10s（连接恒健康）；安静门 300s 开 → 此后每 30s 一轮，12 轮（630s 处）停表
+      for (let i = 0; i < 63; i++) {
+        await advance(10_000);
+        act(() => {
+          streamHandlers!.onHeartbeat!();
+        });
+      }
+      // 12 轮对账后停表（修复前若心跳重置轮次，将无限 30s 一轮）
+      const stopped = daemonMock.listSessionRuns.mock.calls.length;
+      expect(stopped).toBe(runsBase + 12);
+
+      // 再 5min 心跳：无新对账（心跳不是进度证据，不重启计时链）
+      for (let i = 0; i < 30; i++) {
+        await advance(10_000);
+        act(() => {
+          streamHandlers!.onHeartbeat!();
+        });
+      }
+      expect(daemonMock.listSessionRuns.mock.calls.length).toBe(stopped);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("停表后真实事件到达 → 轮次归零且计时链重启（对账兜底恢复）", async () => {
+    vi.useFakeTimers();
+    try {
+      await renderRunningDialog();
+      const runsBase = daemonMock.listSessionRuns.mock.calls.length;
+
+      // 纯静默（无心跳无事件）：90s 连接门开 → 12 轮（t=420s）停表
+      await advance(425_000);
+      const stopped = daemonMock.listSessionRuns.mock.calls.length;
+      expect(stopped).toBe(runsBase + 12);
+
+      // 同 run 真实日志事件到达：包装层重置轮次 + 重挂计时链（currentRunId 不变，
+      // 只能经重启路径复活——修复前计时链已死、对账永久关闭）
+      await act(async () => {
+        streamHandlers!.onLog!(env("log", { channel: "stdout", content: "hi" }), null);
+      });
+      // 事件后 90s 无新事件 → 对账恢复（≥1 次）
+      await advance(91_000);
+      expect(daemonMock.listSessionRuns.mock.calls.length).toBeGreaterThan(stopped);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 /* ────────────────────── run 流预算重置（agent-stream） ────────────────────── */

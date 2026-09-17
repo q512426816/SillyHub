@@ -227,7 +227,7 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   sessions/pre-session-picker（NewSessionForm 删除后接棒，2026-08-23-sessions-
   workspace-hub）两处内联，扩展 provider 两处同步。
 
-- **use-stream-connection-guard（ql-20260916-008-407e）**：心跳帧经 `tapStreamHandlers` 包装视为连接存活（`wrapped.onHeartbeat` 重置活动时间/连续轮次/清提示）——原实现仅 handler 事件推进活动时间，backend 25-30s 心跳注释帧不被 fetch-sse 解析，健康空闲连接 90s 后必触发对账；对账加 `TURN_WATCHDOG_MAX_ROUNDS=12` 上限，stale running 轮不再无限 30s 轮询（停表留 stalledHint，新事件/心跳/换轮自然重启）。
+- **use-stream-connection-guard（ql-20260916-008-407e；2026-09-17 24h 风险审查修正语义）**：心跳帧经 `tapStreamHandlers` 包装**只计连接存活**（`wrapped.onHeartbeat` 仅重置活动时间/清提示）——原实现仅 handler 事件推进活动时间，backend 25-30s 心跳注释帧不被 fetch-sse 解析，健康空闲连接 90s 后必触发对账。心跳曾连带重置连续轮次/轮活动时间是缺陷（会吞掉丢终态兜底，见下方 2026-09-17 增量）；对账 `TURN_WATCHDOG_MAX_ROUNDS=12` 上限，stale running 轮不再无限 30s 轮询（停表留 stalledHint，**仅新真实事件**重启计时链——换轮经 effect 重挂）。
 
 ## quick-ab951f4e 增量（会话页 /runs 请求扇出收敛，ql-20260916-005-0fc5）
 
@@ -257,6 +257,13 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 - **跳转贴底弹回修复**：TurnTimeline [turns] effect 在 isNearBottom=true 时每次 turns 更新强制滚底——用户原在底部点刻度跳转，每次翻页 prepend 都被拉回底部（实测跳 30 轮落位后弹回第 47 轮）。新增 suppressFollowBottom props，跳转全程置位、定位 settle 后 1s 解除。
 - headless 终验：首屏 total=4 compact=0（旧 47/38）；跳第 30 轮翻 8 页落位后 scrollTop 稳定不弹回。
 - 附带（016 收尾）：孤儿窗口规则保留（窗口内静默轮可见性 + ctx 环初始数据源），knownPendingRunIds 死代码清除；跳转轮询 40ms + 首页立即发起（对齐旧 async 循环即时性，page.test 导航 8 用例回归绿）。
+
+## quick 增量（24h 风险审查三缺陷修复：翻页空页/锚点 interval 堆积/看门狗心跳语义，2026-09-17）
+
+- **session-panel-page 翻页空页守卫**：`handleLoadEarlier` 在 epoch 校验后对 `older.length === 0` 提前关闸（游标二元组置空 + `hasEarlier` false + `hasEarlierRef` 镜像 + 锚点作废）——旧实现走到 `older.reduce`（初始值 `older[0]!` 空数组时实为 undefined）读 `.timestamp` 抛 TypeError 被 catch 静默，游标不动 hasEarlier 恒真，日志总数 400 整数倍的会话触顶翻页永久死循环（初始加载有空守卫，翻页路径漏了，6e5de0347 引入）。
+- **session-panel-page 锚点 effect cleanup**：prepend 元素锚 effect（依赖 `[turnState]`）补 cleanup（清本轮 watch interval/rAF 双帧/30s 硬上限 + anchorPinRef 让位）——此前无 cleanup，流式期间每个 SSE 提交新建 interval 而 `anchor.until` 每次延期 + `apply()` 恒真把自清条件钉死，watch interval 随提交数无界堆积（流式 5 提交/s 稳态约 150 个，各每 300ms 读 `offsetTop` 强制布局，74a175960 引入）。
+- **use-stream-connection-guard 心跳语义拆分 + 停表重启**：新增 `lastEventRef`（轮活动时间，**只由真实事件推进**）与 `TURN_QUIET_RECONCILE_MS=300s` 安静门——对账双门：①90s 无任何信号（含心跳，死连接）；②连接健康但 300s 无真实事件（Redis publish best-effort 丢终态兜底，session-stream.ts AC-06 注释自证）。心跳只重置活动时间/清提示（不再重置轮次与轮活动时间——否则丢终态兜底与轮次上限被心跳 perpetual 重置成死状态）；`TURN_WATCHDOG_MAX_ROUNDS` 停表后由**新真实事件**重启计时链（`watchdogRearmRef`，包装层重置轮次 + 重挂；原注释宣称「新事件/心跳/换轮自然重启」实为不存在，161471394 引入）。
+- 回归：session-history-scroll 新增 2 用例（满页后空页关闸零重发 / 流式提交不堆积 watch interval——globalThis setInterval/clearInterval 配对追踪）；session-panel-connection 新增 3 用例（心跳不阻断安静对账 / 心跳不重置轮次上限 12 轮停表 / 停表后真实事件重启）。先红后绿验证：5 用例在修复前代码全部失败。
 
 ## 人工备注
 

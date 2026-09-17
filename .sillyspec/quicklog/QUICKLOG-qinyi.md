@@ -209,3 +209,19 @@
 方案：测试单源对齐现状——mock 补 export/数据源、夹具引用常量、断言按新语义改写；生产代码零改动
 结果：page.test 37绿、session-list-panel 105绿、usage-mount+daemon-session+list 合并 137绿、daemon hot-switch 16绿（修复前每次1-2红）、typecheck 双侧0错、lint 仅既有警告（与CI基线一致）
 审计：[gate] L1（跨 0 模块 · 5 文件：0 代码/5 测试）advisory；每文件注记已全覆盖；测试增量不适用（≤1 代码文件）
+
+## ql-20260917-001-b89b | 2026-09-17 08:38:11 | 会话面板 24h 风险审查三缺陷修复：翻页空页死循环/锚点 interval 堆积/看门狗心跳语义
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（空页关闸+锚 effect cleanup）
+- frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts（lastEventRef 安静门+心跳语义+停表重启）
+- frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx（空页关闸+interval 不堆积 2 用例）
+- frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx（看门狗心跳 3 用例）
+- .sillyspec/docs/frontend/modules/components-daemon.md（增量节+ql-008 条目语义修正）
+- .sillyspec/docs/frontend/modules/components-daemon.changelog.md（追加条目）
+需求：会话面板 24h 风险审查三缺陷修复：翻页空页死循环/锚点 interval 堆积/看门狗心跳语义
+根因：①older.reduce 空数组初始值 undefined 读 .timestamp 抛 TypeError 被 catch 静默，游标不动 hasEarlier 恒真，日志总数 400 整数倍会话触顶翻页永久死循环（6e5de0347 引入，初始加载有守卫不对称）；②锚 effect 依赖 turnState 无 cleanup，流式每提交新建 watch interval 且 anchor.until 延期+apply 恒真钉死自清，interval 无界堆积强制布局风暴（74a175960 引入）；③心跳重置 lastActivityRef 使 90s 对账门在健康连接永不开——Redis publish best-effort 丢 turn_completed 时该轮永久卡运行中，且停表后注释宣称的自然重启不存在（161471394 引入）
+方案：①handleLoadEarlier 对空页提前关闸（游标二元组置空+hasEarlier false+锚点作废，对齐初始加载写法）；②锚 effect 补 cleanup（rAF 双帧/watch interval/30s 硬上限/anchorPinRef 全清）；③新增 lastEventRef 只计真实事件+300s 安静门（对账双门：90s 无任何信号判死连接/300s 无真实事件兜底丢终态），心跳只重置活动时间与 stalledHint，停表后新真实事件经 watchdogRearmRef 重启计时链，注释与 hook 文档同步修正
+结果：新增回归 5 用例（scroll 2+connection 3）先红后绿验证（patch 对照修复前全失败）；两测试文件 24/24 绿，相邻面 history-race/dialog/pre-session/ctx-tokens 101 用例绿，tsc 0 错误，eslint 0 错误（12 警告既有）
+审计：[gate] L1（跨 0 模块 · 6 文件：2 代码/2 测试）advisory；每文件注记已全覆盖；测试增量已含

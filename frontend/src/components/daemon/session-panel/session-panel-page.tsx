@@ -1159,6 +1159,20 @@ export function SessionPanelPage({
       // 会话身份校验（ql-20260903-018）：请求在途切换会话（新会话 effect 已
       // 重置 turnState）时，旧响应直接丢弃，不 prepend 进新会话时间线。
       if (epochAtStart !== sessionEpochRef.current) return;
+      // quick（2026-09-17 24h 风险审查）：空页 = 到头。旧实现走到下方
+      // older.reduce（初始值 older[0]! 在空数组时实为 undefined）后读 .timestamp
+      // 抛 TypeError 被 catch 静默——游标不动、hasEarlier 恒真，日志总数 400
+      // 整数倍的会话触顶翻页永久死循环（每次触顶重发同一请求）。此处对齐初始
+      // 加载空结果写法关闸（游标置空 + hasEarlier false + hasEarlierRef 镜像），
+      // 锚点作废（无 prepend，同下方 olderTurns 空分支语义）。
+      if (older.length === 0) {
+        historyCursorRef.current = null;
+        historyCursorIdRef.current = null;
+        setHasEarlier(false);
+        hasEarlierRef.current = false;
+        pendingAnchorRef.current = null;
+        return;
+      }
       // 滚动锚：记录 prepend 前 scrollHeight，加载后按增量补回（正在读的
       // 内容不被新段顶走，向上滚动自然续读更早）。
       // quick（ql-20260916-018/019）：锚定期内不重复捕获（连页后续加载在污染
@@ -1448,7 +1462,10 @@ export function SessionPanelPage({
       return true;
     };
     apply();
-    requestAnimationFrame(() => requestAnimationFrame(apply));
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(apply);
+    });
     anchorPinRef.current = apply; // 滚动事件重申钩子（onScroll 消费）
     const watch = setInterval(() => {
       const alive = Date.now() <= anchor.until && apply();
@@ -1457,10 +1474,22 @@ export function SessionPanelPage({
         if (anchorPinRef.current === apply) anchorPinRef.current = null;
       }
     }, 300);
-    setTimeout(() => {
+    const hardCap = setTimeout(() => {
       clearInterval(watch);
       if (anchorPinRef.current === apply) anchorPinRef.current = null;
     }, 30_000); // 硬上限兜底
+    // quick（2026-09-17 24h 风险审查）：cleanup——本 effect 依赖 [turnState]，活跃
+    // 流式期间每个 SSE 提交重跑一次；此前无 cleanup，每次新建 watch interval +
+    // 硬上限 timer，而 anchor.until 每次延期 + apply 恒真把自清条件钉死，interval
+    // 随提交数无界堆积（流式 5 提交/s 稳态约 150 个，各每 300ms 读 offsetTop 强制
+    // 布局）。重跑/卸载先清本轮 watch/rAF/硬上限——任意时刻至多一个存活。
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      clearInterval(watch);
+      clearTimeout(hardCap);
+      if (anchorPinRef.current === apply) anchorPinRef.current = null;
+    };
   }, [turnState, timelineScrollEl]);
 
   // ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05 / D-002@v1 D-005@v1）：
