@@ -52,6 +52,10 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
+| `.sillyspec/docs/backend/modules/knowledge.md` | 增量节已写（定位改「读侧+平台写侧」；契约摘要补 7 新端点/409 契约/两段式 merge/zone 递归；注意事项补 decisions 只读与 INDEX 路由行 R-03 同源） | done |
+| `.sillyspec/docs/backend/modules/auth.md` | 增量节已写（契约摘要补 KNOWLEDGE_WRITE：knowledge:write、WORKSPACE 组、migration 20260917104400 播种 platform_admin/workspace_owner） | done |
+| `.sillyspec/docs/SillyHub/modules/spec_workspace.md` | 增量节已写（注意事项补 knowledge writer 为 apply_ops 新服务端调用方，D-011 单写者语义不变） | done |
+| `.sillyspec/docs/SillyHub/modules/frontend_components.md` | 增量节已写（契约摘要补知识域 4 组件：precipitate-dialog/entry-editor/merge-dialog/distill-task-bar） | done |
 | `_module-map.yaml` | 无需增改：本变更新增文件均落在既有 backend/frontend 模块 paths 内；未匹配文件属并行会话非索引过期 | skipped |
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。

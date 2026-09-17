@@ -88,7 +88,7 @@ describe('agent-event-schema 合法用例（8 型各一）', () => {
     expect(parseAgentEvent(ev)).toEqual(ev);
   });
 
-  it('status：subtype 七个枚举值全部可解析（D-005@v1 增 thinking_tokens）', () => {
+  it('status：subtype 八个枚举值全部可解析（D-005@v1 增 thinking_tokens；ql-20260917-006 增 context_compacting）', () => {
     const subtypes = [
       'session_started',
       'bash_chunk',
@@ -97,6 +97,7 @@ describe('agent-event-schema 合法用例（8 型各一）', () => {
       'agent_task_status',
       'task_notification',
       'thinking_tokens',
+      'context_compacting',
     ] as const;
     for (const subtype of subtypes) {
       const res = safeParseAgentEvent({ type: 'status', content: '', subtype });

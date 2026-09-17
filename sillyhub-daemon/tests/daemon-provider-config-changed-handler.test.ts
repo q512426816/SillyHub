@@ -524,9 +524,16 @@ describe('task-04 / D-009+D-011: PROVIDER_CONFIG_CHANGED 热切换按会话重�
       type: MSG.PROVIDER_CONFIG_CHANGED,
       payload: { session_id: SESSION_ID, provider_config: codexSwitchConfig() },
     } as DaemonMessage);
+    // quick（ql-20260916-014）：等 handler 完成信号而非首个文件——写盘是
+    // mkdir→auth.json→config.toml 多段 await，慢机上轮询到首文件就断言会在
+    // 中间态抢跑（config.toml 仍旧值 / 日志未发）。hot_switch_rewrite 日志在
+    // 全部文件写盘后同步发出，等它即等齐整条写盘链。
     await waitForCond(() =>
-      existsSync(join(codexHome, 'auth.json')) &&
-      readFileSync(join(codexHome, 'auth.json'), 'utf-8').includes('sk-codex-hot-new'),
+      sawLog('hot_switch_rewrite', [
+        'session_id=' + SESSION_ID,
+        'agent_kind=codex',
+        'rewritten=true',
+      ]),
     );
 
     // 产物按新供应商重写（auth key + config.toml 端点/模型）。
@@ -589,9 +596,15 @@ describe('task-04 / D-009+D-011: PROVIDER_CONFIG_CHANGED 热切换按会话重�
       type: MSG.PROVIDER_CONFIG_CHANGED,
       payload: { session_id: SESSION_ID, provider_config: piSwitchConfig() },
     } as DaemonMessage);
+    // quick（ql-20260916-014）：同 codex 用例——等 handler 完成信号（日志在
+    // 三文件全部写盘后发出），避免轮询到 settings.json 就读 auth/models.json
+    // 与日志断言抢跑中间态。
     await waitForCond(() =>
-      existsSync(join(piDir, 'settings.json')) &&
-      readFileSync(join(piDir, 'settings.json'), 'utf-8').includes('kimi-k3'),
+      sawLog('hot_switch_rewrite', [
+        'session_id=' + SESSION_ID,
+        'agent_kind=pi',
+        'rewritten=true',
+      ]),
     );
 
     const settings = JSON.parse(readFileSync(join(piDir, 'settings.json'), 'utf-8')) as Record<string, unknown>;

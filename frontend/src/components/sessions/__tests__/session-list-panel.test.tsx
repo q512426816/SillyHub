@@ -101,6 +101,10 @@ const mocks = vi.hoisted(() => ({
   // liveness hook 经 listWorkspaceAgentLogs 拉取——既有 mock 集没有该模块，防
   // jsdom 真实 fetch 噪声，Grill CC-12）。
   listWorkspaceAgentLogs: vi.fn(),
+  // quick（ql-20260916-014）：工作区查询统一 workspace-switcher 键后 queryFn
+  // 并拉 my-bindings（ql-20260916-006）——不 mock 时真实 fetch 失败路径的异步
+  // 延迟在 CI 慢机上晚于组头名称断言（兜底「当前工作区」误显 6 用例红）。
+  fetchMyBindings: vi.fn(),
 }));
 
 // 组件只消费 listAgentSessions + 树拉取上限常量（类型导入编译期擦除），
@@ -145,6 +149,12 @@ vi.mock("@/lib/use-daemon-machines", () => ({
 
 vi.mock("@/lib/workspaces", () => ({
   listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
+}));
+
+// quick（ql-20260916-014）：工作区 queryFn 的 my-bindings 数据源（组件只消费
+// items，bindings 供 workspace-switcher 超集；默认空集零干扰）。
+vi.mock("@/lib/workspace-binding", () => ({
+  fetchMyBindings: (...args: unknown[]) => mocks.fetchMyBindings(...args),
 }));
 
 // task-10（X-009）：「关联」下拉选项数据源 mock（组件仅消费两个列表函数）。
@@ -459,6 +469,8 @@ beforeEach(() => {
   // task-07：群分区默认成功空集（既有用例零渲染干扰）。
   mocks.listGroupChats.mockReset().mockResolvedValue([]);
   mocks.listWorkspaces.mockReset();
+  // quick（ql-20260916-014）：my-bindings 默认成功空集（queryFn Promise.all 不挂）。
+  mocks.fetchMyBindings.mockReset().mockResolvedValue([]);
   // task-10（X-009）：选项数据源默认成功空集（workspace scope 既有用例零干扰）。
   mocks.listChanges.mockReset().mockResolvedValue({ items: [], total: 0 });
   mocks.listQuicklogEntries.mockReset().mockResolvedValue({ items: [], total: 0 });

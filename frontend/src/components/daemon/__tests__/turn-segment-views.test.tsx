@@ -30,6 +30,8 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 
 import {
+  CompactNoticeChip,
+  CompactStatusRowView,
   SegmentView,
   TextSegmentView,
   ThinkingRowView,
@@ -55,6 +57,7 @@ import {
 import type {
   StubTurnSegment,
   ToolTurnSegment,
+  TurnSegment,
 } from "../session-log-assembler";
 
 vi.mock("@/components/ui/markdown-text", () => ({
@@ -1423,5 +1426,91 @@ describe("TeamWorkerBlockView 分身段块（violet）", () => {
     );
     expect(screen.getByText("get_worker_result")).toBeInTheDocument();
     expect(screen.queryByText(/分身「/)).not.toBeInTheDocument();
+  });
+});
+
+/* ───────── ql-20260917-006：压缩摘要卡 / 压缩状态行 / 对话短提示 ───────── */
+
+describe("CompactSegmentView / CompactStatusRowView / CompactNoticeChip（ql-20260917-006）", () => {
+  const SUMMARY_TEXT =
+    "This session is being continued from a previous conversation that ran out of context.\nSummary: 奖惩功能开发";
+
+  const compactSeg: Extract<TurnSegment, { kind: "compact" }> = {
+    kind: "compact",
+    id: "seg:c1",
+    text: SUMMARY_TEXT,
+    ts: 1_000,
+  };
+
+  it("CompactSegmentView 默认收起：标题显示「上下文已重新压缩」+ 字符数；点击展开显示全文", () => {
+    render(<SegmentView segment={compactSeg} />);
+    expect(screen.getByText("上下文已重新压缩")).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(`${SUMMARY_TEXT.length}\\s*字，摘要已注入新窗口`)),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(SUMMARY_TEXT)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("上下文已重新压缩"));
+    expect(
+      screen.getByText((_content, node) => node?.textContent === SUMMARY_TEXT),
+    ).toBeInTheDocument();
+  });
+
+  it("CompactStatusRowView：compacting 显示「上下文正在重新压缩…」，success 渲染 null，failed 显示 amber 警示行", () => {
+    const { rerender } = render(
+      <CompactStatusRowView
+        segment={{
+          kind: "compact_status",
+          id: "seg:cs1",
+          text: '{"phase":"compacting"}',
+          ts: 1_000,
+        }}
+      />,
+    );
+    expect(screen.getByText("上下文正在重新压缩…")).toBeInTheDocument();
+
+    rerender(
+      <CompactStatusRowView
+        segment={{
+          kind: "compact_status",
+          id: "seg:cs2",
+          text: '{"phase":"success"}',
+          ts: 1_100,
+        }}
+      />,
+    );
+    expect(screen.queryByText("上下文正在重新压缩…")).not.toBeInTheDocument();
+    expect(screen.queryByText(/压缩失败/)).not.toBeInTheDocument();
+
+    rerender(
+      <CompactStatusRowView
+        segment={{
+          kind: "compact_status",
+          id: "seg:cs3",
+          text: '{"phase":"failed","error":"model 500"}',
+          ts: 1_200,
+        }}
+      />,
+    );
+    expect(screen.getByText("上下文压缩失败：model 500")).toBeInTheDocument();
+
+    rerender(
+      <CompactStatusRowView
+        segment={{
+          kind: "compact_status",
+          id: "seg:cs4",
+          text: "{bad json",
+          ts: 1_300,
+        }}
+      />,
+    );
+    // 坏 JSON 容错：按 compacting 展示，不抛错
+    expect(screen.getByText("上下文正在重新压缩…")).toBeInTheDocument();
+  });
+
+  it("CompactNoticeChip 对话短提示：一行「上下文已重新压缩」，无全文", () => {
+    render(<CompactNoticeChip />);
+    expect(screen.getByText("上下文已重新压缩")).toBeInTheDocument();
+    expect(screen.queryByText(SUMMARY_TEXT)).not.toBeInTheDocument();
   });
 });

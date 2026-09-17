@@ -1481,3 +1481,60 @@ describe("dropPrefixPartialReply 全桶收编（R1.2：partial 被挤开尾位�
     expect(after.output).toBe("分叉内容完全不同的回复");
   });
 });
+
+describe("压缩摘要与压缩状态协议行（ql-20260917-006）", () => {
+  it("压缩续接摘要行 → kind=compact 段：剥 [ASSISTANT] 前缀保留全文，独立段按序平铺", () => {
+    const summary =
+      "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion.\n\nSummary:\nPrimary Request: 奖惩功能开发";
+    const seg = classifySessionLog(`[ASSISTANT] ${summary}`, "stdout", null);
+    expect(seg?.kind).toBe("compact");
+    expect(seg?.text).toBe(summary);
+    const turn = applyAll([makeLog("c1", "stdout", `[ASSISTANT] ${summary}`)]);
+    const compactSeg = turn.segments[0];
+    expect(compactSeg?.kind).toBe("compact");
+    if (compactSeg?.kind === "compact") {
+      expect(compactSeg.text).toBe(summary);
+    }
+    // 兼容投影不产出任何正文/过程项（历史旧消费方零变化）
+    expect(turn.output).toBe("");
+    expect(turn.processItems).toEqual([]);
+  });
+
+  it("压缩状态行（daemon 落库 [ASSISTANT] [COMPACT_STATUS] 形态）→ kind=compact_status 段，JSON 载荷进 text", () => {
+    const payload = JSON.stringify({ phase: "compacting" });
+    const seg = classifySessionLog(
+      `[ASSISTANT] [COMPACT_STATUS] ${payload}`,
+      "stdout",
+      null,
+    );
+    expect(seg?.kind).toBe("compact_status");
+    expect(seg?.text).toBe(payload);
+  });
+
+  it("摘要行不被回复去重误伤：同轮既有 reply 又有 compact，二者各自成段且 output 只收 reply", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "[ASSISTANT] 这是正常回复内容"),
+      makeLog(
+        "2",
+        "stdout",
+        "[ASSISTANT] This session is being continued from a previous conversation that ran out of context.\nSummary: x",
+      ),
+    ]);
+    expect(turn.segments.map((s) => s.kind)).toEqual(["text", "compact"]);
+    expect(turn.output).toBe("这是正常回复内容");
+  });
+
+  it("历史批量路径 logsToSegments 与实时路径一致：同一批日志产同结构段", () => {
+    const logs = [
+      makeLog("c1", "stdout", "[ASSISTANT] [COMPACT_STATUS] {\"phase\":\"compacting\"}"),
+      makeLog(
+        "c2",
+        "stdout",
+        "[ASSISTANT] This session is being continued from a previous conversation that ran out of context.\nSummary: y",
+      ),
+    ];
+    const live = applyAll(logs);
+    const batch = logsToSegments(logs);
+    expect(batch.map((s) => s.kind)).toEqual(live.segments.map((s) => s.kind));
+  });
+});

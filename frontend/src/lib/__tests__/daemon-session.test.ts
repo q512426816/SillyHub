@@ -728,12 +728,14 @@ describe("streamSession 断线重连（ql-20260820-009）", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(streams).toHaveLength(1);
 
-    // 断连前收到一条实时日志
+    // 断连前收到一条实时日志（时间戳用与 fixture 一致的 ISO 串——ql-20260916-017
+    // 起终态合成按「finished_at > 缺口下沿」字符串序门控，假串 "t" 字典序恒大于
+    // finished_at 会把合成错误地门控掉）
     emitDefault(
       streams[0]!,
       {
         event: "log", session_id: "sess-1", run_id: "r-1", turn: 1,
-        log_id: "log-1", timestamp: "t", channel: "stdout", content: "断连前已见",
+        log_id: "log-1", timestamp: "2026-08-20T02:00:20Z", channel: "stdout", content: "断连前已见",
         status: null, exit_code: null, reason: null,
       },
       "log-1",
@@ -765,15 +767,22 @@ describe("streamSession 断线重连（ql-20260820-009）", () => {
     conn.close();
   });
 
-  it("重连后 5s 延迟复核：再次合成终态（幂等，页面侧终态守卫消化）", async () => {
+  it("重连后 5s 延迟复核：快照含 running run 且窗口内完成 → 复核补合成终态（ql-20260916-005 门控后语义）", async () => {
     const handlers = makeHandlers();
     const conn = streamSession("sess-1", handlers);
     await vi.advanceTimersByTimeAsync(0);
+    // resync 快照时 r-1 仍在运行（「快照 → 订阅」窗口内完成的正是这类 run——
+    // 5s 复核兜的缺口；全终态快照被 sawRunningRunAtSync 门控直接跳过）。
+    runsFixture[0]!.status = "running";
     streams[0]!.close!();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(1);
+    // resync：running 轮只合成 turn_started（非终态不合成 completed）。
+    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(0);
+    // 窗口内 r-1 完成（复核时的新鲜快照已终态）。
+    runsFixture[0]!.status = "completed";
     await vi.advanceTimersByTimeAsync(5000);
-    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(2);
+    // 复核补合成 turn_completed（页面终态守卫消化，幂等）。
+    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(1);
     conn.close();
   });
 

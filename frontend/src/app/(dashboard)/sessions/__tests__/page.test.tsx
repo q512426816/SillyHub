@@ -50,6 +50,10 @@ import type * as React from "react";
 
 import SessionsPortalPage from "@/app/(dashboard)/sessions/page";
 import { SessionPanel } from "@/components/daemon/session-panel";
+// quick（ql-20260916-014）：翻页/初始窗口夹具与断言单源引用页距常量——
+// ql-20260916-013 把 HISTORY_PAGE_SIZE 50→400 后本文件硬编码 100 的夹具全旧
+// （满页判定 logs.length >= HISTORY_PAGE_SIZE 不成立 → 翻页链路用例全红）。
+import { HISTORY_PAGE_SIZE } from "@/components/daemon/session-panel/turn-state";
 import { ApiError } from "@/lib/api";
 import type {
   AgentSessionRead,
@@ -163,6 +167,14 @@ vi.mock("@/lib/use-daemon-machines", () => ({
 // task-07：SessionListPanel（task-05 树形态）组头名/chips 工作区名解析。
 vi.mock("@/lib/workspaces", () => ({
   listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
+}));
+
+// quick（ql-20260916-014）：SessionListPanel 工作区查询统一 workspace-switcher 键
+// 后 queryFn 并拉 my-bindings（ql-20260916-006）——不 mock 时真实 fetch 失败路径
+// 的异步延迟在 CI 慢机上晚于组头名称断言（兜底「当前工作区」误显）。对齐
+// sessions-portal.test 同款 mock。
+vi.mock("@/lib/workspace-binding", () => ({
+  fetchMyBindings: vi.fn(async () => []),
 }));
 
 // task-08（2026-08-22-workspace-sessions-portal / D-004@v1）：薄壳页经
@@ -607,8 +619,11 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
         expect.any(Object),
       );
     });
-    // quick（2026-09-02 群聊体验）：初始历史改 limit=100 窗口（更早走「加载更早」）。
-    expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1", { limit: 100 });
+    // quick（2026-09-02 群聊体验）：初始历史窗口化（limit=HISTORY_PAGE_SIZE，
+    // 更早走「加载更早」；ql-20260916-014 起单源引用常量）。
+    expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1", {
+      limit: HISTORY_PAGE_SIZE,
+    });
     expect(mocks.getAgentSession).toHaveBeenCalledWith("s-1");
   });
 
@@ -828,8 +843,10 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
       expect(screen.getByTitle("我（WhaleFall）")).toHaveTextContent("W");
     });
     expect(screen.getByTitle("张三")).toHaveTextContent("张");
-    // 裸时间元素：用户侧 2 + agent 答复侧 2
-    expect(screen.getAllByText(new RegExp(`^${timePat}$`))).toHaveLength(4);
+    // 裸时间元素：仅用户侧 2（ql-20260916-014 适配——agent 答复侧时间行已被
+    // 轮次时间三段显示改造为「开始 HH:MM:SS · 结束 HH:MM:SS · 历时」，不再裸
+    // HH:MM；三段形态由 turn-time-display.test.tsx 专项覆盖）。
+    expect(screen.getAllByText(new RegExp(`^${timePat}$`))).toHaveLength(2);
   });
 });
 
@@ -1070,9 +1087,9 @@ describe("SessionPanel attach 运行中轮恢复竞态（ql-20260820-007）", ()
     // 历史先回灌：detail 未到前面板显 Spin（!session 分支），但 logs 恢复在
     // mount effect 内已落 turnState（此刻 logsToTurns 全 completed）。
     await waitFor(() => {
-      // quick：初始历史窗口化（limit=100，同 :580 适配）。
+      // quick：初始历史窗口化（limit=HISTORY_PAGE_SIZE，同 :580 适配）。
       expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1", {
-        limit: 100,
+        limit: HISTORY_PAGE_SIZE,
       });
     });
     await act(async () => {}); // flush 回灌 microtask 链（确保先于 detail 落地）
@@ -1401,11 +1418,12 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     };
   }
 
-  it("满页（100 条）→ 触顶自动加载更早 prepend + 加载提示；到头后触顶不再请求", async () => {
-    // 初始窗口满页：1 run 内 100 条（1 user_input + 99 stdout，turn DOM 轻）。
+  it(`满页（${HISTORY_PAGE_SIZE} 条）→ 触顶自动加载更早 prepend + 加载提示；到头后触顶不再请求`, async () => {
+    // 初始窗口满页：1 run 内 HISTORY_PAGE_SIZE 条（1 user_input + 其余 stdout，
+    // turn DOM 轻；ql-20260916-014 起页距单源引用常量）。
     const fullPage = [
       quickLog("q-inj", "r-cur", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
-      ...Array.from({ length: 99 }, (_, i) =>
+      ...Array.from({ length: HISTORY_PAGE_SIZE - 1 }, (_, i) =>
         quickLog(
           `q-out-${i}`,
           "r-cur",
@@ -1431,7 +1449,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
         (c) => c[1] && "before" in (c[1] as Record<string, unknown>),
       ).length;
 
-    // 触顶（jsdom scrollTop=0 ≤ 48px）→ before=窗口最早 ts + limit=100；
+    // 触顶（jsdom scrollTop=0 ≤ 48px）→ before=窗口最早 ts + limit=页距常量；
     // 同步加载提示出现。
     const scroller = await screen.findByTestId("turn-timeline-scroll");
     fireEvent.scroll(scroller);
@@ -1442,7 +1460,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
         // 2026-09-16-logs-cursor-tiebreaker task-07 校准：翻页请求带复合游标
         // id 分量（= 初始窗口最旧行 q-inj 的 id，与 before 同传）。
         beforeId: "q-inj",
-        limit: 100,
+        limit: HISTORY_PAGE_SIZE,
         // ql-20260903-018 加载更早请求自带 AbortController（换会话 abort 在途）。
         signal: expect.any(AbortSignal),
       });
@@ -1453,7 +1471,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("session-load-earlier-hint")).toBeNull();
     });
-    // 第二页不满（2 < 100）→ 到头：再触顶不再发起 before 请求。
+    // 第二页不满（2 < HISTORY_PAGE_SIZE）→ 到头：再触顶不再发起 before 请求。
     expect(beforeCallCount()).toBe(1);
     fireEvent.scroll(scroller);
     await new Promise((r) => setTimeout(r, 0));
@@ -1486,7 +1504,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     try {
       const fullPage = [
         quickLog("a-inj", "r-cur", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
-        ...Array.from({ length: 99 }, (_, i) =>
+        ...Array.from({ length: HISTORY_PAGE_SIZE - 1 }, (_, i) =>
           quickLog(
             `a-out-${i}`,
             "r-cur",
@@ -1560,7 +1578,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     try {
       const fullPage = [
         quickLog("b-inj", "r-cur", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
-        ...Array.from({ length: 99 }, (_, i) =>
+        ...Array.from({ length: HISTORY_PAGE_SIZE - 1 }, (_, i) =>
           quickLog(
             `b-out-${i}`,
             "r-cur",
@@ -1605,7 +1623,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     // 变体插入该 turn 之前（before 游标保证内容不重叠）。
     const fullPage = [
       quickLog("w-inj", "r-long", "user_input", "分身首句", "2026-08-15T08:00:00Z"),
-      ...Array.from({ length: 99 }, (_, i) =>
+      ...Array.from({ length: HISTORY_PAGE_SIZE - 1 }, (_, i) =>
         quickLog(
           `w-out-${i}`,
           "r-long",
@@ -1633,7 +1651,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
         // 2026-09-16-logs-cursor-tiebreaker task-07 校准：复合游标 id 分量
         //（初始窗口最旧行 w-inj）。
         beforeId: "w-inj",
-        limit: 100,
+        limit: HISTORY_PAGE_SIZE,
         // ql-20260903-018 加载更早请求自带 AbortController（换会话 abort 在途）。
         signal: expect.any(AbortSignal),
       });
@@ -1652,11 +1670,11 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     try {
       const fullPage = [
         quickLog("m-a-in", "r-a", "user_input", "当前窗口提问A", "2026-08-15T08:00:00Z"),
-        ...Array.from({ length: 49 }, (_, i) =>
+        ...Array.from({ length: HISTORY_PAGE_SIZE / 2 - 1 }, (_, i) =>
           quickLog(`m-a-out-${i}`, "r-a", "stdout", `窗口A输出 ${i}`, "2026-08-15T08:00:10Z"),
         ),
         quickLog("m-b-in", "r-b", "user_input", "当前窗口提问B", "2026-08-15T08:01:00Z"),
-        ...Array.from({ length: 49 }, (_, i) =>
+        ...Array.from({ length: HISTORY_PAGE_SIZE / 2 - 1 }, (_, i) =>
           quickLog(`m-b-out-${i}`, "r-b", "stdout", `窗口B输出 ${i}`, "2026-08-15T08:01:10Z"),
         ),
       ];
@@ -1700,7 +1718,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     );
     const fullPage = [
       quickLog("v-inj", "r-live", "user_input", "分身首句", "2026-08-15T08:00:00Z"),
-      ...Array.from({ length: 99 }, (_, i) =>
+      ...Array.from({ length: HISTORY_PAGE_SIZE - 1 }, (_, i) =>
         quickLog(`v-out-${i}`, "r-live", "stdout", `窗口内输出 ${i}`, "2026-08-15T08:00:10Z"),
       ),
     ];
@@ -1744,7 +1762,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     ).toBeTruthy();
   });
 
-  it("不满页（<100 条）→ 无加载提示；触顶不发起 before 请求（旧短会话零变化）", async () => {
+  it(`不满页（<${HISTORY_PAGE_SIZE} 条）→ 无加载提示；触顶不发起 before 请求（旧短会话零变化）`, async () => {
     mocks.getAgentSessionLogs.mockResolvedValue([
       quickLog("s-inj", "r-1", "user_input", "短会话提问", "2026-08-15T08:00:00Z"),
       quickLog("s-out", "r-1", "stdout", "答复。", "2026-08-15T08:00:05Z"),
@@ -1868,11 +1886,12 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     };
   }
 
-  /** 满页日志（100 条 = HISTORY_PAGE_SIZE → hasEarlier=true 的最小构造）。 */
+  /** 满页日志（HISTORY_PAGE_SIZE 条 → hasEarlier=true 的最小构造；
+   *  ql-20260916-014 起单源引用页距常量，防再改页距时夹具漂移）。 */
   function fullPage(runId: string, prompt: string, timestamp: string) {
     return [
       navLog(`${runId}-in`, runId, "user_input", prompt, timestamp),
-      ...Array.from({ length: 99 }, (_, i) =>
+      ...Array.from({ length: HISTORY_PAGE_SIZE - 1 }, (_, i) =>
         navLog(`${runId}-out-${i}`, runId, "stdout", `输出 ${i}`, timestamp),
       ),
     ];
@@ -2157,7 +2176,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
       // 2026-09-16-logs-cursor-tiebreaker task-07 校准：复合游标 id 分量
       //（第二次翻页游标 = 中间轮页首行 r-mid-in）。
       beforeId: "r-mid-in",
-      limit: 100,
+      limit: HISTORY_PAGE_SIZE,
       // ql-20260903-018：加载更早请求自带 AbortController。
       signal: expect.any(AbortSignal),
     });
@@ -2174,8 +2193,9 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
       .mockResolvedValueOnce(
         fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
       )
-      // 翻页恒满页（hasEarlier 恒 true）且永不出现 r-old → 跳转循环 8 页达
-      // 上限；每页时间戳随序号递减（跨页 pageKey 唯一防 React 撞 key）。
+      // 翻页恒满页（hasEarlier 恒 true）且永不出现 r-old → 跳转循环 50 页达
+      // 上限（JUMP_LOAD_EARLIER_MAX_PAGES）；每页时间戳随序号递减（跨页 pageKey
+      // 唯一防 React 撞 key）。
       .mockImplementation(() => {
         fillerSeq += 1;
         return fullPage(

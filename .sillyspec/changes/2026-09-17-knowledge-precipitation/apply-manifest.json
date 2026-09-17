@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-17-knowledge-precipitation",
+  "appliedAt": "2026-09-17T11:05:55.742Z",
+  "baseHash": "2a109dcece65a4a95b6ac9e1b92cb0f3a2742ca0",
+  "files": [
+    {
+      "path": "backend/app/modules/knowledge/distill.py",
+      "sha256": "b3255ac609db0f48e8194d1794354633302e06300126e26fffac23fcf15d6e34"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_distill.py",
+      "sha256": "92c88dbdc2b94040d4d38ab1918b8b337f9aa7e1c446cb23ac8c124c073ec30a"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_router.py",
+      "sha256": "67579b0b72f2d0cc8dff19a645953d0f33326d166f43dd5f196ec19171623c26"
+    }
+  ]
+}

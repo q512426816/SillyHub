@@ -126,3 +126,18 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 
 - **CodepageDetectorDecoder 重写**：上节流式版的「StringDecoder 失败切 GBK」是死代码——Node `StringDecoder.write()` 从不抛错（非法/GBK 字节直接替换 U+FFFD 返回），task-runner stdout 与 pi/cursor LfLineFramer 的 GBK 输出仍乱码落库（stderr 立即版 `decodeProcessOutputMaybe` 用 TextDecoder fatal 真 throw，不受影响）。重写为自管字节缓冲：`utf8CompletePrefixLen` 增量扫描最长完整合法 UTF-8 前缀（未决尾字节 ≤3 字节跨 chunk 续接不误切，区间收紧对齐 WHATWG：E0/ED/F0/F4 首连续字节限制），遇非法字节切 `TextDecoder('gbk')` 流式并把未决尾字节一并交 GBK 重解（原实现 `utf8.end()` 丢弃返回值丢字节）；small-icu 构造 GBK 解码器失败退非致命 utf-8。已知启发式边界：恰构成合法 UTF-8 的 GBK 双字节序列（trail 落 ASCII 区时两编码有交集）仍按 UTF-8 解，与立即版一致。
 - **验证**：spawn-env 50 passed（新增 GBK 流式 9 用例：单 chunk 中文/双字节跨 chunk 两态/合法 UTF-8 跨 chunk 不误切/前缀不重复/收紧规则切 GBK/悬空尾替换字符）+ pi-rpc-driver 90 + task-runner 72 + typecheck 0。
+
+## 增量（ql-20260917-006：上下文压缩状态帧事件化）
+
+- **背景**：Claude SDK 自动/手动 context compaction 期间会发 `system/status` 帧（`status='compacting'` 进行中；结束帧 `compact_result='success'|'failed'`，失败附 `compact_error`，SDK 0.3.247 sdk.d.ts:4812-4824），daemon 此前在 `claude-events.ts _normalizeSystemMessage` 尾部静默丢弃——前端无法在压缩过程中显示「上下文正在重新压缩」实时提示（线上会话 6e213eb3 两天 16 次压缩，用户明确要求压缩中回显 + 对话区隐藏续接摘要大段文本）。
+- **归一化器**（`interactive/claude-events.ts`）：`subtype==='status'` 帧分流——`status==='compacting'` → `status/context_compacting`（metadata.phase=compacting）；`compact_result` 为 success/failed → 同 subtype（metadata.phase + 可选 error）；`status==='requesting'` 等其余帧维持丢弃（零回归）。`types.ts AgentStatusSubtype` 增 `context_compacting`（types/agent-event-schema zod 枚举/注释三处同步——schema 有「与 types.ts 一字面对齐」纪律）。`_normalizeSystemMessage` docstring 分派清单同步。
+- **消费侧**（`interactive/session-manager/events.ts dispatchStatusEvent` 新 case）：无 active run 丢弃（口径同 bash_*）；经 `mgr.deps.onTurnMessage` 落 **stdout 协议行** `[COMPACT_STATUS] {"phase":...,"error":...}`——legacy flat 形态（`event_type:'text'`），backend 零改动（按 stdout 文本行持久 + SSE 推送）；前端 `classifySessionLog` 识别该前缀归 kind=compact_status。不走 eventToReportDict 透传：落行路径语义由消费侧显式声明，避免 status 事件被当作 status 文本行双写。
+- **测试**：claude-events.test 增 1 用例（compacting/success/failed 三事件 + requesting 维持丢弃 + zod 校验过）；agent-event-schema.test 闭合枚举 7→8。
+
+## 增量（ql-20260917-008：会话执行中直接切换配置，本轮结束后生效）
+
+- **背景**：供应商/模型/档案切换的生效机制是 turn 边界 daemon reload（子进程 env 启动时烧死，D-002），但前端 running 时全置灰逼用户干等；且排队行无 model 快照（忙轮切模型派发静默丢失）、连续切换排多条切换轮、思考档忙轮 409。用户拍板：执行中允许直接切换、下一轮生效、重复切换覆盖（最后一次为准）。
+- **排队行 model 快照**（`agent_session_queued_messages.model`，迁移 20260917160000）：补齐 task-11 缺口——入队落列 + 派发重放（`_inject_into_session(model=entry.model)`）成对。
+- **纯切换覆盖合并**（`queue.py _handle_busy_turn`）：新请求为纯切换（空 prompt/无附件/带配置维度）且同发送者已有 pending 纯切换行（prompt="" 唯一形态）→ 逐字段覆盖（新请求非 None 的 profile/provider/model 盖旧值，None 不动——按维度「最后一次为准」，切供应商伴生 model="" 与后续单独切模型可组合），不新建行、position 不变；与任务通知 merge 同款行锁内原子。普通消息与切换双向不合并。
+- **思考档忙轮暂存**（`agent_sessions.pending_thinking_level`，同迁移）：`set_session_thinking_level` 忙轮分支 409 → 覆盖式暂存 + 返回 `{ok:true, queued:true}`（schema 加 `queued` 字段，gen:types 同步）；`close_run_steps` run 终态钩子与排队派发并列 fire `apply_pending_thinking_level`（独立 session，复用 `_set_via_rpc` 全分支语义，成功清列、失败保留暂存下轮重试）。
+- **验证**：queue 23（含新增合并 4 用例：逐字段覆盖/双向不合并/派发重放 model 快照——派发断言走 `_inject_into_session` spy）；thinking endpoint 24（忙轮 409 用例改 queued 契约 + 覆盖 last-wins 新增）；inject/switch_config/queue_actions 等相关套件共 100 绿；ruff+mypy 0；迁移 offline SQL 校验过。

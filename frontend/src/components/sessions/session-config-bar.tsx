@@ -18,7 +18,10 @@
  *     行/输入提示消息步骤；prompt 用默认文案或 props switchPrompt 覆盖）→
  *     injectSession(sessionId, prompt, 带新配置)；供应商含「不指定（本机默认）」
  *     选项 → llm_provider_id: "" 切回本机默认（task-16 契约）。
- *   - running 全置灰 + 「🔒 本轮完成后解锁切换」；ended/failed 同样不可切（无锁提示）。
+ *   - ql-20260917-008：running 不再置灰——四控件（供应商/模型/思考级别/档案）
+ *     运行中可点，请求即受理：切换维度经忙轮排队/覆盖合并，**本轮结束后生效**
+ *     （提示行「运行中切换将于本轮结束后生效」替代原 🔒 锁提示）；连续切换
+ *     覆盖式（最后一次为准，后端纯切换条目逐字段合并）。ended/failed 仍不可切。
  *   - 切换 toast：下一轮生效，历史消息保留当时配置（who 行按轮快照渲染，D-008，
  *     渲染归 turn-timeline.tsx whoLine，本组件不管消息流）。
  *
@@ -49,7 +52,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Switch, Tag } from "antd";
-import { ChevronDown, Cloud, Lock, Settings2, User } from "lucide-react";
+import { ChevronDown, Cloud, Settings2, Timer, User } from "lucide-react";
 
 import { ApiError } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -361,7 +364,9 @@ export function SessionConfigBar({
   }, [openKind]);
 
   const effectiveEngine = engine ?? configSnapshot?.engine ?? null;
-  const canSwitch = !running && !ended;
+  // ql-20260917-008：running 不再锁切换——canSwitch 仅排除 ended/failed；
+  // 运行中点选即受理（后端忙轮排队/覆盖合并，本轮结束后生效），提示行见底部。
+  const canSwitch = !ended;
   // 2026-09-11-session-provider-switch-codex-pi task-05（FR-03 / D-002@v1）：
   // PROVIDER_SWITCH_ENGINES 白名单外引擎（cursor/未知）无会话级供应商 →
   // 控件锁定（下拉不可开；task-10 起模型子下拉同锁——直接不渲染）；原 D-010
@@ -522,7 +527,13 @@ export function SessionConfigBar({
       qc.setQueryData(["sessionThinkingLevels", sessionId], (old: { levels: string[]; current: string | null } | undefined) =>
         old ? { ...old, current: level } : { levels: [level], current: level },
       );
-      notify.success(`已切换思考级别：${thinkingLevelLabel(level)}`);
+      // ql-20260917-008：resp.queued=True = 忙轮覆盖式暂存（后端 pending_thinking_
+      // level，run 终态钩子应用）——提示「本轮结束后生效」而非「已切换」。
+      notify.success(
+        resp.queued
+          ? `已排队切换思考级别：${thinkingLevelLabel(level)}（本轮结束后生效）`
+          : `已切换思考级别：${thinkingLevelLabel(level)}`,
+      );
     } catch (err) {
       notify.error(err, "思考级别切换失败");
     } finally {
@@ -595,7 +606,13 @@ export function SessionConfigBar({
         ...companion,
         [p.field]: p.value,
       });
-      notify.success(`已切换${what} → ${name}（下一轮生效，历史消息保留当时配置）`);
+      // ql-20260917-008：运行中受理为忙轮排队（本轮结束后派发生效）；空闲照旧
+      // 下一轮生效。提示区分两态，避免用户误以为运行中点了没反应。
+      notify.success(
+        running
+          ? `已排队切换${what} → ${name}（本轮结束后生效，历史消息保留当时配置）`
+          : `已切换${what} → ${name}（下一轮生效，历史消息保留当时配置）`,
+      );
       onSwitched?.(resp, p.field, p.value);
     } catch (err) {
       notify.error(err, "切换失败，请重试");
@@ -665,7 +682,8 @@ export function SessionConfigBar({
         {/* task-10（FR-03-2 / 原型 .cascade）：供应商+模型级联——两「select」并排
             在供应商 Ctrl 内（供应商=既有按钮+上弹下拉，模型=紧凑原生 select）。
             模型子下拉仅选中具体供应商且引擎未锁供应商时渲染——「不指定（本机
-            默认）」与 providerLocked 两态隐藏；running/ended 同供应商控件置灰。 */}
+            默认）」与 providerLocked 两态隐藏；ql-20260917-008 起 running 不再
+            置灰（受理即排队，本轮结束后生效），仅 ended 禁用。 */}
         <span className="inline-flex items-center gap-0.5">
             {ctrlButton(
               "provider",
@@ -680,7 +698,7 @@ export function SessionConfigBar({
                 : ended
                   ? "会话已结束或机器离线，不可切换供应商"
                   : running
-                    ? "会话运行中，本轮结束后可切换供应商"
+                    ? "运行中可切换，将于本轮结束后生效"
                     : "供应商（不选=本机默认配置）",
             <ConfigDropdown
               testId="config-dd-provider"
@@ -731,10 +749,10 @@ export function SessionConfigBar({
               // 时点了没反应零解释）。
               title={
                 !canSwitch
-                  ? ended
-                    ? "会话已结束或机器离线，不可切换模型"
-                    : "会话运行中，本轮结束后可切换模型"
-                  : "模型（默认=跟随供应商配置）"
+                  ? "会话已结束或机器离线，不可切换模型"
+                  : running
+                    ? "运行中可切换，将于本轮结束后生效"
+                    : "模型（默认=跟随供应商配置）"
               }
               onChange={(e) => {
                 const v = e.target.value;
@@ -778,13 +796,16 @@ export function SessionConfigBar({
             disabled={
               !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false))
             }
-            // ql-20260909-005 同款：禁用态 title 按原因说明。
+            // ql-20260909-005 同款：禁用态 title 说明原因（ql-20260917-008：
+            // 运行中不再禁用——仅 ended/providerLocked 禁）。
             title={
               !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false))
                 ? ended
                   ? "会话已结束或机器离线，不可切换思考级别"
-                  : "会话运行中，本轮结束后可切换思考级别（档位切换仅空闲）"
-                : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
+                  : "思考级别切换不可用"
+                : running && !provisional
+                  ? "运行中可切换，将于本轮结束后生效"
+                  : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
             }
             onChange={(e) => {
               const v = e.target.value;
@@ -833,7 +854,7 @@ export function SessionConfigBar({
             ended
               ? "会话已结束或机器离线，不可切换档案"
               : running
-                ? "会话运行中，本轮结束后可切换档案"
+                ? "运行中可切换，将于本轮结束后生效"
                 : "智能体档案",
           <ConfigDropdown
             testId="config-dd-profile"
@@ -911,12 +932,13 @@ export function SessionConfigBar({
             中断自动续跑
           </label>
         )}
-        {/* running 锁提示：desktop 文字说明；mobile 收（ql-20260915-013 一行化
-            ——禁用态本身可见，控件 title 已带原因，不占行）。 */}
+        {/* ql-20260917-008：running 不再是锁——四控件运行中可点（受理即排队/
+            暂存，本轮结束后生效），提示行改信息性说明；desktop 文字，mobile 收
+            （ql-20260915-013 一行化——控件 title 已带说明，不占行）。 */}
         {running && !mobile && (
-          <span className="inline-flex items-center gap-1 text-[10.5px] text-warning">
-            <Lock aria-hidden className="h-3 w-3" />
-            本轮完成后解锁切换
+          <span className="inline-flex items-center gap-1 text-[10.5px] text-muted-foreground">
+            <Timer aria-hidden className="h-3 w-3" />
+            运行中切换将于本轮结束后生效
           </span>
         )}
         {/* ql-20260915-011：mobile「设置」展开钮——默认收起的思考档位/档案/

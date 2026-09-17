@@ -52,7 +52,12 @@ import { RunErrorItem } from "@/components/agent-log/run-error-item";
 import { formatScheduledTime } from "@/components/daemon/scheduled-messages-bar";
 import type { ErrorLogItem } from "@/components/agent-log/normalize";
 import type { TurnSegment } from "@/components/daemon/session-log-assembler";
-import { SegmentView, TextSegmentView } from "@/components/daemon/turn-segment-views";
+import {
+  CompactNoticeChip,
+  CompactStatusRowView,
+  SegmentView,
+  TextSegmentView,
+} from "@/components/daemon/turn-segment-views";
 // 2026-09-09-sessions-visual-refresh task-05/06（D-003@v1）：消息角色化共享构件
 import { ChatMessageAvatar, RoundDivider } from "@/components/chat";
 import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
@@ -1220,6 +1225,11 @@ function segmentTsOf(seg: TurnSegment): number | null {
       return seg.startedAt;
     case "stderr":
       return seg.ts;
+    // ql-20260917-006：压缩摘要 / 压缩状态段取捕获时刻（同 stderr 语义）。
+    case "compact":
+      return seg.ts;
+    case "compact_status":
+      return seg.ts;
     // 2026-08-25-unified-floating-session task-11：前导段取捕获时刻。
     case "preamble":
       return seg.ts;
@@ -1252,6 +1262,10 @@ type SegmentTimelineItem =
 function isConversationSegment(seg: TurnSegment): boolean {
   if (seg.kind === "text" || seg.kind === "file") return true;
   if (seg.kind === "subagent_stub") return true;
+  // ql-20260917-006：压缩摘要段进对话视图——原位特判渲染一行「上下文已重新
+  // 压缩」短提示（CompactNoticeChip，替代此前大段摘要气泡刷屏）；compact_status
+  // 不在此判定（运行中才进对话流，见 SegmentedTurnBody turnStatus 过滤）。
+  if (seg.kind === "compact") return true;
   return (
     seg.kind === "tool" &&
     seg.children.length > 0 &&
@@ -1315,8 +1329,14 @@ function SegmentedTurnBody({
     () =>
       viewMode === "all"
         ? null
-        : segments.filter(isConversationSegment),
-    [viewMode, segments],
+        : segments.filter(
+            // ql-20260917-006：compact_status 仅运行中轮进对话流（实时
+            // 「上下文正在重新压缩」提示）；终态轮不显示（成功后紧随的
+            // compact 摘要段已是「已重新压缩」标记，失败态经「全部」
+            // 视图 amber 行可见）。
+            (s) => isConversationSegment(s) || (isLiveTurn(turnStatus) && s.kind === "compact_status"),
+          ),
+    [viewMode, segments, turnStatus],
   );
   const timeline = useMemo(() => {
     if (viewMode !== "all") return null;
@@ -1370,6 +1390,15 @@ function SegmentedTurnBody({
                 并以 textBefore 作正文（复用 TextSegmentView 气泡，标记原文不显示；
                 纯标记段无正文气泡）；未命中走 SegmentView 零变化。 */}
             {textSegments.map((s) => {
+              // ql-20260917-006：compact 摘要段原位特判——一行短提示替代大段
+              // 摘要气泡（全文在「全部（进度）」视图折叠卡）；compact_status
+              // 运行中实时提示行（CompactStatusRowView，success 渲染 null）。
+              if (s.kind === "compact") {
+                return <CompactNoticeChip key={s.id} />;
+              }
+              if (s.kind === "compact_status") {
+                return <CompactStatusRowView key={s.id} segment={s} />;
+              }
               if (s.kind !== "text") return <SegmentView key={s.id} segment={s} />;
               const marker = parseAskUserMarkerCached(s.text);
               if (!marker) return <SegmentView key={s.id} segment={s} />;

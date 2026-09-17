@@ -597,12 +597,14 @@ export class ClaudeEventNormalizer {
    * system 帧分派（移植 _onMessage 的 system 分支语义）：
    *   - init（主 agent）→ status/session_started（含 session_id；子代理 init 守卫
    *     丢弃，session-manager.ts:4668-4695 的 isSubagentInit 分支。fork 覆盖守卫
-    *    （forkedInitPending）是 SessionManager 状态，本层不持有——事件恒发，消费侧
+   *    （forkedInitPending）是 SessionManager 状态，本层不持有——事件恒发，消费侧
    *     沿用现有守卫）。
    *   - task_started/task_progress/task_updated → status/agent_task_status；
    *     task_notification → status/task_notification（session-manager.ts:4907-5307）；
    *   - thinking_tokens → status/thinking_tokens（D-005@v1 契约补遗）。
-   *   - 其余（status/compact_boundary/local_command 等）→ 静默丢弃。
+   *   - status（SDKStatusMessage：status='compacting' 或带 compact_result）→
+   *     status/context_compacting（ql-20260917-006；此前静默丢弃）。
+   *   - 其余（status=requesting、compact_boundary、local_command 等）→ 静默丢弃。
    */
   private _normalizeSystemMessage(
     record: Record<string, unknown>,
@@ -661,6 +663,44 @@ export class ClaudeEventNormalizer {
           },
         },
       ];
+    }
+
+    // ql-20260917-006：SDKStatusMessage（SDK 0.3.247 sdk.d.ts:4812-4824）——
+    // status='compacting' 是自动/手动上下文压缩的进行中信号；压缩结束帧带
+    // compact_result（'success' | 'failed'，失败附 compact_error）。事件化为
+    // status/context_compacting（消费侧 session-manager/events.ts 落
+    // [COMPACT_STATUS] 协议行，前端实时显示「上下文正在重新压缩」/失败提示）。
+    // status='requesting'（常规请求阶段）与无压缩字段的 status 帧维持丢弃。
+    if (subtype === 'status') {
+      const rawStatus = record['status'];
+      const compactResult = record['compact_result'];
+      if (rawStatus === 'compacting') {
+        return [
+          {
+            type: 'status',
+            subtype: 'context_compacting',
+            content: '',
+            metadata: { phase: 'compacting' },
+          },
+        ];
+      }
+      if (compactResult === 'success' || compactResult === 'failed') {
+        const compactError = record['compact_error'];
+        return [
+          {
+            type: 'status',
+            subtype: 'context_compacting',
+            content: '',
+            metadata: {
+              phase: compactResult,
+              ...(typeof compactError === 'string' && compactError
+                ? { error: compactError }
+                : {}),
+            },
+          },
+        ];
+      }
+      return [];
     }
     return [];
   }

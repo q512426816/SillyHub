@@ -96,6 +96,13 @@ import { isAssistantApiErrorText } from "@/components/agent-log/normalize";
  *   - kind=skill：[ASSISTANT] Base directory for this skill: 前缀行（ql-20260824-017，
  *     Claude Code 技能装载注入——SKILL.md 全文以 assistant 文本块注入，属技能协议
  *     载荷非用户答复，剥前缀后由装配器挂到最近 Skill 工具段 result，不进对话正文）
+ *   - kind=compact：[ASSISTANT] This session is being continued from a previous
+ *     conversation 前缀行（上下文压缩续接摘要——CLI 自动 compaction 后注入新窗口的
+ *     结构化摘要，非用户答复；对话视图仅显示「上下文已重新压缩」短提示，全文在
+ *     「全部（进度）」视图折叠展示）
+ *   - kind=compact_status：[ASSISTANT] [COMPACT_STATUS] 前缀行（daemon 落库的压缩
+ *     过程状态协议行，phase=compacting/success/failed——运行中轮渲染实时
+ *     「上下文正在重新压缩」提示，终态轮不渲染）
  *   - kind=stderr：channel=stderr
  *   - kind=reply：其余（剥 [ASSISTANT]/[LOG:\w+] 前缀）
  *
@@ -108,6 +115,8 @@ export type SessionLogSegmentKind =
   | "tool_use"
   | "tool_result"
   | "skill"
+  | "compact"
+  | "compact_status"
   | "stderr"
   | "override"
   | "file"
@@ -347,6 +356,27 @@ export function classifySessionLog(
   if (/^\[ASSISTANT\]\s*Base directory for this skill:/i.test(trimmed)) {
     return { kind: "skill", text: trimmed.replace(/^\[ASSISTANT\]\s?/, "") };
   }
+  // ql-20260917-006：上下文压缩续接摘要行——CLI 自动 compaction 后把结构化摘要
+  // 以 assistant 文本块注入新窗口（线上会话 6e213eb3 两天 16 次实证，此前被当
+  // kind=reply 渲染成大段回复气泡刷屏）。非用户答复：归类 compact 段，对话视图
+  // 仅显示「上下文已重新压缩」短提示，全文在「全部（进度）」视图折叠展示。
+  // 仅匹配 [ASSISTANT] 前缀形态（codex / 裸文本流不误吞，同 skill/API 错误行口径）。
+  if (
+    /^\[ASSISTANT\]\s*This session is being continued from a previous conversation/i.test(
+      trimmed,
+    )
+  ) {
+    return { kind: "compact", text: trimmed.replace(/^\[ASSISTANT\]\s?/, "") };
+  }
+  // ql-20260917-006：daemon 落库的压缩过程状态协议行（[COMPACT_STATUS] + 单行
+  // JSON，phase=compacting/success/failed）——运行中轮渲染「上下文正在重新压缩」
+  // 实时提示；text 保留剥前缀后的 JSON 原文供渲染层解析，不进对话正文与投影。
+  if (/^\[ASSISTANT\]\s*\[COMPACT_STATUS\]/.test(trimmed)) {
+    return {
+      kind: "compact_status",
+      text: trimmed.replace(/^\[ASSISTANT\]\s?\[COMPACT_STATUS\]\s?/, ""),
+    };
+  }
   // ql-20260904-013：CLI 合成鉴权行（"[ASSISTANT] Not logged in · Please run
   // /login"，CLI 把模型网关 401 误报为本地未登录）与模型网关错误行（"API Error:
   // …" / "Request rejected"）不是 agent 答复——丢弃正文，展示由 turn.errorDetail
@@ -507,6 +537,33 @@ export type TurnSegment =
       kind: "preamble";
       id: string;
       /** 前导全文（含"【…上下文】"标题块，"---" 之前的部分）。 */
+      text: string;
+      ts: number | null;
+    }
+  | {
+      /**
+       * 上下文压缩续接摘要段（ql-20260917-006）：CLI 自动 compaction 后注入新窗口
+       * 的结构化摘要（"This session is being continued from a previous
+       * conversation..."），非用户答复——对话视图仅显示「上下文已重新压缩」短提示
+       * （CompactNoticeChip），「全部（进度）」视图折叠展示全文
+       * （CompactSegmentView，同 preamble 的展示语义）。
+       */
+      kind: "compact";
+      id: string;
+      /** 摘要全文（已剥 [ASSISTANT] 前缀）。 */
+      text: string;
+      ts: number | null;
+    }
+  | {
+      /**
+       * 压缩过程状态段（ql-20260917-006）：daemon 落库的 [COMPACT_STATUS] 协议行
+       * （JSON 载荷 phase=compacting/success/failed）。运行中轮渲染「上下文正在
+       * 重新压缩」实时提示；终态轮不渲染（成功后紧随的 compact 摘要段即
+       * 「已重新压缩」标记），失败态渲染 amber 提示行。
+       */
+      kind: "compact_status";
+      id: string;
+      /** 剥前缀后的 JSON 原文（渲染层解析 phase/error）。 */
       text: string;
       ts: number | null;
     }
@@ -1409,6 +1466,26 @@ export function applyLogToSegments(
           },
         ];
       });
+      break;
+    case "compact":
+    case "compact_status":
+      // ql-20260917-006：压缩摘要 / 压缩状态协议行——独立过程段按序平铺（归属字段
+      // 实践恒空，走顶层；applyToBucket 保持与 stderr 同构防未来带归属）。不进
+      // 兼容投影（segmentsToLegacy 无 case 自动跳过，output/processItems 不变）。
+      // kind 提局部 const：属性窄化不跨 applyToBucket 回调边界，直写 seg.kind 会
+      // 退化为宽联合类型报 TS2322。
+      {
+        const compactKind = seg.kind;
+        segments = applyToBucket(segments, bucketId, routeSubagentType, (children) => [
+          ...children,
+          {
+            kind: compactKind,
+            id: makeUniqueSegmentId(ids(), segmentIdBase(input, compactKind, ts)),
+            text: seg.text,
+            ts,
+          },
+        ]);
+      }
       break;
     case "stderr":
       segments = applyToBucket(segments, bucketId, routeSubagentType, (children) => [

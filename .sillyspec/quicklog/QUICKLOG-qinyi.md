@@ -283,3 +283,66 @@
 根因：POST /api/auth/refresh 无 signal 无超时，apiFetch 的 GET 30s 超时不覆盖刷新等待。
 方案：15s AbortController 超时抛 ApiError(timeout) 交既有 catch 链展示，不清会话不强制跳登录，网络异常传播不变。
 结果：token-refresh 11 用例绿（5b 先红后绿）+ api.test 12 零回归 + tsc 0 + eslint 0 error（3 既有 warning）
+
+## ql-20260917-006-1380 | 2026-09-17 15:57:08 | 会话对话区隐藏上下文压缩续接摘要，压缩中实时提示
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-log-assembler.ts（classify 新增 compact/compact_status 段识别；TurnSegment 增两成员；装配器平铺+投影零影响）
+- frontend/src/components/daemon/turn-segment-views.tsx（新增 CompactSegmentView（进度折叠卡）/CompactStatusRowView（压缩三态行）/CompactNoticeChip（对话短提示））
+- frontend/src/components/daemon/turn-timeline.tsx（isConversationSegment 纳 compact；compact_status 运行中过滤；segmentTsOf 补两成员）
+- frontend/src/components/daemon/turn-status-bar.tsx（segmentTs 穷尽 switch 补 compact/compact_status）
+- sillyhub-daemon/src/interactive/claude-events.ts（system/status 压缩帧事件化 status/context_compacting）
+- sillyhub-daemon/src/interactive/session-manager/events.ts（dispatchStatusEvent context_compacting case 落 [COMPACT_STATUS] stdout 行）
+- sillyhub-daemon/src/types.ts（AgentStatusSubtype 增 context_compacting）
+- sillyhub-daemon/src/agent-event-schema.ts（zod 枚举 7→8）
+- frontend/src/components/daemon/__tests__/session-log-assembler.test.ts（+4 用例（分类/状态行/投影空/历史实时一致））
+- frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx（+3 用例（折叠交互/三态+坏 JSON/短提示））
+- sillyhub-daemon/tests/interactive/claude-events.test.ts（+1 用例（三事件+requesting 丢弃+zod））
+- sillyhub-daemon/tests/agent-event-schema.test.ts（枚举闭合 7→8）
+- .sillyspec/docs/SillyHub/modules/daemon.md（ql-20260917-006 增量）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（ql-20260917-006-1380 变更索引）
+需求：会话对话区隐藏上下文压缩续接摘要，压缩中实时提示
+根因：CLI 自动 compaction 后把续接摘要当 assistant 文本块注入新窗口，被前端 classifySessionLog 归 reply 渲染成大段气泡刷屏（线上会话 6e213eb3 两天 16 次实证）；SDK system/status 压缩帧被 daemon 归一化器静默丢弃，前端无任何压缩过程信号（用户要求压缩中回显「上下文正在重新压缩」）。
+方案：前端 session-log-assembler classify 新增 compact/compact_status 两 kind 与 TurnSegment 两成员（装配器平铺独立过程段，兼容投影零影响）；turn-segment-views 新增 CompactSegmentView（进度区折叠卡）/CompactStatusRowView（compacting 实时提示/failed 警示/success 静默）/CompactNoticeChip（对话区一行短提示），turn-timeline isConversationSegment 纳 compact+compact_status 运行中过滤，segmentTsOf/turn-status-bar segmentTs 补穷尽分支；sillyhub-daemon claude-events 归一化器 system/status 帧事件化 status/context_compacting（types+zod 枚举同步），session-manager/events dispatchStatusEvent 落 [COMPACT_STATUS] stdout 协议行（backend 零改动）。
+结果：frontend daemon 组件 67 文件 978 用例绿+tsc 0+eslint 0 error（3 warning 既有）；daemon typecheck 0+相关测试 35 绿+全量 4305 绿（1 failed 为 daemon-status-root-persistence 计时并发用例单跑 9 绿，与本改动无关）；模块文档 daemon.md/frontend.md 增量已更；未部署（daemon/前端需重启生效）。遗留：压缩完成由 compact 摘要段承担完成语义；非 claude provider 无压缩帧来源。
+审计：[gate] L1（跨 0 模块 · 16 文件：9 代码/5 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/workspace/router.py, backend/app/modules/workspace/tests/test_platform_grant_list.py
+
+## ql-20260917-007-7cec | 2026-09-17 16:33:05 | 工作区列表平台级授权口径对齐——持平台级 workspace:read/platform:admin 的用户全量可见
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/workspace/router.py（list_workspaces 非管理员分支加平台级授权判定，全量/工作区级两分支）
+- backend/app/modules/workspace/tests/test_platform_grant_list.py（新建 5 用例：平台级 read 全量/platform:admin 全量/工作区级成员仅见本区/无读权限平台角色 403/无角色 403）
+- backend/app/modules/workspace/tests/test_workspace_admin_management.py（FR-02 旧边界用例改锁新语义 sees_empty→sees_all）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引 ql-20260917-007-7cec 条目）
+需求：工作区列表平台级授权口径对齐——持平台级 workspace:read/platform:admin 的用户全量可见
+根因：180593 持平台级 super_admin 角色：通知广播收件人查找（rbac 段2）与端点鉴权（has_permission 段2）都认平台级授权，唯独 GET /workspaces 只查工作区级绑定，造成「列表看不到却能收通知、进内容」的三处口径割裂；旧 FR-02「平台级 read 也见空列表」边界作废
+方案：list_workspaces 非管理员分支先查 collect_permissions_platform，持 workspace:read 或 platform:admin 时 allowed_workspace_ids=None 全量返回（对齐 is_platform_admin 分支），否则维持原工作区级限定；新增 test_platform_grant_list.py 5 用例，既有 test_workspace_admin_management 边界用例改锁新语义；backend.md 变更索引加条目
+结果：workspace+notification+auth(rbac) 三套件 518 passed（1 skip=Windows symlink 特权既有、2 xfail 既有），ruff check/format/mypy 全 0；未部署
+审计：[gate] L1（跨 0 模块 · 6 文件：1 代码/2 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量不适用（≤1 代码文件）
+
+## ql-20260917-008-48e5 | 2026-09-17 16:49:56 | 会话执行中直接切换供应商/模型/思考档/档案，下一轮生效
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/session/service/queue.py（纯切换覆盖合并入队（逐字段 last-wins）+model 快照落列+派发重放透传）
+- backend/app/modules/daemon/session/service/thinking_level.py（忙轮 409 改覆盖暂存 queued 响应+apply_pending_thinking_level 轮末应用）
+- backend/app/modules/daemon/run_sync/service/close_run_steps.py（run 终态钩子并列 fire 暂存思考档应用）
+- backend/app/modules/daemon/schema.py（SessionThinkingLevelResponse 加 queued 字段）
+- backend/app/modules/agent/model.py（queued_messages 加 model 列+sessions 加 pending_thinking_level 列）
+- backend/migrations/versions/20260917160000_add_queued_model_and_pending_thinking_level.py（两列迁移）
+- frontend/src/components/sessions/session-config-bar.tsx（canSwitch 放宽 !ended+排队态提示行+toast 分态+信号分态）
+- backend/openapi.json + frontend/src/lib/api-types.ts（gen:types 同步（queued 字段））
+- backend/app/modules/daemon/tests/test_session_queue.py（+4 用例（覆盖合并/双向不合并/派发重放 model））
+- backend/app/modules/daemon/tests/test_session_thinking_level_endpoint.py（忙轮 409 用例改 queued 契约+覆盖 last-wins 新增）
+- frontend/src/components/sessions/__tests__/session-config-bar.test.tsx（存量 5 用例改写+新增 2 用例（running 排队提示））
+- .sillyspec/docs/SillyHub/modules/daemon.md + .sillyspec/docs/multi-agent-platform/modules/frontend.md（ql-20260917-008 增量）
+需求：会话执行中直接切换供应商/模型/思考档/档案，下一轮生效
+根因：切换生效机制是 turn 边界 daemon reload（子进程 env 启动烧死，D-002），前端 running 全置灰只是展示层旧契约——后端 inject 路由 queue_when_busy=True 早已受理忙轮切换（落排队表轮末自动派发）；实际缺口三处：排队行无 model 快照（忙轮切模型派发静默丢失）、连续切换排多条切换轮、思考档忙轮 409。用户拍板：执行中允许直接切换、下一轮生效、重复切换覆盖（最后一次为准）。
+方案：后端：①agent_session_queued_messages 加 model 快照列（迁移 20260917160000），入队落列+派发重放成对；②queue.py 纯切换覆盖合并——新请求纯切换（空 prompt/无附件/带配置维度）且同发送者已有 pending 纯切换行则逐字段覆盖（None 不动，按维度最后一次为准），不新建行 position 不变，普通消息双向不合并；③思考档忙轮 409 改覆盖式暂存 agent_sessions.pending_thinking_level（同迁移）返回 queued=true，close_run_steps run 终态钩子与排队派发并列 fire apply_pending_thinking_level（独立 session 复用 _set_via_rpc，成功清列失败保留）；schema 加 queued 字段+gen:types/openapi 同步。前端 session-config-bar：canSwitch 放宽 !ended（运行中可点）；底部锁提示改 ⏱「运行中切换将于本轮结束后生效」信息行；四控件 title/toast 分态（running 排队提示）；providerOpenSignal running 不再吞（ended 才吞）。
+结果：后端 queue 23 绿（新增合并 4 用例）+thinking endpoint 24 绿（忙轮 409 用例改 queued 契约+覆盖 last-wins 新增）+inject/switch_config/queue_actions 等相关套件共 100 绿+ruff/mypy 0+迁移 offline SQL 校验过；前端 sessions 8 文件 346 绿+session-panel 3 文件 28 绿+新增 2 用例+存量 5 用例按新契约改写+tsc 0+eslint 0 error（8 warning 既有回调形参）；模块文档 daemon.md/frontend.md 增量已更；未部署（后端迁移+前端构建需部署生效）。遗留：会话 end 时暂存思考档不再应用（fail-loud 日志）；provider_caps/provider-caps.ts 行尾重写假 M 未提交（.gitattributes 根治待办）。
+审计：📝 文档欠账（D-8）：12 个源码文件改动未同步任何模块文档（涉及模块：backend · frontend）
+审计：[gate] L2（跨 0 模块 · 12 文件：9 代码/3 测试）advisory；模块文档认领不适用（无可认领模块）；风险命中 1 处（migration←backend/migrations/versions/20260917160000_add_queued_model_and_pending_thinking_level.py）需运行时证据
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/openapi.json, frontend/src/lib/api-types.ts

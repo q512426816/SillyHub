@@ -177,6 +177,14 @@ export interface StderrRowViewProps {
 export interface PreambleSegmentViewProps {
   segment: Extract<TurnSegment, { kind: "preamble" }>;
 }
+/** ql-20260917-006：上下文压缩续接摘要段（默认收起、可展开，同 preamble 展示语义）。 */
+export interface CompactSegmentViewProps {
+  segment: Extract<TurnSegment, { kind: "compact" }>;
+}
+/** ql-20260917-006：压缩过程状态段（[COMPACT_STATUS] 协议行，渲染层解析 phase）。 */
+export interface CompactStatusRowViewProps {
+  segment: Extract<TurnSegment, { kind: "compact_status" }>;
+}
 
 /* ───────────────────────────── 内部工具（纯函数） ───────────────────────────── */
 
@@ -947,6 +955,110 @@ export const PreambleSegmentView = memo(function PreambleSegmentView({
   );
 });
 
+/**
+ * 上下文压缩续接摘要卡（ql-20260917-006）：CLI 自动 compaction 后注入的结构化
+ * 摘要（"This session is being continued from a previous conversation..."）——
+ * 非用户答复，此前被当回复气泡整段刷屏。「全部（进度）」视图专属（对话视图改由
+ * CompactNoticeChip 显示一行短提示），**默认收起**、点击头部展开全文（展示语义
+ * 平移 PreambleSegmentView：字符数提示 + 拖选不触发收起守卫）。
+ */
+export const CompactSegmentView = memo(function CompactSegmentView({
+  segment,
+}: CompactSegmentViewProps) {
+  const [open, setOpen] = useState(false);
+  const charCount = segment.text.length;
+  return (
+    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+      <button
+        type="button"
+        onClick={() => {
+          if (hasActiveTextSelection()) return;
+          setOpen(!open);
+        }}
+        aria-expanded={open}
+        className="flex w-fit cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11px] text-muted-foreground hover:bg-muted"
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "shrink-0 text-[9px] transition-transform duration-150",
+            open && "rotate-90",
+          )}
+        >
+          ▶
+        </span>
+        <span className="shrink-0 font-medium">上下文已重新压缩</span>
+        <span className="shrink-0 opacity-75">{`（${charCount} 字，摘要已注入新窗口）`}</span>
+      </button>
+      {open && (
+        <div className="select-text whitespace-pre-wrap rounded-lg border border-dashed border-brand-300 bg-brand-50/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+          {segment.text}
+        </div>
+      )}
+    </div>
+  );
+});
+
+/**
+ * 对话视图压缩短提示（ql-20260917-006）：compact 摘要段在「对话」视图的原位
+ * 替换渲染——一行弱化提示替代大段摘要气泡（全文进「全部（进度）」视图
+ * CompactSegmentView 折叠卡）。独立于 SegmentView 分发（对话分支特判渲染）。
+ */
+export function CompactNoticeChip() {
+  return (
+    <div className="flex select-none items-center gap-1.5 py-0.5 text-[11px] text-muted-foreground">
+      <span aria-hidden className="shrink-0">
+        ⇄
+      </span>
+      <span>上下文已重新压缩</span>
+    </div>
+  );
+}
+
+/**
+ * 压缩过程状态行（ql-20260917-006）：daemon [COMPACT_STATUS] 协议行的渲染——
+ * phase=compacting 显示「上下文正在重新压缩…」（运行中轮的实时提示，用户要求的
+ * 「压缩过程中回显」）；failed 显示 amber 失败行（压缩失败时续接摘要不会到达，
+ * 这是唯一可见信号）；success 返回 null（紧随的 compact 摘要段已是「已重新压缩」
+ * 标记，避免双提示）。坏 JSON 容错按 compacting 处理（宁可多显示一行进行中提示
+ * 也不吞失败信号）。
+ */
+export const CompactStatusRowView = memo(function CompactStatusRowView({
+  segment,
+}: CompactStatusRowViewProps) {
+  let phase = "compacting";
+  let error: string | undefined;
+  try {
+    const parsed = JSON.parse(segment.text) as { phase?: unknown; error?: unknown };
+    if (parsed.phase === "success" || parsed.phase === "failed") phase = parsed.phase;
+    if (typeof parsed.error === "string" && parsed.error) error = parsed.error;
+  } catch {
+    // 坏 JSON：保持 compacting 默认展示（容错不抛错）。
+  }
+  if (phase === "success") return null;
+  if (phase === "failed") {
+    return (
+      <div className="flex items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
+        <span aria-hidden className="shrink-0">
+          ⚠
+        </span>
+        <span className="min-w-0 whitespace-pre-wrap break-words">
+          上下文压缩失败{error ? `：${error}` : ""}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex select-none items-center gap-1.5 px-1 py-0.5 text-[11px] text-muted-foreground">
+      <span
+        aria-hidden
+        className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-[1.5px] border-muted-foreground/30 border-t-muted-foreground"
+      />
+      <span>上下文正在重新压缩…</span>
+    </div>
+  );
+});
+
 /* ─────────────── 分身段块（task-12 / 2026-08-22-team-session-unify / FR-07） ─────────────── */
 
 /** 分身 run 状态 → 渲染态/文案/颜色（与 team-task-block WORKER_STATUS_META 对齐；
@@ -1158,6 +1270,15 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
       return <SubagentBlockView segment={segment} />;
     case "stderr":
       return <StderrRowView segment={segment} />;
+    case "compact":
+      // ql-20260917-006：压缩续接摘要——「全部（进度）」视图折叠卡（默认收起，
+      // 点击展开全文）；对话视图不进 SegmentView（isConversationSegment 含
+      // compact，由 turn-timeline 特判渲染 CompactNoticeChip 短提示）。
+      return <CompactSegmentView segment={segment} />;
+    case "compact_status":
+      // ql-20260917-006：压缩过程状态行——compacting 实时提示 / failed 警示 /
+      // success 静默（compact 摘要段已是完成标记）。
+      return <CompactStatusRowView segment={segment} />;
     case "preamble":
       // 2026-08-25-unified-floating-session task-11（FR-7）：上下文前导卡——
       // 「全部（进度）」视图显示首轮注入的【变更/页面上下文】【团队任务简报】

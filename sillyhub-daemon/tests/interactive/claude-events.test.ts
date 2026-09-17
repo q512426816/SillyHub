@@ -667,6 +667,76 @@ describe('status 会话信号（session-init-status）', () => {
     }
     norm.dispose();
   });
+
+  it('ql-20260917-006：system/status 压缩帧 → status/context_compacting 事件（此前静默丢弃）', () => {
+    const norm = makeNormalizer([]);
+    // SDK 0.3.247 SDKStatusMessage 形状（sdk.d.ts:4812-4824）。
+    const compacting = {
+      type: 'system',
+      subtype: 'status',
+      status: 'compacting',
+      uuid: 'u-c1',
+      session_id: 's1',
+    } as unknown as SDKMessage;
+    expect(norm.normalizeMessage(compacting)).toEqual([
+      {
+        type: 'status',
+        subtype: 'context_compacting',
+        content: '',
+        metadata: { phase: 'compacting' },
+      },
+    ]);
+    const succeeded = {
+      type: 'system',
+      subtype: 'status',
+      status: null,
+      compact_result: 'success',
+      uuid: 'u-c2',
+      session_id: 's1',
+    } as unknown as SDKMessage;
+    expect(norm.normalizeMessage(succeeded)).toEqual([
+      {
+        type: 'status',
+        subtype: 'context_compacting',
+        content: '',
+        metadata: { phase: 'success' },
+      },
+    ]);
+    const failed = {
+      type: 'system',
+      subtype: 'status',
+      status: null,
+      compact_result: 'failed',
+      compact_error: 'model returned 500',
+      uuid: 'u-c3',
+      session_id: 's1',
+    } as unknown as SDKMessage;
+    expect(norm.normalizeMessage(failed)).toEqual([
+      {
+        type: 'status',
+        subtype: 'context_compacting',
+        content: '',
+        metadata: { phase: 'failed', error: 'model returned 500' },
+      },
+    ]);
+    // status='requesting' 常规请求帧维持丢弃（非压缩语义，零回归）。
+    const requesting = {
+      type: 'system',
+      subtype: 'status',
+      status: 'requesting',
+      uuid: 'u-c4',
+      session_id: 's1',
+    } as unknown as SDKMessage;
+    expect(norm.normalizeMessage(requesting)).toEqual([]);
+    for (const ev of [
+      ...norm.normalizeMessage(compacting),
+      ...norm.normalizeMessage(succeeded),
+      ...norm.normalizeMessage(failed),
+    ]) {
+      expect(safeParseAgentEvent(ev).success).toBe(true);
+    }
+    norm.dispose();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

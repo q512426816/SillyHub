@@ -98,6 +98,11 @@ function segmentTs(seg: TurnSegment): number {
     // task-08（agent-file-upload-mcp）：file 段非 running 候选，时间戳取 log ts。
     case "file":
       return seg.ts ?? Number.NEGATIVE_INFINITY;
+    // ql-20260917-006：压缩摘要 / 压缩状态段非 running 候选，取捕获 ts。
+    case "compact":
+      return seg.ts ?? Number.NEGATIVE_INFINITY;
+    case "compact_status":
+      return seg.ts ?? Number.NEGATIVE_INFINITY;
   }
 }
 

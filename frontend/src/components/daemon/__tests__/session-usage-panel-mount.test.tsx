@@ -169,11 +169,15 @@ function usageStub(): HTMLElement {
   return screen.getByTestId("session-usage-bar-stub");
 }
 
-/** fire 轮次终态（SSE turn_completed 处理路径；async act 冲刷队列刷新链）。 */
-async function fireTurnCompleted(): Promise<void> {
+/** fire 轮次终态（SSE turn_completed 处理路径；async act 冲刷队列刷新链）。
+ *  quick（ql-20260916-014）：可传覆盖项——刷新类副作用经「同 run 首条完成」门控
+ *  （ql-20260916-005），同 run_id 的第二次终态不再递增信号，逐轮递增须换新 run。 */
+async function fireTurnCompleted(
+  over: Partial<SessionStreamEnvelope> = {},
+): Promise<void> {
   await act(async () => {
     streamHandlers!.onTurnCompleted!(
-      env("turn_completed", { status: "completed" }),
+      env("turn_completed", { status: "completed", ...over }),
     );
   });
 }
@@ -256,8 +260,9 @@ describe("SessionUsageBar 挂载点（2026-08-29-session-usage-stats task-04）"
     await fireTurnCompleted();
     expect(usageStub()).toHaveAttribute("data-refresh-signal", "1");
 
-    // 再一轮终态：继续递增（每轮触发一次重取信号）。
-    await fireTurnCompleted();
+    // 再一轮终态（新 run）：继续递增（每轮触发一次重取信号；同 run 重复合成
+    // 被首条完成门控去重——ql-20260916-005）。
+    await fireTurnCompleted({ run_id: "r-2", turn: 2 });
     expect(usageStub()).toHaveAttribute("data-refresh-signal", "2");
   });
 

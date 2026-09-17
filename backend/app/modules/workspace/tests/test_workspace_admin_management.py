@@ -218,21 +218,23 @@ async def test_normal_account_with_other_user_id_stays_in_allowed_scope(
 
 
 @pytest.mark.asyncio
-async def test_normal_account_without_permission_sees_empty(
+async def test_platform_read_account_sees_all_workspaces(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     _admin, user_a, user_b = await _bootstrap_admin_and_normal_users(db_session)
-    # user_a has platform-level workspace:read (so the endpoint dependency does
-    # not 403) but no workspace-scoped role → allowed_workspace_ids() is empty
-    # and the list returns 200 with an empty page (FR-02 boundary).
+    # user_a 持平台级 workspace:read（入口依赖不 403）且无工作区级角色——
+    # ql-20260917-007 起列表口径与 has_permission 段 2 / 通知广播收件人对齐：
+    # 平台级读授权 = 对所有工作区有真实读权限，列表按全量返回（原 FR-02
+    # 「平台级读授权也只见空列表」边界作废，该边界正是「看不到却能收通知、
+    # 进内容」口径割裂的来源）。
     await _grant_platform_permission(db_session, user_a.id, Permission.WORKSPACE_READ)
-    await _create_workspace_row(db_session, created_by=user_b.id, name="ws-b-only")
+    ws_b = await _create_workspace_row(db_session, created_by=user_b.id, name="ws-b-only")
 
     resp = await client.get("/api/workspaces", headers=_headers(_token_for(user_a)))
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["total"] == 0
-    assert body["items"] == []
+    assert body["total"] >= 1
+    assert any(item["id"] == str(ws_b.id) for item in body["items"])
 
 
 # ── q / type / status / limit / offset ───────────────────────────────────────

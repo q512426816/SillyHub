@@ -425,6 +425,29 @@ export async function dispatchStatusEvent(
       );
       return;
     }
+    case 'context_compacting': {
+      // ql-20260917-006：上下文压缩过程状态（system/status 帧 compacting /
+      // compact_result 事件化）→ 落 [COMPACT_STATUS] 协议行（writeTaskLine 同款
+      // legacy flat 形态直接经 onTurnMessage，backend 按 stdout 文本行持久 +
+      // SSE 推送）。前端分类器识别该前缀：运行中轮实时显示「上下文正在重新
+      // 压缩」/失败提示，终态成功不渲染（紧随的续接摘要段已是完成标记）。
+      // 无 active turn（runId 空）丢弃——压缩状态只在轮内产生，口径同 bash_*。
+      const runId = state.currentRunId;
+      if (!runId) return;
+      const meta = eventMetaOf(ev);
+      const phase = strOf(meta?.['phase']) ?? 'compacting';
+      const payload: Record<string, unknown> = {
+        phase: phase === 'success' || phase === 'failed' ? phase : 'compacting',
+      };
+      const error = strOf(meta?.['error']);
+      if (error) payload['error'] = error;
+      await mgr.deps.onTurnMessage(state.sessionId, runId, {
+        event_type: 'text',
+        content: `[COMPACT_STATUS] ${JSON.stringify(payload)}`,
+        channel: 'stdout',
+      });
+      return;
+    }
     default:
       // 未知 subtype 防御丢弃（schema 闭合枚举外的运行时漂移）。
       return;

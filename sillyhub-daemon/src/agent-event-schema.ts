@@ -31,7 +31,8 @@ const AGENT_EVENT_TYPES = [
 ] as const;
 
 /** subtype 字段合法值（与 types.ts AgentStatusSubtype 一字面对齐，顺序一致）。
- * thinking_tokens 为 D-005@v1 契约补遗新增（task-03 双轨可见性对齐）。 */
+ * thinking_tokens 为 D-005@v1 契约补遗新增（task-03 双轨可见性对齐）；
+ * context_compacting 为 ql-20260917-006 新增（system/status 压缩帧事件化）。 */
 const AGENT_STATUS_SUBTYPES = [
   'session_started',
   'bash_chunk',
@@ -40,6 +41,7 @@ const AGENT_STATUS_SUBTYPES = [
   'agent_task_status',
   'task_notification',
   'thinking_tokens',
+  'context_compacting',
 ] as const;
 
 /** usage 子对象 schema（与 types.ts AgentEventUsage 对齐，字段全可选）。

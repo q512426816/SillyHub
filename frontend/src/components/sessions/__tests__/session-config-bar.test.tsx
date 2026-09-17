@@ -229,10 +229,10 @@ describe("SessionConfigBar 两控件渲染", () => {
   });
 });
 
-// ── 2. running / ended 置灰（FR-05） ─────────────────────────────────────
+// ── 2. running / ended 置灰（FR-05；ql-20260917-008 起 running 放开） ──────
 
 describe("SessionConfigBar 状态置灰", () => {
-  it("running：两控件全禁用 + 「本轮完成后解锁切换」(Lock 图标)提示，下拉不可开", () => {
+  it("running：两控件可点（受理即排队，本轮结束后生效）+ Timer 提示，下拉可开", () => {
     renderBar({ running: true });
     for (const name of [
       "配置-供应商 本机默认",
@@ -240,27 +240,28 @@ describe("SessionConfigBar 状态置灰", () => {
     ]) {
       expect(
         (screen.getByRole("button", { name }) as HTMLButtonElement).disabled,
-      ).toBe(true);
+      ).toBe(false);
     }
-    expect(screen.getByText("本轮完成后解锁切换")).toBeInTheDocument();
-    // 点击置灰控件不开下拉
+    expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
+    // ql-20260917-008：运行中点开下拉可正常选择（请求落忙轮排队）
     fireEvent.click(screen.getByRole("button", { name: "配置-供应商 本机默认" }));
-    expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
+    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
   });
 
-  it("ended：全部禁用且无解锁提示（只读浏览）", () => {
+  it("ended：全部禁用且无运行中提示（只读浏览）", () => {
     renderBar({ ended: true });
     expect(
       (screen.getByRole("button", { name: "配置-供应商 本机默认" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
     expect(
-      screen.queryByText("本轮完成后解锁切换"),
+      screen.queryByText("运行中切换将于本轮结束后生效"),
     ).not.toBeInTheDocument();
   });
 
   // ql-20260909-005：禁用态 title 按原因说明（原恒静态说明，点了没反应零解释）。
-  it("禁用态 title 说明原因：ended→已结束或机器离线；running→本轮后可切换；idle→原默认说明", () => {
+  // ql-20260917-008：running title 改「可切换，本轮结束后生效」（控件不再禁用）。
+  it("title 说明：ended→已结束或机器离线；running→可切换本轮后生效；idle→原默认说明", () => {
     const { unmount: u1 } = renderBar({ ended: true });
     expect(
       screen.getByRole("button", { name: "配置-供应商 本机默认" }),
@@ -273,7 +274,7 @@ describe("SessionConfigBar 状态置灰", () => {
     const { unmount: u2 } = renderBar({ running: true });
     expect(
       screen.getByRole("button", { name: "配置-供应商 本机默认" }),
-    ).toHaveAttribute("title", "会话运行中，本轮结束后可切换供应商");
+    ).toHaveAttribute("title", "运行中可切换，将于本轮结束后生效");
     u2();
 
     renderBar();
@@ -290,9 +291,11 @@ describe("SessionConfigBar 状态置灰", () => {
     });
     const slot = screen.getByTestId("trailing-slot-content");
     expect(slot).toBeInTheDocument();
-    // 与 running 解锁提示同行——共享同一行容器（flex 行）。
+    // 与 running 提示同行——共享同一行容器（flex 行）。
     expect(
-      slot.closest("div")?.contains(screen.getByText("本轮完成后解锁切换")),
+      slot.closest("div")?.contains(
+        screen.getByText("运行中切换将于本轮结束后生效"),
+      ),
     ).toBe(true);
 
     cleanup();
@@ -554,13 +557,24 @@ describe("SessionConfigBar providerOpenSignal（ql-20260904-010）", () => {
     expect(screen.queryByTestId("config-dd-profile")).not.toBeInTheDocument();
   });
 
-  it("running 锁定 → 信号被吞不开下拉；解锁后不凭旧信号重放", () => {
+  it("running → 信号打开下拉（ql-20260917-008 运行中放开）；ended 才吞信号，解锁后不凭旧信号重放", () => {
     const { rerenderWith } = renderSignalBar({
       running: true,
       providerOpenSignal: 1,
     });
-    expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
+    // 运行中不再锁定——信号照常开下拉
+    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
     rerenderWith({ running: false });
+    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
+
+    cleanup();
+    // ended 吞信号；会话重开（新实例 ended=false）不凭旧信号重放
+    const { rerenderWith: rerender2 } = renderSignalBar({
+      ended: true,
+      providerOpenSignal: 1,
+    });
+    expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
+    rerender2({ ended: false });
     expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
   });
 
@@ -1154,6 +1168,43 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04�
     expect(mocks.getSessionThinkingLevels).toHaveBeenCalledTimes(1);
   });
 
+  it("ql-20260917-008：running 时切档受理——queued=True 提示「已排队…本轮结束后生效」+ 乐观缓存照写", async () => {
+    mocks.setSessionThinkingLevel.mockResolvedValue({ ok: true, queued: true });
+    renderBar({ running: true, thinkingLevel: {} });
+    const select = (await screen.findByTestId(
+      "config-thinking-select",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("medium"));
+    expect(select.disabled).toBe(false); // 运行中不再禁用
+    fireEvent.change(select, { target: { value: "high" } });
+    await waitFor(() =>
+      expect(mocks.setSessionThinkingLevel).toHaveBeenCalledWith("sess-1", "high"),
+    );
+    await waitFor(() =>
+      expect(mocks.messageSuccess).toHaveBeenCalledWith(
+        "已排队切换思考级别：高（本轮结束后生效）",
+      ),
+    );
+    await waitFor(() => expect(select.value).toBe("high"));
+  });
+
+  it("ql-20260917-008：running 时切换供应商照常受理——injectSession 调用 + 提示「已排队…本轮结束后生效」", async () => {
+    renderBar({ running: true, llmProviderId: "prov-kimi" });
+    openCtrl("配置-供应商");
+    fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
+    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mocks.messageSuccess).toHaveBeenCalledWith(
+        expect.stringContaining("已排队切换供应商"),
+      ),
+    );
+    await waitFor(() =>
+      expect(mocks.messageSuccess).toHaveBeenCalledWith(
+        expect.stringContaining("本轮结束后生效"),
+      ),
+    );
+  });
+
   it("200 结构化失败（ok=false + error）→ notify error 带 error 原文（如旧 daemon 升级提示）", async () => {
     mocks.setSessionThinkingLevel.mockResolvedValue({
       ok: false,
@@ -1274,13 +1325,15 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
     expect(screen.queryByTestId("config-thinking-select")).not.toBeInTheDocument();
   });
 
-  it("mobile：running 不渲染「本轮完成后解锁切换」文字提示（ql-20260915-013 一行化，禁用态+title 已表意）", () => {
+  it("mobile：running 不渲染「运行中切换将于本轮结束后生效」文字提示（ql-20260915-013 一行化，控件 title 已表意）", () => {
     renderBar({ variant: "mobile", running: true });
-    expect(screen.queryByText("本轮完成后解锁切换")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("运行中切换将于本轮结束后生效"),
+    ).not.toBeInTheDocument();
   });
 
-  it("desktop：running 锁提示照旧（零回归锚）", () => {
+  it("desktop：running 提示照旧（零回归锚；ql-20260917-008 文案改排队说明）", () => {
     renderBar({ running: true });
-    expect(screen.getByText("本轮完成后解锁切换")).toBeInTheDocument();
+    expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
   });
 });

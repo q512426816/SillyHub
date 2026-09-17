@@ -69,7 +69,15 @@ export type AgentStatusSubtype =
   | 'agent_task_status'
   | 'task_notification'
   /** thinking token 估计值（running total，思考进度指示）。D-005@v1 契约补遗。 */
-  | 'thinking_tokens';
+  | 'thinking_tokens'
+  /**
+   * 上下文压缩过程状态（ql-20260917-006）：Claude SDK system/status 帧
+   * （status='compacting' / compact_result success|failed）的事件化——此前静默
+   * 丢弃，前端无法在压缩过程中显示「上下文正在重新压缩」实时提示。metadata
+   * 载 phase（compacting/success/failed）与可选 error；消费侧落
+   * [COMPACT_STATUS] 协议行（session-manager/events.ts）。
+   */
+  | 'context_compacting';
 
 /**
  * token 用量（v2，design.md §7）。字段全可选 number。
