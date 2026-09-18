@@ -1,0 +1,151 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-ac6418d1",
+  "totals": {
+    "files": 14,
+    "additions": 513,
+    "deletions": 57
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/frontend_components.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+      "declared": true,
+      "additions": 5,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/inject.py",
+      "declared": true,
+      "additions": 48,
+      "deletions": 10,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py",
+      "declared": true,
+      "additions": 43,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_queue_actions.py",
+      "declared": true,
+      "additions": 56,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx",
+      "declared": true,
+      "additions": 11,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx",
+      "declared": true,
+      "additions": 182,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/runtime-session-helpers.tsx",
+      "declared": true,
+      "additions": 7,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+      "declared": true,
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "declared": true,
+      "additions": 42,
+      "deletions": 8,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "declared": true,
+      "additions": 65,
+      "deletions": 35,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/turn-state.ts",
+      "declared": true,
+      "additions": 41,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/daemon/session-sse.ts",
+      "declared": true,
+      "additions": 7,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/daemon/session-stream.ts",
+      "declared": true,
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 14,
+    "codeFileCount": 9,
+    "testFileCount": 4,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260918-003-4b16",
+  "sessionId": "quick-ac6418d1",
+  "savedAt": "2026-09-18T00:01:53.629Z",
+  "patchSha256": "1d18a3661d667009f6521090d47cfdca7f7274a80f6a82ebe389c822c02d1033",
+  "patchStatus": "ok"
+}

@@ -685,17 +685,16 @@ async def _inject_into_session(
 
                 marker_lines = "\n".join(attachment_marker_line(r) for r in validated_attachments)
                 user_input_content = f"{marker_lines}\n{prompt}" if prompt else marker_lines
-            svc._session.add(
-                AgentRunLog(
-                    run_id=run.id,
-                    channel="user_input",
-                    content_redacted=user_input_content[:USER_INPUT_LOG_MAX_CHARS],
-                    timestamp=now,
-                    # task-03（群聊影子注入）：群链路 metadata（链 id/深度/发送者）
-                    # 随本轮日志落库；缺省 None 列保持 NULL（存量零回归）。
-                    metadata_=dict(turn_metadata) if turn_metadata is not None else None,
-                )
+            user_input_log = AgentRunLog(
+                run_id=run.id,
+                channel="user_input",
+                content_redacted=user_input_content[:USER_INPUT_LOG_MAX_CHARS],
+                timestamp=now,
+                # task-03（群聊影子注入）：群链路 metadata（链 id/深度/发送者）
+                # 随本轮日志落库；缺省 None 列保持 NULL（存量零回归）。
+                metadata_=dict(turn_metadata) if turn_metadata is not None else None,
             )
+            svc._session.add(user_input_log)
 
         # task-08 拆分：附件组装/gate 复核 + lease metadata 同步 +
         # providerConfig 构造段下沉 inject_gates._finalize_inject_turn_writes。
@@ -726,6 +725,18 @@ async def _inject_into_session(
             run.status = "completed"
             run.finished_at = datetime.now(UTC)
 
+        # ql-20260918-003：commit（expire_on_commit）前快照 user_input 日志标量，
+        # 供 commit 后补发 Redis log 事件（见下方 publish 段）。
+        user_input_event_payload = (
+            None
+            if silent_config_switch
+            else {
+                "log_id": str(user_input_log.id),
+                "content": user_input_log.content_redacted,
+                "timestamp": user_input_log.timestamp.isoformat().replace("+00:00", "Z"),
+            }
+        )
+
         await svc._session.commit()
         await svc._session.refresh(session)
         await svc._session.refresh(run)
@@ -735,6 +746,33 @@ async def _inject_into_session(
     except Exception:
         await svc._session.rollback()
         raise
+
+    # ql-20260918-003：user_input 日志实时推送——本行由 backend 直接落库（不经
+    # daemon 上报管线，无 Redis 发布），排队派发轮（立即发送/轮末自动派发）
+    # 无占位轮，前端实时流收不到任何事件 → 用户消息气泡缺失，刷新才可见
+    # （历史路径 logsToTurns 从日志重建）。commit 后按 daemon 上报同形态
+    # （publish.py session_payload）补发 log 事件；直发轮前端占位轮已有
+    # prompt，事件到达不覆盖（onLog user_input 只在 prompt 为空时写入）。
+    # daemon 后续双提交的裸文本版 user_input 由前端 seenLogIds 按 log_id 去重。
+    if user_input_event_payload is not None:
+        await svc._publish_session_event(
+            session.id,
+            {
+                "event": "log",
+                "session_id": str(session.id),
+                "run_id": str(run.id),
+                **user_input_event_payload,
+                "channel": "user_input",
+                "parent_tool_use_id": None,
+                "subagent_type": None,
+                "depth": None,
+                "tool_kind": None,
+                "segment_id": None,
+                "stale": None,
+                "edit_patch": None,
+                "agent_event": None,
+            },
+        )
 
     # task-08 拆分：commit 后派发段（ready 等待 + SESSION_SWITCH_CONFIG /
     # SESSION_INJECT 下发 + 失败收敛）下沉 control._dispatch_inject_turn。

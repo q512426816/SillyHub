@@ -75,6 +75,34 @@ export interface TurnState {
 export const INITIAL_TURN_STATE: TurnState = { turns: [], currentRunId: null };
 
 /**
+ * ql-20260918-003：直发占位轮 → 真实 run_id 的合并替换（page/dialog 发送路径共用）。
+ *
+ * 常态：占位轮原位改名（runId=realRunId + status=nextStatus）。
+ * 竞态：backend 在 `_inject_into_session` commit 后补发的 user_input log 事件
+ * （SSE）先于 inject HTTP 响应到达时，upsertTurn 已按真实 run_id 建轮——此时
+ * 删除占位轮、其 prompt 在先建轮为空时转移（通常先建轮已从 user_input 事件
+ * 写入 prompt），避免同 runId 双轮。
+ */
+export function replacePlaceholderTurn<
+  T extends { runId: string; prompt: string; status: TurnUiStatus },
+>(turns: T[], placeholderId: string, realRunId: string, nextStatus: TurnUiStatus): T[] {
+  const raced = turns.some((t) => t.runId === realRunId && t.runId !== placeholderId);
+  if (!raced) {
+    return turns.map((t) =>
+      t.runId === placeholderId ? { ...t, runId: realRunId, status: nextStatus } : t,
+    );
+  }
+  const placeholder = turns.find((t) => t.runId === placeholderId);
+  return turns
+    .filter((t) => t.runId !== placeholderId)
+    .map((t) =>
+      t.runId === realRunId && placeholder != null && !t.prompt.trim()
+        ? { ...t, prompt: placeholder.prompt }
+        : t,
+    );
+}
+
+/**
  * 群聊体验 quick（2026-09-02）：初始历史窗口条数（logs 端点 limit=最新 N 条
  * 升序）。「加载更早消息」按钮同页距翻页（before 游标）。满页即视为可能还有
  * 更早（< 页距 = 已到头，按钮隐藏）。
@@ -284,10 +312,21 @@ export function subagentBlockNameOf(seg: TurnSegment): string | null {
   return null;
 }
 
-/** turn_completed 的 status/exit_code → TurnUiStatus 终态。 */
+/**
+ * turn_completed 的 status/exit_code/error_code → TurnUiStatus 终态。
+ *
+ * ql-20260918-003：打断语义分流——daemon SDK abort 上报 error_during_execution
+ * 时 run.status=failed 但 error_code=interactive_interrupted（立即发送的忙时
+ * 打断 / 手动打断本轮同源）；显示为 killed（已中止）而非 failed（轮次失败），
+ * 消除「系统主动打断被渲染成失败」的误导。无 error_code 的老事件 / 老 backend
+ * 保持 failed 原映射（真实失败必带 interactive_failed / interactive_unknown_status，
+ * 不冒进归类）。
+ */
 export function deriveTurnTerminalStatus(env: SessionStreamEnvelope): TurnUiStatus {
   const status = env.status;
-  if (status === "failed") return "failed";
+  if (status === "failed") {
+    return env.error_code === "interactive_interrupted" ? "killed" : "failed";
+  }
   if (status === "killed" || status === "cancelled") return "killed";
   if (env.exit_code !== null && env.exit_code !== 0 && env.status === null) {
     return env.exit_code === 130 || env.exit_code === 143 ? "killed" : "failed";

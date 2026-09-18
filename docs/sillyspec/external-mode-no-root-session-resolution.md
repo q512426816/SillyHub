@@ -76,3 +76,10 @@ read_only PI worker 正常完成（分支产物已 commit、`output_redacted` 50
 - 已知断裂点守护锚点再核全在 main：`resolve_mission_for_session` run 归属回退 + external 首 run 锚（`_mission_from_session_runs`）+ `_worker_done_core` 首 run 锚成员资格 + 守护测试 `test_mission_external_mode.py`（AC-04/05）/ `test_worker_subsession_done.py::TestExternalModeWorkerDone`，源头修复未回退。
 - **待补建议（report_progress / mission_status 的 external 冒烟用例）已转正式登记**：grep 实证两仓在途 change（`2026-09-16-mobile-changes-parity` 等）与 quicklog 均无该测试的认领记录，不再「留属主」口头挂着。正式转登记到 sillyspec 改进债单 `docs/sillyspec/prompt-control-debt.md`（下次编辑该债单时补入「external 冒烟用例」一项），由债单例行跟踪认领。
 - 本文件仍定位「双形态契约守则」参考文档，长期有效；随每次新写解析/治理逻辑复用。保持活跃。
+
+## 处置进展（2026-09-17 定时收口：待补冒烟用例落地 + 守则再立新功）
+
+- **冒烟用例已实现**（`backend/app/modules/agent/tests/test_mission_external_mode_smoke.py` 3 用例）：external worker（parent=NULL、mission.session_id=NULL、首 run 双标记）→ report_progress 200 落库 / mission_status 解析活跃 mission / 普通会话维持 D-12 优雅 miss。
+- **守则当场抓到新缺口并修复**：写用例实证 `_resolve_session_mission` 的 **parent-NULL 分支**只走 `get_active_mission_for_session` 直查——external worker 恒 miss → report_progress 等五端点 404（d879ea247 的 run 归属回退只接在 parent 非空的爬根分支，正是本守则「parent NULL 解析必须问 external 走不走得通」的漏网点）。修复：`mcp_tools.py` 非懒建路径与 `_mission_status_core` parent-NULL miss 两处补 `_mission_from_session_runs` 回退（普通会话无 mission run → None，404/D-12 语义不放宽；dispatch 懒建路径不动——控制器复用会话不误锚旧 worker mission）。status 端点同修后 external worker 能看到自己活跃 mission（active=True），不再被 graceful 误报。
+- **验证**：新用例 3/3 绿；agent 全家 1251 passed 零回归；ruff check/format 0 问题。
+- 09-16 注记提的「转登记 prompt-control-debt.md」——该债单文件现已不存在（仅旧 worktree 副本），且本条已直接实现，登记作废。本文件继续以「双形态契约守则」手册形态长期活跃。

@@ -2466,4 +2466,186 @@ describe("SessionPanel（dialog）终止中态显示（task-13 / FR-04）", () =
     // 不要出现终止中横幅
     expect(screen.queryByText(/终止中…/)).not.toBeInTheDocument();
   });
+
+  // ── ql-20260918-003：排队消息「立即发送」两缺陷回归锁 ──────────────────────
+
+  it("ql-20260918-003：排队派发轮 user_input log 事件实时写 prompt 气泡（无占位轮，双提交不重复）", async () => {
+    // 排队派发轮（立即发送/轮末自动派发）无占位轮——backend 落库 user_input 后
+    // 补发的 log 事件是用户消息气泡的唯一实时来源（修复前实时不显示、刷新才
+    // 可见）。锁定：prompt 为空时写入；daemon 双提交裸文本版（同文不同
+    // log_id）后到不覆盖、不产生第二个气泡。
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.getAgentSession.mockResolvedValue({
+      id: "sess-q", runtime_id: null, lease_id: "lease-q",
+      provider: "claude", status: "active", agent_session_id: "ag-q",
+      config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+      current_run_id: null,
+      terminating_at: null,
+    });
+
+    setupPanel({ attachSessionId: "sess-q", initialTurns: [] });
+    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
+
+    const conn = stream.conn;
+    // backend 补发的 user_input log（排队条目派发建 run 后首条事件）
+    act(() => {
+      conn.handlers.route(makeEnvelope("log", {
+        run_id: "run-q1",
+        channel: "user_input",
+        content: "立即发这条",
+        log_id: "log-ui-1",
+      }));
+    });
+    await waitFor(() => expect(screen.getByText("立即发这条")).toBeInTheDocument());
+
+    // daemon 双提交的裸文本版后到：prompt 已非空不覆盖（单气泡）
+    act(() => {
+      conn.handlers.route(makeEnvelope("log", {
+        run_id: "run-q1",
+        channel: "user_input",
+        content: "立即发这条",
+        log_id: "log-ui-2",
+      }));
+    });
+    expect(screen.getAllByText("立即发这条")).toHaveLength(1);
+  });
+
+  it("ql-20260918-003：回放终态轮的历史 user_input 不误锁输入框（currentRunId 守卫）", async () => {
+    // 轮后对账/断线 resync 会增量重放历史 user_input 日志——落在已终态轮时
+    // 不得把 currentRunId 置回旧 run（否则空闲会话输入框被误锁）。
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.getAgentSession.mockResolvedValue({
+      id: "sess-r", runtime_id: null, lease_id: "lease-r",
+      provider: "claude", status: "active", agent_session_id: "ag-r",
+      config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+      current_run_id: null,
+      terminating_at: null,
+    });
+
+    setupPanel({ attachSessionId: "sess-r", initialTurns: [] });
+    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
+
+    const conn = stream.conn;
+    // 轮先终态（实时窗口），随后轮后对账/断线 resync 增量重放该轮历史日志
+    // （user_input 后到——正是对账补缺口的形态）
+    act(() => {
+      conn.handlers.route(makeEnvelope("log", {
+        run_id: "run-old", channel: "stdout", content: "历史回复", log_id: "l-old-out",
+      }));
+      conn.handlers.route(makeEnvelope("turn_completed", { run_id: "run-old", status: "completed" }));
+    });
+    await waitFor(() => expect(screen.getByText(/历史回复/)).toBeInTheDocument());
+
+    act(() => {
+      conn.handlers.route(makeEnvelope("log", {
+        run_id: "run-old", channel: "user_input", content: "历史消息", log_id: "l-old-ui",
+      }));
+    });
+    // 终态轮重放 user_input：prompt 补写（刷新一致性），不复活轮也不锁输入框
+    await waitFor(() => expect(screen.getByText("历史消息")).toBeInTheDocument());
+    const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+    expect(textarea.disabled).toBe(false);
+  });
+
+  it("ql-20260918-003：直发占位轮与 SSE user_input 先到竞态合并（无双轮、prompt 单份）", async () => {
+    // backend 在 inject commit 后立即 publish user_input log（SSE）——可能先于
+    // inject HTTP 响应到达。占位轮（placeholder id）与先建轮（真实 run id）必须
+    // 合并成单轮：inject 响应侧删除占位轮 + prompt 转移。
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-0", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+    let resolveInject: (v: any) => void = () => {};
+    sessionApi.injectSession.mockImplementation(
+      () => new Promise((resolve) => { resolveInject = resolve; }),
+    );
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "首条" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+    const conn = stream.conn;
+    // 首轮收尾（解锁输入框），第二条走 injectSession（挂起模拟响应迟到）
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-0", turn: 1 }));
+      conn.handlers.route(makeEnvelope("turn_completed", { run_id: "run-0", status: "completed" }));
+    });
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/)).toBeTruthy();
+    }, { timeout: 2000 });
+    const input2 = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
+    fireEvent.change(input2, { target: { value: "竞态消息" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
+
+    // SSE user_input publish 先于 inject HTTP 响应到达（真实 run_id 建轮 + 写 prompt；
+    // 此时占位轮同文本并存——getByText 多元素，用 getAllByText 计数）
+    act(() => {
+      conn.handlers.route(makeEnvelope("log", {
+        run_id: "run-1",
+        channel: "user_input",
+        content: "竞态消息",
+        log_id: "log-race-ui",
+      }));
+    });
+    await waitFor(() => expect(screen.getAllByText("竞态消息").length).toBeGreaterThanOrEqual(1));
+
+    // inject 响应迟到返回 run-1：占位轮删除合并，不产生第二个同 run 轮
+    act(() => { resolveInject({ session_id: "sess-1", run_id: "run-1", status: "active" }); });
+    await waitFor(() => expect(screen.getAllByText("竞态消息")).toHaveLength(1));
+  });
+
+  it("ql-20260918-003：打断轮 status=failed + error_code=interactive_interrupted 显示「已中止」，真实失败保持「失败」", async () => {
+    // 立即发送忙时打断：daemon SDK abort 上报 error_during_execution →
+    // status=failed + error_code=interactive_interrupted——修复前显示「轮次失败」
+    // 误导用户；真实模型失败（interactive_failed）保持「失败」不误伤。
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.getAgentSession.mockResolvedValue({
+      id: "sess-i", runtime_id: null, lease_id: "lease-i",
+      provider: "claude", status: "active", agent_session_id: "ag-i",
+      config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+      current_run_id: null,
+      terminating_at: null,
+    });
+
+    setupPanel({ attachSessionId: "sess-i", initialTurns: [] });
+    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
+
+    const conn = stream.conn;
+    act(() => {
+      conn.handlers.route(makeEnvelope("log", {
+        run_id: "run-int", channel: "user_input", content: "被打断的轮", log_id: "l-ui",
+      }));
+      conn.handlers.route(makeEnvelope("log", {
+        run_id: "run-int", channel: "stdout", content: "跑到一半", log_id: "l-out",
+      }));
+      conn.handlers.route(makeEnvelope("turn_completed", {
+        run_id: "run-int",
+        status: "failed",
+        error_code: "interactive_interrupted",
+      }));
+    });
+    await waitFor(() => expect(screen.getByText("已中止")).toBeInTheDocument());
+    expect(screen.queryByText("失败")).not.toBeInTheDocument();
+
+    // 真实失败（error_code=interactive_failed）保持「失败」
+    act(() => {
+      conn.handlers.route(makeEnvelope("log", {
+        run_id: "run-err", channel: "user_input", content: "真失败轮", log_id: "l-ui-2",
+      }));
+      conn.handlers.route(makeEnvelope("turn_completed", {
+        run_id: "run-err",
+        status: "failed",
+        error_code: "interactive_failed",
+      }));
+    });
+    await waitFor(() => expect(screen.getByText("失败")).toBeInTheDocument());
+  });
 });

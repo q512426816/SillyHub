@@ -14,7 +14,7 @@ import {
 import { Button, Tag } from "antd";
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
-import { applyLogToSegments, finishTurn } from "@/components/daemon/session-log-assembler";
+import { applyLogToSegments, extractPreambleText, finishTurn, stripPreambleText } from "@/components/daemon/session-log-assembler";
 import { TurnTimeline } from "@/components/daemon/turn-timeline";
 import type { AutoResumeEntry } from "@/components/daemon/turn-timeline";
 import { type AttachmentRead } from "@/lib/api/session-attachments";
@@ -58,7 +58,7 @@ import { type SessionPanelProps } from "./index";
 import {
   HISTORY_PAGE_SIZE, MAX_PROMPT_LEN, MENTION_PLACEHOLDER_HINT, SUSPENDED_SESSION_REFETCH_MS,
   TERMINAL_TURN_STATUSES, applyBashStatusEvent, appendBashChunk, BashProgressState,
-  deriveTurnTerminalStatus, mentionBindOptions, readSessionDraft, writeSessionDraft,
+  deriveTurnTerminalStatus, mentionBindOptions, readSessionDraft, replacePlaceholderTurn, writeSessionDraft,
 } from "./turn-state";
 import {
   assembledViewOf, ATTACH_POLL_MAX_ATTEMPTS, ATTACH_POLL_MS, getProviderLabel,
@@ -446,7 +446,43 @@ export function SessionPanelDialog(props: SessionPanelProps) {
             onLog: (env) => {
               // channel=user_input 是用户消息（attach 时 initialTurns 已作 prompt），
               // 不追加到 agent output，避免 prompt 气泡与 output 气泡重复。
-              if (env.channel === "user_input") return;
+              // ql-20260918-003：补 prompt 气泡实时来源——排队派发轮（立即发送/
+              // 轮末自动派发）无占位轮，backend 落库 user_input 后补发的 log 事件
+              // 是其用户消息气泡的唯一实时事件；prompt 为空时写入剥前导正文
+              // （对齐历史路径 logsToTurns 与 page 模式同款：已有值不覆盖，直发
+              // 轮占位轮与 daemon 双提交裸文本版到达时均非空，天然幂等）。
+              if (env.channel === "user_input") {
+                if (!env.run_id) return;
+                const rawText = env.content ?? "";
+                const preambleText = extractPreambleText(rawText);
+                setView((prev) => {
+                  // 回放守卫（page 模式同款）：轮后对账/断线 resync 重放的历史
+                  // user_input 落在已终态轮——不 setCurrentRun（防旧 run 误锁输入框），
+                  // prompt 照常补写；实时事件（新建/活跃轮）才置位。
+                  const existing = prev.turns.find(
+                    (t) => t.runId === env.run_id || t.realRunId === env.run_id,
+                  );
+                  const staleReplay =
+                    existing != null &&
+                    TERMINAL_TURN_STATUSES.has(existing.status) &&
+                    prev.currentRunId !== env.run_id;
+                  return upsertDialogTurn(
+                    prev,
+                    env,
+                    (turn) =>
+                      !turn.prompt.trim()
+                        ? {
+                            ...turn,
+                            prompt: preambleText
+                              ? stripPreambleText(rawText).trim()
+                              : rawText.trim(),
+                          }
+                        : turn,
+                    staleReplay ? {} : { setCurrentRun: env.run_id! },
+                  );
+                });
+                return;
+              }
               setView((prev) => {
                 // quick-9f86d2c3（会话 e87622aa）：非当前活跃 run 的 log = 终态轮迟到
                 // 事件（轮后对账 1.5s 重放 / 断线 resync 增量）。此类 log 落在已终态
@@ -961,14 +997,12 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           onSendSettled(prompt, attachmentIds);
           return;
         }
+        // ql-20260918-003：占位轮合并替换——SSE user_input publish 先于本响应
+        // 到达时已按真实 run_id 建轮，占位轮删除 + prompt 转移（防同 runId 双轮）。
         setView((prev) => ({
           ...prev,
           currentRunId: resp.run_id,
-          turns: prev.turns.map((t) =>
-            t.runId === placeholderId
-              ? { ...t, runId: resp.run_id!, status: "running" }
-              : t,
-          ),
+          turns: replacePlaceholderTurn(prev.turns, placeholderId, resp.run_id!, "running"),
           errorMsg: null,
         }));
         onSendSettled(prompt, attachmentIds);

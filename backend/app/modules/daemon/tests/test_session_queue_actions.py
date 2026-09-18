@@ -534,6 +534,62 @@ class TestDispatchNow:
         assert await _run_user_input(db_session, runs[0].id) == "立即发这条"
 
     @pytest.mark.asyncio
+    async def test_dispatch_now_publishes_user_input_log_event(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """ql-20260918-003：排队派发轮 user_input 落库后补发 Redis log 事件。
+
+        排队派发轮（立即发送/轮末自动派发）无前端占位轮——backend 直接落库的
+        user_input 日志必须补发 session channel log 事件（与 daemon 上报同形态），
+        否则前端实时流收不到用户消息气泡（刷新才可见）。空闲派发路径锁定：
+        publish 到 agent_session:{sid}，payload event=log + channel=user_input +
+        run_id=新 run + log_id=落库行 id + content=条目 prompt。
+        """
+        svc, uid, _rt, session_id, busy_run = await _setup_busy_session(db_session)
+        result = await svc.inject_session(
+            session_id, uid, prompt="立即发这条", queue_when_busy=True
+        )
+        entry_id = result.queue_entry_id
+        assert entry_id is not None
+        await _finish_run(db_session, busy_run)
+        mocked_redis.publish.reset_mock()
+
+        await svc.dispatch_queued_message_now(session_id, entry_id, uid)
+
+        runs = await _active_runs(db_session, session_id)
+        assert len(runs) == 1
+        import json as _json
+
+        user_input_publishes = [
+            _json.loads(call.args[1])
+            for call in mocked_redis.publish.await_args_list
+            if call.args[0] == f"agent_session:{session_id}"
+        ]
+        user_input_events = [
+            p
+            for p in user_input_publishes
+            if p.get("event") == "log" and p.get("channel") == "user_input"
+        ]
+        assert len(user_input_events) >= 1
+        payload = user_input_events[0]
+        assert payload["run_id"] == str(runs[0].id)
+        assert payload["content"] == "立即发这条"
+        # log_id 是落库行真实 id（前端 seenLogIds 去重依赖）
+        log_row = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == runs[0].id,
+                        AgentRunLog.channel == "user_input",
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert payload["log_id"] == str(log_row.id)
+
+    @pytest.mark.asyncio
     async def test_dispatch_now_busy_prepends_and_interrupts(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:

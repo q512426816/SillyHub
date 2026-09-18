@@ -434,6 +434,17 @@ describe("runTerminalTurnStatus（ql-20260822-010）", () => {
     expect(runTerminalTurnStatus("running")).toBeNull();
     expect(runTerminalTurnStatus(null)).toBeNull();
   });
+
+  it("ql-20260918-003：failed + error_code=interactive_interrupted → killed（打断分流）；其余错误码/缺省保持 failed", () => {
+    expect(runTerminalTurnStatus("failed", "interactive_interrupted")).toBe("killed");
+    expect(runTerminalTurnStatus("failed", "interactive_failed")).toBe("failed");
+    expect(runTerminalTurnStatus("failed", "interactive_unknown_status")).toBe("failed");
+    expect(runTerminalTurnStatus("failed", null)).toBe("failed");
+    expect(runTerminalTurnStatus("failed", undefined)).toBe("failed");
+    // 非失败状态不受 error_code 影响
+    expect(runTerminalTurnStatus("interrupted", "interactive_interrupted")).toBe("killed");
+    expect(runTerminalTurnStatus("completed", "interactive_interrupted")).toBeNull();
+  });
 });
 
 describe("logsToTurns 父归属跨 run 重挂（2026-09-15-subagent-three-pane-display 验收返工）", () => {

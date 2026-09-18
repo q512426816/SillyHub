@@ -410,6 +410,10 @@ export function streamSession(
               : run.status
             : null,
         exit_code: run.exit_code,
+        // ql-20260918-003：调度层错误码透传（对齐实时 turn_completed 事件）——
+        // 合成终态事件消费方 deriveTurnTerminalStatus 据此把打断轮
+        // （status=failed + error_code=interactive_interrupted）映射 killed。
+        error_code: event === "turn_completed" ? run.error_code ?? null : null,
         reason: null,
         input_tokens: run.input_tokens,
         output_tokens: run.output_tokens,

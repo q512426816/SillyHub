@@ -160,7 +160,7 @@ export function enrichDisplayTurns(
       // 快照为 failed/interrupted/cancelled 时修正为 failed/killed 并回填
       // errorDetail，消除「聊天时红色错误卡、刷新后变已完成」的路径不一致。
       // 实时轮终态与 run 快照一致，覆盖为同值无害；errorDetail 只补缺（?? 链）。
-      const terminal = runTerminalTurnStatus(meta.status);
+      const terminal = runTerminalTurnStatus(meta.status, meta.error_code);
       const terminalPatch =
                 terminal === null
                   ? {}

@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { Badge, Button, Drawer, Input, Spin } from "antd";
 import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
-import { extractPreambleText, finishTurn } from "@/components/daemon/session-log-assembler";
+import { extractPreambleText, finishTurn, stripPreambleText } from "@/components/daemon/session-log-assembler";
 import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
 import type { AutoResumeEntry } from "@/components/daemon/turn-timeline";
 import { type AttachmentRead } from "@/lib/api/session-attachments";
@@ -82,7 +82,7 @@ import {
   SUSPENDED_SESSION_REFETCH_MS, TERMINAL_TURN_STATUSES, TurnState, applyBashStatusEvent,
   appendBashChunk, applyEnvelopeToTurn, asAssembled, BashProgressState, deriveTurnTerminalStatus,
   findSegmentById, mentionBindOptions, parseRunStartedAt, readPersistedViewMode,
-  readSessionDraft, subagentBlockNameOf, upsertTurn, writePersistedViewMode, writeSessionDraft,
+  readSessionDraft, replacePlaceholderTurn, subagentBlockNameOf, upsertTurn, writePersistedViewMode, writeSessionDraft,
 } from "./turn-state";
 import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
 import { ScheduledSendModal, ScheduledSysHints } from "./scheduled-send";
@@ -184,15 +184,21 @@ function turnNavRowMeta(entry: TurnCatalogEntry): string {
   return entry.loaded ? base : `${base} · 未加载`;
 }
 
-/** run / turn 状态字符串 → 目录刻度五档（词表依据见上方 task-03 注释块）。 */
-function mapRunStatus(status: string | null | undefined): TurnCatalogEntryStatus {
+/** run / turn 状态字符串 → 目录刻度五档（词表依据见上方 task-03 注释块）。
+ *  ql-20260918-003：加 error_code 参数——打断轮 status=failed +
+ *  error_code=interactive_interrupted 归 stopped（已停止），对齐
+ *  runTerminalTurnStatus / deriveTurnTerminalStatus 的打断分流。 */
+function mapRunStatus(
+  status: string | null | undefined,
+  errorCode?: string | null,
+): TurnCatalogEntryStatus {
   switch (status) {
     case "completed":
     case "finished":
       return "completed";
     case "failed":
     case "error":
-      return "failed";
+      return errorCode === "interactive_interrupted" ? "stopped" : "failed";
     // pending_approval 属后端 ACTIVE_RUN_STATUSES 活跃词表（仍是当前轮）；
     // interrupting 为前端展示态（后端不落库），语义仍是活跃轮 → 运行中。
     case "running":
@@ -813,33 +819,59 @@ export function SessionPanelPage({
               // 2026-08-25-unified-floating-session task-11（FR-7）：daemon 回传的
               // 首条 user_input 含完整 dispatch_prompt——提取前导为 preamble 段
               // （对话视图不渲染，「全部」视图显示注入来源）。
+              // ql-20260918-003：补 prompt 气泡实时来源——排队派发轮（立即发送/
+              // 轮末自动派发）无占位轮，backend 落库 user_input 后补发的 log 事件
+              // 是其用户消息气泡的唯一实时事件；prompt 为空时写入剥前导正文
+              // （对齐历史路径 logsToTurns：marker 版原文直写、已有值不覆盖——
+              // 直发轮占位轮与 daemon 双提交裸文本版到达时均非空，天然幂等）。
               const preambleText = extractPreambleText(env.content ?? "");
-              if (preambleText && env.run_id) {
-                setTurnState((prev) =>
-                  upsertTurn(
-                    prev,
-                    env,
-                    (turn) =>
-                      turn.segments?.some((s) => s.kind === "preamble")
-                        ? turn
-                        : {
-                            ...turn,
-                            segments: [
-                              {
-                                kind: "preamble",
-                                id: `preamble:${env.run_id}`,
-                                text: preambleText,
-                                ts: env.timestamp
-                                  ? Date.parse(env.timestamp)
-                                  : Date.now(),
-                              },
-                              ...(turn.segments ?? []),
-                            ],
-                          },
-                    { setCurrentRun: env.run_id! },
-                  ),
+              if (!env.run_id) return;
+              setTurnState((prev) => {
+                // 回放守卫：轮后对账/断线 resync 重放的历史 user_input 落在已终态
+                // 轮上——不 setCurrentRun（否则空闲会话被旧 run 误锁输入框），prompt
+                // 照常补写（与刷新后视图一致）；实时事件（新建轮/活跃轮）才置位。
+                const existing = prev.turns.find(
+                  (t) => t.runId === env.run_id || t.realRunId === env.run_id,
                 );
-              }
+                const staleReplay =
+                  existing != null &&
+                  TERMINAL_TURN_STATUSES.has(existing.status) &&
+                  prev.currentRunId !== env.run_id;
+                return upsertTurn(
+                  prev,
+                  env,
+                  (turn) => {
+                    let next = turn;
+                    if (
+                      preambleText &&
+                      !next.segments?.some((s) => s.kind === "preamble")
+                    ) {
+                      next = {
+                        ...next,
+                        segments: [
+                          {
+                            kind: "preamble",
+                            id: `preamble:${env.run_id}`,
+                            text: preambleText,
+                            ts: env.timestamp
+                              ? Date.parse(env.timestamp)
+                              : Date.now(),
+                          },
+                          ...(next.segments ?? []),
+                        ],
+                      };
+                    }
+                    if (!next.prompt.trim()) {
+                      const promptSource = preambleText
+                        ? stripPreambleText(env.content ?? "").trim()
+                        : (env.content ?? "").trim();
+                      if (promptSource) next = { ...next, prompt: promptSource };
+                    }
+                    return next;
+                  },
+                  staleReplay ? {} : { setCurrentRun: env.run_id! },
+                );
+              });
               return;
             }
             setTurnState((prev) =>
@@ -1921,7 +1953,7 @@ export function SessionPanelPage({
         run.id,
         i + 1,
         run.started_at ?? null,
-        mapRunStatus(run.status),
+        mapRunStatus(run.status, run.error_code),
         run.sender_name,
         loadedByKey.get(run.id),
       ),
@@ -2164,13 +2196,11 @@ export function SessionPanelPage({
           onSendSettled(prompt, attachmentIds);
           return;
         }
+        // ql-20260918-003：占位轮合并替换——SSE user_input publish 先于本响应
+        // 到达时已按真实 run_id 建轮，占位轮删除 + prompt 转移（防同 runId 双轮）。
         setTurnState((prev) => ({
           currentRunId: resp.run_id,
-          turns: prev.turns.map((t) =>
-            t.runId === placeholderId
-              ? { ...t, runId: resp.run_id!, status: "running" }
-              : t,
-          ),
+          turns: replacePlaceholderTurn(prev.turns, placeholderId, resp.run_id!, "running"),
         }));
         setErrorMsg(null);
         onSendSettled(prompt, attachmentIds);

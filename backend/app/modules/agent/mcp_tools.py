@@ -560,6 +560,20 @@ async def _resolve_session_mission(
             return await _get_mission_without_workspace_anchor(
                 session, user, mission_id, enforce_workspace_permission=enforce_workspace_permission
             )
+        # external 模式 worker 归属回退（2026-09-17 冒烟用例实证缺口，external-mode 守则
+        # 「parent NULL 解析必须问 external 走不走得通」的漏网点）：external worker
+        # parent=NULL 走不到上方分身爬根分支，session 直查对 mission.session_id=NULL
+        # 恒 miss → report_progress 等五端点 404。run 归属回退（首 run 双标记反查，
+        # 普通会话无 mission run → None，404 语义不放宽）补齐 parent-NULL 的 external
+        # 形态；仅非懒建路径（dispatch 懒建语义不变——worker 不 dispatch，控制器复用
+        # 会话时不误锚旧 worker mission）。
+        from app.modules.agent.model import _mission_from_session_runs
+
+        ext_mission = await _mission_from_session_runs(session, sid, active_only=True)
+        if ext_mission is not None:
+            if enforce_workspace_permission:
+                await _check_workspace_write(session, user, ext_mission.workspace_id)
+            return ext_mission
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             "该会话当前没有活跃团队任务（先 dispatch_worker 或经派团队弹层预建）",
@@ -2877,6 +2891,14 @@ async def _mission_status_core(
             )
     else:
         mission = await get_active_mission_for_session(session, sid)
+        if mission is None:
+            # external 模式 worker 归属回退（2026-09-17，与 _resolve_session_mission 同款
+            # 补齐——external worker parent=NULL、mission.session_id=NULL 直查恒 miss，D-12
+            # graceful 会把活跃 external mission 误报成 active=false）：首 run 双标记反查，
+            # 普通会话无 mission run → None，D-12 优雅口径不变。
+            from app.modules.agent.model import _mission_from_session_runs
+
+            mission = await _mission_from_session_runs(session, sid, active_only=True)
         if mission is None:
             # D-12：优雅返回 active=false（不走 _resolve_session_mission 的 404 语义）
             return MissionStatusResponse(active=False, hint=_NO_ACTIVE_MISSION_HINT)

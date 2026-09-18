@@ -564,6 +564,11 @@ async def _close_post_commit(
             "run_id": str(agent_run.id),
             "status": agent_run.status,
             "exit_code": agent_run.exit_code,
+            # ql-20260918-003：调度层错误码透传——打断轮（error_during_execution）
+            # status 同为 failed，前端据 error_code=interactive_interrupted 区分
+            # 「系统/用户主动打断」（显示已中止）与真实失败，消除立即发送/
+            # 手动打断被渲染成「轮次失败」的误导。
+            "error_code": agent_run.error_code,
             # ql-20260621：终态 token 一并推送，前端 onTurnCompleted 收敛时
             # 同步显示最终输入/输出词元（与执行中 onTokens 推送的累积值一致，
             # 覆盖 daemon 老版本不实时推 token 的情形）。

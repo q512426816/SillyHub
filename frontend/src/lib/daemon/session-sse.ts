@@ -164,6 +164,13 @@ export interface SessionStreamEnvelope {
   exit_code: number | null;
   reason: string | null;
   /**
+   * ql-20260918-003：turn_completed 事件携带的调度层错误码（AgentRun.error_code
+   * 直传）。打断轮 status=failed 但 error_code=interactive_interrupted——消费方
+   * （deriveTurnTerminalStatus / runTerminalTurnStatus）据此把打断映射为 killed
+   * （已中止）而非 failed（轮次失败）。其它事件 / 老 backend 事件为 null。
+   */
+  error_code?: string | null;
+  /**
    * task-05 / 2026-08-24-platform-session-feedback-fix：plan 模式进入事件携带的
    * 计划摘要与请求时间。
    */

@@ -233,11 +233,17 @@ function firstLogTimestampMs(entries: AgentRunLogEntry[]): number | null {
  * 对齐实时路径 deriveTurnTerminalStatus + daemon.ts run.status 先例
  * （interrupted/cancelled → killed）。completed/pending/running 等正常状态返回
  * null（调用方不动原状态）。
+ * ql-20260918-003：加 error_code 参数——打断轮 status=failed 但调度层
+ * error_code=interactive_interrupted（立即发送忙时打断/手动打断），映射 killed
+ * （已中止）对齐实时路径；缺省 null 保持原语义（无码 failed 不冒进归类）。
  */
 export function runTerminalTurnStatus(
   status: string | null,
+  errorCode?: string | null,
 ): "failed" | "killed" | null {
-  if (status === "failed") return "failed";
+  if (status === "failed") {
+    return errorCode === "interactive_interrupted" ? "killed" : "failed";
+  }
   if (status === "interrupted" || status === "cancelled") return "killed";
   return null;
 }

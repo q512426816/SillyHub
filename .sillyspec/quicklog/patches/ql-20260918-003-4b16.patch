@@ -1,0 +1,820 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.md b/.sillyspec/docs/SillyHub/modules/frontend_components.md
+index 27d9727fc..9fde36d44 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.md
+@@ -154,6 +154,7 @@ active = matchLength 是 sidebarSections 全部菜单中的最大值
+ ## 人工备注
+ 
+ <!-- MANUAL_NOTES_START -->
++- ql-20260918-003：排队派发轮用户气泡实时可见 + 打断轮「已中止」——①page/dialog onLog 的 user_input 分支补 turn.prompt 写入（剥前导正文、prompt 为空才写：直发占位轮与 daemon 双提交裸文本版到达时非空天然幂等；backend 在 `_inject_into_session` commit 后补发 user_input log 事件，排队派发轮无占位轮时这是气泡唯一实时来源），终态轮重放守卫（staleReplay：existing 终态且非 currentRunId → 不置 currentRunId，防轮后对账/断线 resync 重放历史把输入框误锁旧 run）；②打断终态可区分——SessionStreamEnvelope 加 error_code 可选字段（turn_completed 携带），deriveTurnTerminalStatus（turn-state.ts）/ runTerminalTurnStatus（runtime-session-helpers，加可选第二参）/ mapRunStatus（轮次目录，run.error_code 透传）/ dispatchRunSynth（session-stream 合成事件）四处识别 error_code=interactive_interrupted → killed（「已中止」），真实失败（interactive_failed 等）与无码老事件保持 failed。
+ - ql-20260901-002：/team 指令消息显示原始输入——session-panel 发送链路（page 预会话首句 / page 会话内 / dialog 三处 handleSend）不再剥离 "/team" 前缀，发原文使消息气泡与历史回放（user_input 日志）显示 "/team 目标"（对齐 /sillyspec:quick 等技能指令显示形态）；agent 不接收字面前缀，剥离收口到后端派发层（daemon session service `_strip_team_command_prefix`）。裸 /team（无目标文本）守卫保留在前端发送处不发送；拦截弹层（无活跃 mission）语义零改动。
+ - ql-20260831-004：失败轮错误卡原因透出——session-panel 三处失败轮构造（SSE 终态回补 displayTurns、两条 turn_completed 拉取路径）由「error_detail 为空即『运行失败（无详情）』」升级为逐级兜底：error_detail（模型层 ModelError）→ buildSystemFailureItem（normalize 新增；消费 run.failure_summary（后端映射 output_redacted）+ error_code 中文映射，SESSION_LIMIT_REACHED 撞闸原文识别成可操作提示「结束旧会话/等 30 分钟」）。SessionRunRead（lib/daemon.ts + api-types）同步加 failure_summary。注意：仅 failed 轮消费该字段——成功轮 output_redacted 是 agent 输出摘要。
+ <!-- MANUAL_NOTES_END -->
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index c28c559dd..1e45cb1c4 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -564,6 +564,11 @@ async def _close_post_commit(
+             "run_id": str(agent_run.id),
+             "status": agent_run.status,
+             "exit_code": agent_run.exit_code,
++            # ql-20260918-003：调度层错误码透传——打断轮（error_during_execution）
++            # status 同为 failed，前端据 error_code=interactive_interrupted 区分
++            # 「系统/用户主动打断」（显示已中止）与真实失败，消除立即发送/
++            # 手动打断被渲染成「轮次失败」的误导。
++            "error_code": agent_run.error_code,
+             # ql-20260621：终态 token 一并推送，前端 onTurnCompleted 收敛时
+             # 同步显示最终输入/输出词元（与执行中 onTokens 推送的累积值一致，
+             # 覆盖 daemon 老版本不实时推 token 的情形）。
+diff --git a/backend/app/modules/daemon/session/service/inject.py b/backend/app/modules/daemon/session/service/inject.py
+index 514296773..5361965a5 100644
+--- a/backend/app/modules/daemon/session/service/inject.py
++++ b/backend/app/modules/daemon/session/service/inject.py
+@@ -685,17 +685,16 @@ async def _inject_into_session(
+ 
+                 marker_lines = "\n".join(attachment_marker_line(r) for r in validated_attachments)
+                 user_input_content = f"{marker_lines}\n{prompt}" if prompt else marker_lines
+-            svc._session.add(
+-                AgentRunLog(
+-                    run_id=run.id,
+-                    channel="user_input",
+-                    content_redacted=user_input_content[:USER_INPUT_LOG_MAX_CHARS],
+-                    timestamp=now,
+-                    # task-03（群聊影子注入）：群链路 metadata（链 id/深度/发送者）
+-                    # 随本轮日志落库；缺省 None 列保持 NULL（存量零回归）。
+-                    metadata_=dict(turn_metadata) if turn_metadata is not None else None,
+-                )
++            user_input_log = AgentRunLog(
++                run_id=run.id,
++                channel="user_input",
++                content_redacted=user_input_content[:USER_INPUT_LOG_MAX_CHARS],
++                timestamp=now,
++                # task-03（群聊影子注入）：群链路 metadata（链 id/深度/发送者）
++                # 随本轮日志落库；缺省 None 列保持 NULL（存量零回归）。
++                metadata_=dict(turn_metadata) if turn_metadata is not None else None,
+             )
++            svc._session.add(user_input_log)
+ 
+         # task-08 拆分：附件组装/gate 复核 + lease metadata 同步 +
+         # providerConfig 构造段下沉 inject_gates._finalize_inject_turn_writes。
+@@ -726,6 +725,18 @@ async def _inject_into_session(
+             run.status = "completed"
+             run.finished_at = datetime.now(UTC)
+ 
++        # ql-20260918-003：commit（expire_on_commit）前快照 user_input 日志标量，
++        # 供 commit 后补发 Redis log 事件（见下方 publish 段）。
++        user_input_event_payload = (
++            None
++            if silent_config_switch
++            else {
++                "log_id": str(user_input_log.id),
++                "content": user_input_log.content_redacted,
++                "timestamp": user_input_log.timestamp.isoformat().replace("+00:00", "Z"),
++            }
++        )
++
+         await svc._session.commit()
+         await svc._session.refresh(session)
+         await svc._session.refresh(run)
+@@ -736,6 +747,33 @@ async def _inject_into_session(
+         await svc._session.rollback()
+         raise
+ 
++    # ql-20260918-003：user_input 日志实时推送——本行由 backend 直接落库（不经
++    # daemon 上报管线，无 Redis 发布），排队派发轮（立即发送/轮末自动派发）
++    # 无占位轮，前端实时流收不到任何事件 → 用户消息气泡缺失，刷新才可见
++    # （历史路径 logsToTurns 从日志重建）。commit 后按 daemon 上报同形态
++    # （publish.py session_payload）补发 log 事件；直发轮前端占位轮已有
++    # prompt，事件到达不覆盖（onLog user_input 只在 prompt 为空时写入）。
++    # daemon 后续双提交的裸文本版 user_input 由前端 seenLogIds 按 log_id 去重。
++    if user_input_event_payload is not None:
++        await svc._publish_session_event(
++            session.id,
++            {
++                "event": "log",
++                "session_id": str(session.id),
++                "run_id": str(run.id),
++                **user_input_event_payload,
++                "channel": "user_input",
++                "parent_tool_use_id": None,
++                "subagent_type": None,
++                "depth": None,
++                "tool_kind": None,
++                "segment_id": None,
++                "stale": None,
++                "edit_patch": None,
++                "agent_event": None,
++            },
++        )
++
+     # task-08 拆分：commit 后派发段（ready 等待 + SESSION_SWITCH_CONFIG /
+     # SESSION_INJECT 下发 + 失败收敛）下沉 control._dispatch_inject_turn。
+     return await _dispatch_inject_turn(
+diff --git a/backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py b/backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py
+index cb2d0a461..94965425f 100644
+--- a/backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py
++++ b/backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py
+@@ -629,6 +629,49 @@ class TestGap3CloseInteractiveRun:
+         assert payload["status"] == "failed"
+         assert payload["exit_code"] == 1
+ 
++    @pytest.mark.asyncio
++    async def test_publishes_turn_completed_error_code(
++        self, db_session, mocked_redis
++    ) -> None:
++        """ql-20260918-003：turn_completed 携带 error_code——打断轮（error_
++        during_execution → error_code=interactive_interrupted）与真实失败
++        （interactive_failed）在 session channel 事件上可区分，前端据此把打断
++        显示为「已中止」而非「轮次失败」。"""
++
++        def _session_turn_completed_payload(run_id, session_id):
++            import json as _json
++
++            for call in mocked_redis.publish.await_args_list:
++                if call.args[0] != f"agent_session:{session_id}":
++                    continue
++                payload = _json.loads(call.args[1])
++                if payload.get("event") == "turn_completed":
++                    return payload
++            return None
++
++        # 打断轮：error_during_execution → failed + interactive_interrupted
++        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
++        svc = DaemonService(db_session)
++        await svc.close_interactive_run(
++            lease_id, run_id, token, status="error_during_execution", is_error=True
++        )
++        run = await db_session.get(AgentRun, run_id)
++        payload = _session_turn_completed_payload(run_id, run.agent_session_id)
++        assert payload is not None
++        assert payload["status"] == "failed"
++        assert payload["error_code"] == "interactive_interrupted"
++
++        # 真实失败：error + is_error → failed + interactive_failed
++        lease_id2, run_id2, token2 = await _seed_active_interactive_session(db_session)
++        await svc.close_interactive_run(
++            lease_id2, run_id2, token2, status="error", is_error=True
++        )
++        run2 = await db_session.get(AgentRun, run_id2)
++        payload2 = _session_turn_completed_payload(run_id2, run2.agent_session_id)
++        assert payload2 is not None
++        assert payload2["status"] == "failed"
++        assert payload2["error_code"] == "interactive_failed"
++
+ 
+ # ── gap-3: router endpoint contract ──────────────────────────────────────────
+ 
+diff --git a/backend/app/modules/daemon/tests/test_session_queue_actions.py b/backend/app/modules/daemon/tests/test_session_queue_actions.py
+index f946f4d06..d913c8bf3 100644
+--- a/backend/app/modules/daemon/tests/test_session_queue_actions.py
++++ b/backend/app/modules/daemon/tests/test_session_queue_actions.py
+@@ -533,6 +533,62 @@ class TestDispatchNow:
+         assert len(runs) == 1
+         assert await _run_user_input(db_session, runs[0].id) == "立即发这条"
+ 
++    @pytest.mark.asyncio
++    async def test_dispatch_now_publishes_user_input_log_event(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """ql-20260918-003：排队派发轮 user_input 落库后补发 Redis log 事件。
++
++        排队派发轮（立即发送/轮末自动派发）无前端占位轮——backend 直接落库的
++        user_input 日志必须补发 session channel log 事件（与 daemon 上报同形态），
++        否则前端实时流收不到用户消息气泡（刷新才可见）。空闲派发路径锁定：
++        publish 到 agent_session:{sid}，payload event=log + channel=user_input +
++        run_id=新 run + log_id=落库行 id + content=条目 prompt。
++        """
++        svc, uid, _rt, session_id, busy_run = await _setup_busy_session(db_session)
++        result = await svc.inject_session(
++            session_id, uid, prompt="立即发这条", queue_when_busy=True
++        )
++        entry_id = result.queue_entry_id
++        assert entry_id is not None
++        await _finish_run(db_session, busy_run)
++        mocked_redis.publish.reset_mock()
++
++        await svc.dispatch_queued_message_now(session_id, entry_id, uid)
++
++        runs = await _active_runs(db_session, session_id)
++        assert len(runs) == 1
++        import json as _json
++
++        user_input_publishes = [
++            _json.loads(call.args[1])
++            for call in mocked_redis.publish.await_args_list
++            if call.args[0] == f"agent_session:{session_id}"
++        ]
++        user_input_events = [
++            p
++            for p in user_input_publishes
++            if p.get("event") == "log" and p.get("channel") == "user_input"
++        ]
++        assert len(user_input_events) >= 1
++        payload = user_input_events[0]
++        assert payload["run_id"] == str(runs[0].id)
++        assert payload["content"] == "立即发这条"
++        # log_id 是落库行真实 id（前端 seenLogIds 去重依赖）
++        log_row = (
++            (
++                await db_session.execute(
++                    select(AgentRunLog).where(
++                        AgentRunLog.run_id == runs[0].id,
++                        AgentRunLog.channel == "user_input",
++                    )
++                )
++            )
++            .scalars()
++            .one()
++        )
++        assert payload["log_id"] == str(log_row.id)
++
+     @pytest.mark.asyncio
+     async def test_dispatch_now_busy_prepends_and_interrupts(
+         self, db_session, mocked_hub, mocked_redis
+diff --git a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+index 3e08b7288..cfe37e7a1 100644
+--- a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
++++ b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+@@ -434,6 +434,17 @@ describe("runTerminalTurnStatus（ql-20260822-010）", () => {
+     expect(runTerminalTurnStatus("running")).toBeNull();
+     expect(runTerminalTurnStatus(null)).toBeNull();
+   });
++
++  it("ql-20260918-003：failed + error_code=interactive_interrupted → killed（打断分流）；其余错误码/缺省保持 failed", () => {
++    expect(runTerminalTurnStatus("failed", "interactive_interrupted")).toBe("killed");
++    expect(runTerminalTurnStatus("failed", "interactive_failed")).toBe("failed");
++    expect(runTerminalTurnStatus("failed", "interactive_unknown_status")).toBe("failed");
++    expect(runTerminalTurnStatus("failed", null)).toBe("failed");
++    expect(runTerminalTurnStatus("failed", undefined)).toBe("failed");
++    // 非失败状态不受 error_code 影响
++    expect(runTerminalTurnStatus("interrupted", "interactive_interrupted")).toBe("killed");
++    expect(runTerminalTurnStatus("completed", "interactive_interrupted")).toBeNull();
++  });
+ });
+ 
+ describe("logsToTurns 父归属跨 run 重挂（2026-09-15-subagent-three-pane-display 验收返工）", () => {
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+index ad7f70bea..d828483d9 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+@@ -2466,4 +2466,186 @@ describe("SessionPanel（dialog）终止中态显示（task-13 / FR-04）", () =
+     // 不要出现终止中横幅
+     expect(screen.queryByText(/终止中…/)).not.toBeInTheDocument();
+   });
++
++  // ── ql-20260918-003：排队消息「立即发送」两缺陷回归锁 ──────────────────────
++
++  it("ql-20260918-003：排队派发轮 user_input log 事件实时写 prompt 气泡（无占位轮，双提交不重复）", async () => {
++    // 排队派发轮（立即发送/轮末自动派发）无占位轮——backend 落库 user_input 后
++    // 补发的 log 事件是用户消息气泡的唯一实时来源（修复前实时不显示、刷新才
++    // 可见）。锁定：prompt 为空时写入；daemon 双提交裸文本版（同文不同
++    // log_id）后到不覆盖、不产生第二个气泡。
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    sessionApi.getAgentSession.mockResolvedValue({
++      id: "sess-q", runtime_id: null, lease_id: "lease-q",
++      provider: "claude", status: "active", agent_session_id: "ag-q",
++      config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
++      current_run_id: null,
++      terminating_at: null,
++    });
++
++    setupPanel({ attachSessionId: "sess-q", initialTurns: [] });
++    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
++
++    const conn = stream.conn;
++    // backend 补发的 user_input log（排队条目派发建 run 后首条事件）
++    act(() => {
++      conn.handlers.route(makeEnvelope("log", {
++        run_id: "run-q1",
++        channel: "user_input",
++        content: "立即发这条",
++        log_id: "log-ui-1",
++      }));
++    });
++    await waitFor(() => expect(screen.getByText("立即发这条")).toBeInTheDocument());
++
++    // daemon 双提交的裸文本版后到：prompt 已非空不覆盖（单气泡）
++    act(() => {
++      conn.handlers.route(makeEnvelope("log", {
++        run_id: "run-q1",
++        channel: "user_input",
++        content: "立即发这条",
++        log_id: "log-ui-2",
++      }));
++    });
++    expect(screen.getAllByText("立即发这条")).toHaveLength(1);
++  });
++
++  it("ql-20260918-003：回放终态轮的历史 user_input 不误锁输入框（currentRunId 守卫）", async () => {
++    // 轮后对账/断线 resync 会增量重放历史 user_input 日志——落在已终态轮时
++    // 不得把 currentRunId 置回旧 run（否则空闲会话输入框被误锁）。
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    sessionApi.getAgentSession.mockResolvedValue({
++      id: "sess-r", runtime_id: null, lease_id: "lease-r",
++      provider: "claude", status: "active", agent_session_id: "ag-r",
++      config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
++      current_run_id: null,
++      terminating_at: null,
++    });
++
++    setupPanel({ attachSessionId: "sess-r", initialTurns: [] });
++    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
++
++    const conn = stream.conn;
++    // 轮先终态（实时窗口），随后轮后对账/断线 resync 增量重放该轮历史日志
++    // （user_input 后到——正是对账补缺口的形态）
++    act(() => {
++      conn.handlers.route(makeEnvelope("log", {
++        run_id: "run-old", channel: "stdout", content: "历史回复", log_id: "l-old-out",
++      }));
++      conn.handlers.route(makeEnvelope("turn_completed", { run_id: "run-old", status: "completed" }));
++    });
++    await waitFor(() => expect(screen.getByText(/历史回复/)).toBeInTheDocument());
++
++    act(() => {
++      conn.handlers.route(makeEnvelope("log", {
++        run_id: "run-old", channel: "user_input", content: "历史消息", log_id: "l-old-ui",
++      }));
++    });
++    // 终态轮重放 user_input：prompt 补写（刷新一致性），不复活轮也不锁输入框
++    await waitFor(() => expect(screen.getByText("历史消息")).toBeInTheDocument());
++    const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
++    expect(textarea).not.toBeNull();
++    expect(textarea.disabled).toBe(false);
++  });
++
++  it("ql-20260918-003：直发占位轮与 SSE user_input 先到竞态合并（无双轮、prompt 单份）", async () => {
++    // backend 在 inject commit 后立即 publish user_input log（SSE）——可能先于
++    // inject HTTP 响应到达。占位轮（placeholder id）与先建轮（真实 run id）必须
++    // 合并成单轮：inject 响应侧删除占位轮 + prompt 转移。
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    sessionApi.createSession.mockResolvedValue({
++      session_id: "sess-1", run_id: "run-0", lease_id: "l",
++      status: "active", stream_url: "",
++    });
++    let resolveInject: (v: any) => void = () => {};
++    sessionApi.injectSession.mockImplementation(
++      () => new Promise((resolve) => { resolveInject = resolve; }),
++    );
++
++    setupPanel();
++    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "首条" } });
++    fireEvent.click(screen.getByTitle("发送"));
++    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
++    const conn = stream.conn;
++    // 首轮收尾（解锁输入框），第二条走 injectSession（挂起模拟响应迟到）
++    act(() => {
++      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-0", turn: 1 }));
++      conn.handlers.route(makeEnvelope("turn_completed", { run_id: "run-0", status: "completed" }));
++    });
++    await waitFor(() => {
++      expect(screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/)).toBeTruthy();
++    }, { timeout: 2000 });
++    const input2 = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
++    fireEvent.change(input2, { target: { value: "竞态消息" } });
++    fireEvent.click(screen.getByTitle("发送"));
++    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
++
++    // SSE user_input publish 先于 inject HTTP 响应到达（真实 run_id 建轮 + 写 prompt；
++    // 此时占位轮同文本并存——getByText 多元素，用 getAllByText 计数）
++    act(() => {
++      conn.handlers.route(makeEnvelope("log", {
++        run_id: "run-1",
++        channel: "user_input",
++        content: "竞态消息",
++        log_id: "log-race-ui",
++      }));
++    });
++    await waitFor(() => expect(screen.getAllByText("竞态消息").length).toBeGreaterThanOrEqual(1));
++
++    // inject 响应迟到返回 run-1：占位轮删除合并，不产生第二个同 run 轮
++    act(() => { resolveInject({ session_id: "sess-1", run_id: "run-1", status: "active" }); });
++    await waitFor(() => expect(screen.getAllByText("竞态消息")).toHaveLength(1));
++  });
++
++  it("ql-20260918-003：打断轮 status=failed + error_code=interactive_interrupted 显示「已中止」，真实失败保持「失败」", async () => {
++    // 立即发送忙时打断：daemon SDK abort 上报 error_during_execution →
++    // status=failed + error_code=interactive_interrupted——修复前显示「轮次失败」
++    // 误导用户；真实模型失败（interactive_failed）保持「失败」不误伤。
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    sessionApi.getAgentSession.mockResolvedValue({
++      id: "sess-i", runtime_id: null, lease_id: "lease-i",
++      provider: "claude", status: "active", agent_session_id: "ag-i",
++      config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
++      current_run_id: null,
++      terminating_at: null,
++    });
++
++    setupPanel({ attachSessionId: "sess-i", initialTurns: [] });
++    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
++
++    const conn = stream.conn;
++    act(() => {
++      conn.handlers.route(makeEnvelope("log", {
++        run_id: "run-int", channel: "user_input", content: "被打断的轮", log_id: "l-ui",
++      }));
++      conn.handlers.route(makeEnvelope("log", {
++        run_id: "run-int", channel: "stdout", content: "跑到一半", log_id: "l-out",
++      }));
++      conn.handlers.route(makeEnvelope("turn_completed", {
++        run_id: "run-int",
++        status: "failed",
++        error_code: "interactive_interrupted",
++      }));
++    });
++    await waitFor(() => expect(screen.getByText("已中止")).toBeInTheDocument());
++    expect(screen.queryByText("失败")).not.toBeInTheDocument();
++
++    // 真实失败（error_code=interactive_failed）保持「失败」
++    act(() => {
++      conn.handlers.route(makeEnvelope("log", {
++        run_id: "run-err", channel: "user_input", content: "真失败轮", log_id: "l-ui-2",
++      }));
++      conn.handlers.route(makeEnvelope("turn_completed", {
++        run_id: "run-err",
++        status: "failed",
++        error_code: "interactive_failed",
++      }));
++    });
++    await waitFor(() => expect(screen.getByText("失败")).toBeInTheDocument());
++  });
+ });
+diff --git a/frontend/src/components/daemon/runtime-session-helpers.tsx b/frontend/src/components/daemon/runtime-session-helpers.tsx
+index 09f5323dc..0cba7e936 100644
+--- a/frontend/src/components/daemon/runtime-session-helpers.tsx
++++ b/frontend/src/components/daemon/runtime-session-helpers.tsx
+@@ -233,11 +233,17 @@ function firstLogTimestampMs(entries: AgentRunLogEntry[]): number | null {
+  * 对齐实时路径 deriveTurnTerminalStatus + daemon.ts run.status 先例
+  * （interrupted/cancelled → killed）。completed/pending/running 等正常状态返回
+  * null（调用方不动原状态）。
++ * ql-20260918-003：加 error_code 参数——打断轮 status=failed 但调度层
++ * error_code=interactive_interrupted（立即发送忙时打断/手动打断），映射 killed
++ * （已中止）对齐实时路径；缺省 null 保持原语义（无码 failed 不冒进归类）。
+  */
+ export function runTerminalTurnStatus(
+   status: string | null,
++  errorCode?: string | null,
+ ): "failed" | "killed" | null {
+-  if (status === "failed") return "failed";
++  if (status === "failed") {
++    return errorCode === "interactive_interrupted" ? "killed" : "failed";
++  }
+   if (status === "interrupted" || status === "cancelled") return "killed";
+   return null;
+ }
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index 49ed95aa4..385a8c05e 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -160,7 +160,7 @@ export function enrichDisplayTurns(
+       // 快照为 failed/interrupted/cancelled 时修正为 failed/killed 并回填
+       // errorDetail，消除「聊天时红色错误卡、刷新后变已完成」的路径不一致。
+       // 实时轮终态与 run 快照一致，覆盖为同值无害；errorDetail 只补缺（?? 链）。
+-      const terminal = runTerminalTurnStatus(meta.status);
++      const terminal = runTerminalTurnStatus(meta.status, meta.error_code);
+       const terminalPatch =
+                 terminal === null
+                   ? {}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index bdc740d5f..8a6c7e7e2 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -14,7 +14,7 @@ import {
+ import { Button, Tag } from "antd";
+ import { AgentModelInput } from "@/components/AgentModelInput";
+ import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
+-import { applyLogToSegments, finishTurn } from "@/components/daemon/session-log-assembler";
++import { applyLogToSegments, extractPreambleText, finishTurn, stripPreambleText } from "@/components/daemon/session-log-assembler";
+ import { TurnTimeline } from "@/components/daemon/turn-timeline";
+ import type { AutoResumeEntry } from "@/components/daemon/turn-timeline";
+ import { type AttachmentRead } from "@/lib/api/session-attachments";
+@@ -58,7 +58,7 @@ import { type SessionPanelProps } from "./index";
+ import {
+   HISTORY_PAGE_SIZE, MAX_PROMPT_LEN, MENTION_PLACEHOLDER_HINT, SUSPENDED_SESSION_REFETCH_MS,
+   TERMINAL_TURN_STATUSES, applyBashStatusEvent, appendBashChunk, BashProgressState,
+-  deriveTurnTerminalStatus, mentionBindOptions, readSessionDraft, writeSessionDraft,
++  deriveTurnTerminalStatus, mentionBindOptions, readSessionDraft, replacePlaceholderTurn, writeSessionDraft,
+ } from "./turn-state";
+ import {
+   assembledViewOf, ATTACH_POLL_MAX_ATTEMPTS, ATTACH_POLL_MS, getProviderLabel,
+@@ -446,7 +446,43 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+             onLog: (env) => {
+               // channel=user_input 是用户消息（attach 时 initialTurns 已作 prompt），
+               // 不追加到 agent output，避免 prompt 气泡与 output 气泡重复。
+-              if (env.channel === "user_input") return;
++              // ql-20260918-003：补 prompt 气泡实时来源——排队派发轮（立即发送/
++              // 轮末自动派发）无占位轮，backend 落库 user_input 后补发的 log 事件
++              // 是其用户消息气泡的唯一实时事件；prompt 为空时写入剥前导正文
++              // （对齐历史路径 logsToTurns 与 page 模式同款：已有值不覆盖，直发
++              // 轮占位轮与 daemon 双提交裸文本版到达时均非空，天然幂等）。
++              if (env.channel === "user_input") {
++                if (!env.run_id) return;
++                const rawText = env.content ?? "";
++                const preambleText = extractPreambleText(rawText);
++                setView((prev) => {
++                  // 回放守卫（page 模式同款）：轮后对账/断线 resync 重放的历史
++                  // user_input 落在已终态轮——不 setCurrentRun（防旧 run 误锁输入框），
++                  // prompt 照常补写；实时事件（新建/活跃轮）才置位。
++                  const existing = prev.turns.find(
++                    (t) => t.runId === env.run_id || t.realRunId === env.run_id,
++                  );
++                  const staleReplay =
++                    existing != null &&
++                    TERMINAL_TURN_STATUSES.has(existing.status) &&
++                    prev.currentRunId !== env.run_id;
++                  return upsertDialogTurn(
++                    prev,
++                    env,
++                    (turn) =>
++                      !turn.prompt.trim()
++                        ? {
++                            ...turn,
++                            prompt: preambleText
++                              ? stripPreambleText(rawText).trim()
++                              : rawText.trim(),
++                          }
++                        : turn,
++                    staleReplay ? {} : { setCurrentRun: env.run_id! },
++                  );
++                });
++                return;
++              }
+               setView((prev) => {
+                 // quick-9f86d2c3（会话 e87622aa）：非当前活跃 run 的 log = 终态轮迟到
+                 // 事件（轮后对账 1.5s 重放 / 断线 resync 增量）。此类 log 落在已终态
+@@ -961,14 +997,12 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+           onSendSettled(prompt, attachmentIds);
+           return;
+         }
++        // ql-20260918-003：占位轮合并替换——SSE user_input publish 先于本响应
++        // 到达时已按真实 run_id 建轮，占位轮删除 + prompt 转移（防同 runId 双轮）。
+         setView((prev) => ({
+           ...prev,
+           currentRunId: resp.run_id,
+-          turns: prev.turns.map((t) =>
+-            t.runId === placeholderId
+-              ? { ...t, runId: resp.run_id!, status: "running" }
+-              : t,
+-          ),
++          turns: replacePlaceholderTurn(prev.turns, placeholderId, resp.run_id!, "running"),
+           errorMsg: null,
+         }));
+         onSendSettled(prompt, attachmentIds);
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index c45e269af..7d4aeb5b5 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -11,7 +11,7 @@ import {
+ } from "lucide-react";
+ import { Badge, Button, Drawer, Input, Spin } from "antd";
+ import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
+-import { extractPreambleText, finishTurn } from "@/components/daemon/session-log-assembler";
++import { extractPreambleText, finishTurn, stripPreambleText } from "@/components/daemon/session-log-assembler";
+ import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
+ import type { AutoResumeEntry } from "@/components/daemon/turn-timeline";
+ import { type AttachmentRead } from "@/lib/api/session-attachments";
+@@ -82,7 +82,7 @@ import {
+   SUSPENDED_SESSION_REFETCH_MS, TERMINAL_TURN_STATUSES, TurnState, applyBashStatusEvent,
+   appendBashChunk, applyEnvelopeToTurn, asAssembled, BashProgressState, deriveTurnTerminalStatus,
+   findSegmentById, mentionBindOptions, parseRunStartedAt, readPersistedViewMode,
+-  readSessionDraft, subagentBlockNameOf, upsertTurn, writePersistedViewMode, writeSessionDraft,
++  readSessionDraft, replacePlaceholderTurn, subagentBlockNameOf, upsertTurn, writePersistedViewMode, writeSessionDraft,
+ } from "./turn-state";
+ import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
+ import { ScheduledSendModal, ScheduledSysHints } from "./scheduled-send";
+@@ -184,15 +184,21 @@ function turnNavRowMeta(entry: TurnCatalogEntry): string {
+   return entry.loaded ? base : `${base} · 未加载`;
+ }
+ 
+-/** run / turn 状态字符串 → 目录刻度五档（词表依据见上方 task-03 注释块）。 */
+-function mapRunStatus(status: string | null | undefined): TurnCatalogEntryStatus {
++/** run / turn 状态字符串 → 目录刻度五档（词表依据见上方 task-03 注释块）。
++ *  ql-20260918-003：加 error_code 参数——打断轮 status=failed +
++ *  error_code=interactive_interrupted 归 stopped（已停止），对齐
++ *  runTerminalTurnStatus / deriveTurnTerminalStatus 的打断分流。 */
++function mapRunStatus(
++  status: string | null | undefined,
++  errorCode?: string | null,
++): TurnCatalogEntryStatus {
+   switch (status) {
+     case "completed":
+     case "finished":
+       return "completed";
+     case "failed":
+     case "error":
+-      return "failed";
++      return errorCode === "interactive_interrupted" ? "stopped" : "failed";
+     // pending_approval 属后端 ACTIVE_RUN_STATUSES 活跃词表（仍是当前轮）；
+     // interrupting 为前端展示态（后端不落库），语义仍是活跃轮 → 运行中。
+     case "running":
+@@ -813,33 +819,59 @@ export function SessionPanelPage({
+               // 2026-08-25-unified-floating-session task-11（FR-7）：daemon 回传的
+               // 首条 user_input 含完整 dispatch_prompt——提取前导为 preamble 段
+               // （对话视图不渲染，「全部」视图显示注入来源）。
++              // ql-20260918-003：补 prompt 气泡实时来源——排队派发轮（立即发送/
++              // 轮末自动派发）无占位轮，backend 落库 user_input 后补发的 log 事件
++              // 是其用户消息气泡的唯一实时事件；prompt 为空时写入剥前导正文
++              // （对齐历史路径 logsToTurns：marker 版原文直写、已有值不覆盖——
++              // 直发轮占位轮与 daemon 双提交裸文本版到达时均非空，天然幂等）。
+               const preambleText = extractPreambleText(env.content ?? "");
+-              if (preambleText && env.run_id) {
+-                setTurnState((prev) =>
+-                  upsertTurn(
+-                    prev,
+-                    env,
+-                    (turn) =>
+-                      turn.segments?.some((s) => s.kind === "preamble")
+-                        ? turn
+-                        : {
+-                            ...turn,
+-                            segments: [
+-                              {
+-                                kind: "preamble",
+-                                id: `preamble:${env.run_id}`,
+-                                text: preambleText,
+-                                ts: env.timestamp
+-                                  ? Date.parse(env.timestamp)
+-                                  : Date.now(),
+-                              },
+-                              ...(turn.segments ?? []),
+-                            ],
++              if (!env.run_id) return;
++              setTurnState((prev) => {
++                // 回放守卫：轮后对账/断线 resync 重放的历史 user_input 落在已终态
++                // 轮上——不 setCurrentRun（否则空闲会话被旧 run 误锁输入框），prompt
++                // 照常补写（与刷新后视图一致）；实时事件（新建轮/活跃轮）才置位。
++                const existing = prev.turns.find(
++                  (t) => t.runId === env.run_id || t.realRunId === env.run_id,
++                );
++                const staleReplay =
++                  existing != null &&
++                  TERMINAL_TURN_STATUSES.has(existing.status) &&
++                  prev.currentRunId !== env.run_id;
++                return upsertTurn(
++                  prev,
++                  env,
++                  (turn) => {
++                    let next = turn;
++                    if (
++                      preambleText &&
++                      !next.segments?.some((s) => s.kind === "preamble")
++                    ) {
++                      next = {
++                        ...next,
++                        segments: [
++                          {
++                            kind: "preamble",
++                            id: `preamble:${env.run_id}`,
++                            text: preambleText,
++                            ts: env.timestamp
++                              ? Date.parse(env.timestamp)
++                              : Date.now(),
+                           },
+-                    { setCurrentRun: env.run_id! },
+-                  ),
++                          ...(next.segments ?? []),
++                        ],
++                      };
++                    }
++                    if (!next.prompt.trim()) {
++                      const promptSource = preambleText
++                        ? stripPreambleText(env.content ?? "").trim()
++                        : (env.content ?? "").trim();
++                      if (promptSource) next = { ...next, prompt: promptSource };
++                    }
++                    return next;
++                  },
++                  staleReplay ? {} : { setCurrentRun: env.run_id! },
+                 );
+-              }
++              });
+               return;
+             }
+             setTurnState((prev) =>
+@@ -1921,7 +1953,7 @@ export function SessionPanelPage({
+         run.id,
+         i + 1,
+         run.started_at ?? null,
+-        mapRunStatus(run.status),
++        mapRunStatus(run.status, run.error_code),
+         run.sender_name,
+         loadedByKey.get(run.id),
+       ),
+@@ -2164,13 +2196,11 @@ export function SessionPanelPage({
+           onSendSettled(prompt, attachmentIds);
+           return;
+         }
++        // ql-20260918-003：占位轮合并替换——SSE user_input publish 先于本响应
++        // 到达时已按真实 run_id 建轮，占位轮删除 + prompt 转移（防同 runId 双轮）。
+         setTurnState((prev) => ({
+           currentRunId: resp.run_id,
+-          turns: prev.turns.map((t) =>
+-            t.runId === placeholderId
+-              ? { ...t, runId: resp.run_id!, status: "running" }
+-              : t,
+-          ),
++          turns: replacePlaceholderTurn(prev.turns, placeholderId, resp.run_id!, "running"),
+         }));
+         setErrorMsg(null);
+         onSendSettled(prompt, attachmentIds);
+diff --git a/frontend/src/components/daemon/session-panel/turn-state.ts b/frontend/src/components/daemon/session-panel/turn-state.ts
+index 8dd9a24b8..3ca526628 100644
+--- a/frontend/src/components/daemon/session-panel/turn-state.ts
++++ b/frontend/src/components/daemon/session-panel/turn-state.ts
+@@ -74,6 +74,34 @@ export interface TurnState {
+ 
+ export const INITIAL_TURN_STATE: TurnState = { turns: [], currentRunId: null };
+ 
++/**
++ * ql-20260918-003：直发占位轮 → 真实 run_id 的合并替换（page/dialog 发送路径共用）。
++ *
++ * 常态：占位轮原位改名（runId=realRunId + status=nextStatus）。
++ * 竞态：backend 在 `_inject_into_session` commit 后补发的 user_input log 事件
++ * （SSE）先于 inject HTTP 响应到达时，upsertTurn 已按真实 run_id 建轮——此时
++ * 删除占位轮、其 prompt 在先建轮为空时转移（通常先建轮已从 user_input 事件
++ * 写入 prompt），避免同 runId 双轮。
++ */
++export function replacePlaceholderTurn<
++  T extends { runId: string; prompt: string; status: TurnUiStatus },
++>(turns: T[], placeholderId: string, realRunId: string, nextStatus: TurnUiStatus): T[] {
++  const raced = turns.some((t) => t.runId === realRunId && t.runId !== placeholderId);
++  if (!raced) {
++    return turns.map((t) =>
++      t.runId === placeholderId ? { ...t, runId: realRunId, status: nextStatus } : t,
++    );
++  }
++  const placeholder = turns.find((t) => t.runId === placeholderId);
++  return turns
++    .filter((t) => t.runId !== placeholderId)
++    .map((t) =>
++      t.runId === realRunId && placeholder != null && !t.prompt.trim()
++        ? { ...t, prompt: placeholder.prompt }
++        : t,
++    );
++}
++
+ /**
+  * 群聊体验 quick（2026-09-02）：初始历史窗口条数（logs 端点 limit=最新 N 条
+  * 升序）。「加载更早消息」按钮同页距翻页（before 游标）。满页即视为可能还有
+@@ -284,10 +312,21 @@ export function subagentBlockNameOf(seg: TurnSegment): string | null {
+   return null;
+ }
+ 
+-/** turn_completed 的 status/exit_code → TurnUiStatus 终态。 */
++/**
++ * turn_completed 的 status/exit_code/error_code → TurnUiStatus 终态。
++ *
++ * ql-20260918-003：打断语义分流——daemon SDK abort 上报 error_during_execution
++ * 时 run.status=failed 但 error_code=interactive_interrupted（立即发送的忙时
++ * 打断 / 手动打断本轮同源）；显示为 killed（已中止）而非 failed（轮次失败），
++ * 消除「系统主动打断被渲染成失败」的误导。无 error_code 的老事件 / 老 backend
++ * 保持 failed 原映射（真实失败必带 interactive_failed / interactive_unknown_status，
++ * 不冒进归类）。
++ */
+ export function deriveTurnTerminalStatus(env: SessionStreamEnvelope): TurnUiStatus {
+   const status = env.status;
+-  if (status === "failed") return "failed";
++  if (status === "failed") {
++    return env.error_code === "interactive_interrupted" ? "killed" : "failed";
++  }
+   if (status === "killed" || status === "cancelled") return "killed";
+   if (env.exit_code !== null && env.exit_code !== 0 && env.status === null) {
+     return env.exit_code === 130 || env.exit_code === 143 ? "killed" : "failed";
+diff --git a/frontend/src/lib/daemon/session-sse.ts b/frontend/src/lib/daemon/session-sse.ts
+index eeecd289a..be60d603f 100644
+--- a/frontend/src/lib/daemon/session-sse.ts
++++ b/frontend/src/lib/daemon/session-sse.ts
+@@ -163,6 +163,13 @@ export interface SessionStreamEnvelope {
+   status: string | null;
+   exit_code: number | null;
+   reason: string | null;
++  /**
++   * ql-20260918-003：turn_completed 事件携带的调度层错误码（AgentRun.error_code
++   * 直传）。打断轮 status=failed 但 error_code=interactive_interrupted——消费方
++   * （deriveTurnTerminalStatus / runTerminalTurnStatus）据此把打断映射为 killed
++   * （已中止）而非 failed（轮次失败）。其它事件 / 老 backend 事件为 null。
++   */
++  error_code?: string | null;
+   /**
+    * task-05 / 2026-08-24-platform-session-feedback-fix：plan 模式进入事件携带的
+    * 计划摘要与请求时间。
+diff --git a/frontend/src/lib/daemon/session-stream.ts b/frontend/src/lib/daemon/session-stream.ts
+index 42e03ed69..bad011fb4 100644
+--- a/frontend/src/lib/daemon/session-stream.ts
++++ b/frontend/src/lib/daemon/session-stream.ts
+@@ -410,6 +410,10 @@ export function streamSession(
+               : run.status
+             : null,
+         exit_code: run.exit_code,
++        // ql-20260918-003：调度层错误码透传（对齐实时 turn_completed 事件）——
++        // 合成终态事件消费方 deriveTurnTerminalStatus 据此把打断轮
++        // （status=failed + error_code=interactive_interrupted）映射 killed。
++        error_code: event === "turn_completed" ? run.error_code ?? null : null,
+         reason: null,
+         input_tokens: run.input_tokens,
+         output_tokens: run.output_tokens,

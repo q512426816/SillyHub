@@ -629,6 +629,45 @@ class TestGap3CloseInteractiveRun:
         assert payload["status"] == "failed"
         assert payload["exit_code"] == 1
 
+    @pytest.mark.asyncio
+    async def test_publishes_turn_completed_error_code(self, db_session, mocked_redis) -> None:
+        """ql-20260918-003：turn_completed 携带 error_code——打断轮（error_
+        during_execution → error_code=interactive_interrupted）与真实失败
+        （interactive_failed）在 session channel 事件上可区分，前端据此把打断
+        显示为「已中止」而非「轮次失败」。"""
+
+        def _session_turn_completed_payload(run_id, session_id):
+            import json as _json
+
+            for call in mocked_redis.publish.await_args_list:
+                if call.args[0] != f"agent_session:{session_id}":
+                    continue
+                payload = _json.loads(call.args[1])
+                if payload.get("event") == "turn_completed":
+                    return payload
+            return None
+
+        # 打断轮：error_during_execution → failed + interactive_interrupted
+        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+        svc = DaemonService(db_session)
+        await svc.close_interactive_run(
+            lease_id, run_id, token, status="error_during_execution", is_error=True
+        )
+        run = await db_session.get(AgentRun, run_id)
+        payload = _session_turn_completed_payload(run_id, run.agent_session_id)
+        assert payload is not None
+        assert payload["status"] == "failed"
+        assert payload["error_code"] == "interactive_interrupted"
+
+        # 真实失败：error + is_error → failed + interactive_failed
+        lease_id2, run_id2, token2 = await _seed_active_interactive_session(db_session)
+        await svc.close_interactive_run(lease_id2, run_id2, token2, status="error", is_error=True)
+        run2 = await db_session.get(AgentRun, run_id2)
+        payload2 = _session_turn_completed_payload(run_id2, run2.agent_session_id)
+        assert payload2 is not None
+        assert payload2["status"] == "failed"
+        assert payload2["error_code"] == "interactive_failed"
+
 
 # ── gap-3: router endpoint contract ──────────────────────────────────────────
 

@@ -154,6 +154,7 @@ active = matchLength 是 sidebarSections 全部菜单中的最大值
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->
+- ql-20260918-003：排队派发轮用户气泡实时可见 + 打断轮「已中止」——①page/dialog onLog 的 user_input 分支补 turn.prompt 写入（剥前导正文、prompt 为空才写：直发占位轮与 daemon 双提交裸文本版到达时非空天然幂等；backend 在 `_inject_into_session` commit 后补发 user_input log 事件，排队派发轮无占位轮时这是气泡唯一实时来源），终态轮重放守卫（staleReplay：existing 终态且非 currentRunId → 不置 currentRunId，防轮后对账/断线 resync 重放历史把输入框误锁旧 run）；②打断终态可区分——SessionStreamEnvelope 加 error_code 可选字段（turn_completed 携带），deriveTurnTerminalStatus（turn-state.ts）/ runTerminalTurnStatus（runtime-session-helpers，加可选第二参）/ mapRunStatus（轮次目录，run.error_code 透传）/ dispatchRunSynth（session-stream 合成事件）四处识别 error_code=interactive_interrupted → killed（「已中止」），真实失败（interactive_failed 等）与无码老事件保持 failed。
 - ql-20260901-002：/team 指令消息显示原始输入——session-panel 发送链路（page 预会话首句 / page 会话内 / dialog 三处 handleSend）不再剥离 "/team" 前缀，发原文使消息气泡与历史回放（user_input 日志）显示 "/team 目标"（对齐 /sillyspec:quick 等技能指令显示形态）；agent 不接收字面前缀，剥离收口到后端派发层（daemon session service `_strip_team_command_prefix`）。裸 /team（无目标文本）守卫保留在前端发送处不发送；拦截弹层（无活跃 mission）语义零改动。
 - ql-20260831-004：失败轮错误卡原因透出——session-panel 三处失败轮构造（SSE 终态回补 displayTurns、两条 turn_completed 拉取路径）由「error_detail 为空即『运行失败（无详情）』」升级为逐级兜底：error_detail（模型层 ModelError）→ buildSystemFailureItem（normalize 新增；消费 run.failure_summary（后端映射 output_redacted）+ error_code 中文映射，SESSION_LIMIT_REACHED 撞闸原文识别成可操作提示「结束旧会话/等 30 分钟」）。SessionRunRead（lib/daemon.ts + api-types）同步加 failure_summary。注意：仅 failed 轮消费该字段——成功轮 output_redacted 是 agent 输出摘要。
 <!-- MANUAL_NOTES_END -->
