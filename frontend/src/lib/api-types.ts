@@ -18100,6 +18100,11 @@ export interface components {
              * @default false
              */
             index_line_skipped: boolean;
+            /**
+             * Target Will Create
+             * @default false
+             */
+            target_will_create: boolean;
         };
         /** MissionArtifactResponse */
         MissionArtifactResponse: {

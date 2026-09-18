@@ -65,6 +65,11 @@ interface Props {
   filename: string;
   /** 条目标题（小节标题默认预填，可改）。 */
   defaultSectionTitle?: string | null;
+  /**
+   * 目标文件默认值（ql-20260918-007）：页面按候选 frontmatter category 映射
+   * （known-issues/patterns/conventions），无/未知回落 known-issues.md。
+   */
+  defaultTargetFile?: string | null;
   onClose: () => void;
   /** 合并成功后的刷新回调（父级清详情 + 重拉列表，候选从待审核区消失）。 */
   onMerged: () => void;
@@ -73,16 +78,33 @@ interface Props {
 /** 关键词分隔符：中英文逗号 / 顿号（回车在 input onKeyDown 提交）。 */
 const KEYWORD_SPLIT_RE = /[,，、]/;
 
+/**
+ * 标题分词预填默认关键词（ql-20260918-007，用户可改——保留人工最终决定）：
+ * 按空白/中英文标点切分取长度 ≥2 的前 4 段；中文无分隔整串作一个词（截 24 字）。
+ */
+export function defaultKeywordsFromTitle(title: string | null | undefined): string[] {
+  if (!title) return [];
+  const tokens = title
+    .split(/[\s/·|,，、;；:：.。()（）\[\]【】"'']+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2);
+  if (tokens.length === 0 && title.trim().length >= 2) return [title.trim().slice(0, 24)];
+  return tokens.slice(0, 4);
+}
+
 export function MergeDialog({
   workspaceId,
   filename,
   defaultSectionTitle,
+  defaultTargetFile,
   onClose,
   onMerged,
 }: Props) {
-  const [targetFile, setTargetFile] = useState("");
+  const [targetFile, setTargetFile] = useState(defaultTargetFile ?? "");
   const [sectionTitle, setSectionTitle] = useState(defaultSectionTitle ?? "");
-  const [keywords, setKeywords] = useState<string[]>([]);
+  const [keywords, setKeywords] = useState<string[]>(
+    defaultKeywordsFromTitle(defaultSectionTitle),
+  );
   const [keywordDraft, setKeywordDraft] = useState("");
   const [preview, setPreview] = useState<MergePreviewOut | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -311,8 +333,18 @@ export function MergeDialog({
             ) : preview ? (
               <>
                 <p className="text-[11px] text-muted-foreground">
-                  将追加到 {targetFile} 末尾：
+                  将{preview.target_will_create ? "新建" : "追加到"} {targetFile}
+                  {preview.target_will_create ? " 并写入小节：" : " 末尾："}
                 </p>
+                {preview.target_will_create && (
+                  <div
+                    data-testid="target-will-create-note"
+                    className="rounded-md border border-brand/30 bg-brand-100/60 px-3 py-2 text-[11px] text-brand-700"
+                  >
+                    目标文件尚不存在——合并将自动创建 {targetFile}（含本小节），并在
+                    INDEX.md 建对应分类段。
+                  </div>
+                )}
                 {preview.section_skipped ? (
                   <div
                     data-testid="section-skipped-note"

@@ -97,6 +97,9 @@ class MergePreviewOut(BaseModel):
     index_line: str
     section_skipped: bool = False
     index_line_skipped: bool = False
+    # ql-20260918-007：目标文件不存在——合并将自动新建（update op 无 manifest 行
+    # 按新建落 v1）。蒸馏型新 workspace 无三标准文件时合并不再 404。
+    target_will_create: bool = False
 
 
 class KnowledgeMergeResult(BaseModel):

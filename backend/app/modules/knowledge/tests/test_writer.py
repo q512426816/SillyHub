@@ -763,3 +763,70 @@ class TestMergeRobustness:
         )
         assert preview.index_line_skipped is False
         assert "patterns.md#无索引预览小节" in preview.index_line
+
+
+class TestMergeTargetAutoCreate:
+    """ql-20260918-007：目标文件缺失自动新建（蒸馏型 workspace 无三标准文件）。"""
+
+    async def _propose(
+        self, db_session, env, *, title: str = "候选知识", body: str = "候选正文，待合并。"
+    ):
+        writer = KnowledgeWriterService(db_session)
+        return await writer.propose_manual(
+            env.ws.id, env.user, title=title, category="pattern", body=body
+        )
+
+    async def test_preview_missing_target_flags_will_create(self, env, db_session) -> None:
+        await self._propose(db_session, env, title="缺目标候选", body="正文。")
+        # 前置：删掉 fixture 预置的 known-issues.md 模拟蒸馏型骨架 workspace
+        (env.spec_root / "knowledge" / "known-issues.md").unlink()
+        assert not (env.spec_root / "knowledge" / "known-issues.md").exists()
+
+        preview = await KnowledgeWriterService(db_session).preview_merge(
+            env.ws.id,
+            filename="proposed/缺目标候选.md",
+            target_file="known-issues.md",
+            section_title="新小节",
+            keywords=["缺目标"],
+        )
+        assert preview.target_will_create is True
+        # 预览照常：段落 = 空目标上的追加块（文件头 + ## 小节）
+        assert "## 新小节" in preview.section_text
+        assert "正文。" in preview.section_text
+        # 仍未落盘
+        assert not (env.spec_root / "knowledge" / "known-issues.md").exists()
+
+    async def test_merge_missing_target_creates_file_and_index_section(
+        self, env, db_session
+    ) -> None:
+        await self._propose(db_session, env, title="建目标候选", body="建目标正文。")
+        (env.spec_root / "knowledge" / "known-issues.md").unlink()
+        result = await KnowledgeWriterService(db_session).merge(
+            env.ws.id,
+            env.user,
+            filename="proposed/建目标候选.md",
+            target_file="known-issues.md",
+            section_title="自动新建小节",
+            keywords=["自动新建"],
+        )
+        assert result.merged is True
+        created = (env.spec_root / "knowledge" / "known-issues.md").read_text(encoding="utf-8")
+        assert "## 自动新建小节" in created
+        assert "建目标正文。" in created
+        # INDEX 建分类段 + 路由行（段缺失 EOF 追加既有语义）
+        index = (env.spec_root / "knowledge" / "INDEX.md").read_text(encoding="utf-8")
+        assert "## Known Issues" in index
+        assert "自动新建" in index
+        # 候选已删（段二）
+        assert not (env.spec_root / "knowledge" / "proposed" / "建目标候选.md").exists()
+
+    async def test_merge_existing_target_will_create_false(self, env, db_session) -> None:
+        await self._propose(db_session, env, title="已有目标候选", body="正文。")
+        preview = await KnowledgeWriterService(db_session).preview_merge(
+            env.ws.id,
+            filename="proposed/已有目标候选.md",
+            target_file="patterns.md",
+            section_title="小节",
+            keywords=["关键词"],
+        )
+        assert preview.target_will_create is False

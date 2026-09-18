@@ -122,6 +122,19 @@ function appendToGroup(group: KnowledgeNode, relParts: string[], item: Knowledge
   }
 }
 
+/**
+ * 候选 frontmatter category → 合并目标文件默认值（ql-20260918-007）。
+ * propose 落盘 category（known-issues/patterns/conventions/uncategorized）；
+ * 无 frontmatter / 未知值回落 known-issues.md（最常用桶）。
+ */
+function defaultTargetFromContent(content: string | null): string {
+  const m = content?.match(/^---\n[\s\S]*?^category:\s*(\S+)[\r\n]/m);
+  const category = m?.[1];
+  if (category === "patterns") return "patterns.md";
+  if (category === "conventions") return "conventions.md";
+  return "known-issues.md";
+}
+
 /** 按固定 zone 顺序分组建树（空组不渲染；组内目录在前 + 名称排序）。 */
 function buildKnowledgeTree(items: KnowledgeEntry[]): KnowledgeNode[] {
   const groups: KnowledgeNode[] = [];
@@ -557,6 +570,7 @@ export default function KnowledgePage({ params }: Props) {
           workspaceId={workspaceId}
           filename={mergeTarget}
           defaultSectionTitle={selectedTitle}
+          defaultTargetFile={defaultTargetFromContent(selectedContent)}
           onClose={() => setMergeTarget(null)}
           onMerged={() => {
             // 候选已合并删除：清详情 + 刷新列表（待审核区少一条）。

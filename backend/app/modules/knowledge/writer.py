@@ -386,6 +386,21 @@ class KnowledgeWriterService:
                 details={"filename": filename, "byte_offset": exc.start},
             ) from exc
 
+    async def _read_target_raw(self, workspace_id: uuid.UUID, filename: str) -> str:
+        """merge/preview 目标文件宽松读——缺失视作空内容（ql-20260918-007）。
+
+        蒸馏型新 workspace 的知识树只有 INDEX/uncategorized 骨架，白名单三目标
+        （known-issues/patterns/conventions）可能尚不存在——此前走 _read_raw
+        直接 404「知识库文件不存在」导致无法合并。缺失时返回空串：update op 无
+        manifest 行按新建落 version 1（apply_ops R-07 既有语义，照 INDEX.md
+        ql-20260918-005 M6 先例）；_build_append_block 对空目标产出
+        「文件头 + ## 小节」形态的新文件内容。
+        """
+        target = await self._knowledge_path(workspace_id, filename)
+        if not target.is_file():
+            return ""
+        return await self._read_raw(workspace_id, filename)
+
     async def _read_index_raw(self, workspace_id: uuid.UUID) -> str:
         """INDEX.md 原样读——缺失视作空内容（ql-20260918-005 M6）。
 
@@ -521,7 +536,9 @@ class KnowledgeWriterService:
         # 取超过 MAX_CONTENT_BYTES 的候选只拿到前 1/4 字节，预览/合并的内容不完整。
         body = _extract_proposed_body(await self._read_raw(workspace_id, filename))
 
-        target_raw = await self._read_raw(workspace_id, target)
+        target_path = await self._knowledge_path(workspace_id, target)
+        target_will_create = not target_path.is_file()
+        target_raw = await self._read_target_raw(workspace_id, target)
         # ql-20260918-005（M6）：INDEX.md 缺失视作空内容（不再 404，预览路由行照常）
         index_raw = await self._read_index_raw(workspace_id)
         section_skipped = _has_section(target_raw.replace("\r\n", "\n"), section_title)
@@ -536,6 +553,7 @@ class KnowledgeWriterService:
             index_line=route_line,
             section_skipped=section_skipped,
             index_line_skipped=index_line_skipped,
+            target_will_create=target_will_create,
         )
 
     async def merge(
@@ -567,7 +585,8 @@ class KnowledgeWriterService:
         # 截断边界外的内容会随原件进备份区被静默丢弃（30 天后彻底不可恢复）。
         body = _extract_proposed_body(await self._read_raw(workspace_id, filename))
 
-        target_raw = await self._read_raw(workspace_id, target)
+        # ql-20260918-007：目标缺失视作空内容（update op 新建 v1，同 INDEX M6 先例）
+        target_raw = await self._read_target_raw(workspace_id, target)
         # ql-20260918-005（M6）：INDEX.md 缺失视作空内容——合并自动建首段，不再 404
         index_raw = await self._read_index_raw(workspace_id)
         target_norm = target_raw.replace("\r\n", "\n")

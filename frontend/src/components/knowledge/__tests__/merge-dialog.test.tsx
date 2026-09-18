@@ -61,12 +61,20 @@ function mockPreview(overrides: Record<string, unknown> = {}) {
   });
 }
 
-function renderDialog(overrides: Partial<{ onMerged: () => void; onClose: () => void }> = {}) {
+function renderDialog(
+  overrides: Partial<{
+    onMerged: () => void;
+    onClose: () => void;
+    defaultSectionTitle: string;
+    defaultTargetFile: string;
+  }> = {},
+) {
   return render(
     <MergeDialog
       workspaceId="ws-1"
       filename="proposed/pending-fix.md"
-      defaultSectionTitle="移动端 grid 溢出"
+      defaultSectionTitle={overrides.defaultSectionTitle ?? "移动端 grid 溢出"}
+      defaultTargetFile={overrides.defaultTargetFile ?? null}
       onMerged={overrides.onMerged ?? (() => {})}
       onClose={overrides.onClose ?? (() => {})}
     />,
@@ -158,7 +166,7 @@ describe("MergeDialog · 表单与预览（D-007@v1）", () => {
       expect(knowledgeApi.previewMergeKnowledge).toHaveBeenCalledWith("ws-1", "proposed/pending-fix.md", {
         target_file: "known-issues.md",
         section_title: "移动端 grid 溢出",
-        keywords: ["乱码", "GBK"],
+        keywords: expect.arrayContaining(["乱码", "GBK"]),
       }),
     );
 
@@ -220,7 +228,7 @@ describe("MergeDialog · 确认合并与 409 冲突（R-01 契约）", () => {
     expect(knowledgeApi.mergeKnowledge).toHaveBeenCalledWith("ws-1", "proposed/pending-fix.md", {
       target_file: "known-issues.md",
       section_title: "移动端 grid 溢出",
-      keywords: ["乱码", "GBK"],
+      keywords: expect.arrayContaining(["乱码", "GBK"]),
     });
     await waitFor(() => expect(onMerged).toHaveBeenCalledTimes(1));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -273,5 +281,36 @@ describe("MergeDialog · 确认合并与 409 冲突（R-01 契约）", () => {
     await waitFor(() => expect(screen.getByText("INDEX.md 读取失败")).toBeInTheDocument());
     expect(onClose).not.toHaveBeenCalled();
     expect(onMerged).not.toHaveBeenCalled();
+  });
+});
+
+// ql-20260918-007：默认值（目标文件按 category 映射传入 / 关键词标题分词预填）
+// + 目标不存在将新建提示。
+describe("MergeDialog 默认值与目标新建（ql-20260918-007）", () => {
+  it("defaultTargetFile 预选目标、defaultSectionTitle 分词预填关键词（可改）", async () => {
+    mockPreview({ target_will_create: false });
+    renderDialog({
+      defaultSectionTitle: "Maven 双仓库 settings.xml 指冷仓库",
+      defaultTargetFile: "known-issues.md",
+    });
+    // 目标文件默认已选
+    const select = screen.getByLabelText(/目标文件/) as HTMLSelectElement;
+    expect(select.value).toBe("known-issues.md");
+    // 关键词按标题分词预填（表单完整 → 预览自动触发）
+    await waitFor(() => expect(knowledgeApi.previewMergeKnowledge).toHaveBeenCalled());
+    const payload = knowledgeApi.previewMergeKnowledge.mock.calls[0]![2];
+    expect(payload.keywords).toEqual(
+      expect.arrayContaining(["Maven", "双仓库", "settings"])
+    );
+    expect(payload.target_file).toBe("known-issues.md");
+  });
+
+  it("preview.target_will_create → 展示「目标文件尚不存在，合并将自动创建」提示", async () => {
+    mockPreview({ target_will_create: true });
+    renderDialog();
+    fillForm();
+    await waitFor(() =>
+      expect(screen.getByTestId("target-will-create-note")).toBeInTheDocument(),
+    );
   });
 });
