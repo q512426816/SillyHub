@@ -70,6 +70,12 @@ vi.mock("@/components/knowledge/distill-task-bar", () => ({
     ["knowledge", "distill-tasks", workspaceId] as const,
 }));
 
+// ql-20260918-002：DistillHistoryDialog 页面级 stub（Radix Dialog 同族 jsdom
+// 崩溃面，同 MergeDialog 先例）——弹层行为由 distill-history-dialog.test 覆盖。
+vi.mock("@/components/knowledge/distill-history-dialog", () => ({
+  DistillHistoryDialog: () => <div data-testid="distill-history-stub">历史记录 stub</div>,
+}));
+
 // task-06：页面拒绝流用 useNotify toast（antd App 上下文依赖），换纯函数实现
 // （precipitate-dialog.test 同款）；errMessage 保持真实实现（错误文案路径）。
 const notify = vi.hoisted(() => ({

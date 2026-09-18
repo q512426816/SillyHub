@@ -48,6 +48,7 @@ import { DistillTaskBar, distillTasksQueryKey } from "@/components/knowledge/dis
 import { EntryEditor } from "@/components/knowledge/entry-editor";
 import { MergeDialog } from "@/components/knowledge/merge-dialog";
 import { PrecipitateDialog } from "@/components/knowledge/precipitate-dialog";
+import { DistillHistoryDialog } from "@/components/knowledge/distill-history-dialog";
 import { Button } from "@/components/ui/button";
 import { FileNodeIcon } from "@/components/ui/file-node-icon";
 import { MarkdownText } from "@/components/ui/markdown-text";
@@ -235,6 +236,7 @@ export default function KnowledgePage({ params }: Props) {
   const [pageError, setPageError] = useState<string | null>(null);
   // task-05 写入口态：沉淀弹层开关 + 条目编辑开关。
   const [precipitateOpen, setPrecipitateOpen] = useState(false);
+  const [distillHistoryOpen, setDistillHistoryOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   // task-06 审核操作态：合并弹层目标（null = 关）+ 拒绝提交中。
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
@@ -359,14 +361,23 @@ export default function KnowledgePage({ params }: Props) {
           </span>
         }
         actions={
-          canWriteKnowledge ? (
+          <div className="flex items-center gap-2">
             <Button
-              data-testid="precipitate-entry"
-              onClick={() => setPrecipitateOpen(true)}
+              variant="outline"
+              data-testid="distill-history-entry"
+              onClick={() => setDistillHistoryOpen(true)}
             >
-              <span aria-hidden>✦</span> 沉淀知识
+              <span aria-hidden>📋</span> 提炼记录
             </Button>
-          ) : null
+            {canWriteKnowledge ? (
+              <Button
+                data-testid="precipitate-entry"
+                onClick={() => setPrecipitateOpen(true)}
+              >
+                <span aria-hidden>✦</span> 沉淀知识
+              </Button>
+            ) : null}
+          </div>
         }
       />
 
@@ -531,6 +542,15 @@ export default function KnowledgePage({ params }: Props) {
           onJumpToKnowledge={selectEntry}
         />
       )}
+
+      {/* 提炼记录（ql-20260918-002 / D-010④ 补口）：历史蒸馏任务入口——蒸馏会话
+          常规会话页被 k-distill 隔离、任务条完成后消失，此处是唯一历史回看/跳转入口。 */}
+      <DistillHistoryDialog
+        workspaceId={workspaceId}
+        open={distillHistoryOpen}
+        onOpenChange={setDistillHistoryOpen}
+        onJumpToEntry={selectEntry}
+      />
 
       {mergeTarget !== null && (
         <MergeDialog
