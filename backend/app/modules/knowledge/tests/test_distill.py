@@ -507,8 +507,11 @@ async def test_dispatch_resume_ended_session_reopens_then_injects(
     )
 
     assert calls["reopen"] == (session.id, user.id)
-    assert calls["inject"][0] == session.id
-    prompt = calls["inject"][1]
+    # ql-20260918-006（mypy 债）：dict[str, object] 取值先 isinstance 收窄再索引
+    inject_call = calls["inject"]
+    assert isinstance(inject_call, tuple)
+    assert inject_call[0] == session.id
+    prompt = inject_call[1]
     assert "本会话本身的完整对话记录" in prompt  # resume 式 prompt（D-009）
     assert "只提取踩坑" in prompt
 
@@ -1032,3 +1035,100 @@ async def test_dispatch_fresh_session_non_multimodal_provider_returns_422(
         )
     assert "不支持会话附件" in exc_info.value.message
     assert "mode=resume" in exc_info.value.message
+
+
+# ---------------------------------------------------------------------------
+# ql-20260918-006：quick ref 白名单校验（M4）+ fresh 失败分支附件回收（M5）
+# ---------------------------------------------------------------------------
+
+
+async def test_dispatch_quick_ref_illegal_shape_rejected_422(
+    db_session, tmp_path, auth_admin_token
+) -> None:
+    """ql-20260918-006（M4）：quick ref 白名单校验先于存在性检查——"../" / 绝对
+    路径 / 盘符 / 反斜杠 / 子目录形态拒 422，不得把 agent 读取路径指到
+    quicklog 目录外（存在性检查对 .. 不设防）。"""
+    ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
+    spec_root = tmp_path / "distill-spec"
+    (spec_root / "quicklog").mkdir(parents=True)
+    # quicklog 外的同内容文件：若存在性检查不设防，"../escape" 形态可命中
+    (spec_root / "escape.md").write_text("# escaped\n", encoding="utf-8")
+
+    service = DistillDispatchService(db_session)
+    for bad_ref in ("../escape", "..\escape", "/etc/hosts", "C:/win", ".hidden", "a/b"):
+        with pytest.raises(DistillSourceInvalid) as exc_info:
+            await service.dispatch(ws.id, user, source_type="quick", source_ref=bad_ref)
+        assert "不合法" in exc_info.value.message, bad_ref
+
+
+@pytest.mark.parametrize(
+    ("create_exc", "expect_status"),
+    [
+        ("offline", "failed"),
+        ("unsupported", None),
+    ],
+)
+async def test_dispatch_fresh_failure_recycles_draft_attachment_row(
+    db_session, tmp_path, auth_admin_token, monkeypatch, create_exc, expect_status
+) -> None:
+    """ql-20260918-006（M5）：fresh 派发失败分支回收导出附件草稿行——上传先于
+    create_session（洞一取数通道），引擎不支持 / 离线两失败分支此前不清理，
+    附件行成孤儿（对象回收是 D-5 accepted risk，行应即时回收）。"""
+    from app.modules.agent.placement import NoOnlineDaemonError
+    from app.modules.daemon.session.service.errors import (
+        DaemonSessionAttachmentsUnsupported,
+    )
+    from app.modules.session_attachment.model import SessionAttachment
+
+    ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
+    session = await _make_session_record(db_session, user.id, turn_count=5)
+
+    created_ids: list[uuid.UUID] = []
+
+    async def _fake_upload(db, user_id, source_session_id, data):
+        row = SessionAttachment(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            session_id=None,
+            kind="file",
+            media_type="text/markdown",
+            bytes=len(data),
+            name=f"distill-source-{str(source_session_id)[:8]}.md",
+            object_key=f"attachments/{user_id}/{'0' * 64}.md",
+            sha256="0" * 64,
+        )
+        db.add(row)
+        await db.commit()
+        created_ids.append(row.id)
+        return row
+
+    monkeypatch.setattr(distill_module, "_upload_distill_source", _fake_upload)
+
+    async def _fake_create_session(*args, **kwargs):
+        if create_exc == "offline":
+            raise NoOnlineDaemonError(user_id=uuid.uuid4())
+        raise DaemonSessionAttachmentsUnsupported(
+            "此引擎不支持会话附件。",
+            details={"provider": "codex"},
+        )
+
+    monkeypatch.setattr(distill_module, "_create_session", _fake_create_session)
+
+    if expect_status == "failed":
+        task_read = await DistillDispatchService(db_session).dispatch(
+            ws.id, user, source_type="session", source_ref=str(session.id)
+        )
+        assert task_read.status == "failed"
+    else:
+        with pytest.raises(DistillSourceInvalid):
+            await DistillDispatchService(db_session).dispatch(
+                ws.id,
+                user,
+                source_type="session",
+                source_ref=str(session.id),
+                runtime_id=str(uuid.uuid4()),
+            )
+
+    assert created_ids, "前置自检：上传确实发生"
+    row = await db_session.get(SessionAttachment, created_ids[0])
+    assert row is None, "失败分支应回收附件草稿行"

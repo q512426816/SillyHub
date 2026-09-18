@@ -64,6 +64,7 @@ task-07 + D-009 续接分流 + D-010 闭环增强 + D-008 取数通道/回流指
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -86,7 +87,9 @@ from app.modules.workspace.model import AgentRunWorkspace, Workspace
 if TYPE_CHECKING:  # 仅为 _upload_distill_source 返回类型注解（延迟求值，防循环 import）
     from collections.abc import Sequence
 
-    from app.modules.session_attachment.model import SessionAttachment
+    # ql-20260918-006（mypy 债）：SessionAttachmentService.upload 回 AttachmentRead
+    # DTO（非 ORM 行），dispatch 只取 id/name 两属性。
+    from app.modules.session_attachment.schema import AttachmentRead
 
 log = get_logger(__name__)
 
@@ -376,7 +379,7 @@ async def _upload_distill_source(
     user_id: uuid.UUID,
     source_session_id: uuid.UUID,
     data: bytes,
-) -> SessionAttachment:
+) -> AttachmentRead:
     """导出 Markdown → 文件中心附件（洞一取数通道的落盘点）。
 
     kind=file + text/markdown → inject 组装走 ``deliver=disk`` 路线（非多模态
@@ -398,6 +401,32 @@ async def _upload_distill_source(
         media_type="text/markdown",
         data=data,
     )
+
+
+async def _cleanup_distill_attachment(db: AsyncSession, attachment_id: uuid.UUID) -> None:
+    """ql-20260918-006（M5）：fresh 派发失败分支回收导出附件草稿行。
+
+    上传先于 create_session（洞一取数通道），引擎不支持 / 离线两失败分支此前
+    不清理，附件行成存储孤儿（对象回收是 D-5 accepted risk——内容寻址可能共享，
+    本处至少即时回收草稿行，对齐附件删除端点「只删行」语义；已绑定 session 的
+    行属于会话审计轨迹不动）。best-effort：回收失败仅记日志，不改变失败分支
+    既有语义（422 / failed 任务条）。
+    """
+    from app.modules.session_attachment.model import SessionAttachment
+
+    try:
+        row = (
+            await db.execute(select(SessionAttachment).where(SessionAttachment.id == attachment_id))
+        ).scalar_one_or_none()
+        if row is not None and row.session_id is None:
+            await db.delete(row)
+            await db.commit()
+    except Exception:
+        await db.rollback()
+        log.warning(
+            "knowledge_distill_attachment_cleanup_failed",
+            attachment_id=str(attachment_id),
+        )
 
 
 # ── Service ───────────────────────────────────────────────────────────────────
@@ -604,6 +633,9 @@ class DistillDispatchService:
                 source_type=source_type,
                 error=str(exc),
             )
+            # ql-20260918-006（M5）：导出附件已上传，失败即回收草稿行
+            for attachment_id in fresh_attachment_ids or []:
+                await _cleanup_distill_attachment(self._session, attachment_id)
             raise DistillSourceInvalid(
                 "所选运行时引擎不支持会话附件，无法通过附件下发对话记录，"
                 "请改用原会话续接（mode=resume）模式，或选择支持附件的引擎（如 Claude）。",
@@ -618,6 +650,9 @@ class DistillDispatchService:
                 source_type=source_type,
                 error=str(exc),
             )
+            # ql-20260918-006（M5）：导出附件已上传，失败即回收草稿行
+            for attachment_id in fresh_attachment_ids or []:
+                await _cleanup_distill_attachment(self._session, attachment_id)
             run = await self._new_tracking_run(
                 workspace_id,
                 base_meta,
@@ -846,6 +881,17 @@ class DistillDispatchService:
                 )
             return None
         elif source_type == "quick":
+            # ql-20260918-006（M4）：ref 白名单校验先于存在性检查——ref 会原样
+            # 拼进给 agent 的读取路径（build_distill_prompt），"../" 形态可把读取
+            # 路径指到 quicklog 目录外（存在性检查 (dir / f"{ref}.md") 对 .. 不
+            # 设防）。合法形态 = ql-id 风格：字母数字开头，仅含 字母数字/./_/-。
+            for ref in refs:
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", ref):
+                    raise DistillSourceInvalid(
+                        f"快速修复日志引用 '{ref}' 不合法（仅允许字母数字开头的"
+                        " 字母数字/./_/- 组合），请从快速修复列表选择。",
+                        details={"source_type": source_type, "source_ref": ref},
+                    )
             # D-010②：ql 是 spec 树文件条目（<spec_root>/quicklog/<ql-id>.md），
             # 逐条校验存在性；缺失任一条即 422（与 parser 读取口径同根）。
             quicklog_dir = Path(spec_ws.spec_root) / "quicklog"

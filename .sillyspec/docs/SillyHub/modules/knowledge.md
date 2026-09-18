@@ -60,3 +60,9 @@ get(ws, filename) → 同上全量解析后按 filename 匹配（include_content
 - **背景（24h 审查 M3/M6）**：①`_read_raw` 用 `errors="replace"` 解码后 merge 段一整文件回写——目标文件的非 UTF-8 字节（Windows GBK 手工编辑残留）被永久替换为 U+FFFD 且 update 无备份；②merge/preview 前置 `_read_raw("INDEX.md")` 对缺失文件抛 WorkspaceNotFound（404），`_insert_route_line` 本身支持 EOF 追加但前置读失败使合并整体不可用、无自动初始化路径。
 - **修法**（writer.py）：①`_read_raw` 改严格 UTF-8 解码，`UnicodeDecodeError` 抛新增 `KnowledgeFileEncodingInvalid` 422（details 带 byte_offset，文件不动，提示本机转码后再操作）——所有回写路径（目标/INDEX/候选）统一收口；②新增 `_read_index_raw`（缺失返回空串），merge 对空 INDEX 特判首段格式 `## <分类>\n<路由行>\n`（`_insert_route_line` 空输入会留两个空行前导），update op 无 manifest 行按新建落 version 1。
 - **验证**：test_writer 22（新增 4：merge/preview 坏编码 422+原字节未动+候选保留、INDEX 删除后 merge 自动建首段/preview 不 404）+ test_router/test_parser 39 全绿；ruff/mypy（scoped）0。
+
+## 增量（ql-20260918-006：distill quick ref 白名单校验 + fresh 失败分支附件回收）
+
+- **背景（24h 审查 M4/M5）**：①quick 蒸馏 `source_ref` 仅 strip 空白即做存在性检查 `(quicklog_dir / f"{ref}.md").is_file()`（对 `..` 不设防），ref 又原样拼进给 agent 的读取路径（`build_distill_prompt`）——`../..` 形态可把读取路径指到 quicklog 目录外（仅 .md，需 KNOWLEDGE_WRITE 权限，定级中）；②fresh 会话蒸馏上传先于 create_session（洞一取数通道），引擎不支持/离线两失败分支不清理已上传附件——草稿 GC 48h 只删行不删对象（D-5 accepted risk），此变更加了高频孤儿生产者（单份至 19MB）。
+- **修法**（distill.py）：①quick 分支 ref 白名单校验先于存在性检查——`[A-Za-z0-9][A-Za-z0-9._-]*`（字母数字开头，仅含 字母数字/./_/-），拒 `..`/绝对路径/盘符/反斜杠/子目录形态（422）；②新增 `_cleanup_distill_attachment`（best-effort）挂进两失败分支：session_id 仍 NULL 的草稿行即时删除（对齐附件删除端点「只删行」语义；已绑定会话的行属审计轨迹不动，失败仅记日志不改失败分支语义）。
+- **验证**：test_distill 30（新增 2：非法 ref 六形态 422 且 quicklog 外文件不可命中、offline/unsupported 两失败分支参数化断言草稿行已回收）+ test_router 27 全绿；ruff/mypy（scoped）0——顺手清偿 3 处既有 mypy 债（`_upload_distill_source` 返回注解 AttachmentRead、test_distill `calls["inject"]` object 索引收窄）。对象本体的 GC 仍是 D-5 accepted risk，本增量只回收行。

@@ -440,3 +440,12 @@
 根因：_read_raw 用 errors=replace 解码后 merge 段一整文件回写，目标文件非 UTF-8 字节（Windows GBK 手工编辑残留）被永久替换为 U+FFFD 且 update 无备份；merge/preview 前置读 INDEX.md 缺失抛 404，_insert_route_line 本身支持 EOF 追加但前置读失败使合并整体不可用
 方案：_read_raw 改严格 UTF-8 解码，UnicodeDecodeError 抛新增 KnowledgeFileEncodingInvalid 422（byte_offset 入 details，文件不动）；新增 _read_index_raw 缺失返回空串，merge 空 INDEX 特判首段格式为分类标题+路由行，update 无 manifest 行按新建落 version 1
 结果：test_writer 22 全绿（新增 4 例：merge/preview 坏编码 422+原字节未动+候选保留、INDEX 删除后 merge 自动建首段/preview 不 404）+ test_router/test_parser 39 绿；ruff/scoped mypy 0
+
+## ql-20260918-006-d5bf | 2026-09-18 08:25:55 | distill 两处加固——quick source_ref 白名单校验 + fresh 失败分支附件草稿行回收
+状态：已完成
+关联变更：（无）
+文件：.sillyspec/docs/SillyHub/modules/knowledge.md（+6/-0）, backend/app/modules/knowledge/distill.py（+48/-2）, backend/app/modules/knowledge/tests/test_distill.py（+102/-2）
+需求：distill 两处加固——quick source_ref 白名单校验 + fresh 失败分支附件草稿行回收
+根因：quick ref 仅 strip 空白即做存在性检查（对 .. 不设防）且原样拼进 agent 读取路径，可指到 quicklog 目录外；fresh 蒸馏上传先于 create_session，引擎不支持/离线两失败分支不清理附件，行成孤儿（对象 GC 是 D-5 accepted risk）
+方案：quick 分支加 [A-Za-z0-9][A-Za-z0-9._-]* 白名单校验先于存在性检查（拒 ../绝对路径/盘符/反斜杠/子目录，422）；新增 _cleanup_distill_attachment best-effort 挂进两失败分支，session_id 仍 NULL 的草稿行即时删除（对齐附件删除端点只删行语义，已绑定行不动，失败仅记日志）
+结果：test_distill 30 全绿（新增 2：非法 ref 六形态 422 且 quicklog 外文件不可命中、两失败分支参数化断言草稿行回收）+ test_router 27 绿；ruff/scoped mypy 0（顺手清偿 _upload_distill_source 返回注解与 test_distill object 索引 3 处既有 mypy 债）
