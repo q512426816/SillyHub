@@ -1,0 +1,3988 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/admin.md b/.sillyspec/docs/SillyHub/modules/admin.md
+index 8e737980..e75e4f3b 100644
+--- a/.sillyspec/docs/SillyHub/modules/admin.md
++++ b/.sillyspec/docs/SillyHub/modules/admin.md
+@@ -32,6 +32,10 @@ created_at: 2026-08-18 01:45:00
+   - 重置密码：不传新密码时随机生成一次性口令经响应下发（BS-1）；保留「自定义密码」；审计 details 记 `used_default_password`。**支配权（ql-20260827-019）：非平台管理员重置平台管理员密码 → 403 `PLATFORM_ADMIN_RESET_FORBIDDEN`**（重置响应含明文新口令，不校验则任意 ws `user:write` 持有者可接管超管账号）。
+   - disable/enable 登录（is_active 翻转，伴随 `_revoke_sessions` 吊销会话防已禁用账号持 token 继续操作）。
+   - 会话列表 / 吊销单个 / 吊销全部；用户审计日志列表；用户工作区视图（含组织成员关系）。
++- **菜单覆盖管理**（2026-09-18-web-menu-management）：
++  - `menu_overrides` 表（无 role 维度，覆盖全局生效 D-002）：`menu_key` 唯一（String 64，对齐前端注册表 `MenuPermissionGroup.menuKey`；后端不校验注册表存在性，孤儿行由前端合并层忽略）、`label_override` 可空（1–30 字符，NULL=代码默认名）、`sort_order` 可空（0–999 整数，NULL=组内声明序）、`hidden` 布尔（默认 false，全局隐藏，`menus` 行豁免在前端合并层防自锁）；BaseModel 时间戳约定同既有表。
++  - 子路由 `menu_overrides_router`（`APIRouter(prefix="/menu-overrides")`，main.py 以 `include_router(..., prefix="/api")` 挂载——admin 主 router 自带 `/admin` 前缀，承载不了导航消费的公开读路径）：`GET /api/menu-overrides` 仅需认证（导航侧拉全量覆盖，返回 items）；`PUT` / `DELETE /api/menu-overrides/{menu_key}` 需 `menu:admin`（`require_permission_any(MENU_ADMIN)`，`require_permission` 需 workspace_id 路径参数不适用）且写审计（MenuOverrideService list/upsert/delete，复用 roles_service 的 `_audit` 模式）；PUT 为 upsert，null 字段=清除该项覆盖回默认，DELETE 204=整行删除全部恢复默认。
++  - 前端 `/admin/menus` 管理页（menu:admin 门控）：分组表格行级即时保存（每项一次 PUT，行内 toast 反馈，无整页保存按钮）、显示名行内编辑+「已改名」标记+恢复默认、组内上移/下移排序、全局隐藏开关（menus 行 disabled+🔒 提示锁死防自锁）；挂载权限只读展示（key+中文名+持有角色 chips，角色经既有 `GET /api/admin/roles` 客户端反查，仅持 menu:admin 无 role:read 者该区优雅降级为占位提示）。
+ - **审计**：RoleService/OrganizationService/UserService 统一写审计行；AuditLog 模型来自 workflow 模块（admin 对 workflow 的唯一依赖）。
+ - **前端交互**：组织树（受控 expandedKeys 全展开，defaultExpandAll 对异步 treeData 不可靠）、角色权限选择器（按 PermissionGroup 分组）、用户弹窗（antd Modal + Form，组织 TreeSelect / 角色 Select multiple）；列表分页默认 20/页，多选 size 匹配后端 le=100。
+ 
+diff --git a/.sillyspec/docs/SillyHub/modules/auth.md b/.sillyspec/docs/SillyHub/modules/auth.md
+index c2723067..240166e5 100644
+--- a/.sillyspec/docs/SillyHub/modules/auth.md
++++ b/.sillyspec/docs/SillyHub/modules/auth.md
+@@ -33,6 +33,7 @@ created_at: 2026-08-18 01:45:00
+   - `revoke` 按 key_prefix SCAN 清正缓存（否则被吊销 key 在 TTL 内仍可用）；`last_used_at` 写入受节流（默认 60s，0=每次写）避免行锁串行化雪崩。
+   - 缓存层 try/except 降级，Redis 不可用回退 bcrypt 路径。
+ - **权限模型**：`Permission(StrEnum)` 全部权限点 + `PermissionGroup` 分组（AUDIT/WORKSPACE/PLATFORM/ADMIN/CHANGE/AGENT/PPM 等）；rbac 提供 `collect_permissions*`（平台级 / 全部 / everywhere 任意工作空间聚合）、`has_permission`、`list_user_workspace_roles`、`allowed_workspace_ids`；读侧接 core.permission_cache（Redis + 熔断）。
++- **权限枚举 72 项**（2026-09-18-web-menu-management，67 + 5）：新增 `skill:read` / `mcp:read` / `agent_profile:read` / `agent_session:read`（4 个原空权限常显菜单的独立读权限，种子迁移授全部现存角色保现状可见）与 `menu:admin`（菜单管理页 /admin/menus 与覆盖写端点门控）；`group` 前缀映射补 `skill` / `mcp` / `agent_profile` / `agent_session` 前缀归 AGENT 组，`menu` 前缀无特判分支、走默认 PLATFORM 组（group 仅维护后端目录归类一致性，角色勾选器折叠分组由前端注册表 section 驱动）。
+ - **启动 seed**：`bootstrap_admin_and_seed_rbac`（管理员账号三元组来自 Settings 的 platform_bootstrap_admin_* + RBAC 种子）与 `seed_platform_admin_role`。
+ - **数据**：User / Session / Role / RolePermission / ApiKey / UserWorkspaceRole（均继承 BaseModel）。
+ 
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.md
+index 55b1d722..355de256 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.md
+@@ -53,7 +53,8 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。
+     ql-20260903-007 起锚改**服务端时间戳**（回放 maxLogTimestamp / 实时事件
+     env.timestamp）——判定方 last_mention.ts 是后端时钟，此前客户端 now 跨时钟域
+     比较会吞红点/出假红点；空群（无服务端 ts）不写锚，缺省参数回落客户端时钟
+-  - 平台管理：admin / settings / api-keys / mcp-tokens / mcp-settings / menu-permissions / permission / agent-profiles / custom-skills
++  - 平台管理：admin / settings / api-keys / mcp-tokens / mcp-settings / menu-permissions / menu-overrides / permission / agent-profiles / custom-skills
++  - `menu-overrides.ts`（2026-09-18-web-menu-management）：`useMenuOverrides` 拉 `GET /api/menu-overrides`（仅需认证的读端点，导航侧与菜单管理页共用；失败/加载中恒回空数组=空覆盖直通，不阻塞导航渲染）+ `mergeMenus(registry, overrides)` 纯函数（label 覆盖默认名、hidden 剔除且 menuKey="menus" 恒豁免防自锁、sort_order 组内稳定排序、孤儿 override 自然忽略）；导出 `MENU_OVERRIDES_QUERY_KEY`，管理页写成功后据此 invalidate、导航侧 useMenuOverrides 随之重拉刷新
+   - spec 域：scan-docs / scan-docs-tree / spec-workspaces / knowledge / incidents / releases / health / git-identities / file/ / auth(+auth/ 子目录) / ppm/*（含 format / types / kanban）/ api/llm-providers（拆分客户端首例）
+ - 取数 hooks：
+   - `use-agent-run-stream` — run 级 SSE 订阅（ql-20260909-019-4534：预取回放走 onMessagesBatch 整批一次 setLogs 追加——原逐条 emit 每条 O(n) 数组拷贝打开大 run 历史累计 O(n²)；log_id 去重改 seenLogIdsRef O(1) 查询——原 prev.some 每事件 O(n) 线性扫；两路径共享索引，effect 重跑/clear 时重置；ql-20260910-002：onMessage 去重移出 setState updater——Set.add 副作用在 updater 内被 StrictMode 双调二次命中误判重复丢条目（session-log-assembler F7 同型），改「updater 外去重 + 纯追加」对齐批量路径）
+diff --git a/README.md b/README.md
+index 51499738..6972701d 100644
+--- a/README.md
++++ b/README.md
+@@ -95,6 +95,8 @@ make up                              # postgres / redis / minio / litellm + lite
+ # LITELLM_MASTER_KEY、LITELLM_DB_PASSWORD、PLATFORM_BOOTSTRAP_ADMIN_PASSWORD
+ ```
+ 
++> **权限缓存说明**：菜单管理变更（2026-09-18）的种子迁移直插 `role_permissions` 表、绕过权限缓存主动失效（`invalidate_all_permissions`），`perm:*` 前缀的 Redis 缓存以 TTL 300 秒到期自愈为主——外部 Redis 不随后端重启清空，升级镜像后等约 5 分钟新权限即全量生效；如需加速收敛，可手动清理 Redis 中 `perm:*` 键（可选项，非必须，无强制清库要求）。
++
+ ## 项目结构
+ 
+ ```
+diff --git a/backend/app/main.py b/backend/app/main.py
+index edca5745..fbaf4c33 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -26,6 +26,7 @@ from app.core.monitoring import (
+ )
+ from app.core.redis import close_redis
+ from app.core.telemetry import init_telemetry
++from app.modules.admin.menu_overrides_router import router as menu_overrides_router
+ from app.modules.admin.router import router as admin_router
+ from app.modules.agent.profile.router import router as agent_profile_router
+ from app.modules.agent.router import router as agent_router
+@@ -953,6 +954,13 @@ def create_app() -> FastAPI:
+     app.include_router(policy_crud_router, prefix="/api")
+     app.include_router(settings_router, prefix="/api")
+     app.include_router(admin_router, prefix="/api")
++    # 2026-09-18-web-menu-management task-05：菜单覆盖三端点（GET
++    # /api/menu-overrides 认证读全量覆盖 + PUT/DELETE /api/menu-overrides/{menu_key}
++    # 挂 menu:admin 门控；业务/审计在 menu_overrides_service）。sibling include
++    # 而非挂进 admin 主 router——后者自带 prefix=/admin 会把导航消费的公开读端点
++    # 推到 /api/admin 下（审查 B-01）；router 自带 prefix=/menu-overrides，外层
++    # 只加 /api（先例 members_router）。
++    app.include_router(menu_overrides_router, prefix="/api")
+     app.include_router(spec_workspace_router, prefix="/api")
+     # 2026-08-10-sillyhub-platform-sync task-06：SillySpec 进度同步层 3 端点
+     # （POST /changes/{name}/progress / GET /changes / GET /changes/{name}/progress）。
+diff --git a/backend/app/modules/admin/menu_overrides_router.py b/backend/app/modules/admin/menu_overrides_router.py
+new file mode 100644
+index 00000000..f479076a
+--- /dev/null
++++ b/backend/app/modules/admin/menu_overrides_router.py
+@@ -0,0 +1,97 @@
++"""Menu overrides 子路由：``/api/menu-overrides`` 三端点（task-05）。
++
++Change ``2026-09-18-web-menu-management`` task-05 / design §总体方案 Phase 1.3
+++ §接口定义。独立文件而非并入 admin 主 router 的根因（审查 B-01）：admin 主
++router 自带 ``prefix="/admin"``（router.py），会把导航消费的公开读端点推到
++``/api/admin/menu-overrides``，普通用户无法到达——故本子路由自带
++``prefix="/menu-overrides"``，由 main.py 以 ``include_router(..., prefix="/api")``
++sibling 挂载（先例 members_router / platform_sync_workspace_router）。
++
++三端点（读/写分流，design Phase 2.4 / R-06）：
++
++* ``GET    /api/menu-overrides``：仅需认证（``get_current_user``），任意登录
++  用户读全量覆盖——普通用户导航也要消费改名/排序/隐藏（全局生效，D-002），
++  内容仅为显示配置无敏感信息。
++* ``PUT    /api/menu-overrides/{menu_key}``：``require_permission_any(MENU_ADMIN)``
++  门控（无 workspace 路径参数的端点惯例，admin roles 端点同款；
++  ``require_permission`` 需 ``{workspace_id}`` 路径参数，不适用本路由）。
++* ``DELETE /api/menu-overrides/{menu_key}``：同上门控；整行删除 = 该菜单全部
++  恢复默认，幂等 204。
++
++本层是薄 HTTP 壳：参数翻译 + 依赖注入，校验 / 审计 / upsert 语义全委派
++task-04 的 :class:`MenuOverrideService`（AppError 子类由全局 handler 序列化，
++router 不捕获）。后端不校验 menu_key 是否存在于前端注册表——孤儿行由前端
++合并层忽略（R-01 / constraints）。列表响应包装 DTO 定义在本模块内（task-05
++allowed_paths 未含 schema.py，先例 agent/profile/router.py）。
++"""
++
++from __future__ import annotations
++
++from typing import Annotated
++
++from fastapi import APIRouter, Depends, Path, status
++from pydantic import BaseModel
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.auth_deps import get_current_user, require_permission_any
++from app.core.db import get_session
++from app.modules.admin.menu_overrides_service import MenuOverrideService
++from app.modules.admin.schema import MenuOverrideRead, MenuOverrideUpsert
++from app.modules.auth.model import User
++from app.modules.auth.permissions import Permission
++
++router = APIRouter(prefix="/menu-overrides", tags=["menu-overrides"])
++
++
++class MenuOverrideListResponse(BaseModel):
++    """GET 列表响应包装（仓库 list 响应惯例：顶层 ``items`` 字段）。"""
++
++    items: list[MenuOverrideRead]
++
++
++# menu_key 长度防御：对齐模型列 String(64)，超长由 FastAPI 422 拒绝（按字符
++# 计数，中英文同一把尺），避免 upsert 落库时才被 DB 约束炸出 500。
++MenuKeyPath = Annotated[str, Path(min_length=1, max_length=64)]
++
++
++@router.get("", response_model=MenuOverrideListResponse)
++async def list_menu_overrides(
++    session: Annotated[AsyncSession, Depends(get_session)],
++    user: Annotated[User, Depends(get_current_user)],
++) -> MenuOverrideListResponse:
++    """全量菜单覆盖（menu_key 升序）。仅需认证：内容为全局显示配置，无敏感
++    信息（R-06）；FR-05 下发端点，导航侧所有登录用户消费。"""
++    items = await MenuOverrideService(session, user.id).list_overrides()
++    return MenuOverrideListResponse(items=items)
++
++
++@router.put(
++    "/{menu_key}",
++    response_model=MenuOverrideRead,
++    dependencies=[Depends(require_permission_any(Permission.MENU_ADMIN))],
++)
++async def upsert_menu_override(
++    menu_key: MenuKeyPath,
++    payload: MenuOverrideUpsert,
++    session: Annotated[AsyncSession, Depends(get_session)],
++    user: Annotated[User, Depends(get_current_user)],
++) -> MenuOverrideRead:
++    """按 menu_key 建行或整行覆盖写（``None`` = 清除该维度回代码默认）。
++    label/sort_order 校验与 ``menu_override.upserted`` 审计在 service 层。"""
++    return await MenuOverrideService(session, user.id).upsert_override(menu_key, payload)
++
++
++@router.delete(
++    "/{menu_key}",
++    status_code=status.HTTP_204_NO_CONTENT,
++    dependencies=[Depends(require_permission_any(Permission.MENU_ADMIN))],
++)
++async def delete_menu_override(
++    menu_key: MenuKeyPath,
++    session: Annotated[AsyncSession, Depends(get_session)],
++    user: Annotated[User, Depends(get_current_user)],
++) -> None:
++    """按 menu_key 整行删除（该菜单全部恢复默认）。行不存在时幂等 204，
++    ``menu_override.deleted`` 审计在 service 层。"""
++    await MenuOverrideService(session, user.id).delete_override(menu_key)
++    return None
+diff --git a/backend/app/modules/admin/menu_overrides_service.py b/backend/app/modules/admin/menu_overrides_service.py
+new file mode 100644
+index 00000000..d3aebf5d
+--- /dev/null
++++ b/backend/app/modules/admin/menu_overrides_service.py
+@@ -0,0 +1,194 @@
++"""Menu override service.
++
++Backend business layer of ``/api/menu-overrides`` (change
++``2026-09-18-web-menu-management`` task-04). ``menu_overrides`` holds
++global display overrides (label / sort_order / hidden) with no role or
++user dimension (D-002@v1). ``menu_key`` is NOT validated against the
++frontend registry — orphan rows are tolerated and ignored by the
++frontend merge layer (R-01).
++
++Audit logging is explicit (upsert / delete both emit
++``menu_override.*`` rows into ``audit_logs``), mirroring the
++roles_service pattern: the generic SQLAlchemy hook in
++:mod:`app.core.audit_hooks` is not wired into the production lifespan,
++so we write AuditLog directly. ``menu_overrides`` is display
++configuration, not permission data — ``invalidate_all_permissions`` is
++intentionally NOT called after writes.
++"""
++
++from __future__ import annotations
++
++import json
++import uuid
++from datetime import UTC, datetime
++
++from fastapi import status as http_status
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++from sqlmodel import col
++
++from app.core.errors import AppError
++from app.modules.admin.model import MenuOverride
++from app.modules.admin.schema import MenuOverrideRead, MenuOverrideUpsert
++from app.modules.workflow.model import AuditLog
++
++
++def _to_read(override: MenuOverride) -> MenuOverrideRead:
++    """ORM → 读 DTO。对外字段名 ``label`` 与列名 ``label_override`` 不同名，
++    ``from_attributes`` 不会自动命中，必须显式构造映射。"""
++    return MenuOverrideRead(
++        menu_key=override.menu_key,
++        label=override.label_override,
++        sort_order=override.sort_order,
++        hidden=override.hidden,
++    )
++
++
++class MenuOverrideService:
++    """菜单覆盖的 list / upsert / delete 业务底座（task-05 三端点共用）。
++
++    权限闸在 router 层，本类只管业务规则；构造模式对齐 RoleService
++    （session + actor_id）。
++    """
++
++    def __init__(self, session: AsyncSession, actor_id: uuid.UUID) -> None:
++        self._session = session
++        self._actor_id = actor_id
++
++    def _audit(
++        self,
++        *,
++        action: str,
++        override: MenuOverride,
++        details: dict | None = None,
++    ) -> None:
++        self._session.info.setdefault(
++            "audit_context",
++            {
++                "actor_id": self._actor_id,
++                "workspace_id": None,
++            },
++        )
++        self._session.add(
++            AuditLog(
++                id=uuid.uuid4(),
++                workspace_id=None,
++                actor_id=self._actor_id,
++                action=action,
++                resource_type="menu_override",
++                resource_id=override.id,
++                details_json=json.dumps(
++                    {"menu_key": override.menu_key, **(details or {})},
++                    default=str,
++                    ensure_ascii=False,
++                ),
++                timestamp=datetime.now(UTC),
++            )
++        )
++
++    async def list_overrides(self) -> list[MenuOverrideRead]:
++        """全量覆盖，按 ``menu_key`` 升序（稳定排序）；只读路径 GET 共用。"""
++        rows = (
++            (
++                await self._session.execute(
++                    select(MenuOverride).order_by(col(MenuOverride.menu_key).asc())
++                )
++            )
++            .scalars()
++            .all()
++        )
++        return [_to_read(row) for row in rows]
++
++    async def upsert_override(
++        self, menu_key: str, payload: MenuOverrideUpsert
++    ) -> MenuOverrideRead:
++        """按 ``menu_key`` 建行或整行覆盖写。
++
++        PUT 全量语义：``None`` 落 NULL 表示清除该维度回代码默认
++        （label / sort_order 落 NULL，hidden 回 False）。全 null 的
++        upsert 保留行不删行——整行删除是 delete_override 的语义
++        （接口定义：DELETE = 该菜单全部恢复默认）。
++        """
++        # 防御校验：DTO 层已拦 422（task-02 Field 约束），此处为直连
++        # service 的调用方兜底，文案中文（error-message-l10n）。
++        if payload.label is not None and not 1 <= len(payload.label) <= 30:
++            raise AppError(
++                "菜单显示名长度须为 1 到 30 个字符。",
++                code="HTTP_400_MENU_LABEL_INVALID",
++                http_status=http_status.HTTP_400_BAD_REQUEST,
++                details={"menu_key": menu_key, "label": payload.label},
++            )
++        if payload.sort_order is not None and not 0 <= payload.sort_order <= 999:
++            raise AppError(
++                "菜单排序值须在 0 到 999 之间。",
++                code="HTTP_400_MENU_SORT_ORDER_INVALID",
++                http_status=http_status.HTTP_400_BAD_REQUEST,
++                details={"menu_key": menu_key, "sort_order": payload.sort_order},
++            )
++
++        override = (
++            (
++                await self._session.execute(
++                    select(MenuOverride)
++                    .where(col(MenuOverride.menu_key) == menu_key)
++                    .limit(1)
++                )
++            )
++            .scalars()
++            .first()
++        )
++        created = override is None
++        if override is None:
++            override = MenuOverride(menu_key=menu_key)
++            self._session.add(override)
++
++        # 三维度整体落库：null = 清除回默认，hidden 未提供即回 False
++        override.label_override = payload.label
++        override.sort_order = payload.sort_order
++        override.hidden = payload.hidden if payload.hidden is not None else False
++
++        await self._session.flush()
++        self._audit(
++            action="menu_override.upserted",
++            override=override,
++            details={
++                "created": created,
++                "label": override.label_override,
++                "sort_order": override.sort_order,
++                "hidden": override.hidden,
++            },
++        )
++        await self._session.commit()
++        await self._session.refresh(override)
++        return _to_read(override)
++
++    async def delete_override(self, menu_key: str) -> None:
++        """按 ``menu_key`` 整行删除（该菜单全部恢复默认）。
++
++        行不存在时幂等 no-op（对应端点 204 语义），不写审计——
++        无变更即无审计记录，对齐 roles_service「未命中不落审计」惯例。
++        """
++        override = (
++            (
++                await self._session.execute(
++                    select(MenuOverride)
++                    .where(col(MenuOverride.menu_key) == menu_key)
++                    .limit(1)
++                )
++            )
++            .scalars()
++            .first()
++        )
++        if override is None:
++            return
++        self._audit(
++            action="menu_override.deleted",
++            override=override,
++            details={
++                "label": override.label_override,
++                "sort_order": override.sort_order,
++                "hidden": override.hidden,
++            },
++        )
++        await self._session.delete(override)
++        await self._session.commit()
+diff --git a/backend/app/modules/admin/model.py b/backend/app/modules/admin/model.py
+index 78c960b1..6e1fe848 100644
+--- a/backend/app/modules/admin/model.py
++++ b/backend/app/modules/admin/model.py
+@@ -12,6 +12,9 @@ exposes the ORM handles so services and routers can issue typed queries.
+ ``UserRole`` lives here (not in :mod:`app.modules.auth.model`) because
+ its semantics are platform-level admin — workspace-scoped bindings
+ stay in :class:`~app.modules.auth.model.UserWorkspaceRole`.
++
++``MenuOverride`` (table ``menu_overrides``) landed later via task-02 of
++change ``2026-09-18-web-menu-management``.
+ """
+ 
+ from __future__ import annotations
+@@ -20,6 +23,7 @@ import uuid
+ from datetime import UTC, datetime
+ 
+ from sqlalchemy import (
++    Boolean,
+     CheckConstraint,
+     Column,
+     DateTime,
+@@ -142,4 +146,43 @@ class UserRole(BaseModel, table=True):
+     )
+ 
+ 
+-__all__ = ["Organization", "UserOrganization", "UserRole"]
++class MenuOverride(BaseModel, table=True):
++    """菜单显示覆盖（全局生效，无 role/user 维度，D-002@v1）。
++
++    ``menu_key`` 对齐前端 ``MenuPermissionGroup.menuKey``；后端不校验其
++    是否存在于前端注册表，任意稳定字符串可存（R-01 孤儿容忍）。可空列
++    一律表示「未覆盖，使用代码默认」。
++    """
++
++    __tablename__ = "menu_overrides"
++
++    id: uuid.UUID = Field(
++        default_factory=uuid.uuid4,
++        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
++    )
++    menu_key: str = Field(
++        sa_column=Column(String(64), unique=True, nullable=False),
++    )
++    # 显示名覆盖：NULL = 使用代码默认名（列名 label_override，对外 schema 字段名为 label）
++    label_override: str | None = Field(
++        default=None, sa_column=Column(String(30), nullable=True),
++    )
++    # 组内排序覆盖：NULL = 组内声明序
++    sort_order: int | None = Field(
++        default=None, sa_column=Column(Integer, nullable=True),
++    )
++    # 全局隐藏（对含平台管理员的所有用户生效；menu_key="menus" 的豁免在前端合并层）
++    hidden: bool = Field(
++        default=False, sa_column=Column(Boolean, nullable=False, default=False),
++    )
++    created_at: datetime = Field(
++        default_factory=lambda: datetime.now(UTC),
++        sa_column=Column(DateTime(timezone=True), nullable=False),
++    )
++    updated_at: datetime = Field(
++        default_factory=lambda: datetime.now(UTC),
++        sa_column=Column(DateTime(timezone=True), nullable=False),
++    )
++
++
++__all__ = ["MenuOverride", "Organization", "UserOrganization", "UserRole"]
+diff --git a/backend/app/modules/admin/schema.py b/backend/app/modules/admin/schema.py
+index f73c5605..e17095ba 100644
+--- a/backend/app/modules/admin/schema.py
++++ b/backend/app/modules/admin/schema.py
+@@ -322,8 +322,42 @@ class ResetPasswordResponse(BaseModel):
+     plaintext_password: str
+ 
+ 
++# ── Menu override DTOs (task-02, change 2026-09-18-web-menu-management) ─────
++
++
++class MenuOverrideRead(BaseModel):
++    """单条菜单覆盖（读响应；全局生效，无 role/user 维度，D-002@v1）。
++
++    对外字段名为 ``label``，映射模型列 ``MenuOverride.label_override``
++    （service 层组装时改名，from_attributes 不自动命中需显式构造）。
++    """
++
++    model_config = ConfigDict(from_attributes=True)
++
++    menu_key: str
++    label: str | None
++    sort_order: int | None
++    hidden: bool
++
++
++class MenuOverrideUpsert(BaseModel):
++    """Body of ``PUT /api/menu-overrides/{menu_key}``。
++
++    三字段全可空：``None`` = 清除该维度覆盖、回退代码默认。label 1–30 字符、
++    sort_order 0–999；未知字段拒收（extra=forbid）。
++    """
++
++    model_config = ConfigDict(extra="forbid")
++
++    label: str | None = Field(default=None, min_length=1, max_length=30)
++    sort_order: int | None = Field(default=None, ge=0, le=999)
++    hidden: bool | None = None
++
++
+ __all__ = [
+     "AuditLogRead",
++    "MenuOverrideRead",
++    "MenuOverrideUpsert",
+     "OrganizationBrief",
+     "OrganizationCreateRequest",
+     "OrganizationDetail",
+diff --git a/backend/app/modules/auth/permissions.py b/backend/app/modules/auth/permissions.py
+index 4f9d9c52..cf9ab0f7 100644
+--- a/backend/app/modules/auth/permissions.py
++++ b/backend/app/modules/auth/permissions.py
+@@ -167,6 +167,20 @@ class Permission(StrEnum):
+     # 实施计划汇总(weekly-plan:项目实施阶段明细 + 任务计划汇总视图)
+     PPM_WEEKLY_PLAN_VIEW = "ppm:weekly-plan:view"
+ 
++    # ── 菜单读权限 + 菜单管理门控（change 2026-09-18-web-menu-management task-01 / FR-01）────
++    # 4 个原常显菜单（技能管理、MCP 资产库、智能体档案、智能体会话）此前
++    # permissions 为空恒显，补独立 read 权限 key 使其可按角色开关；种子迁移
++    # 授给全部现存角色保现状可见（task-03 消费，字面量与本枚举以
++    # tests/modules/auth/test_permissions.py 断言对齐）。
++    # MENU_ADMIN 门控菜单管理页 /admin/menus 与覆盖写端点（task-05 消费）。
++    # skill/mcp/agent_profile/agent_session 前缀归 AGENT 组；
++    # menu 前缀无特判分支，走默认 PLATFORM 组。
++    SKILL_READ = "skill:read"
++    MCP_READ = "mcp:read"
++    AGENT_PROFILE_READ = "agent_profile:read"
++    AGENT_SESSION_READ = "agent_session:read"
++    MENU_ADMIN = "menu:admin"
++
+     @property
+     def group(self) -> PermissionGroup:
+         """Resolve the logical group for UI rendering.
+@@ -202,6 +216,11 @@ class Permission(StrEnum):
+             return PermissionGroup.CHANGE
+         if prefix in ("task", "code", "tool", "deploy", "daemon"):
+             return PermissionGroup.AGENT
++        # change 2026-09-18-web-menu-management task-01 / FR-01：
++        # 4 个常显菜单独立读权限（skill/mcp/agent_profile/agent_session 前缀）
++        # 归 AGENT 组；菜单管理门控 menu:admin 前缀无特判分支，走默认 PLATFORM 组。
++        if prefix in ("skill", "mcp", "agent_profile", "agent_session"):
++            return PermissionGroup.AGENT
+         # PPM_* 全部以 ppm: 前缀，归入 PPM 业务域组
+         if prefix == "ppm":
+             return PermissionGroup.PPM
+diff --git a/backend/migrations/versions/20260918150000_create_menu_overrides.py b/backend/migrations/versions/20260918150000_create_menu_overrides.py
+new file mode 100644
+index 00000000..786ee721
+--- /dev/null
++++ b/backend/migrations/versions/20260918150000_create_menu_overrides.py
+@@ -0,0 +1,147 @@
++"""create menu_overrides table + seed 4 menu-read permissions
++
++Revision ID: 20260918150000
++Revises: 20260917160000
++Create Date: 2026-09-18 15:00:00.000000
++
++Change ``2026-09-18-web-menu-management`` task-03 / FR-01 / D-001@v1：
++建 ``menu_overrides`` 菜单显示覆盖表（列与 task-02 的
++``app/modules/admin/model.py::MenuOverride`` 一一对应），并把 4 个新菜单
++读权限 key 幂等授给全部现存角色，保证上线后 skills / mcp / agent-profiles
++/ sessions 四个此前常显的菜单可见性与现状一致（此后管理员可在角色管理页
++按角色收回）。
++
++**种子覆盖全部现存角色（含 disabled）**：与 ``20260917104400``（按
++``roles.key`` 定点补授两角色）不同，本迁移 ``SELECT`` 全部 ``roles.id``、
++不筛 ``is_active``——保现状语义对 disabled 角色同样成立（无害）；无任何
++角色的存量用户为已接受的窄例外（design R-07）。**不授 ``menu:admin``**：
++该 key 门控菜单管理页与覆盖写端点，授予属管理员运营决策，走角色管理页
++（design 总体方案 Phase 1.2）。
++
++**授予存量角色必须 SELECT**：role_id 是 ``202605280900`` 起的存量行，
++不能运行时生成，须 SELECT 实际 id 再插 ``role_permissions``（写法同
++``20260917104400`` / ``202607041000`` 先例）。数据依赖型 SELECT 意味着
++``alembic upgrade --sql`` 离线生成不可用（``op.get_bind()`` 为 None）——
++同先例取舍，online upgrade 为部署期动作。
++
++**幂等**：先 SELECT 判存再 bulk_insert（避开 PG/SQLite 方言差异，不用
++ON CONFLICT），重跑不重复插；``role_permissions`` 复合主键
++``(role_id, permission)``（``202605280900`` 建表定义确认）本身也是重复
++行兜底。
++
++**零回归**：只增授权不删改——其它权限行、roles 本体全部不动
++（brownfield）。
++
++**权限字符串字面量复写**：不 import app.*（迁移须可在无应用代码时生成
++SQL，见 ``202605280900`` 注释）；与
++``app/modules/auth/permissions.py`` 的 ``SKILL_READ`` / ``MCP_READ`` /
++``AGENT_PROFILE_READ`` / ``AGENT_SESSION_READ`` 枚举成员值的一致性由
++``tests/modules/admin/test_menu_overrides.py`` 断言对齐（task-06）。
++
++**不调 Redis**：对齐 ``20260917104400`` 范式说明——``perm:{user_id}:*``
++缓存按用户懒填、TTL 300 秒自愈，迁移是同步部署期动作，Redis 未就绪时调
++``invalidate_all_permissions()`` 反致部署卡死（design R-02）。
++
++down_revision 接 ``20260917160000``（写码时 ``alembic heads`` 实测唯一
++head），单 head 接续避免多 head 分叉
++（migration-chain-fragmentation-pattern）。
++"""
++
++from __future__ import annotations
++
++from typing import Sequence
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "20260918150000"
++down_revision: str | None = "20260917160000"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++
++# 4 个新菜单读权限（与 Permission 枚举 4 个新成员一一对应）。迁移内硬
++# 编码，不 import app.* —— 见模块 docstring 说明。刻意不含 menu:admin
++# （见 docstring「种子覆盖全部现存角色」段）。
++MENU_READ_PERMISSIONS: tuple[str, ...] = (
++    "skill:read",
++    "mcp:read",
++    "agent_profile:read",
++    "agent_session:read",
++)
++
++
++def upgrade() -> None:
++    """建 menu_overrides 表 + 4 个新权限授全部现存角色（幂等）。
++
++    全程用类型化 sa.table 桩（同 ``20260917104400`` 范式）：``sa.select``
++    走列的结果处理器，SQLite 上 ``sa.Uuid`` 列 SELECT 回填 ``uuid.UUID``
++    （裸 ``sa.text`` SELECT 无类型信息，SQLite 会回 str 使 bulk_insert 绑定
++    崩溃；PG 的 asyncpg 则天然回 UUID）——typed 桩两方言行为一致。
++    """
++    op.create_table(
++        "menu_overrides",
++        sa.Column("id", sa.Uuid(as_uuid=True), primary_key=True, nullable=False),
++        sa.Column("menu_key", sa.String(length=64), nullable=False, unique=True),
++        sa.Column("label_override", sa.String(length=30), nullable=True),
++        sa.Column("sort_order", sa.Integer(), nullable=True),
++        sa.Column(
++            "hidden",
++            sa.Boolean(),
++            nullable=False,
++            server_default=sa.text("false"),
++        ),
++        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
++        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
++    )
++
++    roles_table = sa.table("roles", sa.column("id", sa.Uuid))
++    role_perms_table = sa.table(
++        "role_permissions",
++        sa.column("role_id", sa.Uuid),
++        sa.column("permission", sa.String),
++    )
++    bind = op.get_bind()
++
++    # 全部现存角色（不筛 is_active，含 disabled——见模块 docstring）。
++    role_ids = [row[0] for row in bind.execute(sa.select(roles_table.c.id))]
++
++    # 仅查 4 个目标 key 的既有行做判存（比全表拉取更窄，且足够判定重复）。
++    existing_pairs = {
++        (row[0], row[1])
++        for row in bind.execute(
++            sa.select(role_perms_table.c.role_id, role_perms_table.c.permission).where(
++                role_perms_table.c.permission.in_(list(MENU_READ_PERMISSIONS))
++            )
++        )
++    }
++    rows = [
++        {"role_id": role_id, "permission": permission}
++        for permission in MENU_READ_PERMISSIONS
++        for role_id in role_ids
++        if (role_id, permission) not in existing_pairs
++    ]
++    if rows:
++        op.bulk_insert(role_perms_table, rows)
++
++
++def downgrade() -> None:
++    """删 4 个 key 的全部 role_permissions 授权行 + drop menu_overrides。
++
++    先显式 DELETE（不依赖 role_permissions.role_id → roles.id 的 ON DELETE
++    CASCADE——SQLite 测试建表 / 部分场景可能不带 FK），roles 本体与其它
++    权限行全部不动；再 drop menu_overrides（覆盖数据随表消亡，导航回代码
++    默认，与 upgrade 前现状一致）。用类型化 sa.table 桩 + IN 删除，跨
++    online/offline 可移植（同 ``20260917104400`` downgrade 范式）。
++    """
++    role_perms_table = sa.table(
++        "role_permissions",
++        sa.column("role_id", sa.Uuid),
++        sa.column("permission", sa.String),
++    )
++    op.execute(
++        role_perms_table.delete().where(
++            role_perms_table.c.permission.in_(list(MENU_READ_PERMISSIONS))
++        )
++    )
++    op.drop_table("menu_overrides")
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 5b143c04..861b5db4 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -32141,6 +32141,119 @@
+         }
+       }
+     },
++    "/api/menu-overrides": {
++      "get": {
++        "tags": [
++          "menu-overrides"
++        ],
++        "summary": "List Menu Overrides",
++        "description": "全量菜单覆盖（menu_key 升序）。仅需认证：内容为全局显示配置，无敏感\n信息（R-06）；FR-05 下发端点，导航侧所有登录用户消费。",
++        "operationId": "list_menu_overrides_api_menu_overrides_get",
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/MenuOverrideListResponse"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
++    "/api/menu-overrides/{menu_key}": {
++      "put": {
++        "tags": [
++          "menu-overrides"
++        ],
++        "summary": "Upsert Menu Override",
++        "description": "按 menu_key 建行或整行覆盖写（``None`` = 清除该维度回代码默认）。\nlabel/sort_order 校验与 ``menu_override.upserted`` 审计在 service 层。",
++        "operationId": "upsert_menu_override_api_menu_overrides__menu_key__put",
++        "parameters": [
++          {
++            "name": "menu_key",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "minLength": 1,
++              "maxLength": 64,
++              "title": "Menu Key"
++            }
++          }
++        ],
++        "requestBody": {
++          "required": true,
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/MenuOverrideUpsert"
++              }
++            }
++          }
++        },
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/MenuOverrideRead"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      },
++      "delete": {
++        "tags": [
++          "menu-overrides"
++        ],
++        "summary": "Delete Menu Override",
++        "description": "按 menu_key 整行删除（该菜单全部恢复默认）。行不存在时幂等 204，\n``menu_override.deleted`` 审计在 service 层。",
++        "operationId": "delete_menu_override_api_menu_overrides__menu_key__delete",
++        "parameters": [
++          {
++            "name": "menu_key",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "minLength": 1,
++              "maxLength": 64,
++              "title": "Menu Key"
++            }
++          }
++        ],
++        "responses": {
++          "204": {
++            "description": "Successful Response"
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/workspaces/{workspace_id}/spec-workspace": {
+       "get": {
+         "tags": [
+@@ -49827,6 +49940,111 @@
+         ],
+         "title": "MemberBindingView"
+       },
++      "MenuOverrideListResponse": {
++        "properties": {
++          "items": {
++            "items": {
++              "$ref": "#/components/schemas/MenuOverrideRead"
++            },
++            "type": "array",
++            "title": "Items"
++          }
++        },
++        "type": "object",
++        "required": [
++          "items"
++        ],
++        "title": "MenuOverrideListResponse",
++        "description": "GET 列表响应包装（仓库 list 响应惯例：顶层 ``items`` 字段）。"
++      },
++      "MenuOverrideRead": {
++        "properties": {
++          "menu_key": {
++            "type": "string",
++            "title": "Menu Key"
++          },
++          "label": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Label"
++          },
++          "sort_order": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Sort Order"
++          },
++          "hidden": {
++            "type": "boolean",
++            "title": "Hidden"
++          }
++        },
++        "type": "object",
++        "required": [
++          "menu_key",
++          "label",
++          "sort_order",
++          "hidden"
++        ],
++        "title": "MenuOverrideRead",
++        "description": "单条菜单覆盖（读响应；全局生效，无 role/user 维度，D-002@v1）。\n\n对外字段名为 ``label``，映射模型列 ``MenuOverride.label_override``\n（service 层组装时改名，from_attributes 不自动命中需显式构造）。"
++      },
++      "MenuOverrideUpsert": {
++        "properties": {
++          "label": {
++            "anyOf": [
++              {
++                "type": "string",
++                "maxLength": 30,
++                "minLength": 1
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Label"
++          },
++          "sort_order": {
++            "anyOf": [
++              {
++                "type": "integer",
++                "maximum": 999.0,
++                "minimum": 0.0
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Sort Order"
++          },
++          "hidden": {
++            "anyOf": [
++              {
++                "type": "boolean"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Hidden"
++          }
++        },
++        "additionalProperties": false,
++        "type": "object",
++        "title": "MenuOverrideUpsert",
++        "description": "Body of ``PUT /api/menu-overrides/{menu_key}``。\n\n三字段全可空：``None`` = 清除该维度覆盖、回退代码默认。label 1–30 字符、\nsort_order 0–999；未知字段拒收（extra=forbid）。"
++      },
+       "MergePreviewOut": {
+         "properties": {
+           "section_text": {
+@@ -51436,7 +51654,12 @@
+           "ppm:problem-list:read",
+           "ppm:problem-change:read",
+           "ppm:task-plan:read",
+-          "ppm:weekly-plan:view"
++          "ppm:weekly-plan:view",
++          "skill:read",
++          "mcp:read",
++          "agent_profile:read",
++          "agent_session:read",
++          "menu:admin"
+         ],
+         "title": "Permission"
+       },
+diff --git a/backend/tests/modules/admin/test_menu_overrides.py b/backend/tests/modules/admin/test_menu_overrides.py
+new file mode 100644
+index 00000000..d942e3ea
+--- /dev/null
++++ b/backend/tests/modules/admin/test_menu_overrides.py
+@@ -0,0 +1,609 @@
++"""Menu overrides 端点 + 种子迁移测试（task-06 / FR-01 / FR-02 / FR-05）。
++
++覆盖 change ``2026-09-18-web-menu-management`` task-03/04/05 的行为契约：
++
++1. CRUD 链——GET 空 → PUT 建行/二次更新/置 null 清除回默认（全 null 保留行）→
++   DELETE 204 且 GET 回空；DELETE 未命中幂等 204。
++2. 门控——未认证 401；无 ``menu:admin`` 用户 PUT/DELETE 403
++   （``details.permission == "menu:admin"``）而 GET 仅认证 200。
++3. 校验——label 空串/31 字符、sort_order 越界、menu_key 超长、未知字段均 422
++   （中文文案 + ``code=validation_error``）；未认证时 401 先于 422。
++4. 审计——PUT/DELETE 落 ``menu_override.upserted/deleted`` AuditLog 行，
++   ``details_json`` 含 ``menu_key``（范式 tests/core/test_audit_hooks_effective.py）；
++   DELETE 未命中不落审计（对齐 roles_service「未命中不落审计」）。
++5. 孤儿容忍——PUT 注册表不存在的 menu_key 仍 200（R-01，后端不校验注册表）。
++6. 种子迁移——照 tests/test_platform_deleted_hidden_migration.py 范式在 SQLite
++   内存库真实执行 upgrade：4 新权限 key × 全部 roles（含 disabled）授满、
++   不授 ``menu:admin``、无关行保留、重放幂等不重复插；downgrade 删 4 key
++   授权行并 drop 表。迁移内权限字符串字面量与 Permission 枚举一致性也在此
++   断言（迁移 docstring 指定 task-06 负责对齐）。
++"""
++
++from __future__ import annotations
++
++import importlib
++import json
++import os
++import uuid
++from pathlib import Path
++
++import pytest
++import sqlalchemy as sa
++from httpx import AsyncClient
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.config import get_settings
++from app.core.security import create_access_token, password_hasher
++from app.modules.admin.model import MenuOverride
++from app.modules.auth.model import User
++from app.modules.auth.permissions import Permission
++from app.modules.workflow.model import AuditLog
++
++REVISION_ID = "20260918150000"
++DOWN_REVISION_ID = "20260917160000"  # alembic heads 实测唯一 head（task-03）
++
++# 前端注册表不存在的 key——锁「后端不校验注册表，孤儿行由前端合并层忽略」（R-01）。
++ORPHAN_MENU_KEY = "totally_not_in_frontend_registry"
++
++
++@pytest.fixture
++async def non_menu_admin_headers(db_session: AsyncSession) -> dict[str, str]:
++    """无任何角色、非平台管理员的普通登录用户（不持 menu:admin）。
++
++    构造方式对齐 test_roles_router.non_admin_token（status 默认 active，
++    get_current_user 校验通过；无 user_roles / user_workspace_roles 行 →
++    require_permission_any(MENU_ADMIN) 判 False → 403）。
++    """
++    settings = get_settings()
++    password_hasher.configure(settings.auth_bcrypt_rounds)
++    user = User(
++        email="menu-normie@example.com",
++        password_hash=password_hasher.hash("Xx1!abcd"),
++        is_platform_admin=False,
++    )
++    db_session.add(user)
++    await db_session.commit()
++    token, _ = create_access_token(
++        user_id=user.id,
++        email=user.email,
++        is_admin=False,
++        settings=settings,
++    )
++    return {"Authorization": f"Bearer {token}"}
++
++
++async def _menu_audit_rows(db_session: AsyncSession, action: str) -> list[AuditLog]:
++    """menu_override.* 审计行（范式 tests/core/test_audit_hooks_effective.py:98）。"""
++    stmt = select(AuditLog).where(AuditLog.action == action)
++    return list((await db_session.execute(stmt)).scalars().all())
++
++
++async def _admin_user_id(db_session: AsyncSession) -> uuid.UUID:
++    """conftest auth_headers 背后的平台管理员 id（审计 actor 断言用）。"""
++    stmt = select(User).where(User.email == "admin@example.com").limit(1)
++    user = (await db_session.execute(stmt)).scalars().first()
++    assert user is not None
++    return user.id
++
++
++# ---------------------------------------------------------------------------
++# 1. CRUD 全链（FR-02 菜单管理页 / FR-05 下发端点）
++# ---------------------------------------------------------------------------
++
++
++@pytest.mark.asyncio
++async def test_crud_full_chain(client: AsyncClient, auth_headers, db_session: AsyncSession):
++    """CRUD 链：GET 空 → PUT 建行 → GET 回读 → DELETE 204 → GET 回空。"""
++    resp = await client.get("/api/menu-overrides", headers=auth_headers)
++    assert resp.status_code == 200, resp.text
++    assert resp.json() == {"items": []}
++
++    resp = await client.put(
++        "/api/menu-overrides/skills",
++        json={"label": "技能中心", "sort_order": 5, "hidden": True},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    assert resp.json() == {
++        "menu_key": "skills",
++        "label": "技能中心",
++        "sort_order": 5,
++        "hidden": True,
++    }
++
++    resp = await client.get("/api/menu-overrides", headers=auth_headers)
++    assert resp.status_code == 200
++    assert resp.json() == {
++        "items": [{"menu_key": "skills", "label": "技能中心", "sort_order": 5, "hidden": True}]
++    }
++
++    resp = await client.delete("/api/menu-overrides/skills", headers=auth_headers)
++    assert resp.status_code == 204
++
++    resp = await client.get("/api/menu-overrides", headers=auth_headers)
++    assert resp.status_code == 200
++    assert resp.json() == {"items": []}
++
++
++@pytest.mark.asyncio
++async def test_put_updates_existing_override(client: AsyncClient, auth_headers):
++    """PUT 二次更新：同 menu_key 整行覆盖写，仍只有一行。"""
++    first = await client.put(
++        "/api/menu-overrides/mcp",
++        json={"label": "旧名"},
++        headers=auth_headers,
++    )
++    assert first.status_code == 200, first.text
++    assert first.json()["label"] == "旧名"
++    # 未提供的维度整体覆盖写：hidden 未给即回 False（PUT 全量语义）。
++    assert first.json()["hidden"] is False
++
++    second = await client.put(
++        "/api/menu-overrides/mcp",
++        json={"label": "新名", "sort_order": 2, "hidden": True},
++        headers=auth_headers,
++    )
++    assert second.status_code == 200, second.text
++    assert second.json() == {
++        "menu_key": "mcp",
++        "label": "新名",
++        "sort_order": 2,
++        "hidden": True,
++    }
++
++    resp = await client.get("/api/menu-overrides", headers=auth_headers)
++    items = resp.json()["items"]
++    assert len(items) == 1
++    assert items[0]["label"] == "新名"
++
++
++@pytest.mark.asyncio
++async def test_put_null_fields_clear_back_to_default_and_keep_row(
++    client: AsyncClient, auth_headers, db_session: AsyncSession
++):
++    """null = 清除该维度回代码默认；全 null upsert 保留行不删行（task-04 语义）。"""
++    resp = await client.put(
++        "/api/menu-overrides/agent-profiles",
++        json={"label": "档案", "sort_order": 9, "hidden": True},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200
++
++    resp = await client.put("/api/menu-overrides/agent-profiles", json={}, headers=auth_headers)
++    assert resp.status_code == 200, resp.text
++    assert resp.json() == {
++        "menu_key": "agent-profiles",
++        "label": None,
++        "sort_order": None,
++        "hidden": False,
++    }
++
++    # 行保留（整行删除是 DELETE 端点专属语义），GET 仍含该行。
++    resp = await client.get("/api/menu-overrides", headers=auth_headers)
++    assert resp.json()["items"] == [
++        {"menu_key": "agent-profiles", "label": None, "sort_order": None, "hidden": False}
++    ]
++    rows = (await db_session.execute(select(MenuOverride))).scalars().all()
++    assert len(rows) == 1
++
++
++@pytest.mark.asyncio
++async def test_delete_missing_key_is_idempotent_204(client: AsyncClient, auth_headers):
++    """DELETE 不存在的 menu_key → 幂等 204（不 404）。"""
++    resp = await client.delete("/api/menu-overrides/never-existed", headers=auth_headers)
++    assert resp.status_code == 204
++
++
++@pytest.mark.asyncio
++async def test_get_lists_multiple_rows_sorted_by_menu_key(client: AsyncClient, auth_headers):
++    """GET 列表含多行并按 menu_key 升序（稳定排序契约）。"""
++    for key in ("sessions", "skills", "mcp"):
++        resp = await client.put(f"/api/menu-overrides/{key}", json={}, headers=auth_headers)
++        assert resp.status_code == 200
++
++    resp = await client.get("/api/menu-overrides", headers=auth_headers)
++    assert [item["menu_key"] for item in resp.json()["items"]] == ["mcp", "sessions", "skills"]
++
++
++# ---------------------------------------------------------------------------
++# 2. 门控（FR-02 无权限场景 / FR-05 任意已认证用户）
++# ---------------------------------------------------------------------------
++
++
++@pytest.mark.asyncio
++async def test_endpoints_require_authentication(client: AsyncClient):
++    """未认证（无凭证）→ 三端点均 401，code=HTTP_401_AUTH_TOKEN_MISSING。"""
++    resp = await client.get("/api/menu-overrides")
++    assert resp.status_code == 401
++    assert resp.json()["code"] == "HTTP_401_AUTH_TOKEN_MISSING"
++
++    resp = await client.put("/api/menu-overrides/skills", json={"label": "x"})
++    assert resp.status_code == 401
++    assert resp.json()["code"] == "HTTP_401_AUTH_TOKEN_MISSING"
++
++    resp = await client.delete("/api/menu-overrides/skills")
++    assert resp.status_code == 401
++    assert resp.json()["code"] == "HTTP_401_AUTH_TOKEN_MISSING"
++
++
++@pytest.mark.asyncio
++async def test_put_delete_denied_without_menu_admin(client: AsyncClient, non_menu_admin_headers):
++    """无 menu:admin 的普通用户 PUT/DELETE → 403，details.permission=menu:admin。"""
++    resp = await client.put(
++        "/api/menu-overrides/skills",
++        json={"label": "越权改名"},
++        headers=non_menu_admin_headers,
++    )
++    assert resp.status_code == 403, resp.text
++    body = resp.json()
++    assert body["code"].endswith("PERMISSION_DENIED")
++    assert body["details"]["permission"] == Permission.MENU_ADMIN.value
++
++    resp = await client.delete("/api/menu-overrides/skills", headers=non_menu_admin_headers)
++    assert resp.status_code == 403, resp.text
++    body = resp.json()
++    assert body["code"].endswith("PERMISSION_DENIED")
++    assert body["details"]["permission"] == Permission.MENU_ADMIN.value
++
++
++@pytest.mark.asyncio
++async def test_get_allowed_for_any_authenticated_user(client: AsyncClient, non_menu_admin_headers):
++    """GET 仅需认证：无 menu:admin 的普通用户 200（FR-05 导航渲染消费）。"""
++    resp = await client.get("/api/menu-overrides", headers=non_menu_admin_headers)
++    assert resp.status_code == 200, resp.text
++    assert resp.json() == {"items": []}
++
++
++# ---------------------------------------------------------------------------
++# 3. 参数校验 422（FR-02 非法参数场景，认证态）
++# ---------------------------------------------------------------------------
++
++
++@pytest.mark.asyncio
++async def test_put_label_empty_or_too_long_rejected_422(client: AsyncClient, auth_headers):
++    """label 空串 / 31 字符 → 422 中文校验错误。"""
++    for bad_label in ("", "a" * 31):
++        resp = await client.put(
++            "/api/menu-overrides/skills",
++            json={"label": bad_label},
++            headers=auth_headers,
++        )
++        assert resp.status_code == 422, (bad_label, resp.text)
++        body = resp.json()
++        assert body["code"] == "validation_error"
++        assert body["message"] == "请求参数校验失败，请检查输入格式。"
++
++
++@pytest.mark.asyncio
++async def test_put_sort_order_out_of_range_rejected_422(client: AsyncClient, auth_headers):
++    """sort_order -1 / 1000 → 422（合法区间 0–999）。"""
++    for bad_sort in (-1, 1000):
++        resp = await client.put(
++            "/api/menu-overrides/skills",
++            json={"sort_order": bad_sort},
++            headers=auth_headers,
++        )
++        assert resp.status_code == 422, (bad_sort, resp.text)
++        assert resp.json()["code"] == "validation_error"
++
++
++@pytest.mark.asyncio
++async def test_put_menu_key_too_long_rejected_422(client: AsyncClient, auth_headers):
++    """menu_key 超过 64 字符（对齐列 String(64)）→ 认证态 422 而非落库 500。"""
++    resp = await client.put(
++        f"/api/menu-overrides/{'k' * 65}",
++        json={"label": "超长 key"},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 422, resp.text
++    assert resp.json()["code"] == "validation_error"
++
++
++@pytest.mark.asyncio
++async def test_put_unknown_field_rejected_422(client: AsyncClient, auth_headers):
++    """未知字段拒收（MenuOverrideUpsert extra=forbid）→ 422。"""
++    resp = await client.put(
++        "/api/menu-overrides/skills",
++        json={"label": "x", "role_id": "hack"},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 422, resp.text
++    assert resp.json()["code"] == "validation_error"
++
++
++@pytest.mark.asyncio
++async def test_unauthenticated_401_precedes_422(client: AsyncClient):
++    """未认证 + 非法 label → 401（认证依赖先于 body 校验，不泄漏校验细节）。"""
++    resp = await client.put("/api/menu-overrides/skills", json={"label": ""})
++    assert resp.status_code == 401, resp.text
++    assert resp.json()["code"] == "HTTP_401_AUTH_TOKEN_MISSING"
++
++
++# ---------------------------------------------------------------------------
++# 4. 审计落库（FR-02：覆盖变更写审计日志）
++# ---------------------------------------------------------------------------
++
++
++@pytest.mark.asyncio
++async def test_put_writes_upsert_audit_rows(client: AsyncClient, auth_headers, db_session):
++    """两次 PUT → 恰两行 menu_override.upserted，details 含 menu_key 与 created 标记。"""
++    await client.put("/api/menu-overrides/skills", json={"label": "一"}, headers=auth_headers)
++    await client.put("/api/menu-overrides/skills", json={"label": "二"}, headers=auth_headers)
++
++    logs = await _menu_audit_rows(db_session, "menu_override.upserted")
++    assert len(logs) == 2, f"expected 2 upsert audit rows, got {len(logs)}"
++    admin_id = await _admin_user_id(db_session)
++    for log in logs:
++        assert log.resource_type == "menu_override"
++        assert log.actor_id == admin_id
++        assert log.workspace_id is None  # 全局配置，无 workspace 维度
++        details = json.loads(log.details_json or "{}")
++        assert details["menu_key"] == "skills"
++        assert details["label"] in ("一", "二")
++    created_flags = sorted(json.loads(log.details_json or "{}").get("created") for log in logs)
++    assert created_flags == [False, True]  # 首次建行 True，二次更新 False
++
++
++@pytest.mark.asyncio
++async def test_delete_writes_audit_row_and_missing_delete_writes_none(
++    client: AsyncClient, auth_headers, db_session
++):
++    """DELETE 命中 → 一行 menu_override.deleted（details 含 menu_key）；未命中不落审计。"""
++    await client.put("/api/menu-overrides/mcp", json={"label": "旧"}, headers=auth_headers)
++    resp = await client.delete("/api/menu-overrides/mcp", headers=auth_headers)
++    assert resp.status_code == 204
++
++    logs = await _menu_audit_rows(db_session, "menu_override.deleted")
++    assert len(logs) == 1
++    admin_id = await _admin_user_id(db_session)
++    assert logs[0].actor_id == admin_id
++    assert logs[0].resource_type == "menu_override"
++    details = json.loads(logs[0].details_json or "{}")
++    assert details["menu_key"] == "mcp"
++    assert details["label"] == "旧"
++
++    # 未命中 DELETE：无变更即无审计（幂等 no-op，deleted 行数不增）。
++    await client.delete("/api/menu-overrides/never-existed", headers=auth_headers)
++    assert len(await _menu_audit_rows(db_session, "menu_override.deleted")) == 1
++
++
++# ---------------------------------------------------------------------------
++# 5. 孤儿 key 容忍（FR-05 R-01：后端不校验注册表）
++# ---------------------------------------------------------------------------
++
++
++@pytest.mark.asyncio
++async def test_put_orphan_menu_key_accepted(client: AsyncClient, auth_headers):
++    """PUT 注册表不存在的 menu_key → 200 且 GET 可见（孤儿行留给前端合并层忽略）。"""
++    resp = await client.put(
++        f"/api/menu-overrides/{ORPHAN_MENU_KEY}",
++        json={"label": "孤儿", "hidden": True},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["menu_key"] == ORPHAN_MENU_KEY
++
++    resp = await client.get("/api/menu-overrides", headers=auth_headers)
++    assert [item["menu_key"] for item in resp.json()["items"]] == [ORPHAN_MENU_KEY]
++
++
++# ---------------------------------------------------------------------------
++# 6. 种子迁移断言（FR-01：4 新权限授全部现存角色）
++# 范式：tests/test_platform_deleted_hidden_migration.py（加载迁移模块 + SQLite
++# 内存库 Operations.context 真实执行）。单 head 链已由 test_migrations_graph.py
++# 全局守护，此处不重复。
++# ---------------------------------------------------------------------------
++
++
++def _load_migration(revision_id: str):
++    """按 revision 前缀加载迁移模块（前缀精确匹配，防 merge 文件误命中）。
++
++    本文件在 tests/modules/admin/ 下，backend 根是 parents[3]（范式文件
++    test_platform_deleted_hidden_migration.py 位于 tests/ 根故为 parent.parent）。
++    """
++    backend_root = Path(__file__).resolve().parents[3]
++    versions_dir = backend_root / "migrations" / "versions"
++    for f in os.listdir(str(versions_dir)):
++        if f.endswith(".py") and f.startswith(f"{revision_id}_") and f != "__init__.py":
++            return importlib.import_module(f"migrations.versions.{f[:-3]}")
++    raise ImportError(f"No migration found for revision {revision_id} in {versions_dir}")
++
++
++def test_migration_metadata():
++    mod = _load_migration(REVISION_ID)
++    assert mod.revision == REVISION_ID
++    assert mod.down_revision == DOWN_REVISION_ID
++    assert mod.branch_labels is None
++    assert mod.depends_on is None
++    assert callable(mod.upgrade)
++    assert callable(mod.downgrade)
++
++
++def test_seed_permission_literals_match_enum():
++    """迁移内硬编码字符串与 Permission 枚举成员值一一对应（迁移 docstring 指定）。
++
++    迁移不 import app.*（须可离线生成 SQL），漂移只能靠测试拦——含「不授
++    menu:admin」的设计决策（menu:admin 授予属运营决策，走角色管理页）。
++    """
++    mod = _load_migration(REVISION_ID)
++    assert tuple(mod.MENU_READ_PERMISSIONS) == (
++        Permission.SKILL_READ.value,
++        Permission.MCP_READ.value,
++        Permission.AGENT_PROFILE_READ.value,
++        Permission.AGENT_SESSION_READ.value,
++    )
++    assert Permission.MENU_ADMIN.value not in mod.MENU_READ_PERMISSIONS
++
++
++def _create_pre_migration_tables(conn) -> list[str]:
++    """迁移前形态最小 roles / role_permissions + 3 角色（含 1 个 disabled）。
++
++    预置两类既有行考验幂等与零回归：
++    - role_active_1 已持有 skill:read（4 key 之一，判存后不得重复插）；
++    - role_active_2 持有 task:read（无关权限，upgrade 不得动）。
++    返回全部 role_id（字符串形态，插入用）。
++    """
++    conn.execute(
++        sa.text(
++            """
++            CREATE TABLE roles (
++                id CHAR(36) PRIMARY KEY NOT NULL,
++                key VARCHAR(100) NOT NULL,
++                is_active BOOLEAN NOT NULL DEFAULT TRUE
++            )
++            """
++        )
++    )
++    conn.execute(
++        sa.text(
++            """
++            CREATE TABLE role_permissions (
++                role_id CHAR(36) NOT NULL,
++                permission VARCHAR(100) NOT NULL,
++                PRIMARY KEY (role_id, permission)
++            )
++            """
++        )
++    )
++    role_ids = [str(uuid.uuid4()) for _ in range(3)]
++    conn.execute(
++        sa.text("INSERT INTO roles (id, key, is_active) VALUES (:id, :key, :active)"),
++        [
++            {"id": role_ids[0], "key": "role_active_1", "active": True},
++            {"id": role_ids[1], "key": "role_active_2", "active": True},
++            # disabled 角色同样在种子覆盖范围内（保现状语义，迁移不筛 is_active）。
++            {"id": role_ids[2], "key": "role_disabled", "active": False},
++        ],
++    )
++    conn.execute(
++        sa.text("INSERT INTO role_permissions (role_id, permission) VALUES (:r, :p)"),
++        [
++            {"r": role_ids[0], "p": "skill:read"},
++            {"r": role_ids[1], "p": "task:read"},
++        ],
++    )
++    return role_ids
++
++
++def _run_migration_fn(engine, mod, fn_name: str) -> None:
++    """在 SQLite 连接上执行迁移函数本体（alembic op 代理经 Operations.context 安装）。"""
++    from alembic.migration import MigrationContext
++    from alembic.operations import Operations
++
++    with engine.begin() as conn:
++        ctx = MigrationContext.configure(conn)
++        with Operations.context(ctx):
++            getattr(mod, fn_name)()
++
++
++def _seeded_pairs(conn) -> set[tuple[str, str]]:
++    """4 个种子 key 的全部 (role_id, permission) 行（UUID 归一到带连字符形态）。
++
++    typed stub 的 Uuid bind processor 在 SQLite 落 hex-32 无连字符，而本文件
++    预置行是带连字符 CHAR(36)——经 uuid.UUID() 归一后两种形态才可比。
++    """
++    mod = _load_migration(REVISION_ID)
++    rows = conn.execute(
++        sa.text(
++            "SELECT role_id, permission FROM role_permissions "
++            "WHERE permission IN (:p1, :p2, :p3, :p4)"
++        ).bindparams(
++            sa.bindparam("p1", mod.MENU_READ_PERMISSIONS[0]),
++            sa.bindparam("p2", mod.MENU_READ_PERMISSIONS[1]),
++            sa.bindparam("p3", mod.MENU_READ_PERMISSIONS[2]),
++            sa.bindparam("p4", mod.MENU_READ_PERMISSIONS[3]),
++        )
++    ).fetchall()
++    return {(str(uuid.UUID(row[0])), str(row[1])) for row in rows}
++
++
++@pytest.fixture()
++def seeded_engine():
++    """建前置表 → 跑 upgrade → yield（downgrade / 幂等重放各自单独测）。"""
++    engine = sa.create_engine("sqlite:///:memory:")
++    with engine.begin() as conn:
++        _create_pre_migration_tables(conn)
++    mod = _load_migration(REVISION_ID)
++    _run_migration_fn(engine, mod, "upgrade")
++    yield engine
++    engine.dispose()
++
++
++def test_upgrade_grants_four_keys_to_all_roles_including_disabled(seeded_engine):
++    """AC：4 新 key × 全部 roles 行（含 disabled 角色）种子授满。"""
++    with seeded_engine.begin() as conn:
++        role_ids = [str(uuid.UUID(row[0])) for row in conn.execute(sa.text("SELECT id FROM roles"))]
++        assert len(role_ids) == 3
++        expected = {
++            (rid, perm)
++            for rid in role_ids
++            for perm in _load_migration(REVISION_ID).MENU_READ_PERMISSIONS
++        }
++        assert _seeded_pairs(conn) == expected
++
++
++def test_upgrade_keeps_unrelated_rows_and_does_not_duplicate(seeded_engine):
++    """AC：预存 skill:read 行不重复插；无关 task:read 行保留（零回归）。"""
++    with seeded_engine.begin() as conn:
++        # 预存的 role_active_1 × skill:read 只有一行（先查后插幂等）。
++        count = conn.execute(
++            sa.text(
++                "SELECT COUNT(*) FROM role_permissions "
++                "WHERE role_id = (SELECT id FROM roles WHERE key = 'role_active_1') "
++                "AND permission = 'skill:read'"
++            )
++        ).scalar_one()
++        assert count == 1
++        # 无关权限行原样保留。
++        unrelated = conn.execute(
++            sa.text("SELECT COUNT(*) FROM role_permissions WHERE permission = 'task:read'")
++        ).scalar_one()
++        assert unrelated == 1
++        # 不授 menu:admin（授予属运营决策，走角色管理页）。
++        menu_admin = conn.execute(
++            sa.text("SELECT COUNT(*) FROM role_permissions WHERE permission = 'menu:admin'")
++        ).scalar_one()
++        assert menu_admin == 0
++
++
++def test_upgrade_creates_menu_overrides_table(seeded_engine):
++    """AC：menu_overrides 表随 upgrade 建立（menu_key 唯一）。"""
++    with seeded_engine.begin() as conn:
++        names = {row[1] for row in conn.execute(sa.text("PRAGMA table_info(menu_overrides)"))}
++        assert {"id", "menu_key", "label_override", "sort_order", "hidden"} <= names
++
++
++def test_upgrade_seed_replay_inserts_no_duplicates(seeded_engine):
++    """AC：种子重放幂等——已有授权行不重复插（先查后插判存分支）。
++
++    alembic 本身用版本表防整段重跑，本用例直击 acceptance 的「幂等不重复
++    插」：drop 掉 menu_overrides（让 create_table 可重入）但保留
++    role_permissions 种子行，再跑一次 upgrade——判存应跳过全部 4 key ×
++    3 角色行，仍恰 12 行无重复。
++    """
++    with seeded_engine.begin() as conn:
++        conn.execute(sa.text("DROP TABLE menu_overrides"))
++    mod = _load_migration(REVISION_ID)
++    _run_migration_fn(seeded_engine, mod, "upgrade")
++    with seeded_engine.begin() as conn:
++        assert len(_seeded_pairs(conn)) == 12
++
++
++def test_downgrade_removes_seed_grants_and_drops_table(seeded_engine):
++    """downgrade：4 key 授权行全删（含预存 skill:read）、menu_overrides 表 drop、
++    无关 task:read 行保留。"""
++    mod = _load_migration(REVISION_ID)
++    _run_migration_fn(seeded_engine, mod, "downgrade")
++    with seeded_engine.begin() as conn:
++        assert _seeded_pairs(conn) == set()
++        unrelated = conn.execute(
++            sa.text("SELECT COUNT(*) FROM role_permissions WHERE permission = 'task:read'")
++        ).scalar_one()
++        assert unrelated == 1
++        assert (
++            conn.execute(
++                sa.text("SELECT COUNT(*) FROM sqlite_master WHERE name = 'menu_overrides'")
++            ).scalar_one()
++            == 0
++        )
+diff --git a/backend/tests/modules/auth/test_permissions.py b/backend/tests/modules/auth/test_permissions.py
+index 614c3a6b..48da9e7f 100644
+--- a/backend/tests/modules/auth/test_permissions.py
++++ b/backend/tests/modules/auth/test_permissions.py
+@@ -42,7 +42,7 @@ def test_permission_group_has_seven_members() -> None:
+     assert set(members) == expected
+ 
+ 
+-def test_permission_count_is_67() -> None:
++def test_permission_count_is_72() -> None:
+     """46 历史 + 17 PPM_* 菜单/读 + daemon:borrow + llm_provider:read + weekly-plan = 66。
+ 
+     cbd258eb/1f5e6ebe 菜单 unique-key 扩容回升到 63；change
+@@ -54,9 +54,13 @@ def test_permission_count_is_67() -> None:
+     ``PPM_WEEKLY_PLAN_VIEW``（实施计划汇总独立菜单权限）→ 66；
+     change 2026-09-17-knowledge-precipitation task-02 / FR-02 再加
+     ``KNOWLEDGE_WRITE``（知识库写权限，管理员/owner 播种走 migration
+-    20260917104400）→ 67。
++    20260917104400）→ 67；
++    change 2026-09-18-web-menu-management task-01 / FR-01 再加
++    ``SKILL_READ``/``MCP_READ``/``AGENT_PROFILE_READ``/``AGENT_SESSION_READ``
++    （4 个常显菜单独立读权限，task-03 种子迁移授全部现存角色保现状可见）
++    与 ``MENU_ADMIN``（菜单管理页 /admin/menus 与覆盖写端点门控）→ 72。
+     """
+-    assert len(list(Permission)) == 67
++    assert len(list(Permission)) == 72
+ 
+ 
+ @pytest.mark.parametrize(
+@@ -104,6 +108,13 @@ def test_permission_count_is_67() -> None:
+         (Permission.DAEMON_BORROW, PermissionGroup.AGENT),
+         # task-01: llm_provider 前缀无特判分支，落默认 PLATFORM 组
+         (Permission.LLM_PROVIDER_READ, PermissionGroup.PLATFORM),
++        # task-01（2026-09-18-web-menu-management / FR-01）：4 个常显菜单独立
++        # 读权限前缀归 AGENT 组；menu 前缀无特判分支，落默认 PLATFORM 组。
++        (Permission.SKILL_READ, PermissionGroup.AGENT),
++        (Permission.MCP_READ, PermissionGroup.AGENT),
++        (Permission.AGENT_PROFILE_READ, PermissionGroup.AGENT),
++        (Permission.AGENT_SESSION_READ, PermissionGroup.AGENT),
++        (Permission.MENU_ADMIN, PermissionGroup.PLATFORM),
+     ],
+ )
+ def test_permission_group_resolution(perm: Permission, expected_group: PermissionGroup) -> None:
+@@ -164,6 +175,20 @@ def test_knowledge_write_permission_value() -> None:
+     assert Permission.KNOWLEDGE_WRITE.value == "knowledge:write"
+ 
+ 
++def test_menu_management_permission_values() -> None:
++    """task-01（2026-09-18-web-menu-management / FR-01）。
++
++    4 个常显菜单读权限 + 菜单管理门控的字符串值必须与 task-03 种子迁移
++    内硬编码字面量逐字一致（迁移内为字面量复写，两处以本断言对齐）；
++    MENU_ADMIN 供 task-05 路由门控 require_permission(Permission.MENU_ADMIN) 消费。
++    """
++    assert Permission.SKILL_READ.value == "skill:read"
++    assert Permission.MCP_READ.value == "mcp:read"
++    assert Permission.AGENT_PROFILE_READ.value == "agent_profile:read"
++    assert Permission.AGENT_SESSION_READ.value == "agent_session:read"
++    assert Permission.MENU_ADMIN.value == "menu:admin"
++
++
+ # ---------------------------------------------------------------------------
+ # task-02：KNOWLEDGE_WRITE 角色-权限播种 migration（20260917104400）
+ #
+diff --git a/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
+new file mode 100644
+index 00000000..4a98a933
+--- /dev/null
++++ b/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
+@@ -0,0 +1,340 @@
++/**
++ * 2026-09-18-web-menu-management task-12：菜单管理页 /admin/menus 交互测试
++ * （FR-02 / FR-03 / R-03 / R-08）。
++ *
++ * 依据:
++ *   - tasks/task-12.md implementation——脚手架照搬 admin/organizations/__tests__ 惯例
++ *     （AntApp 包裹满足 useNotify 的 App.useApp 上下文 + vi.hoisted vi.mock 数据层 +
++ *     useSession.setState 注入会话 + afterEach 复位 session 与 clearAllMocks）；
++ *     页面含 react-query（useMenuOverrides / useQueryClient / listRoles），另按
++ *     workspaces/[id]/mcp 页测惯例包 QueryClientProvider（retry:false）。
++ *   - 数据层全收口 mock @/lib/api 的 apiFetch（menu-overrides GET/PUT 与
++ *     /api/admin/roles 都经它走），PUT 断言直接锚定真实 wire 形态。
++ *
++ * 覆盖（蓝图用例清单权威）:
++ *   1. 行内改名保存——编辑显示名回车提交 → PUT 全量三字段形态（label 新值 +
++ *      sort_order/hidden 当前值，防改名冲掉已有排序/隐藏覆盖）；
++ *   2. 恢复默认——已有 label 覆盖行展示「已改名」标记，「恢复默认」→ PUT label:null
++ *      且保留 sort_order/hidden 当前值；
++ *   3. 组内上移——相邻交换双 PUT（目标行取相邻行生效排序值，相邻行取目标行值，
++ *      未覆盖行以注册表声明序索引为当前值）；
++ *   4. 隐藏开关——menus 行 Switch disabled（R-03 防自锁）；普通行切换 → PUT hidden；
++ *   5. 权限展开——key + 中文名 + 持有角色 chips（GET /api/admin/roles permissions
++ *      客户端反查，D-003）；role:read 403 → 「需 role:read 查看角色分布」占位且
++ *      主功能不受阻（R-08）。
++ */
++
++import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { App as AntApp } from "antd";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++
++import AdminMenusPage from "@/app/(dashboard)/admin/menus/page";
++import { ApiError } from "@/lib/api";
++import { useSession } from "@/stores/session";
++import type { RoleRead } from "@/lib/admin";
++import type { MenuOverrideRead } from "@/lib/menu-overrides";
++
++// ── mock @/lib/api：apiFetch 按路由分发（menu-overrides GET/PUT + roles GET）────
++const apiFetchMock = vi.hoisted(() => vi.fn());
++vi.mock("@/lib/api", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
++  return { ...actual, apiFetch: apiFetchMock };
++});
++
++/** 可变 fixture（hoisted 安全持有，beforeEach 复位、用例内按需改写）。 */
++const fixtures = vi.hoisted(() => ({
++  overrides: [] as Array<{
++    menu_key: string;
++    label: string | null;
++    sort_order: number | null;
++    hidden: boolean;
++  }>,
++  rolesError: false,
++}));
++
++// ── 会话：平台管理员（canWrite 短路，聚焦交互而非权限门禁）───────────────────
++const ADMIN = {
++  id: "u1",
++  email: "admin@test.local",
++  displayName: "管理员",
++  is_platform_admin: true,
++};
++
++/** 角色反查 fixture：平台运维持 role:read/write，只读访客仅 user:read。 */
++function makeRoles(): RoleRead[] {
++  const now = "2026-09-18T06:00:00Z";
++  return [
++    {
++      id: "r1",
++      key: "ops",
++      name: "平台运维",
++      description: null,
++      is_system: false,
++      is_active: true,
++      permissions: ["role:read", "role:write"],
++      user_count: 2,
++      created_at: now,
++      updated_at: now,
++    },
++    {
++      id: "r2",
++      key: "viewer",
++      name: "只读访客",
++      description: null,
++      is_system: false,
++      is_active: true,
++      permissions: ["user:read"],
++      user_count: 5,
++      created_at: now,
++      updated_at: now,
++    },
++  ];
++}
++
++function renderPage() {
++  const client = new QueryClient({
++    defaultOptions: { queries: { retry: false, gcTime: 0 } },
++  });
++  return render(
++    <AntApp>
++      <QueryClientProvider client={client}>
++        <AdminMenusPage />
++      </QueryClientProvider>
++    </AntApp>,
++  );
++}
++
++/** 按路由小字定位菜单行（每行路由文本唯一，如 users 行含 “/admin/users”）。 */
++function menuRow(route: string): HTMLElement {
++  const cell = screen.getByText(route);
++  return cell.closest("tr")!;
++}
++
++beforeEach(() => {
++  fixtures.overrides = [];
++  fixtures.rolesError = false;
++  apiFetchMock.mockImplementation(
++    (path: string, init?: { method?: string; json?: unknown }) => {
++      if (path === "/api/menu-overrides") {
++        return Promise.resolve({ items: fixtures.overrides });
++      }
++      if (path === "/api/admin/roles") {
++        // R-08 场景开关：无 role:read 的菜单管理员拉角色列表 403
++        if (fixtures.rolesError) {
++          return Promise.reject(
++            new ApiError(403, {
++              code: "FORBIDDEN",
++              message: "无权限",
++              request_id: null,
++              details: null,
++            }),
++          );
++        }
++        const items = makeRoles();
++        return Promise.resolve({ items, total: items.length });
++      }
++      if (path.startsWith("/api/menu-overrides/") && init?.method === "PUT") {
++        const menuKey = decodeURIComponent(path.slice("/api/menu-overrides/".length));
++        return Promise.resolve({
++          menu_key: menuKey,
++          ...(init.json as Record<string, unknown>),
++        });
++      }
++      return Promise.reject(new Error(`测试未预期的 apiFetch 调用: ${path}`));
++    },
++  );
++  useSession.setState({ user: ADMIN, accessToken: "tok", hydrated: true } as never);
++});
++
++afterEach(() => {
++  useSession.setState({
++    user: null,
++    accessToken: null,
++    refreshToken: null,
++    hydrated: false,
++  } as never);
++  vi.clearAllMocks();
++});
++
++describe("/admin/menus 菜单管理页（task-11 / task-12）", () => {
++  it("页面骨架：标题 + 说明条 + 按 section 分组平铺（system 组 5 行）", async () => {
++    renderPage();
++
++    // PageHeader 标题与副标题（菜单管理自身的 menuLabel 也叫「菜单管理」，用副标题锚定页头）
++    expect(
++      await screen.findByText("调整菜单显示名、组内排序与全局隐藏（全局生效，改动即时保存）"),
++    ).toBeInTheDocument();
++    // 分组标题行：系统管理（task-08 新增 menus 后 system 组 5 条）
++    expect(await screen.findByText("系统管理")).toBeInTheDocument();
++    expect(await screen.findByText("5 个菜单")).toBeInTheDocument();
++    // 菜单行：users 行（默认名 + 路由小字）
++    expect(await screen.findByText("/admin/users")).toBeInTheDocument();
++  });
++
++  it("行内改名：点击显示名 → 输入新名回车 → PUT 全量三字段（label 新值 + 其余维度当前值）", async () => {
++    renderPage();
++    await screen.findByText("/admin/users");
++    const row = menuRow("/admin/users");
++
++    fireEvent.click(
++      within(row).getByTitle("点击修改显示名（回车或失焦保存）"),
++    );
++    const input = within(row).getByDisplayValue("用户");
++    fireEvent.change(input, { target: { value: "用户中心" } });
++    fireEvent.keyDown(input, { key: "Enter" });
++
++    // PUT 整行当前全量三字段：未覆盖维度传默认（label 新值 / sort_order null / hidden false）
++    await waitFor(() =>
++      expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/users", {
++        method: "PUT",
++        json: { label: "用户中心", sort_order: null, hidden: false },
++      }),
++    );
++  });
++
++  it("恢复默认：已有 label 覆盖行展示「已改名」标记，「恢复默认」→ PUT label:null 且保留其余维度", async () => {
++    fixtures.overrides = [
++      { menu_key: "users", label: "用户中心", sort_order: 5, hidden: true },
++    ];
++    renderPage();
++
++    // 等覆盖查询落定（覆盖 label 生效后 users 行显示名变更为覆盖值）
++    await screen.findByText("用户中心");
++    const row = menuRow("/admin/users");
++    // 覆盖生效：显示名 = 覆盖值 + 已改名标记
++    expect(within(row).getByText("用户中心")).toBeInTheDocument();
++    expect(within(row).getByText("已改名")).toBeInTheDocument();
++
++    fireEvent.click(within(row).getByText("恢复默认"));
++
++    // 清除项传 null 回默认；已有排序/隐藏覆盖原样随行携带（防改名/恢复冲掉其它维度）
++    await waitFor(() =>
++      expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/users", {
++        method: "PUT",
++        json: { label: null, sort_order: 5, hidden: true },
++      }),
++    );
++  });
++
++  it("组内上移：与相邻行交换生效排序值，双 PUT（未覆盖行以声明序索引为当前值）", async () => {
++    renderPage();
++    await screen.findByText("/admin/roles");
++
++    // system 组声明序：users=19 / organizations=20 / roles=21（未覆盖 → 生效值=声明序索引）
++    const rolesRow = menuRow("/admin/roles");
++    fireEvent.click(within(rolesRow).getByTitle("上移"));
++
++    // 先 PUT 目标行（roles 取相邻行 organizations 的生效值 20）
++    await waitFor(() =>
++      expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/roles", {
++        method: "PUT",
++        json: { label: null, sort_order: 20, hidden: false },
++      }),
++    );
++    // 再 PUT 相邻行（organizations 取 roles 原生效值 21）
++    await waitFor(() =>
++      expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/organizations", {
++        method: "PUT",
++        json: { label: null, sort_order: 21, hidden: false },
++      }),
++    );
++  });
++
++  it("组内下移：与相邻行交换生效排序值，双 PUT", async () => {
++    renderPage();
++    await screen.findByText("/admin/roles");
++
++    // organizations(20) 下移 ↔ roles(21)
++    const orgRow = menuRow("/admin/organizations");
++    fireEvent.click(within(orgRow).getByTitle("下移"));
++
++    await waitFor(() =>
++      expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/organizations", {
++        method: "PUT",
++        json: { label: null, sort_order: 21, hidden: false },
++      }),
++    );
++    await waitFor(() =>
++      expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/roles", {
++        method: "PUT",
++        json: { label: null, sort_order: 20, hidden: false },
++      }),
++    );
++  });
++
++  it("隐藏开关：menus 行 Switch disabled 带锁提示（R-03 防自锁）；普通行切换 → PUT hidden", async () => {
++    renderPage();
++
++    // menus 行：管理入口自身不可隐藏
++    await screen.findByText("/admin/menus");
++    const menusRow = menuRow("/admin/menus");
++    expect(within(menusRow).getByRole("switch")).toBeDisabled();
++    expect(within(menusRow).getByText("🔒 自身不可隐藏")).toBeInTheDocument();
++
++    // 普通行：organizations 开启全局隐藏 → PUT hidden:true（label/sort 当前值随行携带）
++    const orgRow = menuRow("/admin/organizations");
++    fireEvent.click(within(orgRow).getByRole("switch"));
++    await waitFor(() =>
++      expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/organizations", {
++        method: "PUT",
++        json: { label: null, sort_order: null, hidden: true },
++      }),
++    );
++  });
++
++  it("权限展开：key + 中文名 + 持有角色 chips（roles permissions 客户端反查，D-003）", async () => {
++    renderPage();
++    await screen.findByText("/admin/roles");
++    const rolesRow = menuRow("/admin/roles");
++
++    fireEvent.click(within(rolesRow).getByText("展开权限 ▾"));
++
++    // 展开行：明细标题 + 只读提示
++    expect(
++      await screen.findByText("「角色」挂载权限与当前持有角色（只读）"),
++    ).toBeInTheDocument();
++    expect(
++      screen.getByText("权限的分配与收回请前往「角色管理」页操作"),
++    ).toBeInTheDocument();
++    // key 中文名正常显示
++    expect(screen.getByText("角色查看")).toBeInTheDocument();
++    expect(screen.getByText("角色编辑")).toBeInTheDocument();
++    // 持有角色 chips：平台运维持 role:read 与 role:write（两行各一枚 chip）；
++    // 只读访客（仅 user:read）不出现
++    expect(await screen.findAllByText("平台运维")).toHaveLength(2);
++    expect(screen.queryByText("只读访客")).not.toBeInTheDocument();
++  });
++
++  it("role:read 403 降级（R-08）：角色区占位提示，权限 key 正常显示，改名主功能不受阻", async () => {
++    fixtures.rolesError = true;
++    renderPage();
++
++    await screen.findByText("/admin/roles");
++    const rolesRow = menuRow("/admin/roles");
++    fireEvent.click(within(rolesRow).getByText("展开权限 ▾"));
++
++    // 角色分布降级占位（role:read / role:write 每个权限行各一枚）；
++    // 权限 key 与中文名正常显示
++    expect(await screen.findAllByText("需 role:read 查看角色分布")).toHaveLength(2);
++    expect(screen.getByText("角色查看")).toBeInTheDocument();
++
++    // 主功能不受阻：行内改名照常 PUT
++    const usersRow = menuRow("/admin/users");
++    fireEvent.click(
++      within(usersRow).getByTitle("点击修改显示名（回车或失焦保存）"),
++    );
++    fireEvent.change(within(usersRow).getByDisplayValue("用户"), {
++      target: { value: "用户中心" },
++    });
++    fireEvent.keyDown(within(usersRow).getByDisplayValue("用户中心"), {
++      key: "Enter",
++    });
++    await waitFor(() =>
++      expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/users", {
++        method: "PUT",
++        json: { label: "用户中心", sort_order: null, hidden: false },
++      }),
++    );
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/admin/menus/page.tsx b/frontend/src/app/(dashboard)/admin/menus/page.tsx
+new file mode 100644
+index 00000000..97ac92d6
+--- /dev/null
++++ b/frontend/src/app/(dashboard)/admin/menus/page.tsx
+@@ -0,0 +1,758 @@
++"use client";
++
++/**
++ * 菜单管理页 /admin/menus（2026-09-18-web-menu-management task-11，FR-02/FR-03）。
++ *
++ * 设计依据（逐条对照）：
++ * - tasks/task-11.md implementation——antd Table 按 MENU_SECTION_ORDER 分组
++ *   （组前插 section 标题行，原型 prototype-menu-admin.html 的 section-row 语义）、
++ *   rowKey=menuKey、不分页（全量 38 行）、行级即时 PUT 保存（无整页保存按钮）；
++ * - design.md「总体方案 Phase 3」——列 = 排序（组内上移/下移）/ 菜单（默认名+路由
++ *   小字）/ 显示名（行内编辑+「已改名」+恢复默认）/ 全局隐藏（Switch，menus 行
++ *   disabled+🔒 自身不可隐藏，R-03）/ 挂载权限（前 2 个 key 摘要+展开行明细）；
++ * - D-002（覆盖全局生效，页面不做角色维度过滤）、D-003（权限区只读——持有角色由
++ *   既有 GET /api/admin/roles 的 RoleRead.permissions 客户端反查，无新聚合端点、
++ *   无任何修改权限的交互）；
++ * - R-05（页头说明条明示「隐藏=全局下架（含平台管理员），按角色开关请前往角色
++ *   管理页」）、R-08（listRoles 403 时角色 chips 区降级「需 role:read 查看角色
++ *   分布」，不阻塞改名/排序/隐藏主功能）；
++ * - 样式遵守 .sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md（§1 骨架四件套 /
++ *   §4 DataTable / §5 antd Button / §9 antd message；多主题走 brand-* 阶与
++ *   ConfigProvider token，零硬编码 hex），页面骨架对齐 /admin/roles。
++ *
++ * 保存语义（蓝图「每次操作一次 PUT /api/menu-overrides/{menu_key}」）：
++ * 后端 upsert 是整行覆盖写（menu_overrides_service.upsert_override 三维度整体
++ * 落库，缺省字段回默认），故每次 PUT 都带该行当前全量三字段（label/sort_order/
++ * hidden），仅把本次操作的目标维度改成新值、清除项传 null——既满足蓝图
++ * 「清除项传 null 回默认」，又避免改名把已有排序/隐藏覆盖冲掉。成功后失效
++ * MENU_OVERRIDES_QUERY_KEY（导航侧 useMenuOverrides 同步重拉，导航即时生效）
++ * + antd message 行内 toast；失败中文提示，控件保持可点即为重试入口。
++ *
++ * 排序算法（蓝图权威）：组内相邻交换——上移/下移 = 目标行与相邻可见行交换生效
++ * sort_order，两行各 PUT 一次各自的新值；sort_order 未覆盖行以「注册表声明序
++ * 索引」为当前值参与交换（与 mergeMenus 规则 3 的 fallback 同源，整表索引保证
++ * 与导航合并层一致）；组首上移/组尾下移按钮 disabled。交换只移动既有值，
++ * 值集合不变，多次移动稳定收敛。
++ *
++ * 本页不改 menu-permissions.ts / menu-overrides.ts / permission.ts / app-shell
++ * （归 task-08/09/10），仅只读消费；页面交互测试归 task-12。
++ */
++import { useCallback, useMemo, useRef, useState } from "react";
++import { useQuery, useQueryClient } from "@tanstack/react-query";
++import { Alert, Button, Input, Switch, Tag, Tooltip, type TableProps } from "antd";
++import { DownOutlined, UpOutlined } from "@ant-design/icons";
++
++import {
++  DataTable,
++  PageContainer,
++  PageHeader,
++  SectionCard,
++} from "@/components/layout";
++import { ApiError, apiFetch } from "@/lib/api";
++import { useNotify } from "@/lib/errors";
++import { listRoles, type RoleRead } from "@/lib/admin";
++import { useSession } from "@/stores/session";
++import type { components } from "@/lib/api-types";
++import {
++  MENU_PERMISSION_GROUPS,
++  MENU_SECTION_LABEL,
++  MENU_SECTION_ORDER,
++  type MenuPermissionGroup,
++  type MenuSection,
++} from "@/lib/menu-permissions";
++import {
++  MENU_OVERRIDES_QUERY_KEY,
++  useMenuOverrides,
++  type MenuOverrideRead,
++} from "@/lib/menu-overrides";
++
++/* ------------------------------------------------------------------ */
++/*  Types                                                              */
++/* ------------------------------------------------------------------ */
++
++/** PUT body（api-types 生成物；三字段全可空，null = 清除该维度回默认）。 */
++type MenuOverrideUpsertBody = components["schemas"]["MenuOverrideUpsert"];
++
++/** PUT 实际发送形态：整行当前全量三字段（见文件头「保存语义」）。 */
++interface OverrideRowState {
++  label: string | null;
++  sort_order: number | null;
++  hidden: boolean;
++}
++
++/** 菜单数据行（TableRow 的 menu 分支）。 */
++interface MenuRow {
++  kind: "menu";
++  rowKey: string;
++  menu: MenuPermissionGroup;
++  /** 在 MENU_PERMISSION_GROUPS 全表中的声明序索引（未覆盖行的 sortValue 来源）。 */
++  declaredIndex: number;
++  override: MenuOverrideRead | undefined;
++  /** 生效排序值 = override.sort_order ?? declaredIndex（与 mergeMenus 规则 3 同源）。 */
++  sortValue: number;
++  /** 组内首位（上移 disabled）/ 组内末位（下移 disabled）。 */
++  isFirst: boolean;
++  isLast: boolean;
++}
++
++/** 分组标题行（TableRow 的 section 分支，colSpan=5 占满整行）。 */
++interface SectionRow {
++  kind: "section";
++  rowKey: string;
++  section: MenuSection;
++  count: number;
++}
++
++type TableRow = SectionRow | MenuRow;
++
++/* ------------------------------------------------------------------ */
++/*  Helpers                                                            */
++/* ------------------------------------------------------------------ */
++
++/** 菜单管理入口自身（mergeMenus 的 hidden 豁免键，R-03 防自锁）。 */
++const MENUS_MENU_KEY = "menus";
++
++/** 后端 list_roles 分页上限 Query(le=100)，反查持有角色需拉全量。 */
++const ROLE_PAGE_SIZE = 100;
++
++/** 持有角色反查的查询 key（本页局部；roles 页不走 react-query，无既有 key 可复用）。 */
++const ROLES_QUERY_KEY = ["adminRoles", "menuAdminPage"] as const;
++
++/** 路由小字：相对 href 在侧边栏拼 /workspaces/{id}/ 前缀（app-shell），此处省略展示。 */
++function routeText(menu: MenuPermissionGroup): string {
++  return menu.absolute ? menu.href : `…/${menu.href}`;
++}
++
++/** 当前生效显示名 = 覆盖 label ?? 代码默认名（mergeMenus 规则 1）。 */
++function effectiveLabel(row: MenuRow): string {
++  return row.override?.label ?? row.menu.menuLabel;
++}
++
++/** 该行当前全量覆盖状态（PUT 整行发送形态的基底，未覆盖维度取默认）。 */
++function currentRowState(row: MenuRow): OverrideRowState {
++  return {
++    label: row.override?.label ?? null,
++    sort_order: row.override?.sort_order ?? null,
++    hidden: row.override?.hidden ?? false,
++  };
++}
++
++/** 拉全量角色（分页 size≤100 翻页拼接；仅反查 permissions，D-003 只读）。 */
++async function fetchAllRoles(): Promise<RoleRead[]> {
++  const all: RoleRead[] = [];
++  let page = 1;
++  // 翻页上限 50 页（5000 角色）防御 total 异常时的死循环。
++  while (page <= 50) {
++    const resp = await listRoles({ page, size: ROLE_PAGE_SIZE });
++    all.push(...resp.items);
++    if (resp.items.length === 0 || all.length >= resp.total) break;
++    page += 1;
++  }
++  return all;
++}
++
++/* ------------------------------------------------------------------ */
++/*  页面                                                               */
++/* ------------------------------------------------------------------ */
++
++export default function AdminMenusPage() {
++  const user = useSession((s) => s.user);
++  // 写权限门控（PUT/DELETE 后端 require menu:admin；platform:admin 自动通过）。
++  const canWrite = !!user?.is_platform_admin ||
++    !!user?.permissions?.includes("menu:admin");
++
++  const notify = useNotify();
++  const queryClient = useQueryClient();
++
++  // 覆盖数据（task-09）：导航与管理页共用同一 query，写后 invalidate 双端同步。
++  const overridesQuery = useMenuOverrides();
++  // 持有角色反查（FR-03/D-003）：403 等失败时 chips 区降级占位（R-08），不阻塞主功能。
++  const rolesQuery = useQuery<RoleRead[], ApiError>({
++    queryKey: ROLES_QUERY_KEY,
++    queryFn: fetchAllRoles,
++    staleTime: 60_000,
++    retry: false,
++  });
++
++  /** 展开的权限明细行（menuKey 集合，受控展开）。 */
++  const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
++  /** 正在保存的行（串行化写操作：保存中禁用该行控件与全部排序按钮）。 */
++  const [savingKey, setSavingKey] = useState<string | null>(null);
++
++  const overrideByKey = useMemo(
++    () => new Map(overridesQuery.overrides.map((o) => [o.menu_key, o] as const)),
++    [overridesQuery.overrides],
++  );
++
++  /** 权限 key → 持有角色名列表（roles[].permissions 客户端 invert，D-003）。 */
++  const rolesByPermission = useMemo(() => {
++    const map = new Map<string, string[]>();
++    for (const role of rolesQuery.data ?? []) {
++      for (const perm of role.permissions) {
++        const names = map.get(perm);
++        if (names) names.push(role.name);
++        else map.set(perm, [role.name]);
++      }
++    }
++    return map;
++  }, [rolesQuery.data]);
++
++  /**
++   * 平铺行数据：按 MENU_SECTION_ORDER 逐组插分组标题行 + 组内按生效排序值
++   * 稳定排序的菜单行（与 mergeMenus 规则 3 同算法，页面展示顺序 = 导航合并顺序）。
++   */
++  const rows = useMemo<TableRow[]>(() => {
++    const out: TableRow[] = [];
++    for (const section of MENU_SECTION_ORDER) {
++      const group: Omit<MenuRow, "kind" | "rowKey" | "isFirst" | "isLast">[] = [];
++      MENU_PERMISSION_GROUPS.forEach((menu, declaredIndex) => {
++        if (menu.section !== section) return;
++        const override = overrideByKey.get(menu.menuKey);
++        group.push({
++          menu,
++          declaredIndex,
++          override,
++          sortValue: override?.sort_order ?? declaredIndex,
++        });
++      });
++      if (group.length === 0) continue;
++      // 现代引擎 Array#sort 稳定，同值保声明序（对齐 mergeMenus）。
++      group.sort((a, b) => a.sortValue - b.sortValue);
++      out.push({
++        kind: "section",
++        rowKey: `section:${section}`,
++        section,
++        count: group.length,
++      });
++      group.forEach((r, i) => {
++        out.push({
++          ...r,
++          kind: "menu",
++          rowKey: r.menu.menuKey,
++          isFirst: i === 0,
++          isLast: i === group.length - 1,
++        });
++      });
++    }
++    return out;
++  }, [overrideByKey]);
++
++  /**
++   * 行级保存：一次 PUT 整行全量三字段（见文件头「保存语义」），成功后失效
++   * MENU_OVERRIDES_QUERY_KEY（导航即时生效）。
++   */
++  const putOverride = useCallback(
++    async (menuKey: string, next: OverrideRowState): Promise<boolean> => {
++      const body: MenuOverrideUpsertBody = next;
++      setSavingKey(menuKey);
++      try {
++        await apiFetch<MenuOverrideRead>(
++          `/api/menu-overrides/${encodeURIComponent(menuKey)}`,
++          { method: "PUT", json: body },
++        );
++        await queryClient.invalidateQueries({ queryKey: MENU_OVERRIDES_QUERY_KEY });
++        return true;
++      } catch (err) {
++        notify.error(err, "保存失败，请重试");
++        return false;
++      } finally {
++        setSavingKey(null);
++      }
++    },
++    [queryClient, notify],
++  );
++
++  /** 行内改名（回车/失焦提交；改回默认名等价清除 label 覆盖回 null）。 */
++  const handleRename = useCallback(
++    async (row: MenuRow, nextLabel: string) => {
++      if (!canWrite) return;
++      const trimmed = nextLabel.trim();
++      if (!trimmed) {
++        notify.warning("显示名不能为空，已取消修改");
++        return;
++      }
++      if (trimmed === effectiveLabel(row)) return; // 无变化不发请求
++      const label = trimmed === row.menu.menuLabel ? null : trimmed;
++      const ok = await putOverride(row.rowKey, { ...currentRowState(row), label });
++      if (ok) {
++        notify.success(
++          label === null
++            ? `「${row.menu.menuLabel}」已恢复默认显示名`
++            : `「${trimmed}」显示名已保存`,
++        );
++      }
++    },
++    [canWrite, notify, putOverride],
++  );
++
++  /** 恢复默认显示名（清 label 覆盖传 null，蓝图「清除项传 null 回默认」）。 */
++  const handleResetLabel = useCallback(
++    async (row: MenuRow) => {
++      if (!canWrite) return;
++      const ok = await putOverride(row.rowKey, {
++        ...currentRowState(row),
++        label: null,
++      });
++      if (ok) notify.success(`已恢复默认显示名「${row.menu.menuLabel}」`);
++    },
++    [canWrite, notify, putOverride],
++  );
++
++  /** 全局隐藏开关（D-002 全局生效：对所有用户含平台管理员下架）。 */
++  const handleToggleHidden = useCallback(
++    async (row: MenuRow, hidden: boolean) => {
++      const ok = await putOverride(row.rowKey, {
++        ...currentRowState(row),
++        hidden,
++      });
++      if (ok) {
++        notify.success(
++          hidden
++            ? `已全局隐藏「${effectiveLabel(row)}」（含平台管理员）`
++            : `已恢复显示「${effectiveLabel(row)}」`,
++        );
++      }
++    },
++    [notify, putOverride],
++  );
++
++  /**
++   * 组内相邻交换排序：目标行与相邻行交换生效 sort_order，两行各 PUT 一次各自的
++   * 新值（蓝图「未覆盖行以组内声明序索引为当前值」参与交换）。首行 PUT 失败即
++   * 中止（错误 toast 已出），成功后行状态经 invalidate 重拉收敛到服务端真值。
++   */
++  const handleMove = useCallback(
++    async (row: MenuRow, dir: -1 | 1) => {
++      if (!canWrite) return;
++      const idx = rows.findIndex((r) => r.rowKey === row.rowKey);
++      if (idx < 0) return;
++      const neighbor = rows[idx + dir];
++      if (!neighbor || neighbor.kind !== "menu") return; // 组首/组尾双保险
++      const label = effectiveLabel(row);
++      const okA = await putOverride(row.rowKey, {
++        ...currentRowState(row),
++        sort_order: neighbor.sortValue,
++      });
++      if (!okA) return;
++      const okB = await putOverride(neighbor.rowKey, {
++        ...currentRowState(neighbor),
++        sort_order: row.sortValue,
++      });
++      if (okB) notify.success(`「${label}」组内排序已保存`);
++    },
++    [canWrite, notify, putOverride, rows],
++  );
++
++  const toggleExpanded = (key: string) => {
++    setExpandedKeys((prev) =>
++      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
++    );
++  };
++
++  /** 分组标题行占满 5 列：首列 colSpan=5，其余列 colSpan=0。 */
++  const sectionCell =
++    (span: 5 | 0) =>
++    (record: TableRow): { colSpan: number } =>
++      record.kind === "section" ? { colSpan: span } : { colSpan: 1 };
++
++  const columns: TableProps<TableRow>["columns"] = [
++    {
++      title: "排序",
++      key: "sort",
++      width: 84,
++      align: "center",
++      onCell: sectionCell(5),
++      render: (_v, record) =>
++        record.kind === "section" ? (
++          <div className="flex items-baseline gap-2 py-0.5">
++            <span className="text-xs font-semibold tracking-wide text-foreground">
++              {MENU_SECTION_LABEL[record.section]}
++            </span>
++            <span className="text-[11px] font-normal text-muted-foreground">
++              {record.count} 个菜单
++            </span>
++          </div>
++        ) : (
++          <div className="flex items-center justify-center gap-0.5">
++            <Button
++              type="text"
++              size="small"
++              icon={<UpOutlined />}
++              disabled={!canWrite || record.isFirst || savingKey !== null}
++              title={
++                !canWrite
++                  ? "无 menu:admin 权限"
++                  : record.isFirst
++                    ? "已是组内第一位"
++                    : "上移"
++              }
++              onClick={() => void handleMove(record, -1)}
++            />
++            <Button
++              type="text"
++              size="small"
++              icon={<DownOutlined />}
++              disabled={!canWrite || record.isLast || savingKey !== null}
++              title={
++                !canWrite
++                  ? "无 menu:admin 权限"
++                  : record.isLast
++                    ? "已是组内最后一位"
++                    : "下移"
++              }
++              onClick={() => void handleMove(record, 1)}
++            />
++          </div>
++        ),
++    },
++    {
++      title: "菜单",
++      key: "menu",
++      onCell: sectionCell(0),
++      render: (_v, record) =>
++        record.kind === "menu" && (
++          <div className="min-w-0">
++            <div className="font-medium text-foreground">
++              {record.menu.menuLabel}
++              {record.menu.navHidden && (
++                <Tag className="ml-1.5">不在侧边栏</Tag>
++              )}
++            </div>
++            <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
++              {routeText(record.menu)}
++            </div>
++          </div>
++        ),
++    },
++    {
++      title: "显示名",
++      key: "label",
++      width: 240,
++      onCell: sectionCell(0),
++      render: (_v, record) =>
++        record.kind === "menu" && (
++          <LabelCell
++            row={record}
++            canWrite={canWrite}
++            saving={savingKey === record.rowKey}
++            onRename={(v) => void handleRename(record, v)}
++            onReset={() => void handleResetLabel(record)}
++          />
++        ),
++    },
++    {
++      title: "全局隐藏",
++      key: "hidden",
++      width: 150,
++      align: "center",
++      onCell: sectionCell(0),
++      render: (_v, record) =>
++        record.kind === "menu" &&
++        (record.menu.menuKey === MENUS_MENU_KEY ? (
++          <Tooltip title="菜单管理入口不可隐藏，防止误操作后无法再进入本页恢复">
++            <span className="inline-flex items-center gap-1.5">
++              <Switch size="small" checked={false} disabled />
++              <span className="text-[11px] text-muted-foreground">
++                🔒 自身不可隐藏
++              </span>
++            </span>
++          </Tooltip>
++        ) : (
++          <Tooltip
++            title={
++              !canWrite
++                ? "无 menu:admin 权限"
++                : record.override?.hidden
++                  ? "点击恢复显示"
++                  : "点击全局隐藏（对所有用户生效，含平台管理员）"
++            }
++          >
++            <Switch
++              size="small"
++              checked={!!record.override?.hidden}
++              disabled={!canWrite || savingKey === record.rowKey}
++              loading={savingKey === record.rowKey}
++              onChange={(checked) => void handleToggleHidden(record, checked)}
++            />
++          </Tooltip>
++        )),
++    },
++    {
++      title: "挂载权限（只读）",
++      key: "perms",
++      width: 320,
++      onCell: sectionCell(0),
++      render: (_v, record) =>
++        record.kind === "menu" &&
++        (record.menu.permissions.length === 0 ? (
++          <span className="text-xs text-muted-foreground">—</span>
++        ) : (
++          <div className="flex flex-wrap items-center gap-1">
++            {record.menu.permissions.slice(0, 2).map((p) => (
++              <span
++                key={p.key}
++                className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
++              >
++                {p.key}
++              </span>
++            ))}
++            {record.menu.permissions.length > 2 && (
++              <span className="text-[11px] text-muted-foreground">
++                +{record.menu.permissions.length - 2}
++              </span>
++            )}
++            <Button
++              type="link"
++              size="small"
++              className="ml-1 h-auto p-0 text-xs"
++              onClick={() => toggleExpanded(record.rowKey)}
++            >
++              {expandedKeys.includes(record.rowKey) ? "收起 ▴" : "展开权限 ▾"}
++            </Button>
++          </div>
++        )),
++    },
++  ];
++
++  return (
++    <PageContainer size="full">
++      <PageHeader
++        title="菜单管理"
++        subtitle="调整菜单显示名、组内排序与全局隐藏（全局生效，改动即时保存）"
++      />
++      {/* 说明条（R-05 边界）：全局 vs 按角色、即时保存、菜单增删随版本。 */}
++      <Alert
++        type="info"
++        showIcon
++        message={
++          <span className="text-xs leading-5 text-muted-foreground">
++            <span className="font-semibold text-foreground">改动即时保存</span>
++            ：每项修改（改名 / 排序 / 隐藏）保存后立即对所有用户生效，无需发版。
++            隐藏为<b>全局下架</b>：对所有用户（含平台管理员）生效；按角色开关菜单请前往
++            「角色管理」页调整权限分配。菜单本身的新增与删除仍随版本发布（菜单对应页面是代码交付物）。
++          </span>
++        }
++      />
++      {/* 覆盖拉取失败（NFR-02 导航侧静默降级，管理页需如实告知，防在假默认值上误覆盖） */}
++      {overridesQuery.isError && (
++        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
++          菜单覆盖配置加载失败，下方暂按代码默认值展示（保存仍会写入并即时生效）。
++          <Button
++            size="small"
++            className="ml-3"
++            onClick={() => void overridesQuery.refetch()}
++          >
++            重新加载
++          </Button>
++        </div>
++      )}
++      <SectionCard bodyPadding="p-2">
++        <DataTable<TableRow>
++          rowKey="rowKey"
++          columns={columns}
++          dataSource={rows}
++          loading={overridesQuery.isLoading}
++          size="small"
++          bordered
++          scroll={{ x: "max-content" }}
++          pagination={false}
++          rowClassName={(record) =>
++            record.kind === "menu" &&
++            !!record.override?.hidden &&
++            record.menu.menuKey !== MENUS_MENU_KEY
++              ? "opacity-60"
++              : ""
++          }
++          expandable={{
++            showExpandColumn: false,
++            expandedRowKeys: expandedKeys,
++            onExpandedRowsChange: (keys) =>
++              setExpandedKeys(keys.map(String)),
++            rowExpandable: (record) =>
++              record.kind === "menu" && record.menu.permissions.length > 0,
++            expandedRowRender: (record) =>
++              record.kind === "menu" && (
++                <PermissionDetail
++                  menu={record.menu}
++                  rolesByPermission={rolesByPermission}
++                  rolesLoading={rolesQuery.isLoading}
++                  rolesDegraded={rolesQuery.isError}
++                />
++              ),
++          }}
++          emptyText="菜单注册表为空"
++        />
++      </SectionCard>
++    </PageContainer>
++  );
++}
++
++/* ------------------------------------------------------------------ */
++/*  显示名行内编辑单元格                                                */
++/* ------------------------------------------------------------------ */
++
++/**
++ * 显示名列：点击当前名进入编辑（回车/失焦提交），已改名行展示「已改名」标记 +
++ * 「恢复默认」入口。提交值交父级校验与保存（本组件无网络/通知副作用）。
++ */
++function LabelCell({
++  row,
++  canWrite,
++  saving,
++  onRename,
++  onReset,
++}: {
++  row: MenuRow;
++  canWrite: boolean;
++  saving: boolean;
++  onRename: (_value: string) => void;
++  onReset: () => void;
++}) {
++  const [editing, setEditing] = useState(false);
++  const [draft, setDraft] = useState("");
++  // 回车提交后组件卸载会再触发 onBlur，用 ref 防重复提交。
++  const editingRef = useRef(false);
++
++  const overridden = row.override?.label != null;
++  const current = effectiveLabel(row);
++
++  const start = () => {
++    if (!canWrite || saving) return;
++    editingRef.current = true;
++    setDraft(current);
++    setEditing(true);
++  };
++
++  const commit = () => {
++    if (!editingRef.current) return;
++    editingRef.current = false;
++    setEditing(false);
++    onRename(draft);
++  };
++
++  if (editing) {
++    return (
++      <Input
++        size="small"
++        autoFocus
++        value={draft}
++        maxLength={30}
++        style={{ width: 180 }}
++        placeholder="1–30 个字符，回车保存"
++        onChange={(e) => setDraft(e.target.value)}
++        onPressEnter={commit}
++        onBlur={commit}
++      />
++    );
++  }
++
++  return (
++    <div className="flex flex-wrap items-center gap-1.5">
++      <span
++        className={
++          canWrite
++            ? "cursor-pointer font-medium text-foreground hover:text-brand-700 hover:underline"
++            : "cursor-not-allowed font-medium text-foreground"
++        }
++        onClick={start}
++        title={
++          canWrite ? "点击修改显示名（回车或失焦保存）" : "无 menu:admin 权限"
++        }
++      >
++        {current}
++      </span>
++      {overridden && (
++        <>
++          <Tag className="m-0 border-brand-200 bg-brand-50 text-brand-700">
++            已改名
++          </Tag>
++          <Button
++            type="link"
++            size="small"
++            className="h-auto p-0 text-xs text-muted-foreground"
++            disabled={!canWrite || saving}
++            title="清除改名覆盖，恢复代码默认名"
++            onClick={onReset}
++          >
++            恢复默认
++          </Button>
++        </>
++      )}
++    </div>
++  );
++}
++
++/* ------------------------------------------------------------------ */
++/*  权限明细展开行（D-003 只读铁律：零修改交互）                         */
++/* ------------------------------------------------------------------ */
++
++function PermissionDetail({
++  menu,
++  rolesByPermission,
++  rolesLoading,
++  rolesDegraded,
++}: {
++  menu: MenuPermissionGroup;
++  rolesByPermission: Map<string, string[]>;
++  rolesLoading: boolean;
++  /** listRoles 失败（典型 403 无 role:read）→ chips 区降级占位（R-08）。 */
++  rolesDegraded: boolean;
++}) {
++  return (
++    <div className="py-1 pr-2">
++      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
++        <span className="text-[11px] text-muted-foreground">
++          「{menu.menuLabel}」挂载权限与当前持有角色（只读）
++        </span>
++        <span className="text-[11px] text-muted-foreground">
++          权限的分配与收回请前往「角色管理」页操作
++        </span>
++      </div>
++      <table className="w-full text-left text-xs">
++        <thead className="border-b border-border text-[11px] text-muted-foreground">
++          <tr>
++            <th className="w-60 px-2 py-1.5 font-semibold">权限标识</th>
++            <th className="w-44 px-2 py-1.5 font-semibold">中文名</th>
++            <th className="px-2 py-1.5 font-semibold">当前持有角色</th>
++          </tr>
++        </thead>
++        <tbody>
++          {menu.permissions.map((p) => {
++            const roleNames = rolesByPermission.get(p.key) ?? [];
++            return (
++              <tr key={p.key} className="border-b border-border/60 last:border-0">
++                <td className="px-2 py-1.5">
++                  <code className="rounded bg-brand-50 px-1.5 py-0.5 font-mono text-[11px] text-brand-700">
++                    {p.key}
++                  </code>
++                </td>
++                <td className="px-2 py-1.5">{p.name}</td>
++                <td className="px-2 py-1.5">
++                  {rolesDegraded ? (
++                    <span className="text-[11px] text-muted-foreground">
++                      需 role:read 查看角色分布
++                    </span>
++                  ) : rolesLoading ? (
++                    <span className="text-[11px] text-muted-foreground">
++                      角色分布加载中…
++                    </span>
++                  ) : roleNames.length === 0 ? (
++                    <Tag className="m-0">暂无角色持有</Tag>
++                  ) : (
++                    <span className="flex flex-wrap gap-1">
++                      {roleNames.map((name) => (
++                        <Tag key={name} className="m-0">
++                          {name}
++                        </Tag>
++                      ))}
++                    </span>
++                  )}
++                </td>
++              </tr>
++            );
++          })}
++        </tbody>
++      </table>
++    </div>
++  );
++}
+diff --git a/frontend/src/components/__tests__/app-shell.test.tsx b/frontend/src/components/__tests__/app-shell.test.tsx
+index 9da3e56e..e7f592e5 100644
+--- a/frontend/src/components/__tests__/app-shell.test.tsx
++++ b/frontend/src/components/__tests__/app-shell.test.tsx
+@@ -17,6 +17,7 @@
+ 
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { render } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ 
+ import { AppShell } from "@/components/app-shell";
+ import { useSession, type SessionUser } from "@/stores/session";
+@@ -77,10 +78,18 @@ const ADMIN: SessionUser = {
+ };
+ 
+ function renderShell() {
++  // 2026-09-18-web-menu-management task-10：AppShell 接入 useMenuOverrides（useQuery），
++  // 裸渲染会抛 No QueryClient set——包独立 QueryClient（retry:false，真实 app 由
++  // AppProviders 提供同款 Provider），覆盖拉取失败经 hook 降级为空数组直通注册表。
++  const queryClient = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
+   return render(
+-    <AppShell>
+-      <div>content</div>
+-    </AppShell>,
++    <QueryClientProvider client={queryClient}>
++      <AppShell>
++        <div>content</div>
++      </AppShell>
++    </QueryClientProvider>,
+   );
+ }
+ 
+diff --git a/frontend/src/components/app-shell.tsx b/frontend/src/components/app-shell.tsx
+index 49e9ec77..27a90c97 100644
+--- a/frontend/src/components/app-shell.tsx
++++ b/frontend/src/components/app-shell.tsx
+@@ -29,6 +29,7 @@ import {
+   LayoutDashboard,
+   ListChecks,
+   ListTodo,
++  ListTree,
+   LogOut,
+   MessageSquare,
+   type LucideIcon,
+@@ -55,6 +56,9 @@ import {
+   MENU_SECTION_ORDER as SECTION_ORDER,
+   type MenuPermissionGroup,
+ } from "@/lib/menu-permissions";
++// task-10：渲染管线接入覆盖合并层（task-09 契约）——useMenuOverrides 拉全局
++// 显示覆盖，mergeMenus 把覆盖叠加到权限过滤结果之上（FR-05）。
++import { mergeMenus, useMenuOverrides } from "@/lib/menu-overrides";
+ import { useSession } from "@/stores/session";
+ import { ensureFreshAccessToken, decodeJwtExp } from "@/lib/token-refresh";
+ import { visibleMenusBySection } from "@/lib/permission";
+@@ -88,6 +92,9 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
+   "/admin/users": Users,
+   "/admin/organizations": Folder,
+   "/admin/roles": KeyRound,
++  // 2026-09-18-web-menu-management task-10：菜单管理入口 /admin/menus。图标
++  // ListTree（层级列表，语义=菜单目录树；未被占用，避开 roles 的 KeyRound）。
++  "/admin/menus": ListTree,
+   "/runtimes": Activity,
+   "/settings": Settings,
+   "/workspaces": Home,
+@@ -143,6 +150,10 @@ export function AppShell({ children }: { children: ReactNode }) {
+   const { workspaceId, current } = useWorkspaceContext();
+   const { user, accessToken, refreshToken, clear } = useSession();
+ 
++  // task-10（FR-05）：全局菜单显示覆盖（改名/隐藏/组内排序）。降级已在 hook 内
++  // 收口——拉取失败/首帧 overrides 恒为空数组（NFR-02 直通），组件层不写额外降级分支。
++  const { overrides } = useMenuOverrides();
++
+   const [collapsed, setCollapsed] = useState<boolean>(() => {
+     if (typeof window === "undefined") return false;
+     try {
+@@ -236,7 +247,13 @@ export function AppShell({ children }: { children: ReactNode }) {
+   )
+     .map((section) => ({
+       section,
+-      menus: visibleMenusBySection(user, section).filter((m) => !m.navHidden),
++      // task-10（FR-05）：先权限过滤（visibleMenusBySection）后覆盖合并
++      // （mergeMenus）——两维度独立（design「接口定义」），顺序不敏感但定死先
++      // 权限后合并；hidden 剔除与 menus 恒豁免（R-03 防自锁）已在 mergeMenus
++      // 内完成，此处不写任何豁免/隐藏特判；navHidden 过滤保持既有位置。
++      menus: mergeMenus(visibleMenusBySection(user, section), overrides).filter(
++        (m) => !m.navHidden,
++      ),
+     }))
+     .filter(({ menus }) => menus.length > 0);
+ 
+diff --git a/frontend/src/lib/__tests__/menu-overrides.test.ts b/frontend/src/lib/__tests__/menu-overrides.test.ts
+new file mode 100644
+index 00000000..a460f297
+--- /dev/null
++++ b/frontend/src/lib/__tests__/menu-overrides.test.ts
+@@ -0,0 +1,321 @@
++// lib/__tests__/menu-overrides.test.ts
++// 2026-09-18-web-menu-management task-12：菜单覆盖合并层单测（FR-05 / NFR-02）。
++//
++// 覆盖（task-12 蓝图 implementation 第 1 条，mergeMenus 六类纯函数行为）：
++//   1. label 覆盖生效——非空 label 替换 menuLabel；label 为 null 直通代码默认名；
++//   2. hidden 剔除——hidden=true 的行从合并结果移除；
++//   3. menus 恒豁免（R-03 防自锁）——menuKey="menus" 的 hidden 覆盖不剔除该行，
++//      但其 label / 组内排序覆盖仍正常生效；
++//   4. 组内排序——sort_order 缺省回落声明序索引；覆盖后组内重排；同值保持声明序
++//      （稳定排序）；section 之间顺序不变；
++//   5. 孤儿 override 忽略（R-01）——registry 无此 menuKey 的覆盖静默丢弃，不抛错；
++//   6. 空覆盖直通（NFR-02）——空数组输入输出与 registry 逐项全等（未覆盖行复用
++//      原对象引用），且不 mutate 入参。
++//
++// 另补 useMenuOverrides hook 降级用例（NFR-02 / FR-05「拉取失败降级」场景）：
++//   - 成功 → overrides = 接口 items；
++//   - 失败（5xx）→ isError=true 且 overrides 恒为空数组（直通降级）；
++//   - 首帧加载中 → overrides 为空数组（不阻塞导航渲染）。
++//
++// mergeMenus 用例全部为纯函数断言，不触网络与 React；hook 用例走
++// renderHook + QueryClientProvider + mock @/lib/api（照搬 use-workspace-context.test.ts 惯例）。
++import { describe, expect, it, vi } from "vitest";
++import { renderHook, waitFor } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import * as React from "react";
++
++import { ApiError } from "@/lib/api";
++import type { MenuOverrideRead } from "@/lib/menu-overrides";
++import { mergeMenus, useMenuOverrides } from "@/lib/menu-overrides";
++import type { MenuPermissionGroup } from "@/lib/menu-permissions";
++
++/* ------------------------------------------------------------------ */
++/*  fixture：合成注册表（不依赖真实 38 条，聚焦合并语义）                 */
++/* ------------------------------------------------------------------ */
++
++/** 最小合法菜单项工厂（权限 key 取后端枚举真实存在的值满足 PermissionKey 联合）。 */
++function mkMenu(
++  over: Partial<MenuPermissionGroup> & Pick<MenuPermissionGroup, "menuKey" | "menuLabel" | "section">,
++): MenuPermissionGroup {
++  return {
++    icon: "x",
++    href: `/${over.menuKey}`,
++    absolute: true,
++    permissions: [{ key: "workspace:read", name: "工作区查看" }],
++    ...over,
++  };
++}
++
++/**
++ * 声明序：0 首页 / 1 报表 / 2 仪表盘（workspace 组），3 用户 / 4 菜单管理（system 组）。
++ * section 首次出现顺序 workspace → system，供「section 间顺序不变」断言。
++ */
++function mkRegistry(): MenuPermissionGroup[] {
++  return [
++    mkMenu({ section: "workspace", menuKey: "home", menuLabel: "首页" }),
++    mkMenu({ section: "workspace", menuKey: "reports", menuLabel: "报表" }),
++    mkMenu({ section: "workspace", menuKey: "dashboards", menuLabel: "仪表盘" }),
++    mkMenu({ section: "system", menuKey: "users", menuLabel: "用户" }),
++    mkMenu({
++      section: "system",
++      menuKey: "menus",
++      menuLabel: "菜单管理",
++      permissions: [{ key: "menu:admin", name: "菜单管理" }],
++    }),
++  ];
++}
++
++/** 覆盖行工厂（MenuOverrideRead 全字段）。 */
++function mkOverride(
++  over: Partial<MenuOverrideRead> & Pick<MenuOverrideRead, "menu_key">,
++): MenuOverrideRead {
++  return { label: null, sort_order: null, hidden: false, ...over };
++}
++
++function keysOf(menus: MenuPermissionGroup[]): string[] {
++  return menus.map((m) => m.menuKey);
++}
++
++/* ------------------------------------------------------------------ */
++/*  mergeMenus 六类纯函数行为                                           */
++/* ------------------------------------------------------------------ */
++
++describe("mergeMenus：空覆盖直通（NFR-02）", () => {
++  it("空覆盖数组 → 输出与 registry 逐项全等，且未覆盖行复用原对象引用", () => {
++    const registry = mkRegistry();
++    const merged = mergeMenus(registry, []);
++    expect(merged).toEqual(registry);
++    // 纯函数语义：未覆盖行不拷贝（浅拷贝仅发生在 label 被覆盖时）
++    registry.forEach((menu, i) => {
++      expect(merged[i]).toBe(menu);
++    });
++  });
++
++  it("混合覆盖后 registry 入参不被 mutate", () => {
++    const registry = mkRegistry();
++    const snapshot = structuredClone(registry);
++    mergeMenus(registry, [
++      mkOverride({ menu_key: "users", label: "成员" }),
++      mkOverride({ menu_key: "reports", hidden: true }),
++      mkOverride({ menu_key: "dashboards", sort_order: 0 }),
++    ]);
++    expect(registry).toEqual(snapshot);
++  });
++});
++
++describe("mergeMenus：label 覆盖（规则 1）", () => {
++  it("非空 label 替换 menuLabel，其余字段原样保留", () => {
++    const merged = mergeMenus(mkRegistry(), [
++      mkOverride({ menu_key: "users", label: "成员中心" }),
++    ]);
++    const users = merged.find((m) => m.menuKey === "users")!;
++    expect(users.menuLabel).toBe("成员中心");
++    // 未覆盖的维度不动：section / href / permissions 仍是注册表原值
++    expect(users.section).toBe("system");
++    expect(users.href).toBe("/users");
++    expect(users.permissions).toEqual([{ key: "workspace:read", name: "工作区查看" }]);
++    // 其它行不受影响
++    expect(merged.find((m) => m.menuKey === "home")!.menuLabel).toBe("首页");
++  });
++
++  it("label 为 null 直通代码默认名（复用原对象引用）", () => {
++    const registry = mkRegistry();
++    const merged = mergeMenus(registry, [
++      mkOverride({ menu_key: "users", label: null }),
++    ]);
++    const users = merged.find((m) => m.menuKey === "users")!;
++    expect(users.menuLabel).toBe("用户");
++    expect(users).toBe(registry[3]);
++  });
++});
++
++describe("mergeMenus：hidden 剔除（规则 2）", () => {
++  it("hidden=true 的行被剔除，其余行保留", () => {
++    const merged = mergeMenus(mkRegistry(), [
++      mkOverride({ menu_key: "reports", hidden: true }),
++    ]);
++    expect(keysOf(merged)).toEqual(["home", "dashboards", "users", "menus"]);
++  });
++
++  it("hidden=false 不剔除（显式恢复显示）", () => {
++    const merged = mergeMenus(mkRegistry(), [
++      mkOverride({ menu_key: "reports", hidden: false }),
++    ]);
++    expect(keysOf(merged)).toEqual(["home", "reports", "dashboards", "users", "menus"]);
++  });
++});
++
++describe("mergeMenus：menus 恒豁免（规则 2 / R-03 防自锁）", () => {
++  it("menuKey=menus 的 hidden 覆盖不剔除该行", () => {
++    const merged = mergeMenus(mkRegistry(), [
++      mkOverride({ menu_key: "menus", hidden: true }),
++    ]);
++    expect(keysOf(merged)).toContain("menus");
++    expect(merged).toHaveLength(5);
++  });
++
++  it("menus 行的 label / 组内排序覆盖仍正常生效（豁免仅免 hidden）", () => {
++    const merged = mergeMenus(mkRegistry(), [
++      mkOverride({ menu_key: "menus", hidden: true, label: "菜单配置", sort_order: 0 }),
++    ]);
++    // system 组内被排到首位 + label 覆盖生效，但行未被剔除
++    const systemKeys = keysOf(merged.filter((m) => m.section === "system"));
++    expect(systemKeys).toEqual(["menus", "users"]);
++    expect(merged.find((m) => m.menuKey === "menus")!.menuLabel).toBe("菜单配置");
++  });
++
++  it("非 menus 菜单同名场景对照：hidden + label 同时覆盖时仍被剔除", () => {
++    const merged = mergeMenus(mkRegistry(), [
++      mkOverride({ menu_key: "users", hidden: true, label: "成员" }),
++    ]);
++    expect(keysOf(merged)).not.toContain("users");
++    expect(merged.find((m) => m.menuKey === "users")).toBeUndefined();
++  });
++});
++
++describe("mergeMenus：组内排序（规则 3）", () => {
++  it("sort_order 缺省回落声明序索引：仅覆盖 system 组时 workspace 组顺序不变", () => {
++    const merged = mergeMenus(mkRegistry(), [
++      mkOverride({ menu_key: "users", label: "成员" }),
++    ]);
++    expect(keysOf(merged)).toEqual(["home", "reports", "dashboards", "users", "menus"]);
++  });
++
++  it("sort_order 覆盖为组内最大值 → 该行沉到组尾", () => {
++    const merged = mergeMenus(mkRegistry(), [
++      mkOverride({ menu_key: "home", sort_order: 9 }),
++    ]);
++    expect(keysOf(merged.filter((m) => m.section === "workspace"))).toEqual([
++      "reports",
++      "dashboards",
++      "home",
++    ]);
++  });
++
++  it("sort_order 覆盖为 0 与未覆盖行回落值同值 → 稳定排序保声明序", () => {
++    // home 未覆盖 sortValue=0（声明序索引），dashboards 覆盖 0：同值按声明序
++    // home(声明0) 在 dashboards(声明2) 前；未覆盖的 reports(1) 居中不受干扰。
++    const merged = mergeMenus(mkRegistry(), [
++      mkOverride({ menu_key: "dashboards", sort_order: 0 }),
++    ]);
++    expect(keysOf(merged.filter((m) => m.section === "workspace"))).toEqual([
++      "home",
++      "dashboards",
++      "reports",
++    ]);
++  });
++
++  it("两行覆盖同值 sort_order → 相对位置保持声明序（稳定排序）", () => {
++    // home(声明0) 与 reports(声明1) 覆盖同值 7 → 声明序在前；dashboards 未覆盖=2
++    expect(
++      keysOf(
++        mergeMenus(mkRegistry(), [
++          mkOverride({ menu_key: "home", sort_order: 7 }),
++          mkOverride({ menu_key: "reports", sort_order: 7 }),
++        ]).filter((m) => m.section === "workspace"),
++      ),
++    ).toEqual(["dashboards", "home", "reports"]);
++  });
++
++  it("section 之间顺序不变（system 组排序值再小也不跨组）", () => {
++    const merged = mergeMenus(mkRegistry(), [
++      mkOverride({ menu_key: "menus", sort_order: 0 }),
++    ]);
++    // 分桶按首次出现顺序拼接：workspace 块整体在前，system 块在后
++    expect(merged.map((m) => m.section)).toEqual([
++      "workspace",
++      "workspace",
++      "workspace",
++      "system",
++      "system",
++    ]);
++    expect(keysOf(merged.filter((m) => m.section === "system"))).toEqual([
++      "menus",
++      "users",
++    ]);
++  });
++});
++
++describe("mergeMenus：孤儿 override 忽略（规则 4 / R-01）", () => {
++  it("registry 无此 menuKey 的覆盖静默忽略，不抛错", () => {
++    const merged = mergeMenus(mkRegistry(), [
++      mkOverride({ menu_key: "ghost", label: "幽灵菜单", sort_order: 0, hidden: true }),
++      mkOverride({ menu_key: "home", label: "主页" }),
++    ]);
++    expect(merged).toHaveLength(5);
++    expect(merged.find((m) => m.menuKey === "home")!.menuLabel).toBe("主页");
++    expect(merged.find((m) => m.menuKey === "ghost")).toBeUndefined();
++  });
++
++  it("整批全是孤儿 → 完全直通", () => {
++    const registry = mkRegistry();
++    const merged = mergeMenus(registry, [
++      mkOverride({ menu_key: "a", hidden: true }),
++      mkOverride({ menu_key: "b", sort_order: 0 }),
++    ]);
++    expect(merged).toEqual(registry);
++  });
++});
++
++/* ------------------------------------------------------------------ */
++/*  useMenuOverrides 降级（NFR-02 / FR-05「拉取失败降级」）              */
++/* ------------------------------------------------------------------ */
++
++const apiFetchMock = vi.hoisted(() => vi.fn());
++vi.mock("@/lib/api", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
++  return { ...actual, apiFetch: apiFetchMock };
++});
++
++function mkQueryClient() {
++  return new QueryClient({
++    defaultOptions: { queries: { retry: false, gcTime: 0 } },
++  });
++}
++
++function wrapper(client: QueryClient) {
++  return function QueryWrapper({ children }: { children: React.ReactNode }) {
++    return React.createElement(QueryClientProvider, { client }, children);
++  };
++}
++
++describe("useMenuOverrides：降级语义（NFR-02）", () => {
++  it("成功 → overrides = 接口 items", async () => {
++    const items: MenuOverrideRead[] = [
++      mkOverride({ menu_key: "home", label: "主页" }),
++    ];
++    apiFetchMock.mockResolvedValue({ items });
++    const { result } = renderHook(() => useMenuOverrides(), {
++      wrapper: wrapper(mkQueryClient()),
++    });
++    await waitFor(() => expect(result.current.isLoading).toBe(false));
++    expect(result.current.isError).toBe(false);
++    expect(result.current.overrides).toEqual(items);
++    expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides");
++  });
++
++  it("首帧加载中 → overrides 为空数组（不阻塞导航渲染）", () => {
++    apiFetchMock.mockReturnValue(new Promise(() => {})); // 永不 resolve
++    const { result } = renderHook(() => useMenuOverrides(), {
++      wrapper: wrapper(mkQueryClient()),
++    });
++    expect(result.current.isLoading).toBe(true);
++    expect(result.current.overrides).toEqual([]);
++  });
++
++  it("拉取失败（5xx）→ isError=true 且 overrides 恒为空数组（直通降级）", async () => {
++    apiFetchMock.mockRejectedValue(
++      new ApiError(500, {
++        code: "INTERNAL_ERROR",
++        message: "服务器内部错误",
++        request_id: null,
++        details: null,
++      }),
++    );
++    const { result } = renderHook(() => useMenuOverrides(), {
++      wrapper: wrapper(mkQueryClient()),
++    });
++    await waitFor(() => expect(result.current.isError).toBe(true));
++    expect(result.current.overrides).toEqual([]);
++  });
++});
+diff --git a/frontend/src/lib/__tests__/menu-permissions.test.ts b/frontend/src/lib/__tests__/menu-permissions.test.ts
+index 4e6950ee..4f4b446c 100644
+--- a/frontend/src/lib/__tests__/menu-permissions.test.ts
++++ b/frontend/src/lib/__tests__/menu-permissions.test.ts
+@@ -4,7 +4,7 @@ import type { MenuSection } from "../menu-permissions";
+ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
+ 
+ /**
+- * 后端 Permission 枚举镜像常量（70 项）。
++ * 后端 Permission 枚举镜像常量（69 项）。
+  *
+  * 与 `backend/app/modules/auth/permissions.py` 的 `Permission` StrEnum 保持同步。
+  * 若后端扩/删枚举，需同时更新本常量；用例 5 会在漂移时失败提示。
+@@ -21,6 +21,7 @@ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
+  * - Tool (4)
+  * - Admin (7)
+  * - PPM (8, change 2026-07-20-ppm-permission-simplify task-04 精简：删 16 个 write/delete/export/assign 摆设动作)
++ * - 菜单读权限 + 菜单管理门控 (5, 2026-09-18-web-menu-management task-01 新增)
+  */
+ const BACKEND_PERMISSION_KEYS = [
+   // Platform (8, ql-004 新增 3 个管理子菜单 admin + ql-005 新增 git_identity:admin
+@@ -100,9 +101,17 @@ const BACKEND_PERMISSION_KEYS = [
+   "ppm:task-plan:read",
+   // 实施计划汇总(weekly-plan 汇总视图)
+   "ppm:weekly-plan:view",
++  // ── 菜单读权限 + 菜单管理门控（2026-09-18-web-menu-management task-01 / FR-01，5 项）──
++  // 4 个原常显菜单（技能管理/MCP 资产库/智能体档案/智能体会话）补独立 read 权限
++  // 按角色开关；menu:admin 门控菜单管理页与覆盖写端点。
++  "skill:read",
++  "mcp:read",
++  "agent_profile:read",
++  "agent_session:read",
++  "menu:admin",
+ ] as const;
+ 
+-/** menuKey 期望集合（2026-08-22-team-session-unify task-13 / D-011 删 missions 菜单项） */
++/** menuKey 期望集合（2026-09-18-web-menu-management task-08 system 组新增 menus） */
+ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
+   "workspaces",
+   "components",
+@@ -130,6 +139,8 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
+   "roles",
+   "runtimes",
+   "settings",
++  // 2026-09-18-web-menu-management task-08 新增（system 组菜单管理页入口）
++  "menus",
+   // PPM 14 条
+   "ppm-workbench",
+   "ppm-projects",
+@@ -157,8 +168,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
+ ]);
+ 
+ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+-  it("MENU_PERMISSION_GROUPS 长度 === 37（task-13 删 missions 后）", () => {
+-    expect(MENU_PERMISSION_GROUPS).toHaveLength(37);
++  it("MENU_PERMISSION_GROUPS 长度 === 38（task-08 新增 menus 菜单项）", () => {
++    expect(MENU_PERMISSION_GROUPS).toHaveLength(38);
+   });
+ 
+   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
+@@ -173,7 +184,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     });
+   });
+ 
+-  it("section 分布：workspace 8 / agent 4 / config 4 / governance 3 / system 4 / ppm 14（task-13 删 missions）", () => {
++  it("section 分布：workspace 8 / agent 4 / config 4 / governance 3 / system 5 / ppm 14（task-08 system 组新增 menus）", () => {
+     const counter: Record<MenuSection, number> = {
+       workspace: 0,
+       agent: 0,
+@@ -189,39 +200,30 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     expect(counter.agent).toBe(4);
+     expect(counter.config).toBe(4);
+     expect(counter.governance).toBe(3);
+-    expect(counter.system).toBe(4);
++    expect(counter.system).toBe(5);
+     expect(counter.ppm).toBe(14);
+   });
+ 
+-  it("每个 menu 至少 1 个 permission（skills / agent-profiles / sessions 例外：permissions:[] 对所有登录用户可见）", () => {
++  it("每个 menu 至少 1 个 permission（task-08 FR-01 后无空 permissions 菜单）", () => {
+     MENU_PERMISSION_GROUPS.forEach((g) => {
+-      if (g.menuKey === "skills") {
+-        // 2026-07-31-custom-skill-per-user D-003：skills 菜单对所有登录用户可见，无独立权限
+-        expect(g.permissions).toEqual([]);
+-        return;
+-      }
+-      if (g.menuKey === "agent-profiles") {
+-        // 2026-08-04-agent-profile-ui-redesign task-05：智能体档案菜单对所有登录用户可见
+-        // （对齐 skills D-003），permissions:[] 经 permission.ts:41 登录即可见
+-        expect(g.permissions).toEqual([]);
+-        return;
+-      }
+-      if (g.menuKey === "sessions") {
+-        // 2026-08-14-sessions-portal task-10：智能体会话菜单对所有登录用户可见
+-        // （会话列表后端已按 user_id 隔离，对齐 agent-profiles 先例）
+-        expect(g.permissions).toEqual([]);
+-        return;
+-      }
+-      if (g.menuKey === "mcp") {
+-        // 2026-09-10-mcp-central-registry task-11 主代理裁决：MCP 资产库全员可见
+-        // （D-001 双层可见性，私有库入口；写权限由 API 层控制，对齐 skills 先例）
+-        expect(g.permissions).toEqual([]);
+-        return;
+-      }
+       expect(g.permissions.length).toBeGreaterThanOrEqual(1);
+     });
+   });
+ 
++  it("4 个原常显菜单挂独立 read 权限（task-08 FR-01：可按角色分配/收回）", () => {
++    const EXPECTED: Record<string, string> = {
++      skills: "skill:read",
++      mcp: "mcp:read",
++      "agent-profiles": "agent_profile:read",
++      sessions: "agent_session:read",
++    };
++    Object.entries(EXPECTED).forEach(([menuKey, permKey]) => {
++      const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === menuKey);
++      expect(g, `missing menu ${menuKey}`).toBeDefined();
++      expect(g!.permissions.map((p) => p.key)).toEqual([permKey]);
++    });
++  });
++
+   it("git-identities 菜单应有 1 个 permission (git_identity:admin；对齐后端 require_permission_any(GIT_IDENTITY_ADMIN))", () => {
+     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "git-identities");
+     expect(g).toBeDefined();
+@@ -232,29 +234,19 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     expect(g!.pickerHidden).toBeFalsy();
+   });
+ 
+-  it("所有 menu 都不设 pickerHidden（skills 例外：D-003 无独立权限可配；ql-005 移除 git-identities 的 pickerHidden）", () => {
+-    // 验证全表无 pickerHidden=true 残留（skills 例外）
++  it("所有 menu 都不设 pickerHidden（task-08 后 skills/mcp 补独立权限进勾选器，无例外）", () => {
++    // 验证全表无 pickerHidden=true 残留（原 skills/mcp 空权限例外已随 FR-01 权限化移除）
+     MENU_PERMISSION_GROUPS.forEach((g) => {
+-      if (g.menuKey === "skills") {
+-        // 2026-07-31-custom-skill-per-user D-003：skills 无独立权限（permissions:[]），pickerHidden 屏蔽空卡
+-        expect(g.pickerHidden).toBe(true);
+-        return;
+-      }
+-      if (g.menuKey === "mcp") {
+-        // 2026-09-10-mcp-central-registry task-11：同 skills 形态（permissions:[] 无独立权限可配）
+-        expect(g.pickerHidden).toBe(true);
+-        return;
+-      }
+       expect(g.pickerHidden).toBeFalsy();
+     });
+   });
+ 
+-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 64", () => {
++  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 69", () => {
+     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
+     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
+-    // 47 (非 PPM, 含 llm_provider:read) + 17 (PPM 菜单/读，已删问题变更 + weekly-plan:view) = 64
+-    expect(BACKEND_PERMISSION_KEYS.length).toBe(64);
+-    expect(valid.size).toBe(64);
++    // 64 (原) + 5 (2026-09-18-web-menu-management task-01 新增菜单读权限 + menu:admin) = 69
++    expect(BACKEND_PERMISSION_KEYS.length).toBe(69);
++    expect(valid.size).toBe(69);
+ 
+     MENU_PERMISSION_GROUPS.forEach((g) => {
+       g.permissions.forEach((p) => {
+@@ -348,7 +340,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     expect(g!.permissions).toEqual([{ key: "llm_provider:read", name: "供应商管理" }]);
+   });
+ 
+-  it("新增 skills 菜单：agent 组 /settings/skills + permissions:[] 对所有登录用户可见（2026-07-31-custom-skill-per-user D-003）", () => {
++  it("skills 菜单：agent 组 /settings/skills + skill:read 门控（task-08 FR-01 权限化，进角色勾选器）", () => {
+     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "skills");
+     expect(g).toBeDefined();
+     expect(g!.section).toBe("agent");
+@@ -356,12 +348,12 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     expect(g!.href).toBe("/settings/skills");
+     expect(g!.absolute).toBe(true);
+     expect(g!.matchPattern).toBe("/settings/skills");
+-    // D-003：skills 菜单放开，所有登录用户可见（permissions:[]），无独立权限可配（pickerHidden:true）
+-    expect(g!.permissions).toEqual([]);
+-    expect(g!.pickerHidden).toBe(true);
++    // 2026-09-18-web-menu-management FR-01：改挂独立 skill:read（去 pickerHidden 进勾选器）
++    expect(g!.permissions).toEqual([{ key: "skill:read", name: "技能查看" }]);
++    expect(g!.pickerHidden).toBeFalsy();
+   });
+ 
+-  it("新增 mcp 菜单：agent 组 /settings/mcp + permissions:[] 全员可见（2026-09-10-mcp-central-registry task-11 更名+主代理裁决放开）", () => {
++  it("mcp 菜单：agent 组 /settings/mcp + mcp:read 门控（task-08 FR-01 权限化，进角色勾选器）", () => {
+     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "mcp");
+     expect(g).toBeDefined();
+     expect(g!.section).toBe("agent");
+@@ -369,13 +361,13 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     expect(g!.href).toBe("/settings/mcp");
+     expect(g!.absolute).toBe(true);
+     expect(g!.matchPattern).toBe("/settings/mcp");
+-    // D-001 双层可见性：普通用户进页面管理自己的私有库（FR-01），写权限由 API 层
+-    // 权限矩阵控制（对齐 skills D-003 放开先例）
+-    expect(g!.permissions).toEqual([]);
+-    expect(g!.pickerHidden).toBe(true);
++    // 2026-09-18-web-menu-management FR-01：改挂独立 mcp:read（去 pickerHidden 进勾选器）；
++    // 库读写仍由 API 层权限矩阵控制（非 admin 平台库写 403）
++    expect(g!.permissions).toEqual([{ key: "mcp:read", name: "MCP 查看" }]);
++    expect(g!.pickerHidden).toBeFalsy();
+   });
+ 
+-  it("新增 agent-profiles 菜单：agent 组 /agent-profiles + permissions:[] 对所有登录用户可见（task-05 / D-001/D-007）", () => {
++  it("agent-profiles 菜单：agent 组 /agent-profiles + agent_profile:read 门控（task-08 FR-01 权限化）", () => {
+     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "agent-profiles");
+     expect(g).toBeDefined();
+     expect(g!.section).toBe("agent");
+@@ -383,9 +375,40 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     expect(g!.href).toBe("/agent-profiles");
+     expect(g!.absolute).toBe(true);
+     expect(g!.matchPattern).toBe("/agent-profiles");
+-    // 对齐 skills（D-003）：菜单对所有登录用户可见，无独立权限可配。
+-    // 空 permissions 经 permission.ts:41（user 非 null → return true）判定登录即可见。
+-    expect(g!.permissions).toEqual([]);
++    // 2026-09-18-web-menu-management FR-01：permissions 由 []（登录即可见）改为
++    // 独立 agent_profile:read，可在角色管理按角色分配/收回
++    expect(g!.permissions).toEqual([
++      { key: "agent_profile:read", name: "智能体档案查看" },
++    ]);
++  });
++
++  it("sessions 菜单：agent 组 /sessions + agent_session:read 门控（task-08 FR-01 权限化）", () => {
++    const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "sessions");
++    expect(g).toBeDefined();
++    expect(g!.section).toBe("agent");
++    expect(g!.menuLabel).toBe("智能体会话");
++    expect(g!.href).toBe("/sessions");
++    expect(g!.absolute).toBe(true);
++    expect(g!.matchPattern).toBe("/sessions");
++    // 2026-09-18-web-menu-management FR-01：permissions 由 []（登录即可见）改为
++    // 独立 agent_session:read；会话列表后端仍按 user_id 隔离
++    expect(g!.permissions).toEqual([
++      { key: "agent_session:read", name: "智能体会话查看" },
++    ]);
++  });
++
++  it("新增 menus 菜单：system 组 /admin/menus + menu:admin 门控（task-08 / R-03 注册表登记）", () => {
++    const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "menus");
++    expect(g).toBeDefined();
++    expect(g!.section).toBe("system");
++    expect(g!.menuLabel).toBe("菜单管理");
++    expect(g!.href).toBe("/admin/menus");
++    expect(g!.absolute).toBe(true);
++    expect(g!.matchPattern).toBe("/admin/menus");
++    // menu:admin 门控管理页入口与覆盖写端点（platform:admin 自动通过）；
++    // hidden 覆盖豁免（防自锁 R-03）归 mergeMenus，此处只登记注册表数据
++    expect(g!.permissions).toEqual([{ key: "menu:admin", name: "菜单管理" }]);
++    expect(g!.pickerHidden).toBeFalsy();
+   });
+ });
+ 
+diff --git a/frontend/src/lib/__tests__/permission.test.ts b/frontend/src/lib/__tests__/permission.test.ts
+index 0a482012..93a27240 100644
+--- a/frontend/src/lib/__tests__/permission.test.ts
++++ b/frontend/src/lib/__tests__/permission.test.ts
+@@ -210,7 +210,7 @@ describe("visibleMenusBySection", () => {
+   it("FR-06 #1: with ['user:read'] on 'system' returns only users (1 entry)", () => {
+     // Given user.permissions = ["user:read"]
+     // When visibleMenusBySection(user, "system")
+-    // Then 长度 = 1 且 menuKey === "users"（organizations/roles/settings 权限不命中）
++    // Then 长度 = 1 且 menuKey === "users"（organizations/roles/settings/menus 权限不命中）
+     const user = mkUser({ permissions: ["user:read"] });
+     const result = visibleMenusBySection(user, "system");
+     expect(result).toHaveLength(1);
+@@ -226,10 +226,11 @@ describe("visibleMenusBySection", () => {
+     expect(result).toEqual([]);
+   });
+ 
+-  it("FR-06 #3: platform admin sees all 4 entries in 'system' section", () => {
++  it("FR-06 #3: platform admin sees all 5 entries in 'system' section", () => {
+     // Given is_platform_admin = true
+     // When visibleMenusBySection(user, "system")
+-    // Then 全部 4 条（users / organizations / roles / settings），顺序与数据源一致
++    // Then 全部 5 条（users / organizations / roles / settings / menus），顺序与数据源一致
++    // （2026-09-18-web-menu-management task-08：system 组新增 menus 菜单项，4 → 5）
+     const user = mkUser({ is_platform_admin: true, permissions: [] });
+     const result = visibleMenusBySection(user, "system");
+     expect(result.map((g) => g.menuKey)).toEqual([
+@@ -237,6 +238,7 @@ describe("visibleMenusBySection", () => {
+       "organizations",
+       "roles",
+       "settings",
++      "menus",
+     ]);
+   });
+ 
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 377085f8..91c596d8 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -10582,6 +10582,53 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/menu-overrides": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * List Menu Overrides
++         * @description 全量菜单覆盖（menu_key 升序）。仅需认证：内容为全局显示配置，无敏感
++         *     信息（R-06）；FR-05 下发端点，导航侧所有登录用户消费。
++         */
++        get: operations["list_menu_overrides_api_menu_overrides_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
++    "/api/menu-overrides/{menu_key}": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        /**
++         * Upsert Menu Override
++         * @description 按 menu_key 建行或整行覆盖写（``None`` = 清除该维度回代码默认）。
++         *     label/sort_order 校验与 ``menu_override.upserted`` 审计在 service 层。
++         */
++        put: operations["upsert_menu_override_api_menu_overrides__menu_key__put"];
++        post?: never;
++        /**
++         * Delete Menu Override
++         * @description 按 menu_key 整行删除（该菜单全部恢复默认）。行不存在时幂等 204，
++         *     ``menu_override.deleted`` 审计在 service 层。
++         */
++        delete: operations["delete_menu_override_api_menu_overrides__menu_key__delete"];
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/spec-workspace": {
+         parameters: {
+             query?: never;
+@@ -18078,6 +18125,46 @@ export interface components {
+             /** Init Synced Spec Version */
+             init_synced_spec_version: number | null;
+         };
++        /**
++         * MenuOverrideListResponse
++         * @description GET 列表响应包装（仓库 list 响应惯例：顶层 ``items`` 字段）。
++         */
++        MenuOverrideListResponse: {
++            /** Items */
++            items: components["schemas"]["MenuOverrideRead"][];
++        };
++        /**
++         * MenuOverrideRead
++         * @description 单条菜单覆盖（读响应；全局生效，无 role/user 维度，D-002@v1）。
++         *
++         *     对外字段名为 ``label``，映射模型列 ``MenuOverride.label_override``
++         *     （service 层组装时改名，from_attributes 不自动命中需显式构造）。
++         */
++        MenuOverrideRead: {
++            /** Menu Key */
++            menu_key: string;
++            /** Label */
++            label: string | null;
++            /** Sort Order */
++            sort_order: number | null;
++            /** Hidden */
++            hidden: boolean;
++        };
++        /**
++         * MenuOverrideUpsert
++         * @description Body of ``PUT /api/menu-overrides/{menu_key}``。
++         *
++         *     三字段全可空：``None`` = 清除该维度覆盖、回退代码默认。label 1–30 字符、
++         *     sort_order 0–999；未知字段拒收（extra=forbid）。
++         */
++        MenuOverrideUpsert: {
++            /** Label */
++            label?: string | null;
++            /** Sort Order */
++            sort_order?: number | null;
++            /** Hidden */
++            hidden?: boolean | null;
++        };
+         /**
+          * MergePreviewOut
+          * @description 合并预览（dry-run，不落盘）：将追加的段落文本与 INDEX 路由行。
+@@ -18835,7 +18922,7 @@ export interface components {
+          * Permission
+          * @enum {string}
+          */
+-        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "daemon:borrow" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view";
++        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "daemon:borrow" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
+         /**
+          * PermissionResponseRead
+          * @description REST response body for POST /sessions/{id}/permissions/{req}/response.
+@@ -45716,6 +45803,90 @@ export interface operations {
+             };
+         };
+     };
++    list_menu_overrides_api_menu_overrides_get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["MenuOverrideListResponse"];
++                };
++            };
++        };
++    };
++    upsert_menu_override_api_menu_overrides__menu_key__put: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                menu_key: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["MenuOverrideUpsert"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["MenuOverrideRead"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    delete_menu_override_api_menu_overrides__menu_key__delete: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                menu_key: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            204: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content?: never;
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_spec_workspace_api_workspaces__workspace_id__spec_workspace_get: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/menu-overrides.ts b/frontend/src/lib/menu-overrides.ts
+new file mode 100644
+index 00000000..6ad0d6aa
+--- /dev/null
++++ b/frontend/src/lib/menu-overrides.ts
+@@ -0,0 +1,179 @@
++/**
++ * menu-overrides — 菜单显示覆盖合并层（2026-09-18-web-menu-management task-09，FR-05）。
++ *
++ * 三层管线定位（本文件是第三层，前两层代码一律不动）：
++ *   1. 注册表（menu-permissions.ts，task-08 / D-001 单一数据源）——菜单目录、
++ *      默认显示名、权限映射的唯一事实来源；
++ *   2. 权限过滤（permission.ts，W1 产物）——canSeeMenu / visibleMenusBySection
++ *      按用户权限决定显隐，与覆盖合并是两个独立维度；
++ *   3. 本文件——拉取全局显示覆盖（GET /api/menu-overrides，仅需认证 R-06），
++ *      用纯函数 mergeMenus 把覆盖叠加到注册表之上（label 改名 / hidden 剔除 /
++ *      组内排序），不改前两层任何代码。
++ *
++ * 数据流：导航 = 注册表（menu-permissions.ts） × 权限过滤（permission.ts）
++ * × 覆盖合并（本文件 mergeMenus）。app-shell（task-10）渲染前把注册表（或权限
++ * 过滤后的子集）经 mergeMenus 叠加覆盖；菜单管理页（task-11）复用
++ * useMenuOverrides 展示覆盖现状、写成功后按 MENU_OVERRIDES_QUERY_KEY
++ * invalidate 刷新导航。
++ *
++ * 降级铁律（NFR-02 / FR-05）：覆盖接口 5xx / 网络错误 / 首帧加载中，overrides
++ * 一律回退空数组——mergeMenus 空覆盖直通，导航渲染与未配置覆盖时逐项一致，
++ * 渲染层永不因覆盖接口故障抛错或空白。
++ *
++ * 类型全部取 api-types.ts 生成物（task-07 gen:types 产出），禁手写重复接口；
++ * 注意 MenuOverrideRead 对外字段名为 label（schema 层映射模型列
++ * label_override，见 api-types.ts schema 描述）。
++ */
++import { useQuery } from "@tanstack/react-query";
++import { ApiError, apiFetch } from "@/lib/api";
++import type { components } from "@/lib/api-types";
++import type { MenuPermissionGroup, MenuSection } from "@/lib/menu-permissions";
++
++/* ------------------------------------------------------------------ */
++/*  Types（api-types 生成物单一来源，再导出供 task-10/11/12 消费）        */
++/* ------------------------------------------------------------------ */
++
++/** 单条菜单覆盖：menu_key / label（= 模型列 label_override）/ sort_order / hidden。 */
++export type MenuOverrideRead = components["schemas"]["MenuOverrideRead"];
++
++/** GET 列表响应包装 { items }（仓库 list 响应惯例）。 */
++export type MenuOverrideListResponse =
++  components["schemas"]["MenuOverrideListResponse"];
++
++/* ------------------------------------------------------------------ */
++/*  Query key + fetch（管理页写后据此 invalidate）                       */
++/* ------------------------------------------------------------------ */
++
++/**
++ * 覆盖查询 key。本文件内联声明、不进 lib/query-keys.ts 集中工厂——保持
++ * task-09 单文件交付面（allowed_paths 仅本文件）。菜单管理页（task-11）
++ * PUT/DELETE 成功后据此 invalidate，导航侧 useMenuOverrides 随之重拉刷新。
++ */
++export const MENU_OVERRIDES_QUERY_KEY = ["menuOverrides"] as const;
++
++/**
++ * 拉全量菜单覆盖（menu_key 升序），返回 items。
++ * GET /api/menu-overrides 仅需认证（R-06：内容为全局显示配置，无敏感信息）；
++ * 只拉差异覆盖，不引入后端菜单目录拉取或本地持久化（D-001）。
++ */
++export async function fetchMenuOverrides(): Promise<MenuOverrideRead[]> {
++  const resp = await apiFetch<MenuOverrideListResponse>("/api/menu-overrides");
++  return resp.items;
++}
++
++/* ------------------------------------------------------------------ */
++/*  Hook（导航侧与管理页共用）                                          */
++/* ------------------------------------------------------------------ */
++
++/**
++ * 菜单覆盖查询（导航侧 app-shell 与菜单管理页共用）。
++ *
++ * - staleTime 30s：显示配置低频变更，导航多组件挂载共享一次拉取，不反复打接口；
++ * - 降级语义（NFR-02 / FR-05）：queryFn 抛错（5xx / 网络错误 / 超时）或首帧
++ *   isLoading 时 data 为 undefined，overrides 回退空数组——渲染层永不因覆盖
++ *   接口故障抛错或空白；空覆盖经 mergeMenus 直通 = 注册表默认渲染。
++ */
++export function useMenuOverrides() {
++  const q = useQuery<MenuOverrideRead[], ApiError>({
++    queryKey: MENU_OVERRIDES_QUERY_KEY,
++    queryFn: fetchMenuOverrides,
++    staleTime: 30_000,
++  });
++  return {
++    /** 覆盖列表；失败 / 加载中恒为空数组（直通降级，勿在此之上区分错误态渲染导航） */
++    overrides: q.data ?? [],
++    isLoading: q.isLoading,
++    isFetching: q.isFetching,
++    isError: q.isError,
++    error: q.error,
++    refetch: q.refetch,
++  };
++}
++
++/* ------------------------------------------------------------------ */
++/*  mergeMenus 纯函数                                                   */
++/* ------------------------------------------------------------------ */
++
++/**
++ * R-03：菜单管理页自身的 menuKey——hidden 覆盖恒豁免。防自锁：管理入口若可被
++ * 隐藏，一旦误操作将无人能再进管理页恢复（注册表条目由 task-08 登记）。
++ */
++const MENUS_MENU_KEY = "menus";
++
++/**
++ * 注册表 × 覆盖纯合并（design「接口定义」四规则，逐条对应实现）：
++ *
++ * 1. label = override.label ?? menuLabel——label 为 null 表示用代码默认名；
++ *    后端校验 label 1–30 字符，非空字符串才可能覆盖到这里；
++ * 2. hidden = true 的行剔除；menuKey === "menus" 恒豁免不剔除（R-03 防自锁，
++ *    该行的 label / 排序覆盖仍正常生效）；
++ * 3. 组内（同 section）按 sort_order ?? 声明序索引稳定排序——同值保持声明序；
++ *    section 之间顺序不动；
++ * 4. 孤儿 override（registry 无此 menuKey）在按 key 索引时天然查不到，
++ *    自然忽略（后端不校验注册表存在性，R-01）。
++ *
++ * 纯函数边界：不 mutate 入参（覆盖 label 时浅拷贝新对象，未覆盖行复用原引用）、
++ * 不触网络与 React 生命周期；navHidden 过滤仍归渲染管线（app-shell），
++ * 本函数不重复处理；权限过滤（permission.ts）与覆盖合并两维度独立，
++ * 本函数不做任何权限判断。
++ *
++ * 输入形态兼容：整表（MENU_PERMISSION_GROUPS，section 连续块）或单 section
++ * 子集（visibleMenusBySection 输出）均可——分桶按 section 首次出现顺序拼接，
++ * 对 section 连续输入即输入原顺序。
++ */
++export function mergeMenus(
++  registry: MenuPermissionGroup[],
++  overrides: MenuOverrideRead[],
++): MenuPermissionGroup[] {
++  // 按 menuKey 建覆盖索引（menu_overrides.menu_key 唯一；重复行理论上不存在，
++  // 后行覆盖前行，无害）。规则 4：registry 无此 key 的覆盖永远不会被查询到。
++  const overrideByKey = new Map(
++    overrides.map((o) => [o.menu_key, o] as const),
++  );
++
++  /** 分桶中间结构：section → 带声明序索引的存活行（Map 保插入序）。 */
++  const buckets = new Map<
++    MenuSection,
++    Array<{
++      menu: MenuPermissionGroup;
++      /** 在 registry 中的位置（过滤子集仍保有相对声明序，等价可用） */
++      declaredIndex: number;
++      override: MenuOverrideRead | undefined;
++    }>
++  >();
++
++  registry.forEach((menu, declaredIndex) => {
++    const override = overrideByKey.get(menu.menuKey);
++    // 规则 2：hidden 剔除 + menus 恒豁免（R-03）
++    if (override?.hidden && menu.menuKey !== MENUS_MENU_KEY) return;
++    let bucket = buckets.get(menu.section);
++    if (!bucket) {
++      bucket = [];
++      buckets.set(menu.section, bucket);
++    }
++    bucket.push({ menu, declaredIndex, override });
++  });
++
++  const merged: MenuPermissionGroup[] = [];
++  for (const bucket of buckets.values()) {
++    // 规则 3：sortValue = override.sort_order ?? 声明序索引。sort 作用于 map
++    // 产生的新数组（不碰入参）；现代引擎 Array#sort 稳定，同值保声明序，
++    // 未覆盖行 sortValue = 自身索引天然唯一、与覆盖值同号时也按声明序在前。
++    bucket
++      .map((entry) => ({
++        entry,
++        sortValue: entry.override?.sort_order ?? entry.declaredIndex,
++      }))
++      .sort((a, b) => a.sortValue - b.sortValue)
++      .forEach(({ entry }) => {
++        const { menu, override } = entry;
++        // 规则 1：label 覆盖（null = 用默认名，复用原对象引用）
++        merged.push(
++          override?.label != null
++            ? { ...menu, menuLabel: override.label }
++            : menu,
++        );
++      });
++  }
++  return merged;
++}
+diff --git a/frontend/src/lib/menu-permissions.ts b/frontend/src/lib/menu-permissions.ts
+index a1ad83ee..3d3a7c8f 100644
+--- a/frontend/src/lib/menu-permissions.ts
++++ b/frontend/src/lib/menu-permissions.ts
+@@ -18,7 +18,29 @@
+  * 管理菜单独立权限（ql-004/005）：config/system 组子菜单各有独立 admin 权限
+  * （settings:admin / api_key:admin / runtime:admin / git_identity:admin），
+  * 避免共用 platform:admin 致 picker 重复或缺失。后端 router 各自 require 对应权限。
++ *
++ * menuKey 稳定标识规约（R-01）：menuKey 是覆盖表 menu_overrides.menu_key 的
++ * 关联键，禁止重命名或复用——前端重构改 menuKey 会使已存的覆盖行变孤儿、
++ * 被合并层静默忽略（不报错）。menuKey/href/section/matchPattern 同为 nav 渲染
++ * 与 picker 折叠的既有契约，非经变更评审不得改动。
++ *
++ * 2026-09-18-web-menu-management（FR-01/FR-04）：
++ * - skills / mcp / agent-profiles / sessions 4 菜单由空 permissions（登录常显）
++ *   改为各挂独立 read 权限（skill:read / mcp:read / agent_profile:read /
++ *   agent_session:read），可在角色管理页按角色分配/收回；存量角色可见性由
++ *   后端种子迁移保现状（4 个新权限 key 插入 role_permissions，覆盖全部现存角色）。
++ * - system 组新增「菜单管理」menus 菜单项（menu:admin 门控，/admin/menus 入口）。
++ * - PermissionItem.key 由 string 收紧为 api-types 生成的 Permission 联合类型
++ *   （PermissionKey），后端枚举漂移在编译期暴露。
++ */
++
++import type { components } from "@/lib/api-types";
++
++/**
++ * 后端 Permission 枚举联合类型（OpenAPI 生成，api-types.ts）。
++ * 权限 key 手写漂移在此编译期暴露（FR-04）。
+  */
++export type PermissionKey = components["schemas"]["Permission"];
+ 
+ export type MenuSection =
+   | "workspace"
+@@ -29,8 +51,8 @@ export type MenuSection =
+   | "ppm";
+ 
+ export interface PermissionItem {
+-  /** 权限标识，必须命中后端 Permission 枚举 */
+-  key: string;
++  /** 权限标识，必须命中后端 Permission 枚举（生成联合类型，漂移在编译期暴露） */
++  key: PermissionKey;
+   /** 中文展示名 */
+   name: string;
+   /** 可选描述 */
+@@ -168,17 +190,10 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+   {
+     // 2026-07-29-sidebar-menu-restructure 新增：技能管理提为独立菜单，指向平台级
+     // /settings/skills（工作区级仍在工作区内部访问）。
+-    // 2026-07-31-custom-skill-per-user D-003：权限放宽——去掉 settings:admin 门槛，
+-    // 改为所有登录用户可见。理由：技能是个人资产（per-user），后端 custom-skills 端点
+-    // （task-03）已从 SETTINGS_ADMIN 放宽到任意登录用户，前端菜单须对齐，否则非管理员
+-    // 看不到入口（前后端不一致 bug）。permissions 置空 = 不再要求任何特定权限。
+-    //
+-    // ⚠️ 配套依赖（超出本 task allowed_paths）：lib/permission.ts 的 canSeeMenu →
+-    // hasAnyPermission 当前对空 permissions 显式 return false（permission.ts:41），
+-    // 即「空 = 非管理员不可见」而非「空 = 登录即可见」。要让本菜单真正对所有登录用户
+-    // 可见，须配套调整 hasAnyPermission：当 perms 为空且 user 非 null 时返回 true
+-    // （登录即可见），并同步更新 permission.test.ts 中「空 perms → false」的断言。
+-    // pickerHidden: true——本菜单已无独立权限可配，AdminRolePermissionPicker 不渲染卡片。
++    // 2026-07-31-custom-skill-per-user D-003：曾放宽为空 permissions（登录可见）。
++    // 2026-09-18-web-menu-management FR-01：改挂独立 skill:read 权限，可在角色
++    // 管理按角色分配/收回（进入 picker 勾选器，去 pickerHidden）；存量角色可见性
++    // 由后端种子迁移保现状（4 个新 read 权限 key 授予全部现存角色）。
+     section: "agent",
+     menuKey: "skills",
+     menuLabel: "技能管理",
+@@ -186,16 +201,16 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     href: "/settings/skills",
+     absolute: true,
+     matchPattern: "/settings/skills",
+-    permissions: [],
+-    pickerHidden: true,
++    permissions: [{ key: "skill:read", name: "技能查看" }],
+   },
+   {
+     // 2026-07-29-sidebar-menu-restructure 新增（D-003）：MCP 管理提为独立菜单，
+     // 指向平台级 /settings/mcp。
+     // 2026-09-10-mcp-central-registry task-11：菜单名改「MCP 资产库」（页面重构为
+-    // 平台共享库/我的库双 tab 资产管理）。主代理裁决：permissions 放开为 []
+-    // （对齐 skills D-003 先例）——D-001 双层可见性要求普通用户能进页面管理自己
+-    // 的私有库（FR-01），菜单只是入口可见性，写权限由 API 层权限矩阵全权控制
++    // 平台共享库/我的库双 tab 资产管理），permissions 曾放开为 []（对齐 skills 先例）。
++    // 2026-09-18-web-menu-management FR-01：改挂独立 mcp:read 权限，可在角色管理
++    // 按角色分配/收回（进入 picker 勾选器，去 pickerHidden）；存量角色可见性由后端
++    // 种子迁移保现状。菜单仍只是入口可见性，库读写由 API 层权限矩阵控制
+     // （非 admin 平台库写 403）。URL 不变。
+     section: "agent",
+     menuKey: "mcp",
+@@ -204,15 +219,15 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     href: "/settings/mcp",
+     absolute: true,
+     matchPattern: "/settings/mcp",
+-    permissions: [],
+-    pickerHidden: true,
++    permissions: [{ key: "mcp:read", name: "MCP 查看" }],
+   },
+   {
+     // 2026-08-04-agent-profile-ui-redesign task-05 新增（D-001/D-007）：智能体档案
+     // 提为侧边栏一级菜单，点击直达全局卡片墙 /agent-profiles（跨工作区聚合视图）。
+-    // permissions:[] 对齐 skills（D-003）：档案对所有登录用户可见，菜单不挂独立权限；
+-    // 空 permissions 经 permission.ts:41 hasAnyPermission（user 非 null 时 return true）
+-    // 判定为登录即可见。工作区详情页快捷入口（workspaces/[id]/page.tsx:361）保留不动。
++    // 2026-09-18-web-menu-management FR-01：permissions 由 []（登录即可见）改为
++    // 独立 agent_profile:read 权限（任一命中即可见），可在角色管理按角色分配/收回；
++    // 存量角色可见性由后端种子迁移保现状。工作区详情页快捷入口
++    // （workspaces/[id]/page.tsx:361）保留不动。
+     section: "agent",
+     menuKey: "agent-profiles",
+     menuLabel: "智能体档案",
+@@ -220,13 +235,15 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     href: "/agent-profiles",
+     absolute: true,
+     matchPattern: "/agent-profiles",
+-    permissions: [],
++    permissions: [{ key: "agent_profile:read", name: "智能体档案查看" }],
+   },
+   {
+     // 2026-08-14-sessions-portal task-10 新增（design §5 Wave3 / FR-01 / FR-02）：
+     // 智能体会话总入口 /sessions（左会话列表 + 右新建/会话两态，跨机器跨智能体统一
+-    // 会话视图）。permissions:[] 对齐 agent-profiles/skills：会话列表后端已按
+-    // user_id 隔离，所有登录用户可见，菜单不挂独立权限（登录即可见）。
++    // 会话视图）。2026-09-18-web-menu-management FR-01：permissions 由 []（登录
++    // 即可见）改为独立 agent_session:read 权限（任一命中即可见），可在角色管理按
++    // 角色分配/收回；存量角色可见性由后端种子迁移保现状。会话列表后端仍按
++    // user_id 隔离。
+     section: "agent",
+     menuKey: "sessions",
+     menuLabel: "智能体会话",
+@@ -234,7 +251,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     href: "/sessions",
+     absolute: true,
+     matchPattern: "/sessions",
+-    permissions: [],
++    permissions: [{ key: "agent_session:read", name: "智能体会话查看" }],
+   },
+ 
+   // ── config 配置中心（4 条，含新增 llm-providers；runtimes 自 system 移入，D-006）
+@@ -325,7 +342,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     permissions: [{ key: "incident:read", name: "事件查看" }],
+   },
+ 
+-  // ── system 系统管理（4 条：用户/组织/角色/设置）───────────────
++  // ── system 系统管理（5 条：用户/组织/角色/设置/菜单）──────────
+   {
+     section: "system",
+     menuKey: "users",
+@@ -378,6 +395,20 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     // （platform:admin 自动通过）。/users 系列仍 require_platform_admin。
+     permissions: [{ key: "settings:admin", name: "平台设置管理" }],
+   },
++  {
++    // 2026-09-18-web-menu-management 新增：菜单管理页入口 /admin/menus（菜单覆盖
++    // 的显示名/组内排序/全局隐藏管理）。menu:admin 门控（platform:admin 自动通过），
++    // 后端 GET /api/menu-overrides 仅需认证，PUT/DELETE require menu:admin。
++    // app-shell 渲染时对本 menuKey 的 hidden 覆盖豁免（防自锁，R-03）。
++    section: "system",
++    menuKey: "menus",
++    menuLabel: "菜单管理",
++    icon: "📑",
++    href: "/admin/menus",
++    absolute: true,
++    matchPattern: "/admin/menus",
++    permissions: [{ key: "menu:admin", name: "菜单管理" }],
++  },
+ 
+   // ── ppm（14 条，平台级项目与问题管理）──────────────────────
+   // change 2026-06-20-ppm-module-migration task-13：13 个 ppm 子域页面登记。

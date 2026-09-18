@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>菜单管理 · 原型 — 2026-09-18-web-menu-management</title>
+<style>
+  /* ── 主题 token：取值单一源 frontend/src/styles/themes.ts（blue / ai-native / dark 三套）── */
+  :root, [data-theme="ai-native"] {
+    --primary:#7C3AED; --primary-hover:#6D28D9; --accent:#0891B2; --bg:#FAF5FF; --card:#FFFFFF; --border:#DDD6FE;
+    --brand-50:#f5f3ff; --brand-100:#ede9fe; --brand-200:#ddd6fe; --brand-300:#c4b5fd; --brand-400:#a78bfa;
+    --brand-500:#8b5cf6; --brand-600:#7c3aed; --brand-700:#6d28d9; --brand-800:#5b21b6; --brand-900:#4c1d95;
+    --slate-50:#f8fafc; --slate-100:#f1f5f9; --slate-200:#e2e8f0; --slate-300:#cbd5e1; --slate-400:#94a3b8;
+    --slate-500:#64748b; --slate-600:#475569; --slate-700:#334155; --slate-800:#1e293b; --slate-900:#0f172a;
+    --success:#059669; --warning:#D97706; --error:#DC2626; --info:#0891B2;
+    --shadow:0 1px 3px rgba(76,29,149,.08),0 4px 16px rgba(76,29,149,.06);
+  }
+  [data-theme="blue"] {
+    --primary:#2563EB; --primary-hover:#1d4ed8; --accent:#06b6d4; --bg:#f8fafc; --card:#ffffff; --border:#e2e8f0;
+    --brand-50:#eff6ff; --brand-100:#dbeafe; --brand-200:#bfdbfe; --brand-300:#93c5fd; --brand-400:#60a5fa;
+    --brand-500:#3b82f6; --brand-600:#2563eb; --brand-700:#1d4ed8; --brand-800:#1e40af; --brand-900:#1e3a8a;
+    --shadow:0 1px 3px rgba(30,58,138,.08),0 4px 16px rgba(30,58,138,.06);
+  }
+  [data-theme="dark"] {
+    --primary:#0891b2; --primary-hover:#06b6d4; --accent:#22d3ee; --bg:#09090b; --card:#27272a; --border:#3f3f46;
+    --brand-50:#083344; --brand-100:#164e63; --brand-200:#155e75; --brand-300:#0e7490; --brand-400:#0891b2;
+    --brand-500:#06b6d4; --brand-600:#22d3ee; --brand-700:#67e8f9; --brand-800:#a5f3fc; --brand-900:#cffafe;
+    --slate-50:#09090b; --slate-100:#18181b; --slate-200:#27272a; --slate-300:#3f3f46; --slate-400:#52525b;
+    --slate-500:#71717a; --slate-600:#a1a1aa; --slate-700:#d4d4d8; --slate-800:#e4e4e7; --slate-900:#f4f4f5;
+    --success:#10b981; --warning:#f59e0b; --error:#ef4444; --info:#22d3ee;
+    --shadow:0 1px 3px rgba(0,0,0,.5),0 4px 16px rgba(0,0,0,.35);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--slate-700); padding:32px 24px; font-size:14px; }
+  .wrap { max-width:1080px; margin:0 auto; }
+  /* 页头 */
+  .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:20px; }
+  .page-head h1 { font-size:22px; font-weight:700; color:var(--slate-800); display:flex; align-items:center; gap:10px; }
+  .page-head h1 .dot { width:10px; height:10px; border-radius:3px; background:linear-gradient(135deg,var(--brand-500),var(--brand-700)); }
+  .page-head p { margin-top:6px; color:var(--slate-500); font-size:13px; }
+  .theme-switch { display:flex; gap:6px; }
+  .theme-switch button { border:1px solid var(--border); background:var(--card); color:var(--slate-600); padding:5px 12px; border-radius:8px; cursor:pointer; font-size:12px; }
+  .theme-switch button.on { background:var(--brand-600); border-color:var(--brand-600); color:#fff; }
+  /* 说明条 */
+  .note { display:flex; gap:10px; align-items:flex-start; background:var(--brand-50); border:1px solid var(--brand-200); border-radius:10px; padding:10px 14px; margin-bottom:16px; font-size:12.5px; color:var(--slate-600); }
+  .note b { color:var(--brand-700); }
+  /* 表格卡片 */
+  .card { background:var(--card); border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow); overflow:hidden; }
+  table { width:100%; border-collapse:collapse; }
+  thead th { text-align:left; font-size:12px; font-weight:600; color:var(--slate-500); padding:10px 12px; background:var(--brand-50); border-bottom:1px solid var(--border); white-space:nowrap; }
+  tbody td { padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  tbody tr:hover td { background:var(--brand-50); }
+  tr.section-row td { background:var(--slate-100); font-weight:700; color:var(--slate-700); font-size:12.5px; letter-spacing:.5px; }
+  tr.section-row:hover td { background:var(--slate-100); }
+  tr.hidden-menu td.menu-name, tr.hidden-menu td.label-cell { opacity:.45; }
+  .badge-off { display:inline-block; margin-left:6px; font-size:11px; color:var(--error); border:1px solid var(--error); border-radius:4px; padding:0 4px; }
+  /* 排序按钮 */
+  .mv { display:flex; gap:4px; }
+  .mv button { width:24px; height:24px; border:1px solid var(--border); background:var(--card); color:var(--slate-500); border-radius:6px; cursor:pointer; font-size:12px; line-height:1; }
+  .mv button:hover:not(:disabled) { border-color:var(--brand-400); color:var(--brand-600); }
+  .mv button:disabled { opacity:.3; cursor:not-allowed; }
+  /* 显示名 */
+  .label-cell .lbl { color:var(--slate-800); font-weight:600; }
+  .label-cell .overridden { color:var(--brand-700); }
+  .label-cell .tag { display:inline-block; margin-left:6px; font-size:11px; background:var(--brand-100); color:var(--brand-700); border-radius:4px; padding:1px 6px; }
+  .label-cell .reset { margin-left:8px; font-size:12px; color:var(--slate-400); cursor:pointer; text-decoration:underline dotted; }
+  .label-cell .reset:hover { color:var(--warning); }
+  .label-cell input { border:1px solid var(--brand-300); border-radius:6px; padding:3px 8px; font-size:13px; color:var(--slate-800); background:var(--card); width:150px; outline:none; }
+  .menu-name .route { display:block; font-size:11px; color:var(--slate-400); font-family:ui-monospace,monospace; margin-top:2px; }
+  /* 开关 */
+  .switch { position:relative; width:36px; height:20px; display:inline-block; }
+  .switch input { opacity:0; width:0; height:0; }
+  .switch i { position:absolute; inset:0; background:var(--slate-300); border-radius:20px; transition:.2s; }
+  .switch i::after { content:""; position:absolute; width:16px; height:16px; border-radius:50%; background:#fff; top:2px; left:2px; transition:.2s; }
+  .switch input:checked + i { background:var(--primary); }
+  .switch input:checked + i::after { left:18px; }
+  .switch input:disabled + i { opacity:.4; cursor:not-allowed; }
+  .lock-tip { font-size:11px; color:var(--slate-400); margin-left:8px; }
+  /* 权限摘要 */
+  .perm-brief { display:flex; flex-wrap:wrap; gap:4px; }
+  .perm-brief .p { font-size:11px; font-family:ui-monospace,monospace; background:var(--slate-100); border:1px solid var(--border); color:var(--slate-600); border-radius:4px; padding:1px 6px; }
+  .perm-brief .p.more { background:transparent; border:none; color:var(--slate-400); }
+  .expander { cursor:pointer; user-select:none; font-size:12px; color:var(--brand-600); white-space:nowrap; }
+  /* 展开行：权限明细 */
+  tr.detail td { background:var(--slate-50); padding:12px 16px 14px 44px; }
+  .perm-table { width:100%; border-collapse:collapse; }
+  .perm-table th { font-size:11.5px; color:var(--slate-400); font-weight:600; padding:4px 10px; text-align:left; border-bottom:1px solid var(--border); background:transparent; }
+  .perm-table td { padding:6px 10px; border-bottom:1px dashed var(--border); font-size:12.5px; background:transparent; }
+  .perm-table tr:hover td { background:transparent; }
+  .perm-table code { font-family:ui-monospace,monospace; background:var(--brand-50); color:var(--brand-700); border-radius:4px; padding:1px 6px; font-size:11.5px; }
+  .role-chip { display:inline-block; font-size:11.5px; background:var(--brand-100); color:var(--brand-700); border-radius:10px; padding:2px 10px; margin:1px 3px 1px 0; }
+  .role-chip.none { background:var(--slate-100); color:var(--slate-400); }
+  .perm-table .go-roles { font-size:11.5px; color:var(--slate-400); }
+  /* toast */
+  #toast { position:fixed; bottom:24px; right:24px; background:var(--slate-800); color:#fff; border-radius:8px; padding:8px 16px; font-size:13px; box-shadow:var(--shadow); opacity:0; transition:.25s; pointer-events:none; }
+  #toast.show { opacity:1; }
+  footer { margin-top:14px; font-size:12px; color:var(--slate-400); line-height:1.8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="page-head">
+    <div>
+      <h1><span class="dot"></span>菜单管理</h1>
+      <p>调整菜单显示名、排序与全局隐藏（全局生效）；按角色开关菜单请前往角色管理页调整权限分配。</p>
+    </div>
+    <div class="theme-switch" id="themeSwitch">
+      <button data-t="blue">明亮蓝</button><button data-t="ai-native" class="on">AI 紫</button><button data-t="dark">暗夜</button>
+    </div>
+  </div>
+
+  <div class="note">
+    <span>ⓘ</span>
+    <div><b>改动即时保存</b>：每项修改（改名 / 排序 / 隐藏）保存后立即对所有用户生效，无需发版。菜单本身的新增与删除仍随版本发布（菜单对应页面是代码交付物）。隐藏为全局下架：对所有用户（含平台管理员）生效。</div>
+  </div>
+
+  <div class="card">
+    <table id="menuTable">
+      <thead>
+        <tr>
+          <th style="width:64px">排序</th>
+          <th>菜单</th>
+          <th style="width:220px">显示名</th>
+          <th style="width:90px">全局隐藏</th>
+          <th style="width:280px">挂载权限（只读）</th>
+        </tr>
+      </thead>
+      <tbody><!-- JS 渲染 --></tbody>
+    </table>
+  </div>
+
+  <footer>
+    原型说明：数据为菜单注册表（frontend/src/lib/menu-permissions.ts）抽样 + 示例角色；「展开 ▾」查看每个菜单挂载权限的标识、中文名与当前持有角色（数据复用既有角色列表接口客户端反查，不在本页修改）。主题切换演示三套主题 token（themes.ts 单一源）。
+  </footer>
+</div>
+<div id="toast"></div>
+
+<script>
+/* ── 菜单注册表抽样（section → menus）；perms: [key, 中文名, 持有角色...]；o=已覆盖演示 ── */
+const DATA = [
+  ["工作区", [
+    { key:"workspaces", label:"工作区首页", route:"/workspaces", perms:[["workspace:read","工作区查看","管理员,开发者,访客"],["workspace:write","工作区编辑","管理员,开发者"],["workspace:admin","工作区管理","管理员"],["workspace:member:manage","工作区成员管理","管理员"]] },
+    { key:"components", label:"项目组组件", route:"…/components", perms:[["component:read","组件查看","管理员,开发者,访客"]] },
+    { key:"knowledge",  label:"知识库", route:"…/knowledge", o:{label:"团队知识库"}, perms:[["knowledge:read","知识查看","管理员,开发者,访客"],["knowledge:write","知识写入","管理员,开发者"]] },
+  ]],
+  ["智能体", [
+    { key:"skills", label:"技能管理", route:"/settings/skills", isNew:true, perms:[["skill:read","技能管理查看（新增 key）","管理员,开发者,访客"]] },
+    { key:"mcp", label:"MCP 资产库", route:"/settings/mcp", isNew:true, perms:[["mcp:read","MCP 资产库查看（新增 key）","管理员,开发者,访客"]] },
+    { key:"agent-profiles", label:"智能体档案", route:"/agent-profiles", isNew:true, perms:[["agent_profile:read","智能体档案查看（新增 key）","管理员,开发者,访客"]] },
+    { key:"sessions", label:"智能体会话", route:"/sessions", isNew:true, perms:[["agent_session:read","智能体会话查看（新增 key）","管理员,开发者,访客"]] },
+  ]],
+  ["配置中心", [
+    { key:"llm-providers", label:"我的供应商", route:"/settings/providers", perms:[["llm_provider:read","供应商管理","管理员,开发者"]] },
+    { key:"api-keys", label:"API 密钥", route:"/settings/api-keys", perms:[["api_key:admin","API 密钥管理","管理员"]] },
+  ]],
+  ["协作治理", [
+    { key:"approvals", label:"审批中心", route:"…/approvals", perms:[["task:approve","任务审批","管理员"],["change:approve","变更审批","管理员"]] },
+    { key:"audit", label:"审计中心", route:"…/audit", perms:[["platform:audit:read","平台审计读取","管理员"]] },
+  ]],
+  ["项目管理", [
+    { key:"ppm-projects", label:"项目", route:"/ppm/projects", perms:[["ppm:project:read","项目查看","管理员,业务人员"]] },
+    { key:"ppm-kanban", label:"看板", route:"/ppm/kanban", o:{hidden:true}, perms:[["ppm:kanban:view","看板查看","管理员,业务人员"]] },
+  ]],
+  ["系统管理", [
+    { key:"users", label:"用户", route:"/admin/users", perms:[["user:read","用户查看","管理员"],["user:write","用户编辑","管理员"]] },
+    { key:"roles", label:"角色", route:"/admin/roles", perms:[["role:read","角色查看","管理员"],["role:write","角色编辑","管理员"]] },
+    { key:"menus", label:"菜单管理", route:"/admin/menus", selfGuard:true, perms:[["menu:admin","菜单管理（新增 key）","管理员"]] },
+  ]],
+];
+const expanded = new Set();
+const $body = document.querySelector("#menuTable tbody");
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+function rowHtml(menu){
+  const over = menu.o || {};
+  const hidden = !!over.hidden;
+  const label = over.label || menu.label;
+  const overridden = !!over.label;
+  const isNew = menu.isNew ? ' <span class="tag" style="background:var(--brand-100);color:var(--brand-700)">新权限</span>' : "";
+  const permBrief = menu.perms.slice(0,2).map(p=>`<span class="p">${esc(p[0])}</span>`).join("")
+    + (menu.perms.length>2?`<span class="p more">+${menu.perms.length-2}</span>`:"");
+  const sw = menu.selfGuard
+    ? `<label class="switch"><input type="checkbox" disabled><i></i></label><span class="lock-tip">🔒 自身不可隐藏</span>`
+    : `<label class="switch"><input type="checkbox" ${hidden?"checked":""} onchange="toggleHide('${menu.key}',this.checked)"><i></i></label>`;
+  return `
+  <tr class="menu-row ${hidden?"hidden-menu":""}" data-key="${menu.key}">
+    <td><div class="mv">
+      <button onclick="move('${menu.key}',-1)" title="上移">↑</button>
+      <button onclick="move('${menu.key}',1)" title="下移">↓</button>
+    </div></td>
+    <td class="menu-name"><span>${esc(menu.label)}</span><span class="route">${esc(menu.route)}</span></td>
+    <td class="label-cell" data-key="${menu.key}">
+      ${overridden
+        ? `<span class="lbl overridden" onclick="editLabel(this)">${esc(label)}</span><span class="tag">已改名</span><span class="reset" onclick="resetLabel(this)">恢复默认</span>`
+        : `<span class="lbl" onclick="editLabel(this)">${esc(label)}</span>`}
+      ${isNew}
+    </td>
+    <td>${sw}</td>
+    <td>
+      <div class="perm-brief">${permBrief}
+        <span class="expander" onclick="toggleDetail('${menu.key}')">${expanded.has(menu.key)?"收起 ▴":"展开权限 ▾"}</span>
+      </div>
+    </td>
+  </tr>
+  <tr class="detail" data-key="${menu.key}" style="display:${expanded.has(menu.key)?"table-row":"none"}">
+    <td colspan="5">
+      <table class="perm-table">
+        <tr><th style="width:230px">权限标识</th><th style="width:150px">中文名</th><th>当前持有角色</th></tr>
+        ${menu.perms.map(p=>`<tr>
+          <td><code>${esc(p[0])}</code></td>
+          <td>${esc(p[1])}</td>
+          <td>${p[2].split(",").map(r=>`<span class="role-chip">${esc(r.trim())}</span>`).join("") || '<span class="role-chip none">暂无角色持有</span>'}
+              <span class="go-roles">← 分配请前往「角色管理」</span></td>
+        </tr>`).join("")}
+      </table>
+    </td>
+  </tr>`;
+}
+
+function render(){
+  $body.innerHTML = DATA.map(([sec,menus]) =>
+    `<tr class="section-row"><td colspan="5">${esc(sec)}</td></tr>` + menus.map(rowHtml).join("")
+  ).join("");
+}
+
+/* 交互演示（原型级）：真实实现为 PUT /api/admin/menu-overrides/{menu_key} 行级即时保存 */
+function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1600); }
+function findMenu(k){ for(const [,ms] of DATA) for(const m of ms) if(m.key===k) return m; }
+function toggleDetail(k){ expanded.has(k)?expanded.delete(k):expanded.add(k); render(); }
+function toggleHide(k,v){ const m=findMenu(k); m.o={...(m.o||{}),hidden:v}; render(); toast(v?`已全局隐藏「${m.label}」（含管理员）`:`已恢复显示「${m.label}」`); }
+function move(k,d){ for(const [,ms] of DATA){ const i=ms.findIndex(m=>m.key===k); if(i>=0){ const j=i+d; if(j>=0&&j<ms.length){ [ms[i],ms[j]]=[ms[j],ms[i]]; render(); toast("组内排序已保存"); } return; } } }
+function editLabel(span){ const td=span.closest("td"); const m=findMenu(td.dataset.key); const old=span.textContent;
+  td.innerHTML=`<input value="${esc(old)}" onblur="saveLabel(this,'${td.dataset.key}')" onkeydown="if(event.key==='Enter')this.blur()">`;
+  td.querySelector("input").focus(); }
+function saveLabel(input,k){ const m=findMenu(k); const v=input.value.trim();
+  if(v && v!==m.label){ m.o={...(m.o||{}),label:v}; render(); toast(`显示名已改为「${v}」并保存`); } else { render(); } }
+function resetLabel(span){ const td=span.closest("td"); const m=findMenu(td.dataset.key); delete m.o.label; render(); toast("已恢复默认显示名"); }
+
+/* 主题切换 */
+document.getElementById("themeSwitch").addEventListener("click",e=>{
+  const b=e.target.closest("button[data-t]"); if(!b) return;
+  document.documentElement.dataset.theme=b.dataset.t;
+  document.querySelectorAll("#themeSwitch button").forEach(x=>x.classList.toggle("on",x===b));
+});
+
+render();
+</script>
+</body>
+</html>

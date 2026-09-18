@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-18-web-menu-management",
+  "appliedAt": "2026-09-18T08:48:18.709Z",
+  "baseHash": "3f2776709c0e226016df1bcc647bafbbc46c43af",
+  "files": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/admin.md",
+      "sha256": "03aeeaec73ae28a9368c61bdfe43b1421a6977151dc652f25616cd999ccafbb5"
+    },
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/auth.md",
+      "sha256": "2559df6b9d913e6d8058130f0196e79a23753ea1bc1f0b7b9a0d26fc3c07e35c"
+    },
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/frontend_lib.md",
+      "sha256": "0fdda0901385d95b5727fb6888bc3368c15ce7fe217aa193269a33c5d90201a5"
+    },
+    {
+      "path": "README.md",
+      "sha256": "3145839ab08e139d021b735104e3d12cd67f2d1991253b4b6c56300180da2c77"
+    },
+    {
+      "path": "backend/app/main.py",
+      "sha256": "32e4df555aa21f287bda4f01668a5c1d452b9cd327abdc5eeb9bcd5252c27981"
+    },
+    {
+      "path": "backend/app/modules/admin/menu_overrides_router.py",
+      "sha256": "dc7bdf5040e30396a13b72dd39388dd474edd88e907e2872c97d88977aa4948d"
+    },
+    {
+      "path": "backend/app/modules/admin/menu_overrides_service.py",
+      "sha256": "bf4c0841cc6de8d59b740708f3bfc6f8b2bcfe8b2544c2895828da9c40d8ab85"
+    },
+    {
+      "path": "backend/app/modules/admin/model.py",
+      "sha256": "df98dd34bab53bfaa27939061613102b166bdcaccff2d0fcc4a4b2540166c376"
+    },
+    {
+      "path": "backend/app/modules/admin/schema.py",
+      "sha256": "ee2400299b85754015ea885498d8b40a0d63712e93af8206703d1455cfcc3f6b"
+    },
+    {
+      "path": "backend/app/modules/auth/permissions.py",
+      "sha256": "5aa8c04fcbd4e1c07172920a98c8ae7a258da5325d274753d07e00d82b9d5dff"
+    },
+    {
+      "path": "backend/migrations/versions/20260918150000_create_menu_overrides.py",
+      "sha256": "9720675d9bae2fc3dd455c159d6c39ba88447fe31f97b06243464e02b1323250"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "aa56ea10d190662bea7f2a27a0b7743b92771d412a6e37ee54b1eecf69da7a4e"
+    },
+    {
+      "path": "backend/tests/modules/admin/test_menu_overrides.py",
+      "sha256": "80205ad2dff4439f0cb4db3a080aad459a020740d98b7205ec9fdc16869f0b47"
+    },
+    {
+      "path": "backend/tests/modules/auth/test_permissions.py",
+      "sha256": "67a035652363f6afb2eb67e59ddf773be1721e310438a89f132af5bda1b8348b"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",
+      "sha256": "7b3081b7f6f90678729c8aecaefe5f6a66d6c06e8b47b40623c3955341ad6594"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/admin/menus/page.tsx",
+      "sha256": "d1b97fbf78c5615b7c2ea03501c31069d2b90edd4057d6eca34a5df7e93a86b6"
+    },
+    {
+      "path": "frontend/src/components/__tests__/app-shell.test.tsx",
+      "sha256": "1c2ef6ba4501743310226382a19255d1ec2bea015a6c9d17c52031f6fc866698"
+    },
+    {
+      "path": "frontend/src/components/app-shell.tsx",
+      "sha256": "91b9a567011413353c1674d8b5c55cf63a7f7c1a896443a93740a4d850c07414"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/menu-overrides.test.ts",
+      "sha256": "1444bbd3d32b66e4d98fe69d018ac2a42d1b972b9266202eed5f557bfb370e6e"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/menu-permissions.test.ts",
+      "sha256": "f385a6d986fb6ebc249b11bf6710769fd37a66c293a31a36de8330f8b829b80b"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/permission.test.ts",
+      "sha256": "7ffa3babe0db58447a12a32e8a394a63b2e9a4563000a8383d6937ca59eb6604"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "e232b21528cd7cd97a5eea0c73e92c65bc00c2f7f5c43d8d834561ff9f0f4b09"
+    },
+    {
+      "path": "frontend/src/lib/menu-overrides.ts",
+      "sha256": "b304e347c0cd057af2a542785e128c282e561e70fa29f3dced77196795d5bf51"
+    },
+    {
+      "path": "frontend/src/lib/menu-permissions.ts",
+      "sha256": "30ef0cf63c6c4a72b80abcaab5c13171dcdcb9f6b427085e496d729bf9d6f714"
+    }
+  ]
+}
