@@ -26,7 +26,7 @@ goal: >
   用例（FR-01 / R-01）。
 implementation:
   - '类型证据定位：sillyhub-daemon/node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts 的 queued_turn_count（:4672/:4726）、still_queued（:3821）与 absorbed mid-turn fold 语义注释（:1900），明确断言口径'
-  - '实测会话：经 ClaudeSdkDriver.start 的输入 AsyncIterable（claude-sdk-driver.ts:402 实测签名 query({prompt: AsyncIterable, options})，:499 sdkQuery 调用点）先推一条长任务 turn，结果流进行中（工具调用间隙）再推第二条用户消息'
+  - '实测会话：经 ClaudeSdkDriver.start 的输入 AsyncIterable（sillyhub-daemon/src/interactive/claude-sdk-driver.ts:402? 实测签名 query({prompt: AsyncIterable, options})，:499 sdkQuery 调用点）先推一条长任务 turn，结果流进行中（工具调用间隙）再推第二条用户消息'
   - '断言吸收：推送后 queued_turn_count ≥1、全程未调 interrupt、第二条消息在下一次 LLM 调用前投递（流内 absorbed/queued fold 或次轮正常执行证据），原样记录到 spike md'
   - '补守护用例：sillyhub-daemon/tests/interactive/claude-sdk-driver.test.ts 按文件既有 mock 惯例追加用例——忙轮推第二条消息不触发 interrupt、次轮生效；既有用例零改动（真实机吸收证据以 spike md 为准，CI 不依赖网络/鉴权）'
   - '结论落盘：写 spike-claude-steering.md——环境（SDK 0.3.247）、会话与断言证据、吸收时机结论（mid-turn 吸收 / 轮边界吸收=降级可接受）、给 task-01 caps 取值收尾的输入'

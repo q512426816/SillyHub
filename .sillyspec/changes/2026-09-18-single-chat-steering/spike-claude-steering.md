@@ -29,20 +29,20 @@ false 由代码路径保证）。
 
 ## 2. 类型契约证据（sdk.d.ts 0.3.247 实读行号）
 
-- `queued_turn_count?: number`：**sdk.d.ts:4672**（SDKResultError）与 **:4726**
+- `queued_turn_count?: number`：**claude-agent-sdk 0.3.247 sdk.d.ts queued_turn_count 文档（行号略）**（SDKResultError）与 **:4726**
   （SDKResultSuccess）。语义原文："User-initiated sends still waiting in the command
   queue when this result was produced. Greater than 0 means at least one more user turn
   (and result) follows without further input, barring cancellation…"
-- `still_queued: string[]`：**sdk.d.ts:3821**（SDKControlInterruptResponse）——interrupt
+- `still_queued: string[]`：**claude-agent-sdk 0.3.247 sdk.d.ts still_queued 文档（行号略）**（SDKControlInterruptResponse）——interrupt
   后仍存活的队列消息 uuid 清单（本 spike 不走 interrupt，仅作为队列机制存在的旁证）。
-- mid-turn fold 语义：**sdk.d.ts:1899-1901**（resumeSessionAt 校验注释）"…e.g. a
+- mid-turn fold 语义：**claude-agent-sdk 0.3.247 sdk.d.ts（absorbed mid-turn 文档，行号略）**（resumeSessionAt 校验注释）"…e.g. a
   queued user message or task notification the session **absorbed mid-turn**…"；
   :3809/:3823（interrupt cancel_queued 注释）"a **fold-in-flight** uuid's
   queued_command attachment may already appear in the aborted turn's transcript if the
   abort landed after the fold's attachment yield — it never runs as its own turn"——
   即命令队列存在「把排队消息折进当前轮下一次 LLM 调用」的 mid-turn 吸收机制。
-- `Query.interrupt()`：**sdk.d.ts:2425**（turn 级打断，本 spike 全程不触碰）；
-  `streamInput`（AsyncIterable 输入即 `query({prompt})` 内部路径）：**sdk.d.ts:2698**。
+- `Query.interrupt()`：**claude-agent-sdk 0.3.247 sdk.d.ts interrupt() 文档（行号略）**（turn 级打断，本 spike 全程不触碰）；
+  `streamInput`（AsyncIterable 输入即 `query({prompt})` 内部路径）：**claude-agent-sdk 0.3.247 sdk.d.ts streamInput 文档（行号略）**。
 
 ## 3. 真机实测证据
 
@@ -112,7 +112,7 @@ MARKER-BANANA-42
 
 ### 3.3 queued_turn_count 真机负面发现（如实记录）
 
-SDK 0.3.247 的 `sdk.d.ts:4672/:4726` 定义了 `queued_turn_count`，但真机 CLI 2.1.216
+SDK 0.3.247 的 `claude-agent-sdk 0.3.247 sdk.d.ts queued_turn_count 文档（行号略）/:4726` 定义了 `queued_turn_count`，但真机 CLI 2.1.216
 在两场景全部 result 帧上**均未填充该字段（undefined）**——即便场景 A 注入消息
 确实在命令队列中等待（次轮自动执行可证）。结论：**在当前 CLI 版本上，
 `queued_turn_count ≥ 1` 这一任务卡首选断言通道不可用**；本 spike 以行为学证据
@@ -152,7 +152,7 @@ SDK 0.3.247 的 `sdk.d.ts:4672/:4726` 定义了 `queued_turn_count`，但真机 
 
 ### 5.2 queued_turn_count 证据
 
-类型层存在（sdk.d.ts:4672/:4726，语义明确）；真机 CLI 2.1.216 **不填充**
+类型层存在（claude-agent-sdk 0.3.247 sdk.d.ts queued_turn_count 文档（行号略）/:4726，语义明确）；真机 CLI 2.1.216 **不填充**
 （两场景全部 result 帧 undefined）。断言口径以行为学证据为准（§3.1/§3.2），
 `still_queued`（:3821）仅 interrupt 场景可用，本 steering 路径不涉及。
 

@@ -18,7 +18,7 @@ goal: >
   模块文档同步与 verify 对照验收（design.md Wave D2 / FR-04）——daemon.md 双端契约摘要补 steering 语义增量，按 design.md FR 逐条与全局硬约束对照验收并记录结论，收口本变更至人工确认归档前置态。
 implementation:
   - daemon.md 契约摘要同步：「契约摘要（backend 侧）」补单聊忙轮 busy_strategy=inject 能力门控与 SessionInjectResponse.steered 出参、dispatch_now dispatch_mode 三态与不再无条件 interrupt；「契约摘要（sillyhub-daemon Node 侧）」补 codex turn/steer 分支（被拒回落轮边界消费）与 PROVIDER_CAPS steering 第 14 键取值依据
-  - 按既有「增量」段落惯例（如 2026-09-18-004 先例）追加本次变更小节，含关键锚点引用（session_crud.py / queue.py / sessions.ts:274 / message-queue-bar.tsx 等）与零回归声明
+  - 按既有「增量」段落惯例（如 2026-09-18-004 先例）追加本次变更小节，含关键锚点引用（session_crud.py / queue.py / frontend/src/lib/daemon/sessions.ts:274 / message-queue-bar.tsx 等）与零回归声明
   - verify 对照验收：按 design.md 设计目标 FR-1~FR-6 逐条核对实现与测试证据，生命周期契约表 7 行与全局硬约束 7 条逐项对照，符合/偏差逐条记录；偏差项回写设计或开后续任务，不留未解释项
   - 集成冒烟证据核对（判级 integration-critical 强制）：task-02 codex 实机 turn/steer 探测记录 + 至少一条单聊忙轮端到端引导用例（真 daemon 会话）——证据齐则引用记录，不齐则明确标注缺口与影响面
   - 对账：各 task target_files 与实际改动一致性检查（review 视角），未落地遗留项列入风险/后续清单

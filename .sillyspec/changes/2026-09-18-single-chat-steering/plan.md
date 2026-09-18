@@ -63,7 +63,7 @@ task-01 → task-05 → task-07 → task-09 → task-10（backend→frontend 主
 ## 全局硬约束（从 design.md 逐字抄录，绑定所有 task）
 
 - 能力矩阵单源：daemon providers.ts PROVIDER_CAPS 为唯一维护源，backend provider_caps.py / frontend provider-caps.ts 均为 gen-provider-caps.mjs 生成产物，不手改生成物；不新建手维护常量、不加 driver 契约属性、不设 daemon 中心化门控任务。
-- 复用既有 `mid_turn` 字段（results.py:39），不新建平行 steered 服务层字段；inject 响应 steered 仅在 router 层映射；dispatch_now 现有 `interrupted: bool` 保留兼容不删。
+- 复用既有 `mid_turn` 字段（backend/app/modules/daemon/session/service/results.py:39），不新建平行 steered 服务层字段；inject 响应 steered 仅在 router 层映射；dispatch_now 现有 `interrupted: bool` 保留兼容不删。
 - 不新建持久化生命周期（无新表/新状态列）；排队表与 run 状态机沿用既有，仅 dispatch_now 转移路径增加「mid-turn 注入活跃 run」分支。
 - 停止按钮 interrupt 语义、带切换维度消息排队/409 语义、群聊 @ steering、scheduled send、服务身份 409——零回归。
 - 前端接口类型 api-types.ts 必须从后端 OpenAPI 生成（pnpm gen:types，先确认 node_modules 健康）；frontend/src/lib/daemon/sessions.ts 手写镜像同步手补。

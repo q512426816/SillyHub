@@ -10,8 +10,8 @@ agent 在长任务运行中（忙轮），用户想说「顺便也改下 XX」�
 
 ## 关键问题
 
-1. **单聊忙轮发送=排队等待**：`queue_when_busy=True`（router/session_crud.py:605）落排队表，本轮完全结束才派发——长任务期间无法即时补充指示，时延=整轮时长。
-2. **⚡「立即发送」代价是打断**：dispatch_now 现逻辑 commit 后 interrupt 活跃轮再接力派发（queue.py:600-665）——用户想要「不打断、马上让 agent 知道」没有途径，打断会丢掉本轮已进行到一半的工作上下文。
+1. **单聊忙轮发送=排队等待**：`queue_when_busy=True`（backend/app/modules/daemon/router/session_crud.py:605?）落排队表，本轮完全结束才派发——长任务期间无法即时补充指示，时延=整轮时长。
+2. **⚡「立即发送」代价是打断**：dispatch_now 现逻辑 commit 后 interrupt 活跃轮再接力派发（backend/app/modules/daemon/session/service/queue.py:600-665）——用户想要「不打断、马上让 agent 知道」没有途径，打断会丢掉本轮已进行到一半的工作上下文。
 3. **codex 引擎忙轮注入被降级到轮边界**：daemon codex 驱动轮级串行（输入循环 :1231-1239，turn/completed 后才消费下一条），而 codex 0.147 app-server 协议实有 `turn/steer` 方法未接入——平台白白放弃引擎原生 steering 能力。
 
 ## 变更范围

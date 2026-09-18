@@ -152,7 +152,7 @@ integration-critical（design 声明接受不豁免）——真实集成证据�
 **task-07**
 | acceptance 条目 | 归属测试文件 | 关键词命中（提示，命中≠判定） | 判定 | 证据 |
 |---|---|---|---|---|
-| sessions.ts:274 SessionInjectResponse 含 steered 可选布尔字段且注释说明映射来源，pnpm exec tsc --noEmit 通过 | 文档交付（spike 记录） | — | non-testable | spike-codex-turn-steer.md 存在且结论被 task-03/e2e 实际消费（参数形状与 e2e daemon.log 一致） |
+| frontend/src/lib/daemon/sessions.ts:274 SessionInjectResponse 含 steered 可选布尔字段且注释说明映射来源，pnpm exec tsc --noEmit 通过 | 文档交付（spike 记录） | — | non-testable | spike-codex-turn-steer.md 存在且结论被 task-03/e2e 实际消费（参数形状与 e2e daemon.log 一致） |
 | page 与 dialog 双挂载点在忙轮发送且响应 steered=true 时均渲染引导中虚线气泡；SSE user_input 留痕行到达后转已引导终态；轮终止未投递时收敛为终态提示，无永久停留的引导中气泡 | 文档交付（spike 记录） | — | non-testable | spike-codex-turn-steer.md 存在且结论被 task-03/e2e 实际消费（参数形状与 e2e daemon.log 一致） |
 | steered=false/undefined 的忙轮发送仍走现有排队条路径，发送/排队/停止按钮既有行为与改造前一致（零回归） | 文档交付（spike 记录） | — | non-testable | spike-codex-turn-steer.md 存在且结论被 task-03/e2e 实际消费（参数形状与 e2e daemon.log 一致） |
 | 历史回放（刷新后重载日志）中已引导消息与实时路径同态（普通用户气泡+已投递小标） | 文档交付（spike 记录） | — | non-testable | spike-codex-turn-steer.md 存在且结论被 task-03/e2e 实际消费（参数形状与 e2e daemon.log 一致） |
@@ -192,8 +192,8 @@ integration-critical（design 声明接受不豁免）——真实集成证据�
 
 | 状态 | 前端调用 | 后端端点 | 文件 |
 |---|---|---|---|
-| ❌ missing | POST /api/daemon/sessions | — | C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-18-single-chat-steering\frontend\src\lib\daemon\sessions.ts:354 |
-| ❌ missing | PATCH /api/daemon/sessions/{param}/pin | — | C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-18-single-chat-steering\frontend\src\lib\daemon\sessions.ts:819 |
+| ❌ missing | POST /api/daemon/sessions | — | C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-18-single-chat-steering\frontend\src\lib\daemon\frontend/src/lib/daemon/sessions.ts:354 |
+| ❌ missing | PATCH /api/daemon/sessions/{param}/pin | — | C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-18-single-chat-steering\frontend\src\lib\daemon\frontend/src/lib/daemon/sessions.ts:819 |
 
 - ❌ contract gap 是真实集成缺陷——诚实判 FAIL 并回 execute 补端点（CLI 仅 advisory 不硬阻断）
 - ⚠️ 1456 个本变更端点前端未调用（warning 不阻断）：GET /admin/roles、POST /admin/roles、GET /admin/organizations、POST /admin/organizations、GET /admin/users …

@@ -14,15 +14,15 @@ scale: large
 pi 原生支持 steering（`docs/rpc.md` steer 命令：streaming 中注入，当前 assistant turn 工具批完成后、下次 LLM 调用前投递，不打断当前轮）；Claude Code 与 Codex CLI 原生同语义（Claude Code 消息队列在工具调用间隙注入；Codex 0.147 app-server 协议存在 `turn/steer` 方法）。平台现状：
 
 - **群聊 @ 忙轮成员**已走 steering 直注入（quick 2026-09-02）：`busy_strategy="inject"` → `_inject_mid_turn_into_run`（backend/app/modules/daemon/session/service/control.py:92）→ SESSION_INJECT 三段式下发，daemon 侧 running 时注入为既有安全路径。
-- **单聊**忙轮发送走 `queue_when_busy=True`（router/session_crud.py:605）→ 落排队表，等本轮完全结束才派发——用户在 agent 长任务期间想说「顺便也改下 XX」只能干等，与原生终端体验（打字回车即引导）不一致。
-- **daemon 三驱动现状**：pi `_sendInject` 已实现 streaming→steer（含 follow_up/prompt 降级重试，pi-rpc-driver.ts:1859-1914）零改动可用；claude SDK 输入流为 `query({prompt: AsyncIterable})` 同进程多轮（claude-sdk-driver.ts:402），忙轮推送进流后由 SDK 命令队列吸收（sdk.d.ts 0.3.247：queued_turn_count / still_queued / 「queued user message … absorbed mid-turn」fold 语义），投递时机需实测；codex 驱动为轮级串行（for-await 下一输入在 turn/completed 后才消费，codex-app-server-driver.ts:9），忙轮注入被推迟到轮边界=降级时延，需新接 `turn/steer`。
+- **单聊**忙轮发送走 `queue_when_busy=True`（backend/app/modules/daemon/router/session_crud.py:605?）→ 落排队表，等本轮完全结束才派发——用户在 agent 长任务期间想说「顺便也改下 XX」只能干等，与原生终端体验（打字回车即引导）不一致。
+- **daemon 三驱动现状**：pi `_sendInject` 已实现 streaming→steer（含 follow_up/prompt 降级重试，sillyhub-daemon/src/interactive/pi-rpc-driver.ts:1859-1914）零改动可用；claude SDK 输入流为 `query({prompt: AsyncIterable})` 同进程多轮（sillyhub-daemon/src/interactive/claude-sdk-driver.ts:402?），忙轮推送进流后由 SDK 命令队列吸收（sdk.d.ts 0.3.247：queued_turn_count / still_queued / 「queued user message … absorbed mid-turn」fold 语义），投递时机需实测；codex 驱动为轮级串行（for-await 下一输入在 turn/completed 后才消费，sillyhub-daemon/src/interactive/codex-app-server-driver.ts:9?），忙轮注入被推迟到轮边界=降级时延，需新接 `turn/steer`。
 
 ## 设计目标
 
 1. **FR-1**：单聊在 agent 忙轮时发送普通消息 = 引导注入活跃轮（不建新 run、不打断当前输出），复用群聊 `_inject_mid_turn_into_run` 链路。
 2. **FR-2**：provider 能力矩阵——pi/claude/codex 支持引导（pi 零改动；claude 输入流直推；codex 新接 `turn/steer`）；不支持的 provider（cursor 等）自动降级为现有排队路径，不报错、行为与现状一致。
-3. **FR-3**：排队条 ⚡「立即发送」从打断式（interrupt 后接力派发，queue.py:600-608）改为引导式（不打断，mid-turn 注入活跃轮）。
-4. **FR-4**：零回归——停止按钮（interrupt 立即打断）语义不变；带配置切换维度（agent_profile/provider/model）的消息保持轮边界排队/409 语义；服务身份调用方（平台审批代写等）409 拒绝语义不变。（前端破坏面证据：use-message-queue.ts:22 明示现不消费 dispatch_now 响应的 interrupted 字段。）
+3. **FR-3**：排队条 ⚡「立即发送」从打断式（interrupt 后接力派发，backend/app/modules/daemon/session/service/queue.py:600-608）改为引导式（不打断，mid-turn 注入活跃轮）。
+4. **FR-4**：零回归——停止按钮（interrupt 立即打断）语义不变；带配置切换维度（agent_profile/provider/model）的消息保持轮边界排队/409 语义；服务身份调用方（平台审批代写等）409 拒绝语义不变。（前端破坏面证据：frontend/src/hooks/use-message-queue.ts:22? 明示现不消费 dispatch_now 响应的 interrupted 字段。）
 5. **FR-5**：前端三态展示——「引导中」（虚线气泡+脉冲，工具间隙投递提示）→「已引导」（普通气泡+已投递小标）；降级时回落现有排队条目并标注。
 6. **FR-6**：留痕——steering 消息 user_input 留痕挂活跃 run（沿用群聊 inject 既有行为），历史回放与流式同态。
 
@@ -43,18 +43,18 @@ pi 原生支持 steering（`docs/rpc.md` steer 命令：streaming 中注入，�
 ### Phase/Wave 划分
 
 **Wave A（daemon，先行——与 backend 解耦可独立验证）**
-- A1 codex 驱动接 `turn/steer`：inject 到达时若 `currentTurnId` 活跃 → 发 `turn/steer`（参数实机探测，见 R-02）而非压回输入队列；被拒/无 turn 活跃 → 维持现有轮边界消费（降级不报错）。实锚：codex-app-server-driver.ts:1231-1239 输入循环。
+- A1 codex 驱动接 `turn/steer`：inject 到达时若 `currentTurnId` 活跃 → 发 `turn/steer`（参数实机探测，见 R-02）而非压回输入队列；被拒/无 turn 活跃 → 维持现有轮边界消费（降级不报错）。实锚：sillyhub-daemon/src/interactive/codex-app-server-driver.ts:1231-1239? 输入循环。
 - A2 claude 引导实测（spike）：忙轮向 `query({prompt: AsyncIterable})` 推消息，断言 SDK 队列 mid-turn 吸收（queued_turn_count ≥1 且不 interrupt）——预期驱动零代码改动，仅补集成测试证据。
-- A3 能力矩阵走既有单源：`PROVIDER_CAPS`（sillyhub-daemon/src/interactive/providers.ts:264）新增 `steering` 第 14 键（pi/claude/codex=true，cursor=false），重跑 `node sillyhub-daemon/scripts/gen-provider-caps.mjs` 三端刷新（backend/app/modules/agent/provider_caps.py + frontend/src/lib/provider-caps.ts 均生成产物，frontend `pnpm gen:types` 链尾自动执行）；一致性由既有 test_provider_caps_alignment.py 守护——**不新建手维护常量、不加 driver 契约属性**（Grill P1-2 修正）。daemon 侧 mid-turn 行为是各 driver 的自然结果（pi steer / claude 推流 / codex A1 分支 / cursor 轮边界等待=能力 false 的自然降级），**不设 daemon 中心化门控任务**（Grill 复审③：PROVIDER_CAPS.steering 键仅供 backend 门控与前端降级标注消费）。
+- A3 能力矩阵走既有单源：`PROVIDER_CAPS`（sillyhub-daemon/src/interactive/providers.ts:295）新增 `steering` 第 14 键（pi/claude/codex=true，cursor=false），重跑 `node sillyhub-daemon/scripts/gen-provider-caps.mjs` 三端刷新（backend/app/modules/agent/provider_caps.py + frontend/src/lib/provider-caps.ts 均生成产物，frontend `pnpm gen:types` 链尾自动执行）；一致性由既有 test_provider_caps_alignment.py 守护——**不新建手维护常量、不加 driver 契约属性**（Grill P1-2 修正）。daemon 侧 mid-turn 行为是各 driver 的自然结果（pi steer / claude 推流 / codex A1 分支 / cursor 轮边界等待=能力 false 的自然降级），**不设 daemon 中心化门控任务**（Grill 复审③：PROVIDER_CAPS.steering 键仅供 backend 门控与前端降级标注消费）。
 
 **Wave B（backend）**
-- B1 单聊忙轮改 steering：`inject_session` 会话单聊调用方（router/session_crud.py:605 端点）忙轮分支由 `queue_when_busy=True` 改 `busy_strategy="inject"`；**能力门控**：session 的 provider 经生成镜像 `backend/app/modules/agent/provider_caps.py`（单源 daemon PROVIDER_CAPS steering 键）判不支持 → 维持 queue_when_busy 排队现状。带切换维度消息不进 inject 分支（既有守卫 queue.py:76-99 零改动）。
-- B2 ⚡ dispatch_now 重构：queue.py:600-665 现逻辑「commit 后 interrupt 活跃轮再接力派发」改为「provider 支持引导 → mid-turn 注入活跃轮（复用 `_inject_mid_turn_into_run`（control.py:92），entry 留痕转挂活跃 run）；不支持 → 维持 interrupt 接力（现状）」。
-- B3 响应扩展（Grill 复审②修正——复用既有 `mid_turn`，不新建平行字段）：`SessionDispatchResult.mid_turn`（session/service/results.py:39）已存在且 `_inject_mid_turn_into_run` 已置 True（control.py:241，群聊链路 messages.py:878 / shadow.py:387 已在消费）——B1 单聊改 busy_strategy=inject 后 mid_turn 端到端自动可用。改动仅两处 router 层映射：SessionInjectResponse（router/session_crud.py:83 本地 DTO）加 `steered: bool`（映射 `result.mid_turn`）；`QueueDispatchNowResponse`（schema.py:550-562）加 `dispatch_mode: Literal["steered","interrupted","dispatched"]` 三态（由 mid_turn/interrupted 派生；现 `interrupted: bool` 保留兼容不删，前端 use-message-queue.ts:22 明示现不消费该字段，破坏面小）；OpenAPI → `pnpm gen:types` 同步（CLAUDE.md 规则 21）。
+- B1 单聊忙轮改 steering：`inject_session` 会话单聊调用方（backend/app/modules/daemon/router/session_crud.py:605? 端点）忙轮分支由 `queue_when_busy=True` 改 `busy_strategy="inject"`；**能力门控**：session 的 provider 经生成镜像 `backend/app/modules/agent/provider_caps.py`（单源 daemon PROVIDER_CAPS steering 键）判不支持 → 维持 queue_when_busy 排队现状。带切换维度消息不进 inject 分支（既有守卫 backend/app/modules/daemon/session/service/queue.py:76-99? 零改动）。
+- B2 ⚡ dispatch_now 重构：backend/app/modules/daemon/session/service/queue.py:600-665 现逻辑「commit 后 interrupt 活跃轮再接力派发」改为「provider 支持引导 → mid-turn 注入活跃轮（复用 `_inject_mid_turn_into_run`（backend/app/modules/daemon/session/service/control.py:92），entry 留痕转挂活跃 run）；不支持 → 维持 interrupt 接力（现状）」。
+- B3 响应扩展（Grill 复审②修正——复用既有 `mid_turn`，不新建平行字段）：`SessionDispatchResult.mid_turn`（backend/app/modules/daemon/session/service/results.py:39）已存在且 `_inject_mid_turn_into_run` 已置 True（backend/app/modules/daemon/session/service/control.py:241，群聊链路 backend/app/modules/daemon/group/service/messages.py:878 / backend/app/modules/daemon/group/service/shadow.py:387 已在消费）——B1 单聊改 busy_strategy=inject 后 mid_turn 端到端自动可用。改动仅两处 router 层映射：SessionInjectResponse（backend/app/modules/daemon/router/session_crud.py:83? 本地 DTO）加 `steered: bool`（映射 `result.mid_turn`）；`QueueDispatchNowResponse`（backend/app/modules/daemon/schema.py:550-562）加 `dispatch_mode: Literal["steered","interrupted","dispatched"]` 三态（由 mid_turn/interrupted 派生；现 `interrupted: bool` 保留兼容不删，前端 frontend/src/hooks/use-message-queue.ts:22? 明示现不消费该字段，破坏面小）；OpenAPI → `pnpm gen:types` 同步（CLAUDE.md 规则 21）。
 
 **Wave C（frontend）**
 - C1 忙轮发送即引导：session-panel 发送后按响应 `steered=true` 渲染「引导中」虚线气泡（原型 §1），后续 turn 事件（user_input 留痕行到达）转「已引导」终态；`steered=false` 走现有排队条。**手写镜像同步**：frontend/src/lib/daemon/sessions.ts:274 `SessionInjectResponse` 为手写接口（不在 gen:types 生成链内，Grill P1-1），`steered?: boolean` 字段须手补。
-- C2 MessageQueueBar ⚡ 文案与行为提示更新：「打断当前轮，立即发送这条」→「立即引导进当前轮（不打断）」（message-queue-bar.tsx:15-17 title 两态）；降级 provider chip 标注「该引擎暂不支持引导」——能力数据源=生成镜像 frontend/src/lib/provider-caps.ts（Grill P2-6，零新增手写源）。
+- C2 MessageQueueBar ⚡ 文案与行为提示更新：「打断当前轮，立即发送这条」→「立即引导进当前轮（不打断）」（frontend/src/components/daemon/message-queue-bar.tsx:15-17 title 两态）；降级 provider chip 标注「该引擎暂不支持引导」——能力数据源=生成镜像 frontend/src/lib/provider-caps.ts（Grill P2-6，零新增手写源）。
 - C3 api-types.ts 重新生成 + 相关测试同步（page.test 等断言随 dispatch_now 语义更新）。
 
 **Wave D（验证与文档）**
@@ -115,7 +115,7 @@ FR-1→Wave B1；FR-2→Wave A1/A3+B1 能力门控；FR-3→Wave B2+C2；FR-4→
 - **R-03**（低→已消解）：能力映射漂移风险经 Grill 审查修正——改走 PROVIDER_CAPS 既有三端生成单源 + alignment 测试守护，无手维护双源。
 - **R-04**（信息）：abort 时未投递引导消息的引擎原生差异（pi 丢弃/claude 存活）不做平台统一（NG-1），前端「引导中」气泡在轮终止事件时收敛为终态提示（「本轮已结束，未投递」或转已投递，按引擎事件语义）。
 - **R-05**（低）：群聊 @ steering 行为零改动（同一 `_inject_mid_turn_into_run` 入口，B2 仅改 dispatch_now 调用方分支）——D1 含群聊回归用例。
-- **R-06**（低）：dispatch_now 前端破坏面小——use-message-queue.ts:22 明示现不消费响应 interrupted 字段，dispatch_mode 为新增消费点；旧字段保留兼容。
+- **R-06**（低）：dispatch_now 前端破坏面小——frontend/src/hooks/use-message-queue.ts:22? 明示现不消费响应 interrupted 字段，dispatch_mode 为新增消费点；旧字段保留兼容。
 
 ## 生命周期契约表
 

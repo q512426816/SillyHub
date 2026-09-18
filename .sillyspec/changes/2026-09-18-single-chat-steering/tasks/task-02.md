@@ -23,8 +23,8 @@ goal: >
   turn/interrupt + prompt/steer/default 枚举痕迹，R-02），结论落盘 spike md，
   供 task-03 驱动接线与 task-01 caps 取值收尾（FR-06）。
 implementation:
-  - '起会话：spawn codex app-server --listen stdio://（本机 C:\nvm4w\nodejs\codex.cmd，codex-cli 0.147.0），JSON-RPC over stdio 手工逐条会话；initialize → notifications/initialized → thread/start，相邻请求间隔 300ms（对齐 codex-app-server-driver.ts:8 既有实测稳定值）'
-  - '造忙轮：thread/start 后发 turn/start 起长任务（大 prompt 让模型长时间输出），确认收到 turn/started（driver 现状以 turn/started 存 currentTurnId——codex-app-server-driver.ts:8 职责 4；输入循环轮级串行见 :9 与 :1236-1238）'
+  - '起会话：spawn codex app-server --listen stdio://（本机 C:\nvm4w\nodejs\codex.cmd，codex-cli 0.147.0），JSON-RPC over stdio 手工逐条会话；initialize → notifications/initialized → thread/start，相邻请求间隔 300ms（对齐 sillyhub-daemon/src/interactive/codex-app-server-driver.ts:8 既有实测稳定值）'
+  - '造忙轮：thread/start 后发 turn/start 起长任务（大 prompt 让模型长时间输出），确认收到 turn/started（driver 现状以 turn/started 存 currentTurnId——sillyhub-daemon/src/interactive/codex-app-server-driver.ts:8 职责 4；输入循环轮级串行见 :9 与 :1236-1238）'
   - '探测 turn/steer：忙轮中发 turn/steer，参数从二进制字符串证据的 prompt/steer/default 枚举痕迹起步（如 threadId/turnId/prompt 等形状逐一试探），逐组记录请求 JSON 与响应/错误文案原样'
   - '补边界证据：无活跃 turn 时发 turn/steer 的行为；被拒后会话是否存活（支撑 FR-06「被拒回落轮边界消费，不报错不挂死」）；穿插 turn/interrupt 对照确认三方法枚举差异'
   - '结论落盘：写 spike-codex-turn-steer.md——环境（版本/命令）、完整请求响应样例（成功+失败）、明确结论字段：可用（含参数形状，task-03 接线依据）或不可用（codex caps 置 false 降级，回改归 task-01 收尾）'

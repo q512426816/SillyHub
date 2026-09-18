@@ -20,9 +20,9 @@ target_files:
 goal: >
   队列条 ⚡ 立即发送的展示语义从「打断当前轮」改为「引导注入当前轮」（design.md Wave C2 / FR-03），不支持引导的引擎 chip 可见化降级标注（FR-05 降级场景 / FR-02 能力数据源），能力判断全部来自 provider-caps.ts 生成镜像，零新增手写能力源。
 implementation:
-  - ⚡ title 两态文案更新：message-queue-bar.tsx:353-367 Tooltip 文案 pending 态由「打断当前轮，立即发送这条」改为「立即引导进当前轮（不打断）」，failed 态维持「立即发送这条」；:16 / :103 / :350 三处注释与实现同步修正（注释与实现不一致是万恶之源）
+  - ⚡ title 两态文案更新：frontend/src/components/daemon/message-queue-bar.tsx:353-367 Tooltip 文案 pending 态由「打断当前轮，立即发送这条」改为「立即引导进当前轮（不打断）」，failed 态维持「立即发送这条」；:16 / :103 / :350 三处注释与实现同步修正（注释与实现不一致是万恶之源）
   - 降级标注（FR-05 降级场景）：provider 不支持引导（provider-caps.ts steering=false，未知 provider 默认 false）时队列条渲染标注 chip「该引擎暂不支持引导」——能力数据源仅用生成镜像 frontend/src/lib/provider-caps.ts，禁手写能力常量/第 4 源（Grill P2-6）
-  - dispatch_mode 三态消费边界：组件保持纯展示、不 fetch、不消费 dispatch_now 响应体——⚡ 点击后条目收敛统一走 SSE/load（沿用 2026-08-31-session-queue-ux R-04「不本地造已打断/已发送态」原则）；dispatch_mode 三态语义（steered=不打断注入/interrupted=打断接力/dispatched=空闲直发）体现在 title 文案与降级标注的对照关系上，旧 interrupted 字段不消费不删（use-message-queue.ts:22 现不消费响应）
+  - dispatch_mode 三态消费边界：组件保持纯展示、不 fetch、不消费 dispatch_now 响应体——⚡ 点击后条目收敛统一走 SSE/load（沿用 2026-08-31-session-queue-ux R-04「不本地造已打断/已发送态」原则）；dispatch_mode 三态语义（steered=不打断注入/interrupted=打断接力/dispatched=空闲直发）体现在 title 文案与降级标注的对照关系上，旧 interrupted 字段不消费不删（frontend/src/hooks/use-message-queue.ts:22? 现不消费响应）
   - provider 标识获取：降级判断所需的会话 provider 经组件 props 传入（沿用 entries/max 既有传参模式），不在组件内新开数据链
   - 原型对照：prototype-single-chat-steering.html §2「⚡ 立即发送语义对照」（不打断→引导注入当前轮、工具间隙投递）与 §3 降级行为为验收参照
 acceptance:

@@ -21,9 +21,9 @@ goal: >
   单聊忙轮普通消息由 queue_when_busy 排队改为 busy_strategy=inject 引导注入活跃轮（provider 能力门控降级），
   响应 DTO 加 steered 映射 result.mid_turn，供 task-07 前端「引导中」态消费（FR-01/FR-02）。
 implementation:
-  - 'router/session_crud.py:605 忙轮分支 queue_when_busy=True 改为 busy_strategy="inject"（service 既有 Literal["queue","inject"] 形参 inject.py:279；复用群聊 _inject_mid_turn_into_run 链路 control.py:92，mid_turn 端到端自动可用）'
-  - '同文件能力门控：经 svc.get_agent_session(session_id, user.id)（read_model.py:227 只读无锁先例）取 session.provider，get_provider_caps(provider)["steering"]（compact.py:103 同款门控先例）为 False（cursor/未知 provider）时维持 queue_when_busy=True 排队现状，不报错'
-  - 'SessionInjectResponse（router/session_crud.py:83 本地 DTO）加 steered: bool = False 字段，响应构造处映射 steered=result.mid_turn（results.py:39 既有字段）；带切换维度消息不进 inject 分支——既有守卫（queue.py:76-99）零改动'
+  - 'backend/app/modules/daemon/router/session_crud.py:605? 忙轮分支 queue_when_busy=True 改为 busy_strategy="inject"（service 既有 Literal["queue","inject"] 形参 backend/app/modules/daemon/session/service/inject.py:279；复用群聊 _inject_mid_turn_into_run 链路 backend/app/modules/daemon/session/service/control.py:92，mid_turn 端到端自动可用）'
+  - '同文件能力门控：经 svc.get_agent_session(session_id, user.id)（backend/app/modules/daemon/session/service/read_model.py:227 只读无锁先例）取 session.provider，get_provider_caps(provider)["steering"]（backend/app/modules/daemon/session/service/compact.py:103 同款门控先例）为 False（cursor/未知 provider）时维持 queue_when_busy=True 排队现状，不报错'
+  - 'SessionInjectResponse（backend/app/modules/daemon/router/session_crud.py:83? 本地 DTO）加 steered: bool = False 字段，响应构造处映射 steered=result.mid_turn（backend/app/modules/daemon/session/service/results.py:39 既有字段）；带切换维度消息不进 inject 分支——既有守卫（backend/app/modules/daemon/session/service/queue.py:76-99?）零改动'
 acceptance:
   - '支持 provider（pi/claude/codex）忙轮发普通消息（不带切换维度）→ 不建新 run、不 interrupt，响应 steered=true 且 queued=false，user_input 留痕挂活跃 run（FR-01）'
   - '不支持 provider（cursor/未知）忙轮 → 维持排队现状：queued=true、queue_entry_id 非空、steered=false，不报错（降级分支，FR-02）'
@@ -32,7 +32,7 @@ acceptance:
 verify:
   - cd backend && .venv/Scripts/python.exe -m pytest app/modules/daemon/tests/test_session_queue.py -k busy
 constraints:
-  - '复用既有 mid_turn 字段（results.py:39），不新建平行 steered 服务层字段；steered 仅 router 层 DTO 映射'
+  - '复用既有 mid_turn 字段（backend/app/modules/daemon/session/service/results.py:39），不新建平行 steered 服务层字段；steered 仅 router 层 DTO 映射'
   - '能力门控用生成镜像 get_provider_caps（task-01 产出），不新建手维护常量；未知 provider 默认 false'
   - '带切换维度排队/409 与服务身份 409 语义零回归；禁跑全量测试'
   - '改动仅限 router/session_crud.py；三分支新用例与测试文件改动归 task-09，本任务不写测试文件'

@@ -20,7 +20,7 @@ goal: >
   codex 驱动忙轮注入从「等 turn/completed 轮边界消费」升级为 turn/steer 直发、被拒安全回落轮边界，
   使 codex 获得与 pi/claude 同语义的 mid-turn 引导能力（FR-06），供 task-09 端到端引导用例消费。
 implementation:
-  - '在输入循环（codex-app-server-driver.ts:1231-1239，while :1236 / _takeNextTurn :1238）加 turn/steer 分支：SESSION_INJECT 到达且 currentTurnId 活跃（turn/started 已见、turn/completed 未到）时向 app-server 发 turn/steer（参数形状严格按 task-02 落盘的 spike-codex-turn-steer.md 探测结论），不再压回输入队列等轮边界'
+  - '在输入循环（sillyhub-daemon/src/interactive/codex-app-server-driver.ts:1231-1239，while :1236 / _takeNextTurn :1238）加 turn/steer 分支：SESSION_INJECT 到达且 currentTurnId 活跃（turn/started 已见、turn/completed 未到）时向 app-server 发 turn/steer（参数形状严格按 task-02 落盘的 spike-codex-turn-steer.md 探测结论），不再压回输入队列等轮边界'
   - '被拒回落：turn/steer 错误回执（参数不符/版本不支持）或无活跃 turn → 维持既有轮级串行路径（消息回落输入队列、下一轮 turn/start 消费），不抛错不挂死'
   - '单测（codex-app-server-driver.test.ts，沿用 mock transport TDD-3 既有模式）新增三用例：忙轮注入直发 turn/steer（断言参数形状与 spike-01 结论一致）；被拒回落轮边界（断言后续 turn/start 仍携带该输入且会话收敛不挂死）；无活跃 turn 注入行为与现状一致'
 acceptance:

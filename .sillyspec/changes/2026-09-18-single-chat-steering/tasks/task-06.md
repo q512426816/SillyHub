@@ -22,10 +22,10 @@ goal: >
   ⚡ 立即发送从「interrupt 打断接力派发」改为「provider 支持即 mid-turn 引导注入活跃轮」，
   响应加 dispatch_mode 三态（interrupted 保留兼容），供 task-08 队列条引导语义消费（FR-03）。
 implementation:
-  - 'queue.py:589 dispatch_queued_message_now（design 锚 :600-665）重构：commit 置顶次序不变，其后判 get_provider_caps(session.provider)["steering"] 且存在活跃 run → 复用 _inject_mid_turn_into_run（control.py:92，mid_turn 置位 :241）注入该条目（留痕转挂活跃 run），不再走 :661-665 无条件 interrupt；不支持或空闲 → 维持现状（interrupt 接力 / dispatch_queued_messages 当场派发）'
+  - 'backend/app/modules/daemon/session/service/queue.py:589 dispatch_queued_message_now（design 锚 :600-665）重构：commit 置顶次序不变，其后判 get_provider_caps(session.provider)["steering"] 且存在活跃 run → 复用 _inject_mid_turn_into_run（backend/app/modules/daemon/session/service/control.py:92，mid_turn 置位 :241）注入该条目（留痕转挂活跃 run），不再走 :661-665 无条件 interrupt；不支持或空闲 → 维持现状（interrupt 接力 / dispatch_queued_messages 当场派发）'
   - 'dispatch_queued_message_now 返回值由单一 interrupted 布尔改为可派生三态的结果（mid_turn/interrupted 标志），供 router 层映射'
-  - 'schema.py:550-562 QueueDispatchNowResponse 加 dispatch_mode: Literal["steered","interrupted","dispatched"]（mid_turn→steered、interrupted=True→interrupted、空闲当场派发→dispatched）；现 interrupted: bool 保留兼容不删'
-  - 'router/session_queue.py:197-198 端点映射改为构造 dispatch_mode 三态返回（interrupted 照旧填充）'
+  - 'backend/app/modules/daemon/schema.py:550-562 QueueDispatchNowResponse 加 dispatch_mode: Literal["steered","interrupted","dispatched"]（mid_turn→steered、interrupted=True→interrupted、空闲当场派发→dispatched）；现 interrupted: bool 保留兼容不删'
+  - 'backend/app/modules/daemon/router/session_queue.py:197-198 端点映射改为构造 dispatch_mode 三态返回（interrupted 照旧填充）'
 acceptance:
   - '支持 provider + 忙轮 ⚡ → 未下发 SESSION_INTERRUPT（断言 hub 无 interrupt 控制）、条目 mid-turn 注入活跃 run、响应 dispatch_mode=steered 且 interrupted=false'
   - '不支持 provider（cursor/未知）+ 忙轮 ⚡ → 维持现状 interrupt 接力（dispatch_mode=interrupted）；空闲态当场派发（dispatch_mode=dispatched）——降级行为与现状一致'
@@ -35,7 +35,7 @@ verify:
   - cd backend && .venv/Scripts/python.exe -m pytest app/modules/daemon/tests/test_session_queue_actions.py -k "dispatch_now and not busy and not interrupt_failure"
 constraints:
   - 'dispatch_now 现有 interrupted: bool 保留兼容不删；dispatch_mode 由 mid_turn/interrupted 派生，不新建平行服务层字段'
-  - '复用 _inject_mid_turn_into_run（control.py:92）不另写第二条注入链路；群聊 @ steering 同入口零回归；停止按钮 interrupt 语义与非 active 409 零回归'
+  - '复用 _inject_mid_turn_into_run（backend/app/modules/daemon/session/service/control.py:92）不另写第二条注入链路；群聊 @ steering 同入口零回归；停止按钮 interrupt 语义与非 active 409 零回归'
   - '测试文件改动与 OpenAPI（openapi.json + pnpm gen:types）同步归 task-09，本任务不跑生成链；禁跑全量测试'
 expects_from:
   task-01:

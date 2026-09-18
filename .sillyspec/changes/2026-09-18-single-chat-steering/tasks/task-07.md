@@ -29,7 +29,7 @@ implementation:
   - dialog 挂载点：session-panel-dialog.tsx（:971/:975/:1044 injectSession 调用面）与 page 同步同一状态逻辑——公共状态推导/渲染 helper 抽到既有 page-helpers.tsx / dialog-helpers.ts 复用，避免双份漂移
   - 「引导中」为纯展示态：不动 useMessageQueue 队列真相、不新增状态库；虚线/脉冲样式走既有主题 token（brand-* 语义阶），blue/ai-native 双主题下可用
 acceptance:
-  - sessions.ts:274 SessionInjectResponse 含 steered 可选布尔字段且注释说明映射来源，pnpm exec tsc --noEmit 通过
+  - frontend/src/lib/daemon/sessions.ts:274 SessionInjectResponse 含 steered 可选布尔字段且注释说明映射来源，pnpm exec tsc --noEmit 通过
   - page 与 dialog 双挂载点在忙轮发送且响应 steered=true 时均渲染引导中虚线气泡；SSE user_input 留痕行到达后转已引导终态；轮终止未投递时收敛为终态提示，无永久停留的引导中气泡
   - steered=false/undefined 的忙轮发送仍走现有排队条路径，发送/排队/停止按钮既有行为与改造前一致（零回归）
   - 历史回放（刷新后重载日志）中已引导消息与实时路径同态（普通用户气泡+已投递小标）
