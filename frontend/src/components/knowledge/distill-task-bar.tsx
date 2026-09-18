@@ -31,6 +31,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
 import { useNotify } from "@/lib/errors";
@@ -138,6 +139,10 @@ export interface DistillTaskBarProps {
 
 export function DistillTaskBar({ workspaceId, onCompleted, onJumpToEntry, className }: DistillTaskBarProps) {
   const notify = useNotify();
+  // D-010④ 跳转落地：任务行「查看会话 ↗」经 /sessions?session=<id> 深链打开执行
+  // 提炼的会话——深链走详情端点直接选中（不依赖列表可见，被 k-distill 隔离的
+  // 蒸馏会话同样可打开；resume 模式则打开续接的原会话）。
+  const router = useRouter();
 
   const tasksQ = useQuery({
     queryKey: distillTasksQueryKey(workspaceId),
@@ -268,6 +273,17 @@ export function DistillTaskBar({ workspaceId, onCompleted, onJumpToEntry, classN
               {distillDegradedText(task.degraded_reason)}
             </span>
           )}
+          {task.agent_session_id && (
+            <button
+              type="button"
+              data-testid="distill-session-link"
+              title="查看执行提炼的会话"
+              onClick={() => router.push(`/sessions?session=${task.agent_session_id}`)}
+              className="shrink-0 text-[11px] text-brand-600 hover:underline"
+            >
+              查看会话 ↗
+            </button>
+          )}
         </div>
       ))}
 
@@ -304,6 +320,17 @@ export function DistillTaskBar({ workspaceId, onCompleted, onJumpToEntry, classN
                   {distillDegradedText(task.degraded_reason)}
                 </span>
               )}
+              {task.agent_session_id && (
+                <button
+                  type="button"
+                  data-testid="distill-session-link"
+                  title="查看执行提炼的会话"
+                  onClick={() => router.push(`/sessions?session=${task.agent_session_id}`)}
+                  className="shrink-0 text-[11px] text-brand-600 hover:underline"
+                >
+                  查看会话 ↗
+                </button>
+              )}
             </>
           ) : (
             <>
@@ -311,6 +338,17 @@ export function DistillTaskBar({ workspaceId, onCompleted, onJumpToEntry, classN
                 提炼失败
               </span>
               <span className="min-w-0 flex-1 truncate text-error">{DISTILL_FAILURE_TEXT}</span>
+              {task.agent_session_id && (
+                <button
+                  type="button"
+                  data-testid="distill-session-link"
+                  title="查看执行提炼的会话"
+                  onClick={() => router.push(`/sessions?session=${task.agent_session_id}`)}
+                  className="shrink-0 text-[11px] text-brand-600 hover:underline"
+                >
+                  查看会话 ↗
+                </button>
+              )}
             </>
           )}
         </div>

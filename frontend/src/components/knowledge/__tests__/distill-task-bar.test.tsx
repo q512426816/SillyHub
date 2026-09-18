@@ -32,6 +32,13 @@ vi.mock("@/lib/knowledge", async (importOriginal) => ({
   listDistillTasks: mocks.listDistillTasks,
 }));
 
+// D-010④ 跳转：任务行「查看会话 ↗」经 router.push 深链（jsdom 无 App Router，
+// mock next/navigation）。
+const pushMock = vi.hoisted(() => vi.fn());
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock, replace: vi.fn(), back: vi.fn() }),
+}));
+
 const notify = vi.hoisted(() => ({
   success: vi.fn(),
   warning: vi.fn(),
@@ -352,5 +359,40 @@ describe("DistillTaskBar · D-009 降级提示 + D-010 merged_to 反链（task-0
     });
     expect(distillDegradedText("provider_no_resume")).toContain("引擎不支持续接");
     expect(distillDegradedText("some_future_reason")).toBe("已降级：some_future_reason");
+  });
+
+  it("D-010④ 查看会话跳转：agent_session_id 非空渲染按钮，点击 router.push 深链 /sessions?session=<id>", async () => {
+    tasksHolder = [task({ agent_run_id: "r-1", agent_session_id: "sess-distill-1", status: "running" })];
+    renderBar();
+    const btn = await screen.findByTestId("distill-session-link");
+    expect(btn).toHaveTextContent("查看会话");
+    fireEvent.click(btn);
+    expect(pushMock).toHaveBeenCalledWith("/sessions?session=sess-distill-1");
+  });
+
+  it("D-010④ 无 agent_session_id 不渲染查看会话按钮（零回归）", async () => {
+    tasksHolder = [task({ agent_run_id: "r-2", status: "running" })];
+    renderBar();
+    await screen.findByText(/蒸馏进行中/);
+    expect(screen.queryByTestId("distill-session-link")).not.toBeInTheDocument();
+  });
+
+  it("D-010④ 失败终态行同样带查看会话入口", async () => {
+    // 终态行依赖「进行中 → 终态」转移观测（直 mock 终态不渲染，task-08 结构）。
+    tasksHolder = [task({ agent_run_id: "r-3", agent_session_id: "sess-distill-3" })];
+    renderBar();
+    await waitFor(() =>
+      expect(screen.getByTestId("distill-task-row-active")).toBeInTheDocument(),
+    );
+    tasksHolder = [
+      task({ agent_run_id: "r-3", agent_session_id: "sess-distill-3", status: "failed" }),
+    ];
+    await pollTasks();
+    await waitFor(() =>
+      expect(screen.getByTestId("distill-task-row-terminal")).toHaveTextContent("提炼失败"),
+    );
+    const btn = screen.getByTestId("distill-session-link");
+    fireEvent.click(btn);
+    expect(pushMock).toHaveBeenCalledWith("/sessions?session=sess-distill-3");
   });
 });
