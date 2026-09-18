@@ -151,7 +151,7 @@ REST 端点（prefix=/workspaces/{workspace_id}，tag=knowledge；**字面量路
 ## 数据模型
 
 - **无新表**（D-003）。候选知识即 `knowledge/proposed/*.md` 文件。
-- `AgentRun` 复用承载蒸馏任务（Grill X-04 源码核实）：`metadata_` JSON 列（backend/app/modules/agent/model.py:369）写 `{kind: "knowledge-distill", source_type, source_ref, focus}`；workspace 关联复用 `AgentRunWorkspace`（backend/app/modules/spec_workspace/bootstrap.py:144 先例）。daemon 离线时创建后立即 failed（no_online_daemon，backend/app/modules/spec_workspace/bootstrap.py:462 先例）。
+- `AgentRun` 复用承载蒸馏任务（Grill X-04 源码核实）：`metadata_` JSON 列（backend/app/modules/agent/model.py:412）写 `{kind: "knowledge-distill", source_type, source_ref, focus}`；workspace 关联复用 `AgentRunWorkspace`（backend/app/modules/spec_workspace/bootstrap.py:144 先例）。daemon 离线时创建后立即 failed（no_online_daemon，backend/app/modules/spec_workspace/bootstrap.py:386 先例）。
 - 权限：`Permission` 枚举增 `KNOWLEDGE_WRITE`（backend/app/modules/auth/permissions.py:68 KNOWLEDGE_READ 先例）+ 角色-权限播种 migration——存量角色按 key SELECT 后授予权限（现库无完全同构先例，migration 202607251600 为 bulk_insert 新角色先例，写法参照其风格）。
 
 ## 兼容策略（brownfield 必填）

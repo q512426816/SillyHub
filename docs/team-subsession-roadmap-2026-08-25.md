@@ -68,7 +68,7 @@
 
 ## 顺带发现（不阻塞主线，见机修）
 
-- `list_workers` MCP 不排除主控轮，与 UI 数据源口径不一致（`backend/app/modules/agent/mcp_tools.py:1536`）。
+- `list_workers` MCP 不排除主控轮，与 UI 数据源口径不一致（`backend/app/modules/agent/mcp_tools.py:1552`）。
 - session 路径不写 AgentRunWorkspace 关联行（ql-20260825-003 修的是 batch 路径同款）。
 - per-worker worktree 的 SDK transcript 在副本删除后残留无人清理。
 - 权限 AskUserQuestion dialog 无超时，无人应答永久挂起 turn。

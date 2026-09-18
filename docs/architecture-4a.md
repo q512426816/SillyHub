@@ -335,10 +335,10 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 | 表 | 用途 | 关键列 / 依据 |
 |---|---|---|
 | `agent_runs` | 单次 agent 执行（核心状态机表，列最多） | `status`(pending/running/completed/failed/killed) / `task_id`/`lease_id`/`change_id`/`mission_id`/`parent_run_id`(FK) / `agent_profile_id`+`agent_profile_snapshot`(快照) / `idempotency_key`(部分唯一) / `gate_status`/`gate_result`(Driver Gate) / token 用量+cost 列 / `read_only` / `worktree_branch` — `backend/app/modules/agent/model.py:48` |
-| `agent_run_logs` | run 流式日志行 | `channel`(stdout/stderr/tool_call) / `dedup_key`(部分唯一索引幂等去重) / `parent_tool_use_id`+`subagent_type`+`depth`(子代理归属) / `tool_kind`(结构化筛选) / `segment_id`(partial 去重) — `backend/app/modules/agent/model.py:488` |
+| `agent_run_logs` | run 流式日志行 | `channel`(stdout/stderr/tool_call) / `dedup_key`(部分唯一索引幂等去重) / `parent_tool_use_id`+`subagent_type`+`depth`(子代理归属) / `tool_kind`(结构化筛选) / `segment_id`(partial 去重) — `backend/app/modules/agent/model.py:541` |
 | `agent_sessions` | 交互式 SDK 驱动会话（跨多 run） | `agent_session_id`(SDK session) / `lease_id`(kind=interactive) / `change_id`/`workspace_id`(SET NULL) / `status` / `deleted_at`(软删) — `backend/app/modules/agent/model.py:371` |
 | `agent_missions` | 多 agent 委派聚合根（状态不落库，派生自子 run） | `objective` / `worker_preset`/`main_agent_config`(JSON) / `converged_at`(收敛守卫) — `backend/app/modules/agent/model.py:363` |
-| `agent_run_dependencies` / `agent_artifacts` | run 间 DAG 边 / worker 结构化产出 | `(run_id,depends_on_run_id)` / `kind`(summary/patch/test_result/evidence) — `backend/app/modules/agent/model.py:1919,700` |
+| `agent_run_dependencies` / `agent_artifacts` | run 间 DAG 边 / worker 结构化产出 | `(run_id,depends_on_run_id)` / `kind`(summary/patch/test_result/evidence) — `backend/app/modules/agent/model.py:1972,700` |
 | `daemon_borrow_audit` | 业务/管理人员借用开发人员 daemon 的审计行 | borrower/lender/workspace/agent_run 均 CASCADE；`daemon_instance_id` **RESTRICT**（审计红线） — `backend/app/modules/agent/model.py` |
 | `agent_profiles` | AgentProfile 配置层（人格+工具引用，增强非替代） | `visibility`(private/workspace/platform) / `llm_provider_id`(SET NULL) / `tool_policy_id`/`mcp_refs`/`skill_refs` / `allowed_roots_overlay`(只能收紧) / `is_system_default` — `backend/app/modules/agent/profile/model.py:59` |
 
