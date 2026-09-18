@@ -1,0 +1,55 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-1ca98b51",
+  "totals": {
+    "files": 2,
+    "additions": 151,
+    "deletions": 1
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/knowledge/distill.py",
+      "declared": true,
+      "additions": 59,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_distill.py",
+      "declared": true,
+      "additions": 92,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 2,
+    "codeFileCount": 1,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260918-008-b1a7",
+  "sessionId": "quick-1ca98b51",
+  "savedAt": "2026-09-18T01:58:09.435Z",
+  "patchSha256": "08cdb228b8efddfb73b08fadf8cbe589a3e303cf48472e34084a85a1ac3db560",
+  "patchStatus": "ok"
+}
