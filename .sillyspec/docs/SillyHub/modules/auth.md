@@ -33,6 +33,7 @@ created_at: 2026-08-18 01:45:00
   - `revoke` 按 key_prefix SCAN 清正缓存（否则被吊销 key 在 TTL 内仍可用）；`last_used_at` 写入受节流（默认 60s，0=每次写）避免行锁串行化雪崩。
   - 缓存层 try/except 降级，Redis 不可用回退 bcrypt 路径。
 - **权限模型**：`Permission(StrEnum)` 全部权限点 + `PermissionGroup` 分组（AUDIT/WORKSPACE/PLATFORM/ADMIN/CHANGE/AGENT/PPM 等）；rbac 提供 `collect_permissions*`（平台级 / 全部 / everywhere 任意工作空间聚合）、`has_permission`、`list_user_workspace_roles`、`allowed_workspace_ids`；读侧接 core.permission_cache（Redis + 熔断）。
+- **权限枚举 72 项**（2026-09-18-web-menu-management，67 + 5）：新增 `skill:read` / `mcp:read` / `agent_profile:read` / `agent_session:read`（4 个原空权限常显菜单的独立读权限，种子迁移授全部现存角色保现状可见）与 `menu:admin`（菜单管理页 /admin/menus 与覆盖写端点门控）；`group` 前缀映射补 `skill` / `mcp` / `agent_profile` / `agent_session` 前缀归 AGENT 组，`menu` 前缀无特判分支、走默认 PLATFORM 组（group 仅维护后端目录归类一致性，角色勾选器折叠分组由前端注册表 section 驱动）。
 - **启动 seed**：`bootstrap_admin_and_seed_rbac`（管理员账号三元组来自 Settings 的 platform_bootstrap_admin_* + RBAC 种子）与 `seed_platform_admin_role`。
 - **数据**：User / Session / Role / RolePermission / ApiKey / UserWorkspaceRole（均继承 BaseModel）。
 

@@ -32,6 +32,10 @@ created_at: 2026-08-18 01:45:00
   - 重置密码：不传新密码时随机生成一次性口令经响应下发（BS-1）；保留「自定义密码」；审计 details 记 `used_default_password`。**支配权（ql-20260827-019）：非平台管理员重置平台管理员密码 → 403 `PLATFORM_ADMIN_RESET_FORBIDDEN`**（重置响应含明文新口令，不校验则任意 ws `user:write` 持有者可接管超管账号）。
   - disable/enable 登录（is_active 翻转，伴随 `_revoke_sessions` 吊销会话防已禁用账号持 token 继续操作）。
   - 会话列表 / 吊销单个 / 吊销全部；用户审计日志列表；用户工作区视图（含组织成员关系）。
+- **菜单覆盖管理**（2026-09-18-web-menu-management）：
+  - `menu_overrides` 表（无 role 维度，覆盖全局生效 D-002）：`menu_key` 唯一（String 64，对齐前端注册表 `MenuPermissionGroup.menuKey`；后端不校验注册表存在性，孤儿行由前端合并层忽略）、`label_override` 可空（1–30 字符，NULL=代码默认名）、`sort_order` 可空（0–999 整数，NULL=组内声明序）、`hidden` 布尔（默认 false，全局隐藏，`menus` 行豁免在前端合并层防自锁）；BaseModel 时间戳约定同既有表。
+  - 子路由 `menu_overrides_router`（`APIRouter(prefix="/menu-overrides")`，main.py 以 `include_router(..., prefix="/api")` 挂载——admin 主 router 自带 `/admin` 前缀，承载不了导航消费的公开读路径）：`GET /api/menu-overrides` 仅需认证（导航侧拉全量覆盖，返回 items）；`PUT` / `DELETE /api/menu-overrides/{menu_key}` 需 `menu:admin`（`require_permission_any(MENU_ADMIN)`，`require_permission` 需 workspace_id 路径参数不适用）且写审计（MenuOverrideService list/upsert/delete，复用 roles_service 的 `_audit` 模式）；PUT 为 upsert，null 字段=清除该项覆盖回默认，DELETE 204=整行删除全部恢复默认。
+  - 前端 `/admin/menus` 管理页（menu:admin 门控）：分组表格行级即时保存（每项一次 PUT，行内 toast 反馈，无整页保存按钮）、显示名行内编辑+「已改名」标记+恢复默认、组内上移/下移排序、全局隐藏开关（menus 行 disabled+🔒 提示锁死防自锁）；挂载权限只读展示（key+中文名+持有角色 chips，角色经既有 `GET /api/admin/roles` 客户端反查，仅持 menu:admin 无 role:read 者该区优雅降级为占位提示）。
 - **审计**：RoleService/OrganizationService/UserService 统一写审计行；AuditLog 模型来自 workflow 模块（admin 对 workflow 的唯一依赖）。
 - **前端交互**：组织树（受控 expandedKeys 全展开，defaultExpandAll 对异步 treeData 不可靠）、角色权限选择器（按 PermissionGroup 分组）、用户弹窗（antd Modal + Form，组织 TreeSelect / 角色 Select multiple）；列表分页默认 20/页，多选 size 匹配后端 le=100。
 

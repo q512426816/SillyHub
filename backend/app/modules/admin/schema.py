@@ -322,8 +322,42 @@ class ResetPasswordResponse(BaseModel):
     plaintext_password: str
 
 
+# ── Menu override DTOs (task-02, change 2026-09-18-web-menu-management) ─────
+
+
+class MenuOverrideRead(BaseModel):
+    """单条菜单覆盖（读响应；全局生效，无 role/user 维度，D-002@v1）。
+
+    对外字段名为 ``label``，映射模型列 ``MenuOverride.label_override``
+    （service 层组装时改名，from_attributes 不自动命中需显式构造）。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    menu_key: str
+    label: str | None
+    sort_order: int | None
+    hidden: bool
+
+
+class MenuOverrideUpsert(BaseModel):
+    """Body of ``PUT /api/menu-overrides/{menu_key}``。
+
+    三字段全可空：``None`` = 清除该维度覆盖、回退代码默认。label 1–30 字符、
+    sort_order 0–999；未知字段拒收（extra=forbid）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = Field(default=None, min_length=1, max_length=30)
+    sort_order: int | None = Field(default=None, ge=0, le=999)
+    hidden: bool | None = None
+
+
 __all__ = [
     "AuditLogRead",
+    "MenuOverrideRead",
+    "MenuOverrideUpsert",
     "OrganizationBrief",
     "OrganizationCreateRequest",
     "OrganizationDetail",

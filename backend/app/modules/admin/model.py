@@ -12,6 +12,9 @@ exposes the ORM handles so services and routers can issue typed queries.
 ``UserRole`` lives here (not in :mod:`app.modules.auth.model`) because
 its semantics are platform-level admin — workspace-scoped bindings
 stay in :class:`~app.modules.auth.model.UserWorkspaceRole`.
+
+``MenuOverride`` (table ``menu_overrides``) landed later via task-02 of
+change ``2026-09-18-web-menu-management``.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -142,4 +146,43 @@ class UserRole(BaseModel, table=True):
     )
 
 
-__all__ = ["Organization", "UserOrganization", "UserRole"]
+class MenuOverride(BaseModel, table=True):
+    """菜单显示覆盖（全局生效，无 role/user 维度，D-002@v1）。
+
+    ``menu_key`` 对齐前端 ``MenuPermissionGroup.menuKey``；后端不校验其
+    是否存在于前端注册表，任意稳定字符串可存（R-01 孤儿容忍）。可空列
+    一律表示「未覆盖，使用代码默认」。
+    """
+
+    __tablename__ = "menu_overrides"
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    menu_key: str = Field(
+        sa_column=Column(String(64), unique=True, nullable=False),
+    )
+    # 显示名覆盖：NULL = 使用代码默认名（列名 label_override，对外 schema 字段名为 label）
+    label_override: str | None = Field(
+        default=None, sa_column=Column(String(30), nullable=True),
+    )
+    # 组内排序覆盖：NULL = 组内声明序
+    sort_order: int | None = Field(
+        default=None, sa_column=Column(Integer, nullable=True),
+    )
+    # 全局隐藏（对含平台管理员的所有用户生效；menu_key="menus" 的豁免在前端合并层）
+    hidden: bool = Field(
+        default=False, sa_column=Column(Boolean, nullable=False, default=False),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+__all__ = ["MenuOverride", "Organization", "UserOrganization", "UserRole"]

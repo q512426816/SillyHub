@@ -53,7 +53,8 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
     ql-20260903-007 起锚改**服务端时间戳**（回放 maxLogTimestamp / 实时事件
     env.timestamp）——判定方 last_mention.ts 是后端时钟，此前客户端 now 跨时钟域
     比较会吞红点/出假红点；空群（无服务端 ts）不写锚，缺省参数回落客户端时钟
-  - 平台管理：admin / settings / api-keys / mcp-tokens / mcp-settings / menu-permissions / permission / agent-profiles / custom-skills
+  - 平台管理：admin / settings / api-keys / mcp-tokens / mcp-settings / menu-permissions / menu-overrides / permission / agent-profiles / custom-skills
+  - `menu-overrides.ts`（2026-09-18-web-menu-management）：`useMenuOverrides` 拉 `GET /api/menu-overrides`（仅需认证的读端点，导航侧与菜单管理页共用；失败/加载中恒回空数组=空覆盖直通，不阻塞导航渲染）+ `mergeMenus(registry, overrides)` 纯函数（label 覆盖默认名、hidden 剔除且 menuKey="menus" 恒豁免防自锁、sort_order 组内稳定排序、孤儿 override 自然忽略）；导出 `MENU_OVERRIDES_QUERY_KEY`，管理页写成功后据此 invalidate、导航侧 useMenuOverrides 随之重拉刷新
   - spec 域：scan-docs / scan-docs-tree / spec-workspaces / knowledge / incidents / releases / health / git-identities / file/ / auth(+auth/ 子目录) / ppm/*（含 format / types / kanban）/ api/llm-providers（拆分客户端首例）
 - 取数 hooks：
   - `use-agent-run-stream` — run 级 SSE 订阅（ql-20260909-019-4534：预取回放走 onMessagesBatch 整批一次 setLogs 追加——原逐条 emit 每条 O(n) 数组拷贝打开大 run 历史累计 O(n²)；log_id 去重改 seenLogIdsRef O(1) 查询——原 prev.some 每事件 O(n) 线性扫；两路径共享索引，effect 重跑/clear 时重置；ql-20260910-002：onMessage 去重移出 setState updater——Set.add 副作用在 updater 内被 StrictMode 双调二次命中误判重复丢条目（session-log-assembler F7 同型），改「updater 外去重 + 纯追加」对齐批量路径）

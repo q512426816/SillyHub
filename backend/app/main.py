@@ -26,6 +26,7 @@ from app.core.monitoring import (
 )
 from app.core.redis import close_redis
 from app.core.telemetry import init_telemetry
+from app.modules.admin.menu_overrides_router import router as menu_overrides_router
 from app.modules.admin.router import router as admin_router
 from app.modules.agent.profile.router import router as agent_profile_router
 from app.modules.agent.router import router as agent_router
@@ -953,6 +954,13 @@ def create_app() -> FastAPI:
     app.include_router(policy_crud_router, prefix="/api")
     app.include_router(settings_router, prefix="/api")
     app.include_router(admin_router, prefix="/api")
+    # 2026-09-18-web-menu-management task-05：菜单覆盖三端点（GET
+    # /api/menu-overrides 认证读全量覆盖 + PUT/DELETE /api/menu-overrides/{menu_key}
+    # 挂 menu:admin 门控；业务/审计在 menu_overrides_service）。sibling include
+    # 而非挂进 admin 主 router——后者自带 prefix=/admin 会把导航消费的公开读端点
+    # 推到 /api/admin 下（审查 B-01）；router 自带 prefix=/menu-overrides，外层
+    # 只加 /api（先例 members_router）。
+    app.include_router(menu_overrides_router, prefix="/api")
     app.include_router(spec_workspace_router, prefix="/api")
     # 2026-08-10-sillyhub-platform-sync task-06：SillySpec 进度同步层 3 端点
     # （POST /changes/{name}/progress / GET /changes / GET /changes/{name}/progress）。

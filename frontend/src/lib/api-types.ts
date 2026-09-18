@@ -10595,6 +10595,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/menu-overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Menu Overrides
+         * @description 全量菜单覆盖（menu_key 升序）。仅需认证：内容为全局显示配置，无敏感
+         *     信息（R-06）；FR-05 下发端点，导航侧所有登录用户消费。
+         */
+        get: operations["list_menu_overrides_api_menu_overrides_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/menu-overrides/{menu_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Upsert Menu Override
+         * @description 按 menu_key 建行或整行覆盖写（``None`` = 清除该维度回代码默认）。
+         *     label/sort_order 校验与 ``menu_override.upserted`` 审计在 service 层。
+         */
+        put: operations["upsert_menu_override_api_menu_overrides__menu_key__put"];
+        post?: never;
+        /**
+         * Delete Menu Override
+         * @description 按 menu_key 整行删除（该菜单全部恢复默认）。行不存在时幂等 204，
+         *     ``menu_override.deleted`` 审计在 service 层。
+         */
+        delete: operations["delete_menu_override_api_menu_overrides__menu_key__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/spec-workspace": {
         parameters: {
             query?: never;
@@ -18161,6 +18208,46 @@ export interface components {
             init_synced_spec_version: number | null;
         };
         /**
+         * MenuOverrideListResponse
+         * @description GET 列表响应包装（仓库 list 响应惯例：顶层 ``items`` 字段）。
+         */
+        MenuOverrideListResponse: {
+            /** Items */
+            items: components["schemas"]["MenuOverrideRead"][];
+        };
+        /**
+         * MenuOverrideRead
+         * @description 单条菜单覆盖（读响应；全局生效，无 role/user 维度，D-002@v1）。
+         *
+         *     对外字段名为 ``label``，映射模型列 ``MenuOverride.label_override``
+         *     （service 层组装时改名，from_attributes 不自动命中需显式构造）。
+         */
+        MenuOverrideRead: {
+            /** Menu Key */
+            menu_key: string;
+            /** Label */
+            label: string | null;
+            /** Sort Order */
+            sort_order: number | null;
+            /** Hidden */
+            hidden: boolean;
+        };
+        /**
+         * MenuOverrideUpsert
+         * @description Body of ``PUT /api/menu-overrides/{menu_key}``。
+         *
+         *     三字段全可空：``None`` = 清除该维度覆盖、回退代码默认。label 1–30 字符、
+         *     sort_order 0–999；未知字段拒收（extra=forbid）。
+         */
+        MenuOverrideUpsert: {
+            /** Label */
+            label?: string | null;
+            /** Sort Order */
+            sort_order?: number | null;
+            /** Hidden */
+            hidden?: boolean | null;
+        };
+        /**
          * MergePreviewOut
          * @description 合并预览（dry-run，不落盘）：将追加的段落文本与 INDEX 路由行。
          *
@@ -18922,7 +19009,7 @@ export interface components {
          * Permission
          * @enum {string}
          */
-        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "daemon:borrow" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view";
+        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "daemon:borrow" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
         /**
          * PermissionResponseRead
          * @description REST response body for POST /sessions/{id}/permissions/{req}/response.
@@ -45823,6 +45910,90 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["app__modules__admin__schema__UserRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_menu_overrides_api_menu_overrides_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuOverrideListResponse"];
+                };
+            };
+        };
+    };
+    upsert_menu_override_api_menu_overrides__menu_key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                menu_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuOverrideUpsert"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuOverrideRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_menu_override_api_menu_overrides__menu_key__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                menu_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

@@ -17,6 +17,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { AppShell } from "@/components/app-shell";
 import { useSession, type SessionUser } from "@/stores/session";
@@ -77,10 +78,18 @@ const ADMIN: SessionUser = {
 };
 
 function renderShell() {
+  // 2026-09-18-web-menu-management task-10：AppShell 接入 useMenuOverrides（useQuery），
+  // 裸渲染会抛 No QueryClient set——包独立 QueryClient（retry:false，真实 app 由
+  // AppProviders 提供同款 Provider），覆盖拉取失败经 hook 降级为空数组直通注册表。
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <AppShell>
-      <div>content</div>
-    </AppShell>,
+    <QueryClientProvider client={queryClient}>
+      <AppShell>
+        <div>content</div>
+      </AppShell>
+    </QueryClientProvider>,
   );
 }
 

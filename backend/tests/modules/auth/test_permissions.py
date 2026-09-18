@@ -42,7 +42,7 @@ def test_permission_group_has_seven_members() -> None:
     assert set(members) == expected
 
 
-def test_permission_count_is_67() -> None:
+def test_permission_count_is_72() -> None:
     """46 历史 + 17 PPM_* 菜单/读 + daemon:borrow + llm_provider:read + weekly-plan = 66。
 
     cbd258eb/1f5e6ebe 菜单 unique-key 扩容回升到 63；change
@@ -54,9 +54,13 @@ def test_permission_count_is_67() -> None:
     ``PPM_WEEKLY_PLAN_VIEW``（实施计划汇总独立菜单权限）→ 66；
     change 2026-09-17-knowledge-precipitation task-02 / FR-02 再加
     ``KNOWLEDGE_WRITE``（知识库写权限，管理员/owner 播种走 migration
-    20260917104400）→ 67。
+    20260917104400）→ 67；
+    change 2026-09-18-web-menu-management task-01 / FR-01 再加
+    ``SKILL_READ``/``MCP_READ``/``AGENT_PROFILE_READ``/``AGENT_SESSION_READ``
+    （4 个常显菜单独立读权限，task-03 种子迁移授全部现存角色保现状可见）
+    与 ``MENU_ADMIN``（菜单管理页 /admin/menus 与覆盖写端点门控）→ 72。
     """
-    assert len(list(Permission)) == 67
+    assert len(list(Permission)) == 72
 
 
 @pytest.mark.parametrize(
@@ -104,6 +108,13 @@ def test_permission_count_is_67() -> None:
         (Permission.DAEMON_BORROW, PermissionGroup.AGENT),
         # task-01: llm_provider 前缀无特判分支，落默认 PLATFORM 组
         (Permission.LLM_PROVIDER_READ, PermissionGroup.PLATFORM),
+        # task-01（2026-09-18-web-menu-management / FR-01）：4 个常显菜单独立
+        # 读权限前缀归 AGENT 组；menu 前缀无特判分支，落默认 PLATFORM 组。
+        (Permission.SKILL_READ, PermissionGroup.AGENT),
+        (Permission.MCP_READ, PermissionGroup.AGENT),
+        (Permission.AGENT_PROFILE_READ, PermissionGroup.AGENT),
+        (Permission.AGENT_SESSION_READ, PermissionGroup.AGENT),
+        (Permission.MENU_ADMIN, PermissionGroup.PLATFORM),
     ],
 )
 def test_permission_group_resolution(perm: Permission, expected_group: PermissionGroup) -> None:
@@ -162,6 +173,20 @@ def test_knowledge_write_permission_value() -> None:
     ``knowledge:write`` 完全一致（迁移内为字面量复写，两处以本断言对齐）。
     """
     assert Permission.KNOWLEDGE_WRITE.value == "knowledge:write"
+
+
+def test_menu_management_permission_values() -> None:
+    """task-01（2026-09-18-web-menu-management / FR-01）。
+
+    4 个常显菜单读权限 + 菜单管理门控的字符串值必须与 task-03 种子迁移
+    内硬编码字面量逐字一致（迁移内为字面量复写，两处以本断言对齐）；
+    MENU_ADMIN 供 task-05 路由门控 require_permission(Permission.MENU_ADMIN) 消费。
+    """
+    assert Permission.SKILL_READ.value == "skill:read"
+    assert Permission.MCP_READ.value == "mcp:read"
+    assert Permission.AGENT_PROFILE_READ.value == "agent_profile:read"
+    assert Permission.AGENT_SESSION_READ.value == "agent_session:read"
+    assert Permission.MENU_ADMIN.value == "menu:admin"
 
 
 # ---------------------------------------------------------------------------

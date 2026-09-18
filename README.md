@@ -95,6 +95,8 @@ make up                              # postgres / redis / minio / litellm + lite
 # LITELLM_MASTER_KEY、LITELLM_DB_PASSWORD、PLATFORM_BOOTSTRAP_ADMIN_PASSWORD
 ```
 
+> **权限缓存说明**：菜单管理变更（2026-09-18）的种子迁移直插 `role_permissions` 表、绕过权限缓存主动失效（`invalidate_all_permissions`），`perm:*` 前缀的 Redis 缓存以 TTL 300 秒到期自愈为主——外部 Redis 不随后端重启清空，升级镜像后等约 5 分钟新权限即全量生效；如需加速收敛，可手动清理 Redis 中 `perm:*` 键（可选项，非必须，无强制清库要求）。
+
 ## 项目结构
 
 ```

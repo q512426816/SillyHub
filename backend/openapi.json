@@ -32141,6 +32141,119 @@
         }
       }
     },
+    "/api/menu-overrides": {
+      "get": {
+        "tags": [
+          "menu-overrides"
+        ],
+        "summary": "List Menu Overrides",
+        "description": "全量菜单覆盖（menu_key 升序）。仅需认证：内容为全局显示配置，无敏感\n信息（R-06）；FR-05 下发端点，导航侧所有登录用户消费。",
+        "operationId": "list_menu_overrides_api_menu_overrides_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuOverrideListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/menu-overrides/{menu_key}": {
+      "put": {
+        "tags": [
+          "menu-overrides"
+        ],
+        "summary": "Upsert Menu Override",
+        "description": "按 menu_key 建行或整行覆盖写（``None`` = 清除该维度回代码默认）。\nlabel/sort_order 校验与 ``menu_override.upserted`` 审计在 service 层。",
+        "operationId": "upsert_menu_override_api_menu_overrides__menu_key__put",
+        "parameters": [
+          {
+            "name": "menu_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "title": "Menu Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuOverrideUpsert"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuOverrideRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "menu-overrides"
+        ],
+        "summary": "Delete Menu Override",
+        "description": "按 menu_key 整行删除（该菜单全部恢复默认）。行不存在时幂等 204，\n``menu_override.deleted`` 审计在 service 层。",
+        "operationId": "delete_menu_override_api_menu_overrides__menu_key__delete",
+        "parameters": [
+          {
+            "name": "menu_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "title": "Menu Key"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/spec-workspace": {
       "get": {
         "tags": [
@@ -50014,6 +50127,111 @@
         ],
         "title": "MemberBindingView"
       },
+      "MenuOverrideListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MenuOverrideRead"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "MenuOverrideListResponse",
+        "description": "GET 列表响应包装（仓库 list 响应惯例：顶层 ``items`` 字段）。"
+      },
+      "MenuOverrideRead": {
+        "properties": {
+          "menu_key": {
+            "type": "string",
+            "title": "Menu Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "hidden": {
+            "type": "boolean",
+            "title": "Hidden"
+          }
+        },
+        "type": "object",
+        "required": [
+          "menu_key",
+          "label",
+          "sort_order",
+          "hidden"
+        ],
+        "title": "MenuOverrideRead",
+        "description": "单条菜单覆盖（读响应；全局生效，无 role/user 维度，D-002@v1）。\n\n对外字段名为 ``label``，映射模型列 ``MenuOverride.label_override``\n（service 层组装时改名，from_attributes 不自动命中需显式构造）。"
+      },
+      "MenuOverrideUpsert": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 30,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 999.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "hidden": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hidden"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "MenuOverrideUpsert",
+        "description": "Body of ``PUT /api/menu-overrides/{menu_key}``。\n\n三字段全可空：``None`` = 清除该维度覆盖、回退代码默认。label 1–30 字符、\nsort_order 0–999；未知字段拒收（extra=forbid）。"
+      },
       "MergePreviewOut": {
         "properties": {
           "section_text": {
@@ -51628,7 +51846,12 @@
           "ppm:problem-list:read",
           "ppm:problem-change:read",
           "ppm:task-plan:read",
-          "ppm:weekly-plan:view"
+          "ppm:weekly-plan:view",
+          "skill:read",
+          "mcp:read",
+          "agent_profile:read",
+          "agent_session:read",
+          "menu:admin"
         ],
         "title": "Permission"
       },

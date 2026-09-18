@@ -210,7 +210,7 @@ describe("visibleMenusBySection", () => {
   it("FR-06 #1: with ['user:read'] on 'system' returns only users (1 entry)", () => {
     // Given user.permissions = ["user:read"]
     // When visibleMenusBySection(user, "system")
-    // Then 长度 = 1 且 menuKey === "users"（organizations/roles/settings 权限不命中）
+    // Then 长度 = 1 且 menuKey === "users"（organizations/roles/settings/menus 权限不命中）
     const user = mkUser({ permissions: ["user:read"] });
     const result = visibleMenusBySection(user, "system");
     expect(result).toHaveLength(1);
@@ -226,10 +226,11 @@ describe("visibleMenusBySection", () => {
     expect(result).toEqual([]);
   });
 
-  it("FR-06 #3: platform admin sees all 4 entries in 'system' section", () => {
+  it("FR-06 #3: platform admin sees all 5 entries in 'system' section", () => {
     // Given is_platform_admin = true
     // When visibleMenusBySection(user, "system")
-    // Then 全部 4 条（users / organizations / roles / settings），顺序与数据源一致
+    // Then 全部 5 条（users / organizations / roles / settings / menus），顺序与数据源一致
+    // （2026-09-18-web-menu-management task-08：system 组新增 menus 菜单项，4 → 5）
     const user = mkUser({ is_platform_admin: true, permissions: [] });
     const result = visibleMenusBySection(user, "system");
     expect(result.map((g) => g.menuKey)).toEqual([
@@ -237,6 +238,7 @@ describe("visibleMenusBySection", () => {
       "organizations",
       "roles",
       "settings",
+      "menus",
     ]);
   });
 

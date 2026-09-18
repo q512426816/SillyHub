@@ -4,7 +4,7 @@ import type { MenuSection } from "../menu-permissions";
 import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
 
 /**
- * 后端 Permission 枚举镜像常量（70 项）。
+ * 后端 Permission 枚举镜像常量（69 项）。
  *
  * 与 `backend/app/modules/auth/permissions.py` 的 `Permission` StrEnum 保持同步。
  * 若后端扩/删枚举，需同时更新本常量；用例 5 会在漂移时失败提示。
@@ -21,6 +21,7 @@ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
  * - Tool (4)
  * - Admin (7)
  * - PPM (8, change 2026-07-20-ppm-permission-simplify task-04 精简：删 16 个 write/delete/export/assign 摆设动作)
+ * - 菜单读权限 + 菜单管理门控 (5, 2026-09-18-web-menu-management task-01 新增)
  */
 const BACKEND_PERMISSION_KEYS = [
   // Platform (8, ql-004 新增 3 个管理子菜单 admin + ql-005 新增 git_identity:admin
@@ -100,9 +101,17 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:task-plan:read",
   // 实施计划汇总(weekly-plan 汇总视图)
   "ppm:weekly-plan:view",
+  // ── 菜单读权限 + 菜单管理门控（2026-09-18-web-menu-management task-01 / FR-01，5 项）──
+  // 4 个原常显菜单（技能管理/MCP 资产库/智能体档案/智能体会话）补独立 read 权限
+  // 按角色开关；menu:admin 门控菜单管理页与覆盖写端点。
+  "skill:read",
+  "mcp:read",
+  "agent_profile:read",
+  "agent_session:read",
+  "menu:admin",
 ] as const;
 
-/** menuKey 期望集合（2026-08-22-team-session-unify task-13 / D-011 删 missions 菜单项） */
+/** menuKey 期望集合（2026-09-18-web-menu-management task-08 system 组新增 menus） */
 const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "workspaces",
   "components",
@@ -130,6 +139,8 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "roles",
   "runtimes",
   "settings",
+  // 2026-09-18-web-menu-management task-08 新增（system 组菜单管理页入口）
+  "menus",
   // PPM 14 条
   "ppm-workbench",
   "ppm-projects",
@@ -157,8 +168,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
 ]);
 
 describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
-  it("MENU_PERMISSION_GROUPS 长度 === 37（task-13 删 missions 后）", () => {
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(37);
+  it("MENU_PERMISSION_GROUPS 长度 === 38（task-08 新增 menus 菜单项）", () => {
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(38);
   });
 
   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
@@ -173,7 +184,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("section 分布：workspace 8 / agent 4 / config 4 / governance 3 / system 4 / ppm 14（task-13 删 missions）", () => {
+  it("section 分布：workspace 8 / agent 4 / config 4 / governance 3 / system 5 / ppm 14（task-08 system 组新增 menus）", () => {
     const counter: Record<MenuSection, number> = {
       workspace: 0,
       agent: 0,
@@ -189,36 +200,27 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(counter.agent).toBe(4);
     expect(counter.config).toBe(4);
     expect(counter.governance).toBe(3);
-    expect(counter.system).toBe(4);
+    expect(counter.system).toBe(5);
     expect(counter.ppm).toBe(14);
   });
 
-  it("每个 menu 至少 1 个 permission（skills / agent-profiles / sessions 例外：permissions:[] 对所有登录用户可见）", () => {
+  it("每个 menu 至少 1 个 permission（task-08 FR-01 后无空 permissions 菜单）", () => {
     MENU_PERMISSION_GROUPS.forEach((g) => {
-      if (g.menuKey === "skills") {
-        // 2026-07-31-custom-skill-per-user D-003：skills 菜单对所有登录用户可见，无独立权限
-        expect(g.permissions).toEqual([]);
-        return;
-      }
-      if (g.menuKey === "agent-profiles") {
-        // 2026-08-04-agent-profile-ui-redesign task-05：智能体档案菜单对所有登录用户可见
-        // （对齐 skills D-003），permissions:[] 经 permission.ts:41 登录即可见
-        expect(g.permissions).toEqual([]);
-        return;
-      }
-      if (g.menuKey === "sessions") {
-        // 2026-08-14-sessions-portal task-10：智能体会话菜单对所有登录用户可见
-        // （会话列表后端已按 user_id 隔离，对齐 agent-profiles 先例）
-        expect(g.permissions).toEqual([]);
-        return;
-      }
-      if (g.menuKey === "mcp") {
-        // 2026-09-10-mcp-central-registry task-11 主代理裁决：MCP 资产库全员可见
-        // （D-001 双层可见性，私有库入口；写权限由 API 层控制，对齐 skills 先例）
-        expect(g.permissions).toEqual([]);
-        return;
-      }
       expect(g.permissions.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it("4 个原常显菜单挂独立 read 权限（task-08 FR-01：可按角色分配/收回）", () => {
+    const EXPECTED: Record<string, string> = {
+      skills: "skill:read",
+      mcp: "mcp:read",
+      "agent-profiles": "agent_profile:read",
+      sessions: "agent_session:read",
+    };
+    Object.entries(EXPECTED).forEach(([menuKey, permKey]) => {
+      const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === menuKey);
+      expect(g, `missing menu ${menuKey}`).toBeDefined();
+      expect(g!.permissions.map((p) => p.key)).toEqual([permKey]);
     });
   });
 
@@ -232,29 +234,19 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.pickerHidden).toBeFalsy();
   });
 
-  it("所有 menu 都不设 pickerHidden（skills 例外：D-003 无独立权限可配；ql-005 移除 git-identities 的 pickerHidden）", () => {
-    // 验证全表无 pickerHidden=true 残留（skills 例外）
+  it("所有 menu 都不设 pickerHidden（task-08 后 skills/mcp 补独立权限进勾选器，无例外）", () => {
+    // 验证全表无 pickerHidden=true 残留（原 skills/mcp 空权限例外已随 FR-01 权限化移除）
     MENU_PERMISSION_GROUPS.forEach((g) => {
-      if (g.menuKey === "skills") {
-        // 2026-07-31-custom-skill-per-user D-003：skills 无独立权限（permissions:[]），pickerHidden 屏蔽空卡
-        expect(g.pickerHidden).toBe(true);
-        return;
-      }
-      if (g.menuKey === "mcp") {
-        // 2026-09-10-mcp-central-registry task-11：同 skills 形态（permissions:[] 无独立权限可配）
-        expect(g.pickerHidden).toBe(true);
-        return;
-      }
       expect(g.pickerHidden).toBeFalsy();
     });
   });
 
-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 64", () => {
+  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 69", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
-    // 47 (非 PPM, 含 llm_provider:read) + 17 (PPM 菜单/读，已删问题变更 + weekly-plan:view) = 64
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(64);
-    expect(valid.size).toBe(64);
+    // 64 (原) + 5 (2026-09-18-web-menu-management task-01 新增菜单读权限 + menu:admin) = 69
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(69);
+    expect(valid.size).toBe(69);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {
@@ -348,7 +340,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.permissions).toEqual([{ key: "llm_provider:read", name: "供应商管理" }]);
   });
 
-  it("新增 skills 菜单：agent 组 /settings/skills + permissions:[] 对所有登录用户可见（2026-07-31-custom-skill-per-user D-003）", () => {
+  it("skills 菜单：agent 组 /settings/skills + skill:read 门控（task-08 FR-01 权限化，进角色勾选器）", () => {
     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "skills");
     expect(g).toBeDefined();
     expect(g!.section).toBe("agent");
@@ -356,12 +348,12 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.href).toBe("/settings/skills");
     expect(g!.absolute).toBe(true);
     expect(g!.matchPattern).toBe("/settings/skills");
-    // D-003：skills 菜单放开，所有登录用户可见（permissions:[]），无独立权限可配（pickerHidden:true）
-    expect(g!.permissions).toEqual([]);
-    expect(g!.pickerHidden).toBe(true);
+    // 2026-09-18-web-menu-management FR-01：改挂独立 skill:read（去 pickerHidden 进勾选器）
+    expect(g!.permissions).toEqual([{ key: "skill:read", name: "技能查看" }]);
+    expect(g!.pickerHidden).toBeFalsy();
   });
 
-  it("新增 mcp 菜单：agent 组 /settings/mcp + permissions:[] 全员可见（2026-09-10-mcp-central-registry task-11 更名+主代理裁决放开）", () => {
+  it("mcp 菜单：agent 组 /settings/mcp + mcp:read 门控（task-08 FR-01 权限化，进角色勾选器）", () => {
     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "mcp");
     expect(g).toBeDefined();
     expect(g!.section).toBe("agent");
@@ -369,13 +361,13 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.href).toBe("/settings/mcp");
     expect(g!.absolute).toBe(true);
     expect(g!.matchPattern).toBe("/settings/mcp");
-    // D-001 双层可见性：普通用户进页面管理自己的私有库（FR-01），写权限由 API 层
-    // 权限矩阵控制（对齐 skills D-003 放开先例）
-    expect(g!.permissions).toEqual([]);
-    expect(g!.pickerHidden).toBe(true);
+    // 2026-09-18-web-menu-management FR-01：改挂独立 mcp:read（去 pickerHidden 进勾选器）；
+    // 库读写仍由 API 层权限矩阵控制（非 admin 平台库写 403）
+    expect(g!.permissions).toEqual([{ key: "mcp:read", name: "MCP 查看" }]);
+    expect(g!.pickerHidden).toBeFalsy();
   });
 
-  it("新增 agent-profiles 菜单：agent 组 /agent-profiles + permissions:[] 对所有登录用户可见（task-05 / D-001/D-007）", () => {
+  it("agent-profiles 菜单：agent 组 /agent-profiles + agent_profile:read 门控（task-08 FR-01 权限化）", () => {
     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "agent-profiles");
     expect(g).toBeDefined();
     expect(g!.section).toBe("agent");
@@ -383,9 +375,40 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.href).toBe("/agent-profiles");
     expect(g!.absolute).toBe(true);
     expect(g!.matchPattern).toBe("/agent-profiles");
-    // 对齐 skills（D-003）：菜单对所有登录用户可见，无独立权限可配。
-    // 空 permissions 经 permission.ts:41（user 非 null → return true）判定登录即可见。
-    expect(g!.permissions).toEqual([]);
+    // 2026-09-18-web-menu-management FR-01：permissions 由 []（登录即可见）改为
+    // 独立 agent_profile:read，可在角色管理按角色分配/收回
+    expect(g!.permissions).toEqual([
+      { key: "agent_profile:read", name: "智能体档案查看" },
+    ]);
+  });
+
+  it("sessions 菜单：agent 组 /sessions + agent_session:read 门控（task-08 FR-01 权限化）", () => {
+    const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "sessions");
+    expect(g).toBeDefined();
+    expect(g!.section).toBe("agent");
+    expect(g!.menuLabel).toBe("智能体会话");
+    expect(g!.href).toBe("/sessions");
+    expect(g!.absolute).toBe(true);
+    expect(g!.matchPattern).toBe("/sessions");
+    // 2026-09-18-web-menu-management FR-01：permissions 由 []（登录即可见）改为
+    // 独立 agent_session:read；会话列表后端仍按 user_id 隔离
+    expect(g!.permissions).toEqual([
+      { key: "agent_session:read", name: "智能体会话查看" },
+    ]);
+  });
+
+  it("新增 menus 菜单：system 组 /admin/menus + menu:admin 门控（task-08 / R-03 注册表登记）", () => {
+    const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "menus");
+    expect(g).toBeDefined();
+    expect(g!.section).toBe("system");
+    expect(g!.menuLabel).toBe("菜单管理");
+    expect(g!.href).toBe("/admin/menus");
+    expect(g!.absolute).toBe(true);
+    expect(g!.matchPattern).toBe("/admin/menus");
+    // menu:admin 门控管理页入口与覆盖写端点（platform:admin 自动通过）；
+    // hidden 覆盖豁免（防自锁 R-03）归 mergeMenus，此处只登记注册表数据
+    expect(g!.permissions).toEqual([{ key: "menu:admin", name: "菜单管理" }]);
+    expect(g!.pickerHidden).toBeFalsy();
   });
 });
 

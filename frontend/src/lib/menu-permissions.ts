@@ -18,7 +18,29 @@
  * 管理菜单独立权限（ql-004/005）：config/system 组子菜单各有独立 admin 权限
  * （settings:admin / api_key:admin / runtime:admin / git_identity:admin），
  * 避免共用 platform:admin 致 picker 重复或缺失。后端 router 各自 require 对应权限。
+ *
+ * menuKey 稳定标识规约（R-01）：menuKey 是覆盖表 menu_overrides.menu_key 的
+ * 关联键，禁止重命名或复用——前端重构改 menuKey 会使已存的覆盖行变孤儿、
+ * 被合并层静默忽略（不报错）。menuKey/href/section/matchPattern 同为 nav 渲染
+ * 与 picker 折叠的既有契约，非经变更评审不得改动。
+ *
+ * 2026-09-18-web-menu-management（FR-01/FR-04）：
+ * - skills / mcp / agent-profiles / sessions 4 菜单由空 permissions（登录常显）
+ *   改为各挂独立 read 权限（skill:read / mcp:read / agent_profile:read /
+ *   agent_session:read），可在角色管理页按角色分配/收回；存量角色可见性由
+ *   后端种子迁移保现状（4 个新权限 key 插入 role_permissions，覆盖全部现存角色）。
+ * - system 组新增「菜单管理」menus 菜单项（menu:admin 门控，/admin/menus 入口）。
+ * - PermissionItem.key 由 string 收紧为 api-types 生成的 Permission 联合类型
+ *   （PermissionKey），后端枚举漂移在编译期暴露。
  */
+
+import type { components } from "@/lib/api-types";
+
+/**
+ * 后端 Permission 枚举联合类型（OpenAPI 生成，api-types.ts）。
+ * 权限 key 手写漂移在此编译期暴露（FR-04）。
+ */
+export type PermissionKey = components["schemas"]["Permission"];
 
 export type MenuSection =
   | "workspace"
@@ -29,8 +51,8 @@ export type MenuSection =
   | "ppm";
 
 export interface PermissionItem {
-  /** 权限标识，必须命中后端 Permission 枚举 */
-  key: string;
+  /** 权限标识，必须命中后端 Permission 枚举（生成联合类型，漂移在编译期暴露） */
+  key: PermissionKey;
   /** 中文展示名 */
   name: string;
   /** 可选描述 */
@@ -168,17 +190,10 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
   {
     // 2026-07-29-sidebar-menu-restructure 新增：技能管理提为独立菜单，指向平台级
     // /settings/skills（工作区级仍在工作区内部访问）。
-    // 2026-07-31-custom-skill-per-user D-003：权限放宽——去掉 settings:admin 门槛，
-    // 改为所有登录用户可见。理由：技能是个人资产（per-user），后端 custom-skills 端点
-    // （task-03）已从 SETTINGS_ADMIN 放宽到任意登录用户，前端菜单须对齐，否则非管理员
-    // 看不到入口（前后端不一致 bug）。permissions 置空 = 不再要求任何特定权限。
-    //
-    // ⚠️ 配套依赖（超出本 task allowed_paths）：lib/permission.ts 的 canSeeMenu →
-    // hasAnyPermission 当前对空 permissions 显式 return false（permission.ts:41），
-    // 即「空 = 非管理员不可见」而非「空 = 登录即可见」。要让本菜单真正对所有登录用户
-    // 可见，须配套调整 hasAnyPermission：当 perms 为空且 user 非 null 时返回 true
-    // （登录即可见），并同步更新 permission.test.ts 中「空 perms → false」的断言。
-    // pickerHidden: true——本菜单已无独立权限可配，AdminRolePermissionPicker 不渲染卡片。
+    // 2026-07-31-custom-skill-per-user D-003：曾放宽为空 permissions（登录可见）。
+    // 2026-09-18-web-menu-management FR-01：改挂独立 skill:read 权限，可在角色
+    // 管理按角色分配/收回（进入 picker 勾选器，去 pickerHidden）；存量角色可见性
+    // 由后端种子迁移保现状（4 个新 read 权限 key 授予全部现存角色）。
     section: "agent",
     menuKey: "skills",
     menuLabel: "技能管理",
@@ -186,16 +201,16 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/settings/skills",
     absolute: true,
     matchPattern: "/settings/skills",
-    permissions: [],
-    pickerHidden: true,
+    permissions: [{ key: "skill:read", name: "技能查看" }],
   },
   {
     // 2026-07-29-sidebar-menu-restructure 新增（D-003）：MCP 管理提为独立菜单，
     // 指向平台级 /settings/mcp。
     // 2026-09-10-mcp-central-registry task-11：菜单名改「MCP 资产库」（页面重构为
-    // 平台共享库/我的库双 tab 资产管理）。主代理裁决：permissions 放开为 []
-    // （对齐 skills D-003 先例）——D-001 双层可见性要求普通用户能进页面管理自己
-    // 的私有库（FR-01），菜单只是入口可见性，写权限由 API 层权限矩阵全权控制
+    // 平台共享库/我的库双 tab 资产管理），permissions 曾放开为 []（对齐 skills 先例）。
+    // 2026-09-18-web-menu-management FR-01：改挂独立 mcp:read 权限，可在角色管理
+    // 按角色分配/收回（进入 picker 勾选器，去 pickerHidden）；存量角色可见性由后端
+    // 种子迁移保现状。菜单仍只是入口可见性，库读写由 API 层权限矩阵控制
     // （非 admin 平台库写 403）。URL 不变。
     section: "agent",
     menuKey: "mcp",
@@ -204,15 +219,15 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/settings/mcp",
     absolute: true,
     matchPattern: "/settings/mcp",
-    permissions: [],
-    pickerHidden: true,
+    permissions: [{ key: "mcp:read", name: "MCP 查看" }],
   },
   {
     // 2026-08-04-agent-profile-ui-redesign task-05 新增（D-001/D-007）：智能体档案
     // 提为侧边栏一级菜单，点击直达全局卡片墙 /agent-profiles（跨工作区聚合视图）。
-    // permissions:[] 对齐 skills（D-003）：档案对所有登录用户可见，菜单不挂独立权限；
-    // 空 permissions 经 permission.ts:41 hasAnyPermission（user 非 null 时 return true）
-    // 判定为登录即可见。工作区详情页快捷入口（workspaces/[id]/page.tsx:361）保留不动。
+    // 2026-09-18-web-menu-management FR-01：permissions 由 []（登录即可见）改为
+    // 独立 agent_profile:read 权限（任一命中即可见），可在角色管理按角色分配/收回；
+    // 存量角色可见性由后端种子迁移保现状。工作区详情页快捷入口
+    // （workspaces/[id]/page.tsx:361）保留不动。
     section: "agent",
     menuKey: "agent-profiles",
     menuLabel: "智能体档案",
@@ -220,13 +235,15 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/agent-profiles",
     absolute: true,
     matchPattern: "/agent-profiles",
-    permissions: [],
+    permissions: [{ key: "agent_profile:read", name: "智能体档案查看" }],
   },
   {
     // 2026-08-14-sessions-portal task-10 新增（design §5 Wave3 / FR-01 / FR-02）：
     // 智能体会话总入口 /sessions（左会话列表 + 右新建/会话两态，跨机器跨智能体统一
-    // 会话视图）。permissions:[] 对齐 agent-profiles/skills：会话列表后端已按
-    // user_id 隔离，所有登录用户可见，菜单不挂独立权限（登录即可见）。
+    // 会话视图）。2026-09-18-web-menu-management FR-01：permissions 由 []（登录
+    // 即可见）改为独立 agent_session:read 权限（任一命中即可见），可在角色管理按
+    // 角色分配/收回；存量角色可见性由后端种子迁移保现状。会话列表后端仍按
+    // user_id 隔离。
     section: "agent",
     menuKey: "sessions",
     menuLabel: "智能体会话",
@@ -234,7 +251,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/sessions",
     absolute: true,
     matchPattern: "/sessions",
-    permissions: [],
+    permissions: [{ key: "agent_session:read", name: "智能体会话查看" }],
   },
 
   // ── config 配置中心（4 条，含新增 llm-providers；runtimes 自 system 移入，D-006）
@@ -325,7 +342,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     permissions: [{ key: "incident:read", name: "事件查看" }],
   },
 
-  // ── system 系统管理（4 条：用户/组织/角色/设置）───────────────
+  // ── system 系统管理（5 条：用户/组织/角色/设置/菜单）──────────
   {
     section: "system",
     menuKey: "users",
@@ -377,6 +394,20 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     // 后端 settings/router 的 GET/PUT /settings require settings:admin
     // （platform:admin 自动通过）。/users 系列仍 require_platform_admin。
     permissions: [{ key: "settings:admin", name: "平台设置管理" }],
+  },
+  {
+    // 2026-09-18-web-menu-management 新增：菜单管理页入口 /admin/menus（菜单覆盖
+    // 的显示名/组内排序/全局隐藏管理）。menu:admin 门控（platform:admin 自动通过），
+    // 后端 GET /api/menu-overrides 仅需认证，PUT/DELETE require menu:admin。
+    // app-shell 渲染时对本 menuKey 的 hidden 覆盖豁免（防自锁，R-03）。
+    section: "system",
+    menuKey: "menus",
+    menuLabel: "菜单管理",
+    icon: "📑",
+    href: "/admin/menus",
+    absolute: true,
+    matchPattern: "/admin/menus",
+    permissions: [{ key: "menu:admin", name: "菜单管理" }],
   },
 
   // ── ppm（14 条，平台级项目与问题管理）──────────────────────

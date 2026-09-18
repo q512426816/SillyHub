@@ -167,6 +167,20 @@ class Permission(StrEnum):
     # 实施计划汇总(weekly-plan:项目实施阶段明细 + 任务计划汇总视图)
     PPM_WEEKLY_PLAN_VIEW = "ppm:weekly-plan:view"
 
+    # ── 菜单读权限 + 菜单管理门控（change 2026-09-18-web-menu-management task-01 / FR-01）────
+    # 4 个原常显菜单（技能管理、MCP 资产库、智能体档案、智能体会话）此前
+    # permissions 为空恒显，补独立 read 权限 key 使其可按角色开关；种子迁移
+    # 授给全部现存角色保现状可见（task-03 消费，字面量与本枚举以
+    # tests/modules/auth/test_permissions.py 断言对齐）。
+    # MENU_ADMIN 门控菜单管理页 /admin/menus 与覆盖写端点（task-05 消费）。
+    # skill/mcp/agent_profile/agent_session 前缀归 AGENT 组；
+    # menu 前缀无特判分支，走默认 PLATFORM 组。
+    SKILL_READ = "skill:read"
+    MCP_READ = "mcp:read"
+    AGENT_PROFILE_READ = "agent_profile:read"
+    AGENT_SESSION_READ = "agent_session:read"
+    MENU_ADMIN = "menu:admin"
+
     @property
     def group(self) -> PermissionGroup:
         """Resolve the logical group for UI rendering.
@@ -201,6 +215,11 @@ class Permission(StrEnum):
         if prefix == "change":
             return PermissionGroup.CHANGE
         if prefix in ("task", "code", "tool", "deploy", "daemon"):
+            return PermissionGroup.AGENT
+        # change 2026-09-18-web-menu-management task-01 / FR-01：
+        # 4 个常显菜单独立读权限（skill/mcp/agent_profile/agent_session 前缀）
+        # 归 AGENT 组；菜单管理门控 menu:admin 前缀无特判分支，走默认 PLATFORM 组。
+        if prefix in ("skill", "mcp", "agent_profile", "agent_session"):
             return PermissionGroup.AGENT
         # PPM_* 全部以 ppm: 前缀，归入 PPM 业务域组
         if prefix == "ppm":

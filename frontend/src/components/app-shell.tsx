@@ -29,6 +29,7 @@ import {
   LayoutDashboard,
   ListChecks,
   ListTodo,
+  ListTree,
   LogOut,
   MessageSquare,
   type LucideIcon,
@@ -55,6 +56,9 @@ import {
   MENU_SECTION_ORDER as SECTION_ORDER,
   type MenuPermissionGroup,
 } from "@/lib/menu-permissions";
+// task-10：渲染管线接入覆盖合并层（task-09 契约）——useMenuOverrides 拉全局
+// 显示覆盖，mergeMenus 把覆盖叠加到权限过滤结果之上（FR-05）。
+import { mergeMenus, useMenuOverrides } from "@/lib/menu-overrides";
 import { useSession } from "@/stores/session";
 import { ensureFreshAccessToken, decodeJwtExp } from "@/lib/token-refresh";
 import { visibleMenusBySection } from "@/lib/permission";
@@ -88,6 +92,9 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   "/admin/users": Users,
   "/admin/organizations": Folder,
   "/admin/roles": KeyRound,
+  // 2026-09-18-web-menu-management task-10：菜单管理入口 /admin/menus。图标
+  // ListTree（层级列表，语义=菜单目录树；未被占用，避开 roles 的 KeyRound）。
+  "/admin/menus": ListTree,
   "/runtimes": Activity,
   "/settings": Settings,
   "/workspaces": Home,
@@ -142,6 +149,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   // 菜单用 current.id 兜底链接（修复"选了工作区菜单仍灰显"，与 switcher 修复同理）。
   const { workspaceId, current } = useWorkspaceContext();
   const { user, accessToken, refreshToken, clear } = useSession();
+
+  // task-10（FR-05）：全局菜单显示覆盖（改名/隐藏/组内排序）。降级已在 hook 内
+  // 收口——拉取失败/首帧 overrides 恒为空数组（NFR-02 直通），组件层不写额外降级分支。
+  const { overrides } = useMenuOverrides();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -236,7 +247,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   )
     .map((section) => ({
       section,
-      menus: visibleMenusBySection(user, section).filter((m) => !m.navHidden),
+      // task-10（FR-05）：先权限过滤（visibleMenusBySection）后覆盖合并
+      // （mergeMenus）——两维度独立（design「接口定义」），顺序不敏感但定死先
+      // 权限后合并；hidden 剔除与 menus 恒豁免（R-03 防自锁）已在 mergeMenus
+      // 内完成，此处不写任何豁免/隐藏特判；navHidden 过滤保持既有位置。
+      menus: mergeMenus(visibleMenusBySection(user, section), overrides).filter(
+        (m) => !m.navHidden,
+      ),
     }))
     .filter(({ menus }) => menus.length > 0);
 
