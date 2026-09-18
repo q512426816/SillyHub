@@ -449,3 +449,37 @@
 根因：quick ref 仅 strip 空白即做存在性检查（对 .. 不设防）且原样拼进 agent 读取路径，可指到 quicklog 目录外；fresh 蒸馏上传先于 create_session，引擎不支持/离线两失败分支不清理附件，行成孤儿（对象 GC 是 D-5 accepted risk）
 方案：quick 分支加 [A-Za-z0-9][A-Za-z0-9._-]* 白名单校验先于存在性检查（拒 ../绝对路径/盘符/反斜杠/子目录，422）；新增 _cleanup_distill_attachment best-effort 挂进两失败分支，session_id 仍 NULL 的草稿行即时删除（对齐附件删除端点只删行语义，已绑定行不动，失败仅记日志）
 结果：test_distill 30 全绿（新增 2：非法 ref 六形态 422 且 quicklog 外文件不可命中、两失败分支参数化断言草稿行回收）+ test_router 27 绿；ruff/scoped mypy 0（顺手清偿 _upload_distill_source 返回注解与 test_distill object 索引 3 处既有 mypy 债）
+
+## ql-20260918-007-fa32 | 2026-09-18 09:25:34 | 蒸馏任务条点击跳转会话页——distill-task-bar 增查看会话入口，经 /sessions?session=<agent_session_id> 深链打开对应蒸馏会话（深链走详情端点不依赖列表可见，被 k-distill 隔离的会…
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260918-008-b1a7 | 2026-09-18 09:50:28 | reconnecting 二连点。根因：inject 硬校验仅 active。方案：恢复窗口轮询重试+超窗语义化。结果：94 绿已提交推送（未部署…
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/knowledge/distill.py（+59/-1）, backend/app/modules/knowledge/tests/test_distill.py（+92/-0）
+需求：reconnecting 二连点。
+根因：inject 硬校验仅 active。
+方案：恢复窗口轮询重试+超窗语义化。
+结果：94 绿已提交推送（未部署，按用户指示）。
+审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档
+
+## ql-20260918-009-275d | 2026-09-18 10:00:06 | 历史蒸馏会话无入口。根因：提炼记录列表未落地。方案：头部入口+历史弹层（50条/跳会话/反链）。结果：65 绿 tsc 0 已提交 ddf19ad26 推送…
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：历史蒸馏会话无入口。
+根因：提炼记录列表未落地。
+方案：头部入口+历史弹层（50条/跳会话/反链）。
+结果：65 绿 tsc 0 已提交 ddf19ad26 推送，未部署。
+
+## ql-20260918-011-543b | 2026-09-18 12:24:37 | frontend-ci 连续失败修复——page.test.tsx user_input 断言未随 ql-20260918-003 行为变更同步
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（『user_input 不进段』用例断言由全文不可见改为恰好一处且落在 turn-bubble 用户气泡内，用例名/注释同步 ql-20260918-003 实时写 prompt 语义）
+需求：frontend-ci 连续失败修复——page.test.tsx user_input 断言未随 ql-20260918-003 行为变更同步
+根因：ad28cffc8（ql-20260918-003）有意变更 onLog 行为——user_input 事件在 prompt 为空时实时写入 turn.prompt 成为排队派发轮用户气泡唯一实时来源，该提交更新了 dialog 测试但漏改 page 级旧断言 queryByText 为 null，与 CI 上稳定失败 3 次逐字吻合，属测试过时而非实现回归
+方案：page.test.tsx『user_input 不进段』用例断言改精确三连——getAllByText 恰 1 处、closest 命中 turn-bubble 用户气泡容器、若误装配进 agent 答复段则第二处匹配被长度断言拦截；用例名与注释同步新语义
+结果：先本地复现 CI 同款 AssertionError 后修复，该测试文件 39/39 用例绿，eslint 0 error，tsc 本文件 0 错误（全量仅另一会话在途 merge-dialog.tsx 3 处存量）

@@ -1,0 +1,37 @@
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index 75bf42198..4f0f1c9f3 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -936,13 +936,16 @@ describe("SessionPanel SSE 装配器接线（task-09）", () => {
+     expect(screen.getByRole("tab", { name: "对话" })).toBeTruthy();
+   });
+ 
+-  it("user_input 不进段 + turn_completed 终态徽标（finishTurn 收尾冒烟）", async () => {
++  it("user_input 不进段（实时写 prompt 气泡）+ turn_completed 终态徽标（finishTurn 收尾冒烟）", async () => {
+     const handlers = await selectSession();
+ 
+     act(() => {
+       handlers.onTurnStarted(makeStreamEnvelope({ event: "turn_started" }));
+     });
+-    // user_input 是用户消息：页面跳过（不进段不进 output）。
++    // user_input 是用户消息：不进段不进 output（装配器内同语义双保险）。
++    // ql-20260918-003：prompt 为空时实时写入 prompt 气泡——排队派发轮
++    // （立即发送/轮末自动派发）无占位轮，backend 补发的 user_input log
++    // 事件是其用户气泡的唯一实时来源。
+     act(() => {
+       handlers.onLog(
+         makeStreamEnvelope({ log_id: "l-u", channel: "user_input", content: "不该出现在答复区" }),
+@@ -966,7 +969,12 @@ describe("SessionPanel SSE 装配器接线（task-09）", () => {
+     });
+ 
+     expect(await screen.findByText("答复完成。")).toBeTruthy();
+-    expect(screen.queryByText("不该出现在答复区")).toBeNull();
++    // ql-20260918-003：文本应恰好一处且落在用户气泡（turn-bubble）内——
++    // 若误装配进 agent 答复段会出现第二处匹配（getAllByText ≥2）。
++    expect(screen.getAllByText("不该出现在答复区")).toHaveLength(1);
++    expect(
++      screen.getByText("不该出现在答复区").closest(".turn-bubble"),
++    ).toBeTruthy();
+     // 终态徽标（deriveTurnTerminalStatus + token 写入）：第 4 轮 · 已完成 · ↑100 ↓20。
+     // 2026-09-09-sessions-visual-refresh 后轮尾换 RoundDivider 胶囊——「第 4 轮」
+     // 标签 / 状态 / meta 是兄弟文本节点，跨节点「·」正则匹配不上，按节点分别断言。
