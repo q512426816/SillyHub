@@ -482,6 +482,59 @@ class AgentRunModelUsage(BaseModel, table=True):
 USER_INPUT_LOG_MAX_CHARS = 50_000
 
 
+class _NulStripMixin:
+    """ql-20260917-009：bind 参数剥 NUL 字节的共用逻辑。
+
+    生产实证（2026-09-17 阿里云）：daemon 上报的日志内容含 \\x00（Windows 命令
+    输出的 UTF-16 宽字符残段，如 ``docker: command not found`` 后跟
+    ``\\x00N\\x00A\\x00M\\x00E`` 形态的 wmic/tasklist 输出），PG 的 VARCHAR/TEXT/
+    JSON 不接受 U+0000（asyncpg CharacterNotInRepertoireError），整条 INSERT 拒收
+    丢单条日志。TypeDecorator 在 SQLAlchemy bind 参数层清洗，是全部构造/写入路径
+    的单一收口（SQLModel table 模型不走 pydantic 验证，field_validator 无效）。
+    impl 仍为 String/Text/JSON：DDL 零变化（迁移不动）。其余控制字符 PG 可接受，
+    只剥 \\x00 保内容最大保真（照 ConstraintsJSON 先例）。
+    """
+
+    def _strip(self, value: object) -> object:
+        if isinstance(value, str) and "\x00" in value:
+            return value.replace("\x00", "")
+        return value
+
+
+class NulSafeStr(_NulStripMixin, TypeDecorator):
+    impl = String
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return self._strip(value)
+
+
+class NulSafeText(_NulStripMixin, TypeDecorator):
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return self._strip(value)
+
+
+class NulSafeJSON(_NulStripMixin, TypeDecorator):
+    impl = JSON
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        """JSON 列的 dict/list 深层字符串剥 NUL（agent_event.content 原文携带）。"""
+
+        def _walk(node: object) -> object:
+            node = self._strip(node)
+            if isinstance(node, dict):
+                return {k: _walk(x) for k, x in node.items()}
+            if isinstance(node, list):
+                return [_walk(x) for x in node]
+            return node
+
+        return _walk(value)
+
+
 class AgentRunLog(BaseModel, table=True):
     """Individual log lines from an agent run."""
 
@@ -539,14 +592,14 @@ class AgentRunLog(BaseModel, table=True):
     )  # stdout, stderr, tool_call
     content_redacted: str | None = Field(
         default=None,
-        sa_column=Column(Text, nullable=True),
+        sa_column=Column(NulSafeText, nullable=True),
     )
     # 2026-06-24-daemon-network-resilience task-20（FR-08）：幂等去重键。
     # daemon ResilienceService.submitWithRetry 注入（Claude msg.id 或 runId:seq）。
     # None 表示无去重（旧消息/未注入路径），不受唯一索引约束（部分索引 WHERE IS NOT NULL）。
     dedup_key: str | None = Field(
         default=None,
-        sa_column=Column(String(200), nullable=True),
+        sa_column=Column(NulSafeStr(200), nullable=True),
     )
     # 2026-06-28-daemon-subagent-transcript task-07 / D-001@v1 / D-004@v1 / D-008@v1：
     # 子代理归属字段（来自 SDK message 顶层 parent_tool_use_id/subagent_type/depth）。
@@ -555,11 +608,11 @@ class AgentRunLog(BaseModel, table=True):
     # 注入每条 flat record（D-008@v1），submit_messages 落库三列（task-09）。
     parent_tool_use_id: str | None = Field(
         default=None,
-        sa_column=Column(String(200), nullable=True),
+        sa_column=Column(NulSafeStr(200), nullable=True),
     )
     subagent_type: str | None = Field(
         default=None,
-        sa_column=Column(String(100), nullable=True),
+        sa_column=Column(NulSafeStr(100), nullable=True),
     )
     depth: int | None = Field(
         default=None,
@@ -571,7 +624,7 @@ class AgentRunLog(BaseModel, table=True):
     # 依赖 default=None 兜底，user_input 构造点无需改动。
     tool_kind: str | None = Field(
         default=None,
-        sa_column=Column(String(32), nullable=True),
+        sa_column=Column(NulSafeStr(32), nullable=True),
     )
     # 2026-07-30-daemon-heartbeat-dedup-fix task-14 / FR-02 / D-002@v1：流式 partial
     # 去重 segment_id。daemon partial flush 的半截行带 metadata.segmentId + isPartial，
@@ -581,7 +634,7 @@ class AgentRunLog(BaseModel, table=True):
     # 已 commit 的 partial 删不掉——本列解决）。None = 非 partial / 旧消息，不受影响。
     segment_id: str | None = Field(
         default=None,
-        sa_column=Column(String(200), nullable=True),
+        sa_column=Column(NulSafeStr(200), nullable=True),
     )
     # ql-20260824-020：Edit 工具结果的结构化 diff（SDK tool_use_result.structuredPatch
     # JSON 串，hunks 含 oldStart/newStart 真实文件行号）。_extract_sdk_messages 从
@@ -590,7 +643,7 @@ class AgentRunLog(BaseModel, table=True):
     # None = 非 Edit 结果 / 旧数据 / 无 patch，不受影响。
     edit_patch: str | None = Field(
         default=None,
-        sa_column=Column(Text, nullable=True),
+        sa_column=Column(NulSafeText, nullable=True),
     )
     # 2026-09-01-session-group-chat task-01（design §3.4 / §5.2）：投影行身份
     # JSON（DB 列名 ``metadata``——SQLAlchemy ``metadata`` 保留名，属性名用
@@ -599,7 +652,7 @@ class AgentRunLog(BaseModel, table=True):
     # 存量行 NULL（单聊日志不写本列，零回归）。
     metadata_: dict | None = Field(
         default=None,
-        sa_column=Column("metadata", JSON, nullable=True),
+        sa_column=Column("metadata", NulSafeJSON, nullable=True),
     )
 
 

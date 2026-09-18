@@ -354,7 +354,7 @@
 需求：agent_run_logs 入库剥 NUL 字节防 PG CharacterNotInRepertoireError 丢单条日志（daemon 上报 Windows 命令 UTF-16 宽字符残段含 \x00）。
 根因：PG VARCHAR/TEXT/JSON 不接受 U+0000，整条 INSERT 拒收。
 方案：NulSafeStr/NulSafeText/NulSafeJSON TypeDecorator 挂 8 列 bind 参数层剥 \x00（照 ConstraintsJSON 先例；SQLModel table 模型不走 pydantic 验证故 field_validator 无效已弃）；impl 不变 DDL 零变化无迁移。
-结果：6 新用例 + agent 全量 1248 绿 + ruff 过；已提交 03a4667b9 推送 origin。
+结果：6 新用例 + agent 全量 1248 绿 + ruff 过；2026-09-18 审查会话复核补落库（原记「已提交 03a4667b9 推送 origin」不实——该提交为预览改进不含本修复，代码因 git add 丢失暂存 11 小时未入库；本次复跑 34 用例绿 + ruff/mypy scoped 0 后随本提交入库）。
 
 ## ql-20260917-010-5b44 | 2026-09-17 21:50:31 | 变更文件预览三改进——diff 去 5000 硬顶改懒加载、去掉变化比对按钮、三个固定结构 json 表格化。根因：DiffView 渲染上限截断大 diff…
 状态：已完成

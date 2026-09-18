@@ -425,7 +425,13 @@ def test_agent_run_log_metadata_reserved_name_mapping() -> None:
     assert field.default is None
     sa_column = field.sa_column
     assert sa_column.name == "metadata"
-    assert isinstance(sa_column.type, sa.JSON)
+    # ql-20260917-009：列类型为 NulSafeJSON（TypeDecorator，impl=JSON——bind 层剥
+    # NUL 防 PG CharacterNotInRepertoireError），isinstance 直判 JSON 不再成立。
+    from sqlalchemy.types import TypeDecorator
+
+    assert isinstance(sa_column.type, sa.JSON) or (
+        isinstance(sa_column.type, TypeDecorator) and isinstance(sa_column.type.impl, sa.JSON)
+    )
     assert sa_column.nullable is True
     # ORM 表层面：列名必须是 metadata（迁移/DB 对齐）
     assert "metadata" in AgentRunLog.__table__.columns
