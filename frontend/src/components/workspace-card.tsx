@@ -65,6 +65,11 @@ interface Props {
   daemonStatus?: DaemonBadgeStatus;
   /** ql-20260821-007：关联 PPM 项目（名称 tag 展示，空数组/不传不渲染行）。 */
   linkedProjects?: PpmProjectBrief[];
+  /**
+   * ql-20260918-012：Git 远程仓库地址（probe 实时识别，DB repo_url 兜底）。
+   * 为空不渲染行；http(s) 形态在路径区渲染为可点外链。
+   */
+  repoUrl?: string | null;
   onChanged: () => void;
   // task-08 / FR-03：别名编辑入口（由 WorkspacesPage 弹 modal）。
   onEditAlias: (workspace: Workspace) => void;
@@ -92,6 +97,7 @@ export function WorkspaceCard({
   boundDaemon,
   daemonStatus,
   linkedProjects,
+  repoUrl,
   onChanged,
   onEditAlias,
   onActivate,
@@ -259,6 +265,7 @@ export function WorkspaceCard({
             runtime={boundRuntime}
             daemon={boundDaemon}
             linkRuntime
+            repoUrl={repoUrl}
           />
           {workspace.tech_stack && workspace.tech_stack.length > 0 && (
             <>

@@ -173,6 +173,22 @@ export interface GitRevParseResult {
   error: string | null;
 }
 
+/**
+ * git_remote 返回结构（ql-20260918-012 工作区 Git 地址识别）：`{ remote_url, error }`。
+ *
+ *   - 成功：`{ remote_url: "<url>" }`——`git remote -v` 首个 `(fetch)` 行的 URL
+ *     （无 origin 但有其它 remote 的仓库同样取首个）。
+ *   - 无 remote：`{ remote_url: null, error: "no_remote" }`（空态，非故障）。
+ *   - 失败（非 git 目录 / git 不可用 / 超时）：`{ remote_url: null, error: <文案> }`
+ *     （不抛，backend probe 归 None fail-safe 不 5xx）。
+ */
+export interface GitRemoteResult {
+  /** 远程仓库 URL（如 git@github.com:foo/bar.git 或 https://…）；无 remote / 失败为 null。 */
+  remote_url: string | null;
+  /** 失败原因（no_remote / git stderr 文案）；成功为 null。 */
+  error: string | null;
+}
+
 // ── task-01（2026-08-25-workspace-git-log）git 只读四方法返回结构（design §7.2）──
 
 /** git_log / git_show 共用的单条 commit 记录（%x00 分隔 8 字段的解析产物）。 */
@@ -1188,6 +1204,43 @@ export class HostFsHandler {
     assertWithinAllowedRoots(params.root, this._rootsProvider());
     const root = pathResolve(params.root);
     return runGitRevParse(root, params.ref && params.ref.length > 0 ? params.ref : 'HEAD');
+  }
+
+  // ── git_remote（ql-20260918-012 工作区 Git 地址识别）─────────────────────
+
+  /**
+   * `git_remote({ root }) → { remote_url, error }`——读工作区远程仓库地址。
+   *
+   * 命令：`git -C <root> remote -v`，取首个 `(fetch)` 行的 URL 列（行格式
+   * `<name>\t<url> (fetch)`）。不用 `git remote get-url origin`——无 origin 但
+   * 有其它 remote 的仓库同样该识别，单次命令同时覆盖两种形态。
+   *
+   * **不抛**（对齐 git_rev_parse 语义）；仅 root 越界走 RpcError forbidden。
+   * 无任何 remote → remote_url=null + error="no_remote"（空态）；非 git 目录 /
+   * git 不可用 / 超时 → remote_url=null + error 文案，backend probe 归 None。
+   */
+  async gitRemote(params: { root: string }): Promise<GitRemoteResult> {
+    // 1. 白名单守卫（与既有 git 方法同款）。
+    assertWithinAllowedRoots(params.root, this._rootsProvider());
+    const root = pathResolve(params.root);
+    const r = await runCmd('git', ['-C', root, 'remote', '-v'], {
+      timeout: GIT_READ_TIMEOUT_MS,
+    });
+    if (!r.ok) {
+      return {
+        remote_url: null,
+        error: r.stderr.trim() || r.stdout.trim() || 'git remote -v failed',
+      };
+    }
+    for (const line of r.stdout.split('\n')) {
+      // 形如 `origin\tgit@github.com:foo/bar.git (fetch)`；URL 取 \t 后到行尾
+      // ` (fetch)` 前的整段（URL 内空格的病态配置不识别，跳过该行）。
+      const url = /^([^\t]+)\t(.+) \(fetch\)$/.exec(line.trim())?.[2];
+      if (url !== undefined) {
+        return { remote_url: url, error: null };
+      }
+    }
+    return { remote_url: null, error: 'no_remote' };
   }
 
   // ── git_log / git_refs / git_show / git_diff_file（task-01 2026-08-25-workspace-git-log）──

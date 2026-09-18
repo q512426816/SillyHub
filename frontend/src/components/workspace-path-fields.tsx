@@ -27,6 +27,38 @@ interface WorkspacePathFieldsProps {
   daemon?: DaemonInstanceRead | null;
   /** Show link to /runtimes when daemon-client */
   linkRuntime?: boolean;
+  /**
+   * ql-20260918-012：Git 远程仓库地址（后端 probe 自动识别回填 DB）。
+   * 为空（direct/unknown 态、未识别或无权限探测）不渲染该行。
+   */
+  repoUrl?: string | null;
+}
+
+/**
+ * ql-20260918-012：「Git 地址」行——http(s) 地址渲染为可点外链（卡片整卡
+ * 可点，链接 click 不冒泡），scp/ssh 形态纯文本展示。
+ */
+function RepoUrlRow({ repoUrl }: { repoUrl: string }) {
+  return (
+    <>
+      <dt className="text-muted-foreground">Git 地址</dt>
+      <dd className="break-all font-mono" title={repoUrl}>
+        {/^https?:\/\//.test(repoUrl) ? (
+          <a
+            href={repoUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {repoUrl}
+          </a>
+        ) : (
+          repoUrl
+        )}
+      </dd>
+    </>
+  );
 }
 
 export function WorkspacePathFields({
@@ -34,6 +66,7 @@ export function WorkspacePathFields({
   runtime,
   daemon,
   linkRuntime = false,
+  repoUrl,
 }: WorkspacePathFieldsProps) {
   // 遗留 1：daemon 实体维度渲染（绑定走 member binding，daemon 实体优先）。
   if (daemon) {
@@ -73,6 +106,8 @@ export function WorkspacePathFields({
         <dd className="break-all font-mono" title={workspace.root_path}>
           {workspace.root_path}
         </dd>
+
+        {repoUrl ? <RepoUrlRow repoUrl={repoUrl} /> : null}
       </>
     );
   }
@@ -109,6 +144,8 @@ export function WorkspacePathFields({
       <dd className="break-all font-mono" title={workspace.root_path}>
         {workspace.root_path}
       </dd>
+
+      {repoUrl ? <RepoUrlRow repoUrl={repoUrl} /> : null}
     </>
   );
 }

@@ -1,0 +1,703 @@
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 1dc622969..22d43facd 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -2,6 +2,7 @@
+ 
+ > 自动生成。正文历史已迁出，详见 backend.md。
+ 
++- ql-20260918-012-ac1b | 工作区 Git 地址自动识别（probe 端点 repo_url 识别回填，用户需求「工作区显示对应 git 地址、不手填」）：WorkspaceProbeItem 增 repo_url 字段——probe 端点对 git_mode=git 且 DB repo_url 为空的工作区经新 delegate 方法 git_remote_url（host_fs.git_remote RPC，`_via_rpc_or_degrade` 降级 fail-safe）实时识别，识别成功且值变化时回填 workspaces.repo_url（本端点唯一写副作用、仅此一列；已识别直接回 DB 值零额外 RPC，首次识别后 RPC 开销回基线）；direct/unknown 态为 None，RPC 降级（含旧 daemon 不识别新方法 → DaemonRpcRemoteError）归 None 不抛。gen:types 同步 openapi.json/api-types.ts。测试：test_probe_endpoint +4（识别回填落库/已填充跳过 RPC/direct 不发 RPC/降级 None 不 5xx）共 13 passed；ruff/format/mypy scoped 0。
+ - ql-20260910-004-db16 | answered_by 透传链补全（askuser-pi-cursor 已知限制②③收口）：SessionDialogRead/WorkspaceDialogRead 增 answered_by 字段（from_model 透传，历史/恢复读可渲染答题人）；已答 409 DaemonDialogAlreadyResolved details 携带 answered_by（第二答题端即时数据源）。测试：test_session_permissions 41 passed（+1 透传双通道断言）+ workspace dialogs 9 不回归。
+ - ql-20260910-001-4560 | 影子会话 pending 提问读侧放开（2026-09-09-askuser-pi-cursor 已知限制①收口）：list_pending_dialogs 的 ownership 404 门对群聊影子会话（session_kind=group_member）复用 task-09 落地的 _resolve_shadow_member_answer_session 影子成员分支（群成员+未移除+软删群过滤，条件与答题侧同源）——群成员可见成员提问卡，关闭「能答却看不见」缺口；越权反例（外人/已移除成员/普通单聊非属主）仍 404 不泄露。测试：test_session_permissions 40 passed（+3：成员拉取成功/外人+移除成员 404/单聊语义零变化）。
+ - change 2026-09-09-askuser-pi-cursor | AskUser 群聊授权放开+caps 镜像：①permission_service 影子会话答题授权放开——respond 的 ownership 404 门对「群聊影子 dialog 行应答」走 _resolve_shadow_member_answer_session（session_kind='group_member'+resolve_shadow_member 未移除群成员+软删群过滤+FOR UPDATE），manual_approval 第二道守卫对 ask_user 类 dialog 豁免（权限审批语义不动，单聊零变化）；answered_by 记实际答题人（修正影子场景记群主失真）+SSE permission_resolved 增 answered_by_actual_user 契约字段。②provider_caps 增 dialog 三值镜像+对齐测试 _TS_BOOL_PAIR_RE 扩 string 枚举（键 8→9，未知回退 none）。测试：test_session_permissions 37（+9 影子授权含越权反例）+对齐 4；verify 真实 HTTP 集成断言（外人 404/成员过全门禁）。
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 3c8dbd2cd..f8deceb78 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -4,6 +4,7 @@
+ > author: qinyi
+ > created_at: 2026-08-26 10:20:00
+ 
++- ql-20260918-012-ac1b | 工作区 Git 地址展示（列表卡 + 详情基本信息，自动识别不手填）：lib/workspaces.ts 新增 probeWorkspaces client（Schemas["WorkspaceProbeItem"] 生成类型，gen:types 同步）；列表页加载后补一发批量 probe（对齐关联项目异步补数模式，403/失败 catch 静默）→ 卡片 repoUrl prop（probe 实时值优先、DB repo_url 兜底）；详情页 mount 单工作区 probe 同款 + GET DB 值兜底；WorkspacePathFields 增「Git 地址」行（http(s) 渲染可点外链且 click 不冒泡整卡点击，scp/ssh 形态纯文本；空值不渲染行）——列表卡与详情基本信息共用。移动端 m/workspaces 未接入（简化选择器无路径信息区）。测试：workspace-card/workspace-drag-grid/team-trigger-popover 67 passed；tsc 0；eslint 0 error（8 warning 全存量，stash 对照确认非本次引入）。
+ - ql-20260915-008-c086 | 会话页额度胶囊刷新策略二调（用户二次反馈：不要固定 30 秒）——默认轮询 5 分钟 + 胶囊悬浮满 2 秒立即刷新：QUOTA_REFRESH_INTERVAL_MS 30_000→5*60_000；新增 QUOTA_HOVER_REFRESH_DELAY_MS=2_000，胶囊 onMouseEnter 起 setTimeout 延时器、满 2 秒仍在胶囊上立刻 refresh 一次（refresh 自带 in-flight 防重入，悬浮再久不重复触发），onMouseLeave 即取消、卸载兜底清理；浮层说明文案同步「每 5 分钟自动刷新；胶囊上悬浮 2 秒立即刷新」。测试：ctx-usage-bar 44/44（新增常量锚定 5min/2s 用例 + 悬浮三段用例：不足 2s 离开取消不刷新/满 2s 立即刷新不等轮询/持续悬浮 60s 仍只多一次）；tsc --noEmit 干净；eslint 0 error（2 warning 存量类型参数位未动）。
+ - ql-20260915-006-54b4 | 会话页额度胶囊 30 秒定时刷新 + 全部可查用量供应商聚合展示（用户要求）：原 QuotaPill 只查当前会话供应商的 quota 端点，后端仅智谱返回窗口数据、其余一律 quota=null（只显示 GLM 的根因），且不刷新。修法：①QuotaPill 重写为自治聚合——useQuery 拉全量供应商列表（5min 慢刷新）→ detectUsageProvider 过滤可查供应商（Kimi/智谱/MiniMax=token_plan 百分比，DeepSeek/硅基/OpenRouter=balance 金额）→ 智谱走 quota 端点（5小时窗/周限额，弱依赖永不 5xx）、其余走 usage 端点（两态错误模型），新增纯函数 mapUsageTiersToViews 归一 tier 视图 + balance 金额 ¥/$ 格式化；②30s setInterval 轮询（QUOTA_REFRESH_INTERVAL_MS 导出，替换 design §5 Wave3 低频单次口径）+ keep-last-good（瞬时失败/quota=null 保留上次数据，is_valid=false 鉴权失效清除条目不留陈旧假数据，供应商被删丢陈旧条目），in-flight 防轮询重叠、cancelledRef 防卸载回写；③胶囊面=会话供应商优先（providerId 语义从门控渲染弱化为排序提示，本机默认会话照常聚合展示）+等N家，浮层按供应商分节（名称+模型+各窗口剩余/金额+重置时间）+「每 30 秒自动刷新」文案（废弃「一期仅 GLM」表述）。测试：ctx-usage-bar 42/42（新增 fake timers 30s 到点重查/keep-last-good/鉴权清除/多端点分流/不可查不请求/providerId=null 照常聚合/余额金额浮层用例，renderPill 重写 rerender 自动补 QueryClientProvider——RTL rerender 替换整棵树会丢 Provider）；tsc --noEmit 干净；eslint 0 error（2 warning 为存量类型参数位 unused）。顺手修 session-history-scroll.test.tsx 存量 noUncheckedIndexedAccess 类型债（beforeCursors length===3 已断言，索引访问加非空断言），该文件 3/3 绿。
+ - ql-20260913-007-1351 | 轮次刻度轨命中区修复（用户反馈「鼠标指向要精确到一点点小范围才能显示和点击，太难操作」）：turn-catalog.tsx 刻度按钮本体原即 2px 视觉线（h-[2px] w-[14px]），hover 摘要卡/点击跳转都要求鼠标精确压线、刻度间 gap-[7px] 还是无响应缝隙。修法：按钮本体改为透明命中区（h-[18px] × 轨全宽 30px，上下各 8px 缓冲），视觉横杠移入内部 span 居中渲染（状态色/hover 放宽/空心描边平移至子元素 group-hover:*/group-focus-visible:* 触发，视觉基本不变——刻度垂直周期 9px→18px 密度略降换可用性）；nav 去 gap-[7px] 相邻命中区紧贴，鼠标垂直扫过轨道连续命中不闪断；飞出卡垂直定位改用刻度中心（computeFlyoutTop 首参 offsetTop→tickCenter，调用方传 offsetTop+offsetHeight/2，否则按钮变高后飞出卡偏上 8px）。测试：turn-catalog 17/17（状态类断言迁移至内部视觉线 span + 新增 2 命中区用例）、sessions page 37/37（轮次导航集成 8 用例全绿）、session-panel-variant 绿；eslint 0 error（onJump 类型参数名 1 warning 为 2026-09-08 存量非本次引入）。
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+index b12745e9b..186483b1c 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+@@ -65,6 +65,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
+ - **2026-08-15-init-trigger-sillyspec-init**（init lease 触发 sillyspec init）：`handleInitLease`（spec-sync.ts）编序 5→6 步——pullSpecBundle 之后、postSpecSync 之前插入 `runSillyspecInit`（硬失败 abort，D-003）：spawn `sillyspec init --dir <rootPath> --spec-dir <specCacheRoot> --workspace-id <wsId> --no-skills --tool <逗号列表>`（shell:true + 60s 超时杀树 + spawnFn 依赖注入），落 .sillyspec-platform.json 平台指针 + CLAUDE.md 等指令注入 + spec 骨架。**spawn 前 3s 版本门控**（MIN_SILLYSPEC_VERSION_FOR_INIT=3.26.8，查询/解析失败 fail-safe 拦截，错误前缀 sillyspec_init_cli_too_old 带中文升级指引，不依赖 daemon 重启）。tools 来源：cli.ts 构造 TaskRunner 前 AgentDetector 独立探测映射 SILLYSPEC_VALID_TOOLS（6 值同名交集），空/失败兜底 ['claude']。**上传排除三处统一**：UPLOAD_EXCLUDE_TOP_BASE（含 projects）由 computeIncrementalOps/buildFullManifest/packSpecDir 共用 + isUploadExcludedPath 过滤缓存残留行防 delete op 误删（pull extractTar 不排除）。init 失败 error 前缀 sillyspec_init_failed 透传 stats.init_error。CLI 侧配套（sillyspec 仓 3.26.8）：--no-skills 开关、--tool 逗号/重复多值、平台模式整体跳过项目内 .sillyspec 清理（保 local.yaml 手调段）。
+ - **ql-20260820-007**（spec 策略两路径静默失效修复）：①`handleInitLease` 时序重排 pull → writeDaemonState（原状态文件先写会在缓存根占位 `.runtime/` 普通目录，阻塞 pullSpecBundle 的 repo-native `ensureSpecJunction` 普通目录守卫 + repo-mirrored cacheEmpty 首拷判定 → 两策略静默降级 platform-managed；且 pull 的 rm -rf 会删掉先写的状态文件）；repo-native 时状态文件经 junction 落源项目 `.sillyspec/.runtime`（gitignored，三策略读写路径 resolveSpecDir(ws)/.runtime 统一）。②task-runner batch agent 路径 `pullSpecBundle` 补传 `strategy: ctx.specStrategy, rootPath: ctx.rootPath`（原只传 existingSpecRoot → 永远 platform-managed pull，rm -rf 拆除 interactive scan 已建 junction，repo-native 永久退化）。③`bumpLocalSpecVersion` 状态文件缺失/损坏时完整重建 2 字段（原「缺失跳过不创建」在 pull rm -rf 后保鲜永久失效，每次任务全量 pull）。副作用契约变更：pull 失败返回 `daemonState: null`（状态文件后置未写）。回归：test_init_lease 新 7 用例（init 策略分支/状态文件幸存/bump 重建/batch 透传）+ test_spec_version_refresh 2 用例改新契约；daemon 全量 2453 绿 + tsc 干净。
+ ## 变更索引
++- ql-20260918-012-ac1b | host_fs 第 11 方法 git_remote（工作区 Git 地址识别）：host-fs-handler 新增 gitRemote({root}) → {remote_url, error}——`git remote -v` 取首个 (fetch) 行 URL（无 origin 但有其它 remote 同样识别首个），无 remote → error="no_remote" 空态、非 git 目录/超时 → stderr 文案（不抛，仅 root 越界走 RpcError forbidden，对齐 git_rev_parse 语义）；daemon.ts 注册 host_fs.git_remote（params 归一与既有方法同款）。backend probe 端点据此识别回填 workspace.repo_url；旧 backend 不调用零影响，旧 daemon 不识别该 RPC 由 backend 侧 `_via_rpc_or_degrade`（DaemonRpcRemoteError）归 None。测试：host-fs-handler.test +5（GR1~GR5：fetch 行解析/非 origin remote/空输出 no_remote/非 git 目录/越界 forbidden）54 passed；typecheck 0。
+ - 2026-09-12-provider-file-tx | 供应商切换文件层事务性（24h 审查 M-7 修复）：①`src/atomic-write.ts` writeFileAtomic（tmp+fsync+rename 顶替，Windows=MoveFileEx REPLACE_EXISTING，失败清 tmp）——codex 两文件+pi 三文件+宿主镜像拷贝六写盘点全部原子化（rollout 拷贝按划界不纳入）；②ForReload 落 `.sillyhub-managed` 生效标记（分支一后置 best-effort；分支四标记先行——标记失败跳过镜像含删除动作，R-03 双失败从根消除）；③reload 事务性三改造（引擎门 provider 维度值比较判据、resume 守卫前移=缺 key 零文件写入、catch 以旧形态重跑 ForReload+空返回删标记）；④restore null+codex 探测三态化（标记在=managed / 无标记有 auth|config=legacy 兼容补落标记 / 皆无=零动作——迁移钩子只建目录恒落第三态，F3 假阳性消除）。测试：九套件 189 用例全绿+typecheck 0。
+ - ql-20260911-027-13b6 | vendored ask-user 扩展（pi AskUser 弹窗缺失的发起端补全，会话 d4c29d95 实证：pi 会话模型只能文字罗列问题、session_dialog_requests 零行——2026-09-09-askuser-pi-cursor 只桥接了 extension_ui_request 的接收半，但 pi 本体无任何模型可调提问工具、daemon 也只挂 subagent 扩展，弹窗链路无发起端）：①新增自研扩展 `vendor/pi-extensions/ask-user/index.ts`——注册模型可调 `AskUserQuestion` 工具（有 options 走 ctx.ui.select、无 options 走 ctx.ui.input；**不传 timeout** 对齐平台 dialog 永久等待语义；hasUI=false/取消/空答均降级明确文本告知模型），工具名对齐 claude 内置名 → daemon/backend 双端 tool-kind 分类器零改动归 ask、backend scan 提示词「必须调用 AskUserQuestion」对 pi 直接成立；②pi-rpc-driver 抽共用 resolveVendoredExtensionPath + piVendoredAskUserExtensionPath（降级开关 SILLYHUB_PI_ASK_USER_EXTENSION=off，语义同 subagent）+ spawn 追加第二个 `--extension`（pi CLI 支持多次）；③vendor README 补自研件行。测试：pi-rpc-driver 78 passed（+5：路径解析三态/双扩展 spawn 参数面含顺序断言）；tsc 0；本机真实 pi CLI 装载冒烟过（对照实验：坏扩展会报 ParseError，方法有效）。
+ - ql-20260911-024-9098 | 平台命令结果回显提速第一级（用户反馈「执行很慢，基本都要十秒以上」——实测命令本体 0.2-0.7s，大头是结果回显两级 15s 定时器）：daemon.ts `_runSillySpecCommand` 忙拒落槽与执行完成（finally 统一出口）均立即补发一次心跳——新私有方法 `_nudgeHeartbeatAfterCommandResult(action, phase)`（debug 日志 sillyspec_command_heartbeat_nudge）`void _sendHeartbeatOnce()` fire-and-forget，结果不再等下一个 15s 心跳节拍。安全性：_sendHeartbeatOnce 全路径 catch 不 reject（不阻塞 WS 接收）；未注册 runtime 时其内部 return false 静默跳过；与 15s 循环短暂重叠无害（心跳是无状态全量上报，backend 字段级 last-write-wins）。第二级（前端下发后 5s×3 加速轮询）见 frontend.md 同 ql 条目。测试：sillyspec-platform-command.test.ts +3（WS 下发完成即补发且第 7 参携带新结果/忙拒路径同补发+放行后首条完成再补发共两次/未注册 runtime nudge 静默 no-op）共 41 绿；近邻 daemon-heartbeat-sillyspec + sillyspec-conflict-snapshot 49 绿；tsc 0。
+diff --git a/backend/app/modules/daemon/host_fs/delegate.py b/backend/app/modules/daemon/host_fs/delegate.py
+index d089cae02..f60580b93 100644
+--- a/backend/app/modules/daemon/host_fs/delegate.py
++++ b/backend/app/modules/daemon/host_fs/delegate.py
+@@ -360,6 +360,32 @@ class HostFsDelegate:
+         commit = result.get("commit") if isinstance(result, dict) else None
+         return str(commit) if commit else None
+ 
++    # ------------------------------------------------------------------
++    # git_remote（ql-20260918-012 工作区 Git 地址识别）
++    # ------------------------------------------------------------------
++    async def git_remote_url(self, workspace: Workspace) -> str | None:
++        """Read *workspace* remote URL (``git remote -v`` 首个 fetch 行), or ``None``.
++
++        daemon-client: forward ``host_fs.git_remote`` over WS RPC。无 remote /
++        非 git 仓库 / RPC 降级（含旧版 daemon 不识别该方法 →
++        :class:`DaemonRpcRemoteError`）一律归 ``None``（fail-safe 不抛，
++        D-006 warn-and-degrade）。root 经
++        :func:`resolve_root_path_for_daemon` 容器前缀改写（对齐
++        :meth:`probe_workspace_git_mode` 的 daemon 侧路径口径）。
++        """
++        # 延迟 import（同 probe_workspace_git_mode：host_fs 处于 daemon.service
++        # 早引用链上，workspace.service 顶层互 import 有环风险）。
++        from app.modules.workspace.service import resolve_root_path_for_daemon
++
++        result = await self._via_rpc_or_degrade(
++            method="git_remote",
++            workspace=workspace,
++            args={"root": resolve_root_path_for_daemon(workspace.root_path)},
++            degraded={"remote_url": None},
++        )
++        url = result.get("remote_url") if isinstance(result, dict) else None
++        return str(url).strip() or None if url else None
++
+     # ------------------------------------------------------------------
+     # git_worktree_add（change 2026-07-12-worker-worktree-isolation task-01）
+     # ------------------------------------------------------------------
+diff --git a/backend/app/modules/workspace/router.py b/backend/app/modules/workspace/router.py
+index 63f8f2ffd..a9d06011a 100644
+--- a/backend/app/modules/workspace/router.py
++++ b/backend/app/modules/workspace/router.py
+@@ -191,6 +191,13 @@ async def probe_workspaces(
+     只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC
+     失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id
+     跳过不报错（与 collect_scope 无效 id 跳过同语义）。
++
++    ql-20260918-012（工作区 Git 地址识别）：响应新增 ``repo_url``——git 态
++    工作区经 ``delegate.git_remote_url`` 读 ``git remote -v`` 首个 fetch 行，
++    并在识别成功且与 DB 不同时**回填** ``workspace.repo_url``（本端点唯一的
++    写副作用，仅此一列；§7.5 的「不改生命周期状态」语义不变）。已识别
++    （repo_url 非空）直接回 DB 值不再发第二次 RPC——首次识别后本端点 RPC
++    开销回到基线；无 remote / RPC 失败归 None 不抛（下次 probe 重试）。
+     """
+     from sqlalchemy import select
+ 
+@@ -211,19 +218,34 @@ async def probe_workspaces(
+         session, list(workspaces), git_probe=delegate.probe_workspace_git_mode
+     )
+     entry_by_id = {uuid.UUID(entry["id"]): entry for entry in entries}
++    ws_by_id = {ws.id: ws for ws in workspaces}
+     items: list[WorkspaceProbeItem] = []
++    repo_url_backfilled = False
+     for ws_id in payload.workspace_ids:
+         entry = entry_by_id.get(ws_id)
+         if entry is None:
+             continue
++        # ql-20260918-012：git 态识别远程地址——已识别的回 DB 值（零额外 RPC），
++        # 未识别的实时读取；识别成功且值变化时回填 DB（见 docstring）。
++        repo_url: str | None = None
++        ws = ws_by_id[ws_id]
++        if entry["git_mode"] == "git":
++            repo_url = ws.repo_url or await delegate.git_remote_url(ws)
++            if repo_url and repo_url != ws.repo_url:
++                ws.repo_url = repo_url
++                repo_url_backfilled = True
+         items.append(
+             WorkspaceProbeItem(
+                 workspace_id=ws_id,
+                 git_mode=entry["git_mode"],
+                 daemon_name=entry["daemon_name"],
+                 daemon_online=entry["daemon_online"],
++                repo_url=repo_url,
+             )
+         )
++    if repo_url_backfilled:
++        await session.commit()
++        # commit 后 ORM 行 expire，条目值已全部取定，无需 refresh。
+     return items
+ 
+ 
+diff --git a/backend/app/modules/workspace/schema.py b/backend/app/modules/workspace/schema.py
+index a0f31c139..5b2eee9de 100644
+--- a/backend/app/modules/workspace/schema.py
++++ b/backend/app/modules/workspace/schema.py
+@@ -412,9 +412,14 @@ class WorkspaceProbeItem(BaseModel):
+     - ``daemon_name``：任一成员 binding daemon 的 ``display_alias or hostname``
+       （未绑/daemon 行缺失 → None）。
+     - ``daemon_online``：该 binding daemon 的在线态。
++    - ``repo_url``（ql-20260918-012 工作区 Git 地址识别）：git 态工作区的远程
++      仓库地址（``git remote -v`` 首个 fetch 行）。已识别（DB repo_url 非空）
++      直接回 DB 值不再发 RPC；未识别的 git 态实时读取并回填 DB；direct/
++      unknown 态为 None。
+     """
+ 
+     workspace_id: uuid.UUID
+     git_mode: Literal["git", "direct", "unknown"]
+     daemon_name: str | None = None
+     daemon_online: bool
++    repo_url: str | None = None
+diff --git a/backend/app/modules/workspace/tests/test_probe_endpoint.py b/backend/app/modules/workspace/tests/test_probe_endpoint.py
+index 47d8a19dd..a221a5209 100644
+--- a/backend/app/modules/workspace/tests/test_probe_endpoint.py
++++ b/backend/app/modules/workspace/tests/test_probe_endpoint.py
+@@ -10,6 +10,8 @@
+ - 缺失（查无行）的 workspace_id 跳过不报错（与 collect 无效 id 跳过同语义）。
+ - 无 WORKSPACE_WRITE 权限 → 403；空或超限（>20）workspace_ids → 422；非法
+   uuid 格式 → 422。
++- ql-20260918-012（工作区 Git 地址识别）：repo_url——git 态实时识别回填 DB /
++  已识别回 DB 值零额外 RPC / direct 态不发 RPC / RPC 降级归 None 不 5xx。
+ """
+ 
+ from __future__ import annotations
+@@ -302,3 +304,133 @@ class TestProbeEndpoint:
+         # 查无行 → 200 空列表（而非 405/404 证明路由匹配成功）
+         assert resp.status_code == 200, resp.text
+         assert resp.json() == []
++
++    # ── ql-20260918-012（工作区 Git 地址识别）：repo_url 识别 + 回填 ──
++
++    @pytest.mark.asyncio
++    async def test_git_mode_repo_url_detected_and_backfilled(
++        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """git 态 + repo_url 未识别 → delegate.git_remote_url 实时读取，
++        响应携带地址且回填 DB（本端点唯一写副作用）。"""
++        from sqlalchemy import select as sa_select
++
++        ws = await _make_workspace(db_session, name="待识别工作区")
++        await _make_binding_with_named_daemon(
++            db_session, ws, display_alias="识别机器", daemon_status="online"
++        )
++
++        async def _fake_probe(self: HostFsDelegate, workspace: Workspace) -> str:
++            return "git"
++
++        async def _fake_remote(self: HostFsDelegate, workspace: Workspace) -> str | None:
++            return "git@github.com:foo/bar.git"
++
++        monkeypatch.setattr(HostFsDelegate, "probe_workspace_git_mode", _fake_probe)
++        monkeypatch.setattr(HostFsDelegate, "git_remote_url", _fake_remote)
++
++        resp = await _post_probe(client, auth_headers, [ws])
++        assert resp.status_code == 200, resp.text
++        item = resp.json()[0]
++        assert item["git_mode"] == "git"
++        assert item["repo_url"] == "git@github.com:foo/bar.git"
++        # 回填落库：后续 probe 直接回 DB 值（零额外 RPC）
++        row = (
++            await db_session.execute(sa_select(Workspace).where(Workspace.id == ws))
++        ).scalar_one()
++        assert row.repo_url == "git@github.com:foo/bar.git"
++
++    @pytest.mark.asyncio
++    async def test_repo_url_already_filled_skips_extra_rpc(
++        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """repo_url 已识别（DB 非空）→ 直接回 DB 值，不再调 git_remote_url。"""
++        from sqlalchemy import select as sa_select
++
++        ws = await _make_workspace(db_session, name="已识别工作区")
++        row = (
++            await db_session.execute(sa_select(Workspace).where(Workspace.id == ws))
++        ).scalar_one()
++        row.repo_url = "https://example.com/x/y.git"
++        await db_session.commit()
++        await _make_binding_with_named_daemon(
++            db_session, ws, display_alias="已识别机器", daemon_status="online"
++        )
++
++        async def _fake_probe(self: HostFsDelegate, workspace: Workspace) -> str:
++            return "git"
++
++        remote_calls: list[str] = []
++
++        async def _fake_remote(self: HostFsDelegate, workspace: Workspace) -> str | None:
++            remote_calls.append(str(workspace.id))
++            return "should-not-be-used"
++
++        monkeypatch.setattr(HostFsDelegate, "probe_workspace_git_mode", _fake_probe)
++        monkeypatch.setattr(HostFsDelegate, "git_remote_url", _fake_remote)
++
++        resp = await _post_probe(client, auth_headers, [ws])
++        assert resp.status_code == 200, resp.text
++        item = resp.json()[0]
++        assert item["repo_url"] == "https://example.com/x/y.git"
++        assert remote_calls == []
++
++    @pytest.mark.asyncio
++    async def test_direct_mode_repo_url_none(
++        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """direct 态（根下无 .git）→ repo_url=None 且不发 git_remote RPC。"""
++        ws = await _make_workspace(db_session, name="直通工作区")
++        await _make_binding_with_named_daemon(
++            db_session, ws, display_alias="直通机器", daemon_status="online"
++        )
++
++        async def _fake_probe(self: HostFsDelegate, workspace: Workspace) -> str:
++            return "direct"
++
++        remote_calls: list[str] = []
++
++        async def _fake_remote(self: HostFsDelegate, workspace: Workspace) -> str | None:
++            remote_calls.append(str(workspace.id))
++            return None
++
++        monkeypatch.setattr(HostFsDelegate, "probe_workspace_git_mode", _fake_probe)
++        monkeypatch.setattr(HostFsDelegate, "git_remote_url", _fake_remote)
++
++        resp = await _post_probe(client, auth_headers, [ws])
++        assert resp.status_code == 200, resp.text
++        item = resp.json()[0]
++        assert item["git_mode"] == "direct"
++        assert item["repo_url"] is None
++        assert remote_calls == []
++
++    @pytest.mark.asyncio
++    async def test_git_remote_degrade_repo_url_none_no_5xx(
++        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """git_remote RPC 降级（旧 daemon 不识别/超时 → delegate 归 None）→
++        repo_url=None 不 5xx，DB 不动（下次 probe 重试）。"""
++        from sqlalchemy import select as sa_select
++
++        ws = await _make_workspace(db_session, name="降级工作区")
++        await _make_binding_with_named_daemon(
++            db_session, ws, display_alias="降级机器", daemon_status="online"
++        )
++
++        async def _fake_probe(self: HostFsDelegate, workspace: Workspace) -> str:
++            return "git"
++
++        async def _fake_remote(self: HostFsDelegate, workspace: Workspace) -> str | None:
++            return None  # delegate._via_rpc_or_degrade 收敛后的形态
++
++        monkeypatch.setattr(HostFsDelegate, "probe_workspace_git_mode", _fake_probe)
++        monkeypatch.setattr(HostFsDelegate, "git_remote_url", _fake_remote)
++
++        resp = await _post_probe(client, auth_headers, [ws])
++        assert resp.status_code == 200, resp.text
++        item = resp.json()[0]
++        assert item["repo_url"] is None
++        row = (
++            await db_session.execute(sa_select(Workspace).where(Workspace.id == ws))
++        ).scalar_one()
++        assert row.repo_url is None
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+index fbc13673e..b5688b0d8 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+@@ -35,6 +35,7 @@ import {
+ } from "@/lib/spec-workspaces";
+ import {
+   getWorkspace,
++  probeWorkspaces,
+   updateWorkspace,
+   type Workspace,
+ } from "@/lib/workspaces";
+@@ -241,6 +242,24 @@ export default function WorkspaceDetailPage({ params }: Props) {
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [workspaceId]);
+ 
++  // ql-20260918-012：Git 地址实时识别——单工作区 probe（后端读 daemon 侧
++  // git remote 并回填 DB），失败/403 静默，基本信息行回退 GET 返回的 DB 值。
++  const [probeRepoUrl, setProbeRepoUrl] = useState<string | null>(null);
++  useEffect(() => {
++    setProbeRepoUrl(null);
++    let active = true;
++    probeWorkspaces([workspaceId])
++      .then((items) => {
++        if (active && items[0]?.repo_url) setProbeRepoUrl(items[0].repo_url);
++      })
++      .catch(() => {
++        /* 无 WORKSPACE_WRITE 权限（403）或探测失败——静默回退 DB 值 */
++      });
++    return () => {
++      active = false;
++    };
++  }, [workspaceId]);
++
+   /* ----  task-11 / daemon-entity-binding：根据绑定 daemon 获取在线 provider 列表 ---- */
+   useEffect(() => {
+     if (!myBinding?.daemon_id) {
+@@ -358,6 +377,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
+               runtime={boundRuntime}
+               daemon={boundDaemon}
+               linkRuntime
++              repoUrl={probeRepoUrl ?? workspace.repo_url ?? null}
+             />
+             <dt className="text-muted-foreground">创建于</dt>
+             <dd>{formatTs(workspace.created_at)}</dd>
+diff --git a/frontend/src/app/(dashboard)/workspaces/page.tsx b/frontend/src/app/(dashboard)/workspaces/page.tsx
+index ed3c747b2..21d189781 100644
+--- a/frontend/src/app/(dashboard)/workspaces/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/page.tsx
+@@ -26,6 +26,7 @@ import { listUsers, type UserRead } from "@/lib/admin";
+ import {
+   listWorkspaces,
+   moveWorkspace,
++  probeWorkspaces,
+   updateWorkspace,
+   WORKSPACE_PAGE_SIZE,
+   type Workspace,
+@@ -98,6 +99,33 @@ export default function WorkspacesPage() {
+   // statusMap[ws_id] → {daemon_id, online, status}。徽标据此映射三态。
+   const { statusMap } = useDaemonStatusMap();
+ 
++  // ql-20260918-012：Git 地址识别——列表加载后补一发批量 probe（实时读
++  // daemon 侧 git remote 并回填 DB），失败/403 静默——展示性信息，卡片回退
++  // DB repo_url（对齐逐卡关联项目的异步补数模式）。
++  const [repoUrlByWs, setRepoUrlByWs] = useState<Map<string, string>>(new Map());
++  useEffect(() => {
++    if (!items || items.length === 0) return;
++    let cancelled = false;
++    probeWorkspaces(items.map((w) => w.id))
++      .then((probed) => {
++        if (!cancelled) {
++          setRepoUrlByWs(
++            new Map(
++              probed
++                .filter((p) => p.repo_url)
++                .map((p) => [p.workspace_id, p.repo_url as string]),
++            ),
++          );
++        }
++      })
++      .catch(() => {
++        /* 无 WORKSPACE_WRITE 权限（403）或探测失败——静默，不渲染地址行 */
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, [items]);
++
+   const reload = useCallback(async () => {
+     setError(null);
+     try {
+@@ -259,6 +287,8 @@ export default function WorkspacesPage() {
+         boundRuntime: null,
+         boundDaemon,
+         daemonStatus: daemonStatusOf(w.id),
++        // ql-20260918-012：probe 实时识别值优先，DB repo_url 兜底。
++        repoUrl: repoUrlByWs.get(w.id) ?? w.repo_url ?? null,
+         onChanged: reload,
+         onEditAlias: handleOpenAlias,
+         onActivate: () => handleActivate(w),
+@@ -268,6 +298,7 @@ export default function WorkspacesPage() {
+       bindingsByWs,
+       instancesById,
+       projectsByWs,
++      repoUrlByWs,
+       daemonStatusOf,
+       reload,
+       handleOpenAlias,
+diff --git a/frontend/src/components/workspace-card.tsx b/frontend/src/components/workspace-card.tsx
+index cbcf7dcb2..a4ba1bbe1 100644
+--- a/frontend/src/components/workspace-card.tsx
++++ b/frontend/src/components/workspace-card.tsx
+@@ -65,6 +65,11 @@ interface Props {
+   daemonStatus?: DaemonBadgeStatus;
+   /** ql-20260821-007：关联 PPM 项目（名称 tag 展示，空数组/不传不渲染行）。 */
+   linkedProjects?: PpmProjectBrief[];
++  /**
++   * ql-20260918-012：Git 远程仓库地址（probe 实时识别，DB repo_url 兜底）。
++   * 为空不渲染行；http(s) 形态在路径区渲染为可点外链。
++   */
++  repoUrl?: string | null;
+   onChanged: () => void;
+   // task-08 / FR-03：别名编辑入口（由 WorkspacesPage 弹 modal）。
+   onEditAlias: (workspace: Workspace) => void;
+@@ -92,6 +97,7 @@ export function WorkspaceCard({
+   boundDaemon,
+   daemonStatus,
+   linkedProjects,
++  repoUrl,
+   onChanged,
+   onEditAlias,
+   onActivate,
+@@ -259,6 +265,7 @@ export function WorkspaceCard({
+             runtime={boundRuntime}
+             daemon={boundDaemon}
+             linkRuntime
++            repoUrl={repoUrl}
+           />
+           {workspace.tech_stack && workspace.tech_stack.length > 0 && (
+             <>
+diff --git a/frontend/src/components/workspace-path-fields.tsx b/frontend/src/components/workspace-path-fields.tsx
+index 6d7ac6fd9..ca093e44a 100644
+--- a/frontend/src/components/workspace-path-fields.tsx
++++ b/frontend/src/components/workspace-path-fields.tsx
+@@ -27,6 +27,38 @@ interface WorkspacePathFieldsProps {
+   daemon?: DaemonInstanceRead | null;
+   /** Show link to /runtimes when daemon-client */
+   linkRuntime?: boolean;
++  /**
++   * ql-20260918-012：Git 远程仓库地址（后端 probe 自动识别回填 DB）。
++   * 为空（direct/unknown 态、未识别或无权限探测）不渲染该行。
++   */
++  repoUrl?: string | null;
++}
++
++/**
++ * ql-20260918-012：「Git 地址」行——http(s) 地址渲染为可点外链（卡片整卡
++ * 可点，链接 click 不冒泡），scp/ssh 形态纯文本展示。
++ */
++function RepoUrlRow({ repoUrl }: { repoUrl: string }) {
++  return (
++    <>
++      <dt className="text-muted-foreground">Git 地址</dt>
++      <dd className="break-all font-mono" title={repoUrl}>
++        {/^https?:\/\//.test(repoUrl) ? (
++          <a
++            href={repoUrl}
++            target="_blank"
++            rel="noreferrer"
++            className="text-primary hover:underline"
++            onClick={(e) => e.stopPropagation()}
++          >
++            {repoUrl}
++          </a>
++        ) : (
++          repoUrl
++        )}
++      </dd>
++    </>
++  );
+ }
+ 
+ export function WorkspacePathFields({
+@@ -34,6 +66,7 @@ export function WorkspacePathFields({
+   runtime,
+   daemon,
+   linkRuntime = false,
++  repoUrl,
+ }: WorkspacePathFieldsProps) {
+   // 遗留 1：daemon 实体维度渲染（绑定走 member binding，daemon 实体优先）。
+   if (daemon) {
+@@ -73,6 +106,8 @@ export function WorkspacePathFields({
+         <dd className="break-all font-mono" title={workspace.root_path}>
+           {workspace.root_path}
+         </dd>
++
++        {repoUrl ? <RepoUrlRow repoUrl={repoUrl} /> : null}
+       </>
+     );
+   }
+@@ -109,6 +144,8 @@ export function WorkspacePathFields({
+       <dd className="break-all font-mono" title={workspace.root_path}>
+         {workspace.root_path}
+       </dd>
++
++      {repoUrl ? <RepoUrlRow repoUrl={repoUrl} /> : null}
+     </>
+   );
+ }
+diff --git a/frontend/src/lib/workspaces.ts b/frontend/src/lib/workspaces.ts
+index 035095cca..c0b2aba69 100644
+--- a/frontend/src/lib/workspaces.ts
++++ b/frontend/src/lib/workspaces.ts
+@@ -233,6 +233,26 @@ export async function getWorkspace(id: string): Promise<Workspace> {
+   return apiFetch<Workspace>(`/api/workspaces/${id}`);
+ }
+ 
++// ── Probe（批量探测，POST /api/workspaces/probe）─────────────────────
++
++export type WorkspaceProbeItem = Schemas["WorkspaceProbeItem"];
++
++/**
++ * 批量探测工作区（git 模式 + 绑定机器状态 + Git 地址识别）。
++ *
++ * ql-20260918-012：响应含 repo_url——后端对 git 态实时读 `git remote -v`
++ * 首个 fetch 行并回填 DB；已识别的直接回 DB 值（零额外 RPC）。需
++ * WORKSPACE_WRITE 权限，无权限/失败时调用方 catch 静默，展示回退 DB 值。
++ */
++export async function probeWorkspaces(
++  workspaceIds: string[],
++): Promise<WorkspaceProbeItem[]> {
++  return apiFetch<WorkspaceProbeItem[]>("/api/workspaces/probe", {
++    method: "POST",
++    json: { workspace_ids: workspaceIds },
++  });
++}
++
+ // ── Components（只读目录，D-001@V1，变更 2026-07-06-component-readonly-split）──
+ // 组件从 projects/*.yaml 派生，不再是 workspace 行；GET /components 返回 ComponentRead[]。
+ 
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 9ba2de4e8..cb3b520e8 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -6722,6 +6722,14 @@ export class Daemon {
+           : 'HEAD';
+       return handler.gitRevParse({ root, ref });
+     });
++    // ql-20260918-012（工作区 Git 地址识别）：第 11 方法 git_remote——读工作区
++    // 远程仓库地址（git remote -v 首个 fetch 行）。backend probe 端点识别回填
++    // workspace.repo_url；参数清洗与既有方法同款（非字符串归一空串，由
++    // assertWithinAllowedRoots 入口断言拒 forbidden）。
++    ws.registerRpcHandler('host_fs.git_remote', async (params) => {
++      const root = typeof params.root === 'string' ? params.root : '';
++      return handler.gitRemote({ root });
++    });
+     ws.registerRpcHandler('host_fs.pollution_archive', async (params) => {
+       const source_root =
+         typeof params.source_root === 'string' ? params.source_root : '';
+diff --git a/sillyhub-daemon/src/host-fs-handler.ts b/sillyhub-daemon/src/host-fs-handler.ts
+index 2ad8a0858..d63409c13 100644
+--- a/sillyhub-daemon/src/host-fs-handler.ts
++++ b/sillyhub-daemon/src/host-fs-handler.ts
+@@ -173,6 +173,22 @@ export interface GitRevParseResult {
+   error: string | null;
+ }
+ 
++/**
++ * git_remote 返回结构（ql-20260918-012 工作区 Git 地址识别）：`{ remote_url, error }`。
++ *
++ *   - 成功：`{ remote_url: "<url>" }`——`git remote -v` 首个 `(fetch)` 行的 URL
++ *     （无 origin 但有其它 remote 的仓库同样取首个）。
++ *   - 无 remote：`{ remote_url: null, error: "no_remote" }`（空态，非故障）。
++ *   - 失败（非 git 目录 / git 不可用 / 超时）：`{ remote_url: null, error: <文案> }`
++ *     （不抛，backend probe 归 None fail-safe 不 5xx）。
++ */
++export interface GitRemoteResult {
++  /** 远程仓库 URL（如 git@github.com:foo/bar.git 或 https://…）；无 remote / 失败为 null。 */
++  remote_url: string | null;
++  /** 失败原因（no_remote / git stderr 文案）；成功为 null。 */
++  error: string | null;
++}
++
+ // ── task-01（2026-08-25-workspace-git-log）git 只读四方法返回结构（design §7.2）──
+ 
+ /** git_log / git_show 共用的单条 commit 记录（%x00 分隔 8 字段的解析产物）。 */
+@@ -1190,6 +1206,43 @@ export class HostFsHandler {
+     return runGitRevParse(root, params.ref && params.ref.length > 0 ? params.ref : 'HEAD');
+   }
+ 
++  // ── git_remote（ql-20260918-012 工作区 Git 地址识别）─────────────────────
++
++  /**
++   * `git_remote({ root }) → { remote_url, error }`——读工作区远程仓库地址。
++   *
++   * 命令：`git -C <root> remote -v`，取首个 `(fetch)` 行的 URL 列（行格式
++   * `<name>\t<url> (fetch)`）。不用 `git remote get-url origin`——无 origin 但
++   * 有其它 remote 的仓库同样该识别，单次命令同时覆盖两种形态。
++   *
++   * **不抛**（对齐 git_rev_parse 语义）；仅 root 越界走 RpcError forbidden。
++   * 无任何 remote → remote_url=null + error="no_remote"（空态）；非 git 目录 /
++   * git 不可用 / 超时 → remote_url=null + error 文案，backend probe 归 None。
++   */
++  async gitRemote(params: { root: string }): Promise<GitRemoteResult> {
++    // 1. 白名单守卫（与既有 git 方法同款）。
++    assertWithinAllowedRoots(params.root, this._rootsProvider());
++    const root = pathResolve(params.root);
++    const r = await runCmd('git', ['-C', root, 'remote', '-v'], {
++      timeout: GIT_READ_TIMEOUT_MS,
++    });
++    if (!r.ok) {
++      return {
++        remote_url: null,
++        error: r.stderr.trim() || r.stdout.trim() || 'git remote -v failed',
++      };
++    }
++    for (const line of r.stdout.split('\n')) {
++      // 形如 `origin\tgit@github.com:foo/bar.git (fetch)`；URL 取 \t 后到行尾
++      // ` (fetch)` 前的整段（URL 内空格的病态配置不识别，跳过该行）。
++      const url = /^([^\t]+)\t(.+) \(fetch\)$/.exec(line.trim())?.[2];
++      if (url !== undefined) {
++        return { remote_url: url, error: null };
++      }
++    }
++    return { remote_url: null, error: 'no_remote' };
++  }
++
+   // ── git_log / git_refs / git_show / git_diff_file（task-01 2026-08-25-workspace-git-log）──
+ 
+   /**
+diff --git a/sillyhub-daemon/tests/host-fs-handler.test.ts b/sillyhub-daemon/tests/host-fs-handler.test.ts
+index b4b2f1076..41d17e6af 100644
+--- a/sillyhub-daemon/tests/host-fs-handler.test.ts
++++ b/sillyhub-daemon/tests/host-fs-handler.test.ts
+@@ -410,6 +410,76 @@ describe('HostFsHandler — git_rev_parse（task-03 H15~H18）', () => {
+   });
+ });
+ 
++describe('HostFsHandler — git_remote（ql-20260918-012 工作区 Git 地址识别）', () => {
++  let root: string;
++  let handler: HostFsHandler;
++
++  beforeEach(async () => {
++    const r = await makeRoot({ withFiles: false });
++    root = r.root;
++    handler = new HostFsHandler({ rootsProvider: () => [root] });
++  });
++
++  afterEach(async () => {
++    execQueue.length = 0;
++    await rm(root, { recursive: true, force: true });
++  });
++
++  it('GR1: 有 remote → 首个 (fetch) 行 URL', async () => {
++    queueExec([
++      {
++        ok: true,
++        stdout:
++          'origin\tgit@github.com:foo/bar.git (fetch)\n' +
++          'origin\tgit@github.com:foo/bar.git (push)\n',
++        stderr: '',
++      },
++    ]);
++    const result = await handler.gitRemote({ root });
++    expect(result.remote_url).toBe('git@github.com:foo/bar.git');
++    expect(result.error).toBeNull();
++  });
++
++  it('GR2: 无 origin 只有其它 remote → 同样识别首个 fetch 行', async () => {
++    queueExec([
++      {
++        ok: true,
++        stdout: 'upstream\thttps://example.com/a/b.git (fetch)\n',
++        stderr: '',
++      },
++    ]);
++    const result = await handler.gitRemote({ root });
++    expect(result.remote_url).toBe('https://example.com/a/b.git');
++  });
++
++  it('GR3: 空 remote 输出 → {remote_url:null, error:"no_remote"}', async () => {
++    queueExec([{ ok: true, stdout: '', stderr: '' }]);
++    const result = await handler.gitRemote({ root });
++    expect(result.remote_url).toBeNull();
++    expect(result.error).toBe('no_remote');
++  });
++
++  it('GR4: 非 git 目录 → {remote_url:null, error:stderr 文案} 不抛', async () => {
++    queueExec([
++      { ok: false, stdout: '', stderr: 'fatal: not a git repository' },
++    ]);
++    const result = await handler.gitRemote({ root });
++    expect(result.remote_url).toBeNull();
++    expect(result.error).toBe('fatal: not a git repository');
++  });
++
++  it('GR5: 越界 → forbidden', async () => {
++    const evil = IS_WIN ? 'C:\\Windows' : '/etc';
++    try {
++      await handler.gitRemote({ root: evil });
++      throw new Error('should have thrown');
++    } catch (e) {
++      expect(e).toBeInstanceOf(RpcError);
++      expect((e as RpcError).code).toBe('forbidden');
++    }
++  });
++});
++
+ describe('HostFsHandler — pollution_archive（task-03 H19~H23）', () => {
+   let root: string;
+   let runtimeRoot: string;

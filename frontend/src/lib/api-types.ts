@@ -413,6 +413,13 @@ export interface paths {
          *     只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC
          *     失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id
          *     跳过不报错（与 collect_scope 无效 id 跳过同语义）。
+         *
+         *     ql-20260918-012（工作区 Git 地址识别）：响应新增 ``repo_url``——git 态
+         *     工作区经 ``delegate.git_remote_url`` 读 ``git remote -v`` 首个 fetch 行，
+         *     并在识别成功且与 DB 不同时**回填** ``workspace.repo_url``（本端点唯一的
+         *     写副作用，仅此一列；§7.5 的「不改生命周期状态」语义不变）。已识别
+         *     （repo_url 非空）直接回 DB 值不再发第二次 RPC——首次识别后本端点 RPC
+         *     开销回到基线；无 remote / RPC 失败归 None 不抛（下次 probe 重试）。
          */
         post: operations["probe_workspaces_api_workspaces_probe_post"];
         delete?: never;
@@ -26119,6 +26126,10 @@ export interface components {
          *     - ``daemon_name``：任一成员 binding daemon 的 ``display_alias or hostname``
          *       （未绑/daemon 行缺失 → None）。
          *     - ``daemon_online``：该 binding daemon 的在线态。
+         *     - ``repo_url``（ql-20260918-012 工作区 Git 地址识别）：git 态工作区的远程
+         *       仓库地址（``git remote -v`` 首个 fetch 行）。已识别（DB repo_url 非空）
+         *       直接回 DB 值不再发 RPC；未识别的 git 态实时读取并回填 DB；direct/
+         *       unknown 态为 None。
          */
         WorkspaceProbeItem: {
             /**
@@ -26135,6 +26146,8 @@ export interface components {
             daemon_name?: string | null;
             /** Daemon Online */
             daemon_online: boolean;
+            /** Repo Url */
+            repo_url?: string | null;
         };
         /**
          * WorkspaceProbeRequest

@@ -10,6 +10,8 @@
 - 缺失（查无行）的 workspace_id 跳过不报错（与 collect 无效 id 跳过同语义）。
 - 无 WORKSPACE_WRITE 权限 → 403；空或超限（>20）workspace_ids → 422；非法
   uuid 格式 → 422。
+- ql-20260918-012（工作区 Git 地址识别）：repo_url——git 态实时识别回填 DB /
+  已识别回 DB 值零额外 RPC / direct 态不发 RPC / RPC 降级归 None 不 5xx。
 """
 
 from __future__ import annotations
@@ -302,3 +304,133 @@ class TestProbeEndpoint:
         # 查无行 → 200 空列表（而非 405/404 证明路由匹配成功）
         assert resp.status_code == 200, resp.text
         assert resp.json() == []
+
+    # ── ql-20260918-012（工作区 Git 地址识别）：repo_url 识别 + 回填 ──
+
+    @pytest.mark.asyncio
+    async def test_git_mode_repo_url_detected_and_backfilled(
+        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """git 态 + repo_url 未识别 → delegate.git_remote_url 实时读取，
+        响应携带地址且回填 DB（本端点唯一写副作用）。"""
+        from sqlalchemy import select as sa_select
+
+        ws = await _make_workspace(db_session, name="待识别工作区")
+        await _make_binding_with_named_daemon(
+            db_session, ws, display_alias="识别机器", daemon_status="online"
+        )
+
+        async def _fake_probe(self: HostFsDelegate, workspace: Workspace) -> str:
+            return "git"
+
+        async def _fake_remote(self: HostFsDelegate, workspace: Workspace) -> str | None:
+            return "git@github.com:foo/bar.git"
+
+        monkeypatch.setattr(HostFsDelegate, "probe_workspace_git_mode", _fake_probe)
+        monkeypatch.setattr(HostFsDelegate, "git_remote_url", _fake_remote)
+
+        resp = await _post_probe(client, auth_headers, [ws])
+        assert resp.status_code == 200, resp.text
+        item = resp.json()[0]
+        assert item["git_mode"] == "git"
+        assert item["repo_url"] == "git@github.com:foo/bar.git"
+        # 回填落库：后续 probe 直接回 DB 值（零额外 RPC）
+        row = (
+            await db_session.execute(sa_select(Workspace).where(Workspace.id == ws))
+        ).scalar_one()
+        assert row.repo_url == "git@github.com:foo/bar.git"
+
+    @pytest.mark.asyncio
+    async def test_repo_url_already_filled_skips_extra_rpc(
+        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """repo_url 已识别（DB 非空）→ 直接回 DB 值，不再调 git_remote_url。"""
+        from sqlalchemy import select as sa_select
+
+        ws = await _make_workspace(db_session, name="已识别工作区")
+        row = (
+            await db_session.execute(sa_select(Workspace).where(Workspace.id == ws))
+        ).scalar_one()
+        row.repo_url = "https://example.com/x/y.git"
+        await db_session.commit()
+        await _make_binding_with_named_daemon(
+            db_session, ws, display_alias="已识别机器", daemon_status="online"
+        )
+
+        async def _fake_probe(self: HostFsDelegate, workspace: Workspace) -> str:
+            return "git"
+
+        remote_calls: list[str] = []
+
+        async def _fake_remote(self: HostFsDelegate, workspace: Workspace) -> str | None:
+            remote_calls.append(str(workspace.id))
+            return "should-not-be-used"
+
+        monkeypatch.setattr(HostFsDelegate, "probe_workspace_git_mode", _fake_probe)
+        monkeypatch.setattr(HostFsDelegate, "git_remote_url", _fake_remote)
+
+        resp = await _post_probe(client, auth_headers, [ws])
+        assert resp.status_code == 200, resp.text
+        item = resp.json()[0]
+        assert item["repo_url"] == "https://example.com/x/y.git"
+        assert remote_calls == []
+
+    @pytest.mark.asyncio
+    async def test_direct_mode_repo_url_none(
+        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """direct 态（根下无 .git）→ repo_url=None 且不发 git_remote RPC。"""
+        ws = await _make_workspace(db_session, name="直通工作区")
+        await _make_binding_with_named_daemon(
+            db_session, ws, display_alias="直通机器", daemon_status="online"
+        )
+
+        async def _fake_probe(self: HostFsDelegate, workspace: Workspace) -> str:
+            return "direct"
+
+        remote_calls: list[str] = []
+
+        async def _fake_remote(self: HostFsDelegate, workspace: Workspace) -> str | None:
+            remote_calls.append(str(workspace.id))
+            return None
+
+        monkeypatch.setattr(HostFsDelegate, "probe_workspace_git_mode", _fake_probe)
+        monkeypatch.setattr(HostFsDelegate, "git_remote_url", _fake_remote)
+
+        resp = await _post_probe(client, auth_headers, [ws])
+        assert resp.status_code == 200, resp.text
+        item = resp.json()[0]
+        assert item["git_mode"] == "direct"
+        assert item["repo_url"] is None
+        assert remote_calls == []
+
+    @pytest.mark.asyncio
+    async def test_git_remote_degrade_repo_url_none_no_5xx(
+        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """git_remote RPC 降级（旧 daemon 不识别/超时 → delegate 归 None）→
+        repo_url=None 不 5xx，DB 不动（下次 probe 重试）。"""
+        from sqlalchemy import select as sa_select
+
+        ws = await _make_workspace(db_session, name="降级工作区")
+        await _make_binding_with_named_daemon(
+            db_session, ws, display_alias="降级机器", daemon_status="online"
+        )
+
+        async def _fake_probe(self: HostFsDelegate, workspace: Workspace) -> str:
+            return "git"
+
+        async def _fake_remote(self: HostFsDelegate, workspace: Workspace) -> str | None:
+            return None  # delegate._via_rpc_or_degrade 收敛后的形态
+
+        monkeypatch.setattr(HostFsDelegate, "probe_workspace_git_mode", _fake_probe)
+        monkeypatch.setattr(HostFsDelegate, "git_remote_url", _fake_remote)
+
+        resp = await _post_probe(client, auth_headers, [ws])
+        assert resp.status_code == 200, resp.text
+        item = resp.json()[0]
+        assert item["repo_url"] is None
+        row = (
+            await db_session.execute(sa_select(Workspace).where(Workspace.id == ws))
+        ).scalar_one()
+        assert row.repo_url is None

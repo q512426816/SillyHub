@@ -191,6 +191,13 @@ async def probe_workspaces(
     只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC
     失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id
     跳过不报错（与 collect_scope 无效 id 跳过同语义）。
+
+    ql-20260918-012（工作区 Git 地址识别）：响应新增 ``repo_url``——git 态
+    工作区经 ``delegate.git_remote_url`` 读 ``git remote -v`` 首个 fetch 行，
+    并在识别成功且与 DB 不同时**回填** ``workspace.repo_url``（本端点唯一的
+    写副作用，仅此一列；§7.5 的「不改生命周期状态」语义不变）。已识别
+    （repo_url 非空）直接回 DB 值不再发第二次 RPC——首次识别后本端点 RPC
+    开销回到基线；无 remote / RPC 失败归 None 不抛（下次 probe 重试）。
     """
     from sqlalchemy import select
 
@@ -211,19 +218,34 @@ async def probe_workspaces(
         session, list(workspaces), git_probe=delegate.probe_workspace_git_mode
     )
     entry_by_id = {uuid.UUID(entry["id"]): entry for entry in entries}
+    ws_by_id = {ws.id: ws for ws in workspaces}
     items: list[WorkspaceProbeItem] = []
+    repo_url_backfilled = False
     for ws_id in payload.workspace_ids:
         entry = entry_by_id.get(ws_id)
         if entry is None:
             continue
+        # ql-20260918-012：git 态识别远程地址——已识别的回 DB 值（零额外 RPC），
+        # 未识别的实时读取；识别成功且值变化时回填 DB（见 docstring）。
+        repo_url: str | None = None
+        ws = ws_by_id[ws_id]
+        if entry["git_mode"] == "git":
+            repo_url = ws.repo_url or await delegate.git_remote_url(ws)
+            if repo_url and repo_url != ws.repo_url:
+                ws.repo_url = repo_url
+                repo_url_backfilled = True
         items.append(
             WorkspaceProbeItem(
                 workspace_id=ws_id,
                 git_mode=entry["git_mode"],
                 daemon_name=entry["daemon_name"],
                 daemon_online=entry["daemon_online"],
+                repo_url=repo_url,
             )
         )
+    if repo_url_backfilled:
+        await session.commit()
+        # commit 后 ORM 行 expire，条目值已全部取定，无需 refresh。
     return items
 
 

@@ -233,6 +233,26 @@ export async function getWorkspace(id: string): Promise<Workspace> {
   return apiFetch<Workspace>(`/api/workspaces/${id}`);
 }
 
+// ── Probe（批量探测，POST /api/workspaces/probe）─────────────────────
+
+export type WorkspaceProbeItem = Schemas["WorkspaceProbeItem"];
+
+/**
+ * 批量探测工作区（git 模式 + 绑定机器状态 + Git 地址识别）。
+ *
+ * ql-20260918-012：响应含 repo_url——后端对 git 态实时读 `git remote -v`
+ * 首个 fetch 行并回填 DB；已识别的直接回 DB 值（零额外 RPC）。需
+ * WORKSPACE_WRITE 权限，无权限/失败时调用方 catch 静默，展示回退 DB 值。
+ */
+export async function probeWorkspaces(
+  workspaceIds: string[],
+): Promise<WorkspaceProbeItem[]> {
+  return apiFetch<WorkspaceProbeItem[]>("/api/workspaces/probe", {
+    method: "POST",
+    json: { workspace_ids: workspaceIds },
+  });
+}
+
 // ── Components（只读目录，D-001@V1，变更 2026-07-06-component-readonly-split）──
 // 组件从 projects/*.yaml 派生，不再是 workspace 行；GET /components 返回 ComponentRead[]。
 

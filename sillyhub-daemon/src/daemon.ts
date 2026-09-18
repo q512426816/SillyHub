@@ -6722,6 +6722,14 @@ export class Daemon {
           : 'HEAD';
       return handler.gitRevParse({ root, ref });
     });
+    // ql-20260918-012（工作区 Git 地址识别）：第 11 方法 git_remote——读工作区
+    // 远程仓库地址（git remote -v 首个 fetch 行）。backend probe 端点识别回填
+    // workspace.repo_url；参数清洗与既有方法同款（非字符串归一空串，由
+    // assertWithinAllowedRoots 入口断言拒 forbidden）。
+    ws.registerRpcHandler('host_fs.git_remote', async (params) => {
+      const root = typeof params.root === 'string' ? params.root : '';
+      return handler.gitRemote({ root });
+    });
     ws.registerRpcHandler('host_fs.pollution_archive', async (params) => {
       const source_root =
         typeof params.source_root === 'string' ? params.source_root : '';

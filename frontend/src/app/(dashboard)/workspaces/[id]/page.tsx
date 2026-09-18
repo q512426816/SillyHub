@@ -35,6 +35,7 @@ import {
 } from "@/lib/spec-workspaces";
 import {
   getWorkspace,
+  probeWorkspaces,
   updateWorkspace,
   type Workspace,
 } from "@/lib/workspaces";
@@ -241,6 +242,24 @@ export default function WorkspaceDetailPage({ params }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
 
+  // ql-20260918-012：Git 地址实时识别——单工作区 probe（后端读 daemon 侧
+  // git remote 并回填 DB），失败/403 静默，基本信息行回退 GET 返回的 DB 值。
+  const [probeRepoUrl, setProbeRepoUrl] = useState<string | null>(null);
+  useEffect(() => {
+    setProbeRepoUrl(null);
+    let active = true;
+    probeWorkspaces([workspaceId])
+      .then((items) => {
+        if (active && items[0]?.repo_url) setProbeRepoUrl(items[0].repo_url);
+      })
+      .catch(() => {
+        /* 无 WORKSPACE_WRITE 权限（403）或探测失败——静默回退 DB 值 */
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
   /* ----  task-11 / daemon-entity-binding：根据绑定 daemon 获取在线 provider 列表 ---- */
   useEffect(() => {
     if (!myBinding?.daemon_id) {
@@ -358,6 +377,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
               runtime={boundRuntime}
               daemon={boundDaemon}
               linkRuntime
+              repoUrl={probeRepoUrl ?? workspace.repo_url ?? null}
             />
             <dt className="text-muted-foreground">创建于</dt>
             <dd>{formatTs(workspace.created_at)}</dd>

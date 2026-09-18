@@ -26,6 +26,7 @@ import { listUsers, type UserRead } from "@/lib/admin";
 import {
   listWorkspaces,
   moveWorkspace,
+  probeWorkspaces,
   updateWorkspace,
   WORKSPACE_PAGE_SIZE,
   type Workspace,
@@ -97,6 +98,33 @@ export default function WorkspacesPage() {
   // task-07 / FR-06 / R-02：daemon 在线状态聚合（task-03 单数据源），
   // statusMap[ws_id] → {daemon_id, online, status}。徽标据此映射三态。
   const { statusMap } = useDaemonStatusMap();
+
+  // ql-20260918-012：Git 地址识别——列表加载后补一发批量 probe（实时读
+  // daemon 侧 git remote 并回填 DB），失败/403 静默——展示性信息，卡片回退
+  // DB repo_url（对齐逐卡关联项目的异步补数模式）。
+  const [repoUrlByWs, setRepoUrlByWs] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (!items || items.length === 0) return;
+    let cancelled = false;
+    probeWorkspaces(items.map((w) => w.id))
+      .then((probed) => {
+        if (!cancelled) {
+          setRepoUrlByWs(
+            new Map(
+              probed
+                .filter((p) => p.repo_url)
+                .map((p) => [p.workspace_id, p.repo_url as string]),
+            ),
+          );
+        }
+      })
+      .catch(() => {
+        /* 无 WORKSPACE_WRITE 权限（403）或探测失败——静默，不渲染地址行 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [items]);
 
   const reload = useCallback(async () => {
     setError(null);
@@ -259,6 +287,8 @@ export default function WorkspacesPage() {
         boundRuntime: null,
         boundDaemon,
         daemonStatus: daemonStatusOf(w.id),
+        // ql-20260918-012：probe 实时识别值优先，DB repo_url 兜底。
+        repoUrl: repoUrlByWs.get(w.id) ?? w.repo_url ?? null,
         onChanged: reload,
         onEditAlias: handleOpenAlias,
         onActivate: () => handleActivate(w),
@@ -268,6 +298,7 @@ export default function WorkspacesPage() {
       bindingsByWs,
       instancesById,
       projectsByWs,
+      repoUrlByWs,
       daemonStatusOf,
       reload,
       handleOpenAlias,

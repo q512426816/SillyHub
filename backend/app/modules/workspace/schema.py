@@ -412,9 +412,14 @@ class WorkspaceProbeItem(BaseModel):
     - ``daemon_name``：任一成员 binding daemon 的 ``display_alias or hostname``
       （未绑/daemon 行缺失 → None）。
     - ``daemon_online``：该 binding daemon 的在线态。
+    - ``repo_url``（ql-20260918-012 工作区 Git 地址识别）：git 态工作区的远程
+      仓库地址（``git remote -v`` 首个 fetch 行）。已识别（DB repo_url 非空）
+      直接回 DB 值不再发 RPC；未识别的 git 态实时读取并回填 DB；direct/
+      unknown 态为 None。
     """
 
     workspace_id: uuid.UUID
     git_mode: Literal["git", "direct", "unknown"]
     daemon_name: str | None = None
     daemon_online: bool
+    repo_url: str | None = None

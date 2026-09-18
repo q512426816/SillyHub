@@ -361,6 +361,32 @@ class HostFsDelegate:
         return str(commit) if commit else None
 
     # ------------------------------------------------------------------
+    # git_remote（ql-20260918-012 工作区 Git 地址识别）
+    # ------------------------------------------------------------------
+    async def git_remote_url(self, workspace: Workspace) -> str | None:
+        """Read *workspace* remote URL (``git remote -v`` 首个 fetch 行), or ``None``.
+
+        daemon-client: forward ``host_fs.git_remote`` over WS RPC。无 remote /
+        非 git 仓库 / RPC 降级（含旧版 daemon 不识别该方法 →
+        :class:`DaemonRpcRemoteError`）一律归 ``None``（fail-safe 不抛，
+        D-006 warn-and-degrade）。root 经
+        :func:`resolve_root_path_for_daemon` 容器前缀改写（对齐
+        :meth:`probe_workspace_git_mode` 的 daemon 侧路径口径）。
+        """
+        # 延迟 import（同 probe_workspace_git_mode：host_fs 处于 daemon.service
+        # 早引用链上，workspace.service 顶层互 import 有环风险）。
+        from app.modules.workspace.service import resolve_root_path_for_daemon
+
+        result = await self._via_rpc_or_degrade(
+            method="git_remote",
+            workspace=workspace,
+            args={"root": resolve_root_path_for_daemon(workspace.root_path)},
+            degraded={"remote_url": None},
+        )
+        url = result.get("remote_url") if isinstance(result, dict) else None
+        return str(url).strip() or None if url else None
+
+    # ------------------------------------------------------------------
     # git_worktree_add（change 2026-07-12-worker-worktree-isolation task-01）
     # ------------------------------------------------------------------
     async def git_worktree_add(

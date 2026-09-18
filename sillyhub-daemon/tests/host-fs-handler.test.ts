@@ -410,6 +410,76 @@ describe('HostFsHandler — git_rev_parse（task-03 H15~H18）', () => {
   });
 });
 
+describe('HostFsHandler — git_remote（ql-20260918-012 工作区 Git 地址识别）', () => {
+  let root: string;
+  let handler: HostFsHandler;
+
+  beforeEach(async () => {
+    const r = await makeRoot({ withFiles: false });
+    root = r.root;
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
+  });
+
+  afterEach(async () => {
+    execQueue.length = 0;
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('GR1: 有 remote → 首个 (fetch) 行 URL', async () => {
+    queueExec([
+      {
+        ok: true,
+        stdout:
+          'origin\tgit@github.com:foo/bar.git (fetch)\n' +
+          'origin\tgit@github.com:foo/bar.git (push)\n',
+        stderr: '',
+      },
+    ]);
+    const result = await handler.gitRemote({ root });
+    expect(result.remote_url).toBe('git@github.com:foo/bar.git');
+    expect(result.error).toBeNull();
+  });
+
+  it('GR2: 无 origin 只有其它 remote → 同样识别首个 fetch 行', async () => {
+    queueExec([
+      {
+        ok: true,
+        stdout: 'upstream\thttps://example.com/a/b.git (fetch)\n',
+        stderr: '',
+      },
+    ]);
+    const result = await handler.gitRemote({ root });
+    expect(result.remote_url).toBe('https://example.com/a/b.git');
+  });
+
+  it('GR3: 空 remote 输出 → {remote_url:null, error:"no_remote"}', async () => {
+    queueExec([{ ok: true, stdout: '', stderr: '' }]);
+    const result = await handler.gitRemote({ root });
+    expect(result.remote_url).toBeNull();
+    expect(result.error).toBe('no_remote');
+  });
+
+  it('GR4: 非 git 目录 → {remote_url:null, error:stderr 文案} 不抛', async () => {
+    queueExec([
+      { ok: false, stdout: '', stderr: 'fatal: not a git repository' },
+    ]);
+    const result = await handler.gitRemote({ root });
+    expect(result.remote_url).toBeNull();
+    expect(result.error).toBe('fatal: not a git repository');
+  });
+
+  it('GR5: 越界 → forbidden', async () => {
+    const evil = IS_WIN ? 'C:\\Windows' : '/etc';
+    try {
+      await handler.gitRemote({ root: evil });
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect(e).toBeInstanceOf(RpcError);
+      expect((e as RpcError).code).toBe('forbidden');
+    }
+  });
+});
+
 describe('HostFsHandler — pollution_archive（task-03 H19~H23）', () => {
   let root: string;
   let runtimeRoot: string;

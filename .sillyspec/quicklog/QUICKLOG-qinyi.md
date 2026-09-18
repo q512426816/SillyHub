@@ -474,6 +474,15 @@
 方案：头部入口+历史弹层（50条/跳会话/反链）。
 结果：65 绿 tsc 0 已提交 ddf19ad26 推送，未部署。
 
+## ql-20260918-010-f997 | 2026-09-18 10:07:01 | 合并三修。根因：目标缺失 404+无默认值。方案：宽松读自动新建+category 默认+分词预填。结果…
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：合并三修。
+根因：目标缺失 404+无默认值。
+方案：宽松读自动新建+category 默认+分词预填。
+结果：97+67 绿 tsc 0 已提交 1e503fa68 推送，未部署。
+
 ## ql-20260918-011-543b | 2026-09-18 12:24:37 | frontend-ci 连续失败修复——page.test.tsx user_input 断言未随 ql-20260918-003 行为变更同步
 状态：已完成
 关联变更：（无）
@@ -483,3 +492,30 @@
 根因：ad28cffc8（ql-20260918-003）有意变更 onLog 行为——user_input 事件在 prompt 为空时实时写入 turn.prompt 成为排队派发轮用户气泡唯一实时来源，该提交更新了 dialog 测试但漏改 page 级旧断言 queryByText 为 null，与 CI 上稳定失败 3 次逐字吻合，属测试过时而非实现回归
 方案：page.test.tsx『user_input 不进段』用例断言改精确三连——getAllByText 恰 1 处、closest 命中 turn-bubble 用户气泡容器、若误装配进 agent 答复段则第二处匹配被长度断言拦截；用例名与注释同步新语义
 结果：先本地复现 CI 同款 AssertionError 后修复，该测试文件 39/39 用例绿，eslint 0 error，tsc 本文件 0 错误（全量仅另一会话在途 merge-dialog.tsx 3 处存量）
+
+## ql-20260918-012-ac1b | 2026-09-18 13:28:30 | 工作区卡片与详情页展示自动识别的 Git 地址（probe repo_url 识别回填）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/host-fs-handler.ts（新增 gitRemote 方法（git remote -v 首个 fetch 行，不抛+越界 forbidden））
+- sillyhub-daemon/src/daemon.ts（注册 host_fs.git_remote 第 11 方法）
+- sillyhub-daemon/tests/host-fs-handler.test.ts（GR1~GR5 五用例）
+- backend/app/modules/daemon/host_fs/delegate.py（新增 git_remote_url（_via_rpc_or_degrade 降级 None））
+- backend/app/modules/workspace/schema.py（WorkspaceProbeItem 增 repo_url）
+- backend/app/modules/workspace/router.py（probe 端点 git 态实时识别+回填（已识别零额外 RPC））
+- backend/app/modules/workspace/tests/test_probe_endpoint.py（+4 用例（识别回填/跳过 RPC/direct/降级））
+- backend/openapi.json（gen:types 同步）
+- frontend/src/lib/api-types.ts（gen:types 同步（WorkspaceProbeItem.repo_url））
+- frontend/src/lib/workspaces.ts（新增 probeWorkspaces client）
+- frontend/src/app/(dashboard)/workspaces/page.tsx（列表页批量 probe + 卡片 repoUrl 接线）
+- frontend/src/app/(dashboard)/workspaces/[id]/page.tsx（详情页单工作区 probe + Git 地址行）
+- frontend/src/components/workspace-path-fields.tsx（新增「Git 地址」行（http(s) 外链））
+- frontend/src/components/workspace-card.tsx（repoUrl prop 透传）
+- .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md（ql 条目）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md（ql 条目）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（变更索引 ql 条目）
+需求：工作区卡片与详情页展示自动识别的 Git 地址（probe repo_url 识别回填）
+根因：workspaces.repo_url 列/DTO/前端生成类型链路已通但创建入口从不填写（恒 NULL）且前端从未渲染，用户要求自动识别不手填
+方案：daemon 侧 host_fs 新增第 11 只读方法 git_remote（git remote -v 首个 fetch 行，旧 daemon 不识别由 backend 降级 None）；backend delegate 新增 git_remote_url + WorkspaceProbeItem 增 repo_url，probe 端点对 git 态实时识别并回填 workspaces.repo_url（已识别零额外 RPC）；前端 lib 新增 probeWorkspaces client，列表页批量 probe（403 静默）+ 详情页单工作区 probe，WorkspacePathFields 新增「Git 地址」行（http(s) 可点外链不冒泡整卡点击，DB 值兜底），gen:types 同步
+结果：backend test_probe_endpoint 13 passed（+4 新用例）、daemon host-fs-handler 54 passed（+5）、前端 workspace-card/drag-grid/team-trigger 67 passed、前端 tsc 0、daemon typecheck 0、ruff/format/mypy scoped 0、eslint 0 error（8 warning stash 对照确认全存量）
+审计：[gate] L1（跨 0 模块 · 15 文件：10 代码/2 测试）advisory；每文件注记已全覆盖；测试增量已含

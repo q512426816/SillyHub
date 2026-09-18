@@ -1,0 +1,159 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-2384dc44",
+  "totals": {
+    "files": 15,
+    "additions": 434,
+    "deletions": 0
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/host_fs/delegate.py",
+      "declared": true,
+      "additions": 26,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/workspace/router.py",
+      "declared": true,
+      "additions": 22,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/workspace/schema.py",
+      "declared": true,
+      "additions": 5,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/workspace/tests/test_probe_endpoint.py",
+      "declared": true,
+      "additions": 132,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/page.tsx",
+      "declared": true,
+      "additions": 20,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/page.tsx",
+      "declared": true,
+      "additions": 31,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/workspace-card.tsx",
+      "declared": true,
+      "additions": 7,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/workspace-path-fields.tsx",
+      "declared": true,
+      "additions": 37,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/workspaces.ts",
+      "declared": true,
+      "additions": 20,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "declared": true,
+      "additions": 8,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/host-fs-handler.ts",
+      "declared": true,
+      "additions": 53,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/host-fs-handler.test.ts",
+      "declared": true,
+      "additions": 70,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 15,
+    "codeFileCount": 10,
+    "testFileCount": 2,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260918-012-ac1b",
+  "sessionId": "quick-2384dc44",
+  "savedAt": "2026-09-18T05:45:43.534Z",
+  "patchSha256": "8f90b3c03bdc64d00dda79491e311baa9893ce9ab8c955f18349ad0c896fda04",
+  "patchStatus": "ok"
+}
