@@ -1,0 +1,55 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-5ea8f38e",
+  "totals": {
+    "files": 2,
+    "additions": 186,
+    "deletions": 4
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/daemon/session/service/thinking_level.py",
+      "declared": true,
+      "additions": 56,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_thinking_level_endpoint.py",
+      "declared": true,
+      "additions": 130,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 3,
+    "codeFileCount": 1,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260918-004-8a5c",
+  "sessionId": "quick-5ea8f38e",
+  "savedAt": "2026-09-18T00:21:01.085Z",
+  "patchSha256": "c8f1b72a5f3629b96af44253f0211fa89f5898478fe9df783157ebada08fbd0c",
+  "patchStatus": "ok"
+}

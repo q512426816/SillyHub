@@ -410,7 +410,24 @@
 关联变更：（无）
 文件：（见实际改动）
 
-## ql-20260918-003-4b16 | 2026-09-18 07:36:29 | 修复排队消息『立即发送』两个缺陷：①打断轮显示『轮次失败』应为『已中止』语义 ②立即发送的消息气泡实时不可见需刷新（user_input 落库无 Redis 发布+前端实时路径不写 prompt）
-状态：进行中
+## ql-20260918-003-4b16 | 2026-09-18 07:36:29 | 修复排队消息立即发送两缺陷：打断轮误显示轮次失败、立即发送的消息气泡实时不可见需刷新
+状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：.sillyspec/docs/SillyHub/modules/frontend_components.md（+1/-0）, backend/app/modules/daemon/run_sync/service/close_run_steps.py（+5/-0）, backend/app/modules/daemon/session/service/inject.py（+48/-10）, backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py（+43/-0）, backend/app/modules/daemon/tests/test_session_queue_actions.py（+56/-0）, frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx（+11/-0）, frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx（+182/-0）, frontend/src/components/daemon/runtime-session-helpers.tsx（+7/-1）, frontend/src/components/daemon/session-panel/page-helpers.tsx（+1/-1）, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx（+42/-8）, frontend/src/components/daemon/session-panel/session-panel-page.tsx（+65/-35）, frontend/src/components/daemon/session-panel/turn-state.ts（+41/-2）, frontend/src/lib/daemon/session-sse.ts（+7/-0）, frontend/src/lib/daemon/session-stream.ts（+4/-0）
+需求：修复排队消息立即发送两缺陷：打断轮误显示轮次失败、立即发送的消息气泡实时不可见需刷新
+根因：打断链路 daemon SDK abort 上报 error_during_execution 统一落 run.status=failed 前端渲染为轮次失败；排队派发轮无占位轮且 backend 落库 user_input 日志不经 daemon 上报管线无 Redis 发布，前端实时流无事件 prompt 气泡缺失
+方案：backend turn_completed 事件补 error_code 直传+前端四处映射 interactive_interrupted→killed 已中止；_inject_into_session commit 后按 daemon 上报同形态补发 user_input log 事件+前端 page/dialog onLog prompt 为空时写剥前导正文，配套终态轮重放守卫与占位轮合并 replacePlaceholderTurn 防双轮
+结果：后端 200+ 用例绿含新增 2（queue/lifecycle/inject/auto_recover/group/worker），前端 167 用例绿含新增 4（dialog/helpers/stream），ruff mypy tsc eslint 全 0 error，文档 daemon.md/frontend_components.md 增量已更，未部署需后端+前端上线生效
+审计：[gate] L1（跨 0 模块 · 14 文件：9 代码/4 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+
+## ql-20260918-004-8a5c | 2026-09-18 08:13:57 | 思考档位暂存列两处竞态修复——apply 终态钩子 CAS 清列防丢用户切档 + 空闲直切对账防陈旧暂存反超
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/session/service/thinking_level.py（+56/-4）, backend/app/modules/daemon/tests/test_session_thinking_level_endpoint.py（+130/-0）
+需求：思考档位暂存列两处竞态修复——apply 终态钩子 CAS 清列防丢用户切档 + 空闲直切对账防陈旧暂存反超
+根因：apply_pending_thinking_level 的 _set_via_rpc 最长挂 15s，成功分支无条件 pending=None 会清掉窗口内用户新写入的 pending（无行锁无 CAS，且触发 run 已终态无补偿钩子）；set_session_thinking_level 空闲分支直切成功不清残留 pending，apply 失败保留的陈旧暂存在下一终态钩子被应用、静默反超用户显式选择
+方案：apply 成功分支改 CAS 清列：db.get 命中身份映射缓存掩盖并发写入，先 refresh 强制重读，仅当 pending 仍等于本次应用值才清、已被覆盖则保留交下一钩子；新增 _finish_idle_switch 收尾空闲分支：锁内记录 stale_pending，RPC 成功 CAS 清列、失败不新增重试语义但陈旧暂存早于本次选择时覆盖为本次档位
+结果：test_session_thinking_level_endpoint 29 全绿（新增 5 例，修复目标 3 例先红后绿、对照组 2 例始终绿）；ruff/scoped mypy 0
+审计：📎 文档引用失效：1/2 处 file:line 失效（sillyspec docs check 可复现）
+审计：   ❌ [docs/sillyspec/external-mode-no-root-session-resolution.md:76] test_worker_subsession_done.py::TestExternalModeWorkerDone → 文件不存在（含 / 按仓库根解析；裸文件名在 src/ 递归）
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/external-mode-no-root-session-resolution.md

@@ -46,6 +46,7 @@ from app.modules.daemon.session.service.thinking_level import (
     SET_THINKING_LEVEL_RPC_METHOD,
     THINKING_LEVEL_RPC_TIMEOUT_SECONDS,
     VALID_THINKING_LEVELS,
+    apply_pending_thinking_level,
 )
 
 from .test_session_switch_config import (
@@ -699,3 +700,132 @@ class TestCreateChainPassthrough:
         # undefined 穿透不伪造默认值。
         payload = await build_claim_payload(db_session, lease)
         assert payload.get("thinking_level") is None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ql-20260918-004：暂存列竞态（apply CAS 清列 / 空闲直切对账）
+# ════════════════════════════════════════════════════════════════════════════
+
+
+async def _set_pending(db_session: AsyncSession, session_id: uuid.UUID, level: str | None) -> None:
+    """直接落 pending 列（模拟忙轮暂存 / apply 失败保留的陈旧暂存）。"""
+    row = await db_session.get(AgentSession, session_id)
+    assert row is not None
+    row.pending_thinking_level = level
+    db_session.add(row)
+    await db_session.commit()
+
+
+async def _get_pending(db_session: AsyncSession, session_id: uuid.UUID) -> str | None:
+    row = await db_session.get(AgentSession, session_id)
+    assert row is not None
+    await db_session.refresh(row)
+    return row.pending_thinking_level
+
+
+class TestPendingRaceFixes:
+    @pytest.mark.asyncio
+    async def test_apply_keeps_newer_pending_written_during_rpc_window(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """M1：apply 的 RPC 窗口内用户又切档写入新 pending——成功后 CAS 清列
+        （仅当 pending 仍等于本次应用值），新值保留交下一终态钩子。
+        修复前无条件 pending=None 会丢掉窗口内的用户新意图。"""
+        sid_holder: dict[str, uuid.UUID] = {}
+
+        async def _rpc_with_race(daemon_id, method, params, timeout):
+            # RPC 在途：模拟并发忙轮切档（apply 的独立 session 之外写入新 pending）
+            await _set_pending(db_session, sid_holder["sid"], "max")
+            return {"ok": True}
+
+        hub = _hub()
+        hub.send_rpc = AsyncMock(side_effect=_rpc_with_race)
+        with patch(_WS_HUB_GETTER, return_value=hub):
+            sid, _rt = await _seed_thinking_session(db_session, provider="claude")
+            sid_holder["sid"] = sid
+            await _set_pending(db_session, sid, "high")
+
+            await apply_pending_thinking_level(sid)
+
+        # 窗口内写入的新档位保留（未被成功清列抹掉）
+        assert await _get_pending(db_session, sid) == "max"
+        # 本次应用的就是旧值 high（daemon 已切到 high，max 留待下一终态钩子）
+        assert hub.send_rpc.await_count == 1
+        assert hub.send_rpc.await_args.args[2]["level"] == "high"
+
+    @pytest.mark.asyncio
+    async def test_apply_clears_pending_when_unchanged_during_rpc(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """M1 对照组：RPC 窗口无并发写入 → 成功后照常清列（既有语义）。"""
+        hub = _hub(send_rpc_return={"ok": True})
+        with patch(_WS_HUB_GETTER, return_value=hub):
+            sid, _rt = await _seed_thinking_session(db_session, provider="claude")
+            await _set_pending(db_session, sid, "high")
+
+            await apply_pending_thinking_level(sid)
+
+        assert await _get_pending(db_session, sid) is None
+
+    @pytest.mark.asyncio
+    async def test_idle_switch_success_clears_stale_pending(
+        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """M2a：空闲直切成功后清残留 pending——apply 失败留下的陈旧暂存不得
+        在下一终态钩子被应用、反超用户本次显式选择。"""
+        hub = _hub(send_rpc_return={"ok": True})
+        with patch(_WS_HUB_GETTER, return_value=hub):
+            sid, _rt = await _seed_thinking_session(db_session, provider="pi")
+            await _set_pending(db_session, sid, "high")
+
+            resp = await client.post(
+                f"/api/daemon/sessions/{sid}/thinking-level",
+                json={"level": "xhigh"},
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ok"] is True
+        assert await _get_pending(db_session, sid) is None
+
+    @pytest.mark.asyncio
+    async def test_idle_switch_failure_supersedes_stale_pending(
+        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """M2b：空闲直切失败（回执 ok=false）且有陈旧暂存时——暂存被本次选择
+        覆盖（陈旧值不再反超）；修复前陈旧 high 会在下一终态钩子被应用。"""
+        hub = _hub(send_rpc_return={"ok": False, "error": "当前模型不支持 xhigh 档位"})
+        with patch(_WS_HUB_GETTER, return_value=hub):
+            sid, _rt = await _seed_thinking_session(db_session, provider="pi")
+            await _set_pending(db_session, sid, "high")
+
+            resp = await client.post(
+                f"/api/daemon/sessions/{sid}/thinking-level",
+                json={"level": "xhigh"},
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ok"] is False
+        # 陈旧暂存被本次（失败的）显式选择取代
+        assert await _get_pending(db_session, sid) == "xhigh"
+
+    @pytest.mark.asyncio
+    async def test_idle_switch_failure_without_stale_keeps_none(
+        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """M2b 对照组：无陈旧暂存时失败不新增「暂存重试」语义（维持 None，
+        错误已结构化返回给用户，由用户决定重试）。"""
+        hub = _hub(send_rpc_return={"ok": False, "error": "当前模型不支持 xhigh 档位"})
+        with patch(_WS_HUB_GETTER, return_value=hub):
+            sid, _rt = await _seed_thinking_session(db_session, provider="pi")
+
+            resp = await client.post(
+                f"/api/daemon/sessions/{sid}/thinking-level",
+                json={"level": "xhigh"},
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ok"] is False
+        assert await _get_pending(db_session, sid) is None

@@ -206,6 +206,9 @@ async def set_session_thinking_level(
             svc._session.add(session)
             await svc._session.commit()
             return SessionThinkingLevelResponse(ok=True, queued=True)
+        # ql-20260918-004：记录锁内观察到的暂存值——空闲直切后按 CAS 语义对账
+        # 暂存列（成功清陈旧 / 失败防陈旧反超），见 _finish_idle_switch。
+        stale_pending = session.pending_thinking_level
         # 释放行锁再派发（照 compact.py 先例）：RPC 最长挂 15s，不拖会话行锁。
         await svc._session.commit()
     except AppError:
@@ -215,7 +218,49 @@ async def set_session_thinking_level(
         await svc._session.rollback()
         raise
 
-    return await _set_via_rpc(svc, session, level=level)
+    return await _finish_idle_switch(svc, session, level=level, stale_pending=stale_pending)
+
+
+async def _finish_idle_switch(
+    svc,
+    session,
+    *,
+    level: str,
+    stale_pending: str | None,
+) -> SessionThinkingLevelResponse:
+    """空闲直切收尾（ql-20260918-004）：RPC 应用 + 暂存列对账。
+
+    ``_set_via_rpc`` 最长挂 15s，窗口内可能出现并发切档写入新 pending（忙轮
+    分支自己的行锁事务）——对账必须 CAS（仅当 pending 仍等于锁内观察值时才
+    动列，身份映射缓存需先 refresh 强制重读）：
+
+    - 成功：清 pending——用户显式选择已直接生效，更早的陈旧暂存被取代；
+      窗口内的并发写入保留，交下一终态钩子。
+    - 失败：不新增「暂存重试」语义（无暂存时维持 None，错误已结构化返回）；
+      但陈旧暂存存在且早于本次选择时覆盖为本次档位——防下一终态钩子应用
+      陈旧值、反超用户最近一次显式选择。
+    """
+    from app.modules.agent.model import AgentSession
+
+    result = await _set_via_rpc(svc, session, level=level)
+    fresh = await svc._session.get(AgentSession, session.id)
+    if fresh is None:
+        return result
+    await svc._session.refresh(fresh)
+    if result.ok:
+        if fresh.pending_thinking_level == stale_pending:
+            fresh.pending_thinking_level = None
+            svc._session.add(fresh)
+            await svc._session.commit()
+    elif (
+        stale_pending is not None
+        and stale_pending != level
+        and fresh.pending_thinking_level == stale_pending
+    ):
+        fresh.pending_thinking_level = level
+        svc._session.add(fresh)
+        await svc._session.commit()
+    return result
 
 
 async def _levels_via_rpc(
@@ -372,9 +417,16 @@ async def apply_pending_thinking_level(session_id: uuid.UUID) -> None:
         if result.ok:
             fresh = await db.get(AgentSession, session_id)
             if fresh is not None:
-                fresh.pending_thinking_level = None
-                db.add(fresh)
-                await db.commit()
+                # ql-20260918-004（CAS 清列）：RPC 窗口（最长 15s）内用户可能又
+                # 切档写入新 pending（忙轮分支自己的行锁事务）——先 refresh 强制
+                # 重读（db.get 命中身份映射缓存会掩盖并发写入），仅当暂存仍等于
+                # 本次应用的值时才清列；已被覆盖则保留，下一终态钩子应用新值
+                # （最后一次为准）。修复前无条件置 None 会丢窗口内的用户意图。
+                await db.refresh(fresh)
+                if fresh.pending_thinking_level == pending:
+                    fresh.pending_thinking_level = None
+                    db.add(fresh)
+                    await db.commit()
 
 
 class _SessionServiceShim:
