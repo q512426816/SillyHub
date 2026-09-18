@@ -549,12 +549,22 @@ class QueueEntryUpdateRequest(BaseModel):
 
 class QueueDispatchNowResponse(BaseModel):
     """POST /api/daemon/sessions/{id}/queue/{entry_id}/dispatch-now 响应体
-    （FR-05 / D-001）。
+    （FR-05 / D-001；task-06 2026-09-18-single-chat-steering FR-03 扩三态）。
 
-    ``interrupted=True``=已打断活跃轮（run 终态钩子接力派发队首=本条）；
-    ``False``=空闲当场派发（条目可能已删行，前端以 SSE/load 收敛，R-04）。
+    ``dispatch_mode``（service 层由 mid_turn/interrupted 派生，design B3——
+    复用 SessionDispatchResult.mid_turn，不新建平行服务层字段）：
+    - ``"steered"``：provider 支持引导（caps steering=true）且忙轮，条目已
+      mid-turn 注入活跃 run（不 interrupt，留痕挂活跃 run）；
+    - ``"interrupted"``：维持现状 interrupt 打断接力派发（不支持引导 /
+      带切换维度条目 / 续跑条目）；
+    - ``"dispatched"``：空闲当场派发（条目可能已删行，前端以 SSE/load
+      收敛，R-04）。
+
+    ``interrupted=True`` 保留兼容不删（= ``dispatch_mode=="interrupted"``；
+    前端 use-message-queue.ts:22 现不消费该字段，破坏面小，R-06）。
     """
 
+    dispatch_mode: Literal["steered", "interrupted", "dispatched"]
     interrupted: bool
 
 

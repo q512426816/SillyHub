@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>单聊引导（Steering）发送 — 交互原型（2026-09-18-single-chat-steering）</title>
+<style>
+  :root{
+    --bg:#0f1117; --card:#171a23; --muted:#8b93a7; --border:#2a2f3d;
+    --brand:#4f7cff; --brand-soft:rgba(79,124,255,.12);
+    --error:#f87171; --error-soft:rgba(248,113,113,.08);
+    --fg:#e7eaf2; --ok:#34d399; --warn:#e3b341;
+    --steer:#a78bfa; --steer-soft:rgba(167,139,250,.12);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;padding:28px}
+  h2{font-size:15px;margin:26px 0 10px;color:var(--fg)}
+  h2 .tag{font-size:11px;color:var(--muted);font-weight:400;margin-left:8px}
+  .note{color:var(--muted);font-size:12px;margin-bottom:10px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;max-width:860px}
+  .btn{border-radius:7px;padding:4px 14px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--fg)}
+  .btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  .btn.steer{background:var(--steer);border-color:var(--steer);color:#fff}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+
+  /* ── 聊天流 ── */
+  .chat{display:flex;flex-direction:column;gap:12px;min-height:120px}
+  .msg-user{display:flex;justify-content:flex-end;gap:8px;align-items:flex-end}
+  .msg-user .bubble{background:var(--brand-soft);border:1px solid rgba(79,124,255,.35);border-radius:12px 12px 4px 12px;padding:8px 12px;max-width:70%}
+  .msg-user .bubble.steering{background:var(--steer-soft);border-color:rgba(167,139,250,.4);border-style:dashed}
+  .msg-assistant{display:flex;justify-content:flex-start}
+  .msg-assistant .bubble{background:#1c2029;border:1px solid var(--border);border-radius:12px 12px 12px 4px;padding:8px 12px;max-width:70%;color:var(--fg)}
+  .st-label{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--steer);margin-top:4px}
+  .st-label .pulse{width:7px;height:7px;border-radius:50%;background:var(--steer);animation:pulse 1.2s infinite}
+  @keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
+  .st-delivered{color:var(--ok);font-size:11px;margin-top:4px}
+  .typing{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px}
+  .typing .dots span{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--muted);margin-right:3px;animation:pulse 1s infinite}
+  .turn-divider{font-size:11px;color:var(--muted);text-align:center;margin:4px 0}
+
+  /* ── 输入区 ── */
+  .input-row{display:flex;gap:8px;margin-top:14px;align-items:center}
+  .input-row input{flex:1;background:#12151c;border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 10px;font:13px/1.5 inherit}
+  .input-hint{font-size:11px;color:var(--steer);margin-top:6px;display:none}
+  .input-hint.on{display:block}
+
+  /* ── 对照表 ── */
+  table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}
+  th,td{border:1px solid var(--border);padding:6px 10px;text-align:left;vertical-align:top}
+  th{color:var(--muted);font-weight:500;background:rgba(255,255,255,.02)}
+  td .old{color:var(--muted);text-decoration:line-through}
+  td .new{color:var(--fg)}
+  .pill{display:inline-block;border-radius:10px;padding:0 8px;font-size:11px;line-height:18px;border:1px solid var(--border)}
+  .pill.steer{color:var(--steer);border-color:rgba(167,139,250,.4);background:var(--steer-soft)}
+  .pill.warn{color:var(--warn);border-color:rgba(227,176,65,.4)}
+</style>
+</head>
+<body>
+
+<h2>§1 忙轮发送 = 引导（不打断当前轮）<span class="tag">主交互流（点击「引导发送」演示）</span></h2>
+<div class="note">agent 正在跑（工具批执行中）。输入框可直接发送，消息以「引导中」虚线气泡入流，本轮工具间隙由引擎投递，不打断当前输出。</div>
+<div class="panel">
+  <div class="chat" id="demo-chat">
+    <div class="msg-user"><div class="bubble">帮我把登录页的表单校验补全</div></div>
+    <div class="msg-assistant"><div class="bubble">
+      正在修改 <code>login.tsx</code>……<br>
+      <span class="typing"><span class="dots"><span></span><span></span><span></span></span>运行中 · 工具调用执行中</span>
+    </div></div>
+  </div>
+  <div class="input-row">
+    <input id="demo-input" placeholder="agent 运行中，发送将引导当前轮（不打断）" value="校验失败时也保留用户已填的手机号">
+    <button class="btn steer" onclick="steerSend()">引导发送</button>
+    <button class="btn" title="原有语义保留：立即打断当前轮" onclick="alert('停止按钮语义不变：interrupt 立即打断当前轮（pi abort / codex turn-interrupt / SDK interrupt）')">■ 停止</button>
+  </div>
+  <div class="input-hint on" id="demo-hint">⏱ 引导消息将在本轮工具调用间隙投递（pi steer / claude 队列吸收 / codex turn-steer）</div>
+</div>
+
+<h2>§2 ⚡ 立即发送语义对照（队列条目上的按钮）<span class="tag">行为变化</span></h2>
+<div class="note">排队条（message-queue-bar）上的 ⚡「立即发送」从<b>打断当前轮</b>改为<b>立即引导注入</b>；需要打断时用会话停止按钮。</div>
+<div class="panel">
+  <table>
+    <tr><th>操作</th><th>现状（打断式）</th><th>本次（引导式）</th></tr>
+    <tr>
+      <td>⚡ 立即发送（队列 chip 上）</td>
+      <td><span class="old">打断当前轮 → 立即作为新轮发送</span></td>
+      <td><span class="new">不打断 → 引导注入当前轮（工具间隙投递）；chip 转为「引导中」并从队列消失</span></td>
+    </tr>
+    <tr>
+      <td>主输入框（忙轮时发送）</td>
+      <td><span class="old">落排队表，等本轮完全结束后派发</span></td>
+      <td><span class="new">直接引导注入活跃轮（不建新 run）</span></td>
+    </tr>
+    <tr>
+      <td>■ 停止按钮</td>
+      <td colspan="2">不变：interrupt 立即打断；打断时未投递的引导消息按引擎原生语义处理（pi=清空 steer 队列）</td>
+    </tr>
+    <tr>
+      <td>带配置切换的消息（换 agent/模型/档位）</td>
+      <td colspan="2">不变：轮边界语义，忙轮时仍走排队/409 分支（不引导）</td>
+    </tr>
+  </table>
+</div>
+
+<h2>§3 状态流转与降级<span class="tag">状态机</span></h2>
+<div class="panel">
+  <table>
+    <tr><th>消息状态</th><th>展示</th><th>进入条件</th><th>离开条件</th></tr>
+    <tr>
+      <td><span class="pill steer">引导中</span></td>
+      <td>虚线紫色气泡 + 脉冲点 + 「将在工具间隙投递」</td>
+      <td>忙轮发送 / ⚡ 立即引导（provider 支持）</td>
+      <td>引擎投递 → 转普通用户消息（保留已引导标记）；轮终止未投递 → 转排队条目或失败</td>
+    </tr>
+    <tr>
+      <td><span class="pill">已引导</span></td>
+      <td>普通用户气泡 + 绿色「已投递」小标（本条曾引导注入）</td>
+      <td>引擎消费引导消息</td>
+      <td>终态（历史回放同态）</td>
+    </tr>
+    <tr>
+      <td><span class="pill warn">排队（降级）</span></td>
+      <td>现有排队条 chip，标注「该引擎暂不支持引导，已排队」</td>
+      <td>provider 无 steering 能力（如 cursor）或引导被引擎拒绝</td>
+      <td>轮结束后自动派发（现有链路）</td>
+    </tr>
+  </table>
+</div>
+
+<script>
+  // §1 演示：引导发送 → 引导中气泡 → 2.5s 后投递转正
+  function steerSend() {
+    const text = (document.getElementById('demo-input').value || '').trim();
+    if (!text) return;
+    const chat = document.getElementById('demo-chat');
+    const wrap = document.createElement('div');
+    wrap.className = 'msg-user';
+    wrap.innerHTML = `<div class="bubble steering">${escapeHtml(text)}
+      <div class="st-label"><span class="pulse"></span>引导中 · 本轮工具间隙投递</div></div>`;
+    chat.appendChild(wrap);
+    document.getElementById('demo-input').value = '';
+    setTimeout(() => {
+      wrap.querySelector('.bubble').classList.remove('steering');
+      wrap.querySelector('.st-label').outerHTML = `<div class="st-delivered">✓ 已投递，agent 已收到引导</div>`;
+      const a = document.createElement('div');
+      a.className = 'msg-assistant';
+      a.innerHTML = `<div class="bubble">收到，我会保留已填手机号并继续校验逻辑……<br>
+        <span class="typing"><span class="dots"><span></span><span></span><span></span></span>运行中</span></div>`;
+      chat.appendChild(a);
+    }, 2500);
+  }
+  function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+</script>
+</body>
+</html>

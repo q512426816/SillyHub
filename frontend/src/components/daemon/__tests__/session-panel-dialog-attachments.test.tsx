@@ -53,7 +53,7 @@ vi.mock("@/lib/api/session-attachments", () => ({
 const sessionApi = vi.hoisted(() => ({
   // 会话用量条（session-usage-bar）自取数：必须 resolve（裸 vi.fn() 返回
   // undefined 会被组件 .then 同步崩）；null = 按无数据不渲染。
-  getSessionUsage: vi.fn().mockResolvedValue(null),
+  getSessionUsage: vi.fn().mockResolvedValue(null),
   listSessionTasks: vi.fn().mockResolvedValue([]),  // 任务执行面板快照（task-10 补 mock 防真实 fetch）
   createSession: vi.fn(),
   injectSession: vi.fn(),
@@ -457,8 +457,10 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
       expect(sessionApi.fetchSessionQueue.mock.calls.length).toBeGreaterThan(callsBefore),
     );
 
-    // ② ⚡ 立即发送（FR-05）：透传 dispatch-now 端点（sess-1 + 条目 id）。
-    fireEvent.click(screen.getAllByLabelText("打断当前轮，立即发送这条")[0]!);
+    // ② ⚡ 立即发送（FR-05，引导语义 2026-09-18-single-chat-steering）：pending
+    //    条目可访问名=「立即引导进当前轮（不打断）」，透传 dispatch-now 端点
+    //    （sess-1 + 条目 id）。
+    fireEvent.click(screen.getAllByLabelText("立即引导进当前轮（不打断）")[0]!);
     await waitFor(() =>
       expect(sessionApi.dispatchNowSessionQueueEntry).toHaveBeenCalledWith("sess-1", "entry-2"),
     );

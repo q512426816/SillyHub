@@ -12,6 +12,11 @@
 //（twelveKeys→thirteenKeys，FR-01 会话级思考强度档位通道，claude/pi/codex
 // 三引擎通道实证 true、cursor 无通道 false；同任务顺手翻 codex.thinking
 // false→true，Grill P0-3 纯声明对齐——本套件逐值断言随 @generated 语义同步）。
+// 2026-09-18-single-chat-steering task-01：caps 第 14 键 steering 联动
+//（thirteenKeys→fourteenKeys，FR-02 运行中会话追加消息转向通道，pi steer
+// 通道 / claude SDK 命令队列忙轮吸收 / codex app-server turn/steer 三引擎
+// true、cursor 无通道 false——claude/codex 取值待 spike-01/02 实测后由
+// 主代理收口翻值）。
 //
 // 覆盖（task-05 验收）：
 //   1. 注册表键集合 = InteractiveProvider 联合（编译层 canary + 运行时键集断言）
@@ -132,7 +137,7 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     expect(INTERACTIVE_PROVIDERS.pi?.family).toBe('pi_json');
   });
 
-  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、13 契约键齐全', () => {
+  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、14 契约键齐全', () => {
     // ql-20260911-017：99a228add（askuser-pi-cursor）给 caps 增第 9 键 dialog
     // （值 'native' 字符串非 boolean），守护测试未同步——主仓预存债务顺手修
     // （skills-central-library verify 门实测暴露，与本变更无关）。
@@ -150,7 +155,12 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     // Options.effort/applyFlagSettings、pi set_thinking_level、codex turn/start
     // params+thread/settings/update 三引擎通道实证 true，cursor CLI 无对应通道
     // false，未知 provider 回退 false）。
-    const thirteenKeys = [
+    // 2026-09-18-single-chat-steering task-01（FR-02）：第 14 键 steering
+    //（boolean，运行中会话追加消息转向通道——pi _sendInject steer、claude
+    // SDK 命令队列忙轮吸收、codex app-server turn/steer 三引擎 true，cursor
+    // CLI 无对应通道 false，未知 provider 回退 false；claude/codex 投递时机
+    // 与参数待 spike-02/01 实测收口）。
+    const fourteenKeys = [
       'compact',
       'ctx_usage',
       'dialog',
@@ -161,6 +171,7 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
       'permission_dialog',
       'provider_switch',
       'resume',
+      'steering',
       'subagent',
       'thinking',
       'thinking_level',
@@ -168,7 +179,7 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     for (const [key, d] of Object.entries(INTERACTIVE_PROVIDERS)) {
       // 单源引用（非复制值）：descriptor.caps 必须就是 PROVIDER_CAPS 的表项对象。
       expect(d.caps).toBe(PROVIDER_CAPS[key]);
-      expect(Object.keys(d.caps).slice().sort()).toEqual(thirteenKeys);
+      expect(Object.keys(d.caps).slice().sort()).toEqual(fourteenKeys);
       for (const [capKey, capValue] of Object.entries(d.caps)) {
         expect(capValue).toBe(PROVIDER_CAPS[key]?.[capKey as keyof typeof d.caps]);
         // dialog 为三态标记（'native' | false | …字符串/布尔），其余十一键恒 boolean

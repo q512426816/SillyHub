@@ -188,14 +188,22 @@ async def dispatch_now_session_queue_entry(
     session: SessionDep,
     user: TaskRunAgentUser,
 ) -> QueueDispatchNowResponse:
-    """立即发送排队消息（2026-08-31-session-queue-ux FR-05 / D-001）。
+    """立即发送排队消息（2026-08-31-session-queue-ux FR-05 / D-001；task-06
+    2026-09-18-single-chat-steering FR-03 三态）。
 
-    条目置队首；忙=打断当前轮（interrupt 接力派发，``interrupted=true``），
-    空闲=当场派发（``interrupted=false``，条目可能已删行）；非 active 409。
+    条目置队首；忙轮且 provider 支持引导（caps steering=true、条目不带
+    轮边界维度）→ mid-turn 注入活跃轮（``dispatch_mode="steered"``，不打断
+    当前轮）；忙轮但不可引导 → 打断当前轮接力派发（``dispatch_mode=
+    "interrupted"``，``interrupted=true``）；空闲 → 当场派发
+    （``dispatch_mode="dispatched"``，条目可能已删行）；非 active 409。
     """
     svc = DaemonService(session)
-    interrupted = await svc.dispatch_queued_message_now(session_id, entry_id, user.id)
-    return QueueDispatchNowResponse(interrupted=interrupted)
+    dispatch_mode = await svc.dispatch_queued_message_now(session_id, entry_id, user.id)
+    # task-06：interrupted 兼容字段由三态派生（保留不删，R-06）。
+    return QueueDispatchNowResponse(
+        dispatch_mode=dispatch_mode,
+        interrupted=(dispatch_mode == "interrupted"),
+    )
 
 
 # task-03（2026-09-07-session-pin-rename-scheduled-send / FR-04 / D-001@v1）：

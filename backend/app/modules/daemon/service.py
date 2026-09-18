@@ -792,6 +792,11 @@ class DaemonService:
         bind_ppm_item_id: uuid.UUID | None = None,
         # ql-20260825-011：忙轮入队透传（后端真实排队）。
         queue_when_busy: bool = False,
+        # task-05（2026-09-18-single-chat-steering / FR-01）：单聊忙轮策略透传
+        # （"inject"=忙轮中途注入当前活跃轮 steering；语义与三层链同参数，
+        # 见 session 子域 inject.py；缺省 None 零回归——facade 显式签名同步，
+        # 漏透传会 500，见 bind_* 同款教训）。
+        busy_strategy: Literal["queue", "inject"] | None = None,
     ) -> SessionDispatchResult:
         return await self._sess.inject_session(
             session_id,
@@ -807,6 +812,7 @@ class DaemonService:
             bind_ppm_item_kind=bind_ppm_item_kind,
             bind_ppm_item_id=bind_ppm_item_id,
             queue_when_busy=queue_when_busy,
+            busy_strategy=busy_strategy,
         )
 
     async def interrupt_session(
@@ -874,7 +880,7 @@ class DaemonService:
         session_id: uuid.UUID,
         entry_id: uuid.UUID,
         user_id: uuid.UUID,
-    ) -> bool:
+    ) -> Literal["steered", "interrupted", "dispatched"]:
         return await self._sess.dispatch_queued_message_now(session_id, entry_id, user_id)
 
     async def end_session(

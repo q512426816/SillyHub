@@ -7,9 +7,11 @@
  *   2. 握手 initialize→notifications/initialized→thread/start(新建) / thread/resume(恢复)；
  *      每条间隔 300ms（对齐 task-runner.ts:835 实测稳定值）。
  *   3. 多轮串行：for-await input queue，每条 UserTurnInput → turn/start，收到
- *      turn/completed 才取下一条；禁止并发 turn（FR-02）。
- *   4. interrupt：turn/started 存 currentTurnId；interrupt 发 turn/interrupt 返回 true；
- *      无 turn 返回 false（FR-03）。
+ *      turn/completed 才起下一轮；禁止并发 turn（FR-02）。task-03（FR-06 /
+ *      D-003@v1）增补：turn 在途时到达的输入经 turn/steer 直发同 turn 注入，
+ *      被拒回落轮边界正常 turn/start（spike-codex-turn-steer 实机定论）。
+ *   4. interrupt：turn/start 响应 / turn/started 存 currentTurnId；interrupt 发
+ *      turn/interrupt 返回 true；无 turn 返回 false（FR-03）。
  *   6. flat message 映射（D-004）：{event_type, content, metadata, session_id=threadId}。
  *   7. turn result：turn/completed 正常 success / failed·cancelled → error。
  *   8. close：关 stdin + kill child，idempotent；stderr 作 error flat message 上报。
@@ -118,6 +120,15 @@ const DEFAULT_COMPACT_TIMEOUT_MS = 10_000;
  * 测试可经构造函数注入极小值加速超时分支（对齐 compactTimeoutMs 惯例）。
  */
 const DEFAULT_THINKING_LEVEL_TIMEOUT_MS = 10_000;
+
+/**
+ * task-03（2026-09-18-single-chat-steering / FR-06）：turn/steer response 的
+ * 超时。spike-01 实测受理回执 ~1ms；10s 与 compact/thinkingLevel 同量级（本地
+ * stdio 轻写）。超时按「被拒」处理回落轮边界消费（不挂死、消息不丢；若 steer
+ * 实已受理仅极端情况下造成该条消息轮边界重复注入，见 _writeTurnSteer 注释）。
+ * 测试可经构造函数注入极小值加速超时分支（对齐 compactTimeoutMs 惯例）。
+ */
+const DEFAULT_STEER_TIMEOUT_MS = 10_000;
 
 /**
  * codex 交互 stdout 日志目录：`<daemonStateDir()>/runs/codex-interactive`。
@@ -468,7 +479,8 @@ export interface CodexHandle extends InteractiveDriverHandle {
   readonly adapter: JsonRpcAdapter;
   /** thread/start / thread/resume 后填充；所有 flat message 的 session_id。 */
   threadId: string | null;
-  /** turn/started 后填充，interrupt 用；turn/completed 后清空。 */
+  /** turn/start 响应 / turn/started 通知后填充，interrupt·turn/steer 用；turn/completed 后清空
+   *（task-03 起双来源回填，spike-codex-turn-steer §6：0.147.0 turnId 嵌 params.turn.id）。 */
   currentTurnId: string | null;
   /**
    * 客户端请求统一递增 id（≥3，避免与握手 1/2 碰撞）。turn/start·turn/interrupt
@@ -755,12 +767,16 @@ export class CodexAppServerDriver implements InteractiveDriver {
   /** task-04：thread/settings/update 等 response 超时（默认 10s；测试注入极小值加速）。 */
   private readonly thinkingLevelTimeoutMs: number;
 
+  /** task-03：turn/steer response 超时（默认 10s；超时按被拒回落轮边界消费）。 */
+  private readonly steerTimeoutMs: number;
+
   constructor(
     opts: {
       handshakeIntervalMs?: number;
       threadIdWaitTimeoutMs?: number;
       compactTimeoutMs?: number;
       thinkingLevelTimeoutMs?: number;
+      steerTimeoutMs?: number;
     } = {},
   ) {
     this.handshakeIntervalMs =
@@ -770,6 +786,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
     this.compactTimeoutMs = opts.compactTimeoutMs ?? DEFAULT_COMPACT_TIMEOUT_MS;
     this.thinkingLevelTimeoutMs =
       opts.thinkingLevelTimeoutMs ?? DEFAULT_THINKING_LEVEL_TIMEOUT_MS;
+    this.steerTimeoutMs = opts.steerTimeoutMs ?? DEFAULT_STEER_TIMEOUT_MS;
   }
 
   /**
@@ -1105,6 +1122,11 @@ export class CodexAppServerDriver implements InteractiveDriver {
       // fire-and-forget 路径零行为变化（R-06）。
       this._maybeResolveJsonRpcResponse(h, line);
 
+      // task-03（2026-09-18-single-chat-steering，spike §6 双保险）：turn/start
+      // 响应 result.turn.id 回填 currentTurnId（最早可用来源——响应先于 turn/
+      // started 通知到达，spike §3.1 帧序；resume/多轮路径同样先收本响应）。
+      this._maybeExtractTurnIdFromResponse(h, line, currentTurnResolve !== null);
+
       // 先处理 server request（task-05 异步分发到 handler + 登记），再 parse。
       // 注意：parse 也会登记到 adapter.pendingMap，我们用 handle 自己的队列。
       this._maybeRespondServerRequest(h, line, onMessage, {
@@ -1219,9 +1241,18 @@ export class CodexAppServerDriver implements InteractiveDriver {
       // ── A. 握手（每条 300ms 间隔）─────────────────────────────────────────
       await this._handshake(h, ctx);
 
-      // ── B/C/D. 多轮串行 ────────────────────────────────────────────────────
-      // 模型：每轮 beginTurn → writeTurnStart → await currentTurnPromise →
-      //      reportOutcome → 取下一条。禁止并发 turn（FR-02）。
+      // ── B/C/D. 多轮串行 + task-03 turn/steer 忙轮注入 ──────────────────────
+      // 两层模型（task-03 前为单层「await currentTurnPromise 阻塞到轮完成」）：
+      //   空闲层（无轮在途）：取下一条输入（回落队列优先）→ beginTurn →
+      //     writeTurnStart → 落入等待层；
+      //   等待层（轮在途）：race「本轮 turn/completed」vs「下一条输入到达」——
+      //     · 轮完成 → 上报 result，回空闲层（轮级串行不变式不变：收到
+      //       turn/completed 才起下一轮 turn/start，FR-02 禁并发 turn 不破坏）；
+      //     · 输入先到 → task-03（FR-06 / D-003@v1）：currentTurnId 活跃时直发
+      //       turn/steer（同 turn 注入，spike-codex-turn-steer §7/§8 定论），
+      //       成功即消费该条、继续等本轮收敛；被拒（-32600 含 no active turn /
+      //       id 失配）或 turnId 未就绪 → 回落 heldTurns 本地重排队，轮完成后
+      //       正常 turn/start 消费（不报错不挂死不丢消息，spike §3.3 已证）。
       // resume 路径：首轮不主动 turn/start，直接进「取下一条」（即用户首次 inject）。
       const isResume = !!ctx.resume;
 
@@ -1233,51 +1264,138 @@ export class CodexAppServerDriver implements InteractiveDriver {
       // 循环外创建，循环内只 next()——此前每轮重订阅，第二轮输入必抛错致会话失败。
       const inputIt = ctx.input[Symbol.asyncIterator]();
 
+      // task-03：steer 被拒（或 turnId 未就绪）的回落输入队列——轮边界按序
+      // turn/start 消费，优先于输入队列取新输入。保序约束：一旦本轮有回落，
+      // 后续忙轮输入一律排其后不再 steer（否则后到的消息会先于被拒消息注入）。
+      const heldTurns: UserTurnInput[] = [];
+      // task-03：输入队列是否已关闭（等待层感知 done 后只标态不退出——本轮
+      // 收敛、回落排空由空闲层统一收口，已拉取的消息不因队列关闭而丢）。
+      let inputDone = false;
+      // task-03：可复用的在途 next() promise——等待层 race 输了（轮先完成）的
+      // 那次拉取不能丢也不能重发（重调 next() 会漏帧）：结果留在 promise 里，
+      // 下次等待继续 await 同一个；消费方取走结果后置 null 触发重新拉取。
+      let pendingNext: Promise<IteratorResult<UserTurnInput>> | null = null;
+      // task-03：输入已关闭时等待层 race 的「永不结算」占位——只等轮完成；
+      // 不 reject，无 unhandled rejection 风险。
+      const neverInput = new Promise<IteratorResult<UserTurnInput>>(() => {});
+
+      /** 取下一条输入（复用在途拉取；消费方负责取走结果后置空 pendingNext）。 */
+      const nextInput = (): Promise<IteratorResult<UserTurnInput>> => {
+        if (pendingNext === null) {
+          pendingNext = inputIt.next();
+        }
+        return pendingNext;
+      };
+
       while (!h.closing && !finalized) {
-        // 取下一条用户输入（阻塞直到有 / queue 关闭）
-        const turn = await this._takeNextTurn(inputIt);
-        if (!turn) break; // input queue 结束 → 收敛
-        if (h.closing || finalized) break;
+        // ── 空闲层：无轮在途，取输入起轮 ──────────────────────────────────
+        if (currentTurnResolve === null) {
+          let turn: UserTurnInput | null = null;
+          if (heldTurns.length > 0) {
+            turn = heldTurns.shift()!;
+          } else if (!inputDone) {
+            const res = await nextInput();
+            pendingNext = null;
+            if (!res.done) turn = res.value;
+            else inputDone = true;
+          }
+          if (turn === null) break; // 回落排空 + 无新输入（含队列关闭）→ 收敛
+          if (h.closing || finalized) break;
 
-        if (skipFirstTurnStart) {
-          // resume 首轮：不 turn/start，但这条 inject 仍作为下一轮的输入
-          skipFirstTurnStart = false;
-          // resume 后第一条 inject 正常 turn/start（跳过仅针对「自动首轮」）
-        }
+          if (skipFirstTurnStart) {
+            // resume 首轮：不 turn/start，但这条 inject 仍作为下一轮的输入
+            skipFirstTurnStart = false;
+            // resume 后第一条 inject 正常 turn/start（跳过仅针对「自动首轮」）
+          }
 
-        // 开始一轮 turn（设置 promise/resolver）
-        beginTurn();
-        // ql-20260909-026：threadId 就绪才写 turn/start（早到 inject 竞态，见
-        // _awaitThreadId 注释）。超时按 failed 收敛——消息可见失败而非静默挂死，
-        // 后续 inject 在循环下一轮正常消费（此时 threadId 已到则照常派发）。
-        const threadIdReady = await this._awaitThreadId(h);
-        // ql-20260909-027：轮开始基线快照（写 turn/start 前最后已知 total）。
-        // codex 的调用只在收到 turn/start 后发生，通知不会早于本点 → 基线干净。
-        h.usageBaseline = h.threadUsageTotal ? { ...h.threadUsageTotal } : null;
-        // ql-20260910-003：本轮调用计数清零（同基线时点）。
-        h.turnApiCallCount = 0;
-        if (!threadIdReady && !h.closing && !finalized) {
-          pendingTurnError =
-            `codex thread/start 响应超时（${this.threadIdWaitTimeoutMs}ms 未拿到 threadId），` +
-            'turn 未派发';
-          // eslint-disable-next-line no-console
-          console.warn('[codex-app-server-driver] thread_id_wait_timeout', {
-            sessionId: ctx.sessionId,
-            waitedMs: this.threadIdWaitTimeoutMs,
-          });
-          finishTurn({ kind: 'failed' });
-        } else {
+          // 开始一轮 turn（设置 promise/resolver）
+          beginTurn();
+          // ql-20260909-026：threadId 就绪才写 turn/start（早到 inject 竞态，见
+          // _awaitThreadId 注释）。超时按 failed 收敛——消息可见失败而非静默挂死，
+          // 后续 inject 在循环下一轮正常消费（此时 threadId 已到则照常派发）。
+          const threadIdReady = await this._awaitThreadId(h);
+          // ql-20260909-027：轮开始基线快照（写 turn/start 前最后已知 total）。
+          // codex 的调用只在收到 turn/start 后发生，通知不会早于本点 → 基线干净。
+          h.usageBaseline = h.threadUsageTotal ? { ...h.threadUsageTotal } : null;
+          // ql-20260910-003：本轮调用计数清零（同基线时点）。
+          h.turnApiCallCount = 0;
+          if (!threadIdReady && !h.closing && !finalized) {
+            pendingTurnError =
+              `codex thread/start 响应超时（${this.threadIdWaitTimeoutMs}ms 未拿到 threadId），` +
+              'turn 未派发';
+            // eslint-disable-next-line no-console
+            console.warn('[codex-app-server-driver] thread_id_wait_timeout', {
+              sessionId: ctx.sessionId,
+              waitedMs: this.threadIdWaitTimeoutMs,
+            });
+            finishTurn({ kind: 'failed' });
+            // 立即收敛上报（对齐原实现 await currentTurnPromise 语义：failed
+            // outcome 不等下一条输入，失败立即可见）
+            const failedOutcome = await currentTurnPromise!;
+            if (!h.closing && !finalized) {
+              this._applyTurnUsageDelta(h, failedOutcome);
+              this._reportOutcome(failedOutcome, pendingTurnError, reportResult, h);
+            }
+            pendingTurnError = null;
+            continue;
+          }
           await this._writeTurnStart(h, ctx, turn.text);
+          // 不在此 await currentTurnPromise——回循环顶进等待层 race（下一条
+          // 输入与轮完成都可能先到）
         }
-        // 等本轮 turn/completed（或进程退出 / error）
-        const outcome = await currentTurnPromise!;
+
+        // ── 等待层：轮在途，race 轮完成 vs 下一条输入 ──────────────────────
+        if (currentTurnResolve === null) {
+          // 防御：起轮 await 途中轮已被 close/exit 收敛（finishTurn 清空
+          // resolver）→ 回循环顶重评估退出条件
+          continue;
+        }
+
+        const raced = await Promise.race([
+          currentTurnPromise!.then((o: TurnOutcome) => ({ kind: 'turn' as const, o })),
+          (inputDone ? neverInput : nextInput()).then(
+            (r: IteratorResult<UserTurnInput>) => ({ kind: 'input' as const, r }),
+          ),
+        ]);
+
+        if (raced.kind === 'input') {
+          pendingNext = null;
+          if (raced.r.done) {
+            // 队列关闭：只标态——本轮收敛、回落排空由空闲层统一收口
+            inputDone = true;
+            continue;
+          }
+          const next = raced.r.value;
+          // task-03：turn 活跃（currentTurnId 非空 = turn/start 回执或 turn/
+          // started 已见、turn/completed 未到）→ turn/steer 直发；任一不满足
+          // （本轮已有回落保序、turnId 未就绪窗口、closing/finalized）→ 排队回落。
+          const canSteer =
+            heldTurns.length === 0 &&
+            h.currentTurnId != null &&
+            !h.closing &&
+            !finalized;
+          const steered = canSteer
+            ? await this._writeTurnSteer(h, next.text)
+            : false;
+          if (!steered) {
+            heldTurns.push(next);
+          }
+          continue;
+        }
+
+        // 轮完成 → 上报 result。task-03 语义注：steer 成功不产生新 turn/started/
+        // turn/completed 对（spike §4 实证同 turn 继续），currentTurnPromise 仍由
+        // 唯一一次 turn/completed 收敛——steer 注入的 item/started userMessage 等
+        // 事件经 adapter 归一化自然透传，不影响轮收敛时点（不提前不滞后）。
+        const outcome = raced.o;
         // ql-20260909-026（审计 #9）：close 释放的轮次（cancelled outcome）不上报
         // ——会话正在被终止，终态归 _terminateSession；对齐 pi 驱动 waiter 之后的
         // closing 守卫（此处也顺带覆盖「turn 恰好完成后、上报前 close」的竞态，
         // 该窗口跳过上报无害——reportResult 本有 finalized 幂等守卫）。
         if (h.closing || finalized) break;
         // ql-20260909-027：轮结果补差值用量（turn/completed 无 usage 时的唯一
-        // 来源；success/failed 轮统一覆盖——失败的轮同样真实消耗了 token）。
+        // 来源；success/failed 轮统一覆盖——失败的轮同样真实消耗了 token；
+        // steer 触发的模型调用计入同 turn 的 threadUsageTotal，差值口径天然覆盖）。
         this._applyTurnUsageDelta(h, outcome);
         // 上报本轮 result
         this._reportOutcome(outcome, pendingTurnError, reportResult, h);
@@ -1479,11 +1597,20 @@ export class CodexAppServerDriver implements InteractiveDriver {
     }
   }
 
-  /** 从原始 turn/started notification 提取 turnId（adapter 未保留）。 */
+  /** 从原始 turn/started notification 提取 turnId（adapter 未保留）。
+   *
+   * task-03（spike-codex-turn-steer §6 副发现，必修）：codex 0.147.0 实测
+   * turn/started params 形状为 {threadId, turn:{id,...}}——顶层无 turnId，旧
+   * 提取点 msg.params?.turnId 恒 undefined → currentTurnId 恒 null → interrupt
+   * （null 卫语句）恒返回 false，turn/steer 同样被挡死。改为兼容提取：顶层
+   * turnId（旧假设形状，向后保留）?? params.turn.id（0.147.0 实测形状）。
+   * turn/start 响应路径的回填见 _maybeExtractTurnIdFromResponse（双保险）。 */
   private _extractTurnId(h: CodexHandle, line: string): void {
     try {
-      const msg = JSON.parse(line) as { params?: { turnId?: unknown } };
-      const tid = msg.params?.turnId;
+      const msg = JSON.parse(line) as {
+        params?: { turnId?: unknown; turn?: { id?: unknown } };
+      };
+      const tid = msg.params?.turnId ?? msg.params?.turn?.id;
       if (typeof tid === 'string' && tid) {
         h.currentTurnId = tid;
       }
@@ -1492,16 +1619,45 @@ export class CodexAppServerDriver implements InteractiveDriver {
     }
   }
 
-  /** 从 input 迭代器取下一条（阻塞直到有或 done）。
+  /**
+   * task-03（spike-codex-turn-steer §6）：turn/start 响应回填 currentTurnId。
    *
-   * 迭代器由调用方在多轮循环外创建一次后传入（InputQueue 单订阅语义，
-   * 第二次 [Symbol.asyncIterator]() 抛 SessionQueueDoubleSubscribeError）。 */
-  private async _takeNextTurn(
-    input: AsyncIterator<UserTurnInput>,
-  ): Promise<UserTurnInput | null> {
-    const res = await input.next();
-    if (res.done) return null;
-    return res.value;
+   * codex 0.147.0 实测 turn/start 响应形如 {"id":N,"result":{"turn":{"id":...}}}，
+   * turnId 嵌在 result.turn.id（与 turn/started 的 params.turn.id 同构）。这是
+   * 最早可用的 turnId 来源（响应先于 turn/started 通知到达，spike §3.1 帧序）；
+   * 与 _extractTurnId（turn/started 通知路径）互为双保险——resume/多轮路径每次
+   * turn/start 后都会先收到本响应，即使 turn/started 通知形状漂移也能拿到 id。
+   *
+   * 仅在轮在途（调用方传 turnInFlight）时回填：迟到/陌生响应不覆盖轮末已清空
+   * 的 currentTurnId（reportResult 置 null 后再被旧响应唤醒会发出过期
+   * turn/interrupt / turn/steer）。天然不命中项：thread/start·resume 响应是
+   * result.thread（无 "turn" 键）、turn/steer 响应是顶层 result.turnId（非
+   * result.turn.id）、turn/completed 通知有 method 被 response 判定排除。
+   */
+  private _maybeExtractTurnIdFromResponse(
+    h: CodexHandle,
+    line: string,
+    turnInFlight: boolean,
+  ): void {
+    if (!turnInFlight) return;
+    // 廉价守卫：只对含 "turn" 键的行做 JSON.parse（每行必经的热路径，对齐
+    // _extractTokenUsage 的 includes 预筛惯例）。
+    if (!line.includes('"turn"')) return;
+    let msg: Record<string, unknown>;
+    try {
+      msg = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    // 只认 response 帧（has id && !has method；判定口径与 _maybeResolveJsonRpc
+    // -Response / adapter.parse 同源）
+    if (!Object.prototype.hasOwnProperty.call(msg, 'id')) return;
+    if (Object.prototype.hasOwnProperty.call(msg, 'method')) return;
+    const result = msg.result as { turn?: { id?: unknown } } | undefined;
+    const tid = result?.turn?.id;
+    if (typeof tid === 'string' && tid) {
+      h.currentTurnId = tid;
+    }
   }
 
   /**
@@ -1718,6 +1874,46 @@ export class CodexAppServerDriver implements InteractiveDriver {
     }
     const line = JSON.stringify({ jsonrpc: '2.0', id, method: 'turn/start', params });
     await this._writeLine(h, line);
+  }
+
+  /**
+   * task-03（2026-09-18-single-chat-steering / FR-06 / D-003@v1）：忙轮注入直发
+   * turn/steer（pi/claude 同语义的 mid-turn 引导，不打断在途流式输出——截断是
+   * turn/interrupt 的职责，两者正交分工）。
+   *
+   * 参数形状严格按 spike-codex-turn-steer.md §7/§8 实机定论（勿凭痕迹猜测）：
+   *   {threadId, expectedTurnId: <当前活跃 turnId>, input: [{type:'text', text}]}
+   *（clientUserMessageId 可选不传——平台消息 id 暂无透传链路，不编造关联）。
+   * 成功响应 {"result":{"turnId":<当前 turn id>}}——引擎在**同一 turn** 继续
+   * （spike §4 行为学实证：受理 ~1ms，steer 文本于下一模型调用边界以
+   * item/started userMessage 注入同 turn，不产生新 turn/started/completed 对），
+   * 该条输入视为已消费。
+   *
+   * 经 task-05 的 _sendJsonRpcRequest（id→pending）等回执：error response
+   *（-32600 四类被拒文案，spike §5）/ 超时 / stdin 不可用 → 返回 false 交调用
+   * 方回落轮边界（消息不丢不挂死，spike §3.3 被拒不炸会话已证）。超时回落有
+   * 极小概率重复注入（steer 实已受理但回执迟到）——10s 本地 stdio 超时下仅为
+   * 理论窗口。steer 注入的事件（userMessage 等）由既有 adapter 归一化路径自然
+   * 透传（userMessage 类型 adapter 现静默丢弃，前端呈现归 task-09，spike §7.5）。
+   */
+  private async _writeTurnSteer(h: CodexHandle, text: string): Promise<boolean> {
+    if (h.closing || h.currentTurnId == null || !h.threadId) return false;
+    try {
+      await this._sendJsonRpcRequest(
+        h,
+        'turn/steer',
+        {
+          threadId: h.threadId,
+          expectedTurnId: h.currentTurnId,
+          input: [{ type: 'text', text }],
+        },
+        this.steerTimeoutMs,
+      );
+      return true;
+    } catch {
+      // 被拒（-32600）/ 超时 / 写失败 → 静默回落轮边界（不抛不挂死）
+      return false;
+    }
   }
 
   /**

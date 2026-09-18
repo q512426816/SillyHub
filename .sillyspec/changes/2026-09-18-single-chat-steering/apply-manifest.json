@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-18-single-chat-steering",
+  "appliedAt": "2026-09-18T19:51:36.927Z",
+  "baseHash": "603d93c536ecdd4dfefad2b26d52596ea698a00b",
+  "files": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/daemon.md",
+      "sha256": "57f51bd04bc73b76a69e04ca4bd36c993c85419c07fed481930d3b91b20e0fa8"
+    },
+    {
+      "path": "backend/app/modules/agent/provider_caps.py",
+      "sha256": "dc43600189dd8a322ae06dc40e484a2dda5ffaa4f92ed2aa86b1acd4b58ce690"
+    },
+    {
+      "path": "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+      "sha256": "f46b9335f8dbab63cf2b30c52a577363ad8b113b84d1ede765f335cc269f3117"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_crud.py",
+      "sha256": "a0f07eb7821c7587088b74280452a8758e0bd83f130164d5ce34bb87d33f4e31"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_queue.py",
+      "sha256": "921b29577461761d3f1e451acfe909b4ae0b7bbf440fe26f442a9462a395c212"
+    },
+    {
+      "path": "backend/app/modules/daemon/schema.py",
+      "sha256": "e2816238f0db909e2be61eb2501f0dce16a720c078ca2b50522342af57436772"
+    },
+    {
+      "path": "backend/app/modules/daemon/service.py",
+      "sha256": "de6cf995a33bb614f07036c58e3dc1df2ca11c357c8b8dc599db15c08b2f2cce"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/__init__.py",
+      "sha256": "5c5836dc66bc1ad3bd61341f2d656cf2c0e2d8893a248c2666307063559886d9"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/inject.py",
+      "sha256": "bf29c1b9004f3db57ca221e022c513ecf656c40026e76c6661b3c51b76d43f47"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/queue.py",
+      "sha256": "e8fdd53ea34b8a57fee19103cf23ba9e4ce3414eeb7bc1ae0b6b8e2d05573635"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_inject_empty_prompt.py",
+      "sha256": "f0d0def7b7fa2e1df412fd3cb96dc9fe1bd4cacdd7a918d76fa5bdb9f4f784b7"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_queue.py",
+      "sha256": "4f1d6797da68e784dfcf4ce3512e257ea56a2c9294531046da51c6eaa5cbfe2e"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_queue_actions.py",
+      "sha256": "5cb963fcf356a0429cbb13e1041c5a880b6633e11736f60674a8e21ae0a4baf0"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_router.py",
+      "sha256": "5bc6a717951d2e931bf465ce4eb8fee25c2969d1121cd72ebdf0a2591903e511"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_user_preamble.py",
+      "sha256": "68e42615710db063f0e584045221731fa4d684274a75f511d07388e91a9c0eaf"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "8fe8f625c386178acc173971c90aa1dc7b889a49645993120cb59fddb64582e8"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+      "sha256": "ce4eca72238b70474ce0627c6d5de80b07e0d7b7ece50d44de469c0f7af910fc"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx",
+      "sha256": "87bd6d478c0614a967d021c78554c3cb3db653cd0bcbe116884690df34d6abe0"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx",
+      "sha256": "4d497fe6ca395e0f98aaf07466505b3b8fda8bfe6e82bac0fcd465ecd3443b35"
+    },
+    {
+      "path": "frontend/src/components/daemon/message-queue-bar.tsx",
+      "sha256": "7778e92d0b34ac07ec08547d3396c37b460da68acf6c71fb565cbcab8cb2566e"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "sha256": "6ad303c3e4fabea527b9c1f3737b82fde6600ee085904531e512272ac5fc4ccc"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "b3aabb595c9afd43c55bb78d25d18511f1c525dec46e42f31473341a0ad8ad54"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+      "sha256": "1bc085086f3476ea4fcb157bac4151dd8d4890625062b1a84802be312c35dd9c"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "e52e04adfc66fe1dd6a24d7764cdae46413a1979c6a5e5ee4ecc32c06eb0744b"
+    },
+    {
+      "path": "frontend/src/lib/daemon/sessions.ts",
+      "sha256": "9b3648663cc352b3f817d6708cbc131766d49b345f53dea80723022efc796aaa"
+    },
+    {
+      "path": "frontend/src/lib/provider-caps.ts",
+      "sha256": "d06d22f3fd7834b0ec0a6ce75e2257fda06672a025bd05e11ce4d0ac2b3f3230"
+    },
+    {
+      "path": "sillyhub-daemon/scripts/gen-provider-caps.mjs",
+      "sha256": "c360a428bb02e43a22f027588d8c77c57eb79e9cdd152ab2726ecc6b91e7ebd2"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+      "sha256": "203850b1f2bb71f8403175df9bb05490321ab79f6e34d15f10547c59892ac930"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/providers.ts",
+      "sha256": "6b20f57ecd5b818ec5d58a4c18c9fab4a9b79f671c82df3aef5412e178accc5f"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/claude-sdk-driver.test.ts",
+      "sha256": "8b598e67eff1487d30ae0bf0995fb0c490ee877a2aadf784e8b1916053036240"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts",
+      "sha256": "c7030a42b4609c833e7d0ef6d906f512650a4a57c8c2d855fabd6f07e9c2cda2"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+      "sha256": "6825616133a679edff55acf20e606bbe019eb8b1464f28c5c27f8e2cad794c79"
+    }
+  ]
+}

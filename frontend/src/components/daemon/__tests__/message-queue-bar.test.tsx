@@ -418,8 +418,9 @@ describe("MessageQueueBar 队列三操作（task-10 / FR-04 FR-05 FR-06）", () 
       />,
     );
 
-    // 两态 title 语义：pending=打断当前轮优先派发（D-001），failed=直接派发。
-    fireEvent.click(screen.getByLabelText("打断当前轮，立即发送这条"));
+    // 两态 title 语义（2026-09-18-single-chat-steering FR-03）：pending=mid-turn
+    // 引导注入当前轮不打断（支持引导的引擎）/ failed=空闲直发。
+    fireEvent.click(screen.getByLabelText("立即引导进当前轮（不打断）"));
     expect(onDispatchNow).toHaveBeenCalledTimes(1);
     expect(onDispatchNow).toHaveBeenCalledWith("mq-p");
 
@@ -427,8 +428,47 @@ describe("MessageQueueBar 队列三操作（task-10 / FR-04 FR-05 FR-06）", () 
     expect(onDispatchNow).toHaveBeenCalledTimes(2);
     expect(onDispatchNow).toHaveBeenCalledWith("mq-f");
 
-    // sending 投递中不可操作：⚡ 仅 2 个（pending + failed），sending 条目没有。
-    expect(screen.getAllByLabelText(/立即发送这条/)).toHaveLength(2);
+    // sending 投递中不可操作：⚡ 仅 2 个（pending 引导态 + failed 直发态），
+    // sending 条目没有；「立即发送这条」仅 failed 一个（pending 已换引导文案）。
+    expect(screen.getAllByLabelText(/立即发送这条/)).toHaveLength(1);
+    expect(screen.getAllByLabelText(/立即引导进当前轮（不打断）/)).toHaveLength(1);
+  });
+
+  it("降级标注（FR-05 / FR-02）：provider 不支持引导渲染「该引擎暂不支持引导」Tag；支持或未传 provider 不渲染", () => {
+    // cursor（caps steering=false）→ 渲染降级标注。
+    const { rerender } = render(
+      <MessageQueueBar
+        entries={[makeEntry({ id: "mq-d", prompt: "降级引擎消息" })]}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        onDispatchNow={vi.fn()}
+        provider="cursor"
+      />,
+    );
+    expect(screen.getByText("该引擎暂不支持引导")).toBeInTheDocument();
+
+    // claude（caps steering=true）→ 不渲染。
+    rerender(
+      <MessageQueueBar
+        entries={[makeEntry({ id: "mq-d", prompt: "支持引擎消息" })]}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        onDispatchNow={vi.fn()}
+        provider="claude"
+      />,
+    );
+    expect(screen.queryByText("该引擎暂不支持引导")).toBeNull();
+
+    // 未传 provider → 不渲染（能力判断不在组件内臆断，接线归父层）。
+    rerender(
+      <MessageQueueBar
+        entries={[makeEntry({ id: "mq-d", prompt: "未接线消息" })]}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        onDispatchNow={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("该引擎暂不支持引导")).toBeNull();
   });
 
   it("✎ 重新编辑（FR-06）：textarea 预填原文；空白不可保存；取消不回调；保存回调 onEdit(id, 新文本)", () => {

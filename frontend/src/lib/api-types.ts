@@ -5986,10 +5986,14 @@ export interface paths {
         put?: never;
         /**
          * Dispatch Now Session Queue Entry
-         * @description 立即发送排队消息（2026-08-31-session-queue-ux FR-05 / D-001）。
+         * @description 立即发送排队消息（2026-08-31-session-queue-ux FR-05 / D-001；task-06
+         *     2026-09-18-single-chat-steering FR-03 三态）。
          *
-         *     条目置队首；忙=打断当前轮（interrupt 接力派发，``interrupted=true``），
-         *     空闲=当场派发（``interrupted=false``，条目可能已删行）；非 active 409。
+         *     条目置队首；忙轮且 provider 支持引导（caps steering=true、条目不带
+         *     轮边界维度）→ mid-turn 注入活跃轮（``dispatch_mode="steered"``，不打断
+         *     当前轮）；忙轮但不可引导 → 打断当前轮接力派发（``dispatch_mode=
+         *     "interrupted"``，``interrupted=true``）；空闲 → 当场派发
+         *     （``dispatch_mode="dispatched"``，条目可能已删行）；非 active 409。
          */
         post: operations["dispatch_now_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__dispatch_now_post"];
         delete?: never;
@@ -21201,12 +21205,26 @@ export interface components {
         /**
          * QueueDispatchNowResponse
          * @description POST /api/daemon/sessions/{id}/queue/{entry_id}/dispatch-now 响应体
-         *     （FR-05 / D-001）。
+         *     （FR-05 / D-001；task-06 2026-09-18-single-chat-steering FR-03 扩三态）。
          *
-         *     ``interrupted=True``=已打断活跃轮（run 终态钩子接力派发队首=本条）；
-         *     ``False``=空闲当场派发（条目可能已删行，前端以 SSE/load 收敛，R-04）。
+         *     ``dispatch_mode``（service 层由 mid_turn/interrupted 派生，design B3——
+         *     复用 SessionDispatchResult.mid_turn，不新建平行服务层字段）：
+         *     - ``"steered"``：provider 支持引导（caps steering=true）且忙轮，条目已
+         *       mid-turn 注入活跃 run（不 interrupt，留痕挂活跃 run）；
+         *     - ``"interrupted"``：维持现状 interrupt 打断接力派发（不支持引导 /
+         *       带切换维度条目 / 续跑条目）；
+         *     - ``"dispatched"``：空闲当场派发（条目可能已删行，前端以 SSE/load
+         *       收敛，R-04）。
+         *
+         *     ``interrupted=True`` 保留兼容不删（= ``dispatch_mode=="interrupted"``；
+         *     前端 use-message-queue.ts:22 现不消费该字段，破坏面小，R-06）。
          */
         QueueDispatchNowResponse: {
+            /**
+             * Dispatch Mode
+             * @enum {string}
+             */
+            dispatch_mode: "steered" | "interrupted" | "dispatched";
             /** Interrupted */
             interrupted: boolean;
         };
@@ -22591,6 +22609,13 @@ export interface components {
          * SessionInjectResponse
          * @description ql-20260825-011：``queued=True`` 时消息进服务端排队（run_id 为 None），
          *     run 终态后自动派发；``queued=False`` 为既有即时派发语义。
+         *
+         *     task-05（2026-09-18-single-chat-steering / FR-01）：``steered=True`` 表示
+         *     忙轮消息经 busy_strategy="inject" 中途注入了**当前活跃轮**（steering）——
+         *     映射 service 层 ``SessionDispatchResult.mid_turn``（``_inject_mid_turn_into_
+         *     run`` 置 True，不新建平行字段），此时 run_id 为活跃 run（非新建）、
+         *     queued=False；排队/降级（provider 不支持）/空闲新建轮恒 False。前端
+         *     「引导中」态消费（task-07）。
          */
         SessionInjectResponse: {
             /**
@@ -22609,6 +22634,11 @@ export interface components {
             queued: boolean;
             /** Queue Entry Id */
             queue_entry_id?: string | null;
+            /**
+             * Steered
+             * @default false
+             */
+            steered: boolean;
         };
         /**
          * SessionQueueEntry

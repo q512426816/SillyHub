@@ -16,11 +16,13 @@ db_session + DaemonService 直调 + mocked_hub / mocked_redis）：
   （QueueEntryUpdateRequest min/max_length，服务层无二次校验）；TASK_WAKEUP
   前缀条目 409 不可编辑；failed 条目编辑 → 翻 pending + error_msg 清空（隔离
   断言），在线时直接派发成功（行删 + 新 run user_input=新文本）。
-- TestDispatchNow（FR-05 / D-001 / R-03 / R-04）：空闲会话当场派发（行删 +
-  新 run 落 prompt）；忙时本条 position 置队首（其余顺移）+ SESSION_INTERRUPT
-  控制指令落库并经 hub 下发 + interrupted=True；interrupt 推送失败置顶不回滚
-  （commit 先于发送，R-03）；非 active 409；条目不存在 404；failed 条目先翻
-  pending 再走派发分支。
+- TestDispatchNow（FR-05 / D-001 / R-03 / R-04 + task-06 三态契约）：空闲会话
+  当场派发（dispatch_mode=dispatched）；忙时按 provider caps steering 键分叉——
+  可引导（claude/pi/codex）mid-turn 注入活跃轮（dispatch_mode=steered、条目
+  留痕转挂、注入成功删行），不可引导（cursor/未知）维持置队首+SESSION_INTERRUPT
+  接力（dispatch_mode=interrupted）；interrupt 推送失败抛 DaemonRuntimeOffline
+  置顶不回滚（commit 先于发送，R-03）、steer 推送失败不抛改落库 pending 待补拉；
+  非 active 409；条目不存在 404；failed 条目先翻 pending 再走派发分支。
 - TestDispatchLoop（FR-01/02 / R-05 / D-004 / D-005 / D-010）：对
   dispatch_queued_messages 直测（mock _inject_into_session 侧信道）——队头
   瞬态失败一次后续派下一条；连续 2 次失败即停（第 3 条不再尝试）；派发成功
@@ -55,9 +57,9 @@ from app.modules.agent.model import (
     AgentSession,
     AgentSessionQueuedMessage,
 )
-from app.modules.daemon.control_commands import KIND_SESSION_INTERRUPT
+from app.modules.daemon.control_commands import KIND_SESSION_INJECT, KIND_SESSION_INTERRUPT
 from app.modules.daemon.model import DaemonControlCommand
-from app.modules.daemon.protocol import DAEMON_MSG_SESSION_INTERRUPT
+from app.modules.daemon.protocol import DAEMON_MSG_SESSION_INJECT, DAEMON_MSG_SESSION_INTERRUPT
 from app.modules.daemon.schema import QueueEntryUpdateRequest
 from app.modules.daemon.service import DaemonService
 from app.modules.daemon.session.service import (
@@ -89,14 +91,14 @@ async def _create_user(session) -> uuid.UUID:
     return uid
 
 
-async def _create_runtime(session, user_id: uuid.UUID):
+async def _create_runtime(session, user_id: uuid.UUID, provider: str = "claude"):
     from app.modules.daemon.model import DaemonRuntime
 
     rt = DaemonRuntime(
         id=uuid.uuid4(),
         user_id=user_id,
         name="daemon",
-        provider="claude",
+        provider=provider,
         status="online",
         last_heartbeat_at=datetime.now(UTC),
     )
@@ -154,12 +156,17 @@ async def _queue_rows(db_session, session_id: uuid.UUID) -> list[AgentSessionQue
     )
 
 
-async def _setup_busy_session(db_session):
-    """建会话 → 完结首 turn → 开一个未完结的第二轮（忙态）。"""
+async def _setup_busy_session(db_session, provider: str = "claude"):
+    """建会话 → 完结首 turn → 开一个未完结的第二轮（忙态）。
+
+    task-09（2026-09-18-single-chat-steering）：provider 加参——dispatch_now
+    忙轮分支按 caps steering 键分叉（claude/pi/codex=true 走 mid-turn 注入，
+    cursor/未知=false 走 interrupt 接力），用例按 provider 能力选型。
+    """
     uid = await _create_user(db_session)
-    rt = await _create_runtime(db_session, uid)
+    rt = await _create_runtime(db_session, uid, provider=provider)
     svc = DaemonService(db_session)
-    created = await svc.create_session(uid, provider="claude", prompt="first")
+    created = await svc.create_session(uid, provider=provider, prompt="first")
     await _finish_run(db_session, created.agent_run)
     busy = await svc.inject_session(created.agent_session.id, uid, prompt="占用本轮")
     return svc, uid, rt, created.agent_session.id, busy.agent_run
@@ -516,7 +523,11 @@ class TestDispatchNow:
     async def test_dispatch_now_idle_dispatches_inline(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
-        """空闲会话（无活跃 run）→ 当场派发：行删 + 新 run prompt=条目 prompt。"""
+        """空闲会话（无活跃 run）→ 当场派发：行删 + 新 run prompt=条目 prompt。
+
+        task-09（2026-09-18-single-chat-steering / task-06 契约）：返回值
+        dispatch_now 布尔契约 → 三态派发模式，空闲分支返 ``"dispatched"``。
+        """
         svc, uid, _rt, session_id, busy_run = await _setup_busy_session(db_session)
         result = await svc.inject_session(
             session_id, uid, prompt="立即发这条", queue_when_busy=True
@@ -525,9 +536,9 @@ class TestDispatchNow:
         assert entry_id is not None
         await _finish_run(db_session, busy_run)
 
-        interrupted = await svc.dispatch_queued_message_now(session_id, entry_id, uid)
+        dispatch_mode = await svc.dispatch_queued_message_now(session_id, entry_id, uid)
 
-        assert interrupted is False
+        assert dispatch_mode == "dispatched"
         assert await _queue_rows(db_session, session_id) == []
         runs = await _active_runs(db_session, session_id)
         assert len(runs) == 1
@@ -593,15 +604,24 @@ class TestDispatchNow:
     async def test_dispatch_now_busy_prepends_and_interrupts(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
-        """忙时：本条 position 置队首（其余顺移）+ SESSION_INTERRUPT 经 hub 下发。"""
-        svc, uid, rt, session_id, _run = await _setup_busy_session(db_session)
+        """忙时（不可引导 provider）：本条 position 置队首（其余顺移）+
+        SESSION_INTERRUPT 经 hub 下发，返 ``"interrupted"``。
+
+        task-09（2026-09-18-single-chat-steering / task-06）：忙轮分支按
+        provider caps ``steering`` 键分叉——本用例固化**不支持引导**侧
+        （cursor，caps steering=false）：点 ⚡ 维持 interrupt 接力（run 终态
+        钩子接力派发队首=本条，daemon 零改动 D-007）。引导侧（claude）
+        见 test_dispatch_now_busy_steerable_injects_mid_turn。返回值旧布尔
+        契约（True=interrupted）已迁移三态枚举。
+        """
+        svc, uid, rt, session_id, _run = await _setup_busy_session(db_session, provider="cursor")
         await svc.inject_session(session_id, uid, prompt="A", queue_when_busy=True)
         b = await svc.inject_session(session_id, uid, prompt="B", queue_when_busy=True)
         mocked_hub.send_session_control.reset_mock()
 
-        interrupted = await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
+        dispatch_mode = await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
 
-        assert interrupted is True
+        assert dispatch_mode == "interrupted"
         rows = await _queue_rows(db_session, session_id)
         assert [r.prompt for r in rows] == ["B", "A"]
         assert [r.position for r in rows] == [0, 1]
@@ -626,12 +646,67 @@ class TestDispatchNow:
         assert command is not None
 
     @pytest.mark.asyncio
+    async def test_dispatch_now_busy_steerable_injects_mid_turn(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """忙时（可引导 provider，claude caps steering=true）→ 不再 interrupt：
+        mid-turn 注入活跃轮，返 ``"steered"``（task-06 FR-03）。
+
+        - 条目留痕转挂活跃 run：user_input 日志行挂 busy run（不建新 run，
+          ``_active_runs`` 仍只有 busy run 一条）；
+        - SESSION_INJECT（非 INTERRUPT）经 hub 下发，run_id=活跃 run；
+        - 注入成功即删本条排队行（不删会在 run 终态被接力派发二次发送），
+          其余排队行原样。
+        """
+        svc, uid, _rt, session_id, busy_run = await _setup_busy_session(db_session)
+        await svc.inject_session(session_id, uid, prompt="A", queue_when_busy=True)
+        b = await svc.inject_session(session_id, uid, prompt="立即B", queue_when_busy=True)
+        mocked_hub.send_session_control.reset_mock()
+
+        dispatch_mode = await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
+
+        assert dispatch_mode == "steered"
+        # 不建新 run：活跃 run 仍只有 busy run 一条。
+        runs = await _active_runs(db_session, session_id)
+        assert [r.id for r in runs] == [busy_run.id]
+        # 本条 user_input 留痕挂活跃 run（与首轮「占用本轮」并存）。
+        steered_input = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == busy_run.id,
+                        AgentRunLog.channel == "user_input",
+                        AgentRunLog.content_redacted == "立即B",
+                    )
+                )
+            )
+            .scalars()
+            .one_or_none()
+        )
+        assert steered_input is not None
+        # hub 收 SESSION_INJECT（run_id=活跃 run），非 INTERRUPT。
+        mocked_hub.send_session_control.assert_awaited_once()
+        _daemon_id, msg_type, payload = mocked_hub.send_session_control.await_args.args
+        assert msg_type == DAEMON_MSG_SESSION_INJECT
+        assert payload["session_id"] == str(session_id)
+        assert payload["run_id"] == str(busy_run.id)
+        # 注入成功删本条排队行；其余排队行原样留队。
+        rows = await _queue_rows(db_session, session_id)
+        assert [r.prompt for r in rows] == ["A"]
+
+    @pytest.mark.asyncio
     async def test_dispatch_now_interrupt_failure_keeps_prepend(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
-        """interrupt 推送失败（daemon 不在线）→ 抛 DaemonRuntimeOffline 但置顶不回滚
-        （commit 先于 interrupt 发送，R-03）。"""
-        svc, uid, _rt, session_id, _run = await _setup_busy_session(db_session)
+        """interrupt 推送失败（不可引导 provider，daemon 不在线）→ 抛
+        DaemonRuntimeOffline 但置顶不回滚（commit 先于 interrupt 发送，R-03）。
+
+        task-09（2026-09-18-single-chat-steering / task-06）：本用例固化**
+        不支持引导**侧（cursor）的 interrupt 接力失败语义——504 报错后排队
+        pending 不丢，用户可重试。可引导侧（claude）推送失败不抛、改落库
+        pending 待补拉，见 test_dispatch_now_steer_push_failure_keeps_pending。
+        """
+        svc, uid, _rt, session_id, _run = await _setup_busy_session(db_session, provider="cursor")
         await svc.inject_session(session_id, uid, prompt="A", queue_when_busy=True)
         b = await svc.inject_session(session_id, uid, prompt="B", queue_when_busy=True)
         mocked_hub.send_session_control = AsyncMock(return_value=False)
@@ -642,6 +717,60 @@ class TestDispatchNow:
         rows = await _queue_rows(db_session, session_id)
         assert [r.prompt for r in rows] == ["B", "A"]
         assert [r.position for r in rows] == [0, 1]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_now_steer_push_failure_keeps_pending(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """steer 注入推送失败（可引导 provider，claude）→ **不抛**异常：
+        SESSION_INJECT 控制指令落库 pending 待 daemon 重连补拉（三段式），
+        返 ``"steered"``——mid-turn 语义与 interrupt 降级路径口径分叉
+        （task-06：活跃 run 不收敛、留痕已转挂，最坏补拉到达时轮已终态
+        → daemon 按会话态处理）。
+        """
+        svc, uid, rt, session_id, busy_run = await _setup_busy_session(db_session)
+        b = await svc.inject_session(session_id, uid, prompt="待补拉B", queue_when_busy=True)
+        mocked_hub.send_session_control = AsyncMock(return_value=False)
+
+        dispatch_mode = await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
+
+        assert dispatch_mode == "steered"
+        # 消息已转挂活跃 run（user_input 留痕），排队行删除。
+        rows = await _queue_rows(db_session, session_id)
+        assert rows == []
+        steered_input = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == busy_run.id,
+                        AgentRunLog.channel == "user_input",
+                        AgentRunLog.content_redacted == "待补拉B",
+                    )
+                )
+            )
+            .scalars()
+            .one_or_none()
+        )
+        assert steered_input is not None
+        # 控制指令落库 pending（WS 推送失败仅落库待补拉，不算异常）——
+        # 同 runtime 已有 setup 忙轮的 inject 指令，按 payload prompt 定位本条。
+        commands = (
+            (
+                await db_session.execute(
+                    select(DaemonControlCommand).where(
+                        DaemonControlCommand.runtime_id == rt.id,
+                        DaemonControlCommand.kind == KIND_SESSION_INJECT,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        steer_command = next(
+            (c for c in commands if (c.payload or {}).get("prompt") == "待补拉B"), None
+        )
+        assert steer_command is not None
+        assert steer_command.status == "pending"
 
     @pytest.mark.asyncio
     async def test_dispatch_now_non_active_rejected(
@@ -672,7 +801,8 @@ class TestDispatchNow:
     async def test_dispatch_now_failed_entry_resets_then_dispatches(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
-        """failed 条目 → 先翻 pending 再走派发分支（空闲路径当场派发）。"""
+        """failed 条目 → 先翻 pending 再走派发分支（空闲路径当场派发，
+        dispatch_mode 三态=``"dispatched"``，task-09 布尔契约迁移）。"""
         svc, uid, _rt, session_id, busy_run = await _setup_busy_session(db_session)
         result = await svc.inject_session(
             session_id, uid, prompt="失败的条目", queue_when_busy=True
@@ -684,9 +814,9 @@ class TestDispatchNow:
         rows = await _queue_rows(db_session, session_id)
         assert rows[0].status == "failed"
 
-        interrupted = await svc.dispatch_queued_message_now(session_id, entry_id, uid)
+        dispatch_mode = await svc.dispatch_queued_message_now(session_id, entry_id, uid)
 
-        assert interrupted is False
+        assert dispatch_mode == "dispatched"
         assert await _queue_rows(db_session, session_id) == []
         runs = await _active_runs(db_session, session_id)
         assert len(runs) == 1

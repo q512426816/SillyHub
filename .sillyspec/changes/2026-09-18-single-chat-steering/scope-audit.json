@@ -1,0 +1,292 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "603d93c536ecdd4dfefad2b26d52596ea698a00b",
+  "totals": {
+    "files": 34,
+    "additions": 2618,
+    "deletions": 718
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/daemon.md",
+      "additions": 29,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/agent/provider_caps.py",
+      "additions": 7,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+      "additions": 13,
+      "deletions": 10,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_crud.py",
+      "additions": 49,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_queue.py",
+      "additions": 14,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/schema.py",
+      "additions": 14,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/service.py",
+      "additions": 7,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/__init__.py",
+      "additions": 6,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/inject.py",
+      "additions": 10,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/queue.py",
+      "additions": 92,
+      "deletions": 11,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_inject_empty_prompt.py",
+      "additions": 7,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_queue.py",
+      "additions": 134,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_queue_actions.py",
+      "additions": 156,
+      "deletions": 26,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_router.py",
+      "additions": 17,
+      "deletions": 5,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_user_preamble.py",
+      "additions": 35,
+      "deletions": 17,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 18,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+      "additions": 123,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx",
+      "additions": 44,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx",
+      "additions": 515,
+      "deletions": 513,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/message-queue-bar.tsx",
+      "additions": 50,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "additions": 134,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "additions": 272,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+      "additions": 6,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 36,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/daemon/sessions.ts",
+      "additions": 10,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/provider-caps.ts",
+      "additions": 17,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/scripts/gen-provider-caps.mjs",
+      "additions": 19,
+      "deletions": 9,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+      "additions": 249,
+      "deletions": 53,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/providers.ts",
+      "additions": 41,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/claude-sdk-driver.test.ts",
+      "additions": 167,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts",
+      "additions": 313,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+      "additions": 14,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "test_inject_empty_prompt.py",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    },
+    {
+      "path": "test_session_user_preamble.py",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "10f8dcf3c8b6744dbf722ee72a1ac4ae950d35f941ccd0efeed1490e4c462e6d",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-18T18:58:41.690Z"
+}

@@ -19,6 +19,13 @@
 //   - onTurnResult 收映射后的 InteractiveDriverResult（usage 短名 cache_*_tokens + session_id）
 //   - 双轨读键：新键存在时旧键不调用（SessionManager 双键形态过渡兼容）
 //   - canUseTool/审批桥相关既有断言零改动（文件内既有 case 不动）
+//
+// task-04（2026-09-18-single-chat-steering / FR-01 / R-01）追加忙轮 inject 守护：
+//   - 忙轮（turn 进行中）向 InputQueue push 第二条消息：driver 经输入流透传给
+//     SDK prompt 迭代器消费（mock sdkQuery 断言），先于轮边界 result、全程不调
+//     query.interrupt——mid-turn 吸收的 driver 侧前置条件（真机吸收证据见该
+//     change 的 spike-claude-steering.md，CI 不依赖网络/鉴权）。
+//   - 连续两条忙轮 inject 按 FIFO 进流（迭代器持续单订阅，不断流）。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'node:path';
@@ -997,5 +1004,165 @@ describe('ClaudeSdkDriver.consume envelope 轨（task-06 / FR-02 / D-002@v1）',
         expect(safeParseAgentEvent(ev).success).toBe(true);
       }
     }
+  });
+});
+
+// ── task-04（2026-09-18-single-chat-steering / FR-01 / R-01）：忙轮 inject 守护 ──
+//
+// 真机吸收证据（queued_turn_count / mid-turn 投递时机）见该 change 的
+// spike-claude-steering.md；此处守护 driver 侧前置条件：忙轮 inject 到达时
+// 消息经输入流透传给 SDK prompt 迭代器消费——不调 query.interrupt、不排队
+// 等待轮边界（第二条 prompt 在 turn1 result 产出前就被迭代器拉走）。
+
+describe('忙轮 inject 引导守护（task-04 / 2026-09-18-single-chat-steering）', () => {
+  /** 轮询等待条件成立（输入流消费是异步竞争，单次 setImmediate 不可靠）。 */
+  async function waitFor(cond: () => boolean, ms = 2000): Promise<void> {
+    const deadline = Date.now() + ms;
+    while (!cond() && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(cond()).toBe(true);
+  }
+
+  it('忙轮 inject：第二条消息被 SDK prompt 迭代器在轮边界 result 前消费，全程不 interrupt', async () => {
+    const realExe = 'C:\\bin\\claude.exe';
+    fsExists.mockReturnValue(true);
+    const captured: SDKUserMessage[] = [];
+    // 事件顺序账本：证明「第二条 prompt 消费」先于「turn1 result 产出」。
+    const orderLog: string[] = [];
+    // 门槛 promise：mock query 的 generator 在第二条 prompt 被消费前不放行
+    // turn1 result——若 driver/输入流把 inject 排队到轮边界后，consume 会一直
+    // 阻塞在本门槛上直至测试超时失败（结构化顺序证明，不靠 sleep）。
+    let releaseResult: () => void;
+    const resultGate = new Promise<void>((r) => {
+      releaseResult = r;
+    });
+
+    const interruptSpy = vi.fn(async () => {});
+    const gen = (async function* (): AsyncGenerator<SDKMessage, void> {
+      orderLog.push('assistant_yielded');
+      yield assistantText('turn1 busy');
+      await resultGate;
+      orderLog.push('result_yielded');
+      yield resultSuccess('TURN1', 'sess');
+    })();
+    const q = {
+      [Symbol.asyncIterator]: () => gen,
+      interrupt: interruptSpy,
+    } as unknown as Query;
+
+    setMockQueryImpl((params) => {
+      // SDK 实际会 for-await 消费 driver 转换后的 prompt（mapUserTurnInputToSdk 输出）。
+      void (async () => {
+        for await (const m of params.prompt as AsyncIterable<SDKUserMessage>) {
+          captured.push(m);
+          if (captured.length === 2) {
+            orderLog.push('second_prompt_consumed');
+            releaseResult!();
+          }
+        }
+      })();
+      return q;
+    });
+
+    const { InputQueue } = await import('../../src/interactive/input-queue.js');
+    const queue = new InputQueue<UserTurnInput>();
+    const driver = new ClaudeSdkDriver();
+    const handle = await driver.start(queue, {
+      pathToClaudeCodeExecutable: realExe,
+      cwd: 'C:\\work',
+    });
+    const onTurnResult = vi.fn();
+    const consumePromise = driver.consume(handle, { onTurnResult });
+
+    // 首 turn 长任务入流，等 SDK 侧迭代器拉走。
+    queue.push({ type: 'user', text: 'turn1 长任务' });
+    await waitFor(() => captured.length >= 1);
+
+    // 忙轮 inject：turn1 result 尚未产出（resultGate 仍锁着）时推第二条。
+    queue.push({ type: 'user', text: '忙轮引导：改用方案B' });
+    await waitFor(() => captured.length >= 2);
+
+    // 门槛放行后 consume 才能收到 turn1 result 并自然结束。
+    await consumePromise;
+
+    expect(captured).toHaveLength(2);
+    expect(captured[1]).toEqual({
+      type: 'user',
+      message: { role: 'user', content: '忙轮引导：改用方案B' },
+      parent_tool_use_id: null,
+    });
+    // 顺序：inject 消费先于 turn1 result 产出（不排队等轮边界）。
+    expect(orderLog).toEqual([
+      'assistant_yielded',
+      'second_prompt_consumed',
+      'result_yielded',
+    ]);
+    // 全程未 interrupt（引导=推流吸收，非打断）。
+    expect(interruptSpy).not.toHaveBeenCalled();
+    expect(onTurnResult).toHaveBeenCalledTimes(1);
+    expect((onTurnResult.mock.calls[0]![0] as SDKResultMessage).result).toBe(
+      'TURN1',
+    );
+  });
+
+  it('连续两条忙轮 inject：均按 FIFO 进流被消费，输入迭代器持续单订阅不断流', async () => {
+    const realExe = 'C:\\bin\\claude.exe';
+    fsExists.mockReturnValue(true);
+    const captured: SDKUserMessage[] = [];
+    let releaseResult: () => void;
+    const resultGate = new Promise<void>((r) => {
+      releaseResult = r;
+    });
+
+    const interruptSpy = vi.fn(async () => {});
+    const gen = (async function* (): AsyncGenerator<SDKMessage, void> {
+      yield assistantText('turn1 busy');
+      await resultGate;
+      yield resultSuccess('TURN1', 'sess');
+    })();
+    const q = {
+      [Symbol.asyncIterator]: () => gen,
+      interrupt: interruptSpy,
+    } as unknown as Query;
+
+    setMockQueryImpl((params) => {
+      void (async () => {
+        for await (const m of params.prompt as AsyncIterable<SDKUserMessage>) {
+          captured.push(m);
+          if (captured.length === 3) releaseResult!();
+        }
+      })();
+      return q;
+    });
+
+    const { InputQueue } = await import('../../src/interactive/input-queue.js');
+    const queue = new InputQueue<UserTurnInput>();
+    const driver = new ClaudeSdkDriver();
+    const handle = await driver.start(queue, {
+      pathToClaudeCodeExecutable: realExe,
+      cwd: 'C:\\work',
+    });
+    const onTurnResult = vi.fn();
+    const consumePromise = driver.consume(handle, { onTurnResult });
+
+    queue.push({ type: 'user', text: 'turn1 长任务' });
+    await waitFor(() => captured.length >= 1);
+    // 同一忙轮内连推两条引导（SessionManager 连续 inject 场景）。
+    queue.push({ type: 'user', text: '引导一' });
+    queue.push({ type: 'user', text: '引导二' });
+    await waitFor(() => captured.length >= 3);
+
+    await consumePromise;
+
+    // FIFO：两条引导按 push 顺序进流（SDK 命令队列语义下可 coalesce，driver
+    // 侧只保证顺序与不丢——顺序证据在此）。
+    expect(captured.map((m) => (m.message as { content: string }).content)).toEqual([
+      'turn1 长任务',
+      '引导一',
+      '引导二',
+    ]);
+    expect(interruptSpy).not.toHaveBeenCalled();
+    expect(onTurnResult).toHaveBeenCalledTimes(1);
   });
 });

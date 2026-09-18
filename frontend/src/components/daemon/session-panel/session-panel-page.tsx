@@ -226,6 +226,161 @@ function truncateForSummary(
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
+/* ── task-07（2026-09-18-single-chat-steering / FR-05 / 原型 §1 §3）：忙轮引导
+ *    消息本地展示态——steering（引导中虚线气泡+脉冲）→ SSE user_input 留痕行到达
+ *    转 delivered（已投递）/ 活跃轮终止未投递转 ended（本轮已结束），新轮开启时
+ *    固化为普通气泡伪 turn（历史回放同态：刷新后 mid-turn user_input 经
+ *    logsToTurns 并入轮 prompt，同为无标记普通气泡）。纯展示态（design「留痕与
+ *    状态机」：不新建持久化、不动 useMessageQueue 队列真相），本文件定义导出、
+ *    session-panel-dialog import 复用（双挂载零漂移；index 入口本就同时加载两
+ *    模块，无循环依赖）。 ───────────────────────────────────────────── */
+
+/** 引导条目三态（原型 §3 状态机）。 */
+export type SteeredMsgPhase = "steering" | "delivered" | "ended";
+
+/** 一条引导消息的本地展示条目（会话内存态，切会话/刷新即弃）。 */
+export interface SteeredMsg {
+  /** 本地唯一 key（`__steering_<ts>__`，沿用 __ 前缀伪 id 惯例）。 */
+  id: string;
+  /** 展示文本（占位轮同款口径：附件标记行 + 原文）。 */
+  prompt: string;
+  /** 引导目标活跃 run（inject 响应 run_id——mid-turn 注入不建新 run）。 */
+  runId: string;
+  phase: SteeredMsgPhase;
+}
+
+/** 引导消息正文比较键：剥 preamble / 附件标记行 + trim（user_input 留痕行匹配用；
+ *  两端同键归一，标记行差异不误判）。 */
+export function steerMatchKey(displayPrompt: string): string {
+  return parseAttachmentMarkers(stripPreambleText(displayPrompt)).text.trim();
+}
+
+/**
+ * user_input 留痕行到达 → 匹配中的「引导中」条目转「已投递」（delivered）终态。
+ * 匹配键：run_id 相同 + 正文比较键相等；同文本多条时每次只收敛最前一条
+ * steering 态（逐条对齐两路事件序列，与 logsToTurns 内容级去重语义一致）。
+ * 无匹配原样返回原引用（零重渲）。
+ */
+export function markSteeredDelivered(
+  prev: SteeredMsg[],
+  runId: string,
+  rawContent: string,
+): SteeredMsg[] {
+  const key = steerMatchKey(rawContent);
+  if (!key) return prev;
+  let hit = false;
+  const next = prev.map((m) => {
+    if (!hit && m.runId === runId && m.phase === "steering" && steerMatchKey(m.prompt) === key) {
+      hit = true;
+      return { ...m, phase: "delivered" as const };
+    }
+    return m;
+  });
+  return hit ? next : prev;
+}
+
+/**
+ * 活跃轮终止（turn_completed 终态事件）→ 该 run 仍未投递的「引导中」条目转
+ * 「本轮已结束，未投递」（ended）终态——不永久停留引导中（design R-04）。
+ * 无匹配原样返回原引用。
+ */
+export function markSteeredEndedByRun(
+  prev: SteeredMsg[],
+  runId: string,
+): SteeredMsg[] {
+  if (!prev.some((m) => m.runId === runId && m.phase === "steering")) return prev;
+  return prev.map((m) =>
+    m.runId === runId && m.phase === "steering"
+      ? { ...m, phase: "ended" as const }
+      : m,
+  );
+}
+
+/**
+ * 新轮开启（turn_started）→ 引导条目固化为普通气泡伪 turn（status=completed、
+ * 仅 prompt 无 output——TurnRow 渲染为普通用户气泡，无状态条/思考占位），释放
+ * streamFooter 挂载位防新轮消息后旧条目垫底错位。伪 id 沿用 __ 前缀惯例，
+ * 轮次目录/播种派生按既有 `runId.startsWith("__")` 分支处理。
+ */
+export function steeredMsgsToTurns(msgs: SteeredMsg[]): SessionTurnView[] {
+  return msgs.map((m) => ({
+    runId: m.id,
+    turn: null,
+    prompt: m.prompt,
+    output: "",
+    status: "completed",
+    seenLogIds: new Set(),
+    inputTokens: null,
+    outputTokens: null,
+    ctxTokens: null,
+    errorDetail: null,
+    processItems: [],
+    segments: [],
+    turnStartedAt: null,
+  }));
+}
+
+/**
+ * 引导条目三态渲染（TurnTimeline streamFooter 注入口，消息流末尾「对话流里的
+ * 一条消息」形态）：steering=brand 语义阶虚线气泡+脉冲点、delivered=普通用户
+ * 气泡（bg-primary，与 TurnRow 用户气泡同 token）+emerald「已投递」小标、
+ * ended=弱化气泡+「本轮已结束，未投递」提示（R-04：如实暴露引擎原生行为）。
+ * data-steered-msg 供测试断言。
+ */
+export function SteeredMessagesFooter({ msgs }: { msgs: SteeredMsg[] }) {
+  if (msgs.length === 0) return null;
+  return (
+    <div className="space-y-2.5">
+      {msgs.map((m) => {
+        const text = parseAttachmentMarkers(m.prompt).text;
+        return (
+          <div
+            key={m.id}
+            data-steered-msg={m.phase}
+            className="flex items-end justify-end gap-1.5"
+          >
+            <div className="max-w-[80%]">
+              {m.phase === "steering" ? (
+                <>
+                  <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md border-2 border-dashed border-brand-400 bg-brand-50 px-4 py-2.5 text-sm leading-6 text-foreground">
+                    {text}
+                  </div>
+                  <p className="mt-1 flex items-center justify-end gap-1.5 text-[11px] font-medium text-brand-600">
+                    <span
+                      aria-hidden
+                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500"
+                    />
+                    引导中 · 本轮工具间隙投递
+                  </p>
+                </>
+              ) : m.phase === "delivered" ? (
+                <>
+                  <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
+                    {text}
+                  </div>
+                  <p className="mt-1 text-right text-[11px] text-emerald-600">
+                    ✓ 已投递，agent 已收到引导
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-border bg-muted/50 px-4 py-2.5 text-sm leading-6 text-muted-foreground">
+                    {text}
+                  </div>
+                  <p className="mt-1 text-right text-[11px] text-muted-foreground">
+                    本轮已结束，消息未投递
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
 /* ────────────────────── page 模式内部子组件（含 react-query，R4） ────────────────────── */
 
 /**
@@ -615,6 +770,36 @@ export function SessionPanelPage({
   // 期触发时用它回退消息到输入框；响应到达后据 placeholderId 是否仍匹配判定
   // 是否已被打断（不匹配 = 已回退，需对真实 run 补发 interrupt）。
   const inflightSendRef = useRef<{ placeholderId: string; prompt: string } | null>(null);
+  // ── task-07（2026-09-18-single-chat-steering / FR-05）：忙轮引导消息本地展示态 ──
+  // ref 为唯一读写源（SSE handlers 在建流 effect 闭包内，直接闭包 state 会陈旧
+  // ——queueRefreshRef 先例语义）；setState 传同一引用驱动重渲。会话内存纯展示
+  // 态，切会话（下方建流 effect reset 区）/会话结束清空，不入任何持久化。
+  const [steeredMsgs, setSteeredMsgs] = useState<SteeredMsg[]>([]);
+  const steeredMsgsRef = useRef<SteeredMsg[]>([]);
+  const applySteeredMsgs = useCallback(
+    (fn: (prev: SteeredMsg[]) => SteeredMsg[]) => {
+      const next = fn(steeredMsgsRef.current);
+      if (next === steeredMsgsRef.current) return;
+      steeredMsgsRef.current = next;
+      setSteeredMsgs(next);
+    },
+    [],
+  );
+  /** steered=true 响应 → 追加「引导中」条目（多条并发各占一条）。 */
+  const addSteeredMsg = useCallback(
+    (displayPrompt: string, runId: string) => {
+      applySteeredMsgs((prev) => [
+        ...prev,
+        {
+          id: `__steering_${Date.now()}_${prev.length}__`,
+          prompt: displayPrompt,
+          runId,
+          phase: "steering" as const,
+        },
+      ]);
+    },
+    [applySteeredMsgs],
+  );
 
   // ── task-09 / design A6：连接横幅 + 运行轮看门狗（共用 hook）──────────────
   // 建流 effect 的 handlers 经 tapStreamHandlers 包装注入 onStatusChange 与活动
@@ -682,6 +867,9 @@ export function SessionPanelPage({
     currentRunIdRef.current = null;
     // task-03：随队列清空（hook 同按 sessionId 切换清队）一并丢弃附件元数据镜像。
     attachmentMetaRef.current.clear();
+    // task-07：引导展示条目随会话切换清空（会话内存态，不跨会话残留）。
+    steeredMsgsRef.current = [];
+    setSteeredMsgs([]);
     // quick 历史窗口化：换会话重置「加载更早」游标/翻页态 + 清搜索浮层状态。
     historyCursorRef.current = null;
     historyCursorIdRef.current = null;
@@ -790,6 +978,18 @@ export function SessionPanelPage({
             // ql-20260825-011：新轮开跑（含排队消息自动派发）→ 刷队列条（队头条目
             // 已转正式轮，应从队列中消失）。
             void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
+            // task-07：新轮开启 → 引导条目固化为普通气泡伪 turn（历史回放同态），
+            // 释放 streamFooter 挂载位（防新轮消息渲染后旧条目垫底错位）。先于
+            // 下方 upsertTurn 执行（追加序 = 引导消息在前、新轮在后）。
+            const steeredSnapshot = steeredMsgsRef.current;
+            if (steeredSnapshot.length > 0) {
+              steeredMsgsRef.current = [];
+              setSteeredMsgs([]);
+              setTurnState((prev) => ({
+                ...prev,
+                turns: [...prev.turns, ...steeredMsgsToTurns(steeredSnapshot)],
+              }));
+            }
             setTurnState((prev) =>
               upsertTurn(
                 prev,
@@ -826,6 +1026,14 @@ export function SessionPanelPage({
               // 直发轮占位轮与 daemon 双提交裸文本版到达时均非空，天然幂等）。
               const preambleText = extractPreambleText(env.content ?? "");
               if (!env.run_id) return;
+              // task-07（FR-05 / 原型 §3）：引导消息留痕行到达（mid-turn 注入挂
+              // 活跃 run，复用群聊 inject 既有链路）→ 匹配中的「引导中」条目转
+              // 「已投递」终态。活跃轮 turn 自身 prompt 已非空不覆盖（下方既有
+              // 幂等守卫），消息气泡由引导条目承载，刷新后经 logsToTurns 并入
+              // 轮 prompt（同态）。
+              applySteeredMsgs((prev) =>
+                markSteeredDelivered(prev, env.run_id!, env.content ?? ""),
+              );
               setTurnState((prev) => {
                 // 回放守卫：轮后对账/断线 resync 重放的历史 user_input 落在已终态
                 // 轮上——不 setCurrentRun（否则空闲会话被旧 run 误锁输入框），prompt
@@ -900,6 +1108,12 @@ export function SessionPanelPage({
           },
           onTurnCompleted: (env) => {
             const terminal = deriveTurnTerminalStatus(env);
+            // task-07（FR-05 / design R-04）：活跃轮终止（完成/中断/失败）→ 该 run
+            // 仍未投递的「引导中」条目收敛「本轮已结束，未投递」终态，不永久停留
+            // （引擎 abort 时未投递语义的原生差异如实暴露，NG-1）。
+            if (env.run_id) {
+              applySteeredMsgs((prev) => markSteeredEndedByRun(prev, env.run_id!));
+            }
             // quick（ql-20260916-005）：新完成判定——同 run 首条 turn_completed 才触发
             // 下方刷新类副作用；首连对账 / 5s 复核 / 断线 resync 对历史轮批量合成的
             // 重放事件只走上面的幂等状态更新（曾致进入页面瞬间 2T 条并发 /runs）。
@@ -1014,6 +1228,9 @@ export function SessionPanelPage({
             setPlanPending(null);
             setBashProgress(null);
             setAgentTasks([]);
+            // task-07：会话结束收口引导展示条目（终态会话只读，临时条目无意义）。
+            steeredMsgsRef.current = [];
+            setSteeredMsgs([]);
             streamRef.current = null;
             void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
             onSessionListRefresh?.();
@@ -2196,6 +2413,20 @@ export function SessionPanelPage({
           onSendSettled(prompt, attachmentIds);
           return;
         }
+        // task-07（FR-01 / FR-05）：竞态引导——发送瞬间上一轮尚未终结且 provider
+        // 支持 steering → 后端 mid-turn 注入活跃轮（steered=true，不建新 run）。
+        // 撤占位轮 + 挂「引导中」条目 + currentRunId 指回活跃 run（该轮实际仍在
+        // 跑，后续 SSE 事件经 upsertTurn 自然接管；轮终止时引导条目收敛终态）。
+        if (resp.steered && resp.run_id) {
+          setTurnState((prev) => ({
+            currentRunId: resp.run_id,
+            turns: prev.turns.filter((t) => t.runId !== placeholderId),
+          }));
+          addSteeredMsg(displayPrompt, resp.run_id);
+          setErrorMsg(null);
+          onSendSettled(prompt, attachmentIds);
+          return;
+        }
         // ql-20260918-003：占位轮合并替换——SSE user_input publish 先于本响应
         // 到达时已按真实 run_id 建轮，占位轮删除 + prompt 转移（防同 runId 双轮）。
         setTurnState((prev) => ({
@@ -2219,12 +2450,15 @@ export function SessionPanelPage({
         }
       }
     },
-    [sessionId, pageContextOverride, pendingMentions, qc, onSendSettled],
+    [sessionId, pageContextOverride, pendingMentions, qc, onSendSettled, addSteeredMsg],
   );
 
   /**
-   * 忙轮路径（ql-20260825-011）：直接 POST inject——后端忙轮自动入服务端排队。
-   * 不插占位轮（派发由后端在 run 终态后自动触发，SSE turn_started 自然建轮）。
+   * 忙轮路径（ql-20260825-011）：直接 POST inject。task-05/06 起 provider 支持
+   * steering 时后端忙轮改 mid-turn 直注入活跃轮（steered=true，原型 §1「不打断
+   * 当前轮」）→ 本地挂「引导中」展示条目（不进排队条；SSE 留痕行/轮终止收敛，
+   * 见建流 effect）；不支持/降级（steered=false/undefined）→ 后端落服务端排队
+   * （无占位轮，run 终态后自动派发，SSE turn_started 自然建轮），零改动。
    * 失败（满员 409 / 离线）：errorMsg 提示，草稿与附件保留在输入框可改后重发。
    */
   const sendToServerQueue = useCallback(
@@ -2238,6 +2472,21 @@ export function SessionPanelPage({
           // 插入点在排队早退分支之前，design §4.2——漏带则该场景静默失效）。
           ...mentionBindOptions(pendingMentions),
         });
+        // task-07（FR-01 / FR-05 / 原型 §1）：忙轮引导成功 → 本地「引导中」条目
+        //（占位轮同款展示口径：附件标记行 + 原文），不进排队条；留痕行到达转
+        //「已投递」、轮终止未投递转「本轮已结束」（建流 effect 收敛）。
+        if (resp.steered && resp.run_id) {
+          const markerLines = attachmentIds
+            .map((id) => {
+              const meta = attachmentMetaRef.current.get(id);
+              return `[附件:${id}|${meta?.kind ?? "file"}|${meta?.name ?? id}]`;
+            })
+            .join("\n");
+          addSteeredMsg(joinAttachmentMarkers(markerLines, prompt), resp.run_id);
+          setErrorMsg(null);
+          onSendSettled(prompt, attachmentIds);
+          return;
+        }
         setErrorMsg(null);
         void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
         onSendSettled(prompt, attachmentIds);
@@ -2249,7 +2498,7 @@ export function SessionPanelPage({
         setErrorMsg(errMessage(apiErr, "发送失败"));
       }
     },
-    [sessionId, pageContextOverride, pendingMentions, qc, onSendSettled],
+    [sessionId, pageContextOverride, pendingMentions, qc, onSendSettled, addSteeredMsg],
   );
 
   // 2026-08-31-session-queue-ux（task-09）：补 refresh（SSE queue_changed 即时
@@ -2748,6 +2997,17 @@ export function SessionPanelPage({
           void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
           return;
         }
+        // task-07（FR-01 / FR-05）：重发竞态引导——上一轮尚未终结且支持 steering
+        // → mid-turn 注入活跃轮，撤占位轮挂「引导中」条目（同 sendFromQueue 分支）。
+        if (resp.steered) {
+          setTurnState((prev) => ({
+            currentRunId: runId,
+            turns: prev.turns.filter((t) => t.runId !== placeholderId),
+          }));
+          addSteeredMsg(trimmed, runId);
+          setErrorMsg(null);
+          return;
+        }
         setTurnState((prev) => ({
           currentRunId: runId,
           turns: prev.turns.map((t) =>
@@ -2767,7 +3027,7 @@ export function SessionPanelPage({
       }
     },
     // qc 为 useQueryClient 稳定实例，补入 deps 消除 exhaustive-deps 告警（行为不变）。
-    [session, machineOnline, turnState.currentRunId, sessionId, qc],
+    [session, machineOnline, turnState.currentRunId, sessionId, qc, addSteeredMsg],
   );
 
   // ql-20260903-026：行级 memo props 稳定化——内联箭头每次渲染新引用会击穿
@@ -3299,8 +3559,13 @@ export function SessionPanelPage({
         // task-08（FR-04）：定时发送系统提示行——创建成功后经 streamFooter 注入
         // 口以「对话流里的一条消息」形态出现（ql-20260823-002-6a1a 预留位首个
         // 消费方；空 turns 空态不渲染是注入口语义，非缺陷）。
+        // task-07（FR-05）：忙轮引导消息三态条目同口挂载（引导中/已投递/本轮
+        // 已结束；新轮开启时固化为伪 turn 释放本挂载位）。
         streamFooter={
-          schedHints.length > 0 ? <ScheduledSysHints hints={schedHints} /> : undefined
+          <>
+            {schedHints.length > 0 ? <ScheduledSysHints hints={schedHints} /> : null}
+            <SteeredMessagesFooter msgs={steeredMsgs} />
+          </>
         }
       />
     </>
@@ -3863,6 +4128,7 @@ export function SessionPanelPage({
             承担，条目收敛统一以服务端 load 结果为准。 */}
         <MessageQueueBar
           entries={queue}
+          provider={session?.provider}
           onRemove={(id) => {
             const entry = queue.find((e) => e.id === id);
             for (const aid of entry?.attachmentIds ?? []) {

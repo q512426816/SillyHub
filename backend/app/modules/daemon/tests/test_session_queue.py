@@ -24,8 +24,11 @@ from sqlalchemy import select
 from app.modules.agent.model import (
     SESSION_QUEUE_MAX_PENDING,
     AgentRun,
+    AgentRunLog,
     AgentSessionQueuedMessage,
 )
+from app.modules.agent.provider_caps import get_provider_caps
+from app.modules.daemon.protocol import DAEMON_MSG_SESSION_INJECT
 from app.modules.daemon.service import DaemonService
 from app.modules.daemon.session.service import (
     DaemonSessionQueueEntryNotFound,
@@ -51,14 +54,14 @@ async def _create_user(session) -> uuid.UUID:
     return uid
 
 
-async def _create_runtime(session, user_id: uuid.UUID):
+async def _create_runtime(session, user_id: uuid.UUID, provider: str = "claude"):
     from app.modules.daemon.model import DaemonRuntime
 
     rt = DaemonRuntime(
         id=uuid.uuid4(),
         user_id=user_id,
         name="daemon",
-        provider="claude",
+        provider=provider,
         status="online",
         last_heartbeat_at=datetime.now(UTC),
     )
@@ -118,12 +121,16 @@ async def _queue_rows(db_session, session_id: uuid.UUID) -> list[AgentSessionQue
     )
 
 
-async def _setup_busy_session(db_session):
-    """建会话 → 完结首 turn → 开一个未完结的第二轮（忙态）。"""
+async def _setup_busy_session(db_session, provider: str = "claude"):
+    """建会话 → 完结首 turn → 开一个未完结的第二轮（忙态）。
+
+    task-09（2026-09-18-single-chat-steering）：provider 加参——忙轮三分支
+    按 caps steering 键选型（claude/pi 可引导、cursor 降级排队）。
+    """
     uid = await _create_user(db_session)
-    await _create_runtime(db_session, uid)
+    await _create_runtime(db_session, uid, provider=provider)
     svc = DaemonService(db_session)
-    created = await svc.create_session(uid, provider="claude", prompt="first")
+    created = await svc.create_session(uid, provider=provider, prompt="first")
     await _finish_run(db_session, created.agent_run)
     busy = await svc.inject_session(created.agent_session.id, uid, prompt="占用本轮")
     return svc, uid, created.agent_session.id, busy.agent_run
@@ -262,6 +269,127 @@ class TestEnqueueWhenBusy:
 
         with pytest.raises(DaemonSessionQueueFull):
             await svc.inject_session(session_id, uid, prompt="超出上限", queue_when_busy=True)
+
+
+class TestBusySteeringInject:
+    """task-09（2026-09-18-single-chat-steering / task-05 FR-01）：单聊忙轮
+    steering 三分支——可引导 provider（claude/pi，caps steering=true）经
+    busy_strategy="inject" 中途注入活跃轮；不可引导（cursor）降级排队现状；
+    带切换维度（轮边界语义）不 steer 回落排队。与群聊 @ 忙轮同
+    ``_inject_mid_turn_into_run`` 入口（design R-05，群侧零回归由
+    test_group_direct.py 守护）。
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["claude", "pi"])
+    async def test_busy_steers_mid_turn_for_steerable_provider(
+        self, db_session, mocked_hub, mocked_redis, provider: str
+    ) -> None:
+        """可引导 provider（claude/pi）忙轮普通消息 → busy_strategy="inject"
+        （router 按 caps steering=true 传入）中途注入活跃轮：
+
+        - mid_turn=True（router 层映射 steered=true）、queued=False、零排队行；
+        - 不建新 run：agent_run 沿用活跃 run（单会话单活跃 run 不变式保持）；
+        - 本轮 user_input 留痕挂活跃 run；
+        - SESSION_INJECT 经 hub 下发，run_id=活跃 run。
+        """
+        assert get_provider_caps(provider)["steering"] is True  # 分支选型前提
+        svc, uid, session_id, busy_run = await _setup_busy_session(db_session, provider=provider)
+        mocked_hub.send_session_control.reset_mock()
+
+        result = await svc.inject_session(
+            session_id,
+            uid,
+            prompt="中途引导这条",
+            queue_when_busy=True,
+            busy_strategy="inject",
+        )
+
+        assert result.mid_turn is True
+        assert result.queued is False
+        assert result.queue_entry_id is None
+        assert result.agent_run is not None and result.agent_run.id == busy_run.id
+        assert await _queue_rows(db_session, session_id) == []
+        steered_input = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == busy_run.id,
+                        AgentRunLog.channel == "user_input",
+                        AgentRunLog.content_redacted == "中途引导这条",
+                    )
+                )
+            )
+            .scalars()
+            .one_or_none()
+        )
+        assert steered_input is not None
+        mocked_hub.send_session_control.assert_awaited_once()
+        _daemon_id, msg_type, payload = mocked_hub.send_session_control.await_args.args
+        assert msg_type == DAEMON_MSG_SESSION_INJECT
+        assert payload["run_id"] == str(busy_run.id)
+
+    @pytest.mark.asyncio
+    async def test_busy_degrades_to_queue_for_cursor(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """不可引导 provider（cursor，caps steering=false）→ router 不传
+        busy_strategy（None），忙轮维持 queue_when_busy 排队现状（降级分支
+        零回归）：queued=True + 排队行落库。
+        """
+        assert get_provider_caps("cursor")["steering"] is False  # 分支选型前提
+        svc, uid, session_id, _run = await _setup_busy_session(db_session, provider="cursor")
+
+        result = await svc.inject_session(
+            session_id, uid, prompt="降级排队这条", queue_when_busy=True
+        )
+
+        assert result.queued is True
+        assert result.mid_turn is False
+        assert result.queue_entry_id is not None
+        rows = await _queue_rows(db_session, session_id)
+        assert [r.prompt for r in rows] == ["降级排队这条"]
+        assert rows[0].status == "pending"
+
+    @pytest.mark.asyncio
+    async def test_busy_switch_dim_not_steered_queues(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """带切换维度（agent_profile_id 等快照，轮边界语义 design FR-4）→
+        service 层守卫压制 busy_strategy="inject"：不 steer，回落排队分支，
+        快照落排队行（派发侧按切换轮重放）。"""
+        svc, uid, session_id, busy_run = await _setup_busy_session(db_session)
+
+        result = await svc.inject_session(
+            session_id,
+            uid,
+            prompt="切档案的忙轮消息",
+            agent_profile_id="profile-snap",
+            queue_when_busy=True,
+            busy_strategy="inject",
+        )
+
+        assert result.mid_turn is False
+        assert result.queued is True
+        assert result.queue_entry_id is not None
+        rows = await _queue_rows(db_session, session_id)
+        assert [r.prompt for r in rows] == ["切档案的忙轮消息"]
+        assert rows[0].agent_profile_id == "profile-snap"
+        # 活跃 run 无本条 user_input 留痕（未注入）。
+        steered_input = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == busy_run.id,
+                        AgentRunLog.channel == "user_input",
+                        AgentRunLog.content_redacted == "切档案的忙轮消息",
+                    )
+                )
+            )
+            .scalars()
+            .one_or_none()
+        )
+        assert steered_input is None
 
 
 class TestDispatchOnTurnComplete:

@@ -279,6 +279,16 @@ export interface SessionInjectResponse {
   /** ql-20260825-011：true = 已入服务端排队（刷新页面不丢）。 */
   queued?: boolean;
   queue_entry_id?: string | null;
+  /**
+   * task-07（2026-09-18-single-chat-steering / FR-01）：true = 忙轮消息经
+   * busy_strategy="inject" 中途注入了**当前活跃轮**（steering）——后端 router
+   * 层映射 service 层 SessionDispatchResult.mid_turn（_inject_mid_turn_into_run
+   * 置 True，不新建平行字段），此时 run_id 为活跃 run（非新建）、queued=false；
+   * 排队/降级（provider 不支持）/空闲新建轮恒 false。手写镜像补字段（本接口
+   * 不在 gen:types 生成链内，Grill P1-1；语义与 backend router/session_crud.py
+   * SessionInjectResponse 逐字对齐）。前端「引导中→已引导」展示态消费。
+   */
+  steered?: boolean;
 }
 
 export interface SessionControlResponse {

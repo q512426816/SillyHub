@@ -528,6 +528,9 @@ class SessionService(BackgroundTaskMixin):
         bind_ppm_item_kind: PpmItemKind | None = None,
         bind_ppm_item_id: uuid.UUID | None = None,
         queue_when_busy: bool = False,
+        # task-05（2026-09-18-single-chat-steering / FR-01）：单聊忙轮策略透传
+        # （语义见 inject.py inject_session 同名参数；缺省 None 零回归）。
+        busy_strategy: Literal["queue", "inject"] | None = None,
     ) -> SessionDispatchResult:
         return await _inject.inject_session(
             self,
@@ -544,6 +547,7 @@ class SessionService(BackgroundTaskMixin):
             bind_ppm_item_kind=bind_ppm_item_kind,
             bind_ppm_item_id=bind_ppm_item_id,
             queue_when_busy=queue_when_busy,
+            busy_strategy=busy_strategy,
         )
 
     async def inject_session_as_service(
@@ -774,7 +778,8 @@ class SessionService(BackgroundTaskMixin):
         session_id: uuid.UUID,
         entry_id: uuid.UUID,
         user_id: uuid.UUID,
-    ) -> bool:
+    ) -> Literal["steered", "interrupted", "dispatched"]:
+        """包装委托（三态见 queue.py dispatch_queued_message_now）。"""
         return await _queue.dispatch_queued_message_now(
             self,
             session_id=session_id,

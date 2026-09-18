@@ -54,12 +54,14 @@ async def _admin_user_id(session: AsyncSession) -> uuid.UUID:
     return user.id
 
 
-async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRuntime:
+async def _create_runtime(
+    session: AsyncSession, user_id: uuid.UUID, provider: str = "claude"
+) -> DaemonRuntime:
     rt = DaemonRuntime(
         id=uuid.uuid4(),
         user_id=user_id,
         name="daemon",
-        provider="claude",
+        provider=provider,
         status="online",
         last_heartbeat_at=datetime.now(UTC),
     )
@@ -266,6 +268,7 @@ class TestSessionEndpointsErrors:
         client: AsyncClient,
         auth_headers: dict[str, str],
         fresh_ws_hub: DaemonWsHub,
+        provider: str = "claude",
     ) -> dict[str, str]:
         from app.modules.auth.model import User
 
@@ -275,11 +278,11 @@ class TestSessionEndpointsErrors:
             .first()
         )
         assert admin is not None
-        rt = await _create_runtime(db_session, admin.id)
+        rt = await _create_runtime(db_session, admin.id, provider=provider)
         await _connect_mock(fresh_ws_hub, rt.id)
         resp = await client.post(
             "/api/daemon/sessions",
-            json={"provider": "claude", "prompt": "first"},
+            json={"provider": provider, "prompt": "first"},
             headers=auth_headers,
         )
         assert resp.status_code == 201, resp.text
@@ -298,8 +301,17 @@ class TestSessionEndpointsErrors:
         排队取代：HTTP 端点恒 queue_when_busy=True，忙时返回 201 + queued。
         409 TURN_CONFLICT 语义仍存在于 service 层（queue_when_busy=False 的
         service 身份调用方），由 test_session_queue.py 守护。
+
+        task-09（2026-09-18-single-chat-steering）：忙轮分支按 provider caps
+        ``steering`` 键分叉——排队契约现固化在**不支持引导**侧（cursor，
+        steering=false → queue_when_busy 排队降级）；可引导侧（claude）忙轮
+        返回 steered=true/queued=false（service 层正向用例见
+        test_session_queue.py，task-09）。本用例 provider=cursor 保住
+        queue_entry_id + queue 读端点 + 删除端点的完整排队 CRUD 断言。
         """
-        created = await self._seed_active_session(db_session, client, auth_headers, fresh_ws_hub)
+        created = await self._seed_active_session(
+            db_session, client, auth_headers, fresh_ws_hub, provider="cursor"
+        )
         # first run still pending → inject queues server-side
         resp = await client.post(
             f"/api/daemon/sessions/{created['session_id']}/inject",

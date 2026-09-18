@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-18-single-chat-steering",
+  "generatedAt": "2026-09-18T19:47:16.293Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-18-single-chat-steering",
+      "metrics": {
+        "matches": 3,
+        "skippedFiles": 2,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-18-single-chat-steering",
+      "metrics": {
+        "tasks": 10,
+        "hasTest": 8
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-18-single-chat-steering",
+      "metrics": {
+        "backendEndpoints": 4672,
+        "frontendCalls": 2
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-18-single-chat-steering",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-18-single-chat-steering",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-09-18-single-chat-steering",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "claude 忙轮引导 e2e（steered=true 无 interrupt，marker 次轮生效）",
+      "command": "worktree 栈 e2e（uvicorn :8002 + daemon + API 驱动，见证据 md 手册）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-18-single-chat-steering/e2e-steering-evidence.md"
+    },
+    {
+      "claim": "codex 忙轮引导 e2e（turn/steer 同 turn fold，api_requests=2）",
+      "command": "worktree 栈 e2e 同上",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-18-single-chat-steering/e2e-steering-evidence.md"
+    },
+    {
+      "claim": "cursor 降级对照 e2e（queued=true steered=false 不报错，轮末自动派发）",
+      "command": "worktree 栈 e2e 同上",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-18-single-chat-steering/e2e-steering-evidence.md"
+    }
+  ],
+  "handover": {
+    "count": 6,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "advisory",
+        "condition": "claude 纯生成形态次轮输出不落平台会话日志（引擎原生行为，NG-1/R-04 备案口径；codex 形态可见）",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "advisory",
+        "condition": "未配置常驻 commands.smoke——e2e 真实集成已跑并留回执（e2e-steering-evidence.md），部署后真机冒烟留人工验收",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "advisory",
+        "condition": "dispatch-now 端点为 partial（单测三态承接、未 e2e 直调）——部署后真机冒烟补一条队列条目⚡引导式直调",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "advisory",
+        "condition": "daemon cli.js start 不读 config.json 的 server_url/api_key（须命令行传参，非本变更引入）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "advisory",
+        "condition": "codex steer 超时 10s 回落理论窗口（实测受理 ~1ms）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "advisory",
+        "condition": "worktree gen:types editable install 陷阱",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 1,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{id}/inject",
+        "rowIdx": 1
+      },
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{id}/queue/{entry}/dispatch-now",
+        "rowIdx": 2
+      },
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions",
+        "rowIdx": 3
+      }
+    ],
+    "declared": 3,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{id}/inject",
+        "rowIdx": 1
+      },
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{id}/queue/{entry}/dispatch-now",
+        "rowIdx": 2
+      },
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions",
+        "rowIdx": 3
+      }
+    ]
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/daemon/tests/test_session_queue.py",
+      "backend/app/modules/daemon/tests/test_session_router.py",
+      "backend/app/modules/daemon/tests/test_session_queue_actions.py",
+      "sillyhub-daemon/scripts/gen-provider-caps.mjs",
+      "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+      "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+      "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts",
+      "sillyhub-daemon/tests/interactive/claude-sdk-driver.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[frontend,sillyhub-daemon,daemon,agent]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-18T19:51:04.426Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

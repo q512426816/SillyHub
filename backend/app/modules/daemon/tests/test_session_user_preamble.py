@@ -406,10 +406,13 @@ class TestCreateSessionUserPreamble:
         tmp_path,
     ) -> None:
         """后续轮次注入不重复携带三前导（D-002 / FR-04）：daemon 未上报
-        ready 时第二轮走排队路径（201 queued），排队行 prompt 仅存用户
-        原文——后续轮派发走 _inject_into_session（不带新前导），不经过
-        create_session 首轮组装。"""
-        from app.modules.agent.model import AgentSessionQueuedMessage
+        ready 时第二轮（claude 可引导）走 mid-turn steering（201
+        steered=true/queued=false），活跃轮 user_input 留痕仅存用户原文
+        ——steering 路径走 _inject_mid_turn_into_run（不带新前导），不经过
+        create_session 首轮组装；零排队行。task-09 断言随
+        2026-09-18-single-chat-steering 忙轮语义迁移（原排队行 prompt
+        剥离断言语义平移到 user_input 留痕行）。"""
+        from app.modules.agent.model import AgentRunLog, AgentSessionQueuedMessage
 
         admin = await _admin(db_session)
         rt = await _make_runtime(db_session, admin.id)
@@ -429,6 +432,7 @@ class TestCreateSessionUserPreamble:
         )
         assert resp.status_code == 201, resp.text
         session_id = resp.json()["session_id"]
+        first_run_id = resp.json()["run_id"]
 
         resp2 = await client.post(
             f"/api/daemon/sessions/{session_id}/inject",
@@ -436,9 +440,12 @@ class TestCreateSessionUserPreamble:
             headers=auth_headers,
         )
         assert resp2.status_code == 201, resp2.text
-        assert resp2.json().get("queued") is True
-
-        queued = (
+        body2 = resp2.json()
+        assert body2.get("steered") is True
+        assert body2.get("queued") is False
+        # steering 沿用活跃 run，不建新 run、零排队行。
+        assert body2.get("run_id") == first_run_id
+        queued_rows = (
             (
                 await db_session.execute(
                     select(AgentSessionQueuedMessage).where(
@@ -447,14 +454,25 @@ class TestCreateSessionUserPreamble:
                 )
             )
             .scalars()
-            .first()
+            .all()
         )
-        assert queued is not None
-        # 2026-08-31-session-queue-ux task-05 防御性回归：排队行带 position 序键
-        # （FR-04/D-002），忙轮排队 prompt 剥离断言不动。
-        assert isinstance(queued.position, int)
-        # 排队行只存干净用户原文：后续轮派发不再拼首轮三前导。
-        assert queued.prompt == "第二轮追问"
-        assert "【当前用户信息】" not in queued.prompt
-        assert "【平台交互规则】" not in queued.prompt
-        assert "【SillySpec 工具使用规则】" not in queued.prompt
+        assert queued_rows == []
+
+        # 活跃轮 user_input 留痕只存干净用户原文：steering 注入不再拼首轮三前导。
+        steered_input = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == uuid.UUID(first_run_id),
+                        AgentRunLog.channel == "user_input",
+                        AgentRunLog.content_redacted == "第二轮追问",
+                    )
+                )
+            )
+            .scalars()
+            .one_or_none()
+        )
+        assert steered_input is not None
+        assert "【当前用户信息】" not in steered_input.content_redacted
+        assert "【平台交互规则】" not in steered_input.content_redacted
+        assert "【SillySpec 工具使用规则】" not in steered_input.content_redacted

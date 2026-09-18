@@ -2748,3 +2748,316 @@ describe('task-04（2026-09-14-session-thinking-level）：思考档位', () => 
     await consumeP;
   });
 });
+
+// ── task-03（2026-09-18-single-chat-steering / FR-06）：turn/steer 忙轮注入 ────
+//
+// 依据：tasks/task-03.md §implementation/§acceptance + spike-codex-turn-steer.md
+// §4/§5/§6/§7/§8（codex-cli 0.147.0 实机定论）：
+//   - 参数形状 {threadId, expectedTurnId, input:[{type:'text',text}]}（S2 实机命中）；
+//   - 成功响应 {"result":{"turnId":<当前 turn id>}}——同 turn 继续，无新
+//     turn/started/completed 对，该条输入视为已消费；
+//   - 被拒（-32600 四类文案）不炸会话，回落轮边界正常 turn/start（§3.3）；
+//   - turnId 提取双来源：turn/started params.turn.id（§6，顶层无 turnId）+
+//     turn/start 响应 result.turn.id（§3.1 帧序最早可用）。
+// 覆盖：
+//   1. 忙轮注入 → 直发 turn/steer（形状断言）+ 成功即消费（无第二条 turn/start）
+//   2. 被拒 → 回落：该条在轮完成后正常 turn/start（消息不丢、会话收敛不挂死）
+//   3. 0.147.0 真实形状 turnId 提取（params.turn.id → steer expectedTurnId 间接验证）
+//   4. turn/start 响应 result.turn.id 回填（resume 路径双保险，不依赖 turn/started）
+//   5. 无活跃 turn 注入 → 行为与现状一致（不发 steer，轮边界正常消费）
+
+/** task-03：0.147.0 真实形状 turn/started（turnId 嵌 params.turn.id，spike §6）。 */
+function turnStartedNotifNested(threadId: string, turnId: string): string {
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'turn/started',
+    params: { threadId, turn: { id: turnId, items: [], status: 'inProgress' } },
+  });
+}
+
+/** task-03：turn/start 响应行（result.turn.id，spike §3.1 原文形状）。 */
+function turnStartOkResponse(id: number, turnId: string): string {
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    id,
+    result: { turn: { id: turnId, items: [], itemsView: 'notLoaded', status: 'inProgress' } },
+  });
+}
+
+/** task-03：turn/steer 受理回执行（result.turnId=当前 turn，spike §3.2 S2）。 */
+function steerOkResponse(id: number, turnId: string): string {
+  return JSON.stringify({ jsonrpc: '2.0', id, result: { turnId } });
+}
+
+/** task-03：turn/steer 被拒回执行（-32600，spike §5 文案样例）。 */
+function steerErrorResponse(id: number, message: string): string {
+  return JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32600, message } });
+}
+
+describe('task-03（2026-09-18-single-chat-steering）：turn/steer 忙轮注入', () => {
+  /** 等一拍让 stdin 写入 / readline 行处理 / race 调度跑完（对齐既有用例节奏）。 */
+  async function tick(ms = 50): Promise<void> {
+    await new Promise<void>((r) => setTimeout(r, ms));
+  }
+
+  it('忙轮注入 → 直发 turn/steer（threadId/expectedTurnId/input 形状），成功即消费该条（全程仅一条 turn/start）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_steer')]);
+    await tick();
+
+    // 首轮 + 忙轮建立（turn/started 已见、turn/completed 未到）
+    push('first');
+    await tick();
+    emitLines(child, [turnStartedNotif('thr_steer', 'turn_1')]);
+    await tick();
+
+    // 忙轮注入
+    push('steer-me');
+    await tick();
+
+    // steer 请求形状（spike §7.1 定论；id=4：与 turn/start(3) 同 nextRpcId 单源）
+    const steerReq = readStdinJson(child).find((m) => m.method === 'turn/steer')!;
+    expect(steerReq).toBeDefined();
+    expect(steerReq.id).toBe(4);
+    expect(steerReq.params).toEqual({
+      threadId: 'thr_steer',
+      expectedTurnId: 'turn_1',
+      input: [{ type: 'text', text: 'steer-me' }],
+    });
+
+    // 受理回执（result.turnId=当前 turn id，spike §3.2 S2）
+    emitLines(child, [steerOkResponse(4, 'turn_1')]);
+    await tick();
+    expect(handle.jsonRpcPending.size).toBe(0); // 受理即清理 pending
+
+    // 本轮收敛（steer 不产生新 turn 对——仍由唯一一次 turn/completed 收敛）
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await tick();
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+
+    // 该条输入已由 steer 消费：不发第二条 turn/start
+    const turnStarts = readStdinJson(child).filter((m) => m.method === 'turn/start');
+    expect(turnStarts).toHaveLength(1);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('turn/steer 被拒（-32600 no active turn）→ 回落轮边界：该条在轮完成后正常 turn/start，会话不挂死不丢消息', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_fb')]);
+    await tick();
+
+    push('first');
+    await tick();
+    emitLines(child, [turnStartedNotif('thr_fb', 'turn_1')]);
+    await tick();
+
+    // 忙轮注入 → steer 发出（id=4）
+    push('fallback');
+    await tick();
+    expect(readStdinJson(child).some((m) => m.method === 'turn/steer')).toBe(true);
+
+    // 被拒（spike §5 空闲态文案样例——此处作为通用被拒注入）
+    emitLines(child, [steerErrorResponse(4, 'no active turn to steer')]);
+    await tick();
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    // 本轮照常完成（被拒不炸会话）
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await tick();
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+
+    // 回落：该条在轮完成后正常 turn/start（id=5：steer 消耗了一个 rpc id）
+    const turnStarts = readStdinJson(child).filter((m) => m.method === 'turn/start');
+    expect(turnStarts).toHaveLength(2);
+    expect(turnStarts[1]!.id).toBe(5);
+    expect((turnStarts[1]!.params as { input: { text: string }[] }).input).toEqual([
+      { type: 'text', text: 'fallback' },
+    ]);
+
+    // 第二轮收敛（回落消息不丢）
+    emitLines(child, [
+      turnStartedNotif('thr_fb', 'turn_2'),
+      turnCompletedNotif('completed'),
+    ]);
+    await tick();
+    expect(results).toHaveLength(2);
+    expect(results.filter((r) => (r as { is_error?: boolean }).is_error !== true)).toHaveLength(2);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('turnId 提取：turn/started params={threadId, turn:{id}}（0.147.0 真实形状）→ steer expectedTurnId 取到嵌套 id', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_nested')]);
+    await tick();
+
+    push('first');
+    await tick();
+    // 0.147.0 实测形状：顶层无 turnId，turnId 嵌 params.turn.id（spike §6）
+    emitLines(child, [turnStartedNotifNested('thr_nested', 'turn_nested_1')]);
+    await tick();
+    expect(handle.currentTurnId).toBe('turn_nested_1');
+
+    // 忙轮注入 → steer 直发（expectedTurnId 间接验证提取正确）
+    push('nested-steer');
+    await tick();
+    const steerReq = readStdinJson(child).find((m) => m.method === 'turn/steer')!;
+    expect(steerReq).toBeDefined();
+    expect((steerReq.params as { expectedTurnId: string }).expectedTurnId).toBe(
+      'turn_nested_1',
+    );
+
+    emitLines(child, [steerOkResponse(steerReq.id as number, 'turn_nested_1')]);
+    await tick();
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await tick();
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+    expect(
+      readStdinJson(child).filter((m) => m.method === 'turn/start'),
+    ).toHaveLength(1);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('turn/start 响应 result.turn.id 回填 currentTurnId（resume 路径双保险，不喂 turn/started 也能 steer）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ resume: 'thr_resp' }),
+    )) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_resp')]);
+    await tick();
+
+    // resume 首轮：push 后正常 turn/start(id=3)
+    push('first');
+    await tick();
+    const turnStart = readStdinJson(child).find((m) => m.method === 'turn/start')!;
+    expect(turnStart).toBeDefined();
+    expect(turnStart.id).toBe(3);
+
+    // 只喂 turn/start 响应（spike §3.1：result.turn.id 先于 turn/started 到达）
+    emitLines(child, [turnStartOkResponse(3, 'turn_resp_1')]);
+    await tick();
+    expect(handle.currentTurnId).toBe('turn_resp_1');
+
+    // 忙轮注入 → steer（expectedTurnId 来自响应回填）
+    push('steer-by-resp');
+    await tick();
+    const steerReq = readStdinJson(child).find((m) => m.method === 'turn/steer')!;
+    expect(steerReq).toBeDefined();
+    expect((steerReq.params as { expectedTurnId: string }).expectedTurnId).toBe(
+      'turn_resp_1',
+    );
+
+    emitLines(child, [steerOkResponse(steerReq.id as number, 'turn_resp_1')]);
+    await tick();
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await tick();
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+    expect(
+      readStdinJson(child).filter((m) => m.method === 'turn/start'),
+    ).toHaveLength(1);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('无活跃 turn（turnId 未就绪窗口）注入 → 行为与现状一致：不发 steer，轮边界正常 turn/start 消费', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_idle')]);
+    await tick();
+
+    // 两条同时入队：第一条起轮；第二条到达时 turn/started / turn/start 响应均
+    // 未到（currentTurnId=null 的早到窗口）→ 不 steer，回落轮边界
+    push('first');
+    push('early-second');
+    await tick();
+
+    expect(readStdinJson(child).some((m) => m.method === 'turn/steer')).toBe(false);
+    const turnStarts = readStdinJson(child).filter((m) => m.method === 'turn/start');
+    expect(turnStarts).toHaveLength(1);
+
+    // 第一轮完成
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await tick();
+    expect(results).toHaveLength(1);
+
+    // 早到输入在轮边界正常消费（id=4：无 steer 消耗 rpc id）
+    const turnStartsAfter = readStdinJson(child).filter(
+      (m) => m.method === 'turn/start',
+    );
+    expect(turnStartsAfter).toHaveLength(2);
+    expect(turnStartsAfter[1]!.id).toBe(4);
+    expect(
+      (turnStartsAfter[1]!.params as { input: { text: string }[] }).input,
+    ).toEqual([{ type: 'text', text: 'early-second' }]);
+
+    // 第二轮收敛
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await tick();
+    expect(results).toHaveLength(2);
+    expect(results.filter((r) => (r as { is_error?: boolean }).is_error !== true)).toHaveLength(2);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+});

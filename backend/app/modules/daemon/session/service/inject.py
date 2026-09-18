@@ -80,6 +80,13 @@ async def inject_session(
     # 排队，刷新页面不丢）。默认 False 保持既有拒绝语义（service 身份路径 /
     # 平台审批代写等调用方零回归）；前端会话 UI 置 True。
     queue_when_busy: bool = False,
+    # task-05（2026-09-18-single-chat-steering / FR-01 / D-001@v1）：单聊忙轮
+    # 策略（语义同 inject_session_as_service 同名参数，:279）——"inject"=忙轮
+    # 跳过排队直接注入当前活跃轮（steering）；"queue"≡queue_when_busy=True；
+    # None=沿用 queue_when_busy 旧形态（既有调用零回归）。单聊 HTTP 端点经
+    # provider caps steering 门控（router/session_crud.py inject 端点）传入；
+    # 携带切换维度时 service 层守卫（queue.py 忙轮分支）不生效，回落排队。
+    busy_strategy: Literal["queue", "inject"] | None = None,
 ) -> SessionDispatchResult:
     """Append a new turn run to an active session (FR-02 / design §7.6 step 1).
 
@@ -246,6 +253,9 @@ async def inject_session(
         page_context=page_context,
         # ql-20260825-011：忙轮入队透传。
         queue_when_busy=queue_when_busy,
+        # task-05（2026-09-18-single-chat-steering）：单聊忙轮策略透传
+        # （缺省 None 零回归）。
+        busy_strategy=busy_strategy,
     )
 
 

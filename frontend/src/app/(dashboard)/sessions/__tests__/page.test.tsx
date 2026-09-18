@@ -1012,6 +1012,129 @@ describe("SessionPanel SSE 装配器接线（task-09）", () => {
   });
 });
 
+// ── task-09（2026-09-18-single-chat-steering / FR-05）：忙轮发送引导三态 ──────
+
+describe("SessionPanel 忙轮发送引导（task-07 steered=true 三态渲染）", () => {
+  /** SSE envelope 固件（对齐上方 SSE 装配 describe 同款形态，run_id=r-live）。 */
+  function makeSteerEnvelope(overrides: Record<string, unknown> = {}) {
+    return {
+      event: "log",
+      session_id: "s-1",
+      run_id: "r-live",
+      turn: 4,
+      log_id: null,
+      timestamp: "2026-08-15T10:00:00Z",
+      channel: null,
+      content: null,
+      status: null,
+      exit_code: null,
+      reason: null,
+      input_tokens: null,
+      output_tokens: null,
+      ...overrides,
+    };
+  }
+
+  /** 选中 s-1 进面板并等 SSE 建流，返回 mock 捕获的 handlers。 */
+  async function selectSession() {
+    renderPage();
+    await selectDefaultSession();
+    await waitFor(() => {
+      expect(mocks.streamSession).toHaveBeenCalledWith(
+        "s-1",
+        expect.objectContaining({ onLog: expect.any(Function) }),
+        expect.any(Object),
+      );
+    });
+    return mocks.streamSession.mock.calls[0]?.[1] as {
+      onTurnStarted: (_env: Record<string, unknown>) => void;
+      onLog: (_env: Record<string, unknown>, _cursor?: string | null) => void;
+      onTurnCompleted: (_env: Record<string, unknown>) => void;
+    };
+  }
+
+  /** 忙轮发送（输入 → 点发送），先 mock steered=true 响应。placeholder 按
+   * running 态取「消息将排队…」/ 空闲态取「继续追问…」（deriveSessionPlaceholder 链）。 */
+  async function steerSend(text: string) {
+    mocks.injectSession.mockResolvedValueOnce({
+      session_id: "s-1",
+      run_id: "r-live",
+      status: "running",
+      steered: true,
+      queued: false,
+    });
+    const input = screen.getByPlaceholderText(
+      /继续追问|消息将排队/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalled());
+  }
+
+  it("running 会话发送 → steered=true 挂「引导中」虚线气泡；user_input 留痕行到达转「已投递」；轮终止未投递转「本轮已结束」", async () => {
+    const handlers = await selectSession();
+
+    // ① 活跃轮开跑（busy：currentRunId=r-live → 发送走 sendToServerQueue）。
+    act(() => {
+      handlers.onTurnStarted(makeSteerEnvelope({ event: "turn_started" }));
+    });
+
+    // ② 忙轮发送：后端 mid-turn 注入活跃轮（steered=true，不建新 run）→
+    //    本地挂「引导中」条目（不进排队条），输入框草稿随 onSendSettled 清空。
+    await steerSend("中途引导这条");
+    expect(mocks.injectSession).toHaveBeenCalledWith(
+      "s-1",
+      "中途引导这条",
+      expect.anything(),
+    );
+    const steeringBubble = await screen.findByText("中途引导这条");
+    expect(
+      steeringBubble.closest("[data-steered-msg]")?.getAttribute("data-steered-msg"),
+    ).toBe("steering");
+    expect(screen.getByText("引导中 · 本轮工具间隙投递")).toBeTruthy();
+    expect(
+      (screen.getByPlaceholderText(/继续追问|消息将排队/) as HTMLTextAreaElement)
+        .value,
+    ).toBe("");
+
+    // ③ 留痕行到达（mid-turn 注入挂活跃 run 的 user_input log）→ 「已投递」。
+    act(() => {
+      handlers.onLog(
+        makeSteerEnvelope({
+          log_id: "l-s1",
+          channel: "user_input",
+          content: "中途引导这条",
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-steered-msg="delivered"]'),
+      ).toBeTruthy();
+    });
+    expect(screen.getByText("✓ 已投递，agent 已收到引导")).toBeTruthy();
+
+    // ④ 再发一条无留痕行，轮终止 → 「本轮已结束，未投递」（R-04 终态收敛）。
+    await steerSend("没赶上的引导");
+    await screen.findByText("没赶上的引导");
+    act(() => {
+      handlers.onTurnCompleted(
+        makeSteerEnvelope({
+          event: "turn_completed",
+          status: "completed",
+          exit_code: 0,
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-steered-msg="ended"]'),
+      ).toBeTruthy();
+    });
+    expect(screen.getByText("本轮已结束，消息未投递")).toBeTruthy();
+  });
+});
+
 // ── ql-20260820-007：attach 运行中轮恢复竞态（detail / 历史 logs 到达顺序） ──
 
 describe("SessionPanel attach 运行中轮恢复竞态（ql-20260820-007）", () => {

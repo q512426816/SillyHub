@@ -615,7 +615,7 @@ describe("对话框路径 Cursor 引擎可选（runtime-session-helpers 白名�
 // 表值前置事实（与 daemon providers.ts PROVIDER_CAPS.cursor 一致；thinking=true
 // 为 Reverse Sync / design 真相，不以过期任务卡 thinking=false 为准）。
 describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", () => {
-  it("十三键与 daemon 单源一致；未知 provider 默认拒绝（boolean 全 false + dialog none）不抛错", () => {
+  it("十四键与 daemon 单源一致；未知 provider 默认拒绝（boolean 全 false + dialog none）不抛错", () => {
     // dialog='marker' 为 2026-09-09-askuser-pi-cursor task-12（FR-06）新增的
     // string 枚举键初值（spike no-go 则随 task-08 三端改 'none'）。
     // ql-20260912-002：56a37498b（provider-adapter-registry）给 caps 加第 10 键
@@ -630,6 +630,9 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
     // 2026-09-14-session-thinking-level task-01（FR-01，连带测试同款）：第 13 键
     // thinking_level（会话级思考强度档位通道）随 @generated 产物加入后本全对象
     // toEqual 必红——同步补齐（cursor 无通道=false / 未知引擎回退=false）。
+    // 2026-09-18-single-chat-steering task-01（FR-02，连带测试同款）：第 14 键
+    // steering（运行中会话追加消息转向通道）随 @generated 产物加入后本全对象
+    // toEqual 必红——同步补齐（cursor 无注入通道=false / 未知引擎回退=false）。
     const caps = getProviderCaps("cursor");
     expect(caps).toEqual({
       resume: true,
@@ -645,6 +648,7 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
       ctx_usage: true,
       compact: false,
       thinking_level: false,
+      steering: false,
     });
     // 任务卡点名的门控前置事实（model_select / mcp / thinking）再显式锁一次。
     expect(caps.model_select).toBe(true);
@@ -664,6 +668,7 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
       ctx_usage: false,
       compact: false,
       thinking_level: false,
+      steering: false,
     });
   });
 

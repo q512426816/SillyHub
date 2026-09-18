@@ -22,7 +22,7 @@
  * 从聚合表派生，本 task 落契约基座（派生前既有字面量与聚合表并存，值等价）。
  *
  * 取值约定：caps 描述 provider 当前真实能力（以本仓现状硬编码门控为准，
- * 不臆断），12 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
+ * 不臆断），13 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
  * 为 string 枚举键（'native' / 'marker' / 'none'，2026-09-09-askuser-pi-cursor
  * task-12 / FR-06 加入——打破「8 键全 boolean」旧约定）；provider_switch 为
  * 第 10 键（2026-09-11-provider-adapter-registry task-01 加入，与
@@ -33,7 +33,11 @@
  * 压缩通道，claude/pi/codex 三引擎原生通道实证 true、cursor 无通道 false）；
  * thinking_level 为第 13 键（2026-09-14-session-thinking-level task-01 /
  * FR-01 加入——会话级思考强度档位通道，claude/pi/codex 三引擎通道实证
- * true、cursor 无通道 false）；未知 provider 查询返回默认拒绝对象（boolean
+ * true、cursor 无通道 false）；steering 为第 14 键
+ * （2026-09-18-single-chat-steering task-01 / FR-02 加入——运行中会话
+ * 追加消息转向通道，pi/claude/codex=true、cursor 无通道 false，取值依据
+ * 见下方 steering 键 docblock 与 PROVIDER_CAPS docblock）；未知 provider
+ * 查询返回默认拒绝对象（boolean
  * 键全 false、dialog 取 'none'），不抛错。改取值先改本文件，再同步两端镜像。
  */
 
@@ -61,7 +65,7 @@ import { isPiFormSufficient, writePiDir } from '../pi-settings.js';
 // 本文件，当前无环；task-02 派生化后其函数声明提升亦环安全。CredentialInjector /
 // ProviderConfig 为 type-only import（verbatimModuleSyntax），零运行时依赖。
 
-/** provider 能力矩阵（13 键：12 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+/** provider 能力矩阵（14 键：13 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
@@ -123,6 +127,21 @@ export interface ProviderCaps {
    * false；未知 provider 回退 false（默认拒绝）。
    */
   thinking_level: boolean;
+  /**
+   * 运行中会话追加消息转向（第 14 键，2026-09-18-single-chat-steering
+   * task-01 / FR-02）：interactive 会话 assistant 轮未结束时能否注入追加
+   * 用户消息（steering / 忙轮吸收）。取值依据（三引擎通道，cursor 无通道）：
+   * pi 为 _sendInject steer 通道实证（pi-rpc-driver.ts:1859-1914——
+   * streaming 中注入默认走 rpc steer，被拒按错误文案单次降级
+   * prompt↔steer / steer→follow_up）；claude 为 query({prompt:
+   * AsyncIterable}) 忙轮推流经 SDK 命令队列吸收（claude-sdk-driver.ts:402，
+   * 投递时机以 spike-02 实测为准，暂定 true）；codex 为 app-server
+   * turn/steer 方法存在（参数以 spike-01 实测为准，暂定 true）——三引擎
+   * true；cursor CLI 无对应注入通道 → false；未知 provider 回退 false
+   * （默认拒绝）。若 spike 探测结论为通道不可用，由主代理收口回改本表
+   * 取值并重跑生成与守护测试。
+   */
+  steering: boolean;
 }
 
 /**
@@ -260,6 +279,18 @@ export interface ProviderCaps {
  * 同任务顺手翻值：codex.thinking false→true（Grill P0-3 纯声明对齐，依据见
  * 上方 codex 段 thinking 条目——driver :671-682 早已映射 reasoning→thinking
  * 事件，渲染由事件流无条件驱动，翻值无行为变化）。
+ *
+ * steering（第 14 键，2026-09-18-single-chat-steering task-01 / FR-02）：
+ * 运行中会话追加消息转向通道（assistant 轮未结束时注入追加用户消息）。
+ * 取值依据：pi 为 _sendInject steer 通道实证（pi-rpc-driver.ts:1859-1914，
+ * streaming 中注入默认走 steer、被拒单次降级重试）；claude 为
+ * query({prompt: AsyncIterable}) 忙轮推流——追加消息经 SDK 命令队列吸收
+ * （claude-sdk-driver.ts:402，投递时机以 spike-02 实测为准，暂定 true）；
+ * codex 为 app-server turn/steer 方法存在（参数以 spike-01 实测为准，
+ * 暂定 true）——三引擎 true；cursor CLI 无对应注入通道 → false；未知
+ * provider 回退 false（默认拒绝）。spike 结论若翻车（codex turn/steer
+ * 不可用 / claude 仅轮边界吸收），本表回改取值并重跑生成与守护测试
+ *（归 task-01 收尾，见 plan spike 前置表）。
  */
 export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   claude: {
@@ -276,6 +307,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     ctx_usage: true,
     compact: true,
     thinking_level: true,
+    steering: true,
   },
   codex: {
     resume: true,
@@ -294,6 +326,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     ctx_usage: true,
     compact: true,
     thinking_level: true,
+    steering: true,
   },
   // 取值依据见上方 docblock pi 段（design §5.3 能力矩阵；subagent 终值 false
   // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3；
@@ -312,6 +345,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     ctx_usage: true,
     compact: true,
     thinking_level: true,
+    steering: true,
   },
   // 取值依据见上方 docblock cursor 段（design「注册（providers.ts）」节；
   // thinking=true 为 task-01 实测修正：顶层 thinking 帧稳定存在且有 fixture，
@@ -331,6 +365,9 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     ctx_usage: true,
     compact: false,
     thinking_level: false,
+    // steering=false：cursor CLI 无运行中注入通道（取值依据见 PROVIDER_CAPS
+    // docblock steering 段，2026-09-18-single-chat-steering task-01 / FR-02）。
+    steering: false,
   },
 };
 
@@ -360,6 +397,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     ctx_usage: false,
     compact: false,
     thinking_level: false,
+    steering: false,
   };
 }
 

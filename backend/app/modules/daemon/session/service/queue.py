@@ -23,6 +23,10 @@ from app.modules.agent.model import (
     AgentSession,
     AgentSessionQueuedMessage,
 )
+
+# task-06（2026-09-18-single-chat-steering FR-03）：dispatch_now 引导门控——
+# provider caps steering 键（task-01 契约，pi/claude/codex=true）。
+from app.modules.agent.provider_caps import get_provider_caps
 from app.modules.daemon.schema import PageContextCreateBlock
 from app.modules.daemon.session.service.auto_resume import (
     make_auto_resume_origin,
@@ -591,21 +595,31 @@ async def dispatch_queued_message_now(
     session_id: uuid.UUID,
     entry_id: uuid.UUID,
     user_id: uuid.UUID,
-) -> bool:
-    """立即发送排队条目（2026-08-31-session-queue-ux FR-05 / D-001）。
+) -> Literal["steered", "interrupted", "dispatched"]:
+    """立即发送排队条目（2026-08-31-session-queue-ux FR-05 / D-001；task-06
+    2026-09-18-single-chat-steering FR-03 引导式重构）。
 
     会话行锁内（R-01）：非 active 409（终态/挂起均拒，与 interrupt 同
     口径）；条目 404；failed 重置 pending + 清 error_msg；本条 position
     置队首（全量重写该会话队列 0..n-1，D-002 ≤5 行）+ commit + 补发
-    queue_changed(action="dispatch_now")——**commit 先于 interrupt 发送**，
-    interrupt 失败不回滚置顶（R-03）。随后判活跃 run：
-    - 有 → :meth:`_send_interrupt_control` 打断当前轮（daemon 零改动
-      D-007，run 终态钩子接力派发队首=本条；AppError 向上抛），返 True；
+    queue_changed(action="dispatch_now")——**commit 先于发送动作**，
+    interrupt / mid-turn 注入失败均不回滚置顶（R-03）。随后判活跃 run：
+    - 有且可引导（provider caps ``steering``=true + 条目不带轮边界维度）
+      → :meth:`_inject_mid_turn_into_run` mid-turn 注入活跃轮（**不
+      interrupt**，prompt/附件/留痕转挂活跃 run，注入成功删排队行，
+      与群聊 @ 忙轮同入口），返 ``"steered"``；
+    - 有但不可引导（provider 不支持 / 带切换维度 / 续跑条目）→
+      :meth:`_send_interrupt_control` 打断当前轮（daemon 零改动 D-007，
+      run 终态钩子接力派发队首=本条；AppError 向上抛），返
+      ``"interrupted"``；
     - 无 → 当场 :meth:`dispatch_queued_messages` 同步派发本条（R-04，
-      条目可能当场删行），返 False。
+      条目可能当场删行），返 ``"dispatched"``。
 
     Returns:
-        interrupted: True=已打断活跃轮（接力派发）；False=空闲当场派发。
+        dispatch_mode 三态（router 层映射 ``QueueDispatchNowResponse``，
+        ``interrupted`` 兼容字段 = ``dispatch_mode == "interrupted"``）：
+        ``"steered"``=mid-turn 注入成功（SessionDispatchResult.mid_turn）；
+        ``"interrupted"``=打断接力；``"dispatched"``=空闲当场派发。
     """
     session = await svc._get_owned_session_for_update(session_id, user_id)
     if session.status != "active":
@@ -658,13 +672,80 @@ async def dispatch_queued_message_now(
             "action": "dispatch_now",
         },
     )
-    # commit 后判活跃 run（置顶持久化先于 interrupt，R-03）。
+    # commit 后判活跃 run（置顶持久化先于 interrupt/注入，R-03）。
     run = await svc._get_current_run(session.id)
     if run is not None:
+        # task-06（2026-09-18-single-chat-steering FR-03 / B2）：provider 支持
+        # 引导（caps steering=true，任务卡 expects_from task-01 契约）且条目
+        # 不带轮边界维度 → 不 interrupt，改 mid-turn 注入活跃轮（复用
+        # _inject_mid_turn_into_run，与群聊 @ 忙轮 / task-05 单聊 busy_strategy=
+        # inject 同入口）。两条降级守卫（命中即走既有 interrupt 接力，现状
+        # 零回归）：
+        # - 带配置切换维度（profile/provider/model 快照）：切换是轮边界语义
+        #   （design FR-4），_inject_mid_turn_into_run 不接切换维度，注入会
+        #   静默丢快照；
+        # - 自动续跑条目（origin=auto_resume:*）：包装 prompt 面向新 run 重放，
+        #   接力派发侧有 G10 超越守卫（dispatch_queued_messages），注入活跃轮
+        #   会绕过守卫（原任务两遍风险）。
+        entry_is_steerable = (
+            bool(get_provider_caps(session.provider or "")["steering"])
+            and entry.agent_profile_id is None
+            and entry.llm_provider_id is None
+            and entry.model is None
+            and not (entry.origin or "").startswith("auto_resume:")
+        )
+        if entry_is_steerable:
+            # 群链标记剥离 / 附件宽容解析 / 附件归属基准（链 sender）：与
+            # dispatch_queued_messages 派发侧同款（entry 的 prompt/附件转入
+            # 活跃 run，daemon 看到的文本与接力派发一致）。
+            dispatch_prompt, chain_metadata = _split_group_chain_marker(entry.prompt or "")
+            attachment_ids: list[uuid.UUID] | None = None
+            if entry.attachment_ids:
+                try:
+                    attachment_ids = [uuid.UUID(str(a)) for a in entry.attachment_ids]
+                except (ValueError, AttributeError, TypeError):
+                    attachment_ids = None
+            attachment_owner_user_id: uuid.UUID | None = None
+            _chain_sender = (chain_metadata or {}).get("sender_user_id")
+            if isinstance(_chain_sender, str) and _chain_sender:
+                try:
+                    attachment_owner_user_id = uuid.UUID(_chain_sender)
+                except (ValueError, AttributeError, TypeError):
+                    attachment_owner_user_id = None
+            # 本分支注入成功即 SessionDispatchResult.mid_turn=True（control.py
+            # 恒置）——"steered" 三态由 mid_turn 派生（design B3：复用既有
+            # 标志，不新建平行服务层字段）。AppError（daemon 离线 / 附件校验
+            # 失败）向上抛，置顶已持久化不回滚（R-03 同口径）。
+            await svc._inject_mid_turn_into_run(
+                session,
+                current_run=run,
+                prompt=dispatch_prompt,
+                attachment_ids=attachment_ids,
+                attachment_owner_user_id=attachment_owner_user_id,
+                turn_metadata=chain_metadata,
+            )
+            # 注入成功：删排队行（消息已转挂活跃 run——user_input 留痕 +
+            # SESSION_INJECT 三段式由 _inject_mid_turn_into_run 落齐），不删
+            # 会在 run 终态被接力派发二次发送。重新取行再删（identity map
+            # 旧对象可能已过期，对齐 dispatch_queued_messages 成功路径）。
+            fresh = await svc._session.get(AgentSessionQueuedMessage, entry.id)
+            if fresh is not None:
+                await svc._session.delete(fresh)
+                await svc._session.commit()
+            await svc._publish_session_event(
+                session.id,
+                {
+                    "event": "queue_changed",
+                    "session_id": str(session.id),
+                    "queue_entry_id": str(entry.id),
+                    "action": "dispatched",
+                },
+            )
+            return "steered"
         await svc._send_interrupt_control(session, run_id=run.id)
-        return True
+        return "interrupted"
     await svc.dispatch_queued_messages(session.id)
-    return False
+    return "dispatched"
 
 
 async def dispatch_queued_messages(svc, session_id: uuid.UUID) -> None:

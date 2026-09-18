@@ -12,9 +12,18 @@
  *     entries 真相仍归父级 useMessageQueue），松手（drop）顺序变化时上抛全量有序
  *     ids 调 onReorder 并复位 override，等父级 load 收敛（R-02 以服务端为准）；
  *     原位松手/拖出有效区不回调；sending 条目不参与拖拽；
- *   - ⚡ 立即发送（FR-05）：pending 与 failed 均渲染（sending 不可操作），
- *     title 两态——pending=「打断当前轮，立即发送这条」/ failed=「立即发送这条」，
- *     点击调 onDispatchNow；不本地造已打断/已发送态，收敛统一走 SSE/load（R-04）；
+ *   - ⚡ 立即发送（FR-05；2026-09-18-single-chat-steering task-08 起改引导语义，
+ *     design C2 / FR-03）：pending 与 failed 均渲染（sending 不可操作），
+ *     title 两态——pending=「立即引导进当前轮（不打断）」（支持引导的引擎
+ *     mid-turn 注入，不打断活跃轮；需打断用会话停止按钮）/ failed=「立即发送这条」
+ *     （空闲直发语义），点击调 onDispatchNow；组件不消费 dispatch_now 响应体
+ *     （dispatch_mode 三态由后端判定，不支持的引擎 ⚡ 降级 interrupt 接力），
+ *     不本地造已引导/已打断/已发送态，收敛统一走 SSE/load（R-04）；
+ *   - 降级标注（FR-05 / FR-02）：provider 不支持引导（provider-caps.ts 生成
+ *     镜像 steering=false，未知 provider 默认 false）时队列条渲染
+ *     「该引擎暂不支持引导」标注 chip——该引擎忙轮发送维持既有排队路径、
+ *     ⚡ 走 interrupt 接力降级，仅标注语义差异不拦截操作；能力数据源唯一
+ *     为生成镜像 provider-caps.ts（Grill P2-6，零新增手写能力源）；
  *   - ✎ 重新编辑（FR-06）：队列行下方展开单条 inline 编辑浮层（说明行 + textarea
  *     + 取消/保存；trim 非空才可保存，后端 422 双保险）；failed 条目浮层说明
  *     「保存后转为等待中并尝试派发」；TASK_WAKEUP 前缀（[后台任务通知]）系统通知
@@ -27,7 +36,8 @@
  *
  * 纯展示组件：不 fetch、不持队列真相、不引状态库；满员判断由父级传入的
  * entries/max 得出。三个新回调 onReorder / onEdit / onDispatchNow 均可选——
- * 未传时对应手柄/按钮不渲染（task-09 接线前 panel 既有挂载不受影响）。
+ * 未传时对应手柄/按钮不渲染（task-09 接线前 panel 既有挂载不受影响）；
+ * provider 同为可选——未传时不渲染降级标注（能力判断不在组件内臆断）。
  * 主题：品牌态用 brand-* 语义阶，错误态用 destructive 语义色；
  * 空队列返回 null（不渲染）。
  */
@@ -48,6 +58,7 @@ import { Button, Input, Tag, Tooltip } from "antd";
 
 import { cn } from "@/lib/utils";
 import type { QueueEntry } from "@/hooks/use-message-queue";
+import { getProviderCaps } from "@/lib/provider-caps";
 
 /** 摘要截断长度（design §3.2：prompt 前 40 字）。 */
 const SUMMARY_LIMIT = 40;
@@ -100,10 +111,19 @@ export interface MessageQueueBarProps {
    */
   onReorder?: (ids: string[]) => void;
   /**
-   * 立即发送（FR-05）：pending=打断当前轮优先派发该条，failed=直接派发；
+   * 立即发送（FR-05；引导语义见 2026-09-18-single-chat-steering FR-03）：
+   * pending=mid-turn 引导注入当前轮不打断（支持引导的引擎；不支持的引擎由
+   * 后端降级 interrupt 接力，组件不感知 dispatch_mode），failed=直接派发；
    * 未传时不渲染 ⚡ 按钮。
    */
   onDispatchNow?: (id: string) => void;
+  /**
+   * 会话 provider 标识（FR-05 降级标注 / FR-02 能力数据源）：经生成镜像
+   * frontend/src/lib/provider-caps.ts 的 getProviderCaps 查 steering 键，
+   * 不支持引导（未知 provider 默认 false）时队列条渲染「该引擎暂不支持
+   * 引导」标注 chip；未传时不渲染该标注（接线归父层，组件不臆断能力）。
+   */
+  provider?: string;
   /**
    * 重新编辑（FR-06）：编辑浮层保存（已 trim 非空）时回调新文本；
    * 未传时不渲染 ✎ 按钮。
@@ -119,6 +139,7 @@ export function MessageQueueBar({
   onReorder,
   onDispatchNow,
   onEdit,
+  provider,
 }: MessageQueueBarProps) {
   /** 当前展开查看完整内容的条目 id（点击条目切换；单条展开即可）。 */
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -149,6 +170,12 @@ export function MessageQueueBar({
     editingId != null && byId.has(editingId) ? byId.get(editingId) : undefined;
 
   const isFull = entries.length >= max;
+
+  // FR-05 降级标注：仅当父层传入 provider 且 steering=false（生成镜像唯一
+  // 能力源 provider-caps.ts，未知 provider 查询默认 false）才标注；未传
+  // provider 不臆断能力（接线前不渲染，既有挂载零回归）。
+  const steeringUnsupported =
+    provider !== undefined && !getProviderCaps(provider).steering;
 
   /** dragstart：记录被拖条目并声明 move 语义（原型 .chip.dragging；setData 兼容 Firefox）。 */
   const handleDragStart = (e: ReactDragEvent<HTMLDivElement>, id: string) => {
@@ -240,6 +267,18 @@ export function MessageQueueBar({
           <Tag color="warning" className="!m-0 shrink-0 !text-[11px]">
             队列已满（{entries.length}/{max}）
           </Tag>
+        )}
+
+        {/* FR-05 降级标注：steering 不支持的 provider（含未知默认 false）行级
+            提示；该引擎 ⚡ 仍可用（后端降级 interrupt 接力）、忙轮发送维持既有
+            排队路径，仅标注语义差异不拦截操作（Tag 惯例同满员提示/邻位
+            ScheduledMessagesBar）。 */}
+        {steeringUnsupported && (
+          <Tooltip title="该引擎暂不支持 mid-turn 引导注入：⚡ 立即发送仍会打断当前轮，忙轮发送维持现有排队路径">
+            <Tag color="warning" className="!m-0 shrink-0 cursor-help !text-[11px]">
+              该引擎暂不支持引导
+            </Tag>
+          </Tooltip>
         )}
 
         {displayEntries.map((entry) => {
@@ -347,12 +386,15 @@ export function MessageQueueBar({
                   </Tooltip>
                 )}
 
-                {/* FR-05 ⚡ 立即发送：pending=打断当前轮 / failed=直接派发；sending 不渲染。 */}
+                {/* FR-05 ⚡ 立即发送（引导语义，2026-09-18-single-chat-steering
+                    FR-03）：pending=mid-turn 引导注入当前轮不打断（不支持引导的
+                    引擎后端降级 interrupt 接力，组件不感知 dispatch_mode）/
+                    failed=直接派发；sending 不渲染。 */}
                 {onDispatchNow && entry.status !== "sending" && (
                   <Tooltip
                     title={
                       entry.status === "pending"
-                        ? "打断当前轮，立即发送这条"
+                        ? "立即引导进当前轮（不打断）"
                         : "立即发送这条"
                     }
                   >
@@ -363,7 +405,7 @@ export function MessageQueueBar({
                       onClick={() => onDispatchNow(entry.id)}
                       aria-label={
                         entry.status === "pending"
-                          ? "打断当前轮，立即发送这条"
+                          ? "立即引导进当前轮（不打断）"
                           : "立即发送这条"
                       }
                       className="!h-5 !min-w-0 !w-5 !p-0"
