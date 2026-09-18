@@ -146,6 +146,19 @@ class KnowledgeFileTooLarge(AppError):
     http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
+class KnowledgeFileEncodingInvalid(AppError):
+    """知识文件含非 UTF-8 字节（ql-20260918-005）。
+
+    ``_read_raw`` 读出的文本会经 merge 段一整文件回写（update 无备份）——
+    ``errors="replace"`` 解码会把非 UTF-8 字节（如 Windows GBK 手工编辑残留）
+    永久替换为 U+FFFD。严格解码 fail-loud：提示先在本机转 UTF-8 再操作，
+    文件不动。
+    """
+
+    code = "HTTP_422_KNOWLEDGE_FILE_ENCODING_INVALID"
+    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
 # ── CLI 语义复刻工具（与 knowledge-classify.js 逐字对齐，R-03）────────────────
 
 
@@ -351,14 +364,39 @@ class KnowledgeWriterService:
         return Path(spec_ws.spec_root) / "knowledge" / filename.replace("\\", "/")
 
     async def _read_raw(self, workspace_id: uuid.UUID, filename: str) -> str:
-        """原样读 knowledge/ 下文件（不经 parser——保留 CRLF/LF 原始字节，R-03）。"""
+        """原样读 knowledge/ 下文件（不经 parser——保留 CRLF/LF 原始字节，R-03）。
+
+        ql-20260918-005：严格 UTF-8 解码——读出的文本会被整文件回写（merge 段一
+        的 update 无备份），errors="replace" 会把非 UTF-8 字节永久替换为 U+FFFD；
+        坏编码 fail-loud 抛 ``KnowledgeFileEncodingInvalid``（文件不动，先转码）。
+        """
         target = await self._knowledge_path(workspace_id, filename)
         if not target.is_file():
             raise WorkspaceNotFound(
                 "知识库文件不存在，请刷新文件列表后重试。",
                 details={"workspace_id": str(workspace_id), "filename": filename},
             )
-        return target.read_bytes().decode("utf-8", errors="replace")
+        raw = target.read_bytes()
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise KnowledgeFileEncodingInvalid(
+                "文件含非 UTF-8 字节（可能在本机用 GBK 等编码保存过），继续合并/编辑"
+                "会永久损坏内容；请先在本机把文件转为 UTF-8 再操作。",
+                details={"filename": filename, "byte_offset": exc.start},
+            ) from exc
+
+    async def _read_index_raw(self, workspace_id: uuid.UUID) -> str:
+        """INDEX.md 原样读——缺失视作空内容（ql-20260918-005 M6）。
+
+        此前 merge/preview 前置读 INDEX 缺失直接 404（_insert_route_line 本身
+        支持 EOF 追加）；缺失时合并自动建首段（update op 无 manifest 行按新建
+        落 version 1）。
+        """
+        index_path = await self._knowledge_path(workspace_id, "INDEX.md")
+        if not index_path.is_file():
+            return ""
+        return await self._read_raw(workspace_id, "INDEX.md")
 
     def _frontmatter_author(self, user: User) -> str:
         return user.display_name or user.email or "unknown"
@@ -484,7 +522,8 @@ class KnowledgeWriterService:
         body = _extract_proposed_body(await self._read_raw(workspace_id, filename))
 
         target_raw = await self._read_raw(workspace_id, target)
-        index_raw = await self._read_raw(workspace_id, "INDEX.md")
+        # ql-20260918-005（M6）：INDEX.md 缺失视作空内容（不再 404，预览路由行照常）
+        index_raw = await self._read_index_raw(workspace_id)
         section_skipped = _has_section(target_raw.replace("\r\n", "\n"), section_title)
         route_line = build_route_line(target, section_title, keywords)
         index_line_skipped = _route_line_exists(
@@ -529,7 +568,8 @@ class KnowledgeWriterService:
         body = _extract_proposed_body(await self._read_raw(workspace_id, filename))
 
         target_raw = await self._read_raw(workspace_id, target)
-        index_raw = await self._read_raw(workspace_id, "INDEX.md")
+        # ql-20260918-005（M6）：INDEX.md 缺失视作空内容——合并自动建首段，不再 404
+        index_raw = await self._read_index_raw(workspace_id)
         target_norm = target_raw.replace("\r\n", "\n")
         index_norm = index_raw.replace("\r\n", "\n")
         display = f"{target}#{section_title}"
@@ -552,9 +592,16 @@ class KnowledgeWriterService:
             )
         if index_updated:
             index_eol = _detect_eol(index_raw)
-            new_index = index_eol.join(
-                _insert_route_line(index_norm, CATEGORY_SECTIONS[target], route_line).split("\n")
-            )
+            if index_norm.strip():
+                new_index = index_eol.join(
+                    _insert_route_line(index_norm, CATEGORY_SECTIONS[target], route_line).split(
+                        "\n"
+                    )
+                )
+            else:
+                # ql-20260918-005（M6）：INDEX 缺失/全空白——首段直接是分类标题 +
+                # 路由行（_insert_route_line 对空输入会留两个空行前导）
+                new_index = f"## {CATEGORY_SECTIONS[target]}\n{route_line}\n"
             stage1.append(
                 FileOp(
                     op="update",

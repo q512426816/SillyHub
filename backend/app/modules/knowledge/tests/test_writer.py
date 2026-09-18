@@ -640,3 +640,126 @@ class TestOversizedFileGuard:
             keywords=["预览"],
         )
         assert tail_marker in (preview.section_text or "")
+
+
+class TestMergeRobustness:
+    """ql-20260918-005：merge 两处健壮性（24h 审查 M3/M6）。
+
+    - M3：目标文件含非 UTF-8 字节（Windows GBK 手工编辑残留）时，_read_raw 的
+      errors="replace" 解码 + 整文件回写会把原字节永久替换为 U+FFFD 且 update 无
+      备份——改严格解码，坏编码 422 拒绝（文件不动），不静默毁坏。
+    - M6：知识树无 INDEX.md 时 merge/preview 前置读直接 404（_insert_route_line
+      本身支持 EOF 追加）——缺失视作空内容，合并时自动建首段。
+    """
+
+    async def test_merge_rejects_non_utf8_target_file(self, env, db_session) -> None:
+        from app.modules.knowledge.writer import KnowledgeFileEncodingInvalid
+
+        # patterns.md 直接写坏字节（GBK「中」= \xd6\xd0，非法 UTF-8）
+        target_path = env.spec_root / "knowledge" / "patterns.md"
+        corrupted = "# Patterns\n\n## \xd6\xd0\n\nGBK \xd6\xd0\xce\xc4\n".encode("latin-1")
+        target_path.write_bytes(corrupted)
+
+        writer = KnowledgeWriterService(db_session)
+        proposed = await writer.propose_manual(
+            env.ws.id, env.user, title="编码守卫候选", category="pattern", body="正文。"
+        )
+
+        with pytest.raises(KnowledgeFileEncodingInvalid) as ei:
+            await writer.merge(
+                env.ws.id,
+                env.user,
+                filename=proposed.filename,
+                target_file="patterns.md",
+                section_title="编码守卫",
+                keywords=["编码"],
+            )
+        assert ei.value.http_status == 422
+        # 坏字节原样保留（未被 U+FFFD 回写毁坏），候选保留未删
+        assert target_path.read_bytes() == corrupted
+        assert (env.spec_root / "knowledge" / proposed.filename).is_file()
+
+    async def test_preview_merge_rejects_non_utf8_target_file(self, env, db_session) -> None:
+        from app.modules.knowledge.writer import KnowledgeFileEncodingInvalid
+
+        target_path = env.spec_root / "knowledge" / "patterns.md"
+        target_path.write_bytes(b"# Patterns\n\n## \xb1\xed\n")
+        writer = KnowledgeWriterService(db_session)
+        proposed = await writer.propose_manual(
+            env.ws.id, env.user, title="预览编码候选", category="pattern", body="正文。"
+        )
+
+        with pytest.raises(KnowledgeFileEncodingInvalid):
+            await writer.preview_merge(
+                env.ws.id,
+                filename=proposed.filename,
+                target_file="patterns.md",
+                section_title="预览编码",
+                keywords=["编码"],
+            )
+        assert target_path.read_bytes() == b"# Patterns\n\n## \xb1\xed\n"
+
+    async def test_merge_without_index_creates_first_section(self, env, db_session) -> None:
+        """M6：INDEX.md 缺失（平台删除走备份区）时 merge 不再 404——自动建
+        首段（分类标题 + 路由行），候选照常删除。"""
+        index_path = env.spec_root / "knowledge" / "INDEX.md"
+        index_row = await _manifest_row(db_session, env.ws.id, "knowledge/INDEX.md")
+        assert index_row is not None
+        await SpecWorkspaceService(db_session).apply_ops(
+            env.ws.id,
+            [
+                FileOp(
+                    op="delete",
+                    path="knowledge/INDEX.md",
+                    base_version=index_row.version,
+                )
+            ],
+        )
+        assert not index_path.exists()
+
+        writer = KnowledgeWriterService(db_session)
+        proposed = await writer.propose_manual(
+            env.ws.id, env.user, title="无索引候选", category="pattern", body="正文。"
+        )
+
+        result = await writer.merge(
+            env.ws.id,
+            env.user,
+            filename=proposed.filename,
+            target_file="patterns.md",
+            section_title="无索引小节",
+            keywords=["索引"],
+        )
+        assert result.merged is True
+
+        index_raw = index_path.read_text(encoding="utf-8")
+        # 自动建首段：分类标题 + 路由行（无空段前导）
+        assert index_raw.startswith("## Patterns\n")
+        assert "[patterns.md#无索引小节](patterns.md#无索引小节)" in index_raw
+        # 目标文件照常追加、候选照常删除
+        assert "无索引小节" in (env.spec_root / "knowledge" / "patterns.md").read_text(
+            encoding="utf-8"
+        )
+        assert not (env.spec_root / "knowledge" / proposed.filename).exists()
+
+    async def test_preview_merge_without_index_ok(self, env, db_session) -> None:
+        """M6：INDEX.md 缺失时 preview_merge 也不 404（路由行提示可预览）。"""
+        index_row = await _manifest_row(db_session, env.ws.id, "knowledge/INDEX.md")
+        await SpecWorkspaceService(db_session).apply_ops(
+            env.ws.id,
+            [FileOp(op="delete", path="knowledge/INDEX.md", base_version=index_row.version)],
+        )
+        writer = KnowledgeWriterService(db_session)
+        proposed = await writer.propose_manual(
+            env.ws.id, env.user, title="无索引预览", category="pattern", body="正文。"
+        )
+
+        preview = await writer.preview_merge(
+            env.ws.id,
+            filename=proposed.filename,
+            target_file="patterns.md",
+            section_title="无索引预览小节",
+            keywords=["预览"],
+        )
+        assert preview.index_line_skipped is False
+        assert "patterns.md#无索引预览小节" in preview.index_line

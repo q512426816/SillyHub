@@ -431,3 +431,12 @@
 审计：📎 文档引用失效：1/2 处 file:line 失效（sillyspec docs check 可复现）
 审计：   ❌ [docs/sillyspec/external-mode-no-root-session-resolution.md:76] test_worker_subsession_done.py::TestExternalModeWorkerDone → 文件不存在（含 / 按仓库根解析；裸文件名在 src/ 递归）
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/external-mode-no-root-session-resolution.md
+
+## ql-20260918-005-5d83 | 2026-09-18 08:21:50 | knowledge merge 两处健壮性——非 UTF-8 字节严格解码拒写 + INDEX.md 缺失自动建首段
+状态：已完成
+关联变更：（无）
+文件：.sillyspec/docs/SillyHub/modules/knowledge.md（+6/-0）, backend/app/modules/knowledge/tests/test_writer.py（+123/-0）, backend/app/modules/knowledge/writer.py（+54/-7）
+需求：knowledge merge 两处健壮性——非 UTF-8 字节严格解码拒写 + INDEX.md 缺失自动建首段
+根因：_read_raw 用 errors=replace 解码后 merge 段一整文件回写，目标文件非 UTF-8 字节（Windows GBK 手工编辑残留）被永久替换为 U+FFFD 且 update 无备份；merge/preview 前置读 INDEX.md 缺失抛 404，_insert_route_line 本身支持 EOF 追加但前置读失败使合并整体不可用
+方案：_read_raw 改严格 UTF-8 解码，UnicodeDecodeError 抛新增 KnowledgeFileEncodingInvalid 422（byte_offset 入 details，文件不动）；新增 _read_index_raw 缺失返回空串，merge 空 INDEX 特判首段格式为分类标题+路由行，update 无 manifest 行按新建落 version 1
+结果：test_writer 22 全绿（新增 4 例：merge/preview 坏编码 422+原字节未动+候选保留、INDEX 删除后 merge 自动建首段/preview 不 404）+ test_router/test_parser 39 绿；ruff/scoped mypy 0

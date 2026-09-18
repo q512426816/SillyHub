@@ -1,0 +1,251 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/knowledge.md b/.sillyspec/docs/SillyHub/modules/knowledge.md
+index 557994da1..a567be3cc 100644
+--- a/.sillyspec/docs/SillyHub/modules/knowledge.md
++++ b/.sillyspec/docs/SillyHub/modules/knowledge.md
+@@ -54,3 +54,9 @@ get(ws, filename) → 同上全量解析后按 filename 匹配（include_content
+ - **merge / preview_merge 原样读**：候选正文从 `entry.content`（parser 截断路径）改 `_read_raw(workspace_id, filename)`，截断边界外内容完整并入目标/预览；zone 校验仍走 reader。
+ - **前端配套**（entry-editor.tsx）：保存成功提示去掉「旧内容已备份」——apply_ops 的 update 不进 spec-backups（仅 delete 备份），原文案与实际语义不符。
+ - **验证**：test_writer 新增 3 用例（超限编辑 422 + 磁盘原文未动、merge/preview 合并内容含 >250KB 处尾部标记、候选删除断言）；test_writer 14 + test_router 24 + queue/inject 相邻面全绿；ruff/mypy（scoped）0。
++
++## 增量（ql-20260918-005：merge 两处健壮性——非 UTF-8 字节严格解码拒写 + INDEX.md 缺失自动建首段）
++
++- **背景（24h 审查 M3/M6）**：①`_read_raw` 用 `errors="replace"` 解码后 merge 段一整文件回写——目标文件的非 UTF-8 字节（Windows GBK 手工编辑残留）被永久替换为 U+FFFD 且 update 无备份；②merge/preview 前置 `_read_raw("INDEX.md")` 对缺失文件抛 WorkspaceNotFound（404），`_insert_route_line` 本身支持 EOF 追加但前置读失败使合并整体不可用、无自动初始化路径。
++- **修法**（writer.py）：①`_read_raw` 改严格 UTF-8 解码，`UnicodeDecodeError` 抛新增 `KnowledgeFileEncodingInvalid` 422（details 带 byte_offset，文件不动，提示本机转码后再操作）——所有回写路径（目标/INDEX/候选）统一收口；②新增 `_read_index_raw`（缺失返回空串），merge 对空 INDEX 特判首段格式 `## <分类>\n<路由行>\n`（`_insert_route_line` 空输入会留两个空行前导），update op 无 manifest 行按新建落 version 1。
++- **验证**：test_writer 22（新增 4：merge/preview 坏编码 422+原字节未动+候选保留、INDEX 删除后 merge 自动建首段/preview 不 404）+ test_router/test_parser 39 全绿；ruff/mypy（scoped）0。
+diff --git a/backend/app/modules/knowledge/tests/test_writer.py b/backend/app/modules/knowledge/tests/test_writer.py
+index 4a14c0ac4..3a22d5357 100644
+--- a/backend/app/modules/knowledge/tests/test_writer.py
++++ b/backend/app/modules/knowledge/tests/test_writer.py
+@@ -640,3 +640,126 @@ class TestOversizedFileGuard:
+             keywords=["预览"],
+         )
+         assert tail_marker in (preview.section_text or "")
++
++
++class TestMergeRobustness:
++    """ql-20260918-005：merge 两处健壮性（24h 审查 M3/M6）。
++
++    - M3：目标文件含非 UTF-8 字节（Windows GBK 手工编辑残留）时，_read_raw 的
++      errors="replace" 解码 + 整文件回写会把原字节永久替换为 U+FFFD 且 update 无
++      备份——改严格解码，坏编码 422 拒绝（文件不动），不静默毁坏。
++    - M6：知识树无 INDEX.md 时 merge/preview 前置读直接 404（_insert_route_line
++      本身支持 EOF 追加）——缺失视作空内容，合并时自动建首段。
++    """
++
++    async def test_merge_rejects_non_utf8_target_file(self, env, db_session) -> None:
++        from app.modules.knowledge.writer import KnowledgeFileEncodingInvalid
++
++        # patterns.md 直接写坏字节（GBK「中」= \xd6\xd0，非法 UTF-8）
++        target_path = env.spec_root / "knowledge" / "patterns.md"
++        corrupted = "# Patterns\n\n## \xd6\xd0\n\nGBK \xd6\xd0\xce\xc4\n".encode("latin-1")
++        target_path.write_bytes(corrupted)
++
++        writer = KnowledgeWriterService(db_session)
++        proposed = await writer.propose_manual(
++            env.ws.id, env.user, title="编码守卫候选", category="pattern", body="正文。"
++        )
++
++        with pytest.raises(KnowledgeFileEncodingInvalid) as ei:
++            await writer.merge(
++                env.ws.id,
++                env.user,
++                filename=proposed.filename,
++                target_file="patterns.md",
++                section_title="编码守卫",
++                keywords=["编码"],
++            )
++        assert ei.value.http_status == 422
++        # 坏字节原样保留（未被 U+FFFD 回写毁坏），候选保留未删
++        assert target_path.read_bytes() == corrupted
++        assert (env.spec_root / "knowledge" / proposed.filename).is_file()
++
++    async def test_preview_merge_rejects_non_utf8_target_file(self, env, db_session) -> None:
++        from app.modules.knowledge.writer import KnowledgeFileEncodingInvalid
++
++        target_path = env.spec_root / "knowledge" / "patterns.md"
++        target_path.write_bytes(b"# Patterns\n\n## \xb1\xed\n")
++        writer = KnowledgeWriterService(db_session)
++        proposed = await writer.propose_manual(
++            env.ws.id, env.user, title="预览编码候选", category="pattern", body="正文。"
++        )
++
++        with pytest.raises(KnowledgeFileEncodingInvalid):
++            await writer.preview_merge(
++                env.ws.id,
++                filename=proposed.filename,
++                target_file="patterns.md",
++                section_title="预览编码",
++                keywords=["编码"],
++            )
++        assert target_path.read_bytes() == b"# Patterns\n\n## \xb1\xed\n"
++
++    async def test_merge_without_index_creates_first_section(self, env, db_session) -> None:
++        """M6：INDEX.md 缺失（平台删除走备份区）时 merge 不再 404——自动建
++        首段（分类标题 + 路由行），候选照常删除。"""
++        index_path = env.spec_root / "knowledge" / "INDEX.md"
++        index_row = await _manifest_row(db_session, env.ws.id, "knowledge/INDEX.md")
++        assert index_row is not None
++        await SpecWorkspaceService(db_session).apply_ops(
++            env.ws.id,
++            [
++                FileOp(
++                    op="delete",
++                    path="knowledge/INDEX.md",
++                    base_version=index_row.version,
++                )
++            ],
++        )
++        assert not index_path.exists()
++
++        writer = KnowledgeWriterService(db_session)
++        proposed = await writer.propose_manual(
++            env.ws.id, env.user, title="无索引候选", category="pattern", body="正文。"
++        )
++
++        result = await writer.merge(
++            env.ws.id,
++            env.user,
++            filename=proposed.filename,
++            target_file="patterns.md",
++            section_title="无索引小节",
++            keywords=["索引"],
++        )
++        assert result.merged is True
++
++        index_raw = index_path.read_text(encoding="utf-8")
++        # 自动建首段：分类标题 + 路由行（无空段前导）
++        assert index_raw.startswith("## Patterns\n")
++        assert "[patterns.md#无索引小节](patterns.md#无索引小节)" in index_raw
++        # 目标文件照常追加、候选照常删除
++        assert "无索引小节" in (env.spec_root / "knowledge" / "patterns.md").read_text(
++            encoding="utf-8"
++        )
++        assert not (env.spec_root / "knowledge" / proposed.filename).exists()
++
++    async def test_preview_merge_without_index_ok(self, env, db_session) -> None:
++        """M6：INDEX.md 缺失时 preview_merge 也不 404（路由行提示可预览）。"""
++        index_row = await _manifest_row(db_session, env.ws.id, "knowledge/INDEX.md")
++        await SpecWorkspaceService(db_session).apply_ops(
++            env.ws.id,
++            [FileOp(op="delete", path="knowledge/INDEX.md", base_version=index_row.version)],
++        )
++        writer = KnowledgeWriterService(db_session)
++        proposed = await writer.propose_manual(
++            env.ws.id, env.user, title="无索引预览", category="pattern", body="正文。"
++        )
++
++        preview = await writer.preview_merge(
++            env.ws.id,
++            filename=proposed.filename,
++            target_file="patterns.md",
++            section_title="无索引预览小节",
++            keywords=["预览"],
++        )
++        assert preview.index_line_skipped is False
++        assert "patterns.md#无索引预览小节" in preview.index_line
+diff --git a/backend/app/modules/knowledge/writer.py b/backend/app/modules/knowledge/writer.py
+index 6af728548..172f8facd 100644
+--- a/backend/app/modules/knowledge/writer.py
++++ b/backend/app/modules/knowledge/writer.py
+@@ -146,6 +146,19 @@ class KnowledgeFileTooLarge(AppError):
+     http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+ 
+ 
++class KnowledgeFileEncodingInvalid(AppError):
++    """知识文件含非 UTF-8 字节（ql-20260918-005）。
++
++    ``_read_raw`` 读出的文本会经 merge 段一整文件回写（update 无备份）——
++    ``errors="replace"`` 解码会把非 UTF-8 字节（如 Windows GBK 手工编辑残留）
++    永久替换为 U+FFFD。严格解码 fail-loud：提示先在本机转 UTF-8 再操作，
++    文件不动。
++    """
++
++    code = "HTTP_422_KNOWLEDGE_FILE_ENCODING_INVALID"
++    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
++
++
+ # ── CLI 语义复刻工具（与 knowledge-classify.js 逐字对齐，R-03）────────────────
+ 
+ 
+@@ -351,14 +364,39 @@ class KnowledgeWriterService:
+         return Path(spec_ws.spec_root) / "knowledge" / filename.replace("\\", "/")
+ 
+     async def _read_raw(self, workspace_id: uuid.UUID, filename: str) -> str:
+-        """原样读 knowledge/ 下文件（不经 parser——保留 CRLF/LF 原始字节，R-03）。"""
++        """原样读 knowledge/ 下文件（不经 parser——保留 CRLF/LF 原始字节，R-03）。
++
++        ql-20260918-005：严格 UTF-8 解码——读出的文本会被整文件回写（merge 段一
++        的 update 无备份），errors="replace" 会把非 UTF-8 字节永久替换为 U+FFFD；
++        坏编码 fail-loud 抛 ``KnowledgeFileEncodingInvalid``（文件不动，先转码）。
++        """
+         target = await self._knowledge_path(workspace_id, filename)
+         if not target.is_file():
+             raise WorkspaceNotFound(
+                 "知识库文件不存在，请刷新文件列表后重试。",
+                 details={"workspace_id": str(workspace_id), "filename": filename},
+             )
+-        return target.read_bytes().decode("utf-8", errors="replace")
++        raw = target.read_bytes()
++        try:
++            return raw.decode("utf-8")
++        except UnicodeDecodeError as exc:
++            raise KnowledgeFileEncodingInvalid(
++                "文件含非 UTF-8 字节（可能在本机用 GBK 等编码保存过），继续合并/编辑"
++                "会永久损坏内容；请先在本机把文件转为 UTF-8 再操作。",
++                details={"filename": filename, "byte_offset": exc.start},
++            ) from exc
++
++    async def _read_index_raw(self, workspace_id: uuid.UUID) -> str:
++        """INDEX.md 原样读——缺失视作空内容（ql-20260918-005 M6）。
++
++        此前 merge/preview 前置读 INDEX 缺失直接 404（_insert_route_line 本身
++        支持 EOF 追加）；缺失时合并自动建首段（update op 无 manifest 行按新建
++        落 version 1）。
++        """
++        index_path = await self._knowledge_path(workspace_id, "INDEX.md")
++        if not index_path.is_file():
++            return ""
++        return await self._read_raw(workspace_id, "INDEX.md")
+ 
+     def _frontmatter_author(self, user: User) -> str:
+         return user.display_name or user.email or "unknown"
+@@ -484,7 +522,8 @@ class KnowledgeWriterService:
+         body = _extract_proposed_body(await self._read_raw(workspace_id, filename))
+ 
+         target_raw = await self._read_raw(workspace_id, target)
+-        index_raw = await self._read_raw(workspace_id, "INDEX.md")
++        # ql-20260918-005（M6）：INDEX.md 缺失视作空内容（不再 404，预览路由行照常）
++        index_raw = await self._read_index_raw(workspace_id)
+         section_skipped = _has_section(target_raw.replace("\r\n", "\n"), section_title)
+         route_line = build_route_line(target, section_title, keywords)
+         index_line_skipped = _route_line_exists(
+@@ -529,7 +568,8 @@ class KnowledgeWriterService:
+         body = _extract_proposed_body(await self._read_raw(workspace_id, filename))
+ 
+         target_raw = await self._read_raw(workspace_id, target)
+-        index_raw = await self._read_raw(workspace_id, "INDEX.md")
++        # ql-20260918-005（M6）：INDEX.md 缺失视作空内容——合并自动建首段，不再 404
++        index_raw = await self._read_index_raw(workspace_id)
+         target_norm = target_raw.replace("\r\n", "\n")
+         index_norm = index_raw.replace("\r\n", "\n")
+         display = f"{target}#{section_title}"
+@@ -552,9 +592,16 @@ class KnowledgeWriterService:
+             )
+         if index_updated:
+             index_eol = _detect_eol(index_raw)
+-            new_index = index_eol.join(
+-                _insert_route_line(index_norm, CATEGORY_SECTIONS[target], route_line).split("\n")
+-            )
++            if index_norm.strip():
++                new_index = index_eol.join(
++                    _insert_route_line(index_norm, CATEGORY_SECTIONS[target], route_line).split(
++                        "\n"
++                    )
++                )
++            else:
++                # ql-20260918-005（M6）：INDEX 缺失/全空白——首段直接是分类标题 +
++                # 路由行（_insert_route_line 对空输入会留两个空行前导）
++                new_index = f"## {CATEGORY_SECTIONS[target]}\n{route_line}\n"
+             stage1.append(
+                 FileOp(
+                     op="update",

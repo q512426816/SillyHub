@@ -54,3 +54,9 @@ get(ws, filename) → 同上全量解析后按 filename 匹配（include_content
 - **merge / preview_merge 原样读**：候选正文从 `entry.content`（parser 截断路径）改 `_read_raw(workspace_id, filename)`，截断边界外内容完整并入目标/预览；zone 校验仍走 reader。
 - **前端配套**（entry-editor.tsx）：保存成功提示去掉「旧内容已备份」——apply_ops 的 update 不进 spec-backups（仅 delete 备份），原文案与实际语义不符。
 - **验证**：test_writer 新增 3 用例（超限编辑 422 + 磁盘原文未动、merge/preview 合并内容含 >250KB 处尾部标记、候选删除断言）；test_writer 14 + test_router 24 + queue/inject 相邻面全绿；ruff/mypy（scoped）0。
+
+## 增量（ql-20260918-005：merge 两处健壮性——非 UTF-8 字节严格解码拒写 + INDEX.md 缺失自动建首段）
+
+- **背景（24h 审查 M3/M6）**：①`_read_raw` 用 `errors="replace"` 解码后 merge 段一整文件回写——目标文件的非 UTF-8 字节（Windows GBK 手工编辑残留）被永久替换为 U+FFFD 且 update 无备份；②merge/preview 前置 `_read_raw("INDEX.md")` 对缺失文件抛 WorkspaceNotFound（404），`_insert_route_line` 本身支持 EOF 追加但前置读失败使合并整体不可用、无自动初始化路径。
+- **修法**（writer.py）：①`_read_raw` 改严格 UTF-8 解码，`UnicodeDecodeError` 抛新增 `KnowledgeFileEncodingInvalid` 422（details 带 byte_offset，文件不动，提示本机转码后再操作）——所有回写路径（目标/INDEX/候选）统一收口；②新增 `_read_index_raw`（缺失返回空串），merge 对空 INDEX 特判首段格式 `## <分类>\n<路由行>\n`（`_insert_route_line` 空输入会留两个空行前导），update op 无 manifest 行按新建落 version 1。
+- **验证**：test_writer 22（新增 4：merge/preview 坏编码 422+原字节未动+候选保留、INDEX 删除后 merge 自动建首段/preview 不 404）+ test_router/test_parser 39 全绿；ruff/mypy（scoped）0。
