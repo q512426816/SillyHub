@@ -41,6 +41,7 @@ from app.modules.auth.model import User
 from app.modules.change.model import Change
 from app.modules.daemon.schema import DISTILL_SESSION_ORIGIN, SessionReopenResponse
 from app.modules.daemon.session.service import SessionService
+from app.modules.daemon.session.service.errors import DaemonSessionNotActive
 from app.modules.daemon.session.service.results import SessionDispatchResult
 from app.modules.knowledge import distill as distill_module
 from app.modules.knowledge.distill import (
@@ -1132,3 +1133,94 @@ async def test_dispatch_fresh_failure_recycles_draft_attachment_row(
     assert created_ids, "前置自检：上传确实发生"
     row = await db_session.get(SessionAttachment, created_ids[0])
     assert row is None, "失败分支应回收附件草稿行"
+
+
+# ql-20260918-001：reconnecting 恢复窗口重试（一次点击报 not active 需二连点）
+async def test_dispatch_resume_reconnecting_recovers_then_injects(
+    db_session, tmp_path, auth_admin_token, monkeypatch
+) -> None:
+    """inject 撞 reconnecting → 窗口轮询翻回 active → 重试 inject 成功。"""
+    ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
+    session = await _make_session_record(db_session, user.id, turn_count=3, status="reconnecting")
+    inject_calls = {"n": 0}
+
+    async def _fake_inject(self, session_id, user_id, *, prompt, **kwargs):
+        inject_calls["n"] += 1
+        if inject_calls["n"] == 1:
+            raise DaemonSessionNotActive(
+                f"AgentSession '{session_id}' is not active (status=reconnecting)."
+            )
+        run = _make_run(db_session)
+        await db_session.commit()
+        return SessionDispatchResult(agent_session=session, agent_run=run, lease_id=uuid.uuid4())
+
+    async def _fast_wait(self, svc, session_id, user_id, **kwargs):
+        session.status = "active"
+        db_session.add(session)
+        await db_session.commit()
+        return True
+
+    monkeypatch.setattr(SessionService, "inject_session", _fake_inject)
+    monkeypatch.setattr(DistillDispatchService, "_wait_session_reconnect", _fast_wait)
+
+    task_read = await DistillDispatchService(db_session).dispatch(
+        ws.id, user, source_type="session", source_ref=str(session.id), mode="resume"
+    )
+    assert inject_calls["n"] == 2
+    assert task_read.mode == "resume"
+
+
+async def test_dispatch_resume_reconnecting_timeout_raises_friendly(
+    db_session, tmp_path, auth_admin_token, monkeypatch
+) -> None:
+    """窗口耗尽仍 reconnecting → 语义化 DistillSourceInvalid（引导稍后重试/切新建）。"""
+    ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
+    session = await _make_session_record(db_session, user.id, turn_count=3, status="reconnecting")
+
+    async def _fake_inject(self, session_id, user_id, *, prompt, **kwargs):
+        raise DaemonSessionNotActive(
+            f"AgentSession '{session_id}' is not active (status=reconnecting)."
+        )
+
+    async def _no_wait(self, svc, session_id, user_id, **kwargs):
+        return False
+
+    monkeypatch.setattr(SessionService, "inject_session", _fake_inject)
+    monkeypatch.setattr(DistillDispatchService, "_wait_session_reconnect", _no_wait)
+
+    with pytest.raises(DistillSourceInvalid) as exc_info:
+        await DistillDispatchService(db_session).dispatch(
+            ws.id, user, source_type="session", source_ref=str(session.id), mode="resume"
+        )
+    assert "正在恢复中" in str(exc_info.value)
+
+
+async def test_dispatch_resume_not_active_other_status_reraises(
+    db_session, tmp_path, auth_admin_token, monkeypatch
+) -> None:
+    """非 reconnecting 的 NotActive（如 suspended 竞态）原样上抛，不进重试。"""
+    ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
+    session = await _make_session_record(db_session, user.id, turn_count=3, status="ended")
+    # ended → plan=reopen；reopen 后状态竞态变 suspended → inject 抛 NotActive
+    session2 = session
+    waited = {"n": 0}
+
+    async def _fake_reopen(self, session_id, user_id):
+        return SessionReopenResponse(session_id=str(session_id), status="reconnecting")
+
+    async def _fake_inject(self, session_id, user_id, *, prompt, **kwargs):
+        session2.status = "suspended"
+        db_session.add(session2)
+        await db_session.commit()
+        raise DaemonSessionNotActive(
+            f"AgentSession '{session_id}' is not active (status=suspended)."
+        )
+
+    monkeypatch.setattr(SessionService, "reopen_session", _fake_reopen)
+    monkeypatch.setattr(SessionService, "inject_session", _fake_inject)
+
+    with pytest.raises(DaemonSessionNotActive):
+        await DistillDispatchService(db_session).dispatch(
+            ws.id, user, source_type="session", source_ref=str(session.id), mode="resume"
+        )
+    assert waited == {"n": 0}

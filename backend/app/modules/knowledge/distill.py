@@ -64,6 +64,7 @@ task-07 + D-009 续接分流 + D-010 闭环增强 + D-008 取数通道/回流指
 
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 from datetime import UTC, datetime
@@ -592,7 +593,35 @@ class DistillDispatchService:
             svc = self._session_service()
             if not resume_inject_only:
                 await svc.reopen_session(resume_session_id, user.id)
-            result = await svc.inject_session(resume_session_id, user.id, prompt=prompt)
+            try:
+                result = await svc.inject_session(resume_session_id, user.id, prompt=prompt)
+            except DaemonSessionNotActive as exc:
+                # reconnecting 恢复窗口重试（ql-20260918-001）：reconnecting ∈
+                # ACTIVE 使 plan 判 inject，但 inject 硬校验仅放行 active——恢复
+                # 中会话一次点击报「not active (status=reconnecting)」需二连点。
+                # 窗口内轮询等 daemon 恢复（reconnecting→active 通常秒级）后重试
+                # inject；超窗仍卡住说明恢复停滞（daemon 离线等），语义化引导
+                # 而非裸抛（此时降级 fresh 也无意义——daemon 不在线同样失败）。
+                session = await svc.get_agent_session(resume_session_id, user.id)
+                if session is not None and session.status == "reconnecting":
+                    log.info(
+                        "knowledge_distill_resume_reconnect_wait",
+                        session_id=str(resume_session_id),
+                    )
+                    if await self._wait_session_reconnect(svc, resume_session_id, user.id):
+                        result = await svc.inject_session(resume_session_id, user.id, prompt=prompt)
+                    else:
+                        raise DistillSourceInvalid(
+                            "原会话正在恢复中（daemon 重连较慢），请稍等片刻重试，"
+                            "或改用「新建 agent」模式派发。",
+                            details={
+                                "source_type": source_type,
+                                "source_ref": refs[0],
+                                "session_status": "reconnecting",
+                            },
+                        ) from exc
+                else:
+                    raise
             run = await self._mark_task_run(
                 workspace_id,
                 base_meta,
@@ -725,6 +754,32 @@ class DistillDispatchService:
         if agent_session.status in ("ended", "failed"):
             return "reopen"
         return "degrade_status"
+
+    async def _wait_session_reconnect(
+        self,
+        svc,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        attempts: int = 5,
+        interval_sec: float = 2.0,
+    ) -> bool:
+        """reconnecting 恢复窗口轮询（ql-20260918-001）。
+
+        等会话翻回 active（daemon 重连恢复通常秒级；RECONNECTING_RETRY_WINDOW
+        分钟级，此处只等 10s 常态窗口）。翻回 active → True（调用方重试
+        inject）；窗口内变终态（ended/failed 等）或一直 reconnecting → False。
+        """
+        for _ in range(attempts):
+            await asyncio.sleep(interval_sec)
+            session = await svc.get_agent_session(session_id, user_id)
+            if session is None:
+                return False
+            if session.status == "active":
+                return True
+            if session.status != "reconnecting":
+                return False
+        return False
 
     async def _mark_task_run(
         self,
@@ -950,4 +1005,5 @@ from app.modules.daemon.session.service.create import (  # noqa: E402
 )
 from app.modules.daemon.session.service.errors import (  # noqa: E402
     DaemonSessionAttachmentsUnsupported,
+    DaemonSessionNotActive,
 )
