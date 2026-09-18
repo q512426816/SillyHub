@@ -642,6 +642,58 @@ class TestOversizedFileGuard:
         assert tail_marker in (preview.section_text or "")
 
 
+class TestUpdateEncodingGuard:
+    """ql-20260919-001：update_entry 坏编码守卫（24h 审查 M1 残余缺口）。
+
+    GET 经 parser._read_file_safe 以 errors="replace" 解码，非 UTF-8 文件回传
+    给编辑器的基底已被 U+FFFD 顶替——整文件替换保存会把原始字节永久毁坏且
+    update 不进 spec-backups（仅 delete 备份）。磁盘原文严格解码失败即 422
+    拒写，口径对齐 merge 路径（ql-20260918-005 M3）。
+    """
+
+    async def test_update_entry_rejects_non_utf8_file(self, env, db_session) -> None:
+        from app.modules.knowledge.writer import KnowledgeFileEncodingInvalid
+
+        # patterns.md 直接写坏字节（GBK「中文」= \xd6\xd0\xce\xc4，非法 UTF-8）
+        target_path = env.spec_root / "knowledge" / "patterns.md"
+        corrupted = "# Patterns\n\n## \xd6\xd0\xce\xc4\n\nGBK \xd6\xd0\xce\xc4\n".encode("latin-1")
+        target_path.write_bytes(corrupted)
+
+        # 前置自检：GET 回传基底确已被替换字符顶替（毁坏向量成立）
+        reader_entry = await KnowledgeService(db_session).get_knowledge(env.ws.id, "patterns.md")
+        assert "\ufffd" in (reader_entry.content or "")
+
+        row_before = await _manifest_row(db_session, env.ws.id, "knowledge/patterns.md")
+        assert row_before is not None
+
+        writer = KnowledgeWriterService(db_session)
+        with pytest.raises(KnowledgeFileEncodingInvalid) as ei:
+            await writer.update_entry(
+                env.ws.id,
+                env.user,
+                filename="patterns.md",
+                content="# Patterns\n\n## 已被替换字符顶替的编辑基底\n",
+            )
+        assert ei.value.http_status == 422
+        assert "转为 UTF-8" in ei.value.message
+        # 坏字节原样保留（未被整文件替换毁坏），manifest 版本未动
+        assert target_path.read_bytes() == corrupted
+        row_after = await _manifest_row(db_session, env.ws.id, "knowledge/patterns.md")
+        assert row_after is not None
+        assert row_after.version == row_before.version
+
+    async def test_update_entry_utf8_chinese_still_roundtrip(self, env, db_session) -> None:
+        """对照组：合法 UTF-8 中文文件不受坏编码守卫误伤。"""
+        writer = KnowledgeWriterService(db_session)
+        updated = await writer.update_entry(
+            env.ws.id,
+            env.user,
+            filename="patterns.md",
+            content="# Patterns\n\n## 中文小节\n\n正常 UTF-8 正文，含「中文」与 ✅。\n",
+        )
+        assert "中文小节" in (updated.content or "")
+
+
 class TestMergeRobustness:
     """ql-20260918-005：merge 两处健壮性（24h 审查 M3/M6）。
 

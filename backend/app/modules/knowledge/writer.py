@@ -147,16 +147,33 @@ class KnowledgeFileTooLarge(AppError):
 
 
 class KnowledgeFileEncodingInvalid(AppError):
-    """知识文件含非 UTF-8 字节（ql-20260918-005）。
+    """知识文件含非 UTF-8 字节（ql-20260918-005 / ql-20260919-001）。
 
-    ``_read_raw`` 读出的文本会经 merge 段一整文件回写（update 无备份）——
-    ``errors="replace"`` 解码会把非 UTF-8 字节（如 Windows GBK 手工编辑残留）
-    永久替换为 U+FFFD。严格解码 fail-loud：提示先在本机转 UTF-8 再操作，
-    文件不动。
+    两条整文件回写路径共用本错误：merge 段经 ``_read_raw`` 读出后回写（目标/
+    INDEX/候选），以及网页编辑 ``update_entry``（GET 基底经 parser
+    ``errors="replace"`` 已被 U+FFFD 顶替，整文件替换保存同样毁坏原文）——
+    update 均不进 spec-backups（仅 delete 备份），坏字节一旦回写不可恢复。
+    严格解码 fail-loud：提示先在本机转 UTF-8 再操作，文件不动。
     """
 
     code = "HTTP_422_KNOWLEDGE_FILE_ENCODING_INVALID"
     http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+def _decode_knowledge_strict(raw: bytes, filename: str) -> str:
+    """严格 UTF-8 解码——坏字节抛 :class:`KnowledgeFileEncodingInvalid`。
+
+    ql-20260919-001：从 ``_read_raw`` 收敛为共享 helper——update_entry 只需
+    探测不需内容，与 merge 回写路径同一解码口径、同一错误形态。
+    """
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise KnowledgeFileEncodingInvalid(
+            "文件含非 UTF-8 字节（可能在本机用 GBK 等编码保存过），继续编辑/合并"
+            "保存会永久损坏原文；请先在本机把文件转为 UTF-8 再操作。",
+            details={"filename": filename, "byte_offset": exc.start},
+        ) from exc
 
 
 # ── CLI 语义复刻工具（与 knowledge-classify.js 逐字对齐，R-03）────────────────
@@ -376,15 +393,9 @@ class KnowledgeWriterService:
                 "知识库文件不存在，请刷新文件列表后重试。",
                 details={"workspace_id": str(workspace_id), "filename": filename},
             )
-        raw = target.read_bytes()
-        try:
-            return raw.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise KnowledgeFileEncodingInvalid(
-                "文件含非 UTF-8 字节（可能在本机用 GBK 等编码保存过），继续合并/编辑"
-                "会永久损坏内容；请先在本机把文件转为 UTF-8 再操作。",
-                details={"filename": filename, "byte_offset": exc.start},
-            ) from exc
+        # ql-20260919-001：解码口径收敛到 _decode_knowledge_strict 共享 helper
+        # （update_entry 探测路径与 merge 回写路径同一错误形态）。
+        return _decode_knowledge_strict(target.read_bytes(), filename)
 
     async def _read_target_raw(self, workspace_id: uuid.UUID, filename: str) -> str:
         """merge/preview 目标文件宽松读——缺失视作空内容（ql-20260918-007）。
@@ -502,6 +513,14 @@ class KnowledgeWriterService:
                 "截断之后的部分，请在本机编辑该文件后再同步。",
                 details={"filename": filename},
             )
+
+        # ql-20260919-001：坏编码守卫——GET 经 parser._read_file_safe 以
+        # errors="replace" 解码，含非 UTF-8 字节（如 Windows GBK 手工编辑残留）
+        # 的文件回传编辑器的基底已被 U+FFFD 顶替；整文件替换保存会把原始字节
+        # 永久毁坏且 update 不进 spec-backups。磁盘原文严格解码失败即拒写
+        # （文件不动），口径与 merge 路径 _read_raw（ql-20260918-005 M3）一致。
+        if disk_path.is_file():
+            _decode_knowledge_strict(disk_path.read_bytes(), filename)
 
         op_path = f"{KNOWLEDGE_PREFIX}{filename}"
         ops = [

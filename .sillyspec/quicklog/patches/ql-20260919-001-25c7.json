@@ -1,0 +1,79 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-b69670a8",
+  "totals": {
+    "files": 5,
+    "additions": 98,
+    "deletions": 18
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/knowledge.md",
+      "declared": true,
+      "additions": 7,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_writer.py",
+      "declared": true,
+      "additions": 52,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/knowledge/writer.py",
+      "declared": true,
+      "additions": 33,
+      "deletions": 14,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/workspace/router.py",
+      "declared": true,
+      "additions": 5,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 5,
+    "codeFileCount": 2,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260919-001-25c7",
+  "sessionId": "quick-b69670a8",
+  "savedAt": "2026-09-18T22:02:36.363Z",
+  "patchSha256": "b929355132bd4899fdf0d073a7a4d595ef1beef6ca146ab101424aef60b5f06d",
+  "patchStatus": "ok"
+}

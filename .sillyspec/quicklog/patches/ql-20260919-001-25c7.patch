@@ -1,0 +1,196 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/knowledge.md b/.sillyspec/docs/SillyHub/modules/knowledge.md
+index a68efd1b1..25bfaff67 100644
+--- a/.sillyspec/docs/SillyHub/modules/knowledge.md
++++ b/.sillyspec/docs/SillyHub/modules/knowledge.md
+@@ -39,7 +39,7 @@ get(ws, filename) → 同上全量解析后按 filename 匹配（include_content
+ - 文件名即知识 key，重命名文件会令前端旧链接 404。
+ - 本模块永不写盘；写入口在 archive（distill_knowledge）与 CLI（quicklog）。
+ - knowledge 与 quicklog 是两套平行目录、共用一套解析逻辑，新增第三种目录只需在 parser 加别名。
+-- **截断内容不得成为写侧基底**（ql-20260918-001）：读侧 `_read_file_safe` 为防 OOM 对 >1MB 文件只回前 1/4 字节——writer 的 `update_entry` 对磁盘超限文件直接 422（`KnowledgeFileTooLarge`，update 不进 spec-backups，整文件替换会静默丢截断后内容且不可恢复）；`merge`/`preview_merge` 候选正文走 `_read_raw` 原样读（合并后随即删候选，截断即永久丢失）。新增写侧入口必须沿用这两条口径。
++- **截断/坏编码内容不得成为写侧基底**（ql-20260918-001 / ql-20260919-001）：读侧 `_read_file_safe` 为防 OOM 对 >1MB 文件只回前 1/4 字节、对非 UTF-8 字节 `errors="replace"` 成 U+FFFD——writer 的 `update_entry` 对磁盘超限文件 422（`KnowledgeFileTooLarge`）、对磁盘非严格 UTF-8 文件 422（`KnowledgeFileEncodingInvalid`，update 不进 spec-backups，整文件替换会静默丢内容/毁坏原字节且不可恢复）；`merge`/`preview_merge` 候选正文走 `_read_raw` 原样读（合并后随即删候选，截断即永久丢失），回写路径统一经 `_decode_knowledge_strict` 严格解码。新增写侧入口必须沿用这三条口径。
+ 
+ ## 人工备注
+ 
+@@ -66,3 +66,9 @@ get(ws, filename) → 同上全量解析后按 filename 匹配（include_content
+ - **背景（24h 审查 M4/M5）**：①quick 蒸馏 `source_ref` 仅 strip 空白即做存在性检查 `(quicklog_dir / f"{ref}.md").is_file()`（对 `..` 不设防），ref 又原样拼进给 agent 的读取路径（`build_distill_prompt`）——`../..` 形态可把读取路径指到 quicklog 目录外（仅 .md，需 KNOWLEDGE_WRITE 权限，定级中）；②fresh 会话蒸馏上传先于 create_session（洞一取数通道），引擎不支持/离线两失败分支不清理已上传附件——草稿 GC 48h 只删行不删对象（D-5 accepted risk），此变更加了高频孤儿生产者（单份至 19MB）。
+ - **修法**（distill.py）：①quick 分支 ref 白名单校验先于存在性检查——`[A-Za-z0-9][A-Za-z0-9._-]*`（字母数字开头，仅含 字母数字/./_/-），拒 `..`/绝对路径/盘符/反斜杠/子目录形态（422）；②新增 `_cleanup_distill_attachment`（best-effort）挂进两失败分支：session_id 仍 NULL 的草稿行即时删除（对齐附件删除端点「只删行」语义；已绑定会话的行属审计轨迹不动，失败仅记日志不改失败分支语义）。
+ - **验证**：test_distill 30（新增 2：非法 ref 六形态 422 且 quicklog 外文件不可命中、offline/unsupported 两失败分支参数化断言草稿行已回收）+ test_router 27 全绿；ruff/mypy（scoped）0——顺手清偿 3 处既有 mypy 债（`_upload_distill_source` 返回注解 AttachmentRead、test_distill `calls["inject"]` object 索引收窄）。对象本体的 GC 仍是 D-5 accepted risk，本增量只回收行。
++
++## 增量（ql-20260919-001：update_entry 坏编码守卫——编辑路径补齐严格解码拒写）
++
++- **背景（24h 审查 M1 残余缺口）**：ql-20260918-005 把 `_read_raw` 收口为严格 UTF-8 解码，但只覆盖 merge/preview 回写路径——网页编辑链路 GET 经 parser `_read_file_safe`（`errors="replace"`）回传的基底对非 UTF-8 文件（Windows GBK 手工编辑残留）已是 U+FFFD 版，`update_entry` 整文件替换保存会把原始字节永久毁坏且 update 不进 spec-backups（仅 delete 备份）。<1MB 的坏编码文件此前两条守卫（大小 422 / merge 严格解码）都不拦。
++- **修法**（writer.py）：新增模块级 `_decode_knowledge_strict(raw, filename)` 共享 helper（`_read_raw` 原内联 try/except 收敛进来，错误形态单一来源）；`update_entry` 在大小守卫后对磁盘原文做严格解码探测（≤1MB，结果弃用只探测），坏编码抛既有 `KnowledgeFileEncodingInvalid` 422（details 带 byte_offset，文件与 manifest 版本不动，提示本机转 UTF-8 后再操作）。
++- **验证**：test_writer 27（新增 2：坏编码编辑 422+前置自检 GET 基底确含 U+FFFD+磁盘原字节与 manifest 版本未动；合法 UTF-8 中文编辑不受误伤的对照组）+ test_router/test_parser/test_distill 相邻面 72 全绿；ruff format/check + mypy（scoped writer）0。附带：workspace/router.py probe_workspaces docstring 勘误——原「只读无状态变化」与 ql-20260918-012 repo_url 回填写副作用自相矛盾（CLAUDE.md 规则 18），改为「不改生命周期状态（唯一写例外 repo_url 回填）」。
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 22d43facd..a89cdd67d 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -2,6 +2,7 @@
+ 
+ > 自动生成。正文历史已迁出，详见 backend.md。
+ 
++- ql-20260919-001-25c7 | update_entry 坏编码守卫（24h 审查 M1 残余缺口收口）：知识文件网页编辑链 GET 经 parser._read_file_safe（errors="replace"）回传的基底对非 UTF-8 文件（Windows GBK 残留）已是 U+FFFD 版，update_entry 整文件替换保存会静默毁坏原始字节且 update 不进 spec-backups——ql-20260918-005 只收口了 merge/preview 的 _read_raw 路径。修法：新增模块级 _decode_knowledge_strict 共享 helper（_read_raw 内联 try/except 收敛进来），update_entry 大小守卫后对磁盘原文严格解码探测（≤1MB，坏编码抛既有 KnowledgeFileEncodingInvalid 422，文件与 manifest 版本不动）。附带 workspace/router.py probe_workspaces docstring 勘误（原「只读无状态变化」与 repo_url 回填写副作用自相矛盾）。测试：test_writer 27（+2：坏编码编辑 422+GET 基底含 U+FFFD 前置自检+磁盘原字节/manifest 版本未动；合法 UTF-8 中文对照组）+ 相邻面 test_router/test_parser/test_distill 72 绿；ruff/format + mypy scoped 0。
+ - ql-20260918-012-ac1b | 工作区 Git 地址自动识别（probe 端点 repo_url 识别回填，用户需求「工作区显示对应 git 地址、不手填」）：WorkspaceProbeItem 增 repo_url 字段——probe 端点对 git_mode=git 且 DB repo_url 为空的工作区经新 delegate 方法 git_remote_url（host_fs.git_remote RPC，`_via_rpc_or_degrade` 降级 fail-safe）实时识别，识别成功且值变化时回填 workspaces.repo_url（本端点唯一写副作用、仅此一列；已识别直接回 DB 值零额外 RPC，首次识别后 RPC 开销回基线）；direct/unknown 态为 None，RPC 降级（含旧 daemon 不识别新方法 → DaemonRpcRemoteError）归 None 不抛。gen:types 同步 openapi.json/api-types.ts。测试：test_probe_endpoint +4（识别回填落库/已填充跳过 RPC/direct 不发 RPC/降级 None 不 5xx）共 13 passed；ruff/format/mypy scoped 0。
+ - ql-20260910-004-db16 | answered_by 透传链补全（askuser-pi-cursor 已知限制②③收口）：SessionDialogRead/WorkspaceDialogRead 增 answered_by 字段（from_model 透传，历史/恢复读可渲染答题人）；已答 409 DaemonDialogAlreadyResolved details 携带 answered_by（第二答题端即时数据源）。测试：test_session_permissions 41 passed（+1 透传双通道断言）+ workspace dialogs 9 不回归。
+ - ql-20260910-001-4560 | 影子会话 pending 提问读侧放开（2026-09-09-askuser-pi-cursor 已知限制①收口）：list_pending_dialogs 的 ownership 404 门对群聊影子会话（session_kind=group_member）复用 task-09 落地的 _resolve_shadow_member_answer_session 影子成员分支（群成员+未移除+软删群过滤，条件与答题侧同源）——群成员可见成员提问卡，关闭「能答却看不见」缺口；越权反例（外人/已移除成员/普通单聊非属主）仍 404 不泄露。测试：test_session_permissions 40 passed（+3：成员拉取成功/外人+移除成员 404/单聊语义零变化）。
+diff --git a/backend/app/modules/knowledge/tests/test_writer.py b/backend/app/modules/knowledge/tests/test_writer.py
+index 711afae55..bea35c308 100644
+--- a/backend/app/modules/knowledge/tests/test_writer.py
++++ b/backend/app/modules/knowledge/tests/test_writer.py
+@@ -642,6 +642,58 @@ class TestOversizedFileGuard:
+         assert tail_marker in (preview.section_text or "")
+ 
+ 
++class TestUpdateEncodingGuard:
++    """ql-20260919-001：update_entry 坏编码守卫（24h 审查 M1 残余缺口）。
++
++    GET 经 parser._read_file_safe 以 errors="replace" 解码，非 UTF-8 文件回传
++    给编辑器的基底已被 U+FFFD 顶替——整文件替换保存会把原始字节永久毁坏且
++    update 不进 spec-backups（仅 delete 备份）。磁盘原文严格解码失败即 422
++    拒写，口径对齐 merge 路径（ql-20260918-005 M3）。
++    """
++
++    async def test_update_entry_rejects_non_utf8_file(self, env, db_session) -> None:
++        from app.modules.knowledge.writer import KnowledgeFileEncodingInvalid
++
++        # patterns.md 直接写坏字节（GBK「中文」= \xd6\xd0\xce\xc4，非法 UTF-8）
++        target_path = env.spec_root / "knowledge" / "patterns.md"
++        corrupted = "# Patterns\n\n## \xd6\xd0\xce\xc4\n\nGBK \xd6\xd0\xce\xc4\n".encode("latin-1")
++        target_path.write_bytes(corrupted)
++
++        # 前置自检：GET 回传基底确已被替换字符顶替（毁坏向量成立）
++        reader_entry = await KnowledgeService(db_session).get_knowledge(env.ws.id, "patterns.md")
++        assert "\ufffd" in (reader_entry.content or "")
++
++        row_before = await _manifest_row(db_session, env.ws.id, "knowledge/patterns.md")
++        assert row_before is not None
++
++        writer = KnowledgeWriterService(db_session)
++        with pytest.raises(KnowledgeFileEncodingInvalid) as ei:
++            await writer.update_entry(
++                env.ws.id,
++                env.user,
++                filename="patterns.md",
++                content="# Patterns\n\n## 已被替换字符顶替的编辑基底\n",
++            )
++        assert ei.value.http_status == 422
++        assert "转为 UTF-8" in ei.value.message
++        # 坏字节原样保留（未被整文件替换毁坏），manifest 版本未动
++        assert target_path.read_bytes() == corrupted
++        row_after = await _manifest_row(db_session, env.ws.id, "knowledge/patterns.md")
++        assert row_after is not None
++        assert row_after.version == row_before.version
++
++    async def test_update_entry_utf8_chinese_still_roundtrip(self, env, db_session) -> None:
++        """对照组：合法 UTF-8 中文文件不受坏编码守卫误伤。"""
++        writer = KnowledgeWriterService(db_session)
++        updated = await writer.update_entry(
++            env.ws.id,
++            env.user,
++            filename="patterns.md",
++            content="# Patterns\n\n## 中文小节\n\n正常 UTF-8 正文，含「中文」与 ✅。\n",
++        )
++        assert "中文小节" in (updated.content or "")
++
++
+ class TestMergeRobustness:
+     """ql-20260918-005：merge 两处健壮性（24h 审查 M3/M6）。
+ 
+diff --git a/backend/app/modules/knowledge/writer.py b/backend/app/modules/knowledge/writer.py
+index be01e7d51..0d527ad02 100644
+--- a/backend/app/modules/knowledge/writer.py
++++ b/backend/app/modules/knowledge/writer.py
+@@ -147,18 +147,35 @@ class KnowledgeFileTooLarge(AppError):
+ 
+ 
+ class KnowledgeFileEncodingInvalid(AppError):
+-    """知识文件含非 UTF-8 字节（ql-20260918-005）。
++    """知识文件含非 UTF-8 字节（ql-20260918-005 / ql-20260919-001）。
+ 
+-    ``_read_raw`` 读出的文本会经 merge 段一整文件回写（update 无备份）——
+-    ``errors="replace"`` 解码会把非 UTF-8 字节（如 Windows GBK 手工编辑残留）
+-    永久替换为 U+FFFD。严格解码 fail-loud：提示先在本机转 UTF-8 再操作，
+-    文件不动。
++    两条整文件回写路径共用本错误：merge 段经 ``_read_raw`` 读出后回写（目标/
++    INDEX/候选），以及网页编辑 ``update_entry``（GET 基底经 parser
++    ``errors="replace"`` 已被 U+FFFD 顶替，整文件替换保存同样毁坏原文）——
++    update 均不进 spec-backups（仅 delete 备份），坏字节一旦回写不可恢复。
++    严格解码 fail-loud：提示先在本机转 UTF-8 再操作，文件不动。
+     """
+ 
+     code = "HTTP_422_KNOWLEDGE_FILE_ENCODING_INVALID"
+     http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+ 
+ 
++def _decode_knowledge_strict(raw: bytes, filename: str) -> str:
++    """严格 UTF-8 解码——坏字节抛 :class:`KnowledgeFileEncodingInvalid`。
++
++    ql-20260919-001：从 ``_read_raw`` 收敛为共享 helper——update_entry 只需
++    探测不需内容，与 merge 回写路径同一解码口径、同一错误形态。
++    """
++    try:
++        return raw.decode("utf-8")
++    except UnicodeDecodeError as exc:
++        raise KnowledgeFileEncodingInvalid(
++            "文件含非 UTF-8 字节（可能在本机用 GBK 等编码保存过），继续编辑/合并"
++            "保存会永久损坏原文；请先在本机把文件转为 UTF-8 再操作。",
++            details={"filename": filename, "byte_offset": exc.start},
++        ) from exc
++
++
+ # ── CLI 语义复刻工具（与 knowledge-classify.js 逐字对齐，R-03）────────────────
+ 
+ 
+@@ -376,15 +393,9 @@ class KnowledgeWriterService:
+                 "知识库文件不存在，请刷新文件列表后重试。",
+                 details={"workspace_id": str(workspace_id), "filename": filename},
+             )
+-        raw = target.read_bytes()
+-        try:
+-            return raw.decode("utf-8")
+-        except UnicodeDecodeError as exc:
+-            raise KnowledgeFileEncodingInvalid(
+-                "文件含非 UTF-8 字节（可能在本机用 GBK 等编码保存过），继续合并/编辑"
+-                "会永久损坏内容；请先在本机把文件转为 UTF-8 再操作。",
+-                details={"filename": filename, "byte_offset": exc.start},
+-            ) from exc
++        # ql-20260919-001：解码口径收敛到 _decode_knowledge_strict 共享 helper
++        # （update_entry 探测路径与 merge 回写路径同一错误形态）。
++        return _decode_knowledge_strict(target.read_bytes(), filename)
+ 
+     async def _read_target_raw(self, workspace_id: uuid.UUID, filename: str) -> str:
+         """merge/preview 目标文件宽松读——缺失视作空内容（ql-20260918-007）。
+@@ -503,6 +514,14 @@ class KnowledgeWriterService:
+                 details={"filename": filename},
+             )
+ 
++        # ql-20260919-001：坏编码守卫——GET 经 parser._read_file_safe 以
++        # errors="replace" 解码，含非 UTF-8 字节（如 Windows GBK 手工编辑残留）
++        # 的文件回传编辑器的基底已被 U+FFFD 顶替；整文件替换保存会把原始字节
++        # 永久毁坏且 update 不进 spec-backups。磁盘原文严格解码失败即拒写
++        # （文件不动），口径与 merge 路径 _read_raw（ql-20260918-005 M3）一致。
++        if disk_path.is_file():
++            _decode_knowledge_strict(disk_path.read_bytes(), filename)
++
+         op_path = f"{KNOWLEDGE_PREFIX}{filename}"
+         ops = [
+             FileOp(
+diff --git a/backend/app/modules/workspace/router.py b/backend/app/modules/workspace/router.py
+index a9d06011a..94fabe1b9 100644
+--- a/backend/app/modules/workspace/router.py
++++ b/backend/app/modules/workspace/router.py
+@@ -188,9 +188,11 @@ async def probe_workspaces(
+     3 条固定查询替代原逐 ws 4 条；条目组装与单 ws 路径共享函数，口径单一来源）
+     + ``probe_workspace_git_mode``（task-02 三态探测）组装。
+ 
+-    只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC
+-    失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id
+-    跳过不报错（与 collect_scope 无效 id 跳过同语义）。
++    探测本身不改工作区生命周期状态（design §7.5；唯一写例外见下——repo_url
++    回填，ql-20260919-001 勘误：原「只读无状态变化」表述与回填副作用矛盾）；
++    每次调用实时探测不缓存（R-02）；探测 RPC 失败/未绑 daemon 归 ``unknown``
++    不抛 5xx（fail-safe）。查无行的 workspace_id 跳过不报错（与 collect_scope
++    无效 id 跳过同语义）。
+ 
+     ql-20260918-012（工作区 Git 地址识别）：响应新增 ``repo_url``——git 态
+     工作区经 ``delegate.git_remote_url`` 读 ``git remote -v`` 首个 fetch 行，

@@ -188,9 +188,11 @@ async def probe_workspaces(
     3 条固定查询替代原逐 ws 4 条；条目组装与单 ws 路径共享函数，口径单一来源）
     + ``probe_workspace_git_mode``（task-02 三态探测）组装。
 
-    只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC
-    失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id
-    跳过不报错（与 collect_scope 无效 id 跳过同语义）。
+    探测本身不改工作区生命周期状态（design §7.5；唯一写例外见下——repo_url
+    回填，ql-20260919-001 勘误：原「只读无状态变化」表述与回填副作用矛盾）；
+    每次调用实时探测不缓存（R-02）；探测 RPC 失败/未绑 daemon 归 ``unknown``
+    不抛 5xx（fail-safe）。查无行的 workspace_id 跳过不报错（与 collect_scope
+    无效 id 跳过同语义）。
 
     ql-20260918-012（工作区 Git 地址识别）：响应新增 ``repo_url``——git 态
     工作区经 ``delegate.git_remote_url`` 读 ``git remote -v`` 首个 fetch 行，
