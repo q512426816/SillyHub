@@ -109,7 +109,15 @@ function bootstrapLegacySegments(
   output: string,
   items: SessionProcessItem[],
 ): TurnSegment[] {
-  const segments: TurnSegment[] = items.map((item, i): TurnSegment => {
+  const segments: TurnSegment[] = items
+    // 2026-09-19-tool-report-session-replay（D-003）：system_event（仅回放链路
+    // 产生，实时会话零出现）在段模型无承载——中性行由 TurnDetailsList 渲染，
+    // legacy 反投影跳过（dialog 模式运行时不可达，纯类型穷尽守卫）。
+    .filter(
+      (item): item is Exclude<SessionProcessItem, { kind: "system_event" }> =>
+        item.kind !== "system_event",
+    )
+    .map((item, i): TurnSegment => {
     if (item.kind === "thinking") {
       return {
         kind: "thinking",

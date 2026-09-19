@@ -1,9 +1,11 @@
 // task-04（2026-08-23-platform-agent-log-ingest / FR-04 / D-006）+
 // ql-20260823-002-6a1a（改会话流内展示）+ task-07（2026-08-23-agent-
-// activity-sessions：sessionId 驱动会话化 + AgentLogSessionBody + 查看内容）+
+// activity-sessions：sessionId 驱动会话化 + 查看内容）+
 // task-05（2026-08-23-agent-log-conversation-view：查看内容对话化升级）+
 // ql-20260904-021（气泡条目改面板顶部折叠栏）：
-// AgentLogCard「本地 Agent 日志」面板顶部折叠栏 + AgentLogSessionBody 会话主体单测。
+// AgentLogCard「本地 Agent 日志」面板顶部折叠栏单测（原 tool_report 会话
+// 主体形态已随组件退役删除，回放主体单测见 agent-replay-body.test.tsx，
+// 2026-09-19-tool-report-session-replay task-12）。
 //
 // 覆盖：
 //   1. 折叠默认态：只渲染一行摘要栏（agent-log-top-bar 根 + 标题 + N 个 +
@@ -23,9 +25,7 @@
 //      unsupported / parse_error / too_large / ApiError（HTTP 失败）/ 422 老
 //      daemon 全部静默回落原文 <pre> + 黄条原因（无 role=alert 红条）；仅
 //      原文端点自身失败保留红条中文文案（现状语义）；
-//   7. AgentLogSessionBody（tool_report 会话主体）：说明行 + 全量条目
-//      （不折叠成 3 条）+ 空态 / error 态中文提示；
-//   8. 会话列表徽标：origin=tool_report 条目 🧾「本地 Agent」徽标 + 引擎位
+//   7. 会话列表徽标：origin=tool_report 条目 🧾「本地 Agent」徽标 + 引擎位
 //      显示 harness（chat 条目无徽标、显示引擎名）。
 //
 // 旧 workspace 挂载移除（D-004）：AgentLogCard 已无 workspaceId prop——类型
@@ -43,10 +43,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import {
-  AgentLogCard,
-  AgentLogSessionBody,
-} from "../agent-log-card";
+import { AgentLogCard } from "../agent-log-card";
 import { SessionListPanel } from "@/components/sessions/session-list-panel";
 import type {
   AgentLogListItem,
@@ -159,17 +156,6 @@ function setupCard(sessionId = "sess-1") {
   return render(
     <QueryClientProvider client={qc}>
       <AgentLogCard sessionId={sessionId} />
-    </QueryClientProvider>,
-  );
-}
-
-function setupSessionBody(sessionId = "sess-1") {
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false, refetchInterval: false } },
-  });
-  return render(
-    <QueryClientProvider client={qc}>
-      <AgentLogSessionBody sessionId={sessionId} />
     </QueryClientProvider>,
   );
 }
@@ -839,55 +825,7 @@ describe("查看内容 · 对话/原文 tab 切换（parsed 态）", () => {
   });
 });
 
-/* ───────────────── 7. AgentLogSessionBody（tool_report 会话主体） ───────── */
-
-describe("AgentLogSessionBody 会话主体", () => {
-  it("说明行 + 全量条目气泡流（5 条不折叠）+ 每条查看内容入口", async () => {
-    agentLogsApi.listAgentLogs.mockResolvedValue({
-      items: Array.from({ length: 5 }, (_, i) =>
-        makeItem({ id: `log-${i + 1}`, session_id: `sess-0000000${i + 1}-0000-0000-0000-00000000000${i}` }),
-      ),
-    });
-    setupSessionBody();
-
-    // 查询参数：sessionId 透传。
-    await waitFor(() => expect(agentLogsApi.listAgentLogs).toHaveBeenCalledWith("sess-1"));
-
-    // 说明行（原型 .head .sub）+ 刷新按钮。
-    expect(
-      screen.getByText("由 SillySpec CLI 自动上报创建 · 点下方输入框即可继续对话"),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
-
-    // 全量 5 条（主体不折叠成 3 条）。
-    const list = await screen.findByTestId("agent-log-session-entries");
-    expect(list.children).toHaveLength(5);
-    // 每条行尾查看内容按钮。
-    expect(screen.getAllByTestId("agent-log-content-toggle")).toHaveLength(5);
-  });
-
-  it("空列表显式空态提示（主体不静默隐藏）", async () => {
-    agentLogsApi.listAgentLogs.mockResolvedValue({ items: [] });
-    setupSessionBody();
-
-    await waitFor(() => expect(agentLogsApi.listAgentLogs).toHaveBeenCalled());
-    expect(await screen.findByText("暂无日志上报，等待 SillySpec CLI 下次上报…")).toBeInTheDocument();
-  });
-
-  it("加载失败：中文错误 + 重新加载入口", async () => {
-    agentLogsApi.listAgentLogs.mockRejectedValue(new Error("boom"));
-    setupSessionBody();
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "加载本地 Agent 日志失败：boom",
-    );
-    expect(
-      screen.getByRole("button", { name: "重新加载" }),
-    ).toBeInTheDocument();
-  });
-});
-
-/* ───────────────── 8. 会话列表 🧾 徽标（SessionListPanel 集成） ─────────── */
+/* ───────────────── 7. 会话列表 🧾 徽标（SessionListPanel 集成） ─────────── */
 
 /** 会话 fixture（AgentSessionRead 全字段；origin 区分 tool_report / chat）。 */
 function makeSession(

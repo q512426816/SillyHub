@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tool_report 会话回放 · 原型（按会话样式展示，数据源=agent 日志）</title>
+<style>
+  :root[data-theme="blue"] {
+    --primary:#2563EB; --bg:#f8fafc; --card:#fff; --border:#e2e8f0;
+    --brand-50:#eff6ff; --brand-100:#dbeafe; --brand-600:#2563eb; --brand-700:#1d4ed8;
+    --slate-500:#64748b; --slate-700:#334155; --slate-900:#0f172a; --success:#10b981; --cyan-700:#0e7490;
+  }
+  :root[data-theme="ai-native"] {
+    --primary:#7C3AED; --bg:#FAF5FF; --card:#fff; --border:#DDD6FE;
+    --brand-50:#f5f3ff; --brand-100:#ede9fe; --brand-600:#7c3aed; --brand-700:#6d28d9;
+    --slate-500:#64748b; --slate-700:#334155; --slate-900:#0f172a; --success:#10b981; --cyan-700:#0e7490;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--slate-900);padding:24px;font-size:13px}
+  .toggle{position:fixed;top:12px;right:16px;z-index:9}
+  .toggle button{border:1px solid var(--border);background:var(--card);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;color:var(--slate-700)}
+  .toggle button.on{border-color:var(--primary);color:var(--primary);font-weight:600}
+  .stage{max-width:880px;margin:0 auto}
+  .stage h1{font-size:15px;margin-bottom:4px}
+  .hint{color:var(--slate-500);font-size:12px;margin-bottom:18px}
+  .sec-title{font-size:12px;font-weight:600;margin:26px 0 8px;color:var(--slate-700)}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+
+  /* 会话头部（沿用现状） */
+  .head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border)}
+  .head .t{font-size:13px;font-weight:600}
+  .badge-tool{font-size:10px;padding:1px 8px;border-radius:999px;background:var(--brand-100);color:var(--brand-700);border:1px solid var(--brand-600);flex-shrink:0}
+  .head .sub{font-size:11px;color:var(--slate-500)}
+
+  /* 顶部：来源说明 + 工作会话折叠条 */
+  .topbar{display:flex;align-items:center;gap:8px;padding:6px 14px;border-bottom:1px solid var(--border);background:var(--brand-50);font-size:11px;color:var(--slate-500)}
+  .topbar .ref{cursor:pointer;border:none;background:none;color:var(--slate-500);font-size:11px}
+  .worker-strip{border-bottom:1px solid var(--border);background:var(--card)}
+  .worker-strip>button{display:flex;align-items:center;gap:6px;width:100%;border:none;background:none;cursor:pointer;padding:6px 14px;font-size:11.5px;color:var(--slate-700)}
+  .worker-strip .cnt{color:var(--brand-700);font-weight:600}
+  .worker-strip .arr{margin-left:auto;color:var(--slate-500);transition:.15s}
+  .worker-strip.open .arr{transform:rotate(90deg)}
+  .worker-list{display:none;padding:4px 14px 10px;flex-direction:column;gap:6px}
+  .worker-strip.open .worker-list{display:flex}
+  .worker-item{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:11px;cursor:pointer;background:var(--card)}
+  .worker-item:hover{background:var(--brand-50)}
+  .worker-item .role{color:var(--cyan-700);font-weight:600}
+  .worker-item .meta{color:var(--slate-500);margin-left:auto}
+  .worker-item .tk{color:var(--slate-500)}
+  .worker-item .tk.unknown{font-style:italic}
+
+  /* 时间线主体 */
+  .stream{display:flex;flex-direction:column;gap:12px;padding:14px;max-height:460px;overflow-y:auto;background:var(--bg)}
+  .load-earlier{align-self:center;border:1px solid var(--border);background:var(--card);border-radius:999px;padding:4px 14px;font-size:11.5px;color:var(--brand-700);cursor:pointer}
+  .turnsep{align-self:center;display:flex;align-items:center;gap:8px;color:var(--slate-500);font-size:10.5px;width:100%}
+  .turnsep::before,.turnsep::after{content:"";flex:1;border-top:1px dashed var(--border)}
+
+  /* 系统事件中性行（task-notification / 系统提醒 / CLI 调用起点） */
+  .sysrow{display:flex;align-items:center;gap:6px;align-self:center;max-width:92%;border:1px dashed var(--border);background:var(--card);border-radius:999px;padding:3px 12px;font-size:11px;color:var(--slate-500)}
+  .sysrow .ic{font-size:11px}
+
+  /* 用户气泡（仅真人） */
+  .u-row{display:flex;justify-content:flex-end}
+  .u{max-width:82%;white-space:pre-wrap;word-break:break-word;background:var(--brand-600);color:#fff;border-radius:14px;border-top-right-radius:4px;padding:8px 12px;font-size:12.5px;line-height:1.6}
+
+  /* assistant 轮 */
+  .a-row{display:flex;gap:8px;align-items:flex-start}
+  .ava{width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--card);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+  .a-col{display:flex;flex-direction:column;gap:6px;min-width:0;max-width:88%}
+  .a-meta{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--slate-500);flex-wrap:wrap}
+  .a-meta .model{color:var(--cyan-700)}
+  .tk-badge{display:inline-flex;gap:6px;border:1px solid var(--border);background:var(--card);border-radius:6px;padding:1px 8px;font-family:ui-monospace,Consolas,monospace;font-size:10px;color:var(--slate-500)}
+  .tk-badge b{color:var(--slate-700);font-weight:600}
+  .tk-badge.unknown{font-style:italic}
+  .reply{background:var(--card);border:1px solid var(--border);border-radius:12px;border-top-left-radius:4px;padding:8px 12px;font-size:12.5px;line-height:1.65;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .reply .mut{color:var(--slate-500)}
+  .think{border:1px solid var(--border);border-radius:8px;background:var(--card);overflow:hidden;font-size:11px}
+  .think>button{display:flex;gap:6px;align-items:center;width:100%;border:none;background:none;cursor:pointer;padding:5px 10px;color:var(--slate-500);font-size:11px;text-align:left}
+  .think .body{display:none;padding:6px 10px;color:var(--slate-500);white-space:pre-wrap;border-top:1px dashed var(--border)}
+  .think.open .body{display:block}
+  .tool{border:1px solid var(--border);border-radius:8px;background:var(--card);font-family:ui-monospace,Consolas,monospace;font-size:11px;overflow:hidden}
+  .tool .th{display:flex;align-items:center;gap:6px;padding:5px 10px;cursor:pointer}
+  .tool .th .nm{color:var(--cyan-700);font-weight:600}
+  .tool .th .st{margin-left:auto;font-size:10px;border-radius:4px;padding:0 6px;border:1px solid var(--border);color:var(--success)}
+  .tool .th .dur{color:var(--slate-500);font-size:10px}
+  .tool .args{display:none;padding:6px 10px;border-top:1px dashed var(--border);white-space:pre-wrap;color:var(--slate-700);max-height:120px;overflow:auto}
+  .tool.open .args{display:block}
+
+  /* 不可用三态 */
+  .warn{display:flex;gap:8px;align-items:flex-start;border:1px solid #f59e0b55;background:#f59e0b14;border-radius:8px;padding:8px 12px;font-size:11.5px;color:#92400e}
+  .offline{display:flex;flex-direction:column;gap:8px;align-items:center;padding:28px 14px;color:var(--slate-500);font-size:12px}
+  .offline .big{font-size:22px}
+  .offline .meta{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;border:1px dashed var(--border);border-radius:6px;padding:4px 10px;background:var(--card)}
+
+  /* 底部输入（现状保留） */
+  .inputbar{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--border);background:var(--card)}
+  .inputbar input{flex:1;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12.5px}
+  .inputbar button{border:1px solid var(--primary);background:var(--primary);color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:12px}
+  .inputbar .note{font-size:10.5px;color:var(--slate-500);align-self:center}
+</style>
+</head>
+<body>
+<div class="toggle"><button id="t-blue" onclick="setTheme('blue')">明亮蓝</button><button id="t-ai" class="on" onclick="setTheme('ai-native')">AI 紫</button></div>
+<div class="stage">
+  <h1>「tool_report 会话回放」原型 —— 按会话样式展示，数据源换 agent 日志</h1>
+  <p class="hint">样本即实证会话 137ddfff「本地 · 2026-09-19-ceremony-pricing-five-cuts」：1 条主日志（zcode，115 次调用聚 3 轮）+ 5 条子代理日志。右上角切换双主题；各折叠块可点。</p>
+
+  <div class="sec-title">状态一 · 正常态：会话主体 = 会话时间线（TurnTimeline 同构）</div>
+  <div class="panel">
+    <div class="head">
+      <span class="t">本地 · 2026-09-19-ceremony-pricing-five-cuts</span>
+      <span class="badge-tool">本地 Agent</span>
+      <span class="sub">zcode · GLM-5.3 · 38 段已加载（共 386）</span>
+    </div>
+
+    <div class="topbar">
+      <span>🧾 由 SillySpec CLI 自动上报创建 · 内容从本机日志实时读取</span>
+      <button class="ref" onclick="alert('刷新：重新拉取最新窗口')">刷新</button>
+    </div>
+
+    <div class="worker-strip" id="ws">
+      <button onclick="document.getElementById('ws').classList.toggle('open')">
+        <span>🤖 工作会话（5）——子代理日志不并入正文，点击展开</span>
+        <span class="arr">▸</span>
+      </button>
+      <div class="worker-list">
+        <div class="worker-item" onclick="alert('打开子代理回放（同一时间线组件，读该日志 messages）')">
+          <span class="role">plan</span><span>subagent_agent_00c5c2d0</span>
+          <span class="meta">09-19 00:10 · 5.4MB</span><span class="tk">in 8.2M · out 6.1K</span>
+        </div>
+        <div class="worker-item"><span class="role">plan</span><span>subagent_agent_5f2568ca</span><span class="meta">09-19 00:19 · 2.9MB</span><span class="tk">in 3.1M · out 2.8K</span></div>
+        <div class="worker-item"><span class="role">execute</span><span>subagent_agent_e302546e</span><span class="meta">09-19 00:38 · 4.7MB</span><span class="tk">in 5.0M · out 9.4K</span></div>
+        <div class="worker-item"><span class="role">execute</span><span>subagent_agent_3288ea6c</span><span class="meta">09-19 00:38 · 3.5MB</span><span class="tk">in 4.2M · out 7.7K</span></div>
+        <div class="worker-item"><span class="role">verify</span><span>subagent_agent_d017b02b</span><span class="meta">09-19 02:27 · 10.3MB</span><span class="tk">in 11.6M · out 18K</span></div>
+      </div>
+    </div>
+
+    <div class="stream">
+      <button class="load-earlier" onclick="alert('beforeSeq=当前最小 seq，前插更早一页（沿用现有 messages 分页语义）')">加载更早</button>
+
+      <div class="turnsep">第 1/3 轮 · 02:15 · 由子代理完成通知触发</div>
+      <div class="sysrow"><span class="ic">⚙</span>系统事件：subagent_agent_d017b02b 完成通知（task-notification，非用户消息）</div>
+      <div class="a-row"><div class="ava">🤖</div><div class="a-col">
+        <div class="a-meta"><span class="model">GLM-5.3</span><span class="tk-badge">本轮 <b>in 51.3M</b> · <b>out 3.1K</b> · ctx <b>513K</b></span><span>02:15–02:26 · 25 次调用</span></div>
+        <div class="think"><button onclick="this.parentNode.classList.toggle('open')">💭 思考过程（点击展开）——Gaps are mostly documentation-level. Fix: design 接口定义…</button><div class="body">（折叠的 thinking 原文）</div></div>
+        <div class="tool"><div class="th" onclick="this.parentNode.classList.toggle('open')"><span class="nm">Bash</span><span>verify --done --change …</span><span class="dur">3.2s</span><span class="st">✓</span></div><div class="args">{"command":"cd \"C:\\Users\\qinyi\\…\" && …"}</div></div>
+        <div class="reply">verify 通过，S1 声明面已直入……<span class="mut">（回复正文 markdown，与普通会话同款渲染）</span></div>
+      </div></div>
+
+      <div class="turnsep">第 2/3 轮 · 02:26 · 由系统提醒触发</div>
+      <div class="sysrow"><span class="ic">⚙</span>系统事件：TodoWrite 提醒注入（非用户消息）</div>
+      <div class="a-row"><div class="ava">🤖</div><div class="a-col">
+        <div class="a-meta"><span class="model">GLM-5.3</span><span class="tk-badge">本轮 <b>in 9.8M</b> · <b>out 41K</b> · ctx <b>508K</b></span><span>87 次调用</span></div>
+        <div class="tool"><div class="th" onclick="this.parentNode.classList.toggle('open')"><span class="nm">Agent</span><span>派出子代理 verify（结果已回流）</span><span class="st">✓</span></div><div class="args">（子代理完整 I/O 在上方「工作会话」入口，不在正文重复）</div></div>
+        <div class="reply">新引擎已接管事实面（内容扫描 S3 消失，blast=S1 声明面直入）。剩余 S1&lt;S2 是旧档未追赶……</div>
+      </div></div>
+
+      <div class="turnsep">第 3/3 轮 · 03:56 · 用户提问</div>
+      <div class="u-row"><div class="u">本次变更为什么跑那么久啊，资源消耗合理吗？</div></div>
+      <div class="a-row"><div class="ava">🤖</div><div class="a-col">
+        <div class="a-meta"><span class="model">GLM-5.3</span><span class="tk-badge">本轮 <b>in 302K</b> · <b>out 838</b> · ctx <b>305K</b></span></div>
+        <div class="reply">（该轮回复正文）</div>
+      </div></div>
+    </div>
+
+    <div class="inputbar">
+      <input placeholder="点此输入即可继续对话（首条消息激活会话派发）">
+      <button>发送</button>
+      <span class="note">会话累计：in 63.7M · out 53.4K · 缓存命中 62.5M</span>
+    </div>
+  </div>
+
+  <div class="sec-title">状态二 · 子代理日志（cursor-agent）token 恒未知态</div>
+  <div class="panel">
+    <div class="head"><span class="t">subagent_agent_d017b02b · verify</span><span class="badge-tool">cursor-agent</span><span class="sub">transcript 不落盘 token</span></div>
+    <div class="stream" style="max-height:200px">
+      <div class="a-row"><div class="ava">🤖</div><div class="a-col">
+        <div class="a-meta"><span class="model">cursor-agent</span><span class="tk-badge unknown">token 未知（该 harness 日志不含用量）</span></div>
+        <div class="reply">（对话正文照常渲染，轮次按 turn_ended 切分）</div>
+      </div></div>
+    </div>
+  </div>
+
+  <div class="sec-title">状态三 · 不可用三态（daemon 离线 / 格式不支持 / 文件已清理）</div>
+  <div class="panel">
+    <div class="stream" style="max-height:none">
+      <div class="offline"><span class="big">📴</span>机器离线，无法读取日志内容<br>回放内容存于上报机器本地，守护进程在线后可查看。<br><span class="meta">zcode · model-io-sess_c35fa872… · 13MB · 118 次调用（元数据仍可见）</span></div>
+    </div>
+    <div class="stream" style="max-height:none;border-top:1px solid var(--border)">
+      <div class="warn">⚠ 该日志格式暂不支持对话化回放（cursor IDE 聊天库为内部二进制格式），仅保留元数据与活性信息。</div>
+    </div>
+  </div>
+</div>
+<script>
+function setTheme(t){document.documentElement.setAttribute('data-theme',t);document.getElementById('t-blue').className=t==='blue'?'on':'';document.getElementById('t-ai').className=t==='ai-native'?'on':'';}
+</script>
+</body>
+</html>

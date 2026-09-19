@@ -633,7 +633,14 @@ export type SessionProcessItem =
       mime: string;
       description?: string | null;
       ts?: number;
-    };
+    }
+  /**
+   * 2026-09-19-tool-report-session-replay（D-003）：与 turn-timeline 同名类型
+   * 逐字段一致的对齐成员——仅回放数据路径产生（agent-log-turns 适配器），实时
+   * 会话链路零产生；段模型（TurnSegment）无对应承载（中性行由 TurnDetailsList
+   * 渲染），segmentsToLegacy 投影不出本项，此处仅为类型 parity。
+   */
+  | { kind: "system_event"; text: string; ts?: number };
 
 /** 装配产物（单 turn）：段序列 + 兼容投影 + 计时锚点（design §7）。 */
 export interface AssembledTurn {

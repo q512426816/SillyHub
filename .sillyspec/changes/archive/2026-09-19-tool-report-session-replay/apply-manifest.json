@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-19-tool-report-session-replay",
+  "appliedAt": "2026-09-19T15:30:39.457Z",
+  "baseHash": "aa3f96845144699e178f19fbe1b892a50759bde8",
+  "files": [
+    {
+      "path": "backend/app/modules/platform_sync/router.py",
+      "sha256": "c061240a53f59e8c2f0cfaeff0cdf79a3b281114cf57dbb96f6dc5946d871e4c"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/schema.py",
+      "sha256": "4f7f5d7748e49195f0bf21ff96e1b3e089d9761219107e20b963ed52fd78d45f"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_agent_log_messages.py",
+      "sha256": "ad5ed9b13525c8869faa21159d821433c812518290995cd254a97a9105fb2463"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "eb7f46199efcfca2018e82bf673190bde9731bb654e5e322cc7092f7068cd549"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/agent-log-card.test.tsx",
+      "sha256": "c707987cd0c92586295f2eb6104e8dc4a2ee18ebf6726cbfca96ccd7ffb26ba2"
+    },
+    {
+      "path": "frontend/src/components/daemon/agent-log-card.tsx",
+      "sha256": "80e14e6dff55b9b173d3096af7ea3fcf9c46103938271a373e4dfaf28d61a559"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-log-assembler.ts",
+      "sha256": "90bc1069591b5de1d398c06205657c9e3d0f929aee980c2010deb21d205d6672"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/dialog-helpers.ts",
+      "sha256": "03640d9301af053fc6e65ca361ed4ecce200c5fc9d3348c51a892db6b9721547"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+      "sha256": "9a95de570309733919e9e99a115b8b03b0ea5bcad457d92fd7551af9b5704ab4"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "c00c9aeaa07b91df086898c0909817d962027afa8cee8ad1ccab1ab271d85379"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "sha256": "9bdc19742324b38eadf9b786159b33d635de03523f29b9d0da1f6d65d57c6f1f"
+    },
+    {
+      "path": "frontend/src/lib/agent-logs.ts",
+      "sha256": "e8fd89bcef1e00b0314ec4a93df064153e94dc7b40ec2cfdcc46fcb26c95bec3"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "e31fb36a5a58e4fd56da86071bc8ec87e8eaabec648907e8784e20fe2e7f1de5"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts",
+      "sha256": "3a6ac85dc269709a2b1c7218a79665bfc6a72b6ddd90faf70ca8c9e400d25f8e"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/read-zcode-sqlite.ts",
+      "sha256": "e5bc9451692c0b8a97fe00a1f516ef0644ee19d2f05e51a09bdba8b305956097"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/registry.ts",
+      "sha256": "5a5396edb25138d63abb8087c49ec9d10f77bd97db51a13a4ad2870538e41ae5"
+    },
+    {
+      "path": "sillyhub-daemon/src/host-fs-handler.ts",
+      "sha256": "609b49b4e5f0da8990ef0aa5a6590220160ea33900797b85affc483dea5f6b71"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/parse-zcode-model-io.test.ts",
+      "sha256": "87e4de7e215af0b02d1c3e93406561d21ec844fa7b0bf16678e9066dd46cb5c7"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/read-agent-log-messages.test.ts",
+      "sha256": "f7d79499a30743ad7b266b5d999d678fd37640855321d0db8c5ee4346a55726c"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/read-zcode-sqlite.test.ts",
+      "sha256": "05a94a995d80b656fcab039c41f9914fa231a255786a2e812e24289a2366b415"
+    },
+    {
+      "path": "docs/sillyspec/cursor-agent-transcript-report-pipeline.md",
+      "sha256": "32316b6822c753bbdea4efd04e163a22d64c52e3d5cf6ea4f6172f68bbd9d4ca"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/agent-replay-body.test.tsx",
+      "sha256": "53cd5c9b43854d267b359fd16561b1c6ebabcbaa611fed24e9798b04a6a57165"
+    },
+    {
+      "path": "frontend/src/components/daemon/agent-replay-body.tsx",
+      "sha256": "94105c41159a995e8a1cdef2803acf4c8b4222245eaa59eb4d4860f35640bc5a"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/agent-log-turns.test.ts",
+      "sha256": "03f94b6dd512976adf80470905e7113f120c148a0d57e616252fb675bda82478"
+    },
+    {
+      "path": "frontend/src/lib/agent-log-turns.ts",
+      "sha256": "f4fbb5c3d8faac0073406aa2b3fc623fbccf31179fe9f536d477faea88b90413"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts",
+      "sha256": "77d0a522ea67f9db95ad7b94be6aecec7d023a3091ca1784d371857c6ea62072"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/parse-cursor-agent-transcript.ts",
+      "sha256": "75cf08e365d5f901230cc205d57239c2f1502a88dd18a9e76bdccce08876367e"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log-matrix.test.ts",
+      "sha256": "961b3a275c98b5cdae10ac35a476ef44f722c8a59b2b59837afd9354d1dba538"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts",
+      "sha256": "48654f0f1bf2ef533c4a219859c6f0f5a025420b85e7bc6fd48d603212c08e39"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/parse-cursor-agent.test.ts",
+      "sha256": "979cce92efd4d6dcff4f0256f6b80b342878e9813bc81fb22130d327118fa4d4"
+    }
+  ]
+}

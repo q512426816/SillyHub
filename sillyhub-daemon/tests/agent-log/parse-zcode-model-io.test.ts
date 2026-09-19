@@ -19,6 +19,16 @@
 //   Z8 5s 超时保护 → parse_error（now 注入，非时钟 mock）
 //   Z9 窗口空洞跳过 + seq 重编号
 //   Z10 tool_input 2KB / tool_result 4KB 截断；ts 为所属行 completedAt
+//   Z11（2026-09-19-tool-report-session-replay task-02）行顶层 turnId/model/durationMs
+//      + response.usage 附着到该行产出的全部段（G 合并段 + 末行补产段共用同一份，
+//      同一次调用多段共享 usage）；model 对象形态 {"modelId",…} 取 modelId
+//   Z12 老形状行（新字段全无）→ 段新字段 null + totalUsage null（不伪造 0）；
+//      形状漂移（model 非字符串非对象 / usage 五项全缺 / durationMs 非数）同置 null；
+//      usage 部分缺项按 0 计（部分上报不整段丢弃）
+//   Z13 totalUsage 按「调用」去重（每个有效行只计一次）且与窗口截断 / beforeSeq
+//      切片无关；parse_error / too_large 早退结果零新字段（不带 totalUsage）
+//   Z14 sender 归一（D-003@v1）：段正文以 <task-notification> 开头 → system_event；
+//      混合 reminder+真人正文 / 普通文本 → 缺省不写（视为 human）；非 user_input 段不写
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -59,7 +69,12 @@ const TOOL = (
   isError = false,
 ): Record<string, unknown> => ({ role: 'tool', toolCallId, toolName, isError, content });
 
-/** 构造一行 model_io JSONL（键集对齐真实日志，含解析器不消费的旁路字段）。 */
+/**
+ * 构造一行 model_io JSONL（键集对齐真实日志，含解析器不消费的旁路字段）。
+ * 2026-09-19 task-02 起顶层 turnId/model/durationMs 与 response.usage 为被消费
+ * 字段：model 按 2026-09-19 实证对象形态 `{"modelId":…,"providerId":…}` 构造、
+ * usage 五项齐全（缺项场景经 usage 覆盖注入）。
+ */
 function ioLine(opts: {
   kind: 'full' | 'delta' | 'tail';
   offset: number;
@@ -67,6 +82,10 @@ function ioLine(opts: {
   responseText?: string;
   responseToolCalls?: Array<{ id: string; name: string; input: unknown }>;
   completedAt?: string;
+  turnId?: string;
+  modelId?: string;
+  durationMs?: number;
+  usage?: Record<string, unknown>;
 }): string {
   return JSON.stringify({
     type: 'model_io',
@@ -84,17 +103,37 @@ function ioLine(opts: {
       text: opts.responseText ?? '',
       toolCalls: opts.responseToolCalls ?? [],
       finishReason: 'stop',
-      usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+      usage:
+        opts.usage ??
+        { inputTokens: 100, outputTokens: 20, totalTokens: 150, cacheReadTokens: 30, cacheWriteTokens: 10 },
     },
     attempt: 1,
     startedAt: '2026-08-23T11:59:59.000Z',
     completedAt: opts.completedAt ?? '2026-08-23T12:00:00.000Z',
-    model: 'glm-4.6',
+    model: { modelId: opts.modelId ?? 'glm-4.6', providerId: 'provider_fixture' },
     sessionId: 'sess_fixture',
     requestId: 'req_fixture',
-    turnId: 'turn_fixture',
-    durationMs: 1234,
+    turnId: opts.turnId ?? 'turn_fixture',
+    durationMs: opts.durationMs ?? 1234,
     querySource: 'agent',
+  });
+}
+
+/**
+ * 老形状行（2026-09-19 补字段之前的旁路字段全无）：顶层无 turnId/model/durationMs、
+ * response 无 usage——新字段缺省（Z12）与 totalUsage null 的对照组。
+ */
+function legacyIoLine(opts: {
+  offset: number;
+  messages: Array<Record<string, unknown>>;
+  responseText?: string;
+  completedAt?: string;
+}): string {
+  return JSON.stringify({
+    type: 'model_io',
+    request: { messages: opts.messages, messageOffset: opts.offset },
+    response: { text: opts.responseText ?? '', toolCalls: [] },
+    completedAt: opts.completedAt ?? '2026-08-23T12:00:00.000Z',
   });
 }
 
@@ -570,5 +609,271 @@ describe('parseZcodeModelIoLog — 摘要截断（Z10 / design §7.1）', () => 
     expect(toolUse?.tool_input?.startsWith('{"command":"xxxx')).toBe(true);
     expect(toolResult?.tool_result).toHaveLength(4096);
     expect(toolResult?.tool_result).toBe('y'.repeat(4096));
+  });
+});
+
+// ── Z11：行级调用元数据附着（2026-09-19 task-02 / FR-02 + FR-03）──────────────
+
+describe('parseZcodeModelIoLog — 行级元数据附着（Z11 / FR-02+FR-03）', () => {
+  // 两行两次调用：L0（turn_A/glm-4.6/1234，默认 usage A）产 G 段；L1
+  // （turn_B/glm-5.3/5678，usage B）既是 G 尾行又是末行——补产段必须带 turn_B 元数据。
+  const USAGE_A = { inputTokens: 100, outputTokens: 20, totalTokens: 150, cacheReadTokens: 30, cacheWriteTokens: 10 };
+  const USAGE_B = { inputTokens: 200, outputTokens: 40, totalTokens: 260, cacheReadTokens: 60, cacheWriteTokens: 20 };
+  const content = jsonl(
+    ioLine({
+      kind: 'full',
+      offset: 0,
+      messages: [
+        USER('补字段场景问题'),
+        ASST_BLOCKS(
+          [
+            { type: 'reasoning', text: '先分析再动手' },
+            { type: 'text', text: '开始处理' },
+          ],
+          [{ id: 'tcA', name: 'Read', input: { file_path: '/a/spec.md' } }],
+        ),
+      ],
+      turnId: 'turn_A',
+      modelId: 'glm-4.6',
+      durationMs: 1234,
+    }),
+    ioLine({
+      kind: 'tail',
+      offset: 2, // 尾随追加（不覆盖 L0 的 assistant 槽位 1）
+      messages: [TOOL('tcA', 'Read', '结果A')],
+      responseText: '最终答复B',
+      responseToolCalls: [{ id: 'tcB', name: 'Grep', input: { pattern: 'x' } }],
+      turnId: 'turn_B',
+      modelId: 'glm-5.3',
+      durationMs: 5678,
+      usage: USAGE_B,
+    }),
+  );
+
+  it('该行产出的全部段带同一 turn_id/model/duration_ms（G 合并段与末行补产段各自对齐所属行）', async () => {
+    const result = await parseZcodeModelIoLog(content);
+    expect(result.totalSegments).toBe(7);
+    expect(result.messages.map((m) => [m.kind, m.turn_id, m.model, m.duration_ms])).toEqual([
+      ['user_input', 'turn_A', 'glm-4.6', 1234],
+      ['thinking', 'turn_A', 'glm-4.6', 1234],
+      ['reply', 'turn_A', 'glm-4.6', 1234],
+      ['tool_use', 'turn_A', 'glm-4.6', 1234],
+      ['tool_result', 'turn_B', 'glm-5.3', 5678], // 覆盖槽位的后写行元数据（与 ts 同口径）
+      ['reply', 'turn_B', 'glm-5.3', 5678], // 末行 response 补产段
+      ['tool_use', 'turn_B', 'glm-5.3', 5678], // 末行 response 补产段
+    ]);
+  });
+
+  it('usage 五项附着到段：L0 段带 usage A、L1 段（含补产段）带 usage B；同调用多段共享同一份', async () => {
+    const result = await parseZcodeModelIoLog(content);
+    expect(result.messages.slice(0, 4).map((m) => m.usage)).toEqual(
+      Array.from({ length: 4 }, () => USAGE_A),
+    );
+    expect(result.messages.slice(4).map((m) => m.usage)).toEqual(
+      Array.from({ length: 3 }, () => USAGE_B),
+    );
+    // 「共享同一份」= 同一引用（前端按调用去重聚合的依据）。
+    expect(result.messages[0]?.usage).toBe(result.messages[1]?.usage);
+    expect(result.messages[5]?.usage).toBe(result.messages[6]?.usage);
+  });
+});
+
+// ── Z12：老形状行缺省 + 形状漂移防御（task-02 约束：新字段可选缺省）──────────
+
+describe('parseZcodeModelIoLog — 老形状与形状漂移（Z12 / 兼容硬约束）', () => {
+  it('老形状行（无 turnId/model/durationMs/usage）→ 全部段新字段 null、totalUsage null（不伪造 0）', async () => {
+    const content = jsonl(
+      legacyIoLine({
+        offset: 0,
+        messages: [USER('老形状真人问题'), ASST_BLOCKS([{ type: 'text', text: '老形状答复' }])],
+        responseText: '老形状末行补产',
+      }),
+    );
+    const result = await parseZcodeModelIoLog(content);
+    expect(result.status).toBe('parsed');
+    expect(result.totalSegments).toBe(3); // user_input + reply(G) + reply(补产)
+    for (const message of result.messages) {
+      expect(message.turn_id).toBeNull();
+      expect(message.model).toBeNull();
+      expect(message.duration_ms).toBeNull();
+      expect(message.usage).toBeNull();
+    }
+    expect(result.totalUsage).toBeNull();
+  });
+
+  /** 顶层/usage 字段注入漂移形状（其余键集与 legacyIoLine 同）。 */
+  function rawLine(overrides: Record<string, unknown>): string {
+    return JSON.stringify({
+      type: 'model_io',
+      request: { messages: [{ role: 'user', content: '漂移场景' }], messageOffset: 0 },
+      response: { text: '', toolCalls: [] },
+      ...overrides,
+    });
+  }
+
+  it('形状漂移逐项置 null：model 数字 / 缺 modelId 对象 / durationMs 字符串 / turnId 数字', async () => {
+    for (const line of [
+      rawLine({ model: 123 }),
+      rawLine({ model: { providerId: 'p_fixture' } }),
+      rawLine({ durationMs: '1234' }),
+      rawLine({ turnId: 42 }),
+    ]) {
+      const result = await parseZcodeModelIoLog(jsonl(line));
+      expect(result.messages[0]?.turn_id).toBeNull();
+      expect(result.messages[0]?.model).toBeNull();
+      expect(result.messages[0]?.duration_ms).toBeNull();
+      expect(result.messages[0]?.usage).toBeNull();
+      expect(result.totalUsage).toBeNull();
+    }
+  });
+
+  it('model 字符串形态（老日志）直用；usage 五项全缺 → null；部分缺项按 0 计', async () => {
+    const legacyStringModel = await parseZcodeModelIoLog(jsonl(rawLine({ model: 'glm-legacy' })));
+    expect(legacyStringModel.messages[0]?.model).toBe('glm-legacy');
+
+    const emptyUsage = await parseZcodeModelIoLog(
+      jsonl(rawLine({ response: { text: '', toolCalls: [], usage: {} } })),
+    );
+    expect(emptyUsage.messages[0]?.usage).toBeNull();
+    expect(emptyUsage.totalUsage).toBeNull();
+
+    const partialUsage = await parseZcodeModelIoLog(
+      jsonl(rawLine({ response: { text: '', toolCalls: [], usage: { inputTokens: 5 } } })),
+    );
+    expect(partialUsage.messages[0]?.usage).toEqual({
+      inputTokens: 5,
+      outputTokens: 0,
+      totalTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    expect(partialUsage.totalUsage).toEqual({
+      inputTokens: 5,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+  });
+});
+
+// ── Z13：totalUsage 按「调用」去重 + 与切片/窗口无关（D-004@v1）──────────────
+
+describe('parseZcodeModelIoLog — totalUsage 累计口径（Z13 / D-004@v1）', () => {
+  /** 单次调用（一行）产 3 个 user 段，usage A——多段共享不得按段翻倍。 */
+  const single = jsonl(
+    ioLine({
+      kind: 'full',
+      offset: 0,
+      messages: [USER('第一问'), USER('第二问'), USER('第三问')],
+    }),
+  );
+  const SINGLE_USAGE = {
+    inputTokens: 100,
+    outputTokens: 20,
+    cacheReadTokens: 30,
+    cacheWriteTokens: 10,
+  };
+
+  it('按「调用」去重：3 段共享同一 usage，totalUsage 只计一次（非 3 倍）', async () => {
+    const result = await parseZcodeModelIoLog(single);
+    expect(result.messages).toHaveLength(3);
+    expect(result.totalUsage).toEqual(SINGLE_USAGE);
+  });
+
+  it('与段窗口截断无关：maxSegments 截走 2 段后 totalUsage 不变', async () => {
+    const result = await parseZcodeModelIoLog(single, { maxSegments: 2 });
+    expect(result.truncated).toBe(true);
+    expect(result.messages).toHaveLength(2);
+    expect(result.totalUsage).toEqual(SINGLE_USAGE);
+  });
+
+  it('与 beforeSeq 切片无关：切片后 totalUsage 仍是全量调用累计', async () => {
+    const result = await parseZcodeModelIoLog(single, { beforeSeq: 2 });
+    expect(result.messages.map((m) => m.seq)).toEqual([1]);
+    expect(result.totalUsage).toEqual(SINGLE_USAGE);
+  });
+
+  it('多次调用各计一次：两行 usage A+B → 四项和（5 段不放大）', async () => {
+    // 与 Z11 同构的两行 fixture（usage A + usage B）。
+    const content = jsonl(
+      ioLine({
+        kind: 'full',
+        offset: 0,
+        messages: [USER('问一'), ASST_BLOCKS([{ type: 'text', text: '答一' }], [
+          { id: 't1', name: 'Read', input: { file_path: '/a' } },
+        ])],
+      }),
+      ioLine({
+        kind: 'tail',
+        offset: 2, // 尾随追加（不覆盖 L0 的 assistant 槽位 1）
+        messages: [TOOL('t1', 'Read', '结果')],
+        responseText: '收尾',
+        usage: { inputTokens: 200, outputTokens: 40, totalTokens: 260, cacheReadTokens: 60, cacheWriteTokens: 20 },
+      }),
+    );
+    const result = await parseZcodeModelIoLog(content);
+    expect(result.totalSegments).toBe(5);
+    expect(result.totalUsage).toEqual({
+      inputTokens: 300,
+      outputTokens: 60,
+      cacheReadTokens: 90,
+      cacheWriteTokens: 30,
+    });
+  });
+
+  it('parse_error / too_large 早退结果零新字段（不带 totalUsage 键）', async () => {
+    const parseError = await parseZcodeModelIoLog(
+      jsonl('{坏行一', '{坏行二', legacyIoLine({ offset: 0, messages: [USER('唯一好行')] })),
+    );
+    expect(parseError.status).toBe('parse_error');
+    expect('totalUsage' in parseError).toBe(false);
+
+    const tooLarge = await parseZcodeModelIoLog('x'.repeat(64), { maxContentBytes: 32 });
+    expect(tooLarge.status).toBe('too_large');
+    expect('totalUsage' in tooLarge).toBe(false);
+  });
+});
+
+// ── Z14：sender 归一（D-003@v1 / FR-02）──────────────────────────────────────
+
+describe('parseZcodeModelIoLog — 伪用户消息归一 sender（Z14 / D-003@v1）', () => {
+  const content = jsonl(
+    ioLine({
+      kind: 'full',
+      offset: 0,
+      messages: [
+        USER('<task-notification>后台任务完成：构建产物已生成</task-notification>'),
+        USER('  <task-notification>\n带前导空白的通知  '),
+        USER('<system-reminder>提醒块</system-reminder>\n\n真人追问：为什么这么慢'),
+        USER('普通真人输入'),
+        ASST_BLOCKS([{ type: 'text', text: '答复正文' }]),
+      ],
+    }),
+  );
+
+  it('task-notification 开头 → system_event（正文保留完整通知文本）；普通/混合正文缺省不写 sender', async () => {
+    const result = await parseZcodeModelIoLog(content);
+    expect(result.messages.map((m) => m.kind)).toEqual([
+      'user_input', 'user_input', 'user_input', 'user_input', 'reply',
+    ]);
+    // 通知文本原样保留（task-notification 无剥离逻辑，仅归一 sender）。
+    expect(result.messages[0]).toMatchObject({
+      text: '<task-notification>后台任务完成：构建产物已生成</task-notification>',
+      sender: 'system_event',
+    });
+    // 前导空白 trim 后仍以通知前缀开头 → system_event。
+    expect(result.messages[1]).toMatchObject({
+      text: '<task-notification>\n带前导空白的通知',
+      sender: 'system_event',
+    });
+    // 混合消息：reminder 块剥掉后正文是真人追问 → 缺省不写（视为 human——
+    // 错标系统事件会隐藏真人输入，代价不对称，design R-06 原则）。
+    expect(result.messages[2]).toMatchObject({ text: '真人追问：为什么这么慢' });
+    expect(Object.hasOwn(result.messages[2] as object, 'sender')).toBe(false);
+    // 普通真人文本同样缺省不写。
+    expect(result.messages[3]).toMatchObject({ text: '普通真人输入' });
+    expect(result.messages[3]?.sender).toBeUndefined();
+    // 非 user_input 段不写 sender。
+    expect(result.messages[4]?.sender).toBeUndefined();
   });
 });

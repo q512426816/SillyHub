@@ -34,6 +34,17 @@
 //   R7 会话不在库 → 抛错不伪造空结果
 //   R8 模块级默认库路径工厂覆写与还原
 //   R9 tool 摘要截断（tool_input 首 2KB / tool_result 首 4KB）
+//
+// task-03（2026-09-19-tool-report-session-replay / FR-03 + D-004@v1，R-01）：
+// spike-01 只读核对真实库结论=等价数据齐全（message.data.tokens/anchor.turnId/
+// modelId/time.completed，详见变更目录 verify-facts.json），采纳主路径。断言：
+//   R1 扩展——消息级 usage（五项映射）/turn_id/model/duration_ms 附着到该消息
+//      全部段（user 段四项 null / assistant 段全带）+ totalUsage 两调用去重求和
+//   R2/R3/R5/R9 连带——子代理 totalUsage / 空会话 null / 零 usage 大会话 null /
+//      无 tokens 消息的截断会话 null（不伪造 0）
+//   R10 边界——裸 assistant 消息四项 null；tokens 形状漂移（缺 cache）usage
+//      null 不计入；隐藏 assistant 带 tokens 零产段且不计入 totalUsage；同一
+//      消息多段（tool use+result）共享 usage 去重求和
 
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
@@ -347,10 +358,14 @@ describe('readZcodeSqliteMessages — SQLite 会话读取器', () => {
         'tool_use', // running：只产 use 段
         'tool_use', // pending：只产 use 段
       ]);
+      // task-03：totalUsage = assistantText（1000+200+64+32）+ assistantTools
+      //（700+100+0+0）两调用去重求和（隐藏消息无 usage、user 段不计数）。
+      expect(result.totalUsage).toEqual({ inputTokens: 1700, outputTokens: 300, cacheReadTokens: 64, cacheWriteTokens: 32 });
 
       const ISO = (delta: number) => new Date(FIXTURE_TIME_BASE + delta).toISOString();
       const [userInput, thinking, reply, use1, res1, use2, res2, use3, use4] = result.messages;
-      // 九字段 snake_case 齐全：首段逐字段断言（未给字段一律 null）。
+      // 九字段 snake_case + task-03 四项 token 元数据齐全：首段逐字段断言（user
+      // 段带 anchor.turnId，usage/model/duration_ms 无调用语义一律 null）。
       expect(userInput).toEqual({
         seq: 1,
         kind: 'user_input',
@@ -361,10 +376,33 @@ describe('readZcodeSqliteMessages — SQLite 会话读取器', () => {
         tool_result: null,
         is_error: null,
         ts: ISO(1000),
+        turn_id: ZCODE_FIXTURE_IDS.turns.main,
+        model: null,
+        duration_ms: null,
+        usage: null,
       });
-      expect(thinking).toMatchObject({ kind: 'thinking', text: '先看构建日志定位报错行…', ts: ISO(5000) });
-      expect(reply).toMatchObject({ kind: 'reply', text: '构建失败原因是依赖版本冲突。', ts: ISO(5000) });
-      // tool completed：use + result 两段，ts 取 message.time.created。
+      // task-03：assistantText 的段带该调用 usage 五项（tokens 映射）+ modelId +
+      // duration（completed-created=4000）+ 同轮 turnId。
+      expect(thinking).toMatchObject({
+        kind: 'thinking',
+        text: '先看构建日志定位报错行…',
+        ts: ISO(5000),
+        turn_id: ZCODE_FIXTURE_IDS.turns.main,
+        model: 'fixture-model-z',
+        duration_ms: 4000,
+        usage: { inputTokens: 1000, outputTokens: 200, totalTokens: 1200, cacheReadTokens: 64, cacheWriteTokens: 32 },
+      });
+      expect(reply).toMatchObject({
+        kind: 'reply',
+        text: '构建失败原因是依赖版本冲突。',
+        ts: ISO(5000),
+        turn_id: ZCODE_FIXTURE_IDS.turns.main,
+        model: 'fixture-model-z',
+        duration_ms: 4000,
+        usage: { inputTokens: 1000, outputTokens: 200, totalTokens: 1200, cacheReadTokens: 64, cacheWriteTokens: 32 },
+      });
+      // tool completed：use + result 两段，ts 取 message.time.created；两段共享
+      // assistantTools 同一 usage（task-03 口径：一次调用多段不重复计数）。
       expect(use1).toMatchObject({
         kind: 'tool_use',
         tool_name: 'Bash',
@@ -373,6 +411,10 @@ describe('readZcodeSqliteMessages — SQLite 会话读取器', () => {
         tool_result: null,
         is_error: null,
         ts: ISO(10000),
+        turn_id: ZCODE_FIXTURE_IDS.turns.main,
+        model: 'fixture-model-z',
+        duration_ms: 5000,
+        usage: { inputTokens: 700, outputTokens: 100, totalTokens: 800, cacheReadTokens: 0, cacheWriteTokens: 0 },
       });
       expect(res1).toMatchObject({
         kind: 'tool_result',
@@ -382,10 +424,14 @@ describe('readZcodeSqliteMessages — SQLite 会话读取器', () => {
         tool_result: '3 passed',
         is_error: false,
         ts: ISO(10000),
+        turn_id: ZCODE_FIXTURE_IDS.turns.main,
+        model: 'fixture-model-z',
+        duration_ms: 5000,
+        usage: { inputTokens: 700, outputTokens: 100, totalTokens: 800, cacheReadTokens: 0, cacheWriteTokens: 0 },
       });
       // tool error：error 态取 state.error 文本进 tool_result。
-      expect(use2).toMatchObject({ kind: 'tool_use', tool_name: 'Bash', tool_use_id: 'call_c2', tool_input: '{"command":"exit 1"}', tool_result: null, is_error: null });
-      expect(res2).toMatchObject({ kind: 'tool_result', tool_name: 'Bash', tool_use_id: 'call_c2', tool_result: 'Command failed with exit code 1', is_error: true });
+      expect(use2).toMatchObject({ kind: 'tool_use', tool_name: 'Bash', tool_use_id: 'call_c2', tool_input: '{"command":"exit 1"}', tool_result: null, is_error: null, usage: { inputTokens: 700, outputTokens: 100, totalTokens: 800, cacheReadTokens: 0, cacheWriteTokens: 0 } });
+      expect(res2).toMatchObject({ kind: 'tool_result', tool_name: 'Bash', tool_use_id: 'call_c2', tool_result: 'Command failed with exit code 1', is_error: true, model: 'fixture-model-z', duration_ms: 5000 });
       // running/pending：无 output，只产 tool_use。
       expect(use3).toMatchObject({ kind: 'tool_use', tool_name: 'Grep', tool_use_id: 'call_c3', tool_input: '{"pattern":"TODO"}', tool_result: null, is_error: null });
       expect(use4).toMatchObject({ kind: 'tool_use', tool_name: 'WebSearch', tool_use_id: 'call_c4', tool_input: '{"query":"node sqlite"}', tool_result: null, is_error: null });
@@ -408,13 +454,23 @@ describe('readZcodeSqliteMessages — SQLite 会话读取器', () => {
         [1, 'user_input', '调查这个已知问题的实现现状', new Date(FIXTURE_TIME_BASE + 20000).toISOString()],
         [2, 'reply', '调查结论：问题出在读取层。', new Date(FIXTURE_TIME_BASE + 21000).toISOString()],
       ]);
+      // task-03：子代理独立轮 anchor + assistant 调用元数据 + 单调用 totalUsage。
+      const [subUser, subReply] = result.messages;
+      expect(subUser).toMatchObject({ turn_id: ZCODE_FIXTURE_IDS.turns.subagent, model: null, duration_ms: null, usage: null });
+      expect(subReply).toMatchObject({
+        turn_id: ZCODE_FIXTURE_IDS.turns.subagent,
+        model: 'fixture-model-z',
+        duration_ms: 4000, // completed(25000) - created(21000)
+        usage: { inputTokens: 400, outputTokens: 100, totalTokens: 500, cacheReadTokens: 16, cacheWriteTokens: 8 },
+      });
+      expect(result.totalUsage).toEqual({ inputTokens: 400, outputTokens: 100, cacheReadTokens: 16, cacheWriteTokens: 8 });
     });
   });
 
-  it('R3 空会话 → parsed 空数组（不伪造 parse_error）', async () => {
+  it('R3 空会话 → parsed 空数组（不伪造 parse_error；totalUsage null 不伪造 0）', async () => {
     await withFixtureDb(async (fixture) => {
       const result = await readZcodeSqliteMessages(EMPTY, null, { dbPath: fixture.dbPath });
-      expect(result).toEqual({ status: 'parsed', messages: [], truncated: false, totalSegments: 0, skippedLines: 0 });
+      expect(result).toEqual({ status: 'parsed', messages: [], truncated: false, totalSegments: 0, skippedLines: 0, totalUsage: null });
     });
   });
 
@@ -470,6 +526,7 @@ describe('readZcodeSqliteMessages — SQLite 会话读取器', () => {
       const first = await readZcodeSqliteMessages(BIG, null, { dbPath: fixture.dbPath });
       expect(first.truncated).toBe(true);
       expect(first.totalSegments).toBe(210);
+      expect(first.totalUsage).toBeNull(); // 零 usage 行（裸 user 消息）→ null 不伪造 0
       expect(first.messages).toHaveLength(200);
       expect(first.messages[0]).toMatchObject({ seq: 11, text: '第 11 条' });
       expect(first.messages.at(-1)).toMatchObject({ seq: 210, text: '第 210 条' });
@@ -568,12 +625,110 @@ describe('readZcodeSqliteMessages — SQLite 会话读取器', () => {
       }
       const result = await readZcodeSqliteMessages(TRUNC, null, { dbPath: fixture.dbPath });
       expect(result.totalSegments).toBe(2);
+      expect(result.totalUsage).toBeNull(); // assistant 无 tokens（老 schema 行形状）→ null
       const [use, res] = result.messages;
       const expectedInputJson = JSON.stringify({ command: 'x'.repeat(3000) });
       expect(use?.tool_input).toBe(expectedInputJson.slice(0, 2048));
       expect(use?.tool_input?.length).toBe(2048);
       expect(res?.tool_result).toBe('o'.repeat(4096));
       expect(res?.tool_result?.length).toBe(4096);
+    });
+  });
+
+  it('R10 task-03 补字段边界：裸消息四项 null / tokens 形状漂移 / 隐藏 assistant 不计 totalUsage / 多段共享 usage 去重', async () => {
+    await withFixtureDb(async (fixture) => {
+      const META = 'sess_33333333-0006-4000-8000-000000000006';
+      const wr = new WritableDatabaseSync(fixture.dbPath);
+      try {
+        wr.prepare('INSERT INTO session (id, title, directory, parent_id) VALUES (?, ?, ?, ?)').run(META, '字段边界会话', 'C:\\repo\\meta', null);
+        const insertMessage = wr.prepare('INSERT INTO message (id, session_id, sequence, data) VALUES (?, ?, ?, ?)');
+        const insertPart = wr.prepare('INSERT INTO part (id, message_id, session_id, sequence, data) VALUES (?, ?, ?, ?, ?)');
+        // A：完整形状 assistant（tokens 五项 + anchor + modelId + time 双键）→
+        //    全字段附着 + 计入 totalUsage；含 tool part 验证同消息多段共享 usage。
+        insertMessage.run(
+          'msg_meta_a',
+          META,
+          1,
+          JSON.stringify({
+            role: 'assistant',
+            time: { created: FIXTURE_TIME_BASE + 1000, completed: FIXTURE_TIME_BASE + 3000 },
+            anchor: { turnId: 'turn_33333333-3333-4000-8000-000000000003' },
+            modelId: 'fixture-model-z',
+            tokens: { total: 340, input: 300, output: 40, reasoning: 0, cache: { read: 5, write: 7 } },
+          }),
+        );
+        insertPart.run('part_meta_a_reasoning', 'msg_meta_a', META, 1, JSON.stringify({ type: 'reasoning', text: '完整形状消息的思考段' }));
+        insertPart.run(
+          'part_meta_a_tool',
+          'msg_meta_a',
+          META,
+          2,
+          JSON.stringify({ type: 'tool', tool: 'Read', callID: 'call_m1', state: { status: 'completed', input: { path: 'a.ts' }, output: 'ok' } }),
+        );
+        // B：裸 assistant（零元数据——模拟老 schema / 字段缺失行）→ 四项全 null 不伪造。
+        insertMessage.run('msg_meta_b', META, 2, JSON.stringify({ role: 'assistant' }));
+        insertPart.run('part_meta_b_text', 'msg_meta_b', META, 1, JSON.stringify({ type: 'text', text: '裸消息的回复段' }));
+        // C：隐藏 assistant（uiVisibility=hidden）带完整 tokens → 零产段且 usage 不计 totalUsage。
+        insertMessage.run(
+          'msg_meta_c',
+          META,
+          3,
+          JSON.stringify({
+            role: 'assistant',
+            time: { created: FIXTURE_TIME_BASE + 5000, completed: FIXTURE_TIME_BASE + 6000 },
+            anchor: { turnId: 'turn_33333333-3333-4000-8000-000000000003' },
+            modelId: 'fixture-model-z',
+            tokens: { total: 999, input: 900, output: 99, reasoning: 0, cache: { read: 0, write: 0 } },
+            semantics: { origin: 'system', uiVisibility: 'hidden', transcriptVisibility: 'visible' },
+          }),
+        );
+        insertPart.run('part_meta_c_text', 'msg_meta_c', META, 1, JSON.stringify({ type: 'text', text: '隐藏消息正文不泄漏' }));
+        // D：tokens 形状漂移（缺 cache 子对象）→ usage 整体 null 不计；anchor/modelId/time 照常附着。
+        insertMessage.run(
+          'msg_meta_d',
+          META,
+          4,
+          JSON.stringify({
+            role: 'assistant',
+            time: { created: FIXTURE_TIME_BASE + 7000, completed: FIXTURE_TIME_BASE + 7500 },
+            anchor: { turnId: 'turn_33333333-3333-4000-8000-000000000003' },
+            modelId: 'fixture-model-z',
+            tokens: { total: 100, input: 90, output: 10 },
+          }),
+        );
+        insertPart.run('part_meta_d_text', 'msg_meta_d', META, 1, JSON.stringify({ type: 'text', text: '形状漂移消息的回复段' }));
+      } finally {
+        wr.close();
+      }
+      const result = await readZcodeSqliteMessages(META, null, { dbPath: fixture.dbPath });
+      expect(result.status).toBe('parsed');
+      // A 产 3 段（thinking + tool_use + tool_result）+ B/D 各 1 段（C 隐藏整条跳过）。
+      expect(result.totalSegments).toBe(5);
+      const [aThink, aUse, aRes, b, d] = result.messages;
+      const A_USAGE = { inputTokens: 300, outputTokens: 40, totalTokens: 340, cacheReadTokens: 5, cacheWriteTokens: 7 };
+      // A 的三段共享同一 usage（一次调用多段，去重口径的附着面）。
+      for (const seg of [aThink, aUse, aRes]) {
+        expect(seg).toMatchObject({
+          turn_id: 'turn_33333333-3333-4000-8000-000000000003',
+          model: 'fixture-model-z',
+          duration_ms: 2000,
+          usage: A_USAGE,
+        });
+      }
+      // B：裸消息四项全 null（ts 亦 null——无 time 键）。
+      expect(b).toMatchObject({ kind: 'reply', text: '裸消息的回复段', ts: null, turn_id: null, model: null, duration_ms: null, usage: null });
+      // D：形状漂移只废 usage，其余三元组照常。
+      expect(d).toMatchObject({
+        kind: 'reply',
+        text: '形状漂移消息的回复段',
+        turn_id: 'turn_33333333-3333-4000-8000-000000000003',
+        model: 'fixture-model-z',
+        duration_ms: 500,
+        usage: null,
+      });
+      // totalUsage 仅计 A（三段共享只计一次；C 隐藏不计、D 漂移不计、B 无 tokens）。
+      expect(result.totalUsage).toEqual({ inputTokens: 300, outputTokens: 40, cacheReadTokens: 5, cacheWriteTokens: 7 });
+      expect(JSON.stringify(result.messages)).not.toContain('隐藏消息正文不泄漏');
     });
   });
 });

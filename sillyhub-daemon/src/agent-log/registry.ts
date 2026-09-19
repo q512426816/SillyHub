@@ -5,10 +5,13 @@
  * read_agent_log_messages RPC 的格式分发层。key 是 CLI 上报落库的 format 串
  * （design §6，与 platform_agent_logs.format 逐字一致），value 是对应解析器。
  *
- * MVP 仅注册 `'zcode-model-io-jsonl'`（D-002 二期扩展点，不预写多格式抽象）；
- * 未注册 format 查询返回 null，由调用方（host-fs-handler.readAgentLogMessages）
- * 转 `status:'unsupported'`——'unsupported' 是本层的判定，解析器自身只产
- * parsed / parse_error / too_large（task-01 契约），两个职责不混。
+ * task-06（2026-09-19-tool-report-session-replay / FR-02 + D-006@v1）自单键
+ * `'zcode-model-io-jsonl'` 扩展为三键——新增 `'claude-code-jsonl'`（task-04
+ * 解析器）与 `'cursor-agent-transcript-jsonl'`（task-05 解析器，format 串与
+ * 扫描上报层约定逐字一致）。未注册 format 查询返回 null，由调用方
+ * （host-fs-handler.readAgentLogMessages）转 `status:'unsupported'`——
+ * 'unsupported' 是本层的判定，解析器自身只产 parsed / parse_error / too_large
+ * （task-01 契约），两个职责不混。
  *
  * 本模块不 import RpcError / ws-client / fs（错误与文件 IO 都是 host-fs-handler
  * 的职责，注册表只做纯映射查询）。
@@ -16,6 +19,8 @@
  * @module agent-log/registry
  */
 
+import { parseClaudeCodeJsonlLog } from './parse-claude-code-jsonl.js';
+import { parseCursorAgentTranscriptLog } from './parse-cursor-agent-transcript.js';
 import type { NormalizedLogMessage } from './parse-zcode-model-io.js';
 import { parseZcodeModelIoLog } from './parse-zcode-model-io.js';
 
@@ -44,6 +49,17 @@ export interface AgentLogMessagesResult {
   totalSegments: number;
   /** 坏行计数。 */
   skippedLines: number;
+  /**
+   * 全会话累计 token 用量（四项计数，全 number）。可选——老 daemon / 无数据源
+   * 缺省 null；由解析器全量过一遍后顺带求和返回（求和逻辑归
+   * 2026-09-19-tool-report-session-replay task-02~05，本契约先行钉死形状）。
+   */
+  totalUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+  } | null;
 }
 
 /**
@@ -55,14 +71,18 @@ export type AgentLogParser = (
   options: { beforeSeq?: number | null },
 ) => Promise<AgentLogMessagesResult>;
 
-// ── 注册表（MVP 单项，D-002）──────────────────────────────────────────────────
+// ── 注册表（三 harness：task-02 D-002 + task-06 D-006）───────────────────────
 
 /**
- * format → parser 静态注册表。MVP 仅 `'zcode-model-io-jsonl'`（key 与 CLI 上报
- * 落库 format 串逐字一致，design §6）；二期多格式经此 Map 扩展，调用方零改动。
+ * format → parser 静态注册表。key 与 CLI 上报落库 format 串逐字一致（design
+ * §6）：`'zcode-model-io-jsonl'`（task-01）/ `'claude-code-jsonl'`（task-04，
+ * claude-code 会话 JSONL）/ `'cursor-agent-transcript-jsonl'`（task-05，
+ * cursor-agent transcript JSONL）；后续多格式经此 Map 增键，调用方零改动。
  */
 const PARSERS: ReadonlyMap<string, AgentLogParser> = new Map<string, AgentLogParser>([
   ['zcode-model-io-jsonl', parseZcodeModelIoLog],
+  ['claude-code-jsonl', parseClaudeCodeJsonlLog],
+  ['cursor-agent-transcript-jsonl', parseCursorAgentTranscriptLog],
 ]);
 
 /**

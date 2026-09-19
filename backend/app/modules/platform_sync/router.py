@@ -864,8 +864,12 @@ async def read_agent_log_messages(
     调 ``host_fs.read_agent_log_messages {path, format, beforeSeq?}``（task-02
     契约，默认 30s 传输预算）：daemon 全量读文件本地解析后只回 KB 级归一化消息
     （FR-02，替代 content 端点 256KB 原文尾部口径）。外层 daemon 返回 camelCase
-    （``totalSegments``/``skippedLines``）→ 本端点转换层落 snake_case；messages
-    内层逐字段已对齐（design §7.1）无需改名。
+    （``totalSegments``/``skippedLines``/``totalUsage``）→ 本端点转换层落
+    snake_case；messages 内层逐字段已对齐（design §7.1）无需改名——新可选字段
+    sender/turn_id/model/duration_ms/usage 与 total_usage（task-08 / FR-03 /
+    D-004@v1）同口径：messages 内 snake_case 原样递归校验（usage 子对象
+    camelCase 键由 schema ``validation_alias`` 对齐），外层 ``totalUsage`` 仅做
+    key 映射，零改写语义；老 daemon / 早退分支不携带即缺省 None。
 
     status 四值（parsed/unsupported/parse_error/too_large）**一律 200 透传**——
     「RPC 成功≠解析成功」，unsupported/parse_error/too_large 由前端判断回落原文
@@ -889,7 +893,10 @@ async def read_agent_log_messages(
     )
 
     # camelCase→snake_case 转换层（messages 内层逐字段已对齐，model_validate
-    # 递归校验即可）；status 非四值（契约破坏）由 pydantic 显式炸出而非静默改写。
+    # 递归校验即可；usage 子对象 camelCase 键由 schema validation_alias 对齐）；
+    # status 非四值（契约破坏）由 pydantic 显式炸出而非静默改写。
+    # total_usage（task-08）：外层 totalUsage 仅 key 映射零改写，老 daemon /
+    # 早退分支不携带 → get 缺省 None（messages 内层新可选字段同理缺省）。
     return AgentLogMessagesResponse.model_validate(
         {
             "status": result.get("status"),
@@ -897,5 +904,6 @@ async def read_agent_log_messages(
             "truncated": result.get("truncated", False),
             "total_segments": result.get("totalSegments", 0),
             "skipped_lines": result.get("skippedLines", 0),
+            "total_usage": result.get("totalUsage"),
         }
     )

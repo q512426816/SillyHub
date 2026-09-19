@@ -30,6 +30,7 @@ modules:
       - handle_plan_response (backend/app/modules/daemon/session/service.py, plan 决策落库+WS daemon:plan_response 下发)
       - heartbeat sillyspec_status 落库/机器视图嵌套 (backend/app/modules/daemon/runtime/service.py + router.py, None=清除语义, 2026-09-02-changes-overview-card)
       - upsert_agent_log_states / BLOCKED_SEGMENTS (backend/app/modules/platform_sync/service.py+router.py, POST /agent-logs/states 批量 upsert-create+blocked 段转移/120s agent_blocked 通知, 2026-09-07-agent-liveness-states)
+      - AgentLogMessagesResponse 可选字段+total_usage (backend/app/modules/platform_sync/schema.py+router.py, GET /agent-logs/{id}/messages 响应扩展·sender/turn_id/model/duration_ms/usage 逐层透传·老 daemon 缺省兼容, 2026-09-19-tool-report-session-replay)
       - WorkerLiveness 直查 (backend/app/modules/agent/mcp_tools.py, list_workers running worker 附 liveness{state,evidence,derived_at}, 2026-09-07-agent-liveness-states)
       - workspace_router
       - members_router
@@ -59,6 +60,7 @@ modules:
       - HomePage
       - ChangesOverviewCard (frontend/src/components/workspace/changes-overview-card.tsx, 工作台活跃变更总览卡片, 2026-09-02-changes-overview-card)
       - AgentLivenessOverviewCard / LivenessBadge (src/components/agent-log/，五态徽章+工作台状态总览卡，D-004 两层, 2026-09-07-agent-liveness-states)
+      - AgentReplayBody / buildReplayTurns (frontend/src/components/daemon/agent-replay-body.tsx + frontend/src/lib/agent-log-turns.ts, tool_report 纯日志会话回放主体·TurnTimeline 真组件复用·适配器切轮/系统事件中性行/轮级 token·工作会话折叠条, 2026-09-19-tool-report-session-replay)
     depends_on: [backend]
     used_by: [deploy, ci, build]
     needs_review: false
@@ -83,6 +85,7 @@ modules:
       - readPid
       - INTERACTIVE_PROVIDERS (sillyhub-daemon/src/interactive/providers.ts, provider 注册表+caps 单源, 2026-09-04-provider-pi-onboarding)
       - readZcodeSqliteMessages (sillyhub-daemon/src/agent-log/read-zcode-sqlite.ts, zcode 本地 SQLite 会话读取器·恒读库+文件兜底+隐藏过滤, 2026-09-10-zcode-session-sqlite-read)
+      - parseZcodeModelIoLog+CallMeta / parseClaudeCodeJsonlLog / parseCursorAgentTranscriptLog / getAgentLogParser (sillyhub-daemon/src/agent-log/, 解析器矩阵三 harness·NormalizedLogMessage 可选 usage/turn_id/model/duration_ms/sender+totalUsage·task-notification 等伪用户归一 system_event, 2026-09-19-tool-report-session-replay)
       - PiRpcDriver (sillyhub-daemon/src/interactive/pi-rpc-driver.ts, pi rpc 长驻 driver, 2026-09-04-provider-pi-onboarding)
       - PiEventNormalizer (sillyhub-daemon/src/interactive/pi-events.ts, rpc 事件→AgentEvent v2, 2026-09-04-provider-pi-onboarding)
       - isProcessAlive

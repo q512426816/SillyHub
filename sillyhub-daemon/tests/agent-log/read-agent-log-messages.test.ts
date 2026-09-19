@@ -155,6 +155,15 @@ describe('HostFsHandler — readAgentLogMessages（task-02）', () => {
     expect(result.messages[0]?.tool_result).toBeNull();
     expect(result.messages[0]?.is_error).toBeNull();
     expect(result.messages[0]?.ts).toBe('2026-08-23T10:00:00Z');
+    // 老形状 fixture（无 turnId/model/durationMs/response.usage）：新字段缺省 null
+    // （2026-09-19 task-02 契约——老日志不返回即缺省，消费方按未知兜底）。
+    expect(result.messages[0]?.turn_id).toBeNull();
+    expect(result.messages[0]?.model).toBeNull();
+    expect(result.messages[0]?.duration_ms).toBeNull();
+    expect(result.messages[0]?.usage).toBeNull();
+    expect(result.messages[0]?.sender).toBeUndefined(); // 普通真人文本缺省不写（human）
+    // 零 usage 数据 → totalUsage null（不伪造 0；parsed 结果恒带该键）。
+    expect(result.totalUsage).toBeNull();
 
     // seq2 tool_result：消息级 toolCallId/toolName/isError/content 键集透传。
     expect(result.messages[1]?.seq).toBe(2);
@@ -225,6 +234,8 @@ describe('HostFsHandler — readAgentLogMessages（task-02）', () => {
     expect(result.messages.map((m) => m.seq)).toEqual([1, 2]);
     expect(result.totalSegments).toBe(3);
     expect(result.truncated).toBe(false);
+    // totalUsage 与 beforeSeq 切片无关（全量口径；老形状 fixture 恒 null）。
+    expect(result.totalUsage).toBeNull();
 
     // beforeSeq=1 → 空（没有更早的段），totalSegments 不变。
     const empty = await handler.readAgentLogMessages(logPath, ZCODE_FORMAT, 1);
@@ -255,5 +266,7 @@ describe('agent-log registry — getAgentLogParser（task-02）', () => {
     expect(result.status).toBe('parsed');
     expect(result.totalSegments).toBe(3);
     expect(result.messages.map((m) => m.seq)).toEqual([1]);
+    // 解析器契约（2026-09-19 task-02）：parsed 结果带 totalUsage（零 usage → null）。
+    expect(result.totalUsage).toBeNull();
   });
 });

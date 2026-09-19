@@ -2008,8 +2008,10 @@ export class HostFsHandler {
 
   /**
    * `read_agent_log_messages(path, format, beforeSeq?) → { status, messages,
-   * truncated, totalSegments, skippedLines }`（design §7.1，外层 camelCase；
-   * messages 内层 NormalizedLogMessage snake_case 原样透传）。
+   * truncated, totalSegments, skippedLines, totalUsage? }`（design §7.1，外层
+   * camelCase；messages 内层 NormalizedLogMessage snake_case 原样透传；
+   * totalUsage 可选——parsed 路径由解析器/读取器携带（task-01 契约扩展），
+   * unsupported / too_large / parse_error 早退分支不带键）。
    *
    * agent 日志对话化读取第 10 方法：backend platform_sync 经 ws_rpc 转发
    * platform_agent_logs 落库的 path + format，daemon 在宿主读原文并解析为
@@ -2109,7 +2111,9 @@ export class HostFsHandler {
 
     // 4. readFile utf8 全量（不存在/读失败 → toRpcError 抛 not_found，
     //    与 readFile 同通道）→ 透传 content + beforeSeq 交解析器，原样回传
-    //    { status, messages, truncated, totalSegments, skippedLines }。
+    //    { status, messages, truncated, totalSegments, skippedLines } + 可选
+    //    totalUsage（task-06：解析器产物直传，handler 零改写；上方 zcode
+    //    sqlite 分派分支 readZcodeSqliteMessages 返回值同样直传）。
     let content: string;
     try {
       content = await readFile(abs, 'utf8');

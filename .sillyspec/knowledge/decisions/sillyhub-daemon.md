@@ -98,3 +98,38 @@
 锚点：sillyhub-daemon/src/interactive/providers.ts:ProviderCaps（caps 键落点）+ sillyhub-daemon/src/interactive/usage-ctx.ts:ctxTokensFromNetInput（公式单源落点，execute 新建）
 最近确认：未记录
 理由：用户原话指定方向：「都要接入的，并且需要统一抽象出来（我记得最近刚刚做了个统一抽象的事情，就是怕后面再接新 agent 又遗漏一些功能）」。据此选方案 A（各归一化器在 usage 构造处用共享 helper 派生 + ProviderCaps 第 11 键声明走既有三端生成与守护链）。
+
+## D-003@v1
+状态：implemented
+变更：2026-09-19-tool-report-session-replay
+锚点：sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts（SYSTEM_REMINDER_BLOCK_RE 剥离先例）
+最近确认：53c67e02a
+理由：跨 harness 通则——仅真人输入渲染为用户气泡；task-notification / system-reminder（zcode）、isMeta 与注入上下文（claude-code）、纯 tool_result 载体 user 行（claude-code）归一化为系统事件或工具段
+
+## D-004@v1
+状态：implemented
+变更：2026-09-19-tool-report-session-replay
+锚点：sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts:66（NormalizedLogMessage）、backend/app/modules/platform_sync/router.py:849（messages 端点）
+最近确认：53c67e02a
+理由：四层打通——daemon 解析器透传 usage/turn/model/耗时 + 全会话累计 → RPC 返回结构 → 平台 GET /agent-logs/{id}/messages schema → gen:types → 前端映射到 SessionTurnView token 字段与会话用量环；老 daemon 字段可选、缺省显示「未知」；cursor-agent 回放 token 恒「未知」（数据不落盘，非解析器可解）
+
+## D-005@v1
+状态：implemented
+变更：2026-09-19-tool-report-session-replay
+锚点：sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts（extractModelIoLine 需补读顶层字段）
+最近确认：53c67e02a
+理由：zcode 按顶层 turnId 聚轮（实证 115 次调用聚 3 轮：子代理通知续跑/系统提醒/真人提问各一）；cursor-agent transcript 按 turn_ended 事件切轮；claude-code 按真人 user 消息天然切轮；每轮可挂自己的 token 小计；CLI 命令原文不在任何日志中（边界有、命令文本无），轮起点的「用户气泡」有真人文本用原文、无则用系统事件标记
+
+## D-006@v1
+状态：implemented
+变更：2026-09-19-tool-report-session-replay
+锚点：sillyhub-daemon/src/agent-log/registry.ts:57（PARSERS 单项注册表——扩展点）
+最近确认：53c67e02a
+理由：claude-code-jsonl 新增解析器并注册（对话化 + usage 一起落地，含 D-003 归一化）；cursor-agent CLI transcript 新增扫描上报（~/.cursor/projects/*/agent-transcripts/，现 96 份零上报）+ 新增解析器（结构干净 {role,message} JSONL + turn_ended，非 Claude Code 同构）；cursor IDE store.db（cursor-chat-sqlite）维持不做对话化（blob 库、无 token），但其 409 死胡同需给出像样说明；zcode 既有解析器补 D-004/D-005 字段
+
+## D-008@v1
+状态：implemented
+变更：2026-09-19-tool-report-session-replay
+锚点：decisions.md D-001/D-004/D-007
+最近确认：53c67e02a
+理由：方案A——前端适配器把 NormalizedLogMessage[] 映射为 SessionTurnView 喂 TurnTimeline 真组件；daemon zcode 解析器补 usage/turnId/model/累计 + 新增 claude-code、cursor-agent 解析器与 cursor-agent 扫描上报；平台 messages schema 加可选字段 + gen:types；平台库零表结构改动，按需现读

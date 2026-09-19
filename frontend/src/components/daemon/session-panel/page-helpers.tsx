@@ -66,7 +66,7 @@ export const PANEL_HEADER_CLS_MOBILE =
   "relative z-20 flex shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-card/60 px-3 py-2 backdrop-blur-md";
 
 /**
- * mobile 会话主体外包层：TurnTimeline / AgentLogSessionBody 自带纵向滚动容器
+ * mobile 会话主体外包层：TurnTimeline / AgentReplayBody 自带纵向滚动容器
  * （min-h-0 flex-1 overflow-y-auto），外包 flex 列容器不破坏高度链；任意变体
  * 选择器给 markdown 表格补横向滚动容器（design §5.4：横向内容不撑破竖屏视口；
  * markdown pre 已有 overflow-x-auto、ARGS_PRE_CLS pre 已 wrap，表格是缺口），

@@ -6,6 +6,10 @@
   「RPC 成功≠解析成功」，前端判断回落）。
 - camelCase→snake_case 外层映射（totalSegments→total_segments /
   skippedLines→skipped_lines）；messages 内层逐字段 snake_case 原样。
+- 2026-09-19-tool-report-session-replay task-08：token/轮次可选字段透传——
+  messages 内层 sender/turn_id/model/duration_ms（snake_case 原样）+ usage
+  （daemon camelCase 键经 schema validation_alias 落 snake_case）；外层
+  totalUsage→total_usage；早退/老 daemon 不携带即缺省 None。
 - before_seq query 参数透传 daemon 侧 beforeSeq；缺省不带该键。
 - 老 daemon method-not-found → 422 ``HTTP_422_AGENT_LOG_UNSUPPORTED``（唯一 422）。
 - 共享 helper 通道复用断言：scope 越权 404 / 二进制 409 / 无绑定 daemon 404 /
@@ -39,8 +43,10 @@ from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime  
 
 _RPC = "app.modules.daemon.host_fs.ws_rpc.send_host_fs_rpc"
 
-#: daemon 契约（task-02）外层 camelCase 返回的 parsed 形状样例（messages 内层
-#: snake_case 与 NormalizedLogMessage 逐字对齐，design §7.1）。
+#: daemon 契约（task-02 + task-08 token/轮次扩展）外层 camelCase 返回的 parsed
+#: 形状样例（messages 内层 snake_case 与 NormalizedLogMessage 逐字对齐，design
+#: §7.1；usage 子对象键为 daemon camelCase，外层 totalUsage 同理——schema 侧
+#: validation_alias 落 snake_case）。
 _PARSED_RESULT: dict[str, Any] = {
     "status": "parsed",
     "messages": [
@@ -54,6 +60,11 @@ _PARSED_RESULT: dict[str, Any] = {
             "tool_result": None,
             "is_error": None,
             "ts": "2026-08-23T10:00:00.000Z",
+            "sender": "human",
+            "turn_id": "t-1",
+            "model": "GLM-5.3",
+            "duration_ms": None,
+            "usage": None,
         },
         {
             "seq": 2,
@@ -65,6 +76,17 @@ _PARSED_RESULT: dict[str, Any] = {
             "tool_result": None,
             "is_error": None,
             "ts": "2026-08-23T10:00:01.000Z",
+            "sender": None,
+            "turn_id": "t-1",
+            "model": "GLM-5.3",
+            "duration_ms": 1200,
+            "usage": {
+                "inputTokens": 100,
+                "outputTokens": 20,
+                "totalTokens": 120,
+                "cacheReadTokens": 5,
+                "cacheWriteTokens": 0,
+            },
         },
         {
             "seq": 3,
@@ -76,11 +98,22 @@ _PARSED_RESULT: dict[str, Any] = {
             "tool_result": "a.py\nb.py",
             "is_error": False,
             "ts": "2026-08-23T10:00:02.000Z",
+            "sender": None,
+            "turn_id": "t-1",
+            "model": None,
+            "duration_ms": None,
+            "usage": None,
         },
     ],
     "truncated": True,
     "totalSegments": 203,
     "skippedLines": 2,
+    "totalUsage": {
+        "inputTokens": 100,
+        "outputTokens": 20,
+        "cacheReadTokens": 5,
+        "cacheWriteTokens": 0,
+    },
 }
 
 
@@ -189,8 +222,10 @@ class TestStatusLayering:
         shpsync_headers: tuple[Any, dict[str, str]],
         db_session: AsyncSession,
     ) -> None:
-        """parsed → 200；外层 totalSegments/skippedLines 落 snake_case，messages
-        内层逐字段原样（tool_use/tool_result 配对字段齐全）。"""
+        """parsed → 200；外层 totalSegments/skippedLines/totalUsage 落 snake_case，
+        messages 内层逐字段原样（tool_use/tool_result 配对字段齐全；task-08 新可选
+        字段 sender/turn_id/model/duration_ms/usage 一并透传，usage camelCase 键
+        落 snake_case）。"""
         ws_id, headers = shpsync_headers
         entry = await _make_bound_entry(db_session, ws_id)
 
@@ -204,6 +239,14 @@ class TestStatusLayering:
         assert body["total_segments"] == 203  # totalSegments → total_segments
         assert body["skipped_lines"] == 2  # skippedLines → skipped_lines
         assert "totalSegments" not in body and "skippedLines" not in body
+        # task-08：外层 totalUsage → total_usage（camelCase 四键落 snake_case）。
+        assert body["total_usage"] == {
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "cache_read_tokens": 5,
+            "cache_write_tokens": 0,
+        }
+        assert "totalUsage" not in body
         assert len(body["messages"]) == 3
         assert body["messages"][0] == {
             "seq": 1,
@@ -215,12 +258,26 @@ class TestStatusLayering:
             "tool_result": None,
             "is_error": None,
             "ts": "2026-08-23T10:00:00.000Z",
+            "sender": "human",
+            "turn_id": "t-1",
+            "model": "GLM-5.3",
+            "duration_ms": None,
+            "usage": None,
         }
         tool_use = body["messages"][1]
         assert tool_use["kind"] == "tool_use"
         assert tool_use["tool_name"] == "Bash"
         assert tool_use["tool_use_id"] == "toolu_01"
         assert tool_use["tool_input"] == '{"command": "ls"}'
+        # usage camelCase 键（inputTokens…）→ snake_case（input_tokens…）。
+        assert tool_use["usage"] == {
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "total_tokens": 120,
+            "cache_read_tokens": 5,
+            "cache_write_tokens": 0,
+        }
+        assert tool_use["duration_ms"] == 1200
         tool_result = body["messages"][2]
         assert tool_result["kind"] == "tool_result"
         assert tool_result["tool_use_id"] == "toolu_01"
@@ -244,7 +301,8 @@ class TestStatusLayering:
         truncated: bool,
     ) -> None:
         """unsupported/parse_error/too_large 同样 200 透传（不映射 4xx），
-        前端判断回落原文端点（design §7.2 / D-003@v1）。"""
+        前端判断回落原文端点（design §7.2 / D-003@v1）；早退分支不带 totalUsage
+        键 → total_usage 缺省 None（task-08）。"""
         ws_id, headers = shpsync_headers
         entry = await _make_bound_entry(db_session, ws_id)
 
@@ -266,6 +324,7 @@ class TestStatusLayering:
             "truncated": False,
             "total_segments": 0,
             "skipped_lines": 0,
+            "total_usage": None,
         }
 
     @pytest.mark.asyncio
@@ -555,14 +614,24 @@ class TestDaemonErrorMapping:
 class TestOpenapiExposure:
     @pytest.mark.asyncio
     async def test_openapi_exposes_messages_schemas(self) -> None:
-        """openapi 自动暴露 AgentLogMessagesResponse / AgentLogMessageItem。"""
+        """openapi 自动暴露 AgentLogMessagesResponse / AgentLogMessageItem
+        （含 task-08 新可选字段与 usage / total_usage 子模型）。"""
         from app.main import app
 
         schemas = app.openapi()["components"]["schemas"]
         assert "AgentLogMessagesResponse" in schemas
         assert "AgentLogMessageItem" in schemas
+        assert "AgentLogMessageUsage" in schemas
+        assert "AgentLogTotalUsage" in schemas
         props = schemas["AgentLogMessagesResponse"]["properties"]
-        assert set(props) == {"status", "messages", "truncated", "total_segments", "skipped_lines"}
+        assert set(props) == {
+            "status",
+            "messages",
+            "truncated",
+            "total_segments",
+            "skipped_lines",
+            "total_usage",
+        }
         item_props = schemas["AgentLogMessageItem"]["properties"]
         assert set(item_props) == {
             "seq",
@@ -574,4 +643,24 @@ class TestOpenapiExposure:
             "tool_result",
             "is_error",
             "ts",
+            "sender",
+            "turn_id",
+            "model",
+            "duration_ms",
+            "usage",
+        }
+        usage_props = schemas["AgentLogMessageUsage"]["properties"]
+        assert set(usage_props) == {
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+        }
+        total_usage_props = schemas["AgentLogTotalUsage"]["properties"]
+        assert set(total_usage_props) == {
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
         }

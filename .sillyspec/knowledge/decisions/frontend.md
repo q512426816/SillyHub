@@ -114,3 +114,31 @@
 锚点：sillyhub-daemon/src/interactive/providers.ts:ProviderCaps（caps 键落点）+ sillyhub-daemon/src/interactive/usage-ctx.ts:ctxTokensFromNetInput（公式单源落点，execute 新建）
 最近确认：未记录
 理由：用户原话指定方向：「都要接入的，并且需要统一抽象出来（我记得最近刚刚做了个统一抽象的事情，就是怕后面再接新 agent 又遗漏一些功能）」。据此选方案 A（各归一化器在 usage 构造处用共享 helper 派生 + ProviderCaps 第 11 键声明走既有三端生成与守护链）。
+
+## D-001@v1
+状态：implemented
+变更：2026-09-19-tool-report-session-replay
+锚点：frontend/src/components/daemon/session-panel/session-panel-page.tsx:3474（isToolReportBody 分支）、frontend/src/components/daemon/turn-timeline.tsx:220（SessionTurnView）
+最近确认：53c67e02a
+理由：直接按普通会话样式展示会话时间线，数据源换成 agent 日志对话化消息——复用真组件（TurnTimeline）而非自造相似渲染器
+
+## D-002@v1
+状态：implemented
+变更：2026-09-19-tool-report-session-replay
+锚点：frontend/src/components/daemon/agent-log-card.tsx:877（AgentLogCard 折叠栏——子代理入口可沿用该形态）
+最近确认：53c67e02a
+理由：主日志 = 回放正文；子代理日志降级为次级「工作会话」入口（不并入正文，避免同一叙事重复两遍）；主日志多条（同 ctx 多次本地会话）时最新为主、更早折叠
+
+## D-004@v1
+状态：implemented
+变更：2026-09-19-tool-report-session-replay
+锚点：sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts:66（NormalizedLogMessage）、backend/app/modules/platform_sync/router.py:849（messages 端点）
+最近确认：53c67e02a
+理由：四层打通——daemon 解析器透传 usage/turn/model/耗时 + 全会话累计 → RPC 返回结构 → 平台 GET /agent-logs/{id}/messages schema → gen:types → 前端映射到 SessionTurnView token 字段与会话用量环；老 daemon 字段可选、缺省显示「未知」；cursor-agent 回放 token 恒「未知」（数据不落盘，非解析器可解）
+
+## D-008@v1
+状态：implemented
+变更：2026-09-19-tool-report-session-replay
+锚点：decisions.md D-001/D-004/D-007
+最近确认：53c67e02a
+理由：方案A——前端适配器把 NormalizedLogMessage[] 映射为 SessionTurnView 喂 TurnTimeline 真组件；daemon zcode 解析器补 usage/turnId/model/累计 + 新增 claude-code、cursor-agent 解析器与 cursor-agent 扫描上报；平台 messages schema 加可选字段 + gen:types；平台库零表结构改动，按需现读

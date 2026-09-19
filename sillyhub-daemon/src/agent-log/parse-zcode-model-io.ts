@@ -20,6 +20,14 @@
  *     在后续行的窗口里，仅末行 response 永远进不了任何窗口 → 补产段
  *     （text→reply、toolCalls→tool_use），补产前与 G 尾部 assistant 段同文去重。
  *
+ * task-02（2026-09-19-tool-report-session-replay / FR-02 + FR-03 + D-003@v1 +
+ * D-004@v1）：行顶层 turnId / model / durationMs 与 response.usage 五项 token
+ * 附着到该行产出的全部段（G 合并段 + 末行补产段共用同一份——同一次调用多段
+ * 共享 usage 是预期，前端按调用去重聚合）；user_input 段正文以 <task-notification>
+ * / <system-reminder> 开头 → sender='system_event'（其余缺省视为 'human' 不写，
+ * 错标系统事件会隐藏真人输入——代价不对称，R-06 原则）；totalUsage 按「调用」
+ * 去重累计（每个有效行的 usage 只计一次）随 parsed 结果返回，零 usage → null。
+ *
  * 纯函数约束（task-01 constraints）：不读 env / 时钟 / 文件系统——content 字符串
  * 与 20MB 预算、200 段窗口、beforeSeq、超时 deadline、时钟函数全部参数注入
  * （默认值模块常量），fixture 单测零 mock。错误不抛异常，以 status 结构化分层：
@@ -60,6 +68,15 @@ const SYSTEM_REMINDER_BLOCK_RE = /<system-reminder>[\s\S]*?<\/system-reminder>/g
 /** 未闭合的 <system-reminder>（CLI 截断等）：从标签起整段丢弃，防内容泄漏（R-04）。 */
 const UNCLOSED_SYSTEM_REMINDER_RE = /<system-reminder>[\s\S]*$/;
 
+/**
+ * 伪用户消息前缀（D-003@v1，2026-09-19 task-02）：user_input 段正文（system-reminder
+ * 剥离后）以此开头 → sender='system_event'。task-notification 是后台任务完成通知
+ * （无既有剥离常量，纯前缀判定）；system-reminder 是防御分支——成对块已被剥离
+ * 不可见，带属性等形状漂移导致漏剥时由前缀兜底。其余段正文缺省不写 sender
+ * （消费方视为 'human'）。
+ */
+const SYSTEM_EVENT_TEXT_PREFIXES: readonly string[] = ['<task-notification>', '<system-reminder>'];
+
 // ── 类型定义（design §7.1，与 backend schema 字段逐字对齐 snake_case）────────
 
 /** 归一化消息段——解析器输出契约（task-01 provides，task-02/前端消费）。 */
@@ -81,6 +98,29 @@ export interface NormalizedLogMessage {
   is_error: boolean | null;
   /** 所属行 completedAt（ISO 字符串；行缺失该字段时为 null）。 */
   ts: string | null;
+  // —— 2026-09-19-tool-report-session-replay 契约扩展：以下五项全部可选，老
+  //    daemon / 无数据源缺省（undefined / null，消费方按未知兜底）；字段附着
+  //    逻辑归该变更 task-02~05，本模块类型先行钉死共用契约锚点，不提取。
+  /**
+   * user_input 段发送方：'human' 真人输入 / 'system_event' 系统注入
+   * （task-notification、system-reminder 等自动消息）。仅 user_input 段
+   * 有意义，其余 kind 不设；缺省视为 'human'。
+   */
+  sender?: 'human' | 'system_event';
+  /** 所属轮次标识（zcode 顶层 turnId / cursor turn_ended 轮号 / claude-code 会话内轮序）。 */
+  turn_id?: string | null;
+  /** 该次调用的模型标识（如 "GLM-5.3"，zcode modelId）。 */
+  model?: string | null;
+  /** 该次调用耗时（毫秒，附着到其产出的段）。 */
+  duration_ms?: number | null;
+  /** 该次调用 token 用量（五项计数，全 number）；无数据源（如 cursor 不落盘）为 null。 */
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+  } | null;
 }
 
 /** 段类型别名。 */
@@ -114,9 +154,36 @@ export interface ZcodeModelIoParseResult {
   totalSegments: number;
   /** 坏行计数（JSON.parse 失败 / 结构不符；空行不计）。 */
   skippedLines: number;
+  /**
+   * 全会话累计 token 用量（四项，D-004@v1）。按「调用」去重——每个有效行的
+   * usage 只计一次（同一次调用产出的多段共享同一 usage，不按段重复计）；
+   * 仅 status='parsed' 携带（parse_error / too_large 早退零新字段）；
+   * 零 usage 数据 → null（不伪造 0，全局硬约束）。
+   */
+  totalUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+  } | null;
 }
 
 // ── 内部形状 ─────────────────────────────────────────────────────────────────
+
+/** 行级调用元数据四项取值（usage 剥掉可选层的非空内核——附着路径恒非 undefined）。 */
+type CallUsage = NonNullable<NormalizedLogMessage['usage']>;
+
+/**
+ * 行级调用元数据（2026-09-19 task-02）：一行 model_io = 一次 API 调用，其顶层
+ * turnId / model / durationMs 与 response.usage 五项附着到该行产出的全部段
+ * （G 合并段 + 末行 response 补产段共用同一份）。结构校验失败逐项置 null。
+ */
+interface CallMeta {
+  turn_id: string | null;
+  model: string | null;
+  duration_ms: number | null;
+  usage: CallUsage | null;
+}
 
 /** 通过结构校验的一行 model_io 记录（坏行在此之前的所有变体都计 skippedLines）。 */
 interface ModelIoLine {
@@ -124,12 +191,17 @@ interface ModelIoLine {
   messages: unknown[];
   response: Record<string, unknown> | null;
   completedAt: string | null;
+  meta: CallMeta;
 }
 
-/** 全局数组 G 的槽位：消息 + 最后写入该槽的行 completedAt（后写覆盖取最新）。 */
+/**
+ * 全局数组 G 的槽位：消息 + 最后写入该槽的行 completedAt 与调用元数据
+ * （后写覆盖取最新——ts 与 meta 同源同行，不漂移）。
+ */
 interface MergedSlot {
   message: unknown;
   ts: string | null;
+  meta: CallMeta;
 }
 
 /** 未编号段（seq 在 G 遍历完成后统一重编号）。 */
@@ -168,6 +240,14 @@ export async function parseZcodeModelIoLog(
   let totalLines = 0;
   let lastValidLine: ModelIoLine | null = null;
 
+  // totalUsage 累计（D-004@v1）：按「调用」去重——每个有效行（= 一次 API 调用）
+  // 的 usage 只计一次；无 usage 行跳过；hasAnyUsage 守卫零数据不伪造 0。
+  let totalUsageInput = 0;
+  let totalUsageOutput = 0;
+  let totalUsageCacheRead = 0;
+  let totalUsageCacheWrite = 0;
+  let hasAnyUsage = false;
+
   for (let i = 0; i < rawLines.length; i++) {
     const raw = rawLines[i];
     if (raw === undefined) break;
@@ -192,13 +272,26 @@ export async function parseZcodeModelIoLog(
     // 统一 offset 对齐合并（D-006 裁决一）：full（offset=0 完整前缀）/ delta
     //（offset>0 增量，len=0 合法）/ tail（滑动尾部）三种窗口同一条规则——
     // G[messageOffset + i] = messages[i]，绝对 offset 对齐覆盖，无 kind 分支；
-    // 行序天然保证后写覆盖取最新（R-06）。
+    // 行序天然保证后写覆盖取最新（R-06）。行级调用元数据随槽位同写（task-02）。
     for (let j = 0; j < modelIoLine.messages.length; j++) {
       const message = modelIoLine.messages[j];
       if (message === undefined) continue;
-      slots[modelIoLine.messageOffset + j] = { message, ts: modelIoLine.completedAt };
+      slots[modelIoLine.messageOffset + j] = {
+        message,
+        ts: modelIoLine.completedAt,
+        meta: modelIoLine.meta,
+      };
     }
     lastValidLine = modelIoLine;
+    // 该行（调用）的 usage 计一次——即使其消息窗口被后续行覆盖，token 已实际
+    // 消耗仍计入全会话累计；被覆盖槽位的段元数据取最后写入行的（与 ts 同口径）。
+    if (modelIoLine.meta.usage !== null) {
+      hasAnyUsage = true;
+      totalUsageInput += modelIoLine.meta.usage.inputTokens;
+      totalUsageOutput += modelIoLine.meta.usage.outputTokens;
+      totalUsageCacheRead += modelIoLine.meta.usage.cacheReadTokens;
+      totalUsageCacheWrite += modelIoLine.meta.usage.cacheWriteTokens;
+    }
 
     // 行级批处理：每 500 行 yield + 超时检查（R-02，防 20MB 内大文件阻塞事件循环）。
     if (totalLines % LINES_PER_BATCH === 0) {
@@ -227,15 +320,15 @@ export async function parseZcodeModelIoLog(
     if (!isRecord(message)) continue; // 窗口内非 object 条目防御式跳过
     const role = message.role;
     if (role === 'user') {
-      const produced = userSegments(message, slot.ts);
+      const produced = userSegments(message, slot.ts, slot.meta);
       segments.push(...produced);
     } else if (role === 'assistant') {
-      const produced = assistantSegments(message, slot.ts);
+      const produced = assistantSegments(message, slot.ts, slot.meta);
       tailReplyTexts = produced.replyTexts;
       tailToolUseIds = produced.toolUseIds;
       segments.push(...produced.segments);
     } else if (role === 'tool') {
-      segments.push(...toolSegments(message, slot.ts));
+      segments.push(...toolSegments(message, slot.ts, slot.meta));
     }
     // role=system 与未知 role：跳过不产段（R-04 铁律 / R-01 防御式）。
   }
@@ -254,12 +347,27 @@ export async function parseZcodeModelIoLog(
   const truncated = sliced.length > maxSegments;
   const messages = truncated ? sliced.slice(sliced.length - maxSegments) : sliced;
 
-  return { status: 'parsed', messages, truncated, totalSegments: numbered.length, skippedLines };
+  // totalUsage（D-004@v1）：全量「调用」累计（窗口截断 / beforeSeq 切片无关——
+  // 与 totalSegments 同为全量口径）；零 usage 数据 → null（不伪造 0，硬约束）。
+  const totalUsage = hasAnyUsage
+    ? {
+        inputTokens: totalUsageInput,
+        outputTokens: totalUsageOutput,
+        cacheReadTokens: totalUsageCacheRead,
+        cacheWriteTokens: totalUsageCacheWrite,
+      }
+    : null;
+
+  return { status: 'parsed', messages, truncated, totalSegments: numbered.length, skippedLines, totalUsage };
 }
 
 // ── 行结构校验 ───────────────────────────────────────────────────────────────
 
-/** 校验并抽取一行 model_io：type=model_io、request 存在、messages 为数组、messageOffset 为非负整数。 */
+/**
+ * 校验并抽取一行 model_io：type=model_io、request 存在、messages 为数组、
+ * messageOffset 为非负整数；顶层 turnId / model / durationMs 与 response.usage
+ * 随行级调用元数据一并提取（结构校验缺失逐项置 null，task-02 / FR-02 + FR-03）。
+ */
 function extractModelIoLine(parsed: unknown): ModelIoLine | null {
   if (!isRecord(parsed)) return null;
   if (parsed.type !== 'model_io') return null;
@@ -276,31 +384,100 @@ function extractModelIoLine(parsed: unknown): ModelIoLine | null {
     return null;
   }
   const response = parsed.response;
+  const responseRecord = isRecord(response) ? response : null;
+  const turnId = parsed.turnId;
+  const durationMs = parsed.durationMs;
   const completedAt = parsed.completedAt;
   return {
     messageOffset,
     messages,
-    response: isRecord(response) ? response : null,
+    response: responseRecord,
     completedAt: typeof completedAt === 'string' ? completedAt : null,
+    meta: {
+      turn_id: typeof turnId === 'string' ? turnId : null,
+      model: extractModelId(parsed.model),
+      duration_ms:
+        typeof durationMs === 'number' && Number.isFinite(durationMs) ? durationMs : null,
+      usage: extractUsage(responseRecord),
+    },
   };
 }
 
+/**
+ * 模型标识提取：顶层 model 实证为对象（`{"modelId":"GLM-5.3","providerId":…}`）
+ * 取 modelId 字符串；字符串形态（老日志）直用；其余形状 null。
+ */
+function extractModelId(model: unknown): string | null {
+  if (typeof model === 'string') return model;
+  if (isRecord(model) && typeof model.modelId === 'string') return model.modelId;
+  return null;
+}
+
+/**
+ * response.usage 五项 token 提取（FR-03 / D-004@v1）。
+ *
+ * 结构校验：response / usage 非 record 或五项全缺 → null（零 usage 数据不伪造）；
+ * record 存在但个别项缺失 / 非数按 0 计（部分上报的库形态不整段丢弃——缺项视为
+ * 未上报的计数 0，与非数（undefined/NaN/Infinity）同口径）。
+ */
+function extractUsage(response: Record<string, unknown> | null): CallUsage | null {
+  if (response === null) return null;
+  const usage = response.usage;
+  if (!isRecord(usage)) return null;
+  const hasAnyToken = USAGE_TOKEN_KEYS.some((key) => typeof usage[key] === 'number');
+  if (!hasAnyToken) return null;
+  const token = (key: UsageTokenKey): number => {
+    const value = usage[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  };
+  return {
+    inputTokens: token('inputTokens'),
+    outputTokens: token('outputTokens'),
+    totalTokens: token('totalTokens'),
+    cacheReadTokens: token('cacheReadTokens'),
+    cacheWriteTokens: token('cacheWriteTokens'),
+  };
+}
+
+/** usage 五项键名（提取与缺项校验共用一份，防两处漂移）。 */
+const USAGE_TOKEN_KEYS = [
+  'inputTokens',
+  'outputTokens',
+  'totalTokens',
+  'cacheReadTokens',
+  'cacheWriteTokens',
+] as const;
+
+/** usage 键名联合类型。 */
+type UsageTokenKey = (typeof USAGE_TOKEN_KEYS)[number];
+
 // ── 段产出（真实消息形状，design §5.1）───────────────────────────────────────
 
-/** user 消息 → user_input 段（剥 <system-reminder> 块后非空才产出，R-04）。 */
-function userSegments(message: Record<string, unknown>, ts: string | null): UnnumberedSegment[] {
+/**
+ * user 消息 → user_input 段（剥 <system-reminder> 块后非空才产出，R-04）。
+ * 段正文以系统注入前缀开头 → sender='system_event'（D-003@v1）；其余缺省不写
+ * （视为 'human'——错标系统事件会隐藏真人输入，代价不对称）。
+ */
+function userSegments(
+  message: Record<string, unknown>,
+  ts: string | null,
+  meta: CallMeta,
+): UnnumberedSegment[] {
   const content = message.content;
   // 实测 user content 恒为纯字符串；形状漂移防御式跳过（R-01，不产段不中断）。
   if (typeof content !== 'string') return [];
   const stripped = stripSystemReminderBlocks(content);
   if (stripped.trim() === '') return []; // 剥后为空整消息丢弃（R-04：绝不渲染成用户气泡）
-  return [makeSegment('user_input', ts, { text: stripped.trim() })];
+  const text = stripped.trim();
+  const sender = isSystemEventText(text) ? ('system_event' as const) : undefined;
+  return [makeSegment('user_input', ts, meta, { text }, sender)];
 }
 
 /** assistant 消息 → thinking / reply / tool_use 段 + 尾部同文比对集。 */
 function assistantSegments(
   message: Record<string, unknown>,
   ts: string | null,
+  meta: CallMeta,
 ): { segments: UnnumberedSegment[]; replyTexts: string[]; toolUseIds: string[] } {
   const segments: UnnumberedSegment[] = [];
   const replyTexts: string[] = [];
@@ -311,21 +488,21 @@ function assistantSegments(
   const content = message.content;
   if (typeof content === 'string') {
     if (content.trim() !== '') {
-      segments.push(makeSegment('reply', ts, { text: content }));
+      segments.push(makeSegment('reply', ts, meta, { text: content }));
       replyTexts.push(content);
     }
   } else if (Array.isArray(content)) {
     for (const block of content) {
       if (!isRecord(block)) continue;
       if (block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
-        segments.push(makeSegment('reply', ts, { text: block.text }));
+        segments.push(makeSegment('reply', ts, meta, { text: block.text }));
         replyTexts.push(block.text);
       } else if (
         block.type === 'reasoning' &&
         typeof block.text === 'string' &&
         block.text.trim() !== ''
       ) {
-        segments.push(makeSegment('thinking', ts, { text: block.text }));
+        segments.push(makeSegment('thinking', ts, meta, { text: block.text }));
       }
       // 未知块类型防御式跳过（R-01）。
     }
@@ -338,7 +515,7 @@ function assistantSegments(
       if (!isRecord(call) || typeof call.name !== 'string') continue;
       const id = typeof call.id === 'string' ? call.id : null;
       segments.push(
-        makeSegment('tool_use', ts, {
+        makeSegment('tool_use', ts, meta, {
           tool_name: call.name,
           tool_use_id: id,
           tool_input: summarizeToolInput(call.input),
@@ -352,12 +529,16 @@ function assistantSegments(
 }
 
 /** tool 消息 → tool_result 段（消息级 toolCallId/toolName/isError/content 键集）。 */
-function toolSegments(message: Record<string, unknown>, ts: string | null): UnnumberedSegment[] {
+function toolSegments(
+  message: Record<string, unknown>,
+  ts: string | null,
+  meta: CallMeta,
+): UnnumberedSegment[] {
   const toolCallId = message.toolCallId;
   const toolName = message.toolName;
   const isError = message.isError;
   return [
-    makeSegment('tool_result', ts, {
+    makeSegment('tool_result', ts, meta, {
       tool_name: typeof toolName === 'string' ? toolName : null,
       tool_use_id: typeof toolCallId === 'string' ? toolCallId : null,
       tool_result: toolResultText(message.content),
@@ -366,7 +547,10 @@ function toolSegments(message: Record<string, unknown>, ts: string | null): Unnu
   ];
 }
 
-/** 末行 response 补尾（text→reply、toolCalls→tool_use），与 G 尾部 assistant 段同文去重。 */
+/**
+ * 末行 response 补尾（text→reply、toolCalls→tool_use），与 G 尾部 assistant 段同文
+ * 去重。补产段带末行（= 该次调用）的 turn_id/model/duration_ms/usage（task-02）。
+ */
 function responseSupplementSegments(
   lastLine: ModelIoLine,
   tailReplyTexts: string[],
@@ -377,7 +561,7 @@ function responseSupplementSegments(
 
   const text = lastLine.response.text;
   if (typeof text === 'string' && text.trim() !== '' && !tailReplyTexts.includes(text)) {
-    segments.push(makeSegment('reply', lastLine.completedAt, { text }));
+    segments.push(makeSegment('reply', lastLine.completedAt, lastLine.meta, { text }));
   }
 
   const toolCalls = lastLine.response.toolCalls;
@@ -387,7 +571,7 @@ function responseSupplementSegments(
       const id = typeof call.id === 'string' ? call.id : null;
       if (id !== null && tailToolUseIds.includes(id)) continue; // 同 id 同文去重
       segments.push(
-        makeSegment('tool_use', lastLine.completedAt, {
+        makeSegment('tool_use', lastLine.completedAt, lastLine.meta, {
           tool_name: call.name,
           tool_use_id: id,
           tool_input: summarizeToolInput(call.input),
@@ -401,16 +585,22 @@ function responseSupplementSegments(
 
 // ── 工具函数 ─────────────────────────────────────────────────────────────────
 
-/** 构造未编号段：未显式给出的字段一律 null（九字段齐全，snake_case）。 */
+/**
+ * 构造未编号段：未显式给出的字段一律 null（九字段齐全，snake_case）；行级调用
+ * 元数据四项（turn_id/model/duration_ms/usage）随段附着（task-02，老形状行 null）；
+ * sender 仅 user_input 系统事件段写（其余缺省不写，视为 'human'）。
+ */
 function makeSegment(
   kind: NormalizedLogMessageKind,
   ts: string | null,
+  meta: CallMeta,
   fields: Partial<
     Pick<
       NormalizedLogMessage,
       'text' | 'tool_name' | 'tool_use_id' | 'tool_input' | 'tool_result' | 'is_error'
     >
   > = {},
+  sender?: 'system_event',
 ): UnnumberedSegment {
   return {
     kind,
@@ -421,7 +611,17 @@ function makeSegment(
     tool_result: fields.tool_result ?? null,
     is_error: fields.is_error ?? null,
     ts,
+    ...(sender !== undefined ? { sender } : {}),
+    turn_id: meta.turn_id,
+    model: meta.model,
+    duration_ms: meta.duration_ms,
+    usage: meta.usage,
   };
+}
+
+/** 段正文是否以系统注入前缀（task-notification / system-reminder）开头（D-003@v1）。 */
+function isSystemEventText(text: string): boolean {
+  return SYSTEM_EVENT_TEXT_PREFIXES.some((prefix) => text.startsWith(prefix));
 }
 
 /** 剥离 user content 内全部 <system-reminder> 块；未闭合标签从标签起整段丢弃（R-04）。 */

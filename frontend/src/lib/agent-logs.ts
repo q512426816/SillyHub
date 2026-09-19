@@ -12,10 +12,14 @@
  *   （后端按字节截断尾部 262144，truncated 标记；format 黑名单二进制 409
  *   中文文案由 ApiError.message 透出，design §3.3.5）。
  * - GET /api/agent-logs/{entry_id}/messages：daemon 侧归一化**对话消息**
- *   （KB 级摘要，task-05 对话化渲染用；design §7.2）。status 一律 200 分层
- *   返回——「RPC 成功≠解析成功」：仅 parsed 渲染对话流，unsupported /
- *   parse_error / too_large 由调用方静默回落 content 端点（D-003@v1）；
- *   before_seq 向前翻更早段切片。
+ *   （KB 级摘要，task-05 查看内容对话化 + AgentReplayBody 逐轮回放（task-11
+ *   起）消费；design §7.2）。status 一律 200 分层返回——「RPC 成功≠解析
+ *   成功」：仅 parsed 渲染对话流，unsupported / parse_error / too_large 由
+ *   调用方静默回落 content 端点（D-003@v1）；before_seq 向前翻更早段切片。
+ *   条目级回放字段（2026-09-19-tool-report-session-replay task-08 gen:types
+ *   生成，snake_case 原样访问）：sender（human 真人气泡 / system_event 系统
+ *   事件行）、turn_id（回放按轮聚合键）、model / duration_ms / usage（单次
+ *   调用模型与 token 五项）；响应级 total_usage 为全会话累计。
  * - 类型一律取 api-types.ts 生成 schema（FR-05 / X-06：snake_case 字段
  *   原样访问，禁止手写同名接口）；query key 见 lib/query-keys.ts 的
  *   agentLogs 工厂（X-17）。
@@ -80,6 +84,11 @@ export async function readAgentLogContent(
  * 调用方渲染对话流，unsupported / parse_error / too_large 判定后静默回落
  * content 端点（D-003@v1）。失败（404 / 409 / 422 / 502 / 504）抛 ApiError
  * 交调用方处理，与 readAgentLogContent 同口径，本函数不吞错误。
+ *
+ * 回放新字段（2026-09-19-tool-report-session-replay task-08 gen:types 落地）：
+ * 条目 sender / turn_id / model / duration_ms / usage（单次调用 token 五项）+
+ * 响应 total_usage（全会话累计）——AgentReplayBody（task-11/12 会话主体）按
+ * turn_id 聚轮消费；类型一律取 api-types 生成 schema，禁手写。
  *
  * @param entryId 日志条目 id（路径段，encodeURIComponent 编码）。
  * @param beforeSeq 可选——返回该全局段序**之前**的更早切片（向前翻页键）；

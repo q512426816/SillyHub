@@ -200,7 +200,15 @@ export type SessionProcessItem =
       mime: string;
       description?: string | null;
       ts?: number;
-    };
+    }
+  /**
+   * 2026-09-19-tool-report-session-replay（FR-02 / D-003 / Grill 交叉点 1）：
+   * 系统注入类伪用户消息（task-notification / system-reminder）归一出的中性
+   * 系统事件行（sender=system_event）。**仅回放数据路径产生**（agent-log-turns
+   * 适配器投影），实时会话数据路径零产生；「全部」视图 TurnDetailsList 渲染为
+   * 居中虚线中性行，与 thinking 同待遇——「对话」视图不渲染过程项。
+   */
+  | { kind: "system_event"; text: string; ts?: number };
 
 export type SessionUiStatus = "idle" | "creating" | "active" | "ending" | "ended" | "failed" | "reconnecting";
 export type TurnUiStatus = "pending" | "running" | "interrupting" | "completed" | "failed" | "killed";
@@ -1474,7 +1482,9 @@ function TurnDetailsList({
         mime: string;
         description?: string | null;
         ts?: number;
-      };
+      }
+    // 2026-09-19-tool-report-session-replay（D-003）：系统事件中性行（仅回放产生）
+    | { kind: "system_event"; text: string };
   const grouped: RenderItem[] = [];
   for (const item of items) {
     if (item.kind === "thinking") {
@@ -1501,6 +1511,10 @@ function TurnDetailsList({
         description: item.description,
         ts: item.ts,
       });
+    } else if (item.kind === "system_event") {
+      // 2026-09-19-tool-report-session-replay（D-003）：直通独立成项，不参与
+      // 连续 thinking 合并——系统事件是切轮/注入锚点，须保留真实时序独立可见。
+      grouped.push({ kind: "system_event", text: item.text });
     } else {
       grouped.push({ kind: "stderr", text: item.text });
     }
@@ -1542,6 +1556,23 @@ function TurnDetailsList({
                 mime={item.mime}
                 description={item.description ?? ""}
               />
+            </div>
+          );
+        }
+        if (item.kind === "system_event") {
+          // 2026-09-19-tool-report-session-replay（D-003）：系统事件居中虚线中性行
+          // （原型 .sysrow 形态）——仅回放链路产生；border-border / bg-card /
+          // text-muted-foreground 双主题语义类，不复用用户气泡样式、不带「执行中」
+          // 假运行语义（回放只读）；超长文本截断、title 悬浮看全文。
+          return (
+            <div key={idx} className="flex justify-center">
+              <div
+                title={item.text}
+                className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-dashed border-border bg-card px-3 py-[3px] text-[11px] text-muted-foreground"
+              >
+                <span aria-hidden className="shrink-0">⚙</span>
+                <span className="min-w-0 truncate">{item.text}</span>
+              </div>
             </div>
           );
         }

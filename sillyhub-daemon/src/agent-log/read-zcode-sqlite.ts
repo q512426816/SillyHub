@@ -19,6 +19,17 @@
  * 缺失 → 抛「读取器不可用」；会话不在库 / 查询异常 → 原样抛出（调用方回落，
  * 不伪造空结果）。
  *
+ * task-03（2026-09-19-tool-report-session-replay / FR-03 + D-004@v1，R-01 spike-01
+ * 前置核对）：补 token 链路字段。spike-01 只读开真实库核对结论（记变更目录
+ * verify-facts.json）：message.data 不落 rollout JSONL 的顶层 usage/turnId/
+ * durationMs 同名键，但等价数据齐全——tokens{total,input,output,reasoning,
+ * cache{read,write}}（assistant 消息级，一条 assistant 消息=一次模型调用）、
+ * anchor.turnId（turn_<uuid>）、modelId（字符串）、time.completed-created（毫秒
+ * 差）。采纳主路径：消息分组头提取四元组附着到该消息产出的全部段（多段共享同
+ * 一 usage，口径对齐 task-02 文件解析器），totalUsage 按消息（调用）去重对四项
+ * 求和（隐藏/坏消息不计），零 usage 会话 → null 不伪造 0；字段缺失/形状漂移逐项
+ * 置 null，status 分层与 beforeSeq/200 段窗口语义零改动。
+ *
  * session id 形态实证（2026-09-10 对本机真实库 `file:...?mode=ro` 只读核对 +
  * rollout 目录文件名交叉比对）：
  *   - session.id：主会话 `sess_<uuid>`，子代理 `sess_subagent_agent_<uuid>`
@@ -32,7 +43,9 @@
  *   session(id TEXT PK, title TEXT NOT NULL, directory TEXT NOT NULL, parent_id
  *   TEXT NULL) / message(id TEXT PK, session_id TEXT NOT NULL, sequence INTEGER,
  *   data TEXT NOT NULL——JSON 含 role / time{created[,completed]} / semantics
- *   {uiVisibility, transcriptVisibility,…} / 顶层 visibility) / part(id TEXT PK,
+ *   {uiVisibility, transcriptVisibility,…} / 顶层 visibility / assistant 消息级
+ *   tokens{total,input,output,reasoning,cache{read,write}} + anchor{turnId} +
+ *   modelId（task-03 spike-01 实证，见 verify-facts.json）) / part(id TEXT PK,
  *   message_id TEXT NOT NULL, session_id TEXT NOT NULL, sequence INTEGER,
  *   data TEXT NOT NULL——JSON 含 type: text|tool{tool, callID, state{status,
  *   input, output|error}}|reasoning|step-start|step-finish|timeline|file|
@@ -161,7 +174,17 @@ export const ZCODE_FIXTURE_IDS = {
     /** data 为非法 JSON 的 part 行（全库唯一坏行）。 */
     badJson: 'part_main_6_badjson',
   },
+  /** task-03 轮次/模型占位：anchor.turnId 形状 turn_<uuid> 与 fixture-model-z 模型串均按真实库形态脱敏（同一轮多条消息共享 turnId）。 */
+  turns: {
+    /** 主会话轮（visibleUser + assistantText + assistantTools 共享——一次轮多次调用实证形态）。 */
+    main: 'turn_11111111-1111-4000-8000-000000000001',
+    /** 子代理会话轮。 */
+    subagent: 'turn_22222222-2222-4000-8000-000000000002',
+  },
 } as const;
+
+/** task-03 fixture 模型占位（modelId 形状镜像真实库 text 串，值脱敏）。 */
+const FIXTURE_MODEL_ID = 'fixture-model-z';
 
 /** 三表 DDL：列名 / 类型 / 可空性按真实库 PRAGMA table_info 镜像（必要列）；索引按真实库 index_list 镜像。 */
 const ZCODE_FIXTURE_DDL = `
@@ -237,11 +260,18 @@ const SEED_SESSIONS: SeedSession[] = [
 
 const SEED_MESSAGES: SeedMessage[] = [
   // 主会话 seq 1-4：可见 user + 隐藏三判据各一条（互不重叠，供过滤判据单测）。
+  // task-03：可见 user 带 anchor.turnId（真实库 user 行实证携带）；隐藏三条刻意
+  // 不带 token 元数据（隐藏行零产出，无需附着样本）。
   {
     id: M.visibleUser,
     sessionId: MAIN,
     sequence: 1,
-    data: { role: 'user', time: { created: FIXTURE_TIME_BASE + 1000 }, semantics: visibleSemantics },
+    data: {
+      role: 'user',
+      time: { created: FIXTURE_TIME_BASE + 1000 },
+      semantics: visibleSemantics,
+      anchor: { turnId: ZCODE_FIXTURE_IDS.turns.main },
+    },
   },
   {
     id: M.hiddenUiVisibility,
@@ -275,6 +305,8 @@ const SEED_MESSAGES: SeedMessage[] = [
     },
   },
   // 主会话 seq 5-6：assistant（user 无 completed、assistant 的 time 双键——真实库实证）。
+  // task-03：assistant 行补 spike-01 实证的调用级元数据（anchor.turnId / modelId /
+  // tokens 五项形状），两条共享同一 turnId（一轮多次调用实证形态）。
   {
     id: M.assistantText,
     sessionId: MAIN,
@@ -283,6 +315,9 @@ const SEED_MESSAGES: SeedMessage[] = [
       role: 'assistant',
       time: { created: FIXTURE_TIME_BASE + 5000, completed: FIXTURE_TIME_BASE + 9000 },
       semantics: { origin: 'agent_runtime', kind: 'assistant_response', uiVisibility: 'visible', transcriptVisibility: 'visible' },
+      anchor: { turnId: ZCODE_FIXTURE_IDS.turns.main },
+      modelId: FIXTURE_MODEL_ID,
+      tokens: { total: 1200, input: 1000, output: 200, reasoning: 0, cache: { read: 64, write: 32 } },
     },
   },
   {
@@ -293,14 +328,22 @@ const SEED_MESSAGES: SeedMessage[] = [
       role: 'assistant',
       time: { created: FIXTURE_TIME_BASE + 10000, completed: FIXTURE_TIME_BASE + 15000 },
       semantics: { origin: 'agent_runtime', kind: 'assistant_response', uiVisibility: 'visible', transcriptVisibility: 'visible' },
+      anchor: { turnId: ZCODE_FIXTURE_IDS.turns.main },
+      modelId: FIXTURE_MODEL_ID,
+      tokens: { total: 800, input: 700, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
     },
   },
-  // 子代理会话 seq 1-2。
+  // 子代理会话 seq 1-2（task-03：带独立轮 anchor + assistant 调用级元数据）。
   {
     id: M.subagentUser,
     sessionId: SUB,
     sequence: 1,
-    data: { role: 'user', time: { created: FIXTURE_TIME_BASE + 20000 }, semantics: visibleSemantics },
+    data: {
+      role: 'user',
+      time: { created: FIXTURE_TIME_BASE + 20000 },
+      semantics: visibleSemantics,
+      anchor: { turnId: ZCODE_FIXTURE_IDS.turns.subagent },
+    },
   },
   {
     id: M.subagentAssistant,
@@ -310,6 +353,9 @@ const SEED_MESSAGES: SeedMessage[] = [
       role: 'assistant',
       time: { created: FIXTURE_TIME_BASE + 21000, completed: FIXTURE_TIME_BASE + 25000 },
       semantics: { origin: 'agent_runtime', kind: 'assistant_response', uiVisibility: 'visible', transcriptVisibility: 'visible' },
+      anchor: { turnId: ZCODE_FIXTURE_IDS.turns.subagent },
+      modelId: FIXTURE_MODEL_ID,
+      tokens: { total: 500, input: 400, output: 100, reasoning: 0, cache: { read: 16, write: 8 } },
     },
   },
 ];
@@ -486,6 +532,10 @@ function errorMessage(error: unknown): string {
  * tool 单 part 产两段（D-004@v1，running/pending 只产 tool_use）、边界/未知
  * part 类型与坏行计数 skippedLines 不中断；seq 全局重编号 1 起，beforeSeq 切片
  * + 200 段窗口（最新在尾、窗口取尾部）与 parse-zcode-model-io 逐字对齐。
+ * task-03（spike-01 主路径）：消息分组头提取调用级元数据
+ * （tokens→usage 五项 / anchor.turnId→turn_id / modelId→model /
+ * time.completed-created→duration_ms）附着到该消息产出的全部段，并按消息
+ * （=一次调用）去重累计 totalUsage；字段缺失/形状漂移逐项置 null 不伪造。
  *
  * 错误语义（不伪造空结果，回落归调用方）：
  *   - node:sqlite 不可导入（D-006@v1 生效版本 ≥22.13.0 / ≥23.4.0）/ 库文件缺失
@@ -547,6 +597,15 @@ export async function readZcodeSqliteMessages(
     let messageSkipParts = false;
     let messageRole: string | null = null;
     let messageTs: string | null = null;
+    // 消息级 token 元数据（task-03 spike-01 主路径）：附着到该消息产出的全部段。
+    let messageMeta: ZcodeMessageMeta = NULL_MESSAGE_META;
+    // totalUsage 累计（按消息=一次模型调用去重——该消息全部段共享同一 usage，
+    // 仅在分组头计一次；隐藏/坏消息不计；零 usage 会话 → null 不伪造 0）。
+    let hasAnyUsage = false;
+    let usageSumInput = 0;
+    let usageSumOutput = 0;
+    let usageSumCacheRead = 0;
+    let usageSumCacheWrite = 0;
 
     for (const row of rows) {
       budgetUnits += (row.message_data?.length ?? 0) + (row.part_data?.length ?? 0);
@@ -569,14 +628,31 @@ export async function readZcodeSqliteMessages(
           messageSkipParts = true;
           messageRole = null;
           messageTs = null;
+          messageMeta = NULL_MESSAGE_META;
         } else if (isHiddenZcodeMessage(messageData)) {
           // 隐藏三判据任一命中（D-003@v1）：整条跳过，不计坏行（对齐文件 parser
-          // 剥 <system-reminder> 不计数的同语义）。
+          // 剥 <system-reminder> 不计数的同语义）；token 元数据随之丢弃不计。
           messageSkipParts = true;
+          messageRole = null;
+          messageTs = null;
+          messageMeta = NULL_MESSAGE_META;
         } else {
           messageSkipParts = false;
           messageRole = typeof messageData.role === 'string' ? messageData.role : null;
           messageTs = zcodeMessageTimestamp(messageData);
+          messageMeta = {
+            turnId: zcodeMessageTurnId(messageData),
+            model: zcodeMessageModel(messageData),
+            durationMs: zcodeMessageDurationMs(messageData),
+            usage: zcodeMessageUsage(messageData),
+          };
+          if (messageMeta.usage !== null) {
+            hasAnyUsage = true;
+            usageSumInput += messageMeta.usage.inputTokens;
+            usageSumOutput += messageMeta.usage.outputTokens;
+            usageSumCacheRead += messageMeta.usage.cacheReadTokens;
+            usageSumCacheWrite += messageMeta.usage.cacheWriteTokens;
+          }
         }
       }
       if (row.part_data === null || messageSkipParts) continue;
@@ -585,7 +661,7 @@ export async function readZcodeSqliteMessages(
         skippedLines++;
         continue;
       }
-      const produced = normalizeZcodePart(part, messageRole, messageTs);
+      const produced = normalizeZcodePart(part, messageRole, messageTs, messageMeta);
       skippedLines += produced.skipped;
       segments.push(...produced.segments);
     }
@@ -600,7 +676,23 @@ export async function readZcodeSqliteMessages(
     const truncated = sliced.length > DEFAULT_MAX_SEGMENTS;
     const messages = truncated ? sliced.slice(sliced.length - DEFAULT_MAX_SEGMENTS) : sliced;
 
-    return { status: 'parsed', messages, truncated, totalSegments: numbered.length, skippedLines };
+    return {
+      status: 'parsed',
+      messages,
+      truncated,
+      totalSegments: numbered.length,
+      skippedLines,
+      // 全会话累计（四项；beforeSeq 切片与窗口截断前的全量按调用去重和）——零
+      // usage 数据 → null（token 显示「未知」归前端，不伪造 0；R-01 降级不阻塞）。
+      totalUsage: hasAnyUsage
+        ? {
+            inputTokens: usageSumInput,
+            outputTokens: usageSumOutput,
+            cacheReadTokens: usageSumCacheRead,
+            cacheWriteTokens: usageSumCacheWrite,
+          }
+        : null,
+    };
   } finally {
     db.close();
   }
@@ -642,6 +734,82 @@ function zcodeMessageTimestamp(data: Record<string, unknown>): string | null {
   return new Date(created).toISOString();
 }
 
+// ── 消息级 token 元数据提取（task-03 spike-01 主路径，形状实证见 verify-facts）──
+
+/** usage 值形状（NormalizedLogMessage['usage'] 的非 undefined 部分——契约五项）。 */
+type ZcodeUsageValue = NonNullable<NormalizedLogMessage['usage']>;
+
+/** 消息级元数据四元组（附着到该消息产出的全部段；一次调用 = 一条 assistant 消息）。 */
+interface ZcodeMessageMeta {
+  turnId: string | null;
+  model: string | null;
+  durationMs: number | null;
+  usage: ZcodeUsageValue | null;
+}
+
+/** 空元数据（坏/隐藏消息分组与字段缺失时的缺省，只读共享安全）。 */
+const NULL_MESSAGE_META: ZcodeMessageMeta = { turnId: null, model: null, durationMs: null, usage: null };
+
+/** unknown 收窄为有限 number（usage/duration 数值校验基础）。 */
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/** turn_id 提取：data.anchor.turnId（非空字符串，turn_<uuid>）；缺失/非法 → null。 */
+function zcodeMessageTurnId(data: Record<string, unknown>): string | null {
+  const anchor = data.anchor;
+  if (!isRecord(anchor)) return null;
+  const turnId = anchor.turnId;
+  return typeof turnId === 'string' && turnId !== '' ? turnId : null;
+}
+
+/** model 提取：data.modelId（非空字符串，仅 assistant 行携带）；缺失/非法 → null。 */
+function zcodeMessageModel(data: Record<string, unknown>): string | null {
+  const modelId = data.modelId;
+  return typeof modelId === 'string' && modelId !== '' ? modelId : null;
+}
+
+/**
+ * duration 提取：time.completed - time.created（毫秒，assistant 行双键齐备）；
+ * 任一键缺失/非有限数值/completed < created（时钟倒挂防御）→ null。
+ */
+function zcodeMessageDurationMs(data: Record<string, unknown>): number | null {
+  const time = data.time;
+  if (!isRecord(time)) return null;
+  const { created, completed } = time;
+  if (!isFiniteNumber(created) || !isFiniteNumber(completed) || completed < created) return null;
+  return completed - created;
+}
+
+/**
+ * usage 提取（spike-01 实证形状）：data.tokens{total,input,output,reasoning,
+ * cache{read,write}} → 契约五项（reasoning 不在契约内丢弃；input→inputTokens、
+ * output→outputTokens、total→totalTokens、cache.read→cacheReadTokens、
+ * cache.write→cacheWriteTokens）。五项任一非有限数值 / cache 子对象缺失 →
+ * 整体 null（形状漂移按未知处理，不伪造 0 值）。
+ */
+function zcodeMessageUsage(data: Record<string, unknown>): ZcodeUsageValue | null {
+  const tokens = data.tokens;
+  if (!isRecord(tokens)) return null;
+  const cache = tokens.cache;
+  if (!isRecord(cache)) return null;
+  const inputTokens = tokens.input;
+  const outputTokens = tokens.output;
+  const totalTokens = tokens.total;
+  const cacheReadTokens = cache.read;
+  const cacheWriteTokens = cache.write;
+  if (
+    !isFiniteNumber(inputTokens) ||
+    !isFiniteNumber(outputTokens) ||
+    !isFiniteNumber(totalTokens) ||
+    !isFiniteNumber(cacheReadTokens) ||
+    !isFiniteNumber(cacheWriteTokens)
+  ) {
+    return null;
+  }
+  return { inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens };
+}
+
 /** 单条 part 归一化结果：产段 + 坏行/忽略计数增量。 */
 interface ZcodePartNormalization {
   segments: UnnumberedSegment[];
@@ -659,28 +827,31 @@ interface ZcodePartNormalization {
  *   - step-start/step-finish/timeline/file/compaction 与任何未知 type：防御式
  *     忽略（计数 skippedLines，未来新增类型不炸）；
  *   - 结构字段缺失/非法（text/tool/callID/state 非法形状）→ 计 1 跳过不中断。
+ * 产出的全部段带消息级 token 元数据四元组（task-03：meta 由所属 message 分组
+ * 头提取，同一消息多段共享同一 usage——口径对齐 task-02 文件解析器）。
  */
 function normalizeZcodePart(
   part: Record<string, unknown>,
   role: string | null,
   ts: string | null,
+  meta: ZcodeMessageMeta,
 ): ZcodePartNormalization {
   switch (part.type) {
     case 'text': {
       if (typeof part.text !== 'string') return { segments: [], skipped: 1 };
       if (part.text.trim() === '') return { segments: [], skipped: 0 }; // 空文本不产段（对齐文件 parser 空气泡防御）
       if (role === 'user') {
-        return { segments: [makeSegment('user_input', ts, { text: part.text })], skipped: 0 };
+        return { segments: [makeSegment('user_input', ts, meta, { text: part.text })], skipped: 0 };
       }
       if (role === 'assistant') {
-        return { segments: [makeSegment('reply', ts, { text: part.text })], skipped: 0 };
+        return { segments: [makeSegment('reply', ts, meta, { text: part.text })], skipped: 0 };
       }
       return { segments: [], skipped: 0 };
     }
     case 'reasoning': {
       if (typeof part.text !== 'string') return { segments: [], skipped: 1 };
       if (part.text.trim() === '') return { segments: [], skipped: 0 };
-      return { segments: [makeSegment('thinking', ts, { text: part.text })], skipped: 0 };
+      return { segments: [makeSegment('thinking', ts, meta, { text: part.text })], skipped: 0 };
     }
     case 'tool': {
       // 结构三要素（tool/callID/state）任一缺失/非法 → 坏行。
@@ -689,7 +860,7 @@ function normalizeZcodePart(
         return { segments: [], skipped: 1 };
       }
       const segments: UnnumberedSegment[] = [
-        makeSegment('tool_use', ts, {
+        makeSegment('tool_use', ts, meta, {
           tool_name: part.tool,
           tool_use_id: part.callID,
           tool_input: summarizeZcodeToolInput(state.input),
@@ -699,7 +870,7 @@ function normalizeZcodePart(
       if (status !== 'running' && status !== 'pending') {
         const isError = status === 'error';
         segments.push(
-          makeSegment('tool_result', ts, {
+          makeSegment('tool_result', ts, meta, {
             tool_name: part.tool,
             tool_use_id: part.callID,
             tool_result: summarizeZcodeToolResult(isError ? state.error : state.output),
@@ -722,10 +893,15 @@ function normalizeZcodePart(
   }
 }
 
-/** 构造未编号段：未显式给出的字段一律 null（九字段齐全 snake_case，对齐文件 parser）。 */
+/**
+ * 构造未编号段：未显式给出的字段一律 null（九字段齐全 snake_case，对齐文件
+ * parser）+ 消息级 token 元数据四项（task-03；usage 浅拷贝防多段共享引用被
+ * 消费方误改串扰）。
+ */
 function makeSegment(
   kind: NormalizedLogMessage['kind'],
   ts: string | null,
+  meta: ZcodeMessageMeta,
   fields: Partial<
     Pick<UnnumberedSegment, 'text' | 'tool_name' | 'tool_use_id' | 'tool_input' | 'tool_result' | 'is_error'>
   > = {},
@@ -739,6 +915,10 @@ function makeSegment(
     tool_result: fields.tool_result ?? null,
     is_error: fields.is_error ?? null,
     ts,
+    turn_id: meta.turnId,
+    model: meta.model,
+    duration_ms: meta.durationMs,
+    usage: meta.usage === null ? null : { ...meta.usage },
   };
 }
 

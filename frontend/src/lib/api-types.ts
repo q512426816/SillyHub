@@ -410,9 +410,11 @@ export interface paths {
          *     3 条固定查询替代原逐 ws 4 条；条目组装与单 ws 路径共享函数，口径单一来源）
          *     + ``probe_workspace_git_mode``（task-02 三态探测）组装。
          *
-         *     只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC
-         *     失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id
-         *     跳过不报错（与 collect_scope 无效 id 跳过同语义）。
+         *     探测本身不改工作区生命周期状态（design §7.5；唯一写例外见下——repo_url
+         *     回填，ql-20260919-001 勘误：原「只读无状态变化」表述与回填副作用矛盾）；
+         *     每次调用实时探测不缓存（R-02）；探测 RPC 失败/未绑 daemon 归 ``unknown``
+         *     不抛 5xx（fail-safe）。查无行的 workspace_id 跳过不报错（与 collect_scope
+         *     无效 id 跳过同语义）。
          *
          *     ql-20260918-012（工作区 Git 地址识别）：响应新增 ``repo_url``——git 态
          *     工作区经 ``delegate.git_remote_url`` 读 ``git remote -v`` 首个 fetch 行，
@@ -11251,8 +11253,12 @@ export interface paths {
          *     调 ``host_fs.read_agent_log_messages {path, format, beforeSeq?}``（task-02
          *     契约，默认 30s 传输预算）：daemon 全量读文件本地解析后只回 KB 级归一化消息
          *     （FR-02，替代 content 端点 256KB 原文尾部口径）。外层 daemon 返回 camelCase
-         *     （``totalSegments``/``skippedLines``）→ 本端点转换层落 snake_case；messages
-         *     内层逐字段已对齐（design §7.1）无需改名。
+         *     （``totalSegments``/``skippedLines``/``totalUsage``）→ 本端点转换层落
+         *     snake_case；messages 内层逐字段已对齐（design §7.1）无需改名——新可选字段
+         *     sender/turn_id/model/duration_ms/usage 与 total_usage（task-08 / FR-03 /
+         *     D-004@v1）同口径：messages 内 snake_case 原样递归校验（usage 子对象
+         *     camelCase 键由 schema ``validation_alias`` 对齐），外层 ``totalUsage`` 仅做
+         *     key 映射，零改写语义；老 daemon / 早退分支不携带即缺省 None。
          *
          *     status 四值（parsed/unsupported/parse_error/too_large）**一律 200 透传**——
          *     「RPC 成功≠解析成功」，unsupported/parse_error/too_large 由前端判断回落原文
@@ -11596,16 +11602,60 @@ export interface components {
              * @description 所属行 completedAt 原文
              */
             ts?: string | null;
+            /**
+             * Sender
+             * @description user_input 段发言者（human=真人气泡 / system_event=系统事件中性行；缺省视为 human）
+             */
+            sender?: ("human" | "system_event") | null;
+            /**
+             * Turn Id
+             * @description 轮次标识（zcode turnId / cursor 轮号 / claude-code 会话内轮序）
+             */
+            turn_id?: string | null;
+            /**
+             * Model
+             * @description 产出该段的模型 id（如 GLM-5.3；无数据源缺省）
+             */
+            model?: string | null;
+            /**
+             * Duration Ms
+             * @description 该次模型调用耗时毫秒（附着到其产出的全部段）
+             */
+            duration_ms?: number | null;
+            /** @description 该次调用 token 用量五项（daemon camelCase 键经 alias 对齐；无数据源缺省） */
+            usage?: components["schemas"]["AgentLogMessageUsage"] | null;
+        };
+        /**
+         * AgentLogMessageUsage
+         * @description 单条消息 usage 五项 token 计数（2026-09-19-tool-report-session-replay task-08）。
+         *
+         *     对齐 daemon ``NormalizedLogMessage.usage``（parse-zcode-model-io.ts，键为
+         *     camelCase ``inputTokens`` 等）——schema 侧 snake_case 落 API 契约，daemon
+         *     原文 camelCase 经 ``validation_alias`` 双名对齐（平台侧 snake_case 构造亦可）。
+         *     子项可 null：daemon 侧形状漂移逐项缺省，不伪造。``extra=ignore`` 与
+         *     AgentLogMessageItem 同款宽松。
+         */
+        AgentLogMessageUsage: {
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /** Total Tokens */
+            total_tokens?: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens?: number | null;
+            /** Cache Write Tokens */
+            cache_write_tokens?: number | null;
         };
         /**
          * AgentLogMessagesResponse
          * @description GET /agent-logs/{entry_id}/messages 200 响应（design §7.2）。
          *
          *     daemon 侧 ``host_fs.read_agent_log_messages`` 外层 camelCase
-         *     （``totalSegments``/``skippedLines``）→ router 转换层落 snake_case；messages
-         *     内层逐字段已对齐无需改名。status 四值一律 200 透传——「RPC 成功≠解析成功」：
-         *     unsupported/parse_error/too_large 由前端判断回落原文端点（D-003@v1），backend
-         *     零解析零改写（D-001@v1）。
+         *     （``totalSegments``/``skippedLines``/``totalUsage``）→ router 转换层落
+         *     snake_case；messages 内层逐字段已对齐无需改名。status 四值一律 200 透传——
+         *     「RPC 成功≠解析成功」：unsupported/parse_error/too_large 由前端判断回落原文
+         *     端点（D-003@v1），backend 零解析零改写（D-001@v1）。
          */
         AgentLogMessagesResponse: {
             /**
@@ -11634,6 +11684,8 @@ export interface components {
              * @description 解析中跳过的坏行数
              */
             skipped_lines: number;
+            /** @description 全会话累计 token 用量四项（daemon 解析器按调用去重求和；无数据源缺省） */
+            total_usage?: components["schemas"]["AgentLogTotalUsage"] | null;
         };
         /**
          * AgentLogPushOk
@@ -11752,6 +11804,25 @@ export interface components {
         AgentLogStatesPush: {
             /** Entries */
             entries: components["schemas"]["AgentLogStateEntry"][];
+        };
+        /**
+         * AgentLogTotalUsage
+         * @description 全会话累计 token 用量四项（2026-09-19-tool-report-session-replay task-08）。
+         *
+         *     对齐 daemon ``AgentLogMessagesResult.totalUsage``（registry.ts，键为 camelCase
+         *     ``inputTokens`` 等）——四项口径与 daemon 一致**无 ``total_tokens``**（daemon
+         *     侧累计即不产出该项）；daemon 原文 camelCase 经 ``validation_alias`` 双名对齐。
+         *     老 daemon / 早退分支（unsupported/parse_error/too_large）不携带即整项 None。
+         */
+        AgentLogTotalUsage: {
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens?: number | null;
+            /** Cache Write Tokens */
+            cache_write_tokens?: number | null;
         };
         /**
          * AgentProfileAggregatedItem

@@ -64,7 +64,10 @@ import { errMessage, useNotify } from "@/lib/errors";
 import { isActiveTeamMission } from "@/components/daemon/team-task-block";
 import { ActivityCatalog, type AgentTaskEntry } from "@/components/daemon/activity-catalog";
 import { type TeamTriggerInitialConfig } from "@/components/daemon/team-trigger-popover";
-import { AgentLogCard, AgentLogSessionBody } from "@/components/daemon/agent-log-card";
+import { AgentLogCard } from "@/components/daemon/agent-log-card";
+// task-12（2026-09-19-tool-report-session-replay）：tool_report 纯日志会话主体
+// 换挂 AgentReplayBody（task-11 逐轮回放主体），原日志条目流主体组件退役删除。
+import { AgentReplayBody } from "@/components/daemon/agent-replay-body";
 import { PlanApprovalCard } from "@/components/daemon/plan-approval-card";
 import {
   TaskExecutionPanel, type TaskExecutionPanelHandle,
@@ -3517,8 +3520,12 @@ export function SessionPanelPage({
   // 渲染期把时间线滚动容器查询器注入 ref。
   scrollElQueryRef.current = () => timelineScrollEl();
 
+  // task-12（design Phase 3.6）：纯日志会话主体换挂 AgentReplayBody——按
+  // turn_id 聚轮的逐轮回放体（task-11 产物；focusEntryId 聚焦跳转暂不启用），
+  // 原日志条目流主体组件已退役删除（承接者见 agent-replay-body.tsx）。
+  // 保持单行分支挂载（git revert 可整体回退）。
   const sessionBody = isToolReportBody ? (
-    <AgentLogSessionBody sessionId={session.id} />
+    <AgentReplayBody sessionId={session.id} />
   ) : (
     <>
       {/* quick（2026-09-02 触顶自动加载迭代）：原「加载更早消息」按钮改滚动
@@ -4011,7 +4018,7 @@ export function SessionPanelPage({
           （streamFooter 挂载）改面板级折叠栏，挂横幅之下、会话主体之上，
           点击展开明细，不再挤占聊天窗口（同 ql-20260826-010 后台目录收纳
           动机）。无上报时组件返回 null 不占位；纯 tool_report 主体
-          （AgentLogSessionBody 即日志条目流）不重复挂载。 */}
+          （AgentReplayBody 即会话主体）不重复挂载。 */}
       {!isToolReportBody && (
         <AgentLogCard sessionId={session.id} mobile={mobile} />
       )}
@@ -4045,8 +4052,8 @@ export function SessionPanelPage({
 
       {/* 会话主体（task-07 / 2026-08-23-agent-activity-sessions design §3.4）：
           - origin=tool_report 且 turn_count===0（未继续过对话）→ 本地 Agent
-            日志条目流即会话主体（AgentLogSessionBody），输入区保留在下方
-            （首条消息懒激活派发，D-002）；
+            日志逐轮回放体即会话主体（AgentReplayBody，task-12 换挂），输入区
+            保留在下方（首条消息懒激活派发，D-002）；
           - 其余会话（chat / 已激活 tool_report 继续对话后）→ 正常对话流
             （task-13 共享子组件；弹窗与新页面同构复用。gap-fix：turns 用
             displayTurns）；关联本会话的日志改走顶部折叠栏（AgentLogCard，
@@ -4068,7 +4075,7 @@ export function SessionPanelPage({
             复用）主体外包「刻度轨 flex 行」：左 TurnCatalog 常驻 ~30px 轨
             （D-007：无折叠 / 无 localStorage / 无头部），右聊天列 flex-1 min-w-0
             占满剩余宽度；整行 min-h-0 flex-1 接管面板剩余高度，聊天列 flex-col
-            保持原纵向滚动高度链（AgentLogSessionBody / TurnTimeline 根均自带
+            保持原纵向滚动高度链（AgentReplayBody / TurnTimeline 根均自带
             min-h-0 flex-1，不受包裹影响）。contents 挂载点原样保留在聊天列内
             ——触顶自动加载滚动监听与 task-04 跳转选择器（timelineScrollEl 按
             data-testid 深查）依赖不变。mobile 分支不动（Drawer 入口属 task-06）；

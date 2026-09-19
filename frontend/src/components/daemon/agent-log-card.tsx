@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * AgentLogCard / AgentLogSessionBody —— 「本地 Agent 日志」会话化两形态
+ * AgentLogCard —— 「本地 Agent 日志」会话化折叠栏
  * （2026-08-23-agent-activity-sessions task-07 / FR-07 / FR-08 / D-004；
  * 前身 2026-08-23-platform-agent-log-ingest task-04 ql-20260823-002-6a1a）。
  *
@@ -13,9 +13,8 @@
  *     形态：🧾 图标 + 一行摘要「N 个 · 最新 X 前 ▸」细栏，点击展开明细
  *     （harness 徽标 / originator / session 短码 / 大小 / 活跃绿点 /
  *     调用次数 / 最近命令 / log_path 复制）。
- *   - AgentLogSessionBody：origin=tool_report 且 turn_count===0 的会话**主体**
- *     ——全量 entries 逐条气泡流（不折叠成 3 条），顶部说明「由 SillySpec CLI
- *     自动上报创建」+ 刷新；底部输入区由 session-panel 保留（首条消息懒激活）。
+ *     （原 tool_report 纯日志会话主体形态已于 2026-09-19-tool-report-session-
+ *     replay task-12 退役，由 AgentReplayBody 承接，见 agent-replay-body.tsx。）
  *   - 每个条目行尾「查看内容 ▾」（task-05 对话化升级，2026-08-23-agent-log-
  *     conversation-view / FR-01 / FR-03 / FR-05 / D-003@v1 / D-006@v1）：展开先
  *     readAgentLogMessages（GET /api/agent-logs/{id}/messages）——status=parsed
@@ -25,12 +24,12 @@
  *     session-log-assembler、零协议文本合成），「对话 / 原文」tab（原文懒调
  *     readAgentLogContent 复用 <pre>），truncated 时「加载更早」带 before_seq
  *     （当前最小 seq）前插；status≠parsed / ApiError（422 老 daemon / 409 /
- *     404 / 5xx）一律静默回落原文 <pre> + 黄条原因（不弹错框）；仅原文端点
+ *     404 / 5xx）一律静默回落原文 <pre> + 黄条原因（不弹错框）；其中 409 二进制
+ *     格式（cursor IDE 聊天库）走专属黄条文案（FR-04，task-13）；仅原文端点
  *     自身失败保留红条（现状语义，design §7.2 / §7.3 / §5.2）。
  *
  * 渲染门控（AgentLogCard）：空列表 / error / loading 一律返回 null——顶部
- * 不出现占位栏（有上报才出现，避免每个会话顶上挂空盒）。SessionBody 是
- * 会话主体，loading / error / 空态各有显式中文提示。
+ * 不出现占位栏（有上报才出现，避免每个会话顶上挂空盒）。
  *
  * 视觉（双主题铁律）：harness 徽标走 brand-* 语义阶（bg-brand-50/
  * text-brand-700/border-brand-100，随 html data-theme 换肤）；zcode 用语义
@@ -171,12 +170,25 @@ function fallbackNoteForStatus(
   }
 }
 
-/** messages 端点 HTTP 失败（422 老 daemon / 409 / 404 / 5xx）的静默回落原因。 */
+/**
+ * messages 端点 HTTP 失败（422 老 daemon / 409 / 404 / 5xx）的静默回落原因。
+ *
+ * 409 二进制格式专属分支（2026-09-19-tool-report-session-replay task-13 / FR-04，
+ * 按 code=HTTP_409_AGENT_LOG_BINARY_FORMAT 精确判定）：cursor IDE sqlite 聊天库
+ * 命中 format 黑名单被后端显式拒——文案改死胡同说明（格式性质 + 仍保留的信息），
+ * 且**不拼 FALLBACK_TAIL**（该场景原文端点同被 409 拒，无原文可回落，红条现状
+ * 语义保留）；其余 409（如 allowed_roots 拒读）与 422/404/5xx 维持既有透传
+ * 文案逐字不变。
+ */
 function fallbackNoteForError(err: unknown): string {
   if (err instanceof ApiError) {
     // 422 是老 daemon 无 read_agent_log_messages 方法的唯一映射（design §7.2）。
     if (err.status === 422) {
       return `daemon 未升级，暂不支持对话化解析，${FALLBACK_TAIL}`;
+    }
+    // 409 cursor IDE sqlite 二进制库：format 黑名单显式拒绝（FR-04 不可用态显式化）。
+    if (err.status === 409 && err.code === "HTTP_409_AGENT_LOG_BINARY_FORMAT") {
+      return "该日志格式（cursor IDE 聊天库）暂不支持对话化回放，仅保留元数据与活性信息";
     }
     return `对话化解析请求失败（${err.message}），${FALLBACK_TAIL}`;
   }
@@ -431,14 +443,14 @@ function useCopyFeedback() {
   return { copiedKey, copy };
 }
 
-/* ───────────────── 条目行（两形态共用） ───────────────── */
+/* ───────────────── 条目行 ───────────────── */
 
 /**
  * 单条日志元信息行：harness 徽标 / originator / session 短码 / 大小 + 活跃
  * 绿点 / 调用次数 + 最近命令 + format / log_path 复制 /「查看内容」内联展开。
  *
- * 根元素是 div（不带 li/bubble 壳）——AgentLogCard 折叠明细以 <li> 包裹
- * （列表语义），AgentLogSessionBody 以头像 + 气泡包裹（对话流语义）。
+ * 根元素是 div（不带 li 壳）——AgentLogCard 折叠明细以 <li> 包裹
+ * （列表语义）。
  */
 function AgentLogEntry({
   entry,
@@ -854,7 +866,7 @@ function AgentLogEntry({
   );
 }
 
-/* ───────────────── 会话关联查询（两形态共用 hook 参数） ───────────────── */
+/* ───────────────── 会话关联查询 ───────────────── */
 
 /** 会话关联日志查询选项（30s 轮询跟随上报节奏，design §3.4，X-20：非秒级心跳）。 */
 function useSessionAgentLogs(sessionId: string) {
@@ -866,7 +878,7 @@ function useSessionAgentLogs(sessionId: string) {
   });
 }
 
-/* ───────────────── 形态一：对话流尾部折叠条目 ───────────────── */
+/* ───────────────── AgentLogCard：面板顶部折叠栏 ───────────────── */
 
 /**
  * AgentLogCard —— 普通会话（chat / 已激活 tool_report）面板顶部折叠栏：
@@ -997,98 +1009,6 @@ export function AgentLogCard({
             </button>
           </div>
         </div>
-      )}
-    </div>
-  );
-}
-
-/* ───────────────── 形态二：tool_report 会话主体 ───────────────── */
-
-/**
- * AgentLogSessionBody —— origin=tool_report 且 turn_count===0 会话的内容主体：
- * 全量 entries 逐条气泡流（不折叠；条目多时容器自身滚动），条目行复用
- * AgentLogEntry（含复制 + 查看内容交互）。输入区由 session-panel 保留在下方
- * （首条消息懒激活派发，D-002）。
- *
- * 容器与 TurnTimeline 同构（min-h-0 flex-1 overflow-y-auto bg-background
- * px-5 py-5），保证与对话流形态互换时布局零跳动。
- */
-export function AgentLogSessionBody({ sessionId }: { sessionId: string }) {
-  const qc = useQueryClient();
-  const { copiedKey, copy } = useCopyFeedback();
-  const logsQ = useSessionAgentLogs(sessionId);
-
-  const items = logsQ.data?.items ?? [];
-
-  return (
-    <div
-      data-testid="agent-log-session-body"
-      className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5"
-    >
-      {/* 顶部说明行 + 刷新（原型 .head .sub「由 SillySpec CLI 自动上报创建」）。 */}
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="text-[11px] text-muted-foreground">
-          由 SillySpec CLI 自动上报创建 · 点下方输入框即可继续对话
-        </p>
-        <button
-          type="button"
-          title="刷新"
-          onClick={() => {
-            void qc.invalidateQueries({ queryKey: queryKeys.agentLogs.all });
-          }}
-          className="shrink-0 cursor-pointer rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          刷新
-        </button>
-      </div>
-
-      {logsQ.isPending ? (
-        <p className="py-6 text-center text-xs text-muted-foreground">
-          日志条目加载中…
-        </p>
-      ) : logsQ.isError ? (
-        <div
-          role="alert"
-          className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive"
-        >
-          加载本地 Agent 日志失败：
-          {logsQ.error instanceof Error ? logsQ.error.message : "未知错误"}
-          <button
-            type="button"
-            onClick={() => void logsQ.refetch()}
-            className="ml-2 cursor-pointer rounded border border-destructive/40 px-1.5 py-0.5 transition-colors hover:bg-destructive/10"
-          >
-            重新加载
-          </button>
-        </div>
-      ) : items.length === 0 ? (
-        <p className="py-6 text-center text-xs text-muted-foreground">
-          暂无日志上报，等待 SillySpec CLI 下次上报…
-        </p>
-      ) : (
-        <ul
-          className="flex flex-col gap-2.5"
-          data-testid="agent-log-session-entries"
-        >
-          {items.map((entry) => (
-            <li key={entry.id} className="flex items-start gap-2.5">
-              {/* 头像 + 气泡：对话流同构（🧾 标识日志条目身份）。 */}
-              <span
-                aria-hidden
-                className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-muted-foreground"
-              >
-                <FileText className="h-3.5 w-3.5" />
-              </span>
-              <div className="min-w-0 max-w-[86%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm shadow-sm">
-                <AgentLogEntry
-                  entry={entry}
-                  copiedKey={copiedKey}
-                  onCopy={copy}
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
       )}
     </div>
   );

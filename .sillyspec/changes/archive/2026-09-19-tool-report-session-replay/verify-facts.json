@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-19-tool-report-session-replay",
+  "generatedAt": "2026-09-19T15:21:20.686Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-19-tool-report-session-replay",
+      "metrics": {
+        "matches": 2,
+        "skippedFiles": 0,
+        "worktreeHits": 10,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-19-tool-report-session-replay",
+      "metrics": {
+        "tasks": 13,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-19-tool-report-session-replay",
+      "metrics": {
+        "backendEndpoints": 2232,
+        "frontendCalls": 2
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-19-tool-report-session-replay",
+      "metrics": {
+        "deletions": 2,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-19-tool-report-session-replay",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-09-19-tool-report-session-replay",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-09-19-tool-report-session-replay",
+      "metrics": {
+        "checkedFiles": 14,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "双端类型检查与全部定向测试在 worktree 实跑通过（execute 各 task 子代理 + 验收审查子代理多次实跑一致）；verify 步骤 6 CLI 快照 lint 整链 exit 0",
+      "command": "cd backend && uv run pytest app/modules/platform_sync/tests/test_agent_log_messages.py -q --no-cov && cd ../sillyhub-daemon && pnpm typecheck && pnpm test -- tests/agent-log && pnpm test -- tests/agent-log-matrix && cd ../frontend && pnpm exec tsc --noEmit && pnpm test -- src/lib/__tests__/agent-log-turns src/components/daemon/__tests__/agent-replay-body src/components/daemon/__tests__/agent-log-card src/components/daemon/__tests__/turn-timeline",
+      "exitCode": 0,
+      "logPath": "本报告「测试结果」节 + execute 13 份 review.json notes + execute-review-2026-09-19-223630 checklist"
+    }
+  ],
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "handover": {
+    "count": 4,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "UI 实机冒烟：纯 tool_report 会话打开显示 TurnTimeline 回放（轮次/系统事件中性行/每轮 token/工作会话折叠条/加载更早）；activated 与 chat 会话渲染零变化",
+        "condition": "本地起 backend+frontend（daemon 在线）打开样本会话逐项目视；部署生产后复验一次",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "409 二进制文案：cursor IDE sqlite 日志点开「查看内容」显示新中文黄条 + 原文端点红条保留",
+        "condition": "造一条 cursor-chat-sqlite 条目点开目视（task-13 allowed_paths 不含测试文件，断言未自动化）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "sillyspec 仓跨仓跟进：cursor-agent transcript 扫描上报（本仓解析器/schema 已就绪）",
+        "condition": "见 docs/sillyspec/cursor-agent-transcript-report-pipeline.md 待办三要素；sillyspec 仓独立变更",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "read-zcode-sqlite.test.ts:129/139 既有 fixture 含真实用户名路径（HEAD 已有、本变更零触碰）",
+        "condition": "后续 quick 顺手脱敏，不阻塞本变更",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 5,
+  "apiFace": {
+    "endpoints": [],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts",
+      "sillyhub-daemon/tests/agent-log/parse-cursor-agent.test.ts",
+      "sillyhub-daemon/tests/agent-log-matrix.test.ts",
+      "sillyhub-daemon/tests/agent-log/parse-zcode-model-io.test.ts",
+      "sillyhub-daemon/tests/agent-log/read-zcode-sqlite.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured"
+}

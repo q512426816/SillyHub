@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, RootModel, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, RootModel, field_validator, model_validator
 
 from app.modules.spec_workspace.schema import FileOp
 
@@ -441,6 +441,35 @@ class AgentLogContentResponse(BaseModel):
 # ── 2026-08-23-agent-log-conversation-view task-03（design §7.1/§7.2 对话化回显）──
 
 
+class AgentLogMessageUsage(BaseModel):
+    """单条消息 usage 五项 token 计数（2026-09-19-tool-report-session-replay task-08）。
+
+    对齐 daemon ``NormalizedLogMessage.usage``（parse-zcode-model-io.ts，键为
+    camelCase ``inputTokens`` 等）——schema 侧 snake_case 落 API 契约，daemon
+    原文 camelCase 经 ``validation_alias`` 双名对齐（平台侧 snake_case 构造亦可）。
+    子项可 null：daemon 侧形状漂移逐项缺省，不伪造。``extra=ignore`` 与
+    AgentLogMessageItem 同款宽松。
+    """
+
+    model_config = {"extra": "ignore"}
+
+    input_tokens: int | None = Field(
+        default=None, validation_alias=AliasChoices("input_tokens", "inputTokens")
+    )
+    output_tokens: int | None = Field(
+        default=None, validation_alias=AliasChoices("output_tokens", "outputTokens")
+    )
+    total_tokens: int | None = Field(
+        default=None, validation_alias=AliasChoices("total_tokens", "totalTokens")
+    )
+    cache_read_tokens: int | None = Field(
+        default=None, validation_alias=AliasChoices("cache_read_tokens", "cacheReadTokens")
+    )
+    cache_write_tokens: int | None = Field(
+        default=None, validation_alias=AliasChoices("cache_write_tokens", "cacheWriteTokens")
+    )
+
+
 class AgentLogMessageItem(BaseModel):
     """GET /agent-logs/{entry_id}/messages 单条归一化消息（design §7.1）。
 
@@ -465,16 +494,61 @@ class AgentLogMessageItem(BaseModel):
     tool_result: str | None = Field(default=None, description="工具结果摘要（首 4KB 截断）")
     is_error: bool | None = Field(default=None, description="tool_result 专用：是否报错")
     ts: str | None = Field(default=None, description="所属行 completedAt 原文")
+    # ── 2026-09-19-tool-report-session-replay task-08（FR-03 / D-004@v1）：token/
+    # 轮次可选字段，逐字对齐 daemon task-01 契约扩展——老 daemon / 无数据源不
+    # 返回即缺省 None（兼容策略：全部可选，前端显示「未知」不伪造）。──
+    sender: Literal["human", "system_event"] | None = Field(
+        default=None,
+        description="user_input 段发言者（human=真人气泡 / system_event=系统事件中性行；缺省视为 human）",
+    )
+    turn_id: str | None = Field(
+        default=None, description="轮次标识（zcode turnId / cursor 轮号 / claude-code 会话内轮序）"
+    )
+    model: str | None = Field(
+        default=None, description="产出该段的模型 id（如 GLM-5.3；无数据源缺省）"
+    )
+    duration_ms: int | None = Field(
+        default=None, description="该次模型调用耗时毫秒（附着到其产出的全部段）"
+    )
+    usage: AgentLogMessageUsage | None = Field(
+        default=None,
+        description="该次调用 token 用量五项（daemon camelCase 键经 alias 对齐；无数据源缺省）",
+    )
+
+
+class AgentLogTotalUsage(BaseModel):
+    """全会话累计 token 用量四项（2026-09-19-tool-report-session-replay task-08）。
+
+    对齐 daemon ``AgentLogMessagesResult.totalUsage``（registry.ts，键为 camelCase
+    ``inputTokens`` 等）——四项口径与 daemon 一致**无 ``total_tokens``**（daemon
+    侧累计即不产出该项）；daemon 原文 camelCase 经 ``validation_alias`` 双名对齐。
+    老 daemon / 早退分支（unsupported/parse_error/too_large）不携带即整项 None。
+    """
+
+    model_config = {"extra": "ignore"}
+
+    input_tokens: int | None = Field(
+        default=None, validation_alias=AliasChoices("input_tokens", "inputTokens")
+    )
+    output_tokens: int | None = Field(
+        default=None, validation_alias=AliasChoices("output_tokens", "outputTokens")
+    )
+    cache_read_tokens: int | None = Field(
+        default=None, validation_alias=AliasChoices("cache_read_tokens", "cacheReadTokens")
+    )
+    cache_write_tokens: int | None = Field(
+        default=None, validation_alias=AliasChoices("cache_write_tokens", "cacheWriteTokens")
+    )
 
 
 class AgentLogMessagesResponse(BaseModel):
     """GET /agent-logs/{entry_id}/messages 200 响应（design §7.2）。
 
     daemon 侧 ``host_fs.read_agent_log_messages`` 外层 camelCase
-    （``totalSegments``/``skippedLines``）→ router 转换层落 snake_case；messages
-    内层逐字段已对齐无需改名。status 四值一律 200 透传——「RPC 成功≠解析成功」：
-    unsupported/parse_error/too_large 由前端判断回落原文端点（D-003@v1），backend
-    零解析零改写（D-001@v1）。
+    （``totalSegments``/``skippedLines``/``totalUsage``）→ router 转换层落
+    snake_case；messages 内层逐字段已对齐无需改名。status 四值一律 200 透传——
+    「RPC 成功≠解析成功」：unsupported/parse_error/too_large 由前端判断回落原文
+    端点（D-003@v1），backend 零解析零改写（D-001@v1）。
     """
 
     status: Literal["parsed", "unsupported", "parse_error", "too_large"] = Field(
@@ -486,3 +560,10 @@ class AgentLogMessagesResponse(BaseModel):
     truncated: bool = Field(description="段窗口是否被截断（最近 200 段之外还有更早内容）")
     total_segments: int = Field(description="解析出的总段数（仅 parsed 有意义）")
     skipped_lines: int = Field(description="解析中跳过的坏行数")
+    # 2026-09-19-tool-report-session-replay task-08（FR-03 / D-004@v1）：全会话
+    # 累计用量四项——daemon 外层 ``totalUsage`` → router 转换层映射 ``total_usage``；
+    # 老 daemon 与早退分支不携带即缺省 None（前端显示「未知」不求和）。
+    total_usage: AgentLogTotalUsage | None = Field(
+        default=None,
+        description="全会话累计 token 用量四项（daemon 解析器按调用去重求和；无数据源缺省）",
+    )
