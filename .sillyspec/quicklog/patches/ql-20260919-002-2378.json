@@ -1,0 +1,87 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-3ac4e4b7",
+  "totals": {
+    "files": 6,
+    "additions": 170,
+    "deletions": 63
+  },
+  "rows": [
+    {
+      "path": "frontend/src/lib/__tests__/agent-log-turns.test.ts",
+      "declared": true,
+      "additions": 2,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/agent-log-turns.ts",
+      "declared": true,
+      "additions": 14,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts",
+      "declared": true,
+      "additions": 48,
+      "deletions": 11,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/registry.ts",
+      "declared": true,
+      "additions": 4,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log-matrix.test.ts",
+      "declared": true,
+      "additions": 44,
+      "deletions": 23,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/parse-zcode-model-io.test.ts",
+      "declared": true,
+      "additions": 58,
+      "deletions": 20,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 6,
+    "codeFileCount": 3,
+    "testFileCount": 3,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260919-002-2378",
+  "sessionId": "quick-3ac4e4b7",
+  "savedAt": "2026-09-19T16:06:21.091Z",
+  "patchSha256": "94e2e5fe38e80f06b136f2536d3c4f1114456c1cee52d95ab4ee5130976bfbd2",
+  "patchStatus": "ok"
+}

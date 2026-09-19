@@ -1,0 +1,449 @@
+diff --git a/frontend/src/lib/__tests__/agent-log-turns.test.ts b/frontend/src/lib/__tests__/agent-log-turns.test.ts
+index 01e3147e5..f46afe992 100644
+--- a/frontend/src/lib/__tests__/agent-log-turns.test.ts
++++ b/frontend/src/lib/__tests__/agent-log-turns.test.ts
+@@ -162,14 +162,14 @@ describe("buildReplayTurns", () => {
+     ]);
+   });
+ 
+-  it("未配对 tool_use → result 缺省、status='running'（无结果记录的规范编码）", () => {
++  it("未配对 tool_use → result 显式「结果未记录」文本、status='ok'（R-03：已结束会话不假运行）", () => {
+     const turns = buildReplayTurns([
+       msg({ kind: "user_input", text: "问" }),
+       msg({ kind: "tool_use", tool_use_id: "use-x", tool_input: "..." }),
+     ]);
+ 
+     expect(turns[0]!.processItems).toEqual([
+-      { kind: "tool", raw: "...", status: "running" },
++      { kind: "tool", raw: "...", result: "结果未记录（更早窗口外或中断）", status: "ok" },
+     ]);
+   });
+ 
+diff --git a/frontend/src/lib/agent-log-turns.ts b/frontend/src/lib/agent-log-turns.ts
+index a951f13e7..3a46849a7 100644
+--- a/frontend/src/lib/agent-log-turns.ts
++++ b/frontend/src/lib/agent-log-turns.ts
+@@ -26,8 +26,9 @@
+  *     （raw=tool_input、result=tool_result、is_error → ok/deny）；
+  *   - 孤儿 tool_result（窗口内未见配对 tool_use，含更早页未加载）→ raw 空串
+  *     tool 项（SessionToolEvent 语义）；
+- *   - 未配对 tool_use → result 缺省 status='running'——DTO 对「无结果记录」的
+- *     规范编码（窗口截断 / 日志中断即无结果），**不是**断言工具仍在运行。
++ *   - 未配对 tool_use → result 显式文本「结果未记录（更早窗口外或中断）」——
++ *     对齐 R-03 红线（agent-log-card 2026-08-23：已结束会话不得假运行），不用
++ *     status='running' 编码（渲染层与实时路径共用，视觉即执行中转圈=假运行）。
+  *
+  * token 轮级聚合（D-004 / FR-03）：轮内各段 usage 先按调用去重（同一次调用
+  * 产出的多段共享同一 usage——JSON 反序列化后引用不同但五项同值，按值签名去重）
+@@ -155,11 +156,12 @@ export function buildReplayTurns(messages: AgentLogMessageItem[]): SessionTurnVi
+         turn.processItems.push({ kind: "thinking", text: msg.text ?? "" });
+         break;
+       case "tool_use": {
+-        // status='running' = 无结果记录的规范编码（窗口截断/日志中断），非假运行断言。
++        // result 暂缺省（配对成功由 tool_result 回填）；轮定稿时未配对项统一
++        // 填「结果未记录」显式文本（R-03：不伪造运行中）。
+         const item: ToolProcessItem = {
+           kind: "tool",
+           raw: msg.tool_input ?? "",
+-          status: "running",
++          status: "ok",
+         };
+         turn.processItems.push(item);
+         const id = msg.tool_use_id ?? null;
+@@ -187,8 +189,15 @@ export function buildReplayTurns(messages: AgentLogMessageItem[]): SessionTurnVi
+     }
+   }
+ 
+-  // 轮级定稿：usage 去重序列求和 + 末次口径 ctxTokens；无 usage 三值 null。
++  // 轮级定稿：未配对 tool_use 统一填「结果未记录」（显式诚实文本，R-03——
++  // 此刻全部消息已处理完，仍无 result 的 tool 项即真孤儿：结果在更早窗口外或
++  // 日志中断）；usage 去重序列求和 + 末次口径 ctxTokens；无 usage 三值 null。
+   return drafts.map((draft, index) => {
++    for (const item of draft.processItems) {
++      if (item.kind === "tool" && item.result === undefined) {
++        item.result = "结果未记录（更早窗口外或中断）";
++      }
++    }
+     const turnNo = index + 1;
+     const lastUsage = draft.usages[draft.usages.length - 1] ?? null;
+     return {
+diff --git a/sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts b/sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts
+index a26f788dc..a33fd8cd2 100644
+--- a/sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts
++++ b/sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts
+@@ -22,8 +22,14 @@
+  *
+  * task-02（2026-09-19-tool-report-session-replay / FR-02 + FR-03 + D-003@v1 +
+  * D-004@v1）：行顶层 turnId / model / durationMs 与 response.usage 五项 token
+- * 附着到该行产出的全部段（G 合并段 + 末行补产段共用同一份——同一次调用多段
+- * 共享 usage 是预期，前端按调用去重聚合）；user_input 段正文以 <task-notification>
++ * 按「产出调用锚定」附着（2026-09-19 双实现对撞深读裁决回带，替换此前的槽位
++ * 后写覆盖口径）：行 N 窗口的末条 assistant = 行 N-1 的响应产出（请求窗口
++ * 不变式），处理行 N 时把行 N-1 的调用元数据锚到该槽——段级用量归属「产出
++ * 它的那次调用」而非「最后一次覆盖窗口的行」（滑动尾窗下后写口径会差几十次
++ * 调用并制造 turnId 幻影切轮）；未获锚定的槽（user/tool 消息、窗口边界）元
++ * 数据取 null——「未知」优于「错值」；末行 response 补产段带末行自身元数据；
++ * 同一次调用产出的多段共享同一份 usage 仍是预期（前端按调用去重聚合）。
++ * user_input 段正文以 <task-notification>
+  * / <system-reminder> 开头 → sender='system_event'（其余缺省视为 'human' 不写，
+  * 错标系统事件会隐藏真人输入——代价不对称，R-06 原则）；totalUsage 按「调用」
+  * 去重累计（每个有效行的 usage 只计一次）随 parsed 结果返回，零 usage → null。
+@@ -195,15 +201,28 @@ interface ModelIoLine {
+ }
+ 
+ /**
+- * 全局数组 G 的槽位：消息 + 最后写入该槽的行 completedAt 与调用元数据
+- * （后写覆盖取最新——ts 与 meta 同源同行，不漂移）。
++ * G 槽位：消息 + 最后写入该槽的行 completedAt（后写覆盖取最新；ts 是行级事实
++ * 不受锚定影响）。
+  */
+ interface MergedSlot {
+   message: unknown;
+   ts: string | null;
+-  meta: CallMeta;
+ }
+ 
++/**
++ * 槽位调用元数据锚（2026-09-19 对撞深读回带）：行 N 窗口末条 assistant =
++ * 行 N-1 的响应产出（请求窗口不变式），处理行 N 时把行 N-1 的 CallMeta 锚到
++ * 该槽。行 N-1 响应为空的罕见边界下锚点会落到更旧 assistant 槽并覆盖前锚
++ * （段级 best-effort；全会话累计按行计数不受影响）。未获锚定的槽取
++ * UNANCHORED_META（全 null——「未知」优于「最后一次覆盖者的」）。
++ */
++const UNANCHORED_META: CallMeta = {
++  turn_id: null,
++  model: null,
++  duration_ms: null,
++  usage: null,
++};
++
+ /** 未编号段（seq 在 G 遍历完成后统一重编号）。 */
+ type UnnumberedSegment = Omit<NormalizedLogMessage, 'seq'>;
+ 
+@@ -236,6 +255,8 @@ export async function parseZcodeModelIoLog(
+   const rawLines = normalized.split('\n');
+ 
+   const slots: Array<MergedSlot | undefined> = [];
++  // 槽位调用元数据锚（见 UNANCHORED_META 注释）：产出调用归属，行序处理时锚定。
++  const slotCallMeta: Array<CallMeta | undefined> = [];
+   let skippedLines = 0;
+   let totalLines = 0;
+   let lastValidLine: ModelIoLine | null = null;
+@@ -272,19 +293,33 @@ export async function parseZcodeModelIoLog(
+     // 统一 offset 对齐合并（D-006 裁决一）：full（offset=0 完整前缀）/ delta
+     //（offset>0 增量，len=0 合法）/ tail（滑动尾部）三种窗口同一条规则——
+     // G[messageOffset + i] = messages[i]，绝对 offset 对齐覆盖，无 kind 分支；
+-    // 行序天然保证后写覆盖取最新（R-06）。行级调用元数据随槽位同写（task-02）。
++    // 行序天然保证后写覆盖取最新（R-06）。ts 随槽位同写；调用元数据不随写
++    // （走下方产出调用锚定，替换此前的后写覆盖口径）。
+     for (let j = 0; j < modelIoLine.messages.length; j++) {
+       const message = modelIoLine.messages[j];
+       if (message === undefined) continue;
+       slots[modelIoLine.messageOffset + j] = {
+         message,
+         ts: modelIoLine.completedAt,
+-        meta: modelIoLine.meta,
+       };
+     }
++
++    // 产出调用锚定（2026-09-19 对撞深读裁决回带）：行 N 窗口的末条 assistant =
++    // 行 N-1 的响应产出（请求窗口不变式）——把前一有效行的调用元数据锚到该槽。
++    // 行 N-1 响应为空的罕见边界下，末条 assistant 会落在更旧槽并覆盖前锚
++    // （段级 best-effort，全会话累计按行计数不受影响）。
++    if (lastValidLine !== null) {
++      for (let j = modelIoLine.messages.length - 1; j >= 0; j--) {
++        const message = modelIoLine.messages[j];
++        if (message === undefined || !isRecord(message)) continue;
++        if (message.role !== 'assistant') continue;
++        slotCallMeta[modelIoLine.messageOffset + j] = lastValidLine.meta;
++        break;
++      }
++    }
+     lastValidLine = modelIoLine;
+     // 该行（调用）的 usage 计一次——即使其消息窗口被后续行覆盖，token 已实际
+-    // 消耗仍计入全会话累计；被覆盖槽位的段元数据取最后写入行的（与 ts 同口径）。
++    // 消耗仍计入全会话累计（累计按行计数，与段级锚定互不影响）。
+     if (modelIoLine.meta.usage !== null) {
+       hasAnyUsage = true;
+       totalUsageInput += modelIoLine.meta.usage.inputTokens;
+@@ -319,16 +354,18 @@ export async function parseZcodeModelIoLog(
+     const message = slot.message;
+     if (!isRecord(message)) continue; // 窗口内非 object 条目防御式跳过
+     const role = message.role;
++    // 段级元数据取产出调用锚（未获锚定的槽全 null——未知优于错值）。
++    const meta = slotCallMeta[i] ?? UNANCHORED_META;
+     if (role === 'user') {
+-      const produced = userSegments(message, slot.ts, slot.meta);
++      const produced = userSegments(message, slot.ts, meta);
+       segments.push(...produced);
+     } else if (role === 'assistant') {
+-      const produced = assistantSegments(message, slot.ts, slot.meta);
++      const produced = assistantSegments(message, slot.ts, meta);
+       tailReplyTexts = produced.replyTexts;
+       tailToolUseIds = produced.toolUseIds;
+       segments.push(...produced.segments);
+     } else if (role === 'tool') {
+-      segments.push(...toolSegments(message, slot.ts, slot.meta));
++      segments.push(...toolSegments(message, slot.ts, meta));
+     }
+     // role=system 与未知 role：跳过不产段（R-04 铁律 / R-01 防御式）。
+   }
+diff --git a/sillyhub-daemon/src/agent-log/registry.ts b/sillyhub-daemon/src/agent-log/registry.ts
+index 220ba43ae..a95a85a2f 100644
+--- a/sillyhub-daemon/src/agent-log/registry.ts
++++ b/sillyhub-daemon/src/agent-log/registry.ts
+@@ -7,8 +7,10 @@
+  *
+  * task-06（2026-09-19-tool-report-session-replay / FR-02 + D-006@v1）自单键
+  * `'zcode-model-io-jsonl'` 扩展为三键——新增 `'claude-code-jsonl'`（task-04
+- * 解析器）与 `'cursor-agent-transcript-jsonl'`（task-05 解析器，format 串与
+- * 扫描上报层约定逐字一致）。未注册 format 查询返回 null，由调用方
++ * 解析器）与 `'cursor-agent-transcript-jsonl'`（task-05 解析器；2026-09-19 双实现
++ * 对撞深读裁决：格式串统一取 -jsonl 后缀族形态为正典——与 'zcode-model-io-jsonl'
++ * /'claude-code-jsonl' 命名一致；sillyspec 上报层当前仅发射 zcode 格式串，cursor
++ * 报告未来落地时以此串为准）。未注册 format 查询返回 null，由调用方
+  * （host-fs-handler.readAgentLogMessages）转 `status:'unsupported'`——
+  * 'unsupported' 是本层的判定，解析器自身只产 parsed / parse_error / too_large
+  * （task-01 契约），两个职责不混。
+diff --git a/sillyhub-daemon/tests/agent-log-matrix.test.ts b/sillyhub-daemon/tests/agent-log-matrix.test.ts
+index c125f3edd..f0739064a 100644
+--- a/sillyhub-daemon/tests/agent-log-matrix.test.ts
++++ b/sillyhub-daemon/tests/agent-log-matrix.test.ts
+@@ -183,8 +183,13 @@ const ZCODE_MINI = jsonl(
+   }),
+   zIoLine({
+     messagesKind: 'tail',
+-    offset: 3, // 尾随追加（不覆盖 L0 槽位 0..2）
+-    messages: [zToolMsg('tc1', 'Read', 'FIXTURE_TOOL_OUTPUT'), zUser('FIXTURE_HUMAN_SECOND')],
++    offset: 2, // 滑动尾窗（真实 64 消息窗形态）：含 L0 产的 R1——窗口末 assistant
++    // 使 L0 的调用元数据（turn-1/usage A）锚到 R1 槽（产出调用锚定）
++    messages: [
++      zAsst('FIXTURE_REPLY_1', [{ id: 'tc1', name: 'Read', input: { file_path: 'FIXTURE_PATH' } }]),
++      zToolMsg('tc1', 'Read', 'FIXTURE_TOOL_OUTPUT'),
++      zUser('FIXTURE_HUMAN_SECOND'),
++    ],
+     responseText: 'FIXTURE_REPLY_2',
+     turnId: 'turn-2',
+     usage: Z_USAGE_B,
+@@ -293,12 +298,16 @@ describe('agent-log 解析器矩阵 — 同场景输出形状一致（M2 / FR-02
+     }
+   }
+ 
+-  it('zcode：7 段、公共契约成立、turn_id 恒 string（行顶层 turnId 透传）', async () => {
++  it('zcode：7 段、公共契约成立、turn_id 取产出调用锚（锚定段透传原文、未锚段 null 不幻影切轮）', async () => {
+     const result = await parserFor(FORMATS.zcode)(ZCODE_MINI, {});
+     expectCommonContract(result);
+     expect(result.totalSegments).toBe(7);
+     expect(result.skippedLines).toBe(0);
+-    for (const message of result.messages) expect(typeof message.turn_id).toBe('string');
++    // 段序 S/H1/R1/tool_use/tool_result/H2/R2：R1 与其 tool_use 是 L1 窗口末 assistant
++    // （= L0 的响应）→ 锚 L0 的 turn-1；R2 是末行补产段 → turn-2；其余未锚段 null。
++    expect(result.messages.map((m) => m.turn_id)).toEqual([
++      null, null, 'turn-1', 'turn-1', null, null, 'turn-2',
++    ]);
+   });
+ 
+   it('claude-code：7 段、公共契约成立、turn_id 恒 string（会话内轮序）', async () => {
+@@ -330,7 +339,8 @@ describe('agent-log 解析器矩阵 — 同场景输出形状一致（M2 / FR-02
+   it('ts 口径：zcode 取所属行 completedAt、claude-code 取行 timestamp（均 ISO 字符串）；cursor 恒 null（不落盘不伪造）', async () => {
+     const z = await parserFor(FORMATS.zcode)(ZCODE_MINI, {});
+     for (const message of z.messages) expect(typeof message.ts).toBe('string');
+-    // 段 1..4 由 L0 覆盖、段 5..7 由 L1 产出（含补产段）——行归属正确。
++    // 段 1..2 由 L0 覆盖（仅 L0 写入）、段 3..5 由 L1 写入（滑动窗重写 R1 槽）、
++    // 补产段属 L1——行归属正确（ts 是行级事实，不随锚定改变）。
+     expect(z.messages[0]?.ts).toBe('2026-09-19T10:00:01.000Z');
+     expect(z.messages[4]?.ts).toBe('2026-09-19T10:00:02.000Z');
+ 
+@@ -409,15 +419,20 @@ describe('agent-log 解析器矩阵 — sender 归一矩阵（M3 / D-003@v1）',
+ // ── M4：usage / totalUsage 矩阵（D-004@v1——有数据源附着五项，无数据源显式未知）─
+ 
+ describe('agent-log 解析器矩阵 — usage / totalUsage 矩阵（M4 / D-004@v1）', () => {
+-  it('zcode：五项 usage 附着到该行产出的全部段（含末行补产段与 user_input 段），model/duration_ms 同随行', async () => {
++  it('zcode：usage 附着产出调用锚——锚定段（R1+其 tool_use）带 usage A、末行补产段带 B；未锚段 null 不带 model/duration', async () => {
+     const result = await parserFor(FORMATS.zcode)(ZCODE_MINI, {});
+-    // L0 产段 1..4 共享 usage A；L1 产段 5..7（含补产 R2）共享 usage B——zcode 的
+-    // 「行=调用」口径下 user_input 段也带 usage（该行即那次 API 调用）。
+-    expect(result.messages.slice(0, 4).map((m) => m.usage)).toEqual(Array.from({ length: 4 }, () => Z_USAGE_A));
+-    expect(result.messages.slice(4).map((m) => m.usage)).toEqual(Array.from({ length: 3 }, () => Z_USAGE_B));
+-    for (const message of result.messages) {
+-      expect(message.model).toBe('FIXTURE_MODEL');
+-      expect(message.duration_ms).toBe(1234);
++    // 段序 S/H1/R1/tool_use/tool_result/H2/R2：R1 及其 tool_use 锚定到产出调用 L0
++    // （usage A / model / duration 同锚）；R2 补产段带末行自身（usage B）。
++    expect(result.messages.map((m) => m.usage)).toEqual([
++      null, null, Z_USAGE_A, Z_USAGE_A, null, null, Z_USAGE_B,
++    ]);
++    for (const index of [2, 3, 6]) {
++      expect(result.messages[index]?.model).toBe('FIXTURE_MODEL');
++      expect(result.messages[index]?.duration_ms).toBe(1234);
++    }
++    for (const index of [0, 1, 4, 5]) {
++      expect(result.messages[index]?.model).toBeNull();
++      expect(result.messages[index]?.duration_ms).toBeNull();
+     }
+   });
+ 
+@@ -500,11 +515,10 @@ describe('agent-log 解析器矩阵 — usage / totalUsage 矩阵（M4 / D-004@v
+ // ── M5：turn 边界矩阵（D-005@v1——三家轮边界机制不同，切轮位置一致）──────────
+ 
+ describe('agent-log 解析器矩阵 — turn 边界矩阵（M5 / D-005@v1）', () => {
+-  it('zcode：turn_id 取行顶层 turnId 原文（后写行产段随行切换轮）', async () => {
++  it('zcode：turn_id 取产出调用锚（窗口末 assistant 段锚前驱行 turnId 原文；未锚段 null）', async () => {
+     const result = await parserFor(FORMATS.zcode)(ZCODE_MINI, {});
+     expect(result.messages.map((m) => m.turn_id)).toEqual([
+-      'turn-1', 'turn-1', 'turn-1', 'turn-1',
+-      'turn-2', 'turn-2', 'turn-2',
++      null, null, 'turn-1', 'turn-1', null, null, 'turn-2',
+     ]);
+   });
+ 
+@@ -522,13 +536,12 @@ describe('agent-log 解析器矩阵 — turn 边界矩阵（M5 / D-005@v1）', (
+     expect(result.messages.map((m) => m.turn_id)).toEqual(['1', '1', '1', '1', '2', '2']);
+   });
+ 
+-  it('交叉口径：三家 H1 与 H2 分属不同轮、H2 与其后的 R2 同轮（切轮位置语义一致）', async () => {
+-    const expectations: Array<{ format: string; content: string; same: boolean }> = [
+-      { format: FORMATS.zcode, content: ZCODE_MINI, same: false },
+-      { format: FORMATS.claudeCode, content: CC_MINI, same: false },
+-      { format: FORMATS.cursor, content: CURSOR_MINI, same: false },
+-    ];
+-    for (const { format, content } of expectations) {
++  it('交叉口径：两轮答复异轮、第二问语义上属第二轮（zcode 未锚段 null 由真人输入切轮兜底）', async () => {
++    // claude-code / cursor：h1/h2/r2 均有 turn_id，按原语义直断。
++    for (const { format, content } of [
++      { format: FORMATS.claudeCode, content: CC_MINI },
++      { format: FORMATS.cursor, content: CURSOR_MINI },
++    ]) {
+       const result = await parserFor(format)(content, {});
+       const humans = ofKind(result.messages, 'user_input').filter((m) => m.text?.startsWith('FIXTURE_HUMAN'));
+       const [h1, h2] = humans;
+@@ -537,6 +550,14 @@ describe('agent-log 解析器矩阵 — turn 边界矩阵（M5 / D-005@v1）', (
+       expect(h1?.turn_id).not.toBe(h2?.turn_id); // 两真人问分属不同轮
+       expect(h2?.turn_id).toBe(r2?.turn_id); // 第二问与其答复同轮
+     }
++    // zcode：H 段不锚定（turn_id null——切轮由前端真人输入判定兜底，见
++    // agent-log-turns 测试），以锚定答复段验证轮语义：R1=turn-1 ≠ R2=turn-2。
++    const z = await parserFor(FORMATS.zcode)(ZCODE_MINI, {});
++    const replies = ofKind(z.messages, 'reply');
++    const [r1, r2] = replies;
++    expect(r1?.turn_id).toBe('turn-1');
++    expect(r2?.turn_id).toBe('turn-2');
++    expect(r1?.turn_id).not.toBe(r2?.turn_id);
+   });
+ });
+ 
+diff --git a/sillyhub-daemon/tests/agent-log/parse-zcode-model-io.test.ts b/sillyhub-daemon/tests/agent-log/parse-zcode-model-io.test.ts
+index 6c9204c31..e9c5f329a 100644
+--- a/sillyhub-daemon/tests/agent-log/parse-zcode-model-io.test.ts
++++ b/sillyhub-daemon/tests/agent-log/parse-zcode-model-io.test.ts
+@@ -650,32 +650,66 @@ describe('parseZcodeModelIoLog — 行级元数据附着（Z11 / FR-02+FR-03）'
+     }),
+   );
+ 
+-  it('该行产出的全部段带同一 turn_id/model/duration_ms（G 合并段与末行补产段各自对齐所属行）', async () => {
++  it('G 合并段元数据取产出调用锚——尾窗无 assistant 的 G 段全 null（未知优于错值）、末行补产段带末行自身元数据', async () => {
+     const result = await parseZcodeModelIoLog(content);
+     expect(result.totalSegments).toBe(7);
+     expect(result.messages.map((m) => [m.kind, m.turn_id, m.model, m.duration_ms])).toEqual([
+-      ['user_input', 'turn_A', 'glm-4.6', 1234],
+-      ['thinking', 'turn_A', 'glm-4.6', 1234],
+-      ['reply', 'turn_A', 'glm-4.6', 1234],
+-      ['tool_use', 'turn_A', 'glm-4.6', 1234],
+-      ['tool_result', 'turn_B', 'glm-5.3', 5678], // 覆盖槽位的后写行元数据（与 ts 同口径）
+-      ['reply', 'turn_B', 'glm-5.3', 5678], // 末行 response 补产段
++      // L1 尾窗（offset 2）无 assistant → L0 的响应不在任何后续窗口里，锚未落
++      // ——G 段全部未知（null），不再取「最后一次覆盖行的」错值（后写覆盖口径已替换）。
++      ['user_input', null, null, null],
++      ['thinking', null, null, null],
++      ['reply', null, null, null],
++      ['tool_use', null, null, null],
++      ['tool_result', null, null, null],
++      ['reply', 'turn_B', 'glm-5.3', 5678], // 末行 response 补产段（产出调用=末行自身）
+       ['tool_use', 'turn_B', 'glm-5.3', 5678], // 末行 response 补产段
+     ]);
+   });
+ 
+-  it('usage 五项附着到段：L0 段带 usage A、L1 段（含补产段）带 usage B；同调用多段共享同一份', async () => {
++  it('usage 附着：G 段未获锚定全 null、末行补产段带 usage B；同调用多段共享同一份', async () => {
+     const result = await parseZcodeModelIoLog(content);
+-    expect(result.messages.slice(0, 4).map((m) => m.usage)).toEqual(
+-      Array.from({ length: 4 }, () => USAGE_A),
+-    );
+-    expect(result.messages.slice(4).map((m) => m.usage)).toEqual(
+-      Array.from({ length: 3 }, () => USAGE_B),
++    expect(result.messages.slice(0, 5).map((m) => m.usage)).toEqual(
++      Array.from({ length: 5 }, () => null),
+     );
++    expect(result.messages.slice(5).map((m) => m.usage)).toEqual([USAGE_B, USAGE_B]);
+     // 「共享同一份」= 同一引用（前端按调用去重聚合的依据）。
+-    expect(result.messages[0]?.usage).toBe(result.messages[1]?.usage);
+     expect(result.messages[5]?.usage).toBe(result.messages[6]?.usage);
+   });
++
++  it('产出调用锚定：行 N 窗口末 assistant 锚行 N-1 元数据（滑动窗下用量归属产出调用而非后写覆盖行）', async () => {
++    const anchored = jsonl(
++      ioLine({
++        kind: 'full',
++        offset: 0,
++        messages: [USER('问1')],
++        responseText: '答1',
++        turnId: 'turn_A',
++        modelId: 'glm-4.6',
++        durationMs: 1234,
++        usage: USAGE_A,
++      }),
++      ioLine({
++        kind: 'full',
++        offset: 1,
++        messages: [ASST_BLOCKS([{ type: 'text', text: '答1' }]), USER('问2')],
++        responseText: '答2',
++        turnId: 'turn_B',
++        modelId: 'glm-5.3',
++        durationMs: 5678,
++        usage: USAGE_B,
++      }),
++    );
++    const result = await parseZcodeModelIoLog(anchored);
++    expect(result.totalSegments).toBe(4);
++    expect(result.messages.map((m) => [m.kind, m.turn_id, m.usage])).toEqual([
++      ['user_input', null, null], // user 槽不获锚定（锚只落窗口末 assistant）
++      // 「答1」是 L0 的响应、出现在 L1 窗口末 → 锚 L0 的元数据（turn_A/usage_A）。
++      // 旧后写覆盖口径此处会是 turn_B/usage_B（L1 是最后写入行）——错值，已替换。
++      ['reply', 'turn_A', USAGE_A],
++      ['user_input', null, null],
++      ['reply', 'turn_B', USAGE_B], // 末行补产段带末行自身
++    ]);
++  });
+ });
+ 
+ // ── Z12：老形状行缺省 + 形状漂移防御（task-02 约束：新字段可选缺省）──────────
+@@ -728,19 +762,23 @@ describe('parseZcodeModelIoLog — 老形状与形状漂移（Z12 / 兼容硬约
+   });
+ 
+   it('model 字符串形态（老日志）直用；usage 五项全缺 → null；部分缺项按 0 计', async () => {
+-    const legacyStringModel = await parseZcodeModelIoLog(jsonl(rawLine({ model: 'glm-legacy' })));
+-    expect(legacyStringModel.messages[0]?.model).toBe('glm-legacy');
++    // 单行会话的 G 段（首行无前驱）不获锚定——元数据断言落在末行 response 补产段
++    //（产出调用=末行自身，恒携带本行元数据）。
++    const legacyStringModel = await parseZcodeModelIoLog(
++      jsonl(rawLine({ model: 'glm-legacy', response: { text: '答', toolCalls: [] } })),
++    );
++    expect(legacyStringModel.messages.at(-1)?.model).toBe('glm-legacy');
+ 
+     const emptyUsage = await parseZcodeModelIoLog(
+-      jsonl(rawLine({ response: { text: '', toolCalls: [], usage: {} } })),
++      jsonl(rawLine({ response: { text: '答', toolCalls: [], usage: {} } })),
+     );
+-    expect(emptyUsage.messages[0]?.usage).toBeNull();
++    expect(emptyUsage.messages.at(-1)?.usage).toBeNull();
+     expect(emptyUsage.totalUsage).toBeNull();
+ 
+     const partialUsage = await parseZcodeModelIoLog(
+-      jsonl(rawLine({ response: { text: '', toolCalls: [], usage: { inputTokens: 5 } } })),
++      jsonl(rawLine({ response: { text: '答', toolCalls: [], usage: { inputTokens: 5 } } })),
+     );
+-    expect(partialUsage.messages[0]?.usage).toEqual({
++    expect(partialUsage.messages.at(-1)?.usage).toEqual({
+       inputTokens: 5,
+       outputTokens: 0,
+       totalTokens: 0,

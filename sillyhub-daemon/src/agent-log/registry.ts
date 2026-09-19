@@ -7,8 +7,10 @@
  *
  * task-06（2026-09-19-tool-report-session-replay / FR-02 + D-006@v1）自单键
  * `'zcode-model-io-jsonl'` 扩展为三键——新增 `'claude-code-jsonl'`（task-04
- * 解析器）与 `'cursor-agent-transcript-jsonl'`（task-05 解析器，format 串与
- * 扫描上报层约定逐字一致）。未注册 format 查询返回 null，由调用方
+ * 解析器）与 `'cursor-agent-transcript-jsonl'`（task-05 解析器；2026-09-19 双实现
+ * 对撞深读裁决：格式串统一取 -jsonl 后缀族形态为正典——与 'zcode-model-io-jsonl'
+ * /'claude-code-jsonl' 命名一致；sillyspec 上报层当前仅发射 zcode 格式串，cursor
+ * 报告未来落地时以此串为准）。未注册 format 查询返回 null，由调用方
  * （host-fs-handler.readAgentLogMessages）转 `status:'unsupported'`——
  * 'unsupported' 是本层的判定，解析器自身只产 parsed / parse_error / too_large
  * （task-01 契约），两个职责不混。

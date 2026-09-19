@@ -13,3 +13,19 @@
 方案：writer.py 新增模块级 _decode_knowledge_strict 共享 helper（_read_raw 内联严格解码收敛进来，错误形态单一来源），update_entry 大小守卫后对磁盘原文严格解码探测（≤1MB，结果弃用只探测），坏编码抛既有 KnowledgeFileEncodingInvalid 422（details 带 byte_offset，文件与 manifest 版本不动）；router.py docstring 改为不改生命周期状态（唯一写例外 repo_url 回填）
 结果：test_writer 27 全绿（新增 2 例先红后绿——坏编码 422+GET 基底含 U+FFFD 前置自检+磁盘原字节与 manifest 版本未动、合法 UTF-8 中文对照组不误伤）+ 相邻面 test_router/test_parser/test_distill 72 绿；ruff check/format 3 文件净、mypy scoped 0；docs gate 405=基线 405 放行
 审计：[gate] L1（跨 0 模块 · 5 文件：2 代码/1 测试）advisory；每文件注记已全覆盖；测试增量已含
+
+## ql-20260919-002-2378 | 2026-09-19 23:53:31 | tool-report-session-replay 双实现对撞深读后的合并收口——回带三处+格式串裁决（深读报告=设计依据…
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts（slotCallMeta锚定重构（MergedSlot去meta/锚定循环/UNANCHORED_META兜底/头注释））
+- sillyhub-daemon/tests/agent-log/parse-zcode-model-io.test.ts（Z11翻转+正向锚定用例+Z12补产段断言）
+- sillyhub-daemon/tests/agent-log-matrix.test.ts（ZCODE_MINI改滑动窗+M2/M4/M5锚定期望+交叉口径重构）
+- frontend/src/lib/agent-log-turns.ts（孤儿结果未记录文本（R-03红线））
+- frontend/src/lib/__tests__/agent-log-turns.test.ts（断言翻转）
+- sillyhub-daemon/src/agent-log/registry.ts（格式串正典裁决注释）
+需求：tool-report-session-replay 双实现对撞深读后的合并收口——回带三处+格式串裁决（深读报告=设计依据：主线基底略胜但rollout用量归属与孤儿编码两处失分）
+根因：主线基底版两处语义缺陷：rollout兜底路径后写覆盖的用量/turnId归属失真（自家测试:661把宽松语义固化成契约）+孤儿tool_use的running编码踩R-03红线（已结束会话不得假运行）；对岸worktree实现在这两处更精确
+方案：①parse-zcode-model-io.ts锚定重构——slotCallMeta产出调用锚（行N窗口末assistant锚行N-1元数据）替换槽位后写覆盖，未锚槽UNANCHORED_META全null（未知优于错值）；测试Z11翻转+正向锚定新用例、矩阵M2/M4/M5夹具改真实滑动窗（L1含R1）+锚定期望、Z12改补产段断言 ②agent-log-turns.ts孤儿tool_use轮定稿统一填「结果未记录（更早窗口外或中断）」+status=ok（R-03），测试翻转 ③残轮合并核对=主仓已等效（非真人起点轮prompt空串同worktree哨兵语义，豁免） ④系统事件双视图=TurnTimeline无systemMarkers支撑，组件级改动按报告可选项推迟 ⑤格式串裁决：-jsonl后缀族为正典（主仓内部已一致零代码变更，registry注释记录裁决+生产端现状）
+结果：daemon agent-log定向196/196全绿（含锚定翻转与新增正向用例）；frontend agent-log-turns 15/15全绿；frontend+daemon双侧tsc --noEmit零错；CLI --done门禁亲跑隔离快照；④推迟与③豁免随QUICKLOG留档
+审计：[gate] L1（跨 0 模块 · 6 文件：3 代码/3 测试）advisory；每文件注记已全覆盖；测试增量已含

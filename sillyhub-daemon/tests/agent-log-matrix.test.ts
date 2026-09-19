@@ -183,8 +183,13 @@ const ZCODE_MINI = jsonl(
   }),
   zIoLine({
     messagesKind: 'tail',
-    offset: 3, // 尾随追加（不覆盖 L0 槽位 0..2）
-    messages: [zToolMsg('tc1', 'Read', 'FIXTURE_TOOL_OUTPUT'), zUser('FIXTURE_HUMAN_SECOND')],
+    offset: 2, // 滑动尾窗（真实 64 消息窗形态）：含 L0 产的 R1——窗口末 assistant
+    // 使 L0 的调用元数据（turn-1/usage A）锚到 R1 槽（产出调用锚定）
+    messages: [
+      zAsst('FIXTURE_REPLY_1', [{ id: 'tc1', name: 'Read', input: { file_path: 'FIXTURE_PATH' } }]),
+      zToolMsg('tc1', 'Read', 'FIXTURE_TOOL_OUTPUT'),
+      zUser('FIXTURE_HUMAN_SECOND'),
+    ],
     responseText: 'FIXTURE_REPLY_2',
     turnId: 'turn-2',
     usage: Z_USAGE_B,
@@ -293,12 +298,16 @@ describe('agent-log 解析器矩阵 — 同场景输出形状一致（M2 / FR-02
     }
   }
 
-  it('zcode：7 段、公共契约成立、turn_id 恒 string（行顶层 turnId 透传）', async () => {
+  it('zcode：7 段、公共契约成立、turn_id 取产出调用锚（锚定段透传原文、未锚段 null 不幻影切轮）', async () => {
     const result = await parserFor(FORMATS.zcode)(ZCODE_MINI, {});
     expectCommonContract(result);
     expect(result.totalSegments).toBe(7);
     expect(result.skippedLines).toBe(0);
-    for (const message of result.messages) expect(typeof message.turn_id).toBe('string');
+    // 段序 S/H1/R1/tool_use/tool_result/H2/R2：R1 与其 tool_use 是 L1 窗口末 assistant
+    // （= L0 的响应）→ 锚 L0 的 turn-1；R2 是末行补产段 → turn-2；其余未锚段 null。
+    expect(result.messages.map((m) => m.turn_id)).toEqual([
+      null, null, 'turn-1', 'turn-1', null, null, 'turn-2',
+    ]);
   });
 
   it('claude-code：7 段、公共契约成立、turn_id 恒 string（会话内轮序）', async () => {
@@ -330,7 +339,8 @@ describe('agent-log 解析器矩阵 — 同场景输出形状一致（M2 / FR-02
   it('ts 口径：zcode 取所属行 completedAt、claude-code 取行 timestamp（均 ISO 字符串）；cursor 恒 null（不落盘不伪造）', async () => {
     const z = await parserFor(FORMATS.zcode)(ZCODE_MINI, {});
     for (const message of z.messages) expect(typeof message.ts).toBe('string');
-    // 段 1..4 由 L0 覆盖、段 5..7 由 L1 产出（含补产段）——行归属正确。
+    // 段 1..2 由 L0 覆盖（仅 L0 写入）、段 3..5 由 L1 写入（滑动窗重写 R1 槽）、
+    // 补产段属 L1——行归属正确（ts 是行级事实，不随锚定改变）。
     expect(z.messages[0]?.ts).toBe('2026-09-19T10:00:01.000Z');
     expect(z.messages[4]?.ts).toBe('2026-09-19T10:00:02.000Z');
 
@@ -409,15 +419,20 @@ describe('agent-log 解析器矩阵 — sender 归一矩阵（M3 / D-003@v1）',
 // ── M4：usage / totalUsage 矩阵（D-004@v1——有数据源附着五项，无数据源显式未知）─
 
 describe('agent-log 解析器矩阵 — usage / totalUsage 矩阵（M4 / D-004@v1）', () => {
-  it('zcode：五项 usage 附着到该行产出的全部段（含末行补产段与 user_input 段），model/duration_ms 同随行', async () => {
+  it('zcode：usage 附着产出调用锚——锚定段（R1+其 tool_use）带 usage A、末行补产段带 B；未锚段 null 不带 model/duration', async () => {
     const result = await parserFor(FORMATS.zcode)(ZCODE_MINI, {});
-    // L0 产段 1..4 共享 usage A；L1 产段 5..7（含补产 R2）共享 usage B——zcode 的
-    // 「行=调用」口径下 user_input 段也带 usage（该行即那次 API 调用）。
-    expect(result.messages.slice(0, 4).map((m) => m.usage)).toEqual(Array.from({ length: 4 }, () => Z_USAGE_A));
-    expect(result.messages.slice(4).map((m) => m.usage)).toEqual(Array.from({ length: 3 }, () => Z_USAGE_B));
-    for (const message of result.messages) {
-      expect(message.model).toBe('FIXTURE_MODEL');
-      expect(message.duration_ms).toBe(1234);
+    // 段序 S/H1/R1/tool_use/tool_result/H2/R2：R1 及其 tool_use 锚定到产出调用 L0
+    // （usage A / model / duration 同锚）；R2 补产段带末行自身（usage B）。
+    expect(result.messages.map((m) => m.usage)).toEqual([
+      null, null, Z_USAGE_A, Z_USAGE_A, null, null, Z_USAGE_B,
+    ]);
+    for (const index of [2, 3, 6]) {
+      expect(result.messages[index]?.model).toBe('FIXTURE_MODEL');
+      expect(result.messages[index]?.duration_ms).toBe(1234);
+    }
+    for (const index of [0, 1, 4, 5]) {
+      expect(result.messages[index]?.model).toBeNull();
+      expect(result.messages[index]?.duration_ms).toBeNull();
     }
   });
 
@@ -500,11 +515,10 @@ describe('agent-log 解析器矩阵 — usage / totalUsage 矩阵（M4 / D-004@v
 // ── M5：turn 边界矩阵（D-005@v1——三家轮边界机制不同，切轮位置一致）──────────
 
 describe('agent-log 解析器矩阵 — turn 边界矩阵（M5 / D-005@v1）', () => {
-  it('zcode：turn_id 取行顶层 turnId 原文（后写行产段随行切换轮）', async () => {
+  it('zcode：turn_id 取产出调用锚（窗口末 assistant 段锚前驱行 turnId 原文；未锚段 null）', async () => {
     const result = await parserFor(FORMATS.zcode)(ZCODE_MINI, {});
     expect(result.messages.map((m) => m.turn_id)).toEqual([
-      'turn-1', 'turn-1', 'turn-1', 'turn-1',
-      'turn-2', 'turn-2', 'turn-2',
+      null, null, 'turn-1', 'turn-1', null, null, 'turn-2',
     ]);
   });
 
@@ -522,13 +536,12 @@ describe('agent-log 解析器矩阵 — turn 边界矩阵（M5 / D-005@v1）', (
     expect(result.messages.map((m) => m.turn_id)).toEqual(['1', '1', '1', '1', '2', '2']);
   });
 
-  it('交叉口径：三家 H1 与 H2 分属不同轮、H2 与其后的 R2 同轮（切轮位置语义一致）', async () => {
-    const expectations: Array<{ format: string; content: string; same: boolean }> = [
-      { format: FORMATS.zcode, content: ZCODE_MINI, same: false },
-      { format: FORMATS.claudeCode, content: CC_MINI, same: false },
-      { format: FORMATS.cursor, content: CURSOR_MINI, same: false },
-    ];
-    for (const { format, content } of expectations) {
+  it('交叉口径：两轮答复异轮、第二问语义上属第二轮（zcode 未锚段 null 由真人输入切轮兜底）', async () => {
+    // claude-code / cursor：h1/h2/r2 均有 turn_id，按原语义直断。
+    for (const { format, content } of [
+      { format: FORMATS.claudeCode, content: CC_MINI },
+      { format: FORMATS.cursor, content: CURSOR_MINI },
+    ]) {
       const result = await parserFor(format)(content, {});
       const humans = ofKind(result.messages, 'user_input').filter((m) => m.text?.startsWith('FIXTURE_HUMAN'));
       const [h1, h2] = humans;
@@ -537,6 +550,14 @@ describe('agent-log 解析器矩阵 — turn 边界矩阵（M5 / D-005@v1）', (
       expect(h1?.turn_id).not.toBe(h2?.turn_id); // 两真人问分属不同轮
       expect(h2?.turn_id).toBe(r2?.turn_id); // 第二问与其答复同轮
     }
+    // zcode：H 段不锚定（turn_id null——切轮由前端真人输入判定兜底，见
+    // agent-log-turns 测试），以锚定答复段验证轮语义：R1=turn-1 ≠ R2=turn-2。
+    const z = await parserFor(FORMATS.zcode)(ZCODE_MINI, {});
+    const replies = ofKind(z.messages, 'reply');
+    const [r1, r2] = replies;
+    expect(r1?.turn_id).toBe('turn-1');
+    expect(r2?.turn_id).toBe('turn-2');
+    expect(r1?.turn_id).not.toBe(r2?.turn_id);
   });
 });
 

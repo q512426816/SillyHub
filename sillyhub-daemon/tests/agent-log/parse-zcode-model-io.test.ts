@@ -650,31 +650,65 @@ describe('parseZcodeModelIoLog — 行级元数据附着（Z11 / FR-02+FR-03）'
     }),
   );
 
-  it('该行产出的全部段带同一 turn_id/model/duration_ms（G 合并段与末行补产段各自对齐所属行）', async () => {
+  it('G 合并段元数据取产出调用锚——尾窗无 assistant 的 G 段全 null（未知优于错值）、末行补产段带末行自身元数据', async () => {
     const result = await parseZcodeModelIoLog(content);
     expect(result.totalSegments).toBe(7);
     expect(result.messages.map((m) => [m.kind, m.turn_id, m.model, m.duration_ms])).toEqual([
-      ['user_input', 'turn_A', 'glm-4.6', 1234],
-      ['thinking', 'turn_A', 'glm-4.6', 1234],
-      ['reply', 'turn_A', 'glm-4.6', 1234],
-      ['tool_use', 'turn_A', 'glm-4.6', 1234],
-      ['tool_result', 'turn_B', 'glm-5.3', 5678], // 覆盖槽位的后写行元数据（与 ts 同口径）
-      ['reply', 'turn_B', 'glm-5.3', 5678], // 末行 response 补产段
+      // L1 尾窗（offset 2）无 assistant → L0 的响应不在任何后续窗口里，锚未落
+      // ——G 段全部未知（null），不再取「最后一次覆盖行的」错值（后写覆盖口径已替换）。
+      ['user_input', null, null, null],
+      ['thinking', null, null, null],
+      ['reply', null, null, null],
+      ['tool_use', null, null, null],
+      ['tool_result', null, null, null],
+      ['reply', 'turn_B', 'glm-5.3', 5678], // 末行 response 补产段（产出调用=末行自身）
       ['tool_use', 'turn_B', 'glm-5.3', 5678], // 末行 response 补产段
     ]);
   });
 
-  it('usage 五项附着到段：L0 段带 usage A、L1 段（含补产段）带 usage B；同调用多段共享同一份', async () => {
+  it('usage 附着：G 段未获锚定全 null、末行补产段带 usage B；同调用多段共享同一份', async () => {
     const result = await parseZcodeModelIoLog(content);
-    expect(result.messages.slice(0, 4).map((m) => m.usage)).toEqual(
-      Array.from({ length: 4 }, () => USAGE_A),
+    expect(result.messages.slice(0, 5).map((m) => m.usage)).toEqual(
+      Array.from({ length: 5 }, () => null),
     );
-    expect(result.messages.slice(4).map((m) => m.usage)).toEqual(
-      Array.from({ length: 3 }, () => USAGE_B),
-    );
+    expect(result.messages.slice(5).map((m) => m.usage)).toEqual([USAGE_B, USAGE_B]);
     // 「共享同一份」= 同一引用（前端按调用去重聚合的依据）。
-    expect(result.messages[0]?.usage).toBe(result.messages[1]?.usage);
     expect(result.messages[5]?.usage).toBe(result.messages[6]?.usage);
+  });
+
+  it('产出调用锚定：行 N 窗口末 assistant 锚行 N-1 元数据（滑动窗下用量归属产出调用而非后写覆盖行）', async () => {
+    const anchored = jsonl(
+      ioLine({
+        kind: 'full',
+        offset: 0,
+        messages: [USER('问1')],
+        responseText: '答1',
+        turnId: 'turn_A',
+        modelId: 'glm-4.6',
+        durationMs: 1234,
+        usage: USAGE_A,
+      }),
+      ioLine({
+        kind: 'full',
+        offset: 1,
+        messages: [ASST_BLOCKS([{ type: 'text', text: '答1' }]), USER('问2')],
+        responseText: '答2',
+        turnId: 'turn_B',
+        modelId: 'glm-5.3',
+        durationMs: 5678,
+        usage: USAGE_B,
+      }),
+    );
+    const result = await parseZcodeModelIoLog(anchored);
+    expect(result.totalSegments).toBe(4);
+    expect(result.messages.map((m) => [m.kind, m.turn_id, m.usage])).toEqual([
+      ['user_input', null, null], // user 槽不获锚定（锚只落窗口末 assistant）
+      // 「答1」是 L0 的响应、出现在 L1 窗口末 → 锚 L0 的元数据（turn_A/usage_A）。
+      // 旧后写覆盖口径此处会是 turn_B/usage_B（L1 是最后写入行）——错值，已替换。
+      ['reply', 'turn_A', USAGE_A],
+      ['user_input', null, null],
+      ['reply', 'turn_B', USAGE_B], // 末行补产段带末行自身
+    ]);
   });
 });
 
@@ -728,19 +762,23 @@ describe('parseZcodeModelIoLog — 老形状与形状漂移（Z12 / 兼容硬约
   });
 
   it('model 字符串形态（老日志）直用；usage 五项全缺 → null；部分缺项按 0 计', async () => {
-    const legacyStringModel = await parseZcodeModelIoLog(jsonl(rawLine({ model: 'glm-legacy' })));
-    expect(legacyStringModel.messages[0]?.model).toBe('glm-legacy');
+    // 单行会话的 G 段（首行无前驱）不获锚定——元数据断言落在末行 response 补产段
+    //（产出调用=末行自身，恒携带本行元数据）。
+    const legacyStringModel = await parseZcodeModelIoLog(
+      jsonl(rawLine({ model: 'glm-legacy', response: { text: '答', toolCalls: [] } })),
+    );
+    expect(legacyStringModel.messages.at(-1)?.model).toBe('glm-legacy');
 
     const emptyUsage = await parseZcodeModelIoLog(
-      jsonl(rawLine({ response: { text: '', toolCalls: [], usage: {} } })),
+      jsonl(rawLine({ response: { text: '答', toolCalls: [], usage: {} } })),
     );
-    expect(emptyUsage.messages[0]?.usage).toBeNull();
+    expect(emptyUsage.messages.at(-1)?.usage).toBeNull();
     expect(emptyUsage.totalUsage).toBeNull();
 
     const partialUsage = await parseZcodeModelIoLog(
-      jsonl(rawLine({ response: { text: '', toolCalls: [], usage: { inputTokens: 5 } } })),
+      jsonl(rawLine({ response: { text: '答', toolCalls: [], usage: { inputTokens: 5 } } })),
     );
-    expect(partialUsage.messages[0]?.usage).toEqual({
+    expect(partialUsage.messages.at(-1)?.usage).toEqual({
       inputTokens: 5,
       outputTokens: 0,
       totalTokens: 0,

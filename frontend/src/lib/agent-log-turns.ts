@@ -26,8 +26,9 @@
  *     （raw=tool_input、result=tool_result、is_error → ok/deny）；
  *   - 孤儿 tool_result（窗口内未见配对 tool_use，含更早页未加载）→ raw 空串
  *     tool 项（SessionToolEvent 语义）；
- *   - 未配对 tool_use → result 缺省 status='running'——DTO 对「无结果记录」的
- *     规范编码（窗口截断 / 日志中断即无结果），**不是**断言工具仍在运行。
+ *   - 未配对 tool_use → result 显式文本「结果未记录（更早窗口外或中断）」——
+ *     对齐 R-03 红线（agent-log-card 2026-08-23：已结束会话不得假运行），不用
+ *     status='running' 编码（渲染层与实时路径共用，视觉即执行中转圈=假运行）。
  *
  * token 轮级聚合（D-004 / FR-03）：轮内各段 usage 先按调用去重（同一次调用
  * 产出的多段共享同一 usage——JSON 反序列化后引用不同但五项同值，按值签名去重）
@@ -155,11 +156,12 @@ export function buildReplayTurns(messages: AgentLogMessageItem[]): SessionTurnVi
         turn.processItems.push({ kind: "thinking", text: msg.text ?? "" });
         break;
       case "tool_use": {
-        // status='running' = 无结果记录的规范编码（窗口截断/日志中断），非假运行断言。
+        // result 暂缺省（配对成功由 tool_result 回填）；轮定稿时未配对项统一
+        // 填「结果未记录」显式文本（R-03：不伪造运行中）。
         const item: ToolProcessItem = {
           kind: "tool",
           raw: msg.tool_input ?? "",
-          status: "running",
+          status: "ok",
         };
         turn.processItems.push(item);
         const id = msg.tool_use_id ?? null;
@@ -187,8 +189,15 @@ export function buildReplayTurns(messages: AgentLogMessageItem[]): SessionTurnVi
     }
   }
 
-  // 轮级定稿：usage 去重序列求和 + 末次口径 ctxTokens；无 usage 三值 null。
+  // 轮级定稿：未配对 tool_use 统一填「结果未记录」（显式诚实文本，R-03——
+  // 此刻全部消息已处理完，仍无 result 的 tool 项即真孤儿：结果在更早窗口外或
+  // 日志中断）；usage 去重序列求和 + 末次口径 ctxTokens；无 usage 三值 null。
   return drafts.map((draft, index) => {
+    for (const item of draft.processItems) {
+      if (item.kind === "tool" && item.result === undefined) {
+        item.result = "结果未记录（更早窗口外或中断）";
+      }
+    }
     const turnNo = index + 1;
     const lastUsage = draft.usages[draft.usages.length - 1] ?? null;
     return {

@@ -22,8 +22,14 @@
  *
  * task-02（2026-09-19-tool-report-session-replay / FR-02 + FR-03 + D-003@v1 +
  * D-004@v1）：行顶层 turnId / model / durationMs 与 response.usage 五项 token
- * 附着到该行产出的全部段（G 合并段 + 末行补产段共用同一份——同一次调用多段
- * 共享 usage 是预期，前端按调用去重聚合）；user_input 段正文以 <task-notification>
+ * 按「产出调用锚定」附着（2026-09-19 双实现对撞深读裁决回带，替换此前的槽位
+ * 后写覆盖口径）：行 N 窗口的末条 assistant = 行 N-1 的响应产出（请求窗口
+ * 不变式），处理行 N 时把行 N-1 的调用元数据锚到该槽——段级用量归属「产出
+ * 它的那次调用」而非「最后一次覆盖窗口的行」（滑动尾窗下后写口径会差几十次
+ * 调用并制造 turnId 幻影切轮）；未获锚定的槽（user/tool 消息、窗口边界）元
+ * 数据取 null——「未知」优于「错值」；末行 response 补产段带末行自身元数据；
+ * 同一次调用产出的多段共享同一份 usage 仍是预期（前端按调用去重聚合）。
+ * user_input 段正文以 <task-notification>
  * / <system-reminder> 开头 → sender='system_event'（其余缺省视为 'human' 不写，
  * 错标系统事件会隐藏真人输入——代价不对称，R-06 原则）；totalUsage 按「调用」
  * 去重累计（每个有效行的 usage 只计一次）随 parsed 结果返回，零 usage → null。
@@ -195,14 +201,27 @@ interface ModelIoLine {
 }
 
 /**
- * 全局数组 G 的槽位：消息 + 最后写入该槽的行 completedAt 与调用元数据
- * （后写覆盖取最新——ts 与 meta 同源同行，不漂移）。
+ * G 槽位：消息 + 最后写入该槽的行 completedAt（后写覆盖取最新；ts 是行级事实
+ * 不受锚定影响）。
  */
 interface MergedSlot {
   message: unknown;
   ts: string | null;
-  meta: CallMeta;
 }
+
+/**
+ * 槽位调用元数据锚（2026-09-19 对撞深读回带）：行 N 窗口末条 assistant =
+ * 行 N-1 的响应产出（请求窗口不变式），处理行 N 时把行 N-1 的 CallMeta 锚到
+ * 该槽。行 N-1 响应为空的罕见边界下锚点会落到更旧 assistant 槽并覆盖前锚
+ * （段级 best-effort；全会话累计按行计数不受影响）。未获锚定的槽取
+ * UNANCHORED_META（全 null——「未知」优于「最后一次覆盖者的」）。
+ */
+const UNANCHORED_META: CallMeta = {
+  turn_id: null,
+  model: null,
+  duration_ms: null,
+  usage: null,
+};
 
 /** 未编号段（seq 在 G 遍历完成后统一重编号）。 */
 type UnnumberedSegment = Omit<NormalizedLogMessage, 'seq'>;
@@ -236,6 +255,8 @@ export async function parseZcodeModelIoLog(
   const rawLines = normalized.split('\n');
 
   const slots: Array<MergedSlot | undefined> = [];
+  // 槽位调用元数据锚（见 UNANCHORED_META 注释）：产出调用归属，行序处理时锚定。
+  const slotCallMeta: Array<CallMeta | undefined> = [];
   let skippedLines = 0;
   let totalLines = 0;
   let lastValidLine: ModelIoLine | null = null;
@@ -272,19 +293,33 @@ export async function parseZcodeModelIoLog(
     // 统一 offset 对齐合并（D-006 裁决一）：full（offset=0 完整前缀）/ delta
     //（offset>0 增量，len=0 合法）/ tail（滑动尾部）三种窗口同一条规则——
     // G[messageOffset + i] = messages[i]，绝对 offset 对齐覆盖，无 kind 分支；
-    // 行序天然保证后写覆盖取最新（R-06）。行级调用元数据随槽位同写（task-02）。
+    // 行序天然保证后写覆盖取最新（R-06）。ts 随槽位同写；调用元数据不随写
+    // （走下方产出调用锚定，替换此前的后写覆盖口径）。
     for (let j = 0; j < modelIoLine.messages.length; j++) {
       const message = modelIoLine.messages[j];
       if (message === undefined) continue;
       slots[modelIoLine.messageOffset + j] = {
         message,
         ts: modelIoLine.completedAt,
-        meta: modelIoLine.meta,
       };
+    }
+
+    // 产出调用锚定（2026-09-19 对撞深读裁决回带）：行 N 窗口的末条 assistant =
+    // 行 N-1 的响应产出（请求窗口不变式）——把前一有效行的调用元数据锚到该槽。
+    // 行 N-1 响应为空的罕见边界下，末条 assistant 会落在更旧槽并覆盖前锚
+    // （段级 best-effort，全会话累计按行计数不受影响）。
+    if (lastValidLine !== null) {
+      for (let j = modelIoLine.messages.length - 1; j >= 0; j--) {
+        const message = modelIoLine.messages[j];
+        if (message === undefined || !isRecord(message)) continue;
+        if (message.role !== 'assistant') continue;
+        slotCallMeta[modelIoLine.messageOffset + j] = lastValidLine.meta;
+        break;
+      }
     }
     lastValidLine = modelIoLine;
     // 该行（调用）的 usage 计一次——即使其消息窗口被后续行覆盖，token 已实际
-    // 消耗仍计入全会话累计；被覆盖槽位的段元数据取最后写入行的（与 ts 同口径）。
+    // 消耗仍计入全会话累计（累计按行计数，与段级锚定互不影响）。
     if (modelIoLine.meta.usage !== null) {
       hasAnyUsage = true;
       totalUsageInput += modelIoLine.meta.usage.inputTokens;
@@ -319,16 +354,18 @@ export async function parseZcodeModelIoLog(
     const message = slot.message;
     if (!isRecord(message)) continue; // 窗口内非 object 条目防御式跳过
     const role = message.role;
+    // 段级元数据取产出调用锚（未获锚定的槽全 null——未知优于错值）。
+    const meta = slotCallMeta[i] ?? UNANCHORED_META;
     if (role === 'user') {
-      const produced = userSegments(message, slot.ts, slot.meta);
+      const produced = userSegments(message, slot.ts, meta);
       segments.push(...produced);
     } else if (role === 'assistant') {
-      const produced = assistantSegments(message, slot.ts, slot.meta);
+      const produced = assistantSegments(message, slot.ts, meta);
       tailReplyTexts = produced.replyTexts;
       tailToolUseIds = produced.toolUseIds;
       segments.push(...produced.segments);
     } else if (role === 'tool') {
-      segments.push(...toolSegments(message, slot.ts, slot.meta));
+      segments.push(...toolSegments(message, slot.ts, meta));
     }
     // role=system 与未知 role：跳过不产段（R-04 铁律 / R-01 防御式）。
   }

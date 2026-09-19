@@ -162,14 +162,14 @@ describe("buildReplayTurns", () => {
     ]);
   });
 
-  it("未配对 tool_use → result 缺省、status='running'（无结果记录的规范编码）", () => {
+  it("未配对 tool_use → result 显式「结果未记录」文本、status='ok'（R-03：已结束会话不假运行）", () => {
     const turns = buildReplayTurns([
       msg({ kind: "user_input", text: "问" }),
       msg({ kind: "tool_use", tool_use_id: "use-x", tool_input: "..." }),
     ]);
 
     expect(turns[0]!.processItems).toEqual([
-      { kind: "tool", raw: "...", status: "running" },
+      { kind: "tool", raw: "...", result: "结果未记录（更早窗口外或中断）", status: "ok" },
     ]);
   });
 
