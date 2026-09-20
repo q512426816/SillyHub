@@ -39,7 +39,7 @@
  */
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Input, Switch, Tag, Tooltip, type TableProps } from "antd";
+import { Alert, Button, Input, Switch, Table, Tag, Tooltip, type TableProps } from "antd";
 import { DownOutlined, UpOutlined } from "@ant-design/icons";
 
 import {
@@ -58,6 +58,7 @@ import {
   MENU_SECTION_LABEL,
   MENU_SECTION_ORDER,
   type MenuPermissionGroup,
+  type PermissionItem,
   type MenuSection,
 } from "@/lib/menu-permissions";
 import {
@@ -698,6 +699,56 @@ function PermissionDetail({
   /** listRoles 失败（典型 403 无 role:read）→ chips 区降级占位（R-08）。 */
   rolesDegraded: boolean;
 }) {
+  // 全列居中（align: "center"）；角色列渲染消费本组件 props（降级/加载/空态/chips）
+  const permissionColumns: TableProps<PermissionItem>["columns"] = [
+    {
+      title: "权限标识",
+      dataIndex: "key",
+      align: "center",
+      width: 240,
+      render: (key: string) => (
+        <code className="rounded bg-brand-50 px-1.5 py-0.5 font-mono text-[11px] text-brand-700">
+          {key}
+        </code>
+      ),
+    },
+    { title: "中文名", dataIndex: "name", align: "center", width: 176 },
+    {
+      title: "当前持有角色",
+      key: "roles",
+      align: "center",
+      render: (_, p) => {
+        if (rolesDegraded) {
+          return (
+            <span className="text-[11px] text-muted-foreground">
+              需 role:read 查看角色分布
+            </span>
+          );
+        }
+        if (rolesLoading) {
+          return (
+            <span className="text-[11px] text-muted-foreground">
+              角色分布加载中…
+            </span>
+          );
+        }
+        const roleNames = rolesByPermission.get(p.key) ?? [];
+        if (roleNames.length === 0) {
+          return <Tag className="m-0">暂无角色持有</Tag>;
+        }
+        return (
+          <span className="flex flex-wrap justify-center gap-1">
+            {roleNames.map((name) => (
+              <Tag key={name} className="m-0">
+                {name}
+              </Tag>
+            ))}
+          </span>
+        );
+      },
+    },
+  ];
+
   return (
     <div className="py-1 pr-2">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -708,51 +759,18 @@ function PermissionDetail({
           权限的分配与收回请前往「角色管理」页操作
         </span>
       </div>
-      <table className="w-full border border-border text-center text-xs">
-        <thead className="text-[11px] text-muted-foreground">
-          <tr>
-            <th className="w-60 border border-border px-2 py-1.5 font-semibold">权限标识</th>
-            <th className="w-44 border border-border px-2 py-1.5 font-semibold">中文名</th>
-            <th className="border border-border px-2 py-1.5 font-semibold">当前持有角色</th>
-          </tr>
-        </thead>
-        <tbody>
-          {menu.permissions.map((p) => {
-            const roleNames = rolesByPermission.get(p.key) ?? [];
-            return (
-              <tr key={p.key}>
-                <td className="border border-border/60 px-2 py-1.5">
-                  <code className="rounded bg-brand-50 px-1.5 py-0.5 font-mono text-[11px] text-brand-700">
-                    {p.key}
-                  </code>
-                </td>
-                <td className="border border-border/60 px-2 py-1.5">{p.name}</td>
-                <td className="border border-border/60 px-2 py-1.5">
-                  {rolesDegraded ? (
-                    <span className="text-[11px] text-muted-foreground">
-                      需 role:read 查看角色分布
-                    </span>
-                  ) : rolesLoading ? (
-                    <span className="text-[11px] text-muted-foreground">
-                      角色分布加载中…
-                    </span>
-                  ) : roleNames.length === 0 ? (
-                    <Tag className="m-0">暂无角色持有</Tag>
-                  ) : (
-                    <span className="flex flex-wrap justify-center gap-1">
-                      {roleNames.map((name) => (
-                        <Tag key={name} className="m-0">
-                          {name}
-                        </Tag>
-                      ))}
-                    </span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      {/* 子表用 antd Table（size=small + bordered + 全列居中）与母表同一视觉体系：
+          表头底色/边框/hover 均走 ConfigProvider token，三主题自适应——不手写
+          Tailwind 边框（ql-20260920-002 手写方案与母表不统一的修正）。 */}
+      <Table<PermissionItem>
+        size="small"
+        bordered
+        pagination={false}
+        rowKey="key"
+        dataSource={menu.permissions}
+        columns={permissionColumns}
+        locale={{ emptyText: "该菜单未挂载权限" }}
+      />
     </div>
   );
 }
