@@ -165,15 +165,18 @@ class MenuOverride(BaseModel, table=True):
     )
     # 显示名覆盖：NULL = 使用代码默认名（列名 label_override，对外 schema 字段名为 label）
     label_override: str | None = Field(
-        default=None, sa_column=Column(String(30), nullable=True),
+        default=None,
+        sa_column=Column(String(30), nullable=True),
     )
     # 组内排序覆盖：NULL = 组内声明序
     sort_order: int | None = Field(
-        default=None, sa_column=Column(Integer, nullable=True),
+        default=None,
+        sa_column=Column(Integer, nullable=True),
     )
     # 全局隐藏（对含平台管理员的所有用户生效；menu_key="menus" 的豁免在前端合并层）
     hidden: bool = Field(
-        default=False, sa_column=Column(Boolean, nullable=False, default=False),
+        default=False,
+        sa_column=Column(Boolean, nullable=False, default=False),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

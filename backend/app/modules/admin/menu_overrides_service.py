@@ -99,9 +99,7 @@ class MenuOverrideService:
         )
         return [_to_read(row) for row in rows]
 
-    async def upsert_override(
-        self, menu_key: str, payload: MenuOverrideUpsert
-    ) -> MenuOverrideRead:
+    async def upsert_override(self, menu_key: str, payload: MenuOverrideUpsert) -> MenuOverrideRead:
         """按 ``menu_key`` 建行或整行覆盖写。
 
         PUT 全量语义：``None`` 落 NULL 表示清除该维度回代码默认
@@ -129,9 +127,7 @@ class MenuOverrideService:
         override = (
             (
                 await self._session.execute(
-                    select(MenuOverride)
-                    .where(col(MenuOverride.menu_key) == menu_key)
-                    .limit(1)
+                    select(MenuOverride).where(col(MenuOverride.menu_key) == menu_key).limit(1)
                 )
             )
             .scalars()
@@ -171,9 +167,7 @@ class MenuOverrideService:
         override = (
             (
                 await self._session.execute(
-                    select(MenuOverride)
-                    .where(col(MenuOverride.menu_key) == menu_key)
-                    .limit(1)
+                    select(MenuOverride).where(col(MenuOverride.menu_key) == menu_key).limit(1)
                 )
             )
             .scalars()
