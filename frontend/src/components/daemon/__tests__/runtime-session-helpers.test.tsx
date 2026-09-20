@@ -406,11 +406,17 @@ describe("logsToTurns 去重收窄（ql-20260822-010）", () => {
   });
 
   it("ql-20260825-002：用户真实连发不同消息不并组（各自保留）", () => {
-    const turns = logsToTurns([
+    // ql-20260920-006（2026-09-18-single-chat-steering 修订）口径：互异主体不再
+    // join 进 prompt 前移轮首——prompt 只取首个主体组，后续主体保留为轮内
+    // user_msg 段（按真实时间位置渲染），消息不丢失（「各自保留」的落点从
+    // prompt 拼接改为独立段）。
+    const turns = toSegmentTurns([
       makeLog("1", "run-1", "user_input", "第一条"),
       makeLog("2", "run-1", "user_input", "第二条"),
     ]);
-    expect(turns[0]!.prompt).toBe("第一条\n第二条");
+    expect(turns[0]!.prompt).toBe("第一条");
+    const userMsg = turns[0]!.segments?.find((s) => s.kind === "user_msg");
+    expect(userMsg).toMatchObject({ text: "第二条", phase: "delivered" });
   });
 
   it("ql-20260825-002：纯附件双提交（空主体）归并为一条 marker 版", () => {
