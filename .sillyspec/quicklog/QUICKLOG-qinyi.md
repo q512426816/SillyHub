@@ -39,3 +39,34 @@
 根因：语义红线活在散文无机器可查形态，对撞实验两处失分三层评审352测试全漏
 方案：.sillyspec/redlines.yaml 两条：RL-001 孤儿tool_use禁running编码/RL-002 用量归属禁后写覆盖，severity error + origin锚归档design
 结果：探针11实弹：applicable 2条断言0命中0警告；正则单反斜杠书写教训记入文件头注释
+
+## ql-20260920-002-8626 | 2026-09-20 07:20:28 | 修复 24h 审查四风险：codex steer 窗口丢轮 outcome 软锁死 + steering 丢 page_context + mid-turn 注…
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/codex-app-server-driver.ts（修①finishTurn 暂存 completedOutcome + consumeCompletedOutcome 统一消费（等待层轮分支/空闲层入口/threadId 超时三点））
+- sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts（修①新增 completed-先于-steer-回执被拒/成功两序用例）
+- backend/app/modules/daemon/session/service/control.py（修②③_inject_mid_turn_into_run 增 page_context（前导只进 payload prompt）+ user_input log 事件补发）
+- backend/app/modules/daemon/session/service/queue.py（修②_handle_busy_turn 与 dispatch_now steered 分支透传/重放 page_context + 修④复锁+条目复取）
+- backend/app/modules/daemon/session/service/__init__.py（修②facade _inject_mid_turn_into_run 签名同步透传 page_context）
+- backend/app/modules/daemon/tests/test_session_queue_actions.py（修②③④新增 4 例（前导/重放/事件/接力已删行收口））
+- .sillyspec/docs/SillyHub/modules/daemon.md（增量节 ql-20260920-002-8626 四风险修复记录）
+- .sillyspec/docs/SillyHub/modules/daemon.changelog.md（同 ql-ID 变更索引行）
+需求：修复 24h 审查四风险：codex steer 窗口丢轮 outcome 软锁死 + steering 丢 page_context + mid-turn 注入缺 user_input SSE 事件 + dispatch_now 无锁双派发
+根因：①driver 等待层 race 输入赢后 await steer 期间 turn/completed 只 resolve promise，continue 回循环顶被 beginTurn 覆盖，reportResult 永不执行致 run 永远 running；②queue.py 两处 inject 分支不传 page_context（排队路径会存会重放）；③control.py mid-turn 注入行 backend 直接落库但不补发 Redis log 事件，前端已投递转换不可达；④置顶 commit 释放行锁后无锁查 run 即注入，接力派发竞态下同条双执行
+方案：①finishTurn 暂存 outcome + consumeCompletedOutcome 三点统一消费（closing/finalized 守卫原口径，引擎侧 cancelled 照报）；②_inject_mid_turn_into_run 增 page_context 参数，前导只进 SESSION_INJECT payload prompt（留痕原文），两调用点透传 + facade 签名同步；③对齐 inject.py 口径 commit 前快照 commit 后补发；④发送动作前复锁会话行 + status 复检 + 条目复取（已删行返 dispatched 零注入）
+结果：daemon codex-app-server-driver 68/68 绿（新增 2 例）；backend test_session_queue_actions 34/34 绿（新增 4 例）；相邻面 session_queue+user_preamble+inject_empty+session_router 70 绿 + 群聊四件 105 绿；daemon tsc 零错 + backend ruff/format/mypy 定向零错；daemon.md 增量节 + daemon.changelog 已记
+审计：📎 文档引用失效：1/0 处 file:line 失效（sillyspec docs check 可复现）
+审计：   ❌ [docs/sillyspec/cursor-agent-transcript-report-pipeline.md:0]  → 文档不存在
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/cursor-agent-transcript-report-pipeline.md, docs/sillyspec/finished/cursor-agent-transcript-report-pipeline.md
+
+## ql-20260920-003-5b69 | 2026-09-20 08:36:36 | 回带④系统事件双视图——对撞深读合并清单最后一项收口
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/turn-timeline.tsx（对话视图system_event药丸块（viewMode门控））
+- frontend/src/components/daemon/__tests__/agent-replay-body.test.tsx（断言翻转（对话视图可见））
+需求：回带④系统事件双视图——对撞深读合并清单最后一项收口
+根因：主仓实现系统事件仅全部视图可见，对岸worktree双视图恒显；深读裁决④=可见性语义采对岸、渲染形态随主仓已发布药丸
+方案：turn-timeline.tsx对话视图块：从processItems提取system_event项渲染同款中性虚线药丸（viewMode===conversation门控防双画；D-03不冒充用户气泡）+agent-replay-body断言翻转
+结果：agent-replay-body 16/16+agent-log-turns 15/15零回归+tsc零错；CLI门禁亲跑；提交acfd25095（含并行会话staged面8文件披露amend，同f254733先例）
