@@ -74,6 +74,33 @@ export interface CredentialInjector {
 }
 
 /**
+ * 主模型名按角色映射 one_m 勾选补 ``[1m]`` 后缀（ql-20260920-004）。
+ *
+ * 背景：one_m 的 ``[1m]`` 后缀原本只落在 ANTHROPIC_DEFAULT_{ROLE}_MODEL（规则 5），
+ * 但主模型两条路径都拿裸模型名——① 规则 3 的 ANTHROPIC_MODEL 取
+ * default_fallback_model/model（无 one_m 信号）；② daemon interactive 会话把 backend
+ * 下发的裸 model 显式塞进 SDK query options.model（优先级最高，直接压掉 env 档位）。
+ * 两条路都裸奔时 claude CLI 对未知模型按默认 200k 窗口算，1M 供应商 ~160k（80%）就
+ * 触发引擎自动压缩（会话 6e213eb3 实证：一天自动 compact 4 次）。本 helper 统一补缀：
+ * 角色映射里存在 ``model === 主模型名 && one_m === true`` 即追加 ``[1m]``（claude CLI
+ * 客户端解析后按 1M 窗口算，调 API 前剥掉后缀，与规则 5 同机制 X-12）。
+ *
+ * 纯函数：已带 ``[1m]`` 后缀原样返回（幂等）；无映射 / 无勾选 / config 缺省返回原名。
+ */
+export function withOneMSuffix(
+  model: string,
+  pc: Pick<ProviderConfig, 'model_role_mappings'> | null | undefined,
+): string {
+  if (model.endsWith('[1m]')) return model;
+  const mappings = pc?.model_role_mappings;
+  if (!mappings) return model;
+  for (const m of Object.values(mappings)) {
+    if (m?.model === model && m.one_m === true) return `${model}[1m]`;
+  }
+  return model;
+}
+
+/**
  * Object.assign 但跳过空串值（ql-20260823-007）。
  *
  * settings_config.env 里的空串占位（前端预设历史预填的 `ANTHROPIC_AUTH_TOKEN: ""`）
@@ -181,9 +208,11 @@ export class ClaudeCredentialInjector implements CredentialInjector {
       env[authField] = c.api_key;
     }
 
-    // 3. default_fallback_model 优先于 model → ANTHROPIC_MODEL（两者皆空不写）
+    // 3. default_fallback_model 优先于 model → ANTHROPIC_MODEL（两者皆空不写）。
+    //    ql-20260920-004：主模型同享 one_m 语义——裸模型名会让 claude CLI 按 200k
+    //    默认窗口提前自动压缩，按角色映射 one_m 勾选补 [1m] 后缀（见 withOneMSuffix）。
     const fallback = c.default_fallback_model ?? c.model;
-    if (fallback) env.ANTHROPIC_MODEL = fallback;
+    if (fallback) env.ANTHROPIC_MODEL = withOneMSuffix(fallback, c);
 
     // 4. 角色映射 → ANTHROPIC_DEFAULT_{ROLE}_MODEL（仅 model 非空注入；未知角色忽略，D-011）
     // 5. one_m=true → 模型名追加 [1m] 后缀（X-12 官方文档实测确认触发 1M 上下文）

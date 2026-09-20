@@ -1,0 +1,97 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-691ab343",
+  "totals": {
+    "files": 4,
+    "additions": 278,
+    "deletions": 4
+  },
+  "rows": [
+    {
+      "path": "sillyhub-daemon/src/credential-injector.ts",
+      "declared": true,
+      "additions": 31,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/driver-factory.ts",
+      "declared": true,
+      "additions": 12,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/credential-injector.test.ts",
+      "declared": true,
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/session-manager-one-m-suffix.test.ts",
+      "declared": true,
+      "additions": 232,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": [
+      {
+        "file": "backend/app/modules/daemon/router/session_crud.py",
+        "sessions": [
+          "quick-18ca91d7",
+          "quick-7e2375e9"
+        ]
+      },
+      {
+        "file": "backend/app/modules/daemon/tests/test_inject_empty_prompt.py",
+        "sessions": [
+          "quick-18ca91d7"
+        ]
+      },
+      {
+        "file": "backend/app/modules/daemon/tests/test_session_router.py",
+        "sessions": [
+          "quick-18ca91d7"
+        ]
+      },
+      {
+        "file": "backend/app/modules/daemon/tests/test_session_user_preamble.py",
+        "sessions": [
+          "quick-18ca91d7"
+        ]
+      }
+    ]
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 5,
+    "codeFileCount": 2,
+    "testFileCount": 2,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260920-004-f580",
+  "sessionId": "quick-691ab343",
+  "savedAt": "2026-09-20T06:42:20.404Z",
+  "patchSha256": "f8d0f7b95cee01966f5e7692738993b3101461e04cffbe9b9fe4848ac5ec98ff",
+  "patchStatus": "ok"
+}

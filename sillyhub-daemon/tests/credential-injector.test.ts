@@ -399,7 +399,9 @@ describe('ClaudeCredentialInjector', () => {
     });
     expect(env.ANTHROPIC_BASE_URL).toBe('https://open.bigmodel.cn/api/anthropic');
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe('sk-bigmodel');
-    expect(env.ANTHROPIC_MODEL).toBe('glm-4.6');
+    // ql-20260920-004：规则 3 主模型同享 one_m——opus 映射 glm-4.6 勾选 one_m=true，
+    // ANTHROPIC_MODEL 也补 [1m]（原裸名会让 claude CLI 按 200k 窗口提前自动压缩）。
+    expect(env.ANTHROPIC_MODEL).toBe('glm-4.6[1m]');
     expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('glm-4.6');
     expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('glm-4.6[1m]');
     expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('glm-4.6');

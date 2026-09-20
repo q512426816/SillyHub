@@ -70,3 +70,27 @@
 根因：主仓实现系统事件仅全部视图可见，对岸worktree双视图恒显；深读裁决④=可见性语义采对岸、渲染形态随主仓已发布药丸
 方案：turn-timeline.tsx对话视图块：从processItems提取system_event项渲染同款中性虚线药丸（viewMode===conversation门控防双画；D-03不冒充用户气泡）+agent-replay-body断言翻转
 结果：agent-replay-body 16/16+agent-log-turns 15/15零回归+tsc零错；CLI门禁亲跑；提交acfd25095（含并行会话staged面8文件披露amend，同f254733先例）
+
+## ql-20260920-004-f580 | 2026-09-20 14:24:15 | claude 会话 one_m 勾选未作用于主模型——1M 供应商 ~160k 提前触发引擎自动压缩
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/credential-injector.ts（withOneMSuffix 导出纯函数 + 规则 3 ANTHROPIC_MODEL 补缀）
+- sillyhub-daemon/src/interactive/session-manager/driver-factory.ts（buildDriverOptions claude 分支 options.model 补缀（create/restore 单点））
+- sillyhub-daemon/tests/credential-injector.test.ts（端到端断言随行为更新（ANTHROPIC_MODEL 带 [1m]））
+- sillyhub-daemon/tests/interactive/session-manager-one-m-suffix.test.ts（新建 14 用例（helper 纯函数 + 规则 3 + create 链三层））
+需求：claude 会话 one_m 勾选未作用于主模型——1M 供应商 ~160k 提前触发引擎自动压缩
+根因：one_m 的 [1m] 后缀只落 ANTHROPIC_DEFAULT_{ROLE}_MODEL；主模型两条路径都拿裸名——injector 规则 3 ANTHROPIC_MODEL 取 default_fallback_model/model 无 one_m 信号，daemon 又把 backend payload.model（恒裸）显式塞进 SDK options.model 优先级最高压掉 env 档位（会话 6e213eb3 实证一天自动 compact 4 次）
+方案：credential-injector 新增导出纯函数 withOneMSuffix（角色映射 model 匹配且 one_m=true 追加 [1m]，幂等）；两处应用——injector 规则 3 的 ANTHROPIC_MODEL（覆盖 reload/resume 走 env 路径）与 buildDriverOptions claude 分支 options.model（create/restore 单点，state.model 与持久化保持裸名不污染；codex/pi 不认 [1m] 不应用）
+结果：新增 14 用例 + injector 端到端断言更新全绿；相邻面 injector-pi/spawn-env/thinking-level/config-switch/reload/pending-switch/session-recovery/driver-registry/resume-config-dir/claude-settings 合计 284 用例全绿；pnpm typecheck 0 错；未部署（daemon bundle 需重打随下次发布）
+审计：[gate] L1（跨 0 模块 · 5 文件：2 代码/2 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+
+## ql-20260920-005-dac1 | 2026-09-20 14:26:42 | 单聊引导（Steering）忙轮直注入
+状态：进行中
+关联变更：2026-09-18-single-chat-steering
+文件：backend/app/modules/daemon/router/session_crud.py, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/message-queue-bar.tsx, frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+
+## ql-20260920-006-ca4a | 2026-09-20 14:33:22 | 单聊引导（Steering）忙轮直注入
+状态：进行中
+关联变更：2026-09-18-single-chat-steering
+文件：backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/tests/test_session_router.py, backend/app/modules/daemon/tests/test_inject_empty_prompt.py, backend/app/modules/daemon/tests/test_session_user_preamble.py, frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/message-queue-bar.tsx, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx

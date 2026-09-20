@@ -31,6 +31,8 @@ import {
   WORKER_MCP_SERVER_NAME,
   type McpConfig,
 } from '../../mcp-config.js';
+// ql-20260920-004：主模型 one_m 补 [1m] 后缀（与 injector 规则 3/5 同源约定）。
+import { withOneMSuffix } from '../../credential-injector.js';
 import type {
   CanUseToolFn,
   DriverOptionsSpec,
@@ -208,7 +210,16 @@ export function buildDriverOptions(
     sessionId: state.sessionId,
   };
   if (spec.model !== undefined) {
-    driverOpts.model = spec.model;
+    // ql-20260920-004：claude 主模型按 provider_config 角色映射 one_m 勾选补 [1m]
+    // 后缀。裸模型名（backend payload.model 恒裸——one_m 信号只在角色映射里）会让
+    // claude CLI 按默认 200k 窗口算，1M 供应商 ~160k 即触发引擎自动压缩；显式
+    // options.model 优先级最高，env 档位的 [1m]（injector 规则 5）被它压掉。create /
+    // restoreAndReconnect 两路共用本单点；reload 不传 model（走 env，由 injector
+    // 规则 3 补缀）。codex/pi 不认 [1m]（Claude Code 专属约定），仅 claude 分支应用。
+    driverOpts.model =
+      state.provider === 'claude'
+        ? withOneMSuffix(spec.model, state.providerConfig)
+        : spec.model;
   }
   if (spec.allowedTools !== undefined) {
     driverOpts.allowedTools = spec.allowedTools;
