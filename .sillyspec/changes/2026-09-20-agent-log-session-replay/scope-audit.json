@@ -1,0 +1,220 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "53c67e02ac3c86f1655d7797ede0a87c1e101c8a",
+  "totals": {
+    "files": 25,
+    "additions": 5665,
+    "deletions": 289
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/platform_sync/router.py",
+      "additions": 6,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/schema.py",
+      "additions": 41,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_agent_log_messages.py",
+      "additions": 156,
+      "deletions": 5,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 107,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/agent-log-card.test.tsx",
+      "additions": 11,
+      "deletions": 67,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/agent-log-replay-body.test.tsx",
+      "additions": 583,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/agent-log-card.tsx",
+      "additions": 24,
+      "deletions": 100,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/agent-log-replay-body.tsx",
+      "additions": 870,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "additions": 64,
+      "deletions": 22,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "additions": 19,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/agent-log-replay.test.ts",
+      "additions": 400,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/agent-log-replay.ts",
+      "additions": 297,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 71,
+      "deletions": 9,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts",
+      "additions": 456,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/parse-cursor-agent-transcript.ts",
+      "additions": 371,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts",
+      "additions": 174,
+      "deletions": 31,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/read-zcode-sqlite.ts",
+      "additions": 443,
+      "deletions": 19,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/registry.ts",
+      "additions": 28,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/host-fs-handler.ts",
+      "additions": 10,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts",
+      "additions": 567,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/parse-cursor-agent-transcript.test.ts",
+      "additions": 470,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/parse-zcode-model-io.test.ts",
+      "additions": 167,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/read-agent-log-messages.test.ts",
+      "additions": 169,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/read-zcode-sqlite.test.ts",
+      "additions": 160,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "2514ca80e57ff3cdd089f8e7b536e32bfc55f730f87de41b07a1f8b95797ac74",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-20T03:48:13.830Z"
+}

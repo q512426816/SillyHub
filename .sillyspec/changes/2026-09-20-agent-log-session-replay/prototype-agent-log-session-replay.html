@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · 本地 Agent 会话回放（按会话样式）— 2026-09-20-agent-log-session-replay</title>
+<style>
+  :root {
+    --bg: #fafafa; --card: #ffffff; --border: #e5e7eb; --fg: #18181b; --muted: #71717a;
+    --brand-50: #f0f7ff; --brand-100: #e0efff; --brand-600: #2563eb; --brand-700: #1d4ed8;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--fg); }
+  .panel { max-width: 860px; margin: 24px auto; border: 1px solid var(--border); border-radius: 12px; background: var(--card); overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.05); }
+  /* ── 顶部来源条 ── */
+  .head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 16px; border-bottom: 1px solid var(--border); background: #f4f4f5; font-size: 12px; color: var(--muted); }
+  .head b { color: var(--fg); font-weight: 600; }
+  .chip { border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; background: var(--card); font-size: 11px; }
+  .chip.brand { border-color: var(--brand-100); background: var(--brand-50); color: var(--brand-700); }
+  .spacer { flex: 1; }
+  .link { color: var(--brand-700); cursor: pointer; }
+  .link:hover { text-decoration: underline; }
+  /* ── 用量汇总条 ── */
+  .usage { display: flex; gap: 14px; padding: 6px 16px; border-bottom: 1px solid var(--border); font-size: 11.5px; color: var(--muted); background: var(--card); }
+  .usage b { color: var(--fg); font-weight: 600; font-family: var(--mono); }
+  /* ── 时间线主体 ── */
+  .body { padding: 16px; max-height: 520px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  .pill { align-self: center; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--brand-700); font-size: 11.5px; padding: 3px 14px; cursor: pointer; }
+  .sysrow { display: flex; justify-content: center; }
+  .sysevent { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); border: 1px dashed var(--border); border-radius: 8px; padding: 2px 10px; background: #fafafa; max-width: 80%; }
+  .sysevent code { font-family: var(--mono); font-size: 10.5px; }
+  .u-row { display: flex; justify-content: flex-end; }
+  .u-bubble { max-width: 82%; background: var(--brand-600); color: #fff; border-radius: 14px; border-top-right-radius: 4px; padding: 8px 12px; white-space: pre-wrap; }
+  .a-row { display: flex; gap: 10px; }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border); background: var(--card); display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; color: var(--muted); }
+  .a-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .a-bubble { border: 1px solid var(--border); background: var(--card); border-radius: 14px; border-top-left-radius: 4px; padding: 8px 12px; }
+  .a-bubble pre { background: #f4f4f5; border-radius: 6px; padding: 6px 8px; margin: 6px 0; font-family: var(--mono); font-size: 11.5px; overflow-x: auto; }
+  .think { border: 1px dashed var(--border); border-radius: 8px; font-size: 11.5px; color: var(--muted); padding: 4px 10px; cursor: pointer; user-select: none; }
+  .think .t-body { display: none; white-space: pre-wrap; padding-top: 4px; }
+  .think.open .t-body { display: block; }
+  .tool { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; font-family: var(--mono); font-size: 11.5px; }
+  .tool-h { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: #fafafa; border-bottom: 1px solid var(--border); }
+  .tool-h .tname { color: #0e7490; font-weight: 700; }
+  .tool-h .dur { color: var(--muted); font-size: 10.5px; margin-left: auto; }
+  .tool-b { padding: 6px 10px; white-space: pre-wrap; color: #3f3f46; max-height: 90px; overflow: hidden; position: relative; }
+  .tool-b::after { content: ""; position: absolute; bottom: 0; left: 0; right: 0; height: 28px; background: linear-gradient(transparent, var(--card)); }
+  .badge-err { border: 1px solid #fecaca; background: #fef2f2; color: #b91c1c; border-radius: 6px; font-size: 10.5px; padding: 0 6px; }
+  .turnfoot { display: flex; align-items: center; gap: 10px; font-size: 10.5px; color: var(--muted); padding-left: 2px; flex-wrap: wrap; }
+  .tok { font-family: var(--mono); background: var(--brand-50); border: 1px solid var(--brand-100); color: var(--brand-700); border-radius: 6px; padding: 0 6px; }
+  .tok.unknown { background: #f4f4f5; border-color: var(--border); color: var(--muted); }
+  .divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; margin: 2px 0; }
+  .divider::before, .divider::after { content: ""; flex: 1; border-top: 1px dashed var(--border); }
+  /* ── 工作会话浮层 ── */
+  .workers { display: none; margin: 0 16px 8px; border: 1px solid var(--border); border-radius: 10px; background: #fafafa; padding: 8px 10px; font-size: 11.5px; }
+  .workers.show { display: block; }
+  .workers li { list-style: none; display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+  .workers .role { color: var(--muted); }
+  /* ── 输入区 ── */
+  .input { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
+  .input input { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .input button { border: none; background: var(--brand-600); color: #fff; border-radius: 8px; padding: 0 16px; cursor: pointer; }
+  .note { max-width: 860px; margin: 10px auto 30px; font-size: 12px; color: var(--muted); padding: 0 4px; }
+  .viewtoggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-size: 11px; }
+  .viewtoggle span { padding: 2px 10px; cursor: pointer; background: var(--card); }
+  .viewtoggle span.on { background: var(--brand-50); color: var(--brand-700); font-weight: 700; }
+  .hide-conversation .tool, .hide-conversation .think { display: none; }
+</style>
+</head>
+<body>
+<div class="panel">
+  <!-- 顶部来源条：主日志选择 + 工作会话入口 + 刷新（替换原「由 SillySpec CLI 自动上报创建」孤立说明行） -->
+  <div class="head">
+    <b>🧾 本地 Agent 会话回放</b>
+    <span class="chip brand">zcode</span>
+    <span class="chip" title="主日志（非 subagent_agent_ 前缀）">主会话 · sess c35fa872…3926e</span>
+    <span class="link" onclick="document.getElementById('workers').classList.toggle('show')">工作会话（5）▾</span>
+    <span class="spacer"></span>
+    <span class="viewtoggle" title="回放默认「全部」视图：思考与工具全程可见（对齐普通会话两态切换）">
+      <span id="vm-conversation" onclick="setView('conversation')">对话</span>
+      <span id="vm-all" class="on" onclick="setView('all')">全部</span>
+    </span>
+    <span class="link">刷新</span>
+  </div>
+  <!-- 用量汇总条：全会话累计（daemon totals 直出，窗口分页不重算）；cursor-agent 日志此条显示「未知」 -->
+  <div class="usage">
+    <span>输入 <b>63,662,604</b></span>
+    <span>输出 <b>53,420</b></span>
+    <span>缓存命中 <b>62,472,640</b></span>
+    <span>模型 <b>GLM-5.3</b></span>
+    <span class="spacer"></span>
+    <span>3 轮 · 386 段</span>
+  </div>
+  <!-- 工作会话浮层：subagent_agent_ 前缀条目不并入正文（主日志已含 Agent 调用与结果回流），单独入口 -->
+  <div class="workers" id="workers">
+    <li>🔧 <span class="link">subagent · plan（00:10–00:18）</span><span class="role">5.4 MB · 6 次调用</span></li>
+    <li>🔧 <span class="link">subagent · plan（00:19–00:26）</span><span class="role">2.9 MB · 3 次</span></li>
+    <li>🔧 <span class="link">subagent · execute（00:38–02:03）</span><span class="role">4.7 MB · 23 次</span></li>
+    <li>🔧 <span class="link">subagent · execute（00:38–02:00）</span><span class="role">3.5 MB · 20 次</span></li>
+    <li>🔧 <span class="link">subagent · verify（02:27–02:59）</span><span class="role">10.3 MB · 22 次</span></li>
+    <li style="color:#a1a1aa; padding-top:6px;">点击在回放中查看该子代理自己的对话（同一渲染，返回主会话）</li>
+  </div>
+
+  <!-- 会话主体：TurnTimeline 同构（用户气泡 / assistant 轮 / 思考折叠 / 工具卡片 / 轮徽标） -->
+  <div class="body" id="body">
+    <span class="pill">加载更早（仅展示最近 200 段 · 共 386 段）</span>
+
+    <div class="divider">CLI 调用轮 1 / 3 · 02:15 自主续跑</div>
+
+    <!-- 系统事件：task-notification / system-reminder 归一化，不冒充用户气泡 -->
+    <div class="sysrow">
+      <span class="sysevent">⚙ 系统事件 · 子代理任务完成通知 <code>agent_d017b02b…</code></span>
+    </div>
+
+    <div class="a-row">
+      <div class="avatar">🤖</div>
+      <div class="a-main">
+        <div class="think" onclick="this.classList.toggle('open')">💭 思考过程（默认折叠）— Gaps are mostly documentation-level. Fix: design 接口定义…
+          <div class="t-body">The user asks: why did this change take so long…（完整思考正文，点击展开）</div>
+        </div>
+        <div class="tool">
+          <div class="tool-h"><span>🔧</span><span class="tname">Bash</span><span class="badge-err">✗ 失败</span><span class="dur">1.2s</span></div>
+          <div class="tool-b">cd "C:\Users\qinyi\IdeaProjects\multi-agent-platform" && pnpm test -- filter=agent-log</div>
+        </div>
+        <div class="tool">
+          <div class="tool-h"><span>🔧</span><span class="tname">Read</span><span class="dur">0.3s</span></div>
+          <div class="tool-b">frontend/src/components/daemon/agent-log-card.tsx（前 120 行…）</div>
+        </div>
+        <div class="a-bubble">解析器矩阵已补齐 usage 透传，本轮用例 12/12 绿。<pre>$ pnpm vitest run agent-log
+✓ 12 passed</pre>四层链路（daemon→RPC→schema→gen:types）全部打通。</div>
+        <div class="turnfoot">
+          <span class="tok">▲ 513,079 · ▼ 780</span>
+          <span class="tok" title="缓存命中读">缓存 511,104</span>
+          <span>02:16 · GLM-5.3</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider">CLI 调用轮 2 / 3 · 02:26 系统提醒触发</div>
+    <div class="sysrow">
+      <span class="sysevent">⚙ 系统事件 · 系统提醒（TodoWrite 提示）</span>
+    </div>
+
+    <div class="divider">CLI 调用轮 3 / 3 · 03:56</div>
+
+    <!-- 真人用户消息：唯一配用户气泡的形态 -->
+    <div class="u-row">
+      <div class="u-bubble">本次变更为什么跑那么久啊，资源消耗合理吗？</div>
+    </div>
+    <div class="a-row">
+      <div class="avatar">🤖</div>
+      <div class="a-main">
+        <div class="a-bubble">整轮跑了 4.5 小时，其中 62.5M 输入 token 里 98% 是缓存命中（实际计费输入约 119 万）……产出/消耗比在合理区间，主要成本在 verify 阶段的 10 次全量重跑。</div>
+        <div class="turnfoot">
+          <span class="tok">▲ 305,779 · ▼ 838</span>
+          <span class="tok">缓存 302,720</span>
+          <span>03:56 · GLM-5.3</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- token 不可得示例（cursor-agent transcript：结构可解析、token 不落盘） -->
+    <div class="a-row">
+      <div class="avatar">🤖</div>
+      <div class="a-main">
+        <div class="a-bubble">（若数据源为 cursor-agent transcript，此轮徽标如下）</div>
+        <div class="turnfoot">
+          <span class="tok unknown">token 未知</span>
+          <span>该 harness 日志不含用量数据</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="input">
+    <input placeholder="点此输入框即可继续对话（首条消息将激活会话派发到你的机器）…">
+    <button>发送</button>
+  </div>
+</div>
+<p class="note">
+  原型说明 · 2026-09-20-agent-log-session-replay：① 主体=TurnTimeline 直适配（对话/全部切换、超长折叠、轮样式继承）；② 系统事件（task-notification/system-reminder/isMeta）与真人消息分流；③ 轮边界=turnId 切轮（divider 行）+真人消息双保险；④ 子代理日志不并入正文，走「工作会话」浮层切换查看；⑤ 用量汇总条数据=daemon totals 直出，cursor-agent 显示未知；⑥ 输入区保留（首条消息懒激活，现状语义不变）。
+</p>
+<script>
+function setView(v) {
+  document.getElementById('vm-all').classList.toggle('on', v === 'all');
+  document.getElementById('vm-conversation').classList.toggle('on', v === 'conversation');
+  document.getElementById('body').classList.toggle('hide-conversation', v === 'conversation');
+}
+</script>
+</body>
+</html>

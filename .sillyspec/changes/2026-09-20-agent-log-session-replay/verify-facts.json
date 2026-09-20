@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-20-agent-log-session-replay",
+  "generatedAt": "2026-09-20T05:05:33.391Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-log-session-replay",
+      "metrics": {
+        "matches": 2,
+        "skippedFiles": 0,
+        "worktreeHits": 6,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-log-session-replay",
+      "metrics": {
+        "tasks": 9,
+        "hasTest": 9
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-log-session-replay",
+      "metrics": {
+        "backendEndpoints": 2232,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-log-session-replay",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-log-session-replay",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-log-session-replay",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-log-session-replay",
+      "metrics": {
+        "checkedFiles": 10,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "runtimeEvidence": [
+    {
+      "claim": "四解析器×真实日志文件端到端只读实跑（zcode rollout/db.sqlite/claude-code/cursor-agent 各一，parsed+usage/turn/totalUsage 契约命中）",
+      "command": "npx tsx .tmp-verify-probe.ts（worktree sillyhub-daemon 内，探针脚本用后即删；命令与输出摘录见「探针结果」表 1-4）",
+      "exitCode": 0,
+      "logPath": "本会话工具输出（2026-09-20 12:0x-12:2x，四探针全部 parsed；无落盘日志文件——脚本临时态，证据数值已录入本表）"
+    },
+    {
+      "claim": "真实环境全量前端套件（308 文件/4098 测试）",
+      "command": "cd <worktree>/frontend && pnpm vitest run",
+      "exitCode": 0,
+      "logPath": "2026-09-20 12:23:25 起 136.79s，4098 passed"
+    }
+  ],
+  "handover": {
+    "count": 4,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "advisory",
+        "condition": "部署 replay-redo 后人工打开 137ddfff 同型会话（tool_report 且 turn_count=0）抽验回放页端到端（WS RPC 全链）——本机未起真实 daemon+backend 组合",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "advisory",
+        "condition": "CLI verify 门沙箱 4 类伪影（overlay 混版/三形态超时/ruff CRLF）已按 local.yaml known_failures O 组豁免，工具侧治理后移除（降级：真实环境全量双绿（frontend 4098/daemon 4376+）已实证伪影非代码缺陷，且豁免条目带复核移除条件，依据 local.yaml known_failures O 组 / verify-result.md「测试结果」节）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "advisory",
+        "condition": "daemon-budget-wiring 60s 超时 flaky（并行会话领地，两轮 3→1 漂移）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "advisory",
+        "condition": "_module-map.yaml 粒度未覆盖 agent-log/session-panel 子目录（scan 基线落后），modules rebuild 转出",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 3,
+  "apiFace": {
+    "endpoints": [],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/agent-log/parse-zcode-model-io.test.ts",
+      "sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts",
+      "sillyhub-daemon/tests/agent-log/parse-cursor-agent-transcript.test.ts",
+      "sillyhub-daemon/tests/agent-log/read-agent-log-messages.test.ts",
+      "sillyhub-daemon/tests/agent-log/read-zcode-sqlite.test.ts",
+      "backend/app/modules/platform_sync/tests/test_agent_log_messages.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[frontend,sillyhub-daemon,daemon,platform_sync]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-20T05:05:42.522Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}
