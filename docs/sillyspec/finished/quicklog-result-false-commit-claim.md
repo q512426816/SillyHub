@@ -34,3 +34,10 @@ ql-20260917-009-7220（agent_run_logs 剥 NUL）的 QUICKLOG 条目「结果」�
   allowedFiles 至少一个在列；quick 收尾后 `git status` 确认暂存区已清（本 quick 的文件）。
 - CLI 侧（改进点）：`--done` 时若「结果：」文本含 40 位 hex 且 allowedFiles 均不在
   `HEAD` 提交面内，warn「结果声称已提交但文件不在最近提交中，请核实」。
+
+## 处置记录（2026-09-19 定时收口，CLI 侧校验落地，归档）
+
+- **CLI 侧改进已实现**（sillyspec 仓 `src/run/complete-handlers.js` quick 末步 --done）：结果文本声称提交（40 位 hex，或短 hash 紧跟「已提交/已推送/落库」字样）时，CLI 亲跑 `git show --name-only` 取提交面，与会话声明文件（guard.allowedFiles）求交——**零命中即醒目警告**（点名 hash + 「计划提交的 hash 被当成已提交的 hash」的已知形态 + git show 复核指引）；引用解析失败同样警告。advisory 不阻断（组合/merge 提交等正常形态确认后照常落账，警告留痕即审计面）；结果不含 hash 声称零介入。
+- **Agent 侧建议**（写「已提交 <hash>」前 git show 核对 + 收尾后 git status 确认暂存区清）保留为操作纪律——CLI 警告是事后机械兜底，事前核对仍是最优。
+- **测试**：新增 `test/quicklog-false-commit-claim.test.mjs` 3 用例 CLI e2e（虚报形态警告+不阻断 / 真命中无警告 / 无 hash 零介入）3/3 绿。
+- 本坑的机制面（台账照常落库只看工作区不看 git 面）是 QUICKLOG 设计语义（追加式日志），不改动；校验落在「结果文本声称与事实核对」这一层。归档。

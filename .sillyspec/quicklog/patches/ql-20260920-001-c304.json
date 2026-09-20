@@ -1,0 +1,47 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-10ce6b6a",
+  "totals": {
+    "files": 1,
+    "additions": 22,
+    "deletions": 0
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/redlines.yaml",
+      "declared": true,
+      "additions": 22,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 0,
+    "codeFileCount": 0,
+    "testFileCount": 0,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": true,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260920-001-c304",
+  "sessionId": "quick-10ce6b6a",
+  "savedAt": "2026-09-19T17:10:38.853Z",
+  "patchSha256": "2e0b4d56f0d4f4b32b2c3dbd4f592c34ff0b3ee93339fa59910e273ed26dacd6",
+  "patchStatus": "ok"
+}

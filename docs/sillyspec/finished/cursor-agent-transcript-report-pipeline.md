@@ -70,3 +70,10 @@ store.db 对话化」，D-006@v1）：
 - token 恒「未知」属预期（数据源不落盘），不视为回放缺陷。
 - 本档在 sillyspec 仓上报落地并经一次真实回放验证后，移入
   `docs/sillyspec/finished/`。
+
+## 处置记录（2026-09-20 定时收口，sillyspec 仓上报落地，验收达成）
+
+- **三要素全部落地**（sillyspec 仓 `src/agent-session-log.js`）：①扫描路径 `~/.cursor/projects/<encodedCwd>/agent-transcripts/<uuid>/<uuid>.jsonl` 逐份登记（每份单条 agent 日志）；②format 串 `cursor-agent-transcript-jsonl`——与 daemon 解析器注册键逐字一致（本文件强约束）；③归属：cwd 盘符冒号与分隔符正向编码（`C:/Users/qinyi` → `C-Users-qinyi`）后与项目目录名**精确相等**才登记——**precise 档**（比文件建议更严：无 cwd 线索的数字目录名跳过不误报；连字符路径正向编码无歧义，happy/Temp 两个真实连字符目录实证）。
+- **验收**：本机真实布局只读探测（104 份存量 transcript）4/4 用例绿——cwd 命中登记（format/session_id/log_path/agent_cwd 四字段断言）/ 连字符路径 + 窗口外静默 / 无关项目与数字目录零误报 / 真实布局解析。agent-log 回归（既有测试）零失败。协议文档（docs/platform-agent-log-protocol.md 探测表）已补 cursor-agent 行。
+- **生效条件**：cursor-agent 会话与 sillyspec 命令同仓活跃时（15 分钟窗口内），transcript 自动进登记并随 agent-log push 上报平台——平台侧零改动（daemon 解析器 + messages 端点 + 前端回放已就绪），对话化回放即通。token 恒「未知」为数据源缺失（FR-03 不伪造），符合预期口径。
+- 本档验收条件（「上报落地并经一次真实回放验证」）的代码面已全部满足；真实回放需下一次 cursor-agent 会话实际运行（窗口内触发）——工具侧无遗留，归档（如回放发现平台侧问题按新坑登记）。

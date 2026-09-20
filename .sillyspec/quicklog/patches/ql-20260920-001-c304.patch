@@ -1,0 +1,27 @@
+diff --git a/.sillyspec/redlines.yaml b/.sillyspec/redlines.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/redlines.yaml
+@@ -0,0 +1,22 @@
++# 红线机检清单（2026-09-20 种子批，sillyspec ≥3.29 探针 11 消费）
++# 机制：.sillyspec/redlines.yaml 消费者仓自持；verify 期探针 11 逐条评估（advisory）。
++# 条目字段：id/statement(红线原文)/scope(文件glob)/forbid(禁式正则)/require(存在性正则)/
++#           severity(error|warning)/origin(散文溯源锚)。人写正则人负责——statement 保留
++#           红线原文供命中时人裁，origin 指回设计文档。
++# 正则书写：YAML 单引号标量不处理转义——正则里要一个反斜杠就写一个（\s、\[ 直书）。
++redlines:
++  - id: RL-001
++    statement: 回放适配器不得用 running 编码未配对 tool_use——已结束会话不得假运行（agent-log-card 2026-08-23 R-03 红线，2026-09-19 对撞实验主线版失分点，回带修复后机检固化）
++    scope: ['frontend/src/lib/agent-log-turns.ts']
++    forbid: ['status:\s*["'']running["'']']
++    require: ['结果未记录']
++    severity: error
++    origin: .sillyspec/changes/archive/2026-09-19-tool-report-session-replay/design.md
++
++  - id: RL-002
++    statement: zcode rollout 段级用量/turnId 归属不得后写覆盖——须产出调用锚定（slotCallMeta：行 N 窗口末 assistant 锚行 N-1 元数据；后写覆盖口径曾把宽松语义固化成自家测试契约，2026-09-19 对撞实验失分点，回带修复后机检固化）
++    scope: ['sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts']
++    forbid: ['meta:\s*modelIoLine\.meta']
++    require: ['slotCallMeta\[']
++    severity: error
++    origin: .sillyspec/changes/archive/2026-09-19-tool-report-session-replay/design.md
