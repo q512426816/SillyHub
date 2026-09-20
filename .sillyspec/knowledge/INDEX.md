@@ -102,3 +102,4 @@
 
 ## FR 需求索引
 - host-fs-handler|FR|需求|承接 → [fr/host-fs-handler.md](fr/host-fs-handler.md)
+- styles|FR|需求|承接 → [fr/styles.md](fr/styles.md)

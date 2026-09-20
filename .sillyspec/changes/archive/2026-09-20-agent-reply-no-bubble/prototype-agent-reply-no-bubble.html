@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · agent 回复去气泡（2026-09-20-agent-reply-no-bubble）</title>
+<style>
+/* ── 主题 token（对照 frontend/src/styles/themes.ts 三套主题） ── */
+:root, [data-theme="ai-native"] {
+  --primary: #7C3AED; --primary-hover: #6D28D9; --bg: #FAF5FF; --card: #FFFFFF;
+  --border: #DDD6FE; --brand-50: #f5f3ff; --brand-100: #ede9fe; --brand-200: #ddd6fe;
+  --brand-600: #7c3aed; --brand-700: #6d28d9;
+  --foreground: #1e1b2e; --muted-fg: #6b6480; --muted-bg: #f1ecfb; --code-bg: #f5f3ff;
+}
+[data-theme="blue"] {
+  --primary: #2563EB; --primary-hover: #1d4ed8; --bg: #f8fafc; --card: #ffffff;
+  --border: #e2e8f0; --brand-50: #eff6ff; --brand-100: #dbeafe; --brand-200: #bfdbfe;
+  --brand-600: #2563eb; --brand-700: #1d4ed8;
+  --foreground: #0f172a; --muted-fg: #64748b; --muted-bg: #f1f5f9; --code-bg: #eff6ff;
+}
+[data-theme="dark"] {
+  --primary: #0891b2; --primary-hover: #06b6d4; --bg: #18181b; --card: #27272a;
+  --border: #3f3f46; --brand-50: #1e293b; --brand-100: #334155; --brand-200: #0891b2;
+  --brand-600: #06b6d4; --brand-700: #22d3ee;
+  --foreground: #e4e4e7; --muted-fg: #a1a1aa; --muted-bg: #27272a; --code-bg: #1c1c1f;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg); color: var(--foreground); font-size: 14px; line-height: 1.6;
+  padding: 16px 0 48px;
+}
+.toolbar {
+  position: sticky; top: 0; z-index: 10; display: flex; gap: 8px; align-items: center;
+  background: var(--card); border-bottom: 1px solid var(--border); padding: 10px 16px;
+  flex-wrap: wrap;
+}
+.toolbar b { font-size: 13px; }
+.toolbar button {
+  cursor: pointer; border: 1px solid var(--border); background: var(--card); color: var(--foreground);
+  border-radius: 8px; padding: 4px 12px; font-size: 12.5px;
+}
+.toolbar button.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+.hint { width: 100%; font-size: 11.5px; color: var(--muted-fg); }
+
+/* 时间线容器（对照 session panel 对话视图） */
+.timeline { max-width: 860px; margin: 20px auto 0; padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
+.turn { display: flex; flex-direction: column; gap: 10px; }
+
+/* ── 用户气泡（不动：品牌色右对齐） ── */
+.user-row { display: flex; justify-content: flex-end; align-items: flex-end; gap: 6px; }
+.user-bubble {
+  background: var(--primary); color: #fff; padding: 10px 16px; border-radius: 16px;
+  border-bottom-right-radius: 6px; max-width: 80%; box-shadow: 0 2px 8px hsl(0 0% 0% / 0.12);
+}
+.avatar {
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 12px; color: #fff;
+}
+.avatar.user { background: var(--primary); }
+.avatar.agent { background: var(--brand-600); }
+
+/* ── agent 正文：改后（无框，铺在背景上，48rem 阅读限宽） ── */
+.agent-row { display: flex; gap: 10px; align-items: flex-start; }
+.agent-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; flex: 1; }
+.seg-text-body { max-width: min(100%, 48rem); }
+.seg-text-body .md p { margin: 0 0 8px; }
+.seg-text-body .md :last-child { margin-bottom: 0; }
+.seg-text-body pre {
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; overflow-x: auto; font-size: 12.5px; line-height: 1.55;
+  font-family: Consolas, "Courier New", monospace; margin: 8px 0;
+}
+.seg-text-body code.inline { background: var(--code-bg); border-radius: 4px; padding: 1px 5px; font-size: 12.5px; font-family: Consolas, monospace; }
+.caret { display: inline-block; width: 7px; height: 15px; background: var(--brand-600); border-radius: 1px; vertical-align: -2px; margin-left: 3px; animation: blink .9s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* 思考行 / 工具行 / 系统事件（现状即无框，不动） */
+.think-row, .tool-row {
+  font-size: 11.5px; color: var(--muted-fg); display: flex; gap: 7px; align-items: center;
+  padding: 3px 6px; border-radius: 6px; cursor: pointer;
+}
+.think-row:hover, .tool-row:hover { background: var(--muted-bg); }
+.sys-pill {
+  align-self: center; display: flex; gap: 6px; align-items: center; font-size: 11px;
+  color: var(--muted-fg); border: 1px dashed var(--border); background: var(--card);
+  border-radius: 999px; padding: 3px 12px;
+}
+.who-chip {
+  font-size: 11px; color: var(--muted-fg); border: 1px dashed var(--brand-200);
+  background: var(--brand-50); border-radius: 999px; padding: 2px 10px; align-self: flex-start;
+}
+/* 轮内引导消息（steering 态，现状虚线 brand 气泡，不动） */
+.steer-bubble {
+  align-self: flex-end; max-width: 80%; border: 1.5px dashed var(--brand-600);
+  background: var(--brand-50); color: var(--foreground); border-radius: 16px;
+  border-bottom-right-radius: 6px; padding: 8px 14px; font-size: 13px;
+}
+.steer-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--brand-600); margin-right: 6px; animation: blink 1.2s infinite; }
+.time { font-size: 10.5px; color: var(--muted-fg); padding-bottom: 4px; }
+
+/* ── 现状模式：给 agent 正文盖回气泡（对照用） ── */
+body.legacy .seg-text-body {
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+  border-top-left-radius: 6px; padding: 10px 16px; max-width: 80%;
+  box-shadow: 0 1px 3px hsl(0 0% 0% / 0.08);
+}
+.legend { max-width: 860px; margin: 12px auto 0; padding: 0 16px; font-size: 12px; color: var(--muted-fg); }
+.legend span { color: var(--brand-600); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <b>原型对照</b>
+  <button id="btn-after" class="on">改后（去气泡）</button>
+  <button id="btn-legacy">现状（气泡）</button>
+  <b style="margin-left:12px">主题</b>
+  <button data-theme="ai-native" class="on">AI 紫</button>
+  <button data-theme="blue">明亮蓝</button>
+  <button data-theme="dark">暗色</button>
+  <div class="hint">agent 回复去气泡、用户消息保留气泡 · 点「现状/改后」切换对比 · 主题三套对照 themes.ts</div>
+</div>
+
+<div class="legend">对照要点：<span>agent 正文无框铺底 + 48rem 阅读限宽</span>；代码块吃到内容列全宽；思考/工具/系统事件行维持现状；用户气泡（含右侧引导消息虚线气泡）不动。</div>
+
+<div class="timeline">
+  <!-- 轮 1 -->
+  <div class="turn">
+    <div class="user-row">
+      <span class="time">14:02</span>
+      <div class="user-bubble">帮我看看这个函数为什么慢，顺便优化下</div>
+      <div class="avatar user" title="我（秦毅）">秦</div>
+    </div>
+    <div class="agent-row">
+      <div class="avatar agent" title="智能体">🤖</div>
+      <div class="agent-col">
+        <div class="think-row">▶ 💭 思考过程&nbsp;&nbsp;先看调用路径，怀疑是 O(n²) 的双层循环…</div>
+        <div class="seg-text-body">
+          <div class="md">
+            <p>问题定位到了：<code class="inline">dedupe()</code> 在热路径里对每个元素做线性查重，整体是 O(n²)，2 万条数据时约 900ms。</p>
+            <p>改为哈希集合去重，一次遍历 O(n)：</p>
+            <pre>function dedupe(items) {
+  const seen = new Set();
+  return items.filter((x) =&gt; !seen.has(x) &amp;&amp; seen.add(x));
+}</pre>
+            <p>实测 2 万条从 <b>900ms → 6ms</b>，行为不变（保留首次出现顺序）。建议直接合入。<span class="caret"></span></p>
+          </div>
+        </div>
+        <div class="tool-row">🔧 Bash · 运行基准测试 · 1.2s ✓</div>
+        <div class="seg-text-body">
+          <div class="md"><p>基准跑完：平均 <b>6.1ms ± 0.3ms</b>，10 轮稳定。可以提交了。</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 轮 2：系统事件 + 引导消息 -->
+  <div class="turn">
+    <div class="sys-pill">⚙ 会话恢复（中断 3 分钟后自动续跑）</div>
+    <div class="user-row">
+      <span class="time">14:11</span>
+      <div class="user-bubble">跑的时候注意别动 config 目录</div>
+      <div class="avatar user">秦</div>
+    </div>
+    <div class="agent-row">
+      <div class="avatar agent">🤖</div>
+      <div class="agent-col">
+        <div class="steer-bubble"><span class="steer-dot"></span>补一句：结束后顺手更新下文档</div>
+        <div class="think-row">▶ 💭 思考过程&nbsp;&nbsp;收到约束，检查任务清单里是否涉及 config…</div>
+        <div class="seg-text-body">
+          <div class="md"><p>收到，两条要求都记下了：不动 <code class="inline">config/</code>，完成后更新文档。现在开始执行。</p></div>
+        </div>
+        <div class="tool-row">🔧 Edit · docs/daemon.md · ✓</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const body = document.body;
+document.getElementById('btn-after').onclick = (e) => {
+  body.classList.remove('legacy');
+  e.target.classList.add('on'); document.getElementById('btn-legacy').classList.remove('on');
+};
+document.getElementById('btn-legacy').onclick = (e) => {
+  body.classList.add('legacy');
+  e.target.classList.add('on'); document.getElementById('btn-after').classList.remove('on');
+};
+document.querySelectorAll('.toolbar button[data-theme]').forEach((b) => {
+  b.onclick = () => {
+    document.documentElement.dataset.theme = b.dataset.theme;
+    document.querySelectorAll('.toolbar button[data-theme]').forEach((x) => x.classList.remove('on'));
+    b.classList.add('on');
+  };
+});
+</script>
+</body>
+</html>

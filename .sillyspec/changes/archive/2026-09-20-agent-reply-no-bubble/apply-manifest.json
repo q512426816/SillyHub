@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-20-agent-reply-no-bubble",
+  "appliedAt": "2026-09-20T10:13:00.951Z",
+  "baseHash": "1f17db306e14d9edfb060527bbf328975a462025",
+  "files": [
+    {
+      "path": "frontend/src/app/globals.css",
+      "sha256": "c1d67b3c9f544480b9213f2fa80c2c5ba23bc1db27f8dd8b259bd1cebb30c284"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx",
+      "sha256": "552745f3790b5e9a42689160017d3ec77d96bf8bb57bae1fb04867a73c94303c"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+      "sha256": "5130875da1b708b4373e3a45d613d970ba173695cf485b3d052a2263e4655900"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-segment-views.tsx",
+      "sha256": "67879a1c3acc00e936b415d29dbe9fcbb044b698683ca32800cc3b6f6dbdda15"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "sha256": "a8e34ecdc2137e2e2ea18ada8bf66af95533e5b2d5c541b9529053fd2fc73ca6"
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "1f17db306e14d9edfb060527bbf328975a462025",
+  "totals": {
+    "files": 5,
+    "additions": 55,
+    "deletions": 31
+  },
+  "rows": [
+    {
+      "path": "frontend/src/app/globals.css",
+      "additions": 10,
+      "deletions": 5,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx",
+      "additions": 2,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+      "additions": 16,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-segment-views.tsx",
+      "additions": 13,
+      "deletions": 17,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "additions": 14,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "017b44557269db85ba3eefbd042b934d4980bae1be2c7913787a9172f5e585b4",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-20T10:07:04.979Z"
+}

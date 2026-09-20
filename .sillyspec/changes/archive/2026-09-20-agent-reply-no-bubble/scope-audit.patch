@@ -1,0 +1,187 @@
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index d170c43ac..7f4a7e960 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -815,15 +815,20 @@
+ [data-variant="mobile"] .markdown-text .wmde-markdown code {
+   font-size: 13px !important;
+ }
+-/* 气泡本体(用户气泡纯文本路径/流式光标继承字号)+限宽放宽(80/82%→94%,窄屏少折行)。
+-   .turn-bubble=用户气泡+旧路径答复气泡(turn-timeline),.seg-text-bubble=段模型
+-   文本气泡(turn-segment-views)。 */
+-[data-variant="mobile"] .turn-bubble,
+-[data-variant="mobile"] .seg-text-bubble {
++/* 手机端字号/行高放大。.turn-bubble=用户气泡(turn-timeline,纯文本路径/流式光标
++   继承字号)+限宽放宽(80/82%→94%,窄屏少折行)；.seg-text-body=agent 无框正文
++   (段模型 turn-segment-views+旧路径 turn-timeline),阅读限宽由组件内
++   max-w-[min(100%,48rem)] 统一承担——此处不带 max-width 覆盖,防高优先级
++   规则压掉组件限宽,mobile 仅放大字号行高。 */
++[data-variant="mobile"] .turn-bubble {
+   font-size: 14px;
+   line-height: 24px;
+   max-width: 94%;
+ }
++[data-variant="mobile"] .seg-text-body {
++  font-size: 14px;
++  line-height: 24px;
++}
+ /* 时间线左右留白收敛(px-5→px-3),窄屏给正文让宽度 */
+ [data-variant="mobile"] [data-testid="turn-timeline-scroll"] {
+   padding-left: 12px;
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+index d828483d9..ed09787c1 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+@@ -407,8 +407,8 @@ describe("SessionPanel（dialog）", () => {
+       );
+     });
+ 
+-    // 单气泡（迟到 partial 被反向前缀收编），流式光标不出现
+-    expect(document.querySelectorAll(".seg-text-bubble")).toHaveLength(1);
++    // 单个 agent 正文容器（迟到 partial 被反向前缀收编），流式光标不出现
++    expect(document.querySelectorAll(".seg-text-body")).toHaveLength(1);
+     expect(document.querySelector(".seg-caret")).toBeNull();
+   });
+ 
+diff --git a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+index 8da15faf0..4bfeaf188 100644
+--- a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+@@ -204,7 +204,22 @@ describe("TextSegmentView 文本段", () => {
+     expect(document.querySelector(".seg-caret")).toBeNull();
+   });
+ 
+-  it("task-11 复制按钮：气泡内常驻挂载（aria-label「复制」），点击写 segment.text 纯文本", () => {
++  it("无框形态：容器挂 seg-text-body（w-full + 48rem 阅读限宽），无气泡框样式类", () => {
++    // 2026-09-20-agent-reply-no-bubble：容器改无框正文，markdown-text 的直接父容器
++    // 即 seg-text-body 容器——断言新类存在 + 旧气泡框类（border/bg-card/shadow-sm/
++    // rounded-2xl/px-4）不存在
++    render(<TextSegmentView segment={makeTextSeg()} />);
++    const container = screen.getByTestId("markdown-text").parentElement;
++    expect(container).not.toBeNull();
++    expect(container?.className).toContain("seg-text-body");
++    expect(container?.className).toContain("w-full");
++    expect(container?.className).toContain("max-w-[min(100%,48rem)]");
++    for (const legacy of ["border", "bg-card", "shadow-sm", "rounded-2xl", "px-4"]) {
++      expect(container?.className).not.toContain(legacy);
++    }
++  });
++
++  it("task-11 复制按钮：正文容器内常驻挂载（aria-label「复制」），点击写 segment.text 纯文本", () => {
+     const writeText = vi.fn().mockResolvedValue(undefined);
+     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+     render(<TextSegmentView segment={makeTextSeg({ text: "要复制的答复正文" })} />);
+diff --git a/frontend/src/components/daemon/turn-segment-views.tsx b/frontend/src/components/daemon/turn-segment-views.tsx
+index 0de9c9569..343d210c6 100644
+--- a/frontend/src/components/daemon/turn-segment-views.tsx
++++ b/frontend/src/components/daemon/turn-segment-views.tsx
+@@ -5,8 +5,8 @@
+  * 段渲染组件族——消费 session-log-assembler（task-01）的 TurnSegment 结构化段
+  * 模型，按 prototype-session-stream.html 视觉基准（D-003）渲染五类段：
+  *
+- *   - TextSegmentView   文本段气泡（MarkdownText + streaming 尾部闪烁光标；
+- *                       task-11：气泡右下角 hover 浮出 CopyButton 复制 segment.text）
++ *   - TextSegmentView   文本段无框正文（MarkdownText + streaming 尾部闪烁光标；
++ *                       task-11：正文右下角 hover 浮出 CopyButton 复制 segment.text）
+  *   - ThinkingRowView   思考折叠行（摘要 60 字截断 + streaming「思考中」脉冲标记；
+  *                       task-11：展开正文右下角 hover 浮出 CopyButton 复制 segment.text）
+  *   - ToolRowView       工具单行（图标+工具名+主参数+状态徽章+耗时+运行中扫动；
+@@ -51,11 +51,12 @@
+  * （ensureSegmentAnimations：文档级幂等 <style>，见下）。类名固定为 seg-sweep /
+  * seg-caret，供 task-12 断言「扫动动画类名到位」。
+  *
+- * 与原型的两处已知偏差（备注）：
++ * 与原型的一处已知偏差（备注）：
+  *   1. 流式光标落在正文块末尾的下一行行首——MarkdownText 是块级容器，无法把
+  *      inline 光标拼进 markdown 正文尾（sanitize 会剥注入的 HTML）；原型为 inline。
+- *   2. 子代理块内文本段去掉气泡底色（原型 subagent-body 内 seg-text 透明化）——
+- *      经 .seg-subagent-body 父级选择器覆盖，保持 props 契约不变（无 variant 参数）。
++ *      （原偏差 2「子代理块内文本段去气泡底色（.seg-subagent-body 父级选择器
++ *      覆盖）」已消除：2026-09-20-agent-reply-no-bubble 起文本段整体改无框正文
++ *      .seg-text-body，子代理文本天然无框，覆盖规则随之删除，不再是偏差。）
+  */
+ 
+ import { Children, memo, useEffect, useRef, useState } from "react";
+@@ -104,13 +105,6 @@ const SEGMENT_ANIMATION_CSS = `
+ .seg-caret {
+   animation: seg-caret-blink 0.9s step-end infinite;
+ }
+-.seg-subagent-body .seg-text-bubble {
+-  background: transparent;
+-  border-color: transparent;
+-  box-shadow: none;
+-  padding: 6px 0;
+-  max-width: 100%;
+-}
+ @media (prefers-reduced-motion: reduce) {
+   .seg-sweep::after,
+   .seg-caret {
+@@ -495,8 +489,9 @@ function hasActiveTextSelection(): boolean {
+ /* ───────────────────────────── 段组件（全部 memo） ───────────────────────────── */
+ 
+ /**
+- * 文本段：markdown 气泡（与现 turn-timeline 答复气泡同款式——rounded-2xl 左上
+- * 收角 + bg-card + MarkdownText）。streaming=true 时尾部流式光标（原型
++ * 文本段：无框正文（MarkdownText 直接铺在时间线背景上；2026-09-20-agent-reply-
++ * no-bubble 去气泡——原 rounded-2xl 卡片气泡容器废弃，字号行高交由 MarkdownText
++ * 内部与既有 .markdown-text 规则承担）。streaming=true 时尾部流式光标（原型
+  * streaming-caret：7×15px 竖条（brand 阶随主题），blink 0.9s step-end；因 MarkdownText 是
+  * 块级容器，光标落在正文末段之后的新行行首，见文件头偏差说明 1）。
+  */
+@@ -504,9 +499,10 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
+   useSegmentAnimations();
+   return (
+     // task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出（纯 CSS 零状态）
+-    // ql-20260909-009：86%→80% 收窄 + border-border/60——气泡不再顶满成"文档块"，
+-    // 与时间线底色（bg-background）拉开前后层级。
+-    <div className="seg-text-bubble group relative max-w-[80%] self-start rounded-2xl rounded-tl-md border border-border/60 bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
++    // 2026-09-20-agent-reply-no-bubble：去气泡——容器改无框正文（w-full +
++    // max-w-[min(100%,48rem)]，铺在时间线背景上），排版交 .markdown-text 既有
++    // 规则（原 ql-20260909-009 的 80% 收窄 + 描边分层形态被此取代）。
++    <div className="seg-text-body group relative w-full max-w-[min(100%,48rem)] self-start">
+       <MarkdownText content={segment.text} />
+       {segment.streaming && (
+         <span
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index d0a5f3de0..8601a7430 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -546,7 +546,9 @@ const TurnRow = memo(function TurnRow({
+                   {/* task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出。
+                       ql-20260909-009：shadow-sm→shadow-primary 品牌投影（与发送按钮同
+                       token），用户气泡从纯色块浮出时间线底。ql-20260915-009：turn-bubble
+-                      标记类供 mobile 放大规则定位（globals.css data-variant 块）。 */}
++                      标记类供 mobile 放大规则定位（globals.css data-variant 块）——
++                      2026-09-20-agent-reply-no-bubble task-02 起仅用户气泡持有该标记类
++                      （旧路径答复已换 seg-text-body 无框正文）。 */}
+                   <div className="turn-bubble group relative max-w-[80%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
+                     {/* task-13：剥离历史附件标记行（D-3），文本与 chips 分层渲染 */}
+                     {(() => {
+@@ -684,16 +686,22 @@ const TurnRow = memo(function TurnRow({
+                 />
+               ) : (
+                 <>
+-                  {/* 旧路径（回退）：agent 答复单气泡（左，带助手图标）。运行中尚无答复时显示思考占位。
+-                      task-07（FR-03）：output 尾部 askuser 标记命中 → 气泡正文换 textBefore；
+-                      纯标记消息（textBefore 空）不渲染气泡行，仅下方提问卡。 */}
++                  {/* 旧路径（回退）：agent 答复正文（左，带助手图标）——seg-text-body
++                      无框容器，与 v2 主路径同款（2026-09-20-agent-reply-no-bubble
++                      task-02）。运行中尚无答复时显示思考占位。
++                      task-07（FR-03）：output 尾部 askuser 标记命中 → 正文换 textBefore；
++                      纯标记消息（textBefore 空）不渲染正文行，仅下方提问卡。 */}
+                   {turn.output ? (
+                     outputMarker && !outputMarker.textBefore.trim() ? null : (
+                       <div className="flex items-start gap-2.5">
+                         <ChatMessageAvatar kind="agent" title="智能体" />
+                         <div className="flex items-end gap-1.5">
+-                          {/* ql-20260915-009：turn-bubble 标记类供 mobile 放大规则定位。 */}
+-                          <div className="turn-bubble max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
++                          {/* 2026-09-20-agent-reply-no-bubble task-02：换 v2 主路径同款
++                              seg-text-body 无框正文（不取 w-full——容器在 flex items-end
++                              行内与行尾时间戳并排，内容自适应宽度，时间戳尾随内容边缘）；
++                              ql-20260915-009 的 mobile 放大标记类自此仅用户气泡持有
++                              （globals.css 规则迁移归 task-03）。 */}
++                          <div className="seg-text-body max-w-[min(100%,48rem)]">
+                             <HugeOutputBlock text={outputMarker ? outputMarker.textBefore : turn.output} />
+                             {/* task-13（FR-05 / D-004@v1）：流式光标——旧路径 output
+                                 气泡运行中（isLiveTurn 三态）挂正文尾，轮终态随条件转

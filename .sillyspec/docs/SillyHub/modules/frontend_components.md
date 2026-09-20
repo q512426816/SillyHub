@@ -21,7 +21,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
 - 会话域（daemon/ + sessions/，两处共享子组件）：
   - `interactive-session-panel.tsx` — /runtimes 弹窗内交互会话主面板
   - `runtime-session-dialog.tsx` + `runtime-session-helpers.tsx`（logsToTurns / reply 流式 delta 直接 concat 不加 \n）/ `runtime-card-helpers.tsx`
-  - `turn-timeline.tsx` / `session-input-bar.tsx` — /sessions 总入口复用
+  - `turn-timeline.tsx` / `session-input-bar.tsx` — /sessions 总入口复用。气泡类名契约（2026-09-20-agent-reply-no-bubble 起）：`.turn-bubble` 仅用户消息气泡持有；agent 回复正文（v2 段模型 TextSegmentView + 旧数据回退路径）统一无框容器 `.seg-text-body`（max-w min(100%,48rem) 阅读限宽；旧路径不取 w-full 保行尾时间戳尾随；mobile 仅字号/行高规则不带 max-width 覆盖，防压组件限宽）
   - `session-usage-bar.tsx` — 会话用量条（2026-08-29-session-usage-stats；ql-20260830-013-14b3 小型化）：摘要行五指标+缓存命中率为图标化小号形态（lucide 图标 + 11px 值，指标名收敛为 antd Tooltip 悬浮提示（触发元素 aria-label，ql-20260830-014-74f5）；命中率 cache_read÷(cache_read+input)，分母 0「—」）+按模型折叠明细（ChevronDown 图标按钮 aria-label 保语义）；自取数（useEffect+refreshSignal prop，零 react-query 对齐 dialog 渲染约束），session-panel page（头部下方）/dialog（输入框上方）双模式挂载，轮次终态递增信号重取
   - `machine-card.tsx` / `runtime-card.tsx` — 机器级与实例级卡片
   - `task-execution-panel.tsx` — 任务执行折叠面板（2026-09-04-session-task-execution-panel，D-004 方案B）：折叠态一行常驻摘要（运行中 N·任务 M 成功 X 失败 Y·轮次 K）+三页签（任务清单=useSessionTasks 快照+applyEvent 实时合并+plan 总纲仅活跃轮显示[R-07 降级：syncGapFromDb 不回放 plan_mode_entered，勿当 bug 修]/运行中=agent-task-card+bash-progress-card+team-task-block 三类卡 props 注入/轮次=listSessionRuns 自取数+refreshSignal（挂载即拉——折叠条「轮次 K」计数依赖；轮次行用量 ql-20260912-003-4506 起四维独立展示：主行下「输入/输出/缓存读取/缓存写入」标签 meta 行，null 维不渲染[无缓存引擎/老 run 行]——8 列固定网格 page/dialog/mobile 窄容器会横向溢出，故不走列））；forwardRef 暴露 applyEvent（SSE 分发处 ref 桥接，不建第二条连接）；page（AgentLogCard 同层）/dialog/mobile 三挂载同组件；brand-* 语义阶零视口断点前缀

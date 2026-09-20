@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-20-agent-reply-no-bubble",
+  "generatedAt": "2026-09-20T10:07:46.766Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-reply-no-bubble",
+      "metrics": {
+        "matches": 2,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-reply-no-bubble",
+      "metrics": {
+        "tasks": 3,
+        "hasTest": 3
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-reply-no-bubble",
+      "metrics": {
+        "backendEndpoints": 609,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-reply-no-bubble",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-reply-no-bubble",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-reply-no-bubble",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-09-20-agent-reply-no-bubble",
+      "metrics": {
+        "checkedFiles": 4,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "旧路径（segments undefined 孤儿 turn/旧会话数据）回退分支无渲染测试，无框形态与时间戳尾随需人工目验",
+        "condition": "打开任一含旧数据/孤儿 turn 的会话（或 mock segments=undefined 的 turn），确认答复为无框正文、行尾时间戳紧随内容边缘",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "mobile 变体（data-variant=\"mobile\"）下 agent 正文字号 14px/行高 24px 与阅读限宽实际观感",
+        "condition": "手机/窄窗打开会话面板目验 agent 正文可读性与限宽（globals.css:828-831 规则走查已过，此项为视觉终验）",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "去气泡后整体视觉（48rem 阅读限宽、连续文本段边界感，design 风险 R-02/R-03）",
+        "condition": "桌面宽面板下目验长回复（含代码块/表格）的限宽与段间距；不满可一行样式值调整（走 quick）",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 3,
+  "apiFace": {
+    "endpoints": [],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "consumerHints": {},
+  "smokeRan": "not-ran",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

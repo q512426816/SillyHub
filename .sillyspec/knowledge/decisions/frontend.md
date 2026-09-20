@@ -142,3 +142,26 @@
 锚点：decisions.md D-001/D-004/D-007
 最近确认：53c67e02a
 理由：方案A——前端适配器把 NormalizedLogMessage[] 映射为 SessionTurnView 喂 TurnTimeline 真组件；daemon zcode 解析器补 usage/turnId/model/累计 + 新增 claude-code、cursor-agent 解析器与 cursor-agent 扫描上报；平台 messages schema 加可选字段 + gen:types；平台库零表结构改动，按需现读
+
+## D-001@v1 agent 回复去气泡、用户消息保留气泡
+状态：implemented
+变更：2026-09-20-agent-reply-no-bubble
+锚点：未记录
+最近确认：fbbf02f4b
+理由：用户确认（2026-09-20 explore 会话 + AskUserQuestion 选择直接立项）：agent 回复文本去掉气泡（边框/底色/阴影/内边距，内容铺在时间线背景上）；用户消息（含轮内引导消息三态气泡）保留品牌色右对齐气泡不动。依据：主流 AI 会话同款形态（Claude/ChatGPT/Gemini/DeepSeek），且项目已半途演进——子代理文本段已透明化去气泡、agent 气泡曾因"顶满成文档块"收窄 86%→80%、mobile 限宽放宽至 94%。
+
+## D-002@v1 双渲染路径同步改，不做新旧形态分叉
+状态：implemented
+变更：2026-09-20-agent-reply-no-bubble
+锚点：未记录
+最近确认：fbbf02f4b
+理由：同步改。旧路径（segments undefined 的孤儿 turn/旧数据）与 v2 路径若形态不一致，同一会话里新旧消息长相分叉，违背"回退不崩不空且行为等价"的既有约定（turn-timeline.tsx:671 注释）。代价仅是多改一处类名。
+
+## D-005@v1 实现方案选 B（容器语义重构）
+状态：implemented
+变更：2026-09-20-agent-reply-no-bubble
+锚点：未记录
+最近确认：fbbf02f4b
+理由：方案 B。⚠️ 采纳方式如实记录：AskUserQuestion 会话内用户未作答（离席），按预置推荐默认继续，非用户亲选——用户可 `sillyspec run brainstorm --reopen --from-step 4` 改选，改选 C 时本决策 superseded。理由要点：新建无框正文类（seg-text-body 语义名）承载 agent 文本，bubble 类名只留用户侧，避免"名不副实"；顺带删子代理透明化补丁（.seg-subagent-body .seg-text-bubble 覆盖，去气泡后天然冗余）+ 迁移 mobile 规则；方案 A 的共享类 .turn-bubble 拆样式是埋坑（用户气泡与旧路径答复共用），方案 C 超出本次气泡诉求（YAGNI）。
+故障面：类名替换遗漏（测试/样式选择器仍引用旧类）——靠全仓 grep .seg-text-bubble/.turn-bubble 清单化核对兜底
+退役判据：若后续整体对齐主流形态（方案 C 复潮），正文容器类可沿用，仅结构层重排
