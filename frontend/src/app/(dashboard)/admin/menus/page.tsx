@@ -708,26 +708,26 @@ function PermissionDetail({
           权限的分配与收回请前往「角色管理」页操作
         </span>
       </div>
-      <table className="w-full text-left text-xs">
-        <thead className="border-b border-border text-[11px] text-muted-foreground">
+      <table className="w-full border border-border text-center text-xs">
+        <thead className="text-[11px] text-muted-foreground">
           <tr>
-            <th className="w-60 px-2 py-1.5 font-semibold">权限标识</th>
-            <th className="w-44 px-2 py-1.5 font-semibold">中文名</th>
-            <th className="px-2 py-1.5 font-semibold">当前持有角色</th>
+            <th className="w-60 border border-border px-2 py-1.5 font-semibold">权限标识</th>
+            <th className="w-44 border border-border px-2 py-1.5 font-semibold">中文名</th>
+            <th className="border border-border px-2 py-1.5 font-semibold">当前持有角色</th>
           </tr>
         </thead>
         <tbody>
           {menu.permissions.map((p) => {
             const roleNames = rolesByPermission.get(p.key) ?? [];
             return (
-              <tr key={p.key} className="border-b border-border/60 last:border-0">
-                <td className="px-2 py-1.5">
+              <tr key={p.key}>
+                <td className="border border-border/60 px-2 py-1.5">
                   <code className="rounded bg-brand-50 px-1.5 py-0.5 font-mono text-[11px] text-brand-700">
                     {p.key}
                   </code>
                 </td>
-                <td className="px-2 py-1.5">{p.name}</td>
-                <td className="px-2 py-1.5">
+                <td className="border border-border/60 px-2 py-1.5">{p.name}</td>
+                <td className="border border-border/60 px-2 py-1.5">
                   {rolesDegraded ? (
                     <span className="text-[11px] text-muted-foreground">
                       需 role:read 查看角色分布
@@ -739,7 +739,7 @@ function PermissionDetail({
                   ) : roleNames.length === 0 ? (
                     <Tag className="m-0">暂无角色持有</Tag>
                   ) : (
-                    <span className="flex flex-wrap gap-1">
+                    <span className="flex flex-wrap justify-center gap-1">
                       {roleNames.map((name) => (
                         <Tag key={name} className="m-0">
                           {name}
