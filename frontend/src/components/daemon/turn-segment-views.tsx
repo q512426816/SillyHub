@@ -5,8 +5,8 @@
  * 段渲染组件族——消费 session-log-assembler（task-01）的 TurnSegment 结构化段
  * 模型，按 prototype-session-stream.html 视觉基准（D-003）渲染五类段：
  *
- *   - TextSegmentView   文本段气泡（MarkdownText + streaming 尾部闪烁光标；
- *                       task-11：气泡右下角 hover 浮出 CopyButton 复制 segment.text）
+ *   - TextSegmentView   文本段无框正文（MarkdownText + streaming 尾部闪烁光标；
+ *                       task-11：正文右下角 hover 浮出 CopyButton 复制 segment.text）
  *   - ThinkingRowView   思考折叠行（摘要 60 字截断 + streaming「思考中」脉冲标记；
  *                       task-11：展开正文右下角 hover 浮出 CopyButton 复制 segment.text）
  *   - ToolRowView       工具单行（图标+工具名+主参数+状态徽章+耗时+运行中扫动；
@@ -51,11 +51,12 @@
  * （ensureSegmentAnimations：文档级幂等 <style>，见下）。类名固定为 seg-sweep /
  * seg-caret，供 task-12 断言「扫动动画类名到位」。
  *
- * 与原型的两处已知偏差（备注）：
+ * 与原型的一处已知偏差（备注）：
  *   1. 流式光标落在正文块末尾的下一行行首——MarkdownText 是块级容器，无法把
  *      inline 光标拼进 markdown 正文尾（sanitize 会剥注入的 HTML）；原型为 inline。
- *   2. 子代理块内文本段去掉气泡底色（原型 subagent-body 内 seg-text 透明化）——
- *      经 .seg-subagent-body 父级选择器覆盖，保持 props 契约不变（无 variant 参数）。
+ *      （原偏差 2「子代理块内文本段去气泡底色（.seg-subagent-body 父级选择器
+ *      覆盖）」已消除：2026-09-20-agent-reply-no-bubble 起文本段整体改无框正文
+ *      .seg-text-body，子代理文本天然无框，覆盖规则随之删除，不再是偏差。）
  */
 
 import { Children, memo, useEffect, useRef, useState } from "react";
@@ -103,13 +104,6 @@ const SEGMENT_ANIMATION_CSS = `
 }
 .seg-caret {
   animation: seg-caret-blink 0.9s step-end infinite;
-}
-.seg-subagent-body .seg-text-bubble {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  padding: 6px 0;
-  max-width: 100%;
 }
 @media (prefers-reduced-motion: reduce) {
   .seg-sweep::after,
@@ -495,8 +489,9 @@ function hasActiveTextSelection(): boolean {
 /* ───────────────────────────── 段组件（全部 memo） ───────────────────────────── */
 
 /**
- * 文本段：markdown 气泡（与现 turn-timeline 答复气泡同款式——rounded-2xl 左上
- * 收角 + bg-card + MarkdownText）。streaming=true 时尾部流式光标（原型
+ * 文本段：无框正文（MarkdownText 直接铺在时间线背景上；2026-09-20-agent-reply-
+ * no-bubble 去气泡——原 rounded-2xl 卡片气泡容器废弃，字号行高交由 MarkdownText
+ * 内部与既有 .markdown-text 规则承担）。streaming=true 时尾部流式光标（原型
  * streaming-caret：7×15px 竖条（brand 阶随主题），blink 0.9s step-end；因 MarkdownText 是
  * 块级容器，光标落在正文末段之后的新行行首，见文件头偏差说明 1）。
  */
@@ -504,9 +499,10 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
   useSegmentAnimations();
   return (
     // task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出（纯 CSS 零状态）
-    // ql-20260909-009：86%→80% 收窄 + border-border/60——气泡不再顶满成"文档块"，
-    // 与时间线底色（bg-background）拉开前后层级。
-    <div className="seg-text-bubble group relative max-w-[80%] self-start rounded-2xl rounded-tl-md border border-border/60 bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
+    // 2026-09-20-agent-reply-no-bubble：去气泡——容器改无框正文（w-full +
+    // max-w-[min(100%,48rem)]，铺在时间线背景上），排版交 .markdown-text 既有
+    // 规则（原 ql-20260909-009 的 80% 收窄 + 描边分层形态被此取代）。
+    <div className="seg-text-body group relative w-full max-w-[min(100%,48rem)] self-start">
       <MarkdownText content={segment.text} />
       {segment.streaming && (
         <span

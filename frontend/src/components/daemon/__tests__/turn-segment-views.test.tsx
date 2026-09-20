@@ -204,7 +204,22 @@ describe("TextSegmentView 文本段", () => {
     expect(document.querySelector(".seg-caret")).toBeNull();
   });
 
-  it("task-11 复制按钮：气泡内常驻挂载（aria-label「复制」），点击写 segment.text 纯文本", () => {
+  it("无框形态：容器挂 seg-text-body（w-full + 48rem 阅读限宽），无气泡框样式类", () => {
+    // 2026-09-20-agent-reply-no-bubble：容器改无框正文，markdown-text 的直接父容器
+    // 即 seg-text-body 容器——断言新类存在 + 旧气泡框类（border/bg-card/shadow-sm/
+    // rounded-2xl/px-4）不存在
+    render(<TextSegmentView segment={makeTextSeg()} />);
+    const container = screen.getByTestId("markdown-text").parentElement;
+    expect(container).not.toBeNull();
+    expect(container?.className).toContain("seg-text-body");
+    expect(container?.className).toContain("w-full");
+    expect(container?.className).toContain("max-w-[min(100%,48rem)]");
+    for (const legacy of ["border", "bg-card", "shadow-sm", "rounded-2xl", "px-4"]) {
+      expect(container?.className).not.toContain(legacy);
+    }
+  });
+
+  it("task-11 复制按钮：正文容器内常驻挂载（aria-label「复制」），点击写 segment.text 纯文本", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     render(<TextSegmentView segment={makeTextSeg({ text: "要复制的答复正文" })} />);

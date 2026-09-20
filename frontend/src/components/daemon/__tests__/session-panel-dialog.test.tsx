@@ -407,8 +407,8 @@ describe("SessionPanel（dialog）", () => {
       );
     });
 
-    // 单气泡（迟到 partial 被反向前缀收编），流式光标不出现
-    expect(document.querySelectorAll(".seg-text-bubble")).toHaveLength(1);
+    // 单个 agent 正文容器（迟到 partial 被反向前缀收编），流式光标不出现
+    expect(document.querySelectorAll(".seg-text-body")).toHaveLength(1);
     expect(document.querySelector(".seg-caret")).toBeNull();
   });
 

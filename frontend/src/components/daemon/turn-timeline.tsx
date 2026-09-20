@@ -546,7 +546,9 @@ const TurnRow = memo(function TurnRow({
                   {/* task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出。
                       ql-20260909-009：shadow-sm→shadow-primary 品牌投影（与发送按钮同
                       token），用户气泡从纯色块浮出时间线底。ql-20260915-009：turn-bubble
-                      标记类供 mobile 放大规则定位（globals.css data-variant 块）。 */}
+                      标记类供 mobile 放大规则定位（globals.css data-variant 块）——
+                      2026-09-20-agent-reply-no-bubble task-02 起仅用户气泡持有该标记类
+                      （旧路径答复已换 seg-text-body 无框正文）。 */}
                   <div className="turn-bubble group relative max-w-[80%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
                     {/* task-13：剥离历史附件标记行（D-3），文本与 chips 分层渲染 */}
                     {(() => {
@@ -684,16 +686,22 @@ const TurnRow = memo(function TurnRow({
                 />
               ) : (
                 <>
-                  {/* 旧路径（回退）：agent 答复单气泡（左，带助手图标）。运行中尚无答复时显示思考占位。
-                      task-07（FR-03）：output 尾部 askuser 标记命中 → 气泡正文换 textBefore；
-                      纯标记消息（textBefore 空）不渲染气泡行，仅下方提问卡。 */}
+                  {/* 旧路径（回退）：agent 答复正文（左，带助手图标）——seg-text-body
+                      无框容器，与 v2 主路径同款（2026-09-20-agent-reply-no-bubble
+                      task-02）。运行中尚无答复时显示思考占位。
+                      task-07（FR-03）：output 尾部 askuser 标记命中 → 正文换 textBefore；
+                      纯标记消息（textBefore 空）不渲染正文行，仅下方提问卡。 */}
                   {turn.output ? (
                     outputMarker && !outputMarker.textBefore.trim() ? null : (
                       <div className="flex items-start gap-2.5">
                         <ChatMessageAvatar kind="agent" title="智能体" />
                         <div className="flex items-end gap-1.5">
-                          {/* ql-20260915-009：turn-bubble 标记类供 mobile 放大规则定位。 */}
-                          <div className="turn-bubble max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
+                          {/* 2026-09-20-agent-reply-no-bubble task-02：换 v2 主路径同款
+                              seg-text-body 无框正文（不取 w-full——容器在 flex items-end
+                              行内与行尾时间戳并排，内容自适应宽度，时间戳尾随内容边缘）；
+                              ql-20260915-009 的 mobile 放大标记类自此仅用户气泡持有
+                              （globals.css 规则迁移归 task-03）。 */}
+                          <div className="seg-text-body max-w-[min(100%,48rem)]">
                             <HugeOutputBlock text={outputMarker ? outputMarker.textBefore : turn.output} />
                             {/* task-13（FR-05 / D-004@v1）：流式光标——旧路径 output
                                 气泡运行中（isLiveTurn 三态）挂正文尾，轮终态随条件转

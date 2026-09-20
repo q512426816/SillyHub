@@ -815,14 +815,19 @@
 [data-variant="mobile"] .markdown-text .wmde-markdown code {
   font-size: 13px !important;
 }
-/* 气泡本体(用户气泡纯文本路径/流式光标继承字号)+限宽放宽(80/82%→94%,窄屏少折行)。
-   .turn-bubble=用户气泡+旧路径答复气泡(turn-timeline),.seg-text-bubble=段模型
-   文本气泡(turn-segment-views)。 */
-[data-variant="mobile"] .turn-bubble,
-[data-variant="mobile"] .seg-text-bubble {
+/* 手机端字号/行高放大。.turn-bubble=用户气泡(turn-timeline,纯文本路径/流式光标
+   继承字号)+限宽放宽(80/82%→94%,窄屏少折行)；.seg-text-body=agent 无框正文
+   (段模型 turn-segment-views+旧路径 turn-timeline),阅读限宽由组件内
+   max-w-[min(100%,48rem)] 统一承担——此处不带 max-width 覆盖,防高优先级
+   规则压掉组件限宽,mobile 仅放大字号行高。 */
+[data-variant="mobile"] .turn-bubble {
   font-size: 14px;
   line-height: 24px;
   max-width: 94%;
+}
+[data-variant="mobile"] .seg-text-body {
+  font-size: 14px;
+  line-height: 24px;
 }
 /* 时间线左右留白收敛(px-5→px-3),窄屏给正文让宽度 */
 [data-variant="mobile"] [data-testid="turn-timeline-scroll"] {
