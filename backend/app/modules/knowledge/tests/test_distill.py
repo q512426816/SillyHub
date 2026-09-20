@@ -2,8 +2,9 @@
 D-008 取数通道/回流指引/体量护栏）。
 
 覆盖（卡片 verify 契约）：
-1. 源校验分支：无记录会话（turn_count=0）422 / 未归档变更 422 / ql 文件缺失
-   422（D-010②）/ session、change 多来源 422 /
+1. 源校验分支：无记录会话（turn_count=0）422 / 未归档变更 422 / quick 源按
+   条目校验（QUICKLOG-*.md 中无该 ``## <ql-id>`` 节 → 422，quick-2dba0118）/
+   session、change 多来源 422 /
    不存在的会话、变更沿既有 404 语义（DaemonSessionNotFound / ChangeNotFound）
 2. fresh 派发（默认）：复用 create_session——离线环境
    NoOnlineDaemonError/DaemonRuntimeOffline 收敛为 failed/no_online_daemon
@@ -227,14 +228,19 @@ async def test_dispatch_active_change_returns_422(db_session, tmp_path, auth_adm
     assert "已归档" in exc_info.value.message
 
 
-async def test_dispatch_quick_missing_file_returns_422(
+async def test_dispatch_quick_missing_entry_returns_422(
     db_session, tmp_path, auth_admin_token
 ) -> None:
-    """ql 文件缺失（D-010②）→ 422；多条时任一缺失即 422。"""
+    """quick 源按**条目**校验（quick-2dba0118）：ref 不在 QUICKLOG-*.md 的
+    ``## <ql-id>`` 节集合 → 422；多条时任一缺失即 422。"""
     ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
     spec_root = tmp_path / "distill-spec"
-    (spec_root / "quicklog").mkdir(parents=True)
-    (spec_root / "quicklog" / "ql-20260917-001-demo.md").write_text("# ql\n", encoding="utf-8")
+    quicklog_dir = spec_root / "quicklog"
+    quicklog_dir.mkdir(parents=True)
+    (quicklog_dir / "QUICKLOG-demo.md").write_text(
+        "## ql-20260917-001-demo | 2026-09-17 08:00:00 | 第一修\n状态：已完成\n",
+        encoding="utf-8",
+    )
 
     service = DistillDispatchService(db_session)
     with pytest.raises(DistillSourceInvalid) as exc_info:
@@ -245,12 +251,13 @@ async def test_dispatch_quick_missing_file_returns_422(
             source_ref=["ql-20260917-001-demo", "ql-20260917-002-absent"],
         )
     assert "ql-20260917-002-absent" in exc_info.value.message
+    assert "QUICKLOG 中无此条目" in exc_info.value.message
 
     with pytest.raises(DistillSourceInvalid) as exc_info2:
         await service.dispatch(
             ws.id, user, source_type="quick", source_ref="ql-20260917-099-no-such"
         )
-    assert "不存在" in exc_info2.value.message
+    assert "QUICKLOG 中无此条目" in exc_info2.value.message
 
 
 async def test_dispatch_session_multi_ref_returns_422(
@@ -372,14 +379,19 @@ async def test_dispatch_quick_source_multi_select_offline_daemon(
     db_session, tmp_path, auth_admin_token, monkeypatch
 ) -> None:
     """quick 多选（D-010②）：source_ref 以 list 落 metadata_，DistillTaskRead
-    以逗号连接投影；离线同样立即 failed。"""
+    以逗号连接投影；离线同样立即 failed。quick-2dba0118：quicklog 单文件
+    多条目，两 ref 同在 QUICKLOG-demo.md 的两个 ``##`` 节里。"""
     from app.modules.agent.placement import NoOnlineDaemonError
 
     ws, user = await _make_distill_env(db_session, tmp_path, auth_admin_token)
     spec_root = tmp_path / "distill-spec"
-    (spec_root / "quicklog").mkdir(parents=True)
-    (spec_root / "quicklog" / "ql-20260917-001-demo.md").write_text("# ql1\n", encoding="utf-8")
-    (spec_root / "quicklog" / "ql-20260917-002-demo.md").write_text("# ql2\n", encoding="utf-8")
+    quicklog_dir = spec_root / "quicklog"
+    quicklog_dir.mkdir(parents=True)
+    (quicklog_dir / "QUICKLOG-demo.md").write_text(
+        "## ql-20260917-001-demo | 2026-09-17 08:00:00 | 第一修\n状态：已完成\n"
+        "\n## ql-20260917-002-demo | 2026-09-17 09:00:00 | 第二修\n状态：已完成\n",
+        encoding="utf-8",
+    )
 
     async def _fake_create_session(*args, **kwargs):
         raise NoOnlineDaemonError(user_id=uuid.uuid4())
@@ -438,6 +450,7 @@ async def test_dispatch_fresh_create_session_full_shape(
         agent_type="codex",
         agent_profile_id=str(uuid.uuid4()),
         model="gpt-5",
+        llm_provider_id=uuid.UUID("5f0c9fc2-1111-4222-8333-444455556666"),
     )
 
     # create_session 完整形态透传
@@ -446,6 +459,9 @@ async def test_dispatch_fresh_create_session_full_shape(
     assert captured["model"] == "gpt-5"
     assert captured["runtime_id"] is not None
     assert captured["agent_profile_id"] is not None
+    # quick-2dba0118：llm_provider_id 透传（UUID 入参转 create_session 的 str 形参；
+    # 此前漏传 → 显式选供应商的蒸馏会话静默回落本机默认）。
+    assert captured["llm_provider_id"] == "5f0c9fc2-1111-4222-8333-444455556666"
     assert captured["workspace_id"] == ws.id
     assert captured["prompt"].startswith("【提炼】")
     assert "change_key：2026-09-17-demo-change" in captured["prompt"]
@@ -746,14 +762,22 @@ def test_build_distill_prompt_three_variants() -> None:
         None,
         spec_dir="~/.sillyhub/daemon/specs/ws-1",
     )
-    assert "~/.sillyhub/daemon/specs/ws-1/quicklog/ql-20260917-001-a.md" in quick_prompt
-    assert "~/.sillyhub/daemon/specs/ws-1/quicklog/ql-20260917-002-b.md" in quick_prompt
+    # quick-2dba0118：条目级指引——不再指 `<ql>.md` 独立文件（实际不存在），
+    # 改指 quicklog/QUICKLOG-*.md 内的 `## <ql-id>` 节（grep 定位到下一个 ## 前）。
+    assert "~/.sillyhub/daemon/specs/ws-1/quicklog/" in quick_prompt
+    assert "QUICKLOG-*.md" in quick_prompt
+    assert "`ql-20260917-001-a`" in quick_prompt
+    assert "`ql-20260917-002-b`" in quick_prompt
+    assert "grep" in quick_prompt
+    assert "下一个 `## `" in quick_prompt
+    assert "ql-20260917-001-a.md" not in quick_prompt
     assert "共 2 条" in quick_prompt
     assert "sillyspec knowledge propose" in quick_prompt
 
     # 无 spec_dir 的旧形（直调兼容）：quick 路径回落 cwd 相对 .sillyspec。
     quick_legacy = build_distill_prompt("quick", ["ql-20260917-001-a"], None)
-    assert ".sillyspec/quicklog/ql-20260917-001-a.md" in quick_legacy
+    assert ".sillyspec/quicklog/" in quick_legacy
+    assert "QUICKLOG-*.md" in quick_legacy
 
 
 def test_build_distill_prompt_session_fresh_requires_export_name() -> None:

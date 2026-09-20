@@ -15,6 +15,8 @@ from app.modules.auth.permissions import Permission
 from app.modules.knowledge.distill import DistillDispatchService
 from app.modules.knowledge.schema import (
     DistillDispatchIn,
+    DistillQuickEntryList,
+    DistillQuickEntryOut,
     DistillTaskRead,
     KnowledgeEntry,
     KnowledgeList,
@@ -168,6 +170,7 @@ async def dispatch_distill(
         agent_type=payload.agent_type,
         agent_profile_id=payload.agent_profile_id,
         model=payload.model,
+        llm_provider_id=payload.llm_provider_id,
     )
 
 
@@ -180,6 +183,27 @@ async def list_distill_tasks(
     """该工作区的蒸馏任务列表（按 created_at 倒序，仅 knowledge-distill 类）。"""
     service = DistillDispatchService(session)
     return await service.list_tasks(workspace_id)
+
+
+@router.get("/knowledge/distill/quick-entries", response_model=DistillQuickEntryList)
+async def list_distill_quick_entries(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
+) -> DistillQuickEntryList:
+    """quicklog 条目级 ql 列表（quick-2dba0118：quick 蒸馏源多选单位）。
+
+    quicklog 是单文件多条目形态（QUICKLOG-*.md 内 ``## <ql-id>`` 节），
+    ``GET /quicklog`` 的文件级列表不适用于逐条勾选——本端点投影
+    ``parse_quick_entries`` 条目视图（ref/title/date，按 ref 倒序最新在前），
+    供沉淀弹层 quick 源选择器消费。**注册序铁律**：必须保持在下方
+    ``GET /knowledge/{filename:path}`` 通配之前（文件首注释同款）。
+    """
+    service = DistillDispatchService(session)
+    entries = await service.list_quick_entries(workspace_id)
+    return DistillQuickEntryList(
+        items=[DistillQuickEntryOut(ref=e.ref, title=e.title, date=e.date) for e in entries]
+    )
 
 
 @router.get("/knowledge/{filename:path}", response_model=KnowledgeEntry)

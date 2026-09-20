@@ -116,18 +116,41 @@ class KnowledgeMergeResult(BaseModel):
 # ── 蒸馏派发 DTO（change 2026-09-17-knowledge-precipitation task-07 / D-002@v1）─
 
 
+class DistillQuickEntryOut(BaseModel):
+    """GET /knowledge/distill/quick-entries 单条 ql 条目（quick-2dba0118 三修之一）。
+
+    quicklog 真实形态是单文件多条目（QUICKLOG-*.md 内 ``## <ql-id> | 日期 | 标题``
+    节），蒸馏 quick 源的多选单位是**条目**而非文件——本 DTO 投影 parser.
+    parse_quick_entries 的条目级视图（弹层选择器数据源 + dispatch 源校验同根）。
+    """
+
+    ref: str
+    title: str
+    date: str
+
+
+class DistillQuickEntryList(BaseModel):
+    """GET /knowledge/distill/quick-entries 响应（最新在前，按 ref 倒序）。"""
+
+    items: list[DistillQuickEntryOut]
+
+
 class DistillDispatchIn(BaseModel):
     """POST /knowledge/distill 请求体（派发蒸馏任务）。
 
     ``source_ref``：会话源为 session_id（UUID 字符串，单条）；变更源为
     change_key（单条）；快速修复源为 ql 自然键短码（ql-YYYYMMDD-NNN-后缀），
-    单条 ql 体量小故来源**多选**（list[str]，D-010②）。
+    单条 ql 体量小故来源**多选**（list[str]，D-010②）——注意 quicklog 是单文件
+    多条目形态，ref 指向 QUICKLOG-*.md 内的 ``## <ql-id>`` 节而非独立文件
+    （quick-2dba0118 校验/指引同步改为条目级）。
     ``mode``：会话源可选 ``resume``（原会话续接，D-009——进行中直接 inject、
     已结束 reopen+inject，引擎/状态不满足自动降级 fresh 并记降级原因）；
     ``fresh`` 为默认（零回归），change/quick 强制走 fresh。
     fresh 配置字段（D-010③，复用 create_session 双入口）：
     ``runtime_id`` 钉机器（优先于 ``agent_type``/provider）、``agent_type``
-    （provider）、``agent_profile_id``、``model``。
+    （provider）、``agent_profile_id``、``model``；quick-2dba0118 补
+    ``llm_provider_id``（会话级 LLM 供应商，None=不指定回落本机/工作区默认，
+    「和会话新建一样」——透传 create_session 写 lease metadata）。
     """
 
     source_type: Literal["session", "change", "quick"]
@@ -138,6 +161,7 @@ class DistillDispatchIn(BaseModel):
     agent_type: str | None = None
     agent_profile_id: str | None = None
     model: str | None = None
+    llm_provider_id: uuid.UUID | None = None
 
     @field_validator("source_ref")
     @classmethod

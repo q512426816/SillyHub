@@ -19899,6 +19899,50 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/knowledge/distill/quick-entries": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "List Distill Quick Entries",
+        "description": "quicklog 条目级 ql 列表（quick-2dba0118：quick 蒸馏源多选单位）。\n\nquicklog 是单文件多条目形态（QUICKLOG-*.md 内 ``## <ql-id>`` 节），\n``GET /quicklog`` 的文件级列表不适用于逐条勾选——本端点投影\n``parse_quick_entries`` 条目视图（ref/title/date，按 ref 倒序最新在前），\n供沉淀弹层 quick 源选择器消费。**注册序铁律**：必须保持在下方\n``GET /knowledge/{filename:path}`` 通配之前（文件首注释同款）。",
+        "operationId": "list_distill_quick_entries_api_workspaces__workspace_id__knowledge_distill_quick_entries_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DistillQuickEntryList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/knowledge/{filename}": {
       "get": {
         "tags": [
@@ -42491,6 +42535,18 @@
               }
             ],
             "title": "Model"
+          },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
           }
         },
         "type": "object",
@@ -42499,7 +42555,48 @@
           "source_ref"
         ],
         "title": "DistillDispatchIn",
-        "description": "POST /knowledge/distill 请求体（派发蒸馏任务）。\n\n``source_ref``：会话源为 session_id（UUID 字符串，单条）；变更源为\nchange_key（单条）；快速修复源为 ql 自然键短码（ql-YYYYMMDD-NNN-后缀），\n单条 ql 体量小故来源**多选**（list[str]，D-010②）。\n``mode``：会话源可选 ``resume``（原会话续接，D-009——进行中直接 inject、\n已结束 reopen+inject，引擎/状态不满足自动降级 fresh 并记降级原因）；\n``fresh`` 为默认（零回归），change/quick 强制走 fresh。\nfresh 配置字段（D-010③，复用 create_session 双入口）：\n``runtime_id`` 钉机器（优先于 ``agent_type``/provider）、``agent_type``\n（provider）、``agent_profile_id``、``model``。"
+        "description": "POST /knowledge/distill 请求体（派发蒸馏任务）。\n\n``source_ref``：会话源为 session_id（UUID 字符串，单条）；变更源为\nchange_key（单条）；快速修复源为 ql 自然键短码（ql-YYYYMMDD-NNN-后缀），\n单条 ql 体量小故来源**多选**（list[str]，D-010②）——注意 quicklog 是单文件\n多条目形态，ref 指向 QUICKLOG-*.md 内的 ``## <ql-id>`` 节而非独立文件\n（quick-2dba0118 校验/指引同步改为条目级）。\n``mode``：会话源可选 ``resume``（原会话续接，D-009——进行中直接 inject、\n已结束 reopen+inject，引擎/状态不满足自动降级 fresh 并记降级原因）；\n``fresh`` 为默认（零回归），change/quick 强制走 fresh。\nfresh 配置字段（D-010③，复用 create_session 双入口）：\n``runtime_id`` 钉机器（优先于 ``agent_type``/provider）、``agent_type``\n（provider）、``agent_profile_id``、``model``；quick-2dba0118 补\n``llm_provider_id``（会话级 LLM 供应商，None=不指定回落本机/工作区默认，\n「和会话新建一样」——透传 create_session 写 lease metadata）。"
+      },
+      "DistillQuickEntryList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DistillQuickEntryOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "DistillQuickEntryList",
+        "description": "GET /knowledge/distill/quick-entries 响应（最新在前，按 ref 倒序）。"
+      },
+      "DistillQuickEntryOut": {
+        "properties": {
+          "ref": {
+            "type": "string",
+            "title": "Ref"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ref",
+          "title",
+          "date"
+        ],
+        "title": "DistillQuickEntryOut",
+        "description": "GET /knowledge/distill/quick-entries 单条 ql 条目（quick-2dba0118 三修之一）。\n\nquicklog 真实形态是单文件多条目（QUICKLOG-*.md 内 ``## <ql-id> | 日期 | 标题``\n节），蒸馏 quick 源的多选单位是**条目**而非文件——本 DTO 投影 parser.\nparse_quick_entries 的条目级视图（弹层选择器数据源 + dispatch 源校验同根）。"
       },
       "DistillTaskRead": {
         "properties": {

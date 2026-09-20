@@ -55,9 +55,11 @@ task-07 + D-009 续接分流 + D-010 闭环增强 + D-008 取数通道/回流指
 - 源校验只读复用既有服务：会话源 ``SessionService.get_agent_session``
   （不存在沿 DaemonSessionNotFound 404 语义）且 ``turn_count > 0`` 否则 422；
   变更源 ``ChangeService.get_by_key``（不存在沿 ChangeNotFound 404 语义）且
-  ``status == "archived"`` 否则 422；快速修复源（D-010②）校验
-  ``<spec_root>/quicklog/<ql-id>.md`` 存在否则 422（ql 为文件树条目，新
-  agent 直接读，无 R-08 洞一取数问题）。
+  ``status == "archived"`` 否则 422；快速修复源（D-010②）按**条目**校验——
+  ``parse_quick_entries`` 扫 ``spec_root/quicklog/QUICKLOG-*.md`` 的 ``## <ql-id>``
+  节头取 ref 集合，逐 ref 校验存在否则 422（quick-2dba0118：quicklog 是单文件
+  多条目形态，不再按 ``<ql>.md`` 独立文件校验；新 agent 按 prompt 指引 grep
+  节头读条目，无 R-08 洞一取数问题）。
 - 生命周期契约（design）：蒸馏无独立状态机，任务条 status 以所落档 AgentRun
   为准；续接/新建会话内部的 run/lease/upsync 事件全部复用既有链路。
 """
@@ -81,6 +83,7 @@ from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.agent.provider_caps import get_provider_caps
 from app.modules.auth.model import User
 from app.modules.daemon.schema import DISTILL_SESSION_ORIGIN
+from app.modules.knowledge.parser import QuickEntry, parse_quick_entries
 from app.modules.knowledge.schema import DistillTaskRead
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
@@ -159,9 +162,13 @@ def build_distill_prompt(
     - ``spec_dir``（洞二回流指引，dispatch 全来源/全模式传入）：daemon 本地
       平台同步规范树路径（``~/.sillyhub/daemon/specs/{ws_id}``）。propose
       命令带 ``--spec-dir``（CLI 实测 ``knowledge propose`` 只认 ``--spec-dir``，
-      ``--spec-root`` 被静默忽略回退 cwd）；change/quick 的来源读取路径同指
+      ``--spec-root`` 被其静默忽略回退 cwd）；change/quick 的来源读取路径同指
       该树（platform-managed 下 cwd 无 .sillyspec）。``None`` 时回落旧行文
       （无工作区上下文的直调/测试，零回归）。
+
+    quick-2dba0118：quick 式来源指引改为**条目级**——quicklog 是单文件多条目
+    形态（QUICKLOG-*.md 内 ``## <ql-id>`` 节），不再指 ``<ql>.md`` 独立文件
+    （该文件实际不存在，旧指引会把 agent 引向断链路径）。
     """
     if source_type == "session":
         if for_resume:
@@ -180,10 +187,14 @@ def build_distill_prompt(
     elif source_type == "quick":
         refs = source_ref if isinstance(source_ref, list) else [source_ref]
         base = spec_dir if spec_dir else ".sillyspec"
-        paths = "\n".join(f"- {base}/quicklog/{ref}.md" for ref in refs)
+        ref_lines = "\n".join(f"- `{ref}`" for ref in refs)
         source_line = (
             "来源是快速修复日志（quicklog）条目，共 "
-            f"{len(refs)} 条，请逐一读取以下文件：\n{paths}\n"
+            f"{len(refs)} 条。这些条目以 `## <ql-id> | 日期 | 标题` 节的形式存放在 "
+            f"{base}/quicklog/ 目录下的 QUICKLOG-*.md 文件里（单文件含多条，大小写文件名都要看）。"
+            "请先用 grep 在该目录下定位以下各条目 ID 的节头，"
+            "再读取从该节头起到下一个 `## ` 节头（或文件末尾）之间的整节内容：\n"
+            f"{ref_lines}\n"
             "聚焦每次修复的问题现象、根因与解法。"
         )
     else:
@@ -434,7 +445,8 @@ async def _cleanup_distill_attachment(db: AsyncSession, attachment_id: uuid.UUID
 
 
 class DistillDispatchService:
-    """知识蒸馏派发：dispatch（源校验 + mode 分流执行）与 list_tasks。"""
+    """知识蒸馏派发：dispatch（源校验 + mode 分流执行）、list_tasks 与
+    list_quick_entries（quick 源条目级列表，quick-2dba0118）。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -452,6 +464,7 @@ class DistillDispatchService:
         agent_type: str | None = None,
         agent_profile_id: str | None = None,
         model: str | None = None,
+        llm_provider_id: uuid.UUID | None = None,
     ) -> DistillTaskRead:
         """源校验后按 mode 分流执行（resume 续接 / fresh 新建蒸馏会话）。
 
@@ -634,8 +647,11 @@ class DistillDispatchService:
 
         # fresh：prompt 首行带「提炼」前缀（D-010③ title 载体）；provider/model
         # 取请求显式值，缺省回落 workspace.default_agent/default_model（对齐
-        # 旧 bootstrap 路径兜底，零回归）。会话源另带导出附件（D-008 洞一：
-        # attachment_ids → daemon deliver=disk 落盘 {cwd}/attachments/）。
+        # 旧 bootstrap 路径兜底，零回归）。llm_provider_id 透传 create_session
+        # （quick-2dba0118：UUID 入参转 str 形参——inject_gates 按 uuid.UUID(s)
+        # 解析归属 + agent_kind 匹配，不匹配 422 原样上抛，「和会话新建一样」）。
+        # 会话源另带导出附件（D-008 洞一：attachment_ids → daemon deliver=disk
+        # 落盘 {cwd}/attachments/）。
         fresh_prompt = "【提炼】请执行以下知识沉淀任务。\n\n" + prompt
         svc = self._session_service()
         try:
@@ -648,6 +664,7 @@ class DistillDispatchService:
                 workspace_id=workspace_id,
                 runtime_id=runtime_id,
                 agent_profile_id=agent_profile_id,
+                llm_provider_id=str(llm_provider_id) if llm_provider_id is not None else None,
                 origin=DISTILL_SESSION_ORIGIN,
                 attachment_ids=fresh_attachment_ids,
             )
@@ -723,6 +740,18 @@ class DistillDispatchService:
             for run in runs
             if (run.metadata_ or {}).get("kind") == DISTILL_RUN_KIND
         ]
+
+    async def list_quick_entries(self, workspace_id: uuid.UUID) -> list[QuickEntry]:
+        """该工作区 quicklog 的**条目级** ql 列表（quick-2dba0118 三修之一）。
+
+        GET /knowledge/distill/quick-entries 的服务实现：spec 树根经
+        ``_get_spec_workspace`` 解析（与 dispatch 源校验同一棵树、同一
+        ``parse_quick_entries`` 单一实现，列表与校验永不漂移）；磁盘扫描移
+        线程池（对齐 KnowledgeService.list_quicklog 的 BQ-2 口径）。返回按
+        ref 倒序 = 最新条目在前。
+        """
+        spec_ws = await self._get_spec_workspace(workspace_id)
+        return await asyncio.to_thread(parse_quick_entries, Path(spec_ws.spec_root))
 
     # ── 内部 ──────────────────────────────────────────────────────────────
 
@@ -937,9 +966,9 @@ class DistillDispatchService:
             return None
         elif source_type == "quick":
             # ql-20260918-006（M4）：ref 白名单校验先于存在性检查——ref 会原样
-            # 拼进给 agent 的读取路径（build_distill_prompt），"../" 形态可把读取
-            # 路径指到 quicklog 目录外（存在性检查 (dir / f"{ref}.md") 对 .. 不
-            # 设防）。合法形态 = ql-id 风格：字母数字开头，仅含 字母数字/./_/-。
+            # 拼进给 agent 的读取指引（build_distill_prompt 的 grep 定位），"../"
+            # 形态可把读取路径指到 quicklog 目录外。合法形态 = ql-id 风格：字母
+            # 数字开头，仅含 字母数字/./_/-。
             for ref in refs:
                 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", ref):
                     raise DistillSourceInvalid(
@@ -947,13 +976,15 @@ class DistillDispatchService:
                         " 字母数字/./_/- 组合），请从快速修复列表选择。",
                         details={"source_type": source_type, "source_ref": ref},
                     )
-            # D-010②：ql 是 spec 树文件条目（<spec_root>/quicklog/<ql-id>.md），
-            # 逐条校验存在性；缺失任一条即 422（与 parser 读取口径同根）。
-            quicklog_dir = Path(spec_ws.spec_root) / "quicklog"
+            # quick-2dba0118：按**条目**校验——quicklog 是单文件多条目形态
+            # （QUICKLOG-*.md 内 `## <ql-id>` 节），旧 `<ql>.md` 文件级校验在
+            # 真实环境恒 422（列表只显示文件、校验却找独立条目文件）。条目
+            # 集合与 quick-entries 端点同根（parse_quick_entries 单一实现）。
+            available_refs = {entry.ref for entry in parse_quick_entries(Path(spec_ws.spec_root))}
             for ref in refs:
-                if not (quicklog_dir / f"{ref}.md").is_file():
+                if ref not in available_refs:
                     raise DistillSourceInvalid(
-                        f"快速修复日志 '{ref}' 不存在，请从快速修复列表选择。",
+                        f"快速修复日志 '{ref}' 在 QUICKLOG 中无此条目，请从快速修复列表选择。",
                         details={"source_type": source_type, "source_ref": ref},
                     )
             return None

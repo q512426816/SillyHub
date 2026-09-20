@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.modules.knowledge.parser import KnowledgeParser, parse_md_directory
+from app.modules.knowledge.parser import KnowledgeParser, parse_md_directory, parse_quick_entries
 
 
 def test_parse_knowledge_with_files(tmp_path: Path) -> None:
@@ -200,3 +200,95 @@ def test_read_file_safe_large_file_truncates_without_full_read(tmp_path: Path) -
     assert truncated is True
     # 只读了前 limit 字节，而不是整文件后再切片
     assert len(content) == limit
+
+
+# ---------------------------------------------------------------------------
+# quick-2dba0118（沉淀弹层三修之一）：quicklog 条目级解析 parse_quick_entries
+# ---------------------------------------------------------------------------
+
+
+def test_parse_quick_entries_single_file_multi_sections(tmp_path: Path) -> None:
+    """单文件多条目：`## <ql-id> | 日期 | 标题` 节头逐条提取（ref/title/date）。
+
+    quicklog 真实形态是 QUICKLOG-*.md 单文件内多条 `## ql-...` 节（服务器实证，
+    一个文件 17 条）——旧式无后缀 ref、非 ql 节头、两段头一律不匹配。"""
+    quicklog_dir = tmp_path / "quicklog"
+    quicklog_dir.mkdir()
+    (quicklog_dir / "QUICKLOG-demo.md").write_text(
+        "\n".join(
+            [
+                "# QUICKLOG",
+                "",
+                "## ql-20260918-001-a1b2 | 2026-09-18 09:00:00 | 第一修：登录超时",
+                "状态：已完成",
+                "",
+                "## ql-20260918-002-c3d4 | 2026-09-18 21:30:00 | 第二修：乱码守卫",
+                "状态：已完成",
+                "",
+                "## 2026-09-18 22:00:00 — 旧式时间戳节头（无 ql-id，不匹配）",
+                "",
+                "## ql-20260706-003 | 2026-07-06 03:10:00 | 旧式无后缀（不匹配）",
+                "",
+                "正文里的 `## ql-20260918-003-eeee | d | t` 缩进行不匹配（锚定行首）",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    entries = parse_quick_entries(tmp_path)
+    assert [(e.ref, e.title, e.date) for e in entries] == [
+        ("ql-20260918-002-c3d4", "第二修：乱码守卫", "2026-09-18 21:30:00"),
+        ("ql-20260918-001-a1b2", "第一修：登录超时", "2026-09-18 09:00:00"),
+    ]
+
+
+def test_parse_quick_entries_dedup_case_tolerant_and_newest_first(tmp_path: Path) -> None:
+    """跨文件按 ref 去重（较新文件副本优先）+ 大小写容忍 + ref 倒序最新在前；
+    非 QUICKLOG- 前缀文件与子目录不进条目视图。"""
+    quicklog_dir = tmp_path / "quicklog"
+    quicklog_dir.mkdir()
+    (quicklog_dir / "QUICKLOG-a.md").write_text(
+        "## ql-20260918-001-dup | 2026-09-18 08:00:00 | 旧文件副本\n"
+        "## ql-20260917-001-old | 2026-09-17 08:00:00 | 旧文件条目\n",
+        encoding="utf-8",
+    )
+    # 文件名倒序较新（QUICKLOG-b > QUICKLOG-a）：同 ref 副本以本文件为准。
+    (quicklog_dir / "QUICKLOG-b.md").write_text(
+        "## ql-20260918-001-dup | 2026-09-18 08:00:00 | 新文件副本\n"
+        "## ql-20260919-001-new | 2026-09-19 08:00:00 | 新条目\n",
+        encoding="utf-8",
+    )
+    # 大小写容忍：小写 quicklog- 前缀同收。
+    (quicklog_dir / "quicklog-c.md").write_text(
+        "## ql-20260916-001-low | 2026-09-16 08:00:00 | 小写文件名条目\n",
+        encoding="utf-8",
+    )
+    # 非 QUICKLOG 前缀（旧式独立条目文件）不扫。
+    (quicklog_dir / "ql-20260101-001-x.md").write_text(
+        "## ql-20260101-001-x | 2026-01-01 08:00:00 | 独立文件条目\n", encoding="utf-8"
+    )
+    # 子目录不递归。
+    (quicklog_dir / "sub").mkdir()
+    (quicklog_dir / "sub" / "QUICKLOG-nested.md").write_text(
+        "## ql-20260102-001-n | 2026-01-02 08:00:00 | 嵌套条目\n", encoding="utf-8"
+    )
+
+    entries = parse_quick_entries(tmp_path)
+    assert [e.ref for e in entries] == [
+        "ql-20260919-001-new",
+        "ql-20260918-001-dup",
+        "ql-20260917-001-old",
+        "ql-20260916-001-low",
+    ]
+    dup = next(e for e in entries if e.ref == "ql-20260918-001-dup")
+    assert dup.title == "新文件副本"
+
+
+def test_parse_quick_entries_missing_or_empty_dir(tmp_path: Path) -> None:
+    """quicklog 目录不存在 / 存在但无 QUICKLOG-*.md → 空列表。"""
+    assert parse_quick_entries(tmp_path) == []
+
+    quicklog_dir = tmp_path / "quicklog"
+    quicklog_dir.mkdir()
+    (quicklog_dir / "notes.md").write_text("## ql-20260101-001-x | d | t\n", encoding="utf-8")
+    assert parse_quick_entries(tmp_path) == []

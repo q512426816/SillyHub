@@ -20,6 +20,9 @@ export type KnowledgeMergeResult = components["schemas"]["KnowledgeMergeResult"]
 // 蒸馏 DTO（task-08 消费，task-07 交付的生成类型）。
 export type DistillDispatchIn = components["schemas"]["DistillDispatchIn"];
 export type DistillTaskRead = components["schemas"]["DistillTaskRead"];
+// quick 条目级 DTO（quick-2dba0118 沉淀弹层三修消费的生成类型）。
+export type DistillQuickEntryOut = components["schemas"]["DistillQuickEntryOut"];
+export type DistillQuickEntryList = components["schemas"]["DistillQuickEntryList"];
 
 /**
  * filename 路径段编码：按 `/` 分段 encodeURIComponent 拼回，不整串编码。
@@ -220,12 +223,30 @@ export async function listDistillTasks(
 }
 
 /**
+ * quicklog 条目级列表（quick-2dba0118 沉淀弹层三修之一）：GET
+ * /knowledge/distill/quick-entries。
+ *
+ * quicklog 的真实形态是**单文件多条目**（QUICKLOG-*.md 内 `## <ql-id> | 日期 |
+ * 标题` 节）——GET /quicklog 的文件级列表（listQuicklog）只返回文件，选不出
+ * 具体条目（「只能选一个」的根因）。本端点投影条目视图（ref/title/date，
+ * 按ref 倒序最新在前），蒸馏弹层 quick 源多选单位 = ref（source_ref list 元素，
+ * 后端 dispatch 同根校验）。listQuicklog 及其文件语义消费者零改动。
+ */
+export async function listQuickEntries(
+  workspaceId: string,
+): Promise<DistillQuickEntryList> {
+  return apiFetch<DistillQuickEntryList>(
+    `/api/workspaces/${workspaceId}/knowledge/distill/quick-entries`,
+  );
+}
+
+/**
  * 快速修复文件列表（D-010② quick 蒸馏来源）：GET /quicklog。
  *
  * 返回 ql 文件条目（filename 为 basename 如 ql-20260917-002-a5c0.md）；
- * 蒸馏 source_ref 取 filename 去 `.md` 后缀的自然键短码（后端按
- * `{ref}.md` 校验文件存在性）。已沉淀反链亦需要本列表 + listDistillTasks
- * 联合判定（弹层来源列表「已沉淀 ↗」标签，task-08 扩展）。
+ * 已沉淀反链亦需要本列表 + listDistillTasks 联合判定（弹层来源列表
+ * 「已沉淀 ↗」标签，task-08 扩展）。quick-2dba0118 起 quick 蒸馏源多选
+ * 改用条目级 listQuickEntries，本端点保留给文件语义消费者（零改动）。
  */
 export async function listQuicklog(
   workspaceId: string,

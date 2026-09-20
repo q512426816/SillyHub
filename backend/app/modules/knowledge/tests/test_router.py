@@ -1000,3 +1000,124 @@ async def test_distill_dispatch_source_validation_via_http(
         json={"source_type": "session", "source_ref": str(uuid.uuid4())},
     )
     assert resp.status_code == 404, resp.text
+
+
+# ---------------------------------------------------------------------------
+# quick-2dba0118（沉淀弹层三修之一）：GET /knowledge/distill/quick-entries
+# ---------------------------------------------------------------------------
+
+
+def _seed_quicklog_entries(tmp_path: Path) -> None:
+    """给 writer_ws 的 spec_root 铺 QUICKLOG 单文件多条目（条目级端点数据源）。"""
+    quicklog_dir = tmp_path / "writer-router-spec" / "quicklog"
+    quicklog_dir.mkdir(parents=True, exist_ok=True)
+    (quicklog_dir / "QUICKLOG-demo.md").write_text(
+        "## ql-20260918-001-a1b2 | 2026-09-18 09:00:00 | 第一修：登录超时\n状态：已完成\n"
+        "\n## ql-20260918-002-c3d4 | 2026-09-18 21:30:00 | 第二修：乱码守卫\n状态：已完成\n",
+        encoding="utf-8",
+    )
+
+
+async def test_distill_quick_entries_shape_and_permission(
+    client,
+    db_session,
+    writer_ws: dict,
+    auth_headers: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    """quick-entries 端点形状（items: ref/title/date，ref 倒序最新在前）+ 读权限
+    放行（字面量路由未被 {filename:path} 通配吞）。"""
+    ws_id = writer_ws["ws_id"]
+    _seed_quicklog_entries(tmp_path)
+
+    resp = await client.get(
+        f"/api/workspaces/{ws_id}/knowledge/distill/quick-entries",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert set(body) == {"items"}
+    assert [item["ref"] for item in body["items"]] == [
+        "ql-20260918-002-c3d4",
+        "ql-20260918-001-a1b2",
+    ]
+    assert set(body["items"][0]) == {"ref", "title", "date"}
+    assert body["items"][0]["title"] == "第二修：乱码守卫"
+    assert body["items"][0]["date"] == "2026-09-18 21:30:00"
+
+    # 仅 KNOWLEDGE_READ 用户可读（读侧端点），未认证 401。
+    reader_headers = await _knowledge_read_only_headers(db_session)
+    resp = await client.get(
+        f"/api/workspaces/{ws_id}/knowledge/distill/quick-entries",
+        headers=reader_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["items"]) == 2
+
+    resp = await client.get(
+        f"/api/workspaces/{ws_id}/knowledge/distill/quick-entries",
+    )
+    assert resp.status_code == 401, resp.text
+
+
+async def test_distill_dispatch_quick_entry_level_validation_and_llm_provider_passthrough(
+    client,
+    writer_ws: dict,
+    auth_headers: dict[str, str],
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """HTTP 面：quick 源条目级校验（不存在条目 422）+ llm_provider_id 进
+    DistillDispatchIn 契约（合法 UUID 透传 create_session，非法形态 schema 422）。"""
+    from app.modules.agent.placement import NoOnlineDaemonError
+    from app.modules.knowledge import distill as distill_module
+
+    ws_id = writer_ws["ws_id"]
+    _seed_quicklog_entries(tmp_path)
+
+    # 不存在条目 → 422（条目级校验文案）。
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/knowledge/distill",
+        headers=auth_headers,
+        json={"source_type": "quick", "source_ref": "ql-20260918-099-absent"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "QUICKLOG 中无此条目" in resp.json()["message"]
+
+    # 合法条目 + llm_provider_id/model → 过 schema 校验与条目校验进派发链，
+    # 经 create_session 透传（mock 捕获参数；离线异常走 failed 任务条口径——
+    # 供应商归属/agent_kind 匹配归 inject_gates，单测不铺加密凭证行）。
+    captured: dict = {}
+
+    async def _fake_create_session(svc, user_id, **kwargs):
+        captured.update(kwargs)
+        raise NoOnlineDaemonError(user_id=user_id)
+
+    monkeypatch.setattr(distill_module, "_create_session", _fake_create_session)
+
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/knowledge/distill",
+        headers=auth_headers,
+        json={
+            "source_type": "quick",
+            "source_ref": ["ql-20260918-001-a1b2", "ql-20260918-002-c3d4"],
+            "llm_provider_id": "5f0c9fc2-1111-4222-8333-444455556666",
+            "model": "glm-4.7",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "failed"  # 离线兜底任务条
+    assert captured["llm_provider_id"] == "5f0c9fc2-1111-4222-8333-444455556666"
+    assert captured["model"] == "glm-4.7"
+
+    # llm_provider_id 非法形态 → schema 422（uuid 格式）。
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/knowledge/distill",
+        headers=auth_headers,
+        json={
+            "source_type": "quick",
+            "source_ref": "ql-20260918-001-a1b2",
+            "llm_provider_id": "not-a-uuid",
+        },
+    )
+    assert resp.status_code == 422, resp.text

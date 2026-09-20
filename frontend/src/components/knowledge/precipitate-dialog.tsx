@@ -21,8 +21,21 @@
  *   「已沉淀 ↗」标签，点击跳 merged_to 目标文件（未合并则仅关弹层回
  *   知识库页，proposed 候选无精确文件名可锚）。源列表走既有实名 API：
  *   会话 listAgentSessions（@/lib/daemon/session-lists，workspace_id 过滤）、
- *   变更 listChanges（@/lib/changes，status=archived）、快速修复
- *   listQuicklog（@/lib/knowledge，GET /quicklog）。
+ *   变更 listChanges（@/lib/changes，status=archived）。
+ *
+ * quick-2dba0118（沉淀弹层三修，ql-20260920-008-3066）：
+ * - **修一（quick 多选失效）**：quicklog 真实形态是单文件多条目
+ *   （QUICKLOG-*.md 内 `## <ql-id>` 节），文件级 listQuicklog 列表只有 1 个
+ *   文件可选不出条目——quick 源列表改调条目级 listQuickEntries
+ *   （GET /knowledge/distill/quick-entries，ref/title/date 最新在前），
+ *   多选单位 = ql ref（selectedQuick 逻辑不变）。
+ * - **修二（弹层溢出）**：DialogContent 加 max-h-[85vh] overflow-y-auto，
+ *   内容长时整体滚动不再溢出视口（max-w-xl 保留）。
+ * - **修三（fresh 配置补供应商/模型）**：配置区增供应商下拉
+ *   （listProviders，空选项「跟随默认」=不传 llm_provider_id，后端回落
+ *   workspace/机器默认，「和会话新建一样使用本机默认」）+ 模型下拉——
+ *   选定供应商后「获取模型」按钮触发 fetchProviderModels 拉列表填充
+ *   select；未选供应商 / 拉取失败退化为文本输入框允许手输模型名；空=不传。
  *
  * 弹层自身不做权限判断——可见性由 knowledge/page.tsx 按 KNOWLEDGE_WRITE
  * 持有者控制（卡片约束：写入口可见性 = useSession permissions + is_platform_admin
@@ -46,6 +59,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  fetchProviderModels,
+  listProviders,
+  type LlmProviderRead,
+} from "@/lib/api/llm-providers";
 import { listChanges } from "@/lib/changes";
 import { listDaemonRuntimes, PROVIDER_META } from "@/lib/daemon";
 import { listAgentSessions } from "@/lib/daemon/session-lists";
@@ -53,7 +71,7 @@ import { errMessage, useNotify } from "@/lib/errors";
 import {
   dispatchDistill,
   listDistillTasks,
-  listQuicklog,
+  listQuickEntries,
   proposeKnowledge,
   type DistillDispatchIn,
   type DistillTaskRead,
@@ -181,17 +199,29 @@ export function PrecipitateDialog({ workspaceId, onClose, onProposed, onDistille
   const [sourcesError, setSourcesError] = useState<string | null>(null);
   /** 已选单选源（session/change 的 DistillSourceItem.ref），null = 未选。 */
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
-  /** 已选 quick 多选源（ql 自然键短码集合，对应 source_ref list[str]，D-010②）。 */
+  /** 已选 quick 多选源（ql 条目 ref 集合，对应 source_ref list[str]，D-010②）。 */
   const [selectedQuick, setSelectedQuick] = useState<string[]>([]);
   /** 派谁去干（D-009）：会话源可选 resume/fresh；change/quick 强制 fresh。 */
   const [executorMode, setExecutorMode] = useState<"resume" | "fresh">("resume");
   /** fresh 配置（D-010③）：空串 = 不指定，后端回落 workspace 默认。 */
   const [freshRuntimeId, setFreshRuntimeId] = useState("");
   const [freshAgentType, setFreshAgentType] = useState("");
+  /**
+   * quick-2dba0118 修三：供应商 + 模型。空串 = 不传（后端回落
+   * workspace/机器默认，「和会话新建一样使用本机默认」）。
+   */
+  const [freshProviderId, setFreshProviderId] = useState("");
+  const [freshModel, setFreshModel] = useState("");
   /** 在线 runtime 列表（机器下拉 + agent 类型下拉同源一次拉取）。 */
   const [onlineRuntimes, setOnlineRuntimes] = useState<
     Array<{ id: string; label: string; provider: string | null }>
   >([]);
+  /** LLM 供应商列表（修三数据源；失败静默空列表，对齐 R-04 退化口径）。 */
+  const [llmProviders, setLlmProviders] = useState<LlmProviderRead[]>([]);
+  /** 已拉取的模型候选（当前选定供应商的 /v1/models；空 = 未拉取/拉取失败）。 */
+  const [providerModels, setProviderModels] = useState<string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
   /** 已沉淀反链（D-010①）：蒸馏任务全集，渲染期按 source_ref 反查来源项。 */
   const [precipitated, setPrecipitated] = useState<DistillTaskRead[]>([]);
   const [focus, setFocus] = useState("");
@@ -237,15 +267,15 @@ export function PrecipitateDialog({ workspaceId, onClose, onProposed, onDistille
                 sub: "已归档变更",
               })),
             )
-          : // D-010② quick 来源：GET /quicklog（knowledge.ts 现有封装），source_ref
-            // 取 filename 去 .md 的自然键短码（后端按 `{ref}.md` 校验存在性）。
-            listQuicklog(workspaceId).then((resp) =>
+          : // quick-2dba0118 修一：quick 源改调条目级 listQuickEntries——quicklog
+            // 是单文件多条目形态（QUICKLOG-*.md 内 `## <ql-id>` 节），文件级
+            // listQuicklog 列表只有 1 个文件选不出条目（「只能选一个」根因）。
+            // 主行显示 ref（稳定标识），副行 = 标题 · 日期；多选单位 = ql ref。
+            listQuickEntries(workspaceId).then((resp) =>
               resp.items.map<DistillSourceItem>((e) => ({
-                ref: e.filename.replace(/\.md$/i, ""),
-                title: e.title && e.title.trim() ? e.title : e.filename,
-                sub: e.last_modified_at
-                  ? `快速修复 · ${e.last_modified_at.slice(0, 10)}`
-                  : "快速修复",
+                ref: e.ref,
+                title: e.ref,
+                sub: `${e.title} · ${e.date.slice(0, 10)}`,
               })),
             );
     promise
@@ -286,6 +316,23 @@ export function PrecipitateDialog({ workspaceId, onClose, onProposed, onDistille
       })
       .catch(() => {
         if (!cancelled) setOnlineRuntimes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+
+  // quick-2dba0118 修三：LLM 供应商一次拉取（供应商下拉数据源；失败静默空
+  // 列表——「跟随默认」恒可选，对齐 runtime 列表 R-04 退化口径）。
+  useEffect(() => {
+    if (activeTab !== "distill") return;
+    let cancelled = false;
+    listProviders()
+      .then((ps) => {
+        if (!cancelled) setLlmProviders(ps);
+      })
+      .catch(() => {
+        if (!cancelled) setLlmProviders([]);
       });
     return () => {
       cancelled = true;
@@ -346,11 +393,48 @@ export function PrecipitateDialog({ workspaceId, onClose, onProposed, onDistille
     onClose();
   };
 
+  // ── quick-2dba0118 修三：供应商/模型级联与模型列表拉取 ──────────────────────
+
+  /** 切供应商：级联重置模型（候选随供应商变，旧模型名对新供应商无意义，
+   * 对齐 session-config-bar「切供应商级联重置模型」模式）。 */
+  const handleProviderChange = (value: string) => {
+    setFreshProviderId(value);
+    setFreshModel("");
+    setProviderModels([]);
+    setModelsError(null);
+  };
+
+  /** 「获取模型」：编辑态按 provider_id 拉上游 /v1/models 填充模型下拉；
+   * 失败退化为文本输入框（提示可手输），空列表同样保持可手输。 */
+  const handleFetchModels = async () => {
+    if (!freshProviderId || modelsLoading) return;
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      const resp = await fetchProviderModels({ provider_id: freshProviderId });
+      setProviderModels(resp.models.map((m) => m.id));
+    } catch (err) {
+      setProviderModels([]);
+      setModelsError(errMessage(err, "获取模型列表失败，可手动输入模型名"));
+    } finally {
+      setModelsLoading(false);
+    }
+  };
+
+  /** 模型下拉候选：拉取结果 + 当前手输值兜底追加（手输值不在上游列表时
+   * 追加到尾部，防止受控 select 值悬空——session-config-bar 同款口径）。 */
+  const modelOptions =
+    freshModel && !providerModels.includes(freshModel)
+      ? [...providerModels, freshModel]
+      : providerModels;
+
   const handleDispatch = async () => {
     if (!canDispatch) return;
     // 按 mode 组装 DistillDispatchIn（生成类型，禁手写窄化）：
     // - resume（仅会话源）：原会话续接，不带 fresh 配置；
-    // - fresh：附 runtime_id/agent_type（空串不下发，后端回落 workspace 默认）；
+    // - fresh：附 runtime_id/agent_type（空串不下发，后端回落 workspace 默认）
+    //   + quick-2dba0118 修三的 llm_provider_id/model（空=不传，回落本机/
+    //   工作区默认，「和会话新建一样」）；
     // - quick：source_ref 多选 list[str]（D-010②），change/quick 恒 fresh。
     const payload: DistillDispatchIn = {
       source_type: sourceType,
@@ -363,6 +447,8 @@ export function PrecipitateDialog({ workspaceId, onClose, onProposed, onDistille
     if (effectiveMode === "fresh") {
       if (freshRuntimeId) payload.runtime_id = freshRuntimeId;
       if (freshAgentType) payload.agent_type = freshAgentType;
+      if (freshProviderId) payload.llm_provider_id = freshProviderId;
+      if (freshModel.trim()) payload.model = freshModel.trim();
     }
     setDispatching(true);
     setDispatchError(null);
@@ -385,7 +471,9 @@ export function PrecipitateDialog({ workspaceId, onClose, onProposed, onDistille
         if (!open && !submitting && !dispatching) onClose();
       }}
     >
-      <DialogContent className="max-w-xl">
+      {/* quick-2dba0118 修二：max-h-[85vh] overflow-y-auto——内容长时整体滚动，
+          不再溢出视口（max-w-xl 原值保留）。 */}
+      <DialogContent className="max-h-[85vh] overflow-y-auto max-w-xl">
         <DialogHeader>
           <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
             <Sparkles className="h-5 w-5" />
@@ -645,7 +733,9 @@ export function PrecipitateDialog({ workspaceId, onClose, onProposed, onDistille
 
             {/* fresh 配置区（D-010③，原型 .fresh-grid）：机器钉 runtime（优先于
                 agent 类型）+ agent 类型（provider），空值不下发由后端回落
-                workspace 默认（对齐 create_session 双入口）。 */}
+                workspace 默认（对齐 create_session 双入口）。
+                quick-2dba0118 修三：增供应商/模型两控件——「跟随默认」不传，
+                后端回落 workspace/机器默认（和会话新建一样使用本机默认）。 */}
             {effectiveMode === "fresh" && (
               <div>
                 <span className="text-xs font-medium text-muted-foreground">
@@ -687,6 +777,75 @@ export function PrecipitateDialog({ workspaceId, onClose, onProposed, onDistille
                         ),
                       )}
                     </select>
+                  </label>
+                  {/* 修三：LLM 供应商（会话级凭证）。「跟随默认」= 不传
+                      llm_provider_id，后端回落 workspace/机器默认。 */}
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] font-medium text-muted-foreground">供应商</span>
+                    <select
+                      aria-label="供应商"
+                      value={freshProviderId}
+                      onChange={(e) => handleProviderChange(e.target.value)}
+                      disabled={dispatching}
+                      className="h-8 w-full rounded border border-input bg-background px-2.5 text-xs focus:border-ring focus:outline-none"
+                    >
+                      <option value="">跟随默认</option>
+                      {llmProviders.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                          {p.is_default ? "（默认）" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {/* 修三：模型。未选供应商 / 未拉取 / 拉取失败 → 文本输入框
+                      （手输模型名）；拉取成功后填充 select。空 = 不传。 */}
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] font-medium text-muted-foreground">模型</span>
+                    <div className="flex items-center gap-1.5">
+                      {providerModels.length > 0 ? (
+                        <select
+                          aria-label="模型"
+                          value={freshModel}
+                          onChange={(e) => setFreshModel(e.target.value)}
+                          disabled={dispatching}
+                          className="h-8 w-full rounded border border-input bg-background px-2.5 text-xs focus:border-ring focus:outline-none"
+                        >
+                          <option value="">跟随默认</option>
+                          {modelOptions.map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          aria-label="模型"
+                          value={freshModel}
+                          onChange={(e) => setFreshModel(e.target.value)}
+                          placeholder="留空=跟随默认，可手动输入模型名"
+                          maxLength={128}
+                          disabled={dispatching}
+                          className="h-8 w-full rounded border border-input bg-background px-2.5 text-xs focus:border-ring focus:outline-none"
+                        />
+                      )}
+                      {freshProviderId && providerModels.length === 0 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 shrink-0 px-2.5 text-xs"
+                          onClick={() => void handleFetchModels()}
+                          disabled={modelsLoading || dispatching}
+                        >
+                          {modelsLoading ? "获取中…" : "获取模型"}
+                        </Button>
+                      )}
+                    </div>
+                    {modelsError && (
+                      <span className="text-[10.5px] text-destructive">{modelsError}</span>
+                    )}
                   </label>
                 </div>
                 <p className="mt-1 text-[10.5px] text-muted-foreground">

@@ -8,6 +8,10 @@
  *     保存成功失败分支）+ task-08 卡片（来源类型切换 / 源列表渲染 / 派发载荷
  *     source_type+source_ref+focus / 未选源禁用；task-05 头注释约定 task-08
  *     落地后默认 tab 翻转为「从记录提炼」，原型同款）
+ *   - quick-2dba0118（沉淀弹层三修）：①quick 源改条目级 listQuickEntries
+ *     （quicklog 单文件多条目，多选单位 = ql ref）；③fresh 配置补供应商/
+ *     模型（默认「跟随默认」不传，选定后 llm_provider_id/model 透传，拉取
+ *     失败退化手输）；②弹层溢出为纯样式类（max-h/overflow）无测试。
  *
  * 覆盖：
  *   1. 手工录入：必填缺省 → 「存为候选知识」禁用；填齐后可用
@@ -18,10 +22,12 @@
  *      （workspace_id 过滤）；切「变更归档」→ listChanges(status=archived) 渲染
  *      变更名；未选源派发禁用；派发成功载荷 source_type/source_ref/focus +
  *      toast + onDistilled + onClose；派发失败错误展示弹层不关
+ *   6. quick-2dba0118：quick 条目列表（ref 主行 + 标题·日期副行）与多选载荷；
+ *      供应商/模型默认不传 + 选定透传 + 拉取失败手输退化 + 切回跟随默认级联清空
  *
- * mock @/lib/knowledge + @/lib/daemon/session-lists + @/lib/changes（hoisted
- * vi.fn）+ @/lib/errors useNotify（antd App 上下文依赖，workspace-scan-dialog.test
- * 同款替换纯函数实现）。
+ * mock @/lib/knowledge + @/lib/daemon/session-lists + @/lib/changes +
+ * @/lib/api/llm-providers（hoisted vi.fn）+ @/lib/errors useNotify（antd App
+ * 上下文依赖，workspace-scan-dialog.test 同款替换纯函数实现）。
  */
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -32,14 +38,24 @@ import { PrecipitateDialog } from "@/components/knowledge/precipitate-dialog";
 const knowledgeApi = vi.hoisted(() => ({
   proposeKnowledge: vi.fn(),
   dispatchDistill: vi.fn(),
-  listQuicklog: vi.fn(),
+  listQuickEntries: vi.fn(),
   listDistillTasks: vi.fn(),
 }));
 vi.mock("@/lib/knowledge", () => ({
   proposeKnowledge: knowledgeApi.proposeKnowledge,
   dispatchDistill: knowledgeApi.dispatchDistill,
-  listQuicklog: knowledgeApi.listQuicklog,
+  listQuickEntries: knowledgeApi.listQuickEntries,
   listDistillTasks: knowledgeApi.listDistillTasks,
+}));
+
+// quick-2dba0118 修三：供应商/模型数据源 mock。
+const llmProviderApi = vi.hoisted(() => ({
+  listProviders: vi.fn(),
+  fetchProviderModels: vi.fn(),
+}));
+vi.mock("@/lib/api/llm-providers", () => ({
+  listProviders: llmProviderApi.listProviders,
+  fetchProviderModels: llmProviderApi.fetchProviderModels,
 }));
 
 const sessionApi = vi.hoisted(() => ({ listAgentSessions: vi.fn() }));
@@ -74,11 +90,13 @@ const SESSION_ID = "9a8b7c6d-1111-2222-3333-444455556666";
 const CHANGE_KEY = "2026-09-04-conflict-resolve-entry";
 const QUICK_REF_A = "ql-20260917-001-a1b2";
 const QUICK_REF_B = "ql-20260917-002-c3d4";
+const PROVIDER_ID = "5f0c9fc2-1111-4222-8333-444455556666";
 
 /** 提炼 tab 默认激活 → 反链/机器列表随同拉取，提供静默缺省。 */
 function mockDistillSideData() {
   knowledgeApi.listDistillTasks.mockResolvedValue([]);
   daemonApi.listDaemonRuntimes.mockResolvedValue([]);
+  llmProviderApi.listProviders.mockResolvedValue([]);
 }
 
 function renderDialog(
@@ -177,28 +195,26 @@ beforeEach(() => {
     limit: 50,
     offset: 0,
   });
-  knowledgeApi.listQuicklog.mockReset();
-  knowledgeApi.listQuicklog.mockResolvedValue({
+  // quick-2dba0118 修一：quick 源改用条目级 listQuickEntries（ref/title/date）。
+  knowledgeApi.listQuickEntries.mockReset();
+  knowledgeApi.listQuickEntries.mockResolvedValue({
     items: [
       {
-        filename: `${QUICK_REF_A}.md`,
-        path: `.sillyspec/quicklog/${QUICK_REF_A}.md`,
+        ref: QUICK_REF_A,
         title: "会话列表心跳三缺陷",
-        content: null,
-        last_modified_at: "2026-09-17T08:00:00Z",
+        date: "2026-09-17 08:00:00",
       },
       {
-        filename: `${QUICK_REF_B}.md`,
-        path: `.sillyspec/quicklog/${QUICK_REF_B}.md`,
-        title: null,
-        content: null,
-        last_modified_at: null,
+        ref: QUICK_REF_B,
+        title: "归档回写坏编码守卫",
+        date: "2026-09-17 09:30:00",
       },
     ],
-    total: 2,
   });
   knowledgeApi.listDistillTasks.mockReset();
   daemonApi.listDaemonRuntimes.mockReset();
+  llmProviderApi.listProviders.mockReset();
+  llmProviderApi.fetchProviderModels.mockReset();
   mockDistillSideData();
 });
 
@@ -421,19 +437,21 @@ describe("PrecipitateDialog · 从记录提炼 tab（task-08 / FR-01 / FR-03）"
 });
 
 describe("PrecipitateDialog · D-010 快速修复多选 + D-009 派谁去干", () => {
-  it("切「快速修复」→ listQuicklog 拉取；checkbox 多选两条 → 载荷 source_ref 为 list + 强制 mode=fresh", async () => {
+  it("切「快速修复」→ 条目级 listQuickEntries 拉取；checkbox 多选两条 → 载荷 source_ref 为 list + 强制 mode=fresh", async () => {
     renderDialog();
 
     fireEvent.click(screen.getByTestId("distill-source-type-quick"));
 
-    await waitFor(() => expect(knowledgeApi.listQuicklog).toHaveBeenCalledWith("ws-1"));
+    await waitFor(() => expect(knowledgeApi.listQuickEntries).toHaveBeenCalledWith("ws-1"));
     const items = await screen.findAllByTestId("distill-source-item");
     expect(items).toHaveLength(2);
-    // ql 标题展示（title 缺失回退 filename）；source_ref 为 filename 去 .md 的自然键。
-    expect(screen.getByText("会话列表心跳三缺陷")).toBeInTheDocument();
-    expect(screen.getByText(`${QUICK_REF_B}.md`)).toBeInTheDocument();
+    // quick-2dba0118 修一：条目主行 = ql ref（稳定标识），副行 = 标题 · 日期。
+    expect(screen.getByText(QUICK_REF_A)).toBeInTheDocument();
+    expect(screen.getByText(QUICK_REF_B)).toBeInTheDocument();
+    expect(screen.getByText("会话列表心跳三缺陷 · 2026-09-17")).toBeInTheDocument();
+    expect(screen.getByText("归档回写坏编码守卫 · 2026-09-17")).toBeInTheDocument();
 
-    // 多选两条（对应 source_ref list[str]，D-010②）。
+    // 多选两条（对应 source_ref list[str]，D-010②；单位 = ql 条目 ref）。
     fireEvent.click(items[0]!);
     fireEvent.click(items[1]!);
     expect(screen.getByRole("button", { name: "新建 agent 提炼" })).toBeEnabled();
@@ -531,6 +549,127 @@ describe("PrecipitateDialog · D-010 快速修复多选 + D-009 派谁去干", (
       runtime_id: "rt-1",
       agent_type: "claude",
     });
+  });
+
+  // ── quick-2dba0118 修三：供应商/模型选择 ────────────────────────────────────
+
+  it("fresh 配置区含供应商/模型控件；默认「跟随默认」不传 llm_provider_id/model", async () => {
+    llmProviderApi.listProviders.mockResolvedValue([
+      {
+        id: PROVIDER_ID,
+        name: "智谱 GLM",
+        is_default: false,
+      },
+    ]);
+    renderDialog();
+    const items = await screen.findAllByTestId("distill-source-item");
+    fireEvent.click(items[0]!);
+
+    fireEvent.click(screen.getByLabelText("新建 agent"));
+
+    // 供应商下拉出现（含「跟随默认」空选项）；未选供应商 → 模型为文本输入框
+    // （手输形态），「获取模型」按钮不出现。
+    const providerSelect = (await screen.findByLabelText("供应商")) as HTMLSelectElement;
+    expect(providerSelect.value).toBe("");
+    expect(screen.getByRole("option", { name: "智谱 GLM" })).toBeInTheDocument();
+    const modelInput = screen.getByLabelText("模型") as HTMLInputElement;
+    expect(modelInput.value).toBe("");
+    expect(screen.queryByRole("button", { name: "获取模型" })).not.toBeInTheDocument();
+
+    // 默认不选 → 载荷无 llm_provider_id / model 键。
+    fireEvent.click(screen.getByRole("button", { name: "新建 agent 提炼" }));
+    await waitFor(() => expect(knowledgeApi.dispatchDistill).toHaveBeenCalledTimes(1));
+    const payload = knowledgeApi.dispatchDistill.mock.calls[0]![1] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("llm_provider_id");
+    expect(payload).not.toHaveProperty("model");
+  });
+
+  it("选定供应商 → 「获取模型」拉列表填充 select；选定后 llm_provider_id/model 随载荷透传", async () => {
+    llmProviderApi.listProviders.mockResolvedValue([
+      { id: PROVIDER_ID, name: "智谱 GLM", is_default: false },
+    ]);
+    llmProviderApi.fetchProviderModels.mockResolvedValue({
+      models: [
+        { id: "glm-4.7", owned_by: null },
+        { id: "glm-4.6", owned_by: null },
+      ],
+    });
+    renderDialog();
+    const items = await screen.findAllByTestId("distill-source-item");
+    fireEvent.click(items[0]!);
+    fireEvent.click(screen.getByLabelText("新建 agent"));
+
+    fireEvent.change(await screen.findByLabelText("供应商"), {
+      target: { value: PROVIDER_ID },
+    });
+
+    // 选定供应商后出现「获取模型」按钮；点击拉列表（provider_id 编辑态形态）。
+    const fetchBtn = await screen.findByRole("button", { name: "获取模型" });
+    fireEvent.click(fetchBtn);
+
+    await waitFor(() =>
+      expect(llmProviderApi.fetchProviderModels).toHaveBeenCalledWith({
+        provider_id: PROVIDER_ID,
+      }),
+    );
+
+    // 拉取成功后模型退化为 select（候选填充 + 「跟随默认」空选项）。
+    const modelSelect = (await screen.findByLabelText("模型")) as HTMLSelectElement;
+    expect(modelSelect.tagName).toBe("SELECT");
+    expect(screen.getByRole("option", { name: "glm-4.7" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "glm-4.6" })).toBeInTheDocument();
+    fireEvent.change(modelSelect, { target: { value: "glm-4.7" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "新建 agent 提炼" }));
+    await waitFor(() => expect(knowledgeApi.dispatchDistill).toHaveBeenCalledTimes(1));
+    expect(knowledgeApi.dispatchDistill).toHaveBeenCalledWith("ws-1", {
+      source_type: "session",
+      source_ref: SESSION_ID,
+      focus: null,
+      mode: "fresh",
+      llm_provider_id: PROVIDER_ID,
+      model: "glm-4.7",
+    });
+  });
+
+  it("拉取模型失败 → 文本输入框手输模型名可派发；切回「跟随默认」级联清空模型", async () => {
+    llmProviderApi.listProviders.mockResolvedValue([
+      { id: PROVIDER_ID, name: "智谱 GLM", is_default: false },
+    ]);
+    llmProviderApi.fetchProviderModels.mockRejectedValueOnce(
+      new Error("上游暂不可用"),
+    );
+    renderDialog();
+    const items = await screen.findAllByTestId("distill-source-item");
+    fireEvent.click(items[0]!);
+    fireEvent.click(screen.getByLabelText("新建 agent"));
+
+    fireEvent.change(await screen.findByLabelText("供应商"), {
+      target: { value: PROVIDER_ID },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "获取模型" }));
+
+    // 拉取失败：错误提示（err.message 直出）+ 模型保持文本输入框（手输模型名照常下发）。
+    await waitFor(() =>
+      expect(screen.getByText(/上游暂不可用/)).toBeInTheDocument(),
+    );
+    const modelInput = screen.getByLabelText("模型") as HTMLInputElement;
+    fireEvent.change(modelInput, { target: { value: "glm-4.7-air" } });
+
+    // 切回「跟随默认」：级联重置模型（候选/手输值/错误态一并清空）。
+    fireEvent.change(screen.getByLabelText("供应商"), { target: { value: "" } });
+    expect((screen.getByLabelText("模型") as HTMLInputElement).value).toBe("");
+    expect(screen.queryByText(/上游暂不可用/)).not.toBeInTheDocument();
+
+    // 手输再派发：模型透传。
+    fireEvent.change(screen.getByLabelText("模型"), {
+      target: { value: "  glm-4.7-air  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新建 agent 提炼" }));
+    await waitFor(() => expect(knowledgeApi.dispatchDistill).toHaveBeenCalledTimes(1));
+    const payload = knowledgeApi.dispatchDistill.mock.calls[0]![1] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("llm_provider_id");
+    expect(payload).toHaveProperty("model", "glm-4.7-air");
   });
 
   it("已沉淀反链（D-010①）：命中已合并任务 → 「已沉淀 ↗」点击跳 merged_to 文件段 + 关弹层", async () => {
