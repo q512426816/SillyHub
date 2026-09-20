@@ -12,8 +12,6 @@ blocks: [task-07]
 requirement_ids: [FR-01, FR-02, FR-03, FR-04, FR-05, FR-06]
 decision_ids: [D-007, D-008@v3, D-009]
 allowed_paths:
-  - backend/app/modules/knowledge/router.py
-  - sillyhub-daemon/src/spec-sync.ts
   - .sillyspec/changes/2026-09-20-knowledge-effect-panel/
 target_files: []
 goal: >

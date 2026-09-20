@@ -18,6 +18,10 @@ target_files:
   - NEW:sillyhub-daemon/src/knowledge-hits-upload.ts
   - sillyhub-daemon/src/spec-sync.ts
   - NEW:sillyhub-daemon/tests/knowledge-hits-upload.test.ts
+expects_from:
+  task-01:
+    - contract: HitsBatchOut
+      needs: [ingested, skipped_bad, duplicates]
 goal: >
   daemon hits 增量上报：postSpecSync 汇聚点 best-effort 钩子，offset 家目录断点，分批 ≤2000 行，多端幂等交服务端 hash 去重。
 implementation:

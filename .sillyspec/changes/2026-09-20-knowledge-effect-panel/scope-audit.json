@@ -1,0 +1,252 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "006449b0adb3bdaf472a2cae1609ecd9780b3b35",
+  "totals": {
+    "files": 29,
+    "additions": 4879,
+    "deletions": 299
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/frontend_components.md",
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": ".sillyspec/docs/backend/modules/knowledge.md",
+      "additions": 9,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": ".sillyspec/docs/sillyhub-daemon/modules/client.md",
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": ".sillyspec/docs/sillyhub-daemon/modules/spec-sync.md",
+      "additions": 4,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/knowledge/hits.py",
+      "additions": 422,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/knowledge/parser.py",
+      "additions": 194,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/knowledge/router.py",
+      "additions": 42,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/knowledge/schema.py",
+      "additions": 133,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/knowledge/service.py",
+      "additions": 45,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_hits.py",
+      "additions": 460,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_parser.py",
+      "additions": 135,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_router.py",
+      "additions": 83,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/conftest.py",
+      "additions": 6,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/migrations/versions/20260920220000_create_knowledge_hits.py",
+      "additions": 77,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 411,
+      "deletions": 190,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx",
+      "additions": 210,
+      "deletions": 13,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx",
+      "additions": 119,
+      "deletions": 10,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx",
+      "additions": 454,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx",
+      "additions": 241,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/entry-card-list.tsx",
+      "additions": 629,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/ops-dashboard.tsx",
+      "additions": 330,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 251,
+      "deletions": 72,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/knowledge.ts",
+      "additions": 21,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/hub-client.ts",
+      "additions": 47,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/src/knowledge-hits-upload.ts",
+      "additions": 188,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/spec-sync.ts",
+      "additions": 11,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/hub-client.test.ts",
+      "additions": 43,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/knowledge-hits-upload.test.ts",
+      "additions": 312,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "NEW:backend/migrations/versions/<执行时定号>_create_knowledge_hits.py",
+      "planned": "新增",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "6960191f72ac9dccad90009debaadd7730b94ae9a038fba6f5ad0415f4bcbd3d",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-20T16:05:05.498Z"
+}

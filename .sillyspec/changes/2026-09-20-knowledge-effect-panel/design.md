@@ -79,6 +79,8 @@ scale: large
 | 修改 | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | zone 组/mock/双 tab 适配 |
 | 新增 | NEW:frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | 指标卡/死条目抽屉/榜渲染 |
 | 新增 | NEW:frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx | 三形态渲染/状态徽标/互跳/防复潮 |
+| 修改 | backend/conftest.py | 执行期合理偏差（task-03）：KnowledgeHit 模型 metadata 根注册，防单跑 test_router 缺表 |
+| 修改 | sillyhub-daemon/src/hub-client.ts | 执行期合理偏差（task-02）：postKnowledgeHitsBatch 公共方法+runtime_id 身份记录（HubClient 无既有公共 POST 面） |
 
 ## 接口定义
 

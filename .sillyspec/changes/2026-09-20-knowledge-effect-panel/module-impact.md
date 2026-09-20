@@ -42,6 +42,10 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `_module-map.yaml` | <!--TODO: 有未匹配文件，判定模块索引是否需增改（modules rebuild）--> | pending |
+| `backend/modules/knowledge.md` | 补 hits 第三面：knowledge_hits 表（uq 幂等）+ POST hits/batch / GET stats 两端点（六型白名单宽容外型、使用计数 {inject,fr-inject}、per_task 次任务归一口径+%两档显示、slug 双端归一、daemon_local_id）+ parse_knowledge_entries 条目全集 + list 透传 use_count + 运营四指标口径（task-07） | done |
+| `sillyhub-daemon/modules/spec-sync.md` | 补 hits 上报 best-effort 钩子（postSpecSync 成功汇聚点+独立 try/catch R-05）、`~/.sillyhub/daemon/.hits-upload-state-{wsId}.json` offset 状态文件、≤2000 行分批（R-06）、完整行断点（R-01）语义（task-07） | done |
+| `sillyhub-daemon/modules/client.md` | spec 同步方法面补 postKnowledgeHitsBatch（URL/body 契约+daemon_local_id 取 runtime_id+返回三计数）（task-07） | done |
+| `SillyHub/modules/frontend_components.md` | 知识域条目追加 ops-dashboard（四指标卡/内嵌死条目清单/使用率榜 % 两档格式 formatPerTaskPct/三态/knowledgeStatsQueryKey 导出）与 entry-card-list（四形态分发/slugifyAnchor 双端归一/防复潮/superseded 折叠/entryCounts 降级）一行式紧凑增量（task-07） | done |
+| `_module-map.yaml` | 无需增改：新文件 `sillyhub-daemon/src/knowledge-hits-upload.ts` 未入 map paths，但其语义已并卡（spec-sync 上报钩子 + client postKnowledgeHitsBatch），模块索引 rebuild 留待下次全量扫描 | skipped |
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。

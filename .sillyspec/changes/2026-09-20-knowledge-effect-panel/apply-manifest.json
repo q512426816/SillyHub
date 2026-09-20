@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-20-knowledge-effect-panel",
+  "appliedAt": "2026-09-20T16:06:52.692Z",
+  "baseHash": "006449b0adb3bdaf472a2cae1609ecd9780b3b35",
+  "files": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/frontend_components.md",
+      "sha256": "77afbec858cc8fbbf54fc7ff80881dd0441dbd4c67b2c19453a277527dd62297"
+    },
+    {
+      "path": ".sillyspec/docs/backend/modules/knowledge.md",
+      "sha256": "b8adb56cfba313860efdeb642653f17efb94f55da9152a442837b88045304967"
+    },
+    {
+      "path": ".sillyspec/docs/sillyhub-daemon/modules/client.md",
+      "sha256": "b6b7eb7a22a7a5286ed2d46c26d939956abc6676a30bee40211bb6528a6f9cd1"
+    },
+    {
+      "path": ".sillyspec/docs/sillyhub-daemon/modules/spec-sync.md",
+      "sha256": "e1b5da05305ee865c1e4f4cc3ff5a141de0fe49a9c776e1e620a1c072f0893cc"
+    },
+    {
+      "path": "backend/app/modules/knowledge/hits.py",
+      "sha256": "25541d15453b1ca8cd103bfd37c32b76b05e9c78012e67916195d2aa86938090"
+    },
+    {
+      "path": "backend/app/modules/knowledge/parser.py",
+      "sha256": "c7b179719579b740d972d86c7d42072931a77a41e19b11adb51d5b690048e01a"
+    },
+    {
+      "path": "backend/app/modules/knowledge/router.py",
+      "sha256": "c529d6a87e4db1f7f10086c41ac999997f674aa12195b9cd5b5a14de3f7b2336"
+    },
+    {
+      "path": "backend/app/modules/knowledge/schema.py",
+      "sha256": "bd43d79d39be44a825cbec0266be531a4d3117d4d1143c3013f6b1bf75e11b08"
+    },
+    {
+      "path": "backend/app/modules/knowledge/service.py",
+      "sha256": "ae6003039d2abb2b451ce48774cb2653ea6e687d61351d37719057dea662ad69"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_hits.py",
+      "sha256": "cd70be465a936887bec49872742e0a9d773477360f3265d6410410d1f15d5341"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_parser.py",
+      "sha256": "fe2c0ccdb17724ce227d711fa6c28b23b85cdbb5dc723a010657cdea8621dc8a"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_router.py",
+      "sha256": "32b3a2d77a760215a3ae0217cb40d5e4cc7c2c0eda418ec4b8b47f921189202f"
+    },
+    {
+      "path": "backend/conftest.py",
+      "sha256": "63bcd28abb7d6416fee530e9cc78037478492801315783c22ef8f0887465bf13"
+    },
+    {
+      "path": "backend/migrations/versions/20260920220000_create_knowledge_hits.py",
+      "sha256": "61f89f19ecc2140535ce5f539a753752eab60a2bec605e602aa6f5a485aa5ee9"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "98d6962e41b24fbb8019a8f8a8571609d514b5d8e2922bbe4110071ed6fb538b"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx",
+      "sha256": "fdef8e8a842522bcbfeca83beebfbd49eaf1f0acc2f2e941efafd41f6408255c"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx",
+      "sha256": "cffcf0ef6555b16be49d0b230401ec5ec235e2e46db2ac2951066148fd80c2fe"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx",
+      "sha256": "faa7fc479f173d188ae17a57ad3f72db352253534aecbe98d3d089df75f1f667"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx",
+      "sha256": "a475fef65ecf44c77651ddbfc8b1240d1cf654aef71807266b60a8206b56d4fe"
+    },
+    {
+      "path": "frontend/src/components/knowledge/entry-card-list.tsx",
+      "sha256": "7261d0ac639b407fea888de13db6134ac37fe52c483a983f6c20d40bbc82b643"
+    },
+    {
+      "path": "frontend/src/components/knowledge/ops-dashboard.tsx",
+      "sha256": "ff6dd571dac4c74d609373b3712c11072084e0db642377af590744a850646cb2"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "100581e2be5c107fc38bcce257a9e8d2e88025f9b060bb7b2c8cb140464a840b"
+    },
+    {
+      "path": "frontend/src/lib/knowledge.ts",
+      "sha256": "0a8fe46dadff74d928b353fdee64bf612538357209d74ed31bb48a2bd67164e0"
+    },
+    {
+      "path": "sillyhub-daemon/src/hub-client.ts",
+      "sha256": "df7de00df9183249c78ffd6a5affa59adf98e9195d962ff29bbb805f579533a1"
+    },
+    {
+      "path": "sillyhub-daemon/src/knowledge-hits-upload.ts",
+      "sha256": "4d15cc84f11c618f3511446db231afa0623063b6bec99689a24a5079c00196f9"
+    },
+    {
+      "path": "sillyhub-daemon/src/spec-sync.ts",
+      "sha256": "ee37786a73e48a2afa3281d9bbe8d6e057bd1b128a1630713654103e0fdc1d33"
+    },
+    {
+      "path": "sillyhub-daemon/tests/hub-client.test.ts",
+      "sha256": "5a496645954a3ce4b3e52fe4ab9b0019b1bec06f69cc628aab43642ef5e2d0ce"
+    },
+    {
+      "path": "sillyhub-daemon/tests/knowledge-hits-upload.test.ts",
+      "sha256": "8f2aa4683ed933918a1efe01eceb0a7112645572ed7ce187c8ff853bed055e5a"
+    }
+  ]
+}
