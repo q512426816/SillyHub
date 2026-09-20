@@ -15,7 +15,7 @@
  * mock 范式照 quicklog-drawer.test：importActual 部分 mock +
  * QueryClientProvider（retry: false）。
  */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -156,6 +156,125 @@ function renderCard(ui: React.ReactElement) {
     defaultOptions: { queries: { retry: false } },
   });
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
+/**
+ * 契约 v2 三仓夹具（f85a6650 类多仓变更，2026-09-20-scope-audit-cross-repo-platform）：
+ * main 20/2（post-apply 主仓锚）+ sub-grid-security 13/1（reviews 锚点档）+
+ * spdemo 9/1（B 档降级：语义锚 anchor_label=null、行数 null）。
+ * rows 只造 3 行——chips 数字必须取信封 repos[].totals（20/13/9）而非行重算，
+ * 行数与 totals 故意不一致正是「单一源」断言的钉子（design 消费语义）。
+ */
+function makeCrossRepoAudit(): ScopeAuditResponse {
+  return {
+    change: "2026-09-18-ehs-back-multi-repo",
+    ok: true,
+    mode: "full-flow",
+    base_ref: "214151b0c0d0e0f0a1b2c3d4e5f6a7b8c9d0e1f2",
+    anchor_label: "214151b",
+    degraded_reason: null,
+    totals: { files: 46, additions: 6040, deletions: 340 },
+    rows: [
+      {
+        path: "src/main/java/com/ehs/RewardController.java",
+        additions: 210,
+        deletions: 18,
+        kind: "modified",
+        planned: "修改",
+        verdict: "planned",
+        declared: null,
+        attribution: null,
+        cross_repo: null,
+      },
+      {
+        path: "pkg/reward/service.go",
+        additions: 430,
+        deletions: 0,
+        kind: "new",
+        planned: "新增",
+        verdict: "planned",
+        declared: null,
+        attribution: null,
+        cross_repo: "sub-grid-security",
+      },
+      {
+        path: "app/demo/page.tsx",
+        additions: null,
+        deletions: null,
+        kind: "modified",
+        planned: "修改",
+        verdict: "planned",
+        declared: null,
+        attribution: null,
+        cross_repo: "spdemo",
+      },
+    ],
+    excluded_foreign_declared: [],
+    note: "计划侧含 22 个跨仓文件（repo：sub-grid-security、spdemo）——已按 local.yaml repos 注册表分仓对账（各仓锚点档见分段）",
+    truncated: false,
+    repos: [
+      {
+        key: "main",
+        anchor: {
+          source: "main-post-apply",
+          base: "214151b0c0d0e0f0a1b2c3d4e5f6a7b8c9d0e1f2",
+          head: "8f9e0d1c2b3a49586775849realsub0",
+          label: "post-apply 主仓锚",
+        },
+        anchor_label: "214151b",
+        totals: {
+          files: 22,
+          additions: 5300,
+          deletions: 310,
+          planned: 20,
+          unplanned: 2,
+          untouched: 0,
+        },
+        degraded: false,
+        degraded_reason: null,
+      },
+      {
+        key: "sub-grid-security",
+        anchor: {
+          source: "reviews-range",
+          base: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+          head: "11223344556677889900aabbccddeeff0011223",
+          label: "reviews base..head（execute task 锚点，2 task 区间并集）",
+        },
+        anchor_label: "a1b2c3d",
+        totals: {
+          files: 14,
+          additions: 740,
+          deletions: 30,
+          planned: 13,
+          unplanned: 1,
+          untouched: 0,
+        },
+        degraded: false,
+        degraded_reason: null,
+      },
+      {
+        key: "spdemo",
+        anchor: {
+          source: "head~1-window",
+          base: null,
+          head: "0a1b2c3d4e5f6789abcdef0123456789abcdef01",
+          label: "HEAD~1..HEAD 最近提交窗口（降级——无可用 reviews）",
+        },
+        anchor_label: null,
+        totals: {
+          files: 10,
+          additions: null,
+          deletions: null,
+          planned: 9,
+          unplanned: 1,
+          untouched: 0,
+        },
+        degraded: false,
+        degraded_reason: null,
+      },
+    ],
+  };
 }
 
 beforeEach(() => {
@@ -404,5 +523,282 @@ describe("ql-20260911-001-c0be 明细弹窗与行联动", () => {
         "src/index.js",
       ),
     );
+  });
+});
+
+describe("2026-09-20-scope-audit-cross-repo-platform 分组形态：三仓分组渲染", () => {
+  it("全表合计 + 主仓/跨仓段各带真实三态与锚点档；chips 数字=信封 totals 不重算；note 渲染", async () => {
+    mocks.getScopeAudit.mockResolvedValue(makeCrossRepoAudit());
+    renderCard(
+      <ScopeAuditCommandCard
+        target={{
+          kind: "change",
+          workspaceId: "ws-1",
+          changeKey: "2026-09-18-ehs-back-multi-repo",
+        }}
+      />,
+    );
+    // 三仓段头（主仓 brand 位 + 各仓锚点档 chip：label + 短 hash；spdemo 语义锚 hash 位 —）
+    expect(
+      await screen.findByTestId("scope-audit-repo-seg-main"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("scope-audit-repo-seg-sub-grid-security")).toBeInTheDocument();
+    expect(screen.getByTestId("scope-audit-repo-seg-spdemo")).toBeInTheDocument();
+    expect(screen.getByText("主仓")).toBeInTheDocument();
+    expect(screen.getByText("sub-grid-security")).toBeInTheDocument();
+    expect(screen.getByText("214151b")).toBeInTheDocument();
+    expect(screen.getByText("a1b2c3d")).toBeInTheDocument();
+    expect(screen.getByText(/HEAD~1\.\.HEAD 最近提交窗口/)).toBeInTheDocument();
+    // 语义锚（B 档降级无 base）→ anchor_label null 显示 —
+    expect(screen.getByTestId("scope-audit-repo-seg-spdemo")).toHaveTextContent(
+      /最近提交窗口（降级——无可用 reviews）\s*—/,
+    );
+    // 全表合计行（信封 totals + 仓数；挂摘要容器断言——数字在 <b> 嵌套节点里）
+    expect(screen.getByTestId("scope-audit-summary")).toHaveTextContent(
+      "全表 46 文件",
+    );
+    expect(screen.getByText("3 个仓库")).toBeInTheDocument();
+    expect(screen.getByText("+6040")).toBeInTheDocument();
+    // 三态 chips 计数取信封 repos[].totals（rows 仅 3 行，20/13/9 只能来自信封）
+    expect(screen.getByTestId("scope-audit-chip-main-planned")).toHaveTextContent(
+      "计划内 20",
+    );
+    expect(screen.getByTestId("scope-audit-chip-main-unplanned")).toHaveTextContent(
+      "计划外 2",
+    );
+    expect(screen.getByTestId("scope-audit-chip-main-untouched")).toHaveTextContent(
+      "计划未动 0",
+    );
+    expect(
+      screen.getByTestId("scope-audit-chip-sub-grid-security-planned"),
+    ).toHaveTextContent("计划内 13");
+    expect(
+      screen.getByTestId("scope-audit-chip-sub-grid-security-unplanned"),
+    ).toHaveTextContent("计划外 1");
+    expect(screen.getByTestId("scope-audit-chip-spdemo-planned")).toHaveTextContent(
+      "计划内 9",
+    );
+    // 该仓 files/+−（spdemo 降级档行数 null → —）
+    expect(screen.getByTestId("scope-audit-repo-seg-main")).toHaveTextContent(
+      "22 文件",
+    );
+    expect(
+      screen.getByTestId("scope-audit-repo-seg-sub-grid-security"),
+    ).toHaveTextContent("14 文件");
+    expect(screen.getByTestId("scope-audit-repo-seg-spdemo")).toHaveTextContent(
+      "10 文件",
+    );
+    expect(screen.getByTestId("scope-audit-repo-seg-spdemo")).toHaveTextContent(
+      "+—",
+    );
+    expect(screen.getByTestId("scope-audit-repo-seg-spdemo")).toHaveTextContent(
+      "−—",
+    );
+    // 旧形态单段 testid 不存在（分组形态下升级为每仓前缀）
+    expect(screen.queryByTestId("scope-audit-chip-planned")).not.toBeInTheDocument();
+    // note 顶摘要层（muted 单行）
+    expect(screen.getByTestId("scope-audit-note")).toHaveTextContent(
+      "已按 local.yaml repos 注册表分仓对账",
+    );
+  });
+
+  it("degraded 仓段：整段 ⚠️ 原因文案、不渲染伪三态 chips", async () => {
+    const audit = makeCrossRepoAudit();
+    audit.repos = [
+      ...audit.repos!.slice(0, 1),
+      {
+        key: "repo-x",
+        anchor: { source: "degraded", base: null, head: null, label: null },
+        anchor_label: null,
+        totals: {
+          files: 9,
+          additions: null,
+          deletions: null,
+          planned: null,
+          unplanned: null,
+          untouched: null,
+        },
+        degraded: true,
+        degraded_reason:
+          "repo key「repo-x」未在 local.yaml repos 注册——跨仓对账不可达，请人工到对应仓核对（该仓 9 个计划文件未对账）",
+      },
+    ];
+    mocks.getScopeAudit.mockResolvedValue(audit);
+    renderCard(
+      <ScopeAuditCommandCard
+        target={{ kind: "change", workspaceId: "ws-1", changeKey: "c-multi" }}
+      />,
+    );
+    expect(
+      await screen.findByTestId("scope-audit-repo-degraded-repo-x"),
+    ).toHaveTextContent("未在 local.yaml repos 注册");
+    expect(screen.getByTestId("scope-audit-repo-degraded-repo-x")).toHaveTextContent(
+      "⚠️",
+    );
+    // degraded 段不渲染三态 chips（无伪计数）
+    expect(
+      screen.queryByTestId("scope-audit-chip-repo-x-planned"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("scope-audit-chip-repo-x-unplanned"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("scope-audit-chip-repo-x-untouched"),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("2026-09-20-scope-audit-cross-repo-platform 分组形态：明细弹窗按仓分桶", () => {
+  it("桶序=repos[] 序 + 孤儿桶尾随；跨仓行仓标徽章、主仓行无徽章；null 行数 —；行点击联动不变", async () => {
+    const audit = makeCrossRepoAudit();
+    // 孤儿桶：行 cross_repo 指向 repos[] 未列出的 key（畸形信封防御）
+    audit.rows = [
+      ...audit.rows!,
+      {
+        path: "legacy/orphan.go",
+        additions: 5,
+        deletions: 1,
+        kind: "modified",
+        planned: "修改",
+        verdict: "unplanned",
+        declared: null,
+        attribution: null,
+        cross_repo: "ghost-repo",
+      },
+    ];
+    mocks.getScopeAudit.mockResolvedValue(audit);
+    renderCard(
+      <ScopeAuditCommandCard
+        target={{ kind: "change", workspaceId: "ws-1", changeKey: "2026-09-18-ehs-back-multi-repo" }}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("scope-audit-detail-entry"));
+    // 分桶小节头（粘性）：repos[] 序 main → sub-grid-security → spdemo，孤儿桶尾随
+    expect(
+      await screen.findByTestId("scope-audit-detail-group-main"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("scope-audit-detail-group-sub-grid-security"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("scope-audit-detail-group-spdemo")).toBeInTheDocument();
+    expect(screen.getByTestId("scope-audit-detail-group-ghost-repo")).toBeInTheDocument();
+    const groups = screen
+      .getAllByTestId(/^scope-audit-detail-group-/)
+      .map((el) => el.dataset.testid);
+    expect(groups).toEqual([
+      "scope-audit-detail-group-main",
+      "scope-audit-detail-group-sub-grid-security",
+      "scope-audit-detail-group-spdemo",
+      "scope-audit-detail-group-ghost-repo",
+    ]);
+    // 跨仓行仓标徽章（brand 小标签）；主仓行无徽章
+    const crossRow = screen.getByTestId("scope-audit-row-pkg/reward/service.go");
+    expect(within(crossRow).getByText("sub-grid-security")).toBeInTheDocument();
+    const mainRow = screen.getByTestId(
+      "scope-audit-row-src/main/java/com/ehs/RewardController.java",
+    );
+    expect(within(mainRow).queryByText("main")).not.toBeInTheDocument();
+    expect(within(mainRow).queryByText("主仓")).not.toBeInTheDocument();
+    // spdemo 行（B 档降级）行数 null → —
+    const spdemoRow = screen.getByTestId("scope-audit-row-app/demo/page.tsx");
+    expect(spdemoRow).toHaveTextContent("+—");
+    // 行点击联动单文件 diff 不变（分组形态 DetailRow 同一 onOpenDiff 链路）
+    mocks.getScopeFileDiff.mockResolvedValue({
+      change: "2026-09-18-ehs-back-multi-repo",
+      file: "pkg/reward/service.go",
+      ok: true,
+      mode: "full-flow",
+      base_ref: "a1b2c3d",
+      anchor_label: "a1b2c3d",
+      diff: "@@ -1 +1 @@\n-a\n+b\n",
+      note: null,
+      truncated: false,
+    });
+    fireEvent.click(crossRow);
+    expect(await screen.findByText("文件变化比对")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.getScopeFileDiff).toHaveBeenCalledWith(
+        "ws-1",
+        "2026-09-18-ehs-back-multi-repo",
+        "pkg/reward/service.go",
+      ),
+    );
+  });
+});
+
+describe("2026-09-20-scope-audit-cross-repo-platform 回退形态：无 repos 渲染与现状等价", () => {
+  it("无 repos 单段（旧 testid）+ note 不渲染；旧形态跨仓行归主仓平铺渲染、无分组头与仓标", async () => {
+    // 旧 CLI/旧 daemon：信封无 repos 键（或空数组）；note 非 null 也不渲染（兼容策略 6）；
+    // 行可能带 cross_repo 键（v3.29.3~v2 间旧快照 ⊘ 标记）→ 回退形态不消费、按普通行渲染。
+    mocks.getScopeAudit.mockResolvedValue({
+      change: "2026-09-10-mcp-central-registry",
+      ok: true,
+      mode: "full-flow",
+      base_ref: "3f22d6b9b6d1f85415be416c5086e29cfd9998a4",
+      anchor_label: "3f22d6b",
+      degraded_reason: null,
+      totals: { files: 3, additions: 436, deletions: 19 },
+      rows: [
+        {
+          path: "src/index.js",
+          additions: 426,
+          deletions: 17,
+          kind: "modified",
+          planned: "修改",
+          verdict: "planned",
+          declared: null,
+          attribution: null,
+          cross_repo: null,
+        },
+        {
+          path: "vendor/legacy.ts",
+          additions: 10,
+          deletions: 2,
+          kind: "modified",
+          planned: null,
+          verdict: "untouched",
+          declared: null,
+          attribution: null,
+          cross_repo: "some-old-repo",
+        },
+      ],
+      excluded_foreign_declared: [],
+      note: "旧快照 note 不应在回退形态渲染",
+      truncated: false,
+    });
+    renderCard(
+      <ScopeAuditCommandCard
+        target={{
+          kind: "change",
+          workspaceId: "ws-1",
+          changeKey: "2026-09-10-mcp-central-registry",
+        }}
+      />,
+    );
+    // 单段：既有 testid 原样（counts-from-rows：planned 1 / untouched 1）
+    expect(
+      await screen.findByTestId("scope-audit-chip-planned"),
+    ).toHaveTextContent("计划内 1");
+    expect(screen.getByTestId("scope-audit-chip-untouched")).toHaveTextContent(
+      "计划未动 1",
+    );
+    expect(screen.getByTestId("scope-audit-summary")).toHaveTextContent("锚点");
+    // 分组形态 testid 均不出现；note 不渲染
+    expect(screen.queryByTestId("scope-audit-repo-seg-main")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("scope-audit-note")).not.toBeInTheDocument();
+    expect(screen.queryByText("旧快照 note 不应在回退形态渲染")).not.toBeInTheDocument();
+    // 明细平铺：跨仓行按普通行渲染（无分桶头、无仓标徽章）
+    fireEvent.click(screen.getByTestId("scope-audit-detail-entry"));
+    expect(
+      await screen.findByTestId("scope-audit-row-vendor/legacy.ts"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("scope-audit-detail-group-main"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("scope-audit-row-vendor/legacy.ts")).queryByText(
+        "some-old-repo",
+      ),
+    ).not.toBeInTheDocument();
   });
 });

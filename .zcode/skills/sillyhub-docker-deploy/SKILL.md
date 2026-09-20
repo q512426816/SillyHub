@@ -224,28 +224,6 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml up --build --
 >
 > ⚠️ **务必带 `--force-recreate`**（或确认 compose 报告 `Recreated`）。若镜像重建了但容器没重建，运行的仍是旧代码。重建后用「验证」节的容器内代码校验确认改动确实生效。
 
-## 低中断更新（日常重建前后端时优先用）
-
-`up --build --force-recreate` 一步走时，旧容器在镜像构建完成前仍在服务，真正的服务
-中断窗口只有容器切换的几秒；但页面上的查询重试 + SSE 重连会在中断窗口内滚雪球，
-直到浏览器 ERR_INSUFFICIENT_RESOURCES（连接资源耗尽），且该状态不自愈——用户必须
-关页签重开（2026-09-17 实证）。两层防护：
-
-1. **客户端全局熔断已内置**（ql-20260917-011，`frontend/src/lib/api-circuit.ts`）：
-   连续 5 次网络错误/5xx 开闸，15s 冷却内非 auth 请求全部短路（不发网络）、SSE 重连
-   对齐冷却终点、顶部横幅提示；半开探测成功自动恢复。中断窗口对用户退化为
-   「横幅出现十几秒后自动恢复」，不再报废页签。**部署前无需额外操作。**
-2. **操作侧缩窗**：更新部署时把「构建」与「换容器」拆开——先构建（旧容器持续服务）：
-
-   ```bash
-   docker compose --env-file deploy/.env -f deploy/docker-compose.yml build backend frontend
-   docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --no-deps --force-recreate backend frontend
-   ```
-
-   换容器一步只做 stop+start（秒级）；避免在构建慢（冷缓存/网络抖动）时把 recreate
-   和 build 串在一起增加排队时间。真零停机需要前置反向代理双实例轮换（nginx/traefik），
-   当前单机开发部署不引入——记录为已知取舍。
-
 ## Docker Desktop 卡在 Created 的修复
 
 症状：

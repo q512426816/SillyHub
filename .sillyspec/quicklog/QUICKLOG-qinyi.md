@@ -131,3 +131,12 @@
 方案：settings_config 三键（autoCompactWindow/autoCompactEnabled/precomputeCompactionEnabled）经 daemon claude-settings.ts 白名单（值守护）写 settings.json；前端 provider 表单 claude 分支「引擎自动压缩」结构化区+超窗风险提示；零迁移零协议后端零改动。
 结果：daemon claude-settings 22/22（4 新用例）、前端表单 29/29（3 新用例）、tsc 0 错、daemon.md 增量段同步
 审计：[gate] L1（跨 0 模块 · 5 文件：2 代码/2 测试）advisory；每文件注记已全覆盖；测试增量已含
+
+## ql-20260920-008-3066 | 2026-09-20 18:30:19 | 弹层三修。根因：单文件多条目/无高度约束/llm_provider_id 漏传。方案：条目级解析+新端点+滚动+供应商模型。结果…
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：弹层三修。
+根因：单文件多条目/无高度约束/llm_provider_id 漏传。
+方案：条目级解析+新端点+滚动+供应商模型。
+结果：104+53+4129 绿 tsc 0，已提交推送（82a76721f）。

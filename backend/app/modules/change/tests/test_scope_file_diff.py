@@ -11,6 +11,10 @@
      method_not_found（旧 daemon）→ 422；offline → 502；timeout → 504；
      其余远端 code → 502；未绑定 → 404
   4. 契约缺口：daemon 回缺 ok 键的畸形结构 → 502 contract gap
+  5. 对账表契约 v2（2026-09-20-scope-audit-cross-repo-platform task-02）：
+     跨仓行 cross_repo + 信封 repos[] 逐字段透传（锚点档/三态计数/
+     degraded 档）；无 repos 键 / 非 list / 非法条目 → [] / 跳过（防御
+     回退零回归）
 """
 
 from __future__ import annotations
@@ -449,6 +453,7 @@ async def test_scope_audit_200_rpc_contract_and_dto(client: AsyncClient, setup_e
     assert body["rows"][1]["additions"] is None  # 二进制行数 null 原样
     assert body["excluded_foreign_declared"] == ["frontend/src/x.ts"]
     assert body["truncated"] is False
+    assert body["repos"] == []  # v1 形态（无 repos 键）→ 空列表回退零回归
 
     call = env.hub.calls[0]
     assert call["method"] == "sillyspec_scope_audit"
@@ -480,3 +485,259 @@ async def test_scope_audit_capability_422_and_not_bound_404(client: AsyncClient,
         headers=_bearer(env2.token),
     )
     assert resp2.status_code == 404, resp2.text
+
+
+# ── 对账表契约 v2（2026-09-20-scope-audit-cross-repo-platform task-02）─────────
+# 形态对齐上游 design「接口定义」JSON 示例（daemon RPC 投影 snake_case 化）：
+# 跨仓行真实三态 + 信封 repos[]（main 首位 / A 档锚点 base+head / degraded 档）。
+
+_AUDIT_V2 = {
+    "change": "2026-09-15-ehs-reward-punishment",
+    "ok": True,
+    "mode": "full-flow",
+    "base_ref": "214151b2c0d1e2f3a4b5c6d7e8f9",
+    "anchor_label": "214151b",
+    "degraded_reason": None,
+    "totals": {"files": 46, "additions": 6040, "deletions": 340},
+    "rows": [
+        {  # 主仓行：无跨仓归属（cross_repo None）
+            "path": "src/main/java/com/ehs/RewardController.java",
+            "additions": 210,
+            "deletions": 18,
+            "kind": "modified",
+            "planned": "修改",
+            "verdict": "planned",
+            "cross_repo": None,
+        },
+        {  # 跨仓行：真实三态（不再恒 untouched）
+            "path": "pkg/reward/service.go",
+            "additions": 430,
+            "deletions": 0,
+            "kind": "new",
+            "planned": "新增",
+            "verdict": "planned",
+            "cross_repo": "sub-grid-security",
+        },
+        {
+            "path": "pkg/reward/legacy.go",
+            "additions": 55,
+            "deletions": 12,
+            "kind": "modified",
+            "planned": None,
+            "verdict": "unplanned",
+            "cross_repo": "sub-grid-security",
+        },
+        {  # degraded 仓行：⊘ 形态（恒 untouched + crossRepo）
+            "path": "app/demo/page.tsx",
+            "additions": 0,
+            "deletions": 0,
+            "kind": "modified",
+            "planned": "修改",
+            "verdict": "untouched",
+            "cross_repo": "spdemo",
+        },
+    ],
+    "repos": [
+        {  # main 条目始终首位（主仓汇总，主仓锚包装）
+            "key": "main",
+            "anchor": {
+                "source": "main-post-apply",
+                "base": "214151b2c0d1e2f3a4b5c6d7e8f9",
+                "head": None,
+                "label": "post-apply 主仓锚",
+            },
+            "anchor_label": "post-apply 主仓锚",
+            "totals": {
+                "files": 22,
+                "additions": 5300,
+                "deletions": 310,
+                "planned": 20,
+                "unplanned": 2,
+                "untouched": 0,
+            },
+            "degraded": False,
+            "degraded_reason": None,
+        },
+        {  # A 档锚点：reviews base..head 封闭区间
+            "key": "sub-grid-security",
+            "anchor": {
+                "source": "reviews-range",
+                "base": "a1b2c3d4e5",
+                "head": "e4f5a6b7c8",
+                "label": "reviews base..head（execute task 锡点，2 task 区间并集）",
+            },
+            "anchor_label": "reviews base..head（execute task 锡点，2 task 区间并集）",
+            "totals": {
+                "files": 14,
+                "additions": 740,
+                "deletions": 30,
+                "planned": 13,
+                "unplanned": 1,
+                "untouched": 0,
+            },
+            "degraded": False,
+            "degraded_reason": None,
+        },
+        {  # degraded 档：仓未注册（一行降级不炸整体）
+            "key": "spdemo",
+            "anchor": {
+                "source": "degraded",
+                "base": None,
+                "head": None,
+                "label": "degraded",
+            },
+            "anchor_label": "degraded",
+            "totals": {
+                "files": 9,
+                "additions": 0,
+                "deletions": 0,
+                "planned": 0,
+                "unplanned": 0,
+                "untouched": 9,
+            },
+            "degraded": True,
+            "degraded_reason": "repo key「spdemo」未在 local.yaml repos 注册——跨仓对账不可达，请人工到对应仓核对",
+        },
+    ],
+    "excluded_foreign_declared": [],
+    "note": "计划侧含 22 个跨仓文件（repo：sub-grid-security、spdemo）——已按 local.yaml repos 注册表分仓对账（各仓锚点档见 repos[].anchor）",
+    "truncated": False,
+}
+
+
+@pytest.mark.asyncio
+async def test_scope_audit_v2_cross_repo_rows_and_repos(client: AsyncClient, setup_env):
+    """契约 v2 透传：跨仓行 cross_repo 真实三态 + 信封 repos[] 逐字段
+    （key/anchor 四键/anchor_label/totals 六计数/degraded/degraded_reason），
+    主仓行 cross_repo 保持 None。"""
+    env = await setup_env()
+    env.hub.on("sillyspec_scope_audit", result=_AUDIT_V2)
+
+    resp = await client.get(
+        f"/api/workspaces/{env.workspace_id}/sillyspec/scope-audit",
+        params={"change": "2026-09-15-ehs-reward-punishment"},
+        headers=_bearer(env.token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    # 行级：主仓行无归属，跨仓行真实三态 + repoKey
+    assert body["rows"][0]["cross_repo"] is None
+    assert body["rows"][1]["cross_repo"] == "sub-grid-security"
+    assert body["rows"][1]["verdict"] == "planned"
+    assert body["rows"][2]["verdict"] == "unplanned"
+    assert body["rows"][3]["cross_repo"] == "spdemo"
+    assert body["rows"][3]["verdict"] == "untouched"  # degraded 仓恒 untouched
+
+    # 信封级：三仓逐字段（main 首位）
+    repos = body["repos"]
+    assert [r["key"] for r in repos] == ["main", "sub-grid-security", "spdemo"]
+
+    main = repos[0]
+    assert main["anchor"] == {
+        "source": "main-post-apply",
+        "base": "214151b2c0d1e2f3a4b5c6d7e8f9",
+        "head": None,
+        "label": "post-apply 主仓锚",
+    }
+    assert main["anchor_label"] == "post-apply 主仓锚"
+    assert main["totals"] == {
+        "files": 22,
+        "additions": 5300,
+        "deletions": 310,
+        "planned": 20,
+        "unplanned": 2,
+        "untouched": 0,
+    }
+    assert main["degraded"] is False
+    assert main["degraded_reason"] is None
+
+    sub = repos[1]  # A 档锚点：base + head 双 commit
+    assert sub["anchor"]["source"] == "reviews-range"
+    assert sub["anchor"]["base"] == "a1b2c3d4e5"
+    assert sub["anchor"]["head"] == "e4f5a6b7c8"
+    assert sub["anchor"]["label"].startswith("reviews base..head")
+    assert sub["anchor_label"] == sub["anchor"]["label"]
+    assert sub["totals"]["planned"] == 13
+    assert sub["degraded"] is False
+
+    demo = repos[2]  # degraded 档
+    assert demo["degraded"] is True
+    assert demo["anchor"]["source"] == "degraded"
+    assert demo["anchor"]["base"] is None
+    assert demo["degraded_reason"].startswith("repo key「spdemo」未在 local.yaml repos 注册")
+    assert demo["totals"]["untouched"] == 9
+
+
+@pytest.mark.asyncio
+async def test_scope_audit_v2_repos_fallback_and_invalid_skipped(
+    client: AsyncClient, setup_env
+):
+    """防御回退（D-002）：无 repos 键 / repos 非 list → []；非法条目（非
+    dict / 缺 key / key 非 str）跳过不炸、嵌套 anchor/totals 非法全 None
+    容错、合法条目保留；行级 cross_repo 非 str → None。"""
+    # 无 repos 键（单仓变更 / 旧 daemon 投影）→ 空列表
+    env = await setup_env()
+    env.hub.on("sillyspec_scope_audit", result=_AUDIT_OK)
+    resp = await client.get(
+        f"/api/workspaces/{env.workspace_id}/sillyspec/scope-audit",
+        params={"change": "2026-09-11-skills-central-library"},
+        headers=_bearer(env.token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["repos"] == []
+
+    # repos 非 list（畸形形态）→ 空列表回退不炸
+    env2 = await setup_env()
+    env2.hub.on("sillyspec_scope_audit", result={**_AUDIT_OK, "repos": {"key": "main"}})
+    resp2 = await client.get(
+        f"/api/workspaces/{env2.workspace_id}/sillyspec/scope-audit",
+        params={"change": "2026-09-11-skills-central-library"},
+        headers=_bearer(env2.token),
+    )
+    assert resp2.status_code == 200, resp2.text
+    assert resp2.json()["repos"] == []
+
+    # 非法条目跳过 + 合法条目嵌套字段容错 + 行级 cross_repo 非 str 守卫
+    env3 = await setup_env()
+    mixed = {
+        **_AUDIT_OK,
+        "rows": [{**_AUDIT_OK["rows"][0], "cross_repo": 123}],  # 非 str → None
+        "repos": [
+            "not-a-dict",  # 非 dict → 跳过
+            {"totals": {"files": 1}},  # 缺 key → 跳过
+            {"key": 42},  # key 非 str → 跳过
+            {  # 合法条目但嵌套形态全非法 → 缺省安全不炸
+                "key": "main",
+                "anchor": "not-a-dict",
+                "anchor_label": 99,
+                "totals": ["bad"],
+                "degraded": "yes",
+                "degraded_reason": 42,
+            },
+        ],
+    }
+    env3.hub.on("sillyspec_scope_audit", result=mixed)
+    resp3 = await client.get(
+        f"/api/workspaces/{env3.workspace_id}/sillyspec/scope-audit",
+        params={"change": "2026-09-11-skills-central-library"},
+        headers=_bearer(env3.token),
+    )
+    assert resp3.status_code == 200, resp3.text
+    body3 = resp3.json()
+    assert body3["rows"][0]["cross_repo"] is None
+    assert len(body3["repos"]) == 1
+    kept = body3["repos"][0]
+    assert kept["key"] == "main"
+    assert kept["anchor"] == {"source": None, "base": None, "head": None, "label": None}
+    assert kept["anchor_label"] is None
+    assert kept["totals"] == {
+        "files": None,
+        "additions": None,
+        "deletions": None,
+        "planned": None,
+        "unplanned": None,
+        "untouched": None,
+    }
+    assert kept["degraded"] is False
+    assert kept["degraded_reason"] is None

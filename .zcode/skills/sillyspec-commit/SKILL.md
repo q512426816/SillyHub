@@ -19,84 +19,42 @@ $ARGUMENTS
 
 ## 流程
 
-### 1. 检查是否有未提交的修改
-git diff --quiet 2>/dev/null; UNSTAGED=$?
-git diff --cached --quiet 2>/dev/null; STAGED=$?
+### 1. 收集变更上下文 + 建议 message（一条命令）
 
-两者都为 0（无修改）→ 提示"没有需要提交的修改"，结束。
+```bash
+sillyspec commit
+```
 
-### 2. 暂存所有修改
-git add -A
+CLI 已接管全部手工收集（上次 commit 时间过滤 QUICKLOG 条目、活跃变更已勾 task、按路径模式归类阶段产出、diff stat），并按下方 type 表生成建议 message + 可照抄的 `git add -A && git commit -m ...` 命令。**它只建议不提交。**
 
-### 3. 收集变更语义信息
-# 上次 commit 时间
-LAST_COMMIT_TIME=$(git log -1 --format=%ci 2>/dev/null)
+- 命令输出「没有需要提交的修改」→ 结束。
+- 无语义来源匹配（输出会明说）→ 展示 diff stat，让用户自己写。
 
-# 修改的文件列表
-git diff --cached --stat
+### 2. 展示确认
 
-从以下来源收集语义信息（筛选时间戳 > LAST_COMMIT_TIME 的条目）：
-
-来源 A — QUICKLOG（quick 产生的修改）：
-USER=$(git config user.name 2>/dev/null || echo "default")
-cat .sillyspec/quicklog/QUICKLOG-${USER}.md 2>/dev/null
-# 同时扫描活跃变更目录下的归属 quicklog
-for dir in .sillyspec/changes/*/quicklog/*.md; do [ -f "$dir" ] && cat "$dir"; done 2>/dev/null
-# 注：QUICKLOG 现由 CLI 接管写入（src/quicklog.js），描述取 quick 启动的任务参数、
-# 结果取 step3 --output 一句话，粒度可能较粗；条目仍含 标题|时间|描述 + 状态 + 结果 结构，
-# 可直接读取。描述过泛时结合 diff stat 与 tasks.md 补充语义。
-
-来源 B — tasks.md（execute 产生的修改）：
-LATEST=$(ls -d .sillyspec/changes/*/ 2>/dev/null | grep -v archive | tail -1)
-cat "$LATEST/tasks.md" 2>/dev/null
-筛选时间戳 > LAST_COMMIT_TIME 的已勾选 task。
-
-来源 C — 阶段产出（scan/brainstorm/plan/archive 等）：
-检查 .sillyspec/ 下新增或修改的文件，根据路径识别来源阶段：
-- .sillyspec/docs/<project>/scan/*.md → scan 产出
-- changes/<name>/design.md → brainstorm 产出
-- changes/<name>/proposal.md → brainstorm 产出
-- changes/<name>/tasks.md → plan 产出
-- changes/<name>/plan.md → plan 产出
-- changes/archive/ → archive 产出
-- knowledge/*.md → 知识库更新
-
-### 4. 自动生成 commit message
-
-按 conventional commits 格式，根据来源生成 message：
-
-| 来源 | type | 示例 |
-|---|---|---|
-| 只有 quick 条目 | fix/refactor | fix: 手机号校验修复（含正则修正） |
-| 只有 execute 条目 | feat | feat(user): 用户模块 task 1~3 |
-| 只有阶段产出 | docs | docs: sillyspec scan 完成 |
-| 混合来源 | 取最主要的 type | body 里列出所有条目 |
-| 无匹配来源 | — | 展示 diff stat，让用户自己写 |
-
-**如果 $ARGUMENTS 非空**，直接使用用户指定的 message，跳过自动生成，但仍展示 diff stat。
-
-多条 quick 合并规则：
-- 2 条以内 → 逐条列出
-- 3 条以上 → 摘要 + body 详情
-
-### 5. 展示确认
-
-用 AskUserQuestion 展示：
-📝 建议的 commit message：
- fix: 手机号校验修复（含正则修正）
-
-📁 修改文件（N 个）：
- src/UserService.java (+15 -3)
- src/PhoneValidator.java (+28 -0)
+把 `sillyspec commit` 的建议 message + 文件统计原样展示给用户（AskUserQuestion）：
 
 选择：确认提交 / 编辑 message / 取消
 
 用户选择编辑 → 让用户输入新 message → 再次确认。
 
-### 6. 执行提交
-git commit -m "{确认后的 message}"
+### 3. 执行提交
+
+用户确认后执行 `git add -A` + 输出里给出的 `git commit` 命令（或用户编辑后的 message）。
 
 提交成功后展示 commit hash + 文件数 + 行数统计。
+
+### 参考：message 生成口径（CLI 同源实现，src/commit-suggest.js）
+
+| 来源 | type | 示例 |
+|---|---|---|
+| 只有 quick 条目 | fix | fix: 手机号校验修复（含正则修正） |
+| 只有 execute 已勾 task | feat | feat: <变更名> 完成 task ×N |
+| 只有阶段产出 | docs | docs: sillyspec scan 完成 |
+| 混合来源 | 取最主要的 type | body 里列出所有条目 |
+| 无匹配来源 | — | 展示 diff stat，让用户自己写 |
+
+**如果 $ARGUMENTS 非空**，直接使用用户指定的 message，跳过自动生成，但仍展示 diff stat。
 
 ## 多项目
 检查修改的文件分别属于哪个子项目：

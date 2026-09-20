@@ -9,6 +9,15 @@
  * 卡面显示锚点 + 文件/行数合计 + 三态计数（full-flow：✓ 计划内 / ⚠️ 计划外 /
  * ⚠️ 计划未动；quick：✓ 已声明 / 🔍 软归属 / ⚠️ 未声明），「查看明细」开宽
  * 弹窗渲染三态全表（行点击联动 scope-file-diff-modal 看单文件 diff）。
+ *
+ * 契约 v2 分组形态（2026-09-20-scope-audit-cross-repo-platform，D-003/D-005）：
+ * 信封 repos 非空数组且 mode==='full-flow' 时卡面按仓分组——全表合计行 +
+ * 每仓一段（仓标识/锚点档 chip/三态 chips 计数取信封 repos[].totals 单一源），
+ * degraded 仓段整段 ⚠️ 原因不渲染 chips；明细弹窗按行 cross_repo 分桶（无键归
+ * main 桶，桶序=repos[] 序，孤儿桶尾随首现序）+ 粘性小节头 + 跨仓行仓标徽章；
+ * note 顶摘要层。repos 空/null 或 quick → 现状单段渲染回退（DOM/testid 原样，
+ * note 不渲染——兼容策略 6）。
+ *
  * 两条本地命令（表格版 / --json 版）折叠为卡尾次要区保留——链路不可用
  * （旧版本/离线）时的兜底与 CLI 习惯入口。
  *
@@ -22,7 +31,7 @@
  * 全部命令经 buildScopeAuditCommand 拼接。
  */
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Modal } from "antd";
 
@@ -37,6 +46,8 @@ import { cn } from "@/lib/utils";
 /** 心跳 sillyspec_status.changes[] 单项（api-types 生成版，禁止手写）。 */
 type SillySpecChange = components["schemas"]["DaemonHeartbeatSillySpecChange"];
 type SillySpecStatus = components["schemas"]["MachineSillySpecStatusRead"];
+/** 信封级 repos[] 单项（契约 v2，api-types 生成版，禁止手写）。 */
+type ScopeAuditRepoDto = components["schemas"]["ScopeAuditRepo"];
 
 /** scope-audit 命令前缀（单一取值点，2026-09-10 由 node src/index.js 切换）。 */
 export const SCOPE_AUDIT_CMD_PREFIX = "sillyspec";
@@ -150,6 +161,83 @@ function fmtNum(n: number | null | undefined): string {
   return typeof n === "number" ? String(n) : "—";
 }
 
+/** 仓标识显示名：main → 「主仓」（brand 色由调用方上），其余显示 repo key 原文。 */
+function repoDisplayName(key: string): string {
+  return key === "main" ? "主仓" : key;
+}
+
+/**
+ * 仓锚点档 chip（契约 v2，2026-09-20-scope-audit-cross-repo-platform）：
+ * anchor.label 文案 + anchor_label 短 hash（base 7 位短化，daemon 侧产出）；
+ * 语义锚（B/C 档降级无 base）anchor_label=null → hash 位显示 —。
+ * 卡面仓段头与明细弹窗小节头共用同一形态。
+ */
+function RepoAnchorChip({ repo }: { repo: ScopeAuditRepoDto }) {
+  const label = repo.anchor?.label ?? null;
+  const hash = repo.anchor_label ?? null;
+  return (
+    <span className="rounded bg-muted px-1.5 py-px font-mono text-[10px] leading-4 text-muted-foreground">
+      {label ? `${label} ` : ""}
+      <span className="font-semibold text-foreground">{hash ?? "—"}</span>
+    </span>
+  );
+}
+
+/**
+ * 明细行渲染（回退平铺与按仓分桶共用；行点击联动单文件 diff 不变）。
+ * repoBadge 非空时（分组形态下的跨仓行）在路径后加仓标徽章（brand 色小标签，
+ * 对齐 ATTR_META soft 形态——design D-003）。
+ */
+function DetailRow({
+  row,
+  mode,
+  repoBadge,
+  onOpenDiff,
+}: {
+  row: ScopeAuditRow;
+  mode: string;
+  repoBadge?: string | null;
+  onOpenDiff: (path: string) => void;
+}) {
+  const badge = rowBadge(row, mode);
+  return (
+    <li className="border-b last:border-b-0">
+      <button
+        type="button"
+        data-testid={`scope-audit-row-${row.path}`}
+        onClick={() => onOpenDiff(row.path)}
+        title="点击查看该文件的变化比对（对账同源锚点 diff）"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/60"
+      >
+        <span
+          className={cn(
+            "shrink-0 rounded px-1 text-[10px] leading-4",
+            badge.className,
+          )}
+        >
+          {badge.label}
+        </span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
+          {row.path}
+        </span>
+        {repoBadge && (
+          <span className="shrink-0 rounded bg-brand-50 px-1 text-[10px] leading-4 text-brand-700">
+            {repoBadge}
+          </span>
+        )}
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          {KIND_LABEL[row.kind] ?? row.kind}
+        </span>
+        <span className="shrink-0 font-mono text-[11px] tabular-nums">
+          <span className="text-success">+{fmtNum(row.additions)}</span>
+          <span className="mx-1 text-muted-foreground">/</span>
+          <span className="text-error">−{fmtNum(row.deletions)}</span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
 /** 单行命令 + 复制按钮（复制交互对齐 change-stage-actions 内联先例）。 */
 function CommandRow({
   label,
@@ -253,6 +341,48 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
     return map;
   }, [audit]);
 
+  // 分组激活（契约 v2，D-002/D-003）：repos 非空数组且 mode==='full-flow' → 按仓分组
+  // 形态；repos 空/null（旧 CLI/旧 daemon/单仓变更）或 quick → 现状单段渲染（回退，
+  // DOM/testid 原样，note 不渲染——兼容策略 6）。
+  const groupedRepos =
+    audit?.mode === "full-flow" &&
+    Array.isArray(audit.repos) &&
+    audit.repos.length > 0
+      ? audit.repos
+      : null;
+
+  // 明细分桶（仅分组形态）：行 cross_repo ?? 'main' 归桶；桶序 = repos[] 序（main
+  // 首位，CLI 保证），repos[] 未列出的孤儿 repo 桶按首现顺序尾随（Map 插入序）。
+  // chips 计数单一源是信封 repos[].totals——分桶只管行归属，两者不一致时以信封为准
+  // （CLI 单一源原则，design 消费语义）。
+  const detailBuckets = useMemo(() => {
+    if (!groupedRepos) return null;
+    const rows = audit?.rows ?? [];
+    const byKey = new Map<string, ScopeAuditRow[]>();
+    for (const r of rows) {
+      const key = r.cross_repo ?? "main";
+      const bucket = byKey.get(key);
+      if (bucket) bucket.push(r);
+      else byKey.set(key, [r]);
+    }
+    const ordered: {
+      repo: ScopeAuditRepoDto | null;
+      key: string;
+      rows: ScopeAuditRow[];
+    }[] = [];
+    for (const repo of groupedRepos) {
+      const bucket = byKey.get(repo.key);
+      if (bucket) {
+        ordered.push({ repo, key: repo.key, rows: bucket });
+        byKey.delete(repo.key);
+      }
+    }
+    for (const [key, bucket] of byKey) {
+      ordered.push({ repo: null, key, rows: bucket });
+    }
+    return ordered;
+  }, [audit, groupedRepos]);
+
   // 明细弹窗 + 行点击联动的单文件 diff 弹窗。
   const [detailOpen, setDetailOpen] = useState(false);
   const [diffRow, setDiffRow] = useState<string | null>(null);
@@ -303,6 +433,116 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
     const order = isQuick
       ? ["declared", "soft", "undeclared"]
       : ["planned", "unplanned", "untouched"];
+
+    // 分组形态（契约 v2，2026-09-20-scope-audit-cross-repo-platform，D-003/D-005）：
+    // 全表合计行 + 每仓一段（段头=仓标识+锚点档 chip；chips 计数取信封
+    // repos[].totals 单一源，不前端重算）；degraded 仓段整段 ⚠️ 原因不渲染 chips。
+    if (groupedRepos) {
+      const verdictOrder = ["planned", "unplanned", "untouched"] as const;
+      return (
+        <>
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <span>
+              全表{" "}
+              <b className="font-mono font-semibold text-foreground">
+                {audit.totals?.files ?? (audit.rows?.length ?? 0)}
+              </b>{" "}
+              文件
+            </span>
+            <span>
+              <span className="text-success">+{fmtNum(audit.totals?.additions)}</span>{" "}
+              /{" "}
+              <span className="text-error">−{fmtNum(audit.totals?.deletions)}</span>
+            </span>
+            <span>{groupedRepos.length} 个仓库</span>
+          </p>
+          {groupedRepos.map((repo) => (
+            <div
+              key={repo.key}
+              data-testid={`scope-audit-repo-seg-${repo.key}`}
+              className="mt-2 border-t border-dashed border-border pt-2"
+            >
+              <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+                <span
+                  className={cn(
+                    "text-xs font-semibold",
+                    repo.key === "main" ? "text-brand-700" : "text-foreground",
+                  )}
+                >
+                  {repoDisplayName(repo.key)}
+                </span>
+                <RepoAnchorChip repo={repo} />
+              </div>
+              {repo.degraded ? (
+                <p
+                  className="mt-1.5 text-[11px] leading-relaxed text-warning"
+                  data-testid={`scope-audit-repo-degraded-${repo.key}`}
+                >
+                  ⚠️{" "}
+                  {repo.degraded_reason ??
+                    "该仓跨仓对账不可达（未注册/路径不可达），请人工到对应仓核对"}
+                </p>
+              ) : (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  {verdictOrder.map((verdict) => {
+                    const meta = VERDICT_META[verdict];
+                    if (!meta) return null;
+                    return (
+                      <span
+                        key={verdict}
+                        data-testid={`scope-audit-chip-${repo.key}-${verdict}`}
+                        className={cn(
+                          "rounded-full px-2 py-px text-[11px] font-medium",
+                          meta.className,
+                        )}
+                      >
+                        {meta.label} {repo.totals?.[verdict] ?? 0}
+                      </span>
+                    );
+                  })}
+                  <span className="ml-auto text-[11px] text-muted-foreground">
+                    {fmtNum(repo.totals?.files)} 文件{" "}
+                    <span className="text-success">
+                      +{fmtNum(repo.totals?.additions)}
+                    </span>{" "}
+                    /{" "}
+                    <span className="text-error">
+                      −{fmtNum(repo.totals?.deletions)}
+                    </span>
+                  </span>
+                </div>
+              )}
+            </div>
+          ))}
+          {audit.note && (
+            <p
+              className="mt-2 border-t border-dashed border-border pt-1.5 text-[11px] leading-relaxed text-muted-foreground"
+              data-testid="scope-audit-note"
+            >
+              {audit.note}
+            </p>
+          )}
+          <div className="mt-2 flex flex-wrap items-center justify-end gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => setDetailOpen(true)}
+              data-testid="scope-audit-detail-entry"
+            >
+              查看明细（{audit.rows?.length ?? 0}）
+            </Button>
+          </div>
+          {audit.truncated && (
+            <p className="mt-1 text-[11px] text-warning">
+              差异文件过多，明细表已截断（仅前 500 行）。
+            </p>
+          )}
+          <CommandSection identifier={identifier} />
+        </>
+      );
+    }
+
     return (
       <>
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
@@ -397,40 +637,48 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
           data-testid="scope-audit-detail-rows"
           className="max-h-[calc(100vh-320px)] min-h-[240px] overflow-auto rounded border bg-card"
         >
-          {(audit?.rows ?? []).map((row) => {
-            const badge = rowBadge(row, audit?.mode ?? "full-flow");
-            return (
-              <li key={row.path} className="border-b last:border-b-0">
-                <button
-                  type="button"
-                  data-testid={`scope-audit-row-${row.path}`}
-                  onClick={() => setDiffRow(row.path)}
-                  title="点击查看该文件的变化比对（对账同源锚点 diff）"
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/60"
-                >
-                  <span
-                    className={cn(
-                      "shrink-0 rounded px-1 text-[10px] leading-4",
-                      badge.className,
-                    )}
-                  >
-                    {badge.label}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
-                    {row.path}
-                  </span>
-                  <span className="shrink-0 text-[10px] text-muted-foreground">
-                    {KIND_LABEL[row.kind] ?? row.kind}
-                  </span>
-                  <span className="shrink-0 font-mono text-[11px] tabular-nums">
-                    <span className="text-success">+{fmtNum(row.additions)}</span>
-                    <span className="mx-1 text-muted-foreground">/</span>
-                    <span className="text-error">−{fmtNum(row.deletions)}</span>
-                  </span>
-                </button>
-              </li>
-            );
-          })}
+          {detailBuckets
+            ? detailBuckets.map((bucket) => {
+                const repo = bucket.repo;
+                return (
+                  <Fragment key={bucket.key}>
+                    {/* 粘性小节头：仓标识 + 该仓锚点档（孤儿桶无信封条目，仅显示 key） */}
+                    <li
+                      data-testid={`scope-audit-detail-group-${bucket.key}`}
+                      className="sticky top-0 z-10 flex flex-wrap items-baseline gap-x-2 border-b bg-muted px-3 py-1"
+                    >
+                      <span
+                        className={cn(
+                          "text-[11px] font-semibold",
+                          bucket.key === "main"
+                            ? "text-brand-700"
+                            : "text-foreground",
+                        )}
+                      >
+                        {repoDisplayName(bucket.key)}
+                      </span>
+                      {repo && <RepoAnchorChip repo={repo} />}
+                    </li>
+                    {bucket.rows.map((row) => (
+                      <DetailRow
+                        key={row.path}
+                        row={row}
+                        mode={audit?.mode ?? "full-flow"}
+                        repoBadge={bucket.key === "main" ? null : bucket.key}
+                        onOpenDiff={setDiffRow}
+                      />
+                    ))}
+                  </Fragment>
+                );
+              })
+            : (audit?.rows ?? []).map((row) => (
+                <DetailRow
+                  key={row.path}
+                  row={row}
+                  mode={audit?.mode ?? "full-flow"}
+                  onOpenDiff={setDiffRow}
+                />
+              ))}
           {(audit?.rows?.length ?? 0) === 0 && (
             <li className="px-3 py-6 text-center text-xs text-muted-foreground">
               无对账行

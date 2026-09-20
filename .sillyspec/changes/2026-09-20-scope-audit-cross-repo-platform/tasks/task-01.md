@@ -17,7 +17,7 @@ target_files:
   - sillyhub-daemon/src/sillyspec-manager.ts
   - sillyhub-daemon/tests/sillyspec-file-diff.test.ts
 provides:
-  rpc_scope_audit_v2_fields: [rows[].cross_repo, repos[]（key/anchor{source,base,head,label}/anchor_label/totals{files,additions,deletions,planned,unplanned,untouched}/degraded/degraded_reason）]
+  rpc_scope_audit_v2_fields: ['rows[].cross_repo', 'repos[]（key/anchor{source,base,head,label}/anchor_label/totals{files,additions,deletions,planned,unplanned,untouched}/degraded/degraded_reason）']
 goal: >
   daemon auditTable 投影消费 sillyspec --json 契约 v2：行级 cross_repo 与信封 repos[] 透传到
   RPC sillyspec_scope_audit result（backend 消费），repoPath 不出 daemon（D-001），旧 CLI 无键
@@ -26,7 +26,7 @@ implementation:
   - sillyhub-daemon/src/sillyspec-manager.ts:385 SillySpecAuditRow 接口增 cross_repo?: string | null（注释更新契约 v2 说明）
   - 新增 SillySpecAuditRepoAnchor / SillySpecAuditRepoTotals / SillySpecAuditRepo 三个导出接口；SillySpecAuditTable（:395 附近）增 repos: SillySpecAuditRepo[] | null
   - auditTable()（sillyhub-daemon/src/sillyspec-manager.ts:1558-1567）rows.push 白名单补 cross_repo: asStr(raw.crossRepo)
-  - auditTable() 信封投影：parsed.repos 非数组 → repos: null；是数组 → 逐条防御投影（isRecord + key 非空 string 否则整条跳过；anchor 四字段 asStr；anchor_label = /^[0-9a-f]{7,40}$/.test(base) ? base.slice(0,7) : null——语义锚/无 base → null〔D-004@v2〕；totals 六字段 asCount；degraded boolean；degraded_reason asStr；repoPath 不投影）
+  - 'auditTable() 信封投影：parsed.repos 非数组 → repos: null；是数组 → 逐条防御投影（isRecord + key 非空 string 否则整条跳过；anchor 四字段 asStr；anchor_label = /^[0-9a-f]{7,40}$/.test(base) ? base.slice(0,7) : null——语义锚/无 base → null〔D-004@v2〕；totals 六字段 asCount；degraded boolean；degraded_reason asStr；repoPath 不投影）'
   - sillyhub-daemon/tests/sillyspec-file-diff.test.ts:305 auditTable describe 增用例：v2 信封夹具（三仓 repos[] + 跨仓行，按上游契约示例造）断言投影全字段 / 无 repos 键 → repos:null / 505 行截断护栏含跨仓行不受影响 / JSON.stringify(result) 不含 repoPath
 acceptance:
   - v2 信封夹具下投影结果逐字段正确（cross_repo 透传、anchor_label 短化、totals 三态计数、degraded_reason、repos 数组序保持）

@@ -336,6 +336,7 @@ describe('ql-20260911-001-c0be manager.auditTable：表模式投影', () => {
     expect(result.rows[0]).toEqual({
       path: 'src/index.js', additions: 426, deletions: 17, kind: 'modified',
       planned: '修改', verdict: 'planned', declared: null, attribution: null,
+      cross_repo: null,
     });
     // 二进制行行数 null 原样（不出伪数据）
     expect(result.rows[2]!.additions).toBeNull();
@@ -390,6 +391,185 @@ describe('ql-20260911-001-c0be manager.auditTable：表模式投影', () => {
     await expect(old.manager.auditTable('c1')).rejects.toMatchObject({
       code: 'sillyspec_capability_missing',
     });
+  });
+
+  // ── 契约 v2（2026-09-20-scope-audit-cross-repo-platform task-01）：跨仓对账投影 ──
+
+  it('契约 v2 信封（三仓 repos[] + 跨仓行）→ repos 逐字段投影（序保持/锚短化/degraded）+ 行级 cross_repo 透传；序列化不含 repoPath（D-001）', async () => {
+    // 夹具按上游契约示例的三仓形态造（main + sub-grid-security + spdemo），
+    // 外加一条 degraded 档（未注册仓）——语义锚档（head~1-window、base=null）
+    // 与 degraded 档各一，覆盖 anchor_label 的全部取值分支。
+    const h = makeFileDiffHarness({
+      outcome: {
+        code: 0,
+        stdout: JSON.stringify({
+          command: 'scope-audit',
+          change: '2026-09-15-ehs-reward-punishment',
+          mode: 'full-flow',
+          ok: true,
+          degradedReason: null,
+          baseAnchor: '214151b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8',
+          totals: { files: 46, additions: 6040, deletions: 340 },
+          rows: [
+            { path: 'src/main/java/.../RewardController.java', planned: '修改', additions: 210, deletions: 18, kind: 'modified', verdict: 'planned' },
+            { path: 'pkg/reward/service.go', planned: '新增', additions: 430, deletions: 0, kind: 'new', verdict: 'planned', crossRepo: 'sub-grid-security' },
+            { path: 'pkg/reward/legacy.go', planned: null, additions: 55, deletions: 12, kind: 'modified', verdict: 'unplanned', crossRepo: 'sub-grid-security' },
+            { path: 'app/demo/page.tsx', planned: '修改', additions: null, deletions: null, kind: 'modified', verdict: 'untouched', crossRepo: 'spdemo' },
+            { path: 'legacy/x.go', planned: null, additions: null, deletions: null, kind: 'modified', verdict: 'untouched', crossRepo: 'legacy-sub' },
+          ],
+          repos: [
+            { key: 'main', repoPath: null,
+              anchor: { source: 'main-post-apply', base: '214151b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8', head: null, label: 'post-apply 主仓锚' },
+              totals: { files: 22, additions: 5300, deletions: 310, planned: 20, unplanned: 2, untouched: 0 },
+              degraded: false, degradedReason: null },
+            { key: 'sub-grid-security', repoPath: 'E:/PZwangge/sub-grid-security',
+              anchor: { source: 'reviews-range', base: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8', head: 'e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3', label: 'reviews base..head（execute task 锡点，2 task 区间并集）' },
+              totals: { files: 14, additions: 740, deletions: 30, planned: 13, unplanned: 1, untouched: 0 },
+              degraded: false, degradedReason: null },
+            { key: 'spdemo', repoPath: 'E:/PZwangge/spdemo',
+              anchor: { source: 'head~1-window', base: null, head: null, label: 'HEAD~1..HEAD 最近提交窗口（降级——无可用 reviews）' },
+              totals: { files: 10, additions: 0, deletions: 0, planned: 9, unplanned: 1, untouched: 0 },
+              degraded: false, degradedReason: null },
+            { key: 'legacy-sub', repoPath: null,
+              anchor: { source: 'degraded', base: null, head: null, label: 'degraded' },
+              totals: { files: 9, additions: 0, deletions: 0, planned: 0, unplanned: 0, untouched: 9 },
+              degraded: true, degradedReason: 'repo key「legacy-sub」未在 local.yaml repos 注册——跨仓对账不可达，请人工到对应仓核对' },
+          ],
+          excluded: { foreignDeclared: [] },
+          note: '计划侧含 22 个跨仓文件（repo：sub-grid-security、spdemo）——已按 local.yaml repos 注册表分仓对账（各仓锚点档见 repos[].anchor）',
+        }),
+        timedOut: false,
+      },
+    });
+    const result = await h.manager.auditTable('2026-09-15-ehs-reward-punishment');
+    // 行级：主仓行 cross_repo=null（无键归 null）；跨仓行 repoKey 原样透传
+    expect(result.rows[0]).toEqual({
+      path: 'src/main/java/.../RewardController.java', additions: 210, deletions: 18,
+      kind: 'modified', planned: '修改', verdict: 'planned',
+      declared: null, attribution: null, cross_repo: null,
+    });
+    expect(result.rows[1]!.cross_repo).toBe('sub-grid-security');
+    expect(result.rows[2]!.cross_repo).toBe('sub-grid-security');
+    expect(result.rows[3]!.cross_repo).toBe('spdemo');
+    expect(result.rows[4]!.cross_repo).toBe('legacy-sub');
+    // 信封 repos[]：数组序保持（main 首位）+ reviews-range 档逐字段投影
+    expect(result.repos!.map((r) => r.key)).toEqual([
+      'main', 'sub-grid-security', 'spdemo', 'legacy-sub',
+    ]);
+    expect(result.repos![1]).toEqual({
+      key: 'sub-grid-security',
+      anchor: {
+        source: 'reviews-range',
+        base: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8',
+        head: 'e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3',
+        label: 'reviews base..head（execute task 锡点，2 task 区间并集）',
+      },
+      anchor_label: 'a1b2c3d',
+      totals: { files: 14, additions: 740, deletions: 30, planned: 13, unplanned: 1, untouched: 0 },
+      degraded: false,
+      degraded_reason: null,
+    });
+    // main 档 hash 锚同样短化 7 位
+    expect(result.repos![0]!.anchor_label).toBe('214151b');
+    // 语义锚档（head~1-window、base=null）→ anchor_label=null（D-004@v2）
+    expect(result.repos![2]!.anchor.source).toBe('head~1-window');
+    expect(result.repos![2]!.anchor_label).toBeNull();
+    // degraded 档：degraded=true + degraded_reason 透传 + 锚四字段 null 化
+    expect(result.repos![3]).toMatchObject({
+      degraded: true,
+      anchor: { source: 'degraded', base: null, head: null, label: 'degraded' },
+      anchor_label: null,
+      degraded_reason: 'repo key「legacy-sub」未在 local.yaml repos 注册——跨仓对账不可达，请人工到对应仓核对',
+    });
+    // D-001：repoPath 不投影——序列化结果不含键名与仓根路径值
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('repoPath');
+    expect(serialized).not.toContain('E:/PZwangge');
+  });
+
+  it('无 repos 键（旧 CLI）→ repos=null 回退，其余投影与现状逐字段一致；repos 非数组同样回退 null', async () => {
+    const h = makeFileDiffHarness({
+      outcome: {
+        code: 0,
+        stdout: JSON.stringify({
+          command: 'scope-audit',
+          change: '2026-09-10-change-scope-audit',
+          mode: 'full-flow',
+          ok: true,
+          degradedReason: null,
+          baseAnchor: '3f22d6b9b6d1f85415be416c5086e29cfd9998a4',
+          totals: { files: 2, additions: 12, deletions: 3 },
+          rows: [
+            { path: 'src/a.ts', additions: 10, deletions: 2, kind: 'modified', planned: '修改', verdict: 'planned' },
+            { path: 'docs/b.md', additions: 2, deletions: 1, kind: 'modified', planned: null, verdict: 'unplanned' },
+          ],
+          excluded: { foreignDeclared: [] },
+          note: null,
+        }),
+        timedOut: false,
+      },
+    });
+    const result = await h.manager.auditTable('2026-09-10-change-scope-audit');
+    expect(result.repos).toBeNull();
+    // 其余投影与现状逐字段一致（v1 行无 crossRepo 键 → 投影补 null）
+    expect(result.base_ref).toBe('3f22d6b9b6d1f85415be416c5086e29cfd9998a4');
+    expect(result.anchor_label).toBe('3f22d6b');
+    expect(result.totals).toEqual({ files: 2, additions: 12, deletions: 3 });
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[1]).toEqual({
+      path: 'docs/b.md', additions: 2, deletions: 1, kind: 'modified',
+      planned: null, verdict: 'unplanned', declared: null, attribution: null,
+      cross_repo: null,
+    });
+    expect(result.truncated).toBe(false);
+
+    // repos 非数组（异常形态）→ 同样回退 null，不炸整体
+    const bad = makeFileDiffHarness({
+      outcome: {
+        code: 0,
+        stdout: JSON.stringify({ ok: true, mode: 'full-flow', repos: { key: 'x' } }),
+        timedOut: false,
+      },
+    });
+    const badResult = await bad.manager.auditTable('c1');
+    expect(badResult.repos).toBeNull();
+  });
+
+  it('505 行截断护栏（含跨仓行）→ 仍 500 + truncated=true；跨仓行 cross_repo 照常投影，repos[] 不受截断影响', async () => {
+    const rows = Array.from({ length: 505 }, (_, i) => ({
+      path: `src/f${i}.ts`, additions: 1, deletions: 0, kind: 'modified',
+      verdict: 'planned',
+      // 首尾各一条跨仓行：f0/f499 落在保留窗内，f504 被截掉
+      ...(i === 0 || i === 499 ? { crossRepo: 'sub-grid-security' } : {}),
+    }));
+    const h = makeFileDiffHarness({
+      outcome: {
+        code: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          mode: 'full-flow',
+          baseAnchor: '3f22d6b9b6d1f85415be416c5086e29cfd9998a4',
+          rows,
+          repos: [
+            { key: 'main', repoPath: 'C:/repo',
+              anchor: { source: 'main-post-apply', base: '3f22d6b9b6d1f85415be416c5086e29cfd9998a4', head: null, label: 'post-apply 主仓锚' },
+              totals: { files: 505, additions: 505, deletions: 0, planned: 505, unplanned: 0, untouched: 0 },
+              degraded: false, degradedReason: null },
+          ],
+        }),
+        timedOut: false,
+      },
+    });
+    const result = await h.manager.auditTable('c1');
+    expect(result.rows).toHaveLength(500);
+    expect(result.truncated).toBe(true);
+    // 截断只作用于 rows 数量：保留窗内跨仓行 cross_repo 照常投影
+    expect(result.rows[0]!.cross_repo).toBe('sub-grid-security');
+    expect(result.rows[499]!.cross_repo).toBe('sub-grid-security');
+    expect(result.rows[1]!.cross_repo).toBeNull();
+    // repos[] 不受 rows 截断影响
+    expect(result.repos).toHaveLength(1);
+    expect(result.repos![0]).toMatchObject({ key: 'main', anchor_label: '3f22d6b' });
   });
 });
 

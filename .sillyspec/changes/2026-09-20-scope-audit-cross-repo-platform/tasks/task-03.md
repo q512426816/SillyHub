@@ -23,7 +23,7 @@ target_files:
   - frontend/src/components/changes/scope-audit-command-card.tsx
   - frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx
 expects_from:
-  task-02: [ScopeAuditRow.cross_repo, ScopeAuditResponse.repos（ScopeAuditRepo{key,anchor,anchor_label,totals,degraded,degraded_reason}）]
+  task-02: ['ScopeAuditRow.cross_repo', 'ScopeAuditResponse.repos（ScopeAuditRepo{key,anchor,anchor_label,totals,degraded,degraded_reason}）']
 goal: >
   前端消费契约 v2：gen:types 重生成类型后，对账卡按仓分组渲染（全表合计 + 每仓段真实三态与
   锚点档，D-003/D-005），明细弹窗按仓分节 + 仓标徽章，无 repos 全链回退现状单段渲染（D-002）。

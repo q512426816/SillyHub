@@ -380,7 +380,10 @@ export const SILLYSPEC_AUDIT_ROWS_MAX = 500;
 
 /** 对账表单行：full-flow 带 verdict（planned/unplanned/untouched）+ planned（design
  * 文件清单原话，如「修改」），quick 带 attribution（declared/soft/undeclared）+
- * declared——两组字段互斥（按 mode 取用），行数 additions/deletions 二进制为 null。 */
+ * declared——两组字段互斥（按 mode 取用），行数 additions/deletions 二进制为 null。
+ * 契约 v2（2026-09-20-scope-audit-cross-repo-platform）：跨仓行增 cross_repo
+ * （所属 repoKey，raw.crossRepo 透传——v1「⊘ 本表不含」升级为已按仓对账）；
+ * 主仓行/旧 CLI 无键 → null。 */
 export interface SillySpecAuditRow {
   path: string;
   additions: number | null;
@@ -390,6 +393,42 @@ export interface SillySpecAuditRow {
   verdict?: string | null;
   declared?: boolean | null;
   attribution?: string | null;
+  cross_repo?: string | null;
+}
+
+// ── 2026-09-20-scope-audit-cross-repo-platform task-01：契约 v2 逐仓汇总类型 ──
+
+/** 契约 v2 repos[].anchor 投影：锚点档四字段（source 档位名 / base / head
+ * commit / 人类可读 label，与上游 collectRepoActual 锚点分级对齐）；degraded
+ * 档 base/head=null。 */
+export interface SillySpecAuditRepoAnchor {
+  source: string | null;
+  base: string | null;
+  head: string | null;
+  label: string | null;
+}
+
+/** 契约 v2 repos[].totals 投影：该仓行合计与三态计数（六字段）。 */
+export interface SillySpecAuditRepoTotals {
+  files: number | null;
+  additions: number | null;
+  deletions: number | null;
+  planned: number | null;
+  unplanned: number | null;
+  untouched: number | null;
+}
+
+/** 契约 v2 repos[] 逐仓汇总条目（防御投影）。repoPath 不投影——仓根绝对路径
+ * 不出 daemon（D-001）。anchor_label：hash 锚短化 7 位；语义锚/无 base → null
+ * （D-004@v2——仓级人类可读档位由 anchor.label 承载，与信封 anchor_label 的
+ * 语义锚原样透传口径不同）。 */
+export interface SillySpecAuditRepo {
+  key: string;
+  anchor: SillySpecAuditRepoAnchor;
+  anchor_label: string | null;
+  totals: SillySpecAuditRepoTotals;
+  degraded: boolean;
+  degraded_reason: string | null;
 }
 
 /** sillyspec_scope_audit RPC result（表模式信封投影 + rows 截断护栏）。 */
@@ -405,6 +444,8 @@ export interface SillySpecAuditTable {
   degraded_reason: string | null;
   totals: { files: number; additions: number | null; deletions: number | null };
   rows: SillySpecAuditRow[];
+  /** per-repo 逐仓汇总（契约 v2）；旧 CLI 无 repos 键 → null（回退零回归）。 */
+  repos: SillySpecAuditRepo[] | null;
   /** 他者已声明文件（quick 窗口剔除清单）。 */
   excluded_foreign_declared: string[];
   note: string | null;
@@ -1522,6 +1563,9 @@ export class SillySpecManager {
    * verdict 计划内/计划外/计划未动；quick：attribution 已声明/软归属/未声明）
    * + 行数，锚点与 --file 同源。锚点短化（表头同款 7 位短 hash）；rows 超
    * 护栏截断置 truncated（totals 仍为工具原值，截断信息见 truncated）。
+   * 契约 v2（2026-09-20-scope-audit-cross-repo-platform task-01）：行级
+   * cross_repo 透传 + 信封 repos[] 逐仓防御投影（旧 CLI 无键/非数组 → null
+   * 回退；repoPath 不投影——D-001 仓根不出 daemon）。
    *
    * @throws {RpcError} invalid_params / no_spec_root / sillyspec_bin_missing /
    *   scope_audit_timeout / sillyspec_capability_missing / scope_audit_failed
@@ -1566,8 +1610,52 @@ export class SillySpecManager {
         verdict: asStr(raw.verdict),
         declared: typeof raw.declared === 'boolean' ? raw.declared : null,
         attribution: asStr(raw.attribution),
+        // 契约 v2：跨仓行 repoKey 透传（v1「⊘ 本表不含」升级为已按仓对账）；
+        // 主仓行/旧 CLI 无键 → null
+        cross_repo: asStr(raw.crossRepo),
       });
       if (rows.length >= SILLYSPEC_AUDIT_ROWS_MAX) break;
+    }
+    // 契约 v2 信封 repos[] 逐仓汇总：无键/非数组（旧 CLI）→ null 回退；是数组
+    // 则逐条防御投影（isRecord + key 非空 string 否则整条跳过）；repoPath 不投影
+    // （D-001：仓根绝对路径不出 daemon）。
+    const rawRepos = Array.isArray(parsed.repos) ? parsed.repos : null;
+    let repos: SillySpecAuditRepo[] | null = null;
+    if (rawRepos !== null) {
+      repos = [];
+      for (const rawRepo of rawRepos) {
+        if (!isRecord(rawRepo)) continue;
+        const key = asStr(rawRepo.key);
+        if (key === null) continue;
+        const anchorRaw = isRecord(rawRepo.anchor) ? rawRepo.anchor : {};
+        const anchorBase = asStr(anchorRaw.base);
+        const totalsRaw = isRecord(rawRepo.totals) ? rawRepo.totals : {};
+        repos.push({
+          key,
+          anchor: {
+            source: asStr(anchorRaw.source),
+            base: anchorBase,
+            head: asStr(anchorRaw.head),
+            label: asStr(anchorRaw.label),
+          },
+          // hash 锚短化 7 位（与信封 anchor_label 同款正则）；语义锚/无 base →
+          // null（D-004@v2——仓级人类可读档位由 anchor.label 承载）
+          anchor_label:
+            anchorBase !== null && /^[0-9a-f]{7,40}$/.test(anchorBase)
+              ? anchorBase.slice(0, 7)
+              : null,
+          totals: {
+            files: asCount(totalsRaw.files),
+            additions: asCount(totalsRaw.additions),
+            deletions: asCount(totalsRaw.deletions),
+            planned: asCount(totalsRaw.planned),
+            unplanned: asCount(totalsRaw.unplanned),
+            untouched: asCount(totalsRaw.untouched),
+          },
+          degraded: rawRepo.degraded === true,
+          degraded_reason: asStr(rawRepo.degradedReason),
+        });
+      }
     }
     const excluded = isRecord(parsed.excluded) && Array.isArray(parsed.excluded.foreignDeclared)
       ? parsed.excluded.foreignDeclared.filter((p): p is string => typeof p === 'string')
@@ -1592,6 +1680,7 @@ export class SillySpecManager {
         deletions: asCount((isRecord(parsed.totals) ? parsed.totals.deletions : null)),
       },
       rows,
+      repos,
       excluded_foreign_declared: excluded,
       note: asStr(parsed.note),
       truncated: rows.length >= SILLYSPEC_AUDIT_ROWS_MAX && rawRows.length > rows.length,

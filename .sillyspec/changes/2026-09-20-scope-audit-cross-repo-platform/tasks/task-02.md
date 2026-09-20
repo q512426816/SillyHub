@@ -19,9 +19,9 @@ target_files:
   - backend/app/modules/change/scope_audit.py
   - backend/app/modules/change/tests/test_scope_file_diff.py
 expects_from:
-  task-01: [rows[].cross_repo, repos[]（key/anchor{source,base,head,label}/anchor_label/totals{files,additions,deletions,planned,unplanned,untouched}/degraded/degraded_reason）]
+  task-01: ['rows[].cross_repo', 'repos[]（key/anchor{source,base,head,label}/anchor_label/totals{files,additions,deletions,planned,unplanned,untouched}/degraded/degraded_reason）']
 provides:
-  openapi_scope_audit_v2_fields: [ScopeAuditRow.cross_repo, ScopeAuditResponse.repos（ScopeAuditRepo{key,anchor,anchor_label,totals,degraded,degraded_reason}）]
+  openapi_scope_audit_v2_fields: ['ScopeAuditRow.cross_repo', 'ScopeAuditResponse.repos（ScopeAuditRepo{key,anchor,anchor_label,totals,degraded,degraded_reason}）']
 goal: >
   backend change 模块消费 daemon RPC result 的契约 v2 增量：ScopeAuditRow.cross_repo 与
   ScopeAuditRepo 族 pydantic schema + get_scope_audit 防御透传，非法/缺省形态回退 repos=[]（D-002）。

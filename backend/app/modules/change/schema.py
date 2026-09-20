@@ -702,6 +702,12 @@ class ScopeAuditRow(BaseModel):
     verdict: str | None = None
     declared: bool | None = None
     attribution: str | None = None
+    # 2026-09-20-scope-audit-cross-repo-platform task-02（契约 v2）：跨仓行归属
+    # repoKey——语义从 v1「⊘ 本表不含」升级为「已按仓对账」；主仓行/旧 daemon/
+    # degraded 仓无此值（None）。producer = daemon RPC 投影 rows[].cross_repo，
+    # consumer = 前端按仓分组（gen:types 经 task-03）。additive 缺省 None，
+    # 旧客户端不读不受影响。
+    cross_repo: str | None = None
 
 
 class ScopeAuditTotals(BaseModel):
@@ -710,11 +716,65 @@ class ScopeAuditTotals(BaseModel):
     deletions: int | None = None
 
 
+# ── per-repo 汇总 DTO（2026-09-20-scope-audit-cross-repo-platform task-02，
+#    daemon RPC result 契约 v2 信封级 repos[]，design「接口定义」逐字段对齐）──
+
+
+class ScopeAuditRepoAnchor(BaseModel):
+    """仓库对账锚点档（锚点分级 A/B/C/degraded 的统一描述）。
+
+    ``source`` 为档位标识（reviews-range / head~1-window /
+    head-uncommitted-window / degraded，main 条目为 main-<form> 主仓锚
+    包装）；``base``/``head`` 为该仓 diff 区间 commit（B/C 档与 degraded
+    档为 None）；``label`` 为人类可读档位描述（表尾汇总行直接用）。
+    全字段缺省 None——daemon 缺键/非法形态时防御构造不炸。
+    """
+
+    source: str | None = None
+    base: str | None = None
+    head: str | None = None
+    label: str | None = None
+
+
+class ScopeAuditRepoTotals(BaseModel):
+    """仓库行合计与三态计数（仅计该仓行；全 int|None——B/C 降级档行数
+    不可得时 additions/deletions 为 None，不计入合计）。"""
+
+    files: int | None = None
+    additions: int | None = None
+    deletions: int | None = None
+    planned: int | None = None
+    unplanned: int | None = None
+    untouched: int | None = None
+
+
+class ScopeAuditRepo(BaseModel):
+    """跨仓对账 per-repo 汇总条目（信封级 repos[] 单项）。
+
+    ``key`` 为仓标识（'main' 或 local.yaml repos 注册 key，main 条目始终
+    首位）；``anchor``/``anchor_label`` 为该仓锚点档（label 扁平冗余一份，
+    供表尾汇总行直取）；``degraded``/``degraded_reason`` 为降级标记与原因
+    （仓未注册/路径不可达/git 不可用等，degraded 仓该组行退 ⊘ 形态）。
+    producer = daemon RPC 投影 repos[]，consumer = 前端按仓分组卡
+    （gen:types 经 task-03）。
+    """
+
+    key: str
+    anchor: ScopeAuditRepoAnchor = Field(default_factory=ScopeAuditRepoAnchor)
+    anchor_label: str | None = None
+    totals: ScopeAuditRepoTotals = Field(default_factory=ScopeAuditRepoTotals)
+    degraded: bool = False
+    degraded_reason: str | None = None
+
+
 class ScopeAuditResponse(BaseModel):
     """对账表（daemon sillyspec_scope_audit RPC 透传投影）。
 
     ok=false 时 degraded_reason 带原因（quick 会话不存在等），rows 为空。
     truncated：rows 超 500 被 daemon 侧截断。
+    ``repos``（契约 v2，2026-09-20-scope-audit-cross-repo-platform）：仅当
+    计划侧含跨仓条目且非预执行形态时 daemon 才输出；单仓变更/旧 daemon/
+    无 repos 键 → 空列表回退（零回归）。
     """
 
     change: str
@@ -728,3 +788,4 @@ class ScopeAuditResponse(BaseModel):
     excluded_foreign_declared: list[str] = Field(default_factory=list)
     note: str | None = None
     truncated: bool = False
+    repos: list[ScopeAuditRepo] = Field(default_factory=list)

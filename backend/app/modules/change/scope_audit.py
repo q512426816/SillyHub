@@ -22,6 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.change.schema import (
+    ScopeAuditRepo,
+    ScopeAuditRepoAnchor,
+    ScopeAuditRepoTotals,
     ScopeAuditResponse,
     ScopeAuditRow,
     ScopeAuditTotals,
@@ -404,9 +407,74 @@ class ScopeFileDiffService:
                             if isinstance(raw.get("attribution"), str)
                             else None
                         ),
+                        # 契约 v2（2026-09-20-scope-audit-cross-repo-platform）：
+                        # 跨仓行归属 repoKey（同 declared/attribution 的 str 守卫
+                        # 风格，非 str 一律回退 None——主仓行零影响）。
+                        cross_repo=(
+                            raw.get("cross_repo")
+                            if isinstance(raw.get("cross_repo"), str)
+                            else None
+                        ),
                     )
                 )
         raw_totals = result.get("totals") if isinstance(result.get("totals"), dict) else {}
+
+        # 契约 v2（2026-09-20-scope-audit-cross-repo-platform，D-002 防御透传）：
+        # 信封级 per-repo 汇总。无 repos 键 / 非 list（单仓变更、旧 daemon、
+        # 预执行形态）→ 空列表回退；逐条 isinstance 守卫（key 非 str / 条目非
+        # dict 跳过，嵌套 anchor/totals 逐字段归一），非法形态不炸整体。
+        raw_repos = result.get("repos")
+        repos: list[ScopeAuditRepo] = []
+        if isinstance(raw_repos, list):
+            for raw_repo in raw_repos:
+                if not isinstance(raw_repo, dict) or not isinstance(raw_repo.get("key"), str):
+                    continue
+                raw_anchor = (
+                    raw_repo.get("anchor") if isinstance(raw_repo.get("anchor"), dict) else {}
+                )
+                raw_repo_totals = (
+                    raw_repo.get("totals") if isinstance(raw_repo.get("totals"), dict) else {}
+                )
+                repos.append(
+                    ScopeAuditRepo(
+                        key=raw_repo["key"],
+                        anchor=ScopeAuditRepoAnchor(
+                            source=(
+                                raw_anchor.get("source")
+                                if isinstance(raw_anchor.get("source"), str)
+                                else None
+                            ),
+                            base=raw_anchor.get("base")
+                            if isinstance(raw_anchor.get("base"), str)
+                            else None,
+                            head=raw_anchor.get("head")
+                            if isinstance(raw_anchor.get("head"), str)
+                            else None,
+                            label=raw_anchor.get("label")
+                            if isinstance(raw_anchor.get("label"), str)
+                            else None,
+                        ),
+                        anchor_label=(
+                            raw_repo.get("anchor_label")
+                            if isinstance(raw_repo.get("anchor_label"), str)
+                            else None
+                        ),
+                        totals=ScopeAuditRepoTotals(
+                            files=_count(raw_repo_totals.get("files")),
+                            additions=_count(raw_repo_totals.get("additions")),
+                            deletions=_count(raw_repo_totals.get("deletions")),
+                            planned=_count(raw_repo_totals.get("planned")),
+                            unplanned=_count(raw_repo_totals.get("unplanned")),
+                            untouched=_count(raw_repo_totals.get("untouched")),
+                        ),
+                        degraded=raw_repo.get("degraded") is True,
+                        degraded_reason=(
+                            raw_repo.get("degraded_reason")
+                            if isinstance(raw_repo.get("degraded_reason"), str)
+                            else None
+                        ),
+                    )
+                )
         # daemon 投影为扁平 excluded_foreign_declared（SillySpecAuditTable 契约）
         foreign = result.get("excluded_foreign_declared")
         return ScopeAuditResponse(
@@ -433,4 +501,5 @@ class ScopeFileDiffService:
             ],
             note=result.get("note") if isinstance(result.get("note"), str) else None,
             truncated=result.get("truncated") is True,
+            repos=repos,
         )
