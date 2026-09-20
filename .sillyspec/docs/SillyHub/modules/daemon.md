@@ -198,3 +198,9 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 - backend：主输入框忙轮发送回退默认排队（router/session_crud.py 删 busy_strategy=inject 自动门控，queue_when_busy=True 恒排队；steered 出参保留恒 false）。「转为引导」唯一入口=队列条 ⚡（dispatch_now 引导式，caps 门控判定在该路径内，queue.py :675-748 不变）。
 - frontend：引导消息改「轮内 user_msg 段」模型（TurnSegment 新 kind，session-log-assembler.ts）——实时：appendSteeredSegment/markSteeredSegmentDelivered/markSteeredSegmentsEnded 三纯函数驱动（session-panel-page.tsx 导出、dialog 复用），steering/delivered/ended 三态段渲染在活跃轮内（turn-segment-views.tsx UserMsgSegmentView，data-steered-msg 锚点）；回放：logsToTurns 非首主体组转 user_msg 段按时间戳插入轮内段序列（runtime-session-helpers.tsx insertUserMsgSegments），轮 prompt 仅取首组——刷新后不再前移到轮次开头。
 - ⚡ title：「立即引导进当前轮（不打断）」→「转为引导，注入当前轮（不打断）」。
+
+## 增量（ql-20260920-007：claude 引擎 autocompact 三键 provider 级配置）
+
+- 机制：引擎默认在 resolved autocompact window（≈模型 believed limit 200K 级）的 ~80% 水位自动压缩（≈160K，预留压缩调用自身缓冲）；平台经 provider 级 `settings_config` 三键干预——`autoCompactWindow`（正整数，配大于默认→更晚触发；⚠️超模型实际窗口会先撞硬限报错）/`autoCompactEnabled`（布尔三态）/`precomputeCompactionEnabled`（后台预计算摘要）。
+- 链路：llm_providers.settings_config（前端 provider 表单 claude 分支「引擎自动压缩」区结构化写入）→ lease/context.py 原样透传 → daemon `claude-settings.ts` TOP_LEVEL_KEYS 白名单（值守护：window 非正整数/开关非布尔跳过不写）→ `$CLAUDE_CONFIG_DIR/settings.json` → claude code spawn 读取。运行中会话不热更新，下一 spawn 生效。
+- 依据：SDK 0.3.247 Settings 可写字段三枚（sdk.d.ts :7567/:5792/:5794），无可写 threshold 项；生产 6e213eb3 会话 COMPACT_STATUS 时间线（160K 触发实证）。

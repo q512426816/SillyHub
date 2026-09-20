@@ -730,3 +730,78 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
     expect(screen.getByText(/留空=官方端点/)).toBeTruthy();
   });
 });
+
+// ── ql-20260920-007（2026-09-20-claude-autocompact-config / FR-02）──────────
+describe("LlmProviderForm — 引擎自动压缩区（claude 条件渲染）", () => {
+  it("agent_kind=claude → 「引擎自动压缩（claude）」区渲染；三控件改值写入 settings_config", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />,
+    );
+    // claude 默认 → 区存在
+    fireEvent.click(screen.getByText("引擎自动压缩（claude）"));
+    // 自动压缩 select → 关闭
+    fireEvent.change(screen.getByDisplayValue("跟随引擎（默认开）"), {
+      target: { value: "false" },
+    });
+    // 压缩窗口数字输入
+    const winInput = screen.getByPlaceholderText("默认=模型窗口（如 200000）");
+    fireEvent.change(winInput, { target: { value: "230000" } });
+    // precompute 勾选
+    fireEvent.click(screen.getByText("后台预计算压缩摘要"));
+    // 填必填项提交
+    fireEvent.change(screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/), {
+      target: { value: "压缩测试供应商" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("sk-***"), {
+      target: { value: "sk-x" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/https:\/\/api\.anthropic\.com/), {
+      target: { value: "https://x.anthropic" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建供应商" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const values = onSubmit.mock.calls[0]![0]!;
+    expect(values.settings_config).toMatchObject({
+      autoCompactEnabled: false,
+      autoCompactWindow: 230000,
+      precomputeCompactionEnabled: true,
+    });
+  });
+
+  it("控件默认空 → settings_config 不含三键（跟随引擎默认）；非法窗口值不写入", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />,
+    );
+    fireEvent.change(screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/), {
+      target: { value: "默认态供应商" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("sk-***"), {
+      target: { value: "sk-y" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/https:\/\/api\.anthropic\.com/), {
+      target: { value: "https://y.anthropic" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建供应商" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const values = onSubmit.mock.calls[0]![0]!;
+    // 三键全未设 → settings_config 仅含 JSON 面板生成的 env 等默认内容或 null
+    const sc = (values.settings_config ?? {}) as Record<string, unknown>;
+    expect(sc).not.toHaveProperty("autoCompactWindow");
+    expect(sc).not.toHaveProperty("autoCompactEnabled");
+    expect(sc).not.toHaveProperty("precomputeCompactionEnabled");
+  });
+
+  it("agent_kind=pi → 引擎自动压缩区不渲染", () => {
+    render(
+      <LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />,
+    );
+    // 切 pi
+    // agent_kind 下拉（label「引擎类型」关联的 select）
+    fireEvent.change(screen.getByLabelText("Agent 种类"), {
+      target: { value: "pi" },
+    });
+    expect(screen.queryByText("引擎自动压缩（claude）")).toBeNull();
+  });
+});

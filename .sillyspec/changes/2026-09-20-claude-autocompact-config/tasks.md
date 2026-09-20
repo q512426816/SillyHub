@@ -1,0 +1,1 @@
+- [x] ql-20260920-007-d0dd claude 引擎 autocompact 配置（provider 级）

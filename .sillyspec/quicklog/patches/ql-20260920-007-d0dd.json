@@ -1,0 +1,79 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-899b61b3",
+  "totals": {
+    "files": 5,
+    "additions": 313,
+    "deletions": 1
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/daemon.md",
+      "declared": true,
+      "additions": 6,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx",
+      "declared": true,
+      "additions": 75,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/llm-providers/llm-provider-form.tsx",
+      "declared": true,
+      "additions": 144,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/claude-settings.ts",
+      "declared": true,
+      "additions": 27,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/claude-settings.test.ts",
+      "declared": true,
+      "additions": 61,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 5,
+    "codeFileCount": 2,
+    "testFileCount": 2,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260920-007-d0dd",
+  "sessionId": "quick-899b61b3",
+  "savedAt": "2026-09-20T09:41:27.487Z",
+  "patchSha256": "f9e96b5fe778cbe2e15547552a5a5a1ce5d8b9c07e4967d386b6fcff089a3340",
+  "patchStatus": "ok"
+}

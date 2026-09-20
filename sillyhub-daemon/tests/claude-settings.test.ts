@@ -299,3 +299,64 @@ describe('applyClaudeSettings 写盘语义', () => {
     // 清理嵌套目录（afterAll 只删 tmpDir 顶层，这里文件已在其下，recursive force 会带走）
   });
 });
+
+// ── ql-20260920-007（2026-09-20-claude-autocompact-config / FR-01）──────────
+describe('applyClaudeSettings autocompact 三键白名单 + 值守护', () => {
+  it('autoCompactWindow/autoCompactEnabled/precomputeCompactionEnabled 合法值 → 全部写入 settings.json 顶层', async () => {
+    await applyClaudeSettings(
+      {
+        agent_kind: 'claude',
+        settings_config: {
+          autoCompactWindow: 230000,
+          autoCompactEnabled: true,
+          precomputeCompactionEnabled: false,
+        },
+      },
+      tmpDir,
+    );
+    const obj = readSettings();
+    expect(obj.autoCompactWindow).toBe(230000);
+    expect(obj.autoCompactEnabled).toBe(true);
+    expect(obj.precomputeCompactionEnabled).toBe(false);
+  });
+
+  it('值守护：window 为 0/负数/非整数 → 跳过；开关非布尔 → 跳过', async () => {
+    await applyClaudeSettings(
+      {
+        agent_kind: 'claude',
+        settings_config: {
+          autoCompactWindow: 0,
+          autoCompactEnabled: 'yes',
+          precomputeCompactionEnabled: null,
+        },
+      },
+      tmpDir,
+    );
+    // 三键全非法 → 结果对象空 → 不写文件（零回归：absent 语义）。
+    expect(existsSync(settingsPath)).toBe(false);
+  });
+
+  it('值守护只跳过非法键：window=200000 合法 + enabled="x" 非法 → 仅 window 写入', async () => {
+    await applyClaudeSettings(
+      {
+        agent_kind: 'claude',
+        settings_config: { autoCompactWindow: 200000, autoCompactEnabled: 'x' },
+      },
+      tmpDir,
+    );
+    const obj = readSettings();
+    expect(obj.autoCompactWindow).toBe(200000);
+    expect(obj).not.toHaveProperty('autoCompactEnabled');
+  });
+
+  it('零回归：仅 env（无任一白名单键）→ 不写文件', async () => {
+    await applyClaudeSettings(
+      {
+        agent_kind: 'claude',
+        settings_config: { env: { ANTHROPIC_MODEL: 'glm-5.3' } },
+      },
+      tmpDir,
+    );
+    expect(existsSync(settingsPath)).toBe(false);
+  });
+});

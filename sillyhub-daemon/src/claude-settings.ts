@@ -38,13 +38,37 @@ import type { ProviderConfig } from './types.js';
  * 显式枚举而非「展开 settings_config 全部键」：① 排除 env（task-05 toEnv 处理）；
  * ② 排除任何未知键（防未来 settings_config 结构扩展时误泄漏到 settings.json）；
  * ③ api_key 天然不在列（settings_config 顶层本就无此键）。
+ *
+ * ql-20260920-007（2026-09-20-claude-autocompact-config / D-003）：新增 claude
+ * 引擎自动压缩三键（SDK 0.3.247 Settings 可写字段，sdk.d.ts :7567/:5792/:5794）——
+ *   - autoCompactWindow：压缩窗口（token 数）。默认=模型 believed limit（200K 级）
+ *     × ~80% 触发（≈160K，预留压缩调用自身缓冲）；配大于默认 → 更高水位才触发。
+ *     ⚠️ 超过模型实际窗口会在触发压缩前撞硬限报错（表单层风险提示承载）。
+ *   - autoCompactEnabled：自动压缩开关。
+ *   - precomputeCompactionEnabled：后台预计算压缩摘要（仅 autoCompact 开启时生效）。
+ * 值守护（FR-01）：window 非正整数 / 开关非布尔 → 该键跳过不写（best-effort 零
+ * 回归语义：不抛错不阻断 spawn）。
  */
 const TOP_LEVEL_KEYS = [
   'attribution',
   'enabledPlugins',
   'model',
   'skipDangerousModePermissionPrompt',
+  'autoCompactWindow',
+  'autoCompactEnabled',
+  'precomputeCompactionEnabled',
 ] as const;
+
+/** ql-20260920-007：值守护——键级合法性（window 正整数 / 开关布尔），非法跳过。 */
+function isLegalValue(key: (typeof TOP_LEVEL_KEYS)[number], v: unknown): boolean {
+  if (key === 'autoCompactWindow') {
+    return typeof v === 'number' && Number.isInteger(v) && v > 0;
+  }
+  if (key === 'autoCompactEnabled' || key === 'precomputeCompactionEnabled') {
+    return typeof v === 'boolean';
+  }
+  return true; // 既有键维持原语义（非 null/undefined 即写，见 buildSettingsObject）
+}
 
 /** settings.json 目标文件名（claude code 读 `$CLAUDE_CONFIG_DIR/settings.json`）。 */
 const SETTINGS_FILENAME = 'settings.json';
@@ -70,7 +94,9 @@ function buildSettingsObject(
   const src = sc as Record<string, unknown>;
   for (const key of TOP_LEVEL_KEYS) {
     const v = src[key];
-    if (v !== undefined && v !== null) {
+    // ql-20260920-007：autocompact 三键过值守护（window 正整数/开关布尔），
+    // 非法值视同未设置跳过；既有键维持「非 null/undefined 即写」原语义。
+    if (v !== undefined && v !== null && isLegalValue(key, v)) {
       out[key] = v;
     }
   }

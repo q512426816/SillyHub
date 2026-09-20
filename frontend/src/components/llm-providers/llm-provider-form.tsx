@@ -509,6 +509,69 @@ export function LlmProviderForm({
   }, [settingsConfigJson]);
 
   /**
+   * ql-20260920-007（2026-09-20-claude-autocompact-config / FR-02）：引擎自动压缩
+   * 三键派生态（agentKind=claude 条件区渲染用）。JSON 非法时全空（跟随引擎默认）。
+   *   - autoCompactWindow：number | undefined（压缩窗口 token 数）
+   *   - autoCompactEnabled：boolean | undefined（三态：undefined=跟随引擎/true=开/false=关）
+   *   - precomputeCompactionEnabled：boolean | undefined（勾选=开启后台预计算）
+   */
+  const autoCompactCfg = useMemo<{
+    window: number | undefined;
+    enabled: boolean | undefined;
+    precompute: boolean | undefined;
+  }>(() => {
+    try {
+      const cfg = JSON.parse(settingsConfigJson || "{}");
+      return {
+        window:
+          typeof cfg?.autoCompactWindow === "number"
+            ? cfg.autoCompactWindow
+            : undefined,
+        enabled:
+          typeof cfg?.autoCompactEnabled === "boolean"
+            ? cfg.autoCompactEnabled
+            : undefined,
+        precompute:
+          typeof cfg?.precomputeCompactionEnabled === "boolean"
+            ? cfg.precomputeCompactionEnabled
+            : undefined,
+      };
+    } catch {
+      return { window: undefined, enabled: undefined, precompute: undefined };
+    }
+  }, [settingsConfigJson]);
+
+  /**
+   * ql-20260920-007：autocompact 三键写入（value=null 删键=跟随引擎默认）。
+   * parse settings_config → set/delete → stringify 回写（照 handleConfigToggle
+   * 范式：JSON 非法静默不动）。window 输入非法（非正整数）不写入。
+   */
+  const setAutoCompactField = (
+    key: "autoCompactWindow" | "autoCompactEnabled" | "precomputeCompactionEnabled",
+    value: number | boolean | null,
+  ): void => {
+    let cfg: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(settingsConfigJson || "{}");
+      cfg =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : {};
+    } catch {
+      return; // JSON 非法 → 静默不动
+    }
+    if (value === null) delete cfg[key];
+    else if (key === "autoCompactWindow") {
+      if (Number.isInteger(value) && (value as number) > 0) {
+        cfg[key] = value;
+      } else {
+        delete cfg[key]; // 非正整数视同未设置
+      }
+    } else cfg[key] = value;
+    setSettingsConfigJson(JSON.stringify(cfg, null, 2));
+  };
+
+  /**
    * 5 开关 toggle（D-008）：parse settings_config → 增删对应键（env 空对象则 delete env）
    * → stringify 回写。JSON 非法静默不动（照 cc-switch catch，不崩不丢输入）。
    * 映射：
@@ -775,6 +838,7 @@ export function LlmProviderForm({
             Agent 种类 <span className="text-destructive">*</span>
           </label>
           <select
+            aria-label="Agent 种类"
             value={agentKind}
             onChange={(e) => {
               const next = e.target.value as LlmProviderAgentKind;
@@ -1201,6 +1265,86 @@ export function LlmProviderForm({
           </div>
         </div>
       </details>
+
+      {/* ql-20260920-007（2026-09-20-claude-autocompact-config / FR-02）：
+          引擎自动压缩三键结构化区——仅 claude 引擎渲染（pi/codex 压缩机制各自独立，
+          不走 settings.json）。三键直写 settings_config 顶层，随 spawn 前白名单
+          （claude-settings.ts）落 $CLAUDE_CONFIG_DIR/settings.json。 */}
+      {agentKind === "claude" && (
+        <details className="rounded border border-dashed border-input/70 p-3">
+          <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+            引擎自动压缩（claude）
+          </summary>
+          <div className="mt-3 space-y-2">
+            <p className={hintCls}>
+              引擎默认在约 80% 上下文窗口（如 200K 窗口 ≈ 160K tokens）自动压缩；
+              留空全部跟随引擎默认。运行中的会话不热更新，下一次新会话生效。
+            </p>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                自动压缩
+                <select
+                  className="h-7 rounded border border-input bg-background px-1.5 text-xs"
+                  value={
+                    autoCompactCfg.enabled === undefined
+                      ? ""
+                      : autoCompactCfg.enabled
+                        ? "true"
+                        : "false"
+                  }
+                  onChange={(e) =>
+                    setAutoCompactField(
+                      "autoCompactEnabled",
+                      e.target.value === ""
+                        ? null
+                        : e.target.value === "true",
+                    )
+                  }
+                >
+                  <option value="">跟随引擎（默认开）</option>
+                  <option value="true">开启</option>
+                  <option value="false">关闭</option>
+                </select>
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                压缩窗口（tokens）
+                <input
+                  type="number"
+                  min={10000}
+                  step={10000}
+                  className="h-7 w-36 rounded border border-input bg-background px-1.5 text-xs"
+                  placeholder="默认=模型窗口（如 200000）"
+                  value={autoCompactCfg.window ?? ""}
+                  onChange={(e) =>
+                    setAutoCompactField(
+                      "autoCompactWindow",
+                      e.target.value === "" ? null : Number(e.target.value),
+                    )
+                  }
+                />
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={autoCompactCfg.precompute === true}
+                  onChange={(e) =>
+                    setAutoCompactField(
+                      "precomputeCompactionEnabled",
+                      e.target.checked ? true : null,
+                    )
+                  }
+                  className="h-3.5 w-3.5 rounded border border-input"
+                />
+                后台预计算压缩摘要
+              </label>
+            </div>
+            <p className="text-[11px] text-amber-700">
+              ⚠️ 压缩窗口不要超过模型实际上下文窗口——超配会在触发压缩前直接撞
+              模型硬限报错（引擎原生行为，平台不拦截）。
+            </p>
+          </div>
+        </details>
+      )}
 
       <details className="rounded border border-dashed border-input/70 p-3">
         <summary className="cursor-pointer text-xs font-medium text-muted-foreground">

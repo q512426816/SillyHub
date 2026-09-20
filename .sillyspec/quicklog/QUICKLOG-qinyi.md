@@ -116,3 +116,18 @@
 结果：backend 41+13 用例全绿（断言回排队口径）、前端 tsc 0 错+65 测试全绿、daemon.md 增量段同步；子代理中断（额度）后分两段续做完成
 审计：[gate] L1（跨 0 模块 · 33 文件：10 代码/6 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
 审计：⚖️ 归属切分：18 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.zcode/skills/sillyhub-docker-deploy/SKILL.md, .zcode/skills/sillyspec-archive/SKILL.md, .zcode/skills/sillyspec-auto/SKILL.md, .zcode/skills/sillyspec-brainstorm/SKILL.md, .zcode/skills/sillyspec-commit/SKILL.md, .zcode/skills/sillyspec-continue/SKILL.md, .zcode/skills/sillyspec-execute/SKILL.md, .zcode/skills/sillyspec-explore/SKILL.md, .zcode/skills/sillyspec-knowledge/SKILL.md, .zcode/skills/sillyspec-plan/SKILL.md, .zcode/skills/sillyspec-propose/SKILL.md, .zcode/skills/sillyspec-quick/SKILL.md, .zcode/skills/sillyspec-resume/SKILL.md, .zcode/skills/sillyspec-state/SKILL.md, .zcode/skills/sillyspec-verify/SKILL.md, .zcode/skills/sillyspec-workspace/SKILL.md, AGENTS.md, .opencode/
+
+## ql-20260920-007-d0dd | 2026-09-20 17:27:00 | claude 引擎 autocompact 做成 provider 级可配（解决 160K 过早压缩）。根因…
+状态：已完成
+关联变更：2026-09-20-claude-autocompact-config
+文件：
+- sillyhub-daemon/src/claude-settings.ts（白名单加三键+值守护）
+- sillyhub-daemon/tests/claude-settings.test.ts（4 新用例）
+- frontend/src/components/llm-providers/llm-provider-form.tsx（claude 条件压缩设置区）
+- frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx（3 新用例）
+- .sillyspec/docs/SillyHub/modules/daemon.md（增量段）
+需求：claude 引擎 autocompact 做成 provider 级可配（解决 160K 过早压缩）。
+根因：引擎默认 believed limit×~80% 触发（200K 窗口≈160K），平台 settings 白名单管道未放行 autocompact 键，无干预手段。
+方案：settings_config 三键（autoCompactWindow/autoCompactEnabled/precomputeCompactionEnabled）经 daemon claude-settings.ts 白名单（值守护）写 settings.json；前端 provider 表单 claude 分支「引擎自动压缩」结构化区+超窗风险提示；零迁移零协议后端零改动。
+结果：daemon claude-settings 22/22（4 新用例）、前端表单 29/29（3 新用例）、tsc 0 错、daemon.md 增量段同步
+审计：[gate] L1（跨 0 模块 · 5 文件：2 代码/2 测试）advisory；每文件注记已全覆盖；测试增量已含

@@ -1,0 +1,389 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.md b/.sillyspec/docs/SillyHub/modules/daemon.md
+index 9014913c9..2c44755fa 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.md
+@@ -198,3 +198,9 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容
+ - backend：主输入框忙轮发送回退默认排队（router/session_crud.py 删 busy_strategy=inject 自动门控，queue_when_busy=True 恒排队；steered 出参保留恒 false）。「转为引导」唯一入口=队列条 ⚡（dispatch_now 引导式，caps 门控判定在该路径内，queue.py :675-748 不变）。
+ - frontend：引导消息改「轮内 user_msg 段」模型（TurnSegment 新 kind，session-log-assembler.ts）——实时：appendSteeredSegment/markSteeredSegmentDelivered/markSteeredSegmentsEnded 三纯函数驱动（session-panel-page.tsx 导出、dialog 复用），steering/delivered/ended 三态段渲染在活跃轮内（turn-segment-views.tsx UserMsgSegmentView，data-steered-msg 锚点）；回放：logsToTurns 非首主体组转 user_msg 段按时间戳插入轮内段序列（runtime-session-helpers.tsx insertUserMsgSegments），轮 prompt 仅取首组——刷新后不再前移到轮次开头。
+ - ⚡ title：「立即引导进当前轮（不打断）」→「转为引导，注入当前轮（不打断）」。
++
++## 增量（ql-20260920-007：claude 引擎 autocompact 三键 provider 级配置）
++
++- 机制：引擎默认在 resolved autocompact window（≈模型 believed limit 200K 级）的 ~80% 水位自动压缩（≈160K，预留压缩调用自身缓冲）；平台经 provider 级 `settings_config` 三键干预——`autoCompactWindow`（正整数，配大于默认→更晚触发；⚠️超模型实际窗口会先撞硬限报错）/`autoCompactEnabled`（布尔三态）/`precomputeCompactionEnabled`（后台预计算摘要）。
++- 链路：llm_providers.settings_config（前端 provider 表单 claude 分支「引擎自动压缩」区结构化写入）→ lease/context.py 原样透传 → daemon `claude-settings.ts` TOP_LEVEL_KEYS 白名单（值守护：window 非正整数/开关非布尔跳过不写）→ `$CLAUDE_CONFIG_DIR/settings.json` → claude code spawn 读取。运行中会话不热更新，下一 spawn 生效。
++- 依据：SDK 0.3.247 Settings 可写字段三枚（sdk.d.ts :7567/:5792/:5794），无可写 threshold 项；生产 6e213eb3 会话 COMPACT_STATUS 时间线（160K 触发实证）。
+diff --git a/frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx b/frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx
+index 489208f53..2c7684660 100644
+--- a/frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx
++++ b/frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx
+@@ -730,3 +730,78 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
+     expect(screen.getByText(/留空=官方端点/)).toBeTruthy();
+   });
+ });
++
++// ── ql-20260920-007（2026-09-20-claude-autocompact-config / FR-02）──────────
++describe("LlmProviderForm — 引擎自动压缩区（claude 条件渲染）", () => {
++  it("agent_kind=claude → 「引擎自动压缩（claude）」区渲染；三控件改值写入 settings_config", async () => {
++    const onSubmit = vi.fn();
++    render(
++      <LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />,
++    );
++    // claude 默认 → 区存在
++    fireEvent.click(screen.getByText("引擎自动压缩（claude）"));
++    // 自动压缩 select → 关闭
++    fireEvent.change(screen.getByDisplayValue("跟随引擎（默认开）"), {
++      target: { value: "false" },
++    });
++    // 压缩窗口数字输入
++    const winInput = screen.getByPlaceholderText("默认=模型窗口（如 200000）");
++    fireEvent.change(winInput, { target: { value: "230000" } });
++    // precompute 勾选
++    fireEvent.click(screen.getByText("后台预计算压缩摘要"));
++    // 填必填项提交
++    fireEvent.change(screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/), {
++      target: { value: "压缩测试供应商" },
++    });
++    fireEvent.change(screen.getByPlaceholderText("sk-***"), {
++      target: { value: "sk-x" },
++    });
++    fireEvent.change(screen.getByPlaceholderText(/https:\/\/api\.anthropic\.com/), {
++      target: { value: "https://x.anthropic" },
++    });
++    fireEvent.click(screen.getByRole("button", { name: "创建供应商" }));
++    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
++    const values = onSubmit.mock.calls[0]![0]!;
++    expect(values.settings_config).toMatchObject({
++      autoCompactEnabled: false,
++      autoCompactWindow: 230000,
++      precomputeCompactionEnabled: true,
++    });
++  });
++
++  it("控件默认空 → settings_config 不含三键（跟随引擎默认）；非法窗口值不写入", async () => {
++    const onSubmit = vi.fn();
++    render(
++      <LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />,
++    );
++    fireEvent.change(screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/), {
++      target: { value: "默认态供应商" },
++    });
++    fireEvent.change(screen.getByPlaceholderText("sk-***"), {
++      target: { value: "sk-y" },
++    });
++    fireEvent.change(screen.getByPlaceholderText(/https:\/\/api\.anthropic\.com/), {
++      target: { value: "https://y.anthropic" },
++    });
++    fireEvent.click(screen.getByRole("button", { name: "创建供应商" }));
++    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
++    const values = onSubmit.mock.calls[0]![0]!;
++    // 三键全未设 → settings_config 仅含 JSON 面板生成的 env 等默认内容或 null
++    const sc = (values.settings_config ?? {}) as Record<string, unknown>;
++    expect(sc).not.toHaveProperty("autoCompactWindow");
++    expect(sc).not.toHaveProperty("autoCompactEnabled");
++    expect(sc).not.toHaveProperty("precomputeCompactionEnabled");
++  });
++
++  it("agent_kind=pi → 引擎自动压缩区不渲染", () => {
++    render(
++      <LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />,
++    );
++    // 切 pi
++    // agent_kind 下拉（label「引擎类型」关联的 select）
++    fireEvent.change(screen.getByLabelText("Agent 种类"), {
++      target: { value: "pi" },
++    });
++    expect(screen.queryByText("引擎自动压缩（claude）")).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/llm-providers/llm-provider-form.tsx b/frontend/src/components/llm-providers/llm-provider-form.tsx
+index 296c5dde5..c27d47ff5 100644
+--- a/frontend/src/components/llm-providers/llm-provider-form.tsx
++++ b/frontend/src/components/llm-providers/llm-provider-form.tsx
+@@ -508,6 +508,69 @@ export function LlmProviderForm({
+     }
+   }, [settingsConfigJson]);
+ 
++  /**
++   * ql-20260920-007（2026-09-20-claude-autocompact-config / FR-02）：引擎自动压缩
++   * 三键派生态（agentKind=claude 条件区渲染用）。JSON 非法时全空（跟随引擎默认）。
++   *   - autoCompactWindow：number | undefined（压缩窗口 token 数）
++   *   - autoCompactEnabled：boolean | undefined（三态：undefined=跟随引擎/true=开/false=关）
++   *   - precomputeCompactionEnabled：boolean | undefined（勾选=开启后台预计算）
++   */
++  const autoCompactCfg = useMemo<{
++    window: number | undefined;
++    enabled: boolean | undefined;
++    precompute: boolean | undefined;
++  }>(() => {
++    try {
++      const cfg = JSON.parse(settingsConfigJson || "{}");
++      return {
++        window:
++          typeof cfg?.autoCompactWindow === "number"
++            ? cfg.autoCompactWindow
++            : undefined,
++        enabled:
++          typeof cfg?.autoCompactEnabled === "boolean"
++            ? cfg.autoCompactEnabled
++            : undefined,
++        precompute:
++          typeof cfg?.precomputeCompactionEnabled === "boolean"
++            ? cfg.precomputeCompactionEnabled
++            : undefined,
++      };
++    } catch {
++      return { window: undefined, enabled: undefined, precompute: undefined };
++    }
++  }, [settingsConfigJson]);
++
++  /**
++   * ql-20260920-007：autocompact 三键写入（value=null 删键=跟随引擎默认）。
++   * parse settings_config → set/delete → stringify 回写（照 handleConfigToggle
++   * 范式：JSON 非法静默不动）。window 输入非法（非正整数）不写入。
++   */
++  const setAutoCompactField = (
++    key: "autoCompactWindow" | "autoCompactEnabled" | "precomputeCompactionEnabled",
++    value: number | boolean | null,
++  ): void => {
++    let cfg: Record<string, unknown>;
++    try {
++      const parsed = JSON.parse(settingsConfigJson || "{}");
++      cfg =
++        parsed && typeof parsed === "object" && !Array.isArray(parsed)
++          ? (parsed as Record<string, unknown>)
++          : {};
++    } catch {
++      return; // JSON 非法 → 静默不动
++    }
++    if (value === null) delete cfg[key];
++    else if (key === "autoCompactWindow") {
++      if (Number.isInteger(value) && (value as number) > 0) {
++        cfg[key] = value;
++      } else {
++        delete cfg[key]; // 非正整数视同未设置
++      }
++    } else cfg[key] = value;
++    setSettingsConfigJson(JSON.stringify(cfg, null, 2));
++  };
++
+   /**
+    * 5 开关 toggle（D-008）：parse settings_config → 增删对应键（env 空对象则 delete env）
+    * → stringify 回写。JSON 非法静默不动（照 cc-switch catch，不崩不丢输入）。
+@@ -775,6 +838,7 @@ export function LlmProviderForm({
+             Agent 种类 <span className="text-destructive">*</span>
+           </label>
+           <select
++            aria-label="Agent 种类"
+             value={agentKind}
+             onChange={(e) => {
+               const next = e.target.value as LlmProviderAgentKind;
+@@ -1202,6 +1266,86 @@ export function LlmProviderForm({
+         </div>
+       </details>
+ 
++      {/* ql-20260920-007（2026-09-20-claude-autocompact-config / FR-02）：
++          引擎自动压缩三键结构化区——仅 claude 引擎渲染（pi/codex 压缩机制各自独立，
++          不走 settings.json）。三键直写 settings_config 顶层，随 spawn 前白名单
++          （claude-settings.ts）落 $CLAUDE_CONFIG_DIR/settings.json。 */}
++      {agentKind === "claude" && (
++        <details className="rounded border border-dashed border-input/70 p-3">
++          <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
++            引擎自动压缩（claude）
++          </summary>
++          <div className="mt-3 space-y-2">
++            <p className={hintCls}>
++              引擎默认在约 80% 上下文窗口（如 200K 窗口 ≈ 160K tokens）自动压缩；
++              留空全部跟随引擎默认。运行中的会话不热更新，下一次新会话生效。
++            </p>
++            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
++              <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
++                自动压缩
++                <select
++                  className="h-7 rounded border border-input bg-background px-1.5 text-xs"
++                  value={
++                    autoCompactCfg.enabled === undefined
++                      ? ""
++                      : autoCompactCfg.enabled
++                        ? "true"
++                        : "false"
++                  }
++                  onChange={(e) =>
++                    setAutoCompactField(
++                      "autoCompactEnabled",
++                      e.target.value === ""
++                        ? null
++                        : e.target.value === "true",
++                    )
++                  }
++                >
++                  <option value="">跟随引擎（默认开）</option>
++                  <option value="true">开启</option>
++                  <option value="false">关闭</option>
++                </select>
++              </label>
++              <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
++                压缩窗口（tokens）
++                <input
++                  type="number"
++                  min={10000}
++                  step={10000}
++                  className="h-7 w-36 rounded border border-input bg-background px-1.5 text-xs"
++                  placeholder="默认=模型窗口（如 200000）"
++                  value={autoCompactCfg.window ?? ""}
++                  onChange={(e) =>
++                    setAutoCompactField(
++                      "autoCompactWindow",
++                      e.target.value === "" ? null : Number(e.target.value),
++                    )
++                  }
++                />
++              </label>
++              <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
++                <input
++                  type="checkbox"
++                  checked={autoCompactCfg.precompute === true}
++                  onChange={(e) =>
++                    setAutoCompactField(
++                      "precomputeCompactionEnabled",
++                      e.target.checked ? true : null,
++                    )
++                  }
++                  className="h-3.5 w-3.5 rounded border border-input"
++                />
++                后台预计算压缩摘要
++              </label>
++            </div>
++            <p className="text-[11px] text-amber-700">
++              ⚠️ 压缩窗口不要超过模型实际上下文窗口——超配会在触发压缩前直接撞
++              模型硬限报错（引擎原生行为，平台不拦截）。
++            </p>
++          </div>
++        </details>
++      )}
++
+       <details className="rounded border border-dashed border-input/70 p-3">
+         <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+           配置 JSON（高级 env 覆盖上方结构化字段）
+diff --git a/sillyhub-daemon/src/claude-settings.ts b/sillyhub-daemon/src/claude-settings.ts
+index 648dacb74..bfec35809 100644
+--- a/sillyhub-daemon/src/claude-settings.ts
++++ b/sillyhub-daemon/src/claude-settings.ts
+@@ -38,14 +38,38 @@ import type { ProviderConfig } from './types.js';
+  * 显式枚举而非「展开 settings_config 全部键」：① 排除 env（task-05 toEnv 处理）；
+  * ② 排除任何未知键（防未来 settings_config 结构扩展时误泄漏到 settings.json）；
+  * ③ api_key 天然不在列（settings_config 顶层本就无此键）。
++ *
++ * ql-20260920-007（2026-09-20-claude-autocompact-config / D-003）：新增 claude
++ * 引擎自动压缩三键（SDK 0.3.247 Settings 可写字段，sdk.d.ts :7567/:5792/:5794）——
++ *   - autoCompactWindow：压缩窗口（token 数）。默认=模型 believed limit（200K 级）
++ *     × ~80% 触发（≈160K，预留压缩调用自身缓冲）；配大于默认 → 更高水位才触发。
++ *     ⚠️ 超过模型实际窗口会在触发压缩前撞硬限报错（表单层风险提示承载）。
++ *   - autoCompactEnabled：自动压缩开关。
++ *   - precomputeCompactionEnabled：后台预计算压缩摘要（仅 autoCompact 开启时生效）。
++ * 值守护（FR-01）：window 非正整数 / 开关非布尔 → 该键跳过不写（best-effort 零
++ * 回归语义：不抛错不阻断 spawn）。
+  */
+ const TOP_LEVEL_KEYS = [
+   'attribution',
+   'enabledPlugins',
+   'model',
+   'skipDangerousModePermissionPrompt',
++  'autoCompactWindow',
++  'autoCompactEnabled',
++  'precomputeCompactionEnabled',
+ ] as const;
+ 
++/** ql-20260920-007：值守护——键级合法性（window 正整数 / 开关布尔），非法跳过。 */
++function isLegalValue(key: (typeof TOP_LEVEL_KEYS)[number], v: unknown): boolean {
++  if (key === 'autoCompactWindow') {
++    return typeof v === 'number' && Number.isInteger(v) && v > 0;
++  }
++  if (key === 'autoCompactEnabled' || key === 'precomputeCompactionEnabled') {
++    return typeof v === 'boolean';
++  }
++  return true; // 既有键维持原语义（非 null/undefined 即写，见 buildSettingsObject）
++}
++
+ /** settings.json 目标文件名（claude code 读 `$CLAUDE_CONFIG_DIR/settings.json`）。 */
+ const SETTINGS_FILENAME = 'settings.json';
+ 
+@@ -70,7 +94,9 @@ function buildSettingsObject(
+   const src = sc as Record<string, unknown>;
+   for (const key of TOP_LEVEL_KEYS) {
+     const v = src[key];
+-    if (v !== undefined && v !== null) {
++    // ql-20260920-007：autocompact 三键过值守护（window 正整数/开关布尔），
++    // 非法值视同未设置跳过；既有键维持「非 null/undefined 即写」原语义。
++    if (v !== undefined && v !== null && isLegalValue(key, v)) {
+       out[key] = v;
+     }
+   }
+diff --git a/sillyhub-daemon/tests/claude-settings.test.ts b/sillyhub-daemon/tests/claude-settings.test.ts
+index ac7763048..72035e903 100644
+--- a/sillyhub-daemon/tests/claude-settings.test.ts
++++ b/sillyhub-daemon/tests/claude-settings.test.ts
+@@ -299,3 +299,64 @@ describe('applyClaudeSettings 写盘语义', () => {
+     // 清理嵌套目录（afterAll 只删 tmpDir 顶层，这里文件已在其下，recursive force 会带走）
+   });
+ });
++
++// ── ql-20260920-007（2026-09-20-claude-autocompact-config / FR-01）──────────
++describe('applyClaudeSettings autocompact 三键白名单 + 值守护', () => {
++  it('autoCompactWindow/autoCompactEnabled/precomputeCompactionEnabled 合法值 → 全部写入 settings.json 顶层', async () => {
++    await applyClaudeSettings(
++      {
++        agent_kind: 'claude',
++        settings_config: {
++          autoCompactWindow: 230000,
++          autoCompactEnabled: true,
++          precomputeCompactionEnabled: false,
++        },
++      },
++      tmpDir,
++    );
++    const obj = readSettings();
++    expect(obj.autoCompactWindow).toBe(230000);
++    expect(obj.autoCompactEnabled).toBe(true);
++    expect(obj.precomputeCompactionEnabled).toBe(false);
++  });
++
++  it('值守护：window 为 0/负数/非整数 → 跳过；开关非布尔 → 跳过', async () => {
++    await applyClaudeSettings(
++      {
++        agent_kind: 'claude',
++        settings_config: {
++          autoCompactWindow: 0,
++          autoCompactEnabled: 'yes',
++          precomputeCompactionEnabled: null,
++        },
++      },
++      tmpDir,
++    );
++    // 三键全非法 → 结果对象空 → 不写文件（零回归：absent 语义）。
++    expect(existsSync(settingsPath)).toBe(false);
++  });
++
++  it('值守护只跳过非法键：window=200000 合法 + enabled="x" 非法 → 仅 window 写入', async () => {
++    await applyClaudeSettings(
++      {
++        agent_kind: 'claude',
++        settings_config: { autoCompactWindow: 200000, autoCompactEnabled: 'x' },
++      },
++      tmpDir,
++    );
++    const obj = readSettings();
++    expect(obj.autoCompactWindow).toBe(200000);
++    expect(obj).not.toHaveProperty('autoCompactEnabled');
++  });
++
++  it('零回归：仅 env（无任一白名单键）→ 不写文件', async () => {
++    await applyClaudeSettings(
++      {
++        agent_kind: 'claude',
++        settings_config: { env: { ANTHROPIC_MODEL: 'glm-5.3' } },
++      },
++      tmpDir,
++    );
++    expect(existsSync(settingsPath)).toBe(false);
++  });
++});
