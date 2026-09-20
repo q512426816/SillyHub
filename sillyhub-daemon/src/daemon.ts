@@ -8560,11 +8560,11 @@ export class Daemon {
     // task-06（spike-01 修正 / D-009）：spawn 前把 provider_config.settings_config 白名单
     // 顶层键写进 $CLAUDE_CONFIG_DIR/settings.json（attribution 等无 env 等价物项）。
     // 与 batch（task-runner.ts buildSpawnEnv 前）对齐，interactive 也走同一 helper。
-    // absent / null / 仅 env → 不写文件（零回归）；写盘失败 best-effort 不阻断 session create。
+    // absent / null / 仅 env → 删除既有 settings.json（撤下语义，ql-20260921-001-8a4d）；写盘失败 best-effort 不阻断 session create。
     // task-03（2026-09-10-multi-provider-injection / Grill P2）：kind 守卫——仅
     // agent_kind='claude' 或缺省才调 applyClaudeSettings，堵 codex/pi kind 的
     // settings_config 白名单键写穿 claude 目录并残留（claude-settings.ts 本体不动；
-    // provider_config 为 null/undefined 时照旧调用，helper 内部零写入零回归）。
+    // provider_config 为 null/undefined 时照旧调用，helper 内部只删自己写的文件零回归）。
     if (
       !execPayload.provider_config ||
       execPayload.provider_config.agent_kind === 'claude' ||

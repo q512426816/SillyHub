@@ -241,7 +241,11 @@ class HitsService:
             workspace_id=workspace_id,
             line_hash=line_hash,
             daemon_local_id=daemon_local_id,
-            type=str(raw_type) if raw_type is not None else "",
+            # type 列 String(32)：截断到列宽（对齐 change_name[:255] 口径）。超长值在
+            # PG 抛 DataError（22001，非 IntegrityError）会穿透 _insert_all 的并发兜底
+            # 整批 500，且 daemon 上行按批推进无按行跳过 → 单条毒行永久卡死该工作区
+            # 遥测（SQLite 测试不检列宽，故必须写入侧截断）。
+            type=str(raw_type)[:32] if raw_type is not None else "",
             change_name=str(change)[:255] if change is not None else None,
             query_text=str(query) if query is not None else None,
             matched_anchors=(

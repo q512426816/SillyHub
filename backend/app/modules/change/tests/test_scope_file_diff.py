@@ -395,7 +395,9 @@ async def test_file_diff_not_bound_404(client: AsyncClient, setup_env):
 
 # ── 对账表端点（ql-20260911-001-c0be）─────────────────────────────────────────
 
-_AUDIT_OK = {
+# 值形态异构（str/bool/嵌套 list[dict]），窄化到 dict[str, object] 会让
+# `["rows"][0]`（8d628ba53 用例）报 object 不可索引——Any 注解放开取值索引。
+_AUDIT_OK: dict[str, Any] = {
     "change": "2026-09-11-skills-central-library",
     "ok": True,
     "mode": "full-flow",
@@ -670,9 +672,7 @@ async def test_scope_audit_v2_cross_repo_rows_and_repos(client: AsyncClient, set
 
 
 @pytest.mark.asyncio
-async def test_scope_audit_v2_repos_fallback_and_invalid_skipped(
-    client: AsyncClient, setup_env
-):
+async def test_scope_audit_v2_repos_fallback_and_invalid_skipped(client: AsyncClient, setup_env):
     """防御回退（D-002）：无 repos 键 / repos 非 list → []；非法条目（非
     dict / 缺 key / key 非 str）跳过不炸、嵌套 anchor/totals 非法全 None
     容错、合法条目保留；行级 cross_repo 非 str → None。"""

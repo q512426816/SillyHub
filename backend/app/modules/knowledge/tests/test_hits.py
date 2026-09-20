@@ -266,6 +266,35 @@ async def test_ingest_type_whitelist_tolerant_out_of_band(db_session, hits_ws: d
     assert inject_row.occurred_at is not None
 
 
+async def test_ingest_type_truncated_to_column_width(db_session, hits_ws: dict) -> None:
+    """type 超列宽（String(32)）截断落库——PG 对超长 varchar 抛 DataError（非
+    IntegrityError）会穿透 _insert_all 并发兜底整批 500，且 daemon 上行按批推进
+    无按行跳过，单条毒行会永久卡死该工作区遥测；SQLite 测试不检列宽，故在写入
+    侧截断并用本用例锁定（对齐 change_name[:255] 口径）。"""
+    from sqlalchemy import select
+
+    from app.modules.knowledge.hits import KnowledgeHit
+
+    service = HitsService(db_session)
+    long_type = "x" * 40
+    lines = [
+        _hit_line(hit_type=long_type, matched=[]),
+        _hit_line(hit_type="inject", matched=[]),
+    ]
+    out = await service.ingest_batch(hits_ws["ws_id"], lines)
+    assert out.ingested == 2
+    assert out.skipped_bad == 0
+
+    types = set(
+        (
+            await db_session.execute(
+                select(KnowledgeHit.type).where(KnowledgeHit.workspace_id == hits_ws["ws_id"])
+            )
+        ).scalars()
+    )
+    assert types == {"x" * 32, "inject"}
+
+
 async def test_ingest_unknown_workspace_404(db_session) -> None:
     """未知 workspace → WorkspaceNotFound（与模块内其它端点同语义，不落悬空行）。"""
     from app.core.errors import WorkspaceNotFound

@@ -819,9 +819,7 @@ async def test_merge_target_outside_whitelist_returns_422(
 # ---------------------------------------------------------------------------
 
 
-async def _knowledge_read_only_headers(
-    db_session, workspace_id: uuid.UUID | str
-) -> dict[str, str]:
+async def _knowledge_read_only_headers(db_session, workspace_id: uuid.UUID | str) -> dict[str, str]:
     """在指定工作区内仅持 KNOWLEDGE_READ 的成员 token（写端点 403 / 任务列表 200 两态用）。
 
     2026-09-20-workspace-member-visibility：平台级业务权限不再穿透工作区
@@ -849,9 +847,7 @@ async def _knowledge_read_only_headers(
     db_session.add_all([user, role])
     await db_session.flush()
     db_session.add(RolePermission(role_id=role.id, permission="knowledge:read"))
-    db_session.add(
-        UserWorkspaceRole(user_id=user.id, workspace_id=ws_uid, role_id=role.id)
-    )
+    db_session.add(UserWorkspaceRole(user_id=user.id, workspace_id=ws_uid, role_id=role.id))
     await db_session.commit()
     await db_session.refresh(user)
 

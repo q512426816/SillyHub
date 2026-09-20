@@ -2,7 +2,8 @@
 // task-13: applyClaudeSettings 写盘行为 + 白名单顶层键合并 + absent 不写文件（task-06 验收）。
 //
 // 覆盖 design §5.2 / §7（daemon 测试策略）/ D-008（白名单顶层键显式枚举）/
-// D-007 brownfield（absent/null/仅 env → 不写文件，零回归）/ D-009（api_key 永不进 settings.json）。
+// D-007 brownfield（absent/null/仅 env → 撤下语义：删既有文件，ql-20260921-001-8a4d）/
+// D-009（api_key 永不进 settings.json）。
 // 不真起 claude 进程（spike-02 顶层键生效验留 verify 端到端），仅断言 settings.json 文件内容。
 //
 // 注：buildSettingsObject 为 task-06 文档约定「导出供 task-13 单测覆盖」的纯函数，但当前
@@ -182,7 +183,7 @@ describe('applyClaudeSettings 安全断言（env / api_key 永不进 settings.js
   });
 });
 
-describe('applyClaudeSettings 零回归（absent 不写文件，D-007 brownfield）', () => {
+describe('applyClaudeSettings 零回归（absent 撤下语义，ql-20260921-001-8a4d）', () => {
   it('settings_config 缺省 → 不写文件（existsSync false）', async () => {
     await applyClaudeSettings({ agent_kind: 'claude' }, tmpDir);
     expect(existsSync(settingsPath)).toBe(false);
@@ -221,7 +222,8 @@ describe('applyClaudeSettings 零回归（absent 不写文件，D-007 brownfield
   });
 
   it('settings_config 白名单键值全为 null → 视为未设置，不写文件', async () => {
-    // buildSettingsObject 过滤 null/undefined；结果空对象 → applyClaudeSettings return 不写。
+    // buildSettingsObject 过滤 null/undefined；结果空对象 → applyClaudeSettings 撤下
+    //（删既有文件；本用例 beforeEach 已清，断言等价于未创建）。
     await applyClaudeSettings(
       {
         agent_kind: 'claude',
@@ -249,6 +251,62 @@ describe('applyClaudeSettings 零回归（absent 不写文件，D-007 brownfield
         tmpDir,
       ),
     ).resolves.toBeUndefined();
+  });
+});
+
+// ── ql-20260921-001-8a4d（24h 审查修复：撤下语义 + 原子写）──────────────────────
+describe('applyClaudeSettings 撤下语义（空对象删除既有文件，ql-20260921-001-8a4d）', () => {
+  it('三键写入后 settings_config 清空（null）→ 既有 settings.json 被删除（关得掉）', async () => {
+    await applyClaudeSettings(
+      {
+        agent_kind: 'claude',
+        settings_config: { autoCompactWindow: 230000, autoCompactEnabled: false },
+      },
+      tmpDir,
+    );
+    expect(existsSync(settingsPath)).toBe(true);
+    await applyClaudeSettings(
+      {
+        agent_kind: 'claude',
+        settings_config: null as unknown as ProviderConfig['settings_config'],
+      },
+      tmpDir,
+    );
+    expect(existsSync(settingsPath)).toBe(false);
+  });
+
+  it('三键写入后改为仅 env 配置 → 既有文件同样被删除（文件恒反映最近一次 spawn 配置）', async () => {
+    await applyClaudeSettings(
+      {
+        agent_kind: 'claude',
+        settings_config: { autoCompactEnabled: false, precomputeCompactionEnabled: true },
+      },
+      tmpDir,
+    );
+    expect(existsSync(settingsPath)).toBe(true);
+    await applyClaudeSettings(
+      {
+        agent_kind: 'claude',
+        settings_config: { env: { ANTHROPIC_MODEL: 'glm-5.3' } },
+      },
+      tmpDir,
+    );
+    expect(existsSync(settingsPath)).toBe(false);
+  });
+
+  it('provider_config=null 撤下已写文件（batch lease 无供应商配置场景）', async () => {
+    await applyClaudeSettings(
+      { agent_kind: 'claude', settings_config: { attribution: { commit: '', pr: '' } } },
+      tmpDir,
+    );
+    expect(existsSync(settingsPath)).toBe(true);
+    await applyClaudeSettings(null, tmpDir);
+    expect(existsSync(settingsPath)).toBe(false);
+  });
+
+  it('撤下时文件本不存在（ENOENT）→ 静默不抛', async () => {
+    await expect(applyClaudeSettings({ agent_kind: 'claude' }, tmpDir)).resolves.toBeUndefined();
+    expect(existsSync(settingsPath)).toBe(false);
   });
 });
 

@@ -130,9 +130,7 @@ async def _grant_workspace_role(
     await db_session.commit()
 
 
-async def _recipients(
-    db_session: AsyncSession, *, workspace_id: uuid.UUID
-) -> set[uuid.UUID]:
+async def _recipients(db_session: AsyncSession, *, workspace_id: uuid.UUID) -> set[uuid.UUID]:
     """通知广播收件人集合（list_user_ids_with_permission 段 1/2/3 之并）。"""
     return set(
         await list_user_ids_with_permission(
@@ -246,9 +244,7 @@ async def test_workspace_scoped_member_limited_to_own_workspace(
     assert user.id not in await _recipients(db_session, workspace_id=outsider_ws.id)
 
 
-async def test_three_caliber_consistency(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_three_caliber_consistency(client: AsyncClient, db_session: AsyncSession) -> None:
     """三口径一致性（AC-07，防 R-01 复发）：同一夹具下，对代表性用户逐一断言
 
         列表可见集 == has_permission(WORKSPACE_READ) 可访问集 == 通知收件集
@@ -281,9 +277,7 @@ async def test_three_caliber_consistency(
         ("is_platform_admin标志", flag_admin_user, flag_admin_token, full),
     ]
     for label, user, token, expected in roster:
-        resp = await client.get(
-            "/api/workspaces", headers={"Authorization": f"Bearer {token}"}
-        )
+        resp = await client.get("/api/workspaces", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200, (label, resp.text)
         visible = {uuid.UUID(item["id"]) for item in resp.json()["items"]}
 
@@ -298,9 +292,7 @@ async def test_three_caliber_consistency(
             )
         }
         recipient = {
-            ws.id
-            for ws in all_ws
-            if user.id in await _recipients(db_session, workspace_id=ws.id)
+            ws.id for ws in all_ws if user.id in await _recipients(db_session, workspace_id=ws.id)
         }
 
         assert visible == expected, (label, "列表可见集", visible, expected)

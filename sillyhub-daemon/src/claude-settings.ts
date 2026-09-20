@@ -17,18 +17,25 @@
  *     且 api_key 本就不在 settings_config 顶层键里，白名单枚举天然排除）
  *
  * 零回归铁律（D-007 brownfield）：
- *   - provider_config / settings_config 为 absent / null / undefined → 不写文件、不抛、
- *     不删已存文件（claude 走默认 + 注入 env，行为与 spike-01 前逐字一致）。
- *   - settings_config 仅含 env（无任一白名单顶层键）→ 同样不写文件（env 已由 toEnv 注入）。
+ *   - provider_config / settings_config 为 absent / null / undefined → 删除既有
+ *     settings.json（若存在）、不抛（claude 走默认 + 注入 env）。
+ *   - settings_config 仅含 env（无任一白名单顶层键）→ 同样删除既有文件（env 已由
+ *     toEnv 注入）。
+ *   - ql-20260921-001-8a4d（24h 审查修复）：原「空对象不写不删」语义下，autocompact 三键
+ *     一旦写入后撤勾（settings_config 清空）→ 旧值永久残留生效、全 daemon 无清理
+ *     路径。改为「文件恒反映最近一次 spawn 的 provider 配置」：空对象 = 撤下 =
+ *     删文件。被删的只可能是本 daemon 自己写的隔离目录内文件，宿主机零打扰不变。
  *
  * 写盘时机 = spawn 前（两处 buildSpawnEnv 调用点旁），非 daemon 启动；daemon 单实例
- * 假设下单写同一 CLAUDE_CONFIG_DIR，无需并发锁。
+ * 假设下单写同一 CLAUDE_CONFIG_DIR；跨 lease 并发写由 writeFileAtomic 原子顶替
+ * （任一观察时刻文件要么旧全文要么新全文，不会交错出半截 JSON）。
  *
  * @module claude-settings
  */
 
-import { writeFile, mkdir } from 'node:fs/promises';
+import { mkdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { writeFileAtomic } from './atomic-write.js';
 import { CLAUDE_CONFIG_DIR } from './config.js';
 import type { ProviderConfig } from './types.js';
 
@@ -77,7 +84,7 @@ const SETTINGS_FILENAME = 'settings.json';
  * 把 `provider_config.settings_config` 的白名单顶层键合并成 settings.json 对象。
  *
  * 纯函数（无 IO，不读不入参），导出供 task-13 单测覆盖：
- *   - absent / null → 空对象（调用方据此判不写盘）
+ *   - absent / null → 空对象（调用方据此删既有文件）
  *   - 仅 env → 空对象（env 不在白名单）
  *   - 含 attribution/model 等 → 仅白名单键 + 非 null/undefined 值
  *
@@ -108,19 +115,20 @@ function buildSettingsObject(
  *
  * 行为：
  *   1. buildSettingsObject 取白名单顶层键；结果为空（absent/null/仅 env/值全 null）
- *      → 直接 return，不写文件（零回归）。
+ *      → 删除既有 settings.json（撤下语义，ql-20260921-001-8a4d；文件不存在 ENOENT 静默）。
  *   2. best-effort mkdir（`recursive:true` 忽略已存在；cli.ts:287 writePid 已保证目录
  *      存在，本步仅兜底运行期被清空场景）。
- *   3. `writeFile(join(dir,'settings.json'), JSON.stringify(obj,null,2), 'utf-8')`。
+ *   3. `writeFileAtomic(join(dir,'settings.json'), …)`——原子顶替，防并发 spawn
+ *      交错损坏（truncate+write 两步裸 writeFile 的窗口）。
  *
  * 失败策略（best-effort，不阻断 spawn 主路径）：
- *   - 写盘抛错（EACCES / ENOSPC 等）→ console.warn 后吞掉，**绝不 rethrow**。
+ *   - 写盘/删除抛错（EACCES / ENOSPC 等）→ console.warn 后吞掉，**绝不 rethrow**。
  *   - 理由：settings.json 是增强项（attribution 是 5 开关里唯一无 env 等价物项），
  *     写失败时 claude 仍可走默认 + 注入 env 跑完任务；让 cosmetic 开关写盘失败
  *     阻断整个 lease 违反「零回归」。与 daemon 既有 spawn-prep 副作用（如
  *     `linkSkillsToWorkdir` try/catch + warn）同模式。
  *
- * @param provider_config lease 下发的供应商配置；absent / 无 settings_config / 仅 env → 不写
+ * @param provider_config lease 下发的供应商配置；absent / 无 settings_config / 仅 env → 删除既有文件
  * @param dir 写入目录，默认 CLAUDE_CONFIG_DIR（测试可注入 tmpdir，task-13）
  */
 export async function applyClaudeSettings(
@@ -128,13 +136,27 @@ export async function applyClaudeSettings(
   dir: string = CLAUDE_CONFIG_DIR,
 ): Promise<void> {
   const obj = buildSettingsObject(provider_config);
-  // 无任一白名单顶层键 → 不写文件（claude 走默认 + 注入 env，零回归 D-007）。
-  if (Object.keys(obj).length === 0) return;
+  // 无任一白名单顶层键 → 撤下：删除既有文件（不存在则 ENOENT 静默）。空对象直接
+  // return 的旧语义会让 autocompact 三键撤勾后旧值永久残留生效（24h 审查 P2）。
+  if (Object.keys(obj).length === 0) {
+    try {
+      await unlink(join(dir, SETTINGS_FILENAME));
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code !== 'ENOENT') {
+        console.warn(
+          'claude_settings_remove_failed',
+          { dir, error: (e as Error)?.message ?? String(e) },
+        );
+      }
+    }
+    return;
+  }
 
   try {
-    // best-effort 建目录：recursive 忽略 EEXIST；其他错误让 writeFile 再抛一次后统一收口。
+    // best-effort 建目录：recursive 忽略 EEXIST；其他错误让 writeFileAtomic 再抛一次后统一收口。
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, SETTINGS_FILENAME), JSON.stringify(obj, null, 2), 'utf-8');
+    await writeFileAtomic(join(dir, SETTINGS_FILENAME), JSON.stringify(obj, null, 2), 'utf-8');
   } catch (e) {
     // 写盘失败不阻断 spawn（settings.json 是增强项，非必需）；记 warn 供运维感知。
     console.warn(

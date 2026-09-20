@@ -1177,6 +1177,77 @@ describe("SessionPanel 忙轮发送引导（task-07 steered=true 三态渲染）
       ),
     ).toBeTruthy();
   });
+
+  // ql-20260921-001-8a4d（24h 审查修复）：⚡ dispatch_now 引导链路发送点不建 steering
+  // 段（hook 不消费 dispatch 响应）——mid-turn 留痕行到达时兜底追加 delivered 段，
+  // 否则引导消息在实时视图被静默丢弃（刷新后 logsToTurns 才可见）。
+  it("⚡ dispatch_now 引导（发送点不建段）→ 留痕行到达兜底追加 delivered 段；prompt 回显与重复行不双画", async () => {
+    const handlers = await selectSession();
+
+    // ① 活跃轮开跑 + 原始提问（prompt 恒非空，busy 态）。
+    act(() => {
+      handlers.onTurnStarted(makeSteerEnvelope({ event: "turn_started" }));
+    });
+    act(() => {
+      handlers.onLog(
+        makeSteerEnvelope({
+          log_id: "l-orig",
+          channel: "user_input",
+          content: "原始提问",
+        }),
+      );
+    });
+    expect(await screen.findByText("原始提问")).toBeTruthy();
+
+    // ② ⚡ 立即发送引导成功：后端 mid-turn 注入活跃 run 并补发 user_input 留痕行
+    //    （前端未消费 dispatch 响应、无 steering 段）→ 兜底直接落 delivered 段。
+    act(() => {
+      handlers.onLog(
+        makeSteerEnvelope({
+          log_id: "l-d1",
+          channel: "user_input",
+          content: "插队引导这条",
+        }),
+      );
+    });
+    const deliveredEl = await waitFor(() => {
+      const el = document.querySelector(
+        '[data-turn-key="r-live"] [data-steered-msg="delivered"]',
+      );
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    expect(deliveredEl.textContent).toContain("插队引导这条");
+    expect(screen.getByText("✓ 已投递，agent 已收到引导")).toBeTruthy();
+    // 轮 prompt 仍是原始提问（互异主体不覆盖 prompt 气泡）。
+    expect(screen.getByText("原始提问")).toBeTruthy();
+
+    // ③ daemon 双提交同主体（裸文本版重放）→ 同键幂等，不重复成段。
+    act(() => {
+      handlers.onLog(
+        makeSteerEnvelope({
+          log_id: "l-d2",
+          channel: "user_input",
+          content: "插队引导这条",
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText("插队引导这条")).toHaveLength(1);
+    });
+
+    // ④ prompt 同主体回显（daemon 双提交裸文本版落在 prompt 主体上）→ 不追加段。
+    act(() => {
+      handlers.onLog(
+        makeSteerEnvelope({
+          log_id: "l-d3",
+          channel: "user_input",
+          content: "原始提问",
+        }),
+      );
+    });
+    expect(screen.getAllByText("原始提问")).toHaveLength(1);
+  });
 });
 
 // ── ql-20260820-007：attach 运行中轮恢复竞态（detail / 历史 logs 到达顺序） ──

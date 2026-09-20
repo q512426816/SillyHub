@@ -5,6 +5,7 @@ created_at: 2026-08-27 14:32:24
 
 # daemon 模块变更索引
 
+- ql-20260921-001-8a4d | 24h 审查两修（daemon 面）——①claude-settings 撤下语义：settings_config 清空/仅 env/值全非法由「不写文件」改「删除既有 settings.json」（原语义下 autocompact 三键撤勾后旧值永久残留生效、全 daemon 无清理路径），写入换 writeFileAtomic 防并发 spawn 交错损坏，删除 ENOENT 静默 best-effort。②batch（task 型）spawn 的 `--model` 旗标经新增导出纯函数 batchModelWithOneM 补 [1m]（kind 守卫同 applyClaudeSettings 调用点，仅 claude/缺省）——旗标优先级压掉 env 档位，ade38ec37 只修 interactive 两路漏此路径，1M 供应商批量任务仍 ~160k 提前压缩。测试：claude-settings 26（+4 撤下矩阵）+ task-runner-one-m-suffix 7 新建 + task-runner/provider-dispatch/session-manager-one-m 相邻面合计 130 全绿、typecheck 0；顺手清偿 knowledge test_router.py ruff format 存量债（ad8b48816 遗留）
 - ql-20260914-007-8f1d | CI 修复批（daemon 面）——cursor-driver.test ② 多轮 --resume 用例首轮 usage 断言补 ctx_tokens:13（净值三和 10+2+1）：ctx-usage-all-providers 变更给 cursor-events mapUsage 派生 ctx_tokens（ctxTokensFromNetInput 共享 helper）时漏改该用例的过时负向断言 not ctx_tokens（daemon-ci 2 连败）。测试：cursor-driver 23 passed、tsc 0 错
 - 2026-09-10-auto-resume-interrupted-turn | daemon 重启自动续跑被中断轮——backend 全自洽：recover 事务内（SAVEPOINT D-011）G1-G9+满员 11 道守卫（范围/开关/错误码白名单 daemon_restarted/最新轮/输入未截断/无附件宽松前缀/链上限 2/幂等/无取消 dialog/队列未满）全过则包续跑提示词入队（origin='auto_resume:<rid>' 复合值 D-009@v2、position 队首 D-012）；派发复用 D-008 钩子+queue G10 派发时守卫（source 后有更新 run 删行跳过，防入队后手动重发两遍 Grill P1-2）；inject 可选参打标 metadata_.auto_resume_of+SessionRunRead.metadata 出口（plan 审查 P0-1：显式 DTO 不自动携带新列）；edit/reorder 对续跑条目 409、delete=手动取消；恢复失败既有 _fail_pending_queued_messages 收敛。两列 migration 20260910120000。测试：守卫矩阵 25+queue 19+pref 4+runs 12+集成 3 全绿
 

@@ -1,0 +1,183 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-1eafe8b5",
+  "totals": {
+    "files": 18,
+    "additions": 404,
+    "deletions": 65
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/daemon.md",
+      "declared": true,
+      "additions": 6,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/knowledge.md",
+      "declared": true,
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/auth/tests/test_rbac_workspace_scope.py",
+      "declared": true,
+      "additions": 5,
+      "deletions": 15,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_scope_file_diff.py",
+      "declared": true,
+      "additions": 4,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/knowledge/hits.py",
+      "declared": true,
+      "additions": 5,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_hits.py",
+      "declared": true,
+      "additions": 29,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_router.py",
+      "declared": true,
+      "additions": 2,
+      "deletions": 6,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/workspace/tests/test_platform_grant_list.py",
+      "declared": true,
+      "additions": 4,
+      "deletions": 12,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+      "declared": true,
+      "additions": 71,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "declared": true,
+      "additions": 12,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "declared": true,
+      "additions": 59,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/claude-settings.ts",
+      "declared": true,
+      "additions": 36,
+      "deletions": 14,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "declared": true,
+      "additions": 2,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/task-runner.ts",
+      "declared": true,
+      "additions": 28,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/claude-settings.test.ts",
+      "declared": true,
+      "additions": 61,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/task-runner-one-m-suffix.test.ts",
+      "declared": false,
+      "additions": 74,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "soft"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 18,
+    "codeFileCount": 6,
+    "testFileCount": 8,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260921-001-8a4d",
+  "sessionId": "quick-1eafe8b5",
+  "savedAt": "2026-09-20T18:36:05.368Z",
+  "patchSha256": "9d26117b2de4174e77edcf20cecf8a64fddc0d234917e8beb7acfffb97d759da",
+  "patchStatus": "ok"
+}

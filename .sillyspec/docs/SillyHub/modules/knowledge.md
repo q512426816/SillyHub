@@ -72,3 +72,7 @@ get(ws, filename) → 同上全量解析后按 filename 匹配（include_content
 - **背景（24h 审查 M1 残余缺口）**：ql-20260918-005 把 `_read_raw` 收口为严格 UTF-8 解码，但只覆盖 merge/preview 回写路径——网页编辑链路 GET 经 parser `_read_file_safe`（`errors="replace"`）回传的基底对非 UTF-8 文件（Windows GBK 手工编辑残留）已是 U+FFFD 版，`update_entry` 整文件替换保存会把原始字节永久毁坏且 update 不进 spec-backups（仅 delete 备份）。<1MB 的坏编码文件此前两条守卫（大小 422 / merge 严格解码）都不拦。
 - **修法**（writer.py）：新增模块级 `_decode_knowledge_strict(raw, filename)` 共享 helper（`_read_raw` 原内联 try/except 收敛进来，错误形态单一来源）；`update_entry` 在大小守卫后对磁盘原文做严格解码探测（≤1MB，结果弃用只探测），坏编码抛既有 `KnowledgeFileEncodingInvalid` 422（details 带 byte_offset，文件与 manifest 版本不动，提示本机转 UTF-8 后再操作）。
 - **验证**：test_writer 27（新增 2：坏编码编辑 422+前置自检 GET 基底确含 U+FFFD+磁盘原字节与 manifest 版本未动；合法 UTF-8 中文编辑不受误伤的对照组）+ test_router/test_parser/test_distill 相邻面 72 全绿；ruff format/check + mypy（scoped writer）0。附带：workspace/router.py probe_workspaces docstring 勘误——原「只读无状态变化」与 ql-20260918-012 repo_url 回填写副作用自相矛盾（CLAUDE.md 规则 18），改为「不改生命周期状态（唯一写例外 repo_url 回填）」。
+
+## 增量（ql-20260921-001-8a4d：hits ingest type 截断到列宽——防 PG 毒行卡死遥测上行）
+
+- `_build_row` 的 `type` 写入补 `[:32]` 截断（对齐 `change_name[:255]` 口径）。列是 String(32)：PG 对超长值抛 DataError（22001，**非** IntegrityError）会穿透 `_insert_all` 的并发兜底整批 500；而 daemon 上行（knowledge-hits-upload.ts）按批推进 offset、无按行跳过——单条毒行会让该工作区 hits 上行永久卡死重试。SQLite 测试不检列宽，故必须在写入侧截断（test_hits 补 40 字符 type → 32 截断落库用例锁定）。

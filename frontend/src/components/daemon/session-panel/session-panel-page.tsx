@@ -348,6 +348,54 @@ export function markSteeredSegmentsEnded(
   ];
 }
 
+/**
+ * ql-20260921-001-8a4d（24h 审查修复）：mid-turn 注入留痕的实时兜底段。
+ *
+ * 背景：⚡ dispatch_now 引导链路发送点不建 steering 段（use-message-queue 不消费
+ * dispatch 响应；appendSteeredSegment 仅 inject steered=true 路径可达，而单聊
+ * inject 端点忙轮恒排队）——mid-turn 注入的 user_input 留痕行到达时
+ * markSteeredSegmentDelivered 无段可收敛，消息正文在实时视图被静默丢弃（刷新后
+ * logsToTurns 才可见）。
+ *
+ * 兜底口径与回放（logsToTurns 组2+）一致：轮存在且 prompt 已非空、主体
+ * （steerMatchKey）与 prompt 互异、轮内尚无同主体 user_msg 段 → 追加 delivered
+ * 段（注入已发生，不走引导中三态）；其余情形原样返回原引用：
+ *   - 轮未建 / prompt 为空 → 本条即轮 prompt（upsertTurn 既有补写承载）；
+ *   - 主体与 prompt 相同 → prompt 回显 / daemon 双提交（marker 版+裸文本版）；
+ *   - 已有同主体段 → steering 段刚被上方收敛为 delivered / 已兜底过，幂等。
+ */
+export function appendDeliveredUserMsgIfAbsent(
+  turns: SessionTurnView[],
+  runId: string,
+  rawContent: string,
+  ts: number | null,
+): SessionTurnView[] {
+  const key = steerMatchKey(rawContent);
+  if (!key) return turns;
+  const idx = steeredTurnIndexOf(turns, runId);
+  if (idx < 0) return turns;
+  const turn = turns[idx]!;
+  if (!turn.prompt.trim()) return turns;
+  if (steerMatchKey(turn.prompt) === key) return turns;
+  if (turn.segments?.some((s) => s.kind === "user_msg" && steerMatchKey(s.text) === key)) {
+    return turns;
+  }
+  const text = stripPreambleText(rawContent);
+  if (!text.trim()) return turns;
+  const seg: UserMsgTurnSegment = {
+    kind: "user_msg",
+    id: `steer:${safeUUID()}`,
+    text,
+    ts: ts != null && Number.isFinite(ts) ? ts : Date.now(),
+    phase: "delivered",
+  };
+  return [
+    ...turns.slice(0, idx),
+    { ...turn, segments: [...(turn.segments ?? []), seg] },
+    ...turns.slice(idx + 1),
+  ];
+}
+
 
 /* ────────────────────── page 模式内部子组件（含 react-query，R4） ────────────────────── */
 
@@ -970,10 +1018,19 @@ export function SessionPanelPage({
                   env.run_id!,
                   env.content ?? "",
                 );
+                // ql-20260921-001-8a4d：发送点未建段的 mid-turn 留痕（⚡ dispatch_now
+                // 引导——响应不被消费，appendSteeredSegment 不可达）兜底追加
+                // delivered 段；口径与回放组2+ 一致（prompt 互异主体才成段）。
+                const withLiveUserMsg = appendDeliveredUserMsgIfAbsent(
+                  withDelivered,
+                  env.run_id!,
+                  env.content ?? "",
+                  env.timestamp ? Date.parse(env.timestamp) : null,
+                );
                 // 回放守卫：轮后对账/断线 resync 重放的历史 user_input 落在已终态
                 // 轮上——不 setCurrentRun（否则空闲会话被旧 run 误锁输入框），prompt
                 // 照常补写（与刷新后视图一致）；实时事件（新建轮/活跃轮）才置位。
-                const existing = withDelivered.find(
+                const existing = withLiveUserMsg.find(
                   (t) => t.runId === env.run_id || t.realRunId === env.run_id,
                 );
                 const staleReplay =
@@ -981,7 +1038,7 @@ export function SessionPanelPage({
                   TERMINAL_TURN_STATUSES.has(existing.status) &&
                   prev.currentRunId !== env.run_id;
                 return upsertTurn(
-                  { ...prev, turns: withDelivered },
+                  { ...prev, turns: withLiveUserMsg },
                   env,
                   (turn) => {
                     let next = turn;

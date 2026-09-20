@@ -100,6 +100,7 @@ import { eventToSubmitMessages } from './event-wire.js';
 import type {
   AgentEvent,
   LeaseCtx,
+  ProviderConfig,
 } from './types.js';
 // task-03（2026-09-07-arch-large-file-split / D-004@v1）：原文件头部的常量/类型/
 // 依赖契约接口/鸭子读取器原样下沉到 ./task-runner/ 包（零改写），facade 经
@@ -156,6 +157,29 @@ import type {
 // batch 接线点（runLease）改 import 消费；原写盘器 import（writeCodexHome /
 // writePiDir，仅被该函数使用）随平移移除。
 import { applyProviderFileSettings } from './provider-file-settings.js';
+import { withOneMSuffix } from './credential-injector.js';
+
+/**
+ * ql-20260921-001-8a4d（24h 审查修复）：batch（task 型 agent run）spawn 的 --model 补缀。
+ *
+ * 背景：one_m 的 [1m] 后缀此前只补了 interactive 两路（injector 规则 3 的 env
+ * ANTHROPIC_MODEL / driver-factory options.model），batch 路径把 backend 下发的裸
+ * model 拼成 CLI `--model` 旗标（stream-json.ts claude 分支）——显式旗标优先级最高，
+ * 压掉 env 里已补的 [1m]，claude CLI 对裸名按默认 200k 窗口算 → 1M 供应商跑批量
+ * 任务 ~160k 触发提前自动压缩（ade38ec37 要修的原 bug 在 batch 路径复发）。
+ *
+ * kind 守卫与 applyClaudeSettings 调用点同款：仅 claude / 缺省应用（codex/pi 不认
+ * [1m]，Claude Code 专属约定）；model 缺省透传 undefined（adapter 侧 `if (model)`
+ * 自行跳过 --model）。state.model / lease payload 不改——缀名只进 CLI 旗标单点。
+ */
+export function batchModelWithOneM(
+  model: string | undefined,
+  pc: ProviderConfig | null | undefined,
+): string | undefined {
+  if (model === undefined) return model;
+  if (pc && pc.agent_kind !== 'claude' && pc.agent_kind !== undefined) return model;
+  return withOneMSuffix(model, pc);
+}
 
 /**
  * 任务编排器：执行一个 lease，把 agent 输出流式 submit 到 server，
@@ -549,7 +573,7 @@ export class TaskRunner {
       // task-06（spike-01 修正 / D-009）：spawn 前把 provider_config.settings_config 的
       // 白名单顶层键（attribution/enabledPlugins/model/skipDangerousModePermissionPrompt）
       // 写进 $CLAUDE_CONFIG_DIR/settings.json，让无 env 等价物的开关（attribution）生效。
-      // absent / null / 仅 env → helper 内 return 不写文件（零回归）；写盘失败 best-effort
+      // absent / null / 仅 env → helper 内删既有文件（撤下语义，ql-20260921-001-8a4d）；写盘失败 best-effort
       // 不阻断 spawn。单 lease 内只写一次（retry 循环在下方，同一 settings.json 重写幂等）。
       // task-03（2026-09-10-multi-provider-injection / Grill P2）：kind 守卫——仅
       // agent_kind='claude' 或缺省才调 applyClaudeSettings，堵 codex/pi kind 的
@@ -699,10 +723,12 @@ export class TaskRunner {
         // task-07：mcpConfigPath 走交叉类型局部变量透传——ProtocolAdapter.buildArgs
         // 契约（protocol-adapter.ts）不含该字段（本任务不改契约文件），StreamJsonAdapter
         // 的 buildArgs opts 已扩 mcpConfigPath?，非 claude provider 时为 undefined。
+        // ql-20260921-001-8a4d：model 过 batchModelWithOneM 补 [1m]（--model 旗标压掉 env
+        // 档位，裸名会让 1M 供应商按默认 200k 窗口提前压缩；见函数头注释）。
         const buildArgsOpts: Parameters<NonNullable<ProtocolAdapter['buildArgs']>>[0] & {
           mcpConfigPath?: string;
         } = {
-          model: effectiveCtx.model,
+          model: batchModelWithOneM(effectiveCtx.model, ctx.provider_config),
           sessionId: effectiveCtx.sessionId,
           resumeSessionId: effectiveCtx.resumeSessionId,
           prompt: effectivePrompt,

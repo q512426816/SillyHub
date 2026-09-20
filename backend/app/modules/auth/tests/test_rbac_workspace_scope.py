@@ -48,9 +48,7 @@ from app.modules.workspace.model import Workspace
 PLATFORM_BUSINESS_PERMS: list[Permission] = [Permission.WORKSPACE_READ, Permission.MCP_READ]
 
 
-async def _make_user(
-    db_session: AsyncSession, *, is_platform_admin: bool = False
-) -> User:
+async def _make_user(db_session: AsyncSession, *, is_platform_admin: bool = False) -> User:
     from app.core.security import password_hasher
 
     user = User(
@@ -143,15 +141,11 @@ async def test_platform_business_perm_blocked_in_workspace_context(
     )
 
     assert (
-        await has_permission(
-            db_session, user=user, permission=permission, workspace_id=ws.id
-        )
+        await has_permission(db_session, user=user, permission=permission, workspace_id=ws.id)
         is False
     )
     assert (
-        await has_permission(
-            db_session, user=user, permission=permission, workspace_id=None
-        )
+        await has_permission(db_session, user=user, permission=permission, workspace_id=None)
         is True
     )
 
@@ -172,9 +166,7 @@ async def test_platform_admin_role_passes_workspace_context(
     )
 
     assert (
-        await has_permission(
-            db_session, user=user, permission=permission, workspace_id=ws.id
-        )
+        await has_permission(db_session, user=user, permission=permission, workspace_id=ws.id)
         is True
     )
 
@@ -188,9 +180,7 @@ async def test_platform_admin_flag_passes_workspace_context(
     user = await _make_user(db_session, is_platform_admin=True)
 
     assert (
-        await has_permission(
-            db_session, user=user, permission=permission, workspace_id=ws.id
-        )
+        await has_permission(db_session, user=user, permission=permission, workspace_id=ws.id)
         is True
     )
 

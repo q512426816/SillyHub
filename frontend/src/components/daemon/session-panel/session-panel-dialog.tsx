@@ -77,7 +77,8 @@ import { applyAgentTaskStatusEvent } from "../agent-task-store";
 // 引导消息改「轮内 user_msg 段」——三个 SessionTurnView 段纯函数定义在
 // session-panel-page（双挂载零漂移；index 入口本就同时加载两模块，无循环依赖）。
 import {
-  appendSteeredSegment, markSteeredSegmentDelivered, markSteeredSegmentsEnded,
+  appendDeliveredUserMsgIfAbsent, appendSteeredSegment, markSteeredSegmentDelivered,
+  markSteeredSegmentsEnded,
 } from "./session-panel-page";
 
 export function SessionPanelDialog(props: SessionPanelProps) {
@@ -485,10 +486,18 @@ export function SessionPanelDialog(props: SessionPanelProps) {
                     env.run_id!,
                     rawText,
                   );
+                  // ql-20260921-001-8a4d（同 page 模式）：发送点未建段的 mid-turn 留痕
+                  //（⚡ dispatch_now 引导）兜底追加 delivered 段，口径与回放组2+ 一致。
+                  const withLiveUserMsg = appendDeliveredUserMsgIfAbsent(
+                    withDelivered,
+                    env.run_id!,
+                    rawText,
+                    env.timestamp ? Date.parse(env.timestamp) : null,
+                  );
                   // 回放守卫（page 模式同款）：轮后对账/断线 resync 重放的历史
                   // user_input 落在已终态轮——不 setCurrentRun（防旧 run 误锁输入框），
                   // prompt 照常补写；实时事件（新建/活跃轮）才置位。
-                  const existing = withDelivered.find(
+                  const existing = withLiveUserMsg.find(
                     (t) => t.runId === env.run_id || t.realRunId === env.run_id,
                   );
                   const staleReplay =
@@ -496,7 +505,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
                     TERMINAL_TURN_STATUSES.has(existing.status) &&
                     prev.currentRunId !== env.run_id;
                   return upsertDialogTurn(
-                    { ...prev, turns: withDelivered },
+                    { ...prev, turns: withLiveUserMsg },
                     env,
                     (turn) =>
                       !turn.prompt.trim()

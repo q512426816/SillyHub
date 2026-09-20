@@ -1,0 +1,844 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 97cd35ba4..c131fc0bb 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -5,6 +5,7 @@ created_at: 2026-08-27 14:32:24
+ 
+ # daemon 模块变更索引
+ 
++- ql-20260921-001-8a4d | 24h 审查两修（daemon 面）——①claude-settings 撤下语义：settings_config 清空/仅 env/值全非法由「不写文件」改「删除既有 settings.json」（原语义下 autocompact 三键撤勾后旧值永久残留生效、全 daemon 无清理路径），写入换 writeFileAtomic 防并发 spawn 交错损坏，删除 ENOENT 静默 best-effort。②batch（task 型）spawn 的 `--model` 旗标经新增导出纯函数 batchModelWithOneM 补 [1m]（kind 守卫同 applyClaudeSettings 调用点，仅 claude/缺省）——旗标优先级压掉 env 档位，ade38ec37 只修 interactive 两路漏此路径，1M 供应商批量任务仍 ~160k 提前压缩。测试：claude-settings 26（+4 撤下矩阵）+ task-runner-one-m-suffix 7 新建 + task-runner/provider-dispatch/session-manager-one-m 相邻面合计 130 全绿、typecheck 0；顺手清偿 knowledge test_router.py ruff format 存量债（ad8b48816 遗留）
+ - ql-20260914-007-8f1d | CI 修复批（daemon 面）——cursor-driver.test ② 多轮 --resume 用例首轮 usage 断言补 ctx_tokens:13（净值三和 10+2+1）：ctx-usage-all-providers 变更给 cursor-events mapUsage 派生 ctx_tokens（ctxTokensFromNetInput 共享 helper）时漏改该用例的过时负向断言 not ctx_tokens（daemon-ci 2 连败）。测试：cursor-driver 23 passed、tsc 0 错
+ - 2026-09-10-auto-resume-interrupted-turn | daemon 重启自动续跑被中断轮——backend 全自洽：recover 事务内（SAVEPOINT D-011）G1-G9+满员 11 道守卫（范围/开关/错误码白名单 daemon_restarted/最新轮/输入未截断/无附件宽松前缀/链上限 2/幂等/无取消 dialog/队列未满）全过则包续跑提示词入队（origin='auto_resume:<rid>' 复合值 D-009@v2、position 队首 D-012）；派发复用 D-008 钩子+queue G10 派发时守卫（source 后有更新 run 删行跳过，防入队后手动重发两遍 Grill P1-2）；inject 可选参打标 metadata_.auto_resume_of+SessionRunRead.metadata 出口（plan 审查 P0-1：显式 DTO 不自动携带新列）；edit/reorder 对续跑条目 409、delete=手动取消；恢复失败既有 _fail_pending_queued_messages 收敛。两列 migration 20260910120000。测试：守卫矩阵 25+queue 19+pref 4+runs 12+集成 3 全绿
+ 
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.md b/.sillyspec/docs/SillyHub/modules/daemon.md
+index 2c44755fa..1767985a1 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.md
+@@ -58,7 +58,7 @@ backend 与 daemon 经 WebSocket + REST 双向通信，支持三种执行形态
+ - **resilience/**：ResilienceService——submitWithRetry 流式消息退避重试（上限约 8s）用尽入 FileOutbox；retryTerminal 终态轻量重试；心跳健康信号触发 drainOutbox 补发（补发前校验 lease 有效/session 未终态，遇 422 claim_token 失效丢弃）。
+ - **spec-sync.ts**：spec 树双向同步——拉取 bundle（tar 解包）+ 推送增量（本地 manifest 与 hub spec-manifest 对比算 FileOp ops，hub 404 首推全量）；junction 挂载、pending-push 标记、`SpecPushConflict` 与 push-before-pull 防护。
+ - **mcp-server.ts（双 toolset）**：同一二进制双模式（env `MCP_TOOLSET`，缺省/拼错回落 orchestration=原 5 编排工具零变化）；`file` 模式=独立 server 名 `sillyhub-file` 仅注册 `upload_file`/`list_uploaded_files` 两工具（worker 注入不含编排工具，不触碰 CC-12 防递归）。路径校验 fail-closed：`MCP_ALLOWED_ROOT` 缺失/空串拒绝一切上传（path_out_of_root），resolve+分隔符前缀校验拒绝对路径/`..` 出根；文件本地读取经 hub-client multipart 直传 `POST /api/agent/file-artifacts`（内容不经 agent 上下文）。注入两条链（2026-08-23-agent-file-upload-mcp）：会话=cli.ts mainAgentMcpConfigProvider 双 server 表 + session-manager per-server env（MCP_SESSION_ID 双条目，injectMcpSessionId 调两次不改签名）；worker（仅 provider=claude）=task-runner 步骤 5.5 写 `os.tmpdir()` 0600 临时 .mcp.json（凭证 per-server env——spike-01 证父进程自定义 env 不透传 MCP 子进程，per-server env 是唯一可靠通道；**同步写**保持 spawn 前零真实异步 IO 间隙）+ run 终 finally 删除 + 构造进程级单次清扫残留 + stream-json buildArgs mcpConfigPath（claude 追加 `--mcp-config`，cursor 忽略）。spike-01（claude CLI 2.1.216 实测）：--mcp-config 与全套既有参数共存；.mcp.json env 支持 `${VAR}` 展开。
+-- **其它**：credential-injector（litellm_proxy 标记→ANTHROPIC_BASE_URL 指向 hub 代理；anthropic 形态 7 条映射规则，`settings_config.env` 空串值按「未配置」跳过不覆盖 api_key 注入——历史预设空占位曾盖掉真实 key 致会话 "Not logged in"（ql-20260823-007），`extra_env` 契约不变仍原样合并；one_m `[1m]` 后缀不止落角色 env——主模型同样生效：规则 3 `ANTHROPIC_MODEL` 与 interactive create/restore 的 `buildDriverOptions` options.model（claude 分支）都经 `withOneMSuffix` 按角色映射 one_m 勾选补缀，裸模型名会让 claude CLI 按默认 200k 窗口算、1M 供应商 ~160k 即触发引擎自动压缩（ql-20260920-004，会话 6e213eb3 实证；state.model/持久化保持裸名不受污染，reload 不传 model 走 env 同覆盖））、ws-client（连接带 X-API-Key header）、local-yaml-writer（init 下发 local.yaml 写盘）、model-error 分类、skill-manager、roots-rpc（磁盘根列举）、host-fs-handler、build-id 自动注入。
++- **其它**：credential-injector（litellm_proxy 标记→ANTHROPIC_BASE_URL 指向 hub 代理；anthropic 形态 7 条映射规则，`settings_config.env` 空串值按「未配置」跳过不覆盖 api_key 注入——历史预设空占位曾盖掉真实 key 致会话 "Not logged in"（ql-20260823-007），`extra_env` 契约不变仍原样合并；one_m `[1m]` 后缀不止落角色 env——主模型同样生效：规则 3 `ANTHROPIC_MODEL`、interactive create/restore 的 `buildDriverOptions` options.model（claude 分支）、batch spawn 的 CLI `--model` 旗标（`batchModelWithOneM`，ql-20260921-001-8a4d 补——旗标优先级压掉 env 档位，漏此路径批量任务仍提前压缩）三路都经 `withOneMSuffix` 按角色映射 one_m 勾选补缀，裸模型名会让 claude CLI 按默认 200k 窗口算、1M 供应商 ~160k 即触发引擎自动压缩（ql-20260920-004，会话 6e213eb3 实证；state.model/持久化保持裸名不受污染，reload 不传 model 走 env 同覆盖））、ws-client（连接带 X-API-Key header）、local-yaml-writer（init 下发 local.yaml 写盘）、model-error 分类、skill-manager、roots-rpc（磁盘根列举）、host-fs-handler、build-id 自动注入。
+ - **agent-log/**（2026-08-23-agent-log-conversation-view）：`parse-zcode-model-io.ts` zcode model-io 转录解析器（纯函数：窗口按绝对 offset 对齐合并 full/delta/tail、消息级 toolCalls/reasoning 块/字符串 content 段产出、剥 system 与 `<system-reminder>`、末行 response 补尾同文去重、坏行>50%→parse_error、20MB/5s 保护、200 段窗口+beforeSeq 切片）；`registry.ts` format→parser 注册表（MVP 仅 zcode-model-io-jsonl）。host-fs-handler 第十方法 `readAgentLogMessages(path, format, beforeSeq?)`：白名单守卫先于一切 IO、not_found/forbidden 与 readFile 同 throw 通道、解析结果 status 分层返回（parsed/unsupported/parse_error/too_large，外层 camelCase 内层 snake_case）；daemon.ts 注册 host_fs.read_agent_log_messages RPC。2026-09-10-zcode-session-sqlite-read：zcode format 在守卫后、registry 前先分派 `read-zcode-sqlite.ts` 读取器——恒读 `~/.zcode/cli/db/db.sqlite`（node:sqlite 经 createRequire 惰性加载只读开库，rollout 短命文件仅扫描发现与读取兜底；分派带**目录门**——log_path 须位于 `~/.zcode/cli/rollout` 内才进读取器，防自登记任意路径横向读库，与文件死活无关【ql-20260911-003-355a 的 lstat 存在性门以文件存在为授权凭证，误杀历史会话回看，已修订替换】）：extractZcodeSessId 提取（model-io-sess_<rest>.jsonl → sess_<rest>）、message×part 单查询归一化（tool 单 part 产 use+result 两段/隐藏三判据整条跳过/未知类型防御忽略计 skippedLines）、窗口与 parse-zcode-model-io 单源对齐（DEFAULT_MAX_SEGMENTS import）；读取器抛错（不可用/不在库/查询异常）原样落回文件流程 + console.info 单行回落日志（ql-20260911-005：原 console.debug 在 console-timestamp 包装外全程无痕、排障只能反编译 bundle，升级 info 并由 ZD3 断言锁住），claude/codex 不进分支；测试基建 createZcodeFixtureDb 真实 schema 造库（tests/agent-log/read-zcode-sqlite.test.ts 20 用例 + zcode-sqlite-dispatch.test.ts 分派四态 7 用例）。
+ - **git 只读五方法**（2026-08-25-workspace-git-log；第 5 个 git_status 增于 2026-08-26-workspace-git-status）：host-fs-handler 在既有十方法（stat/read_file/list_dir/git_apply/git_rev_parse/pollution_archive/read_package_json/read_local_yaml/run_command/read_agent_log_messages）之外新增 gitLog/gitRefs/gitShow/gitDiffFile 四只读方法（共十四）——execFile 独立 argv 跑 git log/for-each-ref/show/rev-parse（%x00 字段 +%x1e 记录分隔解析、tag `%(*objectname)` peeled 回退、diff 64KB 截断+二进制检测、空仓库 exit 128 转空态结构不走红通道）；daemon.ts 经 `ws.registerRpcHandler` **平名注册**（`git_log`/`git_refs`/`git_show`/`git_diff_file`，不走 `host_fs.` 前缀通道，CC-02），消费方=backend `git_log` 模块（工作区 Git 日志视图数据链路）。2026-08-26-workspace-git-status 增第 5 个平名方法 `git_status`（host-fs-handler 累计十五方法）：① `git remote` 预检（无 remote 记 `no_remote` 不跑 fetch）+ `git fetch --quiet` 15s 超时（独立于读超时；不经 runCmd，局部 execFile 读 err.killed/signal 判 `fetch_timeout`/`fetch_failed`，**fetch 失败仅记代号降级、不阻断其余字段**）② `status --porcelain=v2 --branch --no-show-stash`（branch/upstream/ahead-behind/untracked 计数/空仓库 empty 判据）③ `diff HEAD --numstat --no-renames`（files_changed/additions/deletions 单源求和）——十四字段结构化返回不抛，同一注册器平名注册，消费方=backend `git_log` 模块 status 端点。
+ 
+@@ -204,3 +204,8 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容
+ - 机制：引擎默认在 resolved autocompact window（≈模型 believed limit 200K 级）的 ~80% 水位自动压缩（≈160K，预留压缩调用自身缓冲）；平台经 provider 级 `settings_config` 三键干预——`autoCompactWindow`（正整数，配大于默认→更晚触发；⚠️超模型实际窗口会先撞硬限报错）/`autoCompactEnabled`（布尔三态）/`precomputeCompactionEnabled`（后台预计算摘要）。
+ - 链路：llm_providers.settings_config（前端 provider 表单 claude 分支「引擎自动压缩」区结构化写入）→ lease/context.py 原样透传 → daemon `claude-settings.ts` TOP_LEVEL_KEYS 白名单（值守护：window 非正整数/开关非布尔跳过不写）→ `$CLAUDE_CONFIG_DIR/settings.json` → claude code spawn 读取。运行中会话不热更新，下一 spawn 生效。
+ - 依据：SDK 0.3.247 Settings 可写字段三枚（sdk.d.ts :7567/:5792/:5794），无可写 threshold 项；生产 6e213eb3 会话 COMPACT_STATUS 时间线（160K 触发实证）。
++
++## 增量（ql-20260921-001-8a4d：24h 审查两修——settings 撤下语义 + batch [1m] 补缀）
++
++- claude-settings 撤下语义：`applyClaudeSettings` 对空 settings 对象（absent/null/仅 env/值全非法）由「不写文件」改「**删除既有 settings.json**」——原语义下 autocompact 三键撤勾（settings_config 清空）后旧值永久残留生效、全 daemon 无任何清理路径；被删的只可能是本 daemon 自己写的隔离目录内文件，宿主机零打扰不变。写入换 `writeFileAtomic`（repo 自备原语，防跨 lease 并发 spawn 裸 writeFile 交错出半截 JSON）；删除 ENOENT 静默、其余 best-effort warn 不阻断 spawn。
++- batch `[1m]` 补缀：task-runner 新增导出纯函数 `batchModelWithOneM`（kind 守卫同 applyClaudeSettings 调用点：仅 claude/缺省应用），spawn args 的 `--model` 旗标经它补 `[1m]`——显式旗标优先级最高会压掉 env 档位（injector 规则 3 已补的缀），ql-20260920-004 修复漏了此路径，1M 供应商跑批量任务仍按默认 200k 窗口 ~160k 提前自动压缩。
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index f4067fe50..67c83ebb7 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -5,6 +5,7 @@ created_at: 2026-08-30 22:23:33
+ 
+ # frontend_components 模块变更索引
+ 
++- ql-20260921-001-8a4d | ⚡ dispatch_now 引导消息实时渲染兜底（session-panel-page/dialog 双挂载）——⚡「转为引导」链路发送点不建 steering 段（use-message-queue 不消费 dispatch 响应；inject 端点忙轮恒排队致 appendSteeredSegment 生产不可达），mid-turn 注入的 user_input 留痕 SSE 行到达时 markSteeredSegmentDelivered 无段可收敛、消息正文实时视图静默丢弃（刷新后 logsToTurns 才可见）。修复：SSE user_input 处理器新增 appendDeliveredUserMsgIfAbsent 兜底（page:265 起导出、dialog 复用）——口径与回放组2+ 一致：轮存在且 prompt 非空、主体（steerMatchKey，剥前导/附件标记行）与 prompt 互异、轮内无同主体 user_msg 段才追加 delivered 段；prompt 回显/daemon 双提交/纯前导不双画，steering 段刚收敛的 delivered 同键幂等。测试：sessions page 41（+1 ⚡ 场景：兜底 delivered 段+prompt 不覆盖+同主体重复幂等）绿、tsc 0
+ - ql-20260920-007-c04d | 「客户端路径」行改按账号显示本人 binding 路径（workspace-path-fields，2026-09-20-workspace-member-visibility D-004 另开 quick）——旧口径两处渲染位（列表卡片 + 详情页信息区）均显示 workspaces.root_path 全局列（创建者本机路径），任何能看到该工作区的账号都看到别人的路径；新增 myRootPath prop 三态渲染（string=本人 member binding root_path；null=未绑定，显示「未绑定——进入工作区后在『我的接入』绑定后显示你的本地路径」引导文案；undefined=调用方未接线兼容回退全局路径，daemon/兜底两渲染分支统一抽 ClientPathRow）。数据接线：列表页 bindingsByWs 由 {daemon_id} 扩展为 {daemon_id, root_path}（fetchMyBindings 既有响应零后端改动）+ cardPropsOf 透传；详情页传 myBinding?.root_path ?? null；workspace-card 加透传 prop（WorkspaceCardSlotProps 经 ComponentProps Omit 自动含新 prop）。测试：workspaces 页面 182 + workspace-card 19 用例绿、tsc 0
+ - ql-20260916-004-8b06 | 轮次刻度 active 选中双修（session-panel-page）——用户反馈短轮次一页多轮时点末刻度选不中末轮。根因两处同源：① handleJumpToTurn 虽先 setActiveTurnKey(entry.key) 即时置位，但 scrollIntoView({smooth}) 途中 scroll 事件经 syncActiveTurnKey（视口顶+120px 判定线规则）重算覆盖，一页多短轮时终点压线的是中间轮；② 贴底/短末轮场景判定线本就压不中末轮。修复：syncActiveTurnKey 加贴底钳制（距底 ≤120px → active=末个 data-turn-key 行，「读到末尾」语义，加载滚底即时正确）+ 跳转定位期 active 联动抑制窗口（performance.now 时间戳 ref，700ms 内 scroll 重算跳过让点击置位存活，过期恢复有机联动）。测试：page.test 新增 2 用例（贴底钳制取末行/离底回落判定线 + 抑制窗口内存活过期恢复）全绿；顺手修存量 mock 债（llm-providers 工厂 importActual 展开补 detectUsageProvider，7b80bf54 起缺导出致 whoLine 2 用例崩，修后余 1 例「发送者+时间」为并行会话已知在途债非本改动）。实机验证：点末刻度选中保持、点首刻度选中保持、有机滚底联动恢复全通
+ - ql-20260914-007-8f1d | CI 修复批（frontend 面）——①turn-catalog 补 ql-20260913-007-1351 丢失实现：该 quick 仅测试文件随 d114568f3 入库、组件实现未落 git（frontend-ci 5 用例连续红），按 quicklog sidecar 方案恢复——button 本体 h-[18px] × 轨全宽透明命中区（2px 杠上下各 8px 缓冲），视觉细杠内移子 span（data-testid="tick-line"）居中渲染，状态色/hover 放宽/空心描边全挂子 span 经 group-* 触发，nav 去 gap 相邻热区紧贴连续（刻度周期 9px→18px），飞出卡垂直锚点热区中心；②turn-timeline-auto-recover 固件改本地时区固化构造（旧 +08:00 死串在 UTC CI 渲染成 02:03，4 连败）；③session-panel-platform-shared 补 listScheduledMessages mock——全局 apiFetch 返回的共享智能体数组被真定时消息列表吞掉致 summarizeScheduledPrompt 读 undefined.length 异步崩（known_failures I 组时序 flaky 根因）。测试：turn-catalog 17 + sessions 页/variant 44 + auto-recover 7（TZ=UTC 亦绿）+ platform-shared 4 全绿；tsc 0 错；eslint 1 存量 warning（onJump entry 参数名）不变
+diff --git a/.sillyspec/docs/SillyHub/modules/knowledge.md b/.sillyspec/docs/SillyHub/modules/knowledge.md
+index 25bfaff67..8a089daf8 100644
+--- a/.sillyspec/docs/SillyHub/modules/knowledge.md
++++ b/.sillyspec/docs/SillyHub/modules/knowledge.md
+@@ -72,3 +72,7 @@ get(ws, filename) → 同上全量解析后按 filename 匹配（include_content
+ - **背景（24h 审查 M1 残余缺口）**：ql-20260918-005 把 `_read_raw` 收口为严格 UTF-8 解码，但只覆盖 merge/preview 回写路径——网页编辑链路 GET 经 parser `_read_file_safe`（`errors="replace"`）回传的基底对非 UTF-8 文件（Windows GBK 手工编辑残留）已是 U+FFFD 版，`update_entry` 整文件替换保存会把原始字节永久毁坏且 update 不进 spec-backups（仅 delete 备份）。<1MB 的坏编码文件此前两条守卫（大小 422 / merge 严格解码）都不拦。
+ - **修法**（writer.py）：新增模块级 `_decode_knowledge_strict(raw, filename)` 共享 helper（`_read_raw` 原内联 try/except 收敛进来，错误形态单一来源）；`update_entry` 在大小守卫后对磁盘原文做严格解码探测（≤1MB，结果弃用只探测），坏编码抛既有 `KnowledgeFileEncodingInvalid` 422（details 带 byte_offset，文件与 manifest 版本不动，提示本机转 UTF-8 后再操作）。
+ - **验证**：test_writer 27（新增 2：坏编码编辑 422+前置自检 GET 基底确含 U+FFFD+磁盘原字节与 manifest 版本未动；合法 UTF-8 中文编辑不受误伤的对照组）+ test_router/test_parser/test_distill 相邻面 72 全绿；ruff format/check + mypy（scoped writer）0。附带：workspace/router.py probe_workspaces docstring 勘误——原「只读无状态变化」与 ql-20260918-012 repo_url 回填写副作用自相矛盾（CLAUDE.md 规则 18），改为「不改生命周期状态（唯一写例外 repo_url 回填）」。
++
++## 增量（ql-20260921-001-8a4d：hits ingest type 截断到列宽——防 PG 毒行卡死遥测上行）
++
++- `_build_row` 的 `type` 写入补 `[:32]` 截断（对齐 `change_name[:255]` 口径）。列是 String(32)：PG 对超长值抛 DataError（22001，**非** IntegrityError）会穿透 `_insert_all` 的并发兜底整批 500；而 daemon 上行（knowledge-hits-upload.ts）按批推进 offset、无按行跳过——单条毒行会让该工作区 hits 上行永久卡死重试。SQLite 测试不检列宽，故必须在写入侧截断（test_hits 补 40 字符 type → 32 截断落库用例锁定）。
+diff --git a/backend/app/modules/auth/tests/test_rbac_workspace_scope.py b/backend/app/modules/auth/tests/test_rbac_workspace_scope.py
+index 56ac4d46f..88cb28056 100644
+--- a/backend/app/modules/auth/tests/test_rbac_workspace_scope.py
++++ b/backend/app/modules/auth/tests/test_rbac_workspace_scope.py
+@@ -48,9 +48,7 @@ from app.modules.workspace.model import Workspace
+ PLATFORM_BUSINESS_PERMS: list[Permission] = [Permission.WORKSPACE_READ, Permission.MCP_READ]
+ 
+ 
+-async def _make_user(
+-    db_session: AsyncSession, *, is_platform_admin: bool = False
+-) -> User:
++async def _make_user(db_session: AsyncSession, *, is_platform_admin: bool = False) -> User:
+     from app.core.security import password_hasher
+ 
+     user = User(
+@@ -143,15 +141,11 @@ async def test_platform_business_perm_blocked_in_workspace_context(
+     )
+ 
+     assert (
+-        await has_permission(
+-            db_session, user=user, permission=permission, workspace_id=ws.id
+-        )
++        await has_permission(db_session, user=user, permission=permission, workspace_id=ws.id)
+         is False
+     )
+     assert (
+-        await has_permission(
+-            db_session, user=user, permission=permission, workspace_id=None
+-        )
++        await has_permission(db_session, user=user, permission=permission, workspace_id=None)
+         is True
+     )
+ 
+@@ -172,9 +166,7 @@ async def test_platform_admin_role_passes_workspace_context(
+     )
+ 
+     assert (
+-        await has_permission(
+-            db_session, user=user, permission=permission, workspace_id=ws.id
+-        )
++        await has_permission(db_session, user=user, permission=permission, workspace_id=ws.id)
+         is True
+     )
+ 
+@@ -188,9 +180,7 @@ async def test_platform_admin_flag_passes_workspace_context(
+     user = await _make_user(db_session, is_platform_admin=True)
+ 
+     assert (
+-        await has_permission(
+-            db_session, user=user, permission=permission, workspace_id=ws.id
+-        )
++        await has_permission(db_session, user=user, permission=permission, workspace_id=ws.id)
+         is True
+     )
+ 
+diff --git a/backend/app/modules/change/tests/test_scope_file_diff.py b/backend/app/modules/change/tests/test_scope_file_diff.py
+index 5bf3c10d5..6433114a6 100644
+--- a/backend/app/modules/change/tests/test_scope_file_diff.py
++++ b/backend/app/modules/change/tests/test_scope_file_diff.py
+@@ -395,7 +395,9 @@ async def test_file_diff_not_bound_404(client: AsyncClient, setup_env):
+ 
+ # ── 对账表端点（ql-20260911-001-c0be）─────────────────────────────────────────
+ 
+-_AUDIT_OK = {
++# 值形态异构（str/bool/嵌套 list[dict]），窄化到 dict[str, object] 会让
++# `["rows"][0]`（8d628ba53 用例）报 object 不可索引——Any 注解放开取值索引。
++_AUDIT_OK: dict[str, Any] = {
+     "change": "2026-09-11-skills-central-library",
+     "ok": True,
+     "mode": "full-flow",
+@@ -670,9 +672,7 @@ async def test_scope_audit_v2_cross_repo_rows_and_repos(client: AsyncClient, set
+ 
+ 
+ @pytest.mark.asyncio
+-async def test_scope_audit_v2_repos_fallback_and_invalid_skipped(
+-    client: AsyncClient, setup_env
+-):
++async def test_scope_audit_v2_repos_fallback_and_invalid_skipped(client: AsyncClient, setup_env):
+     """防御回退（D-002）：无 repos 键 / repos 非 list → []；非法条目（非
+     dict / 缺 key / key 非 str）跳过不炸、嵌套 anchor/totals 非法全 None
+     容错、合法条目保留；行级 cross_repo 非 str → None。"""
+diff --git a/backend/app/modules/knowledge/hits.py b/backend/app/modules/knowledge/hits.py
+index addb75c1f..4cab66750 100644
+--- a/backend/app/modules/knowledge/hits.py
++++ b/backend/app/modules/knowledge/hits.py
+@@ -241,7 +241,11 @@ class HitsService:
+             workspace_id=workspace_id,
+             line_hash=line_hash,
+             daemon_local_id=daemon_local_id,
+-            type=str(raw_type) if raw_type is not None else "",
++            # type 列 String(32)：截断到列宽（对齐 change_name[:255] 口径）。超长值在
++            # PG 抛 DataError（22001，非 IntegrityError）会穿透 _insert_all 的并发兜底
++            # 整批 500，且 daemon 上行按批推进无按行跳过 → 单条毒行永久卡死该工作区
++            # 遥测（SQLite 测试不检列宽，故必须写入侧截断）。
++            type=str(raw_type)[:32] if raw_type is not None else "",
+             change_name=str(change)[:255] if change is not None else None,
+             query_text=str(query) if query is not None else None,
+             matched_anchors=(
+diff --git a/backend/app/modules/knowledge/tests/test_hits.py b/backend/app/modules/knowledge/tests/test_hits.py
+index efe80f92a..078a8fd3f 100644
+--- a/backend/app/modules/knowledge/tests/test_hits.py
++++ b/backend/app/modules/knowledge/tests/test_hits.py
+@@ -266,6 +266,35 @@ async def test_ingest_type_whitelist_tolerant_out_of_band(db_session, hits_ws: d
+     assert inject_row.occurred_at is not None
+ 
+ 
++async def test_ingest_type_truncated_to_column_width(db_session, hits_ws: dict) -> None:
++    """type 超列宽（String(32)）截断落库——PG 对超长 varchar 抛 DataError（非
++    IntegrityError）会穿透 _insert_all 并发兜底整批 500，且 daemon 上行按批推进
++    无按行跳过，单条毒行会永久卡死该工作区遥测；SQLite 测试不检列宽，故在写入
++    侧截断并用本用例锁定（对齐 change_name[:255] 口径）。"""
++    from sqlalchemy import select
++
++    from app.modules.knowledge.hits import KnowledgeHit
++
++    service = HitsService(db_session)
++    long_type = "x" * 40
++    lines = [
++        _hit_line(hit_type=long_type, matched=[]),
++        _hit_line(hit_type="inject", matched=[]),
++    ]
++    out = await service.ingest_batch(hits_ws["ws_id"], lines)
++    assert out.ingested == 2
++    assert out.skipped_bad == 0
++
++    types = set(
++        (
++            await db_session.execute(
++                select(KnowledgeHit.type).where(KnowledgeHit.workspace_id == hits_ws["ws_id"])
++            )
++        ).scalars()
++    )
++    assert types == {"x" * 32, "inject"}
++
++
+ async def test_ingest_unknown_workspace_404(db_session) -> None:
+     """未知 workspace → WorkspaceNotFound（与模块内其它端点同语义，不落悬空行）。"""
+     from app.core.errors import WorkspaceNotFound
+diff --git a/backend/app/modules/knowledge/tests/test_router.py b/backend/app/modules/knowledge/tests/test_router.py
+index a097482bf..a9aa976a2 100644
+--- a/backend/app/modules/knowledge/tests/test_router.py
++++ b/backend/app/modules/knowledge/tests/test_router.py
+@@ -819,9 +819,7 @@ async def test_merge_target_outside_whitelist_returns_422(
+ # ---------------------------------------------------------------------------
+ 
+ 
+-async def _knowledge_read_only_headers(
+-    db_session, workspace_id: uuid.UUID | str
+-) -> dict[str, str]:
++async def _knowledge_read_only_headers(db_session, workspace_id: uuid.UUID | str) -> dict[str, str]:
+     """在指定工作区内仅持 KNOWLEDGE_READ 的成员 token（写端点 403 / 任务列表 200 两态用）。
+ 
+     2026-09-20-workspace-member-visibility：平台级业务权限不再穿透工作区
+@@ -849,9 +847,7 @@ async def _knowledge_read_only_headers(
+     db_session.add_all([user, role])
+     await db_session.flush()
+     db_session.add(RolePermission(role_id=role.id, permission="knowledge:read"))
+-    db_session.add(
+-        UserWorkspaceRole(user_id=user.id, workspace_id=ws_uid, role_id=role.id)
+-    )
++    db_session.add(UserWorkspaceRole(user_id=user.id, workspace_id=ws_uid, role_id=role.id))
+     await db_session.commit()
+     await db_session.refresh(user)
+ 
+diff --git a/backend/app/modules/workspace/tests/test_platform_grant_list.py b/backend/app/modules/workspace/tests/test_platform_grant_list.py
+index c09e4c455..90d217c56 100644
+--- a/backend/app/modules/workspace/tests/test_platform_grant_list.py
++++ b/backend/app/modules/workspace/tests/test_platform_grant_list.py
+@@ -130,9 +130,7 @@ async def _grant_workspace_role(
+     await db_session.commit()
+ 
+ 
+-async def _recipients(
+-    db_session: AsyncSession, *, workspace_id: uuid.UUID
+-) -> set[uuid.UUID]:
++async def _recipients(db_session: AsyncSession, *, workspace_id: uuid.UUID) -> set[uuid.UUID]:
+     """通知广播收件人集合（list_user_ids_with_permission 段 1/2/3 之并）。"""
+     return set(
+         await list_user_ids_with_permission(
+@@ -246,9 +244,7 @@ async def test_workspace_scoped_member_limited_to_own_workspace(
+     assert user.id not in await _recipients(db_session, workspace_id=outsider_ws.id)
+ 
+ 
+-async def test_three_caliber_consistency(
+-    client: AsyncClient, db_session: AsyncSession
+-) -> None:
++async def test_three_caliber_consistency(client: AsyncClient, db_session: AsyncSession) -> None:
+     """三口径一致性（AC-07，防 R-01 复发）：同一夹具下，对代表性用户逐一断言
+ 
+         列表可见集 == has_permission(WORKSPACE_READ) 可访问集 == 通知收件集
+@@ -281,9 +277,7 @@ async def test_three_caliber_consistency(
+         ("is_platform_admin标志", flag_admin_user, flag_admin_token, full),
+     ]
+     for label, user, token, expected in roster:
+-        resp = await client.get(
+-            "/api/workspaces", headers={"Authorization": f"Bearer {token}"}
+-        )
++        resp = await client.get("/api/workspaces", headers={"Authorization": f"Bearer {token}"})
+         assert resp.status_code == 200, (label, resp.text)
+         visible = {uuid.UUID(item["id"]) for item in resp.json()["items"]}
+ 
+@@ -298,9 +292,7 @@ async def test_three_caliber_consistency(
+             )
+         }
+         recipient = {
+-            ws.id
+-            for ws in all_ws
+-            if user.id in await _recipients(db_session, workspace_id=ws.id)
++            ws.id for ws in all_ws if user.id in await _recipients(db_session, workspace_id=ws.id)
+         }
+ 
+         assert visible == expected, (label, "列表可见集", visible, expected)
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index dbb39d096..05c34bf1f 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -1177,6 +1177,77 @@ describe("SessionPanel 忙轮发送引导（task-07 steered=true 三态渲染）
+       ),
+     ).toBeTruthy();
+   });
++
++  // ql-20260921-001-8a4d（24h 审查修复）：⚡ dispatch_now 引导链路发送点不建 steering
++  // 段（hook 不消费 dispatch 响应）——mid-turn 留痕行到达时兜底追加 delivered 段，
++  // 否则引导消息在实时视图被静默丢弃（刷新后 logsToTurns 才可见）。
++  it("⚡ dispatch_now 引导（发送点不建段）→ 留痕行到达兜底追加 delivered 段；prompt 回显与重复行不双画", async () => {
++    const handlers = await selectSession();
++
++    // ① 活跃轮开跑 + 原始提问（prompt 恒非空，busy 态）。
++    act(() => {
++      handlers.onTurnStarted(makeSteerEnvelope({ event: "turn_started" }));
++    });
++    act(() => {
++      handlers.onLog(
++        makeSteerEnvelope({
++          log_id: "l-orig",
++          channel: "user_input",
++          content: "原始提问",
++        }),
++      );
++    });
++    expect(await screen.findByText("原始提问")).toBeTruthy();
++
++    // ② ⚡ 立即发送引导成功：后端 mid-turn 注入活跃 run 并补发 user_input 留痕行
++    //    （前端未消费 dispatch 响应、无 steering 段）→ 兜底直接落 delivered 段。
++    act(() => {
++      handlers.onLog(
++        makeSteerEnvelope({
++          log_id: "l-d1",
++          channel: "user_input",
++          content: "插队引导这条",
++        }),
++      );
++    });
++    const deliveredEl = await waitFor(() => {
++      const el = document.querySelector(
++        '[data-turn-key="r-live"] [data-steered-msg="delivered"]',
++      );
++      expect(el).toBeTruthy();
++      return el as HTMLElement;
++    });
++    expect(deliveredEl.textContent).toContain("插队引导这条");
++    expect(screen.getByText("✓ 已投递，agent 已收到引导")).toBeTruthy();
++    // 轮 prompt 仍是原始提问（互异主体不覆盖 prompt 气泡）。
++    expect(screen.getByText("原始提问")).toBeTruthy();
++
++    // ③ daemon 双提交同主体（裸文本版重放）→ 同键幂等，不重复成段。
++    act(() => {
++      handlers.onLog(
++        makeSteerEnvelope({
++          log_id: "l-d2",
++          channel: "user_input",
++          content: "插队引导这条",
++        }),
++      );
++    });
++    await waitFor(() => {
++      expect(screen.getAllByText("插队引导这条")).toHaveLength(1);
++    });
++
++    // ④ prompt 同主体回显（daemon 双提交裸文本版落在 prompt 主体上）→ 不追加段。
++    act(() => {
++      handlers.onLog(
++        makeSteerEnvelope({
++          log_id: "l-d3",
++          channel: "user_input",
++          content: "原始提问",
++        }),
++      );
++    });
++    expect(screen.getAllByText("原始提问")).toHaveLength(1);
++  });
+ });
+ 
+ // ── ql-20260820-007：attach 运行中轮恢复竞态（detail / 历史 logs 到达顺序） ──
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index fecf0b3d3..43271215a 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -77,7 +77,8 @@ import { applyAgentTaskStatusEvent } from "../agent-task-store";
+ // 引导消息改「轮内 user_msg 段」——三个 SessionTurnView 段纯函数定义在
+ // session-panel-page（双挂载零漂移；index 入口本就同时加载两模块，无循环依赖）。
+ import {
+-  appendSteeredSegment, markSteeredSegmentDelivered, markSteeredSegmentsEnded,
++  appendDeliveredUserMsgIfAbsent, appendSteeredSegment, markSteeredSegmentDelivered,
++  markSteeredSegmentsEnded,
+ } from "./session-panel-page";
+ 
+ export function SessionPanelDialog(props: SessionPanelProps) {
+@@ -485,10 +486,18 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+                     env.run_id!,
+                     rawText,
+                   );
++                  // ql-20260921-001-8a4d（同 page 模式）：发送点未建段的 mid-turn 留痕
++                  //（⚡ dispatch_now 引导）兜底追加 delivered 段，口径与回放组2+ 一致。
++                  const withLiveUserMsg = appendDeliveredUserMsgIfAbsent(
++                    withDelivered,
++                    env.run_id!,
++                    rawText,
++                    env.timestamp ? Date.parse(env.timestamp) : null,
++                  );
+                   // 回放守卫（page 模式同款）：轮后对账/断线 resync 重放的历史
+                   // user_input 落在已终态轮——不 setCurrentRun（防旧 run 误锁输入框），
+                   // prompt 照常补写；实时事件（新建/活跃轮）才置位。
+-                  const existing = withDelivered.find(
++                  const existing = withLiveUserMsg.find(
+                     (t) => t.runId === env.run_id || t.realRunId === env.run_id,
+                   );
+                   const staleReplay =
+@@ -496,7 +505,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+                     TERMINAL_TURN_STATUSES.has(existing.status) &&
+                     prev.currentRunId !== env.run_id;
+                   return upsertDialogTurn(
+-                    { ...prev, turns: withDelivered },
++                    { ...prev, turns: withLiveUserMsg },
+                     env,
+                     (turn) =>
+                       !turn.prompt.trim()
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 760c03f62..068cc4f07 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -348,6 +348,54 @@ export function markSteeredSegmentsEnded(
+   ];
+ }
+ 
++/**
++ * ql-20260921-001-8a4d（24h 审查修复）：mid-turn 注入留痕的实时兜底段。
++ *
++ * 背景：⚡ dispatch_now 引导链路发送点不建 steering 段（use-message-queue 不消费
++ * dispatch 响应；appendSteeredSegment 仅 inject steered=true 路径可达，而单聊
++ * inject 端点忙轮恒排队）——mid-turn 注入的 user_input 留痕行到达时
++ * markSteeredSegmentDelivered 无段可收敛，消息正文在实时视图被静默丢弃（刷新后
++ * logsToTurns 才可见）。
++ *
++ * 兜底口径与回放（logsToTurns 组2+）一致：轮存在且 prompt 已非空、主体
++ * （steerMatchKey）与 prompt 互异、轮内尚无同主体 user_msg 段 → 追加 delivered
++ * 段（注入已发生，不走引导中三态）；其余情形原样返回原引用：
++ *   - 轮未建 / prompt 为空 → 本条即轮 prompt（upsertTurn 既有补写承载）；
++ *   - 主体与 prompt 相同 → prompt 回显 / daemon 双提交（marker 版+裸文本版）；
++ *   - 已有同主体段 → steering 段刚被上方收敛为 delivered / 已兜底过，幂等。
++ */
++export function appendDeliveredUserMsgIfAbsent(
++  turns: SessionTurnView[],
++  runId: string,
++  rawContent: string,
++  ts: number | null,
++): SessionTurnView[] {
++  const key = steerMatchKey(rawContent);
++  if (!key) return turns;
++  const idx = steeredTurnIndexOf(turns, runId);
++  if (idx < 0) return turns;
++  const turn = turns[idx]!;
++  if (!turn.prompt.trim()) return turns;
++  if (steerMatchKey(turn.prompt) === key) return turns;
++  if (turn.segments?.some((s) => s.kind === "user_msg" && steerMatchKey(s.text) === key)) {
++    return turns;
++  }
++  const text = stripPreambleText(rawContent);
++  if (!text.trim()) return turns;
++  const seg: UserMsgTurnSegment = {
++    kind: "user_msg",
++    id: `steer:${safeUUID()}`,
++    text,
++    ts: ts != null && Number.isFinite(ts) ? ts : Date.now(),
++    phase: "delivered",
++  };
++  return [
++    ...turns.slice(0, idx),
++    { ...turn, segments: [...(turn.segments ?? []), seg] },
++    ...turns.slice(idx + 1),
++  ];
++}
++
+ 
+ /* ────────────────────── page 模式内部子组件（含 react-query，R4） ────────────────────── */
+ 
+@@ -970,10 +1018,19 @@ export function SessionPanelPage({
+                   env.run_id!,
+                   env.content ?? "",
+                 );
++                // ql-20260921-001-8a4d：发送点未建段的 mid-turn 留痕（⚡ dispatch_now
++                // 引导——响应不被消费，appendSteeredSegment 不可达）兜底追加
++                // delivered 段；口径与回放组2+ 一致（prompt 互异主体才成段）。
++                const withLiveUserMsg = appendDeliveredUserMsgIfAbsent(
++                  withDelivered,
++                  env.run_id!,
++                  env.content ?? "",
++                  env.timestamp ? Date.parse(env.timestamp) : null,
++                );
+                 // 回放守卫：轮后对账/断线 resync 重放的历史 user_input 落在已终态
+                 // 轮上——不 setCurrentRun（否则空闲会话被旧 run 误锁输入框），prompt
+                 // 照常补写（与刷新后视图一致）；实时事件（新建轮/活跃轮）才置位。
+-                const existing = withDelivered.find(
++                const existing = withLiveUserMsg.find(
+                   (t) => t.runId === env.run_id || t.realRunId === env.run_id,
+                 );
+                 const staleReplay =
+@@ -981,7 +1038,7 @@ export function SessionPanelPage({
+                   TERMINAL_TURN_STATUSES.has(existing.status) &&
+                   prev.currentRunId !== env.run_id;
+                 return upsertTurn(
+-                  { ...prev, turns: withDelivered },
++                  { ...prev, turns: withLiveUserMsg },
+                   env,
+                   (turn) => {
+                     let next = turn;
+diff --git a/sillyhub-daemon/src/claude-settings.ts b/sillyhub-daemon/src/claude-settings.ts
+index bfec35809..326c5f9f6 100644
+--- a/sillyhub-daemon/src/claude-settings.ts
++++ b/sillyhub-daemon/src/claude-settings.ts
+@@ -17,18 +17,25 @@
+  *     且 api_key 本就不在 settings_config 顶层键里，白名单枚举天然排除）
+  *
+  * 零回归铁律（D-007 brownfield）：
+- *   - provider_config / settings_config 为 absent / null / undefined → 不写文件、不抛、
+- *     不删已存文件（claude 走默认 + 注入 env，行为与 spike-01 前逐字一致）。
+- *   - settings_config 仅含 env（无任一白名单顶层键）→ 同样不写文件（env 已由 toEnv 注入）。
++ *   - provider_config / settings_config 为 absent / null / undefined → 删除既有
++ *     settings.json（若存在）、不抛（claude 走默认 + 注入 env）。
++ *   - settings_config 仅含 env（无任一白名单顶层键）→ 同样删除既有文件（env 已由
++ *     toEnv 注入）。
++ *   - ql-20260921-001-8a4d（24h 审查修复）：原「空对象不写不删」语义下，autocompact 三键
++ *     一旦写入后撤勾（settings_config 清空）→ 旧值永久残留生效、全 daemon 无清理
++ *     路径。改为「文件恒反映最近一次 spawn 的 provider 配置」：空对象 = 撤下 =
++ *     删文件。被删的只可能是本 daemon 自己写的隔离目录内文件，宿主机零打扰不变。
+  *
+  * 写盘时机 = spawn 前（两处 buildSpawnEnv 调用点旁），非 daemon 启动；daemon 单实例
+- * 假设下单写同一 CLAUDE_CONFIG_DIR，无需并发锁。
++ * 假设下单写同一 CLAUDE_CONFIG_DIR；跨 lease 并发写由 writeFileAtomic 原子顶替
++ * （任一观察时刻文件要么旧全文要么新全文，不会交错出半截 JSON）。
+  *
+  * @module claude-settings
+  */
+ 
+-import { writeFile, mkdir } from 'node:fs/promises';
++import { mkdir, unlink } from 'node:fs/promises';
+ import { join } from 'node:path';
++import { writeFileAtomic } from './atomic-write.js';
+ import { CLAUDE_CONFIG_DIR } from './config.js';
+ import type { ProviderConfig } from './types.js';
+ 
+@@ -77,7 +84,7 @@ const SETTINGS_FILENAME = 'settings.json';
+  * 把 `provider_config.settings_config` 的白名单顶层键合并成 settings.json 对象。
+  *
+  * 纯函数（无 IO，不读不入参），导出供 task-13 单测覆盖：
+- *   - absent / null → 空对象（调用方据此判不写盘）
++ *   - absent / null → 空对象（调用方据此删既有文件）
+  *   - 仅 env → 空对象（env 不在白名单）
+  *   - 含 attribution/model 等 → 仅白名单键 + 非 null/undefined 值
+  *
+@@ -108,19 +115,20 @@ function buildSettingsObject(
+  *
+  * 行为：
+  *   1. buildSettingsObject 取白名单顶层键；结果为空（absent/null/仅 env/值全 null）
+- *      → 直接 return，不写文件（零回归）。
++ *      → 删除既有 settings.json（撤下语义，ql-20260921-001-8a4d；文件不存在 ENOENT 静默）。
+  *   2. best-effort mkdir（`recursive:true` 忽略已存在；cli.ts:287 writePid 已保证目录
+  *      存在，本步仅兜底运行期被清空场景）。
+- *   3. `writeFile(join(dir,'settings.json'), JSON.stringify(obj,null,2), 'utf-8')`。
++ *   3. `writeFileAtomic(join(dir,'settings.json'), …)`——原子顶替，防并发 spawn
++ *      交错损坏（truncate+write 两步裸 writeFile 的窗口）。
+  *
+  * 失败策略（best-effort，不阻断 spawn 主路径）：
+- *   - 写盘抛错（EACCES / ENOSPC 等）→ console.warn 后吞掉，**绝不 rethrow**。
++ *   - 写盘/删除抛错（EACCES / ENOSPC 等）→ console.warn 后吞掉，**绝不 rethrow**。
+  *   - 理由：settings.json 是增强项（attribution 是 5 开关里唯一无 env 等价物项），
+  *     写失败时 claude 仍可走默认 + 注入 env 跑完任务；让 cosmetic 开关写盘失败
+  *     阻断整个 lease 违反「零回归」。与 daemon 既有 spawn-prep 副作用（如
+  *     `linkSkillsToWorkdir` try/catch + warn）同模式。
+  *
+- * @param provider_config lease 下发的供应商配置；absent / 无 settings_config / 仅 env → 不写
++ * @param provider_config lease 下发的供应商配置；absent / 无 settings_config / 仅 env → 删除既有文件
+  * @param dir 写入目录，默认 CLAUDE_CONFIG_DIR（测试可注入 tmpdir，task-13）
+  */
+ export async function applyClaudeSettings(
+@@ -128,13 +136,27 @@ export async function applyClaudeSettings(
+   dir: string = CLAUDE_CONFIG_DIR,
+ ): Promise<void> {
+   const obj = buildSettingsObject(provider_config);
+-  // 无任一白名单顶层键 → 不写文件（claude 走默认 + 注入 env，零回归 D-007）。
+-  if (Object.keys(obj).length === 0) return;
++  // 无任一白名单顶层键 → 撤下：删除既有文件（不存在则 ENOENT 静默）。空对象直接
++  // return 的旧语义会让 autocompact 三键撤勾后旧值永久残留生效（24h 审查 P2）。
++  if (Object.keys(obj).length === 0) {
++    try {
++      await unlink(join(dir, SETTINGS_FILENAME));
++    } catch (e) {
++      const code = (e as NodeJS.ErrnoException)?.code;
++      if (code !== 'ENOENT') {
++        console.warn(
++          'claude_settings_remove_failed',
++          { dir, error: (e as Error)?.message ?? String(e) },
++        );
++      }
++    }
++    return;
++  }
+ 
+   try {
+-    // best-effort 建目录：recursive 忽略 EEXIST；其他错误让 writeFile 再抛一次后统一收口。
++    // best-effort 建目录：recursive 忽略 EEXIST；其他错误让 writeFileAtomic 再抛一次后统一收口。
+     await mkdir(dir, { recursive: true });
+-    await writeFile(join(dir, SETTINGS_FILENAME), JSON.stringify(obj, null, 2), 'utf-8');
++    await writeFileAtomic(join(dir, SETTINGS_FILENAME), JSON.stringify(obj, null, 2), 'utf-8');
+   } catch (e) {
+     // 写盘失败不阻断 spawn（settings.json 是增强项，非必需）；记 warn 供运维感知。
+     console.warn(
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index cb3b520e8..904f6b2c9 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -8560,11 +8560,11 @@ export class Daemon {
+     // task-06（spike-01 修正 / D-009）：spawn 前把 provider_config.settings_config 白名单
+     // 顶层键写进 $CLAUDE_CONFIG_DIR/settings.json（attribution 等无 env 等价物项）。
+     // 与 batch（task-runner.ts buildSpawnEnv 前）对齐，interactive 也走同一 helper。
+-    // absent / null / 仅 env → 不写文件（零回归）；写盘失败 best-effort 不阻断 session create。
++    // absent / null / 仅 env → 删除既有 settings.json（撤下语义，ql-20260921-001-8a4d）；写盘失败 best-effort 不阻断 session create。
+     // task-03（2026-09-10-multi-provider-injection / Grill P2）：kind 守卫——仅
+     // agent_kind='claude' 或缺省才调 applyClaudeSettings，堵 codex/pi kind 的
+     // settings_config 白名单键写穿 claude 目录并残留（claude-settings.ts 本体不动；
+-    // provider_config 为 null/undefined 时照旧调用，helper 内部零写入零回归）。
++    // provider_config 为 null/undefined 时照旧调用，helper 内部只删自己写的文件零回归）。
+     if (
+       !execPayload.provider_config ||
+       execPayload.provider_config.agent_kind === 'claude' ||
+diff --git a/sillyhub-daemon/src/task-runner.ts b/sillyhub-daemon/src/task-runner.ts
+index ac4990e16..01555beb7 100644
+--- a/sillyhub-daemon/src/task-runner.ts
++++ b/sillyhub-daemon/src/task-runner.ts
+@@ -100,6 +100,7 @@ import { eventToSubmitMessages } from './event-wire.js';
+ import type {
+   AgentEvent,
+   LeaseCtx,
++  ProviderConfig,
+ } from './types.js';
+ // task-03（2026-09-07-arch-large-file-split / D-004@v1）：原文件头部的常量/类型/
+ // 依赖契约接口/鸭子读取器原样下沉到 ./task-runner/ 包（零改写），facade 经
+@@ -156,6 +157,29 @@ import type {
+ // batch 接线点（runLease）改 import 消费；原写盘器 import（writeCodexHome /
+ // writePiDir，仅被该函数使用）随平移移除。
+ import { applyProviderFileSettings } from './provider-file-settings.js';
++import { withOneMSuffix } from './credential-injector.js';
++
++/**
++ * ql-20260921-001-8a4d（24h 审查修复）：batch（task 型 agent run）spawn 的 --model 补缀。
++ *
++ * 背景：one_m 的 [1m] 后缀此前只补了 interactive 两路（injector 规则 3 的 env
++ * ANTHROPIC_MODEL / driver-factory options.model），batch 路径把 backend 下发的裸
++ * model 拼成 CLI `--model` 旗标（stream-json.ts claude 分支）——显式旗标优先级最高，
++ * 压掉 env 里已补的 [1m]，claude CLI 对裸名按默认 200k 窗口算 → 1M 供应商跑批量
++ * 任务 ~160k 触发提前自动压缩（ade38ec37 要修的原 bug 在 batch 路径复发）。
++ *
++ * kind 守卫与 applyClaudeSettings 调用点同款：仅 claude / 缺省应用（codex/pi 不认
++ * [1m]，Claude Code 专属约定）；model 缺省透传 undefined（adapter 侧 `if (model)`
++ * 自行跳过 --model）。state.model / lease payload 不改——缀名只进 CLI 旗标单点。
++ */
++export function batchModelWithOneM(
++  model: string | undefined,
++  pc: ProviderConfig | null | undefined,
++): string | undefined {
++  if (model === undefined) return model;
++  if (pc && pc.agent_kind !== 'claude' && pc.agent_kind !== undefined) return model;
++  return withOneMSuffix(model, pc);
++}
+ 
+ /**
+  * 任务编排器：执行一个 lease，把 agent 输出流式 submit 到 server，
+@@ -549,7 +573,7 @@ export class TaskRunner {
+       // task-06（spike-01 修正 / D-009）：spawn 前把 provider_config.settings_config 的
+       // 白名单顶层键（attribution/enabledPlugins/model/skipDangerousModePermissionPrompt）
+       // 写进 $CLAUDE_CONFIG_DIR/settings.json，让无 env 等价物的开关（attribution）生效。
+-      // absent / null / 仅 env → helper 内 return 不写文件（零回归）；写盘失败 best-effort
++      // absent / null / 仅 env → helper 内删既有文件（撤下语义，ql-20260921-001-8a4d）；写盘失败 best-effort
+       // 不阻断 spawn。单 lease 内只写一次（retry 循环在下方，同一 settings.json 重写幂等）。
+       // task-03（2026-09-10-multi-provider-injection / Grill P2）：kind 守卫——仅
+       // agent_kind='claude' 或缺省才调 applyClaudeSettings，堵 codex/pi kind 的
+@@ -699,10 +723,12 @@ export class TaskRunner {
+         // task-07：mcpConfigPath 走交叉类型局部变量透传——ProtocolAdapter.buildArgs
+         // 契约（protocol-adapter.ts）不含该字段（本任务不改契约文件），StreamJsonAdapter
+         // 的 buildArgs opts 已扩 mcpConfigPath?，非 claude provider 时为 undefined。
++        // ql-20260921-001-8a4d：model 过 batchModelWithOneM 补 [1m]（--model 旗标压掉 env
++        // 档位，裸名会让 1M 供应商按默认 200k 窗口提前压缩；见函数头注释）。
+         const buildArgsOpts: Parameters<NonNullable<ProtocolAdapter['buildArgs']>>[0] & {
+           mcpConfigPath?: string;
+         } = {
+-          model: effectiveCtx.model,
++          model: batchModelWithOneM(effectiveCtx.model, ctx.provider_config),
+           sessionId: effectiveCtx.sessionId,
+           resumeSessionId: effectiveCtx.resumeSessionId,
+           prompt: effectivePrompt,
+diff --git a/sillyhub-daemon/tests/claude-settings.test.ts b/sillyhub-daemon/tests/claude-settings.test.ts
+index 72035e903..a8eb64f8f 100644
+--- a/sillyhub-daemon/tests/claude-settings.test.ts
++++ b/sillyhub-daemon/tests/claude-settings.test.ts
+@@ -2,7 +2,8 @@
+ // task-13: applyClaudeSettings 写盘行为 + 白名单顶层键合并 + absent 不写文件（task-06 验收）。
+ //
+ // 覆盖 design §5.2 / §7（daemon 测试策略）/ D-008（白名单顶层键显式枚举）/
+-// D-007 brownfield（absent/null/仅 env → 不写文件，零回归）/ D-009（api_key 永不进 settings.json）。
++// D-007 brownfield（absent/null/仅 env → 撤下语义：删既有文件，ql-20260921-001-8a4d）/
++// D-009（api_key 永不进 settings.json）。
+ // 不真起 claude 进程（spike-02 顶层键生效验留 verify 端到端），仅断言 settings.json 文件内容。
+ //
+ // 注：buildSettingsObject 为 task-06 文档约定「导出供 task-13 单测覆盖」的纯函数，但当前
+@@ -182,7 +183,7 @@ describe('applyClaudeSettings 安全断言（env / api_key 永不进 settings.js
+   });
+ });
+ 
+-describe('applyClaudeSettings 零回归（absent 不写文件，D-007 brownfield）', () => {
++describe('applyClaudeSettings 零回归（absent 撤下语义，ql-20260921-001-8a4d）', () => {
+   it('settings_config 缺省 → 不写文件（existsSync false）', async () => {
+     await applyClaudeSettings({ agent_kind: 'claude' }, tmpDir);
+     expect(existsSync(settingsPath)).toBe(false);
+@@ -221,7 +222,8 @@ describe('applyClaudeSettings 零回归（absent 不写文件，D-007 brownfield
+   });
+ 
+   it('settings_config 白名单键值全为 null → 视为未设置，不写文件', async () => {
+-    // buildSettingsObject 过滤 null/undefined；结果空对象 → applyClaudeSettings return 不写。
++    // buildSettingsObject 过滤 null/undefined；结果空对象 → applyClaudeSettings 撤下
++    //（删既有文件；本用例 beforeEach 已清，断言等价于未创建）。
+     await applyClaudeSettings(
+       {
+         agent_kind: 'claude',
+@@ -252,6 +254,62 @@ describe('applyClaudeSettings 零回归（absent 不写文件，D-007 brownfield
+   });
+ });
+ 
++// ── ql-20260921-001-8a4d（24h 审查修复：撤下语义 + 原子写）──────────────────────
++describe('applyClaudeSettings 撤下语义（空对象删除既有文件，ql-20260921-001-8a4d）', () => {
++  it('三键写入后 settings_config 清空（null）→ 既有 settings.json 被删除（关得掉）', async () => {
++    await applyClaudeSettings(
++      {
++        agent_kind: 'claude',
++        settings_config: { autoCompactWindow: 230000, autoCompactEnabled: false },
++      },
++      tmpDir,
++    );
++    expect(existsSync(settingsPath)).toBe(true);
++    await applyClaudeSettings(
++      {
++        agent_kind: 'claude',
++        settings_config: null as unknown as ProviderConfig['settings_config'],
++      },
++      tmpDir,
++    );
++    expect(existsSync(settingsPath)).toBe(false);
++  });
++
++  it('三键写入后改为仅 env 配置 → 既有文件同样被删除（文件恒反映最近一次 spawn 配置）', async () => {
++    await applyClaudeSettings(
++      {
++        agent_kind: 'claude',
++        settings_config: { autoCompactEnabled: false, precomputeCompactionEnabled: true },
++      },
++      tmpDir,
++    );
++    expect(existsSync(settingsPath)).toBe(true);
++    await applyClaudeSettings(
++      {
++        agent_kind: 'claude',
++        settings_config: { env: { ANTHROPIC_MODEL: 'glm-5.3' } },
++      },
++      tmpDir,
++    );
++    expect(existsSync(settingsPath)).toBe(false);
++  });
++
++  it('provider_config=null 撤下已写文件（batch lease 无供应商配置场景）', async () => {
++    await applyClaudeSettings(
++      { agent_kind: 'claude', settings_config: { attribution: { commit: '', pr: '' } } },
++      tmpDir,
++    );
++    expect(existsSync(settingsPath)).toBe(true);
++    await applyClaudeSettings(null, tmpDir);
++    expect(existsSync(settingsPath)).toBe(false);
++  });
++
++  it('撤下时文件本不存在（ENOENT）→ 静默不抛', async () => {
++    await expect(applyClaudeSettings({ agent_kind: 'claude' }, tmpDir)).resolves.toBeUndefined();
++    expect(existsSync(settingsPath)).toBe(false);
++  });
++});
++
+ describe('applyClaudeSettings 写盘语义', () => {
+   it('写出文件是合法 JSON（2 空格缩进，可被 JSON.parse）', async () => {
+     await applyClaudeSettings(
+diff --git a/sillyhub-daemon/tests/task-runner-one-m-suffix.test.ts b/sillyhub-daemon/tests/task-runner-one-m-suffix.test.ts
+new file mode 100644
+index 000000000..831199d90
+--- /dev/null
++++ b/sillyhub-daemon/tests/task-runner-one-m-suffix.test.ts
+@@ -0,0 +1,74 @@
++// tests/task-runner-one-m-suffix.test.ts
++// ql-20260921-001-8a4d（24h 审查修复）：batch（task 型 agent run）spawn 的 --model 补缀单测。
++//
++// 背景：ade38ec37（ql-20260920-004）给 one_m 补 [1m] 时只覆盖 interactive 两路
++// （injector 规则 3 env ANTHROPIC_MODEL / driver-factory options.model），batch 路径
++// 把 backend 下发的裸 model 经 stream-json claude 分支拼成 CLI `--model` 旗标——
++// 显式旗标优先级最高，压掉 env 档位 → 1M 供应商跑批量任务仍按默认 200k 窗口
++// ~160k 提前自动压缩（原 bug 复发）。本修复在 task-runner buildArgs 单点补缀
++//（batchModelWithOneM，kind 守卫与 applyClaudeSettings 调用点同款）。
++//
++// 用例矩阵（纯函数直测，范式同 tests/interactive/session-manager-one-m-suffix.test.ts）：
++//   - claude kind + 角色映射 one_m=true → 追加 [1m]
++//   - one_m=false/undefined、无映射、pc 缺省/null → 裸名原样
++//   - 已带 [1m] → 幂等原样
++//   - codex/pi kind → 不应用（[1m] 是 Claude Code 专属约定）
++//   - agent_kind 缺省（undefined）→ 视为 claude 应用
++//   - model undefined → 透传 undefined（adapter 侧跳过 --model）
++
++import { describe, it, expect } from 'vitest';
++import { batchModelWithOneM } from '../src/task-runner.js';
++import type { ProviderConfig } from '../src/types.js';
++
++describe('ql-20260921-001-8a4d batchModelWithOneM（batch --model 补 [1m]）', () => {
++  const pc = (over: Partial<ProviderConfig> = {}): ProviderConfig => ({
++    agent_kind: 'claude',
++    model_role_mappings: {
++      sonnet: { model: 'glm-5.3', one_m: true },
++      opus: { model: 'glm-5.3', one_m: true },
++    },
++    ...over,
++  });
++
++  it('claude kind + 映射 one_m=true → 主模型追加 [1m]', () => {
++    expect(batchModelWithOneM('glm-5.3', pc())).toBe('glm-5.3[1m]');
++  });
++
++  it('one_m=false / undefined → 裸名原样', () => {
++    const noTick: ProviderConfig = {
++      agent_kind: 'claude',
++      model_role_mappings: { sonnet: { model: 'glm-5.3', one_m: false } },
++    };
++    expect(batchModelWithOneM('glm-5.3', noTick)).toBe('glm-5.3');
++    const undefTick: ProviderConfig = {
++      agent_kind: 'claude',
++      model_role_mappings: { sonnet: { model: 'glm-5.3', one_m: undefined } },
++    };
++    expect(batchModelWithOneM('glm-5.3', undefTick)).toBe('glm-5.3');
++  });
++
++  it('无 model_role_mappings / pc=null/undefined → 裸名原样', () => {
++    expect(batchModelWithOneM('glm-5.3', { agent_kind: 'claude' })).toBe('glm-5.3');
++    expect(batchModelWithOneM('glm-5.3', null)).toBe('glm-5.3');
++    expect(batchModelWithOneM('glm-5.3', undefined)).toBe('glm-5.3');
++  });
++
++  it('已带 [1m] → 幂等原样（不叠双缀）', () => {
++    expect(batchModelWithOneM('glm-5.3[1m]', pc())).toBe('glm-5.3[1m]');
++  });
++
++  it('codex / pi kind → 不应用（即便映射命中）', () => {
++    expect(batchModelWithOneM('glm-5.3', pc({ agent_kind: 'codex' }))).toBe('glm-5.3');
++    expect(batchModelWithOneM('glm-5.3', pc({ agent_kind: 'pi' }))).toBe('glm-5.3');
++  });
++
++  it('agent_kind 缺省（undefined）→ 视为 claude 应用', () => {
++    const implicit: ProviderConfig = pc({ agent_kind: undefined as unknown as string });
++    expect(batchModelWithOneM('glm-5.3', implicit)).toBe('glm-5.3[1m]');
++  });
++
++  it('model undefined → 透传 undefined（adapter 跳过 --model）', () => {
++    expect(batchModelWithOneM(undefined, pc())).toBeUndefined();
++    expect(batchModelWithOneM(undefined, null)).toBeUndefined();
++  });
++});

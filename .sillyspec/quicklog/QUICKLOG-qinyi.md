@@ -140,3 +140,32 @@
 根因：单文件多条目/无高度约束/llm_provider_id 漏传。
 方案：条目级解析+新端点+滚动+供应商模型。
 结果：104+53+4129 绿 tsc 0，已提交推送（82a76721f）。
+
+## ql-20260921-001-8a4d | 2026-09-21 01:31:55 | 24h审查四修：hits毒行/settings撤下/batch[1m]/⚡引导气泡
+状态：已完成
+关联变更：（无）
+文件：
+- .sillyspec/docs/SillyHub/modules/daemon.changelog.md（+1/-0）
+- .sillyspec/docs/SillyHub/modules/daemon.md（+6/-1）
+- .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md（+1/-0）
+- .sillyspec/docs/SillyHub/modules/knowledge.md（+4/-0）
+- backend/app/modules/auth/tests/test_rbac_workspace_scope.py（+5/-15）
+- backend/app/modules/change/tests/test_scope_file_diff.py（+4/-4）
+- backend/app/modules/knowledge/hits.py（+5/-1）
+- backend/app/modules/knowledge/tests/test_hits.py（+29/-0）
+- backend/app/modules/knowledge/tests/test_router.py（+2/-6）
+- backend/app/modules/workspace/tests/test_platform_grant_list.py（+4/-12）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（+71/-0）
+- frontend/src/components/daemon/session-panel/session-panel-dialog.tsx（+12/-3）
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（+59/-2）
+- sillyhub-daemon/src/claude-settings.ts（+36/-14）
+- sillyhub-daemon/src/daemon.ts（+2/-2）
+- sillyhub-daemon/src/task-runner.ts（+28/-2）
+- sillyhub-daemon/tests/claude-settings.test.ts（+61/-3）
+- sillyhub-daemon/tests/task-runner-one-m-suffix.test.ts（软归属·同模块测试，未声明）
+需求：24h审查四修：hits毒行/settings撤下/batch[1m]/⚡引导气泡
+根因：①knowledge hits type 列 String(32) 无截断，PG 超长抛 DataError 穿透 IntegrityError 兜底整批 500，daemon 上行按批推进无按行跳过——单条毒行永久卡死该工作区遥测；②claude settings.json 空对象不写不删，autocompact 三键撤勾后旧值永久残留生效且全 daemon 无清理路径；③ade38ec37 的 [1m] 修复漏 batch 路径——CLI --model 旗标压掉 env 档位，1M 供应商批量任务仍 ~160k 提前压缩；④⚡ dispatch_now 引导链路发送点不建 steering 段（hook 不消费响应、inject 忙轮恒排队），mid-turn 留痕 SSE 行无段可收敛，引导消息实时视图静默丢弃
+方案：①_build_row type 补 [:32] 截断+截断用例；②applyClaudeSettings 空对象改删既有文件（撤下语义）+writeFileAtomic+撤下矩阵 4 用例；③task-runner 新增导出纯函数 batchModelWithOneM 应用于 spawn args --model 单点+7 用例；④session-panel-page 新增导出 appendDeliveredUserMsgIfAbsent，page/dialog 两处 SSE user_input 处理器兜底追加 delivered 段+⚡场景用例；门禁解锁清偿 5 处存量债：knowledge test_router.py format（ad8b48816 遗留）+9109db20b/8d628ba53 三测试文件 format+scope_file_diff _AUDIT_OK Any 注解（object 不可索引 mypy 错）；daemon.md 契约行/增量+两模块 changelog+knowledge.md 增量同步
+结果：backend knowledge 124 + change 535 passed、mypy 967 文件 0 错、ruff check/format 全仓绿；daemon claude-settings 26+one-m 7+相邻面 130 passed + typecheck 0；frontend sessions page 41 passed + tsc 0 + eslint 0 error（5 warning 均 HEAD 既有）；未部署验证（daemon bundle 随下次发布）
+审计：[gate] L1（跨 0 模块 · 18 文件：6 代码/8 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：🔍 软归属：1 个窗口内未声明同模块测试文件已补入文件行（若属并行会话改动请手工剔除）：sillyhub-daemon/tests/task-runner-one-m-suffix.test.ts（+74/-0）
