@@ -1012,7 +1012,11 @@ describe("SessionPanel SSE 装配器接线（task-09）", () => {
   });
 });
 
-// ── task-09（2026-09-18-single-chat-steering / FR-05）：忙轮发送引导三态 ──────
+// ── task-09（2026-09-18-single-chat-steering / FR-05）：忙轮发送引导三态 ──
+// ql-20260920-006（修订）：引导消息改「轮内 user_msg 段」按真实时间位置渲染
+//（旧 SteeredMsg streamFooter 状态机退役）——断言改段形态：steered=true →
+// 活跃轮容器（[data-turn-key]）内 data-steered-msg="steering"；user_input 留痕
+// 行到达 → delivered；轮终止未投递 → ended。
 
 describe("SessionPanel 忙轮发送引导（task-07 steered=true 三态渲染）", () => {
   /** SSE envelope 固件（对齐上方 SSE 装配 describe 同款形态，run_id=r-live）。 */
@@ -1071,33 +1075,55 @@ describe("SessionPanel 忙轮发送引导（task-07 steered=true 三态渲染）
     await waitFor(() => expect(mocks.injectSession).toHaveBeenCalled());
   }
 
-  it("running 会话发送 → steered=true 挂「引导中」虚线气泡；user_input 留痕行到达转「已投递」；轮终止未投递转「本轮已结束」", async () => {
+  it("running 会话发送 → steered=true 活跃轮内挂「引导中」user_msg 段；user_input 留痕行到达转「已投递」；轮终止未投递转「本轮已结束」", async () => {
     const handlers = await selectSession();
 
     // ① 活跃轮开跑（busy：currentRunId=r-live → 发送走 sendToServerQueue）。
     act(() => {
       handlers.onTurnStarted(makeSteerEnvelope({ event: "turn_started" }));
     });
+    // 真实活跃轮的 prompt 已由首次派发的 user_input 写入（ql-20260918-003 补写
+    // 链路）——先落一条原始提问，防后续引导留痕行被空 prompt 幂等守卫误补写
+    // 成轮 prompt（真实流活跃轮 prompt 恒非空）。
+    act(() => {
+      handlers.onLog(
+        makeSteerEnvelope({
+          log_id: "l-orig",
+          channel: "user_input",
+          content: "原始提问",
+        }),
+      );
+    });
+    expect(await screen.findByText("原始提问")).toBeTruthy();
 
-    // ② 忙轮发送：后端 mid-turn 注入活跃轮（steered=true，不建新 run）→
-    //    本地挂「引导中」条目（不进排队条），输入框草稿随 onSendSettled 清空。
+    // ② 忙轮发送：后端 mid-turn 注入活跃轮（steered=true，不建新 run）→ 引导
+    //    段以 steering 态追加进活跃轮 segments（不进排队条），输入框草稿随
+    //    onSendSettled 清空。ql-20260920-006：段在活跃轮 DOM 内（data-turn-key
+    //    锚点）按真实时间位置渲染，不再挂消息流末尾 footer。
     await steerSend("中途引导这条");
     expect(mocks.injectSession).toHaveBeenCalledWith(
       "s-1",
       "中途引导这条",
       expect.anything(),
     );
-    const steeringBubble = await screen.findByText("中途引导这条");
-    expect(
-      steeringBubble.closest("[data-steered-msg]")?.getAttribute("data-steered-msg"),
-    ).toBe("steering");
+    const steeringEl = await waitFor(() => {
+      const el = document.querySelector(
+        '[data-turn-key="r-live"] [data-steered-msg="steering"]',
+      );
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    expect(steeringEl.textContent).toContain("中途引导这条");
     expect(screen.getByText("引导中 · 本轮工具间隙投递")).toBeTruthy();
+    // 引导文本恰好一处：轮 prompt 仍是「原始提问」，未重复成轮 prompt 气泡。
+    expect(screen.getAllByText("中途引导这条")).toHaveLength(1);
     expect(
       (screen.getByPlaceholderText(/继续追问|消息将排队/) as HTMLTextAreaElement)
         .value,
     ).toBe("");
 
-    // ③ 留痕行到达（mid-turn 注入挂活跃 run 的 user_input log）→ 「已投递」。
+    // ③ 留痕行到达（mid-turn 注入挂活跃 run 的 user_input log）→ 同段转
+    //    「已投递」delivered（仍在活跃轮 DOM 内）。
     act(() => {
       handlers.onLog(
         makeSteerEnvelope({
@@ -1109,14 +1135,25 @@ describe("SessionPanel 忙轮发送引导（task-07 steered=true 三态渲染）
     });
     await waitFor(() => {
       expect(
-        document.querySelector('[data-steered-msg="delivered"]'),
+        document.querySelector(
+          '[data-turn-key="r-live"] [data-steered-msg="delivered"]',
+        ),
       ).toBeTruthy();
     });
     expect(screen.getByText("✓ 已投递，agent 已收到引导")).toBeTruthy();
+    // steering 态已收敛消失（段状态机不并存）。
+    expect(document.querySelector('[data-steered-msg="steering"]')).toBeNull();
 
-    // ④ 再发一条无留痕行，轮终止 → 「本轮已结束，未投递」（R-04 终态收敛）。
+    // ④ 再发一条无留痕行，轮终止 → 该段「本轮已结束，未投递」（R-04 终态
+    //    收敛）；已投递段保持 delivered 不回退。
     await steerSend("没赶上的引导");
-    await screen.findByText("没赶上的引导");
+    await waitFor(() => {
+      expect(
+        document.querySelector(
+          '[data-turn-key="r-live"] [data-steered-msg="steering"]',
+        ),
+      ).toBeTruthy();
+    });
     act(() => {
       handlers.onTurnCompleted(
         makeSteerEnvelope({
@@ -1128,10 +1165,17 @@ describe("SessionPanel 忙轮发送引导（task-07 steered=true 三态渲染）
     });
     await waitFor(() => {
       expect(
-        document.querySelector('[data-steered-msg="ended"]'),
+        document.querySelector(
+          '[data-turn-key="r-live"] [data-steered-msg="ended"]',
+        ),
       ).toBeTruthy();
     });
     expect(screen.getByText("本轮已结束，消息未投递")).toBeTruthy();
+    expect(
+      document.querySelector(
+        '[data-turn-key="r-live"] [data-steered-msg="delivered"]',
+      ),
+    ).toBeTruthy();
   });
 });
 

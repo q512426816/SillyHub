@@ -458,9 +458,9 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
     );
 
     // ② ⚡ 立即发送（FR-05，引导语义 2026-09-18-single-chat-steering）：pending
-    //    条目可访问名=「立即引导进当前轮（不打断）」，透传 dispatch-now 端点
-    //    （sess-1 + 条目 id）。
-    fireEvent.click(screen.getAllByLabelText("立即引导进当前轮（不打断）")[0]!);
+    //    条目可访问名=「转为引导，注入当前轮（不打断）」（ql-20260920-006 文案
+    //    对齐段模型），透传 dispatch-now 端点（sess-1 + 条目 id）。
+    fireEvent.click(screen.getAllByLabelText("转为引导，注入当前轮（不打断）")[0]!);
     await waitFor(() =>
       expect(sessionApi.dispatchNowSessionQueueEntry).toHaveBeenCalledWith("sess-1", "entry-2"),
     );

@@ -16,3 +16,4 @@ created_at: 2026-09-19 00:22:43
 - [x] task-08: frontend 队列条 ⚡ 引导语义 + 降级标注（消费 task-06 的 dispatch_mode 三态；message-queue-bar + provider-caps 数据源）(depends_on: task-06)
 - [x] task-09: 三端测试收口 + api-types 重新生成（backend 忙轮三分支/dispatch_now 回归、daemon codex 单测、前端组件测试、群聊零回归用例）(depends_on: task-03, task-05, task-06, task-07, task-08)
 - [x] task-10: 模块文档同步（daemon.md / backend session 模块）+ verify 对照验收 (depends_on: task-09)
+- [x] ql-20260920-006-ca4a steering 修订——忙轮默认排队 + 引导消息轮内时间位置

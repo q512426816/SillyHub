@@ -90,7 +90,29 @@
 关联变更：2026-09-18-single-chat-steering
 文件：backend/app/modules/daemon/router/session_crud.py, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/message-queue-bar.tsx, frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
 
-## ql-20260920-006-ca4a | 2026-09-20 14:33:22 | 单聊引导（Steering）忙轮直注入
-状态：进行中
+## ql-20260920-006-ca4a | 2026-09-20 14:33:22 | 忙轮发送默认改回排队，点队列条「转为引导」才发引导消息；引导消息须渲染在真实时间位置（修复前移到轮次开头的 bug）。根因…
+状态：已完成
 关联变更：2026-09-18-single-chat-steering
-文件：backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/tests/test_session_router.py, backend/app/modules/daemon/tests/test_inject_empty_prompt.py, backend/app/modules/daemon/tests/test_session_user_preamble.py, frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/message-queue-bar.tsx, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
+文件：
+- backend/app/modules/daemon/router/session_crud.py（删忙轮 inject 自动门控回排队）
+- backend/app/modules/daemon/tests/test_inject_empty_prompt.py（断言回排队）
+- backend/app/modules/daemon/tests/test_session_router.py（注释回退标注）
+- backend/app/modules/daemon/tests/test_session_user_preamble.py（断言平移到排队行）
+- frontend/src/components/daemon/session-log-assembler.ts（TurnSegment 加 user_msg 段）
+- frontend/src/components/daemon/runtime-session-helpers.tsx（logsToTurns 非首主体转段按 ts 插入）
+- frontend/src/components/daemon/turn-segment-views.tsx（UserMsgSegmentView 三态渲染）
+- frontend/src/components/daemon/turn-timeline.tsx（segmentTsOf+对话视图放行）
+- frontend/src/components/daemon/turn-status-bar.tsx（联动）
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（实时三纯函数+删旧状态机）
+- frontend/src/components/daemon/session-panel/session-panel-dialog.tsx（同款）
+- frontend/src/components/daemon/message-queue-bar.tsx（⚡文案）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（段形态三态断言）
+- frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx（文案断言）
+- frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx（文案联动）
+- .sillyspec/docs/SillyHub/modules/daemon.md（增量段）
+需求：忙轮发送默认改回排队，点队列条「转为引导」才发引导消息；引导消息须渲染在真实时间位置（修复前移到轮次开头的 bug）。
+根因：①首版把忙轮自动 steering 直注入当默认（D-001 语义过激）；②logsToTurns 把 mid-turn user_input 归并进轮 prompt + 实时挂在时间线末尾 streamFooter，两路都不按时间穿插。
+方案：后端 router 删 busy_strategy=inject 自动门控回排队（引导入口收敛到 dispatch_now）；前端引导消息改轮内 user_msg 段模型——TurnSegment 新 kind、实时三纯函数驱动三态、回放非首主体组按 ts 插入段序列、⚡ 文案改「转为引导」。
+结果：backend 41+13 用例全绿（断言回排队口径）、前端 tsc 0 错+65 测试全绿、daemon.md 增量段同步；子代理中断（额度）后分两段续做完成
+审计：[gate] L1（跨 0 模块 · 33 文件：10 代码/6 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：⚖️ 归属切分：18 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.zcode/skills/sillyhub-docker-deploy/SKILL.md, .zcode/skills/sillyspec-archive/SKILL.md, .zcode/skills/sillyspec-auto/SKILL.md, .zcode/skills/sillyspec-brainstorm/SKILL.md, .zcode/skills/sillyspec-commit/SKILL.md, .zcode/skills/sillyspec-continue/SKILL.md, .zcode/skills/sillyspec-execute/SKILL.md, .zcode/skills/sillyspec-explore/SKILL.md, .zcode/skills/sillyspec-knowledge/SKILL.md, .zcode/skills/sillyspec-plan/SKILL.md, .zcode/skills/sillyspec-propose/SKILL.md, .zcode/skills/sillyspec-quick/SKILL.md, .zcode/skills/sillyspec-resume/SKILL.md, .zcode/skills/sillyspec-state/SKILL.md, .zcode/skills/sillyspec-verify/SKILL.md, .zcode/skills/sillyspec-workspace/SKILL.md, AGENTS.md, .opencode/

@@ -1269,6 +1269,10 @@ function segmentTsOf(seg: TurnSegment): number | null {
     // 排序时间戳取 log ts（同 thinking/stderr 语义）。
     case "file":
       return seg.ts;
+    // ql-20260920-006：轮内用户消息段（引导注入留痕）取捕获时刻——「全部」视图
+    // 与 AskUser 记录同款按 ts 穿插；对话视图走段序（实时追加 / 回放按 ts 插入）。
+    case "user_msg":
+      return seg.ts;
   }
 }
 
@@ -1292,6 +1296,10 @@ type SegmentTimelineItem =
 function isConversationSegment(seg: TurnSegment): boolean {
   if (seg.kind === "text" || seg.kind === "file") return true;
   if (seg.kind === "subagent_stub") return true;
+  // ql-20260920-006（2026-09-18-single-chat-steering 修订）：引导消息（user_msg）
+  // 必须在对话视图可见——右对齐用户气泡随轮内输出按时间位置穿插（与 text/file
+  // 同级放行；不进对话流的思考/工具段过滤不变）。
+  if (seg.kind === "user_msg") return true;
   // ql-20260917-006：压缩摘要段进对话视图——原位特判渲染一行「上下文已重新
   // 压缩」短提示（CompactNoticeChip，替代此前大段摘要气泡刷屏）；compact_status
   // 不在此判定（运行中才进对话流，见 SegmentedTurnBody turnStatus 过滤）。

@@ -302,12 +302,10 @@ class TestSessionEndpointsErrors:
         409 TURN_CONFLICT 语义仍存在于 service 层（queue_when_busy=False 的
         service 身份调用方），由 test_session_queue.py 守护。
 
-        task-09（2026-09-18-single-chat-steering）：忙轮分支按 provider caps
-        ``steering`` 键分叉——排队契约现固化在**不支持引导**侧（cursor，
-        steering=false → queue_when_busy 排队降级）；可引导侧（claude）忙轮
-        返回 steered=true/queued=false（service 层正向用例见
-        test_session_queue.py，task-09）。本用例 provider=cursor 保住
-        queue_entry_id + queue 读端点 + 删除端点的完整排队 CRUD 断言。
+        ql-20260920-006（2026-09-18-single-chat-steering 修订）：忙轮默认回
+        排队（不区分 provider——「转为引导」入口收敛到队列条 ⚡ dispatch_now），
+        本用例保住 queue_entry_id + queue 读端点 + 删除端点的完整排队 CRUD
+        断言；引导式 dispatch_now 断言在 test_session_queue_actions.py。
         """
         created = await self._seed_active_session(
             db_session, client, auth_headers, fresh_ws_hub, provider="cursor"

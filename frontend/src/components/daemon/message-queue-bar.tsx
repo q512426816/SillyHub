@@ -14,8 +14,9 @@
  *     原位松手/拖出有效区不回调；sending 条目不参与拖拽；
  *   - ⚡ 立即发送（FR-05；2026-09-18-single-chat-steering task-08 起改引导语义，
  *     design C2 / FR-03）：pending 与 failed 均渲染（sending 不可操作），
- *     title 两态——pending=「立即引导进当前轮（不打断）」（支持引导的引擎
- *     mid-turn 注入，不打断活跃轮；需打断用会话停止按钮）/ failed=「立即发送这条」
+ *     title 两态——pending=「转为引导，注入当前轮（不打断）」（ql-20260920-006
+ *     文案对齐段模型；支持引导的引擎 mid-turn 注入，不打断活跃轮；需打断用会话
+ *     停止按钮）/ failed=「立即发送这条」
  *     （空闲直发语义），点击调 onDispatchNow；组件不消费 dispatch_now 响应体
  *     （dispatch_mode 三态由后端判定，不支持的引擎 ⚡ 降级 interrupt 接力），
  *     不本地造已引导/已打断/已发送态，收敛统一走 SSE/load（R-04）；
@@ -112,9 +113,9 @@ export interface MessageQueueBarProps {
   onReorder?: (ids: string[]) => void;
   /**
    * 立即发送（FR-05；引导语义见 2026-09-18-single-chat-steering FR-03）：
-   * pending=mid-turn 引导注入当前轮不打断（支持引导的引擎；不支持的引擎由
-   * 后端降级 interrupt 接力，组件不感知 dispatch_mode），failed=直接派发；
-   * 未传时不渲染 ⚡ 按钮。
+   * pending=转为引导注入当前轮不打断（ql-20260920-006 文案对齐段模型；支持
+   * 引导的引擎；不支持的引擎由后端降级 interrupt 接力，组件不感知
+   * dispatch_mode），failed=直接派发；未传时不渲染 ⚡ 按钮。
    */
   onDispatchNow?: (id: string) => void;
   /**
@@ -387,14 +388,14 @@ export function MessageQueueBar({
                 )}
 
                 {/* FR-05 ⚡ 立即发送（引导语义，2026-09-18-single-chat-steering
-                    FR-03）：pending=mid-turn 引导注入当前轮不打断（不支持引导的
-                    引擎后端降级 interrupt 接力，组件不感知 dispatch_mode）/
-                    failed=直接派发；sending 不渲染。 */}
+                    FR-03）：pending=转为引导注入当前轮不打断（ql-20260920-006
+                    文案对齐段模型；不支持引导的引擎后端降级 interrupt 接力，组件
+                    不感知 dispatch_mode）/ failed=直接派发；sending 不渲染。 */}
                 {onDispatchNow && entry.status !== "sending" && (
                   <Tooltip
                     title={
                       entry.status === "pending"
-                        ? "立即引导进当前轮（不打断）"
+                        ? "转为引导，注入当前轮（不打断）"
                         : "立即发送这条"
                     }
                   >
@@ -405,7 +406,7 @@ export function MessageQueueBar({
                       onClick={() => onDispatchNow(entry.id)}
                       aria-label={
                         entry.status === "pending"
-                          ? "立即引导进当前轮（不打断）"
+                          ? "转为引导，注入当前轮（不打断）"
                           : "立即发送这条"
                       }
                       className="!h-5 !min-w-0 !w-5 !p-0"

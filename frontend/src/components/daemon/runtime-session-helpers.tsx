@@ -17,6 +17,7 @@ import {
   stripPreambleText,
   type AssemblerLogInput,
   type TurnSegment,
+  type UserMsgTurnSegment,
 } from "@/components/daemon/session-log-assembler";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import {
@@ -327,6 +328,62 @@ function toolUseIdOfContent(content: string | null | undefined): string | null {
   }
 }
 
+/* ── ql-20260920-006（2026-09-18-single-chat-steering 修订）：引导留痕段插入 ── */
+
+/**
+ * 段排序时间戳（user_msg 插入定位用）：text/tool 取 startedAt；
+ * thinking/stderr/compact/compact_status/preamble/file/user_msg 取 ts——口径与
+ * turn-timeline.tsx segmentTsOf 一致（该函数模块私有未导出，此处局部镜像；
+ * subagent_stub 无自身时刻归 null，按「位置不动」参与插入比较）。
+ */
+function segmentSortTsOf(seg: TurnSegment): number | null {
+  switch (seg.kind) {
+    case "text":
+    case "tool":
+      return seg.startedAt;
+    case "thinking":
+    case "stderr":
+    case "compact":
+    case "compact_status":
+    case "preamble":
+    case "file":
+    case "user_msg":
+      return seg.ts;
+    default:
+      return null;
+  }
+}
+
+/**
+ * ql-20260920-006：把引导留痕 user_msg 段按时间戳插入装配段序列——对话视图按
+ * 段序渲染（无 ts 重排），插入点取「首个 ts 更晚的装配段」之前，使留痕气泡停在
+ * 真实时间位置（轮内输出之间）而非轮首；装配段自身相对顺序不动（tool 配对 /
+ * 文本续接语义零影响），兼容投影仍由装配段单独产出（user_msg 不进
+ * output/processItems）。user_msg 段 ts 缺失（旧数据）保守追加段尾（引导消息
+ * 语义上晚于此前输出，不回轮首）。空列表原引用返回。
+ */
+function insertUserMsgSegments(
+  segments: TurnSegment[],
+  userMsgs: UserMsgTurnSegment[],
+): TurnSegment[] {
+  if (userMsgs.length === 0) return segments;
+  let out = [...segments];
+  for (const um of userMsgs) {
+    let idx = out.length;
+    if (um.ts != null) {
+      for (let i = 0; i < out.length; i += 1) {
+        const sTs = segmentSortTsOf(out[i]!);
+        if (sTs != null && sTs > um.ts) {
+          idx = i;
+          break;
+        }
+      }
+    }
+    out = [...out.slice(0, idx), um, ...out.slice(idx)];
+  }
+  return out;
+}
+
 export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
   const map = new Map<string, AgentRunLogEntry[]>();
   for (const log of logs) {
@@ -349,6 +406,10 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       key: string;
       withMarker: string | null;
       plain: string | null;
+      /** ql-20260920-006：组首条留痕 log id（非首组 user_msg 段 id 用）。 */
+      firstId: string | null;
+      /** ql-20260920-006：组首条捕获时刻（非首组 user_msg 段 ts / 插入定位用）。 */
+      ts: number | null;
     }> = [];
     const promptGroupIndex = new Map<string, number>();
     // 2026-08-25-unified-floating-session task-11（FR-7）：daemon 回传首条
@@ -409,10 +470,15 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
         const gi = promptGroupIndex.get(key);
         if (gi === undefined) {
           promptGroupIndex.set(key, promptGroups.length);
+          // ql-20260920-006：组首条留痕登记 id/ts（非首组转 user_msg 段用）；
+          // ts 非法（NaN）按 null 容错（同 firstLogTimestampMs 口径）。
+          const tsMs = entry.timestamp ? Date.parse(entry.timestamp) : null;
           promptGroups.push({
             key,
             withMarker: markerLines.length > 0 ? promptSource : null,
             plain: markerLines.length > 0 ? null : promptSource,
+            firstId: entry.id ?? null,
+            ts: tsMs != null && Number.isFinite(tsMs) ? tsMs : null,
           });
         } else {
           const group = promptGroups[gi];
@@ -432,21 +498,36 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     // 去重会误删同轮内合法的重复内容（两次相同工具输出等），而实时 SSE 路径
     // 只按 log_id 去重，形成「聊天时可见、刷新后消失」的路径不一致。
     const segments = logsToSegments(assemblerInputs, { seenTextDedup: false });
+    // ql-20260920-006（2026-09-18-single-chat-steering 修订）：轮 prompt 仅取
+    // 首个主体组；第二个及以后的互异主体（mid-turn 引导注入的 user_input 留痕，
+    // ⚡「转为引导」/ dispatch_now 唯一入口）转 user_msg 段——按时间戳插入轮内
+    // 装配段之间（真实时间位置渲染），不再 join 进 prompt 前移到轮次开头。组内
+    // 二阶段归并/去重语义不变（marker 版优先；daemon 双提交同主体归并单条）。
+    const userMsgSegments = promptGroups.slice(1).map((g, i) => ({
+      kind: "user_msg" as const,
+      id: g.firstId ?? `usermsg:${turnIndex}:${i + 1}`,
+      text: g.withMarker ?? g.plain ?? "",
+      ts: g.ts,
+      phase: "delivered" as const,
+    }));
+    const segmentsWithUserMsg = insertUserMsgSegments(segments, userMsgSegments);
     // task-11（FR-7）：前导段并入段序列首部（ts 排序在渲染层完成，此处按捕获序）。
-    // 兼容投影（§9.4）：output / processItems 形状与改前手写路径等价。
+    // 兼容投影（§9.4）：output / processItems 形状与改前手写路径等价（user_msg
+    // 段不进投影——正文气泡由渲染层 user_msg 分支承载）。
     const legacy = segmentsToLegacy(segments);
     turns.push({
       runId: `__attach_history_${turnIndex}__`,
       // ql-20260802-001：保留真实 run_id 供 AskUser 提问历史穿插到对应 turn（跟会话顺序）
       realRunId: runId,
       turn: turnIndex,
-      prompt: prompts.join("\n"),
+      // ql-20260920-006：prompt = 首组内容（互异主体不再拼接）。
+      prompt: prompts[0] ?? "",
       // ql-20260730-004：reply 流式 delta 直接 concat（投影按序拼接，语义同前）。
       output: legacy.output,
       status: "completed",
       seenLogIds: new Set(entries.map((e) => e.id)),
       processItems: legacy.processItems,
-      segments: [...preambleSegments, ...segments],
+      segments: [...preambleSegments, ...segmentsWithUserMsg],
       turnStartedAt: firstLogTimestampMs(entries),
       // ql-20260621：历史回看无实时 token（logs 接口不含 token），置 null。
       // 若后续 logs 接口补 token 字段可在此填充。

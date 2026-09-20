@@ -192,3 +192,9 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 - **③mid-turn 注入缺 user_input log SSE 事件**：该路径日志行由 backend 直接落库（不经 daemon 上报管线），修复前不补发 Redis log 事件——前端引导气泡「已投递」转换（markSteeredDelivered 依赖 channel=user_input）生产不可达，恒显「本轮已结束，消息未投递」。修复：对齐 inject.py 直发路径（ql-20260918-003）commit 前快照 log_id/content/timestamp、commit 后按 daemon 上报同形态补发。
 - **④dispatch_now 无锁双派发窗口**：置顶 commit（R-03）释放入口会话行锁后，原实现无锁查活跃 run 即 mid-turn 注入，违反 `_inject_mid_turn_into_run`「调用方持锁、锁内查 run」契约——run 恰在窗口内收敛时轮终态钩子接力派发（新建 run）+ steered 注入双执行同一条消息。修复：发送动作前 `_get_owned_session_for_update` 复锁 + status 复检 + 条目行复取（已被接力派发删除 → 返 "dispatched" 收口零注入）；置顶持久化先于发送的 R-03 语义不变。
 - 验证：daemon codex-app-server-driver 68/68（含 2 新增）；backend queue_actions 34/34（含 4 新增）+ 相邻面 session_queue/user_preamble/inject_empty/session_router 70 + 群聊四件 105 全绿；双侧 tsc/ruff/mypy 定向零错。
+
+## 增量（ql-20260920-006：steering 修订——忙轮默认排队 + 引导消息轮内时间位置）
+
+- backend：主输入框忙轮发送回退默认排队（router/session_crud.py 删 busy_strategy=inject 自动门控，queue_when_busy=True 恒排队；steered 出参保留恒 false）。「转为引导」唯一入口=队列条 ⚡（dispatch_now 引导式，caps 门控判定在该路径内，queue.py :675-748 不变）。
+- frontend：引导消息改「轮内 user_msg 段」模型（TurnSegment 新 kind，session-log-assembler.ts）——实时：appendSteeredSegment/markSteeredSegmentDelivered/markSteeredSegmentsEnded 三纯函数驱动（session-panel-page.tsx 导出、dialog 复用），steering/delivered/ended 三态段渲染在活跃轮内（turn-segment-views.tsx UserMsgSegmentView，data-steered-msg 锚点）；回放：logsToTurns 非首主体组转 user_msg 段按时间戳插入轮内段序列（runtime-session-helpers.tsx insertUserMsgSegments），轮 prompt 仅取首组——刷新后不再前移到轮次开头。
+- ⚡ title：「立即引导进当前轮（不打断）」→「转为引导，注入当前轮（不打断）」。

@@ -120,7 +120,11 @@ export type SessionLogSegmentKind =
   | "stderr"
   | "override"
   | "file"
-  | "task";
+  | "task"
+  // ql-20260920-006（2026-09-18-single-chat-steering 修订）：轮内用户消息段 kind。
+  // 分类器不产出——user_input 不经 classifySessionLog（由 logsToTurns 特判 /
+  // session-panel 实时段函数构造），词表收录仅为 TurnSegment.user_msg 同源对齐。
+  | "user_msg";
 
 export interface SessionLogSegment {
   kind: SessionLogSegmentKind;
@@ -599,10 +603,31 @@ export type TurnSegment =
       text: string;
       ts: number | null;
       segId?: string | null;
+    }
+  // ql-20260920-006（2026-09-18-single-chat-steering 修订）：轮内用户消息段——
+  // mid-turn 引导注入的 user_input 留痕行（daemon 落库挂活跃 run）。此前刷新后经
+  // logsToTurns 归并进轮 prompt 前移到轮次开头；改「轮内段」模型后实时（发送点
+  // append / SSE 留痕 / 轮终态收敛）与回放（logsToTurns 非首主体组构造）都按
+  // 真实时间戳位置穿插在轮内输出之间。phase 三态沿用旧 SteeredMsg 状态机：
+  // steering=引导中（虚线 brand 气泡+脉冲）/ delivered=已投递（bg-primary 气泡）/
+  // ended=本轮已结束未投递（弱化气泡）。装配器内不主动构造（user_input 通道在
+  // applyLogToSegments 入口即返回），仅作类型成员由 logsToTurns / session-panel
+  // 段函数显式构建；不进 output / processItems 兼容投影（segmentsToLegacy 无
+  // case 自动跳过，正文气泡由 SegmentView.user_msg 分支承载）。
+  | {
+      kind: "user_msg";
+      id: string;
+      /** 展示文本（可含附件标记行，渲染层经 parseAttachmentMarkers 剥离）。 */
+      text: string;
+      ts: number | null;
+      /** 本地展示三态（见上）；回放（历史留痕）恒 delivered。 */
+      phase: "steering" | "delivered" | "ended";
     };
 
 export type ToolTurnSegment = Extract<TurnSegment, { kind: "tool" }>;
 export type StubTurnSegment = Extract<TurnSegment, { kind: "subagent_stub" }>;
+// ql-20260920-006：轮内用户消息段（引导注入留痕，见 TurnSegment.user_msg 注）。
+export type UserMsgTurnSegment = Extract<TurnSegment, { kind: "user_msg" }>;
 type ContainerTurnSegment = ToolTurnSegment | StubTurnSegment;
 
 /**

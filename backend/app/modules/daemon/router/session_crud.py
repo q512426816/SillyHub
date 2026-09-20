@@ -32,7 +32,6 @@ from sqlalchemy import select as sa_select
 
 import app.modules.daemon.router as _router
 from app.core.logging import get_logger
-from app.modules.agent.provider_caps import get_provider_caps
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.router import SessionDep, TaskRunAgentUser, router
@@ -585,29 +584,14 @@ async def inject_session(
 ) -> SessionInjectResponse:
     """Append a new turn run to an active interactive session (FR-02)."""
     svc = DaemonService(session)
-    # ── task-05（2026-09-18-single-chat-steering / FR-02 / D-002@v1）：provider
-    # 能力门控 ── 会话行 ``provider`` 列（引擎标识 claude/codex/pi/cursor，
-    # compact 端点门控同款基准）经生成镜像 ``get_provider_caps``（task-01
-    # 产出，单源 daemon PROVIDER_CAPS）判 steering 键：支持 → 忙轮走 inject
-    # 引导；不支持（cursor / 未知 provider 默认拒绝）→ 维持
-    # queue_when_busy=True 排队现状，不报错（降级分支）。
-    # 门控读只在请求可进忙轮 inject 分支时发生（与 service 层守卫同口径）：
-    # ① 携带切换维度（agent_profile_id/llm_provider_id/model 任一非 None——
-    #    与 queue.py 忙轮 inject 分支「三者全 None」判定同口径）时 inject
-    #    分支不可达，排队语义原样，跳过省一次查库；
-    # ② 空 prompt 且无附件且无切换维度时 service 入口 422 判空先于任何
-    #    查库——门控读不前置，错误优先级零回归（非存在会话仍应 422 而非
-    #    404，test_inject_bind_fields 同口径）。
-    no_switch_dim = (
-        data.agent_profile_id is None and data.llm_provider_id is None and data.model is None
-    )
-    steering_supported = False
-    if no_switch_dim and ((data.prompt or "").strip() or data.attachment_ids):
-        # 只读无锁取本人会话行（read_model.get_agent_session 先例，同上方
-        # get_session_detail；缺失/跨用户 404 不泄露存在性，与后续取锁路径
-        # 同错误类，非存在会话错误码零漂移）。
-        agent_session = await svc.get_agent_session(session_id, user.id)
-        steering_supported = bool(get_provider_caps(agent_session.provider or "")["steering"])
+    # ── ql-20260920-006（2026-09-18-single-chat-steering 修订 / D-001 语义
+    # 收敛）：忙轮默认回排队——主输入框忙轮发送不再自动 steering 直注入，
+    # 「转为引导」显式入口收敛到队列条 ⚡（dispatch_now 引导式，task-06 产
+    # 物）。task-05 的 busy_strategy="inject" 自动门控整块回退（caps 预读/
+    # no_switch_dim 判定一并移除——provider 能力判断由 dispatch_now 路径
+    # 自行完成）；service 层 inject 分支与群聊 @ 链路保持零改动（仍是
+    # dispatch_now/群聊的消费方）。steered 出参保留（本端点恒 false=排队，
+    # 字段契约不删防前端旧版漂移）。
     # 2026-08-14-sessions-portal task-02：agent_profile_id/llm_provider_id 仅透传
     # （切档案/切供应商校验与 SESSION_SWITCH_CONFIG 归 task-05）。
     result = await svc.inject_session(
@@ -630,23 +614,12 @@ async def inject_session(
         bind_change_key=data.bind_change_key,
         bind_quick_id=data.bind_quick_id,
         # task-02（2026-08-28-session-ppm-task-binding / FR-02）：PPM 条目追问
-        # 绑定成对字段透传（幂等 binder 归 SessionService，三层同步加参）。
+        # 绑定成对字段（幂等 binder 归 SessionService，三层同步加参）。
         bind_ppm_item_kind=data.bind_ppm_item_kind,
         bind_ppm_item_id=data.bind_ppm_item_id,
         # ql-20260825-011：忙轮入队（后端真实排队，前端 UI 语义）；服务身份
-        # 调用方不经本端点，保持 409 拒绝语义。task-05：queue_when_busy=True
-        # 保留为降级兜底——steering 不支持（cursor/未知）或携带切换维度
-        # （agent_profile_id/llm_provider_id/model 任一非空，忙轮 inject 分支
-        # 需三者全 None）时 service 层守卫（queue.py _handle_busy_turn 忙轮
-        # inject 分支判定）不进 inject 分支，回落本排队语义（既有行为零回归）。
+        # 调用方不经本端点，保持 409 拒绝语义。
         queue_when_busy=True,
-        # task-05（FR-01 / D-001@v1）：provider 支持 steering 时忙轮普通消息改
-        # busy_strategy="inject" 直接注入当前活跃轮（复用群聊
-        # _inject_mid_turn_into_run 链路，run_id 沿用活跃 run 不新建）；空闲轮
-        # 不受影响（照常新建 run）。router 层不重复实现切换维度守卫——
-        # busy_strategy=inject 在 service 层已有该守卫（queue.py 忙轮分支：
-        # 切换维度非空不进 inject 分支）。
-        busy_strategy="inject" if steering_supported else None,
     )
     return SessionInjectResponse(
         session_id=result.agent_session.id,
@@ -654,8 +627,9 @@ async def inject_session(
         status=(result.agent_run.status or "pending" if result.agent_run is not None else "queued"),
         queued=result.queued,
         queue_entry_id=result.queue_entry_id,
-        # task-05：steered 映射 service 层 mid_turn（_inject_mid_turn_into_run
-        # 置 True）——忙轮 inject 成功=true；排队/降级/空闲新建轮=false。
+        # task-05：steered 映射 service 层 mid_turn。ql-20260920-006 起本端点
+        # 忙轮恒排队 → 恒 false；保留映射（dispatch_now 引导成功经队列条目
+        # 转挂活跃 run 后，该轮 mid_turn 语义仍可追溯）。
         steered=result.mid_turn,
     )
 

@@ -73,12 +73,11 @@ import {
 import { useStreamConnectionGuard } from "./use-stream-connection-guard";
 import { StreamConnectionBanner, TurnStalledWatchdogBanner } from "./connection-banners";
 import { applyAgentTaskStatusEvent } from "../agent-task-store";
-// task-07（2026-09-18-single-chat-steering / FR-05）：忙轮引导消息展示态——共享
-// 类型/归约纯函数/streamFooter 渲行组件定义在 session-panel-page（allowed_paths
-// 限定三文件，双挂载零漂移；index 入口本就同时加载两模块，无循环依赖）。
+// task-07（2026-09-18-single-chat-steering / FR-05）→ ql-20260920-006 修订：忙轮
+// 引导消息改「轮内 user_msg 段」——三个 SessionTurnView 段纯函数定义在
+// session-panel-page（双挂载零漂移；index 入口本就同时加载两模块，无循环依赖）。
 import {
-  markSteeredDelivered, markSteeredEndedByRun, steeredMsgsToTurns,
-  SteeredMessagesFooter, type SteeredMsg,
+  appendSteeredSegment, markSteeredSegmentDelivered, markSteeredSegmentsEnded,
 } from "./session-panel-page";
 
 export function SessionPanelDialog(props: SessionPanelProps) {
@@ -189,48 +188,12 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   // ql-20260825-011：发送中（inject 在途）占位信息——「打断本轮」发送窗口期
   // 触发时回退消息到输入框（同 page 模式 inflightSendRef 语义）。
   const inflightSendRef = useRef<{ placeholderId: string; prompt: string } | null>(null);
-  // ── task-07（2026-09-18-single-chat-steering / FR-05）：忙轮引导消息本地展示态 ──
-  // 同 page 模式：ref 为唯一读写源（establishStream handlers 闭包内回调，直接
-  // 闭包 state 会陈旧——queueRefreshRef 先例语义）；setState 传同一引用驱动重渲。
-  // 会话内存纯展示态（不新建持久化、不动 useMessageQueue），attach 切换 / idle
-  // 重建 / 会话结束清空。
-  const [steeredMsgs, setSteeredMsgs] = useState<SteeredMsg[]>([]);
-  const steeredMsgsRef = useRef<SteeredMsg[]>([]);
-  const applySteeredMsgs = useCallback(
-    (fn: (prev: SteeredMsg[]) => SteeredMsg[]) => {
-      const next = fn(steeredMsgsRef.current);
-      if (next === steeredMsgsRef.current) return;
-      steeredMsgsRef.current = next;
-      setSteeredMsgs(next);
-    },
-    [],
-  );
-  /** steered=true 响应 → 追加「引导中」条目（多条并发各占一条）。 */
-  const addSteeredMsg = useCallback(
-    (displayPrompt: string, runId: string) => {
-      applySteeredMsgs((prev) => [
-        ...prev,
-        {
-          id: `__steering_${Date.now()}_${prev.length}__`,
-          prompt: displayPrompt,
-          runId,
-          phase: "steering" as const,
-        },
-      ]);
-    },
-    [applySteeredMsgs],
-  );
-  /** 新轮开启 → 引导条目固化为普通气泡伪 turn（同 page 模式 onTurnStarted 分支）。 */
-  const settleSteeredMsgs = useCallback(() => {
-    const snapshot = steeredMsgsRef.current;
-    if (snapshot.length === 0) return;
-    steeredMsgsRef.current = [];
-    setSteeredMsgs([]);
-    setView((prev) => ({
-      ...prev,
-      turns: [...prev.turns, ...steeredMsgsToTurns(snapshot)],
-    }));
-  }, []);
+  // ── task-07 → ql-20260920-006（2026-09-18-single-chat-steering 修订）：忙轮
+  //    引导消息不再走独立 SteeredMsg 状态机（streamFooter 条目 + 新轮固化伪
+  //    turn），改「轮内 user_msg 段」——发送点经 appendSteeredSegment 直接写入
+  //    活跃轮 segments，SSE 留痕/轮终态在下方 setView 回调内经
+  //    markSteeredSegmentDelivered / markSteeredSegmentsEnded 收敛（同 page 模式，
+  //    无独立 state，自然随轮生命周期存续/清理）。
   // task-07 接线（task-08 / FR-05）：会话真实引擎镜像（MessageQueueBar 降级标注
   // 数据源，与后端 AgentSession.provider 同源）——dialog 无 session 详情 state
   //（attach 轮询 detail 瞬时即弃），新建时 = 创建引擎、attach 时由轮询 active
@@ -481,11 +444,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           connGuard.tapStreamHandlers({
             onTurnStarted: (env) => {
               // ql-20260825-011：新轮开跑（含排队消息自动派发）→ 刷队列条。
+              // ql-20260920-006：旧「引导条目固化伪 turn」块随 SteeredMsg 状态机
+              // 退役删除——引导留痕已是轮内 user_msg 段，停在原轮真实时间位置。
               queueRefreshRef.current?.();
-              // task-07：新轮开启 → 引导条目固化为普通气泡伪 turn（历史回放同态），
-              // 释放 streamFooter 挂载位。先于下方 upsertDialogTurn 执行（追加序
-              // = 引导消息在前、新轮在后）。
-              settleSteeredMsgs();
               setView((prev) => upsertDialogTurn(prev, env, (turn) => ({
                 ...turn,
                 turn: env.turn ?? turn.turn,
@@ -512,19 +473,22 @@ export function SessionPanelDialog(props: SessionPanelProps) {
               // 轮占位轮与 daemon 双提交裸文本版到达时均非空，天然幂等）。
               if (env.channel === "user_input") {
                 if (!env.run_id) return;
-                // task-07（FR-05 / 原型 §3）：引导消息留痕行到达（mid-turn 注入挂
-                // 活跃 run）→ 匹配中的「引导中」条目转「已投递」终态（同 page 模式；
-                // 活跃轮 turn 自身 prompt 已非空不覆盖，消息气泡由引导条目承载）。
-                applySteeredMsgs((prev) =>
-                  markSteeredDelivered(prev, env.run_id!, env.content ?? ""),
-                );
                 const rawText = env.content ?? "";
                 const preambleText = extractPreambleText(rawText);
                 setView((prev) => {
+                  // ql-20260920-006（同 page 模式）：引导留痕行到达（mid-turn 注入
+                  // 挂活跃 run）→ 该轮匹配中的「引导中」user_msg 段转「已投递」终
+                  // 态（同轮合并进下方 upsertDialogTurn 一次 setState；活跃轮 turn
+                  // 自身 prompt 已非空不覆盖，消息气泡由 user_msg 段承载）。
+                  const withDelivered = markSteeredSegmentDelivered(
+                    prev.turns,
+                    env.run_id!,
+                    rawText,
+                  );
                   // 回放守卫（page 模式同款）：轮后对账/断线 resync 重放的历史
                   // user_input 落在已终态轮——不 setCurrentRun（防旧 run 误锁输入框），
                   // prompt 照常补写；实时事件（新建/活跃轮）才置位。
-                  const existing = prev.turns.find(
+                  const existing = withDelivered.find(
                     (t) => t.runId === env.run_id || t.realRunId === env.run_id,
                   );
                   const staleReplay =
@@ -532,7 +496,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
                     TERMINAL_TURN_STATUSES.has(existing.status) &&
                     prev.currentRunId !== env.run_id;
                   return upsertDialogTurn(
-                    prev,
+                    { ...prev, turns: withDelivered },
                     env,
                     (turn) =>
                       !turn.prompt.trim()
@@ -572,15 +536,18 @@ export function SessionPanelDialog(props: SessionPanelProps) {
               const terminal = deriveTurnTerminalStatus(env);
               // ql-20260825-011：轮终态 → 后台会自动派发下一条排队消息，刷队列条。
               queueRefreshRef.current?.();
-              // task-07（FR-05 / design R-04）：活跃轮终止 → 该 run 仍未投递的
-              //「引导中」条目收敛「本轮已结束，未投递」终态，不永久停留。
-              if (env.run_id) {
-                applySteeredMsgs((prev) => markSteeredEndedByRun(prev, env.run_id!));
-              }
               // 2026-08-29-session-usage-stats task-04（R-04）：轮终态递增用量条
               // 重取信号（dialog 独立 state，会话累计用量随轮终态落库）。
               setUsageRefresh((n) => n + 1);
-              setView((prev) => upsertDialogTurn(prev, env, (turn) => {
+              setView((prev) =>
+                // task-07 → ql-20260920-006：活跃轮终止 → 该轮全部「引导中」
+                // user_msg 段收敛「本轮已结束，未投递」终态（随终态 setState 同轮
+                // 合并，不永久停留，同 page 模式）。
+                upsertDialogTurn(
+                  env.run_id
+                    ? { ...prev, turns: markSteeredSegmentsEnded(prev.turns, env.run_id) }
+                    : prev,
+                  env, (turn) => {
                 // 终态清全部 text/thinking 段的 streaming 标记（finishTurn）——流式
                 // 光标与轮级状态条随之收起。segments 缺省的旧形状 turn 无 streaming
                 // 标记，不经装配器（保持旧渲染路径，R1 吸收 ISP 防御）。
@@ -665,9 +632,8 @@ export function SessionPanelDialog(props: SessionPanelProps) {
               setPlanPending(null);
               setBashProgress(null);
               setAgentTasks([]);
-              // task-07：会话结束收口引导展示条目（终态会话只读，临时条目无意义）。
-              steeredMsgsRef.current = [];
-              setSteeredMsgs([]);
+              // ql-20260920-006：旧「引导条目收口清理」随 SteeredMsg 状态机退役删除
+              //（留痕 user_msg 段随 turns 保留，终态会话只读展示历史）。
               streamConnRef.current = null;
             },
             onError: () => {
@@ -749,19 +715,19 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     // [view.sessionId] effect），避免恢复链路与建流链路绑定。
     // task-09：tapStreamHandlers 为 useCallback([]) 稳定引用（ deps 变化不触发
     // effect 重跑 / SSE 重建），此处入 deps 仅为 exhaustive-deps 完整性。
-    // task-07：applySteeredMsgs / settleSteeredMsgs 同为 useCallback([]) 稳定引用。
-  }, [connGuard.tapStreamHandlers, applySteeredMsgs, settleSteeredMsgs]);
+    // ql-20260920-006：旧 applySteeredMsgs / settleSteeredMsgs deps 随状态机退役
+    // 删除（引导段收敛已内联进 setView 回调，无外部依赖）。
+  }, [connGuard.tapStreamHandlers]);
 
   // attach 模式：mount / attachSessionId 变化时建 SSE + 预填 turn + 进
   // reconnecting。轮询单独 effect 处理（见下）。
   useEffect(() => {
     if (!attachSessionId) return;
-    // task-07 接线：attach 切换清旧会话引擎镜像（回填前 null → 降级标注不臆断）
-    // + 引导展示条目（会话内存态，不跨会话残留）。置顶执行，offlineReadOnly
-    // 提前 return 分支同样覆盖。
+    // task-07 接线：attach 切换清旧会话引擎镜像（回填前 null → 降级标注不臆断）。
+    // ql-20260920-006：引导留痕随轮内 user_msg 段承载，attach 重置 turns（下方
+    // setView INITIAL_DIALOG_VIEW）天然清空，无独立 state 需清理。置顶执行，
+    // offlineReadOnly 提前 return 分支同样覆盖。
     setSessionEngine(null);
-    steeredMsgsRef.current = [];
-    setSteeredMsgs([]);
     // 离线只读（D10）：不建 SSE，直接以 initialTurns 只读渲染（active 态保持），
     // 重连后 effect 重跑建 SSE（deps 含 offlineReadOnly）。
     if (offlineReadOnly) {
@@ -1080,17 +1046,21 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           onSendSettled(prompt, attachmentIds);
           return;
         }
-        // task-07（FR-01 / FR-05，同 page sendFromQueue 分支）：竞态引导——发送
-        // 瞬间上一轮尚未终结且 provider 支持 steering → mid-turn 注入活跃轮
-        //（不建新 run）。撤占位轮 + 挂「引导中」条目 + currentRunId 指回活跃 run。
+        // task-07（FR-01 / FR-05，同 page sendFromQueue 分支）→ ql-20260920-006：
+        // 竞态引导——发送瞬间上一轮尚未终结且 provider 支持 steering → mid-turn
+        // 注入活跃轮（不建新 run）。撤占位轮 + 引导段追加进活跃轮段尾 +
+        // currentRunId 指回活跃 run。
         if (resp.steered && resp.run_id) {
           setView((prev) => ({
             ...prev,
             currentRunId: resp.run_id,
-            turns: prev.turns.filter((t) => t.runId !== placeholderId),
+            turns: appendSteeredSegment(
+              prev.turns.filter((t) => t.runId !== placeholderId),
+              resp.run_id!,
+              displayPrompt,
+            ),
             errorMsg: null,
           }));
-          addSteeredMsg(displayPrompt, resp.run_id);
           onSendSettled(prompt, attachmentIds);
           return;
         }
@@ -1121,16 +1091,16 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         }
       }
     },
-    [view.sessionId, pendingMentions, onSendSettled, addSteeredMsg],
+    [view.sessionId, pendingMentions, onSendSettled],
   );
 
   /**
    * 忙轮路径（ql-20260825-011）：直接 POST inject。task-05/06 起 provider 支持
    * steering 时后端忙轮改 mid-turn 直注入活跃轮（steered=true，原型 §1「不打断
-   * 当前轮」）→ 本地挂「引导中」展示条目（不进排队条；SSE 留痕行/轮终止收敛）；
-   * 不支持/降级（steered=false/undefined）→ 后端落服务端排队（无占位轮，run
-   * 终态后自动派发，SSE turn_started 自然建轮），零改动。失败（满员 409 / 离线）
-   * errorMsg 提示，草稿与附件保留可改后重发。
+   * 当前轮」）→ 引导段追加进活跃轮段尾（ql-20260920-006；不进排队条，SSE 留痕
+   * 行/轮终止收敛）；不支持/降级（steered=false/undefined）→ 后端落服务端排队
+   * （无占位轮，run 终态后自动派发，SSE turn_started 自然建轮），零改动。失败
+   * （满员 409 / 离线）errorMsg 提示，草稿与附件保留可改后重发。
    */
   const sendToServerQueue = useCallback(
     async (prompt: string, attachmentIds: string[]): Promise<void> => {
@@ -1151,8 +1121,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
               }
             : undefined,
         );
-        // task-07（FR-01 / FR-05 / 原型 §1）：忙轮引导成功 → 本地「引导中」条目
-        //（占位轮同款展示口径：附件标记行 + 原文），不进排队条。
+        // task-07（FR-01 / FR-05 / 原型 §1）→ ql-20260920-006：忙轮引导成功 →
+        // 引导段以「引导中」态追加进活跃轮段尾（占位轮同款展示口径：附件标记行
+        // + 原文），不进排队条；留痕行到达转「已投递」、轮终止未投递转「本轮已
+        // 结束」（establishStream 收敛）。
         if (resp.steered && resp.run_id) {
           const markerLines = attachmentIds
             .map((id) => {
@@ -1160,8 +1132,15 @@ export function SessionPanelDialog(props: SessionPanelProps) {
               return `[附件:${id}|${meta?.kind ?? "file"}|${meta?.name ?? id}]`;
             })
             .join("\n");
-          addSteeredMsg(joinAttachmentMarkers(markerLines, prompt), resp.run_id);
-          setView((prev) => ({ ...prev, errorMsg: null }));
+          setView((prev) => ({
+            ...prev,
+            turns: appendSteeredSegment(
+              prev.turns,
+              resp.run_id!,
+              joinAttachmentMarkers(markerLines, prompt),
+            ),
+            errorMsg: null,
+          }));
           onSendSettled(prompt, attachmentIds);
           return;
         }
@@ -1176,7 +1155,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         }));
       }
     },
-    [view.sessionId, pendingMentions, onSendSettled, addSteeredMsg],
+    [view.sessionId, pendingMentions, onSendSettled],
   );
 
   // ── task-11：会话内团队触发（弹层开关 + 预建回调，语义同 page 模式）──────
@@ -1338,9 +1317,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
       const createChangeId = mentions.change?.id ?? changeId;
       setInput("");
       setPendingMentions({});
-      // task-07：idle 重建清引导展示条目与旧引擎镜像（会话内存态不跨会话）。
-      steeredMsgsRef.current = [];
-      setSteeredMsgs([]);
+      // task-07：idle 重建清旧引擎镜像（会话内存态不跨会话）。ql-20260920-006：
+      // 引导留痕随轮内 user_msg 段承载，下方 setView(INITIAL_DIALOG_VIEW) 天然
+      // 清空，无独立 state 需清理。
       setSessionEngine(null);
       setView({
         ...INITIAL_DIALOG_VIEW,
@@ -1924,13 +1903,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         hasOnlineProvider={hasOnlineProvider}
         emptyProviderLabel={getProviderLabel(provider)}
         // task-08（FR-04）：定时发送系统提示行（streamFooter 注入口，同 page 模式）。
-        // task-07（FR-05）：忙轮引导消息三态条目同口挂载（引导中/已投递/本轮
-        // 已结束；新轮开启时固化为伪 turn 释放本挂载位）。
+        // ql-20260920-006：旧 SteeredMessagesFooter 挂载随段模型改造移除——引导
+        // 留痕改为轮内 user_msg 段（UserMsgSegmentView），不再占消息流末尾位。
         streamFooter={
-          <>
-            {schedHints.length > 0 ? <ScheduledSysHints hints={schedHints} /> : null}
-            <SteeredMessagesFooter msgs={steeredMsgs} />
-          </>
+          schedHints.length > 0 ? <ScheduledSysHints hints={schedHints} /> : null
         }
       />
 

@@ -103,6 +103,11 @@ function segmentTs(seg: TurnSegment): number {
       return seg.ts ?? Number.NEGATIVE_INFINITY;
     case "compact_status":
       return seg.ts ?? Number.NEGATIVE_INFINITY;
+    // ql-20260920-006（2026-09-18-single-chat-steering 修订）：轮内用户消息段
+    //（引导注入留痕）非 running 候选，取捕获 ts（本行是 TurnSegment 新增 kind
+    // 的 switch 详尽性编译补点，无行为变化）。
+    case "user_msg":
+      return seg.ts ?? Number.NEGATIVE_INFINITY;
   }
 }
 

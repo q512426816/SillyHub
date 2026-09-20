@@ -66,6 +66,9 @@ import { CopyButton } from "@/components/daemon/copy-button";
 import { FileMessageCard } from "@/components/daemon/file-message-card";
 import { useSubagentPanel } from "@/components/daemon/subagent-panel-context";
 import { ToolExpandBody } from "@/components/daemon/tool-args-detail";
+// ql-20260920-006：user_msg 段文本剥附件标记行（页内 import 惯例——turn-timeline
+// 同源引用 runtime-session-helpers 的既有 util，此处沿用）。
+import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
 import type {
   StubTurnSegment,
   ToolTurnSegment,
@@ -184,6 +187,10 @@ export interface CompactSegmentViewProps {
 /** ql-20260917-006：压缩过程状态段（[COMPACT_STATUS] 协议行，渲染层解析 phase）。 */
 export interface CompactStatusRowViewProps {
   segment: Extract<TurnSegment, { kind: "compact_status" }>;
+}
+/** ql-20260920-006：轮内用户消息段（引导注入留痕，三态右对齐用户气泡）。 */
+export interface UserMsgSegmentViewProps {
+  segment: Extract<TurnSegment, { kind: "user_msg" }>;
 }
 
 /* ───────────────────────────── 内部工具（纯函数） ───────────────────────────── */
@@ -1059,6 +1066,67 @@ export const CompactStatusRowView = memo(function CompactStatusRowView({
   );
 });
 
+/* ────────────── 轮内用户消息段（ql-20260920-006 / 2026-09-18-single-chat-steering 修订） ────────────── */
+
+/**
+ * 轮内用户消息段渲染：mid-turn 引导注入的 user_input 留痕——右对齐用户气泡，
+ * 随段序（实时追加 / 回放按 ts 插入）停在轮内真实时间位置（输出之间），不再
+ * 前移到轮次 prompt 也不垫在时间线末尾。三态视觉平移自原 streamFooter 版
+ * SteeredMessagesFooter（session-panel-page.tsx 留档类名），气泡 token 与既有
+ * 用户气泡一致（bg-primary / brand 语义阶）：
+ *   - steering：虚线 brand 气泡 + 脉冲点 +「引导中 · 本轮工具间隙投递」；
+ *   - delivered：bg-primary 气泡 + emerald「✓ 已投递」小标；
+ *   - ended：弱化气泡（opacity-70）+「本轮已结束，消息未投递」（R-04 如实暴露）。
+ * data-steered-msg={phase} 供测试断言（自旧 footer 迁移）。文本经
+ * parseAttachmentMarkers 剥附件标记行（同 prompt 气泡展示口径）。
+ */
+export const UserMsgSegmentView = memo(function UserMsgSegmentView({
+  segment,
+}: UserMsgSegmentViewProps) {
+  const text = parseAttachmentMarkers(segment.text).text;
+  return (
+    <div
+      data-steered-msg={segment.phase}
+      className="flex items-end justify-end gap-1.5"
+    >
+      <div className="max-w-[80%]">
+        {segment.phase === "steering" ? (
+          <>
+            <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md border-2 border-dashed border-brand-400 bg-brand-50 px-4 py-2.5 text-sm leading-6 text-foreground">
+              {text}
+            </div>
+            <p className="mt-1 flex items-center justify-end gap-1.5 text-[11px] font-medium text-brand-600">
+              <span
+                aria-hidden
+                className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500"
+              />
+              引导中 · 本轮工具间隙投递
+            </p>
+          </>
+        ) : segment.phase === "delivered" ? (
+          <>
+            <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
+              {text}
+            </div>
+            <p className="mt-1 text-right text-[11px] text-emerald-600">
+              ✓ 已投递，agent 已收到引导
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-border bg-muted/50 px-4 py-2.5 text-sm leading-6 text-muted-foreground opacity-70">
+              {text}
+            </div>
+            <p className="mt-1 text-right text-[11px] text-muted-foreground">
+              本轮已结束，消息未投递
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+});
+
 /* ─────────────── 分身段块（task-12 / 2026-08-22-team-session-unify / FR-07） ─────────────── */
 
 /** 分身 run 状态 → 渲染态/文案/颜色（与 team-task-block WORKER_STATUS_META 对齐；
@@ -1304,6 +1372,12 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
           />
         </div>
       );
+    case "user_msg":
+      // ql-20260920-006（2026-09-18-single-chat-steering 修订）：轮内引导留痕段——
+      // 三态气泡（steering 引导中 / delivered 已投递 / ended 未投递），data-steered-msg
+      // 供测试断言；自旧 SteeredMessagesFooter 迁移，正文经 parseAttachmentMarkers
+      // 剥附件标记行（同 prompt 气泡展示口径）。
+      return <UserMsgSegmentView segment={segment} />;
     default: {
       // 穷尽防御：TurnSegment 新增 kind 时此处编译期报错（never 不兼容）。
       const exhaustive: never = segment;

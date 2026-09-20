@@ -226,10 +226,11 @@ class TestInjectEmptyPromptRejected422:
         db_session: AsyncSession,
         fresh_ws_hub: DaemonWsHub,
     ) -> None:
-        """非空 prompt 照常：忙轮（首 run pending，claude 可引导）→ 201
-        steered=true / queued=false（判空不拦非空；task-09 断言随
-        2026-09-18-single-chat-steering 忙轮 steering 语义迁移——排队降级
-        断言在 test_session_queue.py service 层覆盖）。"""
+        """非空 prompt 照常：忙轮（首 run pending）→ 201 排队
+        queued=true / steered=false（ql-20260920-006 修订：忙轮默认回排队，
+        「转为引导」入口收敛到队列条 ⚡ dispatch_now——task-09 的
+        steered=true 断言随 2026-09-18-single-chat-steering 首版语义回退；
+        dispatch_now 引导式正向断言在 test_session_queue_actions.py）。"""
         created = await _seed_active_session_http(db_session, client, auth_headers, fresh_ws_hub)
         sid = uuid.UUID(created["session_id"])
 
@@ -241,9 +242,10 @@ class TestInjectEmptyPromptRejected422:
 
         assert resp.status_code == 201, resp.text
         body = resp.json()
-        assert body["steered"] is True
-        assert body["queued"] is False
-        assert body["run_id"] is not None
+        assert body["queued"] is True
+        assert body["steered"] is False
+        assert body["run_id"] is None
+        assert body["queue_entry_id"]
 
 
 # ── service 层：豁免轮回归保护（不被 SessionEmptyPrompt 拒） ─────────────────

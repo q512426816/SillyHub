@@ -418,9 +418,9 @@ describe("MessageQueueBar 队列三操作（task-10 / FR-04 FR-05 FR-06）", () 
       />,
     );
 
-    // 两态 title 语义（2026-09-18-single-chat-steering FR-03）：pending=mid-turn
-    // 引导注入当前轮不打断（支持引导的引擎）/ failed=空闲直发。
-    fireEvent.click(screen.getByLabelText("立即引导进当前轮（不打断）"));
+    // 两态 title 语义（2026-09-18-single-chat-steering FR-03；ql-20260920-006
+    // 文案对齐段模型）：pending=转为引导注入当前轮不打断 / failed=空闲直发。
+    fireEvent.click(screen.getByLabelText("转为引导，注入当前轮（不打断）"));
     expect(onDispatchNow).toHaveBeenCalledTimes(1);
     expect(onDispatchNow).toHaveBeenCalledWith("mq-p");
 
@@ -431,7 +431,7 @@ describe("MessageQueueBar 队列三操作（task-10 / FR-04 FR-05 FR-06）", () 
     // sending 投递中不可操作：⚡ 仅 2 个（pending 引导态 + failed 直发态），
     // sending 条目没有；「立即发送这条」仅 failed 一个（pending 已换引导文案）。
     expect(screen.getAllByLabelText(/立即发送这条/)).toHaveLength(1);
-    expect(screen.getAllByLabelText(/立即引导进当前轮（不打断）/)).toHaveLength(1);
+    expect(screen.getAllByLabelText(/转为引导，注入当前轮（不打断）/)).toHaveLength(1);
   });
 
   it("降级标注（FR-05 / FR-02）：provider 不支持引导渲染「该引擎暂不支持引导」Tag；支持或未传 provider 不渲染", () => {
