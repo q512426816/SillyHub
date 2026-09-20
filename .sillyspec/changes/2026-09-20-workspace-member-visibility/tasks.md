@@ -11,3 +11,4 @@ created_at: 2026-09-20 18:00:00
 - [x] task-04: 反转 test_platform_grant_list.py 断言为新技术义 + 三口径一致性断言 (depends_on: task-01, task-02, task-03)
 - [x] task-05: 新增 auth 判定链收紧专项测试 test_rbac_workspace_scope.py (depends_on: task-01)
 - [x] task-06: 存量测试回归——扫描依赖平台级穿透的既有断言并同步修正（仅跑相关测试）(depends_on: task-01, task-02, task-03, task-04, task-05)
+- [x] ql-20260920-007-c04d 09-20-workspace-member-visibility
