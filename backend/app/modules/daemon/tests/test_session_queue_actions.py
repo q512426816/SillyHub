@@ -695,6 +695,186 @@ class TestDispatchNow:
         assert [r.prompt for r in rows] == ["A"]
 
     @pytest.mark.asyncio
+    async def test_busy_inject_carries_page_context_preamble(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """24h 审查②：忙轮 steering 注入（busy_strategy="inject"）透传 page_context。
+
+        排队路径会存 entry.page_context 并在派发时重放，steering 路径修复前
+        静默丢——修复后 SESSION_INJECT payload prompt 前缀页面前导（与
+        _dispatch_inject_turn 同口径），user_input 留痕保持用户原文（展示层
+        干净）。generic_page/settings_mcp 走注册表 Lookup（无 DB 项目行依赖）。
+        """
+        from app.modules.daemon.schema import PageContextCreateBlock
+
+        svc, uid, _rt, session_id, busy_run = await _setup_busy_session(db_session)
+        mocked_hub.send_session_control.reset_mock()
+
+        result = await svc.inject_session(
+            session_id,
+            uid,
+            prompt="引导我",
+            busy_strategy="inject",
+            page_context=PageContextCreateBlock(page_key="generic_page", route_key="settings_mcp"),
+        )
+        assert result.mid_turn is True
+
+        # daemon 收到的注入 prompt：页面前导在前 + 用户原文在后。
+        mocked_hub.send_session_control.assert_awaited_once()
+        _daemon_id, msg_type, payload = mocked_hub.send_session_control.await_args.args
+        assert msg_type == DAEMON_MSG_SESSION_INJECT
+        assert "当前用户正在访问本平台的「设置 · MCP」页面" in payload["prompt"]
+        assert payload["prompt"].endswith("引导我")
+        # user_input 留痕只存干净用户原文（前导不进展示层）。
+        steered_input = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == busy_run.id,
+                        AgentRunLog.channel == "user_input",
+                        AgentRunLog.content_redacted == "引导我",
+                    )
+                )
+            )
+            .scalars()
+            .one_or_none()
+        )
+        assert steered_input is not None
+
+    @pytest.mark.asyncio
+    async def test_dispatch_now_steered_replays_entry_page_context(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """24h 审查②：dispatch_now steered 分支重放排队行的 page_context。
+
+        entry.page_context 与接力派发侧（dispatch_queued_messages）同款宽容
+        解析重放——修复前 steered 分支只字未提 page_context（同条消息走接力
+        会带前导、走 steer 丢失），daemon 看到的文本两条路径一致。
+        """
+        from app.modules.daemon.schema import PageContextCreateBlock
+
+        svc, uid, _rt, session_id, busy_run = await _setup_busy_session(db_session)
+        b = await svc.inject_session(
+            session_id,
+            uid,
+            prompt="立即B",
+            queue_when_busy=True,
+            page_context=PageContextCreateBlock(page_key="generic_page", route_key="settings_mcp"),
+        )
+        mocked_hub.send_session_control.reset_mock()
+
+        dispatch_mode = await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
+
+        assert dispatch_mode == "steered"
+        mocked_hub.send_session_control.assert_awaited_once()
+        _daemon_id, msg_type, payload = mocked_hub.send_session_control.await_args.args
+        assert msg_type == DAEMON_MSG_SESSION_INJECT
+        assert "当前用户正在访问本平台的「设置 · MCP」页面" in payload["prompt"]
+        assert payload["prompt"].endswith("立即B")
+        # 留痕保持原文。
+        steered_input = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == busy_run.id,
+                        AgentRunLog.channel == "user_input",
+                        AgentRunLog.content_redacted == "立即B",
+                    )
+                )
+            )
+            .scalars()
+            .one_or_none()
+        )
+        assert steered_input is not None
+
+    @pytest.mark.asyncio
+    async def test_dispatch_now_steered_publishes_user_input_log_event(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """24h 审查③：mid-turn 注入行补发 user_input log 事件（对齐直发/派发路径）。
+
+        前端会话面板引导气泡「已投递」转换依赖 channel=user_input 的 log SSE
+        事件（markSteeredDelivered）；mid-turn 注入行由 backend 直接落库，修复
+        前不补发 → 事件生产不可达，气泡恒显「本轮已结束，消息未投递」。
+        """
+        svc, uid, _rt, session_id, busy_run = await _setup_busy_session(db_session)
+        b = await svc.inject_session(session_id, uid, prompt="立即B", queue_when_busy=True)
+        mocked_redis.publish.reset_mock()
+
+        dispatch_mode = await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
+        assert dispatch_mode == "steered"
+
+        import json as _json
+
+        user_input_events = [
+            _json.loads(call.args[1])
+            for call in mocked_redis.publish.await_args_list
+            if call.args[0] == f"agent_session:{session_id}"
+            and _json.loads(call.args[1]).get("event") == "log"
+            and _json.loads(call.args[1]).get("channel") == "user_input"
+        ]
+        assert len(user_input_events) == 1
+        payload = user_input_events[0]
+        assert payload["run_id"] == str(busy_run.id)
+        assert payload["content"] == "立即B"
+        # log_id 是落库行真实 id（前端 seenLogIds 去重依赖）。
+        log_row = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == busy_run.id,
+                        AgentRunLog.channel == "user_input",
+                        AgentRunLog.content_redacted == "立即B",
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert payload["log_id"] == str(log_row.id)
+
+    @pytest.mark.asyncio
+    async def test_dispatch_now_entry_already_relay_dispatched_returns_dispatched(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """24h 审查④：置顶 commit 后条目被轮终态钩子接力派发删除 → 已派发收口。
+
+        模拟窗口：置顶 commit（锁释放）→ queue_changed 发布点注入「接力派发
+        已删除本条」→ 复锁后条目行不复存在。修复前 steered 分支不看条目行
+        是否还在，照常 mid-turn 注入（挂可能已终态的旧 run）+ 钩子新建 run
+        各执行一遍；修复后返 "dispatched"、零注入下发。
+        """
+        svc, uid, _rt, session_id, _busy_run = await _setup_busy_session(db_session)
+        b = await svc.inject_session(session_id, uid, prompt="立即B", queue_when_busy=True)
+        assert b.queue_entry_id is not None
+        mocked_hub.send_session_control.reset_mock()
+
+        # queue.py 侧的 svc 是 SessionService（DaemonService._sess 委托内层），
+        # 实例级 patch 打在内层才生效。
+        inner = svc._sess
+        orig_publish = inner._publish_session_event
+
+        async def _relay_dispatch_race(session_id_: uuid.UUID, payload_: dict) -> None:
+            if payload_.get("action") == "dispatch_now":
+                # 竞态窗口内：轮终态钩子接力派发队首（=本条）→ 删行 + commit。
+                row = await db_session.get(AgentSessionQueuedMessage, b.queue_entry_id)
+                if row is not None:
+                    await db_session.delete(row)
+                    await db_session.commit()
+            await orig_publish(session_id_, payload_)
+
+        inner._publish_session_event = _relay_dispatch_race
+        try:
+            dispatch_mode = await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
+        finally:
+            inner._publish_session_event = orig_publish
+
+        assert dispatch_mode == "dispatched"
+        # 零注入下发（消息已由接力派发承担，不二次投递）。
+        mocked_hub.send_session_control.assert_not_awaited()
+        assert await _queue_rows(db_session, session_id) == []
+
+    @pytest.mark.asyncio
     async def test_dispatch_now_interrupt_failure_keeps_prepend(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:

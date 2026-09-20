@@ -648,6 +648,8 @@ class SessionService(BackgroundTaskMixin):
         attachment_ids: list[uuid.UUID] | None = None,
         attachment_owner_user_id: uuid.UUID | None = None,
         turn_metadata: dict | None = None,
+        # 24h 审查②：page_context 透传（前导由 control 侧拼装，语义见其 docstring）。
+        page_context: PageContextCreateBlock | None = None,
     ) -> SessionDispatchResult:
         return await _control._inject_mid_turn_into_run(
             self,
@@ -657,6 +659,7 @@ class SessionService(BackgroundTaskMixin):
             attachment_ids=attachment_ids,
             attachment_owner_user_id=attachment_owner_user_id,
             turn_metadata=turn_metadata,
+            page_context=page_context,
         )
 
     async def _send_interrupt_control(

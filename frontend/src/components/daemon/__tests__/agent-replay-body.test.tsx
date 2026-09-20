@@ -277,13 +277,14 @@ describe("AgentReplayBody 正常态（主日志 parsed → 时间线）", () => 
       "资源消耗集中在 verify 阶段，属正常范围。",
     );
 
-    // 「对话」视图：系统事件 / 思考 / 工具不渲染（processItems 仅全部视图）。
+    // 「对话」视图：系统事件可见（回带④双视图）；思考 / 工具仍不渲染（仅全部视图）。
     expect(
-      screen.queryByText(/子代理 verify 完成通知/),
-    ).not.toBeInTheDocument();
+      screen.getByText(/子代理 verify 完成通知/),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/先核对资源消耗数据/)).not.toBeInTheDocument();
 
-    // 切「全部」：系统事件中性行可见（task-10 system_event 渲染分支）。
+    // 切「全部」：系统事件中性行仍可见（task-10 system_event 渲染分支，双视图不双画——
+    // 对话视图块 viewMode 门控退场、全部视图走 TurnDetailsList）。
     fireEvent.click(screen.getByTestId("agent-replay-tab-all"));
     expect(
       screen.getByText(/子代理 verify 完成通知/),

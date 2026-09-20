@@ -106,6 +106,9 @@ async def _handle_busy_turn(
             attachment_ids=attachment_ids,
             attachment_owner_user_id=attachment_owner_user_id,
             turn_metadata=turn_metadata,
+            # 24h 审查②：page_context 透传（此前 inject 分支静默丢——排队
+            # 分支会存会重放，steering 分支应同口径，前导由注入侧拼装）。
+            page_context=page_context,
         )
     # ql-20260825-011（后端真实排队）：忙轮不再无条件 409——
     # queue_when_busy=True 的调用方（前端会话 UI）改落排队表，
@@ -603,11 +606,14 @@ async def dispatch_queued_message_now(
     口径）；条目 404；failed 重置 pending + 清 error_msg；本条 position
     置队首（全量重写该会话队列 0..n-1，D-002 ≤5 行）+ commit + 补发
     queue_changed(action="dispatch_now")——**commit 先于发送动作**，
-    interrupt / mid-turn 注入失败均不回滚置顶（R-03）。随后判活跃 run：
+    interrupt / mid-turn 注入失败均不回滚置顶（R-03）。置顶 commit 释放
+    行锁后**复锁会话行**再判活跃 run 与条目行（24h 审查④：条目已被轮
+    终态钩子接力派发删除时按已派发收口返 ``"dispatched"``，杜绝同条
+    mid-turn 注入 + 接力新 run 双执行）。随后判活跃 run：
     - 有且可引导（provider caps ``steering``=true + 条目不带轮边界维度）
       → :meth:`_inject_mid_turn_into_run` mid-turn 注入活跃轮（**不
-      interrupt**，prompt/附件/留痕转挂活跃 run，注入成功删排队行，
-      与群聊 @ 忙轮同入口），返 ``"steered"``；
+      interrupt**，prompt/附件/页面上下文/留痕转挂活跃 run，注入成功删
+      排队行，与群聊 @ 忙轮同入口），返 ``"steered"``；
     - 有但不可引导（provider 不支持 / 带切换维度 / 续跑条目）→
       :meth:`_send_interrupt_control` 打断当前轮（daemon 零改动 D-007，
       run 终态钩子接力派发队首=本条；AppError 向上抛），返
@@ -672,6 +678,25 @@ async def dispatch_queued_message_now(
             "action": "dispatch_now",
         },
     )
+    # 24h 审查④：置顶 commit 已释放入口会话行锁——发送动作（steer 注入 /
+    # interrupt）前复锁会话行，锁内重读活跃 run 与条目行，恢复
+    # _inject_mid_turn_into_run「调用方持锁、锁内查 run」契约。条目已被
+    # 轮终态钩子接力派发删除（run 收敛竞态窗口）时按已派发收口返
+    # "dispatched"，不再注入——否则同一条消息 mid-turn 注入 + 新 run
+    # 各执行一遍。R-03 语义不变：置顶已持久化，发送失败不回滚。
+    session = await svc._get_owned_session_for_update(session_id, user_id)
+    if session.status != "active":
+        stale_status = session.status
+        await svc._session.rollback()
+        raise DaemonSessionNotActive(
+            f"AgentSession '{session_id}' is not active (status={stale_status}).",
+            details={"session_id": str(session_id), "status": stale_status},
+        )
+    fresh_entry = await svc._session.get(AgentSessionQueuedMessage, entry.id)
+    if fresh_entry is None:
+        await svc._session.rollback()
+        return "dispatched"
+    entry = fresh_entry
     # commit 后判活跃 run（置顶持久化先于 interrupt/注入，R-03）。
     run = await svc._get_current_run(session.id)
     if run is not None:
@@ -695,10 +720,17 @@ async def dispatch_queued_message_now(
             and not (entry.origin or "").startswith("auto_resume:")
         )
         if entry_is_steerable:
-            # 群链标记剥离 / 附件宽容解析 / 附件归属基准（链 sender）：与
-            # dispatch_queued_messages 派发侧同款（entry 的 prompt/附件转入
-            # 活跃 run，daemon 看到的文本与接力派发一致）。
+            # 群链标记剥离 / 附件宽容解析 / 附件归属基准（链 sender）/ 页面
+            # 上下文重放：与 dispatch_queued_messages 派发侧同款（entry 的
+            # prompt/附件/页面上下文转入活跃 run，daemon 看到的文本与接力
+            # 派发一致——page_context 此前只重放不注入，24h 审查②补齐）。
             dispatch_prompt, chain_metadata = _split_group_chain_marker(entry.prompt or "")
+            steered_page_context: PageContextCreateBlock | None = None
+            if entry.page_context is not None:
+                try:
+                    steered_page_context = PageContextCreateBlock(**entry.page_context)
+                except Exception:
+                    steered_page_context = None
             attachment_ids: list[uuid.UUID] | None = None
             if entry.attachment_ids:
                 try:
@@ -709,7 +741,7 @@ async def dispatch_queued_message_now(
             _chain_sender = (chain_metadata or {}).get("sender_user_id")
             if isinstance(_chain_sender, str) and _chain_sender:
                 try:
-                    attachment_owner_user_id = uuid.UUID(_chain_sender)
+                    attachment_owner_user_id = uuid.UUID(str(_chain_sender))
                 except (ValueError, AttributeError, TypeError):
                     attachment_owner_user_id = None
             # 本分支注入成功即 SessionDispatchResult.mid_turn=True（control.py
@@ -723,6 +755,7 @@ async def dispatch_queued_message_now(
                 attachment_ids=attachment_ids,
                 attachment_owner_user_id=attachment_owner_user_id,
                 turn_metadata=chain_metadata,
+                page_context=steered_page_context,
             )
             # 注入成功：删排队行（消息已转挂活跃 run——user_input 留痕 +
             # SESSION_INJECT 三段式由 _inject_mid_turn_into_run 落齐），不删

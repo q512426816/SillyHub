@@ -926,6 +926,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
     // turn/completed / 进程退出时 resolve。串行循环 await 它来阻塞下一轮。
     let currentTurnResolve: ((o: TurnOutcome) => void) | null = null;
     let currentTurnPromise: Promise<TurnOutcome> | null = null;
+    // 已收敛轮 outcome 暂存——finishTurn 写入、consumeCompletedOutcome 消费。
+    // 等待层 race 输入先赢后 await steer 的窗口内 turn/completed 到达时，
+    // promise 在 idle 层 beginTurn 覆盖前已无人再 await（resolve 值随覆盖
+    // 丢弃），唯一不丢口径是本暂存：丢失 = reportResult 不执行，backend
+    // run 永远 running、会话软锁死（24h 审查①）。
+    let completedOutcome: TurnOutcome | null = null;
     // 最近一轮的 error event 缓存（failed status 时用其 message 作 result）
     let pendingTurnError: string | null = null;
     // consume 是否已最终收敛（防 exit 与 turn/completed 双触发）
@@ -956,9 +962,10 @@ export class CodexAppServerDriver implements InteractiveDriver {
       });
     };
 
-    /** resolve 当前轮（若存在），传 outcome。 */
+    /** resolve 当前轮（若存在），传 outcome；同时暂存待统一消费（见 completedOutcome）。 */
     const finishTurn = (o: TurnOutcome): void => {
       if (currentTurnResolve) {
+        completedOutcome = o;
         const r = currentTurnResolve;
         currentTurnResolve = null;
         r(o);
@@ -994,6 +1001,25 @@ export class CodexAppServerDriver implements InteractiveDriver {
         // eslint-disable-next-line no-console
         console.error('[codex-app-server-driver] onTurnResult callback failed', err);
       });
+    };
+
+    /**
+     * 消费 finishTurn 暂存的轮 outcome（统一补报口径，幂等：取走即清空）。
+     * 等待层轮分支与 idle 层入口共用：steer 等待窗口内收敛的轮由 idle 层
+     * 入口在 beginTurn 覆盖 promise 前补报。不上报的形态与等待层原口径
+     * 一致：仅 closing/finalized（close 释放轮终态归 _terminateSession /
+     * 进程异常终态归 finalizeWithError，ql-20260909-026）；引擎侧上报的
+     * cancelled（interrupt 后 complete=cancelled）不在其列，照报。
+     */
+    const consumeCompletedOutcome = (): void => {
+      const outcome = completedOutcome;
+      completedOutcome = null;
+      if (outcome === null) return;
+      if (h.closing || finalized) return;
+      // ql-20260909-027：轮结果补差值用量（含 steer 计入同 turn 的消耗）。
+      this._applyTurnUsageDelta(h, outcome);
+      this._reportOutcome(outcome, pendingTurnError, reportResult, h);
+      pendingTurnError = null;
     };
 
     /** consume 终态收敛（进程异常退出 / consume 抛错）：上报 error result 后停整个循环。 */
@@ -1290,6 +1316,9 @@ export class CodexAppServerDriver implements InteractiveDriver {
       while (!h.closing && !finalized) {
         // ── 空闲层：无轮在途，取输入起轮 ──────────────────────────────────
         if (currentTurnResolve === null) {
+          // steer 等待窗口内收敛的轮在此补报（beginTurn 覆盖 promise 前的
+          // 唯一剩余消费点，24h 审查①）；无暂存时为 no-op。
+          consumeCompletedOutcome();
           let turn: UserTurnInput | null = null;
           if (heldTurns.length > 0) {
             turn = heldTurns.shift()!;
@@ -1330,12 +1359,8 @@ export class CodexAppServerDriver implements InteractiveDriver {
             });
             finishTurn({ kind: 'failed' });
             // 立即收敛上报（对齐原实现 await currentTurnPromise 语义：failed
-            // outcome 不等下一条输入，失败立即可见）
-            const failedOutcome = await currentTurnPromise!;
-            if (!h.closing && !finalized) {
-              this._applyTurnUsageDelta(h, failedOutcome);
-              this._reportOutcome(failedOutcome, pendingTurnError, reportResult, h);
-            }
+            // outcome 不等下一条输入，失败立即可见）——统一走暂存消费。
+            consumeCompletedOutcome();
             pendingTurnError = null;
             continue;
           }
@@ -1387,20 +1412,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
         // turn/completed 对（spike §4 实证同 turn 继续），currentTurnPromise 仍由
         // 唯一一次 turn/completed 收敛——steer 注入的 item/started userMessage 等
         // 事件经 adapter 归一化自然透传，不影响轮收敛时点（不提前不滞后）。
-        const outcome = raced.o;
-        // ql-20260909-026（审计 #9）：close 释放的轮次（cancelled outcome）不上报
-        // ——会话正在被终止，终态归 _terminateSession；对齐 pi 驱动 waiter 之后的
-        // closing 守卫（此处也顺带覆盖「turn 恰好完成后、上报前 close」的竞态，
-        // 该窗口跳过上报无害——reportResult 本有 finalized 幂等守卫）。
-        if (h.closing || finalized) break;
-        // ql-20260909-027：轮结果补差值用量（turn/completed 无 usage 时的唯一
-        // 来源；success/failed 轮统一覆盖——失败的轮同样真实消耗了 token；
-        // steer 触发的模型调用计入同 turn 的 threadUsageTotal，差值口径天然覆盖）。
-        this._applyTurnUsageDelta(h, outcome);
-        // 上报本轮 result
-        this._reportOutcome(outcome, pendingTurnError, reportResult, h);
-        pendingTurnError = null;
-        if (finalized) break;
+        // 上报统一走 consumeCompletedOutcome 暂存消费：closing/finalized 不报
+        //（close 释放轮终态归 _terminateSession / 进程异常归 finalizeWithError，
+        // ql-20260909-026；引擎侧 cancelled 照报）、补差值用量
+        //（ql-20260909-027，steer 计入同 turn 的消耗差值口径天然覆盖）——
+        // 守卫与拆分前原口径逐条对齐。
+        consumeCompletedOutcome();
       }
 
       // input queue 自然结束 / closing → 主循环退出，finally 内 close 释放 child。

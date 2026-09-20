@@ -182,3 +182,13 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 
 - **集成证据**：codex 实机 turn/steer 探测记录 = changes/2026-09-18-single-chat-steering/spike-codex-turn-steer.md（0.147.0 定参 + S2 行为闭环 + 四类被拒不炸会话，实机原文零臆造）；claude SDK 吸收双形态 = changes/2026-09-18-single-chat-steering/spike-claude-steering.md（真机双场景）。缺口标注：单聊忙轮**真 daemon 会话**端到端引导用例无落盘记录（现覆盖 = backend/daemon/frontend 三端 mock 测试 + 两份 spike 实机探测脚本；影响面 = 平台侧 inject→SESSION_INJECT→driver steer 全链拼装未经真实 daemon 回归，留人工验收补录）。
 - **零回归声明**：task-09 收口定向测试全绿（backend 125 + daemon 65 + frontend 66，commit 1934c322a）；本增量（task-10）纯文档同步，零代码/测试改动。
+
+## 增量（ql-20260920-002-8626：24h 审查四风险修复——steering 链路收口）
+
+2026-09-18 增量合入后 24h 只读审查发现的四处高/中风险，本 quick 修复：
+
+- **①codex steer 窗口丢轮 outcome（高，会话软锁死）**：等待层 race 输入先赢后 `await _writeTurnSteer`（最长 10s）期间 `turn/completed` 到达时，outcome 只 resolve 进 promise（`finishTurn` 清 resolver），`continue` 回循环顶被空闲层 `beginTurn` 覆盖——`reportResult` 永不执行，backend run 永远 running、会话恒忙软锁死。修复：`finishTurn` 同步暂存 outcome（`completedOutcome`），消费统一收口 `consumeCompletedOutcome`（等待层轮分支 / 空闲层入口 / threadId 超时路径三点共用；closing/finalized 不报口径与拆分前逐条对齐，引擎侧 cancelled——interrupt 后 complete=cancelled——照报）。测试：driver 新增「completed 先于 steer 回执（被拒/成功两序）」2 用例（既有被拒用例刻意先回执后完成，恰好绕开该序）。
+- **②steering 全链路丢 page_context**：忙轮 inject 分支与 dispatch_now steered 分支此前不传 page_context（排队路径会存 entry.page_context 并派发重放）——`_inject_mid_turn_into_run`（session/service/control.py）增 `page_context` 参数，`build_page_context_preamble` 前导只拼进 SESSION_INJECT payload prompt（user_input 留痕保持原文，与 `_dispatch_inject_turn` 口径一致）；两调用点透传（queue.py `_handle_busy_turn` / `dispatch_queued_message_now` steered 分支，后者与接力派发侧同款宽容解析重放）。
+- **③mid-turn 注入缺 user_input log SSE 事件**：该路径日志行由 backend 直接落库（不经 daemon 上报管线），修复前不补发 Redis log 事件——前端引导气泡「已投递」转换（markSteeredDelivered 依赖 channel=user_input）生产不可达，恒显「本轮已结束，消息未投递」。修复：对齐 inject.py 直发路径（ql-20260918-003）commit 前快照 log_id/content/timestamp、commit 后按 daemon 上报同形态补发。
+- **④dispatch_now 无锁双派发窗口**：置顶 commit（R-03）释放入口会话行锁后，原实现无锁查活跃 run 即 mid-turn 注入，违反 `_inject_mid_turn_into_run`「调用方持锁、锁内查 run」契约——run 恰在窗口内收敛时轮终态钩子接力派发（新建 run）+ steered 注入双执行同一条消息。修复：发送动作前 `_get_owned_session_for_update` 复锁 + status 复检 + 条目行复取（已被接力派发删除 → 返 "dispatched" 收口零注入）；置顶持久化先于发送的 R-03 语义不变。
+- 验证：daemon codex-app-server-driver 68/68（含 2 新增）；backend queue_actions 34/34（含 4 新增）+ 相邻面 session_queue/user_preamble/inject_empty/session_router 70 + 群聊四件 105 全绿；双侧 tsc/ruff/mypy 定向零错。

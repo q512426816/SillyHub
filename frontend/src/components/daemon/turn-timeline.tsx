@@ -511,6 +511,28 @@ const TurnRow = memo(function TurnRow({
                     isHighlighted && "rounded-md ring-2 ring-brand-200 bg-brand-50",
                   )}
                 >
+              {/* 回带④（2026-09-20 双实现对撞深读裁决）：系统事件双视图可见——对话视图
+                  也渲染 system_event 过程项（同「全部」视图的中性虚线药丸形态，从
+                  processItems 提取；不冒充用户气泡、不带假运行语义，D-003 同源）。
+                  「全部」视图不画（TurnDetailsList 已含同款渲染，防双画）。 */}
+              {viewMode === "conversation" &&
+                (() => {
+                  const sysEvents = (turn.processItems ?? []).filter(
+                    (item) => item && typeof item === "object" && "kind" in item && (item as { kind: string }).kind === "system_event",
+                  ) as Array<{ kind: "system_event"; text: string }>;
+                  if (sysEvents.length === 0) return null;
+                  return sysEvents.map((item, i) => (
+                    <div key={`${turn.runId}-sys-${i}`} className="flex justify-center">
+                      <div
+                        title={item.text}
+                        className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-dashed border-border bg-card px-3 py-[3px] text-[11px] text-muted-foreground"
+                      >
+                        <span aria-hidden className="shrink-0">⚙</span>
+                        <span className="min-w-0 truncate">{item.text}</span>
+                      </div>
+                    </div>
+                  ));
+                })()}
               {/* 用户消息气泡（右）。attach 中途接入的 unknown-run turn 无 prompt，不渲染。
                   ql-20260817-007：与 agent 答复对称——[时间][气泡][发送者头像]；
                   头像无图时用用户名首字（同顶栏用户菜单 AvatarFallback 模式）。 */}

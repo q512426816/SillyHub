@@ -98,6 +98,9 @@ async def _inject_mid_turn_into_run(
     attachment_ids: list[uuid.UUID] | None = None,
     attachment_owner_user_id: uuid.UUID | None = None,
     turn_metadata: dict | None = None,
+    # 24h 审查②：steering 路径此前静默丢 page_context（排队路径入队行会存
+    # 并在派发时重放）——透传至此，与普通注入同口径构建页面上下文前导。
+    page_context: PageContextCreateBlock | None = None,
 ) -> SessionDispatchResult:
     """忙轮中途注入（quick 2026-09-02 群聊 @ 忙轮成员 steering 语义）。
 
@@ -110,7 +113,9 @@ async def _inject_mid_turn_into_run(
        同 id 重写为幂等；单会话单活跃 run 不变式保持）；
     2. 本轮 user_input 留痕日志挂**同一活跃 run**（现状每轮注入都落一行
        user_input，沿用；turn_metadata 照传——群链路互@检测按最新一条
-       user_input metadata 读链上下文）；
+       user_input metadata 读链上下文）；``page_context`` 前导只拼进
+       SESSION_INJECT payload 的 prompt（留痕保持用户原文，与
+       ``_dispatch_inject_turn`` 口径一致，展示层干净）；
     3. 不触碰会话配置三列 / lease metadata / turn_count（配置切换是轮
        边界语义，调用方走原排队分支，本方法不接切换维度）；
     4. 推送失败不收敛活跃 run（它仍属当前正在执行的轮）——控制指令已
@@ -177,17 +182,23 @@ async def _inject_mid_turn_into_run(
 
             marker_lines = "\n".join(attachment_marker_line(r) for r in validated_attachments)
             user_input_content = f"{marker_lines}\n{prompt}" if prompt else marker_lines
-        svc._session.add(
-            AgentRunLog(
-                run_id=current_run.id,
-                channel="user_input",
-                content_redacted=user_input_content[:USER_INPUT_LOG_MAX_CHARS],
-                timestamp=now,
-                metadata_=dict(turn_metadata) if turn_metadata is not None else None,
-            )
+        user_input_log = AgentRunLog(
+            run_id=current_run.id,
+            channel="user_input",
+            content_redacted=user_input_content[:USER_INPUT_LOG_MAX_CHARS],
+            timestamp=now,
+            metadata_=dict(turn_metadata) if turn_metadata is not None else None,
         )
+        svc._session.add(user_input_log)
         session.last_active_at = now
         svc._session.add(session)
+        # commit（expire_on_commit）前快照 user_input 日志标量——commit 后
+        # 补发 Redis log 事件用（对齐 inject.py 直发路径 ql-20260918-003 口径）。
+        user_input_event_payload = {
+            "log_id": str(user_input_log.id),
+            "content": user_input_log.content_redacted,
+            "timestamp": user_input_log.timestamp.isoformat().replace("+00:00", "Z"),
+        }
         await svc._session.commit()
         await svc._session.refresh(session)
     except AppError:
@@ -197,15 +208,61 @@ async def _inject_mid_turn_into_run(
         await svc._session.rollback()
         raise
 
+    # 24h 审查③：user_input 留痕实时推送——mid-turn 注入行同样由 backend
+    # 直接落库（不经 daemon 上报管线），不补发则前端实时流收不到事件：
+    # 会话面板引导气泡「已投递」转换依赖 channel=user_input 的 log 事件
+    # （markSteeredDelivered），缺事件恒显「本轮已结束，消息未投递」的
+    # 错误事实。按 daemon 上报同形态（publish.py session_payload）补发，
+    # 与 inject.py 直发路径 / dispatch 派发路径同一口径。
+    await svc._publish_session_event(
+        session.id,
+        {
+            "event": "log",
+            "session_id": str(session.id),
+            "run_id": str(current_run.id),
+            **user_input_event_payload,
+            "channel": "user_input",
+            "parent_tool_use_id": None,
+            "subagent_type": None,
+            "depth": None,
+            "tool_kind": None,
+            "segment_id": None,
+            "stale": None,
+            "edit_patch": None,
+            "agent_event": None,
+        },
+    )
+
     # SESSION_INJECT 三段式下发（claim_token 跨 turn 复用，与普通轮同源）。
     lease_row = await svc._session.get(DaemonTaskLease, session.lease_id)
     lease_meta = dict((lease_row.metadata_ if lease_row else None) or {})
     inject_claim_token = lease_meta.get("claim_token", "")
+    # 24h 审查②：页面前导构建（复用 create/直发路径 build_page_context_preamble，
+    # 服务端 DB 回查；查无/未传 → None 不注入）。拼接顺序与 _dispatch_inject_turn
+    # 一致（页面前导 → 用户消息；mid-turn 无首轮简报段）；前导只进 payload
+    # prompt，上方 user_input 留痕保持用户原文。
+    page_preamble = None
+    if page_context is not None:
+        from app.modules.daemon.session.context import build_page_context_preamble
+
+        page_preamble = await build_page_context_preamble(
+            svc._session,
+            page_context.page_key,
+            page_context.project_id,
+            page_context.route_key,
+            page_context.workspace_id,
+            page_context.tab_key,
+        )
+    _inject_user_msg = _strip_team_command_prefix(prompt)
+    if page_preamble:
+        inject_prompt = f"{page_preamble}\n\n---\n\n{_inject_user_msg}"
+    else:
+        inject_prompt = _inject_user_msg
     inject_payload = {
         "session_id": str(session.id),
         "lease_id": str(session.lease_id),
         "run_id": str(current_run.id),
-        "prompt": _strip_team_command_prefix(prompt),
+        "prompt": inject_prompt,
         "claim_token": inject_claim_token,
         "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
     }
