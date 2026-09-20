@@ -1,0 +1,1921 @@
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index 18c5a5578..1843dcb85 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -702,6 +702,12 @@ class ScopeAuditRow(BaseModel):
+     verdict: str | None = None
+     declared: bool | None = None
+     attribution: str | None = None
++    # 2026-09-20-scope-audit-cross-repo-platform task-02（契约 v2）：跨仓行归属
++    # repoKey——语义从 v1「⊘ 本表不含」升级为「已按仓对账」；主仓行/旧 daemon/
++    # degraded 仓无此值（None）。producer = daemon RPC 投影 rows[].cross_repo，
++    # consumer = 前端按仓分组（gen:types 经 task-03）。additive 缺省 None，
++    # 旧客户端不读不受影响。
++    cross_repo: str | None = None
+ 
+ 
+ class ScopeAuditTotals(BaseModel):
+@@ -710,11 +716,65 @@ class ScopeAuditTotals(BaseModel):
+     deletions: int | None = None
+ 
+ 
++# ── per-repo 汇总 DTO（2026-09-20-scope-audit-cross-repo-platform task-02，
++#    daemon RPC result 契约 v2 信封级 repos[]，design「接口定义」逐字段对齐）──
++
++
++class ScopeAuditRepoAnchor(BaseModel):
++    """仓库对账锚点档（锚点分级 A/B/C/degraded 的统一描述）。
++
++    ``source`` 为档位标识（reviews-range / head~1-window /
++    head-uncommitted-window / degraded，main 条目为 main-<form> 主仓锚
++    包装）；``base``/``head`` 为该仓 diff 区间 commit（B/C 档与 degraded
++    档为 None）；``label`` 为人类可读档位描述（表尾汇总行直接用）。
++    全字段缺省 None——daemon 缺键/非法形态时防御构造不炸。
++    """
++
++    source: str | None = None
++    base: str | None = None
++    head: str | None = None
++    label: str | None = None
++
++
++class ScopeAuditRepoTotals(BaseModel):
++    """仓库行合计与三态计数（仅计该仓行；全 int|None——B/C 降级档行数
++    不可得时 additions/deletions 为 None，不计入合计）。"""
++
++    files: int | None = None
++    additions: int | None = None
++    deletions: int | None = None
++    planned: int | None = None
++    unplanned: int | None = None
++    untouched: int | None = None
++
++
++class ScopeAuditRepo(BaseModel):
++    """跨仓对账 per-repo 汇总条目（信封级 repos[] 单项）。
++
++    ``key`` 为仓标识（'main' 或 local.yaml repos 注册 key，main 条目始终
++    首位）；``anchor``/``anchor_label`` 为该仓锚点档（label 扁平冗余一份，
++    供表尾汇总行直取）；``degraded``/``degraded_reason`` 为降级标记与原因
++    （仓未注册/路径不可达/git 不可用等，degraded 仓该组行退 ⊘ 形态）。
++    producer = daemon RPC 投影 repos[]，consumer = 前端按仓分组卡
++    （gen:types 经 task-03）。
++    """
++
++    key: str
++    anchor: ScopeAuditRepoAnchor = Field(default_factory=ScopeAuditRepoAnchor)
++    anchor_label: str | None = None
++    totals: ScopeAuditRepoTotals = Field(default_factory=ScopeAuditRepoTotals)
++    degraded: bool = False
++    degraded_reason: str | None = None
++
++
+ class ScopeAuditResponse(BaseModel):
+     """对账表（daemon sillyspec_scope_audit RPC 透传投影）。
+ 
+     ok=false 时 degraded_reason 带原因（quick 会话不存在等），rows 为空。
+     truncated：rows 超 500 被 daemon 侧截断。
++    ``repos``（契约 v2，2026-09-20-scope-audit-cross-repo-platform）：仅当
++    计划侧含跨仓条目且非预执行形态时 daemon 才输出；单仓变更/旧 daemon/
++    无 repos 键 → 空列表回退（零回归）。
+     """
+ 
+     change: str
+@@ -728,3 +788,4 @@ class ScopeAuditResponse(BaseModel):
+     excluded_foreign_declared: list[str] = Field(default_factory=list)
+     note: str | None = None
+     truncated: bool = False
++    repos: list[ScopeAuditRepo] = Field(default_factory=list)
+diff --git a/backend/app/modules/change/scope_audit.py b/backend/app/modules/change/scope_audit.py
+index 842719bab..09a85cdb5 100644
+--- a/backend/app/modules/change/scope_audit.py
++++ b/backend/app/modules/change/scope_audit.py
+@@ -22,6 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
+ from app.core.errors import AppError
+ from app.core.logging import get_logger
+ from app.modules.change.schema import (
++    ScopeAuditRepo,
++    ScopeAuditRepoAnchor,
++    ScopeAuditRepoTotals,
+     ScopeAuditResponse,
+     ScopeAuditRow,
+     ScopeAuditTotals,
+@@ -404,9 +407,74 @@ class ScopeFileDiffService:
+                             if isinstance(raw.get("attribution"), str)
+                             else None
+                         ),
++                        # 契约 v2（2026-09-20-scope-audit-cross-repo-platform）：
++                        # 跨仓行归属 repoKey（同 declared/attribution 的 str 守卫
++                        # 风格，非 str 一律回退 None——主仓行零影响）。
++                        cross_repo=(
++                            raw.get("cross_repo")
++                            if isinstance(raw.get("cross_repo"), str)
++                            else None
++                        ),
+                     )
+                 )
+         raw_totals = result.get("totals") if isinstance(result.get("totals"), dict) else {}
++
++        # 契约 v2（2026-09-20-scope-audit-cross-repo-platform，D-002 防御透传）：
++        # 信封级 per-repo 汇总。无 repos 键 / 非 list（单仓变更、旧 daemon、
++        # 预执行形态）→ 空列表回退；逐条 isinstance 守卫（key 非 str / 条目非
++        # dict 跳过，嵌套 anchor/totals 逐字段归一），非法形态不炸整体。
++        raw_repos = result.get("repos")
++        repos: list[ScopeAuditRepo] = []
++        if isinstance(raw_repos, list):
++            for raw_repo in raw_repos:
++                if not isinstance(raw_repo, dict) or not isinstance(raw_repo.get("key"), str):
++                    continue
++                raw_anchor = (
++                    raw_repo.get("anchor") if isinstance(raw_repo.get("anchor"), dict) else {}
++                )
++                raw_repo_totals = (
++                    raw_repo.get("totals") if isinstance(raw_repo.get("totals"), dict) else {}
++                )
++                repos.append(
++                    ScopeAuditRepo(
++                        key=raw_repo["key"],
++                        anchor=ScopeAuditRepoAnchor(
++                            source=(
++                                raw_anchor.get("source")
++                                if isinstance(raw_anchor.get("source"), str)
++                                else None
++                            ),
++                            base=raw_anchor.get("base")
++                            if isinstance(raw_anchor.get("base"), str)
++                            else None,
++                            head=raw_anchor.get("head")
++                            if isinstance(raw_anchor.get("head"), str)
++                            else None,
++                            label=raw_anchor.get("label")
++                            if isinstance(raw_anchor.get("label"), str)
++                            else None,
++                        ),
++                        anchor_label=(
++                            raw_repo.get("anchor_label")
++                            if isinstance(raw_repo.get("anchor_label"), str)
++                            else None
++                        ),
++                        totals=ScopeAuditRepoTotals(
++                            files=_count(raw_repo_totals.get("files")),
++                            additions=_count(raw_repo_totals.get("additions")),
++                            deletions=_count(raw_repo_totals.get("deletions")),
++                            planned=_count(raw_repo_totals.get("planned")),
++                            unplanned=_count(raw_repo_totals.get("unplanned")),
++                            untouched=_count(raw_repo_totals.get("untouched")),
++                        ),
++                        degraded=raw_repo.get("degraded") is True,
++                        degraded_reason=(
++                            raw_repo.get("degraded_reason")
++                            if isinstance(raw_repo.get("degraded_reason"), str)
++                            else None
++                        ),
++                    )
++                )
+         # daemon 投影为扁平 excluded_foreign_declared（SillySpecAuditTable 契约）
+         foreign = result.get("excluded_foreign_declared")
+         return ScopeAuditResponse(
+@@ -433,4 +501,5 @@ class ScopeFileDiffService:
+             ],
+             note=result.get("note") if isinstance(result.get("note"), str) else None,
+             truncated=result.get("truncated") is True,
++            repos=repos,
+         )
+diff --git a/backend/app/modules/change/tests/test_scope_file_diff.py b/backend/app/modules/change/tests/test_scope_file_diff.py
+index fa1c53000..5bf3c10d5 100644
+--- a/backend/app/modules/change/tests/test_scope_file_diff.py
++++ b/backend/app/modules/change/tests/test_scope_file_diff.py
+@@ -11,6 +11,10 @@
+      method_not_found（旧 daemon）→ 422；offline → 502；timeout → 504；
+      其余远端 code → 502；未绑定 → 404
+   4. 契约缺口：daemon 回缺 ok 键的畸形结构 → 502 contract gap
++  5. 对账表契约 v2（2026-09-20-scope-audit-cross-repo-platform task-02）：
++     跨仓行 cross_repo + 信封 repos[] 逐字段透传（锚点档/三态计数/
++     degraded 档）；无 repos 键 / 非 list / 非法条目 → [] / 跳过（防御
++     回退零回归）
+ """
+ 
+ from __future__ import annotations
+@@ -449,6 +453,7 @@ async def test_scope_audit_200_rpc_contract_and_dto(client: AsyncClient, setup_e
+     assert body["rows"][1]["additions"] is None  # 二进制行数 null 原样
+     assert body["excluded_foreign_declared"] == ["frontend/src/x.ts"]
+     assert body["truncated"] is False
++    assert body["repos"] == []  # v1 形态（无 repos 键）→ 空列表回退零回归
+ 
+     call = env.hub.calls[0]
+     assert call["method"] == "sillyspec_scope_audit"
+@@ -480,3 +485,259 @@ async def test_scope_audit_capability_422_and_not_bound_404(client: AsyncClient,
+         headers=_bearer(env2.token),
+     )
+     assert resp2.status_code == 404, resp2.text
++
++
++# ── 对账表契约 v2（2026-09-20-scope-audit-cross-repo-platform task-02）─────────
++# 形态对齐上游 design「接口定义」JSON 示例（daemon RPC 投影 snake_case 化）：
++# 跨仓行真实三态 + 信封 repos[]（main 首位 / A 档锚点 base+head / degraded 档）。
++
++_AUDIT_V2 = {
++    "change": "2026-09-15-ehs-reward-punishment",
++    "ok": True,
++    "mode": "full-flow",
++    "base_ref": "214151b2c0d1e2f3a4b5c6d7e8f9",
++    "anchor_label": "214151b",
++    "degraded_reason": None,
++    "totals": {"files": 46, "additions": 6040, "deletions": 340},
++    "rows": [
++        {  # 主仓行：无跨仓归属（cross_repo None）
++            "path": "src/main/java/com/ehs/RewardController.java",
++            "additions": 210,
++            "deletions": 18,
++            "kind": "modified",
++            "planned": "修改",
++            "verdict": "planned",
++            "cross_repo": None,
++        },
++        {  # 跨仓行：真实三态（不再恒 untouched）
++            "path": "pkg/reward/service.go",
++            "additions": 430,
++            "deletions": 0,
++            "kind": "new",
++            "planned": "新增",
++            "verdict": "planned",
++            "cross_repo": "sub-grid-security",
++        },
++        {
++            "path": "pkg/reward/legacy.go",
++            "additions": 55,
++            "deletions": 12,
++            "kind": "modified",
++            "planned": None,
++            "verdict": "unplanned",
++            "cross_repo": "sub-grid-security",
++        },
++        {  # degraded 仓行：⊘ 形态（恒 untouched + crossRepo）
++            "path": "app/demo/page.tsx",
++            "additions": 0,
++            "deletions": 0,
++            "kind": "modified",
++            "planned": "修改",
++            "verdict": "untouched",
++            "cross_repo": "spdemo",
++        },
++    ],
++    "repos": [
++        {  # main 条目始终首位（主仓汇总，主仓锚包装）
++            "key": "main",
++            "anchor": {
++                "source": "main-post-apply",
++                "base": "214151b2c0d1e2f3a4b5c6d7e8f9",
++                "head": None,
++                "label": "post-apply 主仓锚",
++            },
++            "anchor_label": "post-apply 主仓锚",
++            "totals": {
++                "files": 22,
++                "additions": 5300,
++                "deletions": 310,
++                "planned": 20,
++                "unplanned": 2,
++                "untouched": 0,
++            },
++            "degraded": False,
++            "degraded_reason": None,
++        },
++        {  # A 档锚点：reviews base..head 封闭区间
++            "key": "sub-grid-security",
++            "anchor": {
++                "source": "reviews-range",
++                "base": "a1b2c3d4e5",
++                "head": "e4f5a6b7c8",
++                "label": "reviews base..head（execute task 锡点，2 task 区间并集）",
++            },
++            "anchor_label": "reviews base..head（execute task 锡点，2 task 区间并集）",
++            "totals": {
++                "files": 14,
++                "additions": 740,
++                "deletions": 30,
++                "planned": 13,
++                "unplanned": 1,
++                "untouched": 0,
++            },
++            "degraded": False,
++            "degraded_reason": None,
++        },
++        {  # degraded 档：仓未注册（一行降级不炸整体）
++            "key": "spdemo",
++            "anchor": {
++                "source": "degraded",
++                "base": None,
++                "head": None,
++                "label": "degraded",
++            },
++            "anchor_label": "degraded",
++            "totals": {
++                "files": 9,
++                "additions": 0,
++                "deletions": 0,
++                "planned": 0,
++                "unplanned": 0,
++                "untouched": 9,
++            },
++            "degraded": True,
++            "degraded_reason": "repo key「spdemo」未在 local.yaml repos 注册——跨仓对账不可达，请人工到对应仓核对",
++        },
++    ],
++    "excluded_foreign_declared": [],
++    "note": "计划侧含 22 个跨仓文件（repo：sub-grid-security、spdemo）——已按 local.yaml repos 注册表分仓对账（各仓锚点档见 repos[].anchor）",
++    "truncated": False,
++}
++
++
++@pytest.mark.asyncio
++async def test_scope_audit_v2_cross_repo_rows_and_repos(client: AsyncClient, setup_env):
++    """契约 v2 透传：跨仓行 cross_repo 真实三态 + 信封 repos[] 逐字段
++    （key/anchor 四键/anchor_label/totals 六计数/degraded/degraded_reason），
++    主仓行 cross_repo 保持 None。"""
++    env = await setup_env()
++    env.hub.on("sillyspec_scope_audit", result=_AUDIT_V2)
++
++    resp = await client.get(
++        f"/api/workspaces/{env.workspace_id}/sillyspec/scope-audit",
++        params={"change": "2026-09-15-ehs-reward-punishment"},
++        headers=_bearer(env.token),
++    )
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++
++    # 行级：主仓行无归属，跨仓行真实三态 + repoKey
++    assert body["rows"][0]["cross_repo"] is None
++    assert body["rows"][1]["cross_repo"] == "sub-grid-security"
++    assert body["rows"][1]["verdict"] == "planned"
++    assert body["rows"][2]["verdict"] == "unplanned"
++    assert body["rows"][3]["cross_repo"] == "spdemo"
++    assert body["rows"][3]["verdict"] == "untouched"  # degraded 仓恒 untouched
++
++    # 信封级：三仓逐字段（main 首位）
++    repos = body["repos"]
++    assert [r["key"] for r in repos] == ["main", "sub-grid-security", "spdemo"]
++
++    main = repos[0]
++    assert main["anchor"] == {
++        "source": "main-post-apply",
++        "base": "214151b2c0d1e2f3a4b5c6d7e8f9",
++        "head": None,
++        "label": "post-apply 主仓锚",
++    }
++    assert main["anchor_label"] == "post-apply 主仓锚"
++    assert main["totals"] == {
++        "files": 22,
++        "additions": 5300,
++        "deletions": 310,
++        "planned": 20,
++        "unplanned": 2,
++        "untouched": 0,
++    }
++    assert main["degraded"] is False
++    assert main["degraded_reason"] is None
++
++    sub = repos[1]  # A 档锚点：base + head 双 commit
++    assert sub["anchor"]["source"] == "reviews-range"
++    assert sub["anchor"]["base"] == "a1b2c3d4e5"
++    assert sub["anchor"]["head"] == "e4f5a6b7c8"
++    assert sub["anchor"]["label"].startswith("reviews base..head")
++    assert sub["anchor_label"] == sub["anchor"]["label"]
++    assert sub["totals"]["planned"] == 13
++    assert sub["degraded"] is False
++
++    demo = repos[2]  # degraded 档
++    assert demo["degraded"] is True
++    assert demo["anchor"]["source"] == "degraded"
++    assert demo["anchor"]["base"] is None
++    assert demo["degraded_reason"].startswith("repo key「spdemo」未在 local.yaml repos 注册")
++    assert demo["totals"]["untouched"] == 9
++
++
++@pytest.mark.asyncio
++async def test_scope_audit_v2_repos_fallback_and_invalid_skipped(
++    client: AsyncClient, setup_env
++):
++    """防御回退（D-002）：无 repos 键 / repos 非 list → []；非法条目（非
++    dict / 缺 key / key 非 str）跳过不炸、嵌套 anchor/totals 非法全 None
++    容错、合法条目保留；行级 cross_repo 非 str → None。"""
++    # 无 repos 键（单仓变更 / 旧 daemon 投影）→ 空列表
++    env = await setup_env()
++    env.hub.on("sillyspec_scope_audit", result=_AUDIT_OK)
++    resp = await client.get(
++        f"/api/workspaces/{env.workspace_id}/sillyspec/scope-audit",
++        params={"change": "2026-09-11-skills-central-library"},
++        headers=_bearer(env.token),
++    )
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["repos"] == []
++
++    # repos 非 list（畸形形态）→ 空列表回退不炸
++    env2 = await setup_env()
++    env2.hub.on("sillyspec_scope_audit", result={**_AUDIT_OK, "repos": {"key": "main"}})
++    resp2 = await client.get(
++        f"/api/workspaces/{env2.workspace_id}/sillyspec/scope-audit",
++        params={"change": "2026-09-11-skills-central-library"},
++        headers=_bearer(env2.token),
++    )
++    assert resp2.status_code == 200, resp2.text
++    assert resp2.json()["repos"] == []
++
++    # 非法条目跳过 + 合法条目嵌套字段容错 + 行级 cross_repo 非 str 守卫
++    env3 = await setup_env()
++    mixed = {
++        **_AUDIT_OK,
++        "rows": [{**_AUDIT_OK["rows"][0], "cross_repo": 123}],  # 非 str → None
++        "repos": [
++            "not-a-dict",  # 非 dict → 跳过
++            {"totals": {"files": 1}},  # 缺 key → 跳过
++            {"key": 42},  # key 非 str → 跳过
++            {  # 合法条目但嵌套形态全非法 → 缺省安全不炸
++                "key": "main",
++                "anchor": "not-a-dict",
++                "anchor_label": 99,
++                "totals": ["bad"],
++                "degraded": "yes",
++                "degraded_reason": 42,
++            },
++        ],
++    }
++    env3.hub.on("sillyspec_scope_audit", result=mixed)
++    resp3 = await client.get(
++        f"/api/workspaces/{env3.workspace_id}/sillyspec/scope-audit",
++        params={"change": "2026-09-11-skills-central-library"},
++        headers=_bearer(env3.token),
++    )
++    assert resp3.status_code == 200, resp3.text
++    body3 = resp3.json()
++    assert body3["rows"][0]["cross_repo"] is None
++    assert len(body3["repos"]) == 1
++    kept = body3["repos"][0]
++    assert kept["key"] == "main"
++    assert kept["anchor"] == {"source": None, "base": None, "head": None, "label": None}
++    assert kept["anchor_label"] is None
++    assert kept["totals"] == {
++        "files": None,
++        "additions": None,
++        "deletions": None,
++        "planned": None,
++        "unplanned": None,
++        "untouched": None,
++    }
++    assert kept["degraded"] is False
++    assert kept["degraded_reason"] is None
+diff --git a/backend/openapi.json b/backend/openapi.json
+index da59be5f4..cd9cabac9 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -63037,6 +63037,177 @@
+         "title": "ScheduledMessageRead",
+         "description": "定时消息读侧 DTO（POST 201 响应 / GET 列表项，task-03 / FR-04）。\n\n``AgentSessionScheduledMessage`` ORM 行的 from_attributes 直映射——\n``status`` 为 pending / dispatched / cancelled / failed 四态字符串\n（派发成功不删行，dispatched_at / cancelled_at / error_code 审计留档，\n消费方=前端 scheduled-messages-bar 状态 tag 与失败原因展示，task-05）；\n``attachment_ids`` 为落库的 str 列表快照（派发时转回 uuid）。"
+       },
++      "ScopeAuditRepo": {
++        "properties": {
++          "key": {
++            "type": "string",
++            "title": "Key"
++          },
++          "anchor": {
++            "$ref": "#/components/schemas/ScopeAuditRepoAnchor"
++          },
++          "anchor_label": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Anchor Label"
++          },
++          "totals": {
++            "$ref": "#/components/schemas/ScopeAuditRepoTotals"
++          },
++          "degraded": {
++            "type": "boolean",
++            "title": "Degraded",
++            "default": false
++          },
++          "degraded_reason": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Degraded Reason"
++          }
++        },
++        "type": "object",
++        "required": [
++          "key"
++        ],
++        "title": "ScopeAuditRepo",
++        "description": "跨仓对账 per-repo 汇总条目（信封级 repos[] 单项）。\n\n``key`` 为仓标识（'main' 或 local.yaml repos 注册 key，main 条目始终\n首位）；``anchor``/``anchor_label`` 为该仓锚点档（label 扁平冗余一份，\n供表尾汇总行直取）；``degraded``/``degraded_reason`` 为降级标记与原因\n（仓未注册/路径不可达/git 不可用等，degraded 仓该组行退 ⊘ 形态）。\nproducer = daemon RPC 投影 repos[]，consumer = 前端按仓分组卡\n（gen:types 经 task-03）。"
++      },
++      "ScopeAuditRepoAnchor": {
++        "properties": {
++          "source": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Source"
++          },
++          "base": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Base"
++          },
++          "head": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Head"
++          },
++          "label": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Label"
++          }
++        },
++        "type": "object",
++        "title": "ScopeAuditRepoAnchor",
++        "description": "仓库对账锚点档（锚点分级 A/B/C/degraded 的统一描述）。\n\n``source`` 为档位标识（reviews-range / head~1-window /\nhead-uncommitted-window / degraded，main 条目为 main-<form> 主仓锚\n包装）；``base``/``head`` 为该仓 diff 区间 commit（B/C 档与 degraded\n档为 None）；``label`` 为人类可读档位描述（表尾汇总行直接用）。\n全字段缺省 None——daemon 缺键/非法形态时防御构造不炸。"
++      },
++      "ScopeAuditRepoTotals": {
++        "properties": {
++          "files": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Files"
++          },
++          "additions": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Additions"
++          },
++          "deletions": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Deletions"
++          },
++          "planned": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Planned"
++          },
++          "unplanned": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Unplanned"
++          },
++          "untouched": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Untouched"
++          }
++        },
++        "type": "object",
++        "title": "ScopeAuditRepoTotals",
++        "description": "仓库行合计与三态计数（仅计该仓行；全 int|None——B/C 降级档行数\n不可得时 additions/deletions 为 None，不计入合计）。"
++      },
+       "ScopeAuditResponse": {
+         "properties": {
+           "change": {
+@@ -63117,6 +63288,13 @@
+             "type": "boolean",
+             "title": "Truncated",
+             "default": false
++          },
++          "repos": {
++            "items": {
++              "$ref": "#/components/schemas/ScopeAuditRepo"
++            },
++            "type": "array",
++            "title": "Repos"
+           }
+         },
+         "type": "object",
+@@ -63125,7 +63303,7 @@
+           "ok"
+         ],
+         "title": "ScopeAuditResponse",
+-        "description": "对账表（daemon sillyspec_scope_audit RPC 透传投影）。\n\nok=false 时 degraded_reason 带原因（quick 会话不存在等），rows 为空。\ntruncated：rows 超 500 被 daemon 侧截断。"
++        "description": "对账表（daemon sillyspec_scope_audit RPC 透传投影）。\n\nok=false 时 degraded_reason 带原因（quick 会话不存在等），rows 为空。\ntruncated：rows 超 500 被 daemon 侧截断。\n``repos``（契约 v2，2026-09-20-scope-audit-cross-repo-platform）：仅当\n计划侧含跨仓条目且非预执行形态时 daemon 才输出；单仓变更/旧 daemon/\n无 repos 键 → 空列表回退（零回归）。"
+       },
+       "ScopeAuditRow": {
+         "properties": {
+@@ -63203,6 +63381,17 @@
+               }
+             ],
+             "title": "Attribution"
++          },
++          "cross_repo": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Cross Repo"
+           }
+         },
+         "type": "object",
+diff --git a/frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx b/frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx
+index fc19d2ef7..3b2b52b19 100644
+--- a/frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx
++++ b/frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx
+@@ -15,7 +15,7 @@
+  * mock 范式照 quicklog-drawer.test：importActual 部分 mock +
+  * QueryClientProvider（retry: false）。
+  */
+-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+@@ -158,6 +158,125 @@ function renderCard(ui: React.ReactElement) {
+   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+ }
+ 
++/**
++ * 契约 v2 三仓夹具（f85a6650 类多仓变更，2026-09-20-scope-audit-cross-repo-platform）：
++ * main 20/2（post-apply 主仓锚）+ sub-grid-security 13/1（reviews 锚点档）+
++ * spdemo 9/1（B 档降级：语义锚 anchor_label=null、行数 null）。
++ * rows 只造 3 行——chips 数字必须取信封 repos[].totals（20/13/9）而非行重算，
++ * 行数与 totals 故意不一致正是「单一源」断言的钉子（design 消费语义）。
++ */
++function makeCrossRepoAudit(): ScopeAuditResponse {
++  return {
++    change: "2026-09-18-ehs-back-multi-repo",
++    ok: true,
++    mode: "full-flow",
++    base_ref: "214151b0c0d0e0f0a1b2c3d4e5f6a7b8c9d0e1f2",
++    anchor_label: "214151b",
++    degraded_reason: null,
++    totals: { files: 46, additions: 6040, deletions: 340 },
++    rows: [
++      {
++        path: "src/main/java/com/ehs/RewardController.java",
++        additions: 210,
++        deletions: 18,
++        kind: "modified",
++        planned: "修改",
++        verdict: "planned",
++        declared: null,
++        attribution: null,
++        cross_repo: null,
++      },
++      {
++        path: "pkg/reward/service.go",
++        additions: 430,
++        deletions: 0,
++        kind: "new",
++        planned: "新增",
++        verdict: "planned",
++        declared: null,
++        attribution: null,
++        cross_repo: "sub-grid-security",
++      },
++      {
++        path: "app/demo/page.tsx",
++        additions: null,
++        deletions: null,
++        kind: "modified",
++        planned: "修改",
++        verdict: "planned",
++        declared: null,
++        attribution: null,
++        cross_repo: "spdemo",
++      },
++    ],
++    excluded_foreign_declared: [],
++    note: "计划侧含 22 个跨仓文件（repo：sub-grid-security、spdemo）——已按 local.yaml repos 注册表分仓对账（各仓锚点档见分段）",
++    truncated: false,
++    repos: [
++      {
++        key: "main",
++        anchor: {
++          source: "main-post-apply",
++          base: "214151b0c0d0e0f0a1b2c3d4e5f6a7b8c9d0e1f2",
++          head: "8f9e0d1c2b3a49586775849realsub0",
++          label: "post-apply 主仓锚",
++        },
++        anchor_label: "214151b",
++        totals: {
++          files: 22,
++          additions: 5300,
++          deletions: 310,
++          planned: 20,
++          unplanned: 2,
++          untouched: 0,
++        },
++        degraded: false,
++        degraded_reason: null,
++      },
++      {
++        key: "sub-grid-security",
++        anchor: {
++          source: "reviews-range",
++          base: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
++          head: "11223344556677889900aabbccddeeff0011223",
++          label: "reviews base..head（execute task 锚点，2 task 区间并集）",
++        },
++        anchor_label: "a1b2c3d",
++        totals: {
++          files: 14,
++          additions: 740,
++          deletions: 30,
++          planned: 13,
++          unplanned: 1,
++          untouched: 0,
++        },
++        degraded: false,
++        degraded_reason: null,
++      },
++      {
++        key: "spdemo",
++        anchor: {
++          source: "head~1-window",
++          base: null,
++          head: "0a1b2c3d4e5f6789abcdef0123456789abcdef01",
++          label: "HEAD~1..HEAD 最近提交窗口（降级——无可用 reviews）",
++        },
++        anchor_label: null,
++        totals: {
++          files: 10,
++          additions: null,
++          deletions: null,
++          planned: 9,
++          unplanned: 1,
++          untouched: 0,
++        },
++        degraded: false,
++        degraded_reason: null,
++      },
++    ],
++  };
++}
++
+ beforeEach(() => {
+   vi.clearAllMocks();
+ });
+@@ -406,3 +525,280 @@ describe("ql-20260911-001-c0be 明细弹窗与行联动", () => {
+     );
+   });
+ });
++
++describe("2026-09-20-scope-audit-cross-repo-platform 分组形态：三仓分组渲染", () => {
++  it("全表合计 + 主仓/跨仓段各带真实三态与锚点档；chips 数字=信封 totals 不重算；note 渲染", async () => {
++    mocks.getScopeAudit.mockResolvedValue(makeCrossRepoAudit());
++    renderCard(
++      <ScopeAuditCommandCard
++        target={{
++          kind: "change",
++          workspaceId: "ws-1",
++          changeKey: "2026-09-18-ehs-back-multi-repo",
++        }}
++      />,
++    );
++    // 三仓段头（主仓 brand 位 + 各仓锚点档 chip：label + 短 hash；spdemo 语义锚 hash 位 —）
++    expect(
++      await screen.findByTestId("scope-audit-repo-seg-main"),
++    ).toBeInTheDocument();
++    expect(screen.getByTestId("scope-audit-repo-seg-sub-grid-security")).toBeInTheDocument();
++    expect(screen.getByTestId("scope-audit-repo-seg-spdemo")).toBeInTheDocument();
++    expect(screen.getByText("主仓")).toBeInTheDocument();
++    expect(screen.getByText("sub-grid-security")).toBeInTheDocument();
++    expect(screen.getByText("214151b")).toBeInTheDocument();
++    expect(screen.getByText("a1b2c3d")).toBeInTheDocument();
++    expect(screen.getByText(/HEAD~1\.\.HEAD 最近提交窗口/)).toBeInTheDocument();
++    // 语义锚（B 档降级无 base）→ anchor_label null 显示 —
++    expect(screen.getByTestId("scope-audit-repo-seg-spdemo")).toHaveTextContent(
++      /最近提交窗口（降级——无可用 reviews）\s*—/,
++    );
++    // 全表合计行（信封 totals + 仓数；挂摘要容器断言——数字在 <b> 嵌套节点里）
++    expect(screen.getByTestId("scope-audit-summary")).toHaveTextContent(
++      "全表 46 文件",
++    );
++    expect(screen.getByText("3 个仓库")).toBeInTheDocument();
++    expect(screen.getByText("+6040")).toBeInTheDocument();
++    // 三态 chips 计数取信封 repos[].totals（rows 仅 3 行，20/13/9 只能来自信封）
++    expect(screen.getByTestId("scope-audit-chip-main-planned")).toHaveTextContent(
++      "计划内 20",
++    );
++    expect(screen.getByTestId("scope-audit-chip-main-unplanned")).toHaveTextContent(
++      "计划外 2",
++    );
++    expect(screen.getByTestId("scope-audit-chip-main-untouched")).toHaveTextContent(
++      "计划未动 0",
++    );
++    expect(
++      screen.getByTestId("scope-audit-chip-sub-grid-security-planned"),
++    ).toHaveTextContent("计划内 13");
++    expect(
++      screen.getByTestId("scope-audit-chip-sub-grid-security-unplanned"),
++    ).toHaveTextContent("计划外 1");
++    expect(screen.getByTestId("scope-audit-chip-spdemo-planned")).toHaveTextContent(
++      "计划内 9",
++    );
++    // 该仓 files/+−（spdemo 降级档行数 null → —）
++    expect(screen.getByTestId("scope-audit-repo-seg-main")).toHaveTextContent(
++      "22 文件",
++    );
++    expect(
++      screen.getByTestId("scope-audit-repo-seg-sub-grid-security"),
++    ).toHaveTextContent("14 文件");
++    expect(screen.getByTestId("scope-audit-repo-seg-spdemo")).toHaveTextContent(
++      "10 文件",
++    );
++    expect(screen.getByTestId("scope-audit-repo-seg-spdemo")).toHaveTextContent(
++      "+—",
++    );
++    expect(screen.getByTestId("scope-audit-repo-seg-spdemo")).toHaveTextContent(
++      "−—",
++    );
++    // 旧形态单段 testid 不存在（分组形态下升级为每仓前缀）
++    expect(screen.queryByTestId("scope-audit-chip-planned")).not.toBeInTheDocument();
++    // note 顶摘要层（muted 单行）
++    expect(screen.getByTestId("scope-audit-note")).toHaveTextContent(
++      "已按 local.yaml repos 注册表分仓对账",
++    );
++  });
++
++  it("degraded 仓段：整段 ⚠️ 原因文案、不渲染伪三态 chips", async () => {
++    const audit = makeCrossRepoAudit();
++    audit.repos = [
++      ...audit.repos!.slice(0, 1),
++      {
++        key: "repo-x",
++        anchor: { source: "degraded", base: null, head: null, label: null },
++        anchor_label: null,
++        totals: {
++          files: 9,
++          additions: null,
++          deletions: null,
++          planned: null,
++          unplanned: null,
++          untouched: null,
++        },
++        degraded: true,
++        degraded_reason:
++          "repo key「repo-x」未在 local.yaml repos 注册——跨仓对账不可达，请人工到对应仓核对（该仓 9 个计划文件未对账）",
++      },
++    ];
++    mocks.getScopeAudit.mockResolvedValue(audit);
++    renderCard(
++      <ScopeAuditCommandCard
++        target={{ kind: "change", workspaceId: "ws-1", changeKey: "c-multi" }}
++      />,
++    );
++    expect(
++      await screen.findByTestId("scope-audit-repo-degraded-repo-x"),
++    ).toHaveTextContent("未在 local.yaml repos 注册");
++    expect(screen.getByTestId("scope-audit-repo-degraded-repo-x")).toHaveTextContent(
++      "⚠️",
++    );
++    // degraded 段不渲染三态 chips（无伪计数）
++    expect(
++      screen.queryByTestId("scope-audit-chip-repo-x-planned"),
++    ).not.toBeInTheDocument();
++    expect(
++      screen.queryByTestId("scope-audit-chip-repo-x-unplanned"),
++    ).not.toBeInTheDocument();
++    expect(
++      screen.queryByTestId("scope-audit-chip-repo-x-untouched"),
++    ).not.toBeInTheDocument();
++  });
++});
++
++describe("2026-09-20-scope-audit-cross-repo-platform 分组形态：明细弹窗按仓分桶", () => {
++  it("桶序=repos[] 序 + 孤儿桶尾随；跨仓行仓标徽章、主仓行无徽章；null 行数 —；行点击联动不变", async () => {
++    const audit = makeCrossRepoAudit();
++    // 孤儿桶：行 cross_repo 指向 repos[] 未列出的 key（畸形信封防御）
++    audit.rows = [
++      ...audit.rows!,
++      {
++        path: "legacy/orphan.go",
++        additions: 5,
++        deletions: 1,
++        kind: "modified",
++        planned: "修改",
++        verdict: "unplanned",
++        declared: null,
++        attribution: null,
++        cross_repo: "ghost-repo",
++      },
++    ];
++    mocks.getScopeAudit.mockResolvedValue(audit);
++    renderCard(
++      <ScopeAuditCommandCard
++        target={{ kind: "change", workspaceId: "ws-1", changeKey: "2026-09-18-ehs-back-multi-repo" }}
++      />,
++    );
++    fireEvent.click(await screen.findByTestId("scope-audit-detail-entry"));
++    // 分桶小节头（粘性）：repos[] 序 main → sub-grid-security → spdemo，孤儿桶尾随
++    expect(
++      await screen.findByTestId("scope-audit-detail-group-main"),
++    ).toBeInTheDocument();
++    expect(
++      screen.getByTestId("scope-audit-detail-group-sub-grid-security"),
++    ).toBeInTheDocument();
++    expect(screen.getByTestId("scope-audit-detail-group-spdemo")).toBeInTheDocument();
++    expect(screen.getByTestId("scope-audit-detail-group-ghost-repo")).toBeInTheDocument();
++    const groups = screen
++      .getAllByTestId(/^scope-audit-detail-group-/)
++      .map((el) => el.dataset.testid);
++    expect(groups).toEqual([
++      "scope-audit-detail-group-main",
++      "scope-audit-detail-group-sub-grid-security",
++      "scope-audit-detail-group-spdemo",
++      "scope-audit-detail-group-ghost-repo",
++    ]);
++    // 跨仓行仓标徽章（brand 小标签）；主仓行无徽章
++    const crossRow = screen.getByTestId("scope-audit-row-pkg/reward/service.go");
++    expect(within(crossRow).getByText("sub-grid-security")).toBeInTheDocument();
++    const mainRow = screen.getByTestId(
++      "scope-audit-row-src/main/java/com/ehs/RewardController.java",
++    );
++    expect(within(mainRow).queryByText("main")).not.toBeInTheDocument();
++    expect(within(mainRow).queryByText("主仓")).not.toBeInTheDocument();
++    // spdemo 行（B 档降级）行数 null → —
++    const spdemoRow = screen.getByTestId("scope-audit-row-app/demo/page.tsx");
++    expect(spdemoRow).toHaveTextContent("+—");
++    // 行点击联动单文件 diff 不变（分组形态 DetailRow 同一 onOpenDiff 链路）
++    mocks.getScopeFileDiff.mockResolvedValue({
++      change: "2026-09-18-ehs-back-multi-repo",
++      file: "pkg/reward/service.go",
++      ok: true,
++      mode: "full-flow",
++      base_ref: "a1b2c3d",
++      anchor_label: "a1b2c3d",
++      diff: "@@ -1 +1 @@\n-a\n+b\n",
++      note: null,
++      truncated: false,
++    });
++    fireEvent.click(crossRow);
++    expect(await screen.findByText("文件变化比对")).toBeInTheDocument();
++    await waitFor(() =>
++      expect(mocks.getScopeFileDiff).toHaveBeenCalledWith(
++        "ws-1",
++        "2026-09-18-ehs-back-multi-repo",
++        "pkg/reward/service.go",
++      ),
++    );
++  });
++});
++
++describe("2026-09-20-scope-audit-cross-repo-platform 回退形态：无 repos 渲染与现状等价", () => {
++  it("无 repos 单段（旧 testid）+ note 不渲染；旧形态跨仓行归主仓平铺渲染、无分组头与仓标", async () => {
++    // 旧 CLI/旧 daemon：信封无 repos 键（或空数组）；note 非 null 也不渲染（兼容策略 6）；
++    // 行可能带 cross_repo 键（v3.29.3~v2 间旧快照 ⊘ 标记）→ 回退形态不消费、按普通行渲染。
++    mocks.getScopeAudit.mockResolvedValue({
++      change: "2026-09-10-mcp-central-registry",
++      ok: true,
++      mode: "full-flow",
++      base_ref: "3f22d6b9b6d1f85415be416c5086e29cfd9998a4",
++      anchor_label: "3f22d6b",
++      degraded_reason: null,
++      totals: { files: 3, additions: 436, deletions: 19 },
++      rows: [
++        {
++          path: "src/index.js",
++          additions: 426,
++          deletions: 17,
++          kind: "modified",
++          planned: "修改",
++          verdict: "planned",
++          declared: null,
++          attribution: null,
++          cross_repo: null,
++        },
++        {
++          path: "vendor/legacy.ts",
++          additions: 10,
++          deletions: 2,
++          kind: "modified",
++          planned: null,
++          verdict: "untouched",
++          declared: null,
++          attribution: null,
++          cross_repo: "some-old-repo",
++        },
++      ],
++      excluded_foreign_declared: [],
++      note: "旧快照 note 不应在回退形态渲染",
++      truncated: false,
++    });
++    renderCard(
++      <ScopeAuditCommandCard
++        target={{
++          kind: "change",
++          workspaceId: "ws-1",
++          changeKey: "2026-09-10-mcp-central-registry",
++        }}
++      />,
++    );
++    // 单段：既有 testid 原样（counts-from-rows：planned 1 / untouched 1）
++    expect(
++      await screen.findByTestId("scope-audit-chip-planned"),
++    ).toHaveTextContent("计划内 1");
++    expect(screen.getByTestId("scope-audit-chip-untouched")).toHaveTextContent(
++      "计划未动 1",
++    );
++    expect(screen.getByTestId("scope-audit-summary")).toHaveTextContent("锚点");
++    // 分组形态 testid 均不出现；note 不渲染
++    expect(screen.queryByTestId("scope-audit-repo-seg-main")).not.toBeInTheDocument();
++    expect(screen.queryByTestId("scope-audit-note")).not.toBeInTheDocument();
++    expect(screen.queryByText("旧快照 note 不应在回退形态渲染")).not.toBeInTheDocument();
++    // 明细平铺：跨仓行按普通行渲染（无分桶头、无仓标徽章）
++    fireEvent.click(screen.getByTestId("scope-audit-detail-entry"));
++    expect(
++      await screen.findByTestId("scope-audit-row-vendor/legacy.ts"),
++    ).toBeInTheDocument();
++    expect(
++      screen.queryByTestId("scope-audit-detail-group-main"),
++    ).not.toBeInTheDocument();
++    expect(
++      within(screen.getByTestId("scope-audit-row-vendor/legacy.ts")).queryByText(
++        "some-old-repo",
++      ),
++    ).not.toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/changes/scope-audit-command-card.tsx b/frontend/src/components/changes/scope-audit-command-card.tsx
+index 0ddb047e4..a044581b4 100644
+--- a/frontend/src/components/changes/scope-audit-command-card.tsx
++++ b/frontend/src/components/changes/scope-audit-command-card.tsx
+@@ -9,6 +9,15 @@
+  * 卡面显示锚点 + 文件/行数合计 + 三态计数（full-flow：✓ 计划内 / ⚠️ 计划外 /
+  * ⚠️ 计划未动；quick：✓ 已声明 / 🔍 软归属 / ⚠️ 未声明），「查看明细」开宽
+  * 弹窗渲染三态全表（行点击联动 scope-file-diff-modal 看单文件 diff）。
++ *
++ * 契约 v2 分组形态（2026-09-20-scope-audit-cross-repo-platform，D-003/D-005）：
++ * 信封 repos 非空数组且 mode==='full-flow' 时卡面按仓分组——全表合计行 +
++ * 每仓一段（仓标识/锚点档 chip/三态 chips 计数取信封 repos[].totals 单一源），
++ * degraded 仓段整段 ⚠️ 原因不渲染 chips；明细弹窗按行 cross_repo 分桶（无键归
++ * main 桶，桶序=repos[] 序，孤儿桶尾随首现序）+ 粘性小节头 + 跨仓行仓标徽章；
++ * note 顶摘要层。repos 空/null 或 quick → 现状单段渲染回退（DOM/testid 原样，
++ * note 不渲染——兼容策略 6）。
++ *
+  * 两条本地命令（表格版 / --json 版）折叠为卡尾次要区保留——链路不可用
+  * （旧版本/离线）时的兜底与 CLI 习惯入口。
+  *
+@@ -22,7 +31,7 @@
+  * 全部命令经 buildScopeAuditCommand 拼接。
+  */
+ 
+-import { useMemo, useState } from "react";
++import { Fragment, useMemo, useState } from "react";
+ import { useQuery } from "@tanstack/react-query";
+ import { Modal } from "antd";
+ 
+@@ -37,6 +46,8 @@ import { cn } from "@/lib/utils";
+ /** 心跳 sillyspec_status.changes[] 单项（api-types 生成版，禁止手写）。 */
+ type SillySpecChange = components["schemas"]["DaemonHeartbeatSillySpecChange"];
+ type SillySpecStatus = components["schemas"]["MachineSillySpecStatusRead"];
++/** 信封级 repos[] 单项（契约 v2，api-types 生成版，禁止手写）。 */
++type ScopeAuditRepoDto = components["schemas"]["ScopeAuditRepo"];
+ 
+ /** scope-audit 命令前缀（单一取值点，2026-09-10 由 node src/index.js 切换）。 */
+ export const SCOPE_AUDIT_CMD_PREFIX = "sillyspec";
+@@ -150,6 +161,83 @@ function fmtNum(n: number | null | undefined): string {
+   return typeof n === "number" ? String(n) : "—";
+ }
+ 
++/** 仓标识显示名：main → 「主仓」（brand 色由调用方上），其余显示 repo key 原文。 */
++function repoDisplayName(key: string): string {
++  return key === "main" ? "主仓" : key;
++}
++
++/**
++ * 仓锚点档 chip（契约 v2，2026-09-20-scope-audit-cross-repo-platform）：
++ * anchor.label 文案 + anchor_label 短 hash（base 7 位短化，daemon 侧产出）；
++ * 语义锚（B/C 档降级无 base）anchor_label=null → hash 位显示 —。
++ * 卡面仓段头与明细弹窗小节头共用同一形态。
++ */
++function RepoAnchorChip({ repo }: { repo: ScopeAuditRepoDto }) {
++  const label = repo.anchor?.label ?? null;
++  const hash = repo.anchor_label ?? null;
++  return (
++    <span className="rounded bg-muted px-1.5 py-px font-mono text-[10px] leading-4 text-muted-foreground">
++      {label ? `${label} ` : ""}
++      <span className="font-semibold text-foreground">{hash ?? "—"}</span>
++    </span>
++  );
++}
++
++/**
++ * 明细行渲染（回退平铺与按仓分桶共用；行点击联动单文件 diff 不变）。
++ * repoBadge 非空时（分组形态下的跨仓行）在路径后加仓标徽章（brand 色小标签，
++ * 对齐 ATTR_META soft 形态——design D-003）。
++ */
++function DetailRow({
++  row,
++  mode,
++  repoBadge,
++  onOpenDiff,
++}: {
++  row: ScopeAuditRow;
++  mode: string;
++  repoBadge?: string | null;
++  onOpenDiff: (path: string) => void;
++}) {
++  const badge = rowBadge(row, mode);
++  return (
++    <li className="border-b last:border-b-0">
++      <button
++        type="button"
++        data-testid={`scope-audit-row-${row.path}`}
++        onClick={() => onOpenDiff(row.path)}
++        title="点击查看该文件的变化比对（对账同源锚点 diff）"
++        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/60"
++      >
++        <span
++          className={cn(
++            "shrink-0 rounded px-1 text-[10px] leading-4",
++            badge.className,
++          )}
++        >
++          {badge.label}
++        </span>
++        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
++          {row.path}
++        </span>
++        {repoBadge && (
++          <span className="shrink-0 rounded bg-brand-50 px-1 text-[10px] leading-4 text-brand-700">
++            {repoBadge}
++          </span>
++        )}
++        <span className="shrink-0 text-[10px] text-muted-foreground">
++          {KIND_LABEL[row.kind] ?? row.kind}
++        </span>
++        <span className="shrink-0 font-mono text-[11px] tabular-nums">
++          <span className="text-success">+{fmtNum(row.additions)}</span>
++          <span className="mx-1 text-muted-foreground">/</span>
++          <span className="text-error">−{fmtNum(row.deletions)}</span>
++        </span>
++      </button>
++    </li>
++  );
++}
++
+ /** 单行命令 + 复制按钮（复制交互对齐 change-stage-actions 内联先例）。 */
+ function CommandRow({
+   label,
+@@ -253,6 +341,48 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
+     return map;
+   }, [audit]);
+ 
++  // 分组激活（契约 v2，D-002/D-003）：repos 非空数组且 mode==='full-flow' → 按仓分组
++  // 形态；repos 空/null（旧 CLI/旧 daemon/单仓变更）或 quick → 现状单段渲染（回退，
++  // DOM/testid 原样，note 不渲染——兼容策略 6）。
++  const groupedRepos =
++    audit?.mode === "full-flow" &&
++    Array.isArray(audit.repos) &&
++    audit.repos.length > 0
++      ? audit.repos
++      : null;
++
++  // 明细分桶（仅分组形态）：行 cross_repo ?? 'main' 归桶；桶序 = repos[] 序（main
++  // 首位，CLI 保证），repos[] 未列出的孤儿 repo 桶按首现顺序尾随（Map 插入序）。
++  // chips 计数单一源是信封 repos[].totals——分桶只管行归属，两者不一致时以信封为准
++  // （CLI 单一源原则，design 消费语义）。
++  const detailBuckets = useMemo(() => {
++    if (!groupedRepos) return null;
++    const rows = audit?.rows ?? [];
++    const byKey = new Map<string, ScopeAuditRow[]>();
++    for (const r of rows) {
++      const key = r.cross_repo ?? "main";
++      const bucket = byKey.get(key);
++      if (bucket) bucket.push(r);
++      else byKey.set(key, [r]);
++    }
++    const ordered: {
++      repo: ScopeAuditRepoDto | null;
++      key: string;
++      rows: ScopeAuditRow[];
++    }[] = [];
++    for (const repo of groupedRepos) {
++      const bucket = byKey.get(repo.key);
++      if (bucket) {
++        ordered.push({ repo, key: repo.key, rows: bucket });
++        byKey.delete(repo.key);
++      }
++    }
++    for (const [key, bucket] of byKey) {
++      ordered.push({ repo: null, key, rows: bucket });
++    }
++    return ordered;
++  }, [audit, groupedRepos]);
++
+   // 明细弹窗 + 行点击联动的单文件 diff 弹窗。
+   const [detailOpen, setDetailOpen] = useState(false);
+   const [diffRow, setDiffRow] = useState<string | null>(null);
+@@ -303,6 +433,116 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
+     const order = isQuick
+       ? ["declared", "soft", "undeclared"]
+       : ["planned", "unplanned", "untouched"];
++
++    // 分组形态（契约 v2，2026-09-20-scope-audit-cross-repo-platform，D-003/D-005）：
++    // 全表合计行 + 每仓一段（段头=仓标识+锚点档 chip；chips 计数取信封
++    // repos[].totals 单一源，不前端重算）；degraded 仓段整段 ⚠️ 原因不渲染 chips。
++    if (groupedRepos) {
++      const verdictOrder = ["planned", "unplanned", "untouched"] as const;
++      return (
++        <>
++          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
++            <span>
++              全表{" "}
++              <b className="font-mono font-semibold text-foreground">
++                {audit.totals?.files ?? (audit.rows?.length ?? 0)}
++              </b>{" "}
++              文件
++            </span>
++            <span>
++              <span className="text-success">+{fmtNum(audit.totals?.additions)}</span>{" "}
++              /{" "}
++              <span className="text-error">−{fmtNum(audit.totals?.deletions)}</span>
++            </span>
++            <span>{groupedRepos.length} 个仓库</span>
++          </p>
++          {groupedRepos.map((repo) => (
++            <div
++              key={repo.key}
++              data-testid={`scope-audit-repo-seg-${repo.key}`}
++              className="mt-2 border-t border-dashed border-border pt-2"
++            >
++              <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
++                <span
++                  className={cn(
++                    "text-xs font-semibold",
++                    repo.key === "main" ? "text-brand-700" : "text-foreground",
++                  )}
++                >
++                  {repoDisplayName(repo.key)}
++                </span>
++                <RepoAnchorChip repo={repo} />
++              </div>
++              {repo.degraded ? (
++                <p
++                  className="mt-1.5 text-[11px] leading-relaxed text-warning"
++                  data-testid={`scope-audit-repo-degraded-${repo.key}`}
++                >
++                  ⚠️{" "}
++                  {repo.degraded_reason ??
++                    "该仓跨仓对账不可达（未注册/路径不可达），请人工到对应仓核对"}
++                </p>
++              ) : (
++                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
++                  {verdictOrder.map((verdict) => {
++                    const meta = VERDICT_META[verdict];
++                    if (!meta) return null;
++                    return (
++                      <span
++                        key={verdict}
++                        data-testid={`scope-audit-chip-${repo.key}-${verdict}`}
++                        className={cn(
++                          "rounded-full px-2 py-px text-[11px] font-medium",
++                          meta.className,
++                        )}
++                      >
++                        {meta.label} {repo.totals?.[verdict] ?? 0}
++                      </span>
++                    );
++                  })}
++                  <span className="ml-auto text-[11px] text-muted-foreground">
++                    {fmtNum(repo.totals?.files)} 文件{" "}
++                    <span className="text-success">
++                      +{fmtNum(repo.totals?.additions)}
++                    </span>{" "}
++                    /{" "}
++                    <span className="text-error">
++                      −{fmtNum(repo.totals?.deletions)}
++                    </span>
++                  </span>
++                </div>
++              )}
++            </div>
++          ))}
++          {audit.note && (
++            <p
++              className="mt-2 border-t border-dashed border-border pt-1.5 text-[11px] leading-relaxed text-muted-foreground"
++              data-testid="scope-audit-note"
++            >
++              {audit.note}
++            </p>
++          )}
++          <div className="mt-2 flex flex-wrap items-center justify-end gap-1.5">
++            <Button
++              size="sm"
++              variant="outline"
++              className="h-6 px-2 text-[11px]"
++              onClick={() => setDetailOpen(true)}
++              data-testid="scope-audit-detail-entry"
++            >
++              查看明细（{audit.rows?.length ?? 0}）
++            </Button>
++          </div>
++          {audit.truncated && (
++            <p className="mt-1 text-[11px] text-warning">
++              差异文件过多，明细表已截断（仅前 500 行）。
++            </p>
++          )}
++          <CommandSection identifier={identifier} />
++        </>
++      );
++    }
++
+     return (
+       <>
+         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+@@ -397,40 +637,48 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
+           data-testid="scope-audit-detail-rows"
+           className="max-h-[calc(100vh-320px)] min-h-[240px] overflow-auto rounded border bg-card"
+         >
+-          {(audit?.rows ?? []).map((row) => {
+-            const badge = rowBadge(row, audit?.mode ?? "full-flow");
+-            return (
+-              <li key={row.path} className="border-b last:border-b-0">
+-                <button
+-                  type="button"
+-                  data-testid={`scope-audit-row-${row.path}`}
+-                  onClick={() => setDiffRow(row.path)}
+-                  title="点击查看该文件的变化比对（对账同源锚点 diff）"
+-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/60"
+-                >
+-                  <span
+-                    className={cn(
+-                      "shrink-0 rounded px-1 text-[10px] leading-4",
+-                      badge.className,
+-                    )}
+-                  >
+-                    {badge.label}
+-                  </span>
+-                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
+-                    {row.path}
+-                  </span>
+-                  <span className="shrink-0 text-[10px] text-muted-foreground">
+-                    {KIND_LABEL[row.kind] ?? row.kind}
+-                  </span>
+-                  <span className="shrink-0 font-mono text-[11px] tabular-nums">
+-                    <span className="text-success">+{fmtNum(row.additions)}</span>
+-                    <span className="mx-1 text-muted-foreground">/</span>
+-                    <span className="text-error">−{fmtNum(row.deletions)}</span>
+-                  </span>
+-                </button>
+-              </li>
+-            );
+-          })}
++          {detailBuckets
++            ? detailBuckets.map((bucket) => {
++                const repo = bucket.repo;
++                return (
++                  <Fragment key={bucket.key}>
++                    {/* 粘性小节头：仓标识 + 该仓锚点档（孤儿桶无信封条目，仅显示 key） */}
++                    <li
++                      data-testid={`scope-audit-detail-group-${bucket.key}`}
++                      className="sticky top-0 z-10 flex flex-wrap items-baseline gap-x-2 border-b bg-muted px-3 py-1"
++                    >
++                      <span
++                        className={cn(
++                          "text-[11px] font-semibold",
++                          bucket.key === "main"
++                            ? "text-brand-700"
++                            : "text-foreground",
++                        )}
++                      >
++                        {repoDisplayName(bucket.key)}
++                      </span>
++                      {repo && <RepoAnchorChip repo={repo} />}
++                    </li>
++                    {bucket.rows.map((row) => (
++                      <DetailRow
++                        key={row.path}
++                        row={row}
++                        mode={audit?.mode ?? "full-flow"}
++                        repoBadge={bucket.key === "main" ? null : bucket.key}
++                        onOpenDiff={setDiffRow}
++                      />
++                    ))}
++                  </Fragment>
++                );
++              })
++            : (audit?.rows ?? []).map((row) => (
++                <DetailRow
++                  key={row.path}
++                  row={row}
++                  mode={audit?.mode ?? "full-flow"}
++                  onOpenDiff={setDiffRow}
++                />
++              ))}
+           {(audit?.rows?.length ?? 0) === 0 && (
+             <li className="px-3 py-6 text-center text-xs text-muted-foreground">
+               无对账行
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index a67c7e3ba..b9c3608e8 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -22391,12 +22391,80 @@ export interface components {
+             /** Cancelled At */
+             cancelled_at?: string | null;
+         };
++        /**
++         * ScopeAuditRepo
++         * @description 跨仓对账 per-repo 汇总条目（信封级 repos[] 单项）。
++         *
++         *     ``key`` 为仓标识（'main' 或 local.yaml repos 注册 key，main 条目始终
++         *     首位）；``anchor``/``anchor_label`` 为该仓锚点档（label 扁平冗余一份，
++         *     供表尾汇总行直取）；``degraded``/``degraded_reason`` 为降级标记与原因
++         *     （仓未注册/路径不可达/git 不可用等，degraded 仓该组行退 ⊘ 形态）。
++         *     producer = daemon RPC 投影 repos[]，consumer = 前端按仓分组卡
++         *     （gen:types 经 task-03）。
++         */
++        ScopeAuditRepo: {
++            /** Key */
++            key: string;
++            anchor?: components["schemas"]["ScopeAuditRepoAnchor"];
++            /** Anchor Label */
++            anchor_label?: string | null;
++            totals?: components["schemas"]["ScopeAuditRepoTotals"];
++            /**
++             * Degraded
++             * @default false
++             */
++            degraded: boolean;
++            /** Degraded Reason */
++            degraded_reason?: string | null;
++        };
++        /**
++         * ScopeAuditRepoAnchor
++         * @description 仓库对账锚点档（锚点分级 A/B/C/degraded 的统一描述）。
++         *
++         *     ``source`` 为档位标识（reviews-range / head~1-window /
++         *     head-uncommitted-window / degraded，main 条目为 main-<form> 主仓锚
++         *     包装）；``base``/``head`` 为该仓 diff 区间 commit（B/C 档与 degraded
++         *     档为 None）；``label`` 为人类可读档位描述（表尾汇总行直接用）。
++         *     全字段缺省 None——daemon 缺键/非法形态时防御构造不炸。
++         */
++        ScopeAuditRepoAnchor: {
++            /** Source */
++            source?: string | null;
++            /** Base */
++            base?: string | null;
++            /** Head */
++            head?: string | null;
++            /** Label */
++            label?: string | null;
++        };
++        /**
++         * ScopeAuditRepoTotals
++         * @description 仓库行合计与三态计数（仅计该仓行；全 int|None——B/C 降级档行数
++         *     不可得时 additions/deletions 为 None，不计入合计）。
++         */
++        ScopeAuditRepoTotals: {
++            /** Files */
++            files?: number | null;
++            /** Additions */
++            additions?: number | null;
++            /** Deletions */
++            deletions?: number | null;
++            /** Planned */
++            planned?: number | null;
++            /** Unplanned */
++            unplanned?: number | null;
++            /** Untouched */
++            untouched?: number | null;
++        };
+         /**
+          * ScopeAuditResponse
+          * @description 对账表（daemon sillyspec_scope_audit RPC 透传投影）。
+          *
+          *     ok=false 时 degraded_reason 带原因（quick 会话不存在等），rows 为空。
+          *     truncated：rows 超 500 被 daemon 侧截断。
++         *     ``repos``（契约 v2，2026-09-20-scope-audit-cross-repo-platform）：仅当
++         *     计划侧含跨仓条目且非预执行形态时 daemon 才输出；单仓变更/旧 daemon/
++         *     无 repos 键 → 空列表回退（零回归）。
+          */
+         ScopeAuditResponse: {
+             /** Change */
+@@ -22426,6 +22494,8 @@ export interface components {
+              * @default false
+              */
+             truncated: boolean;
++            /** Repos */
++            repos?: components["schemas"]["ScopeAuditRepo"][];
+         };
+         /**
+          * ScopeAuditRow
+@@ -22453,6 +22523,8 @@ export interface components {
+             declared?: boolean | null;
+             /** Attribution */
+             attribution?: string | null;
++            /** Cross Repo */
++            cross_repo?: string | null;
+         };
+         /** ScopeAuditTotals */
+         ScopeAuditTotals: {
+diff --git a/sillyhub-daemon/src/sillyspec-manager.ts b/sillyhub-daemon/src/sillyspec-manager.ts
+index e28e63dbd..b68d9200a 100644
+--- a/sillyhub-daemon/src/sillyspec-manager.ts
++++ b/sillyhub-daemon/src/sillyspec-manager.ts
+@@ -380,7 +380,10 @@ export const SILLYSPEC_AUDIT_ROWS_MAX = 500;
+ 
+ /** 对账表单行：full-flow 带 verdict（planned/unplanned/untouched）+ planned（design
+  * 文件清单原话，如「修改」），quick 带 attribution（declared/soft/undeclared）+
+- * declared——两组字段互斥（按 mode 取用），行数 additions/deletions 二进制为 null。 */
++ * declared——两组字段互斥（按 mode 取用），行数 additions/deletions 二进制为 null。
++ * 契约 v2（2026-09-20-scope-audit-cross-repo-platform）：跨仓行增 cross_repo
++ * （所属 repoKey，raw.crossRepo 透传——v1「⊘ 本表不含」升级为已按仓对账）；
++ * 主仓行/旧 CLI 无键 → null。 */
+ export interface SillySpecAuditRow {
+   path: string;
+   additions: number | null;
+@@ -390,6 +393,42 @@ export interface SillySpecAuditRow {
+   verdict?: string | null;
+   declared?: boolean | null;
+   attribution?: string | null;
++  cross_repo?: string | null;
++}
++
++// ── 2026-09-20-scope-audit-cross-repo-platform task-01：契约 v2 逐仓汇总类型 ──
++
++/** 契约 v2 repos[].anchor 投影：锚点档四字段（source 档位名 / base / head
++ * commit / 人类可读 label，与上游 collectRepoActual 锚点分级对齐）；degraded
++ * 档 base/head=null。 */
++export interface SillySpecAuditRepoAnchor {
++  source: string | null;
++  base: string | null;
++  head: string | null;
++  label: string | null;
++}
++
++/** 契约 v2 repos[].totals 投影：该仓行合计与三态计数（六字段）。 */
++export interface SillySpecAuditRepoTotals {
++  files: number | null;
++  additions: number | null;
++  deletions: number | null;
++  planned: number | null;
++  unplanned: number | null;
++  untouched: number | null;
++}
++
++/** 契约 v2 repos[] 逐仓汇总条目（防御投影）。repoPath 不投影——仓根绝对路径
++ * 不出 daemon（D-001）。anchor_label：hash 锚短化 7 位；语义锚/无 base → null
++ * （D-004@v2——仓级人类可读档位由 anchor.label 承载，与信封 anchor_label 的
++ * 语义锚原样透传口径不同）。 */
++export interface SillySpecAuditRepo {
++  key: string;
++  anchor: SillySpecAuditRepoAnchor;
++  anchor_label: string | null;
++  totals: SillySpecAuditRepoTotals;
++  degraded: boolean;
++  degraded_reason: string | null;
+ }
+ 
+ /** sillyspec_scope_audit RPC result（表模式信封投影 + rows 截断护栏）。 */
+@@ -405,6 +444,8 @@ export interface SillySpecAuditTable {
+   degraded_reason: string | null;
+   totals: { files: number; additions: number | null; deletions: number | null };
+   rows: SillySpecAuditRow[];
++  /** per-repo 逐仓汇总（契约 v2）；旧 CLI 无 repos 键 → null（回退零回归）。 */
++  repos: SillySpecAuditRepo[] | null;
+   /** 他者已声明文件（quick 窗口剔除清单）。 */
+   excluded_foreign_declared: string[];
+   note: string | null;
+@@ -1522,6 +1563,9 @@ export class SillySpecManager {
+    * verdict 计划内/计划外/计划未动；quick：attribution 已声明/软归属/未声明）
+    * + 行数，锚点与 --file 同源。锚点短化（表头同款 7 位短 hash）；rows 超
+    * 护栏截断置 truncated（totals 仍为工具原值，截断信息见 truncated）。
++   * 契约 v2（2026-09-20-scope-audit-cross-repo-platform task-01）：行级
++   * cross_repo 透传 + 信封 repos[] 逐仓防御投影（旧 CLI 无键/非数组 → null
++   * 回退；repoPath 不投影——D-001 仓根不出 daemon）。
+    *
+    * @throws {RpcError} invalid_params / no_spec_root / sillyspec_bin_missing /
+    *   scope_audit_timeout / sillyspec_capability_missing / scope_audit_failed
+@@ -1566,9 +1610,53 @@ export class SillySpecManager {
+         verdict: asStr(raw.verdict),
+         declared: typeof raw.declared === 'boolean' ? raw.declared : null,
+         attribution: asStr(raw.attribution),
++        // 契约 v2：跨仓行 repoKey 透传（v1「⊘ 本表不含」升级为已按仓对账）；
++        // 主仓行/旧 CLI 无键 → null
++        cross_repo: asStr(raw.crossRepo),
+       });
+       if (rows.length >= SILLYSPEC_AUDIT_ROWS_MAX) break;
+     }
++    // 契约 v2 信封 repos[] 逐仓汇总：无键/非数组（旧 CLI）→ null 回退；是数组
++    // 则逐条防御投影（isRecord + key 非空 string 否则整条跳过）；repoPath 不投影
++    // （D-001：仓根绝对路径不出 daemon）。
++    const rawRepos = Array.isArray(parsed.repos) ? parsed.repos : null;
++    let repos: SillySpecAuditRepo[] | null = null;
++    if (rawRepos !== null) {
++      repos = [];
++      for (const rawRepo of rawRepos) {
++        if (!isRecord(rawRepo)) continue;
++        const key = asStr(rawRepo.key);
++        if (key === null) continue;
++        const anchorRaw = isRecord(rawRepo.anchor) ? rawRepo.anchor : {};
++        const anchorBase = asStr(anchorRaw.base);
++        const totalsRaw = isRecord(rawRepo.totals) ? rawRepo.totals : {};
++        repos.push({
++          key,
++          anchor: {
++            source: asStr(anchorRaw.source),
++            base: anchorBase,
++            head: asStr(anchorRaw.head),
++            label: asStr(anchorRaw.label),
++          },
++          // hash 锚短化 7 位（与信封 anchor_label 同款正则）；语义锚/无 base →
++          // null（D-004@v2——仓级人类可读档位由 anchor.label 承载）
++          anchor_label:
++            anchorBase !== null && /^[0-9a-f]{7,40}$/.test(anchorBase)
++              ? anchorBase.slice(0, 7)
++              : null,
++          totals: {
++            files: asCount(totalsRaw.files),
++            additions: asCount(totalsRaw.additions),
++            deletions: asCount(totalsRaw.deletions),
++            planned: asCount(totalsRaw.planned),
++            unplanned: asCount(totalsRaw.unplanned),
++            untouched: asCount(totalsRaw.untouched),
++          },
++          degraded: rawRepo.degraded === true,
++          degraded_reason: asStr(rawRepo.degradedReason),
++        });
++      }
++    }
+     const excluded = isRecord(parsed.excluded) && Array.isArray(parsed.excluded.foreignDeclared)
+       ? parsed.excluded.foreignDeclared.filter((p): p is string => typeof p === 'string')
+       : [];
+@@ -1592,6 +1680,7 @@ export class SillySpecManager {
+         deletions: asCount((isRecord(parsed.totals) ? parsed.totals.deletions : null)),
+       },
+       rows,
++      repos,
+       excluded_foreign_declared: excluded,
+       note: asStr(parsed.note),
+       truncated: rows.length >= SILLYSPEC_AUDIT_ROWS_MAX && rawRows.length > rows.length,
+diff --git a/sillyhub-daemon/tests/sillyspec-file-diff.test.ts b/sillyhub-daemon/tests/sillyspec-file-diff.test.ts
+index c6e3fb777..067910fca 100644
+--- a/sillyhub-daemon/tests/sillyspec-file-diff.test.ts
++++ b/sillyhub-daemon/tests/sillyspec-file-diff.test.ts
+@@ -336,6 +336,7 @@ describe('ql-20260911-001-c0be manager.auditTable：表模式投影', () => {
+     expect(result.rows[0]).toEqual({
+       path: 'src/index.js', additions: 426, deletions: 17, kind: 'modified',
+       planned: '修改', verdict: 'planned', declared: null, attribution: null,
++      cross_repo: null,
+     });
+     // 二进制行行数 null 原样（不出伪数据）
+     expect(result.rows[2]!.additions).toBeNull();
+@@ -391,6 +392,185 @@ describe('ql-20260911-001-c0be manager.auditTable：表模式投影', () => {
+       code: 'sillyspec_capability_missing',
+     });
+   });
++
++  // ── 契约 v2（2026-09-20-scope-audit-cross-repo-platform task-01）：跨仓对账投影 ──
++
++  it('契约 v2 信封（三仓 repos[] + 跨仓行）→ repos 逐字段投影（序保持/锚短化/degraded）+ 行级 cross_repo 透传；序列化不含 repoPath（D-001）', async () => {
++    // 夹具按上游契约示例的三仓形态造（main + sub-grid-security + spdemo），
++    // 外加一条 degraded 档（未注册仓）——语义锚档（head~1-window、base=null）
++    // 与 degraded 档各一，覆盖 anchor_label 的全部取值分支。
++    const h = makeFileDiffHarness({
++      outcome: {
++        code: 0,
++        stdout: JSON.stringify({
++          command: 'scope-audit',
++          change: '2026-09-15-ehs-reward-punishment',
++          mode: 'full-flow',
++          ok: true,
++          degradedReason: null,
++          baseAnchor: '214151b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8',
++          totals: { files: 46, additions: 6040, deletions: 340 },
++          rows: [
++            { path: 'src/main/java/.../RewardController.java', planned: '修改', additions: 210, deletions: 18, kind: 'modified', verdict: 'planned' },
++            { path: 'pkg/reward/service.go', planned: '新增', additions: 430, deletions: 0, kind: 'new', verdict: 'planned', crossRepo: 'sub-grid-security' },
++            { path: 'pkg/reward/legacy.go', planned: null, additions: 55, deletions: 12, kind: 'modified', verdict: 'unplanned', crossRepo: 'sub-grid-security' },
++            { path: 'app/demo/page.tsx', planned: '修改', additions: null, deletions: null, kind: 'modified', verdict: 'untouched', crossRepo: 'spdemo' },
++            { path: 'legacy/x.go', planned: null, additions: null, deletions: null, kind: 'modified', verdict: 'untouched', crossRepo: 'legacy-sub' },
++          ],
++          repos: [
++            { key: 'main', repoPath: null,
++              anchor: { source: 'main-post-apply', base: '214151b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8', head: null, label: 'post-apply 主仓锚' },
++              totals: { files: 22, additions: 5300, deletions: 310, planned: 20, unplanned: 2, untouched: 0 },
++              degraded: false, degradedReason: null },
++            { key: 'sub-grid-security', repoPath: 'E:/PZwangge/sub-grid-security',
++              anchor: { source: 'reviews-range', base: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8', head: 'e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3', label: 'reviews base..head（execute task 锡点，2 task 区间并集）' },
++              totals: { files: 14, additions: 740, deletions: 30, planned: 13, unplanned: 1, untouched: 0 },
++              degraded: false, degradedReason: null },
++            { key: 'spdemo', repoPath: 'E:/PZwangge/spdemo',
++              anchor: { source: 'head~1-window', base: null, head: null, label: 'HEAD~1..HEAD 最近提交窗口（降级——无可用 reviews）' },
++              totals: { files: 10, additions: 0, deletions: 0, planned: 9, unplanned: 1, untouched: 0 },
++              degraded: false, degradedReason: null },
++            { key: 'legacy-sub', repoPath: null,
++              anchor: { source: 'degraded', base: null, head: null, label: 'degraded' },
++              totals: { files: 9, additions: 0, deletions: 0, planned: 0, unplanned: 0, untouched: 9 },
++              degraded: true, degradedReason: 'repo key「legacy-sub」未在 local.yaml repos 注册——跨仓对账不可达，请人工到对应仓核对' },
++          ],
++          excluded: { foreignDeclared: [] },
++          note: '计划侧含 22 个跨仓文件（repo：sub-grid-security、spdemo）——已按 local.yaml repos 注册表分仓对账（各仓锚点档见 repos[].anchor）',
++        }),
++        timedOut: false,
++      },
++    });
++    const result = await h.manager.auditTable('2026-09-15-ehs-reward-punishment');
++    // 行级：主仓行 cross_repo=null（无键归 null）；跨仓行 repoKey 原样透传
++    expect(result.rows[0]).toEqual({
++      path: 'src/main/java/.../RewardController.java', additions: 210, deletions: 18,
++      kind: 'modified', planned: '修改', verdict: 'planned',
++      declared: null, attribution: null, cross_repo: null,
++    });
++    expect(result.rows[1]!.cross_repo).toBe('sub-grid-security');
++    expect(result.rows[2]!.cross_repo).toBe('sub-grid-security');
++    expect(result.rows[3]!.cross_repo).toBe('spdemo');
++    expect(result.rows[4]!.cross_repo).toBe('legacy-sub');
++    // 信封 repos[]：数组序保持（main 首位）+ reviews-range 档逐字段投影
++    expect(result.repos!.map((r) => r.key)).toEqual([
++      'main', 'sub-grid-security', 'spdemo', 'legacy-sub',
++    ]);
++    expect(result.repos![1]).toEqual({
++      key: 'sub-grid-security',
++      anchor: {
++        source: 'reviews-range',
++        base: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8',
++        head: 'e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3',
++        label: 'reviews base..head（execute task 锡点，2 task 区间并集）',
++      },
++      anchor_label: 'a1b2c3d',
++      totals: { files: 14, additions: 740, deletions: 30, planned: 13, unplanned: 1, untouched: 0 },
++      degraded: false,
++      degraded_reason: null,
++    });
++    // main 档 hash 锚同样短化 7 位
++    expect(result.repos![0]!.anchor_label).toBe('214151b');
++    // 语义锚档（head~1-window、base=null）→ anchor_label=null（D-004@v2）
++    expect(result.repos![2]!.anchor.source).toBe('head~1-window');
++    expect(result.repos![2]!.anchor_label).toBeNull();
++    // degraded 档：degraded=true + degraded_reason 透传 + 锚四字段 null 化
++    expect(result.repos![3]).toMatchObject({
++      degraded: true,
++      anchor: { source: 'degraded', base: null, head: null, label: 'degraded' },
++      anchor_label: null,
++      degraded_reason: 'repo key「legacy-sub」未在 local.yaml repos 注册——跨仓对账不可达，请人工到对应仓核对',
++    });
++    // D-001：repoPath 不投影——序列化结果不含键名与仓根路径值
++    const serialized = JSON.stringify(result);
++    expect(serialized).not.toContain('repoPath');
++    expect(serialized).not.toContain('E:/PZwangge');
++  });
++
++  it('无 repos 键（旧 CLI）→ repos=null 回退，其余投影与现状逐字段一致；repos 非数组同样回退 null', async () => {
++    const h = makeFileDiffHarness({
++      outcome: {
++        code: 0,
++        stdout: JSON.stringify({
++          command: 'scope-audit',
++          change: '2026-09-10-change-scope-audit',
++          mode: 'full-flow',
++          ok: true,
++          degradedReason: null,
++          baseAnchor: '3f22d6b9b6d1f85415be416c5086e29cfd9998a4',
++          totals: { files: 2, additions: 12, deletions: 3 },
++          rows: [
++            { path: 'src/a.ts', additions: 10, deletions: 2, kind: 'modified', planned: '修改', verdict: 'planned' },
++            { path: 'docs/b.md', additions: 2, deletions: 1, kind: 'modified', planned: null, verdict: 'unplanned' },
++          ],
++          excluded: { foreignDeclared: [] },
++          note: null,
++        }),
++        timedOut: false,
++      },
++    });
++    const result = await h.manager.auditTable('2026-09-10-change-scope-audit');
++    expect(result.repos).toBeNull();
++    // 其余投影与现状逐字段一致（v1 行无 crossRepo 键 → 投影补 null）
++    expect(result.base_ref).toBe('3f22d6b9b6d1f85415be416c5086e29cfd9998a4');
++    expect(result.anchor_label).toBe('3f22d6b');
++    expect(result.totals).toEqual({ files: 2, additions: 12, deletions: 3 });
++    expect(result.rows).toHaveLength(2);
++    expect(result.rows[1]).toEqual({
++      path: 'docs/b.md', additions: 2, deletions: 1, kind: 'modified',
++      planned: null, verdict: 'unplanned', declared: null, attribution: null,
++      cross_repo: null,
++    });
++    expect(result.truncated).toBe(false);
++
++    // repos 非数组（异常形态）→ 同样回退 null，不炸整体
++    const bad = makeFileDiffHarness({
++      outcome: {
++        code: 0,
++        stdout: JSON.stringify({ ok: true, mode: 'full-flow', repos: { key: 'x' } }),
++        timedOut: false,
++      },
++    });
++    const badResult = await bad.manager.auditTable('c1');
++    expect(badResult.repos).toBeNull();
++  });
++
++  it('505 行截断护栏（含跨仓行）→ 仍 500 + truncated=true；跨仓行 cross_repo 照常投影，repos[] 不受截断影响', async () => {
++    const rows = Array.from({ length: 505 }, (_, i) => ({
++      path: `src/f${i}.ts`, additions: 1, deletions: 0, kind: 'modified',
++      verdict: 'planned',
++      // 首尾各一条跨仓行：f0/f499 落在保留窗内，f504 被截掉
++      ...(i === 0 || i === 499 ? { crossRepo: 'sub-grid-security' } : {}),
++    }));
++    const h = makeFileDiffHarness({
++      outcome: {
++        code: 0,
++        stdout: JSON.stringify({
++          ok: true,
++          mode: 'full-flow',
++          baseAnchor: '3f22d6b9b6d1f85415be416c5086e29cfd9998a4',
++          rows,
++          repos: [
++            { key: 'main', repoPath: 'C:/repo',
++              anchor: { source: 'main-post-apply', base: '3f22d6b9b6d1f85415be416c5086e29cfd9998a4', head: null, label: 'post-apply 主仓锚' },
++              totals: { files: 505, additions: 505, deletions: 0, planned: 505, unplanned: 0, untouched: 0 },
++              degraded: false, degradedReason: null },
++          ],
++        }),
++        timedOut: false,
++      },
++    });
++    const result = await h.manager.auditTable('c1');
++    expect(result.rows).toHaveLength(500);
++    expect(result.truncated).toBe(true);
++    // 截断只作用于 rows 数量：保留窗内跨仓行 cross_repo 照常投影
++    expect(result.rows[0]!.cross_repo).toBe('sub-grid-security');
++    expect(result.rows[499]!.cross_repo).toBe('sub-grid-security');
++    expect(result.rows[1]!.cross_repo).toBeNull();
++    // repos[] 不受 rows 截断影响
++    expect(result.repos).toHaveLength(1);
++    expect(result.repos![0]).toMatchObject({ key: 'main', anchor_label: '3f22d6b' });
++  });
+ });
+ 
+ describe('ql-20260910-017-2006 daemon RPC 注册：sillyspec_file_diff', () => {

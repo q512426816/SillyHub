@@ -19943,6 +19943,104 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/knowledge/hits/batch": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Ingest Knowledge Hits",
+        "description": "daemon 增量上行知识命中遥测（jsonl 行数组，行 sha256 幂等去重）。\n\n鉴权与 ``POST /spec-workspace/sync`` 同款 WORKSPACE_WRITE（daemon 经\nhub-client 自带用户身份上行，design 自审钉死的 postSpecSync 先例）；\nbody 的 ``daemon_local_id`` 原样落库不 FK（数据层留归属）。",
+        "operationId": "ingest_knowledge_hits_api_workspaces__workspace_id__knowledge_hits_batch_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HitsBatchIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HitsBatchOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/knowledge/stats": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Get Knowledge Stats",
+        "description": "知识运营指标：覆盖率(+8周趋势)/死条目(90天)/密度/生效速度 + 使用率榜。",
+        "operationId": "get_knowledge_stats_api_workspaces__workspace_id__knowledge_stats_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeStatsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/knowledge/{filename}": {
       "get": {
         "tags": [
@@ -39614,6 +39712,51 @@
         "title": "ConvergeResponse",
         "description": "``converge_mission`` tool 返回契约（task-06 D-010，design §5 Phase 1 / §7 / §7.5）。\n\n``status`` 取值收敛为四值（task-06，design §7；既有 done/degraded/merged 并入\n``converged``、failed_manual 改 ``needs_manual``）：\n- ``converged``：收敛完成（bootstrap 合并产物 / execute 全分支 merged），\n  ``converged_at`` 已置位（不依赖主控 run 状态——分身全终态即置位，D-010）。\n- ``busy``：分身 run（``role!='orchestrator'`` 含 NULL）未全终态——引导主\n  agent 等待后重试（mission 状态不变、不置位、不 finalize；message 附引导\n  文案与未完成计数）。\n- ``conflict``：有合并冲突，已把 ``conflicts`` 返给主 agent；主 agent 自己用\n  SDK Read/Write 解决后重入 ``converge_mission``（X-004，backend 不写文件；\n  冲突未解决不算收敛，converged_at 回滚保持会话活跃 mission 可重入）。\n- ``needs_manual``：解冲突轮次超 R-07 上限，mission 标 needs_manual，副本保留\n  （原 ``failed_manual`` 改名并入四值契约）。\n\n防御透传：cancelled/planning 等不可达派生值原样返回（正常流 busy 前置判定已\n挡；planning= 无分身 run 未置位，见 _converge_core）。\n\n``conflicts`` 形如 ``[{file, marker_lines, branch}]``（FinalizerMergeResult 透传）。\n``attempt`` 为本次返的解冲突轮次（per mission 计数，存 ``AgentMission.constraints``）。"
       },
+      "CoverageOut": {
+        "properties": {
+          "used_entries": {
+            "type": "integer",
+            "title": "Used Entries"
+          },
+          "total_entries": {
+            "type": "integer",
+            "title": "Total Entries"
+          },
+          "trend": {
+            "items": {
+              "$ref": "#/components/schemas/CoverageTrendPoint"
+            },
+            "type": "array",
+            "title": "Trend"
+          }
+        },
+        "type": "object",
+        "required": [
+          "used_entries",
+          "total_entries",
+          "trend"
+        ],
+        "title": "CoverageOut"
+      },
+      "CoverageTrendPoint": {
+        "properties": {
+          "week": {
+            "type": "string",
+            "title": "Week"
+          },
+          "pct": {
+            "type": "number",
+            "title": "Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "week",
+          "pct"
+        ],
+        "title": "CoverageTrendPoint",
+        "description": "覆盖率趋势单点：week=周末 ISO 日期；pct=该时点覆盖率（分子按\noccurred_at<=周末重算，分母恒为当前条目总数——「覆盖长出来」口径）。"
+      },
       "CustomSkillCreate": {
         "properties": {
           "name": {
@@ -42258,6 +42401,73 @@
         "title": "DaemonVersionResponse",
         "description": "GET /api/daemon/version 响应：daemon 分发元数据（公开端点）。\n\n2026-07-04-daemon-version-management D-004：新增 latest_version（语义）+\nlatest_build_id（SHA），供前端版本比对与升级入口。旧 latest/minRequired/\ndownloadUrl 保留（install.sh 兼容）。"
       },
+      "DeadEntryOut": {
+        "properties": {
+          "anchor": {
+            "type": "string",
+            "title": "Anchor"
+          },
+          "last_hit_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Hit At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "anchor"
+        ],
+        "title": "DeadEntryOut",
+        "description": "死条目（90 天零命中或从未命中；锚点形态输出可定位）。"
+      },
+      "DensityOut": {
+        "properties": {
+          "per_task_avg": {
+            "type": "number",
+            "title": "Per Task Avg"
+          },
+          "trend": {
+            "items": {
+              "$ref": "#/components/schemas/DensityTrendPoint"
+            },
+            "type": "array",
+            "title": "Trend"
+          }
+        },
+        "type": "object",
+        "required": [
+          "per_task_avg",
+          "trend"
+        ],
+        "title": "DensityOut",
+        "description": "每任务命中密度：总注入锚点数（inject 行 matched_anchors 长度和）÷ 任务数\n（inject 行 change_name 去重；fr-inject 行不进分母仅其锚点计数——口径注记）。"
+      },
+      "DensityTrendPoint": {
+        "properties": {
+          "week": {
+            "type": "string",
+            "title": "Week"
+          },
+          "per_task_avg": {
+            "type": "number",
+            "title": "Per Task Avg"
+          }
+        },
+        "type": "object",
+        "required": [
+          "week",
+          "per_task_avg"
+        ],
+        "title": "DensityTrendPoint",
+        "description": "密度趋势单点：该周窗口内每任务注入锚点数。"
+      },
       "DirEntry": {
         "properties": {
           "name": {
@@ -42720,6 +42930,25 @@
         ],
         "title": "EnableOp",
         "description": "启用/停用操作体（``POST /api/skills/{skill_key}/enable``，本人）。\n\n``enabled=False`` 与 ``DELETE /api/skills/{skill_key}/enable`` 语义等价\n（删绑定）；DELETE 端点无请求体，直取 enabled=False。"
+      },
+      "EntryCountItem": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "title": "File"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "count"
+        ],
+        "title": "EntryCountItem",
+        "description": "文件级使用计数（锚点前缀文件名计数和，文件级 🔥 徽标数据源）。"
       },
       "ExecutePlanReq": {
         "properties": {
@@ -43557,6 +43786,25 @@
         ],
         "title": "FileUploadResp",
         "description": "上传成功响应（task-04 provides）。"
+      },
+      "FreshnessOut": {
+        "properties": {
+          "recent_new": {
+            "type": "integer",
+            "title": "Recent New"
+          },
+          "recent_used": {
+            "type": "integer",
+            "title": "Recent Used"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recent_new",
+          "recent_used"
+        ],
+        "title": "FreshnessOut",
+        "description": "新知识生效速度：近 30 天新增条目数（条目首见=frontmatter created_at 优先/\nhits 首见兜底）与其中已被命中数。"
       },
       "GitIdentityCreate": {
         "properties": {
@@ -46541,6 +46789,59 @@
         ],
         "title": "HealthResponse"
       },
+      "HitsBatchIn": {
+        "properties": {
+          "daemon_local_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Local Id"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Lines"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lines"
+        ],
+        "title": "HitsBatchIn",
+        "description": "POST /knowledge/hits/batch 请求体。\n\n``lines``：原始 jsonl 行数组（逐行 json.loads + sha256 幂等，**不做**预先\n解包——行级原样转发保证多端 line_hash 一致）；``daemon_local_id``：daemon\n实例 id，原样落库不 FK（数据层留归属，design 非目标「按人视图」后续用）。"
+      },
+      "HitsBatchOut": {
+        "properties": {
+          "ingested": {
+            "type": "integer",
+            "title": "Ingested"
+          },
+          "skipped_bad": {
+            "type": "integer",
+            "title": "Skipped Bad"
+          },
+          "duplicates": {
+            "type": "integer",
+            "title": "Duplicates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ingested",
+          "skipped_bad",
+          "duplicates"
+        ],
+        "title": "HitsBatchOut",
+        "description": "batch 接收结果计数。\n\n``ingested``：新落库行数；``skipped_bad``：json.loads 解析失败的坏行数；\n``duplicates``：撞 (workspace_id, line_hash) 唯一约束跳过的行数（含同批\n重复与重报）。"
+      },
       "HumanTestRequest": {
         "properties": {
           "result": {
@@ -47350,6 +47651,17 @@
               }
             ],
             "title": "Last Modified At"
+          },
+          "use_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Use Count"
           }
         },
         "type": "object",
@@ -47486,6 +47798,51 @@
         ],
         "title": "KnowledgeProposeIn",
         "description": "POST /knowledge/propose 请求体（手工录入候选）。"
+      },
+      "KnowledgeStatsOut": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/CoverageOut"
+          },
+          "dead_entries": {
+            "items": {
+              "$ref": "#/components/schemas/DeadEntryOut"
+            },
+            "type": "array",
+            "title": "Dead Entries"
+          },
+          "density": {
+            "$ref": "#/components/schemas/DensityOut"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/FreshnessOut"
+          },
+          "usage_board": {
+            "items": {
+              "$ref": "#/components/schemas/UsageBoardItem"
+            },
+            "type": "array",
+            "title": "Usage Board"
+          },
+          "entry_counts": {
+            "items": {
+              "$ref": "#/components/schemas/EntryCountItem"
+            },
+            "type": "array",
+            "title": "Entry Counts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "coverage",
+          "dead_entries",
+          "density",
+          "freshness",
+          "usage_board",
+          "entry_counts"
+        ],
+        "title": "KnowledgeStatsOut",
+        "description": "GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。"
       },
       "KnowledgeUpdateIn": {
         "properties": {
@@ -63037,6 +63394,177 @@
         "title": "ScheduledMessageRead",
         "description": "定时消息读侧 DTO（POST 201 响应 / GET 列表项，task-03 / FR-04）。\n\n``AgentSessionScheduledMessage`` ORM 行的 from_attributes 直映射——\n``status`` 为 pending / dispatched / cancelled / failed 四态字符串\n（派发成功不删行，dispatched_at / cancelled_at / error_code 审计留档，\n消费方=前端 scheduled-messages-bar 状态 tag 与失败原因展示，task-05）；\n``attachment_ids`` 为落库的 str 列表快照（派发时转回 uuid）。"
       },
+      "ScopeAuditRepo": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "anchor": {
+            "$ref": "#/components/schemas/ScopeAuditRepoAnchor"
+          },
+          "anchor_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor Label"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/ScopeAuditRepoTotals"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded",
+            "default": false
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "title": "ScopeAuditRepo",
+        "description": "跨仓对账 per-repo 汇总条目（信封级 repos[] 单项）。\n\n``key`` 为仓标识（'main' 或 local.yaml repos 注册 key，main 条目始终\n首位）；``anchor``/``anchor_label`` 为该仓锚点档（label 扁平冗余一份，\n供表尾汇总行直取）；``degraded``/``degraded_reason`` 为降级标记与原因\n（仓未注册/路径不可达/git 不可用等，degraded 仓该组行退 ⊘ 形态）。\nproducer = daemon RPC 投影 repos[]，consumer = 前端按仓分组卡\n（gen:types 经 task-03）。"
+      },
+      "ScopeAuditRepoAnchor": {
+        "properties": {
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base"
+          },
+          "head": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "title": "ScopeAuditRepoAnchor",
+        "description": "仓库对账锚点档（锚点分级 A/B/C/degraded 的统一描述）。\n\n``source`` 为档位标识（reviews-range / head~1-window /\nhead-uncommitted-window / degraded，main 条目为 main-<form> 主仓锚\n包装）；``base``/``head`` 为该仓 diff 区间 commit（B/C 档与 degraded\n档为 None）；``label`` 为人类可读档位描述（表尾汇总行直接用）。\n全字段缺省 None——daemon 缺键/非法形态时防御构造不炸。"
+      },
+      "ScopeAuditRepoTotals": {
+        "properties": {
+          "files": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
+          "additions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additions"
+          },
+          "deletions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletions"
+          },
+          "planned": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planned"
+          },
+          "unplanned": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unplanned"
+          },
+          "untouched": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Untouched"
+          }
+        },
+        "type": "object",
+        "title": "ScopeAuditRepoTotals",
+        "description": "仓库行合计与三态计数（仅计该仓行；全 int|None——B/C 降级档行数\n不可得时 additions/deletions 为 None，不计入合计）。"
+      },
       "ScopeAuditResponse": {
         "properties": {
           "change": {
@@ -63117,6 +63645,13 @@
             "type": "boolean",
             "title": "Truncated",
             "default": false
+          },
+          "repos": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeAuditRepo"
+            },
+            "type": "array",
+            "title": "Repos"
           }
         },
         "type": "object",
@@ -63125,7 +63660,7 @@
           "ok"
         ],
         "title": "ScopeAuditResponse",
-        "description": "对账表（daemon sillyspec_scope_audit RPC 透传投影）。\n\nok=false 时 degraded_reason 带原因（quick 会话不存在等），rows 为空。\ntruncated：rows 超 500 被 daemon 侧截断。"
+        "description": "对账表（daemon sillyspec_scope_audit RPC 透传投影）。\n\nok=false 时 degraded_reason 带原因（quick 会话不存在等），rows 为空。\ntruncated：rows 超 500 被 daemon 侧截断。\n``repos``（契约 v2，2026-09-20-scope-audit-cross-repo-platform）：仅当\n计划侧含跨仓条目且非预执行形态时 daemon 才输出；单仓变更/旧 daemon/\n无 repos 键 → 空列表回退（零回归）。"
       },
       "ScopeAuditRow": {
         "properties": {
@@ -63203,6 +63738,17 @@
               }
             ],
             "title": "Attribution"
+          },
+          "cross_repo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cross Repo"
           }
         },
         "type": "object",
@@ -69693,6 +70239,59 @@
         "type": "object",
         "title": "UpdateMyAvatarRequest",
         "description": "Body of ``PATCH /api/auth/me/avatar``（用户自助设置头像，2026-09-10-account-avatar-upload / D-001@v1）。\n\n``avatar`` 三态语义：有值=设置（文件中心 ``/api/file/{id}`` 或 http(s) 外链）、\n空串 ``''``=清除（端点置 NULL，users.avatar 永不存空串）、``None``/缺省=不改。\n``max_length=512`` 与 ``users.avatar`` 列宽一致；``extra=\"forbid\"`` 拒绝多余字段。"
+      },
+      "UsageBoardItem": {
+        "properties": {
+          "anchor": {
+            "type": "string",
+            "title": "Anchor"
+          },
+          "per_task": {
+            "type": "number",
+            "title": "Per Task"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "task_count": {
+            "type": "integer",
+            "title": "Task Count"
+          },
+          "first_hit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Hit"
+          },
+          "last_hit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Hit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "anchor",
+          "per_task",
+          "total",
+          "task_count"
+        ],
+        "title": "UsageBoardItem",
+        "description": "使用率榜单条（全量按 per_task 降序，前端 % 格式显示 D-008@v3）。\n\n``per_task``：条目命中次数 ÷ 条目存在期任务数（条目首见后 inject 行\nchange 去重；分母 0 视为 1 防炸）；``task_count``：命中过该锚点的去重任务数\n（inject+fr-inject 行）。"
       },
       "UsageByModelItemRead": {
         "properties": {

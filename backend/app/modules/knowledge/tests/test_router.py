@@ -86,6 +86,42 @@ async def test_list_knowledge(
     assert "uncategorized.md" in filenames
 
 
+async def test_list_knowledge_use_count_from_hits(
+    client, db_session, workspace_with_knowledge: dict, auth_headers: dict[str, str]
+) -> None:
+    """task-03（2026-09-20-knowledge-effect-panel）：列表透传文件级 use_count。
+
+    口径与 HitsService.stats 的 entry_counts 一致：使用计数行（{inject,
+    fr-inject}）matched_anchors 拆锚点按 ``#`` 前缀（=filename）聚合——预置
+    hits 的条目 use_count>0（同文件两锚点累计），无 hits 的条目为 0（int 非
+    None）。
+    """
+    import json as _json
+
+    from app.modules.knowledge.hits import HitsService
+
+    ws_id = uuid.UUID(workspace_with_knowledge["ws_id"])
+    line = _json.dumps(
+        {
+            "type": "inject",
+            "change": "chg-use-count",
+            "query": "use count 用例",
+            "matchedFiles": ["INDEX.md#patterns", "INDEX.md#known-issues"],
+        }
+    )
+    out = await HitsService(db_session).ingest_batch(ws_id, [line])
+    assert out.ingested == 1
+
+    resp = await client.get(
+        f"/api/workspaces/{ws_id}/knowledge",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    by_file = {item["filename"]: item["use_count"] for item in resp.json()["items"]}
+    assert by_file["INDEX.md"] == 2
+    assert by_file["uncategorized.md"] == 0
+
+
 async def test_get_knowledge_detail(
     client, workspace_with_knowledge: dict, auth_headers: dict[str, str]
 ) -> None:
@@ -1130,3 +1166,50 @@ async def test_distill_dispatch_quick_entry_level_validation_and_llm_provider_pa
         },
     )
     assert resp.status_code == 422, resp.text
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-20-knowledge-effect-panel task-01：fr zone 读侧可见（验收：列表接口
+# 出现 zone=fr 条目）
+# ---------------------------------------------------------------------------
+
+
+async def test_list_knowledge_includes_fr_zone(
+    client,
+    db_session,
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """fr/ 子目录条目在列表接口以 zone="fr" 呈现（D-005@v1「需求规则」组）。"""
+    spec_root = tmp_path / "fr-zone-spec"
+    knowledge_dir = spec_root / "knowledge"
+    (knowledge_dir / "fr").mkdir(parents=True)
+    (knowledge_dir / "fr" / "host-fs-handler.md").write_text(
+        "# FR 索引 — host-fs-handler\n\n## FR-host-fs-handler-001 标题\n状态：active\n",
+        encoding="utf-8",
+    )
+
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="fr-zone-knowledge",
+        slug=f"fr-zone-{uuid.uuid4().hex[:8]}",
+        root_path=str(tmp_path / "client-machine-path"),
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.flush()
+    db_session.add(
+        SpecWorkspace(
+            id=uuid.uuid4(),
+            workspace_id=ws.id,
+            spec_root=str(spec_root),
+            strategy="platform-managed",
+            sync_status="clean",
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get(f"/api/workspaces/{ws.id}/knowledge", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+    assert [(i["filename"], i["zone"]) for i in items] == [("fr/host-fs-handler.md", "fr")]

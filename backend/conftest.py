@@ -207,6 +207,12 @@ async def db_engine() -> AsyncIterator[Any]:
     # NoReferencedTableError('releases')，incident 全部测试 collection-error（预存缺口）。
     from app.modules.incident import model as _incident_model  # noqa: F401
 
+    # 2026-09-20-knowledge-effect-panel task-01/03：knowledge_hits 表（定义在
+    # knowledge/hits.py 而非 model.py）。task-03 起 list_knowledge 查该表——仅跑
+    # test_router.py 等未 import hits 的测试时 create_all 缺表（单跑 vs 全模块跑
+    # 差异的根因），按本 fixture 既有惯例补根注册消除 import 顺序依赖。
+    from app.modules.knowledge import hits as _knowledge_hits_model  # noqa: F401
+
     # agent_profiles.llm_provider_id FK→llm_providers.id（agent-profile-bind-llm-provider
     # 落地后根 conftest 未补 import，create_all 报 NoReferencedTableError('llm_providers')
     # 阻断所有 db_engine 测试。2026-08-11-change-progress-projection task-07 顺手补此预存

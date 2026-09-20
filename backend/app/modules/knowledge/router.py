@@ -13,16 +13,20 @@ from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.knowledge.distill import DistillDispatchService
+from app.modules.knowledge.hits import HitsService
 from app.modules.knowledge.schema import (
     DistillDispatchIn,
     DistillQuickEntryList,
     DistillQuickEntryOut,
     DistillTaskRead,
+    HitsBatchIn,
+    HitsBatchOut,
     KnowledgeEntry,
     KnowledgeList,
     KnowledgeMergeIn,
     KnowledgeMergeResult,
     KnowledgeProposeIn,
+    KnowledgeStatsOut,
     KnowledgeUpdateIn,
     MergePreviewOut,
     QuicklogEntry,
@@ -204,6 +208,44 @@ async def list_distill_quick_entries(
     return DistillQuickEntryList(
         items=[DistillQuickEntryOut(ref=e.ref, title=e.title, date=e.date) for e in entries]
     )
+
+
+# ── hits 接收 + 运营指标端点（2026-09-20-knowledge-effect-panel task-01）────────
+#
+# 字面量路由注册序铁律（文件首注释同款）：GET /knowledge/stats 必须在下方
+# GET /knowledge/{filename:path} 通配之前，否则被当作 filename="stats" 吞掉。
+
+
+@router.post("/knowledge/hits/batch", response_model=HitsBatchOut)
+async def ingest_knowledge_hits(
+    workspace_id: uuid.UUID,
+    payload: HitsBatchIn,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> HitsBatchOut:
+    """daemon 增量上行知识命中遥测（jsonl 行数组，行 sha256 幂等去重）。
+
+    鉴权与 ``POST /spec-workspace/sync`` 同款 WORKSPACE_WRITE（daemon 经
+    hub-client 自带用户身份上行，design 自审钉死的 postSpecSync 先例）；
+    body 的 ``daemon_local_id`` 原样落库不 FK（数据层留归属）。
+    """
+    service = HitsService(session)
+    return await service.ingest_batch(
+        workspace_id,
+        payload.lines,
+        daemon_local_id=payload.daemon_local_id,
+    )
+
+
+@router.get("/knowledge/stats", response_model=KnowledgeStatsOut)
+async def get_knowledge_stats(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
+) -> KnowledgeStatsOut:
+    """知识运营指标：覆盖率(+8周趋势)/死条目(90天)/密度/生效速度 + 使用率榜。"""
+    service = HitsService(session)
+    return await service.stats(workspace_id)
 
 
 @router.get("/knowledge/{filename:path}", response_model=KnowledgeEntry)

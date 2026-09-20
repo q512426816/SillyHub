@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-20-scope-audit-cross-repo-platform",
+  "generatedAt": "2026-09-20T12:38:24.803Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-20-scope-audit-cross-repo-platform",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-20-scope-audit-cross-repo-platform",
+      "metrics": {
+        "tasks": 3,
+        "hasTest": 3
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-20-scope-audit-cross-repo-platform",
+      "metrics": {
+        "backendEndpoints": 1633,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-20-scope-audit-cross-repo-platform",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-20-scope-audit-cross-repo-platform",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-09-20-scope-audit-cross-repo-platform",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-09-20-scope-audit-cross-repo-platform",
+      "metrics": {
+        "checkedFiles": 4,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 1,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "真机验收：在 f85a6650 的 daemon 所在机器（或任一多仓工作区）打开变更中心对账卡，人工核对主仓段 + 各跨仓段真实三态与锚点档（R-01 应对：夹具逐字段对齐上游契约示例，真机首查核对一次）",
+        "condition": "①目标机器 sillyspec CLI 升级到含 2026-09-20-scope-audit-cross-repo 的版本（契约 v2 输出 repos）；②daemon 重新构建部署（本变更投影代码）；③打开 workspace f85a6650 变更 7fa17ae5 对账卡核对三仓分段/锚点档/degraded 文案；单仓变更对照确认回退与旧版一致",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/api/workspaces/{workspace_id}/sillyspec/scope-audit",
+        "rowIdx": 1
+      }
+    ],
+    "declared": 1,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/sillyspec-file-diff.test.ts",
+      "backend/app/modules/change/tests/test_scope_file_diff.py"
+    ]
+  },
+  "smokeRan": "not-ran",
+  "tests": {
+    "command": "module[frontend]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-20T13:07:43.127Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

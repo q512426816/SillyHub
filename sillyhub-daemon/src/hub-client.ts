@@ -596,6 +596,17 @@ export class HubClient {
   private readonly _recoveryRuntimeBySession = new Map<string, string>();
 
   /**
+   * 2026-09-20-knowledge-effect-panel task-02：最近一次 register/heartbeat 上报的
+   * daemon_local_id（= daemon 侧 config.runtime_id）缓存。
+   *
+   * hits 上行（postKnowledgeHitsBatch）需要 body 带 daemon_local_id，但调用链
+   * （spec-sync postSpecSync 汇聚点）只有本 client 实例可传——daemon 启动必先
+   * register、此后每心跳周期 heartbeat 刷新，生产路径恒有值；测试/mock 未走过
+   * register 时为 undefined（body 落 null，backend DTO 可空容忍）。
+   */
+  private _daemonLocalId?: string;
+
+  /**
    * @param serverUrl SillyHub server origin，如 'http://localhost:8000'。尾部斜杠会被去除。
    * @param authOrToken  两种合法形态（向后兼容）：
    *   - string：旧式 Bearer token，等价于 ``{ token }``；
@@ -753,6 +764,8 @@ export class HubClient {
           : new Date(params.startedAt).toISOString(),
       providers: params.providers,
     };
+    // task-02（knowledge-effect-panel）：记住 daemon 身份，hits 上行 body 用。
+    this._daemonLocalId = params.daemonLocalId;
     if (params.os) body.os = params.os;
     if (params.arch) body.arch = params.arch;
     if (params.allowedRoots && params.allowedRoots.length > 0) {
@@ -849,6 +862,9 @@ export class HubClient {
       started_at: startedAt == null ? null : new Date(startedAt).toISOString(),
       providers: providers ?? [],
     };
+    // task-02（knowledge-effect-panel）：心跳刷新 daemon 身份缓存（register 后
+    // 每 heartbeat 周期覆写同值，config.runtime_id 运行期稳定）。
+    this._daemonLocalId = daemonLocalId;
     // 仅 pending 期携带：undefined → 键完全不出现（design S3 兼容约束）。
     if (pendingUpdate) body.pending_update = pendingUpdate;
     // task-05（D-002@v1）：null/undefined 一律不携带（键不出现）。
@@ -1824,6 +1840,37 @@ signal: AbortSignal.timeout(SPEC_BUNDLE_TIMEOUT_MS),
       { ops, change_dirs: changeDirs },
       changeWriteId ? { 'X-Change-Write-Id': changeWriteId } : undefined,
       SPEC_SYNC_TIMEOUT_MS,
+    );
+  }
+
+  /**
+   * 增量上报知识命中遥测行（2026-09-20-knowledge-effect-panel task-02；
+   * 端点 task-01）。
+   *
+   * 端点：POST /api/workspaces/{wsId}/knowledge/hits/batch。
+   * 请求 body（HitsBatchIn）：`{ daemon_local_id, lines }`——lines 为原始 jsonl
+   * 行数组（≤2000 行/批、单行 ≤100KB 由调用方 knowledge-hits-upload 分批保证；
+   * daemon_local_id 取本实例最近一次 register/heartbeat 记住的 config.runtime_id，
+   * backend 原样落库不 FK）。
+   * 响应（HitsBatchOut）：`{ ingested, skipped_bad, duplicates }`——计数仅供日志，
+   * 幂等由 backend (workspace_id, line_hash) 唯一约束兜底（D-007）。
+   *
+   * 鉴权同 postSpecSync 先例（WORKSPACE_WRITE，design 自审钉死）：X-API-Key /
+   * Bearer 经 _request 统一附头。URL 前缀用 /api（knowledge router 挂 prefix="/api"，
+   * 同 postSpecSyncIncremental 的 QA 教训，不能走 REST_PREFIX）。
+   *
+   * 失败语义对齐 _request：HTTP 非 2xx → HubHttpError；网络/超时透传。调用方
+   * （knowledge-hits-upload best-effort 包裹）失败不动 offset 下轮重试，重报由
+   * 服务端 hash 去重兜底。
+   */
+  async postKnowledgeHitsBatch(
+    wsId: string,
+    lines: string[],
+  ): Promise<{ ingested: number; skipped_bad: number; duplicates: number }> {
+    return this._request<{ ingested: number; skipped_bad: number; duplicates: number }>(
+      'POST',
+      `/api/workspaces/${encodeURIComponent(wsId)}/knowledge/hits/batch`,
+      { daemon_local_id: this._daemonLocalId ?? null, lines },
     );
   }
 

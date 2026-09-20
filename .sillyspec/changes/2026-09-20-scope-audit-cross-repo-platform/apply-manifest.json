@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-20-scope-audit-cross-repo-platform",
+  "appliedAt": "2026-09-20T13:20:27.289Z",
+  "baseHash": "f8e326fd20a99ff5907068ed9f7d704f8f2503e3",
+  "files": [
+    {
+      "path": "backend/app/modules/change/schema.py",
+      "sha256": "f00fcc38d70c9babfbc88c2b73774bc473666451b44b379e1bc2757fff00f1ef"
+    },
+    {
+      "path": "backend/app/modules/change/scope_audit.py",
+      "sha256": "4a2206034ccab5202c1ee05f36e4407b49f88b81f642d67a27aa31783c240583"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_scope_file_diff.py",
+      "sha256": "f6af8516f16e8f36abbee1ef2f055a58fd0febd6a2945003d454a4f86cafb570"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "b223e6d70e0c70b41a9259e00847882785b71493c8c41bfa8a8796de14df4dc4"
+    },
+    {
+      "path": "frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx",
+      "sha256": "58603dd85039b9d687816437a61cb589730124165f32e7312614384c0591be87"
+    },
+    {
+      "path": "frontend/src/components/changes/scope-audit-command-card.tsx",
+      "sha256": "9ec12999252b1a7f431ccd221f2948d1efa172d5211b8647e8de4b52e39db3dc"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "68565df06097c86cb8b289bf5f63858cf5cf75a13f9a597369813400aee36496"
+    },
+    {
+      "path": "sillyhub-daemon/src/sillyspec-manager.ts",
+      "sha256": "ee685893ce201ac514cc864ce5665b13f18b9dcf0350b6a6c077de442007b85e"
+    },
+    {
+      "path": "sillyhub-daemon/tests/sillyspec-file-diff.test.ts",
+      "sha256": "dd1a8f23536278652968ca4e7e7a4e46de482b332fd668658076be96d304d5e8"
+    }
+  ]
+}

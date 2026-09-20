@@ -7589,6 +7589,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/knowledge/hits/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Knowledge Hits
+         * @description daemon 增量上行知识命中遥测（jsonl 行数组，行 sha256 幂等去重）。
+         *
+         *     鉴权与 ``POST /spec-workspace/sync`` 同款 WORKSPACE_WRITE（daemon 经
+         *     hub-client 自带用户身份上行，design 自审钉死的 postSpecSync 先例）；
+         *     body 的 ``daemon_local_id`` 原样落库不 FK（数据层留归属）。
+         */
+        post: operations["ingest_knowledge_hits_api_workspaces__workspace_id__knowledge_hits_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Stats
+         * @description 知识运营指标：覆盖率(+8周趋势)/死条目(90天)/密度/生效速度 + 使用率榜。
+         */
+        get: operations["get_knowledge_stats_api_workspaces__workspace_id__knowledge_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/knowledge/{filename}": {
         parameters: {
             query?: never;
@@ -13718,6 +13762,26 @@ export interface components {
             /** Message */
             message?: string | null;
         };
+        /** CoverageOut */
+        CoverageOut: {
+            /** Used Entries */
+            used_entries: number;
+            /** Total Entries */
+            total_entries: number;
+            /** Trend */
+            trend: components["schemas"]["CoverageTrendPoint"][];
+        };
+        /**
+         * CoverageTrendPoint
+         * @description 覆盖率趋势单点：week=周末 ISO 日期；pct=该时点覆盖率（分子按
+         *     occurred_at<=周末重算，分母恒为当前条目总数——「覆盖长出来」口径）。
+         */
+        CoverageTrendPoint: {
+            /** Week */
+            week: string;
+            /** Pct */
+            pct: number;
+        };
         /**
          * CustomSkillCreate
          * @description 创建请求体。
@@ -14718,6 +14782,37 @@ export interface components {
             latest_build_id: string;
         };
         /**
+         * DeadEntryOut
+         * @description 死条目（90 天零命中或从未命中；锚点形态输出可定位）。
+         */
+        DeadEntryOut: {
+            /** Anchor */
+            anchor: string;
+            /** Last Hit At */
+            last_hit_at?: string | null;
+        };
+        /**
+         * DensityOut
+         * @description 每任务命中密度：总注入锚点数（inject 行 matched_anchors 长度和）÷ 任务数
+         *     （inject 行 change_name 去重；fr-inject 行不进分母仅其锚点计数——口径注记）。
+         */
+        DensityOut: {
+            /** Per Task Avg */
+            per_task_avg: number;
+            /** Trend */
+            trend: components["schemas"]["DensityTrendPoint"][];
+        };
+        /**
+         * DensityTrendPoint
+         * @description 密度趋势单点：该周窗口内每任务注入锚点数。
+         */
+        DensityTrendPoint: {
+            /** Week */
+            week: string;
+            /** Per Task Avg */
+            per_task_avg: number;
+        };
+        /**
          * DirEntry
          * @description A single directory entry returned by the daemon list_dir RPC.
          */
@@ -14934,6 +15029,16 @@ export interface components {
              * @description True=启用进 bundle，False=停用
              */
             enabled: boolean;
+        };
+        /**
+         * EntryCountItem
+         * @description 文件级使用计数（锚点前缀文件名计数和，文件级 🔥 徽标数据源）。
+         */
+        EntryCountItem: {
+            /** File */
+            file: string;
+            /** Count */
+            count: number;
         };
         /**
          * ExecutePlanReq
@@ -15283,6 +15388,17 @@ export interface components {
             size: number;
             /** Description */
             description?: string | null;
+        };
+        /**
+         * FreshnessOut
+         * @description 新知识生效速度：近 30 天新增条目数（条目首见=frontmatter created_at 优先/
+         *     hits 首见兜底）与其中已被命中数。
+         */
+        FreshnessOut: {
+            /** Recent New */
+            recent_new: number;
+            /** Recent Used */
+            recent_used: number;
         };
         /** GitIdentityCreate */
         GitIdentityCreate: {
@@ -16697,6 +16813,36 @@ export interface components {
             /** Environment */
             environment: string;
         };
+        /**
+         * HitsBatchIn
+         * @description POST /knowledge/hits/batch 请求体。
+         *
+         *     ``lines``：原始 jsonl 行数组（逐行 json.loads + sha256 幂等，**不做**预先
+         *     解包——行级原样转发保证多端 line_hash 一致）；``daemon_local_id``：daemon
+         *     实例 id，原样落库不 FK（数据层留归属，design 非目标「按人视图」后续用）。
+         */
+        HitsBatchIn: {
+            /** Daemon Local Id */
+            daemon_local_id?: string | null;
+            /** Lines */
+            lines: string[];
+        };
+        /**
+         * HitsBatchOut
+         * @description batch 接收结果计数。
+         *
+         *     ``ingested``：新落库行数；``skipped_bad``：json.loads 解析失败的坏行数；
+         *     ``duplicates``：撞 (workspace_id, line_hash) 唯一约束跳过的行数（含同批
+         *     重复与重报）。
+         */
+        HitsBatchOut: {
+            /** Ingested */
+            ingested: number;
+            /** Skipped Bad */
+            skipped_bad: number;
+            /** Duplicates */
+            duplicates: number;
+        };
         /** HumanTestRequest */
         HumanTestRequest: {
             /** Result */
@@ -16958,6 +17104,8 @@ export interface components {
             content?: string | null;
             /** Last Modified At */
             last_modified_at?: string | null;
+            /** Use Count */
+            use_count?: number | null;
         };
         /** KnowledgeList */
         KnowledgeList: {
@@ -17019,6 +17167,21 @@ export interface components {
             body: string;
             /** Tags */
             tags?: string[];
+        };
+        /**
+         * KnowledgeStatsOut
+         * @description GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。
+         */
+        KnowledgeStatsOut: {
+            coverage: components["schemas"]["CoverageOut"];
+            /** Dead Entries */
+            dead_entries: components["schemas"]["DeadEntryOut"][];
+            density: components["schemas"]["DensityOut"];
+            freshness: components["schemas"]["FreshnessOut"];
+            /** Usage Board */
+            usage_board: components["schemas"]["UsageBoardItem"][];
+            /** Entry Counts */
+            entry_counts: components["schemas"]["EntryCountItem"][];
         };
         /**
          * KnowledgeUpdateIn
@@ -22392,11 +22555,79 @@ export interface components {
             cancelled_at?: string | null;
         };
         /**
+         * ScopeAuditRepo
+         * @description 跨仓对账 per-repo 汇总条目（信封级 repos[] 单项）。
+         *
+         *     ``key`` 为仓标识（'main' 或 local.yaml repos 注册 key，main 条目始终
+         *     首位）；``anchor``/``anchor_label`` 为该仓锚点档（label 扁平冗余一份，
+         *     供表尾汇总行直取）；``degraded``/``degraded_reason`` 为降级标记与原因
+         *     （仓未注册/路径不可达/git 不可用等，degraded 仓该组行退 ⊘ 形态）。
+         *     producer = daemon RPC 投影 repos[]，consumer = 前端按仓分组卡
+         *     （gen:types 经 task-03）。
+         */
+        ScopeAuditRepo: {
+            /** Key */
+            key: string;
+            anchor?: components["schemas"]["ScopeAuditRepoAnchor"];
+            /** Anchor Label */
+            anchor_label?: string | null;
+            totals?: components["schemas"]["ScopeAuditRepoTotals"];
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded: boolean;
+            /** Degraded Reason */
+            degraded_reason?: string | null;
+        };
+        /**
+         * ScopeAuditRepoAnchor
+         * @description 仓库对账锚点档（锚点分级 A/B/C/degraded 的统一描述）。
+         *
+         *     ``source`` 为档位标识（reviews-range / head~1-window /
+         *     head-uncommitted-window / degraded，main 条目为 main-<form> 主仓锚
+         *     包装）；``base``/``head`` 为该仓 diff 区间 commit（B/C 档与 degraded
+         *     档为 None）；``label`` 为人类可读档位描述（表尾汇总行直接用）。
+         *     全字段缺省 None——daemon 缺键/非法形态时防御构造不炸。
+         */
+        ScopeAuditRepoAnchor: {
+            /** Source */
+            source?: string | null;
+            /** Base */
+            base?: string | null;
+            /** Head */
+            head?: string | null;
+            /** Label */
+            label?: string | null;
+        };
+        /**
+         * ScopeAuditRepoTotals
+         * @description 仓库行合计与三态计数（仅计该仓行；全 int|None——B/C 降级档行数
+         *     不可得时 additions/deletions 为 None，不计入合计）。
+         */
+        ScopeAuditRepoTotals: {
+            /** Files */
+            files?: number | null;
+            /** Additions */
+            additions?: number | null;
+            /** Deletions */
+            deletions?: number | null;
+            /** Planned */
+            planned?: number | null;
+            /** Unplanned */
+            unplanned?: number | null;
+            /** Untouched */
+            untouched?: number | null;
+        };
+        /**
          * ScopeAuditResponse
          * @description 对账表（daemon sillyspec_scope_audit RPC 透传投影）。
          *
          *     ok=false 时 degraded_reason 带原因（quick 会话不存在等），rows 为空。
          *     truncated：rows 超 500 被 daemon 侧截断。
+         *     ``repos``（契约 v2，2026-09-20-scope-audit-cross-repo-platform）：仅当
+         *     计划侧含跨仓条目且非预执行形态时 daemon 才输出；单仓变更/旧 daemon/
+         *     无 repos 键 → 空列表回退（零回归）。
          */
         ScopeAuditResponse: {
             /** Change */
@@ -22426,6 +22657,8 @@ export interface components {
              * @default false
              */
             truncated: boolean;
+            /** Repos */
+            repos?: components["schemas"]["ScopeAuditRepo"][];
         };
         /**
          * ScopeAuditRow
@@ -22453,6 +22686,8 @@ export interface components {
             declared?: boolean | null;
             /** Attribution */
             attribution?: string | null;
+            /** Cross Repo */
+            cross_repo?: string | null;
         };
         /** ScopeAuditTotals */
         ScopeAuditTotals: {
@@ -25306,6 +25541,28 @@ export interface components {
              * @description 头像 URL（文件中心 /api/file/{id}）；值=设置，''=清除，None=不改
              */
             avatar?: string | null;
+        };
+        /**
+         * UsageBoardItem
+         * @description 使用率榜单条（全量按 per_task 降序，前端 % 格式显示 D-008@v3）。
+         *
+         *     ``per_task``：条目命中次数 ÷ 条目存在期任务数（条目首见后 inject 行
+         *     change 去重；分母 0 视为 1 防炸）；``task_count``：命中过该锚点的去重任务数
+         *     （inject+fr-inject 行）。
+         */
+        UsageBoardItem: {
+            /** Anchor */
+            anchor: string;
+            /** Per Task */
+            per_task: number;
+            /** Total */
+            total: number;
+            /** Task Count */
+            task_count: number;
+            /** First Hit */
+            first_hit?: string | null;
+            /** Last Hit */
+            last_hit?: string | null;
         };
         /**
          * UsageByModelItemRead
@@ -39245,6 +39502,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DistillQuickEntryList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_knowledge_hits_api_workspaces__workspace_id__knowledge_hits_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HitsBatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HitsBatchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_stats_api_workspaces__workspace_id__knowledge_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeStatsOut"];
                 };
             };
             /** @description Validation Error */

@@ -292,3 +292,138 @@ def test_parse_quick_entries_missing_or_empty_dir(tmp_path: Path) -> None:
     quicklog_dir.mkdir()
     (quicklog_dir / "notes.md").write_text("## ql-20260101-001-x | d | t\n", encoding="utf-8")
     assert parse_quick_entries(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-20-knowledge-effect-panel task-01：fr zone + 条目全集 parse_knowledge_entries
+# ---------------------------------------------------------------------------
+
+
+def test_zone_fr_derived(tmp_path: Path) -> None:
+    """fr/ 子目录条目归独立 fr zone（D-005@v1「需求规则」组数据源）。"""
+    parser = KnowledgeParser()
+    knowledge_dir = tmp_path / "knowledge"
+    (knowledge_dir / "fr").mkdir(parents=True)
+    (knowledge_dir / "fr" / "host-fs-handler.md").write_text("# FR\n正文", encoding="utf-8")
+
+    entries = parser.parse_knowledge(tmp_path)
+    assert [(e.filename, e.zone) for e in entries] == [("fr/host-fs-handler.md", "fr")]
+
+
+def test_slugify_anchor_calibrated_against_real_hits_samples() -> None:
+    """slugify 复刻 CLI INDEX/hits 锚点形态——以本仓 knowledge-hits.jsonl 实测
+    锚点 + 当前知识树标题逐字校准（双端归一的救命项，Grill CLK-02）：
+
+    - 空白每个转一个 ``-``（不折叠 run、不去首尾）：``无 --reload`` → ``无---reload``；
+    - 括号/箭头/斜杠/点/emoji 去除（无痕消失，两侧空格的 ``-`` 留存成 ``--``）；
+    - 保留字母/数字/下划线/中文/连字符；不截断。
+    """
+    from app.modules.knowledge.parser import slugify_anchor
+
+    assert (
+        slugify_anchor(
+            "Backend 模块分层与基类异常约定（Router/Service/Schema → BaseModel → AppError）"
+        )
+        == "backend-模块分层与基类异常约定routerserviceschema--basemodel--apperror"
+    )
+    assert (
+        slugify_anchor("🟡 Docker backend 容器不热重载（挂载非 /app、无 --reload）")
+        == "-docker-backend-容器不热重载挂载非-app无---reload"
+    )
+    assert (
+        slugify_anchor("🟢 daemon 重启 session 恢复已修复（gap-8.3 / commit 40e21d3）")
+        == "-daemon-重启-session-恢复已修复gap-83--commit-40e21d3"
+    )
+    # 下划线保留（item_id 实测锚）；emoji 开头去后遗留前导 -（不去首尾）
+    assert slugify_anchor("PPM 导出 export-excel 路由必须前置于 item_id 路由") == (
+        "ppm-导出-export-excel-路由必须前置于-item_id-路由"
+    )
+    # 点号去除（多数实测样本：gap-8.3→gap-83 / model.py→modelpy / daemon.ts→daemonts）。
+    # 注：INDEX.md#L47 手写行锚 ``硬钉-0-3-181`` 与规则推导 ``硬钉-03181`` 不一致
+    # （手写行 display 与小节标题本就漂移）——R-03 计数 misses 容忍的已知样本。
+    assert slugify_anchor(
+        "🟡 daemon pnpm overrides 把 claude-agent-sdk 8 平台二进制硬钉 0.3.181"
+    ) == ("-daemon-pnpm-overrides-把-claude-agent-sdk-8-平台二进制硬钉-03181")
+
+
+def test_parse_knowledge_entries_three_shapes(tmp_path: Path) -> None:
+    """条目全集三类形态：手册 ## 小节（文件#slug）/ decisions+fr 条目（裸文件、
+    共享锚、title 去 ID 段）/ generated 文件级；INDEX.md 任何 zone 排除、
+    proposed 不入全集、frontmatter created_at/generated_at 解析。"""
+    from datetime import UTC, datetime
+
+    from app.modules.knowledge.parser import parse_knowledge_entries
+
+    knowledge_dir = tmp_path / "knowledge"
+    (knowledge_dir / "decisions").mkdir(parents=True)
+    (knowledge_dir / "fr").mkdir()
+    (knowledge_dir / "generated").mkdir()
+    (knowledge_dir / "proposed").mkdir()
+
+    (knowledge_dir / "INDEX.md").write_text(
+        "# Index\n\n## Patterns\n\n- k → [conventions.md#提交规范](x)\n", encoding="utf-8"
+    )
+    (knowledge_dir / "conventions.md").write_text(
+        "---\ncreated_at: 2026-01-01T00:00:00Z\n---\n"
+        "# Conventions\n\n## 提交规范\n\n正文\n\n## 目录约定\n\n正文\n",
+        encoding="utf-8",
+    )
+    (knowledge_dir / "decisions" / "backend.md").write_text(
+        "# 决策\n\n## D-001@v1 用 links 表\n状态：implemented\n\n## D-002@v1\n状态：implemented\n",
+        encoding="utf-8",
+    )
+    (knowledge_dir / "fr" / "host-fs-handler.md").write_text(
+        "---\ncreated_at: 2026-09-19T15:24:52Z\n---\n"
+        "# FR 索引\n\n## FR-host-fs-handler-001 会话样式回放主体\n状态：superseded\n",
+        encoding="utf-8",
+    )
+    (knowledge_dir / "generated" / "runtime.md").write_text(
+        "---\ngenerated_at: 2026-07-11T16:26:25Z\n---\n# Runtime\n正文\n", encoding="utf-8"
+    )
+    (knowledge_dir / "generated" / "INDEX.md").write_text("# Gen Index\n", encoding="utf-8")
+    (knowledge_dir / "proposed" / "pending.md").write_text("# 候选\n", encoding="utf-8")
+
+    entries = parse_knowledge_entries(tmp_path)
+    by_anchor: dict[str, list] = {}
+    for e in entries:
+        by_anchor.setdefault(e.anchor, []).append(e)
+
+    # 手册：每 ## 小节一条，anchor=文件#slug，created_at 取 frontmatter
+    assert set(by_anchor) == {
+        "conventions.md#提交规范",
+        "conventions.md#目录约定",
+        "decisions/backend.md",
+        "fr/host-fs-handler.md",
+        "generated/runtime.md",
+    }
+    conv = by_anchor["conventions.md#提交规范"][0]
+    assert (conv.title, conv.file, conv.zone) == ("提交规范", "conventions.md", "top")
+    assert conv.created_at == datetime(2026, 1, 1, tzinfo=UTC)
+
+    # decisions：共享裸文件锚 + title 去 ID 段（纯 ID 无标题回落 ID 本身）
+    decision_titles = [e.title for e in by_anchor["decisions/backend.md"]]
+    assert decision_titles == ["用 links 表", "D-002@v1"]
+    assert all(
+        e.zone == "decisions" and e.created_at is None for e in by_anchor["decisions/backend.md"]
+    )
+
+    # fr：条目级共享裸文件锚 + frontmatter created_at
+    fr_entry = by_anchor["fr/host-fs-handler.md"][0]
+    assert fr_entry.title == "会话样式回放主体"
+    assert fr_entry.zone == "fr"
+    assert fr_entry.created_at == datetime(2026, 9, 19, 15, 24, 52, tzinfo=UTC)
+
+    # generated：文件级一条，created_at 取 generated_at 键
+    gen = by_anchor["generated/runtime.md"][0]
+    assert (gen.title, gen.zone) == ("Runtime", "generated")
+    assert gen.created_at == datetime(2026, 7, 11, 16, 26, 25, tzinfo=UTC)
+
+
+def test_parse_knowledge_entries_empty_and_missing_root(tmp_path: Path) -> None:
+    """knowledge 目录不存在 / 空目录 → 空条目全集。"""
+    from app.modules.knowledge.parser import parse_knowledge_entries
+
+    assert parse_knowledge_entries(tmp_path) == []
+
+    (tmp_path / "knowledge").mkdir()
+    assert parse_knowledge_entries(tmp_path) == []

@@ -40,7 +40,8 @@ init 子进程）与 spec_version 保鲜比对。设计原则 D-007@v1：纯模�
 - 辅助：`extractChangeDirs(ops)`（changes/ 与 changes/archive/ 前缀 → change_dirs
   透传 backend scoped reparse）；`syncSpecTreeIfNeeded(ctx, client)`（interactive
   ctx-guarded 薄封装，ctx null 即 no-op，失败仅 warn）。
-- 依赖 hub-client、local-yaml-writer（writeLocalYaml）；被 daemon / task-runner 使用。
+- **hits 增量上报钩子**（2026-09-20-knowledge-effect-panel task-02 / D-003@v1）：`postSpecSync` 成功汇聚点（清 pending_push 标记后）挂 `uploadKnowledgeHitsIfNeeded`（`src/knowledge-hits-upload.ts`，钩子处再包一层 try/catch——R-05 上报失败绝不阻塞同步主流程；首同步 tar/增量/回退 tar/无变化四条成功路径全覆盖，无变化也触发）。上报语义：读 `${specDir}/.runtime/knowledge-hits.jsonl`（CLI 注入命中遥测；不存在/不可读静默 no-op 零日志噪音；**不动 UPLOAD_EXCLUDE 的 .runtime 排除语义**，hits 不随 spec tar 上行）；断点 offset=「已上行完整行数」存 daemon 家目录状态文件 `~/.sillyhub/daemon/.hits-upload-state-{wsId}.json`（`{uploadedLines, updated_at}`，writeFileAtomic 原子写；不落 spec 树防 pull 整树交换清掉，对齐 manifests/{ws}.json 先例；不存在/坏 JSON/形状不符视为 0 全量重报；offset 超前（hits 文件被外部截断）钳到当前行数并立即固化防增量永久卡死）；只报以 `\n` 结尾的**完整行**（R-01：上报窗口内 CLI 正 append 的尾半行留下轮补）；分批 ≤2000 行/批（`HITS_BATCH_MAX_LINES` 与 backend `HitsBatchIn` 上限同值，R-06），每批成功即原子前进 offset（后批失败保前批进度）；任何失败 warn 一次即 return（不抛、不动 offset，下轮重试由服务端 (workspace_id, line_hash) 唯一约束去重兜底 D-007）；client 缺 `postKnowledgeHitsBatch`（mock/旧实例）静默 no-op（对齐 `typeof client.postSpecSync` 先例）。
+- 依赖 hub-client、local-yaml-writer（writeLocalYaml）、knowledge-hits-upload（hits 上报钩子，间接 atomic-write/config）；被 daemon / task-runner 使用。
 
 ## 关键逻辑
 ```
@@ -53,6 +54,8 @@ postSpecSyncImpl:
   → client.postSpecSyncIncremental(wsId, ops, changeWriteId, changeDirs)
     conflict=true → 抛 SpecPushConflict；404/网络错 → 回退全量 tar
   成功 → 按 new_versions 回写缓存
+  成功(result ≠ null) → 清 pending_push → uploadKnowledgeHitsIfNeeded
+    （hits 增量上报 best-effort 钩子，独立 try/catch，失败仅 warn 不影响同步返回值）
 handleInitLease 6 步（顺序严格）:
   1 writeDaemonState(硬失败) → 2 pullSpecBundle(硬失败) → 3 runSillyspecInit(硬失败)
   → 4 postSpecSync(软失败仅 warn, R-03) → 5 writeLocalYaml(硬失败, D-003)

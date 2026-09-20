@@ -38,17 +38,19 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Popconfirm, Tree, type TreeProps } from "antd";
 import type { DataNode } from "antd/es/tree";
 import type { ReactNode } from "react";
 
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { DistillTaskBar, distillTasksQueryKey } from "@/components/knowledge/distill-task-bar";
+import { EntryCardList } from "@/components/knowledge/entry-card-list";
 import { EntryEditor } from "@/components/knowledge/entry-editor";
 import { MergeDialog } from "@/components/knowledge/merge-dialog";
 import { PrecipitateDialog } from "@/components/knowledge/precipitate-dialog";
 import { DistillHistoryDialog } from "@/components/knowledge/distill-history-dialog";
+import { OpsDashboard, knowledgeStatsQueryKey } from "@/components/knowledge/ops-dashboard";
 import { Button } from "@/components/ui/button";
 import { FileNodeIcon } from "@/components/ui/file-node-icon";
 import { MarkdownText } from "@/components/ui/markdown-text";
@@ -58,6 +60,7 @@ import { ApiError } from "@/lib/api";
 import { errMessage, useNotify } from "@/lib/errors";
 import {
   getKnowledge,
+  getKnowledgeStats,
   listKnowledge,
   rejectKnowledge,
   type KnowledgeEntry,
@@ -79,19 +82,24 @@ const TREE_PANEL_WIDTH_KEY = "sillyhub-knowledge-tree-width";
 // ── 知识条目 → zone 分组目录树 ──────────────────────────────────────────────
 
 /**
- * zone 分组定义（顺序固定：待审核置顶，其后手册 / 决策库 / 自动生成）。
- * 与 backend parser 的 zone 口径一致（top|decisions|generated|proposed）。
+ * zone 分组定义（顺序固定：待审核置顶，其后手册 / 决策库 / 需求规则 / 自动生成）。
+ * 与 backend parser 的 zone 口径一致（top|decisions|fr|generated|proposed——fr 为
+ * task-05 / 2026-09-20-knowledge-effect-panel 新增独立 zone，D-005@v1）。
  */
 const ZONE_GROUPS: ReadonlyArray<{ zone: string; label: string }> = [
   { zone: "proposed", label: "待审核" },
   { zone: "top", label: "知识手册" },
   { zone: "decisions", label: "决策库" },
+  { zone: "fr", label: "需求规则" },
   { zone: "generated", label: "自动生成" },
 ];
 
 /** zone 归组（缺 zone / 未知值兜底归 top 组）。 */
 function zoneOf(item: KnowledgeEntry): string {
-  return item.zone === "proposed" || item.zone === "decisions" || item.zone === "generated"
+  return item.zone === "proposed" ||
+    item.zone === "decisions" ||
+    item.zone === "fr" ||
+    item.zone === "generated"
     ? item.zone
     : "top";
 }
@@ -172,7 +180,8 @@ function collectDirPaths(nodes: KnowledgeNode[], acc: string[] = []): string[] {
   return acc;
 }
 
-/** 文件行标题：文件名 + 修改日期灰字，整行单行。 */
+/** 文件行标题：文件名 + 修改日期灰字 + 文件级 🔥 使用徽标（task-05 / FR-06：
+ *  use_count 为 Wave1 透传的文件级命中计数，stats entry_counts 口径），整行单行。 */
 function renderEntryTitle(node: KnowledgeNode & { entry: KnowledgeEntry }): ReactNode {
   const entry = node.entry;
   const date = entry.last_modified_at
@@ -185,6 +194,15 @@ function renderEntryTitle(node: KnowledgeNode & { entry: KnowledgeEntry }): Reac
     >
       <span>{node.name}</span>
       {date ? <span className="shrink-0 text-[11px] text-muted-foreground">{date}</span> : null}
+      {typeof entry.use_count === "number" && entry.use_count > 0 ? (
+        <span
+          data-testid="tree-use-badge"
+          title={`文件级命中 ${entry.use_count} 次`}
+          className="shrink-0 rounded-full bg-brand-100 px-1.5 py-0.5 text-[10px] font-bold leading-4 text-brand-700"
+        >
+          🔥{entry.use_count}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -245,6 +263,11 @@ export default function KnowledgePage({ params }: Props) {
   const [selectedContent, setSelectedContent] = useState<string | null>(null);
   const [selectedTitle, setSelectedTitle] = useState<string | null>(null);
   const [selectedZone, setSelectedZone] = useState<string>("top");
+  /** 选中文件级命中计数（Wave1 透传字段，EntryCardList 头部 🔥 徽标）。 */
+  const [selectedUseCount, setSelectedUseCount] = useState<number | null>(null);
+  /** 内容区视图 tab（task-05 / FR-04 / D-004@v2）：cards=统一条目卡（默认）/
+   *  raw=既有 md 阅读视图（零改动）；每次重新选文件回默认卡片。 */
+  const [viewMode, setViewMode] = useState<"cards" | "raw">("cards");
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
   // task-05 写入口态：沉淀弹层开关 + 条目编辑开关。
@@ -308,14 +331,28 @@ export default function KnowledgePage({ params }: Props) {
 
   /** 选中并加载某个知识条目（树选择 onSelectTree 与 D-010① 反链跳转共用）。 */
   const selectEntry = useCallback(
-    (filename: string) => {
+    (filename: string, anchor?: string) => {
       setSelectedFilename(filename);
       setEditing(false);
+      setViewMode("cards");
       getKnowledge(workspaceId, filename)
         .then((entry) => {
           setSelectedContent(entry.content ?? null);
           setSelectedTitle(entry.title ?? entry.filename);
           setSelectedZone(zoneOf(entry));
+          setSelectedUseCount(entry.use_count ?? null);
+          // 条目级落点（验收建议 2）：卡流加载后滚动到锚点小节卡。锚点是 slug
+          // 形态（INDEX 路由行/条目卡与 hits 同域），滚动定位用 data-anchor 属性
+          // 选择器；查无该卡时静默落文件级顶部（降级兼容旧锚/改名小节）。
+          if (anchor) {
+            requestAnimationFrame(() => {
+              document
+                .querySelector(
+                  `[data-entry-anchor="${CSS.escape(`${filename}#${anchor}`)}"]`,
+                )
+                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+            });
+          }
         })
         .catch((err) => {
           setPageError(err instanceof ApiError ? err.message : "加载文档失败");
@@ -323,6 +360,22 @@ export default function KnowledgePage({ params }: Props) {
     },
     [workspaceId],
   );
+
+  /**
+   * 条目级计数映射（task-05 / FR-06）：与 OpsDashboard 同 key 复用同一 stats
+   * 查询缓存（零额外请求），从 usage_board（anchor→total）派生——手册=`文件#slug`
+   * 小节级、decisions/fr=裸文件名（design 数据流口径）。stats 未就绪 / 空榜时
+   * 传空映射：条目卡不带徽标，仅保留文件级 useCount 徽标（卡片注释的降级路径）。
+   */
+  const statsQ = useQuery({
+    queryKey: knowledgeStatsQueryKey(workspaceId),
+    queryFn: () => getKnowledgeStats(workspaceId),
+  });
+  const entryCounts = useMemo(() => {
+    const board = statsQ.data?.usage_board;
+    if (!board) return undefined;
+    return Object.fromEntries(board.map((u) => [u.anchor, u.total]));
+  }, [statsQ.data]);
 
   const onSelectTree: TreeProps["onSelect"] = (_keys, info) => {
     if (!info.node.isLeaf) return;
@@ -341,6 +394,8 @@ export default function KnowledgePage({ params }: Props) {
     setSelectedContent(null);
     setSelectedTitle(null);
     setSelectedZone("top");
+    setSelectedUseCount(null);
+    setViewMode("cards");
   }, []);
 
   /** 拒绝候选（task-06 / FR-05）：Popconfirm 二次确认后调 reject，成功刷新。 */
@@ -400,6 +455,12 @@ export default function KnowledgePage({ params }: Props) {
         </div>
       )}
 
+      {/* 运营仪表盘（task-04 / 2026-09-20-knowledge-effect-panel / FR-02 / FR-03）：
+          原型 .panel-grid 位（PageHeader 之下、任务条/树之上）——四指标卡 +
+          死条目内嵌清单 + 使用率榜全量；内部三态自理（加载/暂无使用数据/错误），
+          不依赖知识列表加载态（stats 与列表是两条独立数据链）。 */}
+      <OpsDashboard workspaceId={workspaceId} />
+
       {/* 蒸馏任务条（task-08 / 原型 .distill-bar 位）：无进行中任务时不渲染；
           任务完成经 onCompleted 重拉列表，候选出现在待审核区；D-010① merged_to
           反链点击选中目标知识条目。 */}
@@ -449,7 +510,7 @@ export default function KnowledgePage({ params }: Props) {
             />
           </div>
           <SectionCard className="min-w-0 flex-1">
-            {selectedContent === null ? (
+            {selectedFilename === null || selectedContent === null ? (
               <div className="py-12 text-center text-xs text-muted-foreground">
                 选择左侧文档查看内容。
               </div>
@@ -525,9 +586,57 @@ export default function KnowledgePage({ params }: Props) {
                     onCancel={() => setEditing(false)}
                   />
                 ) : isMarkdown ? (
-                  <div className="max-h-[70vh] overflow-auto rounded-md bg-muted/50">
-                    <MarkdownText content={selectedContent} size="reading" />
-                  </div>
+                  <>
+                    {/* 卡片/原文双 tab（task-05 / FR-04 / D-004@v2）：卡片=统一条目
+                        渲染器（默认），原文=既有 md 阅读视图（零改动）。 */}
+                    <div role="tablist" aria-label="内容视图" className="flex gap-1">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={viewMode === "cards"}
+                        data-testid="view-tab-cards"
+                        onClick={() => setViewMode("cards")}
+                        className={
+                          viewMode === "cards"
+                            ? "rounded-sm border border-brand-400 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-600"
+                            : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground hover:text-brand-600"
+                        }
+                      >
+                        卡片
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={viewMode === "raw"}
+                        data-testid="view-tab-raw"
+                        onClick={() => setViewMode("raw")}
+                        className={
+                          viewMode === "raw"
+                            ? "rounded-sm border border-brand-400 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-600"
+                            : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground hover:text-brand-600"
+                        }
+                      >
+                        原文
+                      </button>
+                    </div>
+                    {viewMode === "cards" ? (
+                      <EntryCardList
+                        filename={selectedFilename}
+                        zone={selectedZone}
+                        content={selectedContent}
+                        useCount={selectedUseCount}
+                        entryCounts={entryCounts}
+                        // 条目级落点：锚点透传（验收建议 2——INDEX 路由/依据决策互跳
+                        // 落到小节级而非仅文件级；selectEntry 忽略锚点时降级文件级）。
+                        onJumpToEntry={(file, anchor) => selectEntry(file, anchor)}
+                        className="max-h-[70vh] overflow-y-auto pr-1"
+                      />
+                    ) : (
+                      <div className="max-h-[70vh] overflow-auto rounded-md bg-muted/50">
+                        <MarkdownText content={selectedContent} size="reading" />
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words rounded border bg-muted/30 p-3 text-[11px] leading-4">
                     {selectedContent}

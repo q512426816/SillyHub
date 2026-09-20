@@ -23,6 +23,9 @@ export type DistillTaskRead = components["schemas"]["DistillTaskRead"];
 // quick 条目级 DTO（quick-2dba0118 沉淀弹层三修消费的生成类型）。
 export type DistillQuickEntryOut = components["schemas"]["DistillQuickEntryOut"];
 export type DistillQuickEntryList = components["schemas"]["DistillQuickEntryList"];
+// 运营指标 DTO（task-04 / 2026-09-20-knowledge-effect-panel 消费，task-01 交付
+// 的生成类型）。
+export type KnowledgeStatsOut = components["schemas"]["KnowledgeStatsOut"];
 
 /**
  * filename 路径段编码：按 `/` 分段 encodeURIComponent 拼回，不整串编码。
@@ -237,6 +240,24 @@ export async function listQuickEntries(
 ): Promise<DistillQuickEntryList> {
   return apiFetch<DistillQuickEntryList>(
     `/api/workspaces/${workspaceId}/knowledge/distill/quick-entries`,
+  );
+}
+
+/**
+ * 知识运营指标（task-04 / 2026-09-20-knowledge-effect-panel / FR-02 / FR-03 /
+ * D-009 / D-008@v3）：GET /knowledge/stats。
+ *
+ * 后端实时聚合（条目全集 × {inject, fr-inject} 命中行）：覆盖率（+8 周趋势）/
+ * 死条目（90 天零命中清单）/ 每任务命中密度 / 新知识生效速度 + 使用率榜全量
+ * （per_task 为次/任务浮点原值，% 格式化为前端展示职责——ops-dashboard 的
+ * formatPerTaskPct）+ 文件级计数（文件级 🔥 徽标数据源，task-05 消费）。
+ * 未部署新 daemon 的端 hits 不上行，返回零值指标（前端空态「暂无使用数据」）。
+ */
+export async function getKnowledgeStats(
+  workspaceId: string,
+): Promise<KnowledgeStatsOut> {
+  return apiFetch<KnowledgeStatsOut>(
+    `/api/workspaces/${workspaceId}/knowledge/stats`,
   );
 }
 

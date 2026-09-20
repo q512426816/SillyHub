@@ -27,6 +27,7 @@ import type { HubClient } from './hub-client.js';
 import type { FileOp } from './hub-client.js';
 import { daemonStateDir } from './config.js';
 import { writeLocalYaml } from './local-yaml-writer.js';
+import { uploadKnowledgeHitsIfNeeded } from './knowledge-hits-upload.js';
 
 // ── resolveSpecDir ────────────────────────────────────────────────────────────
 
@@ -831,6 +832,16 @@ export async function postSpecSync(
     // 真实 push 成功（result 非 null）→ 清除 pending_push（本地已与服务器一致）。
     if (result !== null) {
       await rmPendingPushMarker(specRoot);
+      // task-02（2026-09-20-knowledge-effect-panel）：成功汇聚点挂 hits 增量上报
+      // best-effort 钩子——首同步 tar / 增量 / 回退 tar / 无变化四条成功路径都汇到
+      // 此处（无变化也触发：hits 行的 append 与 spec 文档改动互相独立）。
+      // uploadKnowledgeHitsIfNeeded 自身全程 try/catch 不抛，此处再包一层防御
+      // （R-05：上报失败绝不阻塞同步主流程）。
+      try {
+        await uploadKnowledgeHitsIfNeeded(client, wsId, specRoot);
+      } catch (e) {
+        console.warn('spec_sync: hits_upload_hook_failed', wsId, e);
+      }
     }
     return result;
   } catch (e) {

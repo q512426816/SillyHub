@@ -51,8 +51,46 @@ class KnowledgeService:
         # BQ-2（2026-08-20 审计）：同步 rglob+read 移线程池，别占事件循环
         # （对齐 scan_docs task-01 范式）。
         entries = await asyncio.to_thread(self._parser.parse_knowledge, root)
-        items = [self._to_knowledge_entry(e, include_content=False) for e in entries]
+        # task-03（2026-09-20-knowledge-effect-panel）：列表透传文件级 use_count
+        # （无数据 0；proposed 条目同口径，不分 zone 特判）。
+        file_use = await self._usage_file_counts(workspace_id)
+        items = [
+            self._to_knowledge_entry(
+                e, include_content=False, use_count=file_use.get(e.filename, 0)
+            )
+            for e in entries
+        ]
         return KnowledgeList(items=items, total=len(items))
+
+    async def _usage_file_counts(self, workspace_id: uuid.UUID) -> dict[str, int]:
+        """文件级使用计数：使用计数行（type∈{inject, fr-inject}）matched_anchors
+        拆锚点后按 ``#`` 前缀（=filename）聚合，与 HitsService.stats 的
+        entry_counts 同口径（不整跑 stats——列表低频单查仅取锚点列，开销可控）。
+
+        延迟导入防环：hits.py 顶层 import 本模块（复用 _spec_content_root）。
+        """
+        from sqlalchemy import select
+
+        from app.modules.knowledge.hits import USAGE_TYPES, KnowledgeHit
+
+        rows = (
+            (
+                await self._session.execute(
+                    select(KnowledgeHit.matched_anchors).where(
+                        KnowledgeHit.workspace_id == workspace_id,
+                        KnowledgeHit.type.in_(USAGE_TYPES),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        counts: dict[str, int] = {}
+        for matched in rows:
+            for anchor in matched or []:
+                file_key = anchor.split("#", 1)[0]
+                counts[file_key] = counts.get(file_key, 0) + 1
+        return counts
 
     async def get_knowledge(self, workspace_id: uuid.UUID, filename: str) -> KnowledgeEntry:
         workspace = await self._ws_service.get(workspace_id)
@@ -92,9 +130,13 @@ class KnowledgeService:
         )
 
     @staticmethod
-    def _to_knowledge_entry(e: ParsedEntry, *, include_content: bool) -> KnowledgeEntry:
+    def _to_knowledge_entry(
+        e: ParsedEntry, *, include_content: bool, use_count: int | None = None
+    ) -> KnowledgeEntry:
         # task-01（2026-09-17-knowledge-precipitation）：透传 zone；get_knowledge 按
         # filename（含子目录段后值天然唯一）精确匹配，消除跨 zone 同名歧义。
+        # task-03（2026-09-20-knowledge-effect-panel）：use_count 由 list 透传真实
+        # 聚合值（get_knowledge 维持缺省 None，详情侧不查 hits）。
         return KnowledgeEntry(
             zone=e.zone,
             filename=e.filename,
@@ -102,6 +144,7 @@ class KnowledgeService:
             title=e.title,
             content=e.content if include_content else None,
             last_modified_at=e.last_modified_at,
+            use_count=use_count,
         )
 
     @staticmethod

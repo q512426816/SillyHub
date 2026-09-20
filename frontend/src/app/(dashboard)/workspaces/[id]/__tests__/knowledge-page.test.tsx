@@ -1,13 +1,16 @@
 /**
  * 知识库页测试（ql-20260821-015 重构后补；task-03 2026-09-17-knowledge-precipitation 适配；
  * task-05 同变更补写入口权限两态与 decisions 只读断言；task-06 同变更补待审核
- * 条目「合并/拒绝」操作区权限两态与拒绝确认流；task-08 同变更补蒸馏任务条挂载）。
+ * 条目「合并/拒绝」操作区权限两态与拒绝确认流；task-08 同变更补蒸馏任务条挂载；
+ * task-05 / 2026-09-20-knowledge-effect-panel 补 fr「需求规则」组、树行文件级
+ * 🔥 use_count 徽标与「卡片/原文」双 tab 分发）。
  *
  * 覆盖：
  * 1. 只渲染知识库（无快速日志 tab）；树按 zone 分组（待审核置顶 + 计数徽标、知识手册、
- *    决策库、自动生成）+ FileNodeIcon 按扩展名分型 + 日期灰字
+ *    决策库、需求规则、自动生成）+ FileNodeIcon 按扩展名分型 + 日期灰字
  * 2. 空待审核负例：无 proposed 条目时不渲染待审核组与徽标
- * 3. 点目录行展开/收起（expandAction=click）；点文件行 → getKnowledge 拉详情并 Markdown 渲染
+ * 3. 点目录行展开/收起（expandAction=click）；点文件行 → getKnowledge 拉详情，
+ *    默认卡片视图（EntryCardList），「原文」tab 切既有 Markdown 渲染
  * 4. 树栏拖拽把手：默认 280px，拖动调宽 + localStorage 记忆
  * 5. WorkspaceTabs 含「知识库」tab，位于「文件」之后
  * 6. task-05 写入口权限两态：持有 knowledge:write（或 is_platform_admin 短路）见
@@ -20,9 +23,12 @@
  * 9. task-08 蒸馏任务条：挂知识库页列表上方（workspace id 透传），任务完成
  *    onCompleted 回调重拉知识列表（任务条内部轮询/终态行为由
  *    distill-task-bar.test.tsx 覆盖，页面级 stub 隔离）
+ * 10. task-05（2026-09-20-knowledge-effect-panel / D-005@v1 / FR-04 / FR-06）：fr
+ *     条目归「需求规则」组（决策库后）；树行文件级 🔥 use_count 徽标；md 文件
+ *     点开双 tab——默认卡片（EntryCardList 挂载）、原文 tab 切既有 md 视图可切回
  */
 
-import { cleanup, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -51,6 +57,9 @@ vi.mock("@/lib/knowledge", async (importOriginal) => {
     // task-08：蒸馏任务条消费的任务列表端点（页面挂真实请求会打 jsdom 缺失
     // 的 fetch；缺省空列表 = 无任务，任务条不渲染）。
     listDistillTasks: vi.fn(),
+    // task-04（2026-09-20-knowledge-effect-panel）：顶部运营仪表盘消费的
+    // stats 端点（真实请求会打 jsdom 缺失的 fetch；缺省零值指标 = 空态）。
+    getKnowledgeStats: vi.fn(),
   };
 });
 
@@ -126,6 +135,7 @@ import KnowledgePage from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
 import { WorkspaceTabs } from "@/components/workspace-tabs";
 import {
   getKnowledge,
+  getKnowledgeStats,
   listDistillTasks,
   listKnowledge,
   previewMergeKnowledge,
@@ -146,11 +156,15 @@ function entry(partial: Partial<Record<string, unknown>> & { filename: string; p
     last_modified_at: null,
     // task-03：mock 补 zone（缺省 top，与后端 KnowledgeEntry 契约对齐）。
     zone: "top",
+    // task-05（2026-09-20-knowledge-effect-panel）：Wave1 透传的文件级命中计数
+    // （缺省 null = 无徽标；树行 🔥 徽标用例按需覆写）。
+    use_count: null,
     ...partial,
   };
 }
 
-/** 默认：真实 knowledge 目录样例——顶层手册 + decisions/ + generated/ + proposed/ 四 zone。 */
+/** 默认：真实 knowledge 目录样例——顶层手册 + decisions/ + fr/ + generated/ +
+ * proposed/ 五 zone（fr 为 2026-09-20-knowledge-effect-panel 新增独立组）。 */
 function mockDefaultList() {
   mockList.mockResolvedValue({
     items: [
@@ -162,11 +176,18 @@ function mockDefaultList() {
         filename: "conventions.md",
         path: ".sillyspec/knowledge/conventions.md",
         last_modified_at: "2026-08-20T10:00:00Z",
+        use_count: 214,
       }),
       entry({
         filename: "decisions/daemon.md",
         path: ".sillyspec/knowledge/decisions/daemon.md",
         zone: "decisions",
+      }),
+      entry({
+        filename: "fr/host-fs-handler.md",
+        path: ".sillyspec/knowledge/fr/host-fs-handler.md",
+        zone: "fr",
+        use_count: 18,
       }),
       entry({
         filename: "generated/runtime.md",
@@ -230,6 +251,17 @@ beforeEach(() => {
   // task-08：任务列表缺省空（无进行中任务，任务条不渲染——被 stub 后本断言
   // 不依赖真实条渲染）。
   (listDistillTasks as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+  // task-04（2026-09-20-knowledge-effect-panel）：stats 缺省零值指标（运营
+  // 仪表盘空态「暂无使用数据」，不干扰既有树/详情断言；指标卡渲染细节由
+  // ops-dashboard.test.tsx 覆盖）。
+  (getKnowledgeStats as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+    coverage: { used_entries: 0, total_entries: 0, trend: [] },
+    dead_entries: [],
+    density: { per_task_avg: 0, trend: [] },
+    freshness: { recent_new: 0, recent_used: 0 },
+    usage_board: [],
+    entry_counts: [],
+  });
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
@@ -241,9 +273,18 @@ afterEach(() => {
 });
 
 describe("知识库页（task-03 zone 分组树）", () => {
-  it("树按 zone 分组：待审核置顶带计数徽标、四组中文标签、目录/文件图标分型、日期灰字", async () => {
+  it("树按 zone 分组：待审核置顶带计数徽标、五组中文标签（含需求规则）、目录/文件图标分型、日期灰字", async () => {
     renderPage();
-    await waitForTree(["待审核", "知识手册", "决策库", "自动生成", "pending-fix.md", "INDEX.md"]);
+    await waitForTree([
+      "待审核",
+      "知识手册",
+      "决策库",
+      "需求规则",
+      "自动生成",
+      "pending-fix.md",
+      "INDEX.md",
+      "host-fs-handler.md",
+    ]);
 
     // 无快速日志 tab（重构后只剩知识库）。
     expect(screen.queryByText("快速日志")).not.toBeInTheDocument();
@@ -252,14 +293,16 @@ describe("知识库页（task-03 zone 分组树）", () => {
     const badge = screen.getByTestId("proposed-zone-badge");
     expect(badge).toHaveTextContent("1 条");
     expect(badge.closest(".ant-tree-treenode")?.textContent).toContain("待审核");
-    const groupTitles = ["待审核", "知识手册", "决策库", "自动生成"].map(
+    const groupTitles = ["待审核", "知识手册", "决策库", "需求规则", "自动生成"].map(
       (label) => screen.getByText(label).closest(".ant-tree-treenode")!,
     );
-    // 固定 zone 顺序：待审核在最前（DOM 顺序即树顺序）。
+    // 固定 zone 顺序：待审核在最前（DOM 顺序即树顺序），需求规则在决策库后
+    // （task-05 / D-005@v1，fr 独立 zone）。
     const order = groupTitles.map((row) => row.textContent);
     expect(order.indexOf("待审核")).toBeLessThan(order.indexOf("知识手册"));
     expect(order.indexOf("知识手册")).toBeLessThan(order.indexOf("决策库"));
-    expect(order.indexOf("决策库")).toBeLessThan(order.indexOf("自动生成"));
+    expect(order.indexOf("决策库")).toBeLessThan(order.indexOf("需求规则"));
+    expect(order.indexOf("需求规则")).toBeLessThan(order.indexOf("自动生成"));
 
     // zone 组行是目录图标（Folder），组内文件行按扩展名分型（.md → FileText）。
     const dirRow = screen.getByText("决策库").closest(".ant-tree-treenode")!;
@@ -268,6 +311,25 @@ describe("知识库页（task-03 zone 分组树）", () => {
     expect(fileRow.querySelector(".ant-tree-iconEle svg.lucide-file-text")).toBeTruthy();
     // 日期灰字（zh-CN 本地化，UTC 时间戳在本地时区渲染，断言年份存在）。
     expect(fileRow.textContent).toMatch(/2026/);
+  });
+
+  it("fr 条目归「需求规则」组且组内剥 fr/ 前缀；树行文件级 🔥 use_count 徽标（task-05 / FR-06）", async () => {
+    renderPage();
+    await waitForTree(["需求规则", "host-fs-handler.md"]);
+
+    // fr 条目挂在需求规则组（zone 组节点路径 zone:fr）。
+    const frRow = screen.getByText("host-fs-handler.md").closest(".ant-tree-treenode")! as HTMLElement;
+    expect(frRow.textContent).not.toContain("fr/");
+    // 文件级命中徽标：conventions.md 🔥214 / fr 文件 🔥18；无计数条目（INDEX.md）不带。
+    const conventionsRow = screen.getByText("conventions.md").closest(
+      ".ant-tree-treenode",
+    )! as HTMLElement;
+    expect(
+      within(conventionsRow).getByTestId("tree-use-badge").textContent,
+    ).toBe("🔥214");
+    expect(within(frRow).getByTestId("tree-use-badge").textContent).toBe("🔥18");
+    const indexRow = screen.getByText("INDEX.md").closest(".ant-tree-treenode")! as HTMLElement;
+    expect(within(indexRow).queryByTestId("tree-use-badge")).not.toBeInTheDocument();
   });
 
   it("空待审核负例：无 proposed 条目时不渲染待审核组与徽标", async () => {
@@ -299,7 +361,7 @@ describe("知识库页（task-03 zone 分组树）", () => {
     expect(screen.queryByText("待审核")).not.toBeInTheDocument();
   });
 
-  it("点目录行收起/展开；点文件行 → getKnowledge 拉详情并 Markdown 渲染", async () => {
+  it("点目录行收起/展开；点文件行 → getKnowledge 拉详情，默认卡片视图切「原文」走 Markdown 渲染", async () => {
     mockGet.mockResolvedValue(
       entry({
         filename: "proposed/pending-fix.md",
@@ -321,13 +383,21 @@ describe("知识库页（task-03 zone 分组树）", () => {
     fireEvent.click(screen.getByText("待审核").closest(".ant-tree-node-content-wrapper")!);
     await waitForTree(["pending-fix.md"]);
 
-    // 点文件行 → 按 filename（含子目录段）拉详情 + .md 走 Markdown 渲染。
+    // 点文件行 → 按 filename（含子目录段）拉详情；md 文件默认卡片视图
+    // （task-05 / FR-04：统一条目渲染器挂载，md 阅读视图不在默认态）。
     fireEvent.click(
       screen.getByText("pending-fix.md").closest(".ant-tree-node-content-wrapper")!,
     );
     await waitFor(() => expect(mockGet).toHaveBeenCalledWith(WS, "proposed/pending-fix.md"));
     await waitFor(() => expect(screen.getByText("待合并修复")).toBeInTheDocument());
-    expect(screen.getByTestId("md-preview")).toHaveTextContent("# 你好");
+    const cards = await screen.findByTestId("entry-card-list");
+    expect(cards).toHaveAttribute("data-form", "single");
+    expect(screen.queryByTestId("md-preview")).not.toBeInTheDocument();
+
+    // 「原文」tab → 既有 Markdown 阅读视图（零改动路径）。
+    fireEvent.click(screen.getByTestId("view-tab-raw"));
+    await waitFor(() => expect(screen.getByTestId("md-preview")).toHaveTextContent("# 你好"));
+    expect(screen.queryByTestId("entry-card-list")).not.toBeInTheDocument();
   });
 
   it("树栏默认 280px，拖动把手调宽并写入 localStorage 记忆", async () => {
@@ -570,6 +640,133 @@ describe("蒸馏任务条挂载（task-08 / FR-01 / FR-03 / D-002@v1）", () => 
     const listCallsBefore = mockList.mock.calls.length;
     fireEvent.click(screen.getByTestId("stub-distill-completed"));
     await waitFor(() => expect(mockList.mock.calls.length).toBe(listCallsBefore + 1));
+  });
+});
+
+describe("运营仪表盘挂载（task-04 / 2026-09-20-knowledge-effect-panel / FR-02 / FR-03）", () => {
+  it("挂页面顶部（PageHeader 之下、任务条/树之上），stats 按 workspace 拉取；零值指标走空态", async () => {
+    renderPage();
+    await waitForTree(["知识手册", "INDEX.md"]);
+
+    // stats 端点按 workspace id 拉取。
+    await waitFor(() =>
+      expect(getKnowledgeStats).toHaveBeenCalledWith(WS),
+    );
+    // 缺省零值指标 → 空态「暂无使用数据」（不干扰树/详情形态）。
+    await waitFor(() =>
+      expect(screen.getByTestId("ops-dashboard-empty")).toBeInTheDocument(),
+    );
+
+    // 版位：仪表盘在任务条 stub 与树面板之前（PageHeader 之下第一个区块）。
+    const dashboard = screen.getByTestId("ops-dashboard-empty");
+    const bar = screen.getByTestId("distill-task-bar-stub");
+    const tree = screen.getByTestId("knowledge-tree-panel");
+    expect(dashboard.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bar.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("卡片/原文双 tab 分发（task-05 / 2026-09-20-knowledge-effect-panel / FR-04 / D-004@v2）", () => {
+  /** 选中 conventions.md（手册形态多小节）并等卡片视图渲染（双 tab 用例共用步骤）。 */
+  async function selectManualEntry(content: string, useCount: number | null = 214) {
+    mockGet.mockResolvedValue(
+      entry({
+        filename: "conventions.md",
+        path: ".sillyspec/knowledge/conventions.md",
+        zone: "top",
+        title: "项目约定",
+        content,
+        use_count: useCount,
+      }),
+    );
+    renderPage();
+    await waitForTree(["知识手册", "conventions.md"]);
+    fireEvent.click(
+      screen.getByText("conventions.md").closest(".ant-tree-node-content-wrapper")!,
+    );
+    await waitFor(() => expect(screen.getByText("项目约定")).toBeInTheDocument());
+    await screen.findByTestId("entry-card-list");
+  }
+
+  const MANUAL_TWO_SECTIONS =
+    "---\nauthor: q\n---\n\n# 项目约定\n\n## 小节一\n\n正文一。\n\n## 小节二\n\n正文二。\n";
+
+  it("md 文件点开默认卡片（手册形态逐小节卡 + 文件级 🔥 徽标）；tab 可往返；重新选文件回默认卡片", async () => {
+    await selectManualEntry(MANUAL_TWO_SECTIONS);
+
+    // 默认卡片：手册形态逐小节成卡 + 头部文件级 🔥 徽标。
+    expect(screen.getByTestId("entry-card-list")).toHaveAttribute("data-form", "manual");
+    expect(screen.getAllByTestId("manual-section-card")).toHaveLength(2);
+    expect(screen.getByText("小节一")).toBeInTheDocument();
+    expect(screen.getByText("正文二。")).toBeInTheDocument();
+    expect(
+      screen.getAllByTestId("entry-use-badge").map((b) => b.textContent),
+    ).toContain("🔥 214");
+    // tab 选中态：默认卡片。
+    expect(screen.getByTestId("view-tab-cards")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("view-tab-raw")).toHaveAttribute("aria-selected", "false");
+
+    // 切原文 → 既有 md 阅读视图（零改动）；再切回卡片。
+    fireEvent.click(screen.getByTestId("view-tab-raw"));
+    await waitFor(() => expect(screen.getByTestId("md-preview")).toBeInTheDocument());
+    expect(screen.getByTestId("view-tab-raw")).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByTestId("view-tab-cards"));
+    await waitFor(() => expect(screen.getByTestId("entry-card-list")).toBeInTheDocument());
+
+    // 原文态下换选文件 → 回默认卡片（selectEntry 复位 viewMode）。
+    fireEvent.click(screen.getByTestId("view-tab-raw"));
+    await waitFor(() => expect(screen.getByTestId("md-preview")).toBeInTheDocument());
+    mockGet.mockResolvedValue(
+      entry({
+        filename: "INDEX.md",
+        path: ".sillyspec/knowledge/INDEX.md",
+        zone: "top",
+        title: "Knowledge Index",
+        content: "# Knowledge Index\n\n## Conventions\n- 关键词 → [标题](conventions.md#锚)\n",
+      }),
+    );
+    fireEvent.click(
+      screen.getByText("INDEX.md").closest(".ant-tree-node-content-wrapper")!,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("entry-card-list")).toHaveAttribute("data-form", "index"),
+    );
+    expect(screen.queryByTestId("md-preview")).not.toBeInTheDocument();
+  });
+
+  it("条目级计数从 stats usage_board 派生（同 key 复用缓存）：锚对齐小节带 🔥 徽标", async () => {
+    // stats 榜含 conventions.md#小节一 锚（slug=中文原样保留）——条目级徽标数据链。
+    (getKnowledgeStats as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      coverage: { used_entries: 1, total_entries: 5, trend: [] },
+      dead_entries: [],
+      density: { per_task_avg: 0, trend: [] },
+      freshness: { recent_new: 0, recent_used: 0 },
+      usage_board: [
+        {
+          anchor: "conventions.md#小节一",
+          per_task: 0.5,
+          total: 41,
+          task_count: 3,
+          first_hit: null,
+          last_hit: null,
+        },
+      ],
+      entry_counts: [{ file: "conventions.md", count: 41 }],
+    });
+    await selectManualEntry(MANUAL_TWO_SECTIONS);
+
+    // 小节一带条目级徽标 🔥 41；小节二不带（仅头部文件级 🔥 214）。
+    const badges = screen.getAllByTestId("entry-use-badge").map((b) => b.textContent);
+    expect(badges).toContain("🔥 41");
+    expect(badges).toContain("🔥 214");
+    expect(badges).toHaveLength(2);
+  });
+
+  it("无使用数据的端（stats 空榜）：条目卡不带徽标，仅文件级 useCount 头部徽标（FR-06 降级口径）", async () => {
+    await selectManualEntry(MANUAL_TWO_SECTIONS);
+    // 缺省 stats 零值（usage_board 空）→ 无条目级徽标，头部文件级 🔥 214 仍在。
+    const badges = screen.getAllByTestId("entry-use-badge").map((b) => b.textContent);
+    expect(badges).toEqual(["🔥 214"]);
   });
 });
 

@@ -1,0 +1,108 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "f8e326fd20a99ff5907068ed9f7d704f8f2503e3",
+  "totals": {
+    "files": 11,
+    "additions": 1603,
+    "deletions": 38
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/change/schema.py",
+      "additions": 61,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/change/scope_audit.py",
+      "additions": 69,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_scope_file_diff.py",
+      "additions": 261,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 190,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx",
+      "additions": 397,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/changes/scope-audit-command-card.tsx",
+      "additions": 283,
+      "deletions": 35,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 72,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/sillyspec-manager.ts",
+      "additions": 90,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/sillyspec-file-diff.test.ts",
+      "additions": 180,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-change-detail.test.tsx",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    },
+    {
+      "path": "frontend/src/components/changes/__tests__/quicklog-drawer.test.tsx",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "815c81a19f82a6593c3f1617666c411a23b766134242ee7204deaca7f69f9ddb",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-20T12:34:28.086Z"
+}

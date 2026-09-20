@@ -269,6 +269,49 @@ describe('HubClient — register 条件 body 拼装（per-daemon）', () => {
   });
 });
 
+// ── postKnowledgeHitsBatch（2026-09-20-knowledge-effect-panel task-02）────────
+// URL/method/body 契约 + register/heartbeat 记住的 daemon_local_id 进 body。
+// 鉴权先例 = postSpecSync（WORKSPACE_WRITE，X-API-Key/Bearer 经 _request 统一附头）。
+
+describe('HubClient — postKnowledgeHitsBatch（task-02 hits 上行）', () => {
+  beforeEach(() =>
+    vi.stubGlobal('fetch', mockFetchOk({ ingested: 2, skipped_bad: 0, duplicates: 1 })),
+  );
+
+  it('POST /api/workspaces/{ws}/knowledge/hits/batch，body 带 register 记住的 daemon_local_id + lines', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.register({
+      daemonLocalId: 'd-hits-1',
+      serverUrl: 'http://x:8000',
+      hostname: 'h',
+      providers: [{ provider: 'claude' }],
+    });
+    const out = await c.postKnowledgeHitsBatch('ws-1', ['{"n":1}', '{"n":2}']);
+    expect(lastCall!.url).toBe('http://x:8000/api/workspaces/ws-1/knowledge/hits/batch');
+    expect(lastCall!.init.method).toBe('POST');
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body).toEqual({ daemon_local_id: 'd-hits-1', lines: ['{"n":1}', '{"n":2}'] });
+    expect(out).toEqual({ ingested: 2, skipped_bad: 0, duplicates: 1 });
+  });
+
+  it('heartbeat 同样刷新 daemon_local_id 缓存', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.heartbeat('d-hb-1');
+    await c.postKnowledgeHitsBatch('ws-2', ['{"n":1}']);
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body.daemon_local_id).toBe('d-hb-1');
+  });
+
+  it('未 register/heartbeat 过（纯新实例）→ daemon_local_id 落 null（backend DTO 可空容忍）', async () => {
+    const c = new HubClient('http://x:8000', { apiKey: 'shk_x' });
+    await c.postKnowledgeHitsBatch('ws-3', ['{"n":1}']);
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body.daemon_local_id).toBeNull();
+    const headers = lastCall!.init.headers as Record<string, string>;
+    expect(headers['X-API-Key']).toBe('shk_x');
+  });
+});
+
 // ── getPendingLeases（GET，唯一非 POST，对齐 client.py:186-192）──────────────
 
 describe('HubClient — getPendingLeases（GET，唯一非 POST）', () => {

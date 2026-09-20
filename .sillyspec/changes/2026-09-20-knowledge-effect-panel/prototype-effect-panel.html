@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>知识库 · 效果面板 原型 — 2026-09-20-knowledge-effect-panel</title>
+<style>
+:root {
+  --primary: #7C3AED; --primary-hover: #6D28D9; --primary-soft: #EDE9FE; --primary-soft-2: #F5F3FF;
+  --bg: #FAF5FF; --fg: #1E1B4B; --card: #FFFFFF;
+  --muted: #ECEEF9; --muted-fg: #475569; --faint: #94A3B8;
+  --border: #DDD6FE; --border-weak: #EEE9F8;
+  --success: #059669; --success-soft: #D1FAE5; --success-text: #065F46;
+  --warning: #D97706; --warning-soft: #FEF3C7; --warning-text: #92400E;
+  --error: #DC2626; --error-soft: #FEE2E2; --error-text: #991B1B;
+  --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px;
+  --shadow-sm: 0 1px 2px rgba(30,27,75,.06);
+  --font-sans: Inter, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); background: var(--bg); color: var(--fg); font-size: 13px; line-height: 1.6; padding: 20px; }
+.page { max-width: 1280px; margin: 0 auto; }
+.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.page-header h1 { font-size: 20px; font-weight: 700; }
+.header-actions { display: flex; gap: 8px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--card); color: var(--fg); border-radius: var(--radius-md); padding: 6px 12px; font-size: 12px; cursor: pointer; font-family: inherit; }
+.btn:hover { border-color: var(--primary); color: var(--primary); }
+.btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.card { background: var(--card); border: 1px solid var(--border-weak); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+
+/* ── 效果面板：热力图卡 ── */
+.panel-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; margin-bottom: 14px; }
+.heat-card { padding: 14px 16px; }
+.heat-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.heat-head h3 { font-size: 14px; font-weight: 700; }
+.heat-legend { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--faint); }
+.heat-cell { width: 13px; height: 13px; border-radius: 3px; background: var(--muted); }
+.heat-l1 { background: #DDD6FE; } .heat-l2 { background: #A78BFA; } .heat-l3 { background: #7C3AED; } .heat-l4 { background: #5B21B6; }
+.heat-grid { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 4px; }
+.heat-col { display: flex; flex-direction: column; gap: 3px; }
+.heat-months { display: flex; gap: 3px; font-size: 9.5px; color: var(--faint); margin-top: 4px; padding-left: 0; }
+.heat-stat-row { display: flex; gap: 16px; margin-top: 10px; font-size: 11.5px; color: var(--muted-fg); }
+.heat-stat-row b { color: var(--fg); font-size: 14px; }
+
+/* ── Top 榜 ── */
+.top-card { padding: 14px 16px; }
+.top-card h3 { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+.top-card .top-list { max-height: 220px; overflow-y: auto; }
+.top-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border-weak); font-size: 12px; }
+.top-item:last-child { border-bottom: none; }
+.top-rank { width: 18px; height: 18px; border-radius: 50%; background: var(--primary-soft); color: var(--primary-hover); font-size: 10.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.top-rank.r1 { background: var(--primary); color: #fff; }
+.top-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-count { color: var(--primary-hover); font-weight: 700; font-size: 11.5px; }
+
+/* ── 主体布局 ── */
+.layout { display: flex; gap: 0; }
+.tree-panel { width: 270px; flex-shrink: 0; padding: 8px; }
+.zone-label { padding: 6px 8px 3px; font-size: 10.5px; font-weight: 600; color: var(--faint); letter-spacing: .04em; }
+.tree-node { display: flex; align-items: center; gap: 7px; padding: 4px 8px; border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; }
+.tree-node:hover { background: var(--primary-soft-2); }
+.tree-node.active { background: var(--primary-soft); color: var(--primary-hover); font-weight: 600; }
+.badge-use { margin-left: auto; font-size: 10px; color: var(--primary-hover); background: var(--primary-soft); border-radius: 99px; padding: 0 6px; font-weight: 600; }
+.content-panel { flex: 1; min-width: 0; padding: 16px 18px; }
+
+/* ── 条目卡片流（决策库/FR 共用）── */
+.entry-cards { display: flex; flex-direction: column; gap: 8px; max-height: 62vh; overflow: auto; padding-right: 4px; }
+.entry-card { border: 1px solid var(--border-weak); border-radius: var(--radius-md); padding: 10px 12px; cursor: pointer; transition: border-color .15s; }
+.entry-card:hover { border-color: var(--primary); }
+.entry-card.dead { opacity: .62; background: var(--muted); }
+.ec-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ec-id { font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--primary-hover); }
+.ec-title { font-size: 13px; font-weight: 600; flex: 1; min-width: 200px; }
+.pill { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 99px; font-size: 10px; font-weight: 600; }
+.pill-active { background: var(--success-soft); color: var(--success-text); }
+.pill-super { background: var(--muted); color: var(--faint); }
+.pill-rejected { background: var(--error-soft); color: var(--error-text); }
+.pill-impl { background: var(--primary-soft); color: var(--primary-hover); }
+.ec-fields { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 11px; color: var(--muted-fg); }
+.ec-fields .k { color: var(--faint); }
+.ec-reason { margin-top: 6px; font-size: 11.5px; color: var(--fg); background: var(--primary-soft-2); border-radius: var(--radius-sm); padding: 6px 8px; }
+.ec-chain { margin-top: 4px; font-size: 10.5px; color: var(--warning-text); background: var(--warning-soft); border-radius: var(--radius-sm); padding: 3px 8px; display: inline-block; }
+.ec-foot { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10.5px; color: var(--faint); }
+.ec-foot a { color: var(--primary); text-decoration: none; }
+.ec-foot a:hover { text-decoration: underline; }
+.heat-mini { display: inline-flex; gap: 2px; align-items: center; }
+.heat-mini i { width: 8px; height: 8px; border-radius: 2px; background: var(--muted); display: inline-block; }
+
+.rejected-banner { display: flex; align-items: center; gap: 8px; background: var(--error-soft); border: 1px solid var(--error)/.3; border: 1px solid rgba(220,38,38,.3); color: var(--error-text); border-radius: var(--radius-md); padding: 8px 12px; margin-bottom: 8px; font-size: 12px; }
+.note { margin-top: 16px; font-size: 11px; color: var(--faint); border-top: 1px dashed var(--border); padding-top: 10px; }
+tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+.tab { padding: 5px 12px; font-size: 12px; cursor: pointer; border-radius: var(--radius-sm); color: var(--muted-fg); border: 1px solid transparent; }
+.tab.active { color: var(--primary); border-color: var(--primary); background: var(--primary-soft-2); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-header">
+    <h1>知识库</h1>
+    <div class="header-actions">
+      <button class="btn">📋 提炼记录</button>
+      <button class="btn btn-primary">✦ 沉淀知识</button>
+    </div>
+  </div>
+
+  <!-- ═══ 效果面板（新）：热力图 + Top 榜 ═══ -->
+  <div class="panel-grid">
+    <div class="card heat-card" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div style="grid-column:1/3;display:flex;justify-content:space-between;align-items:baseline"><h3 style="font-size:14px;font-weight:700">知识库运营指标</h3><span style="font-size:10.5px;color:var(--faint)">多端汇聚 · 剥离开发量</span></div>
+      <div style="border:1px solid var(--border-weak);border-radius:8px;padding:10px">
+        <div style="font-size:11px;color:var(--muted-fg)">知识覆盖率 <span style="font-size:10px;color:var(--faint)">被用过的/全部</span></div>
+        <div style="font-size:22px;font-weight:700;color:var(--primary-hover)">62%<span style="font-size:11px;font-weight:400;color:var(--muted-fg)"> 78/126 条</span></div>
+        <svg width="100%" height="26"><polyline points="0,20 14,19 28,18 42,18 56,16 70,15 84,13 98,12 112,10" fill="none" stroke="#7C3AED" stroke-width="2"/></svg>
+        <div style="font-size:10px;color:var(--faint)">↑ 近 8 周上行</div>
+      </div>
+      <div style="border:1px solid var(--border-weak);border-radius:8px;padding:10px;cursor:pointer" onclick="toast('死条目清单：34 条 90 天未命中——引导清理/合并')">
+        <div style="font-size:11px;color:var(--muted-fg)">死条目 <span style="font-size:10px;color:var(--faint)">90 天零命中</span></div>
+        <div style="font-size:22px;font-weight:700;color:var(--warning)">34 条</div>
+        <div style="font-size:10.5px;color:var(--faint)">点开清单 → 清理/合并/降级 ↗</div>
+      </div>
+      <div style="border:1px solid var(--border-weak);border-radius:8px;padding:10px">
+        <div style="font-size:11px;color:var(--muted-fg)">每任务命中密度</div>
+        <div style="font-size:22px;font-weight:700">4.2 <span style="font-size:11px;font-weight:400;color:var(--muted-fg)">条/任务</span></div>
+        <div style="font-size:10.5px;color:var(--faint)">过低=沉淀没被检索到 · 过高=注入过肥</div>
+      </div>
+      <div style="border:1px solid var(--border-weak);border-radius:8px;padding:10px">
+        <div style="font-size:11px;color:var(--muted-fg)">新知识生效 <span style="font-size:10px;color:var(--faint)">近30天新增</span></div>
+        <div style="font-size:22px;font-weight:700;color:var(--success)">5/12</div>
+        <div style="font-size:10.5px;color:var(--faint)">新增条目已被使用——沉淀质量</div>
+      </div>
+    </div>
+    <div class="card top-card">
+      <h3>🔥 知识使用率榜 <span style="font-weight:400;font-size:11px;color:var(--faint)">按每任务触发率排序 · 全量</span></h3>
+      <div class="top-list" id="topList"></div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <!-- 左树（zone 分组，fr 新组） -->
+    <div class="card tree-panel">
+      <div class="zone-label">待审核 <span style="background:var(--warning-soft);color:var(--warning-text);border-radius:99px;padding:0 7px;font-size:10px">13</span></div>
+      <div class="zone-label">知识手册</div>
+      <div class="zone-label">决策库 <span style="color:var(--faint);font-weight:400">decisions/</span></div>
+      <div class="tree-node active">🗂 backend.md <span class="badge-use">🔥 214</span></div>
+      <div class="tree-node">🗂 frontend.md <span class="badge-use">🔥 96</span></div>
+      <div class="tree-node">🗂 daemon.md <span class="badge-use">🔥 51</span></div>
+      <div class="zone-label">需求规则 <span style="color:var(--faint);font-weight:400">fr/</span></div>
+      <div class="tree-node">🗂 host-fs-handler.md <span class="badge-use">🔥 18</span></div>
+      <div class="tree-node">🗂 styles.md <span class="badge-use">🔥 7</span></div>
+      <div class="zone-label">自动生成 <span style="color:var(--faint);font-weight:400">generated/</span></div>
+    </div>
+
+    <!-- 右内容区：条目卡片流 -->
+    <div class="card content-panel">
+      <tabs>
+        <div class="tab active" onclick="toast('卡片流（默认）')">卡片</div>
+        <div class="tab" onclick="toast('原文 md 阅读视图（现有）')">原文</div>
+      </tabs>
+
+      <!-- 决策库示例 -->
+      <div class="rejected-banner">🛡 <b>防复潮：</b>rejected 决策置顶——以下方案已被否决，除非复潮条件满足不要再提</div>
+      <!-- 统一条目渲染器：手册小节卡（testing-gotchas.md 点开）示例，条目级使用徽标 -->
+  <div style="font-size:11px;color:var(--faint);margin-bottom:6px">📄 testing-gotchas.md · 4 条 · 视图：卡片</div>
+  <div class="entry-cards" id="manualCards"></div>
+  <div style="font-size:11px;color:var(--faint);margin:10px 0 6px">🗂 decisions/backend.md · 27 条 · 同一渲染器（结构化形态）</div>
+  <div class="entry-cards" id="cards"></div>
+    </div>
+  </div>
+
+  <p class="note">
+    原型说明（2026-09-20-knowledge-effect-panel，五轮反馈定稿）：①顶部=运营指标仪表盘四卡（覆盖率+趋势/死条目可点清单/每任务命中密度/新知识生效——剥离开发量的健康度口径，D-009）；②使用率榜全量按每任务触发率（次/任务）排序（D-008@v2），绝对次数副显；③全 zone 统一条目渲染器：手册 ## 小节正文卡（条目级徽标）/决策+FR 结构化字段卡（状态/取代链/互跳/防复潮）/INDEX 目录导航卡/generated 单卡，原文 tab 可切；④fr 独立 zone。锚点匹配经 slug 归一化（Grill CLK-02）。</p>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+/* Top10 */
+const tops = [
+  'daemon-esm-import 必须带 .js 扩展名','backend 模块分层与基类/异常约定','ppm export-excel 路由必须前置 item_id','Monorepo 三服务架构','子项目构建/测试/lint 命令','daemon adapters 多协议抽象','execute 的 exec-run-id 复用旧目录','前端 SSE 消费统一 fetch-sse','audit_hooks 只在测试 lifespan 注册','本机可能存在多个 daemon 实例','Windows Docker bind mount stat 性能断崖','alembic 并行变更撞 revision 多 head','spec 文件增量同步协议','Daemon 代写队列占坑 commit','平台文件中心对象存储抽象','四轨鉴权 token 分轨','会话日志 TOOL_RESULT 中文乱码','群聊会话类型列','tailwind md 是视口断点'];
+const counts = [342,291,187,165,148,121,96,84,61,44,38,31,26,19,12,7];
+const rates = [0.92,0.85,0.7,0.66,0.6,0.52,0.48,0.41,0.36,0.33,0.3,0.26,0.23,0.2,0.17,0.12];
+document.getElementById('topList').innerHTML = tops.map((t,i)=>
+  `<div class="top-item"><span class="top-rank ${i===0?'r1':''}">${i+1}</span><span class="top-name">${t}</span><span class="top-count">${(rates[i]*100).toFixed(rates[i]*100<10?2:1)}% <span style='color:var(--faint);font-weight:400'>（${counts[i]} 次）</span></span></div>`).join('');
+/* 手册小节卡（正文形态）：## 小节标题 + markdown 正文 + 条目级使用徽标 */
+const manual = [
+  { title: '后端：pytest patch 函数内局部导入的目标', hits: 88, body: 'patch 的是模块属性引用……被测代码 必须 from x import y 局部导入才能被替换；顶层 import 在 patch 前已绑定。' },
+  { title: '前端：MENU_PERMISSION_GROUPS 跨 menu 重复 permission.key 致 queryByLabelText 失败', hits: 41, body: '同一 permission.key 出现在多个 menu 组时 getByLabelText 命中多个……测试侧按 label+container 收窄。' },
+  { title: '后端：无本地 venv 时在 Docker 后端容器跑 pytest', hits: 12, body: 'docker exec -it multi-agent-platform-backend-1 /opt/venv/bin/python -m pytest …（容器内已含全部依赖）。' },
+];
+document.getElementById('manualCards').innerHTML = manual.map(c=>`
+  <div class="entry-card">
+    <div class="ec-head"><span class="ec-title" style="flex:none">${c.title}</span>
+      <span class="heat-mini" title="条目命中 ${c.hits} 次"><i style="background:#DDD6FE"></i><i style="background:#A78BFA"></i><i style="background:#7C3AED"></i><i></i> ${c.hits}</span></div>
+    <div style="margin-top:6px;font-size:12px;color:var(--muted-fg)">${c.body}</div>
+  </div>`).join('');
+/* 卡片流：决策 + FR 混合示例 */
+const cards = [
+  { id:'D-002@v1', title:'数据链路走方案 A——git_log 模块扩展独立轻量 status 端点', pill:['impl','implemented'], fields:[['锚点','backend/app/modules/git_log/router.py'],['变更','2026-08-26-workspace-git-status']], reason:'独立轻量端点，不动既有重查询面。', foot:['最近确认 86d6c405','全文 ↗'] },
+  { id:'FR-styles-001', title:'agent 回复文本无框化（双路径一致）', pill:['active','active'], fields:[['变更','2026-09-20-agent-reply-no-bubble'],['依据决策','D-001@v1 · D-002@v1 · D-004@v1 · D-005@v1'],['场景','3 个（v2 段模型/旧数据回退/连续多文本段）']], reason:'摘要：v2 段模型文本段（主路径）；旧数据回退路径；连续多文本段。', foot:['最近确认 fbbf02f4b','全文 ↗ 归档 requirements#FR-01'] },
+  { id:'D-006@v1', title:'mergeMcpConfigs 白名单顺序（builtin > workspace > platform）', pill:['super','supeded→D-006@v2'], chain:'取代链：D-006@v1 ← D-006@v2（mergeMcpConfigs 修复承接）', fields:[['锚点','sillyhub-daemon/src/mcp-server.ts'],['退役理由','rejected 剔除改 warn 接上']], foot:['最近确认 c81db1ea','全文 ↗'], dead:true },
+];
+document.getElementById('cards').innerHTML = cards.map(c=>`
+  <div class="entry-card ${c.dead?'dead':''}">
+    <div class="ec-head">
+      <span class="ec-id">${c.id}</span>
+      <span class="ec-title">${c.title}</span>
+      <span class="pill pill-${c.pill[0]}">${c.pill[1]}</span>
+      <span class="heat-mini" title="文件级命中 214 次"><i style="background:#DDD6FE"></i><i style="background:#A78BFA"></i><i style="background:#7C3AED"></i><i></i> 214</span>
+    </div>
+    <div class="ec-fields">${c.fields.map(f=>`<span><span class="k">${f[0]}：</span>${f[1]}</span>`).join('')}</div>
+    <div class="ec-reason">${c.reason}</div>
+    ${c.chain?`<div class="ec-chain">🔁 ${c.chain}</div>`:''}
+    <div class="ec-foot"><span>${c.foot[0]}</span><a href="#" onclick="return false">${c.foot[1]}</a></div>
+  </div>`).join('');
+let t; function toast(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(t);t=setTimeout(()=>e.classList.remove('show'),1800);} 
+if(!document.querySelector('.toast')){const d=document.createElement('div');d.className='toast';d.id='toast';document.body.appendChild(d);}
+</script>
+<style>.toast{position:fixed;bottom:24px;right:24px;background:var(--fg);color:#fff;border-radius:var(--radius-md);padding:10px 16px;font-size:12px;opacity:0;transform:translateY(8px);transition:all .2s;z-index:99;pointer-events:none}.toast.show{opacity:1;transform:none}</style>
+</body>
+</html>

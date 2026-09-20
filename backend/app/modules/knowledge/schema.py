@@ -12,14 +12,19 @@ from pydantic import BaseModel, Field, field_validator
 class KnowledgeEntry(BaseModel):
     """A single knowledge file entry."""
 
-    # "top" | "decisions" | "generated" | "proposed"（design 记作 KnowledgeEntryRead
-    # 的读侧条目 DTO；change 2026-09-17-knowledge-precipitation task-01 只增不删）。
+    # "top" | "decisions" | "generated" | "proposed" | "fr"（design 记作
+    # KnowledgeEntryRead 的读侧条目 DTO；change 2026-09-17-knowledge-precipitation
+    # task-01 只增不删）。
     zone: str
     filename: str
     path: str
     title: str | None = None
     content: str | None = None
     last_modified_at: datetime | None = None
+    # 文件级使用计数（锚点前缀=本文件的命中次数和）。task-01（2026-09-20-
+    # knowledge-effect-panel）先加字段默认 None（DTO 契约先行），task-03 由
+    # list 透传真实聚合值；前端文件级 🔥 徽标数据源。
+    use_count: int | None = None
 
 
 class KnowledgeList(BaseModel):
@@ -199,3 +204,129 @@ class DistillTaskRead(BaseModel):
     agent_session_id: uuid.UUID | None = None
     merged_to: str | None = None
     degraded_reason: str | None = None
+
+
+# ── hits 接收 + 运营指标 DTO（2026-09-20-knowledge-effect-panel task-01）────────
+#
+# daemon 把各端本地 ``.sillyspec/.runtime/knowledge-hits.jsonl`` 增量上行到
+# POST /knowledge/hits/batch（行 hash 幂等去重）；GET /knowledge/stats 出四指标
+# + 使用率榜 + 文件级计数（实时聚合，不物化）。
+
+
+#: 单行 jsonl 体积上限（bytes 语义按字符数近似校验，防 daemon 端读坏文件整行灌入）。
+HITS_LINE_MAX_CHARS = 100 * 1024
+#: 单批行数上限（R-06 分批协议：每批 ≤2000 行多次上报）。
+HITS_BATCH_MAX_LINES = 2000
+
+
+class HitsBatchIn(BaseModel):
+    """POST /knowledge/hits/batch 请求体。
+
+    ``lines``：原始 jsonl 行数组（逐行 json.loads + sha256 幂等，**不做**预先
+    解包——行级原样转发保证多端 line_hash 一致）；``daemon_local_id``：daemon
+    实例 id，原样落库不 FK（数据层留归属，design 非目标「按人视图」后续用）。
+    """
+
+    daemon_local_id: str | None = Field(default=None, max_length=64)
+    lines: list[str]
+
+    @field_validator("lines")
+    @classmethod
+    def _lines_bounded(cls, v: list[str]) -> list[str]:
+        if len(v) > HITS_BATCH_MAX_LINES:
+            raise ValueError(f"单批最多 {HITS_BATCH_MAX_LINES} 行（分批上报）")
+        for line in v:
+            if len(line) > HITS_LINE_MAX_CHARS:
+                raise ValueError("单行超过 100KB 上限")
+        return v
+
+
+class HitsBatchOut(BaseModel):
+    """batch 接收结果计数。
+
+    ``ingested``：新落库行数；``skipped_bad``：json.loads 解析失败的坏行数；
+    ``duplicates``：撞 (workspace_id, line_hash) 唯一约束跳过的行数（含同批
+    重复与重报）。
+    """
+
+    ingested: int
+    skipped_bad: int
+    duplicates: int
+
+
+class CoverageTrendPoint(BaseModel):
+    """覆盖率趋势单点：week=周末 ISO 日期；pct=该时点覆盖率（分子按
+    occurred_at<=周末重算，分母恒为当前条目总数——「覆盖长出来」口径）。"""
+
+    week: str
+    pct: float
+
+
+class CoverageOut(BaseModel):
+    used_entries: int
+    total_entries: int
+    trend: list[CoverageTrendPoint]
+
+
+class DeadEntryOut(BaseModel):
+    """死条目（90 天零命中或从未命中；锚点形态输出可定位）。"""
+
+    anchor: str
+    last_hit_at: datetime | None = None
+
+
+class DensityTrendPoint(BaseModel):
+    """密度趋势单点：该周窗口内每任务注入锚点数。"""
+
+    week: str
+    per_task_avg: float
+
+
+class DensityOut(BaseModel):
+    """每任务命中密度：总注入锚点数（inject 行 matched_anchors 长度和）÷ 任务数
+    （inject 行 change_name 去重；fr-inject 行不进分母仅其锚点计数——口径注记）。"""
+
+    per_task_avg: float
+    trend: list[DensityTrendPoint]
+
+
+class FreshnessOut(BaseModel):
+    """新知识生效速度：近 30 天新增条目数（条目首见=frontmatter created_at 优先/
+    hits 首见兜底）与其中已被命中数。"""
+
+    recent_new: int
+    recent_used: int
+
+
+class UsageBoardItem(BaseModel):
+    """使用率榜单条（全量按 per_task 降序，前端 % 格式显示 D-008@v3）。
+
+    ``per_task``：条目命中次数 ÷ 条目存在期任务数（条目首见后 inject 行
+    change 去重；分母 0 视为 1 防炸）；``task_count``：命中过该锚点的去重任务数
+    （inject+fr-inject 行）。
+    """
+
+    anchor: str
+    per_task: float
+    total: int
+    task_count: int
+    first_hit: datetime | None = None
+    last_hit: datetime | None = None
+
+
+class EntryCountItem(BaseModel):
+    """文件级使用计数（锚点前缀文件名计数和，文件级 🔥 徽标数据源）。"""
+
+    file: str
+    count: int
+
+
+class KnowledgeStatsOut(BaseModel):
+    """GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。"""
+
+    coverage: CoverageOut
+    dead_entries: list[DeadEntryOut]
+    density: DensityOut
+    freshness: FreshnessOut
+    usage_board: list[UsageBoardItem]
+    entry_counts: list[EntryCountItem]

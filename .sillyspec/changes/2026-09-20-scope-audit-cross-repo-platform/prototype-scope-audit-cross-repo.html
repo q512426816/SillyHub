@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 — 对账卡按仓分组（契约 v2 消费）</title>
+<style>
+  :root {
+    --card: #ffffff;
+    --bg: #f6f7f9;
+    --border: #e4e4e7;
+    --fg: #18181b;
+    --muted: #71717a;
+    --success: #16a34a;
+    --success-bg: rgba(22, 163, 74, 0.12);
+    --warning: #d97706;
+    --warning-bg: rgba(217, 119, 6, 0.14);
+    --error: #dc2626;
+    --brand: #7c3aed;
+    --brand-bg: rgba(124, 58, 237, 0.10);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg);
+    display: flex; gap: 24px; padding: 24px; flex-wrap: wrap; align-items: flex-start;
+  }
+  .col { display: flex; flex-direction: column; gap: 16px; }
+  .hint { font-size: 12px; color: var(--muted); max-width: 460px; line-height: 1.7; }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; width: 460px;
+  }
+  h2 { font-size: 13px; font-weight: 500; }
+  .sub { font-size: 11px; color: var(--muted); line-height: 1.5; margin-top: 2px; }
+  .total-line { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; color: var(--muted); margin-top: 10px; }
+  .total-line b { font-family: ui-monospace, Consolas, monospace; color: var(--fg); }
+  .repo-seg { border-top: 1px dashed var(--border); margin-top: 8px; padding-top: 8px; }
+  .repo-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 11px; }
+  .repo-name { font-weight: 600; font-size: 12px; }
+  .repo-name.main { color: var(--brand); }
+  .anchor-chip {
+    font-size: 10px; color: var(--muted); background: var(--bg);
+    border-radius: 4px; padding: 1px 6px; font-family: ui-monospace, Consolas, monospace;
+  }
+  .anchor-chip .hash { color: var(--fg); font-weight: 600; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+  .chip { border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 500; }
+  .chip.planned { background: var(--success-bg); color: var(--success); }
+  .chip.unplanned { background: var(--warning-bg); color: var(--warning); }
+  .chip.untouched { background: var(--bg); color: var(--muted); }
+  .repo-nums { font-size: 11px; color: var(--muted); margin-left: auto; }
+  .add { color: var(--success); font-family: ui-monospace, Consolas, monospace; }
+  .del { color: var(--error); font-family: ui-monospace, Consolas, monospace; }
+  .degraded-line { font-size: 11px; color: var(--warning); margin-top: 6px; line-height: 1.6; }
+  .note-line { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.6; border-top: 1px dashed var(--border); padding-top: 6px; }
+  .btn {
+    margin-left: auto; font-size: 11px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card); color: var(--fg); padding: 2px 8px; cursor: pointer;
+  }
+  /* 明细弹窗（静态模拟） */
+  .modal { width: 640px; }
+  .modal-title { font-size: 13px; display: flex; gap: 8px; align-items: center; }
+  .tag { font-size: 10px; background: var(--brand-bg); color: var(--brand); border-radius: 4px; padding: 0 4px; }
+  .rows { border: 1px solid var(--border); border-radius: 6px; margin-top: 10px; max-height: 420px; overflow: auto; }
+  .group-head {
+    position: sticky; top: 0; background: var(--bg); font-size: 11px; font-weight: 600;
+    padding: 5px 10px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: baseline;
+  }
+  .group-head .a { font-weight: 400; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
+  .row { display: flex; gap: 8px; align-items: center; padding: 5px 10px; border-bottom: 1px solid var(--border); font-size: 11px; }
+  .row:last-child { border-bottom: none; }
+  .row:hover { background: rgba(0,0,0,0.03); cursor: pointer; }
+  .badge { flex-shrink: 0; border-radius: 4px; padding: 0 4px; font-size: 10px; }
+  .path { flex: 1; min-width: 0; truncate: true; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, Consolas, monospace; }
+  .repobadge { flex-shrink: 0; font-size: 10px; color: var(--brand); background: var(--brand-bg); border-radius: 4px; padding: 0 4px; }
+  .kind { flex-shrink: 0; color: var(--muted); font-size: 10px; }
+  .nums { flex-shrink: 0; font-family: ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+  <div class="col">
+    <div class="hint">
+      <b>原型说明</b>：对账卡消费 sillyspec --json 契约 v2（rows[].crossRepo 真实三态 + repos[] 信封）。
+      左=变更详情页对账卡（新形态：全表合计 + 每仓一段）；右=「查看明细」弹窗（按仓分节 + 跨仓行仓标）。
+      数据为 f85a6650 类三仓变更示例：主仓 20/2、sub-grid-security 13/1（reviews 锚点档）、
+      spdemo 9（B 档降级：行数 null 显示 —）。旧 CLI 无 repos[] 时整卡回退现状单段渲染（原型未画，见 design 兼容策略）。
+    </div>
+
+    <section class="card">
+      <h2>⚖️ 范围对账（scope-audit）</h2>
+      <p class="sub">「计划改动 × 实际改动」对账：三态全表 + 行数；advisory 只读不设门禁，已归档变更可查。</p>
+
+      <div class="total-line">
+        <span>全表 <b>46</b> 文件</span>
+        <span><span class="add">+6040</span> / <span class="del">−340</span></span>
+        <span>3 个仓库</span>
+      </div>
+
+      <div class="repo-seg">
+        <div class="repo-head">
+          <span class="repo-name main">主仓</span>
+          <span class="anchor-chip">post-apply 主仓锚 <span class="hash">214151b</span></span>
+        </div>
+        <div class="chips">
+          <span class="chip planned">✓ 计划内 20</span>
+          <span class="chip unplanned">⚠️ 计划外 2</span>
+          <span class="chip untouched">⚠️ 计划未动 0</span>
+          <span class="repo-nums">22 文件 <span class="add">+5300</span> / <span class="del">−310</span></span>
+        </div>
+      </div>
+
+      <div class="repo-seg">
+        <div class="repo-head">
+          <span class="repo-name">sub-grid-security</span>
+          <span class="anchor-chip">reviews base..head（execute task 锡点，2 task 区间并集）<span class="hash"> a1b2c3d</span></span>
+        </div>
+        <div class="chips">
+          <span class="chip planned">✓ 计划内 13</span>
+          <span class="chip unplanned">⚠️ 计划外 1</span>
+          <span class="chip untouched">⚠️ 计划未动 0</span>
+          <span class="repo-nums">14 文件 <span class="add">+740</span> / <span class="del">−30</span></span>
+        </div>
+      </div>
+
+      <div class="repo-seg">
+        <div class="repo-head">
+          <span class="repo-name">spdemo</span>
+          <span class="anchor-chip">HEAD~1..HEAD 最近提交窗口（降级——无可用 reviews）</span>
+        </div>
+        <div class="chips">
+          <span class="chip planned">✓ 计划内 9</span>
+          <span class="chip unplanned">⚠️ 计划外 1</span>
+          <span class="chip untouched">⚠️ 计划未动 0</span>
+          <span class="repo-nums">10 文件 <span class="add">+—</span> / <span class="del">−—</span>（降级档）</span>
+        </div>
+      </div>
+
+      <p class="note-line">计划侧含 22 个跨仓文件（repo：sub-grid-security、spdemo）——已按 local.yaml repos 注册表分仓对账（各仓锚点档见分段）</p>
+      <div class="chips" style="margin-top:8px">
+        <button class="btn">查看明细（46）</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>⚖️ 范围对账（scope-audit）—— degraded 仓示例</h2>
+      <div class="total-line">
+        <span>全表 <b>44</b> 文件</span>
+        <span><span class="add">+5292</span> / <span class="del">−3</span></span>
+        <span>2 个仓库</span>
+      </div>
+      <div class="repo-seg">
+        <div class="repo-head">
+          <span class="repo-name main">主仓</span>
+          <span class="anchor-chip">post-apply 主仓锚 <span class="hash">c2f431a</span></span>
+        </div>
+        <div class="chips">
+          <span class="chip planned">✓ 计划内 20</span>
+          <span class="chip unplanned">⚠️ 计划外 2</span>
+          <span class="chip untouched">⚠️ 计划未动 0</span>
+        </div>
+      </div>
+      <div class="repo-seg">
+        <div class="repo-head">
+          <span class="repo-name">spdemo</span>
+          <span class="anchor-chip">degraded</span>
+        </div>
+        <p class="degraded-line">⚠️ repo key「spdemo」未在 local.yaml repos 注册——跨仓对账不可达，请人工到对应仓核对（该仓 9 个计划文件未对账）</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="card modal">
+      <div class="modal-title">
+        <span>范围对账明细</span><span class="tag">变更</span>
+        <span style="font-size:11px;color:var(--muted)">· 点击行查看该文件变化比对</span>
+      </div>
+      <div class="rows">
+        <div class="group-head">主仓 <span class="a">锚点 214151b</span></div>
+        <div class="row"><span class="badge chip planned" style="border-radius:4px">✓ 计划内</span><span class="path">src/main/java/.../RewardController.java</span><span class="kind">修改</span><span class="nums"><span class="add">+210</span> / <span class="del">−18</span></span></div>
+        <div class="row"><span class="badge chip unplanned" style="border-radius:4px">⚠️ 计划外</span><span class="path">src/test/java/.../RewardIT.java</span><span class="kind">新增</span><span class="nums"><span class="add">+96</span> / <span class="del">−0</span></span></div>
+        <div class="group-head">sub-grid-security <span class="a">reviews base..head（2 task 区间并集）a1b2c3d</span></div>
+        <div class="row"><span class="badge chip planned" style="border-radius:4px">✓ 计划内</span><span class="path">pkg/reward/service.go</span><span class="repobadge">sub-grid-security</span><span class="kind">新增</span><span class="nums"><span class="add">+430</span> / <span class="del">−0</span></span></div>
+        <div class="row"><span class="badge chip unplanned" style="border-radius:4px">⚠️ 计划外</span><span class="path">pkg/reward/legacy.go</span><span class="repobadge">sub-grid-security</span><span class="kind">修改</span><span class="nums"><span class="add">+55</span> / <span class="del">−12</span></span></div>
+        <div class="group-head">spdemo <span class="a">HEAD~1..HEAD 最近提交窗口（降级——无可用 reviews）</span></div>
+        <div class="row"><span class="badge chip planned" style="border-radius:4px">✓ 计划内</span><span class="path">app/demo/page.tsx</span><span class="repobadge">spdemo</span><span class="kind">修改</span><span class="nums"><span class="add">+—</span> / <span class="del">−—</span></span></div>
+        <div class="row"><span class="badge chip untouched" style="border-radius:4px">⚠️ 计划未动</span><span class="path">app/demo/api/route.ts</span><span class="repobadge">spdemo</span><span class="kind">修改</span><span class="nums"><span class="add">+0</span> / <span class="del">−0</span></span></div>
+      </div>
+      <p class="note-line" style="border-top:none;margin-top:8px">跨仓行的单文件比对按该仓锚点档路由（A 档区间 diff / B 档实时窗口）；degraded 仓行不提供比对。</p>
+    </section>
+  </div>
+</body>
+</html>
