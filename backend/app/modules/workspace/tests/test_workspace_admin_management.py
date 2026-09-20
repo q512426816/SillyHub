@@ -218,23 +218,26 @@ async def test_normal_account_with_other_user_id_stays_in_allowed_scope(
 
 
 @pytest.mark.asyncio
-async def test_platform_read_account_sees_all_workspaces(
+async def test_platform_read_account_nonmember_sees_member_scope_only(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     _admin, user_a, user_b = await _bootstrap_admin_and_normal_users(db_session)
-    # user_a 持平台级 workspace:read（入口依赖不 403）且无工作区级角色——
-    # ql-20260917-007 起列表口径与 has_permission 段 2 / 通知广播收件人对齐：
-    # 平台级读授权 = 对所有工作区有真实读权限，列表按全量返回（原 FR-02
-    # 「平台级读授权也只见空列表」边界作废，该边界正是「看不到却能收通知、
-    # 进内容」口径割裂的来源）。
+    # user_a 持平台级 workspace:read 且无任何工作区级角色。
+    # ql-20260917-007 旧义（已废止）：平台级读授权 = 对所有工作区全量可见
+    # （穿透语义，当年为对齐 has_permission 段 2 放宽列表分支）。
+    # 2026-09-20-workspace-member-visibility：工作区上下文平台级业务权限不再
+    # 穿透——列表非管理员分支仅 platform:admin 全量，其余回落
+    # allowed_workspace_ids（成员制），非成员的平台级读者 = 空列表（断言反转；
+    # 入口仍 200：require_permission_any 无工作区上下文，平台段照旧放行）。
     await _grant_platform_permission(db_session, user_a.id, Permission.WORKSPACE_READ)
     ws_b = await _create_workspace_row(db_session, created_by=user_b.id, name="ws-b-only")
 
     resp = await client.get("/api/workspaces", headers=_headers(_token_for(user_a)))
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["total"] >= 1
-    assert any(item["id"] == str(ws_b.id) for item in body["items"])
+    assert body["total"] == 0
+    assert body["items"] == []
+    assert all(item["id"] != str(ws_b.id) for item in body["items"])
 
 
 # ── q / type / status / limit / offset ───────────────────────────────────────

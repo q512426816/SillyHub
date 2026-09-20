@@ -783,13 +783,20 @@ async def test_merge_target_outside_whitelist_returns_422(
 # ---------------------------------------------------------------------------
 
 
-async def _knowledge_read_only_headers(db_session) -> dict[str, str]:
-    """仅持 KNOWLEDGE_READ 的用户 token（写端点 403 / 任务列表 200 两态用）。"""
+async def _knowledge_read_only_headers(
+    db_session, workspace_id: uuid.UUID | str
+) -> dict[str, str]:
+    """在指定工作区内仅持 KNOWLEDGE_READ 的成员 token（写端点 403 / 任务列表 200 两态用）。
+
+    2026-09-20-workspace-member-visibility：平台级业务权限不再穿透工作区
+    （原经 admin ``UserRole`` 平台授权 + 非成员 → 工作区内放行的旧语义作废），
+    改经 ``user_workspace_roles`` 成员角色授权，两态考察点不变。
+    """
     from app.core.config import get_settings
     from app.core.security import create_access_token, password_hasher
-    from app.modules.admin.model import UserRole
-    from app.modules.auth.model import Role, RolePermission, User
+    from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 
+    ws_uid = workspace_id if isinstance(workspace_id, uuid.UUID) else uuid.UUID(workspace_id)
     user = User(
         id=uuid.uuid4(),
         email=f"reader-{uuid.uuid4().hex[:8]}@example.com",
@@ -806,7 +813,9 @@ async def _knowledge_read_only_headers(db_session) -> dict[str, str]:
     db_session.add_all([user, role])
     await db_session.flush()
     db_session.add(RolePermission(role_id=role.id, permission="knowledge:read"))
-    db_session.add(UserRole(user_id=user.id, role_id=role.id))
+    db_session.add(
+        UserWorkspaceRole(user_id=user.id, workspace_id=ws_uid, role_id=role.id)
+    )
     await db_session.commit()
     await db_session.refresh(user)
 
@@ -848,7 +857,7 @@ async def test_distill_write_endpoint_permission_states(
 ) -> None:
     """权限两态：仅 KNOWLEDGE_READ 用户 POST /knowledge/distill 403、tasks 200。"""
     ws_id = writer_ws["ws_id"]
-    headers = await _knowledge_read_only_headers(db_session)
+    headers = await _knowledge_read_only_headers(db_session, ws_id)
     session_id = await _admin_session_record(db_session, auth_admin_token)
 
     resp = await client.post(

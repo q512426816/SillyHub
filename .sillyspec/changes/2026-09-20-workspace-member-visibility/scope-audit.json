@@ -1,0 +1,84 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "50736b6ef40ee67c7d285aecfed94ebc0b22663e",
+  "totals": {
+    "files": 8,
+    "additions": 547,
+    "deletions": 87
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/auth/rbac.py",
+      "additions": 32,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/auth/tests/__init__.py",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/auth/tests/test_rbac_workspace_scope.py",
+      "additions": 234,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_router.py",
+      "additions": 15,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/workspace/router.py",
+      "additions": 9,
+      "deletions": 11,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/workspace/tests/test_archived_write_guard.py",
+      "additions": 37,
+      "deletions": 5,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/workspace/tests/test_platform_grant_list.py",
+      "additions": 209,
+      "deletions": 49,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/workspace/tests/test_workspace_admin_management.py",
+      "additions": 11,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "d44039d6137cb6bf0eb04bc7e70e31c84f5d1e4f65f0e712972aa82664dc3ad9",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-20T10:59:08.580Z"
+}

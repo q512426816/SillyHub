@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.errors import WorkspaceArchived
 from app.core.security import create_access_token, password_hasher
-from app.modules.auth.model import Role, RolePermission, User
+from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.service import WorkspaceService
@@ -84,6 +84,30 @@ async def _grant_platform_permission(
     await session.flush()
     session.add(RolePermission(role_id=role.id, permission=permission.value))
     session.add(UserRole(user_id=user_id, role_id=role.id))
+    await session.commit()
+
+
+async def _grant_workspace_permission(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    permission: Permission,
+) -> None:
+    """给 user 在指定工作区内授一个角色（``user_workspace_roles`` 成员制路径）。
+
+    2026-09-20-workspace-member-visibility：工作区上下文内平台级业务权限不再
+    穿透（``rbac.has_permission`` 平台段仅 ``platform:admin`` 放行），409 守卫
+    用例改经成员角色到达守卫（考察点仍是归档禁写本身，非授权路径）。
+    """
+    role = Role(
+        id=uuid.uuid4(),
+        key=f"test-ws-{permission.value}-{uuid.uuid4().hex[:6]}",
+        name=f"test ws {permission.value}",
+    )
+    session.add(role)
+    await session.flush()
+    session.add(RolePermission(role_id=role.id, permission=permission.value))
+    session.add(UserWorkspaceRole(user_id=user_id, workspace_id=workspace_id, role_id=role.id))
     await session.commit()
 
 
@@ -177,8 +201,10 @@ async def test_agent_run_create_on_archived_returns_409(
     from app.modules.worktree.model import WorktreeLease
 
     user = await _create_user(db_session)
-    await _grant_platform_permission(db_session, user.id, Permission.TASK_RUN_AGENT)
     ws = await _create_workspace(db_session, status="archived")
+    # 2026-09-20-workspace-member-visibility：平台级业务权限不再穿透工作区，
+    # 改授工作区成员角色（考察点仍是归档禁写守卫本身）。
+    await _grant_workspace_permission(db_session, user.id, ws.id, Permission.TASK_RUN_AGENT)
     task = Task(
         id=uuid.uuid4(),
         workspace_id=ws.id,
@@ -363,8 +389,10 @@ async def test_skill_create_on_archived_returns_409(
 ) -> None:
     """归档工作区新建 skill → 409（审计④-5，守卫在 _skills_root 内统一挂）。"""
     user = await _create_user(db_session)
-    await _grant_platform_permission(db_session, user.id, Permission.WORKSPACE_WRITE)
     ws = await _create_workspace(db_session, status="archived")
+    # 2026-09-20-workspace-member-visibility：平台级业务权限不再穿透工作区，
+    # 改授工作区成员角色（考察点仍是归档禁写守卫本身）。
+    await _grant_workspace_permission(db_session, user.id, ws.id, Permission.WORKSPACE_WRITE)
 
     resp = await client.post(
         f"/api/workspaces/{ws.id}/skills",
@@ -381,8 +409,10 @@ async def test_mcp_config_update_on_archived_returns_409(
 ) -> None:
     """归档工作区写 .mcp.json → 409（审计④-5）。"""
     user = await _create_user(db_session)
-    await _grant_platform_permission(db_session, user.id, Permission.WORKSPACE_WRITE)
     ws = await _create_workspace(db_session, status="archived")
+    # 2026-09-20-workspace-member-visibility：平台级业务权限不再穿透工作区，
+    # 改授工作区成员角色（考察点仍是归档禁写守卫本身）。
+    await _grant_workspace_permission(db_session, user.id, ws.id, Permission.WORKSPACE_WRITE)
 
     resp = await client.put(
         f"/api/workspaces/{ws.id}/mcp-config",
@@ -399,8 +429,10 @@ async def test_generate_projects_on_archived_returns_409(
 ) -> None:
     """归档工作区 generate-projects（写 projects/*.yaml）→ 409（审计④-5）。"""
     user = await _create_user(db_session)
-    await _grant_platform_permission(db_session, user.id, Permission.WORKSPACE_ADMIN)
     ws = await _create_workspace(db_session, status="archived")
+    # 2026-09-20-workspace-member-visibility：平台级业务权限不再穿透工作区，
+    # 改授工作区成员角色（考察点仍是归档禁写守卫本身）。
+    await _grant_workspace_permission(db_session, user.id, ws.id, Permission.WORKSPACE_ADMIN)
 
     resp = await client.post(
         f"/api/workspaces/{ws.id}/generate-projects",

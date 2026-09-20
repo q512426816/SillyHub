@@ -2,9 +2,11 @@
 
 ``platform_admin`` bypasses every check (this is the V1 simplification
 documented in task-04a §1). Everyone else must have the permission granted
-via at least one role inside the requested workspace, **or** at the
-platform level via the ``user_roles`` table (change
-2026-06-16-admin-org-role-center task-02).
+via at least one role inside the requested workspace; within a workspace,
+platform-level grants via ``user_roles`` admit only ``platform:admin``,
+and other platform-level permissions apply only outside workspace context
+(change 2026-06-16-admin-org-role-center task-02, tightened by
+2026-09-20-workspace-member-visibility task-01).
 """
 
 from __future__ import annotations
@@ -117,17 +119,32 @@ async def has_permission(
     1. ``is_platform_admin`` short-circuit.
     2. Platform-level grant via ``user_roles`` (workspace-agnostic).
     3. Workspace-scoped grant via ``user_workspace_roles``.
+
+    Change 2026-09-20-workspace-member-visibility (task-01): platform-level
+    *business* permissions no longer punch through into a workspace context —
+    inside a workspace only ``platform:admin`` (or the ``is_platform_admin``
+    flag) escalates beyond membership. This supersedes the pass-through
+    semantics of the ql-20260917-007 era. Entry checks without a workspace
+    (``require_permission_any`` semantics) keep the legacy platform
+    pass-through: platform-level hold of the permission itself (or
+    ``PLATFORM_ADMIN``) still admits, else the all-workspace union decides.
     """
     if user.is_platform_admin:
         return True
 
     platform_perms = await collect_permissions_platform(session, user_id=user.id)
-    if permission.value in platform_perms or Permission.PLATFORM_ADMIN.value in platform_perms:
-        return True
 
     if workspace_id is None:
+        # Feature-entry path (require_permission_any): unchanged behavior.
+        if permission.value in platform_perms or Permission.PLATFORM_ADMIN.value in platform_perms:
+            return True
         perms = await collect_permissions_all(session, user_id=user.id)
         return permission.value in perms or Permission.PLATFORM_ADMIN.value in perms
+
+    # Workspace context: platform segment only admits PLATFORM_ADMIN —
+    # business permissions must come from workspace membership below.
+    if Permission.PLATFORM_ADMIN.value in platform_perms:
+        return True
     perms = await collect_permissions(session, user_id=user.id, workspace_id=workspace_id)
     return permission.value in perms or Permission.PLATFORM_ADMIN.value in perms
 
@@ -147,11 +164,14 @@ async def list_user_ids_with_permission(
     1. Workspace grant via ``user_workspace_roles`` → roles →
        role_permissions (users holding a role whose permission set contains
        ``permission`` **or** ``PLATFORM_ADMIN`` are admitted).
-    2. Platform-level grant via admin ``user_roles`` (same permission /
-       PLATFORM_ADMIN admission, workspace-agnostic). Falls back to an
+    2. Platform-level grant via admin ``user_roles``, admitting only
+       ``PLATFORM_ADMIN`` holders (workspace-agnostic). Falls back to an
        empty segment when the admin module is not bootstrapped — same
        ImportError degradation as :func:`collect_permissions_platform`.
     3. Users flagged ``is_platform_admin``.
+
+    2026-09-20-workspace-member-visibility：段 2 仅匹配 platform:admin——平台级持业务
+    权限的非成员不再收工作区广播（对齐 has_permission 收紧后语义）。
 
     Only users with ``status == "active"`` are returned (Grill X-04);
     disabled/deleted accounts never receive broadcast notifications.
@@ -177,6 +197,10 @@ async def list_user_ids_with_permission(
     user_ids = set((await session.execute(stmt)).scalars().all())
 
     # Segment 2: platform-level grants via the admin module's UserRole.
+    # 2026-09-20-workspace-member-visibility: only PLATFORM_ADMIN matches —
+    # platform-level holders of the business permission itself (non-members)
+    # no longer receive workspace broadcasts, mirroring has_permission's
+    # tightened workspace segment (task-01).
     try:
         from app.modules.admin.model import UserRole
     except ImportError:
@@ -188,7 +212,7 @@ async def list_user_ids_with_permission(
             .join(RolePermission, col(RolePermission.role_id) == col(Role.id))
             .join(User, col(User.id) == col(UserRole.user_id))
             .where(col(User.status) == "active")
-            .where(col(RolePermission.permission).in_([target, admin_perm]))
+            .where(col(RolePermission.permission).in_([admin_perm]))
             .distinct()
         )
         user_ids.update((await session.execute(stmt)).scalars().all())

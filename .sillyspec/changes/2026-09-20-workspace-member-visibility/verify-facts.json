@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-20-workspace-member-visibility",
+  "generatedAt": "2026-09-20T11:00:39.287Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-20-workspace-member-visibility",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-20-workspace-member-visibility",
+      "metrics": {
+        "tasks": 6,
+        "hasTest": 6
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-20-workspace-member-visibility",
+      "metrics": {
+        "backendEndpoints": 3469,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-20-workspace-member-visibility",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-20-workspace-member-visibility",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-09-20-workspace-member-visibility",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-09-20-workspace-member-visibility",
+      "metrics": {
+        "checkedFiles": 7,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "other",
+        "item": "全量测试/集成实测留 CI（CLAUDE.md 规则 0 禁本地全量；本变更范围内核验已跑：350 passed + ruff/mypy 0，见「测试结果」「集成验证回执」）",
+        "condition": "CI backend 全量 pipeline 绿；或用户明确要求时本地跑 make test",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "部署后行为抽查（可选）：180490 账号登录 → 工作区列表应为空、直连工作区 URL 403、不收工作区通知",
+        "condition": "下一轮部署到运行环境后人工登录核对",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/workspace/tests/test_platform_grant_list.py",
+      "backend/app/modules/auth/tests/test_rbac_workspace_scope.py"
+    ]
+  },
+  "smokeRan": "not-ran",
+  "runtimeEvidence": [
+    {
+      "claim": "主仓范围内核验套件（判定链专项 + 三口径反转 + 通知回归）全绿",
+      "command": "cd backend && .venv/Scripts/python.exe -m pytest app/modules/auth/tests/test_rbac_workspace_scope.py app/modules/workspace/tests/test_platform_grant_list.py app/modules/notification/tests/test_service.py -q",
+      "exitCode": 0,
+      "logPath": "会话终端输出（24 passed, 15 warnings in 34.10s，2026-09-20）"
+    },
+    {
+      "claim": "主仓 workspace 整目录 + knowledge 路由回归全绿（含 task-06 修正的三个文件）",
+      "command": "cd backend && .venv/Scripts/python.exe -m pytest app/modules/workspace/tests app/modules/knowledge/tests/test_router.py -q",
+      "exitCode": 0,
+      "logPath": "会话终端输出（326 passed, 1 skipped in 299.90s，skip 为 Windows 符号链接特权预存跳过，2026-09-20）"
+    },
+    {
+      "claim": "三触点源码 lint/类型零问题",
+      "command": "cd backend && .venv/Scripts/python.exe -m ruff check app/modules/auth/rbac.py app/modules/workspace/router.py && .venv/Scripts/python.exe -m mypy app/modules/auth/rbac.py app/modules/workspace/router.py",
+      "exitCode": 0,
+      "logPath": "会话终端输出（All checks passed / Success: no issues found in 2 source files，2026-09-20）"
+    }
+  ],
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

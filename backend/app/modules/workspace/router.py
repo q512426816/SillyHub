@@ -320,12 +320,13 @@ async def list_workspaces(
     ``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序
     （每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。
 
-    ql-20260917-007：非管理员分支先看**平台级授权**（``user_roles`` 持
-    ``workspace:read`` 或 ``platform:admin``）——与 ``has_permission`` 段 2、
-    通知广播收件人查找（``list_user_ids_with_permission`` 段 2）口径对齐：
-    这类用户对所有工作区有真实读权限，列表按全量返回；否则维持
-    ``allowed_workspace_ids`` 工作区级限定。修复「列表看不到工作区，
-    却能收到其通知、点进其内容」的三处口径割裂。
+    ql-20260917-007：非管理员分支先看**平台级授权**（``user_roles``）——与
+    ``has_permission`` 段 2、通知广播收件人查找（``list_user_ids_with_permission``
+    段 2）三处口径对齐（原修复「列表看不到工作区，却能收到其通知、点进其
+    内容」的割裂）。2026-09-20-workspace-member-visibility：平台级
+    ``workspace:read`` 不再授予全量可见（纯功能入口语义，D-001@v1），三处
+    同步收窄；平台级仅 ``platform:admin`` 全量，其余维持
+    ``allowed_workspace_ids`` 工作区级限定。
     """
     if unclassified and workspace_type is not None:
         raise AppError(
@@ -349,11 +350,8 @@ async def list_workspaces(
         )
     else:
         platform_perms = await collect_permissions_platform(session, user_id=user.id)
-        if (
-            Permission.WORKSPACE_READ.value in platform_perms
-            or Permission.PLATFORM_ADMIN.value in platform_perms
-        ):
-            # 平台级读授权（user_roles）→ 全量可见（对齐 is_platform_admin
+        if Permission.PLATFORM_ADMIN.value in platform_perms:
+            # 平台级 platform:admin（user_roles）→ 全量可见（对齐 is_platform_admin
             # 分支的 allowed_workspace_ids=None）；user_id 过滤仍忽略。
             allowed: list[uuid.UUID] | None = None
         else:
