@@ -1055,7 +1055,7 @@ async def test_distill_quick_entries_shape_and_permission(
     assert body["items"][0]["date"] == "2026-09-18 21:30:00"
 
     # 仅 KNOWLEDGE_READ 用户可读（读侧端点），未认证 401。
-    reader_headers = await _knowledge_read_only_headers(db_session)
+    reader_headers = await _knowledge_read_only_headers(db_session, ws_id)
     resp = await client.get(
         f"/api/workspaces/{ws_id}/knowledge/distill/quick-entries",
         headers=reader_headers,
