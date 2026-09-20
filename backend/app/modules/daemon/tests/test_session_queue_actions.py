@@ -875,6 +875,146 @@ class TestDispatchNow:
         assert await _queue_rows(db_session, session_id) == []
 
     @pytest.mark.asyncio
+    async def test_dispatch_now_steer_deletes_entry_in_same_tx_as_inject(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """ql-20260921-002-d79d：双注入竞态收口——注入调用时刻条目已同事务删除。
+
+        旧序竞态：注入内部 commit（释放会话行锁）→ 回 dispatch_queued_message_now
+        才删行，窗口内并发 dispatch_now（双击 ⚡）复锁后复取仍见 pending 行 →
+        同条消息 mid-turn 双注入双留痕。修复后注入前预删、与 user_input 留痕经
+        注入内部 commit 原子落库——注入函数入口即可见行已删（本用例核心断言，
+        旧实现此断言红：注入时行仍在）。注入 commit 后进程崩溃窗口的同条二次
+        发送（接力派发残留行）一并消除。
+        """
+        from sqlalchemy import select as _select
+
+        svc, uid, _rt, session_id, busy_run = await _setup_busy_session(db_session)
+        b = await svc.inject_session(session_id, uid, prompt="竞态B", queue_when_busy=True)
+        assert b.queue_entry_id is not None
+        mocked_hub.send_session_control.reset_mock()
+
+        inner = svc._sess
+        orig_inject = inner._inject_mid_turn_into_run
+        entry_visible_at_inject: list[bool] = []
+
+        async def _inject_sees_entry_deleted(*args, **kwargs):
+            # 注入函数入口：autoflush 后按主键 SELECT——预删已在 flush 队列，
+            # 本事务视角行已不可见（旧实现此处行仍存在）。
+            row = (
+                (
+                    await db_session.execute(
+                        _select(AgentSessionQueuedMessage).where(
+                            AgentSessionQueuedMessage.id == b.queue_entry_id
+                        )
+                    )
+                )
+                .scalars()
+                .one_or_none()
+            )
+            entry_visible_at_inject.append(row is not None)
+            return await orig_inject(*args, **kwargs)
+
+        inner._inject_mid_turn_into_run = _inject_sees_entry_deleted
+        try:
+            dispatch_mode = await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
+        finally:
+            inner._inject_mid_turn_into_run = orig_inject
+
+        assert dispatch_mode == "steered"
+        # 核心不变式：注入时刻条目已在本事务中删除（并发复锁方 commit 后必见行删）。
+        assert entry_visible_at_inject == [False]
+        assert await _queue_rows(db_session, session_id) == []
+        steered_input = (
+            (
+                await db_session.execute(
+                    _select(AgentRunLog).where(
+                        AgentRunLog.run_id == busy_run.id,
+                        AgentRunLog.channel == "user_input",
+                        AgentRunLog.content_redacted == "竞态B",
+                    )
+                )
+            )
+            .scalars()
+            .one_or_none()
+        )
+        assert steered_input is not None
+
+    @pytest.mark.asyncio
+    async def test_dispatch_now_steer_offline_rolls_back_entry(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """ql-20260921-002-d79d：注入 commit 前失败（DaemonRuntimeOffline）→
+        预删随注入内部 rollback 连带复活——失败语义与旧序逐字一致（R-03：置顶
+        已单独持久化不回滚，条目留队 pending 可重试，双击不会丢消息）。
+        """
+        svc, uid, _rt, session_id, _busy_run = await _setup_busy_session(db_session)
+        await svc.inject_session(session_id, uid, prompt="A", queue_when_busy=True)
+        b = await svc.inject_session(session_id, uid, prompt="离线B", queue_when_busy=True)
+        assert b.queue_entry_id is not None
+
+        inner = svc._sess
+        orig_inject = inner._inject_mid_turn_into_run
+
+        async def _inject_offline(*args, **kwargs):
+            # 对齐真实现 commit 前失败分支（control.py except AppError:
+            # rollback 后 raise）——rollback 连带撤销同事务预删。
+            await db_session.rollback()
+            raise DaemonRuntimeOffline(
+                "执行代理当前不在线，本轮消息未能发送。请确认 daemon 已运行后重试。",
+                details={"session_id": str(session_id)},
+            )
+
+        inner._inject_mid_turn_into_run = _inject_offline
+        try:
+            with pytest.raises(DaemonRuntimeOffline):
+                await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
+        finally:
+            inner._inject_mid_turn_into_run = orig_inject
+
+        rows = await _queue_rows(db_session, session_id)
+        assert [r.prompt for r in rows] == ["离线B", "A"]
+        assert [r.status for r in rows] == ["pending", "pending"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_now_relocked_entry_failed_returns_dispatched(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """ql-20260921-002-d79d（F3）：复取行存在但已非 pending（接力派发失败化
+        窗口）→ 按已派发收口返 "dispatched"，零注入零打断——旧码只判 None，
+        failed 条目照走 steer（把已判失败的消息再注入一遍）/ interrupt（白杀
+        活跃轮，接力侧只取 pending 不会派发 failed 条目）。
+        """
+        svc, uid, _rt, session_id, _busy_run = await _setup_busy_session(db_session)
+        b = await svc.inject_session(session_id, uid, prompt="失败B", queue_when_busy=True)
+        assert b.queue_entry_id is not None
+        mocked_hub.send_session_control.reset_mock()
+
+        inner = svc._sess
+        orig_publish = inner._publish_session_event
+
+        async def _fail_entry_race(session_id_: uuid.UUID, payload_: dict) -> None:
+            if payload_.get("action") == "dispatch_now":
+                # 置顶 commit（锁释放）窗口内：接力派发把本条失败化留队。
+                row = await db_session.get(AgentSessionQueuedMessage, b.queue_entry_id)
+                if row is not None:
+                    row.status = "failed"
+                    row.error_msg = "dispatch_failed"
+                    await db_session.commit()
+            await orig_publish(session_id_, payload_)
+
+        inner._publish_session_event = _fail_entry_race
+        try:
+            dispatch_mode = await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
+        finally:
+            inner._publish_session_event = orig_publish
+
+        assert dispatch_mode == "dispatched"
+        mocked_hub.send_session_control.assert_not_awaited()
+        rows = await _queue_rows(db_session, session_id)
+        assert [r.status for r in rows] == ["failed"]
+
+    @pytest.mark.asyncio
     async def test_dispatch_now_interrupt_failure_keeps_prepend(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:

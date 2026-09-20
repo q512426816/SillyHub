@@ -1,0 +1,258 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index c131fc0bb..bb12d1aa6 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -5,6 +5,7 @@ created_at: 2026-08-27 14:32:24
+ 
+ # daemon 模块变更索引
+ 
++- ql-20260921-002-d79d | dispatch_now 双注入竞态收口（24h 审查遗留中置信项）——steered 分支删行改注入前同事务预删：旧序注入内部 commit 释放会话行锁后才回本函数删行，窗口内并发 dispatch_now（双击 ⚡）复取仍见 pending 行致同条双注入双留痕，且注入 commit 后崩溃窗口条目残留被接力派发二次发送；预删后删除与 user_input 留痕经注入 commit 原子落库，注入 commit 前失败（DaemonRuntimeOffline/附件校验）rollback 连带复活条目失败语义不变（enqueue_and_push/publish 均 best-effort 不抛，无已删未投路径）。另补复取非 pending 守卫（F3）：接力派发失败化的 failed 条目按已派发收口返 dispatched，不再注入一遍或白杀活跃轮。测试：queue_actions 37（+3，核心两用例 stash 验证旧码红）+ daemon 模块全量 2361 passed、ruff/format/mypy 0
+ - ql-20260921-001-8a4d | 24h 审查两修（daemon 面）——①claude-settings 撤下语义：settings_config 清空/仅 env/值全非法由「不写文件」改「删除既有 settings.json」（原语义下 autocompact 三键撤勾后旧值永久残留生效、全 daemon 无清理路径），写入换 writeFileAtomic 防并发 spawn 交错损坏，删除 ENOENT 静默 best-effort。②batch（task 型）spawn 的 `--model` 旗标经新增导出纯函数 batchModelWithOneM 补 [1m]（kind 守卫同 applyClaudeSettings 调用点，仅 claude/缺省）——旗标优先级压掉 env 档位，ade38ec37 只修 interactive 两路漏此路径，1M 供应商批量任务仍 ~160k 提前压缩。测试：claude-settings 26（+4 撤下矩阵）+ task-runner-one-m-suffix 7 新建 + task-runner/provider-dispatch/session-manager-one-m 相邻面合计 130 全绿、typecheck 0；顺手清偿 knowledge test_router.py ruff format 存量债（ad8b48816 遗留）
+ - ql-20260914-007-8f1d | CI 修复批（daemon 面）——cursor-driver.test ② 多轮 --resume 用例首轮 usage 断言补 ctx_tokens:13（净值三和 10+2+1）：ctx-usage-all-providers 变更给 cursor-events mapUsage 派生 ctx_tokens（ctxTokensFromNetInput 共享 helper）时漏改该用例的过时负向断言 not ctx_tokens（daemon-ci 2 连败）。测试：cursor-driver 23 passed、tsc 0 错
+ - 2026-09-10-auto-resume-interrupted-turn | daemon 重启自动续跑被中断轮——backend 全自洽：recover 事务内（SAVEPOINT D-011）G1-G9+满员 11 道守卫（范围/开关/错误码白名单 daemon_restarted/最新轮/输入未截断/无附件宽松前缀/链上限 2/幂等/无取消 dialog/队列未满）全过则包续跑提示词入队（origin='auto_resume:<rid>' 复合值 D-009@v2、position 队首 D-012）；派发复用 D-008 钩子+queue G10 派发时守卫（source 后有更新 run 删行跳过，防入队后手动重发两遍 Grill P1-2）；inject 可选参打标 metadata_.auto_resume_of+SessionRunRead.metadata 出口（plan 审查 P0-1：显式 DTO 不自动携带新列）；edit/reorder 对续跑条目 409、delete=手动取消；恢复失败既有 _fail_pending_queued_messages 收敛。两列 migration 20260910120000。测试：守卫矩阵 25+queue 19+pref 4+runs 12+集成 3 全绿
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.md b/.sillyspec/docs/SillyHub/modules/daemon.md
+index 1767985a1..deaa46132 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.md
+@@ -209,3 +209,9 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容
+ 
+ - claude-settings 撤下语义：`applyClaudeSettings` 对空 settings 对象（absent/null/仅 env/值全非法）由「不写文件」改「**删除既有 settings.json**」——原语义下 autocompact 三键撤勾（settings_config 清空）后旧值永久残留生效、全 daemon 无任何清理路径；被删的只可能是本 daemon 自己写的隔离目录内文件，宿主机零打扰不变。写入换 `writeFileAtomic`（repo 自备原语，防跨 lease 并发 spawn 裸 writeFile 交错出半截 JSON）；删除 ENOENT 静默、其余 best-effort warn 不阻断 spawn。
+ - batch `[1m]` 补缀：task-runner 新增导出纯函数 `batchModelWithOneM`（kind 守卫同 applyClaudeSettings 调用点：仅 claude/缺省应用），spawn args 的 `--model` 旗标经它补 `[1m]`——显式旗标优先级最高会压掉 env 档位（injector 规则 3 已补的缀），ql-20260920-004 修复漏了此路径，1M 供应商跑批量任务仍按默认 200k 窗口 ~160k 提前自动压缩。
++
++## 增量（ql-20260921-002-d79d：dispatch_now 双注入竞态收口——steered 预删同事务 + 复取非 pending 守卫）
++
++- 竞态：旧序 steered 分支「`_inject_mid_turn_into_run` 内部 commit（连带释放会话行锁）→ 回 `dispatch_queued_message_now` 才删行」之间存在无锁窗口——并发 dispatch_now（双击 ⚡）复锁后复取仍见 pending 行 → 同条消息 mid-turn 双注入双留痕；注入 commit 后进程崩溃窗口内条目残留，run 终态接力派发还会二次发送。修复：删行改**注入前同事务预删**——注入内部 commit 把删除与 user_input 留痕原子落库（任一观察时刻：要么行在，要么消息已注入）；注入 commit 前失败（DaemonRuntimeOffline/附件校验）其内部 rollback 连带复活条目，失败语义与旧序逐字一致（R-03 置顶已单独持久化）。commit 后链路（Redis publish/enqueue_and_push/页面前导）均 best-effort 不抛，无「已删未投」可达路径。
++- F3 守卫：复锁复取只判 None 的缺口补上——行存在但已非 pending（接力派发失败化/并发消费中）按已派发收口返 "dispatched"，不再把 failed 条目注入一遍或白杀活跃轮（interrupt 后接力侧只取 pending，failed 条目不会被派发）。
++- 测试：queue_actions 37（+3：注入时刻同事务已删不变式[旧码红]/离线 rollback 复活/复取 failed 收口[旧码红]）；daemon 模块全量 2361 passed，ruff/format/mypy 0。
+diff --git a/backend/app/modules/daemon/session/service/queue.py b/backend/app/modules/daemon/session/service/queue.py
+index 29b354eac..7dd969d1b 100644
+--- a/backend/app/modules/daemon/session/service/queue.py
++++ b/backend/app/modules/daemon/session/service/queue.py
+@@ -612,8 +612,10 @@ async def dispatch_queued_message_now(
+     mid-turn 注入 + 接力新 run 双执行）。随后判活跃 run：
+     - 有且可引导（provider caps ``steering``=true + 条目不带轮边界维度）
+       → :meth:`_inject_mid_turn_into_run` mid-turn 注入活跃轮（**不
+-      interrupt**，prompt/附件/页面上下文/留痕转挂活跃 run，注入成功删
+-      排队行，与群聊 @ 忙轮同入口），返 ``"steered"``；
++      interrupt**，prompt/附件/页面上下文/留痕转挂活跃 run；ql-20260921-002
++      起删排队行改注入前**同事务预删**——与 user_input 留痕经注入内部 commit
++      原子落库，杜绝注入 commit 释放行锁后、删行前窗口内并发 dispatch_now
++      同条双注入，与群聊 @ 忙轮同入口），返 ``"steered"``；
+     - 有但不可引导（provider 不支持 / 带切换维度 / 续跑条目）→
+       :meth:`_send_interrupt_control` 打断当前轮（daemon 零改动 D-007，
+       run 终态钩子接力派发队首=本条；AppError 向上抛），返
+@@ -696,6 +698,14 @@ async def dispatch_queued_message_now(
+     if fresh_entry is None:
+         await svc._session.rollback()
+         return "dispatched"
++    # ql-20260921-002-d79d：复取行存在但已非 pending（接力派发失败化 / 并发
++    # dispatch_now 消费中）→ 同按已派发收口返 "dispatched"。failed 条目不该被
++    # mid-turn 注入（旧码只判 None，failed 照走 steer/interrupt 分支：注入把
++    # 已判失败的消息再发一遍；interrupt 更是白杀活跃轮——接力侧只取 pending
++    # 队首，failed 条目不会被派发）。
++    if fresh_entry.status != "pending":
++        await svc._session.rollback()
++        return "dispatched"
+     entry = fresh_entry
+     # commit 后判活跃 run（置顶持久化先于 interrupt/注入，R-03）。
+     run = await svc._get_current_run(session.id)
+@@ -748,6 +758,23 @@ async def dispatch_queued_message_now(
+             # 恒置）——"steered" 三态由 mid_turn 派生（design B3：复用既有
+             # 标志，不新建平行服务层字段）。AppError（daemon 离线 / 附件校验
+             # 失败）向上抛，置顶已持久化不回滚（R-03 同口径）。
++            #
++            # ql-20260921-002-d79d（双注入竞态收口）：删行改「注入前同事务预删」。
++            # 旧序「注入内部 commit（连带释放会话行锁）→ 回本函数才删行」之间存在
++            # 无锁窗口——并发 dispatch_now（双击 ⚡）此刻复锁会话行，复取仍见
++            # pending 行 → 同条消息 mid-turn 双注入双留痕；注入 commit 后进程
++            # 崩溃的窗口内条目残留，run 终态接力派发还会二次发送。预删后
++            # _inject_mid_turn_into_run 的内部 commit 把删除与 user_input 留痕
++            # **原子**落库（任一观察时刻：要么行还在，要么消息已注入）；注入在
++            # 自身 commit 前失败（DaemonRuntimeOffline / 附件校验）则其内部
++            # rollback 连带复活条目——失败语义与旧序逐字一致（R-03：置顶已在
++            # 上一段单独持久化，不受影响）。注入 commit 之后的链路（Redis
++            # publish / enqueue_and_push / 页面前导构建）均 best-effort 不抛
++            # （helpers/control_commands 契约），不存在「已删未投」的可达路径。
++            # 标量先取：注入 commit（expire_on_commit）会把已删除的 entry 转
++            # detached 过期态，事后取 entry.id 有 ObjectDeletedError 风险。
++            steered_entry_id = str(entry.id)
++            await svc._session.delete(entry)
+             await svc._inject_mid_turn_into_run(
+                 session,
+                 current_run=run,
+@@ -757,20 +784,15 @@ async def dispatch_queued_message_now(
+                 turn_metadata=chain_metadata,
+                 page_context=steered_page_context,
+             )
+-            # 注入成功：删排队行（消息已转挂活跃 run——user_input 留痕 +
+-            # SESSION_INJECT 三段式由 _inject_mid_turn_into_run 落齐），不删
+-            # 会在 run 终态被接力派发二次发送。重新取行再删（identity map
+-            # 旧对象可能已过期，对齐 dispatch_queued_messages 成功路径）。
+-            fresh = await svc._session.get(AgentSessionQueuedMessage, entry.id)
+-            if fresh is not None:
+-                await svc._session.delete(fresh)
+-                await svc._session.commit()
++            # 注入成功：条目已随注入 commit 原子删除（消息转挂活跃 run——
++            # user_input 留痕 + SESSION_INJECT 三段式由 _inject_mid_turn_into_run
++            # 落齐），此处只补发 queue_changed 通知前端收敛队列条。
+             await svc._publish_session_event(
+                 session.id,
+                 {
+                     "event": "queue_changed",
+                     "session_id": str(session.id),
+-                    "queue_entry_id": str(entry.id),
++                    "queue_entry_id": steered_entry_id,
+                     "action": "dispatched",
+                 },
+             )
+diff --git a/backend/app/modules/daemon/tests/test_session_queue_actions.py b/backend/app/modules/daemon/tests/test_session_queue_actions.py
+index f98b698bd..2f6a16795 100644
+--- a/backend/app/modules/daemon/tests/test_session_queue_actions.py
++++ b/backend/app/modules/daemon/tests/test_session_queue_actions.py
+@@ -874,6 +874,146 @@ class TestDispatchNow:
+         mocked_hub.send_session_control.assert_not_awaited()
+         assert await _queue_rows(db_session, session_id) == []
+ 
++    @pytest.mark.asyncio
++    async def test_dispatch_now_steer_deletes_entry_in_same_tx_as_inject(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """ql-20260921-002-d79d：双注入竞态收口——注入调用时刻条目已同事务删除。
++
++        旧序竞态：注入内部 commit（释放会话行锁）→ 回 dispatch_queued_message_now
++        才删行，窗口内并发 dispatch_now（双击 ⚡）复锁后复取仍见 pending 行 →
++        同条消息 mid-turn 双注入双留痕。修复后注入前预删、与 user_input 留痕经
++        注入内部 commit 原子落库——注入函数入口即可见行已删（本用例核心断言，
++        旧实现此断言红：注入时行仍在）。注入 commit 后进程崩溃窗口的同条二次
++        发送（接力派发残留行）一并消除。
++        """
++        from sqlalchemy import select as _select
++
++        svc, uid, _rt, session_id, busy_run = await _setup_busy_session(db_session)
++        b = await svc.inject_session(session_id, uid, prompt="竞态B", queue_when_busy=True)
++        assert b.queue_entry_id is not None
++        mocked_hub.send_session_control.reset_mock()
++
++        inner = svc._sess
++        orig_inject = inner._inject_mid_turn_into_run
++        entry_visible_at_inject: list[bool] = []
++
++        async def _inject_sees_entry_deleted(*args, **kwargs):
++            # 注入函数入口：autoflush 后按主键 SELECT——预删已在 flush 队列，
++            # 本事务视角行已不可见（旧实现此处行仍存在）。
++            row = (
++                (
++                    await db_session.execute(
++                        _select(AgentSessionQueuedMessage).where(
++                            AgentSessionQueuedMessage.id == b.queue_entry_id
++                        )
++                    )
++                )
++                .scalars()
++                .one_or_none()
++            )
++            entry_visible_at_inject.append(row is not None)
++            return await orig_inject(*args, **kwargs)
++
++        inner._inject_mid_turn_into_run = _inject_sees_entry_deleted
++        try:
++            dispatch_mode = await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
++        finally:
++            inner._inject_mid_turn_into_run = orig_inject
++
++        assert dispatch_mode == "steered"
++        # 核心不变式：注入时刻条目已在本事务中删除（并发复锁方 commit 后必见行删）。
++        assert entry_visible_at_inject == [False]
++        assert await _queue_rows(db_session, session_id) == []
++        steered_input = (
++            (
++                await db_session.execute(
++                    _select(AgentRunLog).where(
++                        AgentRunLog.run_id == busy_run.id,
++                        AgentRunLog.channel == "user_input",
++                        AgentRunLog.content_redacted == "竞态B",
++                    )
++                )
++            )
++            .scalars()
++            .one_or_none()
++        )
++        assert steered_input is not None
++
++    @pytest.mark.asyncio
++    async def test_dispatch_now_steer_offline_rolls_back_entry(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """ql-20260921-002-d79d：注入 commit 前失败（DaemonRuntimeOffline）→
++        预删随注入内部 rollback 连带复活——失败语义与旧序逐字一致（R-03：置顶
++        已单独持久化不回滚，条目留队 pending 可重试，双击不会丢消息）。
++        """
++        svc, uid, _rt, session_id, _busy_run = await _setup_busy_session(db_session)
++        await svc.inject_session(session_id, uid, prompt="A", queue_when_busy=True)
++        b = await svc.inject_session(session_id, uid, prompt="离线B", queue_when_busy=True)
++        assert b.queue_entry_id is not None
++
++        inner = svc._sess
++        orig_inject = inner._inject_mid_turn_into_run
++
++        async def _inject_offline(*args, **kwargs):
++            # 对齐真实现 commit 前失败分支（control.py except AppError:
++            # rollback 后 raise）——rollback 连带撤销同事务预删。
++            await db_session.rollback()
++            raise DaemonRuntimeOffline(
++                "执行代理当前不在线，本轮消息未能发送。请确认 daemon 已运行后重试。",
++                details={"session_id": str(session_id)},
++            )
++
++        inner._inject_mid_turn_into_run = _inject_offline
++        try:
++            with pytest.raises(DaemonRuntimeOffline):
++                await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
++        finally:
++            inner._inject_mid_turn_into_run = orig_inject
++
++        rows = await _queue_rows(db_session, session_id)
++        assert [r.prompt for r in rows] == ["离线B", "A"]
++        assert [r.status for r in rows] == ["pending", "pending"]
++
++    @pytest.mark.asyncio
++    async def test_dispatch_now_relocked_entry_failed_returns_dispatched(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """ql-20260921-002-d79d（F3）：复取行存在但已非 pending（接力派发失败化
++        窗口）→ 按已派发收口返 "dispatched"，零注入零打断——旧码只判 None，
++        failed 条目照走 steer（把已判失败的消息再注入一遍）/ interrupt（白杀
++        活跃轮，接力侧只取 pending 不会派发 failed 条目）。
++        """
++        svc, uid, _rt, session_id, _busy_run = await _setup_busy_session(db_session)
++        b = await svc.inject_session(session_id, uid, prompt="失败B", queue_when_busy=True)
++        assert b.queue_entry_id is not None
++        mocked_hub.send_session_control.reset_mock()
++
++        inner = svc._sess
++        orig_publish = inner._publish_session_event
++
++        async def _fail_entry_race(session_id_: uuid.UUID, payload_: dict) -> None:
++            if payload_.get("action") == "dispatch_now":
++                # 置顶 commit（锁释放）窗口内：接力派发把本条失败化留队。
++                row = await db_session.get(AgentSessionQueuedMessage, b.queue_entry_id)
++                if row is not None:
++                    row.status = "failed"
++                    row.error_msg = "dispatch_failed"
++                    await db_session.commit()
++            await orig_publish(session_id_, payload_)
++
++        inner._publish_session_event = _fail_entry_race
++        try:
++            dispatch_mode = await svc.dispatch_queued_message_now(session_id, b.queue_entry_id, uid)
++        finally:
++            inner._publish_session_event = orig_publish
++
++        assert dispatch_mode == "dispatched"
++        mocked_hub.send_session_control.assert_not_awaited()
++        rows = await _queue_rows(db_session, session_id)
++        assert [r.status for r in rows] == ["failed"]
++
+     @pytest.mark.asyncio
+     async def test_dispatch_now_interrupt_failure_keeps_prepend(
+         self, db_session, mocked_hub, mocked_redis

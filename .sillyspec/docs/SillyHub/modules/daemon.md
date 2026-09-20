@@ -209,3 +209,9 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 
 - claude-settings 撤下语义：`applyClaudeSettings` 对空 settings 对象（absent/null/仅 env/值全非法）由「不写文件」改「**删除既有 settings.json**」——原语义下 autocompact 三键撤勾（settings_config 清空）后旧值永久残留生效、全 daemon 无任何清理路径；被删的只可能是本 daemon 自己写的隔离目录内文件，宿主机零打扰不变。写入换 `writeFileAtomic`（repo 自备原语，防跨 lease 并发 spawn 裸 writeFile 交错出半截 JSON）；删除 ENOENT 静默、其余 best-effort warn 不阻断 spawn。
 - batch `[1m]` 补缀：task-runner 新增导出纯函数 `batchModelWithOneM`（kind 守卫同 applyClaudeSettings 调用点：仅 claude/缺省应用），spawn args 的 `--model` 旗标经它补 `[1m]`——显式旗标优先级最高会压掉 env 档位（injector 规则 3 已补的缀），ql-20260920-004 修复漏了此路径，1M 供应商跑批量任务仍按默认 200k 窗口 ~160k 提前自动压缩。
+
+## 增量（ql-20260921-002-d79d：dispatch_now 双注入竞态收口——steered 预删同事务 + 复取非 pending 守卫）
+
+- 竞态：旧序 steered 分支「`_inject_mid_turn_into_run` 内部 commit（连带释放会话行锁）→ 回 `dispatch_queued_message_now` 才删行」之间存在无锁窗口——并发 dispatch_now（双击 ⚡）复锁后复取仍见 pending 行 → 同条消息 mid-turn 双注入双留痕；注入 commit 后进程崩溃窗口内条目残留，run 终态接力派发还会二次发送。修复：删行改**注入前同事务预删**——注入内部 commit 把删除与 user_input 留痕原子落库（任一观察时刻：要么行在，要么消息已注入）；注入 commit 前失败（DaemonRuntimeOffline/附件校验）其内部 rollback 连带复活条目，失败语义与旧序逐字一致（R-03 置顶已单独持久化）。commit 后链路（Redis publish/enqueue_and_push/页面前导）均 best-effort 不抛，无「已删未投」可达路径。
+- F3 守卫：复锁复取只判 None 的缺口补上——行存在但已非 pending（接力派发失败化/并发消费中）按已派发收口返 "dispatched"，不再把 failed 条目注入一遍或白杀活跃轮（interrupt 后接力侧只取 pending，failed 条目不会被派发）。
+- 测试：queue_actions 37（+3：注入时刻同事务已删不变式[旧码红]/离线 rollback 复活/复取 failed 收口[旧码红]）；daemon 模块全量 2361 passed，ruff/format/mypy 0。

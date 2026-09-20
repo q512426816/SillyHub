@@ -612,8 +612,10 @@ async def dispatch_queued_message_now(
     mid-turn 注入 + 接力新 run 双执行）。随后判活跃 run：
     - 有且可引导（provider caps ``steering``=true + 条目不带轮边界维度）
       → :meth:`_inject_mid_turn_into_run` mid-turn 注入活跃轮（**不
-      interrupt**，prompt/附件/页面上下文/留痕转挂活跃 run，注入成功删
-      排队行，与群聊 @ 忙轮同入口），返 ``"steered"``；
+      interrupt**，prompt/附件/页面上下文/留痕转挂活跃 run；ql-20260921-002
+      起删排队行改注入前**同事务预删**——与 user_input 留痕经注入内部 commit
+      原子落库，杜绝注入 commit 释放行锁后、删行前窗口内并发 dispatch_now
+      同条双注入，与群聊 @ 忙轮同入口），返 ``"steered"``；
     - 有但不可引导（provider 不支持 / 带切换维度 / 续跑条目）→
       :meth:`_send_interrupt_control` 打断当前轮（daemon 零改动 D-007，
       run 终态钩子接力派发队首=本条；AppError 向上抛），返
@@ -696,6 +698,14 @@ async def dispatch_queued_message_now(
     if fresh_entry is None:
         await svc._session.rollback()
         return "dispatched"
+    # ql-20260921-002-d79d：复取行存在但已非 pending（接力派发失败化 / 并发
+    # dispatch_now 消费中）→ 同按已派发收口返 "dispatched"。failed 条目不该被
+    # mid-turn 注入（旧码只判 None，failed 照走 steer/interrupt 分支：注入把
+    # 已判失败的消息再发一遍；interrupt 更是白杀活跃轮——接力侧只取 pending
+    # 队首，failed 条目不会被派发）。
+    if fresh_entry.status != "pending":
+        await svc._session.rollback()
+        return "dispatched"
     entry = fresh_entry
     # commit 后判活跃 run（置顶持久化先于 interrupt/注入，R-03）。
     run = await svc._get_current_run(session.id)
@@ -748,6 +758,23 @@ async def dispatch_queued_message_now(
             # 恒置）——"steered" 三态由 mid_turn 派生（design B3：复用既有
             # 标志，不新建平行服务层字段）。AppError（daemon 离线 / 附件校验
             # 失败）向上抛，置顶已持久化不回滚（R-03 同口径）。
+            #
+            # ql-20260921-002-d79d（双注入竞态收口）：删行改「注入前同事务预删」。
+            # 旧序「注入内部 commit（连带释放会话行锁）→ 回本函数才删行」之间存在
+            # 无锁窗口——并发 dispatch_now（双击 ⚡）此刻复锁会话行，复取仍见
+            # pending 行 → 同条消息 mid-turn 双注入双留痕；注入 commit 后进程
+            # 崩溃的窗口内条目残留，run 终态接力派发还会二次发送。预删后
+            # _inject_mid_turn_into_run 的内部 commit 把删除与 user_input 留痕
+            # **原子**落库（任一观察时刻：要么行还在，要么消息已注入）；注入在
+            # 自身 commit 前失败（DaemonRuntimeOffline / 附件校验）则其内部
+            # rollback 连带复活条目——失败语义与旧序逐字一致（R-03：置顶已在
+            # 上一段单独持久化，不受影响）。注入 commit 之后的链路（Redis
+            # publish / enqueue_and_push / 页面前导构建）均 best-effort 不抛
+            # （helpers/control_commands 契约），不存在「已删未投」的可达路径。
+            # 标量先取：注入 commit（expire_on_commit）会把已删除的 entry 转
+            # detached 过期态，事后取 entry.id 有 ObjectDeletedError 风险。
+            steered_entry_id = str(entry.id)
+            await svc._session.delete(entry)
             await svc._inject_mid_turn_into_run(
                 session,
                 current_run=run,
@@ -757,20 +784,15 @@ async def dispatch_queued_message_now(
                 turn_metadata=chain_metadata,
                 page_context=steered_page_context,
             )
-            # 注入成功：删排队行（消息已转挂活跃 run——user_input 留痕 +
-            # SESSION_INJECT 三段式由 _inject_mid_turn_into_run 落齐），不删
-            # 会在 run 终态被接力派发二次发送。重新取行再删（identity map
-            # 旧对象可能已过期，对齐 dispatch_queued_messages 成功路径）。
-            fresh = await svc._session.get(AgentSessionQueuedMessage, entry.id)
-            if fresh is not None:
-                await svc._session.delete(fresh)
-                await svc._session.commit()
+            # 注入成功：条目已随注入 commit 原子删除（消息转挂活跃 run——
+            # user_input 留痕 + SESSION_INJECT 三段式由 _inject_mid_turn_into_run
+            # 落齐），此处只补发 queue_changed 通知前端收敛队列条。
             await svc._publish_session_event(
                 session.id,
                 {
                     "event": "queue_changed",
                     "session_id": str(session.id),
-                    "queue_entry_id": str(entry.id),
+                    "queue_entry_id": steered_entry_id,
                     "action": "dispatched",
                 },
             )

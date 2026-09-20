@@ -169,3 +169,13 @@
 结果：backend knowledge 124 + change 535 passed、mypy 967 文件 0 错、ruff check/format 全仓绿；daemon claude-settings 26+one-m 7+相邻面 130 passed + typecheck 0；frontend sessions page 41 passed + tsc 0 + eslint 0 error（5 warning 均 HEAD 既有）；未部署验证（daemon bundle 随下次发布）
 审计：[gate] L1（跨 0 模块 · 18 文件：6 代码/8 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
 审计：🔍 软归属：1 个窗口内未声明同模块测试文件已补入文件行（若属并行会话改动请手工剔除）：sillyhub-daemon/tests/task-runner-one-m-suffix.test.ts（+74/-0）
+
+## ql-20260921-002-d79d | 2026-09-21 02:41:37 | dispatch_now双注入竞态收口——steered预删同事务+复取非pending守卫
+状态：已完成
+关联变更：（无）
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md（+1/-0）, .sillyspec/docs/SillyHub/modules/daemon.md（+6/-0）, backend/app/modules/daemon/session/service/queue.py（+33/-11）, backend/app/modules/daemon/tests/test_session_queue_actions.py（+140/-0）
+需求：dispatch_now双注入竞态收口——steered预删同事务+复取非pending守卫
+根因：旧序 steered 分支注入内部 commit 释放会话行锁后才回本函数删行，无锁窗口内并发 dispatch_now（双击⚡）复取仍见 pending 行→同条消息 mid-turn 双注入双留痕；注入 commit 后进程崩溃窗口条目残留还会被接力派发二次发送；另复取只判 None，接力派发失败化的 failed 条目照走注入/打断分支（F3）
+方案：删行改注入前同事务预删——_inject_mid_turn_into_run 内部 commit 把删除与 user_input 留痕原子落库，注入 commit 前失败其内部 rollback 连带复活条目（失败语义与旧序逐字一致，enqueue_and_push/publish 均 best-effort 不抛无已删未投路径）；复锁复取补非 pending 守卫按已派发收口返 dispatched；补 3 用例（注入时刻同事务已删不变式/离线 rollback 复活/复取 failed 收口，核心两用例 stash 验证旧码红）；daemon.md 增量+changelog 同步
+结果：queue_actions 37 passed（+3）+ daemon 模块全量 2361 passed、ruff/format/mypy 0；前端零改动（响应契约不变）；未部署验证
+审计：[gate] L1（跨 0 模块 · 4 文件：1 代码/1 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量不适用（≤1 代码文件）
