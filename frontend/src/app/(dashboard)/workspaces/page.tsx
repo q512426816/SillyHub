@@ -64,7 +64,7 @@ export default function WorkspacesPage() {
   const [instancesById, setInstancesById] = useState<Map<string, DaemonInstanceRead>>(
     () => new Map(),
   );
-  const [bindingsByWs, setBindingsByWs] = useState<Map<string, { daemon_id: string | null }>>(
+  const [bindingsByWs, setBindingsByWs] = useState<Map<string, { daemon_id: string | null; root_path: string | null }>>(
     () => new Map(),
   );
   const [error, setError] = useState<string | null>(null);
@@ -158,7 +158,11 @@ export default function WorkspacesPage() {
       setInstancesById(new Map(instances.map((inst) => [inst.id, inst])));
       setBindingsByWs(
         new Map(
-          bindings.map((b) => [b.workspace_id, { daemon_id: b.daemon_id ?? null }]),
+          bindings.map((b) => [
+            b.workspace_id,
+            // ql-20260920-007：一并保留 root_path 供卡片「客户端路径」显示本人路径（D-004）。
+            { daemon_id: b.daemon_id ?? null, root_path: b.root_path ?? null },
+          ]),
         ),
       );
       // ql-20260821-007：卡片关联项目 tag（并行，单卡失败不拖累整页）
@@ -289,6 +293,8 @@ export default function WorkspacesPage() {
         daemonStatus: daemonStatusOf(w.id),
         // ql-20260918-012：probe 实时识别值优先，DB repo_url 兜底。
         repoUrl: repoUrlByWs.get(w.id) ?? w.repo_url ?? null,
+        // ql-20260920-007：客户端路径显示本人 binding 路径（未绑定→引导文案）。
+        myRootPath: bindingsByWs.get(w.id)?.root_path ?? null,
         onChanged: reload,
         onEditAlias: handleOpenAlias,
         onActivate: () => handleActivate(w),

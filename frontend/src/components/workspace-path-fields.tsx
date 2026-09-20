@@ -28,6 +28,12 @@ interface WorkspacePathFieldsProps {
   /** Show link to /runtimes when daemon-client */
   linkRuntime?: boolean;
   /**
+   * ql-20260920-007（D-004，2026-09-20-workspace-member-visibility）：当前用户本人
+   * binding 的本地项目路径。string=本人路径；null=未绑定（显示「未绑定」引导文案）；
+   * undefined=调用方未接线（兼容旧调用方，退回 workspace.root_path 全局路径）。
+   */
+  myRootPath?: string | null;
+  /**
    * ql-20260918-012：Git 远程仓库地址（后端 probe 自动识别回填 DB）。
    * 为空（direct/unknown 态、未识别或无权限探测）不渲染该行。
    */
@@ -61,11 +67,45 @@ function RepoUrlRow({ repoUrl }: { repoUrl: string }) {
   );
 }
 
+/**
+ * ql-20260920-007：「客户端路径」行渲染——优先本人 binding 路径（D-004 成员制口径，
+ * 不同账号各自看到自己的路径），未绑定显示引导文案；调用方未接线（undefined）时
+ * 退回 workspace.root_path（创建者全局路径，兼容旧调用方）。
+ */
+function ClientPathRow({
+  workspace,
+  myRootPath,
+}: {
+  workspace: Pick<Workspace, "root_path">;
+  myRootPath?: string | null;
+}) {
+  if (myRootPath === null) {
+    return (
+      <>
+        <dt className="text-muted-foreground">客户端路径</dt>
+        <dd className="text-muted-foreground">
+          未绑定——进入工作区后在「我的接入」绑定后显示你的本地路径
+        </dd>
+      </>
+    );
+  }
+  const path = myRootPath ?? workspace.root_path;
+  return (
+    <>
+      <dt className="text-muted-foreground">客户端路径</dt>
+      <dd className="break-all font-mono" title={path}>
+        {path}
+      </dd>
+    </>
+  );
+}
+
 export function WorkspacePathFields({
   workspace,
   runtime,
   daemon,
   linkRuntime = false,
+  myRootPath,
   repoUrl,
 }: WorkspacePathFieldsProps) {
   // 遗留 1：daemon 实体维度渲染（绑定走 member binding，daemon 实体优先）。
@@ -102,10 +142,7 @@ export function WorkspacePathFields({
           )}
         </dd>
 
-        <dt className="text-muted-foreground">客户端路径</dt>
-        <dd className="break-all font-mono" title={workspace.root_path}>
-          {workspace.root_path}
-        </dd>
+        <ClientPathRow workspace={workspace} myRootPath={myRootPath} />
 
         {repoUrl ? <RepoUrlRow repoUrl={repoUrl} /> : null}
       </>
@@ -133,17 +170,14 @@ export function WorkspacePathFields({
         {runtime && (
           <Badge
             variant={daemonRuntimeStatusVariant(runtime)}
-            className="ml-1.5 align-middle text-[10px]"
+            className="ml-1.5 inline-flex flex-wrap gap-1 align-middle text-[10px]"
           >
             {labelOf(DAEMON_RUNTIME_STATUS_LABELS, runtime.status)}
           </Badge>
         )}
       </dd>
 
-      <dt className="text-muted-foreground">客户端路径</dt>
-      <dd className="break-all font-mono" title={workspace.root_path}>
-        {workspace.root_path}
-      </dd>
+      <ClientPathRow workspace={workspace} myRootPath={myRootPath} />
 
       {repoUrl ? <RepoUrlRow repoUrl={repoUrl} /> : null}
     </>

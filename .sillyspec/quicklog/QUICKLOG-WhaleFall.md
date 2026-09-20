@@ -457,3 +457,17 @@
 根因：跳转即时置位被 smooth 滚动途中的判定线重算覆盖，且贴底短末轮判定线本就压不中末轮
 方案：贴底钳制（距底<=120px 取末行）+ 跳转定位期 700ms active 联动抑制窗口；补 2 用例 + 修 llm-providers mock 存量债
 结果：新增 2 用例全绿；相关套件 48/49（余 1 为并行会话在途债 stash 实证无关）；tsc 0 错；eslint 4 warning 全存量；实机三场景全通
+
+## ql-20260920-007-c04d | 2026-09-20 19:24:19 | 工作区卡片与详情页「客户端路径」显示的是创建者的全局 workspaces.root_path，任何账号都能看到别人的本机路径…
+状态：已完成
+关联变更：2026-09-20-workspace-member-visibility
+文件：
+- frontend/src/components/workspace-path-fields.tsx（myRootPath 三态 + ClientPathRow 抽取）
+- frontend/src/components/workspace-card.tsx（透传 prop）
+- frontend/src/app/(dashboard)/workspaces/page.tsx（bindingsByWs 携 root_path）
+- frontend/src/app/(dashboard)/workspaces/[id]/page.tsx（传 myBinding.root_path）
+需求：工作区卡片与详情页「客户端路径」显示的是创建者的全局 workspaces.root_path，任何账号都能看到别人的本机路径，应按账号显示本人 binding 路径、未绑定为空引导。
+根因：WorkspacePathFields 两处渲染位直读 workspace.root_path 全局列（创建/扫描时由创建者写入），而 per-member 的本人路径已存在于 member binding 行却未接入该行。
+方案：新增 myRootPath 三态 prop（string=本人路径/null=未绑定引导文案/undefined=兼容回退），两渲染分支统一抽 ClientPathRow；列表页 bindingsByWs 扩展携带 root_path（fetchMyBindings 既有响应，零后端改动）+ cardPropsOf 透传，详情页传 myBinding?.root_path ?? null，workspace-card 加透传 prop。
+结果：tsc 0 错误；workspaces 页面测试 182 + workspace-card 19 用例全绿；frontend_components.changelog 已记 ql-20260920-007-c04d。
+审计：[gate] L1（跨 0 模块 · 5 文件：4 代码/0 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量缺失（4 个代码文件无测试改动）

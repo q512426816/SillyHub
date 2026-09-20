@@ -1,0 +1,71 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-ac0fb3d7",
+  "totals": {
+    "files": 4,
+    "additions": 59,
+    "deletions": 11
+  },
+  "rows": [
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/page.tsx",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/page.tsx",
+      "declared": true,
+      "additions": 8,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/workspace-card.tsx",
+      "declared": true,
+      "additions": 7,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/workspace-path-fields.tsx",
+      "declared": true,
+      "additions": 43,
+      "deletions": 9,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 5,
+    "codeFileCount": 4,
+    "testFileCount": 0,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "missing",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260920-007-c04d",
+  "sessionId": "quick-ac0fb3d7",
+  "savedAt": "2026-09-20T11:28:51.635Z",
+  "patchSha256": "f6c9d232b68d1fcaec9940f8c05ff3decfc081c419dd57a4bf20db87e03fdd0f",
+  "patchStatus": "ok"
+}

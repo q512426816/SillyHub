@@ -378,6 +378,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
               daemon={boundDaemon}
               linkRuntime
               repoUrl={probeRepoUrl ?? workspace.repo_url ?? null}
+              myRootPath={myBinding?.root_path ?? null}
             />
             <dt className="text-muted-foreground">创建于</dt>
             <dd>{formatTs(workspace.created_at)}</dd>

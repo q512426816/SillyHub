@@ -70,6 +70,11 @@ interface Props {
    * 为空不渲染行；http(s) 形态在路径区渲染为可点外链。
    */
   repoUrl?: string | null;
+  /**
+   * ql-20260920-007（D-004）：当前用户本人 binding 的本地项目路径。
+   * string=本人路径；null=未绑定（显示引导文案）；不传=兼容旧行为（全局路径）。
+   */
+  myRootPath?: string | null;
   onChanged: () => void;
   // task-08 / FR-03：别名编辑入口（由 WorkspacesPage 弹 modal）。
   onEditAlias: (workspace: Workspace) => void;
@@ -98,6 +103,7 @@ export function WorkspaceCard({
   daemonStatus,
   linkedProjects,
   repoUrl,
+  myRootPath,
   onChanged,
   onEditAlias,
   onActivate,
@@ -266,6 +272,7 @@ export function WorkspaceCard({
             daemon={boundDaemon}
             linkRuntime
             repoUrl={repoUrl}
+            myRootPath={myRootPath}
           />
           {workspace.tech_stack && workspace.tech_stack.length > 0 && (
             <>

@@ -1,0 +1,174 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+index b5688b0d..f68eb266 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+@@ -378,6 +378,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
+               daemon={boundDaemon}
+               linkRuntime
+               repoUrl={probeRepoUrl ?? workspace.repo_url ?? null}
++              myRootPath={myBinding?.root_path ?? null}
+             />
+             <dt className="text-muted-foreground">创建于</dt>
+             <dd>{formatTs(workspace.created_at)}</dd>
+diff --git a/frontend/src/app/(dashboard)/workspaces/page.tsx b/frontend/src/app/(dashboard)/workspaces/page.tsx
+index 21d18978..45bd5933 100644
+--- a/frontend/src/app/(dashboard)/workspaces/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/page.tsx
+@@ -64,7 +64,7 @@ export default function WorkspacesPage() {
+   const [instancesById, setInstancesById] = useState<Map<string, DaemonInstanceRead>>(
+     () => new Map(),
+   );
+-  const [bindingsByWs, setBindingsByWs] = useState<Map<string, { daemon_id: string | null }>>(
++  const [bindingsByWs, setBindingsByWs] = useState<Map<string, { daemon_id: string | null; root_path: string | null }>>(
+     () => new Map(),
+   );
+   const [error, setError] = useState<string | null>(null);
+@@ -158,7 +158,11 @@ export default function WorkspacesPage() {
+       setInstancesById(new Map(instances.map((inst) => [inst.id, inst])));
+       setBindingsByWs(
+         new Map(
+-          bindings.map((b) => [b.workspace_id, { daemon_id: b.daemon_id ?? null }]),
++          bindings.map((b) => [
++            b.workspace_id,
++            // ql-20260920-007：一并保留 root_path 供卡片「客户端路径」显示本人路径（D-004）。
++            { daemon_id: b.daemon_id ?? null, root_path: b.root_path ?? null },
++          ]),
+         ),
+       );
+       // ql-20260821-007：卡片关联项目 tag（并行，单卡失败不拖累整页）
+@@ -289,6 +293,8 @@ export default function WorkspacesPage() {
+         daemonStatus: daemonStatusOf(w.id),
+         // ql-20260918-012：probe 实时识别值优先，DB repo_url 兜底。
+         repoUrl: repoUrlByWs.get(w.id) ?? w.repo_url ?? null,
++        // ql-20260920-007：客户端路径显示本人 binding 路径（未绑定→引导文案）。
++        myRootPath: bindingsByWs.get(w.id)?.root_path ?? null,
+         onChanged: reload,
+         onEditAlias: handleOpenAlias,
+         onActivate: () => handleActivate(w),
+diff --git a/frontend/src/components/workspace-card.tsx b/frontend/src/components/workspace-card.tsx
+index a4ba1bbe..2569a0c2 100644
+--- a/frontend/src/components/workspace-card.tsx
++++ b/frontend/src/components/workspace-card.tsx
+@@ -70,6 +70,11 @@ interface Props {
+    * 为空不渲染行；http(s) 形态在路径区渲染为可点外链。
+    */
+   repoUrl?: string | null;
++  /**
++   * ql-20260920-007（D-004）：当前用户本人 binding 的本地项目路径。
++   * string=本人路径；null=未绑定（显示引导文案）；不传=兼容旧行为（全局路径）。
++   */
++  myRootPath?: string | null;
+   onChanged: () => void;
+   // task-08 / FR-03：别名编辑入口（由 WorkspacesPage 弹 modal）。
+   onEditAlias: (workspace: Workspace) => void;
+@@ -98,6 +103,7 @@ export function WorkspaceCard({
+   daemonStatus,
+   linkedProjects,
+   repoUrl,
++  myRootPath,
+   onChanged,
+   onEditAlias,
+   onActivate,
+@@ -266,6 +272,7 @@ export function WorkspaceCard({
+             daemon={boundDaemon}
+             linkRuntime
+             repoUrl={repoUrl}
++            myRootPath={myRootPath}
+           />
+           {workspace.tech_stack && workspace.tech_stack.length > 0 && (
+             <>
+diff --git a/frontend/src/components/workspace-path-fields.tsx b/frontend/src/components/workspace-path-fields.tsx
+index ca093e44..45966b10 100644
+--- a/frontend/src/components/workspace-path-fields.tsx
++++ b/frontend/src/components/workspace-path-fields.tsx
+@@ -27,6 +27,12 @@ interface WorkspacePathFieldsProps {
+   daemon?: DaemonInstanceRead | null;
+   /** Show link to /runtimes when daemon-client */
+   linkRuntime?: boolean;
++  /**
++   * ql-20260920-007（D-004，2026-09-20-workspace-member-visibility）：当前用户本人
++   * binding 的本地项目路径。string=本人路径；null=未绑定（显示「未绑定」引导文案）；
++   * undefined=调用方未接线（兼容旧调用方，退回 workspace.root_path 全局路径）。
++   */
++  myRootPath?: string | null;
+   /**
+    * ql-20260918-012：Git 远程仓库地址（后端 probe 自动识别回填 DB）。
+    * 为空（direct/unknown 态、未识别或无权限探测）不渲染该行。
+@@ -61,11 +67,45 @@ function RepoUrlRow({ repoUrl }: { repoUrl: string }) {
+   );
+ }
+ 
++/**
++ * ql-20260920-007：「客户端路径」行渲染——优先本人 binding 路径（D-004 成员制口径，
++ * 不同账号各自看到自己的路径），未绑定显示引导文案；调用方未接线（undefined）时
++ * 退回 workspace.root_path（创建者全局路径，兼容旧调用方）。
++ */
++function ClientPathRow({
++  workspace,
++  myRootPath,
++}: {
++  workspace: Pick<Workspace, "root_path">;
++  myRootPath?: string | null;
++}) {
++  if (myRootPath === null) {
++    return (
++      <>
++        <dt className="text-muted-foreground">客户端路径</dt>
++        <dd className="text-muted-foreground">
++          未绑定——进入工作区后在「我的接入」绑定后显示你的本地路径
++        </dd>
++      </>
++    );
++  }
++  const path = myRootPath ?? workspace.root_path;
++  return (
++    <>
++      <dt className="text-muted-foreground">客户端路径</dt>
++      <dd className="break-all font-mono" title={path}>
++        {path}
++      </dd>
++    </>
++  );
++}
++
+ export function WorkspacePathFields({
+   workspace,
+   runtime,
+   daemon,
+   linkRuntime = false,
++  myRootPath,
+   repoUrl,
+ }: WorkspacePathFieldsProps) {
+   // 遗留 1：daemon 实体维度渲染（绑定走 member binding，daemon 实体优先）。
+@@ -102,10 +142,7 @@ export function WorkspacePathFields({
+           )}
+         </dd>
+ 
+-        <dt className="text-muted-foreground">客户端路径</dt>
+-        <dd className="break-all font-mono" title={workspace.root_path}>
+-          {workspace.root_path}
+-        </dd>
++        <ClientPathRow workspace={workspace} myRootPath={myRootPath} />
+ 
+         {repoUrl ? <RepoUrlRow repoUrl={repoUrl} /> : null}
+       </>
+@@ -133,17 +170,14 @@ export function WorkspacePathFields({
+         {runtime && (
+           <Badge
+             variant={daemonRuntimeStatusVariant(runtime)}
+-            className="ml-1.5 align-middle text-[10px]"
++            className="ml-1.5 inline-flex flex-wrap gap-1 align-middle text-[10px]"
+           >
+             {labelOf(DAEMON_RUNTIME_STATUS_LABELS, runtime.status)}
+           </Badge>
+         )}
+       </dd>
+ 
+-      <dt className="text-muted-foreground">客户端路径</dt>
+-      <dd className="break-all font-mono" title={workspace.root_path}>
+-        {workspace.root_path}
+-      </dd>
++      <ClientPathRow workspace={workspace} myRootPath={myRootPath} />
+ 
+       {repoUrl ? <RepoUrlRow repoUrl={repoUrl} /> : null}
+     </>
