@@ -47,6 +47,7 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `_module-map.yaml` | skipped：25 文件按目录前缀人工归类完毕（见未匹配文件节判定）；_module-map.yaml 粒度未覆盖 agent-log/session-panel 子目录属索引过期（scan 基线落后 88 天），modules rebuild 留给下轮 scan 变更统一处理，不在本变更扩 scope | done（判定完成，rebuild 转出） |
-
-规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。
+| `_module-map.yaml: backend/frontend/sillyhub-daemon` | main_symbols 各追加一条本变更条目（与 2026-09-19 并行对照标签） | done |
+| `doc: modules/sillyhub-daemon.md` | 文末追加本变更解析器矩阵契约段 | done |
+| `doc: modules/backend.md` | 文末追加本变更 messages 响应扩展段 | done |
+| `doc: modules/frontend.md` | 文末追加本变更回放主体段（与 2026-09-19 实现差异注记） | done |

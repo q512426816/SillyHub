@@ -152,3 +152,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
 - `src/task-runner.ts`：3426 行（D-010 merge 后 3430，含 windowsHide 移植进 spawn-stream）→ **1660 行瘦 facade** + `src/task-runner/` **8 模块**（task-03，commit 9913bb26a）——change-write(108) / file-mcp(157) / index(56) / payload(44) / render(186) / runner-types(239) / skill-prompt(337) / spawn-stream(712)，全部 ≤800。
 - 新增 `src/payload-utils.ts`（112 行，lease payload 鸭子读取器统一，轻重构白名单①）与 `src/event-wire.ts`（381 行，事件上行平行转换收敛，白名单②）——task-04，commit 4672ab25f。
 - 在途排除文件（daemon.ts / hub-client.ts / config.ts / protocol.ts / sillyspec-manager.ts）本变更零改动（D-001；protocol.ts 存在 D-010 merge 自动合并残留的重复接口块 +48 行，合回 main 前复位 main 版——详见 change 的 verify-summary.md）。
+
+### 2026-09-20-agent-log-session-replay（解析器矩阵独立重做，replay-redo 分支）
+
+- sillyhub-daemon/src/agent-log/：parse-zcode-model-io.ts 扩 AgentLogUsage（snake_case 四键直通）+ 消息级 turn_id/model/usage/is_meta/turn_end + totalUsage（窗口前求和）；新增 parse-claude-code-jsonl.ts（usage 全量口径归一 input+cache_read+cache_creation，isMeta→is_meta 位）与 parse-cursor-agent-transcript.ts（{role,message} 行+turn_ended 标记段，token 恒缺省）；read-zcode-sqlite.ts 透传（实证 db.sqlite model_usage 表 assistant_message_id 1:1、turn_usage 反查、SUM 会话级 totalUsage）；registry.ts 注册 claude-code-jsonl/cursor-agent-transcript 两 key。真实数据四探针：zcode rollout 142 段 557 万 token / sqlite 同会话 892 段 4384 万 / claude-code 746 段 6240 万 / cursor 47 段。

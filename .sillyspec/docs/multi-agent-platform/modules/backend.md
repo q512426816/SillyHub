@@ -184,3 +184,7 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 ### 2026-09-07-agent-liveness-states（agent 会话活性状态推导）
 
 - `platform_agent_logs` 增 state/state_derived_at/state_evidence/last_event_at 四列（迁移 20260907141041）；`POST /api/agent-logs/states` 批量 upsert-create（origin=liveness-discovered，X-001 裸会话通道）；blocked 段转移检测 + agent_blocked 通知（120s 段龄按 derived_at 差值、推送即调度、段级+unresolved 双去重）；`list_workers` running worker 附 WorkerLiveness（直查本表最新行，spike-01 定稿）。
+
+### 2026-09-20-agent-log-session-replay（messages 响应扩展独立重做，replay-redo 分支）
+
+- backend/app/modules/platform_sync/：schema.py 新 AgentLogUsage{input_tokens,output_tokens,cache_read_tokens,cache_write_tokens} + AgentLogMessageItem 五可选字段（turn_id/model/is_meta/turn_end/usage）+ Response.totals；router.py 转换层仅一行外层映射 totalUsage→totals（messages 内层 snake_case 零改名直通，与 2026-09-19 实现的逐字段映射路线对照）；老 daemon 全 None 兼容（pytest 新/老双态断言）。

@@ -194,3 +194,8 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 - 三态提示：daemon 离线 404 no_daemon / 格式 unsupported 或 409 二进制（cursor IDE 新文案）/ 文件缺失 404——中文提示行+元数据保留；total_usage 会话累计由 daemon 返回（前端不求和）。
 - turn-timeline.tsx 最小扩展：SessionProcessItem 增 system_event kind（居中虚线胶囊中性行，仅回放路径产生；session-log-assembler 镜像类型 parity 同步+dialog-helpers 一行类型守卫为涟漪）。agent-log-card.tsx：AgentLogCard 顶部栏保留、fallbackNoteForError 增 409 二进制专属文案。
 - 类型：AgentLogMessagesResponse 新可选字段经 gen:types 生成（sender/turn_id/model/duration_ms/usage/total_usage，老 daemon 缺省）。
+
+### 2026-09-20-agent-log-session-replay（同需求独立重做——replay-redo 分支，与上节 2026-09-19 实现并行对照）
+
+- 同基线（53c67e02a）独立实现：AgentLogReplayBody（frontend/src/components/daemon/agent-log-replay-body.tsx）+ 适配层 buildReplayTurns/isSubagentLog/selectMainLogs（frontend/src/lib/agent-log-replay.ts 纯函数）。与 2026-09-19 实现的关键差异：系统事件**零改 TurnTimeline**（复用 stderr processItems 首项，对话视图隐藏）而非新增 system_event kind；dialog 形态经既有 attach 轮询捕获 origin/turn_count 门控（保 R4「dialog 渲染路径零 react-query」）；首屏顺序翻页到最早窗口（上限 10 页）而非最新窗口触顶前插。
+- token：daemon totals 直出汇总条 + 轮徽标（usage 全量口径 input 含缓存读写，claude-code 解析器归一）；无数据源「未知」不伪造。schema 字段名差异：本实现 totals/消息五字段（turn_id/model/is_meta/turn_end/usage）。
