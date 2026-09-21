@@ -7177,7 +7177,25 @@ export class Daemon {
       // 承载，daemon.ts 不重复实现），升级状态经心跳 sillyspec_update 回传。
       case MSG.SILLYSPEC_UPDATE: {
         this._logger.info('sillyspec_update_received', {});
-        void this._sillyspecManager.requestManualUpgrade();
+        // 回显提速第一级（镜像 ql-20260911-024 _nudgeHeartbeatAfterCommandResult）：
+        // 升级链落定（deferred / up_to_date / success / failed）后立即补发一次
+        // 心跳——此前状态要等下一个 15s 心跳节拍才捎给平台，叠加前端 15s 轮询后
+        // 机器卡横幅最差 ~30s 才出现（版本门两次 npm 探测实测 ~12s，用户在横幅
+        // 到达前刷新页面，误判「横幅只在刷新后出现」）。requestManualUpgrade 全
+        // 路径自收敛不 reject，.finally 恒在终态落位后触发；running 中间态仍由
+        // 常规 15s 心跳捎带（按钮已有本地 upgrading 禁用态兜底）。与 15s 循环
+        // 短暂重叠无害——心跳是无状态全量上报，backend 侧字段级 last-write-wins。
+        void this._sillyspecManager
+          .requestManualUpgrade()
+          .catch((e) => {
+            // 防御：契约全路径自收敛不 reject，此处仅防意外异常升级为
+            // unhandledRejection 崩进程（下方心跳补发仍照常执行）。
+            this._logger.warn('sillyspec_update_route_failed', { error: e });
+          })
+          .finally(() => {
+            this._logger.debug('sillyspec_update_heartbeat_nudge', {});
+            void this._sendHeartbeatOnce();
+          });
         break;
       }
       // Server → Daemon：变更中心「平台同步」处理区触发的两条机器级命令

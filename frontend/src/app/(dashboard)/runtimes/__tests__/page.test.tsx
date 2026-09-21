@@ -527,6 +527,101 @@ describe("ql-20260904-016-7b4a / ql-20260904-019-b4f4: 升级 sillyspec 指令�
     // 点了按钮必有横幅（升级进度或「已是最新版」）。
     expect(await screen.findByText(/检查与升级结果将显示在机器卡横幅上/)).toBeInTheDocument();
   });
+
+  /** fake timers 下冲刷微任务/定时器（照 platform-sync-section.test.tsx 惯例）：
+   *  循环小步推进直到谓词命中（有界防死循环）。 */
+  async function flushUntil(pred: () => boolean, maxSteps = 60): Promise<void> {
+    for (let i = 0; i < maxSteps && !pred(); i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+    }
+    expect(pred(), "flushUntil 谓词应在有界步数内命中").toBe(true);
+  }
+
+  it("升级下发后开 60s 加速窗——窗内 5s 间隔拉取，sillyspec_update 到达后横幅出现（回显提速第二级）", async () => {
+    vi.useFakeTimers();
+    try {
+      const noBanner = wrapMachines(
+        [makeRuntime({ id: "rt-ss2", name: "EchoClaude", status: "online" })],
+        { sillyspec_version: "3.29.5", sillyspec_latest_version: "3.29.5" },
+      );
+      const withBanner = wrapMachines(
+        [makeRuntime({ id: "rt-ss2", name: "EchoClaude", status: "online" })],
+        {
+          sillyspec_version: "3.29.5",
+          sillyspec_latest_version: "3.29.5",
+          sillyspec_update: {
+            state: "up_to_date",
+            trigger: "server_command",
+            from_version: "3.29.5",
+            to_version: "3.29.5",
+            error: null,
+            since: "2026-09-21T07:39:51Z",
+          },
+        },
+      );
+      // 首屏 + 下发后 invalidate 一律无横幅（daemon 版本门探测期状态未落
+      // backend）——之后手动切 withBanner，专验加速窗 5s 拉取把横幅带回。
+      daemon.listDaemonMachines.mockResolvedValue(noBanner);
+
+      renderPage(<RuntimesPage />);
+      // 骨架屏无文案可盯——直接等「升级 sillyspec」按钮挂出（机器卡渲染完成）。
+      const sillyBtnThere = (): boolean => {
+        try {
+          return screen
+            .getAllByRole("button", { name: /升级\s*sillyspec/ })
+            .some((el) => el.tagName === "BUTTON");
+        } catch {
+          return false;
+        }
+      };
+      await flushUntil(sillyBtnThere);
+
+      // 定位并点「升级 sillyspec」→ 确认弹层点「升级」。
+      const matches = screen.getAllByRole("button", { name: /升级\s*sillyspec/ });
+      fireEvent.click(matches.filter((el) => el.tagName === "BUTTON")[0] as HTMLElement);
+      await flushUntil(() => queryAntdConfirm() !== null);
+      const confirmRoot = queryAntdConfirm() as HTMLElement;
+      fireEvent.click(within(confirmRoot).getByRole("button", { name: /^升\s*级$/ }));
+      await flushUntil(() => daemon.triggerMachineSillySpecUpdate.mock.calls.length > 0);
+      // 多冲刷几拍让 onOk 尾链（invalidate 双查询重取）落定——此刻横幅仍未出现。
+      for (let i = 0; i < 6; i++) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+        });
+      }
+      expect(screen.queryByText(/已是最新版/)).not.toBeInTheDocument();
+      const callsAtBoost = daemon.listDaemonMachines.mock.calls.length;
+
+      // 状态落 backend（daemon 终态补发心跳后）：切 withBanner，加速窗内 +5s
+      // 一拉（15s 常规节拍在 5s 处不会触发；伴生 sharedToMe 查询首拍在 t0+15s
+      // 亦未到）→ up_to_date 横幅出现，无需刷新页面。
+      daemon.listDaemonMachines.mockResolvedValue(withBanner);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(daemon.listDaemonMachines.mock.calls.length).toBe(callsAtBoost + 1);
+      expect(screen.getByText(/已是最新版（3\.29\.5），无需升级/)).toBeInTheDocument();
+
+      // 窗内节拍钉第二拍：再 +5s 又一发（仍属 5s 加速节拍）。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(daemon.listDaemonMachines.mock.calls.length).toBe(callsAtBoost + 2);
+
+      // 推过窗口尾（点击后 60s）后回退常规节拍——不钉具体次数（窗内余量拉取
+      // 与伴生查询 15s 拍同刻顺序不敏感），只钉横幅仍在（终态由 daemon 10min
+      // 后清，不随窗口过期消失）。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(daemon.listDaemonMachines.mock.calls.length).toBeGreaterThan(callsAtBoost + 2);
+      expect(screen.getByText(/已是最新版（3\.29\.5），无需升级/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("ql-20260829-006-6a9e: 机器级删除（离线机器可删，在线 disabled）", () => {

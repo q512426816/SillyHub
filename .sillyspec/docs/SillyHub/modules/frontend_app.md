@@ -88,6 +88,7 @@ whoLine: attach 时并发拉 listSessionRuns，按 realRunId??runId 匹配注入
 
 ## 变更索引
 
+- ql-20260921-009-b4f4 | /runtimes 升级 sillyspec 横幅回显提速（用户反馈「横幅不自动出现、刷新页面才加载」）——handleSillySpecUpgrade 下发成功后开 60s 加速轮询窗（sillyspecPollBoostUntil 状态 + 到期 setTimeout 清 0 重渲染，写法镜像 platform-sync-section ql-20260911-024）：窗内 useDaemonMachines refetchInterval 切 5s（opts 覆盖口见 frontend_lib 同 ql 条目），daemon 终态补发心跳（第一级，daemon.changelog 同 ql）+ 前端加速拉取把机器卡横幅从最差 ~30s（版本门探测 ~12s + 15s 心跳节拍 + 15s 轮询三段叠加）压到秒级；page.test.tsx 补 fake timers 用例（窗内 5s 精确两拍 + up_to_date 横幅出现 + 窗后不消失）。
 - ql-20260911-019-1f01 | 头像孤儿文件回收（前端半）：桌面/移动个人中心「上传成功但保存失败」→ tryReclaimOrphanAvatarFile best-effort 删新文件（移动端 handleAvatarFile 持 uploadedUrl 后置回收）；换绑/清除的旧文件由后端 update_my_avatar 落库后回收。
 - ql-20260911-003-355a（24h 审查修复批·MCP 资产库/个人中心）| ① settings/mcp 页编辑/复制/新建提交链全量携带 secret_env_keys（用户逐键指定密钥类型——P0-2 修复：编辑保留 <set> 占位=后端保留既有密文，创建/复制占位符被本地校验拦下）；「对我启用」user 解绑自动带本人 user_id 尾段（P1-1：无尾段恒 422）。② 桌面个人中心头像操作串行化（avatarBusy 门，对齐移动端先例——PATCH+fetchMe RTT 窗口内连点两次终值可能非最后所选）。③ 模板预填携带 secret_env_keys 预勾加密行（模板只记键名，值待用户补）。api-types 已 gen:types 再生。
 - ql-20260828-012-4425 | 派团队标签点击编辑回显当前配置——后端 summary 补 project_id/worker_preset/main_agent_config + 弹层 initialConfig 六项回显（mount 首跑不清回显 scope；未展开预设确认原样回传）；预会话待生效 chip 同样回显暂存 payload

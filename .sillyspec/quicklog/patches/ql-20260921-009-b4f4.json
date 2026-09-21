@@ -1,0 +1,79 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-a1bb88ca",
+  "totals": {
+    "files": 5,
+    "additions": 196,
+    "deletions": 13
+  },
+  "rows": [
+    {
+      "path": "frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx",
+      "declared": true,
+      "additions": 95,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/runtimes/page.tsx",
+      "declared": true,
+      "additions": 42,
+      "deletions": 9,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/use-daemon-machines.ts",
+      "declared": true,
+      "additions": 5,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "declared": true,
+      "additions": 19,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts",
+      "declared": true,
+      "additions": 35,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 8,
+    "codeFileCount": 3,
+    "testFileCount": 2,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260921-009-b4f4",
+  "sessionId": "quick-a1bb88ca",
+  "savedAt": "2026-09-21T08:15:03.677Z",
+  "patchSha256": "eb601c8204b788966009d7bf1a00de033522c77f5f2a9e69a13405fee037775a",
+  "patchStatus": "ok"
+}

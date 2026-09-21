@@ -4,7 +4,9 @@
  * 机器级数据 hook：listDaemonMachines，opts.includeSessions 时并发
  * listAgentSessions（sessions 失败 .catch(null) 降级为 []，不阻塞列表渲染）。
  * params 进 queryKey，过滤/分页变化即新查询（react-query 自动停旧启新 R-02）。
- * 15s 无条件轮询。用量（用量统计）不走本 hook，由 page 单独调
+ * 15s 无条件轮询（opts.refetchInterval 可覆盖——runtimes 页升级 sillyspec 下发
+ * 后短窗加速轮询用，镜像 ql-20260911-024 第二级；选项变化 react-query 会重排
+ * 轮询定时器，不进 queryKey）。用量（用量统计）不走本 hook，由 page 单独调
  * getRuntimesUsage(window) 管理（D-004，不内联 /machines）。
  *
  * ql-20260909-013（轮询瘦身）：sessions（100 行级重列表）默认不拉——唯一
@@ -133,7 +135,7 @@ export function daemonMachinesQueryKey(
 
 export function useDaemonMachines(
   params: DaemonMachineListParams,
-  opts: { includeSessions?: boolean } = {},
+  opts: { includeSessions?: boolean; refetchInterval?: number } = {},
 ) {
   const includeSessions = opts.includeSessions ?? false;
   const q = useQuery<DaemonMachinesData, ApiError>({
@@ -155,7 +157,7 @@ export function useDaemonMachines(
         sharedToMe: resp.shared_to_me ?? [],
       };
     },
-    refetchInterval: 15000,
+    refetchInterval: opts.refetchInterval ?? 15000,
   });
 
   // task-10：机器候选融合——自有机器在前，共享机器垫底（按 machine_id 去重，
