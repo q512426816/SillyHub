@@ -313,7 +313,7 @@ class HitsService:
             if hit_type == "inject":
                 inject_anchor_total += len(anchors)
                 inject_row_detail.append(
-                    (occurred, len(anchors), str(change_name) if change_name else None)
+                    (occurred, tuple(anchors), str(change_name) if change_name else None)
                 )
                 if change_name:
                     inject_task_times.append((str(change_name), occurred))
@@ -364,21 +364,37 @@ class HitsService:
         ]
         dead_entries.sort(key=lambda d: d.anchor)
 
-        # ── density（趋势按周窗口：窗口内 inject 行锚点数和 ÷ 窗口内任务数）──
+        # ── density（ql-20260921-002 口径修正：每任务去重条目数）──
+        # 此前=inject 行锚点次数和÷任务数——一个任务多轮注入同条目被重复计入
+        # （实测 375 条/任务≈40 次注入×9 条），并非「注入过肥」。正确口径=每任务
+        # 注入过的去重条目集合大小的均值（榜单口径同源：anchor_tasks 的任务维度对偶）。
+        task_anchor_sets: dict[str, set[str]] = {}
+        for _occ, _anchors, _chg in inject_row_detail:
+            if _chg:
+                task_anchor_sets.setdefault(_chg, set()).update(_anchors)
         density_avg = (
-            round(inject_anchor_total / len(all_inject_tasks), 4) if all_inject_tasks else 0.0
+            round(sum(len(s) for s in task_anchor_sets.values()) / len(task_anchor_sets), 4)
+            if task_anchor_sets
+            else 0.0
         )
         density_trend: list[DensityTrendPoint] = []
         for week_end in week_ends:
             window_start = week_end - timedelta(days=7)
             window_rows = [r for r in inject_row_detail if window_start < r[0] <= week_end]
-            window_anchors = sum(n for _, n, _ in window_rows)
-            window_tasks = {c for _, _, c in window_rows if c}
+            # 窗口内每任务去重锚点集合，均值同主值口径
+            window_task_anchors: dict[str, set[str]] = {}
+            for _occ, _anchors, _chg in window_rows:
+                if _chg:
+                    window_task_anchors.setdefault(_chg, set()).update(_anchors)
             density_trend.append(
                 DensityTrendPoint(
                     week=week_end.date().isoformat(),
-                    per_task_avg=round(window_anchors / len(window_tasks), 4)
-                    if window_tasks
+                    per_task_avg=round(
+                        sum(len(s) for s in window_task_anchors.values())
+                        / len(window_task_anchors),
+                        4,
+                    )
+                    if window_task_anchors
                     else 0.0,
                 )
             )

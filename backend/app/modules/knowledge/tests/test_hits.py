@@ -339,10 +339,12 @@ async def test_stats_full_recomputation(db_session, hits_ws: dict) -> None:
         ("generated/runtime.md", None),
     ]
 
-    # density
-    assert out.density.per_task_avg == 2.0
-    # 周窗口：T-40d 两行落 (T-42d,T-35d] 窗 → 3 锚点/1 任务；T-10d 行落 (T-14d,T-7d] → 1/1
-    assert [p.per_task_avg for p in out.density.trend] == [0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+    # density（ql-20260921-002 去重口径）：chg-a 注入过的去重锚点={conv#分层锚,
+    # known-issues锚}（2 条），chg-b={decisions/backend.md}（1 条）→ (2+1)/2=1.5
+    assert out.density.per_task_avg == 1.5
+    # 周窗口（去重口径）：T-40d 两行落 (T-42d,T-35d] 窗 → chg-a 去重 2 锚点/1 任务；
+    # T-10d 行落 (T-14d,T-7d] → 1/1
+    assert [p.per_task_avg for p in out.density.trend] == [0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 1.0, 0.0]
 
     # freshness
     assert out.freshness.recent_new == 3
