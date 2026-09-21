@@ -396,6 +396,54 @@ export function appendDeliveredUserMsgIfAbsent(
   ];
 }
 
+/**
+ * ql-20260921-004-92f8：直发占位轮 SSE 抢先认领。
+ *
+ * 背景：backend `_inject_into_session` commit 后**立即**补发 user_input log 事件
+ * （inject.py publish 段，ql-20260918-003 引入），而 inject HTTP 响应要等
+ * `_dispatch_inject_turn` 的 ready 等待（≤8s 超时兜底）+ WS 派发才返回
+ * （control.py）——SSE 先到时 upsertTurn 按真实 run_id 另建一轮，占位轮
+ * （__pending_inject_*，排队中）与真实轮同屏双显，直到响应到达才被
+ * replacePlaceholderTurn 合并（用户实证：同一消息两条气泡、数秒后自动合并；
+ * ready 状态丢失时窗口≈8s）。
+ *
+ * 收敛前移：user_input 事件到达且尚无该 run_id 的轮时，若存在等待响应的
+ * 占位轮且正文同文（steerMatchKey 归一——剥 preamble / 附件标记行，两端
+ * 标记行格式同构 [附件:id|kind|name]），占位轮**原地改名**为真实 run_id
+ * （prompt / turnStartedAt / segments 保留，status pending→running 对齐
+ * upsertTurn 新建轮口径）——单气泡从 SSE 首事件起保持。响应侧
+ * replacePlaceholderTurn 不动：raced 分支 filter 占位 id 已 no-op、prompt
+ * 非空不转移，天然幂等兜底（handleResend 的内联改名 map 同理 no-op）。
+ *
+ * 不认领（原样返回原引用，零重渲）：无占位轮（排队派发轮无占位，照常
+ * 建轮）；run_id 已有对应轮（raced 已建轮 / 历史 / mid-turn 注入活跃轮——
+ * 归 markSteeredSegmentDelivered 路径）；正文不同文（极端并发：他轮同窗口
+ * 派发——防错认领，回落响应侧收敛）；同文键为空（附件-only 空 prompt 无法
+ * 与裸文本区分，回落响应侧收敛——replacePlaceholderTurn 不依赖内容匹配）。
+ */
+export function claimPendingPlaceholderTurn(
+  turns: SessionTurnView[],
+  runId: string,
+  rawContent: string,
+): SessionTurnView[] {
+  const key = steerMatchKey(rawContent);
+  if (!key) return turns;
+  if (steeredTurnIndexOf(turns, runId) >= 0) return turns;
+  // 倒序找最末同文占位轮（发送窗口内至多一条；倒序防御极端重放场景多条
+  // 时认领最新，与 upsertTurn realRunId 取最末块口径一致）。
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const t = turns[i];
+    if (t && t.runId.startsWith("__pending_inject_") && steerMatchKey(t.prompt) === key) {
+      return [
+        ...turns.slice(0, i),
+        { ...t, runId, status: "running" },
+        ...turns.slice(i + 1),
+      ];
+    }
+  }
+  return turns;
+}
+
 
 /* ────────────────────── page 模式内部子组件（含 react-query，R4） ────────────────────── */
 
@@ -1008,13 +1056,21 @@ export function SessionPanelPage({
               const preambleText = extractPreambleText(env.content ?? "");
               if (!env.run_id) return;
               setTurnState((prev) => {
+                // ql-20260921-004-92f8：占位轮抢先认领——SSE user_input 先于
+                // inject HTTP 响应到达（backend commit 后立即补发 vs ready
+                // 等待+派发）时，占位轮原地接管真实 run_id，窗口期不再同文双显。
+                const withClaim = claimPendingPlaceholderTurn(
+                  prev.turns,
+                  env.run_id!,
+                  env.content ?? "",
+                );
                 // ql-20260920-006（2026-09-18-single-chat-steering 修订）：引导
                 // 留痕行到达（mid-turn 注入挂活跃 run）→ 该轮匹配中的「引导中」
                 // user_msg 段转「已投递」终态（同轮合并进下方 upsertTurn 一次
                 // setState，无独立状态机）。活跃轮 turn 自身 prompt 已非空不覆盖
                 // （下方既有幂等守卫），消息气泡由 user_msg 段承载。
                 const withDelivered = markSteeredSegmentDelivered(
-                  prev.turns,
+                  withClaim,
                   env.run_id!,
                   env.content ?? "",
                 );

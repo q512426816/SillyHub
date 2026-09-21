@@ -1,0 +1,79 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-f1070667",
+  "totals": {
+    "files": 5,
+    "additions": 259,
+    "deletions": 4
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/frontend/modules/components-daemon.md",
+      "declared": true,
+      "additions": 7,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx",
+      "declared": true,
+      "additions": 69,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "declared": true,
+      "additions": 11,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "declared": true,
+      "additions": 57,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-placeholder-claim.test.ts",
+      "declared": true,
+      "additions": 115,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 5,
+    "codeFileCount": 2,
+    "testFileCount": 2,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260921-004-92f8",
+  "sessionId": "quick-f1070667",
+  "savedAt": "2026-09-21T01:34:43.045Z",
+  "patchSha256": "136c80289ac7ae93fa31b11e2a171702e34510a36b81a925d3cf765282186963",
+  "patchStatus": "ok"
+}

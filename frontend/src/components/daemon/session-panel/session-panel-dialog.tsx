@@ -77,8 +77,8 @@ import { applyAgentTaskStatusEvent } from "../agent-task-store";
 // 引导消息改「轮内 user_msg 段」——三个 SessionTurnView 段纯函数定义在
 // session-panel-page（双挂载零漂移；index 入口本就同时加载两模块，无循环依赖）。
 import {
-  appendDeliveredUserMsgIfAbsent, appendSteeredSegment, markSteeredSegmentDelivered,
-  markSteeredSegmentsEnded,
+  appendDeliveredUserMsgIfAbsent, appendSteeredSegment, claimPendingPlaceholderTurn,
+  markSteeredSegmentDelivered, markSteeredSegmentsEnded,
 } from "./session-panel-page";
 
 export function SessionPanelDialog(props: SessionPanelProps) {
@@ -477,12 +477,20 @@ export function SessionPanelDialog(props: SessionPanelProps) {
                 const rawText = env.content ?? "";
                 const preambleText = extractPreambleText(rawText);
                 setView((prev) => {
+                  // ql-20260921-004-92f8（同 page 模式）：占位轮抢先认领——SSE
+                  // user_input 先于 inject HTTP 响应到达时，占位轮原地接管真实
+                  // run_id，窗口期不再同文双显。
+                  const withClaim = claimPendingPlaceholderTurn(
+                    prev.turns,
+                    env.run_id!,
+                    rawText,
+                  );
                   // ql-20260920-006（同 page 模式）：引导留痕行到达（mid-turn 注入
                   // 挂活跃 run）→ 该轮匹配中的「引导中」user_msg 段转「已投递」终
                   // 态（同轮合并进下方 upsertDialogTurn 一次 setState；活跃轮 turn
                   // 自身 prompt 已非空不覆盖，消息气泡由 user_msg 段承载）。
                   const withDelivered = markSteeredSegmentDelivered(
-                    prev.turns,
+                    withClaim,
                     env.run_id!,
                     rawText,
                   );

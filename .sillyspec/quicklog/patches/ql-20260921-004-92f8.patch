@@ -1,0 +1,334 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.md b/.sillyspec/docs/frontend/modules/components-daemon.md
+index 1be6d1472..c7ef1acbc 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.md
+@@ -279,3 +279,10 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 
+ ## quick-f96d4e81 增量（定时消息终态条目删除）
+ 
+ - **scheduled-messages-bar**：行尾新增「清空已结束」入口（终态条目 >0 才渲染；Modal.confirm → 终态逐条 DELETE 物理删除，pending 不受影响；404/409/422 竞态静默跳过、全部成功才 toast，条数文案与服务端为准失效重拉）。client `cancelScheduledMessage` 改名 `deleteScheduledMessage`（对齐后端 DELETE 语义扩展：pending 取消留档 / 终态删行），静默状态集改名 `DELETE_SILENT_STATUSES`。
++
++## quick 增量（直发占位轮 SSE 抢先认领——同文消息双显竞态，ql-20260921-004-92f8）
++
++- **根因**：backend `_inject_into_session` commit 后立即补发 user_input log 事件（ql-20260918-003 引入的发布点），而 inject HTTP 响应要等 `_dispatch_inject_turn` 的 ready 等待（≤8s 超时兜底）+ WS 派发才返回——SSE 先到时 upsertTurn 按真实 run_id 另建一轮，直发占位轮（`__pending_inject_*`，排队中）与真实轮（运行中）同屏双显，响应到达才被 replacePlaceholderTurn 合并（用户实证：同一消息两条气泡、数秒后自动合并；ready 状态丢失时窗口≈8s）。
++- **session-panel-page `claimPendingPlaceholderTurn`**：user_input 事件到达且尚无该 run_id 的轮时，若存在等待响应的占位轮且正文同文（steerMatchKey 归一——剥 preamble/附件标记行，两端标记行格式同构），占位轮**原地改名**为真实 run_id（prompt/turnStartedAt 保留，status pending→running 对齐 upsertTurn 新建轮口径）——单气泡从 SSE 首事件起保持。page 与 dialog 两挂载点 onLog user_input 分支各插一行（dialog 经 page 模块既有共享导入）。响应侧 replacePlaceholderTurn / handleResend 内联改名不动：认领后 raced 分支 filter 占位 id no-op、prompt 非空不转移，天然幂等兜底。
++- **不认领回落响应侧收敛**（原样返回原引用）：无占位轮（排队派发轮照常建轮）；run_id 已有轮（raced 已建轮/历史/mid-turn 注入活跃轮）；正文不同文（防他轮同窗口派发错认领）；同文键为空（附件-only 空 prompt）。
++- 回归：session-panel-placeholder-claim 新增 7 用例（认领/标记行同构/已有轮/无占位/异文/空键/多条防御）；session-panel-dialog 新增端到端 1 用例（inject 挂起 + user_input SSE 先到 → `.turn-bubble` 同文单气泡，daemon 双提交裸文本版到达仍单气泡——修复前双气泡）。
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+index ed09787c1..941416b83 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+@@ -452,6 +452,75 @@ describe("SessionPanel（dialog）", () => {
+     expect(sessionApi.streamSession).toHaveBeenCalledTimes(1);
+   });
+ 
++  it("ql-20260921-004：直发占位轮被先到的 user_input SSE 原地认领——同文消息不双显", async () => {
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    sessionApi.createSession.mockResolvedValue({
++      session_id: "sess-1", run_id: "run-1", lease_id: "l",
++      status: "active", stream_url: "",
++    });
++    // 真实时序（inject.py commit 后补发 SSE / control.py ready 等待拖住响应）：
++    // user_input SSE 事件先于 inject HTTP 响应到达——响应挂起模拟慢派发。
++    sessionApi.injectSession.mockImplementation(() => new Promise<any>(() => {}));
++
++    setupPanel();
++    const input = screen.getByPlaceholderText(/输入首条消息创建会话/) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "first" } });
++    fireEvent.click(screen.getByTitle("发送"));
++    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
++
++    const conn = stream.conn;
++    act(() => {
++      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
++      conn.handlers.route(makeEnvelope("turn_completed", { run_id: "run-1", status: "completed" }));
++    });
++
++    // 第二条：空闲直发 → 占位轮（排队中）出现，inject 在途。
++    await waitFor(() => {
++      expect((screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement)).toBeTruthy();
++    }, { timeout: 2000 });
++    const input2 = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
++    fireEvent.change(input2, { target: { value: "second" } });
++    fireEvent.click(screen.getByTitle("发送"));
++    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
++
++    // backend commit 后补发的 user_input 事件先于 HTTP 响应到达（ql-20260918-003
++    // 引入的发布点）→ 占位轮应被原地认领为真实 run_id，不再另建一轮。
++    act(() => {
++      conn.handlers.route(
++        makeEnvelope("log", {
++          run_id: "run-2",
++          channel: "user_input",
++          content: "second",
++          log_id: "log-ui-1",
++          timestamp: "2026-09-21T01:04:23Z",
++        }),
++      );
++    });
++    const countSecondBubbles = () =>
++      Array.from(document.querySelectorAll(".turn-bubble")).filter((el) =>
++        // 气泡内还嵌着复制按钮文案，用包含匹配（turn-bubble 仅用户气泡持有，
++        // 同文双显 = 两个含该文本的气泡）。
++        el.textContent?.includes("second"),
++      );
++    // 修复前：占位轮 + SSE 建轮两条同文气泡；修复后：单气泡。
++    expect(countSecondBubbles()).toHaveLength(1);
++
++    // daemon 双提交的裸文本版 user_input（同文不同 log_id）到达仍不双显。
++    act(() => {
++      conn.handlers.route(
++        makeEnvelope("log", {
++          run_id: "run-2",
++          channel: "user_input",
++          content: "second",
++          log_id: "log-ui-2",
++          timestamp: "2026-09-21T01:04:24Z",
++        }),
++      );
++    });
++    expect(countSecondBubbles()).toHaveLength(1);
++  });
++
+   it("task-05：@ 变更选中随首句 createSession 上送 change_id（quicklog_id 缺省不进请求体）", async () => {
+     const stream = makeStreamMock();
+     sessionApi.streamSession.mockImplementation(stream.factory);
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 43271215a..e5ccef914 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -77,8 +77,8 @@ import { applyAgentTaskStatusEvent } from "../agent-task-store";
+ // 引导消息改「轮内 user_msg 段」——三个 SessionTurnView 段纯函数定义在
+ // session-panel-page（双挂载零漂移；index 入口本就同时加载两模块，无循环依赖）。
+ import {
+-  appendDeliveredUserMsgIfAbsent, appendSteeredSegment, markSteeredSegmentDelivered,
+-  markSteeredSegmentsEnded,
++  appendDeliveredUserMsgIfAbsent, appendSteeredSegment, claimPendingPlaceholderTurn,
++  markSteeredSegmentDelivered, markSteeredSegmentsEnded,
+ } from "./session-panel-page";
+ 
+ export function SessionPanelDialog(props: SessionPanelProps) {
+@@ -477,12 +477,20 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+                 const rawText = env.content ?? "";
+                 const preambleText = extractPreambleText(rawText);
+                 setView((prev) => {
++                  // ql-20260921-004-92f8（同 page 模式）：占位轮抢先认领——SSE
++                  // user_input 先于 inject HTTP 响应到达时，占位轮原地接管真实
++                  // run_id，窗口期不再同文双显。
++                  const withClaim = claimPendingPlaceholderTurn(
++                    prev.turns,
++                    env.run_id!,
++                    rawText,
++                  );
+                   // ql-20260920-006（同 page 模式）：引导留痕行到达（mid-turn 注入
+                   // 挂活跃 run）→ 该轮匹配中的「引导中」user_msg 段转「已投递」终
+                   // 态（同轮合并进下方 upsertDialogTurn 一次 setState；活跃轮 turn
+                   // 自身 prompt 已非空不覆盖，消息气泡由 user_msg 段承载）。
+                   const withDelivered = markSteeredSegmentDelivered(
+-                    prev.turns,
++                    withClaim,
+                     env.run_id!,
+                     rawText,
+                   );
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 068cc4f07..3a7824e4f 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -396,6 +396,54 @@ export function appendDeliveredUserMsgIfAbsent(
+   ];
+ }
+ 
++/**
++ * ql-20260921-004-92f8：直发占位轮 SSE 抢先认领。
++ *
++ * 背景：backend `_inject_into_session` commit 后**立即**补发 user_input log 事件
++ * （inject.py publish 段，ql-20260918-003 引入），而 inject HTTP 响应要等
++ * `_dispatch_inject_turn` 的 ready 等待（≤8s 超时兜底）+ WS 派发才返回
++ * （control.py）——SSE 先到时 upsertTurn 按真实 run_id 另建一轮，占位轮
++ * （__pending_inject_*，排队中）与真实轮同屏双显，直到响应到达才被
++ * replacePlaceholderTurn 合并（用户实证：同一消息两条气泡、数秒后自动合并；
++ * ready 状态丢失时窗口≈8s）。
++ *
++ * 收敛前移：user_input 事件到达且尚无该 run_id 的轮时，若存在等待响应的
++ * 占位轮且正文同文（steerMatchKey 归一——剥 preamble / 附件标记行，两端
++ * 标记行格式同构 [附件:id|kind|name]），占位轮**原地改名**为真实 run_id
++ * （prompt / turnStartedAt / segments 保留，status pending→running 对齐
++ * upsertTurn 新建轮口径）——单气泡从 SSE 首事件起保持。响应侧
++ * replacePlaceholderTurn 不动：raced 分支 filter 占位 id 已 no-op、prompt
++ * 非空不转移，天然幂等兜底（handleResend 的内联改名 map 同理 no-op）。
++ *
++ * 不认领（原样返回原引用，零重渲）：无占位轮（排队派发轮无占位，照常
++ * 建轮）；run_id 已有对应轮（raced 已建轮 / 历史 / mid-turn 注入活跃轮——
++ * 归 markSteeredSegmentDelivered 路径）；正文不同文（极端并发：他轮同窗口
++ * 派发——防错认领，回落响应侧收敛）；同文键为空（附件-only 空 prompt 无法
++ * 与裸文本区分，回落响应侧收敛——replacePlaceholderTurn 不依赖内容匹配）。
++ */
++export function claimPendingPlaceholderTurn(
++  turns: SessionTurnView[],
++  runId: string,
++  rawContent: string,
++): SessionTurnView[] {
++  const key = steerMatchKey(rawContent);
++  if (!key) return turns;
++  if (steeredTurnIndexOf(turns, runId) >= 0) return turns;
++  // 倒序找最末同文占位轮（发送窗口内至多一条；倒序防御极端重放场景多条
++  // 时认领最新，与 upsertTurn realRunId 取最末块口径一致）。
++  for (let i = turns.length - 1; i >= 0; i -= 1) {
++    const t = turns[i];
++    if (t && t.runId.startsWith("__pending_inject_") && steerMatchKey(t.prompt) === key) {
++      return [
++        ...turns.slice(0, i),
++        { ...t, runId, status: "running" },
++        ...turns.slice(i + 1),
++      ];
++    }
++  }
++  return turns;
++}
++
+ 
+ /* ────────────────────── page 模式内部子组件（含 react-query，R4） ────────────────────── */
+ 
+@@ -1008,13 +1056,21 @@ export function SessionPanelPage({
+               const preambleText = extractPreambleText(env.content ?? "");
+               if (!env.run_id) return;
+               setTurnState((prev) => {
++                // ql-20260921-004-92f8：占位轮抢先认领——SSE user_input 先于
++                // inject HTTP 响应到达（backend commit 后立即补发 vs ready
++                // 等待+派发）时，占位轮原地接管真实 run_id，窗口期不再同文双显。
++                const withClaim = claimPendingPlaceholderTurn(
++                  prev.turns,
++                  env.run_id!,
++                  env.content ?? "",
++                );
+                 // ql-20260920-006（2026-09-18-single-chat-steering 修订）：引导
+                 // 留痕行到达（mid-turn 注入挂活跃 run）→ 该轮匹配中的「引导中」
+                 // user_msg 段转「已投递」终态（同轮合并进下方 upsertTurn 一次
+                 // setState，无独立状态机）。活跃轮 turn 自身 prompt 已非空不覆盖
+                 // （下方既有幂等守卫），消息气泡由 user_msg 段承载。
+                 const withDelivered = markSteeredSegmentDelivered(
+-                  prev.turns,
++                  withClaim,
+                   env.run_id!,
+                   env.content ?? "",
+                 );
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-placeholder-claim.test.ts b/frontend/src/components/daemon/__tests__/session-panel-placeholder-claim.test.ts
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-panel-placeholder-claim.test.ts
+@@ -0,0 +1,115 @@
++/**
++ * ql-20260921-004-92f8：直发占位轮 SSE 抢先认领单测。
++ *
++ * 背景：backend `_inject_into_session` commit 后立即补发 user_input log 事件，
++ * 而 inject HTTP 响应要等 ready 等待（≤8s）+ WS 派发才返回——SSE 先到时
++ * upsertTurn 按真实 run_id 另建一轮，占位轮（排队中）与真实轮同屏双显，
++ * 响应到达才被 replacePlaceholderTurn 合并（用户实证：同一消息两条气泡、
++ * 数秒后自动合并）。claimPendingPlaceholderTurn 把合并收敛前移到 SSE 首事件。
++ */
++import { claimPendingPlaceholderTurn } from "@/components/daemon/session-panel/session-panel-page";
++import type { SessionTurnView } from "@/components/daemon/turn-timeline";
++
++function makeTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
++  return {
++    runId: "run-x",
++    turn: null,
++    prompt: "",
++    output: "",
++    status: "running",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: null,
++    ctxTokens: null,
++    errorDetail: null,
++    processItems: [],
++    segments: [],
++    turnStartedAt: 1_000,
++    ...overrides,
++  };
++}
++
++const PLACEHOLDER_ID = "__pending_inject_1695267063000__";
++
++function makePlaceholder(prompt: string): SessionTurnView {
++  return makeTurn({
++    runId: PLACEHOLDER_ID,
++    prompt,
++    status: "pending",
++    turnStartedAt: 1_234,
++  });
++}
++
++describe("claimPendingPlaceholderTurn", () => {
++  it("同文 user_input 事件 → 占位轮原地改名为真实 run_id（不新建轮，prompt/锚点保留）", () => {
++    const history = makeTurn({ runId: "run-1", prompt: "上一轮", status: "completed" });
++    const placeholder = makePlaceholder("完成了吗？");
++    const turns = [history, placeholder];
++
++    const next = claimPendingPlaceholderTurn(turns, "run-9", "完成了吗？");
++
++    expect(next).toHaveLength(2);
++    expect(next[0]).toBe(history);
++    expect(next[1]!.runId).toBe("run-9");
++    expect(next[1]!.status).toBe("running");
++    expect(next[1]!.prompt).toBe("完成了吗？");
++    expect(next[1]!.turnStartedAt).toBe(1_234);
++  });
++
++  it("附件标记行同构（占位含标记行 / 事件为 daemon 裸文本版）→ 同键认领", () => {
++    // 标记行 id 须为 UUID（parseAttachmentMarkers UUID 锚定，防伪标记误报）。
++    const placeholder = makePlaceholder(
++      "[附件:00000000-0000-4000-8000-000000000001|file|图.png]\n看图说话",
++    );
++    const turns = [placeholder];
++
++    const next = claimPendingPlaceholderTurn(turns, "run-9", "看图说话");
++
++    expect(next).toHaveLength(1);
++    expect(next[0]!.runId).toBe("run-9");
++  });
++
++  it("该 run_id 已有对应轮（raced 已建轮 / mid-turn 注入活跃轮）→ 原样返回", () => {
++    const placeholder = makePlaceholder("完成了吗？");
++    const raced = makeTurn({ runId: "run-9", prompt: "完成了吗？" });
++    const turns = [placeholder, raced];
++
++    expect(claimPendingPlaceholderTurn(turns, "run-9", "完成了吗？")).toBe(turns);
++  });
++
++  it("无占位轮（排队派发轮场景）→ 原样返回", () => {
++    const turns = [makeTurn({ runId: "run-1", prompt: "旧轮", status: "completed" })];
++    expect(claimPendingPlaceholderTurn(turns, "run-9", "新消息")).toBe(turns);
++  });
++
++  it("正文不同文（极端并发：他轮同窗口派发）→ 不认领，原样返回", () => {
++    const placeholder = makePlaceholder("完成了吗？");
++    const turns = [placeholder];
++    expect(claimPendingPlaceholderTurn(turns, "run-9", "另一条排队消息")).toBe(turns);
++    expect(turns[0]!.runId).toBe(PLACEHOLDER_ID);
++  });
++
++  it("同文键为空（附件-only 空 prompt）→ 不认领，回落响应侧收敛", () => {
++    const placeholder = makePlaceholder("[附件:00000000-0000-4000-8000-000000000002|file|图.png]");
++    const turns = [placeholder];
++    expect(
++      claimPendingPlaceholderTurn(
++        turns,
++        "run-9",
++        "[附件:00000000-0000-4000-8000-000000000002|file|图.png]",
++      ),
++    ).toBe(turns);
++  });
++
++  it("多条占位（防御场景）→ 认领最末一条同文的", () => {
++    const older = makePlaceholder("旧占位");
++    const newer = makePlaceholder("新占位");
++    const turns = [older, newer];
++
++    const next = claimPendingPlaceholderTurn(turns, "run-9", "新占位");
++
++    expect(next).toHaveLength(2);
++    expect(next[0]).toBe(older);
++    expect(next[1]!.runId).toBe("run-9");
++  });
++});

@@ -179,3 +179,37 @@
 方案：删行改注入前同事务预删——_inject_mid_turn_into_run 内部 commit 把删除与 user_input 留痕原子落库，注入 commit 前失败其内部 rollback 连带复活条目（失败语义与旧序逐字一致，enqueue_and_push/publish 均 best-effort 不抛无已删未投路径）；复锁复取补非 pending 守卫按已派发收口返 dispatched；补 3 用例（注入时刻同事务已删不变式/离线 rollback 复活/复取 failed 收口，核心两用例 stash 验证旧码红）；daemon.md 增量+changelog 同步
 结果：queue_actions 37 passed（+3）+ daemon 模块全量 2361 passed、ruff/format/mypy 0；前端零改动（响应契约不变）；未部署验证
 审计：[gate] L1（跨 0 模块 · 4 文件：1 代码/1 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量不适用（≤1 代码文件）
+
+## ql-20260921-003-cc14 | 2026-09-21 08:43:53 | scan-docs 页面首屏提速与人类可读卡片视图
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/scan_docs/service.py（reparse hash跳过未变更行大列重写+_dt_equal时区归一+预取排除content）
+- backend/app/modules/scan_docs/tests/test_service.py（新增TestReparseSkipsUnchangedRows两用例）
+- frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx（列表先行+后台reparse+一级展开+卡片原文双tab+中文标签）
+- frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx（新增首屏/刷新/视图切换3用例）
+- frontend/src/lib/scan-docs-tree.ts（抽出stripPathPrefix）
+- frontend/src/lib/__tests__/scan-docs-tree.test.ts（stripPathPrefix三用例）
+- .sillyspec/docs/backend/modules/scan_docs.md（同步reparse跳过语义）
+- .sillyspec/docs/frontend/modules/app-workspace-pages.md（同步ScanDocsPage行为）
+- .sillyspec/docs/frontend/modules/lib-scan-docs-tree.md（补stripPathPrefix契约）
+需求：scan-docs 页面首屏提速与人类可读卡片视图
+根因：进页先同步跑 reparse（读全部296个文档+对每行整体重赋值含content大列）再拉列表，首屏被文件系统全量解析和写库阻塞；内容区只有原文视图，缺少知识库那样的人类可读卡片形态
+方案：前端列表先行渲染、reparse转后台静默刷新（失败不打断浏览）、树默认只展开项目层（搜索时全摊开）、md详情区复用EntryCardList做卡片/原文双tab、目录scan/flows/modules与标准doc_type徽标配中文标签；后端_apply_parsed以content_hash相等跳过未变更行大列重写（_dt_equal时区归一比较mtime）、_fetch_existing预取load_only排除content
+结果：后端pytest scan_docs+spec_workspace backfill 62过（新增未变更行零UPDATE/变更行hash跟进2用例）；前端vitest 12过（新增首屏不阻塞/后台刷新/卡片原文切换3用例）；tsc 0错；eslint 0警告；ruff check+format过
+审计：[gate] L1（跨 0 模块 · 9 文件：3 代码/3 测试）advisory；每文件注记已全覆盖；测试增量已含
+
+## ql-20260921-004-92f8 | 2026-09-21 09:17:47 | 直发消息双显示竞态修复——占位轮被先到的 SSE 原地认领
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（新增导出 claimPendingPlaceholderTurn 纯函数（steerMatchKey 同文认领占位轮）+ onLog user_input 分支插入认领调用）
+- frontend/src/components/daemon/session-panel/session-panel-dialog.tsx（onLog user_input 分支插入同款认领调用（经 page 模块共享导入））
+- frontend/src/components/daemon/__tests__/session-panel-placeholder-claim.test.ts（新建——认领纯函数 7 用例（含附件标记行同构/空键/多条防御））
+- frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx（新增端到端用例——inject 挂起 + user_input SSE 先到 + daemon 双提交裸文本版均单气泡）
+- .sillyspec/docs/frontend/modules/components-daemon.md（quick 增量段（根因/认领口径/回落守卫/回归清单））
+需求：直发消息双显示竞态修复——占位轮被先到的 SSE 原地认领
+根因：backend inject commit 后立即补发 user_input SSE 事件，而 HTTP 响应要等 ready 等待（≤8s）+ WS 派发才返回；SSE 先到时前端按真实 run_id 另建一轮，与本地占位轮同屏双显，响应到达才合并（用户实证同一消息两条气泡数秒后自动合并）
+方案：session-panel-page 新增 claimPendingPlaceholderTurn：user_input 事件到达且尚无该 run_id 轮时，按 steerMatchKey 同文匹配把 __pending_inject_* 占位轮原地改名为真实 run_id（status→running）；page/dialog 两挂载点 onLog user_input 各插一行；不认领守卫（无占位/已有轮/异文/空键）回落响应侧 replacePlaceholderTurn 既有收敛（幂等兜底不动）
+结果：新增 7 用例单测 + 1 端到端用例（修复前红），两测试文件 70 用例全绿；pnpm typecheck 通过；pnpm lint 触碰文件无新增告警（存量告警行号均未触碰）
+审计：[gate] L1（跨 0 模块 · 5 文件：2 代码/2 测试）advisory；每文件注记已全覆盖；测试增量已含

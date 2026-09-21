@@ -279,3 +279,10 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 ## quick-f96d4e81 增量（定时消息终态条目删除）
 
 - **scheduled-messages-bar**：行尾新增「清空已结束」入口（终态条目 >0 才渲染；Modal.confirm → 终态逐条 DELETE 物理删除，pending 不受影响；404/409/422 竞态静默跳过、全部成功才 toast，条数文案与服务端为准失效重拉）。client `cancelScheduledMessage` 改名 `deleteScheduledMessage`（对齐后端 DELETE 语义扩展：pending 取消留档 / 终态删行），静默状态集改名 `DELETE_SILENT_STATUSES`。
+
+## quick 增量（直发占位轮 SSE 抢先认领——同文消息双显竞态，ql-20260921-004-92f8）
+
+- **根因**：backend `_inject_into_session` commit 后立即补发 user_input log 事件（ql-20260918-003 引入的发布点），而 inject HTTP 响应要等 `_dispatch_inject_turn` 的 ready 等待（≤8s 超时兜底）+ WS 派发才返回——SSE 先到时 upsertTurn 按真实 run_id 另建一轮，直发占位轮（`__pending_inject_*`，排队中）与真实轮（运行中）同屏双显，响应到达才被 replacePlaceholderTurn 合并（用户实证：同一消息两条气泡、数秒后自动合并；ready 状态丢失时窗口≈8s）。
+- **session-panel-page `claimPendingPlaceholderTurn`**：user_input 事件到达且尚无该 run_id 的轮时，若存在等待响应的占位轮且正文同文（steerMatchKey 归一——剥 preamble/附件标记行，两端标记行格式同构），占位轮**原地改名**为真实 run_id（prompt/turnStartedAt 保留，status pending→running 对齐 upsertTurn 新建轮口径）——单气泡从 SSE 首事件起保持。page 与 dialog 两挂载点 onLog user_input 分支各插一行（dialog 经 page 模块既有共享导入）。响应侧 replacePlaceholderTurn / handleResend 内联改名不动：认领后 raced 分支 filter 占位 id no-op、prompt 非空不转移，天然幂等兜底。
+- **不认领回落响应侧收敛**（原样返回原引用）：无占位轮（排队派发轮照常建轮）；run_id 已有轮（raced 已建轮/历史/mid-turn 注入活跃轮）；正文不同文（防他轮同窗口派发错认领）；同文键为空（附件-only 空 prompt）。
+- 回归：session-panel-placeholder-claim 新增 7 用例（认领/标记行同构/已有轮/无占位/异文/空键/多条防御）；session-panel-dialog 新增端到端 1 用例（inject 挂起 + user_input SSE 先到 → `.turn-bubble` 同文单气泡，daemon 双提交裸文本版到达仍单气泡——修复前双气泡）。

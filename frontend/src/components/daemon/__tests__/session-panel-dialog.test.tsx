@@ -452,6 +452,75 @@ describe("SessionPanel（dialog）", () => {
     expect(sessionApi.streamSession).toHaveBeenCalledTimes(1);
   });
 
+  it("ql-20260921-004：直发占位轮被先到的 user_input SSE 原地认领——同文消息不双显", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+    // 真实时序（inject.py commit 后补发 SSE / control.py ready 等待拖住响应）：
+    // user_input SSE 事件先于 inject HTTP 响应到达——响应挂起模拟慢派发。
+    sessionApi.injectSession.mockImplementation(() => new Promise<any>(() => {}));
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "first" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const conn = stream.conn;
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
+      conn.handlers.route(makeEnvelope("turn_completed", { run_id: "run-1", status: "completed" }));
+    });
+
+    // 第二条：空闲直发 → 占位轮（排队中）出现，inject 在途。
+    await waitFor(() => {
+      expect((screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement)).toBeTruthy();
+    }, { timeout: 2000 });
+    const input2 = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
+    fireEvent.change(input2, { target: { value: "second" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
+
+    // backend commit 后补发的 user_input 事件先于 HTTP 响应到达（ql-20260918-003
+    // 引入的发布点）→ 占位轮应被原地认领为真实 run_id，不再另建一轮。
+    act(() => {
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-2",
+          channel: "user_input",
+          content: "second",
+          log_id: "log-ui-1",
+          timestamp: "2026-09-21T01:04:23Z",
+        }),
+      );
+    });
+    const countSecondBubbles = () =>
+      Array.from(document.querySelectorAll(".turn-bubble")).filter((el) =>
+        // 气泡内还嵌着复制按钮文案，用包含匹配（turn-bubble 仅用户气泡持有，
+        // 同文双显 = 两个含该文本的气泡）。
+        el.textContent?.includes("second"),
+      );
+    // 修复前：占位轮 + SSE 建轮两条同文气泡；修复后：单气泡。
+    expect(countSecondBubbles()).toHaveLength(1);
+
+    // daemon 双提交的裸文本版 user_input（同文不同 log_id）到达仍不双显。
+    act(() => {
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-2",
+          channel: "user_input",
+          content: "second",
+          log_id: "log-ui-2",
+          timestamp: "2026-09-21T01:04:24Z",
+        }),
+      );
+    });
+    expect(countSecondBubbles()).toHaveLength(1);
+  });
+
   it("task-05：@ 变更选中随首句 createSession 上送 change_id（quicklog_id 缺省不进请求体）", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
