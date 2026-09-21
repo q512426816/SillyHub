@@ -391,16 +391,22 @@ class HitsService:
         recent_used = sum(1 for e in recent_entries if e.anchor in hit_anchors)
 
         # ── usage_board（全量按 per_task 降序；零命中条目不入榜——死条目清单
+        # ── usage_board（全量按 per_task 降序；零命中条目不入榜——死条目清单
         #    已覆盖零命中视角，榜只含有真实使用数据的锚点）──
+        # ql-20260921-001 口径修正：per_task=任务渗透率（命中过该条目的任务数 ÷
+        # 条目存在期任务总数）——此前分子用锚点命中次数（一个任务内同锚点被注入
+        # 多次会被重复计入，次数可>任务数→渗透率>100% 出现 5033% 之类荒谬值）。
+        # 渗透率天然 ∈[0,1]，前端 ×100 后即合法百分比；total 保留原始次数作副显。
         board: list[UsageBoardItem] = []
         for anchor, total in anchor_total.items():
             denom = _period_task_count(_entry_first_seen(anchor))
+            hit_tasks = len(anchor_tasks.get(anchor, ()))
             board.append(
                 UsageBoardItem(
                     anchor=anchor,
-                    per_task=round(total / denom, 4) if denom else float(total),
+                    per_task=round(hit_tasks / denom, 4) if denom else 1.0,
                     total=total,
-                    task_count=len(anchor_tasks.get(anchor, ())),
+                    task_count=hit_tasks,
                     first_hit=anchor_first.get(anchor),
                     last_hit=anchor_last.get(anchor),
                 )

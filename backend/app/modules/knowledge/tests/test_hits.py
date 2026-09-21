@@ -348,13 +348,13 @@ async def test_stats_full_recomputation(db_session, hits_ws: dict) -> None:
     assert out.freshness.recent_new == 3
     assert out.freshness.recent_used == 3
 
-    # usage_board：全量按 per_task 降序（同率按 total 降序、再锚点字典序）
+    # usage_board：全量按 per_task（任务渗透率，ql-20260921-001）降序（同率按 total 降序、再锚点字典序）
     board = [(b.anchor, b.per_task, b.total, b.task_count) for b in out.usage_board]
     assert board == [
-        (_CONV_SEC_1_ANCHOR, 1.0, 2, 1),  # 存在期任务 2（created 2026-01-01 后全任务）
-        ("decisions/backend.md", 1.0, 1, 1),  # 首见 T-10d 后仅 chg-b
-        ("fr/host-fs-handler.md", 1.0, 1, 1),  # 分母 0（fr-inject 不进分母）→ 退化 total
-        (_KNOWN_ANCHOR, 0.5, 1, 1),  # 首见 T-40d 后 2 任务
+        ("decisions/backend.md", 1.0, 1, 1),  # 首见 T-10d 后仅 chg-b，渗透 1/1
+        ("fr/host-fs-handler.md", 1.0, 1, 1),  # 分母 0（fr-inject 不进分母）→ 渗透率退化 1.0
+        (_CONV_SEC_1_ANCHOR, 0.5, 2, 1),  # 存在期任务 2，命中过它的任务 1 → 渗透 50%
+        (_KNOWN_ANCHOR, 0.5, 1, 1),  # 首见 T-40d 后 2 任务，命中任务 1 → 渗透 50%
     ]
     by_anchor = {b.anchor: b for b in out.usage_board}
     assert by_anchor[_CONV_SEC_1_ANCHOR].first_hit is not None
