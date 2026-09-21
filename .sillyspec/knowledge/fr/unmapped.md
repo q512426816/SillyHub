@@ -6065,3 +6065,65 @@
 摘要：（无场景名）
 全文：.sillyspec/changes/archive/workspace-spec-root-managed-p0/requirements.md#FR-05
 最近确认：98d3e56dd
+
+## FR-unmapped-701 工作区内容访问回归成员制（判定链收紧）
+变更：2026-09-20-workspace-member-visibility
+状态：active
+摘要：默认场景；非成员持平台级 workspace:read 访问工作区详情；非成员持平台级 mcp:read 读工作区 MCP 配置
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：默认场景 — Given 用户不是工作区 W 的成员，且不是平台管理员（`is_platform_admin=False` 且平台级角色不含 `platform:admin`），但平台级；When 以工作区 W 为上下文判定权限 P（`has_permission(workspace_id=W)`，即所有 `require_permission` 路由）；Then 判定为 False（403），P 为任意 Permission 枚举值均如此
+- 场景：非成员持平台级 workspace:read 访问工作区详情 — Given 180490 绑定 developer 角色（平台级 `workspace:read`），不是工作区 W 成员；When GET /api/workspaces/{W}；Then HTTP 403
+- 场景：非成员持平台级 mcp:read 读工作区 MCP 配置 — Given 同上用户，权限为 `mcp:read`；When 访问 W 的 mcp-config 读端点；Then HTTP 403
+全文：.sillyspec/changes/archive/2026-09-20-workspace-member-visibility/requirements.md#FR-01
+最近确认：3642c3d0
+
+## FR-unmapped-702 平台管理员全量不受影响
+变更：2026-09-20-workspace-member-visibility
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 用户 `is_platform_admin=True`，或平台级角色含 `platform:admin`；When 访问任意工作区（成员或非成员）或列表；Then 行为与改动前完全一致（放行、全量列表）
+全文：.sillyspec/changes/archive/2026-09-20-workspace-member-visibility/requirements.md#FR-02
+最近确认：3642c3d0
+
+## FR-unmapped-703 工作区列表按成员制返回
+变更：2026-09-20-workspace-member-visibility
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-003@v1
+场景正文：
+- 场景：默认场景 — Given 用户非平台管理员、平台级角色不含 `platform:admin`，但持平台级 `workspace:read`；When GET /api/workspaces；Then 仅返回该用户为成员的工作区（无成员身份则空列表）；ql-20260917-007 的「平台级 workspace:read → 全量」分支废止
+全文：.sillyspec/changes/archive/2026-09-20-workspace-member-visibility/requirements.md#FR-03
+最近确认：3642c3d0
+
+## FR-unmapped-704 通知收件人按成员制聚合
+变更：2026-09-20-workspace-member-visibility
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given 工作区 W 发生需广播事件（`list_user_ids_with_permission(workspace_id=W, permission=P)` 被调用）；When 查找收件人
+全文：.sillyspec/changes/archive/2026-09-20-workspace-member-visibility/requirements.md#FR-04
+最近确认：3642c3d0
+
+## FR-unmapped-705 功能入口效力保持不变
+变更：2026-09-20-workspace-member-visibility
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：默认场景 — Given 用户持平台级权限 P（如 developer 角色的 `workspace:read`）；When 以无工作区上下文判定 P（`require_permission_any`，如创建工作区前的入口校验）或经 `/api/auth/me` 聚合权限驱动菜单显隐；Then 行为与改动前完全一致（菜单仍可见、入口判定仍放行）
+全文：.sillyspec/changes/archive/2026-09-20-workspace-member-visibility/requirements.md#FR-05
+最近确认：3642c3d0
+
+## FR-unmapped-706 创建者自动成员语义不受影响
+变更：2026-09-20-workspace-member-visibility
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 用户持平台级 `workspace:write` 并创建工作区；When 创建完成（新建/复用/复活任一路径，`backend/app/modules/workspace/service.py` `_ensure_creator_as；Then 创建者自动成为该工作区 `workspace_owner` 成员，随后对该工作区的访问走成员判定、正常放行
+全文：.sillyspec/changes/archive/2026-09-20-workspace-member-visibility/requirements.md#FR-06
+最近确认：3642c3d0

@@ -99,6 +99,9 @@
 - backend_workspace|decision|决策 → [decisions/backend_workspace.md](decisions/backend_workspace.md)
 - frontend_workspace_skills|decision|决策 → [decisions/frontend_workspace_skills.md](decisions/frontend_workspace_skills.md)
 - sillyspec|decision|决策 → [decisions/sillyspec.md](decisions/sillyspec.md)
+- auth|decision|决策 → [decisions/auth.md](decisions/auth.md)
+- NEW-notification|decision|决策 → [decisions/NEW-notification.md](decisions/NEW-notification.md)
+- workspace|decision|决策 → [decisions/workspace.md](decisions/workspace.md)
 
 ## FR 需求索引
 - host-fs-handler|FR|需求|承接 → [fr/host-fs-handler.md](fr/host-fs-handler.md)
