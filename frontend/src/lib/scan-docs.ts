@@ -8,6 +8,7 @@ export type ScanDocList = components["schemas"]["ScanDocList"];
 export type ScanDocWarning = components["schemas"]["ScanDocWarning"];
 export type ScanDocReparseStats = components["schemas"]["ScanDocReparseStats"];
 export type ScanDocReparseResponse = components["schemas"]["ScanDocReparseResponse"];
+export type ScanDocsStats = components["schemas"]["ScanDocsStatsOut"];
 
 /**
  * Stale threshold in ms (default 1h). Override via env var.
@@ -37,4 +38,17 @@ export function reparseScanDocs(workspaceId: string) {
     `/api/workspaces/${workspaceId}/scan-docs/reparse`,
     { method: "POST" },
   );
+}
+
+export function getScanDocsStats(workspaceId: string) {
+  return apiFetch<ScanDocsStats>(
+    `/api/workspaces/${workspaceId}/scan-docs/stats`,
+  );
+}
+
+/**
+ * Ops 面板（scan-docs）stats 查询键。对齐 knowledgeStatsQueryKey 形态。
+ */
+export function scanDocsStatsQueryKey(workspaceId: string) {
+  return ["scan-docs", "stats", workspaceId] as const;
 }

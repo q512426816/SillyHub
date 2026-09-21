@@ -16,7 +16,10 @@ created_at: 2026-08-18 01:45:00
 
 ## 契约摘要
 
-- `buildTree(docs: ScanDocSummary[]): TreeNode[]` — 唯一导出函数。
+- `buildTree(docs: ScanDocSummary[]): TreeNode[]` — 建树主函数。
+- `stripPathPrefix(path: string): string` — 剥离前导包裹段（可选 `.sillyspec` +
+  `docs`），与 buildTree 同口径（ql-20260921-003 抽出复用：卡片视图展示路径 /
+  锚点、INDEX 跳转目标解析都取剥前缀后的形态）。
 - `TreeNode { name; path; doc?: ScanDocSummary; children: TreeNode[] }` —
   目录节点不带 `doc`，文件节点（路径末段）挂原始 `doc` 摘要。
 - 输入类型 `ScanDocSummary` 来自 `./scan-docs`（lib-scan-docs 模块）。

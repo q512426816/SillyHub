@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>扫描文档运营指标面板 · 原型</title>
+<style>
+  :root {
+    /* Tailwind violet 阶（ai-native 默认主题 brand 色） */
+    --brand-50: #F5F3FF; --brand-100: #EDE9FE; --brand-200: #DDD6FE;
+    --brand-400: #A78BFA; --brand-500: #8B5CF6; --brand-600: #7C3AED; --brand-700: #6D28D9;
+    --warning: #D97706; --success: #059669;
+    --bg: #FAFAFA; --card: #FFFFFF; --border: #E4E4E7;
+    --fg: #3F3F46; --muted: #71717A; --muted-2: #A1A1AA;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg); padding: 20px; font-size: 14px;
+  }
+  .page-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .page-head h2 { font-size: 16px; }
+  .btn { border: 1px solid var(--border); background: var(--card); border-radius: 6px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+  .btn:hover { border-color: var(--brand-400); color: var(--brand-600); }
+
+  /* ── 面板主体：左大卡 2/3 + 右榜 1/3 ── */
+  .ops { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .card-lg, .card-board {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .card-head h3 { font-size: 14px; font-weight: 700; }
+  .card-head .sub { font-size: 10.5px; color: var(--muted-2); }
+
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .metric {
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+    transition: border-color .15s;
+  }
+  .metric.clickable { cursor: pointer; }
+  .metric.clickable:hover { border-color: var(--brand-400); }
+  .metric .label { font-size: 11px; color: var(--muted); }
+  .metric .label .hint { font-size: 10px; color: var(--muted-2); }
+  .metric .value { font-size: 22px; font-weight: 700; line-height: 28px; }
+  .metric .value.brand { color: var(--brand-600); }
+  .metric .value.warn { color: var(--warning); }
+  .metric .value.ok { color: var(--success); }
+  .metric .value .unit { font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+  .metric .foot { font-size: 10.5px; color: var(--muted-2); }
+  .metric .breakdown { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+  .tooltip { cursor: help; text-decoration: underline dotted; }
+  svg.trend { width: 100%; height: 26px; color: var(--brand-500); display: block; margin-top: 2px; }
+
+  /* 陈旧清单（开合） */
+  .stale-list {
+    display: none; margin-top: 10px; max-height: 176px; overflow-y: auto;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--brand-50);
+    padding: 6px;
+  }
+  .stale-list.open { display: block; }
+  .stale-row {
+    display: flex; gap: 8px; align-items: center; padding: 4px 8px; font-size: 11px;
+    border-bottom: 1px solid var(--border); font-family: ui-monospace, Consolas, monospace;
+  }
+  .stale-row:last-child { border-bottom: none; }
+  .stale-row .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--brand-700); }
+  .stale-row .when { color: var(--muted); white-space: nowrap; font-family: inherit; }
+
+  /* 榜 */
+  .board { max-height: 224px; overflow-y: auto; }
+  .board-row {
+    display: flex; gap: 8px; align-items: center; padding: 4px 0; font-size: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .board-row:last-child { border-bottom: none; }
+  .rank {
+    width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10.5px; font-weight: 700; background: var(--brand-100); color: var(--brand-700);
+  }
+  .rank.top { background: var(--brand-600); color: #fff; }
+  .board-row .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .board-row .ago { color: var(--muted-2); font-size: 11px; white-space: nowrap; }
+
+  /* 下方页面主体占位（示意挂载位置） */
+  .page-body {
+    border: 1px dashed var(--border); border-radius: 10px; padding: 40px; text-align: center;
+    color: var(--muted-2); font-size: 12px;
+  }
+</style>
+</head>
+<body>
+  <div class="page-head">
+    <h2>扫描文档</h2>
+    <button class="btn">重新扫描</button>
+  </div>
+
+  <div class="ops">
+    <div class="card-lg">
+      <div class="card-head">
+        <h3>扫描文档运营指标</h3>
+        <span class="sub">覆盖 · 鲜活 · 结构健康</span>
+      </div>
+      <div class="metrics">
+        <!-- 覆盖率（含模块文档层 + 趋势） -->
+        <div class="metric">
+          <div class="label">标准文档覆盖率 <span class="hint">实有 / 应有</span></div>
+          <div class="value brand">72%<span class="unit">51/70 项</span></div>
+          <div class="breakdown">七件套 33/35 · 模块文档 18/35</div>
+          <svg class="trend" viewBox="0 0 112 26" preserveAspectRatio="none">
+            <polyline points="0,20 15,18 30,21 45,14 60,16 75,9 90,11 105,5" fill="none" stroke="currentColor" stroke-width="2"/>
+          </svg>
+          <div class="foot">近 8 周更新趋势</div>
+        </div>
+        <!-- 陈旧文档（点开清单） -->
+        <div class="metric clickable" onclick="toggleStale()">
+          <div class="label">陈旧文档 <span class="hint">90 天未更新</span></div>
+          <div class="value warn">41 篇</div>
+          <div class="foot" id="stale-hint">点开清单 → 补写 / 归档 / 重扫 ↓</div>
+        </div>
+        <!-- 密度 -->
+        <div class="metric">
+          <div class="label">每项目文档密度
+            <span class="hint tooltip" title="口径：exists 文档总数 ÷ 项目数（docs 树第一层目录）。过低=项目文档缺失 · 过高=单项目文档臃肿。">口径 ⓘ</span>
+          </div>
+          <div class="value">59.2<span class="unit">篇/项目</span></div>
+          <div class="foot">过低=文档缺失 · 过高=结构臃肿</div>
+        </div>
+        <!-- 新鲜度 -->
+        <div class="metric">
+          <div class="label">近 30 天更新 <span class="hint">鲜活度</span></div>
+          <div class="value ok">63<span class="unit">/ 296 篇</span></div>
+          <div class="foot">重扫后最新内容已入库</div>
+        </div>
+      </div>
+      <!-- 陈旧清单 -->
+      <div class="stale-list" id="stale-list">
+        <div class="stale-row"><span class="path">backend/scan/INTEGRATIONS.md</span><span class="when">最后修改：2026-03-14</span></div>
+        <div class="stale-row"><span class="path">frontend/modules/build.md</span><span class="when">最后修改：2026-04-02</span></div>
+        <div class="stale-row"><span class="path">sillyhub-daemon/modules/registry.md</span><span class="when">最后修改：2026-04-19</span></div>
+        <div class="stale-row"><span class="path">SillyHub/flows/deploy.md</span><span class="when">最后修改：2026-05-08</span></div>
+        <div class="stale-row"><span class="path">multi-agent-platform/scan/CONCERNS.md</span><span class="when">最后修改：2026-06-11</span></div>
+      </div>
+    </div>
+
+    <!-- 最近更新榜 -->
+    <div class="card-board">
+      <div class="card-head">
+        <h3>🕘 最近更新榜 <span class="sub">按最后修改时间 · Top 10</span></h3>
+      </div>
+      <div class="board">
+        <div class="board-row"><span class="rank top">1</span><span class="path">frontend/modules/scan-docs.md</span><span class="ago">2 小时前</span></div>
+        <div class="board-row"><span class="rank">2</span><span class="path">backend/modules/scan_docs.md</span><span class="ago">5 小时前</span></div>
+        <div class="board-row"><span class="rank">3</span><span class="path">SillyHub/modules/knowledge.md</span><span class="ago">1 天前</span></div>
+        <div class="board-row"><span class="rank">4</span><span class="path">backend/modules/spec_workspace.md</span><span class="ago">2 天前</span></div>
+        <div class="board-row"><span class="rank">5</span><span class="path">frontend/modules/app-workspace-pages.md</span><span class="ago">3 天前</span></div>
+        <div class="board-row"><span class="rank">6</span><span class="path">SillyHub/scan/ARCHITECTURE.md</span><span class="ago">5 天前</span></div>
+        <div class="board-row"><span class="rank">7</span><span class="path">sillyhub-daemon/scan/CONVENTIONS.md</span><span class="ago">1 周前</span></div>
+        <div class="board-row"><span class="rank">8</span><span class="path">multi-agent-platform/scan/STRUCTURE.md</span><span class="ago">1 周前</span></div>
+        <div class="board-row"><span class="rank">9</span><span class="path">frontend/flows/session-lifecycle.md</span><span class="ago">2 周前</span></div>
+        <div class="board-row"><span class="rank">10</span><span class="path">SillyHub/modules/daemon.md</span><span class="ago">2 周前</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-body">（scan-docs 页面主体：文档树 + 内容区 —— 面板挂载在页头之下、树之上）</div>
+
+<script>
+  function toggleStale() {
+    const list = document.getElementById("stale-list");
+    const hint = document.getElementById("stale-hint");
+    list.classList.toggle("open");
+    hint.textContent = list.classList.contains("open") ? "收起清单 ↑" : "点开清单 → 补写 / 归档 / 重扫 ↓";
+  }
+</script>
+</body>
+</html>

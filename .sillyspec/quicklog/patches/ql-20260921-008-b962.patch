@@ -1,0 +1,1220 @@
+diff --git a/.sillyspec/docs/frontend/modules/test-utils.changelog.md b/.sillyspec/docs/frontend/modules/test-utils.changelog.md
+new file mode 100644
+index 000000000..1f5ca574c
+--- /dev/null
++++ b/.sillyspec/docs/frontend/modules/test-utils.changelog.md
+@@ -0,0 +1,8 @@
++# test-utils 变更索引
++
++> 自动生成。正文历史已迁出，详见 test-utils.md。
++> author: qinyi
++> created_at: 2026-09-21 12:10:00
++
++- ql-20260921-007-727c | 第三方结构查询收口 dom-queries.ts + 样式断言审计结论：新建 src/test/dom-queries.ts（antd Modal.confirm/Select/Tree/Spin/Segmented/Badge/Image + echarts 容器 + animate-spin 加载态，17 个导出），codemod 迁移 22 个测试文件约 95 处 `.ant-*`/`.echarts-for-react` 字面量查询——antd/echarts 升级的测试爆炸面收拢到单文件；scan-docs-page 与 pre-session-picker 因并行会话改动暂缓。样式断言逐处审计后**零删除**：全部为有意契约守卫（bg-brand-600 主题语义阶、min-h-[44px] 触摸热区、R-01 单行槽位、原型对齐配色、tabular-nums 用例本体等）。验证：22 文件 513 用例全过、tsc 干净、eslint 0 error（13 warning 全存量）。
++- ql-20260921-006-2095 | 覆盖率工具接入（详见根 ci.changelog）：vitest coverage 段落归本卡测试语义管辖，text+html 双报告、不设 thresholds。
+diff --git a/.sillyspec/docs/frontend/modules/test-utils.md b/.sillyspec/docs/frontend/modules/test-utils.md
+index 33a669314..057a8231c 100644
+--- a/.sillyspec/docs/frontend/modules/test-utils.md
++++ b/.sillyspec/docs/frontend/modules/test-utils.md
+@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
+ # 测试基础设施（test-utils）
+ 
+ ## 定位
+-前端测试基础设施与测试用例集合。技术栈 Vitest 2 + jsdom + @testing-library/react。两部分骨架：`frontend/src/test/setup.ts`（全局断言扩展、超时调优、三个 polyfill）与 vitest.config.ts（文件路径属 build 模块，但测试语义归此卡管辖）。测试文件全仓约 157 个 `.test.ts(x)`，两种摆放约定并存：`__tests__/` 目录（约 114 个，主约定）与同层 colocated（仅 `frontend/src/lib/{daemon,errors,workspace-binding,workspaces}.test.ts` 与 `frontend/src/stores/workspace.test.ts` 共 5 个）。
++前端测试基础设施与测试用例集合。技术栈 Vitest 2 + jsdom + @testing-library/react。两部分骨架：`frontend/src/test/setup.ts`（全局断言扩展、超时调优、三个 polyfill）与 vitest.config.ts（文件路径属 build 模块，但测试语义归此卡管辖）；`frontend/src/test/dom-queries.ts`（2026-09-21 ql-20260921-007-727c 新增）集中第三方结构查询（antd/echarts/加载态）。测试文件全仓约 313 个 `.test.ts(x)`（2026-09-21 核实），两种摆放约定并存：`__tests__/` 目录（主约定）与同层 colocated（仅 `frontend/src/lib/{daemon,errors,workspace-binding,workspaces}.test.ts` 与 `frontend/src/stores/workspace.test.ts` 共 5 个）。
+ 
+ ## 契约摘要
+ vitest.config.ts 关键项：
+@@ -18,6 +18,7 @@ vitest.config.ts 关键项：
+ - `testTimeout: 15000` — 全量并行时 jsdom environment setup 累积变慢，个别组件测试全量下超 5s 上限（治 flaky，不拖慢通过的用例）。
+ - `environmentMatchGlobs` 纯逻辑测试切 **node 环境**（省 jsdom 每文件初始化，全量 collect/environment 累计 300s+ 的大头）：白名单精确匹配两批——`frontend/src/lib/__tests__/{admin,agent,api,client-path,daemon-audit,daemon-permission,daemon-usage,format-token,mcp-tokens,menu-permissions,permission,ppm-workday,query-client,scan-docs-tree,token-refresh,workspace-path}.test.ts` 与 `frontend/src/lib/{daemon,errors,workspace-binding,workspaces}.test.ts`；5 个依赖 jsdom 的（use-*、daemon-session 等用 renderHook/fake EventSource）不在此列。
+ - `resolve.alias`：`@` → `path.resolve(__dirname, "./src")`。
++- `coverage`（2026-09-21 ql-20260921-006-2095）：v8 provider、text+html 双报告、include `src/**`、排除测试自身与 `src/test/**`；**不设 thresholds**（观察期，先摸清盲区再评估门槛）。
+ 
+ src/test/setup.ts：
+ - 引入 `@testing-library/jest-dom/vitest`；`configure({ asyncUtilTimeout: 5000 })`（CI 满载并发 128 文件下 `findBy*`/`waitFor` 默认 1s 偶发超时，ImportModuleModal 曾连续 flake）。
+@@ -25,13 +26,17 @@ src/test/setup.ts：
+ - matchMedia polyfill（matches:false + 全 no-op listener）：antd Modal/TreeSelect/Select 等响应式组件需要。
+ - ResizeObserver polyfill（no-op class）：antd Drawer 等需要；三者均为 `if (!globalThis.x)` 守卫式注入。
+ 
++src/test/dom-queries.ts（第三方结构查询收口，17 个导出函数）：
++- antd：`queryAntdConfirm/Title`（Modal.confirm 弹层）、`closestAntdSelect`/`queryAntdSelectZone`（content??selector 点击区）/`queryAntdSelectClear`/`queryAntdSelectMultiple`、`closestAntdTreeRow`/`queryAntdTreeIcon`（可传 lucide 形状名）/`queryAntdTreeSwitcher`/`closestAntdTreeNodeWrapper`、`closestAntdSelectOption`、`closestAntdBadge`、`closestAntdImage`、`queryAntdSpin`、`queryAntdSegmented`；echarts：`queryChart`；Tailwind 加载态：`querySpinner`。
++- 采用状态：22 个测试文件已迁移（2026-09-21）；scan-docs-page 与 pre-session-picker 两文件因并行会话改动暂未迁移。剩余 `classList.contains("ant-select")` 行为判断与 `findByText({ selector: ".ant-select-item-option-content" })` 选项参数两种稳定形态未收（量少且属 antd 稳定 API 面）。
++
+ 目录分布（枚举核实）：
+ - `frontend/src/lib/__tests__/` 23 个：admin/agent/api/client-path/daemon-audit/daemon-permission/daemon-session/daemon-usage/fetch-sse/format-token/mcp-tokens/menu-permissions/permission/ppm-workday/query-client/scan-docs-tree/token-refresh/use-agent-run-stream/use-agent-runs(.tsx)/use-daemon-machines/use-workspace-context/workspace-daemon-status/workspace-path。
+ - `frontend/src/lib/api/__tests__/` 1 个（llm-providers）；`frontend/src/lib/ppm/__tests__/` 2 个（aggregations/format）。
+ - `frontend/src/components/__tests__/` 26 个（admin 系/agent-log-viewer 系/agent-profile-form/change-file-tree/charts 系/workspace 系/top-bar 等）。
+ - `frontend/src/components/{agent-log,agent,agent-profile,daemon,sessions,workspace}/__tests__/` = 3/1/2/12/4/2 个。
+ - `frontend/src/app/**/*.test.tsx` 页面级 31 个（account/layout/runtimes 系/sessions/settings 系 mcp/providers/skills/ppm 组件/workspaces agent/agent-profiles 等）。
+-- scripts：`test` = `vitest run`（CI 用单次），`test:watch` = `vitest`。
++- scripts：`test` = `vitest run`（CI 用单次），`test:watch` = `vitest`，`test:coverage` = `vitest run --coverage`（CI 用，ql-20260921-006-2095）。
+ 
+ ## 关键逻辑
+ ```
+@@ -53,6 +58,7 @@ if (!globalThis.localStorage) { ...内存实现... }   // zustand persist 前置
+ - 摆放约定：组件测试放组件目录 `__tests__/`；lib 纯逻辑优先 `frontend/src/lib/__tests__/` 并评估进白名单；同层 colocated 仅限既有 5 个文件，别新增扩散。
+ - asyncUtilTimeout=5000 与 testTimeout=15000 是「放宽上限不掩盖逻辑错误」的取舍（通过仍毫秒级），遇超时先怀疑真挂/环境慢，别先改阈值。
+ - 页面级测试较旧卡时代已显著增多（约 30 个 page.test.tsx，覆盖 runtimes/sessions/providers/skills/agent 等），但整体重心仍是 lib 层与组件单测。
++- **dom-queries 边界**：只收「第三方库内部 DOM 结构」查询——antd 升级/echarts 替换时改 helper 一处即可；项目自有语义类（sh-* / seg-* / wdg-*）与设计契约守卫（bg-brand-600 语义阶、min-h-[44px] 触摸热区、原型对齐配色等）**不入** helper——后者是对样式的有意断言，留在测试内。新测试查 antd 内部结构一律走本文件，勿再写 `.ant-*` 字面量。
+ 
+ ## 人工备注
+ 
+diff --git a/frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx
+index 94916317a..f26fb0d00 100644
+--- a/frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx
+@@ -26,6 +26,7 @@ import { useSession } from "@/stores/session";
+ // task-09：共享机器「会话」断言用 store 锁定态（FR-01，同根 page.test.tsx 惯例）。
+ import { useFloatingSessionStore } from "@/stores/floating-session";
+ import { PROVIDER_META } from "@/lib/daemon";
++import { queryAntdConfirm, queryAntdConfirmTitle } from "@/test/dom-queries";
+ 
+ // 每 test 独立 QueryClient（retry:false）。
+ function renderPage(ui: React.ReactElement) {
+@@ -509,11 +510,11 @@ describe("ql-20260904-016-7b4a / ql-20260904-019-b4f4: 升级 sillyspec 指令
+ 
+     // 二次确认弹层（portal 到 body）：标题「升级 sillyspec」+ npm 安装说明。
+     const confirmRoot = await waitFor(() => {
+-      const el = document.querySelector(".ant-modal-confirm");
++      const el = queryAntdConfirm();
+       expect(el).not.toBeNull();
+       return el as HTMLElement;
+     });
+-    const confirmTitle = confirmRoot.querySelector(".ant-modal-confirm-title");
++    const confirmTitle = queryAntdConfirmTitle(confirmRoot);
+     expect(confirmTitle).toHaveTextContent("升级 sillyspec");
+     expect(within(confirmRoot).getByText(/npm install -g sillyspec@latest/)).toBeInTheDocument();
+ 
+@@ -550,11 +551,11 @@ describe("ql-20260829-006-6a9e: 机器级删除（离线机器可删，在线 di
+ 
+     // 二次确认弹层（portal 到 body）：标题 + 机器名 + 运行时数提示。
+     const confirmRoot = await waitFor(() => {
+-      const el = document.querySelector(".ant-modal-confirm");
++      const el = queryAntdConfirm();
+       expect(el).not.toBeNull();
+       return el as HTMLElement;
+     });
+-    const confirmTitle = confirmRoot.querySelector(".ant-modal-confirm-title");
++    const confirmTitle = queryAntdConfirmTitle(confirmRoot);
+     expect(confirmTitle).toHaveTextContent("删除机器");
+     expect(within(confirmRoot).getByText(/del-host-1/)).toBeInTheDocument();
+     expect(within(confirmRoot).getByText(/1 个运行时/)).toBeInTheDocument();
+@@ -582,7 +583,7 @@ describe("ql-20260829-006-6a9e: 机器级删除（离线机器可删，在线 di
+     fireEvent.click(findMachineDeleteButton());
+ 
+     const confirmRoot = await waitFor(() => {
+-      const el = document.querySelector(".ant-modal-confirm");
++      const el = queryAntdConfirm();
+       expect(el).not.toBeNull();
+       return el as HTMLElement;
+     });
+@@ -609,7 +610,7 @@ describe("ql-20260829-006-6a9e: 机器级删除（离线机器可删，在线 di
+ 
+     fireEvent.click(btn);
+     expect(daemon.deleteDaemonMachine).not.toHaveBeenCalled();
+-    expect(document.querySelector(".ant-modal-confirm")).toBeNull();
++    expect(queryAntdConfirm()).toBeNull();
+   });
+ });
+ 
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index 05c34bf1f..306951db9 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -61,6 +61,7 @@ import type {
+   DaemonRuntimeRead,
+   SessionRunRead,
+ } from "@/lib/daemon";
++import { closestAntdSelect, queryAntdSelectZone } from "@/test/dom-queries";
+ 
+ // ── hoisted mock 状态 ─────────────────────────────────────────────────────
+ 
+@@ -1624,10 +1625,8 @@ describe("机器筛选下拉接入共享机器（quick 机器行修复；ql-2026
+     const root =
+       anchor.classList.contains("ant-select")
+         ? anchor
+-        : (anchor.closest(".ant-select") as HTMLElement);
+-    const clickZone =
+-      (root.querySelector(".ant-select-content") as HTMLElement | null) ??
+-      (root.querySelector(".ant-select-selector") as HTMLElement | null);
++        : (closestAntdSelect(anchor) as HTMLElement);
++    const clickZone = queryAntdSelectZone(root);
+     if (!clickZone) throw new Error("select click zone for #slp-machine not found");
+     fireEvent.mouseDown(clickZone);
+     const option = await waitFor(() => {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+index d139a9eb6..b43cc7a19 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+@@ -141,6 +141,7 @@ import {
+   previewMergeKnowledge,
+   rejectKnowledge,
+ } from "@/lib/knowledge";
++import { closestAntdTreeRow, queryAntdTreeIcon, closestAntdTreeNodeWrapper } from "@/test/dom-queries";
+ 
+ const mockList = listKnowledge as unknown as ReturnType<typeof vi.fn>;
+ const mockGet = getKnowledge as unknown as ReturnType<typeof vi.fn>;
+@@ -292,9 +293,9 @@ describe("知识库页（task-03 zone 分组树）", () => {
+     // 待审核组置顶：徽标计数 1 条（挂在待审核组行内）。
+     const badge = screen.getByTestId("proposed-zone-badge");
+     expect(badge).toHaveTextContent("1 条");
+-    expect(badge.closest(".ant-tree-treenode")?.textContent).toContain("待审核");
++    expect(closestAntdTreeRow(badge)?.textContent).toContain("待审核");
+     const groupTitles = ["待审核", "知识手册", "决策库", "需求规则", "自动生成"].map(
+-      (label) => screen.getByText(label).closest(".ant-tree-treenode")!,
++      (label) => closestAntdTreeRow(screen.getByText(label))!,
+     );
+     // 固定 zone 顺序：待审核在最前（DOM 顺序即树顺序），需求规则在决策库后
+     // （task-05 / D-005@v1，fr 独立 zone）。
+@@ -305,10 +306,10 @@ describe("知识库页（task-03 zone 分组树）", () => {
+     expect(order.indexOf("需求规则")).toBeLessThan(order.indexOf("自动生成"));
+ 
+     // zone 组行是目录图标（Folder），组内文件行按扩展名分型（.md → FileText）。
+-    const dirRow = screen.getByText("决策库").closest(".ant-tree-treenode")!;
+-    expect(dirRow.querySelector(".ant-tree-iconEle svg.lucide-folder")).toBeTruthy();
+-    const fileRow = screen.getByText("conventions.md").closest(".ant-tree-treenode")!;
+-    expect(fileRow.querySelector(".ant-tree-iconEle svg.lucide-file-text")).toBeTruthy();
++    const dirRow = closestAntdTreeRow(screen.getByText("决策库"))!;
++    expect(queryAntdTreeIcon(dirRow, "folder")).toBeTruthy();
++    const fileRow = closestAntdTreeRow(screen.getByText("conventions.md"))!;
++    expect(queryAntdTreeIcon(fileRow, "file-text")).toBeTruthy();
+     // 日期灰字（zh-CN 本地化，UTC 时间戳在本地时区渲染，断言年份存在）。
+     expect(fileRow.textContent).toMatch(/2026/);
+   });
+@@ -318,7 +319,7 @@ describe("知识库页（task-03 zone 分组树）", () => {
+     await waitForTree(["需求规则", "host-fs-handler.md"]);
+ 
+     // fr 条目挂在需求规则组（zone 组节点路径 zone:fr）。
+-    const frRow = screen.getByText("host-fs-handler.md").closest(".ant-tree-treenode")! as HTMLElement;
++    const frRow = closestAntdTreeRow(screen.getByText("host-fs-handler.md"))! as HTMLElement;
+     expect(frRow.textContent).not.toContain("fr/");
+     // 文件级命中徽标：conventions.md 🔥214 / fr 文件 🔥18；无计数条目（INDEX.md）不带。
+     const conventionsRow = screen.getByText("conventions.md").closest(
+@@ -328,7 +329,7 @@ describe("知识库页（task-03 zone 分组树）", () => {
+       within(conventionsRow).getByTestId("tree-use-badge").textContent,
+     ).toBe("🔥214");
+     expect(within(frRow).getByTestId("tree-use-badge").textContent).toBe("🔥18");
+-    const indexRow = screen.getByText("INDEX.md").closest(".ant-tree-treenode")! as HTMLElement;
++    const indexRow = closestAntdTreeRow(screen.getByText("INDEX.md"))! as HTMLElement;
+     expect(within(indexRow).queryByTestId("tree-use-badge")).not.toBeInTheDocument();
+   });
+ 
+@@ -375,18 +376,18 @@ describe("知识库页（task-03 zone 分组树）", () => {
+     await waitForTree(["待审核", "pending-fix.md"]);
+ 
+     // 点 zone 组行 → 收起（子行隐藏，ql-20260821-015 expandAction=click）。
+-    fireEvent.click(screen.getByText("待审核").closest(".ant-tree-node-content-wrapper")!);
++    fireEvent.click(closestAntdTreeNodeWrapper(screen.getByText("待审核"))!);
+     await waitFor(() =>
+       expect(screen.queryByText("pending-fix.md")).not.toBeInTheDocument(),
+     );
+     // 再点 → 展开。
+-    fireEvent.click(screen.getByText("待审核").closest(".ant-tree-node-content-wrapper")!);
++    fireEvent.click(closestAntdTreeNodeWrapper(screen.getByText("待审核"))!);
+     await waitForTree(["pending-fix.md"]);
+ 
+     // 点文件行 → 按 filename（含子目录段）拉详情；md 文件默认卡片视图
+     // （task-05 / FR-04：统一条目渲染器挂载，md 阅读视图不在默认态）。
+     fireEvent.click(
+-      screen.getByText("pending-fix.md").closest(".ant-tree-node-content-wrapper")!,
++      closestAntdTreeNodeWrapper(screen.getByText("pending-fix.md"))!,
+     );
+     await waitFor(() => expect(mockGet).toHaveBeenCalledWith(WS, "proposed/pending-fix.md"));
+     await waitFor(() => expect(screen.getByText("待合并修复")).toBeInTheDocument());
+@@ -435,7 +436,7 @@ describe("写入口权限与 decisions 只读（task-05 / FR-02 / FR-07 / D-006@
+       }),
+     );
+     fireEvent.click(
+-      screen.getByText("conventions.md").closest(".ant-tree-node-content-wrapper")!,
++      closestAntdTreeNodeWrapper(screen.getByText("conventions.md"))!,
+     );
+     await waitFor(() => expect(screen.getByText("约定")).toBeInTheDocument());
+     expect(screen.queryByTestId("edit-entry")).not.toBeInTheDocument();
+@@ -458,7 +459,7 @@ describe("写入口权限与 decisions 只读（task-05 / FR-02 / FR-07 / D-006@
+     expect(screen.getByTestId("precipitate-entry")).toHaveTextContent("沉淀知识");
+ 
+     fireEvent.click(
+-      screen.getByText("conventions.md").closest(".ant-tree-node-content-wrapper")!,
++      closestAntdTreeNodeWrapper(screen.getByText("conventions.md"))!,
+     );
+     await waitFor(() => expect(screen.getByTestId("edit-entry")).toBeInTheDocument());
+ 
+@@ -490,7 +491,7 @@ describe("写入口权限与 decisions 只读（task-05 / FR-02 / FR-07 / D-006@
+     await waitForTree(["决策库", "daemon.md"]);
+ 
+     fireEvent.click(
+-      screen.getByText("daemon.md").closest(".ant-tree-node-content-wrapper")!,
++      closestAntdTreeNodeWrapper(screen.getByText("daemon.md"))!,
+     );
+     await waitFor(() => expect(screen.getByText("daemon 决策")).toBeInTheDocument());
+ 
+@@ -515,7 +516,7 @@ async function selectProposedEntry() {
+   renderPage();
+   await waitForTree(["待审核", "pending-fix.md"]);
+   fireEvent.click(
+-    screen.getByText("pending-fix.md").closest(".ant-tree-node-content-wrapper")!,
++    closestAntdTreeNodeWrapper(screen.getByText("pending-fix.md"))!,
+   );
+   await waitFor(() => expect(screen.getByText("待合并修复")).toBeInTheDocument());
+ }
+@@ -545,7 +546,7 @@ describe("待审核操作区：合并/拒绝（task-06 / FR-05 / D-007@v1）", (
+       }),
+     );
+     fireEvent.click(
+-      screen.getByText("conventions.md").closest(".ant-tree-node-content-wrapper")!,
++      closestAntdTreeNodeWrapper(screen.getByText("conventions.md"))!,
+     );
+     await waitFor(() => expect(screen.getByText("约定")).toBeInTheDocument());
+     expect(screen.queryByTestId("merge-entry")).not.toBeInTheDocument();
+@@ -682,7 +683,7 @@ describe("卡片/原文双 tab 分发（task-05 / 2026-09-20-knowledge-effect-pa
+     renderPage();
+     await waitForTree(["知识手册", "conventions.md"]);
+     fireEvent.click(
+-      screen.getByText("conventions.md").closest(".ant-tree-node-content-wrapper")!,
++      closestAntdTreeNodeWrapper(screen.getByText("conventions.md"))!,
+     );
+     await waitFor(() => expect(screen.getByText("项目约定")).toBeInTheDocument());
+     await screen.findByTestId("entry-card-list");
+@@ -726,7 +727,7 @@ describe("卡片/原文双 tab 分发（task-05 / 2026-09-20-knowledge-effect-pa
+       }),
+     );
+     fireEvent.click(
+-      screen.getByText("INDEX.md").closest(".ant-tree-node-content-wrapper")!,
++      closestAntdTreeNodeWrapper(screen.getByText("INDEX.md"))!,
+     );
+     await waitFor(() =>
+       expect(screen.getByTestId("entry-card-list")).toHaveAttribute("data-form", "index"),
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+index 5f65a30ba..ac8017d60 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -38,6 +38,7 @@ import ChangesPage, {
+ } from "@/app/(dashboard)/workspaces/[id]/changes/page";
+ import type { ChangeSummary } from "@/lib/changes";
+ import type { Workspace } from "@/lib/workspaces";
++import { closestAntdBadge } from "@/test/dom-queries";
+ 
+ // ── mocks（hoisted，让 mock 工厂能引用同一组 vi.fn）──────────────────────
+ const mocks = vi.hoisted(() => ({
+@@ -568,7 +569,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     // stage 主行徽章照常（execute → 执行；task-08 新增「执行」列头与徽标同文案，
+     // 全局 getByText 撞多元素 → 收敛到徽标作用域，断言意图不变）
+     expect(
+-      screen.getAllByText("执行").some((el) => el.closest(".ant-badge")),
++      screen.getAllByText("执行").some((el) => closestAntdBadge(el)),
+     ).toBe(true);
+   });
+ 
+@@ -586,7 +587,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     await renderAndWait();
+     // stage 主行照常渲染（execute → 执行；task-08 执行列头同文案 → 收敛徽标作用域）
+     expect(
+-      screen.getAllByText("执行").some((el) => el.closest(".ant-badge")),
++      screen.getAllByText("执行").some((el) => closestAntdBadge(el)),
+     ).toBe(true);
+     // 无摘要副行（降级：视觉与现状一致）
+     expect(screen.queryByTestId("step-sub-row")).not.toBeInTheDocument();
+diff --git a/frontend/src/components/__tests__/admin-org-tree.test.tsx b/frontend/src/components/__tests__/admin-org-tree.test.tsx
+index b30a220de..dfe09ad95 100644
+--- a/frontend/src/components/__tests__/admin-org-tree.test.tsx
++++ b/frontend/src/components/__tests__/admin-org-tree.test.tsx
+@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
+ 
+ import { AdminOrgTree } from "@/components/admin-org-tree";
+ import type { OrganizationRead } from "@/lib/admin";
++import { closestAntdTreeNodeWrapper } from "@/test/dom-queries";
+ 
+ // antd Tree 内部 rc-resize-observer 依赖 ResizeObserver,jsdom 无此全局,
+ // 补一个 no-op polyfill 否则渲染即抛 "ResizeObserver is not defined"。
+@@ -54,7 +55,7 @@ function treeitemByTitle(title: string): HTMLElement {
+ // antd Tree 标题点击区:.ant-tree-node-content-wrapper
+ function clickTitleOf(title: string): void {
+   const titleEl = screen.getByText(title);
+-  const wrapper = titleEl.closest(".ant-tree-node-content-wrapper") as HTMLElement;
++  const wrapper = closestAntdTreeNodeWrapper(titleEl) as HTMLElement;
+   fireEvent.click(wrapper);
+ }
+ 
+diff --git a/frontend/src/components/__tests__/agent-profile-form.test.tsx b/frontend/src/components/__tests__/agent-profile-form.test.tsx
+index c276b259a..fe95c2045 100644
+--- a/frontend/src/components/__tests__/agent-profile-form.test.tsx
++++ b/frontend/src/components/__tests__/agent-profile-form.test.tsx
+@@ -22,6 +22,7 @@ import {
+   toUpdateBody,
+ } from "@/components/agent-profile-form";
+ import type { AgentProfileRead } from "@/lib/agent-profiles";
++import { closestAntdSelect, queryAntdSelectZone, closestAntdSelectOption } from "@/test/dom-queries";
+ 
+ // ── antd v6 + jsdom 的 `:has` 兼容补丁（仅本文件） ─────────────────────────
+ // antd v6 Form style 含 `:has(> .ant-switch:only-child, > .ant-rate:only-child)` 规则。
+@@ -317,12 +318,10 @@ describe("AgentProfileForm 创建提交", () => {
+  */
+ async function chooseAntdOption(placeholderText: string, optionText: string) {
+   const anchor = screen.getByText(placeholderText);
+-  const selectWrapper = anchor.closest(".ant-select");
++  const selectWrapper = closestAntdSelect(anchor);
+   if (!selectWrapper)
+     throw new Error(`ant-select for "${placeholderText}" not found`);
+-  const clickZone =
+-    selectWrapper.querySelector(".ant-select-content") ??
+-    selectWrapper.querySelector(".ant-select-selector");
++  const clickZone = queryAntdSelectZone(selectWrapper);
+   if (!clickZone)
+     throw new Error(
+       `ant-select click zone not found under "${placeholderText}"`,
+@@ -331,7 +330,7 @@ async function chooseAntdOption(placeholderText: string, optionText: string) {
+   const option = await screen.findByText(optionText, {
+     selector: ".ant-select-item-option-content",
+   });
+-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
++  const optionRow = closestAntdSelectOption(option) as HTMLElement;
+   fireEvent.mouseDown(optionRow);
+   fireEvent.click(optionRow);
+   await act(async () => {
+diff --git a/frontend/src/components/__tests__/runtime-usage-line-chart.test.tsx b/frontend/src/components/__tests__/runtime-usage-line-chart.test.tsx
+index a18db6032..6285063fa 100644
+--- a/frontend/src/components/__tests__/runtime-usage-line-chart.test.tsx
++++ b/frontend/src/components/__tests__/runtime-usage-line-chart.test.tsx
+@@ -6,6 +6,7 @@ import { render, screen } from "@testing-library/react";
+ import { RuntimeUsageLineChart } from "@/components/charts/RuntimeUsageLineChart";
+ import type { RuntimeUsagePoint } from "@/components/charts/RuntimeUsageLineChart";
+ import { useThemeStore } from "@/stores/theme";
++import { queryChart } from "@/test/dom-queries";
+ 
+ function makePoint(ts: string, input = 100, output = 50): RuntimeUsagePoint {
+   return {
+@@ -35,7 +36,7 @@ describe("RuntimeUsageLineChart", () => {
+       />,
+     );
+     // echarts-for-react 渲染根 div 带 class
+-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
++    expect(queryChart(container)).not.toBeNull();
+   });
+ 
+   it("dark 主题下订阅 useThemeStore 正常渲染(dark 系列色/legend 注入)", () => {
+@@ -45,7 +46,7 @@ describe("RuntimeUsageLineChart", () => {
+         points={[makePoint("2026-06-24T00:00:00", 1000, 500)]}
+       />,
+     );
+-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
++    expect(queryChart(container)).not.toBeNull();
+   });
+ 
+   it("空数据显示暂无数据占位", () => {
+@@ -71,7 +72,7 @@ describe("RuntimeUsageLineChart", () => {
+         height={80}
+       />,
+     );
+-    const root = container.querySelector(".echarts-for-react") as HTMLElement;
++    const root = queryChart(container) as HTMLElement;
+     expect(root.style.height).toBe("80px");
+   });
+ 
+@@ -79,7 +80,7 @@ describe("RuntimeUsageLineChart", () => {
+     const { container } = render(
+       <RuntimeUsageLineChart points={[makePoint("2026-06-24T00:00:00")]} />,
+     );
+-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
++    expect(queryChart(container)).not.toBeNull();
+   });
+ 
+   it("默认高度 120", () => {
+@@ -88,7 +89,7 @@ describe("RuntimeUsageLineChart", () => {
+         points={[makePoint("2026-06-24T00:00:00")]}
+       />,
+     );
+-    const root = container.querySelector(".echarts-for-react") as HTMLElement;
++    const root = queryChart(container) as HTMLElement;
+     expect(root.style.height).toBe("120px");
+   });
+ });
+diff --git a/frontend/src/components/__tests__/work-hour-bar-chart.test.tsx b/frontend/src/components/__tests__/work-hour-bar-chart.test.tsx
+index b7cf06792..254e842e4 100644
+--- a/frontend/src/components/__tests__/work-hour-bar-chart.test.tsx
++++ b/frontend/src/components/__tests__/work-hour-bar-chart.test.tsx
+@@ -5,6 +5,7 @@ import { render, screen } from "@testing-library/react";
+ // (dynamic 在 jsdom 测试环境会一直停在 loading 态)。
+ import { WorkHourBarChart } from "@/components/charts/WorkHourBarChart";
+ import { useThemeStore } from "@/stores/theme";
++import { queryChart } from "@/test/dom-queries";
+ 
+ describe("WorkHourBarChart", () => {
+   // 组件订阅 useThemeStore(task-09),dark 用例改写 store 后恢复默认主题,
+@@ -23,7 +24,7 @@ describe("WorkHourBarChart", () => {
+       />,
+     );
+     // echarts-for-react 渲染根 div 带 class
+-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
++    expect(queryChart(container)).not.toBeNull();
+   });
+ 
+   it("dark 主题下订阅 useThemeStore 正常渲染(dark 文字/分割线注入)", () => {
+@@ -31,7 +32,7 @@ describe("WorkHourBarChart", () => {
+     const { container } = render(
+       <WorkHourBarChart rows={[{ name: "alice", total_hours: 10 }]} />,
+     );
+-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
++    expect(queryChart(container)).not.toBeNull();
+   });
+ 
+   it("空数据显示暂无数据占位", () => {
+@@ -55,7 +56,7 @@ describe("WorkHourBarChart", () => {
+         height={200}
+       />,
+     );
+-    const root = container.querySelector(".echarts-for-react") as HTMLElement;
++    const root = queryChart(container) as HTMLElement;
+     expect(root.style.height).toBe("200px");
+   });
+ });
+diff --git a/frontend/src/components/__tests__/work-hour-pie-chart.test.tsx b/frontend/src/components/__tests__/work-hour-pie-chart.test.tsx
+index 408e7a524..32564036c 100644
+--- a/frontend/src/components/__tests__/work-hour-pie-chart.test.tsx
++++ b/frontend/src/components/__tests__/work-hour-pie-chart.test.tsx
+@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
+ 
+ import { WorkHourPieChart } from "@/components/charts/WorkHourPieChart";
+ import { useThemeStore } from "@/stores/theme";
++import { queryChart } from "@/test/dom-queries";
+ 
+ describe("WorkHourPieChart", () => {
+   // 组件订阅 useThemeStore(task-09),dark 用例改写 store 后恢复默认主题,
+@@ -21,7 +22,7 @@ describe("WorkHourPieChart", () => {
+         totalHours={15}
+       />,
+     );
+-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
++    expect(queryChart(container)).not.toBeNull();
+   });
+ 
+   it("空数据显示暂无数据占位", () => {
+@@ -44,7 +45,7 @@ describe("WorkHourPieChart", () => {
+     const { container } = render(
+       <WorkHourPieChart rows={rows} totalHours={49} topN={5} />,
+     );
+-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
++    expect(queryChart(container)).not.toBeNull();
+   });
+ 
+   it("dark 主题下订阅 useThemeStore 正常渲染(dark 配色注入)", () => {
+@@ -58,6 +59,6 @@ describe("WorkHourPieChart", () => {
+         totalHours={15}
+       />,
+     );
+-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
++    expect(queryChart(container)).not.toBeNull();
+   });
+ });
+diff --git a/frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx b/frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx
+index 128846a60..1dcc13ee6 100644
+--- a/frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx
++++ b/frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx
+@@ -36,6 +36,7 @@ import type * as React from "react";
+ 
+ import { AgentProfileCardGrid } from "@/components/agent-profile/agent-profile-card-grid";
+ import type { AgentProfileAggregatedItem } from "@/lib/agent-profiles";
++import { closestAntdSelect, queryAntdSelectZone, queryAntdSpin, closestAntdSelectOption } from "@/test/dom-queries";
+ 
+ // ── mocks ────────────────────────────────────────────────────────────────
+ 
+@@ -157,13 +158,10 @@ function renderGrid(ui: React.ReactElement) {
+  */
+ async function chooseAntdOption(placeholderText: string, optionText: string) {
+   const placeholder = screen.getByText(placeholderText);
+-  const selectWrapper = placeholder.closest(".ant-select");
++  const selectWrapper = closestAntdSelect(placeholder);
+   if (!selectWrapper)
+     throw new Error(`ant-select for placeholder "${placeholderText}" not found`);
+-  // 优先 antd v5 新结构 .ant-select-content，回退旧版 .ant-select-selector。
+-  const clickZone =
+-    selectWrapper.querySelector(".ant-select-content") ??
+-    selectWrapper.querySelector(".ant-select-selector");
++  const clickZone = queryAntdSelectZone(selectWrapper);
+   if (!clickZone)
+     throw new Error(
+       `ant-select click zone not found under placeholder "${placeholderText}"`,
+@@ -175,7 +173,7 @@ async function chooseAntdOption(placeholderText: string, optionText: string) {
+   });
+   // 点击实际选项容器（antd onClick 挂在 .ant-select-item-option）
+   // antd v5 Select 选项选中监听 mousedown + click；同时触发确保命中。
+-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
++  const optionRow = closestAntdSelectOption(option) as HTMLElement;
+   fireEvent.mouseDown(optionRow);
+   fireEvent.click(optionRow);
+   // 给 React 合成事件 + state 提交一拍（调用方再 waitFor 过滤生效）
+@@ -379,7 +377,7 @@ describe("AgentProfileCardGrid 状态（加载/错误/空）", () => {
+   it("加载中 → Spin（不渲染卡片）", () => {
+     setMine({ profiles: [], isLoading: true });
+     const { container } = renderGrid(<AgentProfileCardGrid />);
+-    expect(container.querySelector(".ant-spin")).toBeInTheDocument();
++    expect(queryAntdSpin(container)).toBeInTheDocument();
+     expect(screen.queryByText("代码审查助手")).not.toBeInTheDocument();
+   });
+ 
+diff --git a/frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx b/frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx
+index c408015f2..40aad6757 100644
+--- a/frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx
++++ b/frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx
+@@ -41,6 +41,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ // 组件尚未实现（task-07）——运行时模块不存在即本文件的红态来源。
+ import { ConflictCompareModal } from "@/components/changes/conflict-compare-modal";
+ import type { components } from "@/lib/api-types";
++import { queryAntdConfirm, queryAntdConfirmTitle } from "@/test/dom-queries";
+ 
+ type CompareResponse = components["schemas"]["SillySpecConflictCompareResponse"];
+ type CompareFile = components["schemas"]["SillySpecConflictCompareFile"];
+@@ -214,7 +215,7 @@ function renderModal(props: ModalPropsOverride = {}) {
+ /** 等 antd modal.confirm 挂载（portal 到 body；标题渲染两份走结构选择器）。 */
+ async function openConfirmRoot(): Promise<HTMLElement> {
+   return await waitFor(() => {
+-    const el = document.querySelector(".ant-modal-confirm");
++    const el = queryAntdConfirm();
+     expect(el).not.toBeNull();
+     return el as HTMLElement;
+   });
+@@ -399,7 +400,7 @@ describe("ConflictCompareModal（task-06 红态锚定 / design §7.2）", () =>
+ 
+     fireEvent.click(screen.getByRole("button", { name: "保本地" }));
+     const confirmRoot = await openConfirmRoot();
+-    expect(confirmRoot.querySelector(".ant-modal-confirm-title")).toHaveTextContent(
++    expect(queryAntdConfirmTitle(confirmRoot)).toHaveTextContent(
+       "裁决冲突：保本地（keep-local）",
+     );
+     expect(
+@@ -430,7 +431,7 @@ describe("ConflictCompareModal（task-06 红态锚定 / design §7.2）", () =>
+ 
+     fireEvent.click(screen.getByRole("button", { name: "取平台" }));
+     const confirmRoot = await openConfirmRoot();
+-    expect(confirmRoot.querySelector(".ant-modal-confirm-title")).toHaveTextContent(
++    expect(queryAntdConfirmTitle(confirmRoot)).toHaveTextContent(
+       "裁决冲突：取平台（take-platform）",
+     );
+     expect(
+diff --git a/frontend/src/components/changes/__tests__/platform-sync-section.test.tsx b/frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
+index 537dca23f..bc9ff9633 100644
+--- a/frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
++++ b/frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
+@@ -44,6 +44,7 @@ import {
+ import { useSession } from "@/stores/session";
+ import type { components } from "@/lib/api-types";
+ import type { DaemonMachineRead } from "@/lib/daemon";
++import { queryAntdConfirm, queryAntdConfirmTitle } from "@/test/dom-queries";
+ 
+ type StatusFixture = components["schemas"]["MachineSillySpecStatusRead"];
+ type ChangeFixture = components["schemas"]["DaemonHeartbeatSillySpecChange"];
+@@ -297,7 +298,7 @@ async function pushMachine(machine: DaemonMachineRead) {
+ /** 等 antd modal.confirm 挂载（portal 到 body；标题渲染两份走结构选择器）。 */
+ async function openConfirmRoot(): Promise<HTMLElement> {
+   return await waitFor(() => {
+-    const el = document.querySelector(".ant-modal-confirm");
++    const el = queryAntdConfirm();
+     expect(el).not.toBeNull();
+     return el as HTMLElement;
+   });
+@@ -517,7 +518,7 @@ describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", ()
+ 
+     const confirmRoot = await openConfirmRoot();
+     expect(
+-      confirmRoot.querySelector(".ant-modal-confirm-title"),
++      queryAntdConfirmTitle(confirmRoot),
+     ).toHaveTextContent("清理 ghost 残留");
+     expect(
+       within(confirmRoot).getByText(/目录已不存在的变更行/),
+diff --git a/frontend/src/components/daemon/__tests__/bash-progress-card.test.tsx b/frontend/src/components/daemon/__tests__/bash-progress-card.test.tsx
+index 69c1c1844..524f4a85e 100644
+--- a/frontend/src/components/daemon/__tests__/bash-progress-card.test.tsx
++++ b/frontend/src/components/daemon/__tests__/bash-progress-card.test.tsx
+@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
+ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+ 
+ import { BashProgressCard, type BashChunkItem } from "@/components/daemon/bash-progress-card";
++import { querySpinner } from "@/test/dom-queries";
+ 
+ const writeTextMock = vi.fn();
+ Object.assign(navigator, {
+@@ -32,7 +33,7 @@ describe("BashProgressCard", () => {
+ 
+   it("running 态显示 spinner，不显示退出码", () => {
+     render(<BashProgressCard command="npm test" status="running" />);
+-    expect(document.querySelector(".animate-spin")).not.toBeNull();
++    expect(querySpinner()).not.toBeNull();
+     expect(screen.queryByText(/exit/)).toBeNull();
+     expect(screen.getByTestId("bash-progress-card")).toHaveAttribute("data-status", "running");
+   });
+@@ -48,7 +49,7 @@ describe("BashProgressCard", () => {
+     );
+     expect(screen.getByText("exit 0")).toBeInTheDocument();
+     expect(screen.getByText(/elapsed 00:12\.3/)).toBeInTheDocument();
+-    expect(document.querySelector(".animate-spin")).toBeNull();
++    expect(querySpinner()).toBeNull();
+   });
+ 
+   it("failed 显示非零 exit code", () => {
+@@ -107,7 +108,7 @@ describe("BashProgressCard", () => {
+         chunks={[{ channel: "stdout", content: "running…", is_final: false }]}
+       />,
+     );
+-    expect(document.querySelector(".animate-spin")).not.toBeNull();
++    expect(querySpinner()).not.toBeNull();
+ 
+     rerender(
+       <BashProgressCard
+@@ -119,6 +120,6 @@ describe("BashProgressCard", () => {
+         ]}
+       />,
+     );
+-    expect(document.querySelector(".animate-spin")).toBeNull();
++    expect(querySpinner()).toBeNull();
+   });
+ });
+diff --git a/frontend/src/components/daemon/__tests__/platform-shared-agents-card.test.tsx b/frontend/src/components/daemon/__tests__/platform-shared-agents-card.test.tsx
+index 3adecb57b..eea1c524b 100644
+--- a/frontend/src/components/daemon/__tests__/platform-shared-agents-card.test.tsx
++++ b/frontend/src/components/daemon/__tests__/platform-shared-agents-card.test.tsx
+@@ -27,6 +27,7 @@ import { App as AntApp } from "antd";
+ 
+ import { PlatformSharedAgentsCard } from "../platform-shared-agents-card";
+ import { useSession } from "@/stores/session";
++import { queryAntdConfirm, queryAntdConfirmTitle, closestAntdSelect, queryAntdSelectZone, closestAntdSelectOption } from "@/test/dom-queries";
+ 
+ // ── antd v6 + jsdom 的 `:has` 兼容补丁（先例 agent-profile-form.test.tsx）──
+ // antd v6 Form style 含 `:has(> .ant-switch:only-child, > .ant-rate:only-child)`
+@@ -250,18 +251,15 @@ async function expandCard() {
+  * 选中监听 mousedown + click 同时触发。
+  */
+ async function selectOption(placeholder: string, optionText: string) {
+-  const selectWrapper = screen.getByText(placeholder).closest(".ant-select");
++  const selectWrapper = closestAntdSelect(screen.getByText(placeholder));
+   if (!selectWrapper)
+     throw new Error(`ant-select for placeholder "${placeholder}" not found`);
+-  const clickZone =
+-    selectWrapper.querySelector(".ant-select-content") ??
+-    selectWrapper.querySelector(".ant-select-selector") ??
+-    selectWrapper;
++  const clickZone = queryAntdSelectZone(selectWrapper) ?? selectWrapper;
+   fireEvent.mouseDown(clickZone as HTMLElement);
+   const option = await screen.findByText(optionText, {
+     selector: ".ant-select-item-option-content",
+   });
+-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
++  const optionRow = closestAntdSelectOption(option) as HTMLElement;
+   fireEvent.mouseDown(optionRow);
+   fireEvent.click(optionRow);
+   // 给 React 合成事件 + state 提交一拍。
+@@ -345,11 +343,11 @@ describe("PlatformSharedAgentsCard（task-09 / FR-04 + quick-6625a929）", () =>
+     await expandCard();
+ 
+     // 档案下拉：展开时仅 platform 可见档案（R-05：非 platform 不进下拉）。
+-    const profileWrapper = screen
+-      .getByText("选择 platform 可见的档案")
+-      .closest(".ant-select") as HTMLElement;
++    const profileWrapper = closestAntdSelect(
++      screen.getByText("选择 platform 可见的档案"),
++    ) as HTMLElement;
+     fireEvent.mouseDown(
+-      (profileWrapper.querySelector(".ant-select-content") ??
++      (queryAntdSelectZone(profileWrapper) ??
+         profileWrapper) as HTMLElement,
+     );
+     const profileOpt = await screen.findByText("平台功能讲解助手（claude）", {
+@@ -357,7 +355,7 @@ describe("PlatformSharedAgentsCard（task-09 / FR-04 + quick-6625a929）", () =>
+     });
+     // 下拉开着：私有档案（visibility=private）应被下拉过滤掉。
+     expect(screen.queryByText("我的私人档案（claude）")).toBeNull();
+-    const profileRow = profileOpt.closest(".ant-select-item-option") as HTMLElement;
++    const profileRow = closestAntdSelectOption(profileOpt) as HTMLElement;
+     fireEvent.mouseDown(profileRow);
+     fireEvent.click(profileRow);
+     await act(async () => {
+@@ -438,11 +436,11 @@ describe("PlatformSharedAgentsCard（task-09 / FR-04 + quick-6625a929）", () =>
+     // 两份（.ant-modal-title 供 aria-labelledby + .ant-modal-confirm-title 正文），
+     // getByText 会多命中——按结构选择器断言。
+     const confirmRoot = await waitFor(() => {
+-      const el = document.querySelector(".ant-modal-confirm");
++      const el = queryAntdConfirm();
+       expect(el).not.toBeNull();
+       return el as HTMLElement;
+     });
+-    const confirmTitle = confirmRoot.querySelector(".ant-modal-confirm-title");
++    const confirmTitle = queryAntdConfirmTitle(confirmRoot);
+     expect(confirmTitle).toHaveTextContent("删除共享智能体");
+     expect(within(confirmRoot).getByText(/平台功能讲解助手/)).toBeInTheDocument();
+ 
+@@ -466,7 +464,7 @@ describe("PlatformSharedAgentsCard（task-09 / FR-04 + quick-6625a929）", () =>
+     );
+ 
+     const confirmRoot = await waitFor(() => {
+-      const el = document.querySelector(".ant-modal-confirm");
++      const el = queryAntdConfirm();
+       expect(el).not.toBeNull();
+       return el as HTMLElement;
+     });
+diff --git a/frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx b/frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx
+index 107393b4c..6b27464a2 100644
+--- a/frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx
++++ b/frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx
+@@ -30,6 +30,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
+ 
+ import { ScheduledMessagesBar } from "@/components/daemon/scheduled-messages-bar";
+ import type { ScheduledMessageRead } from "@/lib/daemon";
++import { queryAntdConfirm } from "@/test/dom-queries";
+ 
+ const mocks = vi.hoisted(() => ({
+   listScheduledMessages: vi.fn(),
+@@ -266,7 +267,7 @@ describe("ScheduledMessagesBar 取消流", () => {
+     if (!keepBtn) throw new Error("keep button not found");
+     fireEvent.click(keepBtn);
+     await waitFor(() =>
+-      expect(document.querySelector(".ant-modal-confirm")).toBeNull(),
++      expect(queryAntdConfirm()).toBeNull(),
+     );
+     expect(mocks.deleteScheduledMessage).not.toHaveBeenCalled();
+   });
+diff --git a/frontend/src/components/explorer/__tests__/file-explorer.test.tsx b/frontend/src/components/explorer/__tests__/file-explorer.test.tsx
+index d24f1e157..6bd930d54 100644
+--- a/frontend/src/components/explorer/__tests__/file-explorer.test.tsx
++++ b/frontend/src/components/explorer/__tests__/file-explorer.test.tsx
+@@ -33,6 +33,7 @@ vi.mock("@/lib/explorer", async (importOriginal) => {
+ 
+ import { FileExplorer } from "../file-explorer";
+ import { fetchTree, fetchSearch } from "@/lib/explorer";
++import { closestAntdTreeRow, queryAntdTreeIcon, queryAntdTreeSwitcher, closestAntdTreeNodeWrapper } from "@/test/dom-queries";
+ 
+ const mockFetchTree = fetchTree as unknown as ReturnType<typeof vi.fn>;
+ const mockFetchSearch = fetchSearch as unknown as ReturnType<typeof vi.fn>;
+@@ -65,16 +66,16 @@ async function waitForRoot() {
+ 
+ /** 点某目录行的 switcher 触发展开。 */
+ function expandRow(name: string) {
+-  const row = screen.getByText(name).closest(".ant-tree-treenode");
++  const row = closestAntdTreeRow(screen.getByText(name));
+   expect(row).toBeTruthy();
+-  const switcher = row!.querySelector(".ant-tree-switcher");
++  const switcher = queryAntdTreeSwitcher(row!);
+   expect(switcher).toBeTruthy();
+   fireEvent.click(switcher!);
+ }
+ 
+ /** 点某节点行标题触发选中。 */
+ function clickNode(name: string) {
+-  fireEvent.click(screen.getByText(name).closest(".ant-tree-node-content-wrapper")!);
++  fireEvent.click(closestAntdTreeNodeWrapper(screen.getByText(name))!);
+ }
+ 
+ /** 提交搜索词（回车立即查）。 */
+@@ -123,9 +124,9 @@ describe("FileExplorer（task-06）", () => {
+     );
+     expect(titles).toEqual(["工作区根", "a", "b", "a.txt", "z.md"]);
+     // 图标：目录 lucide-folder / 文件按扩展名（未知/文本类回退 lucide-file-text）。
+-    const dirRow = screen.getByText("a").closest(".ant-tree-treenode")!;
++    const dirRow = closestAntdTreeRow(screen.getByText("a"))!;
+     expect(dirRow.querySelector("svg.lucide-folder")).toBeTruthy();
+-    const fileRow = screen.getByText("a.txt").closest(".ant-tree-treenode")!;
++    const fileRow = closestAntdTreeRow(screen.getByText("a.txt"))!;
+     expect(fileRow.querySelector("svg.lucide-file-text")).toBeTruthy();
+   });
+ 
+@@ -138,10 +139,7 @@ describe("FileExplorer（task-06）", () => {
+ 
+     // 取 iconEle 内的图标 svg（目录行第一个 svg 是 switcher 展开箭头，无 lucide class）。
+     const rowIconClass = (name: string) =>
+-      screen
+-        .getByText(name)
+-        .closest(".ant-tree-treenode")!
+-        .querySelector(".ant-tree-iconEle svg")!.classList;
++      queryAntdTreeIcon(closestAntdTreeRow(screen.getByText(name))!)!.classList;
+     expect(rowIconClass("main.ts").contains("lucide-braces")).toBe(true);
+     expect(rowIconClass("config.json").contains("lucide-file-json2")).toBe(true);
+     expect(rowIconClass("logo.png").contains("lucide-file-image")).toBe(true);
+@@ -168,10 +166,7 @@ describe("FileExplorer（task-06）", () => {
+     await waitForRoot();
+ 
+     const rowIconClass = (name: string) =>
+-      screen
+-        .getByText(name)
+-        .closest(".ant-tree-treenode")!
+-        .querySelector(".ant-tree-iconEle svg")!.classList;
++      queryAntdTreeIcon(closestAntdTreeRow(screen.getByText(name))!)!.classList;
+     // 各语言独立形状：Java 咖啡 / class 二进制 / xml code-xml / Vue 三角 /
+     // jsx 原子 / py f(x)（lucide-square-function）/ Go 六边形 / C# 积木 / sh 终端。
+     expect(rowIconClass("Main.java").contains("lucide-coffee")).toBe(true);
+@@ -232,7 +227,7 @@ describe("FileExplorer（task-06）", () => {
+ 
+     clickNode("backend");
+     expect(onSelectFile).not.toHaveBeenCalled();
+-    const wrapper = screen.getByText("backend").closest(".ant-tree-node-content-wrapper")!;
++    const wrapper = closestAntdTreeNodeWrapper(screen.getByText("backend"))!;
+     expect(wrapper.className).toContain("ant-tree-node-selected");
+   });
+ 
+@@ -402,7 +397,7 @@ describe("FileExplorer（task-06）", () => {
+     expect(paths).toEqual(["", "backend", "backend/app"]);
+     // 各级目录已展开（深层节点渲染出来）且目标节点选中。
+     await waitFor(() => {
+-      const wrapper = screen.getByText("main.py").closest(".ant-tree-node-content-wrapper")!;
++      const wrapper = closestAntdTreeNodeWrapper(screen.getByText("main.py"))!;
+       expect(wrapper.className).toContain("ant-tree-node-selected");
+     });
+     expect(screen.getByText("app")).toBeInTheDocument();
+@@ -428,7 +423,7 @@ describe("FileExplorer（task-06）", () => {
+     await waitFor(() => expect(mockFetchTree).toHaveBeenCalledWith("ws1", "backend"));
+     await waitFor(() => expect(screen.getByText("pyproject.toml")).toBeInTheDocument());
+     expect(onSelectFile).not.toHaveBeenCalled();
+-    const wrapper = screen.getByText("backend").closest(".ant-tree-node-content-wrapper")!;
++    const wrapper = closestAntdTreeNodeWrapper(screen.getByText("backend"))!;
+     expect(wrapper.className).toContain("ant-tree-node-selected");
+     const paths = mockFetchTree.mock.calls.map((c) => c[1]);
+     expect(paths).toEqual(["", "backend"]);
+diff --git a/frontend/src/components/explorer/__tests__/file-preview.test.tsx b/frontend/src/components/explorer/__tests__/file-preview.test.tsx
+index 22f24e282..13ccb1689 100644
+--- a/frontend/src/components/explorer/__tests__/file-preview.test.tsx
++++ b/frontend/src/components/explorer/__tests__/file-preview.test.tsx
+@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
+ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ import { FilePreview } from "@/components/explorer/file-preview";
++import { queryAntdSpin, closestAntdImage } from "@/test/dom-queries";
+ 
+ /**
+  * 黑盒测试：mock 取数层（@/lib/explorer）、统一预览弹窗（@/components/files）、
+@@ -136,7 +137,7 @@ describe("FilePreview", () => {
+   it("加载中显示 Spin", () => {
+     mockQueryResult(null, { pending: true });
+     const { container } = render(<FilePreview workspaceId="ws-1" filePath="a.py" />);
+-    expect(container.querySelector(".ant-spin")).not.toBeNull();
++    expect(queryAntdSpin(container)).not.toBeNull();
+   });
+ 
+   it("加载失败显示红条并透传 ApiError 中文文案", () => {
+@@ -175,7 +176,7 @@ describe("FilePreview", () => {
+     const img1 = await screen.findByRole("img", { name: "logo.png" });
+     expect(img1).toHaveAttribute("src", "blob:preview-1");
+     // antd Image（FR-05，可点击放大/缩放/旋转）：img 落 .ant-image wrapper 内且带语义类
+-    expect(img1.closest(".ant-image")).not.toBeNull();
++    expect(closestAntdImage(img1)).not.toBeNull();
+     expect(img1.className).toContain("ant-image-img");
+     expect(explorerMocks.fetchDownload).toHaveBeenCalledWith("ws-1", "docs/logo.png");
+ 
+diff --git a/frontend/src/components/group-chat/__tests__/member-panel.test.tsx b/frontend/src/components/group-chat/__tests__/member-panel.test.tsx
+index f8778ebac..d58c98bfb 100644
+--- a/frontend/src/components/group-chat/__tests__/member-panel.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/member-panel.test.tsx
+@@ -66,6 +66,7 @@ import type { GroupChatRead, GroupMemberRead} from "@/lib/daemon";
+ import type { DaemonMachineRead, DaemonRuntimeRead } from "@/lib/daemon";
+ import type { Workspace } from "@/lib/workspaces";
+ import type { ProjectMember } from "@/lib/ppm/types";
++import { closestAntdSelect, queryAntdSelectZone, closestAntdSelectOption } from "@/test/dom-queries";
+ 
+ // ── hoisted mock 状态 ─────────────────────────────────────────────────────
+ 
+@@ -179,11 +180,9 @@ function openAntdSelect(selectId: string) {
+   if (!anchor) throw new Error(`element #${selectId} not found`);
+   const root = anchor.classList.contains("ant-select")
+     ? anchor
+-    : (anchor.closest(".ant-select") as HTMLElement | null);
++    : closestAntdSelect(anchor);
+   if (!root) throw new Error(`.ant-select for #${selectId} not found`);
+-  const clickZone =
+-    (root.querySelector(".ant-select-content") as HTMLElement | null) ??
+-    (root.querySelector(".ant-select-selector") as HTMLElement | null);
++  const clickZone = queryAntdSelectZone(root);
+   if (!clickZone) throw new Error(`select click zone for #${selectId} not found`);
+   fireEvent.mouseDown(clickZone);
+ }
+@@ -197,7 +196,7 @@ async function chooseAntdOptionByText(selectId: string, optionText: string) {
+     if (!hit) throw new Error(`option "${optionText}" not found`);
+     return hit as HTMLElement;
+   });
+-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
++  const optionRow = closestAntdSelectOption(option) as HTMLElement;
+   fireEvent.mouseDown(optionRow);
+   fireEvent.click(optionRow);
+   await act(async () => {
+diff --git a/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx b/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx
+index 99d067709..20c8bd582 100644
+--- a/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx
++++ b/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx
+@@ -73,6 +73,7 @@ import {
+   type GroupChatCreateRead,
+ } from "@/lib/daemon";
+ import type { DaemonMachineRead, DaemonRuntimeRead } from "@/lib/daemon";
++import { closestAntdSelect, queryAntdSelectZone, closestAntdSelectOption } from "@/test/dom-queries";
+ 
+ // ── hoisted mock 状态 ─────────────────────────────────────────────────────
+ 
+@@ -161,11 +162,9 @@ function openAntdSelect(selectId: string) {
+   if (!anchor) throw new Error(`element #${selectId} not found`);
+   const root = anchor.classList.contains("ant-select")
+     ? anchor
+-    : (anchor.closest(".ant-select") as HTMLElement | null);
++    : closestAntdSelect(anchor);
+   if (!root) throw new Error(`.ant-select for #${selectId} not found`);
+-  const clickZone =
+-    (root.querySelector(".ant-select-content") as HTMLElement | null) ??
+-    (root.querySelector(".ant-select-selector") as HTMLElement | null);
++  const clickZone = queryAntdSelectZone(root);
+   if (!clickZone) throw new Error(`select click zone for #${selectId} not found`);
+   fireEvent.mouseDown(clickZone);
+ }
+@@ -179,7 +178,7 @@ async function chooseAntdOptionByText(selectId: string, optionText: string) {
+     if (!hit) throw new Error(`option "${optionText}" not found`);
+     return hit as HTMLElement;
+   });
+-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
++  const optionRow = closestAntdSelectOption(option) as HTMLElement;
+   fireEvent.mouseDown(optionRow);
+   fireEvent.click(optionRow);
+   await act(async () => {
+@@ -190,7 +189,7 @@ async function chooseAntdOptionByText(selectId: string, optionText: string) {
+ /** antd Select 根节点（锁定/禁用态断言用）。 */
+ function antdSelectRoot(selectId: string): HTMLElement {
+   const anchor = document.getElementById(selectId);
+-  const root = anchor?.closest(".ant-select") as HTMLElement | null;
++  const root = anchor ? closestAntdSelect(anchor) : null;
+   if (!root) throw new Error(`.ant-select for #${selectId} not found`);
+   return root;
+ }
+@@ -643,7 +642,7 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
+     await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
+     // 工作区=项目关联工作区必选（不再有「沿用群工作区」选项）。
+     expect(
+-      screen.getByLabelText("Agent 成员 1 工作区").closest(".ant-select"),
++      closestAntdSelect(screen.getByLabelText("Agent 成员 1 工作区")),
+     ).toBeTruthy();
+     await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
+     // 模型 / 方案走缺省（不指定）。
+@@ -900,7 +899,7 @@ describe("CreateGroupWizard 团队能力开关（quick 群成员团队能力）"
+       if (!hit) throw new Error(`visible option "${optionText}" not found`);
+       return hit as HTMLElement;
+     });
+-    const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
++    const optionRow = closestAntdSelectOption(option) as HTMLElement;
+     fireEvent.mouseDown(optionRow);
+     fireEvent.click(optionRow);
+     await act(async () => {
+@@ -1000,7 +999,7 @@ describe("CreateGroupWizard 模型预检（quick 群 P1 llm_provider 预检）",
+       if (!hit) throw new Error(`visible option "${optionText}" not found`);
+       return hit as HTMLElement;
+     });
+-    const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
++    const optionRow = closestAntdSelectOption(option) as HTMLElement;
+     fireEvent.mouseDown(optionRow);
+     fireEvent.click(optionRow);
+     await act(async () => {
+diff --git a/frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx b/frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx
+index 8adffa824..13ee37b34 100644
+--- a/frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx
++++ b/frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx
+@@ -58,6 +58,7 @@ import {
+   SESSIONS_FILE_PREVIEW_WIDTH_MAX,
+ } from "../portal-file-panels";
+ import { fetchTree, useExplorerFile } from "@/lib/explorer";
++import { closestAntdTreeRow, queryAntdTreeSwitcher, closestAntdTreeNodeWrapper } from "@/test/dom-queries";
+ 
+ const mockFetchTree = fetchTree as unknown as ReturnType<typeof vi.fn>;
+ const mockUseExplorerFile = useExplorerFile as unknown as ReturnType<typeof vi.fn>;
+@@ -98,16 +99,16 @@ async function waitForRoot() {
+ 
+ /** 点某目录行的 switcher 触发展开（file-explorer.test 同款）。 */
+ function expandRow(name: string) {
+-  const row = screen.getByText(name).closest(".ant-tree-treenode");
++  const row = closestAntdTreeRow(screen.getByText(name));
+   expect(row).toBeTruthy();
+-  const switcher = row!.querySelector(".ant-tree-switcher");
++  const switcher = queryAntdTreeSwitcher(row!);
+   expect(switcher).toBeTruthy();
+   fireEvent.click(switcher!);
+ }
+ 
+ /** 点某节点行标题触发选中（file-explorer.test 同款）。 */
+ function clickNode(name: string) {
+-  fireEvent.click(screen.getByText(name).closest(".ant-tree-node-content-wrapper")!);
++  fireEvent.click(closestAntdTreeNodeWrapper(screen.getByText(name))!);
+ }
+ 
+ describe("portal-file-panels（task-01）", () => {
+diff --git a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+index 19ef0055d..71e4b1b3d 100644
+--- a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+@@ -77,6 +77,7 @@ import type {
+ import type { AgentLogListItem } from "@/lib/agent-logs";
+ import type { Workspace } from "@/lib/workspaces";
+ import { useSession } from "@/stores/session";
++import { queryAntdConfirm, queryAntdConfirmTitle, closestAntdSelect, queryAntdSelectZone, queryAntdSelectClear, queryAntdSelectMultiple, queryAntdSegmented, closestAntdSelectOption } from "@/test/dom-queries";
+ 
+ // ── hoisted mock 状态 ─────────────────────────────────────────────────────
+ 
+@@ -403,11 +404,9 @@ function openAntdSelect(selectId: string) {
+   if (!anchor) throw new Error(`element #${selectId} not found`);
+   const root = anchor.classList.contains("ant-select")
+     ? anchor
+-    : (anchor.closest(".ant-select") as HTMLElement | null);
++    : closestAntdSelect(anchor);
+   if (!root) throw new Error(`.ant-select for #${selectId} not found`);
+-  const clickZone =
+-    (root.querySelector(".ant-select-content") as HTMLElement | null) ??
+-    (root.querySelector(".ant-select-selector") as HTMLElement | null);
++  const clickZone = queryAntdSelectZone(root);
+   if (!clickZone) throw new Error(`select click zone for #${selectId} not found`);
+   fireEvent.mouseDown(clickZone);
+ }
+@@ -422,7 +421,7 @@ async function chooseAntdOptionByText(selectId: string, optionText: string) {
+     if (!hit) throw new Error(`option "${optionText}" not found`);
+     return hit as HTMLElement;
+   });
+-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
++  const optionRow = closestAntdSelectOption(option) as HTMLElement;
+   fireEvent.mouseDown(optionRow);
+   fireEvent.click(optionRow);
+   await act(async () => {
+@@ -1524,8 +1523,8 @@ describe("SessionListPanel change scope（ql-20260823-003：同走工作区树
+     ).toBeInTheDocument();
+     // 平铺控件退役（引擎胶囊/机器多选/加载更多）。机器筛选用例 ql-20260908-005
+     // 起为树下拉（#slp-machine 单选形态）——退役守卫锚定多选形态而非 id。
+-    expect(document.querySelector(".ant-segmented")).toBeNull();
+-    expect(document.querySelector(".ant-select-multiple")).toBeNull();
++    expect(queryAntdSegmented()).toBeNull();
++    expect(queryAntdSelectMultiple(document)).toBeNull();
+     expect(screen.queryByRole("button", { name: /加载更多/ })).toBeNull();
+   });
+ 
+@@ -2175,10 +2174,11 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () =>
+ 
+     // allowClear 清除 → 恢复无关联过滤参（clear 图标在 #slp-assoc 所属
+     // .ant-select 根下锚定，避免误点其它下拉）
+-    const assocRoot = (document.getElementById("slp-assoc") as HTMLElement)
+-      .closest(".ant-select");
++    const assocRoot = closestAntdSelect(
++      document.getElementById("slp-assoc") as HTMLElement,
++    );
+     if (!assocRoot) throw new Error(".ant-select for #slp-assoc not found");
+-    const clearBtn = assocRoot.querySelector(".ant-select-clear");
++    const clearBtn = queryAntdSelectClear(assocRoot);
+     if (!clearBtn) throw new Error("assoc clear button not found");
+     fireEvent.mouseDown(clearBtn);
+     fireEvent.click(clearBtn);
+@@ -2300,10 +2300,11 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () =>
+     });
+ 
+     // 清除恢复无关联过滤参。
+-    const assocRoot = (document.getElementById("slp-assoc") as HTMLElement)
+-      .closest(".ant-select");
++    const assocRoot = closestAntdSelect(
++      document.getElementById("slp-assoc") as HTMLElement,
++    );
+     if (!assocRoot) throw new Error(".ant-select for #slp-assoc not found");
+-    const clearBtn = assocRoot.querySelector(".ant-select-clear");
++    const clearBtn = queryAntdSelectClear(assocRoot);
+     if (!clearBtn) throw new Error("assoc clear button not found");
+     fireEvent.mouseDown(clearBtn);
+     fireEvent.click(clearBtn);
+@@ -3009,7 +3010,7 @@ describe("SessionListPanel 群行归档与删除操作（task-06）", () => {
+     // 二次确认弹层：标题 + 群名 + 「所有成员」不可再见语义。
+     const confirmRoot = await findConfirmRoot();
+     expect(
+-      confirmRoot.querySelector(".ant-modal-confirm-title"),
++      queryAntdConfirmTitle(confirmRoot),
+     ).toHaveTextContent("删除群聊");
+     expect(confirmRoot.textContent).toContain("前端攻坚小分队");
+     expect(confirmRoot.textContent).toContain("所有成员");
+@@ -3040,7 +3041,7 @@ describe("SessionListPanel 群行归档与删除操作（task-06）", () => {
+     expect(onDeleteGroup).not.toHaveBeenCalled();
+     // 弹层收尾（防 portal 残留串到后续用例的 confirm 锚定）。
+     await waitFor(() =>
+-      expect(document.querySelector(".ant-modal-confirm")).toBeNull(),
++      expect(queryAntdConfirm()).toBeNull(),
+     );
+   });
+ 
+@@ -3084,7 +3085,7 @@ describe("SessionListPanel 群行归档与删除操作（task-06）", () => {
+     );
+     const confirmRoot = await findConfirmRoot();
+     expect(
+-      confirmRoot.querySelector(".ant-modal-confirm-title"),
++      queryAntdConfirmTitle(confirmRoot),
+     ).toHaveTextContent("取消归档");
+     expect(confirmRoot.textContent).toContain("恢复到默认列表");
+     fireEvent.click(await findConfirmOk());
+diff --git a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+index e4d9874e3..945eb9ad9 100644
+--- a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
++++ b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+@@ -87,6 +87,7 @@ import type {
+   DaemonRuntimeRead,
+   GroupChatListItemRead,
+ } from "@/lib/daemon";
++import { closestAntdSelect, queryAntdSelectZone, closestAntdSelectOption } from "@/test/dom-queries";
+ 
+ // ── hoisted mock 状态 ─────────────────────────────────────────────────────
+ 
+@@ -822,11 +823,9 @@ function openAntdSelect(selectId: string) {
+   if (!anchor) throw new Error(`element #${selectId} not found`);
+   const root = anchor.classList.contains("ant-select")
+     ? anchor
+-    : (anchor.closest(".ant-select") as HTMLElement | null);
++    : closestAntdSelect(anchor);
+   if (!root) throw new Error(`.ant-select for #${selectId} not found`);
+-  const clickZone =
+-    (root.querySelector(".ant-select-content") as HTMLElement | null) ??
+-    (root.querySelector(".ant-select-selector") as HTMLElement | null);
++  const clickZone = queryAntdSelectZone(root);
+   if (!clickZone) throw new Error(`select click zone for #${selectId} not found`);
+   fireEvent.mouseDown(clickZone);
+ }
+@@ -841,7 +840,7 @@ async function chooseAntdOptionByText(selectId: string, optionText: string) {
+     if (!hit) throw new Error(`option "${optionText}" not found`);
+     return hit as HTMLElement;
+   });
+-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
++  const optionRow = closestAntdSelectOption(option) as HTMLElement;
+   fireEvent.mouseDown(optionRow);
+   fireEvent.click(optionRow);
+   await act(async () => {
+@@ -1992,9 +1991,9 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
+       target: { value: "前端攻坚小分队" },
+     });
+     const pjInput = document.getElementById("cgw-project");
+-    const pjRoot = pjInput?.closest(".ant-select") as HTMLElement;
++    const pjRoot = closestAntdSelect(pjInput!) as HTMLElement;
+     fireEvent.mouseDown(
+-      (pjRoot.querySelector(".ant-select-selector") as HTMLElement) ??
++      (queryAntdSelectZone(pjRoot) as HTMLElement) ??
+         pjRoot,
+     );
+     const pjOption = await waitFor(() => {
+@@ -2004,8 +2003,8 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
+       if (!hit) throw new Error("project option not found");
+       return hit as HTMLElement;
+     });
+-    fireEvent.mouseDown(pjOption.closest(".ant-select-item-option") as HTMLElement);
+-    fireEvent.click(pjOption.closest(".ant-select-item-option") as HTMLElement);
++    fireEvent.mouseDown(closestAntdSelectOption(pjOption) as HTMLElement);
++    fireEvent.click(closestAntdSelectOption(pjOption) as HTMLElement);
+     await act(async () => {
+       await Promise.resolve();
+     });
+@@ -2255,9 +2254,9 @@ describe("SessionsPortal 选中工作区快照（task-03 D-006）", () => {
+       target: { value: "前端攻坚小分队" },
+     });
+     const pjInput = document.getElementById("cgw-project");
+-    const pjRoot = pjInput?.closest(".ant-select") as HTMLElement;
++    const pjRoot = closestAntdSelect(pjInput!) as HTMLElement;
+     fireEvent.mouseDown(
+-      (pjRoot.querySelector(".ant-select-selector") as HTMLElement) ?? pjRoot,
++      (queryAntdSelectZone(pjRoot) as HTMLElement) ?? pjRoot,
+     );
+     const pjOption = await waitFor(() => {
+       const hit = [
+@@ -2266,8 +2265,8 @@ describe("SessionsPortal 选中工作区快照（task-03 D-006）", () => {
+       if (!hit) throw new Error("project option not found");
+       return hit as HTMLElement;
+     });
+-    fireEvent.mouseDown(pjOption.closest(".ant-select-item-option") as HTMLElement);
+-    fireEvent.click(pjOption.closest(".ant-select-item-option") as HTMLElement);
++    fireEvent.mouseDown(closestAntdSelectOption(pjOption) as HTMLElement);
++    fireEvent.click(closestAntdSelectOption(pjOption) as HTMLElement);
+     await act(async () => {
+       await Promise.resolve();
+     });

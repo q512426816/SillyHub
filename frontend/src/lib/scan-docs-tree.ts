@@ -19,15 +19,22 @@ export interface TreeNode {
  * 前缀（扁平 ``docs/`` vs 包裹 ``.sillyspec/docs/``）。修复前这里写死 ``slice(2)``
  * 只适配包裹布局，导致扁平布局下「组件名」层被切掉，树直接从 flows/modules/scan 开始。
  */
+/**
+ * 剥离 path 前导包裹段（可选 ``.sillyspec`` + ``docs``），与 buildTree 同口径。
+ * 供展示路径与卡片锚点使用（避免头部露出 ``docs/`` 机器段）。
+ */
+export function stripPathPrefix(path: string): string {
+  const parts = path.split("/");
+  let start = 0;
+  if (parts[0] === ".sillyspec") start = 1;
+  if (parts[start] === "docs") start += 1;
+  return parts.slice(start).join("/");
+}
+
 export function buildTree(docs: ScanDocSummary[]): TreeNode[] {
   const root: TreeNode = { name: "", path: "", children: [] };
   for (const doc of docs) {
-    const allParts = doc.path.split("/");
-    // 自适应剥离前导包裹段：可选的 .sillyspec 段 + docs 段，保留其后全部层级。
-    let start = 0;
-    if (allParts[0] === ".sillyspec") start = 1;
-    if (allParts[start] === "docs") start += 1;
-    const parts = allParts.slice(start);
+    const parts = stripPathPrefix(doc.path).split("/").filter(Boolean);
 
     let current = root;
     for (let i = 0; i < parts.length; i++) {

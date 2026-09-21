@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-21-scan-docs-ops-panel",
+  "generatedAt": "2026-09-21T03:09:56.444Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-21-scan-docs-ops-panel",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 4,
+        "globEntries": 2
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-21-scan-docs-ops-panel",
+      "metrics": {
+        "tasks": 5,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-21-scan-docs-ops-panel",
+      "metrics": {
+        "backendEndpoints": 2259,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-21-scan-docs-ops-panel",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-21-scan-docs-ops-panel",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-09-21-scan-docs-ops-panel",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-09-21-scan-docs-ops-panel",
+      "metrics": {
+        "checkedFiles": 6,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "env-blocked",
+        "item": "sillyspec 仓全量测试在嵌套 worktree 路径有 13 个 CLI-cwd 用例红",
+        "condition": "02e40da5 合回 sillyspec 主仓后，在 C:/Users/qinyi/IdeaProjects/sillyspec 跑 `node test/run-tests.mjs` 复跑（预期全绿；主仓路径同套件已实证 390/0）",
+        "severity": "blocking"
+      },
+      {
+        "type": "other",
+        "item": "注入频次榜路径显示缺项目段（modules/<x>.md vs <项目>/modules/x.md）",
+        "condition": "后续迭代对齐：_injection_stats 聚合键带项目段或前端按 docs 列表反查补全（P3，数值口径已正确）",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/scan-docs/stats",
+        "rowIdx": 1
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/scan_docs/tests/test_stats.py"
+    ]
+  },
+  "smokeRan": "not-ran",
+  "tests": {
+    "command": "module[frontend,daemon,knowledge,scan_docs]",
+    "exitCode": 0,
+    "strategy": "module-subset+cross-repo",
+    "failedRemaining": [],
+    "passedAt": "2026-09-21T05:38:32.206Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

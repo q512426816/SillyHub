@@ -1,0 +1,760 @@
+diff --git a/.sillyspec/docs/backend/modules/scan_docs.md b/.sillyspec/docs/backend/modules/scan_docs.md
+index 9bcce80ce..acda52285 100644
+--- a/.sillyspec/docs/backend/modules/scan_docs.md
++++ b/.sillyspec/docs/backend/modules/scan_docs.md
+@@ -23,9 +23,10 @@ created_at: 2026-08-18 01:45:00
+ reparse:
+   root = spec_ws.spec_root（有镜像就读，兜底 workspace.root_path）
+   result = asyncio.to_thread(parser.parse_docs_tree | parse_component)  # FS 重 IO 不进事件循环
+-  按 path 对账 existing 行:
++  按 path 对账 existing 行（预取 load_only 排除 content——旧值只被整体覆盖从不读）:
+     新 path → _build_row + session.add（created）
+-    已有 → _apply_parsed（updated）
++    已有 → _apply_parsed（updated；content_hash 相同 ⇒ 内容未变，跳过 content 大列
++           重写只补轻量列——reparse 每次页面访问都跑，未变更行不再全量写库）
+     文件消失 → exists=False + content=None（软删，deleted）
+   单 session commit + structlog 统计
+ archive_conflict: 只构造 ScanDocConflictHistory 行（默认不入 session，add_to_session 开关）；
+@@ -34,6 +35,7 @@ archive_conflict: 只构造 ScanDocConflictHistory 行（默认不入 session，
+ 
+ ## 注意事项
+ - **reparse 是全量对账 + 软删除**：文件从树里消失不删行（`exists=False` + 清 content）——冲突历史按 path 关联，物理删行断审计链。
++- **未变更行跳过大列重写（ql-20260921-003）**：`_apply_parsed` 以 `content_hash` 相等为不变判据（hash 现在跟随内容更新；旧实现 hash 只在首次落库永不刷新，判据会永久失效）；`last_modified_at` 比较走 `_dt_equal` 时区归一（SQLite 读回 naive、parsed 侧 aware，裸 `!=` 恒不等会让跳过失效）。`stats["updated"]` 口径不变（命中已有行仍计数），只是未变更行不再必然产生 UPDATE。
+ - 解析根优先 `spec_ws.spec_root`（任意 strategy 有镜像就读：platform-managed / repo-native / repo-mirrored）；旧逻辑只认 platform-managed 曾导致 repo-native 工作区 `DOCS_DIR_MISSING`、扫描文档空白——改判定前回看 service.reparse 注释。
+ - parser 的 FS 性能约束（Windows Docker bind mount 上 stat 极慢的现实）：单文件 stat 收敛为 1 次（task-06，is_file/resolve/stat 合并）、后缀预筛在 stat 之前、递归与对账的同步重 IO 全包 `asyncio.to_thread`（task-01）。动 parser 保持这三条。
+ - `archive_conflict` 的 `add_to_session=False`（ql-20260817-005）供调用方在长 FS 循环外批量 `session.add`：循环内逐条 add 会 autobegin 把事务横跨后续 FS 段，撞 PG `idle_in_transaction_session_timeout` 被杀连接。
+diff --git a/.sillyspec/docs/frontend/modules/app-workspace-pages.md b/.sillyspec/docs/frontend/modules/app-workspace-pages.md
+index 67f6bd6d8..24192e422 100644
+--- a/.sillyspec/docs/frontend/modules/app-workspace-pages.md
++++ b/.sillyspec/docs/frontend/modules/app-workspace-pages.md
+@@ -24,7 +24,7 @@ created_at: 2026-08-18 01:45:00
+ - `WorkspaceFilesPage`（`files`，50 行薄壳）：`<BorrowedSolutionFilesPanel>` 拉 owner_type=workspace 的借用方案文件（共享 daemon 产出）。
+ - `ComponentsPage` / `TopologyPage`：`listComponents` / `getTopology`，拓扑 @xyflow/react。
+ - `RuntimePage`（`runtime`）：`getRuntimeProgress` + `getRuntimeUserInputsRaw` + `getRuntimeArtifacts` 运行时进度三路。2026-08-19-runtime-live-daemon-read：数据源为绑定 daemon 实时读取，徽标「守护进程运行态」+ 副标题「经绑定守护进程实时读取 .sillyspec/.runtime/」；错误按 ApiError.status 分级行动指引（502 离线/504 超时/422 版本过旧），产物读取失败接红条不静默。
+-- 其余：`ScanDocsPage`（+ lib-scan-docs-tree 文档树；树节点徽标 `👤 来源成员` / `🕘 历史N版`=conflict_count 覆盖存档计数，中性 outline 非告警，ql-20260819-003）、`KnowledgePage`、`ReleasesPage`、`ApprovalsPage`、`AuditPage`、`IncidentsPage` / `IncidentDetailPage`（`[iid]`）、`MissionsPage`、`MembersPage`（成员管理 + `WorkspaceMemberAddDialog`/`Row`）、`WorkspaceMcpPage`（MCP 设置）。
++- 其余：`ScanDocsPage`（+ lib-scan-docs-tree 文档树；树节点徽标 `👤 来源成员` / `🕘 历史N版`=conflict_count 覆盖存档计数，中性 outline 非告警，ql-20260819-003；ql-20260921-003 首屏提速+人类可读——列表先行渲染、reparse 转后台静默刷新（失败不打断浏览），树默认只展开项目层（搜索结果才全摊开），目录 scan/flows/modules 与标准 doc_type 徽标配中文标签；md 详情区复用知识库 EntryCardList 的卡片/原文双 tab，INDEX 路由行可在 docs 树内跳转）、`KnowledgePage`、`ReleasesPage`、`ApprovalsPage`、`AuditPage`、`IncidentsPage` / `IncidentDetailPage`（`[iid]`）、`MissionsPage`、`MembersPage`（成员管理 + `WorkspaceMemberAddDialog`/`Row`）、`WorkspaceMcpPage`（MCP 设置）。
+ 
+ ## 关键逻辑
+ ```
+diff --git a/.sillyspec/docs/frontend/modules/lib-scan-docs-tree.md b/.sillyspec/docs/frontend/modules/lib-scan-docs-tree.md
+index bf8d10015..0f4983c2e 100644
+--- a/.sillyspec/docs/frontend/modules/lib-scan-docs-tree.md
++++ b/.sillyspec/docs/frontend/modules/lib-scan-docs-tree.md
+@@ -16,7 +16,10 @@ created_at: 2026-08-18 01:45:00
+ 
+ ## 契约摘要
+ 
+-- `buildTree(docs: ScanDocSummary[]): TreeNode[]` — 唯一导出函数。
++- `buildTree(docs: ScanDocSummary[]): TreeNode[]` — 建树主函数。
++- `stripPathPrefix(path: string): string` — 剥离前导包裹段（可选 `.sillyspec` +
++  `docs`），与 buildTree 同口径（ql-20260921-003 抽出复用：卡片视图展示路径 /
++  锚点、INDEX 跳转目标解析都取剥前缀后的形态）。
+ - `TreeNode { name; path; doc?: ScanDocSummary; children: TreeNode[] }` —
+   目录节点不带 `doc`，文件节点（路径末段）挂原始 `doc` 摘要。
+ - 输入类型 `ScanDocSummary` 来自 `./scan-docs`（lib-scan-docs 模块）。
+diff --git a/backend/app/modules/scan_docs/service.py b/backend/app/modules/scan_docs/service.py
+index aa6816271..a26dea859 100644
+--- a/backend/app/modules/scan_docs/service.py
++++ b/backend/app/modules/scan_docs/service.py
+@@ -28,6 +28,16 @@ from app.modules.workspace.service import WorkspaceService
+ log = get_logger(__name__)
+ 
+ 
++def _dt_equal(a: datetime | None, b: datetime | None) -> bool:
++    """datetime 相等比较（时区归一）：SQLite 读回 naive（存的是 UTC），parsed 侧
++    是 aware UTC——直接 != 恒不等，会让未变更行永远 dirty（ql-20260921-003）。"""
++    if a is None or b is None:
++        return a is None and b is None
++    aa = a.replace(tzinfo=UTC) if a.tzinfo is None else a
++    bb = b.replace(tzinfo=UTC) if b.tzinfo is None else b
++    return aa == bb
++
++
+ class ScanDocsService:
+     """List, fetch, and reparse scan documents for a workspace."""
+ 
+@@ -240,7 +250,29 @@ class ScanDocsService:
+     # -- Helpers ---
+ 
+     async def _fetch_existing(self, workspace_id: uuid.UUID) -> list[ScanDocument]:
+-        stmt = select(ScanDocument).where(col(ScanDocument.workspace_id) == workspace_id)
++        # reparse 每次进页面都会跑：existing 行的旧 content 在本流程只被整体覆盖
++        # （_apply_parsed 赋新值 / 软删置 None），从不读取——load_only 排除 content
++        # 大列（与 list_ 无 q 分支同思路），避免每次同步全量搬运全部文档正文。
++        stmt = (
++            select(ScanDocument)
++            .where(col(ScanDocument.workspace_id) == workspace_id)
++            .options(
++                load_only(
++                    ScanDocument.id,
++                    ScanDocument.workspace_id,
++                    ScanDocument.doc_type,
++                    ScanDocument.path,
++                    ScanDocument.title,
++                    ScanDocument.exists,
++                    ScanDocument.last_modified_at,
++                    ScanDocument.source_member_id,
++                    ScanDocument.source_runtime_id,
++                    ScanDocument.source_synced_at,
++                    ScanDocument.source_mtime,
++                    ScanDocument.content_hash,
++                )
++            )
++        )
+         return list((await self._session.execute(stmt)).scalars().all())
+ 
+     @staticmethod
+@@ -274,14 +306,24 @@ class ScanDocsService:
+         row: ScanDocument,
+         parsed_doc: ParsedDoc,
+     ) -> None:
++        new_hash = hashlib.sha256((parsed_doc.content or "").encode("utf-8")).hexdigest()
++        # 内容未变（hash 相同 ⇒ content/title/doc_type 同源不变）时跳过 content
++        # 大列重写：reparse 每次页面访问都会执行，未变更行不再产生含正文的
++        # UPDATE（perf：数百文档工作区每次进页省掉全部大列写），只同步轻量列。
++        if row.content_hash is not None and row.content_hash == new_hash:
++            if not _dt_equal(row.last_modified_at, parsed_doc.last_modified_at):
++                row.last_modified_at = parsed_doc.last_modified_at
++            if not row.exists:
++                row.exists = True
++            return
+         row.doc_type = parsed_doc.doc_type
+         row.path = parsed_doc.path
+         row.title = parsed_doc.title
+         row.exists = parsed_doc.exists
+         row.content = parsed_doc.content
+         row.last_modified_at = parsed_doc.last_modified_at
+-        # Preserve/update source tracking columns (task-07).
+-        new_hash = hashlib.sha256((parsed_doc.content or "").encode("utf-8")).hexdigest()
+-        if row.content_hash is None:
+-            row.content_hash = new_hash
++        # Preserve/update source tracking columns (task-07)：hash 跟随内容更新
++        # （旧实现 hash 只在首次落库，内容变更后永不刷新，skip 判定会永久失效）。
++        row.content_hash = new_hash
++        if row.source_synced_at is None:
+             row.source_synced_at = datetime.now(UTC)
+diff --git a/backend/app/modules/scan_docs/tests/test_service.py b/backend/app/modules/scan_docs/tests/test_service.py
+index e4c64a340..668f6610c 100644
+--- a/backend/app/modules/scan_docs/tests/test_service.py
++++ b/backend/app/modules/scan_docs/tests/test_service.py
+@@ -2,13 +2,14 @@
+ 
+ from __future__ import annotations
+ 
++import hashlib
+ import uuid
+ from datetime import UTC, datetime
+ from pathlib import Path
+ 
+ import pytest
++from sqlalchemy import event, select
+ from sqlalchemy import inspect as sqlalchemy_inspect
+-from sqlalchemy import select
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.core.errors import ScanDocNotFound, WorkspaceNotFound
+@@ -516,6 +517,67 @@ class TestReparseIdempotent:
+         assert total1 == stats1["created"] + stats1["updated"]
+ 
+ 
++class TestReparseSkipsUnchangedRows:
++    """ql-20260921-003：内容未变（content_hash 相同）的行不再产生 UPDATE。
++
++    reparse 每次页面访问都会执行，旧实现对所有已存在行整体重赋值（含 content
++    大列），数百文档工作区每次进页都全量写库。hash 相同 ⇒ content/title/doc_type
++    同源不变，跳过大列重写是纯写放大消除，读侧语义不变。
++    """
++
++    async def _prepare(self, db_session: AsyncSession, tmp_path: Path) -> Workspace:
++        sillyspec_root = tmp_path / "spec"
++        scan_dir = sillyspec_root / "docs"
++        scan_dir.mkdir(parents=True, exist_ok=True)
++        (scan_dir / "ARCHITECTURE.md").write_text("# Stable\nUnchanged.", encoding="utf-8")
++        ws = await _create_workspace(db_session, root_path=str(sillyspec_root), component_key=None)
++        await _create_spec_workspace(db_session, ws, str(sillyspec_root))
++        svc = ScanDocsService(db_session)
++        stats, _ = await svc.reparse(ws.id)
++        assert stats["created"] >= 1
++        return ws
++
++    async def test_unchanged_rows_emit_no_update(
++        self, db_session: AsyncSession, tmp_path: Path
++    ) -> None:
++        ws = await self._prepare(db_session, tmp_path)
++
++        updated: list[uuid.UUID] = []
++
++        def _track(mapper, connection, target):
++            updated.append(target.id)
++
++        event.listen(ScanDocument, "after_update", _track)
++        try:
++            svc = ScanDocsService(db_session)
++            stats, _ = await svc.reparse(ws.id)
++        finally:
++            event.remove(ScanDocument, "after_update", _track)
++
++        assert stats["updated"] >= 1  # 口径不变：命中已有行仍计 updated
++        assert updated == []  # 但未变更行不再产生 UPDATE
++
++    async def test_changed_rows_still_update_hash_and_content(
++        self, db_session: AsyncSession, tmp_path: Path
++    ) -> None:
++        ws = await self._prepare(db_session, tmp_path)
++        (tmp_path / "spec" / "docs" / "ARCHITECTURE.md").write_text(
++            "# Changed\nNew body.", encoding="utf-8"
++        )
++
++        svc = ScanDocsService(db_session)
++        stats, _ = await svc.reparse(ws.id)
++
++        assert stats["updated"] >= 1
++        stmt = select(ScanDocument).where(
++            ScanDocument.workspace_id == ws.id,
++            ScanDocument.path == "docs/ARCHITECTURE.md",
++        )
++        row = (await db_session.execute(stmt)).scalar_one()
++        assert "New body." in (row.content or "")
++        assert row.content_hash == hashlib.sha256(b"# Changed\nNew body.").hexdigest()
++
++
+ class TestReparseRemovesDeletedFiles:
+     """reparse() marks rows as exists=False when files are removed from disk."""
+ 
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
+index 9d928f5c9..03fab2ae3 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
+@@ -7,7 +7,7 @@
+  * 3. 树栏拖拽把手：默认 280px，拖动调宽 + localStorage 记忆
+  */
+ 
+-import { cleanup, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { act, cleanup, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ // antd Tree / rc-component resize-observer 需要 ResizeObserver，jsdom 缺，补 mock
+@@ -41,7 +41,7 @@ vi.mock("@/lib/workspace-binding", async (importOriginal) => {
+ });
+ 
+ vi.mock("@/stores/session", () => ({
+-  useSession: (sel: (s: unknown) => unknown) =>
++  useSession: (sel: (_s: unknown) => unknown) =>
+     sel({ user: { permissions: [], is_platform_admin: false } }),
+ }));
+ 
+@@ -160,3 +160,64 @@ describe("scan-docs 页面（ql-20260821-013 文档树 antd 化）", () => {
+     expect(localStorage.getItem("sillyhub-scan-docs-tree-width")).toBe("400");
+   });
+ });
++
++describe("scan-docs 首屏提速与人类可读视图（ql-20260921-003）", () => {
++  it("列表先行：reparse 未返回时文档树已渲染（不阻塞首屏）", async () => {
++    let resolveReparse!: (_v: unknown) => void;
++    mockReparse.mockImplementation(
++      () => new Promise((res) => { resolveReparse = res; }),
++    );
++
++    render(<ScanDocsPage params={{ id: WS }} />);
++    // reparse 仍 pending：树已可用（旧实现会一直停在「加载中…」）。
++    await waitForTree(["backend", "ARCHITECTURE.md", "README.md"]);
++    expect(screen.getByTestId("bg-syncing-hint")).toBeInTheDocument();
++
++    await act(async () => {
++      resolveReparse({ stats: { parsed: 0, created: 0, updated: 0, deleted: 0 }, warnings: [] });
++    });
++  });
++
++  it("后台 reparse 完成后静默刷新列表并撤下同步提示", async () => {
++    render(<ScanDocsPage params={{ id: WS }} />);
++    await waitForTree(["backend", "ARCHITECTURE.md"]);
++    await waitFor(() => expect(mockReparse).toHaveBeenCalledWith(WS));
++    // 首次加载 + 后台同步完成刷新 = 2 次。
++    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2));
++    await waitFor(() => expect(screen.queryByTestId("bg-syncing-hint")).toBeNull());
++  });
++
++  it("md 文档默认卡片视图（人类可读），可切回原文", async () => {
++    mockGetDoc.mockResolvedValue(
++      summary({
++        id: "id-arch",
++        path: "backend/ARCHITECTURE.md",
++        title: "架构文档",
++        content: "## 模块划分\n前后端分离。",
++      }),
++    );
++    render(<ScanDocsPage params={{ id: WS }} />);
++    await waitForTree(["backend", "ARCHITECTURE.md"]);
++
++    fireEvent.click(
++      screen.getByText("ARCHITECTURE.md").closest(".ant-tree-node-content-wrapper")!,
++    );
++    await waitFor(() => expect(screen.getByText("架构文档")).toBeInTheDocument());
++
++    // 默认卡片视图：EntryCardList 渲染手册小节卡，原文（md-preview）不出现。
++    const cardList = await waitFor(() => screen.getByTestId("entry-card-list"));
++    expect(cardList).toHaveAttribute("data-form", "manual");
++    expect(screen.getByText("模块划分")).toBeInTheDocument();
++    expect(screen.queryByTestId("md-preview")).toBeNull();
++
++    // 切到原文 tab：md 阅读视图出现（MarkdownText 是 dynamic 异步组件，waitFor），
++    // 卡片消失。
++    fireEvent.click(screen.getByTestId("view-tab-raw"));
++    await waitFor(() => expect(screen.getByTestId("md-preview")).toBeInTheDocument());
++    expect(screen.queryByTestId("entry-card-list")).toBeNull();
++
++    // 切回卡片 tab。
++    fireEvent.click(screen.getByTestId("view-tab-cards"));
++    expect(screen.getByTestId("entry-card-list")).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
+index 52df02cac..c7a587ab3 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
+@@ -13,6 +13,9 @@ import { PanelResizer, usePanelWidth } from "@/components/ui/panel-resizer";
+ import { TreeBox } from "@/components/ui/tree-box";
+ // 复用统一 sanitize 插件（task-13 / FR-13）：扫描文档内容源自 daemon 上报的仓库文件，不可信
+ import { MarkdownText } from "@/components/ui/markdown-text";
++// 人类可读卡片视图（对齐知识库 2026-09-20-knowledge-effect-panel / FR-04 / D-004@v2：
++// 手册 ## 小节逐条卡 + INDEX 路由卡；zone 固定 top——扫描文档即项目手册域）
++import { EntryCardList } from "@/components/knowledge/entry-card-list";
+ import { ApiError } from "@/lib/api";
+ import "@uiw/react-markdown-preview/markdown.css";
+ 
+@@ -24,7 +27,7 @@ import {
+   type ScanDocReparseResponse,
+   type ScanDocRead,
+ } from "@/lib/scan-docs";
+-import { buildTree, type TreeNode } from "@/lib/scan-docs-tree";
++import { buildTree, stripPathPrefix, type TreeNode } from "@/lib/scan-docs-tree";
+ import { DaemonRequiredNotice } from "@/components/daemon-required-notice";
+ import {
+   canBorrowSharedDaemon,
+@@ -46,17 +49,42 @@ const TREE_PANEL_MAX_W = 480;
+ /** 宽度记忆 key（仅本地浏览器）。 */
+ const TREE_PANEL_WIDTH_KEY = "sillyhub-scan-docs-tree-width";
+ 
+-/** 收集全部目录 path（初始全展开语义，沿用手搓版行为）。 */
++// ── 人类可读标签（对齐知识库 zone 中文分组口径）────────────────────────────
++// 常见目录段 → 中文标签（scan/flows/modules 是 sillyspec docs 树固定三件套）。
++const DIR_LABELS: Record<string, string> = {
++  scan: "扫描",
++  flows: "流程",
++  modules: "模块",
++};
++// 标准文档类型 → 中文徽标（对齐 backend parser STANDARD_DOC_TYPES + 常见补充，
++// 其余类型原样展示）。title 属性保留原始类型名供排查。
++const DOC_TYPE_LABELS: Record<string, string> = {
++  ARCHITECTURE: "架构",
++  CONVENTIONS: "约定",
++  CONCERNS: "关注点",
++  INTEGRATIONS: "集成",
++  PROJECT: "项目",
++  STRUCTURE: "结构",
++  TESTING: "测试",
++  GLOSSARY: "术语表",
++};
++
++/** 收集全部目录 path（搜索过滤时的全展开语义：结果集小，全部摊开便于点选）。 */
+ function collectDirPaths(nodes: TreeNode[], acc: string[] = []): string[] {
+   for (const n of nodes) {
+     if (n.doc === undefined) {
+       acc.push(n.path);
+-      collectDirPaths(n.children, acc);
++      acc.push(...collectDirPaths(n.children, []));
+     }
+   }
+   return acc;
+ }
+ 
++/** 一级目录 path（默认展开语义：文档量大时只摊开项目层，子目录点开再看）。 */
++function topLevelDirPaths(nodes: TreeNode[]): string[] {
++  return nodes.filter((n) => n.doc === undefined).map((n) => n.path);
++}
++
+ /** 递归构建 path → 文档摘要索引（选中行回查 doc id 拉详情）。 */
+ function buildDocIndex(nodes: TreeNode[], acc = new Map<string, ScanDocSummary>()): Map<string, ScanDocSummary> {
+   for (const n of nodes) {
+@@ -87,13 +115,19 @@ function renderDocTitle(node: TreeNode & { doc: ScanDocSummary }) {
+             🕘 历史{doc.conflict_count}版
+           </Badge>
+         )}
+-        <Badge variant={doc.exists ? "success" : "outline"} className="px-1.5 text-[10px]">{doc.doc_type}</Badge>
++        <Badge
++          variant={doc.exists ? "success" : "outline"}
++          className="px-1.5 text-[10px]"
++          title={doc.doc_type}
++        >
++          {DOC_TYPE_LABELS[doc.doc_type] ?? doc.doc_type}
++        </Badge>
+       </span>
+     </span>
+   );
+ }
+ 
+-/** TreeNode[] → antd DataNode[]（目录 font-medium；文件行带徽标；图标按扩展名分型）。 */
++/** TreeNode[] → antd DataNode[]（目录 font-medium + 中文标签；文件行带徽标；图标按扩展名分型）。 */
+ function toAntdNodes(nodes: TreeNode[]): DataNode[] {
+   return nodes.map((n) => {
+     if (n.doc) {
+@@ -106,32 +140,45 @@ function toAntdNodes(nodes: TreeNode[]): DataNode[] {
+     }
+     return {
+       key: n.path,
+-      title: <span className="font-medium whitespace-nowrap">{n.name}</span>,
++      title: (
++        <span className="font-medium whitespace-nowrap" title={n.name}>
++          {DIR_LABELS[n.name] ?? n.name}
++        </span>
++      ),
+       icon: <FileNodeIcon name={n.name} type="dir" />,
+       children: toAntdNodes(n.children),
+     };
+   });
+ }
+ 
+-/** 文档树：antd Tree 受控（全展开初始 + 可收起；点目录行展开/收起 ql-20260821-015；点文件行拉详情回调）。 */
++/** 文档树：antd Tree 受控（默认展开项目层、搜索结果全展开；点目录行展开/收起
++ *  ql-20260821-015；点文件行拉详情回调）。 */
+ function DocTree({
+   tree,
+   workspaceId,
+   onSelect,
+   selectedPath,
++  expandAll,
+ }: {
+   tree: TreeNode[];
+   workspaceId: string;
+   onSelect: (_doc: ScanDocRead) => void;
+   selectedPath: string | null;
++  /** 搜索过滤态：结果集小，全部摊开便于点选（否则默认只展开项目层）。 */
++  expandAll: boolean;
+ }) {
+   const treeData = useMemo(() => toAntdNodes(tree), [tree]);
+   const docIndex = useMemo(() => buildDocIndex(tree), [tree]);
+-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => collectDirPaths(tree));
+-  // 树重建（搜索过滤/重扫后）重算展开集，保持「全部展开」语义（手搓版同款初始行为）。
++  // 默认展开集随 tree/expandAll 重算：文档量大时不再全量摊开（数百行的首帧
++  // DOM），搜索时结果集小才全展开。用户手动展开/收起在两次数据刷新之间保留。
++  const defaultExpanded = useMemo(
++    () => (expandAll ? collectDirPaths(tree) : topLevelDirPaths(tree)),
++    [tree, expandAll],
++  );
++  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => defaultExpanded);
+   useEffect(() => {
+-    setExpandedKeys(collectDirPaths(tree));
+-  }, [tree]);
++    setExpandedKeys(defaultExpanded);
++  }, [defaultExpanded]);
+ 
+   const onSelectTree: TreeProps["onSelect"] = (keys, info) => {
+     if (!info.node.isLeaf) return;
+@@ -161,9 +208,14 @@ export default function ScanDocsPage({ params }: Props) {
+   const [reparseResult, setReparseResult] = useState<ScanDocReparseResponse | null>(null);
+   const [loading, setLoading] = useState(true);
+   const [reparsing, setReparsing] = useState(false);
++  /** 后台同步中（进页自动 reparse 不阻塞首屏，完成后静默刷新列表）。 */
++  const [bgSyncing, setBgSyncing] = useState(false);
+   const [pageError, setPageError] = useState<string | null>(null);
+   const [searchInput, setSearchInput] = useState("");
+   const [debouncedQ, setDebouncedQ] = useState("");
++  /** 内容区视图 tab（对齐知识库 FR-04/D-004@v2）：cards=人类可读卡片（默认）/
++   *  raw=原文阅读视图；每次重新选文件回默认卡片。 */
++  const [viewMode, setViewMode] = useState<"cards" | "raw">("cards");
+   // 2026-07-26-ungate-workspace-entry / FR-04：扫描文档 reparse 经 host_fs 读源码
+   // （daemon-client），无 binding 时失败。门禁后移后，无 binding 主区渲染 DaemonRequiredNotice。
+   const [myBinding, setMyBinding] = useState<MemberBindingView | null>(null);
+@@ -180,24 +232,19 @@ export default function ScanDocsPage({ params }: Props) {
+   const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
+ 
+   // 仅拉文档列表（可选关键词过滤 path/title/content）。搜索时不触发 reparse，保证响应快。
+-  const fetchDocs = useCallback(async (q?: string) => {
+-    setLoading(true); setPageError(null);
++  // silent=true 时不翻 loading（后台同步完成后的静默刷新，避免树区闪一下加载态）。
++  const fetchDocs = useCallback(async (q?: string, opts?: { silent?: boolean }) => {
++    if (!opts?.silent) setLoading(true);
++    setPageError(null);
+     try {
+       const resp = await listScanDocs(workspaceId, q ? { q } : undefined);
+       setDocs(resp.items);
+     } catch (err) { setPageError(err instanceof ApiError ? err.message : "加载扫描文档失败"); }
+-    finally { setLoading(false); }
++    finally { if (!opts?.silent) setLoading(false); }
+   }, [workspaceId]);
+ 
+-  // 首次进入：reparse 同步平台存储 + 拉全量。
+-  const reparseAndLoad = useCallback(async () => {
+-    setLoading(true); setPageError(null);
+-    try {
+-      await reparseScanDocs(workspaceId);
+-      await fetchDocs();
+-    } catch (err) { setPageError(err instanceof ApiError ? err.message : "加载扫描文档失败"); }
+-    finally { setLoading(false); }
+-  }, [workspaceId, fetchDocs]);
++  // 当前搜索词镜像（后台 reparse 完成后的静默刷新复用，避免把搜索态回退成全量）。
++  const qRef = useRef("");
+ 
+   // 先判 binding：无 binding 不 reparse（避免无谓失败），主区渲染 DaemonRequiredNotice。
+   useEffect(() => {
+@@ -223,19 +270,39 @@ export default function ScanDocsPage({ params }: Props) {
+ 
+   const hasDaemon = !!myBinding?.daemon_id;
+ 
+-  // 仅在已绑定 daemon 时 reparse + 拉文档（零回归：有 binding 路径不变）。
++  // 进页加载策略（perf）：列表先行（DB 快查，数百文档也是轻查询），reparse 转
++  // 后台——不再让全量文件解析阻塞首屏；后台完成后按当前搜索词静默刷新列表。
++  // 失败静默（如只读权限 403 / daemon 瞬断）：页面仍可浏览 DB 既有数据，
++  // 需要强同步时点头部「重新扫描」。
+   useEffect(() => {
+     if (!hasDaemon) return;
+-    void reparseAndLoad();
+-  }, [hasDaemon, reparseAndLoad]);
++    let active = true;
++    void fetchDocs();
++    setBgSyncing(true);
++    reparseScanDocs(workspaceId)
++      .then(() => {
++        if (active) void fetchDocs(qRef.current || undefined, { silent: true });
++      })
++      .catch(() => {})
++      .finally(() => {
++        if (active) setBgSyncing(false);
++      });
++    return () => {
++      active = false;
++    };
++  }, [hasDaemon, workspaceId, fetchDocs]);
+ 
+   // 搜索框输入 debounce 300ms → debouncedQ。
+   useEffect(() => {
+-    const t = setTimeout(() => setDebouncedQ(searchInput.trim()), 300);
++    const t = setTimeout(() => {
++      const q = searchInput.trim();
++      setDebouncedQ(q);
++      qRef.current = q;
++    }, 300);
+     return () => clearTimeout(t);
+   }, [searchInput]);
+ 
+-  // debouncedQ 变化触发过滤查询；跳过首次（首次由 reparseAndLoad 负责，避免重复请求）。
++  // debouncedQ 变化触发过滤查询；跳过首次（首次列表由进页主 effect 负责，避免重复请求）。
+   const skipFirstSearchRef = useRef(true);
+   useEffect(() => {
+     if (skipFirstSearchRef.current) { skipFirstSearchRef.current = false; return; }
+@@ -249,7 +316,41 @@ export default function ScanDocsPage({ params }: Props) {
+     finally { setReparsing(false); }
+   };
+ 
+-  const tree = buildTree(docs);
++  // memo 化：搜索输入等任意重渲染不再重建树（旧实现每渲染一棵新树会连带重置展开态）。
++  const tree = useMemo(() => buildTree(docs), [docs]);
++
++  /** 选中并展示文档详情（树点击 / 卡片 INDEX 路由跳转共用）：每次重选回卡片视图。 */
++  const selectDoc = useCallback((doc: ScanDocRead) => {
++    setSelectedDoc(doc);
++    setViewMode("cards");
++  }, []);
++
++  /** 卡片视图跳转（INDEX 路由行）：在当前文档列表里解析目标文件，命中则拉详情
++   *  选中并滚到锚点小节卡（锚点选择器与知识库 EntryCardList 同域）；查无静默
++   *  忽略（目标可能不在 docs 树，如指向 knowledge 域的相对路径）。 */
++  const jumpToDoc = useCallback(
++    (file: string, anchor?: string) => {
++      const target = docs.find((d) => {
++        const p = stripPathPrefix(d.path);
++        return p === file || p.endsWith(`/${file}`);
++      });
++      if (!target) return;
++      void getScanDoc(workspaceId, target.id)
++        .then((doc) => {
++          selectDoc(doc);
++          if (anchor) {
++            const display = stripPathPrefix(doc.path);
++            requestAnimationFrame(() => {
++              document
++                .querySelector(`[data-entry-anchor="${CSS.escape(`${display}#${anchor}`)}"]`)
++                ?.scrollIntoView({ behavior: "smooth", block: "center" });
++            });
++          }
++        })
++        .catch(() => {});
++    },
++    [docs, workspaceId, selectDoc],
++  );
+ 
+   return (
+     <PageContainer size="full">
+@@ -309,7 +410,11 @@ export default function ScanDocsPage({ params }: Props) {
+         <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
+       ) : docs.length === 0 ? (
+         <div className="py-12 text-center text-xs text-muted-foreground">
+-          {debouncedQ ? `没有匹配「${debouncedQ}」的文档` : "暂无扫描文档。点击「重新扫描」从文件系统解析。"}
++          {bgSyncing
++            ? "正在从文件系统扫描文档…"
++            : debouncedQ
++              ? `没有匹配「${debouncedQ}」的文档`
++              : "暂无扫描文档。点击「重新扫描」从文件系统解析。"}
+         </div>
+       ) : (
+         <div className="flex flex-col gap-4 lg:flex-row">
+@@ -331,12 +436,18 @@ export default function ScanDocsPage({ params }: Props) {
+                   placeholder="搜索名称或内容"
+                   className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                 />
++                {bgSyncing && (
++                  <p data-testid="bg-syncing-hint" className="px-1 text-[11px] text-muted-foreground">
++                    ⏳ 正在后台同步最新扫描，完成后自动刷新…
++                  </p>
++                )}
+                 <TreeBox className="max-h-[calc(100vh-260px)]">
+                   <DocTree
+                     tree={tree}
+                     workspaceId={workspaceId}
+-                    onSelect={setSelectedDoc}
++                    onSelect={selectDoc}
+                     selectedPath={selectedDoc?.path ?? null}
++                    expandAll={!!debouncedQ}
+                   />
+                 </TreeBox>
+               </div>
+@@ -359,14 +470,70 @@ export default function ScanDocsPage({ params }: Props) {
+               <div className="space-y-3">
+                 <div className="flex items-center gap-2">
+                   <h3 className="text-base font-semibold">{selectedDoc.title ?? selectedDoc.path.split("/").pop()}</h3>
+-                  <Badge variant="outline" className="font-mono text-[10px]">{selectedDoc.doc_type}</Badge>
++                  <Badge
++                    variant="outline"
++                    className="font-mono text-[10px]"
++                    title={selectedDoc.doc_type}
++                  >
++                    {DOC_TYPE_LABELS[selectedDoc.doc_type] ?? selectedDoc.doc_type}
++                  </Badge>
+                 </div>
+                 <p className="font-mono text-[11px] text-muted-foreground">{selectedDoc.path}</p>
+                 {selectedDoc.last_modified_at && (
+                   <p className="text-[11px] text-muted-foreground">最后修改：{new Date(selectedDoc.last_modified_at).toLocaleString("zh-CN")}</p>
+                 )}
+                 {selectedDoc.content ? (
+-                  <div className="max-h-[60vh] overflow-auto rounded-md bg-muted/50">{selectedDoc.path.endsWith(".md") ? (<MarkdownText content={selectedDoc.content} size="reading" />) : (<pre className="text-xs leading-relaxed whitespace-pre-wrap">{selectedDoc.content}</pre>)}</div>
++                  selectedDoc.path.toLowerCase().endsWith(".md") ? (
++                    <>
++                      {/* 卡片/原文双 tab（对齐知识库 FR-04 / D-004@v2）：卡片=人类
++                          可读条目卡（默认），原文=既有 md 阅读视图（零改动）。 */}
++                      <div role="tablist" aria-label="内容视图" className="flex gap-1">
++                        <button
++                          type="button"
++                          role="tab"
++                          aria-selected={viewMode === "cards"}
++                          data-testid="view-tab-cards"
++                          onClick={() => setViewMode("cards")}
++                          className={
++                            viewMode === "cards"
++                              ? "rounded-sm border border-brand-400 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-600"
++                              : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground hover:text-brand-600"
++                          }
++                        >
++                          卡片
++                        </button>
++                        <button
++                          type="button"
++                          role="tab"
++                          aria-selected={viewMode === "raw"}
++                          data-testid="view-tab-raw"
++                          onClick={() => setViewMode("raw")}
++                          className={
++                            viewMode === "raw"
++                              ? "rounded-sm border border-brand-400 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-600"
++                              : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground hover:text-brand-600"
++                          }
++                        >
++                          原文
++                        </button>
++                      </div>
++                      {viewMode === "cards" ? (
++                        <EntryCardList
++                          filename={stripPathPrefix(selectedDoc.path)}
++                          zone="top"
++                          content={selectedDoc.content}
++                          onJumpToEntry={jumpToDoc}
++                          className="max-h-[60vh] overflow-y-auto pr-1"
++                        />
++                      ) : (
++                        <div className="max-h-[60vh] overflow-auto rounded-md bg-muted/50">
++                          <MarkdownText content={selectedDoc.content} size="reading" />
++                        </div>
++                      )}
++                    </>
++                  ) : (
++                    <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-md bg-muted/50 p-3 text-xs leading-relaxed">{selectedDoc.content}</pre>
++                  )
+                 ) : (
+                   <p className="text-xs text-muted-foreground">（无内容）</p>
+                 )}
+diff --git a/frontend/src/lib/__tests__/scan-docs-tree.test.ts b/frontend/src/lib/__tests__/scan-docs-tree.test.ts
+index e5e33e3c9..dacb50720 100644
+--- a/frontend/src/lib/__tests__/scan-docs-tree.test.ts
++++ b/frontend/src/lib/__tests__/scan-docs-tree.test.ts
+@@ -1,6 +1,6 @@
+ import { describe, it, expect } from "vitest";
+ 
+-import { buildTree, type TreeNode } from "../scan-docs-tree";
++import { buildTree, stripPathPrefix, type TreeNode } from "../scan-docs-tree";
+ import type { ScanDocSummary } from "../scan-docs";
+ 
+ function makeDoc(path: string, doc_type = "OTHER"): ScanDocSummary {
+@@ -68,3 +68,21 @@ describe("buildTree", () => {
+     ]);
+   });
+ });
++
++describe("stripPathPrefix（ql-20260921-003：与 buildTree 同口径剥前导包裹段）", () => {
++  it("扁平布局剥 docs 段", () => {
++    expect(stripPathPrefix("docs/SillyHub/scan/ARCHITECTURE.md")).toBe(
++      "SillyHub/scan/ARCHITECTURE.md",
++    );
++  });
++
++  it("包裹布局剥 .sillyspec + docs 段", () => {
++    expect(stripPathPrefix(".sillyspec/docs/backend/CONVENTIONS.md")).toBe(
++      "backend/CONVENTIONS.md",
++    );
++  });
++
++  it("无包裹段原样返回", () => {
++    expect(stripPathPrefix("backend/CONVENTIONS.md")).toBe("backend/CONVENTIONS.md");
++  });
++});
+diff --git a/frontend/src/lib/scan-docs-tree.ts b/frontend/src/lib/scan-docs-tree.ts
+index 94e008cbe..791b730b1 100644
+--- a/frontend/src/lib/scan-docs-tree.ts
++++ b/frontend/src/lib/scan-docs-tree.ts
+@@ -19,15 +19,22 @@ export interface TreeNode {
+  * 前缀（扁平 ``docs/`` vs 包裹 ``.sillyspec/docs/``）。修复前这里写死 ``slice(2)``
+  * 只适配包裹布局，导致扁平布局下「组件名」层被切掉，树直接从 flows/modules/scan 开始。
+  */
++/**
++ * 剥离 path 前导包裹段（可选 ``.sillyspec`` + ``docs``），与 buildTree 同口径。
++ * 供展示路径与卡片锚点使用（避免头部露出 ``docs/`` 机器段）。
++ */
++export function stripPathPrefix(path: string): string {
++  const parts = path.split("/");
++  let start = 0;
++  if (parts[0] === ".sillyspec") start = 1;
++  if (parts[start] === "docs") start += 1;
++  return parts.slice(start).join("/");
++}
++
+ export function buildTree(docs: ScanDocSummary[]): TreeNode[] {
+   const root: TreeNode = { name: "", path: "", children: [] };
+   for (const doc of docs) {
+-    const allParts = doc.path.split("/");
+-    // 自适应剥离前导包裹段：可选的 .sillyspec 段 + docs 段，保留其后全部层级。
+-    let start = 0;
+-    if (allParts[0] === ".sillyspec") start = 1;
+-    if (allParts[start] === "docs") start += 1;
+-    const parts = allParts.slice(start);
++    const parts = stripPathPrefix(doc.path).split("/").filter(Boolean);
+ 
+     let current = root;
+     for (let i = 0; i < parts.length; i++) {

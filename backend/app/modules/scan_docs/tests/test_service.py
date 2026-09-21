@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import event, select
 from sqlalchemy import inspect as sqlalchemy_inspect
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ScanDocNotFound, WorkspaceNotFound
@@ -514,6 +515,67 @@ class TestReparseIdempotent:
         # Same total count
         _items1, total1, _cc = await svc.list_(ws.id)
         assert total1 == stats1["created"] + stats1["updated"]
+
+
+class TestReparseSkipsUnchangedRows:
+    """ql-20260921-003：内容未变（content_hash 相同）的行不再产生 UPDATE。
+
+    reparse 每次页面访问都会执行，旧实现对所有已存在行整体重赋值（含 content
+    大列），数百文档工作区每次进页都全量写库。hash 相同 ⇒ content/title/doc_type
+    同源不变，跳过大列重写是纯写放大消除，读侧语义不变。
+    """
+
+    async def _prepare(self, db_session: AsyncSession, tmp_path: Path) -> Workspace:
+        sillyspec_root = tmp_path / "spec"
+        scan_dir = sillyspec_root / "docs"
+        scan_dir.mkdir(parents=True, exist_ok=True)
+        (scan_dir / "ARCHITECTURE.md").write_text("# Stable\nUnchanged.", encoding="utf-8")
+        ws = await _create_workspace(db_session, root_path=str(sillyspec_root), component_key=None)
+        await _create_spec_workspace(db_session, ws, str(sillyspec_root))
+        svc = ScanDocsService(db_session)
+        stats, _ = await svc.reparse(ws.id)
+        assert stats["created"] >= 1
+        return ws
+
+    async def test_unchanged_rows_emit_no_update(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        ws = await self._prepare(db_session, tmp_path)
+
+        updated: list[uuid.UUID] = []
+
+        def _track(mapper, connection, target):
+            updated.append(target.id)
+
+        event.listen(ScanDocument, "after_update", _track)
+        try:
+            svc = ScanDocsService(db_session)
+            stats, _ = await svc.reparse(ws.id)
+        finally:
+            event.remove(ScanDocument, "after_update", _track)
+
+        assert stats["updated"] >= 1  # 口径不变：命中已有行仍计 updated
+        assert updated == []  # 但未变更行不再产生 UPDATE
+
+    async def test_changed_rows_still_update_hash_and_content(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        ws = await self._prepare(db_session, tmp_path)
+        (tmp_path / "spec" / "docs" / "ARCHITECTURE.md").write_text(
+            "# Changed\nNew body.", encoding="utf-8"
+        )
+
+        svc = ScanDocsService(db_session)
+        stats, _ = await svc.reparse(ws.id)
+
+        assert stats["updated"] >= 1
+        stmt = select(ScanDocument).where(
+            ScanDocument.workspace_id == ws.id,
+            ScanDocument.path == "docs/ARCHITECTURE.md",
+        )
+        row = (await db_session.execute(stmt)).scalar_one()
+        assert "New body." in (row.content or "")
+        assert row.content_hash == hashlib.sha256(b"# Changed\nNew body.").hexdigest()
 
 
 class TestReparseRemovesDeletedFiles:

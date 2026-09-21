@@ -1,0 +1,105 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-6c05ad39",
+  "totals": {
+    "files": 7,
+    "additions": 209,
+    "deletions": 5
+  },
+  "rows": [
+    {
+      "path": ".github/workflows/frontend-ci.yml",
+      "declared": true,
+      "additions": 14,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/multi-agent-platform/modules/ci.changelog.md",
+      "declared": true,
+      "additions": 7,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/multi-agent-platform/modules/ci.md",
+      "declared": true,
+      "additions": 2,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/.gitignore",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/package.json",
+      "declared": true,
+      "additions": 2,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/pnpm-lock.yaml",
+      "declared": true,
+      "additions": 169,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/vitest.config.ts",
+      "declared": true,
+      "additions": 14,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 7,
+    "codeFileCount": 3,
+    "testFileCount": 0,
+    "moduleSpan": 1,
+    "modules": [
+      {
+        "id": "build",
+        "files": [
+          "frontend/package.json"
+        ]
+      }
+    ],
+    "unmappedFiles": [
+      "frontend/.gitignore",
+      "frontend/vitest.config.ts"
+    ],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": false,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "missing",
+      "docClaim": "missing",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260921-006-2095",
+  "sessionId": "quick-6c05ad39",
+  "savedAt": "2026-09-21T03:38:46.506Z",
+  "patchSha256": "ad15197fc60a80e8d5c27c419301752b5112fc02bed866cac36f24da60bb53a2",
+  "patchStatus": "ok"
+}

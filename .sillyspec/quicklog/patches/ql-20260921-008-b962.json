@@ -1,0 +1,231 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-d15f38a9",
+  "totals": {
+    "files": 24,
+    "additions": 158,
+    "deletions": 144
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/frontend/modules/test-utils.changelog.md",
+      "declared": true,
+      "additions": 8,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/test-utils.md",
+      "declared": true,
+      "additions": 8,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx",
+      "declared": true,
+      "additions": 7,
+      "deletions": 6,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+      "declared": true,
+      "additions": 3,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx",
+      "declared": true,
+      "additions": 19,
+      "deletions": 18,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx",
+      "declared": true,
+      "additions": 3,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/__tests__/admin-org-tree.test.tsx",
+      "declared": true,
+      "additions": 2,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/__tests__/agent-profile-form.test.tsx",
+      "declared": true,
+      "additions": 4,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/__tests__/runtime-usage-line-chart.test.tsx",
+      "declared": true,
+      "additions": 6,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/__tests__/work-hour-bar-chart.test.tsx",
+      "declared": true,
+      "additions": 4,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/__tests__/work-hour-pie-chart.test.tsx",
+      "declared": true,
+      "additions": 4,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx",
+      "declared": true,
+      "additions": 5,
+      "deletions": 7,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx",
+      "declared": true,
+      "additions": 4,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx",
+      "declared": true,
+      "additions": 3,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/bash-progress-card.test.tsx",
+      "declared": true,
+      "additions": 5,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/platform-shared-agents-card.test.tsx",
+      "declared": true,
+      "additions": 12,
+      "deletions": 14,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx",
+      "declared": true,
+      "additions": 2,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/explorer/__tests__/file-explorer.test.tsx",
+      "declared": true,
+      "additions": 11,
+      "deletions": 16,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/explorer/__tests__/file-preview.test.tsx",
+      "declared": true,
+      "additions": 3,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/group-chat/__tests__/member-panel.test.tsx",
+      "declared": true,
+      "additions": 4,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx",
+      "declared": true,
+      "additions": 8,
+      "deletions": 9,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx",
+      "declared": true,
+      "additions": 4,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+      "declared": true,
+      "additions": 17,
+      "deletions": 16,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+      "declared": true,
+      "additions": 12,
+      "deletions": 13,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 33,
+    "codeFileCount": 6,
+    "testFileCount": 24,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260921-008-b962",
+  "sessionId": "quick-d15f38a9",
+  "savedAt": "2026-09-21T04:25:06.452Z",
+  "patchSha256": "b3b5372ba326e9bf19d9f44e2eb60042e875349e836fb568b6f7c0565202bf72",
+  "patchStatus": "ok"
+}

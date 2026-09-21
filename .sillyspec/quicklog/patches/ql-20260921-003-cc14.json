@@ -1,0 +1,111 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-a24fbaa8",
+  "totals": {
+    "files": 9,
+    "additions": 414,
+    "deletions": 52
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/backend/modules/scan_docs.md",
+      "declared": true,
+      "additions": 4,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/app-workspace-pages.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/lib-scan-docs-tree.md",
+      "declared": true,
+      "additions": 4,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/scan_docs/service.py",
+      "declared": true,
+      "additions": 47,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/scan_docs/tests/test_service.py",
+      "declared": true,
+      "additions": 63,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+      "declared": true,
+      "additions": 63,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx",
+      "declared": true,
+      "additions": 200,
+      "deletions": 33,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/scan-docs-tree.test.ts",
+      "declared": true,
+      "additions": 19,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/scan-docs-tree.ts",
+      "declared": true,
+      "additions": 13,
+      "deletions": 6,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 9,
+    "codeFileCount": 3,
+    "testFileCount": 3,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260921-003-cc14",
+  "sessionId": "quick-a24fbaa8",
+  "savedAt": "2026-09-21T01:04:39.408Z",
+  "patchSha256": "b0b7e6fc8215ae71b218764615033076e7ce73bc50022e4b28ea876916b6cc5f",
+  "patchStatus": "ok"
+}

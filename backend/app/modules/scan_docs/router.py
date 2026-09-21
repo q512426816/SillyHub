@@ -18,6 +18,7 @@ from app.modules.scan_docs.schema import (
     ScanDocRead,
     ScanDocReparseResponse,
     ScanDocReparseStats,
+    ScanDocsStatsOut,
     ScanDocSummary,
     ScanDocWarning,
 )
@@ -50,6 +51,28 @@ async def list_scan_docs(
         for d in items
     ]
     return ScanDocList(items=summaries, total=total)
+
+
+# ── stats 运营指标端点（2026-09-21-scan-docs-ops-panel task-01）─────────────
+#
+# 字面量路由注册序铁律（对齐 knowledge/router.py:215 先例）：GET /scan-docs/stats
+# 必须保持在下方 GET /scan-docs/{doc_id} 通配之前——FastAPI 按声明序匹配，字面量
+# 落后会被当作 doc_id="stats" 解析 UUID 失败返回 422（design R-03）。
+
+
+@router.get(
+    "/scan-docs/stats",
+    response_model=ScanDocsStatsOut,
+)
+async def get_scan_docs_stats(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.SCAN_DOCS_READ))],
+) -> ScanDocsStatsOut:
+    """扫描文档运营指标：覆盖率（七件套+模块两级，8 周趋势）/陈旧（90 天）/
+    每项目密度/近 30 天更新/最近更新榜 + docs-inject 注入频次（D-003@v1）。"""
+    service = ScanDocsService(session)
+    return await service.stats(workspace_id)
 
 
 @router.get(

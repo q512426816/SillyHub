@@ -1,0 +1,495 @@
+diff --git a/.github/workflows/frontend-ci.yml b/.github/workflows/frontend-ci.yml
+index 2de820944..410dc4487 100644
+--- a/.github/workflows/frontend-ci.yml
++++ b/.github/workflows/frontend-ci.yml
+@@ -18,7 +18,8 @@ defaults:
+ jobs:
+   lint-build-test:
+     runs-on: ubuntu-latest
+-    timeout-minutes: 15
++    # 覆盖率插桩后测试变慢（ql-20260921-006-2095），15→20 预留余量
++    timeout-minutes: 20
+ 
+     steps:
+       - uses: actions/checkout@v4
+@@ -42,8 +43,18 @@ jobs:
+       - name: Typecheck
+         run: pnpm typecheck
+ 
+-      - name: Test
+-        run: pnpm test
++      # 同一批测试带覆盖率跑（ql-20260921-006-2095）：先只看数不设门槛，
++      # text 摘要在日志里，html 报告上传 artifact 便于离线翻看（保留 7 天）。
++      - name: Test (coverage)
++        run: pnpm test:coverage
++
++      - name: Upload coverage report
++        uses: actions/upload-artifact@v4
++        with:
++          name: coverage-report
++          path: frontend/coverage/
++          retention-days: 7
++          if-no-files-found: ignore
+ 
+       - name: Build
+         env:
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/ci.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/ci.changelog.md
+new file mode 100644
+index 000000000..ef904974e
+--- /dev/null
++++ b/.sillyspec/docs/multi-agent-platform/modules/ci.changelog.md
+@@ -0,0 +1,7 @@
++# ci 变更索引
++
++> 自动生成。正文历史已迁出，详见 ci.md。
++> author: qinyi
++> created_at: 2026-09-21 11:30:00
++
++- ql-20260921-006-2095 | frontend-ci 接入 vitest 覆盖率报告（先只看数不设门槛）：package.json 加 devDep @vitest/coverage-v8@2.1.9（精确匹配 vitest 2.1.9）+ test:coverage 脚本；vitest.config.ts 加 coverage 段（v8 provider、text+html 双报告、include src/**、排除测试自身/测试基建）；frontend-ci.yml Test 步改跑 pnpm test:coverage + upload-artifact 上传 coverage/（保留 7 天），timeout 15→20 分钟留插桩余量；frontend/.gitignore 补 coverage/。验证：client-path 子集 1 文件 2 用例带覆盖率全过、html 报告生成。
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/ci.md b/.sillyspec/docs/multi-agent-platform/modules/ci.md
+index fb3298ddc..d9da3133d 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/ci.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/ci.md
+@@ -27,9 +27,9 @@ multi-agent-platform 的持续集成组件，以 GitHub Actions workflow 实现
+ ## 关键逻辑
+ 
+ - **backend-ci 步骤**：setup-uv@v8.1.0 → `uv python install 3.12` → `uv sync --all-extras` → `uv run ruff check .` → `uv run ruff format --check .` → `uv run mypy app` → `uv run pytest -q --cov=app --cov-fail-under=60`。
+-- **frontend-ci 步骤**：`pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm build`。（`pnpm test` 不含 e2e——vitest 已 exclude `e2e/**`，e2e 归 e2e-ci 专项跑）
++- **frontend-ci 步骤**：`pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm typecheck` → `pnpm test:coverage` → `pnpm build`。（2026-09-21 ql-20260921-006-2095 起 `pnpm test` 改带覆盖率跑：vitest v8 provider，text 摘要随 CI 日志输出 + coverage/ html 报告上传 artifact 保留 7 天；timeout 15→20 分钟留插桩余量。vitest 已 exclude `e2e/**`，e2e 归 e2e-ci 专项跑）
+ - **门禁一致性**：CI 跑的命令与根 Makefile 的 `backend-test`/`backend-lint`/`frontend-*` 同源，本地 `make lint && make test` 通过基本等于 CI 通过。
+-- **覆盖率硬门**：backend 要求 `--cov-fail-under=60`，低于则 CI 红。
++- **覆盖率硬门**：backend 要求 `--cov-fail-under=60`，低于则 CI 红。frontend 2026-09-21 起输出覆盖率报告但**不设门槛**（观察期，先摸清盲区再评估 thresholds，配置在 frontend/vitest.config.ts coverage 段）。
+ 
+ ## 注意事项
+ 
+diff --git a/frontend/.gitignore b/frontend/.gitignore
+index e2c50f62f..7b68d269a 100644
+--- a/frontend/.gitignore
++++ b/frontend/.gitignore
+@@ -2,4 +2,5 @@
+ 
+ test-results/
+ playwright-report/
++coverage/
+ e2e/.env.e2e
+diff --git a/frontend/package.json b/frontend/package.json
+index 636a93b3b..bb8fda043 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -10,6 +10,7 @@
+     "typecheck": "tsc --noEmit",
+     "test": "vitest run",
+     "test:watch": "vitest",
++    "test:coverage": "vitest run --coverage",
+     "test:e2e": "playwright test",
+     "gen:types": "node scripts/gen-api-types.mjs && node ../sillyhub-daemon/scripts/gen-provider-caps.mjs",
+     "gen:types:check": "node scripts/gen-api-types.mjs && git diff --exit-code src/lib/api-types.ts"
+@@ -58,6 +59,7 @@
+     "@types/react-dom": "18.3.0",
+     "@types/react-syntax-highlighter": "^15.5.13",
+     "@vitejs/plugin-react": "^4.3.1",
++    "@vitest/coverage-v8": "2.1.9",
+     "autoprefixer": "10.4.19",
+     "eslint": "8.57.0",
+     "eslint-config-next": "14.2.5",
+diff --git a/frontend/pnpm-lock.yaml b/frontend/pnpm-lock.yaml
+index 04905187b..8ee665098 100644
+--- a/frontend/pnpm-lock.yaml
++++ b/frontend/pnpm-lock.yaml
+@@ -132,6 +132,9 @@ importers:
+       '@vitejs/plugin-react':
+         specifier: ^4.3.1
+         version: 4.7.0(vite@5.4.21(@types/node@20.14.0))
++      '@vitest/coverage-v8':
++        specifier: 2.1.9
++        version: 2.1.9(vitest@2.1.9(@types/node@20.14.0)(jsdom@24.1.3))
+       autoprefixer:
+         specifier: 10.4.19
+         version: 10.4.19(postcss@8.4.40)
+@@ -169,6 +172,10 @@ packages:
+     resolution: {integrity: sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw==}
+     engines: {node: '>=10'}
+ 
++  '@ampproject/remapping@2.3.0':
++    resolution: {integrity: sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw==}
++    engines: {node: '>=6.0.0'}
++
+   '@ant-design/colors@8.0.1':
+     resolution: {integrity: sha512-foPVl0+SWIslGUtD/xBr1p9U4AKzPhNYEseXYRRo5QSzGACYZrQbe11AYJbYfAWnWSpGBx6JjBmSeugUsD9vqQ==}
+ 
+@@ -303,6 +310,9 @@ packages:
+     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
+     engines: {node: '>=6.9.0'}
+ 
++  '@bcoe/v8-coverage@0.2.3':
++    resolution: {integrity: sha512-0hYQ8SB4Db5zvZB4axdMHGwEaQjkZzFjQiN9LVYvIFB2nSUHW9tYpxWriPrWDASIxiaXax83REcLxuSdnGPZtw==}
++
+   '@csstools/color-helpers@5.1.0':
+     resolution: {integrity: sha512-S11EXWJyy0Mz5SYvRmY8nJYTFFd1LCNV+7cXyAgQtOOuzb4EsgfqDufL+9esx72/eLhsRdGZwaldu/h+E4t4BA==}
+     engines: {node: '>=18'}
+@@ -559,6 +569,10 @@ packages:
+     resolution: {integrity: sha512-O8jcjabXaleOG9DQ0+ARXWZBTfnP4WNAqzuiJK7ll44AmxGKv/J2M4TPjxjY3znBCfvBXFzucm1twdyFybFqEA==}
+     engines: {node: '>=12'}
+ 
++  '@istanbuljs/schema@0.1.6':
++    resolution: {integrity: sha512-+Sg6GCR/wy1oSmQDFq4LQDAhm3ETKnorxN+y5nbLULOR3P0c14f2Wurzj3/xqPXtasLFfHd5iRFQ7AJt4KH2cw==}
++    engines: {node: '>=8'}
++
+   '@jridgewell/gen-mapping@0.3.13':
+     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
+ 
+@@ -1756,6 +1770,15 @@ packages:
+     peerDependencies:
+       vite: ^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0
+ 
++  '@vitest/coverage-v8@2.1.9':
++    resolution: {integrity: sha512-Z2cOr0ksM00MpEfyVE8KXIYPEcBFxdbLSs56L8PO0QQMxt/6bDj45uQfxoc96v05KW3clk7vvgP0qfDit9DmfQ==}
++    peerDependencies:
++      '@vitest/browser': 2.1.9
++      vitest: 2.1.9
++    peerDependenciesMeta:
++      '@vitest/browser':
++        optional: true
++
+   '@vitest/expect@2.1.9':
+     resolution: {integrity: sha512-UJCIkTBenHeKT1TTlKMJWy1laZewsRIzYighyYiJKZreqtdxSos/S1t+ktRMQWu2CKqaarrkeszJx1cgC5tGZw==}
+ 
+@@ -1940,6 +1963,10 @@ packages:
+   balanced-match@1.0.2:
+     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
+ 
++  balanced-match@4.0.4:
++    resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
++    engines: {node: 18 || 20 || >=22}
++
+   baseline-browser-mapping@2.10.32:
+     resolution: {integrity: sha512-wbPvpyjJPC0zdfdKXxqEL3Ea+bOMD/87X4lftiJkkaBiuG6ALQy1SLmEd7BSmVCuwCQsBrCamgBoLyfFDD1EPg==}
+     engines: {node: '>=6.0.0'}
+@@ -1961,6 +1988,10 @@ packages:
+   brace-expansion@2.1.0:
+     resolution: {integrity: sha512-TN1kCZAgdgweJhWWpgKYrQaMNHcDULHkWwQIspdtjV4Y5aurRdZpjAqn6yX3FPqTA9ngHCc4hJxMAMgGfve85w==}
+ 
++  brace-expansion@5.0.12:
++    resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
++    engines: {node: 20 || >=22}
++
+   braces@3.0.3:
+     resolution: {integrity: sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==}
+     engines: {node: '>=8'}
+@@ -2581,6 +2612,11 @@ packages:
+     deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+     hasBin: true
+ 
++  glob@10.5.0:
++    resolution: {integrity: sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg==}
++    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
++    hasBin: true
++
+   glob@7.2.3:
+     resolution: {integrity: sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==}
+     deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+@@ -2686,6 +2722,9 @@ packages:
+     resolution: {integrity: sha512-Y22oTqIU4uuPgEemfz7NDJz6OeKf12Lsu+QC+s3BVpda64lTiMYCyGwg5ki4vFxkMwQdeZDl2adZoqUgdFuTgQ==}
+     engines: {node: '>=18'}
+ 
++  html-escaper@2.0.2:
++    resolution: {integrity: sha512-H2iMtd0I4Mt5eYiapRdIDjp+XzelXQ0tFE4JS7YFwFevXXMmOp9myNrUvCg0D6ws8iqkRPBfKHgbwig1SmlLfg==}
++
+   html-url-attributes@3.0.1:
+     resolution: {integrity: sha512-ol6UPyBWqsrO6EJySPz2O7ZSr856WDrEzM5zMqp+FJJLGMW35cLYmmZnl0vztAZxRUoNZJFTCohfjuIJ8I4QBQ==}
+ 
+@@ -2887,6 +2926,22 @@ packages:
+   isexe@2.0.0:
+     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
+ 
++  istanbul-lib-coverage@3.2.2:
++    resolution: {integrity: sha512-O8dpsF+r0WV/8MNRKfnmrtCWhuKjxrq2w+jpzBL5UZKTi2LeVWnWOmWRxFlesJONmc+wLAGvKQZEOanko0LFTg==}
++    engines: {node: '>=8'}
++
++  istanbul-lib-report@3.0.1:
++    resolution: {integrity: sha512-GCfE1mtsHGOELCU8e/Z7YWzpmybrx/+dSTfLrvY8qRmaY6zXTKWn6WQIjaAFw069icm6GVMNkgu0NzI4iPZUNw==}
++    engines: {node: '>=10'}
++
++  istanbul-lib-source-maps@5.0.6:
++    resolution: {integrity: sha512-yg2d+Em4KizZC5niWhQaIomgf5WlL4vOOjZ5xGCmF8SnPE/mDWWXgvRExdcpCgh9lLRRa1/fSYp2ymmbJ1pI+A==}
++    engines: {node: '>=10'}
++
++  istanbul-reports@3.2.0:
++    resolution: {integrity: sha512-HGYWWS/ehqTV3xN10i23tkPkpH46MLCIMFNCaaKNavAXTF1RkqxawEPtnjnGZ6XKSInBKkiOA5BKS+aZiY3AvA==}
++    engines: {node: '>=8'}
++
+   iterator.prototype@1.1.5:
+     resolution: {integrity: sha512-H0dkQoCa3b2VEeKQBOxFph+JAbcrQdE7KC0UkqwpLmv2EC4P41QXP+rqo9wYodACiG5/WM5s9oDApTU8utwj9g==}
+     engines: {node: '>= 0.4'}
+@@ -2895,6 +2950,9 @@ packages:
+     resolution: {integrity: sha512-N3yCS/NegsOBokc8GAdM8UcmfsKiSS8cipheD/nivzr700H+nsMOxJjQnvwOcRYVuFkdH0wGUvW2WbXGmrZGbQ==}
+     engines: {node: '>=14'}
+ 
++  jackspeak@3.4.3:
++    resolution: {integrity: sha512-OGlZQpz2yfahA/Rd1Y8Cd9SIEsqvXkLVoSw/cgwhnhFMDbsQFeZYoJJ7bIZBS9BcamUW96asq/npPWugM+RQBw==}
++
+   jiti@1.21.7:
+     resolution: {integrity: sha512-/imKNG4EbWNrVjoNC/1H5/9GFy+tqjGBHCaSsN+P2RnPqjsLmv6UD3Ej+Kj8nBWaRAwyk7kK5ZUc+OEatnTR3A==}
+     hasBin: true
+@@ -3025,6 +3083,13 @@ packages:
+   magic-string@0.30.21:
+     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
+ 
++  magicast@0.3.5:
++    resolution: {integrity: sha512-L0WhttDl+2BOsybvEOLK7fW3UA0OQ0IQ2d6Zl2x/a6vVRs3bAY0ECOSHHeL5jD+SbOpOCUEi0y1DgHEn9Qn1AQ==}
++
++  make-dir@4.0.0:
++    resolution: {integrity: sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw==}
++    engines: {node: '>=10'}
++
+   markdown-table@3.0.4:
+     resolution: {integrity: sha512-wiYz4+JrLyb/DqW2hkFJxP7Vd7JuTDm77fvbM8VfEQdmSMqcImWeeRbHwZjBjIFki/VaMK2BhFi7oUUZeM5bqw==}
+ 
+@@ -3181,6 +3246,10 @@ packages:
+     resolution: {integrity: sha512-I9jwMn07Sy/IwOj3zVkVik2JTvgpaykDZEigL6Rx6N9LbMywwUSMtxET+7lVoDLLd3O3IXwJwvuuns8UB/HeAg==}
+     engines: {node: '>=4'}
+ 
++  minimatch@10.2.6:
++    resolution: {integrity: sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==}
++    engines: {node: 18 || 20 || >=22}
++
+   minimatch@3.1.5:
+     resolution: {integrity: sha512-VgjWUsnnT6n+NUk6eZq77zeFdpW2LWDzP6zFGrCbHXiYNul5Dzqk2HHQ5uFH2DNW5Xbp8+jVzaeNt94ssEEl4w==}
+ 
+@@ -3324,6 +3393,9 @@ packages:
+     resolution: {integrity: sha512-LaNjtRWUBY++zB5nE/NwcaoMylSPk+S+ZHNB1TzdbMJMny6dynpAGt7X/tl/QYq3TIeE6nxHppbo2LGymrG5Pw==}
+     engines: {node: '>=10'}
+ 
++  package-json-from-dist@1.0.1:
++    resolution: {integrity: sha512-UEZIS3/by4OC8vL3P2dTXRETpebLI2NiI5vIrjaD/5UtrkFX/tNbwjTSRAGC/+7CAo2pIcBaRgWmcBBHcsaCIw==}
++
+   pako@1.0.11:
+     resolution: {integrity: sha512-4hLB8Py4zZce5s4yd9XzopqwVv/yGNhV1Bl8NTmCq1763HeK2+EwVTv+leGeL13Dnh2wfbqowVPXCIO0z4taYw==}
+ 
+@@ -3917,6 +3989,10 @@ packages:
+     engines: {node: '>=14.0.0'}
+     hasBin: true
+ 
++  test-exclude@7.0.2:
++    resolution: {integrity: sha512-u9E6A+ZDYdp7a4WnarkXPZOx8Ilz46+kby6p1yZ8zsGTz9gYa6FIS7lj2oezzNKmtdyyJNNmmXDppga5GB7kSw==}
++    engines: {node: '>=18'}
++
+   text-table@0.2.0:
+     resolution: {integrity: sha512-N+8UisAXDGk8PFXP4HAzVR9nbfmVJ3zYLAWiTIoqC5v5isinhr+r5uaO8+7r3BMfuNIufIsA7RdpVgacC2cSpw==}
+ 
+@@ -4312,6 +4388,11 @@ snapshots:
+ 
+   '@alloc/quick-lru@5.2.0': {}
+ 
++  '@ampproject/remapping@2.3.0':
++    dependencies:
++      '@jridgewell/gen-mapping': 0.3.13
++      '@jridgewell/trace-mapping': 0.3.31
++
+   '@ant-design/colors@8.0.1':
+     dependencies:
+       '@ant-design/fast-color': 3.0.1
+@@ -4488,6 +4569,8 @@ snapshots:
+       '@babel/helper-string-parser': 7.27.1
+       '@babel/helper-validator-identifier': 7.28.5
+ 
++  '@bcoe/v8-coverage@0.2.3': {}
++
+   '@csstools/color-helpers@5.1.0': {}
+ 
+   '@csstools/css-calc@2.1.4(@csstools/css-parser-algorithms@3.0.5(@csstools/css-tokenizer@3.0.4))(@csstools/css-tokenizer@3.0.4)':
+@@ -4685,6 +4768,8 @@ snapshots:
+       wrap-ansi: 8.1.0
+       wrap-ansi-cjs: wrap-ansi@7.0.0
+ 
++  '@istanbuljs/schema@0.1.6': {}
++
+   '@jridgewell/gen-mapping@0.3.13':
+     dependencies:
+       '@jridgewell/sourcemap-codec': 1.5.5
+@@ -5839,6 +5924,24 @@ snapshots:
+     transitivePeerDependencies:
+       - supports-color
+ 
++  '@vitest/coverage-v8@2.1.9(vitest@2.1.9(@types/node@20.14.0)(jsdom@24.1.3))':
++    dependencies:
++      '@ampproject/remapping': 2.3.0
++      '@bcoe/v8-coverage': 0.2.3
++      debug: 4.4.3(supports-color@10.2.2)
++      istanbul-lib-coverage: 3.2.2
++      istanbul-lib-report: 3.0.1
++      istanbul-lib-source-maps: 5.0.6
++      istanbul-reports: 3.2.0
++      magic-string: 0.30.21
++      magicast: 0.3.5
++      std-env: 3.10.0
++      test-exclude: 7.0.2
++      tinyrainbow: 1.2.0
++      vitest: 2.1.9(@types/node@20.14.0)(jsdom@24.1.3)
++    transitivePeerDependencies:
++      - supports-color
++
+   '@vitest/expect@2.1.9':
+     dependencies:
+       '@vitest/spy': 2.1.9
+@@ -6107,6 +6210,8 @@ snapshots:
+ 
+   balanced-match@1.0.2: {}
+ 
++  balanced-match@4.0.4: {}
++
+   baseline-browser-mapping@2.10.32: {}
+ 
+   bcp-47-match@2.0.3: {}
+@@ -6124,6 +6229,10 @@ snapshots:
+     dependencies:
+       balanced-match: 1.0.2
+ 
++  brace-expansion@5.0.12:
++    dependencies:
++      balanced-match: 4.0.4
++
+   braces@3.0.3:
+     dependencies:
+       fill-range: 7.1.1
+@@ -6897,6 +7006,15 @@ snapshots:
+       minipass: 7.1.3
+       path-scurry: 1.11.1
+ 
++  glob@10.5.0:
++    dependencies:
++      foreground-child: 3.3.1
++      jackspeak: 3.4.3
++      minimatch: 9.0.9
++      minipass: 7.1.3
++      package-json-from-dist: 1.0.1
++      path-scurry: 1.11.1
++
+   glob@7.2.3:
+     dependencies:
+       fs.realpath: 1.0.0
+@@ -7082,6 +7200,8 @@ snapshots:
+     dependencies:
+       whatwg-encoding: 3.1.1
+ 
++  html-escaper@2.0.2: {}
++
+   html-url-attributes@3.0.1: {}
+ 
+   html-void-elements@3.0.0: {}
+@@ -7277,6 +7397,27 @@ snapshots:
+ 
+   isexe@2.0.0: {}
+ 
++  istanbul-lib-coverage@3.2.2: {}
++
++  istanbul-lib-report@3.0.1:
++    dependencies:
++      istanbul-lib-coverage: 3.2.2
++      make-dir: 4.0.0
++      supports-color: 7.2.0
++
++  istanbul-lib-source-maps@5.0.6:
++    dependencies:
++      '@jridgewell/trace-mapping': 0.3.31
++      debug: 4.4.3(supports-color@10.2.2)
++      istanbul-lib-coverage: 3.2.2
++    transitivePeerDependencies:
++      - supports-color
++
++  istanbul-reports@3.2.0:
++    dependencies:
++      html-escaper: 2.0.2
++      istanbul-lib-report: 3.0.1
++
+   iterator.prototype@1.1.5:
+     dependencies:
+       define-data-property: 1.1.4
+@@ -7292,6 +7433,12 @@ snapshots:
+     optionalDependencies:
+       '@pkgjs/parseargs': 0.11.0
+ 
++  jackspeak@3.4.3:
++    dependencies:
++      '@isaacs/cliui': 8.0.2
++    optionalDependencies:
++      '@pkgjs/parseargs': 0.11.0
++
+   jiti@1.21.7: {}
+ 
+   js-levenshtein@1.1.6: {}
+@@ -7428,6 +7575,16 @@ snapshots:
+     dependencies:
+       '@jridgewell/sourcemap-codec': 1.5.5
+ 
++  magicast@0.3.5:
++    dependencies:
++      '@babel/parser': 7.29.3
++      '@babel/types': 7.29.0
++      source-map-js: 1.2.1
++
++  make-dir@4.0.0:
++    dependencies:
++      semver: 7.8.1
++
+   markdown-table@3.0.4: {}
+ 
+   math-intrinsics@1.1.0: {}
+@@ -7791,6 +7948,10 @@ snapshots:
+ 
+   min-indent@1.0.1: {}
+ 
++  minimatch@10.2.6:
++    dependencies:
++      brace-expansion: 5.0.12
++
+   minimatch@3.1.5:
+     dependencies:
+       brace-expansion: 1.1.14
+@@ -7951,6 +8112,8 @@ snapshots:
+     dependencies:
+       p-limit: 3.1.0
+ 
++  package-json-from-dist@1.0.1: {}
++
+   pako@1.0.11: {}
+ 
+   parent-module@1.0.1:
+@@ -8682,6 +8845,12 @@ snapshots:
+     transitivePeerDependencies:
+       - ts-node
+ 
++  test-exclude@7.0.2:
++    dependencies:
++      '@istanbuljs/schema': 0.1.6
++      glob: 10.5.0
++      minimatch: 10.2.6
++
+   text-table@0.2.0: {}
+ 
+   thenify-all@1.6.0:
+diff --git a/frontend/vitest.config.ts b/frontend/vitest.config.ts
+index afd8183e6..22b2561bd 100644
+--- a/frontend/vitest.config.ts
++++ b/frontend/vitest.config.ts
+@@ -35,6 +35,20 @@ export default defineConfig({
+       ],
+       ["src/lib/{daemon,errors,workspace-binding,workspaces}.test.ts", "node"],
+     ],
++    // 覆盖率（ql-20260921-006-2095）：CI 跑 test:coverage，text 摘要随日志输出 +
++    // html 报告作 artifact。先只看数不设 thresholds——313 个测试文件的盲区摸清前
++    // 设门槛只会冷启动即红；include 收敛到 src 业务代码，测试自身/测试基建不计入。
++    coverage: {
++      provider: "v8",
++      reporter: ["text", "html"],
++      include: ["src/**/*.{ts,tsx}"],
++      exclude: [
++        "src/**/*.test.{ts,tsx}",
++        "src/**/__tests__/**",
++        "src/test/**",
++        "e2e/**",
++      ],
++    },
+   },
+   resolve: {
+     alias: {

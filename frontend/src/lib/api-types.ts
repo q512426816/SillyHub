@@ -373,12 +373,13 @@ export interface paths {
          *     ``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序
          *     （每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。
          *
-         *     ql-20260917-007：非管理员分支先看**平台级授权**（``user_roles`` 持
-         *     ``workspace:read`` 或 ``platform:admin``）——与 ``has_permission`` 段 2、
-         *     通知广播收件人查找（``list_user_ids_with_permission`` 段 2）口径对齐：
-         *     这类用户对所有工作区有真实读权限，列表按全量返回；否则维持
-         *     ``allowed_workspace_ids`` 工作区级限定。修复「列表看不到工作区，
-         *     却能收到其通知、点进其内容」的三处口径割裂。
+         *     ql-20260917-007：非管理员分支先看**平台级授权**（``user_roles``）——与
+         *     ``has_permission`` 段 2、通知广播收件人查找（``list_user_ids_with_permission``
+         *     段 2）三处口径对齐（原修复「列表看不到工作区，却能收到其通知、点进其
+         *     内容」的割裂）。2026-09-20-workspace-member-visibility：平台级
+         *     ``workspace:read`` 不再授予全量可见（纯功能入口语义，D-001@v1），三处
+         *     同步收窄；平台级仅 ``platform:admin`` 全量，其余维持
+         *     ``allowed_workspace_ids`` 工作区级限定。
          */
         get: operations["list_workspaces_api_workspaces_get"];
         put?: never;
@@ -2330,6 +2331,27 @@ export interface paths {
         };
         /** List Scan Docs */
         get: operations["list_scan_docs_api_workspaces__workspace_id__scan_docs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/scan-docs/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scan Docs Stats
+         * @description 扫描文档运营指标：覆盖率（七件套+模块两级，8 周趋势）/陈旧（90 天）/
+         *     每项目密度/近 30 天更新/最近更新榜 + docs-inject 注入频次（D-003@v1）。
+         */
+        get: operations["get_scan_docs_stats_api_workspaces__workspace_id__scan_docs_stats_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -22414,6 +22436,98 @@ export interface components {
             doc_type?: string | null;
         };
         /**
+         * ScanDocsCoverageOut
+         * @description 覆盖率两级口径：七件套 + 模块文档（综合百分比由前端用分子分母计算）。
+         */
+        ScanDocsCoverageOut: {
+            /** Std Have */
+            std_have: number;
+            /** Std Expected */
+            std_expected: number;
+            /** Module Have */
+            module_have: number;
+            /** Module Expected */
+            module_expected: number;
+            /** Trend */
+            trend: components["schemas"]["ScanDocsTrendPoint"][];
+        };
+        /** ScanDocsDensityOut */
+        ScanDocsDensityOut: {
+            /** Per Project Avg */
+            per_project_avg: number;
+        };
+        /** ScanDocsFreshnessOut */
+        ScanDocsFreshnessOut: {
+            /** Recent Updated */
+            recent_updated: number;
+            /** Total */
+            total: number;
+        };
+        /** ScanDocsInjectionBoardItem */
+        ScanDocsInjectionBoardItem: {
+            /** Path */
+            path: string;
+            /** Hits 30D */
+            hits_30d: number;
+        };
+        /**
+         * ScanDocsInjectionOut
+         * @description CLI 模块上下文注入频次（docs-inject 遥测行聚合，D-003@v1）。
+         */
+        ScanDocsInjectionOut: {
+            /** Total 30D */
+            total_30d: number;
+            /** Docs Hit 30D */
+            docs_hit_30d: number;
+            /** Board */
+            board: components["schemas"]["ScanDocsInjectionBoardItem"][];
+        };
+        /** ScanDocsRecentBoardItem */
+        ScanDocsRecentBoardItem: {
+            /** Path */
+            path: string;
+            /** Doc Type */
+            doc_type: string;
+            /**
+             * Last Modified At
+             * Format: date-time
+             */
+            last_modified_at: string;
+        };
+        /**
+         * ScanDocsStaleDocOut
+         * @description 陈旧清单单行（last_modified_at 为空 = 未知时间）。
+         */
+        ScanDocsStaleDocOut: {
+            /** Path */
+            path: string;
+            /** Doc Type */
+            doc_type: string;
+            /** Last Modified At */
+            last_modified_at?: string | null;
+        };
+        /** ScanDocsStatsOut */
+        ScanDocsStatsOut: {
+            coverage: components["schemas"]["ScanDocsCoverageOut"];
+            /** Stale Docs */
+            stale_docs: components["schemas"]["ScanDocsStaleDocOut"][];
+            density: components["schemas"]["ScanDocsDensityOut"];
+            freshness: components["schemas"]["ScanDocsFreshnessOut"];
+            /** Recent Board */
+            recent_board: components["schemas"]["ScanDocsRecentBoardItem"][];
+            injection: components["schemas"]["ScanDocsInjectionOut"];
+        };
+        /**
+         * ScanDocsTrendPoint
+         * @description 覆盖率卡内趋势的单周桶。
+         */
+        ScanDocsTrendPoint: {
+            /** Week */
+            week: string;
+            /** Updated */
+            updated: number;
+        };
+        /**
          * ScanGenerateRequest
          * @description Request body for ``POST /api/workspaces/scan-generate``.
          */
@@ -30984,6 +31098,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScanDocList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scan_docs_stats_api_workspaces__workspace_id__scan_docs_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanDocsStatsOut"];
                 };
             };
             /** @description Validation Error */

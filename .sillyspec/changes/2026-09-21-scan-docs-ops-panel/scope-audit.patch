@@ -1,0 +1,2350 @@
+diff --git a/.sillyspec/docs/backend/modules/scan_docs.md b/.sillyspec/docs/backend/modules/scan_docs.md
+index 9bcce80ce..e76a136a5 100644
+--- a/.sillyspec/docs/backend/modules/scan_docs.md
++++ b/.sillyspec/docs/backend/modules/scan_docs.md
+@@ -14,6 +14,7 @@ created_at: 2026-08-18 01:45:00
+ ## 契约摘要
+ - `GET /api/workspaces/{workspace_id}/scan-docs` → 文档列表（读 DB；带每文档冲突计数，`_count_conflicts_batch` IN 预取避免 N+1）。
+ - `GET .../scan-docs/{doc_id}` → 单文档详情（含 content）。
++- `GET .../scan-docs/stats` → `ScanDocsStatsOut` 运营指标（2026-09-21-scan-docs-ops-panel）：四指标——覆盖率两级（七件套 std_have/std_expected + 模块文档 module_have/module_expected，前端合并算综合百分比，带近 8 周趋势 trend）/ 陈旧清单 stale_docs（mtime 为空或超 90 天，最旧在前、上限 200）/ 密度 density.per_project_avg / 新鲜 freshness.recent_updated·total（近 30 天）；双榜——recent_board（mtime 非空降序 Top 10）+ injection（近 30 天 docs-inject 注入频次：total_30d/docs_hit_30d/board Top 10，旧 CLI 无遥测返回全零值前端空态）。单表 `scan_documents` 轻列查询（排除 content）后全内存聚合；路由注册序上字面量 stats 必须保持在 `{doc_id}` 通配之前（design R-03）。
+ - `GET .../scan-docs/{doc_id}/conflicts` → 该文档 path 的冲突历史，新→旧，limit/offset 分页（默认 50）。
+ - `POST .../scan-docs/reparse` → 重扫文件系统，返回 `({parsed, created, updated, deleted}, ScanDocsResult)`。
+ - 解析范围：docs 树递归 `.md` / `.yaml` / `.yml`；yaml 的 doc_type 取文件名 stem，md 按 `_doc_type_from_filename` 推断；`ScanDocsResult` 带告警（如 `DOCS_DIR_MISSING`）。父工作区（component_key 空）扫全树，子组件工作区只扫该组件子树（`parse_component`）。
+@@ -39,6 +40,7 @@ archive_conflict: 只构造 ScanDocConflictHistory 行（默认不入 session，
+ - `archive_conflict` 的 `add_to_session=False`（ql-20260817-005）供调用方在长 FS 循环外批量 `session.add`：循环内逐条 add 会 autobegin 把事务横跨后续 FS 段，撞 PG `idle_in_transaction_session_timeout` 被杀连接。
+ - 冲突历史行存 source id（member/runtime）为**平铺列、故意不加 FK**：删用户或 runtime 不得级联删审计记录。
+ - 归档写入方是 spec_workspace（apply_ops 覆盖文件时），本模块只提供原语与查询端点；conflict 计数与列表消费在前端文档详情页。
++- **stats 口径四要点**（service.stats，动聚合前先对齐）：① 覆盖率两级——七件套按项目去重（`scan/` 下同 doc_type 异常多副本只计一次），模块层分母读各项目 `_module-map.yaml` 的 `modules:` 字典条目数，无 map / yaml 损坏 / 字段缺失的项目**退化为实有数**（不虚摊分母、不抛 500）；② 陈旧口径**含 mtime 空值**（未知时间视为最陈旧、排清单最前）；③ 注入频次读 `knowledge_hits` 的 `type='docs-inject'` 遥测行（跨模块只读引用，对齐 spec_workspace 引 ScanDocument 先例）——knowledge 侧 `USAGE_TYPES` 白名单不含该 type，知识库 stats 口径天然不被污染（design R-07）；④ 项目分组以 `_strip_docs_prefix` 剥前缀后第一段为准，根级文件只进全局口径不建项目。
+ 
+ ## 人工备注
+ 
+diff --git a/.sillyspec/docs/frontend/modules/app-workspace-pages.md b/.sillyspec/docs/frontend/modules/app-workspace-pages.md
+index 67f6bd6d8..45cbedb1f 100644
+--- a/.sillyspec/docs/frontend/modules/app-workspace-pages.md
++++ b/.sillyspec/docs/frontend/modules/app-workspace-pages.md
+@@ -24,7 +24,7 @@ created_at: 2026-08-18 01:45:00
+ - `WorkspaceFilesPage`（`files`，50 行薄壳）：`<BorrowedSolutionFilesPanel>` 拉 owner_type=workspace 的借用方案文件（共享 daemon 产出）。
+ - `ComponentsPage` / `TopologyPage`：`listComponents` / `getTopology`，拓扑 @xyflow/react。
+ - `RuntimePage`（`runtime`）：`getRuntimeProgress` + `getRuntimeUserInputsRaw` + `getRuntimeArtifacts` 运行时进度三路。2026-08-19-runtime-live-daemon-read：数据源为绑定 daemon 实时读取，徽标「守护进程运行态」+ 副标题「经绑定守护进程实时读取 .sillyspec/.runtime/」；错误按 ApiError.status 分级行动指引（502 离线/504 超时/422 版本过旧），产物读取失败接红条不静默。
+-- 其余：`ScanDocsPage`（+ lib-scan-docs-tree 文档树；树节点徽标 `👤 来源成员` / `🕘 历史N版`=conflict_count 覆盖存档计数，中性 outline 非告警，ql-20260819-003）、`KnowledgePage`、`ReleasesPage`、`ApprovalsPage`、`AuditPage`、`IncidentsPage` / `IncidentDetailPage`（`[iid]`）、`MissionsPage`、`MembersPage`（成员管理 + `WorkspaceMemberAddDialog`/`Row`）、`WorkspaceMcpPage`（MCP 设置）。
++- 其余：`ScanDocsPage`（+ lib-scan-docs-tree 文档树；树节点徽标 `👤 来源成员` / `🕘 历史N版`=conflict_count 覆盖存档计数，中性 outline 非告警，ql-20260819-003；2026-09-21-scan-docs-ops-panel：顶部运营指标面板（覆盖率/陈旧/密度/新鲜四子卡+注入频次/最近更新双榜，独立 useQuery 不阻塞主列表），挂 PageHeader 之下、错误条之上，见 scan-docs-stats-panel 卡）、`KnowledgePage`、`ReleasesPage`、`ApprovalsPage`、`AuditPage`、`IncidentsPage` / `IncidentDetailPage`（`[iid]`）、`MissionsPage`、`MembersPage`（成员管理 + `WorkspaceMemberAddDialog`/`Row`）、`WorkspaceMcpPage`（MCP 设置）。
+ 
+ ## 关键逻辑
+ ```
+diff --git a/backend/app/modules/scan_docs/router.py b/backend/app/modules/scan_docs/router.py
+index d80468e3c..a16685bbf 100644
+--- a/backend/app/modules/scan_docs/router.py
++++ b/backend/app/modules/scan_docs/router.py
+@@ -18,6 +18,7 @@ from app.modules.scan_docs.schema import (
+     ScanDocRead,
+     ScanDocReparseResponse,
+     ScanDocReparseStats,
++    ScanDocsStatsOut,
+     ScanDocSummary,
+     ScanDocWarning,
+ )
+@@ -52,6 +53,28 @@ async def list_scan_docs(
+     return ScanDocList(items=summaries, total=total)
+ 
+ 
++# ── stats 运营指标端点（2026-09-21-scan-docs-ops-panel task-01）─────────────
++#
++# 字面量路由注册序铁律（对齐 knowledge/router.py:215 先例）：GET /scan-docs/stats
++# 必须保持在下方 GET /scan-docs/{doc_id} 通配之前——FastAPI 按声明序匹配，字面量
++# 落后会被当作 doc_id="stats" 解析 UUID 失败返回 422（design R-03）。
++
++
++@router.get(
++    "/scan-docs/stats",
++    response_model=ScanDocsStatsOut,
++)
++async def get_scan_docs_stats(
++    workspace_id: uuid.UUID,
++    session: SessionDep,
++    _user: Annotated[User, Depends(require_permission(Permission.SCAN_DOCS_READ))],
++) -> ScanDocsStatsOut:
++    """扫描文档运营指标：覆盖率（七件套+模块两级，8 周趋势）/陈旧（90 天）/
++    每项目密度/近 30 天更新/最近更新榜 + docs-inject 注入频次（D-003@v1）。"""
++    service = ScanDocsService(session)
++    return await service.stats(workspace_id)
++
++
+ @router.get(
+     "/scan-docs/{doc_id}",
+     response_model=ScanDocRead,
+diff --git a/backend/app/modules/scan_docs/schema.py b/backend/app/modules/scan_docs/schema.py
+index 21d7d079a..04c413a10 100644
+--- a/backend/app/modules/scan_docs/schema.py
++++ b/backend/app/modules/scan_docs/schema.py
+@@ -91,3 +91,72 @@ class ScanDocConflictRead(BaseModel):
+     new_source_member_id: uuid.UUID | None = None
+     new_mtime: datetime | None = None
+     created_at: datetime
++
++
++# ── stats 运营指标 DTO 族（2026-09-21-scan-docs-ops-panel task-01）──────────
++#
++# 命名统一 ScanDocs 前缀：CoverageOut/DensityOut/FreshnessOut 与
++# knowledge/schema.py 已有类同名，跨模块同名在 OpenAPI 共享文档会产生
++# CoverageOut1 式去重后缀污染 gen:types 生成类型（design Grill 项4）。
++
++
++class ScanDocsTrendPoint(BaseModel):
++    """覆盖率卡内趋势的单周桶。"""
++
++    week: str  # 周一日期 ISO（"2026-09-15"）
++    updated: int  # 该周桶内更新文档数
++
++
++class ScanDocsCoverageOut(BaseModel):
++    """覆盖率两级口径：七件套 + 模块文档（综合百分比由前端用分子分母计算）。"""
++
++    std_have: int  # 七件套实有（Σ 各项目 scan/ 标准类型去重）
++    std_expected: int  # 项目数 × 7
++    module_have: int  # modules/ 实有 .md（排除 _module-map.yaml）
++    module_expected: int  # Σ 登记模块数（无 map 项目退化为实有，不虚摊）
++    trend: list[ScanDocsTrendPoint]  # 近 8 周
++
++
++class ScanDocsStaleDocOut(BaseModel):
++    """陈旧清单单行（last_modified_at 为空 = 未知时间）。"""
++
++    path: str
++    doc_type: str
++    last_modified_at: datetime | None = None
++
++
++class ScanDocsDensityOut(BaseModel):
++    per_project_avg: float  # total ÷ max(项目数, 1)
++
++
++class ScanDocsFreshnessOut(BaseModel):
++    recent_updated: int  # last_modified_at ≥ now-30d
++    total: int
++
++
++class ScanDocsRecentBoardItem(BaseModel):
++    path: str
++    doc_type: str
++    last_modified_at: datetime
++
++
++class ScanDocsInjectionBoardItem(BaseModel):
++    path: str  # 剥前缀后的 docs 路径（与树/卡片锚点同口径）
++    hits_30d: int  # 近 30 天被注入次数
++
++
++class ScanDocsInjectionOut(BaseModel):
++    """CLI 模块上下文注入频次（docs-inject 遥测行聚合，D-003@v1）。"""
++
++    total_30d: int  # docs-inject 行数（近 30 天）
++    docs_hit_30d: int  # 被注入文档去重数
++    board: list[ScanDocsInjectionBoardItem]  # 按次数降序 Top 10
++
++
++class ScanDocsStatsOut(BaseModel):
++    coverage: ScanDocsCoverageOut
++    stale_docs: list[ScanDocsStaleDocOut]  # 最旧在前，上限 200
++    density: ScanDocsDensityOut
++    freshness: ScanDocsFreshnessOut
++    recent_board: list[ScanDocsRecentBoardItem]  # last_modified_at 降序 Top 10
++    injection: ScanDocsInjectionOut  # 旧 CLI 无遥测 → 全零值，前端空态
+diff --git a/backend/app/modules/scan_docs/service.py b/backend/app/modules/scan_docs/service.py
+index a26dea859..d3fb0bf28 100644
+--- a/backend/app/modules/scan_docs/service.py
++++ b/backend/app/modules/scan_docs/service.py
+@@ -9,9 +9,11 @@ from __future__ import annotations
+ import asyncio
+ import hashlib
+ import uuid
+-from datetime import UTC, datetime
++from collections import Counter
++from datetime import UTC, date, datetime, timedelta
+ from pathlib import Path
+ 
++import yaml
+ from sqlalchemy import func, or_, select
+ from sqlalchemy.ext.asyncio import AsyncSession
+ from sqlalchemy.orm import load_only
+@@ -19,14 +21,41 @@ from sqlmodel import col
+ 
+ from app.core.errors import ScanDocNotFound
+ from app.core.logging import get_logger
++from app.modules.knowledge.hits import KnowledgeHit
+ from app.modules.scan_docs.conflict_model import ScanDocConflictHistory
+ from app.modules.scan_docs.conflict_service import ScanDocConflictService
+ from app.modules.scan_docs.model import ScanDocument
+-from app.modules.scan_docs.parser import ParsedDoc, ScanDocsParser, ScanDocsResult
++from app.modules.scan_docs.parser import (
++    STANDARD_DOC_TYPES,
++    ParsedDoc,
++    ScanDocsParser,
++    ScanDocsResult,
++)
++from app.modules.scan_docs.schema import (
++    ScanDocsCoverageOut,
++    ScanDocsDensityOut,
++    ScanDocsFreshnessOut,
++    ScanDocsInjectionBoardItem,
++    ScanDocsInjectionOut,
++    ScanDocsRecentBoardItem,
++    ScanDocsStaleDocOut,
++    ScanDocsStatsOut,
++    ScanDocsTrendPoint,
++)
+ from app.modules.workspace.service import WorkspaceService
+ 
+ log = get_logger(__name__)
+ 
++# ── stats 口径常量（2026-09-21-scan-docs-ops-panel design D-001@v1/D-003@v1）──
++STATS_TREND_WEEKS = 8
++STATS_STALE_DAYS = 90
++STATS_FRESH_DAYS = 30
++STATS_INJECTION_DAYS = 30
++STATS_STALE_LIST_LIMIT = 200
++STATS_BOARD_LIMIT = 10
++#: docs-inject 遥测行 type 值（sillyspec CLI 模块上下文注入埋点，D-003@v1）。
++STATS_INJECTION_TYPE = "docs-inject"
++
+ 
+ def _dt_equal(a: datetime | None, b: datetime | None) -> bool:
+     """datetime 相等比较（时区归一）：SQLite 读回 naive（存的是 UTC），parsed 侧
+@@ -38,6 +67,29 @@ def _dt_equal(a: datetime | None, b: datetime | None) -> bool:
+     return aa == bb
+ 
+ 
++def _as_utc(dt: datetime) -> datetime:
++    """DB 回读时间归一 aware-UTC（SQLite 读回 naive 存的是 UTC；对齐
++    knowledge/hits.py ``_aware_utc`` 同款坑的防御，stats 聚合比较前置）。"""
++    if dt.tzinfo is None:
++        return dt.replace(tzinfo=UTC)
++    return dt.astimezone(UTC)
++
++
++def _strip_docs_prefix(path: str) -> str:
++    """剥前导包裹段（可选 ``.sillyspec`` 段 + ``docs`` 段）。
++
++    与前端 stripPathPrefix 同口径（frontend/src/lib/scan-docs-tree.ts）：扁平
++    布局 ``docs/<项目>/...`` 与包裹布局 ``.sillyspec/docs/<项目>/...`` 都剥成
++    ``<项目>/...``，剥后第一段即「项目」（无段的根级文件由调用方单独处理）。"""
++    parts = path.split("/")
++    start = 0
++    if parts and parts[0] == ".sillyspec":
++        start = 1
++    if start < len(parts) and parts[start] == "docs":
++        start += 1
++    return "/".join(parts[start:])
++
++
+ class ScanDocsService:
+     """List, fetch, and reparse scan documents for a workspace."""
+ 
+@@ -131,6 +183,174 @@ class ScanDocsService:
+             )
+         return doc
+ 
++    # -- Stats（2026-09-21-scan-docs-ops-panel task-01）---
++
++    async def stats(self, workspace_id: uuid.UUID) -> ScanDocsStatsOut:
++        """scan_documents 单表内存聚合 → 覆盖率（两级）/陈旧/密度/新鲜/趋势/最近榜，
++        再聚合 knowledge_hits 的 docs-inject 行出注入频次（D-003@v1）。
++
++        量级前提（design R-05）：当前工作区数百行 exists 文档，一次轻列查询
++        （排除 content）后全内存聚合，不写多条 SQL；_module-map.yaml 行单独
++        SELECT content 解析登记模块数（yaml 损坏按无 map 退化，不抛 500）。
++        """
++        await self._workspace_service.get(workspace_id)
++        now = _as_utc(datetime.now(UTC))
++
++        stmt = (
++            select(ScanDocument.path, ScanDocument.doc_type, ScanDocument.last_modified_at)
++            .where(col(ScanDocument.workspace_id) == workspace_id)
++            .where(col(ScanDocument.exists).is_(True))
++        )
++        # (raw_path, doc_type, mtime_aware|None)：mtime 归一 aware-UTC——SQLite 读回
++        # naive，与 aware 的 now/窗口比较裸混用会 TypeError。
++        docs: list[tuple[str, str, datetime | None]] = [
++            (path, doc_type, _as_utc(mtime) if mtime is not None else None)
++            for path, doc_type, mtime in (await self._session.execute(stmt)).all()
++        ]
++
++        # ── 项目分组：剥前缀后第一段 = 项目；根级文件不建项目（只进全局口径）──
++        projects: dict[str, dict[str, set[str] | int]] = {}
++        for raw_path, doc_type, _mtime in docs:
++            segs = _strip_docs_prefix(raw_path).split("/")
++            if len(segs) < 2:
++                continue
++            agg = projects.setdefault(segs[0], {"std_types": set(), "module_md": 0})
++            if segs[1] == "scan" and doc_type in STANDARD_DOC_TYPES:
++                # 按项目去重：scan/ 下同名标准件（异常多副本）只计一次。
++                agg["std_types"].add(doc_type)
++            if segs[1] == "modules" and raw_path.endswith(".md") and segs[-1] != "_module-map.yaml":
++                agg["module_md"] += 1
++
++        # ── 覆盖率两级：七件套 have/expected + 模块层 have/expected ──
++        std_have = sum(len(a["std_types"]) for a in projects.values())
++        std_expected = len(projects) * len(STANDARD_DOC_TYPES)
++        module_have = sum(a["module_md"] for a in projects.values())
++        # 无 map / map 损坏的项目 expected 退化为该项目 have（不虚摊覆盖率分母）。
++        registered = await self._registered_module_counts(workspace_id, set(projects))
++        module_expected = sum(registered.get(p, a["module_md"]) for p, a in projects.items())
++
++        # ── 陈旧：mtime 为空或 < now-90d；清单升序（None 最前），上限 200 ──
++        stale_cutoff = now - timedelta(days=STATS_STALE_DAYS)
++        epoch = datetime.min.replace(tzinfo=UTC)
++        stale = [d for d in docs if d[2] is None or d[2] < stale_cutoff]
++        stale.sort(key=lambda d: (d[2] is not None, d[2] or epoch))
++
++        # ── 密度 / 新鲜 ──
++        total = len(docs)
++        fresh_cutoff = now - timedelta(days=STATS_FRESH_DAYS)
++        recent_updated = sum(1 for d in docs if d[2] is not None and d[2] >= fresh_cutoff)
++
++        # ── 趋势：近 8 个自然周（周一为界）桶内 mtime 计数，8 点全输出含 0 ──
++        this_monday = now.date() - timedelta(days=now.date().weekday())
++        mondays = [this_monday - timedelta(weeks=k) for k in range(STATS_TREND_WEEKS - 1, -1, -1)]
++        week_counts: Counter[date] = Counter()
++        for _raw_path, _doc_type, mtime in docs:
++            if mtime is None:
++                continue
++            week_counts[mtime.date() - timedelta(days=mtime.date().weekday())] += 1
++        trend = [
++            ScanDocsTrendPoint(week=w.isoformat(), updated=week_counts.get(w, 0)) for w in mondays
++        ]
++
++        # ── 最近更新榜：mtime 非空降序 Top 10（先按 path 排再稳定排序 → 同刻 path 升序）──
++        dated = sorted((d for d in docs if d[2] is not None), key=lambda d: d[0])
++        dated.sort(key=lambda d: d[2] or epoch, reverse=True)
++        recent_board = [
++            ScanDocsRecentBoardItem(path=raw_path, doc_type=doc_type, last_modified_at=mtime)
++            for raw_path, doc_type, mtime in dated[:STATS_BOARD_LIMIT]
++        ]
++
++        return ScanDocsStatsOut(
++            coverage=ScanDocsCoverageOut(
++                std_have=std_have,
++                std_expected=std_expected,
++                module_have=module_have,
++                module_expected=module_expected,
++                trend=trend,
++            ),
++            stale_docs=[
++                ScanDocsStaleDocOut(path=raw_path, doc_type=doc_type, last_modified_at=mtime)
++                for raw_path, doc_type, mtime in stale[:STATS_STALE_LIST_LIMIT]
++            ],
++            density=ScanDocsDensityOut(per_project_avg=total / max(len(projects), 1)),
++            freshness=ScanDocsFreshnessOut(recent_updated=recent_updated, total=total),
++            recent_board=recent_board,
++            injection=await self._injection_stats(workspace_id, now),
++        )
++
++    async def _registered_module_counts(
++        self,
++        workspace_id: uuid.UUID,
++        projects: set[str],
++    ) -> dict[str, int]:
++        """各项目 ``_module-map.yaml`` 登记模块数（yaml.safe_load 取 ``modules:``
++        字典条目数）。无 map / 内容损坏 / 字段缺失的项目不进返回字典——调用方按
++        「无 map 退化为实有」处理，不抛 500（design 兼容策略）。
++        """
++        if not projects:
++            return {}
++        stmt = (
++            select(ScanDocument.path, ScanDocument.content)
++            .where(col(ScanDocument.workspace_id) == workspace_id)
++            .where(col(ScanDocument.exists).is_(True))
++            .where(col(ScanDocument.path).endswith("_module-map.yaml"))
++        )
++        registered: dict[str, int] = {}
++        for raw_path, content in (await self._session.execute(stmt)).all():
++            segs = _strip_docs_prefix(raw_path).split("/")
++            if len(segs) < 2 or segs[0] not in projects:
++                continue
++            try:
++                data = yaml.safe_load(content or "")
++            except yaml.YAMLError:
++                continue
++            modules = data.get("modules") if isinstance(data, dict) else None
++            if isinstance(modules, dict):
++                registered[segs[0]] = len(modules)
++        return registered
++
++    async def _injection_stats(
++        self,
++        workspace_id: uuid.UUID,
++        now: datetime,
++    ) -> ScanDocsInjectionOut:
++        """knowledge_hits 的 docs-inject 行聚合（近 30 天窗口，D-003@v1）。
++
++        跨模块只读引用 KnowledgeHit（对齐 spec_workspace 引 ScanDocument 先例；
++        knowledge 链不反向依赖本模块，无循环 import）。时间过滤在 Python 侧做
++        ——对齐 hits.stats 先例：occurred_at 读回 naive/aware 混布，SQL 侧跨方言
++        字符串比较有陷阱，且单 type 遥测行量级小。USAGE_TYPES 白名单不含
++        docs-inject，知识库 stats 口径天然不被本查询影响（design R-07）。
++        """
++        window_start = now - timedelta(days=STATS_INJECTION_DAYS)
++        stmt = select(KnowledgeHit.matched_anchors, KnowledgeHit.occurred_at).where(
++            KnowledgeHit.workspace_id == workspace_id,
++            KnowledgeHit.type == STATS_INJECTION_TYPE,
++        )
++        total_30d = 0
++        path_counts: Counter[str] = Counter()
++        for anchors, occurred_raw in (await self._session.execute(stmt)).all():
++            if _as_utc(occurred_raw) < window_start:
++                continue
++            total_30d += 1
++            # matched_anchors = 行内 matchedFiles 原样数组（docs 相对路径，可能是
++            # docs/... 或 .sillyspec/docs/... 两种布局前缀），剥前缀对齐树口径。
++            for anchor in anchors or []:
++                stripped = _strip_docs_prefix(str(anchor))
++                if stripped:
++                    path_counts[stripped] += 1
++        board = [
++            ScanDocsInjectionBoardItem(path=path, hits_30d=hits)
++            for path, hits in sorted(path_counts.items(), key=lambda kv: (-kv[1], kv[0]))[
++                :STATS_BOARD_LIMIT
++            ]
++        ]
++        return ScanDocsInjectionOut(
++            total_30d=total_30d,
++            docs_hit_30d=len(path_counts),
++            board=board,
++        )
++
+     # -- Conflict history (D-001@V1) ---
+ 
+     async def count_conflicts(self, workspace_id: uuid.UUID, path: str) -> int:
+diff --git a/backend/openapi.json b/backend/openapi.json
+index c1aee7c19..c17f0b4ec 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -588,7 +588,7 @@
+           "workspace"
+         ],
+         "summary": "List Workspaces",
+-        "description": "List workspaces with server-side filter + pagination (task-05 / FR-01/02/04).\n\n平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。\n普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。\n\nchange 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增\n``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——\n``?type=`` 等值匹配表达不了 NULL，语义互斥。\n\nchange 2026-09-14-workspace-drag-sort（task-02 / FR-03）：两分支均透传\n``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序\n（每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。\n\nql-20260917-007：非管理员分支先看**平台级授权**（``user_roles`` 持\n``workspace:read`` 或 ``platform:admin``）——与 ``has_permission`` 段 2、\n通知广播收件人查找（``list_user_ids_with_permission`` 段 2）口径对齐：\n这类用户对所有工作区有真实读权限，列表按全量返回；否则维持\n``allowed_workspace_ids`` 工作区级限定。修复「列表看不到工作区，\n却能收到其通知、点进其内容」的三处口径割裂。",
++        "description": "List workspaces with server-side filter + pagination (task-05 / FR-01/02/04).\n\n平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。\n普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。\n\nchange 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增\n``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——\n``?type=`` 等值匹配表达不了 NULL，语义互斥。\n\nchange 2026-09-14-workspace-drag-sort（task-02 / FR-03）：两分支均透传\n``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序\n（每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。\n\nql-20260917-007：非管理员分支先看**平台级授权**（``user_roles``）——与\n``has_permission`` 段 2、通知广播收件人查找（``list_user_ids_with_permission``\n段 2）三处口径对齐（原修复「列表看不到工作区，却能收到其通知、点进其\n内容」的割裂）。2026-09-20-workspace-member-visibility：平台级\n``workspace:read`` 不再授予全量可见（纯功能入口语义，D-001@v1），三处\n同步收窄；平台级仅 ``platform:admin`` 全量，其余维持\n``allowed_workspace_ids`` 工作区级限定。",
+         "operationId": "list_workspaces_api_workspaces_get",
+         "parameters": [
+           {
+@@ -6264,6 +6264,50 @@
+         }
+       }
+     },
++    "/api/workspaces/{workspace_id}/scan-docs/stats": {
++      "get": {
++        "tags": [
++          "scan-docs"
++        ],
++        "summary": "Get Scan Docs Stats",
++        "description": "扫描文档运营指标：覆盖率（七件套+模块两级，8 周趋势）/陈旧（90 天）/\n每项目密度/近 30 天更新/最近更新榜 + docs-inject 注入频次（D-003@v1）。",
++        "operationId": "get_scan_docs_stats_api_workspaces__workspace_id__scan_docs_stats_get",
++        "parameters": [
++          {
++            "name": "workspace_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Workspace Id"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/ScanDocsStatsOut"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/workspaces/{workspace_id}/scan-docs/{doc_id}": {
+       "get": {
+         "tags": [
+@@ -63049,6 +63093,233 @@
+         ],
+         "title": "ScanDocWarning"
+       },
++      "ScanDocsCoverageOut": {
++        "properties": {
++          "std_have": {
++            "type": "integer",
++            "title": "Std Have"
++          },
++          "std_expected": {
++            "type": "integer",
++            "title": "Std Expected"
++          },
++          "module_have": {
++            "type": "integer",
++            "title": "Module Have"
++          },
++          "module_expected": {
++            "type": "integer",
++            "title": "Module Expected"
++          },
++          "trend": {
++            "items": {
++              "$ref": "#/components/schemas/ScanDocsTrendPoint"
++            },
++            "type": "array",
++            "title": "Trend"
++          }
++        },
++        "type": "object",
++        "required": [
++          "std_have",
++          "std_expected",
++          "module_have",
++          "module_expected",
++          "trend"
++        ],
++        "title": "ScanDocsCoverageOut",
++        "description": "覆盖率两级口径：七件套 + 模块文档（综合百分比由前端用分子分母计算）。"
++      },
++      "ScanDocsDensityOut": {
++        "properties": {
++          "per_project_avg": {
++            "type": "number",
++            "title": "Per Project Avg"
++          }
++        },
++        "type": "object",
++        "required": [
++          "per_project_avg"
++        ],
++        "title": "ScanDocsDensityOut"
++      },
++      "ScanDocsFreshnessOut": {
++        "properties": {
++          "recent_updated": {
++            "type": "integer",
++            "title": "Recent Updated"
++          },
++          "total": {
++            "type": "integer",
++            "title": "Total"
++          }
++        },
++        "type": "object",
++        "required": [
++          "recent_updated",
++          "total"
++        ],
++        "title": "ScanDocsFreshnessOut"
++      },
++      "ScanDocsInjectionBoardItem": {
++        "properties": {
++          "path": {
++            "type": "string",
++            "title": "Path"
++          },
++          "hits_30d": {
++            "type": "integer",
++            "title": "Hits 30D"
++          }
++        },
++        "type": "object",
++        "required": [
++          "path",
++          "hits_30d"
++        ],
++        "title": "ScanDocsInjectionBoardItem"
++      },
++      "ScanDocsInjectionOut": {
++        "properties": {
++          "total_30d": {
++            "type": "integer",
++            "title": "Total 30D"
++          },
++          "docs_hit_30d": {
++            "type": "integer",
++            "title": "Docs Hit 30D"
++          },
++          "board": {
++            "items": {
++              "$ref": "#/components/schemas/ScanDocsInjectionBoardItem"
++            },
++            "type": "array",
++            "title": "Board"
++          }
++        },
++        "type": "object",
++        "required": [
++          "total_30d",
++          "docs_hit_30d",
++          "board"
++        ],
++        "title": "ScanDocsInjectionOut",
++        "description": "CLI 模块上下文注入频次（docs-inject 遥测行聚合，D-003@v1）。"
++      },
++      "ScanDocsRecentBoardItem": {
++        "properties": {
++          "path": {
++            "type": "string",
++            "title": "Path"
++          },
++          "doc_type": {
++            "type": "string",
++            "title": "Doc Type"
++          },
++          "last_modified_at": {
++            "type": "string",
++            "format": "date-time",
++            "title": "Last Modified At"
++          }
++        },
++        "type": "object",
++        "required": [
++          "path",
++          "doc_type",
++          "last_modified_at"
++        ],
++        "title": "ScanDocsRecentBoardItem"
++      },
++      "ScanDocsStaleDocOut": {
++        "properties": {
++          "path": {
++            "type": "string",
++            "title": "Path"
++          },
++          "doc_type": {
++            "type": "string",
++            "title": "Doc Type"
++          },
++          "last_modified_at": {
++            "anyOf": [
++              {
++                "type": "string",
++                "format": "date-time"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Last Modified At"
++          }
++        },
++        "type": "object",
++        "required": [
++          "path",
++          "doc_type"
++        ],
++        "title": "ScanDocsStaleDocOut",
++        "description": "陈旧清单单行（last_modified_at 为空 = 未知时间）。"
++      },
++      "ScanDocsStatsOut": {
++        "properties": {
++          "coverage": {
++            "$ref": "#/components/schemas/ScanDocsCoverageOut"
++          },
++          "stale_docs": {
++            "items": {
++              "$ref": "#/components/schemas/ScanDocsStaleDocOut"
++            },
++            "type": "array",
++            "title": "Stale Docs"
++          },
++          "density": {
++            "$ref": "#/components/schemas/ScanDocsDensityOut"
++          },
++          "freshness": {
++            "$ref": "#/components/schemas/ScanDocsFreshnessOut"
++          },
++          "recent_board": {
++            "items": {
++              "$ref": "#/components/schemas/ScanDocsRecentBoardItem"
++            },
++            "type": "array",
++            "title": "Recent Board"
++          },
++          "injection": {
++            "$ref": "#/components/schemas/ScanDocsInjectionOut"
++          }
++        },
++        "type": "object",
++        "required": [
++          "coverage",
++          "stale_docs",
++          "density",
++          "freshness",
++          "recent_board",
++          "injection"
++        ],
++        "title": "ScanDocsStatsOut"
++      },
++      "ScanDocsTrendPoint": {
++        "properties": {
++          "week": {
++            "type": "string",
++            "title": "Week"
++          },
++          "updated": {
++            "type": "integer",
++            "title": "Updated"
++          }
++        },
++        "type": "object",
++        "required": [
++          "week",
++          "updated"
++        ],
++        "title": "ScanDocsTrendPoint",
++        "description": "覆盖率卡内趋势的单周桶。"
++      },
+       "ScanGenerateRequest": {
+         "properties": {
+           "root_path": {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
+index 03fab2ae3..cf2a2bc9e 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
+@@ -8,6 +8,7 @@
+  */
+ 
+ import { act, cleanup, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ // antd Tree / rc-component resize-observer 需要 ResizeObserver，jsdom 缺，补 mock
+@@ -28,6 +29,9 @@ vi.mock("@/lib/scan-docs", async (importOriginal) => {
+     listScanDocs: vi.fn(),
+     reparseScanDocs: vi.fn(),
+     getScanDoc: vi.fn(),
++    // task-03：顶部运营面板消费的 stats 端点（真实请求会打 jsdom 缺失的
++    // fetch；缺省全零 stats = 空态占位）。
++    getScanDocsStats: vi.fn(),
+   };
+ });
+ 
+@@ -51,12 +55,13 @@ vi.mock("@uiw/react-markdown-preview", () => ({
+ }));
+ 
+ import ScanDocsPage from "@/app/(dashboard)/workspaces/[id]/scan-docs/page";
+-import { getScanDoc, listScanDocs, reparseScanDocs } from "@/lib/scan-docs";
++import { getScanDoc, getScanDocsStats, listScanDocs, reparseScanDocs } from "@/lib/scan-docs";
+ import { fetchMyBinding } from "@/lib/workspace-binding";
+ 
+ const mockList = listScanDocs as unknown as ReturnType<typeof vi.fn>;
+ const mockReparse = reparseScanDocs as unknown as ReturnType<typeof vi.fn>;
+ const mockGetDoc = getScanDoc as unknown as ReturnType<typeof vi.fn>;
++const mockStats = getScanDocsStats as unknown as ReturnType<typeof vi.fn>;
+ const mockBinding = fetchMyBinding as unknown as ReturnType<typeof vi.fn>;
+ 
+ const WS = "ws-1";
+@@ -102,21 +107,50 @@ async function waitForTree(names: string[]) {
+   });
+ }
+ 
++/** task-03：面板 stats 全零 fixture（无文档 → 面板空态占位，不打真实请求）。 */
++function zeroStats() {
++  return {
++    coverage: { std_have: 0, std_expected: 0, module_have: 0, module_expected: 0, trend: [] },
++    stale_docs: [],
++    density: { per_project_avg: 0 },
++    freshness: { recent_updated: 0, total: 0 },
++    recent_board: [],
++    injection: { total_30d: 0, docs_hit_30d: 0, board: [] },
++  };
++}
++
++// task-03：页面挂载的 ScanDocsStatsPanel 内部走 useQuery，渲染需 Provider 包裹
++// （knowledge-page.test task-08 同款处理）。
++let queryClient: QueryClient;
++
++function renderPage() {
++  return render(
++    <QueryClientProvider client={queryClient}>
++      <ScanDocsPage params={{ id: WS }} />
++    </QueryClientProvider>,
++  );
++}
++
+ beforeEach(() => {
+   vi.clearAllMocks();
+   localStorage.removeItem("sillyhub-scan-docs-tree-width");
+   mockReparse.mockResolvedValue({ stats: { parsed: 0, created: 0, updated: 0, deleted: 0 }, warnings: [] });
+   mockBinding.mockResolvedValue({ daemon_id: "d-1" });
+   mockDefaultDocs();
++  mockStats.mockResolvedValue(zeroStats());
++  queryClient = new QueryClient({
++    defaultOptions: { queries: { retry: false, gcTime: 0 } },
++  });
+ });
+ 
+ afterEach(() => {
+   cleanup();
++  queryClient.clear();
+ });
+ 
+ describe("scan-docs 页面（ql-20260821-013 文档树 antd 化）", () => {
+   it("渲染文档树：目录/文件分用 lucide 图标，文件行带成员与类型徽标", async () => {
+-    render(<ScanDocsPage params={{ id: WS }} />);
++    renderPage();
+     await waitForTree(["backend", "ARCHITECTURE.md"]);
+ 
+     // 目录 lucide-folder；.md 文件 lucide-file-text（FileNodeIcon 按扩展名分型）。
+@@ -133,7 +167,7 @@ describe("scan-docs 页面（ql-20260821-013 文档树 antd 化）", () => {
+     mockGetDoc.mockResolvedValue(
+       summary({ id: "id-arch", path: "backend/ARCHITECTURE.md", title: "架构文档", content: "# hello" }),
+     );
+-    render(<ScanDocsPage params={{ id: WS }} />);
++    renderPage();
+     await waitForTree(["backend", "ARCHITECTURE.md"]);
+ 
+     fireEvent.click(
+@@ -144,7 +178,7 @@ describe("scan-docs 页面（ql-20260821-013 文档树 antd 化）", () => {
+   });
+ 
+   it("树栏默认 280px，拖动把手调宽并写入 localStorage 记忆", async () => {
+-    render(<ScanDocsPage params={{ id: WS }} />);
++    renderPage();
+     await waitForTree(["backend", "ARCHITECTURE.md"]);
+ 
+     const panel = screen.getByTestId("scan-docs-tree-panel");
+@@ -168,7 +202,7 @@ describe("scan-docs 首屏提速与人类可读视图（ql-20260921-003）", ()
+       () => new Promise((res) => { resolveReparse = res; }),
+     );
+ 
+-    render(<ScanDocsPage params={{ id: WS }} />);
++    renderPage();
+     // reparse 仍 pending：树已可用（旧实现会一直停在「加载中…」）。
+     await waitForTree(["backend", "ARCHITECTURE.md", "README.md"]);
+     expect(screen.getByTestId("bg-syncing-hint")).toBeInTheDocument();
+@@ -179,7 +213,7 @@ describe("scan-docs 首屏提速与人类可读视图（ql-20260921-003）", ()
+   });
+ 
+   it("后台 reparse 完成后静默刷新列表并撤下同步提示", async () => {
+-    render(<ScanDocsPage params={{ id: WS }} />);
++    renderPage();
+     await waitForTree(["backend", "ARCHITECTURE.md"]);
+     await waitFor(() => expect(mockReparse).toHaveBeenCalledWith(WS));
+     // 首次加载 + 后台同步完成刷新 = 2 次。
+@@ -196,7 +230,7 @@ describe("scan-docs 首屏提速与人类可读视图（ql-20260921-003）", ()
+         content: "## 模块划分\n前后端分离。",
+       }),
+     );
+-    render(<ScanDocsPage params={{ id: WS }} />);
++    renderPage();
+     await waitForTree(["backend", "ARCHITECTURE.md"]);
+ 
+     fireEvent.click(
+@@ -221,3 +255,15 @@ describe("scan-docs 首屏提速与人类可读视图（ql-20260921-003）", ()
+     expect(screen.getByTestId("entry-card-list")).toBeInTheDocument();
+   });
+ });
++
++describe("运营指标面板挂载（task-03 / 2026-09-21-scan-docs-ops-panel）", () => {
++  it("PageHeader 之下挂载面板：stats 独立请求 + 全零时空态占位不白屏", async () => {
++    renderPage();
++    await waitForTree(["backend", "ARCHITECTURE.md"]);
++
++    // 面板根存在（stats 全零 → 空态分支，根 testid 在各态根上）且请求带 WS。
++    expect(screen.getByTestId("scan-docs-ops-panel")).toBeInTheDocument();
++    expect(screen.getByTestId("scan-docs-ops-panel-empty")).toBeInTheDocument();
++    await waitFor(() => expect(mockStats).toHaveBeenCalledWith(WS));
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
+index c7a587ab3..01d3632a0 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
+@@ -16,6 +16,9 @@ import { MarkdownText } from "@/components/ui/markdown-text";
+ // 人类可读卡片视图（对齐知识库 2026-09-20-knowledge-effect-panel / FR-04 / D-004@v2：
+ // 手册 ## 小节逐条卡 + INDEX 路由卡；zone 固定 top——扫描文档即项目手册域）
+ import { EntryCardList } from "@/components/knowledge/entry-card-list";
++// 运营指标面板（task-03 / 2026-09-21-scan-docs-ops-panel / FR-03 / FR-04 / FR-07）：
++// 复刻知识库 OpsDashboard 形态；组件内 useQuery 独立数据链（stats 与列表互不阻塞）
++import { ScanDocsStatsPanel } from "@/components/scan-docs-stats-panel";
+ import { ApiError } from "@/lib/api";
+ import "@uiw/react-markdown-preview/markdown.css";
+ 
+@@ -373,6 +376,11 @@ export default function ScanDocsPage({ params }: Props) {
+         }
+       />
+ 
++      {/* 运营指标面板（task-03 / 原型 .ops 位，对齐知识库页 OpsDashboard 挂点
++          位置语义——PageHeader 之下、错误条之上）：四指标卡 + 注入/更新双榜；
++          内部三态自理（加载/错误/空文档），加载失败不影响下方主列表。 */}
++      <ScanDocsStatsPanel workspaceId={workspaceId} />
++
+       {pageError && (
+         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">{pageError}</div>
+       )}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 7446f7fdb..4d4def55a 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -373,12 +373,13 @@ export interface paths {
+          *     ``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序
+          *     （每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。
+          *
+-         *     ql-20260917-007：非管理员分支先看**平台级授权**（``user_roles`` 持
+-         *     ``workspace:read`` 或 ``platform:admin``）——与 ``has_permission`` 段 2、
+-         *     通知广播收件人查找（``list_user_ids_with_permission`` 段 2）口径对齐：
+-         *     这类用户对所有工作区有真实读权限，列表按全量返回；否则维持
+-         *     ``allowed_workspace_ids`` 工作区级限定。修复「列表看不到工作区，
+-         *     却能收到其通知、点进其内容」的三处口径割裂。
++         *     ql-20260917-007：非管理员分支先看**平台级授权**（``user_roles``）——与
++         *     ``has_permission`` 段 2、通知广播收件人查找（``list_user_ids_with_permission``
++         *     段 2）三处口径对齐（原修复「列表看不到工作区，却能收到其通知、点进其
++         *     内容」的割裂）。2026-09-20-workspace-member-visibility：平台级
++         *     ``workspace:read`` 不再授予全量可见（纯功能入口语义，D-001@v1），三处
++         *     同步收窄；平台级仅 ``platform:admin`` 全量，其余维持
++         *     ``allowed_workspace_ids`` 工作区级限定。
+          */
+         get: operations["list_workspaces_api_workspaces_get"];
+         put?: never;
+@@ -2338,6 +2339,27 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/scan-docs/stats": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Scan Docs Stats
++         * @description 扫描文档运营指标：覆盖率（七件套+模块两级，8 周趋势）/陈旧（90 天）/
++         *     每项目密度/近 30 天更新/最近更新榜 + docs-inject 注入频次（D-003@v1）。
++         */
++        get: operations["get_scan_docs_stats_api_workspaces__workspace_id__scan_docs_stats_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/scan-docs/{doc_id}": {
+         parameters: {
+             query?: never;
+@@ -22413,6 +22435,98 @@ export interface components {
+             /** Doc Type */
+             doc_type?: string | null;
+         };
++        /**
++         * ScanDocsCoverageOut
++         * @description 覆盖率两级口径：七件套 + 模块文档（综合百分比由前端用分子分母计算）。
++         */
++        ScanDocsCoverageOut: {
++            /** Std Have */
++            std_have: number;
++            /** Std Expected */
++            std_expected: number;
++            /** Module Have */
++            module_have: number;
++            /** Module Expected */
++            module_expected: number;
++            /** Trend */
++            trend: components["schemas"]["ScanDocsTrendPoint"][];
++        };
++        /** ScanDocsDensityOut */
++        ScanDocsDensityOut: {
++            /** Per Project Avg */
++            per_project_avg: number;
++        };
++        /** ScanDocsFreshnessOut */
++        ScanDocsFreshnessOut: {
++            /** Recent Updated */
++            recent_updated: number;
++            /** Total */
++            total: number;
++        };
++        /** ScanDocsInjectionBoardItem */
++        ScanDocsInjectionBoardItem: {
++            /** Path */
++            path: string;
++            /** Hits 30D */
++            hits_30d: number;
++        };
++        /**
++         * ScanDocsInjectionOut
++         * @description CLI 模块上下文注入频次（docs-inject 遥测行聚合，D-003@v1）。
++         */
++        ScanDocsInjectionOut: {
++            /** Total 30D */
++            total_30d: number;
++            /** Docs Hit 30D */
++            docs_hit_30d: number;
++            /** Board */
++            board: components["schemas"]["ScanDocsInjectionBoardItem"][];
++        };
++        /** ScanDocsRecentBoardItem */
++        ScanDocsRecentBoardItem: {
++            /** Path */
++            path: string;
++            /** Doc Type */
++            doc_type: string;
++            /**
++             * Last Modified At
++             * Format: date-time
++             */
++            last_modified_at: string;
++        };
++        /**
++         * ScanDocsStaleDocOut
++         * @description 陈旧清单单行（last_modified_at 为空 = 未知时间）。
++         */
++        ScanDocsStaleDocOut: {
++            /** Path */
++            path: string;
++            /** Doc Type */
++            doc_type: string;
++            /** Last Modified At */
++            last_modified_at?: string | null;
++        };
++        /** ScanDocsStatsOut */
++        ScanDocsStatsOut: {
++            coverage: components["schemas"]["ScanDocsCoverageOut"];
++            /** Stale Docs */
++            stale_docs: components["schemas"]["ScanDocsStaleDocOut"][];
++            density: components["schemas"]["ScanDocsDensityOut"];
++            freshness: components["schemas"]["ScanDocsFreshnessOut"];
++            /** Recent Board */
++            recent_board: components["schemas"]["ScanDocsRecentBoardItem"][];
++            injection: components["schemas"]["ScanDocsInjectionOut"];
++        };
++        /**
++         * ScanDocsTrendPoint
++         * @description 覆盖率卡内趋势的单周桶。
++         */
++        ScanDocsTrendPoint: {
++            /** Week */
++            week: string;
++            /** Updated */
++            updated: number;
++        };
+         /**
+          * ScanGenerateRequest
+          * @description Request body for ``POST /api/workspaces/scan-generate``.
+@@ -30997,6 +31111,37 @@ export interface operations {
+             };
+         };
+     };
++    get_scan_docs_stats_api_workspaces__workspace_id__scan_docs_stats_get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ScanDocsStatsOut"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_scan_doc_api_workspaces__workspace_id__scan_docs__doc_id__get: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/scan-docs.ts b/frontend/src/lib/scan-docs.ts
+index 598b2f5e4..4045af08e 100644
+--- a/frontend/src/lib/scan-docs.ts
++++ b/frontend/src/lib/scan-docs.ts
+@@ -8,6 +8,7 @@ export type ScanDocList = components["schemas"]["ScanDocList"];
+ export type ScanDocWarning = components["schemas"]["ScanDocWarning"];
+ export type ScanDocReparseStats = components["schemas"]["ScanDocReparseStats"];
+ export type ScanDocReparseResponse = components["schemas"]["ScanDocReparseResponse"];
++export type ScanDocsStats = components["schemas"]["ScanDocsStatsOut"];
+ 
+ /**
+  * Stale threshold in ms (default 1h). Override via env var.
+@@ -38,3 +39,16 @@ export function reparseScanDocs(workspaceId: string) {
+     { method: "POST" },
+   );
+ }
++
++export function getScanDocsStats(workspaceId: string) {
++  return apiFetch<ScanDocsStats>(
++    `/api/workspaces/${workspaceId}/scan-docs/stats`,
++  );
++}
++
++/**
++ * Ops 面板（scan-docs）stats 查询键。对齐 knowledgeStatsQueryKey 形态。
++ */
++export function scanDocsStatsQueryKey(workspaceId: string) {
++  return ["scan-docs", "stats", workspaceId] as const;
++}
+diff --git a/.sillyspec/docs/frontend/modules/scan-docs-stats-panel.md b/.sillyspec/docs/frontend/modules/scan-docs-stats-panel.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/docs/frontend/modules/scan-docs-stats-panel.md
+@@ -0,0 +1,50 @@
++---
++schema_version: 1
++doc_type: module-card
++module_id: scan-docs-stats-panel
++author: qinyi
++created_at: 2026-09-21 10:46:39
++---
++
++# 扫描文档运营面板（scan-docs-stats-panel）
++
++## 定位
++扫描文档页顶部的运营指标面板组件（`frontend/src/components/scan-docs-stats-panel.tsx`，2026-09-21-scan-docs-ops-panel）：四指标子卡（覆盖率+8 周趋势 / 陈旧 90 天 / 每项目密度 / 近 30 天鲜活）+ 注入频次/最近更新双榜 tab（D-003@v1）。形态复刻知识库 OpsDashboard（`components/knowledge/ops-dashboard.tsx`）——指标大卡 2/3 + 榜单卡 1/3（原型 `.ops` 布局）；组件内自带独立 useQuery 数据链，挂载于 ScanDocsPage 的 PageHeader 之下、错误条之上，失败不阻塞主列表。
++
++## 契约摘要
++- props（`ScanDocsStatsPanelProps`）：`workspaceId: string`（必传，进查询键与 URL）；`className?: string`（拼根容器）。
++- 数据链：`useQuery({ queryKey: scanDocsStatsQueryKey(workspaceId)（= `["scan-docs","stats",workspaceId]`，lib-scan-docs 导出）, queryFn: getScanDocsStats })` → `GET /api/workspaces/{ws}/scan-docs/stats` → `ScanDocsStats`（= OpenAPI 生成 `ScanDocsStatsOut`，禁手写）。
++- 布局：根 `flex flex-col gap-3 lg:grid lg:grid-cols-3`；指标大卡 `lg:col-span-2`（四子卡 `grid sm:grid-cols-2` 2×2 + 陈旧清单内嵌开合），榜单卡 1/3（双 tab：🔥 注入频次默认 / 🕘 最近更新）。
++- testid 契约（测试锚点，改结构勿改名）：
++  - 根：`scan-docs-ops-panel`；三态：`scan-docs-ops-panel-loading` / `-error` / `-empty`。
++  - 四子卡：`metric-coverage`（内 `coverage-trend` svg）/ `metric-stale` / `metric-density` / `metric-freshness`。
++  - 陈旧清单：`stale-docs-panel`（开合态才渲染）+ 行 `stale-doc-row`。
++  - 榜单：`board-tab-injection` / `board-tab-recent`（role=tab）；`injection-board` + `injection-board-row`；`recent-board` + `recent-board-row`。
++- 交互状态（组件内 useState，不外抛）：`staleOpen`（陈旧清单卡面点击开合，`aria-expanded`）；`boardTab: "injection" | "recent"`。
++
++## 关键逻辑
++- 三态自理（占住同版位不白屏、不闪布局）：
++  ```
++  isPending → loading 卡（lg:col-span-3 单条）
++  isError   → error 红条（border-destructive/30 + bg-red-50，文案「运营指标加载失败…」）
++  data 且 freshness.total === 0 → empty 卡（「暂无扫描文档（点击重新扫描…）」）
++  数据链独立——stats 失败不影响页面主列表与后台 reparse
++  ```
++- 综合覆盖率（前端算，design 口径）：`(std_have + module_have) / (std_expected + module_expected)` 取整百分比，卡面同时给两档明细 `七件套 h/e · 模块文档 h/e`。
++- 趋势折线 `trendPoints`：8 点等距、按序列最大值归一到纵向区间（全零画底部平线）；与 ops-dashboard 同款但值域不同——那边是 0~1 的 pct，这边是周更新篇数（updated）。
++- 剥前缀口径：`stale_docs` / `recent_board` 的 path 是 DB 原始形态（可能带 `docs/` 或 `.sillyspec/docs/` 前缀），渲染时过 `stripPathPrefix`（lib-scan-docs-tree，与树构建同口径）；`injection.board` 后端已剥前缀直接显示——三处路径展示对齐树的锚点口径。
++- 时间文案：陈旧「最后修改」`YYYY-MM-DD` 本地时区（空/非法 → 「未知」）；最近榜相对时间（小时/天/周，更久落 `zh-CN` 本地化日期）。
++
++## 注意事项
++- 视觉对齐 ops-dashboard（`components/knowledge/ops-dashboard.tsx`）形态：2/3+1/3 网格、迷你趋势 svg（`stroke="currentColor"` 随主题换色）、死条目式「卡面点击开合内嵌清单」、榜单行序号圆徽（榜首 `bg-brand-600` 反白）——改样式先回看该组件，勿自创新形态。
++- 主题铁律：品牌色只用 `brand-*` 语义阶（brand-50/100/400/500/600/700，随 html data-theme 换肤）；边框/背景/文字全主题 token（`border-border` / `bg-card` / `text-muted-foreground` / `text-warning` / `text-success` / `shadow-sm`），禁手写十六进制与 `blue-*`；antd 语义色（destructive/warning/success）走 token 映射。文案中文。
++- 查询键 `scanDocsStatsQueryKey` 与 `getScanDocsStats` 定义在 lib-scan-docs（模块 `scan-docs.ts`）——后续需要主动刷新（如 reparse 后联动面板）消费同一键 invalidate，勿在组件外另起键。
++- stats 字段类型全部来自 `api-types.ts`（`pnpm gen:types` 生成）；后端 DTO 改动须同步重生成，勿手写补字段。
++- 空态口径是 `freshness.total === 0`（没扫过或全部不存在），与「注入频次为零但文档存在」（`injection.total_30d === 0` → 榜内空态文案「暂无注入数据（CLI 升级后自动汇聚）」）是两个不同空态，勿混。
++- 面板只读展示，无写操作；陈旧清单上限 200 条由后端截断（`STATS_STALE_LIST_LIMIT`），前端仅滚动容器（`max-h-44`）不分页。
++
++## 人工备注
++
++<!-- MANUAL_NOTES_START -->
++
++<!-- MANUAL_NOTES_END -->
+
+diff --git a/backend/app/modules/scan_docs/tests/test_stats.py b/backend/app/modules/scan_docs/tests/test_stats.py
+new file mode 100644
+--- /dev/null
++++ b/backend/app/modules/scan_docs/tests/test_stats.py
+@@ -0,0 +1,435 @@
++"""stats 聚合口径测试：覆盖率两级 / 陈旧边界 / 密度 / 新鲜 / 趋势 / 榜 / 注入频次。
++
++change 2026-09-21-scan-docs-ops-panel task-01 / design D-001@v1 + D-003@v1。
++
++fixture 口径：双项目直接构造 ScanDocument 行（mtime 用 datetime 精确控制，
++不依赖文件系统 reparse）——项目 A 走包裹布局（``.sillyspec/docs/...``）、项目 B
++走扁平布局（``docs/...``），覆盖 _strip_docs_prefix 双前缀口径；模块登记数来自
++A 的 _module-map.yaml content，B 无 map 验证「无 map 退化为实有」。
++"""
++
++from __future__ import annotations
++
++import itertools
++import uuid
++from datetime import UTC, date, datetime, timedelta
++from pathlib import Path
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.knowledge.hits import HitsService, KnowledgeHit
++from app.modules.scan_docs.model import ScanDocument
++from app.modules.scan_docs.schema import ScanDocsInjectionOut
++from app.modules.scan_docs.service import ScanDocsService
++from app.modules.spec_workspace.model import SpecWorkspace
++from app.modules.workspace.model import Workspace
++
++#: parser.STANDARD_DOC_TYPES 的七件套展开（与常量同源逐字对齐，断言用）。
++STD_TYPES = (
++    "ARCHITECTURE",
++    "CONVENTIONS",
++    "CONCERNS",
++    "INTEGRATIONS",
++    "PROJECT",
++    "STRUCTURE",
++    "TESTING",
++)
++
++
++async def _create_workspace(
++    session: AsyncSession,
++    *,
++    root_path: str = "/tmp/test-ws",
++    component_key: str | None = None,
++) -> Workspace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="Test Workspace",
++        slug=f"test-ws-{uuid.uuid4().hex[:8]}",
++        root_path=root_path,
++        component_key=component_key,
++        status="active",
++    )
++    session.add(ws)
++    await session.commit()
++    await session.refresh(ws)
++    return ws
++
++
++async def _create_spec_workspace(
++    session: AsyncSession,
++    workspace: Workspace,
++    spec_root: str,
++    strategy: str = "platform-managed",
++) -> SpecWorkspace:
++    spec_ws = SpecWorkspace(
++        id=uuid.uuid4(),
++        workspace_id=workspace.id,
++        spec_root=spec_root,
++        strategy=strategy,
++        sync_status="clean",
++    )
++    session.add(spec_ws)
++    await session.commit()
++    return spec_ws
++
++
++def _doc(
++    ws_id: uuid.UUID,
++    path: str,
++    *,
++    mtime: datetime | None,
++    content: str | None = None,
++) -> ScanDocument:
++    """单行 ScanDocument（doc_type 对齐 parser 口径：md=stem 大写、yaml=stem）。"""
++    name = path.rsplit("/", 1)[-1]
++    doc_type = name.rsplit(".", 1)[0].upper() if name.endswith(".md") else name.rsplit(".", 1)[0]
++    return ScanDocument(
++        id=uuid.uuid4(),
++        workspace_id=ws_id,
++        doc_type=doc_type,
++        path=path,
++        title=None,
++        exists=True,
++        content=content,
++        last_modified_at=mtime,
++    )
++
++
++async def _insert_hit(
++    session: AsyncSession,
++    ws_id: uuid.UUID,
++    *,
++    hit_type: str,
++    matched: list[str],
++    occurred_at: datetime,
++) -> None:
++    """直插 knowledge_hits 行（line_hash 用随机 hex，绕开 uq 幂等去重）。"""
++    session.add(
++        KnowledgeHit(
++            id=uuid.uuid4(),
++            workspace_id=ws_id,
++            line_hash=uuid.uuid4().hex,
++            type=hit_type,
++            matched_anchors=matched,
++            occurred_at=occurred_at,
++        )
++    )
++    await session.commit()
++
++
++async def _seed_two_project_docs(
++    session: AsyncSession,
++    ws_id: uuid.UUID,
++    *,
++    now: datetime,
++) -> dict:
++    """双项目 docs 树（直接构造行，mtime 精确控制）：
++
++    - 项目 A（包裹布局）：scan/ 七件套齐全（ARCHITECTURE=91 天前陈旧，其余
++      10 天前）+ modules/_module-map.yaml 登记 3 模块 + modules/ 3 篇 md
++      （core=5 天前，auth/billing=10 天前）；
++    - 项目 B（扁平布局）：scan/ 5 件（缺 2，ARCHITECTURE mtime=None）+
++      modules/ 无 map 2 篇 md（10 天前）。
++
++    手算：total=18；std 12/14；module 5/5；fresh=16；stale=2（None + 91d）。
++    """
++    rows: list[ScanDocument] = []
++    for std in STD_TYPES:
++        mtime = now - timedelta(days=91) if std == "ARCHITECTURE" else now - timedelta(days=10)
++        rows.append(_doc(ws_id, f".sillyspec/docs/proj-a/scan/{std}.md", mtime=mtime))
++    rows.append(
++        _doc(
++            ws_id,
++            ".sillyspec/docs/proj-a/modules/_module-map.yaml",
++            mtime=now - timedelta(days=10),
++            content="modules:\n  core: {}\n  auth: {}\n  billing: {}\n",
++        )
++    )
++    rows.append(
++        _doc(ws_id, ".sillyspec/docs/proj-a/modules/core.md", mtime=now - timedelta(days=5))
++    )
++    rows.append(
++        _doc(ws_id, ".sillyspec/docs/proj-a/modules/auth.md", mtime=now - timedelta(days=10))
++    )
++    rows.append(
++        _doc(ws_id, ".sillyspec/docs/proj-a/modules/billing.md", mtime=now - timedelta(days=10))
++    )
++    for std in STD_TYPES[:5]:
++        mtime = None if std == "ARCHITECTURE" else now - timedelta(days=10)
++        rows.append(_doc(ws_id, f"docs/proj-b/scan/{std}.md", mtime=mtime))
++    rows.append(_doc(ws_id, "docs/proj-b/modules/agent.md", mtime=now - timedelta(days=10)))
++    rows.append(_doc(ws_id, "docs/proj-b/modules/tools.md", mtime=now - timedelta(days=10)))
++    session.add_all(rows)
++    await session.commit()
++    return {"total": len(rows)}
++
++
++# ── 覆盖率两级 + 密度 + 新鲜 + 趋势 + 榜（主口径复算）──────────────────────
++
++
++class TestStatsMainRecomputation:
++    """双项目 fixture 全指标手算复算（design Wave 1 口径）。"""
++
++    async def test_coverage_density_freshness(self, db_session: AsyncSession) -> None:
++        now = datetime.now(UTC)
++        ws = await _create_workspace(db_session)
++        seeded = await _seed_two_project_docs(db_session, ws.id, now=now)
++
++        out = await ScanDocsService(db_session).stats(ws.id)
++
++        # 覆盖率两级：七件套 A 7/7 + B 5/7 → 12/14；模块层 A 3（map 登记）+
++        # B 2（无 map 退化为实有）→ 5/5
++        assert out.coverage.std_have == 12
++        assert out.coverage.std_expected == 14
++        assert out.coverage.module_have == 5
++        assert out.coverage.module_expected == 5
++        # 综合分子分母：(12+5)/(14+5)
++        assert (out.coverage.std_have + out.coverage.module_have) == 17
++        assert (out.coverage.std_expected + out.coverage.module_expected) == 19
++
++        # 密度：18 ÷ 2 项目
++        assert out.density.per_project_avg == pytest.approx(seeded["total"] / 2)
++
++        # 新鲜：16 行 mtime≥now-30d（91 天前与 None 两行除外）/ total 18
++        assert out.freshness.recent_updated == 16
++        assert out.freshness.total == 18
++
++    async def test_trend_eight_weeks_all_mondays(self, db_session: AsyncSession) -> None:
++        now = datetime.now(UTC)
++        ws = await _create_workspace(db_session)
++        await _seed_two_project_docs(db_session, ws.id, now=now)
++
++        out = await ScanDocsService(db_session).stats(ws.id)
++
++        trend = out.coverage.trend
++        assert len(trend) == 8
++        weeks = [date.fromisoformat(p.week) for p in trend]
++        # 周一为界 + 升序等距（近 8 个自然周）
++        assert all(w.weekday() == 0 for w in weeks)
++        assert all((b - a).days == 7 for a, b in itertools.pairwise(weeks))
++        # 5d/10d 的 16 行都落在 8 周窗内（91 天前=13 周前在窗外）
++        assert sum(p.updated for p in trend) == 16
++        # 最新桶右端覆盖 now（当前周的周一 ≤ now）
++        assert weeks[-1] <= now.date()
++
++    async def test_recent_board_desc_top10(self, db_session: AsyncSession) -> None:
++        now = datetime.now(UTC)
++        ws = await _create_workspace(db_session)
++        await _seed_two_project_docs(db_session, ws.id, now=now)
++
++        out = await ScanDocsService(db_session).stats(ws.id)
++
++        board = out.recent_board
++        assert len(board) == 10  # 16 行有 mtime，Top 10 截断
++        # 降序（非严格——同刻并列）
++        mtimes = [b.last_modified_at for b in board]
++        assert all(a >= b for a, b in itertools.pairwise(mtimes))
++        # 唯一的 5 天前行（proj-a/modules/core.md）排榜首
++        assert board[0].path == ".sillyspec/docs/proj-a/modules/core.md"
++        assert board[0].doc_type == "CORE"
++
++    async def test_stale_only_boundary_rows_none_first(self, db_session: AsyncSession) -> None:
++        """陈旧只含 91 天前与 None 行；None 排最前；清单字段齐全。"""
++        now = datetime.now(UTC)
++        ws = await _create_workspace(db_session)
++        await _seed_two_project_docs(db_session, ws.id, now=now)
++
++        out = await ScanDocsService(db_session).stats(ws.id)
++
++        stale = out.stale_docs
++        assert len(stale) == 2
++        # None 最前，91 天前其后
++        assert stale[0].last_modified_at is None
++        assert stale[0].path == "docs/proj-b/scan/ARCHITECTURE.md"
++        assert stale[1].last_modified_at is not None
++        assert stale[1].path == ".sillyspec/docs/proj-a/scan/ARCHITECTURE.md"
++        expected_old = (now - timedelta(days=91)).replace(tzinfo=UTC)
++        got_old = stale[1].last_modified_at
++        assert got_old.replace(tzinfo=UTC) == expected_old.replace(microsecond=got_old.microsecond)
++
++
++# ── 退化口径：map 损坏 / 根级文件 ─────────────────────────────────────────
++
++
++async def test_module_map_broken_falls_back_to_have(db_session: AsyncSession) -> None:
++    """_module-map.yaml 内容损坏 → 该项目模块 expected 退化为实有（不抛 500）。"""
++    now = datetime.now(UTC)
++    ws = await _create_workspace(db_session)
++    db_session.add_all(
++        [
++            _doc(
++                ws.id,
++                "docs/proj-c/modules/_module-map.yaml",
++                mtime=now,
++                content="{broken yaml :: not parseable",
++            ),
++            _doc(ws.id, "docs/proj-c/modules/x.md", mtime=now),
++            _doc(ws.id, "docs/proj-c/modules/y.md", mtime=now),
++        ]
++    )
++    await db_session.commit()
++
++    out = await ScanDocsService(db_session).stats(ws.id)
++
++    assert out.coverage.module_have == 2
++    assert out.coverage.module_expected == 2  # map 解析失败 → 无 map 退化
++    assert out.coverage.std_expected == 7  # 单项目仍摊七件套分母
++    assert out.coverage.std_have == 0
++
++
++async def test_root_level_files_do_not_create_project(db_session: AsyncSession) -> None:
++    """剥前缀后无项目段的根级文件：计入 total，但不建项目（不虚摊 7 件分母）。"""
++    now = datetime.now(UTC)
++    ws = await _create_workspace(db_session)
++    db_session.add(_doc(ws.id, "docs/README.md", mtime=now - timedelta(days=10)))
++    await db_session.commit()
++
++    out = await ScanDocsService(db_session).stats(ws.id)
++
++    assert out.coverage.std_expected == 0
++    assert out.freshness.total == 1
++    assert out.freshness.recent_updated == 1
++    assert out.density.per_project_avg == pytest.approx(1.0)  # 1 ÷ max(0, 1)
++
++
++# ── 注入频次（D-003@v1）──────────────────────────────────────────────────
++
++
++async def test_injection_aggregation_30d_window(db_session: AsyncSession) -> None:
++    """docs-inject 行聚合：total_30d 行数 / docs_hit_30d 剥前缀去重 / board 降序；
++    40 天前老行不计；双布局前缀（.sillyspec/docs 与 docs）都剥齐。"""
++    now = datetime.now(UTC)
++    ws = await _create_workspace(db_session)
++    await _insert_hit(
++        db_session,
++        ws.id,
++        hit_type="docs-inject",
++        matched=[".sillyspec/docs/proj-a/modules/core.md", "docs/proj-a/scan/ARCHITECTURE.md"],
++        occurred_at=now,
++    )
++    await _insert_hit(
++        db_session,
++        ws.id,
++        hit_type="docs-inject",
++        matched=["docs/proj-a/modules/core.md"],
++        occurred_at=now - timedelta(days=1),
++    )
++    await _insert_hit(  # 40 天前：窗外不计
++        db_session,
++        ws.id,
++        hit_type="docs-inject",
++        matched=["docs/proj-a/legacy.md"],
++        occurred_at=now - timedelta(days=40),
++    )
++
++    out = await ScanDocsService(db_session).stats(ws.id)
++
++    assert out.injection.total_30d == 2
++    assert out.injection.docs_hit_30d == 2
++    assert [(b.path, b.hits_30d) for b in out.injection.board] == [
++        ("proj-a/modules/core.md", 2),  # 双前缀形态剥齐后聚合
++        ("proj-a/scan/ARCHITECTURE.md", 1),
++    ]
++
++
++async def test_knowledge_stats_not_polluted_by_docs_inject(
++    db_session: AsyncSession, tmp_path: Path
++) -> None:
++    """R-07：docs-inject 行存在时知识库 stats（USAGE_TYPES 白名单排除）数值不变。
++
++    前后对照同一棵知识树调 HitsService.stats，插入 docs-inject 行后全量相等。
++    """
++    spec_root = tmp_path / "k-spec"
++    knowledge = spec_root / "knowledge"
++    (knowledge / "decisions").mkdir(parents=True)
++    (knowledge / "fr").mkdir()
++    (knowledge / "generated").mkdir()
++    (knowledge / "INDEX.md").write_text(
++        "# Knowledge Index\n\n## Patterns\n\n- k|关键词 → [conventions.md#提交规范](x)\n",
++        encoding="utf-8",
++    )
++    (knowledge / "conventions.md").write_text(
++        "# Conventions\n\n## 提交规范\n正文。\n", encoding="utf-8"
++    )
++    ws = await _create_workspace(db_session, root_path=str(tmp_path / "client"))
++    await _create_spec_workspace(db_session, ws, str(spec_root))
++
++    before = await HitsService(db_session).stats(ws.id)
++
++    now = datetime.now(UTC)
++    for days in (0, 1, 2):
++        await _insert_hit(
++            db_session,
++            ws.id,
++            hit_type="docs-inject",
++            matched=["docs/k/modules/core.md"],
++            occurred_at=now - timedelta(days=days),
++        )
++
++    after = await HitsService(db_session).stats(ws.id)
++    assert after == before  # docs-inject 不进任何知识使用计数
++    assert after.coverage.used_entries == 0
++    assert after.usage_board == []
++    assert after.entry_counts == []
++
++
++# ── HTTP 路由序（R-03）+ 空表 ─────────────────────────────────────────────
++
++
++async def test_stats_endpoint_literal_route_not_swallowed(
++    client, tmp_path: Path, auth_headers: dict[str, str]
++) -> None:
++    """GET /scan-docs/stats 字面量命中（未被 /scan-docs/{doc_id} 通配吞成 422）。"""
++    base = tmp_path / "ws"
++    sillyspec = base / ".sillyspec"
++    (sillyspec / "projects").mkdir(parents=True)
++    (sillyspec / "changes" / "change").mkdir(parents=True)
++    (sillyspec / "changes" / "archive").mkdir(parents=True)
++    ws_resp = await client.post(
++        "/api/workspaces",
++        json={"name": "scan-docs-stats-test", "root_path": str(base), "type": "other"},
++        headers=auth_headers,
++    )
++    assert ws_resp.status_code == 201, ws_resp.text
++    ws_id = ws_resp.json()["id"]
++
++    resp = await client.get(f"/api/workspaces/{ws_id}/scan-docs/stats", headers=auth_headers)
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert set(body) == {
++        "coverage",
++        "stale_docs",
++        "density",
++        "freshness",
++        "recent_board",
++        "injection",
++    }
++    assert set(body["coverage"]) == {
++        "std_have",
++        "std_expected",
++        "module_have",
++        "module_expected",
++        "trend",
++    }
++
++
++async def test_stats_empty_workspace_all_zero(db_session: AsyncSession) -> None:
++    """空表：无任何文档/遥测行时全零不抛错（前端空态）。"""
++    ws = await _create_workspace(db_session)
++
++    out = await ScanDocsService(db_session).stats(ws.id)
++
++    assert out.coverage.std_have == 0
++    assert out.coverage.std_expected == 0
++    assert out.coverage.module_have == 0
++    assert out.coverage.module_expected == 0
++    assert len(out.coverage.trend) == 8
++    assert all(p.updated == 0 for p in out.coverage.trend)
++    assert out.stale_docs == []
++    assert out.density.per_project_avg == 0.0
++    assert out.freshness.recent_updated == 0
++    assert out.freshness.total == 0
++    assert out.recent_board == []
++    assert out.injection == ScanDocsInjectionOut(total_30d=0, docs_hit_30d=0, board=[])
+
+diff --git a/frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx b/frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx
+@@ -0,0 +1,301 @@
++/**
++ * ScanDocsStatsPanel 组件测试（task-03 / 2026-09-21-scan-docs-ops-panel /
++ * FR-03 / FR-04 / FR-07 / D-001~D-003@v1）。
++ *
++ * 依据：
++ *   - frontend/src/components/scan-docs-stats-panel.tsx + 原型
++ *     prototype-scan-docs-ops-panel.html 的四指标卡与双榜 tab 形态；
++ *   - task-03 卡片 acceptance：综合覆盖率取整口径、陈旧清单开合、
++ *     双榜 tab 切换、注入空态文案、三态占位不白屏。
++ *
++ * 惯例（仿 ops-dashboard.test.tsx + scan-docs-page.test.tsx）：
++ * @/lib/scan-docs 部分 mock（vi.hoisted + importActual，fixture 直接用
++ * task-02 生成类型 ScanDocsStats——编译期锁「无手写类型」）+
++ * QueryClientProvider retry:false/gcTime:0 + ResizeObserver mock。
++ */
++
++import {
++  cleanup,
++  fireEvent,
++  render,
++  screen,
++  waitFor,
++  within,
++} from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++// ResizeObserver jsdom 缺失前置（scan-docs-page.test 同款）。
++if (typeof globalThis.ResizeObserver === "undefined") {
++  class ResizeObserverMock {
++    observe() {}
++    unobserve() {}
++    disconnect() {}
++  }
++  (globalThis as any).ResizeObserver = ResizeObserverMock;
++}
++
++const mocks = vi.hoisted(() => ({ getScanDocsStats: vi.fn() }));
++vi.mock("@/lib/scan-docs", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("@/lib/scan-docs")>()),
++  getScanDocsStats: mocks.getScanDocsStats,
++}));
++
++import { ScanDocsStatsPanel } from "@/components/scan-docs-stats-panel";
++import type { ScanDocsStats } from "@/lib/scan-docs";
++
++const WS = "ws-1";
++
++/** stats fixture（字段对齐 task-02 生成的 ScanDocsStatsOut——openapi 类型，
++ * 编译期无手写）。覆盖 50/70 → 71%（round）。 */
++function stats(p: Partial<ScanDocsStats> = {}): ScanDocsStats {
++  return {
++    coverage: {
++      std_have: 33,
++      std_expected: 35,
++      module_have: 17,
++      module_expected: 35,
++      trend: [
++        { week: "2026-07-27", updated: 2 },
++        { week: "2026-08-03", updated: 1 },
++        { week: "2026-08-10", updated: 3 },
++        { week: "2026-08-17", updated: 2 },
++        { week: "2026-08-24", updated: 4 },
++        { week: "2026-08-31", updated: 3 },
++        { week: "2026-09-07", updated: 5 },
++        { week: "2026-09-14", updated: 6 },
++      ],
++    },
++    stale_docs: [
++      // DB 原始形态：包裹布局带 .sillyspec/docs/ 前缀（展示时剥掉）。
++      {
++        path: ".sillyspec/docs/backend/scan/INTEGRATIONS.md",
++        doc_type: "INTEGRATIONS",
++        last_modified_at: "2026-03-14T12:00:00Z",
++      },
++      // 扁平布局带 docs/ 前缀 + 未知时间（null → 「未知」）。
++      {
++        path: "docs/frontend/modules/build.md",
++        doc_type: "CONVENTIONS",
++        last_modified_at: null,
++      },
++    ],
++    density: { per_project_avg: 12.34 },
++    freshness: { recent_updated: 63, total: 296 },
++    recent_board: [
++      {
++        path: "docs/frontend/modules/scan-docs.md",
++        doc_type: "CONVENTIONS",
++        last_modified_at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
++      },
++      {
++        path: ".sillyspec/docs/backend/modules/scan_docs.md",
++        doc_type: "ARCHITECTURE",
++        last_modified_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
++      },
++    ],
++    // injection.board 后端已剥前缀，直接展示。
++    injection: {
++      total_30d: 42,
++      docs_hit_30d: 12,
++      board: [
++        { path: "backend/modules/scan_docs.md", hits_30d: 18 },
++        { path: "frontend/modules/scan-docs.md", hits_30d: 7 },
++      ],
++    },
++    ...p,
++  };
++}
++
++let queryClient: QueryClient;
++
++function renderPanel() {
++  return render(
++    <QueryClientProvider client={queryClient}>
++      <ScanDocsStatsPanel workspaceId={WS} />
++    </QueryClientProvider>,
++  );
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  queryClient = new QueryClient({
++    defaultOptions: { queries: { retry: false, gcTime: 0 } },
++  });
++});
++
++afterEach(() => {
++  cleanup();
++  queryClient.clear();
++});
++
++describe("四指标卡渲染（FR-03）", () => {
++  it("覆盖率（综合取整+两档明细+8 点趋势折线）/ 陈旧 / 密度 / 鲜活与 mock 一致", async () => {
++    mocks.getScanDocsStats.mockResolvedValue(stats());
++
++    renderPanel();
++
++    // 主态锚点用数据才有的 testid（根 testid 加载态也带，会假性通过）。
++    await waitFor(() =>
++      expect(screen.getByTestId("metric-coverage")).toBeInTheDocument(),
++    );
++    expect(mocks.getScanDocsStats).toHaveBeenCalledWith(WS);
++
++    // 覆盖率：(33+17)/(35+35) = 50/70 → 71%（round），两档明细齐备。
++    const coverage = screen.getByTestId("metric-coverage");
++    expect(coverage).toHaveTextContent("71%");
++    expect(coverage).toHaveTextContent("50/70 项");
++    expect(coverage).toHaveTextContent("七件套 33/35");
++    expect(coverage).toHaveTextContent("模块文档 17/35");
++    const polyline = screen
++      .getByTestId("coverage-trend")
++      .querySelector("polyline");
++    expect(polyline).toBeTruthy();
++    expect(polyline?.getAttribute("points")?.split(" ")).toHaveLength(8);
++
++    // 陈旧：2 篇（90 天未更新）。
++    expect(screen.getByTestId("metric-stale")).toHaveTextContent("2 篇");
++
++    // 密度：12.3 篇/项目（toFixed(1)）。
++    expect(screen.getByTestId("metric-density")).toHaveTextContent("12.3");
++    expect(screen.getByTestId("metric-density")).toHaveTextContent("篇/项目");
++
++    // 鲜活：63/296 篇。
++    expect(screen.getByTestId("metric-freshness")).toHaveTextContent("63");
++    expect(screen.getByTestId("metric-freshness")).toHaveTextContent("296");
++  });
++});
++
++describe("陈旧清单开合（FR-03）", () => {
++  it("点陈旧卡展开清单（剥前缀路径 + 最后修改/未知），再点收起", async () => {
++    mocks.getScanDocsStats.mockResolvedValue(stats());
++    renderPanel();
++    await waitFor(() =>
++      expect(screen.getByTestId("metric-stale")).toBeInTheDocument(),
++    );
++
++    // 初始收起。
++    expect(screen.queryByTestId("stale-docs-panel")).not.toBeInTheDocument();
++
++    fireEvent.click(screen.getByTestId("metric-stale"));
++    const panel = screen.getByTestId("stale-docs-panel");
++    const rows = within(panel).getAllByTestId("stale-doc-row");
++    expect(rows).toHaveLength(2);
++    // 前缀剥掉（.sillyspec/docs/ 与 docs/ 两种布局同口径）；有日期 → YYYY-MM-DD。
++    expect(rows[0]?.textContent).toContain("backend/scan/INTEGRATIONS.md");
++    expect(rows[0]?.textContent).toContain("最后修改：2026-03-14");
++    // 无时间 → 「未知」。
++    expect(rows[1]?.textContent).toContain("frontend/modules/build.md");
++    expect(rows[1]?.textContent).toContain("未知");
++
++    // 再点收起。
++    fireEvent.click(screen.getByTestId("metric-stale"));
++    expect(screen.queryByTestId("stale-docs-panel")).not.toBeInTheDocument();
++  });
++});
++
++describe("双榜 tab（FR-04 / FR-07 / D-003@v1）", () => {
++  it("默认注入频次榜（头部小结 + 行 = 路径 + 次数），可切最近更新榜（相对时间）", async () => {
++    mocks.getScanDocsStats.mockResolvedValue(stats());
++    renderPanel();
++    await waitFor(() =>
++      expect(screen.getByTestId("injection-board")).toBeInTheDocument(),
++    );
++
++    // 默认注入榜：头部小结 + 两行（次数副显）。
++    const injection = screen.getByTestId("injection-board");
++    expect(screen.getByText("近 30 天 42 次 · 12 篇")).toBeInTheDocument();
++    const injRows = within(injection).getAllByTestId("injection-board-row");
++    expect(injRows).toHaveLength(2);
++    expect(injRows[0]).toHaveTextContent("backend/modules/scan_docs.md");
++    expect(injRows[0]).toHaveTextContent("18 次");
++    expect(screen.queryByTestId("recent-board")).not.toBeInTheDocument();
++
++    // 切「最近更新」：剥前缀路径 + 相对时间（小时级 / 天级）。
++    fireEvent.click(screen.getByTestId("board-tab-recent"));
++    const recent = screen.getByTestId("recent-board");
++    expect(screen.queryByTestId("injection-board")).not.toBeInTheDocument();
++    const rows = within(recent).getAllByTestId("recent-board-row");
++    expect(rows).toHaveLength(2);
++    expect(rows[0]).toHaveTextContent("frontend/modules/scan-docs.md");
++    expect(rows[0]).toHaveTextContent("2 小时前");
++    expect(rows[1]).toHaveTextContent("backend/modules/scan_docs.md");
++    expect(rows[1]).toHaveTextContent("3 天前");
++
++    // 切回注入榜。
++    fireEvent.click(screen.getByTestId("board-tab-injection"));
++    expect(screen.getByTestId("injection-board")).toBeInTheDocument();
++    expect(screen.queryByTestId("recent-board")).not.toBeInTheDocument();
++  });
++
++  it("注入数据全零（total_30d=0，旧 CLI 未升级）→ 空态文案不报错", async () => {
++    mocks.getScanDocsStats.mockResolvedValue(
++      stats({ injection: { total_30d: 0, docs_hit_30d: 0, board: [] } }),
++    );
++    renderPanel();
++
++    await waitFor(() =>
++      expect(screen.getByTestId("injection-board")).toBeInTheDocument(),
++    );
++    expect(screen.getByText("暂无注入数据（CLI 升级后自动汇聚）")).toBeInTheDocument();
++    expect(screen.queryAllByTestId("injection-board-row")).toHaveLength(0);
++  });
++});
++
++describe("三态：加载 / 错误 / 空文档（不白屏，占住同版位）", () => {
++  it("请求未决 → 「运营指标加载中…」", async () => {
++    mocks.getScanDocsStats.mockImplementation(
++      () => new Promise<ScanDocsStats>(() => {}),
++    );
++    renderPanel();
++
++    await waitFor(() =>
++      expect(screen.getByTestId("scan-docs-ops-panel-loading")).toBeInTheDocument(),
++    );
++    expect(screen.getByTestId("scan-docs-ops-panel-loading")).toHaveTextContent(
++      "运营指标加载中…",
++    );
++    expect(screen.queryByTestId("metric-coverage")).not.toBeInTheDocument();
++  });
++
++  it("请求失败 → 红条错误提示不白屏", async () => {
++    mocks.getScanDocsStats.mockRejectedValue(new Error("网络错误"));
++    renderPanel();
++
++    await waitFor(() =>
++      expect(screen.getByTestId("scan-docs-ops-panel-error")).toBeInTheDocument(),
++    );
++    expect(screen.getByTestId("scan-docs-ops-panel-error")).toHaveTextContent(
++      "运营指标加载失败，请稍后刷新重试",
++    );
++  });
++
++  it("无文档（freshness.total=0）→ 空态占位，不渲染指标卡与榜", async () => {
++    mocks.getScanDocsStats.mockResolvedValue(
++      stats({
++        coverage: {
++          std_have: 0,
++          std_expected: 0,
++          module_have: 0,
++          module_expected: 0,
++          trend: [],
++        },
++        stale_docs: [],
++        density: { per_project_avg: 0 },
++        freshness: { recent_updated: 0, total: 0 },
++        recent_board: [],
++        injection: { total_30d: 0, docs_hit_30d: 0, board: [] },
++      }),
++    );
++    renderPanel();
++
++    await waitFor(() =>
++      expect(screen.getByTestId("scan-docs-ops-panel-empty")).toBeInTheDocument(),
++    );
++    expect(screen.getByTestId("scan-docs-ops-panel-empty")).toHaveTextContent(
++      "暂无扫描文档",
++    );
++    expect(screen.queryByTestId("metric-coverage")).not.toBeInTheDocument();
++    expect(screen.queryByTestId("injection-board")).not.toBeInTheDocument();
++  });
++});
+
+diff --git a/frontend/src/components/scan-docs-stats-panel.tsx b/frontend/src/components/scan-docs-stats-panel.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/components/scan-docs-stats-panel.tsx
+@@ -0,0 +1,433 @@
++"use client";
++
++/**
++ * ScanDocsStatsPanel — 扫描文档运营指标面板（task-03 /
++ * 2026-09-21-scan-docs-ops-panel / FR-03 / FR-04 / FR-07 /
++ * D-001@v1 / D-002@v1 / D-003@v1）。
++ *
++ * 依据：
++ *   - design Wave 2 + 原型 prototype-scan-docs-ops-panel.html 的 .ops 布局
++ *     （指标大卡 2/3 + 榜单卡 1/3）；视觉/结构复刻知识库 OpsDashboard
++ *     （frontend/src/components/knowledge/ops-dashboard.tsx）形态。
++ *   - 数据链：useQuery 消费 GET /scan-docs/stats（getScanDocsStats 封装，
++ *     task-02 端点）——四指标（覆盖率+8 周趋势 / 陈旧 90 天 / 每项目密度 /
++ *     近 30 天鲜活）+ 注入频次/最近更新双榜（D-003@v1 双 tab）。
++ *   - 三态：加载 / 错误 / 空文档（freshness.total=0）均占住同版位不白屏；
++ *     面板数据链独立，失败不影响页面主列表。
++ *   - 路径显示剥前缀口径：stale_docs/recent_board 的 path 是 DB 原始形态
++ *     （可能带 docs/ 或 .sillyspec/docs/ 前缀），展示时剥掉（stripPathPrefix
++ *     与树构建同口径）；injection.board 后端已剥前缀直接显示。
++ *   - 主题铁律：brand-* 语义阶（stroke 走 currentColor 随主题换色）、
++ *     阴影/边框/文字全主题 token；中文文案。
++ */
++
++import { useState } from "react";
++import { useQuery } from "@tanstack/react-query";
++
++import { cn } from "@/lib/utils";
++import {
++  getScanDocsStats,
++  scanDocsStatsQueryKey,
++  type ScanDocsStats,
++} from "@/lib/scan-docs";
++import { stripPathPrefix } from "@/lib/scan-docs-tree";
++
++/** 空态口径：无文档（freshness.total=0）——没扫过或全部不存在。 */
++function hasNoDocs(stats: ScanDocsStats): boolean {
++  return stats.freshness.total === 0;
++}
++
++/** 覆盖率趋势迷你折线（照 ops-dashboard trendPoints）：viewBox 固定，8 点等距；
++ * 知识库趋势是 0~1 的 pct，这里是周更新篇数（updated），按序列最大值归一到
++ * 纵向区间（全零序列画底部平线）；stroke=currentColor 随主题。 */
++const TREND_W = 112;
++const TREND_H = 26;
++
++function trendPoints(trend: ReadonlyArray<{ updated: number }>): string {
++  const n = trend.length;
++  if (n === 0) return "";
++  const max = Math.max(...trend.map((t) => t.updated), 0);
++  return trend
++    .map((t, i) => {
++      const x = n > 1 ? (i * (TREND_W - 2)) / (n - 1) : 0;
++      const clamped = max > 0 ? Math.min(Math.max(t.updated / max, 0), 1) : 0;
++      const y = TREND_H - 3 - clamped * (TREND_H - 6);
++      return `${x.toFixed(1)},${y.toFixed(1)}`;
++    })
++    .join(" ");
++}
++
++/** 陈旧清单「最后修改」列：YYYY-MM-DD（本地时区）；空/非法 → 「未知」。 */
++function staleDateText(iso: string | null | undefined): string {
++  if (!iso) return "未知";
++  const d = new Date(iso);
++  if (Number.isNaN(d.getTime())) return "未知";
++  const y = d.getFullYear();
++  const m = String(d.getMonth() + 1).padStart(2, "0");
++  const day = String(d.getDate()).padStart(2, "0");
++  return `${y}-${m}-${day}`;
++}
++
++/** 最近更新榜相对时间：<1 天按小时、天级按天、周级按周，更久落本地化日期。 */
++function relativeTimeText(iso: string): string {
++  const d = new Date(iso);
++  if (Number.isNaN(d.getTime())) return "未知";
++  const diffHours = Math.floor((Date.now() - d.getTime()) / 3_600_000);
++  if (diffHours < 24) return `${Math.max(diffHours, 1)} 小时前`;
++  const diffDays = Math.floor(diffHours / 24);
++  if (diffDays < 7) return `${diffDays} 天前`;
++  const diffWeeks = Math.floor(diffDays / 7);
++  if (diffWeeks < 5) return `${diffWeeks} 周前`;
++  return d.toLocaleDateString("zh-CN");
++}
++
++export interface ScanDocsStatsPanelProps {
++  workspaceId: string;
++  className?: string;
++}
++
++export function ScanDocsStatsPanel({
++  workspaceId,
++  className,
++}: ScanDocsStatsPanelProps) {
++  const statsQ = useQuery({
++    queryKey: scanDocsStatsQueryKey(workspaceId),
++    queryFn: () => getScanDocsStats(workspaceId),
++  });
++  // 陈旧清单开关（卡面点击开合，照 ops-dashboard 死条目卡形态）。
++  const [staleOpen, setStaleOpen] = useState(false);
++  // 榜单双 tab（D-003@v1）：注入频次默认 / 最近更新。
++  const [boardTab, setBoardTab] = useState<"injection" | "recent">("injection");
++
++  const rootCls = cn("flex flex-col gap-3 lg:grid lg:grid-cols-3", className);
++
++  // ── 三态：加载 / 错误 / 空文档（均不白屏，占住同版位避免布局跳动）──────────
++  if (statsQ.isPending) {
++    return (
++      <div data-testid="scan-docs-ops-panel" className={rootCls}>
++        <div
++          data-testid="scan-docs-ops-panel-loading"
++          className="rounded-lg border border-border bg-card px-4 py-6 text-center text-xs text-muted-foreground shadow-sm lg:col-span-3"
++        >
++          运营指标加载中…
++        </div>
++      </div>
++    );
++  }
++  if (statsQ.isError) {
++    return (
++      <div data-testid="scan-docs-ops-panel" className={rootCls}>
++        <div
++          data-testid="scan-docs-ops-panel-error"
++          className="rounded-lg border border-destructive/30 bg-red-50 px-4 py-6 text-center text-xs text-destructive lg:col-span-3"
++        >
++          运营指标加载失败，请稍后刷新重试
++        </div>
++      </div>
++    );
++  }
++  const stats = statsQ.data;
++  if (stats && hasNoDocs(stats)) {
++    return (
++      <div data-testid="scan-docs-ops-panel" className={rootCls}>
++        <div
++          data-testid="scan-docs-ops-panel-empty"
++          className="rounded-lg border border-border bg-card px-4 py-6 text-center text-xs text-muted-foreground shadow-sm lg:col-span-3"
++        >
++          暂无扫描文档（点击「重新扫描」从文件系统解析后展示运营指标）。
++        </div>
++      </div>
++    );
++  }
++  if (!stats) return null;
++
++  const { coverage, stale_docs, density, freshness, recent_board, injection } =
++    stats;
++  // 综合覆盖率（design 口径）：七件套 + 模块文档合并分子分母，取整百分比。
++  const covHave = coverage.std_have + coverage.module_have;
++  const covExpected = coverage.std_expected + coverage.module_expected;
++  const coveragePct =
++    covExpected > 0 ? Math.round((covHave / covExpected) * 100) : 0;
++  const points = trendPoints(coverage.trend);
++
++  return (
++    <div data-testid="scan-docs-ops-panel" className={rootCls}>
++      {/* ── 指标大卡（2/3）：四指标子卡 2×2 + 陈旧清单内嵌开合 ── */}
++      <div className="rounded-lg border border-border bg-card p-3.5 shadow-sm lg:col-span-2">
++        <div className="mb-2.5 flex items-baseline justify-between">
++          <h3 className="text-sm font-bold">扫描文档运营指标</h3>
++          <span className="text-[10.5px] text-muted-foreground">
++            覆盖 · 鲜活 · 结构健康
++          </span>
++        </div>
++        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
++          {/* 覆盖率（大卡）：综合百分比 + 两档明细 + 迷你周趋势折线 */}
++          <div
++            data-testid="metric-coverage"
++            className="rounded-md border border-border/60 p-2.5"
++          >
++            <div className="text-[11px] text-muted-foreground">
++              标准文档覆盖率{" "}
++              <span className="text-[10px] text-muted-foreground/70">
++                实有 / 应有
++              </span>
++            </div>
++            <div className="text-[22px] font-bold leading-7 text-brand-600">
++              {coveragePct}%
++              <span className="ml-1 text-[11px] font-normal text-muted-foreground">
++                {covHave}/{covExpected} 项
++              </span>
++            </div>
++            <div className="mt-0.5 text-[10.5px] text-muted-foreground">
++              七件套 {coverage.std_have}/{coverage.std_expected} · 模块文档{" "}
++              {coverage.module_have}/{coverage.module_expected}
++            </div>
++            <svg
++              data-testid="coverage-trend"
++              viewBox={`0 0 ${TREND_W} ${TREND_H}`}
++              className="h-[26px] w-full text-brand-500"
++              preserveAspectRatio="none"
++              aria-hidden
++            >
++              {points ? (
++                <polyline
++                  points={points}
++                  fill="none"
++                  stroke="currentColor"
++                  strokeWidth="2"
++                />
++              ) : null}
++            </svg>
++            <div className="text-[10px] text-muted-foreground/70">
++              近 8 周更新趋势
++            </div>
++          </div>
++
++          {/* 陈旧卡：数字 + 点击开合内嵌清单（剥前缀路径 + 最后修改/未知） */}
++          <button
++            type="button"
++            data-testid="metric-stale"
++            onClick={() => setStaleOpen((v) => !v)}
++            aria-expanded={staleOpen}
++            className="rounded-md border border-border/60 p-2.5 text-left transition-colors hover:border-brand-400"
++          >
++            <div className="text-[11px] text-muted-foreground">
++              陈旧文档{" "}
++              <span className="text-[10px] text-muted-foreground/70">
++                90 天未更新
++              </span>
++            </div>
++            <div className="text-[22px] font-bold leading-7 text-warning">
++              {stale_docs.length} 篇
++            </div>
++            <div className="text-[10.5px] text-muted-foreground/70">
++              {staleOpen ? "收起清单 ↑" : "点开清单 → 补写 / 归档 / 重扫 ↓"}
++            </div>
++          </button>
++
++          {/* 密度卡：篇/项目 + 口径 tooltip（原生 title，design 口径注记） */}
++          <div
++            data-testid="metric-density"
++            className="rounded-md border border-border/60 p-2.5"
++          >
++            <div className="text-[11px] text-muted-foreground">
++              每项目文档密度{" "}
++              <span
++                title="口径：exists 文档总数 ÷ 项目数（docs 树第一层目录）。过低=项目文档缺失 · 过高=单项目文档臃肿。"
++                className="cursor-help text-[10px] text-muted-foreground/70 underline decoration-dotted"
++              >
++                口径 ⓘ
++              </span>
++            </div>
++            <div className="text-[22px] font-bold leading-7">
++              {density.per_project_avg.toFixed(1)}
++              <span className="ml-1 text-[11px] font-normal text-muted-foreground">
++                篇/项目
++              </span>
++            </div>
++            <div className="text-[10.5px] text-muted-foreground/70">
++              过低=项目文档缺失 · 过高=单项目文档臃肿
++            </div>
++          </div>
++
++          {/* 鲜活卡：recent_updated/total（近 30 天更新占比的分子分母） */}
++          <div
++            data-testid="metric-freshness"
++            className="rounded-md border border-border/60 p-2.5"
++          >
++            <div className="text-[11px] text-muted-foreground">
++              近 30 天更新{" "}
++              <span className="text-[10px] text-muted-foreground/70">
++                鲜活度
++              </span>
++            </div>
++            <div className="text-[22px] font-bold leading-7 text-success">
++              {freshness.recent_updated}
++              <span className="ml-1 text-[11px] font-normal text-muted-foreground">
++                / {freshness.total} 篇
++              </span>
++            </div>
++            <div className="text-[10.5px] text-muted-foreground/70">
++              重扫后最新内容已入库
++            </div>
++          </div>
++        </div>
++
++        {/* 陈旧清单（开合态；max-h-44 滚动，上限 200 条后端已截） */}
++        {staleOpen ? (
++          <div
++            data-testid="stale-docs-panel"
++            className="mt-2.5 max-h-44 overflow-y-auto rounded-md border border-border/60 bg-muted/30 p-1.5"
++          >
++            {stale_docs.length === 0 ? (
++              <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
++                没有陈旧文档——全部文档近 90 天内有更新。
++              </p>
++            ) : (
++              stale_docs.map((d) => (
++                <div
++                  key={d.path}
++                  data-testid="stale-doc-row"
++                  className="flex items-center gap-2 border-b border-border/40 px-2 py-1 text-[11px] last:border-b-0"
++                >
++                  <span
++                    className="min-w-0 flex-1 truncate font-mono text-brand-700"
++                    title={d.path}
++                  >
++                    {stripPathPrefix(d.path)}
++                  </span>
++                  <span className="shrink-0 text-muted-foreground">
++                    最后修改：{staleDateText(d.last_modified_at)}
++                  </span>
++                </div>
++              ))
++            )}
++          </div>
++        ) : null}
++      </div>
++
++      {/* ── 榜单卡（1/3）：注入频次（默认）/ 最近更新 双 tab（D-003@v1）── */}
++      <div className="min-w-0 rounded-lg border border-border bg-card p-3.5 shadow-sm">
++        <div
++          role="tablist"
++          aria-label="榜单视图"
++          className="mb-2 flex gap-1"
++        >
++          <button
++            type="button"
++            role="tab"
++            aria-selected={boardTab === "injection"}
++            data-testid="board-tab-injection"
++            onClick={() => setBoardTab("injection")}
++            className={
++              boardTab === "injection"
++                ? "rounded-sm border border-brand-400 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-600"
++                : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground hover:text-brand-600"
++            }
++          >
++            🔥 注入频次
++          </button>
++          <button
++            type="button"
++            role="tab"
++            aria-selected={boardTab === "recent"}
++            data-testid="board-tab-recent"
++            onClick={() => setBoardTab("recent")}
++            className={
++              boardTab === "recent"
++                ? "rounded-sm border border-brand-400 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-600"
++                : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground hover:text-brand-600"
++            }
++          >
++            🕘 最近更新
++          </button>
++        </div>
++
++        {boardTab === "injection" ? (
++          <>
++            <p className="mb-1.5 text-[11px] text-muted-foreground">
++              近 30 天 {injection.total_30d} 次 · {injection.docs_hit_30d} 篇
++            </p>
++            <div
++              data-testid="injection-board"
++              className="max-h-56 overflow-y-auto"
++            >
++              {injection.total_30d === 0 ? (
++                <p className="px-1 py-2 text-[11px] text-muted-foreground">
++                  暂无注入数据（CLI 升级后自动汇聚）
++                </p>
++              ) : (
++                injection.board.map((item, i) => (
++                  <div
++                    key={item.path}
++                    data-testid="injection-board-row"
++                    className="flex items-center gap-2 border-b border-border/40 py-1 text-xs last:border-b-0"
++                  >
++                    <span
++                      className={cn(
++                        "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full text-[10.5px] font-bold",
++                        i === 0
++                          ? "bg-brand-600 text-white"
++                          : "bg-brand-100 text-brand-700",
++                      )}
++                    >
++                      {i + 1}
++                    </span>
++                    <span
++                      className="min-w-0 flex-1 truncate font-mono"
++                      title={item.path}
++                    >
++                      {item.path}
++                    </span>
++                    <span className="shrink-0 font-bold text-brand-700">
++                      {item.hits_30d} 次
++                    </span>
++                  </div>
++                ))
++              )}
++            </div>
++          </>
++        ) : (
++          <div
++            data-testid="recent-board"
++            className="max-h-56 overflow-y-auto"
++          >
++            {recent_board.length === 0 ? (
++              <p className="px-1 py-2 text-[11px] text-muted-foreground">
++                暂无最近更新记录。
++              </p>
++            ) : (
++              recent_board.map((item, i) => (
++                <div
++                  key={item.path}
++                  data-testid="recent-board-row"
++                  className="flex items-center gap-2 border-b border-border/40 py-1 text-xs last:border-b-0"
++                >
++                  <span
++                    className={cn(
++                      "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full text-[10.5px] font-bold",
++                      i === 0
++                        ? "bg-brand-600 text-white"
++                        : "bg-brand-100 text-brand-700",
++                    )}
++                  >
++                    {i + 1}
++                  </span>
++                  <span
++                    className="min-w-0 flex-1 truncate font-mono"
++                    title={item.path}
++                  >
++                    {stripPathPrefix(item.path)}
++                  </span>
++                  <span className="shrink-0 text-muted-foreground">
++                    {relativeTimeText(item.last_modified_at)}
++                  </span>
++                </div>
++              ))
++            )}
++          </div>
++        )}
++      </div>
++    </div>
++  );
++}

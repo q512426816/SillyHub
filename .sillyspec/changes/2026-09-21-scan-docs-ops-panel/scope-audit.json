@@ -1,0 +1,132 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "7f52be37682cf0aa9af0e7ad9b3f0d69bd0725eb",
+  "totals": {
+    "files": 14,
+    "additions": 2034,
+    "deletions": 17
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/backend/modules/scan_docs.md",
+      "additions": 2,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/app-workspace-pages.md",
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/scan_docs/router.py",
+      "additions": 23,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/scan_docs/schema.py",
+      "additions": 69,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/scan_docs/service.py",
+      "additions": 222,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 272,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+      "additions": 53,
+      "deletions": 7,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx",
+      "additions": 8,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 151,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/scan-docs.ts",
+      "additions": 14,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/scan-docs-stats-panel.md",
+      "additions": 50,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/scan_docs/tests/test_stats.py",
+      "additions": 435,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx",
+      "additions": 301,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/scan-docs-stats-panel.tsx",
+      "additions": 433,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "fe3c0aad92249dc07effe19b466acd537aa04ed8aeb96b9b29c913ea87648522",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-21T03:08:18.838Z"
+}

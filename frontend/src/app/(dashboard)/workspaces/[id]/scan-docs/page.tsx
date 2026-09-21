@@ -13,6 +13,12 @@ import { PanelResizer, usePanelWidth } from "@/components/ui/panel-resizer";
 import { TreeBox } from "@/components/ui/tree-box";
 // 复用统一 sanitize 插件（task-13 / FR-13）：扫描文档内容源自 daemon 上报的仓库文件，不可信
 import { MarkdownText } from "@/components/ui/markdown-text";
+// 人类可读卡片视图（对齐知识库 2026-09-20-knowledge-effect-panel / FR-04 / D-004@v2：
+// 手册 ## 小节逐条卡 + INDEX 路由卡；zone 固定 top——扫描文档即项目手册域）
+import { EntryCardList } from "@/components/knowledge/entry-card-list";
+// 运营指标面板（task-03 / 2026-09-21-scan-docs-ops-panel / FR-03 / FR-04 / FR-07）：
+// 复刻知识库 OpsDashboard 形态；组件内 useQuery 独立数据链（stats 与列表互不阻塞）
+import { ScanDocsStatsPanel } from "@/components/scan-docs-stats-panel";
 import { ApiError } from "@/lib/api";
 import "@uiw/react-markdown-preview/markdown.css";
 
@@ -24,7 +30,7 @@ import {
   type ScanDocReparseResponse,
   type ScanDocRead,
 } from "@/lib/scan-docs";
-import { buildTree, type TreeNode } from "@/lib/scan-docs-tree";
+import { buildTree, stripPathPrefix, type TreeNode } from "@/lib/scan-docs-tree";
 import { DaemonRequiredNotice } from "@/components/daemon-required-notice";
 import {
   canBorrowSharedDaemon,
@@ -46,15 +52,40 @@ const TREE_PANEL_MAX_W = 480;
 /** 宽度记忆 key（仅本地浏览器）。 */
 const TREE_PANEL_WIDTH_KEY = "sillyhub-scan-docs-tree-width";
 
-/** 收集全部目录 path（初始全展开语义，沿用手搓版行为）。 */
+// ── 人类可读标签（对齐知识库 zone 中文分组口径）────────────────────────────
+// 常见目录段 → 中文标签（scan/flows/modules 是 sillyspec docs 树固定三件套）。
+const DIR_LABELS: Record<string, string> = {
+  scan: "扫描",
+  flows: "流程",
+  modules: "模块",
+};
+// 标准文档类型 → 中文徽标（对齐 backend parser STANDARD_DOC_TYPES + 常见补充，
+// 其余类型原样展示）。title 属性保留原始类型名供排查。
+const DOC_TYPE_LABELS: Record<string, string> = {
+  ARCHITECTURE: "架构",
+  CONVENTIONS: "约定",
+  CONCERNS: "关注点",
+  INTEGRATIONS: "集成",
+  PROJECT: "项目",
+  STRUCTURE: "结构",
+  TESTING: "测试",
+  GLOSSARY: "术语表",
+};
+
+/** 收集全部目录 path（搜索过滤时的全展开语义：结果集小，全部摊开便于点选）。 */
 function collectDirPaths(nodes: TreeNode[], acc: string[] = []): string[] {
   for (const n of nodes) {
     if (n.doc === undefined) {
       acc.push(n.path);
-      collectDirPaths(n.children, acc);
+      acc.push(...collectDirPaths(n.children, []));
     }
   }
   return acc;
+}
+
+/** 一级目录 path（默认展开语义：文档量大时只摊开项目层，子目录点开再看）。 */
+function topLevelDirPaths(nodes: TreeNode[]): string[] {
+  return nodes.filter((n) => n.doc === undefined).map((n) => n.path);
 }
 
 /** 递归构建 path → 文档摘要索引（选中行回查 doc id 拉详情）。 */
@@ -87,13 +118,19 @@ function renderDocTitle(node: TreeNode & { doc: ScanDocSummary }) {
             🕘 历史{doc.conflict_count}版
           </Badge>
         )}
-        <Badge variant={doc.exists ? "success" : "outline"} className="px-1.5 text-[10px]">{doc.doc_type}</Badge>
+        <Badge
+          variant={doc.exists ? "success" : "outline"}
+          className="px-1.5 text-[10px]"
+          title={doc.doc_type}
+        >
+          {DOC_TYPE_LABELS[doc.doc_type] ?? doc.doc_type}
+        </Badge>
       </span>
     </span>
   );
 }
 
-/** TreeNode[] → antd DataNode[]（目录 font-medium；文件行带徽标；图标按扩展名分型）。 */
+/** TreeNode[] → antd DataNode[]（目录 font-medium + 中文标签；文件行带徽标；图标按扩展名分型）。 */
 function toAntdNodes(nodes: TreeNode[]): DataNode[] {
   return nodes.map((n) => {
     if (n.doc) {
@@ -106,32 +143,45 @@ function toAntdNodes(nodes: TreeNode[]): DataNode[] {
     }
     return {
       key: n.path,
-      title: <span className="font-medium whitespace-nowrap">{n.name}</span>,
+      title: (
+        <span className="font-medium whitespace-nowrap" title={n.name}>
+          {DIR_LABELS[n.name] ?? n.name}
+        </span>
+      ),
       icon: <FileNodeIcon name={n.name} type="dir" />,
       children: toAntdNodes(n.children),
     };
   });
 }
 
-/** 文档树：antd Tree 受控（全展开初始 + 可收起；点目录行展开/收起 ql-20260821-015；点文件行拉详情回调）。 */
+/** 文档树：antd Tree 受控（默认展开项目层、搜索结果全展开；点目录行展开/收起
+ *  ql-20260821-015；点文件行拉详情回调）。 */
 function DocTree({
   tree,
   workspaceId,
   onSelect,
   selectedPath,
+  expandAll,
 }: {
   tree: TreeNode[];
   workspaceId: string;
   onSelect: (_doc: ScanDocRead) => void;
   selectedPath: string | null;
+  /** 搜索过滤态：结果集小，全部摊开便于点选（否则默认只展开项目层）。 */
+  expandAll: boolean;
 }) {
   const treeData = useMemo(() => toAntdNodes(tree), [tree]);
   const docIndex = useMemo(() => buildDocIndex(tree), [tree]);
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => collectDirPaths(tree));
-  // 树重建（搜索过滤/重扫后）重算展开集，保持「全部展开」语义（手搓版同款初始行为）。
+  // 默认展开集随 tree/expandAll 重算：文档量大时不再全量摊开（数百行的首帧
+  // DOM），搜索时结果集小才全展开。用户手动展开/收起在两次数据刷新之间保留。
+  const defaultExpanded = useMemo(
+    () => (expandAll ? collectDirPaths(tree) : topLevelDirPaths(tree)),
+    [tree, expandAll],
+  );
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => defaultExpanded);
   useEffect(() => {
-    setExpandedKeys(collectDirPaths(tree));
-  }, [tree]);
+    setExpandedKeys(defaultExpanded);
+  }, [defaultExpanded]);
 
   const onSelectTree: TreeProps["onSelect"] = (keys, info) => {
     if (!info.node.isLeaf) return;
@@ -161,9 +211,14 @@ export default function ScanDocsPage({ params }: Props) {
   const [reparseResult, setReparseResult] = useState<ScanDocReparseResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [reparsing, setReparsing] = useState(false);
+  /** 后台同步中（进页自动 reparse 不阻塞首屏，完成后静默刷新列表）。 */
+  const [bgSyncing, setBgSyncing] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
+  /** 内容区视图 tab（对齐知识库 FR-04/D-004@v2）：cards=人类可读卡片（默认）/
+   *  raw=原文阅读视图；每次重新选文件回默认卡片。 */
+  const [viewMode, setViewMode] = useState<"cards" | "raw">("cards");
   // 2026-07-26-ungate-workspace-entry / FR-04：扫描文档 reparse 经 host_fs 读源码
   // （daemon-client），无 binding 时失败。门禁后移后，无 binding 主区渲染 DaemonRequiredNotice。
   const [myBinding, setMyBinding] = useState<MemberBindingView | null>(null);
@@ -180,24 +235,19 @@ export default function ScanDocsPage({ params }: Props) {
   const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
 
   // 仅拉文档列表（可选关键词过滤 path/title/content）。搜索时不触发 reparse，保证响应快。
-  const fetchDocs = useCallback(async (q?: string) => {
-    setLoading(true); setPageError(null);
+  // silent=true 时不翻 loading（后台同步完成后的静默刷新，避免树区闪一下加载态）。
+  const fetchDocs = useCallback(async (q?: string, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
+    setPageError(null);
     try {
       const resp = await listScanDocs(workspaceId, q ? { q } : undefined);
       setDocs(resp.items);
     } catch (err) { setPageError(err instanceof ApiError ? err.message : "加载扫描文档失败"); }
-    finally { setLoading(false); }
+    finally { if (!opts?.silent) setLoading(false); }
   }, [workspaceId]);
 
-  // 首次进入：reparse 同步平台存储 + 拉全量。
-  const reparseAndLoad = useCallback(async () => {
-    setLoading(true); setPageError(null);
-    try {
-      await reparseScanDocs(workspaceId);
-      await fetchDocs();
-    } catch (err) { setPageError(err instanceof ApiError ? err.message : "加载扫描文档失败"); }
-    finally { setLoading(false); }
-  }, [workspaceId, fetchDocs]);
+  // 当前搜索词镜像（后台 reparse 完成后的静默刷新复用，避免把搜索态回退成全量）。
+  const qRef = useRef("");
 
   // 先判 binding：无 binding 不 reparse（避免无谓失败），主区渲染 DaemonRequiredNotice。
   useEffect(() => {
@@ -223,19 +273,39 @@ export default function ScanDocsPage({ params }: Props) {
 
   const hasDaemon = !!myBinding?.daemon_id;
 
-  // 仅在已绑定 daemon 时 reparse + 拉文档（零回归：有 binding 路径不变）。
+  // 进页加载策略（perf）：列表先行（DB 快查，数百文档也是轻查询），reparse 转
+  // 后台——不再让全量文件解析阻塞首屏；后台完成后按当前搜索词静默刷新列表。
+  // 失败静默（如只读权限 403 / daemon 瞬断）：页面仍可浏览 DB 既有数据，
+  // 需要强同步时点头部「重新扫描」。
   useEffect(() => {
     if (!hasDaemon) return;
-    void reparseAndLoad();
-  }, [hasDaemon, reparseAndLoad]);
+    let active = true;
+    void fetchDocs();
+    setBgSyncing(true);
+    reparseScanDocs(workspaceId)
+      .then(() => {
+        if (active) void fetchDocs(qRef.current || undefined, { silent: true });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setBgSyncing(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [hasDaemon, workspaceId, fetchDocs]);
 
   // 搜索框输入 debounce 300ms → debouncedQ。
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(searchInput.trim()), 300);
+    const t = setTimeout(() => {
+      const q = searchInput.trim();
+      setDebouncedQ(q);
+      qRef.current = q;
+    }, 300);
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  // debouncedQ 变化触发过滤查询；跳过首次（首次由 reparseAndLoad 负责，避免重复请求）。
+  // debouncedQ 变化触发过滤查询；跳过首次（首次列表由进页主 effect 负责，避免重复请求）。
   const skipFirstSearchRef = useRef(true);
   useEffect(() => {
     if (skipFirstSearchRef.current) { skipFirstSearchRef.current = false; return; }
@@ -249,7 +319,41 @@ export default function ScanDocsPage({ params }: Props) {
     finally { setReparsing(false); }
   };
 
-  const tree = buildTree(docs);
+  // memo 化：搜索输入等任意重渲染不再重建树（旧实现每渲染一棵新树会连带重置展开态）。
+  const tree = useMemo(() => buildTree(docs), [docs]);
+
+  /** 选中并展示文档详情（树点击 / 卡片 INDEX 路由跳转共用）：每次重选回卡片视图。 */
+  const selectDoc = useCallback((doc: ScanDocRead) => {
+    setSelectedDoc(doc);
+    setViewMode("cards");
+  }, []);
+
+  /** 卡片视图跳转（INDEX 路由行）：在当前文档列表里解析目标文件，命中则拉详情
+   *  选中并滚到锚点小节卡（锚点选择器与知识库 EntryCardList 同域）；查无静默
+   *  忽略（目标可能不在 docs 树，如指向 knowledge 域的相对路径）。 */
+  const jumpToDoc = useCallback(
+    (file: string, anchor?: string) => {
+      const target = docs.find((d) => {
+        const p = stripPathPrefix(d.path);
+        return p === file || p.endsWith(`/${file}`);
+      });
+      if (!target) return;
+      void getScanDoc(workspaceId, target.id)
+        .then((doc) => {
+          selectDoc(doc);
+          if (anchor) {
+            const display = stripPathPrefix(doc.path);
+            requestAnimationFrame(() => {
+              document
+                .querySelector(`[data-entry-anchor="${CSS.escape(`${display}#${anchor}`)}"]`)
+                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+            });
+          }
+        })
+        .catch(() => {});
+    },
+    [docs, workspaceId, selectDoc],
+  );
 
   return (
     <PageContainer size="full">
@@ -271,6 +375,11 @@ export default function ScanDocsPage({ params }: Props) {
           </Button>
         }
       />
+
+      {/* 运营指标面板（task-03 / 原型 .ops 位，对齐知识库页 OpsDashboard 挂点
+          位置语义——PageHeader 之下、错误条之上）：四指标卡 + 注入/更新双榜；
+          内部三态自理（加载/错误/空文档），加载失败不影响下方主列表。 */}
+      <ScanDocsStatsPanel workspaceId={workspaceId} />
 
       {pageError && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">{pageError}</div>
@@ -309,7 +418,11 @@ export default function ScanDocsPage({ params }: Props) {
         <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
       ) : docs.length === 0 ? (
         <div className="py-12 text-center text-xs text-muted-foreground">
-          {debouncedQ ? `没有匹配「${debouncedQ}」的文档` : "暂无扫描文档。点击「重新扫描」从文件系统解析。"}
+          {bgSyncing
+            ? "正在从文件系统扫描文档…"
+            : debouncedQ
+              ? `没有匹配「${debouncedQ}」的文档`
+              : "暂无扫描文档。点击「重新扫描」从文件系统解析。"}
         </div>
       ) : (
         <div className="flex flex-col gap-4 lg:flex-row">
@@ -331,12 +444,18 @@ export default function ScanDocsPage({ params }: Props) {
                   placeholder="搜索名称或内容"
                   className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
+                {bgSyncing && (
+                  <p data-testid="bg-syncing-hint" className="px-1 text-[11px] text-muted-foreground">
+                    ⏳ 正在后台同步最新扫描，完成后自动刷新…
+                  </p>
+                )}
                 <TreeBox className="max-h-[calc(100vh-260px)]">
                   <DocTree
                     tree={tree}
                     workspaceId={workspaceId}
-                    onSelect={setSelectedDoc}
+                    onSelect={selectDoc}
                     selectedPath={selectedDoc?.path ?? null}
+                    expandAll={!!debouncedQ}
                   />
                 </TreeBox>
               </div>
@@ -359,14 +478,70 @@ export default function ScanDocsPage({ params }: Props) {
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <h3 className="text-base font-semibold">{selectedDoc.title ?? selectedDoc.path.split("/").pop()}</h3>
-                  <Badge variant="outline" className="font-mono text-[10px]">{selectedDoc.doc_type}</Badge>
+                  <Badge
+                    variant="outline"
+                    className="font-mono text-[10px]"
+                    title={selectedDoc.doc_type}
+                  >
+                    {DOC_TYPE_LABELS[selectedDoc.doc_type] ?? selectedDoc.doc_type}
+                  </Badge>
                 </div>
                 <p className="font-mono text-[11px] text-muted-foreground">{selectedDoc.path}</p>
                 {selectedDoc.last_modified_at && (
                   <p className="text-[11px] text-muted-foreground">最后修改：{new Date(selectedDoc.last_modified_at).toLocaleString("zh-CN")}</p>
                 )}
                 {selectedDoc.content ? (
-                  <div className="max-h-[60vh] overflow-auto rounded-md bg-muted/50">{selectedDoc.path.endsWith(".md") ? (<MarkdownText content={selectedDoc.content} size="reading" />) : (<pre className="text-xs leading-relaxed whitespace-pre-wrap">{selectedDoc.content}</pre>)}</div>
+                  selectedDoc.path.toLowerCase().endsWith(".md") ? (
+                    <>
+                      {/* 卡片/原文双 tab（对齐知识库 FR-04 / D-004@v2）：卡片=人类
+                          可读条目卡（默认），原文=既有 md 阅读视图（零改动）。 */}
+                      <div role="tablist" aria-label="内容视图" className="flex gap-1">
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={viewMode === "cards"}
+                          data-testid="view-tab-cards"
+                          onClick={() => setViewMode("cards")}
+                          className={
+                            viewMode === "cards"
+                              ? "rounded-sm border border-brand-400 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-600"
+                              : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground hover:text-brand-600"
+                          }
+                        >
+                          卡片
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={viewMode === "raw"}
+                          data-testid="view-tab-raw"
+                          onClick={() => setViewMode("raw")}
+                          className={
+                            viewMode === "raw"
+                              ? "rounded-sm border border-brand-400 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-600"
+                              : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground hover:text-brand-600"
+                          }
+                        >
+                          原文
+                        </button>
+                      </div>
+                      {viewMode === "cards" ? (
+                        <EntryCardList
+                          filename={stripPathPrefix(selectedDoc.path)}
+                          zone="top"
+                          content={selectedDoc.content}
+                          onJumpToEntry={jumpToDoc}
+                          className="max-h-[60vh] overflow-y-auto pr-1"
+                        />
+                      ) : (
+                        <div className="max-h-[60vh] overflow-auto rounded-md bg-muted/50">
+                          <MarkdownText content={selectedDoc.content} size="reading" />
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-md bg-muted/50 p-3 text-xs leading-relaxed">{selectedDoc.content}</pre>
+                  )
                 ) : (
                   <p className="text-xs text-muted-foreground">（无内容）</p>
                 )}

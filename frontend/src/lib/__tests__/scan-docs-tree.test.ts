@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { buildTree, type TreeNode } from "../scan-docs-tree";
+import { buildTree, stripPathPrefix, type TreeNode } from "../scan-docs-tree";
 import type { ScanDocSummary } from "../scan-docs";
 
 function makeDoc(path: string, doc_type = "OTHER"): ScanDocSummary {
@@ -66,5 +66,23 @@ describe("buildTree", () => {
       "auth.md",
       "change-lifecycle.md",
     ]);
+  });
+});
+
+describe("stripPathPrefix（ql-20260921-003：与 buildTree 同口径剥前导包裹段）", () => {
+  it("扁平布局剥 docs 段", () => {
+    expect(stripPathPrefix("docs/SillyHub/scan/ARCHITECTURE.md")).toBe(
+      "SillyHub/scan/ARCHITECTURE.md",
+    );
+  });
+
+  it("包裹布局剥 .sillyspec + docs 段", () => {
+    expect(stripPathPrefix(".sillyspec/docs/backend/CONVENTIONS.md")).toBe(
+      "backend/CONVENTIONS.md",
+    );
+  });
+
+  it("无包裹段原样返回", () => {
+    expect(stripPathPrefix("backend/CONVENTIONS.md")).toBe("backend/CONVENTIONS.md");
   });
 });
