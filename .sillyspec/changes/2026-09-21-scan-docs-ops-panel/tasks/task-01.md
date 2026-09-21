@@ -30,7 +30,7 @@ goal: >
 implementation:
   - backend/app/modules/scan_docs/schema.py 新增 ScanDocs 前缀 DTO 9 类（ScanDocsTrendPoint/ScanDocsCoverageOut/ScanDocsStaleDocOut/ScanDocsDensityOut/ScanDocsFreshnessOut/ScanDocsRecentBoardItem/ScanDocsInjectionBoardItem/ScanDocsInjectionOut/ScanDocsStatsOut），字段按 design.md 接口定义节
   - backend/app/modules/scan_docs/service.py 新增 async def stats(workspace_id)：一次 load_only 轻列查询取全部 exists 行（排除 content），path 剥 .sillyspec/docs 前导段按第一段分组；_module-map.yaml 行单独 SELECT content 用 yaml.safe_load 解析 modules 条目数（失败按无 map 退化）；按 design 口径计算五组指标；再 SELECT knowledge_hits WHERE type='docs-inject' AND occurred_at>=now-30d 聚合 injection（matched_anchors 剥前缀对齐，board 按路径计数降序 Top10）
-  - backend/app/modules/scan_docs/router.py 新增 GET /scan-docs/stats（require_permission(Permission.SCAN_DOCS_READ)），声明在 GET /scan-docs/{doc_id} 之前并留路由序铁律注释（对齐 backend/app/modules/knowledge/router.py:215 先例）
+  - backend/app/modules/scan_docs/router.py 新增 GET /scan-docs/stats（require_permission(Permission.SCAN_DOCS_READ)），声明在 GET /scan-docs/{doc_id} 之前并留路由序铁律注释（对齐 backend/app/modules/knowledge/router.py 先例）
   - NEW:backend/app/modules/scan_docs/tests/test_stats.py：fixture 双项目（A 七件套齐+map 登记 3 实有 3；B 缺 2 件+无 map 有 2 篇模块文档）+ mtime 边界（91 天前/10 天前）+ 直插 KnowledgeHit type='docs-inject' 行断言 injection 三值与知识 stats（HitsService.stats）数值不变
 acceptance:
   - GET /scan-docs/stats 返回 200 且响应含 coverage 两级计数（std_have/std_expected/module_have/module_expected）、stale_docs、density.per_project_avg、freshness、recent_board、injection
@@ -59,7 +59,7 @@ constraints:
                     精确文件路径（仓根相对、正斜杠），当前不存在、将由本 task 新建的文件加
                     NEW: 前缀（如 NEW:src/foo.js）；禁 glob（src/**）、禁目录前缀（src/dir/）、
                     禁绝对路径；无明确文件级意图时保留 [] 占位行不动。
-     implementation/acceptance 里的源码位置同样写仓根相对全路径+行号（src/foo.js:123）——
+     implementation/acceptance 里的源码位置同样写仓根相对全路径+行号（src/foo.js）——
                     裸文件名在 docs-check 层1 靠 basename 全仓扫描找候选，找不到候选或关键词
                     窗口不匹配即失效，到 pre-push 才拦（2026-09-19 实证 64 处返工）。
      可选字段按需插进上方 frontmatter（规则见 taskcard-rules）：

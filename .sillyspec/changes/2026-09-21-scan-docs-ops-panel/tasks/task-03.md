@@ -56,7 +56,7 @@ constraints:
                     精确文件路径（仓根相对、正斜杠），当前不存在、将由本 task 新建的文件加
                     NEW: 前缀（如 NEW:src/foo.js）；禁 glob（src/**）、禁目录前缀（src/dir/）、
                     禁绝对路径；无明确文件级意图时保留 [] 占位行不动。
-     implementation/acceptance 里的源码位置同样写仓根相对全路径+行号（src/foo.js:123）——
+     implementation/acceptance 里的源码位置同样写仓根相对全路径+行号（src/foo.js）——
                     裸文件名在 docs-check 层1 靠 basename 全仓扫描找候选，找不到候选或关键词
                     窗口不匹配即失效，到 pre-push 才拦（2026-09-19 实证 64 处返工）。
      可选字段按需插进上方 frontmatter（规则见 taskcard-rules）：

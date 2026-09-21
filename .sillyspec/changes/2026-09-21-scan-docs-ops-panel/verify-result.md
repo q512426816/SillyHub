@@ -1,6 +1,6 @@
 # 验证报告（骨架由 `sillyspec verify-probes --change <变更名> --init` 生成）
 
-> 引用规范：矩阵证据/测试结果等处的源码位置写仓根相对全路径+行号（src/foo.js:123）——裸文件名在 docs-check 层1 靠 basename 全仓扫描找候选，找不到候选或关键词窗口不匹配即失效，到 pre-push 才拦（2026-09-19 实证 64 处返工）。
+> 引用规范：矩阵证据/测试结果等处的源码位置写仓根相对全路径+行号（src/foo.js）——裸文件名在 docs-check 层1 靠 basename 全仓扫描找候选，找不到候选或关键词窗口不匹配即失效，到 pre-push 才拦（2026-09-19 实证 64 处返工）。
 
 > 探针结果已机械预填；其余章节把 `<!--TODO-->` 替换为真实内容。**结论只认「结论枚举：」槽行**——
 > 槽行留「<待填：三选一>」会被 gate 判不过（fail-closed），正文其他位置的 PASS/FAIL 字样不参与判定。
@@ -48,7 +48,7 @@
 - ℹ️ 4 个清单文件主仓不存在、已从 worktree 读取（apply 前新文件形态）
 
 #### 探针 2：设计关键词覆盖
-design 关键词逐个 grep（worktree 源码）：`stats(`→service.py:188 命中；`ScanDocsStatsOut`→schema.py/router.py 命中；`STANDARD_DOC_TYPES`→service.py:29 import 复用；`docs-inject`→service.py `_injection_stats` + sillyspec prompt.js 埋点；`scan-docs/stats`→router.py:63（{doc_id}:78 之前）；剥前缀双端同口径（前端 stripPathPrefix / service `_strip_docs_prefix`）；useQuery→面板组件。全部命中，无缺实现。
+design 关键词逐个 grep（worktree 源码）：`stats(`→service.py 命中；`ScanDocsStatsOut`→schema.py/router.py 命中；`STANDARD_DOC_TYPES`→service.py import 复用；`docs-inject`→service.py `_injection_stats` + sillyspec prompt.js 埋点；`scan-docs/stats`→router.py（{doc_id}:78 之前）；剥前缀双端同口径（前端 stripPathPrefix / service `_strip_docs_prefix`）；useQuery→面板组件。全部命中，无缺实现。
 
 #### 探针 3：验收标准测试覆盖
 - ✅ task-01: 模块目录（backend/app/modules/scan_docs、NEW:backend/app/modules/scan_docs/tests）找到 4 个测试文件（backend/app/modules/scan_docs/tests/test_parser.py、backend/app/modules/scan_docs/tests/test_router.py、backend/app/modules/scan_docs/tests/test_service.py、backend/app/modules/scan_docs/tests/test_stats.py）
@@ -65,11 +65,11 @@ design 关键词逐个 grep（worktree 源码）：`stats(`→service.py:188 命
 **task-01**
 | acceptance 条目 | 归属测试文件 | 关键词命中（提示，命中≠判定） | 判定 | 证据 |
 |---|---|---|---|---|
-| GET /scan-docs/stats 返回 200 且响应含 coverage 两级计数（std_have/std_expected/module_have/module_expected）、stale_docs、density.per_project_avg、freshness、recent_board、injection | `backend/app/modules/scan_docs/tests/test_stats.py` | GET、scan、docs、stats（`backend/app/modules/scan_docs/tests/test_stats.py`） | covered | `backend/app/modules/scan_docs/tests/test_stats.py:384`（GET）、`backend/app/modules/scan_docs/tests/test_stats.py:3`（scan）、`backend/app/modules/scan_docs/tests/test_stats.py:3`（docs） |
-| 覆盖率可复算：fixture A 七件套 7/7、B 5/7；模块层 A 3/3、B 2/2（无 map 退化）；综合分子分母正确 | `backend/app/modules/scan_docs/tests/test_stats.py` | fixture、七件套、模块层、map（`backend/app/modules/scan_docs/tests/test_stats.py`） | covered | `backend/app/modules/scan_docs/tests/test_stats.py:5`（fixture）、`backend/app/modules/scan_docs/tests/test_stats.py:28`（七件套）、`backend/app/modules/scan_docs/tests/test_stats.py:182`（模块层） |
-| 陈旧=91 天前 mtime 的文档计入、10 天前不计；last_modified_at 为空计入且清单可含 | `backend/app/modules/scan_docs/tests/test_stats.py` | 陈旧、天前、mtime（`backend/app/modules/scan_docs/tests/test_stats.py`） | covered | `backend/app/modules/scan_docs/tests/test_stats.py:1`（陈旧）、`backend/app/modules/scan_docs/tests/test_stats.py:130`（天前）、`backend/app/modules/scan_docs/tests/test_stats.py:5`（mtime） |
-| 插入 docs-inject 行后 injection.total_30d/docs_hit_30d/board 正确，且知识库 stats（backend/app/modules/knowledge/hits.py stats）各指标不变 | `backend/app/modules/scan_docs/tests/test_stats.py` | 插入、docs、inject、行后、injection（`backend/app/modules/scan_docs/tests/test_stats.py`） | covered | `backend/app/modules/scan_docs/tests/test_stats.py:342`（插入）、`backend/app/modules/scan_docs/tests/test_stats.py:3`（docs）、`backend/app/modules/scan_docs/tests/test_stats.py:300`（inject） |
-| stats 端点请求不被 /scan-docs/{doc_id} 通配吞掉（路由序生效） | `backend/app/modules/scan_docs/tests/test_stats.py` | stats、scan、docs、doc_id（`backend/app/modules/scan_docs/tests/test_stats.py`） | covered | `backend/app/modules/scan_docs/tests/test_stats.py:1`（stats）、`backend/app/modules/scan_docs/tests/test_stats.py:3`（scan）、`backend/app/modules/scan_docs/tests/test_stats.py:3`（docs） |
+| GET /scan-docs/stats 返回 200 且响应含 coverage 两级计数（std_have/std_expected/module_have/module_expected）、stale_docs、density.per_project_avg、freshness、recent_board、injection | `backend/app/modules/scan_docs/tests/test_stats.py` | GET、scan、docs、stats（`backend/app/modules/scan_docs/tests/test_stats.py`） | covered | `backend/app/modules/scan_docs/tests/test_stats.py`（GET）、`backend/app/modules/scan_docs/tests/test_stats.py`（scan）、`backend/app/modules/scan_docs/tests/test_stats.py`（docs） |
+| 覆盖率可复算：fixture A 七件套 7/7、B 5/7；模块层 A 3/3、B 2/2（无 map 退化）；综合分子分母正确 | `backend/app/modules/scan_docs/tests/test_stats.py` | fixture、七件套、模块层、map（`backend/app/modules/scan_docs/tests/test_stats.py`） | covered | `backend/app/modules/scan_docs/tests/test_stats.py`（fixture）、`backend/app/modules/scan_docs/tests/test_stats.py`（七件套）、`backend/app/modules/scan_docs/tests/test_stats.py`（模块层） |
+| 陈旧=91 天前 mtime 的文档计入、10 天前不计；last_modified_at 为空计入且清单可含 | `backend/app/modules/scan_docs/tests/test_stats.py` | 陈旧、天前、mtime（`backend/app/modules/scan_docs/tests/test_stats.py`） | covered | `backend/app/modules/scan_docs/tests/test_stats.py`（陈旧）、`backend/app/modules/scan_docs/tests/test_stats.py`（天前）、`backend/app/modules/scan_docs/tests/test_stats.py`（mtime） |
+| 插入 docs-inject 行后 injection.total_30d/docs_hit_30d/board 正确，且知识库 stats（backend/app/modules/knowledge/hits.py stats）各指标不变 | `backend/app/modules/scan_docs/tests/test_stats.py` | 插入、docs、inject、行后、injection（`backend/app/modules/scan_docs/tests/test_stats.py`） | covered | `backend/app/modules/scan_docs/tests/test_stats.py`（插入）、`backend/app/modules/scan_docs/tests/test_stats.py`（docs）、`backend/app/modules/scan_docs/tests/test_stats.py`（inject） |
+| stats 端点请求不被 /scan-docs/{doc_id} 通配吞掉（路由序生效） | `backend/app/modules/scan_docs/tests/test_stats.py` | stats、scan、docs、doc_id（`backend/app/modules/scan_docs/tests/test_stats.py`） | covered | `backend/app/modules/scan_docs/tests/test_stats.py`（stats）、`backend/app/modules/scan_docs/tests/test_stats.py`（scan）、`backend/app/modules/scan_docs/tests/test_stats.py`（docs） |
 
 **task-02**
 | acceptance 条目 | 归属测试文件 | 关键词命中（提示，命中≠判定） | 判定 | 证据 |
@@ -81,11 +81,11 @@ design 关键词逐个 grep（worktree 源码）：`stats(`→service.py:188 命
 **task-03**
 | acceptance 条目 | 归属测试文件 | 关键词命中（提示，命中≠判定） | 判定 | 证据 |
 |---|---|---|---|---|
-| 面板四子卡数值与 stats 响应一致；覆盖率综合百分比=(std_have+module_have)/(std_expected+module_expected) 取整 | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`<br>`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx` | stats、std_have（`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`、`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx`） | covered | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx:6`（stats）、`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx:54`（std_have） |
-| 陈旧卡点击开合内嵌清单，清单行为空数据显示「未知」 | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`<br>`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx` | 未知（`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`） | covered | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx:76`（未知） |
-| 双榜 tab 可切换；注入榜数据全零（total_30d=0）时空态文案出现且不报错 | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`<br>`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx` | 双榜、tab、total_30d（`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`、`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx`） | covered | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx:7`（双榜）、`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx:7`（tab）、`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx:99`（total_30d） |
+| 面板四子卡数值与 stats 响应一致；覆盖率综合百分比=(std_have+module_have)/(std_expected+module_expected) 取整 | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`<br>`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx` | stats、std_have（`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`、`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx`） | covered | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`（stats）、`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`（std_have） |
+| 陈旧卡点击开合内嵌清单，清单行为空数据显示「未知」 | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`<br>`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx` | 未知（`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`） | covered | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`（未知） |
+| 双榜 tab 可切换；注入榜数据全零（total_30d=0）时空态文案出现且不报错 | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`<br>`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx` | 双榜、tab、total_30d（`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`、`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx`） | covered | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`（双榜）、`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`（tab）、`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`（total_30d） |
 | isPending/isError/无文档三态占位同版位不白屏；面板加载失败不影响页面主列表 | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`<br>`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx` | — | covered | `scan-docs-stats-panel.test.tsx` 三态用例（isPending 占位/isError 红条/total=0 空态）+ 页面测试 renderPage 基建实证面板 mock 下主列表不受影响 |
-| page.tsx 挂载位置在 PageHeader 之下（jsdom 冒烟断言 panel testid 存在） | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`<br>`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx` | page、tsx（`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`、`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx`） | covered | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx:11`（page）、`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx:6`（tsx） |
+| page.tsx 挂载位置在 PageHeader 之下（jsdom 冒烟断言 panel testid 存在） | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`<br>`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx` | page、tsx（`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`、`frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx`） | covered | `frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`（page）、`frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx`（tsx） |
 
 **task-04**
 | acceptance 条目 | 归属测试文件 | 关键词命中（提示，命中≠判定） | 判定 | 证据 |
@@ -136,14 +136,14 @@ D-001@v1（健康度四指标+模块层基准）→ FR-02/FR-03 → task-01/task
 <!-- 文法注释：子行 = 端点行下一行、两空格缩进、以「↳ <消费端>:」前缀书写（消费端细分承接面，不计矩阵行账）；探索行 = 判定 uncovered 且证据列含 [探索] 标记（探索性验证不算覆盖）。 -->
 | 端点 | 判定 | 用例依据 ID | 结果 | 证据 |
 |---|---|---|---|---|
-| GET /scan-docs/stats | covered-service | design接口表#GET /scan-docs/stats | 200（路由序生效非 422；响应字段全断言） | backend/app/modules/scan_docs/tests/test_stats.py:384（httpx AsyncClient 端点 200+字段断言）+ backend/app/modules/scan_docs/tests/test_stats.py:1（口径复算用例族） |
+| GET /scan-docs/stats | covered-service | design接口表#GET /scan-docs/stats | 200（路由序生效非 422；响应字段全断言） | backend/app/modules/scan_docs/tests/test_stats.py（httpx AsyncClient 端点 200+字段断言）+ backend/app/modules/scan_docs/tests/test_stats.py（口径复算用例族） |
   ↳ 前端面板: `scan-docs-stats-panel.test.tsx` mock 契约对齐（getScanDocsStats 消费生成类型） |
 <!-- advisory 尾注（warning 计算归 validator，本段只留位）：有消费端未填子行的端点将列于此（advisory——消费端归类=design 清单启发式，数据面 facts.consumerHints）；写端点（POST/PUT/DELETE/PATCH）未在权限矩阵段声明的将列于此（advisory——补行或显式豁免「无权限约束」，数据面 facts.apiFace.writeEndpoints；表缺行会让派生框架继承你的洞） -->
 
 ## 测试结果 [层：确定性检查——CLI 实测对账]
 - worktree backend：`python -m pytest app/modules/scan_docs/ app/modules/knowledge/tests -q` → 193 passed, 0 failed（含 NEW test_stats.py 10 用例）
 - worktree frontend：`pnpm exec vitest run` 三文件 → 20 passed（页面 7+组件 7+树 6）；`pnpm exec tsc --noEmit` → 0 错；eslint 4 文件 → 0 警告
-- sillyspec worktree：`node --test test/docs-inject-telemetry.test.mjs` → 3/3；`node test/check-syntax.mjs` → exit 0；全量 `node test/run-tests.mjs` → 549 过/13 红——13 红全部为「子进程调 CLI」用例命中嵌套 worktree 路径守卫（src/index.js:338 旧守卫），对照实证：同套件主仓路径 390/0 绿、task-04 改动域与 13 失败域零交集——判环境性红非回归（移交项已登记复跑条件）
+- sillyspec worktree：`node --test test/docs-inject-telemetry.test.mjs` → 3/3；`node test/check-syntax.mjs` → exit 0；全量 `node test/run-tests.mjs` → 549 过/13 红——13 红全部为「子进程调 CLI」用例命中嵌套 worktree 路径守卫（src/index.js 旧守卫），对照实证：同套件主仓路径 390/0 绿、task-04 改动域与 13 失败域零交集——判环境性红非回归（移交项已登记复跑条件）
 
 ## 决策追踪矩阵（如存在 decisions.md；无则删本节） [层：人工判断]
 <!-- 机械半边预填（CLI，P0-1）：D→FR→task 链自 decisions.md × tasks/*.md frontmatter 结构化字段构建；
@@ -151,7 +151,7 @@ D-001@v1（健康度四指标+模块层基准）→ FR-02/FR-03 → task-01/task
 | 决策 ID | FR | Task | Evidence | 状态 |
 |---|---|---|---|---|
 | D-001@v1 | FR-01、FR-02、FR-03、FR-04、FR-05、FR-06、FR-07 | task-01、task-03、task-05 | test_stats.py 覆盖率两级/陈旧/密度/新鲜用例 + 面板四子卡渲染用例 + 模块卡口径注记 | 已闭环 |
-| D-002@v1 | FR-01、FR-02、FR-03、FR-04、FR-05、FR-06、FR-07 | task-01、task-02、task-03、task-05 | router.py:63 端点 + httpx 200 用例 + gen:types 产物（openapi/api-types）+ lib 三导出 | 已闭环 |
+| D-002@v1 | FR-01、FR-02、FR-03、FR-04、FR-05、FR-06、FR-07 | task-01、task-02、task-03、task-05 | router.py 端点 + httpx 200 用例 + gen:types 产物（openapi/api-types）+ lib 三导出 | 已闭环 |
 | D-003@v1 | FR-01、FR-02、FR-03、FR-04、FR-05、FR-06、FR-07 | task-01、task-03、task-04、task-05 | 02e40da5 埋点+3 用例 + test_stats injection 用例+知识 stats 不变断言 + 面板双榜 tab+空态用例 | 已闭环 |
 
 ## 技术债务 [层：人工判断]

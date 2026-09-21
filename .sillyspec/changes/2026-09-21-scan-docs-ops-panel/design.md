@@ -9,7 +9,7 @@ scale: large
 
 ## 背景
 
-知识库在 2026-09-20-knowledge-effect-panel 变更中落地了运营指标面板（`frontend/src/components/knowledge/ops-dashboard.tsx` + `GET /workspaces/{ws}/knowledge/stats`，backend/app/modules/knowledge/router.py:240），把「知识被用起来的效果」变成一屏可读的四指标 + 使用率榜。扫描文档页（`frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx`）目前只有文档树 + 内容区，296 篇文档的结构健康度（标准七件套齐不齐、模块文档有没有跟上登记、多少文档已经烂了 90 天没人动）完全不可见，要靠人翻树发现。用户要求：参考知识库运营指标，扫描文档也做一套类似展示。
+知识库在 2026-09-20-knowledge-effect-panel 变更中落地了运营指标面板（`frontend/src/components/knowledge/ops-dashboard.tsx` + `GET /workspaces/{ws}/knowledge/stats`，backend/app/modules/knowledge/router.py），把「知识被用起来的效果」变成一屏可读的四指标 + 使用率榜。扫描文档页（`frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx`）目前只有文档树 + 内容区，296 篇文档的结构健康度（标准七件套齐不齐、模块文档有没有跟上登记、多少文档已经烂了 90 天没人动）完全不可见，要靠人翻树发现。用户要求：参考知识库运营指标，扫描文档也做一套类似展示。
 
 关键差异：扫描文档**没有现成命中遥测**（知识库指标的分子来自 hits 表），健康度指标围绕「覆盖 / 陈旧 / 密度 / 新鲜度 / 最近更新」重新设计（D-001@v1）；注入使用频次经用户追问定案补入（D-003@v1）——CLI 埋点 docs-inject 行复用 knowledge-hits 通道（daemon 与平台 ingest 零改动）。健康度指标数据均已在 `scan_documents` 单表（path/doc_type/exists/last_modified_at + `_module-map.yaml` 行的 content）。
 
@@ -42,7 +42,7 @@ scale: large
 
 ### Wave 0 — CLI 注入遥测埋点（sillyspec 仓，D-003@v1）
 
-sillyspec CLI 已有知识注入遥测底座：`appendKnowledgeHit`（sillyspec/src/knowledge-hits.js）通用 append 任意 `{type, change, query, matchedFiles, at}` 行，`buildKnowledgeInjection` 是消费先例（sillyspec/src/run/prompt.js:410）。本 Wave 在**模块上下文注入点**（sillyspec/src/run/prompt.js 的 buildModuleContextInjection:168 一族；execute.js 的孪生注入是 knowledge-inject 型:23/:85，模块上下文若另有孪生实现则同步埋——执行时以 grep 实定位为准）追加同款遥测：每次模块上下文注入命中时 append 一行 `{type:'docs-inject', change, query, matchedFiles:[<注入的 docs 相对路径>], at}`（fail-soft：遥测写失败不影响注入本体）。daemon 上行链路（sillyhub-daemon/src/knowledge-hits-upload.ts）整 jsonl 原样转发——**零改动**；平台 HitsService.ingest 对白名单外 type 宽容落库（backend/app/modules/knowledge/hits.py:233「外型存原值」）——**零改动**，且 USAGE_TYPES 白名单（hits.py:59）不含 docs-inject，不污染知识库 stats 口径。
+sillyspec CLI 已有知识注入遥测底座：`appendKnowledgeHit`（sillyspec/src/knowledge-hits.js）通用 append 任意 `{type, change, query, matchedFiles, at}` 行，`buildKnowledgeInjection` 是消费先例（sillyspec/src/run/prompt.js）。本 Wave 在**模块上下文注入点**（sillyspec/src/run/prompt.js 的 buildModuleContextInjection:168 一族；execute.js 的孪生注入是 knowledge-inject 型:23/:85，模块上下文若另有孪生实现则同步埋——执行时以 grep 实定位为准）追加同款遥测：每次模块上下文注入命中时 append 一行 `{type:'docs-inject', change, query, matchedFiles:[<注入的 docs 相对路径>], at}`（fail-soft：遥测写失败不影响注入本体）。daemon 上行链路（sillyhub-daemon/src/knowledge-hits-upload.ts）整 jsonl 原样转发——**零改动**；平台 HitsService.ingest 对白名单外 type 宽容落库（backend/app/modules/knowledge/hits.py「外型存原值」）——**零改动**，且 USAGE_TYPES 白名单（hits.py）不含 docs-inject，不污染知识库 stats 口径。
 
 ### Wave 1 — 后端 stats 端点
 
@@ -58,14 +58,14 @@ sillyspec CLI 已有知识注入遥测底座：`appendKnowledgeHit`（sillyspec/
 - 榜：last_modified_at 非空的 exists 行降序 Top 10。
 - **注入频次（D-003@v1）**：读 `knowledge_hits` 表 `type='docs-inject'` 行（跨模块只读引用 backend/app/modules/knowledge/model.py 的 KnowledgeHit，对齐 spec_workspace 引 ScanDocument 的先例），近 30 天窗口：total_30d=行数、docs_hit_30d=matched_anchors 去重路径数、board=按路径聚合计数降序 Top 10。路径归一：遥测 matchedFiles 记 docs 树相对路径（如 `docs/SillyHub/modules/core.md`），与 scan_documents.path 对齐时统一剥 `.sillyspec`/`docs` 前导段（同前端 stripPathPrefix 口径）后比对。
 
-`backend/app/modules/scan_docs/router.py` 新增 `GET /scan-docs/stats`（`SCAN_DOCS_READ`）。**路由注册序铁律**：字面量 `/scan-docs/stats` 必须声明在 `/scan-docs/{doc_id}` 通配之前（FastAPI 按声明序匹配；knowledge stats 同款坑，router.py:215 注释先例）。
+`backend/app/modules/scan_docs/router.py` 新增 `GET /scan-docs/stats`（`SCAN_DOCS_READ`）。**路由注册序铁律**：字面量 `/scan-docs/stats` 必须声明在 `/scan-docs/{doc_id}` 通配之前（FastAPI 按声明序匹配；knowledge stats 同款坑，router.py 注释先例）。
 
 ### Wave 2 — 前端面板
 
 - `pnpm gen:types` 同步 `frontend/src/lib/api-types.ts` + `backend/openapi.json`（同变更提交，CLAUDE.md 规则 21）。
 - `frontend/src/lib/scan-docs.ts` 新增 `getScanDocsStats(workspaceId)` + 查询键导出。
 - 新组件 `frontend/src/components/scan-docs-stats-panel.tsx`：复刻 OpsDashboard 布局（`lg:grid lg:grid-cols-3`，指标大卡 `lg:col-span-2` 内四子卡 `sm:grid-cols-2`）；覆盖率卡带 svg polyline 趋势（`stroke=currentColor` 随主题）；陈旧卡 button 开合内嵌清单；密度卡口径 tooltip（原生 title）；**右侧榜单双 tab**——「🔥 注入频次」（默认；路径+近 30 天次数，头部小结「近 30 天 N 次 · M 篇」）/「🕘 最近更新」（路径+相对时间）；注入频次无数据（旧 CLI 未升级）时空态「暂无注入数据（CLI 升级后自动汇聚）」并自动落到最近更新 tab 的可用态。
-- `frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx`：PageHeader 之下挂载 `<ScanDocsStatsPanel workspaceId={...} />`（错误条之上，同知识库 page.tsx:462 位置语义）。
+- `frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx`：PageHeader 之下挂载 `<ScanDocsStatsPanel workspaceId={...} />`（错误条之上，同知识库 page.tsx 位置语义）。
 
 ### Wave 3 — 测试与文档
 
@@ -98,7 +98,7 @@ sillyspec CLI 已有知识注入遥测底座：`appendKnowledgeHit`（sillyspec/
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
 | 修改 | src/run/prompt.js | 模块上下文注入命中处（buildModuleContextInjection:168 一族）append docs-inject 遥测行（复用 appendKnowledgeHit:31，fail-soft）。数据流：producer=CLI 注入引擎（matchedFiles=注入 docs 相对路径）→ .runtime/knowledge-hits.jsonl → daemon 整文件上行 → consumer=平台 knowledge_hits 表（宽容落库） |
-| 修改 | src/stages/execute.js | 注入孪生处同款埋点（execute.js:23/:35/:85 现为 knowledge-inject 型孪生；模块上下文若有本地孪生实现则同步改——执行时 grep 实定位，格式漂移由既有 test/knowledge-inject.test.mjs 等价断言锁定） |
+| 修改 | src/stages/execute.js | 注入孪生处同款埋点（execute.js/:35/:85 现为 knowledge-inject 型孪生；模块上下文若有本地孪生实现则同步改——执行时 grep 实定位，格式漂移由既有 test/knowledge-inject.test.mjs 等价断言锁定） |
 | 新增 | NEW:test/docs-inject-telemetry.test.mjs | docs-inject 埋点用例（命中落行/未命不落/写失败不影响注入） |
 
 ## 接口定义
@@ -194,7 +194,7 @@ export function ScanDocsStatsPanel({ workspaceId, className }: { workspaceId: st
 | R-04 | gen:types 环节 node_modules 半坏报假类型错 | P2 | CLAUDE.md 规则 21 流程：先 `pnpm exec tsc --version` 验健康再生成 |
 | R-05 | 大工作区（数千文档）stats 内存聚合变慢 | P2 | 当前量级 296 行；load_only 已排除 content；超千行再演进 SQL 聚合（非本变更） |
 | R-06 | 跨仓交付节奏：sillyspec CLI 未升级的环境永远无 docs-inject 行 → 注入频次恒空态 | P1 | 前端空态文案明示「CLI 升级后自动汇聚」；榜单双 tab 保底切最近更新；不报错不阻塞 |
-| R-07 | docs-inject 行与知识 inject 行共用 jsonl/表，误入知识统计口径 | P1 | USAGE_TYPES 白名单（hits.py:59）不含 docs-inject，知识 stats 天然排除；test_stats 断言知识 stats 不变（防回归） |
+| R-07 | docs-inject 行与知识 inject 行共用 jsonl/表，误入知识统计口径 | P1 | USAGE_TYPES 白名单（hits.py）不含 docs-inject，知识 stats 天然排除；test_stats 断言知识 stats 不变（防回归） |
 | R-08 | CLI 注入点孪生实现（prompt.js / execute.js）改一处漏一处 | P2 | 格式等价单测锁定（既有 test/knowledge-inject.test.mjs 先例）+ 新增 docs-inject 用例双点覆盖 |
 
 ## 决策追踪
