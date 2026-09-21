@@ -17,3 +17,5 @@ created_at: 2026-09-18 14:35:00
 - [x] task-11: /admin/menus 管理页（对照原型：分组表格/行内改名/上移下移/隐藏开关/权限+持有角色展开/role:read 降级）(depends_on: task-07, task-08, task-09)
 - [x] task-12: 前端测试（merge 纯函数单测 + 管理页交互测试 + permission.test 与 menu-permissions.test 断言同步）(depends_on: task-10, task-11)
 - [x] task-13: 文档与部署说明（模块文档 auth/admin/frontend_lib 增量 + 权限缓存 TTL 部署注记）(depends_on: task-12)
+- [x] ql-20260920-001-cfcc 09-18-web-menu-management
+- [x] ql-20260920-002-9be6 09-18-web-menu-management

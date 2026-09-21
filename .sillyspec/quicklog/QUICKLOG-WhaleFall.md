@@ -458,6 +458,26 @@
 方案：贴底钳制（距底<=120px 取末行）+ 跳转定位期 700ms active 联动抑制窗口；补 2 用例 + 修 llm-providers mock 存量债
 结果：新增 2 用例全绿；相关套件 48/49（余 1 为并行会话在途债 stash 实证无关）；tsc 0 错；eslint 4 warning 全存量；实机三场景全通
 
+## ql-20260920-001-cfcc | 2026-09-20 15:01:09 | /admin/menus 展开权限子表三列居中显示并显示网格线。根因：PermissionDetail 原生 table 为 text-left 且仅横向 bo…
+状态：已完成
+关联变更：2026-09-18-web-menu-management
+文件：
+- frontend/src/app/(dashboard)/admin/menus/page.tsx（PermissionDetail 子表居中+网格线）
+需求：/admin/menus 展开权限子表三列居中显示并显示网格线。
+根因：PermissionDetail 原生 table 为 text-left 且仅横向 border-b 分隔，无纵向网格线。
+方案：table 级改 text-center + 外框 border，th/td 逐格 border（border-collapse 默认）成完整网格，角色 chips 容器加 justify-center。
+结果：tsc 0、页面测试 8/8 绿，已提交并重建前端镜像上线 Docker。
+
+## ql-20260920-002-9be6 | 2026-09-20 15:15:38 | 菜单管理页展开权限子表样式与母表统一。根因：子表是手写 Tailwind 原生 table（ql-001 手写居中+网格线）…
+状态：已完成
+关联变更：2026-09-18-web-menu-management
+文件：
+- frontend/src/app/(dashboard)/admin/menus/page.tsx（PermissionDetail 子表 antd Table 化）
+需求：菜单管理页展开权限子表样式与母表统一。
+根因：子表是手写 Tailwind 原生 table（ql-001 手写居中+网格线），与母表 antd Table（ConfigProvider token 控色）属两套视觉体系，深浅主题下手写边框色不随主题。
+方案：子表整体替换为 antd Table（size=small + bordered + 三列 align=center），角色列降级/加载/空态/chips 渲染原样迁入 column render。
+结果：tsc 0、页面测试 8/8 绿，已提交并重建前端镜像上线。
+
 ## ql-20260920-007-c04d | 2026-09-20 19:24:19 | 工作区卡片与详情页「客户端路径」显示的是创建者的全局 workspaces.root_path，任何账号都能看到别人的本机路径…
 状态：已完成
 关联变更：2026-09-20-workspace-member-visibility

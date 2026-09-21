@@ -1,0 +1,45 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-13fa309a",
+  "totals": {
+    "files": 1,
+    "additions": 776,
+    "deletions": 0
+  },
+  "rows": [
+    {
+      "path": "frontend/src/app/(dashboard)/admin/menus/page.tsx",
+      "declared": true,
+      "additions": 776,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 0,
+    "codeFileCount": 0,
+    "testFileCount": 0,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": true,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260920-002-9be6",
+  "sessionId": "quick-13fa309a",
+  "savedAt": "2026-09-20T07:18:05.049Z"
+}
