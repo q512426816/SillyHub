@@ -1,13 +1,3 @@
----
-author: sillyspec-fr-index
-created_at: 2026-09-19T15:24:52.781Z
----
-
-# FR 索引 — host-fs-handler
-
-> fr-index 从归档变更 requirements.md 幂等提炼（「最近确认」= 归档时 HEAD）。条目字段行为机械解析契约，勿手改。
-> superseded 条目保留供取代链回溯；brainstorm 注入默认只给 active。
-
 ## FR-host-fs-handler-001 会话样式回放主体
 变更：2026-09-19-tool-report-session-replay
 状态：superseded
@@ -15,18 +5,30 @@ superseded_by：FR-host-fs-handler-005
 取代链：FR-host-fs-handler-001 ← FR-host-fs-handler-005（2026-09-20-agent-log-session-replay 承接）
 退役理由：主体由日志元数据卡列表改为会话时间线直适配并纳入 token 与系统事件语义
 摘要：纯 tool_report 会话打开；主/子日志结构；轮次切分；分页
+全文：.sillyspec/changes/archive/2026-09-19-tool-report-session-replay/requirements.md#FR-01
 最近确认：3e703c193
 
 ## FR-host-fs-handler-002 跨 harness 归一化与解析器矩阵
 变更：2026-09-19-tool-report-session-replay
 状态：active
 摘要：伪用户消息归一；claude-code 对话化；cursor-agent 对话化（上报落地后生效）；cursor IDE 二进制
+场景正文：
+- 场景：伪用户消息归一 — Given user 角色消息为系统注入（zcode task-notification/system-reminder、claude-code；When 解析与渲染；Then 归一为 system_event（中性行）或工具段；仅真人输入渲染用户气泡
+- 场景：claude-code 对话化 — Given format=claude-code-jsonl 的日志条目；When 读取 messages；Then status=parsed 且产出对话化消息（含 thinking/text/tool_use/tool_result 配对与
+- 场景：cursor-agent 对话化（上报落地后生效） — Given format=cursor-agent-transcript-jsonl 的日志条目；When 读取 messages；Then status=parsed，按 turn_ended 切轮，token 字段缺省（显示「未知」）
+- 场景：cursor IDE 二进制 — Given format 含 sqlite（cursor IDE store.db）；When 用户尝试查看；Then 显式中文说明（不支持对话化、仅元数据），不再是无解释的 409 死胡同
+全文：.sillyspec/changes/archive/2026-09-19-tool-report-session-replay/requirements.md#FR-02
 最近确认：53c67e02a
 
 ## FR-host-fs-handler-003 token 链路四层打通
 变更：2026-09-19-tool-report-session-replay
 状态：active
 摘要：zcode/claude-code token 展示；无 token 数据源；老 daemon 兼容
+场景正文：
+- 场景：zcode/claude-code token 展示 — Given 日志含 usage（zcode response.usage / claude-code message.usage）；When 回放渲染；Then 每轮显示 inputTokens/outputTokens（ctx=该轮末次 inputTokens），会话显示累计
+- 场景：无 token 数据源 — Given 数据源不落盘 token（cursor-agent）或 sqlite 库缺 usage（R-01 核对结果为缺）；When 回放渲染；Then token 显示「未知」，不显示 0、不伪造
+- 场景：老 daemon 兼容 — Given daemon 为旧版本（messages 不含新字段 / 422 无方法）；When 前端读取；Then 字段缺省走「未知」/既有回落（黄条+原文），不报错
+全文：.sillyspec/changes/archive/2026-09-19-tool-report-session-replay/requirements.md#FR-03
 最近确认：53c67e02a
 
 ## FR-host-fs-handler-004 不可用态显式化
@@ -36,6 +38,7 @@ superseded_by：FR-host-fs-handler-008
 取代链：FR-host-fs-handler-004 ← FR-host-fs-handler-008（2026-09-20-agent-log-session-replay 承接）
 退役理由：回落收口到回放主体内逐条目独立处理并补离线元数据态
 摘要：机器离线；格式不支持 / 文件缺失
+全文：.sillyspec/changes/archive/2026-09-19-tool-report-session-replay/requirements.md#FR-04
 最近确认：3e703c193
 
 ## FR-host-fs-handler-005 回放主体按会话样式渲染（TurnTimeline 直适配）
@@ -82,3 +85,53 @@ superseded_by：FR-host-fs-handler-008
 - 场景：机器离线 — Given 上报机器 daemon 不在线；When 打开回放；Then 主体显示离线提示 + 可复制元数据（harness/短码/路径），不白屏不假加载
 全文：.sillyspec/changes/archive/2026-09-20-agent-log-session-replay/requirements.md#FR-04
 最近确认：3e703c193
+
+## FR-host-fs-handler-009 zcode 日志对话化渲染
+变更：2026-08-23-agent-log-conversation-view
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-004@v1、D-005@v1、D-006@v1
+场景正文：
+- 场景：默认场景 — Given 本地 Agent 会话下一条 `format=zcode-model-io-jsonl` 的日志条目 日志内容含 role=system 消息、request.；When 用户点击「查看内容 ▾」 解析产出消息段；Then 面板以对话流渲染：user_input 用户气泡、reply 走 Markdown、thinking 折叠块、 以上内容一律不进入 NormalizedLogM
+全文：.sillyspec/changes/archive/2026-08-23-agent-log-conversation-view/requirements.md#FR-01
+最近确认：f7f73d86c
+
+## FR-host-fs-handler-010 daemon 本地解析与 KB 级传输
+变更：2026-08-23-agent-log-conversation-view
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-004@v1、D-006@v1
+场景正文：
+- 场景：默认场景 — Given zcode 日志文件存在于 daemon 宿主机且在 allowed_roots 白名单内；When backend 经 ws rpc 调 `host_fs.read_agent_log_messages {path, format}`；Then daemon 本地全量读文件（预算 20MB 上限）、按绝对 offset 对齐合并
+全文：.sillyspec/changes/archive/2026-08-23-agent-log-conversation-view/requirements.md#FR-02
+最近确认：f7f73d86c
+
+## FR-host-fs-handler-011 失败回落与兼容
+变更：2026-08-23-agent-log-conversation-view
+状态：active
+摘要：默认场景
+依据决策：D-003@v1、D-006@v1
+场景正文：
+- 场景：默认场景 — Given 任一情形：format 无解析器（unsupported）/ 解析失败（parse_error）/ 文件超；When 前端请求 messages 端点；Then 一律静默回落现有原文 `<pre>` 查看或沿用既有错误文案，不弹错误框；
+全文：.sillyspec/changes/archive/2026-08-23-agent-log-conversation-view/requirements.md#FR-03
+最近确认：f7f73d86c
+
+## FR-host-fs-handler-012 二进制格式维持拦截
+变更：2026-08-23-agent-log-conversation-view
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given format 含 sqlite/zstd 的日志条目；When 请求 messages 端点；Then 维持既有 409「二进制暂不支持」语义（复用共享 helper 黑名单）
+全文：.sillyspec/changes/archive/2026-08-23-agent-log-conversation-view/requirements.md#FR-04
+最近确认：f7f73d86c
+
+## FR-host-fs-handler-013 段窗口与加载更早
+变更：2026-08-23-agent-log-conversation-view
+状态：active
+摘要：默认场景
+依据决策：D-005@v1
+场景正文：
+- 场景：默认场景 — Given 会话段数超过 200；When 请求 messages 端点 用户点「加载更早」带 before_seq 再请求；Then 返回最近 200 段 + truncated=true + total_segments； daemon 无状态重解析按 seq 切片返回更早窗口（seq 不连
+全文：.sillyspec/changes/archive/2026-08-23-agent-log-conversation-view/requirements.md#FR-05
+最近确认：f7f73d86c
