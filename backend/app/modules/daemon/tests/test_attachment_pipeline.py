@@ -161,6 +161,28 @@ class TestGateAndAssembleCore:
                 _FakeDB([]), user_id=uid, session_llm_provider_id=basis, agent_kind="codex"
             )
 
+    async def test_resolve_multimodal_gate_ands_engine_block_channel(self) -> None:
+        """ql-20260921-005：gate 返回值与 caps.multimodal（块通道）相与。
+
+        回归面：cursor 附件开放后，若用户默认供应商行判 supports=true（或 BYO
+        基准命中多模态行），图片/PDF 不得走 block——cursor driver 无块通道会
+        静默丢图，必须强制降级 deliver=disk。真 caps 表驱动，不 patch。
+        """
+        import app.modules.session_attachment.capability as capability_module
+
+        async def _always_supports(db, *, user_id, session_llm_provider_id, agent_kind):
+            return SimpleNamespace(supports_multimodal=True)
+
+        uid = uuid.uuid4()
+        with patch.object(capability_module, "resolve_session_gate", _always_supports):
+            # 块通道引擎（claude）不受相与影响；无块通道引擎（cursor）强制 False。
+            assert await attachment_pipeline.resolve_multimodal_gate(
+                _FakeDB([]), user_id=uid, session_llm_provider_id=None, agent_kind="claude"
+            )
+            assert not await attachment_pipeline.resolve_multimodal_gate(
+                _FakeDB([]), user_id=uid, session_llm_provider_id=None, agent_kind="cursor"
+            )
+
     async def test_assemble_attachments_builds_storage_and_passes_flag(self) -> None:
         """组装核心：行 + supports_multimodal 透传，storage 由工厂后端构造。"""
         import app.modules.session_attachment.service as att_service
@@ -215,11 +237,11 @@ class TestSessionWrapperEquivalence:
         assert exc_info.value.details == {"image_count": 6, "file_count": 0}
 
     async def test_inject_validation_engine_gate_422(self) -> None:
-        """session inject：非多模态引擎 → DaemonSessionAttachmentsUnsupported（422）。"""
+        """session inject：附件链路未开通引擎 → DaemonSessionAttachmentsUnsupported（422）。"""
         import app.modules.daemon.session.service.attachments as att_module
 
         svc = SimpleNamespace(_session=_FakeDB([]))
-        with patch.object(att_module, "get_provider_caps", lambda p: {"multimodal": False}):
+        with patch.object(att_module, "get_provider_caps", lambda p: {"attachments": False}):
             with pytest.raises(DaemonSessionAttachmentsUnsupported) as exc_info:
                 await _validate_inject_attachment_rows(
                     svc,

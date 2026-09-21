@@ -1,0 +1,965 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.md b/.sillyspec/docs/SillyHub/modules/daemon.md
+index deaa46132..e2b3e2746 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.md
+@@ -52,7 +52,7 @@ backend 与 daemon 经 WebSocket + REST 双向通信，支持三种执行形态
+ - **CLI**（cli.ts，commander）：start/stop/status/logs 四子命令；PID/日志文件在 `~/.sillyhub/daemon/`；start 必带 `--server`（不带会静默连 8000 兜底）；信号 handler 在 Daemon 内部注册，CLI 层不重复（防双重 stop）。status 运行中但运行锁反查失败时五个规范字段照旧（task-22 逐字断言）后追加中文提示行揭示回退 DEFAULT 档案（ql-20260906-001——生产实证未注册 daemon 显示 localhost 旧档案掩盖机器未上线）。
+ - **Daemon 类**（daemon.ts）：detectAgents → register → 三循环（lease 领取含 `_leasePollSkippable` 节流 / WS 心跳 / 会话控制）；无 agent 不注册时 `no_agents_detected` warn 级 + 中文修复提示（ql-20260906-001——launchd 默认 PATH 无 Homebrew CLI 目录致探测为空、机器 0 注册跑整天无人察觉，info 级静默一行用户无感）；停机 `_suspendSessionsOnStop` 在 `_registeredRuntimes` 为空（本进程从未注册成功）时跳过 suspend-batch（backend 无实例行必 404，2026-09-05 生产实证；遗留 active 会话由 600s offline sweep 兜底，A5 fallback 语义不变）；心跳回包 `_syncAllowedRoots`（JSON 相同短路防风暴）+ policy cache 同步；borrow workspace 管理器；turn result/message 回调（ql-20260909-011 起 message 上报走微批——per leaseId:runId 队列 20ms 窗攒批一次提交[单 drain 协程保序，flatSeq 入队前取号]，`SILLYHUB_INTERACTIVE_BATCH_MS=0` 旁路回逐条直发[vt 全局 0，既有断言语义不变]；onTurnResult/onSessionEnd 开头 `flushInteractiveBatches` 强制冲队保证 message 先于 result 落库，取代原 async 逐条串行）；session end 上报；recover/confirmReconnected；interactive create 抛错主动回传 notifyRunResult failed（P2b/daemon H4，2026-08-24 会话审查——interactive lease 恒 NULL 过期时间，不回传则 run 永久 pending）；认领段 cwd 守卫（2026-08-28-fix-cross-machine-worker-dispatch FR-05/D-004@v1——workspace 绑定会话 rootPath 非空字符串且非借用 marker 时经 `interactive-cwd-guard.ts` checkWorkspaceBoundCwd 白名单终检先行+stat 存在性，任一拒绝 notifyRunResult(error_during_execution, 中文 result_summary) 后 return **不 mkdir**（gap-8 无差别 mkdir 已收敛：仅空 rootPath 兜底路径保留，防错机派发静默建空目录跑偏；cwd 解析改 truthy 判定，`??` 不兜空串））。
+ - **autostart/**（跨平台自启策略，index.ts 按平台分派 macos/linux/windows）：macOS launchd plist 固化注册时 `process.env.PATH` 进 `EnvironmentVariables`（ql-20260906-001——launchd 默认 PATH 仅 /usr/bin:/bin:/usr/sbin:/sbin，Homebrew CLI 目录不在内 → daemon 探测不到 AI CLI 按「无 agent 不注册」语义机器永不上线，2026-09-05 生产实证 Mac-mini-3 注册 0 次；空 PATH 省略键退回旧行为）；Linux systemd 用户单元对称 `Environment=PATH=` 同缺陷修复；Windows 计划任务继承完整用户环境无此问题。
+-- **interactive/**：三驱动（2026-09-04-provider-pi-onboarding 增 pi）——pi-rpc-driver（`pi --mode rpc` 长驻 JSON-RPC：严格 LF 分帧禁 readline/get_state 握手合成 session_started/inject prompt-steer-follow_up 三模式+按 pi 错误文案降级/agent_settled 四级收敛/extension_ui_request 自动回 cancelled/ui resume 用 `--session` 旗标[非 --session-id]/crash 会话级 fail）+ pi-events 归一化（rpc 事件→AgentEvent v2，实证 pi 无顶层 error 事件——失败经 turn_end stopReason 浮出；usage cacheRead/cacheWrite→cache_read/cache_creation；2026-09-07-pi-task-events 增实例级 turnTask 状态机派生 status/agent_task_status——一轮一任务 task_id=pi-t<seq>（turn_start→running）、工具调用刷新 last_tool/tool_uses、turn_end stopReason error→failed 其余→completed（D-001/D-002@v1），status 事件先行、零侵入复用上报链路，pi 会话任务执行面板由此有数据）；providers.ts INTERACTIVE_PROVIDERS 注册表（family 复用 adapters 6 协议联合）+ProviderCaps 单源（三端镜像+源文件读取守护；steering 第 14 键——2026-09-18-single-chat-steering：运行中会话追加消息转向通道，pi/claude/codex=true、cursor 与未知 provider=false）；pi caps：resume/multimodal/thinking/model_select=true，mcp/edit_patch/permission_dialog/subagent=false（subagent vendored 示例扩展实证聚合型无归属）；vendored pi 扩展在 vendor/pi-extensions/（bundle 随发，SILLYHUB_PI_SUBAGENT_EXTENSION 可关）。claude-sdk-driver + codex-app-server-driver 双驱动（codex 多轮 consume 只订阅 input 队列一次——迭代器循环外创建，循环内 next()；InputQueue 单订阅，每轮重订阅第二轮必抛 SessionQueueDoubleSubscribeError，2026-08-24 会话审查 P2a 修复；codex 子进程非正常退出除 turn 级收敛外同时触发 onError 会话级 fail（P2b/daemon H2——只 turn 级收敛时会话 active 无消费者，后续 inject 永久挂起））；codex 驱动 2026-09-18-single-chat-steering 起 consume 改两层输入模型 + turn/steer 忙轮注入（currentTurnId 活跃直发，被拒/超时/未就绪回落 heldTurns 轮边界消费，见文末增量节）；session-manager（allowed_roots 写白名单 write-guard——显式写 + Bash 间接写重定向/cp/mv/tee 等都限根内、markPendingSwitch 热切换、reload 孤儿 consume 守卫 isAuthoritative）；input-queue（单订阅，reload 前 resetForResubscribe 保 pending inject）；permission-resolver；会话 jsonl 持久化（create 配供应商→写 daemon 隔离目录、未配→写宿主机 ~/.claude；resume/reload 经 claude-transcript-dir 探测实际位置设 CLAUDE_CONFIG_DIR，ql-20260822-009；SESSION_SWITCH_CONFIG 的 providerConfig 显式 null=切回本机——daemon.ts 路由不归一缺席为 null + reloadWithConfig !== undefined 判定（原双层 ?? 塌缩致切回本机仍跑旧供应商），切回本机时 jsonl 经 migrateClaudeTranscriptToHost 反向迁回宿主机，ql-20260824-018）；SESSION_RESUME 路由接收 backend 随带的 provider_config（snake/camel 双读、null 归一缺省）写 record.providerConfig 供 restoreAndReconnect 重建供应商 env——缺该透传时 reopen 恢复的 SDK 子进程无任何凭证（隔离 CLAUDE_CONFIG_DIR 无本机 OAuth 兜底）"Not logged in" 秒退、会话秒回 ended（ql-20260827-014）。
++- **interactive/**：三驱动（2026-09-04-provider-pi-onboarding 增 pi）——pi-rpc-driver（`pi --mode rpc` 长驻 JSON-RPC：严格 LF 分帧禁 readline/get_state 握手合成 session_started/inject prompt-steer-follow_up 三模式+按 pi 错误文案降级/agent_settled 四级收敛/extension_ui_request 自动回 cancelled/ui resume 用 `--session` 旗标[非 --session-id]/crash 会话级 fail）+ pi-events 归一化（rpc 事件→AgentEvent v2，实证 pi 无顶层 error 事件——失败经 turn_end stopReason 浮出；usage cacheRead/cacheWrite→cache_read/cache_creation；2026-09-07-pi-task-events 增实例级 turnTask 状态机派生 status/agent_task_status——一轮一任务 task_id=pi-t<seq>（turn_start→running）、工具调用刷新 last_tool/tool_uses、turn_end stopReason error→failed 其余→completed（D-001/D-002@v1），status 事件先行、零侵入复用上报链路，pi 会话任务执行面板由此有数据）；providers.ts INTERACTIVE_PROVIDERS 注册表（family 复用 adapters 6 协议联合）+ProviderCaps 单源（三端镜像+源文件读取守护；steering 第 14 键——2026-09-18-single-chat-steering：运行中会话追加消息转向通道，pi/claude/codex=true、cursor 与未知 provider=false；attachments 第 15 键——ql-20260921-005：会话附件链路开通（deliver=disk 落盘+路径清单也算），claude/pi/cursor=true、codex=false，multimodal 键语义自此收窄为多模态块通道（详见文末增量节））；pi caps：resume/multimodal/thinking/model_select=true，mcp/edit_patch/permission_dialog/subagent=false（subagent vendored 示例扩展实证聚合型无归属）；vendored pi 扩展在 vendor/pi-extensions/（bundle 随发，SILLYHUB_PI_SUBAGENT_EXTENSION 可关）。claude-sdk-driver + codex-app-server-driver 双驱动（codex 多轮 consume 只订阅 input 队列一次——迭代器循环外创建，循环内 next()；InputQueue 单订阅，每轮重订阅第二轮必抛 SessionQueueDoubleSubscribeError，2026-08-24 会话审查 P2a 修复；codex 子进程非正常退出除 turn 级收敛外同时触发 onError 会话级 fail（P2b/daemon H2——只 turn 级收敛时会话 active 无消费者，后续 inject 永久挂起））；codex 驱动 2026-09-18-single-chat-steering 起 consume 改两层输入模型 + turn/steer 忙轮注入（currentTurnId 活跃直发，被拒/超时/未就绪回落 heldTurns 轮边界消费，见文末增量节）；session-manager（allowed_roots 写白名单 write-guard——显式写 + Bash 间接写重定向/cp/mv/tee 等都限根内、markPendingSwitch 热切换、reload 孤儿 consume 守卫 isAuthoritative）；input-queue（单订阅，reload 前 resetForResubscribe 保 pending inject）；permission-resolver；会话 jsonl 持久化（create 配供应商→写 daemon 隔离目录、未配→写宿主机 ~/.claude；resume/reload 经 claude-transcript-dir 探测实际位置设 CLAUDE_CONFIG_DIR，ql-20260822-009；SESSION_SWITCH_CONFIG 的 providerConfig 显式 null=切回本机——daemon.ts 路由不归一缺席为 null + reloadWithConfig !== undefined 判定（原双层 ?? 塌缩致切回本机仍跑旧供应商），切回本机时 jsonl 经 migrateClaudeTranscriptToHost 反向迁回宿主机，ql-20260824-018）；SESSION_RESUME 路由接收 backend 随带的 provider_config（snake/camel 双读、null 归一缺省）写 record.providerConfig 供 restoreAndReconnect 重建供应商 env——缺该透传时 reopen 恢复的 SDK 子进程无任何凭证（隔离 CLAUDE_CONFIG_DIR 无本机 OAuth 兜底）"Not logged in" 秒退、会话秒回 ended（ql-20260827-014）。
+ - **adapters/**：json-rpc / stream-json / ndjson / pi-json / text 多协议输出适配。
+ - **policy/**：filesystem-policy / runtime-policy（PolicyCache realpath 归一统一口径）/ audit-sink / path-utils（盘符根/Unix 根边界敏感前缀比较，root 已含尾 sep 勿再补）。
+ - **resilience/**：ResilienceService——submitWithRetry 流式消息退避重试（上限约 8s）用尽入 FileOutbox；retryTerminal 终态轻量重试；心跳健康信号触发 drainOutbox 补发（补发前校验 lease 有效/session 未终态，遇 422 claim_token 失效丢弃）。
+@@ -215,3 +215,11 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容
+ - 竞态：旧序 steered 分支「`_inject_mid_turn_into_run` 内部 commit（连带释放会话行锁）→ 回 `dispatch_queued_message_now` 才删行」之间存在无锁窗口——并发 dispatch_now（双击 ⚡）复锁后复取仍见 pending 行 → 同条消息 mid-turn 双注入双留痕；注入 commit 后进程崩溃窗口内条目残留，run 终态接力派发还会二次发送。修复：删行改**注入前同事务预删**——注入内部 commit 把删除与 user_input 留痕原子落库（任一观察时刻：要么行在，要么消息已注入）；注入 commit 前失败（DaemonRuntimeOffline/附件校验）其内部 rollback 连带复活条目，失败语义与旧序逐字一致（R-03 置顶已单独持久化）。commit 后链路（Redis publish/enqueue_and_push/页面前导）均 best-effort 不抛，无「已删未投」可达路径。
+ - F3 守卫：复锁复取只判 None 的缺口补上——行存在但已非 pending（接力派发失败化/并发消费中）按已派发收口返 "dispatched"，不再把 failed 条目注入一遍或白杀活跃轮（interrupt 后接力侧只取 pending，failed 条目不会被派发）。
+ - 测试：queue_actions 37（+3：注入时刻同事务已删不变式[旧码红]/离线 rollback 复活/复取 failed 收口[旧码红]）；daemon 模块全量 2361 passed，ruff/format/mypy 0。
++
++## 增量（ql-20260921-005：cursor 会话开放附件——caps 第 15 键 attachments，disk-only）
++
++- 背景：cursor CLI 无多模态块通道（multimodal=false），但 daemon 附件落盘链路（deliver=disk：MinIO 下载 → `cwd/attachments/{sha256}.{ext}` + prompt 路径清单，turn-control 引擎中立）本就可行——附件门控此前却查 multimodal 键把 cursor 整链 422 拒掉。用户指出「直接给文件路径」即此链路。
++- caps：ProviderCaps 增 **attachments 第 15 键**（会话附件链路开通，deliver=disk 落盘+路径清单也算）——claude/pi/cursor=true、codex=false（D-6 沿袭，留后续按需开通）；multimodal 键语义收窄为多模态块通道。单源 → gen-provider-caps.mjs 三端生成刷新，alignment 守护测试 15 键。
++- backend：①inject/create 附件引擎门控改查 attachments 键（attachments.py 两处），错误文案改中性「此引擎不支持会话附件（文件与图片收件通道未开通）」（原「仅 Claude」已失实）；②`attachment_pipeline.resolve_multimodal_gate` 返回值与 caps multimodal 相与——cursor 图片/PDF 强制降级落盘（防用户默认供应商行误判 supports=true 走 block 被 driver 静默丢图），三条链路（session inject / create / group shadow 成员）一处收口；③knowledge distill 洞一预检同改 attachments 键（cursor 蒸馏源附件下发随之放行）。
++- frontend：附件入口 4 处门控改查 attachments 键（session-panel-page ×2 / session-panel-dialog ×2）——cursor 会话附件按钮解除禁用；派团队仍置灰（subagent=false 不变）。
++- 测试：backend 60+11 passed（alignment / provider_caps 门控真值表含 cursor 放行与 multimodal 块通道对照 / attachment_pipeline gate 相与 / create_attachments 集成 / distill 门控面）；frontend 49 passed（caps 表值含 attachments 两态 + cursor 附件可用而团队置灰）；daemon provider-registry/adapter-registry 14 passed（契约键列表 15 键）。
+diff --git a/backend/app/modules/agent/provider_caps.py b/backend/app/modules/agent/provider_caps.py
+index b2c601618..b57f62f4f 100644
+--- a/backend/app/modules/agent/provider_caps.py
++++ b/backend/app/modules/agent/provider_caps.py
+@@ -11,7 +11,7 @@ task-04 起手抄镜像退役）：
+   ``PROVIDER_CAPS``（含取值依据的文件:行号锚点注释，改值先改那里）；
+ - 本文件与 ``frontend/src/lib/provider-caps.ts`` 均为脚本生成产物，daemon
+   单源改值后重跑 ``sillyhub-daemon/scripts/gen-provider-caps.mjs`` 三端一并
+-  刷新，三端键集合（14 键：13 个 boolean + dialog string 枚举）与每个
++  刷新，三端键集合（15 键：14 个 boolean + dialog string 枚举）与每个
+   provider 每键取值必须一致；
+ - 一致性由 ``app/modules/agent/tests/test_provider_caps_alignment.py`` 以
+   源文件读取方式守护（直接读 daemon / frontend 表源比对，不复制值断言），
+@@ -29,6 +29,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
+         "resume": True,
+         "mcp": True,
+         "multimodal": True,
++        "attachments": True,
+         "thinking": True,
+         "subagent": True,
+         "permission_dialog": True,
+@@ -45,6 +46,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
+         "resume": True,
+         "mcp": False,
+         "multimodal": False,
++        "attachments": False,
+         "thinking": True,
+         "subagent": False,
+         "permission_dialog": True,
+@@ -61,6 +63,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
+         "resume": True,
+         "mcp": False,
+         "multimodal": True,
++        "attachments": True,
+         "thinking": True,
+         "subagent": False,
+         "permission_dialog": True,
+@@ -77,6 +80,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
+         "resume": True,
+         "mcp": False,
+         "multimodal": False,
++        "attachments": True,
+         "thinking": True,
+         "subagent": False,
+         "permission_dialog": False,
+@@ -91,7 +95,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
+     },
+ }
+ 
+-# 键序取自镜像表首条目（claude）；14 键齐全与三端一致性由守护测试保证。
++# 键序取自镜像表首条目（claude）；15 键齐全与三端一致性由守护测试保证。
+ _CAPS_KEYS: tuple[str, ...] = tuple(next(iter(PROVIDER_CAPS.values())))
+ 
+ 
+@@ -104,7 +108,7 @@ def get_provider_caps(provider: str) -> dict[str, bool | str]:
+     Returns:
+         dict[str, bool | str]: 已知 provider 返回表内条目的**副本**（调用方可安全
+         修改，不污染模块级共享表）；未知 provider 返回默认拒绝新 dict（boolean
+-        键全 False、dialog string 枚举取 ``"none"``，14 键齐全，FR-06），不抛错。
++        键全 False、dialog string 枚举取 ``"none"``，15 键齐全，FR-06），不抛错。
+     """
+     caps = PROVIDER_CAPS.get(provider)
+     if caps is not None:
+diff --git a/backend/app/modules/agent/tests/test_provider_caps_alignment.py b/backend/app/modules/agent/tests/test_provider_caps_alignment.py
+index 006a577e3..a25ab2d71 100644
+--- a/backend/app/modules/agent/tests/test_provider_caps_alignment.py
++++ b/backend/app/modules/agent/tests/test_provider_caps_alignment.py
+@@ -44,12 +44,16 @@ _FRONTEND_TABLE_PATH = _REPO_ROOT / "frontend" / "src" / "lib" / "provider-caps.
+ # boolean 键（FR-01 会话级思考强度档位通道，claude/pi/codex 三引擎通道实证
+ # true、cursor 无通道 false）+ 2026-09-18-single-chat-steering task-01 新增
+ # steering boolean 键（FR-02 运行中会话追加消息转向通道，pi/claude/codex
+-# true、cursor 无通道 false——claude/codex 取值待 spike 实测后收口）= 14 键。
++# true、cursor 无通道 false——claude/codex 取值待 spike 实测后收口）+
++# ql-20260921-005 新增 attachments boolean 键（会话附件链路开通，deliver=disk
++# 落盘 + 路径清单也算：claude/pi/cursor=true、codex=false；multimodal 键语义
++# 自此收窄为多模态块通道，cursor 附件图片经 gate 相与强制落盘）= 15 键。
+ EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
+     {
+         "resume",
+         "mcp",
+         "multimodal",
++        "attachments",
+         "thinking",
+         "subagent",
+         "permission_dialog",
+@@ -151,13 +155,13 @@ def _all_ends() -> dict[str, dict[str, dict[str, bool | str]]]:
+     }
+ 
+ 
+-def test_caps_key_sets_identical_and_are_the_14_contract_keys() -> None:
+-    """①三端每个 provider 条目的键集合一致，且恰为契约 14 键（多键少键都失败）。
++def test_caps_key_sets_identical_and_are_the_15_contract_keys() -> None:
++    """①三端每个 provider 条目的键集合一致，且恰为契约 15 键（多键少键都失败）。
+ 
+-    14 键 = 13 个 boolean 键 + dialog string 枚举键（task-12 / FR-06）——任一端
++    15 键 = 14 个 boolean 键 + dialog string 枚举键（task-12 / FR-06）——任一端
+     漏加 dialog 键即在此失败（R-09：解析器已扩 string 值支持，不会静默丢弃）。
+     """
+-    assert len(EXPECTED_CAPS_KEYS) == 14
++    assert len(EXPECTED_CAPS_KEYS) == 15
+     for end_name, table in _all_ends().items():
+         for provider, caps in table.items():
+             assert set(caps) == EXPECTED_CAPS_KEYS, (
+@@ -197,14 +201,14 @@ def test_cap_values_identical_per_provider_per_key() -> None:
+                 )
+ 
+ 
+-def test_unknown_provider_returns_default_deny_with_14_keys() -> None:
+-    """④未知 provider 查询：不抛错 + 14 键齐全 + 默认拒绝（FR-06 / R-09）。
++def test_unknown_provider_returns_default_deny_with_15_keys() -> None:
++    """④未知 provider 查询：不抛错 + 15 键齐全 + 默认拒绝（FR-06 / R-09）。
+ 
+     默认拒绝形态：13 个 boolean 键全 False + dialog string 枚举回退 'none'。
+     """
+     caps = get_provider_caps("__definitely_unknown_provider__")
+     assert set(caps) == EXPECTED_CAPS_KEYS
+-    assert len(caps) == 14
++    assert len(caps) == 15
+     assert caps["dialog"] == "none"
+     assert all(value is False for key, value in caps.items() if key != "dialog")
+     # 返回新 dict：调用方修改不污染模块级镜像表。
+diff --git a/backend/app/modules/daemon/attachment_pipeline.py b/backend/app/modules/daemon/attachment_pipeline.py
+index 45b895f0e..4c136f103 100644
+--- a/backend/app/modules/daemon/attachment_pipeline.py
++++ b/backend/app/modules/daemon/attachment_pipeline.py
+@@ -17,9 +17,9 @@
+   （reason=attachment_not_found）；group → ``GroupChatInvalid`` 400 群错误族
+   （群消息整体拒绝，无逐会话资源语义）。经 ``not_found_error`` /
+   ``invalid_count_error`` 工厂回调留在调用点，核心只保证判定顺序与阈值；
+-- 引擎门控位置：session 侧发送前 ProviderCaps multimodal 门控
+-  （``DaemonSessionAttachmentsUnsupported``）；group 侧门控下沉到逐成员触发
+-  时判定（成员引擎各异）。
++- 引擎门控位置：session 侧发送前 ProviderCaps attachments 门控
++  （``DaemonSessionAttachmentsUnsupported``，ql-20260921-005 起改键）；group
++  侧门控下沉到逐成员触发时判定（成员引擎各异）。
+ 
+ 上限单源：图/文数量上限统一取 ``session_attachment.service`` 的
+ ``MAX_IMAGES_PER_MESSAGE`` / ``MAX_FILES_PER_MESSAGE``（group 侧原口径；
+@@ -40,6 +40,7 @@ from sqlalchemy import select
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.core.errors import AppError
++from app.modules.agent.provider_caps import get_provider_caps
+ 
+ 
+ async def validate_owned_attachments(
+@@ -98,11 +99,17 @@ async def resolve_multimodal_gate(
+     session_llm_provider_id: uuid.UUID | None,
+     agent_kind: str,
+ ) -> bool:
+-    """多模态 gate 判定（D-9）→ ``supports_multimodal`` 标量。
++    """多模态门控判定（D-9）→ ``supports_multimodal`` 标量。
+ 
+     session ``_resolve_inject_gate``（gate 基准=本轮生效供应商）与 group
+     ``_assemble_group_inject_attachments``（基准=成员六要素，属主=群主）共享；
+     基准口径的计算留在各调用点。
++
++    ql-20260921-005：返回值与 ProviderCaps ``multimodal`` 键（多模态块通道）
++    相与——``agent_kind`` 即引擎名（调用点均传 session/member provider）。
++    cursor 附件链路经 ``attachments`` 键开放后无块通道，图片/PDF 在此强制
++    降为 deliver=disk 落盘（防 BYO 默认供应商行误判 supports=true 走 block，
++    被 driver 静默丢图）；claude/pi 块通道不受影响。
+     """
+     from app.modules.session_attachment.capability import resolve_session_gate
+ 
+@@ -112,7 +119,7 @@ async def resolve_multimodal_gate(
+         session_llm_provider_id=session_llm_provider_id,
+         agent_kind=agent_kind,
+     )
+-    return gate.supports_multimodal
++    return gate.supports_multimodal and bool(get_provider_caps(agent_kind)["multimodal"])
+ 
+ 
+ async def assemble_attachments(rows: list, *, supports_multimodal: bool) -> list[dict]:
+diff --git a/backend/app/modules/daemon/session/service/attachments.py b/backend/app/modules/daemon/session/service/attachments.py
+index f89268837..49295cff7 100644
+--- a/backend/app/modules/daemon/session/service/attachments.py
++++ b/backend/app/modules/daemon/session/service/attachments.py
+@@ -53,11 +53,12 @@ async def _validate_inject_attachment_rows(
+     ``daemon/attachment_pipeline.validate_owned_attachments``（错误族经工厂
+     回调保留在本链路语义：缺失/跨用户 404 资源隐藏、数量超限 422）。
+     """
+-    # provider-abstraction task-11：引擎门控收敛查 ProviderCaps（multimodal
+-    # 键；文案逐字保留，与原 != "claude" 判定等价）。
+-    if not get_provider_caps(session_provider)["multimodal"]:
++    # provider-abstraction task-11：引擎门控收敛查 ProviderCaps；ql-20260921-005
++    # 起改查 attachments 键（附件链路开通，cursor=true 走 disk-only 落盘链路；
++    # multimodal 键语义收窄为多模态块通道，图片 block 路由由 gate 相与决定）。
++    if not get_provider_caps(session_provider)["attachments"]:
+         raise DaemonSessionAttachmentsUnsupported(
+-            "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
++            "此引擎不支持会话附件（文件与图片收件通道未开通）。",
+             details={"session_id": str(session_id), "provider": session_provider},
+         )
+     from app.modules.session_attachment.service import (
+@@ -210,8 +211,9 @@ async def validate_create_attachments(
+ ) -> list:
+     """create 首句附件校验（task-08 自 create_session:1362-1403 拆出，零改写）。
+ 
+-    D-6 引擎门控（ProviderCaps multimodal 键）/ 归属+存在 404 / 数量 422
+-    （图≤5、文≤5）/ 保序；任一失败 raise → 无半成品落库。
++    D-6 引擎门控（ProviderCaps attachments 键，ql-20260921-005 起改键——
++    cursor 附件开放）/ 归属+存在 404 / 数量 422（图≤5、文≤5）/ 保序；任一
++    失败 raise → 无半成品落库。
+ 
+     task-11 轻重构⑤：归属/数量/保序核心收敛到
+     ``daemon/attachment_pipeline.validate_owned_attachments``（与 inject 校验
+@@ -220,9 +222,10 @@ async def validate_create_attachments(
+ 
+     validated_attachments: list = []
+     if attachment_ids:
+-        if not get_provider_caps(provider)["multimodal"]:
++        # ql-20260921-005：改查 attachments 键（与 inject 门控同键同极性）。
++        if not get_provider_caps(provider)["attachments"]:
+             raise DaemonSessionAttachmentsUnsupported(
+-                "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
++                "此引擎不支持会话附件（文件与图片收件通道未开通）。",
+                 details={"provider": provider},
+             )
+         from app.modules.session_attachment.service import (
+diff --git a/backend/app/modules/daemon/tests/test_attachment_pipeline.py b/backend/app/modules/daemon/tests/test_attachment_pipeline.py
+index 94a607b76..f46d8ecf0 100644
+--- a/backend/app/modules/daemon/tests/test_attachment_pipeline.py
++++ b/backend/app/modules/daemon/tests/test_attachment_pipeline.py
+@@ -161,6 +161,28 @@ class TestGateAndAssembleCore:
+                 _FakeDB([]), user_id=uid, session_llm_provider_id=basis, agent_kind="codex"
+             )
+ 
++    async def test_resolve_multimodal_gate_ands_engine_block_channel(self) -> None:
++        """ql-20260921-005：gate 返回值与 caps.multimodal（块通道）相与。
++
++        回归面：cursor 附件开放后，若用户默认供应商行判 supports=true（或 BYO
++        基准命中多模态行），图片/PDF 不得走 block——cursor driver 无块通道会
++        静默丢图，必须强制降级 deliver=disk。真 caps 表驱动，不 patch。
++        """
++        import app.modules.session_attachment.capability as capability_module
++
++        async def _always_supports(db, *, user_id, session_llm_provider_id, agent_kind):
++            return SimpleNamespace(supports_multimodal=True)
++
++        uid = uuid.uuid4()
++        with patch.object(capability_module, "resolve_session_gate", _always_supports):
++            # 块通道引擎（claude）不受相与影响；无块通道引擎（cursor）强制 False。
++            assert await attachment_pipeline.resolve_multimodal_gate(
++                _FakeDB([]), user_id=uid, session_llm_provider_id=None, agent_kind="claude"
++            )
++            assert not await attachment_pipeline.resolve_multimodal_gate(
++                _FakeDB([]), user_id=uid, session_llm_provider_id=None, agent_kind="cursor"
++            )
++
+     async def test_assemble_attachments_builds_storage_and_passes_flag(self) -> None:
+         """组装核心：行 + supports_multimodal 透传，storage 由工厂后端构造。"""
+         import app.modules.session_attachment.service as att_service
+@@ -215,11 +237,11 @@ class TestSessionWrapperEquivalence:
+         assert exc_info.value.details == {"image_count": 6, "file_count": 0}
+ 
+     async def test_inject_validation_engine_gate_422(self) -> None:
+-        """session inject：非多模态引擎 → DaemonSessionAttachmentsUnsupported（422）。"""
++        """session inject：附件链路未开通引擎 → DaemonSessionAttachmentsUnsupported（422）。"""
+         import app.modules.daemon.session.service.attachments as att_module
+ 
+         svc = SimpleNamespace(_session=_FakeDB([]))
+-        with patch.object(att_module, "get_provider_caps", lambda p: {"multimodal": False}):
++        with patch.object(att_module, "get_provider_caps", lambda p: {"attachments": False}):
+             with pytest.raises(DaemonSessionAttachmentsUnsupported) as exc_info:
+                 await _validate_inject_attachment_rows(
+                     svc,
+diff --git a/backend/app/modules/daemon/tests/test_session_provider_caps.py b/backend/app/modules/daemon/tests/test_session_provider_caps.py
+index 5adae8f1c..c4c5a55f3 100644
+--- a/backend/app/modules/daemon/tests/test_session_provider_caps.py
++++ b/backend/app/modules/daemon/tests/test_session_provider_caps.py
+@@ -3,8 +3,9 @@
+ 
+ 背景（design §5.2 / FR-06 / D-002@v1）：daemon/session/service.py 内四处引擎
+ 字面量门控（``!= "claude"`` ×3 / ``not in {"claude", "codex"}`` ×1）已收敛为
+-``get_provider_caps(provider)["multimodal" | "resume"]`` 查表。本文件做**纯重构
+-验收**——对每个收敛判定做函数级输入输出对照，断言与改造前硬编码逐一相等：
++``get_provider_caps(provider)["attachments" | "resume"]`` 查表（ql-20260921-005
++起附件门控改查 attachments 键——cursor 附件开放，multimodal 键收窄为多模态
++块通道）。本文件做**查表行为断言**——对每个收敛判定做函数级输入输出对照：
+ 
+ 1. 真值表对照：查表判定 vs 改造前字面量判定，对 claude / codex / 未知 provider
+    全集逐值断言等价（caps 表取值漂移即失败——这正是查表化后唯一的行为风险面）；
+@@ -50,20 +51,41 @@ from app.modules.daemon.session.service import (
+ # 下面真值表把改造前判定**逐字面量复写**在断言右侧——caps 表任何一键漂移
+ # （例如 codex.multimodal 误置 True）都会让等价断裂、测试失败。
+ 
+-# 真值表覆盖的 provider 全集：两契约 provider + 空 + 未知（默认拒绝路径）。
+-_TRUTH_TABLE_PROVIDERS = ("claude", "codex", "", "gemini", "gpt")
++# 真值表覆盖的 provider 全集：契约 provider + 空 + 未知（默认拒绝路径）。
++_TRUTH_TABLE_PROVIDERS = ("claude", "codex", "pi", "cursor", "", "gemini", "gpt")
+ 
+ 
+ @pytest.mark.parametrize("provider", _TRUTH_TABLE_PROVIDERS)
+-def test_attachment_gate_truth_table_matches_pre_refactor_literal(provider: str) -> None:
+-    """三处附件门控（create :1365 / ppm :2317 / inject :2853，multimodal 键）。"""
+-    assert (not get_provider_caps(provider)["multimodal"]) == (provider != "claude")
++def test_attachment_gate_truth_table_matches_current_contract(provider: str) -> None:
++    """三处附件门控（create / ppm / inject，attachments 键，ql-20260921-005）。
++
++    改键后放行集 = {claude, pi, cursor}（cursor 为 disk-only：无多模态块通道，
++    图片/PDF 经 gate 相与强制落盘）；codex / 空 / 未知默认拒绝。右侧把现行
++    契约字面量复写——caps 表任何一键漂移（例如 codex.attachments 误置 True）
++    都会让等价断裂、测试失败。
++    """
++    assert (not get_provider_caps(provider)["attachments"]) == (
++        provider not in {"claude", "pi", "cursor"}
++    )
++
++
++@pytest.mark.parametrize("provider", _TRUTH_TABLE_PROVIDERS)
++def test_multimodal_block_channel_truth_table(provider: str) -> None:
++    """多模态块通道键取值对照（gate 相与依据）：仅 claude / pi 为 true。
++
++    ql-20260921-005 起 multimodal 键语义收窄为多模态块通道（resolve_multimodal_
++    gate 返回值与它相与）——cursor 虽开放附件（attachments=true）但无块通道，
++    此表锁定 cursor.multimodal=False 不得误翻。
++    """
++    assert get_provider_caps(provider)["multimodal"] == (provider in {"claude", "pi"})
+ 
+ 
+ @pytest.mark.parametrize("provider", _TRUTH_TABLE_PROVIDERS)
+ def test_resume_gate_truth_table_matches_pre_refactor_literal(provider: str) -> None:
+-    """reopen resume 门控（:6345，resume 键）——codex 与 claude 同放行。"""
+-    assert (not get_provider_caps(provider)["resume"]) == (provider not in {"claude", "codex"})
++    """reopen resume 门控（resume 键）——四引擎（claude/codex/pi/cursor）均放行。"""
++    assert (not get_provider_caps(provider)["resume"]) == (
++        provider not in {"claude", "codex", "pi", "cursor"}
++    )
+ 
+ 
+ # ── ② inject 附件门控：_validate_inject_attachment_rows 函数级对照 ───────────
+@@ -89,13 +111,13 @@ async def test_inject_attachment_gate_codex_rejects_with_verbatim_message() -> N
+             session_provider="codex",
+             attachment_ids=[uuid.uuid4()],
+         )
+-    # 改造前文案逐字对照（纯重构铁律：不改报错文案）。
+-    assert exc_info.value.message == "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。"
++    # ql-20260921-005 改键后新文案（「仅 Claude」已失实——pi/cursor 均开放附件）。
++    assert exc_info.value.message == "此引擎不支持会话附件（文件与图片收件通道未开通）。"
+     assert exc_info.value.details == {"session_id": str(session_id), "provider": "codex"}
+ 
+ 
+ async def test_inject_attachment_gate_unknown_provider_rejects_same_as_before() -> None:
+-    """未知 provider（原 != "claude" 真值同为拒绝）→ 同款异常，默认拒绝语义。"""
++    """未知 provider（默认拒绝语义）→ 同款异常。"""
+     svc = _make_service_with_stub_db()
+     with pytest.raises(DaemonSessionAttachmentsUnsupported) as exc_info:
+         await svc._validate_inject_attachment_rows(
+@@ -104,7 +126,7 @@ async def test_inject_attachment_gate_unknown_provider_rejects_same_as_before()
+             session_provider="gemini",
+             attachment_ids=[uuid.uuid4()],
+         )
+-    assert exc_info.value.message == "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。"
++    assert exc_info.value.message == "此引擎不支持会话附件（文件与图片收件通道未开通）。"
+ 
+ 
+ async def test_inject_attachment_gate_claude_passes_gate() -> None:
+@@ -119,6 +141,22 @@ async def test_inject_attachment_gate_claude_passes_gate() -> None:
+     assert rows == []
+ 
+ 
++async def test_inject_attachment_gate_cursor_passes_gate() -> None:
++    """cursor 携附件 → 过引擎门控（ql-20260921-005 附件开放，disk-only 链路）。
++
++    与 claude 同款证明：过门控即进入归属/数量判定（空 ids → 返回 []）；块
++    通道降级由 resolve_multimodal_gate 相与测试守护（test_attachment_pipeline）。
++    """
++    svc = _make_service_with_stub_db()
++    rows = await svc._validate_inject_attachment_rows(
++        session_id=uuid.uuid4(),
++        session_user_id=uuid.uuid4(),
++        session_provider="cursor",
++        attachment_ids=[],
++    )
++    assert rows == []
++
++
+ # ── ③ resume 门控：reopen_session 函数级对照 ─────────────────────────────────
+ 
+ _RESUME_UNSUPPORTED_MSG = (
+diff --git a/backend/app/modules/knowledge/distill.py b/backend/app/modules/knowledge/distill.py
+index d95f6aea8..49cb518e8 100644
+--- a/backend/app/modules/knowledge/distill.py
++++ b/backend/app/modules/knowledge/distill.py
+@@ -28,8 +28,9 @@ task-07 + D-009 续接分流 + D-010 闭环增强 + D-008 取数通道/回流指
+   ``text/markdown``），随 create_session ``attachment_ids`` 下发——daemon 侧
+   ``deliver=disk`` 落盘 ``{cwd}/attachments/{sha256}.md`` 并在消息尾追加
+   「附件已落盘」路径清单（``turn-control.ts``），prompt 指读该文件。附件
+-  引擎门控（``provider_caps.multimodal``，仅 claude/pi）→ 非多模态引擎
+-  fresh 会话源在 dispatch 预检 422（引导 resume 模式）。
++  引擎门控（``provider_caps.attachments``，ql-20260921-005 起改键——claude/
++  pi/cursor）→ 附件链路未开通引擎（codex / 未知）fresh 会话源在 dispatch
++  预检 422（引导 resume 模式）。
+ - **洞二（产出回流指引）**：全局 ``settings.spec_transport`` 默认 ``tar``
+   （config.py:271，daemon-client 单一路径）——交互会话启动时 daemon 把平台
+   spec bundle pull 到 ``~/.sillyhub/daemon/specs/{ws_id}``（三策略统一落点：
+@@ -536,11 +537,13 @@ class DistillDispatchService:
+                         "max_turns": DISTILL_MAX_SESSION_TURNS,
+                     },
+                 )
+-            # 护栏②：附件引擎门控——附件通道仅多模态引擎（claude/pi）可用；
+-            # 此处预检显式 agent_type/工作区缺省引擎，runtime_id 钉定派生的
+-            # 引擎由 create_session 附件校验兜底（except 转 422 见下）。
++            # 护栏②：附件引擎门控——附件通道按 attachments 键（claude/pi/
++            # cursor，ql-20260921-005 起改键；cursor 走 disk-only 落盘同样
++            # 可收 .md 记录）可用；此处预检显式 agent_type/工作区缺省引擎，
++            # runtime_id 钉定派生的引擎由 create_session 附件校验兜底
++            # （except 转 422 见下）。
+             fresh_provider = agent_type or workspace.default_agent or "claude"
+-            if not get_provider_caps(fresh_provider)["multimodal"]:
++            if not get_provider_caps(fresh_provider)["attachments"]:
+                 raise DistillSourceInvalid(
+                     f"引擎「{fresh_provider}」不支持会话附件，无法通过附件下发对话记录，"
+                     "请改用原会话续接（mode=resume）模式，或选择支持附件的引擎（如 Claude）。",
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx
+index 415571cef..16965e73b 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx
+@@ -335,12 +335,26 @@ describe("ProviderCaps 表值（两态对照的前置事实，task-02 镜像）"
+     expect(getProviderCaps("").dialog).toBe("none");
+     expect(getProviderCaps("pi").permission_dialog).toBe(true);
+   });
++
++  // ql-20260921-005：attachments 键（第 15 键，会话附件链路开通，disk-only 也
++  // 算）两态对照——claude/pi/cursor=true（cursor 走落盘+路径清单，图片/PDF 由
++  // backend gate 与 multimodal 相与降级为文件）、codex/未知=false；multimodal
++  // 键语义收窄为多模态块通道（cursor 仍 false，防块路由误开）。
++  it("attachments 键两态对照：claude/pi/cursor=true（cursor disk-only）；codex/未知=false；multimodal 块通道仍 claude/pi", () => {
++    expect(getProviderCaps("claude").attachments).toBe(true);
++    expect(getProviderCaps("pi").attachments).toBe(true);
++    expect(getProviderCaps("cursor").attachments).toBe(true);
++    expect(getProviderCaps("codex").attachments).toBe(false);
++    expect(getProviderCaps("").attachments).toBe(false);
++    expect(getProviderCaps("cursor").multimodal).toBe(false);
++    expect(getProviderCaps("pi").multimodal).toBe(true);
++  });
+ });
+ 
+ /* ───────── 1. dialog 模式（provider state 信息源） ───────── */
+ 
+ describe("dialog 模式门控两态对照（task-11 收敛点：attachmentsDisabled / title / teamEngineOk / 拦截）", () => {
+-  it("附件门控 multimodal：claude idle 态 title 走「首条消息」分支（caps.multimodal && !sessionId）", async () => {
++  it("附件门控 attachments：claude idle 态 title 走「首条消息」分支（caps.attachments && !sessionId）", async () => {
+     setupDialog({ sessionId: null });
+     await openPlusMenu();
+     const clip = await findAttachmentItem();
+@@ -348,7 +362,7 @@ describe("dialog 模式门控两态对照（task-11 收敛点：attachmentsDisab
+     expect(clip.title).toBe("发送首条消息创建会话后可添加附件");
+   });
+ 
+-  it("附件门控 multimodal：codex 态禁用 + 默认 title「当前引擎不支持附件」（原 !== claude → title undefined）", async () => {
++  it("附件门控 attachments：codex 态禁用 + 默认 title「当前引擎不支持附件」", async () => {
+     setupDialog({ sessionId: null, providers: ["codex"], defaultProvider: "codex" });
+     await openPlusMenu();
+     const clip = await findAttachmentItem();
+@@ -356,7 +370,7 @@ describe("dialog 模式门控两态对照（task-11 收敛点：attachmentsDisab
+     expect(clip.title).toBe("当前引擎不支持附件");
+   });
+ 
+-  it("附件门控 multimodal：claude attach 态可用（title 为添加说明，非禁用原因）", async () => {
++  it("附件门控 attachments：claude attach 态可用（title 为添加说明，非禁用原因）", async () => {
+     setupDialog();
+     await openPlusMenu();
+     const clip = await findAttachmentItem();
+@@ -417,14 +431,14 @@ describe("dialog 模式门控两态对照（task-11 收敛点：attachmentsDisab
+ /* ───────── 2. page 模式（session.provider 信息源） ───────── */
+ 
+ describe("page 模式门控两态对照（task-11 收敛点：attachmentsDisabled / teamEngineOk / 拦截）", () => {
+-  it("附件门控 multimodal：claude 会话（session.provider）附件入口可用", async () => {
++  it("附件门控 attachments：claude 会话（session.provider）附件入口可用", async () => {
+     setupPage("claude");
+     await openPlusMenu();
+     const clip = await findAttachmentItem();
+     expect(clip.disabled).toBe(false);
+   });
+ 
+-  it("附件门控 multimodal：codex 会话（session.provider）附件入口禁用 + 默认 title", async () => {
++  it("附件门控 attachments：codex 会话（session.provider）附件入口禁用 + 默认 title", async () => {
+     setupPage("codex");
+     await openPlusMenu();
+     const clip = await findAttachmentItem();
+@@ -432,6 +446,17 @@ describe("page 模式门控两态对照（task-11 收敛点：attachmentsDisable
+     expect(clip.title).toBe("当前引擎不支持附件");
+   });
+ 
++  // ql-20260921-005：cursor 附件开放（disk-only 落盘链路）——附件入口可用；
++  // 派团队仍置灰（subagent=false，CLI 无通道）。
++  it("附件门控 attachments：cursor 会话附件入口可用（disk-only）；团队仍置灰", async () => {
++    setupPage("cursor");
++    await openPlusMenu();
++    expect((await findAttachmentItem()).disabled).toBe(false);
++    const team = await findTeamItem();
++    expect(team.disabled).toBe(true);
++    expect(team.title).toBe("团队需要 Claude 引擎");
++  });
++
+   it("团队门控 subagent：claude 会话（session.provider）菜单项可用", async () => {
+     setupPage("claude");
+     await openPlusMenu();
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index e5ccef914..0f8806cfe 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -1616,15 +1616,16 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+     !hasOnlineProvider ||
+     offlineReadOnly;
+ 
+-  // ql-20260825-007：附件门控（D-6 引擎门控同构 + 首句门控）——codex 引擎禁；
+-  // 无 sessionId（idle 首句 / creating）禁：createSession 契约无 attachment_ids
+-  //（R3），放开会出现「上传成功但发不出去」。attach 模式进入即有 sessionId，
+-  // 追问/排队路径（injectSession）已支持附件，正常开放。
+-  // provider-abstraction task-11：引擎门控收敛查 ProviderCaps（multimodal 键，
+-  // 与原 !== / === "claude" 等价）。
+-  const attachmentsDisabled = !getProviderCaps(provider).multimodal || !view.sessionId;
++  // ql-20260825-007：附件门控（D-6 引擎门控同构 + 首句门控）——附件链路未
++  // 开通引擎（codex / 未知）禁；无 sessionId（idle 首句 / creating）禁：
++  // createSession 契约无 attachment_ids（R3），放开会出现「上传成功但发不出
++  // 去」。attach 模式进入即有 sessionId，追问/排队路径（injectSession）已
++  // 支持附件，正常开放。
++  // provider-abstraction task-11：引擎门控收敛查 ProviderCaps（attachments
++  // 键，ql-20260921-005 改键——cursor=true 走 disk-only 落盘链路）。
++  const attachmentsDisabled = !getProviderCaps(provider).attachments || !view.sessionId;
+   const attachmentsDisabledTitle =
+-    getProviderCaps(provider).multimodal && !view.sessionId
++    getProviderCaps(provider).attachments && !view.sessionId
+       ? "发送首条消息创建会话后可添加附件"
+       : undefined;
+ 
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 3a7824e4f..6c05510da 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -2019,8 +2019,10 @@ export function SessionPanelPage({
+   );
+   // 附件门控（D-6 引擎门控同构）：预会话无会话实体，按目标 runtime 引擎判定。
+   // task-11（provider-abstraction）：引擎字面量门控收敛查 ProviderCaps 表
+-  //（multimodal 键；未知/空引擎全 false 默认拒绝，与原 !== "claude" 等价）。
+-  const preAttachmentsDisabled = !getProviderCaps(preEngine ?? "").multimodal;
++  //（attachments 键；未知/空引擎全 false 默认拒绝。ql-20260921-005 起附件
++  // 入口改查 attachments 键——cursor=true 走 disk-only 落盘链路，multimodal
++  // 键收窄为多模态块通道仅作 gate 路由）。
++  const preAttachmentsDisabled = !getProviderCaps(preEngine ?? "").attachments;
+ 
+   // task-10（design A5/A6 / 原型⑤）：suspended / task-03（design §3.3）：sessionActive
+   // 派生语义见 page-helpers.deriveSessionStatusFlags（逻辑原样外提）。
+@@ -2030,9 +2032,9 @@ export function SessionPanelPage({
+ 
+   // ── 2026-08-20 task-12：附件门控派生（D-6 引擎 / FR-10 D-9 多模态降级）────
+   const sessionEngine = session?.provider ?? null;
+-  // task-11（provider-abstraction）：引擎门控收敛查 ProviderCaps（multimodal 键；
+-  // null/未知引擎全 false 默认拒绝，与原 !== "claude" 等价）。
+-  const attachmentsDisabled = !getProviderCaps(sessionEngine ?? "").multimodal;
++  // task-11（provider-abstraction）：引擎门控收敛查 ProviderCaps（attachments
++  // 键，ql-20260921-005 改键；null/未知引擎全 false 默认拒绝）。
++  const attachmentsDisabled = !getProviderCaps(sessionEngine ?? "").attachments;
+   // 会话实际生效供应商（会话绑定优先；本机默认/未选 → null = 能力未知）。
+   const effectiveProvider = useMemo(
+     () => findProviderById(llmProviders, session?.llm_provider_id ?? null),
+diff --git a/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx b/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
+index 9a325603a..f28613f60 100644
+--- a/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
++++ b/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
+@@ -492,15 +492,15 @@ describe("对话框路径 PI 引擎可选（runtime-session-helpers 白名单加
+ 
+ /* ───────── 7. pi 态 caps 门控（查表裁剪前置事实，FR-03 / FR-04） ───────── */
+ 
+-// session-panel 附件（multimodal）/ 团队派工（subagent）门控均为 getProviderCaps
++// session-panel 附件（attachments，ql-20260921-005 起改键）/ 团队派工（subagent）门控均为 getProviderCaps
+ // 查表的 provider 无关通用代码（2026-09-03-agent-provider-abstraction task-11 收敛；
+ // claude/codex 两态渲染对照由 daemon/__tests__/session-panel-provider-caps.test.tsx
+ // 守护）——pi 态 UI 随表值自动裁剪（design §5.3「门控零新代码」红利）。本卡
+-// allowed_paths 不含该测试文件，此处锁 pi 表值前置事实：multimodal=true → 附件
++// allowed_paths 不含该测试文件，此处锁 pi 表值前置事实：attachments=true → 附件
+ // 入口可用；subagent=false → 团队派工置灰（§6.2 纪律，实证后由 task-06 三端翻值）。
+ describe("pi 态 caps 门控前置事实（getProviderCaps 查表值）", () => {
+-  it("multimodal=true（附件按钮可见）/ subagent=false（团队派工隐藏）", () => {
+-    expect(getProviderCaps("pi").multimodal).toBe(true);
++  it("attachments=true（附件按钮可见）/ subagent=false（团队派工隐藏）", () => {
++    expect(getProviderCaps("pi").attachments).toBe(true);
+     expect(getProviderCaps("pi").subagent).toBe(false);
+   });
+ 
+@@ -633,11 +633,15 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
+     // 2026-09-18-single-chat-steering task-01（FR-02，连带测试同款）：第 14 键
+     // steering（运行中会话追加消息转向通道）随 @generated 产物加入后本全对象
+     // toEqual 必红——同步补齐（cursor 无注入通道=false / 未知引擎回退=false）。
++    // ql-20260921-005（连带测试同款）：第 15 键 attachments（会话附件链路开通，
++    // disk-only 落盘也算）随 @generated 产物加入后本全对象 toEqual 必红——同步
++    // 补齐（cursor=true 走落盘+路径清单 / 未知引擎回退=false）。
+     const caps = getProviderCaps("cursor");
+     expect(caps).toEqual({
+       resume: true,
+       mcp: false,
+       multimodal: false,
++      attachments: true,
+       thinking: true,
+       subagent: false,
+       permission_dialog: false,
+@@ -658,6 +662,7 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
+       resume: false,
+       mcp: false,
+       multimodal: false,
++      attachments: false,
+       thinking: false,
+       subagent: false,
+       permission_dialog: false,
+diff --git a/frontend/src/lib/provider-caps.ts b/frontend/src/lib/provider-caps.ts
+index 333656c6b..9c7e6fb07 100644
+--- a/frontend/src/lib/provider-caps.ts
++++ b/frontend/src/lib/provider-caps.ts
+@@ -8,25 +8,33 @@
+  *
+  * 镜像约定（三端同步，单源 = daemon 侧，2026-09-11-provider-adapter-registry
+  * task-04 起手抄镜像退役）：daemon 单源改取值后重跑生成脚本，本文件与 backend
+- * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（14 键：
+- * 13 个 boolean + dialog string 枚举）与每个 provider 每键取值一致性由
++ * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（15 键：
++ * 14 个 boolean + dialog string 枚举）与每个 provider 每键取值一致性由
+  * backend/app/modules/agent/tests/test_provider_caps_alignment.py 以源文件
+  * 读取方式守护（任一端漂移即测试失败）。
+  *
+- * 取值语义：caps 描述 provider 当前真实能力，13 个 boolean 键缺省 false 默认
++ * 取值语义：caps 描述 provider 当前真实能力，14 个 boolean 键缺省 false 默认
+  * 拒绝（FR-06 / D-002@v1）；dialog 为 string 枚举键（'native' = 走平台
+  * dialog 管道 / 'marker' = 纯前端标记协议 / 'none' = 无通道）；未知 provider
+  * 查询返回默认拒绝对象（boolean 键全 false、dialog 取 'none'），不抛错。
+  */
+ 
+-/** provider 能力矩阵（14 键：13 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
++/** provider 能力矩阵（15 键：14 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+ export interface ProviderCaps {
+   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
+   resume: boolean;
+   /** MCP server 注入（driver 实际消费 mcpServers 配置并生效）。 */
+   mcp: boolean;
+-  /** 多模态（会话附件：图片 / 文件注入）。 */
++  /** 多模态块通道（图片 / PDF 内联注入模型视觉输入；disk-only 附件另见 attachments 键）。 */
+   multimodal: boolean;
++  /**
++   * 会话附件链路开通（第 15 键，ql-20260921-005）：会话能否收附件（前端入口
++   * 与 backend 门控）。deliver=disk 落盘 + 路径清单也算——cursor 无多模态块
++   * 通道但经 daemon 引擎中立的落盘链路收附件（图片/PDF 由 D-9 gate 降级为
++   * 文件，模型不直接看图）；multimodal=true 的引擎（claude/pi）附件图片走
++   * 内联块。codex 附件链路未开通（D-6 沿袭）。
++   */
++  attachments: boolean;
+   /** 思考流（thinking 事件缓冲与渲染）。 */
+   thinking: boolean;
+   /** 子代理（团队派工 / Task 分身链路）。 */
+@@ -87,6 +95,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     resume: true,
+     mcp: true,
+     multimodal: true,
++    attachments: true,
+     thinking: true,
+     subagent: true,
+     permission_dialog: true,
+@@ -103,6 +112,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     resume: true,
+     mcp: false,
+     multimodal: false,
++    attachments: false,
+     thinking: true,
+     subagent: false,
+     permission_dialog: true,
+@@ -119,6 +129,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     resume: true,
+     mcp: false,
+     multimodal: true,
++    attachments: true,
+     thinking: true,
+     subagent: false,
+     permission_dialog: true,
+@@ -135,6 +146,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     resume: true,
+     mcp: false,
+     multimodal: false,
++    attachments: true,
+     thinking: true,
+     subagent: false,
+     permission_dialog: false,
+@@ -165,6 +177,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
+     resume: false,
+     mcp: false,
+     multimodal: false,
++    attachments: false,
+     thinking: false,
+     subagent: false,
+     permission_dialog: false,
+diff --git a/sillyhub-daemon/scripts/gen-provider-caps.mjs b/sillyhub-daemon/scripts/gen-provider-caps.mjs
+index 970e884b7..140d44e6e 100644
+--- a/sillyhub-daemon/scripts/gen-provider-caps.mjs
++++ b/sillyhub-daemon/scripts/gen-provider-caps.mjs
+@@ -60,6 +60,7 @@ const CAPS_KEYS = [
+   "resume",
+   "mcp",
+   "multimodal",
++  "attachments",
+   "thinking",
+   "subagent",
+   "permission_dialog",
+@@ -208,25 +209,33 @@ function renderFrontend(table) {
+  *
+  * 镜像约定（三端同步，单源 = daemon 侧，2026-09-11-provider-adapter-registry
+  * task-04 起手抄镜像退役）：daemon 单源改取值后重跑生成脚本，本文件与 backend
+- * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（14 键：
+- * 13 个 boolean + dialog string 枚举）与每个 provider 每键取值一致性由
++ * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（15 键：
++ * 14 个 boolean + dialog string 枚举）与每个 provider 每键取值一致性由
+  * backend/app/modules/agent/tests/test_provider_caps_alignment.py 以源文件
+  * 读取方式守护（任一端漂移即测试失败）。
+  *
+- * 取值语义：caps 描述 provider 当前真实能力，13 个 boolean 键缺省 false 默认
++ * 取值语义：caps 描述 provider 当前真实能力，14 个 boolean 键缺省 false 默认
+  * 拒绝（FR-06 / D-002@v1）；dialog 为 string 枚举键（'native' = 走平台
+  * dialog 管道 / 'marker' = 纯前端标记协议 / 'none' = 无通道）；未知 provider
+  * 查询返回默认拒绝对象（boolean 键全 false、dialog 取 'none'），不抛错。
+  */
+ 
+-/** provider 能力矩阵（14 键：13 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
++/** provider 能力矩阵（15 键：14 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+ export interface ProviderCaps {
+   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
+   resume: boolean;
+   /** MCP server 注入（driver 实际消费 mcpServers 配置并生效）。 */
+   mcp: boolean;
+-  /** 多模态（会话附件：图片 / 文件注入）。 */
++  /** 多模态块通道（图片 / PDF 内联注入模型视觉输入；disk-only 附件另见 attachments 键）。 */
+   multimodal: boolean;
++  /**
++   * 会话附件链路开通（第 15 键，ql-20260921-005）：会话能否收附件（前端入口
++   * 与 backend 门控）。deliver=disk 落盘 + 路径清单也算——cursor 无多模态块
++   * 通道但经 daemon 引擎中立的落盘链路收附件（图片/PDF 由 D-9 gate 降级为
++   * 文件，模型不直接看图）；multimodal=true 的引擎（claude/pi）附件图片走
++   * 内联块。codex 附件链路未开通（D-6 沿袭）。
++   */
++  attachments: boolean;
+   /** 思考流（thinking 事件缓冲与渲染）。 */
+   thinking: boolean;
+   /** 子代理（团队派工 / Task 分身链路）。 */
+@@ -302,6 +311,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
+     resume: false,
+     mcp: false,
+     multimodal: false,
++    attachments: false,
+     thinking: false,
+     subagent: false,
+     permission_dialog: false,
+@@ -356,7 +366,7 @@ task-04 起手抄镜像退役）：
+   \`\`PROVIDER_CAPS\`\`（含取值依据的文件:行号锚点注释，改值先改那里）；
+ - 本文件与 \`\`frontend/src/lib/provider-caps.ts\`\` 均为脚本生成产物，daemon
+   单源改值后重跑 \`\`sillyhub-daemon/scripts/gen-provider-caps.mjs\`\` 三端一并
+-  刷新，三端键集合（14 键：13 个 boolean + dialog string 枚举）与每个
++  刷新，三端键集合（15 键：14 个 boolean + dialog string 枚举）与每个
+   provider 每键取值必须一致；
+ - 一致性由 \`\`app/modules/agent/tests/test_provider_caps_alignment.py\`\` 以
+   源文件读取方式守护（直接读 daemon / frontend 表源比对，不复制值断言），
+@@ -373,7 +383,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
+ ${engineBlocks}
+ }
+ 
+-# 键序取自镜像表首条目（claude）；14 键齐全与三端一致性由守护测试保证。
++# 键序取自镜像表首条目（claude）；15 键齐全与三端一致性由守护测试保证。
+ _CAPS_KEYS: tuple[str, ...] = tuple(next(iter(PROVIDER_CAPS.values())))
+ 
+ 
+@@ -386,7 +396,7 @@ def get_provider_caps(provider: str) -> dict[str, bool | str]:
+     Returns:
+         dict[str, bool | str]: 已知 provider 返回表内条目的**副本**（调用方可安全
+         修改，不污染模块级共享表）；未知 provider 返回默认拒绝新 dict（boolean
+-        键全 False、dialog string 枚举取 \`\`"none"\`\`，14 键齐全，FR-06），不抛错。
++        键全 False、dialog string 枚举取 \`\`"none"\`\`，15 键齐全，FR-06），不抛错。
+     """
+     caps = PROVIDER_CAPS.get(provider)
+     if caps is not None:
+diff --git a/sillyhub-daemon/src/interactive/providers.ts b/sillyhub-daemon/src/interactive/providers.ts
+index 2d6f3deff..e36cc1253 100644
+--- a/sillyhub-daemon/src/interactive/providers.ts
++++ b/sillyhub-daemon/src/interactive/providers.ts
+@@ -36,7 +36,11 @@
+  * true、cursor 无通道 false）；steering 为第 14 键
+  * （2026-09-18-single-chat-steering task-01 / FR-02 加入——运行中会话
+  * 追加消息转向通道，pi/claude/codex=true、cursor 无通道 false，取值依据
+- * 见下方 steering 键 docblock 与 PROVIDER_CAPS docblock）；未知 provider
++ * 见下方 steering 键 docblock 与 PROVIDER_CAPS docblock）；attachments 为
++ * 第 15 键（ql-20260921-005 加入——会话附件链路开通，deliver=disk 落盘 +
++ * 路径清单也算，multimodal 键语义自此收窄为多模态块通道）：claude / pi /
++ * cursor=true（cursor 为 disk-only，图片/PDF 经 D-9 降级落盘）、codex=false；
++ * 未知 provider
+  * 查询返回默认拒绝对象（boolean
+  * 键全 false、dialog 取 'none'），不抛错。改取值先改本文件，再同步两端镜像。
+  */
+@@ -65,14 +69,22 @@ import { isPiFormSufficient, writePiDir } from '../pi-settings.js';
+ // 本文件，当前无环；task-02 派生化后其函数声明提升亦环安全。CredentialInjector /
+ // ProviderConfig 为 type-only import（verbatimModuleSyntax），零运行时依赖。
+ 
+-/** provider 能力矩阵（14 键：13 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
++/** provider 能力矩阵（15 键：14 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+ export interface ProviderCaps {
+   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
+   resume: boolean;
+   /** MCP server 注入（driver 实际消费 mcpServers 配置并生效）。 */
+   mcp: boolean;
+-  /** 多模态（会话附件：图片 / 文件注入）。 */
++  /** 多模态块通道（图片 / PDF 内联注入模型视觉输入；disk-only 附件另见 attachments 键）。 */
+   multimodal: boolean;
++  /**
++   * 会话附件链路开通（第 15 键，ql-20260921-005）：会话能否收附件（前端入口
++   * 与 backend 门控）。deliver=disk 落盘 + 路径清单也算——cursor 无多模态块
++   * 通道但经 daemon 引擎中立的落盘链路收附件（图片/PDF 由 D-9 gate 降级为
++   * 文件，模型不直接看图）；multimodal=true 的引擎（claude/pi）附件图片走
++   * 内联块。codex 附件链路未开通（D-6 沿袭）。
++   */
++  attachments: boolean;
+   /** 思考流（thinking 事件缓冲与渲染）。 */
+   thinking: boolean;
+   /** 子代理（团队派工 / Task 分身链路）。 */
+@@ -158,6 +170,8 @@ export interface ProviderCaps {
+  *   `provider !== "claude"` 才禁；backend daemon/session/service.py:1361 /
+  *   2845 `!= "claude"` 才 raise AttachmentsUnsupported（「仅 Claude 支持多模态
+  *   与文件注入」）；
++ * - attachments=true（ql-20260921-005 第 15 键初值随 multimodal）：claude 附件
++ *   链路自 2026-08-20 task-05 起开通（块 + 落盘双路由）；
+  * - thinking：src/interactive/session-manager.ts:404-410 Claude SDK
+  *   thinking_delta 缓冲 → [THINKING] flush 链；
+  * - subagent：frontend session-panel.tsx:3237 / 3563 / 5707 团队派工门控
+@@ -191,11 +205,13 @@ export interface ProviderCaps {
+  *   `if (ctx.model) params.model = ctx.model`（frontend session-panel.tsx:5913-5921
+  *   模型输入框不按 provider 门控）。
+  *
+- * codex 其余 4 项 false：
++ * codex 其余 5 项 false：
+  * - mcp：driver.ts:135-136 codex driver 对 mcpServers 仅暂存不消费
+  *   （「codex app-server MCP 注入留后续任务」）；
+  * - multimodal：session-panel.tsx:5695 codex 附件禁用；backend service.py:1361 /
+  *   2845 codex 直接 raise；
++ * - attachments=false（D-6 沿袭，ql-20260921-005 未对 codex 开放——落盘链路
++ *   同样可行，留后续变更按需开通）；
+  * - subagent：session-panel.tsx:3237 / 3563 / 5707 团队派工仅 claude；
+  * - edit_patch：run_sync/service.py:3679 structuredPatch 仅 Claude SDK 形状，
+  *   codex flat message 契约无此字段。
+@@ -209,6 +225,8 @@ export interface ProviderCaps {
+  * - mcp=false（暂缺）：pi 无原生 MCP（自家 extension 生态另轨），桥接留后续
+  *   变更（design §3 非目标）；
+  * - multimodal=true（原生）：rpc prompt images（ImageContent base64）；
++ * - attachments=true（ql-20260921-005 第 15 键初值随 multimodal，pi 附件链路
++ *   2026-09-04 起即随门控放行）；
+  * - thinking=true（原生）：--thinking 七档 + set_thinking_level + thinking
+  *   内容块；
+  * - subagent=false（终值，task-06 实证）：pi subagent 是 examples/ 示例扩展
+@@ -239,7 +257,12 @@ export interface ProviderCaps {
+  * - resume=true（原生）：driver `--resume` 通道（D-001@v1）+ CLI 实测，Wave 0 验证 B
+  *   （--resume 记忆连续性）已通过（spike-cursor-frames.md）；
+  * - mcp=false（暂缺）：CLI 无 per-session `--mcp-config`（D-008@v1）；
+- * - multimodal=false（暂缺）：附件 / blocks 无对应 CLI 通道；
++ * - multimodal=false（暂缺）：附件多模态块（图片内联）无对应 CLI 通道；
++ * - attachments=true（ql-20260921-005）：CLI 无块通道但 daemon 落盘链路
++ *   （deliver=disk：MinIO 下载 → cwd/attachments/{sha256}.{ext} + prompt 路径
++ *   清单，turn-control 引擎中立）可收附件——backend resolve_multimodal_gate
++ *   与本表 multimodal 相与后 cursor 恒走 disk（图片/PDF 降级为文件，模型不
++ *   直接看图，用户在会话内以文件路径引用）；
+  * - thinking=true（task-01 实测修正）：顶层 thinking 帧稳定存在且有 fixture 样本，
+  *   归一化器已映射 delta→thinking 流式——不以过期任务卡 thinking=false 为准；
+  * - subagent=false（暂缺）：团队派工无对应 CLI 通道；
+@@ -297,6 +320,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     resume: true,
+     mcp: true,
+     multimodal: true,
++    attachments: true,
+     thinking: true,
+     subagent: true,
+     permission_dialog: true,
+@@ -313,6 +337,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     resume: true,
+     mcp: false,
+     multimodal: false,
++    attachments: false,
+     // 2026-09-14-session-thinking-level task-01 翻值（Grill P0-3 纯声明对齐，
+     // 无行为变化）：driver :671-682 已映射 reasoning→thinking 事件，渲染由
+     // 事件流无条件驱动、零 caps 消费方——依据详见上方 docblock codex 段。
+@@ -335,6 +360,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     resume: true,
+     mcp: false,
+     multimodal: true,
++    attachments: true,
+     thinking: true,
+     subagent: false,
+     permission_dialog: true,
+@@ -355,6 +381,10 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     resume: true,
+     mcp: false,
+     multimodal: false,
++    // attachments=true（ql-20260921-005）：CLI 无多模态块通道，但 daemon 落盘
++    // 链路（deliver=disk + 路径清单）引擎中立——cursor 收 disk-only 附件，
++    // 图片/PDF 经 backend gate 与 caps.multimodal 相与后强制降级落盘。
++    attachments: true,
+     thinking: true,
+     subagent: false,
+     permission_dialog: false,
+@@ -387,6 +417,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
+     resume: false,
+     mcp: false,
+     multimodal: false,
++    attachments: false,
+     thinking: false,
+     subagent: false,
+     permission_dialog: false,
+diff --git a/sillyhub-daemon/tests/interactive/provider-registry.test.ts b/sillyhub-daemon/tests/interactive/provider-registry.test.ts
+index c645e4817..13ca07cfa 100644
+--- a/sillyhub-daemon/tests/interactive/provider-registry.test.ts
++++ b/sillyhub-daemon/tests/interactive/provider-registry.test.ts
+@@ -137,7 +137,7 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）',
+     expect(INTERACTIVE_PROVIDERS.pi?.family).toBe('pi_json');
+   });
+ 
+-  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、14 契约键齐全', () => {
++  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、15 契约键齐全', () => {
+     // ql-20260911-017：99a228add（askuser-pi-cursor）给 caps 增第 9 键 dialog
+     // （值 'native' 字符串非 boolean），守护测试未同步——主仓预存债务顺手修
+     // （skills-central-library verify 门实测暴露，与本变更无关）。
+@@ -160,7 +160,8 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）',
+     // SDK 命令队列忙轮吸收、codex app-server turn/steer 三引擎 true，cursor
+     // CLI 无对应通道 false，未知 provider 回退 false；claude/codex 投递时机
+     // 与参数待 spike-02/01 实测收口）。
+-    const fourteenKeys = [
++    const fifteenKeys = [
++      'attachments',
+       'compact',
+       'ctx_usage',
+       'dialog',
+@@ -179,7 +180,7 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）',
+     for (const [key, d] of Object.entries(INTERACTIVE_PROVIDERS)) {
+       // 单源引用（非复制值）：descriptor.caps 必须就是 PROVIDER_CAPS 的表项对象。
+       expect(d.caps).toBe(PROVIDER_CAPS[key]);
+-      expect(Object.keys(d.caps).slice().sort()).toEqual(fourteenKeys);
++      expect(Object.keys(d.caps).slice().sort()).toEqual(fifteenKeys);
+       for (const [capKey, capValue] of Object.entries(d.caps)) {
+         expect(capValue).toBe(PROVIDER_CAPS[key]?.[capKey as keyof typeof d.caps]);
+         // dialog 为三态标记（'native' | false | …字符串/布尔），其余十一键恒 boolean

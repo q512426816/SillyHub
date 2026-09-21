@@ -44,12 +44,16 @@ _FRONTEND_TABLE_PATH = _REPO_ROOT / "frontend" / "src" / "lib" / "provider-caps.
 # boolean 键（FR-01 会话级思考强度档位通道，claude/pi/codex 三引擎通道实证
 # true、cursor 无通道 false）+ 2026-09-18-single-chat-steering task-01 新增
 # steering boolean 键（FR-02 运行中会话追加消息转向通道，pi/claude/codex
-# true、cursor 无通道 false——claude/codex 取值待 spike 实测后收口）= 14 键。
+# true、cursor 无通道 false——claude/codex 取值待 spike 实测后收口）+
+# ql-20260921-005 新增 attachments boolean 键（会话附件链路开通，deliver=disk
+# 落盘 + 路径清单也算：claude/pi/cursor=true、codex=false；multimodal 键语义
+# 自此收窄为多模态块通道，cursor 附件图片经 gate 相与强制落盘）= 15 键。
 EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
     {
         "resume",
         "mcp",
         "multimodal",
+        "attachments",
         "thinking",
         "subagent",
         "permission_dialog",
@@ -151,13 +155,13 @@ def _all_ends() -> dict[str, dict[str, dict[str, bool | str]]]:
     }
 
 
-def test_caps_key_sets_identical_and_are_the_14_contract_keys() -> None:
-    """①三端每个 provider 条目的键集合一致，且恰为契约 14 键（多键少键都失败）。
+def test_caps_key_sets_identical_and_are_the_15_contract_keys() -> None:
+    """①三端每个 provider 条目的键集合一致，且恰为契约 15 键（多键少键都失败）。
 
-    14 键 = 13 个 boolean 键 + dialog string 枚举键（task-12 / FR-06）——任一端
+    15 键 = 14 个 boolean 键 + dialog string 枚举键（task-12 / FR-06）——任一端
     漏加 dialog 键即在此失败（R-09：解析器已扩 string 值支持，不会静默丢弃）。
     """
-    assert len(EXPECTED_CAPS_KEYS) == 14
+    assert len(EXPECTED_CAPS_KEYS) == 15
     for end_name, table in _all_ends().items():
         for provider, caps in table.items():
             assert set(caps) == EXPECTED_CAPS_KEYS, (
@@ -197,14 +201,14 @@ def test_cap_values_identical_per_provider_per_key() -> None:
                 )
 
 
-def test_unknown_provider_returns_default_deny_with_14_keys() -> None:
-    """④未知 provider 查询：不抛错 + 14 键齐全 + 默认拒绝（FR-06 / R-09）。
+def test_unknown_provider_returns_default_deny_with_15_keys() -> None:
+    """④未知 provider 查询：不抛错 + 15 键齐全 + 默认拒绝（FR-06 / R-09）。
 
     默认拒绝形态：13 个 boolean 键全 False + dialog string 枚举回退 'none'。
     """
     caps = get_provider_caps("__definitely_unknown_provider__")
     assert set(caps) == EXPECTED_CAPS_KEYS
-    assert len(caps) == 14
+    assert len(caps) == 15
     assert caps["dialog"] == "none"
     assert all(value is False for key, value in caps.items() if key != "dialog")
     # 返回新 dict：调用方修改不污染模块级镜像表。

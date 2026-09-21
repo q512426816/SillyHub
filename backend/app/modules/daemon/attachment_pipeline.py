@@ -17,9 +17,9 @@
   （reason=attachment_not_found）；group → ``GroupChatInvalid`` 400 群错误族
   （群消息整体拒绝，无逐会话资源语义）。经 ``not_found_error`` /
   ``invalid_count_error`` 工厂回调留在调用点，核心只保证判定顺序与阈值；
-- 引擎门控位置：session 侧发送前 ProviderCaps multimodal 门控
-  （``DaemonSessionAttachmentsUnsupported``）；group 侧门控下沉到逐成员触发
-  时判定（成员引擎各异）。
+- 引擎门控位置：session 侧发送前 ProviderCaps attachments 门控
+  （``DaemonSessionAttachmentsUnsupported``，ql-20260921-005 起改键）；group
+  侧门控下沉到逐成员触发时判定（成员引擎各异）。
 
 上限单源：图/文数量上限统一取 ``session_attachment.service`` 的
 ``MAX_IMAGES_PER_MESSAGE`` / ``MAX_FILES_PER_MESSAGE``（group 侧原口径；
@@ -40,6 +40,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.modules.agent.provider_caps import get_provider_caps
 
 
 async def validate_owned_attachments(
@@ -98,11 +99,17 @@ async def resolve_multimodal_gate(
     session_llm_provider_id: uuid.UUID | None,
     agent_kind: str,
 ) -> bool:
-    """多模态 gate 判定（D-9）→ ``supports_multimodal`` 标量。
+    """多模态门控判定（D-9）→ ``supports_multimodal`` 标量。
 
     session ``_resolve_inject_gate``（gate 基准=本轮生效供应商）与 group
     ``_assemble_group_inject_attachments``（基准=成员六要素，属主=群主）共享；
     基准口径的计算留在各调用点。
+
+    ql-20260921-005：返回值与 ProviderCaps ``multimodal`` 键（多模态块通道）
+    相与——``agent_kind`` 即引擎名（调用点均传 session/member provider）。
+    cursor 附件链路经 ``attachments`` 键开放后无块通道，图片/PDF 在此强制
+    降为 deliver=disk 落盘（防 BYO 默认供应商行误判 supports=true 走 block，
+    被 driver 静默丢图）；claude/pi 块通道不受影响。
     """
     from app.modules.session_attachment.capability import resolve_session_gate
 
@@ -112,7 +119,7 @@ async def resolve_multimodal_gate(
         session_llm_provider_id=session_llm_provider_id,
         agent_kind=agent_kind,
     )
-    return gate.supports_multimodal
+    return gate.supports_multimodal and bool(get_provider_caps(agent_kind)["multimodal"])
 
 
 async def assemble_attachments(rows: list, *, supports_multimodal: bool) -> list[dict]:

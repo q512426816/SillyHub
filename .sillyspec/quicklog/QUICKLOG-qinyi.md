@@ -86,7 +86,7 @@
 审计：[gate] L1（跨 0 模块 · 5 文件：2 代码/2 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
 
 ## ql-20260920-005-dac1 | 2026-09-20 14:26:42 | 单聊引导（Steering）忙轮直注入
-状态：进行中
+状态：已取消
 关联变更：2026-09-18-single-chat-steering
 文件：backend/app/modules/daemon/router/session_crud.py, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/message-queue-bar.tsx, frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
 
@@ -213,3 +213,63 @@
 方案：session-panel-page 新增 claimPendingPlaceholderTurn：user_input 事件到达且尚无该 run_id 轮时，按 steerMatchKey 同文匹配把 __pending_inject_* 占位轮原地改名为真实 run_id（status→running）；page/dialog 两挂载点 onLog user_input 各插一行；不认领守卫（无占位/已有轮/异文/空键）回落响应侧 replacePlaceholderTurn 既有收敛（幂等兜底不动）
 结果：新增 7 用例单测 + 1 端到端用例（修复前红），两测试文件 70 用例全绿；pnpm typecheck 通过；pnpm lint 触碰文件无新增告警（存量告警行号均未触碰）
 审计：[gate] L1（跨 0 模块 · 5 文件：2 代码/2 测试）advisory；每文件注记已全覆盖；测试增量已含
+
+## ql-20260921-005-d0aa | 2026-09-21 10:47:28 | cursor 会话开放附件——caps 第 15 键 attachments（disk-only）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/providers.ts（caps 单源：接口+四引擎 attachments 取值+docblock 依据）
+- sillyhub-daemon/scripts/gen-provider-caps.mjs（CAPS_KEYS+两端模板 15 键）
+- sillyhub-daemon/tests/interactive/provider-registry.test.ts（契约键列表 14→15）
+- frontend/src/lib/provider-caps.ts（生成产物）
+- backend/app/modules/agent/provider_caps.py（生成产物）
+- backend/app/modules/agent/tests/test_provider_caps_alignment.py（EXPECTED_CAPS_KEYS 扩 attachments）
+- backend/app/modules/daemon/attachment_pipeline.py（resolve_multimodal_gate 与 engine 块通道相与）
+- backend/app/modules/daemon/session/service/attachments.py（inject/create 门控改 attachments 键+中性文案）
+- backend/app/modules/daemon/tests/test_attachment_pipeline.py（gate 相与用例+mock 键更新）
+- backend/app/modules/daemon/tests/test_session_provider_caps.py（真值表改 attachments+cursor 放行用例+新文案）
+- backend/app/modules/knowledge/distill.py（洞一预检同改键（含 ruff format））
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（附件入口门控改键）
+- frontend/src/components/daemon/session-panel/session-panel-dialog.tsx（附件入口门控改键）
+- frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx（attachments 两态对照+cursor 用例）
+- frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx（pi 断言改 attachments+全对象补键）
+- .sillyspec/docs/SillyHub/modules/daemon.md（增量段落+caps 单源描述补第 15 键）
+需求：cursor 会话开放附件——caps 第 15 键 attachments（disk-only）
+根因：cursor CLI 无多模态块通道导致附件被整链 422 拒收，但 daemon 落盘+路径清单链路引擎中立本就可行（用户指出直接给文件路径即可）
+方案：ProviderCaps 新增 attachments 键（claude/pi/cursor=true、codex=false）拆分 multimodal 块通道语义；三端生成刷新+守护测试 15 键；backend inject/create/distill 门控改查新键，resolve_multimodal_gate 与 caps.multimodal 相与强制 cursor 图片/PDF 降级落盘防静默丢图；前端 4 处附件入口改查新键。测试断言重写说明：provider-registry fourteenKeys→fifteenKeys、pre-session-picker pi.multimodal→pi.attachments 均为新键接入同步契约清单（改键目的本身），非改断言凑绿。test 门禁 skip 理由：本轮沙箱被并行变更 scan-docs-ops-panel 半成品混入（scan_docs 9 失败，本会话零 scan_docs 文件，verify 对账已排除并行文件）+ 快照行尾致 ruff format 假阳性（主仓 format --check 1294 全绿）；实测已由前轮沙箱（五模块 841.9s test passed）与主仓 scoped 全绿覆盖
+结果：主仓 scoped：backend 60+11 passed + ruff check/format/mypy 0、frontend 49 passed、daemon typecheck 过 + registry 14 passed；前轮门禁沙箱 test 五模块全绿 841.9s（daemon 全量 17 失败均为既有 60s 环境性超时，单跑全绿）
+审计：[gate] L1（跨 1 模块 · 58 文件：19 代码/30 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：⚖️ 归属切分：37 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.github/workflows/frontend-ci.yml, backend/app/modules/scan_docs/router.py, backend/app/modules/scan_docs/schema.py, backend/app/modules/scan_docs/tests/test_stats.py, backend/openapi.json, docs/sillyspec/quick-gate-并行全流程变更脏文件误伤.md, frontend/.gitignore, frontend/package.json, frontend/pnpm-lock.yaml, frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx, frontend/src/components/__tests__/admin-org-tree.test.tsx, frontend/src/components/__tests__/agent-profile-form.test.tsx, frontend/src/components/__tests__/runtime-usage-line-chart.test.tsx, frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx, frontend/src/components/__tests__/work-hour-bar-chart.test.tsx, frontend/src/components/__tests__/work-hour-pie-chart.test.tsx, frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx, frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx, frontend/src/components/changes/__tests__/platform-sync-section.test.tsx, frontend/src/components/daemon/__tests__/bash-progress-card.test.tsx, frontend/src/components/daemon/__tests__/platform-shared-agents-card.test.tsx, frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx, frontend/src/components/explorer/__tests__/file-explorer.test.tsx, frontend/src/components/explorer/__tests__/file-preview.test.tsx, frontend/src/components/group-chat/__tests__/member-panel.test.tsx, frontend/src/components/scan-docs-stats-panel.tsx, frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx, frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/__tests__/sessions-portal.test.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/scan-docs.ts, frontend/src/test/dom-queries.ts, frontend/vitest.config.ts
+
+## ql-20260921-006-2095 | 2026-09-21 11:19:25 | 前端 CI 接入覆盖率报告——不设门槛先看数
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/package.json（加 devDep @vitest/coverage-v8@2.1.9 + test:coverage 脚本）
+- frontend/pnpm-lock.yaml（安装产物）
+- frontend/vitest.config.ts（新增 coverage 配置段(不设阈值)）
+- .github/workflows/frontend-ci.yml（Test 步改覆盖率运行+报告 artifact+timeout 20min）
+- frontend/.gitignore（补 coverage/ 产物目录）
+- .sillyspec/docs/multi-agent-platform/modules/ci.md（frontend-ci 步骤与覆盖率门禁口径更新）
+- .sillyspec/docs/multi-agent-platform/modules/ci.changelog.md（新建变更索引）
+需求：前端 CI 接入覆盖率报告——不设门槛先看数
+根因：313 个前端测试文件无任何覆盖率度量,测没测到全凭感觉,是测试体系唯一盲区;backend 已有 cov-fail-under=60 硬门,前端冷启动直接设门槛只会即红,故先观察
+方案：package.json 加 @vitest/coverage-v8@2.1.9(精确匹配 vitest 2.1.9)+ test:coverage 脚本;vitest.config.ts 加 coverage 段(v8、text+html、include src/**、排除测试自身与测试基建,无 thresholds);frontend-ci.yml Test 步改跑 pnpm test:coverage + upload-artifact 上传 coverage/ 报告(7 天),timeout 15→20 分钟;.gitignore 补 coverage/;同步 ci 模块卡与 changelog
+结果：client-path 子集带覆盖率运行 1 文件 2 用例全过,text 摘要正常输出、coverage/index.html 生成;CI 全量验证留待下次 push
+审计：[gate] L1（跨 1 模块 · 7 文件：3 代码/0 测试）advisory；每文件注记已全覆盖；测试增量缺失（3 个代码文件无测试改动）
+
+## ql-20260921-007-727c | 2026-09-21 11:40:57 | 测试断言收拢:antd/echarts/加载态类查询集中封装 helper,清理纯样式类断言
+状态：已取消
+关联变更：（无）
+文件：frontend/src/test/dom-queries.ts, frontend/src/app/(dashboard)/runtimes/page.test.tsx, frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx, frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx, frontend/src/components/mobile/mobile-workspace-header.test.tsx, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx, frontend/src/components/chat/__tests__/round-divider.test.tsx, frontend/src/components/chat/__tests__/chat-message-avatar.test.tsx, frontend/src/components/daemon/__tests__/bash-progress-card.test.tsx, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/llm-providers/__tests__/usage-footer.test.tsx, frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx, frontend/src/components/changes/__tests__/platform-sync-section.test.tsx, frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx, frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx, frontend/src/components/daemon/__tests__/platform-shared-agents-card.test.tsx, frontend/src/components/explorer/__tests__/file-explorer.test.tsx, frontend/src/components/explorer/__tests__/file-preview.test.tsx, frontend/src/components/group-chat/__tests__/member-panel.test.tsx, frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx, frontend/src/components/sessions/__tests__/sessions-portal.test.tsx, frontend/src/components/__tests__/agent-profile-form.test.tsx, frontend/src/components/__tests__/runtime-usage-line-chart.test.tsx, frontend/src/components/__tests__/work-hour-bar-chart.test.tsx, frontend/src/components/__tests__/work-hour-pie-chart.test.tsx
+
+## ql-20260921-008-b962 | 2026-09-21 11:48:04 | 前端测试第三方结构查询收口 dom-queries——antd/echarts 升级爆炸面归一
+状态：已完成
+关联变更：（无）
+文件：.sillyspec/docs/frontend/modules/test-utils.changelog.md（+8/-0）, .sillyspec/docs/frontend/modules/test-utils.md（+8/-2）, frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx（+7/-6）, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（+3/-4）, frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx（+19/-18）, frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx（+3/-2）, frontend/src/components/__tests__/admin-org-tree.test.tsx（+2/-1）, frontend/src/components/__tests__/agent-profile-form.test.tsx（+4/-5）, frontend/src/components/__tests__/runtime-usage-line-chart.test.tsx（+6/-5）, frontend/src/components/__tests__/work-hour-bar-chart.test.tsx（+4/-3）, frontend/src/components/__tests__/work-hour-pie-chart.test.tsx（+4/-3）, frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx（+5/-7）, frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx（+4/-3）, frontend/src/components/changes/__tests__/platform-sync-section.test.tsx（+3/-2）, frontend/src/components/daemon/__tests__/bash-progress-card.test.tsx（+5/-4）, frontend/src/components/daemon/__tests__/platform-shared-agents-card.test.tsx（+12/-14）, frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx（+2/-1）, frontend/src/components/explorer/__tests__/file-explorer.test.tsx（+11/-16）, frontend/src/components/explorer/__tests__/file-preview.test.tsx（+3/-2）, frontend/src/components/group-chat/__tests__/member-panel.test.tsx（+4/-5）, frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx（+8/-9）, frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx（+4/-3）, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx（+17/-16）, frontend/src/components/sessions/__tests__/sessions-portal.test.tsx（+12/-13）
+需求：前端测试第三方结构查询收口 dom-queries——antd/echarts 升级爆炸面归一
+根因：22 个测试文件散落约 95 处 .ant-*/.echarts-for-react 字面量查询,antd 大版本升级或图表库替换时测试会成片碎;评估时标记的纯样式断言逐处审计后确认全部为有意契约守卫(主题语义阶/触摸热区/需求R-01槽位/原型配色),故样式清理零删除,只做结构查询收口
+方案：新建 src/test/dom-queries.ts 17 函数;校验式 codemod 迁移 22 文件约95处(期望命中数校验,修过 CRLF 行尾与 import 插入点两坑);被改断言均为同类名→同 helper 的等价迁移(语义护栏指向的三个文件即属此类,不改变绿灯语义);scan-docs-page 与 pre-session-picker 因并行会话改动暂缓;同步 test-utils 模块卡+changelog。test gate 两轮红均出自并行会话 2026-09-21-scan-docs-ops-panel 的 WIP 文件(test_stats.py 9 failed / router.py ruff-format),非本变更文件;本变更不涉任何 backend 文件,按规则 19 不越界修他者活跃变更,故 SILLYSPEC_QUICK_TEST_GATE=skip 留痕跳过(本地实证见结果字段,CI push 后全量再验)
+结果：22 文件 513 用例全绿(106.7s)、tsc --noEmit 干净、eslint 0 error(13 warning 全存量)、残留字面量 grep 为零;门禁快照内 frontend 侧无失败(红全部为并行会话 scan_docs WIP);CI 全量留待 push
+审计：[gate] L1（跨 0 模块 · 33 文件：6 代码/24 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：⚖️ 归属切分：8 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/scan_docs/router.py, backend/app/modules/scan_docs/schema.py, backend/app/modules/scan_docs/tests/test_stats.py, backend/openapi.json, frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx, frontend/src/components/scan-docs-stats-panel.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/scan-docs.ts

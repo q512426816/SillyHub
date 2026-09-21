@@ -492,15 +492,15 @@ describe("对话框路径 PI 引擎可选（runtime-session-helpers 白名单加
 
 /* ───────── 7. pi 态 caps 门控（查表裁剪前置事实，FR-03 / FR-04） ───────── */
 
-// session-panel 附件（multimodal）/ 团队派工（subagent）门控均为 getProviderCaps
+// session-panel 附件（attachments，ql-20260921-005 起改键）/ 团队派工（subagent）门控均为 getProviderCaps
 // 查表的 provider 无关通用代码（2026-09-03-agent-provider-abstraction task-11 收敛；
 // claude/codex 两态渲染对照由 daemon/__tests__/session-panel-provider-caps.test.tsx
 // 守护）——pi 态 UI 随表值自动裁剪（design §5.3「门控零新代码」红利）。本卡
-// allowed_paths 不含该测试文件，此处锁 pi 表值前置事实：multimodal=true → 附件
+// allowed_paths 不含该测试文件，此处锁 pi 表值前置事实：attachments=true → 附件
 // 入口可用；subagent=false → 团队派工置灰（§6.2 纪律，实证后由 task-06 三端翻值）。
 describe("pi 态 caps 门控前置事实（getProviderCaps 查表值）", () => {
-  it("multimodal=true（附件按钮可见）/ subagent=false（团队派工隐藏）", () => {
-    expect(getProviderCaps("pi").multimodal).toBe(true);
+  it("attachments=true（附件按钮可见）/ subagent=false（团队派工隐藏）", () => {
+    expect(getProviderCaps("pi").attachments).toBe(true);
     expect(getProviderCaps("pi").subagent).toBe(false);
   });
 
@@ -633,11 +633,15 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
     // 2026-09-18-single-chat-steering task-01（FR-02，连带测试同款）：第 14 键
     // steering（运行中会话追加消息转向通道）随 @generated 产物加入后本全对象
     // toEqual 必红——同步补齐（cursor 无注入通道=false / 未知引擎回退=false）。
+    // ql-20260921-005（连带测试同款）：第 15 键 attachments（会话附件链路开通，
+    // disk-only 落盘也算）随 @generated 产物加入后本全对象 toEqual 必红——同步
+    // 补齐（cursor=true 走落盘+路径清单 / 未知引擎回退=false）。
     const caps = getProviderCaps("cursor");
     expect(caps).toEqual({
       resume: true,
       mcp: false,
       multimodal: false,
+      attachments: true,
       thinking: true,
       subagent: false,
       permission_dialog: false,
@@ -658,6 +662,7 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
       resume: false,
       mcp: false,
       multimodal: false,
+      attachments: false,
       thinking: false,
       subagent: false,
       permission_dialog: false,

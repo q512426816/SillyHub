@@ -1616,15 +1616,16 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     !hasOnlineProvider ||
     offlineReadOnly;
 
-  // ql-20260825-007：附件门控（D-6 引擎门控同构 + 首句门控）——codex 引擎禁；
-  // 无 sessionId（idle 首句 / creating）禁：createSession 契约无 attachment_ids
-  //（R3），放开会出现「上传成功但发不出去」。attach 模式进入即有 sessionId，
-  // 追问/排队路径（injectSession）已支持附件，正常开放。
-  // provider-abstraction task-11：引擎门控收敛查 ProviderCaps（multimodal 键，
-  // 与原 !== / === "claude" 等价）。
-  const attachmentsDisabled = !getProviderCaps(provider).multimodal || !view.sessionId;
+  // ql-20260825-007：附件门控（D-6 引擎门控同构 + 首句门控）——附件链路未
+  // 开通引擎（codex / 未知）禁；无 sessionId（idle 首句 / creating）禁：
+  // createSession 契约无 attachment_ids（R3），放开会出现「上传成功但发不出
+  // 去」。attach 模式进入即有 sessionId，追问/排队路径（injectSession）已
+  // 支持附件，正常开放。
+  // provider-abstraction task-11：引擎门控收敛查 ProviderCaps（attachments
+  // 键，ql-20260921-005 改键——cursor=true 走 disk-only 落盘链路）。
+  const attachmentsDisabled = !getProviderCaps(provider).attachments || !view.sessionId;
   const attachmentsDisabledTitle =
-    getProviderCaps(provider).multimodal && !view.sessionId
+    getProviderCaps(provider).attachments && !view.sessionId
       ? "发送首条消息创建会话后可添加附件"
       : undefined;
 

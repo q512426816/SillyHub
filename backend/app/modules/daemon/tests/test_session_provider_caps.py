@@ -3,8 +3,9 @@
 
 背景（design §5.2 / FR-06 / D-002@v1）：daemon/session/service.py 内四处引擎
 字面量门控（``!= "claude"`` ×3 / ``not in {"claude", "codex"}`` ×1）已收敛为
-``get_provider_caps(provider)["multimodal" | "resume"]`` 查表。本文件做**纯重构
-验收**——对每个收敛判定做函数级输入输出对照，断言与改造前硬编码逐一相等：
+``get_provider_caps(provider)["attachments" | "resume"]`` 查表（ql-20260921-005
+起附件门控改查 attachments 键——cursor 附件开放，multimodal 键收窄为多模态
+块通道）。本文件做**查表行为断言**——对每个收敛判定做函数级输入输出对照：
 
 1. 真值表对照：查表判定 vs 改造前字面量判定，对 claude / codex / 未知 provider
    全集逐值断言等价（caps 表取值漂移即失败——这正是查表化后唯一的行为风险面）；
@@ -50,20 +51,41 @@ from app.modules.daemon.session.service import (
 # 下面真值表把改造前判定**逐字面量复写**在断言右侧——caps 表任何一键漂移
 # （例如 codex.multimodal 误置 True）都会让等价断裂、测试失败。
 
-# 真值表覆盖的 provider 全集：两契约 provider + 空 + 未知（默认拒绝路径）。
-_TRUTH_TABLE_PROVIDERS = ("claude", "codex", "", "gemini", "gpt")
+# 真值表覆盖的 provider 全集：契约 provider + 空 + 未知（默认拒绝路径）。
+_TRUTH_TABLE_PROVIDERS = ("claude", "codex", "pi", "cursor", "", "gemini", "gpt")
 
 
 @pytest.mark.parametrize("provider", _TRUTH_TABLE_PROVIDERS)
-def test_attachment_gate_truth_table_matches_pre_refactor_literal(provider: str) -> None:
-    """三处附件门控（create :1365 / ppm :2317 / inject :2853，multimodal 键）。"""
-    assert (not get_provider_caps(provider)["multimodal"]) == (provider != "claude")
+def test_attachment_gate_truth_table_matches_current_contract(provider: str) -> None:
+    """三处附件门控（create / ppm / inject，attachments 键，ql-20260921-005）。
+
+    改键后放行集 = {claude, pi, cursor}（cursor 为 disk-only：无多模态块通道，
+    图片/PDF 经 gate 相与强制落盘）；codex / 空 / 未知默认拒绝。右侧把现行
+    契约字面量复写——caps 表任何一键漂移（例如 codex.attachments 误置 True）
+    都会让等价断裂、测试失败。
+    """
+    assert (not get_provider_caps(provider)["attachments"]) == (
+        provider not in {"claude", "pi", "cursor"}
+    )
+
+
+@pytest.mark.parametrize("provider", _TRUTH_TABLE_PROVIDERS)
+def test_multimodal_block_channel_truth_table(provider: str) -> None:
+    """多模态块通道键取值对照（gate 相与依据）：仅 claude / pi 为 true。
+
+    ql-20260921-005 起 multimodal 键语义收窄为多模态块通道（resolve_multimodal_
+    gate 返回值与它相与）——cursor 虽开放附件（attachments=true）但无块通道，
+    此表锁定 cursor.multimodal=False 不得误翻。
+    """
+    assert get_provider_caps(provider)["multimodal"] == (provider in {"claude", "pi"})
 
 
 @pytest.mark.parametrize("provider", _TRUTH_TABLE_PROVIDERS)
 def test_resume_gate_truth_table_matches_pre_refactor_literal(provider: str) -> None:
-    """reopen resume 门控（:6345，resume 键）——codex 与 claude 同放行。"""
-    assert (not get_provider_caps(provider)["resume"]) == (provider not in {"claude", "codex"})
+    """reopen resume 门控（resume 键）——四引擎（claude/codex/pi/cursor）均放行。"""
+    assert (not get_provider_caps(provider)["resume"]) == (
+        provider not in {"claude", "codex", "pi", "cursor"}
+    )
 
 
 # ── ② inject 附件门控：_validate_inject_attachment_rows 函数级对照 ───────────
@@ -89,13 +111,13 @@ async def test_inject_attachment_gate_codex_rejects_with_verbatim_message() -> N
             session_provider="codex",
             attachment_ids=[uuid.uuid4()],
         )
-    # 改造前文案逐字对照（纯重构铁律：不改报错文案）。
-    assert exc_info.value.message == "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。"
+    # ql-20260921-005 改键后新文案（「仅 Claude」已失实——pi/cursor 均开放附件）。
+    assert exc_info.value.message == "此引擎不支持会话附件（文件与图片收件通道未开通）。"
     assert exc_info.value.details == {"session_id": str(session_id), "provider": "codex"}
 
 
 async def test_inject_attachment_gate_unknown_provider_rejects_same_as_before() -> None:
-    """未知 provider（原 != "claude" 真值同为拒绝）→ 同款异常，默认拒绝语义。"""
+    """未知 provider（默认拒绝语义）→ 同款异常。"""
     svc = _make_service_with_stub_db()
     with pytest.raises(DaemonSessionAttachmentsUnsupported) as exc_info:
         await svc._validate_inject_attachment_rows(
@@ -104,7 +126,7 @@ async def test_inject_attachment_gate_unknown_provider_rejects_same_as_before() 
             session_provider="gemini",
             attachment_ids=[uuid.uuid4()],
         )
-    assert exc_info.value.message == "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。"
+    assert exc_info.value.message == "此引擎不支持会话附件（文件与图片收件通道未开通）。"
 
 
 async def test_inject_attachment_gate_claude_passes_gate() -> None:
@@ -114,6 +136,22 @@ async def test_inject_attachment_gate_claude_passes_gate() -> None:
         session_id=uuid.uuid4(),
         session_user_id=uuid.uuid4(),
         session_provider="claude",
+        attachment_ids=[],
+    )
+    assert rows == []
+
+
+async def test_inject_attachment_gate_cursor_passes_gate() -> None:
+    """cursor 携附件 → 过引擎门控（ql-20260921-005 附件开放，disk-only 链路）。
+
+    与 claude 同款证明：过门控即进入归属/数量判定（空 ids → 返回 []）；块
+    通道降级由 resolve_multimodal_gate 相与测试守护（test_attachment_pipeline）。
+    """
+    svc = _make_service_with_stub_db()
+    rows = await svc._validate_inject_attachment_rows(
+        session_id=uuid.uuid4(),
+        session_user_id=uuid.uuid4(),
+        session_provider="cursor",
         attachment_ids=[],
     )
     assert rows == []

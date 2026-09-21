@@ -53,11 +53,12 @@ async def _validate_inject_attachment_rows(
     ``daemon/attachment_pipeline.validate_owned_attachments``（错误族经工厂
     回调保留在本链路语义：缺失/跨用户 404 资源隐藏、数量超限 422）。
     """
-    # provider-abstraction task-11：引擎门控收敛查 ProviderCaps（multimodal
-    # 键；文案逐字保留，与原 != "claude" 判定等价）。
-    if not get_provider_caps(session_provider)["multimodal"]:
+    # provider-abstraction task-11：引擎门控收敛查 ProviderCaps；ql-20260921-005
+    # 起改查 attachments 键（附件链路开通，cursor=true 走 disk-only 落盘链路；
+    # multimodal 键语义收窄为多模态块通道，图片 block 路由由 gate 相与决定）。
+    if not get_provider_caps(session_provider)["attachments"]:
         raise DaemonSessionAttachmentsUnsupported(
-            "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
+            "此引擎不支持会话附件（文件与图片收件通道未开通）。",
             details={"session_id": str(session_id), "provider": session_provider},
         )
     from app.modules.session_attachment.service import (
@@ -210,8 +211,9 @@ async def validate_create_attachments(
 ) -> list:
     """create 首句附件校验（task-08 自 create_session:1362-1403 拆出，零改写）。
 
-    D-6 引擎门控（ProviderCaps multimodal 键）/ 归属+存在 404 / 数量 422
-    （图≤5、文≤5）/ 保序；任一失败 raise → 无半成品落库。
+    D-6 引擎门控（ProviderCaps attachments 键，ql-20260921-005 起改键——
+    cursor 附件开放）/ 归属+存在 404 / 数量 422（图≤5、文≤5）/ 保序；任一
+    失败 raise → 无半成品落库。
 
     task-11 轻重构⑤：归属/数量/保序核心收敛到
     ``daemon/attachment_pipeline.validate_owned_attachments``（与 inject 校验
@@ -220,9 +222,10 @@ async def validate_create_attachments(
 
     validated_attachments: list = []
     if attachment_ids:
-        if not get_provider_caps(provider)["multimodal"]:
+        # ql-20260921-005：改查 attachments 键（与 inject 门控同键同极性）。
+        if not get_provider_caps(provider)["attachments"]:
             raise DaemonSessionAttachmentsUnsupported(
-                "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
+                "此引擎不支持会话附件（文件与图片收件通道未开通）。",
                 details={"provider": provider},
             )
         from app.modules.session_attachment.service import (

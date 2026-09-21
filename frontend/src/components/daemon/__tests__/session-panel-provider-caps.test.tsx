@@ -335,12 +335,26 @@ describe("ProviderCaps 表值（两态对照的前置事实，task-02 镜像）"
     expect(getProviderCaps("").dialog).toBe("none");
     expect(getProviderCaps("pi").permission_dialog).toBe(true);
   });
+
+  // ql-20260921-005：attachments 键（第 15 键，会话附件链路开通，disk-only 也
+  // 算）两态对照——claude/pi/cursor=true（cursor 走落盘+路径清单，图片/PDF 由
+  // backend gate 与 multimodal 相与降级为文件）、codex/未知=false；multimodal
+  // 键语义收窄为多模态块通道（cursor 仍 false，防块路由误开）。
+  it("attachments 键两态对照：claude/pi/cursor=true（cursor disk-only）；codex/未知=false；multimodal 块通道仍 claude/pi", () => {
+    expect(getProviderCaps("claude").attachments).toBe(true);
+    expect(getProviderCaps("pi").attachments).toBe(true);
+    expect(getProviderCaps("cursor").attachments).toBe(true);
+    expect(getProviderCaps("codex").attachments).toBe(false);
+    expect(getProviderCaps("").attachments).toBe(false);
+    expect(getProviderCaps("cursor").multimodal).toBe(false);
+    expect(getProviderCaps("pi").multimodal).toBe(true);
+  });
 });
 
 /* ───────── 1. dialog 模式（provider state 信息源） ───────── */
 
 describe("dialog 模式门控两态对照（task-11 收敛点：attachmentsDisabled / title / teamEngineOk / 拦截）", () => {
-  it("附件门控 multimodal：claude idle 态 title 走「首条消息」分支（caps.multimodal && !sessionId）", async () => {
+  it("附件门控 attachments：claude idle 态 title 走「首条消息」分支（caps.attachments && !sessionId）", async () => {
     setupDialog({ sessionId: null });
     await openPlusMenu();
     const clip = await findAttachmentItem();
@@ -348,7 +362,7 @@ describe("dialog 模式门控两态对照（task-11 收敛点：attachmentsDisab
     expect(clip.title).toBe("发送首条消息创建会话后可添加附件");
   });
 
-  it("附件门控 multimodal：codex 态禁用 + 默认 title「当前引擎不支持附件」（原 !== claude → title undefined）", async () => {
+  it("附件门控 attachments：codex 态禁用 + 默认 title「当前引擎不支持附件」", async () => {
     setupDialog({ sessionId: null, providers: ["codex"], defaultProvider: "codex" });
     await openPlusMenu();
     const clip = await findAttachmentItem();
@@ -356,7 +370,7 @@ describe("dialog 模式门控两态对照（task-11 收敛点：attachmentsDisab
     expect(clip.title).toBe("当前引擎不支持附件");
   });
 
-  it("附件门控 multimodal：claude attach 态可用（title 为添加说明，非禁用原因）", async () => {
+  it("附件门控 attachments：claude attach 态可用（title 为添加说明，非禁用原因）", async () => {
     setupDialog();
     await openPlusMenu();
     const clip = await findAttachmentItem();
@@ -417,19 +431,30 @@ describe("dialog 模式门控两态对照（task-11 收敛点：attachmentsDisab
 /* ───────── 2. page 模式（session.provider 信息源） ───────── */
 
 describe("page 模式门控两态对照（task-11 收敛点：attachmentsDisabled / teamEngineOk / 拦截）", () => {
-  it("附件门控 multimodal：claude 会话（session.provider）附件入口可用", async () => {
+  it("附件门控 attachments：claude 会话（session.provider）附件入口可用", async () => {
     setupPage("claude");
     await openPlusMenu();
     const clip = await findAttachmentItem();
     expect(clip.disabled).toBe(false);
   });
 
-  it("附件门控 multimodal：codex 会话（session.provider）附件入口禁用 + 默认 title", async () => {
+  it("附件门控 attachments：codex 会话（session.provider）附件入口禁用 + 默认 title", async () => {
     setupPage("codex");
     await openPlusMenu();
     const clip = await findAttachmentItem();
     expect(clip.disabled).toBe(true);
     expect(clip.title).toBe("当前引擎不支持附件");
+  });
+
+  // ql-20260921-005：cursor 附件开放（disk-only 落盘链路）——附件入口可用；
+  // 派团队仍置灰（subagent=false，CLI 无通道）。
+  it("附件门控 attachments：cursor 会话附件入口可用（disk-only）；团队仍置灰", async () => {
+    setupPage("cursor");
+    await openPlusMenu();
+    expect((await findAttachmentItem()).disabled).toBe(false);
+    const team = await findTeamItem();
+    expect(team.disabled).toBe(true);
+    expect(team.title).toBe("团队需要 Claude 引擎");
   });
 
   it("团队门控 subagent：claude 会话（session.provider）菜单项可用", async () => {

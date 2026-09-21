@@ -36,7 +36,11 @@
  * true、cursor 无通道 false）；steering 为第 14 键
  * （2026-09-18-single-chat-steering task-01 / FR-02 加入——运行中会话
  * 追加消息转向通道，pi/claude/codex=true、cursor 无通道 false，取值依据
- * 见下方 steering 键 docblock 与 PROVIDER_CAPS docblock）；未知 provider
+ * 见下方 steering 键 docblock 与 PROVIDER_CAPS docblock）；attachments 为
+ * 第 15 键（ql-20260921-005 加入——会话附件链路开通，deliver=disk 落盘 +
+ * 路径清单也算，multimodal 键语义自此收窄为多模态块通道）：claude / pi /
+ * cursor=true（cursor 为 disk-only，图片/PDF 经 D-9 降级落盘）、codex=false；
+ * 未知 provider
  * 查询返回默认拒绝对象（boolean
  * 键全 false、dialog 取 'none'），不抛错。改取值先改本文件，再同步两端镜像。
  */
@@ -65,14 +69,22 @@ import { isPiFormSufficient, writePiDir } from '../pi-settings.js';
 // 本文件，当前无环；task-02 派生化后其函数声明提升亦环安全。CredentialInjector /
 // ProviderConfig 为 type-only import（verbatimModuleSyntax），零运行时依赖。
 
-/** provider 能力矩阵（14 键：13 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+/** provider 能力矩阵（15 键：14 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
   /** MCP server 注入（driver 实际消费 mcpServers 配置并生效）。 */
   mcp: boolean;
-  /** 多模态（会话附件：图片 / 文件注入）。 */
+  /** 多模态块通道（图片 / PDF 内联注入模型视觉输入；disk-only 附件另见 attachments 键）。 */
   multimodal: boolean;
+  /**
+   * 会话附件链路开通（第 15 键，ql-20260921-005）：会话能否收附件（前端入口
+   * 与 backend 门控）。deliver=disk 落盘 + 路径清单也算——cursor 无多模态块
+   * 通道但经 daemon 引擎中立的落盘链路收附件（图片/PDF 由 D-9 gate 降级为
+   * 文件，模型不直接看图）；multimodal=true 的引擎（claude/pi）附件图片走
+   * 内联块。codex 附件链路未开通（D-6 沿袭）。
+   */
+  attachments: boolean;
   /** 思考流（thinking 事件缓冲与渲染）。 */
   thinking: boolean;
   /** 子代理（团队派工 / Task 分身链路）。 */
@@ -158,6 +170,8 @@ export interface ProviderCaps {
  *   `provider !== "claude"` 才禁；backend daemon/session/service.py:1361 /
  *   2845 `!= "claude"` 才 raise AttachmentsUnsupported（「仅 Claude 支持多模态
  *   与文件注入」）；
+ * - attachments=true（ql-20260921-005 第 15 键初值随 multimodal）：claude 附件
+ *   链路自 2026-08-20 task-05 起开通（块 + 落盘双路由）；
  * - thinking：src/interactive/session-manager.ts:404-410 Claude SDK
  *   thinking_delta 缓冲 → [THINKING] flush 链；
  * - subagent：frontend session-panel.tsx:3237 / 3563 / 5707 团队派工门控
@@ -191,11 +205,13 @@ export interface ProviderCaps {
  *   `if (ctx.model) params.model = ctx.model`（frontend session-panel.tsx:5913-5921
  *   模型输入框不按 provider 门控）。
  *
- * codex 其余 4 项 false：
+ * codex 其余 5 项 false：
  * - mcp：driver.ts:135-136 codex driver 对 mcpServers 仅暂存不消费
  *   （「codex app-server MCP 注入留后续任务」）；
  * - multimodal：session-panel.tsx:5695 codex 附件禁用；backend service.py:1361 /
  *   2845 codex 直接 raise；
+ * - attachments=false（D-6 沿袭，ql-20260921-005 未对 codex 开放——落盘链路
+ *   同样可行，留后续变更按需开通）；
  * - subagent：session-panel.tsx:3237 / 3563 / 5707 团队派工仅 claude；
  * - edit_patch：run_sync/service.py:3679 structuredPatch 仅 Claude SDK 形状，
  *   codex flat message 契约无此字段。
@@ -209,6 +225,8 @@ export interface ProviderCaps {
  * - mcp=false（暂缺）：pi 无原生 MCP（自家 extension 生态另轨），桥接留后续
  *   变更（design §3 非目标）；
  * - multimodal=true（原生）：rpc prompt images（ImageContent base64）；
+ * - attachments=true（ql-20260921-005 第 15 键初值随 multimodal，pi 附件链路
+ *   2026-09-04 起即随门控放行）；
  * - thinking=true（原生）：--thinking 七档 + set_thinking_level + thinking
  *   内容块；
  * - subagent=false（终值，task-06 实证）：pi subagent 是 examples/ 示例扩展
@@ -239,7 +257,12 @@ export interface ProviderCaps {
  * - resume=true（原生）：driver `--resume` 通道（D-001@v1）+ CLI 实测，Wave 0 验证 B
  *   （--resume 记忆连续性）已通过（spike-cursor-frames.md）；
  * - mcp=false（暂缺）：CLI 无 per-session `--mcp-config`（D-008@v1）；
- * - multimodal=false（暂缺）：附件 / blocks 无对应 CLI 通道；
+ * - multimodal=false（暂缺）：附件多模态块（图片内联）无对应 CLI 通道；
+ * - attachments=true（ql-20260921-005）：CLI 无块通道但 daemon 落盘链路
+ *   （deliver=disk：MinIO 下载 → cwd/attachments/{sha256}.{ext} + prompt 路径
+ *   清单，turn-control 引擎中立）可收附件——backend resolve_multimodal_gate
+ *   与本表 multimodal 相与后 cursor 恒走 disk（图片/PDF 降级为文件，模型不
+ *   直接看图，用户在会话内以文件路径引用）；
  * - thinking=true（task-01 实测修正）：顶层 thinking 帧稳定存在且有 fixture 样本，
  *   归一化器已映射 delta→thinking 流式——不以过期任务卡 thinking=false 为准；
  * - subagent=false（暂缺）：团队派工无对应 CLI 通道；
@@ -297,6 +320,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     resume: true,
     mcp: true,
     multimodal: true,
+    attachments: true,
     thinking: true,
     subagent: true,
     permission_dialog: true,
@@ -313,6 +337,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     resume: true,
     mcp: false,
     multimodal: false,
+    attachments: false,
     // 2026-09-14-session-thinking-level task-01 翻值（Grill P0-3 纯声明对齐，
     // 无行为变化）：driver :671-682 已映射 reasoning→thinking 事件，渲染由
     // 事件流无条件驱动、零 caps 消费方——依据详见上方 docblock codex 段。
@@ -335,6 +360,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     resume: true,
     mcp: false,
     multimodal: true,
+    attachments: true,
     thinking: true,
     subagent: false,
     permission_dialog: true,
@@ -355,6 +381,10 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     resume: true,
     mcp: false,
     multimodal: false,
+    // attachments=true（ql-20260921-005）：CLI 无多模态块通道，但 daemon 落盘
+    // 链路（deliver=disk + 路径清单）引擎中立——cursor 收 disk-only 附件，
+    // 图片/PDF 经 backend gate 与 caps.multimodal 相与后强制降级落盘。
+    attachments: true,
     thinking: true,
     subagent: false,
     permission_dialog: false,
@@ -387,6 +417,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     resume: false,
     mcp: false,
     multimodal: false,
+    attachments: false,
     thinking: false,
     subagent: false,
     permission_dialog: false,

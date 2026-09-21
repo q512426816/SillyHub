@@ -28,8 +28,9 @@ task-07 + D-009 续接分流 + D-010 闭环增强 + D-008 取数通道/回流指
   ``text/markdown``），随 create_session ``attachment_ids`` 下发——daemon 侧
   ``deliver=disk`` 落盘 ``{cwd}/attachments/{sha256}.md`` 并在消息尾追加
   「附件已落盘」路径清单（``turn-control.ts``），prompt 指读该文件。附件
-  引擎门控（``provider_caps.multimodal``，仅 claude/pi）→ 非多模态引擎
-  fresh 会话源在 dispatch 预检 422（引导 resume 模式）。
+  引擎门控（``provider_caps.attachments``，ql-20260921-005 起改键——claude/
+  pi/cursor）→ 附件链路未开通引擎（codex / 未知）fresh 会话源在 dispatch
+  预检 422（引导 resume 模式）。
 - **洞二（产出回流指引）**：全局 ``settings.spec_transport`` 默认 ``tar``
   （config.py:271，daemon-client 单一路径）——交互会话启动时 daemon 把平台
   spec bundle pull 到 ``~/.sillyhub/daemon/specs/{ws_id}``（三策略统一落点：
@@ -536,11 +537,13 @@ class DistillDispatchService:
                         "max_turns": DISTILL_MAX_SESSION_TURNS,
                     },
                 )
-            # 护栏②：附件引擎门控——附件通道仅多模态引擎（claude/pi）可用；
-            # 此处预检显式 agent_type/工作区缺省引擎，runtime_id 钉定派生的
-            # 引擎由 create_session 附件校验兜底（except 转 422 见下）。
+            # 护栏②：附件引擎门控——附件通道按 attachments 键（claude/pi/
+            # cursor，ql-20260921-005 起改键；cursor 走 disk-only 落盘同样
+            # 可收 .md 记录）可用；此处预检显式 agent_type/工作区缺省引擎，
+            # runtime_id 钉定派生的引擎由 create_session 附件校验兜底
+            # （except 转 422 见下）。
             fresh_provider = agent_type or workspace.default_agent or "claude"
-            if not get_provider_caps(fresh_provider)["multimodal"]:
+            if not get_provider_caps(fresh_provider)["attachments"]:
                 raise DistillSourceInvalid(
                     f"引擎「{fresh_provider}」不支持会话附件，无法通过附件下发对话记录，"
                     "请改用原会话续接（mode=resume）模式，或选择支持附件的引擎（如 Claude）。",

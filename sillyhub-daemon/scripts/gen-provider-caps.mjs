@@ -60,6 +60,7 @@ const CAPS_KEYS = [
   "resume",
   "mcp",
   "multimodal",
+  "attachments",
   "thinking",
   "subagent",
   "permission_dialog",
@@ -208,25 +209,33 @@ function renderFrontend(table) {
  *
  * 镜像约定（三端同步，单源 = daemon 侧，2026-09-11-provider-adapter-registry
  * task-04 起手抄镜像退役）：daemon 单源改取值后重跑生成脚本，本文件与 backend
- * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（14 键：
- * 13 个 boolean + dialog string 枚举）与每个 provider 每键取值一致性由
+ * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（15 键：
+ * 14 个 boolean + dialog string 枚举）与每个 provider 每键取值一致性由
  * backend/app/modules/agent/tests/test_provider_caps_alignment.py 以源文件
  * 读取方式守护（任一端漂移即测试失败）。
  *
- * 取值语义：caps 描述 provider 当前真实能力，13 个 boolean 键缺省 false 默认
+ * 取值语义：caps 描述 provider 当前真实能力，14 个 boolean 键缺省 false 默认
  * 拒绝（FR-06 / D-002@v1）；dialog 为 string 枚举键（'native' = 走平台
  * dialog 管道 / 'marker' = 纯前端标记协议 / 'none' = 无通道）；未知 provider
  * 查询返回默认拒绝对象（boolean 键全 false、dialog 取 'none'），不抛错。
  */
 
-/** provider 能力矩阵（14 键：13 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+/** provider 能力矩阵（15 键：14 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
   /** MCP server 注入（driver 实际消费 mcpServers 配置并生效）。 */
   mcp: boolean;
-  /** 多模态（会话附件：图片 / 文件注入）。 */
+  /** 多模态块通道（图片 / PDF 内联注入模型视觉输入；disk-only 附件另见 attachments 键）。 */
   multimodal: boolean;
+  /**
+   * 会话附件链路开通（第 15 键，ql-20260921-005）：会话能否收附件（前端入口
+   * 与 backend 门控）。deliver=disk 落盘 + 路径清单也算——cursor 无多模态块
+   * 通道但经 daemon 引擎中立的落盘链路收附件（图片/PDF 由 D-9 gate 降级为
+   * 文件，模型不直接看图）；multimodal=true 的引擎（claude/pi）附件图片走
+   * 内联块。codex 附件链路未开通（D-6 沿袭）。
+   */
+  attachments: boolean;
   /** 思考流（thinking 事件缓冲与渲染）。 */
   thinking: boolean;
   /** 子代理（团队派工 / Task 分身链路）。 */
@@ -302,6 +311,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     resume: false,
     mcp: false,
     multimodal: false,
+    attachments: false,
     thinking: false,
     subagent: false,
     permission_dialog: false,
@@ -356,7 +366,7 @@ task-04 起手抄镜像退役）：
   \`\`PROVIDER_CAPS\`\`（含取值依据的文件:行号锚点注释，改值先改那里）；
 - 本文件与 \`\`frontend/src/lib/provider-caps.ts\`\` 均为脚本生成产物，daemon
   单源改值后重跑 \`\`sillyhub-daemon/scripts/gen-provider-caps.mjs\`\` 三端一并
-  刷新，三端键集合（14 键：13 个 boolean + dialog string 枚举）与每个
+  刷新，三端键集合（15 键：14 个 boolean + dialog string 枚举）与每个
   provider 每键取值必须一致；
 - 一致性由 \`\`app/modules/agent/tests/test_provider_caps_alignment.py\`\` 以
   源文件读取方式守护（直接读 daemon / frontend 表源比对，不复制值断言），
@@ -373,7 +383,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
 ${engineBlocks}
 }
 
-# 键序取自镜像表首条目（claude）；14 键齐全与三端一致性由守护测试保证。
+# 键序取自镜像表首条目（claude）；15 键齐全与三端一致性由守护测试保证。
 _CAPS_KEYS: tuple[str, ...] = tuple(next(iter(PROVIDER_CAPS.values())))
 
 
@@ -386,7 +396,7 @@ def get_provider_caps(provider: str) -> dict[str, bool | str]:
     Returns:
         dict[str, bool | str]: 已知 provider 返回表内条目的**副本**（调用方可安全
         修改，不污染模块级共享表）；未知 provider 返回默认拒绝新 dict（boolean
-        键全 False、dialog string 枚举取 \`\`"none"\`\`，14 键齐全，FR-06），不抛错。
+        键全 False、dialog string 枚举取 \`\`"none"\`\`，15 键齐全，FR-06），不抛错。
     """
     caps = PROVIDER_CAPS.get(provider)
     if caps is not None:

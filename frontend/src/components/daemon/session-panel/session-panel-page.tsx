@@ -2019,8 +2019,10 @@ export function SessionPanelPage({
   );
   // 附件门控（D-6 引擎门控同构）：预会话无会话实体，按目标 runtime 引擎判定。
   // task-11（provider-abstraction）：引擎字面量门控收敛查 ProviderCaps 表
-  //（multimodal 键；未知/空引擎全 false 默认拒绝，与原 !== "claude" 等价）。
-  const preAttachmentsDisabled = !getProviderCaps(preEngine ?? "").multimodal;
+  //（attachments 键；未知/空引擎全 false 默认拒绝。ql-20260921-005 起附件
+  // 入口改查 attachments 键——cursor=true 走 disk-only 落盘链路，multimodal
+  // 键收窄为多模态块通道仅作 gate 路由）。
+  const preAttachmentsDisabled = !getProviderCaps(preEngine ?? "").attachments;
 
   // task-10（design A5/A6 / 原型⑤）：suspended / task-03（design §3.3）：sessionActive
   // 派生语义见 page-helpers.deriveSessionStatusFlags（逻辑原样外提）。
@@ -2030,9 +2032,9 @@ export function SessionPanelPage({
 
   // ── 2026-08-20 task-12：附件门控派生（D-6 引擎 / FR-10 D-9 多模态降级）────
   const sessionEngine = session?.provider ?? null;
-  // task-11（provider-abstraction）：引擎门控收敛查 ProviderCaps（multimodal 键；
-  // null/未知引擎全 false 默认拒绝，与原 !== "claude" 等价）。
-  const attachmentsDisabled = !getProviderCaps(sessionEngine ?? "").multimodal;
+  // task-11（provider-abstraction）：引擎门控收敛查 ProviderCaps（attachments
+  // 键，ql-20260921-005 改键；null/未知引擎全 false 默认拒绝）。
+  const attachmentsDisabled = !getProviderCaps(sessionEngine ?? "").attachments;
   // 会话实际生效供应商（会话绑定优先；本机默认/未选 → null = 能力未知）。
   const effectiveProvider = useMemo(
     () => findProviderById(llmProviders, session?.llm_provider_id ?? null),
