@@ -10,6 +10,10 @@
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
 
+### 2026-09-20 · 工作区可见性收紧为成员制（平台级权限纯入口化）
+
+- **workspace-member-visibility**（2026-09-20 立项/归档，brainstorm→plan→execute→verify 全流程 PASS WITH NOTES，6 task/4 Wave，已合入 main 0b1a75ee 并部署本机 Docker）：实测账号 180490（非平台管理员、非任何工作区成员）仅因绑定 developer 系统角色（平台级 workspace:read）即看到全部工作区并可点进——根因是 has_permission 带工作区上下文判定时平台级业务权限整体穿透（ql-20260917-007 曾据此把列表对齐为全量可见）。本变更三触点联动收紧：①rbac.has_permission 工作区上下文平台级段仅 platform:admin 放行（is_platform_admin 短路与 workspace_id=None 功能入口路径不变，全权限无白名单）；②list_workspaces 平台分支收窄为仅 platform:admin；③list_user_ids_with_permission 段 2 仅匹配 admin_perm（工作区广播收件人=成员∪platform:admin∪is_platform_admin，三口径一致性专项测试防漂移）。连带 quick ql-20260920-007-c04d（D-004）：列表卡片/详情页「客户端路径」改按账号显示本人 binding 路径，未绑定显示引导。测试：判定链专项 7 + platform_grant_list 反转 7 + 存量 6 旧语义用例修正，范围内 350 passed + ruff/mypy 0。NOTES：全量留 CI（规则 0）；部署后 180490 人工验收（列表空/直连 403/不收通知）。
+
 ### 2026-09-13 · 上下文窗口用量全引擎接入 + ctx_usage 能力键统一抽象
 
 - **ctx-usage-all-providers**（2026-09-13 立项/归档，brainstorm→plan→execute→verify 全流程 PASS WITH NOTES，8 task/3 Wave，已合入 main 4c9e88592 并部署阿里云 c8bf23382）：会话页上下文用量环此前仅 Claude 显示真实百分比（codex/pi/cursor 恒未知态"—"）——根因在 daemon 归一化层只有 claude 派生分子 ctx_tokens，backend/前端链路本就引擎无关。本变更：①新增 usage-ctx.ts 共享派生 helper 单源（净值三和=claude/pi/cursor 同式、毛值直取=codex last.inputTokens，全缺不携带不伪造 0）；②三解析器回填派生（pi numOr0 恒派生含错误轮全零 0 有意口径/cursor 守卫派生/codex last 双路携带+extractEventUsage 透传）；③ProviderCaps 第 11 键 ctx_usage 经 gen-provider-caps.mjs 三端生成+双守护测试同步——新引擎漏声明即编译红/测试红（用户点名要的防遗漏机制，复用 2026-09-11-provider-adapter-registry 契约）；④前端 CtxUsageBar caps 门控（false 只渲染额度胶囊，四引擎全 true 界面零变化）+claude 重构引用 helper 行为零变化。真机证据：codex app-server 0.147 实捕 tokenUsage（last 毛值口径 12122 实证+意外发现 modelContextWindow=950000 分母机会留后续）+pi 0.81.1 真机输出过归一化器+daemon.started 真启动。测试：daemon 148/frontend 55/backend 4 相关面全绿。NOTES：三引擎环平台级 e2e 留部署环境（先例口径）；pi 当前 provider 无计量全零如实携带。

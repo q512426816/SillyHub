@@ -17,7 +17,12 @@ created_at: 2026-09-20 18:10:00
 | workspace | backend/app/modules/workspace/router.py | 逻辑变更（list_workspaces 平台分支收窄，docstring 同步） | 否 |
 | workspace | backend/app/modules/workspace/tests/test_platform_grant_list.py | 逻辑变更（断言语义反转 + 三口径一致性） | 否 |
 | auth | backend/app/modules/auth/tests/test_rbac_workspace_scope.py | 新增（判定链收紧专项测试） | 否 |
+| auth | backend/app/modules/auth/tests/__init__.py | 新增（测试目录包标记，空文件） | 否 |
+| workspace | backend/app/modules/workspace/tests/test_archived_write_guard.py | 逻辑变更（task-06 回归：4 用例改成员制授权夹具，断言未动） | 否 |
+| workspace | backend/app/modules/workspace/tests/test_workspace_admin_management.py | 逻辑变更（task-06 回归：1 用例断言反转为新语义） | 否 |
+| knowledge（NEW:未入 map） | backend/app/modules/knowledge/tests/test_router.py | 逻辑变更（task-06 回归：helper 改成员制授权；该文件同时被并行变更 2026-09-17-knowledge-precipitation 声明） | 是（task-06 已回归确认） |
 | notification（NEW:未入 map） | —（不改源码，消费方回归） | 调用关系不变（list_user_ids_with_permission 语义变化自动生效） | 是（task-06 回归确认） |
+| —（归档过程产物） | .sillyspec/knowledge/INDEX.md、.sillyspec/knowledge/fr/unmapped.md | 非代码面（archive decision-distill/fr-index 自动生成的知识索引产物） | 否 |
 
 ## 未匹配文件
 
@@ -36,6 +41,7 @@ created_at: 2026-09-20 18:10:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `_module-map.yaml` | skipped——未匹配 4 文件经判定均归属既有 auth/workspace 模块（CLI 前缀匹配粒度问题，非索引缺模块），无需 rebuild；notification 已按 NEW: 前缀声明在 decisions.md 模块域，待后续 scan 补录 | skipped |
+| .sillyspec/docs/SillyHub/modules/auth.md | 权限模型段落补记平台级权限收紧语义（工作区内效力=成员∪platform:admin∪is_platform_admin，入口语义保留） | done |
+| 模块索引（map） | skipped——无结构变更（无新路径/依赖/入口；notification 模块卡缺是历史扫描基线缺口，留待下次 scan 补录，decisions.md 已按 NEW:notification 声明） | skipped |
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。
