@@ -1,0 +1,195 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.md b/.sillyspec/docs/frontend/modules/components-daemon.md
+index 1be6d147..7e2b2a5a 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.md
+@@ -112,7 +112,16 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 
+   running/interrupting→processing、completed→success、failed/killed→error、
+   pending→default，色走 token 零手写）。滚动容器贴底跟随（ql-20260822-010）：
+   onScroll 维护距底 <80px ref，仅贴底时随 turns 更新滚底（上滚读历史不被拉回），
+-  新增 pending 轮（用户刚发送）例外强制回底。
++  新增 pending 轮（用户刚发送）例外强制回底。贴底重申窗口
++  （ql-20260921-003-42be）：贴底 scrollTo 只能读到执行瞬间的 scrollHeight，
++  初始加载期高度未稳定（content-visibility 估算→真实、markdown 异步撑开、
++  面板布局压缩，实测 314→2069→973→1136 抖动）时单次滚动落位错误且末轮签名
++  不变守卫使后续不再补滚（初始加载不滚到底根因）——贴底 scrollTo 后启动
++  2500ms rAF 重申循环（组件级自管理 `startOrRenewBottomReassert`，刻意不挂
++  effect cleanup：SSE 对账二次 turns 提交与 StrictMode 双跑都会经 cleanup 误杀
++  循环），窗口期内每帧核对 scrollHeight/clientHeight 变化并重申贴底；用户
++  上滚接管（isNearBottomRef=false）/ 窗口到期 / 容器脱离文档（isConnected
++  兜底）即停，每次贴底 scrollTo 续期重开窗口（流式期间持续跟随）。
+   回到底部悬浮按钮 + 新消息计数（ql-20260903-023，照群聊同款）：离开底部出现，
+   离开期间新增轮显示「N 条新消息」；锚定守卫按**末轮身份**（渲染期从 turns 计算，
+   不经 ref——更新不触发重渲染会滞后）判断——仅触顶翻页 prepend（末轮不变）
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
+index 7f153038..53c44061 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
+@@ -12,7 +12,7 @@
+  * scrollTop 直接赋值驱动「用户滚动」，scrollTo 以 mock 替换记录调用。
+  */
+ import { describe, it, expect, vi, afterEach } from "vitest";
+-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
++import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+ 
+ import { TurnTimeline } from "../turn-timeline";
+ import type { SessionTurnView } from "../turn-timeline";
+@@ -238,3 +238,75 @@ describe("TurnTimeline 行级 memo（ql-20260903-026）", () => {
+     expect(mdRenders.count).toBe(4);
+   });
+ });
++
++// ── ql-20260921-003-42be：贴底重申窗口——初始加载高度未稳定时补滚 ──────────
++
++describe("TurnTimeline 贴底重申窗口（ql-20260921-003-42be）", () => {
++  /** 重定义容器内容高度（setup 的 defineProperty 已 configurable）。 */
++  function setScrollHeight(el: HTMLElement, h: number) {
++    Object.defineProperty(el, "scrollHeight", { get: () => h, configurable: true });
++  }
++
++  /** 等待一帧（让重申 rAF 回调执行）。 */
++  async function tickOneFrame() {
++    await act(async () => {
++      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
++    });
++  }
++
++  it("贴底后内容高度撑开（content-visibility/markdown 渐进布局）→ 重申滚到新底", async () => {
++    const { el, scrollToMock, rerenderTurns } = setup([makeTurn()]);
++    userScrollTo(el, 500); // 贴底态
++    // 末轮变化触发贴底 scrollTo(0, 1000)——此时「当时」的高度是 1000。
++    rerenderTurns([
++      makeTurn(),
++      makeTurn({ runId: "run-2", turn: 2, output: "高度未稳定的内容" }),
++    ]);
++    expect(scrollToMock).toHaveBeenCalledWith(0, 1000);
++    // 内容高度随后撑开（屏外行真实布局/代码块渲染）→ 下一帧重申贴底。
++    setScrollHeight(el, 1200);
++    await tickOneFrame();
++    expect(scrollToMock).toHaveBeenCalledWith(0, 1200);
++  });
++
++  it("窗口期内用户上滚接管 → 停止重申（读历史不被拉回）", async () => {
++    const { el, scrollToMock, rerenderTurns } = setup([makeTurn()]);
++    userScrollTo(el, 500);
++    rerenderTurns([
++      makeTurn(),
++      makeTurn({ runId: "run-2", turn: 2, output: "初始内容" }),
++    ]);
++    expect(scrollToMock).toHaveBeenCalledTimes(1);
++    // 用户在窗口期内上滚读历史 → isNearBottomRef 翻 false。
++    userScrollTo(el, 100);
++    setScrollHeight(el, 1200);
++    await tickOneFrame();
++    // 高度变化也不再重申贴底。
++    expect(scrollToMock).toHaveBeenCalledTimes(1);
++  });
++
++  it("窗口到期后高度再变化 → 不再重申（窗口有时限）", async () => {
++    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "Date"] });
++    try {
++      const { el, scrollToMock, rerenderTurns } = setup([makeTurn()]);
++      userScrollTo(el, 500);
++      rerenderTurns([
++        makeTurn(),
++        makeTurn({ runId: "run-2", turn: 2, output: "初始内容" }),
++      ]);
++      expect(scrollToMock).toHaveBeenCalledTimes(1); // 初始贴底 + 启动重申窗口
++      // 推进超过窗口时长（2500ms）→ 循环自然终止。
++      act(() => {
++        vi.advanceTimersByTime(2600);
++      });
++      setScrollHeight(el, 1200);
++      act(() => {
++        vi.advanceTimersByTime(500);
++      });
++      expect(scrollToMock).toHaveBeenCalledTimes(1);
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++});
++
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 8601a743..249c7a2b 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -893,6 +893,13 @@ export function autoRecoverHintForTurn(
+   return undefined;
+ }
+ 
++/** quick（ql-20260921-003-42be）：贴底重申窗口时长（ms）——对齐 session-panel
++ *  prepend 锚点（pendingAnchorRef until=2500）惯例。贴底 scrollTo 读的是执行
++ *  瞬间的 scrollHeight，而初始加载期高度未稳定（content-visibility 屏外行按
++ *  估算占位、markdown 异步撑开、面板布局压缩，实测 314→2069→973→1136 抖动），
++ *  窗口期内每帧核对高度并重申贴底。 */
++const BOTTOM_REASSERT_WINDOW_MS = 2500;
++
+ export function TurnTimeline({
+   turns,
+   viewMode,
+@@ -989,6 +996,50 @@ export function TurnTimeline({
+     setBottomAnchor(null);
+   }, []);
+ 
++  // quick（ql-20260921-003-42be）：贴底重申循环——组件级自管理，刻意不挂 effect
++  // cleanup：establish 后 SSE 对账等任何二次 turns 提交都会重跑 [turns] effect，
++  // cleanup 会误杀仍在窗口期内的循环（新 effect 因末轮签名不变不再启动，视口
++  // 永久停在高度未稳定时的落位）；StrictMode（reactStrictMode=true）dev 双跑
++  // 同理。终止只有三个条件：窗口到期 / 用户上滚接管（isNearBottomRef=false）/
++  // 容器脱离文档（真卸载兜底，isConnected 下一帧即停；StrictMode 模拟卸载不
++  // 脱离 DOM，循环存活）。每次贴底 scrollTo 调用即续期重开窗口（流式期间
++  // turns 更新持续跟随）。重申判据含 clientHeight（视口压缩同样产生距底）。
++  const bottomReassertRef = useRef<{
++    el: HTMLElement;
++    cancelled: boolean;
++    rafId: number;
++  } | null>(null);
++  const startOrRenewBottomReassert = useCallback((el: HTMLElement) => {
++    const prev = bottomReassertRef.current;
++    if (prev) {
++      prev.cancelled = true;
++      cancelAnimationFrame(prev.rafId);
++    }
++    const state = { el, cancelled: false, rafId: 0 };
++    let lastH = el.scrollHeight;
++    let lastCH = el.clientHeight;
++    const deadline = Date.now() + BOTTOM_REASSERT_WINDOW_MS;
++    const stop = () => {
++      if (bottomReassertRef.current === state) bottomReassertRef.current = null;
++    };
++    const tick = () => {
++      if (state.cancelled) return;
++      if (!el.isConnected) return stop(); // 卸载/容器替换
++      if (Date.now() > deadline) return stop(); // 窗口到期
++      if (!isNearBottomRef.current) return stop(); // 用户上滚接管 → 弃贴底
++      const h = el.scrollHeight;
++      const ch = el.clientHeight;
++      if (h !== lastH || ch !== lastCH) {
++        lastH = h;
++        lastCH = ch;
++        el.scrollTo(0, h);
++      }
++      state.rafId = requestAnimationFrame(tick);
++    };
++    state.rafId = requestAnimationFrame(tick);
++    bottomReassertRef.current = state;
++  }, []);
++
+   useEffect(() => {
+     const el = scrollRef.current;
+     if (!el || typeof el.scrollTo !== "function") return;
+@@ -1037,8 +1088,13 @@ export function TurnTimeline({
+     lastSigRef.current = lastSig;
+     if (isNewPendingTurn || (isNearBottomRef.current && lastChanged)) {
+       el.scrollTo(0, el.scrollHeight);
++      // quick（ql-20260921-003-42be）：贴底重申窗口——单次 scrollTo 撞上「高度=
++      // 视口高」的未稳定窗口时滚动量为 0，或滚到中途后高度再涨/视口再压缩，
++      // 末轮签名不变守卫又使后续 turns 提交不再补滚——视口永久停在错误位置
++      //（初始加载不滚到底根因）。见 startOrRenewBottomReassert 注释。
++      startOrRenewBottomReassert(el);
+     }
+-  }, [turns, suppressFollowBottom]);
++  }, [turns, suppressFollowBottom, startOrRenewBottomReassert]);
+ 
+   // ── ql-20260825-006：pending 提问卡最小化（对齐 SessionPermissionPanel 的
+   // task-08 FR-04 / D-003 交互）───────────────────────────────────────────

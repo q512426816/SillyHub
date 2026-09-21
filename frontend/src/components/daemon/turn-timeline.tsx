@@ -893,6 +893,13 @@ export function autoRecoverHintForTurn(
   return undefined;
 }
 
+/** quick（ql-20260921-003-42be）：贴底重申窗口时长（ms）——对齐 session-panel
+ *  prepend 锚点（pendingAnchorRef until=2500）惯例。贴底 scrollTo 读的是执行
+ *  瞬间的 scrollHeight，而初始加载期高度未稳定（content-visibility 屏外行按
+ *  估算占位、markdown 异步撑开、面板布局压缩，实测 314→2069→973→1136 抖动），
+ *  窗口期内每帧核对高度并重申贴底。 */
+const BOTTOM_REASSERT_WINDOW_MS = 2500;
+
 export function TurnTimeline({
   turns,
   viewMode,
@@ -989,6 +996,50 @@ export function TurnTimeline({
     setBottomAnchor(null);
   }, []);
 
+  // quick（ql-20260921-003-42be）：贴底重申循环——组件级自管理，刻意不挂 effect
+  // cleanup：establish 后 SSE 对账等任何二次 turns 提交都会重跑 [turns] effect，
+  // cleanup 会误杀仍在窗口期内的循环（新 effect 因末轮签名不变不再启动，视口
+  // 永久停在高度未稳定时的落位）；StrictMode（reactStrictMode=true）dev 双跑
+  // 同理。终止只有三个条件：窗口到期 / 用户上滚接管（isNearBottomRef=false）/
+  // 容器脱离文档（真卸载兜底，isConnected 下一帧即停；StrictMode 模拟卸载不
+  // 脱离 DOM，循环存活）。每次贴底 scrollTo 调用即续期重开窗口（流式期间
+  // turns 更新持续跟随）。重申判据含 clientHeight（视口压缩同样产生距底）。
+  const bottomReassertRef = useRef<{
+    el: HTMLElement;
+    cancelled: boolean;
+    rafId: number;
+  } | null>(null);
+  const startOrRenewBottomReassert = useCallback((el: HTMLElement) => {
+    const prev = bottomReassertRef.current;
+    if (prev) {
+      prev.cancelled = true;
+      cancelAnimationFrame(prev.rafId);
+    }
+    const state = { el, cancelled: false, rafId: 0 };
+    let lastH = el.scrollHeight;
+    let lastCH = el.clientHeight;
+    const deadline = Date.now() + BOTTOM_REASSERT_WINDOW_MS;
+    const stop = () => {
+      if (bottomReassertRef.current === state) bottomReassertRef.current = null;
+    };
+    const tick = () => {
+      if (state.cancelled) return;
+      if (!el.isConnected) return stop(); // 卸载/容器替换
+      if (Date.now() > deadline) return stop(); // 窗口到期
+      if (!isNearBottomRef.current) return stop(); // 用户上滚接管 → 弃贴底
+      const h = el.scrollHeight;
+      const ch = el.clientHeight;
+      if (h !== lastH || ch !== lastCH) {
+        lastH = h;
+        lastCH = ch;
+        el.scrollTo(0, h);
+      }
+      state.rafId = requestAnimationFrame(tick);
+    };
+    state.rafId = requestAnimationFrame(tick);
+    bottomReassertRef.current = state;
+  }, []);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof el.scrollTo !== "function") return;
@@ -1037,8 +1088,13 @@ export function TurnTimeline({
     lastSigRef.current = lastSig;
     if (isNewPendingTurn || (isNearBottomRef.current && lastChanged)) {
       el.scrollTo(0, el.scrollHeight);
+      // quick（ql-20260921-003-42be）：贴底重申窗口——单次 scrollTo 撞上「高度=
+      // 视口高」的未稳定窗口时滚动量为 0，或滚到中途后高度再涨/视口再压缩，
+      // 末轮签名不变守卫又使后续 turns 提交不再补滚——视口永久停在错误位置
+      //（初始加载不滚到底根因）。见 startOrRenewBottomReassert 注释。
+      startOrRenewBottomReassert(el);
     }
-  }, [turns, suppressFollowBottom]);
+  }, [turns, suppressFollowBottom, startOrRenewBottomReassert]);
 
   // ── ql-20260825-006：pending 提问卡最小化（对齐 SessionPermissionPanel 的
   // task-08 FR-04 / D-003 交互）───────────────────────────────────────────

@@ -12,7 +12,7 @@
  * scrollTop 直接赋值驱动「用户滚动」，scrollTo 以 mock 替换记录调用。
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { TurnTimeline } from "../turn-timeline";
 import type { SessionTurnView } from "../turn-timeline";
@@ -238,3 +238,75 @@ describe("TurnTimeline 行级 memo（ql-20260903-026）", () => {
     expect(mdRenders.count).toBe(4);
   });
 });
+
+// ── ql-20260921-003-42be：贴底重申窗口——初始加载高度未稳定时补滚 ──────────
+
+describe("TurnTimeline 贴底重申窗口（ql-20260921-003-42be）", () => {
+  /** 重定义容器内容高度（setup 的 defineProperty 已 configurable）。 */
+  function setScrollHeight(el: HTMLElement, h: number) {
+    Object.defineProperty(el, "scrollHeight", { get: () => h, configurable: true });
+  }
+
+  /** 等待一帧（让重申 rAF 回调执行）。 */
+  async function tickOneFrame() {
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    });
+  }
+
+  it("贴底后内容高度撑开（content-visibility/markdown 渐进布局）→ 重申滚到新底", async () => {
+    const { el, scrollToMock, rerenderTurns } = setup([makeTurn()]);
+    userScrollTo(el, 500); // 贴底态
+    // 末轮变化触发贴底 scrollTo(0, 1000)——此时「当时」的高度是 1000。
+    rerenderTurns([
+      makeTurn(),
+      makeTurn({ runId: "run-2", turn: 2, output: "高度未稳定的内容" }),
+    ]);
+    expect(scrollToMock).toHaveBeenCalledWith(0, 1000);
+    // 内容高度随后撑开（屏外行真实布局/代码块渲染）→ 下一帧重申贴底。
+    setScrollHeight(el, 1200);
+    await tickOneFrame();
+    expect(scrollToMock).toHaveBeenCalledWith(0, 1200);
+  });
+
+  it("窗口期内用户上滚接管 → 停止重申（读历史不被拉回）", async () => {
+    const { el, scrollToMock, rerenderTurns } = setup([makeTurn()]);
+    userScrollTo(el, 500);
+    rerenderTurns([
+      makeTurn(),
+      makeTurn({ runId: "run-2", turn: 2, output: "初始内容" }),
+    ]);
+    expect(scrollToMock).toHaveBeenCalledTimes(1);
+    // 用户在窗口期内上滚读历史 → isNearBottomRef 翻 false。
+    userScrollTo(el, 100);
+    setScrollHeight(el, 1200);
+    await tickOneFrame();
+    // 高度变化也不再重申贴底。
+    expect(scrollToMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("窗口到期后高度再变化 → 不再重申（窗口有时限）", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "Date"] });
+    try {
+      const { el, scrollToMock, rerenderTurns } = setup([makeTurn()]);
+      userScrollTo(el, 500);
+      rerenderTurns([
+        makeTurn(),
+        makeTurn({ runId: "run-2", turn: 2, output: "初始内容" }),
+      ]);
+      expect(scrollToMock).toHaveBeenCalledTimes(1); // 初始贴底 + 启动重申窗口
+      // 推进超过窗口时长（2500ms）→ 循环自然终止。
+      act(() => {
+        vi.advanceTimersByTime(2600);
+      });
+      setScrollHeight(el, 1200);
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(scrollToMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+

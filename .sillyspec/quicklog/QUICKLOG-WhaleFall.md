@@ -491,3 +491,15 @@
 方案：新增 myRootPath 三态 prop（string=本人路径/null=未绑定引导文案/undefined=兼容回退），两渲染分支统一抽 ClientPathRow；列表页 bindingsByWs 扩展携带 root_path（fetchMyBindings 既有响应，零后端改动）+ cardPropsOf 透传，详情页传 myBinding?.root_path ?? null，workspace-card 加透传 prop。
 结果：tsc 0 错误；workspaces 页面测试 182 + workspace-card 19 用例全绿；frontend_components.changelog 已记 ql-20260920-007-c04d。
 审计：[gate] L1（跨 0 模块 · 5 文件：4 代码/0 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量缺失（4 个代码文件无测试改动）
+
+## ql-20260921-003-42be | 2026-09-21 14:49:17 | 会话初始加载不滚到底修复——贴底重申窗口
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/turn-timeline.tsx（贴底重申窗口常量+startOrRenewBottomReassert 组件级循环+effect 贴底分支接线）
+- frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx（追加 ql-20260921-003-42be 3 用例（重申/接管停止/到期停止））
+- .sillyspec/docs/frontend/modules/components-daemon.md（贴底跟随契约段补记重申窗口语义）
+需求：会话初始加载不滚到底修复——贴底重申窗口
+根因：贴底 scrollTo 只能读到执行瞬间的 scrollHeight，初始加载期高度未稳定（content-visibility 估算→真实、markdown 异步撑开、面板布局压缩，实测 314→2069→973→1136 抖动），单次滚动撞上高度=视口高的窗口时滚动量为 0、或滚到中途后高度再涨；末轮签名不变守卫使后续 turns 提交不再补滚，视口永久停在错误位置
+方案：turn-timeline.tsx 贴底 scrollTo 后启动 2500ms rAF 重申循环（组件级自管理 startOrRenewBottomReassert，不挂 effect cleanup——SSE 对账二次 turns 提交与 StrictMode 双跑会经 cleanup 误杀），窗口期内每帧核对 scrollHeight/clientHeight 变化并重申贴底，用户上滚/窗口到期/容器脱离文档即停，每次贴底 scrollTo 续期重开窗口
+结果：新增 3 单测（高度撑开重申/上滚接管停止/窗口到期停止），turn-timeline-scroll 11/11 通过；相邻回归 5 文件 65/65 通过；tsc --noEmit 零错误；浏览器双路径实测（dev server 连 Docker 后端）深链与列表点击均 dist=0 贴底，含 1719→6215px 剧烈撑开场景即时纠正

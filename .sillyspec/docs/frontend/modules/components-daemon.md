@@ -112,7 +112,16 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   running/interrupting→processing、completed→success、failed/killed→error、
   pending→default，色走 token 零手写）。滚动容器贴底跟随（ql-20260822-010）：
   onScroll 维护距底 <80px ref，仅贴底时随 turns 更新滚底（上滚读历史不被拉回），
-  新增 pending 轮（用户刚发送）例外强制回底。
+  新增 pending 轮（用户刚发送）例外强制回底。贴底重申窗口
+  （ql-20260921-003-42be）：贴底 scrollTo 只能读到执行瞬间的 scrollHeight，
+  初始加载期高度未稳定（content-visibility 估算→真实、markdown 异步撑开、
+  面板布局压缩，实测 314→2069→973→1136 抖动）时单次滚动落位错误且末轮签名
+  不变守卫使后续不再补滚（初始加载不滚到底根因）——贴底 scrollTo 后启动
+  2500ms rAF 重申循环（组件级自管理 `startOrRenewBottomReassert`，刻意不挂
+  effect cleanup：SSE 对账二次 turns 提交与 StrictMode 双跑都会经 cleanup 误杀
+  循环），窗口期内每帧核对 scrollHeight/clientHeight 变化并重申贴底；用户
+  上滚接管（isNearBottomRef=false）/ 窗口到期 / 容器脱离文档（isConnected
+  兜底）即停，每次贴底 scrollTo 续期重开窗口（流式期间持续跟随）。
   回到底部悬浮按钮 + 新消息计数（ql-20260903-023，照群聊同款）：离开底部出现，
   离开期间新增轮显示「N 条新消息」；锚定守卫按**末轮身份**（渲染期从 turns 计算，
   不经 ref——更新不触发重渲染会滞后）判断——仅触顶翻页 prepend（末轮不变）
