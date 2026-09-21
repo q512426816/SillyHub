@@ -6,6 +6,7 @@ import { render, screen } from "@testing-library/react";
 import { RuntimeUsageLineChart } from "@/components/charts/RuntimeUsageLineChart";
 import type { RuntimeUsagePoint } from "@/components/charts/RuntimeUsageLineChart";
 import { useThemeStore } from "@/stores/theme";
+import { queryChart } from "@/test/dom-queries";
 
 function makePoint(ts: string, input = 100, output = 50): RuntimeUsagePoint {
   return {
@@ -35,7 +36,7 @@ describe("RuntimeUsageLineChart", () => {
       />,
     );
     // echarts-for-react 渲染根 div 带 class
-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
+    expect(queryChart(container)).not.toBeNull();
   });
 
   it("dark 主题下订阅 useThemeStore 正常渲染(dark 系列色/legend 注入)", () => {
@@ -45,7 +46,7 @@ describe("RuntimeUsageLineChart", () => {
         points={[makePoint("2026-06-24T00:00:00", 1000, 500)]}
       />,
     );
-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
+    expect(queryChart(container)).not.toBeNull();
   });
 
   it("空数据显示暂无数据占位", () => {
@@ -71,7 +72,7 @@ describe("RuntimeUsageLineChart", () => {
         height={80}
       />,
     );
-    const root = container.querySelector(".echarts-for-react") as HTMLElement;
+    const root = queryChart(container) as HTMLElement;
     expect(root.style.height).toBe("80px");
   });
 
@@ -79,7 +80,7 @@ describe("RuntimeUsageLineChart", () => {
     const { container } = render(
       <RuntimeUsageLineChart points={[makePoint("2026-06-24T00:00:00")]} />,
     );
-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
+    expect(queryChart(container)).not.toBeNull();
   });
 
   it("默认高度 120", () => {
@@ -88,7 +89,7 @@ describe("RuntimeUsageLineChart", () => {
         points={[makePoint("2026-06-24T00:00:00")]}
       />,
     );
-    const root = container.querySelector(".echarts-for-react") as HTMLElement;
+    const root = queryChart(container) as HTMLElement;
     expect(root.style.height).toBe("120px");
   });
 });

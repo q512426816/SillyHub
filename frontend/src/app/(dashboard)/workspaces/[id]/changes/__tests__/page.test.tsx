@@ -38,6 +38,7 @@ import ChangesPage, {
 } from "@/app/(dashboard)/workspaces/[id]/changes/page";
 import type { ChangeSummary } from "@/lib/changes";
 import type { Workspace } from "@/lib/workspaces";
+import { closestAntdBadge } from "@/test/dom-queries";
 
 // ── mocks（hoisted，让 mock 工厂能引用同一组 vi.fn）──────────────────────
 const mocks = vi.hoisted(() => ({
@@ -568,7 +569,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     // stage 主行徽章照常（execute → 执行；task-08 新增「执行」列头与徽标同文案，
     // 全局 getByText 撞多元素 → 收敛到徽标作用域，断言意图不变）
     expect(
-      screen.getAllByText("执行").some((el) => el.closest(".ant-badge")),
+      screen.getAllByText("执行").some((el) => closestAntdBadge(el)),
     ).toBe(true);
   });
 
@@ -586,7 +587,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     await renderAndWait();
     // stage 主行照常渲染（execute → 执行；task-08 执行列头同文案 → 收敛徽标作用域）
     expect(
-      screen.getAllByText("执行").some((el) => el.closest(".ant-badge")),
+      screen.getAllByText("执行").some((el) => closestAntdBadge(el)),
     ).toBe(true);
     // 无摘要副行（降级：视觉与现状一致）
     expect(screen.queryByTestId("step-sub-row")).not.toBeInTheDocument();

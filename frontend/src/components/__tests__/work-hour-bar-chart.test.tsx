@@ -5,6 +5,7 @@ import { render, screen } from "@testing-library/react";
 // (dynamic 在 jsdom 测试环境会一直停在 loading 态)。
 import { WorkHourBarChart } from "@/components/charts/WorkHourBarChart";
 import { useThemeStore } from "@/stores/theme";
+import { queryChart } from "@/test/dom-queries";
 
 describe("WorkHourBarChart", () => {
   // 组件订阅 useThemeStore(task-09),dark 用例改写 store 后恢复默认主题,
@@ -23,7 +24,7 @@ describe("WorkHourBarChart", () => {
       />,
     );
     // echarts-for-react 渲染根 div 带 class
-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
+    expect(queryChart(container)).not.toBeNull();
   });
 
   it("dark 主题下订阅 useThemeStore 正常渲染(dark 文字/分割线注入)", () => {
@@ -31,7 +32,7 @@ describe("WorkHourBarChart", () => {
     const { container } = render(
       <WorkHourBarChart rows={[{ name: "alice", total_hours: 10 }]} />,
     );
-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
+    expect(queryChart(container)).not.toBeNull();
   });
 
   it("空数据显示暂无数据占位", () => {
@@ -55,7 +56,7 @@ describe("WorkHourBarChart", () => {
         height={200}
       />,
     );
-    const root = container.querySelector(".echarts-for-react") as HTMLElement;
+    const root = queryChart(container) as HTMLElement;
     expect(root.style.height).toBe("200px");
   });
 });

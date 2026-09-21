@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilePreview } from "@/components/explorer/file-preview";
+import { queryAntdSpin, closestAntdImage } from "@/test/dom-queries";
 
 /**
  * 黑盒测试：mock 取数层（@/lib/explorer）、统一预览弹窗（@/components/files）、
@@ -136,7 +137,7 @@ describe("FilePreview", () => {
   it("加载中显示 Spin", () => {
     mockQueryResult(null, { pending: true });
     const { container } = render(<FilePreview workspaceId="ws-1" filePath="a.py" />);
-    expect(container.querySelector(".ant-spin")).not.toBeNull();
+    expect(queryAntdSpin(container)).not.toBeNull();
   });
 
   it("加载失败显示红条并透传 ApiError 中文文案", () => {
@@ -175,7 +176,7 @@ describe("FilePreview", () => {
     const img1 = await screen.findByRole("img", { name: "logo.png" });
     expect(img1).toHaveAttribute("src", "blob:preview-1");
     // antd Image（FR-05，可点击放大/缩放/旋转）：img 落 .ant-image wrapper 内且带语义类
-    expect(img1.closest(".ant-image")).not.toBeNull();
+    expect(closestAntdImage(img1)).not.toBeNull();
     expect(img1.className).toContain("ant-image-img");
     expect(explorerMocks.fetchDownload).toHaveBeenCalledWith("ws-1", "docs/logo.png");
 

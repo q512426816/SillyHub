@@ -1,0 +1,124 @@
+# IDE
+.idea/
+.vscode/
+# ZCode CLI 工作区状态（skills 缓存 / 会话计划，本地工具产物勿入库）
+.zcode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+target/
+build/
+out/
+.sillyspec/.runtime/
+**/.sillyspec/.runtime/
+.sillyspec/codebase/SCAN-RAW.md
+.sillyspec/local.yaml
+.sillyspec/knowledge/generated/
+.sillyspec-platform.json
+.sillyspec/docs-check-baseline
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+.venv-*/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+
+# Node / Next.js
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# Env / Secrets
+.env
+.env.*
+!.env.example
+# e2e 凭据模板入库（真实 .env.e2e 仍被上面规则忽略）
+!.env.e2e.example
+
+# Docker
+.docker/data/
+
+# Spec storage (platform-managed workspace docs)
+data/spec-storage/
+
+# Spike artefacts
+spikes/**/tmp/
+spikes/**/*.log
+
+# sillyhub-daemon 运行时 isolate 日志（v8 引擎逐次运行生成，勿入库）
+sillyhub-daemon/isolate-*.log
+
+# Local / temp
+.loop-progress.md
+prototype/
+.playwright-mcp/
+bash.exe.stackdump
+.claude/worktrees/
+frontend/CLAUDE.md
+.sillyspec/.runtime/worktrees/
+.worktrees/
+backups/
+img.png
+sillyhub-*-amd64.tar.gz
+sillyhub-daemon/.sillyhub/
+.dockerignore
+
+# Test artefacts (alembic migration smoke test 产物, 勿提交)
+backend/test_alembic.db
+backend/*.db-journal
+.sillyspec-platform-managed
+.sillyspec-platform-cleaned
+meta.json
+
+# ql-20260826-011：DS/Gotenberg 中文字体挂载目录（微软/方正商用许可，不入库）
+deploy/onlyoffice-fonts/
+
+# ql-20260912-001：部署打包产物不入库（backend-only.tar.gz 289MB 误入 4ad0b87c6 的教训）
+deploy/*.tar.gz
+
+# 平台文件中心内容寻址上传物（64 位十六进制哈希命名，运行时数据不入库；
+# 历史已跟踪的附件不受影响）
+attachments/[0-9a-f]*
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+bower_components/
+jspm_packages/
+site-packages/
+venv/
+coverage/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

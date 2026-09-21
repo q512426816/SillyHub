@@ -27,6 +27,7 @@ import { App as AntApp } from "antd";
 
 import { PlatformSharedAgentsCard } from "../platform-shared-agents-card";
 import { useSession } from "@/stores/session";
+import { queryAntdConfirm, queryAntdConfirmTitle, closestAntdSelect, queryAntdSelectZone, closestAntdSelectOption } from "@/test/dom-queries";
 
 // ── antd v6 + jsdom 的 `:has` 兼容补丁（先例 agent-profile-form.test.tsx）──
 // antd v6 Form style 含 `:has(> .ant-switch:only-child, > .ant-rate:only-child)`
@@ -250,18 +251,15 @@ async function expandCard() {
  * 选中监听 mousedown + click 同时触发。
  */
 async function selectOption(placeholder: string, optionText: string) {
-  const selectWrapper = screen.getByText(placeholder).closest(".ant-select");
+  const selectWrapper = closestAntdSelect(screen.getByText(placeholder));
   if (!selectWrapper)
     throw new Error(`ant-select for placeholder "${placeholder}" not found`);
-  const clickZone =
-    selectWrapper.querySelector(".ant-select-content") ??
-    selectWrapper.querySelector(".ant-select-selector") ??
-    selectWrapper;
+  const clickZone = queryAntdSelectZone(selectWrapper) ?? selectWrapper;
   fireEvent.mouseDown(clickZone as HTMLElement);
   const option = await screen.findByText(optionText, {
     selector: ".ant-select-item-option-content",
   });
-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
+  const optionRow = closestAntdSelectOption(option) as HTMLElement;
   fireEvent.mouseDown(optionRow);
   fireEvent.click(optionRow);
   // 给 React 合成事件 + state 提交一拍。
@@ -345,11 +343,11 @@ describe("PlatformSharedAgentsCard（task-09 / FR-04 + quick-6625a929）", () =>
     await expandCard();
 
     // 档案下拉：展开时仅 platform 可见档案（R-05：非 platform 不进下拉）。
-    const profileWrapper = screen
-      .getByText("选择 platform 可见的档案")
-      .closest(".ant-select") as HTMLElement;
+    const profileWrapper = closestAntdSelect(
+      screen.getByText("选择 platform 可见的档案"),
+    ) as HTMLElement;
     fireEvent.mouseDown(
-      (profileWrapper.querySelector(".ant-select-content") ??
+      (queryAntdSelectZone(profileWrapper) ??
         profileWrapper) as HTMLElement,
     );
     const profileOpt = await screen.findByText("平台功能讲解助手（claude）", {
@@ -357,7 +355,7 @@ describe("PlatformSharedAgentsCard（task-09 / FR-04 + quick-6625a929）", () =>
     });
     // 下拉开着：私有档案（visibility=private）应被下拉过滤掉。
     expect(screen.queryByText("我的私人档案（claude）")).toBeNull();
-    const profileRow = profileOpt.closest(".ant-select-item-option") as HTMLElement;
+    const profileRow = closestAntdSelectOption(profileOpt) as HTMLElement;
     fireEvent.mouseDown(profileRow);
     fireEvent.click(profileRow);
     await act(async () => {
@@ -438,11 +436,11 @@ describe("PlatformSharedAgentsCard（task-09 / FR-04 + quick-6625a929）", () =>
     // 两份（.ant-modal-title 供 aria-labelledby + .ant-modal-confirm-title 正文），
     // getByText 会多命中——按结构选择器断言。
     const confirmRoot = await waitFor(() => {
-      const el = document.querySelector(".ant-modal-confirm");
+      const el = queryAntdConfirm();
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
-    const confirmTitle = confirmRoot.querySelector(".ant-modal-confirm-title");
+    const confirmTitle = queryAntdConfirmTitle(confirmRoot);
     expect(confirmTitle).toHaveTextContent("删除共享智能体");
     expect(within(confirmRoot).getByText(/平台功能讲解助手/)).toBeInTheDocument();
 
@@ -466,7 +464,7 @@ describe("PlatformSharedAgentsCard（task-09 / FR-04 + quick-6625a929）", () =>
     );
 
     const confirmRoot = await waitFor(() => {
-      const el = document.querySelector(".ant-modal-confirm");
+      const el = queryAntdConfirm();
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });

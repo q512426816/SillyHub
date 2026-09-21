@@ -73,6 +73,7 @@ import {
   type GroupChatCreateRead,
 } from "@/lib/daemon";
 import type { DaemonMachineRead, DaemonRuntimeRead } from "@/lib/daemon";
+import { closestAntdSelect, queryAntdSelectZone, closestAntdSelectOption } from "@/test/dom-queries";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
@@ -161,11 +162,9 @@ function openAntdSelect(selectId: string) {
   if (!anchor) throw new Error(`element #${selectId} not found`);
   const root = anchor.classList.contains("ant-select")
     ? anchor
-    : (anchor.closest(".ant-select") as HTMLElement | null);
+    : closestAntdSelect(anchor);
   if (!root) throw new Error(`.ant-select for #${selectId} not found`);
-  const clickZone =
-    (root.querySelector(".ant-select-content") as HTMLElement | null) ??
-    (root.querySelector(".ant-select-selector") as HTMLElement | null);
+  const clickZone = queryAntdSelectZone(root);
   if (!clickZone) throw new Error(`select click zone for #${selectId} not found`);
   fireEvent.mouseDown(clickZone);
 }
@@ -179,7 +178,7 @@ async function chooseAntdOptionByText(selectId: string, optionText: string) {
     if (!hit) throw new Error(`option "${optionText}" not found`);
     return hit as HTMLElement;
   });
-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
+  const optionRow = closestAntdSelectOption(option) as HTMLElement;
   fireEvent.mouseDown(optionRow);
   fireEvent.click(optionRow);
   await act(async () => {
@@ -190,7 +189,7 @@ async function chooseAntdOptionByText(selectId: string, optionText: string) {
 /** antd Select 根节点（锁定/禁用态断言用）。 */
 function antdSelectRoot(selectId: string): HTMLElement {
   const anchor = document.getElementById(selectId);
-  const root = anchor?.closest(".ant-select") as HTMLElement | null;
+  const root = anchor ? closestAntdSelect(anchor) : null;
   if (!root) throw new Error(`.ant-select for #${selectId} not found`);
   return root;
 }
@@ -643,7 +642,7 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
     await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
     // 工作区=项目关联工作区必选（不再有「沿用群工作区」选项）。
     expect(
-      screen.getByLabelText("Agent 成员 1 工作区").closest(".ant-select"),
+      closestAntdSelect(screen.getByLabelText("Agent 成员 1 工作区")),
     ).toBeTruthy();
     await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
     // 模型 / 方案走缺省（不指定）。
@@ -900,7 +899,7 @@ describe("CreateGroupWizard 团队能力开关（quick 群成员团队能力）"
       if (!hit) throw new Error(`visible option "${optionText}" not found`);
       return hit as HTMLElement;
     });
-    const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
+    const optionRow = closestAntdSelectOption(option) as HTMLElement;
     fireEvent.mouseDown(optionRow);
     fireEvent.click(optionRow);
     await act(async () => {
@@ -1000,7 +999,7 @@ describe("CreateGroupWizard 模型预检（quick 群 P1 llm_provider 预检）",
       if (!hit) throw new Error(`visible option "${optionText}" not found`);
       return hit as HTMLElement;
     });
-    const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
+    const optionRow = closestAntdSelectOption(option) as HTMLElement;
     fireEvent.mouseDown(optionRow);
     fireEvent.click(optionRow);
     await act(async () => {

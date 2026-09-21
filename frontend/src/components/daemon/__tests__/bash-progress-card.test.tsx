@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 import { BashProgressCard, type BashChunkItem } from "@/components/daemon/bash-progress-card";
+import { querySpinner } from "@/test/dom-queries";
 
 const writeTextMock = vi.fn();
 Object.assign(navigator, {
@@ -32,7 +33,7 @@ describe("BashProgressCard", () => {
 
   it("running 态显示 spinner，不显示退出码", () => {
     render(<BashProgressCard command="npm test" status="running" />);
-    expect(document.querySelector(".animate-spin")).not.toBeNull();
+    expect(querySpinner()).not.toBeNull();
     expect(screen.queryByText(/exit/)).toBeNull();
     expect(screen.getByTestId("bash-progress-card")).toHaveAttribute("data-status", "running");
   });
@@ -48,7 +49,7 @@ describe("BashProgressCard", () => {
     );
     expect(screen.getByText("exit 0")).toBeInTheDocument();
     expect(screen.getByText(/elapsed 00:12\.3/)).toBeInTheDocument();
-    expect(document.querySelector(".animate-spin")).toBeNull();
+    expect(querySpinner()).toBeNull();
   });
 
   it("failed 显示非零 exit code", () => {
@@ -107,7 +108,7 @@ describe("BashProgressCard", () => {
         chunks={[{ channel: "stdout", content: "running…", is_final: false }]}
       />,
     );
-    expect(document.querySelector(".animate-spin")).not.toBeNull();
+    expect(querySpinner()).not.toBeNull();
 
     rerender(
       <BashProgressCard
@@ -119,6 +120,6 @@ describe("BashProgressCard", () => {
         ]}
       />,
     );
-    expect(document.querySelector(".animate-spin")).toBeNull();
+    expect(querySpinner()).toBeNull();
   });
 });

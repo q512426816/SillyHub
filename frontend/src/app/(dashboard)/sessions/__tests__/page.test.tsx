@@ -61,6 +61,7 @@ import type {
   DaemonRuntimeRead,
   SessionRunRead,
 } from "@/lib/daemon";
+import { closestAntdSelect, queryAntdSelectZone } from "@/test/dom-queries";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
@@ -1624,10 +1625,8 @@ describe("机器筛选下拉接入共享机器（quick 机器行修复；ql-2026
     const root =
       anchor.classList.contains("ant-select")
         ? anchor
-        : (anchor.closest(".ant-select") as HTMLElement);
-    const clickZone =
-      (root.querySelector(".ant-select-content") as HTMLElement | null) ??
-      (root.querySelector(".ant-select-selector") as HTMLElement | null);
+        : (closestAntdSelect(anchor) as HTMLElement);
+    const clickZone = queryAntdSelectZone(root);
     if (!clickZone) throw new Error("select click zone for #slp-machine not found");
     fireEvent.mouseDown(clickZone);
     const option = await waitFor(() => {

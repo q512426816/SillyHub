@@ -77,6 +77,7 @@ import type {
 import type { AgentLogListItem } from "@/lib/agent-logs";
 import type { Workspace } from "@/lib/workspaces";
 import { useSession } from "@/stores/session";
+import { queryAntdConfirm, queryAntdConfirmTitle, closestAntdSelect, queryAntdSelectZone, queryAntdSelectClear, queryAntdSelectMultiple, queryAntdSegmented, closestAntdSelectOption } from "@/test/dom-queries";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
@@ -403,11 +404,9 @@ function openAntdSelect(selectId: string) {
   if (!anchor) throw new Error(`element #${selectId} not found`);
   const root = anchor.classList.contains("ant-select")
     ? anchor
-    : (anchor.closest(".ant-select") as HTMLElement | null);
+    : closestAntdSelect(anchor);
   if (!root) throw new Error(`.ant-select for #${selectId} not found`);
-  const clickZone =
-    (root.querySelector(".ant-select-content") as HTMLElement | null) ??
-    (root.querySelector(".ant-select-selector") as HTMLElement | null);
+  const clickZone = queryAntdSelectZone(root);
   if (!clickZone) throw new Error(`select click zone for #${selectId} not found`);
   fireEvent.mouseDown(clickZone);
 }
@@ -422,7 +421,7 @@ async function chooseAntdOptionByText(selectId: string, optionText: string) {
     if (!hit) throw new Error(`option "${optionText}" not found`);
     return hit as HTMLElement;
   });
-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
+  const optionRow = closestAntdSelectOption(option) as HTMLElement;
   fireEvent.mouseDown(optionRow);
   fireEvent.click(optionRow);
   await act(async () => {
@@ -1524,8 +1523,8 @@ describe("SessionListPanel change scope（ql-20260823-003：同走工作区树�
     ).toBeInTheDocument();
     // 平铺控件退役（引擎胶囊/机器多选/加载更多）。机器筛选用例 ql-20260908-005
     // 起为树下拉（#slp-machine 单选形态）——退役守卫锚定多选形态而非 id。
-    expect(document.querySelector(".ant-segmented")).toBeNull();
-    expect(document.querySelector(".ant-select-multiple")).toBeNull();
+    expect(queryAntdSegmented()).toBeNull();
+    expect(queryAntdSelectMultiple(document)).toBeNull();
     expect(screen.queryByRole("button", { name: /加载更多/ })).toBeNull();
   });
 
@@ -2175,10 +2174,11 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => 
 
     // allowClear 清除 → 恢复无关联过滤参（clear 图标在 #slp-assoc 所属
     // .ant-select 根下锚定，避免误点其它下拉）
-    const assocRoot = (document.getElementById("slp-assoc") as HTMLElement)
-      .closest(".ant-select");
+    const assocRoot = closestAntdSelect(
+      document.getElementById("slp-assoc") as HTMLElement,
+    );
     if (!assocRoot) throw new Error(".ant-select for #slp-assoc not found");
-    const clearBtn = assocRoot.querySelector(".ant-select-clear");
+    const clearBtn = queryAntdSelectClear(assocRoot);
     if (!clearBtn) throw new Error("assoc clear button not found");
     fireEvent.mouseDown(clearBtn);
     fireEvent.click(clearBtn);
@@ -2300,10 +2300,11 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => 
     });
 
     // 清除恢复无关联过滤参。
-    const assocRoot = (document.getElementById("slp-assoc") as HTMLElement)
-      .closest(".ant-select");
+    const assocRoot = closestAntdSelect(
+      document.getElementById("slp-assoc") as HTMLElement,
+    );
     if (!assocRoot) throw new Error(".ant-select for #slp-assoc not found");
-    const clearBtn = assocRoot.querySelector(".ant-select-clear");
+    const clearBtn = queryAntdSelectClear(assocRoot);
     if (!clearBtn) throw new Error("assoc clear button not found");
     fireEvent.mouseDown(clearBtn);
     fireEvent.click(clearBtn);
@@ -3009,7 +3010,7 @@ describe("SessionListPanel 群行归档与删除操作（task-06）", () => {
     // 二次确认弹层：标题 + 群名 + 「所有成员」不可再见语义。
     const confirmRoot = await findConfirmRoot();
     expect(
-      confirmRoot.querySelector(".ant-modal-confirm-title"),
+      queryAntdConfirmTitle(confirmRoot),
     ).toHaveTextContent("删除群聊");
     expect(confirmRoot.textContent).toContain("前端攻坚小分队");
     expect(confirmRoot.textContent).toContain("所有成员");
@@ -3040,7 +3041,7 @@ describe("SessionListPanel 群行归档与删除操作（task-06）", () => {
     expect(onDeleteGroup).not.toHaveBeenCalled();
     // 弹层收尾（防 portal 残留串到后续用例的 confirm 锚定）。
     await waitFor(() =>
-      expect(document.querySelector(".ant-modal-confirm")).toBeNull(),
+      expect(queryAntdConfirm()).toBeNull(),
     );
   });
 
@@ -3084,7 +3085,7 @@ describe("SessionListPanel 群行归档与删除操作（task-06）", () => {
     );
     const confirmRoot = await findConfirmRoot();
     expect(
-      confirmRoot.querySelector(".ant-modal-confirm-title"),
+      queryAntdConfirmTitle(confirmRoot),
     ).toHaveTextContent("取消归档");
     expect(confirmRoot.textContent).toContain("恢复到默认列表");
     fireEvent.click(await findConfirmOk());

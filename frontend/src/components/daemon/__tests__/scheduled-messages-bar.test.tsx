@@ -30,6 +30,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 import { ScheduledMessagesBar } from "@/components/daemon/scheduled-messages-bar";
 import type { ScheduledMessageRead } from "@/lib/daemon";
+import { queryAntdConfirm } from "@/test/dom-queries";
 
 const mocks = vi.hoisted(() => ({
   listScheduledMessages: vi.fn(),
@@ -266,7 +267,7 @@ describe("ScheduledMessagesBar 取消流", () => {
     if (!keepBtn) throw new Error("keep button not found");
     fireEvent.click(keepBtn);
     await waitFor(() =>
-      expect(document.querySelector(".ant-modal-confirm")).toBeNull(),
+      expect(queryAntdConfirm()).toBeNull(),
     );
     expect(mocks.deleteScheduledMessage).not.toHaveBeenCalled();
   });

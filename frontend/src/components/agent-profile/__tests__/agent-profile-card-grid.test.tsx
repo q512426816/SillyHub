@@ -36,6 +36,7 @@ import type * as React from "react";
 
 import { AgentProfileCardGrid } from "@/components/agent-profile/agent-profile-card-grid";
 import type { AgentProfileAggregatedItem } from "@/lib/agent-profiles";
+import { closestAntdSelect, queryAntdSelectZone, queryAntdSpin, closestAntdSelectOption } from "@/test/dom-queries";
 
 // ── mocks ────────────────────────────────────────────────────────────────
 
@@ -157,13 +158,10 @@ function renderGrid(ui: React.ReactElement) {
  */
 async function chooseAntdOption(placeholderText: string, optionText: string) {
   const placeholder = screen.getByText(placeholderText);
-  const selectWrapper = placeholder.closest(".ant-select");
+  const selectWrapper = closestAntdSelect(placeholder);
   if (!selectWrapper)
     throw new Error(`ant-select for placeholder "${placeholderText}" not found`);
-  // 优先 antd v5 新结构 .ant-select-content，回退旧版 .ant-select-selector。
-  const clickZone =
-    selectWrapper.querySelector(".ant-select-content") ??
-    selectWrapper.querySelector(".ant-select-selector");
+  const clickZone = queryAntdSelectZone(selectWrapper);
   if (!clickZone)
     throw new Error(
       `ant-select click zone not found under placeholder "${placeholderText}"`,
@@ -175,7 +173,7 @@ async function chooseAntdOption(placeholderText: string, optionText: string) {
   });
   // 点击实际选项容器（antd onClick 挂在 .ant-select-item-option）
   // antd v5 Select 选项选中监听 mousedown + click；同时触发确保命中。
-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
+  const optionRow = closestAntdSelectOption(option) as HTMLElement;
   fireEvent.mouseDown(optionRow);
   fireEvent.click(optionRow);
   // 给 React 合成事件 + state 提交一拍（调用方再 waitFor 过滤生效）
@@ -379,7 +377,7 @@ describe("AgentProfileCardGrid 状态（加载/错误/空）", () => {
   it("加载中 → Spin（不渲染卡片）", () => {
     setMine({ profiles: [], isLoading: true });
     const { container } = renderGrid(<AgentProfileCardGrid />);
-    expect(container.querySelector(".ant-spin")).toBeInTheDocument();
+    expect(queryAntdSpin(container)).toBeInTheDocument();
     expect(screen.queryByText("代码审查助手")).not.toBeInTheDocument();
   });
 

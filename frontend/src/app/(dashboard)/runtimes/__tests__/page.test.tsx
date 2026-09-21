@@ -26,6 +26,7 @@ import { useSession } from "@/stores/session";
 // task-09：共享机器「会话」断言用 store 锁定态（FR-01，同根 page.test.tsx 惯例）。
 import { useFloatingSessionStore } from "@/stores/floating-session";
 import { PROVIDER_META } from "@/lib/daemon";
+import { queryAntdConfirm, queryAntdConfirmTitle } from "@/test/dom-queries";
 
 // 每 test 独立 QueryClient（retry:false）。
 function renderPage(ui: React.ReactElement) {
@@ -509,11 +510,11 @@ describe("ql-20260904-016-7b4a / ql-20260904-019-b4f4: 升级 sillyspec 指令�
 
     // 二次确认弹层（portal 到 body）：标题「升级 sillyspec」+ npm 安装说明。
     const confirmRoot = await waitFor(() => {
-      const el = document.querySelector(".ant-modal-confirm");
+      const el = queryAntdConfirm();
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
-    const confirmTitle = confirmRoot.querySelector(".ant-modal-confirm-title");
+    const confirmTitle = queryAntdConfirmTitle(confirmRoot);
     expect(confirmTitle).toHaveTextContent("升级 sillyspec");
     expect(within(confirmRoot).getByText(/npm install -g sillyspec@latest/)).toBeInTheDocument();
 
@@ -550,11 +551,11 @@ describe("ql-20260829-006-6a9e: 机器级删除（离线机器可删，在线 di
 
     // 二次确认弹层（portal 到 body）：标题 + 机器名 + 运行时数提示。
     const confirmRoot = await waitFor(() => {
-      const el = document.querySelector(".ant-modal-confirm");
+      const el = queryAntdConfirm();
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
-    const confirmTitle = confirmRoot.querySelector(".ant-modal-confirm-title");
+    const confirmTitle = queryAntdConfirmTitle(confirmRoot);
     expect(confirmTitle).toHaveTextContent("删除机器");
     expect(within(confirmRoot).getByText(/del-host-1/)).toBeInTheDocument();
     expect(within(confirmRoot).getByText(/1 个运行时/)).toBeInTheDocument();
@@ -582,7 +583,7 @@ describe("ql-20260829-006-6a9e: 机器级删除（离线机器可删，在线 di
     fireEvent.click(findMachineDeleteButton());
 
     const confirmRoot = await waitFor(() => {
-      const el = document.querySelector(".ant-modal-confirm");
+      const el = queryAntdConfirm();
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
@@ -609,7 +610,7 @@ describe("ql-20260829-006-6a9e: 机器级删除（离线机器可删，在线 di
 
     fireEvent.click(btn);
     expect(daemon.deleteDaemonMachine).not.toHaveBeenCalled();
-    expect(document.querySelector(".ant-modal-confirm")).toBeNull();
+    expect(queryAntdConfirm()).toBeNull();
   });
 });
 

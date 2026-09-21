@@ -33,6 +33,7 @@ vi.mock("@/lib/explorer", async (importOriginal) => {
 
 import { FileExplorer } from "../file-explorer";
 import { fetchTree, fetchSearch } from "@/lib/explorer";
+import { closestAntdTreeRow, queryAntdTreeIcon, queryAntdTreeSwitcher, closestAntdTreeNodeWrapper } from "@/test/dom-queries";
 
 const mockFetchTree = fetchTree as unknown as ReturnType<typeof vi.fn>;
 const mockFetchSearch = fetchSearch as unknown as ReturnType<typeof vi.fn>;
@@ -65,16 +66,16 @@ async function waitForRoot() {
 
 /** 点某目录行的 switcher 触发展开。 */
 function expandRow(name: string) {
-  const row = screen.getByText(name).closest(".ant-tree-treenode");
+  const row = closestAntdTreeRow(screen.getByText(name));
   expect(row).toBeTruthy();
-  const switcher = row!.querySelector(".ant-tree-switcher");
+  const switcher = queryAntdTreeSwitcher(row!);
   expect(switcher).toBeTruthy();
   fireEvent.click(switcher!);
 }
 
 /** 点某节点行标题触发选中。 */
 function clickNode(name: string) {
-  fireEvent.click(screen.getByText(name).closest(".ant-tree-node-content-wrapper")!);
+  fireEvent.click(closestAntdTreeNodeWrapper(screen.getByText(name))!);
 }
 
 /** 提交搜索词（回车立即查）。 */
@@ -123,9 +124,9 @@ describe("FileExplorer（task-06）", () => {
     );
     expect(titles).toEqual(["工作区根", "a", "b", "a.txt", "z.md"]);
     // 图标：目录 lucide-folder / 文件按扩展名（未知/文本类回退 lucide-file-text）。
-    const dirRow = screen.getByText("a").closest(".ant-tree-treenode")!;
+    const dirRow = closestAntdTreeRow(screen.getByText("a"))!;
     expect(dirRow.querySelector("svg.lucide-folder")).toBeTruthy();
-    const fileRow = screen.getByText("a.txt").closest(".ant-tree-treenode")!;
+    const fileRow = closestAntdTreeRow(screen.getByText("a.txt"))!;
     expect(fileRow.querySelector("svg.lucide-file-text")).toBeTruthy();
   });
 
@@ -138,10 +139,7 @@ describe("FileExplorer（task-06）", () => {
 
     // 取 iconEle 内的图标 svg（目录行第一个 svg 是 switcher 展开箭头，无 lucide class）。
     const rowIconClass = (name: string) =>
-      screen
-        .getByText(name)
-        .closest(".ant-tree-treenode")!
-        .querySelector(".ant-tree-iconEle svg")!.classList;
+      queryAntdTreeIcon(closestAntdTreeRow(screen.getByText(name))!)!.classList;
     expect(rowIconClass("main.ts").contains("lucide-braces")).toBe(true);
     expect(rowIconClass("config.json").contains("lucide-file-json2")).toBe(true);
     expect(rowIconClass("logo.png").contains("lucide-file-image")).toBe(true);
@@ -168,10 +166,7 @@ describe("FileExplorer（task-06）", () => {
     await waitForRoot();
 
     const rowIconClass = (name: string) =>
-      screen
-        .getByText(name)
-        .closest(".ant-tree-treenode")!
-        .querySelector(".ant-tree-iconEle svg")!.classList;
+      queryAntdTreeIcon(closestAntdTreeRow(screen.getByText(name))!)!.classList;
     // 各语言独立形状：Java 咖啡 / class 二进制 / xml code-xml / Vue 三角 /
     // jsx 原子 / py f(x)（lucide-square-function）/ Go 六边形 / C# 积木 / sh 终端。
     expect(rowIconClass("Main.java").contains("lucide-coffee")).toBe(true);
@@ -232,7 +227,7 @@ describe("FileExplorer（task-06）", () => {
 
     clickNode("backend");
     expect(onSelectFile).not.toHaveBeenCalled();
-    const wrapper = screen.getByText("backend").closest(".ant-tree-node-content-wrapper")!;
+    const wrapper = closestAntdTreeNodeWrapper(screen.getByText("backend"))!;
     expect(wrapper.className).toContain("ant-tree-node-selected");
   });
 
@@ -402,7 +397,7 @@ describe("FileExplorer（task-06）", () => {
     expect(paths).toEqual(["", "backend", "backend/app"]);
     // 各级目录已展开（深层节点渲染出来）且目标节点选中。
     await waitFor(() => {
-      const wrapper = screen.getByText("main.py").closest(".ant-tree-node-content-wrapper")!;
+      const wrapper = closestAntdTreeNodeWrapper(screen.getByText("main.py"))!;
       expect(wrapper.className).toContain("ant-tree-node-selected");
     });
     expect(screen.getByText("app")).toBeInTheDocument();
@@ -428,7 +423,7 @@ describe("FileExplorer（task-06）", () => {
     await waitFor(() => expect(mockFetchTree).toHaveBeenCalledWith("ws1", "backend"));
     await waitFor(() => expect(screen.getByText("pyproject.toml")).toBeInTheDocument());
     expect(onSelectFile).not.toHaveBeenCalled();
-    const wrapper = screen.getByText("backend").closest(".ant-tree-node-content-wrapper")!;
+    const wrapper = closestAntdTreeNodeWrapper(screen.getByText("backend"))!;
     expect(wrapper.className).toContain("ant-tree-node-selected");
     const paths = mockFetchTree.mock.calls.map((c) => c[1]);
     expect(paths).toEqual(["", "backend"]);

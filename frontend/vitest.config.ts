@@ -35,6 +35,20 @@ export default defineConfig({
       ],
       ["src/lib/{daemon,errors,workspace-binding,workspaces}.test.ts", "node"],
     ],
+    // 覆盖率（ql-20260921-006-2095）：CI 跑 test:coverage，text 摘要随日志输出 +
+    // html 报告作 artifact。先只看数不设 thresholds——313 个测试文件的盲区摸清前
+    // 设门槛只会冷启动即红；include 收敛到 src 业务代码，测试自身/测试基建不计入。
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html"],
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.test.{ts,tsx}",
+        "src/**/__tests__/**",
+        "src/test/**",
+        "e2e/**",
+      ],
+    },
   },
   resolve: {
     alias: {

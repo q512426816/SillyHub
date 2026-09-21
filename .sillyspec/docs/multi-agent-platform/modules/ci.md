@@ -27,9 +27,9 @@ multi-agent-platform 的持续集成组件，以 GitHub Actions workflow 实现�
 ## 关键逻辑
 
 - **backend-ci 步骤**：setup-uv@v8.1.0 → `uv python install 3.12` → `uv sync --all-extras` → `uv run ruff check .` → `uv run ruff format --check .` → `uv run mypy app` → `uv run pytest -q --cov=app --cov-fail-under=60`。
-- **frontend-ci 步骤**：`pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm build`。（`pnpm test` 不含 e2e——vitest 已 exclude `e2e/**`，e2e 归 e2e-ci 专项跑）
+- **frontend-ci 步骤**：`pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm typecheck` → `pnpm test:coverage` → `pnpm build`。（2026-09-21 ql-20260921-006-2095 起 `pnpm test` 改带覆盖率跑：vitest v8 provider，text 摘要随 CI 日志输出 + coverage/ html 报告上传 artifact 保留 7 天；timeout 15→20 分钟留插桩余量。vitest 已 exclude `e2e/**`，e2e 归 e2e-ci 专项跑）
 - **门禁一致性**：CI 跑的命令与根 Makefile 的 `backend-test`/`backend-lint`/`frontend-*` 同源，本地 `make lint && make test` 通过基本等于 CI 通过。
-- **覆盖率硬门**：backend 要求 `--cov-fail-under=60`，低于则 CI 红。
+- **覆盖率硬门**：backend 要求 `--cov-fail-under=60`，低于则 CI 红。frontend 2026-09-21 起输出覆盖率报告但**不设门槛**（观察期，先摸清盲区再评估 thresholds，配置在 frontend/vitest.config.ts coverage 段）。
 
 ## 注意事项
 

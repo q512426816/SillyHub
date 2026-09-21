@@ -22,6 +22,7 @@ import {
   toUpdateBody,
 } from "@/components/agent-profile-form";
 import type { AgentProfileRead } from "@/lib/agent-profiles";
+import { closestAntdSelect, queryAntdSelectZone, closestAntdSelectOption } from "@/test/dom-queries";
 
 // ── antd v6 + jsdom 的 `:has` 兼容补丁（仅本文件） ─────────────────────────
 // antd v6 Form style 含 `:has(> .ant-switch:only-child, > .ant-rate:only-child)` 规则。
@@ -317,12 +318,10 @@ describe("AgentProfileForm 创建提交", () => {
  */
 async function chooseAntdOption(placeholderText: string, optionText: string) {
   const anchor = screen.getByText(placeholderText);
-  const selectWrapper = anchor.closest(".ant-select");
+  const selectWrapper = closestAntdSelect(anchor);
   if (!selectWrapper)
     throw new Error(`ant-select for "${placeholderText}" not found`);
-  const clickZone =
-    selectWrapper.querySelector(".ant-select-content") ??
-    selectWrapper.querySelector(".ant-select-selector");
+  const clickZone = queryAntdSelectZone(selectWrapper);
   if (!clickZone)
     throw new Error(
       `ant-select click zone not found under "${placeholderText}"`,
@@ -331,7 +330,7 @@ async function chooseAntdOption(placeholderText: string, optionText: string) {
   const option = await screen.findByText(optionText, {
     selector: ".ant-select-item-option-content",
   });
-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
+  const optionRow = closestAntdSelectOption(option) as HTMLElement;
   fireEvent.mouseDown(optionRow);
   fireEvent.click(optionRow);
   await act(async () => {

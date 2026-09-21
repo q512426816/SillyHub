@@ -87,6 +87,7 @@ import type {
   DaemonRuntimeRead,
   GroupChatListItemRead,
 } from "@/lib/daemon";
+import { closestAntdSelect, queryAntdSelectZone, closestAntdSelectOption } from "@/test/dom-queries";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
@@ -822,11 +823,9 @@ function openAntdSelect(selectId: string) {
   if (!anchor) throw new Error(`element #${selectId} not found`);
   const root = anchor.classList.contains("ant-select")
     ? anchor
-    : (anchor.closest(".ant-select") as HTMLElement | null);
+    : closestAntdSelect(anchor);
   if (!root) throw new Error(`.ant-select for #${selectId} not found`);
-  const clickZone =
-    (root.querySelector(".ant-select-content") as HTMLElement | null) ??
-    (root.querySelector(".ant-select-selector") as HTMLElement | null);
+  const clickZone = queryAntdSelectZone(root);
   if (!clickZone) throw new Error(`select click zone for #${selectId} not found`);
   fireEvent.mouseDown(clickZone);
 }
@@ -841,7 +840,7 @@ async function chooseAntdOptionByText(selectId: string, optionText: string) {
     if (!hit) throw new Error(`option "${optionText}" not found`);
     return hit as HTMLElement;
   });
-  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
+  const optionRow = closestAntdSelectOption(option) as HTMLElement;
   fireEvent.mouseDown(optionRow);
   fireEvent.click(optionRow);
   await act(async () => {
@@ -1992,9 +1991,9 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
       target: { value: "前端攻坚小分队" },
     });
     const pjInput = document.getElementById("cgw-project");
-    const pjRoot = pjInput?.closest(".ant-select") as HTMLElement;
+    const pjRoot = closestAntdSelect(pjInput!) as HTMLElement;
     fireEvent.mouseDown(
-      (pjRoot.querySelector(".ant-select-selector") as HTMLElement) ??
+      (queryAntdSelectZone(pjRoot) as HTMLElement) ??
         pjRoot,
     );
     const pjOption = await waitFor(() => {
@@ -2004,8 +2003,8 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
       if (!hit) throw new Error("project option not found");
       return hit as HTMLElement;
     });
-    fireEvent.mouseDown(pjOption.closest(".ant-select-item-option") as HTMLElement);
-    fireEvent.click(pjOption.closest(".ant-select-item-option") as HTMLElement);
+    fireEvent.mouseDown(closestAntdSelectOption(pjOption) as HTMLElement);
+    fireEvent.click(closestAntdSelectOption(pjOption) as HTMLElement);
     await act(async () => {
       await Promise.resolve();
     });
@@ -2255,9 +2254,9 @@ describe("SessionsPortal 选中工作区快照（task-03 D-006）", () => {
       target: { value: "前端攻坚小分队" },
     });
     const pjInput = document.getElementById("cgw-project");
-    const pjRoot = pjInput?.closest(".ant-select") as HTMLElement;
+    const pjRoot = closestAntdSelect(pjInput!) as HTMLElement;
     fireEvent.mouseDown(
-      (pjRoot.querySelector(".ant-select-selector") as HTMLElement) ?? pjRoot,
+      (queryAntdSelectZone(pjRoot) as HTMLElement) ?? pjRoot,
     );
     const pjOption = await waitFor(() => {
       const hit = [
@@ -2266,8 +2265,8 @@ describe("SessionsPortal 选中工作区快照（task-03 D-006）", () => {
       if (!hit) throw new Error("project option not found");
       return hit as HTMLElement;
     });
-    fireEvent.mouseDown(pjOption.closest(".ant-select-item-option") as HTMLElement);
-    fireEvent.click(pjOption.closest(".ant-select-item-option") as HTMLElement);
+    fireEvent.mouseDown(closestAntdSelectOption(pjOption) as HTMLElement);
+    fireEvent.click(closestAntdSelectOption(pjOption) as HTMLElement);
     await act(async () => {
       await Promise.resolve();
     });

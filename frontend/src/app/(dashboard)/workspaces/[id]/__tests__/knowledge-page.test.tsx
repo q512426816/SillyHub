@@ -141,6 +141,7 @@ import {
   previewMergeKnowledge,
   rejectKnowledge,
 } from "@/lib/knowledge";
+import { closestAntdTreeRow, queryAntdTreeIcon, closestAntdTreeNodeWrapper } from "@/test/dom-queries";
 
 const mockList = listKnowledge as unknown as ReturnType<typeof vi.fn>;
 const mockGet = getKnowledge as unknown as ReturnType<typeof vi.fn>;
@@ -292,9 +293,9 @@ describe("知识库页（task-03 zone 分组树）", () => {
     // 待审核组置顶：徽标计数 1 条（挂在待审核组行内）。
     const badge = screen.getByTestId("proposed-zone-badge");
     expect(badge).toHaveTextContent("1 条");
-    expect(badge.closest(".ant-tree-treenode")?.textContent).toContain("待审核");
+    expect(closestAntdTreeRow(badge)?.textContent).toContain("待审核");
     const groupTitles = ["待审核", "知识手册", "决策库", "需求规则", "自动生成"].map(
-      (label) => screen.getByText(label).closest(".ant-tree-treenode")!,
+      (label) => closestAntdTreeRow(screen.getByText(label))!,
     );
     // 固定 zone 顺序：待审核在最前（DOM 顺序即树顺序），需求规则在决策库后
     // （task-05 / D-005@v1，fr 独立 zone）。
@@ -305,10 +306,10 @@ describe("知识库页（task-03 zone 分组树）", () => {
     expect(order.indexOf("需求规则")).toBeLessThan(order.indexOf("自动生成"));
 
     // zone 组行是目录图标（Folder），组内文件行按扩展名分型（.md → FileText）。
-    const dirRow = screen.getByText("决策库").closest(".ant-tree-treenode")!;
-    expect(dirRow.querySelector(".ant-tree-iconEle svg.lucide-folder")).toBeTruthy();
-    const fileRow = screen.getByText("conventions.md").closest(".ant-tree-treenode")!;
-    expect(fileRow.querySelector(".ant-tree-iconEle svg.lucide-file-text")).toBeTruthy();
+    const dirRow = closestAntdTreeRow(screen.getByText("决策库"))!;
+    expect(queryAntdTreeIcon(dirRow, "folder")).toBeTruthy();
+    const fileRow = closestAntdTreeRow(screen.getByText("conventions.md"))!;
+    expect(queryAntdTreeIcon(fileRow, "file-text")).toBeTruthy();
     // 日期灰字（zh-CN 本地化，UTC 时间戳在本地时区渲染，断言年份存在）。
     expect(fileRow.textContent).toMatch(/2026/);
   });
@@ -318,7 +319,7 @@ describe("知识库页（task-03 zone 分组树）", () => {
     await waitForTree(["需求规则", "host-fs-handler.md"]);
 
     // fr 条目挂在需求规则组（zone 组节点路径 zone:fr）。
-    const frRow = screen.getByText("host-fs-handler.md").closest(".ant-tree-treenode")! as HTMLElement;
+    const frRow = closestAntdTreeRow(screen.getByText("host-fs-handler.md"))! as HTMLElement;
     expect(frRow.textContent).not.toContain("fr/");
     // 文件级命中徽标：conventions.md 🔥214 / fr 文件 🔥18；无计数条目（INDEX.md）不带。
     const conventionsRow = screen.getByText("conventions.md").closest(
@@ -328,7 +329,7 @@ describe("知识库页（task-03 zone 分组树）", () => {
       within(conventionsRow).getByTestId("tree-use-badge").textContent,
     ).toBe("🔥214");
     expect(within(frRow).getByTestId("tree-use-badge").textContent).toBe("🔥18");
-    const indexRow = screen.getByText("INDEX.md").closest(".ant-tree-treenode")! as HTMLElement;
+    const indexRow = closestAntdTreeRow(screen.getByText("INDEX.md"))! as HTMLElement;
     expect(within(indexRow).queryByTestId("tree-use-badge")).not.toBeInTheDocument();
   });
 
@@ -375,18 +376,18 @@ describe("知识库页（task-03 zone 分组树）", () => {
     await waitForTree(["待审核", "pending-fix.md"]);
 
     // 点 zone 组行 → 收起（子行隐藏，ql-20260821-015 expandAction=click）。
-    fireEvent.click(screen.getByText("待审核").closest(".ant-tree-node-content-wrapper")!);
+    fireEvent.click(closestAntdTreeNodeWrapper(screen.getByText("待审核"))!);
     await waitFor(() =>
       expect(screen.queryByText("pending-fix.md")).not.toBeInTheDocument(),
     );
     // 再点 → 展开。
-    fireEvent.click(screen.getByText("待审核").closest(".ant-tree-node-content-wrapper")!);
+    fireEvent.click(closestAntdTreeNodeWrapper(screen.getByText("待审核"))!);
     await waitForTree(["pending-fix.md"]);
 
     // 点文件行 → 按 filename（含子目录段）拉详情；md 文件默认卡片视图
     // （task-05 / FR-04：统一条目渲染器挂载，md 阅读视图不在默认态）。
     fireEvent.click(
-      screen.getByText("pending-fix.md").closest(".ant-tree-node-content-wrapper")!,
+      closestAntdTreeNodeWrapper(screen.getByText("pending-fix.md"))!,
     );
     await waitFor(() => expect(mockGet).toHaveBeenCalledWith(WS, "proposed/pending-fix.md"));
     await waitFor(() => expect(screen.getByText("待合并修复")).toBeInTheDocument());
@@ -435,7 +436,7 @@ describe("写入口权限与 decisions 只读（task-05 / FR-02 / FR-07 / D-006@
       }),
     );
     fireEvent.click(
-      screen.getByText("conventions.md").closest(".ant-tree-node-content-wrapper")!,
+      closestAntdTreeNodeWrapper(screen.getByText("conventions.md"))!,
     );
     await waitFor(() => expect(screen.getByText("约定")).toBeInTheDocument());
     expect(screen.queryByTestId("edit-entry")).not.toBeInTheDocument();
@@ -458,7 +459,7 @@ describe("写入口权限与 decisions 只读（task-05 / FR-02 / FR-07 / D-006@
     expect(screen.getByTestId("precipitate-entry")).toHaveTextContent("沉淀知识");
 
     fireEvent.click(
-      screen.getByText("conventions.md").closest(".ant-tree-node-content-wrapper")!,
+      closestAntdTreeNodeWrapper(screen.getByText("conventions.md"))!,
     );
     await waitFor(() => expect(screen.getByTestId("edit-entry")).toBeInTheDocument());
 
@@ -490,7 +491,7 @@ describe("写入口权限与 decisions 只读（task-05 / FR-02 / FR-07 / D-006@
     await waitForTree(["决策库", "daemon.md"]);
 
     fireEvent.click(
-      screen.getByText("daemon.md").closest(".ant-tree-node-content-wrapper")!,
+      closestAntdTreeNodeWrapper(screen.getByText("daemon.md"))!,
     );
     await waitFor(() => expect(screen.getByText("daemon 决策")).toBeInTheDocument());
 
@@ -515,7 +516,7 @@ async function selectProposedEntry() {
   renderPage();
   await waitForTree(["待审核", "pending-fix.md"]);
   fireEvent.click(
-    screen.getByText("pending-fix.md").closest(".ant-tree-node-content-wrapper")!,
+    closestAntdTreeNodeWrapper(screen.getByText("pending-fix.md"))!,
   );
   await waitFor(() => expect(screen.getByText("待合并修复")).toBeInTheDocument());
 }
@@ -545,7 +546,7 @@ describe("待审核操作区：合并/拒绝（task-06 / FR-05 / D-007@v1）", (
       }),
     );
     fireEvent.click(
-      screen.getByText("conventions.md").closest(".ant-tree-node-content-wrapper")!,
+      closestAntdTreeNodeWrapper(screen.getByText("conventions.md"))!,
     );
     await waitFor(() => expect(screen.getByText("约定")).toBeInTheDocument());
     expect(screen.queryByTestId("merge-entry")).not.toBeInTheDocument();
@@ -682,7 +683,7 @@ describe("卡片/原文双 tab 分发（task-05 / 2026-09-20-knowledge-effect-pa
     renderPage();
     await waitForTree(["知识手册", "conventions.md"]);
     fireEvent.click(
-      screen.getByText("conventions.md").closest(".ant-tree-node-content-wrapper")!,
+      closestAntdTreeNodeWrapper(screen.getByText("conventions.md"))!,
     );
     await waitFor(() => expect(screen.getByText("项目约定")).toBeInTheDocument());
     await screen.findByTestId("entry-card-list");
@@ -726,7 +727,7 @@ describe("卡片/原文双 tab 分发（task-05 / 2026-09-20-knowledge-effect-pa
       }),
     );
     fireEvent.click(
-      screen.getByText("INDEX.md").closest(".ant-tree-node-content-wrapper")!,
+      closestAntdTreeNodeWrapper(screen.getByText("INDEX.md"))!,
     );
     await waitFor(() =>
       expect(screen.getByTestId("entry-card-list")).toHaveAttribute("data-form", "index"),

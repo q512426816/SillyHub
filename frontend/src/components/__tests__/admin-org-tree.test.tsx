@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 
 import { AdminOrgTree } from "@/components/admin-org-tree";
 import type { OrganizationRead } from "@/lib/admin";
+import { closestAntdTreeNodeWrapper } from "@/test/dom-queries";
 
 // antd Tree 内部 rc-resize-observer 依赖 ResizeObserver,jsdom 无此全局,
 // 补一个 no-op polyfill 否则渲染即抛 "ResizeObserver is not defined"。
@@ -54,7 +55,7 @@ function treeitemByTitle(title: string): HTMLElement {
 // antd Tree 标题点击区:.ant-tree-node-content-wrapper
 function clickTitleOf(title: string): void {
   const titleEl = screen.getByText(title);
-  const wrapper = titleEl.closest(".ant-tree-node-content-wrapper") as HTMLElement;
+  const wrapper = closestAntdTreeNodeWrapper(titleEl) as HTMLElement;
   fireEvent.click(wrapper);
 }
 

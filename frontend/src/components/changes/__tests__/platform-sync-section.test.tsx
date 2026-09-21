@@ -44,6 +44,7 @@ import {
 import { useSession } from "@/stores/session";
 import type { components } from "@/lib/api-types";
 import type { DaemonMachineRead } from "@/lib/daemon";
+import { queryAntdConfirm, queryAntdConfirmTitle } from "@/test/dom-queries";
 
 type StatusFixture = components["schemas"]["MachineSillySpecStatusRead"];
 type ChangeFixture = components["schemas"]["DaemonHeartbeatSillySpecChange"];
@@ -297,7 +298,7 @@ async function pushMachine(machine: DaemonMachineRead) {
 /** 等 antd modal.confirm 挂载（portal 到 body；标题渲染两份走结构选择器）。 */
 async function openConfirmRoot(): Promise<HTMLElement> {
   return await waitFor(() => {
-    const el = document.querySelector(".ant-modal-confirm");
+    const el = queryAntdConfirm();
     expect(el).not.toBeNull();
     return el as HTMLElement;
   });
@@ -517,7 +518,7 @@ describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", ()
 
     const confirmRoot = await openConfirmRoot();
     expect(
-      confirmRoot.querySelector(".ant-modal-confirm-title"),
+      queryAntdConfirmTitle(confirmRoot),
     ).toHaveTextContent("清理 ghost 残留");
     expect(
       within(confirmRoot).getByText(/目录已不存在的变更行/),

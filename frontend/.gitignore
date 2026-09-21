@@ -2,4 +2,5 @@
 
 test-results/
 playwright-report/
+coverage/
 e2e/.env.e2e

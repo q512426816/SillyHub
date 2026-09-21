@@ -58,6 +58,7 @@ import {
   SESSIONS_FILE_PREVIEW_WIDTH_MAX,
 } from "../portal-file-panels";
 import { fetchTree, useExplorerFile } from "@/lib/explorer";
+import { closestAntdTreeRow, queryAntdTreeSwitcher, closestAntdTreeNodeWrapper } from "@/test/dom-queries";
 
 const mockFetchTree = fetchTree as unknown as ReturnType<typeof vi.fn>;
 const mockUseExplorerFile = useExplorerFile as unknown as ReturnType<typeof vi.fn>;
@@ -98,16 +99,16 @@ async function waitForRoot() {
 
 /** 点某目录行的 switcher 触发展开（file-explorer.test 同款）。 */
 function expandRow(name: string) {
-  const row = screen.getByText(name).closest(".ant-tree-treenode");
+  const row = closestAntdTreeRow(screen.getByText(name));
   expect(row).toBeTruthy();
-  const switcher = row!.querySelector(".ant-tree-switcher");
+  const switcher = queryAntdTreeSwitcher(row!);
   expect(switcher).toBeTruthy();
   fireEvent.click(switcher!);
 }
 
 /** 点某节点行标题触发选中（file-explorer.test 同款）。 */
 function clickNode(name: string) {
-  fireEvent.click(screen.getByText(name).closest(".ant-tree-node-content-wrapper")!);
+  fireEvent.click(closestAntdTreeNodeWrapper(screen.getByText(name))!);
 }
 
 describe("portal-file-panels（task-01）", () => {

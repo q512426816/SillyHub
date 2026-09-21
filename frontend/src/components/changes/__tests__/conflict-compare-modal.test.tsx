@@ -41,6 +41,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // 组件尚未实现（task-07）——运行时模块不存在即本文件的红态来源。
 import { ConflictCompareModal } from "@/components/changes/conflict-compare-modal";
 import type { components } from "@/lib/api-types";
+import { queryAntdConfirm, queryAntdConfirmTitle } from "@/test/dom-queries";
 
 type CompareResponse = components["schemas"]["SillySpecConflictCompareResponse"];
 type CompareFile = components["schemas"]["SillySpecConflictCompareFile"];
@@ -214,7 +215,7 @@ function renderModal(props: ModalPropsOverride = {}) {
 /** 等 antd modal.confirm 挂载（portal 到 body；标题渲染两份走结构选择器）。 */
 async function openConfirmRoot(): Promise<HTMLElement> {
   return await waitFor(() => {
-    const el = document.querySelector(".ant-modal-confirm");
+    const el = queryAntdConfirm();
     expect(el).not.toBeNull();
     return el as HTMLElement;
   });
@@ -399,7 +400,7 @@ describe("ConflictCompareModal（task-06 红态锚定 / design §7.2）", () => 
 
     fireEvent.click(screen.getByRole("button", { name: "保本地" }));
     const confirmRoot = await openConfirmRoot();
-    expect(confirmRoot.querySelector(".ant-modal-confirm-title")).toHaveTextContent(
+    expect(queryAntdConfirmTitle(confirmRoot)).toHaveTextContent(
       "裁决冲突：保本地（keep-local）",
     );
     expect(
@@ -430,7 +431,7 @@ describe("ConflictCompareModal（task-06 红态锚定 / design §7.2）", () => 
 
     fireEvent.click(screen.getByRole("button", { name: "取平台" }));
     const confirmRoot = await openConfirmRoot();
-    expect(confirmRoot.querySelector(".ant-modal-confirm-title")).toHaveTextContent(
+    expect(queryAntdConfirmTitle(confirmRoot)).toHaveTextContent(
       "裁决冲突：取平台（take-platform）",
     );
     expect(

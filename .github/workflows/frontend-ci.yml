@@ -18,7 +18,8 @@ defaults:
 jobs:
   lint-build-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 覆盖率插桩后测试变慢（ql-20260921-006-2095），15→20 预留余量
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -42,8 +43,18 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Test
-        run: pnpm test
+      # 同一批测试带覆盖率跑（ql-20260921-006-2095）：先只看数不设门槛，
+      # text 摘要在日志里，html 报告上传 artifact 便于离线翻看（保留 7 天）。
+      - name: Test (coverage)
+        run: pnpm test:coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: frontend/coverage/
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Build
         env:

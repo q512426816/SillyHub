@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 
 import { WorkHourPieChart } from "@/components/charts/WorkHourPieChart";
 import { useThemeStore } from "@/stores/theme";
+import { queryChart } from "@/test/dom-queries";
 
 describe("WorkHourPieChart", () => {
   // 组件订阅 useThemeStore(task-09),dark 用例改写 store 后恢复默认主题,
@@ -21,7 +22,7 @@ describe("WorkHourPieChart", () => {
         totalHours={15}
       />,
     );
-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
+    expect(queryChart(container)).not.toBeNull();
   });
 
   it("空数据显示暂无数据占位", () => {
@@ -44,7 +45,7 @@ describe("WorkHourPieChart", () => {
     const { container } = render(
       <WorkHourPieChart rows={rows} totalHours={49} topN={5} />,
     );
-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
+    expect(queryChart(container)).not.toBeNull();
   });
 
   it("dark 主题下订阅 useThemeStore 正常渲染(dark 配色注入)", () => {
@@ -58,6 +59,6 @@ describe("WorkHourPieChart", () => {
         totalHours={15}
       />,
     );
-    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
+    expect(queryChart(container)).not.toBeNull();
   });
 });
