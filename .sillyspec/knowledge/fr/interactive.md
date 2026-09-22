@@ -259,3 +259,66 @@
 - 场景：默认场景 — Given 本机 codex-cli 0.147.0 与 pi 0.81.1；When 真机各跑一轮含工具调用会话；Then codex 抓 `thread/tokenUsage/updated` 确认 `last` 形态与取值（结论记 QUICKLOG）；pi 复核 turn_end
 全文：.sillyspec/changes/archive/2026-09-13-ctx-usage-all-providers/requirements.md#FR-07
 最近确认：40eecd92c
+
+## FR-interactive-030 caps 第 13 键+codex thinking 翻值
+变更：2026-09-14-session-thinking-level
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given ProviderCaps 加 thinking_level 键（claude/pi/codex=true、cursor=false）；When gen 脚本三端生成+守护同步；Then 前端门控/后端校验有真数据源；codex thinking 翻 true（纯声明对齐）
+全文：.sillyspec/changes/archive/2026-09-14-session-thinking-level/requirements.md#FR-01
+最近确认：28915f71b
+
+## FR-interactive-031 统一七档词表与映射
+变更：2026-09-14-session-thinking-level
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given THINKING_LEVELS 七档常量+mapPlatformLevelToEngine 映射矩阵；When 各 driver 消费；Then 引擎不支持档位按降级规则映射（off→不设、minimal→low、max→xhigh）+矩阵单测全绿
+全文：.sillyspec/changes/archive/2026-09-14-session-thinking-level/requirements.md#FR-02
+最近确认：28915f71b
+
+## FR-interactive-032 创建时选档全链
+变更：2026-09-14-session-thinking-level
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 前端 preThinkingLevel→createSession；When 全链五跳透传（schema→create→placement→lease→daemon→driver）；Then 三 driver 启动设置生效（claude options.effort/codex turn params/pi 握手后命令）
+全文：.sillyspec/changes/archive/2026-09-14-session-thinking-level/requirements.md#FR-03
+最近确认：28915f71b
+
+## FR-interactive-033 动态档位查询
+变更：2026-09-14-session-thinking-level
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 会话存在且 caps=true；When GET /sessions/{id}/thinking-levels；Then 返回 {levels, current}——pi 按模型动态/claude supportedModels 过滤/codex 五档
+全文：.sillyspec/changes/archive/2026-09-14-session-thinking-level/requirements.md#FR-04
+最近确认：28915f71b
+
+## FR-interactive-034 会话中切换
+变更：2026-09-14-session-thinking-level
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given turn 空闲+合法档位；When POST /sessions/{id}/thinking-level；Then 三引擎切换生效（pi 命令/claude applyFlagSettings/codex settings/update）+成功通知
+全文：.sillyspec/changes/archive/2026-09-14-session-thinking-level/requirements.md#FR-05
+最近确认：28915f71b
+
+## FR-interactive-035 前端双控件
+变更：2026-09-14-session-thinking-level
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given caps.thinking_level=true；When 创建表单（静态七档+off 显示"默认"+语义差异 tooltip）/会话配置条（动态档位+现值+running 禁用）；Then 切换成功通知+失败带原因
+全文：.sillyspec/changes/archive/2026-09-14-session-thinking-level/requirements.md#FR-06
+最近确认：28915f71b
+
+## FR-interactive-036 真机验证
+变更：2026-09-14-session-thinking-level
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 三引擎会话；When 各创建选档+查询+切换；Then 档位生效（真机回执记 QUICKLOG；spike-01 codex 形状/spike-02 claude applyFlagSettings）
+全文：.sillyspec/changes/archive/2026-09-14-session-thinking-level/requirements.md#FR-07
+最近确认：28915f71b
