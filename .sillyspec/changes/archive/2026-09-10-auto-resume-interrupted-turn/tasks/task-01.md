@@ -24,6 +24,8 @@ acceptance: >
 constraints: >
   见 design.md 对应决策与 NFR；禁止越 allowed_paths 改文件；先例引用以行号锚定；既有测试零回归（NFR-01）。
 verify: '验收标准见 acceptance 字段'
+base_commit: '76c15a7884ce9cbba09b429733e37b7382bb5377'
+head_commit: 'ba57735d3ae4d568b08c8ae4f103d75bc8dfffb0'
 ---
 
 
