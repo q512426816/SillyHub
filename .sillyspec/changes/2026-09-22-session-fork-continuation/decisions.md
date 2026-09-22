@@ -164,3 +164,14 @@ change: 2026-09-22-session-fork-continuation
 - normalized_requirement: 六条均为实现必要偏差，不改 D-001~012 语义；task-06 消费键形以本条+D-012 为准（fork_mode 恒写+resume_session_id 承载源会话）。
 - impacts: [task-05, task-06]
 - evidence: commit 8c5ea3e0b（11 文件）；test_session_fork.py 22/22+相邻 139 绿
+
+## D-014@v1: 执行期裁决——W4 双卡裁决汇总（pi 预 fork 方案/路径漂移//runs DTO 增列归属）
+- type: architecture
+- priority: P1
+- status: accepted
+- source: code
+- question: task-06/07 实现期的三处实质偏差如何定案？
+- answer: ①pi fork 采用「短命 RPC 预 fork」替代卡面「源会话活 RPC」——实证 pi fork/clone 会劫持 RPC 进程自身活跃会话（teardownCurrent+apply），活 RPC 方案须 switch_session 切回且违反 D-005 零侵扰；短命方案（临时 pi --mode rpc --session <源> → fork/clone → get_state 读新分支 → 杀 temp → B 以分支文件 spawn）附带支持源会话已结束场景，失败原样上抛不降级。②pi entryId 不在 message 事件（仅 SessionEntry 落盘后存在）→ message_end(role=user) 回查 get_fork_messages 取轮首锚，失败仅 warn=锚缺失入口灰。③task-07 发现 /runs SessionRunRead 未透出 AgentRun.engine_anchor（native 档门控无数据源）→ session_insights.py 一行增列+gen:types 归 task-08，engineAnchor prop 由 /runs 数据接线。另：task-06 路径漂移两处（建会话真身在 session-manager.ts 非 index.ts facade；CreateSessionInput 在 interactive/types.ts）=代码现实修正。
+- normalized_requirement: 上述形态为定案实现；task-08 增 session_insights.py DTO 增列与 prop 接线；pi 锚缺失=入口灰不伪造。
+- impacts: [FR-03, FR-04, FR-07, task-06, task-08]
+- evidence: commit fa91e133a/02a6c15db；pi 0.81.1 agent-session-runtime.js fork() 劫持实证；pi-events AgentSessionEvent 无 entryId 实测

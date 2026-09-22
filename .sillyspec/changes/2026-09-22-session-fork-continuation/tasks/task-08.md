@@ -19,6 +19,9 @@ allowed_paths:
   - frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
   - frontend/src/components/sessions/session-list-panel.tsx
   - frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx
+  - backend/app/modules/daemon/router/session_insights.py
+  - backend/openapi.json
+  - frontend/src/lib/api-types.ts
   - .sillyspec/changes/2026-09-22-session-fork-continuation/e2e-claude-fork.md
 target_files:
   - NEW:frontend/src/components/daemon/session-fork/lineage-block.tsx
@@ -31,11 +34,12 @@ target_files:
 goal: >
   谱系溯源闭环：B 顶部常驻溯源块+多跳面包屑、点击浮层看原会话（WorkerSessionOverlay 泛化）、列表 origin+fork_of 分组徽标；收口 claude 真机 E2E 验收记录。
 implementation:
+  - （D-014③ 前置）backend/app/modules/daemon/router/session_insights.py：SessionRunRead DTO 增 engine_anchor 可空字段透出（轮级门控数据源）+ pnpm gen:types 刷新（PYTHONPATH=<WT>/backend 陷阱）
   - 新建 frontend/src/components/daemon/session-fork/lineage-block.tsx：溯源块（分叉自哪会话@第几轮+引擎档标注+时间，数据=SessionRead fork 字段，不依赖消息内容渲染）+谱系面包屑（A→B→当前，逐节点可点）；点击回调开浮层
   - worker-session-overlay.tsx 标题参数化（「分身会话」→title prop）+「已分叉」状态条；复用为原会话浮层
-  - session-panel-page.tsx + session-panel-dialog.tsx 双模式挂载溯源块（origin='fork' 会话顶部常驻）
+  - session-panel-page.tsx + session-panel-dialog.tsx 双模式挂载：溯源块（origin='fork' 会话顶部常驻）+ TurnForkEntry 接线（engineAnchor prop 取 /runs engine_anchor；轮容器加 group 类——task-07 hover 方案要求）+ ForkConfirmModal 挂载（onForked 跳转 B 会话）
   - session-list-panel.tsx 分叉子会话挂源会话附属分组（origin+fork_of 判定，与分身组 parent_session_id 判定并行不混树，:2403-2489 现状旁）+「🔗 分叉」徽标
-  - 新建 __tests__/session-fork-lineage.test.tsx：溯源块渲染/多跳面包屑/浮层打开/列表分组与徽标
+  - 新建 __tests__/session-fork-lineage.test.tsx：溯源块渲染/多跳面包屑/浮层打开/列表分组与徽标/入口 prop 接线
   - claude 真机 E2E：对真实会话第 N 轮分叉→B 问第 1~N 轮内容可答+问第 N+1 轮内容不知情+fork 后 A 全字段不变；过程与结论记入 e2e-claude-fork.md
 acceptance:
   - B 面板顶部溯源块常驻且点击浮层可看 A 完整记录；多跳链面包屑逐级可点
