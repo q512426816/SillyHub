@@ -1,5 +1,5 @@
 ---
-generated_at: 2026-09-22T20:20:39.156Z
+generated_at: 2026-09-22T20:22:19.243Z
 sources_reconcile: 命中（ran_at=2026-09-22T20:17:43.600Z，verify-runs 按 change 过滤取最新）
 sources_verify_facts: 命中
 sources_module_map: 命中
@@ -118,4 +118,8 @@ sources_decisions: 命中
 
 ### 端点基线提示
 
-- 端点增删：无增删（基线 617 端点 × 现算 617 端点，method+归一 path 全一致）
+- 端点 diff：基线 617 端点 × 现算 618 端点（method+归一 path 集合运算；changed 不配对，天然呈独立行）
+
+| 增删 | method | path | source |
+|---|---|---|---|
+| + 新增 | POST | /sessions/{session_id}/fork | C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\modules\daemon\router\session_crud.py |

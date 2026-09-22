@@ -1,0 +1,196 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-22-session-fork-continuation",
+  "appliedAt": "2026-09-22T20:21:20.448Z",
+  "baseHash": "f209b4da32bf539f100ea2a23f2dbc94dbb9bfef",
+  "files": [
+    {
+      "path": "backend/app/modules/agent/model.py",
+      "sha256": "8d43ad8ba66afa1e3fc41629e63f090e43af7b645d942f5187ce981d76a2fef6"
+    },
+    {
+      "path": "backend/app/modules/agent/placement.py",
+      "sha256": "d2cdc1693c61cde1b1eeeaa2d35cd890626edd40e2854745eaaa2695a7c037bc"
+    },
+    {
+      "path": "backend/app/modules/agent/provider_caps.py",
+      "sha256": "196634cb64eb46192489aeaa76cc523bcf12164083ed9ff74be557613c8acae0"
+    },
+    {
+      "path": "backend/app/modules/agent/tests/test_agent_session_model.py",
+      "sha256": "ca9b76cad913967bb093e7cb74117f6ee943f4de035c9f30250581ebbc279830"
+    },
+    {
+      "path": "backend/app/modules/agent/tests/test_mission_session_id.py",
+      "sha256": "fcbbe2684bf7c9c66c1c739f62fa21fbc3dc3743e89a9fdc090ec0bbc0a48cdc"
+    },
+    {
+      "path": "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+      "sha256": "9201d4dd8d49d1582055cea3c7d8ec23724033888db5a967b1285a2699250406"
+    },
+    {
+      "path": "backend/app/modules/agent/tests/test_session_fork_model.py",
+      "sha256": "891e4c1099ee92bf82cd08d650800f95d6015a6add0a3cda52dbade5b3b71f73"
+    },
+    {
+      "path": "backend/app/modules/daemon/lease/context.py",
+      "sha256": "c2c8aae1e0f83f1a5f6297da191bf15c58b1c7dc4f1f1bed5ca844d7d77dfbc1"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/__init__.py",
+      "sha256": "17b17cd4d9010e3c23985541a6e6cbf3942be0b87260cb72adb34459462b1b06"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_crud.py",
+      "sha256": "31479e52c403317beb8169b943f577aa1cc54d01df794f3289f29c64d5908529"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_insights.py",
+      "sha256": "a66c8d018d891d030df835f504f8dc859a9d81c03cdbc51b8d7c0277500289d1"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/submit_commit.py",
+      "sha256": "fe07de7a1eab5159859dc91fe81e3d9a85a519901b3de0bba982a3c2fc58e51d"
+    },
+    {
+      "path": "backend/app/modules/daemon/schema.py",
+      "sha256": "5fcbad726321a428f7148a2c1d3bc7a530e71f63d18acd055ae179986088353a"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/__init__.py",
+      "sha256": "74cb52c2cb9daa027465b6759b9034f544cb79f7b50bab86338c5bec66a550be"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/create.py",
+      "sha256": "8c376d56e098d18617b78aee7402cd4992aa7050d89f2105066a83f1a4435a69"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/fork.py",
+      "sha256": "8af5acd534f2a28bab8392b8a1432736f786a2c19363fa3efdf83ee23d281c00"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_engine_anchor.py",
+      "sha256": "ee5d91ef9eb7b2c76027984b89c9ed9ba3ffaa436891ff8f55eab1ed9613de48"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_fork.py",
+      "sha256": "f9c9aa769b72f6064b92e95fc053e3cbb3f5502690f6b205535c123f213ca74b"
+    },
+    {
+      "path": "backend/migrations/versions/20260922194500_add_session_fork_columns.py",
+      "sha256": "68f7e8eceb60badaf9ab3caa33d62c9bffe0c456efa70c3355e92ab7a02742c6"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "87102d8b4611bfc3c6621a795c6169c8688a1304088725efde7b912061001b9d"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-fork-entry.test.tsx",
+      "sha256": "1e278de3f7b9f464b1232de69f2353c7d8d12c90bc2ebba3bc6964adb8fc9c43"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx",
+      "sha256": "6e939c120a633e762240c24de90173b2bf5a7b5d68d8b8fb6bff78c1cb353b59"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx",
+      "sha256": "97d83a84d1fb3cea0305fea3d68e9a3ec573cee65319ae77a39aa9ff7775ed3f"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx",
+      "sha256": "40faf93b7e3d3fdfa3b6c79d32ef673dd435ae3a5afe30d1b4bd14b8a799f225"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx",
+      "sha256": "02c92496637cf9835c2d9388180521898a913c8f2b833ee9072637f0372117f3"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-fork/fork-confirm-modal.tsx",
+      "sha256": "cad8ff47376796c74f39f17139d7ff03d8950935363c4709a82bc4ffffbcf5cd"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-fork/lineage-block.tsx",
+      "sha256": "d1b55eb12e025fda73983d1f0350ab9be41d75b94238804cde9beb56559c36bf"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "sha256": "4345e711ebfd587d7bc01b26f01642be31256adc360e1c9df224d813edd45e17"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "2c1e6d3b38fe1130e9cbdbf9fff2a7f0541fc9aba5dfc28bd509b5dba2ca3fc9"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/worker-session-overlay.tsx",
+      "sha256": "356a8348403ac40b2b027a1f94dc3e821b05140239d3372c112e7b8db728285a"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-segment-views.tsx",
+      "sha256": "f0af16a7f361e6f7106497460cedf29d1110b25b2899b094e12636166ecbc971"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "sha256": "4de9660d8572c1f55c22f564b1e5629133fc175a284344e778d8daf0fdd18120"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-list-panel.tsx",
+      "sha256": "72bbd8f327cffa21ce0c261d89e890d51826d18306f856c605bbc7a5a22cbd83"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "0ec632ba41847eaa8b500cd9d869674a68a728bad8f3025f1b5d67ae4a217644"
+    },
+    {
+      "path": "frontend/src/lib/daemon/sessions.ts",
+      "sha256": "f6181e697a8c3a328168704d87578305c2291e5da03ff638fbbc9f3d043e660f"
+    },
+    {
+      "path": "frontend/src/lib/provider-caps.ts",
+      "sha256": "5e74d0259e86c1e1b8dd35de73ccefe0825c8e33b2fe68b6549775436aad23af"
+    },
+    {
+      "path": "sillyhub-daemon/scripts/gen-provider-caps.mjs",
+      "sha256": "3c74b26356d460067bac855f5eb137e0b0b5b9dc86d415f618a7affc4c239ee8"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "2d831c2740a7e651e8316a85a52f45fec42fd0c1f23cb49dbe542dd3916a263e"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/claude-sdk-driver.ts",
+      "sha256": "ab9275052da68ebfd30f30337d0e0bb8397e91aa094f756f19b49954808c9d83"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+      "sha256": "f214361c4db8ea297c8e34baf7eecb03b47a1359b6d77c6b3756eaa273e78445"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/providers.ts",
+      "sha256": "9af888f6cae7428392932478ff68d108721216160e537faa04b2b7512ae39247"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+      "sha256": "8406aae6ceb820a4e8fd9d098a5106e71fe80fe1b80233e9669fec09ef2bdd86"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/driver-factory.ts",
+      "sha256": "569e16e4d4929df5afb0f98fab2a7a767e6b88735229f2f92a107be7ff956038"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/types.ts",
+      "sha256": "c12dff2a736a59fe8f12132c3486c52cb9e00b30f736fd72ace6b520cd353595"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/types.ts",
+      "sha256": "297c0d285f8ff7a8e7d2fd0f1797a26677c8d792f215540d5c809b1219552c3e"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+      "sha256": "9f13a4832db16cde6adae0da0fbf32f1008196fec887eea3bc43b0abe32c18cc"
+    },
+    {
+      "path": "sillyhub-daemon/tests/session-fork.test.ts",
+      "sha256": "d7e72d9559d94a03f08d16deaaef05907c5507ac2c83da2f03b44a43885f5d5f"
+    }
+  ]
+}
