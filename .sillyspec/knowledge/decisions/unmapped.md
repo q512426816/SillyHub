@@ -770,3 +770,30 @@ supersedes：D-006@v2
 锚点：未记录
 最近确认：1f515ddce
 理由：①四 token 全删（消费面 Tailwind 阶已达成同观感，留死定义徒增维护面）；②G-02 作废——task-05 的 43px 对齐要求删除（对话视图无过程行，全部视图按 G-03 不动，turn-segment-views 零改动是正确实现）；③design 文件清单 layout.tsx 行改指 app-shell.tsx（极光实际落点）
+
+## D-009@v1
+状态：rejected
+变更：2026-09-11-agent-log-attribution-refactor
+锚点：未记录
+最近确认：353eb11b0
+理由：否——用户明确「不应该限制 agent 类型」，跨 harness 同变更挂接是需求而非缺陷
+否决理由：与「同变更就挂」需求直接冲突
+复潮条件：未来出现同变更跨 harness 归属仍需区分展示的需求
+
+## D-010@v1
+状态：rejected
+变更：2026-09-11-agent-log-attribution-refactor
+锚点：未记录
+最近确认：353eb11b0
+理由：否——首次错标仍会发生、subagent 归属仍靠 cwd 猜，治标不治本
+否决理由：治标；不满足 FR-01
+复潮条件：锚定方案在某个 harness 上不可实施时的局部回退
+
+## D-011@v1
+状态：rejected
+变更：2026-09-11-agent-log-attribution-refactor
+锚点：未记录
+最近确认：353eb11b0
+理由：否——动表结构与 D-005 冲突；现有 change/quicklog links 表已能表达「会话↔ctx」登记
+否决理由：违反已确认的「不动表结构」决策；现有 links 表能力足够
+复潮条件：ctx owner 解析出现性能问题或需要显式管理界面

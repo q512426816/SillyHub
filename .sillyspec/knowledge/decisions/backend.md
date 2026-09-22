@@ -222,3 +222,24 @@
 锚点：未记录
 最近确认：f1bdbef95
 理由：用户原话「或至少在 mcp-tokens 签发响应/get_daemon_status 里暴露当前生效执行器」。选 get_daemon_status：mcp-tokens 是签发时快照会陈旧，token 是长期凭证不该背 status 类实时信息；daemon 注册/心跳已上报 providers（DaemonRuntime 现成数据）。「管理员把 default_agent 设为 pi」为运维动作随交付文档给出。
+
+## D-002@v1
+状态：implemented
+变更：2026-09-11-agent-log-attribution-refactor
+锚点：backend/app/modules/platform_sync/service.py（_upsert_agent_log_entries_once 归属段）
+最近确认：353eb11b0
+理由：ctx-owner 解析——按 entry 自身 ctx（quick 优先）解析「主」会话：已绑定该 ctx 的会话（change/quicklog links，含平台派发会话与自动会话）取最近活跃者优先挂；无主则 find-or-create 自动会话。跨 harness 不限制（平台 pi 会话 + 本地 zcode 同变更聚到一起）
+
+## D-003@v1
+状态：implemented
+变更：2026-09-11-agent-log-attribution-refactor
+锚点：backend/app/modules/platform_sync/service.py（find-or-create 段）
+最近确认：353eb11b0
+理由：沿用现有 find-or-create origin=tool_report 自动会话；聚合键从 "{harness}|{ctx}" 改为 "{ctx}"（同 ctx 跨 harness 聚合进同一会话），标题改「本地 · {ctx}」；空 ctx 保持 workspace+harness 单桶现状
+
+## D-005@v1
+状态：implemented
+变更：2026-09-11-agent-log-attribution-refactor
+锚点：未记录
+最近确认：353eb11b0
+理由：不动表结构——保留 agent_session_id 单列，靠打标修复 + ctx-owner 解析保证正确性；一条日志行只挂一个会话（其 ctx 的当前 owner），同 ctx 多会话时向最近活跃 owner 漂移
