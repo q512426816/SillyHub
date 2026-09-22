@@ -362,3 +362,70 @@
 - 场景：默认场景 — Given backend 重启清理终态化在跑 run run 收口上报用量时该会话注册表非空；When 标 failed 上报 run result；Then `error_code='SERVICE_RESTART_INTERRUPTED'` + 向正在收口的 runId 追加一条 stdout 日志行
 全文：.sillyspec/changes/archive/2026-09-15-background-task-permission-lockout/requirements.md#FR-04
 最近确认：e21bf19cc
+
+## FR-interactive-041 单聊忙轮发送=引导注入
+变更：2026-09-18-single-chat-steering
+状态：active
+摘要：支持引导的 provider 忙轮发送；带切换维度的消息保持轮边界语义；服务身份调用方
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：支持引导的 provider 忙轮发送 — Given 单聊会话（provider ∈ {pi, claude, codex}）存在活跃 run（忙轮）；When 用户经主输入框发送普通消息（不带 agent_profile/provider/model 切换维度）；Then 走 `busy_strategy=inject` mid-turn 注入活跃轮（不建新 run、不 interrupt），响应含 `steered=true`（
+- 场景：带切换维度的消息保持轮边界语义 — Given 单聊会话忙轮；When 发送携带 agent_profile_id / llm_provider_id / model 任一维度的消息；Then 不进 steering 分支，维持既有排队/409 行为（零回归）
+- 场景：服务身份调用方 — Given service 身份路径调用 inject（平台审批代写等）；Then 保持既有 409 拒绝语义（零回归）
+全文：.sillyspec/changes/archive/2026-09-18-single-chat-steering/requirements.md#FR-01
+最近确认：14d0962f3
+
+## FR-interactive-042 provider 能力矩阵与降级
+变更：2026-09-18-single-chat-steering
+状态：active
+摘要：不支持的 provider；能力单源
+依据决策：D-002@v1、D-003@v1
+场景正文：
+- 场景：不支持的 provider — Given 单聊会话 provider 不支持 steering（cursor 或未知 provider）；When 忙轮发送普通消息；Then 维持现状排队路径（queue_when_busy），响应 `steered=false`/queued，不报错
+- 场景：能力单源 — Given PROVIDER_CAPS steering 键（第 14 键）
+全文：.sillyspec/changes/archive/2026-09-18-single-chat-steering/requirements.md#FR-02
+最近确认：14d0962f3
+
+## FR-interactive-043 ⚡ 立即发送改引导式
+变更：2026-09-18-single-chat-steering
+状态：active
+摘要：支持引导的 provider 队列条目立即发送；不支持的 provider 队列条目立即发送
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：支持引导的 provider 队列条目立即发送 — Given 排队表存在 pending 条目且活跃轮 provider 支持引导；When 用户点击队列 chip 的 ⚡ 立即发送；Then 不 interrupt 活跃轮，mid-turn 注入该条目（留痕转挂活跃 run），响应 `dispatch_mode="steered"`
+- 场景：不支持的 provider 队列条目立即发送 — Given 活跃轮 provider 不支持引导；When 点击 ⚡ 立即发送；Then 维持现状 interrupt 接力派发（`dispatch_mode="interrupted"`）；空闲态当场派发（`"dispatched"`）
+全文：.sillyspec/changes/archive/2026-09-18-single-chat-steering/requirements.md#FR-03
+最近确认：14d0962f3
+
+## FR-interactive-044 零回归面
+变更：2026-09-18-single-chat-steering
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 停止按钮、群聊 @ steering、定时消息、排队 UI 既有行为；When 本变更上线；Then interrupt 立即打断语义不变；群聊 @ 忙轮 steering 行为零改动；scheduled send 忙轮策略不变；排队条目编辑/删除/拖拽行为不变
+全文：.sillyspec/changes/archive/2026-09-18-single-chat-steering/requirements.md#FR-04
+最近确认：14d0962f3
+
+## FR-interactive-045 前端引导状态展示
+变更：2026-09-18-single-chat-steering
+状态：active
+摘要：引导中→已引导；轮终止未投递收敛；降级标注
+依据决策：D-001@v1
+场景正文：
+- 场景：引导中→已引导 — Given 用户忙轮发送且响应 `steered=true`；When 消息入流；Then 渲染「引导中」虚线气泡（工具间隙投递提示）；SSE 收到该消息 user_input 留痕行后转「已引导」终态（普通气泡+已投递小标）；历史回放同态
+- 场景：轮终止未投递收敛 — Given 「引导中」气泡存在；When 活跃轮终止（完成/中断/失败）且引擎未投递该引导；Then 气泡收敛为终态提示（不永久停留）
+- 场景：降级标注 — Given provider 不支持引导；When 排队条目展示；Then 现有排队 chip 照常 + 能力数据源 provider-caps.ts 标注「该引擎暂不支持引导」
+全文：.sillyspec/changes/archive/2026-09-18-single-chat-steering/requirements.md#FR-05
+最近确认：14d0962f3
+
+## FR-interactive-046 codex turn/steer 接入
+变更：2026-09-18-single-chat-steering
+状态：active
+摘要：codex 忙轮注入；turn/steer 被拒
+依据决策：D-003@v1
+场景正文：
+- 场景：codex 忙轮注入 — Given codex 会话活跃轮执行中（currentTurnId 存在）；When SESSION_INJECT 到达 daemon；Then 驱动发 `turn/steer`（参数以实机探测为准，R-02）而非压回输入队列
+- 场景：turn/steer 被拒 — Given `turn/steer` 请求被 codex 拒绝（参数不符/版本不支持）；Then 回落现有轮边界消费（效果=原排队时延），不报错不挂死
+全文：.sillyspec/changes/archive/2026-09-18-single-chat-steering/requirements.md#FR-06
+最近确认：14d0962f3
