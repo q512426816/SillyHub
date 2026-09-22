@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会话任意点分叉 · 交互原型（session-fork-continuation）</title>
+<style>
+  /* 取值对齐 frontend/src/styles/themes.ts ai-native 主题（violet 阶 + 淡紫底 + slate 中性） */
+  :root {
+    --primary: #7C3AED; --primary-hover: #6D28D9; --accent: #0891B2;
+    --bg: #FAF5FF; --card: #FFFFFF; --border: #DDD6FE;
+    --brand-50: #f5f3ff; --brand-100: #ede9fe; --brand-200: #ddd6fe; --brand-500: #8b5cf6; --brand-600: #7c3aed; --brand-700: #6d28d9;
+    --s50:#f8fafc; --s100:#f1f5f9; --s200:#e2e8f0; --s300:#cbd5e1; --s400:#94a3b8; --s500:#64748b; --s600:#475569; --s700:#334155; --s800:#1e293b; --s900:#0f172a;
+    --success: #10b981; --warning: #f59e0b; --error: #ef4444; --info: #06b6d4;
+    --shadow: 0 10px 30px -12px rgb(76 29 149 / 0.18);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--s800); font-size: 14px; }
+  .app { display: flex; height: 100vh; overflow: hidden; }
+
+  /* 左侧会话列表 */
+  .side { width: 260px; border-right: 1px solid var(--border); background: var(--card); padding: 12px; overflow-y: auto; flex-shrink: 0; }
+  .side h3 { font-size: 12px; color: var(--s500); font-weight: 600; margin: 8px 6px 6px; letter-spacing: .05em; }
+  .sess { padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; border: 1px solid transparent; }
+  .sess:hover { background: var(--brand-50); }
+  .sess.active { background: var(--brand-50); border-color: var(--brand-200); }
+  .sess .t { font-weight: 500; color: var(--s800); display: flex; align-items: center; gap: 6px; }
+  .sess .m { font-size: 12px; color: var(--s400); margin-top: 2px; }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 500; flex-shrink: 0; }
+  .badge-fork { background: var(--brand-100); color: var(--brand-700); }
+  .badge-forked { background: #ecfdf5; color: #047857; }
+  .child { margin-left: 14px; border-left: 2px solid var(--brand-200); padding-left: 10px; }
+  .chain-legend { font-size: 11px; color: var(--s500); margin: 6px 6px 0; line-height: 1.6; }
+
+  /* 主面板 */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .panel-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--card); }
+  .panel-head .title { font-weight: 600; }
+  .provider-chip { font-size: 11px; background: var(--brand-100); color: var(--brand-700); border-radius: 6px; padding: 2px 8px; }
+
+  /* 溯源块（分叉会话 B 顶部常驻） */
+  .lineage { display: flex; align-items: center; gap: 10px; margin: 14px 20px 0; padding: 10px 14px; background: var(--brand-50); border: 1px solid var(--brand-200); border-radius: 10px; cursor: pointer; transition: box-shadow .15s; }
+  .lineage:hover { box-shadow: var(--shadow); }
+  .lineage .icon { width: 28px; height: 28px; border-radius: 8px; background: var(--brand-600); color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .lineage .txt { flex: 1; min-width: 0; }
+  .lineage .l1 { font-size: 13px; color: var(--s800); }
+  .lineage .l1 b { color: var(--brand-700); }
+  .lineage .l2 { font-size: 12px; color: var(--s500); margin-top: 1px; }
+  .lineage .open { font-size: 12px; color: var(--brand-600); flex-shrink: 0; }
+  .tier { font-size: 10px; border-radius: 999px; padding: 1px 7px; font-weight: 500; }
+  .tier-native { background: #ecfdf5; color: #047857; }
+  .tier-seed { background: #fffbeb; color: #b45309; }
+  /* 多跳链面包屑 */
+  .crumbs { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--s500); margin: 10px 20px 0; flex-wrap: wrap; }
+  .crumbs a { color: var(--brand-600); text-decoration: none; cursor: pointer; }
+  .crumbs a:hover { text-decoration: underline; }
+  .crumbs .cur { color: var(--s800); font-weight: 600; }
+
+  /* 轮次 */
+  .turns { flex: 1; overflow-y: auto; padding: 16px 20px 40px; }
+  .turn { margin-bottom: 18px; }
+  .turn-head { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--s400); padding: 4px 2px; position: relative; }
+  .turn-head .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand-400, var(--brand-500)); }
+  .fork-btn { display: none; margin-left: auto; font-size: 12px; color: var(--brand-600); background: var(--card); border: 1px solid var(--brand-200); border-radius: 6px; padding: 2px 10px; cursor: pointer; }
+  .fork-btn:hover { background: var(--brand-50); }
+  .turn:hover .fork-btn { display: inline-block; }
+  .fork-btn.disabled { color: var(--s300); border-color: var(--s200); cursor: not-allowed; background: var(--s50); }
+  .bubble-u { background: var(--brand-600); color: #fff; border-radius: 12px 12px 4px 12px; padding: 10px 14px; margin: 6px 0 6px auto; max-width: 72%; width: fit-content; }
+  .bubble-a { background: var(--card); border: 1px solid var(--border); border-radius: 12px 12px 12px 4px; padding: 10px 14px; margin: 6px auto 6px 0; max-width: 85%; box-shadow: 0 1px 3px rgb(76 29 149 / .05); }
+  .bubble-a .meta { font-size: 11px; color: var(--s400); margin-top: 6px; }
+  .forked-here { outline: 2px dashed var(--brand-500); outline-offset: 4px; border-radius: 14px; }
+  .fork-marker { font-size: 11px; color: var(--brand-600); background: var(--brand-50); border: 1px dashed var(--brand-200); padding: 3px 10px; border-radius: 999px; width: fit-content; margin: 2px auto; }
+
+  /* 确认弹层 */
+  .modal-mask { position: fixed; inset: 0; background: rgb(15 23 42 / .45); display: none; align-items: center; justify-content: center; z-index: 60; }
+  .modal { width: 460px; background: var(--card); border-radius: 14px; border: 1px solid var(--border); box-shadow: var(--shadow); padding: 22px; }
+  .modal h4 { font-size: 16px; margin-bottom: 4px; }
+  .modal .sub { font-size: 12px; color: var(--s500); margin-bottom: 14px; }
+  .info-row { display: flex; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--s50); border: 1px solid var(--s200); margin-bottom: 10px; font-size: 13px; line-height: 1.7; }
+  .info-row.warn { background: #fffbeb; border-color: #fde68a; }
+  .info-row b { color: var(--s800); }
+  .modal .acts { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+  .btn { border-radius: 8px; padding: 7px 18px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: var(--card); color: var(--s600); }
+  .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-hover); }
+
+  /* 原会话浮层（WorkerSessionOverlay 泛化形态） */
+  .overlay-mask { position: fixed; inset: 0; background: rgb(15 23 42 / .5); display: none; z-index: 80; padding: 28px; }
+  .overlay { height: 100%; display: flex; flex-direction: column; background: var(--bg); border-radius: 12px; border: 1px solid var(--border); overflow: hidden; box-shadow: var(--shadow); max-width: 900px; margin: 0 auto; }
+  .overlay-head { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--card); border-bottom: 1px solid var(--border); }
+  .overlay-head .name { font-weight: 600; font-size: 14px; }
+  .overlay-head .sid { font-family: ui-monospace, monospace; font-size: 11px; color: var(--s400); }
+  .state-banner { display: flex; gap: 8px; align-items: center; background: var(--brand-50); border-bottom: 1px solid var(--brand-200); color: var(--brand-700); font-size: 12px; padding: 7px 16px; }
+  .overlay-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+
+  .hint { position: fixed; right: 16px; bottom: 14px; background: var(--s800); color: var(--s50); font-size: 12px; padding: 8px 14px; border-radius: 10px; opacity: .92; max-width: 340px; line-height: 1.7; z-index: 40; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- 会话列表 -->
+  <div class="side">
+    <h3>会话</h3>
+    <div class="sess" id="sessA" onclick="showA()">
+      <div class="t">重构方案讨论 <span class="badge badge-forked">↦ 已分叉</span></div>
+      <div class="m">claude · 6 轮 · 2 小时前</div>
+    </div>
+    <div class="child">
+      <div class="sess" id="sessB" onclick="showB()">
+        <div class="t">重构方案讨论（分叉） <span class="badge badge-fork">🔗 分叉</span></div>
+        <div class="m">claude · 2 轮 · 刚刚</div>
+      </div>
+    </div>
+    <div class="chain-legend">分叉子会话挂在原会话分组下（复用分身附属组形态，origin=fork 与分身区分）</div>
+  </div>
+
+  <!-- 主面板 A：原会话 -->
+  <div class="main" id="panelA">
+    <div class="panel-head">
+      <span class="title">重构方案讨论</span>
+      <span class="provider-chip">claude</span>
+      <span class="badge badge-forked">↦ 已分叉 1 个会话</span>
+    </div>
+    <div class="turns">
+      <div class="turn" data-run="1">
+        <div class="turn-head"><span class="dot"></span>第 1 轮<button class="fork-btn" onclick="openForkModal(1)">⑂ 从此分叉</button></div>
+        <div class="bubble-u">帮我看下这个模块怎么重构比较好</div>
+        <div class="bubble-a">建议先做依赖梳理……<div class="meta">✓ 完成 · 输入 12.4K</div></div>
+      </div>
+      <div class="turn" data-run="2">
+        <div class="turn-head"><span class="dot"></span>第 2 轮<button class="fork-btn" onclick="openForkModal(2)">⑂ 从此分叉</button></div>
+        <div class="bubble-u">依赖梳理完了，方案 A 和方案 B 怎么选？</div>
+        <div class="bubble-a">方案 A 改动小但留技术债；方案 B 一步到位但周期长……<div class="meta">✓ 完成 · 输入 48.2K</div></div>
+      </div>
+      <div class="turn" data-run="3">
+        <div class="turn-head"><span class="dot"></span>第 3 轮<button class="fork-btn" onclick="openForkModal(3)">⑂ 从此分叉</button></div>
+        <div class="bubble-u">先按方案 A 做，遇到坑再说</div>
+        <div class="bubble-a">好，按方案 A 拆三步走：……<div class="meta">✓ 完成 · 输入 96.5K</div></div>
+      </div>
+      <div class="turn" data-run="4" id="turn4">
+        <div class="turn-head"><span class="dot"></span>第 4 轮 · 进行中<button class="fork-btn disabled" title="进行中的轮不可作为分叉点">⑂ 进行中不可分叉</button></div>
+        <div class="bubble-u">第三步开始动手吧</div>
+        <div class="bubble-a" style="color:var(--s400)">正在执行…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主面板 B：分叉会话 -->
+  <div class="main hidden" id="panelB">
+    <div class="panel-head">
+      <span class="title">重构方案讨论（分叉）</span>
+      <span class="provider-chip">claude</span>
+      <span class="badge badge-fork">🔗 分叉自「重构方案讨论」@第 2 轮</span>
+    </div>
+    <!-- 常驻溯源块：点击浮层看原会话 -->
+    <div class="lineage" onclick="openOverlay()">
+      <div class="icon">⑂</div>
+      <div class="txt">
+        <div class="l1">分叉自 <b>「重构方案讨论」</b> 第 2 轮后 · 5 分钟前 <span class="tier tier-native">原生分叉·真截断</span></div>
+        <div class="l2">新会话继承截至第 2 轮的全部上下文，此后两侧独立</div>
+      </div>
+      <div class="open">查看原会话 ⟶</div>
+    </div>
+    <div class="crumbs">谱系：<a onclick="openOverlay()">方案讨论 A</a> → <span class="cur">分叉 B（当前）</span>　<span style="color:var(--s300)">·</span>　多跳示意：<a onclick="showC()">A</a> → <a onclick="showC()">B</a> → <span class="cur">C 再分叉</span></div>
+    <div class="turns">
+      <div class="turn">
+        <div class="turn-head"><span class="dot"></span>分叉种子（原生恢复）</div>
+        <div class="bubble-a">已从原会话第 2 轮恢复上下文（方案 A/B 对比已就位）。从这里继续。<div class="meta">系统 · claude resumeSessionAt</div></div>
+      </div>
+      <div class="turn">
+        <div class="turn-head"><span class="dot"></span>第 1 轮<button class="fork-btn" onclick="openForkModal(1)">⑂ 从此分叉</button></div>
+        <div class="bubble-u">等等，还是先认真评估一下方案 B 的周期</div>
+        <div class="bubble-a">方案 B 周期估算：……<div class="meta">✓ 完成 · 输入 52.1K（上下文从第 2 轮起算，未继承第 3-4 轮）</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 多跳 C 面板（静态示意） -->
+  <div class="main hidden" id="panelC">
+    <div class="panel-head">
+      <span class="title">重构方案讨论（分叉的分叉）</span>
+      <span class="provider-chip">codex</span>
+      <span class="badge badge-fork">🔗 分叉自 B @第 1 轮</span>
+    </div>
+    <div class="lineage" onclick="openOverlay()">
+      <div class="icon">⑂</div>
+      <div class="txt">
+        <div class="l1">分叉自 <b>「分叉 B」</b> 第 1 轮后 · 刚刚 <span class="tier tier-seed">种子分叉·前情转述</span></div>
+        <div class="l2">该引擎不支持原生截断——新会话以「前情转述」种子启动，细节有损</div>
+      </div>
+      <div class="open">查看原会话 ⟶</div>
+    </div>
+    <div class="crumbs">谱系：<a onclick="openOverlay()">方案讨论 A</a> → <a onclick="showC2()">分叉 B</a> → <span class="cur">C（当前）</span></div>
+    <div class="turns">
+      <div class="turn">
+        <div class="turn-head"><span class="dot"></span>种子消息（前情转述）</div>
+        <div class="bubble-a">【前情转述】原会话截至第 X 轮要点：……（用户轮全文保留 + 助手轮摘要，超体积帽截尾）<div class="meta">系统 · seed 注入</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 分叉确认弹层 -->
+<div class="modal-mask" id="forkModal">
+  <div class="modal">
+    <h4>从此处创建分叉会话</h4>
+    <div class="sub">新会话将继承截至所选轮次的全部上下文，原会话不受影响、可继续对话</div>
+    <div class="info-row">
+      <span>⑂</span>
+      <div>分叉点：<b>「重构方案讨论」第 <span id="forkAtRun">2</span> 轮后</b>（含该轮全部上下文）</div>
+    </div>
+    <div class="info-row">
+      <span>⚡</span>
+      <div>引擎档位：<b>claude · 原生分叉</b>——SDK 真截断恢复，新会话对分叉点之后的事<b>完全不知情</b></div>
+    </div>
+    <div class="info-row warn">
+      <span>ℹ</span>
+      <div>继承快照：工作区 / 供应商 / 模型 / 档案按原会话当前值继承</div>
+    </div>
+    <div class="acts">
+      <button class="btn" onclick="closeForkModal()">取消</button>
+      <button class="btn btn-primary" onclick="doFork()">创建分叉并进入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 原会话浮层 -->
+<div class="overlay-mask" id="originOverlay" onclick="if(event.target===this)closeOverlay()">
+  <div class="overlay">
+    <div class="overlay-head">
+      <span class="name">原会话 · 重构方案讨论</span>
+      <span class="sid">#a3f9c2d1</span>
+      <span class="badge badge-forked">↦ 已分叉</span>
+      <button class="btn" style="margin-left:auto" onclick="closeOverlay()">返回分叉会话</button>
+    </div>
+    <div class="state-banner">⚠️ 该会话已于第 2 轮后被分叉——原会话保留可继续对话，两侧此后互不影响</div>
+    <div class="overlay-body">
+      <div class="turn">
+        <div class="turn-head"><span class="dot"></span>第 1 轮</div>
+        <div class="bubble-u">帮我看下这个模块怎么重构比较好</div>
+        <div class="bubble-a">建议先做依赖梳理……</div>
+      </div>
+      <div class="turn">
+        <div class="fork-marker">⑂ 分叉点：第 2 轮后 →「重构方案讨论（分叉）」</div>
+        <div class="turn-head"><span class="dot"></span>第 2 轮</div>
+        <div class="bubble-u">依赖梳理完了，方案 A 和方案 B 怎么选？</div>
+        <div class="bubble-a forked-here">方案 A 改动小但留技术债；方案 B 一步到位但周期长……</div>
+      </div>
+      <div class="turn">
+        <div class="turn-head"><span class="dot"></span>第 3 轮</div>
+        <div class="bubble-u">先按方案 A 做，遇到坑再说</div>
+        <div class="bubble-a">好，按方案 A 拆三步走……</div>
+      </div>
+      <div class="turn">
+        <div class="turn-head"><span class="dot"></span>第 4 轮 · 进行中</div>
+        <div class="bubble-u">第三步开始动手吧</div>
+        <div class="bubble-a" style="color:var(--s400)">正在执行…（分叉不中断原会话进行中的轮）</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="hint">原型演示：① 鼠标悬停<b>轮次行</b>出现「⑂ 从此分叉」→ ② 弹层确认（进行中轮不可选）→ ③ 进入分叉会话 B（顶部溯源块+谱系面包屑）→ ④ 点击溯源块浮层查看原会话。左下角列表含分叉徽标与附属分组。</div>
+
+<script>
+  function showA(){ switchPanel('panelA','sessA'); }
+  function showB(){ switchPanel('panelB','sessB'); }
+  function showC(){ switchPanel('panelC', null); }
+  function showC2(){ switchPanel('panelB','sessB'); }
+  function switchPanel(pid, sid){
+    ['panelA','panelB','panelC'].forEach(p=>document.getElementById(p).classList.toggle('hidden', p!==pid));
+    ['sessA','sessB'].forEach(s=>document.getElementById(s).classList.toggle('active', s===sid));
+  }
+  function openForkModal(run){ document.getElementById('forkAtRun').textContent=run; document.getElementById('forkModal').style.display='flex'; }
+  function closeForkModal(){ document.getElementById('forkModal').style.display='none'; }
+  function doFork(){ closeForkModal(); showB(); }
+  function openOverlay(){ document.getElementById('originOverlay').style.display='block'; }
+  function closeOverlay(){ document.getElementById('originOverlay').style.display='none'; }
+  showA();
+</script>
+</body>
+</html>
