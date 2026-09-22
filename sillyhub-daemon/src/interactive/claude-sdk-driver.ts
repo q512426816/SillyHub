@@ -255,8 +255,27 @@ export interface ClaudeStartOptions extends InteractiveDriverStartOptions {
    * ql-20260818-002：resume 时 fork 出新会话 ID（SDK StartOptions.forkSession）
    * ——resume 场景 SDK 的 systemPrompt 选项被 CLI 忽略（jsonl 固化原 system
    * prompt），fork 后新 system prompt 生效且历史完整复制。人格热切换用。
+   * session-fork task-06（2026-09-22-session-fork-continuation）起会话分叉链
+   * 同键消费（与 resumeSessionAt 组合=截断式分叉；转发在 start() 独立分支，
+   * 不嵌 systemPrompt 守卫，R-07）。
    */
   forkSession?: boolean;
+  /**
+   * session-fork task-06（2026-09-22-session-fork-continuation / FR-03 / D-008）：
+   * resume 截断锚——SDK Options.resumeSessionAt：resume 只恢复到该链 UUID（含）
+   * 为止，其后的条目对新会话不可见。取轮末 chain-entry 消息 UUID（spike-pi-fork.md
+   * claude 节实测：resumeSessionAt 只收链 UUID，不收 msg_xxx）。来源：lease
+   * metadata.resume_at_uuid（backend fork.py native 档）→ execPayload →
+   * CreateSessionInput.resumeAtUuid → driverOpts（键名 driver 层沿用平台侧
+   * resumeAtUuid，start() 内映射 SDK 侧 resumeSessionAt）。
+   *
+   * ⚠ **禁传 resumeDropsTurn**（守卫对，D-008 v1 实现约束）：本机 claude CLI
+   * 2.1.216 不支持 --resume-drops-turn 旗标，SDK options 里哪怕只是出现
+   * `resumeDropsTurn: undefined` 也会被序列化成 `--resume-drops-turn=null` 使
+   * CLI 进程硬崩（实测 exit 1、query() reject）。本 driver **永不设置该键**
+   * （省略=官方文档明示的「未校验截断」，截断语义不受影响）。
+   */
+  resumeAtUuid?: string;
   /** env 继承；缺省 `{ ...process.env }`。 */
   env?: Record<string, string>;
 }
@@ -445,6 +464,15 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     }
     if (opts.resume !== undefined) {
       options.resume = opts.resume;
+    }
+    // session-fork task-06（2026-09-22-session-fork-continuation / FR-03 / D-008）：
+    // resumeAtUuid（平台侧键名）→ SDK Options.resumeSessionAt 截断 resume——只写
+    // 非 undefined 键（让 SDK 对缺失字段走默认）。**禁传 resumeDropsTurn**（含
+    // undefined——序列化 null 硬崩 CLI，见 ClaudeStartOptions.resumeAtUuid 字段
+    // 注释；本分支只设 resumeSessionAt，options 对象自始至终不出现
+    // resumeDropsTurn 键）。
+    if (opts.resumeAtUuid !== undefined) {
+      options.resumeSessionAt = opts.resumeAtUuid;
     }
     // task-06（D-007@v2）：主 agent MCP server 注入。opts.mcpServers 由
     // SessionManager 经 mainAgentMcpConfigProvider 构造（platform_default + workspace
@@ -723,6 +751,21 @@ export class ClaudeSdkDriver implements InteractiveDriver {
         // 完整消息归一化。partial flush（message_stop 边界 / 节流定时器到期）在
         // normalizeMessage 执行期间经 partialSink 桥先行转发（同步）。
         const events = normalizer.normalizeMessage(msg);
+
+        // session-fork task-06（2026-09-22-session-fork-continuation / D-011）：
+        // 轮引擎锚补挂——raw record 顶层 uuid（SDKAssistantMessage 必有、流式
+        // user 帧恒无，sdk.d.ts:5066 可选）写入本帧产出的 AgentEvent.metadata
+        // ['engineAnchor']。claude-events.ts 归一化层只读 message.id（msg_xxx），
+        // 链 UUID 仅 driver 的 raw 视角可见；fork 的 resumeSessionAt 只收链 UUID
+        // （D-008），锚错值比 NULL 更糟，故只在 uuid 真为非空串时挂键。backend
+        // submit_commit（session-fork task-04）从落库消息 metadata 取轮末锚
+        // 回填 AgentRun.engine_anchor。不碰 claude-events.ts/event-wire.ts 契约。
+        const frameUuid = (msg as { uuid?: unknown }).uuid;
+        if (typeof frameUuid === 'string' && frameUuid !== '') {
+          for (const ev of events) {
+            ev.metadata = { ...(ev.metadata ?? {}), engineAnchor: frameUuid };
+          }
+        }
 
         // raw 仅调试开关（D-002@v1：raw 降格调试通道）。逐帧读 env（非 import 时
         // 快照），测试/运维可运行时切换。events 空且未开调试 → 不上报（见方法 JSDoc）。

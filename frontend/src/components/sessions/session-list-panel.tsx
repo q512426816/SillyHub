@@ -2428,7 +2428,22 @@ function WorkspaceGroupNode({
         .filter((s) => s.parent_session_id && !shownMainIds.has(s.parent_session_id))
         .map((s) => s.id),
     );
-    return { byParent, orphanIds };
+    // task-08（2026-09-22-session-fork-continuation / FR-05）：分叉子会话
+    // （origin='fork' + fork_of_session_id）挂源会话附属分组——与分身组
+    // parent_session_id 判定并行不混树（fork 会话恒不写 parent_session_id，
+    // 两判定天然互斥）。源在已渲染主行集合才建组；源本身也是附属行（多跳：
+    // B 下再分叉 C，B 已挂 A 组）或不可见（筛选/截断）→ 照常渲染为主行
+    // （带「🔗 分叉」徽标），行绝不丢失（v1 单层分组，多跳谱系看 B 面板
+    // 溯源块面包屑）。
+    const byForkSource = new Map<string, AgentSessionRead[]>();
+    for (const s of visibleSessions) {
+      if (s.origin !== "fork" || !s.fork_of_session_id) continue;
+      if (!shownMainIds.has(s.fork_of_session_id)) continue;
+      const arr = byForkSource.get(s.fork_of_session_id) ?? [];
+      arr.push(s);
+      byForkSource.set(s.fork_of_session_id, arr);
+    }
+    return { byParent, orphanIds, byForkSource };
   }, [visibleSessions, shownSessions]);
 
   const sections = useMemo(() => {
@@ -2453,6 +2468,15 @@ function WorkspaceGroupNode({
           }
           subOrphanSection.sessions.push(s);
         }
+        continue;
+      }
+      // task-08（session-fork / FR-05）：已挂源会话附属分组的分叉子会话不进
+      // 机器/本地小节（源行下渲染）；源不可见的照常走主行（徽标标注）。
+      if (
+        s.origin === "fork" &&
+        s.fork_of_session_id &&
+        subGrouping.byForkSource.has(s.fork_of_session_id)
+      ) {
         continue;
       }
       if (s.origin === "tool_report") {
@@ -2507,15 +2531,27 @@ function WorkspaceGroupNode({
   // 筛选纪元变化重置（R-05 同语义的简化版：直接清空）。
   const [openParents, setOpenParents] = useState<Set<string>>(new Set());
   const [subOrphanOpen, setSubOrphanOpen] = useState(false);
+  // task-08（session-fork / FR-05）：分叉附属组展开态——与分身组 openParents
+  // 分离（同一源行可能既有分身又有分叉，互不联动）；筛选纪元重置同语义。
+  const [openForkSources, setOpenForkSources] = useState<Set<string>>(new Set());
   useEffect(() => {
     setOpenParents(new Set());
     setSubOrphanOpen(false);
+    setOpenForkSources(new Set());
   }, [filterEpoch]);
   const toggleParentSubs = (parentId: string) => {
     setOpenParents((prev) => {
       const next = new Set(prev);
       if (next.has(parentId)) next.delete(parentId);
       else next.add(parentId);
+      return next;
+    });
+  };
+  const toggleForkSource = (sourceId: string) => {
+    setOpenForkSources((prev) => {
+      const next = new Set(prev);
+      if (next.has(sourceId)) next.delete(sourceId);
+      else next.add(sourceId);
       return next;
     });
   };
@@ -2806,9 +2842,15 @@ function WorkspaceGroupNode({
                   sec.sessions.map((s) => {
                     const title = s.title?.trim() || "未命名会话";
                     const childSubs = subGrouping.byParent.get(s.id);
+                    const childForks = subGrouping.byForkSource.get(s.id);
                     const parentOpen =
                       openParents.has(s.id) ||
                       Boolean(childSubs?.some((c) => c.id === selectedSessionId));
+                    // task-08（session-fork / FR-05）：分叉组展开态（选中兜底展开，
+                    // 同分身组语义；与 openParents 独立互不联动）。
+                    const forkOpen =
+                      openForkSources.has(s.id) ||
+                      Boolean(childForks?.some((c) => c.id === selectedSessionId));
                     // task-02（2026-09-08-session-list-liveness-dot）：行级 liveness
                     // 命中（map 未命中 undefined → 行不渲染灯，fail-open）。
                     const liveness = livenessBySessionId?.get(s.id);
@@ -2911,6 +2953,79 @@ function WorkspaceGroupNode({
                                       : undefined
                                   }
                                   /* task-06：分身行照主行透传导出入口。 */
+                                  onExport={
+                                    onExport
+                                      ? (tier: SessionExportTier) =>
+                                          onExport(c.id, tier)
+                                      : undefined
+                                  }
+                                  exporting={exporting}
+                                />
+                              ))}
+                          </div>
+                        )}
+                        {/* task-08（2026-09-22-session-fork-continuation / FR-05）：
+                            源行附属分叉折叠组——与分身组并行不混树（violet=分身 /
+                            brand=分叉，视觉即区分）；子行带「🔗 分叉」徽标
+                            （SessionRow 内按 origin='fork' 派生）。 */}
+                        {childForks && childForks.length > 0 && (
+                          <div className="ml-3 border-l border-brand-300/60 pl-2 dark:border-brand-500/40">
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              aria-expanded={forkOpen}
+                              aria-label="分叉折叠组"
+                              data-testid="fork-subgroup-header"
+                              onClick={() => toggleForkSource(s.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") toggleForkSource(s.id);
+                              }}
+                              className="flex cursor-pointer select-none items-center gap-1.5 px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                            >
+                              <span
+                                aria-hidden
+                                className={`text-[10px] transition-transform ${forkOpen ? "rotate-90" : ""}`}
+                              >
+                                ▶
+                              </span>
+                              <span
+                                aria-hidden
+                                className="inline-flex items-center rounded px-1 py-px text-[10px] font-medium text-brand-600 dark:text-brand-300"
+                              >
+                                ↦ 分叉 {childForks.length}
+                              </span>
+                            </div>
+                            {forkOpen &&
+                              childForks.map((c) => (
+                                <SessionRow
+                                  key={c.id}
+                                  variant="tree"
+                                  session={c}
+                                  title={c.title?.trim() || "未命名分叉会话"}
+                                  selected={c.id === selectedSessionId}
+                                  runtimeToMachine={runtimeToMachine}
+                                  hideEngineChip={hideEngineChip}
+                                  onSelect={onSelect}
+                                  liveness={livenessBySessionId?.get(c.id)}
+                                  livenessUnread={
+                                    livenessBySessionId?.get(c.id)
+                                      ? isUnread(c.id)
+                                      : undefined
+                                  }
+                                  batchMode={batchActive}
+                                  checked={checkedIds.has(c.id)}
+                                  onToggleCheck={() => onToggleChecked(c.id)}
+                                  onDelete={onDelete ? () => onDelete(c.id, c.title ?? "分叉会话") : undefined}
+                                  onArchive={onArchive ? () => onArchive(c.id, c.title ?? "分叉会话") : undefined}
+                                  onUnarchive={onUnarchive ? () => onUnarchive(c.id, c.title ?? "分叉会话") : undefined}
+                                  onPin={onPin ? () => onPin(c.id, c.title ?? "分叉会话") : undefined}
+                                  onUnpin={onUnpin ? () => onUnpin(c.id, c.title ?? "分叉会话") : undefined}
+                                  onRename={
+                                    onRename
+                                      ? (next: string) =>
+                                          onRename(c.id, c.title ?? "分叉会话", next)
+                                      : undefined
+                                  }
                                   onExport={
                                     onExport
                                       ? (tier: SessionExportTier) =>
@@ -3260,6 +3375,18 @@ function SessionRow({
             >
               <FileText aria-hidden className="h-2.5 w-2.5" />
               本地 Agent
+            </span>
+          )}
+          {/* task-08（2026-09-22-session-fork-continuation / FR-05）：分叉子会话
+              徽标（原型 .badge-fork）——origin='fork' 派生（主行/附属行同标，
+              源不可见回落主行时仍可辨识）。 */}
+          {session.origin === "fork" && (
+            <span
+              title="由既有会话分叉创建的子会话（继承分叉点前上下文）"
+              data-testid="fork-origin-badge"
+              className="inline-flex shrink-0 items-center rounded-full border border-brand-600 bg-brand-100 px-1.5 py-px text-[10px] font-medium leading-4 text-brand-700"
+            >
+              🔗 分叉
             </span>
           )}
         </span>

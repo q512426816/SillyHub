@@ -8262,10 +8262,17 @@ export class Daemon {
     // 消费——见 _runLeaseStateMachine 归一化注释）。task-03（2026-09-14-
     // session-thinking-level / FR-03）：同款追加 thinkingLevel（创建时思考档位，
     // 下方 create 透传 CreateSessionInput.thinkingLevel）。
+    // session-fork task-06（2026-09-22-session-fork-continuation / D-012/D-013）：
+    // 同款追加 fork 四键（_runLeaseStateMachine 归一化产物，下方 create 透传
+    // CreateSessionInput fork 键组）。
     execPayload: LeasePayload & {
       worker_depth?: number;
       userId?: string;
       thinkingLevel?: string;
+      resumeAtUuid?: string;
+      forkSession?: boolean;
+      forkAnchorEntryId?: string;
+      forkMode?: 'resume_at' | 'rpc_fork' | 'clone';
     },
   ): Promise<void> {
     // AC-09：重复 task_available（WS 重连/重放）→ 跳过，driver 只启动一次。
@@ -8953,6 +8960,16 @@ export class Daemon {
         // 转发归 task-05。undefined（旧 backend 无该键）→ 键不生效，走全新会话
         // 原路径（零回归）。
         resume: execPayload.resumeSessionId,
+        // session-fork task-06（2026-09-22-session-fork-continuation / FR-03/FR-04
+        // / D-012/D-013）：fork 四键透传 SessionManager.create（CreateSessionInput
+        // 增键，execPayload 归一化区上方）。claude 档 resumeAtUuid（截断锚）+
+        // forkSession（分叉新 SDK id）；pi 档 forkMode('rpc_fork'|'clone')+
+        // forkAnchorEntryId（driver fork 前置消费）。undefined（非 fork lease）
+        // → 键不生效，全新会话原路径（零回归）。
+        resumeAtUuid: execPayload.resumeAtUuid,
+        forkSession: execPayload.forkSession,
+        forkAnchorEntryId: execPayload.forkAnchorEntryId,
+        forkMode: execPayload.forkMode,
         // 2026-08-06-public-mcp-server verify 修复（read_only 物制 / G3 / D-005@v2）：
         // worker 全走 kind=interactive（placement.py D-002@v3），原 interactive 路径在
         // _runLeaseStateMachine 对 kind=interactive 提前 return（daemon.ts:3582）跳过 ctx
@@ -9233,6 +9250,13 @@ export class Daemon {
       worker_depth?: number;
       userId?: string;
       thinkingLevel?: string;
+      // session-fork task-06（2026-09-22-session-fork-continuation / D-012/D-013）：
+      // fork 四键交叉类型承载（LeaseCtx/src/types.ts 不在本卡 allowed_paths，
+      // worker_depth/thinkingLevel 同款先例）。
+      resumeAtUuid?: string;
+      forkSession?: boolean;
+      forkAnchorEntryId?: string;
+      forkMode?: 'resume_at' | 'rpc_fork' | 'clone';
     } = {
       ...payload,
       leaseId: (rawExec.leaseId as string | undefined) ?? (rawExec.lease_id as string | undefined) ?? payload.leaseId,
@@ -9279,6 +9303,30 @@ export class Daemon {
         (rawExec.resumeSessionId as string | undefined) ??
         (rawExec.resume_session_id as string | undefined) ??
         payload.resumeSessionId,
+      // session-fork task-06（2026-09-22-session-fork-continuation / FR-03 / FR-04 /
+      // D-012/D-013）：fork 四键归一化（resume 链旁同款：camelCase 优先 +
+      // snake_case 兜底 + 初始 payload 防御兜底）。来源链：backend fork.py 写
+      // lease.metadata → context.py task-05 白名单进 claim payload（snake_case
+      // 单源：resume_at_uuid/fork_session/fork_anchor_entry_id/fork_mode）→ 此处
+      // → _startInteractiveSession → CreateSessionInput → driverOpts（R-07 独立
+      // 分支）→ driver。undefined（非 fork lease / 旧 backend 无键）→ 全链无键
+      // 不伪造默认值（零回归）。
+      resumeAtUuid:
+        (rawExec.resumeAtUuid as string | undefined) ??
+        (rawExec.resume_at_uuid as string | undefined) ??
+        (payload as { resumeAtUuid?: string }).resumeAtUuid,
+      forkSession:
+        (rawExec.forkSession as boolean | undefined) ??
+        (rawExec.fork_session as boolean | undefined) ??
+        (payload as { forkSession?: boolean }).forkSession,
+      forkAnchorEntryId:
+        (rawExec.forkAnchorEntryId as string | undefined) ??
+        (rawExec.fork_anchor_entry_id as string | undefined) ??
+        (payload as { forkAnchorEntryId?: string }).forkAnchorEntryId,
+      forkMode:
+        (rawExec.forkMode as 'resume_at' | 'rpc_fork' | 'clone' | undefined) ??
+        (rawExec.fork_mode as 'resume_at' | 'rpc_fork' | 'clone' | undefined) ??
+        (payload as { forkMode?: 'resume_at' | 'rpc_fork' | 'clone' }).forkMode,
       sessionId:
         (rawExec.sessionId as string | undefined) ??
         (rawExec.session_id as string | undefined) ??

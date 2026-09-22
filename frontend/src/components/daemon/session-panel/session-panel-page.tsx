@@ -15,7 +15,11 @@ import {
   extractPreambleText, finishTurn, stripPreambleText, type UserMsgTurnSegment,
 } from "@/components/daemon/session-log-assembler";
 import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
-import type { AutoResumeEntry } from "@/components/daemon/turn-timeline";
+import type { AutoResumeEntry, TurnForkEntryWiring } from "@/components/daemon/turn-timeline";
+// task-08（2026-09-22-session-fork-continuation / FR-01 / FR-05）：谱系溯源块 +
+// 分叉确认弹层（溯源块常驻 B 顶部、弹层由轮级分叉入口打开）。
+import { LineageBlock } from "@/components/daemon/session-fork/lineage-block";
+import { ForkConfirmModal } from "@/components/daemon/session-fork/fork-confirm-modal";
 import { type AttachmentRead } from "@/lib/api/session-attachments";
 import {
   joinAttachmentMarkers, logsToTurns, parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
@@ -802,6 +806,17 @@ export function SessionPanelPage({
   // 后置为该分身 sub_session_id，浮层（WorkerSessionOverlay）复用 SessionPanel
   // 打开；null = 关闭（主控面板 state 不动，关闭即原样返回）。
   const [workerSessionId, setWorkerSessionId] = useState<string | null>(null);
+  // ── task-08（2026-09-22-session-fork-continuation / FR-01 / FR-05）─────────
+  // 分叉确认弹层目标（轮头「⑂ 从此分叉」点击置位；确认/取消清空）。
+  const [forkTarget, setForkTarget] = useState<{ runId: string; seq: number } | null>(null);
+  // 谱系溯源浮层：LineageBlock/面包屑点击 → 源会话（带「已分叉」状态条）；
+  // ForkConfirmModal onForked → 分叉会话 B（「创建分叉并进入」语义）。复用
+  // WorkerSessionOverlay（面板既有「打开另一会话」形态，零复制流渲染逻辑）。
+  const [lineageOverlay, setLineageOverlay] = useState<{
+    sessionId: string;
+    title: string;
+    statusHint: string | null;
+  } | null>(null);
   // task-14（design §5.4）：mobile 头部 ⋯ 菜单开关（次要 chrome 收纳容器）。
   // hook 无条件声明（desktop 渲染层不读它），variant 保持在渲染层。
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
@@ -2604,6 +2619,23 @@ export function SessionPanelPage({
     return [...queued, ...scheduled];
   }, [queue, scheduledEntries]);
 
+  // ── task-08（2026-09-22-session-fork-continuation / FR-01 / D-014③）──────────
+  // 轮级分叉入口的锚点数据源：/runs 快照（runsMeta）→ run key → engine_anchor
+  // 映射（流式重渲染不重建 Map；native 档缺失 → null 置灰口径）。
+  const forkEngineAnchors = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const [runId, run] of runsMeta) m.set(runId, run.engine_anchor ?? null);
+    return m;
+  }, [runsMeta]);
+  // 轮入口点击 → 开分叉确认弹层（useCallback 稳定 ref 保 TurnRow 行 memo）。
+  const handleForkTurn = useCallback((runKey: string, seq: number) => {
+    setForkTarget({ runId: runKey, seq });
+  }, []);
+  // 溯源块/面包屑点击 → 源会话浮层（源会话必已被分叉——当前 B 即证据）。
+  const handleOpenLineageSource = useCallback((sessionId: string) => {
+    setLineageOverlay({ sessionId, title: "原会话", statusHint: "↦ 已分叉" });
+  }, []);
+
 
   // ── 操作 ───────────────────────────────────────────────────────────────
   // task-11：团队弹层开关（打开时清旧错误；objective 预填 /team 指令文本）。
@@ -3590,6 +3622,14 @@ export function SessionPanelPage({
     <AgentReplayBody sessionId={session.id} />
   ) : (
     <>
+      {/* task-08（2026-09-22-session-fork-continuation / FR-05）：分叉会话
+          （origin='fork'）顶部常驻谱系溯源块——分叉自哪会话@第几轮+引擎档
+          标注+时间+多跳面包屑；点击开源会话浮层（WorkerSessionOverlay 泛化）。
+          仅 fork 会话渲染（普通会话零占位）；fork 会话 origin 恒 'fork' 不与
+          tool_report 主体分支相交。 */}
+      {session.origin === "fork" && (
+        <LineageBlock session={session} onOpenSource={handleOpenLineageSource} />
+      )}
       {/* quick（2026-09-02 触顶自动加载迭代）：原「加载更早消息」按钮改滚动
           触发——时间线触顶（scrollTop ≤ 48px）自动拉更早一页 prepend；
           hasEarlier=false（到头）后触顶不再发起请求。加载中顶部行内提示。 */}
@@ -3605,6 +3645,15 @@ export function SessionPanelPage({
         turns={dialogTurns}
         viewMode={viewMode}
         errorMsg={errorMsg}
+        // task-08（2026-09-22-session-fork-continuation / FR-01 / FR-04）：轮级
+        // 「⑂ 从此分叉」入口接线——provider 走 caps 单源（none 档行内自不渲染）；
+        // engineAnchor 取 /runs 快照 engine_anchor（D-014③）；点击开确认弹层。
+        // 对象字面量每渲染新建无妨——TurnRow 收 per-row 基元（R-07）。
+        forkEntry={{
+          provider: session.provider,
+          engineAnchors: forkEngineAnchors,
+          onForkTurn: handleForkTurn,
+        } satisfies TurnForkEntryWiring}
         // 2026-09-10-auto-resume-interrupted-turn / FR-07：daemon_restarted 失败卡
         // 场景化兜底（该码不在 8 类错误映射）——按开关状态两态文案。
         autoResumeEntries={autoResumeEntries}
@@ -4450,6 +4499,51 @@ export function SessionPanelPage({
           subSessionId={workerSessionId}
           onClose={() => {
             setWorkerSessionId(null);
+          }}
+          machines={machines}
+          llmProviders={llmProviders}
+        />
+      )}
+
+      {/* task-08（2026-09-22-session-fork-continuation / FR-01 / FR-04）：分叉
+          确认弹层——轮头「⑂ 从此分叉」点击置位 forkTarget 打开；onForked 按
+          forked_session_id 以浮层进入 B（面板既有「打开另一会话」形态，分身
+          浮层同款），原会话 A 面板 state 原样保留（fork 对 A 零影响的 UI 面）。 */}
+      {forkTarget != null && sessionId != null && (
+        <ForkConfirmModal
+          sessionId={sessionId}
+          atRunId={forkTarget.runId}
+          atRunSeq={forkTarget.seq}
+          sourceTitle={title || `会话 ${sessionId.slice(0, 8)}`}
+          provider={session.provider}
+          onCancel={() => {
+            setForkTarget(null);
+          }}
+          onForked={(resp) => {
+            setForkTarget(null);
+            // B 落库 → 左侧列表即时可见（分叉附属分组）。
+            onSessionListRefresh?.();
+            setLineageOverlay({
+              sessionId: resp.forked_session_id,
+              title: "分叉会话",
+              statusHint: null,
+            });
+          }}
+        />
+      )}
+
+      {/* task-08（FR-05）：谱系溯源浮层——LineageBlock/面包屑点击开源会话
+          （带「已分叉」状态条）、ForkConfirmModal onForked 进 B；复用
+          WorkerSessionOverlay（mode=page SessionPanel，浮层内 B 顶部溯源块
+          自然常驻——LineageBlock 已随 page 分支挂载）。 */}
+      {lineageOverlay != null && (
+        <WorkerSessionOverlay
+          subSessionId={lineageOverlay.sessionId}
+          title={lineageOverlay.title}
+          statusHint={lineageOverlay.statusHint}
+          closeLabel="关闭"
+          onClose={() => {
+            setLineageOverlay(null);
           }}
           machines={machines}
           llmProviders={llmProviders}

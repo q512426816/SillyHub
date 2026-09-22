@@ -464,8 +464,16 @@ export interface DriverOptionsSpec {
   /** task-05：profile.system_prompt → driverOpts.systemPrompt preset+append。
    * ql-20260818-004：null=取消档案（preset-only 无人格）。 */
   systemPrompt?: string | null;
-  /** ql-20260818-002/004：档案维度切换（含取消）→ fork 新会话使人格生效。 */
+  /** ql-20260818-002/004：档案维度切换（含取消）→ fork 新会话使人格生效。
+   * session-fork task-06 起 create 路径（会话分叉）同键消费——两语义在 SDK 侧
+   * 同键（forkSession=true），转发统一走独立分支（R-07，见 driver-factory.ts）。 */
   forkSession?: boolean;
+  /** session-fork task-06：claude resumeSessionAt 截断锚（轮末链 UUID，D-008）。 */
+  resumeAtUuid?: string;
+  /** session-fork task-06：pi rpc_fork 锚（源会话用户消息 entryId）。 */
+  forkAnchorEntryId?: string;
+  /** session-fork task-06（D-012）：fork 分档；缺省非 fork（零回归）。 */
+  forkMode?: 'resume_at' | 'rpc_fork' | 'clone';
 }
 
 /**

@@ -702,6 +702,18 @@ class RunPlacementService:
         # daemon SessionManager.create({resume}) 续 SDK 上下文。缺省 None 不写键——
         # 存量 quick-chat / 主控 / 普通会话创建零回归。
         resume_session_id: str | None = None,
+        # ── task-05（2026-09-22-session-fork-continuation / D-012）：fork 参数组
+        # （native 分叉下行链，调用方 = session/service/create.py fork 形参组）──
+        # fork_mode（'resume_at'|'rpc_fork'|'clone'）真值即写键并连带
+        # fork_session=true（daemon 谓词：本 lease 是分叉会话创建）；档位锚点键
+        # 按 mode 由调用方定值——fork_resume_at_uuid（claude 链 UUID，resume_at
+        # 档）/ fork_anchor_entry_id（pi 用户 entryId，rpc_fork 档）；clone 档无
+        # 锚键。seed 档（codex）三参全 None → 不写任何 fork 键（零回归）。经
+        # build_claim_payload interactive 白名单（context.py resume_session_id 旁）
+        # → daemon execPayload → CreateSessionInput（task-06 消费）。
+        fork_mode: str | None = None,
+        fork_resume_at_uuid: str | None = None,
+        fork_anchor_entry_id: str | None = None,
     ) -> "RunPlacementService.InteractiveDispatch":
         """Create the long-lived interactive lease for a new session.
 
@@ -883,8 +895,23 @@ class RunPlacementService:
         # task-02（2026-08-29-batch-session-inherit / design S2）：worker 自动重派注入
         # 的 SDK resume 会话 id。真值才写键（对齐 dispatch_to_daemon :456-457 先例），
         # 缺省 None 不写 → 存量 quick-chat / 主控 / 普通会话 lease 全链无键零回归。
+        # task-05（session-fork）：native 分叉同链复用——fork.py 解析源会话 SDK id
+        # 传入（resume_at/rpc_fork/clone 都需定位源引擎会话，design §Wave2「复用
+        # create-with-resume 管道」）。
         if resume_session_id:
             metadata["resume_session_id"] = resume_session_id
+        # task-05（2026-09-22-session-fork-continuation / D-012）：fork 参数组四键。
+        # fork_mode 真值即分叉 lease：恒写 fork_mode + fork_session=true（daemon 谓词
+        # 键），锚点键按档位真值才写（resume_at_uuid / fork_anchor_entry_id）；clone
+        # 档仅两基础键（全量分叉无定位锚）；seed 档三参全 None → 零键（存量 lease
+        # 逐字节不变，零回归）。写法对齐上方 resume_session_id 真值守护先例。
+        if fork_mode:
+            metadata["fork_mode"] = fork_mode
+            metadata["fork_session"] = True
+            if fork_resume_at_uuid:
+                metadata["resume_at_uuid"] = fork_resume_at_uuid
+            if fork_anchor_entry_id:
+                metadata["fork_anchor_entry_id"] = fork_anchor_entry_id
         # D-008@v1（task-06 provides BorrowedLeaseFlag）：借用 lease 标记 borrowed=True
         # + lender_user_id，供 task-09 沙箱（按 lease 隔离只读 root_path）+ task-10 落 file
         # 判别。自有 daemon 路径 borrowed=False 不写（零回归）。

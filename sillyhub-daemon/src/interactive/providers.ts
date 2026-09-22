@@ -22,9 +22,12 @@
  * 从聚合表派生，本 task 落契约基座（派生前既有字面量与聚合表并存，值等价）。
  *
  * 取值约定：caps 描述 provider 当前真实能力（以本仓现状硬编码门控为准，
- * 不臆断），13 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
+ * 不臆断），14 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
  * 为 string 枚举键（'native' / 'marker' / 'none'，2026-09-09-askuser-pi-cursor
- * task-12 / FR-06 加入——打破「8 键全 boolean」旧约定）；provider_switch 为
+ * task-12 / FR-06 加入——打破「8 键全 boolean」旧约定）；sessionFork 为第
+ * 16 键（string 枚举 'native' / 'seed' / 'none'，2026-09-22-session-fork-
+ * continuation task-03 / D-008 / D-010 加入——会话分叉通道形态，dialog 后
+ * 第二个非 boolean 键）；provider_switch 为
  * 第 10 键（2026-09-11-provider-adapter-registry task-01 加入，与
  * adapter.switchable 单源一致）；ctx_usage 为第 11 键
  * （2026-09-13-ctx-usage-all-providers task-06 / FR-04 加入——interactive
@@ -40,9 +43,12 @@
  * 第 15 键（ql-20260921-005 加入——会话附件链路开通，deliver=disk 落盘 +
  * 路径清单也算，multimodal 键语义自此收窄为多模态块通道）：claude / pi /
  * cursor=true（cursor 为 disk-only，图片/PDF 经 D-9 降级落盘）、codex=false；
- * 未知 provider
+ * sessionFork 定值（D-008 / D-010）：claude / pi='native'（原生截断分叉）、
+ * codex='seed'（种子克隆档）、cursor='none'（无通道）——取值依据锚点见下方
+ * PROVIDER_CAPS docblock sessionFork 段；未知 provider
  * 查询返回默认拒绝对象（boolean
- * 键全 false、dialog 取 'none'），不抛错。改取值先改本文件，再同步两端镜像。
+ * 键全 false、dialog / sessionFork 取 'none'），不抛错。改取值先改本文件，
+ * 再同步两端镜像。
  */
 
 import type { ProtocolType } from '../adapters/index.js';
@@ -69,7 +75,7 @@ import { isPiFormSufficient, writePiDir } from '../pi-settings.js';
 // 本文件，当前无环；task-02 派生化后其函数声明提升亦环安全。CredentialInjector /
 // ProviderConfig 为 type-only import（verbatimModuleSyntax），零运行时依赖。
 
-/** provider 能力矩阵（15 键：14 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+/** provider 能力矩阵（16 键：14 个 boolean + dialog / sessionFork 两 string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
@@ -154,6 +160,17 @@ export interface ProviderCaps {
    * 取值并重跑生成与守护测试。
    */
   steering: boolean;
+  /**
+   * 会话分叉通道形态（第 16 键，2026-09-22-session-fork-continuation task-03 /
+   * D-008 / D-010，string 枚举——dialog 后第二个非 boolean 键）：'native' =
+   * 原生截断分叉（claude=SDK resume + resumeSessionAt + forkSession 三件，
+   * 锚=轮末 chain-entry 消息 UUID；pi=RPC fork 命令，锚=第 N+1 轮用户消息
+   * entryId，末轮后分叉走 clone 全量）；'seed' = 种子克隆档（codex 无原生
+   * 截断通道，以种子克隆续接，engine_anchor 恒 NULL）；'none' = 无通道
+   * （cursor CLI；未知 provider 回退值）。取值依据锚点见 PROVIDER_CAPS
+   * docblock sessionFork 段。
+   */
+  sessionFork: 'native' | 'seed' | 'none';
 }
 
 /**
@@ -314,6 +331,19 @@ export interface ProviderCaps {
  * provider 回退 false（默认拒绝）。spike 结论若翻车（codex turn/steer
  * 不可用 / claude 仅轮边界吸收），本表回改取值并重跑生成与守护测试
  *（归 task-01 收尾，见 plan spike 前置表）。
+ *
+ * sessionFork（第 16 键，2026-09-22-session-fork-continuation task-03 /
+ * D-008 / D-010 定值）：会话分叉通道形态（在某一轮后分叉出新会话并截断
+ * 该点之后的内容）。取值依据（双 spike 实测，证据 spike-pi-fork.md）：
+ * claude='native'——SDK 0.3.247 resume + resumeSessionAt + forkSession 三件
+ * 实机断言（fork 点后内容不可见、transcript 物理截断；锚=轮末 chain-entry
+ * 消息 UUID，普通轮取末 assistant uuid；resumeDropsTurn 守卫 CLI 2.1.216
+ * 不支持，driver 禁传——含 undefined 会序列化 null 硬崩，归 task-06）；
+ * pi='native'——RPC fork 命令以第 N+1 轮用户消息 entryId 为锚实测截断成立
+ * （fork 后 get_messages 6→2、新会话探针不知截去轮、原会话文件零改动；
+ * 末轮后分叉走 clone 全量）；codex='seed'——无原生截断通道，走种子克隆档
+ * （engine_anchor 恒 NULL）；cursor='none'——CLI 无分叉通道；未知 provider
+ * 回退 'none'（默认拒绝）。
  */
 export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   claude: {
@@ -332,6 +362,9 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     compact: true,
     thinking_level: true,
     steering: true,
+    // sessionFork='native'：SDK resume+resumeSessionAt+forkSession 原生截断分叉
+    //（D-008 实测；锚=轮末 chain-entry 消息 UUID，依据见 docblock sessionFork 段）。
+    sessionFork: 'native',
   },
   codex: {
     resume: true,
@@ -352,6 +385,9 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     compact: true,
     thinking_level: true,
     steering: true,
+    // sessionFork='seed'：无原生截断通道，走种子克隆档（D-008/D-010 定值；
+    // engine_anchor 恒 NULL）。
+    sessionFork: 'seed',
   },
   // 取值依据见上方 docblock pi 段（design §5.3 能力矩阵；subagent 终值 false
   // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3；
@@ -372,6 +408,9 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     compact: true,
     thinking_level: true,
     steering: true,
+    // sessionFork='native'：RPC fork 命令以第 N+1 轮用户消息 entryId 为锚原生
+    // 截断（D-008 实测；末轮后分叉走 clone 全量，依据见 docblock sessionFork 段）。
+    sessionFork: 'native',
   },
   // 取值依据见上方 docblock cursor 段（design「注册（providers.ts）」节；
   // thinking=true 为 task-01 实测修正：顶层 thinking 帧稳定存在且有 fixture，
@@ -398,6 +437,8 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     // steering=false：cursor CLI 无运行中注入通道（取值依据见 PROVIDER_CAPS
     // docblock steering 段，2026-09-18-single-chat-steering task-01 / FR-02）。
     steering: false,
+    // sessionFork='none'：CLI 无分叉通道（D-008 定值）。
+    sessionFork: 'none',
   },
 };
 
@@ -405,8 +446,8 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
  * 查询 provider 能力；未知 provider 返回默认拒绝对象，不抛错。
  *
  * 返回已知 provider 的表内对象（调用方只读，勿就地修改——表是模块级共享态）；
- * 未知 provider 每次返回新的默认拒绝字面量（boolean 键全 false、dialog 取
- * 'none'，R-09）。
+ * 未知 provider 每次返回新的默认拒绝字面量（boolean 键全 false、dialog /
+ * sessionFork 取 'none'，R-09）。
  */
 export function getProviderCaps(provider: string): ProviderCaps {
   const caps = PROVIDER_CAPS[provider];
@@ -429,6 +470,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     compact: false,
     thinking_level: false,
     steering: false,
+    sessionFork: 'none',
   };
 }
 

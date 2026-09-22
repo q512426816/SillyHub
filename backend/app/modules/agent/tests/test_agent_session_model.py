@@ -68,12 +68,17 @@ def test_agent_session_has_all_29_fields() -> None:
         # ql-20260917-008：忙轮暂存的思考档位（七档词表值；None = 无暂存）——
         # run 终态钩子经 RPC 应用到 daemon 后清列。
         "pending_thinking_level",
+        # 2026-09-22-session-fork-continuation task-01：会话分叉三列——
+        # fork 溯源 / fork 落点轮 / 原生分叉锚点文本。
+        "fork_of_session_id",
+        "fork_at_run_id",
+        "engine_fork_anchor",
     }
     actual = set(AgentSession.model_fields.keys())
     assert actual == expected, (
         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
-    assert len(AgentSession.model_fields) == 30
+    assert len(AgentSession.model_fields) == 33
 
 
 def test_agent_session_defaults() -> None:

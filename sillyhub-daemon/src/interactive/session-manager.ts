@@ -854,7 +854,20 @@ export class SessionManager {
       return;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      if (input.resume === undefined || !RESUME_DAMAGE_PATTERNS.test(message)) {
+      // session-fork task-06（2026-09-22-session-fork-continuation）：fork 创建
+      // **不降级**——降级=清 resume 后 fresh 重建，对 fork 语义等于静默丢掉全部
+      // 截断前缀历史（B 变成零上下文空会话），错得比失败更隐蔽；宁可原样抛出走
+      // create 失败路径（daemon P2b 回传 run failed，用户可重试或退种子档）。
+      const isForkCreate =
+        input.resumeAtUuid !== undefined ||
+        input.forkSession === true ||
+        input.forkMode !== undefined ||
+        input.forkAnchorEntryId !== undefined;
+      if (
+        input.resume === undefined ||
+        isForkCreate ||
+        !RESUME_DAMAGE_PATTERNS.test(message)
+      ) {
         // 非损伤模式（网络/权限/executable 缺失等）或本次未带 resume：不降级，
         // 原失败路径抛出（损伤判定只认集中正则命中，防误伤）。
         throw e;
@@ -1052,6 +1065,16 @@ export class SessionManager {
         // 归一化传入）→ spec.resume → driverOpts.resume 既有链（worker 重派续旧 SDK
         // 会话）。undefined（旧 backend 无该键）→ 键不写入，全新会话原路径（零回归）。
         resume: input.resume,
+        // session-fork task-06（2026-09-22-session-fork-continuation / FR-03 /
+        // FR-04 / R-07）：fork 四键并入 spec——_buildDriverOptions **独立分支**
+        // 转发（不嵌 systemPrompt 热切换守卫）。claude 档 resumeAtUuid+forkSession
+        // （resume 为源会话 id，backend fork lease 恒带）；pi 档 forkMode+
+        // forkAnchorEntryId（driver fork 前置消费）。undefined（非 fork lease）
+        // → 键不写入（零回归）。
+        resumeAtUuid: input.resumeAtUuid,
+        forkSession: input.forkSession,
+        forkAnchorEntryId: input.forkAnchorEntryId,
+        forkMode: input.forkMode,
         mcpServers: mainAgentMcp,
         systemPrompt: input.systemPrompt,
       });

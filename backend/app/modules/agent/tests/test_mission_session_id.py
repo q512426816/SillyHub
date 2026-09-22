@@ -241,6 +241,10 @@ def test_agent_sessions_model_fields_unchanged() -> None:
         "pinned_at",
         # ql-20260917-008：忙轮暂存的思考档位列（run 终态钩子应用后清列）。
         "pending_thinking_level",
+        # 2026-09-22-session-fork-continuation task-01：会话分叉三列。
+        "fork_of_session_id",
+        "fork_at_run_id",
+        "engine_fork_anchor",
     }
     assert set(AgentSession.model_fields.keys()) == expected
 

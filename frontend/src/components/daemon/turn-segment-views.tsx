@@ -37,6 +37,9 @@
  *                       daemon/file-message-card.tsx）
  *   - SegmentView       统一入口分发器（按 kind 分发；tool 段有 children 时升级为
  *                       子代理块渲染；dispatch_worker 团队工具升级为分身段块）
+ *   - TurnForkEntry     轮头「⑂ 从此分叉」入口（2026-09-22-session-fork-continuation
+ *                       task-07 / FR-01：caps≠none / 终态轮 / native 锚点缺失三重
+ *                       门控，纯展示 props 驱动零请求，点击回调上抛挂载方）
  *
  * 渲染经济性（FR-06 / R-03）：全部组件 React.memo（默认浅比较）——装配器
  * path-copy 保证未触及段引用稳定，流式 delta 只重渲染当前段；列表层以段 id 为
@@ -75,6 +78,8 @@ import type {
   ToolTurnSegment,
   TurnSegment,
 } from "@/components/daemon/session-log-assembler";
+import { getProviderCaps } from "@/lib/provider-caps";
+import type { ProviderCaps } from "@/lib/provider-caps";
 import { workspaceTypeBadge } from "@/lib/workspace-types";
 import { cn } from "@/lib/utils";
 
@@ -1302,6 +1307,104 @@ function teamWorkerBlockFromSegment(segment: ToolTurnSegment): TeamWorkerBlockPr
     )),
   };
 }
+
+/* ────────────── 轮头分叉入口（2026-09-22-session-fork-continuation task-07 / FR-01 / FR-04） ────────────── */
+
+/** caps sessionFork 三档（@/lib/provider-caps 单源派生，勿手抄字面量）。 */
+export type SessionForkTier = ProviderCaps["sessionFork"];
+
+/** 轮头「⑂ 从此分叉」入口 props（纯展示零请求；挂载接线归 task-08）。 */
+export interface TurnForkEntryProps {
+  /** 会话引擎 provider（经 getProviderCaps 查 sessionFork 档位，单一数据源）。 */
+  provider: string;
+  /**
+   * 该轮 run 状态（turn-timeline TurnUiStatus 字面量）。进行中三态
+   * （pending/running/interrupting）置灰——对齐 backend fork 409 口径
+   * （ACTIVE_RUN_STATUSES=pending/running/pending_approval，interrupting
+   * 映射自 running，本质同属未终态）。
+   */
+  runStatus: string;
+  /**
+   * 该轮引擎锚点（AgentRun.engine_anchor，经 runs 快照注入——挂载方数据源）。
+   * native 档缺失（null/undefined/空串）置灰「该轮缺少引擎锚点」（存量轮
+   * 不回填，D-011 故障面：入口灰即降级面，不炸链路）；seed 档种子路径不
+   * 消费锚点，不受此门控。
+   */
+  engineAnchor?: string | null;
+  /** 点击回调（上抛挂载方开确认弹层；置灰态不触发）。 */
+  onFork: () => void;
+}
+
+/**
+ * 轮头动作区「⑂ 从此分叉」入口（design Wave3 第 1 点 / FR-01，原型
+ * prototype-session-fork.html .turn-head .fork-btn）——三重门控纯展示组件：
+ *
+ *   1. caps 门控：provider sessionFork='none'（cursor / 未知引擎）不渲染；
+ *   2. 终态门控：该轮 run 进行中（pending/running/interrupting）置灰
+ *      「⑂ 进行中不可分叉」（FR-01 场景：进行中轮不可选）；
+ *   3. 锚点门控：native 档且该轮 engine_anchor 缺失置灰「⑂ 该轮缺少引擎
+ *      锚点」（tooltip 明示可退种子档，对齐 backend 422 文案语义；seed 档
+ *      不受锚点门控）。
+ *
+ * 交互形态对齐原型：常驻隐藏、父容器（需带 `group` 类，挂载方负责）hover
+ * 或自身 focus 浮出（同 CopyButton 的 opacity 纯 CSS 零状态方案，保键盘可
+ * 达——display:none 方案键盘不可聚焦）；置灰态 hover 同样浮出，颜色降为
+ * muted 阶 + cursor-not-allowed。样式全走 brand 与 muted 语义阶及主题 token
+ * （双主题铁律，不硬编码 hex）。
+ */
+export const TurnForkEntry = memo(function TurnForkEntry({
+  provider,
+  runStatus,
+  engineAnchor,
+  onFork,
+}: TurnForkEntryProps) {
+  // 门控一：caps=none 不渲染（getProviderCaps 对未知 provider 回退拒绝对象，
+  // 其 sessionFork='none'——未知引擎天然无入口，R-09）。
+  const tier = getProviderCaps(provider).sessionFork;
+  if (tier === "none") return null;
+  // 门控二：run 进行中置灰（见 props.runStatus 注释的三活态口径）。
+  const live =
+    runStatus === "pending" ||
+    runStatus === "running" ||
+    runStatus === "interrupting";
+  // 门控三：native 档锚点缺失置灰（seed 档不受锚点门控）。
+  const anchorMissing = tier === "native" && !engineAnchor;
+  const disabled = live || anchorMissing;
+  const label = live
+    ? "⑂ 进行中不可分叉"
+    : anchorMissing
+      ? "⑂ 该轮缺少引擎锚点"
+      : "⑂ 从此分叉";
+  const title = live
+    ? "进行中的轮不可作为分叉点，请等该轮结束后再分叉"
+    : anchorMissing
+      ? "该轮缺少引擎锚点，无法原生分叉；可改用种子档（前情转述）"
+      : "在此轮之后创建分叉会话";
+  return (
+    <button
+      type="button"
+      data-testid="turn-fork-entry"
+      data-fork-tier={tier}
+      disabled={disabled}
+      onClick={() => {
+        // disabled 守卫双保险：原生 disabled 已拦截真实浏览器点击；jsdom 的
+        // fireEvent.click 会穿透 disabled 派发事件，此处兜底防误触发。
+        if (!disabled) onFork();
+      }}
+      title={title}
+      className={cn(
+        "ml-auto shrink-0 rounded-md border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+        // 常驻隐藏：父容器 group hover / 自身 focus 浮出（纯 CSS 零状态）。
+        "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+        disabled
+          ? "cursor-not-allowed border-border bg-muted text-muted-foreground/70"
+          : "cursor-pointer border-brand-200 bg-card text-brand-600 hover:bg-brand-50",
+      )}
+    >
+      {label}
+    </button>
+  );
+});
 
 /* ───────────────────────── 统一入口分发器 ───────────────────────── */
 

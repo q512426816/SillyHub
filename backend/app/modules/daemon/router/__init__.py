@@ -215,6 +215,10 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     "export_sessions",
     "get_session_detail",
     "create_session",
+    # 2026-09-22-session-fork-continuation task-05：会话任意点分叉端点（紧跟
+    # create，同为 session_crud 的会话创建类端点；{session_id}/fork 与下方
+    # {session_id} 控制类端点同形状，注册序即本表序）。
+    "fork_session",
     "inject_session",
     # 2026-09-14-session-ctx-compact task-02 / FR-02：统一压缩端点（紧跟 inject，
     # 同为 session_crud 的 {session_id} 控制类端点）。

@@ -58,7 +58,10 @@ const sessionApi = vi.hoisted(() => ({
   interruptSession: vi.fn(),
   endSession: vi.fn(),
   streamSession: vi.fn(),
-  getAgentSession: vi.fn(),
+  // 2026-09-22-session-fork-continuation task-08 连带补 mock：分叉谱系详情/
+  // 锚点 effect 挂载即取数（同上方 getSessionUsage 注释——裸 vi.fn() 返回
+  // undefined 会被组件 .then 同步崩）；null/[] = 无谱系/无锚数据降级。
+  getAgentSession: vi.fn().mockResolvedValue(null),
   getAgentSessionLogs: vi.fn(),
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
@@ -1301,8 +1304,16 @@ describe("SessionPanel（dialog）", () => {
     try {
       const stream = makeStreamMock();
       sessionApi.streamSession.mockImplementation(stream.factory);
-      // 第一次轮询 reconnecting，第二次 active
+      // 第一次轮询 reconnecting，第二次 active。
+      // task-08（2026-09-22-session-fork-continuation 连带）：挂载期分叉谱系
+      // 详情 effect 会先消费一次 getAgentSession（sess 详情镜像，非轮询）——
+      // 头部补一条 reconnecting Once 保持轮询序不变，下方计数各 +1。
       sessionApi.getAgentSession
+        .mockResolvedValueOnce({
+          id: "sess-attach", runtime_id: null, lease_id: null,
+          provider: "claude", status: "reconnecting", agent_session_id: "ag-1",
+          config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+        })
         .mockResolvedValueOnce({
           id: "sess-attach", runtime_id: null, lease_id: null,
           provider: "claude", status: "reconnecting", agent_session_id: "ag-1",
@@ -1316,16 +1327,16 @@ describe("SessionPanel（dialog）", () => {
 
       setupPanel({ attachSessionId: "sess-attach", initialTurns: makeAttachTurns() });
 
-      // 第一次轮询（reconnecting）
+      // 第一次轮询（reconnecting）——计数含挂载期谱系详情 1 次
       await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
-      expect(sessionApi.getAgentSession).toHaveBeenCalledTimes(1);
+      expect(sessionApi.getAgentSession).toHaveBeenCalledTimes(2);
       // 仍 reconnecting——D-001（task-07 经 SessionPanel 有意变更）：输入不禁用
       //（消息入队等待恢复完成后自动投递）
       expect((screen.getByPlaceholderText(/恢复会话中/) as HTMLTextAreaElement).disabled).toBe(false);
 
       // 第二次轮询（active）
       await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
-      expect(sessionApi.getAgentSession).toHaveBeenCalledTimes(2);
+      expect(sessionApi.getAgentSession).toHaveBeenCalledTimes(3);
 
       // status active → 输入启用 + placeholder 继续追问（fake timers 下 advanceTimersByTimeAsync 已 flush）
       const activeInput = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
@@ -1333,7 +1344,7 @@ describe("SessionPanel（dialog）", () => {
 
       // 不再轮询（active 已清 interval）
       await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
-      expect(sessionApi.getAgentSession).toHaveBeenCalledTimes(2);
+      expect(sessionApi.getAgentSession).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
     }

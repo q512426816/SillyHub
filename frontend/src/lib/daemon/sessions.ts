@@ -756,6 +756,14 @@ export interface SessionRunRead {
    * 历史 run 行 / 老 daemon 无上报为 null（环未知态，design §9）。
    */
   ctx_tokens?: number | null;
+  /**
+   * task-08 / D-014③（2026-09-22-session-fork-continuation）：轮引擎锚点
+   * （AgentRun.engine_anchor，claude 轮末 chain-entry UUID——task-04 终态回填）。
+   * 轮级「从此分叉」入口（TurnForkEntry）native 档门控数据源；存量轮 /
+   * 未回填链为 null（入口置灰「该轮缺少引擎锚点」，D-011 降级面）。与后端
+   * SessionRunRead 直映列对齐（手工维护，本 interface 惯例）。
+   */
+  engine_anchor?: string | null;
   /** ql-20260817-003：轮次发送者（旧 run 行为 null → 前端不显示发送行）。 */
   user_id: string | null;
   sender_name: string | null;
@@ -889,5 +897,42 @@ export async function deleteScheduledMessage(
   await apiFetch(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/scheduled/${encodeURIComponent(messageId)}`,
     { method: "DELETE" },
+  );
+}
+
+/* ---------- Session fork (2026-09-22-session-fork-continuation task-07 / FR-01 / FR-04) ----------
+ *
+ * 端点归 task-05（POST /api/daemon/sessions/{id}/fork）；类型经 gen:types 从
+ * openapi.json 生成（components["schemas"] 引用，禁手写——CLAUDE.md 规则 21，
+ * task-05 已随变更提交 api-types.ts + backend/openapi.json）。AgentSessionRead
+ * 的 fork 三字段（fork_of_session_id / fork_at_run_id / engine_fork_anchor）为
+ * B 会话谱系指针（溯源块数据源，消费归 task-08），已随生成版经
+ * ./session-lists 的 Omit 组合自动继承，无手写镜像可补。
+ *
+ * 错误不在本 client 本地处理，统一由 apiFetch 抛 ApiError（业务码透传）：
+ *   - 404：会话 / at_run_id 不存在或不属于该会话；
+ *   - 409：分叉点 run 进行中（HTTP_409_DAEMON_SESSION_FORK_RUN_ACTIVE）；
+ *   - 422：caps sessionFork=none（…_UNSUPPORTED）或 native 档锚点缺失
+ *     （…_ANCHOR_MISSING，文案明示可退种子档）。
+ */
+
+/** POST /api/daemon/sessions/{id}/fork 请求体（api-types 生成版，禁手写）。 */
+export type SessionForkRequest = components["schemas"]["SessionForkRequest"];
+/** POST /api/daemon/sessions/{id}/fork 响应体（api-types 生成版，禁手写）。 */
+export type SessionForkResponse = components["schemas"]["SessionForkResponse"];
+
+/**
+ * POST /api/daemon/sessions/{id}/fork — 在源会话 ``atRunId`` 轮之后分叉出新
+ * 会话 B（201 返回 SessionForkResponse：B 会话 id / lease / 首轮 run、tier
+ * 实际档位、lineage 溯源块）。body.title 为 B 可选标题（缺省后端按源标题派生）。
+ * 消费方：fork-confirm-modal（确认后创建并回调上抛跳转，跳转归挂载方）。
+ */
+export async function forkSession(
+  sessionId: string,
+  body: SessionForkRequest,
+): Promise<SessionForkResponse> {
+  return apiFetch<SessionForkResponse>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/fork`,
+    { method: "POST", json: body },
   );
 }

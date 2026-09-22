@@ -254,9 +254,28 @@ export function buildDriverOptions(
     // 让 resume fork 出新会话 ID，新 system prompt 对 fork 生效且历史完整复制。
     // 由 reloadWithConfig 显式决策（仅档案维度被切时 fork；provider-only 切换
     // 人格已在 jsonl 固化，resume 自然保留，fork 只会白白换 session id）。
-    if (spec.forkSession === true) {
-      driverOpts.forkSession = true;
-    }
+    // task-06（2026-09-22-session-fork-continuation / R-07）：forkSession 转发
+    // **移出**本 systemPrompt 守卫——会话分叉链（create 路径）的 fork 参数与
+    // 人格热切换语义解耦，独立分支见下方（原嵌套转发点由独立分支覆盖，人格
+    // 切换场景 systemPrompt 恒在场、行为等价零回归）。
+  }
+  // session-fork task-06（2026-09-22-session-fork-continuation / FR-03 / FR-04 /
+  // R-07）：fork 参数链**独立转发分支**——不嵌 systemPrompt 热切换守卫（验收点：
+  // fork 创建不带 systemPrompt 时 forkSession/resumeAtUuid 照常转发，两分支互不
+  // 触发）。缺省（非 fork lease / 非人格切换 reload / restore 路径无键）→ 全部
+  // 不写键，行为同今天（零回归）。claude driver 读 resumeAtUuid/forkSession；
+  // pi driver 读 forkMode/forkAnchorEntryId（fork 前置）；互忽略对方档位的键。
+  if (spec.resumeAtUuid !== undefined) {
+    driverOpts.resumeAtUuid = spec.resumeAtUuid;
+  }
+  if (spec.forkSession === true) {
+    driverOpts.forkSession = true;
+  }
+  if (spec.forkMode !== undefined) {
+    driverOpts.forkMode = spec.forkMode;
+  }
+  if (spec.forkAnchorEntryId !== undefined) {
+    driverOpts.forkAnchorEntryId = spec.forkAnchorEntryId;
   }
   // scan 真阻塞（per-session，generic-wibbling-whisper.md 改造点 C/D）：
   // enableApproval=true 时按 session 建独立 resolver + 注入远程人审 canUseTool +

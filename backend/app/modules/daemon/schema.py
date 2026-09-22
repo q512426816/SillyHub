@@ -97,6 +97,15 @@ class AgentSessionRead(BaseModel):
     # from_attributes 直接映射，零查询改动；默认值守护映射前的旧响应。
     parent_session_id: uuid.UUID | None = None
     tree_depth: int = 0
+    # ── 会话分叉三列（2026-09-22-session-fork-continuation task-05 透出）──
+    # origin='fork' 会话的谱系指针：fork_of_session_id（源会话）/ fork_at_run_id
+    # （锚轮）/ engine_fork_anchor（引擎定位锚，claude/pi native 档有值、seed 档
+    # NULL）。from_attributes 直接映射；默认 None 守护存量行（非 fork 会话恒
+    # NULL，task-01 落列不回填）。前端溯源块（lineage-block）与列表分叉分组
+    # 的数据源；fork 刻意不写 parent_session_id（不入分身树，见 origin 列注释）。
+    fork_of_session_id: uuid.UUID | None = None
+    fork_at_run_id: uuid.UUID | None = None
+    engine_fork_anchor: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -277,6 +286,44 @@ class SessionCreateRequest(BaseModel):
         if (self.ppm_item_kind is None) != (self.ppm_item_id is None):
             raise ValueError("ppm_item_kind 与 ppm_item_id 必须成对提供。")
         return self
+
+
+# ── 会话分叉（2026-09-22-session-fork-continuation task-05 / FR-01~FR-04 /
+#    design §接口定义）────────────────────────────────────────────────────────
+
+
+class SessionForkRequest(BaseModel):
+    """POST /api/daemon/sessions/{id}/fork 请求体。
+
+    ``at_run_id``：分叉锚轮（「分叉自此轮之后」）；``title``：B 会话可选标题
+    （strip 后非空且 ≤255，service 层统一出口校验对齐 rename 口径）。
+    """
+
+    at_run_id: uuid.UUID
+    title: str | None = Field(default=None, max_length=255)
+
+
+class SessionForkLineage(BaseModel):
+    """``SessionForkResponse.lineage`` 溯源块（FR-05 前端 lineage-block 数据源）。"""
+
+    source_session_id: uuid.UUID
+    source_title: str
+    at_run_seq: int  # 锚轮在源会话的 1-based 轮序
+
+
+class SessionForkResponse(BaseModel):
+    """POST /api/daemon/sessions/{id}/fork 响应（design §接口定义）。
+
+    ``tier``：'native'（引擎真截断：claude resume_at / pi rpc_fork / pi clone）
+    | 'seed'（codex 前情转述，有损）。错误语义：404 会话/run 不存在或不属于
+    该会话；409 run 进行中；422 caps sessionFork=none 或 native 档锚点缺失。
+    """
+
+    forked_session_id: uuid.UUID
+    lease_id: uuid.UUID
+    run_id: uuid.UUID | None = None
+    tier: Literal["native", "seed"]
+    lineage: SessionForkLineage
 
 
 class SessionInjectRequest(BaseModel):

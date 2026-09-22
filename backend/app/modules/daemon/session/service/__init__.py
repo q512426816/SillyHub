@@ -156,6 +156,20 @@ from .errors import (  # noqa: E402
     SessionEmptyPrompt,
     ToolReportActivateNoDaemon,
 )
+
+# task-05（2026-09-22-session-fork-continuation）：fork 子域（服务 + 种子组装
+# 器 + 异常族 + 常量）集中 re-export（对齐上方 errors/results 聚合惯例；
+# errors.py 不在该卡 allowed_paths，fork 异常族就近定义在 fork.py 经此透出）。
+from .fork import (  # noqa: E402
+    FORK_SEED_MAX_CHARS,
+    DaemonSessionForkAnchorMissing,
+    DaemonSessionForkRunActive,
+    DaemonSessionForkRunNotFound,
+    DaemonSessionForkUnsupported,
+    SessionForkResult,
+    build_seed_prompt,
+    fork_session,
+)
 from .helpers import (  # noqa: E402
     TASK_WAKEUP_PROMPT_PREFIX,
     _apply_session_terminal_status,
@@ -186,6 +200,8 @@ __all__ = [
     "DAEMON_INTERRUPTED_ERROR_CODE",
     "DAEMON_MSG_SESSION_SWITCH_CONFIG",
     "DAEMON_STOPPED_ERROR_CODE",
+    # fork 种子体积帽（session-fork task-05）
+    "FORK_SEED_MAX_CHARS",
     "RECONNECTING_RETRY_WINDOW_SEC",
     "SCHEDULED_DISPATCH_MIN_LEAD_SEC",
     "TASK_WAKEUP_PROMPT_PREFIX",
@@ -199,6 +215,11 @@ __all__ = [
     "DaemonSessionAttachmentInvalid",
     "DaemonSessionAttachmentsUnsupported",
     "DaemonSessionConfigInvalid",
+    # fork 异常族（session-fork task-05，就近定义于 fork.py 经包聚合透出）
+    "DaemonSessionForkAnchorMissing",
+    "DaemonSessionForkRunActive",
+    "DaemonSessionForkRunNotFound",
+    "DaemonSessionForkUnsupported",
     "DaemonSessionInvariantViolation",
     "DaemonSessionLlmProviderKindMismatch",
     "DaemonSessionLlmProviderNotFound",
@@ -221,6 +242,8 @@ __all__ = [
     "SessionControlResult",
     "SessionDispatchResult",
     "SessionEmptyPrompt",
+    # fork 结果对象（session-fork task-05）
+    "SessionForkResult",
     "SessionReadiness",
     "SessionRecoveryResult",
     # 服务类 + 后台派发入口（2）
@@ -236,7 +259,9 @@ __all__ = [
     "_split_group_chain_marker",
     # patch 专用绑定（4，D-007——无 import 消费但测试 patch/别名 setattr 目标）
     "allowed_workspace_ids",
+    "build_seed_prompt",
     "dispatch_next_queued_message",
+    "fork_session",
     "get_redis",
     "get_session_readiness",
     "log",

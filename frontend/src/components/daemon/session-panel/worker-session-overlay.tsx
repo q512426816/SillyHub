@@ -3,6 +3,11 @@
 /**
  * 分身会话浮层（task-14 / 2026-08-25-team-subsession-governance；自 session-panel.tsx
  * 拆出，2026-09-07-arch-large-file-split，原样搬移零行为变化）。
+ *
+ * task-08（2026-09-22-session-fork-continuation / FR-05）泛化：标题/状态条/关闭
+ * 文案参数化（title / statusHint / closeLabel，均缺省保分身既有形态零回归）——
+ * 分叉谱系溯源复用本浮层查看原会话、进入分叉会话；SessionPanel 复用链路不变
+ * （constraints：零复制流渲染逻辑）。
  */
 
 import { type LlmProviderRead } from "@/lib/api/llm-providers";
@@ -25,7 +30,8 @@ import { SessionPanel } from "./index";
  * workspace-member-add-dialog 既有浮层惯例）。
  */
 export interface WorkerSessionOverlayProps {
-  /** 分身子会话 id（TeamTaskBlock onOpenWorkerSession 上抛）。 */
+  /** 分身子会话 id（TeamTaskBlock onOpenWorkerSession 上抛；分叉溯源复用时为
+   * 源/分叉会话 id——本组件只认「要打开的会话」，不区分来路）。 */
   subSessionId: string;
   /** 关闭浮层（返回主控面板）。 */
   onClose: () => void;
@@ -35,6 +41,22 @@ export interface WorkerSessionOverlayProps {
    * 「找不到不判离线」既有兜底，llmProviders 空仅供应商名解析降级。 */
   machines?: DaemonMachineRead[];
   llmProviders?: LlmProviderRead[];
+  /**
+   * task-08（2026-09-22-session-fork-continuation / FR-05）：标题参数化——
+   * 分叉谱系溯源复用本浮层看原会话 / 进入分叉会话时传对应标题；缺省
+   * 「分身会话」（既有 TeamTaskBlock 分身调用零回归）。
+   */
+  title?: string;
+  /**
+   * task-08（FR-05）：标题旁「已分叉」状态条（源会话浮层标注，原型
+   * .badge-forked）——缺省 null 不渲染（分身浮层零回归）。
+   */
+  statusHint?: string | null;
+  /**
+   * task-08：右上关闭按钮文案——分叉溯源场景语义是「关闭」而非「返回主控」；
+   * 缺省「返回主控」（分身既有文案）。
+   */
+  closeLabel?: string;
 }
 
 export function WorkerSessionOverlay({
@@ -42,27 +64,41 @@ export function WorkerSessionOverlay({
   onClose,
   machines,
   llmProviders,
+  title,
+  statusHint,
+  closeLabel,
 }: WorkerSessionOverlayProps) {
+  const heading = title ?? "分身会话";
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="分身会话"
+      aria-label={heading}
+      data-overlay-title={heading}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 md:p-8"
     >
       <div className="flex h-full min-h-0 w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-lg">
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
-          <span className="text-sm font-semibold text-foreground">分身会话</span>
+          <span className="text-sm font-semibold text-foreground">{heading}</span>
+          {statusHint && (
+            <span
+              data-testid="overlay-status-hint"
+              title="该会话已被分叉出新的会话"
+              className="inline-flex shrink-0 items-center rounded-full border border-emerald-600/40 bg-emerald-600/10 px-2 py-px text-[10.5px] font-medium text-emerald-700"
+            >
+              {statusHint}
+            </span>
+          )}
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
             #{subSessionId.slice(0, 8)}
           </span>
           <button
             type="button"
             onClick={onClose}
-            aria-label="关闭分身会话"
+            aria-label={closeLabel ?? "返回主控"}
             className="shrink-0 rounded-md border border-border px-2.5 py-0.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            返回主控
+            {closeLabel ?? "返回主控"}
           </button>
         </div>
         {/* key 按分身会话驱动整体 remount（R6 同款契约：切换分身即重建建流）。

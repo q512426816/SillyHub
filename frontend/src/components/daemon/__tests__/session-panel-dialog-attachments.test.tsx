@@ -60,7 +60,11 @@ const sessionApi = vi.hoisted(() => ({
   interruptSession: vi.fn(),
   endSession: vi.fn(),
   streamSession: vi.fn(),
-  getAgentSession: vi.fn(),
+  // 2026-09-22-session-fork-continuation task-08 连带补 mock：分叉谱系详情/
+  // 锚点 effect 挂载即取数（裸 vi.fn() 返回 undefined 会被组件 .then 同步崩；
+  // listSessionRuns 缺省会走 actual 真实 fetch 撞 jsdom）；null/[] = 降级。
+  getAgentSession: vi.fn().mockResolvedValue(null),
+  listSessionRuns: vi.fn().mockResolvedValue([]),
   getAgentSessionLogs: vi.fn(),
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
@@ -93,6 +97,7 @@ vi.mock("@/lib/daemon", async () => {
     endSession: sessionApi.endSession,
     streamSession: sessionApi.streamSession,
     getAgentSession: sessionApi.getAgentSession,
+    listSessionRuns: sessionApi.listSessionRuns, // task-08 谱系锚点 effect 挂载即取数
     getAgentSessionLogs: sessionApi.getAgentSessionLogs,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,

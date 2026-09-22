@@ -17,6 +17,10 @@
 // 通道 / claude SDK 命令队列忙轮吸收 / codex app-server turn/steer 三引擎
 // true、cursor 无通道 false——claude/codex 取值待 spike-01/02 实测后由
 // 主代理收口翻值）。
+// 2026-09-22-session-fork-continuation task-03：caps 第 16 键 sessionFork 联动
+//（fifteenKeys→sixteenKeys，D-008/D-010 会话分叉通道形态——dialog 后第二个
+// string 枚举键：claude/pi='native'（原生截断分叉）、codex='seed'（种子克隆
+// 档）、cursor='none'（无通道））。
 //
 // 覆盖（task-05 验收）：
 //   1. 注册表键集合 = InteractiveProvider 联合（编译层 canary + 运行时键集断言）
@@ -137,7 +141,7 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     expect(INTERACTIVE_PROVIDERS.pi?.family).toBe('pi_json');
   });
 
-  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、15 契约键齐全', () => {
+  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、16 契约键齐全', () => {
     // ql-20260911-017：99a228add（askuser-pi-cursor）给 caps 增第 9 键 dialog
     // （值 'native' 字符串非 boolean），守护测试未同步——主仓预存债务顺手修
     // （skills-central-library verify 门实测暴露，与本变更无关）。
@@ -160,7 +164,7 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     // SDK 命令队列忙轮吸收、codex app-server turn/steer 三引擎 true，cursor
     // CLI 无对应通道 false，未知 provider 回退 false；claude/codex 投递时机
     // 与参数待 spike-02/01 实测收口）。
-    const fifteenKeys = [
+    const sixteenKeys = [
       'attachments',
       'compact',
       'ctx_usage',
@@ -172,6 +176,7 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
       'permission_dialog',
       'provider_switch',
       'resume',
+      'sessionFork',
       'steering',
       'subagent',
       'thinking',
@@ -180,12 +185,15 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     for (const [key, d] of Object.entries(INTERACTIVE_PROVIDERS)) {
       // 单源引用（非复制值）：descriptor.caps 必须就是 PROVIDER_CAPS 的表项对象。
       expect(d.caps).toBe(PROVIDER_CAPS[key]);
-      expect(Object.keys(d.caps).slice().sort()).toEqual(fifteenKeys);
+      expect(Object.keys(d.caps).slice().sort()).toEqual(sixteenKeys);
       for (const [capKey, capValue] of Object.entries(d.caps)) {
         expect(capValue).toBe(PROVIDER_CAPS[key]?.[capKey as keyof typeof d.caps]);
-        // dialog 为三态标记（'native' | false | …字符串/布尔），其余十一键恒 boolean
+        // dialog 为三态标记（'native' | false | …字符串/布尔），sessionFork 为
+        // 三值 string 枚举（'native' / 'seed' / 'none'，D-008），其余键恒 boolean。
         if (capKey === 'dialog') {
           expect(['string', 'boolean']).toContain(typeof capValue);
+        } else if (capKey === 'sessionFork') {
+          expect(['native', 'seed', 'none']).toContain(capValue);
         } else {
           expect(typeof capValue).toBe('boolean');
         }
@@ -194,6 +202,12 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
       //（task-01 前置锁定；task-04 caps 生成派生后的同值守护延续此断言）。
       expect(d.switchable).toBe(d.caps.provider_switch);
     }
+    // sessionFork 定值锚（D-008 / D-010）：claude/pi='native'、codex='seed'、
+    // cursor='none'——漂移可见（值域与三端一致性的完整守护在 backend 对齐测试）。
+    expect(INTERACTIVE_PROVIDERS.claude?.caps.sessionFork).toBe('native');
+    expect(INTERACTIVE_PROVIDERS.codex?.caps.sessionFork).toBe('seed');
+    expect(INTERACTIVE_PROVIDERS.cursor?.caps.sessionFork).toBe('none');
+    expect(INTERACTIVE_PROVIDERS.pi?.caps.sessionFork).toBe('native');
   });
 
   it('5. createDriver 可实例化（mock deps）：claude→ClaudeSdkDriver / codex→CodexAppServerDriver / cursor→CursorDriver / pi→PiRpcDriver', () => {

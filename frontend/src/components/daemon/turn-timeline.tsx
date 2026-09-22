@@ -37,6 +37,12 @@
  * 解析返回 null 按普通文本渲染零变化。已答态 best-effort：marker 轮之后已存在
  * 用户消息（displayTurns 本地判定，无后端状态）。提交经既有 onResend 发送链路
  * 作下一条用户消息（cursor --resume 续轮天然生效）。
+ *
+ * task-08（2026-09-22-session-fork-continuation / FR-01 / FR-04）：轮级
+ * 「⑂ 从此分叉」入口（TurnForkEntry，task-07 产出）可选接线——forkEntry prop
+ * （provider / engineAnchors / onForkTurn）经 per-row 基元派生进 memo 行；对话
+ * 视图挂轮尾 RoundDivider 行、全部视图挂状态徽章行（行容器带 group 供 hover
+ * 浮出）。缺省不渲染（未接线消费方零回归）。
  */
 
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -57,6 +63,7 @@ import {
   CompactStatusRowView,
   SegmentView,
   TextSegmentView,
+  TurnForkEntry,
 } from "@/components/daemon/turn-segment-views";
 // 2026-09-09-sessions-visual-refresh task-05/06（D-003@v1）：消息角色化共享构件
 import { ChatMessageAvatar, RoundDivider } from "@/components/chat";
@@ -391,6 +398,28 @@ export interface TurnTimelineProps {
    * 第 47 轮）。跳转方全程置位，定位 settle 后解除。
    */
   suppressFollowBottom?: boolean;
+  /**
+   * task-08（2026-09-22-session-fork-continuation / FR-01 / FR-04）：轮级
+   * 「⑂ 从此分叉」入口接线（可选；缺省不渲染——未接线的旧消费方零回归）。
+   * engineAnchors=run key（realRunId ?? runId，与 data-turn-key 同源）→ 该轮
+   * engine_anchor（/runs 快照，D-014③ 透出）；onForkTurn 上抛分叉锚轮
+   * （runKey + 轮序号），挂载方开 ForkConfirmModal。行内渲染走 TurnRow 的
+   * per-row 基元派生（isHighlighted 同法，R-07 防字符串/map 直传击穿行 memo）。
+   */
+  forkEntry?: TurnForkEntryWiring | null;
+}
+
+/**
+ * task-08（session-fork / FR-01）：TurnForkEntry 的挂载方接线契约（TurnTimeline
+ * 消费，page/dialog 双模式同构传入）。provider 走 caps 单源（none 档入口不渲染）。
+ */
+export interface TurnForkEntryWiring {
+  /** 会话引擎 provider（getProviderCaps → sessionFork 档位）。 */
+  provider: string;
+  /** run key → engine_anchor（/runs 快照派生；未命中按缺失=置灰处理）。 */
+  engineAnchors: ReadonlyMap<string, string | null | undefined>;
+  /** 轮入口点击（置灰态组件内已拦截）——挂载方开分叉确认弹层。 */
+  onForkTurn: (_runKey: string, _seq: number) => void;
 }
 
 /** ql-20260903-026：单轮行 memo 组件——配合 session-panel displayTurns 的引用
@@ -446,6 +475,10 @@ const TurnRow = memo(function TurnRow({
   onSwitchProvider,
   daemonRestartedHint,
   autoResumeEntries,
+  forkProvider,
+  forkAnchor,
+  forkSeq,
+  onForkTurn,
 }: {
   turn: SessionTurnView;
   viewMode: SessionViewMode;
@@ -460,6 +493,14 @@ const TurnRow = memo(function TurnRow({
   daemonRestartedHint?: string | null;
   /** 2026-09-12-chat-turn-auto-recovery：pending 自动恢复条目（双信号推导）。 */
   autoResumeEntries?: AutoResumeEntry[];
+  /** task-08（session-fork / FR-01）：per-row 分叉入口基元（undefined=未接线不渲染）。 */
+  forkProvider?: string;
+  /** task-08：该轮 engine_anchor（null=缺失 → native 档置灰；seed 档不消费）。 */
+  forkAnchor?: string | null;
+  /** task-08：轮序号（turn.turn ?? 行序兜底，ForkConfirmModal「第 N 轮后」展示）。 */
+  forkSeq?: number;
+  /** task-08：分叉入口点击（runKey+seq 上抛挂载方；稳定 ref 由挂载方 useCallback 保证）。 */
+  onForkTurn?: (_runKey: string, _seq: number) => void;
 }) {
   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
   // 气泡正文换 textBefore（标记原文不显示，提问卡随气泡原位渲染（下方 ml-9）；
@@ -799,40 +840,57 @@ const TurnRow = memo(function TurnRow({
                   对话视图轮尾改共享 RoundDivider 胶囊分隔（细线+居中胶囊，六态着色）；
                   「全部」视图保留原 TurnStatusBadge 小字（进度视图信息密度优先，Grill G-03）。 */}
               {viewMode !== "all" ? (
-                <div className="pl-9 pr-2">
-                  <RoundDivider
-                    label={turn.turn != null ? `第 ${turn.turn} 轮` : "轮次"}
-                    status={turn.status}
-                    meta={
-                      // ql-20260831-010 语义保持：运行中输入 null 显示「↑执行中…」
-                      // 不显示假 ↑0；终态 null（旧 daemon 无数据）按 ↑0 降级（与
-                      // TurnStatusBadge 同口径）。
-                      turn.inputTokens != null || turn.outputTokens != null
-                        ? (() => {
-                            const live =
-                              turn.status === "running" ||
-                              turn.status === "pending" ||
-                              turn.status === "interrupting";
-                            const inTxt =
-                              turn.inputTokens != null
-                                ? `↑${turn.inputTokens.toLocaleString("zh-CN")}`
-                                : live
-                                  ? "↑执行中…"
-                                  : "↑0";
-                            const outTxt =
-                              turn.outputTokens != null
-                                ? `↓${turn.outputTokens.toLocaleString("zh-CN")}`
-                                : live
-                                  ? "↓执行中…"
-                                  : "↓0";
-                            return `${inTxt} ${outTxt}`;
-                          })()
-                        : undefined
-                    }
-                  />
+                /* task-08（session-fork / FR-01）：轮容器行加 group——TurnForkEntry
+                    常驻隐藏、hover 本行浮出（task-07 纯 CSS 方案的挂载方义务；
+                    行级 group 不上提整轮根，防轮内 CopyButton 的 group-hover 被
+                    整轮 hover 误触发）。入口挂轮尾分隔行（「第 N 轮」行）——
+                    语义=「在该轮之后分叉」，与本行是 N/N+1 轮边界的定位吻合。 */
+                <div className="group flex items-center gap-2 pl-9 pr-2">
+                  <div className="min-w-0 flex-1">
+                    <RoundDivider
+                      label={turn.turn != null ? `第 ${turn.turn} 轮` : "轮次"}
+                      status={turn.status}
+                      meta={
+                        // ql-20260831-010 语义保持：运行中输入 null 显示「↑执行中…」
+                        // 不显示假 ↑0；终态 null（旧 daemon 无数据）按 ↑0 降级（与
+                        // TurnStatusBadge 同口径）。
+                        turn.inputTokens != null || turn.outputTokens != null
+                          ? (() => {
+                              const live =
+                                turn.status === "running" ||
+                                turn.status === "pending" ||
+                                turn.status === "interrupting";
+                              const inTxt =
+                                turn.inputTokens != null
+                                  ? `↑${turn.inputTokens.toLocaleString("zh-CN")}`
+                                  : live
+                                    ? "↑执行中…"
+                                    : "↑0";
+                              const outTxt =
+                                turn.outputTokens != null
+                                  ? `↓${turn.outputTokens.toLocaleString("zh-CN")}`
+                                  : live
+                                    ? "↓执行中…"
+                                    : "↓0";
+                              return `${inTxt} ${outTxt}`;
+                            })()
+                          : undefined
+                      }
+                    />
+                  </div>
+                  {forkProvider != null && onForkTurn != null && (
+                    <TurnForkEntry
+                      provider={forkProvider}
+                      runStatus={turn.status}
+                      engineAnchor={forkAnchor}
+                      onFork={() =>
+                        onForkTurn(turn.realRunId ?? turn.runId, forkSeq ?? 1)
+                      }
+                    />
+                  )}
                 </div>
               ) : (
-                <div className="flex items-center gap-1.5 pl-9 text-[10px] text-muted-foreground">
+                <div className="group flex items-center gap-1.5 pl-9 text-[10px] text-muted-foreground">
                   <TurnStatusBadge
                     status={turn.status}
                     turn={turn.turn}
@@ -847,6 +905,16 @@ const TurnRow = memo(function TurnRow({
                     >
                       自动续跑
                     </span>
+                  )}
+                  {forkProvider != null && onForkTurn != null && (
+                    <TurnForkEntry
+                      provider={forkProvider}
+                      runStatus={turn.status}
+                      engineAnchor={forkAnchor}
+                      onFork={() =>
+                        onForkTurn(turn.realRunId ?? turn.runId, forkSeq ?? 1)
+                      }
+                    />
                   )}
                 </div>
               )}
@@ -910,6 +978,7 @@ export function TurnTimeline({
   streamFooter,
   highlightTurnKey,
   suppressFollowBottom = false,
+  forkEntry,
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -1172,6 +1241,17 @@ export function TurnTimeline({
               onSwitchProvider={onSwitchProvider}
               daemonRestartedHint={daemonRestartedHint}
             autoResumeEntries={autoResumeEntries}
+              /* task-08（session-fork / FR-01 / R-07）：分叉入口 per-row 基元派生
+                 （provider 字符串 / anchor string|null / seq number / 稳定回调），
+                 map 对象不进 memo 行；seq 兜底 idx+1（与目录轨孤儿轮编号同口径）。 */
+              forkProvider={forkEntry?.provider}
+              forkAnchor={
+                forkEntry
+                  ? (forkEntry.engineAnchors.get(turn.realRunId ?? turn.runId) ?? null)
+                  : undefined
+              }
+              forkSeq={turn.turn ?? idx + 1}
+              onForkTurn={forkEntry?.onForkTurn}
             />
           ))}
           {/* ql-20260823-002-6a1a：消息流末尾注入位（props.streamFooter）——

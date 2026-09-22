@@ -484,6 +484,33 @@ export interface CreateSessionInput {
    * driverOpts.resume（spec.resume 既有链）。undefined 零回归。
    */
   resume?: string;
+  /**
+   * session-fork task-06（2026-09-22-session-fork-continuation / FR-03 / FR-04 /
+   * D-012/D-013）：fork 四键。来源链：backend fork.py 写 lease.metadata →
+   * context.py 白名单进 claim payload（snake_case）→ daemon execPayload 归一化
+   * → 此处 → SessionManager.create spec → _buildDriverOptions 独立分支（R-07）
+   * → driver。缺省（非 fork lease）→ 全链无键，全新会话原路径（零回归）。
+   * 仅 create 时一次性消费，不进 SessionState / 不持久化（fork 是创建期动作，
+   * restore/reload 不重放）。
+   */
+  /**
+   * claude 档（forkMode='resume_at'）：SDK Options.resumeSessionAt 截断锚——
+   * 只恢复到该消息（含）为止；取轮末 chain-entry 消息 UUID（D-008 spike 定档，
+   * resumeSessionAt 只收链 UUID 不收 msg_xxx）。
+   */
+  resumeAtUuid?: string;
+  /** claude 档：SDK Options.forkSession——resume 时分叉出新 SDK 会话 id。 */
+  forkSession?: boolean;
+  /**
+   * pi rpc_fork 档：源会话用户消息 entryId（RPC fork position:'before' 截断到
+   * 该轮前，D-008 pi=native 定档）。clone 档不消费（全量复制）。
+   */
+  forkAnchorEntryId?: string;
+  /**
+   * fork 分档（D-012）：'resume_at'=claude 原生截断；'rpc_fork'=pi 截断分叉；
+   * 'clone'=pi 全量复制（分叉点在末轮之后）。缺省=非 fork 会话。
+   */
+  forkMode?: 'resume_at' | 'rpc_fork' | 'clone';
 }
 
 /** inject 返回值（runId 由 backend 在 inject 时已创建）。 */

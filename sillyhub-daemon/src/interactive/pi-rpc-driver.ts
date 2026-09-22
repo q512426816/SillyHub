@@ -46,6 +46,17 @@
  *      tokensBefore/estimatedTokensAfter 映射 CompactResult，失败/超时 →
  *      { ok:false, error } 不上抛（空闲态守卫由 session-manager 承担；只等
  *      response 不等 compaction_end 事件，R-02 时序降级）。
+ *  10. session-fork task-06（2026-09-22-session-fork-continuation / D-008 pi=
+ *      native 定档 / D-012）：fork 前置——forkMode='rpc_fork'|'clone' 时起
+ *      **短命 RPC** 加载源会话文件，发 fork{entryId} / clone 命令，get_state
+ *      读新分支会话文件后杀临时进程，B 以该文件走既有 --session spawn。不经
+ *      源会话活 RPC（fork 会劫持该进程活跃会话，见 _preforkSourceSession）。
+ *      失败上抛 fail 会话，不静默降级。
+ *  11. session-fork task-06（D-011）：pi 轮锚补挂——message_end(role=user) 经
+ *      get_fork_messages 回查轮首 user 消息 entryId（wire 帧不携带 entryId，
+ *      见 _fetchTurnUserEntryId 时序论证），补挂到本轮内容事件
+ *      metadata.engineAnchor（backend submit_commit task-04 回填
+ *      AgentRun.engine_anchor）。回查失败仅 warn，该轮锚缺失（入口灰）。
  *
  * 官方参照：pi 包 docs/rpc.md（分帧:30-37 / prompt:43-78 / steer:80-100 /
  * follow_up:102-122 / abort:124-135 / get_state:162-190 / extension UI 子协议
@@ -410,6 +421,27 @@ export interface PiStartOptions extends InteractiveDriverStartOptions {
    * denormalize 回流 task-03）；未注入时同现状（fail-closed 自动 cancelled）。
    */
   sessionPermission?: PiSessionPermissionHooks;
+  /**
+   * session-fork task-06（2026-09-22-session-fork-continuation / D-008/D-012）：
+   * pi 原生分叉档位。'rpc_fork'=截断分叉（fork 命令 position:'before'，需
+   * forkAnchorEntryId）；'clone'=全量复制（分叉点在末轮之后）。来源：lease
+   * metadata.fork_mode（backend fork.py native 档分派）→ execPayload →
+   * CreateSessionInput.forkMode → driverOpts（R-07 独立分支）。缺省 → 非 fork
+   * 会话，spawn 原路径（零回归）。
+   *
+   * 实现形态（spike-pi-fork.md pi 节「短命进程预 fork 后走既有 --session
+   * spawn resume 链」）：**短命 RPC 预 fork**——起临时 `pi --mode rpc
+   * --session <源会话id>` 加载源会话文件 → 发 fork/clone 命令 → get_state 读
+   * 新分支会话文件路径 → 杀临时进程 → B 以该分支文件走既有 `--session` spawn。
+   * 不经源会话 A 的活 RPC 发 fork：pi 的 fork/clone 会**劫持该 RPC 进程的活跃
+   * 会话**（agent-session-runtime.js fork() 内 teardownCurrent+apply 切到新
+   * 分支），在 A 活 RPC 上 fork 需再 switch_session 切回，竞态面大；短命进程
+   * 预 fork 对 A 零侵扰（D-005 源会话零改动），且源会话不活（daemon 重启 /
+   * 已结束）同样可用。
+   */
+  forkMode?: 'rpc_fork' | 'clone';
+  /** rpc_fork 档锚：源会话用户消息 entryId（截断到该消息的 parent，D-008）。 */
+  forkAnchorEntryId?: string;
 }
 
 /** pending 命令条目（response 关联用）。 */
@@ -777,12 +809,23 @@ export class PiRpcDriver implements InteractiveDriver {
     //   session_started 事件消费链落库）。
     //   对照：codex 无 spawn 旗标 resume，spawn 后发 thread/resume
     //   （codex-app-server-driver.ts:1174-1180）；pi 有旗标则一步到位。
-    //   switch_session/fork（rpc 运行时会话切换命令，rpc.md:595-639）本变更
-    //   不接——平台的会话级 resume 用 spawn 旗标已覆盖，无「运行中换会话」
-    //   需求场景（SessionManager 的 resume 走 create-with-resume 重建进程）。
+    //   switch_session（rpc 运行时会话切换命令，rpc.md:595-611）平台仍不接——
+    //   会话级 resume 用 spawn 旗标已覆盖，无「运行中换会话」需求场景；
+    //   fork/clone 自 session-fork task-06（2026-09-22-session-fork-continuation
+    //   / D-008 pi=native 定档）经**短命 RPC 预 fork** 路径接入（见
+    //   _preforkSourceSession），不在本 driver 的长驻会话 RPC 上发。
     const args: string[] = ['--mode', 'rpc', '--session-dir', sessionDir];
     if (opts.model) args.push('--model', opts.model);
-    if (opts.resume) args.push('--session', opts.resume);
+    // session-fork task-06（D-008/D-012）：fork 前置——forkMode='rpc_fork'|'clone'
+    // 时先经短命 RPC 在源会话文件上预 fork 出新分支会话文件，B 以该文件启动
+    //（替代直接 resume 源会话——源会话含分叉点之后的全部历史，语义错误）。
+    // 失败上抛 → SessionManager create 失败 → daemon 回传 run failed（fail 会话，
+    // 不静默降级成全量 resume）。缺省（非 fork lease）→ resume 原路径不变。
+    let sessionArg = opts.resume;
+    if (opts.forkMode === 'rpc_fork' || opts.forkMode === 'clone') {
+      sessionArg = await this._preforkSourceSession(opts, sessionDir);
+    }
+    if (sessionArg) args.push('--session', sessionArg);
 
     // vendored subagent 扩展装载（task-06 / R-02）：`--extension <绝对路径>`
     // （pi CLI args.js:120-122；-e 路径经 main.js:485 → additionalExtensionPaths
@@ -1028,6 +1071,12 @@ export class PiRpcDriver implements InteractiveDriver {
     // 与 task-03 mission_worker 代报 summary 两跳消费，design §5.1）。流式
     // text_delta partial 不带 override 不计入；每轮开始重置 null。
     let turnFinalText: string | null = null;
+    // session-fork task-06（D-011）：本轮首条 user 消息的 entryId（pi 轮锚）。
+    // message_end(role=user) 时经 get_fork_messages 回查异步填充（见
+    // _fetchTurnUserEntryId 注释的时序论证）；null=尚未取到（或回查失败——
+    // 该轮锚缺失，native 档入口置灰，不伪造错值）。仅轮首首条取锚，
+    // steer/follow_up 追加的 user 消息不覆盖（D-010「该轮首条用户消息」口径）。
+    let turnUserEntryId: string | null = null;
     // 本轮 turn 是否已上报 result（防 agent_settled 与进程退出双触发重复）。
     let turnReported = false;
     // 2026-09-12-chat-turn-auto-recovery FR-2.1：轮尾是否为「带正文的 assistant
@@ -1373,6 +1422,23 @@ export class PiRpcDriver implements InteractiveDriver {
           );
           lastWasFinalText = hasText;
         }
+        // session-fork task-06（D-011）：轮首 user 消息 → 异步回查 entryId 作轮锚。
+        // wire 帧本体无 entryId（见 _fetchTurnUserEntryId 注释），此刻 pi 侧该条目
+        // 已同步落盘（_emit 与 appendMessage 间无 await），回查必命中。失败仅
+        // warn（该轮锚缺失，不阻断 turn——降级语义对齐「锚缺失轮入口灰」）。
+        if (endMsg.role === 'user' && turnUserEntryId === null) {
+          void this._fetchTurnUserEntryId(h, endMsg)
+            .then((entryId) => {
+              if (entryId) turnUserEntryId = entryId;
+            })
+            .catch((err: unknown) => {
+              // eslint-disable-next-line no-console
+              console.warn(
+                '[pi-rpc-driver] get_fork_messages anchor lookup failed:',
+                err instanceof Error ? err.message : String(err),
+              );
+            });
+        }
       }
       const events = normalizer.normalizeRpcLine(line);
       for (const ev of events) {
@@ -1428,6 +1494,15 @@ export class PiRpcDriver implements InteractiveDriver {
           if (isRecord(ev.metadata)) {
             ev.metadata.usage = turnUsage;
           }
+        }
+        // session-fork task-06（D-011）：pi 轮锚补挂——轮首 user 消息 entryId 写入
+        // 本轮内容事件 metadata.engineAnchor（pi-events 归一化层无 entryId 视角，
+        // driver 持 raw+回查双通道才可补；不碰 pi-events.ts/event-wire.ts 契约）。
+        // backend submit_commit（session-fork task-04）从落库消息 metadata 取锚
+        // 回填 AgentRun.engine_anchor。回查在途时先到的事件不带锚（轮内多条
+        // 内容行，锚随后续行落库；回查失败整轮无锚=该轮入口灰，非错误）。
+        if (turnUserEntryId !== null) {
+          ev.metadata = { ...(ev.metadata ?? {}), engineAnchor: turnUserEntryId };
         }
         Promise.resolve(onMessage?.({ events: [ev] })).catch((err: unknown) => {
           // eslint-disable-next-line no-console
@@ -1512,6 +1587,8 @@ export class PiRpcDriver implements InteractiveDriver {
         // 本轮状态重置
         pendingTurnError = null;
         turnFinalText = null;
+        // session-fork task-06（D-011）：pi 轮锚随轮重置（下一轮重新取锚）。
+        turnUserEntryId = null;
         turnUsage = undefined;
         turnUsageSum = null;
         lastEndUsage = null;
@@ -1793,6 +1870,209 @@ export class PiRpcDriver implements InteractiveDriver {
   }
 
   // ── 私有方法 ──────────────────────────────────────────────────────────────
+
+  /**
+   * session-fork task-06（2026-09-22-session-fork-continuation / D-008/D-012）：
+   * pi fork 前置——短命 RPC 预 fork。序列（rpc.md:613-667 / :162-190）：
+   *   1. spawn 临时 `pi --mode rpc --session-dir <dir> --session <源会话id>`
+   *      （**不带 --model/--extension**——fork 是本地文件操作，不触模型；扩展
+   *      还可能经 session_before_fork 取消 fork，预 fork 进程保持裸配）；
+   *   2. get_state 确认源会话已加载（读 sessionFile 作前后对照基准）；
+   *   3. rpc_fork → `{"type":"fork","entryId":<锚>}`（position:'before'，截断到
+   *      锚消息的 parent；分叉点在末轮之后用 clone → `{"type":"clone"}` 全量
+   *      复制，rpc-mode.js fork/clone 分发实读）；
+   *   4. get_state 读 fork 后 sessionFile = 新分支会话文件路径（fork 响应
+   *      data 只含 {text,cancelled}，不含新会话定位，必须经 get_state 取）；
+   *   5. 杀临时进程，返回新分支文件路径作 B 的 `--session` 实参。
+   *
+   * fork/clone 会劫持临时进程自身的活跃会话（agent-session-runtime.js fork()
+   * 内 teardownCurrent+apply）——对源会话 A 的文件与 A 的活 RPC 进程均零侵扰
+   * （D-005；spike 实证原会话文件零改动）。
+   *
+   * 失败语义：参数缺失 / 源会话加载失败 / 命令被拒（含扩展 cancelled:true）/
+   * 超时 / sessionFile 未切换 → 原样上抛（SessionManager create 失败 → daemon
+   * 回传 run failed，fail 会话不静默降级）。finally 保证临时进程必被回收。
+   *
+   * @returns 新分支会话文件的绝对路径（--session 实参，pi 收 path|id 均可）
+   */
+  private async _preforkSourceSession(
+    opts: PiStartOptions,
+    sessionDir: string,
+  ): Promise<string> {
+    if (!opts.resume) {
+      throw new PiCommandError(
+        opts.forkMode ?? 'fork',
+        'pi fork requires source session id (resume)',
+      );
+    }
+    if (opts.forkMode === 'rpc_fork' && !opts.forkAnchorEntryId) {
+      throw new PiCommandError('fork', 'pi rpc_fork requires forkAnchorEntryId');
+    }
+    // 裸参数面：无 --model / 无 --extension（见方法注释）。
+    const args = ['--mode', 'rpc', '--session-dir', sessionDir, '--session', opts.resume];
+    const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
+    // R-exe：与 start() 同款 shim 解析（Windows pi.cmd 无 shell spawn EINVAL）。
+    let spawnCmdPath = opts.pathToAgentExecutable;
+    let spawnArgs = args;
+    let useShell = false;
+    if (process.platform === 'win32' && /\.cmd$/i.test(opts.pathToAgentExecutable)) {
+      const resolved = resolveWindowsCmdShim(opts.pathToAgentExecutable);
+      if (resolved) {
+        spawnCmdPath = resolved.exe;
+        spawnArgs = [...resolved.prependArgs, ...args];
+      } else {
+        useShell = true;
+      }
+    }
+    const child = spawn(spawnCmdPath, spawnArgs, {
+      cwd: opts.cwd,
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: useShell,
+      windowsHide: true,
+    });
+    // 最小命令通道：复用 PiRpcHandle 形状（_sendCommand/_writeLine/_close 的
+    // 既有实现），stdout 仅关联 response（临时进程的事件流不消费——fork 前置
+    // 只走命令-响应面）。
+    const temp = {
+      provider: 'pi' as const,
+      processId: child.pid,
+      child,
+      sessionDir,
+      sessionId: null,
+      isStreaming: false,
+      nextRequestId: 1,
+      closing: false,
+      pending: new Map<string, PiPendingRequest>(),
+      pendingDialogs: new Map<string, PiPendingDialog>(),
+      close: (): Promise<void> => this._close(temp),
+    } as PiRpcHandle;
+    const framer = new LfLineFramer((line: string): void => {
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      if (!isRecord(msg) || msg.type !== 'response') return;
+      const id = msg.id;
+      if (typeof id === 'string' && temp.pending.has(id)) {
+        const pending = temp.pending.get(id)!;
+        temp.pending.delete(id);
+        clearTimeout(pending.timer);
+        if (msg.success === true) {
+          pending.resolve(msg.data);
+        } else {
+          pending.reject(
+            new PiCommandError(
+              String(msg.command ?? 'unknown'),
+              typeof msg.error === 'string' ? msg.error : 'unknown pi rpc error',
+            ),
+          );
+        }
+      }
+    });
+    if (child.stdout) {
+      child.stdout.on('data', (chunk: Buffer | string) => {
+        framer.push(chunk);
+      });
+      child.stdout.on('end', () => {
+        framer.end();
+      });
+    }
+    // 进程意外退出：全量 reject pending（否则命令挂到超时才失败，拖慢 fail 链）。
+    child.on('exit', () => {
+      this._rejectAllPending(temp, new Error('pi fork preflight process exited'));
+    });
+    try {
+      const state1 = await this._sendCommand(
+        temp,
+        { type: 'get_state' },
+        this.handshakeTimeoutMs,
+      );
+      const sourceFile =
+        isRecord(state1) && typeof state1.sessionFile === 'string' && state1.sessionFile
+          ? state1.sessionFile
+          : null;
+      if (!sourceFile) {
+        throw new Error(
+          `pi fork preflight: source session "${opts.resume}" not loaded (get_state 无 sessionFile)`,
+        );
+      }
+      const forkCmd: Record<string, unknown> =
+        opts.forkMode === 'clone'
+          ? { type: 'clone' }
+          : { type: 'fork', entryId: opts.forkAnchorEntryId };
+      const forkResp = await this._sendCommand(temp, forkCmd, this.requestTimeoutMs);
+      if (isRecord(forkResp) && forkResp.cancelled === true) {
+        throw new Error('pi fork cancelled by extension (session_before_fork)');
+      }
+      const state2 = await this._sendCommand(
+        temp,
+        { type: 'get_state' },
+        this.requestTimeoutMs,
+      );
+      const newFile =
+        isRecord(state2) && typeof state2.sessionFile === 'string' && state2.sessionFile
+          ? state2.sessionFile
+          : null;
+      if (!newFile || newFile === sourceFile) {
+        throw new Error(
+          `pi fork preflight: sessionFile 未切换（source=${sourceFile} got=${newFile ?? 'null'}）`,
+        );
+      }
+      return newFile;
+    } finally {
+      await temp.close();
+    }
+  }
+
+  /**
+   * session-fork task-06（D-011）：回查本轮首条 user 消息的 entryId。
+   *
+   * RPC wire 的 message 帧不携带 entryId（pi 源码：SessionManager.appendMessage
+   * 在 message_end 落盘时才给条目生成 id，AgentMessage 本体无 id 字段；entry
+   * id 只经 get_entries/get_fork_messages 命令回执可见）——driver 层在收到
+   * message_end(role=user) 后立即经 get_fork_messages 回查：pi 侧 _handleAgentEvent
+   * 对 message_end 是先 wire 输出、后同步 appendFileSync 落盘（两步间无 await），
+   * stdin 命令处理必在其后，回查时该条目必已可查。
+   *
+   * 匹配策略：优先按 user 消息首个 text part 的全文精确匹配（防并发追加错位），
+   * 无匹配再取末条有效 entryId（append 顺序下本轮 user 消息即最新）。查不到/
+   * 命令失败 → null（该轮锚缺失：native 档入口置灰，不伪造错值）。
+   */
+  private async _fetchTurnUserEntryId(
+    h: PiRpcHandle,
+    userMsg: Record<string, unknown>,
+  ): Promise<string | null> {
+    const data = await this._sendCommand(
+      h,
+      { type: 'get_fork_messages' },
+      this.requestTimeoutMs,
+    );
+    const messages =
+      isRecord(data) && Array.isArray(data.messages) ? data.messages : [];
+    // 提取 wire user 消息首个 text part（pi extractUserMessageText 同口径）。
+    let text: string | null = null;
+    if (typeof userMsg.content === 'string') {
+      text = userMsg.content;
+    } else if (Array.isArray(userMsg.content)) {
+      for (const part of userMsg.content) {
+        if (isRecord(part) && part.type === 'text' && typeof part.text === 'string') {
+          text = part.text;
+          break;
+        }
+      }
+    }
+    let fallback: string | null = null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = isRecord(messages[i]) ? messages[i] : null;
+      if (!m || typeof m.entryId !== 'string' || !m.entryId) continue;
+      if (fallback === null) fallback = m.entryId;
+      if (text !== null && m.text === text) return m.entryId;
+    }
+    return fallback;
+  }
 
   /**
    * get_state 握手：取 data.sessionId → handle.sessionId + 合成

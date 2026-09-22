@@ -344,7 +344,9 @@ describe("SessionPanel（dialog）运行轮看门狗（task-09 / design A6）", 
       // 满 90s：对账一次（getAgentSession + listSessionRuns）
       await advance(1);
       expect(daemonMock.listSessionRuns.mock.calls.length).toBe(runsBase + 1);
-      expect(daemonMock.getAgentSession).toHaveBeenCalledTimes(2); // attach 轮询 1 + 看门狗 1
+      // task-08（2026-09-22-session-fork-continuation 连带）：挂载期分叉谱系
+      // 详情 effect 增调一次——attach 轮询 1 + 谱系详情 1 + 看门狗 1 = 3。
+      expect(daemonMock.getAgentSession).toHaveBeenCalledTimes(3);
 
       // run 仍 running（mock 默认）：走不到 resync、无长时间无响应提示
       expect(connMock.resync).not.toHaveBeenCalled();

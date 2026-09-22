@@ -15338,6 +15338,60 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/fork": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Fork Session",
+        "description": "Fork a new session B from a past run of session A (task-05 / FR-01~04).\n\n2026-09-22-session-fork-continuation task-05：在源会话 ``at_run_id`` 轮之后\n分叉——B 经既有 create 链落库（origin='fork'+fork 三件套+快照继承，A 零\n字段改动 D-005）。错误语义（design §接口定义）：404 会话/run 不存在或不\n属于该会话；409 run 进行中；422 caps sessionFork=none / native 档锚点缺失\n（文案提示可退种子档）。校验与 D-012 mode 分派（claude resume_at / pi\nrpc_fork·clone / codex seed）归 service fork.py，本端点仅路由映射。",
+        "operationId": "fork_session_api_daemon_sessions__session_id__fork_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionForkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionForkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/inject": {
       "post": {
         "tags": [
@@ -36702,6 +36756,41 @@
             "type": "integer",
             "title": "Tree Depth",
             "default": 0
+          },
+          "fork_of_session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fork Of Session Id"
+          },
+          "fork_at_run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fork At Run Id"
+          },
+          "engine_fork_anchor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Fork Anchor"
           }
         },
         "type": "object",
@@ -64776,6 +64865,104 @@
         "title": "SessionExportRequest",
         "description": "POST /api/daemon/sessions/export 请求体（2026-09-14-session-export task-01 / FR-01 / D-002@v1）。\n\n会话导出请求 DTO：``session_ids`` 1~50 个 UUID（0 个 / 51 个 → 422）+\n``tier`` 双档 Literal（chat=Markdown 对话、full=JSON+附件 zip）。producer=\n本 schema → FastAPI OpenAPI → 前端 ``pnpm gen:types`` → consumer=\n``api-types.ts``（具名产源，字段名/形状不得增删改）。\n\n去重与档位语义不在本层做：ids 去重保序归端点层（task-03），服务层收\n原生参数不 import 本模型（task-02）——本层只做 min/max 与 Literal 约束。"
       },
+      "SessionForkLineage": {
+        "properties": {
+          "source_session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Source Session Id"
+          },
+          "source_title": {
+            "type": "string",
+            "title": "Source Title"
+          },
+          "at_run_seq": {
+            "type": "integer",
+            "title": "At Run Seq"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_session_id",
+          "source_title",
+          "at_run_seq"
+        ],
+        "title": "SessionForkLineage",
+        "description": "``SessionForkResponse.lineage`` 溯源块（FR-05 前端 lineage-block 数据源）。"
+      },
+      "SessionForkRequest": {
+        "properties": {
+          "at_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "At Run Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "at_run_id"
+        ],
+        "title": "SessionForkRequest",
+        "description": "POST /api/daemon/sessions/{id}/fork 请求体。\n\n``at_run_id``：分叉锚轮（「分叉自此轮之后」）；``title``：B 会话可选标题\n（strip 后非空且 ≤255，service 层统一出口校验对齐 rename 口径）。"
+      },
+      "SessionForkResponse": {
+        "properties": {
+          "forked_session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Forked Session Id"
+          },
+          "lease_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Lease Id"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "native",
+              "seed"
+            ],
+            "title": "Tier"
+          },
+          "lineage": {
+            "$ref": "#/components/schemas/SessionForkLineage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "forked_session_id",
+          "lease_id",
+          "tier",
+          "lineage"
+        ],
+        "title": "SessionForkResponse",
+        "description": "POST /api/daemon/sessions/{id}/fork 响应（design §接口定义）。\n\n``tier``：'native'（引擎真截断：claude resume_at / pi rpc_fork / pi clone）\n| 'seed'（codex 前情转述，有损）。错误语义：404 会话/run 不存在或不属于\n该会话；409 run 进行中；422 caps sessionFork=none 或 native 档锚点缺失。"
+      },
       "SessionInjectRequest": {
         "properties": {
           "prompt": {
@@ -65386,6 +65573,17 @@
               }
             ],
             "title": "Failure Summary"
+          },
+          "engine_anchor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Anchor"
           }
         },
         "type": "object",

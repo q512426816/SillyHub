@@ -104,6 +104,11 @@ class SessionRunRead(BaseModel):
     # 轮该列存的是 agent 输出摘要，前端只在 failed 时消费（勿当失败原因展示）。
     # 模型层错误仍走 error_detail（两者正交，D-009）。
     failure_summary: str | None = Field(default=None, validation_alias="output_redacted")
+    # task-08 / D-014③（2026-09-22-session-fork-continuation）：轮引擎锚点
+    # （AgentRun.engine_anchor，task-01 新列 / task-04 回填），from_attributes
+    # 直映零查询改动。前端轮级「从此分叉」入口（TurnForkEntry）native 档门控
+    # 数据源——锚缺失（存量轮 / 未回填链）该轮入口置灰；历史行 None 如实输出。
+    engine_anchor: str | None = None
     model_config = {"from_attributes": True}
 
 

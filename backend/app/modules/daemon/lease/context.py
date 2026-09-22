@@ -562,6 +562,24 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         # interactive lease 全链 undefined 穿透（零回归，不伪造默认值）。
         if lease_meta.get("resume_session_id"):
             payload["resume_session_id"] = lease_meta["resume_session_id"]
+        # task-05（2026-09-22-session-fork-continuation / D-012 / Grill B-1）：fork
+        # 参数组四键白名单透传——placement.prepare_interactive_dispatch 按 mode
+        # 写入（fork_mode 真值 → fork_mode + fork_session=true + 档位锚点键
+        # resume_at_uuid / fork_anchor_entry_id），此处照上方 resume_session_id
+        # 先例透传进 claim payload（snake_case 单键，真值守护），daemon execPayload
+        # 解析（task-06）→ CreateSessionInput（resumeAtUuid/forkSession/
+        # forkAnchorEntryId/forkMode）→ driver options（claude resumeSessionAt×
+        # forkSession / pi RPC fork·clone）。缺键不加 payload 键——存量 lease /
+        # seed 档（codex 无 fork 键）全链 undefined 穿透（零回归，不伪造默认值）。
+        # **漏此环节 fork 参数到不了 daemon，native 档静默断链**（Grill B-1）。
+        if lease_meta.get("resume_at_uuid"):
+            payload["resume_at_uuid"] = lease_meta["resume_at_uuid"]
+        if lease_meta.get("fork_session") is not None:
+            payload["fork_session"] = lease_meta["fork_session"]
+        if lease_meta.get("fork_anchor_entry_id"):
+            payload["fork_anchor_entry_id"] = lease_meta["fork_anchor_entry_id"]
+        if lease_meta.get("fork_mode"):
+            payload["fork_mode"] = lease_meta["fork_mode"]
         # task-07 / C-13：透传 profile 字段（mcp_refs/skill_refs/effective_allowed_roots/
         # profile_version，双写 camelCase+snake_case）。置于 transport 分支之前，让 tar /
         # shared 两路 return 都携带（system_prompt 不在此，走 task-06 claudeMd prepend）。

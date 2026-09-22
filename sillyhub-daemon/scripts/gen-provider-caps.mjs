@@ -12,11 +12,12 @@
 // 解析方式（零新依赖——daemon 无 tsx 且 dist 依赖构建，不 import TS 模块；
 // 先例 = backend 对齐测试 test_provider_caps_alignment.py 的源文件读取式）：
 // 剥注释 → 花括号配平提取 `export const PROVIDER_CAPS` 对象字面量体 →
-// 逐引擎子块提取键值对（boolean 裸字面量 true/false + dialog 三值带引号
-// 字符串 'native'/'marker'/'none'）。
+// 逐引擎子块提取键值对（boolean 裸字面量 true/false + 枚举值键带引号字符串：
+// dialog 三值 'native'/'marker'/'none'、sessionFork 三值
+// 'native'/'seed'/'none'——2026-09-22-session-fork-continuation task-03）。
 //
 // 响亮失败守卫（R-02）：解析结果必须恰含四引擎（claude/codex/pi/cursor）且
-// 每键恰 14 个 caps 键；任一不符即 stderr 打印差异明细并 exit 1，**不写任何
+// 每键恰 16 个 caps 键；任一不符即 stderr 打印差异明细并 exit 1，**不写任何
 // 产物**（值形态写错——如裸 true 误写成字符串——同样以「缺少 caps 键」暴露）。
 //
 // 幂等：固定引擎序/键序/缩进/引号风格，重跑输出逐字节一致（frontend
@@ -72,6 +73,7 @@ const CAPS_KEYS = [
   "compact",
   "thinking_level",
   "steering",
+  "sessionFork",
 ];
 
 // ── 解析（backend 对齐测试 _extract_ts_const_object_body / _TS_BOOL_PAIR_RE
@@ -119,10 +121,11 @@ function extractConstObjectBody(text, constName) {
 
 // 引擎子块（`claude: { ... }`，块内无嵌套花括号——caps 值均为标量）。
 const ENGINE_BLOCK_RE = /([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\{([^{}]*)\}/g;
-// 块内键值对：boolean 裸字面量，或 dialog 三值带引号字符串（写错值形态即
-// 匹配不到，由守卫以「缺少 caps 键」响亮暴露，不会静默通过）。
+// 块内键值对：boolean 裸字面量，或枚举值键带引号字符串（dialog 三值 +
+// sessionFork 三值，共用一个字符串值域并集——写错值形态即匹配不到，由守卫
+// 以「缺少 caps 键」响亮暴露，不会静默通过）。
 const PAIR_RE =
-  /([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:(true|false)\b|'(native|marker|none)')/g;
+  /([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:(true|false)\b|'(native|marker|seed|none)')/g;
 
 /** 解析 PROVIDER_CAPS 字面量体为 Map<engine, Map<key, boolean|string>>。 */
 function parseCapsTable(body) {
@@ -141,7 +144,7 @@ function parseCapsTable(body) {
   return table;
 }
 
-// ── 响亮失败守卫（R-02）：恰四引擎 × 每键恰 14 caps 键 ────────────────────────
+// ── 响亮失败守卫（R-02）：恰四引擎 × 每键恰 16 caps 键 ────────────────────────
 
 function guardTable(table) {
   const errors = [];
@@ -209,18 +212,22 @@ function renderFrontend(table) {
  *
  * 镜像约定（三端同步，单源 = daemon 侧，2026-09-11-provider-adapter-registry
  * task-04 起手抄镜像退役）：daemon 单源改取值后重跑生成脚本，本文件与 backend
- * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（15 键：
- * 14 个 boolean + dialog string 枚举）与每个 provider 每键取值一致性由
+ * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（16 键：
+ * 14 个 boolean + dialog / sessionFork 两 string 枚举）与每个 provider
+ * 每键取值一致性由
  * backend/app/modules/agent/tests/test_provider_caps_alignment.py 以源文件
  * 读取方式守护（任一端漂移即测试失败）。
  *
  * 取值语义：caps 描述 provider 当前真实能力，14 个 boolean 键缺省 false 默认
  * 拒绝（FR-06 / D-002@v1）；dialog 为 string 枚举键（'native' = 走平台
- * dialog 管道 / 'marker' = 纯前端标记协议 / 'none' = 无通道）；未知 provider
- * 查询返回默认拒绝对象（boolean 键全 false、dialog 取 'none'），不抛错。
+ * dialog 管道 / 'marker' = 纯前端标记协议 / 'none' = 无通道）；sessionFork
+ * 为 string 枚举键（2026-09-22-session-fork-continuation task-03 / D-008：
+ * 'native' = 原生截断分叉 / 'seed' = 种子克隆档 / 'none' = 无通道）；未知
+ * provider 查询返回默认拒绝对象（boolean 键全 false、dialog / sessionFork
+ * 取 'none'），不抛错。
  */
 
-/** provider 能力矩阵（15 键：14 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+/** provider 能力矩阵（16 键：14 个 boolean + dialog / sessionFork 两 string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
@@ -285,6 +292,15 @@ export interface ProviderCaps {
    * 回退 false）。
    */
   steering: boolean;
+  /**
+   * 会话分叉通道形态（第 16 键，2026-09-22-session-fork-continuation task-03 /
+   * D-008 / D-010，string 枚举）：'native' = 原生截断分叉（claude=SDK
+   * resume+resumeSessionAt+forkSession、pi=RPC fork 命令锚 entryId）；
+   * 'seed' = 种子克隆档（codex 无原生截断通道，engine_anchor 恒 NULL）；
+   * 'none' = 无通道（cursor CLI；未知 provider 回退值）；取值依据锚点见
+   * daemon 单源 PROVIDER_CAPS docblock sessionFork 段。
+   */
+  sessionFork: 'native' | 'seed' | 'none';
 }
 
 /**
@@ -299,8 +315,8 @@ ${engineBlocks}
  * 查询 provider 能力；未知 provider 返回默认拒绝对象，不抛错。
  *
  * 返回已知 provider 的表内对象（调用方只读，勿就地修改——表是模块级共享态）；
- * 未知 provider 每次返回新的默认拒绝字面量（boolean 键全 false、dialog 取
- * 'none'，R-09）。
+ * 未知 provider 每次返回新的默认拒绝字面量（boolean 键全 false、dialog /
+ * sessionFork 取 'none'，R-09）。
  */
 export function getProviderCaps(provider: string): ProviderCaps {
   const caps = PROVIDER_CAPS[provider];
@@ -323,6 +339,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     compact: false,
     thinking_level: false,
     steering: false,
+    sessionFork: 'none',
   };
 }
 
@@ -366,13 +383,14 @@ task-04 起手抄镜像退役）：
   \`\`PROVIDER_CAPS\`\`（含取值依据的文件:行号锚点注释，改值先改那里）；
 - 本文件与 \`\`frontend/src/lib/provider-caps.ts\`\` 均为脚本生成产物，daemon
   单源改值后重跑 \`\`sillyhub-daemon/scripts/gen-provider-caps.mjs\`\` 三端一并
-  刷新，三端键集合（15 键：14 个 boolean + dialog string 枚举）与每个
-  provider 每键取值必须一致；
+  刷新，三端键集合（16 键：14 个 boolean + dialog / sessionFork 两 string
+  枚举）与每个 provider 每键取值必须一致；
 - 一致性由 \`\`app/modules/agent/tests/test_provider_caps_alignment.py\`\` 以
   源文件读取方式守护（直接读 daemon / frontend 表源比对，不复制值断言），
   任一端漂移即测试失败；
-- 查询语义：未知 provider 返回默认拒绝新 dict（boolean 键全 False、dialog
-  string 枚举取 \`\`"none"\`\`，缺省 false 默认拒绝，FR-06 / D-002@v1），不抛错。
+- 查询语义：未知 provider 返回默认拒绝新 dict（boolean 键全 False、dialog /
+  sessionFork string 枚举取 \`\`"none"\`\`，缺省 false 默认拒绝，FR-06 /
+  D-002@v1），不抛错。
 """
 
 from __future__ import annotations
@@ -383,7 +401,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
 ${engineBlocks}
 }
 
-# 键序取自镜像表首条目（claude）；15 键齐全与三端一致性由守护测试保证。
+# 键序取自镜像表首条目（claude）；16 键齐全与三端一致性由守护测试保证。
 _CAPS_KEYS: tuple[str, ...] = tuple(next(iter(PROVIDER_CAPS.values())))
 
 
@@ -396,13 +414,16 @@ def get_provider_caps(provider: str) -> dict[str, bool | str]:
     Returns:
         dict[str, bool | str]: 已知 provider 返回表内条目的**副本**（调用方可安全
         修改，不污染模块级共享表）；未知 provider 返回默认拒绝新 dict（boolean
-        键全 False、dialog string 枚举取 \`\`"none"\`\`，15 键齐全，FR-06），不抛错。
+        键全 False、dialog / sessionFork string 枚举取 \`\`"none"\`\`，16 键
+        齐全，FR-06），不抛错。
     """
     caps = PROVIDER_CAPS.get(provider)
     if caps is not None:
         return dict(caps)
-    # 未知 provider 默认拒绝：boolean 键全 False，dialog string 枚举回退 'none'。
-    return {key: ("none" if key == "dialog" else False) for key in _CAPS_KEYS}
+    # 未知 provider 默认拒绝：boolean 键全 False，dialog / sessionFork string
+    # 枚举键缺键兜底回退 'none'（对齐 dialog 先例，2026-09-22-session-fork-
+    # continuation task-03 / D-008）。
+    return {key: ("none" if key in ("dialog", "sessionFork") else False) for key in _CAPS_KEYS}
 `;
 }
 

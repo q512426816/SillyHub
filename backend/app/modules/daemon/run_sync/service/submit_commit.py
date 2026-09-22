@@ -3,8 +3,9 @@
 _revoke_committed_partials（跨调用同 segmentId partial 撤销）/ _resolve_
 dispatch_run_id（tool_use_id → 派发 run 冷启动反查；为平衡 submit_steps
 行数自解析段移入本文件，D-008 口径报告项）/ _submit_finalize（AgentRun
-状态同步 + 词元写回 + session pin + sillyspec 绑定 + commit + PublishIntent
-构造与返回）。D-007：log 经 ``_rsvc.log`` 保持原模块 logger 身份。
+状态同步 + 词元写回 + session pin + sillyspec 绑定 + 轮引擎锚回填
+（session-fork task-04）+ commit + PublishIntent 构造与返回）。D-007：log
+经 ``_rsvc.log`` 保持原模块 logger 身份。
 """
 
 from __future__ import annotations
@@ -20,9 +21,61 @@ from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.change.binding import bind_session_to_change, extract_spec_bindings
 
 from .publish import PublishIntent, SubmittedMessages
+from .sdk_pipeline import _channel_from_event_type
 
 if TYPE_CHECKING:
     from .submit_steps import _SubmitState
+
+
+def _flat_record_engine_anchor(rec: dict) -> str | None:
+    """flat record 的引擎锚值（session-fork task-04 / D-011 消费端读取口径）。
+
+    锚由 task-06 双 driver 补挂在新轨 AgentEvent.metadata 固定键
+    ``engineAnchor``（claude=assistant 帧链 UUID / pi=轮首 user 消息 entryId），
+    经 ``_persist_agent_event`` 以 ``_agent_event`` 私有键注入 flat record，
+    落库写 ``AgentRunLog.metadata_['agent_event']['metadata']['engineAnchor']``。
+    旧轨消息 / override 信号行无 ``_agent_event`` → None；driver 只在真值时
+    挂键，此处同口径只认非空 str（缺键 / 空串 = 无锚，不伪造）。
+    """
+    ev = rec.get("_agent_event")
+    if not isinstance(ev, dict):
+        return None
+    metadata = ev.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    anchor = metadata.get("engineAnchor")
+    return anchor if isinstance(anchor, str) and anchor else None
+
+
+def _persisted_engine_anchors(st: _SubmitState) -> list[str]:
+    """本次 submit_messages 调用**真正落库**的消息按序携带的 engineAnchor 值。
+
+    锚候选只取本调用产生 INSERT 的行，判定依据 ``st.published_logs``：它与
+    入库行 1:1 且同序（dedup 跳过 / override 信号 / late partial 丢弃均不
+    append，log_id=None 的 stale 信封已被过滤，被回退 partial 已移除）。双指针
+    按 (channel, content[:50000]) 顺序对齐 flat record 与 published 行——匹配
+    上即该 record 真的落了库，其锚才进候选。这让重试 / 乱序补发批次里被
+    dedup 拦下的旧锚不进候选，从而不覆盖轮内最新锚（task 卡「重复提交
+    不覆盖」；R-05）。channel 缺省时按落库循环同款映射派生（batch 旧轨
+    消息无显式 channel）。
+    """
+    published_rows = [p for p in st.published_logs if p.get("log_id") is not None]
+    anchors: list[str] = []
+    cursor = 0
+    for rec in st.flat_messages:
+        rec_content = rec.get("content")
+        rec_channel = rec.get("channel") or _channel_from_event_type(rec.get("event_type") or "")
+        if (
+            cursor < len(published_rows)
+            and published_rows[cursor].get("channel") == rec_channel
+            and isinstance(rec_content, str)
+            and rec_content[:50000] == published_rows[cursor].get("content")
+        ):
+            anchor = _flat_record_engine_anchor(rec)
+            if anchor is not None:
+                anchors.append(anchor)
+            cursor += 1
+    return anchors
 
 
 async def _revoke_committed_partials(svc, agent_run_id: uuid.UUID, segment_id: str) -> int:
@@ -126,8 +179,9 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
     """submit_messages 尾段（task-10 自方法体搬移，状态经 st 显式传参）。
 
     AgentRun 状态同步（pending→running 原子推进）+ 实时词元写回 +
-    session_id 双写回 + sillyspec 命令绑定 + commit（IntegrityError
-    幂等回滚）+ PublishIntent 标量构造返回。语义与拆分前逐字节一致。
+    session_id 双写回 + sillyspec 命令绑定 + 轮引擎锚回填（session-fork
+    task-04，D-010/D-011 分档）+ commit（IntegrityError 幂等回滚）+
+    PublishIntent 标量构造返回。除锚回填块外语义与拆分前逐字节一致。
     """
     # Sync AgentRun status: pending -> running on first messages
     # task-06：st.agent_run 已在落库循环前 get（归位需要 agent_session_id），此处
@@ -214,6 +268,35 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
             if session_row is not None and session_row.agent_session_id != st.latest_session_id:
                 session_row.agent_session_id = st.latest_session_id
                 svc._session.add(session_row)
+
+        # session-fork task-04 / FR-07 / D-010 D-011（2026-09-22-session-fork-
+        # continuation）：轮引擎锚回填——从本轮**新落库**消息的 metadata
+        # ['engineAnchor'] 分档写 AgentRun.engine_anchor（task-01 新列），
+        # 供 fork 服务 native 档取锚（fork.py at_run 锚）。分档语义：
+        #   claude → 轮内最新（末条带锚消息）覆盖写：每次收口写本调用最新
+        #            落库锚，轮末自然收敛到末 chain-entry 帧 UUID；
+        #   pi    → 轮首 user 消息 entryId 仅空时写：entryId 轮内恒定，
+        #            首写即终值；
+        #   codex / cursor / provider 缺失 → 不写（NULL=分叉入口灰，不伪造
+        #            msg_xxx 类错值，R-05 降级面）。
+        # 「重复提交不覆盖」：候选只含本调用真正 INSERT 的锚（_persisted_
+        # engine_anchors 经 published_logs 判定，dedup 拦下 / 撤回的旧锚不
+        # 进候选）；迟到调用无新落库锚时保持既有值不动。写形态对齐上方
+        # session_id 回填（:194-197 同款 ORM 条件写 + 随末尾既有 commit），
+        # 值相同不置 dirty（无谓 UPDATE）。仅 interactive run（agent_session_id
+        # 非空）——batch run 非会话轮，fork 无消费方；且 batch 轨消息本就不
+        # 携带锚，此守卫纯语义收口。
+        if st.agent_run.agent_session_id is not None and st.agent_run.provider in ("claude", "pi"):
+            persisted_anchors = _persisted_engine_anchors(st)
+            round_anchor: str | None = None
+            if persisted_anchors:
+                if st.agent_run.provider == "claude":
+                    round_anchor = persisted_anchors[-1]
+                elif not st.agent_run.engine_anchor:  # pi：轮首锚仅空时写
+                    round_anchor = persisted_anchors[0]
+            if round_anchor is not None and st.agent_run.engine_anchor != round_anchor:
+                st.agent_run.engine_anchor = round_anchor
+                svc._session.add(st.agent_run)
 
         # 2026-08-25-session-spec-binding task-05 / FR-01 / D-003@v1：sillyspec
         # 命令自动绑定——落库循环收集的命令经 run 二跳定位平台会话

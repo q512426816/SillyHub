@@ -16,7 +16,7 @@ import json
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 
 from fastapi import (
     HTTPException,
@@ -44,6 +44,9 @@ from app.modules.daemon.schema import (
     SessionCompactResponse,
     SessionCreateRequest,
     SessionCtxWindowUpdateRequest,
+    SessionForkLineage,
+    SessionForkRequest,
+    SessionForkResponse,
     SessionInjectRequest,
     SessionReopenResponse,
     SessionThinkingLevelRequest,
@@ -53,6 +56,7 @@ from app.modules.daemon.schema import (
 )
 from app.modules.daemon.service import DaemonService
 from app.modules.daemon.session.service.compact import compact_session as _compact_session_svc
+from app.modules.daemon.session.service.fork import fork_session as _fork_session_svc
 from app.modules.daemon.session.service.thinking_level import (
     get_session_thinking_levels as _get_thinking_levels_svc,
 )
@@ -568,6 +572,49 @@ async def create_session(
         lease_id=result.lease_id,
         status=s.status or "active",
         stream_url=f"/api/daemon/sessions/{s.id}/stream",
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/fork",
+    response_model=SessionForkResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def fork_session(
+    session_id: uuid.UUID,
+    data: SessionForkRequest,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> SessionForkResponse:
+    """Fork a new session B from a past run of session A (task-05 / FR-01~04).
+
+    2026-09-22-session-fork-continuation task-05：在源会话 ``at_run_id`` 轮之后
+    分叉——B 经既有 create 链落库（origin='fork'+fork 三件套+快照继承，A 零
+    字段改动 D-005）。错误语义（design §接口定义）：404 会话/run 不存在或不
+    属于该会话；409 run 进行中；422 caps sessionFork=none / native 档锚点缺失
+    （文案提示可退种子档）。校验与 D-012 mode 分派（claude resume_at / pi
+    rpc_fork·clone / codex seed）归 service fork.py，本端点仅路由映射。
+    """
+    svc = DaemonService(session)
+    result = await _fork_session_svc(
+        svc,
+        user.id,
+        session_id=session_id,
+        at_run_id=data.at_run_id,
+        title=data.title,
+    )
+    return SessionForkResponse(
+        forked_session_id=result.forked_session.id,
+        lease_id=result.lease_id,
+        run_id=result.run_id,
+        # service 结果 tier 为 str（'native'|'seed'，fork.py 分派定值），此处
+        # 收窄到响应 DTO 的 Literal 值域。
+        tier=cast(Literal["native", "seed"], result.tier),
+        lineage=SessionForkLineage(
+            source_session_id=result.source_session_id,
+            source_title=result.source_title,
+            at_run_seq=result.at_run_seq,
+        ),
     )
 
 

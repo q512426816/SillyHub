@@ -16,7 +16,11 @@ import { AgentModelInput } from "@/components/AgentModelInput";
 import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
 import { applyLogToSegments, extractPreambleText, finishTurn, stripPreambleText } from "@/components/daemon/session-log-assembler";
 import { TurnTimeline } from "@/components/daemon/turn-timeline";
-import type { AutoResumeEntry } from "@/components/daemon/turn-timeline";
+import type { AutoResumeEntry, TurnForkEntryWiring } from "@/components/daemon/turn-timeline";
+// task-08（2026-09-22-session-fork-continuation / FR-01 / FR-05）：谱系溯源块 +
+// 分叉确认弹层（dialog 模式与 page 双挂载点同步惯例）。
+import { LineageBlock } from "@/components/daemon/session-fork/lineage-block";
+import { ForkConfirmModal } from "@/components/daemon/session-fork/fork-confirm-modal";
 import { type AttachmentRead } from "@/lib/api/session-attachments";
 import { joinAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
 import {
@@ -47,7 +51,8 @@ import { ScheduledMessageRead, type PlanSummary } from "@/lib/daemon";
 import {
   cancelTeamMission, createScheduledMessage, createSession, endSession, fetchPendingDialogs, fetchSessionDialogHistory,
   getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns,
-  triggerSessionTeamMission, maxLogTimestamp, streamSession, type InteractiveProvider,
+  triggerSessionTeamMission, maxLogTimestamp, streamSession, type AgentSessionRead,
+  type InteractiveProvider,
   type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection,
   type TeamMissionTriggerRequest,
 } from "@/lib/daemon";
@@ -201,6 +206,31 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   // 分支回填；本地 provider state 是选择器当前值（attach 初值 defaultProvider、
   // 切换不随会话），不能作降级判据。null（idle / 回填前）不传 → 组件不臆断。
   const [sessionEngine, setSessionEngine] = useState<string | null>(null);
+  // ── task-08（2026-09-22-session-fork-continuation / FR-01 / FR-05）─────────
+  // 分叉确认弹层目标（轮头「⑂ 从此分叉」点击置位；确认/取消清空）。
+  const [forkTarget, setForkTarget] = useState<{ runId: string; seq: number } | null>(null);
+  // 谱系溯源浮层（LineageBlock/面包屑 → 源会话；onForked → 分叉会话 B）——复用
+  // WorkerSessionOverlay（dialog 模式既有「打开另一会话」形态）。
+  const [lineageOverlay, setLineageOverlay] = useState<{
+    sessionId: string;
+    title: string;
+    statusHint: string | null;
+  } | null>(null);
+  // 会话详情镜像（溯源块数据源：origin / fork 三字段 / provider / created_at /
+  // title）——dialog 无 session 详情 state（上方 sessionEngine 注释），此处仅为
+  // task-08 谱系块单点拉取一次（fork 字段不可变，不轮询）。
+  const [sessionDetail, setSessionDetail] = useState<AgentSessionRead | null>(null);
+  // 轮级分叉入口锚点数据（/runs → run key → engine_anchor；usageRefresh=轮终态
+  // 信号，新轮落库后刷新——锚点由 run 终态回填，终态后拉必新鲜）。
+  const [forkAnchors, setForkAnchors] = useState<Map<string, string | null> | null>(null);
+  // 轮入口点击 → 开分叉确认弹层（稳定 ref）。
+  const handleForkTurn = useCallback((runKey: string, seq: number) => {
+    setForkTarget({ runId: runKey, seq });
+  }, []);
+  // 溯源块/面包屑点击 → 源会话浮层（源会话必已被分叉——当前 B 即证据）。
+  const handleOpenLineageSource = useCallback((sessionId: string) => {
+    setLineageOverlay({ sessionId, title: "原会话", statusHint: "↦ 已分叉" });
+  }, []);
   // ql-20260825-011：服务端排队刷新桥——establishStream（SSE 回调，定义早于
   // useMessageQueue 调用）经 ref 触发队列刷新，避开 use-before-define。
   const queueRefreshRef = useRef<() => void>(() => {});
@@ -208,6 +238,39 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   // 独立 state（零 react-query 铁律不引入 queryClient），onTurnCompleted 轮终态
   // 递增，驱动输入框上方 SessionUsageBar 重拉。
   const [usageRefresh, setUsageRefresh] = useState(0);
+  // task-08（session-fork / FR-01 / FR-05）：谱系详情 + 分叉锚点拉取——会话切换
+  // 重拉；usageRefresh（轮终态信号）驱动锚点刷新（engine_anchor 由 run 终态
+  // 回填，终态后拉必新鲜）。拉取失败均降级不渲染/置灰，不阻断主流程。
+  // Promise.resolve 包裹：测试宿主 daemon mock 可能缺省裸 vi.fn()（返回
+  // undefined，.then 同步崩——dialog 测试族既知惯例），包裹后统一按无数据
+  // 降级；真实链路恒 Promise，行为不变。
+  useEffect(() => {
+    if (!view.sessionId) {
+      setSessionDetail(null);
+      setForkAnchors(null);
+      return;
+    }
+    let cancelled = false;
+    void Promise.resolve(getAgentSession(view.sessionId))
+      .then((detail) => {
+        if (!cancelled && detail) setSessionDetail(detail);
+      })
+      .catch(() => {
+        /* 详情拉取失败 → 溯源块降级不渲染 */
+      });
+    void Promise.resolve(listSessionRuns(view.sessionId))
+      .then((runs) => {
+        if (!cancelled && Array.isArray(runs)) {
+          setForkAnchors(new Map(runs.map((r) => [r.id, r.engine_anchor ?? null])));
+        }
+      })
+      .catch(() => {
+        /* runs 拉取失败 → native 档入口置灰（缺锚口径） */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view.sessionId, usageRefresh]);
   // ── task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时发送 ──
   // 同 page 模式四件套（弹窗开合 / 选定时间 / 提交在途 / 定时条刷新信号）+ 系统
   // 提示行；dialog 侧零 react-query 不变（ScheduledMessagesBar 自带局部 Provider，
@@ -1904,12 +1967,33 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         tasksRefreshSignal={tasksRefresh}
       />
 
+      {/* task-08（2026-09-22-session-fork-continuation / FR-05）：分叉会话
+          （origin='fork'）顶部常驻谱系溯源块+多跳面包屑（数据=sessionDetail
+          镜像的 fork 三字段；详情未就绪/非 fork 会话零占位）。 */}
+      {sessionDetail?.origin === "fork" && (
+        <LineageBlock session={sessionDetail} onOpenSource={handleOpenLineageSource} />
+      )}
+
       {/* 消息流（task-13 共享子组件）。R7：dialog 模式 turns 原样喂 TurnTimeline
           （无 whoLine / 历史 usage / 孤儿 turn 派生链——ISP 现状，强开会多打
-          listSessionRuns 请求并重排顺序）。 */}
+          listSessionRuns 请求并重排顺序）。
+          task-08（session-fork）例外注记：forkAnchors 的 /runs 拉取是分叉入口
+          门控的专属数据源（上方 effect，非 whoLine 派生链复用），不破 R7 语义。 */}
       <TurnTimeline
         autoResumeEntries={autoResumeEntries}
         turns={view.turns}
+        // task-08（session-fork / FR-01 / FR-04）：轮级「⑂ 从此分叉」入口——
+        // provider 优先会话详情镜像（真值），回退 sessionEngine（attach 回填）；
+        // 锚点缺数据（forkAnchors null）时 native 档入口置灰（缺锚口径）。
+        forkEntry={
+          view.sessionId
+            ? ({
+                provider: sessionDetail?.provider ?? sessionEngine ?? provider,
+                engineAnchors: forkAnchors ?? new Map(),
+                onForkTurn: handleForkTurn,
+              } satisfies TurnForkEntryWiring)
+            : null
+        }
         viewMode={viewMode}
         errorMsg={view.errorMsg}
         sessionStatus={view.status}
@@ -2087,6 +2171,49 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           subSessionId={workerSessionId}
           onClose={() => {
             setWorkerSessionId(null);
+          }}
+        />
+      )}
+
+      {/* task-08（2026-09-22-session-fork-continuation / FR-01 / FR-04）：分叉
+          确认弹层——onForked 按 forked_session_id 以浮层进入 B（dialog 模式既有
+          「打开另一会话」形态，分身浮层同款）；源会话标题取 sessionDetail 镜像
+          （未就绪回退短 id）。 */}
+      {forkTarget != null && view.sessionId != null && (
+        <ForkConfirmModal
+          sessionId={view.sessionId}
+          atRunId={forkTarget.runId}
+          atRunSeq={forkTarget.seq}
+          sourceTitle={
+            sessionDetail?.title?.trim() || `会话 ${view.sessionId.slice(0, 8)}`
+          }
+          provider={sessionDetail?.provider ?? sessionEngine ?? provider}
+          onCancel={() => {
+            setForkTarget(null);
+          }}
+          onForked={(resp) => {
+            setForkTarget(null);
+            setLineageOverlay({
+              sessionId: resp.forked_session_id,
+              title: "分叉会话",
+              statusHint: null,
+            });
+          }}
+        />
+      )}
+
+      {/* task-08（FR-05）：谱系溯源浮层——LineageBlock/面包屑点击开源会话（带
+          「已分叉」状态条）、onForked 进 B；复用 WorkerSessionOverlay（mode=page
+          SessionPanel，浮层内 B 顶部溯源块随 page 分支自然常驻）。dialog 宿主无
+          页面级数据，machines/llmProviders 缺省走既有降级（同分身浮层惯例）。 */}
+      {lineageOverlay != null && (
+        <WorkerSessionOverlay
+          subSessionId={lineageOverlay.sessionId}
+          title={lineageOverlay.title}
+          statusHint={lineageOverlay.statusHint}
+          closeLabel="关闭"
+          onClose={() => {
+            setLineageOverlay(null);
           }}
         />
       )}

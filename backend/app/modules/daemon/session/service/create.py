@@ -106,6 +106,20 @@ async def create_session(
     # 调用方 = knowledge.distill fresh 路径）。缺省 None = 落 server_default
     # 'chat'（存量三路调用行为逐字节不变，零回归）。
     origin: str | None = None,
+    # ── task-05（2026-09-22-session-fork-continuation / FR-02 / D-012）：
+    # fork 派生会话参数组（调用方 = fork.py fork_session）──
+    # fork_of_session_id/fork_at_run_id/engine_fork_anchor 落 AgentSession fork
+    # 三件套（谱系单向挂 B 侧；**不写 parent_session_id**——fork 不入分身树，
+    # design §数据模型）；fork_mode（'resume_at'|'rpc_fork'|'clone'）经下方
+    # placement 调用写 lease metadata fork 参数组（D-012 四键，native 档才
+    # 传值）；resume_session_id 复用既有 resume 链（native fork 的源 SDK 会话
+    # id，写法对齐 placement.py worker_redispatch 先例）。全缺省 None 时本方法
+    # 行为逐字节不变（既有三路调用零回归）。
+    fork_of_session_id: uuid.UUID | None = None,
+    fork_at_run_id: uuid.UUID | None = None,
+    engine_fork_anchor: str | None = None,
+    fork_mode: str | None = None,
+    resume_session_id: str | None = None,
 ) -> SessionDispatchResult:
     """Create an interactive session + first-turn run + interactive lease.
 
@@ -129,7 +143,11 @@ async def create_session(
     """
     # ql-20260825-001（D-7 对齐 inject）：纯文本首句需非空 prompt；附件
     # 非空允许空 prompt（看图说话）。
-    if (not prompt or not prompt.strip()) and not attachment_ids:
+    # task-05（session-fork）：fork 调用（fork_of_session_id 非 None）豁免
+    # ——native 档走 resume 链无首句（prompt=""），空 prompt 合法；seed 档
+    # 恒带种子文本不受影响。豁免键取 fork_of_session_id（fork 调用必传），
+    # 存量调用 fork_of_session_id 恒 None，行为逐字节不变。
+    if (not prompt or not prompt.strip()) and not attachment_ids and fork_of_session_id is None:
         raise DaemonSessionNotActive(
             "prompt must not be empty.",
             details={"reason": "empty_prompt"},
@@ -285,6 +303,12 @@ async def create_session(
             # D-010④：会话来源落档（origin=None 时 'chat' 同 server_default，
             # 存量调用行为逐字节不变）。
             origin=origin or "chat",
+            # task-05（session-fork / FR-02）：fork 三件套（谱系溯源指针）。
+            # 缺省 None = 非 fork 会话（存量行零回归）；fork 调用不写
+            # parent_session_id（上方缺省 None 即不入分身树，design §数据模型）。
+            fork_of_session_id=fork_of_session_id,
+            fork_at_run_id=fork_at_run_id,
+            engine_fork_anchor=engine_fork_anchor,
         )
         svc._session.add(session)
         await svc._session.flush()
@@ -503,6 +527,14 @@ async def create_session(
                 # 跳过属主谓词与借用授权分支（task-03 已放行 platform 授权，本
                 # 分支直接钉定并跳过借用语义 → 无沙箱 marker / 无借用审计）。
                 pinned_skip_owner_check=_platform_binding is not None,
+                # task-05（session-fork / D-012）：native fork 的 resume 链 +
+                # fork 参数组透传（写 lease metadata 四键，seed 档全 None 不写
+                # 键零回归）。锚点键按 mode 取 engine_fork_anchor（resume_at=
+                # 源轮末锚 / rpc_fork=下一轮 entryId，fork.py 已按档位定值）。
+                resume_session_id=resume_session_id,
+                fork_mode=fork_mode,
+                fork_resume_at_uuid=(engine_fork_anchor if fork_mode == "resume_at" else None),
+                fork_anchor_entry_id=(engine_fork_anchor if fork_mode == "rpc_fork" else None),
                 **_dispatch_extra,
             )
         except NoOnlineDaemonError as exc:
@@ -650,14 +682,19 @@ async def create_session(
 
             _marker_lines = "\n".join(attachment_marker_line(r) for r in validated_attachments)
             _user_input_content = f"{_marker_lines}\n{prompt}" if prompt else _marker_lines
-        svc._session.add(
-            AgentRunLog(
-                run_id=run.id,
-                channel="user_input",
-                content_redacted=_user_input_content[:USER_INPUT_LOG_MAX_CHARS],
-                timestamp=now,
+        # task-05（session-fork）：native 档 fork 无首句（prompt="" 且无附件）
+        # → _user_input_content 为空，不落 user_input 行（空内容行无展示价值且
+        # 污染回放）。存量路径 prompt 非空或附件标记行非空，恒落行——行为
+        # 逐字节不变。
+        if _user_input_content:
+            svc._session.add(
+                AgentRunLog(
+                    run_id=run.id,
+                    channel="user_input",
+                    content_redacted=_user_input_content[:USER_INPUT_LOG_MAX_CHARS],
+                    timestamp=now,
+                )
             )
-        )
         await svc._session.commit()
         await svc._session.refresh(session)
         await svc._session.refresh(run)

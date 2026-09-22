@@ -307,6 +307,16 @@ class AgentRun(BaseModel, table=True):
         default=None,
         sa_column=Column(Integer, nullable=True),
     )
+    # ── 原生分叉定位锚点（2026-09-22-session-fork-continuation task-01）──
+    # 分档回填（D-008/D-010）：claude=该轮末 chain-entry 消息 UUID（轮终态写，
+    # resume fork 的 SDK 定位锚）；pi=该轮首条用户消息 entryId（fork 取 at_run
+    # 下一轮锚 position before，末轮后分叉走 clone）；codex 无锚点语义恒 NULL。
+    # 列形态 Text（UUID/entryId 文本载体，同 output_redacted 等 Text 列写法）；
+    # nullable 纯加列零迁移兼容（存量 run 行 NULL，不回填）。
+    engine_anchor: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
     # ── Post-scan validation fields ──
     post_scan_status: str | None = Field(
         default=None,
@@ -709,6 +719,11 @@ class AgentSession(BaseModel, table=True):
         # 前置谓词的查询键；置顶块内续排既有最近活跃序，D-002@v1——task-02
         # 消费；迁移 20260907231000 同步建，防 autogenerate 漂移）。
         Index("ix_agent_sessions_pinned_at", "pinned_at"),
+        # 2026-09-22-session-fork-continuation task-01：fork 溯源指针索引——按源
+        # 会话枚举其派生 fork 会话（列表「分叉自」回链 / 溯源查询）的查询键
+        # （迁移 20260922194500 同步建；对齐 ix_agent_sessions_parent 补声明惯例，
+        # 防 autogenerate 漂移）。
+        Index("ix_agent_sessions_fork_of", "fork_of_session_id"),
     )
 
     id: uuid.UUID = Field(
@@ -817,7 +832,10 @@ class AgentSession(BaseModel, table=True):
     # ── 会话化三列（2026-08-23-agent-activity-sessions task-03 / FR-03 / design §3.3.1）──
     # 会话来源：'chat'（平台对话会话，存量行为；server_default 'chat' 使迁移对存量
     # 行免回填即得 chat 语义）| 'tool_report'（CLI 工具上报聚合出的本地 Agent 会话，
-    # task-04 find-or-create 写入）。
+    # task-04 find-or-create 写入）| 'fork'（会话分叉派生的新会话，
+    # 2026-09-22-session-fork-continuation task-01 增值域；String(16) 容纳）。
+    # fork 会话约束：**不写** parent_session_id（会话树是分身挂载语义，fork 不入
+    # 树——源头指针走 fork_of_session_id）、tree_depth 恒 0（非分身层级）。
     origin: str = Field(
         default="chat",
         sa_column=Column(
@@ -915,6 +933,39 @@ class AgentSession(BaseModel, table=True):
     tree_depth: int = Field(
         default=0,
         sa_column=Column(Integer, nullable=False, default=0, server_default=text("0")),
+    )
+    # ── 会话分叉三列（2026-09-22-session-fork-continuation task-01）──
+    # fork 溯源（origin='fork' 会话的源头指针）：指向被分叉的源会话。自引用 FK
+    # 无 ondelete——会话软删不硬删（对齐 parent_session_id 先例）；fork 会话刻意
+    # **不写** parent_session_id（会话树是分身挂载语义，fork 不入树，见 origin
+    # 列注释）。NULL = 非 fork 会话（存量行零回归，不回填）。查询键走
+    # ix_agent_sessions_fork_of（__table_args__ 同步声明，防 autogenerate 漂移）。
+    fork_of_session_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id"),
+            nullable=True,
+        ),
+    )
+    # fork 落点：源会话中分叉发生的那一轮 run（「分叉自此轮之后」的轮定位）。
+    # run 可被硬删（run 删除级联清 log/usage 的既有路径），故 FK ondelete
+    # SET NULL——源 run 删除时锚点退化为 NULL，fork 会话行保留（审计降级不挡删，
+    # 对齐 agent_runs.user_id SET NULL 先例）。
+    fork_at_run_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_runs.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    # 原生分叉定位：实际定位锚文本（与 AgentRun.engine_anchor 同口径分档——claude=
+    # 轮末链 UUID、pi=rpc_fork 取下一轮 entryId/末轮 clone 为 NULL、seed=NULL）。
+    # 会话级冗余一份免回溯 run 查询（谱系溯源块渲染数据源）。
+    engine_fork_anchor: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
     )
     # ── 会话形态（2026-09-01-session-group-chat task-01，design §3.1）──
     # 'chat'（默认，存量单聊零回归）| 'group'（群时间线会话）| 'group_member'

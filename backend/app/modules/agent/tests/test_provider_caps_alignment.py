@@ -47,7 +47,10 @@ _FRONTEND_TABLE_PATH = _REPO_ROOT / "frontend" / "src" / "lib" / "provider-caps.
 # true、cursor 无通道 false——claude/codex 取值待 spike 实测后收口）+
 # ql-20260921-005 新增 attachments boolean 键（会话附件链路开通，deliver=disk
 # 落盘 + 路径清单也算：claude/pi/cursor=true、codex=false；multimodal 键语义
-# 自此收窄为多模态块通道，cursor 附件图片经 gate 相与强制落盘）= 15 键。
+# 自此收窄为多模态块通道，cursor 附件图片经 gate 相与强制落盘）+
+# 2026-09-22-session-fork-continuation task-03 新增 sessionFork string 枚举键
+# （D-008 / D-010 会话分叉通道形态：'native' 原生截断 / 'seed' 种子克隆 /
+# 'none' 无通道——dialog 后第二个非 boolean 键）= 16 键。
 EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
     {
         "resume",
@@ -65,6 +68,7 @@ EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
         "compact",
         "thinking_level",
         "steering",
+        "sessionFork",
     }
 )
 
@@ -76,11 +80,13 @@ EXPECTED_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "cursor", "pi
 # TS 表源解析：provider 条目块（`claude: { ... }`）与块内键值对。
 # 值形态两代（R-09：解析器扩展与 caps 键同任务交付，防止 string 枚举键被
 # 静默丢弃后键集合断言哑绿）：
-# - 13 个 boolean 键：true / false 裸字面量；
-# - dialog string 枚举键（task-12 / FR-06）：带引号 'native' / 'marker' / 'none'。
+# - 14 个 boolean 键：true / false 裸字面量；
+# - dialog string 枚举键（task-12 / FR-06）：带引号 'native' / 'marker' / 'none'；
+# - sessionFork string 枚举键（session-fork task-03 / D-008）：带引号
+#   'native' / 'seed' / 'none'（与 dialog 共用字符串值域并集）。
 _TS_PROVIDER_BLOCK_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\{([^{}]*)\}")
 _TS_BOOL_PAIR_RE = re.compile(
-    r"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:(true|false)\b|'(native|marker|none)')"
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:(true|false)\b|'(native|marker|seed|none)')"
 )
 
 
@@ -111,8 +117,9 @@ def _extract_ts_const_object_body(text: str, const_name: str) -> str:
 def _parse_ts_caps_table(path: Path) -> dict[str, dict[str, bool | str]]:
     """解析 TS 表源为 {provider: {key: bool | str}}（手写解析，不引 TS 运行时依赖）。
 
-    boolean 键还原为 bool，dialog string 枚举键（带引号 'native' / 'marker' /
-    'none'）还原为 str（task-12 / FR-06）。
+    boolean 键还原为 bool，string 枚举键（dialog：'native' / 'marker' / 'none'；
+    sessionFork：'native' / 'seed' / 'none'）还原为 str（task-12 / FR-06、
+    session-fork task-03 / D-008）。
     """
     text = _strip_ts_comments(path.read_text(encoding="utf-8"))
     body = _extract_ts_const_object_body(text, "PROVIDER_CAPS")
@@ -155,13 +162,14 @@ def _all_ends() -> dict[str, dict[str, dict[str, bool | str]]]:
     }
 
 
-def test_caps_key_sets_identical_and_are_the_15_contract_keys() -> None:
-    """①三端每个 provider 条目的键集合一致，且恰为契约 15 键（多键少键都失败）。
+def test_caps_key_sets_identical_and_are_the_16_contract_keys() -> None:
+    """①三端每个 provider 条目的键集合一致，且恰为契约 16 键（多键少键都失败）。
 
-    15 键 = 14 个 boolean 键 + dialog string 枚举键（task-12 / FR-06）——任一端
-    漏加 dialog 键即在此失败（R-09：解析器已扩 string 值支持，不会静默丢弃）。
+    16 键 = 14 个 boolean 键 + dialog / sessionFork 两 string 枚举键
+    （task-12 / FR-06、session-fork task-03 / D-008）——任一端漏加枚举键即在
+    此失败（R-09：解析器已扩 string 值支持，不会静默丢弃）。
     """
-    assert len(EXPECTED_CAPS_KEYS) == 15
+    assert len(EXPECTED_CAPS_KEYS) == 16
     for end_name, table in _all_ends().items():
         for provider, caps in table.items():
             assert set(caps) == EXPECTED_CAPS_KEYS, (
@@ -183,8 +191,9 @@ def test_provider_sets_identical() -> None:
 def test_cap_values_identical_per_provider_per_key() -> None:
     """③每个 provider 每键取值三端一致（逐键断言，漂移信息带端名与锚点）。
 
-    == 同时覆盖 bool 与 str 值形态——dialog string 枚举（'native' / 'marker' /
-    'none'）随 EXPECTED_CAPS_KEYS 一并逐端比对，三端值漂移即失败。
+    == 同时覆盖 bool 与 str 值形态——dialog（'native' / 'marker' / 'none'）与
+    sessionFork（'native' / 'seed' / 'none'）两 string 枚举随
+    EXPECTED_CAPS_KEYS 一并逐端比对，三端值漂移即失败。
     """
     ends = _all_ends()
     reference_name = next(iter(ends))
@@ -201,16 +210,20 @@ def test_cap_values_identical_per_provider_per_key() -> None:
                 )
 
 
-def test_unknown_provider_returns_default_deny_with_15_keys() -> None:
-    """④未知 provider 查询：不抛错 + 15 键齐全 + 默认拒绝（FR-06 / R-09）。
+def test_unknown_provider_returns_default_deny_with_16_keys() -> None:
+    """④未知 provider 查询：不抛错 + 16 键齐全 + 默认拒绝（FR-06 / R-09）。
 
-    默认拒绝形态：13 个 boolean 键全 False + dialog string 枚举回退 'none'。
+    默认拒绝形态：14 个 boolean 键全 False + dialog / sessionFork 两 string
+    枚举键缺键兜底回退 'none'。
     """
     caps = get_provider_caps("__definitely_unknown_provider__")
     assert set(caps) == EXPECTED_CAPS_KEYS
-    assert len(caps) == 15
+    assert len(caps) == 16
     assert caps["dialog"] == "none"
-    assert all(value is False for key, value in caps.items() if key != "dialog")
+    assert caps["sessionFork"] == "none"
+    assert all(
+        value is False for key, value in caps.items() if key not in ("dialog", "sessionFork")
+    )
     # 返回新 dict：调用方修改不污染模块级镜像表。
     caps["resume"] = True
     assert PROVIDER_CAPS["claude"]["resume"] is True
@@ -219,3 +232,30 @@ def test_unknown_provider_returns_default_deny_with_15_keys() -> None:
     known = get_provider_caps("codex")
     known["mcp"] = True
     assert PROVIDER_CAPS["codex"]["mcp"] is False
+
+
+def test_session_fork_enum_domain_and_contract_values() -> None:
+    """⑤sessionFork 第 16 键（D-008 / D-010）：值域三值枚举 + 四引擎定值三端一致。
+
+    值域：'native'（原生截断分叉）/ 'seed'（种子克隆档）/ 'none'（无通道）；
+    定值：claude / pi='native'、codex='seed'、cursor='none'——键集合断言只保证
+    键存在，值域与 D-008 定档取值由本测试钉死（任一端漂移即失败）。
+    """
+    expected_values = {
+        "claude": "native",
+        "codex": "seed",
+        "cursor": "none",
+        "pi": "native",
+    }
+    enum_domain = {"native", "seed", "none"}
+    for end_name, table in _all_ends().items():
+        for provider, expected in expected_values.items():
+            actual = table[provider]["sessionFork"]
+            assert actual in enum_domain, (
+                f"sessionFork 值域漂移: {end_name} 的 {provider} 为 {actual}"
+                f"（值域 {sorted(enum_domain)}）"
+            )
+            assert actual == expected, (
+                f"sessionFork 定值漂移: {end_name} 的 {provider} 为 {actual}，"
+                f"期望 {expected}（D-008 / D-010 定档）"
+            )

@@ -5810,6 +5810,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fork Session
+         * @description Fork a new session B from a past run of session A (task-05 / FR-01~04).
+         *
+         *     2026-09-22-session-fork-continuation task-05：在源会话 ``at_run_id`` 轮之后
+         *     分叉——B 经既有 create 链落库（origin='fork'+fork 三件套+快照继承，A 零
+         *     字段改动 D-005）。错误语义（design §接口定义）：404 会话/run 不存在或不
+         *     属于该会话；409 run 进行中；422 caps sessionFork=none / native 档锚点缺失
+         *     （文案提示可退种子档）。校验与 D-012 mode 分派（claude resume_at / pi
+         *     rpc_fork·clone / codex seed）归 service fork.py，本端点仅路由映射。
+         */
+        post: operations["fork_session_api_daemon_sessions__session_id__fork_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/inject": {
         parameters: {
             query?: never;
@@ -12434,6 +12461,12 @@ export interface components {
              * @default 0
              */
             tree_depth: number;
+            /** Fork Of Session Id */
+            fork_of_session_id?: string | null;
+            /** Fork At Run Id */
+            fork_at_run_id?: string | null;
+            /** Engine Fork Anchor */
+            engine_fork_anchor?: string | null;
         };
         /**
          * AgentSessionTaskRead
@@ -23122,6 +23155,65 @@ export interface components {
             tier: "chat" | "full";
         };
         /**
+         * SessionForkLineage
+         * @description ``SessionForkResponse.lineage`` 溯源块（FR-05 前端 lineage-block 数据源）。
+         */
+        SessionForkLineage: {
+            /**
+             * Source Session Id
+             * Format: uuid
+             */
+            source_session_id: string;
+            /** Source Title */
+            source_title: string;
+            /** At Run Seq */
+            at_run_seq: number;
+        };
+        /**
+         * SessionForkRequest
+         * @description POST /api/daemon/sessions/{id}/fork 请求体。
+         *
+         *     ``at_run_id``：分叉锚轮（「分叉自此轮之后」）；``title``：B 会话可选标题
+         *     （strip 后非空且 ≤255，service 层统一出口校验对齐 rename 口径）。
+         */
+        SessionForkRequest: {
+            /**
+             * At Run Id
+             * Format: uuid
+             */
+            at_run_id: string;
+            /** Title */
+            title?: string | null;
+        };
+        /**
+         * SessionForkResponse
+         * @description POST /api/daemon/sessions/{id}/fork 响应（design §接口定义）。
+         *
+         *     ``tier``：'native'（引擎真截断：claude resume_at / pi rpc_fork / pi clone）
+         *     | 'seed'（codex 前情转述，有损）。错误语义：404 会话/run 不存在或不属于
+         *     该会话；409 run 进行中；422 caps sessionFork=none 或 native 档锚点缺失。
+         */
+        SessionForkResponse: {
+            /**
+             * Forked Session Id
+             * Format: uuid
+             */
+            forked_session_id: string;
+            /**
+             * Lease Id
+             * Format: uuid
+             */
+            lease_id: string;
+            /** Run Id */
+            run_id?: string | null;
+            /**
+             * Tier
+             * @enum {string}
+             */
+            tier: "native" | "seed";
+            lineage: components["schemas"]["SessionForkLineage"];
+        };
+        /**
          * SessionInjectRequest
          * @description POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。
          *
@@ -23392,6 +23484,8 @@ export interface components {
             ctx_tokens?: number | null;
             /** Failure Summary */
             failure_summary?: string | null;
+            /** Engine Anchor */
+            engine_anchor?: string | null;
         };
         /**
          * SessionRuntimeRequest
@@ -36634,6 +36728,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fork_session_api_daemon_sessions__session_id__fork_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionForkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionForkResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

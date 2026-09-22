@@ -8,18 +8,22 @@
  *
  * 镜像约定（三端同步，单源 = daemon 侧，2026-09-11-provider-adapter-registry
  * task-04 起手抄镜像退役）：daemon 单源改取值后重跑生成脚本，本文件与 backend
- * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（15 键：
- * 14 个 boolean + dialog string 枚举）与每个 provider 每键取值一致性由
+ * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（16 键：
+ * 14 个 boolean + dialog / sessionFork 两 string 枚举）与每个 provider
+ * 每键取值一致性由
  * backend/app/modules/agent/tests/test_provider_caps_alignment.py 以源文件
  * 读取方式守护（任一端漂移即测试失败）。
  *
  * 取值语义：caps 描述 provider 当前真实能力，14 个 boolean 键缺省 false 默认
  * 拒绝（FR-06 / D-002@v1）；dialog 为 string 枚举键（'native' = 走平台
- * dialog 管道 / 'marker' = 纯前端标记协议 / 'none' = 无通道）；未知 provider
- * 查询返回默认拒绝对象（boolean 键全 false、dialog 取 'none'），不抛错。
+ * dialog 管道 / 'marker' = 纯前端标记协议 / 'none' = 无通道）；sessionFork
+ * 为 string 枚举键（2026-09-22-session-fork-continuation task-03 / D-008：
+ * 'native' = 原生截断分叉 / 'seed' = 种子克隆档 / 'none' = 无通道）；未知
+ * provider 查询返回默认拒绝对象（boolean 键全 false、dialog / sessionFork
+ * 取 'none'），不抛错。
  */
 
-/** provider 能力矩阵（15 键：14 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+/** provider 能力矩阵（16 键：14 个 boolean + dialog / sessionFork 两 string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
@@ -84,6 +88,15 @@ export interface ProviderCaps {
    * 回退 false）。
    */
   steering: boolean;
+  /**
+   * 会话分叉通道形态（第 16 键，2026-09-22-session-fork-continuation task-03 /
+   * D-008 / D-010，string 枚举）：'native' = 原生截断分叉（claude=SDK
+   * resume+resumeSessionAt+forkSession、pi=RPC fork 命令锚 entryId）；
+   * 'seed' = 种子克隆档（codex 无原生截断通道，engine_anchor 恒 NULL）；
+   * 'none' = 无通道（cursor CLI；未知 provider 回退值）；取值依据锚点见
+   * daemon 单源 PROVIDER_CAPS docblock sessionFork 段。
+   */
+  sessionFork: 'native' | 'seed' | 'none';
 }
 
 /**
@@ -107,6 +120,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     compact: true,
     thinking_level: true,
     steering: true,
+    sessionFork: 'native',
   },
   codex: {
     resume: true,
@@ -124,6 +138,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     compact: true,
     thinking_level: true,
     steering: true,
+    sessionFork: 'seed',
   },
   pi: {
     resume: true,
@@ -141,6 +156,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     compact: true,
     thinking_level: true,
     steering: true,
+    sessionFork: 'native',
   },
   cursor: {
     resume: true,
@@ -158,6 +174,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     compact: false,
     thinking_level: false,
     steering: false,
+    sessionFork: 'none',
   },
 };
 
@@ -165,8 +182,8 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
  * 查询 provider 能力；未知 provider 返回默认拒绝对象，不抛错。
  *
  * 返回已知 provider 的表内对象（调用方只读，勿就地修改——表是模块级共享态）；
- * 未知 provider 每次返回新的默认拒绝字面量（boolean 键全 false、dialog 取
- * 'none'，R-09）。
+ * 未知 provider 每次返回新的默认拒绝字面量（boolean 键全 false、dialog /
+ * sessionFork 取 'none'，R-09）。
  */
 export function getProviderCaps(provider: string): ProviderCaps {
   const caps = PROVIDER_CAPS[provider];
@@ -189,6 +206,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     compact: false,
     thinking_level: false,
     steering: false,
+    sessionFork: 'none',
   };
 }
 
