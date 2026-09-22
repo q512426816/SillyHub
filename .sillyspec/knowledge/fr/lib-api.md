@@ -379,3 +379,43 @@
 - 场景：默认场景 — Given 对比 RPC 因 daemon 业务错误返回 502；When daemon_code = workspace_root_unknown / conflict_record_missing；Then 用户可见文案分别为「该工作区尚未被本机认领…」/「冲突记录已失效，请刷新
 全文：.sillyspec/changes/archive/2026-09-09-conflict-root-workspace-scoping/requirements.md#FR-06
 最近确认：28b758edc
+
+## FR-lib-api-041 同 ts 批次逐页可达
+变更：2026-09-16-logs-cursor-tiebreaker
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 单事务写入 ≥HISTORY_PAGE_SIZE(100) 行同 timestamp 的日志批次；When 前端带 (before, before_id) 复合游标向上翻页；Then 每页返回批内 id 严格更小的行，批内全部行经有限页可达（150 行批两页取尽）
+全文：.sillyspec/changes/archive/2026-09-16-logs-cursor-tiebreaker/requirements.md#FR-01
+最近确认：b204034fb
+
+## FR-lib-api-042 边界行零重叠
+变更：2026-09-16-logs-cursor-tiebreaker
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 复合游标（before, before_id）；When 请求下一页；Then 返回行集与已加载行集交集为空（(ts,id) 严格小于游标，`<=` 的单行重叠同时消除）
+全文：.sillyspec/changes/archive/2026-09-16-logs-cursor-tiebreaker/requirements.md#FR-02
+最近确认：b204034fb
+
+## FR-lib-api-043 旧客户端零回归
+变更：2026-09-16-logs-cursor-tiebreaker
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 调用方不传 before_id；When 带 before 请求；Then 过滤行为与现行 `timestamp <= before` 完全一致（回归用例逐字节断言）
+全文：.sillyspec/changes/archive/2026-09-16-logs-cursor-tiebreaker/requirements.md#FR-03
+最近确认：b204034fb
+
+## FR-lib-api-044 轮序派生零影响
+变更：2026-09-16-logs-cursor-tiebreaker
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 本变更部署后；When 前端 logsToTurns 按 run_id 首见序装配轮次；Then 输入行序仍为 run 块序（ORDER BY 零改动），轮序与现状一致（同 ts 批次翻页跨页拆块的场景除外——该场景现状本就不可达，属修复目标）
+全文：.sillyspec/changes/archive/2026-09-16-logs-cursor-tiebreaker/requirements.md#FR-04
+最近确认：b204034fb
