@@ -243,3 +243,18 @@
 锚点：未记录
 最近确认：353eb11b0
 理由：不动表结构——保留 agent_session_id 单列，靠打标修复 + ctx-owner 解析保证正确性；一条日志行只挂一个会话（其 ctx 的当前 owner），同 ctx 多会话时向最近活跃 owner 漂移
+
+## D-003@v3 pi/codex 结果回传定案 ws RPC（send_rpc + registerRpcHandler），砍 SESSION_COMPACT 控制机器
+状态：implemented
+变更：2026-09-14-session-ctx-compact
+锚点：未记录
+最近确认：1aacbb3d9
+理由：复用既有 ws RPC 请求-结果通道：backend 端点 ws_hub.send_rpc(daemon_id, 'session_compact', {session_id}, timeout=15)（backend/app/modules/daemon/ws_hub.py:502-560，DaemonRpcTimeout/Offline/RemoteError 异常齐备）；daemon 侧 registerRpcHandler('session_compact')（sillyhub-daemon/src/daemon.ts:6438-6456 既有四先例）→ sessionManager.compact → CompactResult 即 RPC result。SESSION_COMPACT 控制机器三件套（backend protocol.py/control_commands.py + daemon protocol.ts/daemon.ts 三点接线）全部弃用；「无 schema 迁移 / control-dispatcher 零改动」在 v3 下为真。
+supersedes：D-003@v2（仅回传机制部分，其余维持）
+
+## D-004@v1 反馈呈现=端点响应回执 + 前端通知三分型
+状态：implemented
+变更：2026-09-14-session-ctx-compact
+锚点：未记录
+最近确认：1aacbb3d9
+理由：端点响应承载回执，前端按 provider 分型通知：pi「已压缩：X → 约 Y tokens」（数字来自 RPC response）/ codex「已触发上下文压缩」（受理无数字）/ claude「已发送 /compact（压缩轮运行中）」（流程可见性由会话流中的 /compact 轮本身承载）；失败通知带 error 原文（如 pi "Nothing to compact"）。

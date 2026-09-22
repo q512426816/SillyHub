@@ -215,3 +215,17 @@ supersedes：D-001@v1
 锚点：frontend/src/components/sessions/session-config-bar.tsx
 最近确认：225dd771d
 理由：用户裁决：按引擎过滤。codex 会话只列 codex kind 供应商，pi 只列 pi kind，claude 只列 claude kind。顺手修掉现状「全量展示 + 选错 kind 撞 backend 422（inject_gates.py:556 agent_kind 不匹配）」的坑。
+
+## D-002@v1 触发时机=仅 turn 空闲可压（轮中禁用）
+状态：implemented
+变更：2026-09-14-session-ctx-compact
+锚点：未记录
+最近确认：1aacbb3d9
+理由：用户选「仅空闲时可压」——turn running 时按钮禁用（提示「轮运行中」），turn 空闲后才可压缩；不打断用户正在跑的任务（各引擎原生 /compact 也都是空闲交互语义）。
+
+## D-004@v1 反馈呈现=端点响应回执 + 前端通知三分型
+状态：implemented
+变更：2026-09-14-session-ctx-compact
+锚点：未记录
+最近确认：1aacbb3d9
+理由：端点响应承载回执，前端按 provider 分型通知：pi「已压缩：X → 约 Y tokens」（数字来自 RPC response）/ codex「已触发上下文压缩」（受理无数字）/ claude「已发送 /compact（压缩轮运行中）」（流程可见性由会话流中的 /compact 轮本身承载）；失败通知带 error 原文（如 pi "Nothing to compact"）。

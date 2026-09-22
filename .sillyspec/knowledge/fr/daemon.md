@@ -229,3 +229,75 @@
 - 场景：默认场景 — Given claude / codex 条目 beforeSeq 翻页请求（「加载更早」）；When 任一读取端点处理 zcode 会话对话化视图；Then 分派路径与现状逐字节一致（不走 SQLite 分支） 窗口切片语义与文件 parser 对齐，翻页正常
 全文：.sillyspec/changes/archive/2026-09-10-zcode-session-sqlite-read/requirements.md#FR-04
 最近确认：48240b713
+
+## FR-daemon-026 caps 第 12 键 compact
+变更：2026-09-14-session-ctx-compact
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given ProviderCaps 单源加 compact 键（claude/pi/codex=true、cursor=false、未知回退 false）；When gen 脚本三端生成 + 双守护测试同步；Then 新引擎漏声明即 satisfies 编译红 + 守护测试红；前端按钮门控与 backend 端点校验有真数据源
+全文：.sillyspec/changes/archive/2026-09-14-session-ctx-compact/requirements.md#FR-01
+最近确认：1aacbb3d9
+
+## FR-daemon-027 统一端点双分路
+变更：2026-09-14-session-ctx-compact
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given POST /api/daemon/sessions/{id}/compact（归属+caps+状态三校验）；When claude → 复用 inject 服务发 "/compact"（建 run；DaemonSessionTurnConflict 捕获映射 error）；Then 响应含 run_id/queued；When pi/codex → ws_hub.send_rpc('session_compact', timeout=15)
+全文：.sillyspec/changes/archive/2026-09-14-session-ctx-compact/requirements.md#FR-02
+最近确认：1aacbb3d9
+
+## FR-daemon-028 claude 分路
+变更：2026-09-14-session-ctx-compact
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given caps.compact=true 且会话空闲；When 用户点压缩；Then inject 通道下发 /compact 文本，SDK 处理 slash，压缩轮作为正常 turn 收敛并在会话流可见；daemon 零改动
+全文：.sillyspec/changes/archive/2026-09-14-session-ctx-compact/requirements.md#FR-03
+最近确认：1aacbb3d9
+
+## FR-daemon-029 pi 分路
+变更：2026-09-14-session-ctx-compact
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given session_compact RPC 到达 daemon；When session-manager 守卫通过后 PiRpcDriver.compact() 发 {"type":"compact"} 等 response；Then 回执 tokensBefore/estimatedTokensAfter 进 CompactResult → RPC result → 端点响应 → 前端通知带
+全文：.sillyspec/changes/archive/2026-09-14-session-ctx-compact/requirements.md#FR-04
+最近确认：1aacbb3d9
+
+## FR-daemon-030 codex 分路
+变更：2026-09-14-session-ctx-compact
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 同 FR-04；When CodexAppServerDriver.compact() 经新 id→pending 机制发 thread/compact/start {threadId}；Then 受理（空响应）→ ok=true 无数字；超时/错误如实回传
+全文：.sillyspec/changes/archive/2026-09-14-session-ctx-compact/requirements.md#FR-05
+最近确认：1aacbb3d9
+
+## FR-daemon-031 前端按钮
+变更：2026-09-14-session-ctx-compact
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 环浮层提供 onCompact 且 caps.compact=true；When turn running → 按钮禁用（tooltip 轮运行中）；预会话不渲染；cursor 引擎不渲染 点击 → compactSession() 调端点；Then 三分型成功通知（pi 数字/codex 受理/claude 已发送）或失败通知带 error 原文
+全文：.sillyspec/changes/archive/2026-09-14-session-ctx-compact/requirements.md#FR-06
+最近确认：1aacbb3d9
+
+## FR-daemon-032 结果呈现
+变更：2026-09-14-session-ctx-compact
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 压缩完成回执在端点响应中；Then 前端通知呈现；claude 流可见性由 /compact 轮承载；环分子在压缩后下一次调用 usage 到达自然回落（零改动链）
+全文：.sillyspec/changes/archive/2026-09-14-session-ctx-compact/requirements.md#FR-07
+最近确认：1aacbb3d9
+
+## FR-daemon-033 真机验证
+变更：2026-09-14-session-ctx-compact
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 本机三引擎会话各一轮压缩；Then pi 通知带数字、claude 会话流出现压缩轮、codex 受理通知；三引擎下一轮环回落；R-01/02/03 风险点各有真机结论
+全文：.sillyspec/changes/archive/2026-09-14-session-ctx-compact/requirements.md#FR-08
+最近确认：1aacbb3d9
