@@ -30,7 +30,6 @@ target_files:
   - frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
   - frontend/src/components/sessions/session-list-panel.tsx
   - NEW:frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx
-  - NEW:.sillyspec/changes/2026-09-22-session-fork-continuation/e2e-claude-fork.md
 goal: >
   谱系溯源闭环：B 顶部常驻溯源块+多跳面包屑、点击浮层看原会话（WorkerSessionOverlay 泛化）、列表 origin+fork_of 分组徽标；收口 claude 真机 E2E 验收记录。
 implementation:

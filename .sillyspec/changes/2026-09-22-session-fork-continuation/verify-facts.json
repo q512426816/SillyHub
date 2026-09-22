@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-22-session-fork-continuation",
+  "generatedAt": "2026-09-22T16:33:00.727Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-22-session-fork-continuation",
+      "metrics": {
+        "matches": 3,
+        "skippedFiles": 0,
+        "worktreeHits": 8,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-22-session-fork-continuation",
+      "metrics": {
+        "tasks": 8,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-22-session-fork-continuation",
+      "metrics": {
+        "backendEndpoints": 2263,
+        "frontendCalls": 2
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-22-session-fork-continuation",
+      "metrics": {
+        "deletions": 1,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-22-session-fork-continuation",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-09-22-session-fork-continuation",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-09-22-session-fork-continuation",
+      "metrics": {
+        "checkedFiles": 9,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "同 HEAD（ea64fa270）三端 scoped 汇总测试+类型检查全绿——backend fork 相关 4 测试文件 41 passed；daemon session-fork+provider-registry 20 passed + typecheck 0 错；frontend session-fork-entry+lineage 33 passed + tsc --noEmit 0 错",
+      "command": "cd backend && uv run pytest app/modules/daemon/tests/test_session_fork.py app/modules/daemon/tests/test_engine_anchor.py app/modules/agent/tests/test_session_fork_model.py app/modules/agent/tests/test_provider_caps_alignment.py -q --no-cov && cd ../sillyhub-daemon && pnpm exec vitest run tests/session-fork.test.ts tests/interactive/provider-registry.test.ts && pnpm typecheck && cd ../frontend && pnpm exec vitest run src/components/daemon/__tests__/session-fork-entry.test.tsx src/components/daemon/__tests__/session-fork-lineage.test.tsx && pnpm exec tsc --noEmit",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/stage-reviews/execute-review-2026-09-23-001811/review.json（checklist「scoped 汇总」行，独立 QA 于同 HEAD 实跑）"
+    }
+  ],
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "平台级 claude 分叉 E2E（「不知情」断言+A 全字段不变）",
+        "condition": "启动本机 backend+daemon+frontend 后照 e2e-claude-fork.md §4 八步清单执行（先建 2 轮会话→POST fork 第 1 轮→B 问前轮可答/问后轮不知情→A 快照比对）",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "pi rpc_fork/clone 平台链路真机（分派→预 fork→B 启动全链）",
+        "condition": "平台运行时对 pi 会话走一次分叉（锚点取法与截断语义已由 spike-pi-fork.md 真机实证，本项验平台装配层）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "daemon tests/session-fork.test.ts 一条非致命 teardown 噪音日志（session_manager_stop_failed）",
+        "condition": "后续随手清理（用例本身全绿，P3）",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{session_id}/fork",
+        "rowIdx": 1
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{session_id}/fork",
+        "rowIdx": 1
+      }
+    ]
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/daemon/tests/test_session_fork.py",
+      "sillyhub-daemon/scripts/gen-provider-caps.mjs",
+      "sillyhub-daemon/tests/session-fork.test.ts"
+    ]
+  },
+  "smokeRan": "not-ran",
+  "tests": {
+    "command": "module[frontend,sillyhub-daemon,daemon,agent]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-22T19:53:48.141Z"
+  }
+}

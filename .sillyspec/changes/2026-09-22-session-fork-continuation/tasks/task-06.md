@@ -15,7 +15,6 @@ expects_from:
 allowed_paths:
   - sillyhub-daemon/src/daemon.ts
   - sillyhub-daemon/src/interactive/session-manager/types.ts
-  - sillyhub-daemon/src/interactive/session-manager/index.ts
   - sillyhub-daemon/src/interactive/session-manager/driver-factory.ts
   - sillyhub-daemon/src/interactive/claude-sdk-driver.ts
   - sillyhub-daemon/src/interactive/pi-rpc-driver.ts
@@ -23,7 +22,6 @@ allowed_paths:
 target_files:
   - sillyhub-daemon/src/daemon.ts
   - sillyhub-daemon/src/interactive/session-manager/types.ts
-  - sillyhub-daemon/src/interactive/session-manager/index.ts
   - sillyhub-daemon/src/interactive/session-manager/driver-factory.ts
   - sillyhub-daemon/src/interactive/claude-sdk-driver.ts
   - sillyhub-daemon/src/interactive/pi-rpc-driver.ts

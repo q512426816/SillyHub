@@ -14,8 +14,7 @@ decision_ids: [D-004@v1, D-007@v1]
 allowed_paths:
   - .sillyspec/changes/2026-09-22-session-fork-continuation/spike-pi-fork.md
   - .sillyspec/changes/2026-09-22-session-fork-continuation/decisions.md
-target_files:
-  - NEW:.sillyspec/changes/2026-09-22-session-fork-continuation/spike-pi-fork.md
+target_files: []  # 纯验证任务零代码（spike 产物在主仓 spec 区，不进 worktree diff）
 goal: >
   前置门（R-01/R-02 消化）：真机实测 pi RPC fork 截断语义与 claude resumeSessionAt×forkSession 组合行为，为 task-03 caps 定档与 task-06 driver 实现锁定事实。
 implementation:
