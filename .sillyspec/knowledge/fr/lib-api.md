@@ -214,3 +214,48 @@
 - 场景：默认场景 — Given PPM 项目页点击「发起团队」；When 预会话面板打开；Then 派团队弹层自动打开；项目自动选中（defaultProjectId）+ scopeMode=按项目；自动拉取项目关联工作区按 workspace_id 升序预选
 全文：.sillyspec/changes/archive/2026-08-28-session-ppm-task-binding/requirements.md#FR-06
 最近确认：8397ea766
+
+## FR-lib-api-023 群归档
+变更：2026-09-03-group-chat-archive-delete
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 群主或 workspace admin 打开会话门户，群行可见 已归档的群 已解散（ended_at 非空）但未删除的群；When 点击群行 hover「归档」按钮并在确认 Modal 点「归档」 重复调用归档 群主归档；Then `agent_group_chats.archived_at = now()`，群从默认列表消失，toast 提示 无操作（幂等，行锁内早退），HTTP 204
+全文：.sillyspec/changes/archive/2026-09-03-group-chat-archive-delete/requirements.md#FR-01
+最近确认：3e9c2cdf3
+
+## FR-lib-api-024 群取消归档
+变更：2026-09-03-group-chat-archive-delete
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 已归档的群在「已归档会话」视图中可见（带「已归档」徽标） 未归档的群；When 群主/admin 点击群行 hover「取消归档」并确认 重复调用取消归档；Then `archived_at = NULL`，群回到默认列表，toast 确认，SSE status_changed 无操作（幂等），HTTP 204
+全文：.sillyspec/changes/archive/2026-09-03-group-chat-archive-delete/requirements.md#FR-02
+最近确认：3e9c2cdf3
+
+## FR-lib-api-025 群删除（软删）
+变更：2026-09-03-group-chat-archive-delete
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 活跃群（未解散） 已解散的群 已删除的群 群软删后；When 群主/admin 点击群行 hover「删除」并在确认 Modal 点「删除」 群主/admin 删除 再次删除或归档/取消归档 成员访问群列表/详情/群 SS；Then 先复用 end 收口链（全部 agent 成员影子会话置 ended + 影子队列清理 + 跳过收口直接双置 deleted_at（end_group 幂等早退
+全文：.sillyspec/changes/archive/2026-09-03-group-chat-archive-delete/requirements.md#FR-03
+最近确认：3e9c2cdf3
+
+## FR-lib-api-026 归档视图与列表过滤
+变更：2026-09-03-group-chat-archive-delete
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 会话门户切到「已归档会话」筛选视图 默认视图 已归档群在归档视图中被打开（归档≠解散，群仍可用）；When 群分区渲染 拉取群列表 群面板 presence 刷新；Then 拉取 `GET /group-chats?archived=true` 列表，群行带「已归档」徽标（muted `GET /group-chats` 不传参 →
+全文：.sillyspec/changes/archive/2026-09-03-group-chat-archive-delete/requirements.md#FR-04
+最近确认：3e9c2cdf3
+
+## FR-lib-api-027 权限边界
+变更：2026-09-03-group-chat-archive-delete
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 普通群成员（非群主非 admin） 非群成员；When 调用归档/取消归档/删除端点 调用任一新端点；Then 403「只有群主或工作区管理员可以执行该操作。」 404 不泄露群存在性
+全文：.sillyspec/changes/archive/2026-09-03-group-chat-archive-delete/requirements.md#FR-05
+最近确认：3e9c2cdf3
