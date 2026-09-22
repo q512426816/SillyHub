@@ -71,25 +71,25 @@
 最近确认：b690c91e
 理由：版本与升级状态随 register/heartbeat 心跳上报（仿 pending_update 模式）；手动升级走 WS 即时消息 daemon:sillyspec_update（仿 daemon:self_update，fire-and-forget）；自动定期升级由 daemon 本机定时器执行（默认 1h，忙时推迟）。三套环节均有既有先例，风险最低。
 
-## D-001@v1 : 恒读 SQLite，文件仅作失败兜底
+## D-001@v1 恒读 SQLite，文件仅作失败兜底
 状态：implemented
 变更：2026-09-10-zcode-session-sqlite-read
 锚点：未记录
-最近确认：c0f16019a
+最近确认：20cf7bc46
 理由：恒读 SQLite（文件存在也不读文件）；库读失败（schema 漂移/库损坏/会话不在库/node:sqlite 不可用）才回落文件路径。
 
-## D-005@v1 : 分派插入点在 allowed_roots 守卫之后、registry 之前
+## D-005@v1 分派插入点在 allowed_roots 守卫之后、registry 之前
 状态：implemented
 变更：2026-09-10-zcode-session-sqlite-read
 锚点：未记录
-最近确认：c0f16019a
+最近确认：20cf7bc46
 理由：assertWithinAllowedRoots(path) 守卫先行（安全铁律，分派不得绕过越界检查），守卫通过且 format=zcode 时先走读取器，失败落回 registry→lstat→文件解析现流程。
 
-## D-006@v1 : node:sqlite 生效版本带与类型声明
+## D-006@v1 node:sqlite 生效版本带与类型声明
 状态：implemented
 变更：2026-09-10-zcode-session-sqlite-read
 锚点：未记录
-最近确认：c0f16019a
+最近确认：20cf7bc46
 理由：运行时生效版本 ≥22.13.0 / ≥23.4.0（22.5–22.12、23.0–23.3 带 flag 导入即抛错 → 自动文件回落），engines 不 bump；devDep @types/node bump 至 22.13+ 或本地 .d.ts。
 
 ## D-001@v1 ctx_tokens 派生位置——归一化器源头上报处派生（方案 A），否决消费侧统一派生（方案 B/C）
@@ -154,3 +154,17 @@
 锚点：未记录
 最近确认：f1bdbef95
 理由：用户原话「支持按 workspace 或按 agent_profile 独立配置（独立池或不同 provider）」。探查证实 profile 绑定链路已全通，真缺口=llm_provider schema 锁死 claude + daemon injector REGISTRY 无 pi；补齐后 per-(user, agent_kind=pi) 默认与 profile/workspace(default_agent_profile_id) 两条路都开放，不在本变更里强选一条。
+
+## D-003@v1 隐藏/系统注入消息过滤判据
+状态：implemented
+变更：2026-09-10-zcode-session-sqlite-read
+锚点：未记录
+最近确认：20cf7bc46
+理由：message.data.semantics.uiVisibility=='hidden' || transcriptVisibility=='hidden' || visibility=='model-only' 任一命中即整条跳过；对齐文件 parser 剥 `<system-reminder>` 的既有语义。
+
+## D-004@v1 tool part 单条产 tool_use + tool_result 两段
+状态：implemented
+变更：2026-09-10-zcode-session-sqlite-read
+锚点：未记录
+最近确认：20cf7bc46
+理由：单条 part（data={tool, callID, state:{status, input, output|error, …}}）产两段：tool_use（input 2KB 摘要）+ tool_result（output 4KB 摘要，is_error=status=='error'）；status ∈ running/pending（无 output）只产 tool_use。
