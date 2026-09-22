@@ -170,8 +170,10 @@ agent_sessions 新列（全部可空，零迁移兼容）：
   索引：ix_agent_sessions_fork_of (fork_of_session_id)
 
 agent_runs 新列：
-  engine_anchor        TEXT  NULL   # 该轮末引擎消息锚（claude=末条 chain-entry UUID；
-                                    # 仅 claude 档回填；codex/pi seed 档恒 NULL）
+  engine_anchor        TEXT  NULL   # 轮引擎锚（D-008/010 分档）：claude=轮末 chain-entry UUID
+                                    # （轮终态回填）；pi=该轮首条用户消息 entryId；codex 恒 NULL
+                                    # pi 档 fork 锚=at_run 下一轮 engine_anchor（before），
+                                    # 末轮后分叉走 clone 全量
 ```
 
 ## 兼容策略（brownfield）

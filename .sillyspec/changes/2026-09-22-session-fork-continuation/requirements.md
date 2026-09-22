@@ -81,9 +81,14 @@ When 增第 16 键 sessionFork（枚举 native/seed/none，生成器沿用 dialo
 Then sillyhub-daemon providers.ts 单源 + gen-provider-caps.mjs 三端生成 backend provider_caps.py / frontend provider-caps.ts，alignment 守护测试升 16 键；claude=native、codex=seed、cursor=none、pi=spike 后定；三端取值处对缺键按 none 默认拒绝兜底
 
 ### FR-07: 轮锚点落库
-Given claude 会话每轮消息上行（run_sync）
-When 轮终态提交
-Then AgentRun.engine_anchor 回填该轮末 chain-entry 消息 UUID（仅 claude 档写；codex/pi 恒 NULL）
+Given claude/pi 会话每轮消息上行（run_sync）
+When 轮终态提交（claude）/轮首条用户消息落库（pi）
+Then AgentRun.engine_anchor 回填——claude=该轮末 chain-entry 消息 UUID；pi=该轮首条用户消息 entryId（D-008/010 分档语义）；codex 恒 NULL
+
+#### 场景：pi 档 fork 锚取法
+Given 用户在 pi 会话第 N 轮后发起分叉
+When fork 服务取锚
+Then N 非末轮→取第 N+1 轮 engine_anchor（其用户 entryId）position before；N 为末轮→clone 全量分叉（等价「末轮后分叉」语义）
 
 #### 场景：存量轮无锚点
 Given 迁移前已存在的轮（engine_anchor NULL）

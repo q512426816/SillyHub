@@ -25,13 +25,13 @@ target_files:
   - backend/app/modules/agent/tests/test_provider_caps_alignment.py
   - sillyhub-daemon/tests/interactive/provider-registry.test.ts
 goal: >
-  引擎分叉能力显式化：ProviderCaps 增第 16 键 sessionFork（枚举 native/seed/none，pi 值按 task-02 spike 的 D-008 定），三端单源生成+alignment 守护+缺键 none 兜底。
+  引擎分叉能力显式化：ProviderCaps 增第 16 键 sessionFork（枚举 native/seed/none，定值 claude=native、codex=seed、cursor=none、pi=native——D-008 实测），三端单源生成+alignment 守护+缺键 none 兜底。
 implementation:
-  - sillyhub-daemon/src/interactive/providers.ts（PROVIDER_CAPS 现 15 键、dialog 枚举先例 :327）增 sessionFork 第 16 键：claude=native、codex=seed、cursor=none、pi=D-008 结论
+  - sillyhub-daemon/src/interactive/providers.ts（PROVIDER_CAPS 现 15 键、dialog 枚举先例 :327）增 sessionFork 第 16 键：claude=native、codex=seed、cursor=none、pi=native（D-008@v1 定值）
   - gen-provider-caps.mjs 按既有 dialog 枚举键形态透传 sessionFork 到三端镜像（backend/app/modules/agent/provider_caps.py + frontend/src/lib/provider-caps.ts）+ 取值处缺键按 none 默认拒绝兜底
   - alignment 测试升 16 键：backend/app/modules/agent/tests/test_provider_caps_alignment.py 键数与值域断言；sillyhub-daemon/tests/interactive/provider-registry.test.ts 契约键列表同步
 acceptance:
-  - 三端镜像 sessionFork 键值一致（claude=native/codex=seed/cursor=none/pi=D-008 值）
+  - 三端镜像 sessionFork 键值一致（claude=native/codex=seed/cursor=none/pi=native，D-008 定值）
   - alignment 断言 15→16 键通过
   - 缺键时 get_provider_caps/前端取值均回落 none（不炸不 undefined）
 verify:

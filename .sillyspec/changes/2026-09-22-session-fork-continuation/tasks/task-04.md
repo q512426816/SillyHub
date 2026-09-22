@@ -20,12 +20,12 @@ goal: >
   原生分叉的定位数据面：claude 轮终态提交时把该轮末 chain-entry 消息 UUID 回填 AgentRun.engine_anchor（task-01 新列），供 fork 服务取锚。
 implementation:
   - backend/app/modules/daemon/run_sync/service/submit_commit.py 轮终态收口处（:194-197 session_id 回填点同款语义）从该轮已提交消息中取 claude 末条 chain-entry 消息 UUID 写 run.engine_anchor
-  - 仅 provider=claude 写；codex/pi 路径零改动（列恒 NULL）
-  - 新建 backend/app/modules/daemon/tests/test_engine_anchor.py：claude 轮回填/非 claude 轮不写/空轮不写/重复提交不覆盖（锚点取轮内最新）
+  - 分档回填（D-010）：claude=轮末 chain-entry UUID（轮终态写）；pi=该轮首条用户消息 entryId（user_input 落库时写——entryId 来源=daemon 上报链 metadata，可得性现场实测：可得则实现，不可得则停人裁决 pi 降 seed，禁止自行降档）；codex 路径零改动（列恒 NULL）
+  - 新建 backend/app/modules/daemon/tests/test_engine_anchor.py：claude 轮回填/pi 轮 user entryId 回填/codex 轮不写/空轮不写/重复提交不覆盖（锚点取轮内最新）
 acceptance:
-  - claude 轮终态后 run.engine_anchor=末条 chain-entry UUID
-  - 非 claude 会话与存量路径零变化
-  - 四类场景单测全绿
+  - claude 轮终态后 run.engine_anchor=末条 chain-entry UUID；pi 轮首条用户消息落库后=其 entryId
+  - codex 会话与存量路径零变化
+  - 五类场景单测全绿
 verify:
   - cd backend && uv run pytest app/modules/daemon/tests/test_engine_anchor.py -q --no-cov
   - cd backend && uv run ruff check app/modules/daemon/run_sync/service/submit_commit.py && uv run mypy app --no-error-summary 2>&1 | tail -1

@@ -4,8 +4,8 @@ created_at: 2026-09-22 19:53:00
 ---
 # 任务清单（Tasks）
 
-- [ ] task-01: 数据模型迁移——agent_sessions fork 三列+origin='fork'+agent_runs engine_anchor+索引（model.py+alembic+模型单测）
-- [ ] task-02: 双 spike 定档——pi fork 截断语义实测 + claude resumeSessionAt×forkSession 真机组合验证，结论落 D-008 与 spike-pi-fork.md
+- [x] task-01: 数据模型迁移——agent_sessions fork 三列+origin='fork'+agent_runs engine_anchor+索引（model.py+alembic+模型单测）
+- [x] task-02: 双 spike 定档——pi fork 截断语义实测 + claude resumeSessionAt×forkSession 真机组合验证，结论落 D-008 与 spike-pi-fork.md
 - [ ] task-03: caps 第 16 键 sessionFork——providers.ts 单源+生成器枚举先例扩展+三端镜像刷新+alignment 升 16 键+缺键 none 兜底（depends_on: task-02）
 - [ ] task-04: 轮锚点回填——submit_commit.py claude 轮终态写 AgentRun.engine_anchor+单测（depends_on: task-01）
 - [ ] task-05: backend fork 服务与契约——fork.py（校验/native·seed 分派/种子体积帽/快照继承）+POST fork 端点+DTO+SessionRead 透出+placement metadata+claim 白名单+gen:types+pytest（depends_on: task-01, task-03）

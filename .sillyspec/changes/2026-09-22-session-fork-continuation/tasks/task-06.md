@@ -35,7 +35,7 @@ implementation:
   - session-manager/index.ts 建会话路径把两键并入 driverOpts（driverOpts.resume 旁，:1050-1054 同款）
   - driver-factory.ts 为 fork 参数建独立转发分支——不复用嵌在 systemPrompt 热切换守卫内的既有 forkSession 转发点（:245-260，R-07 解耦要求）
   - claude-sdk-driver.ts options 增 resumeSessionAt/forkSession（forkSession 生产先例 :476-479；resumeSessionAt 锚点语义按 task-02 spike D-008 结论）
-  - （条件）pi-rpc-driver.ts：仅 D-008=pi native 时接 fork 启动路径；seed 档则本文件零改动
+  - （确认实装，D-008 pi=native）pi-rpc-driver.ts：pi fork 走活 RPC 会话发 fork 命令（{type:"fork", entryId}，createBranchedSession 语义）+ 该轮首条用户消息 entryId 落库上报（engine_anchor 数据源；锚取法 D-010：at_run 下一轮锚 before/末轮 clone）
   - 新建 sillyhub-daemon/tests/session-fork.test.ts：execPayload 解析/Input 增键/driverOpts 组装/claude options 透传断言
 acceptance:
   - fork 两键从 execPayload 到 claude SDK options 全链可见（单测逐跳断言）
@@ -46,7 +46,8 @@ verify:
   - cd sillyhub-daemon && pnpm typecheck
 constraints:
   - 不新增 WS 协议消息类型（复用 lease 认领链）
-  - pi 分支严格以 D-008 结论为门，spike=seed 则不写 pi 原生代码
+  - claude driver 禁传 resumeDropsTurn（含 undefined——序列化 null 硬崩，D-008）；后台 job worker lane 禁用截断参数对
+  - pi 分支按 D-008 native 定值确认实装（活 RPC fork 命令路径）
   - 禁跑全量测试
 ---
 

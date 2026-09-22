@@ -90,3 +90,40 @@ change: 2026-09-22-session-fork-continuation
 - evidence: 用户回答（2026-09-22 方案选择轮，AskUserQuestion）；pi RPC fork 命令线索 sillyhub-daemon/src/interactive/pi-rpc-driver.ts:780-782（注释「平台明确未接」）；claude 侧先例 sillyhub-daemon/src/interactive/claude-sdk-driver.ts:476-479（forkSession 生产使用）
 - 故障面: pi spike 失败退种子档（预期内降级）；pi fork 若实为「整文件分叉无截断」而误标原生档 → 分叉点语义错误，必须以 spike 断言截断行为定档
 - 退役判据: codex 后续版本提供任意点恢复 API 时升原生档，退役种子链路
+
+## D-009@v1: 执行期裁决——task-01 连带更新两个既有字段全集守卫测试
+- type: risk
+- priority: P2
+- status: accepted
+- source: code
+- question: task-01 卡面 allowed_paths 只含 model.py/迁移/新测试，但既有 test_agent_session_model.py（len==30 全集断言）与 test_mission_session_id.py:245（字段集合相等）加列必红——改还是不改？
+- answer: 子代理按 CLAUDE.md 规则 8 与两文件历代加列同步惯例，连带维护性更新并随卡提交（各 +3~7 行守卫清单追加）；属 plan 期 related_tests 漏声明的连带测试债，非越权扩功能。
+- normalized_requirement: 后续加列类任务 plan 期必须排查字段全集守卫测试并声明 related_tests；本次两文件已入 task-01 review changedFiles 披露。
+- impacts: [task-01]
+- evidence: backend/app/modules/agent/tests/test_agent_session_model.py（len 断言）；backend/app/modules/agent/tests/test_mission_session_id.py:245；commit c3b0da10f（worktree 分支 sillyspec/2026-09-22-session-fork-continuation）
+
+## D-008@v1: 双 spike 定档——pi 档位与 claude 锚点结论
+- type: architecture
+- priority: P0
+- status: accepted
+- source: code
+- question: pi 分叉走原生还是种子档？claude resumeSessionAt 锚点取什么消息？
+- answer: 实测 pi=native（判据：RPC fork 命令以用户消息 entryId 为锚实测截断成立——fork 后 get_messages 6→2、新会话探针「name=Alice; code=none; color=none」不知截去轮、原会话文件零改动；截断唯一入口是 RPC fork 命令，CLI --fork 旗标为全量复制）；claude 锚点=轮末最后一个 chain-entry 消息 UUID（普通轮=轮末 SDKAssistantMessage.uuid，resume+resumeSessionAt+forkSession 实机断言知前2轮不知第3轮、transcript 物理截断；end-turn tool 轮/中断轮细则按 sdk.d.ts 归纳标待实机确认）；resumeDropsTurn 守卫=CLI 2.1.216 不支持 --resume-drops-turn（真 UUID 亦 unknown option 硬崩 exit 1、query() reject），SDK 0.3.247 类型已声明——守卫不可启用，省略即官方明示的未校验截断（截断语义不受影响），v1 driver 禁传该参数
+- normalized_requirement: pi caps sessionFork=native（锚=第 N+1 轮用户消息 entryId、末轮后分叉走 clone 全量，驱动层需落库 entryId 并经活 RPC 会话发 fork 命令）；claude engine_anchor 回填=轮末 chain-entry 消息 UUID（普通轮取末 assistant uuid）；FR-07 需从「codex/pi 恒 NULL」修订为「codex 恒 NULL、pi=用户消息 entryId」；claude driver 组合参数面=resume+resumeSessionAt+forkSession 三件（禁传 resumeDropsTurn，含 undefined——会序列化成 null 硬崩）；claude 后台 job worker lane 禁用此对参数（该 lane 静默忽略截断）
+- impacts: [FR-04, FR-07]
+- evidence: spike-pi-fork.md（本目录）；SDK 实装 0.3.247（sdk.d.ts:723/728-733 forkSession、:1551 Options.forkSession、:1892 resumeSessionAt、:1943 resumeDropsTurn、:1927-1932 PRINT/HEADLESS lane 限制）；claude.exe 2.1.216（~/.local/bin，daemon 生产解析路径）实测；pi 0.81.1（rpc.md:613-639 fork 命令、rpc-types.d.ts:105、agent-session-runtime.js:171-247、session-manager.js:1077+ createBranchedSession、main.js:195-206 CLI --fork=全量）
+- 故障面: pi 会话上游 API 错误被静默吞成空 assistant 轮（无错误事件，daemon 侧不浮出）；锚点取「末 assistant uuid」遇 end-turn tool 轮/中断轮时按细则应取轮末最后条目，取错会触发守卫拒绝或截断错位（守卫当前不可用则静默错位）；claude CLI 后续升级支持 --resume-drops-turn 前，任何传参尝试都是进程级硬崩
+- 退役判据: claude CLI 升级支持 --resume-drops-turn 后启用守卫并补校验拒绝路径实测；pi 若大版本改 fork 锚语义须重跑本 spike
+
+## D-010@v1: 执行期裁决——D-008 pi=native 的规格落实（FR-07 修订+卡片定值）
+- type: architecture
+- priority: P0
+- status: accepted
+- source: design-grill
+- question: spike 定档 pi=native 后，FR-07「codex/pi 恒 NULL」与 task-03/04/06 卡面的「pi 待定/claude-only」如何落实？
+- answer: ①caps 定值：pi sessionFork=native（task-03 直接落值，不再待定）；②engine_anchor 语义分档——claude=该轮末 chain-entry UUID（轮终态回填，task-04 原案）；pi=该轮首条用户消息 entryId（daemon 上报链落库）；pi 档 fork 语义=「分叉在第 N 轮后」→ 取第 N+1 轮 engine_anchor 为锚 position before，N 为末轮则走 clone 全量分叉；codex 恒 NULL；③task-06 claude driver 禁传 resumeDropsTurn（undefined 序列化 null 硬崩）+后台 job lane 禁用截断参数对；pi 分支确认实装（活 RPC 会话发 fork 命令）。
+- normalized_requirement: requirements FR-07 与 design 数据模型/兼容策略的 engine_anchor 注释按分档语义修订；task-03 卡 pi=native；task-04 卡增 pi 回填分支（entryId 上报链可得性由实现实测，不可得则停人裁决 pi 降 seed——破坏性不自行降）；task-06 卡增守卫禁传与 pi 实装确认。
+- impacts: [FR-04, FR-07, task-03, task-04, task-06]
+- evidence: D-008@v1（spike-pi-fork.md 实测）；decisions.md 本文件
+- 故障面: pi entryId 若不在既有上报链，需 daemon 侧增报字段（task-06 范围内），漏报则 pi 档 fork 拿不到锚
+- 退役判据: 同 D-008
