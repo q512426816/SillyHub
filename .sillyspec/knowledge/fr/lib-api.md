@@ -259,3 +259,69 @@
 - 场景：默认场景 — Given 普通群成员（非群主非 admin） 非群成员；When 调用归档/取消归档/删除端点 调用任一新端点；Then 403「只有群主或工作区管理员可以执行该操作。」 404 不泄露群存在性
 全文：.sillyspec/changes/archive/2026-09-03-group-chat-archive-delete/requirements.md#FR-05
 最近确认：3e9c2cdf3
+
+## FR-lib-api-028 会话置顶（分组内）
+变更：2026-09-07-session-pin-rename-scheduled-send
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given 属主已登录且会话可见（未删除） 会话已置顶 会话不存在或非属主；When 调用 `PATCH /api/daemon/sessions/{id}/pin` 再次调用 pin 调用 pin；Then `pinned_at=now` 落库，列表排序变为 `(pinned_at IS NULL) ASC, coalesce(last_active_at, cre
+全文：.sillyspec/changes/archive/2026-09-07-session-pin-rename-scheduled-send/requirements.md#FR-01
+最近确认：35f3d6528
+
+## FR-lib-api-029 取消置顶
+变更：2026-09-07-session-pin-rename-scheduled-send
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 会话已置顶 会话未置顶；When 调用 `PATCH /api/daemon/sessions/{id}/unpin` 再次调用 unpin；Then `pinned_at` 置 NULL，会话回到分组内最近活跃序；SSE 广播同 FR-01 幂等无操作，204
+全文：.sillyspec/changes/archive/2026-09-07-session-pin-rename-scheduled-send/requirements.md#FR-02
+最近确认：35f3d6528
+
+## FR-lib-api-030 会话重命名
+变更：2026-09-07-session-pin-rename-scheduled-send
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 属主已登录 title strip 后为空或超过 255 字符；When 调用 `PATCH /api/daemon/sessions/{id}/title`，body `{"title": "新名字"}` 调用；Then `title` 列写入 strip 后值；列表标题派生逻辑（title 优先、回退首条 user_input）使其立即生效；SSE 广播 `status_cha
+全文：.sillyspec/changes/archive/2026-09-07-session-pin-rename-scheduled-send/requirements.md#FR-03
+最近确认：35f3d6528
+
+## FR-lib-api-031 定时消息创建/列表/取消（一次性）
+变更：2026-09-07-session-pin-rename-scheduled-send
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：默认场景 — Given 会话属主已登录、会话非终态 dispatch_at 早于 now+60s，或 prompt 与附件全空，或会话已终态（ended/failed）/已软删 会话有；When 调用 `POST /api/daemon/sessions/{id}/scheduled`，body `{prompt, dispatch_at, attach；Then 落库一行 status=pending（快照字段原样保存，sender_user_id=当前用户），响应 201 + 完整条目；仅一次性，到点派发后不重复 42
+全文：.sillyspec/changes/archive/2026-09-07-session-pin-rename-scheduled-send/requirements.md#FR-04
+最近确认：35f3d6528
+
+## FR-lib-api-032 到点自动派发（sweeper）
+变更：2026-09-07-session-pin-rename-scheduled-send
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-003@v1
+场景正文：
+- 场景：默认场景 — Given 存在 status=pending 且 dispatch_at ≤ now 的条目 到点时会话正忙（有活跃 run） 到点时会话已终态或已软删 到点时会话正忙且；When sweeper 周期（30s）到达 sweeper 派发 sweeper 派发 sweeper 派发 sweeper 处理 sweeper 启动后首轮；Then 行锁复核 pending 后调 `inject_session_as_service(prompt=…, queue_when_busy=True, queue
+全文：.sillyspec/changes/archive/2026-09-07-session-pin-rename-scheduled-send/requirements.md#FR-05
+最近确认：35f3d6528
+
+## FR-lib-api-033 多端 SSE 同步
+变更：2026-09-07-session-pin-rename-scheduled-send
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 用户在两个浏览器标签打开会话门户；When 一端置顶/取消置顶/重命名；Then 另一端经 `agent_sessions:changed` SSE 事件秒级刷新列表（复用 `publish_sessions_changed`，事件 reas
+全文：.sillyspec/changes/archive/2026-09-07-session-pin-rename-scheduled-send/requirements.md#FR-06
+最近确认：35f3d6528
+
+## FR-lib-api-034 兼容与回归
+变更：2026-09-07-session-pin-rename-scheduled-send
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 存量数据（无 pinned_at、无定时消息）；When 升级后首次请求；Then 列表排序与响应行为与升级前一致（pinned_at 恒 NULL 时谓词恒真）；`AgentSessionRead` 仅新增 `pinned_at` 字段，旧前
+全文：.sillyspec/changes/archive/2026-09-07-session-pin-rename-scheduled-send/requirements.md#FR-07
+最近确认：35f3d6528

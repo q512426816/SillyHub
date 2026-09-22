@@ -187,3 +187,24 @@
 锚点：decisions.md D-001/D-004/D-007
 最近确认：53c67e02a
 理由：方案A——前端适配器把 NormalizedLogMessage[] 映射为 SessionTurnView 喂 TurnTimeline 真组件；daemon zcode 解析器补 usage/turnId/model/累计 + 新增 claude-code、cursor-agent 解析器与 cursor-agent 扫描上报；平台 messages schema 加可选字段 + gen:types；平台库零表结构改动，按需现读
+
+## D-001@v1 定时发送的实现方案
+状态：implemented
+变更：2026-09-07-session-pin-rename-scheduled-send
+锚点：未记录
+最近确认：35f3d6528
+理由：**方案 B：新建 `agent_session_scheduled_messages` 表 + 独立 sweeper 常驻协程**。到点扫描 due 条目，逐条复用 `inject_session_as_service`（忙轮自动入 `agent_session_queued_messages` 既有队列），单条状态 pending → dispatched / cancelled / failed，失败隔离。
+
+## D-003@v1 定时到点时队列满员的处理
+状态：implemented
+变更：2026-09-07-session-pin-rename-scheduled-send
+锚点：未记录
+最近确认：35f3d6528
+理由：**置 failed 并落 error_code=queue_full**（不盲发不丢弃，失败原因用户可见，可取消重建）。不选满员自动延后重试。
+
+## D-001@v1 根治方案选 A——全链强制 workspace_id + daemon 映射查根
+状态：implemented
+变更：2026-09-09-conflict-root-workspace-scoping
+锚点：未记录
+最近确认：35f3d6528
+理由：**方案 A**。对比 RPC `sillyspec_conflict_snapshot` 与裁决指令 `sillyspec_resolve` 全链（REST 请求体 → WS payload → daemon 消息处理 → 前端弹窗下传）强制携带 `workspace_id`；daemon 用 `_sillyspecStatusRoots.get(workspaceId)` 解析根，**映射未命中不得回退单槽位**，抛 RpcError `workspace_root_unknown`（提示该工作区尚未被本机会话认领）；无 workspace_id 的旧调用形态保留单槽位 legacy 语义。辅防：无 workspaceId 的 claim 不再覆盖单槽位。与根因文档 `docs/sillyspec/conflict-compare-wrong-status-root.md` 已定稿口径一致。
