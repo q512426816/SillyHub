@@ -6,7 +6,7 @@ author: 'qinyi'
 generated_by: sillyspec-taskcard
 created_at: 2026-09-22 20:33:49
 priority: P0
-depends_on: ['task-01']
+depends_on: ['task-01', 'task-06']
 blocks: []
 requirement_ids: [FR-07]
 decision_ids: [D-003@v1]
@@ -19,9 +19,9 @@ target_files:
 goal: >
   原生分叉的定位数据面：claude 轮终态提交时把该轮末 chain-entry 消息 UUID 回填 AgentRun.engine_anchor（task-01 新列），供 fork 服务取锚。
 implementation:
-  - backend/app/modules/daemon/run_sync/service/submit_commit.py 轮终态收口处（:194-197 session_id 回填点同款语义）从该轮已提交消息中取 claude 末条 chain-entry 消息 UUID 写 run.engine_anchor
-  - 分档回填（D-010）：claude=轮末 chain-entry UUID（轮终态写）；pi=该轮首条用户消息 entryId（user_input 落库时写——entryId 来源=daemon 上报链 metadata，可得性现场实测：可得则实现，不可得则停人裁决 pi 降 seed，禁止自行降档）；codex 路径零改动（列恒 NULL）
-  - 新建 backend/app/modules/daemon/tests/test_engine_anchor.py：claude 轮回填/pi 轮 user entryId 回填/codex 轮不写/空轮不写/重复提交不覆盖（锚点取轮内最新）
+  - 消费端实现（D-011：锚点数据源=task-06 driver 补挂的消息级 metadata.engineAnchor，AgentRunLog.metadata_ 已持久）：backend/app/modules/daemon/run_sync/service/submit_commit.py 轮终态收口处（:194-197 session_id 回填点同款语义）从该轮已落库消息取锚——claude=末条 assistant 消息 metadata['engineAnchor']（链 UUID）；pi=首条 user_input 消息 metadata['engineAnchor']（entryId）；写 run.engine_anchor
+  - 分档回填（D-010/D-011）：claude 轮终态写轮末锚；pi 轮写轮首锚；codex 路径零改动（列恒 NULL）；消息无 engineAnchor 键时该轮不写（NULL=入口灰，不伪造 msg_xxx 类错值）
+  - 新建 backend/app/modules/daemon/tests/test_engine_anchor.py：claude 轮回填/pi 轮回填/codex 轮不写/空轮不写/无 metadata 键不写/重复提交不覆盖（锚点取轮内最新）
 acceptance:
   - claude 轮终态后 run.engine_anchor=末条 chain-entry UUID；pi 轮首条用户消息落库后=其 entryId
   - codex 会话与存量路径零变化

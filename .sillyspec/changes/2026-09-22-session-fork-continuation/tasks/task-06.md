@@ -35,7 +35,8 @@ implementation:
   - session-manager/index.ts 建会话路径把两键并入 driverOpts（driverOpts.resume 旁，:1050-1054 同款）
   - driver-factory.ts 为 fork 参数建独立转发分支——不复用嵌在 systemPrompt 热切换守卫内的既有 forkSession 转发点（:245-260，R-07 解耦要求）
   - claude-sdk-driver.ts options 增 resumeSessionAt/forkSession（forkSession 生产先例 :476-479；resumeSessionAt 锚点语义按 task-02 spike D-008 结论）
-  - （确认实装，D-008 pi=native）pi-rpc-driver.ts：pi fork 走活 RPC 会话发 fork 命令（{type:"fork", entryId}，createBranchedSession 语义）+ 该轮首条用户消息 entryId 落库上报（engine_anchor 数据源；锚取法 D-010：at_run 下一轮锚 before/末轮 clone）
+  - （确认实装，D-008 pi=native）pi-rpc-driver.ts：pi fork 走活 RPC 会话发 fork 命令（{type:"fork", entryId}，createBranchedSession 语义）+ 用户消息 entryId 补挂：driver 层在归一化产物上把 entryId 写入用户消息 AgentEvent.metadata['engineAnchor']（D-011——pi-events 归一化层丢弃 entryId，driver 持 raw 视角可补挂；不碰 pi-events.ts/event-wire.ts 契约）
+  - （D-011 新增）claude-sdk-driver.ts 锚点补挂：consume() 在 normalizeMessage 产物上把 raw record 顶层 uuid 写入 assistant 消息 AgentEvent.metadata['engineAnchor']（claude-events.ts 只读 message.id，链 UUID 在 driver 层才可见；resumeSessionAt 只收链 UUID 不收 msg_xxx——错值比 NULL 糟，D-008）
   - 新建 sillyhub-daemon/tests/session-fork.test.ts：execPayload 解析/Input 增键/driverOpts 组装/claude options 透传断言
 acceptance:
   - fork 两键从 execPayload 到 claude SDK options 全链可见（单测逐跳断言）

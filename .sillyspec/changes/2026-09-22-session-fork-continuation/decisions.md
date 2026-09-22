@@ -127,3 +127,16 @@ change: 2026-09-22-session-fork-continuation
 - evidence: D-008@v1（spike-pi-fork.md 实测）；decisions.md 本文件
 - 故障面: pi entryId 若不在既有上报链，需 daemon 侧增报字段（task-06 范围内），漏报则 pi 档 fork 拿不到锚
 - 退役判据: 同 D-008
+
+## D-011@v1: 执行期裁决——锚点数据源改走消息级 metadata 通道，task-04 依赖反转挪 W5
+- type: architecture
+- priority: P0
+- status: accepted
+- source: design-grill
+- question: task-04 停人实测：pi entryId 与 claude chain-entry uuid 均不在 daemon→backend 上报链（pi-events.ts:245-249 生命周期事件零 IR 产出；claude-events.ts:431-463 只读 message.id 拼 segmentId 从不读顶层 uuid，链内 msg_xxx 与 resumeSessionAt 要求的链 UUID 不同值域）——锚点从哪来？
+- answer: 走消息级 metadata 通道：task-06 两个 driver 在归一化产物上补挂引擎原生锚进 AgentEvent.metadata 固定键 engineAnchor（claude=record 顶层 uuid；pi=用户消息 entryId），不碰 event-wire 平铺契约（metadata 键现成，event-wire.ts:81-116）不碰 claude-events/pi-events（driver 层持有 raw+归一化双视角，均在 task-06 allowed_paths 内）；backend 侧 AgentRunLog.metadata_ 列现成持久。task-04 改为消费端：从该轮已落库消息 metadata.engineAnchor 取值回填 AgentRun.engine_anchor（claude=轮末 assistant 消息；pi=轮首 user 消息）。task-04 因此增依赖 task-06、从 W2 挪 W5（与 task-08 同波，文件正交）；不降档、不推翻 D-008（正是落实其锚值语义）。
+- normalized_requirement: metadata 键名定 engineAnchor（camel，daemon 侧惯例）；task-06 卡增两 driver 补挂职责与单测；task-04 卡改消费端实现+depends_on [task-01, task-06]+W5；plan.md W2/W5 段与关键路径同步。
+- impacts: [FR-07, task-04, task-06]
+- evidence: task-04 停人回传（pi-events.ts:233-249/event-wire.ts:81-116/claude-events.ts:431-463/sdk.d.ts:3086-3094 证据链）；backend/app/modules/agent/model.py AgentRunLog metadata_ 列
+- 故障面: driver 漏挂或 backend 漏读该键→engine_anchor 恒 NULL→该轮入口灰（R-05 既有降级面，不炸链路）
+- 退役判据: 引擎侧原生提供可截断锚的上报 API 时收敛为单一来源

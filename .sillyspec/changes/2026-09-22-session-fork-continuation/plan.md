@@ -12,7 +12,6 @@ plan_level: full
 
 ## Wave 2（依赖 Wave 1）
 - task-03
-- task-04
 
 ## Wave 3（依赖 Wave 2）
 - task-05
@@ -22,6 +21,7 @@ plan_level: full
 - task-07
 
 ## Wave 5（依赖 Wave 4）
+- task-04
 - task-08
 
 ## 任务总表
@@ -30,14 +30,14 @@ plan_level: full
 | task-01 | 数据模型迁移 | W1 | P0 | — | FR-02, FR-07 | model.py fork 三列+origin='fork' 约束（不写 parent/tree_depth）+engine_anchor+索引；alembic 迁移；模型单测 |
 | task-02 | 双 spike 定档 | W1 | P0 | — | D-004@v1, D-007@v1, R-01, R-02 | pi RPC fork/switch_session 截断语义实测；claude resumeSessionAt×forkSession 真机（含 resumeDropsTurn 守卫与错误浮出路径）；结论落 spike-pi-fork.md + D-008 |
 | task-03 | caps 第 16 键 | W2 | P0 | task-02 | FR-06 | providers.ts sessionFork 枚举键（pi 值按 spike 定）+gen-provider-caps.mjs（dialog 枚举先例扩展）+三端镜像+alignment 升 16 键+缺键按 none 兜底 |
-| task-04 | 轮锚点回填 | W2 | P1 | task-01 | FR-07 | submit_commit.py claude 轮终态回填 engine_anchor（session_id 回填点同款语义）；codex/pi 恒 NULL；单测锁回填点 |
+| task-04 | 轮锚点回填 | W5 | P1 | task-01, task-06 | FR-07 | 消费端实现（D-011：数据源=task-06 driver 补挂的消息级 metadata.engineAnchor）：submit_commit.py 轮终态取该轮已落库消息锚——claude=末条 assistant 链 UUID、pi=首条 user entryId，写 AgentRun.engine_anchor；无键不写不伪造；六类场景单测 |
 | task-05 | backend fork 服务与契约 | W3 | P0 | task-01, task-03 | FR-01, FR-02, FR-03, FR-04 | fork.py（归属/终态/档位/锚点四重校验+native·seed 分派+build_seed_prompt 24K 帽+快照继承+fork 记录落库）+create.py 增 fork 参数组+service/__init__.py re-export+端点+DTO+SessionRead 透出+placement.py 写 metadata+daemon/lease/context.py:459 白名单透传两键+gen:types+pytest（含 A 零字段改动断言） |
 | task-06 | daemon fork 透传 | W4 | P0 | task-05 | FR-03, FR-04 | daemon.ts execPayload 解析+CreateSessionInput 增 resumeAtUuid/forkSession+driverOpts 组装+claude-sdk-driver options（forkSession 独立转发分支，R-07 解耦 systemPrompt 守卫）+（pi spike 成才接）pi driver fork 启动路径+单测 |
 | task-07 | 前端分叉发起 | W4 | P1 | task-05 | FR-01, FR-04 | sessions.ts forkSession 封装+手写镜像补齐+轮头「从此分叉」入口（caps≠none/终态轮/native 锚点缺失灰三重门控）+fork-confirm-modal 档位语义标注+组件测试 |
 | task-08 | 谱系溯源 UI + E2E | W5 | P1 | task-06, task-07 | FR-02, FR-05 | lineage-block 溯源块+多跳面包屑+worker-session-overlay 标题参数化+「已分叉」状态条+列表 origin+fork_of 分组徽标+page/dialog 双挂载+组件测试+claude 真机 E2E（B 不知分叉点后内容）记录入变更目录 |
 
 ## 关键路径
-task-01 → task-03 → task-05 → task-06 → task-08（五 Wave 主链；task-02 spike 是 task-03 前置门，task-04 旁路汇入 task-05，task-07 与 task-06 并行汇入 task-08）
+task-01 → task-03 → task-05 → task-06 → task-04/task-08（D-011 后：task-04 依赖 task-06 的 metadata 补挂，与 task-08 同汇于 W5；task-02 spike 是 task-03 前置门，task-07 与 task-06 并行）
 
 ## 全局硬约束（从 design.md 抄录，绑定所有 task）
 - fork 会话**不写 parent_session_id（恒 NULL）、tree_depth 恒 0**——谱系由 fork_of_session_id 单向链表达，分身树语义不混用；列表分叉组按 origin+fork_of 判定，分身组仍按 parent_session_id 判定。
