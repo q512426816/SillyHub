@@ -322,3 +322,43 @@
 - 场景：默认场景 — Given 三引擎会话；When 各创建选档+查询+切换；Then 档位生效（真机回执记 QUICKLOG；spike-01 codex 形状/spike-02 claude applyFlagSettings）
 全文：.sillyspec/changes/archive/2026-09-14-session-thinking-level/requirements.md#FR-07
 最近确认：28915f71b
+
+## FR-interactive-037 后台锚点与守卫放行
+变更：2026-09-15-background-task-permission-lockout
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 会话主轮收尾（`onResult`）且后台任务注册表非空 注册表最后一个任务终态注销（task_notification） 新 inject 到达（后台任务仍在；When 该会话再无新 inject，后台子代理发起写类工具调用进入 `canUseTool` 注销后注册表清空且 `state.status==='active' &&；Then `currentRunId` 保留为后台锚点（status=active），`writeChannelGuardDeny` 经 锚点被清除，守卫恢复 fail-
+全文：.sillyspec/changes/archive/2026-09-15-background-task-permission-lockout/requirements.md#FR-01
+最近确认：e21bf19cc
+
+## FR-interactive-038 background_task 标记与后端受理放宽 + 有界拒收
+变更：2026-09-15-background-task-permission-lockout
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 后台锚点态（`status!=='running' && 注册表非空`） backend 收到 `background_task=true` 的请求 backe；When 4 处可达 register 调用点（默认普通审批 :524 / AskUserQuestion 拦截 :362 / 校验（session 存在/runtime；Then payload 携带 `background_task: true`（主轮进行中恒 false；2 处不可达路径 active-turn 与 run 匹配校验替
+全文：.sillyspec/changes/archive/2026-09-15-background-task-permission-lockout/requirements.md#FR-02
+最近确认：e21bf19cc
+
+## FR-interactive-039 守卫/拒收 deny 带稳定平台故障码
+变更：2026-09-15-background-task-permission-lockout
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 守卫残留 deny（`writeChannelGuardDeny` 两处 message）或 backend 拒收 deny；When deny 文案生成；Then message 以 `PLATFORM_NO_RUNNING_TURN:`（守卫）/ `PLATFORM_PERMISSION_DROPPED:`
+全文：.sillyspec/changes/archive/2026-09-15-background-task-permission-lockout/requirements.md#FR-03
+最近确认：e21bf19cc
+
+## FR-interactive-040 重启终态化补错误码 + 用量归属标注
+变更：2026-09-15-background-task-permission-lockout
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given backend 重启清理终态化在跑 run run 收口上报用量时该会话注册表非空；When 标 failed 上报 run result；Then `error_code='SERVICE_RESTART_INTERRUPTED'` + 向正在收口的 runId 追加一条 stdout 日志行
+全文：.sillyspec/changes/archive/2026-09-15-background-task-permission-lockout/requirements.md#FR-04
+最近确认：e21bf19cc
