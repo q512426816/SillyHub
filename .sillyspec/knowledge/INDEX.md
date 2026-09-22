@@ -102,6 +102,8 @@
 - auth|decision|决策 → [decisions/auth.md](decisions/auth.md)
 - NEW-notification|decision|决策 → [decisions/NEW-notification.md](decisions/NEW-notification.md)
 - workspace|decision|决策 → [decisions/workspace.md](decisions/workspace.md)
+- admin|decision|决策 → [decisions/admin.md](decisions/admin.md)
+- frontend_lib|decision|决策 → [decisions/frontend_lib.md](decisions/frontend_lib.md)
 
 ## FR 需求索引
 - host-fs-handler|FR|需求|承接 → [fr/host-fs-handler.md](fr/host-fs-handler.md)
@@ -135,3 +137,7 @@
 - types|FR|需求|承接 → [fr/types.md](fr/types.md)
 - auto-frontend|frontend|FR|需求|承接 → [fr/auto-frontend.md](fr/auto-frontend.md)
 - auto-sillyhub-daemon|sillyhub-daemon|FR|需求|承接 → [fr/auto-sillyhub-daemon.md](fr/auto-sillyhub-daemon.md)
+- auto-backend|backend|FR|需求|承接 → [fr/auto-backend.md](fr/auto-backend.md)
+- spec-sync|FR|需求|承接 → [fr/spec-sync.md](fr/spec-sync.md)
+- auto-sillyspec|sillyspec|FR|需求|承接 → [fr/auto-sillyspec.md](fr/auto-sillyspec.md)
+- claude-settings|FR|需求|承接 → [fr/claude-settings.md](fr/claude-settings.md)
