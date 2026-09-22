@@ -36,6 +36,6 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `_module-map.yaml` | <!--TODO: 有未匹配文件，判定模块索引是否需增改（modules rebuild）--> | pending |
+| `_module-map.yaml` | skipped：lite-archive 收口裁决——未匹配文件属既有模块族常规演进，模块索引无需因本变更增改；后续如需 rebuild 交由 scan 流程处理 | skipped |
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。

@@ -125,3 +125,83 @@
 待复核：recent-quick
 全文：.sillyspec/changes/archive/2026-07-14-lease-gc-recovery-reliability/requirements.md#FR-08
 最近确认：632c87add
+
+## FR-build-015 每人一套排序持久化（D-001/D-011/D-006@v2）
+变更：2026-09-14-workspace-drag-sort
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 登录用户 U 在默认视图拖动工作区卡片或使用「移动到…」；When 一次 move 成功（单行 sort_position 更新，事务含幂等 backfill）；Then U 的列表按新顺序展示，刷新/换设备后保持；其他任何用户的列表与此前完全一致
+全文：.sillyspec/changes/archive/2026-09-14-workspace-drag-sort/requirements.md#FR-01
+最近确认：e21bf19cc
+
+## FR-build-016 move 锚点端点契约（D-013/D-007）
+变更：2026-09-14-workspace-drag-sort
+状态：active
+摘要：默认场景
+依据决策：D-007@v1、D-013@v1
+场景正文：
+- 场景：默认场景 — Given 用户对目标工作区具备 WORKSPACE_READ（非管理员还需行级可见）；When POST /workspaces/{id}/move 携带恰好一个锚点（after_id / before_id / to）；Then 服务端按锚点更新位置并返回 {workspace, rebalanced, rank}；锚点三选一违反→422 ANCHOR_CONFLICT；锚点不可见/软删
+全文：.sillyspec/changes/archive/2026-09-14-workspace-drag-sort/requirements.md#FR-02
+最近确认：e21bf19cc
+
+## FR-build-017 列表默认排序接入（D-004/D-011）
+变更：2026-09-14-workspace-drag-sort
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given 用户 U 打开列表（或任意筛选组合）；When 服务端执行 list_with_owner(order_user_id=U)；Then 结果按 (无排序行→最前, sort_position ASC, created_at DESC) 排列；无行用户与从未拖过的视图 = 现状 created_a
+全文：.sillyspec/changes/archive/2026-09-14-workspace-drag-sort/requirements.md#FR-03
+最近确认：e21bf19cc
+
+## FR-build-018 页内拖拽（D-003@v2/D-010）
+变更：2026-09-14-workspace-drag-sort
+状态：active
+摘要：默认场景
+依据决策：D-008@v1、D-010@v1
+场景正文：
+- 场景：默认场景 — Given 默认视图、无筛选激活、页内 ≥2 张卡；When 用户拖动卡片手柄落在本页某位置；Then 前端发一次 moveWorkspace(id, {after_id: 落位前邻卡})，乐观更新，失败回滚刷新；卡片手柄与整卡点击进详情不冲突
+全文：.sillyspec/changes/archive/2026-09-14-workspace-drag-sort/requirements.md#FR-04
+最近确认：e21bf19cc
+
+## FR-build-019 边缘投放带跨页（D-003@v2/D-012）
+变更：2026-09-14-workspace-drag-sort
+状态：active
+摘要：默认场景
+依据决策：D-003@v2、D-012@v1
+场景正文：
+- 场景：默认场景 — Given 默认视图拖拽进行中；When 网格上下浮现投放带（第 1 页无上带、末页无下带）；Then 下带提交 {to:"next_page_head"}、上带提交 {to:"prev_page_tail"}（均含 page_size，默认 12）；成功后按响应
+全文：.sillyspec/changes/archive/2026-09-14-workspace-drag-sort/requirements.md#FR-05
+最近确认：e21bf19cc
+
+## FR-build-020 「移动到…」弹窗（D-009@v2）
+变更：2026-09-14-workspace-drag-sort
+状态：active
+摘要：默认场景
+依据决策：D-009@v2
+场景正文：
+- 场景：默认场景 — Given 默认视图某张卡的菜单；When 用户选目标页与页首/页尾并确认；Then 前端先拉取目标页默认视图数据，按方向规则计算 id 锚点（页首：向上 before/向下 after=目标页第一张；页尾对偶到目标页最后一张；同页：页首 bef
+全文：.sillyspec/changes/archive/2026-09-14-workspace-drag-sort/requirements.md#FR-06
+最近确认：e21bf19cc
+
+## FR-build-021 筛选态禁拖保护（D-005@v2）
+变更：2026-09-14-workspace-drag-sort
+状态：active
+摘要：默认场景
+依据决策：D-005@v2
+场景正文：
+- 场景：默认场景 — Given q/type/unclassified/status≠active/user_id/include_deleted 任一激活；When 列表渲染；Then 手柄呈禁用态（可见灰显）+ 提示"筛选状态下不可拖拽排序"；投放带与「移动到…」入口同步禁用；不发任何 move 请求
+全文：.sillyspec/changes/archive/2026-09-14-workspace-drag-sort/requirements.md#FR-07
+最近确认：e21bf19cc
+
+## FR-build-022 分页数量不变量（D-014）
+变更：2026-09-14-workspace-drag-sort
+状态：active
+摘要：默认场景
+依据决策：D-014@v1
+场景正文：
+- 场景：默认场景 — Given 任意合法 move（页内/投放带/弹窗）；When 移动完成并重新分页；Then total 不变、每页恒 PAGE_SIZE 张（末页允许不满）、序列无重复 id、无空页/丢卡
+全文：.sillyspec/changes/archive/2026-09-14-workspace-drag-sort/requirements.md#FR-08
+最近确认：e21bf19cc

@@ -236,3 +236,62 @@ supersedes：D-001@v1
 锚点：未记录
 最近确认：28915f71b
 理由：方案 A：照 2026-09-14-session-ctx-compact 刚验证的 RPC 模式——driver.ts 加可选 `getThinkingLevels?(handle)`/`setThinkingLevel?(handle, level)` 两契约方法；daemon.ts 注册 `session_get_thinking_levels`/`session_set_thinking_level` 两 RPC handler；backend 两端点（GET 档位列表+POST 切换）；caps 第 13 键 `thinking_level`（claude/pi/codex=true、cursor=false）。B（进程重启式）否决：切档重启子进程丢流式状态体验差；C（inject 文本）否决：pi/codex 不认文本且档位查询无通道。
+
+## D-002@v1 保留服务端分页（量级一两百）
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：一两百个量级，服务端分页（12/页 limit/offset）保留，不做"加载全部"改造。
+
+## D-010@v1 前端拖拽库——@dnd-kit/core + @dnd-kit/sortable
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：引入 @dnd-kit/core + @dnd-kit/sortable（两者皆新依赖）。理由：1/2/3 列响应式网格的落点判定与位移动画，原生 HTML5 需手写碰撞检测且体验糙；dnd-kit 轻量、支持网格 sortable、键盘无障碍内置。
+
+## D-011@v1 数据层实现——方案 A（排序表 + 浮点中点锚点）
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：方案 A（用户 brainstorm Step 4 AskUserQuestion 亲选）。理由：唯一同时满足锚点跨页（客户端只需边界卡 id）+ 保住现有服务端 limit/offset 分页与四路筛选 SQL（LEFT JOIN 原生 ORDER BY）+ 每次拖拽 O(1) 单行写入；B 把排序挤到应用层与分页 SQL 冲突且全量写放大；C 跨设备不同步、分页下无法独立排序。淘汰记录：B 违反 D-002 精神（架空服务端分页）、C 违反 D-001（顺序非服务端持久）。
+
+## D-005@v2 筛选态手柄形态——禁用态而非隐藏
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：禁用态：手柄可见但灰显（cursor-not-allowed）+ 筛选条内提示。可发现性优于隐藏——用户在筛选态能看见"有排序功能但被保护"，而非以为功能不存在。
+supersedes：D-005@v1
+
+## D-009@v2 「移动到…」弹窗范围收敛——页首/页尾 + 方向锚点
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：弹窗仅保留页首/页尾（用户 Step 5 确认的设计形态），"某卡前后"精确落位由页内拖拽覆盖不重复提供。锚点按移动方向区分：页首=向上 before_id 目标页第一张/向下 after_id 目标页第一张；页尾=向上 before_id 目标页最后一张/向下 after_id 目标页最后一张；目标页内容先经现有列表接口拉取；锚点为自身时前端跳过请求。
+supersedes：D-009@v1
+
+## D-012@v1 边缘投放带锚点由服务端页相对解析（to 枚举 + rank 响应）
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：投放带请求改 `{to: "next_page_head"|"prev_page_tail"}`（可选 page_size 默认 12），服务端在默认视图有序序列（可见 ∧ active ∧ 未删，按显示序）上定位被移动卡 rank、按分页数学解析目标插入 rank，再走统一中点路径；响应携带移动后 rank，前端 floor(rank/page_size) 换算目标页自动翻页+高亮。否决客户端预取相邻页方案：每次拖拽多两请求且边界卡在并发移动下会过期，分页数学在客户端重复实现必再出 off-by-one。
+
+## D-003@v2 边缘投放带锚点表达改 to 枚举（UX 不变）
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：维持边缘投放带路线（用户 explore 亲选的 UX 不变），仅锚点表达从客户端 id 锚点改为 `{to: next_page_head|prev_page_tail}` 服务端解析（D-012）。v1 的锚点写法作废；翻页+高亮闭环承诺保留。
+supersedes：D-003@v1
+
+## D-014@v1 分页数量不变量——move 是纯重排
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：不允许（用户 2026-09-14 明确约束）。move 只做单行 sort_position 更新，不增删任何行；任何移动后 total 不变、每页恒 PAGE_SIZE 张（末页允许不满），跨页移动=源页少一张/目标页多一张后重新切片。

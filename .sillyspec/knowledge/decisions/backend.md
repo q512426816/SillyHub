@@ -265,3 +265,75 @@ supersedes：D-003@v2（仅回传机制部分，其余维持）
 锚点：未记录
 最近确认：28915f71b
 理由：方案 A：照 2026-09-14-session-ctx-compact 刚验证的 RPC 模式——driver.ts 加可选 `getThinkingLevels?(handle)`/`setThinkingLevel?(handle, level)` 两契约方法；daemon.ts 注册 `session_get_thinking_levels`/`session_set_thinking_level` 两 RPC handler；backend 两端点（GET 档位列表+POST 切换）；caps 第 13 键 `thinking_level`（claude/pi/codex=true、cursor=false）。B（进程重启式）否决：切档重启子进程丢流式状态体验差；C（inject 文本）否决：pi/codex 不认文本且档位查询无通道。
+
+## D-001@v1 顺序归属——每人一套（user-scoped order）
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：每人一套（用户 2026-09-14 explore 会话 AskUserQuestion 亲答）。新表 `user_workspace_orders(user_id, workspace_id, sort_position)`。
+
+## D-002@v1 保留服务端分页（量级一两百）
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：一两百个量级，服务端分页（12/页 limit/offset）保留，不做"加载全部"改造。
+
+## D-004@v1 新建工作区落位——最前
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：最前。与现状 `created_at DESC`（最新在前）感知一致；SQL 语义=排序行缺失（NULL）优先于一切已有位置。
+
+## D-007@v1 move 端点鉴权——登录 + 对目标 workspace 有 WORKSPACE_READ
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：登录用户且对目标 workspace 具备 WORKSPACE_READ（与列表可见性一致）。per-user 顺序只影响本人视图，无需管理员/owner 门槛。锚点目标卡（after_id/before_id）不在该用户可见集合时 422。
+
+## D-011@v1 数据层实现——方案 A（排序表 + 浮点中点锚点）
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：方案 A（用户 brainstorm Step 4 AskUserQuestion 亲选）。理由：唯一同时满足锚点跨页（客户端只需边界卡 id）+ 保住现有服务端 limit/offset 分页与四路筛选 SQL（LEFT JOIN 原生 ORDER BY）+ 每次拖拽 O(1) 单行写入；B 把排序挤到应用层与分页 SQL 冲突且全量写放大；C 跨设备不同步、分页下无法独立排序。淘汰记录：B 违反 D-002 精神（架空服务端分页）、C 违反 D-001（顺序非服务端持久）。
+
+## D-006@v2 backfill 幂等化 + 位置方向勘误
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：①backfill 幂等化：每次 move 事务首步 INSERT..SELECT WHERE NOT EXISTS，对（可见 ∧ active+archived ∧ 无行）全集物化，无行组整体赋在现有最小位置之下、组内 created_at DESC——锚点卡永远有行，物化前后显示序零变化。②初始/新增物化位置按 created_at DESC 赋 row_number×1024 **递增**序列（v1"递减"为笔误，display 顺序语义以 design 公式为准）。
+supersedes：D-006@v1
+
+## D-012@v1 边缘投放带锚点由服务端页相对解析（to 枚举 + rank 响应）
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：投放带请求改 `{to: "next_page_head"|"prev_page_tail"}`（可选 page_size 默认 12），服务端在默认视图有序序列（可见 ∧ active ∧ 未删，按显示序）上定位被移动卡 rank、按分页数学解析目标插入 rank，再走统一中点路径；响应携带移动后 rank，前端 floor(rank/page_size) 换算目标页自动翻页+高亮。否决客户端预取相邻页方案：每次拖拽多两请求且边界卡在并发移动下会过期，分页数学在客户端重复实现必再出 off-by-one。
+
+## D-013@v1 move 请求契约修订——三选一锚点、无 null 置顶、自锚 422
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：①锚点三选一：after_id / before_id / to 恰好一个出现，全为非 null uuid 或枚举值；置顶场景由弹窗页首锚点表达，删除 null 置顶语义。②锚点有效性 = 存在 ∧ 在可见集合 ∧ deleted_at IS NULL ∧ status ∈ {active, archived}（与 D-006@v2 物化范围对齐），违反 422 HTTP_422_MOVE_ANCHOR_NOT_VISIBLE。③自锚 422 HTTP_422_MOVE_ANCHOR_SELF（前端正常流程不会发，作契约兜底）。
+
+## D-003@v2 边缘投放带锚点表达改 to 枚举（UX 不变）
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：维持边缘投放带路线（用户 explore 亲选的 UX 不变），仅锚点表达从客户端 id 锚点改为 `{to: next_page_head|prev_page_tail}` 服务端解析（D-012）。v1 的锚点写法作废；翻页+高亮闭环承诺保留。
+supersedes：D-003@v1
+
+## D-014@v1 分页数量不变量——move 是纯重排
+状态：implemented
+变更：2026-09-14-workspace-drag-sort
+锚点：未记录
+最近确认：e21bf19cc
+理由：不允许（用户 2026-09-14 明确约束）。move 只做单行 sort_position 更新，不增删任何行；任何移动后 total 不变、每页恒 PAGE_SIZE 张（末页允许不满），跨页移动=源页少一张/目标页多一张后重新切片。
