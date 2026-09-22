@@ -175,3 +175,14 @@ change: 2026-09-22-session-fork-continuation
 - normalized_requirement: 上述形态为定案实现；task-08 增 session_insights.py DTO 增列与 prop 接线；pi 锚缺失=入口灰不伪造。
 - impacts: [FR-03, FR-04, FR-07, task-06, task-08]
 - evidence: commit fa91e133a/02a6c15db；pi 0.81.1 agent-session-runtime.js fork() 劫持实证；pi-events AgentSessionEvent 无 entryId 实测
+
+## D-015@v1: 执行期裁决——W5 双卡裁决汇总（取数形态/卡外接线文件/E2E 缓验）
+- type: risk
+- priority: P1
+- status: accepted
+- source: code
+- question: task-04/08 实现期实质偏差定案？
+- answer: ①task-04 锚取数走 flat_messages×published_logs 双指针内存形态（autoflush=False 下 SELECT 看不到本调用待提交行，查库会致测试/生产行为分叉）；claude 末条优先覆盖、pi 轮首锚仅空时写、provider 取 AgentRun.provider。②task-08 卡外连带 5 文件必要接线：turn-timeline.tsx（轮容器真身，TurnForkEntry 挂载点，group 类加轮标签行防 CopyButton 误触发）、lib/daemon/sessions.ts（SessionRunRead 手写镜像补 engine_anchor）、3 个 dialog 测试 mock 补齐（挂载期新增谱系 fetch）。③onForked 跳 B 采用 WorkerSessionOverlay 浮层（面板无法外部切 sessionId，浮层为既有「打开另一会话」形态）。④列表多跳 v1 单层分组（C 回落主行带徽标，多跳完整表达在面板面包屑）。⑤E2E 缓验：平台本机未运行（探测实证），e2e-claude-fork.md 如实记录+引用 spike SDK 级不知情实证+8 步补验清单，verify 阶段或人工启动平台后照单执行——不伪造。
+- normalized_requirement: 上述为定案；E2E 补验清单为 verify 阶段输入。
+- impacts: [task-04, task-08, verify]
+- evidence: commit d03d3864f/6cbfb966c；e2e-claude-fork.md 探测证据表
