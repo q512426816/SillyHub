@@ -586,3 +586,45 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：41c3b37
 理由：2026-09-10-account-avatar-upload——PPM 已上线模块不动，WorkbenchProfile.avatar_text 维持首字；展示范围圈定为个人中心+顶栏+群聊（用户选定）。后续要接入再单独立变更。
+
+## D-001@v1 实施路线——渐进下沉（双轨兼容）而非契约替换或最小注册表
+状态：implemented
+变更：2026-09-03-agent-provider-abstraction
+锚点：未记录
+最近确认：c6c74aa49
+理由：方案A 渐进下沉。driver 内归一化吐 AgentEvent，backend/前端双轨兼容新旧两种事件格式，验证稳定后再退役旧文本协议（退役为后续 change）
+
+## D-002@v1 会话级信号的承载方式——status 事件 subtype + 有状态归一化器，raw 降格为调试通道
+状态：implemented
+变更：2026-09-03-agent-provider-abstraction
+锚点：未记录
+最近确认：c6c74aa49
+理由：①会话级信号全部事件化为 status 型 + subtype 枚举（session_started/bash_status/plan_mode/agent_task_status/task_notification），SessionManager 改按 subtype 分发；②depth 状态机等跨消息状态由有状态归一化器类（ClaudeEventNormalizer，每会话实例）内部维护；③envelope.raw 仅在 SILLYHUB_DEBUG_RAW_EVENTS=1 时携带，下游禁止依赖（cli.ts 的 SDKMessage 接线随之演进）
+
+## D-003@v1 usage 实时透传语义——任意携带 usage 的事件即更新，不限 turn_result
+状态：implemented
+变更：2026-09-03-agent-provider-abstraction
+锚点：未记录
+最近确认：c6c74aa49
+理由：对齐现行为：任意携带 usage 的 AgentEvent（含 partial text/thinking flush 事件）→ daemon lift → backend 更新 agent_runs token 统计 + SSE summary 实时透传（现链路锚点 daemon.ts:3564-3586、service.py:357-370）
+
+## D-004@v1 partial override 撤回的事件化表达——override:true + segment_id
+状态：implemented
+变更：2026-09-03-agent-provider-abstraction
+锚点：未记录
+最近确认：c6c74aa49
+理由：text/thinking 事件增加可选 override:boolean——true 表示替换同 segment_id 已落库 partial 行；backend 行为对齐现有 stale 撤回链（DELETE by (run_id, segment_id) → INSERT）。partial/override 归一化逻辑移植自 daemon session-manager 现实现（非 backend _extract_sdk_messages，后者对 stream_event 恒返回空）
+
+## D-005@v1 AgentEvent v2 契约补遗——status 增 thinking_tokens 子类型、usage 增 ctx_tokens 字段
+状态：implemented
+变更：2026-09-03-agent-provider-abstraction
+锚点：未记录
+最近确认：c6c74aa49
+理由：契约微扩：AgentStatusSubtype += 'thinking_tokens'；AgentEventUsage += ctx_tokens?: number。归一化器对应产出（thinking_tokens 子类型事件、usage 差分携带 ctx_tokens）
+
+## D-006@v1 双轨渲染已知改进差异的取舍——主 agent Task tool_result 配对（新轨 call_id 优先）与 cache_* 完整帧聚合（新轨更全）
+状态：implemented
+变更：2026-09-03-agent-provider-abstraction
+锚点：未记录
+最近确认：c6c74aa49
+理由：均接受为已知改进差异（新轨行为更正确），以豁免/可执行登记形式固化（dual-path fixture 豁免 #2 + TestDocumentedFormatDivergences/§2 差异冻结测试），不要求新轨复刻旧轨缺陷；旧轨本身零改动（回退轨保真）
