@@ -649,3 +649,52 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：0d7e66502
 理由：两态。对象=整包直写、键不出现=置 NULL 清除，与 sillyspec_status 现状（model.py:108-109、runtime/service.py:525-529）语义一致；daemon 终态窗过期后直接停发该键，不发送显式 null；register 恒清（service.py:232-235 先例）堵 daemon 重启后 DB 残留。三态需在心跳面新增 absent/null 判别，唯一先例 router.py:988 display_alias PUT 属 PUT 端点非心跳，无谓引入新机制
+
+## D-001@v1 cursor 交互式 driver 架构——每轮 respawn + --resume chatId 薄 driver
+状态：implemented
+变更：2026-09-08-cursor-interactive-session
+锚点：未记录
+最近确认：35f3d6528
+理由：方案A 每轮 respawn。每个 UserTurnInput spawn 一次 `cursor-agent -p --output-format stream-json [--resume chatId] [--model] <prompt>`，NDJSON 逐帧归一化为 AgentEvent v2，result 帧 + 进程退出 = turn 收敛；chatId 从帧内 session_id 捕获（`create-chat` 子命令兜底）；Windows 经 resolveWindowsCmdShim（含 cursor 坏 ps1 版本目录增强）。B/C 否决：worker 实测是 Cursor 云端 worker 注册通道（K8s 探针/标签/池分配，非本地 stdio 会话协议）；cursor-agent 无 --input-format/SDK 控制协议（批量适配 D-008@v1 已证参数集分叉），ClaudeSdkDriver 握手必挂
+
+## D-002@v1 接入范围——仅交互式会话最小闭环
+状态：implemented
+变更：2026-09-08-cursor-interactive-session
+锚点：未记录
+最近确认：35f3d6528
+理由：仅最小闭环：补齐交互式会话链路（driver + 归一化器 + 注册表 + 三端 caps + 前端白名单 + 测试 + 冒烟），对齐 pi 接入先例。liveness 推导器注册与平台侧 Cursor 凭证配置（llm_provider agent_kind 扩展 + CursorCredentialInjector）留后续变更
+
+## D-004@v1 caps 守护测试 EXPECTED_PROVIDERS 同步必改（Grill B-01）
+状态：implemented
+变更：2026-09-08-cursor-interactive-session
+锚点：未记录
+最近确认：35f3d6528
+理由：否。`backend/app/modules/agent/tests/test_provider_caps_alignment.py:52` EXPECTED_PROVIDERS 为硬编码 `{"claude","codex","pi"}`，test_provider_sets_identical 对三端表断言集合相等——三端表加 cursor 后守护测试必失败。必须同 commit 同步 EXPECTED_PROVIDERS 加 'cursor'（pi 接入 commit 7c4dd4efd 同款先例）。设计文件清单已补该文件
+
+## D-001@v1 派生粒度=工具调用聚合为单任务
+状态：implemented
+变更：2026-09-07-pi-task-events
+锚点：未记录
+最近确认：35f3d6528
+理由：以「一轮（turn）内的活动」聚合为单条任务：turn_start 建/复running行（task_id=pi-run-<runId> 稳定键，task_name 取首轮用户消息或'执行任务'），tool_execution_start 刷新 last_tool_name/tool_uses 累计/summary（'正在调用 X'），tool_execution_end 保持 running（工具成败不等于任务成败），turn_end 按 stopReason 映射终态（error→failed 其余→completed）置 message/finished_at。子代理粒度（claude Task 工具那种）pi 原始流无对应概念，不做
+
+## D-002@v1 派生位置选归一化器（方案 A）——⚠️ 自主决策待用户复核
+状态：implemented
+变更：2026-09-07-pi-task-events
+锚点：未记录
+最近确认：35f3d6528
+理由：选 A。PiEventNormalizer 增实例级 turnTask 聚合状态产出 status/agent_task_status——贴 claude-events 同位置派生信号的既有架构，session-manager/_dispatchStatusEvent→cli 上报链路零改动，纯函数测试范式可延续；代价是归一化器从逐行纯函数升级为实例级状态机（turn 边界做状态推进点，normalizeRpcLine 单行解析仍独立）
+
+## D-003@v1 设计整体确认——⚠️ 自主决策待用户复核
+状态：implemented
+变更：2026-09-07-pi-task-events
+锚点：未记录
+最近确认：35f3d6528
+理由：按 D-001/D-002 定稿确认。原型跳过理由：纯数据链路补齐，前端任务执行面板零改动（pi 会话从空态变有数据，无界面变化，原型分级「纯后端无界面变化」档）
+
+## D-004@v1 design-grill 修正——stopReason 枚举实证与测试路径
+状态：implemented
+变更：2026-09-07-pi-task-events
+锚点：未记录
+最近确认：35f3d6528
+理由：修正三处：①fixture 全量实证 stopReason 仅 stop/error 两值，aborted 是 ame.error 的 reason（流层中止）非 stopReason——删除 aborted→stopped 映射，被打断的轮按 completed 收行；②测试路径实存 tests/interactive/pi-events.test.ts，新增集成用例定名 tests/interactive/pi-task-dispatch.test.ts；③R-01 应对改写：既有用例 expected 数组需追加派生事件（预期适配非破坏）
