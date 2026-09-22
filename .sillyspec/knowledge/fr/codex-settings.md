@@ -51,3 +51,53 @@
 - 场景：默认场景 — 
 全文：.sillyspec/changes/archive/2026-09-10-multi-provider-injection/requirements.md#FR-06
 最近确认：efad0edb5
+
+## FR-codex-settings-007 reload 守卫前移（D-001@v1）
+变更：2026-09-12-provider-file-tx
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given codex/pi 会话收到供应商切换请求；When resume key（agentSessionId）缺失；Then 在任何文件层写盘之前抛出（message 与现状逐字一致），per-session 目录零写入（无目标文件变更、无 tmp 残留）
+全文：.sillyspec/changes/archive/2026-09-12-provider-file-tx/requirements.md#FR-01
+最近确认：8e8b22a7f
+
+## FR-codex-settings-008 reload 失败文件层回滚（D-002@v2）
+变更：2026-09-12-provider-file-tx
+状态：active
+摘要：默认场景
+依据决策：D-002@v2
+场景正文：
+- 场景：默认场景 — Given reload 已执行文件层写盘（局部标记为真）；When 后续步骤（driver.start 等）失败进入 catch；Then 内存态还原后 best-effort 以 oldProviderConfig+oldEnv 重跑 ForReload 恢复文件层；若 ForReload 返回空
+全文：.sillyspec/changes/archive/2026-09-12-provider-file-tx/requirements.md#FR-02
+最近确认：8e8b22a7f
+
+## FR-codex-settings-009 原子写（D-003@v1）
+变更：2026-09-12-provider-file-tx
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given codex 两文件 / pi 三文件 / 宿主镜像拷贝任一写盘点；When 写入过程任一步失败（写 tmp/fsync/rename）；Then 目标文件保持旧全文；`.tmp-*` 被 best-effort 清理；成功时观察者只见旧或新全文（rollout 拷贝按 design 划界不纳入）
+全文：.sillyspec/changes/archive/2026-09-12-provider-file-tx/requirements.md#FR-03
+最近确认：8e8b22a7f
+
+## FR-codex-settings-010 生效标记与 restore 三态探测（D-004@v2）
+变更：2026-09-12-provider-file-tx
+状态：active
+摘要：默认场景
+依据决策：D-004@v2
+场景正文：
+- 场景：默认场景 — Given per-session codex 目录；When 写盘成功（分支一，标记后置 best-effort）或 codex-null 镜像（分支四，标记先行——标记失败则跳过整个镜像含删除动作，返回 prior CO；Then 目录含 `.sillyhub-managed` ⟺ 切换曾真实生效（删除类动作必晚于标记持久化）；restore null+codex 探测三态：标记在 → m
+全文：.sillyspec/changes/archive/2026-09-12-provider-file-tx/requirements.md#FR-04
+最近确认：8e8b22a7f
+
+## FR-codex-settings-011 provider 维度引擎门（D-005@v2）
+变更：2026-09-12-provider-file-tx
+状态：active
+摘要：默认场景
+依据决策：D-005@v2
+场景正文：
+- 场景：默认场景 — Given reload 调用携带 provider 切换载荷；When 引擎 ∉ {claude, codex, pi}（如 cursor）；Then 显式 throw 拒绝（fail-loud + 日志）；config-only 路径（人格/配置切换）不受门限制，全引擎行为不变
+全文：.sillyspec/changes/archive/2026-09-12-provider-file-tx/requirements.md#FR-05
+最近确认：8e8b22a7f
