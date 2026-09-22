@@ -325,3 +325,57 @@
 - 场景：默认场景 — Given 存量数据（无 pinned_at、无定时消息）；When 升级后首次请求；Then 列表排序与响应行为与升级前一致（pinned_at 恒 NULL 时谓词恒真）；`AgentSessionRead` 仅新增 `pinned_at` 字段，旧前
 全文：.sillyspec/changes/archive/2026-09-07-session-pin-rename-scheduled-send/requirements.md#FR-07
 最近确认：35f3d6528
+
+## FR-lib-api-035 对比/裁决全链携带 workspace_id
+变更：2026-09-09-conflict-root-workspace-scoping
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 用户在变更中心打开某工作区的冲突对比/裁决；When 前端发起 compare（查询参数已有）或 resolve（请求体新增必填 workspace_id）；Then backend → daemon 的 RPC params / WS payload 均携带 `workspace_id`；
+全文：.sillyspec/changes/archive/2026-09-09-conflict-root-workspace-scoping/requirements.md#FR-01
+最近确认：28b758edc
+
+## FR-lib-api-036 daemon 按工作区映射取根，未命中不回退
+变更：2026-09-09-conflict-root-workspace-scoping
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given daemon 内存映射 `_sillyspecStatusRoots` 中存在该 workspace_id 映射中不存在该 workspace_id（含 LRU；When 对比 RPC / 裁决指令带该 workspace_id 到达 对比 RPC / 裁决指令带该 workspace_id 到达；Then 用映射中的主仓根执行（不受单槽位投毒影响） 对比抛 RpcError `workspace_root_unknown`（提示「该工作区尚未被本机会话
+全文：.sillyspec/changes/archive/2026-09-09-conflict-root-workspace-scoping/requirements.md#FR-02
+最近确认：28b758edc
+
+## FR-lib-api-037 legacy 调用保留单槽位语义
+变更：2026-09-09-conflict-root-workspace-scoping
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 不带 workspace_id 的旧调用形态；When 对比 / 裁决到达 daemon；Then 沿用单槽位（`_statusCwd()`）读路径；单槽位为空时对比抛 `no_spec_root`
+全文：.sillyspec/changes/archive/2026-09-09-conflict-root-workspace-scoping/requirements.md#FR-03
+最近确认：28b758edc
+
+## FR-lib-api-038 无 workspaceId 的 claim 不再覆盖单槽位（辅防）
+变更：2026-09-09-conflict-root-workspace-scoping
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given claim 到达且 workspaceId 为 null/undefined、rootPath 任意（含 Temp）；When daemon 执行 `_noteSillySpecStatusRoot`；Then 单槽位值与落盘文件**均不变**；合法 UUID 的 claim 仍「映射+单槽位」双写
+全文：.sillyspec/changes/archive/2026-09-09-conflict-root-workspace-scoping/requirements.md#FR-04
+最近确认：28b758edc
+
+## FR-lib-api-039 resolve 端点补 workspace 成员校验
+变更：2026-09-09-conflict-root-workspace-scoping
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 用户已通过机器归属校验（owner/admin）；When 对非本人成员的 workspace_id 下发裁决；Then 403 `PermissionDenied`（文案区分「查看」（compare）/「下发裁决」（resolve）
+全文：.sillyspec/changes/archive/2026-09-09-conflict-root-workspace-scoping/requirements.md#FR-05
+最近确认：28b758edc
+
+## FR-lib-api-040 （可选）502 网关文案按 daemon_code 分叉
+变更：2026-09-09-conflict-root-workspace-scoping
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 对比 RPC 因 daemon 业务错误返回 502；When daemon_code = workspace_root_unknown / conflict_record_missing；Then 用户可见文案分别为「该工作区尚未被本机认领…」/「冲突记录已失效，请刷新
+全文：.sillyspec/changes/archive/2026-09-09-conflict-root-workspace-scoping/requirements.md#FR-06
+最近确认：28b758edc
