@@ -153,3 +153,14 @@ change: 2026-09-22-session-fork-continuation
 - evidence: D-008@v1（pi fork 活 RPC 语义）；design.md 接口定义（claude 形态）扩展
 - 故障面: rpc_fork 时源 pi 会话文件不可达（跨机/已删）→ fork 失败 4xx，文案提示
 - 退役判据: pi 提供 spawn 期截断参数时收敛为 resume_at 同形态
+
+## D-013@v1: 执行期裁决——task-05 六条非破坏裁决披露
+- type: risk
+- priority: P1
+- status: accepted
+- source: code
+- question: task-05 实现期与卡面/代码现实的六处偏差如何处置？
+- answer: ①router/__init__.py _ENDPOINT_ORDER 登记新端点（+4 行，表自带 fail-fast 指示，不登记 app 无法 import）；②native 档补传 resume_session_id+源 runtime 钉定（design「复用 create-with-resume 管道」原文要求，worker_redispatch 先例，源 id 缺→422 可退种子档）；③pi 下一轮存在但锚缺失→422 不降 clone（降级会静默多带分叉点后内容，语义错误）；④fork 异常族定义于 fork.py（errors.py 不在 allowed_paths）经包 __init__ 聚合；⑤create 空 prompt 豁免键=fork_of_session_id、user_input 空内容不落行（零回归，22+139 相邻测试守护）；⑥B.engine_fork_anchor 取实际定位锚（pi rpc_fork=N+1 轮锚，D-012 position-before 语义）。
+- normalized_requirement: 六条均为实现必要偏差，不改 D-001~012 语义；task-06 消费键形以本条+D-012 为准（fork_mode 恒写+resume_session_id 承载源会话）。
+- impacts: [task-05, task-06]
+- evidence: commit 8c5ea3e0b（11 文件）；test_session_fork.py 22/22+相邻 139 绿
