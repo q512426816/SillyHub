@@ -1,0 +1,9 @@
+{
+  "events": [
+    {"ts": 1758566003000, "kind": "file-update", "stage": "design", "detail": "design.md 内容变更", "provisional": true},
+    {"ts": 1758566000000, "kind": "file", "stage": "proposal", "detail": "proposal.md 出现", "provisional": true},
+    {"ts": 1758566005000, "kind": "sentinel-rule", "stage": "execute", "rule": "p2-tests-red", "severity": "warning", "detail": "P2 测试账本检出红测 3 条", "provisional": true, "id": "evt-warn-1"},
+    {"ts": 1758566001000, "kind": "task-done", "stage": "proposal", "detail": "checked 0→1", "provisional": true},
+    {"ts": 1758566007000, "kind": "sentinel-rule", "stage": "verify", "rule": "long-silence", "severity": "warning", "detail": "长静默 40 分钟", "provisional": true, "id": "evt-warn-2"}
+  ]
+}

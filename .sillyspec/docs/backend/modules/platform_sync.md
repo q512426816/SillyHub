@@ -28,6 +28,9 @@ SillySpec CLI 直跑时的跨仓上行通道（进度 / 文档 / 审批 / quickl
     - `POST` 增 body 级 `hub_session_id`（daemon env 注入，命中且同 ws → entries 关联该会话；未命中静默降级）与 entry 级 `change_key`/`quick_id`（随 entry 持久化，D-009）；无 hub → 按 `(workspace, harness, ctx)` find-or-create `origin='tool_report'` 会话（agent_sessions 加 origin/aggregation_key/title 列）。
     - `GET /api/agent-logs?session_id=`（读）：会话关联条目（普通会话尾部折叠条目 + tool_report 会话主体）。
     - `GET /api/agent-logs/{id}/content`（读）：daemon `host_fs.read_file` 直连（不走 delegate degrade）、format 黑名单 409、尾部 256KB 字节截断、404/409/504 错误族。2026-09-10-zcode-session-sqlite-read：format=zcode-model-io-jsonl 先发 `read_agent_log_messages` RPC，status=parsed 时九字段伪 jsonl 合成全量返回不截断（truncated 透传窗口语义），非 parsed/抛错回落 read_file 原 256KB 路径（D-002/D-007@v1）。
+- 变更事件通道（2026-09-23-change-events-channel，watcher 旁路观测面，**provisional 只展示不消费红线**）：
+  - `POST /api/changes/{name}/events`（写）：CLI watcher 批量上行（`{events:[...]}` 1..200 条，kind 必填/ts epoch 毫秒 ge=1e12/stage·detail·rule·severity·id 可选，extra=ignore）；`(workspace_id, change_name, dedup_key)` 幂等**跳过不覆盖**（dedup_key：事件 id 优先否则 `ts|kind|stage` 拼串）；`provisional` 落库恒 True（请求值丢弃）；单变更 >5000 条同事务删最旧修剪（`PlatformChangeEventORM` / `platform_change_events` 表）。
+  - `GET /api/changes/{name}/events?since=&limit=`（读）：面板增量拉取，`ts ASC, id ASC` 稳定正序、since 严格大于（ISO 8601，无效 422）、limit 默认 500 上限 5000、无事件 200 空列表不 404；scope 复用 `_read_args`。
 - workspace 面（`platform_sync_workspace_router`，prefix=/workspaces）：`/api/workspaces/{workspace_id}/platform-sync-tokens` 签发；`POST /api/workspaces/resolve-by-root-path` connect 换发（含手动 `has_permission(WORKSPACE_WRITE)` 403/404 闭环）。
 
 ## 关键逻辑
@@ -54,6 +57,7 @@ spec-sync: row.version != op.base_version → conflict=true（另有同内容豁
 - spec-manifest 读清单也收紧为写权限（清单是增量写协议一部分，防探测文件布局）；`scope.workspace_id is None` 一律 403 fail-closed。
 - 消费链是 CLI（写）+ change 投影（读），前端不直接调写端点；改响应字段前先对 sillyspec 仓 sync.js 契约，别单侧改。
 
+- 事件链路红线（2026-09-23-change-events-channel）：平台对 provisional 事件零业务消费——service/router/前端全链路禁止触发通知/审批/门控/写 progress（`--done` 才是流程真相，事件仅观测面）；改响应字段前对 sillyspec 仓 watcher.js pushEventsToPlatform 契约。
 - agent-logs 会话绑定（2026-08-25-session-spec-binding）：upsert_agent_log_entries hub 分支补消费 entry 的 change_key/quick_id（原完全忽略）绑到 hub 会话；聚合分支 tool_report 会话组级落绑定；两键互斥并存 quick 优先；default 伪键由 bind_session_to_change 内部守卫兜底不建 placeholder。
 
 ## 人工备注

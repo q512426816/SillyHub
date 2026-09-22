@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ColumnElement, or_, select
+from sqlalchemy import ColumnElement, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -50,13 +50,14 @@ from app.modules.change.title_norm import DISPLAY_KEY_PREFIX_RE
 from app.modules.daemon.session_events import publish_sessions_changed
 from app.modules.platform_sync.model import (
     AgentSessionLogORM,
+    PlatformChangeEventORM,
     PlatformChangeProgressORM,
     QuicklogEntryORM,
 )
 
 if TYPE_CHECKING:
     # 类型标注专用（``from __future__ import annotations`` 惰性求值），运行时零导入。
-    from app.modules.platform_sync.schema import AgentLogEntry, AgentLogStateEntry
+    from app.modules.platform_sync.schema import AgentLogEntry, AgentLogStateEntry, ChangeEventPush
     from app.modules.spec_workspace.schema import FileOp
 
 log = get_logger(__name__)
@@ -150,6 +151,25 @@ async def _bind_entry_ctx(
         await bind_session_to_quicklog(session, workspace_id, quick_id, target_session_id)
     elif change_key:
         await bind_session_to_change(session, workspace_id, change_key, target_session_id)
+
+
+# ── Change 2026-09-23-change-events-channel task-02（design §接口定义 / D-002 / D-005）──
+#: 单 (workspace, change) 事件保留上限（D-005@v1）：append_events 插入后超限按
+#: ``(ts, created_at)`` 删最旧修剪——事件是高频观测数据非审计源，单变更观测面
+#: 有界（5000 上限即读端点 limit 上限的全量窗口）。
+CHANGE_EVENTS_MAX_ROWS = 5000
+#: detail 服务端截断长度（对齐 ORM ``String(2000)`` 列宽；schema 层宽松不限长，
+#: 落库前截断，task 卡「宽松接收」语义）。
+_CHANGE_EVENT_DETAIL_MAX = 2000
+
+
+def _change_event_dedup_key(event: ChangeEventPush) -> str:
+    """单条事件 dedup_key（D-002@v1）：CLI 事件带 ``id`` 优先用之，否则
+    ``"{ts_ms}|{kind}|{stage or ''}"`` 拼接（``ts`` 转 int 毫秒——防
+    ``1758566000000.0`` 与 ``1758566000000`` 拼出不同键的浮点表示漂移）。"""
+    if event.id:
+        return event.id
+    return f"{int(event.ts)}|{event.kind}|{event.stage or ''}"
 
 
 @dataclass
@@ -1825,3 +1845,175 @@ class PlatformSyncService:
         )
         rows = (await self._session.execute(stmt)).scalars().all()
         return list(rows)
+
+    # ── Change 2026-09-23-change-events-channel task-02（design §接口定义 / FR-01~FR-04）──
+
+    async def append_events(
+        self,
+        workspace_id: uuid.UUID,
+        change_name: str,
+        events: list[ChangeEventPush],
+    ) -> tuple[int, int]:
+        """POST /changes/{name}/events：批量幂等追加 + 单事务上限修剪（FR-01~FR-03）。
+
+        dedup 语义是**跳过不是覆盖**（区别于 ``upsert_quicklog_entry`` 先例）：
+        事件是 append-only 观测快照、无 update 语义，watcher 重推同 dedup_key
+        直接丢弃不更新原行（D-002）。
+
+        1. 批内去重（plan 审查修正项）：同请求两条同 dedup_key 只插首条、其余
+           计 ``deduplicated``——防批内撞 ``(workspace_id, change_name,
+           dedup_key)`` 唯一约束 500（dict 保序留首条）。
+        2. 已存键 IN 批量预取（ql-20260826-012 同款范式）：批内键命中已存行的
+           计 ``deduplicated`` 跳过。
+        3. 缺失者 INSERT：``ts`` 归一 tz-aware datetime（epoch 毫秒 ÷1000，
+           D-003）；``provisional`` 恒 True（**请求值丢弃**，D-004 红线）；
+           ``detail`` 截 2000（宽松接收、落库截断）。
+        4. 插入后 count 该 ``(workspace_id, change_name)`` 行数，``>5000`` 按
+           ``(ts, created_at)`` 删最旧修剪到 5000（D-005，与本批插入同一次
+           commit 即单事务；``id`` 末位排序消 created_at 并列歧义）。
+
+        service 零业务判定红线（D-004）：不触发通知 / 不写 progress / 不动审批
+        ——本方法只落事件行。返回 ``(accepted, deduplicated)``。
+        """
+        # ① 批内 dedup_key 去重（dict 插入序保序，同键留首条）。
+        pending: dict[str, ChangeEventPush] = {}
+        deduplicated = 0
+        for event in events:
+            key = _change_event_dedup_key(event)
+            if key in pending:
+                deduplicated += 1
+                continue
+            pending[key] = event
+
+        # ② 已存键预取：批内键 ∩ 已存键 → 跳过（计入 deduplicated，不覆盖）。
+        if pending:
+            existing_keys = set(
+                (
+                    await self._session.execute(
+                        select(col(PlatformChangeEventORM.dedup_key)).where(
+                            col(PlatformChangeEventORM.workspace_id) == workspace_id,
+                            col(PlatformChangeEventORM.change_name) == change_name,
+                            col(PlatformChangeEventORM.dedup_key).in_(pending.keys()),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for key in existing_keys:
+                pending.pop(key, None)
+                deduplicated += 1
+
+        # ③ 缺失者 INSERT（provisional 恒 True / detail 截断 / ts 归一）。
+        now = datetime.now(UTC)
+        for key, event in pending.items():
+            self._session.add(
+                PlatformChangeEventORM(
+                    id=uuid.uuid4(),
+                    workspace_id=workspace_id,
+                    change_name=change_name,
+                    dedup_key=key,
+                    ts=datetime.fromtimestamp(event.ts / 1000, tz=UTC),
+                    kind=event.kind,
+                    stage=event.stage,
+                    detail=(
+                        event.detail[:_CHANGE_EVENT_DETAIL_MAX]
+                        if event.detail is not None
+                        else None
+                    ),
+                    rule=event.rule,
+                    severity=event.severity,
+                    provisional=True,  # D-004 红线：请求值丢弃，恒 True。
+                    created_at=now,
+                )
+            )
+        accepted = len(pending)
+
+        # ④ 单事务上限修剪（D-005）：count 含本批待插行（autoflush 先于查询）。
+        scope_filters = (
+            col(PlatformChangeEventORM.workspace_id) == workspace_id,
+            col(PlatformChangeEventORM.change_name) == change_name,
+        )
+        count = (
+            await self._session.execute(
+                select(func.count()).select_from(PlatformChangeEventORM).where(*scope_filters)
+            )
+        ).scalar_one()
+        if count > CHANGE_EVENTS_MAX_ROWS:
+            excess = count - CHANGE_EVENTS_MAX_ROWS
+            oldest_ids = list(
+                (
+                    await self._session.execute(
+                        select(col(PlatformChangeEventORM.id))
+                        .where(*scope_filters)
+                        .order_by(
+                            col(PlatformChangeEventORM.ts).asc(),
+                            col(PlatformChangeEventORM.created_at).asc(),
+                            col(PlatformChangeEventORM.id).asc(),
+                        )
+                        .limit(excess)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if oldest_ids:
+                await self._session.execute(
+                    delete(PlatformChangeEventORM).where(
+                        col(PlatformChangeEventORM.id).in_(oldest_ids)
+                    )
+                )
+
+        await self._session.commit()
+        return accepted, deduplicated
+
+    async def list_events(
+        self,
+        change_name: str,
+        workspace_id: uuid.UUID | None = None,
+        allowed_workspace_ids: list[uuid.UUID] | None = None,
+        since: datetime | None = None,
+        limit: int = 500,
+    ) -> tuple[list[PlatformChangeEventORM], int]:
+        """GET /changes/{name}/events：scope 过滤 + since 增量正序读取（FR-04）。
+
+        scope 双参口径照 ``list_agent_logs``：
+
+        - ``allowed_workspace_ids`` 非 None（JWT/shk_live_ 读路径）→ workspace_id
+          ``IN (并集)``——本表 workspace_id NOT NULL，无 NULL 桶子句（X-04 同款）；
+          空集合即空结果。
+        - ``workspace_id`` 非 None（shpsync_ 路径）→ 精确匹配（token 绑定 ws）。
+        - 两者均 None（防御，router ``_read_args`` 恒给其一）→ 空结果（fail-closed）。
+
+        ``since`` 非 None 时 ``ts > since`` **严格大于**（增量不含边界行；naive
+        值按 UTC 解释——SQLite 测试库丢 tzinfo 的方言分叉防御，X-07 同源）。
+        排序 ``ts ASC, id ASC`` 稳定正序；``total`` 是过滤后（scope + since）
+        总行数、不含 limit 截断，``limit`` 由 router 层 Query 校验（默认 500 上限
+        5000）。change 无事件 → 空列表（不 404，事件表独立于 change 行存在）。
+        """
+        ws_col = col(PlatformChangeEventORM.workspace_id)
+        filters: list[ColumnElement[bool]] = [
+            col(PlatformChangeEventORM.change_name) == change_name
+        ]
+        if allowed_workspace_ids is not None:
+            filters.append(ws_col.in_(allowed_workspace_ids))
+        elif workspace_id is not None:
+            filters.append(ws_col == workspace_id)
+        else:
+            return [], 0
+        if since is not None:
+            since_norm = since if since.tzinfo else since.replace(tzinfo=UTC)
+            filters.append(col(PlatformChangeEventORM.ts) > since_norm)
+        total = (
+            await self._session.execute(
+                select(func.count()).select_from(PlatformChangeEventORM).where(*filters)
+            )
+        ).scalar_one()
+        stmt = (
+            select(PlatformChangeEventORM)
+            .where(*filters)
+            .order_by(col(PlatformChangeEventORM.ts).asc(), col(PlatformChangeEventORM.id).asc())
+            .limit(limit)
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return list(rows), total

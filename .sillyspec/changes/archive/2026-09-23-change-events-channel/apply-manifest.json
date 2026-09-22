@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-23-change-events-channel",
+  "appliedAt": "2026-09-22T22:18:29.687Z",
+  "baseHash": "3ad24659c4c928442d1d56851822b3a852acdedf",
+  "files": [
+    {
+      "path": "backend/app/modules/platform_sync/model.py",
+      "sha256": "85546f28fc787c959bb4645272c2d7e870f2f4ea3ddc099540e4c369762813ee"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/router.py",
+      "sha256": "657e35e5578ae4c4f0552feff42d62076d17e145de2a87a5c7d77fd966a603e5"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/schema.py",
+      "sha256": "7cf1d4b80bc5305ea8fec034928a05486b60ba3af4a03a2d722b2469014c80f3"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/service.py",
+      "sha256": "374e7e7d48cc930f87a3c2461c82831d6a6e37b38dd3a20d9583c389cd69587a"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/conftest.py",
+      "sha256": "1174ba7af0a23c005603aa3921f1c46923544bfafd9538dbeb3fe34eef23d214"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_change_events.py",
+      "sha256": "1a295b45e0d5c82b03837ce7b82fa83e1757d6bcf2a1a9903c4b6fccd35c2a54"
+    },
+    {
+      "path": "backend/migrations/versions/20260923040000_add_platform_change_events.py",
+      "sha256": "527bebd13e799629c1f31a8a5da49801f0f94d594d5ba1fd4bac977e8adc0382"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "06378007275a36c47d8be0af446ede38caaa3af197cf4b09e5c46cb1e7a0b75a"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+      "sha256": "8b0ede2a7003baaf5a53c953dc80c9ab71e83bf1ee285325bbb4fbb94ccd0bea"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-events-card.test.tsx",
+      "sha256": "90f5c290804d3a7bd910bda8bcb4678a9c1a5850c411d597f98e9de7eb7d9d7f"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-events-card.tsx",
+      "sha256": "28d8436f9841760b54e1ce6a806580e26da486211c03b54742088378c37144dc"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "f986a366fd744872cfa31b872982715ad9aafffc92ddfd71ad534298184333e2"
+    },
+    {
+      "path": "frontend/src/lib/changes.ts",
+      "sha256": "0af6a44d66c3ad2b28b20719efe0e0bbb5cbdd9f2552f32159905ac3c0fa2d70"
+    }
+  ]
+}

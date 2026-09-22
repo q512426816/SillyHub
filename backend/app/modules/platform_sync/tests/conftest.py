@@ -3,8 +3,8 @@
 自包含建表（不改根 conftest）：``platform_sync`` model 未在根 conftest ``db_engine``
 的 import 列表（根 conftest 集中登记各 feature model），本 conftest 用 autouse
 fixture 单独建 ``platform_change_progress`` + ``platform_sync_tokens`` +
-``platform_agent_logs`` 三张表，让 platform_sync 测试自包含（遵守 task-07
-allowed_paths，不扩散到根 conftest）。
+``platform_agent_logs`` + ``platform_change_events`` 四张表，让 platform_sync 测试
+自包含（遵守 task-07 allowed_paths，不扩散到根 conftest）。
 """
 
 from __future__ import annotations
@@ -16,13 +16,14 @@ import pytest
 
 @pytest.fixture(autouse=True)
 async def ensure_platform_sync_table(db_engine: Any) -> None:
-    """建 ``platform_change_progress`` + ``platform_sync_tokens`` + ``platform_agent_logs`` 表。
+    """建 platform_sync 四张表（progress / tokens / agent_logs / change_events）。
 
     platform_sync model 未在根 conftest db_engine import 列表 → metadata 不含该表
-    → 根 ``create_all`` 不会建它。此处 import 注册到 metadata + 单独 create 三张表
+    → 根 ``create_all`` 不会建它。此处 import 注册到 metadata + 单独 create 四张表
     （task-01 加 platform_sync_tokens，task-02 给 progress 表加 workspace_id 复合 PK；
     2026-08-23-platform-agent-log-ingest task-01 加 platform_agent_logs，为 task-02
-    接口层测试提供落库基座）。
+    接口层测试提供落库基座；2026-09-23-change-events-channel task-01 加
+    platform_change_events，为 task-02 事件写入端点测试提供落库基座）。
     """
     from app.models.base import BaseModel
     from app.modules.platform_sync import model as _ps_model
@@ -35,6 +36,7 @@ async def ensure_platform_sync_table(db_engine: Any) -> None:
                 _ps_model.PlatformChangeProgressORM.__table__,
                 _ps_token_model.PlatformSyncTokenORM.__table__,
                 _ps_model.AgentSessionLogORM.__table__,
+                _ps_model.PlatformChangeEventORM.__table__,
             ],
         )
 

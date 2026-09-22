@@ -6,6 +6,9 @@
 - POST /changes/-/spec-sync：CLI 直跑增量 spec 文件 ops（2026-08-17-spec-file-incremental-sync task-02，design §5.2/§7）
 - GET /changes/-/spec-bundle：CLI 直跑拉服务器 spec 整树 tar（2026-08-29-change-delete-closure-and-spec-pull task-08，design §7.1/§7.3）
 - GET /changes/{name}/progress：完整 JSON（裸六表 + 顶层 last_pushed_at，404）
+- POST /changes/{name}/events：change 事件批量上行（2026-09-23-change-events-channel
+  task-03，design §接口定义 / FR-01，仅 shpsync_）
+- GET /changes/{name}/events：change 事件增量读取（同上 task-03，FR-04 since 正序）
 - POST /changes/{name}/documents：四件套全文同步（2026-08-14-platform-sync-docs-approval，D-004@v1）
 - POST /changes/{name}/approval：审批决定提交（同上，D-001@v1 完整闭环）
 - GET /changes/{name}/approval：审批状态查询（改读库，无记录默认 approved 放行）
@@ -39,6 +42,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -64,6 +68,10 @@ from app.modules.platform_sync.schema import (
     ApprovalSubmitOk,
     ApprovalSubmitRequest,
     ChangeApprovalResponse,
+    ChangeEventItem,
+    ChangeEventListResponse,
+    ChangeEventPushOk,
+    ChangeEventPushRequest,
     ChangeListItem,
     ConflictResponse,
     DocumentsSyncOk,
@@ -370,6 +378,81 @@ async def get_approval(
     return ChangeApprovalResponse(
         status=str(record.get("status", "approved")),
         reason=record.get("reason"),
+    )
+
+
+# ── Change 2026-09-23-change-events-channel task-03（design §接口定义 / FR-01 / FR-04）──
+
+
+@router.post("/changes/{name}/events", response_model=ChangeEventPushOk)
+async def push_change_events(
+    name: str,
+    body: ChangeEventPushRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _write_auth,
+) -> ChangeEventPushOk:
+    """POST change 事件批量上行（design §接口定义 / FR-01~FR-03，watcher 观测通道）。
+
+    CLI ``watcher.js`` 周期批推（1..200 条/请求，schema 层 422）。router 只收发
+    透传零业务判定（D-004 红线：不触发通知/审批/门控）——批内+已存键 dedup 跳过、
+    ``provisional`` 恒 True、5000 上限修剪全在 service ``append_events``（task-02）。
+    响应 ``{accepted, deduplicated}``（两者之和 = 请求条数）。
+
+    workspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写：无凭据
+    401 / shk_live_·JWT 403，对齐 quicklog-entries 范式）；body 不含也不接受
+    workspace 字段（extra=ignore 吞掉，G6 同款）。
+    """
+    _user, scope = auth
+    if scope.workspace_id is None:
+        # 防御：require_platform_sync_write 的 shpsync_ 通道恒派生 workspace；到达此
+        # 分支即凭据形态异常，403 关闭写通道（fail-closed，对齐 quicklog 范式）。
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
+    accepted, deduplicated = await PlatformSyncService(session).append_events(
+        workspace_id=scope.workspace_id,
+        change_name=name,
+        events=body.events,
+    )
+    return ChangeEventPushOk(accepted=accepted, deduplicated=deduplicated)
+
+
+@router.get("/changes/{name}/events", response_model=ChangeEventListResponse)
+async def list_change_events(
+    name: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _read_auth,
+    since: str | None = Query(default=None, description="ISO 8601 增量游标（ts > since 严格大于）"),
+    limit: int = Query(default=500, ge=1, le=5000, description="返回条数，默认 500 上限 5000"),
+) -> ChangeEventListResponse:
+    """GET change 事件增量列表（design §接口定义 / FR-04，``ts ASC, id ASC`` 稳定正序）。
+
+    鉴权 scope 复用 ``_read_args`` 翻译（shpsync_ → token 绑定 workspace；JWT/
+    shk_live_ → CHANGE_READ 并集，本表 workspace_id NOT NULL 无 NULL 桶）。
+    ``since`` ISO 8601 可选增量游标：``ts > since`` 严格大于（增量不含边界行），
+    ``Z`` 后缀容忍（替换 +00:00 再解析），naive 值由 service 按 UTC 解释（X-07
+    方言防御）；解析失败 422 中文。``limit`` 默认 500 上限 5000（单变更上限内
+    全量窗口）；``total`` 是过滤后总行数、不含 limit 截断。change 无事件 →
+    200 空列表不 404（事件表独立于 change 行存在，观测面宽松）。
+    ChangeEventItem ``from_attributes`` 直接 model_validate ORM 行（router 零手工映射）。
+    """
+    _user, scope = auth
+    since_dt: datetime | None = None
+    if since is not None:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="since 参数不是合法的 ISO 8601 时间格式",
+            ) from exc
+    rows, total = await PlatformSyncService(session).list_events(
+        change_name=name,
+        since=since_dt,
+        limit=limit,
+        **_read_args(scope),
+    )
+    return ChangeEventListResponse(
+        items=[ChangeEventItem.model_validate(row) for row in rows],
+        total=total,
     )
 
 

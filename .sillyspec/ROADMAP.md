@@ -4,11 +4,15 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-09-13
+最近更新：2026-09-23
 
 ---
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
+
+### 2026-09-23 · 变更事件通道（watcher 推送消费端点 + 面板观测区）
+
+- **change-events-channel**（2026-09-23 立项/归档，brainstorm→plan→execute→verify 全流程 PASS WITH NOTES，8 task/7 Wave）：sillyspec CLI watcher/哨兵已向 `/api/changes/{name}/events` 推送 provisional 事件但平台端点不存在（推送静默 404）——本件补齐消费端与展示面：①后端 platform_sync 模块新增 `platform_change_events` append-only 表（`(workspace_id, change_name, dedup_key)` 幂等跳过不覆盖、单变更 5000 条上限同事务修剪最旧）+ POST/GET 双端点（鉴权同款 shpsync_ 写/读 scope；GET since ISO 严格大于增量 + ts ASC 稳定正序）；②前端变更详情页 aside 新增「观测事件」折叠卡（30s 轮询自取数、warning 琥珀高亮+角标计数默认展开、provisional 徽标悬停"旁路观测信号，非流程真相"、失败静默隐藏）。红线（D-004）：平台对 provisional 事件只展示不消费——`--done` 才是流程真相，全链路零业务判定（service/router/组件 grep 零通知/审批/门控命中；provisional 落库恒 True 含伪造反例测试）。执行期裁决 D-008：迁移 down_revision 接实测 head 20260922194500（任务卡成稿后 merge 入链）。测试：后端 16 用例五组（收/取/去重/鉴权/上限+红线反例）+platform_sync 全模块 260 passed、前端 vitest 5 用例四组、tsc/ruff/mypy 全绿；端到端 curl 实测（SQLite dev 后端真起服：401/推 5 条含 2 warning/正序/重放去重/since 增量/422 全过）。NOTES：浏览器视觉级目验移交人工（行为已由组件测试机器断言）；本地无 PG 用 SQLite 验收（生产部署后事件表随 alembic 迁移自动建）。
 
 ### 2026-09-20 · 工作区可见性收紧为成员制（平台级权限纯入口化）
 

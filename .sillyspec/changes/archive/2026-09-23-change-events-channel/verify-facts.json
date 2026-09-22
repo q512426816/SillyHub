@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-23-change-events-channel",
+  "generatedAt": "2026-09-22T21:43:02.209Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-23-change-events-channel",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 4,
+        "globEntries": 1
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-23-change-events-channel",
+      "metrics": {
+        "tasks": 8,
+        "hasTest": 8
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-23-change-events-channel",
+      "metrics": {
+        "backendEndpoints": 3519,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-23-change-events-channel",
+      "metrics": {
+        "deletions": 1,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-23-change-events-channel",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-09-23-change-events-channel",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-09-23-change-events-channel",
+      "metrics": {
+        "checkedFiles": 9,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "端到端真实集成：SQLite dev 后端（worktree HEAD 6609c7bb）起服后 curl 模拟 watcher 全链路——401 鉴权 / 推 5 条乱序（2 warning）/ GET 正序 / 重放去重 / since 增量 / 422 全部实测通过",
+      "command": "uvicorn app.main:app --port 8901 + curl POST/GET /api/changes/2026-09-23-change-events-channel/events",
+      "exitCode": 0,
+      "logPath": "本报告 Runtime Evidence 节（完整请求/响应实录，服务已停）"
+    }
+  ],
+  "handover": {
+    "count": 1,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "变更详情页「观测事件」折叠卡浏览器目验（真实琥珀色视觉/30s 轮询刷新体感/provisional 徽标悬停 tooltip）",
+        "condition": "部署后打开任一变更详情页：推 2 条 severity=warning 事件 → 卡片默认展开+角标 2+琥珀行；悬停 provisional 徽标见「旁路观测信号，非流程真相」；挂机 30s 见轮询刷新。行为已由 vitest 5 用例机器断言，本项为视觉级增强确认",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/changes/{name}/events",
+        "rowIdx": 1
+      },
+      {
+        "method": "GET",
+        "path": "/api/changes/{name}/events",
+        "rowIdx": 2
+      }
+    ],
+    "declared": 2,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/api/changes/{name}/events",
+        "rowIdx": 1
+      }
+    ]
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/platform_sync/tests/conftest.py",
+      "backend/app/modules/platform_sync/tests/test_change_events.py"
+    ]
+  },
+  "smokeRan": "not-ran",
+  "tests": {
+    "command": "module[frontend,platform_sync]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-22T22:16:18.366Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

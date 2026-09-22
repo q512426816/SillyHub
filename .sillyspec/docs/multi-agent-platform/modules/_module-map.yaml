@@ -32,6 +32,7 @@ modules:
       - upsert_agent_log_states / BLOCKED_SEGMENTS (backend/app/modules/platform_sync/service.py+router.py, POST /agent-logs/states 批量 upsert-create+blocked 段转移/120s agent_blocked 通知, 2026-09-07-agent-liveness-states)
       - AgentLogMessagesResponse 可选字段+total_usage (backend/app/modules/platform_sync/schema.py+router.py, GET /agent-logs/{id}/messages 响应扩展·sender/turn_id/model/duration_ms/usage 逐层透传·老 daemon 缺省兼容, 2026-09-19-tool-report-session-replay)
       - AgentLogUsage/totals+消息五字段 (backend/app/modules/platform_sync/schema.py+router.py, messages 响应扩展·内层 snake_case 零改名·唯一外层映射 totalUsage→totals·老 daemon 全 None, 2026-09-20-agent-log-session-replay)
+      - append_events/list_events (backend/app/modules/platform_sync/service.py+router.py, POST/GET /changes/{name}/events 变更事件通道·watcher 批量上行幂等跳过+5000 修剪·since 增量正序·provisional 只展示不消费红线, 2026-09-23-change-events-channel)
       - WorkerLiveness 直查 (backend/app/modules/agent/mcp_tools.py, list_workers running worker 附 liveness{state,evidence,derived_at}, 2026-09-07-agent-liveness-states)
       - workspace_router
       - members_router
@@ -63,6 +64,7 @@ modules:
       - AgentLivenessOverviewCard / LivenessBadge (src/components/agent-log/，五态徽章+工作台状态总览卡，D-004 两层, 2026-09-07-agent-liveness-states)
       - AgentReplayBody / buildReplayTurns (frontend/src/components/daemon/agent-replay-body.tsx + frontend/src/lib/agent-log-turns.ts, tool_report 纯日志会话回放主体·TurnTimeline 真组件复用·适配器切轮/系统事件中性行/轮级 token·工作会话折叠条, 2026-09-19-tool-report-session-replay)
       - AgentLogReplayBody / buildReplayTurns / isSubagentLog (frontend/src/components/daemon/agent-log-replay-body.tsx + frontend/src/lib/agent-log-replay.ts, tool_report 空轮回放主体·TurnTimeline 直适配·系统事件复用 stderr 原语零改组件·三保险切轮·首屏最早窗口 10 页上限·dialog attach 轮询捕获门控, 2026-09-20-agent-log-session-replay)
+      - ChangeEventsCard (frontend/src/components/changes/detail/change-events-card.tsx, 变更详情页 aside「观测事件」折叠卡·30s 轮询自取数·warning 琥珀高亮+角标计数·provisional 徽标·失败静默隐藏·零业务逻辑红线, 2026-09-23-change-events-channel)
     depends_on: [backend]
     used_by: [deploy, ci, build]
     needs_review: false

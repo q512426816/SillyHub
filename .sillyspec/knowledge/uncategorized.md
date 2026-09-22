@@ -281,3 +281,9 @@ SDK 0.3.181（捆 CLI 2.1.181+）运行时确实发射 `system/task_started`（t
 ## jsdom 下 shadcn/Radix Avatar 的 AvatarImage 永不渲染——需 stub window.Image
 - Radix AvatarImage 内部 `new Image()` 等 load 事件才挂 `<img>`，jsdom 不加载资源永不触发 → 头像图用例断言 img 永远拿不到、只见 AvatarFallback 首字。解法：测试里 stub `window.Image`（getter/setter 赋 src 时同步置 complete=true、naturalWidth=64 并 dispatch load），`URL.createObjectURL` 由 src/test/setup.ts 全局 polyfill 兜底。适用于一切经 useAvatarSrc（blob objectURL）→ shadcn Avatar 展示头像的组件测试（top-bar-avatar.test.tsx 实证）。
 - 来源：2026-09-10-account-avatar-upload task-09
+
+## Git Bash 下本地 e2e 验收的两个环境坑：/tmp 路径分叉与 curl 多行 JSON 传参失败
+- Windows Git Bash 起本地 dev 后端做 curl 端到端验收时：(1) `DATABASE_URL=sqlite+aiosqlite:////tmp/x.db` 中 Python/aiosqlite 把 `/tmp` 解析为当前盘符根（`C:/tmp/x.db`），与 Git Bash 内建 `/tmp`（用户 AppData/Local/Temp）是两个文件——`rm -f /tmp/x.db` 清库清不掉真库，残留半建表结构会让重跑报 `table has no column named ...`。规避：DATABASE_URL 一律写显式 Windows 路径 `sqlite+aiosqlite:///C:/tmp/x.db`，清理时同步删两个路径。
+- (2) curl `-d '<多行 JSON>'` 在 Git Bash 单引号内含中文/换行时报 `There was an error parsing the body`。规避：JSON 写文件后 `-d @<绝对路径>`。
+- (3) 本地无 PG 时起 dev 后端：SQLite URL + SECRET_KEY 环境变量注入（.env 只在主仓 backend/ 下，worktree 缺失）；全量 alembic 链在 SQLite 跑不通（PG 专属 EXTENSION 语句），用 `import app.main` 后 `BaseModel.metadata.create_all`（根 conftest 同款 model 注册链）。
+- 来源：2026-09-23-change-events-channel task-08

@@ -14,6 +14,7 @@ import {
   useChangeDeleteAccess,
 } from "@/components/delete-change-confirm";
 import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
+import { ChangeEventsCard } from "@/components/changes/detail/change-events-card";
 import { ChangeFilesCard } from "@/components/changes/detail/change-files-card";
 import { ChangeSessionsCard } from "@/components/changes/detail/change-sessions-card";
 import { ChangeStageActions } from "@/components/changes/detail/change-stage-actions";
@@ -431,6 +432,14 @@ export default function ChangeDetailPage({ params }: Props) {
               workspaceId,
               changeKey: change.change_key,
             }}
+          />
+          {/* task-06（2026-09-23-change-events-channel / FR-05~07 / D-004 / D-006）：
+              「观测事件」折叠卡——CLI watcher 旁路推送流只读展示，组件 useQuery
+              自取数（30s 轮询）+ 失败静默隐藏（QuicklogLinkedCard 同款范式）；
+              纯展示零业务逻辑，行不可点击、无 mutation、不触发流程动作。 */}
+          <ChangeEventsCard
+            workspaceId={workspaceId}
+            changeKey={change.change_key}
           />
         </aside>
       </div>

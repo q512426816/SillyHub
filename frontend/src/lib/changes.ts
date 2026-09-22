@@ -697,3 +697,45 @@ export function listReviews(workspaceId: string, changeId: string) {
     `/api/workspaces/${workspaceId}/changes/${changeId}/reviews`,
   );
 }
+
+// ── 变更观测事件（2026-09-23-change-events-channel task-05，design §接口定义 / FR-04）──
+
+/**
+ * 观测事件行。对齐后端 schema（components.schemas.ChangeEventItem，gen:types 生成）。
+ * id 是平台行主键 UUID（与推送侧 CLI 去重 id 同名异义）；ts/created_at 为 ISO 8601
+ * 字符串；provisional 恒 true（D-004 红线：旁路观测信号，非流程真相）。
+ */
+export type ChangeEventItem = components["schemas"]["ChangeEventItem"];
+
+/** 观测事件列表响应。对齐后端 schema（components.schemas.ChangeEventListResponse）。 */
+export type ChangeEventListResponse =
+  components["schemas"]["ChangeEventListResponse"];
+
+/**
+ * 拉取变更观测事件 — GET /api/changes/{name}/events
+ *
+ * CLI watcher 旁路推送的 append-only 事件流（design §接口定义 / FR-04）：
+ * ``ts ASC, id ASC`` 稳定正序、受 limit 截断；``total`` 是过滤后总行数（不含截断）。
+ * ``since`` 为 ISO 8601 增量游标（``ts > since`` 严格大于，不含边界行），非法格式
+ * 经 apiFetch 抛 ApiError 422（中文 message）；``limit`` 默认 500 上限 5000。
+ * change 无事件 → 200 空列表不 404（事件表独立于 change 行存在，观测面宽松）。
+ *
+ * 注意：端点鉴权 scope 由凭据派生（shpsync_ 绑定 workspace / JWT·shk_live_ →
+ * CHANGE_READ 并集），路径与查询均**无 workspace 维度**——workspaceId 不参与请求，
+ * 仅为详情页调用方签名对称保留（task-06 ChangeEventsCard 同时持有 workspaceId +
+ * change_key，透传不裁剪；ChangeEventItem 亦无 workspace 字段，无法前端过滤）。
+ */
+export function listChangeEvents(
+  workspaceId: string,
+  changeKey: string,
+  params?: { since?: string; limit?: number },
+): Promise<ChangeEventListResponse> {
+  // workspaceId 见上 JSDoc：端点无 workspace 维度，不拼进 URL（无假过滤语义）。
+  const searchParams = new URLSearchParams();
+  if (params?.since) searchParams.set("since", params.since);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const qs = searchParams.toString();
+  return apiFetch<ChangeEventListResponse>(
+    `/api/changes/${encodeURIComponent(changeKey)}/events${qs ? `?${qs}` : ""}`,
+  );
+}
