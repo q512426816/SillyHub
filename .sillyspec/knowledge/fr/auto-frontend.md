@@ -78,3 +78,73 @@ created_at: 2026-09-22T16:33:05.472Z
 - 场景：默认场景 — Given 群 G 直接归属工作区 D、关联项目 A，项目 A 关联工作区 D 与 F，当前用户是 G 的成员；When 用户分别在工作区 D 与工作区 F 打开会话列表（桌面左栏 / 移动端列表页）；Then 两处的群聊分区均显示群 G
 全文：.sillyspec/changes/archive/2026-09-13-session-group-ux-fixes/requirements.md#FR-3
 最近确认：39d3d8c5c
+
+## FR-auto-frontend-008 列表页重新扫描
+变更：2026-09-16-mobile-changes-parity
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given 用户在移动变更列表页（任一变更 tab） 重新扫描返回警告列表 重新扫描请求失败；When 点击工具栏「重新扫描」按钮 警告数 > 0 返回 ApiError；Then 调用 reparseChanges(workspaceId)，成功后显示「已重新扫描：解析 N，新增 N · 更新 N · 删除 N。W 个警告。」反馈条（文案
+全文：.sillyspec/changes/archive/2026-09-16-mobile-changes-parity/requirements.md#FR-01
+最近确认：d33092ea3
+
+## FR-auto-frontend-009 列表卡片信息补齐
+变更：2026-09-16-mobile-changes-parity
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given ChangeSummary.owner_name 非空 owner_name 空且 owner_id 有值 owner_name 与 owner_id 均空 a；When 渲染卡片元信息行 渲染元信息行 渲染元信息行 渲染元信息行 渲染执行用量行 渲染执行用量行 渲染执行用量行 渲染徽标行；Then 显示负责人名（owner_name） 显示 owner_id 前 8 位（mono 弱化色） 负责人段显示「—」 影响组件段省略（不占位） 显示「—」占位 整行
+全文：.sillyspec/changes/archive/2026-09-16-mobile-changes-parity/requirements.md#FR-02
+最近确认：d33092ea3
+
+## FR-auto-frontend-010 列表排序切换与 URL 参数
+变更：2026-09-16-mobile-changes-parity
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given 用户打开筛选抽屉 URL 含 ?tab=quicklog 或 ?tab=archive（合法值） URL 含 ?search=词 未操作任何筛选、URL 无参数；When 切换「排序」chip（↓ 最近优先 / ↑ 最早优先）并确定 页面初始加载 页面初始加载 页面加载；Then sortDir 生效进主列表 query key，列表按所选方向请求 初始 tab 为该值（非法值回 active） 搜索词初始化为该值（输入框与已提交 sta
+全文：.sillyspec/changes/archive/2026-09-16-mobile-changes-parity/requirements.md#FR-03
+最近确认：d33092ea3
+
+## FR-auto-frontend-011 quicklog tab 筛选
+变更：2026-09-16-mobile-changes-parity
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given 用户在快速修复 tab 用户选择状态=疑似中断并确定 作者选项数据 用户关闭「显示空壳占位」并确定 quicklog tab 处于抽屉筛选状态；When 打开筛选抽屉 quicklog 列表请求发出 quicklog 列表响应到达 请求发出 点击重置；Then 可见状态 4 态 chips、作者 chips、显示空壳占位开关 query key 与请求参数带 status="stale"（槽位与桌面 QuicklogT
+全文：.sillyspec/changes/archive/2026-09-16-mobile-changes-parity/requirements.md#FR-04
+最近确认：d33092ea3
+
+## FR-auto-frontend-012 详情页三卡挂载
+变更：2026-09-16-mobile-changes-parity
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given change.steps 存在且至少一步有 completed_at change.steps 无 completed_at（或 steps 缺失） 任意变更详；When 详情页渲染 详情页渲染 渲染；Then StageStepper 下方显示 ChangeLastSignal（最后信号相对时间） 最后信号行不渲染 挂载 ChangeUsageCard(kind="c
+全文：.sillyspec/changes/archive/2026-09-16-mobile-changes-parity/requirements.md#FR-05
+最近确认：d33092ea3
+
+## FR-auto-frontend-013 详情页阶段-时间线联动
+变更：2026-09-16-mobile-changes-parity
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given steps 中某阶段有条目 时间线处于阶段筛选态 某阶段在 steps 中无条目；When 点击步骤条该阶段节点 再次点击同阶段节点或点清除 chip 渲染步骤条；Then 时间线仅显示该阶段步骤，卡头出现「阶段名 ✕」清除 chip 取消筛选恢复全量 该节点不可点（无筛选效果）
+全文：.sillyspec/changes/archive/2026-09-16-mobile-changes-parity/requirements.md#FR-06
+最近确认：d33092ea3
+
+## FR-auto-frontend-014 详情页删除入口
+变更：2026-09-16-mobile-changes-parity
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given 用户对目标变更有删除权限（canDeleteChange 启发式通过） 用户无权限 change 尚在加载（null） 用户点击删除并确认 deleteChan；When 打开 ⋯ 菜单 打开 ⋯ 菜单 渲染 ⋯ 菜单 deleteChange 成功 mutation onError；Then 出现 danger 项「删除变更」 不出现删除项（其余动作不受影响） 不出现删除项 toast「变更 {change_key} 已删除」+ 失效 ["chang
+全文：.sillyspec/changes/archive/2026-09-16-mobile-changes-parity/requirements.md#FR-07
+最近确认：d33092ea3
