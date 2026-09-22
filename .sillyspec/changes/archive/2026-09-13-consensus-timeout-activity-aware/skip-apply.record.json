@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-13-consensus-timeout-activity-aware",
+  "flag": "--skip-apply",
+  "skippedAt": "2026-09-22T17:14:41.504Z",
+  "deliverableCount": 4,
+  "deliverableFiles": [
+    "backend/app/modules/daemon/group/service/consensus.py",
+    "backend/app/modules/daemon/group/service/mentions.py",
+    "backend/app/modules/daemon/group/service/messages.py",
+    "backend/app/modules/daemon/tests/test_group_consensus_activity.py"
+  ],
+  "note": "归档时显式跳过未 apply 交付面检查（--skip-apply）：交付物未确认进主仓，本记录随归档包留存供审计"
+}
