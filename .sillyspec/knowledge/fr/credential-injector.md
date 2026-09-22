@@ -67,3 +67,49 @@
 - 场景：默认场景 — Given provider_config 含明文 api_key 流经 daemon；When 写日志 / submitMessages / complete_lease / AuditLog；Then api_key 被 `redactEnv` 脱敏（`***REDACTED***`），严禁明文落盘 / 落日志 / 回传。
 全文：.sillyspec/changes/archive/2026-07-26-2026-07-25-llm-provider-management/requirements.md#FR-07
 最近确认：b89ac6ed9
+
+## FR-credential-injector-008 聚合契约 + 编译期强制
+变更：2026-09-11-provider-adapter-registry
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given INTERACTIVE_PROVIDERS 聚合表（ProviderAdapter = 现五要素 + envInjector 懒工厂【实例或显式 none+理由；Then `satisfies Record<InteractiveProvider, ProviderAdapter>` 编译期强制全引擎覆盖——新引擎加入联合类型后未
+全文：.sillyspec/changes/archive/2026-09-11-provider-adapter-registry/requirements.md#FR-01
+最近确认：f0211bbcf
+
+## FR-credential-injector-009 派生改造零漂移
+变更：2026-09-11-provider-adapter-registry
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given credential-injector REGISTRY（惰性 memoized 派生）与 provider-file-settings 分派（按 adapte；Then 模块导出面与调用点零改动；全部既有测试（daemon 162 修改相关 + frontend 55，含 ForReload 21 矩阵/dispatch 17/
+全文：.sillyspec/changes/archive/2026-09-11-provider-adapter-registry/requirements.md#FR-02
+最近确认：f0211bbcf
+
+## FR-credential-injector-010 硬编码收口（六处）
+变更：2026-09-11-provider-adapter-registry
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given daemon.ts 热切换判断（:7815）、_cleanupProviderFileDirs、_sweepOrphanProviderFileDirs（:47；When 改为读聚合表元数据（fileSettings 是否 writer / perSessionDir）；Then 六处行为与原字面量判断逐类等价（claude/cursor/未知零动作，codex/pi 原逻辑不变），既有测试锁定
+全文：.sillyspec/changes/archive/2026-09-11-provider-adapter-registry/requirements.md#FR-03
+最近确认：f0211bbcf
+
+## FR-credential-injector-011 caps 生成 + 白名单派生
+变更：2026-09-11-provider-adapter-registry
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given providers.ts PROVIDER_CAPS 单源（新增第 10 键 provider_switch：claude/codex/pi=true，curs；When 跑生成脚本（frontend gen:types 链尾自动 / 手动）；Then 产出 frontend/src/lib/provider-caps.ts 与 backend/app/modules/agent/provider_caps.p
+全文：.sillyspec/changes/archive/2026-09-11-provider-adapter-registry/requirements.md#FR-04
+最近确认：f0211bbcf
+
+## FR-credential-injector-012 冒烟制度化
+变更：2026-09-11-provider-adapter-registry
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 每个文件层写盘器声明 smokeSuite（测试文件名）；Then 守护测试校验：smokeSuite 文件真实存在 + 文件内容含 api_format 词表全量字面量（表驱动映射覆盖）；pi-settings/codex-s
+全文：.sillyspec/changes/archive/2026-09-11-provider-adapter-registry/requirements.md#FR-05
+最近确认：f0211bbcf

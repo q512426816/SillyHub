@@ -797,3 +797,11 @@ supersedes：D-006@v2
 理由：否——动表结构与 D-005 冲突；现有 change/quicklog links 表已能表达「会话↔ctx」登记
 否决理由：违反已确认的「不动表结构」决策；现有 links 表能力足够
 复潮条件：ctx owner 解析出现性能问题或需要显式管理界面
+
+## D-003@v2 聚合形态 = 编译期聚合（落点修订）
+状态：implemented
+变更：2026-09-11-provider-adapter-registry
+锚点：未记录
+最近确认：f0211bbcf
+理由：Grill 复审发现 @v1 表述「新建 provider-adapter.ts」与实际最优落点不符——ProviderDescriptor（providers.ts:262）已承载五要素，原地扩展 INTERACTIVE_PROVIDERS 为 ProviderAdapter 聚合表改动面最小。@v2 修订：落点=providers.ts 内扩展，不另立契约文件。
+supersedes：D-003@v1
