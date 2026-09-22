@@ -33,7 +33,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - `session-list-panel` — 筛选 + 虚拟滚动 + 紧凑两行条目
   - `workspace-session-picker` — 新建会话工作区选择器（自治取数 listWorkspaces + fetchMyBindings；首项「不使用工作区」，选中工作区按绑定 daemon_id 联动带出在线机器；空列表禁用提示 + 失败重试，2026-08-19-sessions-workspace-selector）
   - `new-session-form` — 新会话五选择器（工作区 / runtime / profile / 供应商 / 会话名；选中工作区提交体带 workspace_id 并显示项目目录运行提示条）
-  - `session-config-bar` — 运行中切换档案/供应商（点选即切换）
+  - `session-config-bar` — 运行中切换档案/供应商/模型/思考档位（点选即切换；思考档位 ql-20260922-001 起为 antd Dropdown 胶囊触发器，类名同 ctrlButton 与供应商/档案按钮统一，菜单向上弹 selectable 高亮当前档）
   - `ctx-usage-bar` — 上下文用量前端累计
 - 群聊（group-chat/，2026-09-01-session-group-chat）：
   - `group-chat-panel.tsx` — 群聊主视图：平铺消息流按 log timestamp 全局排序
