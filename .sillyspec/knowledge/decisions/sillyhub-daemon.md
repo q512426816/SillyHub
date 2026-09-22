@@ -168,3 +168,17 @@
 锚点：未记录
 最近确认：20cf7bc46
 理由：单条 part（data={tool, callID, state:{status, input, output|error, …}}）产两段：tool_use（input 2KB 摘要）+ tool_result（output 4KB 摘要，is_error=status=='error'）；status ∈ running/pending（无 output）只产 tool_use。
+
+## D-001@v1 非 claude 引擎完整开放会话级供应商切换（含「不指定（本机默认）」）
+状态：implemented
+变更：2026-09-11-session-provider-switch-codex-pi
+锚点：sillyhub-daemon/src/codex-settings.ts, sillyhub-daemon/src/provider-file-settings.ts（新增）
+最近确认：225dd771d
+理由：用户裁决：肯定要开放——本变更的目的就是与 claude 完全对齐。技术落地（保住不丢历史）：codex 切回本机默认**不丢 CODEX_HOME**（thread 历史存在 `$CODEX_HOME/sessions` 下，丢目录即断 resume），改为把宿主 `~/.codex` 的 auth.json / config.toml **镜像拷贝**进 per-session 目录（宿主无文件则清空 = 如实反映宿主未登录）；pi 切回本机默认 = 丢弃 `PI_CODING_AGENT_DIR` env 回宿主 `~/.pi`（pi 会话历史在 daemon 自管 `--session-dir`，pi-rpc-driver.ts:719，不受影响）。
+
+## D-003@v1 daemon 侧接入点 = reload 内核统一接入（方案 A）
+状态：implemented
+变更：2026-09-11-session-provider-switch-codex-pi
+锚点：sillyhub-daemon/src/interactive/session-manager.ts:_reloadSessionNow
+最近确认：225dd771d
+理由：用户裁决方案 A：把 applyProviderFileSettings（+ codex null 切换宿主凭证镜像扩展）从 task-runner.ts 抽到独立共享模块（provider-file-settings.ts），session-manager `_reloadSessionNow` 构造 newEnv 时对 codex/pi kind 调用并把 CODEX_HOME / PI_CODING_AGENT_DIR 并入新 env（文件层 env 最后合并盖过下层，与 daemon.ts:8285 spawn 路径同模式）；顺带删 reloadWithProvider 的 claude-only 守卫（session-manager.ts:1502）使 PROVIDER_CONFIG_CHANGED 默认供应商热切换对 codex/pi 也走确定性 reload。否决 B（payload 携带实现细节字段污染消息契约 + 热切换路径享受不到）、C（破坏 driver provider-neutral 契约）。

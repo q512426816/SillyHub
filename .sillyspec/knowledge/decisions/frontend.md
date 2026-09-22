@@ -208,3 +208,10 @@ supersedes：D-001@v1
 锚点：未记录
 最近确认：f1bdbef95
 理由：用户原话「支持按 workspace 或按 agent_profile 独立配置（独立池或不同 provider）」。探查证实 profile 绑定链路已全通，真缺口=llm_provider schema 锁死 claude + daemon injector REGISTRY 无 pi；补齐后 per-(user, agent_kind=pi) 默认与 profile/workspace(default_agent_profile_id) 两条路都开放，不在本变更里强选一条。
+
+## D-002@v1 供应商下拉按会话引擎过滤 agent_kind
+状态：implemented
+变更：2026-09-11-session-provider-switch-codex-pi
+锚点：frontend/src/components/sessions/session-config-bar.tsx
+最近确认：225dd771d
+理由：用户裁决：按引擎过滤。codex 会话只列 codex kind 供应商，pi 只列 pi kind，claude 只列 claude kind。顺手修掉现状「全量展示 + 选错 kind 撞 backend 422（inject_gates.py:556 agent_kind 不匹配）」的坑。

@@ -87,3 +87,52 @@
 - 场景：默认场景 — Given 历史日志含 channel='stdout'、content 以 `[TOOL_USE]` 开头的行（旧 daemon 双写遗留）；When classifyLog 处理；Then 归类为 `tool_call` 语义类（参与工具配对/筛选），不再 fallthrough 到 `log` 灰徽标
 全文：.sillyspec/changes/archive/2026-07-09-2026-07-09-agent-log-display-fix/requirements.md#FR-10
 最近确认：af41fac1d
+
+## FR-task-runner-011 codex/pi 会话内供应商切换确定性生效
+变更：2026-09-11-session-provider-switch-codex-pi
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given codex 或 pi 引擎的 active 会话（已绑定平台供应商 A 或宿主起步均可）；When 用户在配置条选供应商 B（codex/pi kind 与引擎匹配）并确认；Then backend SESSION_SWITCH_CONFIG → daemon turn 边界 reload：重写 per-session 配置目录（CODEX_
+全文：.sillyspec/changes/archive/2026-09-11-session-provider-switch-codex-pi/requirements.md#FR-01
+最近确认：225dd771d
+
+## FR-task-runner-012 codex/pi 切回「不指定（本机默认）」不丢历史
+变更：2026-09-11-session-provider-switch-codex-pi
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given codex 会话当前在平台供应商上（env 带 CODEX_HOME） pi 会话当前在平台供应商上（env 带 PI_CODING_AGENT_DIR）；When 用户选「不指定（本机默认）」 用户选「不指定（本机默认）」；Then reload 后 CODEX_HOME 保持原 per-session 目录（thread 历史不丢），宿主 ~/.codex 的 auth.json/conf
+全文：.sillyspec/changes/archive/2026-09-11-session-provider-switch-codex-pi/requirements.md#FR-02
+最近确认：225dd771d
+
+## FR-task-runner-013 供应商下拉按引擎过滤 + 门禁白名单化
+变更：2026-09-11-session-provider-switch-codex-pi
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given 会话引擎为 E（claude/codex/pi） 会话引擎为 cursor 或未知引擎 会话 provider 为空/未知（session.provider 缺；When 打开配置条供应商下拉；Then 候选=「不指定（本机默认）」+ agent_kind === E 的供应商（全引擎保留默认项；选错 kind 撞 422 的现状坑随之消除） 配置条供应商控件锁
+全文：.sillyspec/changes/archive/2026-09-11-session-provider-switch-codex-pi/requirements.md#FR-03
+最近确认：225dd771d
+
+## FR-task-runner-014 默认供应商热切换（PROVIDER_CONFIG_CHANGED）对 codex/pi 确定性生效
+变更：2026-09-11-session-provider-switch-codex-pi
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given codex/pi 引擎 active 会话；When 用户在 /settings 改默认供应商（backend 推 PROVIDER_CONFIG_CHANGED）；Then daemon markPendingSwitch → reloadWithProvider 不再因非 claude 抛错 → 与 FR-01 同一 reload
+全文：.sillyspec/changes/archive/2026-09-11-session-provider-switch-codex-pi/requirements.md#FR-04
+最近确认：225dd771d
+
+## FR-task-runner-015 codex 宿主起步会话首切供应商时迁移 thread 历史
+变更：2026-09-11-session-provider-switch-codex-pi
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given codex 会话以宿主凭证起步（env 无 CODEX_HOME）且已有 thread（agentSessionId 非空）；When 用户首次切到平台供应商
+全文：.sillyspec/changes/archive/2026-09-11-session-provider-switch-codex-pi/requirements.md#FR-05
+最近确认：225dd771d
