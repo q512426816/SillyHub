@@ -66,3 +66,43 @@
 - 场景：默认场景 — Given claimed batch lease 心跳停止致 lease_expires_at 过期 WS 断开 10s 后仍未恢复 placement 候选筛选；When lease_expiry_sweeper（60s 周期常驻协程）执行 延迟降级任务执行 DB status=online 的候选行评估；Then 过期 lease→expired；run 重派（attempt<3，新 pending lease+WS 唤醒）或 failed（≥3）；不再永挂 复查 ws_
 全文：.sillyspec/changes/archive/2026-08-29-daemon-platform-resilience/requirements.md#FR-07
 最近确认：2c290d7c7
+
+## FR-client-008 PI worker 终态结论沉淀为 summary artifact
+变更：2026-09-10-review-dispatch-platform-fixes
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 一个 `stage=mission_worker` 且 provider caps `mcp=false`（如 pi）的 interactive 分身会话 wo；When 该会话一轮 turn 以 success 收敛且轮内存在完整 assistant 文本（override text 事件） 每一轮 success 收敛；Then daemon 在 `onTurnResult` 的 `await notifyRunResult` 之后，以分身会话 id 为 X-Session-Id 调 `
+全文：.sillyspec/changes/archive/2026-09-10-review-dispatch-platform-fixes/requirements.md#FR-01
+最近确认：f1bdbef95
+
+## FR-client-009 PI turn result 携带轮终全文
+变更：2026-09-10-review-dispatch-platform-fixes
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given pi-rpc-driver 一轮 turn 内到达 assistant message_end（override text 全文事件）；When turn 以 success 收敛上报 result；Then result 含 `result`=轮内最后一条 override text 全文；error 轮维持既有 error 语义（result=错误信息）；轮状态在
+全文：.sillyspec/changes/archive/2026-09-10-review-dispatch-platform-fixes/requirements.md#FR-02
+最近确认：f1bdbef95
+
+## FR-client-010 pi 凭证可独立配置并注入 worker 子进程
+变更：2026-09-10-review-dispatch-platform-fixes
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given 平台管理员经 API/表单创建 `agent_kind=pi` 的 LlmProvider（独立 api_key，auth_field 为合法 env 变量名如；When pi 会话（interactive 或 batch）claim lease 且解析到该 provider_config pi 会话 claim；Then daemon spawn-env 第 0 层经 PiCredentialInjector 注入 `env[auth_field ?? 'ANTHROPIC_AP
+全文：.sillyspec/changes/archive/2026-09-10-review-dispatch-platform-fixes/requirements.md#FR-03
+最近确认：f1bdbef95
+
+## FR-client-011 get_daemon_status 暴露生效执行器
+变更：2026-09-10-review-dispatch-platform-fixes
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given token 绑定 workspace 的 get_daemon_status 查询；When 响应返回；Then 顶层含 `default_agent`（workspace 原值，可为 null）与 `effective_agent`（default_agent 非空即它；
+全文：.sillyspec/changes/archive/2026-09-10-review-dispatch-platform-fixes/requirements.md#FR-04
+最近确认：f1bdbef95
