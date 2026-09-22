@@ -132,3 +132,6 @@
 - autostart|FR|需求|承接 → [fr/autostart.md](fr/autostart.md)
 - codex-settings|FR|需求|承接 → [fr/codex-settings.md](fr/codex-settings.md)
 - skill-manager|FR|需求|承接 → [fr/skill-manager.md](fr/skill-manager.md)
+- types|FR|需求|承接 → [fr/types.md](fr/types.md)
+- auto-frontend|frontend|FR|需求|承接 → [fr/auto-frontend.md](fr/auto-frontend.md)
+- auto-sillyhub-daemon|sillyhub-daemon|FR|需求|承接 → [fr/auto-sillyhub-daemon.md](fr/auto-sillyhub-daemon.md)
