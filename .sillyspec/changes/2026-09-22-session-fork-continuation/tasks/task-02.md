@@ -6,6 +6,7 @@ author: 'qinyi'
 generated_by: sillyspec-taskcard
 created_at: 2026-09-22 20:33:49
 priority: P0
+task_type: verification
 depends_on: []
 blocks: []
 requirement_ids: [FR-04]
