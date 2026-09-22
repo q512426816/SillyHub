@@ -419,3 +419,68 @@
 - 场景：默认场景 — Given 本变更部署后；When 前端 logsToTurns 按 run_id 首见序装配轮次；Then 输入行序仍为 run 块序（ORDER BY 零改动），轮序与现状一致（同 ts 批次翻页跨页拆块的场景除外——该场景现状本就不可达，属修复目标）
 全文：.sillyspec/changes/archive/2026-09-16-logs-cursor-tiebreaker/requirements.md#FR-04
 最近确认：b204034fb
+
+## FR-lib-api-045 会话蒸馏派发
+变更：2026-09-17-knowledge-precipitation
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 一个存在记录的 agent 会话；When 用户在知识库页「沉淀知识 → 从记录提炼」选择该会话（可附关注点提示词）并派发；Then 平台创建 knowledge-distill 类 AgentRun 后台执行，任务条显示进行中；完成后候选知识出现在待审核区（proposed/），失败时任务条
+全文：.sillyspec/changes/archive/2026-09-17-knowledge-precipitation/requirements.md#FR-01
+最近确认：e83c21744
+
+## FR-lib-api-046 手工录入候选
+变更：2026-09-17-knowledge-precipitation
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 用户具有 KNOWLEDGE_WRITE；When 填写标题/分类/正文并保存；Then 生成 `knowledge/proposed/<slug>.md`（frontmatter 含 author/created_at/proposed_at/so
+全文：.sillyspec/changes/archive/2026-09-17-knowledge-precipitation/requirements.md#FR-02
+最近确认：e83c21744
+
+## FR-lib-api-047 变更蒸馏派发
+变更：2026-09-17-knowledge-precipitation
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 一个已归档变更；When 用户选择该变更并派发蒸馏；Then 行为同 FR-01（源为变更四件套与决策记录）
+全文：.sillyspec/changes/archive/2026-09-17-knowledge-precipitation/requirements.md#FR-03
+最近确认：e83c21744
+
+## FR-lib-api-048 平台直写底座
+变更：2026-09-17-knowledge-precipitation
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 任何知识写操作（录入/编辑/合并/拒绝）；When 后端执行落盘；Then 全部经 spec_workspace apply_ops 语义：manifest 行版本 +1、spec_version 递增、删除内容进 30 天备份区；与上
+全文：.sillyspec/changes/archive/2026-09-17-knowledge-precipitation/requirements.md#FR-04
+最近确认：e83c21744
+
+## FR-lib-api-049 审核合并与拒绝
+变更：2026-09-17-knowledge-precipitation
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 待审核区一条候选；When 用户执行合并（选目标文件 ∈ {known-issues.md, patterns.md, conventions.md} + 小节标题 + 路由关键词）；Then 预览展示将追加的 `##` 小节与 INDEX 路由行；确认后两段式落盘（先目标文件+INDEX 更新、无冲突后再移除候选）；目标文件追加小节、INDEX.md
+全文：.sillyspec/changes/archive/2026-09-17-knowledge-precipitation/requirements.md#FR-05
+最近确认：e83c21744
+
+## FR-lib-api-050 递归 zone 展示
+变更：2026-09-17-knowledge-precipitation
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given spec 树 knowledge/ 下存在子目录（decisions/、generated/、proposed/）；When 用户打开知识库页；Then 列表递归展示全部 `*.md` 条目并按 zone 分组（待审核置顶 + 计数徽标），子目录条目可点开查看正文
+全文：.sillyspec/changes/archive/2026-09-17-knowledge-precipitation/requirements.md#FR-06
+最近确认：e83c21744
+
+## FR-lib-api-051 全层编辑
+变更：2026-09-17-knowledge-precipitation
+状态：active
+摘要：默认场景
+依据决策：D-006@v1
+场景正文：
+- 场景：默认场景 — Given 手册层或 generated 层一条条目；When 用户具有 KNOWLEDGE_WRITE 并编辑保存；Then 正文更新（frontmatter 保持不动，版本 +1、旧内容入备份区）；decisions/ 条目不提供编辑入口并标注"由归档流程维护"
+全文：.sillyspec/changes/archive/2026-09-17-knowledge-precipitation/requirements.md#FR-07
+最近确认：e83c21744
