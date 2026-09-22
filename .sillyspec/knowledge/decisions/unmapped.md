@@ -698,3 +698,75 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：35f3d6528
 理由：修正三处：①fixture 全量实证 stopReason 仅 stop/error 两值，aborted 是 ame.error 的 reason（流层中止）非 stopReason——删除 aborted→stopped 映射，被打断的轮按 completed 收行；②测试路径实存 tests/interactive/pi-events.test.ts，新增集成用例定名 tests/interactive/pi-task-dispatch.test.ts；③R-01 应对改写：既有用例 expected 数组需追加派生事件（预期适配非破坏）
+
+## D-002@v2 品牌色派生 token 三主题分值（blue 不继承紫）
+状态：implemented
+变更：2026-09-09-sessions-visual-refresh
+锚点：未记录
+最近确认：1f515ddce
+理由：品牌色派生 token（--aurora-*/--row-active(-ring)/--shadow-glow/--shadow-primary）按既有 --shadow-primary 三主题分值惯例写满 :root/[data-theme="blue"]/[data-theme="dark"] 三块，blue 给蓝系取值
+supersedes：D-002@v1
+
+## D-003@v1 消息形态 = 气泡 + 头像
+状态：implemented
+变更：2026-09-09-sessions-visual-refresh
+锚点：未记录
+最近确认：1f515ddce
+理由：用户选定「气泡 + 头像」——现有气泡骨架保留，agent 消息加品牌渐变头像（Bot/引擎图标），用户消息维持右对齐品牌色气泡
+
+## D-004@v1 范围含群聊面板
+状态：implemented
+变更：2026-09-09-sessions-visual-refresh
+锚点：未记录
+最近确认：1f515ddce
+理由：会话页 + 群聊一起改——group-chat-panel 的消息行同步焕新（头像/气泡层级/代码块已由 MarkdownText 共享自动获益）
+
+## D-005@v1 dark 主题底色一起调
+状态：implemented
+变更：2026-09-09-sessions-visual-refresh
+锚点：未记录
+最近确认：1f515ddce
+理由：连主题底色一起调——dark 主题 card/border 取值微调拉大页面底与卡片反差（themes.ts darkTheme + globals.css dark 变量块同步，取值仍限 Tailwind v3 zinc 阶默认值）；全站受益，回归面经 build+主页面实拍控制
+
+## D-006@v3 群聊 agent 成员无自定义头像时统一 Bot 渐变光环（取舍记录）
+状态：implemented
+变更：2026-09-09-sessions-visual-refresh
+锚点：未记录
+最近确认：1f515ddce
+理由：取舍为维持统一光环——发送者区分由消息行成员名行承担且群聊本就渲染成员名；统一 agent 视觉锚点（与单聊一致）价值大于分色辨识（分色仍保留在成员面板/facepile 等非消息行场景）；自定义头像（avatar 入参）优先级不变
+supersedes：D-006@v2
+
+## D-007@v1 高级感设计语言（v2 原型定调）
+状态：implemented
+变更：2026-09-09-sessions-visual-refresh
+锚点：未记录
+最近确认：1f515ddce
+理由：v2 原型定调六根杠杆——①环境极光背景（品牌色径向渐变光晕，浅/dark 双套取值）；②多层弥散阴影替代硬边框（边框统一降透明 --border-soft）；③玻璃拟态（顶栏/面板头/列表列 backdrop-blur + saturate）；④渐变点睛收敛到三处：标题「智能体」渐变字、agent 光环头像、发送按钮；⑤macOS 风深空代码块（三色窗点+语言标签+复制钮）；⑥微交互（发送钮 hover 浮起/点击回弹、plus 钮 hover 渐变填充、composer 聚焦光环+弥散阴影）
+
+## D-008@v1 v3 修正——玻璃可读性 + 删流光顶条
+状态：implemented
+变更：2026-09-09-sessions-visual-refresh
+锚点：未记录
+最近确认：1f515ddce
+理由：①玻璃拟态不可读的根因是极光只铺内容区、玻璃面板底下是纯色底没有东西可透——v3 把极光铺满整个应用底（body background-attachment: fixed），侧栏/列表列/面板整体降透明 + backdrop-blur，玻璃下有色彩可透才读得出玻璃感；②panel-accent 渐变流光顶条整体删除——运行态氛围收敛为脉冲状态点 + 任务条 spinner 两个既有元素，克制优先，不再加新动效载体
+
+## D-009@v1 v4 自查修正（用户要求"你自己看看效果图"后的逐项自审）
+状态：implemented
+变更：2026-09-09-sessions-visual-refresh
+锚点：未记录
+最近确认：1f515ddce
+理由：自审五条——①浅色下用户气泡紫色面积太大太吵（max-width 76%→72% + shadow-primary 降重：阴影 alpha 减半）；②composer 聚焦光环 v3 过浓且原型硬编码常驻焦点态（dark 下呈 RGB 霓虹圈游戏感）——改 3px/10% 透明度柔环、阴影不再跳档、原型展示常态；③列表/导航选中态两主题都太弱——inset 描边从 border-soft 换品牌色 22%/30% 透明度（--row-active-ring 新 token）；④浅色右上极光泛紫过浓（13%→9%）；⑤dark 极光太弱整体死黑（四团光晕各加 3-4 个百分点）
+
+## D-010@v1 RoundDivider 状态六态映射
+状态：implemented
+变更：2026-09-09-sessions-visual-refresh
+锚点：未记录
+最近确认：1f515ddce
+理由：status 改六态判别联合，着色映射：completed=success / failed+killed=error / running=info / pending+interrupting=neutral
+
+## D-011@v1 死 token 删除 + G-02 43px 悬空口径修正
+状态：implemented
+变更：2026-09-09-sessions-visual-refresh
+锚点：未记录
+最近确认：1f515ddce
+理由：①四 token 全删（消费面 Tailwind 阶已达成同观感，留死定义徒增维护面）；②G-02 作废——task-05 的 43px 对齐要求删除（对话视图无过程行，全部视图按 G-03 不动，turn-segment-views 零改动是正确实现）；③design 文件清单 layout.tsx 行改指 app-shell.tsx（极光实际落点）
