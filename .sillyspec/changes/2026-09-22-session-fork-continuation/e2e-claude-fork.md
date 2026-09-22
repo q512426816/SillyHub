@@ -1,3 +1,7 @@
+---
+author: qinyi
+created_at: 2026-09-22 23:55:00
+---
 # claude 真机 E2E 验收记录 — 会话任意点分叉「不知情」语义（task-08）
 
 > 变更：2026-09-22-session-fork-continuation（task-08 / FR-02 / FR-03 / D-005@v1）
