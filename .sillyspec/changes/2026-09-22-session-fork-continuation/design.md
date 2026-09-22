@@ -103,6 +103,15 @@ backend fork 端点 pytest（归属/终态/档位门/种子帽/快照继承/A �
 | 修改 | frontend/src/components/sessions/session-list-panel.tsx | origin=fork 附属分组+分叉徽标（:2403-2489 分身分组渲染模式旁，origin 区分防混树） |
 | 新增 | NEW:frontend/src/components/daemon/__tests__/session-fork-entry.test.tsx | 轮级入口三重门控+确认弹层组件测试（task-07） |
 | 新增 | NEW:frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx | 溯源块/面包屑/浮层/列表分组组件测试（task-08） |
+| 修改 | backend/app/modules/agent/tests/test_agent_session_model.py | 字段全集守卫 30→33（D-009 连带，加列必红） |
+| 修改 | backend/app/modules/agent/tests/test_mission_session_id.py | 同上守卫追加（D-009） |
+| 修改 | backend/app/modules/daemon/router/__init__.py | _ENDPOINT_ORDER 登记新端点 +4 行（D-013①，该表自带 fail-fast 指示） |
+| 修改 | sillyhub-daemon/src/interactive/session-manager.ts | 建会话 driverOpts 组装真身（task-06 卡面 index.ts 为纯 re-export facade——D-014 路径漂移） |
+| 修改 | sillyhub-daemon/src/interactive/types.ts | CreateSessionInput 定义真身（D-014 路径漂移） |
+| 修改 | frontend/src/components/daemon/turn-timeline.tsx | TurnForkEntry 挂载点（轮容器真身）+group 类（D-015①） |
+| 修改 | frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx | 挂载期谱系 fetch mock 补齐（D-015③） |
+| 修改 | frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx | 同上连带（D-015③） |
+| 修改 | frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx | 同上连带（D-015③） |
 | 修改 | backend/openapi.json | gen:types 产物同步（fork 端点+SessionRead 新字段） |
 | 修改 | frontend/src/lib/api-types.ts | 同上（pnpm gen:types 生成，禁手写） |
 

@@ -14,6 +14,8 @@ allowed_paths:
   - backend/app/modules/agent/model.py
   - backend/migrations/versions/20260922194500_add_session_fork_columns.py
   - backend/app/modules/agent/tests/test_session_fork_model.py
+  - backend/app/modules/agent/tests/test_agent_session_model.py
+  - backend/app/modules/agent/tests/test_mission_session_id.py
 target_files:
   - backend/app/modules/agent/model.py
   - NEW:backend/migrations/versions/20260922194500_add_session_fork_columns.py

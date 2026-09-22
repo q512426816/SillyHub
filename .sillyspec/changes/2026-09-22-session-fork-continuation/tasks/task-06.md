@@ -19,6 +19,8 @@ allowed_paths:
   - sillyhub-daemon/src/interactive/claude-sdk-driver.ts
   - sillyhub-daemon/src/interactive/pi-rpc-driver.ts
   - sillyhub-daemon/tests/session-fork.test.ts
+  - sillyhub-daemon/src/interactive/session-manager.ts
+  - sillyhub-daemon/src/interactive/types.ts
 target_files:
   - sillyhub-daemon/src/daemon.ts
   - sillyhub-daemon/src/interactive/session-manager/types.ts

@@ -23,6 +23,10 @@ allowed_paths:
   - backend/openapi.json
   - frontend/src/lib/api-types.ts
   - .sillyspec/changes/2026-09-22-session-fork-continuation/e2e-claude-fork.md
+  - frontend/src/components/daemon/turn-timeline.tsx
+  - frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+  - frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx
+  - frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx
 target_files:
   - NEW:frontend/src/components/daemon/session-fork/lineage-block.tsx
   - frontend/src/components/daemon/session-panel/worker-session-overlay.tsx

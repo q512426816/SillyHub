@@ -25,6 +25,7 @@ allowed_paths:
   - backend/openapi.json
   - frontend/src/lib/api-types.ts
   - backend/app/modules/daemon/tests/test_session_fork.py
+  - backend/app/modules/daemon/router/__init__.py
 target_files:
   - NEW:backend/app/modules/daemon/session/service/fork.py
   - backend/app/modules/daemon/session/service/create.py
