@@ -12,7 +12,7 @@ requirement_ids: [FR-01, FR-02, FR-03, FR-04]
 decision_ids: [D-001@v1, D-005@v1, D-007@v1]
 provides:
   - POST /api/daemon/sessions/{id}/fork（SessionForkRequest/Response，含 tier 出参）
-  - lease.metadata 键 resume_at_uuid/fork_session（daemon execPayload 消费）
+  - lease.metadata fork 四键（D-012：resume_at_uuid/fork_session/fork_anchor_entry_id/fork_mode，daemon execPayload 消费）
   - SessionRead 增 fork_of_session_id/fork_at_run_id/engine_fork_anchor 透出
 allowed_paths:
   - backend/app/modules/daemon/session/service/fork.py
@@ -39,10 +39,10 @@ target_files:
 goal: >
   backend 侧 fork 全链：fork 点四重校验→native（metadata 两键下行）/seed（前情转述种子 24K 帽）分派→fork 记录+快照继承落库→端点与 DTO→gen:types；A 零字段改动。
 implementation:
-  - 新建 fork.py：fork_session（归属/终态/caps 档≠none/native 锚点存在四重校验；native→build_fork_lease_metadata、seed→build_seed_prompt 读截至轮 logs 用户轮全文+助手轮摘要 FORK_SEED_MAX_CHARS=24000 截尾声明）+ create_session 调用（origin='fork'、fork 三件套、workspace/供应商/模型/档案快照继承，不写 parent_session_id）
+  - 新建 fork.py：fork_session（归属/终态/caps 档≠none/native 锚点存在四重校验；按 D-012 定 fork_mode——claude：at_run.engine_anchor 有→mode=resume_at（resume_at_uuid=该值）、无→422；pi：at_run 下一轮 engine_anchor 有→mode=rpc_fork（fork_anchor_entry_id=该值）、at_run 为末轮→mode=clone；codex seed→不写 fork 键；seed 档→build_seed_prompt 读截至轮 logs 用户轮全文+助手轮摘要 FORK_SEED_MAX_CHARS=24000 截尾声明）+ create_session 调用（origin='fork'、fork 三件套、workspace/供应商/模型/档案快照继承，不写 parent_session_id）
   - create.py 增 fork 参数组（缺省走原路径零回归）；service/__init__.py re-export
-  - session_crud.py 增 POST /sessions/{id}/fork 端点（404/409/422 错误语义按 design 接口定义）；schema.py 增 SessionForkRequest/Response + SessionRead 透出 fork 三字段
-  - placement.py 写 lease.metadata 增 resume_at_uuid/fork_session（只写 metadata）；backend/app/modules/daemon/lease/context.py:459 build_claim_payload interactive 白名单透传两键（Grill B-1 断链点，漏此环节 native 档静默失效）
+  - session_crud.py 增 POST /sessions/{id}/fork 端点（404/409/422 错误语义按 design 接口定义；pi rpc_fork 源会话不可达→4xx 文案提示）；schema.py 增 SessionForkRequest/Response + SessionRead 透出 fork 三字段
+  - placement.py 写 lease.metadata 增 fork 四键（D-012，按 mode 只写相关键）；backend/app/modules/daemon/lease/context.py:459 build_claim_payload interactive 白名单透传四键（Grill B-1 断链点，漏此环节 native 档静默失效）
   - pnpm gen:types 同步 openapi.json+api-types.ts（先确认前端 node_modules 健康）
   - 新建 test_session_fork.py：四重校验矩阵/native·seed 分派/种子帽/A 零字段改动断言/快照继承
 acceptance:

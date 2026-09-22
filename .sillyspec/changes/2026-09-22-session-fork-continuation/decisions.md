@@ -140,3 +140,16 @@ change: 2026-09-22-session-fork-continuation
 - evidence: task-04 停人回传（pi-events.ts:233-249/event-wire.ts:81-116/claude-events.ts:431-463/sdk.d.ts:3086-3094 证据链）；backend/app/modules/agent/model.py AgentRunLog metadata_ 列
 - 故障面: driver 漏挂或 backend 漏读该键→engine_anchor 恒 NULL→该轮入口灰（R-05 既有降级面，不炸链路）
 - 退役判据: 引擎侧原生提供可截断锚的上报 API 时收敛为单一来源
+
+## D-012@v1: 执行期裁决——lease.metadata fork 参数组统一契约（claude/pi 双形态）
+- type: architecture
+- priority: P0
+- status: accepted
+- source: design-grill
+- question: pi 原生 fork 走活 RPC 命令（D-008）与 claude spawn 期 options 形态不同，下行参数契约如何统一？
+- answer: lease.metadata fork 参数组四键：resume_at_uuid（claude 链 UUID）、fork_session(bool)、fork_anchor_entry_id（pi 用户 entryId）、fork_mode('resume_at'|'rpc_fork'|'clone')。fork.py 按 provider×锚可得性定 mode：claude→engine_anchor 有=resume_at、无=422；pi→at_run 下一轮 engine_anchor 有=rpc_fork、末轮=clone；codex(seed)→不写 fork 键纯种子。daemon（task-06）按 mode 消费：resume_at→claude SDK options 三件（禁 resumeDropsTurn）；rpc_fork→对源会话活 RPC 发 fork 命令（源死则加载源文件起临时 RPC 再 fork）；clone→pi 全量分叉。CreateSessionInput 对应增 resumeAtUuid/forkSession/forkAnchorEntryId/forkMode 四可选键。
+- normalized_requirement: 键名与值域如上；fork.py 输出 mode 进 SessionForkResponse.tier 语义不变（native/seed）；task-05/06 卡同步该契约。
+- impacts: [FR-03, FR-04, task-05, task-06]
+- evidence: D-008@v1（pi fork 活 RPC 语义）；design.md 接口定义（claude 形态）扩展
+- 故障面: rpc_fork 时源 pi 会话文件不可达（跨机/已删）→ fork 失败 4xx，文案提示
+- 退役判据: pi 提供 spawn 期截断参数时收敛为 resume_at 同形态

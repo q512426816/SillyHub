@@ -31,7 +31,7 @@ target_files:
 goal: >
   daemon 侧 fork 参数透传：execPayload 解析 resume_at_uuid/fork_session → CreateSessionInput → driverOpts → claude driver SDK options（resumeSessionAt+forkSession），fork 转发与 systemPrompt 守卫解耦（R-07）；pi 视 D-008 定档条件接入。
 implementation:
-  - daemon.ts execPayload 解析（:9278-9281 resume 链旁）增 resumeAtUuid/forkSession 两可选键透传 CreateSessionInput（session-manager/types.ts 增键）
+  - daemon.ts execPayload 解析（:9278-9281 resume 链旁）增 fork 四键透传 CreateSessionInput（D-012：resumeAtUuid/forkSession/forkAnchorEntryId/forkMode；session-manager/types.ts 增键）
   - session-manager/index.ts 建会话路径把两键并入 driverOpts（driverOpts.resume 旁，:1050-1054 同款）
   - driver-factory.ts 为 fork 参数建独立转发分支——不复用嵌在 systemPrompt 热切换守卫内的既有 forkSession 转发点（:245-260，R-07 解耦要求）
   - claude-sdk-driver.ts options 增 resumeSessionAt/forkSession（forkSession 生产先例 :476-479；resumeSessionAt 锚点语义按 task-02 spike D-008 结论）
