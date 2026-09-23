@@ -116,3 +116,14 @@ B 谱系行：origin='fork'、fork_of_session_id=A、fork_at_run_id=run1、engin
 - 远程 openapi（513 端点）含：POST /api/daemon/sessions/{session_id}/fork、SessionForkLineage/Request/Response 三 DTO、AgentSessionRead fork 三字段、SessionRunRead.engine_anchor ✓
 - 无鉴权 POST fork → **401**（路由真实挂载+鉴权拦截，非 openapi 残影）✓
 - 机器列表：本机 daemon 在线（新 build 当日 08:18）✓
+
+## 7. pi 平台链路分叉验证（2026-09-23 09:25–09:33，同环境）——装配层 PASS，对话级受环境阻断
+
+| 步骤 | 结果 |
+|---|---|
+| 建 pi 会话 A（`43426ecf…`）+两轮 | run1/run2 均 failed——stderr 实证 `403 permission_error: Your current subscription does not have access to Kimi Code`（pi 上游订阅失效，D-008 已记录的 pi 吞上游错误故障面） |
+| pi 锚点链 | run1.engine_anchor=`b5175f49…`（pi entryId 轮首锚回填链生产生效 ✓） |
+| **POST fork at run1** | **HTTP 201 tier=native**，B=`93512b20…`，lineage={source=A, at_run_seq:1} ✓——backend 分派→claim 四键→daemon 短命 RPC 预 fork→B 建立全链通 |
+| B 探针对话 | 注入成功但模型轮同样 403（订阅级，非链路问题）——对话级「不知情」断言 NOT EXECUTED |
+
+结论：**pi 移交项的装配层验证兑现**（分派/预 fork/谱系/锚点四项全证）；对话级断言由 spike-pi-fork.md §pi 真机实证代位（当时用本地 claude 代理后端在真 pi 0.81.1 RPC 上证明 fork 截断+不知情）。pi 订阅恢复后可按同八步复跑对话级（可选项）。
