@@ -1,0 +1,47 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-7e47b474",
+  "totals": {
+    "files": 1,
+    "additions": 7,
+    "deletions": 2
+  },
+  "rows": [
+    {
+      "path": "backend/.pre-commit-config.yaml",
+      "declared": true,
+      "additions": 7,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 0,
+    "codeFileCount": 0,
+    "testFileCount": 0,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": true,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260923-001-7986",
+  "sessionId": "quick-7e47b474",
+  "savedAt": "2026-09-23T00:58:24.190Z",
+  "patchSha256": "df07e117bc8ebc5e6642899ebc555daabed197e454fe967408f57db8b1ee50f4",
+  "patchStatus": "ok"
+}

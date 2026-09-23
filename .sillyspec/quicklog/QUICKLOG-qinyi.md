@@ -295,3 +295,13 @@
 审计：   ❌ [docs/sillyspec/quick-gate-并行全流程变更脏文件误伤.md:0]  → 文档不存在
 审计：[gate] L1（跨 0 模块 · 16 文件：4 代码/5 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
 审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/quick-done-长静默与快照行尾假阳性.md, docs/sillyspec/quick-gate-并行全流程变更脏文件误伤.md, docs/sillyspec/verify-gate-worktree-crossrepo-three-defects.md, docs/sillyspec/finished/quick-gate-并行全流程变更脏文件误伤.md
+
+## ql-20260923-001-7986 | 2026-09-23 08:57:34 | change-events-channel 执行会话反馈④：pre-commit ruff 拦提交两次…
+状态：已完成
+关联变更：（无）
+文件：
+- backend/.pre-commit-config.yaml（两 hook entry bash -c 失败提示包装+实证注释）
+需求：change-events-channel 执行会话反馈④：pre-commit ruff 拦提交两次，归因『hook ruff(0.15.14) 与项目 uv ruff 版本格式化结果有差异』，诉求 hook 提示里直接给出对齐版本的修复命令
+根因：实证为误诊：hook 语言 system 经 uv run 解析，仓库根与 backend 两处 uv run ruff --version 均 0.15.14、与 uv.lock 一致，无版本漂移；真实盲点=被拦时 ruff 只报 diff，对齐修复命令只写在 yaml 注释块里，失败现场不可见——check-only 是 2026-09-11 ql-20260911-006 的既定设计（auto-fix 会触发 stash 冲突回滚），不能回退
+方案：两 hook entry 改 bash -c 包装：命令失败时 exit 1 前打印『↩ 修复命令（与 hook 同源 uv 环境，勿用全局 ruff）：cd backend && uv run ruff format <被拦文件>』（check hook 对应 --fix 形态）；注释块补 2026-09-23 实证记录防后续会话再误诊版本漂移
+结果：pre-commit run 双路径实测：坏格式探针（x=1）→ Failed + 修复命令行出现在输出；真实干净文件 → Passed；探针即用即删。纯配置改动（yaml 单文件），test/lint 门禁按配置类自动跳过
