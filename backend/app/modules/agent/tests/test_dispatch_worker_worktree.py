@@ -438,3 +438,100 @@ async def test_dispatch_worker_base_ref_keeps_configured_branch_when_resolvable(
     assert lease_id is not None
     wt_kwargs = delegate.git_worktree_add.call_args.kwargs
     assert wt_kwargs["base_ref"] == "release"
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-23 external worker 会话缺口：首条 user_input 日志行
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_worker_persists_first_user_input_log(
+    db_session: AsyncSession,
+) -> None:
+    """dispatch_worker 成功后必须落一条 channel="user_input" 日志行。
+
+    会话详情页的用户消息气泡与会话标题都派生自 AgentRunLog.channel="user_input"
+    行。batch 派发（sillyspec external mission 经 mcp_gateway → execution 走的
+    正是这条）此前只有 daemon 上行的 stdout/tool_call 日志，worker 会话在 UI
+    上「看不到用户输入、标题空」（生产实例 4297aaa3：75 stdout + 18 tool_call
+    + 0 user_input）。本测试守护派发成功即写首条 user_input（对齐 mcp 子会话
+    路径 mcp_tools.py / create_session 首 turn 同源写法）。
+    """
+    from sqlalchemy import select as sa_select
+
+    from app.modules.agent.model import AgentRunLog
+
+    ws_id = await _make_workspace(db_session, root_path="/tmp/repo", default_branch="main")
+    mission = AgentMission(workspace_id=ws_id, objective="o")
+    db_session.add(mission)
+    await db_session.commit()
+    await db_session.refresh(mission)
+    run = await _make_worker(db_session, mission_id=mission.id)
+
+    delegate = _make_delegate_mock(ok=True, worktree_path="/tmp/repo/.worktrees/abcd1234")
+    fake_placement = MagicMock()
+    fake_placement.dispatch_to_daemon = AsyncMock(return_value=uuid.uuid4())
+    svc = MissionExecutionService(db_session, placement=fake_placement, host_fs_delegate=delegate)
+
+    lease_id = await svc.dispatch_worker(
+        run, workspace_id=ws_id, user_id=uuid.uuid4(), read_only=False
+    )
+
+    assert lease_id is not None
+    rows = (
+        (
+            await db_session.execute(
+                sa_select(AgentRunLog).where(
+                    AgentRunLog.run_id == run.id,
+                    AgentRunLog.channel == "user_input",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    # content 取派发用 prompt（未覆写时 = render_worker_prompt(objective)）
+    assert "scan arch" in (rows[0].content_redacted or "")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_worker_no_user_input_log_when_dispatch_fails(
+    db_session: AsyncSession,
+) -> None:
+    """派发失败（worktree 创建失败）不得落 user_input 行——那是成功派发的痕迹。"""
+    from sqlalchemy import select as sa_select
+
+    from app.modules.agent.model import AgentRunLog
+
+    ws_id = await _make_workspace(db_session, root_path="/tmp/repo", default_branch="main")
+    mission = AgentMission(workspace_id=ws_id, objective="o")
+    db_session.add(mission)
+    await db_session.commit()
+    await db_session.refresh(mission)
+    run = await _make_worker(db_session, mission_id=mission.id)
+
+    delegate = _make_delegate_mock(ok=False, error="boom")
+    fake_placement = MagicMock()
+    fake_placement.dispatch_to_daemon = AsyncMock(return_value=uuid.uuid4())
+    svc = MissionExecutionService(db_session, placement=fake_placement, host_fs_delegate=delegate)
+
+    lease_id = await svc.dispatch_worker(
+        run, workspace_id=ws_id, user_id=uuid.uuid4(), read_only=False
+    )
+
+    assert lease_id is None
+    rows = (
+        (
+            await db_session.execute(
+                sa_select(AgentRunLog).where(
+                    AgentRunLog.run_id == run.id,
+                    AgentRunLog.channel == "user_input",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []

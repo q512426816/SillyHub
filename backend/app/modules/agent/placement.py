@@ -564,13 +564,20 @@ class RunPlacementService:
                 "ask_user_only": True,
             }
         )
+        # workspace_id 落列（2026-09-23 external worker 会话缺口修复）：会话列表
+        # 按 agent_sessions.workspace_id 分组，NULL 落「非工作区」组——此前裸 INSERT
+        # 不带该列，dispatch_to_daemon 建的全部会话（mission worker / stage / patrol
+        # 重派）工作区归属皆空。值取路由用 workspace_id 形参（execution 派发传
+        # effective_target，与 mcp 子会话路径 workspace_id=effective_target 同语义）。
         await self._session.execute(
             text(
                 """
                 INSERT INTO agent_sessions
-                    (id, user_id, runtime_id, lease_id, provider, status, turn_count, config, created_at)
+                    (id, user_id, runtime_id, lease_id, workspace_id, provider, status,
+                     turn_count, config, created_at)
                 VALUES
-                    (:sid, :user_id, :runtime_id, :lease_id, :provider, 'pending', 0, :config, :now)
+                    (:sid, :user_id, :runtime_id, :lease_id, :ws_id, :provider, 'pending',
+                     0, :config, :now)
                 """
             ),
             {
@@ -578,6 +585,7 @@ class RunPlacementService:
                 "user_id": user_id.hex if hasattr(user_id, "hex") else str(user_id),
                 "runtime_id": runtime_id.hex,
                 "lease_id": lease_id.hex,
+                "ws_id": workspace_id.hex if workspace_id is not None else None,
                 "provider": provider or "claude",
                 "config": stage_session_config,
                 "now": now,

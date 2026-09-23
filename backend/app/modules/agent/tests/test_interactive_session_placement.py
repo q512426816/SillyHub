@@ -507,6 +507,47 @@ class TestDispatchToDaemonBindsRun:
         assert (sess.config or {}).get("ask_user_only") is True
 
     @pytest.mark.asyncio
+    async def test_dispatch_to_daemon_session_writes_workspace_id(
+        self, db_session: AsyncSession
+    ) -> None:
+        """dispatch_to_daemon 建的 agent_sessions 行必须落 workspace_id。
+
+        2026-09-23 external worker 会话缺口回归：会话列表按 agent_sessions.
+        workspace_id 分组，NULL 落「非工作区」组——sillyspec external mission 经
+        execution.dispatch_worker → dispatch_to_daemon 派 worker 时，raw SQL
+        INSERT 列清单漏 workspace_id，worker 会话全部挂到非工作区（生产实例
+        4297aaa3）。本测试守护 INSERT 不再缺列：路由用 workspace_id 形参即
+        落库值（execution 传 effective_target，与 mcp 子会话路径同语义）。
+        """
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        ws_id = await _bootstrap_workspace_binding(db_session, uid, rt.id)
+        run = AgentRun(id=uuid.uuid4(), agent_type="claude_code", status="pending")
+        db_session.add(run)
+        await db_session.commit()
+
+        from unittest.mock import MagicMock
+
+        mock_hub = MagicMock()
+        mock_hub.is_connected.return_value = True
+        mock_hub.send_wakeup = AsyncMock()
+        with patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=mock_hub):
+            placement = RunPlacementService(db_session)
+            await placement.dispatch_to_daemon(
+                agent_run_id=run.id,
+                user_id=uid,
+                workspace_id=ws_id,
+                provider="claude",
+                prompt="batch job",
+            )
+
+        await db_session.refresh(run)
+        assert run.agent_session_id is not None
+        sess = await db_session.get(AgentSession, run.agent_session_id)
+        assert sess is not None
+        assert sess.workspace_id == ws_id
+
+    @pytest.mark.asyncio
     async def test_expire_leases_skips_interactive_lease(self, db_session: AsyncSession) -> None:
         """AC-15: an interactive lease with NULL lease_expires_at is never expired."""
         from app.modules.daemon.service import DaemonService

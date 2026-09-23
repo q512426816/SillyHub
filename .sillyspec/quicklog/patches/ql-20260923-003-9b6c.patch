@@ -1,0 +1,241 @@
+diff --git a/backend/app/modules/agent/execution.py b/backend/app/modules/agent/execution.py
+index 65722e4d5..310b2d46b 100644
+--- a/backend/app/modules/agent/execution.py
++++ b/backend/app/modules/agent/execution.py
+@@ -42,7 +42,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
+ from sqlmodel import col
+ 
+ from app.core.logging import get_logger
+-from app.modules.agent.model import AgentArtifact, AgentRun
++from app.modules.agent.model import (
++    USER_INPUT_LOG_MAX_CHARS,
++    AgentArtifact,
++    AgentRun,
++    AgentRunLog,
++)
+ from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
+ from app.modules.daemon.host_fs.delegate import HostFsDelegate, HostFsDelegateUnavailable
+ from app.modules.workspace.model import Workspace
+@@ -674,6 +679,30 @@ class MissionExecutionService:
+                 message="runtime 在派发瞬间离线，dispatch 返回 None",
+             )
+             return None
++        # 首 prompt 落一条 user_input 日志行（2026-09-23 external worker 会话缺口
++        # 修复）：batch 派发建的 worker 会话此前只有 stdout/tool_call 日志——会话
++        # 详情页的用户消息气泡与会话标题都派生自 channel="user_input" 行，缺它即
++        # 「看不到用户输入、标题空」。对齐 mcp_tools 子会话路径（:1431）/ create_session
++        # 首 turn 同源。best-effort：dispatch 已成功（lease 在途），本写入失败只告警
++        # 不抛，不把已成功的派发误报失败（对齐 _apply_worker_role_to_lease 兜底风格）。
++        try:
++            self._session.add(
++                AgentRunLog(
++                    run_id=run.id,
++                    channel="user_input",
++                    content_redacted=prompt[:USER_INPUT_LOG_MAX_CHARS],
++                    timestamp=datetime.now(UTC),
++                )
++            )
++            await self._session.commit()
++        except Exception as exc:
++            await self._session.rollback()
++            log.warning(
++                "mission_worker_user_input_log_failed",
++                run_id=str(run.id),
++                lease_id=str(lease_id),
++                error=str(exc),
++            )
+         # task-09（design §5 Phase 2 / Grill NEW-2）：stage 常量化后 role 语义保留——
+         # 按 lease_id 补写 metadata.role（模式对齐 _apply_worker_profile_to_lease）。
+         await self._apply_worker_role_to_lease(run.role, lease_id)
+diff --git a/backend/app/modules/agent/placement.py b/backend/app/modules/agent/placement.py
+index 3a118a22f..7bbb77829 100644
+--- a/backend/app/modules/agent/placement.py
++++ b/backend/app/modules/agent/placement.py
+@@ -564,13 +564,20 @@ class RunPlacementService:
+                 "ask_user_only": True,
+             }
+         )
++        # workspace_id 落列（2026-09-23 external worker 会话缺口修复）：会话列表
++        # 按 agent_sessions.workspace_id 分组，NULL 落「非工作区」组——此前裸 INSERT
++        # 不带该列，dispatch_to_daemon 建的全部会话（mission worker / stage / patrol
++        # 重派）工作区归属皆空。值取路由用 workspace_id 形参（execution 派发传
++        # effective_target，与 mcp 子会话路径 workspace_id=effective_target 同语义）。
+         await self._session.execute(
+             text(
+                 """
+                 INSERT INTO agent_sessions
+-                    (id, user_id, runtime_id, lease_id, provider, status, turn_count, config, created_at)
++                    (id, user_id, runtime_id, lease_id, workspace_id, provider, status,
++                     turn_count, config, created_at)
+                 VALUES
+-                    (:sid, :user_id, :runtime_id, :lease_id, :provider, 'pending', 0, :config, :now)
++                    (:sid, :user_id, :runtime_id, :lease_id, :ws_id, :provider, 'pending',
++                     0, :config, :now)
+                 """
+             ),
+             {
+@@ -578,6 +585,7 @@ class RunPlacementService:
+                 "user_id": user_id.hex if hasattr(user_id, "hex") else str(user_id),
+                 "runtime_id": runtime_id.hex,
+                 "lease_id": lease_id.hex,
++                "ws_id": workspace_id.hex if workspace_id is not None else None,
+                 "provider": provider or "claude",
+                 "config": stage_session_config,
+                 "now": now,
+diff --git a/backend/app/modules/agent/tests/test_dispatch_worker_worktree.py b/backend/app/modules/agent/tests/test_dispatch_worker_worktree.py
+index 25e19565e..cc15d7662 100644
+--- a/backend/app/modules/agent/tests/test_dispatch_worker_worktree.py
++++ b/backend/app/modules/agent/tests/test_dispatch_worker_worktree.py
+@@ -438,3 +438,100 @@ async def test_dispatch_worker_base_ref_keeps_configured_branch_when_resolvable(
+     assert lease_id is not None
+     wt_kwargs = delegate.git_worktree_add.call_args.kwargs
+     assert wt_kwargs["base_ref"] == "release"
++
++
++# ---------------------------------------------------------------------------
++# 2026-09-23 external worker 会话缺口：首条 user_input 日志行
++# ---------------------------------------------------------------------------
++
++
++@pytest.mark.asyncio
++async def test_dispatch_worker_persists_first_user_input_log(
++    db_session: AsyncSession,
++) -> None:
++    """dispatch_worker 成功后必须落一条 channel="user_input" 日志行。
++
++    会话详情页的用户消息气泡与会话标题都派生自 AgentRunLog.channel="user_input"
++    行。batch 派发（sillyspec external mission 经 mcp_gateway → execution 走的
++    正是这条）此前只有 daemon 上行的 stdout/tool_call 日志，worker 会话在 UI
++    上「看不到用户输入、标题空」（生产实例 4297aaa3：75 stdout + 18 tool_call
++    + 0 user_input）。本测试守护派发成功即写首条 user_input（对齐 mcp 子会话
++    路径 mcp_tools.py / create_session 首 turn 同源写法）。
++    """
++    from sqlalchemy import select as sa_select
++
++    from app.modules.agent.model import AgentRunLog
++
++    ws_id = await _make_workspace(db_session, root_path="/tmp/repo", default_branch="main")
++    mission = AgentMission(workspace_id=ws_id, objective="o")
++    db_session.add(mission)
++    await db_session.commit()
++    await db_session.refresh(mission)
++    run = await _make_worker(db_session, mission_id=mission.id)
++
++    delegate = _make_delegate_mock(ok=True, worktree_path="/tmp/repo/.worktrees/abcd1234")
++    fake_placement = MagicMock()
++    fake_placement.dispatch_to_daemon = AsyncMock(return_value=uuid.uuid4())
++    svc = MissionExecutionService(db_session, placement=fake_placement, host_fs_delegate=delegate)
++
++    lease_id = await svc.dispatch_worker(
++        run, workspace_id=ws_id, user_id=uuid.uuid4(), read_only=False
++    )
++
++    assert lease_id is not None
++    rows = (
++        (
++            await db_session.execute(
++                sa_select(AgentRunLog).where(
++                    AgentRunLog.run_id == run.id,
++                    AgentRunLog.channel == "user_input",
++                )
++            )
++        )
++        .scalars()
++        .all()
++    )
++    assert len(rows) == 1
++    # content 取派发用 prompt（未覆写时 = render_worker_prompt(objective)）
++    assert "scan arch" in (rows[0].content_redacted or "")
++
++
++@pytest.mark.asyncio
++async def test_dispatch_worker_no_user_input_log_when_dispatch_fails(
++    db_session: AsyncSession,
++) -> None:
++    """派发失败（worktree 创建失败）不得落 user_input 行——那是成功派发的痕迹。"""
++    from sqlalchemy import select as sa_select
++
++    from app.modules.agent.model import AgentRunLog
++
++    ws_id = await _make_workspace(db_session, root_path="/tmp/repo", default_branch="main")
++    mission = AgentMission(workspace_id=ws_id, objective="o")
++    db_session.add(mission)
++    await db_session.commit()
++    await db_session.refresh(mission)
++    run = await _make_worker(db_session, mission_id=mission.id)
++
++    delegate = _make_delegate_mock(ok=False, error="boom")
++    fake_placement = MagicMock()
++    fake_placement.dispatch_to_daemon = AsyncMock(return_value=uuid.uuid4())
++    svc = MissionExecutionService(db_session, placement=fake_placement, host_fs_delegate=delegate)
++
++    lease_id = await svc.dispatch_worker(
++        run, workspace_id=ws_id, user_id=uuid.uuid4(), read_only=False
++    )
++
++    assert lease_id is None
++    rows = (
++        (
++            await db_session.execute(
++                sa_select(AgentRunLog).where(
++                    AgentRunLog.run_id == run.id,
++                    AgentRunLog.channel == "user_input",
++                )
++            )
++        )
++        .scalars()
++        .all()
++    )
++    assert rows == []
+diff --git a/backend/app/modules/agent/tests/test_interactive_session_placement.py b/backend/app/modules/agent/tests/test_interactive_session_placement.py
+index 64e6bac25..c28c8ed01 100644
+--- a/backend/app/modules/agent/tests/test_interactive_session_placement.py
++++ b/backend/app/modules/agent/tests/test_interactive_session_placement.py
+@@ -506,6 +506,47 @@ class TestDispatchToDaemonBindsRun:
+         assert (sess.config or {}).get("manual_approval") is True
+         assert (sess.config or {}).get("ask_user_only") is True
+ 
++    @pytest.mark.asyncio
++    async def test_dispatch_to_daemon_session_writes_workspace_id(
++        self, db_session: AsyncSession
++    ) -> None:
++        """dispatch_to_daemon 建的 agent_sessions 行必须落 workspace_id。
++
++        2026-09-23 external worker 会话缺口回归：会话列表按 agent_sessions.
++        workspace_id 分组，NULL 落「非工作区」组——sillyspec external mission 经
++        execution.dispatch_worker → dispatch_to_daemon 派 worker 时，raw SQL
++        INSERT 列清单漏 workspace_id，worker 会话全部挂到非工作区（生产实例
++        4297aaa3）。本测试守护 INSERT 不再缺列：路由用 workspace_id 形参即
++        落库值（execution 传 effective_target，与 mcp 子会话路径同语义）。
++        """
++        uid = await _create_user(db_session)
++        rt = await _create_runtime(db_session, uid)
++        ws_id = await _bootstrap_workspace_binding(db_session, uid, rt.id)
++        run = AgentRun(id=uuid.uuid4(), agent_type="claude_code", status="pending")
++        db_session.add(run)
++        await db_session.commit()
++
++        from unittest.mock import MagicMock
++
++        mock_hub = MagicMock()
++        mock_hub.is_connected.return_value = True
++        mock_hub.send_wakeup = AsyncMock()
++        with patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=mock_hub):
++            placement = RunPlacementService(db_session)
++            await placement.dispatch_to_daemon(
++                agent_run_id=run.id,
++                user_id=uid,
++                workspace_id=ws_id,
++                provider="claude",
++                prompt="batch job",
++            )
++
++        await db_session.refresh(run)
++        assert run.agent_session_id is not None
++        sess = await db_session.get(AgentSession, run.agent_session_id)
++        assert sess is not None
++        assert sess.workspace_id == ws_id
++
+     @pytest.mark.asyncio
+     async def test_expire_leases_skips_interactive_lease(self, db_session: AsyncSession) -> None:
+         """AC-15: an interactive lease with NULL lease_expires_at is never expired."""

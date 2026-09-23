@@ -316,3 +316,18 @@
 根因：坑文档的根治方向（_apply_cli_tombstone 认 archived 置 location）与 D-002@v1 设计决策冲突：_sync_change_stage_status 明确 archived 分支不动 location（reparse 是 location owner，抢先置位会被回翻抖动，test_archived_terminal_persists 锁死）；真盲区有两个——存量冤案行 location=deleted 被已归档 tab 过滤 + 新归档行 location 恒 active（reparse 失效）
 方案：不加写路径（尊重 D-002@v1）：①list_ 的 location=='archive' 分支放宽为三源并集——location='archive'（存量收敛行回归保护）∪ status='archived'（CLI 终态上行落表，覆盖新归档行与多数冤案行）∪ deleted×current_stage∈{archive,archived}（旧载荷冤案两代拼写兜底；真删除 3 例均 brainstorm/scan 期零误伤）；②迁移 20260923090000 REPAIR_SQL 一次性回翻存量冤案行（判据同上，downgrade no-op，镜像恢复交 CLI spec-sync/sync-docs 下行自愈）
 结果：聚焦 29/29（新 4 例：三源并集 6 行矩阵+active 分支不漂移+迁移链位+REPAIR_SQL sqlite 语义；ingest/deleted-guard 回归绿）；后端全量 8192 passed/1 failed——auth/rbac test_platform_level_grant_hit 为 08-29 预存（与本次零代码路径交集，单跑亦败，疑本地 redis 依赖），非本变更引入；门禁按模块子集
+
+## ql-20260923-003-9b6c | 2026-09-23 18:48:48 | external worker 会话双缺口修复——补 workspace_id 与首条 user_input
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/placement.py（裸 INSERT 补 workspace_id 列（形参即落库值））
+- backend/app/modules/agent/execution.py（dispatch_worker 成功后补写首条 user_input 日志行（best-effort 不崩派发））
+- backend/app/modules/agent/tests/test_interactive_session_placement.py（守护 dispatch_to_daemon 建会话落 workspace_id）
+- backend/app/modules/agent/tests/test_dispatch_worker_worktree.py（守护 dispatch_worker 成功写 user_input 行/失败不写）
+需求：external worker 会话双缺口修复——补 workspace_id 与首条 user_input
+根因：sillyspec CLI 经 mcp_gateway→execution.dispatch_worker→placement.dispatch_to_daemon 派 worker 时，裸 INSERT 建 agent_sessions 漏 workspace_id 列（前端会话列表按该列分组，NULL 落「非工作区」组），且全程不写 channel=user_input 日志行（详情页用户消息气泡与会话标题都派生自该行）——生产实例 4297aaa3 即此形态；对比 mcp 子会话路径两处都写齐，batch 老路径是双实现漂移的漏网侧
+方案：placement.dispatch_to_daemon 裸 INSERT 列清单补 workspace_id（取既有路由形参，零签名变更零调用方改动，全部调用方一次修好）；execution.dispatch_worker 派发成功后补写 AgentRunLog(channel=user_input, content=派发 prompt 截断 50000)，best-effort 失败仅告警不把成功派发误报失败；补 3 个守护测试
+结果：聚焦测试 26 passed + dispatch 族回归 73 passed（十文件覆盖 stage/scan/team/subsession 共用路径）+ ruff format/check 全过 + 门禁 mypy 974 文件过；门禁前端 next lint 因沙箱临时目录无 node_modules 必败（环境问题非代码问题，坑已记 docs/sillyspec/quick-test-gate-frontend-lint-tempdir-no-nodemodules.md），本次零前端改动故走 skip 审计留痕
+审计：[gate] L1（跨 0 模块 · 5 文件：2 代码/2 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/quick-test-gate-frontend-lint-tempdir-no-nodemodules.md

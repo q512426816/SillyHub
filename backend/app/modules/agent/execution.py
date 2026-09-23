@@ -42,7 +42,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.logging import get_logger
-from app.modules.agent.model import AgentArtifact, AgentRun
+from app.modules.agent.model import (
+    USER_INPUT_LOG_MAX_CHARS,
+    AgentArtifact,
+    AgentRun,
+    AgentRunLog,
+)
 from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
 from app.modules.daemon.host_fs.delegate import HostFsDelegate, HostFsDelegateUnavailable
 from app.modules.workspace.model import Workspace
@@ -674,6 +679,30 @@ class MissionExecutionService:
                 message="runtime 在派发瞬间离线，dispatch 返回 None",
             )
             return None
+        # 首 prompt 落一条 user_input 日志行（2026-09-23 external worker 会话缺口
+        # 修复）：batch 派发建的 worker 会话此前只有 stdout/tool_call 日志——会话
+        # 详情页的用户消息气泡与会话标题都派生自 channel="user_input" 行，缺它即
+        # 「看不到用户输入、标题空」。对齐 mcp_tools 子会话路径（:1431）/ create_session
+        # 首 turn 同源。best-effort：dispatch 已成功（lease 在途），本写入失败只告警
+        # 不抛，不把已成功的派发误报失败（对齐 _apply_worker_role_to_lease 兜底风格）。
+        try:
+            self._session.add(
+                AgentRunLog(
+                    run_id=run.id,
+                    channel="user_input",
+                    content_redacted=prompt[:USER_INPUT_LOG_MAX_CHARS],
+                    timestamp=datetime.now(UTC),
+                )
+            )
+            await self._session.commit()
+        except Exception as exc:
+            await self._session.rollback()
+            log.warning(
+                "mission_worker_user_input_log_failed",
+                run_id=str(run.id),
+                lease_id=str(lease_id),
+                error=str(exc),
+            )
         # task-09（design §5 Phase 2 / Grill NEW-2）：stage 常量化后 role 语义保留——
         # 按 lease_id 补写 metadata.role（模式对齐 _apply_worker_profile_to_lease）。
         await self._apply_worker_role_to_lease(run.role, lease_id)
