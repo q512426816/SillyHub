@@ -429,3 +429,82 @@
 - 场景：turn/steer 被拒 — Given `turn/steer` 请求被 codex 拒绝（参数不符/版本不支持）；Then 回落现有轮边界消费（效果=原排队时延），不报错不挂死
 全文：.sillyspec/changes/archive/2026-09-18-single-chat-steering/requirements.md#FR-06
 最近确认：14d0962f3
+
+## FR-interactive-047 通用轮级分叉入口
+变更：2026-09-22-session-fork-continuation
+状态：active
+摘要：默认场景；进行中轮不可选；caps=none 引擎无入口
+依据决策：D-001@v1、D-003@v1
+场景正文：
+- 场景：默认场景 — Given 任意普通会话（不限 sillyspec 变更上下文）存在已终态轮；When 用户在该轮轮头动作区点「从此分叉」并确认；Then 弹层确认后创建分叉会话并进入
+- 场景：进行中轮不可选 — Given 目标轮 run 状态为 running；When 用户查看该轮动作区；Then 入口置灰/不可点（文案「进行中不可分叉」）
+- 场景：caps=none 引擎无入口 — Given 会话 provider 的 sessionFork 能力位为 none（如 cursor）；When 用户查看任意轮动作区，或直接调 POST /sessions/{id}/fork；Then 前端不渲染入口；API 返回 422
+全文：.sillyspec/changes/archive/2026-09-22-session-fork-continuation/requirements.md#FR-01
+最近确认：1d33bda33
+
+## FR-interactive-048 分叉会话创建与继承（源会话零影响）
+变更：2026-09-22-session-fork-continuation
+状态：active
+摘要：默认场景；A 零字段改动；分叉点非法
+依据决策：D-005@v1
+场景正文：
+- 场景：默认场景 — Given 用户在会话 A 第 N 轮（已终态）发起分叉；When fork 端点执行成功；Then 新会话 B 落库：origin='fork'、fork_of_session_id=A、fork_at_run_id=该轮、engine_fork_anchor
+- 场景：A 零字段改动 — When 分叉完成后比对 A 的全部数据库字段；Then 与分叉前完全一致；A 可继续正常对话
+- 场景：分叉点非法 — Given at_run_id 不属于该会话（404）、或该轮进行中（409）、或 native 档锚点缺失（422 附「可退种子档」提示）；When 调 fork 端点；Then 对应错误码返回，B 不落库（事务回滚）
+全文：.sillyspec/changes/archive/2026-09-22-session-fork-continuation/requirements.md#FR-02
+最近确认：1d33bda33
+
+## FR-interactive-049 claude 原生真截断分叉
+变更：2026-09-22-session-fork-continuation
+状态：active
+摘要：默认场景
+依据决策：D-004@v1、D-007@v1
+场景正文：
+- 场景：默认场景 — Given claude 会话第 N 轮已终态且 engine_anchor 存在；When fork 走 native 档（lease.metadata 携 resume_session_id+resume_at_uuid+fork_session，经；Then B 的 SDK 上下文=截至第 N 轮（含）的原生历史；B 对第 N+1 轮及之后内容完全不知情；fork 后新 SDK session id 按既有回写链覆盖
+全文：.sillyspec/changes/archive/2026-09-22-session-fork-continuation/requirements.md#FR-03
+最近确认：1d33bda33
+
+## FR-interactive-050 种子档降级（codex；pi 视 spike 定档）
+变更：2026-09-22-session-fork-continuation
+状态：active
+摘要：默认场景；pi spike 定档
+依据决策：D-004@v1、D-007@v1
+场景正文：
+- 场景：默认场景 — Given provider 的 sessionFork=seed（codex；pi 若 spike 失败）；When fork 执行；Then B 以「前情转述」种子消息启动：截至第 N 轮的用户轮全文+助手轮摘要、超 FORK_SEED_MAX_CHARS 帽截尾并声明；UI 标注「种子分叉·前情转述
+- 场景：pi spike 定档 — Given Wave1 pi spike 实测 fork/switch_session 截断语义；When spike 断言「能截断到指定消息」；Then pi 升 native 档（caps 值+driver fork 启动路径）；否则落 seed 档，结论落 D-008
+全文：.sillyspec/changes/archive/2026-09-22-session-fork-continuation/requirements.md#FR-04
+最近确认：1d33bda33
+
+## FR-interactive-051 谱系溯源 UI
+变更：2026-09-22-session-fork-continuation
+状态：active
+摘要：默认场景；多跳链；会话列表
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given 会话 B 为分叉会话（origin='fork'）；When 用户打开 B；Then B 顶部常驻溯源块（分叉自哪个会话@第几轮+引擎档标注+时间）；点击以浮层打开原会话完整记录（复用 WorkerSessionOverlay 形态+「已分叉」状
+- 场景：多跳链 — Given B 又被分叉出 C；When 用户打开 C；Then 谱系面包屑呈 A → B → C（当前），每个历史节点可点开浮层
+- 场景：会话列表 — When 分叉产生后查看会话列表；Then B 挂 A 附属分组下、带「分叉」徽标；与分身子会话分组区分（origin 判定）
+全文：.sillyspec/changes/archive/2026-09-22-session-fork-continuation/requirements.md#FR-05
+最近确认：1d33bda33
+
+## FR-interactive-052 能力位 sessionFork 三端单源
+变更：2026-09-22-session-fork-continuation
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given ProviderCaps 现有 15 键（14 布尔 + dialog 枚举值键先例，providers.ts:327）；When 增第 16 键 sessionFork（枚举 native/seed/none，生成器沿用 dialog 枚举先例扩展）；Then sillyhub-daemon providers.ts 单源 + gen-provider-caps.mjs 三端生成 backend provider_ca
+全文：.sillyspec/changes/archive/2026-09-22-session-fork-continuation/requirements.md#FR-06
+最近确认：1d33bda33
+
+## FR-interactive-053 轮锚点落库
+变更：2026-09-22-session-fork-continuation
+状态：active
+摘要：默认场景；pi 档 fork 锚取法；存量轮无锚点
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given claude/pi 会话每轮消息上行（run_sync）；When 轮终态提交（claude）/轮首条用户消息落库（pi）；Then AgentRun.engine_anchor 回填——claude=该轮末 chain-entry 消息 UUID；pi=该轮首条用户消息 entryId（D-
+- 场景：pi 档 fork 锚取法 — Given 用户在 pi 会话第 N 轮后发起分叉；When fork 服务取锚；Then N 非末轮→取第 N+1 轮 engine_anchor（其用户 entryId）position before；N 为末轮→clone 全量分叉（等价「末轮后
+- 场景：存量轮无锚点 — Given 迁移前已存在的轮（engine_anchor NULL）；When 用户尝试原生分叉该轮；Then 入口置灰（提示缺锚点）；种子档不受影响
+全文：.sillyspec/changes/archive/2026-09-22-session-fork-continuation/requirements.md#FR-07
+最近确认：1d33bda33

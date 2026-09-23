@@ -92,7 +92,7 @@ submitWithRetry(退避) → 用尽 → FileOutbox 暂存 → 心跳健康 → dr
 - Node 侧 PolicyCache realpath 归一 + allowed_roots JSON 短路是心跳不卡死的关键；盘符根/Unix 根前缀比较勿再补尾部 sep（历史误 deny 事故）。
 - spec-sync 推拉有顺序约束；daemon 侧 manifest 缓存过旧会推不出新 change（已知运维坑），从仓库导入 RPC 不受 30s 代理超时限制。
 - BUILD_ID 注入格式（build-id.ts 无 `: string` 注解）被 backend `_compute_daemon_version` 正则依赖，改格式断 self-update。
-- 会话附件 disk 交付落盘为内容寻址 `attachments/{sha256}.{白名单ext}`（同内容复用、EEXIST 跳过写入；展示名只在 prompt 清单注记「原文件名」）——与 backend MinIO 内容寻址同哲学，勿改回展示名+(n) 序号（路径歧义会诱发 agent 全目录读比对）。
+- 会话附件 disk 交付落盘为内容寻址 `attachments/{sha256}.{白名单ext}`（ql-20260922-001 起原子化：目标存在且 size 相符→复用；缺失/半截→tmp+rename 原子落位，崩溃最坏残留随机名 tmp 不挡后续写；展示名只在 prompt 清单注记「原文件名」）——与 backend MinIO 内容寻址同哲学，勿改回展示名+(n) 序号（路径歧义会诱发 agent 全目录读比对）、勿改回 `wx` 直写最终路径（半截文件被 EEXIST 永久复用）。
 
 ## 人工备注
 
@@ -223,3 +223,11 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 - backend：①inject/create 附件引擎门控改查 attachments 键（attachments.py 两处），错误文案改中性「此引擎不支持会话附件（文件与图片收件通道未开通）」（原「仅 Claude」已失实）；②`attachment_pipeline.resolve_multimodal_gate` 返回值与 caps multimodal 相与——cursor 图片/PDF 强制降级落盘（防用户默认供应商行误判 supports=true 走 block 被 driver 静默丢图），三条链路（session inject / create / group shadow 成员）一处收口；③knowledge distill 洞一预检同改 attachments 键（cursor 蒸馏源附件下发随之放行）。
 - frontend：附件入口 4 处门控改查 attachments 键（session-panel-page ×2 / session-panel-dialog ×2）——cursor 会话附件按钮解除禁用；派团队仍置灰（subagent=false 不变）。
 - 测试：backend 60+11 passed（alignment / provider_caps 门控真值表含 cursor 放行与 multimodal 块通道对照 / attachment_pipeline gate 相与 / create_attachments 集成 / distill 门控面）；frontend 49 passed（caps 表值含 attachments 两态 + cursor 附件可用而团队置灰）；daemon provider-registry/adapter-registry 14 passed（契约键列表 15 键）。
+
+## 增量（ql-20260922-001：24h 审查五修——附件落盘原子化 + settings 每 attempt 重写 + PPM 门控补漏）
+
+- 背景：24h 只读审查（2026-09-21 13 提交）发现 5 个中危，本批修复 daemon/backend 侧 3 个（另 2 个 scan_docs 侧见该模块卡）。
+- 附件落盘原子化（turn-control `writeAttachmentFile`）：旧 `writeFile({flag:'wx'})` 直写最终路径，崩溃/断电在内容寻址路径留半截文件，同内容重发 sha256 相同 → EEXIST 被当「已落盘」永久复用半截（cursor 附件 disk-only 无 block 兜底，此函数是唯一投递通道）。改为：目标存在且 size 相符 → 复用（截断只会更小，size 校验足以自愈存量半截）；缺失/不符 → `{dest}.tmp-{pid}-{rand}` 写入后 rename 顶替（Windows MoveFileEx REPLACE_EXISTING 与 atomic-write 同语义）。不走 writeFileAtomic 的 fsync（附件非配置文件，截断可由重发自愈，省 20MB 级 fsync）。
+- applyClaudeSettings 移入 task-runner `for(;;)` 重试循环（每次 attempt spawn 前重写）：CLAUDE_CONFIG_DIR 全局唯一，并发 lease 的「撤下 unlink」（ql-20260921-001-8a4d 引入）可在本 lease 运行期删掉 settings.json——循环外只写一次会让 attempt 2+ 的 spawn 丢配置（autocompact 回 ~160k 提前压缩）。apply 幂等，写重复无害。
+- PPM 附件门控补漏（ppm_activation 阶段-1 资格判定）：ql-20260921-005 三处门控改 attachments 键时漏改本处（仍查 multimodal）——cursor 会话的 PPM 附件（含本可落盘 .md）被错误降级为 GET 链接，而同会话手动上传 .md 走落盘，自相矛盾。改键对齐 attachments.py / knowledge/distill.py；docblock 三处旧口径（"provider≠claude"）同步。
+- 测试：daemon 31 passed（turn-control-attachment-atomic 新 4 用例：首次写/复用 mtime 不变/半截自愈[旧码红]/并发双写；retry-timeout +1：apply 调用数=attempt 数[旧码红]）+ 回归 5 文件 144 passed + tsc 0；backend ppm 门控新 2 用例（cursor 取值不降级[旧码红] / attachments=false 仍降级）+ ppm 全文件 16 passed + scan_docs 46 passed，ruff/format/mypy 0。

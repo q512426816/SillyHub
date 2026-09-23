@@ -698,3 +698,108 @@ class TestListChannelPpmFilter:
         body = resp.json()
         assert body["total"] == 2
         assert str(s_bound.id) in {i["id"] for i in body["items"]}
+
+
+class TestPpmAttachmentGateAttachmentsKey:
+    """ql-20260922-001：PPM 附件门控查 attachments 键的回归锁定（函数级直测）。
+
+    背景：ql-20260921-005 把附件通道三处门控从 multimodal 键改到 attachments
+    键（cursor attachments=True / multimodal=False，走 disk-only 落盘可收
+    .md 记录），ppm_activation 阶段-1 资格判定漏改——cursor 会话的 PPM 附件
+    被错误降级为 GET 链接，而同会话手动上传 .md 走落盘，自相矛盾。
+    """
+
+    def _make_env(self):
+        """构造 _materialize_ppm_attachments 的最小依赖（全部 mock，无 DB/IO）。"""
+        from types import SimpleNamespace
+
+        from app.modules.daemon.session.service import ppm_activation
+
+        file_id = uuid.uuid4()
+        row = SimpleNamespace(
+            id=file_id,
+            stored_key="k1",
+            mime_type="text/markdown",
+            original_name="note.md",
+        )
+        item = SimpleNamespace(file_urls=[str(file_id)])
+
+        svc = MagicMock()
+        svc._session.get = AsyncMock(return_value=SimpleNamespace())
+        svc.log = MagicMock()
+
+        async def _stream(key: str):
+            yield b"hello ppm"
+
+        backend = MagicMock()
+        backend.get_object_stream = _stream
+        store = MagicMock()
+        store.store_bytes = AsyncMock(return_value=("attachments/u/x", "deadbeef"))
+        return ppm_activation, row, item, svc, backend, store, file_id
+
+    async def test_cursor_like_caps_do_not_degrade(self) -> None:
+        """multimodal=False + attachments=True（cursor 取值）→ 走物化不降级。"""
+        ppm_activation, row, item, svc, backend, store, _ = self._make_env()
+
+        with (
+            patch.object(ppm_activation, "load_item_files", AsyncMock(return_value=[row])),
+            patch.object(
+                ppm_activation,
+                "get_provider_caps",
+                lambda p: {"attachments": True, "multimodal": False},
+            ),
+            patch("app.modules.file.service.FileService") as fs_cls,
+            patch(
+                "app.modules.session_attachment.storage.SessionAttachmentStorage",
+                return_value=store,
+            ),
+            patch("app.modules.storage.factory.get_storage_backend", return_value=backend),
+            patch("app.core.config.get_settings"),
+        ):
+            fs_cls.return_value._can_access = AsyncMock(return_value=True)
+            degrade, prepared = await ppm_activation._materialize_ppm_attachments(
+                svc,
+                user_id=uuid.uuid4(),
+                kind="plan_task",
+                item_id=uuid.uuid4(),
+                provider="cursor",
+                manual_attachments=[],
+                item=item,
+            )
+
+        assert degrade == []
+        assert len(prepared) == 1
+        assert prepared[0].name == "note.md"
+
+    async def test_attachments_false_still_degrades_to_get_link(self) -> None:
+        """attachments=False（codex 取值）→ 整条降级为 GET 链接（门控仍生效）。"""
+        ppm_activation, row, item, svc, backend, store, file_id = self._make_env()
+
+        with (
+            patch.object(ppm_activation, "load_item_files", AsyncMock(return_value=[row])),
+            patch.object(
+                ppm_activation,
+                "get_provider_caps",
+                lambda p: {"attachments": False, "multimodal": False},
+            ),
+            patch("app.modules.file.service.FileService") as fs_cls,
+            patch(
+                "app.modules.session_attachment.storage.SessionAttachmentStorage",
+                return_value=store,
+            ),
+            patch("app.modules.storage.factory.get_storage_backend", return_value=backend),
+            patch("app.core.config.get_settings"),
+        ):
+            fs_cls.return_value._can_access = AsyncMock(return_value=True)
+            degrade, prepared = await ppm_activation._materialize_ppm_attachments(
+                svc,
+                user_id=uuid.uuid4(),
+                kind="plan_task",
+                item_id=uuid.uuid4(),
+                provider="codex",
+                manual_attachments=[],
+                item=item,
+            )
+
+        assert degrade == [f"note.md：GET /api/file/{file_id}"]
+        assert prepared == []

@@ -577,6 +577,39 @@ class TestReparseSkipsUnchangedRows:
         assert "New body." in (row.content or "")
         assert row.content_hash == hashlib.sha256(b"# Changed\nNew body.").hexdigest()
 
+    async def test_soft_deleted_row_revived_with_same_content_refills_content(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """ql-20260922-001：软删行同内容复活 → 走全量回填，content 不丢失。
+
+        旧 skip 判定只比 hash：软删（exists=False, content=None）后文件原样
+        恢复，hash 相同命中 skip 只回 exists 标志 → 正文永久 None（详情页
+        无内容、搜索不可见，直到文件内容真正变化才自愈）。
+        """
+        ws = await self._prepare(db_session, tmp_path)
+        doc_file = tmp_path / "spec" / "docs" / "ARCHITECTURE.md"
+        original = doc_file.read_text(encoding="utf-8")
+        stmt = select(ScanDocument).where(
+            ScanDocument.workspace_id == ws.id,
+            ScanDocument.path == "docs/ARCHITECTURE.md",
+        )
+
+        # ② 删文件后 reparse → 软删（exists=False，content 赋 None 不触发懒加载）
+        doc_file.unlink()
+        svc = ScanDocsService(db_session)
+        await svc.reparse(ws.id)
+        soft = (await db_session.execute(stmt)).scalar_one()
+        assert soft.exists is False
+        assert soft.content is None
+
+        # ③ 文件原样恢复（同内容同 hash）→ 必须走全量回填而不是 skip
+        doc_file.write_text(original, encoding="utf-8")
+        await svc.reparse(ws.id)
+        revived = (await db_session.execute(stmt)).scalar_one()
+        assert revived.exists is True
+        assert revived.content == original
+        assert revived.content_hash == hashlib.sha256(original.encode("utf-8")).hexdigest()
+
 
 class TestReparseRemovesDeletedFiles:
     """reparse() marks rows as exists=False when files are removed from disk."""

@@ -334,6 +334,43 @@ async def test_injection_aggregation_30d_window(db_session: AsyncSession) -> Non
     ]
 
 
+async def test_injection_anchor_hash_suffix_splits_to_file(db_session: AsyncSession) -> None:
+    """ql-20260922-001：「文件#锚」形态拆 # 后按文件去重聚合（对齐 knowledge/hits 先例）。
+
+    旧口径不拆 #锚：同文件多锚在榜上拆成多行、docs_hit_30d 按 (文件,锚)
+    去重——与 DTO 注释「被注入文档去重数」语义矛盾且数值虚高。
+    """
+    now = datetime.now(UTC)
+    ws = await _create_workspace(db_session)
+    await _insert_hit(
+        db_session,
+        ws.id,
+        hit_type="docs-inject",
+        matched=[
+            "docs/proj-a/modules/core.md#anchor-1",
+            "docs/proj-a/modules/core.md#anchor-2",
+            ".sillyspec/docs/proj-a/modules/core.md#anchor-1",
+        ],
+        occurred_at=now,
+    )
+    await _insert_hit(
+        db_session,
+        ws.id,
+        hit_type="docs-inject",
+        matched=["docs/proj-a/modules/core.md"],
+        occurred_at=now - timedelta(days=1),
+    )
+
+    out = await ScanDocsService(db_session).stats(ws.id)
+
+    assert out.injection.total_30d == 2
+    # 全部命中同一文件（旧口径按 (文件,锚) 去重会得 4）
+    assert out.injection.docs_hit_30d == 1
+    assert [(b.path, b.hits_30d) for b in out.injection.board] == [
+        ("proj-a/modules/core.md", 4),  # 三锚形态 + 裸文件，拆锚后聚到同一行
+    ]
+
+
 async def test_knowledge_stats_not_polluted_by_docs_inject(
     db_session: AsyncSession, tmp_path: Path
 ) -> None:

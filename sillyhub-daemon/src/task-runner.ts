@@ -570,22 +570,8 @@ export class TaskRunner {
         });
       }
 
-      // task-06（spike-01 修正 / D-009）：spawn 前把 provider_config.settings_config 的
-      // 白名单顶层键（attribution/enabledPlugins/model/skipDangerousModePermissionPrompt）
-      // 写进 $CLAUDE_CONFIG_DIR/settings.json，让无 env 等价物的开关（attribution）生效。
-      // absent / null / 仅 env → helper 内删既有文件（撤下语义，ql-20260921-001-8a4d）；写盘失败 best-effort
-      // 不阻断 spawn。单 lease 内只写一次（retry 循环在下方，同一 settings.json 重写幂等）。
-      // task-03（2026-09-10-multi-provider-injection / Grill P2）：kind 守卫——仅
-      // agent_kind='claude' 或缺省才调 applyClaudeSettings，堵 codex/pi kind 的
-      // settings_config 白名单键写穿 claude 目录并残留（claude-settings.ts 本体不动；
-      // provider_config 为 null/undefined 时照旧调用，helper 内部零写入零回归）。
-      if (
-        !ctx.provider_config ||
-        ctx.provider_config.agent_kind === 'claude' ||
-        ctx.provider_config.agent_kind === undefined
-      ) {
-        await applyClaudeSettings(ctx.provider_config);
-      }
+      // task-06：applyClaudeSettings 已移入下方 retry 循环内——每次 attempt
+      // spawn 前重写（ql-20260922-001 并发撤下竞态收口），此处不再调用。
 
       // task-03（FR-01/FR-02 / D-005/D-011/D-012）：codex/pi 配置写盘层分派。
       // per-session 目录段 = leaseId（batch 无会话 id，lease 是唯一稳定执行粒度）；
@@ -714,6 +700,25 @@ export class TaskRunner {
           if (typeof adapterWithReset.resetAccumulator === 'function') {
             adapterWithReset.resetAccumulator();
           }
+        }
+        // task-06（spike-01 修正 / D-009）：spawn 前把 provider_config.settings_config
+        // 的白名单顶层键写进 $CLAUDE_CONFIG_DIR/settings.json（attribution 等无 env
+        // 等价物项生效）。absent / null / 仅 env → helper 内删既有文件（撤下语义，
+        // ql-20260921-001-8a4d）；写盘失败 best-effort 不阻断 spawn。
+        // ql-20260922-001（竞态收口）：从循环外移入——CLAUDE_CONFIG_DIR 是全局
+        // 唯一目录，并发 lease 的「撤下 unlink」可在本 lease 运行期删掉文件，
+        // 循环外只写一次会让 attempt 2+ 的 spawn 读不到自己的配置（autocompact
+        // 丢失回到 ~160k 提前压缩）。每次 attempt spawn 前重写，apply 幂等、
+        // 写重复无害。task-03（Grill P2）kind 守卫——仅 agent_kind='claude' 或
+        // 缺省才调，堵 codex/pi kind 的 settings_config 白名单键写穿 claude
+        // 目录并残留（provider_config 为 null/undefined 时照旧调用，helper
+        // 内部零写入零回归）。
+        if (
+          !ctx.provider_config ||
+          ctx.provider_config.agent_kind === 'claude' ||
+          ctx.provider_config.agent_kind === undefined
+        ) {
+          await applyClaudeSettings(ctx.provider_config);
         }
         // task-08：本 attempt 起始的累计基线（const per-attempt，闭包捕获稳定）。
         const usedBeforeAttempt = budgetState.used;

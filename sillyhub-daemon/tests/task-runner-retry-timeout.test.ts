@@ -32,10 +32,17 @@ vi.mock('../src/adapters/index.js', () => ({
   getBackend: vi.fn((_p: string) => mockAdapter),
 }));
 
+// ql-20260922-001：mock 掉 settings 写盘（既隔离全局 CLAUDE_CONFIG_DIR 副作用，
+// 也让「每个 attempt spawn 前 apply」的调用次数可断言）。
+vi.mock('../src/claude-settings.js', () => ({
+  applyClaudeSettings: vi.fn(async () => undefined),
+}));
+
 import { spawn } from 'node:child_process';
 import { TaskRunner, resolveTimeout, resolveMaxRetries, isSpawnLevelFailure } from '../src/task-runner.js';
+import { applyClaudeSettings } from '../src/claude-settings.js';
 import type { DaemonConfig } from '../src/config.js';
-import type { LeaseCtx } from '../src/types.js';
+import type { LeaseCtx, ProviderConfig } from '../src/types.js';
 import { createFakeChild, waitForSpawn, type FakeChild } from './helpers/fake-child.js';
 
 // ── 共用 helper ──────────────────────────────────────────────────────────────
@@ -348,6 +355,44 @@ describe('重试编排（task-10 B3 集成）', () => {
     // 第一次带 resumeSessionId，第二次（重试）清空
     expect(buildArgsCalls[0]?.resumeSessionId).toBe('sess-original');
     expect(buildArgsCalls[1]?.resumeSessionId).toBeUndefined();
+  });
+
+  it('ql-20260922-001: 每个 attempt spawn 前都调 applyClaudeSettings（并发撤下竞态收口）', async () => {
+    // CLAUDE_CONFIG_DIR 全局唯一：并发 lease 的「撤下 unlink」可在本 lease
+    // 运行期删掉 settings.json——apply 在循环外只调一次会让 attempt 2+ 的
+    // spawn 读不到自己的配置（autocompact 丢失回到 ~160k 提前压缩）。
+    // 修复后 apply 移入 for(;;) 循环：调用次数 = attempt 次数（旧实现恒 1，红）。
+    vi.mocked(applyClaudeSettings).mockClear();
+    let callCount = 0;
+    vi.mocked(spawn).mockImplementation(() => {
+      callCount++;
+      const fake = createFakeChild();
+      setImmediate(() => {
+        if (callCount === 1) {
+          // 第一次 ENOENT（spawn 级失败）→ 重试
+          fake._emitError(Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }));
+          fake._emitExit(127);
+        } else {
+          // 第二次成功
+          fake._emitExit(0);
+        }
+      });
+      return fake as never;
+    });
+
+    const runner = new TaskRunner(
+      makeClient() as never,
+      makeWorkspace() as never,
+      makeCred() as never,
+      makeConfig({ max_retries: 1 }),
+    );
+    const result = await runner.runLease(
+      makeCtx({ provider_config: { agent_kind: 'claude' } as ProviderConfig }),
+    );
+
+    expect(callCount).toBe(2);
+    expect(result.status).toBe('completed');
+    expect(vi.mocked(applyClaudeSettings)).toHaveBeenCalledTimes(2);
   });
 
   it('cancel → 不重试 → cancelled + retry_count=0', async () => {

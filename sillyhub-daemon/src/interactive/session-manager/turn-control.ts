@@ -12,8 +12,8 @@
  */
 
 import { basename, join } from 'node:path';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
 import type { InjectResult, SessionState } from '../types.js';
 import {
   SessionAttachmentTimeoutError,
@@ -58,8 +58,19 @@ import type { SessionManagerDepsWithQueued } from './types.js';
  * - 扩展名取展示名后缀白名单化（字母数字 1-8 位；非法/无后缀回退 ``bin``，
  *   对齐 backend storage 的 ``_EXT_RE``）；展示名不进键路径（防穿越 +
  *   消灭同名歧义——旧的同名 (n) 序号机制已废弃）。
- * - 同哈希已存在（``wx`` 独占探测 EEXIST）即跳过写入直接复用：内容寻址
- *   不可变，agent 从路径即可唯一锁定本次发送的文件，无需读目录比对。
+ * - ql-20260922-001：落盘原子化 + 复用前完整性校验。旧实现 ``wx`` 直接写
+ *   最终路径，进程崩溃/断电会在内容寻址路径上留下半截文件；同内容附件
+ *   再发送时 sha256 相同 → EEXIST 被当「同内容已落盘」直接复用，半截
+ *   损坏被永久固化且无告警（cursor 附件 disk-only 无 block 通道兜底，
+ *   本函数是其唯一投递通道）。改为：①目标已存在且 size 相符 → 复用
+ *   （截断只会更小，size 校验足以识别半截并自愈存量损坏文件）；②缺失/
+ *   不符 → 写 ``{dest}.tmp-{pid}-{rand}`` 后 rename 顶替——任一观察时刻
+ *   最终路径上的文件要么不存在要么完整，崩溃最坏残留 tmp（随机名不挡
+ *   后续写）。并发双写者各写各的 tmp，后 rename 者覆盖前者（同内容无害）。
+ *   rename 顶替已存在目标的 Windows 语义（MoveFileEx REPLACE_EXISTING）
+ *   与 atomic-write.ts 同款、由其仓内测试锁定。附件非配置文件，不走
+ *   writeFileAtomic 的 fsync 持久性——截断可由重发自愈，省大附件 fsync
+ *   开销（≤20MB 级）。
  * - 返回相对路径 ``attachments/xxx``（prompt 路径清单用相对形态）。
  */
 const ATTACHMENT_EXT_RE = /^[A-Za-z0-9]{1,8}$/;
@@ -78,11 +89,24 @@ export async function writeAttachmentFile(
   const ext = ATTACHMENT_EXT_RE.test(rawExt) ? rawExt : 'bin';
   const sha256 = createHash('sha256').update(buf).digest('hex');
   const rel = `attachments/${sha256}.${ext}`;
+  const dest = join(cwd, rel);
+  let destSize = -1;
   try {
-    await writeFile(join(cwd, rel), buf, { flag: 'wx' });
+    destSize = (await stat(dest)).size;
   } catch (err) {
-    // EEXIST = 同内容对象已落盘（不可变）→ 跳过写入直接复用；其余照抛。
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    // ENOENT = 目标未落盘（首次写）；其余（权限等）照抛走调用方降级。
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+  if (destSize !== buf.length) {
+    const tmpPath = `${dest}.tmp-${process.pid}-${randomUUID().slice(0, 8)}`;
+    try {
+      await writeFile(tmpPath, buf);
+      await rename(tmpPath, dest);
+    } finally {
+      // rename 成功后 tmp 已不存在；失败则清掉半截 tmp 再让异常向上走
+      // （inject 的单附件 catch 降级为「下载失败: <name>」标注）。
+      await unlink(tmpPath).catch(() => {});
+    }
   }
   return rel;
 }

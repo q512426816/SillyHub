@@ -338,10 +338,13 @@ class ScanDocsService:
             if _as_utc(occurred_raw) < window_start:
                 continue
             total_30d += 1
-            # matched_anchors = 行内 matchedFiles 原样数组（docs 相对路径，可能是
-            # docs/... 或 .sillyspec/docs/... 两种布局前缀），剥前缀对齐树口径。
+            # matched_anchors = 行内 matchedFiles 原样数组（「文件」或「文件#锚」
+            # 两形态，可能是 docs/... 或 .sillyspec/docs/... 两种布局前缀），剥前缀
+            # + 拆 #锚 对齐树的裸文件口径（ql-20260922-001：对齐 knowledge/hits.py
+            # 聚合先例——不拆则同文件多锚在榜上拆成多行、docs_hit_30d 按 (文件,锚)
+            # 去重，与 DTO 注释「被注入文档去重数」语义矛盾且数值虚高）。
             for anchor in anchors or []:
-                stripped = _strip_docs_prefix(str(anchor))
+                stripped = _strip_docs_prefix(str(anchor)).split("#", 1)[0]
                 if stripped:
                     path_counts[stripped] += 1
         board = [
@@ -532,14 +535,17 @@ class ScanDocsService:
         parsed_doc: ParsedDoc,
     ) -> None:
         new_hash = hashlib.sha256((parsed_doc.content or "").encode("utf-8")).hexdigest()
-        # 内容未变（hash 相同 ⇒ content/title/doc_type 同源不变）时跳过 content
-        # 大列重写：reparse 每次页面访问都会执行，未变更行不再产生含正文的
-        # UPDATE（perf：数百文档工作区每次进页省掉全部大列写），只同步轻量列。
-        if row.content_hash is not None and row.content_hash == new_hash:
+        # 内容未变（hash 相同 ⇒ content/title/doc_type 同源不变）且行在线时跳过
+        # content 大列重写：reparse 每次页面访问都会执行，未变更行不再产生含正
+        # 文的 UPDATE（perf：数百文档工作区每次进页省掉全部大列写），只同步轻量列。
+        # ql-20260922-001：软删行（exists=False，content 已置 None）即便 hash 相同
+        # 也不许 skip——文件同内容复活时必须走全量回填，否则 content 永久为 None
+        # （详情页无内容、搜索不可见，直到文件内容真正变化才自愈）。判软删只能用
+        # exists：content 列被 _fetch_existing load_only 排除，skip 判定里读它会
+        # 触发 deferred 懒加载（async 下 MissingGreenlet）。
+        if row.content_hash is not None and row.content_hash == new_hash and row.exists:
             if not _dt_equal(row.last_modified_at, parsed_doc.last_modified_at):
                 row.last_modified_at = parsed_doc.last_modified_at
-            if not row.exists:
-                row.exists = True
             return
         row.doc_type = parsed_doc.doc_type
         row.path = parsed_doc.path

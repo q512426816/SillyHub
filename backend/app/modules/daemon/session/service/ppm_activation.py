@@ -57,8 +57,8 @@ async def _materialize_ppm_attachments(
     非 uuid 条目直接进降级清单）→ task-01 :func:`load_item_files` 取存活
     File 行 → 逐条 ``FileService._can_access`` 同口径校验（D-007：上传者
     本人/平台管理员；ppm 附件 owner_type 不命中 workspace/agent 锚分支）→
-    有权且 provider=claude 且与手动附件合并后 图≤5/文≤5 的条目读 file
-    storage bytes → ``SessionAttachmentStorage.store_bytes``（内容寻址
+    有权且引擎支持附件（attachments 键）且与手动附件合并后 图≤5/文≤5 的条目
+    读 file storage bytes → ``SessionAttachmentStorage.store_bytes``（内容寻址
     sha256 去重）产出预备行；其余条目降级为前导文字清单。
 
     ql-20260828-003 两项修复：
@@ -72,10 +72,10 @@ async def _materialize_ppm_attachments(
       会话创建；每条独立兜错）；③按条目原序组装 prepared / 降级行。
 
     - 降级四类（均不阻塞会话创建，TaskCard GWT-3）：无权 → 仅文件名 +
-      「无权访问」；超限 / provider≠claude / 读取失败（``read_failed``）/
-      存储失败（``store_failed``）/ File 已删或缺号的有权条目 → 文件名 +
-      ``GET /api/file/{file_id}`` 链接（软删/缺号行回查取文件名，查无以
-      file_id 兜底）。
+      「无权访问」；超限 / 引擎不支持附件（attachments 键，ql-20260921-005
+      改键）/ 读取失败（``read_failed``）/ 存储失败（``store_failed``）/
+      File 已删或缺号的有权条目 → 文件名 + ``GET /api/file/{file_id}`` 链接
+      （软删/缺号行回查取文件名，查无以 file_id 兜底）。
     - 纯只读 + storage IO、无 DB 写：``SessionAttachment`` 行 insert 归
       create_session 写事务内（消费返回的 ``_PreparedPpmAttachment``）；
       不复用 ``SessionAttachmentService.upload()``（自带 commit 与 PIL/
@@ -137,9 +137,12 @@ async def _materialize_ppm_attachments(
         if actor is None or not await file_svc._can_access(user=actor, row=row):
             degrade_lines.append(f"{row.original_name}（无权访问）")
             continue
-        # provider-abstraction task-11：引擎门控收敛查 ProviderCaps（multimodal
-        # 键，与原 != "claude" 判定等价——不支持附件的引擎整条降级为链接）。
-        if not get_provider_caps(provider)["multimodal"]:
+        # provider-abstraction task-11：引擎门控收敛查 ProviderCaps——附件通道按
+        # attachments 键（claude/pi/cursor，ql-20260921-005 起改键，cursor 走
+        # disk-only 落盘同样可收 .md 记录），与 attachments.py / knowledge/
+        # distill.py 同口径（ql-20260922-001 补漏：本处漏改 multimodal 键导致
+        # cursor 会话的 PPM 附件被错误降级为 GET 链接）。
+        if not get_provider_caps(provider)["attachments"]:
             degrade_lines.append(f"{row.original_name}：GET /api/file/{row.id}")
             continue
         entry_kind = "image" if (row.mime_type or "").startswith("image/") else "file"

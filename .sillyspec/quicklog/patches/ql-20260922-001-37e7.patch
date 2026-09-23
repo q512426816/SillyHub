@@ -1,0 +1,577 @@
+diff --git a/backend/app/modules/daemon/session/service/ppm_activation.py b/backend/app/modules/daemon/session/service/ppm_activation.py
+index 6540233d9..e015ded7b 100644
+--- a/backend/app/modules/daemon/session/service/ppm_activation.py
++++ b/backend/app/modules/daemon/session/service/ppm_activation.py
+@@ -57,8 +57,8 @@ async def _materialize_ppm_attachments(
+     非 uuid 条目直接进降级清单）→ task-01 :func:`load_item_files` 取存活
+     File 行 → 逐条 ``FileService._can_access`` 同口径校验（D-007：上传者
+     本人/平台管理员；ppm 附件 owner_type 不命中 workspace/agent 锚分支）→
+-    有权且 provider=claude 且与手动附件合并后 图≤5/文≤5 的条目读 file
+-    storage bytes → ``SessionAttachmentStorage.store_bytes``（内容寻址
++    有权且引擎支持附件（attachments 键）且与手动附件合并后 图≤5/文≤5 的条目
++    读 file storage bytes → ``SessionAttachmentStorage.store_bytes``（内容寻址
+     sha256 去重）产出预备行；其余条目降级为前导文字清单。
+ 
+     ql-20260828-003 两项修复：
+@@ -72,10 +72,10 @@ async def _materialize_ppm_attachments(
+       会话创建；每条独立兜错）；③按条目原序组装 prepared / 降级行。
+ 
+     - 降级四类（均不阻塞会话创建，TaskCard GWT-3）：无权 → 仅文件名 +
+-      「无权访问」；超限 / provider≠claude / 读取失败（``read_failed``）/
+-      存储失败（``store_failed``）/ File 已删或缺号的有权条目 → 文件名 +
+-      ``GET /api/file/{file_id}`` 链接（软删/缺号行回查取文件名，查无以
+-      file_id 兜底）。
++      「无权访问」；超限 / 引擎不支持附件（attachments 键，ql-20260921-005
++      改键）/ 读取失败（``read_failed``）/ 存储失败（``store_failed``）/
++      File 已删或缺号的有权条目 → 文件名 + ``GET /api/file/{file_id}`` 链接
++      （软删/缺号行回查取文件名，查无以 file_id 兜底）。
+     - 纯只读 + storage IO、无 DB 写：``SessionAttachment`` 行 insert 归
+       create_session 写事务内（消费返回的 ``_PreparedPpmAttachment``）；
+       不复用 ``SessionAttachmentService.upload()``（自带 commit 与 PIL/
+@@ -137,9 +137,12 @@ async def _materialize_ppm_attachments(
+         if actor is None or not await file_svc._can_access(user=actor, row=row):
+             degrade_lines.append(f"{row.original_name}（无权访问）")
+             continue
+-        # provider-abstraction task-11：引擎门控收敛查 ProviderCaps（multimodal
+-        # 键，与原 != "claude" 判定等价——不支持附件的引擎整条降级为链接）。
+-        if not get_provider_caps(provider)["multimodal"]:
++        # provider-abstraction task-11：引擎门控收敛查 ProviderCaps——附件通道按
++        # attachments 键（claude/pi/cursor，ql-20260921-005 起改键，cursor 走
++        # disk-only 落盘同样可收 .md 记录），与 attachments.py / knowledge/
++        # distill.py 同口径（ql-20260922-001 补漏：本处漏改 multimodal 键导致
++        # cursor 会话的 PPM 附件被错误降级为 GET 链接）。
++        if not get_provider_caps(provider)["attachments"]:
+             degrade_lines.append(f"{row.original_name}：GET /api/file/{row.id}")
+             continue
+         entry_kind = "image" if (row.mime_type or "").startswith("image/") else "file"
+diff --git a/backend/app/modules/daemon/tests/test_ppm_session.py b/backend/app/modules/daemon/tests/test_ppm_session.py
+index ee8dd0eeb..acea3d5fe 100644
+--- a/backend/app/modules/daemon/tests/test_ppm_session.py
++++ b/backend/app/modules/daemon/tests/test_ppm_session.py
+@@ -698,3 +698,108 @@ class TestListChannelPpmFilter:
+         body = resp.json()
+         assert body["total"] == 2
+         assert str(s_bound.id) in {i["id"] for i in body["items"]}
++
++
++class TestPpmAttachmentGateAttachmentsKey:
++    """ql-20260922-001：PPM 附件门控查 attachments 键的回归锁定（函数级直测）。
++
++    背景：ql-20260921-005 把附件通道三处门控从 multimodal 键改到 attachments
++    键（cursor attachments=True / multimodal=False，走 disk-only 落盘可收
++    .md 记录），ppm_activation 阶段-1 资格判定漏改——cursor 会话的 PPM 附件
++    被错误降级为 GET 链接，而同会话手动上传 .md 走落盘，自相矛盾。
++    """
++
++    def _make_env(self):
++        """构造 _materialize_ppm_attachments 的最小依赖（全部 mock，无 DB/IO）。"""
++        from types import SimpleNamespace
++
++        from app.modules.daemon.session.service import ppm_activation
++
++        file_id = uuid.uuid4()
++        row = SimpleNamespace(
++            id=file_id,
++            stored_key="k1",
++            mime_type="text/markdown",
++            original_name="note.md",
++        )
++        item = SimpleNamespace(file_urls=[str(file_id)])
++
++        svc = MagicMock()
++        svc._session.get = AsyncMock(return_value=SimpleNamespace())
++        svc.log = MagicMock()
++
++        async def _stream(key: str):
++            yield b"hello ppm"
++
++        backend = MagicMock()
++        backend.get_object_stream = _stream
++        store = MagicMock()
++        store.store_bytes = AsyncMock(return_value=("attachments/u/x", "deadbeef"))
++        return ppm_activation, row, item, svc, backend, store, file_id
++
++    async def test_cursor_like_caps_do_not_degrade(self) -> None:
++        """multimodal=False + attachments=True（cursor 取值）→ 走物化不降级。"""
++        ppm_activation, row, item, svc, backend, store, _ = self._make_env()
++
++        with (
++            patch.object(ppm_activation, "load_item_files", AsyncMock(return_value=[row])),
++            patch.object(
++                ppm_activation,
++                "get_provider_caps",
++                lambda p: {"attachments": True, "multimodal": False},
++            ),
++            patch("app.modules.file.service.FileService") as fs_cls,
++            patch(
++                "app.modules.session_attachment.storage.SessionAttachmentStorage",
++                return_value=store,
++            ),
++            patch("app.modules.storage.factory.get_storage_backend", return_value=backend),
++            patch("app.core.config.get_settings"),
++        ):
++            fs_cls.return_value._can_access = AsyncMock(return_value=True)
++            degrade, prepared = await ppm_activation._materialize_ppm_attachments(
++                svc,
++                user_id=uuid.uuid4(),
++                kind="plan_task",
++                item_id=uuid.uuid4(),
++                provider="cursor",
++                manual_attachments=[],
++                item=item,
++            )
++
++        assert degrade == []
++        assert len(prepared) == 1
++        assert prepared[0].name == "note.md"
++
++    async def test_attachments_false_still_degrades_to_get_link(self) -> None:
++        """attachments=False（codex 取值）→ 整条降级为 GET 链接（门控仍生效）。"""
++        ppm_activation, row, item, svc, backend, store, file_id = self._make_env()
++
++        with (
++            patch.object(ppm_activation, "load_item_files", AsyncMock(return_value=[row])),
++            patch.object(
++                ppm_activation,
++                "get_provider_caps",
++                lambda p: {"attachments": False, "multimodal": False},
++            ),
++            patch("app.modules.file.service.FileService") as fs_cls,
++            patch(
++                "app.modules.session_attachment.storage.SessionAttachmentStorage",
++                return_value=store,
++            ),
++            patch("app.modules.storage.factory.get_storage_backend", return_value=backend),
++            patch("app.core.config.get_settings"),
++        ):
++            fs_cls.return_value._can_access = AsyncMock(return_value=True)
++            degrade, prepared = await ppm_activation._materialize_ppm_attachments(
++                svc,
++                user_id=uuid.uuid4(),
++                kind="plan_task",
++                item_id=uuid.uuid4(),
++                provider="codex",
++                manual_attachments=[],
++                item=item,
++            )
++
++        assert degrade == [f"note.md：GET /api/file/{file_id}"]
++        assert prepared == []
+diff --git a/backend/app/modules/scan_docs/service.py b/backend/app/modules/scan_docs/service.py
+index 3614d5765..ff121d9e6 100644
+--- a/backend/app/modules/scan_docs/service.py
++++ b/backend/app/modules/scan_docs/service.py
+@@ -338,10 +338,13 @@ class ScanDocsService:
+             if _as_utc(occurred_raw) < window_start:
+                 continue
+             total_30d += 1
+-            # matched_anchors = 行内 matchedFiles 原样数组（docs 相对路径，可能是
+-            # docs/... 或 .sillyspec/docs/... 两种布局前缀），剥前缀对齐树口径。
++            # matched_anchors = 行内 matchedFiles 原样数组（「文件」或「文件#锚」
++            # 两形态，可能是 docs/... 或 .sillyspec/docs/... 两种布局前缀），剥前缀
++            # + 拆 #锚 对齐树的裸文件口径（ql-20260922-001：对齐 knowledge/hits.py
++            # 聚合先例——不拆则同文件多锚在榜上拆成多行、docs_hit_30d 按 (文件,锚)
++            # 去重，与 DTO 注释「被注入文档去重数」语义矛盾且数值虚高）。
+             for anchor in anchors or []:
+-                stripped = _strip_docs_prefix(str(anchor))
++                stripped = _strip_docs_prefix(str(anchor)).split("#", 1)[0]
+                 if stripped:
+                     path_counts[stripped] += 1
+         board = [
+@@ -532,14 +535,17 @@ class ScanDocsService:
+         parsed_doc: ParsedDoc,
+     ) -> None:
+         new_hash = hashlib.sha256((parsed_doc.content or "").encode("utf-8")).hexdigest()
+-        # 内容未变（hash 相同 ⇒ content/title/doc_type 同源不变）时跳过 content
+-        # 大列重写：reparse 每次页面访问都会执行，未变更行不再产生含正文的
+-        # UPDATE（perf：数百文档工作区每次进页省掉全部大列写），只同步轻量列。
+-        if row.content_hash is not None and row.content_hash == new_hash:
++        # 内容未变（hash 相同 ⇒ content/title/doc_type 同源不变）且行在线时跳过
++        # content 大列重写：reparse 每次页面访问都会执行，未变更行不再产生含正
++        # 文的 UPDATE（perf：数百文档工作区每次进页省掉全部大列写），只同步轻量列。
++        # ql-20260922-001：软删行（exists=False，content 已置 None）即便 hash 相同
++        # 也不许 skip——文件同内容复活时必须走全量回填，否则 content 永久为 None
++        # （详情页无内容、搜索不可见，直到文件内容真正变化才自愈）。判软删只能用
++        # exists：content 列被 _fetch_existing load_only 排除，skip 判定里读它会
++        # 触发 deferred 懒加载（async 下 MissingGreenlet）。
++        if row.content_hash is not None and row.content_hash == new_hash and row.exists:
+             if not _dt_equal(row.last_modified_at, parsed_doc.last_modified_at):
+                 row.last_modified_at = parsed_doc.last_modified_at
+-            if not row.exists:
+-                row.exists = True
+             return
+         row.doc_type = parsed_doc.doc_type
+         row.path = parsed_doc.path
+diff --git a/backend/app/modules/scan_docs/tests/test_service.py b/backend/app/modules/scan_docs/tests/test_service.py
+index 668f6610c..e289d1778 100644
+--- a/backend/app/modules/scan_docs/tests/test_service.py
++++ b/backend/app/modules/scan_docs/tests/test_service.py
+@@ -577,6 +577,39 @@ class TestReparseSkipsUnchangedRows:
+         assert "New body." in (row.content or "")
+         assert row.content_hash == hashlib.sha256(b"# Changed\nNew body.").hexdigest()
+ 
++    async def test_soft_deleted_row_revived_with_same_content_refills_content(
++        self, db_session: AsyncSession, tmp_path: Path
++    ) -> None:
++        """ql-20260922-001：软删行同内容复活 → 走全量回填，content 不丢失。
++
++        旧 skip 判定只比 hash：软删（exists=False, content=None）后文件原样
++        恢复，hash 相同命中 skip 只回 exists 标志 → 正文永久 None（详情页
++        无内容、搜索不可见，直到文件内容真正变化才自愈）。
++        """
++        ws = await self._prepare(db_session, tmp_path)
++        doc_file = tmp_path / "spec" / "docs" / "ARCHITECTURE.md"
++        original = doc_file.read_text(encoding="utf-8")
++        stmt = select(ScanDocument).where(
++            ScanDocument.workspace_id == ws.id,
++            ScanDocument.path == "docs/ARCHITECTURE.md",
++        )
++
++        # ② 删文件后 reparse → 软删（exists=False，content 赋 None 不触发懒加载）
++        doc_file.unlink()
++        svc = ScanDocsService(db_session)
++        await svc.reparse(ws.id)
++        soft = (await db_session.execute(stmt)).scalar_one()
++        assert soft.exists is False
++        assert soft.content is None
++
++        # ③ 文件原样恢复（同内容同 hash）→ 必须走全量回填而不是 skip
++        doc_file.write_text(original, encoding="utf-8")
++        await svc.reparse(ws.id)
++        revived = (await db_session.execute(stmt)).scalar_one()
++        assert revived.exists is True
++        assert revived.content == original
++        assert revived.content_hash == hashlib.sha256(original.encode("utf-8")).hexdigest()
++
+ 
+ class TestReparseRemovesDeletedFiles:
+     """reparse() marks rows as exists=False when files are removed from disk."""
+diff --git a/backend/app/modules/scan_docs/tests/test_stats.py b/backend/app/modules/scan_docs/tests/test_stats.py
+index 9aa7f2090..a69e26f37 100644
+--- a/backend/app/modules/scan_docs/tests/test_stats.py
++++ b/backend/app/modules/scan_docs/tests/test_stats.py
+@@ -334,6 +334,43 @@ async def test_injection_aggregation_30d_window(db_session: AsyncSession) -> Non
+     ]
+ 
+ 
++async def test_injection_anchor_hash_suffix_splits_to_file(db_session: AsyncSession) -> None:
++    """ql-20260922-001：「文件#锚」形态拆 # 后按文件去重聚合（对齐 knowledge/hits 先例）。
++
++    旧口径不拆 #锚：同文件多锚在榜上拆成多行、docs_hit_30d 按 (文件,锚)
++    去重——与 DTO 注释「被注入文档去重数」语义矛盾且数值虚高。
++    """
++    now = datetime.now(UTC)
++    ws = await _create_workspace(db_session)
++    await _insert_hit(
++        db_session,
++        ws.id,
++        hit_type="docs-inject",
++        matched=[
++            "docs/proj-a/modules/core.md#anchor-1",
++            "docs/proj-a/modules/core.md#anchor-2",
++            ".sillyspec/docs/proj-a/modules/core.md#anchor-1",
++        ],
++        occurred_at=now,
++    )
++    await _insert_hit(
++        db_session,
++        ws.id,
++        hit_type="docs-inject",
++        matched=["docs/proj-a/modules/core.md"],
++        occurred_at=now - timedelta(days=1),
++    )
++
++    out = await ScanDocsService(db_session).stats(ws.id)
++
++    assert out.injection.total_30d == 2
++    # 全部命中同一文件（旧口径按 (文件,锚) 去重会得 4）
++    assert out.injection.docs_hit_30d == 1
++    assert [(b.path, b.hits_30d) for b in out.injection.board] == [
++        ("proj-a/modules/core.md", 4),  # 三锚形态 + 裸文件，拆锚后聚到同一行
++    ]
++
++
+ async def test_knowledge_stats_not_polluted_by_docs_inject(
+     db_session: AsyncSession, tmp_path: Path
+ ) -> None:
+diff --git a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+index 915ab7cf7..fdfc66d5d 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+@@ -12,8 +12,8 @@
+  */
+ 
+ import { basename, join } from 'node:path';
+-import { mkdir, writeFile } from 'node:fs/promises';
+-import { createHash } from 'node:crypto';
++import { mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
++import { createHash, randomUUID } from 'node:crypto';
+ import type { InjectResult, SessionState } from '../types.js';
+ import {
+   SessionAttachmentTimeoutError,
+@@ -58,8 +58,19 @@ import type { SessionManagerDepsWithQueued } from './types.js';
+  * - 扩展名取展示名后缀白名单化（字母数字 1-8 位；非法/无后缀回退 ``bin``，
+  *   对齐 backend storage 的 ``_EXT_RE``）；展示名不进键路径（防穿越 +
+  *   消灭同名歧义——旧的同名 (n) 序号机制已废弃）。
+- * - 同哈希已存在（``wx`` 独占探测 EEXIST）即跳过写入直接复用：内容寻址
+- *   不可变，agent 从路径即可唯一锁定本次发送的文件，无需读目录比对。
++ * - ql-20260922-001：落盘原子化 + 复用前完整性校验。旧实现 ``wx`` 直接写
++ *   最终路径，进程崩溃/断电会在内容寻址路径上留下半截文件；同内容附件
++ *   再发送时 sha256 相同 → EEXIST 被当「同内容已落盘」直接复用，半截
++ *   损坏被永久固化且无告警（cursor 附件 disk-only 无 block 通道兜底，
++ *   本函数是其唯一投递通道）。改为：①目标已存在且 size 相符 → 复用
++ *   （截断只会更小，size 校验足以识别半截并自愈存量损坏文件）；②缺失/
++ *   不符 → 写 ``{dest}.tmp-{pid}-{rand}`` 后 rename 顶替——任一观察时刻
++ *   最终路径上的文件要么不存在要么完整，崩溃最坏残留 tmp（随机名不挡
++ *   后续写）。并发双写者各写各的 tmp，后 rename 者覆盖前者（同内容无害）。
++ *   rename 顶替已存在目标的 Windows 语义（MoveFileEx REPLACE_EXISTING）
++ *   与 atomic-write.ts 同款、由其仓内测试锁定。附件非配置文件，不走
++ *   writeFileAtomic 的 fsync 持久性——截断可由重发自愈，省大附件 fsync
++ *   开销（≤20MB 级）。
+  * - 返回相对路径 ``attachments/xxx``（prompt 路径清单用相对形态）。
+  */
+ const ATTACHMENT_EXT_RE = /^[A-Za-z0-9]{1,8}$/;
+@@ -78,11 +89,24 @@ export async function writeAttachmentFile(
+   const ext = ATTACHMENT_EXT_RE.test(rawExt) ? rawExt : 'bin';
+   const sha256 = createHash('sha256').update(buf).digest('hex');
+   const rel = `attachments/${sha256}.${ext}`;
++  const dest = join(cwd, rel);
++  let destSize = -1;
+   try {
+-    await writeFile(join(cwd, rel), buf, { flag: 'wx' });
++    destSize = (await stat(dest)).size;
+   } catch (err) {
+-    // EEXIST = 同内容对象已落盘（不可变）→ 跳过写入直接复用；其余照抛。
+-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
++    // ENOENT = 目标未落盘（首次写）；其余（权限等）照抛走调用方降级。
++    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
++  }
++  if (destSize !== buf.length) {
++    const tmpPath = `${dest}.tmp-${process.pid}-${randomUUID().slice(0, 8)}`;
++    try {
++      await writeFile(tmpPath, buf);
++      await rename(tmpPath, dest);
++    } finally {
++      // rename 成功后 tmp 已不存在；失败则清掉半截 tmp 再让异常向上走
++      // （inject 的单附件 catch 降级为「下载失败: <name>」标注）。
++      await unlink(tmpPath).catch(() => {});
++    }
+   }
+   return rel;
+ }
+diff --git a/sillyhub-daemon/src/task-runner.ts b/sillyhub-daemon/src/task-runner.ts
+index 01555beb7..50c752fcd 100644
+--- a/sillyhub-daemon/src/task-runner.ts
++++ b/sillyhub-daemon/src/task-runner.ts
+@@ -570,22 +570,8 @@ export class TaskRunner {
+         });
+       }
+ 
+-      // task-06（spike-01 修正 / D-009）：spawn 前把 provider_config.settings_config 的
+-      // 白名单顶层键（attribution/enabledPlugins/model/skipDangerousModePermissionPrompt）
+-      // 写进 $CLAUDE_CONFIG_DIR/settings.json，让无 env 等价物的开关（attribution）生效。
+-      // absent / null / 仅 env → helper 内删既有文件（撤下语义，ql-20260921-001-8a4d）；写盘失败 best-effort
+-      // 不阻断 spawn。单 lease 内只写一次（retry 循环在下方，同一 settings.json 重写幂等）。
+-      // task-03（2026-09-10-multi-provider-injection / Grill P2）：kind 守卫——仅
+-      // agent_kind='claude' 或缺省才调 applyClaudeSettings，堵 codex/pi kind 的
+-      // settings_config 白名单键写穿 claude 目录并残留（claude-settings.ts 本体不动；
+-      // provider_config 为 null/undefined 时照旧调用，helper 内部零写入零回归）。
+-      if (
+-        !ctx.provider_config ||
+-        ctx.provider_config.agent_kind === 'claude' ||
+-        ctx.provider_config.agent_kind === undefined
+-      ) {
+-        await applyClaudeSettings(ctx.provider_config);
+-      }
++      // task-06：applyClaudeSettings 已移入下方 retry 循环内——每次 attempt
++      // spawn 前重写（ql-20260922-001 并发撤下竞态收口），此处不再调用。
+ 
+       // task-03（FR-01/FR-02 / D-005/D-011/D-012）：codex/pi 配置写盘层分派。
+       // per-session 目录段 = leaseId（batch 无会话 id，lease 是唯一稳定执行粒度）；
+@@ -715,6 +701,25 @@ export class TaskRunner {
+             adapterWithReset.resetAccumulator();
+           }
+         }
++        // task-06（spike-01 修正 / D-009）：spawn 前把 provider_config.settings_config
++        // 的白名单顶层键写进 $CLAUDE_CONFIG_DIR/settings.json（attribution 等无 env
++        // 等价物项生效）。absent / null / 仅 env → helper 内删既有文件（撤下语义，
++        // ql-20260921-001-8a4d）；写盘失败 best-effort 不阻断 spawn。
++        // ql-20260922-001（竞态收口）：从循环外移入——CLAUDE_CONFIG_DIR 是全局
++        // 唯一目录，并发 lease 的「撤下 unlink」可在本 lease 运行期删掉文件，
++        // 循环外只写一次会让 attempt 2+ 的 spawn 读不到自己的配置（autocompact
++        // 丢失回到 ~160k 提前压缩）。每次 attempt spawn 前重写，apply 幂等、
++        // 写重复无害。task-03（Grill P2）kind 守卫——仅 agent_kind='claude' 或
++        // 缺省才调，堵 codex/pi kind 的 settings_config 白名单键写穿 claude
++        // 目录并残留（provider_config 为 null/undefined 时照旧调用，helper
++        // 内部零写入零回归）。
++        if (
++          !ctx.provider_config ||
++          ctx.provider_config.agent_kind === 'claude' ||
++          ctx.provider_config.agent_kind === undefined
++        ) {
++          await applyClaudeSettings(ctx.provider_config);
++        }
+         // task-08：本 attempt 起始的累计基线（const per-attempt，闭包捕获稳定）。
+         const usedBeforeAttempt = budgetState.used;
+         // args 每次重试都重新构建（重试时 effectiveCtx.resumeSessionId 已清空，buildArgs 不带 --resume）
+diff --git a/sillyhub-daemon/tests/task-runner-retry-timeout.test.ts b/sillyhub-daemon/tests/task-runner-retry-timeout.test.ts
+index ff1de937c..46b3c13a8 100644
+--- a/sillyhub-daemon/tests/task-runner-retry-timeout.test.ts
++++ b/sillyhub-daemon/tests/task-runner-retry-timeout.test.ts
+@@ -32,10 +32,17 @@ vi.mock('../src/adapters/index.js', () => ({
+   getBackend: vi.fn((_p: string) => mockAdapter),
+ }));
+ 
++// ql-20260922-001：mock 掉 settings 写盘（既隔离全局 CLAUDE_CONFIG_DIR 副作用，
++// 也让「每个 attempt spawn 前 apply」的调用次数可断言）。
++vi.mock('../src/claude-settings.js', () => ({
++  applyClaudeSettings: vi.fn(async () => undefined),
++}));
++
+ import { spawn } from 'node:child_process';
+ import { TaskRunner, resolveTimeout, resolveMaxRetries, isSpawnLevelFailure } from '../src/task-runner.js';
++import { applyClaudeSettings } from '../src/claude-settings.js';
+ import type { DaemonConfig } from '../src/config.js';
+-import type { LeaseCtx } from '../src/types.js';
++import type { LeaseCtx, ProviderConfig } from '../src/types.js';
+ import { createFakeChild, waitForSpawn, type FakeChild } from './helpers/fake-child.js';
+ 
+ // ── 共用 helper ──────────────────────────────────────────────────────────────
+@@ -350,6 +357,44 @@ describe('重试编排（task-10 B3 集成）', () => {
+     expect(buildArgsCalls[1]?.resumeSessionId).toBeUndefined();
+   });
+ 
++  it('ql-20260922-001: 每个 attempt spawn 前都调 applyClaudeSettings（并发撤下竞态收口）', async () => {
++    // CLAUDE_CONFIG_DIR 全局唯一：并发 lease 的「撤下 unlink」可在本 lease
++    // 运行期删掉 settings.json——apply 在循环外只调一次会让 attempt 2+ 的
++    // spawn 读不到自己的配置（autocompact 丢失回到 ~160k 提前压缩）。
++    // 修复后 apply 移入 for(;;) 循环：调用次数 = attempt 次数（旧实现恒 1，红）。
++    vi.mocked(applyClaudeSettings).mockClear();
++    let callCount = 0;
++    vi.mocked(spawn).mockImplementation(() => {
++      callCount++;
++      const fake = createFakeChild();
++      setImmediate(() => {
++        if (callCount === 1) {
++          // 第一次 ENOENT（spawn 级失败）→ 重试
++          fake._emitError(Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }));
++          fake._emitExit(127);
++        } else {
++          // 第二次成功
++          fake._emitExit(0);
++        }
++      });
++      return fake as never;
++    });
++
++    const runner = new TaskRunner(
++      makeClient() as never,
++      makeWorkspace() as never,
++      makeCred() as never,
++      makeConfig({ max_retries: 1 }),
++    );
++    const result = await runner.runLease(
++      makeCtx({ provider_config: { agent_kind: 'claude' } as ProviderConfig }),
++    );
++
++    expect(callCount).toBe(2);
++    expect(result.status).toBe('completed');
++    expect(vi.mocked(applyClaudeSettings)).toHaveBeenCalledTimes(2);
++  });
++
+   it('cancel → 不重试 → cancelled + retry_count=0', async () => {
+     let callCount = 0;
+     let firstFake: FakeChild | null = null;
+diff --git a/sillyhub-daemon/tests/turn-control-attachment-atomic.test.ts b/sillyhub-daemon/tests/turn-control-attachment-atomic.test.ts
+new file mode 100644
+--- /dev/null
++++ b/sillyhub-daemon/tests/turn-control-attachment-atomic.test.ts
+@@ -0,0 +1,88 @@
++// tests/turn-control-attachment-atomic.test.ts
++// ql-20260922-001（24h 审查五修②）：writeAttachmentFile 落盘原子化 + 复用前
++// size 完整性校验。
++//
++// 背景：旧实现 ``writeFile({flag:'wx'})`` 直接写最终路径——进程崩溃/断电会在
++// 内容寻址路径 ``attachments/{sha256}.{ext}`` 上留下半截文件；同内容附件再发送
++// 时 sha256 相同 → EEXIST 被当「同内容已落盘」直接复用，半截损坏被永久固化且
++// 无告警（cursor 附件 disk-only 无 block 通道兜底，本函数是其唯一投递通道）。
++// 修复后：目标存在且 size 相符 → 复用；缺失/不符（半截）→ tmp+rename 原子落位。
++//
++// 用例矩阵：
++//   - 首次写：内容完整、返回内容寻址相对路径、无 tmp 残留
++//   - 同内容再写：size 相符 → 复用既有文件（mtime 不变）
++//   - 核心回归：同 sha256 路径上的半截文件 → 重写自愈为完整内容（旧实现
++//     EEXIST 永久复用半截）
++//   - 并发同内容双写：均成功且最终内容完整、无 tmp 残留
++
++import { describe, it, expect } from 'vitest';
++import { mkdir, mkdtemp, readFile, readdir, stat, utimes, writeFile } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { createHash } from 'node:crypto';
++import { writeAttachmentFile } from '../src/interactive/session-manager/turn-control.js';
++
++/** 与实现同式的内容寻址相对路径（attachments/{sha256}.{ext}）。 */
++const relOf = (buf: Buffer, ext: string): string =>
++  `attachments/${createHash('sha256').update(buf).digest('hex')}.${ext}`;
++
++async function freshCwd(): Promise<string> {
++  return mkdtemp(join(tmpdir(), 'turn-control-att-'));
++}
++
++describe('ql-20260922-001 writeAttachmentFile 落盘原子化 + size 校验自愈', () => {
++  it('首次写：内容完整、返回内容寻址相对路径、无 tmp 残留', async () => {
++    const cwd = await freshCwd();
++    const buf = Buffer.from('# hello attachment\n'.repeat(10));
++
++    const rel = await writeAttachmentFile(null as never, cwd, 'note.md', buf);
++
++    expect(rel).toBe(relOf(buf, 'md'));
++    expect(await readFile(join(cwd, rel))).toEqual(buf);
++    const files = await readdir(join(cwd, 'attachments'));
++    expect(files.filter((f) => f.includes('.tmp-'))).toEqual([]);
++  });
++
++  it('同内容再写：size 相符 → 复用既有文件（mtime 不变）', async () => {
++    const cwd = await freshCwd();
++    const buf = Buffer.from('same content');
++    await writeAttachmentFile(null as never, cwd, 'a.txt', buf);
++    const dest = join(cwd, relOf(buf, 'txt'));
++    // 拨回 10s 前防同秒精度，复用路径不触碰 mtime
++    const past = new Date(Date.now() - 10_000);
++    await utimes(dest, past, past);
++
++    await writeAttachmentFile(null as never, cwd, 'b-different-name.txt', buf);
++
++    expect((await stat(dest)).mtimeMs).toBe(past.getTime());
++  });
++
++  it('核心回归：同 sha256 路径上的半截文件 → 重写自愈为完整内容', async () => {
++    const cwd = await freshCwd();
++    const buf = Buffer.alloc(1024, 0xab);
++    const rel = relOf(buf, 'md');
++    // 预置「崩溃残留」：同路径但只有前 16 字节（截断只会更小）
++    await mkdir(join(cwd, 'attachments'), { recursive: true });
++    await writeFile(join(cwd, rel), buf.subarray(0, 16));
++
++    const got = await writeAttachmentFile(null as never, cwd, 'truncated.md', buf);
++
++    expect(got).toBe(rel);
++    expect(await readFile(join(cwd, rel))).toEqual(buf);
++  });
++
++  it('并发同内容双写：均成功、最终内容完整、无 tmp 残留', async () => {
++    const cwd = await freshCwd();
++    const buf = Buffer.from('concurrent payload'.repeat(64));
++
++    const rels = await Promise.all([
++      writeAttachmentFile(null as never, cwd, 'a.md', buf),
++      writeAttachmentFile(null as never, cwd, 'b.md', buf),
++    ]);
++
++    expect(rels[0]).toBe(rels[1]);
++    expect(await readFile(join(cwd, rels[0]!))).toEqual(buf);
++    const files = await readdir(join(cwd, 'attachments'));
++    expect(files.filter((f) => f.includes('.tmp-'))).toEqual([]);
++  });
++});

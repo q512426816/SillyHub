@@ -1,0 +1,111 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-affdc765",
+  "totals": {
+    "files": 9,
+    "additions": 388,
+    "deletions": 42
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/daemon/session/service/ppm_activation.py",
+      "declared": true,
+      "additions": 12,
+      "deletions": 9,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_ppm_session.py",
+      "declared": true,
+      "additions": 105,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/scan_docs/service.py",
+      "declared": true,
+      "additions": 15,
+      "deletions": 9,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/scan_docs/tests/test_service.py",
+      "declared": true,
+      "additions": 33,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/scan_docs/tests/test_stats.py",
+      "declared": true,
+      "additions": 37,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/turn-control.ts",
+      "declared": true,
+      "additions": 31,
+      "deletions": 7,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/task-runner.ts",
+      "declared": true,
+      "additions": 21,
+      "deletions": 16,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/task-runner-retry-timeout.test.ts",
+      "declared": true,
+      "additions": 46,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/turn-control-attachment-atomic.test.ts",
+      "declared": true,
+      "additions": 88,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 16,
+    "codeFileCount": 4,
+    "testFileCount": 5,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260922-001-37e7",
+  "sessionId": "quick-affdc765",
+  "savedAt": "2026-09-22T00:17:08.637Z",
+  "patchSha256": "c0b509c26c86cabd93e831f6c2acc83b1179aa1997ec0b6d74c37030f465f414",
+  "patchStatus": "ok"
+}

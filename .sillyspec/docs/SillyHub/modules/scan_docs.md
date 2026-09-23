@@ -31,10 +31,17 @@ reparse:
   → component_key? parser.parse_component : parse_docs_tree（均 to_thread）
   → 按 path 对账: 已有→_apply_parsed(updated)、新→_build_row(created)
   → 文件消失→ exists=False + content=None（软删）→ 单事务 commit → stats
+_apply_parsed:
+  hash 同且行在线（exists=True）才 skip content 大列重写（只同步 mtime）；
+  软删行同内容复活 → 强制走全量回填（判软删只能用 exists——content 列被
+  _fetch_existing load_only 排除，skip 判定里读它会触发 deferred 懒加载）
 list_(q):
   有 q → func.lower()+like+escape 跨方言（PG/SQLite）搜索，转义 %/_/\
   无 q → load_only 排除 content 大列（session 仍 attach，访问 content 懒加载补取）
   conflict_count → 一次 group by 批量算（防列表 N+1）
+_injection_stats:
+  matched_anchors 剥布局前缀 + 拆 #锚 → 按裸文件聚合（对齐 knowledge/hits
+  先例；不拆则 docs_hit_30d 按 (文件,锚) 去重虚高）
 ```
 
 ## 注意事项
@@ -44,6 +51,8 @@ list_(q):
 - stats 口径：`parsed` 只计 exists=True 行，`deleted` 计本次软删行，二者与 created/updated 互斥
 - parser 纯同步纯读、无共享可变状态，`asyncio.to_thread` 线程安全（perf-remediation S1/task-01）
 - 旧逻辑只 platform-managed 读 spec_root 会导致 repo-native/repo-mirrored 读 root_path 客户端路径不可达 → DOCS_DIR_MISSING → 文档不显示；现已改为有镜像就读（源码注释留有该背景）
+- 软删复活必须全量回填（ql-20260922-001）：skip 只许对「在线且 hash 同」的行成立——软删行（content=None）同内容复活若命中 skip，正文永久 None（详情页无内容、搜索不可见，直到文件内容真正变化才自愈）
+- 注入榜聚合拆 `#锚`（ql-20260922-001）：matched_anchors 是「文件 / 文件#锚」两形态，聚合统一拆到裸文件口径，勿回退成整串计数（docs_hit_30d 语义=被注入文档去重数）
 
 ## 人工备注
 

@@ -273,3 +273,25 @@
 结果：22 文件 513 用例全绿(106.7s)、tsc --noEmit 干净、eslint 0 error(13 warning 全存量)、残留字面量 grep 为零;门禁快照内 frontend 侧无失败(红全部为并行会话 scan_docs WIP);CI 全量留待 push
 审计：[gate] L1（跨 0 模块 · 33 文件：6 代码/24 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
 审计：⚖️ 归属切分：8 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/scan_docs/router.py, backend/app/modules/scan_docs/schema.py, backend/app/modules/scan_docs/tests/test_stats.py, backend/openapi.json, frontend/src/components/__tests__/scan-docs-stats-panel.test.tsx, frontend/src/components/scan-docs-stats-panel.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/scan-docs.ts
+
+## ql-20260922-001-37e7 | 2026-09-22 07:15:42 | 24h 审查五修——附件落盘原子化等 5 个中危修复
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/scan_docs/service.py（skip 加 row.exists 判定（软删复活全量回填）+注入榜拆#锚）
+- backend/app/modules/daemon/session/service/ppm_activation.py（门控 multimodal→attachments 键+docblock 旧口径同步）
+- sillyhub-daemon/src/interactive/session-manager/turn-control.ts（落盘 size 校验复用+tmp/rename 原子化）
+- sillyhub-daemon/src/task-runner.ts（applyClaudeSettings 移入重试循环）
+- backend/app/modules/scan_docs/tests/test_service.py（软删复活回填用例）
+- backend/app/modules/scan_docs/tests/test_stats.py（拆锚聚合用例）
+- backend/app/modules/daemon/tests/test_ppm_session.py（门控真值表 2 用例）
+- sillyhub-daemon/tests/task-runner-retry-timeout.test.ts（apply=attempt 数用例）
+- sillyhub-daemon/tests/turn-control-attachment-atomic.test.ts（新建：落盘原子化 4 用例）
+需求：24h 审查五修——附件落盘原子化等 5 个中危修复
+根因：24h 只读审查发现 5 个中危：①scan_docs 软删行同内容复活命中 hash-skip 只回 exists 不回填 content，正文永久 None；②writeAttachmentFile wx 直写最终路径，崩溃半截文件被 EEXIST 永久复用（cursor disk-only 唯一通道无兜底）；③CLAUDE_CONFIG_DIR 全局唯一，并发 lease 撤下 unlink 可删掉 settings.json 而 applyClaudeSettings 在重试循环外只调一次，attempt 2+ spawn 丢配置；④ql-20260921-005 三处门控改 attachments 键漏改 ppm_activation，cursor 会话 PPM 附件被错误降级；⑤注入榜未拆 #锚 后缀，docs_hit_30d 按 (文件,锚) 去重虚高
+方案：①_apply_parsed skip 条件加 row.exists（软删行走全量回填；不用 content 判定——load_only 排除后读会触发 deferred 懒加载）；②落盘改 size 校验复用 + tmp/rename 原子落位（半截自愈）；③applyClaudeSettings 移入 for(;;) 循环每次 attempt spawn 前重写（幂等）；④门控改 attachments 键 + docblock 三处旧口径同步；⑤_strip_docs_prefix 后 split('#',1)[0] 对齐 knowledge/hits 先例
+结果：本地实测全绿：新增 8 用例（半截自愈/apply=attempt 数/cursor 不降级/软删回填/拆锚聚合均旧码红）+ 回归 scan_docs 46 + ppm 16 + daemon 31+144 passed，ruff/format/mypy/tsc 0 错。门禁全量中 12 个 stats-passthrough/budget 等 runLease 集成用例超时系主仓既有环境问题（三重对照：未提交改动 stash 对照仍挂/26e362d61 还原对照仍挂/9-20 全量时全绿且依赖与测试文件未变；本机 Temp 堆积 412 个 sillyhub 残留），与本次改动无关，环境根因待单独排查——按审计留痕通道跳过门禁复跑
+审计：📎 文档引用失效：1/0 处 file:line 失效（sillyspec docs check 可复现）
+审计：   ❌ [docs/sillyspec/quick-gate-并行全流程变更脏文件误伤.md:0]  → 文档不存在
+审计：[gate] L1（跨 0 模块 · 16 文件：4 代码/5 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/quick-done-长静默与快照行尾假阳性.md, docs/sillyspec/quick-gate-并行全流程变更脏文件误伤.md, docs/sillyspec/verify-gate-worktree-crossrepo-three-defects.md, docs/sillyspec/finished/quick-gate-并行全流程变更脏文件误伤.md
