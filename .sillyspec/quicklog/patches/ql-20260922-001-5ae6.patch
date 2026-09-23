@@ -1,0 +1,492 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 67c83ebb..9a6b1e87 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -5,6 +5,7 @@ created_at: 2026-08-30 22:23:33
+ 
+ # frontend_components 模块变更索引
+ 
++- ql-20260922-001-5ae6 | 思考级别控件 antd Dropdown 化（session-config-bar）——用户反馈配置条上思考级别原生 select（带边框 bg-card 小方框）与旁边供应商胶囊按钮风格不统一；改 antd Dropdown + 胶囊按钮触发器（类名逐字同 ctrlButton：无边框 rounded-md px-2 py-1 text-xs + Brain 图标 brand 色 + 值截断 + ChevronDown，hover bg-muted、开态 bg-muted text-primary），菜单 placement=topLeft 向上弹对齐 ConfigDropdown bottom-full 方向、selectable+selectedKeys 高亮当前档、off 档 P2-11 跨引擎语义 tooltip 保留（label span title），两态（预会话七档镜像/会话态动态档）与禁用态 title/级联重置/乐观缓存契约零变化，data-testid=config-thinking-select 与 aria-label 保留。测试：config-bar 53 用例（第 7/8 节由 select.options/fireEvent.change 改 menuitem 点击+触发器文本直显断言，照 page.m-change-detail antd Dropdown 先例）全绿、tsc 0 错、eslint 8 warning 预存（测试 mock 区未触碰）；dev server（:3100 指向 Docker 后端）实机截图确认胶囊形态与供应商按钮一致（ended 会话禁用态，菜单开态交互由单测覆盖）
+ - ql-20260921-001-8a4d | ⚡ dispatch_now 引导消息实时渲染兜底（session-panel-page/dialog 双挂载）——⚡「转为引导」链路发送点不建 steering 段（use-message-queue 不消费 dispatch 响应；inject 端点忙轮恒排队致 appendSteeredSegment 生产不可达），mid-turn 注入的 user_input 留痕 SSE 行到达时 markSteeredSegmentDelivered 无段可收敛、消息正文实时视图静默丢弃（刷新后 logsToTurns 才可见）。修复：SSE user_input 处理器新增 appendDeliveredUserMsgIfAbsent 兜底（page:265 起导出、dialog 复用）——口径与回放组2+ 一致：轮存在且 prompt 非空、主体（steerMatchKey，剥前导/附件标记行）与 prompt 互异、轮内无同主体 user_msg 段才追加 delivered 段；prompt 回显/daemon 双提交/纯前导不双画，steering 段刚收敛的 delivered 同键幂等。测试：sessions page 41（+1 ⚡ 场景：兜底 delivered 段+prompt 不覆盖+同主体重复幂等）绿、tsc 0
+ - ql-20260920-007-c04d | 「客户端路径」行改按账号显示本人 binding 路径（workspace-path-fields，2026-09-20-workspace-member-visibility D-004 另开 quick）——旧口径两处渲染位（列表卡片 + 详情页信息区）均显示 workspaces.root_path 全局列（创建者本机路径），任何能看到该工作区的账号都看到别人的路径；新增 myRootPath prop 三态渲染（string=本人 member binding root_path；null=未绑定，显示「未绑定——进入工作区后在『我的接入』绑定后显示你的本地路径」引导文案；undefined=调用方未接线兼容回退全局路径，daemon/兜底两渲染分支统一抽 ClientPathRow）。数据接线：列表页 bindingsByWs 由 {daemon_id} 扩展为 {daemon_id, root_path}（fetchMyBindings 既有响应零后端改动）+ cardPropsOf 透传；详情页传 myBinding?.root_path ?? null；workspace-card 加透传 prop（WorkspaceCardSlotProps 经 ComponentProps Omit 自动含新 prop）。测试：workspaces 页面 182 + workspace-card 19 用例绿、tsc 0
+ - ql-20260916-004-8b06 | 轮次刻度 active 选中双修（session-panel-page）——用户反馈短轮次一页多轮时点末刻度选不中末轮。根因两处同源：① handleJumpToTurn 虽先 setActiveTurnKey(entry.key) 即时置位，但 scrollIntoView({smooth}) 途中 scroll 事件经 syncActiveTurnKey（视口顶+120px 判定线规则）重算覆盖，一页多短轮时终点压线的是中间轮；② 贴底/短末轮场景判定线本就压不中末轮。修复：syncActiveTurnKey 加贴底钳制（距底 ≤120px → active=末个 data-turn-key 行，「读到末尾」语义，加载滚底即时正确）+ 跳转定位期 active 联动抑制窗口（performance.now 时间戳 ref，700ms 内 scroll 重算跳过让点击置位存活，过期恢复有机联动）。测试：page.test 新增 2 用例（贴底钳制取末行/离底回落判定线 + 抑制窗口内存活过期恢复）全绿；顺手修存量 mock 债（llm-providers 工厂 importActual 展开补 detectUsageProvider，7b80bf54 起缺导出致 whoLine 2 用例崩，修后余 1 例「发送者+时间」为并行会话已知在途债非本改动）。实机验证：点末刻度选中保持、点首刻度选中保持、有机滚底联动恢复全通
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.md b/.sillyspec/docs/SillyHub/modules/frontend_components.md
+index 3764d28c..1aa96357 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.md
+@@ -33,7 +33,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
+   - `session-list-panel` — 筛选 + 虚拟滚动 + 紧凑两行条目
+   - `workspace-session-picker` — 新建会话工作区选择器（自治取数 listWorkspaces + fetchMyBindings；首项「不使用工作区」，选中工作区按绑定 daemon_id 联动带出在线机器；空列表禁用提示 + 失败重试，2026-08-19-sessions-workspace-selector）
+   - `new-session-form` — 新会话五选择器（工作区 / runtime / profile / 供应商 / 会话名；选中工作区提交体带 workspace_id 并显示项目目录运行提示条）
+-  - `session-config-bar` — 运行中切换档案/供应商（点选即切换）
++  - `session-config-bar` — 运行中切换档案/供应商/模型/思考档位（点选即切换；思考档位 ql-20260922-001 起为 antd Dropdown 胶囊触发器，类名同 ctrlButton 与供应商/档案按钮统一，菜单向上弹 selectable 高亮当前档）
+   - `ctx-usage-bar` — 上下文用量前端累计
+ - 群聊（group-chat/，2026-09-01-session-group-chat）：
+   - `group-chat-panel.tsx` — 群聊主视图：平铺消息流按 log timestamp 全局排序
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index a2e56130..70359eb9 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -25,6 +25,10 @@
+  *     选档 onProvisionalThinkingLevelSwitch 上抛/模型变级联重置发 ""）与会话态
+  *     thinkingLevel prop 动态档位控件（GET 列表+current 现值/running 禁用/切换
+  *     POST+成功通知+invalidate 重拉/失败 notify error 带 error 原文）。
++ *   ql-20260922-001：思考档位控件 antd Dropdown 化（原生 select → 胶囊按钮 +
++ *     antd 菜单）——第 7/8 节断言由 select.options/select.value/fireEvent.change
++ *     改为点触发器开菜单 → menuitem 点击，现值经触发器文本直显断言（照
++ *     page.m-change-detail antd Dropdown 测试先例）。
+  *
+  * mock 策略（对齐 new-session-form.test.tsx）：直接 mock 组件消费的 hook/函数模块
+  * （useMineAgentProfiles / listProviders / injectSession），
+@@ -1017,50 +1021,55 @@ describe("SessionConfigBar 思考档位下拉（task-06 / FR-06）", () => {
+     ).not.toBeInTheDocument();
+   });
+ 
+-  it("预会话：静态七档镜像渲染（off→max 逐项一致），off 显示「默认」带跨引擎语义差异 tooltip（P2-11）", () => {
++  it("预会话：静态七档镜像渲染（off→max 逐项一致），off 显示「默认」带跨引擎语义差异 tooltip（P2-11）", async () => {
+     renderBar({ provisional: true, configSnapshot: null });
+-    const select = screen.getByTestId(
+-      "config-thinking-select",
+-    ) as HTMLSelectElement;
++    const trigger = screen.getByTestId("config-thinking-select");
++    // 未选择态显示归位「默认」（""=清空不随首句上送，与显式选 off 显示同形）。
++    expect(trigger.textContent).toBe("默认");
++    // ql-20260922-001：antd Dropdown 化——点触发器开菜单后逐项断言。
++    fireEvent.click(trigger);
+     // 七档镜像：与 daemon THINKING_LEVELS 单源逐项一致（含顺序，约束注释互指）。
+-    expect(Array.from(select.options).map((o) => o.value)).toEqual([
+-      "off",
+-      "minimal",
+-      "low",
+-      "medium",
+-      "high",
+-      "xhigh",
+-      "max",
++    const items = await screen.findAllByRole("menuitem");
++    expect(items.map((li) => li.textContent)).toEqual([
++      "默认",
++      "极低",
++      "低",
++      "中",
++      "高",
++      "超高",
++      "最高",
+     ]);
+     // off 显示「默认」；tooltip 说明跨引擎语义差异（claude/codex=引擎默认思考
+     // 通常开 ≠ pi=真关思考）。
+-    const offOption = select.options.item(0);
+-    expect(offOption?.textContent).toBe("默认");
+-    expect(offOption?.title).toContain("claude/codex=不设置档位");
+-    expect(offOption?.title).toContain("pi=真正关闭思考");
+-    // 未选择态显示归位「默认」（""=清空不随首句上送，与显式选 off 显示同形）。
+-    expect(select.value).toBe("off");
++    const offItem = screen.getByRole("menuitem", { name: "默认" });
++    // antd v6 菜单项 li 内多层容器包裹 label span，按 [title] 属性定位 tooltip 载体。
++    const offTitle = offItem.querySelector("[title]")?.getAttribute("title");
++    expect(offTitle).toContain("claude/codex=不设置档位");
++    expect(offTitle).toContain("pi=真正关闭思考");
++    // 当前档（默认）经 selectable + selectedKeys 高亮（antd selected 类）。
++    expect(offItem.className).toContain("selected");
+     // 其余档位中文标签可读（未知值兜底显原值不编造）。
+-    expect(select.options.item(6)?.textContent).toBe("最高");
++    expect(items[6]?.textContent).toBe("最高");
+   });
+ 
+-  it("预会话选档 → onProvisionalThinkingLevelSwitch 上抛档位值（不 inject，显式选「默认」=off 也上抛）", () => {
++  it("预会话选档 → onProvisionalThinkingLevelSwitch 上抛档位值（不 inject，显式选「默认」=off 也上抛）", async () => {
+     const onLevel = vi.fn();
+     renderBar({
+       provisional: true,
+       configSnapshot: null,
+       onProvisionalThinkingLevelSwitch: onLevel,
+     });
+-    const select = screen.getByTestId(
+-      "config-thinking-select",
+-    ) as HTMLSelectElement;
+-    fireEvent.change(select, { target: { value: "high" } });
++    const trigger = screen.getByTestId("config-thinking-select");
++    fireEvent.click(trigger);
++    fireEvent.click(await screen.findByRole("menuitem", { name: "高" }));
+     expect(onLevel).toHaveBeenCalledWith("high");
+-    expect(select.value).toBe("high");
++    // 触发器胶囊显示已选档名。
++    expect(trigger.textContent).toBe("高");
+     // 暂存不走 inject（无会话——preModelId 同款专用回调收值）。
+     expect(mocks.injectSession).not.toHaveBeenCalled();
+     // 显式选「默认」= off 也上抛（首句携带 off，daemon 按引擎映射）。
+-    fireEvent.change(select, { target: { value: "off" } });
++    fireEvent.click(trigger);
++    fireEvent.click(await screen.findByRole("menuitem", { name: "默认" }));
+     expect(onLevel).toHaveBeenLastCalledWith("off");
+   });
+ 
+@@ -1074,10 +1083,9 @@ describe("SessionConfigBar 思考档位下拉（task-06 / FR-06）", () => {
+       onProvisionalModelSwitch: onModel,
+       onProvisionalThinkingLevelSwitch: onLevel,
+     });
+-    const level = screen.getByTestId(
+-      "config-thinking-select",
+-    ) as HTMLSelectElement;
+-    fireEvent.change(level, { target: { value: "max" } });
++    const trigger = screen.getByTestId("config-thinking-select");
++    fireEvent.click(trigger);
++    fireEvent.click(await screen.findByRole("menuitem", { name: "最高" }));
+     expect(onLevel).toHaveBeenLastCalledWith("max");
+     // 模型子下拉（供应商已选 prov-kimi → 候选 kimi-k2）变更触发级联重置。
+     const model = (await screen.findByRole("combobox", {
+@@ -1087,8 +1095,7 @@ describe("SessionConfigBar 思考档位下拉（task-06 / FR-06）", () => {
+     expect(onModel).toHaveBeenCalledWith("kimi-k2");
+     // 档位仅清自身选择（不动模型/provider 既有级联链）：回调收 ""，显示归位「默认」。
+     expect(onLevel).toHaveBeenLastCalledWith("");
+-    expect(level.value).toBe("off");
+-    expect(level.options.item(0)?.textContent).toBe("默认");
++    expect(trigger.textContent).toBe("默认");
+   });
+ });
+ 
+@@ -1108,21 +1115,25 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+   it("GET 动态档位渲染 + current 现值选中显示", async () => {
+     renderBar({ thinkingLevel: {} });
+     expect(mocks.getSessionThinkingLevels).toHaveBeenCalledWith("sess-1");
+-    const select = (await screen.findByTestId(
++    const trigger = (await screen.findByTestId(
+       "config-thinking-select",
+-    )) as HTMLSelectElement;
+-    await waitFor(() => {
+-      expect(Array.from(select.options).map((o) => o.value)).toEqual([
+-        "off",
+-        "low",
+-        "medium",
+-        "high",
+-        "max",
+-      ]);
+-    });
+-    // current=medium → 现值直显为选中项。
+-    expect(select.value).toBe("medium");
+-    expect(select.options.item(2)?.textContent).toBe("中");
++    )) as HTMLButtonElement;
++    // current=medium → 触发器胶囊直显「中」。
++    await waitFor(() => expect(trigger.textContent).toBe("中"));
++    // ql-20260922-001：antd Dropdown 化——点触发器开菜单逐项断言。
++    fireEvent.click(trigger);
++    const items = await screen.findAllByRole("menuitem");
++    expect(items.map((li) => li.textContent)).toEqual([
++      "默认",
++      "低",
++      "中",
++      "高",
++      "最高",
++    ]);
++    // 现值档（中）经 selectable + selectedKeys 高亮。
++    expect(
++      screen.getByRole("menuitem", { name: "中" }).className,
++    ).toContain("selected");
+   });
+ 
+   it("current=null（claude SDK 不暴露现值）→ 回退「默认」选项（不显示「现值未知」占位）", async () => {
+@@ -1131,10 +1142,10 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+       current: null,
+     });
+     renderBar({ thinkingLevel: {} });
+-    const select = (await screen.findByTestId(
++    const trigger = (await screen.findByTestId(
+       "config-thinking-select",
+-    )) as HTMLSelectElement;
+-    await waitFor(() => expect(select.value).toBe("off"));
++    )) as HTMLButtonElement;
++    await waitFor(() => expect(trigger.textContent).toBe("默认"));
+     // 不再渲染「现值未知」占位（UX 优化：引擎默认档=事实上的当前档）
+     expect(screen.queryByText("现值未知（引擎未上报）")).not.toBeInTheDocument();
+   });
+@@ -1142,28 +1153,29 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+   it("turn running（thinkingLevel.disabled）→ 下拉禁用（档位切换仅空闲，D-002）", () => {
+     renderBar({ thinkingLevel: { disabled: true } });
+     expect(
+-      (screen.getByTestId("config-thinking-select") as HTMLSelectElement)
++      (screen.getByTestId("config-thinking-select") as HTMLButtonElement)
+         .disabled,
+     ).toBe(true);
+   });
+ 
+   it("点选即切换：setSessionThinkingLevel 调用 + 成功通知「已切换思考级别：X」+ 乐观缓存 current（不 invalidate）", async () => {
+     renderBar({ thinkingLevel: {} });
+-    const select = (await screen.findByTestId(
++    const trigger = (await screen.findByTestId(
+       "config-thinking-select",
+-    )) as HTMLSelectElement;
+-    await waitFor(() => expect(select.value).toBe("medium"));
+-    fireEvent.change(select, { target: { value: "high" } });
++    )) as HTMLButtonElement;
++    await waitFor(() => expect(trigger.textContent).toBe("中"));
++    fireEvent.click(trigger);
++    fireEvent.click(await screen.findByRole("menuitem", { name: "高" }));
+     await waitFor(() =>
+       expect(mocks.setSessionThinkingLevel).toHaveBeenCalledWith("sess-1", "high"),
+     );
+     await waitFor(() =>
+       expect(mocks.messageSuccess).toHaveBeenCalledWith("已切换思考级别：高"),
+     );
+-    // 乐观缓存：成功后 current 立即变为用户选的档（select.value=high），且**不
+-    // invalidate 重拉**（claude/codex 回 current=null 会覆盖乐观值闪回默认——
+-    // 用户反馈：切档后提示成功但立马恢复默认）。
+-    await waitFor(() => expect(select.value).toBe("high"));
++    // 乐观缓存：成功后触发器立即显示所选档（高），且**不 invalidate 重拉**
++    // （claude/codex 回 current=null 会覆盖乐观值闪回默认——用户反馈：切档后
++    // 提示成功但立马恢复默认）。
++    await waitFor(() => expect(trigger.textContent).toBe("高"));
+     // 只拉了 1 次（初始），没有第二次 invalidate 重拉。
+     expect(mocks.getSessionThinkingLevels).toHaveBeenCalledTimes(1);
+   });
+@@ -1171,12 +1183,13 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+   it("ql-20260917-008：running 时切档受理——queued=True 提示「已排队…本轮结束后生效」+ 乐观缓存照写", async () => {
+     mocks.setSessionThinkingLevel.mockResolvedValue({ ok: true, queued: true });
+     renderBar({ running: true, thinkingLevel: {} });
+-    const select = (await screen.findByTestId(
++    const trigger = (await screen.findByTestId(
+       "config-thinking-select",
+-    )) as HTMLSelectElement;
+-    await waitFor(() => expect(select.value).toBe("medium"));
+-    expect(select.disabled).toBe(false); // 运行中不再禁用
+-    fireEvent.change(select, { target: { value: "high" } });
++    )) as HTMLButtonElement;
++    await waitFor(() => expect(trigger.textContent).toBe("中"));
++    expect(trigger.disabled).toBe(false); // 运行中不再禁用
++    fireEvent.click(trigger);
++    fireEvent.click(await screen.findByRole("menuitem", { name: "高" }));
+     await waitFor(() =>
+       expect(mocks.setSessionThinkingLevel).toHaveBeenCalledWith("sess-1", "high"),
+     );
+@@ -1185,7 +1198,7 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+         "已排队切换思考级别：高（本轮结束后生效）",
+       ),
+     );
+-    await waitFor(() => expect(select.value).toBe("high"));
++    await waitFor(() => expect(trigger.textContent).toBe("高"));
+   });
+ 
+   it("ql-20260917-008：running 时切换供应商照常受理——injectSession 调用 + 提示「已排队…本轮结束后生效」", async () => {
+@@ -1211,11 +1224,12 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+       error: "daemon 未支持思考级别，请升级 daemon",
+     });
+     renderBar({ thinkingLevel: {} });
+-    const select = (await screen.findByTestId(
++    const trigger = (await screen.findByTestId(
+       "config-thinking-select",
+-    )) as HTMLSelectElement;
+-    await waitFor(() => expect(select.value).toBe("medium"));
+-    fireEvent.change(select, { target: { value: "low" } });
++    )) as HTMLButtonElement;
++    await waitFor(() => expect(trigger.textContent).toBe("中"));
++    fireEvent.click(trigger);
++    fireEvent.click(await screen.findByRole("menuitem", { name: "低" }));
+     // notify.error(err, fallback) → message.error(errMessage(err)) → error 原文直出。
+     await waitFor(() =>
+       expect(mocks.messageError).toHaveBeenCalledWith(
+@@ -1232,11 +1246,12 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+       new Error("会话运行中，本轮结束后可切换"),
+     );
+     renderBar({ thinkingLevel: {} });
+-    const select = (await screen.findByTestId(
++    const trigger = (await screen.findByTestId(
+       "config-thinking-select",
+-    )) as HTMLSelectElement;
+-    await waitFor(() => expect(select.value).toBe("medium"));
+-    fireEvent.change(select, { target: { value: "low" } });
++    )) as HTMLButtonElement;
++    await waitFor(() => expect(trigger.textContent).toBe("中"));
++    fireEvent.click(trigger);
++    fireEvent.click(await screen.findByRole("menuitem", { name: "低" }));
+     await waitFor(() =>
+       expect(mocks.messageError).toHaveBeenCalledWith(
+         "会话运行中，本轮结束后可切换",
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 150bf837..19e3acb9 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -48,11 +48,14 @@
+  * 暂存，模型变级联重置清空）；会话态经 thinkingLevel 可选 prop 挂动态档位切换控件
+  * （GET 动态列表+current 现值+切换 POST+成功 invalidate 刷新，R-04）。两态均
+  * caps.thinking_level 门控（cursor/未知引擎不渲染）。
++ * ql-20260922-001：思考档位控件 antd Dropdown 化——原生 select 换胶囊按钮触发
++ * （类名同 ctrlButton，与供应商/档案按钮风格统一）+ antd 菜单上弹（theme-toggle
++ * 先例 selectable 高亮当前档），行为契约（七档镜像/动态档/禁用态 title）不变。
+  */
+ import { useEffect, useMemo, useRef, useState } from "react";
+ import { useQuery, useQueryClient } from "@tanstack/react-query";
+-import { Switch, Tag } from "antd";
+-import { ChevronDown, Cloud, Settings2, Timer, User } from "lucide-react";
++import { Dropdown, Switch, Tag, type MenuProps } from "antd";
++import { Brain, ChevronDown, Cloud, Settings2, Timer, User } from "lucide-react";
+ 
+ import { ApiError } from "@/lib/api";
+ import type { components } from "@/lib/api-types";
+@@ -541,6 +544,44 @@ export function SessionConfigBar({
+     }
+   };
+ 
++  // ql-20260922-001：思考档位控件 antd Dropdown 化（原生 select → 胶囊按钮 +
++  // 上弹菜单）。open 受控是为触发器置开态高亮（bg-muted text-primary，同供应商
++  // 按钮 openKind 语义）；菜单照 theme-toggle 先例 selectable + selectedKeys
++  // 高亮当前档，placement=topLeft 对齐 ConfigDropdown bottom-full 上弹方向。
++  const [thinkingOpen, setThinkingOpen] = useState(false);
++  const thinkingCtrlDisabled =
++    !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false));
++  const thinkingCtrlValue = provisional
++    ? provisionalThinkingDisplay
++    : (currentThinkingLevel || "");
++  const thinkingMenuItems: MenuProps["items"] = (
++    provisional
++      ? THINKING_LEVEL_OPTIONS.map((o) => o.value)
++      : sessionLevelOptions
++  ).map((v) => ({
++    key: v,
++    label: (
++      <span
++        // P2-11：off（显示「默认」）跨引擎语义差异 tooltip（口径同 daemon
++        // thinking-levels.ts 文件头注释，改文案两侧同步）。
++        title={
++          v === THINKING_LEVEL_OFF_VALUE ? THINKING_LEVEL_OFF_TOOLTIP : undefined
++        }
++      >
++        {thinkingLevelLabel(v)}
++      </span>
++    ),
++  }));
++  const onThinkingMenuClick: MenuProps["onClick"] = ({ key }) => {
++    const v = key as string;
++    if (provisional) {
++      setProvisionalThinkingLevel(v);
++      onProvisionalThinkingLevelSwitch?.(v);
++    } else {
++      void handleThinkingLevelSwitch(v);
++    }
++  };
++
+   // 当前值展示（快照直显免二次解析，Grill C-12；id 兜底防列表缺行）。
+   const profileLabel = agentProfileId
+     ? profiles.find((p) => p.id === agentProfileId)?.name ??
+@@ -781,67 +822,69 @@ export function SessionConfigBar({
+             prop 挂载的动态档位（GET 列表+current 现值，点选即 POST 切换）。两态均
+             caps.thinking_level 门控（cursor/未知引擎不渲染）；running/ended 照模型
+             下拉同禁（会话态另叠 thinkingLevel.disabled）；ql-20260915-009 mobile
+-            默认收进「设置」展开态（ql-20260915-011：收入口不砍功能）。 */}
++            默认收进「设置」展开态（ql-20260915-011：收入口不砍功能）。
++            ql-20260922-001：原生 select 改 antd Dropdown——触发器胶囊按钮与
++            ctrlButton 同款类名（与供应商/档案按钮风格统一），菜单向上弹
++            （placement=topLeft）selectable 高亮当前档，行为/禁用态契约不变。 */}
+         {thinkingLevelEnabled &&
+           mobileReveal &&
+           (provisional || thinkingLevel != null) && (
+-          <select
+-            aria-label="配置-思考级别"
+-            data-testid="config-thinking-select"
+-            value={
+-              provisional
+-                ? provisionalThinkingDisplay
+-                : (currentThinkingLevel || "")
+-            }
+-            disabled={
+-              !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false))
+-            }
+-            // ql-20260909-005 同款：禁用态 title 说明原因（ql-20260917-008：
+-            // 运行中不再禁用——仅 ended/providerLocked 禁）。
+-            title={
+-              !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false))
+-                ? ended
+-                  ? "会话已结束或机器离线，不可切换思考级别"
+-                  : "思考级别切换不可用"
+-                : running && !provisional
+-                  ? "运行中可切换，将于本轮结束后生效"
+-                  : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
+-            }
+-            onChange={(e) => {
+-              const v = e.target.value;
+-              if (provisional) {
+-                setProvisionalThinkingLevel(v);
+-                onProvisionalThinkingLevelSwitch?.(v);
+-              } else {
+-                void handleThinkingLevelSwitch(v);
+-              }
++          <Dropdown
++            menu={{
++              items: thinkingMenuItems,
++              selectable: true,
++              selectedKeys: [thinkingCtrlValue],
++              onClick: onThinkingMenuClick,
+             }}
+-            className={cn(
+-              "h-6 max-w-[120px] cursor-pointer truncate rounded-md border border-border bg-card px-1 text-xs transition-colors hover:bg-muted",
+-              (!canSwitch ||
+-                (!provisional && (thinkingLevel?.disabled ?? false))) &&
+-                "cursor-not-allowed text-muted-foreground/60 hover:bg-card",
+-            )}
++            trigger={["click"]}
++            placement="topLeft"
++            disabled={thinkingCtrlDisabled}
++            open={thinkingCtrlDisabled ? false : thinkingOpen}
++            onOpenChange={(next) => setThinkingOpen(next)}
++            destroyOnHidden
+           >
+-            {(provisional
+-              ? THINKING_LEVEL_OPTIONS.map((o) => o.value)
+-              : sessionLevelOptions
+-            ).map((v) => (
+-              <option
+-                key={v}
+-                value={v}
+-                // P2-11：off（显示「默认」）跨引擎语义差异 tooltip（口径同 daemon
+-                // thinking-levels.ts 文件头注释）。
+-                title={
+-                  v === THINKING_LEVEL_OFF_VALUE
+-                    ? THINKING_LEVEL_OFF_TOOLTIP
+-                    : undefined
+-                }
++            <button
++              type="button"
++              aria-label="配置-思考级别"
++              aria-haspopup="menu"
++              data-testid="config-thinking-select"
++              disabled={thinkingCtrlDisabled}
++              // ql-20260909-005 同款：禁用态 title 说明原因（ql-20260917-008：
++              // 运行中不再禁用——仅 ended/providerLocked 禁）。
++              title={
++                thinkingCtrlDisabled
++                  ? ended
++                    ? "会话已结束或机器离线，不可切换思考级别"
++                    : "思考级别切换不可用"
++                  : running && !provisional
++                    ? "运行中可切换，将于本轮结束后生效"
++                    : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
++              }
++              className={cn(
++                "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
++                thinkingCtrlDisabled
++                  ? "cursor-not-allowed text-muted-foreground/60"
++                  : "cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground",
++                thinkingOpen && "bg-muted text-primary",
++              )}
++            >
++              <span aria-hidden className="shrink-0 text-brand-600">
++                <Brain aria-hidden className="h-3.5 w-3.5" />
++              </span>
++              <span
++                className={cn(
++                  "max-w-[160px] truncate",
++                  mobile && "max-w-[110px]",
++                )}
+               >
+-                {thinkingLevelLabel(v)}
+-              </option>
+-            ))}
+-          </select>
++                {thinkingLevelLabel(thinkingCtrlValue)}
++              </span>
++              <ChevronDown
++                aria-hidden
++                className="h-3 w-3 shrink-0 text-muted-foreground/60"
++              />
++            </button>
++          </Dropdown>
+         )}
+         {/* ql-20260915-009：mobile 默认不渲染档案控件，收进「设置」展开态
+             （ql-20260915-011：收入口不砍功能）；桌面端照旧。 */}

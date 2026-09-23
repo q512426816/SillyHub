@@ -1,0 +1,306 @@
+diff --git a/frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx
+index f26fb0d0..05f1ca80 100644
+--- a/frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx
+@@ -527,6 +527,101 @@ describe("ql-20260904-016-7b4a / ql-20260904-019-b4f4: 升级 sillyspec 指令
+     // 点了按钮必有横幅（升级进度或「已是最新版」）。
+     expect(await screen.findByText(/检查与升级结果将显示在机器卡横幅上/)).toBeInTheDocument();
+   });
++
++  /** fake timers 下冲刷微任务/定时器（照 platform-sync-section.test.tsx 惯例）：
++   *  循环小步推进直到谓词命中（有界防死循环）。 */
++  async function flushUntil(pred: () => boolean, maxSteps = 60): Promise<void> {
++    for (let i = 0; i < maxSteps && !pred(); i++) {
++      await act(async () => {
++        await vi.advanceTimersByTimeAsync(1);
++      });
++    }
++    expect(pred(), "flushUntil 谓词应在有界步数内命中").toBe(true);
++  }
++
++  it("升级下发后开 60s 加速窗——窗内 5s 间隔拉取，sillyspec_update 到达后横幅出现（回显提速第二级）", async () => {
++    vi.useFakeTimers();
++    try {
++      const noBanner = wrapMachines(
++        [makeRuntime({ id: "rt-ss2", name: "EchoClaude", status: "online" })],
++        { sillyspec_version: "3.29.5", sillyspec_latest_version: "3.29.5" },
++      );
++      const withBanner = wrapMachines(
++        [makeRuntime({ id: "rt-ss2", name: "EchoClaude", status: "online" })],
++        {
++          sillyspec_version: "3.29.5",
++          sillyspec_latest_version: "3.29.5",
++          sillyspec_update: {
++            state: "up_to_date",
++            trigger: "server_command",
++            from_version: "3.29.5",
++            to_version: "3.29.5",
++            error: null,
++            since: "2026-09-21T07:39:51Z",
++          },
++        },
++      );
++      // 首屏 + 下发后 invalidate 一律无横幅（daemon 版本门探测期状态未落
++      // backend）——之后手动切 withBanner，专验加速窗 5s 拉取把横幅带回。
++      daemon.listDaemonMachines.mockResolvedValue(noBanner);
++
++      renderPage(<RuntimesPage />);
++      // 骨架屏无文案可盯——直接等「升级 sillyspec」按钮挂出（机器卡渲染完成）。
++      const sillyBtnThere = (): boolean => {
++        try {
++          return screen
++            .getAllByRole("button", { name: /升级\s*sillyspec/ })
++            .some((el) => el.tagName === "BUTTON");
++        } catch {
++          return false;
++        }
++      };
++      await flushUntil(sillyBtnThere);
++
++      // 定位并点「升级 sillyspec」→ 确认弹层点「升级」。
++      const matches = screen.getAllByRole("button", { name: /升级\s*sillyspec/ });
++      fireEvent.click(matches.filter((el) => el.tagName === "BUTTON")[0] as HTMLElement);
++      await flushUntil(() => queryAntdConfirm() !== null);
++      const confirmRoot = queryAntdConfirm() as HTMLElement;
++      fireEvent.click(within(confirmRoot).getByRole("button", { name: /^升\s*级$/ }));
++      await flushUntil(() => daemon.triggerMachineSillySpecUpdate.mock.calls.length > 0);
++      // 多冲刷几拍让 onOk 尾链（invalidate 双查询重取）落定——此刻横幅仍未出现。
++      for (let i = 0; i < 6; i++) {
++        await act(async () => {
++          await vi.advanceTimersByTimeAsync(1);
++        });
++      }
++      expect(screen.queryByText(/已是最新版/)).not.toBeInTheDocument();
++      const callsAtBoost = daemon.listDaemonMachines.mock.calls.length;
++
++      // 状态落 backend（daemon 终态补发心跳后）：切 withBanner，加速窗内 +5s
++      // 一拉（15s 常规节拍在 5s 处不会触发；伴生 sharedToMe 查询首拍在 t0+15s
++      // 亦未到）→ up_to_date 横幅出现，无需刷新页面。
++      daemon.listDaemonMachines.mockResolvedValue(withBanner);
++      await act(async () => {
++        await vi.advanceTimersByTimeAsync(5_000);
++      });
++      expect(daemon.listDaemonMachines.mock.calls.length).toBe(callsAtBoost + 1);
++      expect(screen.getByText(/已是最新版（3\.29\.5），无需升级/)).toBeInTheDocument();
++
++      // 窗内节拍钉第二拍：再 +5s 又一发（仍属 5s 加速节拍）。
++      await act(async () => {
++        await vi.advanceTimersByTimeAsync(5_000);
++      });
++      expect(daemon.listDaemonMachines.mock.calls.length).toBe(callsAtBoost + 2);
++
++      // 推过窗口尾（点击后 60s）后回退常规节拍——不钉具体次数（窗内余量拉取
++      // 与伴生查询 15s 拍同刻顺序不敏感），只钉横幅仍在（终态由 daemon 10min
++      // 后清，不随窗口过期消失）。
++      await act(async () => {
++        await vi.advanceTimersByTimeAsync(60_000);
++      });
++      expect(daemon.listDaemonMachines.mock.calls.length).toBeGreaterThan(callsAtBoost + 2);
++      expect(screen.getByText(/已是最新版（3\.29\.5），无需升级/)).toBeInTheDocument();
++    } finally {
++      vi.useRealTimers();
++    }
++  });
+ });
+ 
+ describe("ql-20260829-006-6a9e: 机器级删除（离线机器可删，在线 disabled）", () => {
+diff --git a/frontend/src/app/(dashboard)/runtimes/page.tsx b/frontend/src/app/(dashboard)/runtimes/page.tsx
+index 4001633e..975d5198 100644
+--- a/frontend/src/app/(dashboard)/runtimes/page.tsx
++++ b/frontend/src/app/(dashboard)/runtimes/page.tsx
+@@ -93,6 +93,14 @@ const WINDOW_LABELS: Record<RuntimeUsageWindow, string> = {
+   "30d": "30 天",
+ };
+ 
++/** sillyspec 升级回显提速第二级（镜像 platform-sync-section ql-20260911-024 写法）：
++ *  下发后 60s 加速窗内机器查询切 5s 短间隔——daemon 侧终态补发心跳秒级到
++ *  backend，前端加速拉取把机器卡横幅回显从最差 ~30s（版本门探测 ~12s + 15s
++ *  心跳节拍 + 15s 轮询三段叠加）压到秒级；窗外回退 15s 常规节拍。窗长盖住
++ *  版本门探测与多数 npm install 时长，running 长升级尾段由常规节拍接管。 */
++const SILLYSPEC_ECHO_FAST_POLL_MS = 5_000;
++const SILLYSPEC_ECHO_BOOST_WINDOW_MS = 60_000;
++
+ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
+   const accessToken = useSession((s) => s.accessToken);
+   const [copied, setCopied] = useState(false);
+@@ -544,6 +552,9 @@ export default function RuntimesPage() {
+   // 「升级 sillyspec」按钮即时禁用；POST fire-and-forget 返回后即清，后续由
+   // 15s 轮询 sillyspec_update running 态接管禁用显示）。
+   const [sillyspecUpgradingId, setSillyspecUpgradingId] = useState<string | null>(null);
++  // sillyspec 升级回显提速第二级：下发后加速轮询窗口截止时刻（epoch ms；
++  // 0=未加速）。窗口内 machines 查询 refetchInterval 切 5s（见上方常量注释）。
++  const [sillyspecPollBoostUntil, setSillyspecPollBoostUntil] = useState(0);
+   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
+   // FR-01：旧 dialogRuntime / initialSessionId 已退役（2026-08-25-runtimes-entry-unified-floating），
+   // 「会话」按钮唤起全局悬浮会话助手（useFloatingSessionStore.openRuntimeSession）。
+@@ -595,7 +606,26 @@ export default function RuntimesPage() {
+     }),
+     [debouncedQuery, statusFilter, providerFilter, ownerUserId, page, isPlatformAdmin],
+   );
+-  const { items: machines, total, sessions, isLoading, error: listError, refetch } = useDaemonMachines(listParams, { includeSessions: true });
++  const { items: machines, total, sessions, isLoading, error: listError, refetch } =
++    useDaemonMachines(listParams, {
++      includeSessions: true,
++      // 加速窗内切 5s 短间隔（回显提速第二级），窗外常规 15s。
++      refetchInterval:
++        Date.now() < sillyspecPollBoostUntil
++          ? SILLYSPEC_ECHO_FAST_POLL_MS
++          : 15_000,
++    });
++
++  // 加速窗到期回退常规节拍：到期 setTimeout 清 0 触发重渲染，让 machines 查询的
++  // refetchInterval 选项从 5s 切回 15s（react-query 随选项值变化重排轮询定时器）。
++  useEffect(() => {
++    if (sillyspecPollBoostUntil <= Date.now()) return;
++    const timer = window.setTimeout(
++      () => setSillyspecPollBoostUntil(0),
++      sillyspecPollBoostUntil - Date.now(),
++    );
++    return () => window.clearTimeout(timer);
++  }, [sillyspecPollBoostUntil]);
+ 
+   // task-09 / FR-01：shared_to_me 取数路径——/machines 响应末位附带共享机器行
+   //（task-07 后端装配），但 useDaemonMachines 的缓存是裁剪形 {items,total,sessions}
+@@ -737,12 +767,13 @@ export default function RuntimesPage() {
+ 
+   // 2026-08-31-machine-sillyspec-version task-07 / FR-02：升级 sillyspec——
+   // modal.confirm 二次确认 → triggerMachineSillySpecUpdate（WS fire-and-forget
+-  // 无回执）→ 成功/失败 toast + invalidate machines。升级进度由 daemon 状态机经
+-  // 心跳 sillyspec_update 回传（机器卡横幅五态 + 徽标），15s 轮询自然刷新；
+-  // 已最新时 daemon 版本门回传 up_to_date 终态（横幅明示「已是最新版」，
+-  // ql-20260904-019 推翻原静默 no-op；toast 文案历史见 ql-20260904-016）。
+-  // running/deferred 期的重复指令由 daemon 侧 in-flight 门去重。npm latest 由
+-  // daemon 自行探测（后端不代查，design §接口定义）。
++  // 无回执）→ 成功/失败 toast + invalidate machines + 开 60s 加速轮询窗。
++  // 升级进度由 daemon 状态机经心跳 sillyspec_update 回传（机器卡横幅五态 +
++  // 徽标）——daemon 终态补发心跳（第一级）+ 前端窗内 5s 拉取（第二级），
++  // 横幅秒级回显；已最新时 daemon 版本门回传 up_to_date 终态（横幅明示
++  // 「已是最新版」，ql-20260904-019 推翻原静默 no-op；toast 文案历史见
++  // ql-20260904-016）。running/deferred 期的重复指令由 daemon 侧 in-flight
++  // 门去重。npm latest 由 daemon 自行探测（后端不代查，design §接口定义）。
+   const handleSillySpecUpgrade = useCallback(
+     (machine: DaemonMachineRead) => {
+       if (machine.status !== "online") return;
+@@ -758,8 +789,10 @@ export default function RuntimesPage() {
+               // ql-20260904-019：daemon 版本门已最新改回传 up_to_date 终态——
+               // 点了按钮必有横幅（升级进度或「已是最新版」），toast 回归承诺横幅。
+               notify.success("升级指令已下发，检查与升级结果将显示在机器卡横幅上");
+-            // 软刷新 machines：升级状态经心跳 sillyspec_update 回传，实际横幅
+-            // 要等下一轮心跳（15s 轮询自然看到）。
++            // 软刷新 machines + 开加速轮询窗：daemon 终态落定即补发心跳（回显
++            // 提速第一级，daemon 侧），秒级到 backend——前端 60s 窗内以 5s 间隔
++            // 拉取（第二级），横幅秒级回显；窗外回退 15s 常规节拍自然收敛。
++            setSillyspecPollBoostUntil(Date.now() + SILLYSPEC_ECHO_BOOST_WINDOW_MS);
+             void queryClient.invalidateQueries({ queryKey: queryKeys.daemonMachines.all });
+           } catch (err) {
+             notify.error(err, "下发 sillyspec 升级指令失败");
+diff --git a/frontend/src/lib/use-daemon-machines.ts b/frontend/src/lib/use-daemon-machines.ts
+index e0dce16f..65c98088 100644
+--- a/frontend/src/lib/use-daemon-machines.ts
++++ b/frontend/src/lib/use-daemon-machines.ts
+@@ -4,7 +4,9 @@
+  * 机器级数据 hook：listDaemonMachines，opts.includeSessions 时并发
+  * listAgentSessions（sessions 失败 .catch(null) 降级为 []，不阻塞列表渲染）。
+  * params 进 queryKey，过滤/分页变化即新查询（react-query 自动停旧启新 R-02）。
+- * 15s 无条件轮询。用量（用量统计）不走本 hook，由 page 单独调
++ * 15s 无条件轮询（opts.refetchInterval 可覆盖——runtimes 页升级 sillyspec 下发
++ * 后短窗加速轮询用，镜像 ql-20260911-024 第二级；选项变化 react-query 会重排
++ * 轮询定时器，不进 queryKey）。用量（用量统计）不走本 hook，由 page 单独调
+  * getRuntimesUsage(window) 管理（D-004，不内联 /machines）。
+  *
+  * ql-20260909-013（轮询瘦身）：sessions（100 行级重列表）默认不拉——唯一
+@@ -133,7 +135,7 @@ export function daemonMachinesQueryKey(
+ 
+ export function useDaemonMachines(
+   params: DaemonMachineListParams,
+-  opts: { includeSessions?: boolean } = {},
++  opts: { includeSessions?: boolean; refetchInterval?: number } = {},
+ ) {
+   const includeSessions = opts.includeSessions ?? false;
+   const q = useQuery<DaemonMachinesData, ApiError>({
+@@ -155,7 +157,7 @@ export function useDaemonMachines(
+         sharedToMe: resp.shared_to_me ?? [],
+       };
+     },
+-    refetchInterval: 15000,
++    refetchInterval: opts.refetchInterval ?? 15000,
+   });
+ 
+   // task-10：机器候选融合——自有机器在前，共享机器垫底（按 machine_id 去重，
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 904f6b2c..20f3d4f0 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -7177,7 +7177,25 @@ export class Daemon {
+       // 承载，daemon.ts 不重复实现），升级状态经心跳 sillyspec_update 回传。
+       case MSG.SILLYSPEC_UPDATE: {
+         this._logger.info('sillyspec_update_received', {});
+-        void this._sillyspecManager.requestManualUpgrade();
++        // 回显提速第一级（镜像 ql-20260911-024 _nudgeHeartbeatAfterCommandResult）：
++        // 升级链落定（deferred / up_to_date / success / failed）后立即补发一次
++        // 心跳——此前状态要等下一个 15s 心跳节拍才捎给平台，叠加前端 15s 轮询后
++        // 机器卡横幅最差 ~30s 才出现（版本门两次 npm 探测实测 ~12s，用户在横幅
++        // 到达前刷新页面，误判「横幅只在刷新后出现」）。requestManualUpgrade 全
++        // 路径自收敛不 reject，.finally 恒在终态落位后触发；running 中间态仍由
++        // 常规 15s 心跳捎带（按钮已有本地 upgrading 禁用态兜底）。与 15s 循环
++        // 短暂重叠无害——心跳是无状态全量上报，backend 侧字段级 last-write-wins。
++        void this._sillyspecManager
++          .requestManualUpgrade()
++          .catch((e) => {
++            // 防御：契约全路径自收敛不 reject，此处仅防意外异常升级为
++            // unhandledRejection 崩进程（下方心跳补发仍照常执行）。
++            this._logger.warn('sillyspec_update_route_failed', { error: e });
++          })
++          .finally(() => {
++            this._logger.debug('sillyspec_update_heartbeat_nudge', {});
++            void this._sendHeartbeatOnce();
++          });
+         break;
+       }
+       // Server → Daemon：变更中心「平台同步」处理区触发的两条机器级命令
+diff --git a/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts b/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
+index b20f7f5a..948a68a5 100644
+--- a/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
++++ b/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
+@@ -634,6 +634,41 @@ describe('task-05 WS SILLYSPEC_UPDATE 指令接线', () => {
+     // 门内转 requestUpgrade('server_command')——本测试 mock 直接断言新入口被调）。
+     expect(h.manager.requestManualUpgrade).toHaveBeenCalledTimes(1);
+   });
++
++  // 回显提速第一级（镜像 ql-20260911-024 resolve/ghost_cleanup 的心跳补发）：
++  // 升级链落定后立即补发一次心跳，不等下一个 15s 心跳节拍——机器卡横幅回显
++  // 由此从「心跳 15s + 前端轮询 15s」双段等待压成一次 HTTP 往返。
++  it('requestManualUpgrade 落定后立即补发一次心跳（不等 15s 心跳节拍）', async () => {
++    const h = makeHeartbeatHarness({
++      snapshot: { version: null, latest_version: null },
++      probeLocalResult: null,
++      probeLatestResult: null,
++    });
++    const handleWsMessage = (
++      h.daemon as unknown as {
++        _handleWsMessage: (msg: DaemonMessage) => Promise<void>;
++      }
++    )._handleWsMessage.bind(h.daemon);
++    await handleWsMessage({ type: MSG.SILLYSPEC_UPDATE, payload: {} } as DaemonMessage);
++    // fire-and-forget 链微任务落定后补发（vi.waitFor 兼容调度差异）。
++    await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(1));
++  });
++
++  it('requestManualUpgrade 意外 reject → 防御 catch 吞掉（不 unhandledRejection）且心跳补发照常', async () => {
++    const h = makeHeartbeatHarness({
++      snapshot: { version: null, latest_version: null },
++      probeLocalResult: null,
++      probeLatestResult: null,
++    });
++    h.manager.requestManualUpgrade.mockRejectedValueOnce(new Error('boom'));
++    const handleWsMessage = (
++      h.daemon as unknown as {
++        _handleWsMessage: (msg: DaemonMessage) => Promise<void>;
++      }
++    )._handleWsMessage.bind(h.daemon);
++    await handleWsMessage({ type: MSG.SILLYSPEC_UPDATE, payload: {} } as DaemonMessage);
++    await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(1));
++  });
+ });
+ 
+ // ── 类型层：快照类型可引用（编译期守卫，tsc --noEmit 覆盖）────────────────────

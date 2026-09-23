@@ -48,11 +48,14 @@
  * 暂存，模型变级联重置清空）；会话态经 thinkingLevel 可选 prop 挂动态档位切换控件
  * （GET 动态列表+current 现值+切换 POST+成功 invalidate 刷新，R-04）。两态均
  * caps.thinking_level 门控（cursor/未知引擎不渲染）。
+ * ql-20260922-001：思考档位控件 antd Dropdown 化——原生 select 换胶囊按钮触发
+ * （类名同 ctrlButton，与供应商/档案按钮风格统一）+ antd 菜单上弹（theme-toggle
+ * 先例 selectable 高亮当前档），行为契约（七档镜像/动态档/禁用态 title）不变。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Switch, Tag } from "antd";
-import { ChevronDown, Cloud, Settings2, Timer, User } from "lucide-react";
+import { Dropdown, Switch, Tag, type MenuProps } from "antd";
+import { Brain, ChevronDown, Cloud, Settings2, Timer, User } from "lucide-react";
 
 import { ApiError } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -541,6 +544,44 @@ export function SessionConfigBar({
     }
   };
 
+  // ql-20260922-001：思考档位控件 antd Dropdown 化（原生 select → 胶囊按钮 +
+  // 上弹菜单）。open 受控是为触发器置开态高亮（bg-muted text-primary，同供应商
+  // 按钮 openKind 语义）；菜单照 theme-toggle 先例 selectable + selectedKeys
+  // 高亮当前档，placement=topLeft 对齐 ConfigDropdown bottom-full 上弹方向。
+  const [thinkingOpen, setThinkingOpen] = useState(false);
+  const thinkingCtrlDisabled =
+    !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false));
+  const thinkingCtrlValue = provisional
+    ? provisionalThinkingDisplay
+    : (currentThinkingLevel || "");
+  const thinkingMenuItems: MenuProps["items"] = (
+    provisional
+      ? THINKING_LEVEL_OPTIONS.map((o) => o.value)
+      : sessionLevelOptions
+  ).map((v) => ({
+    key: v,
+    label: (
+      <span
+        // P2-11：off（显示「默认」）跨引擎语义差异 tooltip（口径同 daemon
+        // thinking-levels.ts 文件头注释，改文案两侧同步）。
+        title={
+          v === THINKING_LEVEL_OFF_VALUE ? THINKING_LEVEL_OFF_TOOLTIP : undefined
+        }
+      >
+        {thinkingLevelLabel(v)}
+      </span>
+    ),
+  }));
+  const onThinkingMenuClick: MenuProps["onClick"] = ({ key }) => {
+    const v = key as string;
+    if (provisional) {
+      setProvisionalThinkingLevel(v);
+      onProvisionalThinkingLevelSwitch?.(v);
+    } else {
+      void handleThinkingLevelSwitch(v);
+    }
+  };
+
   // 当前值展示（快照直显免二次解析，Grill C-12；id 兜底防列表缺行）。
   const profileLabel = agentProfileId
     ? profiles.find((p) => p.id === agentProfileId)?.name ??
@@ -781,67 +822,69 @@ export function SessionConfigBar({
             prop 挂载的动态档位（GET 列表+current 现值，点选即 POST 切换）。两态均
             caps.thinking_level 门控（cursor/未知引擎不渲染）；running/ended 照模型
             下拉同禁（会话态另叠 thinkingLevel.disabled）；ql-20260915-009 mobile
-            默认收进「设置」展开态（ql-20260915-011：收入口不砍功能）。 */}
+            默认收进「设置」展开态（ql-20260915-011：收入口不砍功能）。
+            ql-20260922-001：原生 select 改 antd Dropdown——触发器胶囊按钮与
+            ctrlButton 同款类名（与供应商/档案按钮风格统一），菜单向上弹
+            （placement=topLeft）selectable 高亮当前档，行为/禁用态契约不变。 */}
         {thinkingLevelEnabled &&
           mobileReveal &&
           (provisional || thinkingLevel != null) && (
-          <select
-            aria-label="配置-思考级别"
-            data-testid="config-thinking-select"
-            value={
-              provisional
-                ? provisionalThinkingDisplay
-                : (currentThinkingLevel || "")
-            }
-            disabled={
-              !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false))
-            }
-            // ql-20260909-005 同款：禁用态 title 说明原因（ql-20260917-008：
-            // 运行中不再禁用——仅 ended/providerLocked 禁）。
-            title={
-              !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false))
-                ? ended
-                  ? "会话已结束或机器离线，不可切换思考级别"
-                  : "思考级别切换不可用"
-                : running && !provisional
-                  ? "运行中可切换，将于本轮结束后生效"
-                  : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
-            }
-            onChange={(e) => {
-              const v = e.target.value;
-              if (provisional) {
-                setProvisionalThinkingLevel(v);
-                onProvisionalThinkingLevelSwitch?.(v);
-              } else {
-                void handleThinkingLevelSwitch(v);
-              }
+          <Dropdown
+            menu={{
+              items: thinkingMenuItems,
+              selectable: true,
+              selectedKeys: [thinkingCtrlValue],
+              onClick: onThinkingMenuClick,
             }}
-            className={cn(
-              "h-6 max-w-[120px] cursor-pointer truncate rounded-md border border-border bg-card px-1 text-xs transition-colors hover:bg-muted",
-              (!canSwitch ||
-                (!provisional && (thinkingLevel?.disabled ?? false))) &&
-                "cursor-not-allowed text-muted-foreground/60 hover:bg-card",
-            )}
+            trigger={["click"]}
+            placement="topLeft"
+            disabled={thinkingCtrlDisabled}
+            open={thinkingCtrlDisabled ? false : thinkingOpen}
+            onOpenChange={(next) => setThinkingOpen(next)}
+            destroyOnHidden
           >
-            {(provisional
-              ? THINKING_LEVEL_OPTIONS.map((o) => o.value)
-              : sessionLevelOptions
-            ).map((v) => (
-              <option
-                key={v}
-                value={v}
-                // P2-11：off（显示「默认」）跨引擎语义差异 tooltip（口径同 daemon
-                // thinking-levels.ts 文件头注释）。
-                title={
-                  v === THINKING_LEVEL_OFF_VALUE
-                    ? THINKING_LEVEL_OFF_TOOLTIP
-                    : undefined
-                }
+            <button
+              type="button"
+              aria-label="配置-思考级别"
+              aria-haspopup="menu"
+              data-testid="config-thinking-select"
+              disabled={thinkingCtrlDisabled}
+              // ql-20260909-005 同款：禁用态 title 说明原因（ql-20260917-008：
+              // 运行中不再禁用——仅 ended/providerLocked 禁）。
+              title={
+                thinkingCtrlDisabled
+                  ? ended
+                    ? "会话已结束或机器离线，不可切换思考级别"
+                    : "思考级别切换不可用"
+                  : running && !provisional
+                    ? "运行中可切换，将于本轮结束后生效"
+                    : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
+              }
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
+                thinkingCtrlDisabled
+                  ? "cursor-not-allowed text-muted-foreground/60"
+                  : "cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground",
+                thinkingOpen && "bg-muted text-primary",
+              )}
+            >
+              <span aria-hidden className="shrink-0 text-brand-600">
+                <Brain aria-hidden className="h-3.5 w-3.5" />
+              </span>
+              <span
+                className={cn(
+                  "max-w-[160px] truncate",
+                  mobile && "max-w-[110px]",
+                )}
               >
-                {thinkingLevelLabel(v)}
-              </option>
-            ))}
-          </select>
+                {thinkingLevelLabel(thinkingCtrlValue)}
+              </span>
+              <ChevronDown
+                aria-hidden
+                className="h-3 w-3 shrink-0 text-muted-foreground/60"
+              />
+            </button>
+          </Dropdown>
         )}
         {/* ql-20260915-009：mobile 默认不渲染档案控件，收进「设置」展开态
             （ql-20260915-011：收入口不砍功能）；桌面端照旧。 */}

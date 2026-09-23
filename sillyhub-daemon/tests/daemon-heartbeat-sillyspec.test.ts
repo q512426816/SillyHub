@@ -634,6 +634,41 @@ describe('task-05 WS SILLYSPEC_UPDATE 指令接线', () => {
     // 门内转 requestUpgrade('server_command')——本测试 mock 直接断言新入口被调）。
     expect(h.manager.requestManualUpgrade).toHaveBeenCalledTimes(1);
   });
+
+  // 回显提速第一级（镜像 ql-20260911-024 resolve/ghost_cleanup 的心跳补发）：
+  // 升级链落定后立即补发一次心跳，不等下一个 15s 心跳节拍——机器卡横幅回显
+  // 由此从「心跳 15s + 前端轮询 15s」双段等待压成一次 HTTP 往返。
+  it('requestManualUpgrade 落定后立即补发一次心跳（不等 15s 心跳节拍）', async () => {
+    const h = makeHeartbeatHarness({
+      snapshot: { version: null, latest_version: null },
+      probeLocalResult: null,
+      probeLatestResult: null,
+    });
+    const handleWsMessage = (
+      h.daemon as unknown as {
+        _handleWsMessage: (msg: DaemonMessage) => Promise<void>;
+      }
+    )._handleWsMessage.bind(h.daemon);
+    await handleWsMessage({ type: MSG.SILLYSPEC_UPDATE, payload: {} } as DaemonMessage);
+    // fire-and-forget 链微任务落定后补发（vi.waitFor 兼容调度差异）。
+    await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(1));
+  });
+
+  it('requestManualUpgrade 意外 reject → 防御 catch 吞掉（不 unhandledRejection）且心跳补发照常', async () => {
+    const h = makeHeartbeatHarness({
+      snapshot: { version: null, latest_version: null },
+      probeLocalResult: null,
+      probeLatestResult: null,
+    });
+    h.manager.requestManualUpgrade.mockRejectedValueOnce(new Error('boom'));
+    const handleWsMessage = (
+      h.daemon as unknown as {
+        _handleWsMessage: (msg: DaemonMessage) => Promise<void>;
+      }
+    )._handleWsMessage.bind(h.daemon);
+    await handleWsMessage({ type: MSG.SILLYSPEC_UPDATE, payload: {} } as DaemonMessage);
+    await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(1));
+  });
 });
 
 // ── 类型层：快照类型可引用（编译期守卫，tsc --noEmit 覆盖）────────────────────

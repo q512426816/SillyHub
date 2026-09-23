@@ -93,6 +93,14 @@ const WINDOW_LABELS: Record<RuntimeUsageWindow, string> = {
   "30d": "30 天",
 };
 
+/** sillyspec 升级回显提速第二级（镜像 platform-sync-section ql-20260911-024 写法）：
+ *  下发后 60s 加速窗内机器查询切 5s 短间隔——daemon 侧终态补发心跳秒级到
+ *  backend，前端加速拉取把机器卡横幅回显从最差 ~30s（版本门探测 ~12s + 15s
+ *  心跳节拍 + 15s 轮询三段叠加）压到秒级；窗外回退 15s 常规节拍。窗长盖住
+ *  版本门探测与多数 npm install 时长，running 长升级尾段由常规节拍接管。 */
+const SILLYSPEC_ECHO_FAST_POLL_MS = 5_000;
+const SILLYSPEC_ECHO_BOOST_WINDOW_MS = 60_000;
+
 function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
   const accessToken = useSession((s) => s.accessToken);
   const [copied, setCopied] = useState(false);
@@ -544,6 +552,9 @@ export default function RuntimesPage() {
   // 「升级 sillyspec」按钮即时禁用；POST fire-and-forget 返回后即清，后续由
   // 15s 轮询 sillyspec_update running 态接管禁用显示）。
   const [sillyspecUpgradingId, setSillyspecUpgradingId] = useState<string | null>(null);
+  // sillyspec 升级回显提速第二级：下发后加速轮询窗口截止时刻（epoch ms；
+  // 0=未加速）。窗口内 machines 查询 refetchInterval 切 5s（见上方常量注释）。
+  const [sillyspecPollBoostUntil, setSillyspecPollBoostUntil] = useState(0);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   // FR-01：旧 dialogRuntime / initialSessionId 已退役（2026-08-25-runtimes-entry-unified-floating），
   // 「会话」按钮唤起全局悬浮会话助手（useFloatingSessionStore.openRuntimeSession）。
@@ -595,7 +606,26 @@ export default function RuntimesPage() {
     }),
     [debouncedQuery, statusFilter, providerFilter, ownerUserId, page, isPlatformAdmin],
   );
-  const { items: machines, total, sessions, isLoading, error: listError, refetch } = useDaemonMachines(listParams, { includeSessions: true });
+  const { items: machines, total, sessions, isLoading, error: listError, refetch } =
+    useDaemonMachines(listParams, {
+      includeSessions: true,
+      // 加速窗内切 5s 短间隔（回显提速第二级），窗外常规 15s。
+      refetchInterval:
+        Date.now() < sillyspecPollBoostUntil
+          ? SILLYSPEC_ECHO_FAST_POLL_MS
+          : 15_000,
+    });
+
+  // 加速窗到期回退常规节拍：到期 setTimeout 清 0 触发重渲染，让 machines 查询的
+  // refetchInterval 选项从 5s 切回 15s（react-query 随选项值变化重排轮询定时器）。
+  useEffect(() => {
+    if (sillyspecPollBoostUntil <= Date.now()) return;
+    const timer = window.setTimeout(
+      () => setSillyspecPollBoostUntil(0),
+      sillyspecPollBoostUntil - Date.now(),
+    );
+    return () => window.clearTimeout(timer);
+  }, [sillyspecPollBoostUntil]);
 
   // task-09 / FR-01：shared_to_me 取数路径——/machines 响应末位附带共享机器行
   //（task-07 后端装配），但 useDaemonMachines 的缓存是裁剪形 {items,total,sessions}
@@ -737,12 +767,13 @@ export default function RuntimesPage() {
 
   // 2026-08-31-machine-sillyspec-version task-07 / FR-02：升级 sillyspec——
   // modal.confirm 二次确认 → triggerMachineSillySpecUpdate（WS fire-and-forget
-  // 无回执）→ 成功/失败 toast + invalidate machines。升级进度由 daemon 状态机经
-  // 心跳 sillyspec_update 回传（机器卡横幅五态 + 徽标），15s 轮询自然刷新；
-  // 已最新时 daemon 版本门回传 up_to_date 终态（横幅明示「已是最新版」，
-  // ql-20260904-019 推翻原静默 no-op；toast 文案历史见 ql-20260904-016）。
-  // running/deferred 期的重复指令由 daemon 侧 in-flight 门去重。npm latest 由
-  // daemon 自行探测（后端不代查，design §接口定义）。
+  // 无回执）→ 成功/失败 toast + invalidate machines + 开 60s 加速轮询窗。
+  // 升级进度由 daemon 状态机经心跳 sillyspec_update 回传（机器卡横幅五态 +
+  // 徽标）——daemon 终态补发心跳（第一级）+ 前端窗内 5s 拉取（第二级），
+  // 横幅秒级回显；已最新时 daemon 版本门回传 up_to_date 终态（横幅明示
+  // 「已是最新版」，ql-20260904-019 推翻原静默 no-op；toast 文案历史见
+  // ql-20260904-016）。running/deferred 期的重复指令由 daemon 侧 in-flight
+  // 门去重。npm latest 由 daemon 自行探测（后端不代查，design §接口定义）。
   const handleSillySpecUpgrade = useCallback(
     (machine: DaemonMachineRead) => {
       if (machine.status !== "online") return;
@@ -758,8 +789,10 @@ export default function RuntimesPage() {
               // ql-20260904-019：daemon 版本门已最新改回传 up_to_date 终态——
               // 点了按钮必有横幅（升级进度或「已是最新版」），toast 回归承诺横幅。
               notify.success("升级指令已下发，检查与升级结果将显示在机器卡横幅上");
-            // 软刷新 machines：升级状态经心跳 sillyspec_update 回传，实际横幅
-            // 要等下一轮心跳（15s 轮询自然看到）。
+            // 软刷新 machines + 开加速轮询窗：daemon 终态落定即补发心跳（回显
+            // 提速第一级，daemon 侧），秒级到 backend——前端 60s 窗内以 5s 间隔
+            // 拉取（第二级），横幅秒级回显；窗外回退 15s 常规节拍自然收敛。
+            setSillyspecPollBoostUntil(Date.now() + SILLYSPEC_ECHO_BOOST_WINDOW_MS);
             void queryClient.invalidateQueries({ queryKey: queryKeys.daemonMachines.all });
           } catch (err) {
             notify.error(err, "下发 sillyspec 升级指令失败");
