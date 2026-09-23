@@ -38,3 +38,8 @@ created_at: 2026-08-29 22:56:30
 ## 2026-09-04 — sillyspec_update state 取值补 up_to_date（quick ql-20260904-019-b4f4）
 
 - DaemonHeartbeatSillySpecUpdate / MachineSillySpecUpdateRead docstring 补 state 新取值 up_to_date（daemon 手动升级已最新的明确反馈终态）——schema 本就 string 不收紧零行为改动，gen:types 同步 openapi.json/api-types.ts（diff 仅注释文本）。
+
+## 2026-09-24 — 24h 审查修复：fork 锚点 marker 卡死 + 原生 fork 空首句（quick ql-20260924-001）
+
+- submit_commit `_persisted_engine_anchors` 对齐候选排除 override 标记行（log_id 非空 + stale=True 无对应 flat record，双指针卡死丢锚 → fork 截断点偏早丢轮尾）；守护测试 test_override_marker_row_not_stall_anchor_cursor。
+- create.py native fork（prompt 空且无附件）dispatch_prompt 归零：lease metadata prompt 与首轮 SESSION_INJECT 均不再携带前导-only 载荷（原行为＝前导被当首轮执行 / 空载荷被 daemon 判「缺少必要字段」回报 run 失败）；对照回归 seed 档种子文本照常下发。

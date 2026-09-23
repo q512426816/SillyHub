@@ -144,16 +144,22 @@ def _agent_event_message(
     engine_anchor: str | None = None,
     dedup_key: str | None = None,
     event_type: str = "text",
+    segment_id: str | None = None,
 ) -> dict[str, Any]:
     """新轨消息（daemon eventToReportDict wire 形态）。
 
     ``engine_anchor`` 模拟 task-06 driver 补挂的
     ``AgentEvent.metadata.engineAnchor``；``dedup_key`` 模拟 ResilienceService
-    注入的幂等键（Claude msg.id / runId:seq）。
+    注入的幂等键（Claude msg.id / runId:seq）；``segment_id`` 模拟流式
+    complete 行的 AgentEvent.segment_id（submit_steps quick-0e56260f 据此
+    合成 override 标记行——标记行带真 log_id 进 published_logs 但无对应
+    flat record）。
     """
     ev: dict[str, Any] = {"type": event_type, "content": content}
     if engine_anchor is not None:
         ev["metadata"] = {"engineAnchor": engine_anchor}
+    if segment_id is not None:
+        ev["segment_id"] = segment_id
     msg: dict[str, Any] = {"kind": "agent_event", "event": ev}
     if dedup_key is not None:
         msg["dedup_key"] = dedup_key
@@ -352,3 +358,52 @@ class TestEngineAnchorBackfill:
         )
         assert result3 == 0  # dedup 全拦
         assert await _run_engine_anchor(db_session, run_id) == "chain-uuid-b"
+
+    @pytest.mark.asyncio
+    async def test_override_marker_row_not_stall_anchor_cursor(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """24h 审查 H-1：override 标记行不得卡死锚点双指针。
+
+        带 segmentId 的 complete 行落库时会额外追加 override 标记行（submit_steps
+        quick-0e56260f：log_id 非空 + stale=True，但**无对应 flat record**）。标记行
+        混进 ``_persisted_engine_anchors`` 的 published_rows 后，其 content 永远对
+        不上任何 flat record → 双指针卡死，其后所有 engineAnchor 被静默丢弃 →
+        轮末锚偏早 → fork 截断点错位丢轮尾内容。锚对齐必须跳过 stale 标记行。"""
+        _session_id, lease_id, run_id, token = await _seed_interactive_run(
+            db_session, provider="claude"
+        )
+        svc = DaemonService(db_session)
+
+        # 同批：流式 complete 行（segmentId → 内容行 + 标记行）带锚 a → 后随
+        # 无 segment 消息带锚 b。轮末锚必须是 b（修复前标记行卡死指针 → 丢 b）。
+        result = await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [
+                _agent_event_message(
+                    "streamed reply", engine_anchor="chain-uuid-a", segment_id="main:msg_001:0"
+                ),
+                _agent_event_message("final reply", engine_anchor="chain-uuid-b"),
+            ],
+        )
+        assert result == 2
+        assert await _run_engine_anchor(db_session, run_id) == "chain-uuid-b"
+
+        # 场景守护：标记行确实落了库（证明本批触发了 quick-0e56260f 路径，
+        # 防用例空转——不触发标记行时锚断言无鉴别力）。
+        marker_rows = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == run_id,
+                        AgentRunLog.channel == "stdout",
+                        AgentRunLog.content_redacted == "[ASSISTANT_OVERRIDE] main:msg_001:0",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(marker_rows) == 1

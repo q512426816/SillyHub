@@ -185,6 +185,41 @@ async def test_push_seconds_epoch_rejected_422(
     assert resp.status_code == 422
 
 
+@pytest.mark.asyncio
+async def test_push_beyond_datetime_range_rejected_422(
+    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+) -> None:
+    """ts 超 datetime 值域（毫秒 > 年 9999 上限）422——24h 审查 M-2：原校验只有
+    ge 下界，微秒误传（如 1e15）会在落库 fromtimestamp 抛 OSError → 整批 500。"""
+    _ws_id, headers = shpsync_headers
+    resp = await client.post(
+        f"/api/changes/{CHANGE_NAME}/events",
+        json={"events": [_event(0, ts=1e15)]},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_push_ts_infinity_rejected_422(
+    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+) -> None:
+    """ts=Infinity 422——inf 过 ge(1e12) 下界但 ``int(inf)``（dedup 回退键）与
+    fromtimestamp 均 OverflowError → 整批 500（24h 审查 M-2 同源防线）。
+    Infinity 非法 JSON（httpx json= 序列化即拒），用原始 body 发 ``Infinity``
+    字面量——Python json.loads 默认接受该形态，是真实可达的绕过面。"""
+    _ws_id, headers = shpsync_headers
+    resp = await client.post(
+        f"/api/changes/{CHANGE_NAME}/events",
+        content=(
+            '{"events": [{"kind": "file_changed", "ts": Infinity, '
+            '"stage": "execute", "detail": "inf"}]}'
+        ),
+        headers={**headers, "Content-Type": "application/json"},
+    )
+    assert resp.status_code == 422
+
+
 # ── 取（FR-04：ts ASC 正序 / since 增量 / limit / 空列表）──
 
 
@@ -317,6 +352,80 @@ async def test_intra_batch_same_dedup_key_inserts_once(
     rows = (await db_session.execute(stmt)).scalars().all()
     assert len(rows) == 1
     assert rows[0].detail == "事件 0"  # 首条胜出，第二条被丢
+
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_key_converges_not_500(
+    db_session: AsyncSession, shpsync_headers: tuple[Any, dict[str, str]]
+) -> None:
+    """24h 审查 M-1：并发同 dedup_key 撞唯一约束 → 回滚重查收敛，不整批 500。
+
+    场景确定性模拟（不靠真并发时序）：并发对手已提交 k1 行，但本批「已存键
+    预取」发生在对手提交前（盲看，patch 首次预取查询）→ INSERT 撞
+    uq_platform_change_events_dedup 抛 IntegrityError。修复预期：捕获 → rollback
+    → 重查已存键剔除撞键条目 → 重插剩余（对齐本文件 quicklog/progress 写路径
+    :535/:1068 既有 IntegrityError 自愈范式）。修复前：IntegrityError 未捕获直
+    冒泡 → 全局 500 兜底，整批（≤200 条）被拒。"""
+    from unittest.mock import patch as _patch
+
+    from sqlalchemy import false as _sa_false
+
+    import app.modules.platform_sync.service as _ps_service
+    from app.modules.platform_sync.schema import ChangeEventPush
+    from app.modules.platform_sync.service import PlatformSyncService
+
+    ws_id, _headers = shpsync_headers
+    # 并发对手的 k1 行（先落库——本批预取被 patch 成盲看，看不见它）。
+    db_session.add(
+        PlatformChangeEventORM(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            change_name=CHANGE_NAME,
+            dedup_key="k1",
+            ts=_ts_dt(0),
+            kind="file_changed",
+            provisional=True,
+            created_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+
+    _real_select = _ps_service.select
+    _blind = {"done": False}
+
+    def _select_with_blind_spot(*entities: Any, **kw: Any) -> Any:
+        stmt = _real_select(*entities, **kw)
+        if not _blind["done"] and "platform_change_events.dedup_key" in str(stmt):
+            _blind["done"] = True  # 仅首次已存键预取盲看；重试重查放行
+            return stmt.where(_sa_false())
+        return stmt
+
+    events = [
+        ChangeEventPush(kind="file_changed", ts=BASE_TS_MS, stage="execute", detail="k1", id="k1"),
+        ChangeEventPush(
+            kind="file_changed", ts=BASE_TS_MS + 1000, stage="execute", detail="k2", id="k2"
+        ),
+    ]
+    with _patch.object(_ps_service, "select", _select_with_blind_spot):
+        accepted, deduplicated = await PlatformSyncService(db_session).append_events(
+            ws_id, CHANGE_NAME, events
+        )
+
+    # k1 撞键收敛为 deduplicated，k2 正常落库——不再整批 500。
+    assert (accepted, deduplicated) == (1, 1)
+    keys = set(
+        (
+            await db_session.execute(
+                select(PlatformChangeEventORM.dedup_key).where(
+                    PlatformChangeEventORM.workspace_id == ws_id,
+                    PlatformChangeEventORM.change_name == CHANGE_NAME,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert keys == {"k1", "k2"}
 
 
 # ── 鉴权（写通道仅 shpsync_；shpsync_ 200 见收组）──

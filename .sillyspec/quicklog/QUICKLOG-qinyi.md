@@ -340,3 +340,22 @@
 根因：sillyspec 仓 2026-09-23 处理该坑时实证反转原诊断——健康 pnpm node_modules 经 junction 进临时目录 tsc/next 均可解析，沙箱机制无罪；真因=本仓 frontend node_modules 半装（.bin 整体缺失+顶层链接悬空，疑似 03:18 中断 install），主仓同样失败非沙箱特有；环境已删净重装修复（next v14.2.5 实测），工具侧 CNF 降档已落 sillyspec ql-20260923-022-f7f4
 方案：docs/sillyspec/quick-test-gate-frontend-lint-tempdir-no-nodemodules.md 全文重写——状态翻转已解决；新增复核结论段（junction 实证+半装真因+坑中坑残留 .modulesyaml 致普通重装不彻底）、环境修复段（rm node_modules+pnpm install --frozen-lockfile 11.1s+三重实测）、工具侧修复段（四族 CNF 签名降档 skipped+修复指引+GBK 乱码连根修；原三期望逐一回应）、升级前注意段；保留原始现象与绕过记录
 结果：纯 doc 单文件零代码——门禁按规则 8 纯 doc 自动跳过（无 test/lint 面）；文档事实与 sillyspec 仓 commit 0444a0b0/ql-20260923-022-f7f4 及本仓环境修复实测一致
+
+## ql-20260924-001-2547 | 2026-09-24 01:52:48 | 24h 审查四缺陷修复——fork 锚点标记行卡死/原生 fork 空首句/事件并发撞键 500/ts 值域缺上界
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/run_sync/service/submit_commit.py（H-1 锚点对齐候选排除 override 标记行）
+- backend/app/modules/daemon/session/service/create.py（H-2 native fork 空首句 dispatch_prompt 归零+空载荷 inject 跳过）
+- sillyhub-daemon/src/interactive/session-manager.ts（H-2 空 firstPrompt 不挂 10s 空消息兜底）
+- backend/app/modules/platform_sync/service.py（M-1 append_events IntegrityError 一轮重试收敛）
+- backend/app/modules/platform_sync/schema.py（M-2 ts le 上界+非有限值 before 校验器）
+- backend/app/modules/daemon/tests/test_engine_anchor.py（新用例标记行不卡死+场景守护断言）
+- backend/app/modules/daemon/tests/test_session_fork.py（新 2 用例 native 跳过+seed 对照）
+- backend/app/modules/platform_sync/tests/test_change_events.py（新 4 用例撞键收敛/超域/Infinity/回归）
+- sillyhub-daemon/tests/session-fork.test.ts（新用例空 firstPrompt 不挂+非空对照）
+需求：24h 审查四缺陷修复——fork 锚点标记行卡死/原生 fork 空首句/事件并发撞键 500/ts 值域缺上界
+根因：24h 只读审查确认 2 高危 2 中危：H-1 override 标记行（log_id 非空+stale）混进锚点对齐双指针卡死丢锚致 fork 截断点偏早丢轮尾；H-2 native fork 空 prompt 但前导拼接送出前导-only 首轮（前导空时被 daemon 判缺字段回报失败）；M-1 append_events 并发同 dedup_key 撞唯一约束整批 500；M-2 ts 只有下界，Infinity/微秒误传在落库处抛错整批 500
+方案：①_persisted_engine_anchors 加 not stale 过滤；②create.py 在 prompt 空且无附件时 dispatch_prompt 归零贯穿 lease 元数据与首轮 inject（空载荷跳过），daemon 侧空 firstPrompt 不挂 10s 兜底；③INSERT+修剪+commit 包 IntegrityError 一轮重试收敛（rollback 重查剔除重插）；④schema.ts 补 le=253402300799999+非有限值 before 校验器转 None（防 422 回显 inf 渲染炸）
+结果：聚焦全绿：engine_anchor 7P（新 1）/session_fork 24P（新 2 旧码红）/platform_sync 263P（新 4 旧码 500→收敛）/daemon 模块 2233P 零回归/daemon 侧 session-fork 15P+邻接 82P；ruff format/check 过、mypy 974 文件 0 错、tsc 过；模块文档 4 处+changelog 2 处同步
+审计：[gate] L1（跨 0 模块 · 14 文件：5 代码/4 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含

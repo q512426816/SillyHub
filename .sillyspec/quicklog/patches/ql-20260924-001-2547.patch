@@ -1,0 +1,643 @@
+diff --git a/backend/app/modules/daemon/run_sync/service/submit_commit.py b/backend/app/modules/daemon/run_sync/service/submit_commit.py
+index b3c07502c..ac31db9d8 100644
+--- a/backend/app/modules/daemon/run_sync/service/submit_commit.py
++++ b/backend/app/modules/daemon/run_sync/service/submit_commit.py
+@@ -58,8 +58,16 @@ def _persisted_engine_anchors(st: _SubmitState) -> list[str]:
+     dedup 拦下的旧锚不进候选，从而不覆盖轮内最新锚（task 卡「重复提交
+     不覆盖」；R-05）。channel 缺省时按落库循环同款映射派生（batch 旧轨
+     消息无显式 channel）。
++
++    24h 审查 H-1（2026-09-24）：quick-0e56260f 的 override **标记行**（log_id
++    非空 + stale=True）也进 published_logs，但它无对应 flat record——标记行
++    content 永远对不上任何 flat record，双指针一旦落到它即卡死，其后全部
++    engineAnchor 被静默丢弃（轮末锚偏早 → fork 截断点错位）。对齐候选必须
++    连 stale=True 的标记行一并排除（普通落库行不带 stale 键）。
+     """
+-    published_rows = [p for p in st.published_logs if p.get("log_id") is not None]
++    published_rows = [
++        p for p in st.published_logs if p.get("log_id") is not None and not p.get("stale")
++    ]
+     anchors: list[str] = []
+     cursor = 0
+     for rec in st.flat_messages:
+diff --git a/backend/app/modules/daemon/session/service/create.py b/backend/app/modules/daemon/session/service/create.py
+index 8a49e87eb..448270c58 100644
+--- a/backend/app/modules/daemon/session/service/create.py
++++ b/backend/app/modules/daemon/session/service/create.py
+@@ -496,6 +496,17 @@ async def create_session(
+             if _prefix_parts
+             else _dispatch_user_msg
+         )
++        # 24h 审查 H-2（ql-20260924-001）：首轮无用户内容（prompt 空且无附件——
++        # 仅 native 档 fork 达此态，fork.py 对 fork 豁免空 prompt 校验）时，前导
++        # （用户信息/平台规则等 _prefix_parts）不得单独成轮：design 生命周期契约
++        # 「native 档首轮即用户首问」。dispatch_prompt 归零贯穿两处——lease
++        # metadata prompt（daemon firstPrompt，空则不挂 10s 空消息兜底，见
++        # session-manager 同 quick 修）与下方首轮 SESSION_INJECT（空载荷跳过
++        # 下发，防 daemon 「缺少必要字段」丢弃回报 run 失败）。副作用声明：B 的
++        # 用户前导不再随首轮投递（inject 链无前导拼接，native fork 接受此语义）。
++        # 看图说话（空 prompt + 附件）不受影响——附件在场时不归零，前导照常随轮。
++        if not (prompt and prompt.strip()) and not validated_attachments:
++            dispatch_prompt = ""
+ 
+         placement = RunPlacementService(svc._session)
+         # task-04 / FR-02 / design §5.B：stage 透传（软依赖 task-03 的
+@@ -746,8 +757,17 @@ async def create_session(
+     # （daemon.ts _awaitSessionThenRoute，ql-20260831-006）；②控制指令三段式
+     # （落库 pending + WS 推送 + daemon 重连补拉，task-04 design A2）；③daemon
+     # create 的 firstPrompt 10s fallback（session-manager _pendingFirstPrompt）。
+-    control_ok = False
+-    if daemon_id is not None:
++    # 24h 审查 H-2（ql-20260924-001）：首轮无内容可投递（prompt 空且无附件——
++    # 仅 native 档 fork 达此态，design 生命周期契约「native 档首轮即用户首问」）
++    # 时整体跳过 SESSION_INJECT：daemon 对空 prompt 的 inject 按「缺少必要字段」
++    # 丢弃并回报该 run 失败（daemon.ts SESSION_INJECT !prompt 分支），B 首轮必败。
++    # 跳过＝有意不下发（control_ok 视为成功，不落 control_send_failed 告警）；
++    # B 等用户首问经既有 inject 链驱动，daemon 侧空 firstPrompt 不挂 10s 空消息
++    # 兜底（session-manager 同 quick 修）。看图说话（空 prompt + 附件）不受影响
++    # ——create_inject_attachments 非空仍下发。
++    _has_first_turn_payload = bool(dispatch_prompt or create_inject_attachments)
++    control_ok = not _has_first_turn_payload
++    if daemon_id is not None and _has_first_turn_payload:
+         _create_inject_payload = {
+             "session_id": str(session.id),
+             "lease_id": str(dispatch.lease_id),
+diff --git a/backend/app/modules/daemon/tests/test_engine_anchor.py b/backend/app/modules/daemon/tests/test_engine_anchor.py
+index 32aaba9ca..8abe64ae6 100644
+--- a/backend/app/modules/daemon/tests/test_engine_anchor.py
++++ b/backend/app/modules/daemon/tests/test_engine_anchor.py
+@@ -144,16 +144,22 @@ def _agent_event_message(
+     engine_anchor: str | None = None,
+     dedup_key: str | None = None,
+     event_type: str = "text",
++    segment_id: str | None = None,
+ ) -> dict[str, Any]:
+     """新轨消息（daemon eventToReportDict wire 形态）。
+ 
+     ``engine_anchor`` 模拟 task-06 driver 补挂的
+     ``AgentEvent.metadata.engineAnchor``；``dedup_key`` 模拟 ResilienceService
+-    注入的幂等键（Claude msg.id / runId:seq）。
++    注入的幂等键（Claude msg.id / runId:seq）；``segment_id`` 模拟流式
++    complete 行的 AgentEvent.segment_id（submit_steps quick-0e56260f 据此
++    合成 override 标记行——标记行带真 log_id 进 published_logs 但无对应
++    flat record）。
+     """
+     ev: dict[str, Any] = {"type": event_type, "content": content}
+     if engine_anchor is not None:
+         ev["metadata"] = {"engineAnchor": engine_anchor}
++    if segment_id is not None:
++        ev["segment_id"] = segment_id
+     msg: dict[str, Any] = {"kind": "agent_event", "event": ev}
+     if dedup_key is not None:
+         msg["dedup_key"] = dedup_key
+@@ -352,3 +358,52 @@ class TestEngineAnchorBackfill:
+         )
+         assert result3 == 0  # dedup 全拦
+         assert await _run_engine_anchor(db_session, run_id) == "chain-uuid-b"
++
++    @pytest.mark.asyncio
++    async def test_override_marker_row_not_stall_anchor_cursor(
++        self, db_session: AsyncSession, mocked_redis
++    ) -> None:
++        """24h 审查 H-1：override 标记行不得卡死锚点双指针。
++
++        带 segmentId 的 complete 行落库时会额外追加 override 标记行（submit_steps
++        quick-0e56260f：log_id 非空 + stale=True，但**无对应 flat record**）。标记行
++        混进 ``_persisted_engine_anchors`` 的 published_rows 后，其 content 永远对
++        不上任何 flat record → 双指针卡死，其后所有 engineAnchor 被静默丢弃 →
++        轮末锚偏早 → fork 截断点错位丢轮尾内容。锚对齐必须跳过 stale 标记行。"""
++        _session_id, lease_id, run_id, token = await _seed_interactive_run(
++            db_session, provider="claude"
++        )
++        svc = DaemonService(db_session)
++
++        # 同批：流式 complete 行（segmentId → 内容行 + 标记行）带锚 a → 后随
++        # 无 segment 消息带锚 b。轮末锚必须是 b（修复前标记行卡死指针 → 丢 b）。
++        result = await svc.submit_messages(
++            lease_id,
++            token,
++            run_id,
++            [
++                _agent_event_message(
++                    "streamed reply", engine_anchor="chain-uuid-a", segment_id="main:msg_001:0"
++                ),
++                _agent_event_message("final reply", engine_anchor="chain-uuid-b"),
++            ],
++        )
++        assert result == 2
++        assert await _run_engine_anchor(db_session, run_id) == "chain-uuid-b"
++
++        # 场景守护：标记行确实落了库（证明本批触发了 quick-0e56260f 路径，
++        # 防用例空转——不触发标记行时锚断言无鉴别力）。
++        marker_rows = (
++            (
++                await db_session.execute(
++                    select(AgentRunLog).where(
++                        AgentRunLog.run_id == run_id,
++                        AgentRunLog.channel == "stdout",
++                        AgentRunLog.content_redacted == "[ASSISTANT_OVERRIDE] main:msg_001:0",
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++        assert len(marker_rows) == 1
+diff --git a/backend/app/modules/daemon/tests/test_session_fork.py b/backend/app/modules/daemon/tests/test_session_fork.py
+index acc4a1aee..5469bc68e 100644
+--- a/backend/app/modules/daemon/tests/test_session_fork.py
++++ b/backend/app/modules/daemon/tests/test_session_fork.py
+@@ -605,6 +605,68 @@ class TestForkModeDispatch:
+         assert "前情转述（非原生上下文）" in (first_log.content_redacted or "")
+         assert "帮我分析这个方案" in (first_log.content_redacted or "")
+ 
++    @pytest.mark.asyncio
++    async def test_native_fork_skips_first_turn_inject(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        mocked_hub,
++        mocked_redis,
++    ) -> None:
++        """24h 审查 H-2：native 档 fork 无首句 → 不下发首轮 SESSION_INJECT。
++
++        daemon 对空 prompt 的 SESSION_INJECT 按「缺少必要字段」丢弃并回报该 run
++        失败（daemon.ts SESSION_INJECT ``!prompt`` 分支）——create 链对 fork 豁免了
++        空 prompt 校验却仍无条件发空载荷 inject，B 首轮必败。design 生命周期契约
++        「native 档首轮即用户首问」（经既有 inject 链驱动）。修复口径：无首句且
++        无附件时整体跳过下发；派发唤醒（send_wakeup）不受影响。"""
++        source = await _seed_source_session(db_session, provider="claude")
++        source.agent_session_id = "sdk-src-claude-h2"
++        await db_session.commit()
++        at_run = await _append_completed_run(db_session, source, engine_anchor="chain-h2-1")
++
++        mocked_hub.send_session_control.reset_mock()
++        resp = await client.post(
++            f"/api/daemon/sessions/{source.id}/fork",
++            json={"at_run_id": str(at_run.id)},
++            headers=auth_headers,
++        )
++        assert resp.status_code == 201, resp.text
++        assert resp.json()["tier"] == "native"
++        # 首轮 SESSION_INJECT 不下发：控制指令通道对 B 零调用。
++        mocked_hub.send_session_control.assert_not_called()
++
++    @pytest.mark.asyncio
++    async def test_seed_fork_first_turn_inject_still_sent(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        mocked_hub,
++        mocked_redis,
++    ) -> None:
++        """H-2 对照回归：seed 档（种子 prompt 非空）首轮 SESSION_INJECT 照常
++        下发且载荷携带种子文本——跳过仅限「无首句且无附件」的 native 档。"""
++        source = await _seed_source_session(db_session, provider="codex")
++        at_run = await _append_completed_run(db_session, source)
++        await _add_log(db_session, at_run.id, "user_input", "帮我分析这个方案")
++        await _add_log(db_session, at_run.id, "stdout", "好的，方案分析如下：……", offset_sec=1.0)
++        await db_session.commit()
++
++        mocked_hub.send_session_control.reset_mock()
++        resp = await client.post(
++            f"/api/daemon/sessions/{source.id}/fork",
++            json={"at_run_id": str(at_run.id)},
++            headers=auth_headers,
++        )
++        assert resp.status_code == 201, resp.text
++        assert resp.json()["tier"] == "seed"
++        # 种子 prompt 经控制指令通道下发，载荷 prompt 为种子文本（非空）。
++        mocked_hub.send_session_control.assert_called_once()
++        _daemon_id, _msg_type, payload = mocked_hub.send_session_control.call_args.args
++        assert "帮我分析这个方案" in (payload.get("prompt") or "")
++
+ 
+ # ════════════════════════════════════════════════════════════════════════════
+ # A 零字段改动（D-005）+ 快照继承
+diff --git a/backend/app/modules/platform_sync/schema.py b/backend/app/modules/platform_sync/schema.py
+index 6cacb2036..05eeacdcc 100644
+--- a/backend/app/modules/platform_sync/schema.py
++++ b/backend/app/modules/platform_sync/schema.py
+@@ -15,6 +15,7 @@ Change 2026-09-23-change-events-channel task-02：新增五模型支撑事件收
+ 
+ from __future__ import annotations
+ 
++import math
+ import uuid
+ from datetime import datetime
+ from typing import Any, Literal
+@@ -596,7 +597,31 @@ class ChangeEventPush(BaseModel):
+     model_config = {"extra": "ignore"}
+ 
+     kind: str = Field(min_length=1, max_length=64)
+-    ts: float = Field(ge=1e12, description="事件 epoch 毫秒（≥1e12 值域校验，D-003）")
++    # 24h 审查 M-2（ql-20260924-001）：补 le 上界——原校验只有 ge 下界，
++    # Infinity（float 可过 ge）与超 datetime 值域的毫秒（如微秒误传 1e15）会在
++    # 落库处 fromtimestamp / dedup 回退键 int() 抛 Overflow/OSError → 整批 500。
++    # 上界取 datetime.max（年 9999）对应的 epoch 毫秒。
++    ts: float = Field(
++        ge=1e12,
++        le=253_402_300_799_999,
++        description="事件 epoch 毫秒（[1e12, 253402300799999] 值域校验，D-003 + M-2）",
++    )
++
++    @field_validator("ts", mode="before")
++    @classmethod
++    def _ts_reject_non_finite(cls, value: object) -> object:
++        """非有限值（Infinity/NaN，Python json.loads 接受 ``Infinity`` 字面量——
++        真实可达的绕过面）先行转 None 走「非 number」422。
++
++        不直接 raise：Pydantic 错误详情回显原始 ``input``（inf/NaN），而
++        starlette JSONResponse.render 用 ``allow_nan=False`` 序列化——回显
++        非有限值的 422 响应自身渲染抛 ValueError 反成 500。转 None 后错误
++        ``input=None`` 可正常渲染，422 干净返回（M-2 补充防线）。
++        """
++        if isinstance(value, float) and not math.isfinite(value):
++            return None
++        return value
++
+     stage: str | None = Field(default=None, max_length=64)
+     detail: str | None = None
+     rule: str | None = Field(default=None, max_length=128)
+diff --git a/backend/app/modules/platform_sync/service.py b/backend/app/modules/platform_sync/service.py
+index f78ff76bb..f52635d1a 100644
+--- a/backend/app/modules/platform_sync/service.py
++++ b/backend/app/modules/platform_sync/service.py
+@@ -1871,6 +1871,10 @@ class PlatformSyncService:
+         4. 插入后 count 该 ``(workspace_id, change_name)`` 行数，``>5000`` 按
+            ``(ts, created_at)`` 删最旧修剪到 5000（D-005，与本批插入同一次
+            commit 即单事务；``id`` 末位排序消 created_at 并列歧义）。
++        5. IntegrityError 重试收敛（24h 审查 M-1 / ql-20260924-001）：③④ 与
++           commit 整体包裹——并发对手在 ② 预取后提交同 dedup_key 行致唯一
++           约束冲突时，rollback 重查已存键、剔除撞键条目（计 deduplicated）
++           重插一轮，不再整批 500。
+ 
+         service 零业务判定红线（D-004）：不触发通知 / 不写 progress / 不动审批
+         ——本方法只落事件行。返回 ``(accepted, deduplicated)``。
+@@ -1905,66 +1909,104 @@ class PlatformSyncService:
+                 deduplicated += 1
+ 
+         # ③ 缺失者 INSERT（provisional 恒 True / detail 截断 / ts 归一）。
++        # 24h 审查 M-1（ql-20260924-001）：INSERT + 修剪 + commit 包
++        # IntegrityError 重试收敛——并发对手在本批预取（②）之后提交同
++        # dedup_key 行时，唯一约束 uq_platform_change_events_dedup 在
++        # flush/commit 抛 IntegrityError；此前未捕获直冒泡 → 全局 500 兜底
++        # 整批（≤200 条）被拒。对齐本文件 quicklog/progress 写路径既有自愈
++        # 范式（upsert :535 / quicklog :1068）：rollback → 重查已存键 →
++        # 剔除撞键条目（计 deduplicated）→ 重插剩余。一轮重试足够（重查
++        # 确认缺失后才插，再撞说明另有并发写入，重抛让上层感知）。
+         now = datetime.now(UTC)
+-        for key, event in pending.items():
+-            self._session.add(
+-                PlatformChangeEventORM(
+-                    id=uuid.uuid4(),
+-                    workspace_id=workspace_id,
+-                    change_name=change_name,
+-                    dedup_key=key,
+-                    ts=datetime.fromtimestamp(event.ts / 1000, tz=UTC),
+-                    kind=event.kind,
+-                    stage=event.stage,
+-                    detail=(
+-                        event.detail[:_CHANGE_EVENT_DETAIL_MAX]
+-                        if event.detail is not None
+-                        else None
+-                    ),
+-                    rule=event.rule,
+-                    severity=event.severity,
+-                    provisional=True,  # D-004 红线：请求值丢弃，恒 True。
+-                    created_at=now,
+-                )
+-            )
+-        accepted = len(pending)
++        accepted = 0
++        for _attempt in range(2):
++            try:
++                for key, event in pending.items():
++                    self._session.add(
++                        PlatformChangeEventORM(
++                            id=uuid.uuid4(),
++                            workspace_id=workspace_id,
++                            change_name=change_name,
++                            dedup_key=key,
++                            ts=datetime.fromtimestamp(event.ts / 1000, tz=UTC),
++                            kind=event.kind,
++                            stage=event.stage,
++                            detail=(
++                                event.detail[:_CHANGE_EVENT_DETAIL_MAX]
++                                if event.detail is not None
++                                else None
++                            ),
++                            rule=event.rule,
++                            severity=event.severity,
++                            provisional=True,  # D-004 红线：请求值丢弃，恒 True。
++                            created_at=now,
++                        )
++                    )
+ 
+-        # ④ 单事务上限修剪（D-005）：count 含本批待插行（autoflush 先于查询）。
+-        scope_filters = (
+-            col(PlatformChangeEventORM.workspace_id) == workspace_id,
+-            col(PlatformChangeEventORM.change_name) == change_name,
+-        )
+-        count = (
+-            await self._session.execute(
+-                select(func.count()).select_from(PlatformChangeEventORM).where(*scope_filters)
+-            )
+-        ).scalar_one()
+-        if count > CHANGE_EVENTS_MAX_ROWS:
+-            excess = count - CHANGE_EVENTS_MAX_ROWS
+-            oldest_ids = list(
+-                (
++                # ④ 单事务上限修剪（D-005）：count 含本批待插行（autoflush 先于查询）。
++                scope_filters = (
++                    col(PlatformChangeEventORM.workspace_id) == workspace_id,
++                    col(PlatformChangeEventORM.change_name) == change_name,
++                )
++                count = (
+                     await self._session.execute(
+-                        select(col(PlatformChangeEventORM.id))
++                        select(func.count())
++                        .select_from(PlatformChangeEventORM)
+                         .where(*scope_filters)
+-                        .order_by(
+-                            col(PlatformChangeEventORM.ts).asc(),
+-                            col(PlatformChangeEventORM.created_at).asc(),
+-                            col(PlatformChangeEventORM.id).asc(),
++                    )
++                ).scalar_one()
++                if count > CHANGE_EVENTS_MAX_ROWS:
++                    excess = count - CHANGE_EVENTS_MAX_ROWS
++                    oldest_ids = list(
++                        (
++                            await self._session.execute(
++                                select(col(PlatformChangeEventORM.id))
++                                .where(*scope_filters)
++                                .order_by(
++                                    col(PlatformChangeEventORM.ts).asc(),
++                                    col(PlatformChangeEventORM.created_at).asc(),
++                                    col(PlatformChangeEventORM.id).asc(),
++                                )
++                                .limit(excess)
++                            )
+                         )
+-                        .limit(excess)
++                        .scalars()
++                        .all()
+                     )
+-                )
+-                .scalars()
+-                .all()
+-            )
+-            if oldest_ids:
+-                await self._session.execute(
+-                    delete(PlatformChangeEventORM).where(
+-                        col(PlatformChangeEventORM.id).in_(oldest_ids)
++                    if oldest_ids:
++                        await self._session.execute(
++                            delete(PlatformChangeEventORM).where(
++                                col(PlatformChangeEventORM.id).in_(oldest_ids)
++                            )
++                        )
++
++                await self._session.commit()
++                accepted = len(pending)
++                break
++            except IntegrityError:
++                await self._session.rollback()
++                if _attempt:
++                    raise
++                # 重查已存键：首次预取与对手提交之间的竞态窗口在此收敛。
++                existing_keys = set(
++                    (
++                        await self._session.execute(
++                            select(col(PlatformChangeEventORM.dedup_key)).where(
++                                col(PlatformChangeEventORM.workspace_id) == workspace_id,
++                                col(PlatformChangeEventORM.change_name) == change_name,
++                                col(PlatformChangeEventORM.dedup_key).in_(pending.keys()),
++                            )
++                        )
+                     )
++                    .scalars()
++                    .all()
+                 )
+-
+-        await self._session.commit()
++                for key in existing_keys & set(pending.keys()):
++                    pending.pop(key, None)
++                    deduplicated += 1
++                if not pending:
++                    # 全部撞键：本批零 INSERT（修剪无需重跑）。
++                    break
+         return accepted, deduplicated
+ 
+     async def list_events(
+diff --git a/backend/app/modules/platform_sync/tests/test_change_events.py b/backend/app/modules/platform_sync/tests/test_change_events.py
+index 10916b0c9..2ac044470 100644
+--- a/backend/app/modules/platform_sync/tests/test_change_events.py
++++ b/backend/app/modules/platform_sync/tests/test_change_events.py
+@@ -185,6 +185,41 @@ async def test_push_seconds_epoch_rejected_422(
+     assert resp.status_code == 422
+ 
+ 
++@pytest.mark.asyncio
++async def test_push_beyond_datetime_range_rejected_422(
++    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
++) -> None:
++    """ts 超 datetime 值域（毫秒 > 年 9999 上限）422——24h 审查 M-2：原校验只有
++    ge 下界，微秒误传（如 1e15）会在落库 fromtimestamp 抛 OSError → 整批 500。"""
++    _ws_id, headers = shpsync_headers
++    resp = await client.post(
++        f"/api/changes/{CHANGE_NAME}/events",
++        json={"events": [_event(0, ts=1e15)]},
++        headers=headers,
++    )
++    assert resp.status_code == 422
++
++
++@pytest.mark.asyncio
++async def test_push_ts_infinity_rejected_422(
++    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
++) -> None:
++    """ts=Infinity 422——inf 过 ge(1e12) 下界但 ``int(inf)``（dedup 回退键）与
++    fromtimestamp 均 OverflowError → 整批 500（24h 审查 M-2 同源防线）。
++    Infinity 非法 JSON（httpx json= 序列化即拒），用原始 body 发 ``Infinity``
++    字面量——Python json.loads 默认接受该形态，是真实可达的绕过面。"""
++    _ws_id, headers = shpsync_headers
++    resp = await client.post(
++        f"/api/changes/{CHANGE_NAME}/events",
++        content=(
++            '{"events": [{"kind": "file_changed", "ts": Infinity, '
++            '"stage": "execute", "detail": "inf"}]}'
++        ),
++        headers={**headers, "Content-Type": "application/json"},
++    )
++    assert resp.status_code == 422
++
++
+ # ── 取（FR-04：ts ASC 正序 / since 增量 / limit / 空列表）──
+ 
+ 
+@@ -319,6 +354,80 @@ async def test_intra_batch_same_dedup_key_inserts_once(
+     assert rows[0].detail == "事件 0"  # 首条胜出，第二条被丢
+ 
+ 
++@pytest.mark.asyncio
++async def test_concurrent_duplicate_key_converges_not_500(
++    db_session: AsyncSession, shpsync_headers: tuple[Any, dict[str, str]]
++) -> None:
++    """24h 审查 M-1：并发同 dedup_key 撞唯一约束 → 回滚重查收敛，不整批 500。
++
++    场景确定性模拟（不靠真并发时序）：并发对手已提交 k1 行，但本批「已存键
++    预取」发生在对手提交前（盲看，patch 首次预取查询）→ INSERT 撞
++    uq_platform_change_events_dedup 抛 IntegrityError。修复预期：捕获 → rollback
++    → 重查已存键剔除撞键条目 → 重插剩余（对齐本文件 quicklog/progress 写路径
++    :535/:1068 既有 IntegrityError 自愈范式）。修复前：IntegrityError 未捕获直
++    冒泡 → 全局 500 兜底，整批（≤200 条）被拒。"""
++    from unittest.mock import patch as _patch
++
++    from sqlalchemy import false as _sa_false
++
++    import app.modules.platform_sync.service as _ps_service
++    from app.modules.platform_sync.schema import ChangeEventPush
++    from app.modules.platform_sync.service import PlatformSyncService
++
++    ws_id, _headers = shpsync_headers
++    # 并发对手的 k1 行（先落库——本批预取被 patch 成盲看，看不见它）。
++    db_session.add(
++        PlatformChangeEventORM(
++            id=uuid.uuid4(),
++            workspace_id=ws_id,
++            change_name=CHANGE_NAME,
++            dedup_key="k1",
++            ts=_ts_dt(0),
++            kind="file_changed",
++            provisional=True,
++            created_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++    _real_select = _ps_service.select
++    _blind = {"done": False}
++
++    def _select_with_blind_spot(*entities: Any, **kw: Any) -> Any:
++        stmt = _real_select(*entities, **kw)
++        if not _blind["done"] and "platform_change_events.dedup_key" in str(stmt):
++            _blind["done"] = True  # 仅首次已存键预取盲看；重试重查放行
++            return stmt.where(_sa_false())
++        return stmt
++
++    events = [
++        ChangeEventPush(kind="file_changed", ts=BASE_TS_MS, stage="execute", detail="k1", id="k1"),
++        ChangeEventPush(
++            kind="file_changed", ts=BASE_TS_MS + 1000, stage="execute", detail="k2", id="k2"
++        ),
++    ]
++    with _patch.object(_ps_service, "select", _select_with_blind_spot):
++        accepted, deduplicated = await PlatformSyncService(db_session).append_events(
++            ws_id, CHANGE_NAME, events
++        )
++
++    # k1 撞键收敛为 deduplicated，k2 正常落库——不再整批 500。
++    assert (accepted, deduplicated) == (1, 1)
++    keys = set(
++        (
++            await db_session.execute(
++                select(PlatformChangeEventORM.dedup_key).where(
++                    PlatformChangeEventORM.workspace_id == ws_id,
++                    PlatformChangeEventORM.change_name == CHANGE_NAME,
++                )
++            )
++        )
++        .scalars()
++        .all()
++    )
++    assert keys == {"k1", "k2"}
++
++
+ # ── 鉴权（写通道仅 shpsync_；shpsync_ 200 见收组）──
+ 
+ 
+diff --git a/sillyhub-daemon/src/interactive/session-manager.ts b/sillyhub-daemon/src/interactive/session-manager.ts
+index 69723a8e9..5ca0e31c8 100644
+--- a/sillyhub-daemon/src/interactive/session-manager.ts
++++ b/sillyhub-daemon/src/interactive/session-manager.ts
+@@ -940,18 +940,25 @@ export class SessionManager {
+     // 不再构造 SDKUserMessage；Claude driver 内部做形态转换（task-03）。
+     // ql-20260825-002：firstPrompt 不再直接入队（防与首条 SESSION_INJECT 双提交），
+     // 挂起等 inject 消费；超时 fallback 提交（见 _pendingFirstPrompt 注释）。
++    // ql-20260924-001（24h 审查 H-2）：firstPrompt 为空（native fork 会话——backend
++    // create 对 fork 豁免空首句且空载荷 SESSION_INJECT 已不再下发）不挂 10s 兜底：
++    // 兜底到点会 push 空用户消息（claude 档空串仍发送），污染 B 首轮。空串无
++    // 信息量，跳过挂起即等用户首问经 inject 驱动；inject 消费路径对 Map 缺键
++    // 天然 no-op（turn-control get→undefined），零回归。
+     const inputQueue = new InputQueue<UserTurnInput>();
+     const PENDING_FIRST_FALLBACK_MS = 10_000;
+-    const pendingTimer = setTimeout(() => {
+-      this._pendingFirstPrompt.delete(input.sessionId);
+-      const st = this._store.get(input.sessionId);
+-      if (!st || st.status === 'ended' || st.status === 'failed') return;
+-      st.inputQueue.push({ type: 'user', text: input.firstPrompt });
+-    }, PENDING_FIRST_FALLBACK_MS);
+-    this._pendingFirstPrompt.set(input.sessionId, {
+-      prompt: input.firstPrompt,
+-      timer: pendingTimer,
+-    });
++    if (input.firstPrompt) {
++      const pendingTimer = setTimeout(() => {
++        this._pendingFirstPrompt.delete(input.sessionId);
++        const st = this._store.get(input.sessionId);
++        if (!st || st.status === 'ended' || st.status === 'failed') return;
++        st.inputQueue.push({ type: 'user', text: input.firstPrompt });
++      }, PENDING_FIRST_FALLBACK_MS);
++      this._pendingFirstPrompt.set(input.sessionId, {
++        prompt: input.firstPrompt,
++        timer: pendingTimer,
++      });
++    }
+ 
+     // 2. 写 SessionState（status=running，首 turn 的 currentRunId=firstRunId）。
+     // scan 真阻塞（generic-wibbling-whisper 改造点 C/B/D）：求值 effective
+diff --git a/sillyhub-daemon/tests/session-fork.test.ts b/sillyhub-daemon/tests/session-fork.test.ts
+index 76ac33d01..07a853d47 100644
+--- a/sillyhub-daemon/tests/session-fork.test.ts
++++ b/sillyhub-daemon/tests/session-fork.test.ts
+@@ -531,6 +531,36 @@ describe('session-fork task-06：create → driverOpts 组装（R-07 解耦验
+     ).rejects.toThrow(/No conversation found/);
+     expect(startCalls).toHaveLength(1);
+   });
++
++  it('firstPrompt 为空（native fork B）不挂 10s 空消息兜底——首轮由用户首问 inject 驱动（24h 审查 H-2）', async () => {
++    const { driver } = makeOptCapturingDriver('claude');
++    const sm = new SessionManager({ drivers: { claude: driver }, ...makeSmDeps() }, {});
++    // native fork：lease metadata prompt=""（backend create 对 fork 豁免空首句，
++    // 且空载荷 SESSION_INJECT 已不再下发）。挂 10s 兜底会在超时后 push 空用户
++    // 消息（claude 档空串仍发送），污染 B 的首轮——空串无信息量，不挂即等 inject。
++    await sm.create({
++      ...smBaseInput,
++      sessionId: 'sess-fork-empty-first',
++      firstPrompt: '',
++      provider: 'claude',
++      resume: 'src-sdk-sess-empty',
++      forkSession: true,
++      forkMode: 'resume_at',
++    });
++    expect(sm._pendingFirstPrompt.has('sess-fork-empty-first')).toBe(false);
++    // inject 消费路径对缺键天然 no-op（turn-control get→undefined），B 等用户
++    // 首问经 SESSION_INJECT 正常驱动。
++
++    // 对照：非空首句仍挂兜底（零回归）；测试内清 timer 防悬挂。
++    await sm.create({
++      ...smBaseInput,
++      sessionId: 'sess-fork-nonempty-first',
++      provider: 'claude',
++    });
++    expect(sm._pendingFirstPrompt.has('sess-fork-nonempty-first')).toBe(true);
++    const pending = sm._pendingFirstPrompt.get('sess-fork-nonempty-first');
++    if (pending) clearTimeout(pending.timer);
++  });
+ });
+ 
+ // ── C. claude-sdk-driver：options 透传 + engineAnchor 补挂 ──────────────────

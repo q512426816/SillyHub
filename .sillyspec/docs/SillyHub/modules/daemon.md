@@ -231,3 +231,7 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 - applyClaudeSettings 移入 task-runner `for(;;)` 重试循环（每次 attempt spawn 前重写）：CLAUDE_CONFIG_DIR 全局唯一，并发 lease 的「撤下 unlink」（ql-20260921-001-8a4d 引入）可在本 lease 运行期删掉 settings.json——循环外只写一次会让 attempt 2+ 的 spawn 丢配置（autocompact 回 ~160k 提前压缩）。apply 幂等，写重复无害。
 - PPM 附件门控补漏（ppm_activation 阶段-1 资格判定）：ql-20260921-005 三处门控改 attachments 键时漏改本处（仍查 multimodal）——cursor 会话的 PPM 附件（含本可落盘 .md）被错误降级为 GET 链接，而同会话手动上传 .md 走落盘，自相矛盾。改键对齐 attachments.py / knowledge/distill.py；docblock 三处旧口径（"provider≠claude"）同步。
 - 测试：daemon 31 passed（turn-control-attachment-atomic 新 4 用例：首次写/复用 mtime 不变/半截自愈[旧码红]/并发双写；retry-timeout +1：apply 调用数=attempt 数[旧码红]）+ 回归 5 文件 144 passed + tsc 0；backend ppm 门控新 2 用例（cursor 取值不降级[旧码红] / attachments=false 仍降级）+ ppm 全文件 16 passed + scan_docs 46 passed，ruff/format/mypy 0。
+
+## 增量（ql-20260924-001：空 firstPrompt 不挂 10s 兜底——native fork 首轮契约对齐，24h 审查 H-2 daemon 侧）
+
+- session-manager `_createInternal` 的 firstPrompt 挂起（ql-20260825-002 的 10s fallback）补空串守卫：`input.firstPrompt` 为空（native fork 会话——backend create 对 fork 归零 lease metadata prompt 且空载荷 SESSION_INJECT 已不再下发，见 backend daemon.md 同 ql）时**不挂兜底**。修复前兜底到点 push `{type:'user', text:''}` 空用户消息（claude 档空串仍发送），污染 B 首轮。inject 消费路径对 Map 缺键天然 no-op（turn-control/lifecycle 均 get→undefined 守卫），B 等用户首问经 SESSION_INJECT 正常驱动，零回归。测试 session-fork.test.ts 新用例（空串不挂 + 非空仍挂对照）。

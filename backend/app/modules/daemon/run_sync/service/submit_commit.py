@@ -58,8 +58,16 @@ def _persisted_engine_anchors(st: _SubmitState) -> list[str]:
     dedup 拦下的旧锚不进候选，从而不覆盖轮内最新锚（task 卡「重复提交
     不覆盖」；R-05）。channel 缺省时按落库循环同款映射派生（batch 旧轨
     消息无显式 channel）。
+
+    24h 审查 H-1（2026-09-24）：quick-0e56260f 的 override **标记行**（log_id
+    非空 + stale=True）也进 published_logs，但它无对应 flat record——标记行
+    content 永远对不上任何 flat record，双指针一旦落到它即卡死，其后全部
+    engineAnchor 被静默丢弃（轮末锚偏早 → fork 截断点错位）。对齐候选必须
+    连 stale=True 的标记行一并排除（普通落库行不带 stale 键）。
     """
-    published_rows = [p for p in st.published_logs if p.get("log_id") is not None]
+    published_rows = [
+        p for p in st.published_logs if p.get("log_id") is not None and not p.get("stale")
+    ]
     anchors: list[str] = []
     cursor = 0
     for rec in st.flat_messages:

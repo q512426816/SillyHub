@@ -15,6 +15,7 @@ Change 2026-09-23-change-events-channel task-02：新增五模型支撑事件收
 
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime
 from typing import Any, Literal
@@ -596,7 +597,31 @@ class ChangeEventPush(BaseModel):
     model_config = {"extra": "ignore"}
 
     kind: str = Field(min_length=1, max_length=64)
-    ts: float = Field(ge=1e12, description="事件 epoch 毫秒（≥1e12 值域校验，D-003）")
+    # 24h 审查 M-2（ql-20260924-001）：补 le 上界——原校验只有 ge 下界，
+    # Infinity（float 可过 ge）与超 datetime 值域的毫秒（如微秒误传 1e15）会在
+    # 落库处 fromtimestamp / dedup 回退键 int() 抛 Overflow/OSError → 整批 500。
+    # 上界取 datetime.max（年 9999）对应的 epoch 毫秒。
+    ts: float = Field(
+        ge=1e12,
+        le=253_402_300_799_999,
+        description="事件 epoch 毫秒（[1e12, 253402300799999] 值域校验，D-003 + M-2）",
+    )
+
+    @field_validator("ts", mode="before")
+    @classmethod
+    def _ts_reject_non_finite(cls, value: object) -> object:
+        """非有限值（Infinity/NaN，Python json.loads 接受 ``Infinity`` 字面量——
+        真实可达的绕过面）先行转 None 走「非 number」422。
+
+        不直接 raise：Pydantic 错误详情回显原始 ``input``（inf/NaN），而
+        starlette JSONResponse.render 用 ``allow_nan=False`` 序列化——回显
+        非有限值的 422 响应自身渲染抛 ValueError 反成 500。转 None 后错误
+        ``input=None`` 可正常渲染，422 干净返回（M-2 补充防线）。
+        """
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        return value
+
     stage: str | None = Field(default=None, max_length=64)
     detail: str | None = None
     rule: str | None = Field(default=None, max_length=128)

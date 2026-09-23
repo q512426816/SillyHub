@@ -496,6 +496,17 @@ async def create_session(
             if _prefix_parts
             else _dispatch_user_msg
         )
+        # 24h 审查 H-2（ql-20260924-001）：首轮无用户内容（prompt 空且无附件——
+        # 仅 native 档 fork 达此态，fork.py 对 fork 豁免空 prompt 校验）时，前导
+        # （用户信息/平台规则等 _prefix_parts）不得单独成轮：design 生命周期契约
+        # 「native 档首轮即用户首问」。dispatch_prompt 归零贯穿两处——lease
+        # metadata prompt（daemon firstPrompt，空则不挂 10s 空消息兜底，见
+        # session-manager 同 quick 修）与下方首轮 SESSION_INJECT（空载荷跳过
+        # 下发，防 daemon 「缺少必要字段」丢弃回报 run 失败）。副作用声明：B 的
+        # 用户前导不再随首轮投递（inject 链无前导拼接，native fork 接受此语义）。
+        # 看图说话（空 prompt + 附件）不受影响——附件在场时不归零，前导照常随轮。
+        if not (prompt and prompt.strip()) and not validated_attachments:
+            dispatch_prompt = ""
 
         placement = RunPlacementService(svc._session)
         # task-04 / FR-02 / design §5.B：stage 透传（软依赖 task-03 的
@@ -746,8 +757,17 @@ async def create_session(
     # （daemon.ts _awaitSessionThenRoute，ql-20260831-006）；②控制指令三段式
     # （落库 pending + WS 推送 + daemon 重连补拉，task-04 design A2）；③daemon
     # create 的 firstPrompt 10s fallback（session-manager _pendingFirstPrompt）。
-    control_ok = False
-    if daemon_id is not None:
+    # 24h 审查 H-2（ql-20260924-001）：首轮无内容可投递（prompt 空且无附件——
+    # 仅 native 档 fork 达此态，design 生命周期契约「native 档首轮即用户首问」）
+    # 时整体跳过 SESSION_INJECT：daemon 对空 prompt 的 inject 按「缺少必要字段」
+    # 丢弃并回报该 run 失败（daemon.ts SESSION_INJECT !prompt 分支），B 首轮必败。
+    # 跳过＝有意不下发（control_ok 视为成功，不落 control_send_failed 告警）；
+    # B 等用户首问经既有 inject 链驱动，daemon 侧空 firstPrompt 不挂 10s 空消息
+    # 兜底（session-manager 同 quick 修）。看图说话（空 prompt + 附件）不受影响
+    # ——create_inject_attachments 非空仍下发。
+    _has_first_turn_payload = bool(dispatch_prompt or create_inject_attachments)
+    control_ok = not _has_first_turn_payload
+    if daemon_id is not None and _has_first_turn_payload:
         _create_inject_payload = {
             "session_id": str(session.id),
             "lease_id": str(dispatch.lease_id),

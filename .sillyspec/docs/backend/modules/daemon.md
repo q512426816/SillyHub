@@ -306,3 +306,8 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
 
 - **GET /sessions/{id}/logs 新增可选 `before_id`（uuid）查询参数**：与 `before` 组合实现 (ts,id) 复合游标——过滤 `(timestamp < before) OR (timestamp == before AND id < before_id)`（read_model.get_agent_session_logs，经 DaemonService/SessionService 两层门面透传）；缺省不传保持现行 `timestamp <= before` 逐字一致（旧客户端零回归）；单独传 before_id 无 before → 422（参数组合校验，先例 session_team/machines）。修 c318553a6 遗留：单事务 ≥页大小（100）同 timestamp 批次游标停摆（重复拉页+批内前段行不可达）。
 - **ORDER BY（run 块序 anchor_ts→timestamp→id）与 logsToTurns 轮序派生零改动**；排序键与裸 ts 过滤键不对齐的既有局限不变（复合过滤仅在 run 块内收紧）。测试：test_group_logs_pagination 17 passed（150 行同 ts 批两页取尽零交集/缺省 <= 回归/单独 422 三新用例）。
+
+## 增量（ql-20260924-001：24h 审查 H-1/H-2——fork 锚点 marker 卡死 + 原生 fork 空首句）
+
+- **锚点回填跳过 override 标记行（H-1，run_sync/submit_commit `_persisted_engine_anchors`）**：带 segmentId 的 complete 行落库时 quick-0e56260f 会额外追加 override 标记行（log_id 非空 + stale=True，但无对应 flat record）——标记行 content 永远对不上 flat record，双指针落到它即卡死，其后全部 engineAnchor 被静默丢弃 → 轮末锚偏早 → fork 截断点错位丢轮尾。对齐候选连 stale=True 一并排除（普通落库行不带 stale 键）。守护测试 test_engine_anchor.py::test_override_marker_row_not_stall_anchor_cursor（segment complete 行 + 后随锚消息，断言取末锚 + 标记行在场防用例空转）。
+- **native fork 空首句不下发首轮（H-2，session/service/create.py）**：native 档 fork prompt=""（fork.py 走 resume 链，design 生命周期契约「首轮即用户首问」），但 `_prefix_parts`（用户信息/平台规则前导）仍使 dispatch_prompt 非空——首轮被注入**前导-only 消息**单独成轮（且若前导为空则 daemon 按「缺少必要字段」丢弃 inject 回报 run 失败）。修：prompt 空且无附件时 dispatch_prompt 归零——贯穿 lease metadata prompt（daemon firstPrompt，空则 daemon 侧不挂 10s 空消息兜底，见 SillyHub daemon.md 同 ql）与首轮 SESSION_INJECT（空载荷整体跳过，control_ok 视为有意成功不落告警）。副作用声明：B 的用户前导不再随首轮投递（inject 链无前导拼接，native fork 接受此语义）；看图说话（空 prompt + 附件）不受影响。对照回归：test_session_fork.py::test_seed_fork_first_turn_inject_still_sent（seed 档种子文本照常下发）。

@@ -1871,6 +1871,10 @@ class PlatformSyncService:
         4. 插入后 count 该 ``(workspace_id, change_name)`` 行数，``>5000`` 按
            ``(ts, created_at)`` 删最旧修剪到 5000（D-005，与本批插入同一次
            commit 即单事务；``id`` 末位排序消 created_at 并列歧义）。
+        5. IntegrityError 重试收敛（24h 审查 M-1 / ql-20260924-001）：③④ 与
+           commit 整体包裹——并发对手在 ② 预取后提交同 dedup_key 行致唯一
+           约束冲突时，rollback 重查已存键、剔除撞键条目（计 deduplicated）
+           重插一轮，不再整批 500。
 
         service 零业务判定红线（D-004）：不触发通知 / 不写 progress / 不动审批
         ——本方法只落事件行。返回 ``(accepted, deduplicated)``。
@@ -1905,66 +1909,104 @@ class PlatformSyncService:
                 deduplicated += 1
 
         # ③ 缺失者 INSERT（provisional 恒 True / detail 截断 / ts 归一）。
+        # 24h 审查 M-1（ql-20260924-001）：INSERT + 修剪 + commit 包
+        # IntegrityError 重试收敛——并发对手在本批预取（②）之后提交同
+        # dedup_key 行时，唯一约束 uq_platform_change_events_dedup 在
+        # flush/commit 抛 IntegrityError；此前未捕获直冒泡 → 全局 500 兜底
+        # 整批（≤200 条）被拒。对齐本文件 quicklog/progress 写路径既有自愈
+        # 范式（upsert :535 / quicklog :1068）：rollback → 重查已存键 →
+        # 剔除撞键条目（计 deduplicated）→ 重插剩余。一轮重试足够（重查
+        # 确认缺失后才插，再撞说明另有并发写入，重抛让上层感知）。
         now = datetime.now(UTC)
-        for key, event in pending.items():
-            self._session.add(
-                PlatformChangeEventORM(
-                    id=uuid.uuid4(),
-                    workspace_id=workspace_id,
-                    change_name=change_name,
-                    dedup_key=key,
-                    ts=datetime.fromtimestamp(event.ts / 1000, tz=UTC),
-                    kind=event.kind,
-                    stage=event.stage,
-                    detail=(
-                        event.detail[:_CHANGE_EVENT_DETAIL_MAX]
-                        if event.detail is not None
-                        else None
-                    ),
-                    rule=event.rule,
-                    severity=event.severity,
-                    provisional=True,  # D-004 红线：请求值丢弃，恒 True。
-                    created_at=now,
-                )
-            )
-        accepted = len(pending)
-
-        # ④ 单事务上限修剪（D-005）：count 含本批待插行（autoflush 先于查询）。
-        scope_filters = (
-            col(PlatformChangeEventORM.workspace_id) == workspace_id,
-            col(PlatformChangeEventORM.change_name) == change_name,
-        )
-        count = (
-            await self._session.execute(
-                select(func.count()).select_from(PlatformChangeEventORM).where(*scope_filters)
-            )
-        ).scalar_one()
-        if count > CHANGE_EVENTS_MAX_ROWS:
-            excess = count - CHANGE_EVENTS_MAX_ROWS
-            oldest_ids = list(
-                (
-                    await self._session.execute(
-                        select(col(PlatformChangeEventORM.id))
-                        .where(*scope_filters)
-                        .order_by(
-                            col(PlatformChangeEventORM.ts).asc(),
-                            col(PlatformChangeEventORM.created_at).asc(),
-                            col(PlatformChangeEventORM.id).asc(),
+        accepted = 0
+        for _attempt in range(2):
+            try:
+                for key, event in pending.items():
+                    self._session.add(
+                        PlatformChangeEventORM(
+                            id=uuid.uuid4(),
+                            workspace_id=workspace_id,
+                            change_name=change_name,
+                            dedup_key=key,
+                            ts=datetime.fromtimestamp(event.ts / 1000, tz=UTC),
+                            kind=event.kind,
+                            stage=event.stage,
+                            detail=(
+                                event.detail[:_CHANGE_EVENT_DETAIL_MAX]
+                                if event.detail is not None
+                                else None
+                            ),
+                            rule=event.rule,
+                            severity=event.severity,
+                            provisional=True,  # D-004 红线：请求值丢弃，恒 True。
+                            created_at=now,
                         )
-                        .limit(excess)
                     )
-                )
-                .scalars()
-                .all()
-            )
-            if oldest_ids:
-                await self._session.execute(
-                    delete(PlatformChangeEventORM).where(
-                        col(PlatformChangeEventORM.id).in_(oldest_ids)
-                    )
-                )
 
-        await self._session.commit()
+                # ④ 单事务上限修剪（D-005）：count 含本批待插行（autoflush 先于查询）。
+                scope_filters = (
+                    col(PlatformChangeEventORM.workspace_id) == workspace_id,
+                    col(PlatformChangeEventORM.change_name) == change_name,
+                )
+                count = (
+                    await self._session.execute(
+                        select(func.count())
+                        .select_from(PlatformChangeEventORM)
+                        .where(*scope_filters)
+                    )
+                ).scalar_one()
+                if count > CHANGE_EVENTS_MAX_ROWS:
+                    excess = count - CHANGE_EVENTS_MAX_ROWS
+                    oldest_ids = list(
+                        (
+                            await self._session.execute(
+                                select(col(PlatformChangeEventORM.id))
+                                .where(*scope_filters)
+                                .order_by(
+                                    col(PlatformChangeEventORM.ts).asc(),
+                                    col(PlatformChangeEventORM.created_at).asc(),
+                                    col(PlatformChangeEventORM.id).asc(),
+                                )
+                                .limit(excess)
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    if oldest_ids:
+                        await self._session.execute(
+                            delete(PlatformChangeEventORM).where(
+                                col(PlatformChangeEventORM.id).in_(oldest_ids)
+                            )
+                        )
+
+                await self._session.commit()
+                accepted = len(pending)
+                break
+            except IntegrityError:
+                await self._session.rollback()
+                if _attempt:
+                    raise
+                # 重查已存键：首次预取与对手提交之间的竞态窗口在此收敛。
+                existing_keys = set(
+                    (
+                        await self._session.execute(
+                            select(col(PlatformChangeEventORM.dedup_key)).where(
+                                col(PlatformChangeEventORM.workspace_id) == workspace_id,
+                                col(PlatformChangeEventORM.change_name) == change_name,
+                                col(PlatformChangeEventORM.dedup_key).in_(pending.keys()),
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                for key in existing_keys & set(pending.keys()):
+                    pending.pop(key, None)
+                    deduplicated += 1
+                if not pending:
+                    # 全部撞键：本批零 INSERT（修剪无需重跑）。
+                    break
         return accepted, deduplicated
 
     async def list_events(

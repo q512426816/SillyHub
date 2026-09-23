@@ -940,18 +940,25 @@ export class SessionManager {
     // 不再构造 SDKUserMessage；Claude driver 内部做形态转换（task-03）。
     // ql-20260825-002：firstPrompt 不再直接入队（防与首条 SESSION_INJECT 双提交），
     // 挂起等 inject 消费；超时 fallback 提交（见 _pendingFirstPrompt 注释）。
+    // ql-20260924-001（24h 审查 H-2）：firstPrompt 为空（native fork 会话——backend
+    // create 对 fork 豁免空首句且空载荷 SESSION_INJECT 已不再下发）不挂 10s 兜底：
+    // 兜底到点会 push 空用户消息（claude 档空串仍发送），污染 B 首轮。空串无
+    // 信息量，跳过挂起即等用户首问经 inject 驱动；inject 消费路径对 Map 缺键
+    // 天然 no-op（turn-control get→undefined），零回归。
     const inputQueue = new InputQueue<UserTurnInput>();
     const PENDING_FIRST_FALLBACK_MS = 10_000;
-    const pendingTimer = setTimeout(() => {
-      this._pendingFirstPrompt.delete(input.sessionId);
-      const st = this._store.get(input.sessionId);
-      if (!st || st.status === 'ended' || st.status === 'failed') return;
-      st.inputQueue.push({ type: 'user', text: input.firstPrompt });
-    }, PENDING_FIRST_FALLBACK_MS);
-    this._pendingFirstPrompt.set(input.sessionId, {
-      prompt: input.firstPrompt,
-      timer: pendingTimer,
-    });
+    if (input.firstPrompt) {
+      const pendingTimer = setTimeout(() => {
+        this._pendingFirstPrompt.delete(input.sessionId);
+        const st = this._store.get(input.sessionId);
+        if (!st || st.status === 'ended' || st.status === 'failed') return;
+        st.inputQueue.push({ type: 'user', text: input.firstPrompt });
+      }, PENDING_FIRST_FALLBACK_MS);
+      this._pendingFirstPrompt.set(input.sessionId, {
+        prompt: input.firstPrompt,
+        timer: pendingTimer,
+      });
+    }
 
     // 2. 写 SessionState（status=running，首 turn 的 currentRunId=firstRunId）。
     // scan 真阻塞（generic-wibbling-whisper 改造点 C/B/D）：求值 effective

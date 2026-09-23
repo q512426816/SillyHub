@@ -531,6 +531,36 @@ describe('session-fork task-06：create → driverOpts 组装（R-07 解耦验�
     ).rejects.toThrow(/No conversation found/);
     expect(startCalls).toHaveLength(1);
   });
+
+  it('firstPrompt 为空（native fork B）不挂 10s 空消息兜底——首轮由用户首问 inject 驱动（24h 审查 H-2）', async () => {
+    const { driver } = makeOptCapturingDriver('claude');
+    const sm = new SessionManager({ drivers: { claude: driver }, ...makeSmDeps() }, {});
+    // native fork：lease metadata prompt=""（backend create 对 fork 豁免空首句，
+    // 且空载荷 SESSION_INJECT 已不再下发）。挂 10s 兜底会在超时后 push 空用户
+    // 消息（claude 档空串仍发送），污染 B 的首轮——空串无信息量，不挂即等 inject。
+    await sm.create({
+      ...smBaseInput,
+      sessionId: 'sess-fork-empty-first',
+      firstPrompt: '',
+      provider: 'claude',
+      resume: 'src-sdk-sess-empty',
+      forkSession: true,
+      forkMode: 'resume_at',
+    });
+    expect(sm._pendingFirstPrompt.has('sess-fork-empty-first')).toBe(false);
+    // inject 消费路径对缺键天然 no-op（turn-control get→undefined），B 等用户
+    // 首问经 SESSION_INJECT 正常驱动。
+
+    // 对照：非空首句仍挂兜底（零回归）；测试内清 timer 防悬挂。
+    await sm.create({
+      ...smBaseInput,
+      sessionId: 'sess-fork-nonempty-first',
+      provider: 'claude',
+    });
+    expect(sm._pendingFirstPrompt.has('sess-fork-nonempty-first')).toBe(true);
+    const pending = sm._pendingFirstPrompt.get('sess-fork-nonempty-first');
+    if (pending) clearTimeout(pending.timer);
+  });
 });
 
 // ── C. claude-sdk-driver：options 透传 + engineAnchor 补挂 ──────────────────

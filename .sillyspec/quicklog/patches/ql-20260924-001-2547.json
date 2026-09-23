@@ -1,0 +1,111 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-0ae06e31",
+  "totals": {
+    "files": 9,
+    "additions": 425,
+    "deletions": 67
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/submit_commit.py",
+      "declared": true,
+      "additions": 9,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/create.py",
+      "declared": true,
+      "additions": 22,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_engine_anchor.py",
+      "declared": true,
+      "additions": 56,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_fork.py",
+      "declared": true,
+      "additions": 62,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/schema.py",
+      "declared": true,
+      "additions": 26,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/service.py",
+      "declared": true,
+      "additions": 94,
+      "deletions": 52,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_change_events.py",
+      "declared": true,
+      "additions": 109,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+      "declared": true,
+      "additions": 17,
+      "deletions": 10,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/session-fork.test.ts",
+      "declared": true,
+      "additions": 30,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 14,
+    "codeFileCount": 5,
+    "testFileCount": 4,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260924-001-2547",
+  "sessionId": "quick-0ae06e31",
+  "savedAt": "2026-09-23T18:38:46.976Z",
+  "patchSha256": "0a7cce4123eeb75283c10f411916a9030dde75124933d1e2b2a7f8c7af2928dc",
+  "patchStatus": "ok"
+}

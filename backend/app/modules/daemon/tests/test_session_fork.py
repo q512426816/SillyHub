@@ -605,6 +605,68 @@ class TestForkModeDispatch:
         assert "前情转述（非原生上下文）" in (first_log.content_redacted or "")
         assert "帮我分析这个方案" in (first_log.content_redacted or "")
 
+    @pytest.mark.asyncio
+    async def test_native_fork_skips_first_turn_inject(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+    ) -> None:
+        """24h 审查 H-2：native 档 fork 无首句 → 不下发首轮 SESSION_INJECT。
+
+        daemon 对空 prompt 的 SESSION_INJECT 按「缺少必要字段」丢弃并回报该 run
+        失败（daemon.ts SESSION_INJECT ``!prompt`` 分支）——create 链对 fork 豁免了
+        空 prompt 校验却仍无条件发空载荷 inject，B 首轮必败。design 生命周期契约
+        「native 档首轮即用户首问」（经既有 inject 链驱动）。修复口径：无首句且
+        无附件时整体跳过下发；派发唤醒（send_wakeup）不受影响。"""
+        source = await _seed_source_session(db_session, provider="claude")
+        source.agent_session_id = "sdk-src-claude-h2"
+        await db_session.commit()
+        at_run = await _append_completed_run(db_session, source, engine_anchor="chain-h2-1")
+
+        mocked_hub.send_session_control.reset_mock()
+        resp = await client.post(
+            f"/api/daemon/sessions/{source.id}/fork",
+            json={"at_run_id": str(at_run.id)},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["tier"] == "native"
+        # 首轮 SESSION_INJECT 不下发：控制指令通道对 B 零调用。
+        mocked_hub.send_session_control.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_seed_fork_first_turn_inject_still_sent(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+    ) -> None:
+        """H-2 对照回归：seed 档（种子 prompt 非空）首轮 SESSION_INJECT 照常
+        下发且载荷携带种子文本——跳过仅限「无首句且无附件」的 native 档。"""
+        source = await _seed_source_session(db_session, provider="codex")
+        at_run = await _append_completed_run(db_session, source)
+        await _add_log(db_session, at_run.id, "user_input", "帮我分析这个方案")
+        await _add_log(db_session, at_run.id, "stdout", "好的，方案分析如下：……", offset_sec=1.0)
+        await db_session.commit()
+
+        mocked_hub.send_session_control.reset_mock()
+        resp = await client.post(
+            f"/api/daemon/sessions/{source.id}/fork",
+            json={"at_run_id": str(at_run.id)},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["tier"] == "seed"
+        # 种子 prompt 经控制指令通道下发，载荷 prompt 为种子文本（非空）。
+        mocked_hub.send_session_control.assert_called_once()
+        _daemon_id, _msg_type, payload = mocked_hub.send_session_control.call_args.args
+        assert "帮我分析这个方案" in (payload.get("prompt") or "")
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # A 零字段改动（D-005）+ 快照继承
