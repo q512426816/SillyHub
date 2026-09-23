@@ -331,3 +331,12 @@
 结果：聚焦测试 26 passed + dispatch 族回归 73 passed（十文件覆盖 stage/scan/team/subsession 共用路径）+ ruff format/check 全过 + 门禁 mypy 974 文件过；门禁前端 next lint 因沙箱临时目录无 node_modules 必败（环境问题非代码问题，坑已记 docs/sillyspec/quick-test-gate-frontend-lint-tempdir-no-nodemodules.md），本次零前端改动故走 skip 审计留痕
 审计：[gate] L1（跨 0 模块 · 5 文件：2 代码/2 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/quick-test-gate-frontend-lint-tempdir-no-nodemodules.md
+
+## ql-20260923-004-04c3 | 2026-09-23 20:52:19 | 坑文档复核更正——quick 门禁 next lint 沙箱必败坑翻转为已解决（junction 无罪+真因 node_modules 半装）
+状态：已完成
+关联变更：（无）
+文件：docs/sillyspec/quick-test-gate-frontend-lint-tempdir-no-nodemodules.md
+需求：坑文档复核更正——quick 门禁 next lint 沙箱必败坑翻转为已解决（junction 无罪+真因 node_modules 半装）
+根因：sillyspec 仓 2026-09-23 处理该坑时实证反转原诊断——健康 pnpm node_modules 经 junction 进临时目录 tsc/next 均可解析，沙箱机制无罪；真因=本仓 frontend node_modules 半装（.bin 整体缺失+顶层链接悬空，疑似 03:18 中断 install），主仓同样失败非沙箱特有；环境已删净重装修复（next v14.2.5 实测），工具侧 CNF 降档已落 sillyspec ql-20260923-022-f7f4
+方案：docs/sillyspec/quick-test-gate-frontend-lint-tempdir-no-nodemodules.md 全文重写——状态翻转已解决；新增复核结论段（junction 实证+半装真因+坑中坑残留 .modulesyaml 致普通重装不彻底）、环境修复段（rm node_modules+pnpm install --frozen-lockfile 11.1s+三重实测）、工具侧修复段（四族 CNF 签名降档 skipped+修复指引+GBK 乱码连根修；原三期望逐一回应）、升级前注意段；保留原始现象与绕过记录
+结果：纯 doc 单文件零代码——门禁按规则 8 纯 doc 自动跳过（无 test/lint 面）；文档事实与 sillyspec 仓 commit 0444a0b0/ql-20260923-022-f7f4 及本仓环境修复实测一致

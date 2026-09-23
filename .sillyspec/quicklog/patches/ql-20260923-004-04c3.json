@@ -1,0 +1,47 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-189bae12",
+  "totals": {
+    "files": 1,
+    "additions": 48,
+    "deletions": 20
+  },
+  "rows": [
+    {
+      "path": "docs/sillyspec/quick-test-gate-frontend-lint-tempdir-no-nodemodules.md",
+      "declared": true,
+      "additions": 48,
+      "deletions": 20,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 0,
+    "codeFileCount": 0,
+    "testFileCount": 0,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": true,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260923-004-04c3",
+  "sessionId": "quick-189bae12",
+  "savedAt": "2026-09-23T12:52:57.106Z",
+  "patchSha256": "2b85e496760911aa72f4ae41d1572ed63e79e167035d846a8890e69a613389be",
+  "patchStatus": "ok"
+}
