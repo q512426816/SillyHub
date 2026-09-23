@@ -305,3 +305,14 @@
 根因：实证为误诊：hook 语言 system 经 uv run 解析，仓库根与 backend 两处 uv run ruff --version 均 0.15.14、与 uv.lock 一致，无版本漂移；真实盲点=被拦时 ruff 只报 diff，对齐修复命令只写在 yaml 注释块里，失败现场不可见——check-only 是 2026-09-11 ql-20260911-006 的既定设计（auto-fix 会触发 stash 冲突回滚），不能回退
 方案：两 hook entry 改 bash -c 包装：命令失败时 exit 1 前打印『↩ 修复命令（与 hook 同源 uv 环境，勿用全局 ruff）：cd backend && uv run ruff format <被拦文件>』（check hook 对应 --fix 形态）；注释块补 2026-09-23 实证记录防后续会话再误诊版本漂移
 结果：pre-commit run 双路径实测：坏格式探针（x=1）→ Failed + 修复命令行出现在输出；真实干净文件 → Passed；探针即用即删。纯配置改动（yaml 单文件），test/lint 门禁按配置类自动跳过
+
+## ql-20260923-002-03e2 | 2026-09-23 10:28:56 | archive-tombstone 坑平台侧（docs/sillyspec/archive-tombstone-归档墓碑致面板已归档变更软删不可见.md）…
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/service.py（list_ archive 分支三源并集+and_ import）
+- backend/migrations/versions/20260923090000_repair_archive_tombstone_victims.py（REPAIR_SQL 数据修复（downgrade no-op））
+需求：archive-tombstone 坑平台侧（docs/sillyspec/archive-tombstone-归档墓碑致面板已归档变更软删不可见.md）：归档链被 CLI 旧墓碑载荷伪装 deleted 软删后，面板已归档 tab 隐身；且 reparse 对 CLI 工作流失效（D-002@v1 owner 守卫）致 location 停 active——即使 CLI 侧修好载荷，新归档行也进不了已归档集合
+根因：坑文档的根治方向（_apply_cli_tombstone 认 archived 置 location）与 D-002@v1 设计决策冲突：_sync_change_stage_status 明确 archived 分支不动 location（reparse 是 location owner，抢先置位会被回翻抖动，test_archived_terminal_persists 锁死）；真盲区有两个——存量冤案行 location=deleted 被已归档 tab 过滤 + 新归档行 location 恒 active（reparse 失效）
+方案：不加写路径（尊重 D-002@v1）：①list_ 的 location=='archive' 分支放宽为三源并集——location='archive'（存量收敛行回归保护）∪ status='archived'（CLI 终态上行落表，覆盖新归档行与多数冤案行）∪ deleted×current_stage∈{archive,archived}（旧载荷冤案两代拼写兜底；真删除 3 例均 brainstorm/scan 期零误伤）；②迁移 20260923090000 REPAIR_SQL 一次性回翻存量冤案行（判据同上，downgrade no-op，镜像恢复交 CLI spec-sync/sync-docs 下行自愈）
+结果：聚焦 29/29（新 4 例：三源并集 6 行矩阵+active 分支不漂移+迁移链位+REPAIR_SQL sqlite 语义；ingest/deleted-guard 回归绿）；后端全量 8192 passed/1 failed——auth/rbac test_platform_level_grant_hit 为 08-29 预存（与本次零代码路径交集，单跑亦败，疑本地 redis 依赖），非本变更引入；门禁按模块子集

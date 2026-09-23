@@ -1,0 +1,71 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-7b5ddf4e",
+  "totals": {
+    "files": 4,
+    "additions": 277,
+    "deletions": 2
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/change/service.py",
+      "declared": true,
+      "additions": 23,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/migrations/versions/20260923090000_repair_archive_tombstone_victims.py",
+      "declared": true,
+      "additions": 59,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_archive_tab_tombstone_relax.py",
+      "declared": true,
+      "additions": 106,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/tests/test_archive_tombstone_repair_migration.py",
+      "declared": true,
+      "additions": 89,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 0,
+    "codeFileCount": 0,
+    "testFileCount": 0,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": true,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260923-002-03e2",
+  "sessionId": "quick-7b5ddf4e",
+  "savedAt": "2026-09-23T02:29:58.282Z",
+  "patchSha256": "f4d57163bbf5f5001a6b30a8d1189dbedd29801f6ff32aaed417a89f965a4237",
+  "patchStatus": "ok"
+}

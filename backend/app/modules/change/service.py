@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select, tuple_
+from sqlalchemy import and_, func, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -219,7 +219,28 @@ class ChangeService:
         base = select(Change).where(col(Change.workspace_id) == workspace_id)
 
         if location:
-            base = base.where(col(Change.location) == location)
+            if location == "archive":
+                # archive-tombstone 冤案放宽（2026-09-23，docs/sillyspec/archive-tombstone-
+                # 归档墓碑致面板已归档变更软删不可见.md）：归档链曾被 CLI 墓碑载荷伪装
+                # 'deleted' 软删（location='deleted' + 镜像收敛），且 reparse 对 CLI 工作
+                # 流失效（D-002@v1 owner_id 守卫）location 停 'active'——「已归档」集合按
+                # 三源并集：① location='archive'（reparse/存量收敛行）② status='archived'
+                # （CLI 终态上行 _sync_change_stage_status 落表；2026-09-23 起 CLI 墓碑终态
+                # 透传 'archived'，旧载荷冤案行也多已带此值）③ location='deleted' 且
+                # current_stage ∈ {'archive','archived'}（两代阶段拼写兜底——真删除
+                # change-delete 历史 3 例均 brainstorm/scan 期，两仓本地库实证零误伤）。
+                base = base.where(
+                    or_(
+                        col(Change.location) == "archive",
+                        col(Change.status) == "archived",
+                        and_(
+                            col(Change.location) == "deleted",
+                            col(Change.current_stage).in_(("archive", "archived")),
+                        ),
+                    )
+                )
+            else:
+                base = base.where(col(Change.location) == location)
         if status:
             base = base.where(col(Change.status) == status)
         if owner:

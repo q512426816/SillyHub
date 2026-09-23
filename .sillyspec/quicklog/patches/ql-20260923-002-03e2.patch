@@ -1,0 +1,314 @@
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index efd5a67ad..f163ee633 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
+ from pathlib import Path
+ 
+ from fastapi import HTTPException
+-from sqlalchemy import func, or_, select, tuple_
++from sqlalchemy import and_, func, or_, select, tuple_
+ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.ext.asyncio import AsyncSession
+ from sqlmodel import col
+@@ -219,7 +219,28 @@ class ChangeService:
+         base = select(Change).where(col(Change.workspace_id) == workspace_id)
+ 
+         if location:
+-            base = base.where(col(Change.location) == location)
++            if location == "archive":
++                # archive-tombstone 冤案放宽（2026-09-23，docs/sillyspec/archive-tombstone-
++                # 归档墓碑致面板已归档变更软删不可见.md）：归档链曾被 CLI 墓碑载荷伪装
++                # 'deleted' 软删（location='deleted' + 镜像收敛），且 reparse 对 CLI 工作
++                # 流失效（D-002@v1 owner_id 守卫）location 停 'active'——「已归档」集合按
++                # 三源并集：① location='archive'（reparse/存量收敛行）② status='archived'
++                # （CLI 终态上行 _sync_change_stage_status 落表；2026-09-23 起 CLI 墓碑终态
++                # 透传 'archived'，旧载荷冤案行也多已带此值）③ location='deleted' 且
++                # current_stage ∈ {'archive','archived'}（两代阶段拼写兜底——真删除
++                # change-delete 历史 3 例均 brainstorm/scan 期，两仓本地库实证零误伤）。
++                base = base.where(
++                    or_(
++                        col(Change.location) == "archive",
++                        col(Change.status) == "archived",
++                        and_(
++                            col(Change.location) == "deleted",
++                            col(Change.current_stage).in_(("archive", "archived")),
++                        ),
++                    )
++                )
++            else:
++                base = base.where(col(Change.location) == location)
+         if status:
+             base = base.where(col(Change.status) == status)
+         if owner:
+diff --git a/backend/migrations/versions/20260923090000_repair_archive_tombstone_victims.py b/backend/migrations/versions/20260923090000_repair_archive_tombstone_victims.py
+new file mode 100644
+--- /dev/null
++++ b/backend/migrations/versions/20260923090000_repair_archive_tombstone_victims.py
+@@ -0,0 +1,59 @@
++"""repair archive-tombstone victims (deleted→archive)
++
++Revision ID: 20260923090000
++Revises: 20260923040000
++Create Date: 2026-09-23 09:00:00
++
++archive-tombstone 坑一次性数据修复（docs/sillyspec/archive-tombstone-归档墓碑致
++面板已归档变更软删不可见.md，2026-09-23-change-events-channel 部署验收发现）：
++
++CLI 墓碑机制（sillyspec sync.js _applyTombstoneStatus，2026-08-29 引入）曾把
++归档链（unregisterChange，DB status='archived'）的墓碑载荷一律写成
++status='deleted'——平台 _apply_cli_tombstone 见值即置 location='deleted' 并
++镜像软删收敛，归档变更在面板「已归档」tab 隐身。CLI 侧已修复为终态透传
++（archived 链发 'archived'，2026-09-23 sillyspec 仓提交）；本迁移回翻存量冤案行。
++
++判据（实证安全）：location='deleted' AND current_stage IN ('archive','archived')。
++两仓本地进度库实证（2026-09-23 查）：真删除（change-delete 命令）历史仅 3 例，
++全部停在 brainstorm/scan 期——无一例从 archive 阶段删除，本判据零误伤；
++'archived' 拼写覆盖 _sync_change_stage_status P1 前后两代终态值。
++
++镜像文件（soft_delete_change_dir 移入 30 天备份区）不在本迁移恢复——由源仓
++CLI 下次 spec-sync / `sillyspec platform sync-docs --change <名>` 上行自愈重传，
++备份区兜底窗口 30 天。行回翻后 _change_key_deleted 拒收锚点同步解除（进度
++上行不再 409）。
++
++downgrade：no-op——回翻是把行恢复到 CLI 本地库的真实语义（status='archived'），
++反向操作会把冤案重新隐身且无法区分真删除，无意义。
++
++author: qinyi
++created_at: 2026-09-23 09:00:00
++"""
++
++from __future__ import annotations
++
++from typing import Sequence
++
++import sqlalchemy as sa
++from alembic import op
++
++# 模块级常量供迁移测试直接执行断言语义（先例：test_changes_location_check_migration.py
++# 的结构断言 + 本仓「迁移可测」惯例——数据迁移把判据 SQL 提为可导入单点）。
++REPAIR_SQL = (
++    "UPDATE changes SET location = 'archive' "
++    "WHERE location = 'deleted' AND current_stage IN ('archive', 'archived')"
++)
++
++revision: str = "20260923090000"
++down_revision: str | None = "20260923040000"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++
++def upgrade() -> None:
++    op.execute(sa.text(REPAIR_SQL))
++
++
++def downgrade() -> None:
++    # 数据修复不可逆（见模块 docstring）
++    pass
+
+diff --git a/backend/app/modules/change/tests/test_archive_tab_tombstone_relax.py b/backend/app/modules/change/tests/test_archive_tab_tombstone_relax.py
+new file mode 100644
+--- /dev/null
++++ b/backend/app/modules/change/tests/test_archive_tab_tombstone_relax.py
+@@ -0,0 +1,106 @@
++"""「已归档」tab 三源放宽（archive-tombstone 冤案修复）行为测试。
++
++docs/sillyspec/archive-tombstone-归档墓碑致面板已归档变更软删不可见.md（2026-09-23
++change-events-channel 部署验收发现）：CLI 墓碑载荷曾把归档链伪装 'deleted'
++（平台 _apply_cli_tombstone 翻 location='deleted' + 镜像软删），且 reparse 对 CLI
++工作流失效（D-002@v1 owner_id 守卫，location 停 'active'）——``ChangeService.list_``
++的 ``location=='archive'`` 分支放宽为三源并集：
++
++- ① ``location='archive'``（reparse/存量收敛行——不改行为，回归保护）
++- ② ``status='archived'``（CLI 终态上行落表；2026-09-23 起 CLI 墓碑终态透传，
++  旧冤案行也多已带此值）
++- ③ ``location='deleted' AND current_stage IN ('archive','archived')``（旧载荷
++  冤案行两代阶段拼写兜底）
++
++排除面：真删除（change-delete 命令）历史 3 例均 brainstorm/scan 期（两仓本地库
++2026-09-23 实证）——deleted 且非归档阶段的行保持隐身。
++"""
++
++from __future__ import annotations
++
++import uuid
++
++from app.modules.change.model import Change
++from app.modules.change.service import ChangeService
++from app.modules.workspace.model import Workspace
++
++
++async def _seed(db_session, **cols) -> Change:
++    change = Change(
++        id=uuid.uuid4(),
++        workspace_id=cols["workspace_id"],
++        change_key=cols["change_key"],
++        title=cols["change_key"],
++        status=cols.get("status", "draft"),
++        location=cols["location"],
++        path=f"changes/{cols['change_key']}",
++        current_stage=cols.get("current_stage"),
++    )
++    db_session.add(change)
++    await db_session.commit()
++    return change
++
++
++async def test_archive_tab_three_source_union(db_session):
++    """三源并集：reparse 行 / status=archived 行 / deleted 冤案行全部可见，真删除保持隐身。"""
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name=f"arch-ws-{uuid.uuid4().hex[:6]}",
++        slug=f"arch-ws-{uuid.uuid4().hex[:6]}",
++        root_path=f"/tmp/arch-ws-{uuid.uuid4().hex[:8]}",
++        status="active",
++    )
++    db_session.add(ws)
++    await db_session.commit()
++
++    # ① 存量收敛行（reparse 置位）——回归保护：本来就该可见
++    r1 = await _seed(db_session, workspace_id=ws.id, change_key="2026-09-01-reparse-row",
++                     location="archive", status="in_progress", current_stage="archived")
++    # ② CLI 归档终态上行行（location 停 active、status='archived'——D-002@v1 不动 location）
++    r2 = await _seed(db_session, workspace_id=ws.id, change_key="2026-09-23-cli-archived",
++                     location="active", status="archived", current_stage="archived")
++    # ③ 旧墓碑载荷冤案行（deleted + 走完归档阶段，两代拼写各一）
++    r3 = await _seed(db_session, workspace_id=ws.id, change_key="2026-09-23-victim-cli-spelling",
++                     location="deleted", status="archived", current_stage="archive")
++    r4 = await _seed(db_session, workspace_id=ws.id, change_key="2026-09-16-victim-platform-spelling",
++                     location="deleted", status="draft", current_stage="archived")
++    # 排除：真删除（brainstorm/scan 期废弃——历史 3 例同形态）
++    x1 = await _seed(db_session, workspace_id=ws.id, change_key="2026-09-03-genuine-delete",
++                     location="deleted", status="draft", current_stage="brainstorm")
++    # 排除：活跃行（不属于已归档集合）
++    x2 = await _seed(db_session, workspace_id=ws.id, change_key="2026-09-23-active-row",
++                     location="active", status="in_progress", current_stage="execute")
++
++    items, total = await ChangeService(db_session).list_(ws.id, location="archive")
++    keys = {c.change_key for c in items}
++    assert keys == {r1.change_key, r2.change_key, r3.change_key, r4.change_key}, (
++        f"已归档集合=三源并集（实际 {sorted(keys)}）"
++    )
++    assert total == 4, f"total 计三源并集（实际 {total}）"
++    assert x1.change_key not in keys and x2.change_key not in keys, "真删除与活跃行不混入"
++
++
++async def test_active_location_filter_unchanged(db_session):
++    """非 archive 的 location 过滤保持精确等值（active tab 不受放宽影响）。"""
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name=f"act-ws-{uuid.uuid4().hex[:6]}",
++        slug=f"act-ws-{uuid.uuid4().hex[:6]}",
++        root_path=f"/tmp/act-ws-{uuid.uuid4().hex[:8]}",
++        status="active",
++    )
++    db_session.add(ws)
++    await db_session.commit()
++
++    active = await _seed(db_session, workspace_id=ws.id, change_key="2026-09-23-in-flight",
++                         location="active", status="in_progress", current_stage="execute")
++    # status='archived' 但 location='active' 的行**不进** active 精确过滤吗？——不：
++    # 精确等值分支只看 location，该行 location='active' 照常命中（本测试钉住这一点：
++    # 放宽只发生在 archive 分支，active 分支语义不漂移）
++    cli_archived = await _seed(db_session, workspace_id=ws.id, change_key="2026-09-23-cli-archived",
++                               location="active", status="archived", current_stage="archived")
++
++    items, total = await ChangeService(db_session).list_(ws.id, location="active")
++    keys = {c.change_key for c in items}
++    assert active.change_key in keys and cli_archived.change_key in keys
++    assert total == 2
+
+diff --git a/backend/tests/test_archive_tombstone_repair_migration.py b/backend/tests/test_archive_tombstone_repair_migration.py
+new file mode 100644
+--- /dev/null
++++ b/backend/tests/test_archive_tombstone_repair_migration.py
+@@ -0,0 +1,89 @@
++"""archive-tombstone 冤案一次性数据修复迁移测试（20260923090000）。
++
++结构断言对齐先例 ``test_changes_location_check_migration.py``：迁移文件存在、
++alembic 单 head 链且 down_revision 接既有 head（20260923040000）。语义断言直接
++执行迁移模块的 ``REPAIR_SQL``（数据迁移判据提为模块级常量的可导入单点）：
++deleted×归档阶段（'archive'/'archived' 两代拼写）→ archive；真删除（brainstorm/
++scan 期）与活跃行不动。
++"""
++
++from __future__ import annotations
++
++import importlib.util
++from pathlib import Path
++
++MIGRATION_FILE = (
++    Path(__file__).resolve().parents[1]
++    / "migrations"
++    / "versions"
++    / "20260923090000_repair_archive_tombstone_victims.py"
++)
++#: 本迁移接续的既有唯一 head（change-events-channel task-01 建表迁移）。
++PRIOR_HEAD = "20260923040000"
++
++
++def _load_migration_module():
++    spec = importlib.util.spec_from_file_location("repair_migration", MIGRATION_FILE)
++    mod = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(mod)
++    return mod
++
++
++class TestMigrationStructure:
++    def test_migration_file_exists_and_single_head_chain(self) -> None:
++        from alembic.config import Config
++        from alembic.script import ScriptDirectory
++
++        assert MIGRATION_FILE.exists(), "迁移文件缺失"
++        cfg = Config(str(MIGRATION_FILE.parents[2] / "alembic.ini"))
++        sd = ScriptDirectory.from_config(cfg)
++        heads = sd.get_heads()
++        assert len(heads) == 1, f"expected single head, got {heads}"
++
++    def test_revision_chain(self) -> None:
++        mod = _load_migration_module()
++        assert mod.revision == "20260923090000"
++        assert mod.down_revision == PRIOR_HEAD, "down_revision 必须接 20260923040000 单 head"
++
++    def test_downgrade_noop(self) -> None:
++        mod = _load_migration_module()
++        text = MIGRATION_FILE.read_text(encoding="utf-8")
++        assert "def downgrade" in text
++        mod.downgrade()  # no-op 不抛（数据修复不可逆）
++
++
++def test_repair_sql_semantics_on_sqlite():
++    """REPAIR_SQL 判据语义：只翻 deleted×归档阶段，真删除/活跃行不动。"""
++    from sqlalchemy import create_engine, text
++
++    engine = create_engine("sqlite:///:memory:")
++    with engine.begin() as conn:
++        conn.execute(text(
++            "CREATE TABLE changes (id INTEGER PRIMARY KEY, change_key TEXT,"
++            " location TEXT, current_stage TEXT)"
++        ))
++        rows = [
++            ("victim-cli-spelling", "deleted", "archive"),      # 冤案（CLI 拼写，观测形态）
++            ("victim-platform-spelling", "deleted", "archived"),  # 冤案（平台终态拼写兜底）
++            ("genuine-delete-brainstorm", "deleted", "brainstorm"),  # 真删除（历史 3 例同形态）
++            ("genuine-delete-scan", "deleted", "scan"),
++            ("normal-archived", "archive", "archived"),          # 已正确行不动
++            ("active-row", "active", "execute"),
++        ]
++        for key, loc, stage in rows:
++            conn.execute(text(
++                "INSERT INTO changes (change_key, location, current_stage) VALUES (:k, :l, :s)"
++            ), {"k": key, "l": loc, "s": stage})
++
++        mod = _load_migration_module()
++        conn.execute(text(mod.REPAIR_SQL))
++
++        flipped = dict(
++            conn.execute(text("SELECT change_key, location FROM changes")).all()
++        )
++    assert flipped["victim-cli-spelling"] == "archive"
++    assert flipped["victim-platform-spelling"] == "archive"
++    assert flipped["genuine-delete-brainstorm"] == "deleted", "真删除（brainstorm 期）不复活"
++    assert flipped["genuine-delete-scan"] == "deleted", "真删除（scan 期）不复活"
++    assert flipped["normal-archived"] == "archive"
++    assert flipped["active-row"] == "active"
