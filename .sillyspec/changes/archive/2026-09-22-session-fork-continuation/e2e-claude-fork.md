@@ -91,3 +91,28 @@ claude runtime 在线）；用有 TASK_RUN_AGENT 权限的账号登录前端。
 ## 5. 执行记录（补验后填写）
 
 （空——未执行。）
+
+## 5. 平台级 E2E 执行记录（2026-09-23 09:05–09:20，远程生产环境）——**PASS**
+
+环境：`https://crrcdt.ppdmq.top`（阿里云重新部署，backend/frontend 含本变更代码——部署面证据见 §6）+ 本机 daemon DESKTOP-HJ0AM09（build 20260923081838，owner=管理员，7 runtime online）+ 账号 admin2。
+
+| 步骤 | 操作 | 结果 |
+|---|---|---|
+| 1 | 建会话 A（provider=claude），轮 1「名字叫 Alice；秘密代码 FORK-E2E-99」 | A=`ba802543-e3c2-4794-abf5-bd78ef3f4787`，run1=`f1142a6f…` completed（01:08:33Z） |
+| 2 | 轮 2「最喜欢的颜色是紫色」 | run2=`9816eb27…` completed（01:12:12Z）；A turn_count=2 |
+| 3 | 锚点链验证：GET /runs | run1.engine_anchor=`41734d18…`、run2.engine_anchor=`61b74a90…`（真实链 UUID，daemon 补挂→backend 回填全链生产生效） |
+| 4 | 快照 A（fork 前） | origin=chat、fork 三字段 null、agent_session_id=`55c57991…` |
+| 5 | **POST /sessions/{A}/fork {at_run_id: run1}** | **HTTP 201，tier=native**，B=`978cf0f7-c9db-4654-a0ca-3c281c013eee`，lineage={source=A, at_run_seq:1} ✓ |
+| 6 | B 注入探针「名字/秘密代码/最喜欢的颜色？格式 name=;code=;color=，不知道写 none」 | run=`a3bb140c…` completed |
+| 7 | **B 的回答** | **`name=Alice;code=FORK-E2E-99;color=none`** —— 知分叉点前（轮1 两项全对）、**不知分叉点后（轮2 紫色→none）**：「不知情」断言 PASS（真截断，非转述） |
+| 8 | A fork 后复核 | **全字段零差异**（运行时字段除外），turn_count 2/2 不变 —— D-005「A 零影响」生产实证 |
+
+B 谱系行：origin='fork'、fork_of_session_id=A、fork_at_run_id=run1、engine_fork_anchor=轮1 锚、**agent_session_id=`18aaa855…`（≠A 的 55c57991——SDK forkSession 换新 id 生效）**。
+
+**结论：平台级 E2E 八步全 PASS——§4 缓验清单兑现，本变更两项 manual-acceptance 移交项之 claude 项关闭。**
+
+## 6. 部署面验证（2026-09-23 09:00，无凭据探针）
+
+- 远程 openapi（513 端点）含：POST /api/daemon/sessions/{session_id}/fork、SessionForkLineage/Request/Response 三 DTO、AgentSessionRead fork 三字段、SessionRunRead.engine_anchor ✓
+- 无鉴权 POST fork → **401**（路由真实挂载+鉴权拦截，非 openapi 残影）✓
+- 机器列表：本机 daemon 在线（新 build 当日 08:18）✓
