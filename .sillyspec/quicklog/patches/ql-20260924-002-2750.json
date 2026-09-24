@@ -1,0 +1,79 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-b142c783",
+  "totals": {
+    "files": 5,
+    "additions": 231,
+    "deletions": 11
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/SillyHub/flows/spec-incremental-sync.md",
+      "declared": true,
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/spec_workspace.md",
+      "declared": true,
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/backend/modules/spec_workspace.md",
+      "declared": true,
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/spec_workspace/service.py",
+      "declared": true,
+      "additions": 56,
+      "deletions": 6,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py",
+      "declared": true,
+      "additions": 166,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 5,
+    "codeFileCount": 1,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260924-002-2750",
+  "sessionId": "quick-b142c783",
+  "savedAt": "2026-09-24T06:50:04.454Z",
+  "patchSha256": "3c21140562143af4fb458f4129120721ae9b5105600f0053e0c2450501b02578",
+  "patchStatus": "ok"
+}

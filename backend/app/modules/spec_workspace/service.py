@@ -125,6 +125,24 @@ SPEC_BUNDLE_INVALID_CODE = "HTTP_422_SPEC_BUNDLE_INVALID"
 BACKUP_TS_FORMAT = "%Y%m%d%H%M%S%f"
 SPEC_BACKUP_RETENTION_DAYS = 30
 
+# ql-20260924（生产 OOM 修复）：备份区修剪节流窗口（秒）。
+# 实测事故：delete 重放风暴（~5 op/秒）下每 op 一次全量扫描 spec-backups（线上堆积
+# 3.5 万时间戳目录），listdir+逐目录 strptime 抢死 GIL → event_loop.blocked 5.7s、
+# 内存被顶到 mem_limit 被 oom-kill。即便修复了「每批一次修剪」，重放持续时仍是
+# 每批一次全量扫；本冷却窗口把扫描频率封顶（机会式修剪，延迟清理无副作用——备份
+# 区保留 30 天，10 分钟才剪一次远快于任何保留窗口）。
+PRUNE_THROTTLE_INTERVAL_S = 600.0
+# 每个 backup_root 的上次修剪时刻（time.monotonic 基准），进程内节流态。
+_prune_last_pruned_at: dict[str, float] = {}
+_prune_lock = threading.Lock()
+
+
+def _reset_prune_throttle() -> None:
+    """清空备份区修剪的进程级节流态（测试隔离用，单测间互不污染）。"""
+    with _prune_lock:
+        _prune_last_pruned_at.clear()
+
+
 # 批量进度回写（perf-remediation task-03 / D-002@v1）：内存计数 + 批量 UPDATE，
 # 消除每文件一次独立 session+commit 的回写开销。粒度 50 文件 / 500ms（先到者，
 # design 兼容策略授权），流程结束 finally 终态回写保证数值最终准确（R-02）。
@@ -1740,10 +1758,25 @@ class SpecWorkspaceService:
 
         只删能解析为 ``BACKUP_TS_FORMAT`` 时间戳的目录；解析失败/非目录跳过（保守
         不误删）。软删时调用，无独立清理任务/定时器（P2 落盘决策）。
+
+        ql-20260924（生产 OOM 修复）加两层防护：
+        1. **节流**：同一 ``backup_root`` 在 ``PRUNE_THROTTLE_INTERVAL_S`` 冷却窗口内
+           直接返回（机会式修剪语义允许延迟清理），把高频软删/重放下的扫描频率封顶；
+        2. **scandir** 替代 ``listdir``+逐条 ``is_dir()``——后者对 3.5 万目录每条多
+           一次 stat syscall，scandir 的 dirent 自带类型（多数文件系统免 stat），syscall
+           减半。
         """
+        key = str(backup_root)
+        now_mono = time.monotonic()
+        with _prune_lock:
+            last = _prune_last_pruned_at.get(key)
+            if last is not None and (now_mono - last) < PRUNE_THROTTLE_INTERVAL_S:
+                return  # 冷却窗口内 → 本次跳过扫描
+            _prune_last_pruned_at[key] = now_mono
         cutoff = datetime.now(UTC) - timedelta(days=SPEC_BACKUP_RETENTION_DAYS)
         try:
-            names = [n for n in os.listdir(backup_root) if (backup_root / n).is_dir()]
+            with os.scandir(backup_root) as entries:
+                names = [entry.name for entry in entries if entry.is_dir()]
         except FileNotFoundError:
             return
         for name in names:
@@ -1976,6 +2009,17 @@ class SpecWorkspaceService:
         # task-03 / D-002@v1：逐文件回写改批量回写器（内存计数 + 50 文件/500ms
         # 批量 UPDATE）；finally 终态 flush 保证 files_processed 最终准确。
         progress = _BatchProgressWriter(change_write_id)
+        # ql-20260924（生产 OOM 修复）：单次 apply_ops 共享一个备份批次时间戳目录 +
+        # 修剪移出 op 循环。旧实现 ts 在 delete 分支内按 op 生成（%f 微秒永不重名，
+        # 批量删 N 个文件造 N 个目录，线上堆积 3.5 万个/906MB）且每个 delete op 调
+        # 一次全量扫描 _prune_spec_backups（listdir + 逐目录 strptime），二者互相
+        # 喂养成扫描风暴：CPU/GIL/内存三重压力，event_loop.blocked 达 5.7s，RSS
+        # 涨至 mem_limit 被 oom-kill（137）。现在：ts 全批共享一个目录（与
+        # soft_delete_change_dir 的 ts 生成位置对齐），删除 op 只置 prune_needed，
+        # 循环后至多修剪一次。
+        backup_root = self._backup_root(settings, workspace_id)
+        batch_backup_ts = now.strftime(BACKUP_TS_FORMAT)
+        prune_needed = False
         try:
             for op in ops:
                 # task-02（design §5.1）：收集 ops 涉及目录（delete / rename 才会改变
@@ -2115,9 +2159,8 @@ class SpecWorkspaceService:
                 elif op.op == "delete":
                     # R-07：无行 → no-op 成功（幂等），不写 new_versions。
                     if row is not None:
-                        backup_root = self._backup_root(settings, workspace_id)
-                        ts = datetime.now(UTC).strftime(BACKUP_TS_FORMAT)
-                        dest = backup_root / ts / op.path
+                        # ql-20260924：全批共享 batch_backup_ts（见循环前声明处注释）
+                        dest = backup_root / batch_backup_ts / op.path
                         src = spec_root / op.path
                         try:
                             # ql-20260818-009：mkdir+move 整体入线程（根因①，见 _move_op_file）
@@ -2129,8 +2172,8 @@ class SpecWorkspaceService:
                         row.exists = False
                         row.updated_at = now
                         new_versions[op.path] = row.version
-                        # task-02：修剪（os.listdir + rmtree，同步 FS）移出事件循环
-                        await asyncio.to_thread(self._prune_spec_backups, backup_root)
+                        # ql-20260924：修剪移出 op 循环，循环后至多一次（扫描风暴修复）
+                        prune_needed = True
 
                 elif op.op == "rename":
                     if op.new_path is None:
@@ -2315,6 +2358,13 @@ class SpecWorkspaceService:
         finally:
             # task-03 / R-02：终态回写兜底（含 422 中断路径——已处理计数最终准确）。
             await progress.flush()
+
+        # ql-20260924（生产 OOM 修复）：备份区修剪整批至多一次（移出 delete op 循环）。
+        # 仅当本批真的发生过 delete（有行被软删）才触发；同步 FS 段入线程，与
+        # cleanup_dirs 同款。函数内部另有按 backup_root 的 10 分钟节流，重放风暴
+        # 下扫描频率被封顶。
+        if prune_needed:
+            await asyncio.to_thread(self._prune_spec_backups, backup_root)
 
         # task-02（design §5.1 / FR-02 幽灵目录堵点）：ops 涉及目录链的空目录清理。
         # delete/rename 逐文件软删不动目录，parser 对空目录照常产出 key → 即使全量

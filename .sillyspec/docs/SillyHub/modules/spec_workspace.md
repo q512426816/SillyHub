@@ -61,7 +61,9 @@ apply_ops（增量落盘核心，design §7）：
   有行且 version != base_version
     → 同 hash 豁免（no-op 对齐）否则记 conflict、收集 server_versions、跳过
   无行 → R-07 hash 兜底（add/update=新建 v1；delete=no-op 幂等；rename 按 add）
-delete = move 到 spec-backups/{ws}/{ts}/{path} + exists=False（30 天机会式修剪）
+delete = move 到 spec-backups/{ws}/{ts}/{path} + exists=False
+  （30 天机会式修剪；ql-20260924：单批共享一个 {ts} 目录，修剪整批至多一次
+   + 函数内按 backup_root 10 分钟节流 + scandir 扫描——修 OOM 扫描风暴）
 落盘 commit 后（事务外 best-effort）触发 change reparse：
   change_dirs 标注 → scoped；无标注扫 changes/ 前缀兜底；
   含 archive 路径 → 全量；零 changes 路径零触发（R-01 防空转）

@@ -42,7 +42,9 @@ SillySpec CLI / daemon 与平台之间 spec 文件树的服务器权威增量同
      │      → 同 hash 豁免（no-op 对齐，D-008@v2）
      │        否则记 conflict + 收集 server_versions + 跳过该 op
      │    无行 → hash 兜底（add/update=新建 v1；delete=no-op 幂等；rename 按 add）
-     ├─ delete = move 到 spec-backups/{ws}/{ts}/{path} + exists=False（30 天机会式修剪）
+     ├─ delete = move 到 spec-backups/{ws}/{ts}/{path} + exists=False
+     │    （30 天机会式修剪；ql-20260924：单批共享一个 {ts}，修剪整批至多一次
+     │     + 10 分钟节流 + scandir——防备份扫描风暴打爆 OOM）
      └─ 返回 {new_versions, conflict, server_versions}（有冲突 HTTP 仍 200）
      ▼
 (4) 落盘后   事务外 best-effort 触发 change reparse：

@@ -359,3 +359,18 @@
 方案：①_persisted_engine_anchors 加 not stale 过滤；②create.py 在 prompt 空且无附件时 dispatch_prompt 归零贯穿 lease 元数据与首轮 inject（空载荷跳过），daemon 侧空 firstPrompt 不挂 10s 兜底；③INSERT+修剪+commit 包 IntegrityError 一轮重试收敛（rollback 重查剔除重插）；④schema.ts 补 le=253402300799999+非有限值 before 校验器转 None（防 422 回显 inf 渲染炸）
 结果：聚焦全绿：engine_anchor 7P（新 1）/session_fork 24P（新 2 旧码红）/platform_sync 263P（新 4 旧码 500→收敛）/daemon 模块 2233P 零回归/daemon 侧 session-fork 15P+邻接 82P；ruff format/check 过、mypy 974 文件 0 错、tsc 过；模块文档 4 处+changelog 2 处同步
 审计：[gate] L1（跨 0 模块 · 14 文件：5 代码/4 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+
+## ql-20260924-002-2750 | 2026-09-24 14:38:07 | 备份扫描风暴修复——单批共享 ts + 修剪出循环节流，解 backend OOM 循环
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/spec_workspace/service.py（apply_ops 共享 batch_backup_ts + 修剪移出 op 循环；_prune_spec_backups 加节流 + scandir；新增 PRUNE_THROTTLE_INTERVAL_S/_reset_prune_throttle）
+- backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py（新增 TestApplyOpsBatchBackup + TestPruneSpecBackups 共 6 个回归用例）
+- .sillyspec/docs/backend/modules/spec_workspace.md（关键逻辑 delete 行补批次 ts 与修剪节流说明）
+- .sillyspec/docs/SillyHub/modules/spec_workspace.md（apply_ops delete 路径补批次 ts 与修剪节流说明）
+- .sillyspec/docs/SillyHub/flows/spec-incremental-sync.md（增量同步流程 delete 步骤补批次 ts 与修剪节流说明）
+需求：备份扫描风暴修复——单批共享 ts + 修剪出循环节流，解 backend OOM 循环
+根因：apply_ops 的 delete 分支在 op 循环内按微秒时间戳逐 op 建备份目录并逐 op 全量扫描修剪（线上堆积 3.5 万目录/906MB，delete 重放约 5 次/秒），listdir+strptime 抢死 GIL，event_loop.blocked 达 5.7s，RSS 涨到 mem_limit 被 oom-kill（137），Docker 自动拉起成每 40 分钟一轮循环
+方案：apply_ops 批次共享一个 batch_backup_ts（ts 生成移出 delete op 循环），修剪调用移出 op 循环改为整批至多一次，_prune_spec_backups 本体加按 backup_root 600s 冷却节流 + os.scandir 替代 listdir+逐条 is_dir；同步更新 backend 与 SillyHub 侧三处模块/流程文档的 delete 路径描述
+结果：spec_workspace 全套 170 passed 1 skipped（Windows symlink 平台限制），聚焦 47 passed，ruff format+check 全过；新增 6 个测试用例；尚未部署
+审计：[gate] L1（跨 0 模块 · 5 文件：1 代码/1 测试）advisory；每文件注记已全覆盖；测试增量不适用（≤1 代码文件）

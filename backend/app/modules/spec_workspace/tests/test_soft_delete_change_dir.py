@@ -25,7 +25,9 @@ created_at: 2026-08-29
 from __future__ import annotations
 
 import base64
+import os
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -33,7 +35,12 @@ from sqlalchemy import select
 
 from app.modules.spec_workspace.model import SpecFileManifest, SpecWorkspace
 from app.modules.spec_workspace.schema import FileOp
-from app.modules.spec_workspace.service import SpecWorkspaceService
+from app.modules.spec_workspace.service import (
+    BACKUP_TS_FORMAT,
+    SPEC_BACKUP_RETENTION_DAYS,
+    SpecWorkspaceService,
+    _reset_prune_throttle,
+)
 from app.modules.workspace.model import Workspace
 
 # ---------------------------------------------------------------------------
@@ -364,5 +371,162 @@ class TestCliTombstoneWiring:
         assert moved and moved[0].read_text(encoding="utf-8") == "p"
 
 
+# ===========================================================================
+# ⑥ apply_ops 备份批次化（ql-20260924 备份扫描风暴修复）
+# ===========================================================================
+
+
+class TestApplyOpsBatchBackup:
+    """apply_ops 增量 delete：备份时间戳目录批次共享 + 修剪移出 op 循环。
+
+    2026-09-24 生产 OOM：``ts`` 生成写在 delete 分支内（每 op 一个微秒目录）+
+    ``_prune_spec_backups`` 每 op 全量扫描备份区（线上堆积 3.5 万目录），delete
+    重放风暴下二者互相喂养——CPU/GIL/内存三重压力，event_loop.blocked 达 5.7s，
+    RSS 涨至 mem_limit 被 oom-kill（137），Docker 自动拉起成 40 分钟一轮循环。
+    本组锁死两个结构性修复：单次 apply_ops 共享一个 ts 目录、修剪每批至多一次。
+    """
+
+    async def test_multiple_deletes_share_one_backup_ts_dir(self, db_session, tmp_path) -> None:
+        """单次 apply_ops 删 N 个文件 → 备份区只落 **一个** ts 目录（N 个则回退）。
+
+        旧实现 ts 在 delete 分支内按 op 生成（``%f`` 微秒永不重名），批量删 N 个
+        文件造 N 个时间戳目录，实测堆积 34975+15450 个、单次重放 3021 个。
+        """
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        svc = SpecWorkspaceService(db_session)
+
+        paths = [f"changes/batch/f{i}.md" for i in range(5)]
+        for p in paths:
+            result = await svc.apply_ops(ws.id, [_op("add", p, content=_b64("x"))])
+            assert result["conflict"] is False, result
+
+        result = await svc.apply_ops(
+            ws.id,
+            [_op("delete", p, base_version=1) for p in paths],
+        )
+
+        assert result["conflict"] is False, result
+        from app.core.config import get_settings
+
+        backup_parent = Path(get_settings().spec_data_root) / "spec-backups" / str(ws.id)
+        ts_dirs = [d for d in backup_parent.iterdir() if d.is_dir()]
+        assert len(ts_dirs) == 1, f"批次应共享一个 ts 目录，实得 {len(ts_dirs)}: {ts_dirs}"
+        # 五个文件都落在同一批次目录下，路径层级与原 op.path 一致
+        for p in paths:
+            assert (ts_dirs[0] / p).exists(), f"{p} 未落备份区"
+
+    async def test_prune_called_once_per_batch_not_per_op(
+        self, db_session, tmp_path, monkeypatch
+    ) -> None:
+        """单次 apply_ops 删 N 个文件 → ``_prune_spec_backups`` 至多调一次（非 N 次）。
+
+        旧实现每 delete op 调一次全量扫描（N op × 3.5 万目录 = 扫描风暴）。
+        以 spy 计数锁定调用次数；阈值 >1 即回退。
+        """
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        svc = SpecWorkspaceService(db_session)
+
+        paths = [f"changes/prune/f{i}.md" for i in range(4)]
+        for p in paths:
+            await svc.apply_ops(ws.id, [_op("add", p, content=_b64("x"))])
+
+        calls: list[Path] = []
+        original = SpecWorkspaceService._prune_spec_backups
+
+        def _spy(backup_root: Path) -> None:
+            calls.append(backup_root)
+            return original(backup_root)
+
+        # 原方法是 @staticmethod；monkeypatch 换上的普通函数会经实例访问被当作
+        # 绑定方法（多收一个 self），须包回 staticmethod 才与原调用形态一致。
+        monkeypatch.setattr(SpecWorkspaceService, "_prune_spec_backups", staticmethod(_spy))
+
+        await svc.apply_ops(
+            ws.id,
+            [_op("delete", p, base_version=1) for p in paths],
+        )
+
+        assert len(calls) <= 1, f"每批至多修剪一次，实调 {len(calls)} 次"
+
+
+# ===========================================================================
+# ⑦ _prune_spec_backups 行为：只删过期目录 / 非时间戳跳过 / 节流
+# ===========================================================================
+
+
+class TestPruneSpecBackups:
+    def test_deletes_only_dirs_older_than_retention(self, tmp_path) -> None:
+        """只 rmtree 早于 30 天的可解析时间戳目录；新鲜的与非时间戳目录零触碰。"""
+        old_ts = (datetime.now(UTC) - timedelta(days=SPEC_BACKUP_RETENTION_DAYS + 1)).strftime(
+            BACKUP_TS_FORMAT
+        )
+        fresh_ts = datetime.now(UTC).strftime(BACKUP_TS_FORMAT)
+        (tmp_path / old_ts).mkdir()
+        (tmp_path / old_ts / "file.md").write_text("old", encoding="utf-8")
+        (tmp_path / fresh_ts).mkdir()
+        (tmp_path / "not-a-timestamp").mkdir()
+        (tmp_path / "not-a-timestamp" / "file.md").write_text("keep", encoding="utf-8")
+
+        SpecWorkspaceService._prune_spec_backups(tmp_path)
+
+        assert not (tmp_path / old_ts).exists(), "过期目录应被删"
+        assert (tmp_path / fresh_ts).exists(), "新鲜目录必须保留"
+        assert (tmp_path / "not-a-timestamp" / "file.md").exists(), "非时间戳目录必须保留"
+
+    def test_throttled_second_call_is_noop(self, tmp_path, monkeypatch) -> None:
+        """节流：同一 backup_root 在冷却窗口内二次调用直接返回（不重扫目录）。
+
+        锁死 ql-20260924 修复的第三层防护——即便上游仍高频触发，扫描频率也被
+        冷却窗口封顶（线上 delete 重放 ~5 次/秒，不节流则每批仍触发全量扫）。
+        """
+        old_ts = (datetime.now(UTC) - timedelta(days=SPEC_BACKUP_RETENTION_DAYS + 1)).strftime(
+            BACKUP_TS_FORMAT
+        )
+        (tmp_path / old_ts).mkdir()
+        (tmp_path / old_ts / "first.md").write_text("1", encoding="utf-8")
+
+        scans: list[Path] = []
+        real_scandir = os.scandir
+
+        def _counting_scandir(path):
+            # 只统计对 backup_root 本级的扫描：rmtree 内部也会 scandir 子目录，
+            # 那些不是「全量列举备份区」的那一次。
+            if Path(path) == tmp_path:
+                scans.append(Path(path))
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", _counting_scandir)
+        _reset_prune_throttle()  # 隔离上一用例的进程级节流态
+
+        SpecWorkspaceService._prune_spec_backups(tmp_path)
+        assert len(scans) == 1, "首次调用应执行一次扫描"
+        assert not (tmp_path / old_ts).exists()
+
+        # 冷却窗口内二次调用：不再扫描（即使又冒出新的过期目录）
+        newer_old_ts = (
+            datetime.now(UTC) - timedelta(days=SPEC_BACKUP_RETENTION_DAYS + 2)
+        ).strftime(BACKUP_TS_FORMAT)
+        (tmp_path / newer_old_ts).mkdir()
+        SpecWorkspaceService._prune_spec_backups(tmp_path)
+
+        assert len(scans) == 1, f"冷却窗口内不应重复扫描，实扫 {len(scans)} 次"
+        assert (tmp_path / newer_old_ts).exists(), "冷却窗口内保留是预期（机会式修剪）"
+
+    def test_missing_backup_root_is_noop(self, tmp_path) -> None:
+        """备份区目录不存在（首次软删前）→ FileNotFound 容错静默返回，不抛。"""
+        _reset_prune_throttle()
+        SpecWorkspaceService._prune_spec_backups(tmp_path / "does-not-exist")  # 不抛即通过
+
+
 # Suppress unused-import warning for pytest (fixture discovery).
-pytestmark = pytest.mark.asyncio
+# 模块级 asyncio 标记：本文件绝大多数用例是 async（走 db_session fixture）；
+# ``TestPruneSpecBackups`` 三个纯同步用例（直调静态方法）会被此标记覆盖成
+# 「非 async 函数」告警——显式过滤该告警，保留 async 默认。
+pytestmark = [
+    pytest.mark.asyncio,
+    pytest.mark.filterwarnings("ignore:.*marked with.*but it is not an async function.*"),
+]

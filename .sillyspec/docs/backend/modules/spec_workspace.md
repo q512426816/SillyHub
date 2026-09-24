@@ -51,7 +51,9 @@ apply_ops(workspace_id, ops, change_write_id, change_dirs):
   IN 预取清单行消 N+1 → 逐 op:
     base_version 不匹配 → 同内容豁免(hash 相同 no-op) 否则记冲突跳过
     无清单行 → add 起 version=1 / delete 幂等 no-op / rename 按 add
-  delete = 软删 move 到 spec-backups/{ws}/{ts}/（机会式修剪 30 天前）
+  delete = 软删 move 到 spec-backups/{ws}/{ts}/（ql-20260924：单批共享一个 {ts} 目录
+    ——ts 生成移出 op 循环，批量删 N 文件从 N 个微秒目录降为 1 个；备份区机会式修剪
+    30 天前，整批至多一次且函数内按 backup_root 10 分钟节流，scandir 扫描）
   FS 段（mkdir/write_bytes/utime/move）抽 _write_op_file/_move_op_file 整体入
     asyncio.to_thread（ql-20260818-009：bind mount 连写卡事件循环 93s/82s 根因①）
   commit 成功后事务外 best-effort 触发 change reparse
