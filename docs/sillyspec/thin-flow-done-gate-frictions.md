@@ -75,6 +75,28 @@
 - 建议：会话专属 worktree（工具自荐③）；或提供重冻结入口（按当前 HEAD 重算 +
   重锚 sha256）；或归属按「本会话 flow start 后首个触碰者」记台账。
 
+## 坑 5（2026-09-25 追加）：模块已登记但门禁仍「未登记模块图 + test: skipped」
+
+- 现象：变更 2026-09-25-scan-docs-stats-caliber（交付 `backend/app/modules/scan_docs/service.py`
+  + `tests/test_stats.py`）收口时打印「🗺️ 未登记模块图的交付目录（backend/app/modules/scan_docs
+  （1 文件）、backend/app/modules/scan_docs/tests（1 文件）…）」且 `gate_summary` 记
+  `test: skipped`——但 `.sillyspec/docs/backend/modules/_module-map.yaml` **已有**
+  `scan_docs:` 条目（paths: `app/modules/scan_docs/**`），`.sillyspec/local.yaml` modules 块
+  也已有 `scan_docs: { path: "backend/app/modules/scan_docs/", test: "cd backend && uv run pytest
+  app/modules/scan_docs …" }`。登记齐全、门禁却按未登记处理 → 模块测试面被静默跳过
+  （同窗口对比：变更 2026-09-25-knowledge-anchor-match-tolerance 的 knowledge 模块命中正常，
+  `test: passed ← module[change]+deps(py1)`——同 map 同 local.yaml，行为不一致）。
+- 影响：`test: skipped` 与「无测试面」在 gate_summary 里不可区分；评审只能靠亲测补证
+  （本次评审员实跑 73 passed 实证 FR-06）。
+- 疑点（未定位到行）：门禁模块收窄用的目录→模块查找口径与 map 的 `app/modules/<x>/**`
+  （项目相对）不一致——交付路径带 `backend/` 前缀，查找可能没做项目前缀归一；或收窄输入
+  本身先被坑 4 的归属切分削掉了实现文件、只剩 tests 子目录无法匹配。
+- 建议：①门禁在收窄前后各打一行「命中模块清单」（把 skipped 的原因显式化：无映射/输入为空/
+  查找未命中）；②目录→模块查找与 map/local.yaml 的 paths 归一同口径（含项目前缀）；
+  ③`test: skipped` 在 verify-result 里带原因字段，与 `test: none（无测试面）` 区分。
+- 关联：坑 4（同一根因链——收窄输入被削 → 查找空转）；细程见
+  docs/sillyspec/thin-flow-freeze-foreign-declared-hijack.md。
+
 ## 关联留档
 
 - 薄流程 adopt 边界两坑（同期）：docs/sillyspec/thin-flow-adopt-edge-cases.md
