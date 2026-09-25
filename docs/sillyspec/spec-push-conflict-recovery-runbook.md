@@ -22,7 +22,39 @@ source: 2026-09-25 知识命中调查（daemon.log 9-18~9-23 五次 SpecPushConf
 2026-09-23T19:49Z；b97 停在 09-20T16:05Z）；c84182bc 镜像缺本地 13 个 decisions/fr 文件；
 b97 镜像缺整个 `knowledge/generated/`。
 
-## 恢复步骤（按序执行，每步可验证）
+## 执行记录（2026-09-25 18:xx，本 runbook 部分执行）
+
+已执行（按「以本地为准」）：
+1. ✅ 删除 daemon 陈旧 manifest `~/.sillyhub/daemon/manifests/c84182bc-….json`（备份在本仓
+   `.tmp-analysis/manifest-backup-20260925/`）——下一轮 daemon 同步将走全量 tar（无乐观锁）。
+2. ✅ CLI 正规通道 `sillyspec platform sync --change 2026-09-25-thin-fr-inject-parity`：变更进度
+   同步成功；遗留 4 文件 spec 树冲突（`changes/archive/2026-09-22-thin-fr-distill-sync/*`，
+   服务器版本停在 2，`resolve --keep-local` 两次仍冲突——疑与线上旧后端的墓碑守卫相关，部署后重试）。
+3. ✅ 手工全量推送 `POST /spec-workspace/sync`（80MB tar，8857 成员，与 daemon packSpecDir 同款
+   排除规则）→ 服务器回 `ok:true, reparsed 304, reparsed_changes 367`，但**只落了 6751/8857**：
+   13 个知识文件 + 6 proposed + 319 quicklog + 1707 changes（后者是平台墓碑前缀按设计排除）仍未落。
+4. ✅ 命中遥测补传：卡住的 11 行新命中经 daemon 同款通道上行成功（ingested 11，dup 0）——
+   知识页最新命中时间从 2026-09-23T19:49Z 前进到 **2026-09-25T05:06Z**，覆盖率 17.7% → 18.3%。
+
+**根因判定（本地复现实证）**：用平台 HEAD 代码在本地对同一 tar 跑 `apply_sync` → **落盘
+8856/8857（唯一未落=local.yaml，设计排除），knowledge 86/86 全落**。即：全量同步代码没问题，
+**生产 crrcdt.ppdmq.top 跑的是旧版后端**，其落盘行为丢成员（13 个知识文件正卡在这里）。
+
+## 剩余步骤（按序，需部署权限）
+
+1. **部署 main 到生产**（含：全量同步修复链、知识锚点容错、scan-docs 口径、asyncpg 分片、
+   墓碑 heal 等全部未上线修复）——用本仓 `deploy-to-server` 技能。
+2. **重跑一次全量推送**（同款命令）：
+   ```bash
+   cd C:/Users/qinyi/IdeaProjects/sillyspec && tar 包构建与推送脚本见
+   .tmp-analysis/（或等 daemon 下一轮同步自动全量——manifest 已删，daemon 会自己推）
+   ```
+3. **重试冲突裁决**：`sillyspec platform resolve 2026-09-25-thin-fr-inject-parity --keep-local`
+   （新后端的墓碑 heal 上线后应能过；其余 9 个 `.runtime/spec-sync-conflict-*` 同批处理）。
+4. **验收（三项逐文件对账）**：`GET /knowledge` 应 86 个文件；条目数 ≈1962；文件级命中数与
+   本地 jsonl 一致、最新命中时间随新变更前进。b97f8231 的 413 在部署后用分批/上限处置。
+
+## 原版恢复步骤（存档——1/2 已执行，见上）
 
 1. **先定哪侧为准**（拍板项，无法代办）：c84182bc 的本地树（sillyspec 仓 `.sillyspec/`）是
    「一切以本地文件为准」的源；服务器镜像是 9-24 合并前后的混合快照。**建议以本地为准**。
