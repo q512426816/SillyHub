@@ -1256,7 +1256,7 @@ class SpecWorkspaceService:
         workspace_id: uuid.UUID,
         tar_bytes: bytes,
         change_write_id: str | None = None,
-    ) -> tuple[SpecWorkspace, int, int]:
+    ) -> tuple[SpecWorkspace, int, int, int, int]:
         """Validate + overwrite spec_root with tar (D-006 whole-tree), commit clean.
 
         D-001（2026-07-01-spec-import-async-and-change-reparse）：从 apply_sync 提取，
