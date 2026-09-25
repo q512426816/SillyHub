@@ -1,0 +1,537 @@
+diff --git a/sillyhub-daemon/src/knowledge-hits-upload.ts b/sillyhub-daemon/src/knowledge-hits-upload.ts
+index f12deb2e9..2340a6c42 100644
+--- a/sillyhub-daemon/src/knowledge-hits-upload.ts
++++ b/sillyhub-daemon/src/knowledge-hits-upload.ts
+@@ -6,11 +6,14 @@
+ // append 的原始 jsonl 行）。仅本地读取——UPLOAD_EXCLUDE_TOP_BASE 已把 .runtime/
+ // 整体排除出 spec 上传链路（task-07），本模块不动该排除语义，hits 不随 spec tar 上行。
+ //
+-// 断点（R-01）：offset 记「已上行的完整行数」，存 daemon 家目录状态文件
++// 断点（R-01）：offset 记「已上行的完整行数 + 最后一行指纹」，存 daemon 家目录状态文件
+ // `~/.sillyhub/daemon/.hits-upload-state-{wsId}.json`（不落 spec 树——pull 的整树
+ // 交换会清掉 specDir，对齐 manifests/{ws}.json 移出 specDir 的 BL-4/R-03 先例；
+ // SILLYHUB_DAEMON_DIR 隔离时随 daemonStateDir() 一并重定向）。只报**以 \n 结尾的
+ // 完整行**——上报窗口内 CLI 正 append 的尾行（无换行）留下轮补，防半行截断。
++// 行指纹（2026-09-25-daemon-hits-upload-fingerprint）：行数口径看不出「文件被重置
++// 替换后又长回旧行数」——该场景新文件前 offset 行会被静默跳过永久丢报；指纹比对
++// 识别即回退 offset=0 从头重报（服务端行级 hash 唯一约束幂等，零重复入库）。
+ //
+ // 分批（R-06）：每批 ≤2000 行（backend HitsBatchIn HITS_BATCH_MAX_LINES 同值），
+ // 每批成功即原子写 offset（writeFileAtomic），后续批次失败时前批进度不丢。
+@@ -25,6 +28,7 @@
+ // !== 'function'` 先例，不产日志噪音）。
+ 
+ import { readFile, mkdir } from 'node:fs/promises';
++import { createHash } from 'node:crypto';
+ import { join, dirname } from 'node:path';
+ import type { HubClient } from './hub-client.js';
+ import { daemonStateDir } from './config.js';
+@@ -36,10 +40,24 @@ const HITS_REL_PATH = join('.runtime', 'knowledge-hits.jsonl');
+ /** 单批最大行数（backend HitsBatchIn 上限同值，422 越界由服务端兜底校验）。 */
+ const HITS_BATCH_MAX_LINES = 2000;
+ 
+-/** offset 状态文件结构（daemon 家目录，schema version 0 起即此形态）。 */
++/** 单行 sha256（hex）——行指纹，供「文件被替换」检测（2026-09-25-daemon-hits-upload-fingerprint）。 */
++function lineHash(line: string): string {
++  return createHash('sha256').update(line, 'utf8').digest('hex');
++}
++
++/** offset 状态文件结构（daemon 家目录，schema version 0 起为 {uploadedLines}，指纹轮起带 tailHash）。 */
+ interface HitsUploadState {
+   /** 已成功上行的完整行数（下次从此处继续）。 */
+   uploadedLines: number;
++  /**
++   * 已上行最后一行的行指纹（sha256 hex；uploadedLines=0 时 null）。
++   * 纯行数 offset 有个洞：文件被重置/替换后又长**超过**旧 offset 时，钳位不触发、
++   * 新文件前 offset 行被静默跳过永久丢报——行指纹比对能在行数看不出的情况下识别
++   * 「同一位置已是别的行」，识别即回退 offset=0 从头重报（服务端 (ws, line_hash)
++   * 唯一约束幂等去重，重报零重复入库）。legacy 状态无此键 → 该轮维持行数口径，
++   * 首批成功后指纹开始随行数一起落盘。
++   */
++  tailHash: string | null;
+   /** 最近一次前进时间（ISO，诊断用，不参与逻辑）。 */
+   updated_at: string;
+ }
+@@ -66,24 +84,34 @@ export function hitsUploadStatePath(wsId: string): string {
+ }
+ 
+ /**
+- * 读 offset 状态；不存在 / 坏 JSON / 形状不符 → 0（视为从未上报，全量重报由
+- * 服务端 hash 去重兜底，不因状态文件损坏永久卡死增量）。
++ * 读 offset 状态；不存在 / 坏 JSON / 形状不符 → {uploadedLines: 0, tailHash: null}
++ * （视为从未上报，全量重报由服务端 hash 去重兜底，不因状态文件损坏永久卡死增量）。
++ * legacy 状态（有 uploadedLines 无 tailHash）→ tailHash 返回 null：该轮维持纯行数
++ * 口径（不因升级误重报），首批成功后指纹随行数一起落盘。
+  */
+-async function readUploadedLines(wsId: string): Promise<number> {
++async function readUploadedLines(wsId: string): Promise<HitsUploadState> {
+   let raw: string;
+   try {
+     raw = await readFile(hitsUploadStatePath(wsId), 'utf-8');
+   } catch {
+-    return 0; // 首轮（ENOENT）或不可读
++    return { uploadedLines: 0, tailHash: null, updated_at: '' }; // 首轮（ENOENT）或不可读
+   }
+   try {
+-    const obj = JSON.parse(raw) as { uploadedLines?: unknown };
+-    if (typeof obj.uploadedLines === 'number' && Number.isInteger(obj.uploadedLines) && obj.uploadedLines >= 0) {
+-      return obj.uploadedLines;
++    const obj = JSON.parse(raw) as { uploadedLines?: unknown; tailHash?: unknown };
++    if (
++      typeof obj.uploadedLines === 'number' &&
++      Number.isInteger(obj.uploadedLines) &&
++      obj.uploadedLines >= 0
++    ) {
++      return {
++        uploadedLines: obj.uploadedLines,
++        tailHash: typeof obj.tailHash === 'string' && obj.tailHash ? obj.tailHash : null,
++        updated_at: '',
++      };
+     }
+-    return 0;
++    return { uploadedLines: 0, tailHash: null, updated_at: '' };
+   } catch {
+-    return 0;
++    return { uploadedLines: 0, tailHash: null, updated_at: '' };
+   }
+ }
+ 
+@@ -91,8 +119,16 @@ async function readUploadedLines(wsId: string): Promise<number> {
+  * 原子写 offset 状态（tmp+rename，见 atomic-write.ts）。失败上抛由调用方
+  * best-effort catch（状态写失败但批已上行——本轮 warn，下轮重报该批，hash 去重兜底）。
+  */
+-async function writeUploadedLines(wsId: string, n: number): Promise<void> {
+-  const state: HitsUploadState = { uploadedLines: n, updated_at: new Date().toISOString() };
++async function writeUploadedLines(
++  wsId: string,
++  uploadedLines: number,
++  tailHash: string | null,
++): Promise<void> {
++  const state: HitsUploadState = {
++    uploadedLines,
++    tailHash,
++    updated_at: new Date().toISOString(),
++  };
+   const p = hitsUploadStatePath(wsId);
+   // 建父目录（对齐 writeLocalManifest 先例；daemonStateDir 常态已存在，防御首写）。
+   await mkdir(dirname(p), { recursive: true });
+@@ -155,13 +191,27 @@ export async function uploadKnowledgeHitsIfNeeded(
+     }
+ 
+     const completeLines = splitCompleteLines(raw);
+-    let uploadedLines = await readUploadedLines(wsId);
+-    // 外部截断/替换 hits 文件（如手动清理）时状态可能超前——钳到当前行数并**立即
+-    // 固化**，否则每轮都空转在钳位上、append 后增量永久卡死；固化后从文件现行数
+-    // 续走（钳位轮无上行，append 的新行下轮正常报）。
++    const state = await readUploadedLines(wsId);
++    let uploadedLines = state.uploadedLines;
++    let tailHash = state.tailHash;
+     if (uploadedLines > completeLines.length) {
++      // 外部截断/替换（如手动清理）时状态可能超前——钳到当前行数并**立即固化**，否则每轮
++      // 都空转在钳位上、append 后增量永久卡死；固化后从文件现行数续走（钳位轮无上行，
++      // append 的新行下轮正常报）。钳位同时重记指纹（截断后的最后一行）。
+       uploadedLines = completeLines.length;
+-      await writeUploadedLines(wsId, uploadedLines);
++      const tailLine = completeLines[completeLines.length - 1];
++      tailHash = tailLine !== undefined ? lineHash(tailLine) : null;
++      await writeUploadedLines(wsId, uploadedLines, tailHash);
++    } else if (uploadedLines > 0 && tailHash !== null) {
++      // 行数没超前、但「已上行最后一行」位置已是别的行 → 文件被重置/替换后又长回了
++      // 旧行数（纯行数口径的盲区：新文件前 offset 行会被静默跳过、永久丢报）。
++      // 回退 offset=0 从头重报——服务端 (workspace_id, line_hash) 唯一约束幂等去重，
++      // 旧行重报零重复入库，新行全部补齐。
++      const uploadedTail = completeLines[uploadedLines - 1];
++      if (uploadedTail !== undefined && lineHash(uploadedTail) !== tailHash) {
++        uploadedLines = 0;
++        tailHash = null;
++      }
+     }
+ 
+     let pending = completeLines.length - uploadedLines;
+@@ -172,8 +222,11 @@ export async function uploadKnowledgeHitsIfNeeded(
+       );
+       await poster.postKnowledgeHitsBatch(wsId, batch);
+       // 批成功才前进 offset（原子写）；失败抛出 → 下方 catch，本批下轮重试。
++      // 指纹 = 本批最后一行（即当前已上行的最后一行）。
+       uploadedLines += batch.length;
+-      await writeUploadedLines(wsId, uploadedLines);
++      const lastLine = batch[batch.length - 1];
++      if (lastLine !== undefined) tailHash = lineHash(lastLine);
++      await writeUploadedLines(wsId, uploadedLines, tailHash);
+       pending = completeLines.length - uploadedLines;
+     }
+   } catch (e) {
+diff --git a/sillyhub-daemon/tests/knowledge-hits-upload.test.ts b/sillyhub-daemon/tests/knowledge-hits-upload.test.ts
+index 6464a2100..24dbe5fbf 100644
+--- a/sillyhub-daemon/tests/knowledge-hits-upload.test.ts
++++ b/sillyhub-daemon/tests/knowledge-hits-upload.test.ts
+@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+ import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
+ import { mkdtempSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
++import { createHash } from 'node:crypto';
+ import { join } from 'node:path';
+ 
+ // ── hoisted mocks（homedir 必须在 knowledge-hits-upload import 前替换）────────
+@@ -261,6 +262,83 @@ describe('uploadKnowledgeHitsIfNeeded', () => {
+     expect(warnSpy.mock.calls.length).toBe(warnBefore);
+     expect(await readState('ws-old-client')).toBeNull();
+   });
++
++  // ── 行指纹断点（2026-09-25-daemon-hits-upload-fingerprint）───────────────────
++
++  it('文件被重置替换后长回/超过旧 offset → 指纹不符，回退 0 全量重报（新行不丢）', async () => {
++    const wsId = 'ws-replaced-regrow';
++    // 首轮：报 3 行，offset=3 + 指纹=第 3 行。
++    const specDir = await makeSpecDirWithHits(wsId, '{"n":1}\n{"n":2}\n{"n":3}\n');
++    const client = makePosterClient();
++    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
++    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, [
++      '{"n":1}',
++      '{"n":2}',
++      '{"n":3}',
++    ]);
++    // 替换：文件被清空重写且长到 5 行（> 旧 offset 3）——纯行数口径会把新文件前 3 行
++    // 静默跳过；指纹口径必须识别并从头重报。
++    await writeFile(
++      join(specDir, '.runtime', 'knowledge-hits.jsonl'),
++      '{"m":1}\n{"m":2}\n{"m":3}\n{"m":4}\n{"m":5}\n',
++      'utf-8',
++    );
++    client.postKnowledgeHitsBatch.mockClear();
++    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
++    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, [
++      '{"m":1}',
++      '{"m":2}',
++      '{"m":3}',
++      '{"m":4}',
++      '{"m":5}',
++    ]);
++    // 重报后指纹随新文件落盘；append 走正常增量。
++    await writeFile(
++      join(specDir, '.runtime', 'knowledge-hits.jsonl'),
++      '{"m":1}\n{"m":2}\n{"m":3}\n{"m":4}\n{"m":5}\n{"m":6}\n',
++      'utf-8',
++    );
++    client.postKnowledgeHitsBatch.mockClear();
++    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
++    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, ['{"m":6}']);
++  });
++
++  it('等长替换（行数恰好相同）→ 指纹同样识别，全量重报不丢新内容', async () => {
++    const wsId = 'ws-replaced-equal-len';
++    const specDir = await makeSpecDirWithHits(wsId, '{"a":1}\n{"a":2}\n');
++    const client = makePosterClient();
++    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
++    await writeFile(
++      join(specDir, '.runtime', 'knowledge-hits.jsonl'),
++      '{"b":1}\n{"b":2}\n',
++      'utf-8',
++    );
++    client.postKnowledgeHitsBatch.mockClear();
++    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
++    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, ['{"b":1}', '{"b":2}']);
++  });
++
++  it('legacy 状态（无 tailHash）→ 不因升级误重报，首批成功后指纹开始落盘', async () => {
++    const wsId = 'ws-legacy-state';
++    const specDir = await makeSpecDirWithHits(wsId, '{"n":1}\n{"n":2}\n');
++    await mkdir(join(FAKE_HOME, '.sillyhub', 'daemon'), { recursive: true });
++    await writeFile(
++      hitsUploadStatePath(wsId),
++      JSON.stringify({ uploadedLines: 1, updated_at: '2026-09-20T00:00:00Z' }),
++      'utf-8',
++    );
++    const client = makePosterClient();
++    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
++    // legacy 无指纹：维持行数口径，只报第 2 行（不整文件重报）。
++    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, ['{"n":2}']);
++    // 首批成功后状态带 tailHash（= 已上行最后一行的 sha256）。
++    const raw = await readFile(hitsUploadStatePath(wsId), 'utf-8');
++    const parsed = JSON.parse(raw) as { uploadedLines: number; tailHash: string };
++    expect(parsed.uploadedLines).toBe(2);
++    expect(parsed.tailHash).toBe(
++      createHash('sha256').update('{"n":2}', 'utf8').digest('hex'),
++    );
++  });
+ });
+ 
+ describe('postSpecSync 成功汇聚点挂点（task-02 / R-05）', () => {
+diff --git a/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/design.md b/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/design.md
+@@ -0,0 +1,82 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T09:50:43.826Z
++---
++# 设计记录（Design Record）— 2026-09-25-daemon-hits-upload-fingerprint
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-daemon-hits-upload-fingerprint 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++在 `sillyhub-daemon/src/knowledge-hits-upload.ts` 落「行数 + 行指纹」双断点：状态文件
++`~/.sillyhub/daemon/.hits-upload-state-{wsId}.json` 在 `uploadedLines` 之外新增 `tailHash`
++（已上行最后一行的 sha256，`node:crypto` 本地计算，与服务端行级唯一约束的 line_hash 同源算法）；
++每批上行成功后随行数一起 `writeFileAtomic` 落盘。每轮上报前先比对：行数未超前、但
++`completeLines[uploadedLines-1]` 的指纹 ≠ 记录值 → 判定「文件被重置/替换后又长回旧行数」，
++回退 offset=0 从头重报（服务端 (workspace_id, line_hash) 唯一约束幂等，旧行重报零重复入库）。
++
++选这个方案的原因：纯行数 offset 的盲区在「替换后长过旧 offset」——钳位分支只在文件**短于**
++offset 时触发，重置文件重新长过 3389 行后新文件前 3389 行被静默跳过、永久丢报；而服务端
++本来就是行级 hash 去重，重报免费，行数口径没有理由拒绝指纹自愈。指纹只存本地状态文件、
++不进 hits 载荷，协议面零变化。
++
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-daemon-hits-upload-fingerprint 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++改动文件：`sillyhub-daemon/src/knowledge-hits-upload.ts`（状态结构 + 读写 helper + 主循环）、
++`sillyhub-daemon/tests/knowledge-hits-upload.test.ts`（新增 3 用例）。
++
++对外可见：**协议零变化**——`postKnowledgeHitsBatch(wsId, lines)` 的请求/响应、批大小上限、
++best-effort 语义（失败不抛、不动断点、不阻塞 postSpecSync）全部不变；变的是**本地断点状态文件
++多一个 `tailHash` 键**（旧 daemon 升级后读到无键状态按 legacy 处理，见下）与两个新行为：
++① 文件被替换后自动全量重报（此前静默丢报）；② 状态文件形状从 `{uploadedLines, updated_at}`
++变为 `{uploadedLines, tailHash, updated_at}`（向后兼容读）。
++
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-daemon-hits-upload-fingerprint 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. **乱序/迟到到达**：断点只由「批成功」推进且每批原子写；指纹比对在每轮读文件后独立执行，与行到达顺序无关。半行（无换行尾行）仍留下轮，语义不变。
++2. **并发写**：上传钩子挂在 postSpecSync 汇聚点、单 daemon 进程内串行（与既有设计一致）；CLI append 与 daemon 读是 append-only 文件 + 「只报完整行」断言，指纹不改变该并发模型。两个 daemon 实例并发上行同一工作区时，服务端行级唯一约束仍是最终幂等防线（既有 D-007，本变更不扩大该面——两实例状态文件同路径本就是既有前提）。
++3. **切换/生命周期**：状态文件原子写（tmp+rename），批成功与断点推进之间进程被杀 → 断点停在上一批，下轮重报该批由服务端去重吸收（既有语义，指纹同此）；替换检测回退 0 后被杀 → 状态未写、下轮重新检测（幂等）。
++4. **作用域**：状态文件按 wsId 隔离（既有）；指纹只比对本地文件内容，不跨工作区；`tailHash` 不进网络载荷，无跨端串台面。
++
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-daemon-hits-upload-fingerprint 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++**最大风险**：指纹误判（append-only 正常路径被误判为「替换」）触发整文件重报——最坏代价是
++一次全量重报被服务端 hash 去重吸收（duplicates 计数升高，无数据错误）；「已上行最后一行」
++在 append-only 语义下永不变内容，误判面只在文件被外部改写时出现，而那正是要检测的场景。
++
++**次生风险**：legacy 状态（存量 daemon 的 `{uploadedLines}` 无 tailHash）升级后首轮不识别替换
++——设计上明确**不误重报**（tailHash=null 跳过比对，维持行数口径），首轮成功后指纹落盘、
++次轮起具备替换检测能力；这是一次性、可接受的过渡窗口。
++
++**试过但放弃的方案**：
++1. 行数超钳位（现有分支）扩成「钳位即回退 0 全量重报」——只覆盖文件变短的形态，长回旧 offset 的形态仍漏；且改变既有钳位测试钉住的「钳位轮零上行」语义。
++2. 状态文件存全量行 hash 清单（每行都记）——断点文件随 hits 无界增长，违背「轻量本地断点」定位；只记尾行指纹即可覆盖「替换后长回」的判别需求。
++3. 服务端把 duplicates 从 warn 升格为错误防止重报风暴——重报本来就是设计内的幂等路径，升格会让正常自愈失败；不动。
++
++## 文件变更清单
++
++- sillyhub-daemon/src/knowledge-hits-upload.ts
++- sillyhub-daemon/tests/knowledge-hits-upload.test.ts
+
+diff --git a/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/flow-state.yaml b/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/flow-state.yaml
+@@ -0,0 +1,14 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 276386810bf91c6a4d2282480bf58962119768c0
++updatedAt: '2026-09-25T09:52:20.051Z'
++gate_summary: >-
++  test: skipped｜lint: passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app &&
++  cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（6.8s）｜门文件 5 个
++
+
+diff --git a/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/proposal.md b/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/proposal.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T09:50:43.825Z
++---
++# 提案书（Proposal）— 2026-09-25-daemon-hits-upload-fingerprint
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:d25d6d0af75ba8a19636bc1a84a78148afa4347aed0e61afc57838d6f78cb356:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-daemon-hits-upload-fingerprint 留痕重锚 -->
++任务原话转写：动机：daemon 知识命中上行的断点是纯行数 offset（.hits-upload-state-{ws}.json 只记 uploadedLines）——文件被重置/替换后又长回或超过旧 offset 时，钳位不触发，新文件前 offset 行会被静默跳过、永久丢报（sillyspec 仓 2026-09-24 merge 清空 hits 文件的现实场景正是这类替换；等文件重新长过 3389 行该洞必然触发）。服务端本就有 (workspace_id, line_hash) 行级唯一约束，重报幂等零重复，行数口径没有理由不用指纹自愈。
++
++成功标准：
++- 断点状态在行数之外记录 tailHash（已上行最后一行的 sha256）；每批成功后随行数一起原子落盘
++- 每轮上报前做指纹比对：行数未超前但「已上行最后一行」位置已是别的行 → 回退 offset=0 从头重报（服务端 hash 去重兜底），新文件前段不再被静默跳过
++- 钳位分支（行数超前）语义不变：钳位轮零上行、立即固化，并随钳位重记指纹
++- legacy 状态（无 tailHash）零误伤：该轮维持纯行数口径不整文件重报，首批成功后指纹开始落盘
++- 新增单测：替换后长过旧 offset 全量重报+后续恢复增量、等长替换识别、legacy 状态不误报且指纹落盘
++- 既有 hits 上行单测零回归（基线 14）+ pnpm typecheck 0 错
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:7bc918d1144ca295ee2e2ddf5a7c1b3eae7ebcbe154660b311f878f449aebc4f:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-daemon-hits-upload-fingerprint 留痕重锚 -->
++按成功标准机械推导，共 7 条验收面：
++1. 断点状态在行数之外记录 tailHash（已上行最后一行的 sha256）
++2. 每批成功后随行数一起原子落盘
++3. 每轮上报前做指纹比对：行数未超前但「已上行最后一行」位置已是别的行 → 回退 offset=0 从头重报（服务端 hash 去重兜底），新文件前段不再被静默跳过
++4. 钳位分支（行数超前）语义不变：钳位轮零上行、立即固化，并随钳位重记指纹
++5. legacy 状态（无 tailHash）零误伤：该轮维持纯行数口径不整文件重报，首批成功后指纹开始落盘
++6. 新增单测：替换后长过旧 offset 全量重报+后续恢复增量、等长替换识别、legacy 状态不误报且指纹落盘
++7. 既有 hits 上行单测零回归（基线 14）+ pnpm typecheck 0 错
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:8c3bd6ddb4c81216df6ed4e8e35c39ba6469d522bc326dae499b686ec27934d0:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-daemon-hits-upload-fingerprint 留痕重锚 -->
++1. 断点状态在行数之外记录 tailHash（已上行最后一行的 sha256）
++2. 每批成功后随行数一起原子落盘
++3. 每轮上报前做指纹比对：行数未超前但「已上行最后一行」位置已是别的行 → 回退 offset=0 从头重报（服务端 hash 去重兜底），新文件前段不再被静默跳过
++4. 钳位分支（行数超前）语义不变：钳位轮零上行、立即固化，并随钳位重记指纹
++5. legacy 状态（无 tailHash）零误伤：该轮维持纯行数口径不整文件重报，首批成功后指纹开始落盘
++6. 新增单测：替换后长过旧 offset 全量重报+后续恢复增量、等长替换识别、legacy 状态不误报且指纹落盘
++7. 既有 hits 上行单测零回归（基线 14）+ pnpm typecheck 0 错
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/requirements.md b/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/requirements.md
+@@ -0,0 +1,91 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T09:50:43.826Z
++---
++# 需求规格（Requirements）— 2026-09-25-daemon-hits-upload-fingerprint
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++### FR-01: 断点状态记录行指纹
++
++- Given：`.hits-upload-state-{wsId}.json` 持久化上行断点
++- When：每批 `postKnowledgeHitsBatch` 成功后
++- Then：状态原子写为 `{uploadedLines, tailHash, updated_at}`，`tailHash` = 已上行最后一行的 sha256（uploadedLines=0 时为 null）
++
++### FR-02: 替换检测与全量自愈重报
++
++- Given：hits 文件被重置/替换后重新长回或超过旧 offset（行数口径看不出异常）
++- When：下一轮上报前做指纹比对，发现「已上行最后一行」位置已是别的行
++- Then：回退 offset=0 从头重报全部完整行；服务端 (workspace_id, line_hash) 唯一约束幂等去重，新文件前段不再被静默跳过
++
++### FR-03: 钳位语义不变
++
++- Given：状态行数超前于当前文件（外部截断）
++- When：钳位分支执行
++- Then：钳位轮零上行、立即固化断点，并随钳位重记指纹（行为与既有用例钉住的一致）
++
++### FR-04: legacy 状态零误伤
++
++- Given：旧 daemon 写的 `{uploadedLines, updated_at}`（无 tailHash）
++- When：新代码读取该状态
++- Then：该轮维持纯行数口径不整文件重报；首批成功后 tailHash 开始落盘，次轮起具备替换检测
++
++### FR-05: 单测覆盖三态
++
++- Given：替换后长过旧 offset、等长替换、legacy 状态三种形态
++- When：跑 `tests/knowledge-hits-upload.test.ts`
++- Then：分别断言：全量重报且后续恢复增量 / 等长替换识别重报 / legacy 只报增量且状态落 tailHash
++
++### FR-06: 零回归
++
++- Given：既有 14 个 hits 上行用例
++- When：定向跑 `pnpm vitest run tests/knowledge-hits-upload.test.ts`
++- Then：全部通过（当前 17 passed = 基线 14 + 新 3）
++
++### FR-07: 类型检查零错
++
++- Given：daemon 工程 `tsc --noEmit`（含 noUncheckedIndexedAccess 严格索引）
++- When：跑 `pnpm typecheck`
++- Then：exit 0（无类型错误）
++<!--
++参考摘录（非约束——agent 可采纳/改写/忽略；每条格式 ### FR-NN: 标题 + Given/When/Then）
++FR-01: 断点状态在行数之外记录 tailHash（已上行最后一行的 sha256）
++FR-02: 每批成功后随行数一起原子落盘
++FR-03: 每轮上报前做指纹比对：行数未超前但「已上行最后一行」位置已是别的行 → 回退 offset=0 从头重报（服务端 hash 去重兜底），新文件前段不再被静默跳过
++FR-04: 钳位分支（行数超前）语义不变：钳位轮零上行、立即固化，并随钳位重记指纹
++FR-05: legacy 状态（无 tailHash）零误伤：该轮维持纯行数口径不整文件重报，首批成功后指纹开始落盘
++FR-06: 新增单测：替换后长过旧 offset 全量重报+后续恢复增量、等长替换识别、legacy 状态不误报且指纹落盘
++FR-07: 既有 hits 上行单测零回归（基线 14）+ pnpm typecheck 0 错
++-->
++
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++sillyhub-daemon/tests/knowledge-hits-upload.test.ts::legacy 状态用例（断言状态文件落 tailHash= 已上行最后一行 sha256）
++
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/knowledge-hits-upload.test.ts::文件被重置替换后长回/超过旧 offset 用例（全量重报 + 恢复增量两段断言）
++
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/knowledge-hits-upload.test.ts::「offset 超前（外部截断）」既有用例（零上行 + append 后续走）
++
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/knowledge-hits-upload.test.ts::legacy 状态（无 tailHash）用例（只报第 2 行 + tailHash 落盘断言）
++
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/knowledge-hits-upload.test.ts 三个新用例（替换长回 / 等长替换 / legacy）
++
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/knowledge-hits-upload.test.ts 全套（17 passed = 基线 14 + 新 3）
++
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向命令 cd sillyhub-daemon && pnpm typecheck（exit 0）
++
+
+diff --git a/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/tasks.md b/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/tasks.md
+@@ -0,0 +1,16 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T09:50:43.826Z
++---
++# 任务注册表（Tasks）— 2026-09-25-daemon-hits-upload-fingerprint
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++- [x] task-01: 断点状态在行数之外记录 tailHash（已上行最后一行的 sha256）
++- [x] task-02: 每批成功后随行数一起原子落盘
++- [x] task-03: 每轮上报前做指纹比对：行数未超前但「已上行最后一行」位置已是别的行 → 回退 offset=0 从头重报（服务端 has
++- [x] task-04: 钳位分支（行数超前）语义不变：钳位轮零上行、立即固化，并随钳位重记指纹
++- [x] task-05: legacy 状态（无 tailHash）零误伤：该轮维持纯行数口径不整文件重报，首批成功后指纹开始落盘
++- [x] task-06: 新增单测：替换后长过旧 offset 全量重报+后续恢复增量、等长替换识别、legacy 状态不误报且指纹落盘
++- [x] task-07: 既有 hits 上行单测零回归（基线 14）+ pnpm typecheck 0 错

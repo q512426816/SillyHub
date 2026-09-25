@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-daemon-hits-upload-fingerprint",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-03「随钳位重记指纹」子句无直接测试断言",
+      "evidence": "绑定的既有钳位用例预置的是无 tailHash 的 legacy 状态且钳位后不读状态文件断言 tailHash——任何指纹值（含 null/陈旧值）都能通过该用例；重记行为本身在 src/knowledge-hits-upload.ts:201-204 已正确实现（防截断后陈旧指纹误触发重报），但测试未钉住该子句，回归保护缺口",
+      "location": "sillyhub-daemon/tests/knowledge-hits-upload.test.ts:240"
+    },
+    {
+      "severity": "P3",
+      "title": "未声明的残余假阴性盲区：替换后新文件在旧 offset-1 位置行内容巧合相同时检测失效",
+      "evidence": "src/knowledge-hits-upload.ts:211 只比对 completeLines[uploadedLines-1] 的 sha256——若新文件该位置的行与旧文件同位置字节相同（重复性行的 jsonl 可能出现），指纹命中不回退，新文件前 uploadedLines 行仍被静默跳过（旧洞收窄版）；design 风险节只披露假阳性面（误判重报被去重吸收），未披露此假阴性残余，「只记尾行指纹即可覆盖判别需求」措辞略过强。FR-02 承诺以「该位置已是别的行」为前提，故不算违约，仅为残余风险披露缺口",
+      "location": "sillyhub-daemon/src/knowledge-hits-upload.ts:211"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受）——append-only 下「已上行最后一行」内容不可变：tailHash 取自批末行即 completeLines[uploadedLines-1]，后续 append 只在其后追加不会改写该位置，误判面仅存在于文件被外部改写（正是要检测的场景）；半行（无换行尾行）留下轮语义不变，splitCompleteLines 未动",
+    "并发": "ok（边界已裁决：可接受）——「指纹误判最坏代价是一次全量重报被服务端去重吸收」已核实成立：uq_knowledge_hits_ws_hash (workspace_id, line_hash) unique 真实存在（backend/app/modules/knowledge/hits.py:85）；单进程 postSpecSync 串行挂点未动，双实例并发上行最坏多一次重报被同索引吸收，属既有 D-007 前提、本变更未扩大该面",
+    "切换": "ok（边界已裁决：可接受）——「legacy 首轮无替换检测的过渡窗口」可接受：tailHash=null 跳过比对（src:205 条件 tailHash!==null），一轮过渡、不误重报、首批成功后自愈（legacy 用例断言）；「回退 0 后被进程中断」已核实：回退仅改内存变量、状态未写，下轮重新检测幂等，无数据丢失无死循环；「钳位轮零上行语义不变」已核实：钳位即 pending=0、while 循环跳过、writeUploadedLines 立即固化，既有钳位用例仍通过",
+    "作用域": "ok（边界已裁决：可接受）——「tailHash 不进网络载荷」已核实：全量源码中 tailHash 仅进 writeUploadedLines/本地比对，postKnowledgeHitsBatch(wsId, lines) 载荷结构与调用点未变；状态文件按 wsId 隔离（hitsUploadStatePath）；patch 未动 hub-client.ts 及任何请求载荷结构（协议零变化属实）"
+  },
+  "reviewedAt": "2026-09-25T17:56:08+08:00"
+}

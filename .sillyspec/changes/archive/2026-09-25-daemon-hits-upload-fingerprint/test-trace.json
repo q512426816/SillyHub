@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-daemon-hits-upload-fingerprint",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-25-daemon-hits-upload-fingerprint:flow:FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/knowledge-hits-upload.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-daemon-hits-upload-fingerprint"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-25-daemon-hits-upload-fingerprint:flow:FR-02",
+      "tests": [
+        "tests/knowledge-hits-upload.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-daemon-hits-upload-fingerprint"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-25-daemon-hits-upload-fingerprint:flow:FR-03",
+      "tests": [
+        "tests/knowledge-hits-upload.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-daemon-hits-upload-fingerprint"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-25-daemon-hits-upload-fingerprint:flow:FR-04",
+      "tests": [
+        "tests/knowledge-hits-upload.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-daemon-hits-upload-fingerprint"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-25-daemon-hits-upload-fingerprint:flow:FR-05",
+      "tests": [
+        "tests/knowledge-hits-upload.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-daemon-hits-upload-fingerprint"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-09-25-daemon-hits-upload-fingerprint:flow:FR-06",
+      "tests": [
+        "tests/knowledge-hits-upload.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-daemon-hits-upload-fingerprint"
+    }
+  ]
+}

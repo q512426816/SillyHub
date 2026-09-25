@@ -1,0 +1,23 @@
+{
+  "change": "2026-09-25-daemon-hits-upload-fingerprint",
+  "baseline": "276386810bf91c6a4d2282480bf58962119768c0",
+  "head": "064b606a4cd620ad60aa9ad218ff130a648acf13",
+  "files": [
+    "sillyhub-daemon/src/knowledge-hits-upload.ts",
+    "sillyhub-daemon/tests/knowledge-hits-upload.test.ts",
+    ".sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/design.md",
+    ".sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/flow-state.yaml",
+    ".sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/proposal.md",
+    ".sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/requirements.md",
+    ".sillyspec/changes/2026-09-25-daemon-hits-upload-fingerprint/tasks.md"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 399,
+    "deletions": 19
+  },
+  "savedAt": "2026-09-25T09:52:20.754Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "27ef86c1510d517f2bac696d2865e04daec0a3f75ee52fff43cb77b09707c031",
+  "patchStatus": "ok"
+}
