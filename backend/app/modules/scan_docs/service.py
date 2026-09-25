@@ -75,6 +75,43 @@ def _as_utc(dt: datetime) -> datetime:
     return dt.astimezone(UTC)
 
 
+#: 模块层不计入实有分子的非模块文档后缀（变更日志与模块卡成对存在，
+#: change 2026-09-25-scan-docs-stats-caliber：计入会让 module_have 虚高、
+#: 覆盖率出现 >100% 的荒谬值）。
+MODULE_DOC_EXCLUDE_SUFFIXES: tuple[str, ...] = (".changelog.md",)
+
+#: 模块层登记文件（不是模块文档，单独 SELECT content 解析登记数）。
+MODULE_MAP_FILENAME = "_module-map.yaml"
+
+
+def _is_module_doc(raw_path: str) -> bool:
+    """modules/ 下该路径是否算「模块文档」（模块层覆盖率实有分子）。
+
+    排除 ``_module-map.yaml``（登记表）与 ``MODULE_DOC_EXCLUDE_SUFFIXES``
+    后缀（如 ``runtime.changelog.md`` 变更日志）。纯路径判定，无 I/O。
+    """
+    name = raw_path.rsplit("/", 1)[-1]
+    if not name.endswith(".md") or name == MODULE_MAP_FILENAME:
+        return False
+    return not name.endswith(MODULE_DOC_EXCLUDE_SUFFIXES)
+
+
+def _effective_mtime(
+    source_mtime: datetime | None,
+    last_modified_at: datetime | None,
+) -> datetime | None:
+    """统计有效时间：``source_mtime`` 优先、缺失回落 ``last_modified_at``。
+
+    change 2026-09-25-scan-docs-stats-caliber：spec 同步会重写镜像文件 mtime
+    （``last_modified_at`` 随之漂移，同步/合并当天全量"新鲜"、陈旧恒 0 条），
+    设计里真正的源文件时间是 ``source_mtime``（写入侧见
+    spec_workspace/service.py 同步落库分支）；两列都归一 aware-UTC（SQLite 读回
+    naive 存的是 UTC，与 aware 的 now/窗口裸比较会 TypeError）。
+    """
+    value = source_mtime if source_mtime is not None else last_modified_at
+    return _as_utc(value) if value is not None else None
+
+
 def _strip_docs_prefix(path: str) -> str:
     """剥前导包裹段（可选 ``.sillyspec`` 段 + ``docs`` 段）。
 
@@ -192,20 +229,32 @@ class ScanDocsService:
         量级前提（design R-05）：当前工作区数百行 exists 文档，一次轻列查询
         （排除 content）后全内存聚合，不写多条 SQL；_module-map.yaml 行单独
         SELECT content 解析登记模块数（yaml 损坏按无 map 退化，不抛 500）。
+
+        口径修正（2026-09-25-scan-docs-stats-caliber）：① 模块层实有分子只数
+        模块文档（排除 `_module-map.yaml` 与 `*.changelog.md`——变更日志与模块卡
+        成对存在，计入会虚增分子使覆盖率超 100%）；② 陈旧/新鲜/趋势/最近榜四处
+        统一走 :func:`_effective_mtime`（source_mtime 优先、缺失回落
+        last_modified_at）——镜像 mtime 会被 spec 同步重写，不代表源文件新鲜度。
         """
         await self._workspace_service.get(workspace_id)
         now = _as_utc(datetime.now(UTC))
 
-        stmt = (
-            select(ScanDocument.path, ScanDocument.doc_type, ScanDocument.last_modified_at)
-            .where(col(ScanDocument.workspace_id) == workspace_id)
-            .where(col(ScanDocument.exists).is_(True))
+        stmt = select(
+            ScanDocument.path,
+            ScanDocument.doc_type,
+            ScanDocument.source_mtime,
+            ScanDocument.last_modified_at,
+        ).where(
+            col(ScanDocument.workspace_id) == workspace_id,
+            col(ScanDocument.exists).is_(True),
         )
         # (raw_path, doc_type, mtime_aware|None)：mtime 归一 aware-UTC——SQLite 读回
         # naive，与 aware 的 now/窗口比较裸混用会 TypeError。
         docs: list[tuple[str, str, datetime | None]] = [
-            (path, doc_type, _as_utc(mtime) if mtime is not None else None)
-            for path, doc_type, mtime in (await self._session.execute(stmt)).all()
+            (path, doc_type, _effective_mtime(source_mtime, last_modified_at))
+            for path, doc_type, source_mtime, last_modified_at in (
+                await self._session.execute(stmt)
+            ).all()
         ]
 
         # ── 项目分组：剥前缀后第一段 = 项目；根级文件不建项目（只进全局口径）──
@@ -221,7 +270,7 @@ class ScanDocsService:
             if segs[1] == "scan" and doc_type in STANDARD_DOC_TYPES:
                 # 按项目去重：scan/ 下同名标准件（异常多副本）只计一次。
                 std_types_by_project[segs[0]].add(doc_type)
-            if segs[1] == "modules" and raw_path.endswith(".md") and segs[-1] != "_module-map.yaml":
+            if segs[1] == "modules" and _is_module_doc(raw_path):
                 module_md_by_project[segs[0]] += 1
 
         # ── 覆盖率两级：七件套 have/expected + 模块层 have/expected ──

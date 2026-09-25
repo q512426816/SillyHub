@@ -81,8 +81,13 @@ def _doc(
     *,
     mtime: datetime | None,
     content: str | None = None,
+    source_mtime: datetime | None = None,
 ) -> ScanDocument:
-    """单行 ScanDocument（doc_type 对齐 parser 口径：md=stem 大写、yaml=stem）。"""
+    """单行 ScanDocument（doc_type 对齐 parser 口径：md=stem 大写、yaml=stem）。
+
+    ``mtime`` 写 last_modified_at（镜像 mtime）；``source_mtime``（可选）写源文件
+    时间——2026-09-25-scan-docs-stats-caliber 起统计口径以 source_mtime 优先。
+    """
     name = path.rsplit("/", 1)[-1]
     doc_type = name.rsplit(".", 1)[0].upper() if name.endswith(".md") else name.rsplit(".", 1)[0]
     return ScanDocument(
@@ -94,6 +99,7 @@ def _doc(
         exists=True,
         content=content,
         last_modified_at=mtime,
+        source_mtime=source_mtime,
     )
 
 
@@ -470,3 +476,83 @@ async def test_stats_empty_workspace_all_zero(db_session: AsyncSession) -> None:
     assert out.freshness.total == 0
     assert out.recent_board == []
     assert out.injection == ScanDocsInjectionOut(total_30d=0, docs_hit_30d=0, board=[])
+
+
+# ── 口径修正（change 2026-09-25-scan-docs-stats-caliber）─────────────────────
+
+
+async def test_module_layer_excludes_changelog_docs(db_session: AsyncSession) -> None:
+    """模块层实有分子排除 ``*.changelog.md``：登记 2 模块 + 2 模块卡 + 2 变更日志 → 2/2。
+
+    修正前：变更日志被当作模块文档 → have=4 > expected=2（覆盖率虚高 >100%）。
+    """
+    now = datetime.now(UTC)
+    ws = await _create_workspace(db_session)
+    await _create_spec_workspace(db_session, ws, spec_root="/tmp/spec-caliber-module")
+    db_session.add_all(
+        [
+            _doc(
+                ws.id,
+                "docs/proj-a/modules/_module-map.yaml",
+                mtime=now,
+                content="modules:\n  core: {}\n  auth: {}\n",
+            ),
+            _doc(ws.id, "docs/proj-a/modules/core.md", mtime=now),
+            _doc(ws.id, "docs/proj-a/modules/auth.md", mtime=now),
+            _doc(ws.id, "docs/proj-a/modules/core.changelog.md", mtime=now),
+            _doc(ws.id, "docs/proj-a/modules/auth.changelog.md", mtime=now),
+        ]
+    )
+    await db_session.commit()
+
+    out = await ScanDocsService(db_session).stats(ws.id)
+
+    assert out.coverage.module_have == 2
+    assert out.coverage.module_expected == 2
+
+
+async def test_stats_effective_mtime_prefers_source_mtime(db_session: AsyncSession) -> None:
+    """陈旧/新鲜/趋势/最近榜四处按 source_mtime 优先判定（回落 last_modified_at）。
+
+    三行对照（同一项目 modules/）：
+    - core：镜像"新鲜"（last_modified_at=now）但源文件 200 天前 → 判陈旧；
+    - auth：镜像 mtime 为空（同步新增行未回填）但源文件 5 天前 → 判新鲜；
+    - billing：两列皆空 → 陈旧（未知时间，前后一致）。
+    """
+    now = datetime.now(UTC)
+    ws = await _create_workspace(db_session)
+    await _create_spec_workspace(db_session, ws, spec_root="/tmp/spec-caliber-mtime")
+    db_session.add_all(
+        [
+            _doc(
+                ws.id,
+                "docs/proj-a/modules/core.md",
+                mtime=now,
+                source_mtime=now - timedelta(days=200),
+            ),
+            _doc(
+                ws.id,
+                "docs/proj-a/modules/auth.md",
+                mtime=None,
+                source_mtime=now - timedelta(days=5),
+            ),
+            _doc(ws.id, "docs/proj-a/modules/billing.md", mtime=None),
+        ]
+    )
+    await db_session.commit()
+
+    out = await ScanDocsService(db_session).stats(ws.id)
+
+    # 陈旧清单：时间未知者在前（None 最前），源文件 200 天前其次
+    assert [d.path for d in out.stale_docs] == [
+        "docs/proj-a/modules/billing.md",
+        "docs/proj-a/modules/core.md",
+    ]
+    # 新鲜度：源文件 5 天前算近 30 天更新；镜像 mtime 不再参与判定
+    assert out.freshness.total == 3
+    assert out.freshness.recent_updated == 1
+    # 最近更新榜：按有效时间降序（auth 的源时间最新，榜首即它）
+    assert next(d.path for d in out.recent_board) == "docs/proj-a/modules/auth.md"
+    # 趋势：仅 auth 的源时间落在 8 周窗内（core 200 天前出窗、billing 无时间）——
+    # 账按周桶聚合，具体落哪个星期几视运行日而定，断言窗内总数 1（日期无关）
+    assert sum(p.updated for p in out.coverage.trend) == 1
