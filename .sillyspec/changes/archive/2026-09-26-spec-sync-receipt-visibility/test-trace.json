@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-spec-sync-receipt-visibility",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-26-spec-sync-receipt-visibility:flow:FR-01",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-spec-sync-receipt-visibility"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-26-spec-sync-receipt-visibility:flow:FR-02",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_sync_incremental.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-spec-sync-receipt-visibility"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-26-spec-sync-receipt-visibility:flow:FR-03",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-spec-sync-receipt-visibility"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-26-spec-sync-receipt-visibility:flow:FR-04",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-spec-sync-receipt-visibility"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-26-spec-sync-receipt-visibility:flow:FR-05",
+      "tests": [
+        "frontend/src/components/__tests__/spec-sync-conflict-banner.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-spec-sync-receipt-visibility"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-09-26-spec-sync-receipt-visibility:flow:FR-06",
+      "tests": [
+        "src/components/__tests__/spec-sync-conflict-banner.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-spec-sync-receipt-visibility"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-09-26-spec-sync-receipt-visibility:flow:FR-07",
+      "tests": [
+        "src/components/__tests__/spec-sync-conflict-banner.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-spec-sync-receipt-visibility"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-09-26-spec-sync-receipt-visibility:flow:FR-08",
+      "tests": [
+        "src/components/__tests__/spec-sync-conflict-banner.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-spec-sync-receipt-visibility"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-09-26-spec-sync-receipt-visibility:flow:FR-09",
+      "tests": [
+        "src/components/__tests__/spec-sync-conflict-banner.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-spec-sync-receipt-visibility"
+    },
+    {
+      "anchor": "FR-10",
+      "row_id": "2026-09-26-spec-sync-receipt-visibility:flow:FR-10",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py",
+        "src/components/__tests__/spec-sync-conflict-banner.test.ts",
+        "tests/test_platform_deleted_guard.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-spec-sync-receipt-visibility"
+    },
+    {
+      "anchor": "FR-11",
+      "row_id": "2026-09-26-spec-sync-receipt-visibility:flow:FR-11",
+      "tests": [
+        "src/components/__tests__/spec-sync-conflict-banner.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-spec-sync-receipt-visibility"
+    },
+    {
+      "anchor": "FR-12",
+      "row_id": "2026-09-26-spec-sync-receipt-visibility:flow:FR-12",
+      "tests": [
+        "src/components/__tests__/spec-sync-conflict-banner.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-spec-sync-receipt-visibility"
+    }
+  ]
+}

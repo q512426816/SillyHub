@@ -1,0 +1,1188 @@
+diff --git a/backend/app/modules/platform_sync/router.py b/backend/app/modules/platform_sync/router.py
+index 5ad174cbc..6f40016f0 100644
+--- a/backend/app/modules/platform_sync/router.py
++++ b/backend/app/modules/platform_sync/router.py
+@@ -261,6 +261,9 @@ async def push_spec_sync(
+         ok=True,
+         new_versions=result["new_versions"],
+         conflict=result["conflict"],
++        applied_ops=result.get("applied_ops", 0),
++        skipped_conflict=result.get("skipped_conflict", 0),
++        skipped_tombstone=result.get("skipped_tombstone", 0),
+         server_versions=result["server_versions"],
+         # 审计 A6：透出被平台墓碑拒绝的路径列表（CLI 区分墓碑拒绝与版本冲突）
+         platform_deleted=result["platform_deleted"],
+diff --git a/backend/app/modules/platform_sync/schema.py b/backend/app/modules/platform_sync/schema.py
+index 05eeacdcc..48ed252fe 100644
+--- a/backend/app/modules/platform_sync/schema.py
++++ b/backend/app/modules/platform_sync/schema.py
+@@ -257,6 +257,10 @@ class SpecSyncResponse(BaseModel):
+     conflict: bool = False
+     server_versions: dict[str, int] | None = None
+     platform_deleted: list[str] = Field(default_factory=list)
++    # 2026-09-26-spec-sync-receipt-visibility：回执计数（applied/skipped 双轨同键）。
++    applied_ops: int = 0
++    skipped_conflict: int = 0
++    skipped_tombstone: int = 0
+ 
+ 
+ # ── Change 2026-08-23-platform-agent-log-ingest task-02（design §3.2 API 契约）──
+diff --git a/backend/app/modules/spec_workspace/router.py b/backend/app/modules/spec_workspace/router.py
+index b22bed398..881ca1234 100644
+--- a/backend/app/modules/spec_workspace/router.py
++++ b/backend/app/modules/spec_workspace/router.py
+@@ -57,6 +57,10 @@ class SpecSyncResponse(BaseModel):
+     ok: bool
+     reparsed: int  # = reparsed_docs（向后兼容，旧客户端读这个）
+     reparsed_changes: int = 0
++    # 2026-09-26-spec-sync-receipt-visibility：全量落盘/跳过计数（skipped>0 即有
++    # 成员未落盘——墓碑前缀排除或 staging 缺失，服务端同步 warn 日志）。
++    landed_files: int = 0
++    skipped_files: int = 0
+ 
+ 
+ # ── Spec Workspace ─────────────────────────────────────────────────────────────
+@@ -270,6 +274,8 @@ async def sync_spec_workspace(
+         ok=True,
+         reparsed=result["reparsed_docs"],
+         reparsed_changes=result["reparsed_changes"],
++        landed_files=result.get("landed_files", 0),
++        skipped_files=result.get("skipped_files", 0),
+     )
+ 
+ 
+@@ -308,6 +314,10 @@ async def sync_spec_workspace_incremental(
+         new_versions=result["new_versions"],
+         conflict=result["conflict"],
+         server_versions=result["server_versions"],
++        applied_ops=result.get("applied_ops", 0),
++        skipped_conflict=result.get("skipped_conflict", 0),
++        skipped_tombstone=result.get("skipped_tombstone", 0),
++        platform_deleted=result.get("platform_deleted", []),
+     )
+ 
+ 
+diff --git a/backend/app/modules/spec_workspace/schema.py b/backend/app/modules/spec_workspace/schema.py
+index 6e9bf80cf..c2c06f877 100644
+--- a/backend/app/modules/spec_workspace/schema.py
++++ b/backend/app/modules/spec_workspace/schema.py
+@@ -127,3 +127,9 @@ class SpecIncrementalSyncResponse(BaseModel):
+     new_versions: dict[str, int]  # path -> 新版本号
+     conflict: bool = False
+     server_versions: dict[str, int] | None = Field(default=None)  # 冲突时服务器当前版本
++    # 2026-09-26-spec-sync-receipt-visibility：回执计数 + 墓碑拒收路径（daemon 轨道
++    # 此前不透传 platform_deleted——只有 CLI 轨道有，daemon 看不到拒收原因）。
++    applied_ops: int = 0
++    skipped_conflict: int = 0
++    skipped_tombstone: int = 0
++    platform_deleted: list[str] = Field(default_factory=list)
+diff --git a/backend/app/modules/spec_workspace/service.py b/backend/app/modules/spec_workspace/service.py
+index bd34179eb..e69ed926d 100644
+--- a/backend/app/modules/spec_workspace/service.py
++++ b/backend/app/modules/spec_workspace/service.py
+@@ -786,7 +786,7 @@ class SpecWorkspaceService:
+             if done:
+                 break
+             yield ": keepalive\n\n"
+-        spec_ws, converged_files, converged_dirs = write_task.result()
++        spec_ws, converged_files, converged_dirs, _landed, _skipped = write_task.result()
+ 
+         yield _evt("reparsing_docs", phase="reparsing_docs")
+         reparse_docs_task = asyncio.ensure_future(
+@@ -1133,6 +1133,86 @@ class SpecWorkspaceService:
+         tf.extractall(staging, members=members, filter="data")
+         return tf, staging
+ 
++    #: 增量同步冲突的注册表锚（stage/conflict_type 二元组，幂等 upsert 键）。
++    SYNC_CONFLICT_STAGE = "spec-sync"
++    SYNC_CONFLICT_TYPE = "sync"
++
++    async def _upsert_sync_conflict(
++        self,
++        workspace_id: uuid.UUID,
++        server_versions: dict[str, int],
++        platform_deleted: list[str],
++    ) -> None:
++        """增量冲突 → spec_conflicts 开放行（幂等：同工作区同 stage 只更新不重复建）。
++
++        details_json 携带 server_versions / platform_deleted / 冲突路径与 last_seen_at，
++        供 GET /spec-conflicts 与前端横幅机器消费；created_at 保持首见时间。
++        """
++        from app.modules.spec_profile.model import SpecConflict
++
++        row = (
++            (
++                await self._session.execute(
++                    select(SpecConflict)
++                    .where(
++                        SpecConflict.workspace_id == workspace_id,
++                        SpecConflict.stage == self.SYNC_CONFLICT_STAGE,
++                        SpecConflict.status == "open",
++                    )
++                    .limit(1)
++                )
++            )
++            .scalars()
++            .first()
++        )
++        conflicting = sorted(set(server_versions) | set(platform_deleted))
++        details = json.dumps(
++            {
++                "kind": "incremental_push_conflict",
++                "server_versions": server_versions,
++                "platform_deleted": platform_deleted,
++                "conflicting_paths": conflicting,
++                "last_seen_at": datetime.now(UTC).isoformat(),
++            },
++            ensure_ascii=False,
++        )
++        if row is not None:
++            row.details_json = details
++        else:
++            self._session.add(
++                SpecConflict(
++                    workspace_id=workspace_id,
++                    stage=self.SYNC_CONFLICT_STAGE,
++                    conflict_type=self.SYNC_CONFLICT_TYPE,
++                    details_json=details,
++                    status="open",
++                )
++            )
++        await self._session.commit()
++
++    async def _close_open_sync_conflicts(self, workspace_id: uuid.UUID) -> None:
++        """全绿同步 → 开放的 spec-sync 冲突行置 resolved（闭环，防僵尸行）。"""
++        from app.modules.spec_profile.model import SpecConflict
++
++        rows = (
++            (
++                await self._session.execute(
++                    select(SpecConflict).where(
++                        SpecConflict.workspace_id == workspace_id,
++                        SpecConflict.stage == self.SYNC_CONFLICT_STAGE,
++                        SpecConflict.status == "open",
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++        if not rows:
++            return
++        for row in rows:
++            row.status = "resolved"
++        await self._session.commit()
++
+     async def _load_platform_deleted_prefixes(self, workspace_id: uuid.UUID) -> tuple[str, ...]:
+         """task-02（design §5.4 B-2 加固）：workspace manifest 中 platform_deleted=True
+         行 → 已平台删除目录前缀集。
+@@ -1176,7 +1256,7 @@ class SpecWorkspaceService:
+         workspace_id: uuid.UUID,
+         tar_bytes: bytes,
+         change_write_id: str | None = None,
+-    ) -> tuple[SpecWorkspace, int, int]:
++    ) -> tuple[SpecWorkspace, int, int, int, int]:
+         """Validate + overwrite spec_root with tar (D-006 whole-tree), commit clean.
+ 
+         D-001（2026-07-01-spec-import-async-and-change-reparse）：从 apply_sync 提取，
+@@ -1229,6 +1309,9 @@ class SpecWorkspaceService:
+             # 集合是对账删除（_converge_stale_files）与 manifest 逐行对齐的基准。
+             landed_paths: set[str] = set()
+             landed_hashes: dict[str, str] = {}
++            # 2026-09-26-spec-sync-receipt-visibility：全量同步落盘/跳过计数（回执
++            # 透传 + skipped>0 显式 warn——「ok:true 却静默丢成员」收口）。
++            skipped_files = 0
+             # task-03 / D-002@v1：逐文件 _bump 改批量回写器——循环内仅内存计数，
+             # 50 文件/500ms 粒度回写；finally 终态 flush 保证 files_processed 最终准确。
+             progress = _BatchProgressWriter(change_write_id)
+@@ -1279,6 +1362,7 @@ class SpecWorkspaceService:
+                 # 消失）——仅挡 manifest 对齐环不够，文件一旦回磁盘 reparse 即翻回
+                 # active（R-10）。
+                 if platform_deleted_prefixes and rel_path.startswith(platform_deleted_prefixes):
++                    skipped_files += 1
+                     continue
+                 src_file = staging / m.name
+                 target = spec_root / rel_path
+@@ -1304,6 +1388,7 @@ class SpecWorkspaceService:
+                 try:
+                     content, ch, src_mtime, tgt_exists = await asyncio.to_thread(_load_member)
+                 except FileNotFoundError:
++                    skipped_files += 1
+                     log.warning(
+                         "spec_workspace.sync_member_missing_in_staging",
+                         workspace_id=str(workspace_id),
+@@ -1472,7 +1557,15 @@ class SpecWorkspaceService:
+                 row.version = row.version + 1
+                 row.updated_at = now
+         await self._session.commit()
+-        return spec_ws, len(converged_paths), converged_dirs
++        if skipped_files > 0:
++            log.warning(
++                "spec_workspace.sync_skipped_members",
++                workspace_id=str(workspace_id),
++                landed=len(landed_paths),
++                skipped=skipped_files,
++            )
++        # 返回扩 2 元（landed/skipped 计数，2026-09-26 回执可见性）
++        return spec_ws, len(converged_paths), converged_dirs, len(landed_paths), skipped_files
+ 
+     async def _bump_files_processed(self, change_write_id: str | None) -> None:
+         """单批进度回写（+1）。签名不变（design 接口定义），内部走批量回写器。
+@@ -1513,9 +1606,13 @@ class SpecWorkspaceService:
+         ``change_write_id``（可选）让 ``_write_spec_root`` 循环内回写进度
+         （task-03 起批量：50 文件/500ms 粒度，终态准确）。
+         """
+-        spec_ws, converged_files, converged_dirs = await self._write_spec_root(
+-            workspace_id, tar_bytes, change_write_id=change_write_id
+-        )
++        (
++            spec_ws,
++            converged_files,
++            converged_dirs,
++            landed_files,
++            skipped_files,
++        ) = await self._write_spec_root(workspace_id, tar_bytes, change_write_id=change_write_id)
+         reparsed_docs = await self._reparse_phase(workspace_id, spec_ws, "scan_docs")
+         reparsed_changes = await self._reparse_phase(workspace_id, spec_ws, "change")
+         log.info(
+@@ -1526,7 +1623,12 @@ class SpecWorkspaceService:
+             converged_files=converged_files,
+             converged_dirs=converged_dirs,
+         )
+-        return {"reparsed_docs": reparsed_docs, "reparsed_changes": reparsed_changes}
++        return {
++            "reparsed_docs": reparsed_docs,
++            "reparsed_changes": reparsed_changes,
++            "landed_files": landed_files,
++            "skipped_files": skipped_files,
++        }
+ 
+     async def _reparse_phase(
+         self,
+@@ -2016,6 +2118,10 @@ class SpecWorkspaceService:
+         await self._session.commit()
+         pending_adds: list[SpecFileManifest] = []
+         pending_deletes: list[SpecFileManifest] = []
++        # 2026-09-26-spec-sync-receipt-visibility：回执计数（冲突跳过 / 墓碑跳过；
++        # applied 在返回处由总数减得）——「ok:true 却静默丢成员」的绿灯谎言收口。
++        skipped_conflict = 0
++        skipped_tombstone = 0
+ 
+         # task-03 / D-002@v1：逐文件回写改批量回写器（内存计数 + 50 文件/500ms
+         # 批量 UPDATE）；finally 终态 flush 保证 files_processed 最终准确。
+@@ -2067,6 +2173,7 @@ class SpecWorkspaceService:
+                             server_versions = {}
+                         server_versions[op.path] = row.version
+                     platform_deleted_paths.append(op.path)
++                    skipped_tombstone += 1
+                     continue
+ 
+                 # ql-20260819-004：软删行复活（add）。CLI diff 把 exists=False 行从
+@@ -2088,6 +2195,7 @@ class SpecWorkspaceService:
+                             server_versions = {}
+                         server_versions[op.path] = row.version
+                         platform_deleted_paths.append(op.path)
++                        skipped_tombstone += 1
+                         continue
+                     if op.content is None:
+                         raise _spec_bundle_invalid(
+@@ -2115,6 +2223,7 @@ class SpecWorkspaceService:
+                         server_versions = {}
+                     server_versions[op.path] = row.version
+                     platform_deleted_paths.append(op.path)
++                    skipped_tombstone += 1
+                     continue
+ 
+                 # base_version 乐观锁（D-001）：有行且版本不匹配 → conflict，跳过不落盘。
+@@ -2132,6 +2241,7 @@ class SpecWorkspaceService:
+                     if server_versions is None:
+                         server_versions = {}
+                     server_versions[op.path] = row.version
++                    skipped_conflict += 1
+                     continue
+ 
+                 if op.op in ("add", "update"):
+@@ -2431,14 +2541,36 @@ class SpecWorkspaceService:
+                 error=str(exc),
+             )
+ 
++        # 2026-09-26-spec-sync-receipt-visibility：冲突进注册表——此前增量冲突只活在
++        # daemon 日志一行 warn，spec-conflicts 注册表恒空、无横幅，c84182bc 冲突挂
++        # 一周无人知晓。有冲突 → 幂等 upsert 开放行（供 GET /spec-conflicts 与前端
++        # 横幅消费）；全绿 → 自动把开放行置 resolved（闭环不留僵尸）。
++        try:
++            if conflict or platform_deleted_paths:
++                await self._upsert_sync_conflict(
++                    workspace_id, server_versions or {}, platform_deleted_paths
++                )
++            else:
++                await self._close_open_sync_conflicts(workspace_id)
++        except Exception as exc:
++            log.warning(
++                "spec_workspace.sync_conflict_registry_failed",
++                workspace_id=str(workspace_id),
++                error=str(exc),
++            )
++
+         return {
+             "new_versions": new_versions,
+             "conflict": conflict,
+             "server_versions": server_versions,
+             # task-02（design §5.4/§11）：被 platform_deleted 墓碑拒绝的 add/rename
+-            # 路径（空列表=无拦截）。HTTP 响应模型暂不透出（task 约束：不改端点
+-            # 签名），service 层契约先行，供后续 CLI 感知接线。
++            # 路径（空列表=无拦截）。
+             "platform_deleted": platform_deleted_paths,
++            # 2026-09-26 回执计数：applied = 总数 - 两类跳过（同内容豁免 no-op 计入
++            # applied——它成功了且回 new_versions）。
++            "applied_ops": len(ops) - skipped_conflict - skipped_tombstone,
++            "skipped_conflict": skipped_conflict,
++            "skipped_tombstone": skipped_tombstone,
+         }
+ 
+     async def _reconcile_quicklog_hidden(
+diff --git a/backend/app/modules/spec_workspace/tests/test_bundle_sync.py b/backend/app/modules/spec_workspace/tests/test_bundle_sync.py
+index f00a86f79..8c26c19cd 100644
+--- a/backend/app/modules/spec_workspace/tests/test_bundle_sync.py
++++ b/backend/app/modules/spec_workspace/tests/test_bundle_sync.py
+@@ -305,7 +305,13 @@ class TestSync:
+         body = resp.json()
+         # D-003：apply_sync 现返回 {reparsed_docs, reparsed_changes}；sync DTO 暴露两段
+         # （reparsed=docs 向后兼容 + reparsed_changes；test spec_root 无 changes → 0）。
+-        assert body == {"ok": True, "reparsed": 1, "reparsed_changes": 0}
++        assert body == {
++            "ok": True,
++            "reparsed": 1,
++            "reparsed_changes": 0,
++            "landed_files": 1,
++            "skipped_files": 0,
++        }
+ 
+         # 2026-08-19-spec-mirror-tombstone-sync FR-01：tar 是整树权威快照——镜像里
+         # tar 未包含的 A.md 被对账删除（软删 move 到备份区），幽灵文件不再残留；
+diff --git a/backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py b/backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
+index 842e3b9e1..892714886 100644
+--- a/backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
++++ b/backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
+@@ -140,7 +140,7 @@ class TestConvergeStaleFiles:
+         await db_session.commit()
+ 
+         tar_bytes = _build_tar({"docs": None, "docs/keep.md": b"# keep"})
+-        spec_ws, converged_files, converged_dirs = await SpecWorkspaceService(
++        spec_ws, converged_files, converged_dirs, _, _ = await SpecWorkspaceService(
+             db_session
+         )._write_spec_root(ws.id, tar_bytes)
+ 
+@@ -197,7 +197,7 @@ class TestConvergeStaleFiles:
+         await db_session.commit()
+ 
+         tar_bytes = _build_tar({"docs": None, "docs/A.md": b"# A", "docs/B.md": b"# B"})
+-        _, converged_files, converged_dirs = await SpecWorkspaceService(
++        _, converged_files, converged_dirs, _, _ = await SpecWorkspaceService(
+             db_session
+         )._write_spec_root(ws.id, tar_bytes)
+ 
+@@ -234,7 +234,7 @@ class TestConvergeStaleFiles:
+                 ".sillyspec/local.yaml": b"client: local",
+             }
+         )
+-        _, converged_files, _ = await SpecWorkspaceService(db_session)._write_spec_root(
++        _, converged_files, _, _, _ = await SpecWorkspaceService(db_session)._write_spec_root(
+             ws.id, tar_bytes
+         )
+ 
+@@ -260,7 +260,7 @@ class TestConvergeGuards:
+         (spec_root / "docs" / "A.md").write_text("# A", encoding="utf-8")
+         await _make_spec_workspace(db_session, ws, spec_root)
+ 
+-        _, converged_files, converged_dirs = await SpecWorkspaceService(
++        _, converged_files, converged_dirs, _, _ = await SpecWorkspaceService(
+             db_session
+         )._write_spec_root(ws.id, _build_tar({}))
+ 
+@@ -284,7 +284,7 @@ class TestConvergeGuards:
+         await _make_spec_workspace(db_session, ws, spec_root)
+ 
+         tar_bytes = _build_tar({"docs": None, "docs/A.md": b"# A"})
+-        _, converged_files, converged_dirs = await SpecWorkspaceService(
++        _, converged_files, converged_dirs, _, _ = await SpecWorkspaceService(
+             db_session
+         )._write_spec_root(ws.id, tar_bytes)
+ 
+diff --git a/backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py b/backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py
+index e6211fdea..e7d784827 100644
+--- a/backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py
++++ b/backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py
+@@ -341,9 +341,13 @@ class TestAddReviveInterception:
+         svc = SpecWorkspaceService(db_session)
+ 
+         result = await svc.apply_ops(ws.id, [_op("add", "docs/plain.md", content=_b64("p"))])
++        # 2026-09-26-spec-sync-receipt-visibility：回执计数三键（applied/skipped_*）
+         assert result == {
+             "new_versions": {"docs/plain.md": 1},
+             "conflict": False,
++            "applied_ops": 1,
++            "skipped_conflict": 0,
++            "skipped_tombstone": 0,
+             "server_versions": None,
+             "platform_deleted": [],
+         }
+@@ -543,7 +547,7 @@ class TestWriteSpecRootExclusion:
+                 "changes/live/ok.md": b"# ok",
+             }
+         )
+-        spec_ws, converged_files, converged_dirs = await SpecWorkspaceService(
++        spec_ws, converged_files, converged_dirs, _, _ = await SpecWorkspaceService(
+             db_session
+         )._write_spec_root(ws.id, tar_bytes)
+ 
+@@ -599,7 +603,7 @@ class TestWriteSpecRootExclusion:
+         tar_bytes = _build_tar(
+             {"docs": None, "docs/A.md": b"# A", "changes/x": None, "changes/x/p.md": b"# P"}
+         )
+-        spec_ws, converged_files, converged_dirs = await SpecWorkspaceService(
++        spec_ws, converged_files, converged_dirs, _, _ = await SpecWorkspaceService(
+             db_session
+         )._write_spec_root(ws.id, tar_bytes)
+ 
+@@ -701,3 +705,63 @@ class TestPrefixLoadingArchiveBoundary:
+ 
+         assert "changes/archive/real/" in prefixes  # 四段正常派生
+         assert "changes/archive/stray.md/" not in prefixes  # 伪前缀不再产出
++
++
++# ===========================================================================
++# 2026-09-26-spec-sync-receipt-visibility：冲突注册表 + 回执计数
++# ===========================================================================
++
++
++async def test_sync_conflict_registry_open_and_close(db_session, tmp_path) -> None:
++    """增量冲突 → spec_conflicts 开放行（幂等不重复建）；全绿 → 自动置 resolved。"""
++    from app.modules.spec_profile.model import SpecConflict
++
++    ws = await _make_workspace(db_session)
++    spec_root = tmp_path / "spec-root"
++    await _make_spec_workspace(db_session, ws, spec_root)
++    svc = SpecWorkspaceService(db_session)
++
++    async def _open_rows():
++        return (
++            (
++                await db_session.execute(
++                    select(SpecConflict).where(
++                        SpecConflict.workspace_id == ws.id,
++                        SpecConflict.status == "open",
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++
++    # ① 墓碑行 add 拒收 → 冲突进注册表（开放行 + details 带 platform_deleted）
++    tomb = SpecFileManifest(
++        workspace_id=ws.id,
++        path="changes/deleted-x/a.md",
++        content_hash="h",
++        version=2,
++        exists=False,
++        platform_deleted=True,
++    )
++    db_session.add(tomb)
++    await db_session.commit()
++    r1 = await svc.apply_ops(ws.id, [_op("add", "changes/deleted-x/a.md", content=_b64("z"))])
++    assert r1["conflict"] is True
++    assert r1["platform_deleted"] == ["changes/deleted-x/a.md"]
++    assert r1["skipped_tombstone"] == 1
++    assert r1["applied_ops"] == 0
++    rows = await _open_rows()
++    assert len(rows) == 1
++    assert rows[0].stage == "spec-sync"
++    assert "changes/deleted-x/a.md" in (rows[0].details_json or "")
++
++    # ② 再次冲突 → 幂等更新同一行（不重复建）
++    await svc.apply_ops(ws.id, [_op("add", "changes/deleted-x/a.md", content=_b64("z2"))])
++    assert len(await _open_rows()) == 1
++
++    # ③ 全绿同步 → 开放行自动置 resolved（闭环不留僵尸）
++    r3 = await svc.apply_ops(ws.id, [_op("add", "docs/ok.md", content=_b64("ok"))])
++    assert r3["conflict"] is False
++    assert r3["applied_ops"] == 1
++    assert await _open_rows() == []
+diff --git a/backend/app/modules/spec_workspace/tests/test_sync_incremental.py b/backend/app/modules/spec_workspace/tests/test_sync_incremental.py
+index a162aaaea..24ae8dfdf 100644
+--- a/backend/app/modules/spec_workspace/tests/test_sync_incremental.py
++++ b/backend/app/modules/spec_workspace/tests/test_sync_incremental.py
+@@ -124,6 +124,11 @@ class TestAddUpdate:
+             "new_versions": {"docs/A.md": 1},
+             "conflict": False,
+             "server_versions": None,
++            # 2026-09-26-spec-sync-receipt-visibility 回执计数三键 + 墓碑路径
++            "applied_ops": 1,
++            "skipped_conflict": 0,
++            "skipped_tombstone": 0,
++            "platform_deleted": [],
+         }
+         assert (spec_root / "docs" / "A.md").read_text(encoding="utf-8") == "# A"
+ 
+@@ -428,6 +433,10 @@ class TestDelete:
+             "new_versions": {},
+             "conflict": False,
+             "server_versions": None,
++            "applied_ops": 1,
++            "skipped_conflict": 0,
++            "skipped_tombstone": 0,
++            "platform_deleted": [],
+         }
+ 
+ 
+@@ -798,7 +807,13 @@ class TestCompat:
+                 content=tar_bytes,
+             )
+         assert resp.status_code == 200, resp.text
+-        assert resp.json() == {"ok": True, "reparsed": 1, "reparsed_changes": 0}
++        assert resp.json() == {
++            "ok": True,
++            "reparsed": 1,
++            "reparsed_changes": 0,
++            "landed_files": 1,
++            "skipped_files": 0,
++        }
+         # 旧 tar 整树覆盖仍落盘
+         assert (spec_root / "docs" / "legacy.md").read_text(encoding="utf-8") == "# legacy"
+ 
+diff --git a/backend/openapi.json b/backend/openapi.json
+index b86d6d50e..10e140e78 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -68038,6 +68038,28 @@
+               }
+             ],
+             "title": "Server Versions"
++          },
++          "applied_ops": {
++            "type": "integer",
++            "title": "Applied Ops",
++            "default": 0
++          },
++          "skipped_conflict": {
++            "type": "integer",
++            "title": "Skipped Conflict",
++            "default": 0
++          },
++          "skipped_tombstone": {
++            "type": "integer",
++            "title": "Skipped Tombstone",
++            "default": 0
++          },
++          "platform_deleted": {
++            "items": {
++              "type": "string"
++            },
++            "type": "array",
++            "title": "Platform Deleted"
+           }
+         },
+         "type": "object",
+@@ -75405,6 +75427,21 @@
+             },
+             "type": "array",
+             "title": "Platform Deleted"
++          },
++          "applied_ops": {
++            "type": "integer",
++            "title": "Applied Ops",
++            "default": 0
++          },
++          "skipped_conflict": {
++            "type": "integer",
++            "title": "Skipped Conflict",
++            "default": 0
++          },
++          "skipped_tombstone": {
++            "type": "integer",
++            "title": "Skipped Tombstone",
++            "default": 0
+           }
+         },
+         "type": "object",
+@@ -75429,6 +75466,16 @@
+             "type": "integer",
+             "title": "Reparsed Changes",
+             "default": 0
++          },
++          "landed_files": {
++            "type": "integer",
++            "title": "Landed Files",
++            "default": 0
++          },
++          "skipped_files": {
++            "type": "integer",
++            "title": "Skipped Files",
++            "default": 0
+           }
+         },
+         "type": "object",
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx
+index f537a7be4..e3110cf40 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx
+@@ -2,6 +2,7 @@
+ 
+ import { usePathname } from "next/navigation";
+ 
++import { SpecSyncConflictBanner } from "@/components/spec-sync-conflict-banner";
+ import { WorkspaceTabs } from "@/components/workspace-tabs";
+ 
+ export default function WorkspaceDetailLayout({
+@@ -22,12 +23,15 @@ export default function WorkspaceDetailLayout({
+   if (isStandalone) {
+     return <>{children}</>;
+   }
++  // 2026-09-26-spec-sync-receipt-visibility：spec 同步冲突横幅（开放行非空才渲染）
++  const conflictBanner = <SpecSyncConflictBanner workspaceId={params.id} />;
+   // ql-20260827-011：main 彻底移除 max-w-[1440px] 宽度帽（含配套 mx-auto）——
+   // 所在工作区子页撑满内容区，对齐 /agent-profiles 等平台级页（AppShell 无帽 +
+   // PageContainer size="full" 占满语义，FRONTEND_PAGE_STYLE.md）；本条是
+   // ql-20260827-008（仅 sessions 路由放开）的用户定案超集，isFullWidth 分支随之删除。
+   return (
+     <main className="flex w-full flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
++      {conflictBanner}
+       <WorkspaceTabs workspaceId={params.id}>{children}</WorkspaceTabs>
+     </main>
+   );
+diff --git a/frontend/src/components/__tests__/spec-sync-conflict-banner.test.tsx b/frontend/src/components/__tests__/spec-sync-conflict-banner.test.tsx
+new file mode 100644
+index 000000000..9e27c0e27
+--- /dev/null
++++ b/frontend/src/components/__tests__/spec-sync-conflict-banner.test.tsx
+@@ -0,0 +1,65 @@
++// tests/spec-sync-conflict-banner.test.tsx
++// 2026-09-26-spec-sync-receipt-visibility：横幅三态——开放行非空渲染警示 /
++// 空不渲染 / 请求失败静默（retry:false 横幅缺位不阻塞页面）。
++
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { cleanup, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++const mocks = vi.hoisted(() => ({ listSpecConflicts: vi.fn() }));
++vi.mock("@/lib/spec-workspaces", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("@/lib/spec-workspaces")>()),
++  listSpecConflicts: mocks.listSpecConflicts,
++}));
++
++import { SpecSyncConflictBanner } from "@/components/spec-sync-conflict-banner";
++
++function renderBanner() {
++  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
++  return render(
++    <QueryClientProvider client={qc}>
++      <SpecSyncConflictBanner workspaceId="ws-1" />
++    </QueryClientProvider>,
++  );
++}
++
++describe("SpecSyncConflictBanner", () => {
++  beforeEach(() => mocks.listSpecConflicts.mockReset());
++  afterEach(cleanup);
++
++  it("开放行非空 → 细条警示（数量 + 镜像滞后提示）", async () => {
++    mocks.listSpecConflicts.mockResolvedValue([
++      { id: "c1", stage: "spec-sync", conflict_type: "sync", status: "open" },
++    ]);
++    renderBanner();
++    await waitFor(() =>
++      expect(screen.getByTestId("spec-sync-conflict-banner")).toBeInTheDocument(),
++    );
++    expect(screen.getByTestId("spec-sync-conflict-banner")).toHaveTextContent(
++      "spec 同步有 1 条冲突待裁决",
++    );
++    expect(screen.getByTestId("spec-sync-conflict-banner")).toHaveTextContent(
++      "镜像可能滞后",
++    );
++  });
++
++  it("无开放行 → 不渲染", async () => {
++    mocks.listSpecConflicts.mockResolvedValue([]);
++    const { container } = renderBanner();
++    await waitFor(() => expect(mocks.listSpecConflicts).toHaveBeenCalled());
++    expect(container.querySelector('[data-testid="spec-sync-conflict-banner"]')).toBeNull();
++  });
++
++  it("请求失败 → 静默不渲染（不白屏）", async () => {
++    // 返回 rejected promise 且预挂 catch 兜底：react-query 捕获进 error 态；
++    // vitest 对跨测试边界的未处理拒绝会计失败，故在 mock 侧先消化一份。
++    const err = new Error("网络错误");
++    const p = Promise.reject(err);
++    p.catch(() => undefined);
++    mocks.listSpecConflicts.mockReturnValueOnce(p);
++    const { container } = renderBanner();
++    await waitFor(() => expect(mocks.listSpecConflicts).toHaveBeenCalled());
++    await new Promise((r) => setTimeout(r, 0));
++    expect(container.querySelector('[data-testid="spec-sync-conflict-banner"]')).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/spec-sync-conflict-banner.tsx b/frontend/src/components/spec-sync-conflict-banner.tsx
+new file mode 100644
+index 000000000..99e00b68a
+--- /dev/null
++++ b/frontend/src/components/spec-sync-conflict-banner.tsx
+@@ -0,0 +1,42 @@
++"use client";
++
++/**
++ * SpecSyncConflictBanner — 工作区 spec 同步冲突横幅（2026-09-26-spec-sync-receipt-visibility）。
++ *
++ * 背景：增量同步冲突（乐观锁 / platform_deleted 墓碑拒收）此前只活在 daemon 日志一行
++ * warn，spec-conflicts 注册表恒空、页面零感知——c84182bc 冲突挂一周、镜像与遥测全冻结
++ * 无人知晓。本变更起 apply_ops 冲突幂等写注册表开放行（全绿自动置 resolved），本横幅
++ * 消费开放行：有则显示细条警示（数量 + 镜像可能滞后提示），无则不渲染。
++ * 样式对齐 circuit-banner 的细条形态（warning 语义阶）。
++ */
++
++import { useQuery } from "@tanstack/react-query";
++import { TriangleAlert } from "lucide-react";
++
++import { listSpecConflicts } from "@/lib/spec-workspaces";
++
++export function specConflictsQueryKey(workspaceId: string) {
++  return ["spec-conflicts", "open", workspaceId] as const;
++}
++
++export function SpecSyncConflictBanner({ workspaceId }: { workspaceId: string }) {
++  const q = useQuery({
++    queryKey: specConflictsQueryKey(workspaceId),
++    queryFn: () => listSpecConflicts(workspaceId),
++    // 低频轮询：冲突是长滞留态（人工拍板），60s 足够；失败静默（横幅缺位不阻塞页面）。
++    refetchInterval: 60_000,
++    retry: false,
++  });
++  if (!q.data || q.data.length === 0) return null;
++  return (
++    <div
++      data-testid="spec-sync-conflict-banner"
++      className="flex items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-xs text-warning"
++    >
++      <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />
++      <span>
++        spec 同步有 {q.data.length} 条冲突待裁决——镜像可能滞后于本地，最新内容暂未同步。
++      </span>
++    </div>
++  );
++}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index a8c55b658..bf92ffdea 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -24722,6 +24722,23 @@ export interface components {
+             server_versions?: {
+                 [key: string]: number;
+             } | null;
++            /**
++             * Applied Ops
++             * @default 0
++             */
++            applied_ops: number;
++            /**
++             * Skipped Conflict
++             * @default 0
++             */
++            skipped_conflict: number;
++            /**
++             * Skipped Tombstone
++             * @default 0
++             */
++            skipped_tombstone: number;
++            /** Platform Deleted */
++            platform_deleted?: string[];
+         };
+         /**
+          * SpecManifestFileEntry
+@@ -27719,6 +27736,21 @@ export interface components {
+             } | null;
+             /** Platform Deleted */
+             platform_deleted?: string[];
++            /**
++             * Applied Ops
++             * @default 0
++             */
++            applied_ops: number;
++            /**
++             * Skipped Conflict
++             * @default 0
++             */
++            skipped_conflict: number;
++            /**
++             * Skipped Tombstone
++             * @default 0
++             */
++            skipped_tombstone: number;
+         };
+         /**
+          * SpecSyncResponse
+@@ -27734,6 +27766,16 @@ export interface components {
+              * @default 0
+              */
+             reparsed_changes: number;
++            /**
++             * Landed Files
++             * @default 0
++             */
++            landed_files: number;
++            /**
++             * Skipped Files
++             * @default 0
++             */
++            skipped_files: number;
+         };
+         /** ReviewResponse */
+         app__modules__workflow__schema__ReviewResponse: {
+diff --git a/frontend/src/lib/spec-workspaces.ts b/frontend/src/lib/spec-workspaces.ts
+index 6929bfab5..7c94c6fb9 100644
+--- a/frontend/src/lib/spec-workspaces.ts
++++ b/frontend/src/lib/spec-workspaces.ts
+@@ -331,3 +331,25 @@ export async function downloadSpecBundle(
+   return { blob, filename, specVersion };
+ }
+ 
++
++/** spec 同步冲突注册表行（GET /spec-conflicts 开放行，横幅数据源）。 */
++export interface SpecConflictItem {
++  id: string;
++  workspace_id: string;
++  stage: string;
++  conflict_type: string;
++  details_json: string | null;
++  status: string;
++  created_at: string;
++}
++
++/** 拉工作区 spec 同步冲突（默认只取开放行，横幅消费）。 */
++export async function listSpecConflicts(
++  workspaceId: string,
++  status = "open",
++): Promise<SpecConflictItem[]> {
++  const body = await apiFetch<{ items?: SpecConflictItem[] }>(
++    `/api/workspaces/${workspaceId}/spec-conflicts?status=${encodeURIComponent(status)}&limit=10`,
++  );
++  return body.items ?? [];
++}
+diff --git a/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/design.md b/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/design.md
+@@ -0,0 +1,92 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T16:20:13.220Z
++---
++# 设计记录（Design Record）— 2026-09-26-spec-sync-receipt-visibility
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-sync-receipt-visibility 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++三件事同源落盘：①apply_ops 两个墓碑拦截分支 + 版本冲突分支各计数（applied=总数-跳过），
++返回 dict 与双轨响应模型（daemon SpecIncrementalSyncResponse / CLI SpecSyncResponse）新增
++applied_ops/skipped_conflict/skipped_tombstone/platform_deleted 四键；全量通道 _write_spec_root
++两跳过分支计数（返回 tuple 扩 2 元），apply_sync 回执增 landed_files/skipped_files，
++skipped>0 服务端显式 warn。②apply_ops 冲突 → _upsert_sync_conflict 幂等写 spec_conflicts
++开放行（stage=spec-sync，details_json 带 server_versions/platform_deleted/conflicting_paths/
++last_seen_at，同工作区同 stage 只更新不重复建）；全绿 → _close_open_sync_conflicts 自动置
++resolved（闭环不留僵尸）。③前端 lib.listSpecConflicts + SpecSyncConflictBanner（工作区布局
++顶部细条警示，react-query 60s 轮询，失败静默）。选此方案：三面全是纯增量（响应字段带默认值、
++注册表用既有 SpecConflict 表与 GET/resolve 端点、横幅独立组件零侵入），不改任何既有字段语义。
++
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-sync-receipt-visibility 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++改动：spec_workspace/{service,schema,router}.py（计数+注册表 helper×2+回执透传）、
++platform_sync/{schema,router}.py（CLI 轨道回执计数）、_write_spec_root 返回 tuple 3→5 元
++（apply_sync/import SSE 两调用点同步）、测试×3 文件（形状断言补新键 + 新用例：冲突注册表
++开/幂等/闭环）、frontend：lib/spec-workspaces.ts（listSpecConflicts）、
++components/spec-sync-conflict-banner.tsx + 测试、workspaces/[id]/layout.tsx 挂载、
++api-types.ts/openapi.json 重生成。对外可见：三个同步端点响应**新增字段**（全带默认值零破坏）；
++spec_conflicts 表开始有 spec-sync 开放行（既有 GET /spec-conflicts 与 resolve 端点直接可消费）；
++工作区页面顶部新增冲突横幅。
++
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-sync-receipt-visibility 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序：计数是单请求内循环累加、注册表 upsert 按开放行单键幂等，与到达顺序无关。
++2. 并发写：注册表 helper 各自 commit 短事务；两并发冲突同步 → 后写覆盖 details（last_seen_at
++单调），不重复建行（SELECT 开放行 + 唯一工作区粒度语义靠先查后插，竞态最坏多建一行，resolve
++全绿时会全部关闭，无僵尸累积面）。
++3. 切换：响应新字段带默认值，旧 daemon/CLI 读新回执零破坏；新前端读旧后端——横幅查询走既有
++GET /spec-conflicts（旧后端恒空 → 横幅不渲染，安全退化）。
++4. 作用域：注册表行按 workspace_id 过滤；计数只进响应不落库；details_json 不含跨工作区数据。
++
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-sync-receipt-visibility 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：注册表先查后插的竞态在并发冲突同步下可能多建开放行——最坏影响是横幅多计一条，
++且下一次全绿同步全量关闭，无永久僵尸面；接受（加唯一约束属过度工程）。
++次生：applied_ops 把「同内容豁免 no-op」与「delete 无行 no-op」计入 applied——口径=「成功处理
++非跳过」，文档化即可；若消费方要严格落盘数可后续细分。
++放弃的方案：①冲突行按 path 粒度多行——横幅/查询面噪音大且 resolve 语义复杂，单行聚合+details
++清单更贴近「一次人工拍板动作」；②把计数写日志不发回执——daemon/CLI 无法程序消费，绿灯谎言
++依旧；③横幅用 SSE 推送——冲突是长滞留态，60s 轮询足够且零新基础设施。
++
++## 文件变更清单
++
++- backend/app/modules/spec_workspace/service.py
++- backend/app/modules/spec_workspace/schema.py
++- backend/app/modules/spec_workspace/router.py
++- backend/app/modules/platform_sync/schema.py
++- backend/app/modules/platform_sync/router.py
++- backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py
++- backend/app/modules/spec_workspace/tests/test_sync_incremental.py
++- backend/app/modules/spec_workspace/tests/test_bundle_sync.py
++- backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
++- backend/openapi.json
++- frontend/src/lib/api-types.ts
++- frontend/src/lib/spec-workspaces.ts
++- frontend/src/components/spec-sync-conflict-banner.tsx
++- frontend/src/components/__tests__/spec-sync-conflict-banner.test.tsx
++- frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx
+
+diff --git a/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/flow-state.yaml b/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/flow-state.yaml
+@@ -0,0 +1,16 @@
++tier: thick
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 054be6fc94a27dd4db58068223e4bf25318594a1
++updatedAt: '2026-09-25T22:51:45.960Z'
++upgrade_reason: verify 实测失败（实测失败：lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
++gate_summary: >-
++  test: skipped — 跳过原因：test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）。｜lint: passed ← cd backend && uv run ruff check
++  . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
++  typecheck（7.4s）｜门文件 18 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/proposal.md b/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/proposal.md
+@@ -0,0 +1,57 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T16:20:13.219Z
++---
++# 提案书（Proposal）— 2026-09-26-spec-sync-receipt-visibility
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:3628b97b0f86f562e3e4fd67138208f19d795c4d854366b7e2d83031ec0d5246:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-sync-receipt-visibility 留痕重锚 -->
++任务原话转写：动机：spec 同步链的「绿灯谎言」两处（2026-09-25 生产实证）：①全量推送回 {"ok":true} 却丢 2106 个成员零告警（回执无 landed/skipped 计数）；②增量冲突（base_version 乐观锁 / platform_deleted 墓碑拒收）只活在 daemon 日志一行 warn——平台 spec-conflicts 注册表恒空、无任何横幅，c84182bc 冲突挂了一周无人知晓，镜像与遥测全冻结。
++
++成功标准：
++- 全量同步回执（SpecSyncResponse）增 landed_files / skipped_files 计数；skipped>0 时服务端显式 warn 日志（跳过原因计入：墓碑前缀排除 + staging 成员缺失）
++- 增量同步回执（SpecIncrementalSyncResponse）增 applied_ops / skipped_conflict / skipped_tombstone 计数与 platform_deleted 列表（daemon 轨道此前不透传该字段——CLI 轨道有但 daemon 看不到）
++- 增量冲突发生时写 SpecConflict 注册表行（stage=spec-sync，details_json 带 server_versions/platform_deleted/冲突路径；同工作区同 stage 开放行幂等更新不重复建行），随后一次全绿同步自动把开放冲突行置 resolved（闭环不留僵尸）
++- 前端工作区布局挂 spec 同步冲突横幅：有开放 spec-sync 冲突时显示细条警示（数量 + 「镜像可能滞后」提示），无冲突不渲染
++- gen:types 契约同步（api-types.ts + openapi.json 随提交）
++- 后端单测：墓碑前缀跳过计数 / 冲突建行 + 成功闭环 / 计数字段在两回执中；前端横幅渲染/隐藏用例
++- 既有 spec_workspace 测试与前端布局相关测试零回归
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:02714a96b53e4d5edf83c96e161740ae0f7a0c6700a28b930bf0bec4ef101c2c:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-sync-receipt-visibility 留痕重锚 -->
++按成功标准机械推导，共 12 条验收面：
++1. 全量同步回执（SpecSyncResponse）增 landed_files
++2. skipped_files 计数
++3. skipped>0 时服务端显式 warn 日志（跳过原因计入：墓碑前缀排除 + staging 成员缺失）
++4. 增量同步回执（SpecIncrementalSyncResponse）增 applied_ops / skipped_conflict / skipped_tombstone 计数与 platform_deleted 列表（daemon 轨道此前不透传该字段——CLI 轨道有但 daemon 看不到）
++5. 增量冲突发生时写 SpecConflict 注册表行（stage=spec-sync，details_json 带 server_versions/platform_deleted/冲突路径
++6. 同工作区同 stage 开放行幂等更新不重复建行），随后一次全绿同步自动把开放冲突行置 resolved（闭环不留僵尸）
++7. 前端工作区布局挂 spec 同步冲突横幅：有开放 spec-sync 冲突时显示细条警示（数量 + 「镜像可能滞后」提示），无冲突不渲染
++8. gen:types 契约同步（api-types.ts + openapi.json 随提交）
++9. 后端单测：墓碑前缀跳过计数 / 冲突建行 + 成功闭环 / 计数字段在两回执中
++10. 前端横幅渲染
++11. 隐藏用例
++12. 既有 spec_workspace 测试与前端布局相关测试零回归
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:eb4ee766f71053d309db1672549df2557a54ec530752507c0036339a2db463e8:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-sync-receipt-visibility 留痕重锚 -->
++1. 全量同步回执（SpecSyncResponse）增 landed_files
++2. skipped_files 计数
++3. skipped>0 时服务端显式 warn 日志（跳过原因计入：墓碑前缀排除 + staging 成员缺失）
++4. 增量同步回执（SpecIncrementalSyncResponse）增 applied_ops / skipped_conflict / skipped_tombstone 计数与 platform_deleted 列表（daemon 轨道此前不透传该字段——CLI 轨道有但 daemon 看不到）
++5. 增量冲突发生时写 SpecConflict 注册表行（stage=spec-sync，details_json 带 server_versions/platform_deleted/冲突路径
++6. 同工作区同 stage 开放行幂等更新不重复建行），随后一次全绿同步自动把开放冲突行置 resolved（闭环不留僵尸）
++7. 前端工作区布局挂 spec 同步冲突横幅：有开放 spec-sync 冲突时显示细条警示（数量 + 「镜像可能滞后」提示），无冲突不渲染
++8. gen:types 契约同步（api-types.ts + openapi.json 随提交）
++9. 后端单测：墓碑前缀跳过计数 / 冲突建行 + 成功闭环 / 计数字段在两回执中
++10. 前端横幅渲染
++11. 隐藏用例
++12. 既有 spec_workspace 测试与前端布局相关测试零回归
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/requirements.md b/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/requirements.md
+@@ -0,0 +1,104 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T16:20:13.220Z
++---
++# 需求规格（Requirements）— 2026-09-26-spec-sync-receipt-visibility
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++### FR-01: 全量同步回执计数
++
++- Given：全量 tar 同步存在跳过成员（platform_deleted 墓碑前缀排除 / staging 成员缺失）
++- When：POST /spec-workspace/sync
++- Then：回执新增 landed_files 与 skipped_files；skipped>0 时服务端显式 warn 日志
++
++### FR-02: 增量同步回执计数（daemon/CLI 双轨）
++
++- Given：增量 ops 存在冲突跳过或墓碑拒收
++- When：POST sync-incremental（daemon 轨道）或 /changes/-/spec-sync（CLI 轨道）
++- Then：回执新增 applied_ops / skipped_conflict / skipped_tombstone / platform_deleted 四键
++
++### FR-03: 冲突进注册表
++
++- Given：增量同步发生冲突（乐观锁版本不匹配或墓碑拒收）
++- When：apply_ops 处理完成
++- Then：幂等写 spec_conflicts 开放行（stage=spec-sync；details_json 含 server_versions / platform_deleted / conflicting_paths / last_seen_at）；同工作区同 stage 开放行只更新不重复建
++
++### FR-04: 全绿闭环
++
++- Given：存在开放的 spec-sync 冲突行
++- When：下一次全绿增量同步
++- Then：开放行自动置 resolved（不留僵尸行）
++
++### FR-05: 工作区冲突横幅
++
++- Given：spec_conflicts 存在开放行
++- When：渲染工作区布局
++- Then：顶部细条警示（数量 + 镜像可能滞后提示）；无开放行或请求失败不渲染
++
++### FR-06: 契约同步与零回归
++
++- Given：响应 schema 变更与既有测试
++- When：gen:types 与定向测试
++- Then：api-types.ts / openapi.json 同步重生成随提交；两模块 430 passed 1 skipped；前端横幅 3 passed + tsc 0 错
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py::test_sync_conflict_registry_open_and_close（skipped_tombstone=1 / applied_ops=0 断言）
++
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/spec_workspace/tests/test_sync_incremental.py（端点形状断言已补 applied_ops/skipped_conflict/skipped_tombstone/platform_deleted 四键）+ test_platform_deleted_guard.py 同用例回执四键断言
++
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py::test_sync_conflict_registry_open_and_close（开放行唯一 + details_json 含 platform_deleted 路径断言）
++
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py::test_sync_conflict_registry_open_and_close 第③段（全绿同步后开放行为空）
++
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/__tests__/spec-sync-conflict-banner.test.tsx（三态：非空渲染/空不渲染/失败静默）
++
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向回归：cd backend && uv run pytest app/modules/spec_workspace app/modules/platform_sync -q --no-cov（430 passed 1 skipped）+ cd frontend && pnpm exec vitest run src/components/__tests__/spec-sync-conflict-banner.test.tsx（3 passed）+ pnpm exec tsc --noEmit（0 错）
++
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向回归：cd backend && uv run pytest app/modules/spec_workspace app/modules/platform_sync -q --no-cov（430 passed 1 skipped）+ cd frontend && pnpm exec vitest run src/components/__tests__/spec-sync-conflict-banner.test.tsx（3 passed）+ pnpm exec tsc --noEmit（0 错）
++
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向回归：cd backend && uv run pytest app/modules/spec_workspace app/modules/platform_sync -q --no-cov（430 passed 1 skipped）+ cd frontend && pnpm exec vitest run src/components/__tests__/spec-sync-conflict-banner.test.tsx（3 passed）+ pnpm exec tsc --noEmit（0 错）
++
++
++<!--AGENT:测试绑定FR-09 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向回归：cd backend && uv run pytest app/modules/spec_workspace app/modules/platform_sync -q --no-cov（430 passed 1 skipped）+ cd frontend && pnpm exec vitest run src/components/__tests__/spec-sync-conflict-banner.test.tsx（3 passed）+ pnpm exec tsc --noEmit（0 错）
++
++
++<!--AGENT:测试绑定FR-10 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向回归：cd backend && uv run pytest app/modules/spec_workspace app/modules/platform_sync -q --no-cov（430 passed 1 skipped）+ cd frontend && pnpm exec vitest run src/components/__tests__/spec-sync-conflict-banner.test.tsx（3 passed）+ pnpm exec tsc --noEmit（0 错）
++
++定向回归：cd backend && uv run pytest app/modules/spec_workspace app/modules/platform_sync -q --no-cov（430 passed 1 skipped）+ cd frontend && pnpm exec vitest run src/components/__tests__/spec-sync-conflict-banner.test.tsx（3 passed）+ pnpm exec tsc --noEmit（0 错）
++
++backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py::test_sync_conflict_registry_open_and_close（skipped_tombstone=1 / applied_ops=0 断言）
++
++tests/test_platform_deleted_guard.py::test_sync_conflict_registry_open_and_close（skipped_tombstone=1/applied=0 断言）
++
++
++<!--AGENT:测试绑定FR-11 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向回归：cd backend && uv run pytest app/modules/spec_workspace app/modules/platform_sync -q --no-cov（430 passed 1 skipped）+ cd frontend && pnpm exec vitest run src/components/__tests__/spec-sync-conflict-banner.test.tsx（3 passed）+ pnpm exec tsc --noEmit（0 错）
++
++定向回归：cd backend && uv run pytest app/modules/spec_workspace app/modules/platform_sync -q --no-cov（430 passed 1 skipped）+ cd frontend && pnpm exec vitest run src/components/__tests__/spec-sync-conflict-banner.test.tsx（3 passed）+ pnpm exec tsc --noEmit（0 错）
++
++
++<!--AGENT:测试绑定FR-12 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向回归：cd backend && uv run pytest app/modules/spec_workspace app/modules/platform_sync -q --no-cov（430 passed 1 skipped）+ cd frontend && pnpm exec vitest run src/components/__tests__/spec-sync-conflict-banner.test.tsx（3 passed）+ pnpm exec tsc --noEmit（0 错）
++
++定向回归：cd backend && uv run pytest app/modules/spec_workspace app/modules/platform_sync -q --no-cov（430 passed 1 skipped）+ cd frontend && pnpm exec vitest run src/components/__tests__/spec-sync-conflict-banner.test.tsx（3 passed）+ pnpm exec tsc --noEmit（0 错）
++
+
+diff --git a/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/tasks.md b/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-spec-sync-receipt-visibility/tasks.md
+@@ -0,0 +1,21 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T16:20:13.221Z
++---
++# 任务注册表（Tasks）— 2026-09-26-spec-sync-receipt-visibility
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++- [ ] task-01: 全量同步回执（SpecSyncResponse）增 landed_files
++- [ ] task-02: skipped_files 计数
++- [ ] task-03: skipped>0 时服务端显式 warn 日志（跳过原因计入：墓碑前缀排除 + staging 成员缺失）
++- [ ] task-04: 增量同步回执（SpecIncrementalSyncResponse）增 applied_ops / skipped_conflict / skipped_to…
++- [ ] task-05: 增量冲突发生时写 SpecConflict 注册表行（stage=spec-sync…
++- [ ] task-06: 同工作区同 stage 开放行幂等更新不重复建行），随后一次全绿同步自动把开放冲突行置 resolved（闭环不留僵尸）
++- [ ] task-07: 前端工作区布局挂 spec 同步冲突横幅：有开放 spec-sync 冲突时显示细条警示（数量 + 「镜像可能滞后」提示），无冲突不渲染
++- [ ] task-08: gen:types 契约同步（api-types.ts + openapi.json 随提交）
++- [ ] task-09: 后端单测：墓碑前缀跳过计数 / 冲突建行 + 成功闭环 / 计数字段在两回执中
++- [ ] task-10: 前端横幅渲染
++- [ ] task-11: 隐藏用例
++- [ ] task-12: 既有 spec_workspace 测试与前端布局相关测试零回归
