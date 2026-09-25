@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-change-detail-assets-usability",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-25-change-detail-assets-usability:flow:FR-01",
+      "tests": [
+        "__tests__/knowledge-page.test.ts",
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-detail-assets-usability"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-25-change-detail-assets-usability:flow:FR-03",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts",
+        "frontend/src/components/explorer/__tests__/file-preview.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-detail-assets-usability"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-25-change-detail-assets-usability:flow:FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py",
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-detail-assets-usability"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-25-change-detail-assets-usability:flow:FR-05",
+      "tests": [
+        "frontend/src/components/changes/__tests__/scope-audit-command-card.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-detail-assets-usability"
+    }
+  ]
+}

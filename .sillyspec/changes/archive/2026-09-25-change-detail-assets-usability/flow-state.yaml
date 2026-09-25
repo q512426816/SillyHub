@@ -4,11 +4,16 @@ substeps:
   artifacts: done
   ledger: done
   patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
 baseline_commit: c72d04c8f196a81fce03d43ccfe9705e7d3390f8
-updatedAt: '2026-09-25T08:42:35.468Z'
+updatedAt: '2026-09-25T08:59:04.563Z'
 route_hint: thick
 edit_ratio: 1
 gate_summary: >-

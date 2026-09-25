@@ -269,3 +269,105 @@
   confirmed_at: null
   source_change: 2026-09-25-change-precipitated-assets
   status: active
+
+## FR-lib-changes-026 FR 索引行点击落到知识库的具体条目
+变更：2026-09-25-change-detail-assets-usability
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 变更详情「沉淀资产」卡列出若干 FR 索引条目（来源 knowledge/fr/<域>.md，条目 id 形如 FR-<域>-NNN）；；When 用户点击某一行；；Then 知识库页打开该 FR 所属文件，并滚动定位到这一条 FR 的条目卡（DOM 落点 data-entry-anchor=<知识库相对文件名>#<FR id>）；
+全文：.sillyspec/changes/archive/2026-09-25-change-detail-assets-usability/requirements.md#FR-01
+最近确认：39f2eb4fe0cd00568c6bb63bc7248c2430b11182
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-detail-assets-usability:flow:FR-01
+  tests: __tests__/knowledge-page.test.ts | frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-detail-assets-usability
+  status: active
+
+## FR-lib-changes-027 决策索引行点击落到知识库的具体条目
+变更：2026-09-25-change-detail-assets-usability
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 「沉淀资产」卡列出若干决策蒸馏条目（来源 knowledge/decisions/*.md，条目 id 形如 D-NNN@vN）；；When 用户点击某一行；；Then 与 FR-01 同款落位语义：选中该决策文件并滚动到该条目卡（data-entry-anchor=<文件名>#<D id>）。
+全文：.sillyspec/changes/archive/2026-09-25-change-detail-assets-usability/requirements.md#FR-02
+最近确认：39f2eb4fe0cd00568c6bb63bc7248c2430b11182
+
+## FR-lib-changes-028 测试绑定行可查看仓库内测试文件内容
+变更：2026-09-25-change-detail-assets-usability
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 「沉淀资产」卡「测试绑定」组列出 test-trace 行（锚点 / 测试文件路径 / 状态）；；When 用户点击该行给出的测试文件路径；；Then 弹出只读预览弹窗，展示仓库内该文件内容（走 explorer 取数，不依赖 spec 镜像），失败时弹窗内给出可读错误提示；
+全文：.sillyspec/changes/archive/2026-09-25-change-detail-assets-usability/requirements.md#FR-03
+最近确认：39f2eb4fe0cd00568c6bb63bc7248c2430b11182
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-detail-assets-usability:flow:FR-03
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts | frontend/src/components/explorer/__tests__/file-preview.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-detail-assets-usability
+  status: active
+
+## FR-lib-changes-029 归档留档可看到具体改动
+变更：2026-09-25-change-detail-assets-usability
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 已归档变更的归档目录存在 change-patch.json（含 files 清单）与 change.patch（冻结全量 diff）；；When 用户展开「沉淀资产」卡的「归档留档」组； 用户点击清单中某个文件；；Then 除既有 files/additions/deletions 统计外，列出 change-patch.json 的文件清单（超上限时显式标注截断）； 弹出该文件在
+全文：.sillyspec/changes/archive/2026-09-25-change-detail-assets-usability/requirements.md#FR-04
+最近确认：39f2eb4fe0cd00568c6bb63bc7248c2430b11182
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-detail-assets-usability:flow:FR-04
+  tests: backend/app/modules/change/tests/test_assets.py | frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-detail-assets-usability
+  status: active
+
+## FR-lib-changes-030 范围对账降级态显式展示、不再误显三态
+变更：2026-09-25-change-detail-assets-usability
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given scope-audit 返回 ok=true 且 degraded_reason 非空（计划侧不可用，降级为「实际侧 only 视图」，行内无三态字段）；；When 变更详情页渲染范围对账卡；；Then 不再渲染三态 chip 的 0/0/0，改为显式展示降级原因 + 口径说明（该视图无三态列、文件面为实时窗口），明细弹窗同样带降级横幅；
+全文：.sillyspec/changes/archive/2026-09-25-change-detail-assets-usability/requirements.md#FR-05
+最近确认：39f2eb4fe0cd00568c6bb63bc7248c2430b11182
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-detail-assets-usability:flow:FR-05
+  tests: frontend/src/components/changes/__tests__/scope-audit-command-card.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-detail-assets-usability
+  status: active
+
+## FR-lib-changes-031 相关测试与静态检查全绿
+变更：2026-09-25-change-detail-assets-usability
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 本变更改动了后端 assets/scope-audit 展示链路与前端两张卡、知识库页；；Then 后端 test_assets.py、前端 change-assets-card / scope-audit-command-card / knowledge-p
+全文：.sillyspec/changes/archive/2026-09-25-change-detail-assets-usability/requirements.md#FR-06
+最近确认：39f2eb4fe0cd00568c6bb63bc7248c2430b11182
