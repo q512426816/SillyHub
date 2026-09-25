@@ -86,6 +86,39 @@ sillyspec 仓提交 `80355e9b`（2026-09-24 `docs(knowledge): 合回知识面（
 即：**页面 17.7% 的覆盖率，是「拿平台的知识当分母、去匹配 CLI 的命中记录」的残值**，
 既不反映 CLI 侧知识使用率，也不反映平台侧。度量口径必须先修好这一层，再谈覆盖率数字。
 
+## 本地文件对账（一切以本地为准，2026-09-25）
+
+两仓本地知识树 × 本地 hits（平台同口径复算）vs 页面实际：
+
+| 指标 | sillyspec 仓（页 c84182bc） | multi-agent-platform 仓（页 b97f8231） |
+|---|---|---|
+| 本地知识文件 | 86（含 6 proposed） | 102（含 40 generated + INDEX） |
+| **页面清单** | **67 → 缺 19**（13 个 decisions/fr + 6 proposed） | **61 → 缺 41**（整个 generated/ 40 个 + INDEX） |
+| 本地条目 | 1962 | 1649 |
+| 页面条目 | 1758（13 文件少 170 条 + decisions/runtime 41→7） | 1558 |
+| 本地口径覆盖率 | **554/1962 = 28.2%**（死 1408） | **310/1649 = 18.8%**（死 1339） |
+| 页面覆盖率 | 311/1758 = 17.7%（死 1447） | 195/1558 = 12.5%（死 1363） |
+| 本地 hits | 3398 行（3389 备份 + 9 现行）/ 10829 次 | 3760 行 / 28467 次 |
+| 命中无法归属本地 | 55 锚点 / **7138 次 = 65.9%**（9-24 合并删掉的自有 handbook 小节） | 6 锚点 / **3597 次 = 12.6%**（emoji 前缀 / 点号 / 标题漂移） |
+
+本仓（平台）自身的 6 条活性漂移（本地 INDEX 写的锚点 vs 本地文件标题算出的锚点，命中次数为本地 hits 实测）：
+
+| INDEX 写的锚点 | 本地文件算出的锚点 | 命中 |
+|---|---|---|
+| `known-issues.md#sillyhub-daemon-于-2026-06-14-从-python-重写为-nodejs` | `…#-sillyhub-daemon-…`（emoji 去掉后空格转的 `-` 留在首） | 890 |
+| `known-issues.md#本机可能存在多个-daemon-实例` | `…#-本机可能存在多个-daemon-实例` | 889 |
+| `known-issues.md#agentrunlog-无-metadata-列三层日志-metadata-丢失` | `…#-agentrunlog-无-metadata-列--三层日志-metadata-丢失`（斜杠处 `-` 差异） | 321 |
+| `known-issues.md#ci-hook-复合命令可绕过-claude-pretooluse-层` | `…#-ci-hook-复合命令可绕过-claude-pretooluse-层` | 4 |
+| `…#-daemon-pnpm-overrides-把-claude-agent-sdk-8-平台二进制硬钉-0.3.181` | `…#…硬钉-03181`（点号被丢） | 1130 |
+| `…#-全-docker-部署本地-pg-容器端口未映射-hostrun-alembicpytest-连不上` | `…#…未映射-hosthost-跑-alembicpytest-连不上`（逗号/斜杠规则不同 + 标题漂移） | 363 |
+
+CLI 仓自有知识面本地可恢复：`.sillyspec/.pre-merge-backup-2026-09-24T0620/knowledge/`
+（`conventions.md` 19 条 CLI 小节 / `known-issues.md` 40 条 / CLI `patterns.md`）+
+同目录 `.runtime/knowledge-hits.jsonl`（3389 行，即页面数据源）。
+
+**验收标准（以本地文件为准）**：修完后逐文件对账三项全等——① 知识文件清单；
+② 每文件条目数；③ 文件级命中数（`use_count` / `entry_counts`）。
+
 ## 平台侧配套（本仓 backlog，非工具缺陷）
 
 - P1 覆盖率分母分层：只统计「可路由条目」（INDEX 路由面 ∪ 文件级可命中文件），或按 zone
