@@ -85,6 +85,20 @@ describe('KnowledgeHitsPeriodicUploader.roundOnce', () => {
     expect(uploadMock).not.toHaveBeenCalled();
   });
 
+  it('uploader 回执 false（内部吞错）→ 不记印，同 mtime 下轮也重试（三审钉子）', async () => {
+    await makeWs(UUID_A, '{"n":1}\n');
+    uploadMock.mockResolvedValueOnce(false);
+    const u = new KnowledgeHitsPeriodicUploader({} as never, 60_000, STATE);
+    const r1 = await u.roundOnce();
+    expect(r1.attempted).toEqual([]); // 失败不记印
+    uploadMock.mockResolvedValue(true);
+    const r2 = await u.roundOnce(); // 文件未变（同 mtime）：仍应重试
+    expect(r2.attempted).toEqual([UUID_A]);
+    expect(uploadMock).toHaveBeenCalledTimes(2);
+    const r3 = await u.roundOnce(); // 成功后才短路
+    expect(r3.skippedUnchanged).toEqual([UUID_A]);
+  });
+
   it('上行抛错不冒泡（周期通道不中断），下轮照常', async () => {
     await makeWs(UUID_A, '{"n":1}\n');
     uploadMock.mockRejectedValueOnce(new Error('HTTP 502'));
