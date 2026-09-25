@@ -74,3 +74,9 @@ cd frontend && rm -rf node_modules && pnpm install --frozen-lockfile
 ```bash
 SILLYSPEC_QUICK_TEST_GATE=skip sillyspec run quick --done --change <id> ...
 ```
+
+## 处置记录（2026-09-24）
+
+复核闭环：环境修复（node_modules 重装）与工具侧 CNF 降档（sillyspec 仓
+commit `0444a0b0`）均已实证在仓——`test/verify-gate-command-missing.test.mjs`
+7/7 通过（本日复跑确认）。无遗留，归档。

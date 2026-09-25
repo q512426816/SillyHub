@@ -1,0 +1,31 @@
+{
+  "change": "2026-09-25-change-precipitated-assets",
+  "baseline": "5ae347894da3d03154c45783d115e634c8bc2390",
+  "head": "a7eca07270b25dbe374717aaf8379f57254fe3df",
+  "files": [
+    "backend/app/modules/change/assets.py",
+    "backend/app/modules/change/router.py",
+    "backend/app/modules/change/schema.py",
+    "backend/app/modules/change/tests/test_assets.py",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+    "frontend/src/components/changes/detail/change-assets-card.tsx",
+    "frontend/src/lib/changes.ts",
+    ".sillyspec/changes/2026-09-25-change-precipitated-assets/decisions.md",
+    ".sillyspec/changes/2026-09-25-change-precipitated-assets/design.md",
+    ".sillyspec/changes/2026-09-25-change-precipitated-assets/flow-state.yaml",
+    ".sillyspec/changes/2026-09-25-change-precipitated-assets/proposal.md",
+    ".sillyspec/changes/2026-09-25-change-precipitated-assets/prototype-precipitated-assets-card.html",
+    ".sillyspec/changes/2026-09-25-change-precipitated-assets/requirements.md",
+    ".sillyspec/changes/2026-09-25-change-precipitated-assets/tasks.md"
+  ],
+  "totals": {
+    "files": 15,
+    "additions": 1202,
+    "deletions": 0
+  },
+  "savedAt": "2026-09-25T04:13:11.584Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "59a6256068c17ba23b617122acde6663ee2287a0c05512c490b79446d84e70f4",
+  "patchStatus": "ok"
+}

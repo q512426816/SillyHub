@@ -1,0 +1,2079 @@
+diff --git a/.claude/CLAUDE.md b/.claude/CLAUDE.md
+index e8e93bbb3..1fef6228d 100644
+--- a/.claude/CLAUDE.md
++++ b/.claude/CLAUDE.md
+@@ -10,7 +10,7 @@
+ 1. 禁止绕过本文件规则和 SillySpec 流程。
+ 2. 修改代码前，必须先说明依据的文档路径或现有代码依据。
+ 3. 新功能 / 大改动必须走完整 SillySpec 流程技能：`brainstorm → plan → execute → verify → （人工确认再执行）archive`。
+-4. 小修复 / 小调整走 SillySpec quick 技能：`sillyspec run quick`。
++4. 小修复 / 小调整走 SillySpec 轻量变更（thin，2 调用协议）：`sillyspec flow start --change <名> --input "<多行需求：动机一行 + 独立节头行「成功标准：」+ 每行一条 - <标准>>"` → 干活（改代码写测试）→ `sillyspec flow done --change <名>`。注意：`--input` 的成功标准禁止单行内联（会被清晰度门 exit 2 拒）；`flow done` 中间态 exit 1 属正常（空槽拒收/实测失败自动升厚），修复后重跑同命令断点续。（旧的 `sillyspec run quick` 已退役，仅存量收尾。）
+ 5. 执行顺序：文档 → 读代码 → 写测试 → 写实现 → 跑测试 → 验收 → 更新文档。 
+ 6. 中途停下用 `sillyspec status` / `sillyspec resume` 存进度，不直接 commit 半成品。
+ 7. 禁止无依据改代码，禁止先随意实现再补文档。 
+@@ -27,7 +27,7 @@
+ 18. 注释和实现不一致是万恶之源，遇到不一致的要及时修正
+ 19. SillySpec 任务记录是隔离的
+     - **永不重置 / reset / 清零已存在的 change**。多个活跃 change 各自 `--change <名>` 隔离,不重叠。代码不重叠 = 新 `--change`,不是清旧 change。
+-    - quick:同一 QUICKLOG 文件按 ql-ID 条目追加,不是单槽位,不冲突。
++    - quick(存量通道,退役中):同一 QUICKLOG 文件按 ql-ID 条目追加,不是单槽位,不冲突。旧的 `sillyspec run quick` 已退役——仅存量变更继续走该通道收尾;新的小修复一律走轻量变更(规则 4)。
+ 20. 前端样式统一参考（2026-08-20 起为 AI-Native 双主题系统）：
+ 21. 
+   * `.sillyspec/changes/archive/2026-08-20-frontend-ai-native-style/prototype-frontend-ai-native-style.html`（设计系统总纲·原型）
+diff --git a/backend/app/modules/change/binding.py b/backend/app/modules/change/binding.py
+index 086464e7f..5ea0cad3a 100644
+--- a/backend/app/modules/change/binding.py
++++ b/backend/app/modules/change/binding.py
+@@ -8,6 +8,9 @@ bind 函数，供 W2 检测写入口（run_sync 命令解析 / platform_sync age
+   quick 会话 id，D-004@v1）；其余 ``run`` 阶段支持 ``--change <名>``（空格）与
+   ``--change=<名>``（等号）两形式；``名 == "default"`` 跳过（D-005@v2 解析层
+   第一道）；progress/status/archive 等非 run 子命令无产出。
++- thin（2026-09-25-change-center-thin-flow task-04）：``sillyspec flow
++  start|done|amend-draft --change <名>`` 同样产出变更绑定——thin 派发会话的
++  变更绑定**唯一**依靠本命令解析通道（派发链全程不写 change_session_links）。
+ - bind 事务口径：**不自行 commit**（跟随调用方事务），savepoint
+   （``begin_nested``）+ flush 落行，失败仅 ``log.warning`` 不抛（对齐
+   ``change/service.py:_bind_change_to_session`` 的 best-effort 风格）。
+@@ -33,6 +36,11 @@ log = get_logger(__name__)
+ # bind_session_to_change 内部双道守卫统一跳过。
+ DEFAULT_CHANGE_KEY = "default"
+ 
++# flow 命令族中携带 --change <变更名> 的子命令（2026-09-25-change-center-thin-flow
++# task-04）：thin 派发会话的 2 调用协议命令。progress/status 等只读子命令无
++# --change，不在其列。
++_FLOW_CHANGE_SUBCOMMANDS: frozenset[str] = frozenset({"start", "done", "amend-draft"})
++
+ 
+ @dataclass(frozen=True)
+ class SpecCommandBinding:
+@@ -60,6 +68,13 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
+       ``--change=<名>``（等号）；``--change`` 的值取紧随其后的非选项 token
+       （以 ``-`` 开头视为选项 → 无值不产出）。
+     - ``名 == "default"`` 跳过（D-005@v2 解析层第一道，函数内还有兜底）。
++    - **flow 命令族**（2026-09-25-change-center-thin-flow task-04）：定位
++      ``sillyspec flow <start|done|amend-draft>`` token 序列，在其后 token 里
++      同规则找 ``--change <名>`` —— thin 派发会话执行 2 调用协议
++      （``flow start`` → 干活 → ``flow done``），变更绑定**唯一**依靠本命令
++      解析通道；``名 == "default"`` 同样跳过。flow 其它子命令
++      （progress/status 等）无 ``--change`` 自然无产出。
++    - run 与 flow 命中其一即处理（一段命令只属一族，先查 run 再查 flow）。
+ 
+     边界（可接受，key 均 slug 格式）：引号内含空格的 ``--change "a b"`` 不支持
+     （token 切分会把 ``"a` 当值）；本函数只做提取不做归属校验，workspace/会话
+@@ -68,19 +83,35 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
+     bindings: list[SpecCommandBinding] = []
+     for segment in iter_command_segments(command):
+         tokens = segment.split()
++        # ── 族一：sillyspec run（quick 子命令跳过）──
+         run_idx: int | None = None
+         for i in range(len(tokens) - 1):
+             if tokens[i] == "sillyspec" and tokens[i + 1] == "run":
+                 run_idx = i
+                 break
+-        if run_idx is None:
+-            # 非 sillyspec run 命令（含 progress/status/archive 等子命令、
+-            # grep sillyspec 等参数含字样误归）——无产出。
++        if run_idx is not None:
++            if run_idx + 2 < len(tokens) and tokens[run_idx + 2] == "quick":
++                # D-004@v1：quick 子命令的 --change 是 CLI quick 会话 id，跳过。
++                continue
++            change_key = _parse_change_key(tokens, start=run_idx + 2)
++            if change_key is not None and change_key != DEFAULT_CHANGE_KEY:
++                bindings.append(SpecCommandBinding(kind="change", change_key=change_key))
+             continue
+-        if run_idx + 2 < len(tokens) and tokens[run_idx + 2] == "quick":
+-            # D-004@v1：quick 子命令的 --change 是 CLI quick 会话 id，跳过。
++        # ── 族二：sillyspec flow start|done|amend-draft（thin 2 调用协议）──
++        flow_idx: int | None = None
++        for i in range(len(tokens) - 2):
++            if (
++                tokens[i] == "sillyspec"
++                and tokens[i + 1] == "flow"
++                and tokens[i + 2] in _FLOW_CHANGE_SUBCOMMANDS
++            ):
++                flow_idx = i
++                break
++        if flow_idx is None:
++            # 既非 run 也非 flow 命令族（含 progress/status/archive 等子命令、
++            # grep sillyspec 等参数含字样误归）——无产出。
+             continue
+-        change_key = _parse_change_key(tokens, start=run_idx + 2)
++        change_key = _parse_change_key(tokens, start=flow_idx + 3)
+         if change_key is None or change_key == DEFAULT_CHANGE_KEY:
+             continue
+         bindings.append(SpecCommandBinding(kind="change", change_key=change_key))
+diff --git a/backend/app/modules/change/dispatch.py b/backend/app/modules/change/dispatch.py
+index 5a9ee94c5..b19a830b8 100644
+--- a/backend/app/modules/change/dispatch.py
++++ b/backend/app/modules/change/dispatch.py
+@@ -10,6 +10,7 @@ from __future__ import annotations
+ import asyncio
+ import functools
+ import json
++import re
+ import sqlite3
+ import uuid
+ from dataclasses import dataclass, field
+@@ -133,6 +134,19 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
+         read_only=False,
+         description="Quick fix: run SillySpec quick 3 steps (understand/implement/record).",
+     ),
++    # thin（2026-09-25-change-center-thin-flow）：轻量变更辅助阶段，2 调用协议。
++    # 与 quick 同走 ``manual_dispatch`` 泛化路径：配置在场即可经
++    # ``POST /changes/{id}/dispatch`` 派发 thin agent，无需改派发逻辑。
++    # requires_worktree=False / read_only=False：thin 流程需写代码，走 daemon-client，
++    # change 目录由 sillyspec flow 自建（模板细节见 prompts/thin.md）。
++    StageEnum.THIN.value: StageAgentConfig(
++        enabled=True,
++        prompt_template="thin.md",  # 轻量变更 prompt 模板（2 调用协议）
++        phase="Thin",
++        requires_worktree=False,
++        read_only=False,
++        description="Thin flow: 2-call protocol (flow start → work → flow done).",
++    ),
+ }
+ 
+ # ---------------------------------------------------------------------------
+@@ -141,6 +155,38 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
+ 
+ _DISPATCH_CHAIN_LIMIT: int = 10
+ 
++# thin 变更 change_key 白名单（2026-09-25-change-center-thin-flow task-02，纵深防御）：
++# 上游 sillyspec 3.30.0 已在 flow 入口做同款校验（拒 `..`/路径分隔/default/
++# quick-<hex8>），平台侧自查防旧版 CLI 与穿越名——thin 派发会把 change_key 直接
++# 拼进 `sillyspec flow start --change <名>` prompt 命令，名字穿越会误导 agent 在
++# 非预期目录跑 flow。
++_THIN_CHANGE_KEY_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
++_THIN_QUICK_SESSION_KEY_RE = re.compile(r"^quick-[0-9a-f]{8}$")
++
++
++def _validate_thin_change_key(change_key: str) -> None:
++    """校验 thin 变更的 change_key 合法性，非法 raise AgentRunError 拒绝派发。
++
++    合法 = 匹配 ``^[A-Za-z0-9_.\\-]+$``（天然排除路径分隔符）且非：
++    - ``default``（CLI 无名操作伪键，binding 同款跳过值）；
++    - ``quick-<hex8>``（CLI 内部 quick 会话 id 形态，属 quick 通道残留键）；
++    - 含 ``..`` 段（路径穿越）。
++    仅对 ``current_stage == "thin"`` 的变更调用（非 thin 变更零作用）。
++    """
++    from app.modules.agent.service import AgentRunError
++
++    if (
++        not _THIN_CHANGE_KEY_RE.fullmatch(change_key)
++        or change_key == "default"
++        or _THIN_QUICK_SESSION_KEY_RE.fullmatch(change_key) is not None
++        or ".." in change_key
++    ):
++        raise AgentRunError(
++            f"轻量变更（thin）的变更名不合法，已拒绝派发：{change_key!r}"
++            "（仅允许字母/数字/点/连字符/下划线，且不能是 default、"
++            "quick-<hex8> 会话键或包含 .. 段）"
++        )
++
+ 
+ def _get_chain_count(stages: dict) -> int:
+     """从 Change.stages JSON 中读取连续 auto-dispatch 计数。"""
+@@ -523,6 +569,13 @@ async def dispatch(
+     if change is None:
+         return {"dispatched": False, "reason": "change_not_found"}
+ 
++    if target_stage == StageEnum.THIN.value:
++        # thin 变更 change_key 白名单（task-02 纵深防御）：change_key 会拼进
++        # thin.md 的 flow 命令，穿越名直接拒绝派发（raise AgentRunError →
++        # manual_dispatch 端点 400）。这是本函数唯一的主动拒绝路径（区别于
++        # best-effort 失败吞错），故放在 last_dispatch 写入之前——不留痕迹。
++        _validate_thin_change_key(change.change_key)
++
+     # dict() copy avoids SQLAlchemy JSON in-place mutation not persisting.
+     stages = dict(change.stages or {})
+     # 第四批 F1 merge 语义（同 stage 保留 gate_retry_count/gate_last_errors，
+@@ -1780,6 +1833,34 @@ class SillySpecStageDispatchService:
+                 except OSError:
+                     pass
+ 
++        # 守卫 A（2026-09-25-change-center-thin-flow task-05）：thin 变更阶段回洗双守卫之一。
++        # CLI 红线：thin（轻量变更）进度落 flow-state.yaml 不落 sillyspec.db——DB 行
++        # current_stage 全程停留 'scan'、status 'active'，照常投影会把平台 'thin' 洗回
++        # 'scan' 并在 stages JSON 留下幽灵 scan 组。谓词（与守卫 B——platform_sync
++        # _sync_change_stage_status——同一规则，不引入第二套判断）：
++        #   平台 current_stage=='thin' 且 DB 行 status != 'archived'
++        #     → 跳过 current_stage 回写与 stages JSON 写入（仅 updated_at 时间戳照常）；
++        #   DB 行 status=='archived'（flow done 后）
++        #     → 放行下方既有归档翻转链（读侧三源并集承接）；
++        #   非 thin 变更零作用（逐字走现状）。
++        if change.current_stage == StageEnum.THIN.value and row["status"] != "archived":
++            log.info(
++                "sync_stage_status.thin_guard_skip",
++                change_id=str(change_id),
++                change_key=change.change_key,
++                db_current_stage=db_current_stage,
++                db_status=row["status"],
++            )
++            change.updated_at = datetime.now(UTC)
++            session.add(change)
++            await session.commit()
++            return StageSyncResult(
++                synced=True,
++                change_id=change_id,
++                run_id=run_id,
++                current_stage=change.current_stage,
++            )
++
+         # 投影到 Change
+         if change.current_stage != db_current_stage:
+             log.info(
+diff --git a/backend/app/modules/change/model.py b/backend/app/modules/change/model.py
+index 789bc23d7..67463f725 100644
+--- a/backend/app/modules/change/model.py
++++ b/backend/app/modules/change/model.py
+@@ -30,12 +30,18 @@ from app.models.base import BaseModel
+ 
+ 
+ class StageEnum(enum.StrEnum):
+-    """变更流程阶段枚举：5 主阶段 + quick 辅助阶段。
++    """变更流程阶段枚举：5 主阶段 + quick/thin 辅助阶段。
+ 
+     quick（2026-08-12-quick-independent-stage）是 SillySpec 的独立辅助阶段
+     （``VALID_STAGES`` 含 quick，``auxiliary: true``），与主线 5 阶段平行，自己
+     跑三步就结束，**不走** brainstorm→plan→execute→verify→archive 主线，
+     故不进 :data:`TRANSITIONS`，也不进 :meth:`spec_stages`（主线上下游判定）。
++
++    thin（2026-09-25-change-center-thin-flow）是「轻量变更」的辅助阶段：
++    change_type=="quick" 的新变更分流至 thin，agent 派发走 2 调用协议
++    （``sillyspec flow start`` → 干活 → ``sillyspec flow done``），跑完即终态
++    对齐 QUICK 先例——不进 TRANSITIONS / STAGE_ORDER（CLI 红线：thin 进度落
++    flow-state.yaml 不落 sillyspec.db，平台侧由双守卫保持阶段恒显 thin）。
+     """
+ 
+     # ── 变更流程主阶段（scan 不在变更流程，由 workspace 初始化承载） ──
+@@ -46,6 +52,7 @@ class StageEnum(enum.StrEnum):
+     ARCHIVE = "archive"
+     # ── 辅助阶段（独立流程，不进主线上下游判定） ──
+     QUICK = "quick"
++    THIN = "thin"
+ 
+     @classmethod
+     def spec_stages(cls) -> list[StageEnum]:
+@@ -64,12 +71,12 @@ class StageEnum(enum.StrEnum):
+ 
+     @classmethod
+     def spec_auxiliary_stages(cls) -> list[StageEnum]:
+-        """SillySpec 辅助阶段（quick 等，独立流程，不进主线上下游判定）。
++        """SillySpec 辅助阶段（quick/thin 等，独立流程，不进主线上下游判定）。
+ 
+         与 :meth:`spec_stages` 互补：主线靠 ``spec_stages``，辅助阶段（无后继
+         转换、跑完即终态）靠本方法，二者并集 = 本平台支持的 SillySpec 全量阶段。
+         """
+-        return [cls.QUICK]
++        return [cls.QUICK, cls.THIN]
+ 
+ 
+ class ChangeStatus(enum.StrEnum):
+diff --git a/backend/app/modules/change/parser.py b/backend/app/modules/change/parser.py
+index a4bb9132f..333a58b0d 100644
+--- a/backend/app/modules/change/parser.py
++++ b/backend/app/modules/change/parser.py
+@@ -732,6 +732,11 @@ class ChangeParser:
+         被导入排除（worktrees 太大），平台读不到。这里从 change 目录的文档产出推断
+         大致 stage：archive → archive / verify-result → verify / plan+tasks → plan /
+         proposal+design → brainstorm / 否则 brainstorm（scan 已移除，起点为 brainstorm）。
++
++        2026-09-25-change-center-thin-flow task-06：变更目录含 ``flow-state.yaml``
++        → "thin"（最高优先，先于 verify/plan/brainstorm 文档推断）——CLI 侧
++        ``sillyspec flow``（轻量变更）自建 thin 目录时进度落 flow-state.yaml 而非
++        sillyspec.db，无此规则会被错标 brainstorm。
+         """
+         if location == "archive":
+             return "archive"
+@@ -739,6 +744,8 @@ class ChangeParser:
+         def has(f: str) -> bool:
+             return (change_dir / f).is_file()
+ 
++        if has("flow-state.yaml"):
++            return "thin"
+         if has("verify-result.md"):
+             return "verify"
+         if has("plan.md") or has("tasks.md") or (change_dir / "tasks").is_dir():
+diff --git a/backend/app/modules/change/prompts/thin.md b/backend/app/modules/change/prompts/thin.md
+new file mode 100644
+index 000000000..9ac568686
+--- /dev/null
++++ b/backend/app/modules/change/prompts/thin.md
+@@ -0,0 +1,78 @@
++# Thin Stage（轻量变更）
++
++You are executing the **thin** stage for a SillySpec change — a lightweight change
++(轻量变更) running the 2-call SillySpec flow protocol.
++
++## Context
++
++- **Change**: {{change_title}}
++- **Change Key**: {{change_key}}
++- **Workspace ID**: {{workspace_id}}
++
++## Your Task
++
++Run the SillySpec lightweight-change flow for this change: `flow start` → do the
++work → `flow done`. Exactly two SillySpec calls, nothing else.
++
++### Steps
++
++1. **Start the flow** (call 1 of 2):
++
++   ```bash
++   sillyspec flow start --change {{change_key}}{{platform_args}} --input "<多行需求文本>"
++   ```
++
++   The `--input` text MUST be multi-line and MUST follow this exact gate format
++   (SillySpec clarity gate rejects anything else with exit code 2):
++
++   - Line 1: one line of motivation (what and why, in Chinese).
++   - Then a standalone section header line, exactly `成功标准：`
++   - Then one criterion per line, each as a markdown list item:
++
++   ```
++   <一句话动机说明>
++   成功标准：
++   - <可验证的标准 1>
++   - <可验证的标准 2>
++   ```
++
++   ⚠️ NEVER write the criteria inline on the header line (e.g.
++   `成功标准：xxx` on a single line) — the gate rejects single-line inline
++   criteria. The header line stands alone; every criterion is its own `- ` line.
++
++2. **Do the work** (no SillySpec call): implement the change and its tests.
++   Along the way, fill the AGENT slots the CLI creates:
++
++   - In `design.md`: the four AGENT sections — each needs at least one line;
++     `不适用：<理由>` is an acceptable answer where truly not applicable.
++   - In `requirements.md`: the test-binding slots — same rule, at least one
++     line each (`不适用：<理由>` counts).
++
++   Unfilled slots make `flow done` fail — fill them as you go, not after.
++
++3. **Finish the flow** (call 2 of 2):
++
++   ```bash
++   sillyspec flow done --change {{change_key}}{{platform_args}}
++   ```
++
++   Expect these semantics:
++
++   - An intermediate `flow done` exit code 1 is NORMAL (empty-slot rejection,
++     or automatic thickening when real tests fail). Fix the reported problem
++     and re-run the SAME `flow done` command — it resumes from where it
++     stopped (断点续).
++   - A genuinely failing real test means the whole change fails
++     (fail-closed). Do not mark it done.
++
++4. **Done**: after `flow done` succeeds, the change is archived automatically.
++   No further SillySpec command is needed.
++
++### Key Rules
++
++- Exactly two SillySpec calls (`flow start`, `flow done`); re-running `flow
++  done` after fixing an intermediate failure is a resume, not a third call.
++- Keep changes minimal and focused; run focused tests only (never the full
++  suite — that is CI's job).
++- All work happens inside this change's directory; never touch other changes.
++- Write code comments and report in 简体中文.
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index f163ee633..c5fc3977f 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -2553,15 +2553,22 @@ class ChangeService:
+ 
+     @staticmethod
+     def _stage_group_order(stage: str) -> tuple[int, str]:
+-        """stage 分组排序键：STAGE_ORDER 序号，quick 及未知 stage 追加在已知序之后。
++        """stage 分组排序键：STAGE_ORDER 序号，辅助阶段（quick/thin）紧随其后，未知 stage 追加最末。
+ 
+-        Grill #14：未知 stage（含 quick）与已知序并列时按 stage 名稳定排序
+-        （index=len(STAGE_ORDER) 同值，tuple 第二元兜底，结果跨平台稳定）。
++        Grill #14：同 index 的 stage 按名稳定排序（tuple 第二元兜底，结果跨平台稳定）。
++        2026-09-25-change-center-thin-flow task-01：辅助阶段进已知序——
++        ``StageEnum.spec_auxiliary_stages()`` 的序（quick→thin）紧随主线之后，
++        thin 恒排 quick 之后、其它未知阶段之前（timeline 组序确定性）。
+         """
+         try:
+             return (STAGE_ORDER.index(stage), stage)
+         except ValueError:
+-            return (len(STAGE_ORDER), stage)
++            pass
++        auxiliary_order = [s.value for s in StageEnum.spec_auxiliary_stages()]
++        try:
++            return (len(STAGE_ORDER) + auxiliary_order.index(stage), stage)
++        except ValueError:
++            return (len(STAGE_ORDER) + len(auxiliary_order), stage)
+ 
+     @staticmethod
+     def _normalize_completed_at(value: object) -> str | None:
+diff --git a/backend/app/modules/change/tests/test_dispatch.py b/backend/app/modules/change/tests/test_dispatch.py
+index 3aa3184a6..3efce15b7 100644
+--- a/backend/app/modules/change/tests/test_dispatch.py
++++ b/backend/app/modules/change/tests/test_dispatch.py
+@@ -49,7 +49,8 @@ class TestStageAgentConfig:
+         assert config.read_only is False
+ 
+     def test_all_expected_stages_present(self):
+-        # 5 主线阶段 + quick 辅助阶段（2026-08-12-quick-independent-stage）。
++        # 5 主线阶段 + quick/thin 辅助阶段（2026-08-12-quick-independent-stage /
++        # 2026-09-25-change-center-thin-flow 轻量变更）。
+         expected = {
+             "brainstorm",
+             "plan",
+@@ -57,9 +58,21 @@ class TestStageAgentConfig:
+             "verify",
+             "archive",
+             "quick",
++            "thin",
+         }
+         assert set(STAGE_AGENT_CONFIG.keys()) == expected
+ 
++    def test_thin_config_values(self):
++        # 2026-09-25-change-center-thin-flow：thin 辅助阶段（轻量变更 2 调用协议），
++        # 对齐 quick 先例——走 manual_dispatch 泛化路径，daemon-client 写码不占 worktree。
++        config = get_config_for_stage("thin")
++        assert config is not None
++        assert config.enabled is True
++        assert config.prompt_template == "thin.md"
++        assert config.phase == "Thin"
++        assert config.requires_worktree is False  # 与 quick 同款：daemon-client 不用 worktree
++        assert config.read_only is False
++
+     def test_no_config_for_non_dispatch_stages(self):
+         for stage in ("draft", "blocked", "archived"):
+             assert get_config_for_stage(stage) is None
+diff --git a/backend/app/modules/change/tests/test_parser.py b/backend/app/modules/change/tests/test_parser.py
+index cca838649..ca061b1de 100644
+--- a/backend/app/modules/change/tests/test_parser.py
++++ b/backend/app/modules/change/tests/test_parser.py
+@@ -423,3 +423,42 @@ class TestLoadModuleMapPlatformManaged:
+             assert ChangeParser._load_module_map(root) == {"agent": ["backend/app/modules/agent/"]}
+         finally:
+             parser_mod._MODULE_MAP_CACHE.clear()
++
++
++class TestInferCurrentStageThin:
++    """flow-state.yaml → thin 推断（2026-09-25-change-center-thin-flow task-06）。
++
++    CLI ``sillyspec flow``（轻量变更）自建 thin 目录时进度落 flow-state.yaml 而非
++    sillyspec.db；无此规则 reparse 会把 thin 目录错标 brainstorm。
++    """
++
++    def test_flow_state_yaml_present_infers_thin(self, tmp_path: Path) -> None:
++        """flow-state.yaml 在场（无论 proposal 与否）→ thin，优先于 brainstorm 推断。"""
++        change_dir = tmp_path / "2026-09-25-thin-demo"
++        change_dir.mkdir()
++        (change_dir / "flow-state.yaml").write_text("mode: thin\n", encoding="utf-8")
++        assert ChangeParser._infer_current_stage(change_dir, "active") == "thin"
++
++        # proposal.md 同场也不降级为 brainstorm（thin 规则优先）
++        (change_dir / "proposal.md").write_text("# demo\n", encoding="utf-8")
++        assert ChangeParser._infer_current_stage(change_dir, "active") == "thin"
++
++    def test_flow_state_yaml_in_archive_dir_still_archive(self, tmp_path: Path) -> None:
++        """location=archive 优先于 flow-state.yaml（归档终态不被 thin 规则遮蔽）。"""
++        change_dir = tmp_path / "2026-09-25-thin-archived"
++        change_dir.mkdir()
++        (change_dir / "flow-state.yaml").write_text("mode: thin\n", encoding="utf-8")
++        assert ChangeParser._infer_current_stage(change_dir, "archive") == "archive"
++
++    def test_no_flow_state_yaml_brainstorm_not_regressed(self, tmp_path: Path) -> None:
++        """无 flow-state.yaml：proposal.md 在场 → brainstorm 既有行为不回归。"""
++        change_dir = tmp_path / "2026-09-25-normal-change"
++        change_dir.mkdir()
++        (change_dir / "proposal.md").write_text("# demo\n", encoding="utf-8")
++        (change_dir / "design.md").write_text("# demo\n", encoding="utf-8")
++        assert ChangeParser._infer_current_stage(change_dir, "active") == "brainstorm"
++
++        # 空目录 → brainstorm（起点默认）
++        empty_dir = tmp_path / "2026-09-25-empty-change"
++        empty_dir.mkdir()
++        assert ChangeParser._infer_current_stage(empty_dir, "active") == "brainstorm"
+diff --git a/backend/app/modules/change/tests/test_spec_binding.py b/backend/app/modules/change/tests/test_spec_binding.py
+index 9e06b8c34..fe3f9dda6 100644
+--- a/backend/app/modules/change/tests/test_spec_binding.py
++++ b/backend/app/modules/change/tests/test_spec_binding.py
+@@ -5,6 +5,9 @@ Change 2026-08-25-session-spec-binding task-02：``change/binding.py`` 的
+ 误归样例均无产出）+ ``bind_session_to_change`` / ``bind_session_to_quicklog``
+ 的 DB 行为（default 守卫 / placeholder defaults / 幂等 / best-effort 不抛）。
+ 
++2026-09-25-change-center-thin-flow task-04：样例库补 flow 命令族
++（start/done/amend-draft --change → 变更绑定；run quick 跳过回归保留）。
++
+ DB 用例走根 conftest ``db_engine`` 的 SQLite ``create_all``（change model 已在
+ 其 import 列表，参照 test_quicklog_session_links.py 模式）。
+ 
+@@ -76,6 +79,33 @@ PARSE_CASES: list[tuple[str, list[str]]] = [
+     ("sillyspec run execute --change", []),
+     ("sillyspec run execute --change --done", []),
+     ("sillyspec run execute --change=", []),
++    # --- flow 命令族（2026-09-25-change-center-thin-flow task-04：thin 2 调用协议）---
++    # start/done/amend-draft 三子命令 --change 是真变更名 → 产出变更绑定。
++    (
++        "sillyspec flow start --change 2026-09-25-demo-task --input '动机'",
++        ["2026-09-25-demo-task"],
++    ),
++    ("sillyspec flow done --change=eq-flow-key", ["eq-flow-key"]),
++    (
++        "sillyspec flow amend-draft --change 2026-09-25-draft-fix",
++        ["2026-09-25-draft-fix"],
++    ),
++    # flow + platform_args（--spec-root 等选项前导，--change 在后）→ 产出。
++    (
++        "sillyspec flow start --spec-root /data/ws --change thin-args-key",
++        ["thin-args-key"],
++    ),
++    # flow 其它子命令（progress/status 等只读）无 --change → 无产出。
++    ("sillyspec flow status", []),
++    ("sillyspec flow progress show", []),
++    # flow default 伪键同样跳过（与 run 族同规则）。
++    ("sillyspec flow start --change default", []),
++    # run quick 跳过规则与 flow 并存：run 族 quick 跳过、flow 族照常产出。
++    (
++        "sillyspec run quick --done --change quick-990f8c09; "
++        "sillyspec flow done --change after-quick-key",
++        ["after-quick-key"],
++    ),
+ ]
+ 
+ 
+diff --git a/backend/app/modules/change/tests/test_step_progress.py b/backend/app/modules/change/tests/test_step_progress.py
+index 493fb2463..1e2e788b8 100644
+--- a/backend/app/modules/change/tests/test_step_progress.py
++++ b/backend/app/modules/change/tests/test_step_progress.py
+@@ -114,7 +114,11 @@ def test_extract_normal_multi_stage_sorted_by_stage_order() -> None:
+ 
+ 
+ def test_extract_quick_and_unknown_stage_after_known_order() -> None:
+-    """quick 及未知 stage 追加在 STAGE_ORDER 已知序之后，组内按 stage 名稳定排序。"""
++    """quick/thin 辅助阶段排 STAGE_ORDER 已知序之后，未知 stage 追加最末，组内按 stage 名稳定排序。
++
++    2026-09-25-change-center-thin-flow D-003@v1：辅助阶段（quick→thin）进已知序
++    （spec_auxiliary_stages 序），未知 stage 从「与 quick 并列混排」改为恒排辅助阶段之后。
++    """
+     steps = [
+         _step("zz-custom", "z1", status="pending", ordering=1),
+         _step("quick", "q1", status="completed", ordering=1),
+@@ -123,8 +127,8 @@ def test_extract_quick_and_unknown_stage_after_known_order() -> None:
+     ]
+     summary, timeline = ChangeService._extract_step_progress(_payload("quick", steps))
+     assert timeline is not None
+-    # 追加组（quick+未知）按 stage 名稳定排序：aa-custom < quick < zz-custom
+-    assert [e.stage for e in timeline] == ["execute", "aa-custom", "quick", "zz-custom"]
++    # 主线已知序 → quick（辅助已知序）→ 未知组按 stage 名稳定排序
++    assert [e.stage for e in timeline] == ["execute", "quick", "aa-custom", "zz-custom"]
+     assert summary is not None
+     assert summary.current_step_name == "a1"  # execute/quick completed 后第一个非 completed
+ 
+@@ -597,15 +601,21 @@ async def test_project_current_stage_returns_quadruple(db_session: AsyncSession)
+ 
+ 
+ def test_stage_group_order_matches_design() -> None:
+-    """排序键单测：已知 stage 按 STAGE_ORDER 序号；quick/未知并列追加在后按名稳定。"""
++    """排序键单测：已知 stage 按 STAGE_ORDER 序号；辅助（quick→thin）紧随其后；未知追加最末按名稳定。
++
++    2026-09-25-change-center-thin-flow D-003@v1：辅助阶段进已知序（thin 排 quick 后、未知前）。
++    """
+     assert STAGE_ORDER == ["brainstorm", "plan", "execute", "verify", "archive"]
+     assert ChangeService._stage_group_order("brainstorm") == (0, "brainstorm")
+     assert ChangeService._stage_group_order("archive") == (4, "archive")
+     assert ChangeService._stage_group_order("quick") == (5, "quick")
+-    assert ChangeService._stage_group_order("zz-unknown") == (5, "zz-unknown")
+-    assert ChangeService._stage_group_order("aa-unknown") == (5, "aa-unknown")
+-    # 已知序永远先于未知序
++    assert ChangeService._stage_group_order("thin") == (6, "thin")
++    assert ChangeService._stage_group_order("zz-unknown") == (7, "zz-unknown")
++    assert ChangeService._stage_group_order("aa-unknown") == (7, "aa-unknown")
++    # 已知序（主线+辅助）永远先于未知序；thin 恒排 quick 之后
+     assert ChangeService._stage_group_order("archive") < ChangeService._stage_group_order("quick")
++    assert ChangeService._stage_group_order("quick") < ChangeService._stage_group_order("thin")
++    assert ChangeService._stage_group_order("thin") < ChangeService._stage_group_order("zz-unknown")
+ 
+ 
+ def test_extract_summary_fields_shape() -> None:
+diff --git a/backend/app/modules/change/tests/test_thin_stage.py b/backend/app/modules/change/tests/test_thin_stage.py
+new file mode 100644
+index 000000000..2ad2fd2dc
+--- /dev/null
++++ b/backend/app/modules/change/tests/test_thin_stage.py
+@@ -0,0 +1,297 @@
++"""thin 辅助阶段（轻量变更）测试（2026-09-25-change-center-thin-flow task-02）。
++
++覆盖：
++- STAGE_AGENT_CONFIG thin 条目配置断言（对齐 task-01 落地值）。
++- ``_validate_thin_change_key`` 白名单四态（合法过 / ``..`` 段拒 / ``default``
++  拒 / ``quick-<hex8>`` 拒 / 路径分隔拒 / 空串拒）。
++- ``load_prompt_template("thin.md", ...)`` 渲染契约：变量替换后无 ``{{`` 残留，
++  含 flow start/done 两命令与过门格式样例。
++
++守卫 A（sync_stage_status thin 不回写）用例由 task-05 追加到本文件。
++
++author: qinyi
++created_at: 2026-09-25
++"""
++
++from __future__ import annotations
++
++import pytest
++
++from app.modules.agent.service import AgentRunError
++from app.modules.change.dispatch import (
++    STAGE_AGENT_CONFIG,
++    _validate_thin_change_key,
++    get_config_for_stage,
++    load_prompt_template,
++)
++
++# ===========================================================================
++# thin 派发配置（对齐 task-01 落地条目）
++# ===========================================================================
++
++
++def test_thin_stage_config_entry() -> None:
++    """thin 条目：2 调用协议配置（daemon-client 写码，不占 worktree）。"""
++    config = STAGE_AGENT_CONFIG["thin"]  # 直书值面，避免枚举 import 掩盖值错误
++    assert config.enabled is True
++    assert config.prompt_template == "thin.md"
++    assert config.phase == "Thin"
++    assert config.requires_worktree is False
++    assert config.read_only is False
++    assert "flow" in config.description
++
++
++def test_thin_stage_enum_and_auxiliary_order() -> None:
++    """StageEnum.THIN 值面与辅助阶段清单序（quick → thin）。"""
++    from app.modules.change.model import StageEnum
++
++    assert StageEnum.THIN.value == "thin"
++    assert [s.value for s in StageEnum.spec_auxiliary_stages()] == ["quick", "thin"]
++    # thin 不进主线（TRANSITIONS/STAGE_ORDER 均无出边）
++    from app.modules.change.model import TRANSITIONS
++
++    assert StageEnum.THIN not in TRANSITIONS
++
++
++# ===========================================================================
++# change_key 白名单（task-02 纵深防御）
++# ===========================================================================
++
++
++def test_validate_thin_change_key_accepts_platform_key() -> None:
++    """合法平台键（<日期>-<slug>-<hex6> 形态）放行（不抛即过）。"""
++    _validate_thin_change_key("2026-09-25-change-center-thin-flow")
++    _validate_thin_change_key("2026-08-12-quick-independent-stage")
++    _validate_thin_change_key("feature.flag_name-v2")
++
++
++def test_validate_thin_change_key_rejects_dotdot() -> None:
++    """含 ``..`` 段（路径穿越）拒。"""
++    with pytest.raises(AgentRunError, match="不合法"):
++        _validate_thin_change_key("..")
++    with pytest.raises(AgentRunError, match="不合法"):
++        _validate_thin_change_key("2026-09-25-evil..traversal")
++    with pytest.raises(AgentRunError, match="不合法"):
++        _validate_thin_change_key("a/../b")
++
++
++def test_validate_thin_change_key_rejects_default() -> None:
++    """``default`` 伪键拒（CLI 无名操作）。"""
++    with pytest.raises(AgentRunError, match="不合法"):
++        _validate_thin_change_key("default")
++
++
++def test_validate_thin_change_key_rejects_quick_session_key() -> None:
++    """``quick-<hex8>`` CLI 内部会话键形态拒。"""
++    with pytest.raises(AgentRunError, match="不合法"):
++        _validate_thin_change_key("quick-a4939946")
++    with pytest.raises(AgentRunError, match="不合法"):
++        _validate_thin_change_key("quick-0e56260f")
++
++
++def test_validate_thin_change_key_rejects_path_separators() -> None:
++    """路径分隔符（/ 与 \\，含 Windows 盘符形态）拒——正则天然排除。"""
++    for bad in ("a/b", "a\\b", "C:/evil", "../etc/passwd", "a b"):
++        with pytest.raises(AgentRunError, match="不合法"):
++            _validate_thin_change_key(bad)
++
++
++def test_validate_thin_change_key_rejects_empty() -> None:
++    """空串拒（正则 ``+`` 量词）。"""
++    with pytest.raises(AgentRunError, match="不合法"):
++        _validate_thin_change_key("")
++
++
++# ===========================================================================
++# thin.md prompt 模板渲染契约
++# ===========================================================================
++
++
++def test_thin_prompt_template_renders_without_placeholder_residue() -> None:
++    """渲染后无 ``{{`` 残留；含两命令（flow start/done）与过门格式样例。"""
++    rendered = load_prompt_template(
++        "thin.md",
++        {
++            "change_key": "2026-09-25-demo-task",
++            "change_title": "示例轻量变更",
++            "workspace_id": "ws-1",
++            "platform_args": " --spec-root /data/ws --workspace-id ws-1",
++        },
++    )
++    assert "{{" not in rendered
++    # 2 调用协议：start 与 done 各出现（--change 带渲染后的键）
++    assert "sillyspec flow start --change 2026-09-25-demo-task" in rendered
++    assert "sillyspec flow done --change 2026-09-25-demo-task" in rendered
++    # platform_args 沿用现有形态（--spec-root 等直接拼在 --change 后）
++    assert "--spec-root /data/ws" in rendered
++    # 过门格式硬约束：独立节头行 + 列表行，且明示单行内联会被拒
++    assert "成功标准：" in rendered
++    assert "- <可验证的标准 1>" in rendered
++    assert "inline" in rendered or "内联" in rendered
++    # 断点续 / fail-closed 语义在场
++    assert "断点续" in rendered
++    assert "fail-closed" in rendered
++
++
++def test_thin_prompt_raw_template_variables_present() -> None:
++    """未渲染原文含全部四个模板变量（防止误删占位符）。"""
++    raw = load_prompt_template("thin.md")
++    for var in ("{{change_key}}", "{{change_title}}", "{{workspace_id}}", "{{platform_args}}"):
++        assert var in raw
++
++
++def test_get_config_for_stage_thin() -> None:
++    """get_config_for_stage("thin") 命中（manual_dispatch 泛化路径前提）。"""
++    assert get_config_for_stage("thin") is not None
++
++
++# ===========================================================================
++# 守卫 A：sync_stage_status（task-05 追加）
++# 平台 current_stage=='thin' 且 sillyspec.db 行 status!='archived' → 跳过
++# current_stage 回写与 stages JSON 写入；archived 放行翻转；非 thin 零作用。
++# ===========================================================================
++
++
++import sqlite3
++import tempfile
++import uuid
++from pathlib import Path
++from unittest.mock import AsyncMock, patch
++
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.change.dispatch import SillySpecStageDispatchService
++from app.modules.change.model import Change
++from app.modules.workspace.model import Workspace
++
++
++def _make_sillyspec_db(change_key: str, *, db_stage: str, db_status: str) -> str:
++    """构造 sillyspec.db 内容（latin-1 str 形态，等价 delegate.read_file 返回值）。
++
++    只建 sync 查询涉及的三表三行（changes/stages/steps），stage 停留 'scan'
++    是 CLI thin 流的真实形态（进度落 flow-state.yaml 不落 DB）。
++    """
++    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
++        db_path = Path(f.name)
++    conn = sqlite3.connect(db_path)
++    # executescript 不接受参数绑定，DDL 与参数化 DML 分开执行
++    conn.executescript(
++        """
++        CREATE TABLE changes (
++            id INTEGER PRIMARY KEY, name TEXT, current_stage TEXT, status TEXT
++        );
++        CREATE TABLE stages (
++            id INTEGER PRIMARY KEY, change_id INTEGER, stage TEXT,
++            status TEXT, completed_at TEXT
++        );
++        CREATE TABLE steps (
++            id INTEGER PRIMARY KEY, stage_id INTEGER, name TEXT,
++            status TEXT, ordering INTEGER
++        );
++        """
++    )
++    conn.execute(
++        "INSERT INTO changes (name, current_stage, status) VALUES (?, ?, ?)",
++        (change_key, db_stage, db_status),
++    )
++    conn.execute(
++        "INSERT INTO stages (change_id, stage, status, completed_at) "
++        "VALUES (1, ?, 'completed', '2026-09-25T00:00:00Z')",
++        (db_stage,),
++    )
++    conn.execute(
++        "INSERT INTO steps (stage_id, name, status, ordering) "
++        "VALUES (1, 'scan-steps', 'completed', 1)"
++    )
++    conn.commit()
++    conn.close()
++    data = db_path.read_bytes()
++    db_path.unlink(missing_ok=True)
++    return data.decode("latin-1")
++
++
++def _fake_delegate(db_content: str) -> AsyncMock:
++    """HostFsDelegate 替身：stat 探存在 + read_file 回 db 内容。"""
++    delegate = AsyncMock()
++    delegate.stat.return_value = {"exists": True}
++    delegate.read_file.return_value = db_content
++    return delegate
++
++
++async def _make_ws_and_change(
++    session: AsyncSession, *, current_stage: str
++) -> tuple[uuid.UUID, uuid.UUID]:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name=f"thin-guard-{uuid.uuid4().hex[:6]}",
++        root_path=f"/tmp/thin-guard-{uuid.uuid4().hex[:8]}",
++        slug=f"thin-guard-{uuid.uuid4().hex[:8]}",
++    )
++    session.add(ws)
++    await session.flush()
++    change = Change(
++        id=uuid.uuid4(),
++        workspace_id=ws.id,
++        change_key="2026-09-25-thin-guard-demo",
++        title="thin guard demo",
++        status="in_progress",
++        location="active",
++        path="/tmp/thin-guard-demo",
++        change_type="quick",
++        current_stage=current_stage,
++        stages={},
++    )
++    session.add(change)
++    await session.commit()
++    return ws.id, change.id
++
++
++class TestSyncStageStatusThinGuardA:
++    """守卫 A 三态（dispatch.py sync_stage_status 回写段）。"""
++
++    async def test_thin_active_db_scan_not_washed_back(self, db_session: AsyncSession) -> None:
++        """thin×active：DB current_stage='scan' 不覆盖平台 'thin'，stages 无幽灵 scan 块。"""
++        _, change_id = await _make_ws_and_change(db_session, current_stage="thin")
++        svc = SillySpecStageDispatchService(db_session)
++        db_content = _make_sillyspec_db(
++            "2026-09-25-thin-guard-demo", db_stage="scan", db_status="active"
++        )
++        with patch.object(svc, "_get_host_fs_delegate", return_value=_fake_delegate(db_content)):
++            result = await svc.sync_stage_status(db_session, change_id, uuid.uuid4())
++        assert result.synced is True
++        assert result.current_stage == "thin"
++        change = await db_session.get(Change, change_id)
++        assert change is not None
++        assert change.current_stage == "thin"
++        # stages JSON 不出现幽灵 scan 组（R-01 断言面）
++        assert "scan" not in (change.stages or {})
++
++    async def test_thin_archived_db_flips_through(self, db_session: AsyncSession) -> None:
++        """thin×archived：DB 行 archived → 放行既有翻转链（current_stage 被 DB 值接管）。"""
++        _, change_id = await _make_ws_and_change(db_session, current_stage="thin")
++        svc = SillySpecStageDispatchService(db_session)
++        db_content = _make_sillyspec_db(
++            "2026-09-25-thin-guard-demo", db_stage="archive", db_status="archived"
++        )
++        with patch.object(svc, "_get_host_fs_delegate", return_value=_fake_delegate(db_content)):
++            result = await svc.sync_stage_status(db_session, change_id, uuid.uuid4())
++        assert result.synced is True
++        change = await db_session.get(Change, change_id)
++        assert change is not None
++        assert change.current_stage == "archive"
++        assert "archive" in (change.stages or {})
++
++    async def test_mainline_stage_unaffected(self, db_session: AsyncSession) -> None:
++        """主线阶段（execute）不受守卫影响：DB 值照常覆盖 + stages JSON 照常写入。"""
++        _, change_id = await _make_ws_and_change(db_session, current_stage="execute")
++        svc = SillySpecStageDispatchService(db_session)
++        db_content = _make_sillyspec_db(
++            "2026-09-25-thin-guard-demo", db_stage="verify", db_status="active"
++        )
++        with patch.object(svc, "_get_host_fs_delegate", return_value=_fake_delegate(db_content)):
++            result = await svc.sync_stage_status(db_session, change_id, uuid.uuid4())
++        assert result.synced is True
++        change = await db_session.get(Change, change_id)
++        assert change is not None
++        assert change.current_stage == "verify"
++        assert "verify" in (change.stages or {})
+diff --git a/backend/app/modules/change_writer/proxy.py b/backend/app/modules/change_writer/proxy.py
+index 3632b2922..8d0b46d19 100644
+--- a/backend/app/modules/change_writer/proxy.py
++++ b/backend/app/modules/change_writer/proxy.py
+@@ -343,10 +343,11 @@ async def proxy_create_change(
+     if change_type is None:
+         change_type = classify_change_type(description)
+ 
+-    # ql-20260812-007（2026-08-12-quick-independent-stage）：quick 类型走独立阶段，
+-    # 其余走 brainstorm（保持 ql-006 行为）。quick 是 SillySpec 辅助阶段，自己跑三步
+-    # 就结束，不进主线 brainstorm→plan→execute→verify→archive。
+-    initial_stage = "quick" if change_type == "quick" else "brainstorm"
++    # 2026-09-25-change-center-thin-flow task-03：quick 类型新变更分流至 thin
++    # 辅助阶段（轻量变更 2 调用协议），其余走 brainstorm（保持 ql-006 行为）。
++    # change_type 标签仍写 "quick"（分类标签与阶段解耦，D-001@v1）——存量的
++    # quick 阶段在途变更不受影响（本入口只管新变更初值）。
++    initial_stage = "thin" if change_type == "quick" else "brainstorm"
+ 
+     files = _build_files(
+         change_key=change_key,
+diff --git a/backend/app/modules/change_writer/service.py b/backend/app/modules/change_writer/service.py
+index 9fd5d5b73..d1ca3a9d4 100644
+--- a/backend/app/modules/change_writer/service.py
++++ b/backend/app/modules/change_writer/service.py
+@@ -126,10 +126,11 @@ class ChangeWriterService:
+         if change_type is None:
+             change_type = classify_change_type(description)
+ 
+-        # ql-20260812-007（2026-08-12-quick-independent-stage）：quick 类型走独立阶段，
+-        # 其余走 brainstorm（保持 ql-006 行为）。quick 是 SillySpec 辅助阶段，自己跑三步
+-        # 就结束，不进主线 brainstorm→plan→execute→verify→archive。
+-        initial_stage = "quick" if change_type == "quick" else "brainstorm"
++        # 2026-09-25-change-center-thin-flow task-03：quick 类型新变更分流至 thin
++        # 辅助阶段（轻量变更 2 调用协议），其余走 brainstorm（保持 ql-006 行为）。
++        # change_type 标签仍写 "quick"（分类标签与阶段解耦，D-001@v1）——存量的
++        # quick 阶段在途变更不受影响（本入口只管新变更初值）。
++        initial_stage = "thin" if change_type == "quick" else "brainstorm"
+ 
+         # v4 layout: .sillyspec/changes/<change_key>/  (no intermediate change/ dir)
+         resolver = SpecPathResolver(repo_dir)
+diff --git a/backend/app/modules/change_writer/tests/test_classifier.py b/backend/app/modules/change_writer/tests/test_classifier.py
+index 707fbe207..3df3a6607 100644
+--- a/backend/app/modules/change_writer/tests/test_classifier.py
++++ b/backend/app/modules/change_writer/tests/test_classifier.py
+@@ -84,22 +84,24 @@ def test_dispatch_stage_agent_config_has_quick():
+     assert cfg.read_only is False
+ 
+ 
+-def test_quick_classify_maps_to_quick_stage():
+-    """分流映射：描述含 quick 关键词 → change_type='quick' → initial_stage='quick'。
++def test_quick_classify_maps_to_thin_stage():
++    """分流映射：描述含 quick 关键词 → change_type='quick' → initial_stage='thin'。
+ 
+-    验证创建分流的分类输入端（service/proxy 用同一表达式
+-    ``initial_stage = 'quick' if change_type == 'quick' else 'brainstorm'``）。
++    2026-09-25-change-center-thin-flow task-03：quick 类型新变更分流至 thin 辅助
++    阶段（轻量变更 2 调用协议），change_type 标签保持 'quick' 不动（标签与阶段
++    解耦）。验证创建分流的分类输入端（service/proxy 用同一表达式
++    ``initial_stage = 'thin' if change_type == 'quick' else 'brainstorm'``）。
+     """
+-    # quick 关键词 → quick
++    # quick 关键词 → quick（分类标签不动）
+     assert classify_change_type("快速修复登录按钮文案") == "quick"
+     # 非 quick → feature → brainstorm
+     assert classify_change_type("实现用户管理模块") == "feature"
+     # 分流表达式：change_type 决定 initial_stage
+     for desc in ("快速修复登录按钮文案", "fix typo in readme"):
+         change_type = classify_change_type(desc)
+-        initial_stage = "quick" if change_type == "quick" else "brainstorm"
+-        assert initial_stage == "quick", f"quick 描述应分流到 quick 阶段: {desc}"
++        initial_stage = "thin" if change_type == "quick" else "brainstorm"
++        assert initial_stage == "thin", f"quick 描述应分流到 thin 阶段: {desc}"
+     for desc in ("实现用户管理模块", "优化数据库性能"):
+         change_type = classify_change_type(desc)
+-        initial_stage = "quick" if change_type == "quick" else "brainstorm"
++        initial_stage = "thin" if change_type == "quick" else "brainstorm"
+         assert initial_stage == "brainstorm", f"非 quick 描述应分流到 brainstorm: {desc}"
+diff --git a/backend/app/modules/platform_sync/tests/test_thin_stage_guard.py b/backend/app/modules/platform_sync/tests/test_thin_stage_guard.py
+new file mode 100644
+index 000000000..52f50b645
+--- /dev/null
++++ b/backend/app/modules/platform_sync/tests/test_thin_stage_guard.py
+@@ -0,0 +1,262 @@
++"""thin 变更守卫 B 与事件归属对账（2026-09-25-change-center-thin-flow task-05）。
++
++守卫 B（platform_sync ``_sync_change_stage_status``）三态——与守卫 A
++（change/dispatch.sync_stage_status）同一谓词，CLI 红线：thin（轻量变更）进度落
++flow-state.yaml 不落 sillyspec.db，CLI 上行 current_stage 全程 'scan' 停留态：
++
++- thin×active：CLI 'scan' 不覆盖平台 'thin'（status/时间戳类照常落）；
++- thin×archived（flow done 后）：放行既有归档翻转链（current_stage='archived'
++  + archived_at 首填；读侧三源并集承接，change/service.py:221-243）；
++- 主线阶段：零作用（现状覆盖行为回归锁定，brownfield 铁律）。
++
++watcher 事件归属两前提对账（R-06）：事件行挂到变更详情的两个前提——
++①事件 ``change_name`` 与平台 ``change_key`` 逐字一致（读侧字符串 join，变体
++名字是孤儿不展示在正确变更下）；②workspace 归属一致（token 派生 ws 不符的
++事件不进本 ws 查询面）。
++
++范式对齐 test_stage_status_ingest.py / test_change_events.py（conftest
++shpsync_headers + client + db_session）。
++
++author: qinyi
++created_at: 2026-09-25
++"""
++
++from __future__ import annotations
++
++from typing import Any
++
++import pytest
++from httpx import AsyncClient
++from sqlalchemy.ext.asyncio import AsyncSession
++
++THIN_NAME = "2026-09-25-thin-guard-demo"
++
++
++def _progress_body(name: str, stage: str | None, status: str | None) -> dict:
++    entry: dict[str, Any] = {"name": name}
++    if stage is not None:
++        entry["current_stage"] = stage
++    if status is not None:
++        entry["status"] = status
++    return {
++        "project": {"name": "demo"},
++        "changes": [entry],
++        "stages": [],
++        "steps": [],
++        "batch_progress": [],
++        "approvals": [],
++    }
++
++
++async def _seed_change_row(
++    db_session: AsyncSession, ws_id: Any, name: str, *, current_stage: str
++) -> None:
++    """建平台 Change 行（占位行后续被 progress 覆盖的既有语义）。"""
++    import uuid as _uuid
++
++    from app.modules.change.model import Change
++
++    db_session.add(
++        Change(
++            id=_uuid.uuid4(),
++            workspace_id=ws_id,
++            change_key=name,
++            title=name,
++            status="in_progress",
++            location="active",
++            path=f"changes/{name}",
++            current_stage=current_stage,
++            stages={},
++        )
++    )
++    await db_session.commit()
++
++
++async def _get_change_row(db_session: AsyncSession, ws_id: Any, name: str):
++    from sqlalchemy import select
++
++    from app.modules.change.model import Change
++
++    return (
++        (
++            await db_session.execute(
++                select(Change).where(
++                    Change.workspace_id == ws_id,
++                    Change.change_key == name,
++                )
++            )
++        )
++        .scalars()
++        .one_or_none()
++    )
++
++
++# ── 守卫 B 三态 ───────────────────────────────────────────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_thin_active_cli_scan_not_overwriting_platform_thin(
++    client: AsyncClient, db_session: AsyncSession, shpsync_headers: tuple[Any, dict[str, str]]
++) -> None:
++    """thin×active：CLI current_stage='scan' 不覆盖平台 'thin'，status 照常映射落库。"""
++    ws_id, headers = shpsync_headers
++    await _seed_change_row(db_session, ws_id, THIN_NAME, current_stage="thin")
++    resp = await client.post(
++        f"/api/changes/{THIN_NAME}/progress",
++        json=_progress_body(THIN_NAME, stage="scan", status="active"),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-25T08:00:00.000Z"},
++    )
++    assert resp.status_code == 200
++    row = await _get_change_row(db_session, ws_id, THIN_NAME)
++    assert row is not None
++    # 守卫 B 命中：current_stage 恒显 thin（CLI scan 停留态被拦）
++    assert row.current_stage == "thin"
++    # status/时间戳类照常（CLI active → in_progress 映射落库不受守卫影响）
++    assert row.status == "in_progress"
++
++
++@pytest.mark.asyncio
++async def test_thin_archived_flips_through_archive_chain(
++    client: AsyncClient, db_session: AsyncSession, shpsync_headers: tuple[Any, dict[str, str]]
++) -> None:
++    """thin×archived：DB 行 archived → 放行既有归档翻转（current_stage/archived_at）。"""
++    ws_id, headers = shpsync_headers
++    await _seed_change_row(db_session, ws_id, THIN_NAME, current_stage="thin")
++    resp = await client.post(
++        f"/api/changes/{THIN_NAME}/progress",
++        json=_progress_body(THIN_NAME, stage="scan", status="archived"),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-25T08:01:00.000Z"},
++    )
++    assert resp.status_code == 200
++    row = await _get_change_row(db_session, ws_id, THIN_NAME)
++    assert row is not None
++    # 归档翻转链放行：current_stage 翻 'archived' + archived_at 首填
++    assert row.current_stage == "archived"
++    assert row.status == "archived"
++    assert row.archived_at is not None
++
++
++@pytest.mark.asyncio
++async def test_mainline_stage_unchanged_by_guard(
++    client: AsyncClient, db_session: AsyncSession, shpsync_headers: tuple[Any, dict[str, str]]
++) -> None:
++    """主线阶段（execute）：守卫零作用——CLI 权威值照常覆盖（现状回归锁定）。"""
++    ws_id, headers = shpsync_headers
++    await _seed_change_row(db_session, ws_id, THIN_NAME, current_stage="execute")
++    resp = await client.post(
++        f"/api/changes/{THIN_NAME}/progress",
++        json=_progress_body(THIN_NAME, stage="verify", status="active"),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-25T08:02:00.000Z"},
++    )
++    assert resp.status_code == 200
++    row = await _get_change_row(db_session, ws_id, THIN_NAME)
++    assert row is not None
++    assert row.current_stage == "verify"
++
++
++# ── watcher 事件归属两前提对账（R-06；本变更不动事件通道，仅锁定归属语义）──
++
++#: 值域内基准毫秒（schema 校验 ≥1e12）。
++_EVT_TS = 1_758_566_000_000
++
++
++async def _mint_second_ws_token(
++    db_session: AsyncSession,
++) -> tuple[Any, dict[str, str]]:
++    """铸第二个 workspace 的 shpsync_ token（conftest fixture 单 token，跨 workspace
++    用例在文件内自铸同款，范式对齐 test_change_events._mint_shpsync_token）。"""
++    import uuid as _uuid
++
++    from app.core.config import get_settings
++    from app.core.security import password_hasher
++    from app.modules.auth.model import User
++    from app.modules.platform_sync.token_service import PlatformSyncTokenService
++    from app.modules.workspace.model import Workspace
++
++    ws = Workspace(
++        id=_uuid.uuid4(),
++        name=f"ws-thin-guard-{_uuid.uuid4().hex[:8]}",
++        slug=f"ws-thin-guard-{_uuid.uuid4().hex[:8]}",
++        root_path=f"/tmp/ws-thin-guard-{_uuid.uuid4().hex[:8]}",
++        status="active",
++    )
++    db_session.add(ws)
++    user = User(
++        id=_uuid.uuid4(),
++        email=f"thin-guard-{_uuid.uuid4().hex[:6]}@example.com",
++        password_hash=password_hasher.hash("x"),
++        status="active",
++    )
++    db_session.add(user)
++    await db_session.commit()
++    _row, plaintext = await PlatformSyncTokenService(db_session, settings=get_settings()).create(
++        workspace_id=ws.id,
++        name="thin-guard-cross-ws",
++        created_by=user.id,
++    )
++    return ws.id, {"Authorization": f"Bearer {plaintext}"}
++
++
++@pytest.mark.asyncio
++async def test_event_attribution_requires_exact_change_key(
++    client: AsyncClient, db_session: AsyncSession, shpsync_headers: tuple[Any, dict[str, str]]
++) -> None:
++    """前提①：事件 change_name 与平台 change_key 逐字一致才挂上；变体名是孤儿。"""
++    ws_id, headers = shpsync_headers
++    await _seed_change_row(db_session, ws_id, THIN_NAME, current_stage="thin")
++    variant_name = f"{THIN_NAME}x"  # 一字之差的变体（非逐字一致）
++    events = [
++        {"kind": "file_changed", "ts": _EVT_TS, "stage": "thin", "detail": "exact"},
++        {"kind": "file_changed", "ts": _EVT_TS + 1000, "stage": "thin", "detail": "variant"},
++    ]
++    resp_exact = await client.post(
++        f"/api/changes/{THIN_NAME}/events",
++        json={"events": [events[0]]},
++        headers=headers,
++    )
++    resp_variant = await client.post(
++        f"/api/changes/{variant_name}/events",
++        json={"events": [events[1]]},
++        headers=headers,
++    )
++    assert resp_exact.status_code == 200
++    assert resp_variant.status_code == 200  # 写通道无归属校验，孤儿照落库
++
++    # 读侧：thin 变更详情只挂逐字一致的事件；变体名不混入
++    got = await client.get(f"/api/changes/{THIN_NAME}/events", headers=headers)
++    assert got.status_code == 200
++    details = [e["detail"] for e in got.json()["items"]]
++    assert details == ["exact"]
++    # 孤儿事件只能从变体名自己的查询面读到（平台无该变更行，落库不丢）
++    got_variant = await client.get(f"/api/changes/{variant_name}/events", headers=headers)
++    assert got_variant.status_code == 200
++    assert [e["detail"] for e in got_variant.json()["items"]] == ["variant"]
++
++
++@pytest.mark.asyncio
++async def test_event_attribution_requires_same_workspace(
++    client: AsyncClient,
++    db_session: AsyncSession,
++    shpsync_headers: tuple[Any, dict[str, str]],
++) -> None:
++    """前提②：workspace 归属一致——他 ws token 推的同名事件不进本 ws 查询面。"""
++    ws_id, headers = shpsync_headers
++    other_ws_id, other_headers = await _mint_second_ws_token(db_session)
++    await _seed_change_row(db_session, ws_id, THIN_NAME, current_stage="thin")
++    event = {"kind": "stage_started", "ts": _EVT_TS, "stage": "thin", "detail": "cross-ws"}
++    resp = await client.post(
++        f"/api/changes/{THIN_NAME}/events",
++        json={"events": [event]},
++        headers=other_headers,  # 他 ws 的 shpsync_ token（合法写凭据）
++    )
++    assert resp.status_code == 200
++
++    # 本 ws 查询面不含他 ws 事件（token 派生 workspace_id 隔离）
++    got = await client.get(f"/api/changes/{THIN_NAME}/events", headers=headers)
++    assert got.status_code == 200
++    assert got.json()["items"] == []
++    # 他 ws 自己的查询面能读到（归属=token ws，非 thin 变更所在 ws）
++    got_other = await client.get(f"/api/changes/{THIN_NAME}/events", headers=other_headers)
++    assert got_other.status_code == 200
++    assert [e["detail"] for e in got_other.json()["items"]] == ["cross-ws"]
++    assert other_ws_id != ws_id
+diff --git a/backend/tests/modules/change/test_dispatch_stage_config.py b/backend/tests/modules/change/test_dispatch_stage_config.py
+index 63e14b55f..57ab59470 100644
+--- a/backend/tests/modules/change/test_dispatch_stage_config.py
++++ b/backend/tests/modules/change/test_dispatch_stage_config.py
+@@ -5,19 +5,21 @@ Validates all 可派发变更阶段 are configured with correct values。
+ 仅保留 brainstorm/plan/execute/verify/archive。
+ 2026-08-12-quick-independent-stage：新增 quick 辅助阶段（独立流程，自己派发 quick agent），
+ config 现含 6 个键（5 主线 + 1 辅助），二者并集 = 全量派发阶段。
++2026-09-25-change-center-thin-flow：新增 thin 辅助阶段（轻量变更 2 调用协议），
++config 含 7 个键（5 主线 + quick/thin 两辅助），并集仍 = 全量派发阶段。
+ """
+ 
+ from app.modules.change.dispatch import STAGE_AGENT_CONFIG
+ from app.modules.change.model import StageEnum
+ 
+ 
+-def test_config_has_six_entries():
+-    """STAGE_AGENT_CONFIG must have exactly 6 entries (5 主线 + quick 辅助)."""
+-    assert len(STAGE_AGENT_CONFIG) == 6
++def test_config_has_seven_entries():
++    """STAGE_AGENT_CONFIG must have exactly 7 entries (5 主线 + quick/thin 辅助)."""
++    assert len(STAGE_AGENT_CONFIG) == 7
+ 
+ 
+ def test_config_keys_match_spec_stages():
+-    """All keys must be StageEnum 主线阶段 + 辅助阶段（quick）的 value 并集."""
++    """All keys must be StageEnum 主线阶段 + 辅助阶段（quick/thin）的 value 并集."""
+     expected_keys = {e.value for e in StageEnum.spec_stages()} | {
+         e.value for e in StageEnum.spec_auxiliary_stages()
+     }
+@@ -26,13 +28,13 @@ def test_config_keys_match_spec_stages():
+ 
+ 
+ def test_all_stages_enabled():
+-    """All 6 stages must have enabled=True."""
++    """All 7 stages must have enabled=True."""
+     for stage, config in STAGE_AGENT_CONFIG.items():
+         assert config.enabled is True, f"Stage '{stage}' is not enabled"
+ 
+ 
+ def test_all_stages_read_only_false():
+-    """All 6 stages must have read_only=False (every stage writes files)."""
++    """All 7 stages must have read_only=False (every stage writes files)."""
+     for stage, config in STAGE_AGENT_CONFIG.items():
+         assert config.read_only is False, f"Stage '{stage}' has read_only=True, expected False"
+ 
+diff --git a/docs/sillyspec/thin-flow-adopt-edge-cases.md b/docs/sillyspec/thin-flow-adopt-edge-cases.md
+new file mode 100644
+index 000000000..7b6405c6b
+--- /dev/null
++++ b/docs/sillyspec/thin-flow-adopt-edge-cases.md
+@@ -0,0 +1,29 @@
++# 薄流程（thin）adopt 收编边界两观察（活跃坑，待上游修复）
++
++> 来源：2026-09-25-change-center-thin-flow verify 阶段实测（本机 sillyspec 3.30.0）。
++> 上游仓：C:\Users\qinyi\IdeaProjects\sillyspec。修复后按惯例移 docs/sillyspec/finished/。
++
++## 坑 1：adopt 收编后 sillyspec.db 残留 0 字节空文件，下次 flow start 误报「db 损坏」
++
++- 现象：临时目录实验中，对含预建产物的变更跑 `flow start` 走 adopt 收编（EXIT 0）后，
++  变更目录/sillyspec 运行面留下 **0 字节的 sillyspec.db 空文件**；再次 `flow start` 报
++  「进度库损坏」。
++- 绕过：删除该 0 字节空 db 文件后恢复正常（ProgressManager 会重建）。
++- 疑似根因：adopt 路径的 ProgressManager 初始化在中途 best-effort 失败后留下空文件句柄
++  （`new ProgressManager()` 建库失败不清残骸）。
++- 建议：flow.js adopt 分支收尾清理空 db；或 db-engine 打开时把「文件存在且 0 字节」
++  视同不存在重建。
++
++## 坑 2：adopt「收编补件失败」ENOENT best-effort 警告噪音
++
++- 现象：adopt 收编时打印 `⚠️ 收编补件失败（best-effort）: ENOENT ...`（redraftMissingArtifacts
++  / ensureBindingSlots 对预建目录形态的路径假设），不影响收编成功（EXIT 0）。
++- 绕过：可忽略；或预建目录时同时给足四件套占位。
++- 建议：adopt 分支的补件函数对「目录刚建、部分工件缺父路径」场景做 mkdir -p 语义。
++
++## 关联留档
++
++- 上游前置修复（flow 平台参数面四缺口 + 名称白名单）已在 3.30.0 修复并留档：
++  docs/sillyspec/finished/thin-flow-quick-retirement.md
++- 本文件仅记录 adopt 边界两小坑，不阻塞平台侧 thin 派发（平台 writer 不走 adopt 路径——
++  变更目录由 flow start 全新建，预建仅空目录放行形态）。
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index 7ca9dca56..eaa811afe 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -68,12 +68,15 @@ export function isTerminalChange(
+   return change.status === "archived" || change.location === "archive";
+ }
+ 
+-// quick/blocked/archived 三态 status 徽标（非线性节点，独立呈现）
++// quick/thin/blocked/archived 状态徽标（非线性节点，独立呈现）
++// 2026-09-25-change-center-thin-flow task-07：补 thin=轻量变更（防标题裸显英文 "thin"）；
++// quick 补存量口径。
+ const STATUS_BADGE: Record<
+   string,
+   { label: string; variant: "success" | "outline" | "destructive" | "default" }
+ > = {
+-  quick: { label: "快速修复", variant: "default" },
++  quick: { label: "快速任务（存量）", variant: "default" },
++  thin: { label: "轻量变更", variant: "default" },
+   blocked: { label: "已阻塞", variant: "destructive" },
+   archived: { label: "已归档", variant: "success" },
+ };
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index 16e648573..da3224de0 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -85,6 +85,9 @@ const STAGE_OPTIONS = [
+   { value: "execute", label: "执行" },
+   { value: "verify", label: "验证" },
+   { value: "archive", label: "归档" },
++  // 2026-09-25-change-center-thin-flow task-07：thin 可筛（与 quick 不可筛不同，
++  // thin 是主力辅助流，新 quick 类型变更全部分流至此）。
++  { value: "thin", label: "轻量变更" },
+ ] as const;
+ 
+ // ── 「执行」列（task-08 / FR-05 / D-004@v1，视觉对齐 prototype-change-center-
+@@ -593,10 +596,12 @@ export default function ChangesPage({ params }: Props) {
+   const renderSubtitle = (): ReactNode => {
+     const wsName = workspace?.name ?? "—";
+     if (tab === "quicklog") {
++      // 存量口径（2026-09-25-change-center-thin-flow task-09）：quick 通道已退役，
++      // 计数只含存量条目；新工作走变更列表「轻量变更」。
+       const n = tabTotals.quicklog;
+       return n !== undefined
+-        ? `${wsName} · ${n} 条快速修复记录`
+-        : `${wsName} · 快速修复记录`;
++        ? `${wsName} · ${n} 条存量快速修复记录（旧 quick 通道已退役）`
++        : `${wsName} · 存量快速修复记录（旧 quick 通道已退役）`;
+     }
+     if (tab === "archive") {
+       return `${wsName} · 已归档变更`;
+@@ -746,7 +751,8 @@ export default function ChangesPage({ params }: Props) {
+               {t.label}
+               {cnt !== undefined && (
+                 <span className="ml-1 inline-block min-w-[18px] rounded-full bg-muted px-1.5 text-[11px] text-muted-foreground">
+-                  {cnt}
++                  {/* 存量口径（task-09）：quick 通道已退役，quicklog 计数只含存量条目 */}
++                  {t.key === "quicklog" ? `存量 · ${cnt}` : cnt}
+                 </span>
+               )}
+             </button>
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+index 7677e1844..a36251023 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+@@ -4,7 +4,8 @@
+  * 知识库页（/workspaces/[id]/knowledge）。
+  *
+  * ql-20260821-015 重构（原「知识 & 日志」双 tab）：
+- * - 只保留知识库，快速修复日志 tab 移除（变更中心「快速修复」tab 仍是完整入口）
++ * - 只保留知识库，快速修复日志 tab 移除（变更中心「快速修复」tab 已随 quick 退役转存量口径，
++ *   见 2026-09-25-change-center-thin-flow；新工作走变更列表「轻量变更」）
+  * - 左侧文件树与 explorer/scan-docs 同风格：共享三件套 FileNodeIcon（按扩展名分型图标）
+  *   + TreeBox（单行 + 横向滚动）+ PanelResizer/usePanelWidth（拖拽调宽 + localStorage 记忆）
+  * - antd Tree 受控：目录默认全展开、点目录行展开/收起（expandAction=click）、
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/page.tsx b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+index dcb054280..2e19b4fa6 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+@@ -125,6 +125,9 @@ const STAGE_OPTIONS = [
+   { value: "execute", label: "执行" },
+   { value: "verify", label: "验证" },
+   { value: "archive", label: "归档" },
++  // 2026-09-25-change-center-thin-flow task-07：thin 可筛（与桌面副本同步，
++  // 模块私有就地内联不 export 的既有规则不变）。
++  { value: "thin", label: "轻量变更" },
+ ] as const;
+ 
+ /**
+@@ -867,11 +870,11 @@ export default function MobileChangesPage() {
+     ) : (
+       <div className="flex flex-col items-center gap-2 py-10 text-center">
+         <p className="text-[15px] font-medium text-foreground">
+-          还没有快速修复记录
++          暂无存量快速修复记录
+         </p>
+         <p className="text-xs text-muted-foreground">
+-          在仓库跑 sillyspec quick 后，条目会实时出现在这里（CLI 推送 +
+-          文件同步双链路）。
++          旧的 quick 通道已退役，不再产生新条目；存量记录继续在这里收尾查阅。
++          新的小修复请在变更列表创建「轻量变更」。
+         </p>
+       </div>
+     );
+@@ -983,7 +986,8 @@ export default function MobileChangesPage() {
+               {t.label}
+               {cnt !== undefined && (
+                 <span className="inline-block min-w-[18px] rounded-full bg-muted px-1.5 text-[11px] leading-[18px] text-muted-foreground">
+-                  {cnt}
++                  {/* 存量口径（task-09）：quick 通道已退役，quicklog 计数只含存量条目 */}
++                  {t.key === "quicklog" ? `存量 · ${cnt}` : cnt}
+                 </span>
+               )}
+             </button>
+diff --git a/frontend/src/components/changes/__tests__/quicklog-table.test.tsx b/frontend/src/components/changes/__tests__/quicklog-table.test.tsx
+index d7b9ccdc1..8b3659eb2 100644
+--- a/frontend/src/components/changes/__tests__/quicklog-table.test.tsx
++++ b/frontend/src/components/changes/__tests__/quicklog-table.test.tsx
+@@ -227,10 +227,11 @@ describe("QuicklogTable", () => {
+     );
+   });
+ 
+-  it("空态：无记录引导文案；有筛选时短文案", async () => {
++  it("空态：存量退役指引文案；有筛选时短文案", async () => {
+     mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+     renderTable();
+-    expect(await screen.findByText("还没有快速修复记录")).toBeTruthy();
++    // 2026-09-25-change-center-thin-flow task-09：quick 通道退役，空态改存量指引
++    expect(await screen.findByText("暂无存量快速修复记录")).toBeTruthy();
+ 
+     // 触发一次带 search 的查询（输入回车）
+     const input = screen.getByPlaceholderText("搜索标题 / 正文全文…");
+diff --git a/frontend/src/components/changes/change-step-badge.tsx b/frontend/src/components/changes/change-step-badge.tsx
+index 3a7274d6b..89c982fc1 100644
+--- a/frontend/src/components/changes/change-step-badge.tsx
++++ b/frontend/src/components/changes/change-step-badge.tsx
+@@ -24,26 +24,36 @@ import { WORKFLOW_STAGE_LABELS } from "@/components/changes/detail/change-stage-
+ /** step 级进度摘要（api-types 生成，禁止手写）。 */
+ export type StepProgressSummary = components["schemas"]["StepProgressSummary"];
+ 
+-/** stage → 徽章色语义（与列表页现状 STAGE_KIND 一致：quick/brainstorm 警示、verify 成功…）。 */
+-export const STAGE_KIND: Record<string, StatusKind> = {
++/** stage → 徽章色语义（与列表页现状 STAGE_KIND 一致：quick/brainstorm 警示、verify 成功…）。
++ *
++ * 2026-09-25-change-center-thin-flow task-07：thin 走品牌紫阶——StatusBadge 的
++ * StatusKind 五值体系无紫，本地扩展 "brand" kind（渲染药丸形紫阶徽章，类名走
++ * brand-* 语义阶，随 html data-theme 换肤——themes.ts 单一源铁律）。 */
++export type StageBadgeKind = StatusKind | "brand";
++
++export const STAGE_KIND: Record<string, StageBadgeKind> = {
+   quick: "warning",
+   brainstorm: "warning",
+   plan: "info",
+   execute: "info",
+   verify: "success",
+   archive: "neutral",
++  // 2026-09-25-change-center-thin-flow：轻量变更品牌紫阶（D-002@v1），与 quick
++  // 的 warning 琥珀区分新旧两代辅助流。
++  thin: "brand",
+   // 2026-08-21 quick：CLI 归档变更读侧终态投影 current_stage='archived'
+   //（与平台内 complete_stage 终态同形），列表徽标降级为中性色。
+   archived: "neutral",
+ };
+ 
+ /** stage → 中文标签：主线五阶段复用 change-stage-header 的 WORKFLOW_STAGE_LABELS，
+- * 列表页另有 draft（旧数据兜底）/ scan / quick 三个值本地补齐。 */
++ * 列表页另有 draft（旧数据兜底）/ scan / quick / thin 四个值本地补齐。 */
+ export const STAGE_LABELS: Record<string, string> = {
+   ...WORKFLOW_STAGE_LABELS,
+   draft: "草稿",
+   scan: "扫描",
+-  quick: "快速任务",
++  quick: "快速任务（存量）", // task-07：quick 通道退役，存量口径
++  thin: "轻量变更", // D-002@v1：中文显示名单一口径
+   archived: "已归档",
+ };
+ 
+@@ -126,12 +136,22 @@ export function ChangeStepBadge({ stage, stepProgress }: ChangeStepBadgeProps) {
+   if (!stage) return null;
+ 
+   const hasSummary = stepProgress !== null && stepProgress.step_total > 0;
++  const kind: StageBadgeKind = STAGE_KIND[stage] ?? "neutral";
++  const label = STAGE_LABELS[stage] ?? stage;
+ 
+   return (
+     <div className="inline-flex flex-col items-start">
+-      <StatusBadge kind={STAGE_KIND[stage] ?? "neutral"}>
+-        {STAGE_LABELS[stage] ?? stage}
+-      </StatusBadge>
++      {kind === "brand" ? (
++        // 轻量变更（thin）品牌紫阶药丸徽章（2026-09-25-change-center-thin-flow
++        // task-07）：形态对照原型 prototype-change-center-thin-flow.html .badge.thin
++        //（soft 底 + brand 字 + 紫边 + ◈ 符号）；brand-* 语义阶随主题换肤不写死 hex。
++        <span className="inline-flex items-center gap-1 rounded-full border border-brand-300 bg-brand-50 px-2 py-px text-xs whitespace-nowrap text-brand-700">
++          <span aria-hidden>◈</span>
++          {label}
++        </span>
++      ) : (
++        <StatusBadge kind={kind}>{label}</StatusBadge>
++      )}
+       {hasSummary ? <StepSubRow progress={stepProgress} /> : null}
+     </div>
+   );
+diff --git a/frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx b/frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx
+index 8752aa968..f280ca955 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx
+@@ -140,17 +140,37 @@ describe("ChangeStageActions 审批卡（task-10）", () => {
+     ).toBeInTheDocument();
+   });
+ 
+-  it("quick 阶段：只读说明，无任何执行控制按钮（含推进/触发/门禁）", () => {
++  it("quick 阶段：只读说明（存量退役口径），无任何执行控制按钮（含推进/触发/门禁）", () => {
+     const props = makeProps({
+       change: makeChange({ current_stage: "quick", pending_review: null }),
+     });
+     render(<ChangeStageActions {...props} />);
+-    expect(screen.getByText(/快速修复由智能体在会话中执行/)).toBeInTheDocument();
++    // 2026-09-25-change-center-thin-flow task-08：quick 卡改「已退役·存量收尾」文案
++    expect(screen.getByText(/旧的 quick 通道已退役/)).toBeInTheDocument();
+     expect(screen.queryByText(/通过并通知绑定会话/)).not.toBeInTheDocument();
+     expect(screen.queryByText(/触发/)).not.toBeInTheDocument();
+     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+   });
+ 
++  it("thin 阶段：两段式只读说明卡（flow start/done 命令 + 断点续/fail-closed）", () => {
++    const props = makeProps({
++      change: makeChange({
++        current_stage: "thin",
++        pending_review: null,
++        change_key: "2026-09-25-thin-demo",
++      }),
++    });
++    render(<ChangeStageActions {...props} />);
++    expect(screen.getByText("◈ 轻量变更")).toBeInTheDocument();
++    expect(screen.getByText(/sillyspec flow start --change 2026-09-25-thin-demo/)).toBeInTheDocument();
++    expect(screen.getByText(/sillyspec flow done --change 2026-09-25-thin-demo/)).toBeInTheDocument();
++    expect(screen.getByText(/断点续/)).toBeInTheDocument();
++    expect(screen.getByText(/fail-closed/)).toBeInTheDocument();
++    // 只读说明：无执行控制按钮
++    expect(screen.queryByText(/通过并通知绑定会话/)).not.toBeInTheDocument();
++    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
++  });
++
+   it("无待审阶段：占位说明，无执行控制按钮", () => {
+     const props = makeProps({
+       change: makeChange({ current_stage: "execute", pending_review: null }),
+diff --git a/frontend/src/components/changes/detail/change-stage-actions.tsx b/frontend/src/components/changes/detail/change-stage-actions.tsx
+index 65ca8d6e7..10612bbe4 100644
+--- a/frontend/src/components/changes/detail/change-stage-actions.tsx
++++ b/frontend/src/components/changes/detail/change-stage-actions.tsx
+@@ -12,7 +12,9 @@ import type { AgentSessionListItem } from "@/lib/daemon";
+  * 变更详情页**唯一操作区**：意见输入 + 绑定会话只读展示 + 「通过/打回并通知绑定会话」。
+  * 执行控制（推进 / 重新派发 / 验证门禁 / 选档案 / 团队配置，含 quick 分支）已全部删除——
+  * 变更由 agent 在会话里经 sillyspec 驱动，平台只做展示板 + 人工审批（D-003@v1）。
+- * quick 类变更由 agent 在会话里跑 ``sillyspec run quick`` 触发，无需平台按钮。
++ * quick/thin 类变更均由 agent 在会话中驱动（quick 已退役转存量收尾；
++ * 2026-09-25-change-center-thin-flow 起 quick 类型新变更分流至 thin 轻量变更，
++ * 两分支均为只读说明卡，无平台按钮）。
+  *
+  * 审批走单端点调用（submitStageReview 透传 notify_session），注入由后端以服务身份
+  * best-effort 完成；据响应 notified_session / notify_error 展示三类降级提示
+@@ -125,18 +127,58 @@ export function ChangeStageActions({
+   const currentStage = change.current_stage ?? "draft";
+   const gatePanel = APPROVAL_PANELS[change.pending_review ?? ""];
+ 
+-  // quick 独立阶段（D-003）：无平台执行控制，仅只读说明。
++  // thin 辅助阶段（2026-09-25-change-center-thin-flow task-08）：轻量变更只读说明卡，
++  // 两段式 2 调用协议（形态对照原型 B 面）；平台无操作，执行全在会话内。
++  if (currentStage === "thin") {
++    const thinKey = change.change_key ?? change.id;
++    return (
++      <section className="space-y-2 rounded-md border border-brand-300 bg-brand-50/60 px-4 py-3">
++        <div className="flex items-center gap-2">
++          <span className="text-sm font-semibold">◈ 轻量变更</span>
++          <span className="text-xs text-muted-foreground">
++            两段式流程（flow start → 干活 → flow done），不走完整审批流
++          </span>
++        </div>
++        <div className="space-y-1.5 text-[11px] text-muted-foreground">
++          <p>
++            协议 1/2 —— 智能体在会话中执行
++            <code className="mx-1 rounded bg-background px-1.5 py-0.5 text-[11px]">
++              sillyspec flow start --change {thinKey}
++            </code>
++            启动（需求需多行文本，含独立「成功标准：」节头行 + 每行一条
++            <code className="mx-1 rounded bg-background px-1.5 py-0.5 text-[11px]">- 标准</code>
++            列表行，单行内联会被清晰度门拒绝）。
++          </p>
++          <p>
++            协议 2/2 —— 干活（改代码 + 写测试 + 填 design/requirements 槽位）后执行
++            <code className="mx-1 rounded bg-background px-1.5 py-0.5 text-[11px]">
++              sillyspec flow done --change {thinKey}
++            </code>
++            收口：中间态退出码 1 属正常（空槽拒收/实测失败自动升厚），修复后重跑同
++            命令即可断点续跑；实测失败即整单失败（fail-closed）。
++          </p>
++          <p>
++            进行中状态阶段恒显示「轻量变更」，归档时自动翻转（进度不落
++            sillyspec.db，flow done 后变更自动转入归档区，无需平台操作）。
++          </p>
++        </div>
++      </section>
++    );
++  }
++
++  // quick 独立阶段（D-003）：无平台执行控制，仅只读说明（存量通道，已退役）。
+   if (currentStage === "quick") {
+     return (
+       <section className="space-y-2 rounded-md border border-amber-500/40 bg-amber-50/40 px-4 py-3">
+         <div className="flex items-center gap-2">
+-          <span className="text-sm font-semibold">⚡ 快速修复</span>
++          <span className="text-sm font-semibold">⚡ 快速修复（存量）</span>
+           <span className="text-xs text-muted-foreground">
+-            快速通道，不走完整流程
++            已退役 · 存量收尾通道
+           </span>
+         </div>
+         <p className="text-[11px] text-muted-foreground">
+-          快速修复由智能体在会话中执行（sillyspec run quick），平台无需操作；完成态经同步链路回写。
++          旧的 quick 通道已退役，仅存量变更继续在会话中收尾；完成态经同步链路回写。
++          新的小修复请在变更列表创建「轻量变更」。
+         </p>
+       </section>
+     );
+diff --git a/frontend/src/components/changes/detail/change-stage-header.tsx b/frontend/src/components/changes/detail/change-stage-header.tsx
+index 3db737d50..ccd1f4dca 100644
+--- a/frontend/src/components/changes/detail/change-stage-header.tsx
++++ b/frontend/src/components/changes/detail/change-stage-header.tsx
+@@ -23,6 +23,11 @@ export const WORKFLOW_STAGE_LABELS: Record<string, string> = {
+   execute: "执行",
+   verify: "验证",
+   archive: "归档",
++  // 2026-09-25-change-center-thin-flow task-07：辅助阶段标签（供 change-step-timeline
++  // 组标题与 [cid] 详情页复用，防裸显英文；WORKFLOW_STAGES 主线数组不动——thin
++  // 不进主管线渲染，主管线 indexOf<0 分支不受影响）。
++  thin: "轻量变更",
++  quick: "快速任务（存量）",
+ };
+ 
+ export interface ChangeStageHeaderProps {
+diff --git a/frontend/src/components/changes/quicklog-table.tsx b/frontend/src/components/changes/quicklog-table.tsx
+index 3b4945939..915cdeed0 100644
+--- a/frontend/src/components/changes/quicklog-table.tsx
++++ b/frontend/src/components/changes/quicklog-table.tsx
+@@ -340,11 +340,11 @@ export function QuicklogTable({ workspaceId, onSelect }: QuicklogTableProps) {
+     return (
+       <div className="flex flex-col items-center gap-2 py-10 text-center">
+         <div className="text-[15px] font-medium text-foreground">
+-          还没有快速修复记录
++          暂无存量快速修复记录
+         </div>
+         <div className="text-xs text-muted-foreground">
+-          在仓库跑 sillyspec quick 后，条目会实时出现在这里（CLI 推送 +
+-          文件同步双链路）。
++          旧的 quick 通道已退役，不再产生新条目；存量记录继续在这里收尾查阅。
++          新的小修复请在变更列表创建「轻量变更」。
+         </div>
+       </div>
+     );
+@@ -358,7 +358,12 @@ export function QuicklogTable({ workspaceId, onSelect }: QuicklogTableProps) {
+         </div>
+       )}
+ 
+-      <div className="flex items-center justify-end gap-2">
++      <div className="flex items-center justify-between gap-2">
++        {/* 存量标注（2026-09-25-change-center-thin-flow task-09）：quick 通道已退役，
++            本面板仅承载存量记录的收尾查阅；新工作走变更列表「轻量变更」。 */}
++        <span className="text-xs text-muted-foreground">
++          存量面板 · 旧 quick 通道已退役，不再产生新条目
++        </span>
+         <Checkbox
+           checked={showPlaceholder}
+           onChange={(e) => {
+diff --git a/frontend/src/components/knowledge/__tests__/distill-history-dialog.test.tsx b/frontend/src/components/knowledge/__tests__/distill-history-dialog.test.tsx
+index 97f331587..5b6a39c81 100644
+--- a/frontend/src/components/knowledge/__tests__/distill-history-dialog.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/distill-history-dialog.test.tsx
+@@ -79,7 +79,7 @@ describe("DistillHistoryDialog", () => {
+     expect(mocks.listDistillTasks).toHaveBeenCalledWith(WS);
+     expect(items[0]).toHaveTextContent("失败");
+     expect(items[0]).toHaveTextContent("引擎不支持续接");
+-    expect(items[1]).toHaveTextContent("快速修复 · 2 条记录");
++    expect(items[1]).toHaveTextContent("快速修复（存量） · 2 条记录");
+   });
+ 
+   it("查看会话：agent_session_id 非空点击深链 /sessions?session=<id> 并关弹层", async () => {
+diff --git a/frontend/src/components/knowledge/__tests__/distill-task-bar.test.tsx b/frontend/src/components/knowledge/__tests__/distill-task-bar.test.tsx
+index e8bbc88df..7d375fb94 100644
+--- a/frontend/src/components/knowledge/__tests__/distill-task-bar.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/distill-task-bar.test.tsx
+@@ -341,7 +341,7 @@ describe("DistillTaskBar · D-009 降级提示 + D-010 merged_to 反链（task-0
+     renderBar();
+ 
+     await waitFor(() =>
+-      expect(screen.getByText(/正在从 2 条快速修复记录提炼知识/)).toBeInTheDocument(),
++      expect(screen.getByText(/正在从 2 条快速修复记录（存量）提炼知识/)).toBeInTheDocument(),
+     );
+   });
+ 
+diff --git a/frontend/src/components/knowledge/distill-history-dialog.tsx b/frontend/src/components/knowledge/distill-history-dialog.tsx
+index d5bbf35d0..0ba162cae 100644
+--- a/frontend/src/components/knowledge/distill-history-dialog.tsx
++++ b/frontend/src/components/knowledge/distill-history-dialog.tsx
+@@ -43,7 +43,7 @@ function sourceText(task: DistillTaskRead): string {
+       ? "会话"
+       : task.source_type === "change"
+         ? "变更"
+-        : "快速修复";
++        : "快速修复（存量）";
+   // quick 多选后端投影为 JSON 串（DistillTaskRead.source_ref: string）——解析
+   // 成条数展示；解析失败按普通 ref 截断（会话 UUID/变更名）。
+   let ref = String(task.source_ref);
+diff --git a/frontend/src/components/knowledge/distill-task-bar.tsx b/frontend/src/components/knowledge/distill-task-bar.tsx
+index 7d7823f5b..586861e63 100644
+--- a/frontend/src/components/knowledge/distill-task-bar.tsx
++++ b/frontend/src/components/knowledge/distill-task-bar.tsx
+@@ -84,8 +84,8 @@ function sourceSummary(task: DistillTaskRead): string {
+       }
+     }
+     return count > 1
+-      ? `正在从 ${count} 条快速修复记录提炼知识`
+-      : "正在从快速修复记录提炼知识";
++      ? `正在从 ${count} 条快速修复记录（存量）提炼知识`
++      : "正在从快速修复记录（存量）提炼知识";
+   }
+   const ref = task.source_ref ? task.source_ref.slice(0, 8) : "—";
+   return `正在从会话记录（${ref}…）提炼知识`;
+diff --git a/frontend/src/components/knowledge/precipitate-dialog.tsx b/frontend/src/components/knowledge/precipitate-dialog.tsx
+index 9f639da5d..ef156735b 100644
+--- a/frontend/src/components/knowledge/precipitate-dialog.tsx
++++ b/frontend/src/components/knowledge/precipitate-dialog.tsx
+@@ -108,14 +108,14 @@ interface DistillSourceItem {
+ const SOURCE_TYPE_OPTIONS: ReadonlyArray<{ value: DistillSourceType; label: string }> = [
+   { value: "session", label: "会话记录" },
+   { value: "change", label: "变更归档" },
+-  { value: "quick", label: "快速修复" },
++  { value: "quick", label: "快速修复（存量）" },
+ ];
+ 
+ /** 各来源类型的列表空态文案。 */
+ const SOURCE_EMPTY_TEXT: Record<DistillSourceType, string> = {
+   session: "当前工作区暂无可选会话记录。",
+   change: "暂无已归档变更可选。",
+-  quick: "当前工作区暂无快速修复记录。",
++  quick: "当前工作区暂无快速修复记录（存量通道已退役，不再产生新条目）。",
+ };
+ 
+ /** 各来源类型的条目图标（原型 .src-item .icon）。 */
+@@ -725,7 +725,7 @@ export function PrecipitateDialog({ workspaceId, onClose, onProposed, onDistille
+               {sourceType !== "session" && (
+                 <p className="mt-1 text-[10.5px] text-muted-foreground">
+                   {isQuickSource
+-                    ? "快速修复是零散记录，无「原会话」概念，固定走新建 agent。"
++                    ? "快速修复是零散记录（存量通道已退役，不再产生新条目），无「原会话」概念，固定走新建 agent。"
+                     : "变更归档没有「原会话」概念，固定走新建 agent。"}
+                 </p>
+               )}
+diff --git a/frontend/src/components/mobile/mobile-change-detail.tsx b/frontend/src/components/mobile/mobile-change-detail.tsx
+index dbc58a530..35e56f7d3 100644
+--- a/frontend/src/components/mobile/mobile-change-detail.tsx
++++ b/frontend/src/components/mobile/mobile-change-detail.tsx
+@@ -495,8 +495,48 @@ export function MobileChangeDetail({
+         target={{ kind: "change", workspaceId, changeKey: change.change_key }}
+       />
+ 
+-      {/* 审批操作卡（X-03 #2 自绘：有待办默认展开；无待办折叠只读说明） */}
+-      {reviewMeta ? (
++      {/* thin/quick 辅助阶段说明卡（2026-09-25-change-center-thin-flow task-08）：
++          现状两阶段均落「无可审批事项」通用卡——补专用只读说明（形态对齐桌面
++          change-stage-actions 同名分支；移动端折叠态承载，命令以说明文本呈现）。 */}
++      {change.current_stage === "thin" ? (
++        <SecCard
++          testId="m-change-thin-card"
++          title="◈ 轻量变更 · 两段式流程"
++          defaultOpen
++        >
++          <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
++            <p>
++              协议 1/2 —— 智能体在会话中执行
++              <code className="mx-1 rounded bg-card px-1.5 py-0.5 text-[11px]">
++                sillyspec flow start --change {change.change_key ?? change.id}
++              </code>
++              启动（需求需多行文本，含独立「成功标准：」节头行 + 每行一条
++              <code className="mx-1 rounded bg-card px-1.5 py-0.5 text-[11px]">- 标准</code>
++              列表行，单行内联会被清晰度门拒绝）。
++            </p>
++            <p>
++              协议 2/2 —— 干活（改代码 + 写测试 + 填槽位）后执行
++              <code className="mx-1 rounded bg-card px-1.5 py-0.5 text-[11px]">
++                sillyspec flow done --change {change.change_key ?? change.id}
++              </code>
++              收口：中间态退出码 1 属正常，修复后重跑同命令即断点续跑；实测失败即整单
++              失败（fail-closed）；flow done 后变更自动转入归档区。
++            </p>
++            <p>进行中状态阶段恒显示「轻量变更」，归档时自动翻转，平台无需操作。</p>
++          </div>
++        </SecCard>
++      ) : change.current_stage === "quick" ? (
++        <SecCard
++          testId="m-change-quick-card"
++          title="⚡ 快速修复（存量）· 已退役"
++          defaultOpen={false}
++        >
++          <p className="text-xs text-muted-foreground">
++            旧的 quick 通道已退役，仅存量变更继续在会话中收尾；新的小修复请在变更
++            列表创建「轻量变更」。
++          </p>
++        </SecCard>
++      ) : reviewMeta ? (
+         <section
+           data-testid="m-change-review-card"
+           className="rounded-[var(--radius-lg)] border-2 border-primary/25 bg-primary/5 shadow-[var(--shadow-sm)]"
+diff --git a/frontend/src/components/workspace/changes-overview-card.tsx b/frontend/src/components/workspace/changes-overview-card.tsx
+index 2fbfde4c1..ae93e7394 100644
+--- a/frontend/src/components/workspace/changes-overview-card.tsx
++++ b/frontend/src/components/workspace/changes-overview-card.tsx
+@@ -68,9 +68,12 @@ type SillySpecChange = components["schemas"]["DaemonHeartbeatSillySpecChange"];
+ /** 主管线 6 阶段（schema 另有 quick/explore 两键走旁路徽标，不进管线）。 */
+ const MAIN_STAGES = ["scan", "brainstorm", "plan", "execute", "verify", "archive"] as const;
+ 
+-/** quick/explore 旁路徽标（原型 .badge.quick；violet 固定信息色，同 PROVIDER_TONES 先例）。 */
++/** thin/quick/explore 旁路徽标（原型 .badge.quick；violet 固定信息色，同 PROVIDER_TONES 先例）。
++ * 2026-09-25-change-center-thin-flow task-07：加 thin（◈ 轻量变更）与 quick 存量口径——
++ * 不加则 thin 变更渲染为全灰主管线无徽标（design 七触点之一）。 */
+ const BYPASS_BADGES: Record<string, string> = {
+-  quick: "⚡ quick",
++  thin: "◈ thin",
++  quick: "⚡ quick（存量）",
+   explore: "🧭 explore",
+ };
+ const BYPASS_BADGE_CLASS =
+@@ -226,7 +229,9 @@ function StepsBar({
+  */
+ function ActiveChangeRow({ change }: { change: SillySpecChange }) {
+   const stage = change.current_stage ?? null;
+-  const isBypass = stage === "quick" || stage === "explore";
++  // thin（2026-09-25-change-center-thin-flow task-07）加入旁路：轻量变更不进主管线，
++  // 无旁路判断会渲染为全灰管线无徽标。
++  const isBypass = stage === "quick" || stage === "thin" || stage === "explore";
+   const stageLabel = change.stage_label?.trim() || stage || "—";
+   const completed = change.steps?.completed ?? null;
+   const total = change.steps?.total ?? null;
+@@ -265,7 +270,9 @@ function ActiveChangeRow({ change }: { change: SillySpecChange }) {
+ function GhostRow({ change }: { change: SillySpecChange }) {
+   const stage = change.current_stage ?? null;
+   const bypassLabel =
+-    stage === "quick" || stage === "explore" ? (BYPASS_BADGES[stage] ?? null) : null;
++    stage === "quick" || stage === "thin" || stage === "explore"
++      ? (BYPASS_BADGES[stage] ?? null)
++      : null;
+   const stageLabel = change.stage_label?.trim() || stage || "—";
+   return (
+     <li className="border-t px-4 py-2">
+diff --git a/frontend/src/components/workspace/stats-row.tsx b/frontend/src/components/workspace/stats-row.tsx
+index 234fdc8ad..761a87d86 100644
+--- a/frontend/src/components/workspace/stats-row.tsx
++++ b/frontend/src/components/workspace/stats-row.tsx
+@@ -95,7 +95,9 @@ export function WorkspaceStatsRow({
+       <StatCard
+         href={`/workspaces/${workspaceId}/changes?tab=quicklog`}
+         icon={Zap}
+-        label="快速修复"
++        /* 存量口径（2026-09-25-change-center-thin-flow task-09）：quick 通道已退役，
++           计数只含存量收尾条目；新的小修复走「轻量变更」。 */
++        label="快速修复（存量）"
+         value={quickTotal}
+         clickable
+       />
+diff --git a/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/design.md b/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T01:54:21.475Z
++---
++# 设计记录（Design Record）— 2026-09-25-knowledge-quick-legacy-copy
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-quick-legacy-copy 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++纯文案面四处同步（依据 2026-09-25 两子代理核对结论「知识库弹层是 quick 源另一入口未同步存量口径」）：precipitate-dialog 蒸馏源标签「快速修复（存量）」+空态退役说明+提示文案、distill-task-bar 摘要、distill-history-dialog 来源头、knowledge/page.tsx 头注释；口径与变更中心已落的存量退役表述一致（2026-09-25-change-center-thin-flow）。两处字面量断言跟新口径（distill-task-bar:344、distill-history-dialog:82）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-quick-legacy-copy 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++无对外签名/行为/文件格式变化：仅 UI 展示字符串（SOURCE_TYPE_OPTIONS 标签、SOURCE_EMPTY_TEXT、sourceSummary/sourceText 文案）与注释；source_type 值仍为 "quick"、蒸馏请求载荷与后端校验零改动。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-quick-legacy-copy 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：静态文案常量，无时序面——不适用。2. 并发写：无共享可变状态，纯渲染串。3. 切换/生命周期：无状态无生命周期面——不适用。4. 作用域：文案为编译期常量全局唯一份，无跨工作区/多实例差异。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-quick-legacy-copy 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：文案改动破坏依赖字面量的组件测试——已排查命中面（precipitate:509 为子串匹配兼容；task-bar:344/history:82 两处已跟新口径）并实测三组件 38 用例全绿。试过放弃的方案：直接隐藏/移除「快速修复」蒸馏分段——放弃，存量 QUICKLOG 条目仍需可蒸馏（thin-flow 设计钉死保留存量读通道），隐藏会切断存量收尾能力。
+
+diff --git a/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/flow-state.yaml b/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/flow-state.yaml
+@@ -0,0 +1,16 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 9c908b6ae2af7d4d3b7a28301373cb58ac010755
++updatedAt: '2026-09-25T03:51:00.157Z'
++gate_summary: >-
++  test: passed ← module[platform_sync]+deps(py1)（63.1s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260925035037\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（22.2s）｜门文件 47 个
++
+
+diff --git a/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/proposal.md b/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/proposal.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T01:54:21.474Z
++---
++# 提案书（Proposal）— 2026-09-25-knowledge-quick-legacy-copy
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:9c7edcf58b51c74d2f40e6220aef4d8381803c1cad935e0bf159a88ad316992a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-quick-legacy-copy 留痕重锚 -->
++任务原话转写：知识库页面 quick 蒸馏源存量口径一致性：变更中心已把 quick 通道转为存量退役口径（2026-09-25-change-center-thin-flow），但知识库弹层三处文案与一处过时注释未同步，用户在同概念两入口看到不一致的退役状态。
++成功标准：
++- precipitate-dialog「快速修复」蒸馏源分段带存量标注，空态文案不再引导产生新 quick 条目
++- distill-task-bar 与 distill-history-dialog 的 quick 相关文案带存量口径
++- knowledge/page.tsx 头部过时注释更新（快速修复 tab 已是存量口径）
++- 聚焦验证（tsc + 相关组件测试）全绿，存量蒸馏功能行为零改动（纯文案面）
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:b2ff4fd9b05b752035066082dbccc5e966cefcefaf0555465028f80e4ad90214:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-quick-legacy-copy 留痕重锚 -->
++按成功标准机械推导，共 4 条验收面：
++1. precipitate-dialog「快速修复」蒸馏源分段带存量标注，空态文案不再引导产生新 quick 条目
++2. distill-task-bar 与 distill-history-dialog 的 quick 相关文案带存量口径
++3. knowledge/page.tsx 头部过时注释更新（快速修复 tab 已是存量口径）
++4. 聚焦验证（tsc + 相关组件测试）全绿，存量蒸馏功能行为零改动（纯文案面）
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:0f6ff3cad15687cdce80dc433cbec6535494e97db0b3773612ac2f910d343fd9:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-quick-legacy-copy 留痕重锚 -->
++1. precipitate-dialog「快速修复」蒸馏源分段带存量标注，空态文案不再引导产生新 quick 条目
++2. distill-task-bar 与 distill-history-dialog 的 quick 相关文案带存量口径
++3. knowledge/page.tsx 头部过时注释更新（快速修复 tab 已是存量口径）
++4. 聚焦验证（tsc + 相关组件测试）全绿，存量蒸馏功能行为零改动（纯文案面）
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/requirements.md b/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/requirements.md
+@@ -0,0 +1,44 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T01:54:21.475Z
++---
++# 需求规格（Requirements）— 2026-09-25-knowledge-quick-legacy-copy
++
++## 功能需求（成功标准机械摘录）
++<!-- MACHINE-DRAFT:requirements-frs:d0cbdebb2363da3efcf804cebc673bea0d8fcb44e3a5193e2db8121067450c45:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-quick-legacy-copy 留痕重锚 -->
++### FR-01: precipitate-dialog「快速修复」蒸馏源分段带存量标注，空态文案不
++Given 平台按当前契约运行
++When 本变更交付并运行
++Then precipitate-dialog「快速修复」蒸馏源分段带存量标注，空态文案不再引导产生新 quick 条目
++
++### FR-02: distill-task-bar 与 distill-history-dialo
++Given 平台按当前契约运行
++When 本变更交付并运行
++Then distill-task-bar 与 distill-history-dialog 的 quick 相关文案带存量口径
++
++### FR-03: knowledge/page.tsx 头部过时注释更新（快速修复 tab 已是存
++Given 平台按当前契约运行
++When 本变更交付并运行
++Then knowledge/page.tsx 头部过时注释更新（快速修复 tab 已是存量口径）
++
++### FR-04: 聚焦验证（tsc + 相关组件测试）全绿，存量蒸馏功能行为零改动（纯文案面）
++Given 平台按当前契约运行
++When 本变更交付并运行
++Then 聚焦验证（tsc + 相关组件测试）全绿，存量蒸馏功能行为零改动（纯文案面）
++<!-- MACHINE-DRAFT:requirements-frs:end -->
++
++<!--AGENT:槽1 需求例外裁决（FR 语义改写不走此槽——直接编辑机器段后跑 flow amend-draft 留痕，槽内容不进 FR 索引）——例外裁决书写面（机器段之外合法） -->
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx（D-010 分组全组覆盖分段渲染与提示文案；:509 子串断言兼容新文案）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/knowledge/__tests__/distill-task-bar.test.tsx:344（断言「正在从 2 条快速修复记录（存量）提炼知识」新口径）+ frontend/src/components/knowledge/__tests__/distill-history-dialog.test.tsx:82（断言「快速修复（存量） · 2 条记录」）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++不适用：注释级变更无运行时行为；tsc --noEmit 覆盖语法面（exit 0 回执 .sillyspec/.runtime/logs/c1-tsc.log）。
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend tsc --noEmit exit 0 + vitest 三组件（precipitate-dialog/distill-task-bar/distill-history-dialog）38 passed——回执 .sillyspec/.runtime/logs/c1-tsc.log 与 c1-test.log。
+
+diff --git a/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/tasks.md b/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-knowledge-quick-legacy-copy/tasks.md
+@@ -0,0 +1,16 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T01:54:21.475Z
++---
++# 任务注册表（Tasks）— 2026-09-25-knowledge-quick-legacy-copy
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++<!-- MACHINE-DRAFT:tasks-rows:464a202ddd407da4e87f2fd170879613af9cc19bd826b0206137b49c1f78c082:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-quick-legacy-copy 留痕重锚 -->
++- [ ] task-01: precipitate-dialog「快速修复」蒸馏源分段带存量标注，空态文案不再引导产生新 quick 条目
++- [ ] task-02: distill-task-bar 与 distill-history-dialog 的 quick 相关文案带存量口径
++- [ ] task-03: knowledge/page.tsx 头部过时注释更新（快速修复 tab 已是存量口径）
++- [ ] task-04: 聚焦验证（tsc + 相关组件测试）全绿，存量蒸馏功能行为零改动（纯文案面）
++<!-- MACHINE-DRAFT:tasks-rows:end -->
++

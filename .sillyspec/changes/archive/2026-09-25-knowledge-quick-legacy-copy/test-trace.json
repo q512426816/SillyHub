@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-knowledge-quick-legacy-copy",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-25-knowledge-quick-legacy-copy:flow:FR-01",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/precipitate-dialog.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-knowledge-quick-legacy-copy"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-25-knowledge-quick-legacy-copy:flow:FR-02",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/distill-history-dialog.test.ts",
+        "frontend/src/components/knowledge/__tests__/distill-task-bar.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-knowledge-quick-legacy-copy"
+    }
+  ]
+}

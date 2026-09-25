@@ -1,0 +1,412 @@
+diff --git a/backend/app/modules/platform_sync/service.py b/backend/app/modules/platform_sync/service.py
+index f15d2919b..9a392d256 100644
+--- a/backend/app/modules/platform_sync/service.py
++++ b/backend/app/modules/platform_sync/service.py
+@@ -279,12 +279,27 @@ class PlatformSyncService:
+         # task-04：已删探测先于一切写路径（含 base_ts 冲突分支——已删 key 无论
+         # 乐观锁状态一律以 change_deleted 拒收，信息对 CLI 更可行动）。
+         if await self._change_key_deleted(workspace_id, name):
+-            return PlatformSyncResult(
+-                conflict=False,
+-                platform_progress=None,
+-                last_pushed_at=None,
+-                change_deleted=True,
+-            )
++            # archived 载荷复活通道（坑 archive-tombstone 冤案行修复，2026-09-23）：
++            # 旧 CLI 墓碑 bug 曾把归档链误标 location='deleted'（CLI 侧 e4667729 终态透传
++            # 前单点写死 deleted）。本地库 status='archived'（真归档）的新 CLI 重推
++            # 'archived' 载荷时，行冤案可恢复——先翻回 location='archive' 再走正常接受
++            # 分支（镜像不软删，与 _apply_cli_tombstone archived 路径同口径）；真删除
++            # 链（本地 status='deleted'）载荷不变仍拒收 409。
++            if self._body_changes_status(
++                body, name
++            ) == "archived" and await self._heal_deleted_row_to_archive(workspace_id, name):
++                log.info(
++                    "platform_sync.change_deleted_healed_to_archive",
++                    workspace_id=str(workspace_id),
++                    change_key=name,
++                )
++            else:
++                return PlatformSyncResult(
++                    conflict=False,
++                    platform_progress=None,
++                    last_pushed_at=None,
++                    change_deleted=True,
++                )
+ 
+         row = await self._find_row(workspace_id, name)
+ 
+@@ -545,6 +560,42 @@ class PlatformSyncService:
+             self._assign(existing, body, stamped_at, user)
+             await self._session.commit()
+ 
++    @staticmethod
++    def _body_changes_status(body: dict[str, Any], name: str) -> str | None:
++        """body changes[] 同名条目的 status（墓碑终态判别；缺条目/非 dict 返回 None）。"""
++        for c in body.get("changes") or []:
++            if isinstance(c, dict) and c.get("name") == name:
++                status = c.get("status")
++                return status if isinstance(status, str) else None
++        return None
++
++    async def _heal_deleted_row_to_archive(self, workspace_id: uuid.UUID | None, name: str) -> bool:
++        """location='deleted' 冤案行翻回 'archive'（坑 archive-tombstone，2026-09-23）。
++
++        仅当 Change 行存在且 location='deleted'（主判据命中形态）时翻回；兜底判据命中
++        （行缺失、仅 manifest platform_deleted 锚点）不建行——真删除走平台删除入口的
++        恢复流程，不在同步通道猜。镜像不软删不恢复（deleted 链已收敛的镜像文件由
++        reparse/镜像驱动收敛自行对齐，位置恢复已满足「已归档」tab 可见的主诉求）。
++        幂等：已是 archive 返回 False（无需复活，走原拒收/正常分支均可）。
++        """
++        if workspace_id is None:
++            return False
++        from app.modules.change.model import Change as _Change
++
++        row = (
++            await self._session.execute(
++                select(_Change).where(
++                    col(_Change.workspace_id) == workspace_id,
++                    col(_Change.change_key) == name,
++                )
++            )
++        ).scalar_one_or_none()
++        if row is None or row.location != "deleted":
++            return False
++        row.location = "archive"
++        await self._session.commit()
++        return True
++
+     async def _change_key_deleted(self, workspace_id: uuid.UUID | None, name: str) -> bool:
+         """已删 key 双层判据（task-04 / design §5.4 B-1 加固，upsert_progress 拒收
+         前置与 ``_ensure_change_row`` 建占位守卫共用同一 helper）。
+@@ -747,8 +798,24 @@ class PlatformSyncService:
+             ),
+             None,
+         )
+-        if status != "deleted":
++        if status not in ("deleted", "archived"):
+             return
++
++        # archived 墓碑（坑 archive-tombstone-归档墓碑致面板已归档变更软删不可见，
++        # 2026-09-23 实证；CLI 侧 e4667729 终态透传后的平台配套）：unregisterChange 链
++        # （run archive / quick 收尾 / 自愈）的墓碑载荷是 'archived'——**不触发镜像
++        # 软删**（归档的语义是可回溯，spec 镜像须保留；镜像收敛仅属 'deleted' 链）。
++        # 实现：no-op 早退，不开第二条 location 写路径——
++        # - P1 ingest 不变量（2026-09-16，test_archived_terminal_persists 回归锚）：
++        #   location 收敛归文件移动 + reparse，常规上行不动 location——行 'active'
++        #   收到 'archived' 载荷保持不变；
++        # - 冤案行恢复（旧 CLI 误发 'deleted' 致 location='deleted'）在
++        #   upsert_progress 拒收分支 _heal_deleted_row_to_archive 已闭环——本函数
++        #   只能被已过已删探测（行非 'deleted'）的载荷触达，此处再翻 location
++        #   既违反上述不变量、对冤案行又是死代码。
++        if status == "archived":
++            return
++
+         row = (
+             await self._session.execute(
+                 select(Change).where(
+diff --git a/backend/app/modules/platform_sync/tests/test_change_deleted_guard.py b/backend/app/modules/platform_sync/tests/test_change_deleted_guard.py
+index f2eee83fb..20a7aad50 100644
+--- a/backend/app/modules/platform_sync/tests/test_change_deleted_guard.py
++++ b/backend/app/modules/platform_sync/tests/test_change_deleted_guard.py
+@@ -81,16 +81,23 @@ async def _make_ws_and_users_with_tokens(db_session, *, n_users: int = 1):
+ 
+ 
+ async def _get_change(db_session, ws_id, name):
+-    """取 (workspace, change_key) 唯一的 ux_changes 行。"""
++    """取 (workspace, change_key) 唯一的 ux_changes 行。
++
++    populate_existing：client 与 db_session 是两个独立 session（conftest 分别
++    sessionmaker，expire_on_commit=False），app 侧 commit 后本 session 身份映射里
++    缓存的旧属性不会自动刷新——多 push 场景必须强读 DB 真值，否则读到首查缓存。
++    """
+     from app.modules.change.model import Change
+ 
+     return (
+         (
+             await db_session.execute(
+-                select(Change).where(
++                select(Change)
++                .where(
+                     Change.workspace_id == ws_id,
+                     Change.change_key == name,
+                 )
++                .execution_options(populate_existing=True)
+             )
+         )
+         .scalars()
+@@ -433,3 +440,85 @@ async def test_name_archive_second_range_still_catches_real_archived_anchor(clie
+     resp = await _push(client, headers[0], "archive")
+     assert resp.status_code == 409
+     assert resp.json()["code"] == "change_deleted"
++
++
++# ── archived 墓碑（坑 archive-tombstone-归档墓碑致面板已归档变更软删不可见，2026-09-23）──
++# CLI 侧 e4667729 终态透传后的平台配套：'archived' 载荷 → location='archive'（面板
++# 「已归档」tab 可见，含修复旧 CLI 误发 'deleted' 造成的冤案行），不触发镜像软删。
++
++
++async def test_cli_tombstone_archived_restores_location_archive(client, db_session):
++    """archived 墓碑 → location='archive'（行从 deleted 冤案恢复，归档 tab 可见）。"""
++    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
++    # 旧 CLI 误发 'deleted' 墓碑 → 行被软删（冤案形态）
++    await _push(client, headers[0], "tomb-arch", body=_progress("tomb-arch", status="deleted"))
++    change = await _get_change(db_session, ws_id, "tomb-arch")
++    assert change.location == "deleted"
++
++    # 新 CLI 终态透传 'archived' → 恢复 archive
++    resp = await _push(
++        client,
++        headers[0],
++        "tomb-arch",
++        body=_progress("tomb-arch", status="archived"),
++    )
++    assert resp.status_code == 200
++    change = await _get_change(db_session, ws_id, "tomb-arch")
++    assert change.location == "archive", "archived 墓碑恢复归档可见"
++
++
++async def test_cli_tombstone_archived_no_mirror_soft_delete(client, db_session):
++    """archived 墓碑不触发镜像软删（区别于 deleted 链）——spec 文件树保持可见。"""
++    from sqlalchemy import select as _select
++
++    from app.modules.spec_workspace.model import SpecFileManifest
++
++    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
++    db_session.add(
++        SpecFileManifest(
++            workspace_id=ws_id,
++            path="changes/arch-keep/design.md",
++            content_hash="deadbeef",
++            version=1,
++            exists=True,
++        )
++    )
++    await db_session.commit()
++
++    resp = await _push(
++        client,
++        headers[0],
++        "arch-keep",
++        body=_progress("arch-keep", status="archived"),
++    )
++    assert resp.status_code == 200
++    change = await _get_change(db_session, ws_id, "arch-keep")
++    # P1 ingest 不变量：'archived' 载荷不动 location（收敛归文件移动 + reparse），
++    # 关键是不像旧 bug 那样被误当 deleted 链软删
++    assert change.location == "active"
++    # 镜像文件未被软删（deleted 链才收敛）
++    rows = (
++        (
++            await db_session.execute(
++                _select(SpecFileManifest).where(
++                    SpecFileManifest.workspace_id == ws_id,
++                    SpecFileManifest.path == "changes/arch-keep/design.md",
++                )
++            )
++        )
++        .scalars()
++        .all()
++    )
++    assert all(r.exists for r in rows), "archived 墓碑不软删 spec 镜像（可回溯）"
++
++
++async def test_cli_tombstone_archived_idempotent(client, db_session):
++    """重复 archived 载荷 no-op（幂等）：均 200、location 不翻、不软删。"""
++    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
++    for _ in range(2):
++        resp = await _push(
++            client, headers[0], "tomb-arch2", body=_progress("tomb-arch2", status="archived")
++        )
++        assert resp.status_code == 200
++    change = await _get_change(db_session, ws_id, "tomb-arch2")
++    assert change.location == "active", "archived 载荷幂等 no-op，不动 location"
+diff --git a/.sillyspec/changes/2026-09-25-tombstone-heal-archive/design.md b/.sillyspec/changes/2026-09-25-tombstone-heal-archive/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-tombstone-heal-archive/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T05:03:12.145Z
++---
++# 设计记录（Design Record）— 2026-09-25-tombstone-heal-archive
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-tombstone-heal-archive 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++收编上个会话遗留半成品（代码+测试均已就绪，实测 16 passed）。三块：①upsert_progress 已删拒收分支加复活通道——body 同名条目 status=='archived' 且行 location=='deleted' 时 _heal_deleted_row_to_archive 翻回 archive 走正常接受，否则维持原拒收；②两个私有 helper（_body_changes_status 墓碑终态判别 + 幂等翻行）；③_apply_cli_tombstone 的 archived 分支语义化 no-op（行为与原早退等价，注释钉住不软删镜像/不动 location）。与已提交的 dfdeedf27（change 侧三源并集+存量回翻迁移）互补：那侧治存量，本侧治增量通道。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-tombstone-heal-archive 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++对外 API 零签名变化（POST /progress 行为语义增强：'archived' 载荷可复活 deleted 冤案行）；模块内新增两个私有 helper，无新端点/DTO/迁移。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-tombstone-heal-archive 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序：晚到的旧 'deleted' 载荷在行已复活后到达——已删探测不再命中（location=archive）走正常 upsert，无害。2. 并发：两请求同翻一行——第二个幂等返回 False 走原分支；单写点无交叉，commit 竞态由既有会话语义兜底。3. 切换：翻行与接受分支同请求内顺序执行，无半态窗口。4. 作用域：翻行查询显式带 workspace_id，无跨工作区串台。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-tombstone-heal-archive 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：误复活真删除行——防线是判据只认「行 location=='deleted' 且载荷终态 'archived'」（真删除链本地 status='deleted' 不会再发 archived 终态；行缺失/兜底判据命中不建行）。放弃的方案：让 _apply_cli_tombstone 认 archived 置 location——与 D-002@v1 冲突（reparse 是 location owner，抢先置位会被回翻抖动），坑文档原提议已在 dfdeedf27 否决；本复活通道是拒收分支内的唯一例外写点且单向。
+
+diff --git a/.sillyspec/changes/2026-09-25-tombstone-heal-archive/flow-state.yaml b/.sillyspec/changes/2026-09-25-tombstone-heal-archive/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-tombstone-heal-archive/flow-state.yaml
+@@ -0,0 +1,14 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: ba2d4226748a86570fda837f0c80c7f9d8fb6f16
++updatedAt: '2026-09-25T05:05:26.003Z'
++gate_summary: >-
++  test: skipped｜lint: passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app &&
++  cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（15.4s）｜门文件 12 个
++
+
+diff --git a/.sillyspec/changes/2026-09-25-tombstone-heal-archive/proposal.md b/.sillyspec/changes/2026-09-25-tombstone-heal-archive/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-tombstone-heal-archive/proposal.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T05:03:12.144Z
++---
++# 提案书（Proposal）— 2026-09-25-tombstone-heal-archive
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:a9552878d42bf717b03127bcfd1e93a78d0ad98f4677a371774c24a9fa24514f:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-tombstone-heal-archive 留痕重锚 -->
++任务原话转写：收编上个会话遗留的 archive-tombstone 冤案复活半成品（platform_sync/service.py 未提交 WIP + test_change_deleted_guard.py 新 3 用例，代码与测试均已就绪实测 16 passed）：旧 CLI 墓碑 bug 曾把归档链误标 location='deleted'（面板已归档 tab 隐身）；新 CLI（e4667729 终态透传后）重推 'archived' 载荷时应把冤案行翻回 location='archive' 恢复可见，且 'archived' 墓碑不触发镜像软删（归档可回溯，区别于 deleted 链）。
++成功标准：
++- upsert_progress 已删拒收分支加复活通道：body changes[] 同名条目 status=='archived' 且行 location=='deleted' 时翻回 archive 走正常接受，否则维持原拒收（真删除链零回归）
++- _apply_cli_tombstone 的 archived 分支语义化 no-op（行为与原早退等价，钉住不软删镜像/不动 location 的不变量注释）
++- test_change_deleted_guard.py 三新用例（恢复/不软删/幂等）+ 既有 13 用例全绿（16 passed 实测）
++- 尊重 D-002@v1 与 P1 ingest 不变量：不新增 location 写路径竞争（复活通道是唯一新增写点且仅 deleted→archive 单向）
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:a8e92912cec3777f337ae00d3f37d7c509780d453c2f8532787a779634931579:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-tombstone-heal-archive 留痕重锚 -->
++按成功标准机械推导，共 4 条验收面：
++1. upsert_progress 已删拒收分支加复活通道：body changes[] 同名条目 status=='archived' 且行 location=='deleted' 时翻回 archive 走正常接受，否则维持原拒收（真删除链零回归）
++2. _apply_cli_tombstone 的 archived 分支语义化 no-op（行为与原早退等价，钉住不软删镜像/不动 location 的不变量注释）
++3. test_change_deleted_guard.py 三新用例（恢复/不软删/幂等）+ 既有 13 用例全绿（16 passed 实测）
++4. 尊重 D-002@v1 与 P1 ingest 不变量：不新增 location 写路径竞争（复活通道是唯一新增写点且仅 deleted→archive 单向）
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:abc25edf7d9c84c4e4334bd35bcb90a78870016bf876be27f3184ff1b8f8e197:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-tombstone-heal-archive 留痕重锚 -->
++1. upsert_progress 已删拒收分支加复活通道：body changes[] 同名条目 status=='archived' 且行 location=='deleted' 时翻回 archive 走正常接受，否则维持原拒收（真删除链零回归）
++2. _apply_cli_tombstone 的 archived 分支语义化 no-op（行为与原早退等价，钉住不软删镜像/不动 location 的不变量注释）
++3. test_change_deleted_guard.py 三新用例（恢复/不软删/幂等）+ 既有 13 用例全绿（16 passed 实测）
++4. 尊重 D-002@v1 与 P1 ingest 不变量：不新增 location 写路径竞争（复活通道是唯一新增写点且仅 deleted→archive 单向）
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-25-tombstone-heal-archive/requirements.md b/.sillyspec/changes/2026-09-25-tombstone-heal-archive/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-tombstone-heal-archive/requirements.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T05:03:12.145Z
++---
++# 需求规格（Requirements）— 2026-09-25-tombstone-heal-archive
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++### FR-01: archived 载荷复活 deleted 冤案行
++Given 平台 Change 行 location='deleted'（旧 CLI 墓碑 bug 误标）且 upsert_progress 收到新 CLI 重推的 'archived' 载荷（body changes[] 同名条目 status=='archived'）
++When 已删探测命中走拒收分支
++Then 行翻回 location='archive' 并走正常接受分支（面板「已归档」tab 恢复可见）；行缺失/仅 manifest 兜底判据命中/真删除链（本地 status='deleted'）不复活，维持原拒收
++
++### FR-02: archived 墓碑不触发镜像软删
++Given _apply_cli_tombstone 收到 status=='archived' 的墓碑载荷
++When 处理 tombstone
++Then no-op 早退：不动 location（P1 ingest 不变量，收敛归文件移动 + reparse）、不软删 spec 镜像（归档可回溯，区别于 deleted 链）；行为与原「非 deleted 早退」等价，注释钉住语义
++
++### FR-03: 聚焦测试全绿
++Given 本变更交付
++When 跑 test_change_deleted_guard.py
++Then 三新用例（恢复/不软删/幂等）+ 既有 13 用例全绿（16 passed 实测）
++
++### FR-04: 不变量守恒
++Given D-002@v1（reparse 是 location owner）与 P1 ingest 不变量
++When 本变更落库
++Then 复活通道是唯一新增 location 写点且仅 deleted→archive 单向；镜像不软删不恢复
++<!--
++参考摘录（非约束——agent 可采纳/改写/忽略；每条格式 ### FR-NN: 标题 + Given/When/Then）
++FR-01: upsert_progress 已删拒收分支加复活通道：body changes[] 同名条目 status=='archived' 且行 location=='deleted' 时翻回 archive 走正常接受，否则维持原拒收（真删除链零回归）
++FR-02: _apply_cli_tombstone 的 archived 分支语义化 no-op（行为与原早退等价，钉住不软删镜像/不动 location 的不变量注释）
++FR-03: test_change_deleted_guard.py 三新用例（恢复/不软删/幂等）+ 既有 13 用例全绿（16 passed 实测）
++FR-04: 尊重 D-002@v1 与 P1 ingest 不变量：不新增 location 写路径竞争（复活通道是唯一新增写点且仅 deleted→archive 单向）
++-->
++
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/platform_sync/tests/test_change_deleted_guard.py::test_cli_tombstone_archived_restores_location_archive
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/platform_sync/tests/test_change_deleted_guard.py::test_cli_tombstone_archived_no_mirror_soft_delete（含幂等 test_cli_tombstone_archived_idempotent）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++uv run pytest app/modules/platform_sync/tests/test_change_deleted_guard.py -q --no-cov → 16 passed（回执 .sillyspec/.runtime/logs/c3-test.log）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++不适用：设计不变量（唯一新增写点=复活通道且单向），由 FR-01/02 行为用例与既有 test_archived_terminal_persists（P1 锚，不在本 diff 内零改动）共同锁定。
+
+diff --git a/.sillyspec/changes/2026-09-25-tombstone-heal-archive/tasks.md b/.sillyspec/changes/2026-09-25-tombstone-heal-archive/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-tombstone-heal-archive/tasks.md
+@@ -0,0 +1,16 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T05:03:12.145Z
++---
++# 任务注册表（Tasks）— 2026-09-25-tombstone-heal-archive
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++<!-- MACHINE-DRAFT:tasks-rows:349365fec7bd07ec01a7a887e469eb1ed41359055c7d38822038280543941043:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-tombstone-heal-archive 留痕重锚 -->
++- [ ] task-01: upsert_progress 已删拒收分支加复活通道：body changes[] 同名条目 status=='arc
++- [ ] task-02: _apply_cli_tombstone 的 archived 分支语义化 no-op（行为与原早退等价，钉住不软删镜像
++- [ ] task-03: test_change_deleted_guard.py 三新用例（恢复/不软删/幂等）+ 既有 13 用例全绿（16 
++- [ ] task-04: 尊重 D-002@v1 与 P1 ingest 不变量：不新增 location 写路径竞争（复活通道是唯一新增写点且仅
++<!-- MACHINE-DRAFT:tasks-rows:end -->
++

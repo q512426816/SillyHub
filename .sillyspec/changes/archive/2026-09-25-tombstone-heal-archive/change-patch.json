@@ -1,0 +1,23 @@
+{
+  "change": "2026-09-25-tombstone-heal-archive",
+  "baseline": "ba2d4226748a86570fda837f0c80c7f9d8fb6f16",
+  "head": "fed6e9e9a27b6363273addd25ac98f316e90db36",
+  "files": [
+    "backend/app/modules/platform_sync/service.py",
+    "backend/app/modules/platform_sync/tests/test_change_deleted_guard.py",
+    ".sillyspec/changes/2026-09-25-tombstone-heal-archive/design.md",
+    ".sillyspec/changes/2026-09-25-tombstone-heal-archive/flow-state.yaml",
+    ".sillyspec/changes/2026-09-25-tombstone-heal-archive/proposal.md",
+    ".sillyspec/changes/2026-09-25-tombstone-heal-archive/requirements.md",
+    ".sillyspec/changes/2026-09-25-tombstone-heal-archive/tasks.md"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 325,
+    "deletions": 9
+  },
+  "savedAt": "2026-09-25T05:05:26.768Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "85c4c07c8adf9796a545e0d5c09deeb54e43743d3ca7d111295100c347e9f95c",
+  "patchStatus": "ok"
+}

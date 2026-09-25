@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-change-precipitated-assets",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "镜像根/变更目录解析为同构复制而非字面复用，且与 ChangeService 的 fallback 口径不一",
+      "evidence": "design 称「变更目录解析复用 _resolve_change_dir（含 archive 段）」。实际 assets.py 自带 _spec_root + _resolve_change_dir：镜像根与声称先例 knowledge/service.py::_spec_content_root 逐行一致（SpecWorkspace.spec_root 优先，兜底 root_path/.sillyspec，见 service.py:30-46），变更目录为 spec_root/change.path（archive 段由 change.path 自带，语义等价）。但 ChangeService._resolve_change_dir（service.py:161-173）的兜底是 Path(workspace.root_path) 不追加 .sillyspec——两模块在「无 SpecWorkspace 行/异常」兜底路径上会解析到不同目录（既有不一致被本变更显化；spec_root 在场的主路径无影响）。",
+      "location": "backend/app/modules/change/assets.py:439-461; backend/app/modules/change/service.py:161-173"
+    },
+    {
+      "severity": "P3",
+      "title": "每请求 _spec_root 双重解析（两次 DB 查询）",
+      "evidence": "get_change_assets 先调一次 _spec_root（assets.py:400 一带），_resolve_change_dir 内部再调一次（assets.py:460），每次各打 SpecWorkspaceService/WorkspaceService 查询。纯效率备忘，无正确性影响（读端点、量级小）。",
+      "location": "backend/app/modules/change/assets.py:400,419,460"
+    },
+    {
+      "severity": "P3",
+      "title": "在途引导空态条件为 !archived && total===0，与 FR-02 字面表述有边界偏差",
+      "evidence": "FR-02 称「在途变更显示引导空态」；实现（change-assets-card.tsx）仅在 total===0 时显示 change-assets-inflight，若在途变更镜像已有归属条目则直接渲染数据组。实务上 CLI 归档时才沉淀 knowledge 条目，此态通常不可达；数据优先属合理取舍，备忘备查。",
+      "location": "frontend/src/components/changes/detail/change-assets-card.tsx:1026-1033"
+    },
+    {
+      "severity": "P3",
+      "title": "api-types.ts 未随新端点再生（design 有意，无门禁破口）",
+      "evidence": "design 文件清单未列 api-types.ts，前端以手写接口类型交付（changes.ts 新增六个 interface，字段与 ChangeAssetsRead DTO 逐一吻合）。frontend/package.json:16 存在 gen:types:check（再生+git diff 守门），但 grep 全仓无 CI/门禁引用（仅历史归档 verify-facts 与脚本自注释），本变更 flow 门为 ruff/mypy/lint/typecheck，不破门；后续任一次 gen:types 会产生预期 diff 需随手提交。",
+      "location": "frontend/src/lib/changes.ts:1157-1211; frontend/package.json:16"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-25T04:15:56Z"
+}

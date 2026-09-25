@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-tombstone-heal-archive",
+  "commit": "fed6e9e9a",
+  "reviewedAt": "2026-09-25",
+  "reviewer": "flow-done 独立评审（只读抽验）",
+  "verdict": "PASS",
+  "verdictReason": "FR↔实现↔测试三方一致且测试回执实证（16 passed）；no-op 分支与原早退逐字等价；防护声明（workspace 过滤/幂等/不建行）全部核实；无生成物需同步。特别核查的误复活通道在服务器端确实不可分辨冤案/真删除行，但设计槽4 已如实披露该防线为客户端行为假设，且影响有界（权限门槛 + 仅可见性 + reparse 锚点降级自纠 + 数据零破坏），属可控风险/备忘而非虚报或未披露缺陷。",
+  "readBudget": { "used": 11, "limit": 12 },
+  "findings": [
+    {
+      "id": "R-1",
+      "severity": "P2",
+      "type": "risk-disclosed",
+      "title": "复活通道在服务器端无法分辨冤案行与真删除行，防线纯靠客户端行为",
+      "detail": "复活条件 = _change_key_deleted 命中 + 载荷 changes[] 同名条目 status=='archived'（_body_changes_status）+ 行存在且 location=='deleted'（_heal_deleted_row_to_archive）。三层判据中没有任何一层检查 Change.status、manifest platform_deleted 锚点或删除来源。而三类真删除产出与冤案行完全同构（行存在 + location='deleted'）：平台删除入口 change/service.py:398（软删不物理删）、CLI 删除墓碑 platform_sync/service.py:833（+镜像软删写 platform_deleted 锚点）、reparse 删除环 change/service.py:1570。且 CLI_STATUS_TO_PLATFORM（platform_sync/service.py:368-372）无 deleted 映射，删除链不写 status 列——『本地 status=deleted』只存在于 CLI 侧 sillyspec.db，服务器既不读也无法验证。因此任何持该 workspace shpsync_ token 的推送，只要载荷声称 'archived'，真删除行即被翻回 'archive' 并 200 接受。现实非恶意触发面：多机场景机器 A 删除（墓碑落库）、机器 B 本地库仍为 archived（stale），B 的 unregisterChange/自愈链推 'archived' 即误复活。缓解因素使之为可控风险：① 需同 workspace 推送权限（本就能建变更，无越权面扩大）；② heal 不恢复镜像文件（误复活行无文件重现，纯行可见性）；③ 下一次全量 reparse 因 platform_deleted 锚点未清 + key ∉ seen_keys 会把 heal 行降级回 'deleted'（change/service.py:1569-1571），自动纠偏；④ 数据零破坏。设计槽4 已把此列为最大风险并如实陈述防线性质，非未披露缺陷。建议备忘：若未来要服务端加固，可对 heal 增加行内佐证（如 current_stage/status 归档形态）或统一锚点收敛策略。"
+    },
+    {
+      "id": "R-2",
+      "severity": "P2",
+      "type": "doc-precision",
+      "title": "FR-01 Then 把客户端本地状态写成服务器保证",
+      "detail": "FR-01 Then『真删除链（本地 status=deleted）不复活，维持原拒收』：括号内『本地 status=deleted』是 CLI 本地库状态，服务器不持有该信息（平台侧删除链不写 status 列，见 R-1）。该条款实际语义是『载荷终态非 archived 时不复活』——这正是服务器保证且被既有测试覆盖（deleted 行 + 默认 in_progress 载荷 → 409，如 test_deleted_change_row_rejected_409_no_side_writes；tombstone 测试推 status=deleted 后 409）。建议措辞改为以载荷为判据，避免把客户端行为假设固化为服务端契约。"
+    },
+    {
+      "id": "R-3",
+      "severity": "P3",
+      "type": "doc-precision",
+      "title": "盲维问1『乱序无害』不准确：晚到 deleted 载荷会再次回翻",
+      "detail": "行复活（location='archive'）后晚到的旧 'deleted' 载荷：已删探测确不再命中（_change_key_deleted 主判据行存在且非 deleted → False），走正常 upsert——但正常 upsert 内含 _apply_cli_tombstone（platform_sync/service.py:827-845），status='deleted' 会再次置 location='deleted' 并以 prev_location='archive' 重跑镜像软删。即 last-writer-wins 回翻而非无害 no-op，冤案可复现，直至下一次 archived 推送再 heal。语义可接受（收敛到最新载荷、严格优于变更前），但『无害』表述应修正为『回翻可恢复』。"
+    },
+    {
+      "id": "R-4",
+      "severity": "P3",
+      "type": "behavior-gap",
+      "title": "heal 的 location 持久性未闭环：reparse 锚点降级可使其震荡",
+      "detail": "heal 只翻 row.location='archive'，不清 manifest platform_deleted 锚点、不恢复镜像文件（docstring 明示此为取舍）。若 CLI 不重推归档区文件，下一次全量 reparse 删除环对『key ∉ seen_keys + 锚点命中 + location≠deleted』的行降级置回 'deleted'（change/service.py:1569-1571）——heal 成果被回收，location 在 archive↔deleted 间震荡直至文件重同步。FR-01 主诉求（面板已归档 tab 可见）不破：读侧三源并集（change/service.py:227-241，status='archived' 命中第②源；被接受的 archived 载荷经 _sync_change_stage_status 落 status='archived'）兜底可见性。三新测试均未覆盖 heal 后 reparse 交互，属测试盲区备忘。"
+    },
+    {
+      "id": "R-5",
+      "severity": "P3",
+      "type": "doc-precision",
+      "title": "盲维问2『并发幂等』精确形态：并发双推一方 200 一方 409",
+      "detail": "两并发 archived 载荷同翻一行：先提交者 heal 成功走接受 200；后到者（READ COMMITTED 下重查）见 location='archive' → _heal 返回 False → 走 else 返回 409 change_deleted。并非双方皆 200；第三次起恢复正常。瞬态 409 对 CLI 重试语义可接受且设计已写明『第二个幂等返回 False 走原分支』，此条仅钉住精确形态。顺序幂等（test_cli_tombstone_archived_idempotent 两连推均 200、location 不动）真实成立。"
+    },
+    {
+      "id": "R-6",
+      "severity": "P3",
+      "type": "doc-precision",
+      "title": "盲维问3『无半态窗口』表述过强",
+      "detail": "_heal 内部独立 commit（platform_sync/service.py:596）先于接受分支各步 commit；请求在两者之间中断会留下『location 已翻 archive + 进度/收件箱未更』中间态。因翻行即治愈主目标且进度最终一致（下次推送补齐），实际无害，但严格说存在跨事务窗口，表述宜收敛为『中断态可恢复』。"
+    },
+    {
+      "id": "R-7",
+      "severity": "P3",
+      "type": "evidence",
+      "title": "FR-03 测试实证与门状态说明",
+      "detail": ".sillyspec/.runtime/logs/c3-test.log 实证 16 passed（16.19s，15 warnings 均为无关 DeprecationWarning）；三新用例真实行使复活分支（先推 deleted 墓碑造冤案行 → 推 archived → 断言 200 + location='archive'）、镜像不软删（SpecFileManifest exists 保持 True）、顺序幂等。flow-state gate_summary 标 test: skipped 与人工回执并存（门跳过、回执补位），非虚报。"
+    }
+  ],
+  "dimensionNotes": {
+    "fr_implementation_test": {
+      "pass": true,
+      "note": "FR-01：复活通道三重条件与实现精确一致——外层 _change_key_deleted（:281）+ 载荷同名条目 status=='archived'（_body_changes_status :563-570，缺条目/非 dict/非 str 均返 None 不误触发）+ 行存在且 location=='deleted' 才翻（:593-594）；行缺失/仅 manifest 兜底命中时 heal 返 False 不建行、维持拒收（与 FR-01 Then 前半逐字吻合；『真删除链』条款的服务器端真实语义见 R-2）。FR-02：新 `status not in (\"deleted\",\"archived\")` 早退 + `status==\"archived\"` 再早退，与原 `status != \"deleted\"` 早退在 status='archived' 上行为逐字等价（两者均在行查询前 return，零写动作），其余 status 集合不变，等价性成立；注释完整钉住不动 location/不软删镜像语义。FR-03：三新用例在场且回执 16 passed（R-7）。FR-04：全仓 location 写点枚举核实——存量写点为 parser.py:169（reparse 归档区）、change/service.py:398（平台删除）、:1570（reparse 删除环降级）、:2715（reparse 回翻，墓碑行豁免）、:3578（dfdeedf27 存量迁移）、platform_sync/service.py:833（CLI 墓碑）；本 diff 唯一新增写点 :595 且仅 deleted→archive 单向（非 deleted 早退）。"
+    },
+    "blind_dimensions": {
+      "pass": true,
+      "note": "问2 并发：单写点（heal 内一次 SELECT+UPDATE+commit），双翻第二者幂等 False 走原分支——与代码相符，精确形态见 R-5。问3 切换：翻行与接受分支同请求顺序执行属实，跨事务中间态备忘见 R-6。问4 作用域：heal 查询显式 workspace_id+change_key 双条件（:587-591），workspace_id None → False（:581-582），无跨 workspace 串台，声明真实。问1 乱序：探测不再命中的推断正确，但『无害』结论不准确（R-3）。四问均有着落、无设计缺口，其中两问表述精度打折（R-3/R-5/R-6）。"
+    },
+    "guards": {
+      "pass": true,
+      "note": "翻行查询带 workspace_id：核实（select where workspace_id==X and change_key==name，platform_sync/service.py:585-592）。幂等（非 deleted 返回 False）：核实（row is None or row.location != 'deleted' → False，:593-594）。不建行：核实（兜底判据命中形态 heal 返 False 维持拒收）。workspace_id None 防御：核实（:581-582）。"
+    },
+    "artifacts_sync": {
+      "pass": true,
+      "note": "diff 仅改 platform_sync/service.py（纯行为语义，两个私有 helper + 分支增强）与 test_change_deleted_guard.py（+测试工具 populate_existing 修正属测试自身正确性）+ .sillyspec 文档；零 DTO/schema/迁移/端点签名变化，frontend api-types.ts 与 backend/openapi.json 无需再生（CLAUDE.md 规则 21 不触发）。『无类型/契约文件』声明属实。测试工具 _get_change 补 populate_existing 是修 session 身份映射缓存导致的假读，非为凑绿改断言，合规（规则 9）。"
+    }
+  }
+}

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>变更详情 · 沉淀资产卡原型 — 2026-09-25-change-precipitated-assets</title>
+<style>
+:root{--primary:#7C3AED;--primary-soft:#EDE9FE;--bg:#FAF5FF;--fg:#1E1B4B;--card:#FFF;--muted:#475569;--faint:#94A3B8;--border:#DDD6FE;--border-w:#EEE9F8;--success:#059669;--success-soft:#D1FAE5;--warning:#D97706;--warning-soft:#FEF3C7;--accent:#0891B2;--accent-soft:#CFFAFE}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg);padding:24px;font-size:13px;line-height:1.6}
+h1{font-size:17px;margin-bottom:3px}
+.sub{color:var(--faint);font-size:12px;margin-bottom:18px}
+aside{width:340px;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 3px rgba(30,27,75,.06)}
+.card-h{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border-w);font-weight:600;font-size:13px;cursor:pointer}
+.card-h .n{font-size:11px;font-weight:500;color:var(--primary);background:var(--primary-soft);border-radius:99px;padding:0 8px}
+.card-h .arrow{color:var(--faint);font-size:11px}
+.card-b{padding:10px 12px;display:flex;flex-direction:column;gap:10px}
+.grp{border:1px solid var(--border-w);border-radius:6px;padding:8px 10px}
+.grp .t{font-size:11.5px;font-weight:600;color:var(--muted);display:flex;justify-content:space-between;margin-bottom:6px}
+.grp .t .c{color:var(--faint);font-weight:500}
+.row{display:flex;align-items:baseline;gap:8px;padding:3px 0;border-bottom:1px dashed var(--border-w);font-size:12px}
+.row:last-child{border-bottom:none}
+.row .id{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--primary);white-space:nowrap}
+.row .id.dec{color:var(--accent)}
+.row .tt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
+.row .st{font-size:10px;color:var(--success);background:var(--success-soft);border-radius:99px;padding:0 6px;white-space:nowrap}
+.row .st.cand{color:var(--warning);background:var(--warning-soft)}
+.kv{display:flex;gap:10px;font-size:11.5px;color:var(--muted);flex-wrap:wrap}
+.kv b{color:var(--fg);font-weight:600}
+.empty{color:var(--faint);font-size:12px;padding:14px 0;text-align:center}
+.note{margin-top:14px;font-size:11.5px;color:var(--faint);max-width:340px}
+.note b{color:var(--muted)}
+</style>
+</head>
+<body>
+<h1>变更详情 · aside「沉淀资产」卡（观测事件卡同构）</h1>
+<div class="sub">2026-09-25-change-precipitated-assets · 数据源 GET /changes/{cid}/assets · 只读 · 失败静默隐藏 · 归档后才有数据（在途变更显示空态引导）</div>
+
+<aside>
+  <div class="card-h"><span>📦 沉淀资产 <span class="n">FR 2 · 决策 3</span></span><span class="arrow">收起 ▲</span></div>
+  <div class="card-b">
+
+    <div class="grp">
+      <div class="t"><span>需求规则（FR 索引）</span><span class="c">knowledge/fr</span></div>
+      <div class="row"><span class="id">FR-auto-frontend-015</span><span class="tt">precipitate-dialog 存量标注</span><span class="st">active</span></div>
+      <div class="row"><span class="id">FR-auto-frontend-016</span><span class="tt">distill 两组件存量口径</span><span class="st">active</span></div>
+    </div>
+
+    <div class="grp">
+      <div class="t"><span>决策蒸馏</span><span class="c">knowledge/decisions</span></div>
+      <div class="row"><span class="id dec">D-001@v1</span><span class="tt">槽4 风险与死路收割</span><span class="st">implemented</span></div>
+    </div>
+
+    <div class="grp">
+      <div class="t"><span>测试绑定</span><span class="c">test-trace</span></div>
+      <div class="row"><span class="id">task-01:acc-0</span><span class="tt">distill-task-bar.test.tsx 等 2 文件</span><span class="st cand">candidate</span></div>
+    </div>
+
+    <div class="grp">
+      <div class="t"><span>归档留档</span><span class="c">audit</span></div>
+      <div class="kv"><span>patch <b>6 文件 +10/−9</b></span><span>delta <b>104 行</b></span><span>sha256 <b>已锚</b></span></div>
+    </div>
+
+  </div>
+</aside>
+
+<div class="note">
+<b>形态与容错约定：</b>四组按「有数据才渲染」逐组容错（如无 change.patch 的存量归档不显示归档留档组）；FR/决策行点击可跳知识库页对应条目（带上文件锚点）；在途未归档变更 → 卡体显示「变更归档后此处汇总其沉淀的 FR / 决策 / 测试绑定与留档」。
+</div>
+
+</body>
+</html>

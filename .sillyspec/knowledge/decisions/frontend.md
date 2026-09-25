@@ -304,3 +304,12 @@ supersedes：D-003@v1
 理由：用户裁决选方案 A（THIN 新辅助阶段），并加 UX 约束原话：「列表页面上我想跟常规变更在一起，内部的逻辑展示可以不一样」——thin 变更是常规 Change 记录，进主变更列表（不像 quicklog 另开 tab），详情页内部按薄流程两段式（start→干活→done）差异化展示。依据：与上游 CLI「存量过渡」语义逐字对齐（quick 保留收尾、新工作走 thin）；新旧隔离清晰存量零风险；manual_dispatch 泛化路径零改动可用；quicklog 那种独立 tab 的形态在核对中被证伪（thin 变更的四件套/归档/事件/蒸馏全在 change 体系，独立入口割裂最重）。
 故障面：过渡期 quick/thin 两套辅助阶段并存——前端徽章/筛选/说明卡两态都要活，漏一处即裸显英文 "thin" 或全灰管线（核对报告前端遗漏清单已列全触点）。
 退役判据：quick 存量变更全部收尾归档后，可另立决策下线 QUICK 阶段派发面与 quicklog 读侧（读侧至少保留一个归档周期）。
+
+## D-001@v1 数据流=服务端聚合端点（方案 a），thin+brainstorm 跑法（用户裁决）
+状态：implemented
+变更：2026-09-25-change-precipitated-assets
+锚点：未记录
+最近确认：a7eca07270b25dbe374717aaf8379f57254fe3df
+理由：用户前轮方案对比后裁决「好，做」选定方案 a——后端新增聚合端点按变更名解析 spec 树镜像（knowledge/fr/*.md 与 knowledge/decisions/*.md 的「变更：」行过滤 + 归档目录 test-trace.json/change-patch.json/delta.md 容错读取），前端观测事件卡同构折叠卡；并裁决本变更走「轻量变更+头脑风暴预段」（原话：好，做，第二个变更走轻量变更附加头脑风暴）。b（CLI 命令：tests 无 --json/derive 无对应 facet/decisions list 只读 active）与 c（前端自行解析：全量拉 60+ 域文件 N+1 + CLI 机械解析契约前端化双端漂移）经两子代理核对证伪排除。
+故障面：解析契约与 CLI 演进漂移——「变更：」行格式属 CLI 机械契约，上游改格式需同步本解析（加版本容错与未知行跳过）。
+退役判据：若平台后续引入结构化资产表（CLI 直推 DB），本解析层可退役改读表。

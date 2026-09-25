@@ -1,6 +1,6 @@
 # 归档墓碑致面板「已归档」变更被软删不可见（CLI archived 语义与平台 deleted 墓碑载荷分歧）
 
-> 状态：活跃坑（待工具/语义修复）。发现于 2026-09-23-change-events-channel 部署后验收。
+> 状态：已解决（CLI 侧 e4667729 + 平台侧 2026-09-24 修复，冤案行自愈通道就位）。发现于 2026-09-23-change-events-channel 部署后验收。
 > author: qinyi ｜ created_at: 2026-09-23 09:05:00
 
 ## 现象
@@ -77,3 +77,42 @@
   另一 deleted 写入方，与本坑无关）
 - 排查记录：2026-09-23-change-events-channel 部署后验收会话（平台行/本地库/
   progress 快照三方对照，本文件「根因」节引全）
+
+## 处置记录（2026-09-24）
+
+**根治方向落地（两仓协同，按「修复方向·根治」一条）**：
+
+1. **CLI 侧（并行会话已完成，sillyspec 仓 commit `e4667729`）**：墓碑载荷按链
+   区分终态——`unregisterChange` 链（run archive / quick 收尾 / 自愈）墓碑
+   `status='archived'`，仅 `deleteChange` 链发 `'deleted'`。已实证在仓。
+2. **平台侧（本日修复，multi-agent-platform 工作树，未提交）**：
+   - `_apply_cli_tombstone`（service.py）：`'archived'` 载荷 **no-op 早退**——
+     不置 `location='deleted'`、不触发镜像软删收敛（归档可回溯，镜像保留）。
+     刻意**不**翻 `location='archive'`：P1 ingest 不变量（2026-09-16，
+     `test_archived_terminal_persists` 回归锚）规定 location 收敛归文件移动 +
+     reparse，进度上行通道不开第二条 location 写路径。
+   - 冤案行自愈：`upsert_progress` 拒收分支新增 `_heal_deleted_row_to_archive`
+     ——旧 CLI 误标 `location='deleted'` 的行，收到新 CLI `status='archived'`
+     载荷时翻回 `location='archive'` 后走正常接受（真删除载荷仍 409 拒收）。
+     上述 5 条冤案行（change-events-channel 等）将由该机器新 CLI 版本后的
+     下一次墓碑上行自动恢复「已归档」tab 可见。
+   - 兜底判据（行缺失、仅 manifest platform_deleted 锚点）不猜恢复——真删除
+     走平台删除入口的恢复流程。
+
+**测试证据**（backend venv，pytest）：
+
+- 新增 3 例（test_change_deleted_guard.py）：deleted 冤案行经 'archived' 载荷
+  恢复 archive / 'archived' 载荷不软删 spec 镜像且不动 active 行 location /
+  重复 'archived' 载荷幂等 no-op。
+- 修复测试助手 `_get_change` 身份映射缓存缺陷（client 与 db_session 双
+  session + expire_on_commit=False，多 push 场景需 `populate_existing` 强读
+  DB 真值）。
+- `app/modules/platform_sync/tests` 全量 **266 passed**（含 P1 ingest 回归锚）；
+  ruff format/check、mypy（service.py）全绿。
+
+**治标项不采纳**：「已归档」tab 过滤放宽（location IN ('archive','deleted')）
+不再需要——根治 + 自愈通道已覆盖；放宽会把真删除行混进归档 tab。
+
+**遗留**：镜像文件曾被软删收敛的冤案行，location 恢复后镜像由 reparse /
+镜像驱动收敛自行对齐（软删不逆向恢复，位置恢复已满足归档 tab 可见主诉求）；
+两仓发版节奏由用户掌握（旧 CLI + 新平台兼容窗口内 'deleted' 载荷行为不变）。

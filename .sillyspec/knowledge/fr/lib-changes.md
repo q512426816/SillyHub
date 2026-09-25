@@ -206,3 +206,66 @@
 - 场景：默认场景 — Given 平台侧收到任意 provisional 事件；When 全链路处理（存储/读取/展示）；Then 不触发通知、不写 progress、不影响审批门控、不做任何流程状态判定
 全文：.sillyspec/changes/archive/2026-09-23-change-events-channel/requirements.md#FR-07
 最近确认：5a62ff39f
+
+## FR-lib-changes-023 沉淀资产聚合端点
+变更：2026-09-25-change-precipitated-assets
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 变更已归档且 spec 树镜像含其沉淀产物；When 调用 GET /workspaces/{ws}/changes/{cid}/assets；Then 返回 FR 索引/决策蒸馏归属条目（「变更：」行过滤）+ 测试绑定行 + patch 统计 + delta 摘要；逐项 fail-open，在途变更跳过目录件
+全文：.sillyspec/changes/archive/2026-09-25-change-precipitated-assets/requirements.md#FR-01
+最近确认：a7eca07270b25dbe374717aaf8379f57254fe3df
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-precipitated-assets:flow:FR-01
+  tests: backend/app/modules/change/tests/test_assets.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-precipitated-assets
+  status: active
+
+## FR-lib-changes-024 变更详情沉淀资产卡
+变更：2026-09-25-change-precipitated-assets
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 用户在变更详情页 aside；When 渲染「沉淀资产」折叠卡；Then 四组逐组有数据才渲染（FR/决策行可跳知识库页）、失败静默隐藏、在途变更显示引导空态
+全文：.sillyspec/changes/archive/2026-09-25-change-precipitated-assets/requirements.md#FR-02
+最近确认：a7eca07270b25dbe374717aaf8379f57254fe3df
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-precipitated-assets:flow:FR-02
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-precipitated-assets
+  status: active
+
+## FR-lib-changes-025 聚焦验证全绿
+变更：2026-09-25-change-precipitated-assets
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 本变更交付；When 跑聚焦测试与静态检查；Then 后端 test_assets.py 5 用例 + 前端 change-assets-card 5 用例 + tsc + ruff 全绿
+全文：.sillyspec/changes/archive/2026-09-25-change-precipitated-assets/requirements.md#FR-03
+最近确认：a7eca07270b25dbe374717aaf8379f57254fe3df
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-precipitated-assets:flow:FR-03
+  tests: app/modules/change/tests/test_assets.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-precipitated-assets
+  status: active

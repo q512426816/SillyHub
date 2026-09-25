@@ -1,0 +1,1326 @@
+diff --git a/.sillyspec/changes/2026-09-25-change-precipitated-assets/decisions.md b/.sillyspec/changes/2026-09-25-change-precipitated-assets/decisions.md
+new file mode 100644
+index 000000000..a00ab274d
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-change-precipitated-assets/decisions.md
+@@ -0,0 +1,21 @@
++---
++author: qinyi
++created_at: 2026-09-25 10:15:00
++change: 2026-09-25-change-precipitated-assets
++---
++
++# 决策记录（Decisions）
++
++## D-001@v1: 数据流=服务端聚合端点（方案 a），thin+brainstorm 跑法（用户裁决）
++- type: architecture
++- priority: P0
++- status: accepted
++- source: user
++- question: 变更详情展示沉淀资产（FR/决策/测试绑定/patch/delta）的数据通路走哪条？变更流程跑法？
++- answer: 用户前轮方案对比后裁决「好，做」选定方案 a——后端新增聚合端点按变更名解析 spec 树镜像（knowledge/fr/*.md 与 knowledge/decisions/*.md 的「变更：」行过滤 + 归档目录 test-trace.json/change-patch.json/delta.md 容错读取），前端观测事件卡同构折叠卡；并裁决本变更走「轻量变更+头脑风暴预段」（原话：好，做，第二个变更走轻量变更附加头脑风暴）。b（CLI 命令：tests 无 --json/derive 无对应 facet/decisions list 只读 active）与 c（前端自行解析：全量拉 60+ 域文件 N+1 + CLI 机械解析契约前端化双端漂移）经两子代理核对证伪排除。
++- normalized_requirement: 后端 GET /workspaces/{ws}/changes/{cid}/assets 单端点聚合；解析只认「变更：<名>」行与固定文件名，不改 CLI 产物格式；change.patch/change-patch.json 按「文件存在才展示」容错；前端只读折叠卡失败静默隐藏。
++- impacts: [FR-01, FR-02, FR-03, FR-04]
++- evidence: 用户裁决轮（本会话，2026-09-25）；两子代理核对报告（资产数据面/两页面）；backend/app/modules/knowledge/service.py:30-46（镜像根先例）；frontend/src/components/changes/detail/change-events-card.tsx（样式先例）
++- 模块域: backend, frontend
++- 故障面: 解析契约与 CLI 演进漂移——「变更：」行格式属 CLI 机械契约，上游改格式需同步本解析（加版本容错与未知行跳过）。
++- 退役判据: 若平台后续引入结构化资产表（CLI 直推 DB），本解析层可退役改读表。
+diff --git a/.sillyspec/changes/2026-09-25-change-precipitated-assets/design.md b/.sillyspec/changes/2026-09-25-change-precipitated-assets/design.md
+new file mode 100644
+index 000000000..7382d6584
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-change-precipitated-assets/design.md
+@@ -0,0 +1,91 @@
++---
++author: qinyi
++created_at: 2026-09-25 10:18:00
++scale: small
++---
++
++# 设计文档（Design）— 2026-09-25-change-precipitated-assets
++
++## 背景
++
++用户在变更详情页想看「本次变更沉淀的项目资产」。核对结论：CLI 归档时沉淀的 FR 索引（knowledge/fr/*.md）、决策蒸馏（knowledge/decisions/*.md）、测试绑定（test-trace.json）、patch 留档（change.patch/change-patch.json）、delta（delta.md）全部经 spec 树同步进入平台镜像，且平台已有按路径读镜像的现成能力（/changes/{cid}/files/content、/knowledge/{filename}），缺的只是「按变更名聚合解析」一层（全后端无 per-change 资产解析）。方案 a（服务端聚合端点+前端折叠卡）经用户拍板，CLI 命令与前端解析两路已证伪（D-001@v1）。
++
++## 设计目标
++
++变更详情 aside 新增「沉淀资产」卡：归档变更展示其沉淀的 FR 条目/决策条目/测试绑定行/patch 统计/delta 摘要，条目可跳知识库页；在途变更显示引导空态。
++
++## 非目标
++
++- 不动知识库页/扫描文档页（前轮核对 0 必须项）；不新增 CLI 侧命令；不改 CLI 产物文件格式。
++- 不做移动端详情卡（桌面 aside 先行，移动端对等另议）。
++- 不做资产的结构化入库（解析层实时读镜像，退役判据见 D-001@v1）。
++
++## 总体方案
++
++后端：`change` 模块新增 `assets.py` 解析层（~百行）+ router 端点 + schema DTO。解析规则（对齐 CLI 机械契约，只读不写）：
++- fr 条目：扫 `knowledge/fr/*.md`，节头 `^## (FR-\S+)\s+(.+)$` 分条，节内 `^变更：<change_key>$` 行命中才收录（status 行/全文锚点行顺带提取）；decisions 同构（`^## (D-\d+@v\d+)\s+(.+)$`，无「变更：」行的条目跳过）。
++- test-trace.json：归档目录直读，rows 原样（文件本身 per-change）。
++- change-patch.json：存在才读（存量归档无此件 → patch=None）；delta.md：取标题行与 Before/Delta 段行数摘要。
++- 镜像根获取复用 knowledge 模块先例（SpecWorkspace.spec_root，asyncio.to_thread 读盘）；变更目录解析复用 `_resolve_change_dir`（含 archive 段）。
++
++前端：aside 尾部挂 `ChangeAssetsCard`（观测事件卡同构：useQuery 自取数、retry:false、isError → return null、默认折叠）；四组逐组「有数据才渲染」；FR/决策行点击跳知识库页（query 带文件锚点）；在途变更（archived=false）显示引导空态。
++
++## 文件变更清单
++
++| 操作 | 文件路径 | 说明 |
++|---|---|---|
++| 新增 | NEW:backend/app/modules/change/assets.py | 聚合解析层：镜像根获取 + fr/decisions 按变更名过滤 + 归档目录三件容错读（asyncio.to_thread） |
++| 修改 | backend/app/modules/change/router.py | GET /workspaces/{ws_id}/changes/{cid}/assets（CHANGE_READ 权限，404 随变更不存在） |
++| 修改 | backend/app/modules/change/schema.py | ChangeAssetsRead DTO（fr_entries/decisions/test_rows/patch/delta，全 Optional 容错） |
++| 新增 | NEW:backend/app/modules/change/tests/test_assets.py | 聚合解析测试：以已归档的 2026-09-25-change-center-thin-flow 为金样本（fr 8 引用/决策 2/test-trace 221 行）+ 空态/无 patch 容错/在途变更 |
++| 新增 | NEW:frontend/src/components/changes/detail/change-assets-card.tsx | 沉淀资产折叠卡（原型 prototype-precipitated-assets-card.html） |
++| 修改 | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx | aside 尾部挂载（page.tsx:422 一带） |
++| 修改 | frontend/src/lib/changes.ts | getChangeAssets 客户端函数 |
++| 新增 | NEW:frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | 组件测试：四组渲染/空态静默/失败隐藏/在途引导 |
++| 修改 | .sillyspec/docs/multi-agent-platform/modules/backend.md | change 模块补 assets 端点 |
++| 修改 | .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md | changelog 条目 |
++| 修改 | .sillyspec/docs/multi-agent-platform/modules/frontend.md | changes 组件族补沉淀资产卡 |
++| 修改 | .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md | changelog 条目 |
++
++## 接口定义
++
++```python
++# GET /workspaces/{ws_id}/changes/{cid}/assets → ChangeAssetsRead
++class ChangeAssetsRead(BaseModel):
++    change_key: str
++    archived: bool
++    fr_entries: list[FrEntry] = []      # {id,title,status,file}
++    decisions: list[DecisionEntry] = [] # {id,title,status,file}
++    test_rows: list[TestRow] = []       # {row_id,anchor,tests,state}
++    patch: PatchMeta | None             # {files,additions,deletions,patch_status,saved_at}
++    delta: DeltaMeta | None             # {headline,before_lines,delta_lines}
++```
++
++数据流：assets.py 读镜像（producer）→ FastAPI JSON → getChangeAssets（frontend/src/lib/changes.ts）→ ChangeAssetsCard（consumer，逐组容错渲染）。
++
++## 兼容策略
++
++- 纯新增端点+卡片，存量 API/UI 零改动；解析失败/文件缺失逐项降级为空（fail-open 展示面，不影响变更详情主功能）。
++- 「变更：」行格式属 CLI 机械契约——解析层做未知行跳过与容错，上游格式演进时本层同步（D-001@v1 故障面）。
++
++## 风险登记
++
++| 编号 | 风险 | 等级 | 应对 |
++|---|---|---|---|
++| R-01 | 镜像大仓扫 fr+decisions 全域文件的读盘耗时（40+20 文件×几十 KB） | P2 | asyncio.to_thread + 单请求一次性读；量级实测无压力（核对结论）；不做缓存（YAGNI，失败可重试） |
++| R-02 | CLI 格式演进致解析漂移 | P1 | 解析只认节头+「变更：」行最小契约；金样本测试锁格式（thin-flow 归档） |
++| R-03 | 在途变更误触发归档目录读取 | P2 | archived=false 时跳过目录件读取，仅返回引导空态 |
++
++## 决策追踪
++
++| 决策 | 覆盖点 | 状态 |
++|---|---|---|
++| D-001@v1 | 总体方案全节；FR-01~04 | 已覆盖 |
++
++## 自审
++
++- [x] 章节齐全 / frontmatter（scale: small——用户裁决轻量跑道，单能力闭环）
++- [x] 决策引用 D-001@v1
++- [x] 生命周期契约：不涉及（无 session/lease/daemon 面——纯读端点；「不涉及生命周期契约」）
++- [x] UI 原型已生成（prototype-precipitated-assets-card.html）
++- [x] 无「⚠️ 自审存疑」项
+diff --git a/.sillyspec/changes/2026-09-25-change-precipitated-assets/prototype-precipitated-assets-card.html b/.sillyspec/changes/2026-09-25-change-precipitated-assets/prototype-precipitated-assets-card.html
+new file mode 100644
+index 000000000..05d3cfff7
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-change-precipitated-assets/prototype-precipitated-assets-card.html
+@@ -0,0 +1,71 @@
++<!DOCTYPE html>
++<html lang="zh-CN">
++<head>
++<meta charset="UTF-8">
++<title>变更详情 · 沉淀资产卡原型 — 2026-09-25-change-precipitated-assets</title>
++<style>
++:root{--primary:#7C3AED;--primary-soft:#EDE9FE;--bg:#FAF5FF;--fg:#1E1B4B;--card:#FFF;--muted:#475569;--faint:#94A3B8;--border:#DDD6FE;--border-w:#EEE9F8;--success:#059669;--success-soft:#D1FAE5;--warning:#D97706;--warning-soft:#FEF3C7;--accent:#0891B2;--accent-soft:#CFFAFE}
++*{margin:0;padding:0;box-sizing:border-box}
++body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg);padding:24px;font-size:13px;line-height:1.6}
++h1{font-size:17px;margin-bottom:3px}
++.sub{color:var(--faint);font-size:12px;margin-bottom:18px}
++aside{width:340px;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 1px 3px rgba(30,27,75,.06)}
++.card-h{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border-w);font-weight:600;font-size:13px;cursor:pointer}
++.card-h .n{font-size:11px;font-weight:500;color:var(--primary);background:var(--primary-soft);border-radius:99px;padding:0 8px}
++.card-h .arrow{color:var(--faint);font-size:11px}
++.card-b{padding:10px 12px;display:flex;flex-direction:column;gap:10px}
++.grp{border:1px solid var(--border-w);border-radius:6px;padding:8px 10px}
++.grp .t{font-size:11.5px;font-weight:600;color:var(--muted);display:flex;justify-content:space-between;margin-bottom:6px}
++.grp .t .c{color:var(--faint);font-weight:500}
++.row{display:flex;align-items:baseline;gap:8px;padding:3px 0;border-bottom:1px dashed var(--border-w);font-size:12px}
++.row:last-child{border-bottom:none}
++.row .id{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--primary);white-space:nowrap}
++.row .id.dec{color:var(--accent)}
++.row .tt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
++.row .st{font-size:10px;color:var(--success);background:var(--success-soft);border-radius:99px;padding:0 6px;white-space:nowrap}
++.row .st.cand{color:var(--warning);background:var(--warning-soft)}
++.kv{display:flex;gap:10px;font-size:11.5px;color:var(--muted);flex-wrap:wrap}
++.kv b{color:var(--fg);font-weight:600}
++.empty{color:var(--faint);font-size:12px;padding:14px 0;text-align:center}
++.note{margin-top:14px;font-size:11.5px;color:var(--faint);max-width:340px}
++.note b{color:var(--muted)}
++</style>
++</head>
++<body>
++<h1>变更详情 · aside「沉淀资产」卡（观测事件卡同构）</h1>
++<div class="sub">2026-09-25-change-precipitated-assets · 数据源 GET /changes/{cid}/assets · 只读 · 失败静默隐藏 · 归档后才有数据（在途变更显示空态引导）</div>
++
++<aside>
++  <div class="card-h"><span>📦 沉淀资产 <span class="n">FR 2 · 决策 3</span></span><span class="arrow">收起 ▲</span></div>
++  <div class="card-b">
++
++    <div class="grp">
++      <div class="t"><span>需求规则（FR 索引）</span><span class="c">knowledge/fr</span></div>
++      <div class="row"><span class="id">FR-auto-frontend-015</span><span class="tt">precipitate-dialog 存量标注</span><span class="st">active</span></div>
++      <div class="row"><span class="id">FR-auto-frontend-016</span><span class="tt">distill 两组件存量口径</span><span class="st">active</span></div>
++    </div>
++
++    <div class="grp">
++      <div class="t"><span>决策蒸馏</span><span class="c">knowledge/decisions</span></div>
++      <div class="row"><span class="id dec">D-001@v1</span><span class="tt">槽4 风险与死路收割</span><span class="st">implemented</span></div>
++    </div>
++
++    <div class="grp">
++      <div class="t"><span>测试绑定</span><span class="c">test-trace</span></div>
++      <div class="row"><span class="id">task-01:acc-0</span><span class="tt">distill-task-bar.test.tsx 等 2 文件</span><span class="st cand">candidate</span></div>
++    </div>
++
++    <div class="grp">
++      <div class="t"><span>归档留档</span><span class="c">audit</span></div>
++      <div class="kv"><span>patch <b>6 文件 +10/−9</b></span><span>delta <b>104 行</b></span><span>sha256 <b>已锚</b></span></div>
++    </div>
++
++  </div>
++</aside>
++
++<div class="note">
++<b>形态与容错约定：</b>四组按「有数据才渲染」逐组容错（如无 change.patch 的存量归档不显示归档留档组）；FR/决策行点击可跳知识库页对应条目（带上文件锚点）；在途未归档变更 → 卡体显示「变更归档后此处汇总其沉淀的 FR / 决策 / 测试绑定与留档」。
++</div>
++
++</body>
++</html>
+diff --git a/backend/app/modules/change/assets.py b/backend/app/modules/change/assets.py
+new file mode 100644
+index 000000000..5086481bc
+--- /dev/null
++++ b/backend/app/modules/change/assets.py
+@@ -0,0 +1,254 @@
++"""变更沉淀资产聚合只读服务（2026-09-25-change-precipitated-assets FR-01/02）。
++
++按变更名聚合「本变更经归档沉淀的项目资产」（D-001@v1 方案 a——服务端解析
++spec 树镜像；CLI 侧无结构化查询命令、前端自行解析有 N+1 与契约双端漂移，
++两路均经核对证伪排除）：
++
++- FR 索引条目：``knowledge/fr/*.md`` 节头 ``## FR-<域>-NNN 标题`` 分条，
++  节内 ``变更：<change_key>`` 行命中才收录（fr/decisions 均可能散落多个
++  域文件，全扫聚合，量级 40+20 个小文件无压力）；
++- 决策蒸馏条目：``knowledge/decisions/*.md`` 同构（``## D-NNN@N 标题``；
++  无「变更：」行的条目跳过——CLI 容错面）；
++- 测试绑定：归档变更目录 ``test-trace.json`` 直读（文件本身 per-change）；
++- patch 留档：``change-patch.json`` 存在才读（存量归档无此件 → None 容错，
++  该留档是 CLI 晚于多数归档的新功能）；
++- delta 摘要：``delta.md`` 标题行 + ``## Before``/``## Delta`` 段行数。
++
++镜像根获取对齐 ``knowledge/service.py::_spec_content_root`` 先例、变更目录
++解析复用 ``ChangeService._resolve_change_dir``（含 archive 段，对齐
++reparse 的 sillyspec_root 解析）；文件读全部经 ``asyncio.to_thread``。
++逐项 fail-open：单项解析失败降级为空（展示面，不影响变更详情主功能）；
++在途变更（未归档）跳过目录件读取（design R-03）。
++"""
++
++from __future__ import annotations
++
++import asyncio
++import json
++import re
++import uuid
++from pathlib import Path
++
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.errors import ChangeNotFound
++from app.core.logging import get_logger
++from app.modules.change.model import Change
++from app.modules.change.schema import (
++    ChangeAssetsRead,
++    ChangeDecisionEntry,
++    ChangeDeltaMeta,
++    ChangeFrEntry,
++    ChangePatchMeta,
++    ChangeTestRow,
++)
++
++log = get_logger(__name__)
++
++# CLI fr-index / decision-distill 机械契约的最小子集（只读，勿在此扩语义——
++# 上游格式演进时本层同步，D-001@v1 故障面；未知行一律跳过）。
++_ENTRY_HEAD_RE = re.compile(r"^##\s+(FR-\S+|D-\d+@v\d+)\s+(.+)$")
++_OWNER_LINE_RE = re.compile(r"^变更：(.+)$")
++_STATUS_LINE_RE = re.compile(r"^状态：(\S+)")
++
++
++def _parse_entries_owned_by(text: str, change_key: str) -> list[tuple[str, str, str | None]]:
++    """解析域文件条目（节头分条 + ``变更：`` 行归属过滤）。
++
++    返回 ``(id, title, status)`` 三元组列表；status 行缺省 None（fr 条目
++    恒有、decisions 个别条目无——对齐 CLI 两文件的现实容差）。
++    """
++    entries: list[tuple[str, str, str | None]] = []
++    cur_id: str | None = None
++    cur_title = ""
++    owned = False
++    cur_status: str | None = None
++    for line in text.splitlines():
++        head = _ENTRY_HEAD_RE.match(line)
++        if head:
++            if cur_id is not None and owned:
++                entries.append((cur_id, cur_title, cur_status))
++            cur_id = head.group(1)
++            cur_title = head.group(2).strip()
++            owned = False
++            cur_status = None
++            continue
++        if cur_id is None:
++            continue
++        owner = _OWNER_LINE_RE.match(line)
++        if owner:
++            owned = owner.group(1).strip() == change_key
++            continue
++        if cur_status is None:
++            status_match = _STATUS_LINE_RE.match(line)
++            if status_match:
++                cur_status = status_match.group(1)
++    if cur_id is not None and owned:
++        entries.append((cur_id, cur_title, cur_status))
++    return entries
++
++
++def _scan_domain_files(
++    spec_root: Path, domain: str, change_key: str
++) -> list[tuple[str, str, str | None, str]]:
++    """扫 ``spec_root/knowledge/<domain>/*.md``，返回归属条目 ``(id,title,status,rel_file)``。"""
++    out: list[tuple[str, str, str | None, str]] = []
++    domain_dir = spec_root / "knowledge" / domain
++    if not domain_dir.is_dir():
++        return out
++    for md in sorted(domain_dir.glob("*.md")):
++        try:
++            text = md.read_text(encoding="utf-8")
++        except OSError as exc:
++            log.warning("change.assets_read_domain_file_failed", file=str(md), error=str(exc))
++            continue
++        for entry_id, title, status in _parse_entries_owned_by(text, change_key):
++            out.append((entry_id, title, status, md.relative_to(spec_root).as_posix()))
++    return out
++
++
++def _read_test_rows(change_dir: Path) -> list[ChangeTestRow]:
++    """读 ``test-trace.json``（损坏/缺失 → 空列表，fail-open）。"""
++    path = change_dir / "test-trace.json"
++    try:
++        data = json.loads(path.read_text(encoding="utf-8"))
++    except (OSError, ValueError) as exc:
++        log.info("change.assets_test_trace_unavailable", path=str(path), error=str(exc))
++        return []
++    rows: list[ChangeTestRow] = []
++    for row in data.get("rows", []) if isinstance(data, dict) else []:
++        if not isinstance(row, dict) or not row.get("row_id"):
++            continue
++        rows.append(
++            ChangeTestRow(
++                row_id=str(row["row_id"]),
++                anchor=row.get("anchor"),
++                tests=[str(t) for t in row.get("tests", []) if t],
++                state=row.get("state"),
++            )
++        )
++    return rows
++
++
++def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
++    """读 ``change-patch.json`` 的 totals 投影（存在才读 → 无此件 None）。"""
++    path = change_dir / "change-patch.json"
++    try:
++        data = json.loads(path.read_text(encoding="utf-8"))
++    except (OSError, ValueError) as exc:
++        log.info("change.assets_patch_unavailable", path=str(path), error=str(exc))
++        return None
++    if not isinstance(data, dict):
++        return None
++    totals = data.get("totals") or {}
++    return ChangePatchMeta(
++        files=totals.get("files"),
++        additions=totals.get("additions"),
++        deletions=totals.get("deletions"),
++        patch_status=data.get("patchStatus"),
++        saved_at=data.get("savedAt"),
++    )
++
++
++def _read_delta_meta(change_dir: Path) -> ChangeDeltaMeta | None:
++    """读 ``delta.md`` 标题行 + Before/Delta 段行数（缺失 → None）。"""
++    path = change_dir / "delta.md"
++    try:
++        text = path.read_text(encoding="utf-8")
++    except OSError as exc:
++        log.info("change.assets_delta_unavailable", path=str(path), error=str(exc))
++        return None
++    headline: str | None = None
++    section: str | None = None
++    before_lines = 0
++    delta_lines = 0
++    for line in text.splitlines():
++        if line.startswith("# ") and headline is None:
++            headline = line[2:].strip()
++            continue
++        if line.startswith("## "):
++            name = line[3:].strip().lower()
++            section = name if name in ("before", "delta") else None
++            continue
++        if section == "before" and line.strip():
++            before_lines += 1
++        elif section == "delta" and line.strip():
++            delta_lines += 1
++    if headline is None:
++        return None
++    return ChangeDeltaMeta(headline=headline, before_lines=before_lines, delta_lines=delta_lines)
++
++
++class ChangeAssetsQueryService:
++    """变更沉淀资产只读聚合服务（唯一数据源，对接 assets 端点）。"""
++
++    def __init__(self, session: AsyncSession) -> None:
++        self._session = session
++
++    async def get_change_assets(
++        self, workspace_id: uuid.UUID, change_id: uuid.UUID
++    ) -> ChangeAssetsRead:
++        change = await self._get_change(workspace_id, change_id)
++        spec_root = await self._spec_root(workspace_id)
++        archived = change.location == "archive" or change.status == "archived"
++
++        fr_rows, dec_rows = await asyncio.gather(
++            asyncio.to_thread(_scan_domain_files, spec_root, "fr", change.change_key),
++            asyncio.to_thread(_scan_domain_files, spec_root, "decisions", change.change_key),
++        )
++        result = ChangeAssetsRead(
++            change_key=change.change_key,
++            archived=archived,
++            fr_entries=[ChangeFrEntry(id=i, title=t, status=s, file=f) for i, t, s, f in fr_rows],
++            decisions=[
++                ChangeDecisionEntry(id=i, title=t, status=s, file=f) for i, t, s, f in dec_rows
++            ],
++        )
++        if not archived:
++            # 在途变更：目录件尚不存在，跳过读取（design R-03）。
++            return result
++
++        change_dir = await self._resolve_change_dir(workspace_id, change)
++        test_rows, patch, delta = await asyncio.gather(
++            asyncio.to_thread(_read_test_rows, change_dir),
++            asyncio.to_thread(_read_patch_meta, change_dir),
++            asyncio.to_thread(_read_delta_meta, change_dir),
++        )
++        result.test_rows = test_rows
++        result.patch = patch
++        result.delta = delta
++        return result
++
++    async def _get_change(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> Change:
++        res = await self._session.execute(
++            select(Change).where(Change.id == change_id, Change.workspace_id == workspace_id)
++        )
++        change = res.scalar_one_or_none()
++        if change is None:
++            raise ChangeNotFound("变更不存在或不属于该工作区")
++        return change
++
++    async def _spec_root(self, workspace_id: uuid.UUID) -> Path:
++        """镜像根解析（对齐 ``knowledge/service.py::_spec_content_root`` 先例）。"""
++        try:
++            from app.modules.spec_workspace.service import SpecWorkspaceService
++
++            spec_ws = await SpecWorkspaceService(self._session).get(workspace_id)
++            if spec_ws and spec_ws.spec_root:
++                return Path(spec_ws.spec_root)
++        except Exception as exc:
++            log.warning(
++                "change.assets_resolve_spec_root_failed",
++                workspace_id=str(workspace_id),
++                error=str(exc),
++            )
++        from app.modules.workspace.service import WorkspaceService
++
++        workspace = await WorkspaceService(self._session).get(workspace_id)
++        return Path(workspace.root_path) / ".sillyspec"
++
++    async def _resolve_change_dir(self, workspace_id: uuid.UUID, change: Change) -> Path:
++        """变更目录解析（对齐 ``ChangeService._resolve_change_dir`` 语义：spec_root / change.path）。"""
++        spec_root = await self._spec_root(workspace_id)
++        return spec_root / change.path
+diff --git a/backend/app/modules/change/router.py b/backend/app/modules/change/router.py
+index cd5c8170e..50ff98c69 100644
+--- a/backend/app/modules/change/router.py
++++ b/backend/app/modules/change/router.py
+@@ -23,6 +23,7 @@ from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+ from app.modules.auth.model import User
+ from app.modules.auth.permissions import Permission
+ from app.modules.auth.rbac import has_permission
++from app.modules.change.assets import ChangeAssetsQueryService
+ from app.modules.change.model import ChangeSessionLink, QuicklogSessionLink
+ from app.modules.change.quicklog_service import QuicklogQueryService
+ from app.modules.change.schema import (
+@@ -30,6 +31,7 @@ from app.modules.change.schema import (
+     ApproveRequest,
+     ArchiveConfirmRequest,
+     ArchiveGateResponse,
++    ChangeAssetsRead,
+     ChangeDeleteResponse,
+     ChangeDocMatrix,
+     ChangeDocMatrixEntry,
+@@ -524,6 +526,26 @@ async def get_change_usage(
+     return await ChangeUsageQueryService(session).get_change_usage(workspace_id, change_id)
+ 
+ 
++@router.get(
++    "/changes/{change_id}/assets",
++    response_model=ChangeAssetsRead,
++)
++async def get_change_assets(
++    workspace_id: uuid.UUID,
++    change_id: uuid.UUID,
++    session: SessionDep,
++    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
++) -> ChangeAssetsRead:
++    """变更沉淀资产聚合（2026-09-25-change-precipitated-assets / D-001@v1 方案 a）。
++
++    按变更名解析 spec 树镜像：knowledge/fr + knowledge/decisions 的归属条目、
++    归档目录 test-trace/change-patch/delta 容错读取；逐项 fail-open（单项失败
++    降级为空，不影响其它组）。不存在/跨工作区由 service 抛 ``ChangeNotFound``
++    （404 resource-hiding，对齐 usage 端点口径）。
++    """
++    return await ChangeAssetsQueryService(session).get_change_assets(workspace_id, change_id)
++
++
+ @router.get(
+     "/changes/{change_id}/files/content",
+     response_model=ChangeFileContent,
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index 1843dcb85..7d05014d4 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -789,3 +789,67 @@ class ScopeAuditResponse(BaseModel):
+     note: str | None = None
+     truncated: bool = False
+     repos: list[ScopeAuditRepo] = Field(default_factory=list)
++
++
++# ── 沉淀资产聚合（2026-09-25-change-precipitated-assets / D-001@v1 方案 a）────
++
++
++class ChangeFrEntry(BaseModel):
++    """FR 索引条目（knowledge/fr 域文件内归属本变更的节）。"""
++
++    id: str
++    title: str
++    status: str | None = None
++    file: str
++
++
++class ChangeDecisionEntry(BaseModel):
++    """决策蒸馏条目（knowledge/decisions 域文件内归属本变更的节）。"""
++
++    id: str
++    title: str
++    status: str | None = None
++    file: str
++
++
++class ChangeTestRow(BaseModel):
++    """测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。"""
++
++    row_id: str
++    anchor: str | None = None
++    tests: list[str] = Field(default_factory=list)
++    state: str | None = None
++
++
++class ChangePatchMeta(BaseModel):
++    """patch 留档统计（change-patch.json 的 totals 投影；无留档 → 整体 None）。"""
++
++    files: int | None = None
++    additions: int | None = None
++    deletions: int | None = None
++    patch_status: str | None = None
++    saved_at: str | None = None
++
++
++class ChangeDeltaMeta(BaseModel):
++    """归档 delta 摘要（delta.md 标题行 + Before/Delta 段行数）。"""
++
++    headline: str | None = None
++    before_lines: int | None = None
++    delta_lines: int | None = None
++
++
++class ChangeAssetsRead(BaseModel):
++    """变更沉淀资产聚合（GET /changes/{cid}/assets）。
++
++    逐项 fail-open（design 兼容策略）：单项解析失败降级为空，不影响其它组；
++    ``archived=False``（在途变更）时目录件不读取，前端按此渲染引导空态。
++    """
++
++    change_key: str
++    archived: bool = False
++    fr_entries: list[ChangeFrEntry] = Field(default_factory=list)
++    decisions: list[ChangeDecisionEntry] = Field(default_factory=list)
++    test_rows: list[ChangeTestRow] = Field(default_factory=list)
++    patch: ChangePatchMeta | None = None
++    delta: ChangeDeltaMeta | None = None
+diff --git a/backend/app/modules/change/tests/test_assets.py b/backend/app/modules/change/tests/test_assets.py
+new file mode 100644
+index 000000000..40684d9b2
+--- /dev/null
++++ b/backend/app/modules/change/tests/test_assets.py
+@@ -0,0 +1,206 @@
++"""沉淀资产聚合测试（2026-09-25-change-precipitated-assets FR-01/02）。
++
++覆盖（design §测试面 + Grill 两条非阻塞建议吸收——损坏 JSON 用例在内）：
++- ``_parse_entries_owned_by`` 纯函数：节头分条 + 「变更：」行归属过滤 + status 提取；
++- 金样本式聚合：tmp 镜像（fr 两条目一归属一他属 + decisions 一归属一无主条目 +
++  归档目录 test-trace/delta，无 change-patch.json → patch=None 容错）；
++- 在途变更（未归档）跳过目录件读取（design R-03）；
++- 损坏 JSON fail-open（Grill 建议：test-trace 非法 → test_rows=[]）；
++- 跨工作区/不存在 → ``ChangeNotFound``。
++
++author: qinyi
++created_at: 2026-09-25
++"""
++
++from __future__ import annotations
++
++import json
++import uuid
++from pathlib import Path
++
++import pytest
++
++from app.core.errors import ChangeNotFound
++from app.modules.change.assets import (
++    ChangeAssetsQueryService,
++    _parse_entries_owned_by,
++)
++from app.modules.change.model import Change
++from app.modules.spec_workspace.model import SpecWorkspace
++from app.modules.workspace.model import Workspace
++
++KEY = "2026-09-25-assets-golden"
++
++
++# ===========================================================================
++# 纯函数：条目归属解析
++# ===========================================================================
++
++
++def test_parse_entries_owned_by_filters_and_extracts() -> None:
++    """节头分条 + 「变更：」行过滤 + status 行提取；无主条目与他属条目跳过。"""
++    text = (
++        "# FR 索引\n\n"
++        f"## FR-auto-test-001 归属条目\n变更：{KEY}\n状态：active\n摘要：x\n\n"
++        "## FR-auto-test-002 他属条目\n变更：other-change\n状态：active\n\n"
++        "## FR-auto-test-003 无主条目\n状态：active\n\n"
++        f"## D-001@v1 决策归属\n变更：{KEY}\n理由：y\n"
++    )
++    entries = _parse_entries_owned_by(text, KEY)
++    assert [(e[0], e[2]) for e in entries] == [
++        ("FR-auto-test-001", "active"),
++        ("D-001@v1", None),  # 决策条目无「状态：」行 → None 容差
++    ]
++    assert entries[0][1] == "归属条目"
++
++
++# ===========================================================================
++# fixture：tmp 镜像 + DB 行
++# ===========================================================================
++
++
++async def _make_ws_spec(db_session, spec_root: Path) -> Workspace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="assets ws",
++        slug=f"assets-{uuid.uuid4().hex[:8]}",
++        root_path=str(spec_root.parent),
++        status="active",
++        component_key="comp",
++    )
++    db_session.add(ws)
++    db_session.add(
++        SpecWorkspace(
++            id=uuid.uuid4(),
++            workspace_id=ws.id,
++            spec_root=str(spec_root),
++            strategy="platform-managed",
++            sync_status="clean",
++        )
++    )
++    await db_session.commit()
++    return ws
++
++
++async def _make_change(db_session, ws: Workspace, *, archived: bool) -> Change:
++    rel = f"changes/archive/{KEY}" if archived else f"changes/{KEY}"
++    change = Change(
++        id=uuid.uuid4(),
++        workspace_id=ws.id,
++        change_key=KEY,
++        title=KEY,
++        status="archived" if archived else "in_progress",
++        location="archive" if archived else "active",
++        path=rel,
++        current_stage="archive" if archived else "brainstorm",
++    )
++    db_session.add(change)
++    await db_session.commit()
++    return change
++
++
++def _seed_mirror(spec_root: Path, *, with_trace: bool = True) -> None:
++    """tmp 镜像：fr/decisions 归属条目 + 归档目录三件（patch 刻意缺席）。"""
++    fr_dir = spec_root / "knowledge" / "fr"
++    dec_dir = spec_root / "knowledge" / "decisions"
++    fr_dir.mkdir(parents=True)
++    dec_dir.mkdir(parents=True)
++    (fr_dir / "auto-test.md").write_text(
++        f"# FR\n\n## FR-auto-test-001 金样本条目\n变更：{KEY}\n状态：active\n全文：x#FR-01\n\n"
++        "## FR-auto-test-002 他属\n变更：someone-else\n状态：active\n",
++        encoding="utf-8",
++    )
++    (dec_dir / "backend.md").write_text(
++        f"# 决策\n\n## D-001@v1 金样本决策\n变更：{KEY}\n理由：z\n\n## D-009@v1 无主\n理由：w\n",
++        encoding="utf-8",
++    )
++    change_dir = spec_root / "changes" / "archive" / KEY
++    change_dir.mkdir(parents=True)
++    if with_trace:
++        (change_dir / "test-trace.json").write_text(
++            json.dumps(
++                {
++                    "schemaVersion": 1,
++                    "change": KEY,
++                    "rows": [
++                        {
++                            "row_id": f"{KEY}:task-01:acc-0",
++                            "anchor": "FR-01",
++                            "tests": ["backend/app/modules/change/tests/test_assets.py"],
++                            "reason": "spec",
++                            "state": "candidate",
++                            "status": "active",
++                        }
++                    ],
++                }
++            ),
++            encoding="utf-8",
++        )
++    (change_dir / "delta.md").write_text(
++        f"# 变更 Delta — {KEY}\n\n## Before\n行一\n行二\n\n## Delta\n行三\n",
++        encoding="utf-8",
++    )
++
++
++# ===========================================================================
++# 聚合服务
++# ===========================================================================
++
++
++async def test_golden_aggregation(db_session, tmp_path: Path) -> None:
++    """金样本：fr/决策只收归属条目；trace 行投影；patch 缺席 → None；delta 摘要。"""
++    spec_root = tmp_path / "spec-root"
++    _seed_mirror(spec_root)
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    assert result.change_key == KEY
++    assert result.archived is True
++    assert [e.id for e in result.fr_entries] == ["FR-auto-test-001"]
++    assert result.fr_entries[0].file == "knowledge/fr/auto-test.md"
++    assert result.fr_entries[0].status == "active"
++    assert [d.id for d in result.decisions] == ["D-001@v1"]
++    assert [r.row_id for r in result.test_rows] == [f"{KEY}:task-01:acc-0"]
++    assert result.test_rows[0].state == "candidate"
++    assert result.patch is None  # 无 change-patch.json → 容错 None
++    assert result.delta is not None
++    assert result.delta.before_lines == 2
++    assert result.delta.delta_lines == 1
++
++
++async def test_inflight_change_skips_dir_files(db_session, tmp_path: Path) -> None:
++    """在途变更（design R-03）：archived=False，目录件不读取（空/None）。"""
++    spec_root = tmp_path / "spec-root2"
++    _seed_mirror(spec_root)  # 归档目录件在场也应被跳过
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=False)
++
++    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    assert result.archived is False
++    assert result.test_rows == []
++    assert result.patch is None
++    assert result.delta is None
++
++
++async def test_corrupt_json_fail_open(db_session, tmp_path: Path) -> None:
++    """损坏 test-trace.json → 空列表（fail-open，Grill 建议用例）。"""
++    spec_root = tmp_path / "spec-root3"
++    _seed_mirror(spec_root, with_trace=False)
++    change_dir = spec_root / "changes" / "archive" / KEY
++    change_dir.mkdir(parents=True, exist_ok=True)
++    (change_dir / "test-trace.json").write_text("{broken", encoding="utf-8")
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    assert result.test_rows == []
++
++
++async def test_not_found_reraises(db_session, tmp_path: Path) -> None:
++    """不存在/跨工作区 → ChangeNotFound（对齐 usage 端点 404 口径）。"""
++    spec_root = tmp_path / "spec-root4"
++    spec_root.mkdir()
++    ws = await _make_ws_spec(db_session, spec_root)
++    with pytest.raises(ChangeNotFound):
++        await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, uuid.uuid4())
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index eaa811afe..b7314190b 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -14,6 +14,7 @@ import {
+   useChangeDeleteAccess,
+ } from "@/components/delete-change-confirm";
+ import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
++import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
+ import { ChangeEventsCard } from "@/components/changes/detail/change-events-card";
+ import { ChangeFilesCard } from "@/components/changes/detail/change-files-card";
+ import { ChangeSessionsCard } from "@/components/changes/detail/change-sessions-card";
+@@ -444,6 +445,11 @@ export default function ChangeDetailPage({ params }: Props) {
+             workspaceId={workspaceId}
+             changeKey={change.change_key}
+           />
++          {/* 2026-09-25-change-precipitated-assets（D-001@v1 方案 a）：「沉淀资产」
++              折叠卡——本变更经归档沉淀的 FR 索引/决策蒸馏/测试绑定/patch 留档/
++              delta 摘要只读聚合（GET /changes/{cid}/assets），四组逐组有数据才
++              渲染、失败静默隐藏（ChangeEventsCard 同款范式）。 */}
++          <ChangeAssetsCard workspaceId={workspaceId} changeId={changeId} />
+         </aside>
+       </div>
+     </PageContainer>
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+new file mode 100644
+index 000000000..d3d4ea4aa
+--- /dev/null
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -0,0 +1,127 @@
++// 2026-09-25-change-precipitated-assets（FR-03/04）：沉淀资产卡组件测试。
++// 覆盖：四组渲染（fr/决策/测试绑定/归档留档逐组有数据才出现）+ 计数徽标、
++// 逐组容错（仅 fr 有数据时其余组不渲染）、在途变更引导空态、归档全空态、
++// 失败静默隐藏（isError → 整卡 null）。
++import { render, screen, fireEvent } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { beforeEach, describe, expect, it, vi } from "vitest";
++
++import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
++import { getChangeAssets } from "@/lib/changes";
++
++vi.mock("@/lib/changes", () => ({
++  getChangeAssets: vi.fn(),
++}));
++
++const mockGet = vi.mocked(getChangeAssets);
++
++function renderCard() {
++  const client = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  return render(
++    <QueryClientProvider client={client}>
++      <ChangeAssetsCard workspaceId="ws-1" changeId="c-1" />
++    </QueryClientProvider>,
++  );
++}
++
++const FULL = {
++  change_key: "k",
++  archived: true,
++  fr_entries: [
++    { id: "FR-auto-x-001", title: "条目一", status: "active", file: "knowledge/fr/x.md" },
++  ],
++  decisions: [
++    { id: "D-001@v1", title: "决策一", status: "implemented", file: "knowledge/decisions/x.md" },
++  ],
++  test_rows: [
++    {
++      row_id: "k:task-01:acc-0",
++      anchor: "FR-01",
++      tests: ["backend/app/x.py"],
++      state: "candidate",
++    },
++  ],
++  patch: { files: 6, additions: 10, deletions: 9, patch_status: "ok", saved_at: null },
++  delta: { headline: "h", before_lines: 2, delta_lines: 1 },
++};
++
++describe("ChangeAssetsCard", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++  });
++
++  it("四组渲染：展开后 fr/决策/测试绑定/归档留档逐组出现，计数徽标正确", async () => {
++    mockGet.mockResolvedValue(FULL);
++    renderCard();
++
++    expect(await screen.findByText(/FR 1 · 决策 1/)).toBeInTheDocument();
++
++    fireEvent.click(screen.getByRole("button", { name: /沉淀资产/ }));
++    expect(await screen.findByTestId("change-assets-fr")).toBeInTheDocument();
++    expect(screen.getByTestId("change-assets-decisions")).toBeInTheDocument();
++    expect(screen.getByTestId("change-assets-tests")).toBeInTheDocument();
++    expect(screen.getByTestId("change-assets-audit")).toBeInTheDocument();
++    expect(screen.getByText("FR-auto-x-001")).toBeInTheDocument();
++    expect(screen.getByText(/6 文件 \+10\/−9/)).toBeInTheDocument();
++  });
++
++  it("逐组容错：仅 fr 有数据时其余组不渲染", async () => {
++    mockGet.mockResolvedValue({
++      ...FULL,
++      decisions: [],
++      test_rows: [],
++      patch: null,
++      delta: null,
++    });
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++
++    expect(await screen.findByTestId("change-assets-fr")).toBeInTheDocument();
++    expect(screen.queryByTestId("change-assets-decisions")).toBeNull();
++    expect(screen.queryByTestId("change-assets-tests")).toBeNull();
++    expect(screen.queryByTestId("change-assets-audit")).toBeNull();
++  });
++
++  it("在途变更（archived=false 且无数据）显示引导空态", async () => {
++    mockGet.mockResolvedValue({
++      ...FULL,
++      archived: false,
++      fr_entries: [],
++      decisions: [],
++      test_rows: [],
++      patch: null,
++      delta: null,
++    });
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++
++    expect(
++      await screen.findByTestId("change-assets-inflight"),
++    ).toBeInTheDocument();
++  });
++
++  it("归档变更全空态显示占位文案", async () => {
++    mockGet.mockResolvedValue({
++      ...FULL,
++      fr_entries: [],
++      decisions: [],
++      test_rows: [],
++      patch: null,
++      delta: null,
++    });
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++
++    expect(await screen.findByText("本变更暂无沉淀资产记录。")).toBeInTheDocument();
++  });
++
++  it("失败静默：isError → 整卡不渲染", async () => {
++    mockGet.mockRejectedValue(new Error("boom"));
++    const { container } = renderCard();
++    // 等 query 落定（retry:false 单次即败）后断言空渲染。
++    await new Promise((r) => setTimeout(r, 100));
++    expect(container.querySelector('[data-testid="change-assets-card"]')).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+new file mode 100644
+index 000000000..79e41efeb
+--- /dev/null
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -0,0 +1,192 @@
++"use client";
++
++import { useState } from "react";
++import Link from "next/link";
++import { useQuery } from "@tanstack/react-query";
++
++import { getChangeAssets } from "@/lib/changes";
++
++interface ChangeAssetsCardProps {
++  workspaceId: string;
++  changeId: string;
++}
++
++/**
++ * 变更详情页 aside「沉淀资产」折叠卡（2026-09-25-change-precipitated-assets /
++ * D-001@v1 方案 a）。
++ *
++ * 本变更经归档沉淀的项目资产只读聚合：FR 索引条目 / 决策蒸馏条目 / 测试绑定
++ * 行 / patch 留档统计 / delta 摘要。useQuery 自取数（ChangeEventsCard 同款
++ * 范式）+ 失败静默隐藏；四组逐组「有数据才渲染」（design fail-open）；
++ * 在途变更（archived=false）显示引导空态（design R-03 对应展示面）。
++ * 纯展示零业务逻辑——FR/决策行点击跳知识库页（?file= 前向参数，页面暂不
++ * 消费，深锚点后续演进），无 mutation。
++ */
++export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProps) {
++  const query = useQuery({
++    queryKey: ["changeAssets", workspaceId, changeId],
++    queryFn: () => getChangeAssets(workspaceId, changeId),
++    retry: false,
++    refetchOnWindowFocus: false,
++  });
++
++  const [open, setOpen] = useState(false);
++
++  // 失败静默：区块隐藏（不影响详情主内容）。
++  if (query.isError) return null;
++
++  const data = query.data;
++  const frCount = data?.fr_entries.length ?? 0;
++  const decCount = data?.decisions.length ?? 0;
++  const rowCount = data?.test_rows.length ?? 0;
++  const hasAudit = Boolean(data?.patch || data?.delta);
++  const total = frCount + decCount + rowCount + (hasAudit ? 1 : 0);
++
++  return (
++    <section
++      data-testid="change-assets-card"
++      className="rounded-md border bg-card"
++    >
++      <button
++        type="button"
++        onClick={() => setOpen((v) => !v)}
++        data-state={open ? "open" : "closed"}
++        className="flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left"
++      >
++        <h2 className="flex items-center gap-1.5 text-xs font-medium">
++          📦 沉淀资产
++          {total > 0 && (
++            <span className="rounded-full border border-brand-300 bg-brand-50 px-2 py-px text-[10px] font-medium text-brand-700">
++              FR {frCount} · 决策 {decCount}
++            </span>
++          )}
++        </h2>
++        <span className="text-[10px] text-muted-foreground">
++          {open ? "收起 ▲" : "展开 ▼"}
++        </span>
++      </button>
++
++      {open && (
++        <div className="flex flex-col gap-2 px-3 py-2">
++          {data && !data.archived && total === 0 ? (
++            <p
++              data-testid="change-assets-inflight"
++              className="py-3 text-center text-[11px] text-muted-foreground"
++            >
++              变更归档后，此处会汇总其沉淀的 FR / 决策 / 测试绑定与留档。
++            </p>
++          ) : null}
++
++          {data && data.archived && total === 0 ? (
++            <p className="py-3 text-center text-[11px] text-muted-foreground">
++              本变更暂无沉淀资产记录。
++            </p>
++          ) : null}
++
++          {frCount > 0 ? (
++            <div className="rounded border-border/60 border p-2" data-testid="change-assets-fr">
++              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
++                <span>需求规则（FR 索引）</span>
++                <span className="text-[10px] text-muted-foreground/70">knowledge/fr</span>
++              </div>
++              {data?.fr_entries.map((e) => (
++                <Link
++                  key={e.id}
++                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(e.file)}`}
++                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 hover:underline"
++                >
++                  <span className="font-mono text-[10px] text-brand-700">{e.id}</span>
++                  <span className="min-w-0 flex-1 truncate">{e.title}</span>
++                  {e.status ? (
++                    <span className="rounded-full bg-emerald-50 px-1.5 text-[10px] text-emerald-700">
++                      {e.status}
++                    </span>
++                  ) : null}
++                </Link>
++              ))}
++            </div>
++          ) : null}
++
++          {decCount > 0 ? (
++            <div className="rounded border-border/60 border p-2" data-testid="change-assets-decisions">
++              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
++                <span>决策蒸馏</span>
++                <span className="text-[10px] text-muted-foreground/70">
++                  knowledge/decisions
++                </span>
++              </div>
++              {data?.decisions.map((d) => (
++                <Link
++                  key={d.id}
++                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(d.file)}`}
++                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 hover:underline"
++                >
++                  <span className="font-mono text-[10px] text-cyan-700">{d.id}</span>
++                  <span className="min-w-0 flex-1 truncate">{d.title}</span>
++                  {d.status ? (
++                    <span className="rounded-full bg-emerald-50 px-1.5 text-[10px] text-emerald-700">
++                      {d.status}
++                    </span>
++                  ) : null}
++                </Link>
++              ))}
++            </div>
++          ) : null}
++
++          {rowCount > 0 ? (
++            <div className="rounded border-border/60 border p-2" data-testid="change-assets-tests">
++              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
++                <span>测试绑定</span>
++                <span className="text-[10px] text-muted-foreground/70">test-trace</span>
++              </div>
++              {data?.test_rows.map((r) => (
++                <div
++                  key={r.row_id}
++                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0"
++                >
++                  <span className="font-mono text-[10px] text-muted-foreground">
++                    {r.row_id.split(":").slice(1, 3).join(":") || r.row_id}
++                  </span>
++                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
++                    {r.tests.join(" ｜ ")}
++                  </span>
++                  {r.state ? (
++                    <span className="rounded-full bg-amber-50 px-1.5 text-[10px] text-amber-700">
++                      {r.state}
++                    </span>
++                  ) : null}
++                </div>
++              ))}
++            </div>
++          ) : null}
++
++          {hasAudit && data ? (
++            <div className="rounded border-border/60 border p-2 text-[11px] text-muted-foreground" data-testid="change-assets-audit">
++              <div className="mb-1 text-[11px] font-medium">归档留档</div>
++              <div className="flex flex-wrap gap-x-3 gap-y-1">
++                {data.patch ? (
++                  <span>
++                    patch{" "}
++                    <b className="text-foreground">
++                      {data.patch.files ?? "?"} 文件 +{data.patch.additions ?? "?"}/−
++                      {data.patch.deletions ?? "?"}
++                    </b>
++                  </span>
++                ) : null}
++                {data.delta ? (
++                  <span>
++                    delta{" "}
++                    <b className="text-foreground">
++                      Before {data.delta.before_lines ?? "?"} 行 / Delta{" "}
++                      {data.delta.delta_lines ?? "?"} 行
++                    </b>
++                  </span>
++                ) : null}
++              </div>
++            </div>
++          ) : null}
++        </div>
++      )}
++    </section>
++  );
++}
+diff --git a/frontend/src/lib/changes.ts b/frontend/src/lib/changes.ts
+index ba7696fb6..55c61ab8e 100644
+--- a/frontend/src/lib/changes.ts
++++ b/frontend/src/lib/changes.ts
+@@ -739,3 +739,59 @@ export function listChangeEvents(
+     `/api/changes/${encodeURIComponent(changeKey)}/events${qs ? `?${qs}` : ""}`,
+   );
+ }
++
++// ── 沉淀资产（2026-09-25-change-precipitated-assets / D-001@v1 方案 a）─────────
++
++export interface ChangeAssetsFrEntry {
++  id: string;
++  title: string;
++  status: string | null;
++  file: string;
++}
++
++export interface ChangeAssetsDecisionEntry {
++  id: string;
++  title: string;
++  status: string | null;
++  file: string;
++}
++
++export interface ChangeAssetsTestRow {
++  row_id: string;
++  anchor: string | null;
++  tests: string[];
++  state: string | null;
++}
++
++export interface ChangeAssetsPatchMeta {
++  files: number | null;
++  additions: number | null;
++  deletions: number | null;
++  patch_status: string | null;
++  saved_at: string | null;
++}
++
++export interface ChangeAssetsDeltaMeta {
++  headline: string | null;
++  before_lines: number | null;
++  delta_lines: number | null;
++}
++
++export interface ChangeAssetsResponse {
++  change_key: string;
++  archived: boolean;
++  fr_entries: ChangeAssetsFrEntry[];
++  decisions: ChangeAssetsDecisionEntry[];
++  test_rows: ChangeAssetsTestRow[];
++  patch: ChangeAssetsPatchMeta | null;
++  delta: ChangeAssetsDeltaMeta | null;
++}
++
++export function getChangeAssets(
++  workspaceId: string,
++  changeId: string,
++): Promise<ChangeAssetsResponse> {
++  return apiFetch<ChangeAssetsResponse>(
++    `/api/workspaces/${workspaceId}/changes/${changeId}/assets`,
++  );
++}
+diff --git a/.sillyspec/changes/2026-09-25-change-precipitated-assets/flow-state.yaml b/.sillyspec/changes/2026-09-25-change-precipitated-assets/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-change-precipitated-assets/flow-state.yaml
+@@ -0,0 +1,18 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++adopted_from: brainstorm
++review_force: null
++baseline_commit: 5ae347894da3d03154c45783d115e634c8bc2390
++updatedAt: '2026-09-25T04:13:11.092Z'
++route_hint: thick
++edit_ratio: 1
++gate_summary: >-
++  test: passed ← module[platform_sync]+deps(py1)（52.9s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260925041252\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（18.3s）｜门文件 19 个
++
+
+diff --git a/.sillyspec/changes/2026-09-25-change-precipitated-assets/proposal.md b/.sillyspec/changes/2026-09-25-change-precipitated-assets/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-change-precipitated-assets/proposal.md
+@@ -0,0 +1,25 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T04:00:03.763Z
++---
++# 提案书（Proposal）— 2026-09-25-change-precipitated-assets
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:6859be6f853979314c63210ace7d6bcdee4f92c9b7e30764179788548a8ecb41:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-precipitated-assets 留痕重锚 -->
++任务原话转写：（未提供 --input）
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:2ad7b02691c7d907e1d2c9e853d9134f164a9bcdcef5d7db52d0af11c4bfbd30:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-precipitated-assets 留痕重锚 -->
++（--input 未含成功标准条目——flow done 测试门与工件校验为默认验收面）
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:a51de969f5ead9a789fdde1476c1242c83293cf63ac80a43d63bd08ee3588533:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-precipitated-assets 留痕重锚 -->
++1. flow done 六子步全绿（测试门实测通过+工件指纹校验通过）
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-25-change-precipitated-assets/requirements.md b/.sillyspec/changes/2026-09-25-change-precipitated-assets/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-change-precipitated-assets/requirements.md
+@@ -0,0 +1,36 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T04:00:03.768Z
++---
++# 需求规格（Requirements）— 2026-09-25-change-precipitated-assets
++
++## 功能需求（成功标准机械摘录）
++<!-- MACHINE-DRAFT:requirements-frs:e3cb30ef10d2ce1a33eb6eeed85ba093b3c4fc770551b4567902e2f9c4e7978e:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-precipitated-assets 留痕重锚 -->
++### FR-01: 沉淀资产聚合端点
++Given 变更已归档且 spec 树镜像含其沉淀产物
++When 调用 GET /workspaces/{ws}/changes/{cid}/assets
++Then 返回 FR 索引/决策蒸馏归属条目（「变更：」行过滤）+ 测试绑定行 + patch 统计 + delta 摘要；逐项 fail-open，在途变更跳过目录件
++
++### FR-02: 变更详情沉淀资产卡
++Given 用户在变更详情页 aside
++When 渲染「沉淀资产」折叠卡
++Then 四组逐组有数据才渲染（FR/决策行可跳知识库页）、失败静默隐藏、在途变更显示引导空态
++
++### FR-03: 聚焦验证全绿
++Given 本变更交付
++When 跑聚焦测试与静态检查
++Then 后端 test_assets.py 5 用例 + 前端 change-assets-card 5 用例 + tsc + ruff 全绿
++<!-- MACHINE-DRAFT:requirements-frs:end -->
++
++<!--AGENT:槽1 需求例外裁决（FR 语义改写不走此槽——直接编辑机器段后跑 flow amend-draft 留痕，槽内容不进 FR 索引）——例外裁决书写面（机器段之外合法） -->
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_assets.py：test_golden_aggregation（归属过滤/目录件投影/patch 缺席 None）+ test_inflight_change_skips_dir_files + test_corrupt_json_fail_open + test_not_found_reraises
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx：四组渲染+计数徽标 / 逐组容错 / 在途引导空态 / 归档全空态 / 失败静默 五用例
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++uv run pytest app/modules/change/tests/test_assets.py（5 passed，回执 .sillyspec/.runtime/logs/c2-backend-test.log）+ pnpm exec tsc --noEmit（exit 0）+ pnpm test -- change-assets-card（5 passed，回执 logs/c2-fe-test.log）+ ruff format --check/check 双过（61 files already formatted / 0 errors）
+
+diff --git a/.sillyspec/changes/2026-09-25-change-precipitated-assets/tasks.md b/.sillyspec/changes/2026-09-25-change-precipitated-assets/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-change-precipitated-assets/tasks.md
+@@ -0,0 +1,13 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T04:00:03.771Z
++---
++# 任务注册表（Tasks）— 2026-09-25-change-precipitated-assets
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++<!-- MACHINE-DRAFT:tasks-rows:3f1668e68bb5ff0d348018c4a8eaf7443ba132a7c4f58bb13137d7d0e78cd50e:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-precipitated-assets 留痕重锚 -->
++- [ ] task-01: 完成实现并使 flow done 六子步全绿
++<!-- MACHINE-DRAFT:tasks-rows:end -->
++
