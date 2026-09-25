@@ -928,7 +928,24 @@ class PlatformSyncService:
                 if row is None:
                     return
                 if stage is not None:
-                    row.current_stage = stage
+                    # 守卫 B（2026-09-25-change-center-thin-flow task-05）：thin 变更
+                    # 阶段回洗双守卫之二（与守卫 A——change/dispatch.sync_stage_status
+                    # ——同一谓词，不引入第二套判断）。CLI 红线：thin（轻量变更）进度
+                    # 落 flow-state.yaml 不落 sillyspec.db，CLI 上行的 current_stage
+                    # 全程是 'scan' 停留态——直接覆盖会把平台 'thin' 洗回 'scan'。
+                    # 平台行 current_stage=='thin' 且上行 status 非 archived → 跳过
+                    # 覆盖（status/时间戳类照常）；archived（flow done 后）放行下方
+                    # 既有归档翻转链（读侧三源并集承接）；非 thin 变更零作用。
+                    if row.current_stage == "thin" and mapped_status != "archived":
+                        log.info(
+                            "platform_sync.thin_stage_guard_skip",
+                            workspace_id=str(workspace_id),
+                            change_key=name,
+                            cli_stage=stage,
+                            cli_status=status_value,
+                        )
+                    else:
+                        row.current_stage = stage
                 if mapped_status is not None:
                     row.status = mapped_status
                     if mapped_status == "archived":
