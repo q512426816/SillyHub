@@ -1298,7 +1298,7 @@ class SpecWorkspaceService:
                     # 目标磁盘在位探测（复活判定用）：同内容跳过分支的前提之一。
                     return data, digest, src_mtime, tgt.exists()
 
-                # ql-20260913-004：staging 成员缺失（tar name 被旧打包方截断 / 解包竞态等）
+                # ql-20260813-004：staging 成员缺失（tar name 被旧打包方截断 / 解包竞态等）
                 # → 跳过 + warn，不抛 500 致整次同步失败。daemon 侧 buildLongLinkHeader +
                 # 排除 runtime(无点) 已根治超长 name，此为纵深防御兜底。
                 try:
