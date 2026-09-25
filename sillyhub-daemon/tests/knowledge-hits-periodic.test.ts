@@ -107,3 +107,26 @@ describe('KnowledgeHitsPeriodicUploader.roundOnce', () => {
     expect(Array.isArray(names)).toBe(true);
   });
 });
+
+describe('绑定集守卫（评审 P2 收口：UUID 形态 + backup 目录排除）', () => {
+  beforeEach(async () => {
+    uploadMock.mockReset().mockResolvedValue(undefined);
+    await rm(join(FAKE_HOME, '.sillyhub'), { recursive: true, force: true }).catch(() => undefined);
+  });
+
+  it('非 UUID 杂名与 .pre-junction-backup-* 目录不进端点调用', async () => {
+    await makeWs(UUID_A, '{"n":1}\n');
+    // 杂名目录（有 hits 文件也不该被调）与 backup 缓存目录
+    for (const bad of ['not-a-uuid', 'b97f8231.pre-junction-backup-20260909']) {
+      const d = join(STATE, 'specs', bad, '.runtime');
+      await mkdir(d, { recursive: true });
+      await writeFile(join(d, 'knowledge-hits.jsonl'), '{"bad":1}\n', 'utf-8');
+    }
+    const u = new KnowledgeHitsPeriodicUploader({} as never, 60_000, STATE);
+    const r = await u.roundOnce();
+    expect(r.attempted).toEqual([UUID_A]);
+    expect(uploadMock).toHaveBeenCalledTimes(1);
+    const argWs = uploadMock.mock.calls[0]?.[1];
+    expect(argWs).toBe(UUID_A);
+  });
+});

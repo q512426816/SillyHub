@@ -64,14 +64,19 @@ export class KnowledgeHitsPeriodicUploader {
         skippedUnchanged.push(wsId);
         continue;
       }
-      this._lastStamp.set(wsId, stampKey);
-      if (stamp === null) continue; // 无 hits 文件：记空印短路，不空转调 uploader
+      if (stamp === null) {
+        this._lastStamp.set(wsId, stampKey); // 无文件：空印短路
+        continue;
+      }
       // uploadKnowledgeHitsIfNeeded 自身全程 try/catch 不抛；再包一层防定时器冒泡。
+      // stamp **成功后才记**（评审 P2 收口）：失败轮不记印，下轮同 mtime 也会重试
+      // ——「失败后文件未变则永久短路」的漏重试口子由后移记录堵死。
       try {
         await uploadKnowledgeHitsIfNeeded(this._client as never, wsId, join(this._stateDir, 'specs', wsId));
+        this._lastStamp.set(wsId, stampKey);
         attempted.push(wsId);
       } catch (e) {
-        console.warn('knowledge_hits_periodic: round_failed', wsId, e);
+        console.warn('knowledge_hits_periodic: round_failed_will_retry_next_round', wsId, e);
       }
     }
     return { attempted, skippedUnchanged };
