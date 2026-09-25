@@ -121,7 +121,10 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
   }
   if (!stats) return null;
 
-  const { coverage, dead_entries, density, freshness, usage_board, orphan_anchors } = stats;
+  const { coverage, dead_entries, density, freshness, usage_board } = stats;
+  // 运行时防御（评审 P2 收口）：旧后端过渡窗口可能不带新字段（TS 类型已生成但
+  // 运行时缺省），?? 兜底避免 undefined.length / undefined 渲染崩溃。
+  const orphan_anchors = stats.orphan_anchors ?? [];
   const coveragePct =
     coverage.total_entries > 0
       ? Math.round((coverage.used_entries / coverage.total_entries) * 100)

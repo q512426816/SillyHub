@@ -464,6 +464,10 @@ class HitsService:
         # 渗透率天然 ∈[0,1]，前端 ×100 后即合法百分比；total 保留原始次数作副显。
         board: list[UsageBoardItem] = []
         for anchor, total in anchor_total.items():
+            # 幽灵锚不入榜（2026-09-25-knowledge-stats-layering 评审 P2 收口）：解析失败
+            # 锚点已在 orphan_anchors 单列，榜内再混排等于双列且挤占正常条目位次。
+            if anchor not in entry_anchors:
+                continue
             denom = _period_task_count(_entry_first_seen(anchor))
             hit_tasks = len(anchor_tasks.get(anchor, ()))
             board.append(

@@ -486,8 +486,8 @@ async def test_stats_anchor_drift_tolerant_matching(db_session, drift_ws: dict) 
     - 精确锚 ``conventions.md#提交规范`` → 精确命中（算命中）；
     - 歧义锚 ``conventions.md#foo.bar``（归一键 foobar 命中两条目）→ 不猜（不算）；
     - 内容漂移锚 → 归一键也不同 → 不猜（不算）。
-    预期：used=3/6，死条目=3（两个 Foo* + 内容漂移小节），榜 5 行（前三条并为
-    条目锚点、后两条保持原锚点原样）。
+    预期：used=3/6，死条目=3（两个 Foo* + 内容漂移小节），榜 3 行（三条命中归位条目锚点；
+    幽灵锚经 2026-09-25-knowledge-stats-layering 评审 P2 收口不入榜、单列失效命中期）。
     """
     service = HitsService(db_session)
     lines = [
@@ -521,10 +521,13 @@ async def test_stats_anchor_drift_tolerant_matching(db_session, drift_ws: dict) 
         _DOT_ENTRY_ANCHOR,
         _FOLD_ENTRY_ANCHOR,
         "conventions.md#提交规范",
+    }
+    assert all(b.total == 1 for b in out.usage_board)
+    # 幽灵锚单列在 orphan_anchors（不再入榜）
+    assert {o.anchor for o in out.orphan_anchors} == {
         "conventions.md#foo.bar",
         _DRIFTED_HIT_ANCHOR,
     }
-    assert all(b.total == 1 for b in out.usage_board)
 
     # 文件级计数：解析前后文件段不变（降序：known-issues 3 > conventions 2）
     assert [(e.file, e.count) for e in out.entry_counts] == [
@@ -680,6 +683,11 @@ async def test_stats_layering_fields(db_session, hits_ws: dict, drift_ws: dict) 
         (_DRIFTED_HIT_ANCHOR, 1),
     ]
     assert all(o.last_hit is not None for o in b.orphan_anchors)
+    # 评审 P2 收口：幽灵锚不入使用率榜（已单列失效命中期，不再双列）
+    board_anchors = {item.anchor for item in b.usage_board}
+    assert "conventions.md#foo.bar" not in board_anchors
+    assert _DRIFTED_HIT_ANCHOR not in board_anchors
+    assert len(board_anchors) == 3
 
 
 async def test_stats_zero_hits_data_until_none(db_session, hits_ws: dict) -> None:
