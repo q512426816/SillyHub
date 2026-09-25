@@ -79,7 +79,8 @@ services:
         # 空 → 取最新 sillyspec；填值 → pin。
         SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-}
         # Git SHA baked into the image; export COMMIT_SHA before `up --build`.
-        COMMIT_SHA: ${COMMIT_SHA:-}
+        # 2026-09-26-deploy-eng-hardening：删运行时空覆盖——此前 ${COMMIT_SHA:-} 在
+      # 未 export 的服务器上以空串覆盖镜像 ENV，git 探测回退（容器无 .git）→ unknown。
     env_file:
       - .env
     restart: unless-stopped
@@ -113,7 +114,8 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-dev}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-["http://localhost:3001","http://127.0.0.1:3001"]}
       OTEL_ENDPOINT: ${OTEL_ENDPOINT:-}
-      COMMIT_SHA: ${COMMIT_SHA:-}
+      # 2026-09-26-deploy-eng-hardening：删运行时空覆盖——此前 ${COMMIT_SHA:-} 在
+      # 未 export 的服务器上以空串覆盖镜像 ENV，git 探测回退（容器无 .git）→ unknown。
       # 对象存储（平台文件中心）。Docker 内 minio 走服务名 minio:9000；
       # 凭证须与 minio 服务的 MINIO_ROOT_USER/MINIO_ROOT_PASSWORD 一致。
       STORAGE_BACKEND: ${STORAGE_BACKEND:-minio}

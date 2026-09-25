@@ -19,6 +19,31 @@ const backendRoot = resolve(here, "..", "..", "backend");
 const openapiJson = resolve(backendRoot, "openapi.json");
 const outFile = resolve(root, "src", "lib", "api-types.ts");
 
+// 2026-09-26-deploy-eng-hardening：并行会话守卫——openapi.json / api-types.ts 有
+// 未提交改动时中止（重生成会把对方 WIP 卷进自己的提交，本轮真实踩过）。--force 跳过。
+function assertNoDirtyGenerated() {
+  if (process.argv.includes("--force")) return;
+  const targets = [openapiJson, outFile];
+  const dirty = targets.filter((f) => {
+    try {
+      execSync(`git diff --quiet -- "${f}"`, { cwd: root, stdio: "pipe" });
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  if (dirty.length > 0) {
+    const lines = dirty.map((f) => "  " + f).join("\\n");
+    console.error(
+      `[gen-api-types] 中止：以下生成物有未提交改动，重生成会把并行会话的 WIP 卷进本次提交：\\n${lines}`,
+    );
+    console.error(
+      "  处置：先提交/stash 这些文件，或确认归属后用 pnpm gen:types -- --force 跳过守卫。",
+    );
+    process.exit(1);
+  }
+}
+
 // node_modules 健康自检：openapi-typescript 的 .bin shim 必须在。
 // pnpm 半坏场景（CLAUDE.md 规则 20）：包目录 node_modules/openapi-typescript 在（符号链接），
 // 但 node_modules/.bin/openapi-typescript shim 没建 → npx --no-install 找不到命令 →
@@ -54,6 +79,7 @@ function assertOpenapiTypescriptShim() {
   process.exit(1);
 }
 
+assertNoDirtyGenerated();
 assertOpenapiTypescriptShim();
 
 // 1. dump 最新 openapi.json（uv 在 backend 目录跑 dump_openapi.py）

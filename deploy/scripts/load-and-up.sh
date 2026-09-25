@@ -13,17 +13,26 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 TAR="${1:-images.tar.gz}"
 [ -f "$TAR" ] || { echo "找不到 $TAR，先 scp 上传到 $(pwd)/"; exit 1; }
 
-echo "==> [1/4] docker load"
+echo "==> [1/5] docker load"
 gunzip -c "$TAR" | docker load
 
-echo "==> [2/4] docker compose up -d（用 load 进来的 :latest，不构建）"
+echo "==> [2/5] docker compose up -d（用 load 进来的 :latest，不构建）"
 # compose 发现已存在 multi-agent-platform-{backend,frontend}:latest，直接用，不触发 build。
 docker compose --env-file .env up -d
 
-echo "==> [3/4] 清理 dangling 镜像（服务器磁盘紧张）"
+echo "==> [3/5] 清理 dangling 镜像 + 旧 backup tag（服务器磁盘紧张）"
 docker image prune -f
+# 2026-09-26-deploy-eng-hardening：backup tag 保留策略——每镜像只留最近 4 个
+# backup-*（按创建时间降序），更旧的 rmi。40G 盘上每个 backup ≈908MB，无策略
+# 时每部署一次积 2 个（backend+frontend），7 次部署即 6.4G。
+for repo in multi-agent-platform-backend multi-agent-platform-frontend; do
+  docker images --format '{{.Tag}}' "$repo" | grep '^backup-' | sort -r | tail -n +5 | while read -r tag; do
+    echo "    rmi $repo:$tag（超出最近 4 个保留窗）"
+    docker rmi "$repo:$tag" >/dev/null 2>&1 || true
+  done
+done
 
-echo "==> [4/4] 删除 tar 包释放空间"
+echo "==> [4/5] 删除 tar 包释放空间"
 rm -f "$TAR"
 
 echo ""
