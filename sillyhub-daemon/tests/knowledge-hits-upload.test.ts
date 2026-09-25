@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
 // ── hoisted mocks（homedir 必须在 knowledge-hits-upload import 前替换）────────
@@ -260,6 +261,83 @@ describe('uploadKnowledgeHitsIfNeeded', () => {
     await uploadKnowledgeHitsIfNeeded({} as never, 'ws-old-client', specDir);
     expect(warnSpy.mock.calls.length).toBe(warnBefore);
     expect(await readState('ws-old-client')).toBeNull();
+  });
+
+  // ── 行指纹断点（2026-09-25-daemon-hits-upload-fingerprint）───────────────────
+
+  it('文件被重置替换后长回/超过旧 offset → 指纹不符，回退 0 全量重报（新行不丢）', async () => {
+    const wsId = 'ws-replaced-regrow';
+    // 首轮：报 3 行，offset=3 + 指纹=第 3 行。
+    const specDir = await makeSpecDirWithHits(wsId, '{"n":1}\n{"n":2}\n{"n":3}\n');
+    const client = makePosterClient();
+    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
+    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, [
+      '{"n":1}',
+      '{"n":2}',
+      '{"n":3}',
+    ]);
+    // 替换：文件被清空重写且长到 5 行（> 旧 offset 3）——纯行数口径会把新文件前 3 行
+    // 静默跳过；指纹口径必须识别并从头重报。
+    await writeFile(
+      join(specDir, '.runtime', 'knowledge-hits.jsonl'),
+      '{"m":1}\n{"m":2}\n{"m":3}\n{"m":4}\n{"m":5}\n',
+      'utf-8',
+    );
+    client.postKnowledgeHitsBatch.mockClear();
+    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
+    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, [
+      '{"m":1}',
+      '{"m":2}',
+      '{"m":3}',
+      '{"m":4}',
+      '{"m":5}',
+    ]);
+    // 重报后指纹随新文件落盘；append 走正常增量。
+    await writeFile(
+      join(specDir, '.runtime', 'knowledge-hits.jsonl'),
+      '{"m":1}\n{"m":2}\n{"m":3}\n{"m":4}\n{"m":5}\n{"m":6}\n',
+      'utf-8',
+    );
+    client.postKnowledgeHitsBatch.mockClear();
+    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
+    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, ['{"m":6}']);
+  });
+
+  it('等长替换（行数恰好相同）→ 指纹同样识别，全量重报不丢新内容', async () => {
+    const wsId = 'ws-replaced-equal-len';
+    const specDir = await makeSpecDirWithHits(wsId, '{"a":1}\n{"a":2}\n');
+    const client = makePosterClient();
+    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
+    await writeFile(
+      join(specDir, '.runtime', 'knowledge-hits.jsonl'),
+      '{"b":1}\n{"b":2}\n',
+      'utf-8',
+    );
+    client.postKnowledgeHitsBatch.mockClear();
+    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
+    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, ['{"b":1}', '{"b":2}']);
+  });
+
+  it('legacy 状态（无 tailHash）→ 不因升级误重报，首批成功后指纹开始落盘', async () => {
+    const wsId = 'ws-legacy-state';
+    const specDir = await makeSpecDirWithHits(wsId, '{"n":1}\n{"n":2}\n');
+    await mkdir(join(FAKE_HOME, '.sillyhub', 'daemon'), { recursive: true });
+    await writeFile(
+      hitsUploadStatePath(wsId),
+      JSON.stringify({ uploadedLines: 1, updated_at: '2026-09-20T00:00:00Z' }),
+      'utf-8',
+    );
+    const client = makePosterClient();
+    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
+    // legacy 无指纹：维持行数口径，只报第 2 行（不整文件重报）。
+    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, ['{"n":2}']);
+    // 首批成功后状态带 tailHash（= 已上行最后一行的 sha256）。
+    const raw = await readFile(hitsUploadStatePath(wsId), 'utf-8');
+    const parsed = JSON.parse(raw) as { uploadedLines: number; tailHash: string };
+    expect(parsed.uploadedLines).toBe(2);
+    expect(parsed.tailHash).toBe(
+      createHash('sha256').update('{"n":2}', 'utf8').digest('hex'),
+    );
   });
 });
 

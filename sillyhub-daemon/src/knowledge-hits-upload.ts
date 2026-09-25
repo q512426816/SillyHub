@@ -6,11 +6,14 @@
 // append 的原始 jsonl 行）。仅本地读取——UPLOAD_EXCLUDE_TOP_BASE 已把 .runtime/
 // 整体排除出 spec 上传链路（task-07），本模块不动该排除语义，hits 不随 spec tar 上行。
 //
-// 断点（R-01）：offset 记「已上行的完整行数」，存 daemon 家目录状态文件
+// 断点（R-01）：offset 记「已上行的完整行数 + 最后一行指纹」，存 daemon 家目录状态文件
 // `~/.sillyhub/daemon/.hits-upload-state-{wsId}.json`（不落 spec 树——pull 的整树
 // 交换会清掉 specDir，对齐 manifests/{ws}.json 移出 specDir 的 BL-4/R-03 先例；
 // SILLYHUB_DAEMON_DIR 隔离时随 daemonStateDir() 一并重定向）。只报**以 \n 结尾的
 // 完整行**——上报窗口内 CLI 正 append 的尾行（无换行）留下轮补，防半行截断。
+// 行指纹（2026-09-25-daemon-hits-upload-fingerprint）：行数口径看不出「文件被重置
+// 替换后又长回旧行数」——该场景新文件前 offset 行会被静默跳过永久丢报；指纹比对
+// 识别即回退 offset=0 从头重报（服务端行级 hash 唯一约束幂等，零重复入库）。
 //
 // 分批（R-06）：每批 ≤2000 行（backend HitsBatchIn HITS_BATCH_MAX_LINES 同值），
 // 每批成功即原子写 offset（writeFileAtomic），后续批次失败时前批进度不丢。
@@ -25,6 +28,7 @@
 // !== 'function'` 先例，不产日志噪音）。
 
 import { readFile, mkdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import type { HubClient } from './hub-client.js';
 import { daemonStateDir } from './config.js';
@@ -36,10 +40,24 @@ const HITS_REL_PATH = join('.runtime', 'knowledge-hits.jsonl');
 /** 单批最大行数（backend HitsBatchIn 上限同值，422 越界由服务端兜底校验）。 */
 const HITS_BATCH_MAX_LINES = 2000;
 
-/** offset 状态文件结构（daemon 家目录，schema version 0 起即此形态）。 */
+/** 单行 sha256（hex）——行指纹，供「文件被替换」检测（2026-09-25-daemon-hits-upload-fingerprint）。 */
+function lineHash(line: string): string {
+  return createHash('sha256').update(line, 'utf8').digest('hex');
+}
+
+/** offset 状态文件结构（daemon 家目录，schema version 0 起为 {uploadedLines}，指纹轮起带 tailHash）。 */
 interface HitsUploadState {
   /** 已成功上行的完整行数（下次从此处继续）。 */
   uploadedLines: number;
+  /**
+   * 已上行最后一行的行指纹（sha256 hex；uploadedLines=0 时 null）。
+   * 纯行数 offset 有个洞：文件被重置/替换后又长**超过**旧 offset 时，钳位不触发、
+   * 新文件前 offset 行被静默跳过永久丢报——行指纹比对能在行数看不出的情况下识别
+   * 「同一位置已是别的行」，识别即回退 offset=0 从头重报（服务端 (ws, line_hash)
+   * 唯一约束幂等去重，重报零重复入库）。legacy 状态无此键 → 该轮维持行数口径，
+   * 首批成功后指纹开始随行数一起落盘。
+   */
+  tailHash: string | null;
   /** 最近一次前进时间（ISO，诊断用，不参与逻辑）。 */
   updated_at: string;
 }
@@ -66,24 +84,34 @@ export function hitsUploadStatePath(wsId: string): string {
 }
 
 /**
- * 读 offset 状态；不存在 / 坏 JSON / 形状不符 → 0（视为从未上报，全量重报由
- * 服务端 hash 去重兜底，不因状态文件损坏永久卡死增量）。
+ * 读 offset 状态；不存在 / 坏 JSON / 形状不符 → {uploadedLines: 0, tailHash: null}
+ * （视为从未上报，全量重报由服务端 hash 去重兜底，不因状态文件损坏永久卡死增量）。
+ * legacy 状态（有 uploadedLines 无 tailHash）→ tailHash 返回 null：该轮维持纯行数
+ * 口径（不因升级误重报），首批成功后指纹随行数一起落盘。
  */
-async function readUploadedLines(wsId: string): Promise<number> {
+async function readUploadedLines(wsId: string): Promise<HitsUploadState> {
   let raw: string;
   try {
     raw = await readFile(hitsUploadStatePath(wsId), 'utf-8');
   } catch {
-    return 0; // 首轮（ENOENT）或不可读
+    return { uploadedLines: 0, tailHash: null, updated_at: '' }; // 首轮（ENOENT）或不可读
   }
   try {
-    const obj = JSON.parse(raw) as { uploadedLines?: unknown };
-    if (typeof obj.uploadedLines === 'number' && Number.isInteger(obj.uploadedLines) && obj.uploadedLines >= 0) {
-      return obj.uploadedLines;
+    const obj = JSON.parse(raw) as { uploadedLines?: unknown; tailHash?: unknown };
+    if (
+      typeof obj.uploadedLines === 'number' &&
+      Number.isInteger(obj.uploadedLines) &&
+      obj.uploadedLines >= 0
+    ) {
+      return {
+        uploadedLines: obj.uploadedLines,
+        tailHash: typeof obj.tailHash === 'string' && obj.tailHash ? obj.tailHash : null,
+        updated_at: '',
+      };
     }
-    return 0;
+    return { uploadedLines: 0, tailHash: null, updated_at: '' };
   } catch {
-    return 0;
+    return { uploadedLines: 0, tailHash: null, updated_at: '' };
   }
 }
 
@@ -91,8 +119,16 @@ async function readUploadedLines(wsId: string): Promise<number> {
  * 原子写 offset 状态（tmp+rename，见 atomic-write.ts）。失败上抛由调用方
  * best-effort catch（状态写失败但批已上行——本轮 warn，下轮重报该批，hash 去重兜底）。
  */
-async function writeUploadedLines(wsId: string, n: number): Promise<void> {
-  const state: HitsUploadState = { uploadedLines: n, updated_at: new Date().toISOString() };
+async function writeUploadedLines(
+  wsId: string,
+  uploadedLines: number,
+  tailHash: string | null,
+): Promise<void> {
+  const state: HitsUploadState = {
+    uploadedLines,
+    tailHash,
+    updated_at: new Date().toISOString(),
+  };
   const p = hitsUploadStatePath(wsId);
   // 建父目录（对齐 writeLocalManifest 先例；daemonStateDir 常态已存在，防御首写）。
   await mkdir(dirname(p), { recursive: true });
@@ -155,13 +191,27 @@ export async function uploadKnowledgeHitsIfNeeded(
     }
 
     const completeLines = splitCompleteLines(raw);
-    let uploadedLines = await readUploadedLines(wsId);
-    // 外部截断/替换 hits 文件（如手动清理）时状态可能超前——钳到当前行数并**立即
-    // 固化**，否则每轮都空转在钳位上、append 后增量永久卡死；固化后从文件现行数
-    // 续走（钳位轮无上行，append 的新行下轮正常报）。
+    const state = await readUploadedLines(wsId);
+    let uploadedLines = state.uploadedLines;
+    let tailHash = state.tailHash;
     if (uploadedLines > completeLines.length) {
+      // 外部截断/替换（如手动清理）时状态可能超前——钳到当前行数并**立即固化**，否则每轮
+      // 都空转在钳位上、append 后增量永久卡死；固化后从文件现行数续走（钳位轮无上行，
+      // append 的新行下轮正常报）。钳位同时重记指纹（截断后的最后一行）。
       uploadedLines = completeLines.length;
-      await writeUploadedLines(wsId, uploadedLines);
+      const tailLine = completeLines[completeLines.length - 1];
+      tailHash = tailLine !== undefined ? lineHash(tailLine) : null;
+      await writeUploadedLines(wsId, uploadedLines, tailHash);
+    } else if (uploadedLines > 0 && tailHash !== null) {
+      // 行数没超前、但「已上行最后一行」位置已是别的行 → 文件被重置/替换后又长回了
+      // 旧行数（纯行数口径的盲区：新文件前 offset 行会被静默跳过、永久丢报）。
+      // 回退 offset=0 从头重报——服务端 (workspace_id, line_hash) 唯一约束幂等去重，
+      // 旧行重报零重复入库，新行全部补齐。
+      const uploadedTail = completeLines[uploadedLines - 1];
+      if (uploadedTail !== undefined && lineHash(uploadedTail) !== tailHash) {
+        uploadedLines = 0;
+        tailHash = null;
+      }
     }
 
     let pending = completeLines.length - uploadedLines;
@@ -172,8 +222,11 @@ export async function uploadKnowledgeHitsIfNeeded(
       );
       await poster.postKnowledgeHitsBatch(wsId, batch);
       // 批成功才前进 offset（原子写）；失败抛出 → 下方 catch，本批下轮重试。
+      // 指纹 = 本批最后一行（即当前已上行的最后一行）。
       uploadedLines += batch.length;
-      await writeUploadedLines(wsId, uploadedLines);
+      const lastLine = batch[batch.length - 1];
+      if (lastLine !== undefined) tailHash = lineHash(lastLine);
+      await writeUploadedLines(wsId, uploadedLines, tailHash);
       pending = completeLines.length - uploadedLines;
     }
   } catch (e) {
