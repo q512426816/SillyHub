@@ -43,7 +43,7 @@ function sourceText(task: DistillTaskRead): string {
       ? "会话"
       : task.source_type === "change"
         ? "变更"
-        : "快速修复";
+        : "快速修复（存量）";
   // quick 多选后端投影为 JSON 串（DistillTaskRead.source_ref: string）——解析
   // 成条数展示；解析失败按普通 ref 截断（会话 UUID/变更名）。
   let ref = String(task.source_ref);

@@ -108,14 +108,14 @@ interface DistillSourceItem {
 const SOURCE_TYPE_OPTIONS: ReadonlyArray<{ value: DistillSourceType; label: string }> = [
   { value: "session", label: "会话记录" },
   { value: "change", label: "变更归档" },
-  { value: "quick", label: "快速修复" },
+  { value: "quick", label: "快速修复（存量）" },
 ];
 
 /** 各来源类型的列表空态文案。 */
 const SOURCE_EMPTY_TEXT: Record<DistillSourceType, string> = {
   session: "当前工作区暂无可选会话记录。",
   change: "暂无已归档变更可选。",
-  quick: "当前工作区暂无快速修复记录。",
+  quick: "当前工作区暂无快速修复记录（存量通道已退役，不再产生新条目）。",
 };
 
 /** 各来源类型的条目图标（原型 .src-item .icon）。 */
@@ -725,7 +725,7 @@ export function PrecipitateDialog({ workspaceId, onClose, onProposed, onDistille
               {sourceType !== "session" && (
                 <p className="mt-1 text-[10.5px] text-muted-foreground">
                   {isQuickSource
-                    ? "快速修复是零散记录，无「原会话」概念，固定走新建 agent。"
+                    ? "快速修复是零散记录（存量通道已退役，不再产生新条目），无「原会话」概念，固定走新建 agent。"
                     : "变更归档没有「原会话」概念，固定走新建 agent。"}
                 </p>
               )}

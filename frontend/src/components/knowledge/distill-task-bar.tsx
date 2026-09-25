@@ -84,8 +84,8 @@ function sourceSummary(task: DistillTaskRead): string {
       }
     }
     return count > 1
-      ? `正在从 ${count} 条快速修复记录提炼知识`
-      : "正在从快速修复记录提炼知识";
+      ? `正在从 ${count} 条快速修复记录（存量）提炼知识`
+      : "正在从快速修复记录（存量）提炼知识";
   }
   const ref = task.source_ref ? task.source_ref.slice(0, 8) : "—";
   return `正在从会话记录（${ref}…）提炼知识`;

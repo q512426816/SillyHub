@@ -4,7 +4,8 @@
  * 知识库页（/workspaces/[id]/knowledge）。
  *
  * ql-20260821-015 重构（原「知识 & 日志」双 tab）：
- * - 只保留知识库，快速修复日志 tab 移除（变更中心「快速修复」tab 仍是完整入口）
+ * - 只保留知识库，快速修复日志 tab 移除（变更中心「快速修复」tab 已随 quick 退役转存量口径，
+ *   见 2026-09-25-change-center-thin-flow；新工作走变更列表「轻量变更」）
  * - 左侧文件树与 explorer/scan-docs 同风格：共享三件套 FileNodeIcon（按扩展名分型图标）
  *   + TreeBox（单行 + 横向滚动）+ PanelResizer/usePanelWidth（拖拽调宽 + localStorage 记忆）
  * - antd Tree 受控：目录默认全展开、点目录行展开/收起（expandAction=click）、

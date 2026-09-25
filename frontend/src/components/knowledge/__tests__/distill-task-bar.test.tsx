@@ -341,7 +341,7 @@ describe("DistillTaskBar · D-009 降级提示 + D-010 merged_to 反链（task-0
     renderBar();
 
     await waitFor(() =>
-      expect(screen.getByText(/正在从 2 条快速修复记录提炼知识/)).toBeInTheDocument(),
+      expect(screen.getByText(/正在从 2 条快速修复记录（存量）提炼知识/)).toBeInTheDocument(),
     );
   });
 

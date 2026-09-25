@@ -79,7 +79,7 @@ describe("DistillHistoryDialog", () => {
     expect(mocks.listDistillTasks).toHaveBeenCalledWith(WS);
     expect(items[0]).toHaveTextContent("失败");
     expect(items[0]).toHaveTextContent("引擎不支持续接");
-    expect(items[1]).toHaveTextContent("快速修复 · 2 条记录");
+    expect(items[1]).toHaveTextContent("快速修复（存量） · 2 条记录");
   });
 
   it("查看会话：agent_session_id 非空点击深链 /sessions?session=<id> 并关弹层", async () => {
