@@ -14,6 +14,7 @@ import {
   useChangeDeleteAccess,
 } from "@/components/delete-change-confirm";
 import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
+import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
 import { ChangeEventsCard } from "@/components/changes/detail/change-events-card";
 import { ChangeFilesCard } from "@/components/changes/detail/change-files-card";
 import { ChangeSessionsCard } from "@/components/changes/detail/change-sessions-card";
@@ -444,6 +445,11 @@ export default function ChangeDetailPage({ params }: Props) {
             workspaceId={workspaceId}
             changeKey={change.change_key}
           />
+          {/* 2026-09-25-change-precipitated-assets（D-001@v1 方案 a）：「沉淀资产」
+              折叠卡——本变更经归档沉淀的 FR 索引/决策蒸馏/测试绑定/patch 留档/
+              delta 摘要只读聚合（GET /changes/{cid}/assets），四组逐组有数据才
+              渲染、失败静默隐藏（ChangeEventsCard 同款范式）。 */}
+          <ChangeAssetsCard workspaceId={workspaceId} changeId={changeId} />
         </aside>
       </div>
     </PageContainer>

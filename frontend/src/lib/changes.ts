@@ -739,3 +739,59 @@ export function listChangeEvents(
     `/api/changes/${encodeURIComponent(changeKey)}/events${qs ? `?${qs}` : ""}`,
   );
 }
+
+// ── 沉淀资产（2026-09-25-change-precipitated-assets / D-001@v1 方案 a）─────────
+
+export interface ChangeAssetsFrEntry {
+  id: string;
+  title: string;
+  status: string | null;
+  file: string;
+}
+
+export interface ChangeAssetsDecisionEntry {
+  id: string;
+  title: string;
+  status: string | null;
+  file: string;
+}
+
+export interface ChangeAssetsTestRow {
+  row_id: string;
+  anchor: string | null;
+  tests: string[];
+  state: string | null;
+}
+
+export interface ChangeAssetsPatchMeta {
+  files: number | null;
+  additions: number | null;
+  deletions: number | null;
+  patch_status: string | null;
+  saved_at: string | null;
+}
+
+export interface ChangeAssetsDeltaMeta {
+  headline: string | null;
+  before_lines: number | null;
+  delta_lines: number | null;
+}
+
+export interface ChangeAssetsResponse {
+  change_key: string;
+  archived: boolean;
+  fr_entries: ChangeAssetsFrEntry[];
+  decisions: ChangeAssetsDecisionEntry[];
+  test_rows: ChangeAssetsTestRow[];
+  patch: ChangeAssetsPatchMeta | null;
+  delta: ChangeAssetsDeltaMeta | null;
+}
+
+export function getChangeAssets(
+  workspaceId: string,
+  changeId: string,
+): Promise<ChangeAssetsResponse> {
+  return apiFetch<ChangeAssetsResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/assets`,
+  );
+}

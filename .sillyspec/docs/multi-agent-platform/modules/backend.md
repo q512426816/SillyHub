@@ -189,3 +189,7 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 ### 2026-09-20-agent-log-session-replay（messages 响应扩展独立重做，replay-redo 分支）
 
 - backend/app/modules/platform_sync/：schema.py 新 AgentLogUsage{input_tokens,output_tokens,cache_read_tokens,cache_write_tokens} + AgentLogMessageItem 五可选字段（turn_id/model/is_meta/turn_end/usage）+ Response.totals；router.py 转换层仅一行外层映射 totalUsage→totals（messages 内层 snake_case 零改名直通，与 2026-09-19 实现的逐字段映射路线对照）；老 daemon 全 None 兼容（pytest 新/老双态断言）。
+
+### 2026-09-25-change-precipitated-assets（变更沉淀资产聚合）
+
+- `change/assets.py`：按变更名聚合本变更经归档沉淀的项目资产（D-001@v1 方案 a，只读解析 spec 树镜像）——FR 索引（knowledge/fr 节头 `## FR-*` + `变更：` 行归属过滤）、决策蒸馏（knowledge/decisions 同构，无主条目跳过）、测试绑定（归档目录 test-trace.json）、patch 留档（change-patch.json 存在才读）、delta 摘要；`GET /api/workspaces/{ws}/changes/{cid}/assets`（CHANGE_READ），在途变更跳过目录件，逐项 fail-open。

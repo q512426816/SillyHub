@@ -789,3 +789,67 @@ class ScopeAuditResponse(BaseModel):
     note: str | None = None
     truncated: bool = False
     repos: list[ScopeAuditRepo] = Field(default_factory=list)
+
+
+# ── 沉淀资产聚合（2026-09-25-change-precipitated-assets / D-001@v1 方案 a）────
+
+
+class ChangeFrEntry(BaseModel):
+    """FR 索引条目（knowledge/fr 域文件内归属本变更的节）。"""
+
+    id: str
+    title: str
+    status: str | None = None
+    file: str
+
+
+class ChangeDecisionEntry(BaseModel):
+    """决策蒸馏条目（knowledge/decisions 域文件内归属本变更的节）。"""
+
+    id: str
+    title: str
+    status: str | None = None
+    file: str
+
+
+class ChangeTestRow(BaseModel):
+    """测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。"""
+
+    row_id: str
+    anchor: str | None = None
+    tests: list[str] = Field(default_factory=list)
+    state: str | None = None
+
+
+class ChangePatchMeta(BaseModel):
+    """patch 留档统计（change-patch.json 的 totals 投影；无留档 → 整体 None）。"""
+
+    files: int | None = None
+    additions: int | None = None
+    deletions: int | None = None
+    patch_status: str | None = None
+    saved_at: str | None = None
+
+
+class ChangeDeltaMeta(BaseModel):
+    """归档 delta 摘要（delta.md 标题行 + Before/Delta 段行数）。"""
+
+    headline: str | None = None
+    before_lines: int | None = None
+    delta_lines: int | None = None
+
+
+class ChangeAssetsRead(BaseModel):
+    """变更沉淀资产聚合（GET /changes/{cid}/assets）。
+
+    逐项 fail-open（design 兼容策略）：单项解析失败降级为空，不影响其它组；
+    ``archived=False``（在途变更）时目录件不读取，前端按此渲染引导空态。
+    """
+
+    change_key: str
+    archived: bool = False
+    fr_entries: list[ChangeFrEntry] = Field(default_factory=list)
+    decisions: list[ChangeDecisionEntry] = Field(default_factory=list)
+    test_rows: list[ChangeTestRow] = Field(default_factory=list)
+    patch: ChangePatchMeta | None = None
+    delta: ChangeDeltaMeta | None = None

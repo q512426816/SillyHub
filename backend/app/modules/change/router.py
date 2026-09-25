@@ -23,6 +23,7 @@ from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import has_permission
+from app.modules.change.assets import ChangeAssetsQueryService
 from app.modules.change.model import ChangeSessionLink, QuicklogSessionLink
 from app.modules.change.quicklog_service import QuicklogQueryService
 from app.modules.change.schema import (
@@ -30,6 +31,7 @@ from app.modules.change.schema import (
     ApproveRequest,
     ArchiveConfirmRequest,
     ArchiveGateResponse,
+    ChangeAssetsRead,
     ChangeDeleteResponse,
     ChangeDocMatrix,
     ChangeDocMatrixEntry,
@@ -522,6 +524,26 @@ async def get_change_usage(
     同口径：不加额外 deleted 404，聚合结果如实返回。
     """
     return await ChangeUsageQueryService(session).get_change_usage(workspace_id, change_id)
+
+
+@router.get(
+    "/changes/{change_id}/assets",
+    response_model=ChangeAssetsRead,
+)
+async def get_change_assets(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> ChangeAssetsRead:
+    """变更沉淀资产聚合（2026-09-25-change-precipitated-assets / D-001@v1 方案 a）。
+
+    按变更名解析 spec 树镜像：knowledge/fr + knowledge/decisions 的归属条目、
+    归档目录 test-trace/change-patch/delta 容错读取；逐项 fail-open（单项失败
+    降级为空，不影响其它组）。不存在/跨工作区由 service 抛 ``ChangeNotFound``
+    （404 resource-hiding，对齐 usage 端点口径）。
+    """
+    return await ChangeAssetsQueryService(session).get_change_assets(workspace_id, change_id)
 
 
 @router.get(

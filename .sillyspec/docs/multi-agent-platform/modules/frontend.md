@@ -200,3 +200,7 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - 同基线（53c67e02a）独立实现：AgentLogReplayBody（frontend/src/components/daemon/agent-log-replay-body.tsx）+ 适配层 buildReplayTurns/isSubagentLog/selectMainLogs（frontend/src/lib/agent-log-replay.ts 纯函数）。与 2026-09-19 实现的关键差异：系统事件**零改 TurnTimeline**（复用 stderr processItems 首项，对话视图隐藏）而非新增 system_event kind；dialog 形态经既有 attach 轮询捕获 origin/turn_count 门控（保 R4「dialog 渲染路径零 react-query」）；首屏顺序翻页到最早窗口（上限 10 页）而非最新窗口触顶前插。
 - token：daemon totals 直出汇总条 + 轮徽标（usage 全量口径 input 含缓存读写，claude-code 解析器归一）；无数据源「未知」不伪造。schema 字段名差异：本实现 totals/消息五字段（turn_id/model/is_meta/turn_end/usage）。
+
+### 2026-09-25-change-precipitated-assets（变更详情沉淀资产卡）
+
+- `changes/detail/change-assets-card.tsx`：aside「沉淀资产」折叠卡（观测事件卡同款范式）——FR 索引/决策蒸馏行可点击跳知识库页、测试绑定行、patch+delta 归档留档，四组逐组有数据才渲染；在途变更引导空态；`lib/changes.ts` getChangeAssets 客户端。
