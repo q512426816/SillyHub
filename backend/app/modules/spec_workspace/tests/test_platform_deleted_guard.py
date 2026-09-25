@@ -802,3 +802,85 @@ async def test_rename_tombstone_skip_counted(db_session, tmp_path) -> None:
     assert r["platform_deleted"] == ["changes/deleted-y/t.md"]
     assert r["skipped_tombstone"] == 1
     assert r["applied_ops"] == 0
+
+
+# ===========================================================================
+# 2026-09-26-manifest-heal-endpoint：墓碑人工恢复通道
+# ===========================================================================
+
+
+class TestManifestHeal:
+    async def test_heal_tombstone_rows_and_close_conflicts(self, db_session, tmp_path) -> None:
+        """墓碑行 heal（platform_deleted→False、exists→True、version 不变）+ 冲突闭环。"""
+        from app.modules.spec_profile.model import SpecConflict
+
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        svc = SpecWorkspaceService(db_session)
+        # 两个墓碑行 + 一个正常行 + 一条开放 spec-sync 冲突行
+        for i, path in enumerate(["changes/a1/x.md", "changes/a1/y.md", "docs/ok.md"]):
+            db_session.add(
+                SpecFileManifest(
+                    workspace_id=ws.id,
+                    path=path,
+                    content_hash=f"h{i}",
+                    version=2 + i,
+                    exists=(i == 2),
+                    platform_deleted=(i < 2),
+                )
+            )
+        db_session.add(
+            SpecConflict(
+                workspace_id=ws.id,
+                stage="spec-sync",
+                conflict_type="sync",
+                details_json="{}",
+                status="open",
+            )
+        )
+        await db_session.commit()
+
+        result = await svc.heal_manifest_tombstones(ws.id, ["changes/a1/x.md", "docs/ok.md"])
+        assert result["healed"] == ["changes/a1/x.md"]
+        assert result["skipped"] == ["docs/ok.md"]
+
+        rows = {
+            r.path: r
+            for r in (
+                (
+                    await db_session.execute(
+                        select(SpecFileManifest).where(SpecFileManifest.workspace_id == ws.id)
+                    )
+                ).scalars()
+            )
+        }
+        assert rows["changes/a1/x.md"].platform_deleted is False
+        assert rows["changes/a1/x.md"].exists is True
+        assert rows["changes/a1/x.md"].version == 2  # version 不动
+        assert rows["changes/a1/y.md"].platform_deleted is True  # 未列不动
+
+        open_conflicts = (
+            (
+                await db_session.execute(
+                    select(SpecConflict).where(
+                        SpecConflict.workspace_id == ws.id,
+                        SpecConflict.status == "open",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert open_conflicts == []  # heal 即人工宣告已解决
+
+    async def test_heal_unknown_path_rejected(self, db_session, tmp_path) -> None:
+        """清单外路径 → 422 语义（不静默忽略）。"""
+        from app.core.errors import AppError
+
+        ws = await _make_workspace(db_session)
+        await _make_spec_workspace(db_session, ws, tmp_path / "spec-root")
+        with pytest.raises(AppError):
+            await SpecWorkspaceService(db_session).heal_manifest_tombstones(
+                ws.id, ["changes/never-exists/z.md"]
+            )

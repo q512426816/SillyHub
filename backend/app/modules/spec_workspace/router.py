@@ -33,6 +33,8 @@ from app.modules.spec_profile.schema import (
 )
 from app.modules.spec_workspace.bootstrap import SpecBootstrapService
 from app.modules.spec_workspace.schema import (
+    ManifestHealIn,
+    ManifestHealOut,
     SpecBootstrapRunStartResponse,
     SpecIncrementalSyncRequest,
     SpecIncrementalSyncResponse,
@@ -353,6 +355,28 @@ async def bootstrap_spec_workspace(
     service = SpecBootstrapService(session)
     result = await service.bootstrap(workspace_id, user_id=_user.id)
     return SpecBootstrapRunStartResponse(**result)
+
+
+# ── 墓碑人工恢复通道（2026-09-26-manifest-heal-endpoint）──────────────────────
+
+
+@router.post("/spec-workspace/manifest-heal", response_model=ManifestHealOut)
+async def heal_manifest_tombstones(
+    workspace_id: uuid.UUID,
+    payload: ManifestHealIn,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> ManifestHealOut:
+    """人工拍板恢复 platform_deleted 墓碑行（冤案修复通道）。
+
+    2026-09-25 生产实证：4 个旧归档文件被墓碑无条件拒收、resolve --keep-local
+    永久卡死，无任何业务路径清除墓碑。本端点显式 paths 单文件粒度 heal
+    （platform_deleted→False、exists→True、version 不动），并同步关闭开放的
+    spec-sync 冲突行。非墓碑行跳过（幂等重放安全）。
+    """
+    service = SpecWorkspaceService(session)
+    result = await service.heal_manifest_tombstones(workspace_id, payload.paths)
+    return ManifestHealOut(healed=result["healed"], skipped=result["skipped"])
 
 
 # ── Spec Conflicts ─────────────────────────────────────────────────────────────

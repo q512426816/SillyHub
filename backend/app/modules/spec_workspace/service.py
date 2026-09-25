@@ -1137,6 +1137,67 @@ class SpecWorkspaceService:
     SYNC_CONFLICT_STAGE = "spec-sync"
     SYNC_CONFLICT_TYPE = "sync"
 
+    async def heal_manifest_tombstones(
+        self,
+        workspace_id: uuid.UUID,
+        paths: list[str],
+    ) -> dict[str, list[str] | int]:
+        """人工拍板恢复通道（2026-09-26-manifest-heal-endpoint）。
+
+        冤案墓碑（archived 载荷误标 / 平台删除后本地恢复）此前无任何清除通道——
+        2026-09-25 生产实证 4 个旧归档文件只能 SSH 进库手工 UPDATE。本端点把显式
+        paths 的行 platform_deleted 置 False、exists 置 True（version 不动，下一轮
+        常规同步自然重定基线），并同步关闭开放的 spec-sync 冲突行（heal 即人工
+        宣告已解决）。非墓碑行跳过计入 skipped（幂等重放安全）。
+        """
+        await self.get(workspace_id)
+        rows = (
+            (
+                await self._session.execute(
+                    select(SpecFileManifest).where(
+                        SpecFileManifest.workspace_id == workspace_id,
+                        SpecFileManifest.path.in_(paths),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        by_path = {r.path: r for r in rows}
+        missing = [p for p in paths if p not in by_path]
+        if missing:
+            raise _spec_bundle_invalid(
+                "清单中存在工作区未登记的路径。",
+                path=missing[0],
+            )
+        healed: list[str] = []
+        skipped: list[str] = []
+        for p in paths:
+            row = by_path[p]
+            if row.platform_deleted or row.exists is False:
+                row.platform_deleted = False
+                row.exists = True
+                row.updated_at = datetime.now(UTC)
+                healed.append(p)
+            else:
+                skipped.append(p)
+        await self._session.commit()
+        log.info(
+            "spec_workspace.manifest_healed",
+            workspace_id=str(workspace_id),
+            healed=len(healed),
+            skipped=len(skipped),
+        )
+        try:
+            await self._close_open_sync_conflicts(workspace_id)
+        except Exception as exc:
+            log.warning(
+                "spec_workspace.manifest_heal_close_conflict_failed",
+                workspace_id=str(workspace_id),
+                error=str(exc),
+            )
+        return {"healed": healed, "skipped": skipped}
+
     async def _upsert_sync_conflict(
         self,
         workspace_id: uuid.UUID,

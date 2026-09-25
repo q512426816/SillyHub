@@ -133,3 +133,20 @@ class SpecIncrementalSyncResponse(BaseModel):
     skipped_conflict: int = 0
     skipped_tombstone: int = 0
     platform_deleted: list[str] = Field(default_factory=list)
+
+
+class ManifestHealIn(BaseModel):
+    """POST /spec-workspace/manifest-heal 请求体。
+
+    2026-09-26-manifest-heal-endpoint：显式文件清单（人工拍板单位=单文件，
+    不接受前缀批量——防误清整目录墓碑）。
+    """
+
+    paths: list[str] = Field(min_length=1, max_length=500)
+
+
+class ManifestHealOut(BaseModel):
+    """heal 回执：治愈清单 + 跳过清单（非墓碑行幂等重放安全）。"""
+
+    healed: list[str]
+    skipped: list[str]
