@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-scan-docs-stats-caliber",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "冻结交付件 change.patch 缺生产代码段（service.py 改动不在 diff 内）",
+      "evidence": "design 接口契约声明改动文件为 backend/app/modules/scan_docs/service.py（新增 _is_module_doc/_effective_mtime + 四处时间消费面改口径），但 change.patch 全 7 段只含 test_stats.py 与 .sillyspec/docs 流程文件，无任何 service.py hunk；patch 反而夹带他变更文件（docs/sillyspec/thin-flow-done-gate-frictions.md 自述来源 2026-09-25-change-detail-assets-usability），与「坑 4 冻结面归属噪声」同因——冻结件不能自证本次实现；工作区代码经核实已完整实现（service.py:81-112 两 helper、:242-258 SELECT 取 source_mtime、:273-274 分子判定、四处消费面无残留 last_modified_at），审计真相须以 git 历史/工作区为准。",
+      "location": ".sillyspec/changes/2026-09-25-scan-docs-stats-caliber/change.patch:1-465"
+    },
+    {
+      "severity": "P2",
+      "title": "FR-06 零回归缺可执行证据（ledger 门 test: skipped）",
+      "evidence": "flow-state.yaml gate_summary 记录 `test: skipped｜lint: passed`，未执行 app/modules/scan_docs 套件；requirements FR-06 的「73 passed（基线 71 + 新增 2）」为自述，评审只读无法复跑。静态核对可排除回归：baseline fixture 的 modules/ 下无 *.changelog.md（test_stats.py:151-169 仅 map + 3 模块卡），既有行全部未设 source_mtime（该标识仅出现在 84/102/514+ 新增面）→ 恒走回落分支，既有断言口径逐字不变。",
+      "location": ".sillyspec/changes/2026-09-25-scan-docs-stats-caliber/flow-state.yaml:8"
+    },
+    {
+      "severity": "P3",
+      "title": "module_have ≤ module_expected 不是强制不变量（残余同类虚高风险）",
+      "evidence": "module_have 数文件（modules/ 下 _is_module_doc 命中数，service.py:273-274），module_expected 数 _module-map.yaml 登记条目（service.py:281-284）；若模块卡存在而登记表缺条目（模块增删未同步 map），覆盖率仍可 >100%，FR-01 的「使同一工作区满足 have ≤ expected」只在本例两类排除成立。",
+      "location": "backend/app/modules/scan_docs/service.py:273-284"
+    },
+    {
+      "severity": "P3",
+      "title": "MODULE_MAP_FILENAME 常量未复用于登记表过滤（双字面量漂移风险）",
+      "evidence": "新常量 MODULE_MAP_FILENAME（service.py:84）只在 _is_module_doc 内使用（:94），_registered_module_counts 仍硬编码 .endswith(\"_module-map.yaml\")（:350）；design 已声明该函数保持独立过滤、当前语义一致无行为错误，但后续改常量会让两处判定分叉。",
+      "location": "backend/app/modules/scan_docs/service.py:84,350"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——stats 单请求只读聚合，_effective_mtime 仅两列取一 + tz 归一，无事件序/到达序假设）",
+    "并发": "ok（边界已裁决：可接受——只改读侧不改写入侧 mtime，stats 全程只读无缓存；与同步并发最坏读到写入中间态属既有行为，source_mtime 优先使「新源时间 + 旧镜像时间」中间态不影响判定，无跨列错配新窗口）",
+    "切换": "ok（边界已裁决：可接受——source_mtime 缺失回落 last_modified_at，存量行行为与修正前逐字一致、无需回填/迁移；模块分子变小致覆盖率下降是纠正虚高而非指标退步）",
+    "作用域": "ok（边界已裁决：可接受——HTTP DTO/端点/前端零结构变化：openapi.json 与 api-types.ts 的 ScanDocsStaleDocOut/RecentBoardItem 字段集不变、无 source_mtime 泄漏，仅字段取值改为源时间，前端标签「最后修改」语义一致；_is_module_doc 只按尾段判定，跨扁平/包裹布局与跨工作区不串台，行按 workspace_id 过滤）"
+  },
+  "reviewedAt": "2026-09-25T09:17:03Z"
+}

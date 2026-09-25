@@ -1,0 +1,25 @@
+{
+  "change": "2026-09-25-scan-docs-stats-caliber",
+  "baseline": "0849f64f62c7d13d0e6712045bca5bdb1e444089",
+  "head": "40d215410020316d1109efa73e51441798c6693f",
+  "files": [
+    "backend/app/modules/scan_docs/service.py",
+    "backend/app/modules/scan_docs/tests/test_stats.py",
+    "docs/sillyspec/thin-flow-done-gate-frictions.md",
+    ".sillyspec/changes/2026-09-25-scan-docs-stats-caliber/design.md",
+    ".sillyspec/changes/2026-09-25-scan-docs-stats-caliber/flow-state.yaml",
+    ".sillyspec/changes/2026-09-25-scan-docs-stats-caliber/proposal.md",
+    ".sillyspec/changes/2026-09-25-scan-docs-stats-caliber/requirements.md",
+    ".sillyspec/changes/2026-09-25-scan-docs-stats-caliber/review.json",
+    ".sillyspec/changes/2026-09-25-scan-docs-stats-caliber/tasks.md"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 508,
+    "deletions": 8
+  },
+  "savedAt": "2026-09-25T09:20:52.488Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "aa48c7e6eb448f9ede7e3ccadc062a2435ebe9d7b43a0d78bdafc079d8a97c8d",
+  "patchStatus": "ok"
+}

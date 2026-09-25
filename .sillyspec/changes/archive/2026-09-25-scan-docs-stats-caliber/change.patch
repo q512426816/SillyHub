@@ -1,0 +1,613 @@
+diff --git a/backend/app/modules/scan_docs/service.py b/backend/app/modules/scan_docs/service.py
+index ff121d9e6..6e4f77b19 100644
+--- a/backend/app/modules/scan_docs/service.py
++++ b/backend/app/modules/scan_docs/service.py
+@@ -75,6 +75,43 @@ def _as_utc(dt: datetime) -> datetime:
+     return dt.astimezone(UTC)
+ 
+ 
++#: 模块层不计入实有分子的非模块文档后缀（变更日志与模块卡成对存在，
++#: change 2026-09-25-scan-docs-stats-caliber：计入会让 module_have 虚高、
++#: 覆盖率出现 >100% 的荒谬值）。
++MODULE_DOC_EXCLUDE_SUFFIXES: tuple[str, ...] = (".changelog.md",)
++
++#: 模块层登记文件（不是模块文档，单独 SELECT content 解析登记数）。
++MODULE_MAP_FILENAME = "_module-map.yaml"
++
++
++def _is_module_doc(raw_path: str) -> bool:
++    """modules/ 下该路径是否算「模块文档」（模块层覆盖率实有分子）。
++
++    排除 ``_module-map.yaml``（登记表）与 ``MODULE_DOC_EXCLUDE_SUFFIXES``
++    后缀（如 ``runtime.changelog.md`` 变更日志）。纯路径判定，无 I/O。
++    """
++    name = raw_path.rsplit("/", 1)[-1]
++    if not name.endswith(".md") or name == MODULE_MAP_FILENAME:
++        return False
++    return not name.endswith(MODULE_DOC_EXCLUDE_SUFFIXES)
++
++
++def _effective_mtime(
++    source_mtime: datetime | None,
++    last_modified_at: datetime | None,
++) -> datetime | None:
++    """统计有效时间：``source_mtime`` 优先、缺失回落 ``last_modified_at``。
++
++    change 2026-09-25-scan-docs-stats-caliber：spec 同步会重写镜像文件 mtime
++    （``last_modified_at`` 随之漂移，同步/合并当天全量"新鲜"、陈旧恒 0 条），
++    设计里真正的源文件时间是 ``source_mtime``（写入侧见
++    spec_workspace/service.py 同步落库分支）；两列都归一 aware-UTC（SQLite 读回
++    naive 存的是 UTC，与 aware 的 now/窗口裸比较会 TypeError）。
++    """
++    value = source_mtime if source_mtime is not None else last_modified_at
++    return _as_utc(value) if value is not None else None
++
++
+ def _strip_docs_prefix(path: str) -> str:
+     """剥前导包裹段（可选 ``.sillyspec`` 段 + ``docs`` 段）。
+ 
+@@ -192,20 +229,32 @@ class ScanDocsService:
+         量级前提（design R-05）：当前工作区数百行 exists 文档，一次轻列查询
+         （排除 content）后全内存聚合，不写多条 SQL；_module-map.yaml 行单独
+         SELECT content 解析登记模块数（yaml 损坏按无 map 退化，不抛 500）。
++
++        口径修正（2026-09-25-scan-docs-stats-caliber）：① 模块层实有分子只数
++        模块文档（排除 `_module-map.yaml` 与 `*.changelog.md`——变更日志与模块卡
++        成对存在，计入会虚增分子使覆盖率超 100%）；② 陈旧/新鲜/趋势/最近榜四处
++        统一走 :func:`_effective_mtime`（source_mtime 优先、缺失回落
++        last_modified_at）——镜像 mtime 会被 spec 同步重写，不代表源文件新鲜度。
+         """
+         await self._workspace_service.get(workspace_id)
+         now = _as_utc(datetime.now(UTC))
+ 
+-        stmt = (
+-            select(ScanDocument.path, ScanDocument.doc_type, ScanDocument.last_modified_at)
+-            .where(col(ScanDocument.workspace_id) == workspace_id)
+-            .where(col(ScanDocument.exists).is_(True))
++        stmt = select(
++            ScanDocument.path,
++            ScanDocument.doc_type,
++            ScanDocument.source_mtime,
++            ScanDocument.last_modified_at,
++        ).where(
++            col(ScanDocument.workspace_id) == workspace_id,
++            col(ScanDocument.exists).is_(True),
+         )
+         # (raw_path, doc_type, mtime_aware|None)：mtime 归一 aware-UTC——SQLite 读回
+         # naive，与 aware 的 now/窗口比较裸混用会 TypeError。
+         docs: list[tuple[str, str, datetime | None]] = [
+-            (path, doc_type, _as_utc(mtime) if mtime is not None else None)
+-            for path, doc_type, mtime in (await self._session.execute(stmt)).all()
++            (path, doc_type, _effective_mtime(source_mtime, last_modified_at))
++            for path, doc_type, source_mtime, last_modified_at in (
++                await self._session.execute(stmt)
++            ).all()
+         ]
+ 
+         # ── 项目分组：剥前缀后第一段 = 项目；根级文件不建项目（只进全局口径）──
+@@ -221,7 +270,7 @@ class ScanDocsService:
+             if segs[1] == "scan" and doc_type in STANDARD_DOC_TYPES:
+                 # 按项目去重：scan/ 下同名标准件（异常多副本）只计一次。
+                 std_types_by_project[segs[0]].add(doc_type)
+-            if segs[1] == "modules" and raw_path.endswith(".md") and segs[-1] != "_module-map.yaml":
++            if segs[1] == "modules" and _is_module_doc(raw_path):
+                 module_md_by_project[segs[0]] += 1
+ 
+         # ── 覆盖率两级：七件套 have/expected + 模块层 have/expected ──
+diff --git a/backend/app/modules/scan_docs/tests/test_stats.py b/backend/app/modules/scan_docs/tests/test_stats.py
+index a69e26f37..92ab4a662 100644
+--- a/backend/app/modules/scan_docs/tests/test_stats.py
++++ b/backend/app/modules/scan_docs/tests/test_stats.py
+@@ -81,8 +81,13 @@ def _doc(
+     *,
+     mtime: datetime | None,
+     content: str | None = None,
++    source_mtime: datetime | None = None,
+ ) -> ScanDocument:
+-    """单行 ScanDocument（doc_type 对齐 parser 口径：md=stem 大写、yaml=stem）。"""
++    """单行 ScanDocument（doc_type 对齐 parser 口径：md=stem 大写、yaml=stem）。
++
++    ``mtime`` 写 last_modified_at（镜像 mtime）；``source_mtime``（可选）写源文件
++    时间——2026-09-25-scan-docs-stats-caliber 起统计口径以 source_mtime 优先。
++    """
+     name = path.rsplit("/", 1)[-1]
+     doc_type = name.rsplit(".", 1)[0].upper() if name.endswith(".md") else name.rsplit(".", 1)[0]
+     return ScanDocument(
+@@ -94,6 +99,7 @@ def _doc(
+         exists=True,
+         content=content,
+         last_modified_at=mtime,
++        source_mtime=source_mtime,
+     )
+ 
+ 
+@@ -470,3 +476,83 @@ async def test_stats_empty_workspace_all_zero(db_session: AsyncSession) -> None:
+     assert out.freshness.total == 0
+     assert out.recent_board == []
+     assert out.injection == ScanDocsInjectionOut(total_30d=0, docs_hit_30d=0, board=[])
++
++
++# ── 口径修正（change 2026-09-25-scan-docs-stats-caliber）─────────────────────
++
++
++async def test_module_layer_excludes_changelog_docs(db_session: AsyncSession) -> None:
++    """模块层实有分子排除 ``*.changelog.md``：登记 2 模块 + 2 模块卡 + 2 变更日志 → 2/2。
++
++    修正前：变更日志被当作模块文档 → have=4 > expected=2（覆盖率虚高 >100%）。
++    """
++    now = datetime.now(UTC)
++    ws = await _create_workspace(db_session)
++    await _create_spec_workspace(db_session, ws, spec_root="/tmp/spec-caliber-module")
++    db_session.add_all(
++        [
++            _doc(
++                ws.id,
++                "docs/proj-a/modules/_module-map.yaml",
++                mtime=now,
++                content="modules:\n  core: {}\n  auth: {}\n",
++            ),
++            _doc(ws.id, "docs/proj-a/modules/core.md", mtime=now),
++            _doc(ws.id, "docs/proj-a/modules/auth.md", mtime=now),
++            _doc(ws.id, "docs/proj-a/modules/core.changelog.md", mtime=now),
++            _doc(ws.id, "docs/proj-a/modules/auth.changelog.md", mtime=now),
++        ]
++    )
++    await db_session.commit()
++
++    out = await ScanDocsService(db_session).stats(ws.id)
++
++    assert out.coverage.module_have == 2
++    assert out.coverage.module_expected == 2
++
++
++async def test_stats_effective_mtime_prefers_source_mtime(db_session: AsyncSession) -> None:
++    """陈旧/新鲜/趋势/最近榜四处按 source_mtime 优先判定（回落 last_modified_at）。
++
++    三行对照（同一项目 modules/）：
++    - core：镜像"新鲜"（last_modified_at=now）但源文件 200 天前 → 判陈旧；
++    - auth：镜像 mtime 为空（同步新增行未回填）但源文件 5 天前 → 判新鲜；
++    - billing：两列皆空 → 陈旧（未知时间，前后一致）。
++    """
++    now = datetime.now(UTC)
++    ws = await _create_workspace(db_session)
++    await _create_spec_workspace(db_session, ws, spec_root="/tmp/spec-caliber-mtime")
++    db_session.add_all(
++        [
++            _doc(
++                ws.id,
++                "docs/proj-a/modules/core.md",
++                mtime=now,
++                source_mtime=now - timedelta(days=200),
++            ),
++            _doc(
++                ws.id,
++                "docs/proj-a/modules/auth.md",
++                mtime=None,
++                source_mtime=now - timedelta(days=5),
++            ),
++            _doc(ws.id, "docs/proj-a/modules/billing.md", mtime=None),
++        ]
++    )
++    await db_session.commit()
++
++    out = await ScanDocsService(db_session).stats(ws.id)
++
++    # 陈旧清单：时间未知者在前（None 最前），源文件 200 天前其次
++    assert [d.path for d in out.stale_docs] == [
++        "docs/proj-a/modules/billing.md",
++        "docs/proj-a/modules/core.md",
++    ]
++    # 新鲜度：源文件 5 天前算近 30 天更新；镜像 mtime 不再参与判定
++    assert out.freshness.total == 3
++    assert out.freshness.recent_updated == 1
++    # 最近更新榜：按有效时间降序（auth 的源时间最新，榜首即它）
++    assert next(d.path for d in out.recent_board) == "docs/proj-a/modules/auth.md"
++    # 趋势：仅 auth 的源时间落在 8 周窗内（core 200 天前出窗、billing 无时间）——
++    # 账按周桶聚合，具体落哪个星期几视运行日而定，断言窗内总数 1（日期无关）
++    assert sum(p.updated for p in out.coverage.trend) == 1
+diff --git a/docs/sillyspec/thin-flow-done-gate-frictions.md b/docs/sillyspec/thin-flow-done-gate-frictions.md
+new file mode 100644
+index 000000000..6a5345975
+--- /dev/null
++++ b/docs/sillyspec/thin-flow-done-gate-frictions.md
+@@ -0,0 +1,82 @@
++# thin flow done 三道门与指引口径漂移（活跃坑，待上游修复）
++
++> 来源：2026-09-25-change-detail-assets-usability 全程实测（本机 sillyspec 3.30.0，
++> 主仓多会话并行场景）。修复后按惯例移 docs/sillyspec/finished/。
++> 上游仓：C:\Users\qinyi\IdeaProjects\sillyspec。
++
++## 复现路径（同一变更被收口门拦了四轮）
++
++1. `flow start` 成功；按其横幅指引「干活时逐条勾选 tasks.md 的 `- [ ]` → `- [x]`」勾完 6 条；
++2. `flow done` ❌ 拒收①：`机器段「tasks-rows」内容与指纹失配（被改写）`（artifacts 子步）；
++3. 按①的指引跑 `flow amend-draft` 留痕重锚（代价见坑 1）→ `flow done` ❌ 拒收②：
++   `design.md 有 1 个空 AGENT 槽（骨架缺失）`——fill 时整文件重写把 `<!--AGENT:槽N-->`
++   标记行弄丢了（artifacts 子步）；
++4. 手工补回 4 个槽标记 + 6 个绑定标记 → `flow done` ❌ 拒收③：
++   `哨兵断言拒收：全勾 6/6 但 6 个任务零完成证据（区间提交无 token）`（ledger 子步）；
++5. 把 task-NN token 写进提交**正文**追加 → 仍拒收③（同因，见坑 2）；
++6. token 写进提交 **subject** → 过；review 任务书 → 独立子代理出 review.json → PASS →
++   归档收口（含 findings 续提交）。
++
++四轮都是「按工具指引/报错文案的合理理解做，仍被下一道门拦」，非实现错误。
++
++## 坑 1：勾选纪律与机器稿指纹门自相矛盾（拒收①）
++
++- 现象：`flow start` 横幅明确要求逐条勾选（并说勾选是哨兵证据面），但 tasks.md 的任务行
++  生成时就在 `MACHINE-DRAFT:tasks-rows` 指纹段内（flow-draft.js `draftTasks()` 的
++  `wrapped('tasks-rows', rows.join('\n'))`）——勾选态 `- [ ]`→`- [x]` 即改变段内容；
++  `verifyMarkers()` 的 `bodyHash` 只做 CRLF 归一的 sha256（machine-draft.js），无勾选态
++  归一 → 失配拒收。
++- 绕过：`sillyspec flow amend-draft`（工具给的合法留痕通道）。**代价**：amend 把
++  勾选态变化计为机器稿改写 → editRatio=1（阈值 0.5）→ `route_hint: thick`
++  （「决策覆盖度低，该走厚档」advisory + 遥测记账）——为一次正常操作付出升级提示。
++- 建议（两选一）：
++  1. 哈希归一化把勾选态抹平：`wrapSection` / `verifyMarkers` / 台账三处同口径地在
++     hash 前把 `^([-*] \[)[ xX](?= task-\d)` 归一回 `- [ ]`（勾选本来是预期写面，
++     不该参与「被改写」判定）——改动最小，旧台账兼容（draft 全是 `[ ]`）。
++  2. 或把 checkbox 行挪出机器段（机器段只留题面/表头），勾选行成为自由书写面。
++
++## 坑 2：哨兵断言只认提交 subject（拒收③，含一轮假绕过）
++
++- 现象：token（task-NN）写在提交**正文**不算证据；`git log --format=%s` 只取 subject
++  （flow.js ledger 子步），`detectFakeCheckCompletion` 对 messages 数组做
++  `task-NN(?!\d)` 词边界匹配。报错文案只说「提交带 task-NN」，未限定标题行——
++  agent 按正文理解重试一次仍被拦。
++- 评价：哨兵本身拦得对（我确实没按其证据形态留痕，防「全勾零证据」的假完成）；
++  问题只在**判据口径（subject-only）与文案未对齐**。
++- 建议：`--format=%s` → `--format=%B`（sentinel 的 messages 按行喂即可，正则逐行匹配
++  不受多行影响，改动近一行）；或在报错文案里写明「token 须出现在提交标题行」。
++
++## 坑 3：AGENT 槽标记是「已填」判定的唯一锚点，丢了只有收口才知道（拒收②）
++
++- 现象：用整文件重写方式填槽（Write 全文）会把 `<!--AGENT:槽N …-->` /
++  `<!--AGENT:测试绑定FR-NN …-->` / `<!--AGENT:FR区 …-->` 标记行弄丢；收口判定
++  `designFilled = matchAll(/<!--AGENT:槽\d+[^\n]*-->\n(\S)/g).length >= 3`
++  （flow.js）与绑定标记计数都依赖**标记行存在且下一行非空白** → 报「空 AGENT 槽
++  （骨架缺失）」。对 agent 的心智模型：HTML 注释看起来是可丢弃的提示，生成侧注释里
++  的「例外裁决书写面」劝说对整文件重写不起作用——守卫只在收口侧炸。
++- 绕过：手工把缺失标记行原文补回（flow-draft.js `AGENT_SLOT` / bindingSlot 的生成
++  格式），答案紧跟标记行。报错只说「恢复机器骨架后作答」，骨架原文要翻 CLI 源码。
++- 建议（任选/叠加）：
++  1. 报错时直接打印缺失标记的**原文模板**（机器可生成，零猜测）；
++  2. 收口侧对「节标题下已有实质内容但无标记」自动补锚（标记在机器段外，补锚不影响
++     机器段指纹）——把「骨架修复」从 agent 手工劳动变成工具自愈；
++  3. 或 flow start 横幅与四件套文件头显式加一句「HTML 注释标记是验收锚点，勿删」。
++
++## 坑 4（关联观察）：共享主仓多会话并行下的冻结面归属噪声
++
++- 现象（同变更一次收口中同时出现）：冻结 change.patch 的 20 文件**夹带**了并行会话
++  正在写的 `docs/sillyspec/…md`（1 个），同时把本变更 2 个生成物
++  （`frontend/src/lib/api-types.ts` / `backend/openapi.json`）按「他侧声明文件」**剔除**；
++  ledger 门禁的模块收窄又用到并行会话文件的 diff → `test: skipped`（评测面缺口，
++  评审 P2 已留档）。评审后收口提交不在冻结件内——工具无重冻结入口（只有
++  `--freeze-dirty` 加法）。
++- 绕过：接受缺口（工具三选一之一）；审计真相以 git 提交历史为准，冻结件定位为
++  「flow done 时点快照」。
++- 建议：会话专属 worktree（工具自荐③）；或提供重冻结入口（按当前 HEAD 重算 +
++  重锚 sha256）；或归属按「本会话 flow start 后首个触碰者」记台账。
++
++## 关联留档
++
++- 薄流程 adopt 边界两坑（同期）：docs/sillyspec/thin-flow-adopt-edge-cases.md
++- 平台侧变更留档：.sillyspec/changes/archive/2026-09-25-change-detail-assets-usability/
++  （review.json 的 5 项非阻断 findings 与本文件坑 4 的 test:skipped 根因互证）
+diff --git a/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/design.md b/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/design.md
+@@ -0,0 +1,84 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T09:06:46.577Z
++---
++# 设计记录（Design Record）— 2026-09-25-scan-docs-stats-caliber
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-scan-docs-stats-caliber 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++在 `scan_docs/service.py` 落两处口径修正：① 模块层实有分子改用新 helper `_is_module_doc()`
++判定（排除 `_module-map.yaml` 与 `*.changelog.md`），替换原来的 `endswith('.md')` 组合条件；
++② stats 的文档查询多取一列 `source_mtime`，四处时间消费面（陈旧/新鲜/趋势/最近榜）统一改用新
++helper `_effective_mtime(source_mtime, last_modified_at)`（source_mtime 优先、缺失回落），
++并把 `MODULE_DOC_EXCLUDE_SUFFIXES`/`MODULE_MAP_FILENAME` 提为模块常量。
++
++选这个落点的理由：分子虚高是纯判定式过宽（变更日志与模块卡成对存在，本不该算模块文档）；
++时间口径错位是「读错列」——写入侧 spec_workspace 同步分支已把源文件时间落进 `source_mtime`
++（新增行甚至只落该列、`last_modified_at` 为 None），而镜像 mtime 会被同步重写，只有源时间
++才代表文件真实新旧。两个 helper 都是纯函数、单点使用，四处各写一遍的漂移风险被消掉。
++
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-scan-docs-stats-caliber 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++改动文件：`backend/app/modules/scan_docs/service.py`
++- 新增模块常量 `MODULE_DOC_EXCLUDE_SUFFIXES = ('.changelog.md',)`、`MODULE_MAP_FILENAME = '_module-map.yaml'`
++- 新增纯函数 `_is_module_doc(raw_path: str) -> bool`、`_effective_mtime(source_mtime, last_modified_at) -> datetime | None`
++- `ScanDocsService.stats`：SELECT 增 `ScanDocument.source_mtime` 列；模块层计数改 `_is_module_doc`；
++  四处时间消费面（stale_docs / freshness / coverage.trend / recent_board）改吃有效时间
++
++对外可见：HTTP 端点、`ScanDocsStatsOut` DTO 结构、字段名、前端消费口径**零变化**；
++变的是同一份数据下的数值：`coverage.module_have` 不再把 `*.changelog.md` 计入（不再出现
++have > expected）、`stale_docs`/`freshness`/`coverage.trend`/`recent_board` 按源文件时间判定。
++`_module-map.yaml` 的登记数解析路径与 `_registered_module_counts` 行为不变（该函数按
++`.endswith('_module-map.yaml')` 独立过滤，常量值与判定语义一致）。
++
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-scan-docs-stats-caliber 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. **乱序/迟到到达**：stats 是单请求内一次 SELECT + 内存聚合，无事件流；`_effective_mtime` 只做两列取一与 tz 归一，与行到达顺序无关。
++2. **并发写**：stats 全程只读（无写入、无缓存）；`reparse`/同步写入侧未改动，其写 `last_modified_at`/`source_mtime` 的既有语义不变——同工作区并发 stats 与 reparse 的最坏情形是读到写入中间态（既有行为，本变更不放大：两列各自独立取值，不会出现跨列错配的新窗口）。
++3. **切换/生命周期**：无状态、无持久化中间产物；请求中断即丢弃局部聚合结果。`source_mtime` 为空的存量行按设计回落 `last_modified_at`（与修正前一致），不需要数据迁移或回填。
++4. **作用域**：文档行按 `workspace_id` 过滤（既有 WHERE）；helper 是纯函数；`_is_module_doc` 只看路径尾段，跨工作区/跨布局（`.sillyspec/docs/...` 与 `docs/...` 双前缀）均按同一规则判定，不串台。
++
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-scan-docs-stats-caliber 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++**最大风险**：`source_mtime` 在存量数据上可能为空（早期同步路径/本地 reparse 创建的行），若修改为「只认 source_mtime」会让这些行集体判陈旧（陈旧清单暴涨）。缓解：`_effective_mtime` 设计成 source_mtime 优先、**缺失回落 last_modified_at**，缺失行行为与修正前逐字一致；单测含「两列皆空 → 仍判陈旧（未知时间）」的对照行。
++
++**次生风险**：模块层实有分子变小（排除变更日志）会让某些工作区的模块覆盖率**下降**（例如 40/36 → 36/36），看起来像「指标退步」——这是把虚高纠正为真实值，需在汇报里说明口径变化。
++
++**试过但放弃的方案**：
++1. 在 `_registered_module_counts` 里反向把变更日志也算进 expected（即把分母一起虚增到 40）——把 bug 变成口径，且登记表里没有 changelog 条目，语义错。
++2. 改 `reparse` 让镜像文件的 mtime 等于源 mtime（写入侧 up-utime）——影响所有读 mtime 的消费面（含 change 卡片），面太大且与本次「读对列」的修法重叠；留作后续。
++3. 只改陈旧判定不改趋势/最近榜——四处口径不一致会让页面自相矛盾（同一文件「新鲜」却不在最近榜），必须四处同改。
++
++## 文件变更清单
++
++- backend/app/modules/scan_docs/service.py
++- backend/app/modules/scan_docs/tests/test_stats.py
++
++（前者：模块层判定 `_is_module_doc`（排除 `_module-map.yaml` 与 `*.changelog.md`）+ 有效时间
++`_effective_mtime`（source_mtime 优先、缺失回落 last_modified_at）与四处消费面接线；
++后者：两条口径修正的单测（changelog 排除 / 有效时间三行对照）+ `_doc` 增 `source_mtime` 参数。）
+
+diff --git a/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/flow-state.yaml b/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/flow-state.yaml
+@@ -0,0 +1,16 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 0849f64f62c7d13d0e6712045bca5bdb1e444089
++updatedAt: '2026-09-25T09:20:52.053Z'
++route_hint: thick
++edit_ratio: 1
++gate_summary: >-
++  test: skipped｜lint: passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app &&
++  cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（6.0s）｜门文件 6 个
++
+
+diff --git a/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/proposal.md b/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/proposal.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T09:06:46.576Z
++---
++# 提案书（Proposal）— 2026-09-25-scan-docs-stats-caliber
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:eb61998d26d801b13afea113085003eea3c6d44c225c245c65bf627fe488e529:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-scan-docs-stats-caliber 留痕重锚 -->
++任务原话转写：动机：扫描文档页两个统计口径与设计意图不符——① 模块层覆盖率把 modules/ 下的 *.changelog.md 变更日志也算作模块文档，分子虚高（生产实测 module_have 245 > module_expected 240，覆盖率显示 120%）；② 陈旧/新鲜/最近更新/周趋势全部用 last_modified_at（镜像文件 mtime），而 spec 同步会重写镜像 mtime（合并/同步当天全量"新鲜"、陈旧恒 0 条），设计里真正的源文件时间是 source_mtime（spec_workspace/schema.py 已注明用途）。
++
++成功标准：
++- 模块层覆盖率的实有分子只数 modules/ 下的模块文档：排除 _module-map.yaml 与 *.changelog.md，使 module_have 不再虚高（同一工作区应满足 have ≤ expected）
++- 陈旧清单 / 新鲜度 / 8 周趋势 / 最近更新榜四处改用 source_mtime 优先、为空时回落 last_modified_at 的有效时间口径
++- 有效时间口径抽成一个 helper 并在 stats 内单点使用，避免四处各写一遍再漂移
++- 新增单测：① modules/ 内 .changelog.md 不计入 module_have；② source_mtime 与 last_modified_at 不一致时四处指标按 source_mtime 判定（含 source_mtime 缺失回落 last_modified_at 的对照）
++- 既有 scan_docs 模块测试零回归
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:c002e2a5c2f983d1c802b4b3e4b98d0add902c5546f0c245640526d671906d51:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-scan-docs-stats-caliber 留痕重锚 -->
++按成功标准机械推导，共 6 条验收面：
++1. 模块层覆盖率的实有分子只数 modules/ 下的模块文档：排除 _module-map.yaml 与 *.changelog.md，使 module_have 不再虚高（同一工作区应满足 have ≤ expected）
++2. 陈旧清单 / 新鲜度 / 8 周趋势 / 最近更新榜四处改用 source_mtime 优先、为空时回落 last_modified_at 的有效时间口径
++3. 有效时间口径抽成一个 helper 并在 stats 内单点使用，避免四处各写一遍再漂移
++4. 新增单测：① modules/ 内 .changelog.md 不计入 module_have
++5. ② source_mtime 与 last_modified_at 不一致时四处指标按 source_mtime 判定（含 source_mtime 缺失回落 last_modified_at 的对照）
++6. 既有 scan_docs 模块测试零回归
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:fd4064f9758400239f783758dc5c8e2511b6d684bd02d344945833fed7fed67f:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-scan-docs-stats-caliber 留痕重锚 -->
++1. 模块层覆盖率的实有分子只数 modules/ 下的模块文档：排除 _module-map.yaml 与 *.changelog.md，使 module_have 不再虚高（同一工作区应满足 have ≤ expected）
++2. 陈旧清单 / 新鲜度 / 8 周趋势 / 最近更新榜四处改用 source_mtime 优先、为空时回落 last_modified_at 的有效时间口径
++3. 有效时间口径抽成一个 helper 并在 stats 内单点使用，避免四处各写一遍再漂移
++4. 新增单测：① modules/ 内 .changelog.md 不计入 module_have
++5. ② source_mtime 与 last_modified_at 不一致时四处指标按 source_mtime 判定（含 source_mtime 缺失回落 last_modified_at 的对照）
++6. 既有 scan_docs 模块测试零回归
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/requirements.md b/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/requirements.md
+@@ -0,0 +1,83 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T09:06:46.577Z
++---
++# 需求规格（Requirements）— 2026-09-25-scan-docs-stats-caliber
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++### FR-01: 模块层实有分子只数模块文档
++
++- Given：`modules/` 目录下与模块卡成对存在 `*.changelog.md` 变更日志，以及 `_module-map.yaml` 登记表
++- When：`GET /workspaces/{id}/scan-docs/stats` 计算模块层覆盖率实有分子
++- Then：只有模块文档计入——`_module-map.yaml` 与 `*.changelog.md` 均排除，使同一工作区满足
++  `module_have <= module_expected`（不再出现 120% 之类虚高）
++
++### FR-02: 时间口径按源文件时间判定
++
++- Given：`scan_documents` 同时有 `source_mtime`（源文件时间）与 `last_modified_at`（镜像 mtime，
++  会被 spec 同步重写）
++- When：stats 计算陈旧清单 / 新鲜度 / 8 周趋势 / 最近更新榜
++- Then：四处统一按 `source_mtime` 优先、为空回落 `last_modified_at` 的有效时间判定，
++  `source_mtime` 缺失的存量行行为与修正前一致
++
++### FR-03: 有效时间口径单点实现
++
++- Given：四处时间消费面
++- When：后续维护或再次调整口径
++- Then：只改 `_effective_mtime` 一个 helper（纯函数、含 tz 归一），四处不再各写一遍时间取值
++
++### FR-04: 变更日志与登记表判定的纯函数
++
++- Given：任意 `modules/` 下的路径（含包裹/扁平双布局）
++- When：判断是否算模块文档
++- Then：`_is_module_doc` 按尾段判定（`.md` + 非登记表 + 非排除后缀），无 I/O、无副作用
++
++### FR-05: 单测覆盖两条修正与临界形态
++
++- Given：模块层 changelog 样本、source_mtime 与 last_modified_at 不一致样本、两列皆空样本
++- When：跑 scan_docs 单测
++- Then：断言 module_have 排除 changelog；四处指标按有效时间判定；两列皆空仍判陈旧
++
++### FR-06: 既有行为零回归
++
++- Given：scan_docs 模块既有 71 个用例（含 stats 手算复算、注入聚合、路由）
++- When：跑 `cd backend && uv run pytest app/modules/scan_docs -q --no-cov`
++- Then：全绿（当前 73 passed = 基线 71 + 本变更新增 2）
++<!--
++参考摘录（非约束——agent 可采纳/改写/忽略；每条格式 ### FR-NN: 标题 + Given/When/Then）
++FR-01: 模块层覆盖率的实有分子只数 modules/ 下的模块文档：排除 _module-map.yaml 与 *.changelog.md，使 module_have 不再虚高（同一工作区应满足 have ≤ expected）
++FR-02: 陈旧清单 / 新鲜度 / 8 周趋势 / 最近更新榜四处改用 source_mtime 优先、为空时回落 last_modified_at 的有效时间口径
++FR-03: 有效时间口径抽成一个 helper 并在 stats 内单点使用，避免四处各写一遍再漂移
++FR-04: 新增单测：① modules/ 内 .changelog.md 不计入 module_have
++FR-05: ② source_mtime 与 last_modified_at 不一致时四处指标按 source_mtime 判定（含 source_mtime 缺失回落 last_modified_at 的对照）
++FR-06: 既有 scan_docs 模块测试零回归
++-->
++
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/scan_docs/tests/test_stats.py::test_module_layer_excludes_changelog_docs
++
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_stats.py::test_stats_effective_mtime_prefers_source_mtime
++
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_stats.py::test_stats_effective_mtime_prefers_source_mtime（四处消费面同一次断言内比对，helper 单点即此测试的观察面）+ test_module_layer_excludes_changelog_docs
++
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_stats.py::test_module_layer_excludes_changelog_docs（_is_module_doc 经 stats 间接覆盖：_module-map.yaml 与 *.changelog.md 两类排除 + 模块卡保留）
++
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_stats.py::test_module_layer_excludes_changelog_docs + tests/test_stats.py::test_stats_effective_mtime_prefers_source_mtime
++
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向回归命令 cd backend && uv run pytest app/modules/scan_docs -q --no-cov（73 passed；基线 71）
++
+
+diff --git a/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/review.json b/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/review.json
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/review.json
+@@ -0,0 +1,39 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-09-25-scan-docs-stats-caliber",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "findings": [
++    {
++      "severity": "P2",
++      "title": "冻结交付件 change.patch 缺生产代码段（service.py 改动不在 diff 内）",
++      "evidence": "design 接口契约声明改动文件为 backend/app/modules/scan_docs/service.py（新增 _is_module_doc/_effective_mtime + 四处时间消费面改口径），但 change.patch 全 7 段只含 test_stats.py 与 .sillyspec/docs 流程文件，无任何 service.py hunk；patch 反而夹带他变更文件（docs/sillyspec/thin-flow-done-gate-frictions.md 自述来源 2026-09-25-change-detail-assets-usability），与「坑 4 冻结面归属噪声」同因——冻结件不能自证本次实现；工作区代码经核实已完整实现（service.py:81-112 两 helper、:242-258 SELECT 取 source_mtime、:273-274 分子判定、四处消费面无残留 last_modified_at），审计真相须以 git 历史/工作区为准。",
++      "location": ".sillyspec/changes/2026-09-25-scan-docs-stats-caliber/change.patch:1-465"
++    },
++    {
++      "severity": "P2",
++      "title": "FR-06 零回归缺可执行证据（ledger 门 test: skipped）",
++      "evidence": "flow-state.yaml gate_summary 记录 `test: skipped｜lint: passed`，未执行 app/modules/scan_docs 套件；requirements FR-06 的「73 passed（基线 71 + 新增 2）」为自述，评审只读无法复跑。静态核对可排除回归：baseline fixture 的 modules/ 下无 *.changelog.md（test_stats.py:151-169 仅 map + 3 模块卡），既有行全部未设 source_mtime（该标识仅出现在 84/102/514+ 新增面）→ 恒走回落分支，既有断言口径逐字不变。",
++      "location": ".sillyspec/changes/2026-09-25-scan-docs-stats-caliber/flow-state.yaml:8"
++    },
++    {
++      "severity": "P3",
++      "title": "module_have ≤ module_expected 不是强制不变量（残余同类虚高风险）",
++      "evidence": "module_have 数文件（modules/ 下 _is_module_doc 命中数，service.py:273-274），module_expected 数 _module-map.yaml 登记条目（service.py:281-284）；若模块卡存在而登记表缺条目（模块增删未同步 map），覆盖率仍可 >100%，FR-01 的「使同一工作区满足 have ≤ expected」只在本例两类排除成立。",
++      "location": "backend/app/modules/scan_docs/service.py:273-284"
++    },
++    {
++      "severity": "P3",
++      "title": "MODULE_MAP_FILENAME 常量未复用于登记表过滤（双字面量漂移风险）",
++      "evidence": "新常量 MODULE_MAP_FILENAME（service.py:84）只在 _is_module_doc 内使用（:94），_registered_module_counts 仍硬编码 .endswith(\"_module-map.yaml\")（:350）；design 已声明该函数保持独立过滤、当前语义一致无行为错误，但后续改常量会让两处判定分叉。",
++      "location": "backend/app/modules/scan_docs/service.py:84,350"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok（边界已裁决：可接受——stats 单请求只读聚合，_effective_mtime 仅两列取一 + tz 归一，无事件序/到达序假设）",
++    "并发": "ok（边界已裁决：可接受——只改读侧不改写入侧 mtime，stats 全程只读无缓存；与同步并发最坏读到写入中间态属既有行为，source_mtime 优先使「新源时间 + 旧镜像时间」中间态不影响判定，无跨列错配新窗口）",
++    "切换": "ok（边界已裁决：可接受——source_mtime 缺失回落 last_modified_at，存量行行为与修正前逐字一致、无需回填/迁移；模块分子变小致覆盖率下降是纠正虚高而非指标退步）",
++    "作用域": "ok（边界已裁决：可接受——HTTP DTO/端点/前端零结构变化：openapi.json 与 api-types.ts 的 ScanDocsStaleDocOut/RecentBoardItem 字段集不变、无 source_mtime 泄漏，仅字段取值改为源时间，前端标签「最后修改」语义一致；_is_module_doc 只按尾段判定，跨扁平/包裹布局与跨工作区不串台，行按 workspace_id 过滤）"
++  },
++  "reviewedAt": "2026-09-25T09:17:03Z"
++}
+
+diff --git a/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/tasks.md b/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-scan-docs-stats-caliber/tasks.md
+@@ -0,0 +1,18 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T09:06:46.577Z
++---
++# 任务注册表（Tasks）— 2026-09-25-scan-docs-stats-caliber
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++<!-- MACHINE-DRAFT:tasks-rows:56980b3aa1dde58777953ae515732adc8043ea69274116e371b940f749f83b73:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-scan-docs-stats-caliber 留痕重锚 -->
++- [x] task-01: 模块层覆盖率的实有分子只数 modules/ 下的模块文档：排除 _module-map.yaml 与 *.change
++- [x] task-02: 陈旧清单 / 新鲜度 / 8 周趋势 / 最近更新榜四处改用 source_mtime 优先、为空时回落 last_mo
++- [x] task-03: 有效时间口径抽成一个 helper 并在 stats 内单点使用，避免四处各写一遍再漂移
++- [x] task-04: 新增单测：① modules/ 内 .changelog.md 不计入 module_have
++- [x] task-05: ② source_mtime 与 last_modified_at 不一致时四处指标按 source_mtime 判定（
++- [x] task-06: 既有 scan_docs 模块测试零回归
++<!-- MACHINE-DRAFT:tasks-rows:end -->
++

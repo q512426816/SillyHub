@@ -453,3 +453,104 @@ created_at: 2026-09-22T17:00:51.578Z
 摘要：（无场景名）
 全文：.sillyspec/changes/archive/2026-09-25-knowledge-anchor-match-tolerance/requirements.md#FR-06
 最近确认：bf47e2a9402502c5aeaee1a70e923b5ff438ee50
+## FR-auto-backend-032 模块层实有分子只数模块文档
+变更：2026-09-25-scan-docs-stats-caliber
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-scan-docs-stats-caliber/requirements.md#FR-01
+最近确认：40d215410020316d1109efa73e51441798c6693f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-scan-docs-stats-caliber:flow:FR-01
+  tests: backend/app/modules/scan_docs/tests/test_stats.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-scan-docs-stats-caliber
+  status: active
+
+## FR-auto-backend-033 时间口径按源文件时间判定
+变更：2026-09-25-scan-docs-stats-caliber
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-scan-docs-stats-caliber/requirements.md#FR-02
+最近确认：40d215410020316d1109efa73e51441798c6693f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-scan-docs-stats-caliber:flow:FR-02
+  tests: tests/test_stats.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-scan-docs-stats-caliber
+  status: active
+
+## FR-auto-backend-034 有效时间口径单点实现
+变更：2026-09-25-scan-docs-stats-caliber
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-scan-docs-stats-caliber/requirements.md#FR-03
+最近确认：40d215410020316d1109efa73e51441798c6693f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-scan-docs-stats-caliber:flow:FR-03
+  tests: tests/test_stats.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-scan-docs-stats-caliber
+  status: active
+
+## FR-auto-backend-035 变更日志与登记表判定的纯函数
+变更：2026-09-25-scan-docs-stats-caliber
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-scan-docs-stats-caliber/requirements.md#FR-04
+最近确认：40d215410020316d1109efa73e51441798c6693f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-scan-docs-stats-caliber:flow:FR-04
+  tests: tests/test_stats.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-scan-docs-stats-caliber
+  status: active
+
+## FR-auto-backend-036 单测覆盖两条修正与临界形态
+变更：2026-09-25-scan-docs-stats-caliber
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-scan-docs-stats-caliber/requirements.md#FR-05
+最近确认：40d215410020316d1109efa73e51441798c6693f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-scan-docs-stats-caliber:flow:FR-05
+  tests: tests/test_stats.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-scan-docs-stats-caliber
+  status: active
+
+## FR-auto-backend-037 既有行为零回归
+变更：2026-09-25-scan-docs-stats-caliber
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-scan-docs-stats-caliber/requirements.md#FR-06
+最近确认：40d215410020316d1109efa73e51441798c6693f

@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-scan-docs-stats-caliber",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-25-scan-docs-stats-caliber:flow:FR-01",
+      "tests": [
+        "backend/app/modules/scan_docs/tests/test_stats.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-scan-docs-stats-caliber"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-25-scan-docs-stats-caliber:flow:FR-02",
+      "tests": [
+        "tests/test_stats.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-scan-docs-stats-caliber"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-25-scan-docs-stats-caliber:flow:FR-03",
+      "tests": [
+        "tests/test_stats.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-scan-docs-stats-caliber"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-25-scan-docs-stats-caliber:flow:FR-04",
+      "tests": [
+        "tests/test_stats.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-scan-docs-stats-caliber"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-25-scan-docs-stats-caliber:flow:FR-05",
+      "tests": [
+        "tests/test_stats.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-scan-docs-stats-caliber"
+    }
+  ]
+}
