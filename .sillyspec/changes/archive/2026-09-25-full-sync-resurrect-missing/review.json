@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-full-sync-resurrect-missing",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "补丁夹带与本变更无关的知识锚点注释改号（ql-20260813→ql-20260913），且同文件内新旧号并存",
+      "evidence": "patch 仅将 service.py:1301 的 ql-20260813-004 与 :1355 的 ql-20260813-007 改为 ql-20260913-004/007，而 :1266 处另一处 ql-20260813-007 未改——同一知识条目在单文件内出现两个锚点号；纯注释、零运行时影响，但超出声明变更范围且未在 design 披露",
+      "location": "backend/app/modules/spec_workspace/service.py:1301,1355（对照 :1266）"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-25T12:49:02Z"
+}

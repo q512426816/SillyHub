@@ -1,0 +1,23 @@
+{
+  "change": "2026-09-25-full-sync-resurrect-missing",
+  "baseline": "572e608a3decdb9d9cc27d7323310704ec926a9b",
+  "head": "38e19b00336fe47da3a28583b3be313acca5c863",
+  "files": [
+    "backend/app/modules/spec_workspace/service.py",
+    "backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py",
+    ".sillyspec/changes/2026-09-25-full-sync-resurrect-missing/design.md",
+    ".sillyspec/changes/2026-09-25-full-sync-resurrect-missing/flow-state.yaml",
+    ".sillyspec/changes/2026-09-25-full-sync-resurrect-missing/proposal.md",
+    ".sillyspec/changes/2026-09-25-full-sync-resurrect-missing/requirements.md",
+    ".sillyspec/changes/2026-09-25-full-sync-resurrect-missing/tasks.md"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 411,
+    "deletions": 21
+  },
+  "savedAt": "2026-09-25T12:44:12.604Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "b7012b7e864c0659d86329b8de56a1f885f474b5972701fabebb4cb3c694c050",
+  "patchStatus": "ok"
+}

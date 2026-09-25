@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-full-sync-resurrect-missing",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-25-full-sync-resurrect-missing:flow:FR-01",
+      "tests": [
+        "tests/test_full_sync_convergence.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-full-sync-resurrect-missing"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-25-full-sync-resurrect-missing:flow:FR-02",
+      "tests": [
+        "tests/test_full_sync_convergence.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-full-sync-resurrect-missing"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-25-full-sync-resurrect-missing:flow:FR-03",
+      "tests": [
+        "tests/test_full_sync_convergence.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-full-sync-resurrect-missing"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-25-full-sync-resurrect-missing:flow:FR-04",
+      "tests": [
+        "tests/test_full_sync_convergence.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-full-sync-resurrect-missing"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-25-full-sync-resurrect-missing:flow:FR-05",
+      "tests": [
+        "tests/test_full_sync_convergence.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-full-sync-resurrect-missing"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-09-25-full-sync-resurrect-missing:flow:FR-06",
+      "tests": [
+        "tests/test_full_sync_convergence.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-full-sync-resurrect-missing"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-09-25-full-sync-resurrect-missing:flow:FR-07",
+      "tests": [
+        "tests/test_full_sync_convergence.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-full-sync-resurrect-missing"
+    }
+  ]
+}

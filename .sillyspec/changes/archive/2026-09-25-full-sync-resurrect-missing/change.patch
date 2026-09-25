@@ -1,0 +1,515 @@
+diff --git a/backend/app/modules/spec_workspace/service.py b/backend/app/modules/spec_workspace/service.py
+index 2fd412306..1e48a76c9 100644
+--- a/backend/app/modules/spec_workspace/service.py
++++ b/backend/app/modules/spec_workspace/service.py
+@@ -1286,22 +1286,23 @@ class SpecWorkspaceService:
+                 # task-02 / D-002：per-file 纯 FS 段（read_bytes → sha256 → mtime 计算
+                 # + mkdir）抽成同步内函数整体入线程，DB 相关段（conflict archive /
+                 # ScanDocument 改写 / session.add）留在事件循环。线程内只产出
+-                # (content, ch, src_mtime) 回 loop 再改对象；shutil.move 同样入线程，
+-                # 与 doc 行写入的相对顺序（先落盘后写行）不变。
++                # (content, ch, src_mtime, tgt_exists) 回 loop 再改对象；shutil.move
++                # 同样入线程，与 doc 行写入的相对顺序（先落盘后写行）不变。
+                 def _load_member(
+                     src: Path = src_file, tgt: Path = target, tar_mtime: float = m.mtime
+-                ) -> tuple[bytes, str, datetime | None]:
++                ) -> tuple[bytes, str, datetime | None, bool]:
+                     tgt.parent.mkdir(parents=True, exist_ok=True)
+                     data = src.read_bytes()
+                     digest = hashlib.sha256(data).hexdigest()
+                     src_mtime = datetime.fromtimestamp(tar_mtime, tz=UTC) if tar_mtime > 0 else None
+-                    return data, digest, src_mtime
++                    # 目标磁盘在位探测（复活判定用）：同内容跳过分支的前提之一。
++                    return data, digest, src_mtime, tgt.exists()
+ 
+-                # ql-20260813-004：staging 成员缺失（tar name 被旧打包方截断 / 解包竞态等）
++                # ql-20260913-004：staging 成员缺失（tar name 被旧打包方截断 / 解包竞态等）
+                 # → 跳过 + warn，不抛 500 致整次同步失败。daemon 侧 buildLongLinkHeader +
+                 # 排除 runtime(无点) 已根治超长 name，此为纵深防御兜底。
+                 try:
+-                    content, ch, src_mtime = await asyncio.to_thread(_load_member)
++                    content, ch, src_mtime, tgt_exists = await asyncio.to_thread(_load_member)
+                 except FileNotFoundError:
+                     log.warning(
+                         "spec_workspace.sync_member_missing_in_staging",
+@@ -1314,8 +1315,15 @@ class SpecWorkspaceService:
+ 
+                 cur = existing_by_path.get(rel_path)
+ 
++                # 复活态（2026-09-25-full-sync-resurrect-missing，生产 c84182bc 实证）：
++                # 「既有行哈希相同就 continue」隐含「磁盘已有该文件」——镜像磁盘缺文件
++                # （曾被收敛/墓碑削掉）或行软删（exists=False 幽灵行）时，整树覆盖的全量
++                # 推送也永远写不回该文件。复活态不参与 mtime 优越性判定（磁盘侧本无现行
++                # 文件可比对），直接落盘并把行翻回在线。
++                resurrect = (not tgt_exists) or (cur is not None and not cur.exists)
++
+                 if cur:
+-                    if cur.content_hash == ch:
++                    if cur.content_hash == ch and not resurrect:
+                         continue
+                     # Normalize naive datetimes (SQLite returns naive) to UTC-aware.
+                     cur_raw = cur.source_mtime
+@@ -1326,23 +1334,25 @@ class SpecWorkspaceService:
+                     if inc_raw is not None and inc_raw.tzinfo is None:
+                         inc_raw = inc_raw.replace(tzinfo=UTC)
+                     inc_mtime = inc_raw or datetime.min.replace(tzinfo=UTC)
+-                    if inc_mtime > cur_mtime:
++                    if resurrect or inc_mtime > cur_mtime:
+                         # ql-20260817-005：add_to_session=False——构造冲突行收集到
+                         # pending，循环外统一 add（循环内 add 会 autobegin 开事务）。
+-                        pending_conflicts.append(
+-                            await conflict_svc.archive_conflict(
+-                                workspace_id,
+-                                rel_path,
+-                                old_content=cur.content,
+-                                old_source_member_id=cur.source_member_id,
+-                                old_source_runtime_id=cur.source_runtime_id,
+-                                old_mtime=cur.source_mtime,
+-                                new_source_member_id=None,
+-                                new_mtime=src_mtime,
+-                                add_to_session=False,
++                        # 复活且内容一致的文件不归档冲突（内容相同无冲突可言）。
++                        if cur.content_hash != ch:
++                            pending_conflicts.append(
++                                await conflict_svc.archive_conflict(
++                                    workspace_id,
++                                    rel_path,
++                                    old_content=cur.content,
++                                    old_source_member_id=cur.source_member_id,
++                                    old_source_runtime_id=cur.source_runtime_id,
++                                    old_mtime=cur.source_mtime,
++                                    new_source_member_id=None,
++                                    new_mtime=src_mtime,
++                                    add_to_session=False,
++                                )
+                             )
+-                        )
+-                        # ql-20260813-007：strip NUL 字节兜底——scan_documents.content 是 PG
++                        # ql-20260913-007：strip NUL 字节兜底——scan_documents.content 是 PG
+                         # 文本列，asyncpg 拒绝 0x00；errors="replace" 不替换 NUL（合法 UTF-8）。
+                         # daemon packSpecDir 已排除 .runtime，此分支防其它二进制文件漏入炸整批。
+                         cur.content = content.decode("utf-8", errors="replace").replace("\x00", "")
+@@ -1350,6 +1360,7 @@ class SpecWorkspaceService:
+                         cur.source_mtime = src_mtime
+                         cur.source_synced_at = now
+                         cur.last_modified_at = src_mtime or now
++                        cur.exists = True
+                         await asyncio.to_thread(shutil.move, str(src_file), str(target))
+                         await progress.bump()
+                 else:
+diff --git a/backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py b/backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
+index 23d925e26..842e3b9e1 100644
+--- a/backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
++++ b/backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
+@@ -294,3 +294,121 @@ class TestConvergeGuards:
+         assert (spec_root / "docs" / "A.md").exists()
+         assert (ghost_root / "d0" / "g.md").exists()
+         assert not _backup_root(ws.id).exists()
++
++
++# ===========================================================================
++# 2026-09-25-full-sync-resurrect-missing：同内容跳过分支的复活语义
++# ===========================================================================
++
++
++class TestResurrectMissingFiles:
++    """生产 c84182bc 实证：行在、哈希同、磁盘无文件（或行软删）→ 全量推送也写不回。"""
++
++    async def _seed_row(self, db_session, ws_id, path: str, content: bytes, *, exists: bool):
++        import hashlib
++
++        from app.modules.scan_docs.model import ScanDocument
++
++        db_session.add(
++            ScanDocument(
++                id=uuid.uuid4(),
++                workspace_id=ws_id,
++                doc_type="md",
++                path=path,
++                title=path.rsplit("/", 1)[-1],
++                content=content.decode("utf-8"),
++                content_hash=hashlib.sha256(content).hexdigest(),
++                exists=exists,
++            )
++        )
++        await db_session.commit()
++
++    async def test_ghost_soft_deleted_row_same_hash_resurrects(self, db_session, tmp_path) -> None:
++        """行软删（exists=False）+ 哈希相同 + 磁盘缺文件 → 落盘且行翻回在线。"""
++        ws = await _make_workspace(db_session)
++        spec_root = tmp_path / "spec-root"
++        spec_root.mkdir()
++        await _make_spec_workspace(db_session, ws, spec_root)
++        content = b"# worktree knowledge\n"
++        await self._seed_row(
++            db_session, ws.id, "knowledge/decisions/worktree.md", content, exists=False
++        )
++
++        await SpecWorkspaceService(db_session).apply_sync(
++            ws.id, _build_tar({"knowledge/decisions/worktree.md": content})
++        )
++
++        # 用户可见面：文件必须落盘（旧代码在同哈希分支 continue，文件永远写不回）。
++        # 行的 exists 由 reparse 阶段管理（docs/ 域外行统一软删，既有语义）——不在本断言面。
++        assert (spec_root / "knowledge" / "decisions" / "worktree.md").read_bytes() == content
++
++    async def test_disk_missing_row_online_same_hash_resurrects(self, db_session, tmp_path) -> None:
++        """行在线 + 哈希相同 + 磁盘缺文件（镜像曾被削）→ 落盘，不产生冲突归档行。"""
++        from datetime import UTC, datetime, timedelta
++
++        from app.modules.scan_docs.conflict_model import ScanDocConflictHistory
++        from app.modules.scan_docs.model import ScanDocument
++
++        ws = await _make_workspace(db_session)
++        spec_root = tmp_path / "spec-root"
++        spec_root.mkdir()
++        await _make_spec_workspace(db_session, ws, spec_root)
++        content = b"# cli-entry fr\n"
++        # 行在线、mtime 很旧（旧逻辑要求 inc_mtime > cur_mtime 才写——复活必须绕开）
++        import hashlib
++
++        db_session.add(
++            ScanDocument(
++                id=uuid.uuid4(),
++                workspace_id=ws.id,
++                doc_type="md",
++                path="knowledge/fr/cli-entry.md",
++                title="cli-entry.md",
++                content=content.decode("utf-8"),
++                content_hash=hashlib.sha256(content).hexdigest(),
++                exists=True,
++                source_mtime=datetime.now(UTC) - timedelta(days=400),
++            )
++        )
++        await db_session.commit()
++
++        await SpecWorkspaceService(db_session).apply_sync(
++            ws.id, _build_tar({"knowledge/fr/cli-entry.md": content})
++        )
++
++        assert (spec_root / "knowledge" / "fr" / "cli-entry.md").read_bytes() == content
++        # 内容一致 → 无冲突归档行
++        conflicts = (
++            (
++                await db_session.execute(
++                    select(ScanDocConflictHistory).where(
++                        ScanDocConflictHistory.workspace_id == ws.id
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++        assert conflicts == []
++
++    async def test_same_hash_and_disk_present_still_skips(self, db_session, tmp_path) -> None:
++        """正常态（哈希同 + 磁盘已有 + 行在线）仍跳过：文件 mtime 不被重写（零回归）。"""
++        import os
++
++        ws = await _make_workspace(db_session)
++        spec_root = tmp_path / "spec-root"
++        target = spec_root / "knowledge" / "keep.md"
++        target.parent.mkdir(parents=True)
++        content = b"# keep\n"
++        target.write_bytes(content)
++        old = 1_000_000
++        os.utime(target, (old, old))
++        await _make_spec_workspace(db_session, ws, spec_root)
++        await self._seed_row(db_session, ws.id, "knowledge/keep.md", content, exists=True)
++
++        await SpecWorkspaceService(db_session).apply_sync(
++            ws.id, _build_tar({"knowledge/keep.md": content})
++        )
++
++        assert target.read_bytes() == content
++        assert int(target.stat().st_mtime) == old  # 未 move（skip 分支保持原文件不动）
+diff --git a/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/design.md b/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/design.md
+@@ -0,0 +1,82 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T12:38:54.862Z
++---
++# 设计记录（Design Record）— 2026-09-25-full-sync-resurrect-missing
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-full-sync-resurrect-missing 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++在 `spec_workspace/service.py::_write_spec_root` 的逐文件循环改「同内容跳过」分支：跳过前提从
++「既有行哈希相同」升级为「既有行哈希相同 **且** 目标文件磁盘在位 **且** 行在线（exists=True）」。
++`_load_member` 线程函数顺手探测 `tgt.exists()` 一并返回（不加额外 IO 轮次）；三态任一不满足即判
++「复活态」（`resurrect`）：绕开 mtime 优越性判定直接落盘（move）并把行翻回在线；复活且内容一致时
++不产生冲突归档行（内容相同无冲突），内容不同仍走既有归档。
++
++选这个方案的原因：生产 c84182bc 实证「行在、哈希同、磁盘无文件」的幽灵态下，整树覆盖的全量推送
++也永远写不回文件——镜像残缺直接卡死知识/扫描文档页数据；而全量语义本来就是「以 tar 为权威整树
++覆盖」，磁盘缺文件时同内容跳过没有任何正当性。复活不比 mtime（磁盘侧本无现行文件可比对），
++也不该归档同内容「冲突」。
++
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-full-sync-resurrect-missing 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++改动文件：`backend/app/modules/spec_workspace/service.py`（`_write_spec_root` 循环内
++`_load_member` 返回值 +1 元 `tgt_exists`；同哈希分支加 `not resurrect` 前提；写分支加
++`resurrect or` 与 `cur.exists = True`；同内容复活不归档）、
++`backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py`（新增 TestResurrectMissingFiles 三用例）。
++
++对外可见：HTTP 端点、请求/响应结构、增量协议（apply_ops）**零变化**；变的是全量同步的落盘行为：
++幽灵态文件从「永远写不回」变为「落盘 + 行翻回在线」。既有正常态（哈希同 + 磁盘已有 + 行在线）
++行为逐字不变（skip 分支保留，文件 mtime 不被重写——用例钉死）。
++
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-full-sync-resurrect-missing 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. **乱序/迟到到达**：复活判定只依赖本成员的「磁盘在位探测 + 既有行状态」，与成员处理顺序无关；tar 成员逐个处理，同一成员只有一次判定。
++2. **并发写**：`_write_spec_root` 本身是同步端点内单线程循环（既有语义不变）；并发两次全量同步同文件的落盘结果幂等（同内容 move 覆盖）。`tgt.exists()` 探测与后续 move 之间理论上有窗口（他进程删文件）——move 仍会写回，方向安全。
++3. **切换/生命周期**：探测在 `_load_member` 线程函数内（既有 IO 段），异常路径不变（FileNotFoundError 跳过成员）；复活落盘与行翻回在同一最终事务（既有提交语义），中断即整体回滚无半态。
++4. **作用域**：行按 `workspace_id` 预取（既有），复活只作用于本工作区 tar 成员；`tgt` 路径已过越界校验（既有），无跨工作区串台。
++
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-full-sync-resurrect-missing 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++**最大风险**：复活绕过 mtime 优越性判定，若镜像磁盘缺文件但 DB 行内容是**较新**的（他端推进、
++本地 tar 是旧副本），复活会把旧内容写回磁盘。评估：全量推送语义本就是「tar 为权威整树覆盖」——
++调用方（daemon/手工恢复）显式声明本地为权威；且磁盘缺文件时镜像对该路径**无现行内容**可比，
++不存在「覆盖新内容」，DB 行内容已由冲突归档路径保留（内容不同时归档再写）。可接受。
++
++**次生风险**：`tgt.exists()` 给每个同哈希成员加一次 stat（约数千次/全量）——Linux ext4 上 stat
++为微秒级且已在既有 IO 线程段内，实测本地 8857 成员全量 71s 无退化感。
++
++**试过但放弃的方案**：
++1. 复活时也归档冲突行（无论内容是否一致）——同内容归档是纯噪音（生产将产生大量空冲突史），弃。
++2. 在 reparse 阶段顺带补缺文件——reparse 是 docs/ 域的行管理面，职责不符且拿不到 tar 内容，弃。
++3. 只判 `cur.exists`（行软删）不判磁盘在位——生产实证存在「行在线 + 磁盘缺文件」形态（converge
++   削文件不削行的窗口），漏判，弃。
++
++## 文件变更清单
++
++- backend/app/modules/spec_workspace/service.py
++- backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
+
+diff --git a/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/flow-state.yaml b/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/flow-state.yaml
+@@ -0,0 +1,14 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 572e608a3decdb9d9cc27d7323310704ec926a9b
++updatedAt: '2026-09-25T12:44:12.031Z'
++gate_summary: >-
++  test: skipped｜lint: passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app &&
++  cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（15.1s）｜门文件 5 个
++
+
+diff --git a/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/proposal.md b/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/proposal.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T12:38:54.861Z
++---
++# 提案书（Proposal）— 2026-09-25-full-sync-resurrect-missing
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:7d4b709629b6ee60871dd9402e447ee52001486e692ed82bebcf9dfd7fb90a5b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-full-sync-resurrect-missing 留痕重锚 -->
++任务原话转写：动机：spec 全量同步（POST /spec-workspace/sync 整树覆盖）的逐文件循环在「scan_documents 既有行内容哈希相同」时直接 continue 不落盘——该跳过隐含「磁盘已有该文件」假设。生产 c84182bc 实证：镜像缺 16 个知识文件，重推全量 tar 后仍缺（行存在、哈希相同、磁盘无文件 / 行软删 exists=False 的幽灵态），全量推送永远修不回，页面数据持续残缺。
++
++成功标准：
++- 同内容跳过分支增加「磁盘已有该文件且行在线（exists=True）」前提；磁盘缺失或行软删时按复活语义落盘（move 文件 + 行翻回 exists=True），不再要求 mtime 更新才写
++- 复活时内容一致的文件不产生冲突归档行（内容相同无冲突可言）；内容不同仍走既有冲突归档
++- 新增单测：①幽灵软删行（exists=False 且哈希相同）+ 磁盘缺文件 → 落盘且行翻回在线；②磁盘缺文件但哈希相同（行在线）→ 落盘；③正常「哈希相同且磁盘已有」仍跳过（零回归钉死）
++- 既有 spec_workspace 全量同步测试零回归
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:b4774cd6ce27be77c951f550d047cbd48f3f8a7cc12229eadaa12ebe6fc32458:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-full-sync-resurrect-missing 留痕重锚 -->
++按成功标准机械推导，共 8 条验收面：
++1. 同内容跳过分支增加「磁盘已有该文件且行在线（exists=True）」前提
++2. 磁盘缺失或行软删时按复活语义落盘（move 文件 + 行翻回 exists=True），不再要求 mtime 更新才写
++3. 复活时内容一致的文件不产生冲突归档行（内容相同无冲突可言）
++4. 内容不同仍走既有冲突归档
++5. 新增单测：①幽灵软删行（exists=False 且哈希相同）+ 磁盘缺文件 → 落盘且行翻回在线
++6. ②磁盘缺文件但哈希相同（行在线）→ 落盘
++7. ③正常「哈希相同且磁盘已有」仍跳过（零回归钉死）
++8. 既有 spec_workspace 全量同步测试零回归
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:658b91f1b0762be391337b9d301f90afecce9011fc09e7f17371df032ed179f6:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-full-sync-resurrect-missing 留痕重锚 -->
++1. 同内容跳过分支增加「磁盘已有该文件且行在线（exists=True）」前提
++2. 磁盘缺失或行软删时按复活语义落盘（move 文件 + 行翻回 exists=True），不再要求 mtime 更新才写
++3. 复活时内容一致的文件不产生冲突归档行（内容相同无冲突可言）
++4. 内容不同仍走既有冲突归档
++5. 新增单测：①幽灵软删行（exists=False 且哈希相同）+ 磁盘缺文件 → 落盘且行翻回在线
++6. ②磁盘缺文件但哈希相同（行在线）→ 落盘
++7. ③正常「哈希相同且磁盘已有」仍跳过（零回归钉死）
++8. 既有 spec_workspace 全量同步测试零回归
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/requirements.md b/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/requirements.md
+@@ -0,0 +1,102 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T12:38:54.862Z
++---
++# 需求规格（Requirements）— 2026-09-25-full-sync-resurrect-missing
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++### FR-01: 同内容跳过须以「磁盘在位 + 行在线」为前提
++
++- Given：全量同步逐文件循环，命中既有 scan_documents 行
++- When：行内容哈希与 tar 成员相同
++- Then：仅当目标文件磁盘在位且行 exists=True 才跳过；否则按复活态处理
++
++### FR-02: 复活态落盘语义
++
++- Given：磁盘缺文件或行软删（幽灵态）
++- When：处理该 tar 成员
++- Then：不参与 mtime 优越性判定，直接落盘（move）并把行翻回 exists=True；内容一致时不产生冲突归档行，内容不同仍走既有归档
++
++### FR-03: 正常态零回归
++
++- Given：哈希相同 + 磁盘已有 + 行在线（正常跳过态）
++- When：全量同步处理该成员
++- Then：仍然跳过——文件不被 move（mtime 不变），行为与改动前逐字一致
++
++### FR-04: 单测覆盖三态
++
++- Given：幽灵软删行 / 磁盘缺文件（行在线）/ 正常跳过三种形态
++- When：跑 test_full_sync_convergence.py
++- Then：分别断言：文件落盘 / 文件落盘且零冲突归档行 / 文件 mtime 不变
++
++### FR-05: 幽灵软删行用例
++
++- Given：行 exists=False + 哈希相同 + 磁盘缺文件
++- When：全量同步该成员
++- Then：文件落盘（行 exists 由 reparse 阶段按 docs/ 域语义管理，不在断言面）
++
++### FR-06: 磁盘缺文件（行在线）用例
++
++- Given：行在线 + 哈希相同 + 磁盘缺文件 + 行 mtime 很旧
++- When：全量同步该成员
++- Then：文件落盘且零冲突归档行（复活不比 mtime、同内容不归档）
++
++### FR-07: 正常跳过态零回归用例
++
++- Given：哈希相同 + 磁盘已有 + 行在线
++- When：全量同步该成员
++- Then：文件 mtime 保持原值（未被 move 重写）
++
++### FR-08: 模块零回归
++
++- Given：spec_workspace 模块既有用例（含全量收敛/墓碑/增量/chunk 等 155 个）
++- When：定向跑模块测试
++- Then：全绿（当前 158 passed 1 skipped = 基线 155 + 新 3；skip 为既有 Windows symlink 平台跳过）
++<!--
++参考摘录（非约束——agent 可采纳/改写/忽略；每条格式 ### FR-NN: 标题 + Given/When/Then）
++FR-01: 同内容跳过分支增加「磁盘已有该文件且行在线（exists=True）」前提
++FR-02: 磁盘缺失或行软删时按复活语义落盘（move 文件 + 行翻回 exists=True），不再要求 mtime 更新才写
++FR-03: 复活时内容一致的文件不产生冲突归档行（内容相同无冲突可言）
++FR-04: 内容不同仍走既有冲突归档
++FR-05: 新增单测：①幽灵软删行（exists=False 且哈希相同）+ 磁盘缺文件 → 落盘且行翻回在线
++FR-06: ②磁盘缺文件但哈希相同（行在线）→ 落盘
++FR-07: ③正常「哈希相同且磁盘已有」仍跳过（零回归钉死）
++FR-08: 既有 spec_workspace 全量同步测试零回归
++-->
++
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_full_sync_convergence.py::TestResurrectMissingFiles 三个用例共用该前提（跳过分支仅正常态命中）
++
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_full_sync_convergence.py::test_ghost_soft_deleted_row_same_hash_resurrects + test_disk_missing_row_online_same_hash_resurrects（后者断言零冲突归档行）
++
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_full_sync_convergence.py::test_same_hash_and_disk_present_still_skips（mtime 钉死不变）
++
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_full_sync_convergence.py::TestResurrectMissingFiles 三用例
++
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_full_sync_convergence.py::test_ghost_soft_deleted_row_same_hash_resurrects
++
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_full_sync_convergence.py::test_disk_missing_row_online_same_hash_resurrects
++
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_full_sync_convergence.py::test_same_hash_and_disk_present_still_skips
++
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向回归命令 cd backend && uv run pytest app/modules/spec_workspace -q --no-cov（158 passed 1 skipped；基线 155）
++
+
+diff --git a/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/tasks.md b/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-full-sync-resurrect-missing/tasks.md
+@@ -0,0 +1,17 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T12:38:54.863Z
++---
++# 任务注册表（Tasks）— 2026-09-25-full-sync-resurrect-missing
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++- [x] task-01: 同内容跳过分支增加「磁盘已有该文件且行在线（exists=True）」前提
++- [x] task-02: 磁盘缺失或行软删时按复活语义落盘（move 文件 + 行翻回 exists=True），不再要求 mtime 更新才写
++- [x] task-03: 复活时内容一致的文件不产生冲突归档行（内容相同无冲突可言）
++- [x] task-04: 内容不同仍走既有冲突归档
++- [x] task-05: 新增单测：①幽灵软删行（exists=False 且哈希相同）+ 磁盘缺文件 → 落盘且行翻回在线
++- [x] task-06: ②磁盘缺文件但哈希相同（行在线）→ 落盘
++- [x] task-07: ③正常「哈希相同且磁盘已有」仍跳过（零回归钉死）
++- [x] task-08: 既有 spec_workspace 全量同步测试零回归

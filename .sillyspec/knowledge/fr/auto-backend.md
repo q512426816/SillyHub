@@ -554,3 +554,142 @@ created_at: 2026-09-22T17:00:51.578Z
 摘要：（无场景名）
 全文：.sillyspec/changes/archive/2026-09-25-scan-docs-stats-caliber/requirements.md#FR-06
 最近确认：40d215410020316d1109efa73e51441798c6693f
+## FR-auto-backend-038 同内容跳过须以「磁盘在位 + 行在线」为前提
+变更：2026-09-25-full-sync-resurrect-missing
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-01
+最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-full-sync-resurrect-missing:flow:FR-01
+  tests: tests/test_full_sync_convergence.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-full-sync-resurrect-missing
+  status: active
+
+## FR-auto-backend-039 复活态落盘语义
+变更：2026-09-25-full-sync-resurrect-missing
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-02
+最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-full-sync-resurrect-missing:flow:FR-02
+  tests: tests/test_full_sync_convergence.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-full-sync-resurrect-missing
+  status: active
+
+## FR-auto-backend-040 正常态零回归
+变更：2026-09-25-full-sync-resurrect-missing
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-03
+最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-full-sync-resurrect-missing:flow:FR-03
+  tests: tests/test_full_sync_convergence.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-full-sync-resurrect-missing
+  status: active
+
+## FR-auto-backend-041 单测覆盖三态
+变更：2026-09-25-full-sync-resurrect-missing
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-04
+最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-full-sync-resurrect-missing:flow:FR-04
+  tests: tests/test_full_sync_convergence.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-full-sync-resurrect-missing
+  status: active
+
+## FR-auto-backend-042 幽灵软删行用例
+变更：2026-09-25-full-sync-resurrect-missing
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-05
+最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-full-sync-resurrect-missing:flow:FR-05
+  tests: tests/test_full_sync_convergence.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-full-sync-resurrect-missing
+  status: active
+
+## FR-auto-backend-043 磁盘缺文件（行在线）用例
+变更：2026-09-25-full-sync-resurrect-missing
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-06
+最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-full-sync-resurrect-missing:flow:FR-06
+  tests: tests/test_full_sync_convergence.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-full-sync-resurrect-missing
+  status: active
+
+## FR-auto-backend-044 正常跳过态零回归用例
+变更：2026-09-25-full-sync-resurrect-missing
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-07
+最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-full-sync-resurrect-missing:flow:FR-07
+  tests: tests/test_full_sync_convergence.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-full-sync-resurrect-missing
+  status: active
+
+## FR-auto-backend-045 模块零回归
+变更：2026-09-25-full-sync-resurrect-missing
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-08
+最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
