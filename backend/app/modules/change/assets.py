@@ -164,10 +164,46 @@ def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
     )
 
 
+# git C 风格引号内转义（core.quotePath 默认 true）：标准转义 + 1-3 位八进制字节
+# （非 ASCII 路径按 UTF-8 字节逐字节八进制输出，如 `"a/src/\346\234\211"`）。
+_C_ESCAPE_RE = re.compile(r"\\([0-7]{1,3}|.)")
+_C_SIMPLE_ESCAPES = {
+    "n": 10,
+    "t": 9,
+    "r": 13,
+    "a": 7,
+    "b": 8,
+    "f": 12,
+    "v": 11,
+    '"': 34,
+    "\\": 92,
+}
+
+
+def _unescape_git_quoted(inner: str) -> str:
+    """解引号内 C 风格转义（八进制按字节累加后整体 UTF-8 解码，对齐 git unquote_c_style）。"""
+    out = bytearray()
+    pos = 0
+    for match in _C_ESCAPE_RE.finditer(inner):
+        out.extend(inner[pos : match.start()].encode("utf-8"))
+        token = match.group(1)
+        if token.isdigit():  # 1-3 位八进制 = 一个原始字节
+            out.append(int(token, 8) & 0xFF)
+        else:
+            out.append(_C_SIMPLE_ESCAPES.get(token, ord(token)) & 0xFF)
+        pos = match.end()
+    out.extend(inner[pos:].encode("utf-8"))
+    return out.decode("utf-8", errors="replace")
+
+
 def _unquote_patch_path(raw: str) -> str:
-    """解 git 对特殊字符路径的引号包裹（``diff --git "a/…" "b/…"`` 形态）。"""
+    """解 git 对特殊字符路径的引号包裹（``diff --git "a/…" "b/…"`` 形态）。
+
+    ``core.quotePath=true``（git 默认）下非 ASCII 路径以八进制字节转义输出——只反转
+    ``\\"``/``\\\\`` 会漏命中（评审 P2：切片返回 None 被表述成「文件不在 patch 内」）。
+    """
     if len(raw) >= 2 and raw.startswith('"') and raw.endswith('"'):
-        return raw[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+        return _unescape_git_quoted(raw[1:-1])
     return raw
 
 

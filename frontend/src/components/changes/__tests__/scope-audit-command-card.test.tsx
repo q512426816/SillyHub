@@ -421,6 +421,39 @@ describe("ql-20260911-001-c0be change 目标：对账结果摘要", () => {
       await screen.findByTestId("scope-audit-degraded-scope"),
     ).toHaveTextContent(/不代表本变更的计划外改动/);
   });
+
+  // FR-05 后半句「明细弹窗同样带降级横幅」（评审 P3 覆盖缺口补钉）：
+  // 弹窗里同样不能让人把「实际侧 only」读成三态全表。
+  it("ok=true 降级：明细弹窗内同样出降级横幅，且行不带三态徽章", async () => {
+    mocks.getScopeAudit.mockResolvedValue({
+      ...makeFullFlowAudit(),
+      degraded_reason: "design.md 无「文件变更清单」章节或清单为空——降级实际侧 only 视图（不出三态列）",
+      rows: [
+        { path: "src/flow.js", kind: "new", additions: 5, deletions: 0 },
+      ],
+      totals: { files: 1, additions: 5, deletions: 0 },
+    });
+    renderCard(
+      <ScopeAuditCommandCard
+        target={{ kind: "change", workspaceId: "ws-1", changeKey: "c1" }}
+        archived
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("scope-audit-detail-entry"));
+    const rows = await screen.findByTestId("scope-audit-detail-rows");
+    // 弹窗内降级横幅（同一 DegradedNotice 组件，文案与卡面同源）
+    expect(
+      within(rows.parentElement as HTMLElement).getByTestId(
+        "scope-audit-degraded-view",
+      ),
+    ).toHaveTextContent(/不出三态列/);
+    // 行内无 verdict → 不渲染空徽章（行只剩路径/类型/行数三列）
+    const row = within(rows).getByTestId("scope-audit-row-src/flow.js");
+    expect(row.querySelector('[data-diff-kind]')).toBeNull();
+    expect(row.textContent).toContain("src/flow.js");
+    expect(row.textContent).toContain("新增");
+  });
 });
 
 describe("ql-20260911-001-c0be quick 目标：反查后取数", () => {

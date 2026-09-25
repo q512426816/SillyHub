@@ -1,9 +1,17 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
 born_face: thin
 with_tasks: false
 review_force: null
 baseline_commit: c72d04c8f196a81fce03d43ccfe9705e7d3390f8
-updatedAt: '2026-09-25T08:10:16.733Z'
+updatedAt: '2026-09-25T08:42:35.468Z'
+route_hint: thick
+edit_ratio: 1
+gate_summary: >-
+  test: skipped｜lint: passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app &&
+  cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（12.7s）｜门文件 18 个
 

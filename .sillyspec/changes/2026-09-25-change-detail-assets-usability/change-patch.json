@@ -1,0 +1,36 @@
+{
+  "change": "2026-09-25-change-detail-assets-usability",
+  "baseline": "c72d04c8f196a81fce03d43ccfe9705e7d3390f8",
+  "head": "9cb48847d9952aa1fd385bae3fbaaaf75056b30f",
+  "files": [
+    ".sillyspec/changes/2026-09-25-change-detail-assets-usability/design.md",
+    ".sillyspec/changes/2026-09-25-change-detail-assets-usability/flow-state.yaml",
+    ".sillyspec/changes/2026-09-25-change-detail-assets-usability/proposal.md",
+    ".sillyspec/changes/2026-09-25-change-detail-assets-usability/requirements.md",
+    ".sillyspec/changes/2026-09-25-change-detail-assets-usability/tasks.md",
+    "backend/app/modules/change/assets.py",
+    "backend/app/modules/change/router.py",
+    "backend/app/modules/change/schema.py",
+    "backend/app/modules/change/tests/test_assets.py",
+    "docs/sillyspec/knowledge-hits-anchor-drift-and-upload-stall.md",
+    "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx",
+    "frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+    "frontend/src/components/changes/detail/change-assets-card.tsx",
+    "frontend/src/components/changes/scope-audit-command-card.tsx",
+    "frontend/src/components/knowledge/entry-card-list.tsx",
+    "frontend/src/components/mobile/mobile-change-detail.tsx",
+    "frontend/src/lib/changes.ts"
+  ],
+  "totals": {
+    "files": 20,
+    "additions": 1377,
+    "deletions": 108
+  },
+  "savedAt": "2026-09-25T08:42:35.461Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "ab79979ff623b63098e85927ca3971464553e2ed31731ae4136f53d42a992407",
+  "patchStatus": "ok"
+}

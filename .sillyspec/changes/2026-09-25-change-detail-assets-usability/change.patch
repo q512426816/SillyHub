@@ -1,0 +1,1964 @@
+diff --git a/.sillyspec/changes/2026-09-25-change-detail-assets-usability/design.md b/.sillyspec/changes/2026-09-25-change-detail-assets-usability/design.md
+new file mode 100644
+index 000000000..54cda337a
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-change-detail-assets-usability/design.md
+@@ -0,0 +1,62 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T08:10:16.781Z
++---
++# 设计记录（Design Record）— 2026-09-25-change-detail-assets-usability
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-detail-assets-usability 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++本变更四条修复全在「展示与跳转」层，不新增数据源，延续 D-001@v1（沉淀资产=服务端解析 spec 树镜像）与「git/锚点逻辑单一源在工具」两条既有决策：
++
++1. 范围对账降级态（FR-05）：卡面按 `degraded_reason` 分支渲染——有降级原因时不渲染三态 chip，改显降级原因 + 口径说明；已归档变更补一句「文件面为当前工作区未提交窗口」并由变更详情页传入 archived 标志。根因是 CLI 降级为「实际侧 only 视图（不出三态列）」时行内无 verdict 字段，前端把 undefined 计成 0 仍照画三个 chip（本机跑 `sillyspec scope-audit --json` 实证）。
++2. 沉淀资产卡三组入口：FR/决策行改跳知识库页 URL 参数（`?file=&anchor=`）并落到条目卡；测试绑定行给「看测试文件」入口，弹窗内复用 explorer 的 `FilePreview`（读仓库文件，spec 镜像里没有测试文件）；归档留档列出 change-patch.json 的 files 清单，点击看 change.patch 中该文件的切片（后端切片 + 复用 DiffView）。
++3. 知识库页补 URL 参数消费（FR-01/02 的落位端）：新增 `?file=`/`?anchor=` 解析 + 前缀归一 + 条目级滚动；`entry-card-list` 的结构化条目卡补 `data-entry-anchor`（原只有手册形态有，FR/决策条目因此无法作为滚动落点）。
++4. 路径校验复用 `change/scope_audit.py::normalize_scope_file_path`（拒 `..`/绝对路径/pathspec magic），不新写一份校验。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-detail-assets-usability 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++- 新增端点 `GET /changes/{change_id}/assets/patch-file?path=<变更目录相对路径>` → `ChangePatchFileRead{path, diff, note, truncated}`：读归档目录 `change.patch` 并按 unified diff 的 `diff --git` 块切出该文件；命中返回 diff 文本（超 200k 字符截断并置 truncated），未命中返回 `diff=null` + note，文件不存在/无 patch 亦以 note 说明（展示面 fail-open，不 500）；path 非法 → 422（复用 normalize_scope_file_path）。
++- schema：`ChangePatchMeta` 新增 `files: list[str]`（change-patch.json 的 files 投影，上限 500 条）与 `files_truncated: bool`。
++- 前端：知识库页新增查询参数 `file`（知识库相对文件名，容错 `knowledge/`、`.sillyspec/`、`.sillyspec/knowledge/` 前缀）与 `anchor`（条目 id）；无参数时行为与现状逐字一致。
++- 行为变化（DOM 层）：范围对账卡降级分支不再渲染 `scope-audit-chip-*`；结构化条目卡新增 `data-entry-anchor` 属性；沉淀资产卡 FR/决策行 href 由「仅 file」变为「file+anchor」，测试绑定行与归档留档清单新增可点击入口。
++- 无：无数据库迁移、无 CLI/daemon 契约变化、无既有端点签名变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-detail-assets-usability 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到到达：知识库「列表」与「详情」是两条独立请求——URL 落位在列表就绪后按文件名选中，滚动落点在详情返回并挂载后执行，用有界重试（最多若干帧）容忍 DOM 未就绪，重试耗尽静默停在文件级（不报错）。范围对账降级原因来自同一次响应，无跨请求竞态。
++2. 并发写：本变更四条全为只读展示链路（读 spec 镜像、读仓库文件、读 change.patch），无写路径、无共享可变状态；并发打开同一变更只产生重复只读请求。
++3. 切换/生命周期：卡片取数 key 含 workspaceId/changeId，切换即换 key；弹窗关闭即卸载（radix Portal 惰性挂载），切换文件回默认态；URL 参数只在挂载/参数变化时消费一次，不写入 URL（不回写历史）。
++4. 作用域：explorer 取数按当前工作区解析成员绑定机器 + 相对工作区根路径，跨工作区不串台；patch 切片只读该变更自己解析出的归档目录（spec_root + change.path），不跨变更；文件清单上限 500 条防超大 patch 撑爆响应。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-detail-assets-usability 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++风险一：`change.patch` 与 `change-patch.json` 由 CLI 产出，体量不可控——切片后设 200k 字符上限并置 truncated，清单设 500 条上限并在 UI 标注截断（不静默截断）。
++风险二：知识库 URL 参数是新的外部入口，前缀归一规则写死会让旧链接失效——归一函数覆盖四种写法并用例钉住，未知形态回落文件级。
++风险三：切片按 `diff --git` 块解析属 git 自有格式，CLI 侧有同款 `slicePatchForFile`（双端实现）——本层只做只读展示切片、不参与审计判据，且只解析块头不做语义推断，漂移面可控。
++
++死路一：复用范围对账「点行看单文件 diff」弹窗（daemon RPC `sillyspec_file_diff`）看归档留档 —— 该 RPC 的冻结 patch 分支只认 `scope-audit.patch`，本类变更无此件，会退化成实时窗口 diff（正是本次要治的失真），放弃。
++死路二：前端拉 change.patch 自行切片 —— D-001@v1 已判前端解析属双端漂移面（且 N+1），放弃。
++死路三：降级时整卡隐藏或只留命令兜底 —— 会连「当前工作区未提交窗口」这一有效信息一起丢掉，放弃；改为显式降级说明 + 归档变更口径提示。
++死路四：改 CLI 让冻结 patch 分支兼容 change.patch —— 跨仓改动、需 CLI 发版 + daemon 升级才生效，远超本次展示层修复范围，放弃（可作为后续工具侧改进项）。
+diff --git a/.sillyspec/changes/2026-09-25-change-detail-assets-usability/flow-state.yaml b/.sillyspec/changes/2026-09-25-change-detail-assets-usability/flow-state.yaml
+new file mode 100644
+index 000000000..87fa98a3e
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-change-detail-assets-usability/flow-state.yaml
+@@ -0,0 +1,16 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: c72d04c8f196a81fce03d43ccfe9705e7d3390f8
++updatedAt: '2026-09-25T08:42:34.883Z'
++route_hint: thick
++edit_ratio: 1
++gate_summary: >-
++  test: skipped｜lint: passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app &&
++  cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（12.7s）｜门文件 18 个
++
+diff --git a/.sillyspec/changes/2026-09-25-change-detail-assets-usability/proposal.md b/.sillyspec/changes/2026-09-25-change-detail-assets-usability/proposal.md
+new file mode 100644
+index 000000000..4f0e50883
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-change-detail-assets-usability/proposal.md
+@@ -0,0 +1,42 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T08:10:16.780Z
++---
++# 提案书（Proposal）— 2026-09-25-change-detail-assets-usability
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:9b542b4f4a929577e3d9a73794a31b746ae1240eb9b2e0f066cec297e2051bb7:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-detail-assets-usability 留痕重锚 -->
++任务原话转写：变更详情「沉淀资产」卡与相邻范围对账卡的可用性修复：FR/决策索引点击不落位、测试绑定看不到测试文件、归档留档看不到具体改动，范围对账在降级态还误显三态全 0。
++成功标准：
++- FR/决策索引行点击后知识库页落到对应文件并滚动到该条目卡
++- 测试绑定行提供入口，可在弹窗内读到仓库内该测试文件内容
++- 归档留档列出 change-patch.json 的文件清单，点击可看到 change.patch 中该文件的红绿 diff
++- 范围对账卡在 ok=true 且有降级原因时不再渲染三态 0/0/0，改为显式展示降级原因与口径
++- 相关后端与前端测试全绿（新增用例覆盖上述四项），ruff 与 tsc 零错误
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:46d6f2e80f4f5db7be2984f965bfc6af4a2b417a3354401b8a3af1d1c456f2ef:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-detail-assets-usability 留痕重锚 -->
++按成功标准机械推导，共 6 条验收面：
++1. FR
++2. 决策索引行点击后知识库页落到对应文件并滚动到该条目卡
++3. 测试绑定行提供入口，可在弹窗内读到仓库内该测试文件内容
++4. 归档留档列出 change-patch.json 的文件清单，点击可看到 change.patch 中该文件的红绿 diff
++5. 范围对账卡在 ok=true 且有降级原因时不再渲染三态 0/0/0，改为显式展示降级原因与口径
++6. 相关后端与前端测试全绿（新增用例覆盖上述四项），ruff 与 tsc 零错误
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:391971d5c1a11d11cc83ecbd258bdbd6ae05f4d75927d6328c8c57985c4a3404:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-detail-assets-usability 留痕重锚 -->
++1. FR
++2. 决策索引行点击后知识库页落到对应文件并滚动到该条目卡
++3. 测试绑定行提供入口，可在弹窗内读到仓库内该测试文件内容
++4. 归档留档列出 change-patch.json 的文件清单，点击可看到 change.patch 中该文件的红绿 diff
++5. 范围对账卡在 ok=true 且有降级原因时不再渲染三态 0/0/0，改为显式展示降级原因与口径
++6. 相关后端与前端测试全绿（新增用例覆盖上述四项），ruff 与 tsc 零错误
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-09-25-change-detail-assets-usability/requirements.md b/.sillyspec/changes/2026-09-25-change-detail-assets-usability/requirements.md
+new file mode 100644
+index 000000000..ed181c7ef
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-change-detail-assets-usability/requirements.md
+@@ -0,0 +1,68 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T08:10:16.781Z
++---
++# 需求规格（Requirements）— 2026-09-25-change-detail-assets-usability
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++### FR-01: FR 索引行点击落到知识库的具体条目
++
++Given 变更详情「沉淀资产」卡列出若干 FR 索引条目（来源 knowledge/fr/<域>.md，条目 id 形如 FR-<域>-NNN）；
++When 用户点击某一行；
++Then 知识库页打开该 FR 所属文件，并滚动定位到这一条 FR 的条目卡（DOM 落点 data-entry-anchor=<知识库相对文件名>#<FR id>）；
++且文件参数做前缀容错：`knowledge/`、`.sillyspec/`、`.sillyspec/knowledge/` 前缀与裸文件名四种写法都能落到同一文件，查不到文件时静默停在文件级（不报错、不留白屏）。
++
++### FR-02: 决策索引行点击落到知识库的具体条目
++
++Given 「沉淀资产」卡列出若干决策蒸馏条目（来源 knowledge/decisions/*.md，条目 id 形如 D-NNN@vN）；
++When 用户点击某一行；
++Then 与 FR-01 同款落位语义：选中该决策文件并滚动到该条目卡（data-entry-anchor=<文件名>#<D id>）。
++
++### FR-03: 测试绑定行可查看仓库内测试文件内容
++
++Given 「沉淀资产」卡「测试绑定」组列出 test-trace 行（锚点 / 测试文件路径 / 状态）；
++When 用户点击该行给出的测试文件路径；
++Then 弹出只读预览弹窗，展示仓库内该文件内容（走 explorer 取数，不依赖 spec 镜像），失败时弹窗内给出可读错误提示；
++且行内锚点标注为「变更内 FR-NN」形态（与该变更 requirements.md 的 FR 对应），与知识库 FR 索引条目的 id 区分显示。
++
++### FR-04: 归档留档可看到具体改动
++
++Given 已归档变更的归档目录存在 change-patch.json（含 files 清单）与 change.patch（冻结全量 diff）；
++When 用户展开「沉淀资产」卡的「归档留档」组；
++Then 除既有 files/additions/deletions 统计外，列出 change-patch.json 的文件清单（超上限时显式标注截断）；
++When 用户点击清单中某个文件；
++Then 弹出该文件在 change.patch 中的红绿 diff 切片（后端切片，不前端解析 patch）；该文件不在 patch 内时弹窗给出明确说明而不是空 diff。
++
++### FR-05: 范围对账降级态显式展示、不再误显三态
++
++Given scope-audit 返回 ok=true 且 degraded_reason 非空（计划侧不可用，降级为「实际侧 only 视图」，行内无三态字段）；
++When 变更详情页渲染范围对账卡；
++Then 不再渲染三态 chip 的 0/0/0，改为显式展示降级原因 + 口径说明（该视图无三态列、文件面为实时窗口），明细弹窗同样带降级横幅；
++且已归档变更额外提示「文件面为当前工作区未提交窗口，不代表本变更改动面，本变更改动面见沉淀资产 · 归档留档」。
++
++### FR-06: 相关测试与静态检查全绿
++
++Given 本变更改动了后端 assets/scope-audit 展示链路与前端两张卡、知识库页；
++Then 后端 test_assets.py、前端 change-assets-card / scope-audit-command-card / knowledge-page 用例全绿，ruff 与 tsc 零错误；全量测试交 CI（仓库规则 0）。
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++FR-01: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx（FR 行 href 含 file+anchor）+ frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx（URL 参数落位与前缀容错）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++FR-02: 同 FR-01 两个用例文件（决策行 href 含 file+anchor，落位链路与 FR 行共用同一 selectEntry 通道）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++FR-03: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx（点测试文件路径开预览弹窗 + 锚点「变更内 FR」标注）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++FR-04: backend/app/modules/change/tests/test_assets.py（files 清单 + 切片命中/未命中/路径非法）+ frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx（清单渲染与点击开 diff 弹窗）
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++FR-05: frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx（降级态不渲染三态 chip、显降级原因、归档提示）
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++FR-06: 不适用：验收口径本身（跑上述用例 + ruff + tsc 即其证据面，无独立测试对象）
+diff --git a/.sillyspec/changes/2026-09-25-change-detail-assets-usability/tasks.md b/.sillyspec/changes/2026-09-25-change-detail-assets-usability/tasks.md
+new file mode 100644
+index 000000000..4ef16a510
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-change-detail-assets-usability/tasks.md
+@@ -0,0 +1,18 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T08:10:16.781Z
++---
++# 任务注册表（Tasks）— 2026-09-25-change-detail-assets-usability
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++<!-- MACHINE-DRAFT:tasks-rows:7d160c390ec2536815a352dfb778a9d99cd96424da6cbf4f6efaa96f06addb92:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-detail-assets-usability 留痕重锚 -->
++- [x] task-01: FR
++- [x] task-02: 决策索引行点击后知识库页落到对应文件并滚动到该条目卡
++- [x] task-03: 测试绑定行提供入口，可在弹窗内读到仓库内该测试文件内容
++- [x] task-04: 归档留档列出 change-patch.json 的文件清单，点击可看到 change.patch 中该文件的红绿 di
++- [x] task-05: 范围对账卡在 ok=true 且有降级原因时不再渲染三态 0/0/0，改为显式展示降级原因与口径
++- [x] task-06: 相关后端与前端测试全绿（新增用例覆盖上述四项），ruff 与 tsc 零错误
++<!-- MACHINE-DRAFT:tasks-rows:end -->
++
+diff --git a/backend/app/modules/change/assets.py b/backend/app/modules/change/assets.py
+index 5086481bc..858bffb34 100644
+--- a/backend/app/modules/change/assets.py
++++ b/backend/app/modules/change/assets.py
+@@ -11,7 +11,8 @@ spec 树镜像；CLI 侧无结构化查询命令、前端自行解析有 N+1 与
+   无「变更：」行的条目跳过——CLI 容错面）；
+ - 测试绑定：归档变更目录 ``test-trace.json`` 直读（文件本身 per-change）；
+ - patch 留档：``change-patch.json`` 存在才读（存量归档无此件 → None 容错，
+-  该留档是 CLI 晚于多数归档的新功能）；
++  该留档是 CLI 晚于多数归档的新功能）；``change.patch`` 的单文件切片供卡面
++  点开看具体改动（2026-09-25-change-detail-assets-usability / FR-04）；
+ - delta 摘要：``delta.md`` 标题行 + ``## Before``/``## Delta`` 段行数。
+ 
+ 镜像根获取对齐 ``knowledge/service.py::_spec_content_root`` 先例、变更目录
+@@ -40,6 +41,7 @@ from app.modules.change.schema import (
+     ChangeDecisionEntry,
+     ChangeDeltaMeta,
+     ChangeFrEntry,
++    ChangePatchFileRead,
+     ChangePatchMeta,
+     ChangeTestRow,
+ )
+@@ -51,6 +53,13 @@ log = get_logger(__name__)
+ _ENTRY_HEAD_RE = re.compile(r"^##\s+(FR-\S+|D-\d+@v\d+)\s+(.+)$")
+ _OWNER_LINE_RE = re.compile(r"^变更：(.+)$")
+ _STATUS_LINE_RE = re.compile(r"^状态：(\S+)")
++# git 块头（``diff --git a/<old> b/<new>``；两侧可被引号包裹——特殊字符路径形态）。
++_PATCH_HEADER_RE = re.compile(r"^diff --git (?P<old>\"[^\"]*\"|\S+) (?P<new>\"[^\"]*\"|\S+)$")
++
++# 展示面上限（design「风险一」）：清单条数与单文件切片字符数——超限显式标注，
++# 不静默截断（超大 patch 撑爆响应/前端 DOM 是真实风险，但静默丢数据更糟）。
++_PATCH_FILES_MAX = 500
++_PATCH_FILE_MAX_CHARS = 200_000
+ 
+ 
+ def _parse_entries_owned_by(text: str, change_key: str) -> list[tuple[str, str, str | None]]:
+@@ -132,7 +141,7 @@ def _read_test_rows(change_dir: Path) -> list[ChangeTestRow]:
+ 
+ 
+ def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
+-    """读 ``change-patch.json`` 的 totals 投影（存在才读 → 无此件 None）。"""
++    """读 ``change-patch.json`` 的 totals + files 投影（存在才读 → 无此件 None）。"""
+     path = change_dir / "change-patch.json"
+     try:
+         data = json.loads(path.read_text(encoding="utf-8"))
+@@ -142,12 +151,84 @@ def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
+     if not isinstance(data, dict):
+         return None
+     totals = data.get("totals") or {}
++    raw_files = data.get("files")
++    file_list = [f for f in raw_files if isinstance(f, str)] if isinstance(raw_files, list) else []
+     return ChangePatchMeta(
+         files=totals.get("files"),
+         additions=totals.get("additions"),
+         deletions=totals.get("deletions"),
+         patch_status=data.get("patchStatus"),
+         saved_at=data.get("savedAt"),
++        file_list=file_list[:_PATCH_FILES_MAX],
++        files_truncated=len(file_list) > _PATCH_FILES_MAX,
++    )
++
++
++def _unquote_patch_path(raw: str) -> str:
++    """解 git 对特殊字符路径的引号包裹（``diff --git "a/…" "b/…"`` 形态）。"""
++    if len(raw) >= 2 and raw.startswith('"') and raw.endswith('"'):
++        return raw[1:-1].replace('\\"', '"').replace("\\\\", "\\")
++    return raw
++
++
++def _strip_ab_prefix(path: str) -> str:
++    """剥 ``a/``/``b/`` 前缀（git 块头两侧路径各带一侧前缀）。"""
++    for prefix in ("a/", "b/"):
++        if path.startswith(prefix):
++            return path[len(prefix) :]
++    return path
++
++
++def slice_patch_for_file(patch_text: str, rel_path: str) -> str | None:
++    """按 ``diff --git`` 块切出单个文件的 diff（未命中 → None）。
++
++    只解析块头两侧路径（``a/``/``b/`` 剥前缀后与目标逐字比较，覆盖改名形态），
++    不做语义推断——CLI 侧有同款 ``slicePatchForFile``，本层是只读展示切片、
++    不参与审计判据（design「风险三」）。
++    """
++    blocks: list[list[str]] = []
++    current: list[str] | None = None
++    for line in patch_text.splitlines(keepends=True):
++        if line.startswith("diff --git "):
++            current = [line]
++            blocks.append(current)
++        elif current is not None:
++            current.append(line)
++    for block in blocks:
++        match = _PATCH_HEADER_RE.match(block[0].rstrip("\r\n"))
++        if match is None:
++            continue
++        candidates = {
++            _strip_ab_prefix(_unquote_patch_path(match.group("old"))),
++            _strip_ab_prefix(_unquote_patch_path(match.group("new"))),
++        }
++        if rel_path in candidates:
++            return "".join(block)
++    return None
++
++
++def _read_patch_file_diff(change_dir: Path, rel_path: str) -> ChangePatchFileRead:
++    """读 ``change.patch`` 并切出目标文件段（缺件/未命中/超限 → note 或 truncated）。"""
++    path = change_dir / "change.patch"
++    try:
++        text = path.read_text(encoding="utf-8", errors="replace")
++    except OSError as exc:
++        log.info("change.assets_patch_file_unavailable", path=str(path), error=str(exc))
++        return ChangePatchFileRead(
++            path=rel_path,
++            note="本变更归档目录没有 change.patch 留档（该件是 CLI 晚于多数归档的新功能），无法比对具体改动。",
++        )
++    sliced = slice_patch_for_file(text, rel_path)
++    if sliced is None:
++        return ChangePatchFileRead(
++            path=rel_path,
++            note="该文件不在 change.patch 内（留档窗口外，或仅改了不纳入 patch 的面）。",
++        )
++    truncated = len(sliced) > _PATCH_FILE_MAX_CHARS
++    return ChangePatchFileRead(
++        path=rel_path,
++        diff=sliced[:_PATCH_FILE_MAX_CHARS] if truncated else sliced,
++        truncated=truncated,
+     )
+ 
+ 
+@@ -220,6 +301,18 @@ class ChangeAssetsQueryService:
+         result.delta = delta
+         return result
+ 
++    async def get_patch_file_diff(
++        self, workspace_id: uuid.UUID, change_id: uuid.UUID, rel_path: str
++    ) -> ChangePatchFileRead:
++        """归档留档单文件 diff 切片（FR-04；``rel_path`` 已由 router 白名单校验）。
++
++        在途变更同样允许调用——归档目录件不存在时由 ``_read_patch_file_diff``
++        以 note 说明，不额外分支（展示面 fail-open，读不到不是错误面）。
++        """
++        change = await self._get_change(workspace_id, change_id)
++        change_dir = await self._resolve_change_dir(workspace_id, change)
++        return await asyncio.to_thread(_read_patch_file_diff, change_dir, rel_path)
++
+     async def _get_change(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> Change:
+         res = await self._session.execute(
+             select(Change).where(Change.id == change_id, Change.workspace_id == workspace_id)
+diff --git a/backend/app/modules/change/router.py b/backend/app/modules/change/router.py
+index 50ff98c69..aed630638 100644
+--- a/backend/app/modules/change/router.py
++++ b/backend/app/modules/change/router.py
+@@ -41,6 +41,7 @@ from app.modules.change.schema import (
+     ChangeFileWriteRequest,
+     ChangeFileWriteResponse,
+     ChangeList,
++    ChangePatchFileRead,
+     ChangeRead,
+     ChangeReparseResponse,
+     ChangeReparseStats,
+@@ -546,6 +547,31 @@ async def get_change_assets(
+     return await ChangeAssetsQueryService(session).get_change_assets(workspace_id, change_id)
+ 
+ 
++@router.get(
++    "/changes/{change_id}/assets/patch-file",
++    response_model=ChangePatchFileRead,
++)
++async def get_change_patch_file(
++    workspace_id: uuid.UUID,
++    change_id: uuid.UUID,
++    session: SessionDep,
++    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
++    path: str = Query(..., description="变更目录相对文件路径（如 src/flow.js）"),
++) -> ChangePatchFileRead:
++    """归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。
++
++    卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch`` 并切出该
++    文件的 diff 段——冻结在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，
++    两者不可互替）。``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
++    绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
++    不抛 404（读不到留档是展示面降级，不是资源不存在）。
++    """
++    service = ChangeAssetsQueryService(session)
++    return await service.get_patch_file_diff(
++        workspace_id, change_id, normalize_scope_file_path(path)
++    )
++
++
+ @router.get(
+     "/changes/{change_id}/files/content",
+     response_model=ChangeFileContent,
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index 7d05014d4..db771f457 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -822,13 +822,33 @@ class ChangeTestRow(BaseModel):
+ 
+ 
+ class ChangePatchMeta(BaseModel):
+-    """patch 留档统计（change-patch.json 的 totals 投影；无留档 → 整体 None）。"""
++    """patch 留档统计（change-patch.json 的 totals + files 投影；无留档 → 整体 None）。
++
++    ``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 是同一 JSON
++    ``files`` 数组的清单投影（2026-09-25-change-detail-assets-usability / FR-04 起
++    供卡面列出具体改动面），超上限时 ``files_truncated=True`` 显式标注。
++    """
+ 
+     files: int | None = None
+     additions: int | None = None
+     deletions: int | None = None
+     patch_status: str | None = None
+     saved_at: str | None = None
++    file_list: list[str] = Field(default_factory=list)
++    files_truncated: bool = False
++
++
++class ChangePatchFileRead(BaseModel):
++    """归档留档单文件 diff 切片（GET /changes/{cid}/assets/patch-file）。
++
++    展示面 fail-open：``change.patch`` 缺失、文件不在 patch 内、切片超上限一律以
++    ``note``/``truncated`` 说明而非报错（读不到留档不是变更详情的错误面）。
++    """
++
++    path: str
++    diff: str | None = None
++    note: str | None = None
++    truncated: bool = False
+ 
+ 
+ class ChangeDeltaMeta(BaseModel):
+diff --git a/backend/app/modules/change/tests/test_assets.py b/backend/app/modules/change/tests/test_assets.py
+index 40684d9b2..49c43e396 100644
+--- a/backend/app/modules/change/tests/test_assets.py
++++ b/backend/app/modules/change/tests/test_assets.py
+@@ -8,6 +8,10 @@
+ - 损坏 JSON fail-open（Grill 建议：test-trace 非法 → test_rows=[]）；
+ - 跨工作区/不存在 → ``ChangeNotFound``。
+ 
++2026-09-25-change-detail-assets-usability / FR-04 追加：``change-patch.json`` 的
++files 清单投影（含超上限标注）与 ``change.patch`` 单文件切片（命中/改名/引号路径/
++未命中/缺件/超限）。
++
+ author: qinyi
+ created_at: 2026-09-25
+ """
+@@ -21,9 +25,11 @@ from pathlib import Path
+ import pytest
+ 
+ from app.core.errors import ChangeNotFound
++from app.modules.change import assets as assets_mod
+ from app.modules.change.assets import (
+     ChangeAssetsQueryService,
+     _parse_entries_owned_by,
++    slice_patch_for_file,
+ )
+ from app.modules.change.model import Change
+ from app.modules.spec_workspace.model import SpecWorkspace
+@@ -31,6 +37,25 @@ from app.modules.workspace.model import Workspace
+ 
+ KEY = "2026-09-25-assets-golden"
+ 
++# 切片样本：两文件块（普通头 + 新增文件头），覆盖块边界不串段。
++PATCH_SAMPLE = (
++    "diff --git a/src/flow.js b/src/flow.js\n"
++    "index 1111111..2222222 100644\n"
++    "--- a/src/flow.js\n"
++    "+++ b/src/flow.js\n"
++    "@@ -1,2 +1,3 @@\n"
++    " a\n"
++    "+b\n"
++    " c\n"
++    "diff --git a/test/x.test.mjs b/test/x.test.mjs\n"
++    "new file mode 100644\n"
++    "index 0000000..3333333\n"
++    "--- /dev/null\n"
++    "+++ b/test/x.test.mjs\n"
++    "@@ -0,0 +1,1 @@\n"
++    "+x\n"
++)
++
+ 
+ # ===========================================================================
+ # 纯函数：条目归属解析
+@@ -204,3 +229,241 @@ async def test_not_found_reraises(db_session, tmp_path: Path) -> None:
+     ws = await _make_ws_spec(db_session, spec_root)
+     with pytest.raises(ChangeNotFound):
+         await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, uuid.uuid4())
++
++
++# ===========================================================================
++# change.patch 单文件切片（2026-09-25-change-detail-assets-usability / FR-04）
++# ===========================================================================
++
++
++def test_slice_patch_for_file_hits_own_block_only() -> None:
++    """命中文件只取自己那一块（不把后一文件的 hunk 带进来）。"""
++    sliced = slice_patch_for_file(PATCH_SAMPLE, "src/flow.js")
++    assert sliced is not None
++    assert sliced.startswith("diff --git a/src/flow.js b/src/flow.js\n")
++    assert "+b\n" in sliced
++    assert "test/x.test.mjs" not in sliced
++
++    added = slice_patch_for_file(PATCH_SAMPLE, "test/x.test.mjs")
++    assert added is not None
++    assert added.startswith("diff --git a/test/x.test.mjs b/test/x.test.mjs\n")
++    assert "+x\n" in added
++
++
++def test_slice_patch_for_file_rename_and_quoted_paths() -> None:
++    """改名块头两侧路径都算命中；引号包裹的特殊字符路径解引号后命中。"""
++    rename = (
++        "diff --git a/src/old-name.js b/src/new-name.js\n"
++        "similarity index 90%\n"
++        "rename from src/old-name.js\n"
++        "rename to src/new-name.js\n"
++        "@@ -1 +1 @@\n-a\n+b\n"
++    )
++    assert slice_patch_for_file(rename, "src/new-name.js") is not None
++    assert slice_patch_for_file(rename, "src/old-name.js") is not None
++
++    quoted = 'diff --git "a/src/有 空格.js" "b/src/有 空格.js"\n@@ -1 +1 @@\n-a\n+b\n'
++    assert slice_patch_for_file(quoted, "src/有 空格.js") is not None
++
++
++def test_slice_patch_for_file_miss_returns_none() -> None:
++    """未命中/空 patch → None（调用方转 note，不抛错）。"""
++    assert slice_patch_for_file(PATCH_SAMPLE, "src/not-there.js") is None
++    assert slice_patch_for_file("", "src/flow.js") is None
++
++
++def _seed_patch_archive(spec_root: Path, *, patch_text: str | None = PATCH_SAMPLE) -> None:
++    """归档目录补 change-patch.json（+ 可选 change.patch）。"""
++    change_dir = spec_root / "changes" / "archive" / KEY
++    change_dir.mkdir(parents=True, exist_ok=True)
++    (change_dir / "change-patch.json").write_text(
++        json.dumps(
++            {
++                "change": KEY,
++                "files": ["src/flow.js", "test/x.test.mjs"],
++                "totals": {"files": 2, "additions": 2, "deletions": 0},
++                "patchStatus": "ok",
++                "savedAt": "2026-09-25T06:09:44.456Z",
++            }
++        ),
++        encoding="utf-8",
++    )
++    if patch_text is not None:
++        (change_dir / "change.patch").write_text(patch_text, encoding="utf-8")
++
++
++async def test_patch_meta_projects_file_list(db_session, tmp_path: Path) -> None:
++    """change-patch.json 的 files 清单进 DTO（计数与清单同源同件）。"""
++    spec_root = tmp_path / "spec-root5"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_patch_archive(spec_root)
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    assert result.patch is not None
++    assert result.patch.files == 2
++    assert result.patch.file_list == ["src/flow.js", "test/x.test.mjs"]
++    assert result.patch.files_truncated is False
++
++
++async def test_patch_meta_file_list_truncates_with_flag(
++    db_session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """清单超上限 → 截断 + files_truncated=True（不静默丢数据）。"""
++    monkeypatch.setattr(assets_mod, "_PATCH_FILES_MAX", 1)
++    spec_root = tmp_path / "spec-root6"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_patch_archive(spec_root)
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    assert result.patch is not None
++    assert result.patch.file_list == ["src/flow.js"]
++    assert result.patch.files_truncated is True
++
++
++async def test_patch_file_diff_hit_and_miss(db_session, tmp_path: Path) -> None:
++    """切片端点：命中给 diff；不在 patch 内给 note（不报错）。"""
++    spec_root = tmp_path / "spec-root7"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_patch_archive(spec_root)
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++    service = ChangeAssetsQueryService(db_session)
++
++    hit = await service.get_patch_file_diff(ws.id, change.id, "src/flow.js")
++    assert hit.diff is not None and "+b" in hit.diff
++    assert hit.note is None and hit.truncated is False
++
++    miss = await service.get_patch_file_diff(ws.id, change.id, "src/not-there.js")
++    assert miss.diff is None
++    assert miss.note is not None and "不在 change.patch" in miss.note
++
++
++async def test_patch_file_diff_without_patch_artifact(db_session, tmp_path: Path) -> None:
++    """归档无 change.patch（存量归档常态）→ note 说明，不 500。"""
++    spec_root = tmp_path / "spec-root8"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_patch_archive(spec_root, patch_text=None)
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_patch_file_diff(
++        ws.id, change.id, "src/flow.js"
++    )
++    assert result.diff is None
++    assert result.note is not None and "没有 change.patch" in result.note
++
++
++async def test_patch_file_diff_truncates_with_flag(
++    db_session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """切片超上限 → 截断 + truncated=True。"""
++    monkeypatch.setattr(assets_mod, "_PATCH_FILE_MAX_CHARS", 40)
++    spec_root = tmp_path / "spec-root9"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_patch_archive(spec_root)
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_patch_file_diff(
++        ws.id, change.id, "src/flow.js"
++    )
++    assert result.diff is not None and len(result.diff) == 40
++    assert result.truncated is True
++
++
++# ===========================================================================
++# HTTP 面（路由注册 + 参数校验 + DTO 形状；fixture 范式照 test_files_router）
++# ===========================================================================
++
++
++@pytest.fixture()
++async def archived_change_with_patch(client, tmp_path: Path, auth_headers: dict, seed_spec_root_fn):
++    """建工作区 → spec_root 落一份带 change.patch 的归档变更 → reparse 取 change id。"""
++    root = tmp_path / "http-root"
++    root.mkdir()
++    resp = await client.post(
++        "/api/workspaces",
++        json={"name": "assets-http", "type": "other", "root_path": str(root)},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 201, resp.text
++    ws_id = resp.json()["id"]
++
++    empty_spec = tmp_path / "empty-spec"
++    empty_spec.mkdir()
++    spec_root = Path(seed_spec_root_fn(ws_id, empty_spec))
++    (spec_root / "knowledge" / "fr").mkdir(parents=True, exist_ok=True)
++    (spec_root / "knowledge" / "fr" / "x.md").write_text(
++        f"## FR-http-test-001 归属\n变更：{KEY}\n状态：active\n", encoding="utf-8"
++    )
++    change_dir = spec_root / "changes" / "archive" / KEY
++    change_dir.mkdir(parents=True, exist_ok=True)
++    (change_dir / "requirements.md").write_text("# 需求\n", encoding="utf-8")
++    _seed_patch_archive(spec_root)
++
++    await client.post(f"/api/workspaces/{ws_id}/changes/reparse", headers=auth_headers)
++    list_resp = await client.get(f"/api/workspaces/{ws_id}/changes", headers=auth_headers)
++    items = list_resp.json()["items"]
++    if not items:  # reparse 首扫偶发空（test_files_router 既定兜底）
++        await client.post(f"/api/workspaces/{ws_id}/changes/reparse", headers=auth_headers)
++        list_resp = await client.get(f"/api/workspaces/{ws_id}/changes", headers=auth_headers)
++        items = list_resp.json()["items"]
++    assert items, "reparse 未发现归档变更"
++    return {"ws_id": ws_id, "change_id": items[0]["id"]}
++
++
++async def test_assets_http_lists_files_and_slices_patch(
++    client, archived_change_with_patch: dict, auth_headers: dict
++) -> None:
++    """GET /assets 出 file_list；GET /assets/patch-file 出该文件切片（FR-04 HTTP 面）。"""
++    ws_id = archived_change_with_patch["ws_id"]
++    cid = archived_change_with_patch["change_id"]
++
++    assets = await client.get(f"/api/workspaces/{ws_id}/changes/{cid}/assets", headers=auth_headers)
++    assert assets.status_code == 200, assets.text
++    body = assets.json()
++    assert body["patch"]["file_list"] == ["src/flow.js", "test/x.test.mjs"]
++    assert body["patch"]["files_truncated"] is False
++
++    sliced = await client.get(
++        f"/api/workspaces/{ws_id}/changes/{cid}/assets/patch-file",
++        params={"path": "src/flow.js"},
++        headers=auth_headers,
++    )
++    assert sliced.status_code == 200, sliced.text
++    payload = sliced.json()
++    assert payload["path"] == "src/flow.js"
++    assert "+b" in payload["diff"]
++    assert payload["note"] is None
++
++
++async def test_patch_file_http_rejects_traversal_422(
++    client, archived_change_with_patch: dict, auth_headers: dict
++) -> None:
++    """路径白名单校验（复用 normalize_scope_file_path）：``..`` / 绝对路径 → 422。"""
++    ws_id = archived_change_with_patch["ws_id"]
++    cid = archived_change_with_patch["change_id"]
++    for bad in ("../secret.txt", "/etc/passwd", ":(glob)**"):
++        resp = await client.get(
++            f"/api/workspaces/{ws_id}/changes/{cid}/assets/patch-file",
++            params={"path": bad},
++            headers=auth_headers,
++        )
++        assert resp.status_code == 422, f"{bad} → {resp.status_code}"
++
++
++async def test_patch_file_http_unknown_change_404(
++    client, archived_change_with_patch: dict, auth_headers: dict
++) -> None:
++    """跨工作区/不存在 → 404（ChangeNotFound resource-hiding 口径）。"""
++    ws_id = archived_change_with_patch["ws_id"]
++    resp = await client.get(
++        f"/api/workspaces/{ws_id}/changes/{uuid.uuid4()}/assets/patch-file",
++        params={"path": "src/flow.js"},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 404, resp.text
+diff --git a/docs/sillyspec/knowledge-hits-anchor-drift-and-upload-stall.md b/docs/sillyspec/knowledge-hits-anchor-drift-and-upload-stall.md
+new file mode 100644
+index 000000000..dc0739102
+--- /dev/null
++++ b/docs/sillyspec/knowledge-hits-anchor-drift-and-upload-stall.md
+@@ -0,0 +1,145 @@
++---
++title: 知识命中遥测的锚点三代漂移 + hits.jsonl 被 merge 清空后上行卡死（平台「知识命中很局限」归因）
++date: 2026-09-25
++status: 活跃（工具侧待修；平台侧口径问题同批列出，归本仓 backlog）
++source: 生产工作区 c84182bc-5db4-4441-98b6-eee4903cd7d9（sillyspec CLI 仓前置 spec）知识页/扫描文档页命中与覆盖异常调查——2026-09-25
++---
++
++# 知识命中遥测：锚点三代漂移 + 上行卡死
++
++> 一句话守则：**平台知识页的「命中/覆盖」= 平台按当前知识文件标题现算的锚点（`slugify_anchor`）
++> 与 CLI 写进 hits `matchedFiles` 的锚点（INDEX 路由行原样）做字符串精确匹配。
++> 只要 CLI 侧 INDEX 锚点生成规则、或标题本身，与平台侧 slug 规则不一致，
++> 命中就会被判成「幽灵锚」——不计覆盖、不计死条目清理依据，页面只剩榜单上几行。
++> 改任一侧规则前，先跑双端锚点交叉断言（把两边规则的真值表钉成测试）。**
++
++## 现象（2026-09-25 生产实证）
++
++工作区 `c84182bc-…` 知识页：覆盖率 311/1758（17.7%）、死条目 1447、使用率榜仅 72 行，
++其中 `decisions/*`、`fr/*` 各只有 8~11 行「整文件」行；扫描文档页注入统计 30 天仅 20 行 / 8 个文档。
++
++本地复算（拉平台镜像 67 个知识文件 + 3389 行 hits = `.pre-merge-backup-2026-09-24T0620/.runtime/knowledge-hits.jsonl`）
++逐字复现了 1758 / 311 / 1447 三个数字 → **聚合算法本身没算错，错在输入与匹配口径**。
++
++## 证据链
++
++1. **72 个命中锚点里只有 6 个能在平台镜像的知识树里找到对应条目**（另 66 个是幽灵锚）：
++   - 53 个手册锚点（known-issues 29 / conventions 14 / patterns 10）**交集为 0**。命中侧是 CLI 时代
++     的手册小节（锚点形如 `known-issues.md#Windows 下 process.exit 触发 UV_HANDLE_CLOSING assertion 覆盖退出码`，
++     即**标题原文**），镜像里的手册已被合并后的另一代内容替换（emoji 前缀小节）。
++   - 13 个文件级锚点（`decisions/worktree.md`、`decisions/setup.md`、`fr/sync.md` …）指向的文件
++     **在镜像里不存在**，但本地树与 daemon 的本地 manifest 里都有 → 镜像 / manifest / 本地树三份快照互不一致。
++2. **锚点生成规则目前仍有 3 套并存**（同一标题产出 3 个不同锚点）：
++   | 标题 | CLI `stages/knowledge.js` slug | INDEX 路由行实际锚点 | 平台 `slugify_anchor` |
++   |---|---|---|---|
++   | `🟡 sillyhub-daemon 于 2026-06-14 从 Python 重写为 Node.js` | `sillyhub-daemon-…-node-js` | `sillyhub-daemon-…-nodejs`（无前导 `-`） | `-sillyhub-daemon-…-nodejs`（emoji 去掉但空格转的 `-` 留首） |
++   | `子项目构建 / 测试 / lint 命令` | `子项目构建-测试-lint-命令` | `子项目构建--测试--lint-命令` | `子项目构建--测试--lint-命令` |
++   | `…硬钉 0.3.181` | 同左（`.`→`-`） | 保留 `0.3.181` | 丢点 → `03181` |
++   结论：**标题带 emoji 前缀 / 保留点号 / 标题事后被改**三类，命中必落空。
++   当前一代 INDEX 58 条带锚点路由行里就有 6 条立刻是幽灵锚（≈10%，全在 known-issues.md）。
++3. **hits.jsonl 被 merge 清空后上行卡死**：daemon 状态文件
++   `~/.sillyhub/daemon/.hits-upload-state-c84182bc-….json` = `uploadedLines: 3389`（2026-09-24T00:46Z），
++   而当前 `.runtime/knowledge-hits.jsonl` 只有 9 行（2026-09-24 13:59Z 起）。
++   merge 把文件从 3389 行重置为空 → 平台最新命中停在 2026-09-23T19:49Z，此后新命中一行都没上行。
++   包内虽有钳位代码（`uploadedLines > completeLines.length` → 钳位并固化），但该工作区自
++   2026-09-23 16:41 起 spec 推送上行持续失败（`SpecPushConflict`），钩子从未跑到 → 钳位没机会执行。
++4. **条目级命中粒度缺失**：`decisions/`、`fr/` 的 INDEX 路由行是「一个文件一行」（无锚点），
++   命中即整文件 → 平台只能把整文件所有 `##` 条目算作「被用过」。
++   覆盖数 311 = fr 156 + decisions 155 + 顶层手册 0 —— 「知识手册 0 命中」正由证据 1 造成。
++5. **分母含结构性不可达桶**：`fr/unmapped.md` 713 条（3389 行 hits 里出现次数 = 0）、
++   `decisions/unmapped.md` 148 条、`uncategorized.md` 39 条，加上「文件级命中被当作整文件条目」
++   的口径二分，使覆盖率与死条目两个指标同时失真。
++
++## 工具侧修复建议（sillyspec CLI / daemon）
++
++- T1 `hits.jsonl` 属历史遥测：merge / 重置 / 清理 spec 时不得清空，应轮转归档；daemon 侧
++  offset 从「行数」升级为「前 N 行指纹（行数 + 尾行哈希）」，文件被替换即自动从头重报
++  （服务端 `(workspace_id, line_hash)` 已幂等兜底，重报零风险）。
++- T2 锚点规则单一源：INDEX 写侧与平台读侧共用同一份 slug 规范（emoji 前缀、点号、斜杠、
++  大小写、截断 60、首尾 `-`），并用交叉真值表测试钉住；或干脆弃用「标题 slug」改用稳定条目 ID。
++- T3 decisions/fr 命中落「条目级」：注入时 CLI 已解析出具体 `D-xxx@vN` / `FR-域-NNN`，
++  写进 matchedFiles（或新增字段），平台才能算条目级使用率，而不是「文件被用过一次 = 整文件算用过」。
++- T4 路由行锚点与标题的一致性校验进 `sillyspec knowledge validate`（标题改了但路由行没跟 → 报 warning），
++  避免「INDEX 锚点 / 文件标题」静默漂移。
++
++## 根因定性（2026-09-25 追加）：9-24 的 knowledge 合并把 CLI 侧知识面换成了平台侧
++
++sillyspec 仓提交 `80355e9b`（2026-09-24 `docs(knowledge): 合回知识面（… spec 归位主仓）`）
++把**平台侧知识整体覆盖进 CLI 仓的 knowledge/**：
++
++- `conventions.md`：19 条 CLI 自有小节（ESM Only / Naming / Error Handling / Logging /
++  CLI Entry / Zero Config Init / 铁律段格式 / 资产保护注释 / …）→ 11 条平台小节
++  （SillySpec 文档驱动开发流程 / backend Python 工程约定 / 前端 SSE 消费 …）；
++- `known-issues.md`：40 条 → 25 条（CLI 自有坑条目被删）；
++- 新增平台侧 `decisions/*`（backend +339 / frontend +297 / unmapped +1232 行 …）与
++  `fr/*`（auto-backend / cli / daemon / lib-* …），`INDEX.md` 重写 +219 行。
++
++而 3389 行命中遥测全部产生于合并前（2026-09-14 ~ 09-23）的 CLI 自有知识面。
++于是页面的分母（当前镜像 = 平台侧知识 1758 条）与命中记录（CLI 侧知识）**几乎不相交**：
++
++| 命中归属 | 次数 | 占比 |
++|---|---|---|
++| 手册三文件小节（锚点对不上 + 内容已被换掉） | 7136 | 66% |
++| 页面文件清单里不存在的 13 个 CLI 域文件 | 2707 | 25% |
++| **真正能落到页面可见条目的**（decisions/runtime 325 + fr/core-engine 222 + fr/runtime 193 + decisions/unmapped 112 + fr/setup 78 + fr/cli-entry 19） | **949** | **8.8%** |
++
++即：**页面 17.7% 的覆盖率，是「拿平台的知识当分母、去匹配 CLI 的命中记录」的残值**，
++既不反映 CLI 侧知识使用率，也不反映平台侧。度量口径必须先修好这一层，再谈覆盖率数字。
++
++## 本地文件对账（一切以本地为准，2026-09-25）
++
++两仓本地知识树 × 本地 hits（平台同口径复算）vs 页面实际：
++
++| 指标 | sillyspec 仓（页 c84182bc） | multi-agent-platform 仓（页 b97f8231） |
++|---|---|---|
++| 本地知识文件 | 86（含 6 proposed） | 102（含 40 generated + INDEX） |
++| **页面清单** | **67 → 缺 19**（13 个 decisions/fr + 6 proposed） | **61 → 缺 41**（整个 generated/ 40 个 + INDEX） |
++| 本地条目 | 1962 | 1649 |
++| 页面条目 | 1758（13 文件少 170 条 + decisions/runtime 41→7） | 1558 |
++| 本地口径覆盖率 | **554/1962 = 28.2%**（死 1408） | **310/1649 = 18.8%**（死 1339） |
++| 页面覆盖率 | 311/1758 = 17.7%（死 1447） | 195/1558 = 12.5%（死 1363） |
++| 本地 hits | 3398 行（3389 备份 + 9 现行）/ 10829 次 | 3760 行 / 28467 次 |
++| 命中无法归属本地 | 55 锚点 / **7138 次 = 65.9%**（9-24 合并删掉的自有 handbook 小节） | 6 锚点 / **3597 次 = 12.6%**（emoji 前缀 / 点号 / 标题漂移） |
++
++本仓（平台）自身的 6 条活性漂移（本地 INDEX 写的锚点 vs 本地文件标题算出的锚点，命中次数为本地 hits 实测）：
++
++| INDEX 写的锚点 | 本地文件算出的锚点 | 命中 |
++|---|---|---|
++| `known-issues.md#sillyhub-daemon-于-2026-06-14-从-python-重写为-nodejs` | `…#-sillyhub-daemon-…`（emoji 去掉后空格转的 `-` 留在首） | 890 |
++| `known-issues.md#本机可能存在多个-daemon-实例` | `…#-本机可能存在多个-daemon-实例` | 889 |
++| `known-issues.md#agentrunlog-无-metadata-列三层日志-metadata-丢失` | `…#-agentrunlog-无-metadata-列--三层日志-metadata-丢失`（斜杠处 `-` 差异） | 321 |
++| `known-issues.md#ci-hook-复合命令可绕过-claude-pretooluse-层` | `…#-ci-hook-复合命令可绕过-claude-pretooluse-层` | 4 |
++| `…#-daemon-pnpm-overrides-把-claude-agent-sdk-8-平台二进制硬钉-0.3.181` | `…#…硬钉-03181`（点号被丢） | 1130 |
++| `…#-全-docker-部署本地-pg-容器端口未映射-hostrun-alembicpytest-连不上` | `…#…未映射-hosthost-跑-alembicpytest-连不上`（逗号/斜杠规则不同 + 标题漂移） | 363 |
++
++CLI 仓自有知识面本地可恢复：`.sillyspec/.pre-merge-backup-2026-09-24T0620/knowledge/`
++（`conventions.md` 19 条 CLI 小节 / `known-issues.md` 40 条 / CLI `patterns.md`）+
++同目录 `.runtime/knowledge-hits.jsonl`（3389 行，即页面数据源）。
++
++**验收标准（以本地文件为准）**：修完后逐文件对账三项全等——① 知识文件清单；
++② 每文件条目数；③ 文件级命中数（`use_count` / `entry_counts`）。
++
++## 平台侧配套（本仓 backlog，非工具缺陷）
++
++- P1 覆盖率分母分层：只统计「可路由条目」（INDEX 路由面 ∪ 文件级可命中文件），或按 zone
++  （手册 / decisions / fr）分会话展示；`unmapped` / `uncategorized` / `proposed` 等结构性不可达桶单列。
++- P2 匹配容错：锚点比对前做归一（emoji、首尾 `-`、`·`/`.`、大小写），并把「历史命中但当前树无对应条目」
++  单列一个「已失效命中」分组，而不是静默留在榜单上。
++- P3 `GET /knowledge/stats` 增加数据截止时间（max `last_hit` / max `received_at`），前端标注「截至 X」。
++- P4 scan-docs：`module_have` 需排除 `*.changelog.md` 等非模块文档（当前出现 245/240 = 120% 覆盖率）；
++  陈旧 / 新鲜改用 `source_mtime` + 内容 hash，而不是被同步重写过的镜像 mtime（合并当天全量 304/304「新鲜」）。
++- P5 spec-sync 快照一致性：工作区 `c84182bc` 的**镜像（67 个知识文件）**、**daemon 本地 manifest
++  （30 个，含镜像里没有的 13 个 decisions/fr 文件与 6 个 proposed）**、**本地树（86 个）** 三份互不一致；
++  该工作区 spec 推送上行自 2026-09-23 16:41 起持续 `SpecPushConflict` 失败，另一工作区
++  `b97f8231`（本仓）另有 `HTTP 413` 失败记录（daemon.log）→ 需排查增量推送冲突与超限后的
++  镜像落地语义（是否部分落地 / manifest 是否按落地结果回写）。
++
++## 复算方法（本地可重跑）
++
++```bash
++# 1) 拉平台镜像知识树（只读，用 daemon runtime key 走 X-API-Key）
++#    GET /api/workspaces/{ws}/knowledge  +  GET /api/workspaces/{ws}/knowledge/{filename:path}
++# 2) 用本仓 parser 现算条目全集与锚点
++python -c "import sys;sys.path.insert(0,'backend');from pathlib import Path;from app.modules.knowledge.parser import parse_knowledge_entries as p;print(len(p(Path('.sillyspec'))))"
++# 3) 与 hits 锚点求交（hits 行 = .runtime/knowledge-hits.jsonl 或 .pre-merge-backup-*）
++```
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+index b43cc7a19..a4aa38b65 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+@@ -126,12 +126,20 @@ vi.mock("@uiw/react-markdown-preview", () => ({
+ }));
+ 
+ // WorkspaceTabs 的 usePathname 需要 app router 上下文，jsdom 下 mock 掉
+-// （知识库页本身用 params prop，不受影响）。
++// （知识库页本身用 params prop，不受影响）。useSearchParams（2026-09-25-change-
++// detail-assets-usability / FR-01/02 外部深链入口）走 navState 可覆写——用例内
++// 改 navState.searchParams 即可驱动 ?file=&anchor= 落位。
++const navState = vi.hoisted(() => ({
++  searchParams: new URLSearchParams(),
++}));
+ vi.mock("next/navigation", () => ({
+   usePathname: () => "/workspaces/ws-1/knowledge",
++  useSearchParams: () => navState.searchParams,
+ }));
+ 
+-import KnowledgePage from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
++import KnowledgePage, {
++  normalizeKnowledgeFileParam,
++} from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
+ import { WorkspaceTabs } from "@/components/workspace-tabs";
+ import {
+   getKnowledge,
+@@ -771,6 +779,84 @@ describe("卡片/原文双 tab 分发（task-05 / 2026-09-20-knowledge-effect-pa
+   });
+ });
+ 
++describe("外部深链落位（2026-09-25-change-detail-assets-usability / FR-01/02）", () => {
++  /** fr 域文件内容：一条 FR 结构化条目（条目卡带 data-entry-anchor 落点）。 */
++  const FR_CONTENT =
++    "---\nauthor: q\n---\n\n# FR 索引\n\n## FR-host-fs-handler-001 主机文件处理\n变更：some-change\n状态：active\n摘要：x\n";
++
++  /** 深链参数驱动 + 等 fr 文件被选中（getKnowledge 收到剥前缀后的键）。 */
++  async function renderWithDeepLink(params: Record<string, string>) {
++    navState.searchParams = new URLSearchParams(params);
++    mockGet.mockResolvedValue(
++      entry({
++        filename: "fr/host-fs-handler.md",
++        path: ".sillyspec/knowledge/fr/host-fs-handler.md",
++        zone: "fr",
++        title: "FR 索引",
++        content: FR_CONTENT,
++      }),
++    );
++    renderPage();
++    await waitFor(() => expect(mockGet).toHaveBeenCalledWith(WS, "fr/host-fs-handler.md"));
++    await screen.findByTestId("entry-card-list");
++  }
++
++  beforeEach(() => {
++    navState.searchParams = new URLSearchParams();
++  });
++
++  afterEach(() => {
++    navState.searchParams = new URLSearchParams();
++  });
++
++  it("?file=knowledge/…&anchor=FR-… → 选中该文件并给出条目级锚点落点", async () => {
++    await renderWithDeepLink({
++      file: "knowledge/fr/host-fs-handler.md",
++      anchor: "FR-host-fs-handler-001",
++    });
++    expect(screen.getByTestId("entry-card-list")).toHaveAttribute("data-form", "structured");
++    expect(
++      document.querySelector(
++        '[data-entry-anchor="fr/host-fs-handler.md#FR-host-fs-handler-001"]',
++      ),
++    ).not.toBeNull();
++  });
++
++  it("前缀容错：.sillyspec/knowledge/ 与 .sillyspec/ 写法落到同一文件", async () => {
++    await renderWithDeepLink({
++      file: ".sillyspec/knowledge/fr/host-fs-handler.md",
++      anchor: "FR-host-fs-handler-001",
++    });
++    expect(mockGet).toHaveBeenCalledWith(WS, "fr/host-fs-handler.md");
++
++    cleanup();
++    await renderWithDeepLink({
++      file: ".sillyspec/fr/host-fs-handler.md",
++    });
++    expect(mockGet).toHaveBeenCalledWith(WS, "fr/host-fs-handler.md");
++  });
++
++  it("查无此文件：不选中任何条目（静默停在列表空态，不报错）", async () => {
++    navState.searchParams = new URLSearchParams({
++      file: "knowledge/fr/not-there.md",
++    });
++    renderPage();
++    await waitForTree(["需求规则", "host-fs-handler.md"]);
++    await new Promise((r) => setTimeout(r, 30));
++    expect(mockGet).not.toHaveBeenCalled();
++    expect(screen.getByText("选择左侧文档查看内容。")).toBeInTheDocument();
++  });
++
++  it("normalizeKnowledgeFileParam：四种前缀形态归一，未知形态原样返回", () => {
++    expect(normalizeKnowledgeFileParam("knowledge/fr/x.md")).toBe("fr/x.md");
++    expect(normalizeKnowledgeFileParam(".sillyspec/knowledge/fr/x.md")).toBe("fr/x.md");
++    expect(normalizeKnowledgeFileParam(".sillyspec/fr/x.md")).toBe("fr/x.md");
++    expect(normalizeKnowledgeFileParam("fr/x.md")).toBe("fr/x.md");
++    expect(normalizeKnowledgeFileParam("./fr/x.md")).toBe("fr/x.md");
++    expect(normalizeKnowledgeFileParam("fr\\x.md")).toBe("fr/x.md");
++  });
++});
++
+ describe("WorkspaceTabs「知识库」tab（ql-20260821-015）", () => {  it("标签列表包含「知识库」且 href 为 /knowledge，位于「文件」之后", () => {
+     render(
+       <WorkspaceTabs workspaceId="ws-1">
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index b7314190b..3eeefe606 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -429,13 +429,15 @@ export default function ChangeDetailPage({ params }: Props) {
+           <ChangeSessionsCard workspaceId={workspaceId} changeId={changeId} />
+           {/* ql-20260910-014-6c29：scope-audit 范围对账结果卡（ql-20260911-001-c0be
+               升级：本机跑对账出三态计数+明细表，本地命令折叠为兜底；identifier=
+-              change_key，已归档变更也可查） */}
++              change_key）。archived 传入（2026-09-25-change-detail-assets-usability /
++              FR-05）：已归档变更降级时指路「沉淀资产 · 归档留档」。 */}
+           <ScopeAuditCommandCard
+             target={{
+               kind: "change",
+               workspaceId,
+               changeKey: change.change_key,
+             }}
++            archived={isTerminalChange(change)}
+           />
+           {/* task-06（2026-09-23-change-events-channel / FR-05~07 / D-004 / D-006）：
+               「观测事件」折叠卡——CLI watcher 旁路推送流只读展示，组件 useQuery
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+index a36251023..85e260400 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+@@ -35,9 +35,16 @@
+  * （原型 .distill-bar 位）——轮询蒸馏任务（5s/15s 双档），任务完成刷新知识
+  * 列表使候选出现在待审核区；沉淀弹层派发成功经 onDistilled invalidate 任务
+  * 查询，任务条立即出现不等下个轮询到点。
++ *
++ * 外部深链（2026-09-25-change-detail-assets-usability / FR-01/02）：支持
++ * ``?file=<路径>&anchor=<条目 id>`` —— file 做前缀归一（``knowledge/``、
++ * ``.sillyspec/``、反斜杠、``./``）后选中该文件，anchor 命中条目卡则滚动定位
++ * （FR/决策结构化条目卡的数据锚点由 entry-card-list 提供）。参数只在就绪后消费
++ * 一次，列表刷新不再触发跳转；查不到文件静默停在列表空态。
+  */
+ 
+ import Link from "next/link";
++import { useSearchParams } from "next/navigation";
+ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import { useQuery, useQueryClient } from "@tanstack/react-query";
+ import { Popconfirm, Tree, type TreeProps } from "antd";
+@@ -256,8 +263,26 @@ function toAntdNodes(nodes: KnowledgeNode[]): DataNode[] {
+   });
+ }
+ 
++/**
++ * 外部深链 file 参数 → 知识库相对文件名（2026-09-25-change-detail-assets-usability /
++ * FR-01/02）。调用方给的是 spec 树相对路径（``knowledge/fr/x.md``），知识库 API 的
++ * 键是剥掉 ``knowledge/`` 后的相对路径（``fr/x.md``）；再容错 ``.sillyspec/`` 前缀、
++ * 反斜杠与 ``./`` 写法——四种常见形态落到同一文件，其余原样返回（查不到即静默落
++ * 文件级，不报错）。
++ */
++export function normalizeKnowledgeFileParam(raw: string): string {
++  let v = raw.trim().replace(/\\/g, "/").replace(/^\.\//, "");
++  while (v.startsWith(".sillyspec/")) v = v.slice(".sillyspec/".length);
++  if (v.startsWith("knowledge/")) v = v.slice("knowledge/".length);
++  return v;
++}
++
+ export default function KnowledgePage({ params }: Props) {
+   const workspaceId = params.id;
++  const searchParams = useSearchParams();
++  /** 外部深链参数（沉淀资产卡 FR/决策索引行等入口）。 */
++  const deepLinkFile = searchParams.get("file");
++  const deepLinkAnchor = searchParams.get("anchor");
+   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeEntry[]>([]);
+   /** 选中文件名（API 详情键）与展示态。 */
+   const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
+@@ -345,14 +370,23 @@ export default function KnowledgePage({ params }: Props) {
+           // 条目级落点（验收建议 2）：卡流加载后滚动到锚点小节卡。锚点是 slug
+           // 形态（INDEX 路由行/条目卡与 hits 同域），滚动定位用 data-anchor 属性
+           // 选择器；查无该卡时静默落文件级顶部（降级兼容旧锚/改名小节）。
++          //
++          // 有界重试（2026-09-25-change-detail-assets-usability / FR-01/02）：详情
++          // 落 state 到卡流挂载之间隔着 React 提交 + 卡流解析，单帧 rAF 可能早于
++          // DOM 就绪（URL 深链是外部入口，落空代价是「跳了但没定位」）；改为逐帧
++          // 重试至多 12 帧，命中即滚动，耗尽仍静默降级文件级。
+           if (anchor) {
+-            requestAnimationFrame(() => {
+-              document
+-                .querySelector(
+-                  `[data-entry-anchor="${CSS.escape(`${filename}#${anchor}`)}"]`,
+-                )
+-                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+-            });
++            const selector = `[data-entry-anchor="${CSS.escape(`${filename}#${anchor}`)}"]`;
++            let tries = 0;
++            const tick = () => {
++              const el = document.querySelector(selector);
++              if (el) {
++                el.scrollIntoView({ behavior: "smooth", block: "center" });
++                return;
++              }
++              if (++tries < 12) requestAnimationFrame(tick);
++            };
++            requestAnimationFrame(tick);
+           }
+         })
+         .catch((err) => {
+@@ -362,6 +396,25 @@ export default function KnowledgePage({ params }: Props) {
+     [workspaceId],
+   );
+ 
++  /**
++   * 外部深链落位（2026-09-25-change-detail-assets-usability / FR-01/02）：URL
++   * ``?file=&anchor=`` 就绪且列表落定后选中目标文件并滚到条目卡。每个参数组合只
++   * 消费一次（deepLinkDoneRef）——列表刷新（编辑保存/审核操作后 loadList）不会
++   * 再次触发跳转把用户从当前位置拽走；查无此文件时同样标记已消费，静默停在列表
++   * 空态（不报错、不反复重试）。
++   */
++  const deepLinkDoneRef = useRef<string | null>(null);
++  useEffect(() => {
++    if (!deepLinkFile) return;
++    const key = `${deepLinkFile}#${deepLinkAnchor ?? ""}`;
++    if (deepLinkDoneRef.current === key) return;
++    if (loading || knowledgeItems.length === 0) return;
++    deepLinkDoneRef.current = key;
++    const target = normalizeKnowledgeFileParam(deepLinkFile);
++    const hit = knowledgeItems.find((it) => it.filename === target);
++    if (hit) selectEntry(hit.filename, deepLinkAnchor ?? undefined);
++  }, [deepLinkFile, deepLinkAnchor, loading, knowledgeItems, selectEntry]);
++
+   /**
+    * 条目级计数映射（task-05 / FR-06）：与 OpsDashboard 同 key 复用同一 stats
+    * 查询缓存（零额外请求），从 usage_board（anchor→total）派生——手册=`文件#slug`
+diff --git a/frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx b/frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx
+index 3b2b52b19..c5e95e9d7 100644
+--- a/frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx
++++ b/frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx
+@@ -365,6 +365,62 @@ describe("ql-20260911-001-c0be change 目标：对账结果摘要", () => {
+     ).toHaveTextContent(/guard 已清理/);
+     expect(screen.getByTestId("scope-audit-commands")).toBeInTheDocument();
+   });
++
++  // 2026-09-25-change-detail-assets-usability / FR-05：ok=true 但降级为「实际侧
++  // only 视图」时，行内没有 verdict 字段——原实现照样渲染三态 0/0/0（生产实证：
++  // 已归档轻量变更 39 文件 +124162/−0 三态全 0，被读成「无计划外改动」）。
++  it("ok=true 降级：不渲染三态 chips，显降级原因与口径；归档变更指路留档", async () => {
++    mocks.getScopeAudit.mockResolvedValue({
++      ...makeFullFlowAudit(),
++      degraded_reason:
++        "design.md 无「文件变更清单」章节或清单为空——降级实际侧 only 视图（不出三态列）",
++      anchor_label: "head-uncommitted-window",
++      // 降级行：只有 path/行数，没有 verdict（正是误导来源）
++      rows: [
++        { path: ".sillyspec/.pre-merge-backup/x.json", kind: "new", additions: 36, deletions: 0 },
++        { path: "src/flow.js", kind: "new", additions: 5, deletions: 0 },
++      ],
++      totals: { files: 2, additions: 41, deletions: 0 },
++    });
++    renderCard(
++      <ScopeAuditCommandCard
++        target={{ kind: "change", workspaceId: "ws-1", changeKey: "c1" }}
++        archived
++      />,
++    );
++
++    expect(
++      await screen.findByTestId("scope-audit-degraded-view"),
++    ).toHaveTextContent(/不出三态列/);
++    expect(screen.getByTestId("scope-audit-degraded-scope")).toHaveTextContent(
++      /真实改动面见「沉淀资产 · 归档留档」/,
++    );
++    // 关键钉子：三态 chips 一个都不许出现（0/0/0 会被读成「无计划外改动」）
++    expect(screen.queryByTestId("scope-audit-chip-planned")).toBeNull();
++    expect(screen.queryByTestId("scope-audit-chip-unplanned")).toBeNull();
++    expect(screen.queryByTestId("scope-audit-chip-untouched")).toBeNull();
++    // 文件面合计仍在（锚点 + 行数），明细入口仍在
++    expect(screen.getByText("2 文件")).toBeInTheDocument();
++    expect(screen.getByTestId("scope-audit-detail-entry")).toHaveTextContent(
++      "查看明细（2）",
++    );
++  });
++
++  it("ok=true 降级 + 未归档：口径提示不带留档指路", async () => {
++    mocks.getScopeAudit.mockResolvedValue({
++      ...makeFullFlowAudit(),
++      degraded_reason: "锚点缺失——行数按 HEAD 未提交窗口采集",
++      rows: [{ path: "src/a.ts", kind: "new", additions: 1, deletions: 0 }],
++    });
++    renderCard(
++      <ScopeAuditCommandCard
++        target={{ kind: "change", workspaceId: "ws-1", changeKey: "c1" }}
++      />,
++    );
++    expect(
++      await screen.findByTestId("scope-audit-degraded-scope"),
++    ).toHaveTextContent(/不代表本变更的计划外改动/);
++  });
+ });
+ 
+ describe("ql-20260911-001-c0be quick 目标：反查后取数", () => {
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index d3d4ea4aa..4609bd90a 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -2,18 +2,32 @@
+ // 覆盖：四组渲染（fr/决策/测试绑定/归档留档逐组有数据才出现）+ 计数徽标、
+ // 逐组容错（仅 fr 有数据时其余组不渲染）、在途变更引导空态、归档全空态、
+ // 失败静默隐藏（isError → 整卡 null）。
+-import { render, screen, fireEvent } from "@testing-library/react";
++//
++// 2026-09-25-change-detail-assets-usability（FR-01~04）追加：FR/决策行 href 带
++// file+anchor 深链、测试绑定行点开测试文件预览弹窗（FilePreview 收到仓库路径）、
++// 归档留档文件清单渲染与点开单文件 diff 弹窗（命中/note 两态）。
++import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
+-import { getChangeAssets } from "@/lib/changes";
++import { getChangeAssets, getChangePatchFile } from "@/lib/changes";
+ 
+ vi.mock("@/lib/changes", () => ({
+   getChangeAssets: vi.fn(),
++  getChangePatchFile: vi.fn(),
++}));
++
++// FilePreview 走 explorer 取数（仓库文件），本卡只验证「弹窗打开且把路径交给它」——
++// 取数与渲染由 explorer 自己的用例覆盖，这里用替身把路径回显出来。
++vi.mock("@/components/explorer/file-preview", () => ({
++  FilePreview: ({ filePath }: { filePath: string | null }) => (
++    <div data-testid="file-preview-stub">{filePath}</div>
++  ),
+ }));
+ 
+ const mockGet = vi.mocked(getChangeAssets);
++const mockPatch = vi.mocked(getChangePatchFile);
+ 
+ function renderCard() {
+   const client = new QueryClient({
+@@ -43,7 +57,15 @@ const FULL = {
+       state: "candidate",
+     },
+   ],
+-  patch: { files: 6, additions: 10, deletions: 9, patch_status: "ok", saved_at: null },
++  patch: {
++    files: 6,
++    additions: 10,
++    deletions: 9,
++    patch_status: "ok",
++    saved_at: null,
++    file_list: ["src/flow.js", "test/x.test.mjs"],
++    files_truncated: false,
++  },
+   delta: { headline: "h", before_lines: 2, delta_lines: 1 },
+ };
+ 
+@@ -124,4 +146,84 @@ describe("ChangeAssetsCard", () => {
+     await new Promise((r) => setTimeout(r, 100));
+     expect(container.querySelector('[data-testid="change-assets-card"]')).toBeNull();
+   });
++
++  it("FR/决策索引行：href 带 file+anchor 深链（FR-01/02）", async () => {
++    mockGet.mockResolvedValue(FULL);
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++
++    const frLink = (await screen.findByText("FR-auto-x-001")).closest("a");
++    expect(frLink).toHaveAttribute(
++      "href",
++      "/workspaces/ws-1/knowledge?file=knowledge%2Ffr%2Fx.md&anchor=FR-auto-x-001",
++    );
++    const decLink = screen.getByText("D-001@v1").closest("a");
++    expect(decLink).toHaveAttribute(
++      "href",
++      "/workspaces/ws-1/knowledge?file=knowledge%2Fdecisions%2Fx.md&anchor=D-001%40v1",
++    );
++  });
++
++  it("测试绑定行：锚点标注「变更内」且测试文件可点开预览（FR-03）", async () => {
++    mockGet.mockResolvedValue(FULL);
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++
++    expect(await screen.findByText(/变更内 FR-01/)).toBeInTheDocument();
++
++    fireEvent.click(screen.getByTestId("change-assets-test-file-backend/app/x.py"));
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      "backend/app/x.py",
++    );
++  });
++
++  it("归档留档：清单渲染 + 点开命中文件出 diff 弹窗（FR-04）", async () => {
++    mockGet.mockResolvedValue(FULL);
++    mockPatch.mockResolvedValue({
++      path: "src/flow.js",
++      diff: "diff --git a/src/flow.js b/src/flow.js\n@@ -1 +1 @@\n-a\n+b\n",
++      note: null,
++      truncated: false,
++    });
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++
++    expect(await screen.findByTestId("change-assets-patch-files")).toBeInTheDocument();
++    expect(screen.getByTestId("change-assets-patch-file-src/flow.js")).toBeInTheDocument();
++    expect(screen.getByTestId("change-assets-patch-file-test/x.test.mjs")).toBeInTheDocument();
++
++    fireEvent.click(screen.getByTestId("change-assets-patch-file-src/flow.js"));
++    await waitFor(() =>
++      expect(mockPatch).toHaveBeenCalledWith("ws-1", "c-1", "src/flow.js"),
++    );
++    expect(await screen.findByTestId("diff-view")).toBeInTheDocument();
++  });
++
++  it("归档留档：切片未命中出 note 文案而非空 diff（FR-04）", async () => {
++    mockGet.mockResolvedValue(FULL);
++    mockPatch.mockResolvedValue({
++      path: "src/flow.js",
++      diff: null,
++      note: "该文件不在 change.patch 内（留档窗口外，或仅改了不纳入 patch 的面）。",
++      truncated: false,
++    });
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++
++    fireEvent.click(await screen.findByTestId("change-assets-patch-file-src/flow.js"));
++    expect(await screen.findByTestId("change-assets-patch-note")).toHaveTextContent(
++      "不在 change.patch 内",
++    );
++  });
++
++  it("归档留档：清单截断时显式标注（FR-04）", async () => {
++    mockGet.mockResolvedValue({
++      ...FULL,
++      patch: { ...FULL.patch, files_truncated: true },
++    });
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++
++    expect(await screen.findByText("清单已截断")).toBeInTheDocument();
++  });
+ });
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index 79e41efeb..561d951cb 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -4,7 +4,16 @@ import { useState } from "react";
+ import Link from "next/link";
+ import { useQuery } from "@tanstack/react-query";
+ 
+-import { getChangeAssets } from "@/lib/changes";
++import { FilePreview } from "@/components/explorer/file-preview";
++import { DiffView } from "@/components/files/structured-views";
++import {
++  Dialog,
++  DialogContent,
++  DialogDescription,
++  DialogHeader,
++  DialogTitle,
++} from "@/components/ui/dialog";
++import { getChangeAssets, getChangePatchFile } from "@/lib/changes";
+ 
+ interface ChangeAssetsCardProps {
+   workspaceId: string;
+@@ -19,8 +28,19 @@ interface ChangeAssetsCardProps {
+  * 行 / patch 留档统计 / delta 摘要。useQuery 自取数（ChangeEventsCard 同款
+  * 范式）+ 失败静默隐藏；四组逐组「有数据才渲染」（design fail-open）；
+  * 在途变更（archived=false）显示引导空态（design R-03 对应展示面）。
+- * 纯展示零业务逻辑——FR/决策行点击跳知识库页（?file= 前向参数，页面暂不
+- * 消费，深锚点后续演进），无 mutation。
++ * 纯展示零业务逻辑，无 mutation。
++ *
++ * 可用性修复（2026-09-25-change-detail-assets-usability / FR-01~04）——三处
++ * 「点了看不到东西」各自补齐落点：
++ * - FR/决策索引行：href 带 `?file=&anchor=`（file 为 spec 树相对路径，知识库页
++ *   做前缀归一后选中文件并滚动到该条目卡）；
++ * - 测试绑定行：测试文件路径可点，弹窗内走 explorer 的 FilePreview 读仓库内
++ *   文件本体（测试文件在仓库里、不在 spec 镜像里，变更文件树读不到）；行首锚点
++ *   标注「变更内」——它是该变更 requirements.md 的 FR 编号，与知识库 FR 索引
++ *   条目（FR-<域>-NNN）不是同一套 id，原文只显示 row_id 片段时极易误认；
++ * - 归档留档：除统计外列出 change-patch.json 的文件清单，点某文件看它在
++ *   change.patch 中的红绿 diff 切片（后端切片，冻结在收尾时点——与范围对账的
++ *   实时窗口锚不同源，故不复用范围对账的单文件比对弹窗）。
+  */
+ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProps) {
+   const query = useQuery({
+@@ -31,16 +51,29 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+   });
+ 
+   const [open, setOpen] = useState(false);
++  /** 测试文件预览目标（null = 关）。 */
++  const [testPath, setTestPath] = useState<string | null>(null);
++  /** 归档留档 diff 目标（null = 关）。 */
++  const [patchPath, setPatchPath] = useState<string | null>(null);
++
++  const patchQ = useQuery({
++    queryKey: ["changePatchFile", workspaceId, changeId, patchPath],
++    queryFn: () => getChangePatchFile(workspaceId, changeId, patchPath!),
++    enabled: patchPath !== null,
++    retry: false,
++    refetchOnWindowFocus: false,
++  });
+ 
+   // 失败静默：区块隐藏（不影响详情主内容）。
+   if (query.isError) return null;
+ 
+   const data = query.data;
+-  const frCount = data?.fr_entries.length ?? 0;
+-  const decCount = data?.decisions.length ?? 0;
+-  const rowCount = data?.test_rows.length ?? 0;
++  const frCount = data?.fr_entries?.length ?? 0;
++  const decCount = data?.decisions?.length ?? 0;
++  const rowCount = data?.test_rows?.length ?? 0;
+   const hasAudit = Boolean(data?.patch || data?.delta);
+   const total = frCount + decCount + rowCount + (hasAudit ? 1 : 0);
++  const patchFileList = data?.patch?.file_list ?? [];
+ 
+   return (
+     <section
+@@ -89,10 +122,13 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                 <span>需求规则（FR 索引）</span>
+                 <span className="text-[10px] text-muted-foreground/70">knowledge/fr</span>
+               </div>
+-              {data?.fr_entries.map((e) => (
++              {data?.fr_entries?.map((e) => (
+                 <Link
+                   key={e.id}
+-                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(e.file)}`}
++                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
++                    e.file,
++                  )}&anchor=${encodeURIComponent(e.id)}`}
++                  title={`打开知识库并定位到 ${e.id}`}
+                   className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 hover:underline"
+                 >
+                   <span className="font-mono text-[10px] text-brand-700">{e.id}</span>
+@@ -115,10 +151,13 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                   knowledge/decisions
+                 </span>
+               </div>
+-              {data?.decisions.map((d) => (
++              {data?.decisions?.map((d) => (
+                 <Link
+                   key={d.id}
+-                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(d.file)}`}
++                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
++                    d.file,
++                  )}&anchor=${encodeURIComponent(d.id)}`}
++                  title={`打开知识库并定位到 ${d.id}`}
+                   className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 hover:underline"
+                 >
+                   <span className="font-mono text-[10px] text-cyan-700">{d.id}</span>
+@@ -139,19 +178,37 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                 <span>测试绑定</span>
+                 <span className="text-[10px] text-muted-foreground/70">test-trace</span>
+               </div>
+-              {data?.test_rows.map((r) => (
++              {data?.test_rows?.map((r) => (
+                 <div
+                   key={r.row_id}
+                   className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0"
+                 >
+-                  <span className="font-mono text-[10px] text-muted-foreground">
+-                    {r.row_id.split(":").slice(1, 3).join(":") || r.row_id}
++                  <span
++                    className="shrink-0 font-mono text-[10px] text-muted-foreground"
++                    title="变更内锚点：对应本变更 requirements.md 的 FR 编号（与知识库 FR 索引条目 FR-<域>-NNN 不是同一套 id）"
++                  >
++                    变更内{" "}
++                    {r.anchor ??
++                      (r.row_id.split(":").slice(1, 3).join(":") || r.row_id)}
+                   </span>
+-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+-                    {r.tests.join(" ｜ ")}
++                  <span className="min-w-0 flex-1 truncate text-left">
++                    {(r.tests ?? []).map((t, i) => (
++                      <span key={t}>
++                        {i > 0 ? <span className="text-muted-foreground/50"> ｜ </span> : null}
++                        <button
++                          type="button"
++                          data-testid={`change-assets-test-file-${t}`}
++                          onClick={() => setTestPath(t)}
++                          title={`查看测试文件内容：${t}`}
++                          className="rounded text-muted-foreground underline-offset-2 hover:text-brand-700 hover:underline"
++                        >
++                          {t}
++                        </button>
++                      </span>
++                    ))}
+                   </span>
+                   {r.state ? (
+-                    <span className="rounded-full bg-amber-50 px-1.5 text-[10px] text-amber-700">
++                    <span className="shrink-0 rounded-full bg-amber-50 px-1.5 text-[10px] text-amber-700">
+                       {r.state}
+                     </span>
+                   ) : null}
+@@ -183,10 +240,101 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                   </span>
+                 ) : null}
+               </div>
++              {patchFileList.length > 0 ? (
++                <div className="mt-1.5 border-t border-dashed pt-1.5">
++                  <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
++                    <span>改动文件（点开看该文件在 change.patch 中的 diff）</span>
++                    {data.patch?.files_truncated ? (
++                      <span className="shrink-0 text-warning">清单已截断</span>
++                    ) : null}
++                  </div>
++                  <ul
++                    data-testid="change-assets-patch-files"
++                    className="max-h-40 overflow-auto"
++                  >
++                    {patchFileList.map((p) => (
++                      <li key={p} className="border-b border-dashed last:border-b-0">
++                        <button
++                          type="button"
++                          data-testid={`change-assets-patch-file-${p}`}
++                          onClick={() => setPatchPath(p)}
++                          title={`查看 ${p} 在 change.patch 中的 diff`}
++                          className="flex w-full items-baseline gap-2 py-1 text-left hover:underline"
++                        >
++                          <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-foreground">
++                            {p}
++                          </span>
++                          <span className="shrink-0 text-[10px] text-brand-700">看 diff</span>
++                        </button>
++                      </li>
++                    ))}
++                  </ul>
++                </div>
++              ) : null}
+             </div>
+           ) : null}
+         </div>
+       )}
++
++      {/* 测试文件预览弹窗（FR-03）：explorer 取数（仓库文件），与变更文件树同款只读预览。 */}
++      <Dialog open={testPath !== null} onOpenChange={(v) => !v && setTestPath(null)}>
++        <DialogContent className="flex h-[80vh] max-w-4xl flex-col gap-0 p-0">
++          <DialogHeader className="border-b px-4 py-3">
++            <DialogTitle className="text-sm">测试文件</DialogTitle>
++            <DialogDescription className="truncate font-mono text-[11px]">
++              {testPath}
++            </DialogDescription>
++          </DialogHeader>
++          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
++            <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
++              {testPath !== null ? (
++                <FilePreview workspaceId={workspaceId} filePath={testPath} />
++              ) : null}
++            </div>
++          </div>
++        </DialogContent>
++      </Dialog>
++
++      {/* 归档留档单文件 diff 弹窗（FR-04）：冻结 patch 切片，非实时窗口。 */}
++      <Dialog open={patchPath !== null} onOpenChange={(v) => !v && setPatchPath(null)}>
++        <DialogContent className="flex h-[80vh] max-w-5xl flex-col gap-0 p-0">
++          <DialogHeader className="border-b px-4 py-3">
++            <DialogTitle className="text-sm">归档留档 · 单文件 diff</DialogTitle>
++            <DialogDescription className="truncate font-mono text-[11px]">
++              {patchPath} · change.patch（收尾时点冻结）
++            </DialogDescription>
++          </DialogHeader>
++          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
++            {patchQ.isPending ? (
++              <p className="py-6 text-center text-xs text-muted-foreground">读取中…</p>
++            ) : patchQ.isError ? (
++              <p className="py-6 text-center text-xs text-destructive">
++                {patchQ.error instanceof Error ? patchQ.error.message : "读取失败"}
++              </p>
++            ) : patchQ.data?.note ? (
++              <p
++                data-testid="change-assets-patch-note"
++                className="py-6 text-center text-xs text-muted-foreground"
++              >
++                {patchQ.data.note}
++              </p>
++            ) : patchQ.data?.diff ? (
++              <div className="flex min-h-0 flex-1 flex-col overflow-auto">
++                {patchQ.data.truncated ? (
++                  <p className="mb-1 shrink-0 text-[11px] text-warning">
++                    该文件 diff 过大，仅显示前 200k 字符。
++                  </p>
++                ) : null}
++                <DiffView content={patchQ.data.diff} />
++              </div>
++            ) : (
++              <p className="py-6 text-center text-xs text-muted-foreground">
++                该文件在 change.patch 中无 diff。
++              </p>
++            )}
++          </div>
++        </DialogContent>
++      </Dialog>
+     </section>
+   );
+ }
+diff --git a/frontend/src/components/changes/scope-audit-command-card.tsx b/frontend/src/components/changes/scope-audit-command-card.tsx
+index a044581b4..fdd6ae13e 100644
+--- a/frontend/src/components/changes/scope-audit-command-card.tsx
++++ b/frontend/src/components/changes/scope-audit-command-card.tsx
+@@ -26,6 +26,14 @@
+  * useQuickSessionName 反查）。反查失败 / ok=false（会话已清理等）→ 降级为
+  * 命令 + 提示，不阻断展示（advisory 语义）。
+  *
++ * 降级视图（2026-09-25-change-detail-assets-usability / FR-05）：ok=true 但
++ * ``degraded_reason`` 非空 = CLI 降级为「实际侧 only 视图（不出三态列）」，
++ * 行内无 verdict 字段——原实现照样渲染三态 0/0/0，被读成「无计划外改动」
++ * （生产实证：已归档轻量变更 39 文件 +124162/−0 三态全 0，实为当前工作区
++ * 未提交窗口）。现改为：不渲染三态 chips（含分组形态的顶层降级说明），
++ * 显式展示降级原因；``archived`` 为真时追加「真实改动面见沉淀资产 · 归档留档」
++ * 的指路（该 prop 由变更详情页传入）。
++ *
+  * 命令前缀单一取值点（SCOPE_AUDIT_CMD_PREFIX）：直接显示 sillyspec 正式命令
+  * （本机已安装版本若尚未含 scope-audit，跑命令会得「未知命令」提示升级），
+  * 全部命令经 buildScopeAuditCommand 拼接。
+@@ -124,6 +132,12 @@ export type ScopeAuditTarget =
+ 
+ export interface ScopeAuditCommandCardProps {
+   target: ScopeAuditTarget;
++  /**
++   * 目标变更是否已归档（2026-09-25-change-detail-assets-usability / FR-05）。
++   * 归档变更的实时窗口锚采到的是「当前工作区未提交改动」，与该变更无关——
++   * 降级说明里需要据此指路到「沉淀资产 · 归档留档」。缺省 false（不渲染该提示）。
++   */
++  archived?: boolean;
+ }
+ 
+ /** full-flow verdict 徽章（色阶走语义 token，✓/⚠️ 与工具表同款标记）。 */
+@@ -148,12 +162,12 @@ const KIND_LABEL: Record<string, string> = {
+   binary: "二进制",
+ };
+ 
+-/** 行徽章（mode 分派：full-flow 取 verdict，quick 取 attribution）。 */
++/** 行徽章（mode 分派：full-flow 取 verdict，quick 取 attribution）；无键 → null（不渲染空徽章）。 */
+ function rowBadge(row: ScopeAuditRow, mode: string) {
+   const key = mode === "quick" ? row.attribution : row.verdict;
+-  const meta =
+-    (mode === "quick" ? ATTR_META : VERDICT_META)[key ?? ""] ?? null;
+-  return meta ?? { label: key ?? "—", className: "bg-muted text-muted-foreground" };
++  if (key === null || key === undefined || key === "") return null;
++  const meta = (mode === "quick" ? ATTR_META : VERDICT_META)[key];
++  return meta ?? { label: key, className: "bg-muted text-muted-foreground" };
+ }
+ 
+ /** 行数紧凑展示（+N 绿 / −M 红；null=二进制/降级 → —）。 */
+@@ -209,14 +223,16 @@ function DetailRow({
+         title="点击查看该文件的变化比对（对账同源锚点 diff）"
+         className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/60"
+       >
+-        <span
+-          className={cn(
+-            "shrink-0 rounded px-1 text-[10px] leading-4",
+-            badge.className,
+-          )}
+-        >
+-          {badge.label}
+-        </span>
++        {badge && (
++          <span
++            className={cn(
++              "shrink-0 rounded px-1 text-[10px] leading-4",
++              badge.className,
++            )}
++          >
++            {badge.label}
++          </span>
++        )}
+         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
+           {row.path}
+         </span>
+@@ -283,6 +299,42 @@ function CommandRow({
+   );
+ }
+ 
++/**
++ * 降级视图说明（2026-09-25-change-detail-assets-usability / FR-05）。
++ *
++ * ok=true 但 ``degraded_reason`` 非空 = CLI 降级为「实际侧 only 视图（不出三态
++ * 列）」：行内没有 verdict 字段，三态计数恒为 0 但并非「无计划外改动」。原实现
++ * 照样渲染三态 chip 的 0/0/0，属误导性展示（生产实证：已归档轻量变更卡面显示
++ * 39 文件 +124162/−0 且三态全 0，实际是当前工作区未提交窗口，与变更无关）。
++ */
++function DegradedNotice({
++  reason,
++  archived,
++}: {
++  reason: string;
++  archived: boolean;
++}) {
++  return (
++    <>
++      <p
++        className="text-[11px] leading-relaxed text-warning"
++        data-testid="scope-audit-degraded-view"
++      >
++        ⚠️ 本视图已降级：{reason}
++      </p>
++      <p
++        className="mt-1 text-[11px] leading-relaxed text-muted-foreground"
++        data-testid="scope-audit-degraded-scope"
++      >
++        该视图无三态列（计划侧不可用），下方明细是实时窗口采集的文件面
++        {archived
++          ? "——本变更已归档，其真实改动面见「沉淀资产 · 归档留档」。"
++          : "，不代表本变更的计划外改动。"}
++      </p>
++    </>
++  );
++}
++
+ /** 命令折叠区（卡尾次要入口：链路不可用兜底 + CLI 习惯）。 */
+ function CommandSection({ identifier }: { identifier: string }) {
+   return (
+@@ -306,7 +358,10 @@ function CommandSection({ identifier }: { identifier: string }) {
+   );
+ }
+ 
+-export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
++export function ScopeAuditCommandCard({
++  target,
++  archived = false,
++}: ScopeAuditCommandCardProps) {
+   // quick 会话名解析（仅 quick 分支取数；change 分支 hooks 顺序恒定经 enabled=false 保持）。
+   const enabled = target.kind === "quick";
+   const workspaceId = target.workspaceId;
+@@ -433,14 +488,22 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
+     const order = isQuick
+       ? ["declared", "soft", "undeclared"]
+       : ["planned", "unplanned", "untouched"];
++    // 降级视图（ok=true + degraded_reason，FR-05）：三态列不可信 → 不渲染三态 chips。
++    const degradedReason = audit.degraded_reason ?? null;
+ 
+     // 分组形态（契约 v2，2026-09-20-scope-audit-cross-repo-platform，D-003/D-005）：
+     // 全表合计行 + 每仓一段（段头=仓标识+锚点档 chip；chips 计数取信封
+     // repos[].totals 单一源，不前端重算）；degraded 仓段整段 ⚠️ 原因不渲染 chips。
++    // 顶层降级说明叠加在分组之上（各仓 chip 取信封 totals，与顶层降级不同源）。
+     if (groupedRepos) {
+       const verdictOrder = ["planned", "unplanned", "untouched"] as const;
+       return (
+         <>
++          {degradedReason && (
++            <div className="mb-2">
++              <DegradedNotice reason={degradedReason} archived={archived} />
++            </div>
++          )}
+           <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+             <span>
+               全表{" "}
+@@ -559,27 +622,37 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
+             <span className="text-error">−{fmtNum(audit.totals?.deletions)}</span>
+           </span>
+         </p>
+-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+-          {order.map((key) => {
+-            const meta = badgeMap[key];
+-            if (!meta) return null;
+-            return (
+-              <span
+-                key={key}
+-                data-testid={`scope-audit-chip-${key}`}
+-                className={cn(
+-                  "rounded-full px-2 py-px text-[11px] font-medium",
+-                  meta.className,
+-                )}
+-              >
+-                {meta.label} {counts.get(key) ?? 0}
+-              </span>
+-            );
+-          })}
++        {degradedReason ? (
++          // 降级：三态列不存在（行内无 verdict）——渲染 0/0/0 会被读成「无计划外改动」，
++          // 故只出降级说明 + 明细入口（FR-05）。
++          <div className="mt-1.5">
++            <DegradedNotice reason={degradedReason} archived={archived} />
++          </div>
++        ) : (
++          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
++            {order.map((key) => {
++              const meta = badgeMap[key];
++              if (!meta) return null;
++              return (
++                <span
++                  key={key}
++                  data-testid={`scope-audit-chip-${key}`}
++                  className={cn(
++                    "rounded-full px-2 py-px text-[11px] font-medium",
++                    meta.className,
++                  )}
++                >
++                  {meta.label} {counts.get(key) ?? 0}
++                </span>
++              );
++            })}
++          </div>
++        )}
++        <div className="mt-1.5 flex flex-wrap items-center justify-end gap-1.5">
+           <Button
+             size="sm"
+             variant="outline"
+-            className="ml-auto h-6 px-2 text-[11px]"
++            className="h-6 px-2 text-[11px]"
+             onClick={() => setDetailOpen(true)}
+             data-testid="scope-audit-detail-entry"
+           >
+@@ -606,7 +679,7 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
+           <h2 className="text-xs font-medium">⚖️ 范围对账（scope-audit）</h2>
+           <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+             「计划改动 × 实际改动」对账：三态全表 + 行数；advisory
+-            只读不设门禁，已归档变更可查。
++            只读不设门禁。计划侧不可用时降级为实时窗口视图，卡面显式标注、不出三态。
+           </p>
+         </div>
+       </div>
+@@ -633,6 +706,15 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
+           </div>
+         }
+       >
++        {audit?.ok === true && audit.degraded_reason ? (
++          // 降级横幅（FR-05）：弹窗里同样不能让人把「实际侧 only」读成三态全表。
++          <div className="mb-2 rounded border border-warning/40 bg-warning/10 px-2 py-1.5">
++            <DegradedNotice
++              reason={audit.degraded_reason}
++              archived={archived}
++            />
++          </div>
++        ) : null}
+         <ul
+           data-testid="scope-audit-detail-rows"
+           className="max-h-[calc(100vh-320px)] min-h-[240px] overflow-auto rounded border bg-card"
+diff --git a/frontend/src/components/knowledge/entry-card-list.tsx b/frontend/src/components/knowledge/entry-card-list.tsx
+index 944ff0ff6..a9a162a99 100644
+--- a/frontend/src/components/knowledge/entry-card-list.tsx
++++ b/frontend/src/components/knowledge/entry-card-list.tsx
+@@ -350,6 +350,11 @@ function DecisionCard({
+     <article
+       data-testid="decision-entry-card"
+       data-status={entry.status}
++      // 条目级落点（2026-09-25-change-detail-assets-usability / FR-01/02）：结构化条目
++      // 卡此前没有锚点属性，FR/决策索引行跳进来只能落到文件级。键与手册形态同构
++      // （``文件#锚``），锚取条目 id（``FR-cli-entry-075`` / ``D-001@v1``）——与沉淀
++      // 资产卡 href 的 anchor 参数同一取值。
++      data-entry-anchor={entry.id ? `${filename}#${entry.id}` : undefined}
+       className={cn(
+         "rounded-md border border-border/60 p-2.5 transition-colors hover:border-brand-400",
+         superseded && "border-border/40 bg-muted/40 opacity-60",
+diff --git a/frontend/src/components/mobile/mobile-change-detail.tsx b/frontend/src/components/mobile/mobile-change-detail.tsx
+index 35e56f7d3..19e0768b8 100644
+--- a/frontend/src/components/mobile/mobile-change-detail.tsx
++++ b/frontend/src/components/mobile/mobile-change-detail.tsx
+@@ -490,9 +490,11 @@ export function MobileChangeDetail({
+       <ChangeUsageCard kind="change" workspaceId={workspaceId} refKey={changeId} />
+ 
+       {/* 范围对账卡（task-06 / FR-05 / D-005@v1：import 复用原样挂载，
+-          identifier=change_key 已归档也可查，接线对齐桌面 :432-437） */}
++          identifier=change_key；archived 传入对齐桌面（2026-09-25-change-detail-
++          assets-usability / FR-05）——降级时指路「沉淀资产 · 归档留档」） */}
+       <ScopeAuditCommandCard
+         target={{ kind: "change", workspaceId, changeKey: change.change_key }}
++        archived={change.status === "archived" || change.location === "archive"}
+       />
+ 
+       {/* thin/quick 辅助阶段说明卡（2026-09-25-change-center-thin-flow task-08）：
+diff --git a/frontend/src/lib/changes.ts b/frontend/src/lib/changes.ts
+index 55c61ab8e..519ffd280 100644
+--- a/frontend/src/lib/changes.ts
++++ b/frontend/src/lib/changes.ts
+@@ -741,51 +741,15 @@ export function listChangeEvents(
+ }
+ 
+ // ── 沉淀资产（2026-09-25-change-precipitated-assets / D-001@v1 方案 a）─────────
++// 类型统一取 OpenAPI 生成版（CLAUDE.md 规则 21：前端接口类型禁止手写；
++// 2026-09-25-change-detail-assets-usability 顺手清掉本段旧手写副本——生成版
++// 数组字段为可选，消费方按 `?.` + `?? []` 取，不假设后端一定回填）。
+ 
+-export interface ChangeAssetsFrEntry {
+-  id: string;
+-  title: string;
+-  status: string | null;
+-  file: string;
+-}
+-
+-export interface ChangeAssetsDecisionEntry {
+-  id: string;
+-  title: string;
+-  status: string | null;
+-  file: string;
+-}
++/** 沉淀资产聚合响应（GET /changes/{cid}/assets）。 */
++export type ChangeAssetsResponse = components["schemas"]["ChangeAssetsRead"];
+ 
+-export interface ChangeAssetsTestRow {
+-  row_id: string;
+-  anchor: string | null;
+-  tests: string[];
+-  state: string | null;
+-}
+-
+-export interface ChangeAssetsPatchMeta {
+-  files: number | null;
+-  additions: number | null;
+-  deletions: number | null;
+-  patch_status: string | null;
+-  saved_at: string | null;
+-}
+-
+-export interface ChangeAssetsDeltaMeta {
+-  headline: string | null;
+-  before_lines: number | null;
+-  delta_lines: number | null;
+-}
+-
+-export interface ChangeAssetsResponse {
+-  change_key: string;
+-  archived: boolean;
+-  fr_entries: ChangeAssetsFrEntry[];
+-  decisions: ChangeAssetsDecisionEntry[];
+-  test_rows: ChangeAssetsTestRow[];
+-  patch: ChangeAssetsPatchMeta | null;
+-  delta: ChangeAssetsDeltaMeta | null;
+-}
++/** 归档留档单文件 diff 切片响应（api-types 生成版）。 */
++export type ChangePatchFileResponse = components["schemas"]["ChangePatchFileRead"];
+ 
+ export function getChangeAssets(
+   workspaceId: string,
+@@ -795,3 +759,19 @@ export function getChangeAssets(
+     `/api/workspaces/${workspaceId}/changes/${changeId}/assets`,
+   );
+ }
++
++/**
++ * 读某文件在 change.patch 中的 diff 切片（2026-09-25-change-detail-assets-usability /
++ * FR-04）。冻结在收尾时点，与范围对账的实时窗口锚不同源；未命中/缺件由响应
++ * ``note`` 表达（不是错误态），仅路径非法/无权限抛 ApiError。
++ */
++export function getChangePatchFile(
++  workspaceId: string,
++  changeId: string,
++  path: string,
++): Promise<ChangePatchFileResponse> {
++  const q = new URLSearchParams({ path });
++  return apiFetch<ChangePatchFileResponse>(
++    `/api/workspaces/${workspaceId}/changes/${changeId}/assets/patch-file?${q.toString()}`,
++  );
++}

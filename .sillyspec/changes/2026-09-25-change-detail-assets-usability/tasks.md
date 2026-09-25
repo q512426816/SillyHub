@@ -7,7 +7,7 @@ created_at: 2026-09-25T08:10:16.781Z
 > 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
 > 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
 
-<!-- MACHINE-DRAFT:tasks-rows:118e46ec8fc8b67b8f57e9aa2cbd7e7ba788cd9e8a967ec6f5b7937c92bb0391:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-detail-assets-usability 留痕重锚 -->
+<!-- MACHINE-DRAFT:tasks-rows:7d160c390ec2536815a352dfb778a9d99cd96424da6cbf4f6efaa96f06addb92:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-change-detail-assets-usability 留痕重锚 -->
 - [x] task-01: FR
 - [x] task-02: 决策索引行点击后知识库页落到对应文件并滚动到该条目卡
 - [x] task-03: 测试绑定行提供入口，可在弹窗内读到仓库内该测试文件内容

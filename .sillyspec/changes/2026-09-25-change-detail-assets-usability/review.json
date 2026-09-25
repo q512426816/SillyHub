@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-change-detail-assets-usability",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "非 ASCII / 需转义路径的文件在 change.patch 切片中必然漏命中，弹窗把「命中不到」表述为「该文件不在 change.patch 内」",
+      "evidence": "assets.py:167 `_unquote_patch_path` 只反转义 `\\\"` 与 `\\\\`，不处理 git 默认 core.quotePath=true 对 ≥0x80 字节输出的八进制形态（如 `\\346\\234\\211`）；切片候选与 change-patch.json 的 UTF-8 路径逐字比较（:198/:202），不等即返回 None，`_read_patch_file_diff`:210 转成 note「该文件不在 change.patch 内」——文件其实在清单里（FR-04 的『明确说明』被用在了不该出现的场景）。钉住引号路径的唯一用例样本是字面 CJK（tests/test_assets.py `'diff --git \"a/src/有 空格.js\" …'`），真实 git 不会这样输出，防不住该形态。条件性：若 CLI 生成 change.patch 时已关 quotePath 则不触发——本变更 change.patch 的 20 个路径全 ASCII，冻结件内无样本可证伪。",
+      "location": "backend/app/modules/change/assets.py:167"
+    },
+    {
+      "severity": "P2",
+      "title": "FR-06「相关测试全绿 + ruff/tsc 零错误」在冻结件中不可自证（门禁 test: skipped，且门禁命令不含前端 tsc）",
+      "evidence": "flow-state.yaml:15 gate_summary = `test: skipped｜lint: passed ← ruff check / ruff format --check / mypy / frontend pnpm lint / daemon pnpm typecheck`——pytest、vitest、frontend `pnpm typecheck` 均不在实跑命令内；requirements.md:48 的 FR-06 测试绑定自述「不适用：验收口径本身」。绑定作答所列用例文件真实存在且断言具体（test_assets.py 的命中/未命中/截断/422/404；change-assets-card / scope-audit-command-card / knowledge-page 的深链与降级用例），故记录为「未验证证据面」而非已证缺陷；本评审全程只读，未执行任何用例。",
+      "location": ".sillyspec/changes/2026-09-25-change-detail-assets-usability/flow-state.yaml:15"
+    },
+    {
+      "severity": "P3",
+      "title": "冻结清单缺生成物 frontend/src/lib/api-types.ts（该件含本变更新增 schema，而 CI 不重生成类型）",
+      "evidence": "change-patch.json:5-26 的 20 文件清单列了 frontend/src/lib/changes.ts 却无 frontend/src/lib/api-types.ts；而 api-types.ts:13620/13653/13658 已含本变更新增的 ChangePatchFileRead 与 ChangePatchMeta.file_list/files_truncated，lib/changes.ts:752 直接引用该 schema（lib/changes.ts 的手写类型删除依赖它）；.github/workflows/frontend-ci.yml 只有 pnpm lint / typecheck / test:coverage，无 gen:types 步骤 → 该生成物必须随提交落地，否则 FR-06 的 tsc 面不成立。冻结点无法区分「CLI 过滤生成物」与「漏收」，请一句确认。",
+      "location": ".sillyspec/changes/2026-09-25-change-detail-assets-usability/change-patch.json:5"
+    },
+    {
+      "severity": "P3",
+      "title": "design 接口契约的字段名与实现漂移（声明 `files: list[str]`，实现为 `file_list`）",
+      "evidence": "design.md:30 写「`ChangePatchMeta` 新增 `files: list[str]`（change-patch.json 的 files 投影，上限 500 条）与 `files_truncated: bool`」，实现保留既有 `files: int`（totals 计数）另加 `file_list: list[str]`（schema.py / 生成类型 api-types.ts:13653 同实现）；实现自洽且不破坏既有 files 语义，但照 design 取数的调用方会拿到 int。",
+      "location": ".sillyspec/changes/2026-09-25-change-detail-assets-usability/design.md:30"
+    },
+    {
+      "severity": "P3",
+      "title": "两处 FR 句子的绑定用例未断言（FR-05 明细弹窗降级横幅；FR-03 弹窗内失败提示）",
+      "evidence": "FR-05 的「明细弹窗同样带降级横幅」已实现（scope-audit-command-card.tsx:709 弹窗内 DegradedNotice），但两条新增用例只验卡面、不打开明细弹窗；FR-03 的「失败时弹窗内给出可读错误提示」由 FilePreview 兑现（file-preview.tsx:397-403 有 isError Alert），而卡片用例用替身 FilePreview（change-assets-card.test.tsx 的 vi.mock），该句在卡片层无断言面。属覆盖缺口，非承诺违反。",
+      "location": "frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx:370"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok｜边界已裁决：可接受——URL 深链在列表就绪后消费一次并按「file#anchor」记忆（knowledge/page.tsx:406-416），条目滚动改 ≤12 帧有界重试、耗尽静默落文件级（:387）；「查无此文件同样标记已消费、不重试不报错」是同一显式边界（requirements FR-01 原文），不产生错误态或白屏。范围对账降级原因与明细同源同响应，无跨请求竞态；rAF 回调只做 DOM 查询、不写状态，组件切换后残留 tick 无副作用。",
+    "并发": "ok｜边界已裁决：可接受——四条链路全只读：后端仅读 change-patch.json/change.patch（assets.py:151/210，asyncio.to_thread），前端仅 useQuery，无写路径、无共享可变状态，并发打开只产生重复只读请求。「切片 200k 字符上限 + truncated」「清单 500 条上限 + files_truncated」「缺件/未命中以 note fail-open 不 500」「在途变更同样允许调用端点」四条边界裁为可接受：上限一律显式标注（UI「清单已截断」「仅显示前 200k 字符」），不静默丢数据，且只影响展示面。",
+    "切换": "ok｜边界已裁决：可接受——取数 key 含 workspaceId/changeId（change-assets-card.tsx:47/60），弹窗 open 由 `path !== null` 派生即关即卸载（:285/:302），URL 参数只消费一次且不回写历史（无 router.replace/push，仅 useSearchParams）。「双端 patch 切片并存（后端 slice_patch_for_file 与 CLI slicePatchForFile，只解析块头不语义推断，漂移面限于展示）」「不复用范围对账单文件弹窗（其冻结分支只认 scope-audit.patch，会退化成实时窗口 diff）」两条取舍均不参与审计判据——可接受；前者对非 ASCII 路径的保真问题已单列为 findings(P2)。",
+    "作用域": "ok｜边界已裁决：可接受——change 目录=本工作区 spec_root/change.path（assets.py:344-347；change 经 `Change.workspace_id == workspace_id` 过滤），path 参数复用 normalize_scope_file_path（scope_audit.py:73，ScopeFileDiffInvalidParam→422，router.py:551-571），不跨工作区、不跨变更；补丁只读本变更归档目录。「前缀归一只覆盖 knowledge//.sillyspec//.sillyspec/knowledge//裸名四形态、未知形态静默回落文件级」「该视图无三态列、文件面为实时窗口（不代表本变更改动面）」两条显式边界可接受（不报错、文案已明写）；「全量测试交 CI（仓库规则 0）」的定向用例证据缺失已进 findings(P2)，非维度缺陷。"
+  },
+  "reviewedAt": "2026-09-25T16:50:58+08:00"
+}

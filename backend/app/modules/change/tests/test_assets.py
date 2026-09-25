@@ -251,7 +251,7 @@ def test_slice_patch_for_file_hits_own_block_only() -> None:
 
 
 def test_slice_patch_for_file_rename_and_quoted_paths() -> None:
-    """改名块头两侧路径都算命中；引号包裹的特殊字符路径解引号后命中。"""
+    """改名块头两侧路径都算命中；引号包裹路径解引号后命中（含 core.quotePath 八进制形态）。"""
     rename = (
         "diff --git a/src/old-name.js b/src/new-name.js\n"
         "similarity index 90%\n"
@@ -262,8 +262,18 @@ def test_slice_patch_for_file_rename_and_quoted_paths() -> None:
     assert slice_patch_for_file(rename, "src/new-name.js") is not None
     assert slice_patch_for_file(rename, "src/old-name.js") is not None
 
-    quoted = 'diff --git "a/src/有 空格.js" "b/src/有 空格.js"\n@@ -1 +1 @@\n-a\n+b\n'
+    # 真实 git 输出形态（core.quotePath=true）：非 ASCII 字节按八进制转义输出，
+    # 逐字节还原后须与 UTF-8 路径逐字相等——评审 P2 的钉子用例（字面 CJK 样本
+    # 真实 git 不会产出，防不住该形态）。
+    quoted = (
+        'diff --git "a/src/\\346\\234\\211 \\347\\251\\272\\346\\240\\274.js" '
+        '"b/src/\\346\\234\\211 \\347\\251\\272\\346\\240\\274.js"\n'
+        "@@ -1 +1 @@\n-a\n+b\n"
+    )
     assert slice_patch_for_file(quoted, "src/有 空格.js") is not None
+    # 转义引号（\"）仍按标准转义还原
+    escaped = 'diff --git "a/src/q\\"uote.js" "b/src/q\\"uote.js"\n@@ -1 +1 @@\n-a\n+b\n'
+    assert slice_patch_for_file(escaped, 'src/q"uote.js') is not None
 
 
 def test_slice_patch_for_file_miss_returns_none() -> None:
