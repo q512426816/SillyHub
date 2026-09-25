@@ -1,0 +1,29 @@
+{
+  "change": "2026-09-25-knowledge-stats-layering",
+  "baseline": "613728c7c3c53fa0dfa0a01a5920a0b734497221",
+  "head": "80645bf25c61416beb100daa5941b4a723e65c73",
+  "files": [
+    "backend/app/modules/knowledge/hits.py",
+    "backend/app/modules/knowledge/parser.py",
+    "backend/app/modules/knowledge/schema.py",
+    "backend/app/modules/knowledge/tests/test_hits.py",
+    "backend/openapi.json",
+    "frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx",
+    "frontend/src/components/knowledge/ops-dashboard.tsx",
+    "frontend/src/lib/api-types.ts",
+    ".sillyspec/changes/2026-09-25-knowledge-stats-layering/design.md",
+    ".sillyspec/changes/2026-09-25-knowledge-stats-layering/flow-state.yaml",
+    ".sillyspec/changes/2026-09-25-knowledge-stats-layering/proposal.md",
+    ".sillyspec/changes/2026-09-25-knowledge-stats-layering/requirements.md",
+    ".sillyspec/changes/2026-09-25-knowledge-stats-layering/tasks.md"
+  ],
+  "totals": {
+    "files": 13,
+    "additions": 725,
+    "deletions": 13
+  },
+  "savedAt": "2026-09-25T15:57:26.940Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "eb2f4f79f9d5c79e2860d2ecfc0faead680c1bb39ca5264ca4e8b3a2c73d02b3",
+  "patchStatus": "ok"
+}

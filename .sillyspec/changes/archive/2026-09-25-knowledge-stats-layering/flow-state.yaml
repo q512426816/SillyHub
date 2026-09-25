@@ -1,0 +1,21 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+baseline_commit: 613728c7c3c53fa0dfa0a01a5920a0b734497221
+updatedAt: '2026-09-25T16:09:01.300Z'
+gate_summary: >-
+  test: skipped — 跳过原因：test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）。｜lint: passed ← cd backend && uv run ruff check
+  . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
+  typecheck（15.0s）｜门文件 11 个
+

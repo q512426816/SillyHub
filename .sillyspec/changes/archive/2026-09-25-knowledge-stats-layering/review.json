@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-knowledge-stats-layering",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "usage_board 仍包含幽灵锚并与 orphan_anchors 双呈现，FR-02「不与 usage_board 混排」在榜单侧未兑现",
+      "evidence": "board 构建循环遍历 anchor_total.items()（含解析失败锚）无 entry_anchors 过滤——同一幽灵锚既进使用率榜又进 orphan_anchors 单列；动机所述「66% 幽灵锚在榜单混排」的榜单侧痛点保留",
+      "location": "backend/app/modules/knowledge/hits.py:466（对照 orphans 过滤 :488-491）"
+    },
+    {
+      "severity": "P2",
+      "title": "新前端读旧后端（design 盲维3 自声明场景）orphan_anchors undefined → TypeError 面板崩溃；覆盖率分数行渲染 undefined/undefined",
+      "evidence": "旧后端响应无新字段：routablePct 回退成立（undefined>0=false→coveragePct），但解构后 orphan_anchors.length（:297）抛 TypeError；分数行 :169 直接打 routable 字段 → \"undefined/undefined 条\"——design 声称「回退分支已实现」仅对百分数成立，整卡读数安全未兑现",
+      "location": "frontend/src/components/knowledge/ops-dashboard.tsx:124,169,297"
+    },
+    {
+      "severity": "P3",
+      "title": "routable_entries=0 且 total>0（INDEX 路由全失配真形态）主数值回退全集但分数读数仍「0/0 条」",
+      "evidence": "routablePct 三元回退 coveragePct，但分数行恒渲染 routable_used/routable_entries → 百分比（全集口径）与分数（0/0）口径不一致，FR-08「不出现空读数」未完全满足",
+      "location": "frontend/src/components/knowledge/ops-dashboard.tsx:131-137,169"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-10 data_until=None「不显示该段」分支无测试覆盖",
+      "evidence": "绑定的「零使用空态用例」在空态提前 return，不渲染头部行，未执行 dataUntilText 空串分支；无用例喂 data_until=null 且渲染完整面板",
+      "location": "frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx:244（零使用空态用例）；组件分支 ops-dashboard.tsx:137-151"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "finding",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-25T16:06:30Z"
+}

@@ -1,0 +1,1039 @@
+diff --git a/backend/app/modules/knowledge/hits.py b/backend/app/modules/knowledge/hits.py
+index e5865b1f9..837d9fcfe 100644
+--- a/backend/app/modules/knowledge/hits.py
++++ b/backend/app/modules/knowledge/hits.py
+@@ -30,7 +30,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
+ from sqlmodel import Field
+ 
+ from app.models.base import BaseModel
+-from app.modules.knowledge.parser import anchor_match_key, parse_knowledge_entries
++from app.modules.knowledge.parser import (
++    anchor_match_key,
++    parse_index_routes,
++    parse_knowledge_entries,
++)
+ from app.modules.knowledge.schema import (
+     CoverageOut,
+     CoverageTrendPoint,
+@@ -41,6 +45,7 @@ from app.modules.knowledge.schema import (
+     FreshnessOut,
+     HitsBatchOut,
+     KnowledgeStatsOut,
++    OrphanAnchorOut,
+     UsageBoardItem,
+ )
+ from app.modules.knowledge.service import KnowledgeService
+@@ -294,6 +299,18 @@ class HitsService:
+                 return next(iter(candidates))
+             return raw
+ 
++        # 可路由面（2026-09-25-knowledge-stats-layering）：INDEX 路由小节锚点（经
++        # anchor_match_key 归一匹配条目锚点）∪ 文件级路由文件的全部条目。INDEX 缺失/
++        # 无路由行 → 退化为全集（routable == total，不虚摊也不缩水）。
++        section_routes, file_routes = await asyncio.to_thread(parse_index_routes, root)
++        route_keys = {anchor_match_key(a) for a in section_routes}
++        entry_routable = [
++            (not section_routes and not file_routes)
++            or e.file in file_routes
++            or anchor_match_key(e.anchor) in route_keys
++            for e in entries
++        ]
++
+         usage_rows = (
+             await self._session.execute(
+                 select(
+@@ -308,6 +325,10 @@ class HitsService:
+             )
+         ).all()
+ 
++        # 数据截止时间：使用计数行最大 occurred_at（零命中 None——上行断流时面板显式
++        # 展示「数据截至 X」而不是无声停更）。
++        data_until: datetime | None = None
++
+         # ── 锚点级 / 文件级 / 任务级基础聚合 ──
+         anchor_total: Counter[str] = Counter()
+         anchor_first: dict[str, datetime] = {}
+@@ -321,6 +342,8 @@ class HitsService:
+ 
+         for hit_type, change_name, matched, occurred_raw in usage_rows:
+             occurred = _aware_utc(occurred_raw)
++            if data_until is None or occurred > data_until:
++                data_until = occurred
+             anchors = matched or []
+             for anchor in anchors:
+                 # 锚点先解析回条目锚点（归一回退），聚合键即条目锚点——同一小节的多种漂移
+@@ -460,10 +483,28 @@ class HitsService:
+             for file, count in sorted(file_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+         ]
+ 
++        # 失效命中（幽灵锚）单列：解析后仍不对应任何当前条目的锚点——「没人用」与
++        # 「对不上」（知识面换代/标题漂移）是两类信号，不与正常榜单混排。
++        orphans = [
++            OrphanAnchorOut(anchor=anchor, total=total, last_hit=anchor_last.get(anchor))
++            for anchor, total in anchor_total.items()
++            if anchor not in entry_anchors
++        ]
++        orphans.sort(key=lambda o: (-o.total, o.anchor))
++
++        routable_entries = sum(1 for ok in entry_routable if ok)
++        routable_used = sum(
++            1
++            for e, ok in zip(entries, entry_routable, strict=True)
++            if ok and e.anchor in hit_anchors
++        )
++
+         return KnowledgeStatsOut(
+             coverage=CoverageOut(
+                 used_entries=used_entries,
+                 total_entries=total_entries,
++                routable_entries=routable_entries,
++                routable_used_entries=routable_used,
+                 trend=coverage_trend,
+             ),
+             dead_entries=dead_entries,
+@@ -471,4 +512,6 @@ class HitsService:
+             freshness=FreshnessOut(recent_new=len(recent_entries), recent_used=recent_used),
+             usage_board=board,
+             entry_counts=entry_counts,
++            orphan_anchors=orphans,
++            data_until=data_until,
+         )
+diff --git a/backend/app/modules/knowledge/parser.py b/backend/app/modules/knowledge/parser.py
+index a36fc165a..627aa35b6 100644
+--- a/backend/app/modules/knowledge/parser.py
++++ b/backend/app/modules/knowledge/parser.py
+@@ -287,6 +287,38 @@ def anchor_match_key(anchor: str) -> str:
+     return _ANCHOR_MATCH_DROP_RE.sub("", anchor.lower())
+ 
+ 
++#: INDEX.md 路由行（与 CLI knowledge-match.js parseKnowledgeIndex 同口径）：
++#: ``- 关键词1|关键词2 → [显示名](文件#锚点)`` / ``- kw → [x](文件)``（文件级）。
++_INDEX_ROUTE_RE = re.compile(r"^-\s+(.+?)\s*→\s*\[(.+?)\]\(([^#)]+)(?:#([^)]+))?\)")
++
++
++def parse_index_routes(sillyspec_root: Path) -> tuple[set[str], set[str]]:
++    """扫 ``knowledge/INDEX.md`` 提取 stats 可路由面（2026-09-25-knowledge-stats-layering）。
++
++    返回 ``(小节锚点集, 文件级路由文件集)``：带 ``#锚点`` 的路由行进前者（原样字符串，
++    消费侧经 :func:`anchor_match_key` 归一匹配条目锚点）；裸文件路由行进后者（该文件
++    全部条目视为可路由——decisions/fr 的天然形态）。INDEX 缺失/损坏 → 空集（调用方
++    按全集退化处理）。
++    """
++    index_path = sillyspec_root / "knowledge" / "INDEX.md"
++    try:
++        content = index_path.read_text(encoding="utf-8", errors="replace")
++    except OSError:
++        return set(), set()
++    section_anchors: set[str] = set()
++    file_routes: set[str] = set()
++    for line in content.splitlines():
++        m = _INDEX_ROUTE_RE.match(line)
++        if m is None:
++            continue
++        file, anchor = m.group(3).strip(), (m.group(4) or "").strip()
++        if anchor:
++            section_anchors.add(f"{file}#{anchor}")
++        else:
++            file_routes.add(file)
++    return section_anchors, file_routes
++
++
+ def _iter_h2_titles(content: str) -> list[str]:
+     """提取全部 ``##`` 小节标题原文（按出现序； fenced code block 内的假节头容忍——
+     统计口径 R-03 容忍计数 misses，不做块级状态机）。"""
+diff --git a/backend/app/modules/knowledge/schema.py b/backend/app/modules/knowledge/schema.py
+index 170694181..d77e23815 100644
+--- a/backend/app/modules/knowledge/schema.py
++++ b/backend/app/modules/knowledge/schema.py
+@@ -265,6 +265,12 @@ class CoverageTrendPoint(BaseModel):
+ class CoverageOut(BaseModel):
+     used_entries: int
+     total_entries: int
++    # 可路由口径分母分层（2026-09-25-knowledge-stats-layering）：INDEX.md 路由可达的
++    # 条目数（小节锚点经归一匹配 + 文件级路由覆盖整文件）与其中被命中的数——全集
++    # 分母含 unmapped/uncategorized 等结构性不可路由桶，单一口径系统性偏低且误导。
++    # INDEX 缺失/无路由行时退化为全集（routable == total）。
++    routable_entries: int = 0
++    routable_used_entries: int = 0
+     trend: list[CoverageTrendPoint]
+ 
+ 
+@@ -321,8 +327,25 @@ class EntryCountItem(BaseModel):
+     count: int
+ 
+ 
++class OrphanAnchorOut(BaseModel):
++    """失效命中（幽灵锚）：解析后仍不对应任何当前条目的命中锚点。
++
++    2026-09-25-knowledge-stats-layering：与正常榜单分开单列——「没人用」与
++    「锚点对不上」（知识面换代/标题漂移）是两类完全不同的信号，混排误导。
++    """
++
++    anchor: str
++    total: int
++    last_hit: datetime | None = None
++
++
+ class KnowledgeStatsOut(BaseModel):
+-    """GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。"""
++    """GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。
++
++    2026-09-25-knowledge-stats-layering 增：orphan_anchors（失效命中单列，
++    按命中次数降序）与 data_until（数据截止时间 = 使用计数行最大 occurred_at；
++    零命中为 None——上行断流时面板据此显式展示「数据截至 X」）。
++    """
+ 
+     coverage: CoverageOut
+     dead_entries: list[DeadEntryOut]
+@@ -330,3 +353,5 @@ class KnowledgeStatsOut(BaseModel):
+     freshness: FreshnessOut
+     usage_board: list[UsageBoardItem]
+     entry_counts: list[EntryCountItem]
++    orphan_anchors: list[OrphanAnchorOut] = []
++    data_until: datetime | None = None
+diff --git a/backend/app/modules/knowledge/tests/test_hits.py b/backend/app/modules/knowledge/tests/test_hits.py
+index 708558e7a..9d477c268 100644
+--- a/backend/app/modules/knowledge/tests/test_hits.py
++++ b/backend/app/modules/knowledge/tests/test_hits.py
+@@ -50,8 +50,10 @@ async def hits_ws(db_session, tmp_path: Path) -> dict:
+     (knowledge / "generated").mkdir()
+     (knowledge / "proposed").mkdir()
+ 
++    # INDEX 路由行用真实格式（href=file#锚点）——2026-09-25-knowledge-stats-layering
++    # 起 stats 可路由面消费 INDEX（此前仅摆设，玩具 href="x" 形态不再满足解析）。
+     (knowledge / "INDEX.md").write_text(
+-        "# Knowledge Index\n\n## Patterns\n\n- k|关键词 → [conventions.md#提交规范](x)\n",
++        "# Knowledge Index\n\n## Patterns\n\n- k|关键词 → [提交规范](conventions.md#提交规范)\n",
+         encoding="utf-8",
+     )
+     (knowledge / "conventions.md").write_text(
+@@ -456,7 +458,8 @@ async def drift_ws(db_session, tmp_path: Path) -> dict:
+         id=uuid.uuid4(),
+         name="drift-ws",
+         slug=f"drift-ws-{uuid.uuid4().hex[:8]}",
+-        root_path=str(tmp_path / "client-machine-path"),
++        # root_path 与 hits_ws 不同值：两 fixture 同测试共用 tmp_path 时避开唯一约束
++        root_path=str(tmp_path / "client-machine-path-drift"),
+         status="active",
+     )
+     db_session.add(ws)
+@@ -577,8 +580,16 @@ async def test_stats_endpoint_literal_route_not_swallowed(
+         "freshness",
+         "usage_board",
+         "entry_counts",
++        "orphan_anchors",
++        "data_until",
++    }
++    assert set(body["coverage"]) == {
++        "used_entries",
++        "total_entries",
++        "routable_entries",
++        "routable_used_entries",
++        "trend",
+     }
+-    assert set(body["coverage"]) == {"used_entries", "total_entries", "trend"}
+     assert body["coverage"]["used_entries"] == 5
+ 
+ 
+@@ -617,3 +628,62 @@ async def test_hits_batch_body_bounds_return_422(
+         json={"lines": ["{}"] * 2000},
+     )
+     assert resp.status_code == 200
++
++
++# ---------------------------------------------------------------------------
++# 三新字段口径（change 2026-09-25-knowledge-stats-layering）
++# ---------------------------------------------------------------------------
++
++
++async def test_stats_layering_fields(db_session, hits_ws: dict, drift_ws: dict) -> None:
++    """routable 双口径 / orphan_anchors 单列 / data_until 三件套。
++
++    - hits_ws（INDEX 有一条小节路由 conventions.md#提交规范，未被命中）：
++      routable=1/used=0；有命中行 → data_until 非空；scenario 无幽灵锚 → orphans 空。
++    - drift_ws（INDEX 空壳无路由行）→ 退化为全集：routable == total、routable_used ==
++      used；歧义锚 + 内容漂移锚是幽灵 → orphans 单列（含次数与最后命中时间）。
++    """
++    service = HitsService(db_session)
++    await service.ingest_batch(hits_ws["ws_id"], _scenario_lines(hits_ws["now"]))
++    await service.ingest_batch(
++        drift_ws["ws_id"],
++        [
++            _hit_line(
++                change="chg-layer",
++                matched=[
++                    _DOT_HIT_ANCHOR,
++                    _FOLD_HIT_ANCHOR,
++                    "conventions.md#提交规范",
++                    "conventions.md#foo.bar",
++                    _DRIFTED_HIT_ANCHOR,
++                ],
++                at=hits_ws["now"],
++            )
++        ],
++    )
++
++    a = await service.stats(hits_ws["ws_id"])
++    # INDEX 路由只覆盖 提交规范（decisions/fr 无文件级路由行）且未被 scenario 命中
++    assert a.coverage.routable_entries == 1
++    assert a.coverage.routable_used_entries == 0
++    assert a.data_until is not None
++    assert a.orphan_anchors == []
++
++    b = await service.stats(drift_ws["ws_id"])
++    # INDEX 空壳（无路由行）→ 全集退化
++    assert b.coverage.routable_entries == b.coverage.total_entries == 6
++    assert b.coverage.routable_used_entries == b.coverage.used_entries == 3
++    assert b.data_until is not None
++    # 幽灵锚单列：歧义锚 foo.bar + 内容漂移锚（各 1 次），按次数降序同数按锚点字典序
++    assert [(o.anchor, o.total) for o in b.orphan_anchors] == [
++        ("conventions.md#foo.bar", 1),
++        (_DRIFTED_HIT_ANCHOR, 1),
++    ]
++    assert all(o.last_hit is not None for o in b.orphan_anchors)
++
++
++async def test_stats_zero_hits_data_until_none(db_session, hits_ws: dict) -> None:
++    """零命中端：data_until=None（前端「暂无使用数据」态可区分断流与无数据）。"""
++    out = await HitsService(db_session).stats(hits_ws["ws_id"])
++    assert out.data_until is None
++    assert out.orphan_anchors == []
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 858d58371..b86d6d50e 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -40669,6 +40669,16 @@
+             "type": "integer",
+             "title": "Total Entries"
+           },
++          "routable_entries": {
++            "type": "integer",
++            "title": "Routable Entries",
++            "default": 0
++          },
++          "routable_used_entries": {
++            "type": "integer",
++            "title": "Routable Used Entries",
++            "default": 0
++          },
+           "trend": {
+             "items": {
+               "$ref": "#/components/schemas/CoverageTrendPoint"
+@@ -48777,6 +48787,26 @@
+             },
+             "type": "array",
+             "title": "Entry Counts"
++          },
++          "orphan_anchors": {
++            "items": {
++              "$ref": "#/components/schemas/OrphanAnchorOut"
++            },
++            "type": "array",
++            "title": "Orphan Anchors",
++            "default": []
++          },
++          "data_until": {
++            "anyOf": [
++              {
++                "type": "string",
++                "format": "date-time"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Data Until"
+           }
+         },
+         "type": "object",
+@@ -48789,7 +48819,7 @@
+           "entry_counts"
+         ],
+         "title": "KnowledgeStatsOut",
+-        "description": "GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。"
++        "description": "GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。\n\n2026-09-25-knowledge-stats-layering 增：orphan_anchors（失效命中单列，\n按命中次数降序）与 data_until（数据截止时间 = 使用计数行最大 occurred_at；\n零命中为 None——上行断流时面板据此显式展示「数据截至 X」）。"
+       },
+       "KnowledgeUpdateIn": {
+         "properties": {
+@@ -52680,6 +52710,37 @@
+         "title": "OrganizationUpdateRequest",
+         "description": "Body of ``PATCH /api/admin/organizations/{org_id}``.\n\nAll fields optional. Service validates ``parent_id`` changes for\nself-loops and descendant cycles."
+       },
++      "OrphanAnchorOut": {
++        "properties": {
++          "anchor": {
++            "type": "string",
++            "title": "Anchor"
++          },
++          "total": {
++            "type": "integer",
++            "title": "Total"
++          },
++          "last_hit": {
++            "anyOf": [
++              {
++                "type": "string",
++                "format": "date-time"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Last Hit"
++          }
++        },
++        "type": "object",
++        "required": [
++          "anchor",
++          "total"
++        ],
++        "title": "OrphanAnchorOut",
++        "description": "失效命中（幽灵锚）：解析后仍不对应任何当前条目的命中锚点。\n\n2026-09-25-knowledge-stats-layering：与正常榜单分开单列——「没人用」与\n「锚点对不上」（知识面换代/标题漂移）是两类完全不同的信号，混排误导。"
++      },
+       "PageContextCreateBlock": {
+         "properties": {
+           "page_key": {
+diff --git a/frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx b/frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx
+index ea49d87ab..195d2cd6c 100644
+--- a/frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx
+@@ -13,7 +13,7 @@
+  * （vi.hoisted + importActual）+ QueryClientProvider retry:false/gcTime:0。
+  */
+ 
+-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { within, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+@@ -37,6 +37,8 @@ function stats(p: Partial<KnowledgeStatsOut> = {}): KnowledgeStatsOut {
+     coverage: {
+       used_entries: 78,
+       total_entries: 126,
++      routable_entries: 90,
++      routable_used_entries: 70,
+       trend: [
+         { week: "2026-07-26", pct: 0.4 },
+         { week: "2026-08-02", pct: 0.45 },
+@@ -53,6 +55,11 @@ function stats(p: Partial<KnowledgeStatsOut> = {}): KnowledgeStatsOut {
+       { anchor: "decisions/backend.md", last_hit_at: null },
+     ],
+     density: { per_task_avg: 4.2, trend: [] },
++    orphan_anchors: [
++      { anchor: "conventions.md#esm-only", total: 525, last_hit: "2026-09-23T19:49:50Z" },
++      { anchor: "known-issues.md#已换代小节", total: 12, last_hit: null },
++    ],
++    data_until: "2026-09-25T05:06:34Z",
+     freshness: { recent_new: 12, recent_used: 5 },
+     // 乱序喂入（0.92 在中间）：断言前端防御性 per_task 降序重排。
+     usage_board: [
+@@ -142,6 +149,33 @@ describe("四指标卡渲染（FR-02 / D-009）", () => {
+ });
+ 
+ describe("死条目内嵌清单开合", () => {
++
++  it("可路由口径为主数值 + 全集口径副显 + 数据截至 + 失效命中期开合（2026-09-25-knowledge-stats-layering）", async () => {
++    renderDashboard();
++
++    await waitFor(() =>
++      expect(screen.getByTestId("ops-dashboard")).toBeInTheDocument(),
++    );
++    // 主数值 = 可路由口径 70/90 ≈ 78%；副显全集口径 78/126 ≈ 62%
++    const coverage = screen.getByTestId("metric-coverage");
++    expect(coverage).toHaveTextContent("78%");
++    expect(coverage).toHaveTextContent("70/90 条");
++    expect(coverage).toHaveTextContent("全集口径 62%（78/126 条，含不可路由桶）");
++    // 数据截至时间随头部行展示
++    expect(screen.getByTestId("ops-dashboard")).toHaveTextContent("数据截至");
++    // 失效命中：默认收起，点开渲染清单行
++    expect(screen.queryByTestId("orphan-entries-panel")).not.toBeInTheDocument();
++    fireEvent.click(screen.getByTestId("orphan-toggle"));
++    const panel = await screen.findByTestId("orphan-entries-panel");
++    const rows = within(panel).getAllByTestId("orphan-entry-row");
++    expect(rows).toHaveLength(2);
++    expect(rows[0]).toHaveTextContent("conventions.md#esm-only");
++    expect(rows[0]).toHaveTextContent("525 次");
++    expect(rows[1]).toHaveTextContent("已换代小节");
++    fireEvent.click(screen.getByTestId("orphan-toggle"));
++    expect(screen.queryByTestId("orphan-entries-panel")).not.toBeInTheDocument();
++  });
++
+   it("点死条目卡展开清单（锚点 + 最后命中时间/从未），再点收起", async () => {
+     mocks.getKnowledgeStats.mockResolvedValue(stats());
+     renderDashboard();
+@@ -207,7 +241,13 @@ describe("三态：空态 / 错误态（不白屏）", () => {
+   it("零使用指标 → 「暂无使用数据」空态，不渲染指标卡与榜", async () => {
+     mocks.getKnowledgeStats.mockResolvedValue(
+       stats({
+-        coverage: { used_entries: 0, total_entries: 0, trend: [] },
++        coverage: {
++          used_entries: 0,
++          total_entries: 0,
++          routable_entries: 0,
++          routable_used_entries: 0,
++          trend: [],
++        },
+         dead_entries: [],
+         density: { per_task_avg: 0, trend: [] },
+         freshness: { recent_new: 0, recent_used: 0 },
+diff --git a/frontend/src/components/knowledge/ops-dashboard.tsx b/frontend/src/components/knowledge/ops-dashboard.tsx
+index ecf9804ac..510db56a9 100644
+--- a/frontend/src/components/knowledge/ops-dashboard.tsx
++++ b/frontend/src/components/knowledge/ops-dashboard.tsx
+@@ -85,6 +85,8 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
+   });
+   // 死条目内嵌清单开关（卡面点击开合；抽屉形态的 jsdom 等价实现，见头注释）。
+   const [deadOpen, setDeadOpen] = useState(false);
++  // 失效命中（幽灵锚）清单开关（2026-09-25-knowledge-stats-layering）。
++  const [orphanOpen, setOrphanOpen] = useState(false);
+ 
+   const rootCls = cn("flex flex-col gap-3 lg:grid lg:grid-cols-3", className);
+ 
+@@ -119,11 +121,22 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
+   }
+   if (!stats) return null;
+ 
+-  const { coverage, dead_entries, density, freshness, usage_board } = stats;
++  const { coverage, dead_entries, density, freshness, usage_board, orphan_anchors } = stats;
+   const coveragePct =
+     coverage.total_entries > 0
+       ? Math.round((coverage.used_entries / coverage.total_entries) * 100)
+       : 0;
++  // 可路由口径主数值（分母分层）：INDEX 路由可达条目为分母——unmapped/uncategorized
++  // 等结构性不可路由桶不再系统性压低读数；routable=0（INDEX 空且非退化形态）回退全集。
++  const routablePct =
++    coverage.routable_entries > 0
++      ? Math.round(
++          (coverage.routable_used_entries / coverage.routable_entries) * 100,
++        )
++      : coveragePct;
++  const dataUntilText = stats.data_until
++    ? `数据截至 ${new Date(stats.data_until).toLocaleString("zh-CN")}`
++    : "";
+   // 榜排序（防御性重排：后端已按 per_task 降序，前端不信任传输序）。
+   const board = [...usage_board].sort((a, b) => b.per_task - a.per_task);
+   const points = trendPoints(coverage.trend);
+@@ -135,7 +148,7 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
+         <div className="mb-2.5 flex items-baseline justify-between">
+           <h3 className="text-sm font-bold">知识库运营指标</h3>
+           <span className="text-[10.5px] text-muted-foreground">
+-            多端汇聚 · 剥离开发量
++            多端汇聚 · 剥离开发量{dataUntilText ? ` · ${dataUntilText}` : ""}
+           </span>
+         </div>
+         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+@@ -147,15 +160,19 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
+             <div className="text-[11px] text-muted-foreground">
+               知识覆盖率{" "}
+               <span className="text-[10px] text-muted-foreground/70">
+-                被用过的/全部
++                被用过的/可路由
+               </span>
+             </div>
+             <div className="text-[22px] font-bold leading-7 text-brand-600">
+-              {coveragePct}%
++              {routablePct}%
+               <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+-                {coverage.used_entries}/{coverage.total_entries} 条
++                {coverage.routable_used_entries}/{coverage.routable_entries} 条
+               </span>
+             </div>
++            <div className="text-[10px] text-muted-foreground/70">
++              全集口径 {coveragePct}%（{coverage.used_entries}/
++              {coverage.total_entries} 条，含不可路由桶）
++            </div>
+             <svg
+               data-testid="coverage-trend"
+               viewBox={`0 0 ${TREND_W} ${TREND_H}`}
+@@ -273,6 +290,49 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
+             )}
+           </div>
+         ) : null}
++
++        {/* 失效命中（幽灵锚）单列（2026-09-25-knowledge-stats-layering）：历史命中
++            但当前知识树无对应条目（知识面换代/标题漂移）——「没人用」与「对不上」
++            是两类信号，与死条目/榜单分开呈现 */}
++        {orphan_anchors.length > 0 ? (
++          <>
++            <button
++              type="button"
++              data-testid="orphan-toggle"
++              onClick={() => setOrphanOpen((v) => !v)}
++              aria-expanded={orphanOpen}
++              className="mt-2 w-full rounded-md border border-border/60 px-2 py-1 text-left text-[10.5px] text-muted-foreground transition-colors hover:border-brand-400"
++            >
++              {orphanOpen
++                ? `收起失效命中 ↑`
++                : `失效命中 ${orphan_anchors.length} 个（历史命中但对不上当前条目）↓`}
++            </button>
++            {orphanOpen ? (
++              <div
++                data-testid="orphan-entries-panel"
++                className="mt-1.5 max-h-36 overflow-y-auto rounded-md border border-border/60 bg-muted/30 p-1.5"
++              >
++                {orphan_anchors.map((o) => (
++                  <div
++                    key={o.anchor}
++                    data-testid="orphan-entry-row"
++                    className="flex items-center gap-2 border-b border-border/40 px-2 py-1 text-[11px] last:border-b-0"
++                  >
++                    <span
++                      className="min-w-0 flex-1 truncate font-mono text-muted-foreground"
++                      title={o.anchor}
++                    >
++                      {o.anchor}
++                    </span>
++                    <span className="shrink-0 text-muted-foreground/80">
++                      {o.total} 次{o.last_hit ? ` · 最后 ${new Date(o.last_hit).toLocaleDateString("zh-CN")}` : ""}
++                    </span>
++                  </div>
++                ))}
++              </div>
++            ) : null}
++          </>
++        ) : null}
+       </div>
+ 
+       {/* ── 使用率榜（1/3）：全量滚动，% 主数值 + 绝对次数副显 ── */}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 20a908f6f..a8c55b658 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -14173,6 +14173,16 @@ export interface components {
+             used_entries: number;
+             /** Total Entries */
+             total_entries: number;
++            /**
++             * Routable Entries
++             * @default 0
++             */
++            routable_entries: number;
++            /**
++             * Routable Used Entries
++             * @default 0
++             */
++            routable_used_entries: number;
+             /** Trend */
+             trend: components["schemas"]["CoverageTrendPoint"][];
+         };
+@@ -17576,6 +17586,10 @@ export interface components {
+         /**
+          * KnowledgeStatsOut
+          * @description GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。
++         *
++         *     2026-09-25-knowledge-stats-layering 增：orphan_anchors（失效命中单列，
++         *     按命中次数降序）与 data_until（数据截止时间 = 使用计数行最大 occurred_at；
++         *     零命中为 None——上行断流时面板据此显式展示「数据截至 X」）。
+          */
+         KnowledgeStatsOut: {
+             coverage: components["schemas"]["CoverageOut"];
+@@ -17587,6 +17601,13 @@ export interface components {
+             usage_board: components["schemas"]["UsageBoardItem"][];
+             /** Entry Counts */
+             entry_counts: components["schemas"]["EntryCountItem"][];
++            /**
++             * Orphan Anchors
++             * @default []
++             */
++            orphan_anchors: components["schemas"]["OrphanAnchorOut"][];
++            /** Data Until */
++            data_until?: string | null;
+         };
+         /**
+          * KnowledgeUpdateIn
+@@ -19307,6 +19328,21 @@ export interface components {
+             /** Sort Order */
+             sort_order?: number | null;
+         };
++        /**
++         * OrphanAnchorOut
++         * @description 失效命中（幽灵锚）：解析后仍不对应任何当前条目的命中锚点。
++         *
++         *     2026-09-25-knowledge-stats-layering：与正常榜单分开单列——「没人用」与
++         *     「锚点对不上」（知识面换代/标题漂移）是两类完全不同的信号，混排误导。
++         */
++        OrphanAnchorOut: {
++            /** Anchor */
++            anchor: string;
++            /** Total */
++            total: number;
++            /** Last Hit */
++            last_hit?: string | null;
++        };
+         /**
+          * PageContextCreateBlock
+          * @description ``SessionCreateRequest.page_context`` 内嵌块（2026-08-25-unified-floating-session / FR-5 / D-005）。
+diff --git a/.sillyspec/changes/2026-09-25-knowledge-stats-layering/design.md b/.sillyspec/changes/2026-09-25-knowledge-stats-layering/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-knowledge-stats-layering/design.md
+@@ -0,0 +1,89 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T15:44:26.935Z
++---
++# 设计记录（Design Record）— 2026-09-25-knowledge-stats-layering
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-stats-layering 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++三个纯增量字段挂在既有 stats 聚合上：①`parser.parse_index_routes()` 解析 INDEX.md 路由行
++（小节锚点集 + 文件级路由文件集，与 CLI knowledge-match.js 同口径正则），`HitsService.stats` 用
++`anchor_match_key` 归一匹配条目锚点算 `routable_entries`/`routable_used_entries`（INDEX 缺失/无路由
++行退化为全集，不虚摊不缩水）；②聚合循环里解析失败（不在条目全集）的锚点单列为 `orphan_anchors`
++（次数 + 最后命中，按次数降序）——「没人用」与「对不上」两类信号分开；③循环里顺手维护
++`data_until` = 使用计数行最大 occurred_at（零命中 None）。
++
++选这个方案：三字段全部只读聚合、零迁移零回填；DTO 全部带默认值（旧客户端向前兼容）；INDEX 是
++CLI 既有的唯一路由真相源，平台此前从未消费——分母分层的判定源与 CLI 注入侧天然同源。
++
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-stats-layering 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++改动：`backend/app/modules/knowledge/parser.py`（新 `parse_index_routes` + 路由正则）、
++`schema.py`（CoverageOut +routable_entries/routable_used_entries；新 OrphanAnchorOut；
++KnowledgeStatsOut +orphan_anchors/data_until）、`hits.py`（stats 三段计算）、
++`frontend/src/lib/api-types.ts` + `backend/openapi.json`（gen:types 重生成）、
++`frontend/src/components/knowledge/ops-dashboard.tsx`（可路由口径主数值 + 全集副显 + 数据截至 +
++失效命中期开合清单）+ 两测试文件。
++
++对外可见：`GET /knowledge/stats` 响应**新增字段**（全部带默认值，旧消费者零破坏——已同步
++gen:types 提交契约）；既有字段语义零变化。前端面板：覆盖率主数值换成可路由口径、全集口径降为
++副显说明，头部行显示数据截至时间，新增失效命中可展开清单。
++
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-stats-layering 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. **乱序/迟到到达**：三字段都是 stats 请求内一次性聚合（INDEX 读盘一次 + 行集一次），与命中行到达顺序无关；data_until 取 max，天然幂等。
++2. **并发写**：stats 全程只读（既有不变）；INDEX 在聚合中途被改写最多读本文件前一版本——与条目全集读树是同一既有竞态窗口，本变更不放大。
++3. **切换/生命周期**：无状态无持久化；请求中断即丢弃局部聚合。旧 daemon/前端读新响应：字段带默认值，零破坏；新前端读旧后端：routable 缺省 0 → 前端回退全集口径显示（回退分支已实现）。
++4. **作用域**：INDEX 读取走 `_spec_content_root` 同源根（与条目全集同一棵树）；命中行按 workspace_id 过滤（既有）；路由行解析是纯字符串函数无跨工作区状态。
++
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-stats-layering 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++**最大风险**：可路由口径被误读为「真实覆盖率上限」——INDEX 路由面本身可能缺行（知识有但没人
++登记路由），此时 routable 偏小、口径读数偏乐观。缓解：卡片副显保留全集口径（两个数并排，读数
++可对照）；退化形态（无 INDEX）恒等于全集；后续若做「未路由条目」清单可再补第三层。
++
++**次生风险**：orphan_anchors 无上限（理论 = 命中锚点数，当前量级 ≤ 百）——榜单本就全量渲染，
++同量级不新增分页需求；若未来爆量再补 TopN。
++
++**试过但放弃的方案**：
++1. 把全集覆盖率字段直接改成可路由口径（语义变更）——旧前端/消费方读数跳变，且「结构性不可达
++   条目」的可见性（全集口径）仍有运营价值，弃。
++2. 未路由条目也单列清单——本次范围外（需要第三组对照数据），留后续。
++3. data_until 取 anchor_last 最大值——fr-inject 行无锚点时不进 anchor_last，会漏；改用行级
++   occurred_at max（含 fr-inject），口径更真。
++
++## 文件变更清单
++
++- backend/app/modules/knowledge/parser.py
++- backend/app/modules/knowledge/schema.py
++- backend/app/modules/knowledge/hits.py
++- backend/app/modules/knowledge/tests/test_hits.py
++- backend/openapi.json
++- frontend/src/lib/api-types.ts
++- frontend/src/components/knowledge/ops-dashboard.tsx
++- frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx
+
+diff --git a/.sillyspec/changes/2026-09-25-knowledge-stats-layering/flow-state.yaml b/.sillyspec/changes/2026-09-25-knowledge-stats-layering/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-knowledge-stats-layering/flow-state.yaml
+@@ -0,0 +1,15 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 613728c7c3c53fa0dfa0a01a5920a0b734497221
++updatedAt: '2026-09-25T15:57:26.268Z'
++gate_summary: >-
++  test: skipped — 跳过原因：test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）。｜lint: passed ← cd backend && uv run ruff check
++  . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
++  typecheck（15.0s）｜门文件 11 个
++
+
+diff --git a/.sillyspec/changes/2026-09-25-knowledge-stats-layering/proposal.md b/.sillyspec/changes/2026-09-25-knowledge-stats-layering/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-knowledge-stats-layering/proposal.md
+@@ -0,0 +1,60 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T15:44:26.934Z
++---
++# 提案书（Proposal）— 2026-09-25-knowledge-stats-layering
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:0e827f3ae8586e7f88ac839cbda374796db2a64a320841f2a6c2142b1bb85037:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-stats-layering 留痕重锚 -->
++任务原话转写：动机：知识页运营面板的三个口径缺口（用户实证「命中的怎么那么局限」的残留层）：①覆盖率分母把 unmapped/uncategorized 等结构性不可路由条目全额计入（fr/unmapped 713 条从未可命中），单一分母让覆盖率系统性偏低且误导；②命中锚点解析失败（幽灵锚，如 9-24 知识面换代后的 66% 历史命中）在榜单上与正常条目混排，用户无法区分「没人用」与「对不上」；③面板不知道数据截止时间（上行断流 4 天无人察觉）。
++
++成功标准：
++- stats 覆盖率增双口径字段：routable_entries（INDEX 路由可达条目数）与 routable_used_entries（可路由且被命中），既有 total/used 语义不变
++- stats 增失效命中单列：orphan_anchors 列表（解析失败锚点 + 命中次数 + 最后命中时间，按次数降序），与正常榜单分开
++- stats 增数据截止时间 data_until（使用计数行最大 occurred_at；零命中为 null）
++- 可路由判定用与锚点容错同源的归一匹配（INDEX 小节锚点经 anchor_match_key 匹配条目锚点；文件级路由覆盖整文件条目）
++- 前端运营面板配套：覆盖率卡显示可路由口径为主、全集口径为辅；新增失效命中文案与可展开清单；卡片区显示数据截至时间
++- 后端 schema 变更同步 gen:types（api-types.ts + openapi.json 一并提交）
++- 新增后端单测覆盖三个新字段的计算（含 INDEX 缺失退化为全集、幽灵锚单列、data_until 零命中 null）与前端面板渲染
++- 既有 knowledge 模块与 ops-dashboard 测试零回归
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:01674a47f245e1ea8d4d93e56ce10392d9a73305543082f2cbf1c4eca04e72bf:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-stats-layering 留痕重锚 -->
++按成功标准机械推导，共 13 条验收面：
++1. stats 覆盖率增双口径字段：routable_entries（INDEX 路由可达条目数）与 routable_used_entries（可路由且被命中），既有 total
++2. used 语义不变
++3. stats 增失效命中单列：orphan_anchors 列表（解析失败锚点 + 命中次数 + 最后命中时间，按次数降序），与正常榜单分开
++4. stats 增数据截止时间 data_until（使用计数行最大 occurred_at
++5. 零命中为 null）
++6. 可路由判定用与锚点容错同源的归一匹配（INDEX 小节锚点经 anchor_match_key 匹配条目锚点
++7. 文件级路由覆盖整文件条目）
++8. 前端运营面板配套：覆盖率卡显示可路由口径为主、全集口径为辅
++9. 新增失效命中文案与可展开清单
++10. 卡片区显示数据截至时间
++11. 后端 schema 变更同步 gen:types（api-types.ts + openapi.json 一并提交）
++12. 新增后端单测覆盖三个新字段的计算（含 INDEX 缺失退化为全集、幽灵锚单列、data_until 零命中 null）与前端面板渲染
++13. 既有 knowledge 模块与 ops-dashboard 测试零回归
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:428033feef96189e15b760ca8136a0466cafd2c85a2ebbde5fcfaf846322ff99:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-knowledge-stats-layering 留痕重锚 -->
++1. stats 覆盖率增双口径字段：routable_entries（INDEX 路由可达条目数）与 routable_used_entries（可路由且被命中），既有 total
++2. used 语义不变
++3. stats 增失效命中单列：orphan_anchors 列表（解析失败锚点 + 命中次数 + 最后命中时间，按次数降序），与正常榜单分开
++4. stats 增数据截止时间 data_until（使用计数行最大 occurred_at
++5. 零命中为 null）
++6. 可路由判定用与锚点容错同源的归一匹配（INDEX 小节锚点经 anchor_match_key 匹配条目锚点
++7. 文件级路由覆盖整文件条目）
++8. 前端运营面板配套：覆盖率卡显示可路由口径为主、全集口径为辅
++9. 新增失效命中文案与可展开清单
++10. 卡片区显示数据截至时间
++11. 后端 schema 变更同步 gen:types（api-types.ts + openapi.json 一并提交）
++12. 新增后端单测覆盖三个新字段的计算（含 INDEX 缺失退化为全集、幽灵锚单列、data_until 零命中 null）与前端面板渲染
++13. 既有 knowledge 模块与 ops-dashboard 测试零回归
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-25-knowledge-stats-layering/requirements.md b/.sillyspec/changes/2026-09-25-knowledge-stats-layering/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-knowledge-stats-layering/requirements.md
+@@ -0,0 +1,159 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T15:44:26.935Z
++---
++# 需求规格（Requirements）— 2026-09-25-knowledge-stats-layering
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++### FR-01: 覆盖率分母分层（可路由口径）
++
++- Given：知识树含 INDEX 路由面与 unmapped/uncategorized 等结构性不可路由条目
++- When：GET /knowledge/stats 聚合
++- Then：coverage 增 routable_entries（INDEX 小节锚点经归一匹配 + 文件级路由整文件）与
++  routable_used_entries；既有 total/used 语义不变；INDEX 缺失/无路由行时 routable == total
++
++### FR-02: 失效命中（幽灵锚）单列
++
++- Given：命中锚点解析后仍不对应任何当前条目（知识面换代/标题漂移）
++- When：同一次聚合
++- Then：orphan_anchors 列表（anchor/total/last_hit，按 total 降序、同数按锚点字典序），
++  不与 usage_board 混排
++
++### FR-03: 数据截止时间
++
++- Given：使用计数行集（含 fr-inject 行）
++- When：同一次聚合
++- Then：data_until = 最大 occurred_at；零命中为 None
++
++### FR-04: 前端运营面板配套
++
++- Given：三新字段
++- When：渲染 ops-dashboard
++- Then：覆盖率主数值为可路由口径（routable=0 回退全集）、全集口径副显说明；头部行显示
++  「数据截至 X」；失效命中可展开/收起清单（锚点 + 次数 + 最后命中日期）
++
++### FR-05: 契约同步
++
++- Given：后端 schema 新字段
++- When：pnpm gen:types
++- Then：api-types.ts 与 openapi.json 同步重生成并随变更提交；旧消费者（字段带默认值）零破坏
++
++### FR-06: 测试与零回归
++
++- Given：后端 hits/parser 测试与前端 ops-dashboard 测试
++- When：定向跑测
++- Then：新增用例覆盖三字段口径（含退化/零命中）与前端渲染/开合；既有用例零回归
++<!--
++参考摘录（非约束——agent 可采纳/改写/忽略；每条格式 ### FR-NN: 标题 + Given/When/Then）
++FR-01: stats 覆盖率增双口径字段：routable_entries（INDEX 路由可达条目数）与 routable_used_entries（可路由且被命中），既有 total
++FR-02: used 语义不变
++FR-03: stats 增失效命中单列：orphan_anchors 列表（解析失败锚点 + 命中次数 + 最后命中时间，按次数降序），与正常榜单分开
++FR-04: stats 增数据截止时间 data_until（使用计数行最大 occurred_at
++FR-05: 零命中为 null）
++FR-06: 可路由判定用与锚点容错同源的归一匹配（INDEX 小节锚点经 anchor_match_key 匹配条目锚点
++FR-07: 文件级路由覆盖整文件条目）
++FR-08: 前端运营面板配套：覆盖率卡显示可路由口径为主、全集口径为辅
++FR-09: 新增失效命中文案与可展开清单
++FR-10: 卡片区显示数据截至时间
++FR-11: 后端 schema 变更同步 gen:types（api-types.ts + openapi.json 一并提交）
++FR-12: 新增后端单测覆盖三个新字段的计算（含 INDEX 缺失退化为全集、幽灵锚单列、data_until 零命中 null）与前端面板渲染
++FR-13: 既有 knowledge 模块与 ops-dashboard 测试零回归
++-->
++
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/knowledge/tests/test_hits.py::test_stats_layering_fields（routable=1 用例 + 空壳 INDEX 退化为全集用例）
++
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_hits.py::test_stats_layering_fields（drift_ws 的 foo.bar + 内容漂移锚两幽灵单列断言）
++
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_hits.py::test_stats_layering_fields + test_stats_zero_hits_data_until_none（零命中 None）
++
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx::可路由口径为主数值 + 全集口径副显 + 数据截至 + 失效命中期开合
++
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向命令 cd frontend && pnpm gen:types && pnpm exec tsc --noEmit（tsc 0 错；api-types/openapi 已随提交）
++
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：backend uv run pytest app/modules/knowledge -q --no-cov（128 passed = 基线 126 + 新 2）+ frontend vitest ops-dashboard（7 passed = 基线 6 + 新 1）
++
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_hits.py::test_stats_layering_fields（hits_ws 小节路由经归一匹配命中 提交规范 条目）
++
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend ops-dashboard.test.tsx::可路由口径用例（fixture routable>0 正常路径）+ 组件回退分支（routable=0 → coveragePct）
++
++
++<!--AGENT:测试绑定FR-09 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend ops-dashboard.test.tsx::可路由口径用例 后半（orphan-toggle 两段点击 + 行数/文案断言）
++
++
++<!--AGENT:测试绑定FR-10 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend ops-dashboard.test.tsx::可路由口径用例（toHaveTextContent("数据截至")）+ 零使用空态用例（空态不渲染卡片区）
++
++
++<!--AGENT:测试绑定FR-11 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向命令 cd frontend && pnpm gen:types（产物已随本次提交：backend/openapi.json + frontend/src/lib/api-types.ts）
++
++
++<!--AGENT:测试绑定FR-12 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_hits.py::test_stats_layering_fields（drift_ws 全集退化段）+ test_stats_zero_hits_data_until_none
++
++
++<!--AGENT:测试绑定FR-13 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_hits.py::test_stats_endpoint_literal_route_not_swallowed（键集断言已更新）
++
++### FR-07: 可路由判定与锚点容错同源
++
++- Given：INDEX 小节锚点与条目锚点存在规则漂移
++- When：计算可路由面
++- Then：小节路由经 anchor_match_key 归一匹配（与命中解析同源）；文件级路由覆盖该文件全部条目
++
++### FR-08: 前端可路由口径回退
++
++- Given：routable_entries=0 且 total>0（旧后端/异常形态）
++- When：渲染覆盖率卡
++- Then：主数值回退全集口径（不出现除零或空读数）
++
++### FR-09: 失效命中期开合交互
++
++- Given：orphan_anchors 非空
++- When：点击切换
++- Then：清单展开渲染（锚点/次数/最后命中日期）与收起；空列表时不渲染切换行
++
++### FR-10: 数据截至展示形态
++
++- Given：data_until 非 None / None
++- When：渲染头部行
++- Then：非 None 显示「数据截至 <zh-CN 本地化时间>」；None 不显示该段
++
++### FR-11: gen:types 契约闭环
++
++- Given：后端 schema 新字段
++- When：提交前
++- Then：api-types.ts 与 openapi.json 均为重生成后状态且随变更一并提交（不让类型落后后端形成债）
++
++### FR-12: 退化与零命中端用例
++
++- Given：INDEX 空壳（无路由行）与零命中两种形态
++- When：跑后端用例
++- Then：前者 routable==total==used 三值对齐；后者 data_until None、orphan_anchors 空
++
++### FR-13: 端点形状契约更新
++
++- Given：stats 响应新增字段
++- When：GET /knowledge/stats
++- Then：响应键集含 orphan_anchors/data_until，coverage 键集含 routable_entries/routable_used_entries（字面量路由不被通配吞的既有断言同步更新）
+
+diff --git a/.sillyspec/changes/2026-09-25-knowledge-stats-layering/tasks.md b/.sillyspec/changes/2026-09-25-knowledge-stats-layering/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-knowledge-stats-layering/tasks.md
+@@ -0,0 +1,22 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T15:44:26.935Z
++---
++# 任务注册表（Tasks）— 2026-09-25-knowledge-stats-layering
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++- [x] task-01: stats 覆盖率增双口径字段：routable_entries（INDEX 路由可达条目数）与 routable_used_entries（可路由且被命中）…
++- [x] task-02: used 语义不变
++- [x] task-03: stats 增失效命中单列：orphan_anchors 列表（解析失败锚点 + 命中次数 + 最后命中时间，按次数降序），与正常榜单分开
++- [x] task-04: stats 增数据截止时间 data_until（使用计数行最大 occurred_at
++- [x] task-05: 零命中为 null）
++- [x] task-06: 可路由判定用与锚点容错同源的归一匹配（INDEX 小节锚点经 anchor_match_key 匹配条目锚点
++- [x] task-07: 文件级路由覆盖整文件条目）
++- [x] task-08: 前端运营面板配套：覆盖率卡显示可路由口径为主、全集口径为辅
++- [x] task-09: 新增失效命中文案与可展开清单
++- [x] task-10: 卡片区显示数据截至时间
++- [x] task-11: 后端 schema 变更同步 gen:types（api-types.ts + openapi.json 一并提交）
++- [x] task-12: 新增后端单测覆盖三个新字段的计算（含 INDEX 缺失退化为全集、幽灵锚单列、data_until 零命中 null）与前端面板渲染
++- [x] task-13: 既有 knowledge 模块与 ops-dashboard 测试零回归
