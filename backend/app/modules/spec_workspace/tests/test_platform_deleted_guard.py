@@ -765,3 +765,40 @@ async def test_sync_conflict_registry_open_and_close(db_session, tmp_path) -> No
     assert r3["conflict"] is False
     assert r3["applied_ops"] == 1
     assert await _open_rows() == []
+
+
+async def test_rename_tombstone_skip_counted(db_session, tmp_path) -> None:
+    """评审 P1 收口：rename 目标撞墓碑/占用三拦截分支同样计数（不虚报 applied）。"""
+    ws = await _make_workspace(db_session)
+    spec_root = tmp_path / "spec-root"
+    await _make_spec_workspace(db_session, ws, spec_root)
+    svc = SpecWorkspaceService(db_session)
+    # 源文件先落一条正常行
+    await svc.apply_ops(ws.id, [_op("add", "docs/src.md", content=_b64("s"))])
+    # 目标路径精确墓碑行
+    db_session.add(
+        SpecFileManifest(
+            workspace_id=ws.id,
+            path="changes/deleted-y/t.md",
+            content_hash="h",
+            version=3,
+            exists=False,
+            platform_deleted=True,
+        )
+    )
+    await db_session.commit()
+    r = await svc.apply_ops(
+        ws.id,
+        [
+            FileOp(
+                op="rename",
+                path="docs/src.md",
+                new_path="changes/deleted-y/t.md",
+                base_version=1,
+            )
+        ],
+    )
+    assert r["conflict"] is True
+    assert r["platform_deleted"] == ["changes/deleted-y/t.md"]
+    assert r["skipped_tombstone"] == 1
+    assert r["applied_ops"] == 0

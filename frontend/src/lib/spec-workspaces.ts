@@ -349,7 +349,8 @@ export async function listSpecConflicts(
   status = "open",
 ): Promise<SpecConflictItem[]> {
   const body = await apiFetch<{ items?: SpecConflictItem[] }>(
-    `/api/workspaces/${workspaceId}/spec-conflicts?status=${encodeURIComponent(status)}&limit=10`,
+    `/api/workspaces/${workspaceId}/spec-conflicts?status=${encodeURIComponent(status)}&limit=50`,
   );
-  return body.items ?? [];
+  // 只认本横幅语义的 spec-sync 行（其它 stage 的冲突行归各自消费方，防误报）。
+  return (body.items ?? []).filter((c) => c.stage === "spec-sync");
 }

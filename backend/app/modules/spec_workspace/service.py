@@ -2323,6 +2323,7 @@ class SpecWorkspaceService:
                                 server_versions = {}
                             server_versions[op.new_path] = target_row.version
                         platform_deleted_paths.append(op.new_path)
+                        skipped_tombstone += 1
                         continue
                     # task-02（design §5.4 通道 2）：rename 目标命中 platform_deleted
                     # 墓碑 → 拒绝复活（daemon 增量把本地残留搬进平台已删目录）。与下方
@@ -2334,12 +2335,14 @@ class SpecWorkspaceService:
                             server_versions = {}
                         server_versions[op.new_path] = target_row.version
                         platform_deleted_paths.append(op.new_path)
+                        skipped_tombstone += 1
                         continue
                     if target_row is not None and target_row.exists:
                         conflict = True
                         if server_versions is None:
                             server_versions = {}
                         server_versions[op.new_path] = target_row.version
+                        skipped_conflict += 1
                         continue
                     # R-07：无旧行 → 按 add new_path 处理（目标有墓碑则原地复活，
                     # 不走 INSERT——SQLAlchemy flush 先 INSERT 后 DELETE/UPDATE，
