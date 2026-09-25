@@ -27,6 +27,7 @@ function assertNoDirtyGenerated() {
   const dirty = targets.filter((f) => {
     try {
       execSync(`git diff --quiet -- "${f}"`, { cwd: root, stdio: "pipe" });
+      execSync(`git diff --cached --quiet -- "${f}"`, { cwd: root, stdio: "pipe" });
       return false;
     } catch {
       return true;

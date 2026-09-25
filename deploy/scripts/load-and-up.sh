@@ -26,7 +26,7 @@ docker image prune -f
 # backup-*（按创建时间降序），更旧的 rmi。40G 盘上每个 backup ≈908MB，无策略
 # 时每部署一次积 2 个（backend+frontend），7 次部署即 6.4G。
 for repo in multi-agent-platform-backend multi-agent-platform-frontend; do
-  docker images --format '{{.Tag}}' "$repo" | grep '^backup-' | sort -r | tail -n +5 | while read -r tag; do
+  docker images --format '{{.Tag}}' "$repo" | { grep '^backup-' || true; } | sort -r | tail -n +5 | while read -r tag; do
     echo "    rmi $repo:$tag（超出最近 4 个保留窗）"
     docker rmi "$repo:$tag" >/dev/null 2>&1 || true
   done
