@@ -62,6 +62,30 @@ source: 生产工作区 c84182bc-5db4-4441-98b6-eee4903cd7d9（sillyspec CLI 仓
 - T4 路由行锚点与标题的一致性校验进 `sillyspec knowledge validate`（标题改了但路由行没跟 → 报 warning），
   避免「INDEX 锚点 / 文件标题」静默漂移。
 
+## 根因定性（2026-09-25 追加）：9-24 的 knowledge 合并把 CLI 侧知识面换成了平台侧
+
+sillyspec 仓提交 `80355e9b`（2026-09-24 `docs(knowledge): 合回知识面（… spec 归位主仓）`）
+把**平台侧知识整体覆盖进 CLI 仓的 knowledge/**：
+
+- `conventions.md`：19 条 CLI 自有小节（ESM Only / Naming / Error Handling / Logging /
+  CLI Entry / Zero Config Init / 铁律段格式 / 资产保护注释 / …）→ 11 条平台小节
+  （SillySpec 文档驱动开发流程 / backend Python 工程约定 / 前端 SSE 消费 …）；
+- `known-issues.md`：40 条 → 25 条（CLI 自有坑条目被删）；
+- 新增平台侧 `decisions/*`（backend +339 / frontend +297 / unmapped +1232 行 …）与
+  `fr/*`（auto-backend / cli / daemon / lib-* …），`INDEX.md` 重写 +219 行。
+
+而 3389 行命中遥测全部产生于合并前（2026-09-14 ~ 09-23）的 CLI 自有知识面。
+于是页面的分母（当前镜像 = 平台侧知识 1758 条）与命中记录（CLI 侧知识）**几乎不相交**：
+
+| 命中归属 | 次数 | 占比 |
+|---|---|---|
+| 手册三文件小节（锚点对不上 + 内容已被换掉） | 7136 | 66% |
+| 页面文件清单里不存在的 13 个 CLI 域文件 | 2707 | 25% |
+| **真正能落到页面可见条目的**（decisions/runtime 325 + fr/core-engine 222 + fr/runtime 193 + decisions/unmapped 112 + fr/setup 78 + fr/cli-entry 19） | **949** | **8.8%** |
+
+即：**页面 17.7% 的覆盖率，是「拿平台的知识当分母、去匹配 CLI 的命中记录」的残值**，
+既不反映 CLI 侧知识使用率，也不反映平台侧。度量口径必须先修好这一层，再谈覆盖率数字。
+
 ## 平台侧配套（本仓 backlog，非工具缺陷）
 
 - P1 覆盖率分母分层：只统计「可路由条目」（INDEX 路由面 ∪ 文件级可命中文件），或按 zone
