@@ -350,6 +350,11 @@ function DecisionCard({
     <article
       data-testid="decision-entry-card"
       data-status={entry.status}
+      // 条目级落点（2026-09-25-change-detail-assets-usability / FR-01/02）：结构化条目
+      // 卡此前没有锚点属性，FR/决策索引行跳进来只能落到文件级。键与手册形态同构
+      // （``文件#锚``），锚取条目 id（``FR-cli-entry-075`` / ``D-001@v1``）——与沉淀
+      // 资产卡 href 的 anchor 参数同一取值。
+      data-entry-anchor={entry.id ? `${filename}#${entry.id}` : undefined}
       className={cn(
         "rounded-md border border-border/60 p-2.5 transition-colors hover:border-brand-400",
         superseded && "border-border/40 bg-muted/40 opacity-60",

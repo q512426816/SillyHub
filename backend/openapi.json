@@ -4524,6 +4524,125 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/changes/{change_id}/assets": {
+      "get": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Get Change Assets",
+        "description": "变更沉淀资产聚合（2026-09-25-change-precipitated-assets / D-001@v1 方案 a）。\n\n按变更名解析 spec 树镜像：knowledge/fr + knowledge/decisions 的归属条目、\n归档目录 test-trace/change-patch/delta 容错读取；逐项 fail-open（单项失败\n降级为空，不影响其它组）。不存在/跨工作区由 service 抛 ``ChangeNotFound``\n（404 resource-hiding，对齐 usage 端点口径）。",
+        "operationId": "get_change_assets_api_workspaces__workspace_id__changes__change_id__assets_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Change Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeAssetsRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/changes/{change_id}/assets/patch-file": {
+      "get": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Get Change Patch File",
+        "description": "归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。\n\n卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch`` 并切出该\n文件的 diff 段——冻结在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，\n两者不可互替）。``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/\n绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，\n不抛 404（读不到留档是展示面降级，不是资源不存在）。",
+        "operationId": "get_change_patch_file_api_workspaces__workspace_id__changes__change_id__assets_patch_file_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Change Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "变更目录相对文件路径（如 src/flow.js）",
+              "title": "Path"
+            },
+            "description": "变更目录相对文件路径（如 src/flow.js）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangePatchFileRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/changes/{change_id}/files/content": {
       "get": {
         "tags": [
@@ -38480,6 +38599,101 @@
         "title": "ChangeApprovalResponse",
         "description": "GET /changes/{name}/approval 响应——给 sillyspec CLI execute 审批门控用。\n\nCLI ``sync.js checkApproval``（execute 启动时调）读 ``status``：\n``rejected``/``pending`` 阻断 execute，其他（``approved``）放行\n（command.js:1071-1080）。当前后端无审批策略/数据 → 所有 change 默认 ``approved``\n放行（ql-20260812-001-6eb8 修 CLI 因 404 误判 pending 卡死）。"
       },
+      "ChangeAssetsRead": {
+        "properties": {
+          "change_key": {
+            "type": "string",
+            "title": "Change Key"
+          },
+          "archived": {
+            "type": "boolean",
+            "title": "Archived",
+            "default": false
+          },
+          "fr_entries": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeFrEntry"
+            },
+            "type": "array",
+            "title": "Fr Entries"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeDecisionEntry"
+            },
+            "type": "array",
+            "title": "Decisions"
+          },
+          "test_rows": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeTestRow"
+            },
+            "type": "array",
+            "title": "Test Rows"
+          },
+          "patch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangePatchMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delta": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangeDeltaMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "change_key"
+        ],
+        "title": "ChangeAssetsRead",
+        "description": "变更沉淀资产聚合（GET /changes/{cid}/assets）。\n\n逐项 fail-open（design 兼容策略）：单项解析失败降级为空，不影响其它组；\n``archived=False``（在途变更）时目录件不读取，前端按此渲染引导空态。"
+      },
+      "ChangeDecisionEntry": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "file": {
+            "type": "string",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "file"
+        ],
+        "title": "ChangeDecisionEntry",
+        "description": "决策蒸馏条目（knowledge/decisions 域文件内归属本变更的节）。"
+      },
       "ChangeDeleteResponse": {
         "properties": {
           "ok": {
@@ -38503,6 +38717,46 @@
         ],
         "title": "ChangeDeleteResponse",
         "description": "DELETE /changes/{cid} 响应（task-06 / design §11，FR-05a）。\n\n- ``ok``：恒 True（失败路径走 403/404/409 错误体，不进本 DTO）；\n- ``backup_dir``：镜像软删落地的备份目录绝对路径（30 天保留，人工恢复兜底）；\n- ``file_count``：实际移入备份区的文件数（零文件幂等删除为 0）。"
+      },
+      "ChangeDeltaMeta": {
+        "properties": {
+          "headline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
+          "before_lines": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Lines"
+          },
+          "delta_lines": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Lines"
+          }
+        },
+        "type": "object",
+        "title": "ChangeDeltaMeta",
+        "description": "归档 delta 摘要（delta.md 标题行 + Before/Delta 段行数）。"
       },
       "ChangeDocMatrix": {
         "properties": {
@@ -38710,9 +38964,10 @@
           },
           "ts": {
             "type": "number",
+            "maximum": 253402300799999.0,
             "minimum": 1000000000000.0,
             "title": "Ts",
-            "description": "事件 epoch 毫秒（≥1e12 值域校验，D-003）"
+            "description": "事件 epoch 毫秒（[1e12, 253402300799999] 值域校验，D-003 + M-2）"
           },
           "stage": {
             "anyOf": [
@@ -38971,6 +39226,41 @@
         ],
         "title": "ChangeFileWriteResponse"
       },
+      "ChangeFrEntry": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "file": {
+            "type": "string",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "file"
+        ],
+        "title": "ChangeFrEntry",
+        "description": "FR 索引条目（knowledge/fr 域文件内归属本变更的节）。"
+      },
       "ChangeList": {
         "properties": {
           "items": {
@@ -39078,6 +39368,121 @@
         ],
         "title": "ChangePasswordRequest",
         "description": "Body of ``POST /api/auth/change-password``（用户自助修改密码）。\n\n``old_password`` 必填（旧密码，verify 通过才允许改）；``new_password`` 至少 8 位\n（对齐 ``UserCreateRequest.password`` 的 min_length=8）。``confirm_password`` 仅前端\n校验，后端不收（``extra=\"forbid\"`` 拒绝多余字段）。"
+      },
+      "ChangePatchFileRead": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "ChangePatchFileRead",
+        "description": "归档留档单文件 diff 切片（GET /changes/{cid}/assets/patch-file）。\n\n展示面 fail-open：``change.patch`` 缺失、文件不在 patch 内、切片超上限一律以\n``note``/``truncated`` 说明而非报错（读不到留档不是变更详情的错误面）。"
+      },
+      "ChangePatchMeta": {
+        "properties": {
+          "files": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
+          "additions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additions"
+          },
+          "deletions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletions"
+          },
+          "patch_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patch Status"
+          },
+          "saved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved At"
+          },
+          "file_list": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "File List"
+          },
+          "files_truncated": {
+            "type": "boolean",
+            "title": "Files Truncated",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "ChangePatchMeta",
+        "description": "patch 留档统计（change-patch.json 的 totals + files 投影；无留档 → 整体 None）。\n\n``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 是同一 JSON\n``files`` 数组的清单投影（2026-09-25-change-detail-assets-usability / FR-04 起\n供卡面列出具体改动面），超上限时 ``files_truncated=True`` 显式标注。"
       },
       "ChangeProcessReq": {
         "properties": {
@@ -39562,6 +39967,49 @@
           "updated_at"
         ],
         "title": "ChangeSummary"
+      },
+      "ChangeTestRow": {
+        "properties": {
+          "row_id": {
+            "type": "string",
+            "title": "Row Id"
+          },
+          "anchor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor"
+          },
+          "tests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tests"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "row_id"
+        ],
+        "title": "ChangeTestRow",
+        "description": "测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。"
       },
       "ChangeUsageRead": {
         "properties": {

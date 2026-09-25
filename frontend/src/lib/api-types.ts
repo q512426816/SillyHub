@@ -1810,6 +1810,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Change Assets
+         * @description 变更沉淀资产聚合（2026-09-25-change-precipitated-assets / D-001@v1 方案 a）。
+         *
+         *     按变更名解析 spec 树镜像：knowledge/fr + knowledge/decisions 的归属条目、
+         *     归档目录 test-trace/change-patch/delta 容错读取；逐项 fail-open（单项失败
+         *     降级为空，不影响其它组）。不存在/跨工作区由 service 抛 ``ChangeNotFound``
+         *     （404 resource-hiding，对齐 usage 端点口径）。
+         */
+        get: operations["get_change_assets_api_workspaces__workspace_id__changes__change_id__assets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/assets/patch-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Change Patch File
+         * @description 归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。
+         *
+         *     卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch`` 并切出该
+         *     文件的 diff 段——冻结在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，
+         *     两者不可互替）。``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
+         *     绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
+         *     不抛 404（读不到留档是展示面降级，不是资源不存在）。
+         */
+        get: operations["get_change_patch_file_api_workspaces__workspace_id__changes__change_id__assets_patch_file_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/changes/{change_id}/files/content": {
         parameters: {
             query?: never;
@@ -13229,6 +13280,44 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * ChangeAssetsRead
+         * @description 变更沉淀资产聚合（GET /changes/{cid}/assets）。
+         *
+         *     逐项 fail-open（design 兼容策略）：单项解析失败降级为空，不影响其它组；
+         *     ``archived=False``（在途变更）时目录件不读取，前端按此渲染引导空态。
+         */
+        ChangeAssetsRead: {
+            /** Change Key */
+            change_key: string;
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+            /** Fr Entries */
+            fr_entries?: components["schemas"]["ChangeFrEntry"][];
+            /** Decisions */
+            decisions?: components["schemas"]["ChangeDecisionEntry"][];
+            /** Test Rows */
+            test_rows?: components["schemas"]["ChangeTestRow"][];
+            patch?: components["schemas"]["ChangePatchMeta"] | null;
+            delta?: components["schemas"]["ChangeDeltaMeta"] | null;
+        };
+        /**
+         * ChangeDecisionEntry
+         * @description 决策蒸馏条目（knowledge/decisions 域文件内归属本变更的节）。
+         */
+        ChangeDecisionEntry: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Status */
+            status?: string | null;
+            /** File */
+            file: string;
+        };
+        /**
          * ChangeDeleteResponse
          * @description DELETE /changes/{cid} 响应（task-06 / design §11，FR-05a）。
          *
@@ -13243,6 +13332,18 @@ export interface components {
             backup_dir: string;
             /** File Count */
             file_count: number;
+        };
+        /**
+         * ChangeDeltaMeta
+         * @description 归档 delta 摘要（delta.md 标题行 + Before/Delta 段行数）。
+         */
+        ChangeDeltaMeta: {
+            /** Headline */
+            headline?: string | null;
+            /** Before Lines */
+            before_lines?: number | null;
+            /** Delta Lines */
+            delta_lines?: number | null;
         };
         /** ChangeDocMatrix */
         ChangeDocMatrix: {
@@ -13350,7 +13451,7 @@ export interface components {
             kind: string;
             /**
              * Ts
-             * @description 事件 epoch 毫秒（≥1e12 值域校验，D-003）
+             * @description 事件 epoch 毫秒（[1e12, 253402300799999] 值域校验，D-003 + M-2）
              */
             ts: number;
             /** Stage */
@@ -13452,6 +13553,20 @@ export interface components {
             /** Task Id */
             task_id?: string | null;
         };
+        /**
+         * ChangeFrEntry
+         * @description FR 索引条目（knowledge/fr 域文件内归属本变更的节）。
+         */
+        ChangeFrEntry: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Status */
+            status?: string | null;
+            /** File */
+            file: string;
+        };
         /** ChangeList */
         ChangeList: {
             /** Items */
@@ -13494,6 +13609,53 @@ export interface components {
             old_password: string;
             /** New Password */
             new_password: string;
+        };
+        /**
+         * ChangePatchFileRead
+         * @description 归档留档单文件 diff 切片（GET /changes/{cid}/assets/patch-file）。
+         *
+         *     展示面 fail-open：``change.patch`` 缺失、文件不在 patch 内、切片超上限一律以
+         *     ``note``/``truncated`` 说明而非报错（读不到留档不是变更详情的错误面）。
+         */
+        ChangePatchFileRead: {
+            /** Path */
+            path: string;
+            /** Diff */
+            diff?: string | null;
+            /** Note */
+            note?: string | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
+         * ChangePatchMeta
+         * @description patch 留档统计（change-patch.json 的 totals + files 投影；无留档 → 整体 None）。
+         *
+         *     ``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 是同一 JSON
+         *     ``files`` 数组的清单投影（2026-09-25-change-detail-assets-usability / FR-04 起
+         *     供卡面列出具体改动面），超上限时 ``files_truncated=True`` 显式标注。
+         */
+        ChangePatchMeta: {
+            /** Files */
+            files?: number | null;
+            /** Additions */
+            additions?: number | null;
+            /** Deletions */
+            deletions?: number | null;
+            /** Patch Status */
+            patch_status?: string | null;
+            /** Saved At */
+            saved_at?: string | null;
+            /** File List */
+            file_list?: string[];
+            /**
+             * Files Truncated
+             * @default false
+             */
+            files_truncated: boolean;
         };
         /**
          * ChangeProcessReq
@@ -13658,6 +13820,20 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * ChangeTestRow
+         * @description 测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。
+         */
+        ChangeTestRow: {
+            /** Row Id */
+            row_id: string;
+            /** Anchor */
+            anchor?: string | null;
+            /** Tests */
+            tests?: string[];
+            /** State */
+            state?: string | null;
         };
         /**
          * ChangeUsageRead
@@ -30430,6 +30606,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeUsageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_change_assets_api_workspaces__workspace_id__changes__change_id__assets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeAssetsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_change_patch_file_api_workspaces__workspace_id__changes__change_id__assets_patch_file_get: {
+        parameters: {
+            query: {
+                /** @description 变更目录相对文件路径（如 src/flow.js） */
+                path: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangePatchFileRead"];
                 };
             };
             /** @description Validation Error */

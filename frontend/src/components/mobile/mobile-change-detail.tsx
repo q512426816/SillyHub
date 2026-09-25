@@ -490,9 +490,11 @@ export function MobileChangeDetail({
       <ChangeUsageCard kind="change" workspaceId={workspaceId} refKey={changeId} />
 
       {/* 范围对账卡（task-06 / FR-05 / D-005@v1：import 复用原样挂载，
-          identifier=change_key 已归档也可查，接线对齐桌面 :432-437） */}
+          identifier=change_key；archived 传入对齐桌面（2026-09-25-change-detail-
+          assets-usability / FR-05）——降级时指路「沉淀资产 · 归档留档」） */}
       <ScopeAuditCommandCard
         target={{ kind: "change", workspaceId, changeKey: change.change_key }}
+        archived={change.status === "archived" || change.location === "archive"}
       />
 
       {/* thin/quick 辅助阶段说明卡（2026-09-25-change-center-thin-flow task-08）：

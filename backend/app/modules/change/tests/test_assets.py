@@ -8,6 +8,10 @@
 - 损坏 JSON fail-open（Grill 建议：test-trace 非法 → test_rows=[]）；
 - 跨工作区/不存在 → ``ChangeNotFound``。
 
+2026-09-25-change-detail-assets-usability / FR-04 追加：``change-patch.json`` 的
+files 清单投影（含超上限标注）与 ``change.patch`` 单文件切片（命中/改名/引号路径/
+未命中/缺件/超限）。
+
 author: qinyi
 created_at: 2026-09-25
 """
@@ -21,15 +25,36 @@ from pathlib import Path
 import pytest
 
 from app.core.errors import ChangeNotFound
+from app.modules.change import assets as assets_mod
 from app.modules.change.assets import (
     ChangeAssetsQueryService,
     _parse_entries_owned_by,
+    slice_patch_for_file,
 )
 from app.modules.change.model import Change
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import Workspace
 
 KEY = "2026-09-25-assets-golden"
+
+# 切片样本：两文件块（普通头 + 新增文件头），覆盖块边界不串段。
+PATCH_SAMPLE = (
+    "diff --git a/src/flow.js b/src/flow.js\n"
+    "index 1111111..2222222 100644\n"
+    "--- a/src/flow.js\n"
+    "+++ b/src/flow.js\n"
+    "@@ -1,2 +1,3 @@\n"
+    " a\n"
+    "+b\n"
+    " c\n"
+    "diff --git a/test/x.test.mjs b/test/x.test.mjs\n"
+    "new file mode 100644\n"
+    "index 0000000..3333333\n"
+    "--- /dev/null\n"
+    "+++ b/test/x.test.mjs\n"
+    "@@ -0,0 +1,1 @@\n"
+    "+x\n"
+)
 
 
 # ===========================================================================
@@ -204,3 +229,241 @@ async def test_not_found_reraises(db_session, tmp_path: Path) -> None:
     ws = await _make_ws_spec(db_session, spec_root)
     with pytest.raises(ChangeNotFound):
         await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, uuid.uuid4())
+
+
+# ===========================================================================
+# change.patch 单文件切片（2026-09-25-change-detail-assets-usability / FR-04）
+# ===========================================================================
+
+
+def test_slice_patch_for_file_hits_own_block_only() -> None:
+    """命中文件只取自己那一块（不把后一文件的 hunk 带进来）。"""
+    sliced = slice_patch_for_file(PATCH_SAMPLE, "src/flow.js")
+    assert sliced is not None
+    assert sliced.startswith("diff --git a/src/flow.js b/src/flow.js\n")
+    assert "+b\n" in sliced
+    assert "test/x.test.mjs" not in sliced
+
+    added = slice_patch_for_file(PATCH_SAMPLE, "test/x.test.mjs")
+    assert added is not None
+    assert added.startswith("diff --git a/test/x.test.mjs b/test/x.test.mjs\n")
+    assert "+x\n" in added
+
+
+def test_slice_patch_for_file_rename_and_quoted_paths() -> None:
+    """改名块头两侧路径都算命中；引号包裹的特殊字符路径解引号后命中。"""
+    rename = (
+        "diff --git a/src/old-name.js b/src/new-name.js\n"
+        "similarity index 90%\n"
+        "rename from src/old-name.js\n"
+        "rename to src/new-name.js\n"
+        "@@ -1 +1 @@\n-a\n+b\n"
+    )
+    assert slice_patch_for_file(rename, "src/new-name.js") is not None
+    assert slice_patch_for_file(rename, "src/old-name.js") is not None
+
+    quoted = 'diff --git "a/src/有 空格.js" "b/src/有 空格.js"\n@@ -1 +1 @@\n-a\n+b\n'
+    assert slice_patch_for_file(quoted, "src/有 空格.js") is not None
+
+
+def test_slice_patch_for_file_miss_returns_none() -> None:
+    """未命中/空 patch → None（调用方转 note，不抛错）。"""
+    assert slice_patch_for_file(PATCH_SAMPLE, "src/not-there.js") is None
+    assert slice_patch_for_file("", "src/flow.js") is None
+
+
+def _seed_patch_archive(spec_root: Path, *, patch_text: str | None = PATCH_SAMPLE) -> None:
+    """归档目录补 change-patch.json（+ 可选 change.patch）。"""
+    change_dir = spec_root / "changes" / "archive" / KEY
+    change_dir.mkdir(parents=True, exist_ok=True)
+    (change_dir / "change-patch.json").write_text(
+        json.dumps(
+            {
+                "change": KEY,
+                "files": ["src/flow.js", "test/x.test.mjs"],
+                "totals": {"files": 2, "additions": 2, "deletions": 0},
+                "patchStatus": "ok",
+                "savedAt": "2026-09-25T06:09:44.456Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    if patch_text is not None:
+        (change_dir / "change.patch").write_text(patch_text, encoding="utf-8")
+
+
+async def test_patch_meta_projects_file_list(db_session, tmp_path: Path) -> None:
+    """change-patch.json 的 files 清单进 DTO（计数与清单同源同件）。"""
+    spec_root = tmp_path / "spec-root5"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_patch_archive(spec_root)
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    assert result.patch is not None
+    assert result.patch.files == 2
+    assert result.patch.file_list == ["src/flow.js", "test/x.test.mjs"]
+    assert result.patch.files_truncated is False
+
+
+async def test_patch_meta_file_list_truncates_with_flag(
+    db_session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """清单超上限 → 截断 + files_truncated=True（不静默丢数据）。"""
+    monkeypatch.setattr(assets_mod, "_PATCH_FILES_MAX", 1)
+    spec_root = tmp_path / "spec-root6"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_patch_archive(spec_root)
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    assert result.patch is not None
+    assert result.patch.file_list == ["src/flow.js"]
+    assert result.patch.files_truncated is True
+
+
+async def test_patch_file_diff_hit_and_miss(db_session, tmp_path: Path) -> None:
+    """切片端点：命中给 diff；不在 patch 内给 note（不报错）。"""
+    spec_root = tmp_path / "spec-root7"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_patch_archive(spec_root)
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+    service = ChangeAssetsQueryService(db_session)
+
+    hit = await service.get_patch_file_diff(ws.id, change.id, "src/flow.js")
+    assert hit.diff is not None and "+b" in hit.diff
+    assert hit.note is None and hit.truncated is False
+
+    miss = await service.get_patch_file_diff(ws.id, change.id, "src/not-there.js")
+    assert miss.diff is None
+    assert miss.note is not None and "不在 change.patch" in miss.note
+
+
+async def test_patch_file_diff_without_patch_artifact(db_session, tmp_path: Path) -> None:
+    """归档无 change.patch（存量归档常态）→ note 说明，不 500。"""
+    spec_root = tmp_path / "spec-root8"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_patch_archive(spec_root, patch_text=None)
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_patch_file_diff(
+        ws.id, change.id, "src/flow.js"
+    )
+    assert result.diff is None
+    assert result.note is not None and "没有 change.patch" in result.note
+
+
+async def test_patch_file_diff_truncates_with_flag(
+    db_session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """切片超上限 → 截断 + truncated=True。"""
+    monkeypatch.setattr(assets_mod, "_PATCH_FILE_MAX_CHARS", 40)
+    spec_root = tmp_path / "spec-root9"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_patch_archive(spec_root)
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_patch_file_diff(
+        ws.id, change.id, "src/flow.js"
+    )
+    assert result.diff is not None and len(result.diff) == 40
+    assert result.truncated is True
+
+
+# ===========================================================================
+# HTTP 面（路由注册 + 参数校验 + DTO 形状；fixture 范式照 test_files_router）
+# ===========================================================================
+
+
+@pytest.fixture()
+async def archived_change_with_patch(client, tmp_path: Path, auth_headers: dict, seed_spec_root_fn):
+    """建工作区 → spec_root 落一份带 change.patch 的归档变更 → reparse 取 change id。"""
+    root = tmp_path / "http-root"
+    root.mkdir()
+    resp = await client.post(
+        "/api/workspaces",
+        json={"name": "assets-http", "type": "other", "root_path": str(root)},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    ws_id = resp.json()["id"]
+
+    empty_spec = tmp_path / "empty-spec"
+    empty_spec.mkdir()
+    spec_root = Path(seed_spec_root_fn(ws_id, empty_spec))
+    (spec_root / "knowledge" / "fr").mkdir(parents=True, exist_ok=True)
+    (spec_root / "knowledge" / "fr" / "x.md").write_text(
+        f"## FR-http-test-001 归属\n变更：{KEY}\n状态：active\n", encoding="utf-8"
+    )
+    change_dir = spec_root / "changes" / "archive" / KEY
+    change_dir.mkdir(parents=True, exist_ok=True)
+    (change_dir / "requirements.md").write_text("# 需求\n", encoding="utf-8")
+    _seed_patch_archive(spec_root)
+
+    await client.post(f"/api/workspaces/{ws_id}/changes/reparse", headers=auth_headers)
+    list_resp = await client.get(f"/api/workspaces/{ws_id}/changes", headers=auth_headers)
+    items = list_resp.json()["items"]
+    if not items:  # reparse 首扫偶发空（test_files_router 既定兜底）
+        await client.post(f"/api/workspaces/{ws_id}/changes/reparse", headers=auth_headers)
+        list_resp = await client.get(f"/api/workspaces/{ws_id}/changes", headers=auth_headers)
+        items = list_resp.json()["items"]
+    assert items, "reparse 未发现归档变更"
+    return {"ws_id": ws_id, "change_id": items[0]["id"]}
+
+
+async def test_assets_http_lists_files_and_slices_patch(
+    client, archived_change_with_patch: dict, auth_headers: dict
+) -> None:
+    """GET /assets 出 file_list；GET /assets/patch-file 出该文件切片（FR-04 HTTP 面）。"""
+    ws_id = archived_change_with_patch["ws_id"]
+    cid = archived_change_with_patch["change_id"]
+
+    assets = await client.get(f"/api/workspaces/{ws_id}/changes/{cid}/assets", headers=auth_headers)
+    assert assets.status_code == 200, assets.text
+    body = assets.json()
+    assert body["patch"]["file_list"] == ["src/flow.js", "test/x.test.mjs"]
+    assert body["patch"]["files_truncated"] is False
+
+    sliced = await client.get(
+        f"/api/workspaces/{ws_id}/changes/{cid}/assets/patch-file",
+        params={"path": "src/flow.js"},
+        headers=auth_headers,
+    )
+    assert sliced.status_code == 200, sliced.text
+    payload = sliced.json()
+    assert payload["path"] == "src/flow.js"
+    assert "+b" in payload["diff"]
+    assert payload["note"] is None
+
+
+async def test_patch_file_http_rejects_traversal_422(
+    client, archived_change_with_patch: dict, auth_headers: dict
+) -> None:
+    """路径白名单校验（复用 normalize_scope_file_path）：``..`` / 绝对路径 → 422。"""
+    ws_id = archived_change_with_patch["ws_id"]
+    cid = archived_change_with_patch["change_id"]
+    for bad in ("../secret.txt", "/etc/passwd", ":(glob)**"):
+        resp = await client.get(
+            f"/api/workspaces/{ws_id}/changes/{cid}/assets/patch-file",
+            params={"path": bad},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422, f"{bad} → {resp.status_code}"
+
+
+async def test_patch_file_http_unknown_change_404(
+    client, archived_change_with_patch: dict, auth_headers: dict
+) -> None:
+    """跨工作区/不存在 → 404（ChangeNotFound resource-hiding 口径）。"""
+    ws_id = archived_change_with_patch["ws_id"]
+    resp = await client.get(
+        f"/api/workspaces/{ws_id}/changes/{uuid.uuid4()}/assets/patch-file",
+        params={"path": "src/flow.js"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404, resp.text

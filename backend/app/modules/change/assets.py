@@ -11,7 +11,8 @@ spec 树镜像；CLI 侧无结构化查询命令、前端自行解析有 N+1 与
   无「变更：」行的条目跳过——CLI 容错面）；
 - 测试绑定：归档变更目录 ``test-trace.json`` 直读（文件本身 per-change）；
 - patch 留档：``change-patch.json`` 存在才读（存量归档无此件 → None 容错，
-  该留档是 CLI 晚于多数归档的新功能）；
+  该留档是 CLI 晚于多数归档的新功能）；``change.patch`` 的单文件切片供卡面
+  点开看具体改动（2026-09-25-change-detail-assets-usability / FR-04）；
 - delta 摘要：``delta.md`` 标题行 + ``## Before``/``## Delta`` 段行数。
 
 镜像根获取对齐 ``knowledge/service.py::_spec_content_root`` 先例、变更目录
@@ -40,6 +41,7 @@ from app.modules.change.schema import (
     ChangeDecisionEntry,
     ChangeDeltaMeta,
     ChangeFrEntry,
+    ChangePatchFileRead,
     ChangePatchMeta,
     ChangeTestRow,
 )
@@ -51,6 +53,13 @@ log = get_logger(__name__)
 _ENTRY_HEAD_RE = re.compile(r"^##\s+(FR-\S+|D-\d+@v\d+)\s+(.+)$")
 _OWNER_LINE_RE = re.compile(r"^变更：(.+)$")
 _STATUS_LINE_RE = re.compile(r"^状态：(\S+)")
+# git 块头（``diff --git a/<old> b/<new>``；两侧可被引号包裹——特殊字符路径形态）。
+_PATCH_HEADER_RE = re.compile(r"^diff --git (?P<old>\"[^\"]*\"|\S+) (?P<new>\"[^\"]*\"|\S+)$")
+
+# 展示面上限（design「风险一」）：清单条数与单文件切片字符数——超限显式标注，
+# 不静默截断（超大 patch 撑爆响应/前端 DOM 是真实风险，但静默丢数据更糟）。
+_PATCH_FILES_MAX = 500
+_PATCH_FILE_MAX_CHARS = 200_000
 
 
 def _parse_entries_owned_by(text: str, change_key: str) -> list[tuple[str, str, str | None]]:
@@ -132,7 +141,7 @@ def _read_test_rows(change_dir: Path) -> list[ChangeTestRow]:
 
 
 def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
-    """读 ``change-patch.json`` 的 totals 投影（存在才读 → 无此件 None）。"""
+    """读 ``change-patch.json`` 的 totals + files 投影（存在才读 → 无此件 None）。"""
     path = change_dir / "change-patch.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -142,12 +151,84 @@ def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
     if not isinstance(data, dict):
         return None
     totals = data.get("totals") or {}
+    raw_files = data.get("files")
+    file_list = [f for f in raw_files if isinstance(f, str)] if isinstance(raw_files, list) else []
     return ChangePatchMeta(
         files=totals.get("files"),
         additions=totals.get("additions"),
         deletions=totals.get("deletions"),
         patch_status=data.get("patchStatus"),
         saved_at=data.get("savedAt"),
+        file_list=file_list[:_PATCH_FILES_MAX],
+        files_truncated=len(file_list) > _PATCH_FILES_MAX,
+    )
+
+
+def _unquote_patch_path(raw: str) -> str:
+    """解 git 对特殊字符路径的引号包裹（``diff --git "a/…" "b/…"`` 形态）。"""
+    if len(raw) >= 2 and raw.startswith('"') and raw.endswith('"'):
+        return raw[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+    return raw
+
+
+def _strip_ab_prefix(path: str) -> str:
+    """剥 ``a/``/``b/`` 前缀（git 块头两侧路径各带一侧前缀）。"""
+    for prefix in ("a/", "b/"):
+        if path.startswith(prefix):
+            return path[len(prefix) :]
+    return path
+
+
+def slice_patch_for_file(patch_text: str, rel_path: str) -> str | None:
+    """按 ``diff --git`` 块切出单个文件的 diff（未命中 → None）。
+
+    只解析块头两侧路径（``a/``/``b/`` 剥前缀后与目标逐字比较，覆盖改名形态），
+    不做语义推断——CLI 侧有同款 ``slicePatchForFile``，本层是只读展示切片、
+    不参与审计判据（design「风险三」）。
+    """
+    blocks: list[list[str]] = []
+    current: list[str] | None = None
+    for line in patch_text.splitlines(keepends=True):
+        if line.startswith("diff --git "):
+            current = [line]
+            blocks.append(current)
+        elif current is not None:
+            current.append(line)
+    for block in blocks:
+        match = _PATCH_HEADER_RE.match(block[0].rstrip("\r\n"))
+        if match is None:
+            continue
+        candidates = {
+            _strip_ab_prefix(_unquote_patch_path(match.group("old"))),
+            _strip_ab_prefix(_unquote_patch_path(match.group("new"))),
+        }
+        if rel_path in candidates:
+            return "".join(block)
+    return None
+
+
+def _read_patch_file_diff(change_dir: Path, rel_path: str) -> ChangePatchFileRead:
+    """读 ``change.patch`` 并切出目标文件段（缺件/未命中/超限 → note 或 truncated）。"""
+    path = change_dir / "change.patch"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        log.info("change.assets_patch_file_unavailable", path=str(path), error=str(exc))
+        return ChangePatchFileRead(
+            path=rel_path,
+            note="本变更归档目录没有 change.patch 留档（该件是 CLI 晚于多数归档的新功能），无法比对具体改动。",
+        )
+    sliced = slice_patch_for_file(text, rel_path)
+    if sliced is None:
+        return ChangePatchFileRead(
+            path=rel_path,
+            note="该文件不在 change.patch 内（留档窗口外，或仅改了不纳入 patch 的面）。",
+        )
+    truncated = len(sliced) > _PATCH_FILE_MAX_CHARS
+    return ChangePatchFileRead(
+        path=rel_path,
+        diff=sliced[:_PATCH_FILE_MAX_CHARS] if truncated else sliced,
+        truncated=truncated,
     )
 
 
@@ -219,6 +300,18 @@ class ChangeAssetsQueryService:
         result.patch = patch
         result.delta = delta
         return result
+
+    async def get_patch_file_diff(
+        self, workspace_id: uuid.UUID, change_id: uuid.UUID, rel_path: str
+    ) -> ChangePatchFileRead:
+        """归档留档单文件 diff 切片（FR-04；``rel_path`` 已由 router 白名单校验）。
+
+        在途变更同样允许调用——归档目录件不存在时由 ``_read_patch_file_diff``
+        以 note 说明，不额外分支（展示面 fail-open，读不到不是错误面）。
+        """
+        change = await self._get_change(workspace_id, change_id)
+        change_dir = await self._resolve_change_dir(workspace_id, change)
+        return await asyncio.to_thread(_read_patch_file_diff, change_dir, rel_path)
 
     async def _get_change(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> Change:
         res = await self._session.execute(

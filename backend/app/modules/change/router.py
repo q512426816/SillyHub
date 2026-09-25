@@ -41,6 +41,7 @@ from app.modules.change.schema import (
     ChangeFileWriteRequest,
     ChangeFileWriteResponse,
     ChangeList,
+    ChangePatchFileRead,
     ChangeRead,
     ChangeReparseResponse,
     ChangeReparseStats,
@@ -544,6 +545,31 @@ async def get_change_assets(
     （404 resource-hiding，对齐 usage 端点口径）。
     """
     return await ChangeAssetsQueryService(session).get_change_assets(workspace_id, change_id)
+
+
+@router.get(
+    "/changes/{change_id}/assets/patch-file",
+    response_model=ChangePatchFileRead,
+)
+async def get_change_patch_file(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+    path: str = Query(..., description="变更目录相对文件路径（如 src/flow.js）"),
+) -> ChangePatchFileRead:
+    """归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。
+
+    卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch`` 并切出该
+    文件的 diff 段——冻结在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，
+    两者不可互替）。``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
+    绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
+    不抛 404（读不到留档是展示面降级，不是资源不存在）。
+    """
+    service = ChangeAssetsQueryService(session)
+    return await service.get_patch_file_diff(
+        workspace_id, change_id, normalize_scope_file_path(path)
+    )
 
 
 @router.get(

@@ -741,51 +741,15 @@ export function listChangeEvents(
 }
 
 // ── 沉淀资产（2026-09-25-change-precipitated-assets / D-001@v1 方案 a）─────────
+// 类型统一取 OpenAPI 生成版（CLAUDE.md 规则 21：前端接口类型禁止手写；
+// 2026-09-25-change-detail-assets-usability 顺手清掉本段旧手写副本——生成版
+// 数组字段为可选，消费方按 `?.` + `?? []` 取，不假设后端一定回填）。
 
-export interface ChangeAssetsFrEntry {
-  id: string;
-  title: string;
-  status: string | null;
-  file: string;
-}
+/** 沉淀资产聚合响应（GET /changes/{cid}/assets）。 */
+export type ChangeAssetsResponse = components["schemas"]["ChangeAssetsRead"];
 
-export interface ChangeAssetsDecisionEntry {
-  id: string;
-  title: string;
-  status: string | null;
-  file: string;
-}
-
-export interface ChangeAssetsTestRow {
-  row_id: string;
-  anchor: string | null;
-  tests: string[];
-  state: string | null;
-}
-
-export interface ChangeAssetsPatchMeta {
-  files: number | null;
-  additions: number | null;
-  deletions: number | null;
-  patch_status: string | null;
-  saved_at: string | null;
-}
-
-export interface ChangeAssetsDeltaMeta {
-  headline: string | null;
-  before_lines: number | null;
-  delta_lines: number | null;
-}
-
-export interface ChangeAssetsResponse {
-  change_key: string;
-  archived: boolean;
-  fr_entries: ChangeAssetsFrEntry[];
-  decisions: ChangeAssetsDecisionEntry[];
-  test_rows: ChangeAssetsTestRow[];
-  patch: ChangeAssetsPatchMeta | null;
-  delta: ChangeAssetsDeltaMeta | null;
-}
+/** 归档留档单文件 diff 切片响应（api-types 生成版）。 */
+export type ChangePatchFileResponse = components["schemas"]["ChangePatchFileRead"];
 
 export function getChangeAssets(
   workspaceId: string,
@@ -793,5 +757,21 @@ export function getChangeAssets(
 ): Promise<ChangeAssetsResponse> {
   return apiFetch<ChangeAssetsResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/assets`,
+  );
+}
+
+/**
+ * 读某文件在 change.patch 中的 diff 切片（2026-09-25-change-detail-assets-usability /
+ * FR-04）。冻结在收尾时点，与范围对账的实时窗口锚不同源；未命中/缺件由响应
+ * ``note`` 表达（不是错误态），仅路径非法/无权限抛 ApiError。
+ */
+export function getChangePatchFile(
+  workspaceId: string,
+  changeId: string,
+  path: string,
+): Promise<ChangePatchFileResponse> {
+  const q = new URLSearchParams({ path });
+  return apiFetch<ChangePatchFileResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/assets/patch-file?${q.toString()}`,
   );
 }

@@ -126,12 +126,20 @@ vi.mock("@uiw/react-markdown-preview", () => ({
 }));
 
 // WorkspaceTabs 的 usePathname 需要 app router 上下文，jsdom 下 mock 掉
-// （知识库页本身用 params prop，不受影响）。
+// （知识库页本身用 params prop，不受影响）。useSearchParams（2026-09-25-change-
+// detail-assets-usability / FR-01/02 外部深链入口）走 navState 可覆写——用例内
+// 改 navState.searchParams 即可驱动 ?file=&anchor= 落位。
+const navState = vi.hoisted(() => ({
+  searchParams: new URLSearchParams(),
+}));
 vi.mock("next/navigation", () => ({
   usePathname: () => "/workspaces/ws-1/knowledge",
+  useSearchParams: () => navState.searchParams,
 }));
 
-import KnowledgePage from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
+import KnowledgePage, {
+  normalizeKnowledgeFileParam,
+} from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
 import { WorkspaceTabs } from "@/components/workspace-tabs";
 import {
   getKnowledge,
@@ -768,6 +776,84 @@ describe("卡片/原文双 tab 分发（task-05 / 2026-09-20-knowledge-effect-pa
     // 缺省 stats 零值（usage_board 空）→ 无条目级徽标，头部文件级 🔥 214 仍在。
     const badges = screen.getAllByTestId("entry-use-badge").map((b) => b.textContent);
     expect(badges).toEqual(["🔥 214"]);
+  });
+});
+
+describe("外部深链落位（2026-09-25-change-detail-assets-usability / FR-01/02）", () => {
+  /** fr 域文件内容：一条 FR 结构化条目（条目卡带 data-entry-anchor 落点）。 */
+  const FR_CONTENT =
+    "---\nauthor: q\n---\n\n# FR 索引\n\n## FR-host-fs-handler-001 主机文件处理\n变更：some-change\n状态：active\n摘要：x\n";
+
+  /** 深链参数驱动 + 等 fr 文件被选中（getKnowledge 收到剥前缀后的键）。 */
+  async function renderWithDeepLink(params: Record<string, string>) {
+    navState.searchParams = new URLSearchParams(params);
+    mockGet.mockResolvedValue(
+      entry({
+        filename: "fr/host-fs-handler.md",
+        path: ".sillyspec/knowledge/fr/host-fs-handler.md",
+        zone: "fr",
+        title: "FR 索引",
+        content: FR_CONTENT,
+      }),
+    );
+    renderPage();
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith(WS, "fr/host-fs-handler.md"));
+    await screen.findByTestId("entry-card-list");
+  }
+
+  beforeEach(() => {
+    navState.searchParams = new URLSearchParams();
+  });
+
+  afterEach(() => {
+    navState.searchParams = new URLSearchParams();
+  });
+
+  it("?file=knowledge/…&anchor=FR-… → 选中该文件并给出条目级锚点落点", async () => {
+    await renderWithDeepLink({
+      file: "knowledge/fr/host-fs-handler.md",
+      anchor: "FR-host-fs-handler-001",
+    });
+    expect(screen.getByTestId("entry-card-list")).toHaveAttribute("data-form", "structured");
+    expect(
+      document.querySelector(
+        '[data-entry-anchor="fr/host-fs-handler.md#FR-host-fs-handler-001"]',
+      ),
+    ).not.toBeNull();
+  });
+
+  it("前缀容错：.sillyspec/knowledge/ 与 .sillyspec/ 写法落到同一文件", async () => {
+    await renderWithDeepLink({
+      file: ".sillyspec/knowledge/fr/host-fs-handler.md",
+      anchor: "FR-host-fs-handler-001",
+    });
+    expect(mockGet).toHaveBeenCalledWith(WS, "fr/host-fs-handler.md");
+
+    cleanup();
+    await renderWithDeepLink({
+      file: ".sillyspec/fr/host-fs-handler.md",
+    });
+    expect(mockGet).toHaveBeenCalledWith(WS, "fr/host-fs-handler.md");
+  });
+
+  it("查无此文件：不选中任何条目（静默停在列表空态，不报错）", async () => {
+    navState.searchParams = new URLSearchParams({
+      file: "knowledge/fr/not-there.md",
+    });
+    renderPage();
+    await waitForTree(["需求规则", "host-fs-handler.md"]);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(mockGet).not.toHaveBeenCalled();
+    expect(screen.getByText("选择左侧文档查看内容。")).toBeInTheDocument();
+  });
+
+  it("normalizeKnowledgeFileParam：四种前缀形态归一，未知形态原样返回", () => {
+    expect(normalizeKnowledgeFileParam("knowledge/fr/x.md")).toBe("fr/x.md");
+    expect(normalizeKnowledgeFileParam(".sillyspec/knowledge/fr/x.md")).toBe("fr/x.md");
+    expect(normalizeKnowledgeFileParam(".sillyspec/fr/x.md")).toBe("fr/x.md");
+    expect(normalizeKnowledgeFileParam("fr/x.md")).toBe("fr/x.md");
+    expect(normalizeKnowledgeFileParam("./fr/x.md")).toBe("fr/x.md");
+    expect(normalizeKnowledgeFileParam("fr\\x.md")).toBe("fr/x.md");
   });
 });
 

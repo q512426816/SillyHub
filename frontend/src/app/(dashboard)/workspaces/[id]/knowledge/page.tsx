@@ -35,9 +35,16 @@
  * （原型 .distill-bar 位）——轮询蒸馏任务（5s/15s 双档），任务完成刷新知识
  * 列表使候选出现在待审核区；沉淀弹层派发成功经 onDistilled invalidate 任务
  * 查询，任务条立即出现不等下个轮询到点。
+ *
+ * 外部深链（2026-09-25-change-detail-assets-usability / FR-01/02）：支持
+ * ``?file=<路径>&anchor=<条目 id>`` —— file 做前缀归一（``knowledge/``、
+ * ``.sillyspec/``、反斜杠、``./``）后选中该文件，anchor 命中条目卡则滚动定位
+ * （FR/决策结构化条目卡的数据锚点由 entry-card-list 提供）。参数只在就绪后消费
+ * 一次，列表刷新不再触发跳转；查不到文件静默停在列表空态。
  */
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Popconfirm, Tree, type TreeProps } from "antd";
@@ -256,8 +263,26 @@ function toAntdNodes(nodes: KnowledgeNode[]): DataNode[] {
   });
 }
 
+/**
+ * 外部深链 file 参数 → 知识库相对文件名（2026-09-25-change-detail-assets-usability /
+ * FR-01/02）。调用方给的是 spec 树相对路径（``knowledge/fr/x.md``），知识库 API 的
+ * 键是剥掉 ``knowledge/`` 后的相对路径（``fr/x.md``）；再容错 ``.sillyspec/`` 前缀、
+ * 反斜杠与 ``./`` 写法——四种常见形态落到同一文件，其余原样返回（查不到即静默落
+ * 文件级，不报错）。
+ */
+export function normalizeKnowledgeFileParam(raw: string): string {
+  let v = raw.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+  while (v.startsWith(".sillyspec/")) v = v.slice(".sillyspec/".length);
+  if (v.startsWith("knowledge/")) v = v.slice("knowledge/".length);
+  return v;
+}
+
 export default function KnowledgePage({ params }: Props) {
   const workspaceId = params.id;
+  const searchParams = useSearchParams();
+  /** 外部深链参数（沉淀资产卡 FR/决策索引行等入口）。 */
+  const deepLinkFile = searchParams.get("file");
+  const deepLinkAnchor = searchParams.get("anchor");
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeEntry[]>([]);
   /** 选中文件名（API 详情键）与展示态。 */
   const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
@@ -345,14 +370,23 @@ export default function KnowledgePage({ params }: Props) {
           // 条目级落点（验收建议 2）：卡流加载后滚动到锚点小节卡。锚点是 slug
           // 形态（INDEX 路由行/条目卡与 hits 同域），滚动定位用 data-anchor 属性
           // 选择器；查无该卡时静默落文件级顶部（降级兼容旧锚/改名小节）。
+          //
+          // 有界重试（2026-09-25-change-detail-assets-usability / FR-01/02）：详情
+          // 落 state 到卡流挂载之间隔着 React 提交 + 卡流解析，单帧 rAF 可能早于
+          // DOM 就绪（URL 深链是外部入口，落空代价是「跳了但没定位」）；改为逐帧
+          // 重试至多 12 帧，命中即滚动，耗尽仍静默降级文件级。
           if (anchor) {
-            requestAnimationFrame(() => {
-              document
-                .querySelector(
-                  `[data-entry-anchor="${CSS.escape(`${filename}#${anchor}`)}"]`,
-                )
-                ?.scrollIntoView({ behavior: "smooth", block: "center" });
-            });
+            const selector = `[data-entry-anchor="${CSS.escape(`${filename}#${anchor}`)}"]`;
+            let tries = 0;
+            const tick = () => {
+              const el = document.querySelector(selector);
+              if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+                return;
+              }
+              if (++tries < 12) requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
           }
         })
         .catch((err) => {
@@ -361,6 +395,25 @@ export default function KnowledgePage({ params }: Props) {
     },
     [workspaceId],
   );
+
+  /**
+   * 外部深链落位（2026-09-25-change-detail-assets-usability / FR-01/02）：URL
+   * ``?file=&anchor=`` 就绪且列表落定后选中目标文件并滚到条目卡。每个参数组合只
+   * 消费一次（deepLinkDoneRef）——列表刷新（编辑保存/审核操作后 loadList）不会
+   * 再次触发跳转把用户从当前位置拽走；查无此文件时同样标记已消费，静默停在列表
+   * 空态（不报错、不反复重试）。
+   */
+  const deepLinkDoneRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!deepLinkFile) return;
+    const key = `${deepLinkFile}#${deepLinkAnchor ?? ""}`;
+    if (deepLinkDoneRef.current === key) return;
+    if (loading || knowledgeItems.length === 0) return;
+    deepLinkDoneRef.current = key;
+    const target = normalizeKnowledgeFileParam(deepLinkFile);
+    const hit = knowledgeItems.find((it) => it.filename === target);
+    if (hit) selectEntry(hit.filename, deepLinkAnchor ?? undefined);
+  }, [deepLinkFile, deepLinkAnchor, loading, knowledgeItems, selectEntry]);
 
   /**
    * 条目级计数映射（task-05 / FR-06）：与 OpsDashboard 同 key 复用同一 stats

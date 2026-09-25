@@ -365,6 +365,62 @@ describe("ql-20260911-001-c0be change 目标：对账结果摘要", () => {
     ).toHaveTextContent(/guard 已清理/);
     expect(screen.getByTestId("scope-audit-commands")).toBeInTheDocument();
   });
+
+  // 2026-09-25-change-detail-assets-usability / FR-05：ok=true 但降级为「实际侧
+  // only 视图」时，行内没有 verdict 字段——原实现照样渲染三态 0/0/0（生产实证：
+  // 已归档轻量变更 39 文件 +124162/−0 三态全 0，被读成「无计划外改动」）。
+  it("ok=true 降级：不渲染三态 chips，显降级原因与口径；归档变更指路留档", async () => {
+    mocks.getScopeAudit.mockResolvedValue({
+      ...makeFullFlowAudit(),
+      degraded_reason:
+        "design.md 无「文件变更清单」章节或清单为空——降级实际侧 only 视图（不出三态列）",
+      anchor_label: "head-uncommitted-window",
+      // 降级行：只有 path/行数，没有 verdict（正是误导来源）
+      rows: [
+        { path: ".sillyspec/.pre-merge-backup/x.json", kind: "new", additions: 36, deletions: 0 },
+        { path: "src/flow.js", kind: "new", additions: 5, deletions: 0 },
+      ],
+      totals: { files: 2, additions: 41, deletions: 0 },
+    });
+    renderCard(
+      <ScopeAuditCommandCard
+        target={{ kind: "change", workspaceId: "ws-1", changeKey: "c1" }}
+        archived
+      />,
+    );
+
+    expect(
+      await screen.findByTestId("scope-audit-degraded-view"),
+    ).toHaveTextContent(/不出三态列/);
+    expect(screen.getByTestId("scope-audit-degraded-scope")).toHaveTextContent(
+      /真实改动面见「沉淀资产 · 归档留档」/,
+    );
+    // 关键钉子：三态 chips 一个都不许出现（0/0/0 会被读成「无计划外改动」）
+    expect(screen.queryByTestId("scope-audit-chip-planned")).toBeNull();
+    expect(screen.queryByTestId("scope-audit-chip-unplanned")).toBeNull();
+    expect(screen.queryByTestId("scope-audit-chip-untouched")).toBeNull();
+    // 文件面合计仍在（锚点 + 行数），明细入口仍在
+    expect(screen.getByText("2 文件")).toBeInTheDocument();
+    expect(screen.getByTestId("scope-audit-detail-entry")).toHaveTextContent(
+      "查看明细（2）",
+    );
+  });
+
+  it("ok=true 降级 + 未归档：口径提示不带留档指路", async () => {
+    mocks.getScopeAudit.mockResolvedValue({
+      ...makeFullFlowAudit(),
+      degraded_reason: "锚点缺失——行数按 HEAD 未提交窗口采集",
+      rows: [{ path: "src/a.ts", kind: "new", additions: 1, deletions: 0 }],
+    });
+    renderCard(
+      <ScopeAuditCommandCard
+        target={{ kind: "change", workspaceId: "ws-1", changeKey: "c1" }}
+      />,
+    );
+    expect(
+      await screen.findByTestId("scope-audit-degraded-scope"),
+    ).toHaveTextContent(/不代表本变更的计划外改动/);
+  });
 });
 
 describe("ql-20260911-001-c0be quick 目标：反查后取数", () => {

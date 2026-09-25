@@ -2,18 +2,32 @@
 // 覆盖：四组渲染（fr/决策/测试绑定/归档留档逐组有数据才出现）+ 计数徽标、
 // 逐组容错（仅 fr 有数据时其余组不渲染）、在途变更引导空态、归档全空态、
 // 失败静默隐藏（isError → 整卡 null）。
-import { render, screen, fireEvent } from "@testing-library/react";
+//
+// 2026-09-25-change-detail-assets-usability（FR-01~04）追加：FR/决策行 href 带
+// file+anchor 深链、测试绑定行点开测试文件预览弹窗（FilePreview 收到仓库路径）、
+// 归档留档文件清单渲染与点开单文件 diff 弹窗（命中/note 两态）。
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
-import { getChangeAssets } from "@/lib/changes";
+import { getChangeAssets, getChangePatchFile } from "@/lib/changes";
 
 vi.mock("@/lib/changes", () => ({
   getChangeAssets: vi.fn(),
+  getChangePatchFile: vi.fn(),
+}));
+
+// FilePreview 走 explorer 取数（仓库文件），本卡只验证「弹窗打开且把路径交给它」——
+// 取数与渲染由 explorer 自己的用例覆盖，这里用替身把路径回显出来。
+vi.mock("@/components/explorer/file-preview", () => ({
+  FilePreview: ({ filePath }: { filePath: string | null }) => (
+    <div data-testid="file-preview-stub">{filePath}</div>
+  ),
 }));
 
 const mockGet = vi.mocked(getChangeAssets);
+const mockPatch = vi.mocked(getChangePatchFile);
 
 function renderCard() {
   const client = new QueryClient({
@@ -43,7 +57,15 @@ const FULL = {
       state: "candidate",
     },
   ],
-  patch: { files: 6, additions: 10, deletions: 9, patch_status: "ok", saved_at: null },
+  patch: {
+    files: 6,
+    additions: 10,
+    deletions: 9,
+    patch_status: "ok",
+    saved_at: null,
+    file_list: ["src/flow.js", "test/x.test.mjs"],
+    files_truncated: false,
+  },
   delta: { headline: "h", before_lines: 2, delta_lines: 1 },
 };
 
@@ -123,5 +145,85 @@ describe("ChangeAssetsCard", () => {
     // 等 query 落定（retry:false 单次即败）后断言空渲染。
     await new Promise((r) => setTimeout(r, 100));
     expect(container.querySelector('[data-testid="change-assets-card"]')).toBeNull();
+  });
+
+  it("FR/决策索引行：href 带 file+anchor 深链（FR-01/02）", async () => {
+    mockGet.mockResolvedValue(FULL);
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+
+    const frLink = (await screen.findByText("FR-auto-x-001")).closest("a");
+    expect(frLink).toHaveAttribute(
+      "href",
+      "/workspaces/ws-1/knowledge?file=knowledge%2Ffr%2Fx.md&anchor=FR-auto-x-001",
+    );
+    const decLink = screen.getByText("D-001@v1").closest("a");
+    expect(decLink).toHaveAttribute(
+      "href",
+      "/workspaces/ws-1/knowledge?file=knowledge%2Fdecisions%2Fx.md&anchor=D-001%40v1",
+    );
+  });
+
+  it("测试绑定行：锚点标注「变更内」且测试文件可点开预览（FR-03）", async () => {
+    mockGet.mockResolvedValue(FULL);
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+
+    expect(await screen.findByText(/变更内 FR-01/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("change-assets-test-file-backend/app/x.py"));
+    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
+      "backend/app/x.py",
+    );
+  });
+
+  it("归档留档：清单渲染 + 点开命中文件出 diff 弹窗（FR-04）", async () => {
+    mockGet.mockResolvedValue(FULL);
+    mockPatch.mockResolvedValue({
+      path: "src/flow.js",
+      diff: "diff --git a/src/flow.js b/src/flow.js\n@@ -1 +1 @@\n-a\n+b\n",
+      note: null,
+      truncated: false,
+    });
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+
+    expect(await screen.findByTestId("change-assets-patch-files")).toBeInTheDocument();
+    expect(screen.getByTestId("change-assets-patch-file-src/flow.js")).toBeInTheDocument();
+    expect(screen.getByTestId("change-assets-patch-file-test/x.test.mjs")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("change-assets-patch-file-src/flow.js"));
+    await waitFor(() =>
+      expect(mockPatch).toHaveBeenCalledWith("ws-1", "c-1", "src/flow.js"),
+    );
+    expect(await screen.findByTestId("diff-view")).toBeInTheDocument();
+  });
+
+  it("归档留档：切片未命中出 note 文案而非空 diff（FR-04）", async () => {
+    mockGet.mockResolvedValue(FULL);
+    mockPatch.mockResolvedValue({
+      path: "src/flow.js",
+      diff: null,
+      note: "该文件不在 change.patch 内（留档窗口外，或仅改了不纳入 patch 的面）。",
+      truncated: false,
+    });
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+
+    fireEvent.click(await screen.findByTestId("change-assets-patch-file-src/flow.js"));
+    expect(await screen.findByTestId("change-assets-patch-note")).toHaveTextContent(
+      "不在 change.patch 内",
+    );
+  });
+
+  it("归档留档：清单截断时显式标注（FR-04）", async () => {
+    mockGet.mockResolvedValue({
+      ...FULL,
+      patch: { ...FULL.patch, files_truncated: true },
+    });
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+
+    expect(await screen.findByText("清单已截断")).toBeInTheDocument();
   });
 });

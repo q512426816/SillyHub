@@ -26,6 +26,14 @@
  * useQuickSessionName 反查）。反查失败 / ok=false（会话已清理等）→ 降级为
  * 命令 + 提示，不阻断展示（advisory 语义）。
  *
+ * 降级视图（2026-09-25-change-detail-assets-usability / FR-05）：ok=true 但
+ * ``degraded_reason`` 非空 = CLI 降级为「实际侧 only 视图（不出三态列）」，
+ * 行内无 verdict 字段——原实现照样渲染三态 0/0/0，被读成「无计划外改动」
+ * （生产实证：已归档轻量变更 39 文件 +124162/−0 三态全 0，实为当前工作区
+ * 未提交窗口）。现改为：不渲染三态 chips（含分组形态的顶层降级说明），
+ * 显式展示降级原因；``archived`` 为真时追加「真实改动面见沉淀资产 · 归档留档」
+ * 的指路（该 prop 由变更详情页传入）。
+ *
  * 命令前缀单一取值点（SCOPE_AUDIT_CMD_PREFIX）：直接显示 sillyspec 正式命令
  * （本机已安装版本若尚未含 scope-audit，跑命令会得「未知命令」提示升级），
  * 全部命令经 buildScopeAuditCommand 拼接。
@@ -124,6 +132,12 @@ export type ScopeAuditTarget =
 
 export interface ScopeAuditCommandCardProps {
   target: ScopeAuditTarget;
+  /**
+   * 目标变更是否已归档（2026-09-25-change-detail-assets-usability / FR-05）。
+   * 归档变更的实时窗口锚采到的是「当前工作区未提交改动」，与该变更无关——
+   * 降级说明里需要据此指路到「沉淀资产 · 归档留档」。缺省 false（不渲染该提示）。
+   */
+  archived?: boolean;
 }
 
 /** full-flow verdict 徽章（色阶走语义 token，✓/⚠️ 与工具表同款标记）。 */
@@ -148,12 +162,12 @@ const KIND_LABEL: Record<string, string> = {
   binary: "二进制",
 };
 
-/** 行徽章（mode 分派：full-flow 取 verdict，quick 取 attribution）。 */
+/** 行徽章（mode 分派：full-flow 取 verdict，quick 取 attribution）；无键 → null（不渲染空徽章）。 */
 function rowBadge(row: ScopeAuditRow, mode: string) {
   const key = mode === "quick" ? row.attribution : row.verdict;
-  const meta =
-    (mode === "quick" ? ATTR_META : VERDICT_META)[key ?? ""] ?? null;
-  return meta ?? { label: key ?? "—", className: "bg-muted text-muted-foreground" };
+  if (key === null || key === undefined || key === "") return null;
+  const meta = (mode === "quick" ? ATTR_META : VERDICT_META)[key];
+  return meta ?? { label: key, className: "bg-muted text-muted-foreground" };
 }
 
 /** 行数紧凑展示（+N 绿 / −M 红；null=二进制/降级 → —）。 */
@@ -209,14 +223,16 @@ function DetailRow({
         title="点击查看该文件的变化比对（对账同源锚点 diff）"
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/60"
       >
-        <span
-          className={cn(
-            "shrink-0 rounded px-1 text-[10px] leading-4",
-            badge.className,
-          )}
-        >
-          {badge.label}
-        </span>
+        {badge && (
+          <span
+            className={cn(
+              "shrink-0 rounded px-1 text-[10px] leading-4",
+              badge.className,
+            )}
+          >
+            {badge.label}
+          </span>
+        )}
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
           {row.path}
         </span>
@@ -283,6 +299,42 @@ function CommandRow({
   );
 }
 
+/**
+ * 降级视图说明（2026-09-25-change-detail-assets-usability / FR-05）。
+ *
+ * ok=true 但 ``degraded_reason`` 非空 = CLI 降级为「实际侧 only 视图（不出三态
+ * 列）」：行内没有 verdict 字段，三态计数恒为 0 但并非「无计划外改动」。原实现
+ * 照样渲染三态 chip 的 0/0/0，属误导性展示（生产实证：已归档轻量变更卡面显示
+ * 39 文件 +124162/−0 且三态全 0，实际是当前工作区未提交窗口，与变更无关）。
+ */
+function DegradedNotice({
+  reason,
+  archived,
+}: {
+  reason: string;
+  archived: boolean;
+}) {
+  return (
+    <>
+      <p
+        className="text-[11px] leading-relaxed text-warning"
+        data-testid="scope-audit-degraded-view"
+      >
+        ⚠️ 本视图已降级：{reason}
+      </p>
+      <p
+        className="mt-1 text-[11px] leading-relaxed text-muted-foreground"
+        data-testid="scope-audit-degraded-scope"
+      >
+        该视图无三态列（计划侧不可用），下方明细是实时窗口采集的文件面
+        {archived
+          ? "——本变更已归档，其真实改动面见「沉淀资产 · 归档留档」。"
+          : "，不代表本变更的计划外改动。"}
+      </p>
+    </>
+  );
+}
+
 /** 命令折叠区（卡尾次要入口：链路不可用兜底 + CLI 习惯）。 */
 function CommandSection({ identifier }: { identifier: string }) {
   return (
@@ -306,7 +358,10 @@ function CommandSection({ identifier }: { identifier: string }) {
   );
 }
 
-export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
+export function ScopeAuditCommandCard({
+  target,
+  archived = false,
+}: ScopeAuditCommandCardProps) {
   // quick 会话名解析（仅 quick 分支取数；change 分支 hooks 顺序恒定经 enabled=false 保持）。
   const enabled = target.kind === "quick";
   const workspaceId = target.workspaceId;
@@ -433,14 +488,22 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
     const order = isQuick
       ? ["declared", "soft", "undeclared"]
       : ["planned", "unplanned", "untouched"];
+    // 降级视图（ok=true + degraded_reason，FR-05）：三态列不可信 → 不渲染三态 chips。
+    const degradedReason = audit.degraded_reason ?? null;
 
     // 分组形态（契约 v2，2026-09-20-scope-audit-cross-repo-platform，D-003/D-005）：
     // 全表合计行 + 每仓一段（段头=仓标识+锚点档 chip；chips 计数取信封
     // repos[].totals 单一源，不前端重算）；degraded 仓段整段 ⚠️ 原因不渲染 chips。
+    // 顶层降级说明叠加在分组之上（各仓 chip 取信封 totals，与顶层降级不同源）。
     if (groupedRepos) {
       const verdictOrder = ["planned", "unplanned", "untouched"] as const;
       return (
         <>
+          {degradedReason && (
+            <div className="mb-2">
+              <DegradedNotice reason={degradedReason} archived={archived} />
+            </div>
+          )}
           <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             <span>
               全表{" "}
@@ -559,27 +622,37 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
             <span className="text-error">−{fmtNum(audit.totals?.deletions)}</span>
           </span>
         </p>
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          {order.map((key) => {
-            const meta = badgeMap[key];
-            if (!meta) return null;
-            return (
-              <span
-                key={key}
-                data-testid={`scope-audit-chip-${key}`}
-                className={cn(
-                  "rounded-full px-2 py-px text-[11px] font-medium",
-                  meta.className,
-                )}
-              >
-                {meta.label} {counts.get(key) ?? 0}
-              </span>
-            );
-          })}
+        {degradedReason ? (
+          // 降级：三态列不存在（行内无 verdict）——渲染 0/0/0 会被读成「无计划外改动」，
+          // 故只出降级说明 + 明细入口（FR-05）。
+          <div className="mt-1.5">
+            <DegradedNotice reason={degradedReason} archived={archived} />
+          </div>
+        ) : (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {order.map((key) => {
+              const meta = badgeMap[key];
+              if (!meta) return null;
+              return (
+                <span
+                  key={key}
+                  data-testid={`scope-audit-chip-${key}`}
+                  className={cn(
+                    "rounded-full px-2 py-px text-[11px] font-medium",
+                    meta.className,
+                  )}
+                >
+                  {meta.label} {counts.get(key) ?? 0}
+                </span>
+              );
+            })}
+          </div>
+        )}
+        <div className="mt-1.5 flex flex-wrap items-center justify-end gap-1.5">
           <Button
             size="sm"
             variant="outline"
-            className="ml-auto h-6 px-2 text-[11px]"
+            className="h-6 px-2 text-[11px]"
             onClick={() => setDetailOpen(true)}
             data-testid="scope-audit-detail-entry"
           >
@@ -606,7 +679,7 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
           <h2 className="text-xs font-medium">⚖️ 范围对账（scope-audit）</h2>
           <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
             「计划改动 × 实际改动」对账：三态全表 + 行数；advisory
-            只读不设门禁，已归档变更可查。
+            只读不设门禁。计划侧不可用时降级为实时窗口视图，卡面显式标注、不出三态。
           </p>
         </div>
       </div>
@@ -633,6 +706,15 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
           </div>
         }
       >
+        {audit?.ok === true && audit.degraded_reason ? (
+          // 降级横幅（FR-05）：弹窗里同样不能让人把「实际侧 only」读成三态全表。
+          <div className="mb-2 rounded border border-warning/40 bg-warning/10 px-2 py-1.5">
+            <DegradedNotice
+              reason={audit.degraded_reason}
+              archived={archived}
+            />
+          </div>
+        ) : null}
         <ul
           data-testid="scope-audit-detail-rows"
           className="max-h-[calc(100vh-320px)] min-h-[240px] overflow-auto rounded border bg-card"

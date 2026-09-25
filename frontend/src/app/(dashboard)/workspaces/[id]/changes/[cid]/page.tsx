@@ -429,13 +429,15 @@ export default function ChangeDetailPage({ params }: Props) {
           <ChangeSessionsCard workspaceId={workspaceId} changeId={changeId} />
           {/* ql-20260910-014-6c29：scope-audit 范围对账结果卡（ql-20260911-001-c0be
               升级：本机跑对账出三态计数+明细表，本地命令折叠为兜底；identifier=
-              change_key，已归档变更也可查） */}
+              change_key）。archived 传入（2026-09-25-change-detail-assets-usability /
+              FR-05）：已归档变更降级时指路「沉淀资产 · 归档留档」。 */}
           <ScopeAuditCommandCard
             target={{
               kind: "change",
               workspaceId,
               changeKey: change.change_key,
             }}
+            archived={isTerminalChange(change)}
           />
           {/* task-06（2026-09-23-change-events-channel / FR-05~07 / D-004 / D-006）：
               「观测事件」折叠卡——CLI watcher 旁路推送流只读展示，组件 useQuery
