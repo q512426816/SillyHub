@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from app.modules.knowledge.hits import HitsService
+from app.modules.knowledge.parser import slugify_anchor
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import Workspace
 
@@ -400,6 +401,133 @@ async def test_stats_archive_types_not_counted(db_session, hits_ws: dict) -> Non
     assert out.coverage.used_entries == 0
     assert out.usage_board == []
     assert out.entry_counts == []
+
+
+# ---------------------------------------------------------------------------
+# 锚点规则漂移容错（change 2026-09-25-knowledge-anchor-match-tolerance）
+# ---------------------------------------------------------------------------
+
+#: 漂移样本逐字取自本仓 knowledge-hits.jsonl × 本地知识树实测（三类系统性规则差异）。
+_DOT_SEC = "🟡 daemon pnpm overrides 把 claude-agent-sdk 8 平台二进制硬钉 0.3.181"
+_DOT_ENTRY_ANCHOR = (
+    "known-issues.md#-daemon-pnpm-overrides-把-claude-agent-sdk-8-平台二进制硬钉-03181"
+)
+_DOT_HIT_ANCHOR = (
+    "known-issues.md#-daemon-pnpm-overrides-把-claude-agent-sdk-8-平台二进制硬钉-0.3.181"
+)
+_FOLD_SEC = "🟢 AgentRunLog 无 metadata 列 / 三层日志 metadata 丢失"
+_FOLD_ENTRY_ANCHOR = "known-issues.md#-agentrunlog-无-metadata-列--三层日志-metadata-丢失"
+_FOLD_HIT_ANCHOR = "known-issues.md#-agentrunlog-无-metadata-列三层日志-metadata-丢失"
+#: 内容真漂移（标题被改过，非规则差异）——归一键也不同，必须保持未命中（防误判）。
+_DRIFTED_SEC = "全 Docker 部署本地 PG 容器端口未映射 host，host 跑 alembic/pytest 连不上"
+_DRIFTED_HIT_ANCHOR = (
+    "known-issues.md#-全-docker-部署本地-pg-容器端口未映射-hostrun-alembicpytest-连不上"
+)
+
+
+@pytest.fixture()
+async def drift_ws(db_session, tmp_path: Path) -> dict:
+    """漂移容错工作区：emoji/点号/短横折叠三类样本 + 精确命中 + 歧义对。
+
+    条目全集 6 条：
+    - known-issues.md：点号样本 / 短横折叠样本 / 内容漂移样本（各 1 小节）；
+    - conventions.md：``提交规范``（精确命中用）+ ``Foo Bar`` / ``FooBar``（歧义对，
+      归一键同为 ``foobar``——单测构造，真实树未出现类内碰撞）。
+    """
+    spec_root = tmp_path / "drift-spec"
+    knowledge = spec_root / "knowledge"
+    knowledge.mkdir(parents=True)
+    (knowledge / "INDEX.md").write_text("# Index\n", encoding="utf-8")
+    (knowledge / "known-issues.md").write_text(
+        "# Known Issues\n"
+        f"\n## {_DOT_SEC}\n\n点号样本正文。\n"
+        f"\n## {_FOLD_SEC}\n\n折叠样本正文。\n"
+        f"\n## {_DRIFTED_SEC}\n\n内容漂移样本正文。\n",
+        encoding="utf-8",
+    )
+    (knowledge / "conventions.md").write_text(
+        "# Conventions\n"
+        "\n## 提交规范\n\n精确样本正文。\n"
+        "\n## Foo Bar\n\n歧义对甲。\n"
+        "\n## FooBar\n\n歧义对乙。\n",
+        encoding="utf-8",
+    )
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="drift-ws",
+        slug=f"drift-ws-{uuid.uuid4().hex[:8]}",
+        root_path=str(tmp_path / "client-machine-path"),
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.flush()
+    db_session.add(
+        SpecWorkspace(
+            id=uuid.uuid4(),
+            workspace_id=ws.id,
+            spec_root=str(spec_root),
+            strategy="platform-managed",
+            sync_status="clean",
+        )
+    )
+    await db_session.commit()
+    return {"ws_id": ws.id, "spec_root": spec_root}
+
+
+async def test_stats_anchor_drift_tolerant_matching(db_session, drift_ws: dict) -> None:
+    """三类规则漂移经归一回退归位；精确优先；歧义与内容漂移保持未命中。
+
+    命中构造（单任务 chg-drift·inject 一行，5 个锚点）：
+    - 点号漂移锚 → 回退到条目锚（算命中）；
+    - 短横折叠漂移锚 → 回退（算命中）；
+    - 精确锚 ``conventions.md#提交规范`` → 精确命中（算命中）；
+    - 歧义锚 ``conventions.md#foo.bar``（归一键 foobar 命中两条目）→ 不猜（不算）；
+    - 内容漂移锚 → 归一键也不同 → 不猜（不算）。
+    预期：used=3/6，死条目=3（两个 Foo* + 内容漂移小节），榜 5 行（前三条并为
+    条目锚点、后两条保持原锚点原样）。
+    """
+    service = HitsService(db_session)
+    lines = [
+        _hit_line(
+            change="chg-drift",
+            matched=[
+                _DOT_HIT_ANCHOR,
+                _FOLD_HIT_ANCHOR,
+                "conventions.md#提交规范",
+                "conventions.md#foo.bar",
+                _DRIFTED_HIT_ANCHOR,
+            ],
+        )
+    ]
+    await service.ingest_batch(drift_ws["ws_id"], lines)
+
+    out = await service.stats(drift_ws["ws_id"])
+
+    assert out.coverage.total_entries == 6
+    assert out.coverage.used_entries == 3
+
+    # 死条目：歧义对两条 + 内容漂移小节（按锚点升序）
+    dead = [d.anchor for d in out.dead_entries]
+    assert len(dead) == 3
+    assert dead[:2] == ["conventions.md#foo-bar", "conventions.md#foobar"]
+    assert dead[2] == f"known-issues.md#{slugify_anchor(_DRIFTED_SEC)}"
+
+    # 榜：三条漂移/精确命中并为条目锚点；两条未解析保持原锚点
+    board = {b.anchor for b in out.usage_board}
+    assert board == {
+        _DOT_ENTRY_ANCHOR,
+        _FOLD_ENTRY_ANCHOR,
+        "conventions.md#提交规范",
+        "conventions.md#foo.bar",
+        _DRIFTED_HIT_ANCHOR,
+    }
+    assert all(b.total == 1 for b in out.usage_board)
+
+    # 文件级计数：解析前后文件段不变（降序：known-issues 3 > conventions 2）
+    assert [(e.file, e.count) for e in out.entry_counts] == [
+        ("known-issues.md", 3),
+        ("conventions.md", 2),
+    ]
 
 
 # ---------------------------------------------------------------------------

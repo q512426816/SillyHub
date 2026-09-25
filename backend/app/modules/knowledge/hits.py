@@ -8,6 +8,11 @@ change 2026-09-20-knowledge-effect-panel task-01 / Wave 1：
 - :meth:`HitsService.stats` 条目全集（parser helper）× 命中聚合
   （{inject, fr-inject} 拆锚点）→ 覆盖率/死条目/密度/生效速度/使用率榜/
   文件级计数（D-009/D-008@v3 口径，实时聚合不物化）。
+
+2026-09-25-knowledge-anchor-match-tolerance：聚合前先把命中锚点解析回条目锚点
+（精确优先 → :func:`~app.modules.knowledge.parser.anchor_match_key` 归一唯一候选回退，
+歧义不猜）——消灭 CLI INDEX 写侧与平台 slug 规则漂移（emoji 前缀/点号/短横折叠）
+造成的「幽灵锚」漏计（本仓实测可归属率 87.4% → 98.7%）。
 """
 
 from __future__ import annotations
@@ -25,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import Field
 
 from app.models.base import BaseModel
-from app.modules.knowledge.parser import parse_knowledge_entries
+from app.modules.knowledge.parser import anchor_match_key, parse_knowledge_entries
 from app.modules.knowledge.schema import (
     CoverageOut,
     CoverageTrendPoint,
@@ -271,6 +276,24 @@ class HitsService:
         # BQ-2 范式：同步 rglob+read 移线程池。
         entries = await asyncio.to_thread(parse_knowledge_entries, root)
 
+        # 命中锚点解析表（2026-09-25-knowledge-anchor-match-tolerance）：精确面 + 归一回退面。
+        # 命中锚点来自 CLI 写 INDEX 路由行的原样字符串，条目锚点由本仓按当前标题现算——两侧
+        # 规则漂移（emoji 前缀 / 点号 / 短横折叠）会让同一小节字面不同。归一键唯一候选才回退，
+        # 多候选（歧义）不猜测、保持原锚点（宁少认不虚增覆盖）。
+        entry_anchors = {e.anchor for e in entries}
+        key_to_anchors: dict[str, set[str]] = {}
+        for _entry_anchor in entry_anchors:
+            key_to_anchors.setdefault(anchor_match_key(_entry_anchor), set()).add(_entry_anchor)
+
+        def _resolve_anchor(raw: str) -> str:
+            """命中锚点 → 条目锚点：精确优先；归一键唯一候选回退；歧义/未中保持原值。"""
+            if raw in entry_anchors:
+                return raw
+            candidates = key_to_anchors.get(anchor_match_key(raw))
+            if candidates is not None and len(candidates) == 1:
+                return next(iter(candidates))
+            return raw
+
         usage_rows = (
             await self._session.execute(
                 select(
@@ -300,6 +323,9 @@ class HitsService:
             occurred = _aware_utc(occurred_raw)
             anchors = matched or []
             for anchor in anchors:
+                # 锚点先解析回条目锚点（归一回退），聚合键即条目锚点——同一小节的多种漂移
+                # 写法合并到同一行/同一覆盖判定。
+                anchor = _resolve_anchor(anchor)
                 anchor_total[anchor] += 1
                 first = anchor_first.get(anchor)
                 if first is None or occurred < first:

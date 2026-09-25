@@ -262,6 +262,31 @@ def slugify_anchor(title: str) -> str:
     return _SLUG_DROP_RE.sub("", s)
 
 
+#: 锚点匹配归一键：仅保留 [0-9a-z_] 与中文，其余（emoji/点号/短横/斜杠/空白/全角符号）
+#: 全部丢弃——只用于**匹配**，不改变条目对外的 anchor 展示形态。
+_ANCHOR_MATCH_DROP_RE = re.compile(r"[^0-9a-z_\u4e00-\u9fff]+")
+
+
+def anchor_match_key(anchor: str) -> str:
+    """锚点 → 匹配归一键（命中锚点 ↔ 条目锚点跨规则漂移的容错匹配面）。
+
+    change 2026-09-25-knowledge-anchor-match-tolerance：命中遥测里的锚点是 **CLI 写 INDEX
+    路由行时的原样字符串**，条目锚点是本仓 :func:`slugify_anchor` 按**当前文件标题**现算的
+    slug——两侧由不同版本/不同人维护，实测三类系统性漂移导致逐字比较失配（真实命中被判成
+    「幽灵锚」不计覆盖）：
+
+    1. emoji 前缀：``🟡 sillyhub-daemon 于 …`` 平台算 ``-sillyhub-daemon-…``（前导点留自
+       「emoji 去掉后那个空格转的 -」），INDEX 写 ``sillyhub-daemon-…``（无前导 -）；
+    2. 点号保留：``…硬钉 0.3.181`` 平台丢点 ``…硬钉-03181``，INDEX 保留 ``…硬钉-0.3.181``；
+    3. 短横折叠：``… metadata 列 / 三层日志 …`` 平台 ``…列--三层…``（斜杠无痕消失、两侧空格
+       各留一个 -），INDEX ``…列三层…``（手写行不保留空段）。
+
+    归一键把这三类差异抹平（小写 + 丢全部符号），**仅用于匹配回退**：精确命中优先（保持既有
+    行为零变化），精确未中且归一键唯一候选才回退（多候选＝歧义，不猜测——宁少认不虚增覆盖）。
+    """
+    return _ANCHOR_MATCH_DROP_RE.sub("", anchor.lower())
+
+
 def _iter_h2_titles(content: str) -> list[str]:
     """提取全部 ``##`` 小节标题原文（按出现序； fenced code block 内的假节头容忍——
     统计口径 R-03 容忍计数 misses，不做块级状态机）。"""

@@ -346,6 +346,39 @@ def test_slugify_anchor_calibrated_against_real_hits_samples() -> None:
     ) == ("-daemon-pnpm-overrides-把-claude-agent-sdk-8-平台二进制硬钉-03181")
 
 
+def test_anchor_match_key_normalizes_cross_rule_drift() -> None:
+    """归一键抹平命中侧/条目侧三类真实漂移（2026-09-25-knowledge-anchor-match-tolerance）。
+
+    样本逐字取自本仓 knowledge-hits.jsonl × 本地知识树实测——同一小节的两种写法必须同键：
+    ① emoji 前缀前导 ``-`` 有无；② 点号保留 vs 丢弃；③ 斜杠处 ``--`` vs 无。
+    同时钉反向：标题内容真的不同的两条**不得**折叠成同键（防误判虚增覆盖）。
+    """
+    from app.modules.knowledge.parser import anchor_match_key
+
+    # ① emoji 前缀：平台算锚带前导 -，CLI INDEX 写侧无
+    assert anchor_match_key(
+        "known-issues.md#-docker-backend-容器不热重载挂载非-app无---reload"
+    ) == anchor_match_key("known-issues.md#docker-backend-容器不热重载挂载非-app无---reload")
+    # ② 点号：平台丢点，INDEX 保留
+    assert anchor_match_key(
+        "known-issues.md#-daemon-pnpm-overrides-把-claude-agent-sdk-8-平台二进制硬钉-03181"
+    ) == anchor_match_key(
+        "known-issues.md#-daemon-pnpm-overrides-把-claude-agent-sdk-8-平台二进制硬钉-0.3.181"
+    )
+    # ③ 短横折叠：平台 ``列--三层``，INDEX ``列三层``
+    assert anchor_match_key(
+        "known-issues.md#-agentrunlog-无-metadata-列--三层日志-metadata-丢失"
+    ) == anchor_match_key("known-issues.md#-agentrunlog-无-metadata-列三层日志-metadata-丢失")
+    # 大小写折叠 + 下划线/数字保留
+    assert anchor_match_key("Conventions.md#Item_ID-路由-2") == "conventionsmditem_id路由2"
+    # 反向：真实内容漂移（hosthost-跑 vs hostrun）不得同键
+    assert anchor_match_key(
+        "known-issues.md#-全-docker-部署本地-pg-容器端口未映射-hosthost-跑-alembicpytest-连不上"
+    ) != anchor_match_key(
+        "known-issues.md#-全-docker-部署本地-pg-容器端口未映射-hostrun-alembicpytest-连不上"
+    )
+
+
 def test_parse_knowledge_entries_three_shapes(tmp_path: Path) -> None:
     """条目全集三类形态：手册 ## 小节（文件#slug）/ decisions+fr 条目（裸文件、
     共享锚、title 去 ID 段）/ generated 文件级；INDEX.md 任何 zone 排除、
