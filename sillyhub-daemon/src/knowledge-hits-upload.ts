@@ -170,16 +170,16 @@ export async function uploadKnowledgeHitsIfNeeded(
   client: HubClient,
   wsId: string,
   specDir: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     // mock/旧客户端容错（spec-sync 同款惯例）：无方法 → 静默 no-op。
     const poster = client as unknown as Partial<KnowledgeHitsPoster>;
-    if (typeof poster.postKnowledgeHitsBatch !== 'function') return;
+    if (typeof poster.postKnowledgeHitsBatch !== 'function') return true; // 无通道=无事可做
 
     // 防御：wsId 进状态文件名，拒绝路径分隔符（正常是 UUID，同 resolveSpecDir E-07）。
     if (!wsId || /[\\/]/.test(wsId)) {
       console.warn('knowledge_hits_upload: invalid_ws_id', JSON.stringify(wsId));
-      return;
+      return false; // 非法 wsId：重试同样非法，但让调用方感知（下轮守卫再拦）
     }
 
     // 读 hits 文件；不存在 → 静默 no-op（常态路径，零噪音）。
@@ -187,7 +187,7 @@ export async function uploadKnowledgeHitsIfNeeded(
     try {
       raw = await readFile(join(specDir, HITS_REL_PATH), 'utf-8');
     } catch {
-      return;
+      return true; // 无文件=无事可做（记印防空转）
     }
 
     const completeLines = splitCompleteLines(raw);
@@ -231,11 +231,15 @@ export async function uploadKnowledgeHitsIfNeeded(
     }
   } catch (e) {
     // best-effort：warn 一次即返回，不抛（不阻塞同步主流程）、offset 不进。
+    // 返回 false 让周期兜底通道感知失败（同 mtime 下轮重试）；postSync 挂点忽略
+    // 返回值，语义不变。
     console.warn(
       'knowledge_hits_upload: upload_failed_will_retry_next_sync',
       wsId,
       specDir,
       e,
     );
+    return false;
   }
+  return true;
 }

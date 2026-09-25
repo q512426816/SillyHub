@@ -72,7 +72,12 @@ export class KnowledgeHitsPeriodicUploader {
       // stamp **成功后才记**（评审 P2 收口）：失败轮不记印，下轮同 mtime 也会重试
       // ——「失败后文件未变则永久短路」的漏重试口子由后移记录堵死。
       try {
-        await uploadKnowledgeHitsIfNeeded(this._client as never, wsId, join(this._stateDir, 'specs', wsId));
+        const ok = await uploadKnowledgeHitsIfNeeded(
+          this._client as never,
+          wsId,
+          join(this._stateDir, 'specs', wsId),
+        );
+        if (ok === false) continue; // uploader 内部吞错但回执 false：不记印，同 mtime 下轮重试
         this._lastStamp.set(wsId, stampKey);
         attempted.push(wsId);
       } catch (e) {

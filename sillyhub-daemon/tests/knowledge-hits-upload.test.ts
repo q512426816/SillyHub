@@ -175,7 +175,7 @@ describe('uploadKnowledgeHitsIfNeeded', () => {
     // 不抛（best-effort，R-05）。
     await expect(
       uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);  // 2026-09-26 周期通道契约：失败回执 false（原 void）
     expect(warnSpy).toHaveBeenCalledTimes(1);
     // offset 未进：状态文件不存在（首次上报即失败）。
     expect(await readState(wsId)).toBeNull();
@@ -207,7 +207,7 @@ describe('uploadKnowledgeHitsIfNeeded', () => {
     });
     await expect(
       uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);  // 2026-09-26 周期通道契约：失败回执 false（原 void）
     expect(client.postKnowledgeHitsBatch).toHaveBeenCalledTimes(2);
     const b1 = (client.postKnowledgeHitsBatch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as string[];
     const b2 = (client.postKnowledgeHitsBatch as ReturnType<typeof vi.fn>).mock.calls[1]![1] as string[];
