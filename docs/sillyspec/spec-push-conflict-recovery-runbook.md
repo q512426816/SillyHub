@@ -93,8 +93,13 @@ b97 镜像缺整个 `knowledge/generated/`。
    覆盖 **28.8%**（锚点容错生效，榜 72→95 行）；最新命中 2026-09-25T05:06Z。
 4. ✅ **b97f8231 同修**：102/102 文件（generated/ 41 个全回）；命中补传 863 行
    （9-21~9-25 空窗，分批 ≤2000）；覆盖 **19.9%**；最新命中 2026-09-24T23:58Z。
-5. ⚠️ 遗留：`resolve --keep-local` 对 4 个旧归档文件（2026-09-22-thin-fr-distill-sync/*）
-   仍报「裁决期间又有更新」但 server_versions 停在 2 不动——版本竞态现象与回执不符，
-   疑 CLI 与平台增量协议的版本比对缺陷，留待单独排查（不影响页面数据）。
+5. ✅ 已排查闭环（2026-09-25 晚）：「又有更新」是**误报文案**——真因是那 4 行 spec manifest
+   带 `platform_deleted=True`（平台「删除变更」流程 `_soft_delete_change_dir` 写的删除墓碑），
+   apply_ops 对墓碑路径**无条件拒收**（与版本无关，实测 update base=version 完全匹配仍拒），
+   回执里的 `platform_deleted` 列表 CLI 侧没有消费、只展示了 `server_versions` → 被译成
+   「又有更新」。处置：4 行 DB heal（platform_deleted=false, exists=true）后
+   `resolve --keep-local` 一次闭环。**待修**：①CLI 冲突回执消费 platform_deleted 字段并给
+   正确文案/恢复指引；②平台缺墓碑清除通道（「恢复变更」不清 spec manifest 墓碑，冤案墓碑
+   永久卡死 keep-local——对齐 fed6e9e9a 在 progress 通道的 heal 补 spec 通道）。
 6. 服务器清理：images.tar.gz 已删 + prune；backup tag ×4 留作回滚（确认稳定后可
    `docker rmi` 清理）。daemon 本地旧 hits 状态文件待其下一轮同步自愈（指纹断点已上线）。
