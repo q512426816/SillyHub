@@ -376,30 +376,25 @@ class AgentSessionLogORM(BaseModel, table=True):
     )
 
 
+# ── Change 2026-09-26-change-events-r18-full task-01（design 数据模型 / D-002 / D-004）──
+
+
 class PlatformChangeEventORM(BaseModel, table=True):
-    """watcher 推送的变更事件 append-only 行（design §数据模型 / D-002 / D-003 / D-004）。
+    """watcher 推送的变更旁路观测事件（append-only，design 数据模型节）。
 
-    Change 2026-09-23-change-events-channel task-01：承接 sillyspec CLI watcher
-    探测到变更事件后的批量 POST 上行（写入端点在 task-02），只存**观测快照**——
-    事件是一次性写入的 append-only 观测数据（design 生命周期契约节），无 update
-    语义、无派生逻辑，表/ORM 零业务逻辑。
+    命名 ``platform_change_events``（platform_sync 前缀先例）——区别于既有
+    ``change_events``（owner 变更事件表，20260816120000）：本表是 sillyspec CLI
+    watcher/哨兵推送的旁路观测信号，恒 ``provisional``，只展示不消费（红线 D-004：
+    零业务判定——无流程外键、无状态机联动）。
 
-    ``(workspace_id, change_name, dedup_key)`` 复合唯一约束支撑幂等去重（D-002）：
-    ``dedup_key`` 由 service 层归一——CLI 事件带 ``id`` 优先用之，否则
-    ``ts|kind|stage`` 拼接（design §数据模型）；watcher 重跑/重推同一事件由约束
-    兜底不产生重复行。``workspace_id`` 只由 shpsync_ token 派生（auth.py D-004@v1
-    通道），必填 NOT NULL，无 shk_live_ 过渡期 NULL 场景；workspace 删则级联删
-    本表行。
-
-    ``ts`` 用 timezone-aware DateTime 而非 ``last_pushed_at`` 先例的 ISO 原文
-    String（D-003）：watcher 上报的 epoch 毫秒经 schema 层校验（值域 ≥1e12）后
-    由 service 层归一为结构化 datetime 落库，读路径按 ``ts`` 区间/排序查询且
-    ``(workspace_id, change_name, ts)`` 是索引键（ix_platform_change_events_
-    ws_change_ts），无 CLI 字符串字典序比较需求。
-
-    ``provisional`` 落库恒 True（D-004 红线数据层落地）：平台对 provisional
-    事件只展示不消费，``--done`` 才是流程真相；ORM 侧 ``default=True`` 不给
-    客户端赋值通道，请求体携带的任意值在 service 层被丢弃（task-02）。
+    - ``dedup_key`` 幂等去重键（D-002）：事件 id 优先（>300 字符取 sha256 hex），
+      回退 ``ts + '|' + rule``；``(workspace_id, change_name, dedup_key)`` 复合唯一
+      约束支撑 watcher 重推幂等。
+    - ``ts`` 恒 ISO 8601 UTC **字符串**存储与比较（字典序=时间序，同
+      ``platform_change_progress.last_pushed_at`` 先例 R-04——禁时区/精度转换）。
+    - ``severity`` / ``provisional`` 原值透传（观测语义不加工）。
+    - ``workspace_id`` 只由 shpsync_ token 派生（写通道唯一），NOT NULL。
+    - 普通索引 ``(workspace_id, change_name, ts)``：GET 正序增量查询路径。
     """
 
     __tablename__ = "platform_change_events"
@@ -410,7 +405,6 @@ class PlatformChangeEventORM(BaseModel, table=True):
             "dedup_key",
             name="uq_platform_change_events_dedup",
         ),
-        # 读路径主查询：单 workspace 单 change 按时间序/区间拉取（design §数据模型）。
         Index(
             "ix_platform_change_events_ws_change_ts",
             "workspace_id",
@@ -440,31 +434,26 @@ class PlatformChangeEventORM(BaseModel, table=True):
     dedup_key: str = Field(
         sa_column=Column(String(320), nullable=False),
     )
-    ts: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False),
-    )
     kind: str = Field(
         sa_column=Column(String(64), nullable=False),
     )
-    stage: str | None = Field(
-        default=None,
-        sa_column=Column(String(64), nullable=True),
+    rule: str = Field(
+        sa_column=Column(String(128), nullable=False),
     )
-    detail: str | None = Field(
-        default=None,
-        sa_column=Column(String(2000), nullable=True),
-    )
-    rule: str | None = Field(
-        default=None,
-        sa_column=Column(String(128), nullable=True),
-    )
-    severity: str | None = Field(
-        default=None,
-        sa_column=Column(String(32), nullable=True),
+    severity: str = Field(
+        default="info",
+        sa_column=Column(String(16), nullable=False),
     )
     provisional: bool = Field(
         default=True,
         sa_column=Column(Boolean, nullable=False),
+    )
+    detail: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),  # text
+    )
+    ts: str = Field(
+        sa_column=Column(String(64), nullable=False),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

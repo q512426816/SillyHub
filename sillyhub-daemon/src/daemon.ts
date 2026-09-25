@@ -197,6 +197,7 @@ import { isValidPlatformLevel } from './interactive/thinking-levels.js';
 // ql-20260831-001-6dde：恢复链/重开与本地在途 turn 竞态守卫（SessionBusyError
 // instanceof 分支用，value import）。
 import { SessionBusyError } from './interactive/types.js';
+import { KnowledgeHitsPeriodicUploader } from './knowledge-hits-periodic.js';
 import type {
   PersistedSessionRecord,
   SessionState,
@@ -1957,6 +1958,8 @@ export class Daemon {
    * startDiskProbe 创建（unref 不阻止进程退出），stop() 清理。
    */
   private _diskProbeTimer: ReturnType<typeof setInterval> | null = null;
+  // 2026-09-26-daemon-hits-periodic-upload：知识命中周期上行器（解耦 postSync成败）。
+  private _hitsPeriodic: KnowledgeHitsPeriodicUploader | null = null;
   /**
    * ql-20260904-027：服务器版本轮询循环定时器（null=未启动/已停止）。
    * startServerVersionProbe 创建（unref），stop() 清理。
@@ -2313,6 +2316,12 @@ export class Daemon {
     this.startDiskProbe((diskBuildId) =>
       void this._tryUpdate('disk_change', diskBuildId),
     );
+
+    // 2026-09-26-daemon-hits-periodic-upload：hits 周期上行兜底——此前只挂
+    // postSpecSync 成功点，同步失败遥测即断流（生产断 4-5 天无人察觉）。双通道
+    // 幂等（服务端行级 hash 去重），mtime 短路防无谓重读。
+    this._hitsPeriodic = new KnowledgeHitsPeriodicUploader(this._client);
+    this._hitsPeriodic.start();
 
     // ql-20260904-027：服务器版本轮询——补齐「运行中发现新部署」的缺口（原本
     // 只有平台指令+磁盘探测两源，服务器轮询恒缺）。同间隔同守卫，差异走

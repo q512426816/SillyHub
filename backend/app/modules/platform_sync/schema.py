@@ -7,15 +7,10 @@
 Change 2026-08-11-change-progress-projection task-07：新增三模型支撑 workspace-scoped
 token 签发端点（design §7）—— ``PlatformSyncTokenCreateResponse`` / ``ResolveByRootPathRequest``
 / ``ResolveByRootPathResponse``。
-
-Change 2026-09-23-change-events-channel task-02：新增五模型支撑事件收发端点
-（design §接口定义）—— ``ChangeEventPush`` / ``ChangeEventPushRequest`` /
-``ChangeEventItem`` / ``ChangeEventPushOk`` / ``ChangeEventListResponse``。
 """
 
 from __future__ import annotations
 
-import math
 import uuid
 from datetime import datetime
 from typing import Any, Literal
@@ -257,10 +252,6 @@ class SpecSyncResponse(BaseModel):
     conflict: bool = False
     server_versions: dict[str, int] | None = None
     platform_deleted: list[str] = Field(default_factory=list)
-    # 2026-09-26-spec-sync-receipt-visibility：回执计数（applied/skipped 双轨同键）。
-    applied_ops: int = 0
-    skipped_conflict: int = 0
-    skipped_tombstone: int = 0
 
 
 # ── Change 2026-08-23-platform-agent-log-ingest task-02（design §3.2 API 契约）──
@@ -578,122 +569,54 @@ class AgentLogMessagesResponse(BaseModel):
     )
 
 
-# ── Change 2026-09-23-change-events-channel task-02（design §接口定义 / FR-01~FR-04）──
-
-
-class ChangeEventPush(BaseModel):
-    """POST /changes/{name}/events 单条事件（CLI watcher 实际形态，FR-01 / D-007@v1）。
-
-    必填仅 ``kind`` + ``ts``：``ts`` 是 epoch **毫秒** number，值域 ``ge=1e12``
-    校验（D-003@v1 故障面防御——秒级时间戳/小数值在 Pydantic 层先行 422，防
-    毫秒/秒混淆污染 dedup_key 拼串与排序）。其余 optional，字符串 ``max_length``
-    与 ORM 列宽对齐（stage 64 / rule 128 / severity 32 / id 320）；``detail``
-    不在 schema 限长——服务端截 2000 落库（宽松接收、落库截断，task-02 service 层）。
-    ``extra=ignore`` 宽松吞掉 CLI schema 升版的未知字段（D-007@v1，与
-    AgentLogEntry 同款）。
-
-    ``provisional`` 接收但**忽略落库值**——平台恒存 True（D-004@v1 红线数据层
-    落地在 service；此处仅为宽松接收不 422）。
-    ``id`` 是 CLI 侧事件去重 id（dedup_key 优先源，D-002），与 ``ChangeEventItem.id``
-    （平台行主键 UUID）**同名异义**，见 ChangeEventItem docstring。
-    """
-
-    model_config = {"extra": "ignore"}
-
-    kind: str = Field(min_length=1, max_length=64)
-    # 24h 审查 M-2（ql-20260924-001）：补 le 上界——原校验只有 ge 下界，
-    # Infinity（float 可过 ge）与超 datetime 值域的毫秒（如微秒误传 1e15）会在
-    # 落库处 fromtimestamp / dedup 回退键 int() 抛 Overflow/OSError → 整批 500。
-    # 上界取 datetime.max（年 9999）对应的 epoch 毫秒。
-    ts: float = Field(
-        ge=1e12,
-        le=253_402_300_799_999,
-        description="事件 epoch 毫秒（[1e12, 253402300799999] 值域校验，D-003 + M-2）",
-    )
-
-    @field_validator("ts", mode="before")
-    @classmethod
-    def _ts_reject_non_finite(cls, value: object) -> object:
-        """非有限值（Infinity/NaN，Python json.loads 接受 ``Infinity`` 字面量——
-        真实可达的绕过面）先行转 None 走「非 number」422。
-
-        不直接 raise：Pydantic 错误详情回显原始 ``input``（inf/NaN），而
-        starlette JSONResponse.render 用 ``allow_nan=False`` 序列化——回显
-        非有限值的 422 响应自身渲染抛 ValueError 反成 500。转 None 后错误
-        ``input=None`` 可正常渲染，422 干净返回（M-2 补充防线）。
-        """
-        if isinstance(value, float) and not math.isfinite(value):
-            return None
-        return value
-
-    stage: str | None = Field(default=None, max_length=64)
-    detail: str | None = None
-    rule: str | None = Field(default=None, max_length=128)
-    severity: str | None = Field(default=None, max_length=32)
-    id: str | None = Field(
-        default=None, max_length=320, description="CLI 侧事件去重 id（dedup_key 优先源）"
-    )
-    provisional: bool | None = Field(
-        default=None,
-        description="接收但忽略落库值——平台恒存 True（D-004 红线）",
-    )
+# ── Change 2026-09-26-change-events-r18-full task-01/task-02（design 接口定义 / FR-01 / FR-03）──
 
 
 class ChangeEventPushRequest(BaseModel):
-    """POST /changes/{name}/events 请求体（批量 1..200 条，FR-01）。
+    """POST /changes/{name}/events 请求（sillyspec watcher 推送，恒 provisional）。
 
-    **不声明 workspace 字段**——workspace 一律由 shpsync_ token 派生（G6 同款，
-    body 出现的值被 extra=ignore 吞掉）；同批内同 dedup_key 的重复条目由 service
-    层批内去重只插首条（防撞唯一约束 500，task-02）。
+    单事件 JSON（kind/rule/severity/provisional/detail/ts[/id]）。``id`` 可选——
+    去重键首选（缺失回退 ``ts+'|'+rule``，D-002）；``severity``/``provisional``
+    缺省 info/true（schema 兜底，落库原值透传）。**不含也不接受 workspace 字段**
+    ——workspace_id 恒由 shpsync_ token 派生（body 出现被 extra=ignore 吞掉，
+    与 quicklog-entries 同款宽松口径：CLI 字段演进不破推送）。
     """
 
     model_config = {"extra": "ignore"}
 
-    events: list[ChangeEventPush] = Field(min_length=1, max_length=200)
-
-
-class ChangeEventItem(BaseModel):
-    """GET /changes/{name}/events 列表项（design §接口定义）。
-
-    ``id`` 是 ``platform_change_events`` **行主键 UUID**（平台生成）——与
-    ``ChangeEventPush.id``（CLI 侧事件去重 id，dedup_key 优先源）同名异义：
-    请求体的 id 不回显（已折叠进 dedup_key），读侧行 id 只标识落库行。
-    ``dedup_key`` 同为内部幂等实现细节，不透出。
-    ``ts`` / ``created_at`` 序列化为 ISO 8601 字符串；``from_attributes`` 支持
-    ORM 行直接 ``model_validate``（与 AgentLogListItem 同款，router 零手工映射）。
-    """
-
-    model_config = {"from_attributes": True}
-
-    id: uuid.UUID
-    ts: datetime
-    kind: str
-    stage: str | None = None
+    id: str | None = Field(default=None, max_length=512)
+    kind: str = Field(min_length=1, max_length=64)
+    rule: str = Field(min_length=1, max_length=128)
+    severity: str = Field(default="info", max_length=16)
+    provisional: bool = True
     detail: str | None = None
-    rule: str | None = None
-    severity: str | None = None
-    provisional: bool
-    created_at: datetime
+    ts: str = Field(min_length=1, max_length=64)
 
 
 class ChangeEventPushOk(BaseModel):
-    """POST /changes/{name}/events 200 响应（FR-01 / FR-02）。
+    """POST /changes/{name}/events 200 响应（恒 200，幂等/截断语义由计数表达）。"""
 
-    ``accepted`` + ``deduplicated`` = 请求条数（批内重复与已存键都计入
-    deduplicated；dedup 语义是跳过不是覆盖，不更新原行）。
-    """
+    change_name: str
+    stored: bool = Field(description="本条是否新写入（False=去重命中）")
+    deduplicated: bool = Field(description="True=同去重键已存在，未新增行")
+    truncated: int = Field(default=0, description="因上限截断删除的最旧行数")
 
-    accepted: int = Field(description="本次新落库的事件数")
-    deduplicated: int = Field(description="命中 dedup_key 被跳过的事件数（批内重复 + 已存键）")
+
+class ChangeEventItem(BaseModel):
+    """GET /changes/{name}/events 单条事件（task-02，snake_case 原样 X-06）。"""
+
+    id: uuid.UUID
+    kind: str
+    rule: str
+    severity: str
+    provisional: bool
+    detail: str | None
+    ts: str
 
 
 class ChangeEventListResponse(BaseModel):
-    """GET /changes/{name}/events 200 响应（FR-04：since 增量正序）。
+    """GET /changes/{name}/events 200 响应（ts 正序；since 严格大于增量）。"""
 
-    ``items`` 按 ``ts ASC, id ASC`` 稳定正序、受 ``limit`` 截断；``total`` 是
-    过滤后（scope + since）总行数，不含 limit 截断。change 无事件 → 200 空列表
-    （事件表独立于 change 行存在，不 404）。
-    """
-
+    change_name: str
+    count: int
     items: list[ChangeEventItem] = Field(default_factory=list)
-    total: int = Field(description="过滤后总行数（不含 limit 截断）")

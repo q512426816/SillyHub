@@ -57,7 +57,7 @@ from app.modules.platform_sync.model import (
 
 if TYPE_CHECKING:
     # 类型标注专用（``from __future__ import annotations`` 惰性求值），运行时零导入。
-    from app.modules.platform_sync.schema import AgentLogEntry, AgentLogStateEntry, ChangeEventPush
+    from app.modules.platform_sync.schema import AgentLogEntry, AgentLogStateEntry
     from app.modules.spec_workspace.schema import FileOp
 
 log = get_logger(__name__)
@@ -151,25 +151,6 @@ async def _bind_entry_ctx(
         await bind_session_to_quicklog(session, workspace_id, quick_id, target_session_id)
     elif change_key:
         await bind_session_to_change(session, workspace_id, change_key, target_session_id)
-
-
-# ── Change 2026-09-23-change-events-channel task-02（design §接口定义 / D-002 / D-005）──
-#: 单 (workspace, change) 事件保留上限（D-005@v1）：append_events 插入后超限按
-#: ``(ts, created_at)`` 删最旧修剪——事件是高频观测数据非审计源，单变更观测面
-#: 有界（5000 上限即读端点 limit 上限的全量窗口）。
-CHANGE_EVENTS_MAX_ROWS = 5000
-#: detail 服务端截断长度（对齐 ORM ``String(2000)`` 列宽；schema 层宽松不限长，
-#: 落库前截断，task 卡「宽松接收」语义）。
-_CHANGE_EVENT_DETAIL_MAX = 2000
-
-
-def _change_event_dedup_key(event: ChangeEventPush) -> str:
-    """单条事件 dedup_key（D-002@v1）：CLI 事件带 ``id`` 优先用之，否则
-    ``"{ts_ms}|{kind}|{stage or ''}"`` 拼接（``ts`` 转 int 毫秒——防
-    ``1758566000000.0`` 与 ``1758566000000`` 拼出不同键的浮点表示漂移）。"""
-    if event.id:
-        return event.id
-    return f"{int(event.ts)}|{event.kind}|{event.stage or ''}"
 
 
 @dataclass
@@ -279,27 +260,12 @@ class PlatformSyncService:
         # task-04：已删探测先于一切写路径（含 base_ts 冲突分支——已删 key 无论
         # 乐观锁状态一律以 change_deleted 拒收，信息对 CLI 更可行动）。
         if await self._change_key_deleted(workspace_id, name):
-            # archived 载荷复活通道（坑 archive-tombstone 冤案行修复，2026-09-23）：
-            # 旧 CLI 墓碑 bug 曾把归档链误标 location='deleted'（CLI 侧 e4667729 终态透传
-            # 前单点写死 deleted）。本地库 status='archived'（真归档）的新 CLI 重推
-            # 'archived' 载荷时，行冤案可恢复——先翻回 location='archive' 再走正常接受
-            # 分支（镜像不软删，与 _apply_cli_tombstone archived 路径同口径）；真删除
-            # 链（本地 status='deleted'）载荷不变仍拒收 409。
-            if self._body_changes_status(
-                body, name
-            ) == "archived" and await self._heal_deleted_row_to_archive(workspace_id, name):
-                log.info(
-                    "platform_sync.change_deleted_healed_to_archive",
-                    workspace_id=str(workspace_id),
-                    change_key=name,
-                )
-            else:
-                return PlatformSyncResult(
-                    conflict=False,
-                    platform_progress=None,
-                    last_pushed_at=None,
-                    change_deleted=True,
-                )
+            return PlatformSyncResult(
+                conflict=False,
+                platform_progress=None,
+                last_pushed_at=None,
+                change_deleted=True,
+            )
 
         row = await self._find_row(workspace_id, name)
 
@@ -560,42 +526,6 @@ class PlatformSyncService:
             self._assign(existing, body, stamped_at, user)
             await self._session.commit()
 
-    @staticmethod
-    def _body_changes_status(body: dict[str, Any], name: str) -> str | None:
-        """body changes[] 同名条目的 status（墓碑终态判别；缺条目/非 dict 返回 None）。"""
-        for c in body.get("changes") or []:
-            if isinstance(c, dict) and c.get("name") == name:
-                status = c.get("status")
-                return status if isinstance(status, str) else None
-        return None
-
-    async def _heal_deleted_row_to_archive(self, workspace_id: uuid.UUID | None, name: str) -> bool:
-        """location='deleted' 冤案行翻回 'archive'（坑 archive-tombstone，2026-09-23）。
-
-        仅当 Change 行存在且 location='deleted'（主判据命中形态）时翻回；兜底判据命中
-        （行缺失、仅 manifest platform_deleted 锚点）不建行——真删除走平台删除入口的
-        恢复流程，不在同步通道猜。镜像不软删不恢复（deleted 链已收敛的镜像文件由
-        reparse/镜像驱动收敛自行对齐，位置恢复已满足「已归档」tab 可见的主诉求）。
-        幂等：已是 archive 返回 False（无需复活，走原拒收/正常分支均可）。
-        """
-        if workspace_id is None:
-            return False
-        from app.modules.change.model import Change as _Change
-
-        row = (
-            await self._session.execute(
-                select(_Change).where(
-                    col(_Change.workspace_id) == workspace_id,
-                    col(_Change.change_key) == name,
-                )
-            )
-        ).scalar_one_or_none()
-        if row is None or row.location != "deleted":
-            return False
-        row.location = "archive"
-        await self._session.commit()
-        return True
-
     async def _change_key_deleted(self, workspace_id: uuid.UUID | None, name: str) -> bool:
         """已删 key 双层判据（task-04 / design §5.4 B-1 加固，upsert_progress 拒收
         前置与 ``_ensure_change_row`` 建占位守卫共用同一 helper）。
@@ -798,24 +728,8 @@ class PlatformSyncService:
             ),
             None,
         )
-        if status not in ("deleted", "archived"):
+        if status != "deleted":
             return
-
-        # archived 墓碑（坑 archive-tombstone-归档墓碑致面板已归档变更软删不可见，
-        # 2026-09-23 实证；CLI 侧 e4667729 终态透传后的平台配套）：unregisterChange 链
-        # （run archive / quick 收尾 / 自愈）的墓碑载荷是 'archived'——**不触发镜像
-        # 软删**（归档的语义是可回溯，spec 镜像须保留；镜像收敛仅属 'deleted' 链）。
-        # 实现：no-op 早退，不开第二条 location 写路径——
-        # - P1 ingest 不变量（2026-09-16，test_archived_terminal_persists 回归锚）：
-        #   location 收敛归文件移动 + reparse，常规上行不动 location——行 'active'
-        #   收到 'archived' 载荷保持不变；
-        # - 冤案行恢复（旧 CLI 误发 'deleted' 致 location='deleted'）在
-        #   upsert_progress 拒收分支 _heal_deleted_row_to_archive 已闭环——本函数
-        #   只能被已过已删探测（行非 'deleted'）的载荷触达，此处再翻 location
-        #   既违反上述不变量、对冤案行又是死代码。
-        if status == "archived":
-            return
-
         row = (
             await self._session.execute(
                 select(Change).where(
@@ -995,24 +909,7 @@ class PlatformSyncService:
                 if row is None:
                     return
                 if stage is not None:
-                    # 守卫 B（2026-09-25-change-center-thin-flow task-05）：thin 变更
-                    # 阶段回洗双守卫之二（与守卫 A——change/dispatch.sync_stage_status
-                    # ——同一谓词，不引入第二套判断）。CLI 红线：thin（轻量变更）进度
-                    # 落 flow-state.yaml 不落 sillyspec.db，CLI 上行的 current_stage
-                    # 全程是 'scan' 停留态——直接覆盖会把平台 'thin' 洗回 'scan'。
-                    # 平台行 current_stage=='thin' 且上行 status 非 archived → 跳过
-                    # 覆盖（status/时间戳类照常）；archived（flow done 后）放行下方
-                    # 既有归档翻转链（读侧三源并集承接）；非 thin 变更零作用。
-                    if row.current_stage == "thin" and mapped_status != "archived":
-                        log.info(
-                            "platform_sync.thin_stage_guard_skip",
-                            workspace_id=str(workspace_id),
-                            change_key=name,
-                            cli_stage=stage,
-                            cli_status=status_value,
-                        )
-                    else:
-                        row.current_stage = stage
+                    row.current_stage = stage
                 if mapped_status is not None:
                     row.status = mapped_status
                     if mapped_status == "archived":
@@ -1358,6 +1255,170 @@ class PlatformSyncService:
         await self._session.commit()
         await self._session.refresh(row)
         return row
+
+    # ── Change 2026-09-26-change-events-r18-full task-01（design 接口定义 / D-002 / D-003 / D-004）──
+
+    #: 单变更事件量上限（D-003 截断最旧，不拒绝）。
+    EVENT_CAP_PER_CHANGE = 5000
+
+    #: dedup_key 长度钳制阈值（超长 id 取 sha256 hex，Grill X-002）。
+    _EVENT_DEDUP_RAW_MAX = 300
+
+    @classmethod
+    def _event_dedup_key(cls, payload: dict[str, Any]) -> str:
+        """幂等去重键（D-002）：事件 id 优先，缺失回退 ``ts + '|' + rule``。
+
+        id 超 300 字符取 sha256 十六进制（64 字符，防溢出 varchar(320)——观测
+        信号非账本，碰撞概率可忽略）。
+        """
+        import hashlib
+
+        raw_id = payload.get("id")
+        if raw_id:
+            raw = str(raw_id)
+            if len(raw) > cls._EVENT_DEDUP_RAW_MAX:
+                return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+            return raw
+        return f"{payload.get('ts', '')}|{payload.get('rule', '')}"
+
+    async def append_event(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        change_name: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """POST /changes/{name}/events：append-only 写入（幂等去重 + 上限截断）。
+
+        零业务判定红线（D-004）：本方法只做存储三件事——去重（D-002）、截断
+        （D-003）、落库；不做任何状态机/审批/通知联动，provisional 原值透传。
+
+        返回 ``{stored, deduplicated, truncated}``：
+
+        - 同 ``(workspace_id, change_name, dedup_key)`` 已存在 → 不新增行，
+          ``deduplicated=True``（恒 200，watcher 重推幂等）；
+        - 写入前单变更行数 > 5000 → DELETE 最旧（ts 升序）保新行，
+          ``truncated=删除数``（保新弃旧观测语义，D-003——不拒绝新事件）。
+        """
+        dedup_key = self._event_dedup_key(payload)
+        scope = (
+            col(PlatformChangeEventORM.workspace_id) == workspace_id,
+            col(PlatformChangeEventORM.change_name) == change_name,
+        )
+        existing = (
+            await self._session.execute(
+                select(PlatformChangeEventORM.id).where(
+                    *scope, col(PlatformChangeEventORM.dedup_key) == dedup_key
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return {"stored": False, "deduplicated": True, "truncated": 0}
+
+        # 上限保护：> 5000 截断最旧（DELETE ts 升序超颧行，一次性删到 cap-1 再插入）
+        truncated = 0
+        current = (
+            await self._session.execute(
+                select(func.count()).select_from(PlatformChangeEventORM).where(*scope)
+            )
+        ).scalar_one()
+        if current >= self.EVENT_CAP_PER_CHANGE:
+            overflow = current - self.EVENT_CAP_PER_CHANGE + 1
+            oldest_ids = (
+                (
+                    await self._session.execute(
+                        select(PlatformChangeEventORM.id)
+                        .where(*scope)
+                        .order_by(col(PlatformChangeEventORM.ts).asc())
+                        .limit(overflow)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            await self._session.execute(
+                delete(PlatformChangeEventORM).where(col(PlatformChangeEventORM.id).in_(oldest_ids))
+            )
+            truncated = len(oldest_ids)
+
+        self._session.add(
+            PlatformChangeEventORM(
+                workspace_id=workspace_id,
+                change_name=change_name,
+                dedup_key=dedup_key,
+                kind=str(payload.get("kind", "unknown")),
+                rule=str(payload.get("rule", "unknown")),
+                severity=str(payload.get("severity", "info")),
+                provisional=bool(payload.get("provisional", True)),
+                detail=payload.get("detail"),
+                ts=str(payload.get("ts", "")),
+            )
+        )
+        await self._session.commit()
+        return {"stored": True, "deduplicated": False, "truncated": truncated}
+
+    # ── Change 2026-09-26-change-events-r18-full task-02（design 接口定义 / FR-03）──
+
+    #: GET 单次返回上限（无 since 时选集=最新 N 条后反转正序，Grill X-001）。
+    EVENT_LIST_LIMIT = 200
+
+    async def list_events(
+        self,
+        *,
+        change_name: str,
+        since: str | None = None,
+        workspace_id: uuid.UUID | None = None,
+        allowed_workspace_ids: list[uuid.UUID] | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """GET /changes/{name}/events：正序增量读取（读 scope 双参口径）。
+
+        - ``since`` 严格大于（ISO 8601 字符串字典序，D-001/同 base_ts 先例 R-04）；
+        - 输出恒 ts 正序；无 since 时选集=最新 ``limit`` 条（DESC LIMIT 后应用层
+          反转，保新弃旧——观测语义与 D-003 同向，Grill X-001）；
+        - scope 过滤同读三方法先例：``workspace_id``（shpsync_ 收件箱）或
+          ``allowed_workspace_ids``（JWT/shk_live_ CHANGE_READ 并集，NULL 桶无——
+          本表 workspace_id NOT NULL）；
+        - 零业务判定（D-004）：原值透传，不聚合不消费。
+        """
+        cap = limit if (limit is not None and limit > 0) else self.EVENT_LIST_LIMIT
+        scope_cols: list[ColumnElement[bool]] = [
+            col(PlatformChangeEventORM.change_name) == change_name
+        ]
+        if workspace_id is not None:
+            scope_cols.append(col(PlatformChangeEventORM.workspace_id) == workspace_id)
+        elif allowed_workspace_ids is not None:
+            scope_cols.append(col(PlatformChangeEventORM.workspace_id).in_(allowed_workspace_ids))
+        if since:
+            scope_cols.append(col(PlatformChangeEventORM.ts) > since)
+
+        stmt = (
+            select(
+                PlatformChangeEventORM.id,
+                PlatformChangeEventORM.kind,
+                PlatformChangeEventORM.rule,
+                PlatformChangeEventORM.severity,
+                PlatformChangeEventORM.provisional,
+                PlatformChangeEventORM.detail,
+                PlatformChangeEventORM.ts,
+            )
+            .where(*scope_cols)
+            .order_by(col(PlatformChangeEventORM.ts).desc())
+            .limit(cap)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [
+            {
+                "id": r.id,
+                "kind": r.kind,
+                "rule": r.rule,
+                "severity": r.severity,
+                "provisional": r.provisional,
+                "detail": r.detail,
+                "ts": r.ts,
+            }
+            for r in reversed(rows)  # DESC 取最新 → 反转为正序输出
+        ]
 
     # ── Change 2026-08-17-spec-file-incremental-sync task-01（design §5.2/§5.3）──
 
@@ -1929,217 +1990,3 @@ class PlatformSyncService:
         )
         rows = (await self._session.execute(stmt)).scalars().all()
         return list(rows)
-
-    # ── Change 2026-09-23-change-events-channel task-02（design §接口定义 / FR-01~FR-04）──
-
-    async def append_events(
-        self,
-        workspace_id: uuid.UUID,
-        change_name: str,
-        events: list[ChangeEventPush],
-    ) -> tuple[int, int]:
-        """POST /changes/{name}/events：批量幂等追加 + 单事务上限修剪（FR-01~FR-03）。
-
-        dedup 语义是**跳过不是覆盖**（区别于 ``upsert_quicklog_entry`` 先例）：
-        事件是 append-only 观测快照、无 update 语义，watcher 重推同 dedup_key
-        直接丢弃不更新原行（D-002）。
-
-        1. 批内去重（plan 审查修正项）：同请求两条同 dedup_key 只插首条、其余
-           计 ``deduplicated``——防批内撞 ``(workspace_id, change_name,
-           dedup_key)`` 唯一约束 500（dict 保序留首条）。
-        2. 已存键 IN 批量预取（ql-20260826-012 同款范式）：批内键命中已存行的
-           计 ``deduplicated`` 跳过。
-        3. 缺失者 INSERT：``ts`` 归一 tz-aware datetime（epoch 毫秒 ÷1000，
-           D-003）；``provisional`` 恒 True（**请求值丢弃**，D-004 红线）；
-           ``detail`` 截 2000（宽松接收、落库截断）。
-        4. 插入后 count 该 ``(workspace_id, change_name)`` 行数，``>5000`` 按
-           ``(ts, created_at)`` 删最旧修剪到 5000（D-005，与本批插入同一次
-           commit 即单事务；``id`` 末位排序消 created_at 并列歧义）。
-        5. IntegrityError 重试收敛（24h 审查 M-1 / ql-20260924-001）：③④ 与
-           commit 整体包裹——并发对手在 ② 预取后提交同 dedup_key 行致唯一
-           约束冲突时，rollback 重查已存键、剔除撞键条目（计 deduplicated）
-           重插一轮，不再整批 500。
-
-        service 零业务判定红线（D-004）：不触发通知 / 不写 progress / 不动审批
-        ——本方法只落事件行。返回 ``(accepted, deduplicated)``。
-        """
-        # ① 批内 dedup_key 去重（dict 插入序保序，同键留首条）。
-        pending: dict[str, ChangeEventPush] = {}
-        deduplicated = 0
-        for event in events:
-            key = _change_event_dedup_key(event)
-            if key in pending:
-                deduplicated += 1
-                continue
-            pending[key] = event
-
-        # ② 已存键预取：批内键 ∩ 已存键 → 跳过（计入 deduplicated，不覆盖）。
-        if pending:
-            existing_keys = set(
-                (
-                    await self._session.execute(
-                        select(col(PlatformChangeEventORM.dedup_key)).where(
-                            col(PlatformChangeEventORM.workspace_id) == workspace_id,
-                            col(PlatformChangeEventORM.change_name) == change_name,
-                            col(PlatformChangeEventORM.dedup_key).in_(pending.keys()),
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            for key in existing_keys:
-                pending.pop(key, None)
-                deduplicated += 1
-
-        # ③ 缺失者 INSERT（provisional 恒 True / detail 截断 / ts 归一）。
-        # 24h 审查 M-1（ql-20260924-001）：INSERT + 修剪 + commit 包
-        # IntegrityError 重试收敛——并发对手在本批预取（②）之后提交同
-        # dedup_key 行时，唯一约束 uq_platform_change_events_dedup 在
-        # flush/commit 抛 IntegrityError；此前未捕获直冒泡 → 全局 500 兜底
-        # 整批（≤200 条）被拒。对齐本文件 quicklog/progress 写路径既有自愈
-        # 范式（upsert :535 / quicklog :1068）：rollback → 重查已存键 →
-        # 剔除撞键条目（计 deduplicated）→ 重插剩余。一轮重试足够（重查
-        # 确认缺失后才插，再撞说明另有并发写入，重抛让上层感知）。
-        now = datetime.now(UTC)
-        accepted = 0
-        for _attempt in range(2):
-            try:
-                for key, event in pending.items():
-                    self._session.add(
-                        PlatformChangeEventORM(
-                            id=uuid.uuid4(),
-                            workspace_id=workspace_id,
-                            change_name=change_name,
-                            dedup_key=key,
-                            ts=datetime.fromtimestamp(event.ts / 1000, tz=UTC),
-                            kind=event.kind,
-                            stage=event.stage,
-                            detail=(
-                                event.detail[:_CHANGE_EVENT_DETAIL_MAX]
-                                if event.detail is not None
-                                else None
-                            ),
-                            rule=event.rule,
-                            severity=event.severity,
-                            provisional=True,  # D-004 红线：请求值丢弃，恒 True。
-                            created_at=now,
-                        )
-                    )
-
-                # ④ 单事务上限修剪（D-005）：count 含本批待插行（autoflush 先于查询）。
-                scope_filters = (
-                    col(PlatformChangeEventORM.workspace_id) == workspace_id,
-                    col(PlatformChangeEventORM.change_name) == change_name,
-                )
-                count = (
-                    await self._session.execute(
-                        select(func.count())
-                        .select_from(PlatformChangeEventORM)
-                        .where(*scope_filters)
-                    )
-                ).scalar_one()
-                if count > CHANGE_EVENTS_MAX_ROWS:
-                    excess = count - CHANGE_EVENTS_MAX_ROWS
-                    oldest_ids = list(
-                        (
-                            await self._session.execute(
-                                select(col(PlatformChangeEventORM.id))
-                                .where(*scope_filters)
-                                .order_by(
-                                    col(PlatformChangeEventORM.ts).asc(),
-                                    col(PlatformChangeEventORM.created_at).asc(),
-                                    col(PlatformChangeEventORM.id).asc(),
-                                )
-                                .limit(excess)
-                            )
-                        )
-                        .scalars()
-                        .all()
-                    )
-                    if oldest_ids:
-                        await self._session.execute(
-                            delete(PlatformChangeEventORM).where(
-                                col(PlatformChangeEventORM.id).in_(oldest_ids)
-                            )
-                        )
-
-                await self._session.commit()
-                accepted = len(pending)
-                break
-            except IntegrityError:
-                await self._session.rollback()
-                if _attempt:
-                    raise
-                # 重查已存键：首次预取与对手提交之间的竞态窗口在此收敛。
-                existing_keys = set(
-                    (
-                        await self._session.execute(
-                            select(col(PlatformChangeEventORM.dedup_key)).where(
-                                col(PlatformChangeEventORM.workspace_id) == workspace_id,
-                                col(PlatformChangeEventORM.change_name) == change_name,
-                                col(PlatformChangeEventORM.dedup_key).in_(pending.keys()),
-                            )
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-                for key in existing_keys & set(pending.keys()):
-                    pending.pop(key, None)
-                    deduplicated += 1
-                if not pending:
-                    # 全部撞键：本批零 INSERT（修剪无需重跑）。
-                    break
-        return accepted, deduplicated
-
-    async def list_events(
-        self,
-        change_name: str,
-        workspace_id: uuid.UUID | None = None,
-        allowed_workspace_ids: list[uuid.UUID] | None = None,
-        since: datetime | None = None,
-        limit: int = 500,
-    ) -> tuple[list[PlatformChangeEventORM], int]:
-        """GET /changes/{name}/events：scope 过滤 + since 增量正序读取（FR-04）。
-
-        scope 双参口径照 ``list_agent_logs``：
-
-        - ``allowed_workspace_ids`` 非 None（JWT/shk_live_ 读路径）→ workspace_id
-          ``IN (并集)``——本表 workspace_id NOT NULL，无 NULL 桶子句（X-04 同款）；
-          空集合即空结果。
-        - ``workspace_id`` 非 None（shpsync_ 路径）→ 精确匹配（token 绑定 ws）。
-        - 两者均 None（防御，router ``_read_args`` 恒给其一）→ 空结果（fail-closed）。
-
-        ``since`` 非 None 时 ``ts > since`` **严格大于**（增量不含边界行；naive
-        值按 UTC 解释——SQLite 测试库丢 tzinfo 的方言分叉防御，X-07 同源）。
-        排序 ``ts ASC, id ASC`` 稳定正序；``total`` 是过滤后（scope + since）
-        总行数、不含 limit 截断，``limit`` 由 router 层 Query 校验（默认 500 上限
-        5000）。change 无事件 → 空列表（不 404，事件表独立于 change 行存在）。
-        """
-        ws_col = col(PlatformChangeEventORM.workspace_id)
-        filters: list[ColumnElement[bool]] = [
-            col(PlatformChangeEventORM.change_name) == change_name
-        ]
-        if allowed_workspace_ids is not None:
-            filters.append(ws_col.in_(allowed_workspace_ids))
-        elif workspace_id is not None:
-            filters.append(ws_col == workspace_id)
-        else:
-            return [], 0
-        if since is not None:
-            since_norm = since if since.tzinfo else since.replace(tzinfo=UTC)
-            filters.append(col(PlatformChangeEventORM.ts) > since_norm)
-        total = (
-            await self._session.execute(
-                select(func.count()).select_from(PlatformChangeEventORM).where(*filters)
-            )
-        ).scalar_one()
-        stmt = (
-            select(PlatformChangeEventORM)
-            .where(*filters)
-            .order_by(col(PlatformChangeEventORM.ts).asc(), col(PlatformChangeEventORM.id).asc())
-            .limit(limit)
-        )
-        rows = (await self._session.execute(stmt)).scalars().all()
-        return list(rows), total

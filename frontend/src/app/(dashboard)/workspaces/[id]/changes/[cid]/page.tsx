@@ -14,8 +14,6 @@ import {
   useChangeDeleteAccess,
 } from "@/components/delete-change-confirm";
 import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
-import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
-import { ChangeEventsCard } from "@/components/changes/detail/change-events-card";
 import { ChangeFilesCard } from "@/components/changes/detail/change-files-card";
 import { ChangeSessionsCard } from "@/components/changes/detail/change-sessions-card";
 import { ChangeStageActions } from "@/components/changes/detail/change-stage-actions";
@@ -29,6 +27,7 @@ import {
   lastSignalFromSteps,
 } from "@/components/changes/change-activity-badge";
 import { ChangeUsageCard } from "@/components/changes/detail/change-usage-card";
+import { ChangeObservationEventsCard } from "@/components/changes/detail/change-observation-events-card";
 import { QuicklogLinkedCard } from "@/components/changes/detail/quicklog-linked-card";
 import { ScopeAuditCommandCard } from "@/components/changes/scope-audit-command-card";
 import { ApiError } from "@/lib/api";
@@ -69,15 +68,12 @@ export function isTerminalChange(
   return change.status === "archived" || change.location === "archive";
 }
 
-// quick/thin/blocked/archived 状态徽标（非线性节点，独立呈现）
-// 2026-09-25-change-center-thin-flow task-07：补 thin=轻量变更（防标题裸显英文 "thin"）；
-// quick 补存量口径。
+// quick/blocked/archived 三态 status 徽标（非线性节点，独立呈现）
 const STATUS_BADGE: Record<
   string,
   { label: string; variant: "success" | "outline" | "destructive" | "default" }
 > = {
-  quick: { label: "快速任务（存量）", variant: "default" },
-  thin: { label: "轻量变更", variant: "default" },
+  quick: { label: "快速修复", variant: "default" },
   blocked: { label: "已阻塞", variant: "destructive" },
   archived: { label: "已归档", variant: "success" },
 };
@@ -426,32 +422,21 @@ export default function ChangeDetailPage({ params }: Props) {
             workspaceId={workspaceId}
             changeKey={change.change_key}
           />
+          {/* 2026-09-26-change-events-r18-full task-03（FR-07/FR-08）：「观测事件」
+              折叠卡——watcher 推送的旁路观测信号只读展示（红线 D-004：零业务逻辑，
+              纯渲染；组件自取数 30s 轮询，失败静默隐藏不阻断详情页）。 */}
+          <ChangeObservationEventsCard changeKey={change.change_key} />
           <ChangeSessionsCard workspaceId={workspaceId} changeId={changeId} />
           {/* ql-20260910-014-6c29：scope-audit 范围对账结果卡（ql-20260911-001-c0be
               升级：本机跑对账出三态计数+明细表，本地命令折叠为兜底；identifier=
-              change_key）。archived 传入（2026-09-25-change-detail-assets-usability /
-              FR-05）：已归档变更降级时指路「沉淀资产 · 归档留档」。 */}
+              change_key，已归档变更也可查） */}
           <ScopeAuditCommandCard
             target={{
               kind: "change",
               workspaceId,
               changeKey: change.change_key,
             }}
-            archived={isTerminalChange(change)}
           />
-          {/* task-06（2026-09-23-change-events-channel / FR-05~07 / D-004 / D-006）：
-              「观测事件」折叠卡——CLI watcher 旁路推送流只读展示，组件 useQuery
-              自取数（30s 轮询）+ 失败静默隐藏（QuicklogLinkedCard 同款范式）；
-              纯展示零业务逻辑，行不可点击、无 mutation、不触发流程动作。 */}
-          <ChangeEventsCard
-            workspaceId={workspaceId}
-            changeKey={change.change_key}
-          />
-          {/* 2026-09-25-change-precipitated-assets（D-001@v1 方案 a）：「沉淀资产」
-              折叠卡——本变更经归档沉淀的 FR 索引/决策蒸馏/测试绑定/patch 留档/
-              delta 摘要只读聚合（GET /changes/{cid}/assets），四组逐组有数据才
-              渲染、失败静默隐藏（ChangeEventsCard 同款范式）。 */}
-          <ChangeAssetsCard workspaceId={workspaceId} changeId={changeId} />
         </aside>
       </div>
     </PageContainer>

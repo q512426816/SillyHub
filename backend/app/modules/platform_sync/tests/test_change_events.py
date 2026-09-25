@@ -1,523 +1,418 @@
-"""POST/GET /api/changes/{name}/events 端点测试（task-04 / design 五组：收/取/去重/鉴权/上限）。
+"""platform_sync 变更事件通道测试（change 2026-09-26-change-events-r18-full）。
 
-覆盖：收（批量 2 条 shpsync_ 200 + 落库字段核对 + 伪造 provisional=False 仍存
-True / 批量>200 422 / ts 秒级值域 422）、取（乱序推入 GET ts ASC 正序 / since
-严格大于不含边界 / limit 生效且 total 不含截断 / 无事件 200 空列表）、去重
-（同批重放 / 带 id 事件按 id 去重 / 批内同 dedup_key 只插一条）、鉴权矩阵
-（无凭据 401 / shk_live_ 403 / JWT 403，shpsync_ 200 见收组；跨 workspace
-scope 隔离）、5000 上限修剪（最旧被删，FR-03 / D-005@v1）。
-
-范式逐字对齐 test_quicklog_push.py（fixture 复用 conftest shpsync_headers /
-apikey_headers / auth_headers + db_session 落库断言）；时间毫秒用递增基准
-（BASE_TS_MS + i*1000），不依赖真实时钟。
+task-01 四组：收 / 去重 / 鉴权 / 上限（task-02 增第五组「取」）。
+红线 D-004：provisional 原值透传、零业务判定（存储无流程外键）。
 """
 
 from __future__ import annotations
 
-import uuid
-from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.platform_sync.model import PlatformChangeEventORM
 
-CHANGE_NAME = "2026-09-23-change-events-channel"
 
-#: 递增基准毫秒（≈2025-09-22，值域 ≥1e12 满足 schema 校验）。
-BASE_TS_MS = 1758566000000
-
-
-def _event(i: int, **overrides: Any) -> dict[str, Any]:
-    """第 i 条事件载荷（ts 递增 +1s，全部字段显式便于落库核对）。"""
-    event: dict[str, Any] = {
-        "kind": "file_changed",
-        "ts": BASE_TS_MS + i * 1000,
-        "stage": "execute",
-        "detail": f"事件 {i}",
-        "rule": "watcher:fs",
-        "severity": "info",
-    }
-    event.update(overrides)
-    return event
-
-
-def _ts_dt(i: int) -> datetime:
-    """第 i 条事件的期望落库 datetime（epoch 毫秒 ÷1000 归一，D-003@v1）。"""
-    return datetime.fromtimestamp((BASE_TS_MS + i * 1000) / 1000, tz=UTC)
-
-
-def _as_utc(dt: datetime) -> datetime:
-    """SQLite 读回 naive datetime 统一按 UTC 解释（X-07 方言防御同源）。"""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
-
-
-def _iso_to_dt(raw: str) -> datetime:
-    """GET 响应 ts（ISO 字符串，SQLite 行可能 naive 无后缀）→ UTC aware datetime。"""
-    return _as_utc(datetime.fromisoformat(raw.replace("Z", "+00:00")))
-
-
-async def _push(
-    client: AsyncClient, headers: dict[str, str], events: list[dict[str, Any]]
+def _event(
+    *,
+    ts: str,
+    rule: str = "stage-stuck",
+    kind: str = "watchdog",
+    severity: str = "info",
+    detail: str | None = "详情",
+    event_id: str | None = None,
 ) -> dict[str, Any]:
-    """POST 批量事件并断言 200，返回 ``{accepted, deduplicated}``。"""
-    resp = await client.post(
-        f"/api/changes/{CHANGE_NAME}/events", json={"events": events}, headers=headers
-    )
-    assert resp.status_code == 200
-    return resp.json()
+    """构造 watcher 推送事件 body（id 可缺省——回退 ts+rule 去重键）。"""
+    body: dict[str, Any] = {
+        "kind": kind,
+        "rule": rule,
+        "severity": severity,
+        "provisional": True,
+        "detail": detail,
+        "ts": ts,
+    }
+    if event_id is not None:
+        body["id"] = event_id
+    return body
 
 
-async def _mint_shpsync_token(
-    db_session: AsyncSession,
-) -> tuple[uuid.UUID, dict[str, str]]:
-    """铸第二个 workspace 的 shpsync_ token（conftest fixture 单 token，跨 workspace
-    用例在文件内自铸同款，不扩散改 conftest）。"""
-    from app.core.config import get_settings
-    from app.core.security import password_hasher
-    from app.modules.auth.model import User
-    from app.modules.platform_sync.token_service import PlatformSyncTokenService
-    from app.modules.workspace.model import Workspace
-
-    ws = Workspace(
-        id=uuid.uuid4(),
-        name=f"ws-evt-{uuid.uuid4().hex[:8]}",
-        slug=f"ws-evt-{uuid.uuid4().hex[:8]}",
-        root_path=f"/tmp/ws-evt-{uuid.uuid4().hex[:8]}",
-        status="active",
-    )
-    db_session.add(ws)
-    user = User(
-        id=uuid.uuid4(),
-        email=f"evt-{uuid.uuid4().hex[:6]}@example.com",
-        password_hash=password_hasher.hash("x"),
-        status="active",
-    )
-    db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(ws)
-
-    _row, plaintext = await PlatformSyncTokenService(db_session, settings=get_settings()).create(
-        workspace_id=ws.id,
-        name="events-cross-ws",
-        created_by=user.id,
-    )
-    return ws.id, {"Authorization": f"Bearer {plaintext}"}
-
-
-# ── 收（FR-01：批量上行 + 落库字段核对 + 值域/批量防线）──
-
-
-@pytest.mark.asyncio
-async def test_push_batch_ok_and_persisted(
-    client: AsyncClient,
-    shpsync_headers: tuple[Any, dict[str, str]],
-    db_session: AsyncSession,
-) -> None:
-    """批量 2 条 shpsync_ 200（accepted=2 deduplicated=0）+ 落库字段核对。
-
-    ts 归一毫秒→datetime、dedup_key 无 id 时 ``{ts_ms}|{kind}|{stage}`` 拼接、
-    provisional 恒 True——含伪造 ``provisional=False`` 入参仍存 True 的红线反例
-    （D-004@v1：请求值丢弃，平台只展示不消费）。
-    """
-    ws_id, headers = shpsync_headers
-    events = [
-        _event(0),
-        _event(1, kind="stage_completed", stage="verify", provisional=False),
-    ]
-    resp = await client.post(
-        f"/api/changes/{CHANGE_NAME}/events", json={"events": events}, headers=headers
-    )
-    assert resp.status_code == 200
-    assert resp.json() == {"accepted": 2, "deduplicated": 0}
-
+async def _count_rows(db_session: Any, change_name: str) -> int:
     stmt = (
-        select(PlatformChangeEventORM)
-        .where(PlatformChangeEventORM.workspace_id == ws_id)
-        .order_by(PlatformChangeEventORM.ts.asc())
-    )
-    rows = (await db_session.execute(stmt)).scalars().all()
-    assert len(rows) == 2
-    first, second = rows
-    assert first.change_name == CHANGE_NAME
-    assert first.kind == "file_changed"
-    assert first.stage == "execute"
-    assert first.detail == "事件 0"
-    assert first.rule == "watcher:fs"
-    assert first.severity == "info"
-    assert _as_utc(first.ts) == _ts_dt(0)
-    assert first.dedup_key == f"{BASE_TS_MS}|file_changed|execute"
-    assert first.provisional is True
-    assert second.kind == "stage_completed"
-    assert second.stage == "verify"
-    assert _as_utc(second.ts) == _ts_dt(1)
-    assert second.provisional is True  # 红线反例：伪造 False 仍存 True
-
-
-@pytest.mark.asyncio
-async def test_push_batch_over_200_rejected_422(
-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
-) -> None:
-    """批量 201 条 422（schema 层 max_length=200，FR-01 批量上限）。"""
-    _ws_id, headers = shpsync_headers
-    resp = await client.post(
-        f"/api/changes/{CHANGE_NAME}/events",
-        json={"events": [_event(i) for i in range(201)]},
-        headers=headers,
-    )
-    assert resp.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_push_seconds_epoch_rejected_422(
-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
-) -> None:
-    """ts=1e9 秒级值域 422（schema ge=1e12 毫秒下限，D-003@v1 毫秒/秒混淆防线）。"""
-    _ws_id, headers = shpsync_headers
-    resp = await client.post(
-        f"/api/changes/{CHANGE_NAME}/events",
-        json={"events": [_event(0, ts=1_000_000_000)]},
-        headers=headers,
-    )
-    assert resp.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_push_beyond_datetime_range_rejected_422(
-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
-) -> None:
-    """ts 超 datetime 值域（毫秒 > 年 9999 上限）422——24h 审查 M-2：原校验只有
-    ge 下界，微秒误传（如 1e15）会在落库 fromtimestamp 抛 OSError → 整批 500。"""
-    _ws_id, headers = shpsync_headers
-    resp = await client.post(
-        f"/api/changes/{CHANGE_NAME}/events",
-        json={"events": [_event(0, ts=1e15)]},
-        headers=headers,
-    )
-    assert resp.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_push_ts_infinity_rejected_422(
-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
-) -> None:
-    """ts=Infinity 422——inf 过 ge(1e12) 下界但 ``int(inf)``（dedup 回退键）与
-    fromtimestamp 均 OverflowError → 整批 500（24h 审查 M-2 同源防线）。
-    Infinity 非法 JSON（httpx json= 序列化即拒），用原始 body 发 ``Infinity``
-    字面量——Python json.loads 默认接受该形态，是真实可达的绕过面。"""
-    _ws_id, headers = shpsync_headers
-    resp = await client.post(
-        f"/api/changes/{CHANGE_NAME}/events",
-        content=(
-            '{"events": [{"kind": "file_changed", "ts": Infinity, '
-            '"stage": "execute", "detail": "inf"}]}'
-        ),
-        headers={**headers, "Content-Type": "application/json"},
-    )
-    assert resp.status_code == 422
-
-
-# ── 取（FR-04：ts ASC 正序 / since 增量 / limit / 空列表）──
-
-
-@pytest.mark.asyncio
-async def test_list_returns_ts_ascending(
-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
-) -> None:
-    """乱序推 3 条 → GET 按 ts ASC 正序（FR-04 稳定正序）。"""
-    _ws_id, headers = shpsync_headers
-    await _push(client, headers, [_event(2), _event(0), _event(1)])
-
-    resp = await client.get(f"/api/changes/{CHANGE_NAME}/events", headers=headers)
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["total"] == 3
-    assert [_iso_to_dt(item["ts"]) for item in body["items"]] == [_ts_dt(0), _ts_dt(1), _ts_dt(2)]
-
-
-@pytest.mark.asyncio
-async def test_list_since_strictly_greater_excludes_boundary(
-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
-) -> None:
-    """since=<第 2 条 ts 的 ISO> → 只回第 3 条（严格大于，增量不含边界行，FR-04）。"""
-    _ws_id, headers = shpsync_headers
-    await _push(client, headers, [_event(0), _event(1), _event(2)])
-
-    resp = await client.get(
-        f"/api/changes/{CHANGE_NAME}/events",
-        params={"since": _ts_dt(1).isoformat()},
-        headers=headers,
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["total"] == 1
-    assert len(body["items"]) == 1
-    assert _iso_to_dt(body["items"][0]["ts"]) == _ts_dt(2)
-
-
-@pytest.mark.asyncio
-async def test_list_limit_applies_and_total_excludes_truncation(
-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
-) -> None:
-    """limit=2 生效（截断从最旧端起）且 total=3 不含 limit 截断。"""
-    _ws_id, headers = shpsync_headers
-    await _push(client, headers, [_event(i) for i in range(3)])
-
-    resp = await client.get(
-        f"/api/changes/{CHANGE_NAME}/events", params={"limit": 2}, headers=headers
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert len(body["items"]) == 2
-    assert body["total"] == 3
-    assert [_iso_to_dt(item["ts"]) for item in body["items"]] == [_ts_dt(0), _ts_dt(1)]
-
-
-@pytest.mark.asyncio
-async def test_list_empty_change_returns_200_empty(
-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
-) -> None:
-    """无事件 change GET 200 空列表（事件表独立于 change 行存在，观测面宽松）。"""
-    _ws_id, headers = shpsync_headers
-    resp = await client.get(f"/api/changes/{CHANGE_NAME}/events", headers=headers)
-    assert resp.status_code == 200
-    assert resp.json() == {"items": [], "total": 0}
-
-
-@pytest.mark.asyncio
-async def test_list_invalid_since_returns_422(
-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
-) -> None:
-    """since 非法 ISO 格式 422（execute 阶段独立审查补充用例，e2e curl 已实测）。"""
-    _ws_id, headers = shpsync_headers
-    resp = await client.get(
-        f"/api/changes/{CHANGE_NAME}/events", headers=headers, params={"since": "not-a-date"}
-    )
-    assert resp.status_code == 422
-
-
-# ── 去重（D-002：dedup 语义是跳过不是覆盖）──
-
-
-@pytest.mark.asyncio
-async def test_replay_same_batch_deduplicated(
-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
-) -> None:
-    """同批重放：二次响应 deduplicated=N accepted=0，GET 行数不变（watcher 重跑幂等）。"""
-    _ws_id, headers = shpsync_headers
-    batch = [_event(i) for i in range(3)]
-    assert await _push(client, headers, batch) == {"accepted": 3, "deduplicated": 0}
-    assert await _push(client, headers, batch) == {"accepted": 0, "deduplicated": 3}
-
-    resp = await client.get(f"/api/changes/{CHANGE_NAME}/events", headers=headers)
-    assert resp.json()["total"] == 3
-
-
-@pytest.mark.asyncio
-async def test_repush_with_cli_id_dedup_by_id(
-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
-) -> None:
-    """带 id 事件重推按 id 去重（dedup_key 优先源是 CLI id），原行不被更新。"""
-    _ws_id, headers = shpsync_headers
-    event = _event(0, id="evt-abc-001")
-    assert await _push(client, headers, [event]) == {"accepted": 1, "deduplicated": 0}
-
-    # 同 id 不同 ts/kind 重推：按 id 去重跳过（跳过不是覆盖）。
-    replay = {**event, "ts": BASE_TS_MS + 999000, "kind": "stage_completed"}
-    assert await _push(client, headers, [replay]) == {"accepted": 0, "deduplicated": 1}
-
-    resp = await client.get(f"/api/changes/{CHANGE_NAME}/events", headers=headers)
-    body = resp.json()
-    assert body["total"] == 1
-    assert body["items"][0]["kind"] == "file_changed"
-    assert _iso_to_dt(body["items"][0]["ts"]) == _ts_dt(0)
-
-
-@pytest.mark.asyncio
-async def test_intra_batch_same_dedup_key_inserts_once(
-    client: AsyncClient,
-    shpsync_headers: tuple[Any, dict[str, str]],
-    db_session: AsyncSession,
-) -> None:
-    """批内同 dedup_key 两条只插一条（deduplicated=1，dict 保序留首条，防撞唯一约束）。"""
-    ws_id, headers = shpsync_headers
-    duplicate = _event(0)
-    result = await _push(client, headers, [duplicate, {**duplicate, "detail": "重复条"}])
-    assert result == {"accepted": 1, "deduplicated": 1}
-
-    stmt = select(PlatformChangeEventORM).where(PlatformChangeEventORM.workspace_id == ws_id)
-    rows = (await db_session.execute(stmt)).scalars().all()
-    assert len(rows) == 1
-    assert rows[0].detail == "事件 0"  # 首条胜出，第二条被丢
-
-
-@pytest.mark.asyncio
-async def test_concurrent_duplicate_key_converges_not_500(
-    db_session: AsyncSession, shpsync_headers: tuple[Any, dict[str, str]]
-) -> None:
-    """24h 审查 M-1：并发同 dedup_key 撞唯一约束 → 回滚重查收敛，不整批 500。
-
-    场景确定性模拟（不靠真并发时序）：并发对手已提交 k1 行，但本批「已存键
-    预取」发生在对手提交前（盲看，patch 首次预取查询）→ INSERT 撞
-    uq_platform_change_events_dedup 抛 IntegrityError。修复预期：捕获 → rollback
-    → 重查已存键剔除撞键条目 → 重插剩余（对齐本文件 quicklog/progress 写路径
-    :535/:1068 既有 IntegrityError 自愈范式）。修复前：IntegrityError 未捕获直
-    冒泡 → 全局 500 兜底，整批（≤200 条）被拒。"""
-    from unittest.mock import patch as _patch
-
-    from sqlalchemy import false as _sa_false
-
-    import app.modules.platform_sync.service as _ps_service
-    from app.modules.platform_sync.schema import ChangeEventPush
-    from app.modules.platform_sync.service import PlatformSyncService
-
-    ws_id, _headers = shpsync_headers
-    # 并发对手的 k1 行（先落库——本批预取被 patch 成盲看，看不见它）。
-    db_session.add(
-        PlatformChangeEventORM(
-            id=uuid.uuid4(),
-            workspace_id=ws_id,
-            change_name=CHANGE_NAME,
-            dedup_key="k1",
-            ts=_ts_dt(0),
-            kind="file_changed",
-            provisional=True,
-            created_at=datetime.now(UTC),
-        )
-    )
-    await db_session.commit()
-
-    _real_select = _ps_service.select
-    _blind = {"done": False}
-
-    def _select_with_blind_spot(*entities: Any, **kw: Any) -> Any:
-        stmt = _real_select(*entities, **kw)
-        if not _blind["done"] and "platform_change_events.dedup_key" in str(stmt):
-            _blind["done"] = True  # 仅首次已存键预取盲看；重试重查放行
-            return stmt.where(_sa_false())
-        return stmt
-
-    events = [
-        ChangeEventPush(kind="file_changed", ts=BASE_TS_MS, stage="execute", detail="k1", id="k1"),
-        ChangeEventPush(
-            kind="file_changed", ts=BASE_TS_MS + 1000, stage="execute", detail="k2", id="k2"
-        ),
-    ]
-    with _patch.object(_ps_service, "select", _select_with_blind_spot):
-        accepted, deduplicated = await PlatformSyncService(db_session).append_events(
-            ws_id, CHANGE_NAME, events
-        )
-
-    # k1 撞键收敛为 deduplicated，k2 正常落库——不再整批 500。
-    assert (accepted, deduplicated) == (1, 1)
-    keys = set(
-        (
-            await db_session.execute(
-                select(PlatformChangeEventORM.dedup_key).where(
-                    PlatformChangeEventORM.workspace_id == ws_id,
-                    PlatformChangeEventORM.change_name == CHANGE_NAME,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert keys == {"k1", "k2"}
-
-
-# ── 鉴权（写通道仅 shpsync_；shpsync_ 200 见收组）──
-
-
-@pytest.mark.asyncio
-async def test_events_push_no_auth_returns_401(client: AsyncClient) -> None:
-    resp = await client.post(f"/api/changes/{CHANGE_NAME}/events", json={"events": [_event(0)]})
-    assert resp.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_events_push_apikey_auth_403(
-    client: AsyncClient, apikey_headers: dict[str, str]
-) -> None:
-    """shk_live_ 凭据有效也 403——写通道仅 shpsync_（D-004@v1 收紧口径）。"""
-    resp = await client.post(
-        f"/api/changes/{CHANGE_NAME}/events",
-        json={"events": [_event(0)]},
-        headers=apikey_headers,
-    )
-    assert resp.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_events_push_jwt_auth_403(client: AsyncClient, auth_headers: dict[str, str]) -> None:
-    resp = await client.post(
-        f"/api/changes/{CHANGE_NAME}/events",
-        json={"events": [_event(0)]},
-        headers=auth_headers,
-    )
-    assert resp.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_cross_workspace_scope_isolation(
-    client: AsyncClient,
-    shpsync_headers: tuple[Any, dict[str, str]],
-    db_session: AsyncSession,
-) -> None:
-    """两个 shpsync_ token：A 推的事件 B 的 GET 看不到（token 派生 workspace 隔离）。"""
-    _ws_a, headers_a = shpsync_headers
-    await _push(client, headers_a, [_event(0), _event(1)])
-
-    _ws_b, headers_b = await _mint_shpsync_token(db_session)
-    resp_b = await client.get(f"/api/changes/{CHANGE_NAME}/events", headers=headers_b)
-    assert resp_b.status_code == 200
-    assert resp_b.json() == {"items": [], "total": 0}
-
-    # 对照：A 自己仍读得满（防「谁也读不到」的假阴性）。
-    resp_a = await client.get(f"/api/changes/{CHANGE_NAME}/events", headers=headers_a)
-    assert resp_a.json()["total"] == 2
-
-
-# ── 上限（FR-03 / D-005@v1：单 (workspace, change) 5000 行修剪最旧）──
-
-
-@pytest.mark.asyncio
-async def test_cap_5000_trims_oldest(
-    client: AsyncClient,
-    shpsync_headers: tuple[Any, dict[str, str]],
-    db_session: AsyncSession,
-) -> None:
-    """推 5005 条（26 批：25×200 + 1×5）→ 最终 count=5000 且被删的是最旧 5 条。"""
-    from app.modules.platform_sync.service import CHANGE_EVENTS_MAX_ROWS
-
-    ws_id, headers = shpsync_headers
-    total = CHANGE_EVENTS_MAX_ROWS + 5
-    pushed = 0
-    while pushed < total:
-        batch = [_event(pushed + i) for i in range(min(200, total - pushed))]
-        assert await _push(client, headers, batch) == {
-            "accepted": len(batch),
-            "deduplicated": 0,
-        }
-        pushed += len(batch)
-
-    count_stmt = (
         select(func.count())
         .select_from(PlatformChangeEventORM)
-        .where(
-            PlatformChangeEventORM.workspace_id == ws_id,
-            PlatformChangeEventORM.change_name == CHANGE_NAME,
-        )
+        .where(PlatformChangeEventORM.change_name == change_name)
     )
-    assert (await db_session.execute(count_stmt)).scalar_one() == CHANGE_EVENTS_MAX_ROWS
+    return int((await db_session.execute(stmt)).scalar_one())
 
-    resp = await client.get(
-        f"/api/changes/{CHANGE_NAME}/events", params={"limit": 1}, headers=headers
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["total"] == CHANGE_EVENTS_MAX_ROWS
-    # 最旧 5 条（i=0..4）被修剪，最老存活行是第 6 条（i=5）。
-    assert _iso_to_dt(body["items"][0]["ts"]) == _ts_dt(5)
+
+class TestPush:
+    """收：POST 落库断言。"""
+
+    async def test_push_stores_event_row(
+        self, client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+    ) -> None:
+        _ws, headers = shpsync_headers
+        resp = await client.post(
+            "/api/changes/evt-push-demo/events",
+            headers=headers,
+            json=_event(ts="2026-09-26T06:00:00Z", severity="warning"),
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["change_name"] == "evt-push-demo"
+        assert body["stored"] is True
+        assert body["deduplicated"] is False
+        assert body["truncated"] == 0
+
+    async def test_push_row_fields_match_payload(
+        self,
+        client: AsyncClient,
+        db_session: Any,
+        shpsync_headers: tuple[Any, dict[str, str]],
+    ) -> None:
+        _ws, headers = shpsync_headers
+        await client.post(
+            "/api/changes/evt-fields/events",
+            headers=headers,
+            json=_event(
+                ts="2026-09-26T06:01:00Z",
+                rule="gate-retry-storm",
+                kind="watchdog",
+                severity="warning",
+                detail="同一门禁 10 分钟内拦截 4 次",
+                event_id="evt-abc-001",
+            ),
+        )
+        rows = (
+            (
+                await db_session.execute(
+                    select(PlatformChangeEventORM).where(
+                        PlatformChangeEventORM.change_name == "evt-fields"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.kind == "watchdog"
+        assert row.rule == "gate-retry-storm"
+        assert row.severity == "warning"
+        assert row.provisional is True  # 红线：原值透传
+        assert row.detail == "同一门禁 10 分钟内拦截 4 次"
+        assert row.ts == "2026-09-26T06:01:00Z"
+        assert row.dedup_key == "evt-abc-001"
+
+    async def test_push_defaults_provisional_and_severity(
+        self,
+        client: AsyncClient,
+        db_session: Any,
+        shpsync_headers: tuple[Any, dict[str, str]],
+    ) -> None:
+        """body 缺 provisional/severity → 缺省 true/info（schema 兜底）。"""
+        _ws, headers = shpsync_headers
+        resp = await client.post(
+            "/api/changes/evt-defaults/events",
+            headers=headers,
+            json={"kind": "heartbeat", "rule": "cli-alive", "ts": "2026-09-26T06:02:00Z"},
+        )
+        assert resp.status_code == 200
+        row = (
+            await db_session.execute(
+                select(PlatformChangeEventORM).where(
+                    PlatformChangeEventORM.change_name == "evt-defaults"
+                )
+            )
+        ).scalar_one()
+        assert row.provisional is True
+        assert row.severity == "info"
+
+
+class TestDedup:
+    """去重：事件 id 优先 / ts+rule 回退。"""
+
+    async def test_duplicate_same_event_id(
+        self,
+        client: AsyncClient,
+        db_session: Any,
+        shpsync_headers: tuple[Any, dict[str, str]],
+    ) -> None:
+        _ws, headers = shpsync_headers
+        payload = _event(ts="2026-09-26T06:03:00Z", event_id="evt-dup-1")
+        first = await client.post("/api/changes/evt-dedup/events", headers=headers, json=payload)
+        assert first.json()["deduplicated"] is False
+        second = await client.post("/api/changes/evt-dedup/events", headers=headers, json=payload)
+        assert second.status_code == 200
+        assert second.json()["deduplicated"] is True
+        assert await _count_rows(db_session, "evt-dedup") == 1
+
+    async def test_duplicate_fallback_ts_rule(
+        self,
+        client: AsyncClient,
+        db_session: Any,
+        shpsync_headers: tuple[Any, dict[str, str]],
+    ) -> None:
+        """无 id：同 (ts, rule) 二次推不增行；同 ts 不同 rule 是新事件。"""
+        _ws, headers = shpsync_headers
+        await client.post(
+            "/api/changes/evt-fallback/events",
+            headers=headers,
+            json=_event(ts="2026-09-26T06:04:00Z", rule="r1"),
+        )
+        again = await client.post(
+            "/api/changes/evt-fallback/events",
+            headers=headers,
+            json=_event(ts="2026-09-26T06:04:00Z", rule="r1"),
+        )
+        assert again.json()["deduplicated"] is True
+        await client.post(
+            "/api/changes/evt-fallback/events",
+            headers=headers,
+            json=_event(ts="2026-09-26T06:04:00Z", rule="r2"),
+        )
+        assert await _count_rows(db_session, "evt-fallback") == 2
+
+    async def test_dedup_scoped_by_change_name(
+        self,
+        client: AsyncClient,
+        db_session: Any,
+        shpsync_headers: tuple[Any, dict[str, str]],
+    ) -> None:
+        """同去重键不同 change_name → 各自一行（去重键含 change_name 维度）。"""
+        _ws, headers = shpsync_headers
+        payload = _event(ts="2026-09-26T06:05:00Z", event_id="evt-shared-id")
+        await client.post("/api/changes/evt-a/events", headers=headers, json=payload)
+        await client.post("/api/changes/evt-b/events", headers=headers, json=payload)
+        assert await _count_rows(db_session, "evt-a") == 1
+        assert await _count_rows(db_session, "evt-b") == 1
+
+
+class TestAuth:
+    """鉴权：写通道仅 shpsync_。"""
+
+    async def test_push_no_token_401(self, client: AsyncClient) -> None:
+        resp = await client.post("/api/changes/x/events", json=_event(ts="2026-09-26T06:06:00Z"))
+        assert resp.status_code == 401
+
+    async def test_push_jwt_403(self, client: AsyncClient, auth_headers: dict[str, str]) -> None:
+        resp = await client.post(
+            "/api/changes/x/events",
+            headers=auth_headers,
+            json=_event(ts="2026-09-26T06:06:00Z"),
+        )
+        assert resp.status_code == 403
+
+    async def test_push_api_key_403(
+        self, client: AsyncClient, apikey_headers: dict[str, str]
+    ) -> None:
+        resp = await client.post(
+            "/api/changes/x/events",
+            headers=apikey_headers,
+            json=_event(ts="2026-09-26T06:06:00Z"),
+        )
+        assert resp.status_code == 403
+
+
+class TestCap:
+    """上限：单变更 >5000 截断最旧不拒绝。"""
+
+    @pytest.mark.parametrize("over_by", [1, 3])
+    async def test_cap_trims_oldest(
+        self,
+        client: AsyncClient,
+        db_session: Any,
+        shpsync_headers: tuple[Any, dict[str, str]],
+        over_by: int,
+    ) -> None:
+        """预置 5000 条 → 再推 over_by 条：旧行被截、新事件恒 200 存入。"""
+        import uuid as _uuid
+
+        _ws, headers = shpsync_headers
+        change = f"evt-cap-{over_by}"
+        # 预置 5000 条（bulk 直插，绕开 HTTP：上限行为只验 service/端点截断）
+        db_session.add_all(
+            PlatformChangeEventORM(
+                id=_uuid.uuid4(),
+                workspace_id=_ws,
+                change_name=change,
+                dedup_key=f"seed-{i}",
+                kind="watchdog",
+                rule="seed",
+                severity="info",
+                provisional=True,
+                detail=None,
+                ts=f"2026-09-25T06:{i // 60:02d}:{i % 60:02d}Z",  # i 升序=时间升序
+            )
+            for i in range(5000)
+        )
+        await db_session.commit()
+        resp = await client.post(
+            f"/api/changes/{change}/events",
+            headers=headers,
+            json=_event(ts="2026-09-26T07:00:00Z", event_id="evt-new-1"),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["stored"] is True
+        assert resp.json()["truncated"] >= 1
+        assert await _count_rows(db_session, change) <= 5000
+        # 最旧 seed 行被截（seed-0 不在），最新事件在
+        keys = {
+            r
+            for (r,) in await db_session.execute(
+                select(PlatformChangeEventORM.dedup_key).where(
+                    PlatformChangeEventORM.change_name == change
+                )
+            )
+        }
+        assert "seed-0" not in keys
+        assert "evt-new-1" in keys
+
+
+# ── task-02：第五组「取」（GET 正序/增量/隔离/JWT 读通道）──
+
+
+class TestList:
+    """取：GET 正序增量。"""
+
+    async def _push_three(self, client: AsyncClient, headers: dict[str, str], change: str) -> None:
+        for ts in ("2026-09-26T06:10:00Z", "2026-09-26T06:11:00Z", "2026-09-26T06:12:00Z"):
+            resp = await client.post(
+                f"/api/changes/{change}/events",
+                headers=headers,
+                json=_event(ts=ts, event_id=f"{change}-{ts}"),
+            )
+            assert resp.status_code == 200
+
+    async def test_get_returns_chronological_order(
+        self, client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+    ) -> None:
+        """GET 输出按 ts 正序（推入顺序打乱仍正序）。"""
+        _ws, headers = shpsync_headers
+        change = "evt-list-order"
+        for ts in ("2026-09-26T06:20:02Z", "2026-09-26T06:20:00Z", "2026-09-26T06:20:01Z"):
+            await client.post(
+                f"/api/changes/{change}/events",
+                headers=headers,
+                json=_event(ts=ts, event_id=f"o-{ts}"),
+            )
+        resp = await client.get(f"/api/changes/{change}/events", headers=headers)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["change_name"] == change
+        assert body["count"] == 3
+        ts_list = [it["ts"] for it in body["items"]]
+        assert ts_list == sorted(ts_list)  # 正序
+
+    async def test_get_since_strictly_greater(
+        self, client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+    ) -> None:
+        """since 严格大于：不含等值行。"""
+        _ws, headers = shpsync_headers
+        change = "evt-list-since"
+        await self._push_three(client, headers, change)
+        resp = await client.get(
+            f"/api/changes/{change}/events",
+            headers=headers,
+            params={"since": "2026-09-26T06:11:00Z"},
+        )
+        assert resp.status_code == 200
+        ts_list = [it["ts"] for it in resp.json()["items"]]
+        assert ts_list == ["2026-09-26T06:12:00Z"]
+
+    async def test_get_workspace_isolation(
+        self,
+        client: AsyncClient,
+        db_session: Any,
+        shpsync_headers: tuple[Any, dict[str, str]],
+    ) -> None:
+        """shpsync_ 收件箱隔离：他 workspace 事件不可见。"""
+        import uuid as _uuid
+
+        from app.modules.workspace.model import Workspace
+
+        _ws, headers = shpsync_headers
+        change = "evt-list-iso"
+        await client.post(
+            f"/api/changes/{change}/events",
+            headers=headers,
+            json=_event(ts="2026-09-26T06:30:00Z", event_id="iso-1"),
+        )
+        other = Workspace(
+            id=_uuid.uuid4(),
+            name=f"ws-other-{_uuid.uuid4().hex[:6]}",
+            slug=f"ws-other-{_uuid.uuid4().hex[:6]}",
+            root_path=f"/tmp/ws-other-{_uuid.uuid4().hex[:6]}",
+            status="active",
+        )
+        db_session.add(other)
+        await db_session.commit()
+        db_session.add(
+            PlatformChangeEventORM(
+                workspace_id=other.id,
+                change_name=change,
+                dedup_key="foreign-1",
+                kind="watchdog",
+                rule="foreign",
+                severity="info",
+                provisional=True,
+                ts="2026-09-26T06:31:00Z",
+            )
+        )
+        await db_session.commit()
+        resp = await client.get(f"/api/changes/{change}/events", headers=headers)
+        items = resp.json()["items"]
+        assert [it["rule"] for it in items] == ["stage-stuck"]  # 只见本 workspace
+
+    async def test_get_jwt_can_read(
+        self,
+        client: AsyncClient,
+        shpsync_headers: tuple[Any, dict[str, str]],
+        auth_headers: dict[str, str],
+    ) -> None:
+        """JWT 读通道可读（前端面板走此路径，X-003 实证）。"""
+        _ws, shp = shpsync_headers
+        change = "evt-list-jwt"
+        await client.post(
+            f"/api/changes/{change}/events",
+            headers=shp,
+            json=_event(ts="2026-09-26T06:40:00Z", event_id="jwt-1"),
+        )
+        resp = await client.get(f"/api/changes/{change}/events", headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 1
+
+    async def test_get_latest_n_then_chronological(
+        self,
+        client: AsyncClient,
+        db_session: Any,
+        shpsync_headers: tuple[Any, dict[str, str]],
+    ) -> None:
+        """无 since 且 >200 条 → 回最新 200 条且仍正序（Grill X-001）。"""
+        import uuid as _uuid
+
+        _ws, headers = shpsync_headers
+        change = "evt-list-cap200"
+        db_session.add_all(
+            PlatformChangeEventORM(
+                id=_uuid.uuid4(),
+                workspace_id=_ws,
+                change_name=change,
+                dedup_key=f"l-{i}",
+                kind="watchdog",
+                rule="seed",
+                severity="info",
+                provisional=True,
+                ts=f"2026-09-26T05:{i // 60:02d}:{i % 60:02d}Z",
+            )
+            for i in range(250)
+        )
+        await db_session.commit()
+        resp = await client.get(f"/api/changes/{change}/events", headers=headers)
+        body = resp.json()
+        assert body["count"] == 200
+        ts_list = [it["ts"] for it in body["items"]]
+        assert ts_list == sorted(ts_list)  # 仍正序
+        assert ts_list[0] > "2026-09-26T05:00:49Z"  # 最旧 50 条被排除（最新 200）
