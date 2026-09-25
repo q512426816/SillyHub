@@ -1,0 +1,25 @@
+{
+  "change": "2026-09-25-knowledge-anchor-match-tolerance",
+  "baseline": "9cb48847d9952aa1fd385bae3fbaaaf75056b30f",
+  "head": "0b80cb2eac3108b0e385a222ff925a8abdcc27a1",
+  "files": [
+    "backend/app/modules/knowledge/hits.py",
+    "backend/app/modules/knowledge/parser.py",
+    "backend/app/modules/knowledge/tests/test_hits.py",
+    "backend/app/modules/knowledge/tests/test_parser.py",
+    ".sillyspec/changes/2026-09-25-knowledge-anchor-match-tolerance/design.md",
+    ".sillyspec/changes/2026-09-25-knowledge-anchor-match-tolerance/flow-state.yaml",
+    ".sillyspec/changes/2026-09-25-knowledge-anchor-match-tolerance/proposal.md",
+    ".sillyspec/changes/2026-09-25-knowledge-anchor-match-tolerance/requirements.md",
+    ".sillyspec/changes/2026-09-25-knowledge-anchor-match-tolerance/tasks.md"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 437,
+    "deletions": 1
+  },
+  "savedAt": "2026-09-25T08:57:57.266Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "ff307b3d6b82c00ed67e17da1f78f52e43b3686a1a8812b36f685a006b087518",
+  "patchStatus": "ok"
+}

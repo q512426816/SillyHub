@@ -364,3 +364,92 @@ created_at: 2026-09-22T17:00:51.578Z
   confirmed_at: null
   source_change: 2026-09-25-change-center-thin-flow
   status: active
+## FR-auto-backend-026 命中锚点归一回退匹配
+变更：2026-09-25-knowledge-anchor-match-tolerance
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-knowledge-anchor-match-tolerance/requirements.md#FR-01
+最近确认：bf47e2a9402502c5aeaee1a70e923b5ff438ee50
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-knowledge-anchor-match-tolerance:flow:FR-01
+  tests: backend/app/modules/knowledge/tests/test_parser.py | tests/test_hits.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-knowledge-anchor-match-tolerance
+  status: active
+
+## FR-auto-backend-027 歧义与真实内容漂移保守处理
+变更：2026-09-25-knowledge-anchor-match-tolerance
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-knowledge-anchor-match-tolerance/requirements.md#FR-02
+最近确认：bf47e2a9402502c5aeaee1a70e923b5ff438ee50
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-knowledge-anchor-match-tolerance:flow:FR-02
+  tests: tests/test_hits.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-knowledge-anchor-match-tolerance
+  status: active
+
+## FR-auto-backend-028 四项数值统一用解析后锚点
+变更：2026-09-25-knowledge-anchor-match-tolerance
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-knowledge-anchor-match-tolerance/requirements.md#FR-03
+最近确认：bf47e2a9402502c5aeaee1a70e923b5ff438ee50
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-knowledge-anchor-match-tolerance:flow:FR-03
+  tests: tests/test_hits.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-knowledge-anchor-match-tolerance
+  status: active
+
+## FR-auto-backend-029 存量真实数据复算收益
+变更：2026-09-25-knowledge-anchor-match-tolerance
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-knowledge-anchor-match-tolerance/requirements.md#FR-04
+最近确认：bf47e2a9402502c5aeaee1a70e923b5ff438ee50
+
+## FR-auto-backend-030 单测覆盖三类漂移与两条边界
+变更：2026-09-25-knowledge-anchor-match-tolerance
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-knowledge-anchor-match-tolerance/requirements.md#FR-05
+最近确认：bf47e2a9402502c5aeaee1a70e923b5ff438ee50
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-knowledge-anchor-match-tolerance:flow:FR-05
+  tests: tests/test_hits.py | tests/test_parser.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-knowledge-anchor-match-tolerance
+  status: active
+
+## FR-auto-backend-031 既有行为零回归
+变更：2026-09-25-knowledge-anchor-match-tolerance
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-25-knowledge-anchor-match-tolerance/requirements.md#FR-06
+最近确认：bf47e2a9402502c5aeaee1a70e923b5ff438ee50

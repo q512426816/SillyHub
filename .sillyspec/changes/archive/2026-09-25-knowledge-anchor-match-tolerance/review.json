@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-knowledge-anchor-match-tolerance",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "stats.entry_counts 已按「解析后锚点」的文件段聚合，而列表页 use_count 仍按「原样锚点」文件段聚合——两者自称同口径，在文件段拼写漂移时会分叉（实测未触发）",
+      "evidence": "hits.py:328 解析后由 hits.py:338 file_counts[anchor.split('#',1)[0]] 计数（→ entry_counts）；knowledge/service.py:89-92 的 _usage_file_counts 对原样锚点拆 '#' 计数（列表页 use_count，docstring 第 67-68 行声称与 entry_counts 同口径）。分叉仅在「命中锚点文件段与条目文件段拼写不同、但归一同键」时成立；用出厂 anchor_match_key 复算平台仓 28467 次命中与 CLI 仓，file_segment_moved=0，且文档披露的三类漂移只在 '#' 之后，故当前数据未触发，非本次承诺面的回归。",
+      "location": "backend/app/modules/knowledge/hits.py:338 与 backend/app/modules/knowledge/service.py:65-93"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok｜边界已裁决：可接受（分辨率是锚点串的纯函数 + 同一请求内读到的条目表，与命中行到达顺序无关；迟到行只影响既有 first/last/窗口口径，该逻辑未被本次触碰）",
+    "并发": "ok｜边界已裁决：可接受（stats 全程只读：workspace 查库 + to_thread 解析 + 单条 SELECT；entry_anchors/key_to_anchors/_resolve_anchor 均为请求局部，无模块级缓存（grep 全模块无 lru_cache）或共享可变状态；ingest_batch 与行级幂等语义未改）",
+    "切换": "ok｜边界已裁决：可接受（解析表与 entries 由同一次 parse_knowledge_entries 结果构建，不存在新增「表-树错配」窗口；请求中断即丢弃局部表，无持久化状态）",
+    "作用域": "ok｜边界已裁决：可接受（表只由本工作区 spec_root 下的知识树构建，命中查询带 workspace_id 过滤（hits.py:305），anchor_match_key 无状态纯字符串函数，跨工作区/跨仓/多实例不串台）",
+    "声明边界裁决": "逐条裁决（依据：patch 代码 + 实测复算）：①精确命中恒优先→可接受（hits.py:290 精确分支前置，精确面行为与改前逐字一致）；②归一键映射≥2条目时歧义不认、保持原锚点→可接受（len(candidates)==1 才回退，方向恒为宁少认；复算两仓真实命中锚点歧义数 0）；③未命中（真实内容漂移）保持原锚点进榜、不计覆盖分子、不消死条目→可接受（原值仅进 usage_board/file_counts，coverage 分子按条目锚点集判定、dead_entries 逐条判定，可见性与保守口径同时成立）；④不做模糊/前缀匹配→可接受（模糊匹配必然误并不同小节，收益-风险不对称；该类锚点（平台仓 1 个/363 次）按未归属显式留痕）；⑤覆盖率分母口径本变更不动→可接受（改分母需新增 DTO 字段且会隐去「有知识未进 INDEX」信号，属独立决策，本变更未动分母）；⑥「唯一候选即认」不校验内容身份→可接受（FR-01 明文规定的语义；残余误认方向限于命中锚点键恰与唯一现存条目同键的窄情形，实测 0 例）；⑦density(per_task_avg/trend) 继续按原样锚点去重、不随本次归并→可接受（接口契约的闭枚举「变的只是 coverage.used_entries / dead_entries / usage_board[].anchor / entry_counts[].count 四项」排除该项，属改前既有口径、无回归；代价是同一小节两种漂移写法在同一 change 内仍计 2 条，页面密度数与归并后的覆盖/榜存在口径差）；⑧展示层零变化→可接受（patch 未触及 schema.py/router.py/openapi.json/前端；变的是四个值的取值，已在接口契约明示）。以上均无「未裁决」项。"
+  },
+  "reviewedAt": "2026-09-25T17:03:14+08:00"
+}

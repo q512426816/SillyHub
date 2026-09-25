@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-knowledge-anchor-match-tolerance",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-25-knowledge-anchor-match-tolerance:flow:FR-01",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_parser.py",
+        "tests/test_hits.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-knowledge-anchor-match-tolerance"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-25-knowledge-anchor-match-tolerance:flow:FR-02",
+      "tests": [
+        "tests/test_hits.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-knowledge-anchor-match-tolerance"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-25-knowledge-anchor-match-tolerance:flow:FR-03",
+      "tests": [
+        "tests/test_hits.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-knowledge-anchor-match-tolerance"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-25-knowledge-anchor-match-tolerance:flow:FR-05",
+      "tests": [
+        "tests/test_hits.py",
+        "tests/test_parser.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-knowledge-anchor-match-tolerance"
+    }
+  ]
+}
