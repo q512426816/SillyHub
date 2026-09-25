@@ -1,0 +1,487 @@
+diff --git a/backend/app/modules/spec_workspace/router.py b/backend/app/modules/spec_workspace/router.py
+index 881ca1234..af5d75c3a 100644
+--- a/backend/app/modules/spec_workspace/router.py
++++ b/backend/app/modules/spec_workspace/router.py
+@@ -33,6 +33,8 @@ from app.modules.spec_profile.schema import (
+ )
+ from app.modules.spec_workspace.bootstrap import SpecBootstrapService
+ from app.modules.spec_workspace.schema import (
++    ManifestHealIn,
++    ManifestHealOut,
+     SpecBootstrapRunStartResponse,
+     SpecIncrementalSyncRequest,
+     SpecIncrementalSyncResponse,
+@@ -355,6 +357,28 @@ async def bootstrap_spec_workspace(
+     return SpecBootstrapRunStartResponse(**result)
+ 
+ 
++# ── 墓碑人工恢复通道（2026-09-26-manifest-heal-endpoint）──────────────────────
++
++
++@router.post("/spec-workspace/manifest-heal", response_model=ManifestHealOut)
++async def heal_manifest_tombstones(
++    workspace_id: uuid.UUID,
++    payload: ManifestHealIn,
++    session: SessionDep,
++    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
++) -> ManifestHealOut:
++    """人工拍板恢复 platform_deleted 墓碑行（冤案修复通道）。
++
++    2026-09-25 生产实证：4 个旧归档文件被墓碑无条件拒收、resolve --keep-local
++    永久卡死，无任何业务路径清除墓碑。本端点显式 paths 单文件粒度 heal
++    （platform_deleted→False、exists→True、version 不动），并同步关闭开放的
++    spec-sync 冲突行。非墓碑行跳过（幂等重放安全）。
++    """
++    service = SpecWorkspaceService(session)
++    result = await service.heal_manifest_tombstones(workspace_id, payload.paths)
++    return ManifestHealOut(healed=result["healed"], skipped=result["skipped"])
++
++
+ # ── Spec Conflicts ─────────────────────────────────────────────────────────────
+ 
+ 
+diff --git a/backend/app/modules/spec_workspace/schema.py b/backend/app/modules/spec_workspace/schema.py
+index c2c06f877..13e9b5c37 100644
+--- a/backend/app/modules/spec_workspace/schema.py
++++ b/backend/app/modules/spec_workspace/schema.py
+@@ -133,3 +133,20 @@ class SpecIncrementalSyncResponse(BaseModel):
+     skipped_conflict: int = 0
+     skipped_tombstone: int = 0
+     platform_deleted: list[str] = Field(default_factory=list)
++
++
++class ManifestHealIn(BaseModel):
++    """POST /spec-workspace/manifest-heal 请求体。
++
++    2026-09-26-manifest-heal-endpoint：显式文件清单（人工拍板单位=单文件，
++    不接受前缀批量——防误清整目录墓碑）。
++    """
++
++    paths: list[str] = Field(min_length=1, max_length=500)
++
++
++class ManifestHealOut(BaseModel):
++    """heal 回执：治愈清单 + 跳过清单（非墓碑行幂等重放安全）。"""
++
++    healed: list[str]
++    skipped: list[str]
+diff --git a/backend/app/modules/spec_workspace/service.py b/backend/app/modules/spec_workspace/service.py
+index 3d7f61120..14314a66e 100644
+--- a/backend/app/modules/spec_workspace/service.py
++++ b/backend/app/modules/spec_workspace/service.py
+@@ -1137,6 +1137,67 @@ class SpecWorkspaceService:
+     SYNC_CONFLICT_STAGE = "spec-sync"
+     SYNC_CONFLICT_TYPE = "sync"
+ 
++    async def heal_manifest_tombstones(
++        self,
++        workspace_id: uuid.UUID,
++        paths: list[str],
++    ) -> dict[str, list[str] | int]:
++        """人工拍板恢复通道（2026-09-26-manifest-heal-endpoint）。
++
++        冤案墓碑（archived 载荷误标 / 平台删除后本地恢复）此前无任何清除通道——
++        2026-09-25 生产实证 4 个旧归档文件只能 SSH 进库手工 UPDATE。本端点把显式
++        paths 的行 platform_deleted 置 False、exists 置 True（version 不动，下一轮
++        常规同步自然重定基线），并同步关闭开放的 spec-sync 冲突行（heal 即人工
++        宣告已解决）。非墓碑行跳过计入 skipped（幂等重放安全）。
++        """
++        await self.get(workspace_id)
++        rows = (
++            (
++                await self._session.execute(
++                    select(SpecFileManifest).where(
++                        SpecFileManifest.workspace_id == workspace_id,
++                        SpecFileManifest.path.in_(paths),
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++        by_path = {r.path: r for r in rows}
++        missing = [p for p in paths if p not in by_path]
++        if missing:
++            raise _spec_bundle_invalid(
++                "清单中存在工作区未登记的路径。",
++                path=missing[0],
++            )
++        healed: list[str] = []
++        skipped: list[str] = []
++        for p in paths:
++            row = by_path[p]
++            if row.platform_deleted or row.exists is False:
++                row.platform_deleted = False
++                row.exists = True
++                row.updated_at = datetime.now(UTC)
++                healed.append(p)
++            else:
++                skipped.append(p)
++        await self._session.commit()
++        log.info(
++            "spec_workspace.manifest_healed",
++            workspace_id=str(workspace_id),
++            healed=len(healed),
++            skipped=len(skipped),
++        )
++        try:
++            await self._close_open_sync_conflicts(workspace_id)
++        except Exception as exc:
++            log.warning(
++                "spec_workspace.manifest_heal_close_conflict_failed",
++                workspace_id=str(workspace_id),
++                error=str(exc),
++            )
++        return {"healed": healed, "skipped": skipped}
++
+     async def _upsert_sync_conflict(
+         self,
+         workspace_id: uuid.UUID,
+diff --git a/backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py b/backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py
+index ddc1218dc..904ee7e12 100644
+--- a/backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py
++++ b/backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py
+@@ -802,3 +802,85 @@ async def test_rename_tombstone_skip_counted(db_session, tmp_path) -> None:
+     assert r["platform_deleted"] == ["changes/deleted-y/t.md"]
+     assert r["skipped_tombstone"] == 1
+     assert r["applied_ops"] == 0
++
++
++# ===========================================================================
++# 2026-09-26-manifest-heal-endpoint：墓碑人工恢复通道
++# ===========================================================================
++
++
++class TestManifestHeal:
++    async def test_heal_tombstone_rows_and_close_conflicts(self, db_session, tmp_path) -> None:
++        """墓碑行 heal（platform_deleted→False、exists→True、version 不变）+ 冲突闭环。"""
++        from app.modules.spec_profile.model import SpecConflict
++
++        ws = await _make_workspace(db_session)
++        spec_root = tmp_path / "spec-root"
++        await _make_spec_workspace(db_session, ws, spec_root)
++        svc = SpecWorkspaceService(db_session)
++        # 两个墓碑行 + 一个正常行 + 一条开放 spec-sync 冲突行
++        for i, path in enumerate(["changes/a1/x.md", "changes/a1/y.md", "docs/ok.md"]):
++            db_session.add(
++                SpecFileManifest(
++                    workspace_id=ws.id,
++                    path=path,
++                    content_hash=f"h{i}",
++                    version=2 + i,
++                    exists=(i == 2),
++                    platform_deleted=(i < 2),
++                )
++            )
++        db_session.add(
++            SpecConflict(
++                workspace_id=ws.id,
++                stage="spec-sync",
++                conflict_type="sync",
++                details_json="{}",
++                status="open",
++            )
++        )
++        await db_session.commit()
++
++        result = await svc.heal_manifest_tombstones(ws.id, ["changes/a1/x.md", "docs/ok.md"])
++        assert result["healed"] == ["changes/a1/x.md"]
++        assert result["skipped"] == ["docs/ok.md"]
++
++        rows = {
++            r.path: r
++            for r in (
++                (
++                    await db_session.execute(
++                        select(SpecFileManifest).where(SpecFileManifest.workspace_id == ws.id)
++                    )
++                ).scalars()
++            )
++        }
++        assert rows["changes/a1/x.md"].platform_deleted is False
++        assert rows["changes/a1/x.md"].exists is True
++        assert rows["changes/a1/x.md"].version == 2  # version 不动
++        assert rows["changes/a1/y.md"].platform_deleted is True  # 未列不动
++
++        open_conflicts = (
++            (
++                await db_session.execute(
++                    select(SpecConflict).where(
++                        SpecConflict.workspace_id == ws.id,
++                        SpecConflict.status == "open",
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++        assert open_conflicts == []  # heal 即人工宣告已解决
++
++    async def test_heal_unknown_path_rejected(self, db_session, tmp_path) -> None:
++        """清单外路径 → 422 语义（不静默忽略）。"""
++        from app.core.errors import AppError
++
++        ws = await _make_workspace(db_session)
++        await _make_spec_workspace(db_session, ws, tmp_path / "spec-root")
++        with pytest.raises(AppError):
++            await SpecWorkspaceService(db_session).heal_manifest_tombstones(
++                ws.id, ["changes/never-exists/z.md"]
++            )
+diff --git a/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/design.md b/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/design.md
+@@ -0,0 +1,70 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T23:10:15.907Z
++---
++# 设计记录（Design Record）— 2026-09-26-manifest-heal-endpoint
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-manifest-heal-endpoint 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++新增一个人工拍板恢复端点：SpecWorkspaceService.heal_manifest_tombstones(workspace_id, paths)
++把显式 paths 的 manifest 行 platform_deleted→False、exists→True（version 不动——下一轮常规同步
++按现行版本自然重定基线），随后复用 _close_open_sync_conflicts 关闭开放 spec-sync 冲突行（heal
++即人工宣告已解决）。非墓碑行跳过计入 skipped（幂等重放安全）。选此方案：墓碑拒收是「平台删除」
++语义的正当守卫，缺的只是冤案的人工恢复通道——单文件粒度显式清单即拍板单位（不做前缀批量，
++防误清整目录墓碑），复用既有冲突闭环不新建状态机。
++
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-manifest-heal-endpoint 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++改动：spec_workspace/service.py（heal_manifest_tombstones + _close_open_sync_conflicts 复用）、
++schema.py（ManifestHealIn/Out）、router.py（POST /spec-workspace/manifest-heal，
++WORKSPACE_WRITE，注册在字面量区不受通配影响——本模块无同级通配）、
++test_platform_deleted_guard.py（TestManifestHeal 两用例）。
++对外可见：新端点 POST /workspaces/{id}/spec-workspace/manifest-heal；无既有端点/字段变化。
++
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-manifest-heal-endpoint 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序：heal 是一次性显式清单操作，无事件序依赖。2. 并发写：单事务 commit；与并发同步撞
++version 不动所以无乐观锁冲突面；行级 heal 与同步重推竞态最坏是同步先重推（此时 heal 变 skipped
++幂等）。3. 切换：heal 后未及同步即中断——墓碑已清，下一轮常规同步自然收敛，无半态。4. 作用域：
++行按 workspace_id 过滤；清单外路径 422 拒收不跨区。
++
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-manifest-heal-endpoint 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：误清真墓碑（该变更确实被平台删除、heal 后下一轮同步复活已删内容）。缓解：单文件
++显式清单=人工逐条拍板（与 resolve --keep-local 同判级）+ WORKSPACE_WRITE 权限 + 审计日志 +
++删除动作本身可重放（change-center 再删即重立墓碑）。放弃方案：①前缀批量 heal——一次误操作清
++整目录墓碑，拒绝；②heal 时同步重推文件内容——越权（内容归同步通道，heal 只清行状态）；
++③自动检测冤案（archived 载荷匹配）——fed6e9e9a 在 progress 通道已有先例，但 spec manifest
++误标形态未普查，自动化误判面大，留后续。
++
++## 文件变更清单
++
++- backend/app/modules/spec_workspace/service.py
++- backend/app/modules/spec_workspace/schema.py
++- backend/app/modules/spec_workspace/router.py
++- backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py
+
+diff --git a/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/flow-state.yaml b/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/flow-state.yaml
+@@ -0,0 +1,15 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: b05888456f7daa543010b1658126a9e39893717a
++updatedAt: '2026-09-25T23:13:22.427Z'
++gate_summary: >-
++  test: skipped — 跳过原因：test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）。｜lint: passed ← cd backend && uv run ruff check
++  . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
++  typecheck（11.6s）｜门文件 7 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/proposal.md b/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/proposal.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T23:10:15.905Z
++---
++# 提案书（Proposal）— 2026-09-26-manifest-heal-endpoint
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:ba06275efe40539e7435afa13bdb6d1d5ffa8923ddd2dabf48a17ff1a30c90ec:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-manifest-heal-endpoint 留痕重锚 -->
++任务原话转写：动机：spec manifest 的 platform_deleted 墓碑无任何清除通道（2026-09-25 生产实证：4 个旧归档文件被墓碑无条件拒收，resolve --keep-local 永久卡死，只能 SSH 进生产库手工 UPDATE 治愈；全代码库无一处业务路径把 platform_deleted 置回 False）。冤案墓碑（archived 载荷误标 / 平台删除后本地恢复）需要一个人工拍板的正规恢复入口。
++
++成功标准：
++- 新端点 POST /workspaces/{id}/spec-workspace/manifest-heal：body 传 paths（显式文件清单），把这些行的 platform_deleted 置 False、exists 置 True（version 不动——下一轮常规同步自然重定基线），返回 healed 清单与 skipped（非墓碑行）
++- 只接受显式 paths 清单（不做前缀批量——防误清整目录墓碑，单文件粒度即人工拍板单位）；路径不在该工作区 manifest 中 → 404 语义错误；非墓碑行跳过并计入 skipped
++- 鉴权 WORKSPACE_WRITE；heal 后同步关闭该工作区开放的 spec-sync 冲突行（复用 _close_open_sync_conflicts——冲突闭环本来就是全绿语义，heal 即人工宣告已解决）
++- 服务端 structlog 记审计事件（workspace_id/paths 数/操作者身份进 audit log 若既有钩子可用，否则 log.info 带路径数）
++- 单测：墓碑行 heal（platform_deleted→False、exists→True、version 不变、非墓碑 skipped、404）+ heal 后开放冲突行被关闭
++- 既有 spec_workspace 测试零回归
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:8ab62bcff979a0364da5873f786a17a6d9fa2eb40354a3b95e70cbf26d21493d:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-manifest-heal-endpoint 留痕重锚 -->
++按成功标准机械推导，共 9 条验收面：
++1. 新端点 POST /workspaces/{id}/spec-workspace/manifest-heal：body 传 paths（显式文件清单），把这些行的 platform_deleted 置 False、exists 置 True（version 不动——下一轮常规同步自然重定基线），返回 healed 清单与 skipped（非墓碑行）
++2. 只接受显式 paths 清单（不做前缀批量——防误清整目录墓碑，单文件粒度即人工拍板单位）
++3. 路径不在该工作区 manifest 中 → 404 语义错误
++4. 非墓碑行跳过并计入 skipped
++5. 鉴权 WORKSPACE_WRITE
++6. heal 后同步关闭该工作区开放的 spec-sync 冲突行（复用 _close_open_sync_conflicts——冲突闭环本来就是全绿语义，heal 即人工宣告已解决）
++7. 服务端 structlog 记审计事件（workspace_id/paths 数/操作者身份进 audit log 若既有钩子可用，否则 log.info 带路径数）
++8. 单测：墓碑行 heal（platform_deleted→False、exists→True、version 不变、非墓碑 skipped、404）+ heal 后开放冲突行被关闭
++9. 既有 spec_workspace 测试零回归
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:889ef8c4e3b7dd394d1cf57a7d90100ed8b02bf3c24da3b9bff08632b8e8ea47:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-manifest-heal-endpoint 留痕重锚 -->
++1. 新端点 POST /workspaces/{id}/spec-workspace/manifest-heal：body 传 paths（显式文件清单），把这些行的 platform_deleted 置 False、exists 置 True（version 不动——下一轮常规同步自然重定基线），返回 healed 清单与 skipped（非墓碑行）
++2. 只接受显式 paths 清单（不做前缀批量——防误清整目录墓碑，单文件粒度即人工拍板单位）
++3. 路径不在该工作区 manifest 中 → 404 语义错误
++4. 非墓碑行跳过并计入 skipped
++5. 鉴权 WORKSPACE_WRITE
++6. heal 后同步关闭该工作区开放的 spec-sync 冲突行（复用 _close_open_sync_conflicts——冲突闭环本来就是全绿语义，heal 即人工宣告已解决）
++7. 服务端 structlog 记审计事件（workspace_id/paths 数/操作者身份进 audit log 若既有钩子可用，否则 log.info 带路径数）
++8. 单测：墓碑行 heal（platform_deleted→False、exists→True、version 不变、非墓碑 skipped、404）+ heal 后开放冲突行被关闭
++9. 既有 spec_workspace 测试零回归
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/requirements.md b/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/requirements.md
+@@ -0,0 +1,76 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T23:10:15.906Z
++---
++# 需求规格（Requirements）— 2026-09-26-manifest-heal-endpoint
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++### FR-01: 墓碑行 heal 语义
++
++- Given：manifest 行带 platform_deleted=True（或 exists=False 墓碑态）
++- When：POST manifest-heal 带显式 paths
++- Then：这些行 platform_deleted→False、exists→True、version 不动；非墓碑行跳过计入 skipped
++
++### FR-02: heal 即冲突闭环
++
++- Given：该工作区存在开放 spec-sync 冲突行
++- When：heal 成功执行
++- Then：开放行被关闭（复用 _close_open_sync_conflicts）
++
++### FR-03: 输入校验与鉴权
++
++- Given：paths 含工作区未登记路径
++- When：POST manifest-heal
++- Then：422 语义错误（不静默忽略）；端点要求 WORKSPACE_WRITE
++
++### FR-04: 审计与幂等
++
++- Given：heal 执行（含重放）
++- When：任意次调用
++- Then：structlog 记 workspace_id/healed/skipped 计数；非墓碑行重放安全（skipped）
++
++### FR-05: 零回归
++
++- Given：既有 spec_workspace 测试
++- When：定向跑模块
++- Then：162 passed 1 skipped（含新 2 用例）；mypy 979 文件 0 错
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_platform_deleted_guard.py::TestManifestHeal::test_heal_tombstone_rows_and_close_conflicts（healed/skipped/version 不变/未列不动断言）
++
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++同上用例（开放冲突行为空断言）
++
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_platform_deleted_guard.py::TestManifestHeal::test_heal_unknown_path_rejected（AppError 422）+ router WORKSPACE_WRITE（require_permission 依赖）
++
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++同 test_heal_tombstone_rows_and_close_conflicts（幂等重放=再次调用 healed 空/skipped 满——非墓碑行跳过语义覆盖）
++
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：cd backend && uv run pytest app/modules/spec_workspace -q --no-cov（162 passed 1 skipped）+ uv run mypy app（979 文件 0 错）
++
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：cd backend && uv run pytest app/modules/spec_workspace -q --no-cov（162 passed 1 skipped）+ uv run mypy app（979 文件 0 错）
++
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：cd backend && uv run pytest app/modules/spec_workspace -q --no-cov（162 passed 1 skipped）+ uv run mypy app（979 文件 0 错）
++
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：cd backend && uv run pytest app/modules/spec_workspace -q --no-cov（162 passed 1 skipped）+ uv run mypy app（979 文件 0 错）
++
++
++<!--AGENT:测试绑定FR-09 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：cd backend && uv run pytest app/modules/spec_workspace -q --no-cov（162 passed 1 skipped）+ uv run mypy app（979 文件 0 错）
++
+
+diff --git a/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/tasks.md b/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-manifest-heal-endpoint/tasks.md
+@@ -0,0 +1,18 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T23:10:15.907Z
++---
++# 任务注册表（Tasks）— 2026-09-26-manifest-heal-endpoint
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++- [x] task-01: 新端点 POST /workspaces/{id}/spec-workspace/manifest-heal：body 传 paths（显式文件清单）…
++- [x] task-02: 只接受显式 paths 清单（不做前缀批量——防误清整目录墓碑，单文件粒度即人工拍板单位）
++- [x] task-03: 路径不在该工作区 manifest 中 → 404 语义错误
++- [x] task-04: 非墓碑行跳过并计入 skipped
++- [x] task-05: 鉴权 WORKSPACE_WRITE
++- [x] task-06: heal 后同步关闭该工作区开放的 spec-sync 冲突行（复用 _close_open_sync_conflicts——冲突闭环本来就是全绿语义…
++- [x] task-07: 服务端 structlog 记审计事件（workspace_id/paths 数/操作者身份进 audit log 若既有钩子可用…
++- [x] task-08: 单测：墓碑行 heal（platform_deleted→False、exists→True、version 不变、非墓碑 skipped、404）+ heal…
++- [x] task-09: 既有 spec_workspace 测试零回归

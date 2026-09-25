@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-manifest-heal-endpoint",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "openapi.json / api-types.ts 未随新端点再生成，gen:types:check 守门将漂移",
+      "evidence": "backend/openapi.json 全文 0 命中 manifest-heal，change.patch 亦未含 backend/openapi.json 或 frontend/src/lib/api-types.ts。frontend/scripts/gen-api-types.mjs 头注释明确流程为「先跑后端 dump_openapi.py 刷新 openapi.json，再用 openapi-typescript 生成」，且 package.json 有 gen:types / gen:types:check（重新生成 + git diff --exit-code）守门——新端点入库后运行守门即产生 diff。本变更为纯后端端点、无前端消费承诺，不涉行为正确性，故 P2 而非 P1；修复=跑一次 pnpm gen:types 并将两个生成物补入提交。",
+      "location": "backend/openapi.json:1"
+    },
+    {
+      "severity": "P3",
+      "title": "proposal.md 多处写 404，FR-03 与实现为 422——提案文档内部矛盾（实现以 FR 为准正确）",
+      "evidence": "proposal.md 第 13/16/27/32/41/46 行共 6 处写「路径不在 manifest 中 → 404 语义错误」；requirements.md FR-03 及实现为 422（service.py:422-429 _spec_bundle_invalid 固定 http_status=422，heal 于 service.py:1169 复用）。实跑 test_heal_unknown_path_rejected 通过。仅提案文本未随 FR 收敛，无代码问题。",
+      "location": ".sillyspec/changes/2026-09-26-manifest-heal-endpoint/proposal.md:27"
+    },
+    {
+      "severity": "P3",
+      "title": "测试绑定描述强于实际断言：无字面二次重放、未钉 422 状态码",
+      "evidence": "FR-04 绑定声称「幂等重放=再次调用 healed 空/skipped 满」，但 test_heal_tombstone_rows_and_close_conflicts 仅调用 heal 一次（skipped 语义间接覆盖重放安全，逻辑上成立：heal 后行已非墓碑→下次必入 skipped，但未实证）；test_heal_unknown_path_rejected 仅 pytest.raises(AppError)，未断言 status_code==422，任意 AppError（含 500）均可通过。行为本身实跑通过，属断言强度问题。",
+      "location": "backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py:877"
+    },
+    {
+      "severity": "P3",
+      "title": "冲突闭环包裸 except Exception 降级为 warning，FR-02 在异常路径可静默不闭环且设计未披露",
+      "evidence": "service.py:1191-1198 对 _close_open_sync_conflicts 包 try/except Exception 仅 log.warning 后照常返回 healed/skipped——FR-02「heal 成功执行→开放行被关闭」在 DB 异常路径可静默失效（heal 回执成功但冲突横幅仍在）。缓解：下一轮全绿同步同样调用该闭环自然收敛，且墓碑行状态已独立提交无半态。design 槽1/槽4 未披露此失败容忍取舍。",
+      "location": "backend/app/modules/spec_workspace/service.py:1193"
+    },
+    {
+      "severity": "P3",
+      "title": "确认型：防护六项逐条核实通过",
+      "evidence": "①非墓碑行 skipped：service.py:1177 else 分支，实跑断言 skipped==['docs/ok.md']。②version 不动：heal 仅写 platform_deleted/exists/updated_at，测试断言 version==2。③冲突关闭且只关 spec-sync：_close_open_sync_conflicts（service.py:1254-1275）过滤 stage==self.SYNC_CONFLICT_STAGE（='spec-sync'）且 status=='open'→resolved，测试断言 open_conflicts==[]。④清单外路径 422：missing→_spec_bundle_invalid（http_status=422），不静默忽略。⑤端点鉴权：router.py:368 Depends(require_permission(Permission.WORKSPACE_WRITE))。⑥竞态方向：heal 只做墓碑→非墓碑的单向放松，不写 version/content_hash，无乐观锁冲突面；并发 heal 写同值幂等；与并发删除 op 竞态最坏=墓碑重立（即设计宣称的可重删兜底）。作用域：查询双重过滤 workspace_id+path.in_，前置 get(workspace_id)。",
+      "location": "backend/app/modules/spec_workspace/service.py:1177"
+    },
+    {
+      "severity": "P3",
+      "title": "确认型：披露边界三项设计取舍逐条裁决",
+      "evidence": "①「误清真墓碑风险靠单文件显式清单+权限+审计+可重删兜底」→可接受：影响面=显式列出的单文件，与删除动作对称（change-center 再删即重立墓碑），有 WORKSPACE_WRITE 门与审计计数；proposal 明示 fallback 允许 log.info 只记路径数，但注意日志不含具体 paths 与操作者，事后追溯偏弱（已在 fallback 条款内，可接受）。②「version 不动让常规同步自然重定基线」→可接受：heal 不伪造版本基线，version 归同步通道所有，实现与测试均确认 version 未动，下一轮同步按现行 version 收敛。③「heal 越权不推内容」→可接受：若 heal 直接重推文件内容会绕过冲突检测语义，职责单一（只清行状态）是正确边界。",
+      "location": ".sillyspec/changes/2026-09-26-manifest-heal-endpoint/design.md:57"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "finding",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-26T07:19:08+08:00"
+}

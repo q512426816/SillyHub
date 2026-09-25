@@ -1,0 +1,25 @@
+{
+  "change": "2026-09-26-manifest-heal-endpoint",
+  "baseline": "b05888456f7daa543010b1658126a9e39893717a",
+  "head": "cdabe79b980710e1f73bfc63e4a380ff8e92ea79",
+  "files": [
+    "backend/app/modules/spec_workspace/router.py",
+    "backend/app/modules/spec_workspace/schema.py",
+    "backend/app/modules/spec_workspace/service.py",
+    "backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py",
+    ".sillyspec/changes/2026-09-26-manifest-heal-endpoint/design.md",
+    ".sillyspec/changes/2026-09-26-manifest-heal-endpoint/flow-state.yaml",
+    ".sillyspec/changes/2026-09-26-manifest-heal-endpoint/proposal.md",
+    ".sillyspec/changes/2026-09-26-manifest-heal-endpoint/requirements.md",
+    ".sillyspec/changes/2026-09-26-manifest-heal-endpoint/tasks.md"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 413,
+    "deletions": 0
+  },
+  "savedAt": "2026-09-25T23:13:23.045Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "c662959ff3bf721497954a9b08e2fc47d0d3242d540a95b9c6b2db868b708b9f",
+  "patchStatus": "ok"
+}
