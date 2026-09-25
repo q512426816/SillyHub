@@ -2316,37 +2316,46 @@ class SpecWorkspaceService:
             if pending_adds:
                 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-                add_stmt = pg_insert(SpecFileManifest).values(
-                    [
-                        {
-                            "id": r.id,
-                            "workspace_id": r.workspace_id,
-                            "path": r.path,
-                            "content_hash": r.content_hash,
-                            "version": r.version,
-                            "exists": r.exists,
-                            "platform_deleted": r.platform_deleted,
-                            "updated_at": r.updated_at,
-                        }
-                        for r in pending_adds
-                    ]
-                )
-                add_stmt = add_stmt.on_conflict_do_update(
-                    index_elements=["workspace_id", "path"],
-                    set_={
-                        "content_hash": add_stmt.excluded.content_hash,
-                        "version": case(
-                            (
-                                add_stmt.excluded.version > SpecFileManifest.version,
-                                add_stmt.excluded.version,
+                # 分片执行（2026-09-25-spec-sync-pg-chunk 生产热修）：asyncpg 单语句
+                # 绑定参数上限 32767，本表每行 8 参 → 单语句最多 ~4095 行；归档移动
+                # 整树的单批 ops 数千行直接爆 InterfaceError 500（sillyspec 狗粮区
+                # 实证，spec-sync 全链瘫痪）。取 500/批（4000 参，含余量），行级
+                # upsert 语义逐字不变（幂等，分片边界无原子性要求——conflict 跳过
+                # 语义 per-row 独立）。
+                add_chunk = 500
+                for i in range(0, len(pending_adds), add_chunk):
+                    chunk = pending_adds[i : i + add_chunk]
+                    add_stmt = pg_insert(SpecFileManifest).values(
+                        [
+                            {
+                                "id": r.id,
+                                "workspace_id": r.workspace_id,
+                                "path": r.path,
+                                "content_hash": r.content_hash,
+                                "version": r.version,
+                                "exists": r.exists,
+                                "platform_deleted": r.platform_deleted,
+                                "updated_at": r.updated_at,
+                            }
+                            for r in chunk
+                        ]
+                    )
+                    add_stmt = add_stmt.on_conflict_do_update(
+                        index_elements=["workspace_id", "path"],
+                        set_={
+                            "content_hash": add_stmt.excluded.content_hash,
+                            "version": case(
+                                (
+                                    add_stmt.excluded.version > SpecFileManifest.version,
+                                    add_stmt.excluded.version,
+                                ),
+                                else_=SpecFileManifest.version,
                             ),
-                            else_=SpecFileManifest.version,
-                        ),
-                        "exists": True,
-                        "updated_at": add_stmt.excluded.updated_at,
-                    },
-                )
-                await self._session.execute(add_stmt)
+                            "exists": True,
+                            "updated_at": add_stmt.excluded.updated_at,
+                        },
+                    )
+                    await self._session.execute(add_stmt)
             # ql-20260905-001：增量落盘与 _write_spec_root 同语义 bump spec_version
             # ——①保鲜：lease 下发的 latest_spec_version 变化触发他机重拉新树；
             # ②gzip 整包缓存键联动：不 bump 则 (ws, spec_version) 同键恒吐增量
