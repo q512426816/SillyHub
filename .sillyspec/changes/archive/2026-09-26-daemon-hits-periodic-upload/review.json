@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-daemon-hits-periodic-upload",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "三审 P2（false 回执钉子用例缺失）已确认落盘并实测通过",
+      "evidence": "用例「uploader 回执 false（内部吞错）→ 不记印，同 mtime 下轮也重试（三审钉子）」存在于 sillyhub-daemon/tests/knowledge-hits-periodic.test.ts L88-100：mockResolvedValueOnce(false) 后 r1.attempted 为空（L93，失败不记印）；改 mockResolvedValue(true) 后同 mtime 的 r2.attempted==[UUID_A] 且 toHaveBeenCalledTimes(2)（L96-97，未变仍重试）；成功后 r3.skippedUnchanged==[UUID_A]（L99，记印短路）。亲测：pnpm vitest run tests/knowledge-hits-periodic.test.ts tests/knowledge-hits-upload.test.ts → 2 文件 24 测试全过（periodic 7 含新钉子，upload 17）；pnpm typecheck 零错误。",
+      "location": "sillyhub-daemon/tests/knowledge-hits-periodic.test.ts:88-100"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "n/a",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-09-25T23:43:19Z"
+}

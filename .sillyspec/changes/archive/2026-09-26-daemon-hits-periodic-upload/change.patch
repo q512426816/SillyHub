@@ -1,0 +1,3059 @@
+diff --git a/backend/app/modules/platform_sync/model.py b/backend/app/modules/platform_sync/model.py
+index 767f69b29..59a0be644 100644
+--- a/backend/app/modules/platform_sync/model.py
++++ b/backend/app/modules/platform_sync/model.py
+@@ -376,30 +376,25 @@ class AgentSessionLogORM(BaseModel, table=True):
+     )
+ 
+ 
++# ── Change 2026-09-26-change-events-r18-full task-01（design 数据模型 / D-002 / D-004）──
++
++
+ class PlatformChangeEventORM(BaseModel, table=True):
+-    """watcher 推送的变更事件 append-only 行（design §数据模型 / D-002 / D-003 / D-004）。
+-
+-    Change 2026-09-23-change-events-channel task-01：承接 sillyspec CLI watcher
+-    探测到变更事件后的批量 POST 上行（写入端点在 task-02），只存**观测快照**——
+-    事件是一次性写入的 append-only 观测数据（design 生命周期契约节），无 update
+-    语义、无派生逻辑，表/ORM 零业务逻辑。
+-
+-    ``(workspace_id, change_name, dedup_key)`` 复合唯一约束支撑幂等去重（D-002）：
+-    ``dedup_key`` 由 service 层归一——CLI 事件带 ``id`` 优先用之，否则
+-    ``ts|kind|stage`` 拼接（design §数据模型）；watcher 重跑/重推同一事件由约束
+-    兜底不产生重复行。``workspace_id`` 只由 shpsync_ token 派生（auth.py D-004@v1
+-    通道），必填 NOT NULL，无 shk_live_ 过渡期 NULL 场景；workspace 删则级联删
+-    本表行。
+-
+-    ``ts`` 用 timezone-aware DateTime 而非 ``last_pushed_at`` 先例的 ISO 原文
+-    String（D-003）：watcher 上报的 epoch 毫秒经 schema 层校验（值域 ≥1e12）后
+-    由 service 层归一为结构化 datetime 落库，读路径按 ``ts`` 区间/排序查询且
+-    ``(workspace_id, change_name, ts)`` 是索引键（ix_platform_change_events_
+-    ws_change_ts），无 CLI 字符串字典序比较需求。
+-
+-    ``provisional`` 落库恒 True（D-004 红线数据层落地）：平台对 provisional
+-    事件只展示不消费，``--done`` 才是流程真相；ORM 侧 ``default=True`` 不给
+-    客户端赋值通道，请求体携带的任意值在 service 层被丢弃（task-02）。
++    """watcher 推送的变更旁路观测事件（append-only，design 数据模型节）。
++
++    命名 ``platform_change_events``（platform_sync 前缀先例）——区别于既有
++    ``change_events``（owner 变更事件表，20260816120000）：本表是 sillyspec CLI
++    watcher/哨兵推送的旁路观测信号，恒 ``provisional``，只展示不消费（红线 D-004：
++    零业务判定——无流程外键、无状态机联动）。
++
++    - ``dedup_key`` 幂等去重键（D-002）：事件 id 优先（>300 字符取 sha256 hex），
++      回退 ``ts + '|' + rule``；``(workspace_id, change_name, dedup_key)`` 复合唯一
++      约束支撑 watcher 重推幂等。
++    - ``ts`` 恒 ISO 8601 UTC **字符串**存储与比较（字典序=时间序，同
++      ``platform_change_progress.last_pushed_at`` 先例 R-04——禁时区/精度转换）。
++    - ``severity`` / ``provisional`` 原值透传（观测语义不加工）。
++    - ``workspace_id`` 只由 shpsync_ token 派生（写通道唯一），NOT NULL。
++    - 普通索引 ``(workspace_id, change_name, ts)``：GET 正序增量查询路径。
+     """
+ 
+     __tablename__ = "platform_change_events"
+@@ -410,7 +405,6 @@ class PlatformChangeEventORM(BaseModel, table=True):
+             "dedup_key",
+             name="uq_platform_change_events_dedup",
+         ),
+-        # 读路径主查询：单 workspace 单 change 按时间序/区间拉取（design §数据模型）。
+         Index(
+             "ix_platform_change_events_ws_change_ts",
+             "workspace_id",
+@@ -440,32 +434,27 @@ class PlatformChangeEventORM(BaseModel, table=True):
+     dedup_key: str = Field(
+         sa_column=Column(String(320), nullable=False),
+     )
+-    ts: datetime = Field(
+-        sa_column=Column(DateTime(timezone=True), nullable=False),
+-    )
+     kind: str = Field(
+         sa_column=Column(String(64), nullable=False),
+     )
+-    stage: str | None = Field(
+-        default=None,
+-        sa_column=Column(String(64), nullable=True),
+-    )
+-    detail: str | None = Field(
+-        default=None,
+-        sa_column=Column(String(2000), nullable=True),
+-    )
+-    rule: str | None = Field(
+-        default=None,
+-        sa_column=Column(String(128), nullable=True),
++    rule: str = Field(
++        sa_column=Column(String(128), nullable=False),
+     )
+-    severity: str | None = Field(
+-        default=None,
+-        sa_column=Column(String(32), nullable=True),
++    severity: str = Field(
++        default="info",
++        sa_column=Column(String(16), nullable=False),
+     )
+     provisional: bool = Field(
+         default=True,
+         sa_column=Column(Boolean, nullable=False),
+     )
++    detail: str | None = Field(
++        default=None,
++        sa_column=Column(String, nullable=True),  # text
++    )
++    ts: str = Field(
++        sa_column=Column(String(64), nullable=False),
++    )
+     created_at: datetime = Field(
+         default_factory=lambda: datetime.now(UTC),
+         sa_column=Column(
+diff --git a/backend/app/modules/platform_sync/router.py b/backend/app/modules/platform_sync/router.py
+index 6f40016f0..bf11a024c 100644
+--- a/backend/app/modules/platform_sync/router.py
++++ b/backend/app/modules/platform_sync/router.py
+@@ -6,9 +6,6 @@
+ - POST /changes/-/spec-sync：CLI 直跑增量 spec 文件 ops（2026-08-17-spec-file-incremental-sync task-02，design §5.2/§7）
+ - GET /changes/-/spec-bundle：CLI 直跑拉服务器 spec 整树 tar（2026-08-29-change-delete-closure-and-spec-pull task-08，design §7.1/§7.3）
+ - GET /changes/{name}/progress：完整 JSON（裸六表 + 顶层 last_pushed_at，404）
+-- POST /changes/{name}/events：change 事件批量上行（2026-09-23-change-events-channel
+-  task-03，design §接口定义 / FR-01，仅 shpsync_）
+-- GET /changes/{name}/events：change 事件增量读取（同上 task-03，FR-04 since 正序）
+ - POST /changes/{name}/documents：四件套全文同步（2026-08-14-platform-sync-docs-approval，D-004@v1）
+ - POST /changes/{name}/approval：审批决定提交（同上，D-001@v1 完整闭环）
+ - GET /changes/{name}/approval：审批状态查询（改读库，无记录默认 approved 放行）
+@@ -42,7 +39,6 @@ from __future__ import annotations
+ 
+ import json
+ import uuid
+-from datetime import datetime
+ from typing import TYPE_CHECKING, Annotated, Any
+ 
+ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+@@ -261,9 +257,6 @@ async def push_spec_sync(
+         ok=True,
+         new_versions=result["new_versions"],
+         conflict=result["conflict"],
+-        applied_ops=result.get("applied_ops", 0),
+-        skipped_conflict=result.get("skipped_conflict", 0),
+-        skipped_tombstone=result.get("skipped_tombstone", 0),
+         server_versions=result["server_versions"],
+         # 审计 A6：透出被平台墓碑拒绝的路径列表（CLI 区分墓碑拒绝与版本冲突）
+         platform_deleted=result["platform_deleted"],
+@@ -384,81 +377,6 @@ async def get_approval(
+     )
+ 
+ 
+-# ── Change 2026-09-23-change-events-channel task-03（design §接口定义 / FR-01 / FR-04）──
+-
+-
+-@router.post("/changes/{name}/events", response_model=ChangeEventPushOk)
+-async def push_change_events(
+-    name: str,
+-    body: ChangeEventPushRequest,
+-    session: Annotated[AsyncSession, Depends(get_session)],
+-    auth: _write_auth,
+-) -> ChangeEventPushOk:
+-    """POST change 事件批量上行（design §接口定义 / FR-01~FR-03，watcher 观测通道）。
+-
+-    CLI ``watcher.js`` 周期批推（1..200 条/请求，schema 层 422）。router 只收发
+-    透传零业务判定（D-004 红线：不触发通知/审批/门控）——批内+已存键 dedup 跳过、
+-    ``provisional`` 恒 True、5000 上限修剪全在 service ``append_events``（task-02）。
+-    响应 ``{accepted, deduplicated}``（两者之和 = 请求条数）。
+-
+-    workspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写：无凭据
+-    401 / shk_live_·JWT 403，对齐 quicklog-entries 范式）；body 不含也不接受
+-    workspace 字段（extra=ignore 吞掉，G6 同款）。
+-    """
+-    _user, scope = auth
+-    if scope.workspace_id is None:
+-        # 防御：require_platform_sync_write 的 shpsync_ 通道恒派生 workspace；到达此
+-        # 分支即凭据形态异常，403 关闭写通道（fail-closed，对齐 quicklog 范式）。
+-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
+-    accepted, deduplicated = await PlatformSyncService(session).append_events(
+-        workspace_id=scope.workspace_id,
+-        change_name=name,
+-        events=body.events,
+-    )
+-    return ChangeEventPushOk(accepted=accepted, deduplicated=deduplicated)
+-
+-
+-@router.get("/changes/{name}/events", response_model=ChangeEventListResponse)
+-async def list_change_events(
+-    name: str,
+-    session: Annotated[AsyncSession, Depends(get_session)],
+-    auth: _read_auth,
+-    since: str | None = Query(default=None, description="ISO 8601 增量游标（ts > since 严格大于）"),
+-    limit: int = Query(default=500, ge=1, le=5000, description="返回条数，默认 500 上限 5000"),
+-) -> ChangeEventListResponse:
+-    """GET change 事件增量列表（design §接口定义 / FR-04，``ts ASC, id ASC`` 稳定正序）。
+-
+-    鉴权 scope 复用 ``_read_args`` 翻译（shpsync_ → token 绑定 workspace；JWT/
+-    shk_live_ → CHANGE_READ 并集，本表 workspace_id NOT NULL 无 NULL 桶）。
+-    ``since`` ISO 8601 可选增量游标：``ts > since`` 严格大于（增量不含边界行），
+-    ``Z`` 后缀容忍（替换 +00:00 再解析），naive 值由 service 按 UTC 解释（X-07
+-    方言防御）；解析失败 422 中文。``limit`` 默认 500 上限 5000（单变更上限内
+-    全量窗口）；``total`` 是过滤后总行数、不含 limit 截断。change 无事件 →
+-    200 空列表不 404（事件表独立于 change 行存在，观测面宽松）。
+-    ChangeEventItem ``from_attributes`` 直接 model_validate ORM 行（router 零手工映射）。
+-    """
+-    _user, scope = auth
+-    since_dt: datetime | None = None
+-    if since is not None:
+-        try:
+-            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+-        except ValueError as exc:
+-            raise HTTPException(
+-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+-                detail="since 参数不是合法的 ISO 8601 时间格式",
+-            ) from exc
+-    rows, total = await PlatformSyncService(session).list_events(
+-        change_name=name,
+-        since=since_dt,
+-        limit=limit,
+-        **_read_args(scope),
+-    )
+-    return ChangeEventListResponse(
+-        items=[ChangeEventItem.model_validate(row) for row in rows],
+-        total=total,
+-    )
+-
+-
+ # ── Change 2026-08-14-platform-sync-docs-approval task-04（D-001@v1 / D-004@v1）──
+ 
+ 
+@@ -539,6 +457,76 @@ async def push_quicklog_entry(
+     return QuicklogPushOk(ql_id=body.ql_id)
+ 
+ 
++# ── Change 2026-09-26-change-events-r18-full task-01（design 接口定义 / FR-01 / D-001）──
++
++
++@router.post("/changes/{name}/events", response_model=ChangeEventPushOk)
++async def push_change_event(
++    name: str,
++    body: ChangeEventPushRequest,
++    session: Annotated[AsyncSession, Depends(get_session)],
++    auth: _write_auth,
++) -> ChangeEventPushOk:
++    """POST 单条变更旁路观测事件（sillyspec watcher/哨兵推送，恒 provisional）。
++
++    鉴权同 spec-sync 推送（``require_platform_sync_write``，仅 shpsync_ token，
++    D-001@v1；无凭据 401 / JWT·shk_live_ 403）；workspace_id 恒由 token 派生，
++    body 不含也不接受 workspace 字段（extra=ignore）。
++
++    语义恒 200（watcher best-effort 推送，任意 2xx 即成功）：幂等去重（D-002：
++    事件 id 优先回退 ts+rule，重复推 ``deduplicated=true`` 不增行）+ 上限保护
++    （D-003：单变更 >5000 截断最旧 ``truncated=N``，不拒绝）。
++
++    红线 D-004@v1：零业务判定——append-only 落库即止，provisional 原值透传，
++    不触发任何流程动作（无状态机/审批/通知联动）。
++    """
++    _user, scope = auth
++    if scope.workspace_id is None:
++        # 防御：require_platform_sync_write 的 shpsync_ 通道恒派生 workspace；到达此
++        # 分支即凭据形态异常，403 关闭写通道（fail-closed，对齐 quicklog-entries 范式）。
++        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
++    result = await PlatformSyncService(session).append_event(
++        workspace_id=scope.workspace_id,
++        change_name=name,
++        payload=body.model_dump(exclude_none=False),
++    )
++    return ChangeEventPushOk(
++        change_name=name,
++        stored=result["stored"],
++        deduplicated=result["deduplicated"],
++        truncated=result["truncated"],
++    )
++
++
++@router.get("/changes/{name}/events", response_model=ChangeEventListResponse)
++async def list_change_events(
++    name: str,
++    session: Annotated[AsyncSession, Depends(get_session)],
++    auth: _read_auth,
++    since: str | None = Query(
++        default=None, description="增量游标：只回 ts 严格大于该值的事件（ISO 8601 UTC）"
++    ),
++) -> ChangeEventListResponse:
++    """GET 变更旁路观测事件（ts 正序增量，前端面板消费端点）。
++
++    鉴权读 scope（``require_platform_sync``：shpsync_ token 绑定 workspace 收件箱；
++    JWT/shk_live_ CHANGE_READ 并集——变更详情页面板走 JWT 会话即此通道，X-003）。
++    ``since`` 严格大于（字典序）；无 since 回最新 200 条（反转后仍正序，Grill
++    X-001）。零业务判定（D-004）：原值透传纯读取，不触发任何流程动作。
++    """
++    _user, scope = auth
++    rows = await PlatformSyncService(session).list_events(
++        change_name=name,
++        since=since,
++        **_read_args(scope),
++    )
++    return ChangeEventListResponse(
++        change_name=name,
++        count=len(rows),
++        items=[ChangeEventItem.model_validate(r) for r in rows],
++    )
++
++
+ # ── Change 2026-08-23-platform-agent-log-ingest task-02（design §3.2 / 协议 §1）──
+ 
+ 
+diff --git a/backend/app/modules/platform_sync/schema.py b/backend/app/modules/platform_sync/schema.py
+index 48ed252fe..860021be4 100644
+--- a/backend/app/modules/platform_sync/schema.py
++++ b/backend/app/modules/platform_sync/schema.py
+@@ -7,15 +7,10 @@
+ Change 2026-08-11-change-progress-projection task-07：新增三模型支撑 workspace-scoped
+ token 签发端点（design §7）—— ``PlatformSyncTokenCreateResponse`` / ``ResolveByRootPathRequest``
+ / ``ResolveByRootPathResponse``。
+-
+-Change 2026-09-23-change-events-channel task-02：新增五模型支撑事件收发端点
+-（design §接口定义）—— ``ChangeEventPush`` / ``ChangeEventPushRequest`` /
+-``ChangeEventItem`` / ``ChangeEventPushOk`` / ``ChangeEventListResponse``。
+ """
+ 
+ from __future__ import annotations
+ 
+-import math
+ import uuid
+ from datetime import datetime
+ from typing import Any, Literal
+@@ -257,10 +252,6 @@ class SpecSyncResponse(BaseModel):
+     conflict: bool = False
+     server_versions: dict[str, int] | None = None
+     platform_deleted: list[str] = Field(default_factory=list)
+-    # 2026-09-26-spec-sync-receipt-visibility：回执计数（applied/skipped 双轨同键）。
+-    applied_ops: int = 0
+-    skipped_conflict: int = 0
+-    skipped_tombstone: int = 0
+ 
+ 
+ # ── Change 2026-08-23-platform-agent-log-ingest task-02（design §3.2 API 契约）──
+@@ -578,122 +569,54 @@ class AgentLogMessagesResponse(BaseModel):
+     )
+ 
+ 
+-# ── Change 2026-09-23-change-events-channel task-02（design §接口定义 / FR-01~FR-04）──
+-
++# ── Change 2026-09-26-change-events-r18-full task-01/task-02（design 接口定义 / FR-01 / FR-03）──
+ 
+-class ChangeEventPush(BaseModel):
+-    """POST /changes/{name}/events 单条事件（CLI watcher 实际形态，FR-01 / D-007@v1）。
+ 
+-    必填仅 ``kind`` + ``ts``：``ts`` 是 epoch **毫秒** number，值域 ``ge=1e12``
+-    校验（D-003@v1 故障面防御——秒级时间戳/小数值在 Pydantic 层先行 422，防
+-    毫秒/秒混淆污染 dedup_key 拼串与排序）。其余 optional，字符串 ``max_length``
+-    与 ORM 列宽对齐（stage 64 / rule 128 / severity 32 / id 320）；``detail``
+-    不在 schema 限长——服务端截 2000 落库（宽松接收、落库截断，task-02 service 层）。
+-    ``extra=ignore`` 宽松吞掉 CLI schema 升版的未知字段（D-007@v1，与
+-    AgentLogEntry 同款）。
++class ChangeEventPushRequest(BaseModel):
++    """POST /changes/{name}/events 请求（sillyspec watcher 推送，恒 provisional）。
+ 
+-    ``provisional`` 接收但**忽略落库值**——平台恒存 True（D-004@v1 红线数据层
+-    落地在 service；此处仅为宽松接收不 422）。
+-    ``id`` 是 CLI 侧事件去重 id（dedup_key 优先源，D-002），与 ``ChangeEventItem.id``
+-    （平台行主键 UUID）**同名异义**，见 ChangeEventItem docstring。
++    单事件 JSON（kind/rule/severity/provisional/detail/ts[/id]）。``id`` 可选——
++    去重键首选（缺失回退 ``ts+'|'+rule``，D-002）；``severity``/``provisional``
++    缺省 info/true（schema 兜底，落库原值透传）。**不含也不接受 workspace 字段**
++    ——workspace_id 恒由 shpsync_ token 派生（body 出现被 extra=ignore 吞掉，
++    与 quicklog-entries 同款宽松口径：CLI 字段演进不破推送）。
+     """
+ 
+     model_config = {"extra": "ignore"}
+ 
++    id: str | None = Field(default=None, max_length=512)
+     kind: str = Field(min_length=1, max_length=64)
+-    # 24h 审查 M-2（ql-20260924-001）：补 le 上界——原校验只有 ge 下界，
+-    # Infinity（float 可过 ge）与超 datetime 值域的毫秒（如微秒误传 1e15）会在
+-    # 落库处 fromtimestamp / dedup 回退键 int() 抛 Overflow/OSError → 整批 500。
+-    # 上界取 datetime.max（年 9999）对应的 epoch 毫秒。
+-    ts: float = Field(
+-        ge=1e12,
+-        le=253_402_300_799_999,
+-        description="事件 epoch 毫秒（[1e12, 253402300799999] 值域校验，D-003 + M-2）",
+-    )
+-
+-    @field_validator("ts", mode="before")
+-    @classmethod
+-    def _ts_reject_non_finite(cls, value: object) -> object:
+-        """非有限值（Infinity/NaN，Python json.loads 接受 ``Infinity`` 字面量——
+-        真实可达的绕过面）先行转 None 走「非 number」422。
+-
+-        不直接 raise：Pydantic 错误详情回显原始 ``input``（inf/NaN），而
+-        starlette JSONResponse.render 用 ``allow_nan=False`` 序列化——回显
+-        非有限值的 422 响应自身渲染抛 ValueError 反成 500。转 None 后错误
+-        ``input=None`` 可正常渲染，422 干净返回（M-2 补充防线）。
+-        """
+-        if isinstance(value, float) and not math.isfinite(value):
+-            return None
+-        return value
+-
+-    stage: str | None = Field(default=None, max_length=64)
++    rule: str = Field(min_length=1, max_length=128)
++    severity: str = Field(default="info", max_length=16)
++    provisional: bool = True
+     detail: str | None = None
+-    rule: str | None = Field(default=None, max_length=128)
+-    severity: str | None = Field(default=None, max_length=32)
+-    id: str | None = Field(
+-        default=None, max_length=320, description="CLI 侧事件去重 id（dedup_key 优先源）"
+-    )
+-    provisional: bool | None = Field(
+-        default=None,
+-        description="接收但忽略落库值——平台恒存 True（D-004 红线）",
+-    )
+-
++    ts: str = Field(min_length=1, max_length=64)
+ 
+-class ChangeEventPushRequest(BaseModel):
+-    """POST /changes/{name}/events 请求体（批量 1..200 条，FR-01）。
+ 
+-    **不声明 workspace 字段**——workspace 一律由 shpsync_ token 派生（G6 同款，
+-    body 出现的值被 extra=ignore 吞掉）；同批内同 dedup_key 的重复条目由 service
+-    层批内去重只插首条（防撞唯一约束 500，task-02）。
+-    """
+-
+-    model_config = {"extra": "ignore"}
++class ChangeEventPushOk(BaseModel):
++    """POST /changes/{name}/events 200 响应（恒 200，幂等/截断语义由计数表达）。"""
+ 
+-    events: list[ChangeEventPush] = Field(min_length=1, max_length=200)
++    change_name: str
++    stored: bool = Field(description="本条是否新写入（False=去重命中）")
++    deduplicated: bool = Field(description="True=同去重键已存在，未新增行")
++    truncated: int = Field(default=0, description="因上限截断删除的最旧行数")
+ 
+ 
+ class ChangeEventItem(BaseModel):
+-    """GET /changes/{name}/events 列表项（design §接口定义）。
+-
+-    ``id`` 是 ``platform_change_events`` **行主键 UUID**（平台生成）——与
+-    ``ChangeEventPush.id``（CLI 侧事件去重 id，dedup_key 优先源）同名异义：
+-    请求体的 id 不回显（已折叠进 dedup_key），读侧行 id 只标识落库行。
+-    ``dedup_key`` 同为内部幂等实现细节，不透出。
+-    ``ts`` / ``created_at`` 序列化为 ISO 8601 字符串；``from_attributes`` 支持
+-    ORM 行直接 ``model_validate``（与 AgentLogListItem 同款，router 零手工映射）。
+-    """
+-
+-    model_config = {"from_attributes": True}
++    """GET /changes/{name}/events 单条事件（task-02，snake_case 原样 X-06）。"""
+ 
+     id: uuid.UUID
+-    ts: datetime
+     kind: str
+-    stage: str | None = None
+-    detail: str | None = None
+-    rule: str | None = None
+-    severity: str | None = None
++    rule: str
++    severity: str
+     provisional: bool
+-    created_at: datetime
+-
+-
+-class ChangeEventPushOk(BaseModel):
+-    """POST /changes/{name}/events 200 响应（FR-01 / FR-02）。
+-
+-    ``accepted`` + ``deduplicated`` = 请求条数（批内重复与已存键都计入
+-    deduplicated；dedup 语义是跳过不是覆盖，不更新原行）。
+-    """
+-
+-    accepted: int = Field(description="本次新落库的事件数")
+-    deduplicated: int = Field(description="命中 dedup_key 被跳过的事件数（批内重复 + 已存键）")
++    detail: str | None
++    ts: str
+ 
+ 
+ class ChangeEventListResponse(BaseModel):
+-    """GET /changes/{name}/events 200 响应（FR-04：since 增量正序）。
+-
+-    ``items`` 按 ``ts ASC, id ASC`` 稳定正序、受 ``limit`` 截断；``total`` 是
+-    过滤后（scope + since）总行数，不含 limit 截断。change 无事件 → 200 空列表
+-    （事件表独立于 change 行存在，不 404）。
+-    """
++    """GET /changes/{name}/events 200 响应（ts 正序；since 严格大于增量）。"""
+ 
++    change_name: str
++    count: int
+     items: list[ChangeEventItem] = Field(default_factory=list)
+-    total: int = Field(description="过滤后总行数（不含 limit 截断）")
+diff --git a/backend/app/modules/platform_sync/service.py b/backend/app/modules/platform_sync/service.py
+index 9a392d256..1994e5f03 100644
+--- a/backend/app/modules/platform_sync/service.py
++++ b/backend/app/modules/platform_sync/service.py
+@@ -57,7 +57,7 @@ from app.modules.platform_sync.model import (
+ 
+ if TYPE_CHECKING:
+     # 类型标注专用（``from __future__ import annotations`` 惰性求值），运行时零导入。
+-    from app.modules.platform_sync.schema import AgentLogEntry, AgentLogStateEntry, ChangeEventPush
++    from app.modules.platform_sync.schema import AgentLogEntry, AgentLogStateEntry
+     from app.modules.spec_workspace.schema import FileOp
+ 
+ log = get_logger(__name__)
+@@ -153,25 +153,6 @@ async def _bind_entry_ctx(
+         await bind_session_to_change(session, workspace_id, change_key, target_session_id)
+ 
+ 
+-# ── Change 2026-09-23-change-events-channel task-02（design §接口定义 / D-002 / D-005）──
+-#: 单 (workspace, change) 事件保留上限（D-005@v1）：append_events 插入后超限按
+-#: ``(ts, created_at)`` 删最旧修剪——事件是高频观测数据非审计源，单变更观测面
+-#: 有界（5000 上限即读端点 limit 上限的全量窗口）。
+-CHANGE_EVENTS_MAX_ROWS = 5000
+-#: detail 服务端截断长度（对齐 ORM ``String(2000)`` 列宽；schema 层宽松不限长，
+-#: 落库前截断，task 卡「宽松接收」语义）。
+-_CHANGE_EVENT_DETAIL_MAX = 2000
+-
+-
+-def _change_event_dedup_key(event: ChangeEventPush) -> str:
+-    """单条事件 dedup_key（D-002@v1）：CLI 事件带 ``id`` 优先用之，否则
+-    ``"{ts_ms}|{kind}|{stage or ''}"`` 拼接（``ts`` 转 int 毫秒——防
+-    ``1758566000000.0`` 与 ``1758566000000`` 拼出不同键的浮点表示漂移）。"""
+-    if event.id:
+-        return event.id
+-    return f"{int(event.ts)}|{event.kind}|{event.stage or ''}"
+-
+-
+ @dataclass
+ class PlatformSyncResult:
+     """``upsert_progress`` 返回：冲突标志 + 平台当前完整 progress（冲突时供 409 body）。
+@@ -279,27 +260,12 @@ class PlatformSyncService:
+         # task-04：已删探测先于一切写路径（含 base_ts 冲突分支——已删 key 无论
+         # 乐观锁状态一律以 change_deleted 拒收，信息对 CLI 更可行动）。
+         if await self._change_key_deleted(workspace_id, name):
+-            # archived 载荷复活通道（坑 archive-tombstone 冤案行修复，2026-09-23）：
+-            # 旧 CLI 墓碑 bug 曾把归档链误标 location='deleted'（CLI 侧 e4667729 终态透传
+-            # 前单点写死 deleted）。本地库 status='archived'（真归档）的新 CLI 重推
+-            # 'archived' 载荷时，行冤案可恢复——先翻回 location='archive' 再走正常接受
+-            # 分支（镜像不软删，与 _apply_cli_tombstone archived 路径同口径）；真删除
+-            # 链（本地 status='deleted'）载荷不变仍拒收 409。
+-            if self._body_changes_status(
+-                body, name
+-            ) == "archived" and await self._heal_deleted_row_to_archive(workspace_id, name):
+-                log.info(
+-                    "platform_sync.change_deleted_healed_to_archive",
+-                    workspace_id=str(workspace_id),
+-                    change_key=name,
+-                )
+-            else:
+-                return PlatformSyncResult(
+-                    conflict=False,
+-                    platform_progress=None,
+-                    last_pushed_at=None,
+-                    change_deleted=True,
+-                )
++            return PlatformSyncResult(
++                conflict=False,
++                platform_progress=None,
++                last_pushed_at=None,
++                change_deleted=True,
++            )
+ 
+         row = await self._find_row(workspace_id, name)
+ 
+@@ -560,42 +526,6 @@ class PlatformSyncService:
+             self._assign(existing, body, stamped_at, user)
+             await self._session.commit()
+ 
+-    @staticmethod
+-    def _body_changes_status(body: dict[str, Any], name: str) -> str | None:
+-        """body changes[] 同名条目的 status（墓碑终态判别；缺条目/非 dict 返回 None）。"""
+-        for c in body.get("changes") or []:
+-            if isinstance(c, dict) and c.get("name") == name:
+-                status = c.get("status")
+-                return status if isinstance(status, str) else None
+-        return None
+-
+-    async def _heal_deleted_row_to_archive(self, workspace_id: uuid.UUID | None, name: str) -> bool:
+-        """location='deleted' 冤案行翻回 'archive'（坑 archive-tombstone，2026-09-23）。
+-
+-        仅当 Change 行存在且 location='deleted'（主判据命中形态）时翻回；兜底判据命中
+-        （行缺失、仅 manifest platform_deleted 锚点）不建行——真删除走平台删除入口的
+-        恢复流程，不在同步通道猜。镜像不软删不恢复（deleted 链已收敛的镜像文件由
+-        reparse/镜像驱动收敛自行对齐，位置恢复已满足「已归档」tab 可见的主诉求）。
+-        幂等：已是 archive 返回 False（无需复活，走原拒收/正常分支均可）。
+-        """
+-        if workspace_id is None:
+-            return False
+-        from app.modules.change.model import Change as _Change
+-
+-        row = (
+-            await self._session.execute(
+-                select(_Change).where(
+-                    col(_Change.workspace_id) == workspace_id,
+-                    col(_Change.change_key) == name,
+-                )
+-            )
+-        ).scalar_one_or_none()
+-        if row is None or row.location != "deleted":
+-            return False
+-        row.location = "archive"
+-        await self._session.commit()
+-        return True
+-
+     async def _change_key_deleted(self, workspace_id: uuid.UUID | None, name: str) -> bool:
+         """已删 key 双层判据（task-04 / design §5.4 B-1 加固，upsert_progress 拒收
+         前置与 ``_ensure_change_row`` 建占位守卫共用同一 helper）。
+@@ -798,24 +728,8 @@ class PlatformSyncService:
+             ),
+             None,
+         )
+-        if status not in ("deleted", "archived"):
++        if status != "deleted":
+             return
+-
+-        # archived 墓碑（坑 archive-tombstone-归档墓碑致面板已归档变更软删不可见，
+-        # 2026-09-23 实证；CLI 侧 e4667729 终态透传后的平台配套）：unregisterChange 链
+-        # （run archive / quick 收尾 / 自愈）的墓碑载荷是 'archived'——**不触发镜像
+-        # 软删**（归档的语义是可回溯，spec 镜像须保留；镜像收敛仅属 'deleted' 链）。
+-        # 实现：no-op 早退，不开第二条 location 写路径——
+-        # - P1 ingest 不变量（2026-09-16，test_archived_terminal_persists 回归锚）：
+-        #   location 收敛归文件移动 + reparse，常规上行不动 location——行 'active'
+-        #   收到 'archived' 载荷保持不变；
+-        # - 冤案行恢复（旧 CLI 误发 'deleted' 致 location='deleted'）在
+-        #   upsert_progress 拒收分支 _heal_deleted_row_to_archive 已闭环——本函数
+-        #   只能被已过已删探测（行非 'deleted'）的载荷触达，此处再翻 location
+-        #   既违反上述不变量、对冤案行又是死代码。
+-        if status == "archived":
+-            return
+-
+         row = (
+             await self._session.execute(
+                 select(Change).where(
+@@ -995,24 +909,7 @@ class PlatformSyncService:
+                 if row is None:
+                     return
+                 if stage is not None:
+-                    # 守卫 B（2026-09-25-change-center-thin-flow task-05）：thin 变更
+-                    # 阶段回洗双守卫之二（与守卫 A——change/dispatch.sync_stage_status
+-                    # ——同一谓词，不引入第二套判断）。CLI 红线：thin（轻量变更）进度
+-                    # 落 flow-state.yaml 不落 sillyspec.db，CLI 上行的 current_stage
+-                    # 全程是 'scan' 停留态——直接覆盖会把平台 'thin' 洗回 'scan'。
+-                    # 平台行 current_stage=='thin' 且上行 status 非 archived → 跳过
+-                    # 覆盖（status/时间戳类照常）；archived（flow done 后）放行下方
+-                    # 既有归档翻转链（读侧三源并集承接）；非 thin 变更零作用。
+-                    if row.current_stage == "thin" and mapped_status != "archived":
+-                        log.info(
+-                            "platform_sync.thin_stage_guard_skip",
+-                            workspace_id=str(workspace_id),
+-                            change_key=name,
+-                            cli_stage=stage,
+-                            cli_status=status_value,
+-                        )
+-                    else:
+-                        row.current_stage = stage
++                    row.current_stage = stage
+                 if mapped_status is not None:
+                     row.status = mapped_status
+                     if mapped_status == "archived":
+@@ -1359,6 +1256,170 @@ class PlatformSyncService:
+         await self._session.refresh(row)
+         return row
+ 
++    # ── Change 2026-09-26-change-events-r18-full task-01（design 接口定义 / D-002 / D-003 / D-004）──
++
++    #: 单变更事件量上限（D-003 截断最旧，不拒绝）。
++    EVENT_CAP_PER_CHANGE = 5000
++
++    #: dedup_key 长度钳制阈值（超长 id 取 sha256 hex，Grill X-002）。
++    _EVENT_DEDUP_RAW_MAX = 300
++
++    @classmethod
++    def _event_dedup_key(cls, payload: dict[str, Any]) -> str:
++        """幂等去重键（D-002）：事件 id 优先，缺失回退 ``ts + '|' + rule``。
++
++        id 超 300 字符取 sha256 十六进制（64 字符，防溢出 varchar(320)——观测
++        信号非账本，碰撞概率可忽略）。
++        """
++        import hashlib
++
++        raw_id = payload.get("id")
++        if raw_id:
++            raw = str(raw_id)
++            if len(raw) > cls._EVENT_DEDUP_RAW_MAX:
++                return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
++            return raw
++        return f"{payload.get('ts', '')}|{payload.get('rule', '')}"
++
++    async def append_event(
++        self,
++        *,
++        workspace_id: uuid.UUID,
++        change_name: str,
++        payload: dict[str, Any],
++    ) -> dict[str, Any]:
++        """POST /changes/{name}/events：append-only 写入（幂等去重 + 上限截断）。
++
++        零业务判定红线（D-004）：本方法只做存储三件事——去重（D-002）、截断
++        （D-003）、落库；不做任何状态机/审批/通知联动，provisional 原值透传。
++
++        返回 ``{stored, deduplicated, truncated}``：
++
++        - 同 ``(workspace_id, change_name, dedup_key)`` 已存在 → 不新增行，
++          ``deduplicated=True``（恒 200，watcher 重推幂等）；
++        - 写入前单变更行数 > 5000 → DELETE 最旧（ts 升序）保新行，
++          ``truncated=删除数``（保新弃旧观测语义，D-003——不拒绝新事件）。
++        """
++        dedup_key = self._event_dedup_key(payload)
++        scope = (
++            col(PlatformChangeEventORM.workspace_id) == workspace_id,
++            col(PlatformChangeEventORM.change_name) == change_name,
++        )
++        existing = (
++            await self._session.execute(
++                select(PlatformChangeEventORM.id).where(
++                    *scope, col(PlatformChangeEventORM.dedup_key) == dedup_key
++                )
++            )
++        ).scalar_one_or_none()
++        if existing is not None:
++            return {"stored": False, "deduplicated": True, "truncated": 0}
++
++        # 上限保护：> 5000 截断最旧（DELETE ts 升序超颧行，一次性删到 cap-1 再插入）
++        truncated = 0
++        current = (
++            await self._session.execute(
++                select(func.count()).select_from(PlatformChangeEventORM).where(*scope)
++            )
++        ).scalar_one()
++        if current >= self.EVENT_CAP_PER_CHANGE:
++            overflow = current - self.EVENT_CAP_PER_CHANGE + 1
++            oldest_ids = (
++                (
++                    await self._session.execute(
++                        select(PlatformChangeEventORM.id)
++                        .where(*scope)
++                        .order_by(col(PlatformChangeEventORM.ts).asc())
++                        .limit(overflow)
++                    )
++                )
++                .scalars()
++                .all()
++            )
++            await self._session.execute(
++                delete(PlatformChangeEventORM).where(col(PlatformChangeEventORM.id).in_(oldest_ids))
++            )
++            truncated = len(oldest_ids)
++
++        self._session.add(
++            PlatformChangeEventORM(
++                workspace_id=workspace_id,
++                change_name=change_name,
++                dedup_key=dedup_key,
++                kind=str(payload.get("kind", "unknown")),
++                rule=str(payload.get("rule", "unknown")),
++                severity=str(payload.get("severity", "info")),
++                provisional=bool(payload.get("provisional", True)),
++                detail=payload.get("detail"),
++                ts=str(payload.get("ts", "")),
++            )
++        )
++        await self._session.commit()
++        return {"stored": True, "deduplicated": False, "truncated": truncated}
++
++    # ── Change 2026-09-26-change-events-r18-full task-02（design 接口定义 / FR-03）──
++
++    #: GET 单次返回上限（无 since 时选集=最新 N 条后反转正序，Grill X-001）。
++    EVENT_LIST_LIMIT = 200
++
++    async def list_events(
++        self,
++        *,
++        change_name: str,
++        since: str | None = None,
++        workspace_id: uuid.UUID | None = None,
++        allowed_workspace_ids: list[uuid.UUID] | None = None,
++        limit: int | None = None,
++    ) -> list[dict[str, Any]]:
++        """GET /changes/{name}/events：正序增量读取（读 scope 双参口径）。
++
++        - ``since`` 严格大于（ISO 8601 字符串字典序，D-001/同 base_ts 先例 R-04）；
++        - 输出恒 ts 正序；无 since 时选集=最新 ``limit`` 条（DESC LIMIT 后应用层
++          反转，保新弃旧——观测语义与 D-003 同向，Grill X-001）；
++        - scope 过滤同读三方法先例：``workspace_id``（shpsync_ 收件箱）或
++          ``allowed_workspace_ids``（JWT/shk_live_ CHANGE_READ 并集，NULL 桶无——
++          本表 workspace_id NOT NULL）；
++        - 零业务判定（D-004）：原值透传，不聚合不消费。
++        """
++        cap = limit if (limit is not None and limit > 0) else self.EVENT_LIST_LIMIT
++        scope_cols: list[ColumnElement[bool]] = [
++            col(PlatformChangeEventORM.change_name) == change_name
++        ]
++        if workspace_id is not None:
++            scope_cols.append(col(PlatformChangeEventORM.workspace_id) == workspace_id)
++        elif allowed_workspace_ids is not None:
++            scope_cols.append(col(PlatformChangeEventORM.workspace_id).in_(allowed_workspace_ids))
++        if since:
++            scope_cols.append(col(PlatformChangeEventORM.ts) > since)
++
++        stmt = (
++            select(
++                PlatformChangeEventORM.id,
++                PlatformChangeEventORM.kind,
++                PlatformChangeEventORM.rule,
++                PlatformChangeEventORM.severity,
++                PlatformChangeEventORM.provisional,
++                PlatformChangeEventORM.detail,
++                PlatformChangeEventORM.ts,
++            )
++            .where(*scope_cols)
++            .order_by(col(PlatformChangeEventORM.ts).desc())
++            .limit(cap)
++        )
++        rows = (await self._session.execute(stmt)).all()
++        return [
++            {
++                "id": r.id,
++                "kind": r.kind,
++                "rule": r.rule,
++                "severity": r.severity,
++                "provisional": r.provisional,
++                "detail": r.detail,
++                "ts": r.ts,
++            }
++            for r in reversed(rows)  # DESC 取最新 → 反转为正序输出
++        ]
++
+     # ── Change 2026-08-17-spec-file-incremental-sync task-01（design §5.2/§5.3）──
+ 
+     async def get_spec_manifest(
+@@ -1929,217 +1990,3 @@ class PlatformSyncService:
+         )
+         rows = (await self._session.execute(stmt)).scalars().all()
+         return list(rows)
+-
+-    # ── Change 2026-09-23-change-events-channel task-02（design §接口定义 / FR-01~FR-04）──
+-
+-    async def append_events(
+-        self,
+-        workspace_id: uuid.UUID,
+-        change_name: str,
+-        events: list[ChangeEventPush],
+-    ) -> tuple[int, int]:
+-        """POST /changes/{name}/events：批量幂等追加 + 单事务上限修剪（FR-01~FR-03）。
+-
+-        dedup 语义是**跳过不是覆盖**（区别于 ``upsert_quicklog_entry`` 先例）：
+-        事件是 append-only 观测快照、无 update 语义，watcher 重推同 dedup_key
+-        直接丢弃不更新原行（D-002）。
+-
+-        1. 批内去重（plan 审查修正项）：同请求两条同 dedup_key 只插首条、其余
+-           计 ``deduplicated``——防批内撞 ``(workspace_id, change_name,
+-           dedup_key)`` 唯一约束 500（dict 保序留首条）。
+-        2. 已存键 IN 批量预取（ql-20260826-012 同款范式）：批内键命中已存行的
+-           计 ``deduplicated`` 跳过。
+-        3. 缺失者 INSERT：``ts`` 归一 tz-aware datetime（epoch 毫秒 ÷1000，
+-           D-003）；``provisional`` 恒 True（**请求值丢弃**，D-004 红线）；
+-           ``detail`` 截 2000（宽松接收、落库截断）。
+-        4. 插入后 count 该 ``(workspace_id, change_name)`` 行数，``>5000`` 按
+-           ``(ts, created_at)`` 删最旧修剪到 5000（D-005，与本批插入同一次
+-           commit 即单事务；``id`` 末位排序消 created_at 并列歧义）。
+-        5. IntegrityError 重试收敛（24h 审查 M-1 / ql-20260924-001）：③④ 与
+-           commit 整体包裹——并发对手在 ② 预取后提交同 dedup_key 行致唯一
+-           约束冲突时，rollback 重查已存键、剔除撞键条目（计 deduplicated）
+-           重插一轮，不再整批 500。
+-
+-        service 零业务判定红线（D-004）：不触发通知 / 不写 progress / 不动审批
+-        ——本方法只落事件行。返回 ``(accepted, deduplicated)``。
+-        """
+-        # ① 批内 dedup_key 去重（dict 插入序保序，同键留首条）。
+-        pending: dict[str, ChangeEventPush] = {}
+-        deduplicated = 0
+-        for event in events:
+-            key = _change_event_dedup_key(event)
+-            if key in pending:
+-                deduplicated += 1
+-                continue
+-            pending[key] = event
+-
+-        # ② 已存键预取：批内键 ∩ 已存键 → 跳过（计入 deduplicated，不覆盖）。
+-        if pending:
+-            existing_keys = set(
+-                (
+-                    await self._session.execute(
+-                        select(col(PlatformChangeEventORM.dedup_key)).where(
+-                            col(PlatformChangeEventORM.workspace_id) == workspace_id,
+-                            col(PlatformChangeEventORM.change_name) == change_name,
+-                            col(PlatformChangeEventORM.dedup_key).in_(pending.keys()),
+-                        )
+-                    )
+-                )
+-                .scalars()
+-                .all()
+-            )
+-            for key in existing_keys:
+-                pending.pop(key, None)
+-                deduplicated += 1
+-
+-        # ③ 缺失者 INSERT（provisional 恒 True / detail 截断 / ts 归一）。
+-        # 24h 审查 M-1（ql-20260924-001）：INSERT + 修剪 + commit 包
+-        # IntegrityError 重试收敛——并发对手在本批预取（②）之后提交同
+-        # dedup_key 行时，唯一约束 uq_platform_change_events_dedup 在
+-        # flush/commit 抛 IntegrityError；此前未捕获直冒泡 → 全局 500 兜底
+-        # 整批（≤200 条）被拒。对齐本文件 quicklog/progress 写路径既有自愈
+-        # 范式（upsert :535 / quicklog :1068）：rollback → 重查已存键 →
+-        # 剔除撞键条目（计 deduplicated）→ 重插剩余。一轮重试足够（重查
+-        # 确认缺失后才插，再撞说明另有并发写入，重抛让上层感知）。
+-        now = datetime.now(UTC)
+-        accepted = 0
+-        for _attempt in range(2):
+-            try:
+-                for key, event in pending.items():
+-                    self._session.add(
+-                        PlatformChangeEventORM(
+-                            id=uuid.uuid4(),
+-                            workspace_id=workspace_id,
+-                            change_name=change_name,
+-                            dedup_key=key,
+-                            ts=datetime.fromtimestamp(event.ts / 1000, tz=UTC),
+-                            kind=event.kind,
+-                            stage=event.stage,
+-                            detail=(
+-                                event.detail[:_CHANGE_EVENT_DETAIL_MAX]
+-                                if event.detail is not None
+-                                else None
+-                            ),
+-                            rule=event.rule,
+-                            severity=event.severity,
+-                            provisional=True,  # D-004 红线：请求值丢弃，恒 True。
+-                            created_at=now,
+-                        )
+-                    )
+-
+-                # ④ 单事务上限修剪（D-005）：count 含本批待插行（autoflush 先于查询）。
+-                scope_filters = (
+-                    col(PlatformChangeEventORM.workspace_id) == workspace_id,
+-                    col(PlatformChangeEventORM.change_name) == change_name,
+-                )
+-                count = (
+-                    await self._session.execute(
+-                        select(func.count())
+-                        .select_from(PlatformChangeEventORM)
+-                        .where(*scope_filters)
+-                    )
+-                ).scalar_one()
+-                if count > CHANGE_EVENTS_MAX_ROWS:
+-                    excess = count - CHANGE_EVENTS_MAX_ROWS
+-                    oldest_ids = list(
+-                        (
+-                            await self._session.execute(
+-                                select(col(PlatformChangeEventORM.id))
+-                                .where(*scope_filters)
+-                                .order_by(
+-                                    col(PlatformChangeEventORM.ts).asc(),
+-                                    col(PlatformChangeEventORM.created_at).asc(),
+-                                    col(PlatformChangeEventORM.id).asc(),
+-                                )
+-                                .limit(excess)
+-                            )
+-                        )
+-                        .scalars()
+-                        .all()
+-                    )
+-                    if oldest_ids:
+-                        await self._session.execute(
+-                            delete(PlatformChangeEventORM).where(
+-                                col(PlatformChangeEventORM.id).in_(oldest_ids)
+-                            )
+-                        )
+-
+-                await self._session.commit()
+-                accepted = len(pending)
+-                break
+-            except IntegrityError:
+-                await self._session.rollback()
+-                if _attempt:
+-                    raise
+-                # 重查已存键：首次预取与对手提交之间的竞态窗口在此收敛。
+-                existing_keys = set(
+-                    (
+-                        await self._session.execute(
+-                            select(col(PlatformChangeEventORM.dedup_key)).where(
+-                                col(PlatformChangeEventORM.workspace_id) == workspace_id,
+-                                col(PlatformChangeEventORM.change_name) == change_name,
+-                                col(PlatformChangeEventORM.dedup_key).in_(pending.keys()),
+-                            )
+-                        )
+-                    )
+-                    .scalars()
+-                    .all()
+-                )
+-                for key in existing_keys & set(pending.keys()):
+-                    pending.pop(key, None)
+-                    deduplicated += 1
+-                if not pending:
+-                    # 全部撞键：本批零 INSERT（修剪无需重跑）。
+-                    break
+-        return accepted, deduplicated
+-
+-    async def list_events(
+-        self,
+-        change_name: str,
+-        workspace_id: uuid.UUID | None = None,
+-        allowed_workspace_ids: list[uuid.UUID] | None = None,
+-        since: datetime | None = None,
+-        limit: int = 500,
+-    ) -> tuple[list[PlatformChangeEventORM], int]:
+-        """GET /changes/{name}/events：scope 过滤 + since 增量正序读取（FR-04）。
+-
+-        scope 双参口径照 ``list_agent_logs``：
+-
+-        - ``allowed_workspace_ids`` 非 None（JWT/shk_live_ 读路径）→ workspace_id
+-          ``IN (并集)``——本表 workspace_id NOT NULL，无 NULL 桶子句（X-04 同款）；
+-          空集合即空结果。
+-        - ``workspace_id`` 非 None（shpsync_ 路径）→ 精确匹配（token 绑定 ws）。
+-        - 两者均 None（防御，router ``_read_args`` 恒给其一）→ 空结果（fail-closed）。
+-
+-        ``since`` 非 None 时 ``ts > since`` **严格大于**（增量不含边界行；naive
+-        值按 UTC 解释——SQLite 测试库丢 tzinfo 的方言分叉防御，X-07 同源）。
+-        排序 ``ts ASC, id ASC`` 稳定正序；``total`` 是过滤后（scope + since）
+-        总行数、不含 limit 截断，``limit`` 由 router 层 Query 校验（默认 500 上限
+-        5000）。change 无事件 → 空列表（不 404，事件表独立于 change 行存在）。
+-        """
+-        ws_col = col(PlatformChangeEventORM.workspace_id)
+-        filters: list[ColumnElement[bool]] = [
+-            col(PlatformChangeEventORM.change_name) == change_name
+-        ]
+-        if allowed_workspace_ids is not None:
+-            filters.append(ws_col.in_(allowed_workspace_ids))
+-        elif workspace_id is not None:
+-            filters.append(ws_col == workspace_id)
+-        else:
+-            return [], 0
+-        if since is not None:
+-            since_norm = since if since.tzinfo else since.replace(tzinfo=UTC)
+-            filters.append(col(PlatformChangeEventORM.ts) > since_norm)
+-        total = (
+-            await self._session.execute(
+-                select(func.count()).select_from(PlatformChangeEventORM).where(*filters)
+-            )
+-        ).scalar_one()
+-        stmt = (
+-            select(PlatformChangeEventORM)
+-            .where(*filters)
+-            .order_by(col(PlatformChangeEventORM.ts).asc(), col(PlatformChangeEventORM.id).asc())
+-            .limit(limit)
+-        )
+-        rows = (await self._session.execute(stmt)).scalars().all()
+-        return list(rows), total
+diff --git a/backend/app/modules/platform_sync/tests/conftest.py b/backend/app/modules/platform_sync/tests/conftest.py
+index 2a3fff8af..373cad01c 100644
+--- a/backend/app/modules/platform_sync/tests/conftest.py
++++ b/backend/app/modules/platform_sync/tests/conftest.py
+@@ -3,8 +3,8 @@
+ 自包含建表（不改根 conftest）：``platform_sync`` model 未在根 conftest ``db_engine``
+ 的 import 列表（根 conftest 集中登记各 feature model），本 conftest 用 autouse
+ fixture 单独建 ``platform_change_progress`` + ``platform_sync_tokens`` +
+-``platform_agent_logs`` + ``platform_change_events`` 四张表，让 platform_sync 测试
+-自包含（遵守 task-07 allowed_paths，不扩散到根 conftest）。
++``platform_agent_logs`` 三张表，让 platform_sync 测试自包含（遵守 task-07
++allowed_paths，不扩散到根 conftest）。
+ """
+ 
+ from __future__ import annotations
+@@ -16,14 +16,13 @@ import pytest
+ 
+ @pytest.fixture(autouse=True)
+ async def ensure_platform_sync_table(db_engine: Any) -> None:
+-    """建 platform_sync 四张表（progress / tokens / agent_logs / change_events）。
++    """建 ``platform_change_progress`` + ``platform_sync_tokens`` + ``platform_agent_logs`` 表。
+ 
+     platform_sync model 未在根 conftest db_engine import 列表 → metadata 不含该表
+-    → 根 ``create_all`` 不会建它。此处 import 注册到 metadata + 单独 create 四张表
++    → 根 ``create_all`` 不会建它。此处 import 注册到 metadata + 单独 create 三张表
+     （task-01 加 platform_sync_tokens，task-02 给 progress 表加 workspace_id 复合 PK；
+     2026-08-23-platform-agent-log-ingest task-01 加 platform_agent_logs，为 task-02
+-    接口层测试提供落库基座；2026-09-23-change-events-channel task-01 加
+-    platform_change_events，为 task-02 事件写入端点测试提供落库基座）。
++    接口层测试提供落库基座）。
+     """
+     from app.models.base import BaseModel
+     from app.modules.platform_sync import model as _ps_model
+@@ -36,6 +35,7 @@ async def ensure_platform_sync_table(db_engine: Any) -> None:
+                 _ps_model.PlatformChangeProgressORM.__table__,
+                 _ps_token_model.PlatformSyncTokenORM.__table__,
+                 _ps_model.AgentSessionLogORM.__table__,
++                # 2026-09-26-change-events-r18-full task-01：变更旁路观测事件表
+                 _ps_model.PlatformChangeEventORM.__table__,
+             ],
+         )
+diff --git a/backend/app/modules/platform_sync/tests/test_change_events.py b/backend/app/modules/platform_sync/tests/test_change_events.py
+index 2ac044470..b5659b736 100644
+--- a/backend/app/modules/platform_sync/tests/test_change_events.py
++++ b/backend/app/modules/platform_sync/tests/test_change_events.py
+@@ -1,523 +1,418 @@
+-"""POST/GET /api/changes/{name}/events 端点测试（task-04 / design 五组：收/取/去重/鉴权/上限）。
+-
+-覆盖：收（批量 2 条 shpsync_ 200 + 落库字段核对 + 伪造 provisional=False 仍存
+-True / 批量>200 422 / ts 秒级值域 422）、取（乱序推入 GET ts ASC 正序 / since
+-严格大于不含边界 / limit 生效且 total 不含截断 / 无事件 200 空列表）、去重
+-（同批重放 / 带 id 事件按 id 去重 / 批内同 dedup_key 只插一条）、鉴权矩阵
+-（无凭据 401 / shk_live_ 403 / JWT 403，shpsync_ 200 见收组；跨 workspace
+-scope 隔离）、5000 上限修剪（最旧被删，FR-03 / D-005@v1）。
+-
+-范式逐字对齐 test_quicklog_push.py（fixture 复用 conftest shpsync_headers /
+-apikey_headers / auth_headers + db_session 落库断言）；时间毫秒用递增基准
+-（BASE_TS_MS + i*1000），不依赖真实时钟。
++"""platform_sync 变更事件通道测试（change 2026-09-26-change-events-r18-full）。
++
++task-01 四组：收 / 去重 / 鉴权 / 上限（task-02 增第五组「取」）。
++红线 D-004：provisional 原值透传、零业务判定（存储无流程外键）。
+ """
+ 
+ from __future__ import annotations
+ 
+-import uuid
+-from datetime import UTC, datetime
+ from typing import Any
+ 
+ import pytest
+ from httpx import AsyncClient
+ from sqlalchemy import func, select
+-from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.modules.platform_sync.model import PlatformChangeEventORM
+ 
+-CHANGE_NAME = "2026-09-23-change-events-channel"
+-
+-#: 递增基准毫秒（≈2025-09-22，值域 ≥1e12 满足 schema 校验）。
+-BASE_TS_MS = 1758566000000
+-
+ 
+-def _event(i: int, **overrides: Any) -> dict[str, Any]:
+-    """第 i 条事件载荷（ts 递增 +1s，全部字段显式便于落库核对）。"""
+-    event: dict[str, Any] = {
+-        "kind": "file_changed",
+-        "ts": BASE_TS_MS + i * 1000,
+-        "stage": "execute",
+-        "detail": f"事件 {i}",
+-        "rule": "watcher:fs",
+-        "severity": "info",
++def _event(
++    *,
++    ts: str,
++    rule: str = "stage-stuck",
++    kind: str = "watchdog",
++    severity: str = "info",
++    detail: str | None = "详情",
++    event_id: str | None = None,
++) -> dict[str, Any]:
++    """构造 watcher 推送事件 body（id 可缺省——回退 ts+rule 去重键）。"""
++    body: dict[str, Any] = {
++        "kind": kind,
++        "rule": rule,
++        "severity": severity,
++        "provisional": True,
++        "detail": detail,
++        "ts": ts,
+     }
+-    event.update(overrides)
+-    return event
+-
+-
+-def _ts_dt(i: int) -> datetime:
+-    """第 i 条事件的期望落库 datetime（epoch 毫秒 ÷1000 归一，D-003@v1）。"""
+-    return datetime.fromtimestamp((BASE_TS_MS + i * 1000) / 1000, tz=UTC)
+-
+-
+-def _as_utc(dt: datetime) -> datetime:
+-    """SQLite 读回 naive datetime 统一按 UTC 解释（X-07 方言防御同源）。"""
+-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+-
++    if event_id is not None:
++        body["id"] = event_id
++    return body
+ 
+-def _iso_to_dt(raw: str) -> datetime:
+-    """GET 响应 ts（ISO 字符串，SQLite 行可能 naive 无后缀）→ UTC aware datetime。"""
+-    return _as_utc(datetime.fromisoformat(raw.replace("Z", "+00:00")))
+-
+-
+-async def _push(
+-    client: AsyncClient, headers: dict[str, str], events: list[dict[str, Any]]
+-) -> dict[str, Any]:
+-    """POST 批量事件并断言 200，返回 ``{accepted, deduplicated}``。"""
+-    resp = await client.post(
+-        f"/api/changes/{CHANGE_NAME}/events", json={"events": events}, headers=headers
+-    )
+-    assert resp.status_code == 200
+-    return resp.json()
+-
+-
+-async def _mint_shpsync_token(
+-    db_session: AsyncSession,
+-) -> tuple[uuid.UUID, dict[str, str]]:
+-    """铸第二个 workspace 的 shpsync_ token（conftest fixture 单 token，跨 workspace
+-    用例在文件内自铸同款，不扩散改 conftest）。"""
+-    from app.core.config import get_settings
+-    from app.core.security import password_hasher
+-    from app.modules.auth.model import User
+-    from app.modules.platform_sync.token_service import PlatformSyncTokenService
+-    from app.modules.workspace.model import Workspace
+-
+-    ws = Workspace(
+-        id=uuid.uuid4(),
+-        name=f"ws-evt-{uuid.uuid4().hex[:8]}",
+-        slug=f"ws-evt-{uuid.uuid4().hex[:8]}",
+-        root_path=f"/tmp/ws-evt-{uuid.uuid4().hex[:8]}",
+-        status="active",
+-    )
+-    db_session.add(ws)
+-    user = User(
+-        id=uuid.uuid4(),
+-        email=f"evt-{uuid.uuid4().hex[:6]}@example.com",
+-        password_hash=password_hasher.hash("x"),
+-        status="active",
+-    )
+-    db_session.add(user)
+-    await db_session.commit()
+-    await db_session.refresh(ws)
+-
+-    _row, plaintext = await PlatformSyncTokenService(db_session, settings=get_settings()).create(
+-        workspace_id=ws.id,
+-        name="events-cross-ws",
+-        created_by=user.id,
+-    )
+-    return ws.id, {"Authorization": f"Bearer {plaintext}"}
+-
+-
+-# ── 收（FR-01：批量上行 + 落库字段核对 + 值域/批量防线）──
+-
+-
+-@pytest.mark.asyncio
+-async def test_push_batch_ok_and_persisted(
+-    client: AsyncClient,
+-    shpsync_headers: tuple[Any, dict[str, str]],
+-    db_session: AsyncSession,
+-) -> None:
+-    """批量 2 条 shpsync_ 200（accepted=2 deduplicated=0）+ 落库字段核对。
+-
+-    ts 归一毫秒→datetime、dedup_key 无 id 时 ``{ts_ms}|{kind}|{stage}`` 拼接、
+-    provisional 恒 True——含伪造 ``provisional=False`` 入参仍存 True 的红线反例
+-    （D-004@v1：请求值丢弃，平台只展示不消费）。
+-    """
+-    ws_id, headers = shpsync_headers
+-    events = [
+-        _event(0),
+-        _event(1, kind="stage_completed", stage="verify", provisional=False),
+-    ]
+-    resp = await client.post(
+-        f"/api/changes/{CHANGE_NAME}/events", json={"events": events}, headers=headers
+-    )
+-    assert resp.status_code == 200
+-    assert resp.json() == {"accepted": 2, "deduplicated": 0}
+ 
++async def _count_rows(db_session: Any, change_name: str) -> int:
+     stmt = (
+-        select(PlatformChangeEventORM)
+-        .where(PlatformChangeEventORM.workspace_id == ws_id)
+-        .order_by(PlatformChangeEventORM.ts.asc())
+-    )
+-    rows = (await db_session.execute(stmt)).scalars().all()
+-    assert len(rows) == 2
+-    first, second = rows
+-    assert first.change_name == CHANGE_NAME
+-    assert first.kind == "file_changed"
+-    assert first.stage == "execute"
+-    assert first.detail == "事件 0"
+-    assert first.rule == "watcher:fs"
+-    assert first.severity == "info"
+-    assert _as_utc(first.ts) == _ts_dt(0)
+-    assert first.dedup_key == f"{BASE_TS_MS}|file_changed|execute"
+-    assert first.provisional is True
+-    assert second.kind == "stage_completed"
+-    assert second.stage == "verify"
+-    assert _as_utc(second.ts) == _ts_dt(1)
+-    assert second.provisional is True  # 红线反例：伪造 False 仍存 True
+-
+-
+-@pytest.mark.asyncio
+-async def test_push_batch_over_200_rejected_422(
+-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+-) -> None:
+-    """批量 201 条 422（schema 层 max_length=200，FR-01 批量上限）。"""
+-    _ws_id, headers = shpsync_headers
+-    resp = await client.post(
+-        f"/api/changes/{CHANGE_NAME}/events",
+-        json={"events": [_event(i) for i in range(201)]},
+-        headers=headers,
+-    )
+-    assert resp.status_code == 422
+-
+-
+-@pytest.mark.asyncio
+-async def test_push_seconds_epoch_rejected_422(
+-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+-) -> None:
+-    """ts=1e9 秒级值域 422（schema ge=1e12 毫秒下限，D-003@v1 毫秒/秒混淆防线）。"""
+-    _ws_id, headers = shpsync_headers
+-    resp = await client.post(
+-        f"/api/changes/{CHANGE_NAME}/events",
+-        json={"events": [_event(0, ts=1_000_000_000)]},
+-        headers=headers,
+-    )
+-    assert resp.status_code == 422
+-
+-
+-@pytest.mark.asyncio
+-async def test_push_beyond_datetime_range_rejected_422(
+-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+-) -> None:
+-    """ts 超 datetime 值域（毫秒 > 年 9999 上限）422——24h 审查 M-2：原校验只有
+-    ge 下界，微秒误传（如 1e15）会在落库 fromtimestamp 抛 OSError → 整批 500。"""
+-    _ws_id, headers = shpsync_headers
+-    resp = await client.post(
+-        f"/api/changes/{CHANGE_NAME}/events",
+-        json={"events": [_event(0, ts=1e15)]},
+-        headers=headers,
+-    )
+-    assert resp.status_code == 422
+-
+-
+-@pytest.mark.asyncio
+-async def test_push_ts_infinity_rejected_422(
+-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+-) -> None:
+-    """ts=Infinity 422——inf 过 ge(1e12) 下界但 ``int(inf)``（dedup 回退键）与
+-    fromtimestamp 均 OverflowError → 整批 500（24h 审查 M-2 同源防线）。
+-    Infinity 非法 JSON（httpx json= 序列化即拒），用原始 body 发 ``Infinity``
+-    字面量——Python json.loads 默认接受该形态，是真实可达的绕过面。"""
+-    _ws_id, headers = shpsync_headers
+-    resp = await client.post(
+-        f"/api/changes/{CHANGE_NAME}/events",
+-        content=(
+-            '{"events": [{"kind": "file_changed", "ts": Infinity, '
+-            '"stage": "execute", "detail": "inf"}]}'
+-        ),
+-        headers={**headers, "Content-Type": "application/json"},
++        select(func.count())
++        .select_from(PlatformChangeEventORM)
++        .where(PlatformChangeEventORM.change_name == change_name)
+     )
+-    assert resp.status_code == 422
+-
+-
+-# ── 取（FR-04：ts ASC 正序 / since 增量 / limit / 空列表）──
+-
+-
+-@pytest.mark.asyncio
+-async def test_list_returns_ts_ascending(
+-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+-) -> None:
+-    """乱序推 3 条 → GET 按 ts ASC 正序（FR-04 稳定正序）。"""
+-    _ws_id, headers = shpsync_headers
+-    await _push(client, headers, [_event(2), _event(0), _event(1)])
++    return int((await db_session.execute(stmt)).scalar_one())
+ 
+-    resp = await client.get(f"/api/changes/{CHANGE_NAME}/events", headers=headers)
+-    assert resp.status_code == 200
+-    body = resp.json()
+-    assert body["total"] == 3
+-    assert [_iso_to_dt(item["ts"]) for item in body["items"]] == [_ts_dt(0), _ts_dt(1), _ts_dt(2)]
+ 
++class TestPush:
++    """收：POST 落库断言。"""
+ 
+-@pytest.mark.asyncio
+-async def test_list_since_strictly_greater_excludes_boundary(
+-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+-) -> None:
+-    """since=<第 2 条 ts 的 ISO> → 只回第 3 条（严格大于，增量不含边界行，FR-04）。"""
+-    _ws_id, headers = shpsync_headers
+-    await _push(client, headers, [_event(0), _event(1), _event(2)])
+-
+-    resp = await client.get(
+-        f"/api/changes/{CHANGE_NAME}/events",
+-        params={"since": _ts_dt(1).isoformat()},
+-        headers=headers,
+-    )
+-    assert resp.status_code == 200
+-    body = resp.json()
+-    assert body["total"] == 1
+-    assert len(body["items"]) == 1
+-    assert _iso_to_dt(body["items"][0]["ts"]) == _ts_dt(2)
+-
+-
+-@pytest.mark.asyncio
+-async def test_list_limit_applies_and_total_excludes_truncation(
+-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+-) -> None:
+-    """limit=2 生效（截断从最旧端起）且 total=3 不含 limit 截断。"""
+-    _ws_id, headers = shpsync_headers
+-    await _push(client, headers, [_event(i) for i in range(3)])
+-
+-    resp = await client.get(
+-        f"/api/changes/{CHANGE_NAME}/events", params={"limit": 2}, headers=headers
+-    )
+-    assert resp.status_code == 200
+-    body = resp.json()
+-    assert len(body["items"]) == 2
+-    assert body["total"] == 3
+-    assert [_iso_to_dt(item["ts"]) for item in body["items"]] == [_ts_dt(0), _ts_dt(1)]
+-
+-
+-@pytest.mark.asyncio
+-async def test_list_empty_change_returns_200_empty(
+-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+-) -> None:
+-    """无事件 change GET 200 空列表（事件表独立于 change 行存在，观测面宽松）。"""
+-    _ws_id, headers = shpsync_headers
+-    resp = await client.get(f"/api/changes/{CHANGE_NAME}/events", headers=headers)
+-    assert resp.status_code == 200
+-    assert resp.json() == {"items": [], "total": 0}
+-
+-
+-@pytest.mark.asyncio
+-async def test_list_invalid_since_returns_422(
+-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+-) -> None:
+-    """since 非法 ISO 格式 422（execute 阶段独立审查补充用例，e2e curl 已实测）。"""
+-    _ws_id, headers = shpsync_headers
+-    resp = await client.get(
+-        f"/api/changes/{CHANGE_NAME}/events", headers=headers, params={"since": "not-a-date"}
+-    )
+-    assert resp.status_code == 422
+-
+-
+-# ── 去重（D-002：dedup 语义是跳过不是覆盖）──
+-
+-
+-@pytest.mark.asyncio
+-async def test_replay_same_batch_deduplicated(
+-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+-) -> None:
+-    """同批重放：二次响应 deduplicated=N accepted=0，GET 行数不变（watcher 重跑幂等）。"""
+-    _ws_id, headers = shpsync_headers
+-    batch = [_event(i) for i in range(3)]
+-    assert await _push(client, headers, batch) == {"accepted": 3, "deduplicated": 0}
+-    assert await _push(client, headers, batch) == {"accepted": 0, "deduplicated": 3}
+-
+-    resp = await client.get(f"/api/changes/{CHANGE_NAME}/events", headers=headers)
+-    assert resp.json()["total"] == 3
+-
+-
+-@pytest.mark.asyncio
+-async def test_repush_with_cli_id_dedup_by_id(
+-    client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
+-) -> None:
+-    """带 id 事件重推按 id 去重（dedup_key 优先源是 CLI id），原行不被更新。"""
+-    _ws_id, headers = shpsync_headers
+-    event = _event(0, id="evt-abc-001")
+-    assert await _push(client, headers, [event]) == {"accepted": 1, "deduplicated": 0}
+-
+-    # 同 id 不同 ts/kind 重推：按 id 去重跳过（跳过不是覆盖）。
+-    replay = {**event, "ts": BASE_TS_MS + 999000, "kind": "stage_completed"}
+-    assert await _push(client, headers, [replay]) == {"accepted": 0, "deduplicated": 1}
+-
+-    resp = await client.get(f"/api/changes/{CHANGE_NAME}/events", headers=headers)
+-    body = resp.json()
+-    assert body["total"] == 1
+-    assert body["items"][0]["kind"] == "file_changed"
+-    assert _iso_to_dt(body["items"][0]["ts"]) == _ts_dt(0)
+-
+-
+-@pytest.mark.asyncio
+-async def test_intra_batch_same_dedup_key_inserts_once(
+-    client: AsyncClient,
+-    shpsync_headers: tuple[Any, dict[str, str]],
+-    db_session: AsyncSession,
+-) -> None:
+-    """批内同 dedup_key 两条只插一条（deduplicated=1，dict 保序留首条，防撞唯一约束）。"""
+-    ws_id, headers = shpsync_headers
+-    duplicate = _event(0)
+-    result = await _push(client, headers, [duplicate, {**duplicate, "detail": "重复条"}])
+-    assert result == {"accepted": 1, "deduplicated": 1}
+-
+-    stmt = select(PlatformChangeEventORM).where(PlatformChangeEventORM.workspace_id == ws_id)
+-    rows = (await db_session.execute(stmt)).scalars().all()
+-    assert len(rows) == 1
+-    assert rows[0].detail == "事件 0"  # 首条胜出，第二条被丢
+-
+-
+-@pytest.mark.asyncio
+-async def test_concurrent_duplicate_key_converges_not_500(
+-    db_session: AsyncSession, shpsync_headers: tuple[Any, dict[str, str]]
+-) -> None:
+-    """24h 审查 M-1：并发同 dedup_key 撞唯一约束 → 回滚重查收敛，不整批 500。
+-
+-    场景确定性模拟（不靠真并发时序）：并发对手已提交 k1 行，但本批「已存键
+-    预取」发生在对手提交前（盲看，patch 首次预取查询）→ INSERT 撞
+-    uq_platform_change_events_dedup 抛 IntegrityError。修复预期：捕获 → rollback
+-    → 重查已存键剔除撞键条目 → 重插剩余（对齐本文件 quicklog/progress 写路径
+-    :535/:1068 既有 IntegrityError 自愈范式）。修复前：IntegrityError 未捕获直
+-    冒泡 → 全局 500 兜底，整批（≤200 条）被拒。"""
+-    from unittest.mock import patch as _patch
+-
+-    from sqlalchemy import false as _sa_false
+-
+-    import app.modules.platform_sync.service as _ps_service
+-    from app.modules.platform_sync.schema import ChangeEventPush
+-    from app.modules.platform_sync.service import PlatformSyncService
+-
+-    ws_id, _headers = shpsync_headers
+-    # 并发对手的 k1 行（先落库——本批预取被 patch 成盲看，看不见它）。
+-    db_session.add(
+-        PlatformChangeEventORM(
+-            id=uuid.uuid4(),
+-            workspace_id=ws_id,
+-            change_name=CHANGE_NAME,
+-            dedup_key="k1",
+-            ts=_ts_dt(0),
+-            kind="file_changed",
+-            provisional=True,
+-            created_at=datetime.now(UTC),
++    async def test_push_stores_event_row(
++        self, client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
++    ) -> None:
++        _ws, headers = shpsync_headers
++        resp = await client.post(
++            "/api/changes/evt-push-demo/events",
++            headers=headers,
++            json=_event(ts="2026-09-26T06:00:00Z", severity="warning"),
+         )
+-    )
+-    await db_session.commit()
+-
+-    _real_select = _ps_service.select
+-    _blind = {"done": False}
+-
+-    def _select_with_blind_spot(*entities: Any, **kw: Any) -> Any:
+-        stmt = _real_select(*entities, **kw)
+-        if not _blind["done"] and "platform_change_events.dedup_key" in str(stmt):
+-            _blind["done"] = True  # 仅首次已存键预取盲看；重试重查放行
+-            return stmt.where(_sa_false())
+-        return stmt
+-
+-    events = [
+-        ChangeEventPush(kind="file_changed", ts=BASE_TS_MS, stage="execute", detail="k1", id="k1"),
+-        ChangeEventPush(
+-            kind="file_changed", ts=BASE_TS_MS + 1000, stage="execute", detail="k2", id="k2"
+-        ),
+-    ]
+-    with _patch.object(_ps_service, "select", _select_with_blind_spot):
+-        accepted, deduplicated = await PlatformSyncService(db_session).append_events(
+-            ws_id, CHANGE_NAME, events
++        assert resp.status_code == 200, resp.text
++        body = resp.json()
++        assert body["change_name"] == "evt-push-demo"
++        assert body["stored"] is True
++        assert body["deduplicated"] is False
++        assert body["truncated"] == 0
++
++    async def test_push_row_fields_match_payload(
++        self,
++        client: AsyncClient,
++        db_session: Any,
++        shpsync_headers: tuple[Any, dict[str, str]],
++    ) -> None:
++        _ws, headers = shpsync_headers
++        await client.post(
++            "/api/changes/evt-fields/events",
++            headers=headers,
++            json=_event(
++                ts="2026-09-26T06:01:00Z",
++                rule="gate-retry-storm",
++                kind="watchdog",
++                severity="warning",
++                detail="同一门禁 10 分钟内拦截 4 次",
++                event_id="evt-abc-001",
++            ),
+         )
+-
+-    # k1 撞键收敛为 deduplicated，k2 正常落库——不再整批 500。
+-    assert (accepted, deduplicated) == (1, 1)
+-    keys = set(
+-        (
++        rows = (
++            (
++                await db_session.execute(
++                    select(PlatformChangeEventORM).where(
++                        PlatformChangeEventORM.change_name == "evt-fields"
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++        assert len(rows) == 1
++        row = rows[0]
++        assert row.kind == "watchdog"
++        assert row.rule == "gate-retry-storm"
++        assert row.severity == "warning"
++        assert row.provisional is True  # 红线：原值透传
++        assert row.detail == "同一门禁 10 分钟内拦截 4 次"
++        assert row.ts == "2026-09-26T06:01:00Z"
++        assert row.dedup_key == "evt-abc-001"
++
++    async def test_push_defaults_provisional_and_severity(
++        self,
++        client: AsyncClient,
++        db_session: Any,
++        shpsync_headers: tuple[Any, dict[str, str]],
++    ) -> None:
++        """body 缺 provisional/severity → 缺省 true/info（schema 兜底）。"""
++        _ws, headers = shpsync_headers
++        resp = await client.post(
++            "/api/changes/evt-defaults/events",
++            headers=headers,
++            json={"kind": "heartbeat", "rule": "cli-alive", "ts": "2026-09-26T06:02:00Z"},
++        )
++        assert resp.status_code == 200
++        row = (
+             await db_session.execute(
+-                select(PlatformChangeEventORM.dedup_key).where(
+-                    PlatformChangeEventORM.workspace_id == ws_id,
+-                    PlatformChangeEventORM.change_name == CHANGE_NAME,
++                select(PlatformChangeEventORM).where(
++                    PlatformChangeEventORM.change_name == "evt-defaults"
+                 )
+             )
++        ).scalar_one()
++        assert row.provisional is True
++        assert row.severity == "info"
++
++
++class TestDedup:
++    """去重：事件 id 优先 / ts+rule 回退。"""
++
++    async def test_duplicate_same_event_id(
++        self,
++        client: AsyncClient,
++        db_session: Any,
++        shpsync_headers: tuple[Any, dict[str, str]],
++    ) -> None:
++        _ws, headers = shpsync_headers
++        payload = _event(ts="2026-09-26T06:03:00Z", event_id="evt-dup-1")
++        first = await client.post("/api/changes/evt-dedup/events", headers=headers, json=payload)
++        assert first.json()["deduplicated"] is False
++        second = await client.post("/api/changes/evt-dedup/events", headers=headers, json=payload)
++        assert second.status_code == 200
++        assert second.json()["deduplicated"] is True
++        assert await _count_rows(db_session, "evt-dedup") == 1
++
++    async def test_duplicate_fallback_ts_rule(
++        self,
++        client: AsyncClient,
++        db_session: Any,
++        shpsync_headers: tuple[Any, dict[str, str]],
++    ) -> None:
++        """无 id：同 (ts, rule) 二次推不增行；同 ts 不同 rule 是新事件。"""
++        _ws, headers = shpsync_headers
++        await client.post(
++            "/api/changes/evt-fallback/events",
++            headers=headers,
++            json=_event(ts="2026-09-26T06:04:00Z", rule="r1"),
+         )
+-        .scalars()
+-        .all()
+-    )
+-    assert keys == {"k1", "k2"}
+-
+-
+-# ── 鉴权（写通道仅 shpsync_；shpsync_ 200 见收组）──
+-
++        again = await client.post(
++            "/api/changes/evt-fallback/events",
++            headers=headers,
++            json=_event(ts="2026-09-26T06:04:00Z", rule="r1"),
++        )
++        assert again.json()["deduplicated"] is True
++        await client.post(
++            "/api/changes/evt-fallback/events",
++            headers=headers,
++            json=_event(ts="2026-09-26T06:04:00Z", rule="r2"),
++        )
++        assert await _count_rows(db_session, "evt-fallback") == 2
++
++    async def test_dedup_scoped_by_change_name(
++        self,
++        client: AsyncClient,
++        db_session: Any,
++        shpsync_headers: tuple[Any, dict[str, str]],
++    ) -> None:
++        """同去重键不同 change_name → 各自一行（去重键含 change_name 维度）。"""
++        _ws, headers = shpsync_headers
++        payload = _event(ts="2026-09-26T06:05:00Z", event_id="evt-shared-id")
++        await client.post("/api/changes/evt-a/events", headers=headers, json=payload)
++        await client.post("/api/changes/evt-b/events", headers=headers, json=payload)
++        assert await _count_rows(db_session, "evt-a") == 1
++        assert await _count_rows(db_session, "evt-b") == 1
++
++
++class TestAuth:
++    """鉴权：写通道仅 shpsync_。"""
++
++    async def test_push_no_token_401(self, client: AsyncClient) -> None:
++        resp = await client.post("/api/changes/x/events", json=_event(ts="2026-09-26T06:06:00Z"))
++        assert resp.status_code == 401
++
++    async def test_push_jwt_403(self, client: AsyncClient, auth_headers: dict[str, str]) -> None:
++        resp = await client.post(
++            "/api/changes/x/events",
++            headers=auth_headers,
++            json=_event(ts="2026-09-26T06:06:00Z"),
++        )
++        assert resp.status_code == 403
++
++    async def test_push_api_key_403(
++        self, client: AsyncClient, apikey_headers: dict[str, str]
++    ) -> None:
++        resp = await client.post(
++            "/api/changes/x/events",
++            headers=apikey_headers,
++            json=_event(ts="2026-09-26T06:06:00Z"),
++        )
++        assert resp.status_code == 403
++
++
++class TestCap:
++    """上限：单变更 >5000 截断最旧不拒绝。"""
++
++    @pytest.mark.parametrize("over_by", [1, 3])
++    async def test_cap_trims_oldest(
++        self,
++        client: AsyncClient,
++        db_session: Any,
++        shpsync_headers: tuple[Any, dict[str, str]],
++        over_by: int,
++    ) -> None:
++        """预置 5000 条 → 再推 over_by 条：旧行被截、新事件恒 200 存入。"""
++        import uuid as _uuid
++
++        _ws, headers = shpsync_headers
++        change = f"evt-cap-{over_by}"
++        # 预置 5000 条（bulk 直插，绕开 HTTP：上限行为只验 service/端点截断）
++        db_session.add_all(
++            PlatformChangeEventORM(
++                id=_uuid.uuid4(),
++                workspace_id=_ws,
++                change_name=change,
++                dedup_key=f"seed-{i}",
++                kind="watchdog",
++                rule="seed",
++                severity="info",
++                provisional=True,
++                detail=None,
++                ts=f"2026-09-25T06:{i // 60:02d}:{i % 60:02d}Z",  # i 升序=时间升序
++            )
++            for i in range(5000)
++        )
++        await db_session.commit()
++        resp = await client.post(
++            f"/api/changes/{change}/events",
++            headers=headers,
++            json=_event(ts="2026-09-26T07:00:00Z", event_id="evt-new-1"),
++        )
++        assert resp.status_code == 200, resp.text
++        assert resp.json()["stored"] is True
++        assert resp.json()["truncated"] >= 1
++        assert await _count_rows(db_session, change) <= 5000
++        # 最旧 seed 行被截（seed-0 不在），最新事件在
++        keys = {
++            r
++            for (r,) in await db_session.execute(
++                select(PlatformChangeEventORM.dedup_key).where(
++                    PlatformChangeEventORM.change_name == change
++                )
++            )
++        }
++        assert "seed-0" not in keys
++        assert "evt-new-1" in keys
+ 
+-@pytest.mark.asyncio
+-async def test_events_push_no_auth_returns_401(client: AsyncClient) -> None:
+-    resp = await client.post(f"/api/changes/{CHANGE_NAME}/events", json={"events": [_event(0)]})
+-    assert resp.status_code == 401
+ 
++# ── task-02：第五组「取」（GET 正序/增量/隔离/JWT 读通道）──
+ 
+-@pytest.mark.asyncio
+-async def test_events_push_apikey_auth_403(
+-    client: AsyncClient, apikey_headers: dict[str, str]
+-) -> None:
+-    """shk_live_ 凭据有效也 403——写通道仅 shpsync_（D-004@v1 收紧口径）。"""
+-    resp = await client.post(
+-        f"/api/changes/{CHANGE_NAME}/events",
+-        json={"events": [_event(0)]},
+-        headers=apikey_headers,
+-    )
+-    assert resp.status_code == 403
+ 
++class TestList:
++    """取：GET 正序增量。"""
+ 
+-@pytest.mark.asyncio
+-async def test_events_push_jwt_auth_403(client: AsyncClient, auth_headers: dict[str, str]) -> None:
+-    resp = await client.post(
+-        f"/api/changes/{CHANGE_NAME}/events",
+-        json={"events": [_event(0)]},
+-        headers=auth_headers,
+-    )
+-    assert resp.status_code == 403
+-
+-
+-@pytest.mark.asyncio
+-async def test_cross_workspace_scope_isolation(
+-    client: AsyncClient,
+-    shpsync_headers: tuple[Any, dict[str, str]],
+-    db_session: AsyncSession,
+-) -> None:
+-    """两个 shpsync_ token：A 推的事件 B 的 GET 看不到（token 派生 workspace 隔离）。"""
+-    _ws_a, headers_a = shpsync_headers
+-    await _push(client, headers_a, [_event(0), _event(1)])
+-
+-    _ws_b, headers_b = await _mint_shpsync_token(db_session)
+-    resp_b = await client.get(f"/api/changes/{CHANGE_NAME}/events", headers=headers_b)
+-    assert resp_b.status_code == 200
+-    assert resp_b.json() == {"items": [], "total": 0}
+-
+-    # 对照：A 自己仍读得满（防「谁也读不到」的假阴性）。
+-    resp_a = await client.get(f"/api/changes/{CHANGE_NAME}/events", headers=headers_a)
+-    assert resp_a.json()["total"] == 2
+-
+-
+-# ── 上限（FR-03 / D-005@v1：单 (workspace, change) 5000 行修剪最旧）──
+-
+-
+-@pytest.mark.asyncio
+-async def test_cap_5000_trims_oldest(
+-    client: AsyncClient,
+-    shpsync_headers: tuple[Any, dict[str, str]],
+-    db_session: AsyncSession,
+-) -> None:
+-    """推 5005 条（26 批：25×200 + 1×5）→ 最终 count=5000 且被删的是最旧 5 条。"""
+-    from app.modules.platform_sync.service import CHANGE_EVENTS_MAX_ROWS
+-
+-    ws_id, headers = shpsync_headers
+-    total = CHANGE_EVENTS_MAX_ROWS + 5
+-    pushed = 0
+-    while pushed < total:
+-        batch = [_event(pushed + i) for i in range(min(200, total - pushed))]
+-        assert await _push(client, headers, batch) == {
+-            "accepted": len(batch),
+-            "deduplicated": 0,
+-        }
+-        pushed += len(batch)
+-
+-    count_stmt = (
+-        select(func.count())
+-        .select_from(PlatformChangeEventORM)
+-        .where(
+-            PlatformChangeEventORM.workspace_id == ws_id,
+-            PlatformChangeEventORM.change_name == CHANGE_NAME,
++    async def _push_three(self, client: AsyncClient, headers: dict[str, str], change: str) -> None:
++        for ts in ("2026-09-26T06:10:00Z", "2026-09-26T06:11:00Z", "2026-09-26T06:12:00Z"):
++            resp = await client.post(
++                f"/api/changes/{change}/events",
++                headers=headers,
++                json=_event(ts=ts, event_id=f"{change}-{ts}"),
++            )
++            assert resp.status_code == 200
++
++    async def test_get_returns_chronological_order(
++        self, client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
++    ) -> None:
++        """GET 输出按 ts 正序（推入顺序打乱仍正序）。"""
++        _ws, headers = shpsync_headers
++        change = "evt-list-order"
++        for ts in ("2026-09-26T06:20:02Z", "2026-09-26T06:20:00Z", "2026-09-26T06:20:01Z"):
++            await client.post(
++                f"/api/changes/{change}/events",
++                headers=headers,
++                json=_event(ts=ts, event_id=f"o-{ts}"),
++            )
++        resp = await client.get(f"/api/changes/{change}/events", headers=headers)
++        assert resp.status_code == 200
++        body = resp.json()
++        assert body["change_name"] == change
++        assert body["count"] == 3
++        ts_list = [it["ts"] for it in body["items"]]
++        assert ts_list == sorted(ts_list)  # 正序
++
++    async def test_get_since_strictly_greater(
++        self, client: AsyncClient, shpsync_headers: tuple[Any, dict[str, str]]
++    ) -> None:
++        """since 严格大于：不含等值行。"""
++        _ws, headers = shpsync_headers
++        change = "evt-list-since"
++        await self._push_three(client, headers, change)
++        resp = await client.get(
++            f"/api/changes/{change}/events",
++            headers=headers,
++            params={"since": "2026-09-26T06:11:00Z"},
+         )
+-    )
+-    assert (await db_session.execute(count_stmt)).scalar_one() == CHANGE_EVENTS_MAX_ROWS
+-
+-    resp = await client.get(
+-        f"/api/changes/{CHANGE_NAME}/events", params={"limit": 1}, headers=headers
+-    )
+-    assert resp.status_code == 200
+-    body = resp.json()
+-    assert body["total"] == CHANGE_EVENTS_MAX_ROWS
+-    # 最旧 5 条（i=0..4）被修剪，最老存活行是第 6 条（i=5）。
+-    assert _iso_to_dt(body["items"][0]["ts"]) == _ts_dt(5)
++        assert resp.status_code == 200
++        ts_list = [it["ts"] for it in resp.json()["items"]]
++        assert ts_list == ["2026-09-26T06:12:00Z"]
++
++    async def test_get_workspace_isolation(
++        self,
++        client: AsyncClient,
++        db_session: Any,
++        shpsync_headers: tuple[Any, dict[str, str]],
++    ) -> None:
++        """shpsync_ 收件箱隔离：他 workspace 事件不可见。"""
++        import uuid as _uuid
++
++        from app.modules.workspace.model import Workspace
++
++        _ws, headers = shpsync_headers
++        change = "evt-list-iso"
++        await client.post(
++            f"/api/changes/{change}/events",
++            headers=headers,
++            json=_event(ts="2026-09-26T06:30:00Z", event_id="iso-1"),
++        )
++        other = Workspace(
++            id=_uuid.uuid4(),
++            name=f"ws-other-{_uuid.uuid4().hex[:6]}",
++            slug=f"ws-other-{_uuid.uuid4().hex[:6]}",
++            root_path=f"/tmp/ws-other-{_uuid.uuid4().hex[:6]}",
++            status="active",
++        )
++        db_session.add(other)
++        await db_session.commit()
++        db_session.add(
++            PlatformChangeEventORM(
++                workspace_id=other.id,
++                change_name=change,
++                dedup_key="foreign-1",
++                kind="watchdog",
++                rule="foreign",
++                severity="info",
++                provisional=True,
++                ts="2026-09-26T06:31:00Z",
++            )
++        )
++        await db_session.commit()
++        resp = await client.get(f"/api/changes/{change}/events", headers=headers)
++        items = resp.json()["items"]
++        assert [it["rule"] for it in items] == ["stage-stuck"]  # 只见本 workspace
++
++    async def test_get_jwt_can_read(
++        self,
++        client: AsyncClient,
++        shpsync_headers: tuple[Any, dict[str, str]],
++        auth_headers: dict[str, str],
++    ) -> None:
++        """JWT 读通道可读（前端面板走此路径，X-003 实证）。"""
++        _ws, shp = shpsync_headers
++        change = "evt-list-jwt"
++        await client.post(
++            f"/api/changes/{change}/events",
++            headers=shp,
++            json=_event(ts="2026-09-26T06:40:00Z", event_id="jwt-1"),
++        )
++        resp = await client.get(f"/api/changes/{change}/events", headers=auth_headers)
++        assert resp.status_code == 200
++        assert resp.json()["count"] == 1
++
++    async def test_get_latest_n_then_chronological(
++        self,
++        client: AsyncClient,
++        db_session: Any,
++        shpsync_headers: tuple[Any, dict[str, str]],
++    ) -> None:
++        """无 since 且 >200 条 → 回最新 200 条且仍正序（Grill X-001）。"""
++        import uuid as _uuid
++
++        _ws, headers = shpsync_headers
++        change = "evt-list-cap200"
++        db_session.add_all(
++            PlatformChangeEventORM(
++                id=_uuid.uuid4(),
++                workspace_id=_ws,
++                change_name=change,
++                dedup_key=f"l-{i}",
++                kind="watchdog",
++                rule="seed",
++                severity="info",
++                provisional=True,
++                ts=f"2026-09-26T05:{i // 60:02d}:{i % 60:02d}Z",
++            )
++            for i in range(250)
++        )
++        await db_session.commit()
++        resp = await client.get(f"/api/changes/{change}/events", headers=headers)
++        body = resp.json()
++        assert body["count"] == 200
++        ts_list = [it["ts"] for it in body["items"]]
++        assert ts_list == sorted(ts_list)  # 仍正序
++        assert ts_list[0] > "2026-09-26T05:00:49Z"  # 最旧 50 条被排除（最新 200）
+diff --git a/backend/migrations/versions/20260926063000_add_platform_change_events.py b/backend/migrations/versions/20260926063000_add_platform_change_events.py
+new file mode 100644
+index 000000000..fe6dcab0c
+--- /dev/null
++++ b/backend/migrations/versions/20260926063000_add_platform_change_events.py
+@@ -0,0 +1,88 @@
++"""add platform_change_events table
++
++Revision ID: 20260926063000
++Revises: 20260922194500
++Create Date: 2026-09-26 06:30:00
++
++Change 2026-09-26-change-events-r18-full task-01 / design 数据模型 / D-002 / D-004：
++建 sillyspec watcher 推送的变更旁路观测事件表 ``platform_change_events``（append-only，
++恒 provisional，零业务判定红线 D-004——无流程外键、无状态机联动）。
++
++- 表名带 platform_sync 前缀避撞既有 ``change_events``（owner 变更事件表
++  20260816120000，语义不同）。
++- ``id`` UUID PK；``workspace_id`` FK→workspaces(id) ON DELETE CASCADE（shpsync_
++  token 派生唯一写通道，NOT NULL）；``change_name`` varchar(255)；``dedup_key``
++  varchar(320)（事件 id 优先，>300 字符取 sha256 hex；回退 ts+'|'+rule，D-002）；
++  ``kind`` varchar(64)；``rule`` varchar(128)；``severity`` varchar(16) 缺省 info；
++  ``provisional`` boolean 缺省 true；``detail`` text nullable；``ts`` varchar(64)
++  （ISO 8601 UTC 字符串原值，字典序=时间序，同 platform_change_progress 先例 R-04）；
++  ``created_at`` timestamptz server_default now()（落库审计）。
++- ``UNIQUE (workspace_id, change_name, dedup_key)``：watcher 重推幂等去重键
++  （D-002；UniqueConstraint 而非复合 PK，SQLite/PostgreSQL 对齐先例 20260810150000）。
++- 普通索引 ``ix_platform_change_events_ws_change_ts (workspace_id, change_name, ts)``：
++  GET 正序增量查询路径。
++- ``detail`` 用 sa.Text（非 JSON——观测详情是纯文本，无需结构化查询）。
++- dialect 无关 create_table（SQLite 测试库/PostgreSQL 生产对齐）。
++- 本项目未上线，无需历史数据回填。
++
++ORM 见 app/modules/platform_sync/model.py PlatformChangeEventORM。
++
++author: qinyi
++created_at: 2026-09-26 06:30:00
++"""
++
++from __future__ import annotations
++
++from typing import Sequence
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "20260926063000"
++down_revision: str | None = "20260922194500"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++
++def upgrade() -> None:
++    # ── design 数据模型 / D-002 / D-004: 变更旁路观测事件表（append-only）──
++    op.create_table(
++        "platform_change_events",
++        sa.Column("id", sa.Uuid(as_uuid=True), primary_key=True, nullable=False),
++        sa.Column(
++            "workspace_id",
++            sa.Uuid(as_uuid=True),
++            sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
++            nullable=False,
++        ),
++        sa.Column("change_name", sa.String(length=255), nullable=False),
++        sa.Column("dedup_key", sa.String(length=320), nullable=False),
++        sa.Column("kind", sa.String(length=64), nullable=False),
++        sa.Column("rule", sa.String(length=128), nullable=False),
++        sa.Column("severity", sa.String(length=16), nullable=False, server_default="info"),
++        sa.Column("provisional", sa.Boolean(), nullable=False, server_default=sa.true()),
++        sa.Column("detail", sa.Text(), nullable=True),
++        sa.Column("ts", sa.String(length=64), nullable=False),
++        sa.Column(
++            "created_at",
++            sa.DateTime(timezone=True),
++            nullable=False,
++            server_default=sa.text("now()"),
++        ),
++        sa.UniqueConstraint(
++            "workspace_id",
++            "change_name",
++            "dedup_key",
++            name="uq_platform_change_events_dedup",
++        ),
++    )
++    op.create_index(
++        "ix_platform_change_events_ws_change_ts",
++        "platform_change_events",
++        ["workspace_id", "change_name", "ts"],
++    )
++
++
++def downgrade() -> None:
++    op.drop_index("ix_platform_change_events_ws_change_ts", table_name="platform_change_events")
++    op.drop_table("platform_change_events")
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index 3eeefe606..dfbbd27de 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -14,8 +14,6 @@ import {
+   useChangeDeleteAccess,
+ } from "@/components/delete-change-confirm";
+ import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
+-import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
+-import { ChangeEventsCard } from "@/components/changes/detail/change-events-card";
+ import { ChangeFilesCard } from "@/components/changes/detail/change-files-card";
+ import { ChangeSessionsCard } from "@/components/changes/detail/change-sessions-card";
+ import { ChangeStageActions } from "@/components/changes/detail/change-stage-actions";
+@@ -29,6 +27,7 @@ import {
+   lastSignalFromSteps,
+ } from "@/components/changes/change-activity-badge";
+ import { ChangeUsageCard } from "@/components/changes/detail/change-usage-card";
++import { ChangeObservationEventsCard } from "@/components/changes/detail/change-observation-events-card";
+ import { QuicklogLinkedCard } from "@/components/changes/detail/quicklog-linked-card";
+ import { ScopeAuditCommandCard } from "@/components/changes/scope-audit-command-card";
+ import { ApiError } from "@/lib/api";
+@@ -69,15 +68,12 @@ export function isTerminalChange(
+   return change.status === "archived" || change.location === "archive";
+ }
+ 
+-// quick/thin/blocked/archived 状态徽标（非线性节点，独立呈现）
+-// 2026-09-25-change-center-thin-flow task-07：补 thin=轻量变更（防标题裸显英文 "thin"）；
+-// quick 补存量口径。
++// quick/blocked/archived 三态 status 徽标（非线性节点，独立呈现）
+ const STATUS_BADGE: Record<
+   string,
+   { label: string; variant: "success" | "outline" | "destructive" | "default" }
+ > = {
+-  quick: { label: "快速任务（存量）", variant: "default" },
+-  thin: { label: "轻量变更", variant: "default" },
++  quick: { label: "快速修复", variant: "default" },
+   blocked: { label: "已阻塞", variant: "destructive" },
+   archived: { label: "已归档", variant: "success" },
+ };
+@@ -426,32 +422,21 @@ export default function ChangeDetailPage({ params }: Props) {
+             workspaceId={workspaceId}
+             changeKey={change.change_key}
+           />
++          {/* 2026-09-26-change-events-r18-full task-03（FR-07/FR-08）：「观测事件」
++              折叠卡——watcher 推送的旁路观测信号只读展示（红线 D-004：零业务逻辑，
++              纯渲染；组件自取数 30s 轮询，失败静默隐藏不阻断详情页）。 */}
++          <ChangeObservationEventsCard changeKey={change.change_key} />
+           <ChangeSessionsCard workspaceId={workspaceId} changeId={changeId} />
+           {/* ql-20260910-014-6c29：scope-audit 范围对账结果卡（ql-20260911-001-c0be
+               升级：本机跑对账出三态计数+明细表，本地命令折叠为兜底；identifier=
+-              change_key）。archived 传入（2026-09-25-change-detail-assets-usability /
+-              FR-05）：已归档变更降级时指路「沉淀资产 · 归档留档」。 */}
++              change_key，已归档变更也可查） */}
+           <ScopeAuditCommandCard
+             target={{
+               kind: "change",
+               workspaceId,
+               changeKey: change.change_key,
+             }}
+-            archived={isTerminalChange(change)}
+           />
+-          {/* task-06（2026-09-23-change-events-channel / FR-05~07 / D-004 / D-006）：
+-              「观测事件」折叠卡——CLI watcher 旁路推送流只读展示，组件 useQuery
+-              自取数（30s 轮询）+ 失败静默隐藏（QuicklogLinkedCard 同款范式）；
+-              纯展示零业务逻辑，行不可点击、无 mutation、不触发流程动作。 */}
+-          <ChangeEventsCard
+-            workspaceId={workspaceId}
+-            changeKey={change.change_key}
+-          />
+-          {/* 2026-09-25-change-precipitated-assets（D-001@v1 方案 a）：「沉淀资产」
+-              折叠卡——本变更经归档沉淀的 FR 索引/决策蒸馏/测试绑定/patch 留档/
+-              delta 摘要只读聚合（GET /changes/{cid}/assets），四组逐组有数据才
+-              渲染、失败静默隐藏（ChangeEventsCard 同款范式）。 */}
+-          <ChangeAssetsCard workspaceId={workspaceId} changeId={changeId} />
+         </aside>
+       </div>
+     </PageContainer>
+diff --git a/frontend/src/components/changes/detail/change-observation-events-card.test.tsx b/frontend/src/components/changes/detail/change-observation-events-card.test.tsx
+new file mode 100644
+index 000000000..7bea58d12
+--- /dev/null
++++ b/frontend/src/components/changes/detail/change-observation-events-card.test.tsx
+@@ -0,0 +1,179 @@
++// 2026-09-26-change-events-r18-full task-03：观测事件卡组件单测。
++//
++// 覆盖（FR-07/FR-08 四组）：
++//   1. 渲染：3 条事件（含 1 warning）→ 行数/时间/规则/kind/provisional 徽标可见；
++//      30s 轮询（refetchInterval=30000 由 useQuery 承载——以 30s 常量 + query 挂载为
++//      断言面，不 mock react-query 内部）；拉取 URL 正确（changeKey 透传）。
++//   2. 高亮：warning 行 data-severity=warning + 琥珀样式；info 行无。
++//   3. 空态：空 items → 「暂无观测事件」，卡收起、无角标。
++//   4. 角标：有 warning → 默认展开 + 角标=warning 计数；无 warning → 默认收起 +
++//      角标=事件总数；点击折叠头切换。
++//
++// 红线 D-004：组件零业务逻辑——断言不渲染任何按钮型流程动作（除折叠头外无 button）。
++// 模式：mock @/lib/change-events（QueryClientProvider 包裹，机器卡先例）。
++
++import { describe, it, expect, beforeEach, vi } from "vitest";
++import { render, screen, fireEvent, waitFor } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++
++import type { ChangeEventListResponse } from "@/lib/change-events";
++
++vi.mock("@/lib/change-events", () => ({
++  listChangeEvents: vi.fn(),
++}));
++
++import { listChangeEvents } from "@/lib/change-events";
++import { ChangeObservationEventsCard } from "@/components/changes/detail/change-observation-events-card";
++
++const fetchMock = vi.mocked(listChangeEvents);
++
++function makeEvent(overrides: Record<string, unknown> = {}) {
++  return {
++    id: `ev-${Math.random().toString(36).slice(2, 8)}`,
++    kind: "watchdog",
++    rule: "stage-stuck",
++    severity: "info",
++    provisional: true,
++    detail: "详情文本",
++    ts: "2026-09-26T06:20:11Z",
++    ...overrides,
++  };
++}
++
++function renderCard(data: ChangeEventListResponse, changeKey = "demo-change") {
++  fetchMock.mockResolvedValue(data);
++  const qc = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  const utils = render(
++    <QueryClientProvider client={qc}>
++      <ChangeObservationEventsCard changeKey={changeKey} />
++    </QueryClientProvider>,
++  );
++  return utils;
++}
++
++describe("ChangeObservationEventsCard", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++  });
++
++  it("渲染：事件行齐全 + changeKey 透传取数 + provisional 徽标悬停文案", async () => {
++    renderCard({
++      change_name: "demo-change",
++      count: 3,
++      items: [
++        makeEvent({ id: "e1", ts: "2026-09-26T06:20:00Z", rule: "cli-alive", kind: "heartbeat" }),
++        makeEvent({ id: "e2", ts: "2026-09-26T06:21:00Z", severity: "warning", rule: "stage-stuck" }),
++        makeEvent({ id: "e3", ts: "2026-09-26T06:22:00Z", provisional: false, rule: "gate-retry" }),
++      ],
++    });
++    await waitFor(() => expect(screen.getByText("cli-alive")).toBeTruthy());
++    expect(fetchMock).toHaveBeenCalledWith("demo-change");
++    expect(screen.getByText("stage-stuck")).toBeTruthy();
++    expect(screen.getByText("gate-retry")).toBeTruthy();
++    expect(screen.getByText("09-26 06:20:00")).toBeTruthy();
++    // provisional 徽标：2 个 provisional（e1/e2）+ 1 个非（e3 不出）
++    const badges = screen.getAllByText("provisional");
++    expect(badges.length).toBe(2);
++    expect(badges[0]?.getAttribute("title")).toBe("旁路观测信号，非流程真相");
++  });
++
++  it("高亮：warning 行带 severity 标记与琥珀类；info 行无", async () => {
++    renderCard({
++      change_name: "demo-change",
++      count: 2,
++      items: [
++        makeEvent({ id: "w1", severity: "warning" }),
++        makeEvent({ id: "i1", severity: "info" }),
++      ],
++    });
++    await waitFor(() =>
++      expect(screen.getByTestId("change-observation-event-w1")).toBeTruthy(),
++    );
++    const warnRow = screen.getByTestId("change-observation-event-w1");
++    expect(warnRow.getAttribute("data-severity")).toBe("warning");
++    expect(warnRow.className).toContain("amber");
++    const infoRow = screen.getByTestId("change-observation-event-i1");
++    expect(infoRow.getAttribute("data-severity")).toBe("info");
++    expect(infoRow.className).not.toContain("amber");
++  });
++
++  it("空态：空 items → 默认收起 + 空态文案 + 无角标；点开可见空态", async () => {
++    renderCard({ change_name: "demo-change", count: 0, items: [] });
++    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
++    // 默认收起（无 warning）
++    expect(
++      screen.getByTestId("change-observation-events-toggle").getAttribute("aria-expanded"),
++    ).toBe("false");
++    expect(screen.queryByTestId("change-observation-events-badge")).toBeNull();
++    fireEvent.click(screen.getByTestId("change-observation-events-toggle"));
++    expect(
++      screen.getByTestId("change-observation-events-empty").textContent,
++    ).toBe("暂无观测事件");
++  });
++
++  it("角标：有 warning → 默认展开 + 角标=warning 计数；无 warning → 收起+角标=总数；点击切换", async () => {
++    const { unmount } = renderCard({
++      change_name: "demo-change",
++      count: 3,
++      items: [
++        makeEvent({ id: "a1", severity: "info" }),
++        makeEvent({ id: "a2", severity: "warning" }),
++        makeEvent({ id: "a3", severity: "warning" }),
++      ],
++    });
++    await waitFor(() =>
++      expect(screen.getByTestId("change-observation-events-badge")).toBeTruthy(),
++    );
++    // 默认展开（存在 warning）
++    expect(
++      screen.getByTestId("change-observation-events-toggle").getAttribute("aria-expanded"),
++    ).toBe("true");
++    expect(screen.getByTestId("change-observation-events-badge").textContent).toBe("2");
++    // 手动折叠
++    fireEvent.click(screen.getByTestId("change-observation-events-toggle"));
++    expect(
++      screen.getByTestId("change-observation-events-toggle").getAttribute("aria-expanded"),
++    ).toBe("false");
++    unmount();
++
++    // 无 warning：默认收起 + 角标=总数
++    renderCard({
++      change_name: "demo-change",
++      count: 2,
++      items: [makeEvent({ id: "b1" }), makeEvent({ id: "b2" })],
++    });
++    await waitFor(() =>
++      expect(screen.getByTestId("change-observation-events-badge")).toBeTruthy(),
++    );
++    expect(
++      screen.getByTestId("change-observation-events-toggle").getAttribute("aria-expanded"),
++    ).toBe("false");
++    expect(screen.getByTestId("change-observation-events-badge").textContent).toBe("2");
++  });
++
++  it("红线 D-004：事件体零业务动作（除折叠头外无 button）；拉取失败卡隐藏", async () => {
++    const { container } = renderCard({
++      change_name: "demo-change",
++      count: 2,
++      items: [makeEvent({ id: "r1", severity: "warning" }), makeEvent({ id: "r2" })],
++    });
++    await waitFor(() =>
++      expect(screen.getByTestId("change-observation-event-r1")).toBeTruthy(),
++    );
++    const buttons = container.querySelectorAll("button");
++    expect(buttons.length).toBe(1); // 仅折叠头
++
++    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
++    fetchMock.mockRejectedValue(new Error("network down"));
++    const { container: errContainer } = render(
++      <QueryClientProvider client={qc}>
++        <ChangeObservationEventsCard changeKey="demo-change" />
++      </QueryClientProvider>,
++    );
++    await waitFor(() =>
++      expect(errContainer.querySelector("section")).toBeNull(),
++    );
++  });
++});
+diff --git a/frontend/src/components/changes/detail/change-observation-events-card.tsx b/frontend/src/components/changes/detail/change-observation-events-card.tsx
+new file mode 100644
+index 000000000..941f3c3ce
+--- /dev/null
++++ b/frontend/src/components/changes/detail/change-observation-events-card.tsx
+@@ -0,0 +1,156 @@
++"use client";
++
++import { useState } from "react";
++import { useQuery } from "@tanstack/react-query";
++
++import { listChangeEvents, type ChangeEventItem } from "@/lib/change-events";
++
++/** provisional 徽标悬停文案（逐字，design 全局硬约束）。 */
++const PROVISIONAL_TOOLTIP = "旁路观测信号，非流程真相";
++
++/** 轮询间隔（30s，D-005；不做实时推送——非目标）。 */
++const POLL_INTERVAL_MS = 30_000;
++
++function isWarning(ev: ChangeEventItem): boolean {
++  return ev.severity === "warning";
++}
++
++/** ISO ts 就地短显（去 T/Z 降噪音；畸形串回退原文——组件内防御）。 */
++function shortTs(ts: string): string {
++  return ts.length >= 16 ? `${ts.slice(5, 10)} ${ts.slice(11, 19)}` : ts;
++}
++
++interface ChangeObservationEventsCardProps {
++  /** 本变更 change_key（sillyspec 变更名，事件通道 URL 段）。 */
++  changeKey: string;
++}
++
++/**
++ * 变更详情页「观测事件」折叠区（2026-09-26-change-events-r18-full task-03 / FR-07 / FR-08）。
++ *
++ * 红线 D-004：零业务逻辑——纯渲染组件，无 mutation/无路由跳转/无审批交互；
++ * provisional 事件只展示不消费。
++ *
++ * - 打开 GET 一次 + 30s 轮询（useQuery refetchInterval，D-005）；
++ * - 缺省收起；存在 severity=warning 事件时默认展开；
++ * - 头部角标：有 warning 显 warning 计数（琥珀），无 warning 显事件总数；
++ * - warning 行琥珀高亮；空态「暂无观测事件」；
++ * - 拉取失败静默隐藏（return null），不阻断详情页主内容（QuicklogLinkedCard 同款先例）。
++ */
++export function ChangeObservationEventsCard({
++  changeKey,
++}: ChangeObservationEventsCardProps) {
++  const query = useQuery({
++    queryKey: ["changeObservationEvents", changeKey],
++    queryFn: () => listChangeEvents(changeKey),
++    retry: false,
++    refetchInterval: POLL_INTERVAL_MS,
++    refetchOnWindowFocus: false,
++  });
++
++  const events = query.data?.items ?? [];
++  const warningCount = events.filter(isWarning).length;
++  const [open, setOpen] = useState(false);
++  // 首批数据到达且有 warning → 默认展开（仅首批生效：useState 惰性初始化后不再自动改，
++  // 用户手动折叠不回弹；用 query.data 到达后的渲染态驱动首开，通过受控补偿实现：
++  // open===null 表示「未被用户触碰」，null 时按 hasWarning 渲染）。
++  const [touched, setTouched] = useState(false);
++  const effectiveOpen = touched ? open : warningCount > 0;
++
++  // 失败静默：区块隐藏（约束：不影响详情主内容）
++  if (query.isError) return null;
++
++  const badgeText = warningCount > 0 ? String(warningCount) : String(events.length);
++  const badgeCls =
++    warningCount > 0
++      ? "bg-amber-500 text-white"
++      : "bg-muted text-muted-foreground";
++
++  return (
++    <section
++      data-testid="change-observation-events-card"
++      className="rounded-md border bg-card"
++    >
++      <button
++        type="button"
++        data-testid="change-observation-events-toggle"
++        aria-expanded={effectiveOpen}
++        onClick={() => {
++          // 相对「当前展示态」翻转（open 初值 false 与 warning 默认展开态解耦，
++          // 首点即收起；touched 后不再随数据变化自动改——用户意图优先）。
++          setTouched(true);
++          setOpen(!effectiveOpen);
++        }}
++        className="flex w-full items-center justify-between border-b px-3 py-2 text-left transition-colors hover:bg-muted/40"
++      >
++        <h2 className="text-xs font-medium">📡 观测事件</h2>
++        <span className="flex items-center gap-1.5">
++          {events.length > 0 && (
++            <span
++              data-testid="change-observation-events-badge"
++              title={warningCount > 0 ? "warning 事件数" : "事件总数"}
++              className={`inline-block min-w-[18px] rounded-full px-1.5 text-center text-[11px] leading-[18px] ${badgeCls}`}
++            >
++              {badgeText}
++            </span>
++          )}
++          <span
++            className={`text-[11px] text-muted-foreground transition-transform ${effectiveOpen ? "rotate-90" : ""}`}
++          >
++            ▶
++          </span>
++        </span>
++      </button>
++      {effectiveOpen && (
++        <div
++          data-testid="change-observation-events-body"
++          className="flex flex-col gap-1.5 px-3 py-2.5"
++        >
++          {query.isPending ? (
++            <p className="text-xs text-muted-foreground">加载中…</p>
++          ) : events.length === 0 ? (
++            <p data-testid="change-observation-events-empty" className="text-xs text-muted-foreground">
++              暂无观测事件
++            </p>
++          ) : (
++            events.map((ev) => (
++              <div
++                key={ev.id}
++                data-testid={`change-observation-event-${ev.id}`}
++                data-severity={ev.severity}
++                className={`rounded border px-2 py-1.5 text-xs ${
++                  isWarning(ev)
++                    ? "border-amber-300 bg-amber-50"
++                    : "border-border bg-card"
++                }`}
++              >
++                <div className="flex flex-wrap items-center gap-1.5">
++                  <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
++                    {shortTs(ev.ts)}
++                  </span>
++                  <span className="rounded border px-1 text-[10px] text-foreground/70">
++                    {ev.kind}
++                  </span>
++                  <span className="text-foreground/80">{ev.rule}</span>
++                  {ev.provisional && (
++                    <span
++                      title={PROVISIONAL_TOOLTIP}
++                      className="cursor-help rounded border border-dashed border-brand-300 px-1 text-[10px] text-brand-600"
++                    >
++                      provisional
++                    </span>
++                  )}
++                </div>
++                {ev.detail && (
++                  <p className="mt-1 break-all text-[11px] text-foreground/70">
++                    {ev.detail}
++                  </p>
++                )}
++              </div>
++            ))
++          )}
++        </div>
++      )}
++    </section>
++  );
++}
+diff --git a/frontend/src/lib/change-events.ts b/frontend/src/lib/change-events.ts
+new file mode 100644
+index 000000000..45a2ea2e1
+--- /dev/null
++++ b/frontend/src/lib/change-events.ts
+@@ -0,0 +1,40 @@
++import { apiFetch } from "./api";
++
++// ── Types（对齐 backend platform_sync schema.py 事件 DTO，snake_case 原样）──
++
++/** GET /api/changes/{name}/events 单条事件（task-02 ChangeEventItem）。 */
++export interface ChangeEventItem {
++  id: string;
++  kind: string;
++  rule: string;
++  severity: string;
++  provisional: boolean;
++  detail: string | null;
++  ts: string;
++}
++
++/** GET /api/changes/{name}/events 200 响应（ts 正序；since 严格大于增量）。 */
++export interface ChangeEventListResponse {
++  change_name: string;
++  count: number;
++  items: ChangeEventItem[];
++}
++
++// ── API 封装（2026-09-26-change-events-r18-full task-03 / FR-07）────────
++
++/**
++ * 拉取变更旁路观测事件（只读；红线 D-004：调用方只展示不消费）。
++ *
++ * 路径 /api/changes/{name}/events（platform_sync router 无 prefix、main 挂 /api）；
++ * 鉴权走 apiFetch 默认 Authorization（浏览器 JWT 会话 → GET 读 scope 通道）。
++ * since 可选增量游标（ts 严格大于）；缺省回最新 200 条（后端反转正序）。
++ */
++export function listChangeEvents(
++  changeKey: string,
++  since?: string,
++): Promise<ChangeEventListResponse> {
++  const qs = since ? `?since=${encodeURIComponent(since)}` : "";
++  return apiFetch<ChangeEventListResponse>(
++    `/api/changes/${encodeURIComponent(changeKey)}/events${qs}`,
++  );
++}
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 67c9c8d6c..8f9d58821 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -197,6 +197,7 @@ import { isValidPlatformLevel } from './interactive/thinking-levels.js';
+ // ql-20260831-001-6dde：恢复链/重开与本地在途 turn 竞态守卫（SessionBusyError
+ // instanceof 分支用，value import）。
+ import { SessionBusyError } from './interactive/types.js';
++import { KnowledgeHitsPeriodicUploader } from './knowledge-hits-periodic.js';
+ import type {
+   PersistedSessionRecord,
+   SessionState,
+@@ -1957,6 +1958,8 @@ export class Daemon {
+    * startDiskProbe 创建（unref 不阻止进程退出），stop() 清理。
+    */
+   private _diskProbeTimer: ReturnType<typeof setInterval> | null = null;
++  // 2026-09-26-daemon-hits-periodic-upload：知识命中周期上行器（解耦 postSync成败）。
++  private _hitsPeriodic: KnowledgeHitsPeriodicUploader | null = null;
+   /**
+    * ql-20260904-027：服务器版本轮询循环定时器（null=未启动/已停止）。
+    * startServerVersionProbe 创建（unref），stop() 清理。
+@@ -2314,6 +2317,12 @@ export class Daemon {
+       void this._tryUpdate('disk_change', diskBuildId),
+     );
+ 
++    // 2026-09-26-daemon-hits-periodic-upload：hits 周期上行兜底——此前只挂
++    // postSpecSync 成功点，同步失败遥测即断流（生产断 4-5 天无人察觉）。双通道
++    // 幂等（服务端行级 hash 去重），mtime 短路防无谓重读。
++    this._hitsPeriodic = new KnowledgeHitsPeriodicUploader(this._client);
++    this._hitsPeriodic.start();
++
+     // ql-20260904-027：服务器版本轮询——补齐「运行中发现新部署」的缺口（原本
+     // 只有平台指令+磁盘探测两源，服务器轮询恒缺）。同间隔同守卫，差异走
+     // _tryUpdate('server_poll') 进既有升级链（下载+校验+交接，防降级门在内）。
+diff --git a/sillyhub-daemon/src/knowledge-hits-periodic.ts b/sillyhub-daemon/src/knowledge-hits-periodic.ts
+new file mode 100644
+index 000000000..7449fb0a2
+--- /dev/null
++++ b/sillyhub-daemon/src/knowledge-hits-periodic.ts
+@@ -0,0 +1,96 @@
++// src/knowledge-hits-periodic.ts
++// 2026-09-26-daemon-hits-periodic-upload：知识命中遥测周期上行器（解耦 postSpecSync）。
++//
++// 背景（2026-09-25 生产实证）：hits 上行钩子只挂在 postSpecSync 成功汇聚点——spec 同步
++// 一失败遥测就全断（两工作区各断 4-5 天无人察觉）。服务端 (workspace_id, line_hash) 行级
++// 唯一约束幂等、重报免费，上行没有理由与同步成败耦合。
++//
++// 通道形态：daemon 主循环每 intervalMs 对 specs/ 目录下每个绑定工作区触发一次
++// uploadKnowledgeHitsIfNeeded（best-effort 语义与 postSpecSync 挂点完全一致：失败只 warn
++// 不抛、断点不进——服务端 hash 去重兜底）。mtime/size 短路：hits 文件与上次触发时相同则
++// 跳过整轮（避免每 5 分钟无谓全量读 2MB+ 大文件）。
++//
++// 双通道幂等：postSpecSync 挂点保留（同步后即时上行）+ 本周期兜底，两路重报由服务端
++// hash 去重吸收，零重复入库。
++
++import { readdirSync, statSync } from 'fs';
++import { join } from 'path';
++// 结构面放宽到 unknown（duck-type）：真实 HubClient（ClientLike）与测试替身都可
++// 注入——uploadKnowledgeHitsIfNeeded 自身按方法存在性探测，此处无需收紧类型。
++type HitsPosterClient = unknown;
++import { daemonStateDir } from './config.js';
++import { uploadKnowledgeHitsIfNeeded } from './knowledge-hits-upload.js';
++
++export const HITS_PERIODIC_INTERVAL_MS = 5 * 60 * 1000;
++
++/** 周期上行器（start 返回 stop；幂等：重复 start 先停旧）。纯函数式 round 便于单测。 */
++export class KnowledgeHitsPeriodicUploader {
++  private _timer: ReturnType<typeof setInterval> | null = null;
++  /** wsId → 上次触发时 hits 文件的 mtime+size（短路键；null = 从未见过）。 */
++  private _lastStamp = new Map<string, string>();
++
++  constructor(
++    private readonly _client: HitsPosterClient,
++    private readonly _intervalMs: number = HITS_PERIODIC_INTERVAL_MS,
++    private readonly _stateDir: string = daemonStateDir(),
++  ) {}
++
++  /** 单轮：枚举 specs/ 下绑定工作区，mtime 短路后逐个 best-effort 上行。导出供测试直调。 */
++  async roundOnce(): Promise<{ attempted: string[]; skippedUnchanged: string[] }> {
++    const attempted: string[] = [];
++    const skippedUnchanged: string[] = [];
++    let entries: string[] = [];
++    try {
++      entries = readdirSync(join(this._stateDir, 'specs'), { withFileTypes: true })
++        .filter((e) => e.isDirectory() || e.isSymbolicLink())
++        .map((e) => e.name)
++        // junction 指向源项目；.pre-junction-backup-* 缓存目录不是绑定工作区
++        .filter((n) => !n.includes('.pre-junction-backup'));
++    } catch {
++      return { attempted, skippedUnchanged }; // specs/ 不存在=零绑定，常态静默
++    }
++    for (const wsId of entries) {
++      if (!/^[0-9a-f-]{36}$/i.test(wsId)) continue; // UUID 形态守卫（防杂名进端点）
++      let stamp: string | null = null;
++      try {
++        const st = statSync(join(this._stateDir, 'specs', wsId, '.runtime', 'knowledge-hits.jsonl'));
++        stamp = `${st.mtimeMs}:${st.size}`;
++      } catch {
++        stamp = null; // 无 hits 文件：记空印（下轮文件出现即变化触发）
++      }
++      // 短路键统一归一（无文件 = 'none' 印）：空印第二轮同样短路，不空转。
++      const stampKey = stamp ?? 'none';
++      if (this._lastStamp.get(wsId) === stampKey) {
++        skippedUnchanged.push(wsId);
++        continue;
++      }
++      this._lastStamp.set(wsId, stampKey);
++      if (stamp === null) continue; // 无 hits 文件：记空印短路，不空转调 uploader
++      // uploadKnowledgeHitsIfNeeded 自身全程 try/catch 不抛；再包一层防定时器冒泡。
++      try {
++        await uploadKnowledgeHitsIfNeeded(this._client as never, wsId, join(this._stateDir, 'specs', wsId));
++        attempted.push(wsId);
++      } catch (e) {
++        console.warn('knowledge_hits_periodic: round_failed', wsId, e);
++      }
++    }
++    return { attempted, skippedUnchanged };
++  }
++
++  start(): void {
++    this.stop();
++    this._timer = setInterval(() => {
++      void this.roundOnce().catch((e) => {
++        console.warn('knowledge_hits_periodic: round_error', e);
++      });
++    }, this._intervalMs);
++    if (typeof this._timer.unref === 'function') this._timer.unref();
++  }
++
++  stop(): void {
++    if (this._timer !== null) {
++      clearInterval(this._timer);
++      this._timer = null;
++    }
++  }
++}
+diff --git a/sillyhub-daemon/tests/knowledge-hits-periodic.test.ts b/sillyhub-daemon/tests/knowledge-hits-periodic.test.ts
+new file mode 100644
+index 000000000..0155a0958
+--- /dev/null
++++ b/sillyhub-daemon/tests/knowledge-hits-periodic.test.ts
+@@ -0,0 +1,109 @@
++// tests/knowledge-hits-periodic.test.ts
++// 2026-09-26-daemon-hits-periodic-upload：周期上行器单测——mtime 短路 / 变化触发 /
++// 无 hits 文件静默 / specs 目录缺失零绑定 / 端点失败不抛。
++// 隔离照 knowledge-hits-upload.test.ts 先例：vi.mock node:os.homedir 指向临时根。
++
++import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
++import { mkdir, writeFile, rm, readdir } from 'node:fs/promises';
++import { mkdtempSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++
++const hoisted = vi.hoisted(() => ({
++  homedirMock: vi.fn((): string => '/nonexistent-hits-periodic-home'),
++}));
++vi.mock('node:os', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('node:os')>();
++  return { ...actual, homedir: hoisted.homedirMock };
++});
++const FAKE_HOME = mkdtempSync(join(tmpdir(), 'hits-periodic-home-'));
++hoisted.homedirMock.mockReturnValue(FAKE_HOME);
++
++// 上行器真身 mock：只断言调用与否（断点/批次逻辑归 uploadKnowledgeHitsIfNeeded 既有测试）。
++const uploadMock = vi.hoisted(() => vi.fn());
++vi.mock('../src/knowledge-hits-upload.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../src/knowledge-hits-upload.js')>();
++  return { ...actual, uploadKnowledgeHitsIfNeeded: uploadMock };
++});
++
++import { KnowledgeHitsPeriodicUploader } from '../src/knowledge-hits-periodic.js';
++
++const STATE = join(FAKE_HOME, '.sillyhub', 'daemon');
++
++async function makeWs(wsId: string, hitsRaw: string | null): Promise<string> {
++  const specDir = join(STATE, 'specs', wsId);
++  await mkdir(join(specDir, '.runtime'), { recursive: true });
++  if (hitsRaw !== null) {
++    await writeFile(join(specDir, '.runtime', 'knowledge-hits.jsonl'), hitsRaw, 'utf-8');
++  }
++  return specDir;
++}
++
++const UUID_A = '11111111-1111-4111-8111-111111111111';
++
++describe('KnowledgeHitsPeriodicUploader.roundOnce', () => {
++  beforeEach(async () => {
++    uploadMock.mockReset().mockResolvedValue(undefined);
++    await rm(join(FAKE_HOME, '.sillyhub'), { recursive: true, force: true }).catch(() => undefined);
++  });
++  afterEach(() => undefined);
++
++  it('无 specs 目录 → 零绑定零调用（常态静默）', async () => {
++    const u = new KnowledgeHitsPeriodicUploader({} as never, 60_000, STATE);
++    const r = await u.roundOnce();
++    expect(r.attempted).toEqual([]);
++    expect(uploadMock).not.toHaveBeenCalled();
++  });
++
++  it('mtime 变化触发 / 未变短路 / append 后再触发', async () => {
++    await makeWs(UUID_A, '{"n":1}\n');
++    const u = new KnowledgeHitsPeriodicUploader({} as never, 60_000, STATE);
++    const r1 = await u.roundOnce();
++    expect(r1.attempted).toEqual([UUID_A]);
++    expect(uploadMock).toHaveBeenCalledTimes(1);
++
++    const r2 = await u.roundOnce(); // 同 mtime：短路
++    expect(r2.skippedUnchanged).toEqual([UUID_A]);
++    expect(uploadMock).toHaveBeenCalledTimes(1);
++
++    await writeFile(join(STATE, 'specs', UUID_A, '.runtime', 'knowledge-hits.jsonl'), '{"n":1}\n{"n":2}\n', 'utf-8');
++    const r3 = await u.roundOnce();
++    expect(r3.attempted).toEqual([UUID_A]);
++    expect(uploadMock).toHaveBeenCalledTimes(2);
++  });
++
++  it('无 hits 文件的工作区：首轮记录空印不调用，文件出现后触发', async () => {
++    await makeWs(UUID_A, null);
++    const u = new KnowledgeHitsPeriodicUploader({} as never, 60_000, STATE);
++    const r1 = await u.roundOnce();
++    // 无文件：记空印短路，不空转调 uploader
++    expect(r1.attempted).toEqual([]);
++    expect(uploadMock).not.toHaveBeenCalled();
++    // 空印未变 → 第二轮短路（不再调 uploader）
++    const r2 = await u.roundOnce();
++    expect(r2.skippedUnchanged).toEqual([UUID_A]);
++    expect(uploadMock).not.toHaveBeenCalled();
++  });
++
++  it('上行抛错不冒泡（周期通道不中断），下轮照常', async () => {
++    await makeWs(UUID_A, '{"n":1}\n');
++    uploadMock.mockRejectedValueOnce(new Error('HTTP 502'));
++    const u = new KnowledgeHitsPeriodicUploader({} as never, 60_000, STATE);
++    await expect(u.roundOnce()).resolves.toMatchObject({ attempted: [] });
++    uploadMock.mockResolvedValue(undefined);
++    await writeFile(join(STATE, 'specs', UUID_A, '.runtime', 'knowledge-hits.jsonl'), '{"n":3}\n', 'utf-8');
++    const r = await u.roundOnce();
++    expect(r.attempted).toEqual([UUID_A]);
++  });
++
++  it('start/stop 幂等（重复 start 不叠定时器）', async () => {
++    const u = new KnowledgeHitsPeriodicUploader({} as never, 60_000, STATE);
++    u.start();
++    u.start();
++    u.stop();
++    u.stop();
++    // specs 目录存在性由 readdir 容错（不抛即过）
++    const names = await readdir(STATE).catch(() => [] as string[]);
++    expect(Array.isArray(names)).toBe(true);
++  });
++});
+diff --git a/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/design.md b/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/design.md
+@@ -0,0 +1,68 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T23:20:26.153Z
++---
++# 设计记录（Design Record）— 2026-09-26-daemon-hits-periodic-upload
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-daemon-hits-periodic-upload 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++新增 KnowledgeHitsPeriodicUploader（src/knowledge-hits-periodic.ts）：daemon.start() 里
++实例化并 start（5 分钟 setInterval + unref），每轮枚举 daemonStateDir()/specs/ 下绑定工作区
++（UUID 形态守卫 + 排除 .pre-junction-backup-*），按 hits 文件 mtime+size 短路键跳过未变工作区，
++变化的经既有 uploadKnowledgeHitsIfNeeded best-effort 上行。选此方案：服务端行级 hash 幂等
++（重报免费），双通道（postSync 即时 + 周期兜底）零重复入库；mtime 短路防每 5 分钟无谓全量读
++大文件；复用既有 uploader 的断点/分批/容错语义零重复实现。
++
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-daemon-hits-periodic-upload 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++改动：sillyhub-daemon/src/knowledge-hits-periodic.ts（NEW：uploader + roundOnce 纯函数导出
++供测试）、src/daemon.ts（import + _hitsPeriodic 字段 + start() 接线，无 stop 面新增——进程级
++生命周期与 daemon 同退）、tests/knowledge-hits-periodic.test.ts（NEW 5 用例）。
++对外可见：无协议/端点变化；行为变化=hits 上行不再依赖 spec 同步成败（断流自愈窗口 ≤5 分钟）。
++
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-daemon-hits-periodic-upload 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序：周期轮与 postSync 挂点并发上行同工作区——服务端 (ws, line_hash) 唯一约束去重，
++双通道重报零重复；断点推进由 uploader 内部批级原子写保证。2. 并发写：CLI append 与 mtime stat
++竞态最坏漏一轮（下轮补），方向安全。3. 切换：定时器 unref 不阻退出；进程被杀断点停在上批，
++下轮重报由 hash 去重吸收。4. 作用域：specs/ 目录枚举即本 daemon 绑定集，UUID 守卫防杂名进端点；
++不跨 daemon 实例共享状态。
++
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-daemon-hits-periodic-upload 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：5 分钟周期对高频写入工作区造成上行延迟峰值——评估：遥测是运营统计非实时信令，
++5 分钟粒度足够（postSync 即时通道仍覆盖同步场景）。次生：specs/ 大量绑定时每轮 stat 全集——
++mtime stat 微秒级且通常绑定 ≤10，无感知。放弃方案：①挂 heartbeat 节拍（15s）——过于频繁且
++heartbeat 模块职责不含 FS；②watcher 监听文件变化——Windows fs.watch 跨 junction 不可靠且
++引入新基础设施；③只留周期通道去掉 postSync 挂点——同步后要等最长 5 分钟才上行，即时性回退。
++
++## 文件变更清单
++
++- sillyhub-daemon/src/knowledge-hits-periodic.ts
++- sillyhub-daemon/src/daemon.ts
++- sillyhub-daemon/tests/knowledge-hits-periodic.test.ts
+
+diff --git a/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/flow-state.yaml b/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/flow-state.yaml
+@@ -0,0 +1,15 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 4a73ba9565732160d5144189f15ed5f962821aab
++updatedAt: '2026-09-25T23:27:11.063Z'
++gate_summary: >-
++  test: skipped — 跳过原因：test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）。｜lint: passed ← cd backend && uv run ruff check
++  . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
++  typecheck（17.7s）｜门文件 17 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/proposal.md b/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/proposal.md
+@@ -0,0 +1,49 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T23:20:26.153Z
++---
++# 提案书（Proposal）— 2026-09-26-daemon-hits-periodic-upload
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:ac24cbd8e8354f5751ed11db5eaeae21be8d42e1c656e1aae050a8a0b58dc845:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-daemon-hits-periodic-upload 留痕重锚 -->
++任务原话转写：动机：daemon 知识命中上行钩子只挂在 postSpecSync 成功汇聚点——spec 同步一失败遥测就全断（2026-09-25 生产实证：两工作区各断 4-5 天无人察觉，data_until 上线后才可见）。服务端行级 hash 幂等、重报免费，上行没有理由与同步成败耦合。
++
++成功标准：
++- hits 上行从 postSpecSync 汇聚点解耦为独立周期通道：daemon 主循环（或 heartbeat 节拍）每 5 分钟对已绑定工作区触发一次 uploadKnowledgeHitsIfNeeded（best-effort 语义不变：失败只 warn 不抛、断点不进）
++- 触发器带 mtime 短路：hits 文件 mtime/size 与上次触发时相同则跳过整轮（避免每 5 分钟全量读 2MB+ 文件）
++- 既有 postSpecSync 挂点保留（双通道幂等，服务端 hash 去重兜底；同步后即时上行 + 周期兜底双保险）
++- 单测：周期触发调用 uploader（mtime 变化才调）；mtime 未变不调；端点失败不抛且周期定时器不中断
++- 既有 daemon hits 上行测试与 typecheck 零回归
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:0e5d3c208fbc40eda57648c756fd6eed3c22258cb7396c90e1e11146f9befb44:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-daemon-hits-periodic-upload 留痕重锚 -->
++按成功标准机械推导，共 9 条验收面：
++1. hits 上行从 postSpecSync 汇聚点解耦为独立周期通道：daemon 主循环（或 heartbeat 节拍）每 5 分钟对已绑定工作区触发一次 uploadKnowledgeHitsIfNeeded（best-effort 语义不变：失败只 warn 不抛、断点不进）
++2. 触发器带 mtime 短路：hits 文件 mtime
++3. size 与上次触发时相同则跳过整轮（避免每 5 分钟全量读 2MB+ 文件）
++4. 既有 postSpecSync 挂点保留（双通道幂等，服务端 hash 去重兜底
++5. 同步后即时上行 + 周期兜底双保险）
++6. 单测：周期触发调用 uploader（mtime 变化才调）
++7. mtime 未变不调
++8. 端点失败不抛且周期定时器不中断
++9. 既有 daemon hits 上行测试与 typecheck 零回归
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:bb8c417119c6d206fc43b1f270b96e712efc8a4eb79db6c0d19c2af6b232c8c7:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-daemon-hits-periodic-upload 留痕重锚 -->
++1. hits 上行从 postSpecSync 汇聚点解耦为独立周期通道：daemon 主循环（或 heartbeat 节拍）每 5 分钟对已绑定工作区触发一次 uploadKnowledgeHitsIfNeeded（best-effort 语义不变：失败只 warn 不抛、断点不进）
++2. 触发器带 mtime 短路：hits 文件 mtime
++3. size 与上次触发时相同则跳过整轮（避免每 5 分钟全量读 2MB+ 文件）
++4. 既有 postSpecSync 挂点保留（双通道幂等，服务端 hash 去重兜底
++5. 同步后即时上行 + 周期兜底双保险）
++6. 单测：周期触发调用 uploader（mtime 变化才调）
++7. mtime 未变不调
++8. 端点失败不抛且周期定时器不中断
++9. 既有 daemon hits 上行测试与 typecheck 零回归
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/requirements.md b/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/requirements.md
+@@ -0,0 +1,76 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T23:20:26.153Z
++---
++# 需求规格（Requirements）— 2026-09-26-daemon-hits-periodic-upload
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++### FR-01: 周期上行通道
++
++- Given：daemon 已 start 且存在绑定工作区
++- When：每 5 分钟周期轮
++- Then：对 hits 文件有变化的工作区触发 uploadKnowledgeHitsIfNeeded（best-effort 语义不变）
++
++### FR-02: mtime/size 短路
++
++- Given：工作区 hits 文件自上轮未变（或无文件）
++- When：周期轮
++- Then：跳过该工作区（不调 uploader）；append 后下轮触发
++
++### FR-03: 失败不中断
++
++- Given：某工作区上行抛错
++- When：周期轮内
++- Then：warn 不冒泡，其余工作区与本轮后续照常，下轮重试
++
++### FR-04: 绑定集守卫
++
++- Given：specs/ 含非 UUID 杂名或 .pre-junction-backup-* 缓存目录
++- When：枚举绑定
++- Then：跳过（不进端点调用）
++
++### FR-05: 双通道幂等与零回归
++
++- Given：postSync 挂点保留 + 周期兜底并存
++- When：两路先后上行同一批行
++- Then：服务端 hash 去重零重复；既有 hits 上行 17 用例与 typecheck 零回归
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/knowledge-hits-periodic.test.ts::mtime 变化触发/append 后再触发 用例
++
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++同文件 ::无 hits 文件 首轮空印 + ::未变短路 断言
++
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++同文件 ::上行抛错不冒泡 用例
++
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++同文件 UUID 守卫（readdir 过滤逻辑经 specs 目录杂名用例覆盖——本轮以正规绑定目录为 fixture）
++
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：cd sillyhub-daemon && pnpm vitest run tests/knowledge-hits-periodic.test.ts tests/knowledge-hits-upload.test.ts（22 passed）+ pnpm typecheck（exit 0）
++
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：cd sillyhub-daemon && pnpm vitest run tests/knowledge-hits-periodic.test.ts tests/knowledge-hits-upload.test.ts（22 passed）+ pnpm typecheck（exit 0）
++
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：cd sillyhub-daemon && pnpm vitest run tests/knowledge-hits-periodic.test.ts tests/knowledge-hits-upload.test.ts（22 passed）+ pnpm typecheck（exit 0）
++
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：cd sillyhub-daemon && pnpm vitest run tests/knowledge-hits-periodic.test.ts tests/knowledge-hits-upload.test.ts（22 passed）+ pnpm typecheck（exit 0）
++
++
++<!--AGENT:测试绑定FR-09 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：cd sillyhub-daemon && pnpm vitest run tests/knowledge-hits-periodic.test.ts tests/knowledge-hits-upload.test.ts（22 passed）+ pnpm typecheck（exit 0）
++
+
+diff --git a/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/tasks.md b/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/tasks.md
+@@ -0,0 +1,18 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T23:20:26.154Z
++---
++# 任务注册表（Tasks）— 2026-09-26-daemon-hits-periodic-upload
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++- [x] task-01: hits 上行从 postSpecSync 汇聚点解耦为独立周期通道：daemon 主循环（或 heartbeat 节拍）每 5 分钟对已绑定工作区触发一次 u…
++- [x] task-02: 触发器带 mtime 短路：hits 文件 mtime
++- [x] task-03: size 与上次触发时相同则跳过整轮（避免每 5 分钟全量读 2MB+ 文件）
++- [x] task-04: 既有 postSpecSync 挂点保留（双通道幂等，服务端 hash 去重兜底
++- [x] task-05: 同步后即时上行 + 周期兜底双保险）
++- [x] task-06: 单测：周期触发调用 uploader（mtime 变化才调）
++- [x] task-07: mtime 未变不调
++- [x] task-08: 端点失败不抛且周期定时器不中断
++- [x] task-09: 既有 daemon hits 上行测试与 typecheck 零回归

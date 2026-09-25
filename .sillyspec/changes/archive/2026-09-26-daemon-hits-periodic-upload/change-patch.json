@@ -1,0 +1,35 @@
+{
+  "change": "2026-09-26-daemon-hits-periodic-upload",
+  "baseline": "4a73ba9565732160d5144189f15ed5f962821aab",
+  "head": "304eba982ba6add17e415f227a4a37e7fd64b584",
+  "files": [
+    "backend/app/modules/platform_sync/model.py",
+    "backend/app/modules/platform_sync/router.py",
+    "backend/app/modules/platform_sync/schema.py",
+    "backend/app/modules/platform_sync/service.py",
+    "backend/app/modules/platform_sync/tests/conftest.py",
+    "backend/app/modules/platform_sync/tests/test_change_events.py",
+    "backend/migrations/versions/20260926063000_add_platform_change_events.py",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+    "frontend/src/components/changes/detail/change-observation-events-card.test.tsx",
+    "frontend/src/components/changes/detail/change-observation-events-card.tsx",
+    "frontend/src/lib/change-events.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/knowledge-hits-periodic.ts",
+    "sillyhub-daemon/tests/knowledge-hits-periodic.test.ts",
+    ".sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/design.md",
+    ".sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/flow-state.yaml",
+    ".sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/proposal.md",
+    ".sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/requirements.md",
+    ".sillyspec/changes/2026-09-26-daemon-hits-periodic-upload/tasks.md"
+  ],
+  "totals": {
+    "files": 19,
+    "additions": 1602,
+    "deletions": 1072
+  },
+  "savedAt": "2026-09-25T23:27:11.715Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "da13fa9927f784e58e1e758013a379d32835cab677a534e9154502a3eec1e800",
+  "patchStatus": "ok"
+}
