@@ -1286,22 +1286,23 @@ class SpecWorkspaceService:
                 # task-02 / D-002：per-file 纯 FS 段（read_bytes → sha256 → mtime 计算
                 # + mkdir）抽成同步内函数整体入线程，DB 相关段（conflict archive /
                 # ScanDocument 改写 / session.add）留在事件循环。线程内只产出
-                # (content, ch, src_mtime) 回 loop 再改对象；shutil.move 同样入线程，
-                # 与 doc 行写入的相对顺序（先落盘后写行）不变。
+                # (content, ch, src_mtime, tgt_exists) 回 loop 再改对象；shutil.move
+                # 同样入线程，与 doc 行写入的相对顺序（先落盘后写行）不变。
                 def _load_member(
                     src: Path = src_file, tgt: Path = target, tar_mtime: float = m.mtime
-                ) -> tuple[bytes, str, datetime | None]:
+                ) -> tuple[bytes, str, datetime | None, bool]:
                     tgt.parent.mkdir(parents=True, exist_ok=True)
                     data = src.read_bytes()
                     digest = hashlib.sha256(data).hexdigest()
                     src_mtime = datetime.fromtimestamp(tar_mtime, tz=UTC) if tar_mtime > 0 else None
-                    return data, digest, src_mtime
+                    # 目标磁盘在位探测（复活判定用）：同内容跳过分支的前提之一。
+                    return data, digest, src_mtime, tgt.exists()
 
-                # ql-20260813-004：staging 成员缺失（tar name 被旧打包方截断 / 解包竞态等）
+                # ql-20260913-004：staging 成员缺失（tar name 被旧打包方截断 / 解包竞态等）
                 # → 跳过 + warn，不抛 500 致整次同步失败。daemon 侧 buildLongLinkHeader +
                 # 排除 runtime(无点) 已根治超长 name，此为纵深防御兜底。
                 try:
-                    content, ch, src_mtime = await asyncio.to_thread(_load_member)
+                    content, ch, src_mtime, tgt_exists = await asyncio.to_thread(_load_member)
                 except FileNotFoundError:
                     log.warning(
                         "spec_workspace.sync_member_missing_in_staging",
@@ -1314,8 +1315,15 @@ class SpecWorkspaceService:
 
                 cur = existing_by_path.get(rel_path)
 
+                # 复活态（2026-09-25-full-sync-resurrect-missing，生产 c84182bc 实证）：
+                # 「既有行哈希相同就 continue」隐含「磁盘已有该文件」——镜像磁盘缺文件
+                # （曾被收敛/墓碑削掉）或行软删（exists=False 幽灵行）时，整树覆盖的全量
+                # 推送也永远写不回该文件。复活态不参与 mtime 优越性判定（磁盘侧本无现行
+                # 文件可比对），直接落盘并把行翻回在线。
+                resurrect = (not tgt_exists) or (cur is not None and not cur.exists)
+
                 if cur:
-                    if cur.content_hash == ch:
+                    if cur.content_hash == ch and not resurrect:
                         continue
                     # Normalize naive datetimes (SQLite returns naive) to UTC-aware.
                     cur_raw = cur.source_mtime
@@ -1326,23 +1334,25 @@ class SpecWorkspaceService:
                     if inc_raw is not None and inc_raw.tzinfo is None:
                         inc_raw = inc_raw.replace(tzinfo=UTC)
                     inc_mtime = inc_raw or datetime.min.replace(tzinfo=UTC)
-                    if inc_mtime > cur_mtime:
+                    if resurrect or inc_mtime > cur_mtime:
                         # ql-20260817-005：add_to_session=False——构造冲突行收集到
                         # pending，循环外统一 add（循环内 add 会 autobegin 开事务）。
-                        pending_conflicts.append(
-                            await conflict_svc.archive_conflict(
-                                workspace_id,
-                                rel_path,
-                                old_content=cur.content,
-                                old_source_member_id=cur.source_member_id,
-                                old_source_runtime_id=cur.source_runtime_id,
-                                old_mtime=cur.source_mtime,
-                                new_source_member_id=None,
-                                new_mtime=src_mtime,
-                                add_to_session=False,
+                        # 复活且内容一致的文件不归档冲突（内容相同无冲突可言）。
+                        if cur.content_hash != ch:
+                            pending_conflicts.append(
+                                await conflict_svc.archive_conflict(
+                                    workspace_id,
+                                    rel_path,
+                                    old_content=cur.content,
+                                    old_source_member_id=cur.source_member_id,
+                                    old_source_runtime_id=cur.source_runtime_id,
+                                    old_mtime=cur.source_mtime,
+                                    new_source_member_id=None,
+                                    new_mtime=src_mtime,
+                                    add_to_session=False,
+                                )
                             )
-                        )
-                        # ql-20260813-007：strip NUL 字节兜底——scan_documents.content 是 PG
+                        # ql-20260913-007：strip NUL 字节兜底——scan_documents.content 是 PG
                         # 文本列，asyncpg 拒绝 0x00；errors="replace" 不替换 NUL（合法 UTF-8）。
                         # daemon packSpecDir 已排除 .runtime，此分支防其它二进制文件漏入炸整批。
                         cur.content = content.decode("utf-8", errors="replace").replace("\x00", "")
@@ -1350,6 +1360,7 @@ class SpecWorkspaceService:
                         cur.source_mtime = src_mtime
                         cur.source_synced_at = now
                         cur.last_modified_at = src_mtime or now
+                        cur.exists = True
                         await asyncio.to_thread(shutil.move, str(src_file), str(target))
                         await progress.bump()
                 else:

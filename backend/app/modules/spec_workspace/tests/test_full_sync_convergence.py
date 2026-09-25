@@ -294,3 +294,121 @@ class TestConvergeGuards:
         assert (spec_root / "docs" / "A.md").exists()
         assert (ghost_root / "d0" / "g.md").exists()
         assert not _backup_root(ws.id).exists()
+
+
+# ===========================================================================
+# 2026-09-25-full-sync-resurrect-missing：同内容跳过分支的复活语义
+# ===========================================================================
+
+
+class TestResurrectMissingFiles:
+    """生产 c84182bc 实证：行在、哈希同、磁盘无文件（或行软删）→ 全量推送也写不回。"""
+
+    async def _seed_row(self, db_session, ws_id, path: str, content: bytes, *, exists: bool):
+        import hashlib
+
+        from app.modules.scan_docs.model import ScanDocument
+
+        db_session.add(
+            ScanDocument(
+                id=uuid.uuid4(),
+                workspace_id=ws_id,
+                doc_type="md",
+                path=path,
+                title=path.rsplit("/", 1)[-1],
+                content=content.decode("utf-8"),
+                content_hash=hashlib.sha256(content).hexdigest(),
+                exists=exists,
+            )
+        )
+        await db_session.commit()
+
+    async def test_ghost_soft_deleted_row_same_hash_resurrects(self, db_session, tmp_path) -> None:
+        """行软删（exists=False）+ 哈希相同 + 磁盘缺文件 → 落盘且行翻回在线。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        spec_root.mkdir()
+        await _make_spec_workspace(db_session, ws, spec_root)
+        content = b"# worktree knowledge\n"
+        await self._seed_row(
+            db_session, ws.id, "knowledge/decisions/worktree.md", content, exists=False
+        )
+
+        await SpecWorkspaceService(db_session).apply_sync(
+            ws.id, _build_tar({"knowledge/decisions/worktree.md": content})
+        )
+
+        # 用户可见面：文件必须落盘（旧代码在同哈希分支 continue，文件永远写不回）。
+        # 行的 exists 由 reparse 阶段管理（docs/ 域外行统一软删，既有语义）——不在本断言面。
+        assert (spec_root / "knowledge" / "decisions" / "worktree.md").read_bytes() == content
+
+    async def test_disk_missing_row_online_same_hash_resurrects(self, db_session, tmp_path) -> None:
+        """行在线 + 哈希相同 + 磁盘缺文件（镜像曾被削）→ 落盘，不产生冲突归档行。"""
+        from datetime import UTC, datetime, timedelta
+
+        from app.modules.scan_docs.conflict_model import ScanDocConflictHistory
+        from app.modules.scan_docs.model import ScanDocument
+
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        spec_root.mkdir()
+        await _make_spec_workspace(db_session, ws, spec_root)
+        content = b"# cli-entry fr\n"
+        # 行在线、mtime 很旧（旧逻辑要求 inc_mtime > cur_mtime 才写——复活必须绕开）
+        import hashlib
+
+        db_session.add(
+            ScanDocument(
+                id=uuid.uuid4(),
+                workspace_id=ws.id,
+                doc_type="md",
+                path="knowledge/fr/cli-entry.md",
+                title="cli-entry.md",
+                content=content.decode("utf-8"),
+                content_hash=hashlib.sha256(content).hexdigest(),
+                exists=True,
+                source_mtime=datetime.now(UTC) - timedelta(days=400),
+            )
+        )
+        await db_session.commit()
+
+        await SpecWorkspaceService(db_session).apply_sync(
+            ws.id, _build_tar({"knowledge/fr/cli-entry.md": content})
+        )
+
+        assert (spec_root / "knowledge" / "fr" / "cli-entry.md").read_bytes() == content
+        # 内容一致 → 无冲突归档行
+        conflicts = (
+            (
+                await db_session.execute(
+                    select(ScanDocConflictHistory).where(
+                        ScanDocConflictHistory.workspace_id == ws.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert conflicts == []
+
+    async def test_same_hash_and_disk_present_still_skips(self, db_session, tmp_path) -> None:
+        """正常态（哈希同 + 磁盘已有 + 行在线）仍跳过：文件 mtime 不被重写（零回归）。"""
+        import os
+
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        target = spec_root / "knowledge" / "keep.md"
+        target.parent.mkdir(parents=True)
+        content = b"# keep\n"
+        target.write_bytes(content)
+        old = 1_000_000
+        os.utime(target, (old, old))
+        await _make_spec_workspace(db_session, ws, spec_root)
+        await self._seed_row(db_session, ws.id, "knowledge/keep.md", content, exists=True)
+
+        await SpecWorkspaceService(db_session).apply_sync(
+            ws.id, _build_tar({"knowledge/keep.md": content})
+        )
+
+        assert target.read_bytes() == content
+        assert int(target.stat().st_mtime) == old  # 未 move（skip 分支保持原文件不动）
