@@ -50,8 +50,10 @@ async def hits_ws(db_session, tmp_path: Path) -> dict:
     (knowledge / "generated").mkdir()
     (knowledge / "proposed").mkdir()
 
+    # INDEX 路由行用真实格式（href=file#锚点）——2026-09-25-knowledge-stats-layering
+    # 起 stats 可路由面消费 INDEX（此前仅摆设，玩具 href="x" 形态不再满足解析）。
     (knowledge / "INDEX.md").write_text(
-        "# Knowledge Index\n\n## Patterns\n\n- k|关键词 → [conventions.md#提交规范](x)\n",
+        "# Knowledge Index\n\n## Patterns\n\n- k|关键词 → [提交规范](conventions.md#提交规范)\n",
         encoding="utf-8",
     )
     (knowledge / "conventions.md").write_text(
@@ -456,7 +458,8 @@ async def drift_ws(db_session, tmp_path: Path) -> dict:
         id=uuid.uuid4(),
         name="drift-ws",
         slug=f"drift-ws-{uuid.uuid4().hex[:8]}",
-        root_path=str(tmp_path / "client-machine-path"),
+        # root_path 与 hits_ws 不同值：两 fixture 同测试共用 tmp_path 时避开唯一约束
+        root_path=str(tmp_path / "client-machine-path-drift"),
         status="active",
     )
     db_session.add(ws)
@@ -577,8 +580,16 @@ async def test_stats_endpoint_literal_route_not_swallowed(
         "freshness",
         "usage_board",
         "entry_counts",
+        "orphan_anchors",
+        "data_until",
     }
-    assert set(body["coverage"]) == {"used_entries", "total_entries", "trend"}
+    assert set(body["coverage"]) == {
+        "used_entries",
+        "total_entries",
+        "routable_entries",
+        "routable_used_entries",
+        "trend",
+    }
     assert body["coverage"]["used_entries"] == 5
 
 
@@ -617,3 +628,62 @@ async def test_hits_batch_body_bounds_return_422(
         json={"lines": ["{}"] * 2000},
     )
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# 三新字段口径（change 2026-09-25-knowledge-stats-layering）
+# ---------------------------------------------------------------------------
+
+
+async def test_stats_layering_fields(db_session, hits_ws: dict, drift_ws: dict) -> None:
+    """routable 双口径 / orphan_anchors 单列 / data_until 三件套。
+
+    - hits_ws（INDEX 有一条小节路由 conventions.md#提交规范，未被命中）：
+      routable=1/used=0；有命中行 → data_until 非空；scenario 无幽灵锚 → orphans 空。
+    - drift_ws（INDEX 空壳无路由行）→ 退化为全集：routable == total、routable_used ==
+      used；歧义锚 + 内容漂移锚是幽灵 → orphans 单列（含次数与最后命中时间）。
+    """
+    service = HitsService(db_session)
+    await service.ingest_batch(hits_ws["ws_id"], _scenario_lines(hits_ws["now"]))
+    await service.ingest_batch(
+        drift_ws["ws_id"],
+        [
+            _hit_line(
+                change="chg-layer",
+                matched=[
+                    _DOT_HIT_ANCHOR,
+                    _FOLD_HIT_ANCHOR,
+                    "conventions.md#提交规范",
+                    "conventions.md#foo.bar",
+                    _DRIFTED_HIT_ANCHOR,
+                ],
+                at=hits_ws["now"],
+            )
+        ],
+    )
+
+    a = await service.stats(hits_ws["ws_id"])
+    # INDEX 路由只覆盖 提交规范（decisions/fr 无文件级路由行）且未被 scenario 命中
+    assert a.coverage.routable_entries == 1
+    assert a.coverage.routable_used_entries == 0
+    assert a.data_until is not None
+    assert a.orphan_anchors == []
+
+    b = await service.stats(drift_ws["ws_id"])
+    # INDEX 空壳（无路由行）→ 全集退化
+    assert b.coverage.routable_entries == b.coverage.total_entries == 6
+    assert b.coverage.routable_used_entries == b.coverage.used_entries == 3
+    assert b.data_until is not None
+    # 幽灵锚单列：歧义锚 foo.bar + 内容漂移锚（各 1 次），按次数降序同数按锚点字典序
+    assert [(o.anchor, o.total) for o in b.orphan_anchors] == [
+        ("conventions.md#foo.bar", 1),
+        (_DRIFTED_HIT_ANCHOR, 1),
+    ]
+    assert all(o.last_hit is not None for o in b.orphan_anchors)
+
+
+async def test_stats_zero_hits_data_until_none(db_session, hits_ws: dict) -> None:
+    """零命中端：data_until=None（前端「暂无使用数据」态可区分断流与无数据）。"""
+    out = await HitsService(db_session).stats(hits_ws["ws_id"])
+    assert out.data_until is None
+    assert out.orphan_anchors == []

@@ -13,7 +13,7 @@
  * （vi.hoisted + importActual）+ QueryClientProvider retry:false/gcTime:0。
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { within, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -37,6 +37,8 @@ function stats(p: Partial<KnowledgeStatsOut> = {}): KnowledgeStatsOut {
     coverage: {
       used_entries: 78,
       total_entries: 126,
+      routable_entries: 90,
+      routable_used_entries: 70,
       trend: [
         { week: "2026-07-26", pct: 0.4 },
         { week: "2026-08-02", pct: 0.45 },
@@ -53,6 +55,11 @@ function stats(p: Partial<KnowledgeStatsOut> = {}): KnowledgeStatsOut {
       { anchor: "decisions/backend.md", last_hit_at: null },
     ],
     density: { per_task_avg: 4.2, trend: [] },
+    orphan_anchors: [
+      { anchor: "conventions.md#esm-only", total: 525, last_hit: "2026-09-23T19:49:50Z" },
+      { anchor: "known-issues.md#已换代小节", total: 12, last_hit: null },
+    ],
+    data_until: "2026-09-25T05:06:34Z",
     freshness: { recent_new: 12, recent_used: 5 },
     // 乱序喂入（0.92 在中间）：断言前端防御性 per_task 降序重排。
     usage_board: [
@@ -142,6 +149,33 @@ describe("四指标卡渲染（FR-02 / D-009）", () => {
 });
 
 describe("死条目内嵌清单开合", () => {
+
+  it("可路由口径为主数值 + 全集口径副显 + 数据截至 + 失效命中期开合（2026-09-25-knowledge-stats-layering）", async () => {
+    renderDashboard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("ops-dashboard")).toBeInTheDocument(),
+    );
+    // 主数值 = 可路由口径 70/90 ≈ 78%；副显全集口径 78/126 ≈ 62%
+    const coverage = screen.getByTestId("metric-coverage");
+    expect(coverage).toHaveTextContent("78%");
+    expect(coverage).toHaveTextContent("70/90 条");
+    expect(coverage).toHaveTextContent("全集口径 62%（78/126 条，含不可路由桶）");
+    // 数据截至时间随头部行展示
+    expect(screen.getByTestId("ops-dashboard")).toHaveTextContent("数据截至");
+    // 失效命中：默认收起，点开渲染清单行
+    expect(screen.queryByTestId("orphan-entries-panel")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("orphan-toggle"));
+    const panel = await screen.findByTestId("orphan-entries-panel");
+    const rows = within(panel).getAllByTestId("orphan-entry-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("conventions.md#esm-only");
+    expect(rows[0]).toHaveTextContent("525 次");
+    expect(rows[1]).toHaveTextContent("已换代小节");
+    fireEvent.click(screen.getByTestId("orphan-toggle"));
+    expect(screen.queryByTestId("orphan-entries-panel")).not.toBeInTheDocument();
+  });
+
   it("点死条目卡展开清单（锚点 + 最后命中时间/从未），再点收起", async () => {
     mocks.getKnowledgeStats.mockResolvedValue(stats());
     renderDashboard();
@@ -207,7 +241,13 @@ describe("三态：空态 / 错误态（不白屏）", () => {
   it("零使用指标 → 「暂无使用数据」空态，不渲染指标卡与榜", async () => {
     mocks.getKnowledgeStats.mockResolvedValue(
       stats({
-        coverage: { used_entries: 0, total_entries: 0, trend: [] },
+        coverage: {
+          used_entries: 0,
+          total_entries: 0,
+          routable_entries: 0,
+          routable_used_entries: 0,
+          trend: [],
+        },
         dead_entries: [],
         density: { per_task_avg: 0, trend: [] },
         freshness: { recent_new: 0, recent_used: 0 },

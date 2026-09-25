@@ -14173,6 +14173,16 @@ export interface components {
             used_entries: number;
             /** Total Entries */
             total_entries: number;
+            /**
+             * Routable Entries
+             * @default 0
+             */
+            routable_entries: number;
+            /**
+             * Routable Used Entries
+             * @default 0
+             */
+            routable_used_entries: number;
             /** Trend */
             trend: components["schemas"]["CoverageTrendPoint"][];
         };
@@ -17576,6 +17586,10 @@ export interface components {
         /**
          * KnowledgeStatsOut
          * @description GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。
+         *
+         *     2026-09-25-knowledge-stats-layering 增：orphan_anchors（失效命中单列，
+         *     按命中次数降序）与 data_until（数据截止时间 = 使用计数行最大 occurred_at；
+         *     零命中为 None——上行断流时面板据此显式展示「数据截至 X」）。
          */
         KnowledgeStatsOut: {
             coverage: components["schemas"]["CoverageOut"];
@@ -17587,6 +17601,13 @@ export interface components {
             usage_board: components["schemas"]["UsageBoardItem"][];
             /** Entry Counts */
             entry_counts: components["schemas"]["EntryCountItem"][];
+            /**
+             * Orphan Anchors
+             * @default []
+             */
+            orphan_anchors: components["schemas"]["OrphanAnchorOut"][];
+            /** Data Until */
+            data_until?: string | null;
         };
         /**
          * KnowledgeUpdateIn
@@ -19306,6 +19327,21 @@ export interface components {
             parent_id?: string | null;
             /** Sort Order */
             sort_order?: number | null;
+        };
+        /**
+         * OrphanAnchorOut
+         * @description 失效命中（幽灵锚）：解析后仍不对应任何当前条目的命中锚点。
+         *
+         *     2026-09-25-knowledge-stats-layering：与正常榜单分开单列——「没人用」与
+         *     「锚点对不上」（知识面换代/标题漂移）是两类完全不同的信号，混排误导。
+         */
+        OrphanAnchorOut: {
+            /** Anchor */
+            anchor: string;
+            /** Total */
+            total: number;
+            /** Last Hit */
+            last_hit?: string | null;
         };
         /**
          * PageContextCreateBlock

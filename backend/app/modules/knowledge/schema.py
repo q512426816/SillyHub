@@ -265,6 +265,12 @@ class CoverageTrendPoint(BaseModel):
 class CoverageOut(BaseModel):
     used_entries: int
     total_entries: int
+    # 可路由口径分母分层（2026-09-25-knowledge-stats-layering）：INDEX.md 路由可达的
+    # 条目数（小节锚点经归一匹配 + 文件级路由覆盖整文件）与其中被命中的数——全集
+    # 分母含 unmapped/uncategorized 等结构性不可路由桶，单一口径系统性偏低且误导。
+    # INDEX 缺失/无路由行时退化为全集（routable == total）。
+    routable_entries: int = 0
+    routable_used_entries: int = 0
     trend: list[CoverageTrendPoint]
 
 
@@ -321,8 +327,25 @@ class EntryCountItem(BaseModel):
     count: int
 
 
+class OrphanAnchorOut(BaseModel):
+    """失效命中（幽灵锚）：解析后仍不对应任何当前条目的命中锚点。
+
+    2026-09-25-knowledge-stats-layering：与正常榜单分开单列——「没人用」与
+    「锚点对不上」（知识面换代/标题漂移）是两类完全不同的信号，混排误导。
+    """
+
+    anchor: str
+    total: int
+    last_hit: datetime | None = None
+
+
 class KnowledgeStatsOut(BaseModel):
-    """GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。"""
+    """GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。
+
+    2026-09-25-knowledge-stats-layering 增：orphan_anchors（失效命中单列，
+    按命中次数降序）与 data_until（数据截止时间 = 使用计数行最大 occurred_at；
+    零命中为 None——上行断流时面板据此显式展示「数据截至 X」）。
+    """
 
     coverage: CoverageOut
     dead_entries: list[DeadEntryOut]
@@ -330,3 +353,5 @@ class KnowledgeStatsOut(BaseModel):
     freshness: FreshnessOut
     usage_board: list[UsageBoardItem]
     entry_counts: list[EntryCountItem]
+    orphan_anchors: list[OrphanAnchorOut] = []
+    data_until: datetime | None = None

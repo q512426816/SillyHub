@@ -85,6 +85,8 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
   });
   // 死条目内嵌清单开关（卡面点击开合；抽屉形态的 jsdom 等价实现，见头注释）。
   const [deadOpen, setDeadOpen] = useState(false);
+  // 失效命中（幽灵锚）清单开关（2026-09-25-knowledge-stats-layering）。
+  const [orphanOpen, setOrphanOpen] = useState(false);
 
   const rootCls = cn("flex flex-col gap-3 lg:grid lg:grid-cols-3", className);
 
@@ -119,11 +121,22 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
   }
   if (!stats) return null;
 
-  const { coverage, dead_entries, density, freshness, usage_board } = stats;
+  const { coverage, dead_entries, density, freshness, usage_board, orphan_anchors } = stats;
   const coveragePct =
     coverage.total_entries > 0
       ? Math.round((coverage.used_entries / coverage.total_entries) * 100)
       : 0;
+  // 可路由口径主数值（分母分层）：INDEX 路由可达条目为分母——unmapped/uncategorized
+  // 等结构性不可路由桶不再系统性压低读数；routable=0（INDEX 空且非退化形态）回退全集。
+  const routablePct =
+    coverage.routable_entries > 0
+      ? Math.round(
+          (coverage.routable_used_entries / coverage.routable_entries) * 100,
+        )
+      : coveragePct;
+  const dataUntilText = stats.data_until
+    ? `数据截至 ${new Date(stats.data_until).toLocaleString("zh-CN")}`
+    : "";
   // 榜排序（防御性重排：后端已按 per_task 降序，前端不信任传输序）。
   const board = [...usage_board].sort((a, b) => b.per_task - a.per_task);
   const points = trendPoints(coverage.trend);
@@ -135,7 +148,7 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
         <div className="mb-2.5 flex items-baseline justify-between">
           <h3 className="text-sm font-bold">知识库运营指标</h3>
           <span className="text-[10.5px] text-muted-foreground">
-            多端汇聚 · 剥离开发量
+            多端汇聚 · 剥离开发量{dataUntilText ? ` · ${dataUntilText}` : ""}
           </span>
         </div>
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -147,14 +160,18 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
             <div className="text-[11px] text-muted-foreground">
               知识覆盖率{" "}
               <span className="text-[10px] text-muted-foreground/70">
-                被用过的/全部
+                被用过的/可路由
               </span>
             </div>
             <div className="text-[22px] font-bold leading-7 text-brand-600">
-              {coveragePct}%
+              {routablePct}%
               <span className="ml-1 text-[11px] font-normal text-muted-foreground">
-                {coverage.used_entries}/{coverage.total_entries} 条
+                {coverage.routable_used_entries}/{coverage.routable_entries} 条
               </span>
+            </div>
+            <div className="text-[10px] text-muted-foreground/70">
+              全集口径 {coveragePct}%（{coverage.used_entries}/
+              {coverage.total_entries} 条，含不可路由桶）
             </div>
             <svg
               data-testid="coverage-trend"
@@ -272,6 +289,49 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
               ))
             )}
           </div>
+        ) : null}
+
+        {/* 失效命中（幽灵锚）单列（2026-09-25-knowledge-stats-layering）：历史命中
+            但当前知识树无对应条目（知识面换代/标题漂移）——「没人用」与「对不上」
+            是两类信号，与死条目/榜单分开呈现 */}
+        {orphan_anchors.length > 0 ? (
+          <>
+            <button
+              type="button"
+              data-testid="orphan-toggle"
+              onClick={() => setOrphanOpen((v) => !v)}
+              aria-expanded={orphanOpen}
+              className="mt-2 w-full rounded-md border border-border/60 px-2 py-1 text-left text-[10.5px] text-muted-foreground transition-colors hover:border-brand-400"
+            >
+              {orphanOpen
+                ? `收起失效命中 ↑`
+                : `失效命中 ${orphan_anchors.length} 个（历史命中但对不上当前条目）↓`}
+            </button>
+            {orphanOpen ? (
+              <div
+                data-testid="orphan-entries-panel"
+                className="mt-1.5 max-h-36 overflow-y-auto rounded-md border border-border/60 bg-muted/30 p-1.5"
+              >
+                {orphan_anchors.map((o) => (
+                  <div
+                    key={o.anchor}
+                    data-testid="orphan-entry-row"
+                    className="flex items-center gap-2 border-b border-border/40 px-2 py-1 text-[11px] last:border-b-0"
+                  >
+                    <span
+                      className="min-w-0 flex-1 truncate font-mono text-muted-foreground"
+                      title={o.anchor}
+                    >
+                      {o.anchor}
+                    </span>
+                    <span className="shrink-0 text-muted-foreground/80">
+                      {o.total} 次{o.last_hit ? ` · 最后 ${new Date(o.last_hit).toLocaleDateString("zh-CN")}` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </>
         ) : null}
       </div>
 

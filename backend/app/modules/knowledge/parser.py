@@ -287,6 +287,38 @@ def anchor_match_key(anchor: str) -> str:
     return _ANCHOR_MATCH_DROP_RE.sub("", anchor.lower())
 
 
+#: INDEX.md 路由行（与 CLI knowledge-match.js parseKnowledgeIndex 同口径）：
+#: ``- 关键词1|关键词2 → [显示名](文件#锚点)`` / ``- kw → [x](文件)``（文件级）。
+_INDEX_ROUTE_RE = re.compile(r"^-\s+(.+?)\s*→\s*\[(.+?)\]\(([^#)]+)(?:#([^)]+))?\)")
+
+
+def parse_index_routes(sillyspec_root: Path) -> tuple[set[str], set[str]]:
+    """扫 ``knowledge/INDEX.md`` 提取 stats 可路由面（2026-09-25-knowledge-stats-layering）。
+
+    返回 ``(小节锚点集, 文件级路由文件集)``：带 ``#锚点`` 的路由行进前者（原样字符串，
+    消费侧经 :func:`anchor_match_key` 归一匹配条目锚点）；裸文件路由行进后者（该文件
+    全部条目视为可路由——decisions/fr 的天然形态）。INDEX 缺失/损坏 → 空集（调用方
+    按全集退化处理）。
+    """
+    index_path = sillyspec_root / "knowledge" / "INDEX.md"
+    try:
+        content = index_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return set(), set()
+    section_anchors: set[str] = set()
+    file_routes: set[str] = set()
+    for line in content.splitlines():
+        m = _INDEX_ROUTE_RE.match(line)
+        if m is None:
+            continue
+        file, anchor = m.group(3).strip(), (m.group(4) or "").strip()
+        if anchor:
+            section_anchors.add(f"{file}#{anchor}")
+        else:
+            file_routes.add(file)
+    return section_anchors, file_routes
+
+
 def _iter_h2_titles(content: str) -> list[str]:
     """提取全部 ``##`` 小节标题原文（按出现序； fenced code block 内的假节头容忍——
     统计口径 R-03 容忍计数 misses，不做块级状态机）。"""

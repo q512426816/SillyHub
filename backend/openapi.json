@@ -40669,6 +40669,16 @@
             "type": "integer",
             "title": "Total Entries"
           },
+          "routable_entries": {
+            "type": "integer",
+            "title": "Routable Entries",
+            "default": 0
+          },
+          "routable_used_entries": {
+            "type": "integer",
+            "title": "Routable Used Entries",
+            "default": 0
+          },
           "trend": {
             "items": {
               "$ref": "#/components/schemas/CoverageTrendPoint"
@@ -48777,6 +48787,26 @@
             },
             "type": "array",
             "title": "Entry Counts"
+          },
+          "orphan_anchors": {
+            "items": {
+              "$ref": "#/components/schemas/OrphanAnchorOut"
+            },
+            "type": "array",
+            "title": "Orphan Anchors",
+            "default": []
+          },
+          "data_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Until"
           }
         },
         "type": "object",
@@ -48789,7 +48819,7 @@
           "entry_counts"
         ],
         "title": "KnowledgeStatsOut",
-        "description": "GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。"
+        "description": "GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。\n\n2026-09-25-knowledge-stats-layering 增：orphan_anchors（失效命中单列，\n按命中次数降序）与 data_until（数据截止时间 = 使用计数行最大 occurred_at；\n零命中为 None——上行断流时面板据此显式展示「数据截至 X」）。"
       },
       "KnowledgeUpdateIn": {
         "properties": {
@@ -52679,6 +52709,37 @@
         "type": "object",
         "title": "OrganizationUpdateRequest",
         "description": "Body of ``PATCH /api/admin/organizations/{org_id}``.\n\nAll fields optional. Service validates ``parent_id`` changes for\nself-loops and descendant cycles."
+      },
+      "OrphanAnchorOut": {
+        "properties": {
+          "anchor": {
+            "type": "string",
+            "title": "Anchor"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "last_hit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Hit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "anchor",
+          "total"
+        ],
+        "title": "OrphanAnchorOut",
+        "description": "失效命中（幽灵锚）：解析后仍不对应任何当前条目的命中锚点。\n\n2026-09-25-knowledge-stats-layering：与正常榜单分开单列——「没人用」与\n「锚点对不上」（知识面换代/标题漂移）是两类完全不同的信号，混排误导。"
       },
       "PageContextCreateBlock": {
         "properties": {

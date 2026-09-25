@@ -30,7 +30,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import Field
 
 from app.models.base import BaseModel
-from app.modules.knowledge.parser import anchor_match_key, parse_knowledge_entries
+from app.modules.knowledge.parser import (
+    anchor_match_key,
+    parse_index_routes,
+    parse_knowledge_entries,
+)
 from app.modules.knowledge.schema import (
     CoverageOut,
     CoverageTrendPoint,
@@ -41,6 +45,7 @@ from app.modules.knowledge.schema import (
     FreshnessOut,
     HitsBatchOut,
     KnowledgeStatsOut,
+    OrphanAnchorOut,
     UsageBoardItem,
 )
 from app.modules.knowledge.service import KnowledgeService
@@ -294,6 +299,18 @@ class HitsService:
                 return next(iter(candidates))
             return raw
 
+        # 可路由面（2026-09-25-knowledge-stats-layering）：INDEX 路由小节锚点（经
+        # anchor_match_key 归一匹配条目锚点）∪ 文件级路由文件的全部条目。INDEX 缺失/
+        # 无路由行 → 退化为全集（routable == total，不虚摊也不缩水）。
+        section_routes, file_routes = await asyncio.to_thread(parse_index_routes, root)
+        route_keys = {anchor_match_key(a) for a in section_routes}
+        entry_routable = [
+            (not section_routes and not file_routes)
+            or e.file in file_routes
+            or anchor_match_key(e.anchor) in route_keys
+            for e in entries
+        ]
+
         usage_rows = (
             await self._session.execute(
                 select(
@@ -308,6 +325,10 @@ class HitsService:
             )
         ).all()
 
+        # 数据截止时间：使用计数行最大 occurred_at（零命中 None——上行断流时面板显式
+        # 展示「数据截至 X」而不是无声停更）。
+        data_until: datetime | None = None
+
         # ── 锚点级 / 文件级 / 任务级基础聚合 ──
         anchor_total: Counter[str] = Counter()
         anchor_first: dict[str, datetime] = {}
@@ -321,6 +342,8 @@ class HitsService:
 
         for hit_type, change_name, matched, occurred_raw in usage_rows:
             occurred = _aware_utc(occurred_raw)
+            if data_until is None or occurred > data_until:
+                data_until = occurred
             anchors = matched or []
             for anchor in anchors:
                 # 锚点先解析回条目锚点（归一回退），聚合键即条目锚点——同一小节的多种漂移
@@ -460,10 +483,28 @@ class HitsService:
             for file, count in sorted(file_counts.items(), key=lambda kv: (-kv[1], kv[0]))
         ]
 
+        # 失效命中（幽灵锚）单列：解析后仍不对应任何当前条目的锚点——「没人用」与
+        # 「对不上」（知识面换代/标题漂移）是两类信号，不与正常榜单混排。
+        orphans = [
+            OrphanAnchorOut(anchor=anchor, total=total, last_hit=anchor_last.get(anchor))
+            for anchor, total in anchor_total.items()
+            if anchor not in entry_anchors
+        ]
+        orphans.sort(key=lambda o: (-o.total, o.anchor))
+
+        routable_entries = sum(1 for ok in entry_routable if ok)
+        routable_used = sum(
+            1
+            for e, ok in zip(entries, entry_routable, strict=True)
+            if ok and e.anchor in hit_anchors
+        )
+
         return KnowledgeStatsOut(
             coverage=CoverageOut(
                 used_entries=used_entries,
                 total_entries=total_entries,
+                routable_entries=routable_entries,
+                routable_used_entries=routable_used,
                 trend=coverage_trend,
             ),
             dead_entries=dead_entries,
@@ -471,4 +512,6 @@ class HitsService:
             freshness=FreshnessOut(recent_new=len(recent_entries), recent_used=recent_used),
             usage_board=board,
             entry_counts=entry_counts,
+            orphan_anchors=orphans,
+            data_until=data_until,
         )
