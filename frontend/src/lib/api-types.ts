@@ -11030,6 +11030,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/spec-workspace/manifest-heal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Heal Manifest Tombstones
+         * @description 人工拍板恢复 platform_deleted 墓碑行（冤案修复通道）。
+         *
+         *     2026-09-25 生产实证：4 个旧归档文件被墓碑无条件拒收、resolve --keep-local
+         *     永久卡死，无任何业务路径清除墓碑。本端点显式 paths 单文件粒度 heal
+         *     （platform_deleted→False、exists→True、version 不动），并同步关闭开放的
+         *     spec-sync 冲突行。非墓碑行跳过（幂等重放安全）。
+         */
+        post: operations["heal_manifest_tombstones_api_workspaces__workspace_id__spec_workspace_manifest_heal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/spec-conflicts": {
         parameters: {
             query?: never;
@@ -18224,6 +18249,27 @@ export interface components {
             error?: string | null;
             /** Since */
             since?: string | null;
+        };
+        /**
+         * ManifestHealIn
+         * @description POST /spec-workspace/manifest-heal 请求体。
+         *
+         *     2026-09-26-manifest-heal-endpoint：显式文件清单（人工拍板单位=单文件，
+         *     不接受前缀批量——防误清整目录墓碑）。
+         */
+        ManifestHealIn: {
+            /** Paths */
+            paths: string[];
+        };
+        /**
+         * ManifestHealOut
+         * @description heal 回执：治愈清单 + 跳过清单（非墓碑行幂等重放安全）。
+         */
+        ManifestHealOut: {
+            /** Healed */
+            healed: string[];
+            /** Skipped */
+            skipped: string[];
         };
         /**
          * McpBindingCreate
@@ -47471,6 +47517,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpecBootstrapRunStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    heal_manifest_tombstones_api_workspaces__workspace_id__spec_workspace_manifest_heal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManifestHealIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManifestHealOut"];
                 };
             };
             /** @description Validation Error */
