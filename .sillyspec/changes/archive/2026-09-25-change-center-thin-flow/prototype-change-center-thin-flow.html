@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>变更中心 · 轻量变更接入原型 — 2026-09-25-change-center-thin-flow</title>
+<style>
+:root {
+  --primary: #7C3AED; --primary-hover: #6D28D9; --primary-soft: #EDE9FE; --primary-soft-2: #F5F3FF;
+  --secondary: #A78BFA; --accent: #0891B2; --accent-soft: #CFFAFE; --accent-text: #0E7490;
+  --brand-gradient: linear-gradient(135deg, #7C3AED 0%, #0891B2 100%);
+  --bg: #FAF5FF; --fg: #1E1B4B; --card: #FFFFFF; --muted: #ECEEF9; --muted-fg: #475569;
+  --faint: #94A3B8; --border: #DDD6FE; --border-weak: #EEE9F8;
+  --success: #059669; --success-soft: #D1FAE5; --success-text: #065F46;
+  --warning: #D97706; --warning-soft: #FEF3C7; --warning-text: #92400E;
+  --info: #2563EB; --info-soft: #DBEAFE; --info-text: #1E40AF;
+  --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px;
+  --shadow: 0 1px 3px rgba(30,27,75,.06), 0 4px 14px rgba(124,58,237,.06);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--fg); padding:28px; font-size:14px; line-height:1.6; }
+h1 { font-size:20px; margin-bottom:4px; }
+h2 { font-size:16px; margin:0 0 14px; display:flex; align-items:center; gap:8px; }
+h2 .tag { font-size:11px; font-weight:500; color:var(--accent-text); background:var(--accent-soft); padding:2px 8px; border-radius:99px; }
+.sub { color:var(--muted-fg); font-size:12.5px; margin-bottom:22px; }
+section { background:var(--card); border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:var(--shadow); padding:22px 24px; margin-bottom:26px; }
+.badge { display:inline-flex; align-items:center; gap:4px; font-size:12px; padding:1px 9px; border-radius:99px; border:1px solid transparent; white-space:nowrap; }
+.badge.thin { background:var(--primary-soft); color:var(--primary); border-color:#C4B5FD; }
+.badge.quick { background:var(--warning-soft); color:var(--warning-text); border-color:#FDE68A; }
+.badge.brainstorm { background:var(--info-soft); color:var(--info-text); border-color:#BFDBFE; }
+.badge.archived { background:var(--muted); color:var(--muted-fg); }
+.badge.reti { background:var(--muted); color:var(--faint); border-color:var(--border); }
+.badge.reti b { font-weight:600; }
+.row { display:flex; align-items:center; gap:12px; padding:11px 4px; border-bottom:1px solid var(--border-weak); }
+.row:last-child { border-bottom:none; }
+.row .ttl { flex:1; min-width:0; }
+.row .ttl .t { font-weight:600; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.row .ttl .m { color:var(--faint); font-size:12px; }
+.tabs { display:flex; gap:4px; border-bottom:1.5px solid var(--border); margin-bottom:14px; }
+.tab { padding:8px 14px; font-size:13.5px; color:var(--muted-fg); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1.5px; display:flex; gap:7px; align-items:center; }
+.tab.on { color:var(--primary); font-weight:600; border-bottom-color:var(--primary); }
+.pill { font-size:11px; background:var(--muted); color:var(--muted-fg); border-radius:99px; padding:0 7px; }
+.pill.warn { background:var(--warning-soft); color:var(--warning-text); }
+select { font:inherit; padding:5px 28px 5px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:#fff; color:var(--fg); }
+.toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.ban { display:flex; gap:10px; align-items:flex-start; background:var(--muted); border:1px dashed var(--border); color:var(--muted-fg); border-radius:var(--radius-md); padding:10px 14px; font-size:12.5px; margin:12px 0 4px; }
+.ban .ic { flex:none; }
+.cmd { font-family:ui-monospace,Consolas,monospace; font-size:12px; background:var(--fg); color:#E9E6F7; border-radius:var(--radius-sm); padding:9px 12px; margin:8px 0; overflow-x:auto; white-space:nowrap; }
+.cmd .c { color:#A78BFA; } .cmd .g { color:#6EE7B7; } .cmd .d { color:#94A3B8; }
+.stagecard { border:1px solid #C4B5FD; background:var(--primary-soft-2); border-radius:var(--radius-lg); padding:16px 18px; margin-top:14px; }
+.stagecard h3 { font-size:14.5px; display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+.stagecard .st { font-size:12px; color:var(--muted-fg); margin-bottom:12px; }
+.steps { display:flex; gap:10px; flex-wrap:wrap; margin:12px 0; }
+.step { flex:1; min-width:200px; background:#fff; border:1px solid var(--border); border-radius:var(--radius-md); padding:12px 14px; }
+.step .no { font-size:11px; color:var(--accent-text); background:var(--accent-soft); border-radius:99px; padding:1px 8px; display:inline-block; margin-bottom:6px; }
+.step .nm { font-weight:600; font-size:13px; margin-bottom:4px; }
+.step .ds { color:var(--muted-fg); font-size:12px; }
+.arrow { align-self:center; color:var(--faint); font-size:18px; }
+.note { background:var(--warning-soft); border:1px solid #FDE68A; color:var(--warning-text); border-radius:var(--radius-md); padding:9px 13px; font-size:12.5px; margin-top:10px; }
+.kv { display:grid; grid-template-columns:130px 1fr; gap:6px 14px; font-size:12.5px; margin-top:10px; }
+.kv .k { color:var(--faint); }
+.pipeline { display:flex; gap:6px; align-items:center; margin:10px 0 2px; }
+.node { font-size:11.5px; padding:3px 10px; border-radius:99px; background:var(--muted); color:var(--muted-fg); }
+.node.done { background:var(--success-soft); color:var(--success-text); }
+.bypass { font-size:11.5px; padding:3px 10px; border-radius:99px; background:var(--primary-soft); color:var(--primary); border:1px dashed #C4B5FD; margin-left:8px; }
+.ghost { color:var(--faint); }
+.legend { display:flex; gap:16px; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px dashed var(--border); font-size:12px; color:var(--muted-fg); }
+.empty { text-align:center; color:var(--faint); padding:26px 0 18px; font-size:13px; }
+.empty b { color:var(--muted-fg); }
+</style>
+</head>
+<body>
+
+<h1>变更中心 · 轻量变更（thin）接入原型</h1>
+<div class="sub">2026-09-25-change-center-thin-flow · 三个 UI 面：A 主列表同列展示与筛选 ｜ B 详情页轻量变更说明卡（新） ｜ C quick 存量退役标注。D-001@v1 约束：列表页与常规变更在一起，内部逻辑展示差异化。</div>
+
+<!-- ═══════════ A. 主列表 ═══════════ -->
+<section>
+  <h2>A. 变更中心主列表 <span class="tag">thin 与常规变更同列（D-001@v1 用户裁决）</span></h2>
+  <div class="tabs">
+    <div class="tab on">变更 <span class="pill">12</span></div>
+    <div class="tab">快速修复 <span class="pill warn">存量 · 3</span></div>
+    <div class="tab">团队</div>
+  </div>
+  <div class="toolbar">
+    <div style="display:flex;gap:10px;align-items:center;">
+      <span class="ghost" style="font-size:12.5px;">阶段筛选</span>
+      <select>
+        <option>全部阶段</option>
+        <option>轻量变更</option>       <!-- ← 新增：thin 可筛（与 quick 不可筛不同） -->
+        <option selected>头脑风暴</option>
+        <option>计划</option>
+        <option>执行</option>
+        <option>验证</option>
+        <option>归档</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <span class="badge thin">◈ 轻量变更</span>
+      <span class="badge quick">⚡ 快速任务（存量）</span>
+      <span class="ghost" style="font-size:12px;">徽章新增 thin，quick 加存量后缀</span>
+    </div>
+  </div>
+  <div class="row">
+    <div class="ttl">
+      <div class="t">修复工作区概览卡在 dark 主题下的边框对比度</div>
+      <div class="m">快速修复 · qinyi · 2 小时前</div>
+    </div>
+    <span class="badge thin">◈ 轻量变更</span>
+  </div>
+  <div class="row">
+    <div class="ttl">
+      <div class="t">observation events v3 — 观测事件通道演进</div>
+      <div class="m">功能开发 · qinyi · 3 小时前</div>
+    </div>
+    <span class="badge brainstorm">头脑风暴</span>
+  </div>
+  <div class="row">
+    <div class="ttl">
+      <div class="t">调整 quicklog 抽屉深链的 URL 编码（存量收尾中）</div>
+      <div class="m">快速修复 · daemon · 09-24</div>
+    </div>
+    <span class="badge quick">⚡ 快速任务</span>
+  </div>
+  <div class="legend">
+    <span>· thin 徽章走品牌紫阶（brand-* 语义，随主题换肤），与 quick 的 warning 琥珀区分新旧两代辅助流</span>
+    <span>· 「快速修复」tab 标签不变，计数徽标改「存量 · N」</span>
+  </div>
+</section>
+
+<!-- ═══════════ B. 详情页 thin 说明卡 ═══════════ -->
+<section>
+  <h2>B. 变更详情 · 轻量变更说明卡 <span class="tag">对齐 quick 只读卡形态，桌面 + 移动端审批卡同款</span></h2>
+  <div class="row" style="border:none;padding-top:0;">
+    <div class="ttl">
+      <div class="t" style="font-size:15px;">修复工作区概览卡在 dark 主题下的边框对比度</div>
+      <div class="m">快速修复（change_type 标签保留）· 创建于 09-25 01:12</div>
+    </div>
+    <span class="badge thin">◈ 轻量变更</span>
+  </div>
+  <div class="stagecard">
+    <h3>◈ 轻量变更进行中</h3>
+    <div class="st">2 次调用协议：起步 → 干活 → 一次收口。治理工件由 CLI 机器起草，agent 只填决策槽。</div>
+    <div class="steps">
+      <div class="step">
+        <span class="no">调用 1/2</span>
+        <div class="nm">flow start · 起步</div>
+        <div class="ds">建变更 + 基线锚定；需求含「成功标准」节（独立行 + 列表条目）</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <span class="no">干活</span>
+        <div class="nm">改代码 + 填槽</div>
+        <div class="ds">design.md 四节 AGENT 槽、requirements 测试绑定槽，每处至少一行</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <span class="no">调用 2/2</span>
+        <div class="nm">flow done · 收口</div>
+        <div class="ds">实测门 / patch 留档 / 蒸馏 / 归档六子步一次裁决</div>
+      </div>
+    </div>
+    <div class="cmd"><span class="c">sillyspec</span> flow start --change 2026-09-25-fix-overview-border <span class="d">--input "&lt;多行：动机 + 成功标准节&gt;"</span> <span class="g"># 派发 agent 自动执行</span></div>
+    <div class="cmd"><span class="c">sillyspec</span> flow done --change 2026-09-25-fix-overview-border <span class="g"># 干完后收口；中间态失败可断点续重跑</span></div>
+    <div class="note">⚠ flow done 中间态失败（空槽拒收 / 实测失败自动升厚）属正常——修复后重跑同命令，已完成子步幂等跳过。归档后变更自动转入归档区。</div>
+    <div class="kv">
+      <span class="k">进行中状态</span><span>阶段停留在「轻量变更」，归档时一键翻转（CLI 红线：thin 进度不落 sillyspec.db）</span>
+      <span class="k">观测事件</span><span>右侧「观测事件」卡实时轮询 watcher 旁路（provisional 只展示）</span>
+    </div>
+  </div>
+  <div class="legend">
+    <span>· 桌面 change-stage-actions 的 quick 分支旁新增 thin 分支；quick 卡文案同步改为「已退役·存量」语义</span>
+    <span>· 移动端 mobile-change-detail 补同款说明卡（现状无 quick/thin 分支，核对遗漏清单 #3）</span>
+  </div>
+</section>
+
+<!-- ═══════════ C. 存量退役标注 ═══════════ -->
+<section>
+  <h2>C. quick 存量软退役标注 <span class="tag">文案对齐 CLI 横幅：存量收尾、停止新增</span></h2>
+  <div class="pipeline">
+    <span class="node done">scan</span><span class="ghost">→</span>
+    <span class="node">头脑风暴</span><span class="ghost">→</span>
+    <span class="node">计划</span><span class="ghost">→</span>
+    <span class="node">执行</span><span class="ghost">→</span>
+    <span class="node">验证</span><span class="ghost">→</span>
+    <span class="node">归档</span>
+    <span class="bypass">◈ thin 轻量变更</span><span class="bypass" style="background:var(--warning-soft);color:var(--warning-text);border-color:#FDE68A;">⚡ quick（存量）</span>
+  </div>
+  <div style="font-size:12px;color:var(--faint);margin-left:2px;">工作区概览卡：旁路徽标判断（现状两处硬编码 stage === "quick" || "explore"）加 thin——不加则 thin 变更渲染为全灰主管线（核对遗漏清单 #1）</div>
+  <div class="ban">
+    <span class="ic">▾</span>
+    <div><b>「快速修复」已退役 · 仅存量只读</b><br>
+    quick 为存量过渡通道，新的小修复已改走轻量变更（详情见变更列表中的 ◈ 轻量变更 变更）。存量条目仍可收尾与查看。</div>
+  </div>
+  <div class="empty">
+    <b>存量快速修复已全部收尾</b><br>
+    旧的 quick 通道不再产生新条目——新的小修复请在「变更」列表走 <span class="badge thin" style="font-size:11px;">◈ 轻量变更</span>
+    <div style="margin-top:6px;">（空态文案替换现状「在仓库跑 sillyspec quick 后…」——桌面 quicklog-table:346 + 移动端 :873 两处）</div>
+  </div>
+  <div class="legend">
+    <span>· 变更详情「关联的快速任务」卡、蒸馏源「快速修复」选项：保留，面向存量数据</span>
+    <span>· 工作区统计卡「快速修复」计数：保留（存量口径）</span>
+  </div>
+</section>
+
+</body>
+</html>

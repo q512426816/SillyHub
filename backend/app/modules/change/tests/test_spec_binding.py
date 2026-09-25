@@ -5,6 +5,9 @@ Change 2026-08-25-session-spec-binding task-02：``change/binding.py`` 的
 误归样例均无产出）+ ``bind_session_to_change`` / ``bind_session_to_quicklog``
 的 DB 行为（default 守卫 / placeholder defaults / 幂等 / best-effort 不抛）。
 
+2026-09-25-change-center-thin-flow task-04：样例库补 flow 命令族
+（start/done/amend-draft --change → 变更绑定；run quick 跳过回归保留）。
+
 DB 用例走根 conftest ``db_engine`` 的 SQLite ``create_all``（change model 已在
 其 import 列表，参照 test_quicklog_session_links.py 模式）。
 
@@ -76,6 +79,33 @@ PARSE_CASES: list[tuple[str, list[str]]] = [
     ("sillyspec run execute --change", []),
     ("sillyspec run execute --change --done", []),
     ("sillyspec run execute --change=", []),
+    # --- flow 命令族（2026-09-25-change-center-thin-flow task-04：thin 2 调用协议）---
+    # start/done/amend-draft 三子命令 --change 是真变更名 → 产出变更绑定。
+    (
+        "sillyspec flow start --change 2026-09-25-demo-task --input '动机'",
+        ["2026-09-25-demo-task"],
+    ),
+    ("sillyspec flow done --change=eq-flow-key", ["eq-flow-key"]),
+    (
+        "sillyspec flow amend-draft --change 2026-09-25-draft-fix",
+        ["2026-09-25-draft-fix"],
+    ),
+    # flow + platform_args（--spec-root 等选项前导，--change 在后）→ 产出。
+    (
+        "sillyspec flow start --spec-root /data/ws --change thin-args-key",
+        ["thin-args-key"],
+    ),
+    # flow 其它子命令（progress/status 等只读）无 --change → 无产出。
+    ("sillyspec flow status", []),
+    ("sillyspec flow progress show", []),
+    # flow default 伪键同样跳过（与 run 族同规则）。
+    ("sillyspec flow start --change default", []),
+    # run quick 跳过规则与 flow 并存：run 族 quick 跳过、flow 族照常产出。
+    (
+        "sillyspec run quick --done --change quick-990f8c09; "
+        "sillyspec flow done --change after-quick-key",
+        ["after-quick-key"],
+    ),
 ]
 
 

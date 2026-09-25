@@ -8,6 +8,9 @@ bind 函数，供 W2 检测写入口（run_sync 命令解析 / platform_sync age
   quick 会话 id，D-004@v1）；其余 ``run`` 阶段支持 ``--change <名>``（空格）与
   ``--change=<名>``（等号）两形式；``名 == "default"`` 跳过（D-005@v2 解析层
   第一道）；progress/status/archive 等非 run 子命令无产出。
+- thin（2026-09-25-change-center-thin-flow task-04）：``sillyspec flow
+  start|done|amend-draft --change <名>`` 同样产出变更绑定——thin 派发会话的
+  变更绑定**唯一**依靠本命令解析通道（派发链全程不写 change_session_links）。
 - bind 事务口径：**不自行 commit**（跟随调用方事务），savepoint
   （``begin_nested``）+ flush 落行，失败仅 ``log.warning`` 不抛（对齐
   ``change/service.py:_bind_change_to_session`` 的 best-effort 风格）。
@@ -32,6 +35,11 @@ log = get_logger(__name__)
 # D-005@v2：CLI 无名操作伪键。绑定会污染变更列表（placeholder 行），解析层与
 # bind_session_to_change 内部双道守卫统一跳过。
 DEFAULT_CHANGE_KEY = "default"
+
+# flow 命令族中携带 --change <变更名> 的子命令（2026-09-25-change-center-thin-flow
+# task-04）：thin 派发会话的 2 调用协议命令。progress/status 等只读子命令无
+# --change，不在其列。
+_FLOW_CHANGE_SUBCOMMANDS: frozenset[str] = frozenset({"start", "done", "amend-draft"})
 
 
 @dataclass(frozen=True)
@@ -60,6 +68,13 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
       ``--change=<名>``（等号）；``--change`` 的值取紧随其后的非选项 token
       （以 ``-`` 开头视为选项 → 无值不产出）。
     - ``名 == "default"`` 跳过（D-005@v2 解析层第一道，函数内还有兜底）。
+    - **flow 命令族**（2026-09-25-change-center-thin-flow task-04）：定位
+      ``sillyspec flow <start|done|amend-draft>`` token 序列，在其后 token 里
+      同规则找 ``--change <名>`` —— thin 派发会话执行 2 调用协议
+      （``flow start`` → 干活 → ``flow done``），变更绑定**唯一**依靠本命令
+      解析通道；``名 == "default"`` 同样跳过。flow 其它子命令
+      （progress/status 等）无 ``--change`` 自然无产出。
+    - run 与 flow 命中其一即处理（一段命令只属一族，先查 run 再查 flow）。
 
     边界（可接受，key 均 slug 格式）：引号内含空格的 ``--change "a b"`` 不支持
     （token 切分会把 ``"a` 当值）；本函数只做提取不做归属校验，workspace/会话
@@ -68,19 +83,35 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
     bindings: list[SpecCommandBinding] = []
     for segment in iter_command_segments(command):
         tokens = segment.split()
+        # ── 族一：sillyspec run（quick 子命令跳过）──
         run_idx: int | None = None
         for i in range(len(tokens) - 1):
             if tokens[i] == "sillyspec" and tokens[i + 1] == "run":
                 run_idx = i
                 break
-        if run_idx is None:
-            # 非 sillyspec run 命令（含 progress/status/archive 等子命令、
+        if run_idx is not None:
+            if run_idx + 2 < len(tokens) and tokens[run_idx + 2] == "quick":
+                # D-004@v1：quick 子命令的 --change 是 CLI quick 会话 id，跳过。
+                continue
+            change_key = _parse_change_key(tokens, start=run_idx + 2)
+            if change_key is not None and change_key != DEFAULT_CHANGE_KEY:
+                bindings.append(SpecCommandBinding(kind="change", change_key=change_key))
+            continue
+        # ── 族二：sillyspec flow start|done|amend-draft（thin 2 调用协议）──
+        flow_idx: int | None = None
+        for i in range(len(tokens) - 2):
+            if (
+                tokens[i] == "sillyspec"
+                and tokens[i + 1] == "flow"
+                and tokens[i + 2] in _FLOW_CHANGE_SUBCOMMANDS
+            ):
+                flow_idx = i
+                break
+        if flow_idx is None:
+            # 既非 run 也非 flow 命令族（含 progress/status/archive 等子命令、
             # grep sillyspec 等参数含字样误归）——无产出。
             continue
-        if run_idx + 2 < len(tokens) and tokens[run_idx + 2] == "quick":
-            # D-004@v1：quick 子命令的 --change 是 CLI quick 会话 id，跳过。
-            continue
-        change_key = _parse_change_key(tokens, start=run_idx + 2)
+        change_key = _parse_change_key(tokens, start=flow_idx + 3)
         if change_key is None or change_key == DEFAULT_CHANGE_KEY:
             continue
         bindings.append(SpecCommandBinding(kind="change", change_key=change_key))

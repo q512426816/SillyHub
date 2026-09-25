@@ -125,6 +125,9 @@ const STAGE_OPTIONS = [
   { value: "execute", label: "执行" },
   { value: "verify", label: "验证" },
   { value: "archive", label: "归档" },
+  // 2026-09-25-change-center-thin-flow task-07：thin 可筛（与桌面副本同步，
+  // 模块私有就地内联不 export 的既有规则不变）。
+  { value: "thin", label: "轻量变更" },
 ] as const;
 
 /**
@@ -867,11 +870,11 @@ export default function MobileChangesPage() {
     ) : (
       <div className="flex flex-col items-center gap-2 py-10 text-center">
         <p className="text-[15px] font-medium text-foreground">
-          还没有快速修复记录
+          暂无存量快速修复记录
         </p>
         <p className="text-xs text-muted-foreground">
-          在仓库跑 sillyspec quick 后，条目会实时出现在这里（CLI 推送 +
-          文件同步双链路）。
+          旧的 quick 通道已退役，不再产生新条目；存量记录继续在这里收尾查阅。
+          新的小修复请在变更列表创建「轻量变更」。
         </p>
       </div>
     );
@@ -983,7 +986,8 @@ export default function MobileChangesPage() {
               {t.label}
               {cnt !== undefined && (
                 <span className="inline-block min-w-[18px] rounded-full bg-muted px-1.5 text-[11px] leading-[18px] text-muted-foreground">
-                  {cnt}
+                  {/* 存量口径（task-09）：quick 通道已退役，quicklog 计数只含存量条目 */}
+                  {t.key === "quicklog" ? `存量 · ${cnt}` : cnt}
                 </span>
               )}
             </button>

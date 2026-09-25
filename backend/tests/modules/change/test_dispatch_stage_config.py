@@ -5,19 +5,21 @@ Validates all 可派发变更阶段 are configured with correct values。
 仅保留 brainstorm/plan/execute/verify/archive。
 2026-08-12-quick-independent-stage：新增 quick 辅助阶段（独立流程，自己派发 quick agent），
 config 现含 6 个键（5 主线 + 1 辅助），二者并集 = 全量派发阶段。
+2026-09-25-change-center-thin-flow：新增 thin 辅助阶段（轻量变更 2 调用协议），
+config 含 7 个键（5 主线 + quick/thin 两辅助），并集仍 = 全量派发阶段。
 """
 
 from app.modules.change.dispatch import STAGE_AGENT_CONFIG
 from app.modules.change.model import StageEnum
 
 
-def test_config_has_six_entries():
-    """STAGE_AGENT_CONFIG must have exactly 6 entries (5 主线 + quick 辅助)."""
-    assert len(STAGE_AGENT_CONFIG) == 6
+def test_config_has_seven_entries():
+    """STAGE_AGENT_CONFIG must have exactly 7 entries (5 主线 + quick/thin 辅助)."""
+    assert len(STAGE_AGENT_CONFIG) == 7
 
 
 def test_config_keys_match_spec_stages():
-    """All keys must be StageEnum 主线阶段 + 辅助阶段（quick）的 value 并集."""
+    """All keys must be StageEnum 主线阶段 + 辅助阶段（quick/thin）的 value 并集."""
     expected_keys = {e.value for e in StageEnum.spec_stages()} | {
         e.value for e in StageEnum.spec_auxiliary_stages()
     }
@@ -26,13 +28,13 @@ def test_config_keys_match_spec_stages():
 
 
 def test_all_stages_enabled():
-    """All 6 stages must have enabled=True."""
+    """All 7 stages must have enabled=True."""
     for stage, config in STAGE_AGENT_CONFIG.items():
         assert config.enabled is True, f"Stage '{stage}' is not enabled"
 
 
 def test_all_stages_read_only_false():
-    """All 6 stages must have read_only=False (every stage writes files)."""
+    """All 7 stages must have read_only=False (every stage writes files)."""
     for stage, config in STAGE_AGENT_CONFIG.items():
         assert config.read_only is False, f"Stage '{stage}' has read_only=True, expected False"
 

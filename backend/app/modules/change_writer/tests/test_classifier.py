@@ -84,22 +84,24 @@ def test_dispatch_stage_agent_config_has_quick():
     assert cfg.read_only is False
 
 
-def test_quick_classify_maps_to_quick_stage():
-    """分流映射：描述含 quick 关键词 → change_type='quick' → initial_stage='quick'。
+def test_quick_classify_maps_to_thin_stage():
+    """分流映射：描述含 quick 关键词 → change_type='quick' → initial_stage='thin'。
 
-    验证创建分流的分类输入端（service/proxy 用同一表达式
-    ``initial_stage = 'quick' if change_type == 'quick' else 'brainstorm'``）。
+    2026-09-25-change-center-thin-flow task-03：quick 类型新变更分流至 thin 辅助
+    阶段（轻量变更 2 调用协议），change_type 标签保持 'quick' 不动（标签与阶段
+    解耦）。验证创建分流的分类输入端（service/proxy 用同一表达式
+    ``initial_stage = 'thin' if change_type == 'quick' else 'brainstorm'``）。
     """
-    # quick 关键词 → quick
+    # quick 关键词 → quick（分类标签不动）
     assert classify_change_type("快速修复登录按钮文案") == "quick"
     # 非 quick → feature → brainstorm
     assert classify_change_type("实现用户管理模块") == "feature"
     # 分流表达式：change_type 决定 initial_stage
     for desc in ("快速修复登录按钮文案", "fix typo in readme"):
         change_type = classify_change_type(desc)
-        initial_stage = "quick" if change_type == "quick" else "brainstorm"
-        assert initial_stage == "quick", f"quick 描述应分流到 quick 阶段: {desc}"
+        initial_stage = "thin" if change_type == "quick" else "brainstorm"
+        assert initial_stage == "thin", f"quick 描述应分流到 thin 阶段: {desc}"
     for desc in ("实现用户管理模块", "优化数据库性能"):
         change_type = classify_change_type(desc)
-        initial_stage = "quick" if change_type == "quick" else "brainstorm"
+        initial_stage = "thin" if change_type == "quick" else "brainstorm"
         assert initial_stage == "brainstorm", f"非 quick 描述应分流到 brainstorm: {desc}"

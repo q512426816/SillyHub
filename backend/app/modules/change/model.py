@@ -30,12 +30,18 @@ from app.models.base import BaseModel
 
 
 class StageEnum(enum.StrEnum):
-    """变更流程阶段枚举：5 主阶段 + quick 辅助阶段。
+    """变更流程阶段枚举：5 主阶段 + quick/thin 辅助阶段。
 
     quick（2026-08-12-quick-independent-stage）是 SillySpec 的独立辅助阶段
     （``VALID_STAGES`` 含 quick，``auxiliary: true``），与主线 5 阶段平行，自己
     跑三步就结束，**不走** brainstorm→plan→execute→verify→archive 主线，
     故不进 :data:`TRANSITIONS`，也不进 :meth:`spec_stages`（主线上下游判定）。
+
+    thin（2026-09-25-change-center-thin-flow）是「轻量变更」的辅助阶段：
+    change_type=="quick" 的新变更分流至 thin，agent 派发走 2 调用协议
+    （``sillyspec flow start`` → 干活 → ``sillyspec flow done``），跑完即终态
+    对齐 QUICK 先例——不进 TRANSITIONS / STAGE_ORDER（CLI 红线：thin 进度落
+    flow-state.yaml 不落 sillyspec.db，平台侧由双守卫保持阶段恒显 thin）。
     """
 
     # ── 变更流程主阶段（scan 不在变更流程，由 workspace 初始化承载） ──
@@ -46,6 +52,7 @@ class StageEnum(enum.StrEnum):
     ARCHIVE = "archive"
     # ── 辅助阶段（独立流程，不进主线上下游判定） ──
     QUICK = "quick"
+    THIN = "thin"
 
     @classmethod
     def spec_stages(cls) -> list[StageEnum]:
@@ -64,12 +71,12 @@ class StageEnum(enum.StrEnum):
 
     @classmethod
     def spec_auxiliary_stages(cls) -> list[StageEnum]:
-        """SillySpec 辅助阶段（quick 等，独立流程，不进主线上下游判定）。
+        """SillySpec 辅助阶段（quick/thin 等，独立流程，不进主线上下游判定）。
 
         与 :meth:`spec_stages` 互补：主线靠 ``spec_stages``，辅助阶段（无后继
         转换、跑完即终态）靠本方法，二者并集 = 本平台支持的 SillySpec 全量阶段。
         """
-        return [cls.QUICK]
+        return [cls.QUICK, cls.THIN]
 
 
 class ChangeStatus(enum.StrEnum):

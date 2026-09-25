@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import re
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
@@ -133,6 +134,19 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
         read_only=False,
         description="Quick fix: run SillySpec quick 3 steps (understand/implement/record).",
     ),
+    # thin（2026-09-25-change-center-thin-flow）：轻量变更辅助阶段，2 调用协议。
+    # 与 quick 同走 ``manual_dispatch`` 泛化路径：配置在场即可经
+    # ``POST /changes/{id}/dispatch`` 派发 thin agent，无需改派发逻辑。
+    # requires_worktree=False / read_only=False：thin 流程需写代码，走 daemon-client，
+    # change 目录由 sillyspec flow 自建（模板细节见 prompts/thin.md）。
+    StageEnum.THIN.value: StageAgentConfig(
+        enabled=True,
+        prompt_template="thin.md",  # 轻量变更 prompt 模板（2 调用协议）
+        phase="Thin",
+        requires_worktree=False,
+        read_only=False,
+        description="Thin flow: 2-call protocol (flow start → work → flow done).",
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -140,6 +154,38 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
 # ---------------------------------------------------------------------------
 
 _DISPATCH_CHAIN_LIMIT: int = 10
+
+# thin 变更 change_key 白名单（2026-09-25-change-center-thin-flow task-02，纵深防御）：
+# 上游 sillyspec 3.30.0 已在 flow 入口做同款校验（拒 `..`/路径分隔/default/
+# quick-<hex8>），平台侧自查防旧版 CLI 与穿越名——thin 派发会把 change_key 直接
+# 拼进 `sillyspec flow start --change <名>` prompt 命令，名字穿越会误导 agent 在
+# 非预期目录跑 flow。
+_THIN_CHANGE_KEY_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+_THIN_QUICK_SESSION_KEY_RE = re.compile(r"^quick-[0-9a-f]{8}$")
+
+
+def _validate_thin_change_key(change_key: str) -> None:
+    """校验 thin 变更的 change_key 合法性，非法 raise AgentRunError 拒绝派发。
+
+    合法 = 匹配 ``^[A-Za-z0-9_.\\-]+$``（天然排除路径分隔符）且非：
+    - ``default``（CLI 无名操作伪键，binding 同款跳过值）；
+    - ``quick-<hex8>``（CLI 内部 quick 会话 id 形态，属 quick 通道残留键）；
+    - 含 ``..`` 段（路径穿越）。
+    仅对 ``current_stage == "thin"`` 的变更调用（非 thin 变更零作用）。
+    """
+    from app.modules.agent.service import AgentRunError
+
+    if (
+        not _THIN_CHANGE_KEY_RE.fullmatch(change_key)
+        or change_key == "default"
+        or _THIN_QUICK_SESSION_KEY_RE.fullmatch(change_key) is not None
+        or ".." in change_key
+    ):
+        raise AgentRunError(
+            f"轻量变更（thin）的变更名不合法，已拒绝派发：{change_key!r}"
+            "（仅允许字母/数字/点/连字符/下划线，且不能是 default、"
+            "quick-<hex8> 会话键或包含 .. 段）"
+        )
 
 
 def _get_chain_count(stages: dict) -> int:
@@ -522,6 +568,13 @@ async def dispatch(
     change = await session.get(Change, change_id)
     if change is None:
         return {"dispatched": False, "reason": "change_not_found"}
+
+    if target_stage == StageEnum.THIN.value:
+        # thin 变更 change_key 白名单（task-02 纵深防御）：change_key 会拼进
+        # thin.md 的 flow 命令，穿越名直接拒绝派发（raise AgentRunError →
+        # manual_dispatch 端点 400）。这是本函数唯一的主动拒绝路径（区别于
+        # best-effort 失败吞错），故放在 last_dispatch 写入之前——不留痕迹。
+        _validate_thin_change_key(change.change_key)
 
     # dict() copy avoids SQLAlchemy JSON in-place mutation not persisting.
     stages = dict(change.stages or {})
@@ -1779,6 +1832,34 @@ class SillySpecStageDispatchService:
                     tmp_path.unlink()
                 except OSError:
                     pass
+
+        # 守卫 A（2026-09-25-change-center-thin-flow task-05）：thin 变更阶段回洗双守卫之一。
+        # CLI 红线：thin（轻量变更）进度落 flow-state.yaml 不落 sillyspec.db——DB 行
+        # current_stage 全程停留 'scan'、status 'active'，照常投影会把平台 'thin' 洗回
+        # 'scan' 并在 stages JSON 留下幽灵 scan 组。谓词（与守卫 B——platform_sync
+        # _sync_change_stage_status——同一规则，不引入第二套判断）：
+        #   平台 current_stage=='thin' 且 DB 行 status != 'archived'
+        #     → 跳过 current_stage 回写与 stages JSON 写入（仅 updated_at 时间戳照常）；
+        #   DB 行 status=='archived'（flow done 后）
+        #     → 放行下方既有归档翻转链（读侧三源并集承接）；
+        #   非 thin 变更零作用（逐字走现状）。
+        if change.current_stage == StageEnum.THIN.value and row["status"] != "archived":
+            log.info(
+                "sync_stage_status.thin_guard_skip",
+                change_id=str(change_id),
+                change_key=change.change_key,
+                db_current_stage=db_current_stage,
+                db_status=row["status"],
+            )
+            change.updated_at = datetime.now(UTC)
+            session.add(change)
+            await session.commit()
+            return StageSyncResult(
+                synced=True,
+                change_id=change_id,
+                run_id=run_id,
+                current_stage=change.current_stage,
+            )
 
         # 投影到 Change
         if change.current_stage != db_current_stage:

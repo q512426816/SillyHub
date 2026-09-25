@@ -12,7 +12,9 @@ import type { AgentSessionListItem } from "@/lib/daemon";
  * 变更详情页**唯一操作区**：意见输入 + 绑定会话只读展示 + 「通过/打回并通知绑定会话」。
  * 执行控制（推进 / 重新派发 / 验证门禁 / 选档案 / 团队配置，含 quick 分支）已全部删除——
  * 变更由 agent 在会话里经 sillyspec 驱动，平台只做展示板 + 人工审批（D-003@v1）。
- * quick 类变更由 agent 在会话里跑 ``sillyspec run quick`` 触发，无需平台按钮。
+ * quick/thin 类变更均由 agent 在会话中驱动（quick 已退役转存量收尾；
+ * 2026-09-25-change-center-thin-flow 起 quick 类型新变更分流至 thin 轻量变更，
+ * 两分支均为只读说明卡，无平台按钮）。
  *
  * 审批走单端点调用（submitStageReview 透传 notify_session），注入由后端以服务身份
  * best-effort 完成；据响应 notified_session / notify_error 展示三类降级提示
@@ -125,18 +127,58 @@ export function ChangeStageActions({
   const currentStage = change.current_stage ?? "draft";
   const gatePanel = APPROVAL_PANELS[change.pending_review ?? ""];
 
-  // quick 独立阶段（D-003）：无平台执行控制，仅只读说明。
+  // thin 辅助阶段（2026-09-25-change-center-thin-flow task-08）：轻量变更只读说明卡，
+  // 两段式 2 调用协议（形态对照原型 B 面）；平台无操作，执行全在会话内。
+  if (currentStage === "thin") {
+    const thinKey = change.change_key ?? change.id;
+    return (
+      <section className="space-y-2 rounded-md border border-brand-300 bg-brand-50/60 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold">◈ 轻量变更</span>
+          <span className="text-xs text-muted-foreground">
+            两段式流程（flow start → 干活 → flow done），不走完整审批流
+          </span>
+        </div>
+        <div className="space-y-1.5 text-[11px] text-muted-foreground">
+          <p>
+            协议 1/2 —— 智能体在会话中执行
+            <code className="mx-1 rounded bg-background px-1.5 py-0.5 text-[11px]">
+              sillyspec flow start --change {thinKey}
+            </code>
+            启动（需求需多行文本，含独立「成功标准：」节头行 + 每行一条
+            <code className="mx-1 rounded bg-background px-1.5 py-0.5 text-[11px]">- 标准</code>
+            列表行，单行内联会被清晰度门拒绝）。
+          </p>
+          <p>
+            协议 2/2 —— 干活（改代码 + 写测试 + 填 design/requirements 槽位）后执行
+            <code className="mx-1 rounded bg-background px-1.5 py-0.5 text-[11px]">
+              sillyspec flow done --change {thinKey}
+            </code>
+            收口：中间态退出码 1 属正常（空槽拒收/实测失败自动升厚），修复后重跑同
+            命令即可断点续跑；实测失败即整单失败（fail-closed）。
+          </p>
+          <p>
+            进行中状态阶段恒显示「轻量变更」，归档时自动翻转（进度不落
+            sillyspec.db，flow done 后变更自动转入归档区，无需平台操作）。
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  // quick 独立阶段（D-003）：无平台执行控制，仅只读说明（存量通道，已退役）。
   if (currentStage === "quick") {
     return (
       <section className="space-y-2 rounded-md border border-amber-500/40 bg-amber-50/40 px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">⚡ 快速修复</span>
+          <span className="text-sm font-semibold">⚡ 快速修复（存量）</span>
           <span className="text-xs text-muted-foreground">
-            快速通道，不走完整流程
+            已退役 · 存量收尾通道
           </span>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          快速修复由智能体在会话中执行（sillyspec run quick），平台无需操作；完成态经同步链路回写。
+          旧的 quick 通道已退役，仅存量变更继续在会话中收尾；完成态经同步链路回写。
+          新的小修复请在变更列表创建「轻量变更」。
         </p>
       </section>
     );

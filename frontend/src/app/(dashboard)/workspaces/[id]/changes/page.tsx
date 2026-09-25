@@ -85,6 +85,9 @@ const STAGE_OPTIONS = [
   { value: "execute", label: "执行" },
   { value: "verify", label: "验证" },
   { value: "archive", label: "归档" },
+  // 2026-09-25-change-center-thin-flow task-07：thin 可筛（与 quick 不可筛不同，
+  // thin 是主力辅助流，新 quick 类型变更全部分流至此）。
+  { value: "thin", label: "轻量变更" },
 ] as const;
 
 // ── 「执行」列（task-08 / FR-05 / D-004@v1，视觉对齐 prototype-change-center-
@@ -593,10 +596,12 @@ export default function ChangesPage({ params }: Props) {
   const renderSubtitle = (): ReactNode => {
     const wsName = workspace?.name ?? "—";
     if (tab === "quicklog") {
+      // 存量口径（2026-09-25-change-center-thin-flow task-09）：quick 通道已退役，
+      // 计数只含存量条目；新工作走变更列表「轻量变更」。
       const n = tabTotals.quicklog;
       return n !== undefined
-        ? `${wsName} · ${n} 条快速修复记录`
-        : `${wsName} · 快速修复记录`;
+        ? `${wsName} · ${n} 条存量快速修复记录（旧 quick 通道已退役）`
+        : `${wsName} · 存量快速修复记录（旧 quick 通道已退役）`;
     }
     if (tab === "archive") {
       return `${wsName} · 已归档变更`;
@@ -746,7 +751,8 @@ export default function ChangesPage({ params }: Props) {
               {t.label}
               {cnt !== undefined && (
                 <span className="ml-1 inline-block min-w-[18px] rounded-full bg-muted px-1.5 text-[11px] text-muted-foreground">
-                  {cnt}
+                  {/* 存量口径（task-09）：quick 通道已退役，quicklog 计数只含存量条目 */}
+                  {t.key === "quicklog" ? `存量 · ${cnt}` : cnt}
                 </span>
               )}
             </button>

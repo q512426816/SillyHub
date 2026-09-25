@@ -68,9 +68,12 @@ type SillySpecChange = components["schemas"]["DaemonHeartbeatSillySpecChange"];
 /** 主管线 6 阶段（schema 另有 quick/explore 两键走旁路徽标，不进管线）。 */
 const MAIN_STAGES = ["scan", "brainstorm", "plan", "execute", "verify", "archive"] as const;
 
-/** quick/explore 旁路徽标（原型 .badge.quick；violet 固定信息色，同 PROVIDER_TONES 先例）。 */
+/** thin/quick/explore 旁路徽标（原型 .badge.quick；violet 固定信息色，同 PROVIDER_TONES 先例）。
+ * 2026-09-25-change-center-thin-flow task-07：加 thin（◈ 轻量变更）与 quick 存量口径——
+ * 不加则 thin 变更渲染为全灰主管线无徽标（design 七触点之一）。 */
 const BYPASS_BADGES: Record<string, string> = {
-  quick: "⚡ quick",
+  thin: "◈ thin",
+  quick: "⚡ quick（存量）",
   explore: "🧭 explore",
 };
 const BYPASS_BADGE_CLASS =
@@ -226,7 +229,9 @@ function StepsBar({
  */
 function ActiveChangeRow({ change }: { change: SillySpecChange }) {
   const stage = change.current_stage ?? null;
-  const isBypass = stage === "quick" || stage === "explore";
+  // thin（2026-09-25-change-center-thin-flow task-07）加入旁路：轻量变更不进主管线，
+  // 无旁路判断会渲染为全灰管线无徽标。
+  const isBypass = stage === "quick" || stage === "thin" || stage === "explore";
   const stageLabel = change.stage_label?.trim() || stage || "—";
   const completed = change.steps?.completed ?? null;
   const total = change.steps?.total ?? null;
@@ -265,7 +270,9 @@ function ActiveChangeRow({ change }: { change: SillySpecChange }) {
 function GhostRow({ change }: { change: SillySpecChange }) {
   const stage = change.current_stage ?? null;
   const bypassLabel =
-    stage === "quick" || stage === "explore" ? (BYPASS_BADGES[stage] ?? null) : null;
+    stage === "quick" || stage === "thin" || stage === "explore"
+      ? (BYPASS_BADGES[stage] ?? null)
+      : null;
   const stageLabel = change.stage_label?.trim() || stage || "—";
   return (
     <li className="border-t px-4 py-2">

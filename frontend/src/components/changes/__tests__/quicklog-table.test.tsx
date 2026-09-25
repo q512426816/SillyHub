@@ -227,10 +227,11 @@ describe("QuicklogTable", () => {
     );
   });
 
-  it("空态：无记录引导文案；有筛选时短文案", async () => {
+  it("空态：存量退役指引文案；有筛选时短文案", async () => {
     mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
     renderTable();
-    expect(await screen.findByText("还没有快速修复记录")).toBeTruthy();
+    // 2026-09-25-change-center-thin-flow task-09：quick 通道退役，空态改存量指引
+    expect(await screen.findByText("暂无存量快速修复记录")).toBeTruthy();
 
     // 触发一次带 search 的查询（输入回车）
     const input = screen.getByPlaceholderText("搜索标题 / 正文全文…");

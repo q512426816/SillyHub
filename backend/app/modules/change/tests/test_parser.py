@@ -423,3 +423,42 @@ class TestLoadModuleMapPlatformManaged:
             assert ChangeParser._load_module_map(root) == {"agent": ["backend/app/modules/agent/"]}
         finally:
             parser_mod._MODULE_MAP_CACHE.clear()
+
+
+class TestInferCurrentStageThin:
+    """flow-state.yaml → thin 推断（2026-09-25-change-center-thin-flow task-06）。
+
+    CLI ``sillyspec flow``（轻量变更）自建 thin 目录时进度落 flow-state.yaml 而非
+    sillyspec.db；无此规则 reparse 会把 thin 目录错标 brainstorm。
+    """
+
+    def test_flow_state_yaml_present_infers_thin(self, tmp_path: Path) -> None:
+        """flow-state.yaml 在场（无论 proposal 与否）→ thin，优先于 brainstorm 推断。"""
+        change_dir = tmp_path / "2026-09-25-thin-demo"
+        change_dir.mkdir()
+        (change_dir / "flow-state.yaml").write_text("mode: thin\n", encoding="utf-8")
+        assert ChangeParser._infer_current_stage(change_dir, "active") == "thin"
+
+        # proposal.md 同场也不降级为 brainstorm（thin 规则优先）
+        (change_dir / "proposal.md").write_text("# demo\n", encoding="utf-8")
+        assert ChangeParser._infer_current_stage(change_dir, "active") == "thin"
+
+    def test_flow_state_yaml_in_archive_dir_still_archive(self, tmp_path: Path) -> None:
+        """location=archive 优先于 flow-state.yaml（归档终态不被 thin 规则遮蔽）。"""
+        change_dir = tmp_path / "2026-09-25-thin-archived"
+        change_dir.mkdir()
+        (change_dir / "flow-state.yaml").write_text("mode: thin\n", encoding="utf-8")
+        assert ChangeParser._infer_current_stage(change_dir, "archive") == "archive"
+
+    def test_no_flow_state_yaml_brainstorm_not_regressed(self, tmp_path: Path) -> None:
+        """无 flow-state.yaml：proposal.md 在场 → brainstorm 既有行为不回归。"""
+        change_dir = tmp_path / "2026-09-25-normal-change"
+        change_dir.mkdir()
+        (change_dir / "proposal.md").write_text("# demo\n", encoding="utf-8")
+        (change_dir / "design.md").write_text("# demo\n", encoding="utf-8")
+        assert ChangeParser._infer_current_stage(change_dir, "active") == "brainstorm"
+
+        # 空目录 → brainstorm（起点默认）
+        empty_dir = tmp_path / "2026-09-25-empty-change"
+        empty_dir.mkdir()
+        assert ChangeParser._infer_current_stage(empty_dir, "active") == "brainstorm"

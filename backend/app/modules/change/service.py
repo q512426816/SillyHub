@@ -2553,15 +2553,22 @@ class ChangeService:
 
     @staticmethod
     def _stage_group_order(stage: str) -> tuple[int, str]:
-        """stage 分组排序键：STAGE_ORDER 序号，quick 及未知 stage 追加在已知序之后。
+        """stage 分组排序键：STAGE_ORDER 序号，辅助阶段（quick/thin）紧随其后，未知 stage 追加最末。
 
-        Grill #14：未知 stage（含 quick）与已知序并列时按 stage 名稳定排序
-        （index=len(STAGE_ORDER) 同值，tuple 第二元兜底，结果跨平台稳定）。
+        Grill #14：同 index 的 stage 按名稳定排序（tuple 第二元兜底，结果跨平台稳定）。
+        2026-09-25-change-center-thin-flow task-01：辅助阶段进已知序——
+        ``StageEnum.spec_auxiliary_stages()`` 的序（quick→thin）紧随主线之后，
+        thin 恒排 quick 之后、其它未知阶段之前（timeline 组序确定性）。
         """
         try:
             return (STAGE_ORDER.index(stage), stage)
         except ValueError:
-            return (len(STAGE_ORDER), stage)
+            pass
+        auxiliary_order = [s.value for s in StageEnum.spec_auxiliary_stages()]
+        try:
+            return (len(STAGE_ORDER) + auxiliary_order.index(stage), stage)
+        except ValueError:
+            return (len(STAGE_ORDER) + len(auxiliary_order), stage)
 
     @staticmethod
     def _normalize_completed_at(value: object) -> str | None:

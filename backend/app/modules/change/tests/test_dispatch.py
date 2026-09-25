@@ -49,7 +49,8 @@ class TestStageAgentConfig:
         assert config.read_only is False
 
     def test_all_expected_stages_present(self):
-        # 5 主线阶段 + quick 辅助阶段（2026-08-12-quick-independent-stage）。
+        # 5 主线阶段 + quick/thin 辅助阶段（2026-08-12-quick-independent-stage /
+        # 2026-09-25-change-center-thin-flow 轻量变更）。
         expected = {
             "brainstorm",
             "plan",
@@ -57,8 +58,20 @@ class TestStageAgentConfig:
             "verify",
             "archive",
             "quick",
+            "thin",
         }
         assert set(STAGE_AGENT_CONFIG.keys()) == expected
+
+    def test_thin_config_values(self):
+        # 2026-09-25-change-center-thin-flow：thin 辅助阶段（轻量变更 2 调用协议），
+        # 对齐 quick 先例——走 manual_dispatch 泛化路径，daemon-client 写码不占 worktree。
+        config = get_config_for_stage("thin")
+        assert config is not None
+        assert config.enabled is True
+        assert config.prompt_template == "thin.md"
+        assert config.phase == "Thin"
+        assert config.requires_worktree is False  # 与 quick 同款：daemon-client 不用 worktree
+        assert config.read_only is False
 
     def test_no_config_for_non_dispatch_stages(self):
         for stage in ("draft", "blocked", "archived"):

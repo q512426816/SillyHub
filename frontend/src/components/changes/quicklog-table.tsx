@@ -340,11 +340,11 @@ export function QuicklogTable({ workspaceId, onSelect }: QuicklogTableProps) {
     return (
       <div className="flex flex-col items-center gap-2 py-10 text-center">
         <div className="text-[15px] font-medium text-foreground">
-          还没有快速修复记录
+          暂无存量快速修复记录
         </div>
         <div className="text-xs text-muted-foreground">
-          在仓库跑 sillyspec quick 后，条目会实时出现在这里（CLI 推送 +
-          文件同步双链路）。
+          旧的 quick 通道已退役，不再产生新条目；存量记录继续在这里收尾查阅。
+          新的小修复请在变更列表创建「轻量变更」。
         </div>
       </div>
     );
@@ -358,7 +358,12 @@ export function QuicklogTable({ workspaceId, onSelect }: QuicklogTableProps) {
         </div>
       )}
 
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex items-center justify-between gap-2">
+        {/* 存量标注（2026-09-25-change-center-thin-flow task-09）：quick 通道已退役，
+            本面板仅承载存量记录的收尾查阅；新工作走变更列表「轻量变更」。 */}
+        <span className="text-xs text-muted-foreground">
+          存量面板 · 旧 quick 通道已退役，不再产生新条目
+        </span>
         <Checkbox
           checked={showPlaceholder}
           onChange={(e) => {

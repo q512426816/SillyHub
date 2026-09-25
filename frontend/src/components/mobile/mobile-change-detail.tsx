@@ -495,8 +495,48 @@ export function MobileChangeDetail({
         target={{ kind: "change", workspaceId, changeKey: change.change_key }}
       />
 
-      {/* 审批操作卡（X-03 #2 自绘：有待办默认展开；无待办折叠只读说明） */}
-      {reviewMeta ? (
+      {/* thin/quick 辅助阶段说明卡（2026-09-25-change-center-thin-flow task-08）：
+          现状两阶段均落「无可审批事项」通用卡——补专用只读说明（形态对齐桌面
+          change-stage-actions 同名分支；移动端折叠态承载，命令以说明文本呈现）。 */}
+      {change.current_stage === "thin" ? (
+        <SecCard
+          testId="m-change-thin-card"
+          title="◈ 轻量变更 · 两段式流程"
+          defaultOpen
+        >
+          <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+            <p>
+              协议 1/2 —— 智能体在会话中执行
+              <code className="mx-1 rounded bg-card px-1.5 py-0.5 text-[11px]">
+                sillyspec flow start --change {change.change_key ?? change.id}
+              </code>
+              启动（需求需多行文本，含独立「成功标准：」节头行 + 每行一条
+              <code className="mx-1 rounded bg-card px-1.5 py-0.5 text-[11px]">- 标准</code>
+              列表行，单行内联会被清晰度门拒绝）。
+            </p>
+            <p>
+              协议 2/2 —— 干活（改代码 + 写测试 + 填槽位）后执行
+              <code className="mx-1 rounded bg-card px-1.5 py-0.5 text-[11px]">
+                sillyspec flow done --change {change.change_key ?? change.id}
+              </code>
+              收口：中间态退出码 1 属正常，修复后重跑同命令即断点续跑；实测失败即整单
+              失败（fail-closed）；flow done 后变更自动转入归档区。
+            </p>
+            <p>进行中状态阶段恒显示「轻量变更」，归档时自动翻转，平台无需操作。</p>
+          </div>
+        </SecCard>
+      ) : change.current_stage === "quick" ? (
+        <SecCard
+          testId="m-change-quick-card"
+          title="⚡ 快速修复（存量）· 已退役"
+          defaultOpen={false}
+        >
+          <p className="text-xs text-muted-foreground">
+            旧的 quick 通道已退役，仅存量变更继续在会话中收尾；新的小修复请在变更
+            列表创建「轻量变更」。
+          </p>
+        </SecCard>
+      ) : reviewMeta ? (
         <section
           data-testid="m-change-review-card"
           className="rounded-[var(--radius-lg)] border-2 border-primary/25 bg-primary/5 shadow-[var(--shadow-sm)]"

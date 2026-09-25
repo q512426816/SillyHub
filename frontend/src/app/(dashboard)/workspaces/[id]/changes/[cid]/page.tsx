@@ -68,12 +68,15 @@ export function isTerminalChange(
   return change.status === "archived" || change.location === "archive";
 }
 
-// quick/blocked/archived 三态 status 徽标（非线性节点，独立呈现）
+// quick/thin/blocked/archived 状态徽标（非线性节点，独立呈现）
+// 2026-09-25-change-center-thin-flow task-07：补 thin=轻量变更（防标题裸显英文 "thin"）；
+// quick 补存量口径。
 const STATUS_BADGE: Record<
   string,
   { label: string; variant: "success" | "outline" | "destructive" | "default" }
 > = {
-  quick: { label: "快速修复", variant: "default" },
+  quick: { label: "快速任务（存量）", variant: "default" },
+  thin: { label: "轻量变更", variant: "default" },
   blocked: { label: "已阻塞", variant: "destructive" },
   archived: { label: "已归档", variant: "success" },
 };

@@ -141,3 +141,226 @@ created_at: 2026-09-22T17:00:51.578Z
 - 场景：默认场景 — Given 后端 `SessionExportRequest` schema 落地；When 跑 `pnpm gen:types`；Then `api-types.ts` 含该请求类型且对既有类型零破坏，`openapi.json` 同步提交
 全文：.sillyspec/changes/archive/2026-09-14-session-export/requirements.md#FR-07
 最近确认：8caa2f56b
+
+## FR-auto-backend-015 THIN 辅助阶段与派发配置
+变更：2026-09-25-change-center-thin-flow
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given StageEnum 现有 QUICK 辅助阶段先例（backend/app/modules/change/model.py:65-72）；When 变更中心为 quick 类型新变更派发 agent；Then StageEnum 含 THIN="thin"（进 spec_auxiliary_stages，不进 TRANSITIONS/STAGE_ORDER，跑完即终态
+全文：.sillyspec/changes/archive/2026-09-25-change-center-thin-flow/requirements.md#FR-01
+最近确认：9c908b6ae
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-center-thin-flow:task-01:acc-0-272c783f
+  tests: backend/app/modules/change/tests/test_dispatch.py | backend/tests/modules/change/test_dispatch_stage_config.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+- row: 2026-09-25-change-center-thin-flow:task-01:acc-1-6259e0f9
+  tests: backend/app/modules/change/tests/test_dispatch.py | backend/tests/modules/change/test_dispatch_stage_config.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+- row: 2026-09-25-change-center-thin-flow:task-01:acc-2-ed98ef81
+  tests: backend/app/modules/change/tests/test_dispatch.py | backend/tests/modules/change/test_dispatch_stage_config.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+
+## FR-auto-backend-016 thin 派发 prompt 契约
+变更：2026-09-25-change-center-thin-flow
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given thin 派发 agent 需执行 2 调用协议；When agent 收到派发 prompt；Then prompt 指示：flow start 带 --input 多行文本（动机行 + 独立节头行「成功标准：」+ 每行一条 `- <标准>`——单行内联会被清晰度
+全文：.sillyspec/changes/archive/2026-09-25-change-center-thin-flow/requirements.md#FR-02
+最近确认：9c908b6ae
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-center-thin-flow:task-02:acc-0-e8ac335f
+  tests: backend/app/modules/change/tests/test_thin_stage.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+- row: 2026-09-25-change-center-thin-flow:task-02:acc-1-b3206f61
+  tests: backend/app/modules/change/tests/test_thin_stage.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+- row: 2026-09-25-change-center-thin-flow:task-02:acc-2-c6d1563c
+  tests: backend/app/modules/change/tests/test_thin_stage.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+
+## FR-auto-backend-017 写入分流 quick→thin
+变更：2026-09-25-change-center-thin-flow
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given change_writer 分类器输出 change_type="quick"；When service.py/proxy.py 写入新变更；Then initial_stage="thin"（原 "quick"）；change_type 标签保留 "quick" 不改；stages JSON 初值含 thin
+全文：.sillyspec/changes/archive/2026-09-25-change-center-thin-flow/requirements.md#FR-03
+最近确认：9c908b6ae
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-center-thin-flow:task-03:acc-0-b4738f3e
+  tests: backend/app/modules/change_writer/tests/test_classifier.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+- row: 2026-09-25-change-center-thin-flow:task-03:acc-1-cdf7329e
+  tests: backend/app/modules/change_writer/tests/test_classifier.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+
+## FR-auto-backend-018 flow 命令族会话绑定
+变更：2026-09-25-change-center-thin-flow
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given thin 派发 agent 在会话内执行 `sillyspec flow start|done|amend-draft --change <名>`；When daemon run_sync submit_commit 解析 bash 命令；Then extract_spec_bindings 产出 SpecCommandBinding(kind="change", change_key=<名>)，会话正确写
+全文：.sillyspec/changes/archive/2026-09-25-change-center-thin-flow/requirements.md#FR-04
+最近确认：9c908b6ae
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-center-thin-flow:task-04:acc-0-58d01e5a
+  tests: backend/app/modules/change/tests/test_spec_binding.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+- row: 2026-09-25-change-center-thin-flow:task-04:acc-1-06326d42
+  tests: backend/app/modules/change/tests/test_spec_binding.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+
+## FR-auto-backend-019 阶段回洗双守卫
+变更：2026-09-25-change-center-thin-flow
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given thin 变更在 sillyspec.db 停留 current_stage='scan'/status='active'，归档翻 status='archiv；When ① daemon run_sync 回调 sync_stage_status（dispatch.py:1784 一带）或 ② CLI progress 上行 _；Then 平台 change.current_stage=='thin' 且 DB 行非 archived 时：不回写 current_stage、不写 stages['
+全文：.sillyspec/changes/archive/2026-09-25-change-center-thin-flow/requirements.md#FR-05
+最近确认：9c908b6ae
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-center-thin-flow:task-05:acc-0-504aa4f7
+  tests: backend/app/modules/change/tests/test_thin_stage.py | backend/app/modules/platform_sync/tests/test_thin_stage_guard.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+- row: 2026-09-25-change-center-thin-flow:task-05:acc-1-e63707df
+  tests: backend/app/modules/change/tests/test_thin_stage.py | backend/app/modules/platform_sync/tests/test_thin_stage_guard.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+
+## FR-auto-backend-020 前端 thin 视觉与交互（显示名「轻量变更」，D-002@v1）
+变更：2026-09-25-change-center-thin-flow
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：默认场景 — Given 前端七处硬编码触点（徽章映射/STATUS_BADGE/STAGE_OPTIONS 双副本/说明卡/概览卡两处旁路判断/移动端审批卡/时间线组标签）；When thin 变更出现在列表/详情/概览/移动端；Then 徽章「◈ 轻量变更」品牌紫阶（quick 改「快速任务（存量）」琥珀）；筛选下拉含「轻量变更」（桌面+移动两份副本）；详情页 thin 两段式说明卡（桌面+移动
+全文：.sillyspec/changes/archive/2026-09-25-change-center-thin-flow/requirements.md#FR-06
+最近确认：9c908b6ae
+
+## FR-auto-backend-021 quick 存量软退役标注
+变更：2026-09-25-change-center-thin-flow
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given quick 为存量过渡通道（CLI 横幅语义）；When 用户查看 quicklog 面板/quick 说明卡/统计卡/流程指引文档；Then quicklog tab 计数标「存量 · N」、空态文案换退役指引（桌面 quicklog-table:346 + 移动 :873 两处必改）；quick 说
+全文：.sillyspec/changes/archive/2026-09-25-change-center-thin-flow/requirements.md#FR-07
+最近确认：9c908b6ae
+
+## FR-auto-backend-022 纵深防御与对账
+变更：2026-09-25-change-center-thin-flow
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 上游 3.30.0 已有变更名白名单但平台入口无校验；watcher 事件按 change_name 字符串归属；When thin 变更派发/CLI 侧自建 thin 目录 reparse/watcher 事件上行；Then 派发入口对 thin 变更校验 change_key（`^[A-Za-z0-9_.\-]+$`，拒 `..`/`default`/`quick-<hex8>`）
+全文：.sillyspec/changes/archive/2026-09-25-change-center-thin-flow/requirements.md#FR-08
+最近确认：9c908b6ae
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-change-center-thin-flow:task-06:acc-0-2cf02565
+  tests: backend/app/modules/change/tests/test_parser.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active
+- row: 2026-09-25-change-center-thin-flow:task-06:acc-1-b13aec10
+  tests: backend/app/modules/change/tests/test_parser.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-change-center-thin-flow
+  status: active

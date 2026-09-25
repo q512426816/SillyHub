@@ -1,0 +1,29 @@
+# 薄流程（thin）adopt 收编边界两观察（活跃坑，待上游修复）
+
+> 来源：2026-09-25-change-center-thin-flow verify 阶段实测（本机 sillyspec 3.30.0）。
+> 上游仓：C:\Users\qinyi\IdeaProjects\sillyspec。修复后按惯例移 docs/sillyspec/finished/。
+
+## 坑 1：adopt 收编后 sillyspec.db 残留 0 字节空文件，下次 flow start 误报「db 损坏」
+
+- 现象：临时目录实验中，对含预建产物的变更跑 `flow start` 走 adopt 收编（EXIT 0）后，
+  变更目录/sillyspec 运行面留下 **0 字节的 sillyspec.db 空文件**；再次 `flow start` 报
+  「进度库损坏」。
+- 绕过：删除该 0 字节空 db 文件后恢复正常（ProgressManager 会重建）。
+- 疑似根因：adopt 路径的 ProgressManager 初始化在中途 best-effort 失败后留下空文件句柄
+  （`new ProgressManager()` 建库失败不清残骸）。
+- 建议：flow.js adopt 分支收尾清理空 db；或 db-engine 打开时把「文件存在且 0 字节」
+  视同不存在重建。
+
+## 坑 2：adopt「收编补件失败」ENOENT best-effort 警告噪音
+
+- 现象：adopt 收编时打印 `⚠️ 收编补件失败（best-effort）: ENOENT ...`（redraftMissingArtifacts
+  / ensureBindingSlots 对预建目录形态的路径假设），不影响收编成功（EXIT 0）。
+- 绕过：可忽略；或预建目录时同时给足四件套占位。
+- 建议：adopt 分支的补件函数对「目录刚建、部分工件缺父路径」场景做 mkdir -p 语义。
+
+## 关联留档
+
+- 上游前置修复（flow 平台参数面四缺口 + 名称白名单）已在 3.30.0 修复并留档：
+  docs/sillyspec/finished/thin-flow-quick-retirement.md
+- 本文件仅记录 adopt 边界两小坑，不阻塞平台侧 thin 派发（平台 writer 不走 adopt 路径——
+  变更目录由 flow start 全新建，预建仅空目录放行形态）。

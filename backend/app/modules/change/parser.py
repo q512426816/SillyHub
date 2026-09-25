@@ -732,6 +732,11 @@ class ChangeParser:
         被导入排除（worktrees 太大），平台读不到。这里从 change 目录的文档产出推断
         大致 stage：archive → archive / verify-result → verify / plan+tasks → plan /
         proposal+design → brainstorm / 否则 brainstorm（scan 已移除，起点为 brainstorm）。
+
+        2026-09-25-change-center-thin-flow task-06：变更目录含 ``flow-state.yaml``
+        → "thin"（最高优先，先于 verify/plan/brainstorm 文档推断）——CLI 侧
+        ``sillyspec flow``（轻量变更）自建 thin 目录时进度落 flow-state.yaml 而非
+        sillyspec.db，无此规则会被错标 brainstorm。
         """
         if location == "archive":
             return "archive"
@@ -739,6 +744,8 @@ class ChangeParser:
         def has(f: str) -> bool:
             return (change_dir / f).is_file()
 
+        if has("flow-state.yaml"):
+            return "thin"
         if has("verify-result.md"):
             return "verify"
         if has("plan.md") or has("tasks.md") or (change_dir / "tasks").is_dir():

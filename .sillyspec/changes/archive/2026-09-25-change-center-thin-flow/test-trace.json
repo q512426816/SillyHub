@@ -1,0 +1,221 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-change-center-thin-flow",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-25-change-center-thin-flow:task-01:acc-0-272c783f",
+      "tests": [
+        "backend/app/modules/change/tests/test_dispatch.py",
+        "backend/tests/modules/change/test_dispatch_stage_config.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-25-change-center-thin-flow:task-01:acc-1-6259e0f9",
+      "tests": [
+        "backend/app/modules/change/tests/test_dispatch.py",
+        "backend/tests/modules/change/test_dispatch_stage_config.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-25-change-center-thin-flow:task-01:acc-2-ed98ef81",
+      "tests": [
+        "backend/app/modules/change/tests/test_dispatch.py",
+        "backend/tests/modules/change/test_dispatch_stage_config.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-25-change-center-thin-flow:task-02:acc-0-e8ac335f",
+      "tests": [
+        "backend/app/modules/change/tests/test_thin_stage.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-25-change-center-thin-flow:task-02:acc-1-b3206f61",
+      "tests": [
+        "backend/app/modules/change/tests/test_thin_stage.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-25-change-center-thin-flow:task-02:acc-2-c6d1563c",
+      "tests": [
+        "backend/app/modules/change/tests/test_thin_stage.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-25-change-center-thin-flow:task-03:acc-0-b4738f3e",
+      "tests": [
+        "backend/app/modules/change_writer/tests/test_classifier.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-25-change-center-thin-flow:task-03:acc-1-cdf7329e",
+      "tests": [
+        "backend/app/modules/change_writer/tests/test_classifier.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-25-change-center-thin-flow:task-04:acc-0-58d01e5a",
+      "tests": [
+        "backend/app/modules/change/tests/test_spec_binding.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-25-change-center-thin-flow:task-04:acc-1-06326d42",
+      "tests": [
+        "backend/app/modules/change/tests/test_spec_binding.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-25-change-center-thin-flow:task-05:acc-0-504aa4f7",
+      "tests": [
+        "backend/app/modules/change/tests/test_thin_stage.py",
+        "backend/app/modules/platform_sync/tests/test_thin_stage_guard.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-25-change-center-thin-flow:task-05:acc-1-e63707df",
+      "tests": [
+        "backend/app/modules/change/tests/test_thin_stage.py",
+        "backend/app/modules/platform_sync/tests/test_thin_stage_guard.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-09-25-change-center-thin-flow:task-06:acc-0-2cf02565",
+      "tests": [
+        "backend/app/modules/change/tests/test_parser.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-09-25-change-center-thin-flow:task-06:acc-1-b13aec10",
+      "tests": [
+        "backend/app/modules/change/tests/test_parser.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-change-center-thin-flow"
+    }
+  ]
+}

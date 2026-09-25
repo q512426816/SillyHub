@@ -140,14 +140,34 @@ describe("ChangeStageActions 审批卡（task-10）", () => {
     ).toBeInTheDocument();
   });
 
-  it("quick 阶段：只读说明，无任何执行控制按钮（含推进/触发/门禁）", () => {
+  it("quick 阶段：只读说明（存量退役口径），无任何执行控制按钮（含推进/触发/门禁）", () => {
     const props = makeProps({
       change: makeChange({ current_stage: "quick", pending_review: null }),
     });
     render(<ChangeStageActions {...props} />);
-    expect(screen.getByText(/快速修复由智能体在会话中执行/)).toBeInTheDocument();
+    // 2026-09-25-change-center-thin-flow task-08：quick 卡改「已退役·存量收尾」文案
+    expect(screen.getByText(/旧的 quick 通道已退役/)).toBeInTheDocument();
     expect(screen.queryByText(/通过并通知绑定会话/)).not.toBeInTheDocument();
     expect(screen.queryByText(/触发/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+  });
+
+  it("thin 阶段：两段式只读说明卡（flow start/done 命令 + 断点续/fail-closed）", () => {
+    const props = makeProps({
+      change: makeChange({
+        current_stage: "thin",
+        pending_review: null,
+        change_key: "2026-09-25-thin-demo",
+      }),
+    });
+    render(<ChangeStageActions {...props} />);
+    expect(screen.getByText("◈ 轻量变更")).toBeInTheDocument();
+    expect(screen.getByText(/sillyspec flow start --change 2026-09-25-thin-demo/)).toBeInTheDocument();
+    expect(screen.getByText(/sillyspec flow done --change 2026-09-25-thin-demo/)).toBeInTheDocument();
+    expect(screen.getByText(/断点续/)).toBeInTheDocument();
+    expect(screen.getByText(/fail-closed/)).toBeInTheDocument();
+    // 只读说明：无执行控制按钮
+    expect(screen.queryByText(/通过并通知绑定会话/)).not.toBeInTheDocument();
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 

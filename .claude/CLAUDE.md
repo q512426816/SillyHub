@@ -10,7 +10,7 @@
 1. 禁止绕过本文件规则和 SillySpec 流程。
 2. 修改代码前，必须先说明依据的文档路径或现有代码依据。
 3. 新功能 / 大改动必须走完整 SillySpec 流程技能：`brainstorm → plan → execute → verify → （人工确认再执行）archive`。
-4. 小修复 / 小调整走 SillySpec quick 技能：`sillyspec run quick`。
+4. 小修复 / 小调整走 SillySpec 轻量变更（thin，2 调用协议）：`sillyspec flow start --change <名> --input "<多行需求：动机一行 + 独立节头行「成功标准：」+ 每行一条 - <标准>>"` → 干活（改代码写测试）→ `sillyspec flow done --change <名>`。注意：`--input` 的成功标准禁止单行内联（会被清晰度门 exit 2 拒）；`flow done` 中间态 exit 1 属正常（空槽拒收/实测失败自动升厚），修复后重跑同命令断点续。（旧的 `sillyspec run quick` 已退役，仅存量收尾。）
 5. 执行顺序：文档 → 读代码 → 写测试 → 写实现 → 跑测试 → 验收 → 更新文档。 
 6. 中途停下用 `sillyspec status` / `sillyspec resume` 存进度，不直接 commit 半成品。
 7. 禁止无依据改代码，禁止先随意实现再补文档。 
@@ -27,7 +27,7 @@
 18. 注释和实现不一致是万恶之源，遇到不一致的要及时修正
 19. SillySpec 任务记录是隔离的
     - **永不重置 / reset / 清零已存在的 change**。多个活跃 change 各自 `--change <名>` 隔离,不重叠。代码不重叠 = 新 `--change`,不是清旧 change。
-    - quick:同一 QUICKLOG 文件按 ql-ID 条目追加,不是单槽位,不冲突。
+    - quick(存量通道,退役中):同一 QUICKLOG 文件按 ql-ID 条目追加,不是单槽位,不冲突。旧的 `sillyspec run quick` 已退役——仅存量变更继续走该通道收尾;新的小修复一律走轻量变更(规则 4)。
 20. 前端样式统一参考（2026-08-20 起为 AI-Native 双主题系统）：
 21. 
   * `.sillyspec/changes/archive/2026-08-20-frontend-ai-native-style/prototype-frontend-ai-native-style.html`（设计系统总纲·原型）

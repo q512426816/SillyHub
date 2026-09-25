@@ -343,10 +343,11 @@ async def proxy_create_change(
     if change_type is None:
         change_type = classify_change_type(description)
 
-    # ql-20260812-007（2026-08-12-quick-independent-stage）：quick 类型走独立阶段，
-    # 其余走 brainstorm（保持 ql-006 行为）。quick 是 SillySpec 辅助阶段，自己跑三步
-    # 就结束，不进主线 brainstorm→plan→execute→verify→archive。
-    initial_stage = "quick" if change_type == "quick" else "brainstorm"
+    # 2026-09-25-change-center-thin-flow task-03：quick 类型新变更分流至 thin
+    # 辅助阶段（轻量变更 2 调用协议），其余走 brainstorm（保持 ql-006 行为）。
+    # change_type 标签仍写 "quick"（分类标签与阶段解耦，D-001@v1）——存量的
+    # quick 阶段在途变更不受影响（本入口只管新变更初值）。
+    initial_stage = "thin" if change_type == "quick" else "brainstorm"
 
     files = _build_files(
         change_key=change_key,

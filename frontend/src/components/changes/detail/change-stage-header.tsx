@@ -23,6 +23,11 @@ export const WORKFLOW_STAGE_LABELS: Record<string, string> = {
   execute: "执行",
   verify: "验证",
   archive: "归档",
+  // 2026-09-25-change-center-thin-flow task-07：辅助阶段标签（供 change-step-timeline
+  // 组标题与 [cid] 详情页复用，防裸显英文；WORKFLOW_STAGES 主线数组不动——thin
+  // 不进主管线渲染，主管线 indexOf<0 分支不受影响）。
+  thin: "轻量变更",
+  quick: "快速任务（存量）",
 };
 
 export interface ChangeStageHeaderProps {

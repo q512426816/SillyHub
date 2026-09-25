@@ -95,7 +95,9 @@ export function WorkspaceStatsRow({
       <StatCard
         href={`/workspaces/${workspaceId}/changes?tab=quicklog`}
         icon={Zap}
-        label="快速修复"
+        /* 存量口径（2026-09-25-change-center-thin-flow task-09）：quick 通道已退役，
+           计数只含存量收尾条目；新的小修复走「轻量变更」。 */
+        label="快速修复（存量）"
         value={quickTotal}
         clickable
       />

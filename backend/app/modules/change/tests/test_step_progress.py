@@ -114,7 +114,11 @@ def test_extract_normal_multi_stage_sorted_by_stage_order() -> None:
 
 
 def test_extract_quick_and_unknown_stage_after_known_order() -> None:
-    """quick 及未知 stage 追加在 STAGE_ORDER 已知序之后，组内按 stage 名稳定排序。"""
+    """quick/thin 辅助阶段排 STAGE_ORDER 已知序之后，未知 stage 追加最末，组内按 stage 名稳定排序。
+
+    2026-09-25-change-center-thin-flow D-003@v1：辅助阶段（quick→thin）进已知序
+    （spec_auxiliary_stages 序），未知 stage 从「与 quick 并列混排」改为恒排辅助阶段之后。
+    """
     steps = [
         _step("zz-custom", "z1", status="pending", ordering=1),
         _step("quick", "q1", status="completed", ordering=1),
@@ -123,8 +127,8 @@ def test_extract_quick_and_unknown_stage_after_known_order() -> None:
     ]
     summary, timeline = ChangeService._extract_step_progress(_payload("quick", steps))
     assert timeline is not None
-    # 追加组（quick+未知）按 stage 名稳定排序：aa-custom < quick < zz-custom
-    assert [e.stage for e in timeline] == ["execute", "aa-custom", "quick", "zz-custom"]
+    # 主线已知序 → quick（辅助已知序）→ 未知组按 stage 名稳定排序
+    assert [e.stage for e in timeline] == ["execute", "quick", "aa-custom", "zz-custom"]
     assert summary is not None
     assert summary.current_step_name == "a1"  # execute/quick completed 后第一个非 completed
 
@@ -597,15 +601,21 @@ async def test_project_current_stage_returns_quadruple(db_session: AsyncSession)
 
 
 def test_stage_group_order_matches_design() -> None:
-    """排序键单测：已知 stage 按 STAGE_ORDER 序号；quick/未知并列追加在后按名稳定。"""
+    """排序键单测：已知 stage 按 STAGE_ORDER 序号；辅助（quick→thin）紧随其后；未知追加最末按名稳定。
+
+    2026-09-25-change-center-thin-flow D-003@v1：辅助阶段进已知序（thin 排 quick 后、未知前）。
+    """
     assert STAGE_ORDER == ["brainstorm", "plan", "execute", "verify", "archive"]
     assert ChangeService._stage_group_order("brainstorm") == (0, "brainstorm")
     assert ChangeService._stage_group_order("archive") == (4, "archive")
     assert ChangeService._stage_group_order("quick") == (5, "quick")
-    assert ChangeService._stage_group_order("zz-unknown") == (5, "zz-unknown")
-    assert ChangeService._stage_group_order("aa-unknown") == (5, "aa-unknown")
-    # 已知序永远先于未知序
+    assert ChangeService._stage_group_order("thin") == (6, "thin")
+    assert ChangeService._stage_group_order("zz-unknown") == (7, "zz-unknown")
+    assert ChangeService._stage_group_order("aa-unknown") == (7, "aa-unknown")
+    # 已知序（主线+辅助）永远先于未知序；thin 恒排 quick 之后
     assert ChangeService._stage_group_order("archive") < ChangeService._stage_group_order("quick")
+    assert ChangeService._stage_group_order("quick") < ChangeService._stage_group_order("thin")
+    assert ChangeService._stage_group_order("thin") < ChangeService._stage_group_order("zz-unknown")
 
 
 def test_extract_summary_fields_shape() -> None:

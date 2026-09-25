@@ -24,26 +24,36 @@ import { WORKFLOW_STAGE_LABELS } from "@/components/changes/detail/change-stage-
 /** step 级进度摘要（api-types 生成，禁止手写）。 */
 export type StepProgressSummary = components["schemas"]["StepProgressSummary"];
 
-/** stage → 徽章色语义（与列表页现状 STAGE_KIND 一致：quick/brainstorm 警示、verify 成功…）。 */
-export const STAGE_KIND: Record<string, StatusKind> = {
+/** stage → 徽章色语义（与列表页现状 STAGE_KIND 一致：quick/brainstorm 警示、verify 成功…）。
+ *
+ * 2026-09-25-change-center-thin-flow task-07：thin 走品牌紫阶——StatusBadge 的
+ * StatusKind 五值体系无紫，本地扩展 "brand" kind（渲染药丸形紫阶徽章，类名走
+ * brand-* 语义阶，随 html data-theme 换肤——themes.ts 单一源铁律）。 */
+export type StageBadgeKind = StatusKind | "brand";
+
+export const STAGE_KIND: Record<string, StageBadgeKind> = {
   quick: "warning",
   brainstorm: "warning",
   plan: "info",
   execute: "info",
   verify: "success",
   archive: "neutral",
+  // 2026-09-25-change-center-thin-flow：轻量变更品牌紫阶（D-002@v1），与 quick
+  // 的 warning 琥珀区分新旧两代辅助流。
+  thin: "brand",
   // 2026-08-21 quick：CLI 归档变更读侧终态投影 current_stage='archived'
   //（与平台内 complete_stage 终态同形），列表徽标降级为中性色。
   archived: "neutral",
 };
 
 /** stage → 中文标签：主线五阶段复用 change-stage-header 的 WORKFLOW_STAGE_LABELS，
- * 列表页另有 draft（旧数据兜底）/ scan / quick 三个值本地补齐。 */
+ * 列表页另有 draft（旧数据兜底）/ scan / quick / thin 四个值本地补齐。 */
 export const STAGE_LABELS: Record<string, string> = {
   ...WORKFLOW_STAGE_LABELS,
   draft: "草稿",
   scan: "扫描",
-  quick: "快速任务",
+  quick: "快速任务（存量）", // task-07：quick 通道退役，存量口径
+  thin: "轻量变更", // D-002@v1：中文显示名单一口径
   archived: "已归档",
 };
 
@@ -126,12 +136,22 @@ export function ChangeStepBadge({ stage, stepProgress }: ChangeStepBadgeProps) {
   if (!stage) return null;
 
   const hasSummary = stepProgress !== null && stepProgress.step_total > 0;
+  const kind: StageBadgeKind = STAGE_KIND[stage] ?? "neutral";
+  const label = STAGE_LABELS[stage] ?? stage;
 
   return (
     <div className="inline-flex flex-col items-start">
-      <StatusBadge kind={STAGE_KIND[stage] ?? "neutral"}>
-        {STAGE_LABELS[stage] ?? stage}
-      </StatusBadge>
+      {kind === "brand" ? (
+        // 轻量变更（thin）品牌紫阶药丸徽章（2026-09-25-change-center-thin-flow
+        // task-07）：形态对照原型 prototype-change-center-thin-flow.html .badge.thin
+        //（soft 底 + brand 字 + 紫边 + ◈ 符号）；brand-* 语义阶随主题换肤不写死 hex。
+        <span className="inline-flex items-center gap-1 rounded-full border border-brand-300 bg-brand-50 px-2 py-px text-xs whitespace-nowrap text-brand-700">
+          <span aria-hidden>◈</span>
+          {label}
+        </span>
+      ) : (
+        <StatusBadge kind={kind}>{label}</StatusBadge>
+      )}
       {hasSummary ? <StepSubRow progress={stepProgress} /> : null}
     </div>
   );
