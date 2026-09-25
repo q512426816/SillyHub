@@ -331,3 +331,25 @@ export async function downloadSpecBundle(
   return { blob, filename, specVersion };
 }
 
+
+/** spec 同步冲突注册表行（GET /spec-conflicts 开放行，横幅数据源）。 */
+export interface SpecConflictItem {
+  id: string;
+  workspace_id: string;
+  stage: string;
+  conflict_type: string;
+  details_json: string | null;
+  status: string;
+  created_at: string;
+}
+
+/** 拉工作区 spec 同步冲突（默认只取开放行，横幅消费）。 */
+export async function listSpecConflicts(
+  workspaceId: string,
+  status = "open",
+): Promise<SpecConflictItem[]> {
+  const body = await apiFetch<{ items?: SpecConflictItem[] }>(
+    `/api/workspaces/${workspaceId}/spec-conflicts?status=${encodeURIComponent(status)}&limit=10`,
+  );
+  return body.items ?? [];
+}

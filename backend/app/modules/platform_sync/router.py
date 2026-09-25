@@ -261,6 +261,9 @@ async def push_spec_sync(
         ok=True,
         new_versions=result["new_versions"],
         conflict=result["conflict"],
+        applied_ops=result.get("applied_ops", 0),
+        skipped_conflict=result.get("skipped_conflict", 0),
+        skipped_tombstone=result.get("skipped_tombstone", 0),
         server_versions=result["server_versions"],
         # 审计 A6：透出被平台墓碑拒绝的路径列表（CLI 区分墓碑拒绝与版本冲突）
         platform_deleted=result["platform_deleted"],

@@ -57,6 +57,10 @@ class SpecSyncResponse(BaseModel):
     ok: bool
     reparsed: int  # = reparsed_docs（向后兼容，旧客户端读这个）
     reparsed_changes: int = 0
+    # 2026-09-26-spec-sync-receipt-visibility：全量落盘/跳过计数（skipped>0 即有
+    # 成员未落盘——墓碑前缀排除或 staging 缺失，服务端同步 warn 日志）。
+    landed_files: int = 0
+    skipped_files: int = 0
 
 
 # ── Spec Workspace ─────────────────────────────────────────────────────────────
@@ -270,6 +274,8 @@ async def sync_spec_workspace(
         ok=True,
         reparsed=result["reparsed_docs"],
         reparsed_changes=result["reparsed_changes"],
+        landed_files=result.get("landed_files", 0),
+        skipped_files=result.get("skipped_files", 0),
     )
 
 
@@ -308,6 +314,10 @@ async def sync_spec_workspace_incremental(
         new_versions=result["new_versions"],
         conflict=result["conflict"],
         server_versions=result["server_versions"],
+        applied_ops=result.get("applied_ops", 0),
+        skipped_conflict=result.get("skipped_conflict", 0),
+        skipped_tombstone=result.get("skipped_tombstone", 0),
+        platform_deleted=result.get("platform_deleted", []),
     )
 
 

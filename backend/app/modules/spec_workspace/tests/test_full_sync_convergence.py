@@ -140,7 +140,7 @@ class TestConvergeStaleFiles:
         await db_session.commit()
 
         tar_bytes = _build_tar({"docs": None, "docs/keep.md": b"# keep"})
-        spec_ws, converged_files, converged_dirs = await SpecWorkspaceService(
+        spec_ws, converged_files, converged_dirs, _, _ = await SpecWorkspaceService(
             db_session
         )._write_spec_root(ws.id, tar_bytes)
 
@@ -197,7 +197,7 @@ class TestConvergeStaleFiles:
         await db_session.commit()
 
         tar_bytes = _build_tar({"docs": None, "docs/A.md": b"# A", "docs/B.md": b"# B"})
-        _, converged_files, converged_dirs = await SpecWorkspaceService(
+        _, converged_files, converged_dirs, _, _ = await SpecWorkspaceService(
             db_session
         )._write_spec_root(ws.id, tar_bytes)
 
@@ -234,7 +234,7 @@ class TestConvergeStaleFiles:
                 ".sillyspec/local.yaml": b"client: local",
             }
         )
-        _, converged_files, _ = await SpecWorkspaceService(db_session)._write_spec_root(
+        _, converged_files, _, _, _ = await SpecWorkspaceService(db_session)._write_spec_root(
             ws.id, tar_bytes
         )
 
@@ -260,7 +260,7 @@ class TestConvergeGuards:
         (spec_root / "docs" / "A.md").write_text("# A", encoding="utf-8")
         await _make_spec_workspace(db_session, ws, spec_root)
 
-        _, converged_files, converged_dirs = await SpecWorkspaceService(
+        _, converged_files, converged_dirs, _, _ = await SpecWorkspaceService(
             db_session
         )._write_spec_root(ws.id, _build_tar({}))
 
@@ -284,7 +284,7 @@ class TestConvergeGuards:
         await _make_spec_workspace(db_session, ws, spec_root)
 
         tar_bytes = _build_tar({"docs": None, "docs/A.md": b"# A"})
-        _, converged_files, converged_dirs = await SpecWorkspaceService(
+        _, converged_files, converged_dirs, _, _ = await SpecWorkspaceService(
             db_session
         )._write_spec_root(ws.id, tar_bytes)
 

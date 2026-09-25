@@ -24722,6 +24722,23 @@ export interface components {
             server_versions?: {
                 [key: string]: number;
             } | null;
+            /**
+             * Applied Ops
+             * @default 0
+             */
+            applied_ops: number;
+            /**
+             * Skipped Conflict
+             * @default 0
+             */
+            skipped_conflict: number;
+            /**
+             * Skipped Tombstone
+             * @default 0
+             */
+            skipped_tombstone: number;
+            /** Platform Deleted */
+            platform_deleted?: string[];
         };
         /**
          * SpecManifestFileEntry
@@ -27719,6 +27736,21 @@ export interface components {
             } | null;
             /** Platform Deleted */
             platform_deleted?: string[];
+            /**
+             * Applied Ops
+             * @default 0
+             */
+            applied_ops: number;
+            /**
+             * Skipped Conflict
+             * @default 0
+             */
+            skipped_conflict: number;
+            /**
+             * Skipped Tombstone
+             * @default 0
+             */
+            skipped_tombstone: number;
         };
         /**
          * SpecSyncResponse
@@ -27734,6 +27766,16 @@ export interface components {
              * @default 0
              */
             reparsed_changes: number;
+            /**
+             * Landed Files
+             * @default 0
+             */
+            landed_files: number;
+            /**
+             * Skipped Files
+             * @default 0
+             */
+            skipped_files: number;
         };
         /** ReviewResponse */
         app__modules__workflow__schema__ReviewResponse: {

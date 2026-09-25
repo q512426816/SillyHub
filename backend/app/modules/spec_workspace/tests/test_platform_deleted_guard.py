@@ -341,9 +341,13 @@ class TestAddReviveInterception:
         svc = SpecWorkspaceService(db_session)
 
         result = await svc.apply_ops(ws.id, [_op("add", "docs/plain.md", content=_b64("p"))])
+        # 2026-09-26-spec-sync-receipt-visibility：回执计数三键（applied/skipped_*）
         assert result == {
             "new_versions": {"docs/plain.md": 1},
             "conflict": False,
+            "applied_ops": 1,
+            "skipped_conflict": 0,
+            "skipped_tombstone": 0,
             "server_versions": None,
             "platform_deleted": [],
         }
@@ -543,7 +547,7 @@ class TestWriteSpecRootExclusion:
                 "changes/live/ok.md": b"# ok",
             }
         )
-        spec_ws, converged_files, converged_dirs = await SpecWorkspaceService(
+        spec_ws, converged_files, converged_dirs, _, _ = await SpecWorkspaceService(
             db_session
         )._write_spec_root(ws.id, tar_bytes)
 
@@ -599,7 +603,7 @@ class TestWriteSpecRootExclusion:
         tar_bytes = _build_tar(
             {"docs": None, "docs/A.md": b"# A", "changes/x": None, "changes/x/p.md": b"# P"}
         )
-        spec_ws, converged_files, converged_dirs = await SpecWorkspaceService(
+        spec_ws, converged_files, converged_dirs, _, _ = await SpecWorkspaceService(
             db_session
         )._write_spec_root(ws.id, tar_bytes)
 
@@ -701,3 +705,63 @@ class TestPrefixLoadingArchiveBoundary:
 
         assert "changes/archive/real/" in prefixes  # 四段正常派生
         assert "changes/archive/stray.md/" not in prefixes  # 伪前缀不再产出
+
+
+# ===========================================================================
+# 2026-09-26-spec-sync-receipt-visibility：冲突注册表 + 回执计数
+# ===========================================================================
+
+
+async def test_sync_conflict_registry_open_and_close(db_session, tmp_path) -> None:
+    """增量冲突 → spec_conflicts 开放行（幂等不重复建）；全绿 → 自动置 resolved。"""
+    from app.modules.spec_profile.model import SpecConflict
+
+    ws = await _make_workspace(db_session)
+    spec_root = tmp_path / "spec-root"
+    await _make_spec_workspace(db_session, ws, spec_root)
+    svc = SpecWorkspaceService(db_session)
+
+    async def _open_rows():
+        return (
+            (
+                await db_session.execute(
+                    select(SpecConflict).where(
+                        SpecConflict.workspace_id == ws.id,
+                        SpecConflict.status == "open",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    # ① 墓碑行 add 拒收 → 冲突进注册表（开放行 + details 带 platform_deleted）
+    tomb = SpecFileManifest(
+        workspace_id=ws.id,
+        path="changes/deleted-x/a.md",
+        content_hash="h",
+        version=2,
+        exists=False,
+        platform_deleted=True,
+    )
+    db_session.add(tomb)
+    await db_session.commit()
+    r1 = await svc.apply_ops(ws.id, [_op("add", "changes/deleted-x/a.md", content=_b64("z"))])
+    assert r1["conflict"] is True
+    assert r1["platform_deleted"] == ["changes/deleted-x/a.md"]
+    assert r1["skipped_tombstone"] == 1
+    assert r1["applied_ops"] == 0
+    rows = await _open_rows()
+    assert len(rows) == 1
+    assert rows[0].stage == "spec-sync"
+    assert "changes/deleted-x/a.md" in (rows[0].details_json or "")
+
+    # ② 再次冲突 → 幂等更新同一行（不重复建）
+    await svc.apply_ops(ws.id, [_op("add", "changes/deleted-x/a.md", content=_b64("z2"))])
+    assert len(await _open_rows()) == 1
+
+    # ③ 全绿同步 → 开放行自动置 resolved（闭环不留僵尸）
+    r3 = await svc.apply_ops(ws.id, [_op("add", "docs/ok.md", content=_b64("ok"))])
+    assert r3["conflict"] is False
+    assert r3["applied_ops"] == 1
+    assert await _open_rows() == []

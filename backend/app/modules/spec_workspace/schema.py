@@ -127,3 +127,9 @@ class SpecIncrementalSyncResponse(BaseModel):
     new_versions: dict[str, int]  # path -> 新版本号
     conflict: bool = False
     server_versions: dict[str, int] | None = Field(default=None)  # 冲突时服务器当前版本
+    # 2026-09-26-spec-sync-receipt-visibility：回执计数 + 墓碑拒收路径（daemon 轨道
+    # 此前不透传 platform_deleted——只有 CLI 轨道有，daemon 看不到拒收原因）。
+    applied_ops: int = 0
+    skipped_conflict: int = 0
+    skipped_tombstone: int = 0
+    platform_deleted: list[str] = Field(default_factory=list)

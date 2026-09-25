@@ -68038,6 +68038,28 @@
               }
             ],
             "title": "Server Versions"
+          },
+          "applied_ops": {
+            "type": "integer",
+            "title": "Applied Ops",
+            "default": 0
+          },
+          "skipped_conflict": {
+            "type": "integer",
+            "title": "Skipped Conflict",
+            "default": 0
+          },
+          "skipped_tombstone": {
+            "type": "integer",
+            "title": "Skipped Tombstone",
+            "default": 0
+          },
+          "platform_deleted": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Platform Deleted"
           }
         },
         "type": "object",
@@ -75405,6 +75427,21 @@
             },
             "type": "array",
             "title": "Platform Deleted"
+          },
+          "applied_ops": {
+            "type": "integer",
+            "title": "Applied Ops",
+            "default": 0
+          },
+          "skipped_conflict": {
+            "type": "integer",
+            "title": "Skipped Conflict",
+            "default": 0
+          },
+          "skipped_tombstone": {
+            "type": "integer",
+            "title": "Skipped Tombstone",
+            "default": 0
           }
         },
         "type": "object",
@@ -75428,6 +75465,16 @@
           "reparsed_changes": {
             "type": "integer",
             "title": "Reparsed Changes",
+            "default": 0
+          },
+          "landed_files": {
+            "type": "integer",
+            "title": "Landed Files",
+            "default": 0
+          },
+          "skipped_files": {
+            "type": "integer",
+            "title": "Skipped Files",
             "default": 0
           }
         },

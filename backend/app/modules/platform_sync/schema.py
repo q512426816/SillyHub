@@ -257,6 +257,10 @@ class SpecSyncResponse(BaseModel):
     conflict: bool = False
     server_versions: dict[str, int] | None = None
     platform_deleted: list[str] = Field(default_factory=list)
+    # 2026-09-26-spec-sync-receipt-visibility：回执计数（applied/skipped 双轨同键）。
+    applied_ops: int = 0
+    skipped_conflict: int = 0
+    skipped_tombstone: int = 0
 
 
 # ── Change 2026-08-23-platform-agent-log-ingest task-02（design §3.2 API 契约）──

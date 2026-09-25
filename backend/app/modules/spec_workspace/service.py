@@ -786,7 +786,7 @@ class SpecWorkspaceService:
             if done:
                 break
             yield ": keepalive\n\n"
-        spec_ws, converged_files, converged_dirs = write_task.result()
+        spec_ws, converged_files, converged_dirs, _landed, _skipped = write_task.result()
 
         yield _evt("reparsing_docs", phase="reparsing_docs")
         reparse_docs_task = asyncio.ensure_future(
@@ -1133,6 +1133,86 @@ class SpecWorkspaceService:
         tf.extractall(staging, members=members, filter="data")
         return tf, staging
 
+    #: 增量同步冲突的注册表锚（stage/conflict_type 二元组，幂等 upsert 键）。
+    SYNC_CONFLICT_STAGE = "spec-sync"
+    SYNC_CONFLICT_TYPE = "sync"
+
+    async def _upsert_sync_conflict(
+        self,
+        workspace_id: uuid.UUID,
+        server_versions: dict[str, int],
+        platform_deleted: list[str],
+    ) -> None:
+        """增量冲突 → spec_conflicts 开放行（幂等：同工作区同 stage 只更新不重复建）。
+
+        details_json 携带 server_versions / platform_deleted / 冲突路径与 last_seen_at，
+        供 GET /spec-conflicts 与前端横幅机器消费；created_at 保持首见时间。
+        """
+        from app.modules.spec_profile.model import SpecConflict
+
+        row = (
+            (
+                await self._session.execute(
+                    select(SpecConflict)
+                    .where(
+                        SpecConflict.workspace_id == workspace_id,
+                        SpecConflict.stage == self.SYNC_CONFLICT_STAGE,
+                        SpecConflict.status == "open",
+                    )
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        conflicting = sorted(set(server_versions) | set(platform_deleted))
+        details = json.dumps(
+            {
+                "kind": "incremental_push_conflict",
+                "server_versions": server_versions,
+                "platform_deleted": platform_deleted,
+                "conflicting_paths": conflicting,
+                "last_seen_at": datetime.now(UTC).isoformat(),
+            },
+            ensure_ascii=False,
+        )
+        if row is not None:
+            row.details_json = details
+        else:
+            self._session.add(
+                SpecConflict(
+                    workspace_id=workspace_id,
+                    stage=self.SYNC_CONFLICT_STAGE,
+                    conflict_type=self.SYNC_CONFLICT_TYPE,
+                    details_json=details,
+                    status="open",
+                )
+            )
+        await self._session.commit()
+
+    async def _close_open_sync_conflicts(self, workspace_id: uuid.UUID) -> None:
+        """全绿同步 → 开放的 spec-sync 冲突行置 resolved（闭环，防僵尸行）。"""
+        from app.modules.spec_profile.model import SpecConflict
+
+        rows = (
+            (
+                await self._session.execute(
+                    select(SpecConflict).where(
+                        SpecConflict.workspace_id == workspace_id,
+                        SpecConflict.stage == self.SYNC_CONFLICT_STAGE,
+                        SpecConflict.status == "open",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not rows:
+            return
+        for row in rows:
+            row.status = "resolved"
+        await self._session.commit()
+
     async def _load_platform_deleted_prefixes(self, workspace_id: uuid.UUID) -> tuple[str, ...]:
         """task-02（design §5.4 B-2 加固）：workspace manifest 中 platform_deleted=True
         行 → 已平台删除目录前缀集。
@@ -1229,6 +1309,9 @@ class SpecWorkspaceService:
             # 集合是对账删除（_converge_stale_files）与 manifest 逐行对齐的基准。
             landed_paths: set[str] = set()
             landed_hashes: dict[str, str] = {}
+            # 2026-09-26-spec-sync-receipt-visibility：全量同步落盘/跳过计数（回执
+            # 透传 + skipped>0 显式 warn——「ok:true 却静默丢成员」收口）。
+            skipped_files = 0
             # task-03 / D-002@v1：逐文件 _bump 改批量回写器——循环内仅内存计数，
             # 50 文件/500ms 粒度回写；finally 终态 flush 保证 files_processed 最终准确。
             progress = _BatchProgressWriter(change_write_id)
@@ -1279,6 +1362,7 @@ class SpecWorkspaceService:
                 # 消失）——仅挡 manifest 对齐环不够，文件一旦回磁盘 reparse 即翻回
                 # active（R-10）。
                 if platform_deleted_prefixes and rel_path.startswith(platform_deleted_prefixes):
+                    skipped_files += 1
                     continue
                 src_file = staging / m.name
                 target = spec_root / rel_path
@@ -1304,6 +1388,7 @@ class SpecWorkspaceService:
                 try:
                     content, ch, src_mtime, tgt_exists = await asyncio.to_thread(_load_member)
                 except FileNotFoundError:
+                    skipped_files += 1
                     log.warning(
                         "spec_workspace.sync_member_missing_in_staging",
                         workspace_id=str(workspace_id),
@@ -1472,7 +1557,15 @@ class SpecWorkspaceService:
                 row.version = row.version + 1
                 row.updated_at = now
         await self._session.commit()
-        return spec_ws, len(converged_paths), converged_dirs
+        if skipped_files > 0:
+            log.warning(
+                "spec_workspace.sync_skipped_members",
+                workspace_id=str(workspace_id),
+                landed=len(landed_paths),
+                skipped=skipped_files,
+            )
+        # 返回扩 2 元（landed/skipped 计数，2026-09-26 回执可见性）
+        return spec_ws, len(converged_paths), converged_dirs, len(landed_paths), skipped_files
 
     async def _bump_files_processed(self, change_write_id: str | None) -> None:
         """单批进度回写（+1）。签名不变（design 接口定义），内部走批量回写器。
@@ -1513,9 +1606,13 @@ class SpecWorkspaceService:
         ``change_write_id``（可选）让 ``_write_spec_root`` 循环内回写进度
         （task-03 起批量：50 文件/500ms 粒度，终态准确）。
         """
-        spec_ws, converged_files, converged_dirs = await self._write_spec_root(
-            workspace_id, tar_bytes, change_write_id=change_write_id
-        )
+        (
+            spec_ws,
+            converged_files,
+            converged_dirs,
+            landed_files,
+            skipped_files,
+        ) = await self._write_spec_root(workspace_id, tar_bytes, change_write_id=change_write_id)
         reparsed_docs = await self._reparse_phase(workspace_id, spec_ws, "scan_docs")
         reparsed_changes = await self._reparse_phase(workspace_id, spec_ws, "change")
         log.info(
@@ -1526,7 +1623,12 @@ class SpecWorkspaceService:
             converged_files=converged_files,
             converged_dirs=converged_dirs,
         )
-        return {"reparsed_docs": reparsed_docs, "reparsed_changes": reparsed_changes}
+        return {
+            "reparsed_docs": reparsed_docs,
+            "reparsed_changes": reparsed_changes,
+            "landed_files": landed_files,
+            "skipped_files": skipped_files,
+        }
 
     async def _reparse_phase(
         self,
@@ -2016,6 +2118,10 @@ class SpecWorkspaceService:
         await self._session.commit()
         pending_adds: list[SpecFileManifest] = []
         pending_deletes: list[SpecFileManifest] = []
+        # 2026-09-26-spec-sync-receipt-visibility：回执计数（冲突跳过 / 墓碑跳过；
+        # applied 在返回处由总数减得）——「ok:true 却静默丢成员」的绿灯谎言收口。
+        skipped_conflict = 0
+        skipped_tombstone = 0
 
         # task-03 / D-002@v1：逐文件回写改批量回写器（内存计数 + 50 文件/500ms
         # 批量 UPDATE）；finally 终态 flush 保证 files_processed 最终准确。
@@ -2067,6 +2173,7 @@ class SpecWorkspaceService:
                             server_versions = {}
                         server_versions[op.path] = row.version
                     platform_deleted_paths.append(op.path)
+                    skipped_tombstone += 1
                     continue
 
                 # ql-20260819-004：软删行复活（add）。CLI diff 把 exists=False 行从
@@ -2088,6 +2195,7 @@ class SpecWorkspaceService:
                             server_versions = {}
                         server_versions[op.path] = row.version
                         platform_deleted_paths.append(op.path)
+                        skipped_tombstone += 1
                         continue
                     if op.content is None:
                         raise _spec_bundle_invalid(
@@ -2115,6 +2223,7 @@ class SpecWorkspaceService:
                         server_versions = {}
                     server_versions[op.path] = row.version
                     platform_deleted_paths.append(op.path)
+                    skipped_tombstone += 1
                     continue
 
                 # base_version 乐观锁（D-001）：有行且版本不匹配 → conflict，跳过不落盘。
@@ -2132,6 +2241,7 @@ class SpecWorkspaceService:
                     if server_versions is None:
                         server_versions = {}
                     server_versions[op.path] = row.version
+                    skipped_conflict += 1
                     continue
 
                 if op.op in ("add", "update"):
@@ -2431,14 +2541,36 @@ class SpecWorkspaceService:
                 error=str(exc),
             )
 
+        # 2026-09-26-spec-sync-receipt-visibility：冲突进注册表——此前增量冲突只活在
+        # daemon 日志一行 warn，spec-conflicts 注册表恒空、无横幅，c84182bc 冲突挂
+        # 一周无人知晓。有冲突 → 幂等 upsert 开放行（供 GET /spec-conflicts 与前端
+        # 横幅消费）；全绿 → 自动把开放行置 resolved（闭环不留僵尸）。
+        try:
+            if conflict or platform_deleted_paths:
+                await self._upsert_sync_conflict(
+                    workspace_id, server_versions or {}, platform_deleted_paths
+                )
+            else:
+                await self._close_open_sync_conflicts(workspace_id)
+        except Exception as exc:
+            log.warning(
+                "spec_workspace.sync_conflict_registry_failed",
+                workspace_id=str(workspace_id),
+                error=str(exc),
+            )
+
         return {
             "new_versions": new_versions,
             "conflict": conflict,
             "server_versions": server_versions,
             # task-02（design §5.4/§11）：被 platform_deleted 墓碑拒绝的 add/rename
-            # 路径（空列表=无拦截）。HTTP 响应模型暂不透出（task 约束：不改端点
-            # 签名），service 层契约先行，供后续 CLI 感知接线。
+            # 路径（空列表=无拦截）。
             "platform_deleted": platform_deleted_paths,
+            # 2026-09-26 回执计数：applied = 总数 - 两类跳过（同内容豁免 no-op 计入
+            # applied——它成功了且回 new_versions）。
+            "applied_ops": len(ops) - skipped_conflict - skipped_tombstone,
+            "skipped_conflict": skipped_conflict,
+            "skipped_tombstone": skipped_tombstone,
         }
 
     async def _reconcile_quicklog_hidden(

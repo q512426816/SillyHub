@@ -124,6 +124,11 @@ class TestAddUpdate:
             "new_versions": {"docs/A.md": 1},
             "conflict": False,
             "server_versions": None,
+            # 2026-09-26-spec-sync-receipt-visibility 回执计数三键 + 墓碑路径
+            "applied_ops": 1,
+            "skipped_conflict": 0,
+            "skipped_tombstone": 0,
+            "platform_deleted": [],
         }
         assert (spec_root / "docs" / "A.md").read_text(encoding="utf-8") == "# A"
 
@@ -428,6 +433,10 @@ class TestDelete:
             "new_versions": {},
             "conflict": False,
             "server_versions": None,
+            "applied_ops": 1,
+            "skipped_conflict": 0,
+            "skipped_tombstone": 0,
+            "platform_deleted": [],
         }
 
 
@@ -798,7 +807,13 @@ class TestCompat:
                 content=tar_bytes,
             )
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"ok": True, "reparsed": 1, "reparsed_changes": 0}
+        assert resp.json() == {
+            "ok": True,
+            "reparsed": 1,
+            "reparsed_changes": 0,
+            "landed_files": 1,
+            "skipped_files": 0,
+        }
         # 旧 tar 整树覆盖仍落盘
         assert (spec_root / "docs" / "legacy.md").read_text(encoding="utf-8") == "# legacy"
 

@@ -305,7 +305,13 @@ class TestSync:
         body = resp.json()
         # D-003：apply_sync 现返回 {reparsed_docs, reparsed_changes}；sync DTO 暴露两段
         # （reparsed=docs 向后兼容 + reparsed_changes；test spec_root 无 changes → 0）。
-        assert body == {"ok": True, "reparsed": 1, "reparsed_changes": 0}
+        assert body == {
+            "ok": True,
+            "reparsed": 1,
+            "reparsed_changes": 0,
+            "landed_files": 1,
+            "skipped_files": 0,
+        }
 
         # 2026-08-19-spec-mirror-tombstone-sync FR-01：tar 是整树权威快照——镜像里
         # tar 未包含的 A.md 被对账删除（软删 move 到备份区），幽灵文件不再残留；
