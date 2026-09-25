@@ -279,12 +279,27 @@ class PlatformSyncService:
         # task-04：已删探测先于一切写路径（含 base_ts 冲突分支——已删 key 无论
         # 乐观锁状态一律以 change_deleted 拒收，信息对 CLI 更可行动）。
         if await self._change_key_deleted(workspace_id, name):
-            return PlatformSyncResult(
-                conflict=False,
-                platform_progress=None,
-                last_pushed_at=None,
-                change_deleted=True,
-            )
+            # archived 载荷复活通道（坑 archive-tombstone 冤案行修复，2026-09-23）：
+            # 旧 CLI 墓碑 bug 曾把归档链误标 location='deleted'（CLI 侧 e4667729 终态透传
+            # 前单点写死 deleted）。本地库 status='archived'（真归档）的新 CLI 重推
+            # 'archived' 载荷时，行冤案可恢复——先翻回 location='archive' 再走正常接受
+            # 分支（镜像不软删，与 _apply_cli_tombstone archived 路径同口径）；真删除
+            # 链（本地 status='deleted'）载荷不变仍拒收 409。
+            if self._body_changes_status(
+                body, name
+            ) == "archived" and await self._heal_deleted_row_to_archive(workspace_id, name):
+                log.info(
+                    "platform_sync.change_deleted_healed_to_archive",
+                    workspace_id=str(workspace_id),
+                    change_key=name,
+                )
+            else:
+                return PlatformSyncResult(
+                    conflict=False,
+                    platform_progress=None,
+                    last_pushed_at=None,
+                    change_deleted=True,
+                )
 
         row = await self._find_row(workspace_id, name)
 
@@ -545,6 +560,42 @@ class PlatformSyncService:
             self._assign(existing, body, stamped_at, user)
             await self._session.commit()
 
+    @staticmethod
+    def _body_changes_status(body: dict[str, Any], name: str) -> str | None:
+        """body changes[] 同名条目的 status（墓碑终态判别；缺条目/非 dict 返回 None）。"""
+        for c in body.get("changes") or []:
+            if isinstance(c, dict) and c.get("name") == name:
+                status = c.get("status")
+                return status if isinstance(status, str) else None
+        return None
+
+    async def _heal_deleted_row_to_archive(self, workspace_id: uuid.UUID | None, name: str) -> bool:
+        """location='deleted' 冤案行翻回 'archive'（坑 archive-tombstone，2026-09-23）。
+
+        仅当 Change 行存在且 location='deleted'（主判据命中形态）时翻回；兜底判据命中
+        （行缺失、仅 manifest platform_deleted 锚点）不建行——真删除走平台删除入口的
+        恢复流程，不在同步通道猜。镜像不软删不恢复（deleted 链已收敛的镜像文件由
+        reparse/镜像驱动收敛自行对齐，位置恢复已满足「已归档」tab 可见的主诉求）。
+        幂等：已是 archive 返回 False（无需复活，走原拒收/正常分支均可）。
+        """
+        if workspace_id is None:
+            return False
+        from app.modules.change.model import Change as _Change
+
+        row = (
+            await self._session.execute(
+                select(_Change).where(
+                    col(_Change.workspace_id) == workspace_id,
+                    col(_Change.change_key) == name,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None or row.location != "deleted":
+            return False
+        row.location = "archive"
+        await self._session.commit()
+        return True
+
     async def _change_key_deleted(self, workspace_id: uuid.UUID | None, name: str) -> bool:
         """已删 key 双层判据（task-04 / design §5.4 B-1 加固，upsert_progress 拒收
         前置与 ``_ensure_change_row`` 建占位守卫共用同一 helper）。
@@ -747,8 +798,24 @@ class PlatformSyncService:
             ),
             None,
         )
-        if status != "deleted":
+        if status not in ("deleted", "archived"):
             return
+
+        # archived 墓碑（坑 archive-tombstone-归档墓碑致面板已归档变更软删不可见，
+        # 2026-09-23 实证；CLI 侧 e4667729 终态透传后的平台配套）：unregisterChange 链
+        # （run archive / quick 收尾 / 自愈）的墓碑载荷是 'archived'——**不触发镜像
+        # 软删**（归档的语义是可回溯，spec 镜像须保留；镜像收敛仅属 'deleted' 链）。
+        # 实现：no-op 早退，不开第二条 location 写路径——
+        # - P1 ingest 不变量（2026-09-16，test_archived_terminal_persists 回归锚）：
+        #   location 收敛归文件移动 + reparse，常规上行不动 location——行 'active'
+        #   收到 'archived' 载荷保持不变；
+        # - 冤案行恢复（旧 CLI 误发 'deleted' 致 location='deleted'）在
+        #   upsert_progress 拒收分支 _heal_deleted_row_to_archive 已闭环——本函数
+        #   只能被已过已删探测（行非 'deleted'）的载荷触达，此处再翻 location
+        #   既违反上述不变量、对冤案行又是死代码。
+        if status == "archived":
+            return
+
         row = (
             await self._session.execute(
                 select(Change).where(

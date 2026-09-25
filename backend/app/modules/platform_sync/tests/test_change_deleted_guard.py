@@ -81,16 +81,23 @@ async def _make_ws_and_users_with_tokens(db_session, *, n_users: int = 1):
 
 
 async def _get_change(db_session, ws_id, name):
-    """取 (workspace, change_key) 唯一的 ux_changes 行。"""
+    """取 (workspace, change_key) 唯一的 ux_changes 行。
+
+    populate_existing：client 与 db_session 是两个独立 session（conftest 分别
+    sessionmaker，expire_on_commit=False），app 侧 commit 后本 session 身份映射里
+    缓存的旧属性不会自动刷新——多 push 场景必须强读 DB 真值，否则读到首查缓存。
+    """
     from app.modules.change.model import Change
 
     return (
         (
             await db_session.execute(
-                select(Change).where(
+                select(Change)
+                .where(
                     Change.workspace_id == ws_id,
                     Change.change_key == name,
                 )
+                .execution_options(populate_existing=True)
             )
         )
         .scalars()
@@ -433,3 +440,85 @@ async def test_name_archive_second_range_still_catches_real_archived_anchor(clie
     resp = await _push(client, headers[0], "archive")
     assert resp.status_code == 409
     assert resp.json()["code"] == "change_deleted"
+
+
+# ── archived 墓碑（坑 archive-tombstone-归档墓碑致面板已归档变更软删不可见，2026-09-23）──
+# CLI 侧 e4667729 终态透传后的平台配套：'archived' 载荷 → location='archive'（面板
+# 「已归档」tab 可见，含修复旧 CLI 误发 'deleted' 造成的冤案行），不触发镜像软删。
+
+
+async def test_cli_tombstone_archived_restores_location_archive(client, db_session):
+    """archived 墓碑 → location='archive'（行从 deleted 冤案恢复，归档 tab 可见）。"""
+    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
+    # 旧 CLI 误发 'deleted' 墓碑 → 行被软删（冤案形态）
+    await _push(client, headers[0], "tomb-arch", body=_progress("tomb-arch", status="deleted"))
+    change = await _get_change(db_session, ws_id, "tomb-arch")
+    assert change.location == "deleted"
+
+    # 新 CLI 终态透传 'archived' → 恢复 archive
+    resp = await _push(
+        client,
+        headers[0],
+        "tomb-arch",
+        body=_progress("tomb-arch", status="archived"),
+    )
+    assert resp.status_code == 200
+    change = await _get_change(db_session, ws_id, "tomb-arch")
+    assert change.location == "archive", "archived 墓碑恢复归档可见"
+
+
+async def test_cli_tombstone_archived_no_mirror_soft_delete(client, db_session):
+    """archived 墓碑不触发镜像软删（区别于 deleted 链）——spec 文件树保持可见。"""
+    from sqlalchemy import select as _select
+
+    from app.modules.spec_workspace.model import SpecFileManifest
+
+    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
+    db_session.add(
+        SpecFileManifest(
+            workspace_id=ws_id,
+            path="changes/arch-keep/design.md",
+            content_hash="deadbeef",
+            version=1,
+            exists=True,
+        )
+    )
+    await db_session.commit()
+
+    resp = await _push(
+        client,
+        headers[0],
+        "arch-keep",
+        body=_progress("arch-keep", status="archived"),
+    )
+    assert resp.status_code == 200
+    change = await _get_change(db_session, ws_id, "arch-keep")
+    # P1 ingest 不变量：'archived' 载荷不动 location（收敛归文件移动 + reparse），
+    # 关键是不像旧 bug 那样被误当 deleted 链软删
+    assert change.location == "active"
+    # 镜像文件未被软删（deleted 链才收敛）
+    rows = (
+        (
+            await db_session.execute(
+                _select(SpecFileManifest).where(
+                    SpecFileManifest.workspace_id == ws_id,
+                    SpecFileManifest.path == "changes/arch-keep/design.md",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert all(r.exists for r in rows), "archived 墓碑不软删 spec 镜像（可回溯）"
+
+
+async def test_cli_tombstone_archived_idempotent(client, db_session):
+    """重复 archived 载荷 no-op（幂等）：均 200、location 不翻、不软删。"""
+    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
+    for _ in range(2):
+        resp = await _push(
+            client, headers[0], "tomb-arch2", body=_progress("tomb-arch2", status="archived")
+        )
+        assert resp.status_code == 200
+    change = await _get_change(db_session, ws_id, "tomb-arch2")
+    assert change.location == "active", "archived 载荷幂等 no-op，不动 location"
