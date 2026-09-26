@@ -284,3 +284,87 @@ created_at: 2026-09-22T16:33:05.472Z
 - 场景：默认场景 — Given 三处恢复落盘，；Then 全部用例通过且类型检查 0 错。
 全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-04
 最近确认：83bde5d52c29cd07960e1d300d9541bf6a44a5ec
+
+## FR-auto-frontend-023 测试文件预览路径解析兜底（归一 + 文件名搜索 + 后缀救回）
+变更：2026-09-26-assets-testfile-path-resolve
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 归档件 test-trace.json 记录的测试文件路径可能是短路径（如 `tests/test_full_sync_convergence.py`，实为仓库；When 用户在沉淀资产卡「测试绑定」行点开测试文件预览，；Then 弹窗先对记录路径做知识库同款字符串归一（反斜杠→斜杠、去 `./` 前缀），再按文件名调 explorer search 全树搜索：命中路径与归一路径**等值*
+全文：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/requirements.md#FR-01
+最近确认：49117b2a8bfc07fb875117a81dcd1c9a8d9f6ba1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-assets-testfile-path-resolve:flow:FR-01
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-assets-testfile-path-resolve
+  status: active
+
+## FR-auto-frontend-024 未命中走中性文案，消除「工作区目录可能已被移动或删除」误导
+变更：2026-09-26-assets-testfile-path-resolve
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 记录路径在仓库内零命中或多候选（用户需自选），；When 预览弹窗渲染解析结果，；Then 前端显示中性提示（未在仓库中找到该测试文件、路径可能不完整或已被移动/删除；多候选时列候选），不出现「工作区目录可能已被移动或删除」语义；explorer 后端
+全文：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/requirements.md#FR-02
+最近确认：49117b2a8bfc07fb875117a81dcd1c9a8d9f6ba1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-assets-testfile-path-resolve:flow:FR-02
+  tests: backend/tests/modules/explorer/test_explorer.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-assets-testfile-path-resolve
+  status: active
+
+## FR-auto-frontend-025 前端组件测试补齐且既有用例不回归
+变更：2026-09-26-assets-testfile-path-resolve
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 路径解析逻辑落盘，；When 运行 change-assets-card 组件套件，；Then 新增用例（等值命中直用、短路径唯一后缀救回、worktree 副本排除后救回、零命中中性文案）与既有 10 用例全部通过。
+全文：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/requirements.md#FR-03
+最近确认：49117b2a8bfc07fb875117a81dcd1c9a8d9f6ba1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-assets-testfile-path-resolve:flow:FR-03
+  tests: change-assets-card.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-assets-testfile-path-resolve
+  status: active
+
+## FR-auto-frontend-026 后端聚焦测试与类型门禁全绿
+变更：2026-09-26-assets-testfile-path-resolve
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given explorer 文案修改落盘，；When 运行后端 explorer 聚焦测试与 `frontend tsc --noEmit`，；Then 全部通过且类型检查 0 错。
+全文：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/requirements.md#FR-04
+最近确认：49117b2a8bfc07fb875117a81dcd1c9a8d9f6ba1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-assets-testfile-path-resolve:flow:FR-04
+  tests: backend/tests/modules/explorer/test_explorer.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-assets-testfile-path-resolve
+  status: active

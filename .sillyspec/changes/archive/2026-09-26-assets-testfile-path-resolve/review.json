@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-assets-testfile-path-resolve",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "FR-01「在真实路径旁标注原记录路径」注记未包含原路径，且测试断言空转通过",
+      "evidence": "redirect 注记（change-assets-test-redirect-note）仅渲染 resolution.path（真实路径），原记录路径不在注记文本内，仅靠弹窗头部既有 DialogDescription {testPath}（本变更未改动的先在代码）呈现；测试对注记断言 toHaveTextContent(\"tests/conv.py\") 因真实路径 backend/app/modules/spec_workspace/tests/conv.py 本身包含该子串而空转通过，未真正钉住「原记录路径标注」——requirements FR-01 测试绑定声称「断言收到的解析后路径与原记录路径标注」，后半与实际不符。用户在弹窗层面仍可同时看到两条路径（头部+注记），防护实质存在，故 P2 非 P1。",
+      "location": "frontend/src/components/changes/detail/change-assets-card.tsx:458"
+    },
+    {
+      "severity": "P2",
+      "title": "design 槽3 盲维作答与代码不符：声称 search 失败按零命中中性文案降级，代码实际兜底原路径直开",
+      "evidence": "TestFileBody 的 searchQ.isError 分支返回 FilePreview(norm) 原路径直开（让 explorer 呈现真实错误），并非「按零命中降级（中性文案）」；tasks.md task-05 与代码注释记录的是直开行为，design 槽3 第1答仍是旧方案——设计冻结记录与交付代码在错误分支上互相矛盾。直开行为本身更保守且已在 tasks/代码注释披露，故 P2。",
+      "location": "frontend/src/components/changes/detail/change-assets-card.tsx:443"
+    },
+    {
+      "severity": "P3",
+      "title": "冻结件 gate_summary 记录 test: skipped，FR-03/04 测试全绿仅有 tasks.md 自述佐证",
+      "evidence": "flow-state.yaml gate_summary 写明「test: skipped — test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）｜lint: passed」；15 passed / 39 passed / tsc exit 0 均出自 tasks.md 勾选自述，评审以 patch 无法复核运行结果（新增用例在 patch 中真实存在且断言目标行为，仅运行状态无门禁证据）。",
+      "location": ".sillyspec/changes/2026-09-26-assets-testfile-path-resolve/flow-state.yaml:11"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "finding｜「search 一次性请求+纯函数快照、retry:false 不重试不阻塞」与代码一致，可接受；「后缀多命中不自动猜（唯一后缀才自动救回，多命中降级候选列表）」「.sillyspec/.runtime/ 前缀排除后仍多则列候选」边界已裁决:可接受（救错文件的误配风险由候选点选+注记抑制，代码 resolveTestFilePath 逐条兑现）；「搜索失败兜底原路径直开」按代码实际行为裁决:可接受（比中性文案更诚实，explorer 真实错误可见）——但槽3文字声称的是「零命中中性文案降级」，与代码不符，见 finding。",
+    "并发": "ok｜边界已裁决:可接受——只读消费（search+file 预览两个 GET，无共享可写状态，chosen 为局部态），与 diff 一致；「归档件 test-trace.json 不手改（保 sha256 审计锚定链）」边界已裁决:可接受——展示层统一兜底覆盖同类短路径，不改审计数据。",
+    "切换": "ok｜边界已裁决:可接受——弹窗关闭 setTestPath(null) 触发卸载清态，react-query 缓存按 [changeAssetsTestSearch, workspaceId, basename] 键控（change-assets-card.tsx:423-428 属实），重复打开同文件走缓存不重复请求。",
+    "作用域": "ok｜边界已裁决:可接受——fetchSearch(workspaceId, basename) 带路由参数 workspaceId，后缀匹配限定在同一命中集内，无跨工作区串台；「后端容器无真实仓库文件系统故解析放在前端（走既有 explorer RPC、零契约变化）」边界已裁决:可接受，理由成立；「大仓搜索性能由 explorer 既有实现承载、本变更仅弹窗打开时一次调用」可接受。"
+  },
+  "reviewedAt": "2026-09-26T07:09:26Z"
+}

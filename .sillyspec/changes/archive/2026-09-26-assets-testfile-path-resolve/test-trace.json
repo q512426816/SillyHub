@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-assets-testfile-path-resolve",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-26-assets-testfile-path-resolve:flow:FR-01",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-assets-testfile-path-resolve"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-26-assets-testfile-path-resolve:flow:FR-02",
+      "tests": [
+        "backend/tests/modules/explorer/test_explorer.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-assets-testfile-path-resolve"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-26-assets-testfile-path-resolve:flow:FR-03",
+      "tests": [
+        "change-assets-card.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-assets-testfile-path-resolve"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-26-assets-testfile-path-resolve:flow:FR-04",
+      "tests": [
+        "backend/tests/modules/explorer/test_explorer.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-assets-testfile-path-resolve"
+    }
+  ]
+}

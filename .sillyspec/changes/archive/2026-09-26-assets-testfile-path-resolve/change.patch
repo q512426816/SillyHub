@@ -1,0 +1,585 @@
+diff --git a/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/tasks.md b/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/tasks.md
+new file mode 100644
+index 000000000..2710533f6
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/tasks.md
+@@ -0,0 +1,19 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T06:57:07.027Z
++---
++# 任务注册表（Tasks）— 2026-09-26-assets-testfile-path-resolve
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: change-assets-card.tsx 新增导出 normalizeTestFilePath / resolveTestFilePath 纯函数 + TestFileBody 弹窗主体：打开时按文件名 fetchSearch，等值或唯一后缀命中自动用真实路径预览（参考知识库 normalizeKnowledgeFileParam 先例）
++- [x] task-02: resolveTestFilePath 后缀多命中时排除 .sillyspec/.runtime/ 工作树副本前缀再判唯一，仍多个返回 candidates；TestFileBody 渲染候选清单按钮由用户点选（点选后转 FilePreview）
++- [x] task-03: normalizeTestFilePath 处理反斜杠→斜杠、去 ./ 前缀、首尾空白（与知识库归一同款最小集；命中集元素比较前同样归一）
++- [x] task-04: redirected 救回时弹窗预览上方渲染 change-assets-test-redirect-note 注记（记录路径未直接命中，已定位到仓库内同名文件：+真实路径）
++- [x] task-05: 零命中渲染中性文案「未在仓库中找到该测试文件（路径）——记录路径可能不完整，或文件已被移动/删除」；搜索通道失败时兜底原路径直开（FilePreview 呈现 explorer 真实错误，不吞）
++- [x] task-06: backend explorer/service.py not_found 文案改中性「文件或目录不存在：路径可能不完整，或文件已被移动/删除」（code/details 结构不动）
++- [x] task-07: change-assets-card.test.tsx 新增 5 用例（等值无注记/短路径后缀救回/worktree 排除/多候选点选/零命中中性文案）+ 既有 10 用例一次跑过 = 15 passed；详情页整页回归 22 用例同绿
++- [x] task-08: backend uv run pytest tests/modules/explorer/ -q → 39 passed
++- [x] task-09: frontend pnpm exec tsc --noEmit → exit 0
+diff --git a/backend/app/modules/explorer/service.py b/backend/app/modules/explorer/service.py
+index 8fae774c4..f3517e7e2 100644
+--- a/backend/app/modules/explorer/service.py
++++ b/backend/app/modules/explorer/service.py
+@@ -436,8 +436,11 @@ def _map_remote_error(
+         **context,
+     }
+     if exc.code == "not_found":
++        # 2026-09-26-assets-testfile-path-resolve：旧文案「工作区目录可能已被移动
++        # 或删除」按整目录被删场景设计，任何寻径失败都套用，会把「路径写短了/
++        # 文件被移走」误导成工作区丢失——改中性表述。
+         return ExplorerPathNotFound(
+-            "文件或目录不存在，工作区目录可能已被移动或删除。",
++            "文件或目录不存在：路径可能不完整，或文件已被移动/删除。",
+             details=details,
+         )
+     if exc.code == "forbidden":
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index 4609bd90a..abc2f135e 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -12,12 +12,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
+ import { getChangeAssets, getChangePatchFile } from "@/lib/changes";
++import { fetchSearch } from "@/lib/explorer";
+ 
+ vi.mock("@/lib/changes", () => ({
+   getChangeAssets: vi.fn(),
+   getChangePatchFile: vi.fn(),
+ }));
+ 
++// 路径解析兜底（2026-09-26-assets-testfile-path-resolve）：TestFileBody 打开时
++// 按文件名调 explorer search。默认给与 FULL fixture 等值命中（backend/app/x.py），
++// 既有「点开预览」用例走 resolved 分支不依赖 jsdom fetch 失败时序；新用例各自覆盖。
++vi.mock("@/lib/explorer", () => ({
++  fetchSearch: vi.fn(),
++}));
++
+ // FilePreview 走 explorer 取数（仓库文件），本卡只验证「弹窗打开且把路径交给它」——
+ // 取数与渲染由 explorer 自己的用例覆盖，这里用替身把路径回显出来。
+ vi.mock("@/components/explorer/file-preview", () => ({
+@@ -28,6 +36,19 @@ vi.mock("@/components/explorer/file-preview", () => ({
+ 
+ const mockGet = vi.mocked(getChangeAssets);
+ const mockPatch = vi.mocked(getChangePatchFile);
++const mockSearch = vi.mocked(fetchSearch);
++
++/** 单命中 matches 便捷构造（type 恒 file——本卡只消费 path）。 */
++function matchesOf(paths: string[]) {
++  return {
++    matches: paths.map((p) => ({
++      path: p,
++      name: p.split("/").pop() ?? p,
++      type: "file" as const,
++    })),
++    truncated: false,
++  };
++}
+ 
+ function renderCard() {
+   const client = new QueryClient({
+@@ -72,6 +93,10 @@ const FULL = {
+ describe("ChangeAssetsCard", () => {
+   beforeEach(() => {
+     vi.clearAllMocks();
++    // 默认等值命中（FULL fixture 的 backend/app/x.py）——「点开预览」用例走
++    // resolved 等值分支（clearAllMocks 只清调用记录，但两个 describe 各自
++    // 显式设默认，互不依赖顺序）。
++    mockSearch.mockResolvedValue(matchesOf(["backend/app/x.py"]));
+   });
+ 
+   it("四组渲染：展开后 fr/决策/测试绑定/归档留档逐组出现，计数徽标正确", async () => {
+@@ -227,3 +252,98 @@ describe("ChangeAssetsCard", () => {
+     expect(await screen.findByText("清单已截断")).toBeInTheDocument();
+   });
+ });
++
++// ── 路径解析兜底（2026-09-26-assets-testfile-path-resolve / FR-01~02）────────
++// 短路径数据瑕疵（如 tests/x.py 实为 backend/app/modules/<m>/tests/x.py）+ 误导
++// 文案的生产实证驱动：点开测试文件先按文件名搜索，等值/唯一后缀自动救回，
++// worktree 副本排除，多候选列清单，零命中中性文案。
++describe("ChangeAssetsCard 测试文件路径解析", () => {
++  /** 换 tests fixture 打开测试文件弹窗。 */
++  async function openTestFile(tests: string[]) {
++    mockGet.mockResolvedValue({
++      ...FULL,
++      test_rows: [
++        { row_id: "k:task-01:acc-0", anchor: "FR-01", tests, state: "candidate" },
++      ],
++    });
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    fireEvent.click(
++      screen.getByTestId(`change-assets-test-file-${tests[0]}`),
++    );
++  }
++
++  beforeEach(() => {
++    vi.clearAllMocks();
++    mockSearch.mockResolvedValue(matchesOf(["backend/app/x.py"]));
++  });
++
++  it("等值命中：原路径直接预览，无重定向注记", async () => {
++    await openTestFile(["backend/app/x.py"]);
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      "backend/app/x.py",
++    );
++    expect(
++      screen.queryByTestId("change-assets-test-redirect-note"),
++    ).toBeNull();
++  });
++
++  it("短路径唯一后缀救回：自动用真实路径并标注原记录路径", async () => {
++    mockSearch.mockResolvedValue(
++      matchesOf(["backend/app/modules/spec_workspace/tests/conv.py"]),
++    );
++    await openTestFile(["tests/conv.py"]);
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      "backend/app/modules/spec_workspace/tests/conv.py",
++    );
++    expect(
++      screen.getByTestId("change-assets-test-redirect-note"),
++    ).toHaveTextContent("tests/conv.py");
++  });
++
++  it("worktree 副本排除：后缀多命中时跳过 .sillyspec/.runtime/ 副本取唯一真实路径", async () => {
++    mockSearch.mockResolvedValue(
++      matchesOf([
++        ".sillyspec/.runtime/worktrees/2026-09-12-foo/tests/conv.py",
++        "backend/app/modules/spec_workspace/tests/conv.py",
++      ]),
++    );
++    await openTestFile(["tests/conv.py"]);
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      "backend/app/modules/spec_workspace/tests/conv.py",
++    );
++  });
++
++  it("多真实候选：列出清单由用户点选，选中后预览", async () => {
++    mockSearch.mockResolvedValue(
++      matchesOf([
++        "backend/a/tests/conv.py",
++        "backend/b/tests/conv.py",
++        ".sillyspec/.runtime/worktrees/2026-09-12-foo/tests/conv.py",
++      ]),
++    );
++    await openTestFile(["tests/conv.py"]);
++    const list = await screen.findByTestId("change-assets-test-candidates");
++    expect(list).toHaveTextContent("2 个同名测试文件");
++    expect(
++      screen.queryByTestId(
++        "change-assets-test-candidate-.sillyspec/.runtime/worktrees/2026-09-12-foo/tests/conv.py",
++      ),
++    ).toBeNull();
++
++    fireEvent.click(
++      screen.getByTestId("change-assets-test-candidate-backend/a/tests/conv.py"),
++    );
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      "backend/a/tests/conv.py",
++    );
++  });
++
++  it("零命中：中性文案，不再出现「工作区目录可能已被移动或删除」误导语义", async () => {
++    mockSearch.mockResolvedValue(matchesOf([]));
++    await openTestFile(["tests/gone.py"]);
++    const tip = await screen.findByTestId("change-assets-test-notfound");
++    expect(tip).toHaveTextContent("未在仓库中找到该测试文件");
++    expect(tip).not.toHaveTextContent("工作区目录可能已被移动或删除");
++  });
++});
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index 561d951cb..b4c8ddbfe 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -14,12 +14,72 @@ import {
+   DialogTitle,
+ } from "@/components/ui/dialog";
+ import { getChangeAssets, getChangePatchFile } from "@/lib/changes";
++import { fetchSearch } from "@/lib/explorer";
+ 
+ interface ChangeAssetsCardProps {
+   workspaceId: string;
+   changeId: string;
+ }
+ 
++// ── 测试文件路径解析（2026-09-26-assets-testfile-path-resolve / FR-01~02）────
++// test-trace 记录的测试文件路径可能是短路径（缺仓库内目录前缀，如
++// ``tests/x.py`` 实为 ``backend/app/modules/<m>/tests/x.py``）或反斜杠/``./``
++// 写法。归一照知识库页 normalizeKnowledgeFileParam 先例；解析决策是纯函数，
++// 由弹窗用 explorer search 的同名命中集驱动。
++
++/** 记录路径字符串归一（反斜杠→斜杠、去 ``./`` 前缀与首尾空白）。 */
++export function normalizeTestFilePath(raw: string): string {
++  return raw.trim().replace(/\\/g, "/").replace(/^\.\//, "");
++}
++
++/** 解析决策：resolved=唯一确定路径（redirected=与记录路径不同，需标注）；
++ *  candidates=多候选需用户点选；notfound=仓库内无同名命中。 */
++export type TestFileResolution =
++  | { kind: "resolved"; path: string; redirected: boolean }
++  | { kind: "candidates"; paths: string[] }
++  | { kind: "notfound" };
++
++/** sillyspec 会话工作树副本前缀——basename 命中时的已知噪音源，排除后再判唯一。 */
++const WORKTREE_COPY_PREFIX = ".sillyspec/.runtime/";
++
++/**
++ * 归一记录路径 × 同名命中集 → 解析决策。优先级：等值命中（路径原样存在）→
++ * 唯一后缀命中（短路径是真实路径的后缀）→ 排除工作树副本后的唯一后缀 → 候选
++ * 列表（含命中但结构完全不匹配的场景）。命中集元素同样归一后比较。
++ */
++export function resolveTestFilePath(
++  rawPath: string,
++  searchPaths: readonly string[],
++): TestFileResolution {
++  const norm = normalizeTestFilePath(rawPath);
++  if (norm === "") return { kind: "notfound" };
++  const hits = searchPaths.map((p) => normalizeTestFilePath(p));
++  if (hits.includes(norm)) {
++    return { kind: "resolved", path: norm, redirected: false };
++  }
++  const suffix = hits.filter((p) => p.endsWith(`/${norm}`));
++  const pickSingle = (arr: string[]): string | null =>
++    arr.length === 1 ? (arr[0] ?? null) : null;
++  const onlySuffix = pickSingle(suffix);
++  if (onlySuffix !== null) {
++    return { kind: "resolved", path: onlySuffix, redirected: true };
++  }
++  if (suffix.length > 1) {
++    const real = suffix.filter((p) => !p.startsWith(WORKTREE_COPY_PREFIX));
++    const onlyReal = pickSingle(real);
++    if (onlyReal !== null) {
++      return { kind: "resolved", path: onlyReal, redirected: true };
++    }
++    return { kind: "candidates", paths: real.length > 0 ? real : suffix };
++  }
++  // 无后缀命中：仍有同名命中（路径结构完全不同）→ 交用户选；零命中 → 未找到。
++  if (hits.length > 0) {
++    const real = hits.filter((p) => !p.startsWith(WORKTREE_COPY_PREFIX));
++    return { kind: "candidates", paths: real.length > 0 ? real : hits };
++  }
++  return { kind: "notfound" };
++}
++
+ /**
+  * 变更详情页 aside「沉淀资产」折叠卡（2026-09-25-change-precipitated-assets /
+  * D-001@v1 方案 a）。
+@@ -276,7 +336,10 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+         </div>
+       )}
+ 
+-      {/* 测试文件预览弹窗（FR-03）：explorer 取数（仓库文件），与变更文件树同款只读预览。 */}
++      {/* 测试文件预览弹窗（FR-03）：explorer 取数（仓库文件），与变更文件树同款只读预览。
++          路径解析兜底（2026-09-26-assets-testfile-path-resolve / FR-01~02）：记录路径
++          先归一，再按文件名走 explorer search 同名命中集驱动 resolveTestFilePath——
++          等值/唯一后缀自动用真实路径，多候选列清单点选，零命中中性文案。 */}
+       <Dialog open={testPath !== null} onOpenChange={(v) => !v && setTestPath(null)}>
+         <DialogContent className="flex h-[80vh] max-w-4xl flex-col gap-0 p-0">
+           <DialogHeader className="border-b px-4 py-3">
+@@ -288,7 +351,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+           <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+             <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
+               {testPath !== null ? (
+-                <FilePreview workspaceId={workspaceId} filePath={testPath} />
++                <TestFileBody workspaceId={workspaceId} rawPath={testPath} />
+               ) : null}
+             </div>
+           </div>
+@@ -338,3 +401,99 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+     </section>
+   );
+ }
++
++/**
++ * 测试文件弹窗主体（2026-09-26-assets-testfile-path-resolve / FR-01~02）——
++ * 按文件名调 explorer search 取同名命中集，resolveTestFilePath 决策后渲染：
++ * resolved → FilePreview（真实路径；redirected 时在预览上方标注原记录路径）；
++ * candidates → 候选清单点选（选中后转 FilePreview）；notfound / 搜索失败
++ * 兜底用原路径直开（FilePreview 展示 explorer 侧真实错误，不吞）。
++ */
++function TestFileBody({
++  workspaceId,
++  rawPath,
++}: {
++  workspaceId: string;
++  rawPath: string;
++}) {
++  const norm = normalizeTestFilePath(rawPath);
++  const basename = norm.split("/").filter(Boolean).pop() ?? norm;
++  const [chosen, setChosen] = useState<string | null>(null);
++
++  const searchQ = useQuery({
++    queryKey: ["changeAssetsTestSearch", workspaceId, basename],
++    queryFn: () => fetchSearch(workspaceId, basename),
++    retry: false,
++    refetchOnWindowFocus: false,
++  });
++
++  if (chosen !== null) {
++    return <FilePreview workspaceId={workspaceId} filePath={chosen} />;
++  }
++  if (searchQ.isPending) {
++    return (
++      <p className="py-6 text-center text-xs text-muted-foreground">
++        正在仓库中定位测试文件…
++      </p>
++    );
++  }
++  if (searchQ.isError) {
++    // 搜索通道不可用（daemon 离线/权限等）：退回原路径直开，让 FilePreview
++    // 呈现 explorer 侧的真实错误——比「未找到」更诚实（文件可能就在）。
++    return <FilePreview workspaceId={workspaceId} filePath={norm} />;
++  }
++
++  const resolution = resolveTestFilePath(
++    rawPath,
++    searchQ.data?.matches.map((m) => m.path) ?? [],
++  );
++  if (resolution.kind === "resolved") {
++    return (
++      <div className="flex h-full min-h-0 flex-col">
++        {resolution.redirected ? (
++          <p
++            data-testid="change-assets-test-redirect-note"
++            className="shrink-0 border-b border-dashed px-2 py-1 text-[10px] text-muted-foreground"
++          >
++            记录路径未直接命中，已定位到仓库内同名文件：{resolution.path}
++          </p>
++        ) : null}
++        <div className="min-h-0 flex-1">
++          <FilePreview workspaceId={workspaceId} filePath={resolution.path} />
++        </div>
++      </div>
++    );
++  }
++  if (resolution.kind === "candidates") {
++    return (
++      <div className="overflow-auto p-3" data-testid="change-assets-test-candidates">
++        <p className="mb-2 text-[11px] text-muted-foreground">
++          仓库内有 {resolution.paths.length} 个同名测试文件，请选择要查看的路径：
++        </p>
++        <ul className="space-y-1">
++          {resolution.paths.map((p) => (
++            <li key={p}>
++              <button
++                type="button"
++                data-testid={`change-assets-test-candidate-${p}`}
++                onClick={() => setChosen(p)}
++                className="w-full truncate rounded border px-2 py-1 text-left font-mono text-[11px] hover:border-brand-300 hover:bg-brand-50/60"
++                title={p}
++              >
++                {p}
++              </button>
++            </li>
++          ))}
++        </ul>
++      </div>
++    );
++  }
++  return (
++    <p
++      data-testid="change-assets-test-notfound"
++      className="py-6 text-center text-xs text-muted-foreground"
++    >
++      未在仓库中找到该测试文件（{rawPath}）——记录路径可能不完整，或文件已被移动/删除。
++    </p>
++  );
++}
+diff --git a/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/design.md b/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T06:57:07.027Z
++---
++# 设计记录（Design Record）— 2026-09-26-assets-testfile-path-resolve
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-testfile-path-resolve 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++纯展示层修复，两个文件：①`change-assets-card.tsx`——参考知识库页 `normalizeKnowledgeFileParam` 先例，导出同款风格纯函数 `normalizeTestFilePath`（反斜杠→斜杠、去 `./` 前缀）与 `resolveTestFilePath`（归一路径 × search 命中路径集的解析决策：等值 → 唯一后缀 → 排除 `.sillyspec/.runtime/` 副本后再判 → 候选列表/未命中），测试文件弹窗打开时按文件名调既有 `fetchSearch`（explorer GET /search）取命中集，交给纯函数决策后渲染 FilePreview（真实路径）或候选列表/中性提示；路径救回时弹窗标题旁标注原记录路径。②`backend/app/modules/explorer/service.py`——not_found 文案由「工作区目录可能已被移动或删除」改为中性「路径可能不完整，或文件已被移动/删除」（旧文案按整目录被删场景设计，任何寻径失败都套用，误导用户）。选前端解析而非后端 assets 聚合改写：仓库文件在用户本机（daemon 管），后端容器看不到真实仓库，路径探测只能走 explorer RPC，前端两级解析零后端契约变化；且不改归档冻结件（test-trace.json 是审计件，手改路径数据破坏 sha256 锚定链）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-testfile-path-resolve 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++无端点/签名增删。前端 `change-assets-card.tsx` 新导出两个纯函数（`normalizeTestFilePath` / `resolveTestFilePath`，仅供测试与组件内用）；弹窗内新增对既有 `GET /api/workspaces/{wid}/explorer/search` 的调用（按文件名，既有端点零改动）。后端仅 explorer not_found 错误的 message 文案变化（code/details 结构不动）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-testfile-path-resolve 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：search 是一次性请求，解析决策是纯函数（归一路径 × 命中集快照），无时序假设；search 失败按零命中降级（中性文案），不重试不阻塞。
++2. 并发写：只读消费（search + file 预览两个 GET），无共享可写状态；仓库文件在解析与预览之间被删/移动，FilePreview 自身错误面兜底（既有行为）。
++3. 切换/生命周期：弹窗关闭清 testPath 态，react-query 缓存按 (workspaceId, 关键词) 键控，重复打开同文件不重复请求；变更删除/切换工作区时组件随页面卸载，无悬挂写。
++4. 作用域：search 调用带 workspaceId（路由参数），命中路径相对该工作区根；后缀匹配在同一命中集内判定，无跨工作区串面。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-testfile-path-resolve 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：短路径后缀匹配救错文件——同 basename 的测试文件在仓库多个模块存在且都非 `.sillyspec/.runtime/` 前缀时（如 frontend 与 backend 各一个同名测试），后缀匹配多命中已降级为候选列表由用户选，不自动猜；唯一后缀命中才自动救回，且救回时弹窗明示真实路径 + 原记录路径，用户可察觉错配。试过但放弃：①直接修归档件 test-trace.json 的路径数据——放弃，审计件 sha256 锚定链会被破坏，且同类短路径在其它归档变更可能重复出现，逐个修数据不如展示层统一兜底；②后端 assets 聚合时归一——放弃，后端容器无真实仓库文件系统，探测必须走 daemon RPC，等价于把解析搬到后端但多一跳契约变化，收益不成比例。搜索端点按文件名子串匹配（RPC 60s 超时）大仓性能由 explorer 既有实现承载，本变更只新增弹窗打开时的一次调用。
+
+diff --git a/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/flow-state.yaml b/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/flow-state.yaml
+@@ -0,0 +1,15 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 524a9a6fcc9a65573c7d12622810a6ee2d2b9e89
++updatedAt: '2026-09-26T07:05:38.703Z'
++gate_summary: >-
++  test: skipped — 跳过原因：test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）。｜lint: passed ← cd backend && uv run ruff check
++  . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
++  typecheck（13.1s）｜门文件 6 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/proposal.md b/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/proposal.md
+@@ -0,0 +1,49 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T06:57:07.026Z
++---
++# 提案书（Proposal）— 2026-09-26-assets-testfile-path-resolve
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:6ad67e6aa0242881a3e593eb7255621b185a6444bdd141a616c3ce3cbb5a9f08:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-testfile-path-resolve 留痕重锚 -->
++任务原话转写：动机:沉淀资产卡测试绑定行记录的测试文件路径存在短路径数据瑕疵——如 tests/test_full_sync_convergence.py 实为 backend/app/modules/spec_workspace/tests/ 下同名文件——点开预览走 explorer 原样寻径必 404,且 not_found 文案「工作区目录可能已被移动或删除」误导用户以为工作区丢失(2026-09-26 生产实证)。参考知识库页深链前缀归一先例 normalizeKnowledgeFileParam,为测试文件预览补路径解析兜底。
++
++成功标准:
++- 测试文件预览弹窗打开时先按文件名调 explorer search,记录路径与命中路径等值或唯一后缀匹配时自动用真实路径预览;后缀匹配多个时排除 .sillyspec/.runtime/ 工作树副本前缀后再判,仍多个则列出候选路径由用户点选
++- 路径归一纯函数对反斜杠与点斜杠前缀等形态做与知识库归一同款处理;路径救回时弹窗在真实路径旁标注原记录路径
++- 零命中与多候选时显示中性文案(未在仓库中找到该测试文件、路径可能不完整或已被移动删除),不再出现工作区目录可能已被移动或删除的误导语义
++- explorer 后端 not_found 错误文案改为中性表述:路径可能不完整或文件已被移动删除
++- 前端 change-assets-card 组件测试补齐用例(等值命中、短路径唯一后缀救回、worktree 副本排除、零命中中性文案)全绿且既有 10 用例不回归;后端 explorer 聚焦测试全绿;frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:b57a6a40742f23c1e3131cc9e0d47eae7929057d4b9fade903d66ae3ef89e9e1:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-testfile-path-resolve 留痕重锚 -->
++按成功标准机械推导，共 9 条验收面：
++1. 测试文件预览弹窗打开时先按文件名调 explorer search,记录路径与命中路径等值或唯一后缀匹配时自动用真实路径预览
++2. 后缀匹配多个时排除 .sillyspec/.runtime/ 工作树副本前缀后再判,仍多个则列出候选路径由用户点选
++3. 路径归一纯函数对反斜杠与点斜杠前缀等形态做与知识库归一同款处理
++4. 路径救回时弹窗在真实路径旁标注原记录路径
++5. 零命中与多候选时显示中性文案(未在仓库中找到该测试文件、路径可能不完整或已被移动删除),不再出现工作区目录可能已被移动或删除的误导语义
++6. explorer 后端 not_found 错误文案改为中性表述:路径可能不完整或文件已被移动删除
++7. 前端 change-assets-card 组件测试补齐用例(等值命中、短路径唯一后缀救回、worktree 副本排除、零命中中性文案)全绿且既有 10 用例不回归
++8. 后端 explorer 聚焦测试全绿
++9. frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:70aebbc45e3887a4afa393ab8146928a00388e180078d40c47db23f41fd0d87e:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-testfile-path-resolve 留痕重锚 -->
++1. 测试文件预览弹窗打开时先按文件名调 explorer search,记录路径与命中路径等值或唯一后缀匹配时自动用真实路径预览
++2. 后缀匹配多个时排除 .sillyspec/.runtime/ 工作树副本前缀后再判,仍多个则列出候选路径由用户点选
++3. 路径归一纯函数对反斜杠与点斜杠前缀等形态做与知识库归一同款处理
++4. 路径救回时弹窗在真实路径旁标注原记录路径
++5. 零命中与多候选时显示中性文案(未在仓库中找到该测试文件、路径可能不完整或已被移动删除),不再出现工作区目录可能已被移动或删除的误导语义
++6. explorer 后端 not_found 错误文案改为中性表述:路径可能不完整或文件已被移动删除
++7. 前端 change-assets-card 组件测试补齐用例(等值命中、短路径唯一后缀救回、worktree 副本排除、零命中中性文案)全绿且既有 10 用例不回归
++8. 后端 explorer 聚焦测试全绿
++9. frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/requirements.md b/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-assets-testfile-path-resolve/requirements.md
+@@ -0,0 +1,57 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T06:57:07.027Z
++---
++# 需求规格（Requirements）— 2026-09-26-assets-testfile-path-resolve
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++<!-- 参考摘录 9 条按实现结构合并为 FR-01~04（FR-01 吸收摘录 01~04、FR-02 吸收 05~06、FR-03 对应 07、FR-04 对应 08~09） -->
++
++### FR-01: 测试文件预览路径解析兜底（归一 + 文件名搜索 + 后缀救回）
++Given 归档件 test-trace.json 记录的测试文件路径可能是短路径（如 `tests/test_full_sync_convergence.py`，实为仓库内 `backend/app/modules/spec_workspace/tests/` 下同名文件）或含反斜杠/`./` 前缀的写法，
++When 用户在沉淀资产卡「测试绑定」行点开测试文件预览，
++Then 弹窗先对记录路径做知识库同款字符串归一（反斜杠→斜杠、去 `./` 前缀），再按文件名调 explorer search 全树搜索：命中路径与归一路径**等值**或**唯一后缀匹配**（命中路径以 `/{归一路径}` 结尾）时自动用真实路径打开预览，并在真实路径旁标注原记录路径；后缀匹配多个时先排除 `.sillyspec/.runtime/` 前缀的工作树副本再判唯一，仍多个则列出候选路径由用户点选打开。
++
++### FR-02: 未命中走中性文案，消除「工作区目录可能已被移动或删除」误导
++Given 记录路径在仓库内零命中或多候选（用户需自选），
++When 预览弹窗渲染解析结果，
++Then 前端显示中性提示（未在仓库中找到该测试文件、路径可能不完整或已被移动/删除；多候选时列候选），不出现「工作区目录可能已被移动或删除」语义；explorer 后端 not_found 错误文案同步改为中性表述「文件或目录不存在：路径可能不完整，或文件已被移动/删除」。
++
++### FR-03: 前端组件测试补齐且既有用例不回归
++Given 路径解析逻辑落盘，
++When 运行 change-assets-card 组件套件，
++Then 新增用例（等值命中直用、短路径唯一后缀救回、worktree 副本排除后救回、零命中中性文案）与既有 10 用例全部通过。
++
++### FR-04: 后端聚焦测试与类型门禁全绿
++Given explorer 文案修改落盘，
++When 运行后端 explorer 聚焦测试与 `frontend tsc --noEmit`，
++Then 全部通过且类型检查 0 错。
++<!--
++参考摘录（非约束——agent 可采纳/改写/忽略；每条格式 ### FR-NN: 标题 + Given/When/Then）
++FR-01: 测试文件预览弹窗打开时先按文件名调 explorer search,记录路径与命中路径等值或唯一后缀匹配时自动用真实路径预览
++FR-02: 后缀匹配多个时排除 .sillyspec/.runtime/ 工作树副本前缀后再判,仍多个则列出候选路径由用户点选
++FR-03: 路径归一纯函数对反斜杠与点斜杠前缀等形态做与知识库归一同款处理
++FR-04: 路径救回时弹窗在真实路径旁标注原记录路径
++FR-05: 零命中与多候选时显示中性文案(未在仓库中找到该测试文件、路径可能不完整或已被移动删除),不再出现工作区目录可能已被移动或删除的误导语义
++FR-06: explorer 后端 not_found 错误文案改为中性表述:路径可能不完整或文件已被移动删除
++FR-07: 前端 change-assets-card 组件测试补齐用例(等值命中、短路径唯一后缀救回、worktree 副本排除、零命中中性文案)全绿且既有 10 用例不回归
++FR-08: 后端 explorer 聚焦测试全绿
++FR-09: frontend tsc 无错误
++-->
++
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++`frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx`::短路径唯一后缀救回 / worktree 副本排除后救回 / 等值命中直用 用例（fetchSearch mock + FilePreview 替身断言收到的解析后路径与原记录路径标注）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++前端零命中中性文案用例（同上文件）；后端文案 `backend/tests/modules/explorer/test_explorer.py`（既有套件回归——旧文案无断言，改后跑聚焦确认零破坏）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++同 `change-assets-card.test.tsx` 全套（新增 4 用例 + 既有 10 用例一次跑过）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++`backend/tests/modules/explorer/test_explorer.py` 聚焦全绿；`pnpm exec tsc --noEmit` exit 0（2026-09-26 实测）
