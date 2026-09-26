@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-thin-badge-survives-archive",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-26-thin-badge-survives-archive:flow:FR-01",
+      "tests": [
+        "__tests__/page-restore-assets.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-thin-badge-survives-archive"
+    }
+  ]
+}

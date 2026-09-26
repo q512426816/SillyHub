@@ -1129,3 +1129,10 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：963dde53e652652befc497ed379f1eaefe60924b
 理由：最大风险：对 writer 格式演进的耦合——tests 多值连接符 " | "、两空格缩进、字段集是 sillyspec test-bindings.js 的现行形态，CLI 侧改形态时这里需跟（宽容匹配注释标记前缀已留余量；tests 用 "|" split 天然容忍多值）。试过放弃的方案：①整块隐藏机器块——丢 tests 覆盖信号，放弃；②后端解析透传结构化字段——动 openapi/api-types 面大，展示层问题展示层解决，放弃。另注：knowledge-page 既有深链用例在 jsdom 下有 scrollIntoView 未实现的既有报错噪音（与本次无关，昨日引入）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-26-thin-badge-survives-archive
+锚点：未记录
+最近确认：1556fe5581282d478fa783f2808213c8f6fddb32
+理由：最大风险：时间窗边界误判——若数据库存在 created_at 异常（时钟漂移/手工导入）的边界数据，可能误标/漏标出身；误标代价仅是多显示一个徽章（低危展示层），且 thin 分流上线后 quick 类型不再新增，窗口语义单调。试过但放弃：①镜像 flow-state.yaml tier==thin 精确投影——需后端详情读侧加文件系统读取，读放大不成比例；②列表页徽章同改——列表行徽章走 ChangeStepBadge（另一组件），用户诉求在详情页标题，列表另行跟进不夹带。

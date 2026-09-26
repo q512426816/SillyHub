@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-thin-badge-survives-archive",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "变更自留档未同步修复提交：change.patch/tasks.md 仍是首轮 FAIL 实现，复审自述「change.patch 含修复提交」不成立",
+      "evidence": "工作树源码已真修（首轮 P1 已消除）：page.tsx:66-71 导出 isTerminalChange(status===\"archived\" || location===\"archive\") 双条件；page.tsx:283-288 thinOrigin 消费 Boolean(thinBadge) && isTerminalChange(change) && change_type===\"quick\" && created_at>=2026-09-25T00:00:00+08:00；page.tsx:289-299 归档徽章分支同样以 isTerminalChange 为前置（不再只看 current_stage）。测试 __tests__/page-restore-assets.test.tsx:246-258 新增第三用例单设 location=archive（stage=execute、status=in_progress），真正拆开三字段同设的掩盖。但 change.patch（复审指定「代码事实唯一来源」）全文无 isTerminalChange，page.tsx hunk 仍是 stage===\"archived\" 单条件、仅两用例（三字段同设）；tasks.md task-01 仍写「stage=archived 且…」、task-03 仍写「补两用例」。若以该 patch 归档留档，归档后呈现的是首轮被 FAIL 的代码——留档正确性缺陷，非 FR 行为违约，不计 P1。",
+      "location": ".sillyspec/changes/2026-09-26-thin-badge-survives-archive/change.patch:83"
+    },
+    {
+      "severity": "P3",
+      "title": "自述的 P3 措辞修复未落盘：FR-01 仍为「品牌紫徽章」，未见承诺的「与进行中轻量变更同款 STATUS_BADGE.thin」",
+      "evidence": "修复自述称已将 FR-01 措辞对齐实现（「与进行中轻量变更同款 STATUS_BADGE.thin」），但 requirements.md FR-01（第 10-13 行）仍为「轻量变更品牌紫徽章与已归档徽章并存」，该短语在 requirements.md 与 tasks.md 中均不存在。实现实际复用 STATUS_BADGE.thin（variant=default，page.tsx:81/282），非专用品牌紫样式。首轮 P3 形态未恶化，如实列出，不影响 verdict。",
+      "location": ".sillyspec/changes/2026-09-26-thin-badge-survives-archive/requirements.md:10"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 措辞与实现存在字段级偏差：FR 写 current_stage 为 archived，实现消费 status===\"archived\"",
+      "evidence": "FR-02（requirements.md:15）与 proposal 成功标准 2 写「current_stage 为 archived 或 location 为 archive」；实现经 isTerminalChange 实际判定 status===\"archived\" || location===\"archive\"（page.tsx:70）。status 是 changes 表权威终态字段（仅 active/archived 两值，page.tsx:61-64 注释），与本页轮询停轮（page.tsx:101）及 scope-audit archived 传参（page.tsx:476）同源；现实归档行三字段一致时行为等价，仅数据不一致的极端角落有解读差。属措辞级非行为级，建议收口时同步 FR 文案。",
+      "location": ".sillyspec/changes/2026-09-26-thin-badge-survives-archive/requirements.md:15"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-26T13:54:28Z"
+}

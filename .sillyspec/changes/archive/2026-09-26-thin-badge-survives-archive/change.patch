@@ -1,0 +1,269 @@
+diff --git a/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/tasks.md b/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/tasks.md
+new file mode 100644
+index 000000000..fa91bd3e1
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/tasks.md
+@@ -0,0 +1,12 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T13:39:44.512Z
++---
++# 任务注册表（Tasks）— 2026-09-26-thin-badge-survives-archive
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++- [x] task-01: 详情页标题徽章分支加轻量出身判定——stage=archived 且 change_type=quick 且 created_at>=2026-09-25 时间窗（thin 写入分流上线日），命中时「轻量变更」品牌紫徽章与「已归档」success 徽章并排
++- [x] task-02: 历史 quick（2026-09-25 前）与普通归档仍单「已归档」徽章（时间窗防误标），进行中 thin 徽章行为零改动
++- [x] task-03: page-restore-assets 测试补两用例（归档轻量双徽章/旧 quick 单徽章不误标）= 详情页全套 25 passed（23 既有零回归 + 2 新）；frontend tsc exit 0
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+index 9e74c2b79..7a8e2f72a 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+@@ -203,3 +203,43 @@ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets
+     ).toBeNull();
+   });
+ });
++
++// ── 轻量出身标识归档存活（2026-09-26-thin-badge-survives-archive / FR-01~02）──
++describe("归档轻量出身双徽章", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++    mocks.getAgentStatus.mockResolvedValue(null as unknown as DispatchResponse);
++    mocks.listWorkspaceAgentSessions.mockResolvedValue(
++      [] as unknown as AgentSessionListItem[],
++    );
++    mocks.listQuicklogEntries.mockResolvedValue([]);
++  });
++
++  it("FR-01：归档轻量出身显示「轻量变更 + 已归档」双徽章", async () => {
++    renderPage(
++      makeChange({
++        current_stage: "archived",
++        status: "archived",
++        location: "archive",
++        change_type: "quick",
++        created_at: "2026-09-26T10:00:00Z",
++      }),
++    );
++    expect(await screen.findByText("已归档")).toBeInTheDocument();
++    expect(screen.getByText("轻量变更")).toBeInTheDocument();
++  });
++
++  it("FR-02：2026-09-25 前历史 quick 归档仅单「已归档」徽章（不误标）", async () => {
++    renderPage(
++      makeChange({
++        current_stage: "archived",
++        status: "archived",
++        location: "archive",
++        change_type: "quick",
++        created_at: "2026-09-20T10:00:00Z",
++      }),
++    );
++    expect(await screen.findByText("已归档")).toBeInTheDocument();
++    expect(screen.queryByText("轻量变更")).toBeNull();
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index a690631b2..907d000dc 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -274,9 +274,28 @@ export default function ChangeDetailPage({ params }: Props) {
+             {(() => {
+               const stage = change.current_stage ?? "draft";
+               const statusBadge = STATUS_BADGE[stage];
++              // 轻量出身标识在归档后存活（2026-09-26-thin-badge-survives-archive
++              // / FR-01）：thin-flow「归档时自动翻转」让 stage 变 archived，出身
++              // 随徽章消失——归档态若为轻量出身（thin 写入分流 2026-09-25 上线，
++              // 此后新 quick 类型变更全部分流 thin，change_type 保留 "quick"），
++              // 在「已归档」旁并排补「轻量变更」徽章。
++              const thinBadge = STATUS_BADGE.thin;
++              const thinOrigin =
++                Boolean(thinBadge) &&
++                stage === "archived" &&
++                change.change_type === "quick" &&
++                new Date(change.created_at ?? 0) >=
++                  new Date("2026-09-25T00:00:00+08:00");
+               if (statusBadge) {
+                 return (
+-                  <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
++                  <>
++                    {thinOrigin && thinBadge ? (
++                      <Badge variant={thinBadge.variant}>
++                        {thinBadge.label}
++                      </Badge>
++                    ) : null}
++                    <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
++                  </>
+                 );
+               }
+               return (
+diff --git a/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/design.md b/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T13:39:44.512Z
++---
++# 设计记录（Design Record）— 2026-09-26-thin-badge-survives-archive
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-thin-badge-survives-archive 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++纯前端展示修复，只动详情页 page.tsx 标题徽章分支：归档态且判定轻量出身时，在「已归档」徽章旁并排渲染 STATUS_BADGE.thin 的「轻量变更」徽章。出身判定用既有 ChangeRead 字段（change_type=="quick" + created_at>=2026-09-25 时间窗），零后端改动零新请求。选时间窗而非镜像 flow-state.yaml tier 投影：后者要动后端读侧投影（每次详情读文件系统），收益不成比例；时间窗依据 thin 写入分流上线日（2026-09-25-change-center-thin-flow，此后新 quick 类型变更全部分流 thin），存量 quick 均早于该日，判定可靠。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-thin-badge-survives-archive 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++无接口变化——纯前端徽章渲染分支，消费既有 ChangeRead.change_type/created_at/current_stage/location 字段。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-thin-badge-survives-archive 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：不适用——纯渲染派生，输入是单次详情快照字段，无时序。
++2. 并发写：不适用——无状态无写。
++3. 切换/生命周期：不适用——徽章随组件渲染，无弹窗/请求生命周期。
++4. 作用域：时间窗常量 2026-09-25 是平台级 thin 分流上线日（全局事实），非工作区相关；change_type/created_at 均来自该变更行，无跨工作区串面。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-thin-badge-survives-archive 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：时间窗边界误判——若数据库存在 created_at 异常（时钟漂移/手工导入）的边界数据，可能误标/漏标出身；误标代价仅是多显示一个徽章（低危展示层），且 thin 分流上线后 quick 类型不再新增，窗口语义单调。试过但放弃：①镜像 flow-state.yaml tier==thin 精确投影——需后端详情读侧加文件系统读取，读放大不成比例；②列表页徽章同改——列表行徽章走 ChangeStepBadge（另一组件），用户诉求在详情页标题，列表另行跟进不夹带。
+
+diff --git a/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/flow-state.yaml b/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/flow-state.yaml
+@@ -0,0 +1,15 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 1c51c7a7a507a571404501fc49218f1536f753c4
++updatedAt: '2026-09-26T13:42:40.088Z'
++gate_summary: >-
++  test: skipped — 跳过原因：test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）。｜lint: passed ← cd backend && uv run ruff check
++  . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
++  typecheck（10.8s）｜门文件 5 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/proposal.md b/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/proposal.md
+@@ -0,0 +1,40 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T13:39:44.511Z
++---
++# 提案书（Proposal）— 2026-09-26-thin-badge-survives-archive
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:03a9dd3f341b7388f96848844dfc61b66403eac1a5e2c1cbf90fc54c5cd9b9b5:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-thin-badge-survives-archive 留痕重锚 -->
++任务原话转写：动机:thin-flow 设计「归档时自动翻转」让轻量变更归档后徽章只剩「已归档」,出身标识随归档消失——用户在归档变更上看不到轻量变更标签,今天全部收口的变更均如此,透明度受损。
++
++成功标准:
++- 已归档变更若为轻量出身则标题显示双徽章:轻量变更品牌紫徽章与已归档徽章并存
++- 出身判定:current_stage 为 archived 或 location 为 archive,且 change_type 为 quick,且 created_at 不早于 2026-09-25(thin 写入分流上线日,此前 quick 为存量通道非轻量出身)
++- 2026-09-25 前建的历史 quick 变更与普通归档变更仍只显示已归档徽章,行为零回归
++- 页面级测试补双徽章用例与旧 quick 不误标用例,既有用例不回归;frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:c76173771e21cb3824ead0cf2e4672870f2ca155fa54003c730beca40ffbeeb6:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-thin-badge-survives-archive 留痕重锚 -->
++按成功标准机械推导，共 5 条验收面：
++1. 已归档变更若为轻量出身则标题显示双徽章:轻量变更品牌紫徽章与已归档徽章并存
++2. 出身判定:current_stage 为 archived 或 location 为 archive,且 change_type 为 quick,且 created_at 不早于 2026-09-25(thin 写入分流上线日,此前 quick 为存量通道非轻量出身)
++3. 2026-09-25 前建的历史 quick 变更与普通归档变更仍只显示已归档徽章,行为零回归
++4. 页面级测试补双徽章用例与旧 quick 不误标用例,既有用例不回归
++5. frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:46f62093c3423f6477ef81eb8d9baac269f5f1d4bcdbb5d7825dc14fef215d19:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-thin-badge-survives-archive 留痕重锚 -->
++1. 已归档变更若为轻量出身则标题显示双徽章:轻量变更品牌紫徽章与已归档徽章并存
++2. 出身判定:current_stage 为 archived 或 location 为 archive,且 change_type 为 quick,且 created_at 不早于 2026-09-25(thin 写入分流上线日,此前 quick 为存量通道非轻量出身)
++3. 2026-09-25 前建的历史 quick 变更与普通归档变更仍只显示已归档徽章,行为零回归
++4. 页面级测试补双徽章用例与旧 quick 不误标用例,既有用例不回归
++5. frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/requirements.md b/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-thin-badge-survives-archive/requirements.md
+@@ -0,0 +1,45 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T13:39:44.512Z
++---
++# 需求规格（Requirements）— 2026-09-26-thin-badge-survives-archive
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 已归档变更若为轻量出身则标题显示双徽章:轻量变更品牌紫徽章与已归档徽章并存
++Given 系统就绪
++When 已归档变更若为轻量出身
++Then 标题显示双徽章:轻量变更品牌紫徽章与已归档徽章并存
++
++### FR-02: 出身判定:current_stage 为 archived 或 location 为 archive
++Given 系统就绪
++When 出身判定:current_stage 为 archived 或 location 为 archive,且 change_type 为 quick,且 creat
++Then 行为符合本条标准描述
++
++### FR-03: 2026-09-25 前建的历史 quick 变更与普通归档变更仍只显示已归档徽章,行为零回归
++Given 系统就绪
++When 2026-09-25 前建的历史 quick 变更与普通归档变更仍只显示已归档徽章,行为零回归
++Then 行为符合本条标准描述
++
++### FR-04: 页面级测试补双徽章用例与旧 quick 不误标用例,既有用例不回归
++Given 测试 相关模块就绪
++When 页面级测试补双徽章用例与旧 quick 不误标用例,既有用例不回归
++Then 行为符合本条标准描述
++
++### FR-05: frontend tsc 无错误
++Given 系统就绪
++When frontend tsc 无错误
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx::已归档轻量出身双徽章 用例
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++同文件::2026-09-25 前历史 quick 归档仅单徽章 用例
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++详情页 __tests__ 三文件全套一次跑过 + pnpm exec tsc --noEmit exit 0（2026-09-26 实测）
++

@@ -1,0 +1,23 @@
+{
+  "change": "2026-09-26-thin-badge-survives-archive",
+  "baseline": "1c51c7a7a507a571404501fc49218f1536f753c4",
+  "head": "f3dbf6d32f286a928557741ea40a3046e6527fd9",
+  "files": [
+    ".sillyspec/changes/2026-09-26-thin-badge-survives-archive/tasks.md",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+    ".sillyspec/changes/2026-09-26-thin-badge-survives-archive/design.md",
+    ".sillyspec/changes/2026-09-26-thin-badge-survives-archive/flow-state.yaml",
+    ".sillyspec/changes/2026-09-26-thin-badge-survives-archive/proposal.md",
+    ".sillyspec/changes/2026-09-26-thin-badge-survives-archive/requirements.md"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 218,
+    "deletions": 1
+  },
+  "savedAt": "2026-09-26T13:42:43.649Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "b919a8627c6c4053edccd5a9b8c0b0326b2eccd49b976a20a9a405caf6e2b005",
+  "patchStatus": "ok"
+}
