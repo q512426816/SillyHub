@@ -30,7 +30,19 @@
 
 import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// jsdom 未实现 scrollIntoView（深链落点有界重试的 rAF 回调调用）——全量并发下
+// rAF 晚于断言触发时成为 unhandled error 拖挂整跑（2026-09-26 门禁实证：失败
+// 尾带 Uncaught Exception TypeError: el.scrollIntoView），文件级统一 spy + 还原
+// （sessions/page.test 同款先例）。
+const scrollIntoViewSpy = vi.fn();
+beforeAll(() => {
+  Element.prototype.scrollIntoView = scrollIntoViewSpy;
+});
+afterAll(() => {
+  delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
+});
 
 // antd Tree / rc-component resize-observer 需要 ResizeObserver，jsdom 缺，补 mock
 // （file-explorer.test 同款前置）。

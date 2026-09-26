@@ -1,0 +1,21 @@
+{
+  "change": "2026-09-26-knowledge-card-machine-block",
+  "baseline": "ede9fcfbb7d28384f27fac7af48867140c93edef",
+  "head": "ede9fcfbb7d28384f27fac7af48867140c93edef",
+  "files": [
+    ".sillyspec/changes/2026-09-26-knowledge-card-machine-block/design.md",
+    ".sillyspec/changes/2026-09-26-knowledge-card-machine-block/flow-state.yaml",
+    ".sillyspec/changes/2026-09-26-knowledge-card-machine-block/proposal.md",
+    ".sillyspec/changes/2026-09-26-knowledge-card-machine-block/requirements.md",
+    ".sillyspec/changes/2026-09-26-knowledge-card-machine-block/tasks.md"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 172,
+    "deletions": 0
+  },
+  "savedAt": "2026-09-26T12:17:20.040Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "2408696169b2df78730b356063d6545c19fba351fe1c9b79124162c5b650636b",
+  "patchStatus": "ok"
+}

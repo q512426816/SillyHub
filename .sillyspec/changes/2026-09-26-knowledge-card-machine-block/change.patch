@@ -1,0 +1,201 @@
+diff --git a/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/design.md b/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T11:47:46.140Z
++---
++# 设计记录（Design Record）— 2026-09-26-knowledge-card-machine-block
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-knowledge-card-machine-block 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++纯前端展示层修复：entry-card-list.tsx 的 parseDecisionEntries 增加测试绑定机器块状态机（形态对齐 sillyspec src/test-bindings.js renderBindingBlock：空值「测试绑定：」头 + `<!-- test-bindings:` 注释标记 + `- row:` 行 + 两空格缩进键值行）。机器块解析为结构化 testBindings（rowId/tests/state）由卡片以紧凑只读行渲染（muted mono 块，rowId 进 title 溯源）；空值「测试绑定：」字段头撤出字段网格；块外的整行 HTML 注释一律不进正文（与原文 tab 口径一致——md 渲染下注释本就不可见）。选结构化而非整块隐藏：tests/state 是 FR 覆盖面的有效信号，隐藏会丢信息。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-knowledge-card-machine-block 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++无后端/端点/文件格式改动。前端模块内导出新增类型 TestBindingRow 与 DecisionEntry.testBindings 字段（组件内部契约，无外部消费方）；解析行为变化仅限 decisions/fr 结构化卡：机器块不再落入 fields/body、整行 HTML 注释不再出现在正文。手册/INDEX/single 三形态零改动。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-knowledge-card-machine-block 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：不适用——纯单文件同步解析，无事件/输入乱序面。
++2. 并发写：不适用——前端只读渲染，不写知识文件。
++3. 切换/生命周期：解析是纯函数无状态；机器块状态机遇到下一个 `##` 条目头或顶格非块内容即退出，旧文件（无机器块）零影响（既有 15 用例回归全绿）。
++4. 作用域：不适用——组件级渲染，不跨工作区/仓；多实例渲染各自内容互不影响。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-knowledge-card-machine-block 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：对 writer 格式演进的耦合——tests 多值连接符 " | "、两空格缩进、字段集是 sillyspec test-bindings.js 的现行形态，CLI 侧改形态时这里需跟（宽容匹配注释标记前缀已留余量；tests 用 "|" split 天然容忍多值）。试过放弃的方案：①整块隐藏机器块——丢 tests 覆盖信号，放弃；②后端解析透传结构化字段——动 openapi/api-types 面大，展示层问题展示层解决，放弃。另注：knowledge-page 既有深链用例在 jsdom 下有 scrollIntoView 未实现的既有报错噪音（与本次无关，昨日引入）。
+
+diff --git a/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/flow-state.yaml b/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/flow-state.yaml
+@@ -0,0 +1,17 @@
++tier: thick
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: ede9fcfbb7d28384f27fac7af48867140c93edef
++updatedAt: '2026-09-26T12:16:49.341Z'
++upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
++gate_summary: >-
++  test: passed ← module[frontend]（165.0s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260926121640\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（8.3s）｜门文件 6 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/proposal.md b/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/proposal.md
+@@ -0,0 +1,39 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T11:47:46.139Z
++---
++# 提案书（Proposal）— 2026-09-26-knowledge-card-machine-block
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:e281ad29e0ff8fe57720e5af1e9052efdea7cf3166ee9b42ebab364746223062:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-knowledge-card-machine-block 留痕重锚 -->
++任务原话转写：动机：知识库卡片视图把「测试绑定」机器管理块（test-bindings 注释行 + - row: YAML 行）当正文裸露渲染，原文视图里注释行不可见，两个视图口径不一致，用户看到机器 YAML 倾泻以为内容错了（生产实证：dogfood 工作区 knowledge/fr/cli-entry.md 的 FR-009/010 条目卡）。
++成功标准：
++- 卡片视图不再把整行 HTML 注释当正文渲染（与原文视图口径一致：注释不可见）
++- 测试绑定机器块（注释标记 + row 行 + 缩进键值行）解析为结构化数据，以紧凑只读行展示 tests 路径与 state，不再整块 YAML 倾泻
++- 机器块的「测试绑定：」空字段头不再以悬空空值字段行出现在字段网格
++- 无机器块的既有条目（decisions/fr/手册）渲染零回归；聚焦测试全绿 + tsc 0 错
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:dca32233f7a078e3f8490124ce27d804d0551712564e7749c4575a475d642aef:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-knowledge-card-machine-block 留痕重锚 -->
++按成功标准机械推导，共 5 条验收面：
++1. 卡片视图不再把整行 HTML 注释当正文渲染（与原文视图口径一致：注释不可见）
++2. 测试绑定机器块（注释标记 + row 行 + 缩进键值行）解析为结构化数据，以紧凑只读行展示 tests 路径与 state，不再整块 YAML 倾泻
++3. 机器块的「测试绑定：」空字段头不再以悬空空值字段行出现在字段网格
++4. 无机器块的既有条目（decisions/fr/手册）渲染零回归
++5. 聚焦测试全绿 + tsc 0 错
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:8e4799ad4795d9360e5adf3310321de72b881999e85908adb2207a03583db095:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-knowledge-card-machine-block 留痕重锚 -->
++1. 卡片视图不再把整行 HTML 注释当正文渲染（与原文视图口径一致：注释不可见）
++2. 测试绑定机器块（注释标记 + row 行 + 缩进键值行）解析为结构化数据，以紧凑只读行展示 tests 路径与 state，不再整块 YAML 倾泻
++3. 机器块的「测试绑定：」空字段头不再以悬空空值字段行出现在字段网格
++4. 无机器块的既有条目（decisions/fr/手册）渲染零回归
++5. 聚焦测试全绿 + tsc 0 错
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/requirements.md b/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/requirements.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T11:47:46.140Z
++---
++# 需求规格（Requirements）— 2026-09-26-knowledge-card-machine-block
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 卡片视图不再把整行 HTML 注释当正文渲染（与原文视图口径一致：注释不可见）
++Given 系统就绪
++When 卡片视图不再把整行 HTML 注释当正文渲染（与原文视图口径一致：注释不可见）
++Then 行为符合本条标准描述
++
++### FR-02: 测试绑定机器块（注释标记 + row 行 + 缩进键值行）解析为结构化数据，以紧凑只读行展示 tes
++Given 测试 相关模块就绪
++When 测试绑定机器块（注释标记 + row 行 + 缩进键值行）解析为结构化数据，以紧凑只读行展示 tests 路径与 state，不再整块 YAML 倾泻
++Then 行为符合本条标准描述
++
++### FR-03: 机器块的「测试绑定：」空字段头不再以悬空空值字段行出现在字段网格
++Given 测试 相关模块就绪
++When 机器块的「测试绑定：」空字段头不再以悬空空值字段行出现在字段网格
++Then 行为符合本条标准描述
++
++### FR-04: 无机器块的既有条目（decisions/fr/手册）渲染零回归
++Given 系统就绪
++When 无机器块的既有条目（decisions/fr/手册）渲染零回归
++Then 行为符合本条标准描述
++
++### FR-05: 聚焦测试全绿 + tsc 0 错
++Given 测试 相关模块就绪
++When 聚焦测试全绿 + tsc 0 错
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「测试绑定机器块」describe 渲染用例（queryByText 勿手改/手写整行注释 均不可见）
++
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「测试绑定机器块」describe 解析+渲染两用例（testBindings 结构、tests · candidate 紧凑行、title=rowId）
++
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「测试绑定机器块」解析用例（fields 无「测试绑定」空头）+渲染用例（queryByText("测试绑定：") 精确匹配为空）
++
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx 既有 15 用例回归 + frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx 26 用例回归
++
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx 17 passed + knowledge-page 26 passed 实测；pnpm exec tsc --noEmit exit 0（本会话实跑）
++
+
+diff --git a/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/tasks.md b/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-knowledge-card-machine-block/tasks.md
+@@ -0,0 +1,15 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T11:47:46.140Z
++---
++# 任务注册表（Tasks）— 2026-09-26-knowledge-card-machine-block
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: 卡片视图不再把整行 HTML 注释当正文渲染（与原文视图口径一致：注释不可见）
++- [ ] task-02: 测试绑定机器块（注释标记 + row 行 + 缩进键值行）解析为结构化数据，以紧凑只读行展示 tests 路径与 state，不再整块 YAML 倾泻
++- [ ] task-03: 机器块的「测试绑定：」空字段头不再以悬空空值字段行出现在字段网格
++- [ ] task-04: 无机器块的既有条目（decisions/fr/手册）渲染零回归
++- [ ] task-05: 聚焦测试全绿 + tsc 0 错

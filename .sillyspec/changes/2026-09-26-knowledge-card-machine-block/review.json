@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-knowledge-card-machine-block",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "change.patch 冻结件不含任何代码 hunks，无法充当「代码事实的唯一来源」",
+      "evidence": "patch 全文 202 行仅覆盖 .sillyspec/changes/<变更>/ 下 5 个规范文件（design/flow-state/proposal/requirements/tasks），背景事实声明的 entry-card-list.tsx、entry-card-list.test.tsx、knowledge-page.test.tsx scrollIntoView mock、.sillyspec/local.yaml known_failures 均无对应 hunk；代码承诺只能靠工作区实文件核验（本次已实核通过），冻结件与交付物不一致属产物完整性缺口，非运行时/数据正确性风险",
+      "location": ".sillyspec/changes/2026-09-26-knowledge-card-machine-block/change.patch:1-202"
+    },
+    {
+      "severity": "P3",
+      "title": "tasks.md 五条任务全部未勾选，与同冻结件内已通过的门禁记录矛盾",
+      "evidence": "patch 内 tasks.md 五条 checkbox 均为 '- [ ]'，而同一 patch 的 flow-state.yaml 已记录 gate_summary test passed（12:16）——即冻结时点任务已实质完成但进度锚未按其自述「边干边勾」纪律更新",
+      "location": ".sillyspec/changes/2026-09-26-knowledge-card-machine-block/tasks.md:12-16（change.patch:197-201）"
+    },
+    {
+      "severity": "P3",
+      "title": "披露边界裁决（可接受，留痕）：FR-01 字面口径宽于实现——整行 HTML 注释过滤仅作用于 decisions/fr 结构化卡",
+      "evidence": "FR-01 文案为「卡片视图」全形态，但 FULL_LINE_COMMENT_RE 过滤仅在 parseDecisionEntries 内；手册形态 parseEntrySections 不过滤注释，整行 `<!-- ... -->` 会以纯文本进手册小节卡正文（与原文 md 视图口径仍不一致）。design 槽2 已显式划界「手册/INDEX/single 三形态零改动」。裁决：可接受——动机实证（dogfood fr/cli-entry.md）与 FR-01 测试绑定均锚在结构化卡，INDEX 形态注释行因路由行匹配天然不渲染，手册形态注释倾泻无生产实证；留痕 P3 供后续如出现手册注释再收敛",
+      "location": "frontend/src/components/knowledge/entry-card-list.tsx:90,236 vs 113-131"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-09-26T20:20:07+08:00"
+}

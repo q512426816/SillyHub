@@ -101,7 +101,7 @@ created_at: 2026-09-19T15:24:52.781Z
 superseded_by：FR-demo-domain-005
 取代链：FR-demo-domain-001 ← FR-demo-domain-005（2026-09-20-demo2 承接）
 退役理由：主体改为时间线直适配
-摘要：纯会话打开；轮次切分
+摘要：纯会话打开；轮询切分
 最近确认：3e703c193
 
 ## FR-demo-domain-005 回放主体按会话样式渲染
@@ -114,6 +114,43 @@ superseded_by：FR-demo-domain-005
 依据决策：D-001@v1 · D-004@v1
 全文：.sillyspec/changes/archive/2026-09-20-demo2/requirements.md#FR-01
 最近确认：3e703c193
+`;
+
+/**
+ * FR 条目 + 测试绑定机器块（脱敏自 dogfood knowledge/fr/cli-entry.md，形态对齐
+ * sillyspec src/test-bindings.js renderBindingBlock：空值「测试绑定：」头 +
+ * 注释标记 + `- row:` + 两空格缩进键值行，tests 多值 " | " 连接）。
+ * 另含一条正文里的整行 HTML 注释（非机器块）——同样不应渲染。
+ */
+const FR_MACHINE_BLOCK_CONTENT = `# FR 索引 — demo-domain
+
+## FR-demo-domain-010 机器块条目
+变更：2026-09-25-demo
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given flow 在跑；When done；Then 校验槽非空
+全文：.sillyspec/changes/archive/2026-09-25-demo/requirements.md#FR-02
+最近确认：2264c27134ed5da57a3193baf34f1026295ce0f2
+
+<!-- 手写整行注释：正文说明，双视图均不可见 -->
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-demo:flow:FR-02
+  tests: test/flow-draft.test.mjs | test/flow-protocol.test.mjs
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-demo
+  status: active
+
+## FR-demo-domain-011 无块条目
+变更：2026-09-25-demo2
+状态：active
+场景正文：
+- 场景：默认场景 — Given x；When y；Then z
 `;
 
 /** INDEX 路由：含 # 锚（手册）与无 # 裸文件（decisions/fr）两类 + 注释行。 */
@@ -403,6 +440,55 @@ describe("FR 形态：依据决策点击 + 全文链接 + 文件级条目徽标"
     });
     // 头部文件级 useCount 徽标为 18（entryCounts 裸文件名锚 + 条目卡同源计数）。
     expect(screen.getAllByTestId("entry-use-badge").map((b) => b.textContent)).toContain("🔥 18");
+  });
+});
+
+describe("测试绑定机器块（sillyspec tests 管理——结构化渲染不倾泻）", () => {
+  it("解析：row/缩进键值入 testBindings；空「测试绑定：」头与注释/row 行不进字段/正文", () => {
+    const entries = parseDecisionEntries(FR_MACHINE_BLOCK_CONTENT);
+    expect(entries).toHaveLength(2);
+    const withBlock = entries[0]!;
+    expect(withBlock.testBindings).toEqual([
+      {
+        rowId: "2026-09-25-demo:flow:FR-02",
+        tests: ["test/flow-draft.test.mjs", "test/flow-protocol.test.mjs"],
+        state: "candidate",
+      },
+    ]);
+    // 空值「测试绑定：」字段头被撤出字段网格。
+    expect(withBlock.fields.find((f) => f.key === "测试绑定")).toBeUndefined();
+    // 注释标记 / row 行 / 缩进键值行 / 手写整行注释都不进正文。
+    expect(withBlock.body).not.toContain("test-bindings");
+    expect(withBlock.body).not.toContain("- row:");
+    expect(withBlock.body).not.toContain("confirmed_by");
+    expect(withBlock.body).not.toContain("手写整行注释");
+    // 无块条目零影响。
+    expect(entries[1]!.testBindings).toEqual([]);
+  });
+
+  it("渲染：紧凑只读行（tests · state）+ 悬浮 rowId；原文 YAML 不再可见", () => {
+    renderList({
+      filename: "fr/demo-domain.md",
+      zone: "fr",
+      content: FR_MACHINE_BLOCK_CONTENT,
+    });
+
+    const block = screen.getByTestId("machine-test-bindings");
+    expect(within(block).getByText(/test\/flow-draft\.test\.mjs · test\/flow-protocol\.test\.mjs/)).toBeInTheDocument();
+    expect(within(block).getByText("candidate")).toBeInTheDocument();
+    // rowId 进 title 溯源。
+    expect(within(block).getByText(/test\/flow-draft/).closest("span")).toHaveAttribute(
+      "title",
+      "2026-09-25-demo:flow:FR-02",
+    );
+
+    // 机器 YAML 与注释任何形态都不可见（正文/字段网格均无）。
+    expect(screen.queryByText(/勿手改/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/- row:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/discovery/)).not.toBeInTheDocument();
+    // 悬空空值字段行「测试绑定：」不渲染（区别于块标签「测试绑定（机器管理…」）。
+    expect(screen.queryByText("测试绑定：", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("手写整行注释：正文说明，双视图均不可见")).not.toBeInTheDocument();
   });
 });
 

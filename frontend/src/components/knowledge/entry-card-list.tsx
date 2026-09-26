@@ -9,7 +9,8 @@
  *     markdown 纯文本）+ 条目级 🔥 徽标（锚点 `文件#slug` 对齐 hits）；
  *   - structured（决策/FR，zone∈{decisions,fr}）：## 条目（`## D-xxx@vN : 标题`
  *     / `## FR-域-NNN 标题`）+ 字段行 → 结构化卡（ID mono 徽标 + 状态 pill +
- *     字段行网格 + 理由/摘要高亮块 + 取代链条带）。rejected 置顶 + 防复潮横幅
+ *     字段行网格 + 理由/摘要高亮块 + 取代链条带 + 测试绑定机器块紧凑行——注释
+ *     标记与 row YAML 不进正文/字段网格，整行 HTML 注释双视图一致不可见）。rejected 置顶 + 防复潮横幅
  *     （zone=decisions 且存在 rejected 时）；superseded 折叠置灰可展开；
  *     依据决策渲染为可点击（onJumpToEntry → decisions/<域>.md）；全文路径
  *     存在则输出文本链（点击复制路径）；
@@ -75,6 +76,30 @@ const FIELD_RE = /^([A-Za-z_\u4e00-\u9fff]+)：(.*)$/;
 const ENTRY_ID_RE =
   /^(D-\d+@v\d+|FR-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*-\d+)(?:\s*:\s*|\s+|$)(.*)$/;
 
+// ── 测试绑定机器块（sillyspec tests 管理，writer 侧 src/test-bindings.js
+// renderBindingBlock 固定形态）───────────────────────────────────────────────
+//
+// ```测试绑定：``（空值字段头）+ `<!-- test-bindings: … 勿手改 -->` 注释标记 +
+// `- row: <row_id>` + 两空格缩进键值行（tests 多值 ` | ` 连接）。卡片视图结构化
+// 渲染 tests/state，不再把注释与 YAML 行当正文倾泻（原文视图注释本就不可见，
+// 双视图口径一致）；块外的整行 HTML 注释同理不进正文。
+
+/** 机器块注释标记行（宽容匹配 writer 的固定文案形态）。 */
+const MACHINE_NOTE_RE = /^<!--\s*test-bindings:.*-->$/;
+/** 整行 HTML 注释（首尾即闭合，不跨行）。 */
+const FULL_LINE_COMMENT_RE = /^<!--.*-->$/;
+/** 机器块 row 行。 */
+const MACHINE_ROW_RE = /^- row: (.+)$/;
+/** 机器块缩进键值行（writer 恒两空格缩进）。 */
+const MACHINE_KV_RE = /^  ([A-Za-z_]+): (.*)$/;
+
+/** 机器绑定行的人读投影（完整字段面见原文 tab；rowId 供 tooltip 溯源）。 */
+export interface TestBindingRow {
+  rowId: string;
+  tests: string[];
+  state: string;
+}
+
 // ── 形态 a：手册 ## 小节 ────────────────────────────────────────────────────
 
 /** 手册小节卡数据（anchor=`文件#slug`，条目级徽标匹配键）。 */
@@ -123,6 +148,8 @@ export interface DecisionEntry {
   reason: string | null;
   /** 其余非字段正文行。 */
   body: string;
+  /** 测试绑定机器块的结构化投影（无块=空数组，渲染层独立于字段网格/正文）。 */
+  testBindings: TestBindingRow[];
 }
 
 function normalizeStatus(raw: string): EntryStatus {
@@ -145,15 +172,20 @@ interface WorkingEntry {
   fields: { key: string; value: string }[];
   bodyLines: string[];
   lastField: { key: string; value: string } | null;
+  machineRows: TestBindingRow[];
 }
 
 export function parseDecisionEntries(content: string): DecisionEntry[] {
   const entries: WorkingEntry[] = [];
   let current: WorkingEntry | null = null;
+  // 机器块态：注释标记行之后、下一顶格非块内容/条目头之前，row/缩进键值行入
+  // machineRows，空行留在块内，其余行退出块态落回常规分流。
+  let machineMode = false;
 
   for (const line of stripFrontmatter(content).split("\n")) {
     const m = line.match(H2_RE);
     if (m) {
+      machineMode = false;
       const idm = m[1]!.match(ENTRY_ID_RE);
       current = {
         id: idm?.[1] ?? null,
@@ -161,11 +193,48 @@ export function parseDecisionEntries(content: string): DecisionEntry[] {
         fields: [],
         bodyLines: [],
         lastField: null,
+        machineRows: [],
       };
       entries.push(current);
       continue;
     }
     if (!current) continue;
+
+    if (machineMode) {
+      const rowm = line.match(MACHINE_ROW_RE);
+      if (rowm) {
+        current.machineRows.push({ rowId: rowm[1]!.trim(), tests: [], state: "" });
+        continue;
+      }
+      const kvm = line.match(MACHINE_KV_RE);
+      if (kvm) {
+        const row = current.machineRows[current.machineRows.length - 1];
+        if (row) {
+          if (kvm[1] === "tests") {
+            row.tests = kvm[2]!.split("|").map((t) => t.trim()).filter(Boolean);
+          } else if (kvm[1] === "state") {
+            row.state = kvm[2]!.trim();
+          }
+        }
+        continue;
+      }
+      if (line.trim() === "") continue;
+      machineMode = false; // 顶格非块内容：块结束，本行落回常规分流
+    }
+
+    if (MACHINE_NOTE_RE.test(line)) {
+      machineMode = true;
+      // 空值「测试绑定：」字段头是块结构标记，撤出字段网格防悬空空行。
+      if (current.fields.length > 0) {
+        const last = current.fields[current.fields.length - 1];
+        if (last && last.key === "测试绑定" && last.value === "") current.fields.pop();
+      }
+      current.lastField = null;
+      continue;
+    }
+    // 整行 HTML 注释不进正文（原文视图同样不可见，双视图口径一致）。
+    if (FULL_LINE_COMMENT_RE.test(line)) continue;
+
     const fm = line.match(FIELD_RE);
     if (fm) {
       const field = { key: fm[1]!, value: fm[2]!.trim() };
@@ -193,6 +262,7 @@ export function parseDecisionEntries(content: string): DecisionEntry[] {
       fields: e.fields,
       reason,
       body: e.bodyLines.join("\n").trim(),
+      testBindings: e.machineRows,
     };
   });
 }
@@ -414,6 +484,21 @@ function DecisionCard({
             <p className="mt-1.5 whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-muted-foreground">
               {entry.body}
             </p>
+          ) : null}
+
+          {entry.testBindings.length > 0 ? (
+            <div
+              data-testid="machine-test-bindings"
+              className="mt-1.5 flex flex-col gap-0.5 rounded bg-muted/60 px-2 py-1 font-mono text-[10.5px] leading-4 text-muted-foreground"
+            >
+              <span className="text-muted-foreground/70">测试绑定（机器管理 · 原文含全量字段）：</span>
+              {entry.testBindings.map((r) => (
+                <span key={r.rowId} title={r.rowId} className="break-all">
+                  {r.tests.join(" · ")}
+                  {r.state ? <span className="ml-1.5 rounded bg-brand-100 px-1 py-px font-bold text-brand-700">{r.state}</span> : null}
+                </span>
+              ))}
+            </div>
           ) : null}
 
           {basedOnIds.length > 0 ? (
