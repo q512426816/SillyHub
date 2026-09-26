@@ -1,0 +1,23 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+baseline_commit: 9adc7bf4d9d940f770e511f4811a7f4e7927a7a5
+updatedAt: '2026-09-26T23:27:12.671Z'
+gate_summary: >-
+  test: skipped
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260926232047\test-result.json —
+  跳过原因：变更与测试面零关系（21 个变更文件无自身测试、无 import 依赖测试、无 FR 关联绑定）——动态子集空，不硬跑全量（防超时/预存失败面）。｜lint: passed ← cd backend && uv run
+  ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd
+  ../sillyhub-daemon && pnpm typecheck（9.7s）｜门文件 26 个
+

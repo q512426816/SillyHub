@@ -1,0 +1,24 @@
+{
+  "change": "2026-09-27-daemon-queue-stop-gaps",
+  "baseline": "9adc7bf4d9d940f770e511f4811a7f4e7927a7a5",
+  "head": "3942b156fd3a9feb541d81daccbc763a2f5cad94",
+  "files": [
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/tests/daemon-hits-periodic-lifecycle.test.ts",
+    "sillyhub-daemon/tests/sillyspec-platform-command.test.ts",
+    ".sillyspec/changes/2026-09-27-daemon-queue-stop-gaps/design.md",
+    ".sillyspec/changes/2026-09-27-daemon-queue-stop-gaps/flow-state.yaml",
+    ".sillyspec/changes/2026-09-27-daemon-queue-stop-gaps/proposal.md",
+    ".sillyspec/changes/2026-09-27-daemon-queue-stop-gaps/requirements.md",
+    ".sillyspec/changes/2026-09-27-daemon-queue-stop-gaps/tasks.md"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 411,
+    "deletions": 11
+  },
+  "savedAt": "2026-09-26T23:21:31.797Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "86d2e8e0ca657e3be289b86e9e03589965c1b3d56c83e620e87a2e71bbeab682",
+  "patchStatus": "ok"
+}

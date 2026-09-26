@@ -421,6 +421,7 @@ describe('guard 排队（2026-09-26-sillyspec-command-queue）：并发到达不
       expect(failed.strategy).toBe('keep_local');
       expect(failed.state).toBe('failed');
       expect(failed.error).toContain('升级链长时间未结束');
+      expect(failed.error).toContain('请待升级完成后重试'); // P3 收口：钉住可重试提示语
       // 队列放行：第二条开始自己的等待（独立预算），升级结束后照常执行——
       // 楔死形态（首条挂起链尾不推进）已消。
       h.manager.isUpgradeInFlight.mockReturnValue(false);

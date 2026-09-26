@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-daemon-queue-stop-gaps",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01「含可重试提示的错误文案」在代码中兑现但测试断言未钉住重试提示子句",
+      "evidence": "超时错误文案为『升级链长时间未结束（等待超过 300 秒），命令未执行；请待升级完成后重试』（daemon.ts:7420-7422，重试提示存在），但绑定测试只断言 toContain('升级链长时间未结束')，未断言『请待升级完成后重试』——若回归丢失重试提示子句测试仍绿。实现本身符合 FR 承诺，仅为断言精度缺口。",
+      "location": "sillyhub-daemon/tests/sillyspec-platform-command.test.ts:423"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "作用域": "ok",
+    "切换": "ok"
+  },
+  "reviewedAt": "2026-09-26T23:25:42Z"
+}

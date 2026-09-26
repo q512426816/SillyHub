@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-daemon-queue-stop-gaps",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-27-daemon-queue-stop-gaps:flow:FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-platform-command.test.ts「ghost_cleanup 超预算同口径：记 failed 槽（action=ghost_cleanup、无 change/strategy 键）不 exec」",
+        "sillyhub-daemon/tests/sillyspec-platform-command.test.ts「升级链持续在跑超过等待总预算 → 当前命令记 failed 槽（不 exec）并放行队列后续命令」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-daemon-queue-stop-gaps"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-27-daemon-queue-stop-gaps:flow:FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-platform-command.test.ts「升级链在总预算内结束 → 行为不变：命令照常执行、无 failed 槽（预算边界回归）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-daemon-queue-stop-gaps"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-27-daemon-queue-stop-gaps:flow:FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-hits-periodic-lifecycle.test.ts「停机调用 _hitsPeriodic.stop() 并置空实例（同进程 stop→start 不残留旧 interval）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-daemon-queue-stop-gaps"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-27-daemon-queue-stop-gaps:flow:FR-05",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-hits-periodic-lifecycle.test.ts",
+        "sillyhub-daemon/tests/sillyspec-platform-command.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-daemon-queue-stop-gaps"
+    }
+  ]
+}
