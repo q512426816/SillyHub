@@ -1,0 +1,353 @@
+diff --git a/backend/app/modules/change/assets.py b/backend/app/modules/change/assets.py
+index f556dff09..70fb58fba 100644
+--- a/backend/app/modules/change/assets.py
++++ b/backend/app/modules/change/assets.py
+@@ -28,7 +28,7 @@ import asyncio
+ import json
+ import re
+ import uuid
+-from pathlib import Path
++from pathlib import Path, PurePosixPath
+ 
+ import yaml
+ from sqlalchemy import select
+@@ -370,6 +370,23 @@ def _read_delta_meta(change_dir: Path) -> ChangeDeltaMeta | None:
+     return ChangeDeltaMeta(headline=headline, before_lines=before_lines, delta_lines=delta_lines)
+ 
+ 
++def _safe_module_doc(doc: str) -> str | None:
++    """模块图 doc 值安全化（2026-09-27-audit-followup-hardening）。
++
++    doc 属工作区镜像 yaml 内容（随仓库同步而来），未归一化直拼
++    ``docs/<project> / doc`` 会越出项目 docs 根读宿主文件（读面仅 h1 首行，
++    低 severity 但应守）。越界形态——POSIX 绝对（``/`` 前缀，含 ``//`` UNC
++    形态）、Windows 盘符（``C:``，含无斜杠 drive-relative）、反斜杠（归一为
++    ``/`` 后按前两条判）、``..`` 段——整条丢弃返回 None：不读盘、不放前端
++    预览 chip（doc=None），模块名自然回退 id。
++    """
++    norm = doc.replace("\\", "/")
++    posix = PurePosixPath(norm)
++    if posix.is_absolute() or ".." in posix.parts or re.match(r"^[A-Za-z]:", norm):
++        return None
++    return doc
++
++
+ def _read_touched_modules(spec_root: Path, file_list: list[str]) -> list["ChangeTouchedModule"]:
+     """模块触达：交付文件清单 × 镜像模块图（docs/<项目>/modules/_module-map.yaml）。
+ 
+@@ -410,7 +427,7 @@ def _read_touched_modules(spec_root: Path, file_list: list[str]) -> list["Change
+             ):
+                 continue
+             seen.add((project, mod_id))
+-            doc = str(mod.get("doc") or "") or None
++            doc = _safe_module_doc(str(mod.get("doc") or "")) if mod.get("doc") else None
+             name = mod_id
+             if doc:
+                 try:
+diff --git a/backend/app/modules/change/tests/test_assets.py b/backend/app/modules/change/tests/test_assets.py
+index 4159e0fb7..92ec0cf26 100644
+--- a/backend/app/modules/change/tests/test_assets.py
++++ b/backend/app/modules/change/tests/test_assets.py
+@@ -637,6 +637,36 @@ def test_touched_modules_name_fallback(tmp_path: Path) -> None:
+     ]
+ 
+ 
++def test_touched_modules_doc_traversal_guard(tmp_path: Path) -> None:
++    """纯函数（2026-09-27-audit-followup-hardening）：doc 含 ``..`` 段或绝对路径
++    （POSIX / 前缀、Windows 盘符/反斜杠 UNC）→ 不读盘（h1 回退 id）、doc 不
++    外发越界路径（不放预览 chip）；正常相对 doc 零回归。"""
++    from app.modules.change.assets import _read_touched_modules
++
++    mod_dir = tmp_path / "docs" / "p" / "modules"
++    mod_dir.mkdir(parents=True)
++    (mod_dir / "_module-map.yaml").write_text(
++        "modules:\n"
++        "  up:\n    doc: ../../escape.md\n    paths: [src/a/**]\n"
++        "  abs:\n    doc: /etc/passwd\n    paths: [src/b/**]\n"
++        "  win:\n    doc: 'C:\\\\Windows\\\\win.ini'\n    paths: [src/d/**]\n"
++        "  ok:\n    doc: modules/ok.md\n    paths: [src/c/**]\n",
++        encoding="utf-8",
++    )
++    # 越界目标真实存在且带 # h1——守卫缺失时 name 会被读成「逃逸成功」。
++    (tmp_path / "escape.md").write_text("# 逃逸成功\n", encoding="utf-8")
++    (mod_dir / "ok.md").write_text("# 正常模块\n", encoding="utf-8")
++    mods = _read_touched_modules(
++        tmp_path, ["p/src/a/x.ts", "p/src/b/y.ts", "p/src/d/z.ts", "p/src/c/w.ts"]
++    )
++    assert [(m.id, m.name, m.doc) for m in mods] == [
++        ("up", "up", None),
++        ("abs", "abs", None),
++        ("win", "win", None),
++        ("ok", "正常模块", "docs/p/modules/ok.md"),
++    ]
++
++
+ def test_knowledge_touch_empty_without_marker(tmp_path: Path) -> None:
+     """纯函数：无待复核标记的域文件 → 空组（fail-open）。"""
+     from app.modules.change.assets import _REVIEW_MARK_RE, _scan_domain_files
+diff --git a/backend/migrations/versions/20260926234000_align_platform_change_events.py b/backend/migrations/versions/20260926234000_align_platform_change_events.py
+index 2546f9360..1b2cf2674 100644
+--- a/backend/migrations/versions/20260926234000_align_platform_change_events.py
++++ b/backend/migrations/versions/20260926234000_align_platform_change_events.py
+@@ -29,6 +29,19 @@ text / 无 stage），但重写只对**全新库**生效——已应用库的记
+ information_schema，探测恒 False 整体 no-op——测试库从零 upgrade 即目标
+ 结构。downgrade no-op：结构对齐不可逆（旧结构的 timestamptz 精度与 stage
+ 值已不可恢复），回退走部署回滚而非数据反向转换。
++
++运维注记（2026-09-27-audit-followup-hardening）：本变更同时删除了平行分支
++修订 ``20260926063000`` 与 merge ``3931ff71bd32``（2026-09-26-migration-
++chain-dedupe）——**alembic_version 停在这两个被删修订号上的库**，
++``upgrade head`` 会报 "Can't locate revision" 直接失败，须先人工校准版本
++锚点再升级::
++
++    alembic current                     # 卡在 20260926063000 或 3931ff71bd32
++    alembic stamp 20260926083000        # 结构即 083000 语义（表已建好）
++    alembic upgrade head                # → 234000 本迁移按探测对齐/短路
++
++stamp 前须人工确认表结构形态（目标结构直 stamp；旧 040000 结构同样 stamp
++083000 后由本迁移对齐）。全新库与正常主线库不受影响。
+ """
+ 
+ from __future__ import annotations
+diff --git a/deploy/docker-compose.yml b/deploy/docker-compose.yml
+index 3d19902f8..efbc03f7a 100644
+--- a/deploy/docker-compose.yml
++++ b/deploy/docker-compose.yml
+@@ -171,7 +171,11 @@ services:
+     environment:
+       INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://backend:8000}
+       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+-      NEXT_PUBLIC_COMMIT_SHA: ${NEXT_PUBLIC_COMMIT_SHA:-}
++      # 2026-09-27-audit-followup-hardening：删此前的运行时 NEXT_PUBLIC_COMMIT_SHA
++      # 空覆盖行——与 backend 侧 COMMIT_SHA 同型问题（2026-09-26-deploy-eng-hardening
++      # 已删 backend 行）：${VAR:-} 在未 export 的服务器上以空串覆盖镜像 ENV
++      # （frontend/Dockerfile 构建期 ARG→ENV 烘焙）。版本号一律构建期烘焙，运行
++      # 时不覆盖。
+     ports:
+       - "${FRONTEND_PORT:-3000}:3000"
+     mem_limit: 400m
+diff --git a/frontend/scripts/gen-api-types.mjs b/frontend/scripts/gen-api-types.mjs
+index 96a98035b..c73a12d04 100644
+--- a/frontend/scripts/gen-api-types.mjs
++++ b/frontend/scripts/gen-api-types.mjs
+@@ -34,9 +34,9 @@ function assertNoDirtyGenerated() {
+     }
+   });
+   if (dirty.length > 0) {
+-    const lines = dirty.map((f) => "  " + f).join("\\n");
++    const lines = dirty.map((f) => "  " + f).join("\n");
+     console.error(
+-      `[gen-api-types] 中止：以下生成物有未提交改动，重生成会把并行会话的 WIP 卷进本次提交：\\n${lines}`,
++      `[gen-api-types] 中止：以下生成物有未提交改动，重生成会把并行会话的 WIP 卷进本次提交：\n${lines}`,
+     );
+     console.error(
+       "  处置：先提交/stash 这些文件，或确认归属后用 pnpm gen:types -- --force 跳过守卫。",
+diff --git a/.sillyspec/changes/2026-09-27-audit-followup-hardening/design.md b/.sillyspec/changes/2026-09-27-audit-followup-hardening/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-audit-followup-hardening/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T23:28:32.583Z
++---
++# 设计记录（Design Record）— 2026-09-27-audit-followup-hardening
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-audit-followup-hardening 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++四项独立小修：①assets.py 新增纯函数 `_safe_module_doc`（POSIX 绝对/UNC、Windows 盘符、反斜杠归一、`..` 段四形态判越界），`_read_touched_modules` 对 doc 值过闸——越界返回 None：不读盘、不放前端预览 chip，模块名回退 id（既有回退路径）；②docker-compose frontend 删运行时 `NEXT_PUBLIC_COMMIT_SHA` 空覆盖行并留与 backend 同口径注释（版本号一律构建期烘焙）；③gen-api-types.mjs 守卫提示 `join("\n")`/`：\n` 双反斜杠改单反斜杠（字面两字符→真实换行）；④234000 迁移 docstring 补运维注记：alembic_version 卡在被删修订 20260926063000/3931ff71bd32 的库 upgrade 报 Can't locate revision，须 stamp 20260926083000 后再 upgrade。选守卫丢弃而非「resolve 后白名单校验」：读面本就只需 h1，越界值无合法语义，丢弃即 fail-closed 最简形态。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-audit-followup-hardening 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++assets：`_read_touched_modules` 行为变化仅「越界 doc 值」——此前尝试读盘（h1 提取，失败回退 id）且 doc 字段外发越界路径，现在不读盘且 doc=None；正常相对 doc 逐字节零回归；`_safe_module_doc` 为模块私有新函数无导出面。compose：frontend 服务 environment 删一行（部署面，无代码签名）。gen 脚本：stderr 文案格式变化（换行真实化）。迁移：docstring-only，revision graph 零变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-audit-followup-hardening 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：模块图逐图 fail-open 语义未动，单图损坏跳过不变；doc 守卫是纯函数无状态。
++2. 并发写：`_safe_module_doc` 纯字符串判定无共享态；读盘仍在原 read_text 一次性路径。
++3. 切换/生命周期：无新资源/定时器/句柄；compose 与 gen 脚本变更在部署/构建期一次性生效。
++4. 作用域：doc 值按 docs/<project> 域判界，跨工作区零串面（spec_root 每工作区独立解析不变）。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-audit-followup-hardening 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：合法但形态特殊的 doc 值（如含反斜杠的合法相对路径）被误判越界丢弃 chip——影响面仅展示降级（名回退 id），不丢模块触达本身。试过放弃：①「resolve+is_relative_to 白名单」——Windows 大小写/符号链接语义跨三平台分歧大（规则 13），纯词法判定更可移植；②「doc 保留仅去 h1 读取」——越界路径仍外发给前端 chip 可点击，留下二次面；③「同步修 explorer 预览侧」——explorer 自有寻径防护（前端传参仅展示路径），无需重复设防。
+
+diff --git a/.sillyspec/changes/2026-09-27-audit-followup-hardening/flow-state.yaml b/.sillyspec/changes/2026-09-27-audit-followup-hardening/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-audit-followup-hardening/flow-state.yaml
+@@ -0,0 +1,16 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: cf8d14e36eab43d5b4c5b9ab1d1f27620f81d1bc
++updatedAt: '2026-09-26T23:33:43.206Z'
++gate_summary: >-
++  test: passed ← module[]+deps(jsx3)+fr(3)（6.9s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260926233332\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（10.1s）｜门文件 30 个
++
+
+diff --git a/.sillyspec/changes/2026-09-27-audit-followup-hardening/proposal.md b/.sillyspec/changes/2026-09-27-audit-followup-hardening/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-audit-followup-hardening/proposal.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T23:28:32.581Z
++---
++# 提案书（Proposal）— 2026-09-27-audit-followup-hardening
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:8c0e35865df57ff79864e4e70d855b7e39a52675b874d934e5abcec2f7163180:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-audit-followup-hardening 留痕重锚 -->
++任务原话转写：24h 只读审查的低置信收尾四项：①资产卡模块触达 doc 路径未归一化——_read_touched_modules 对模块图 doc 值直接拼路径读盘，含 .. 或绝对路径可越出 docs/<project> 读宿主文件（仅 h1 行回显，低 severity 但应守）；②docker-compose frontend 运行时 NEXT_PUBLIC_COMMIT_SHA 空覆盖残行——backend 同型行已删（空串覆盖镜像 ENV 回退 unknown），frontend 漏删同型埋雷；③gen-api-types 守卫错误提示 \n 为字面两字符非换行（显示 bug）；④迁移 234000 docstring 缺「卡在被删修订号 063000/3931ff71bd32 的库须先 stamp 20260926083000 再 upgrade」运维注记。
++
++成功标准：
++- _read_touched_modules 对含 .. 段或绝对路径的 doc 值不读盘：模块名回退 id、doc 字段不外发越界路径（不放 chip），正常相对 doc 行为零回归
++- docker-compose frontend 运行时 NEXT_PUBLIC_COMMIT_SHA 覆盖行删除并留同 backend 口径的注释说明
++- gen-api-types 守卫提示的换行为真实换行（多文件列表逐行显示）
++- 234000 迁移 docstring 补 stranded revision 人工 stamp 运维注记
++- test_assets 新增越界 doc 用例（../ 与绝对路径两形态）绿，既有聚焦测试绿
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:2163d50219470fc74065213764ca6653c201951fa337a27a751a3210c539673f:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-audit-followup-hardening 留痕重锚 -->
++按成功标准机械推导，共 6 条验收面：
++1. _read_touched_modules 对含 .. 段或绝对路径的 doc 值不读盘：模块名回退 id、doc 字段不外发越界路径（不放 chip），正常相对 doc 行为零回归
++2. docker-compose frontend 运行时 NEXT_PUBLIC_COMMIT_SHA 覆盖行删除并留同 backend 口径的注释说明
++3. gen-api-types 守卫提示的换行为真实换行（多文件列表逐行显示）
++4. 234000 迁移 docstring 补 stranded revision 人工 stamp 运维注记
++5. test_assets 新增越界 doc 用例（..
++6. 与绝对路径两形态）绿，既有聚焦测试绿
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:cf46402a2b07efc2496b33dd6977f80711aa86e2d17f92dd66d15e24a68d13f5:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-audit-followup-hardening 留痕重锚 -->
++1. _read_touched_modules 对含 .. 段或绝对路径的 doc 值不读盘：模块名回退 id、doc 字段不外发越界路径（不放 chip），正常相对 doc 行为零回归
++2. docker-compose frontend 运行时 NEXT_PUBLIC_COMMIT_SHA 覆盖行删除并留同 backend 口径的注释说明
++3. gen-api-types 守卫提示的换行为真实换行（多文件列表逐行显示）
++4. 234000 迁移 docstring 补 stranded revision 人工 stamp 运维注记
++5. test_assets 新增越界 doc 用例（..
++6. 与绝对路径两形态）绿，既有聚焦测试绿
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-27-audit-followup-hardening/requirements.md b/.sillyspec/changes/2026-09-27-audit-followup-hardening/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-audit-followup-hardening/requirements.md
+@@ -0,0 +1,59 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T23:28:32.582Z
++---
++# 需求规格（Requirements）— 2026-09-27-audit-followup-hardening
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: _read_touched_modules 对含 .. 段或绝对路径的 doc 值不读盘：模块名回退
++Given 系统就绪
++When _read_touched_modules 对含 .. 段或绝对路径的 doc 值不读盘：模块名回退 id、doc 字段不外发越界路径（不放 chip），正常相
++Then 行为符合本条标准描述
++
++### FR-02: docker-compose frontend 运行时 NEXT_PUBLIC_COMMIT_SHA
++Given 系统就绪
++When docker-compose frontend 运行时 NEXT_PUBLIC_COMMIT_SHA 覆盖行删除并留同 backend 口径的注释说明
++Then 行为符合本条标准描述
++
++### FR-03: gen-api-types 守卫提示的换行为真实换行（多文件列表逐行显示）
++Given api 相关模块就绪
++When gen-api-types 守卫提示的换行为真实换行（多文件列表逐行显示）
++Then 行为符合本条标准描述
++
++### FR-04: 234000 迁移 docstring 补 stranded revision 人工 stamp 运
++Given 迁移 相关模块就绪
++When 234000 迁移 docstring 补 stranded revision 人工 stamp 运维注记
++Then 行为符合本条标准描述
++
++### FR-05: test_assets 新增越界 doc 用例（..
++Given 系统就绪
++When test_assets 新增越界 doc 用例（..
++Then 行为符合本条标准描述
++
++### FR-06: 与绝对路径两形态）绿，既有聚焦测试绿
++Given 测试 相关模块就绪
++When 与绝对路径两形态）绿，既有聚焦测试绿
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_assets.py::test_touched_modules_doc_traversal_guard（../、/etc/passwd、C:\Windows 三形态 + 正常相对 doc 回归四面断言）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：compose 为部署配置无测试面——yaml 解析验证（7 services、frontend.environment 无该键）+ 注释与 backend 侧（2026-09-26-deploy-eng-hardening 已删行）同口径留档
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：构建脚本文案格式无断言面——node --check 语法验证 0 错，守卫逻辑（exit 1 路径）未被触碰
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/tests/test_align_platform_change_events_migration.py 全套（docstring-only 改动后 12 passed 复跑，迁移行为零变化验证）
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_assets.py::test_touched_modules_doc_traversal_guard（同 FR-01 用例即覆盖「../ 与绝对路径两形态 + 既有聚焦回归」）
++backend/app/modules/change/tests/test_assets.py 全套 22 passed（含新用例）；ruff check assets.py/test_assets.py/迁移文件 All checks passed；mypy assets.py no issues；node --check gen 脚本 OK；compose yaml 解析 OK
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_assets.py 全套 22 passed（既有 21 零回归 + 新 1）；ruff/mypy/node --check/yaml 解析全过（同 FR-05 验证面汇总）
+
+diff --git a/.sillyspec/changes/2026-09-27-audit-followup-hardening/tasks.md b/.sillyspec/changes/2026-09-27-audit-followup-hardening/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-audit-followup-hardening/tasks.md
+@@ -0,0 +1,16 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T23:28:32.583Z
++---
++# 任务注册表（Tasks）— 2026-09-27-audit-followup-hardening
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: _read_touched_modules 对含 .. 段或绝对路径的 doc 值不读盘：模块名回退 id、doc 字段不外发越界路径（不放 chip）…
++- [x] task-02: docker-compose frontend 运行时 NEXT_PUBLIC_COMMIT_SHA 覆盖行删除并留同 backend 口径的注释说明
++- [x] task-03: gen-api-types 守卫提示的换行为真实换行（多文件列表逐行显示）
++- [x] task-04: 234000 迁移 docstring 补 stranded revision 人工 stamp 运维注记
++- [x] task-05: test_assets 新增越界 doc 用例（..
++- [x] task-06: 与绝对路径两形态）绿，既有聚焦测试绿

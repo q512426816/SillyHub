@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-audit-followup-hardening",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-27-audit-followup-hardening:flow:FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py::test_touched_modules_doc_traversal_guard（../、/etc/passwd、C:/Windows"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-audit-followup-hardening"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-27-audit-followup-hardening:flow:FR-04",
+      "tests": [
+        "backend/tests/test_align_platform_change_events_migration.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-audit-followup-hardening"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-27-audit-followup-hardening:flow:FR-05",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_assets.py::test_touched_modules_doc_traversal_guard（同"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-audit-followup-hardening"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-09-27-audit-followup-hardening:flow:FR-06",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-audit-followup-hardening"
+    }
+  ]
+}

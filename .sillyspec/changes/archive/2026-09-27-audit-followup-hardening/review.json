@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-audit-followup-hardening",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "234000 运维注记「stamp 083000 结构即 083000 语义」对卡在 063000 的库语义不完整：会连 083000 自身的 spec_workspaces 加列一并跳过",
+      "evidence": "git 历史（9adc7bf4^）实证旧图：063000 down=20260922194500，083000 down 原接 063000，merge 3931ff71bd32 down=(20260923090000, 20260926083000)。故锚卡在 3931ff71bd32 的库 083000 已执行、stamp 正确；但锚卡在 063000 的库 083000（spec_workspaces 加 last_writer/last_writer_at，ORM model.py/service.py 有映射，非幂等裸 add_column）与 090000（archive-tombstone 冤案数据回翻）均未执行，stamp 083000 会全部跳过——注记中「结构即 083000 语义（表已建好）」仅对 platform_change_events 成立，末句人工确认提示也只列了该表形态，未提示 spec_workspaces 两列检查。处置口径本身与 dedupe 变更（9adc7bf4）已实跑验证的「stamp 083000→upgrade head 成功」一致；本地 dogfood 库实测锚已到 20260926234000 且两列齐全，现实存量风险极低；docstring-only 无代码行为影响，故记 P3 文档完整性而非 P2。",
+      "location": "backend/migrations/versions/20260926234000_align_platform_change_events.py:40"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-27T07:39:46+08:00"
+}
