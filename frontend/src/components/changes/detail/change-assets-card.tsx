@@ -115,6 +115,8 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
   const [testPath, setTestPath] = useState<string | null>(null);
   /** 归档留档 diff 目标（null = 关）。 */
   const [patchPath, setPatchPath] = useState<string | null>(null);
+  /** 模块文档预览目标（镜像内相对路径，null = 关）。 */
+  const [moduleDoc, setModuleDoc] = useState<string | null>(null);
 
   const patchQ = useQuery({
     queryKey: ["changePatchFile", workspaceId, changeId, patchPath],
@@ -132,7 +134,13 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
   const decCount = data?.decisions?.length ?? 0;
   const rowCount = data?.test_rows?.length ?? 0;
   const hasAudit = Boolean(data?.patch || data?.delta);
-  const total = frCount + decCount + rowCount + (hasAudit ? 1 : 0);
+  // 资产透明面（2026-09-26-change-asset-transparency）：知识触达（待复核标记
+  // 反查）与模块触达（file_list × 模块图）两组，计数并入卡头统计。
+  const touchList = data?.knowledge_touch ?? [];
+  const moduleList = data?.touched_modules ?? [];
+  const total =
+    frCount + decCount + rowCount + (hasAudit ? 1 : 0) + (touchList.length > 0 ? 1 : 0) +
+    (moduleList.length > 0 ? 1 : 0);
   const patchFileList = data?.patch?.file_list ?? [];
 
   return (
@@ -232,6 +240,33 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
             </div>
           ) : null}
 
+          {/* 知识触达（2026-09-26-change-asset-transparency / FR-01）：本变更知识
+              注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查（flow
+              done 对触达域打标），覆盖面以标记为准，行点击跳知识库深链。 */}
+          {touchList.length > 0 ? (
+            <div className="rounded border-border/60 border p-2" data-testid="change-assets-knowledge-touch">
+              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+                <span>知识触达（注入命中 · 待复核标记反查）</span>
+                <span className="text-[10px] text-muted-foreground/70">
+                  {touchList.length} 条
+                </span>
+              </div>
+              {touchList.map((e) => (
+                <Link
+                  key={`${e.file}#${e.id}`}
+                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
+                    e.file ?? "",
+                  )}&anchor=${encodeURIComponent(e.id ?? "")}`}
+                  title={`打开知识库并定位到 ${e.id}`}
+                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 hover:underline"
+                >
+                  <span className="font-mono text-[10px] text-violet-700">{e.id}</span>
+                  <span className="min-w-0 flex-1 truncate">{e.title}</span>
+                </Link>
+              ))}
+            </div>
+          ) : null}
+
           {rowCount > 0 ? (
             <div className="rounded border-border/60 border p-2" data-testid="change-assets-tests">
               <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
@@ -291,6 +326,36 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                   ) : null}
                 </div>
               ))}
+            </div>
+          ) : null}
+
+          {/* 模块触达（FR-02）：交付文件清单 × 镜像模块图匹配的模块；chip 点击
+              打开模块文档预览（explorer 读仓库文件，路径确定不走搜索解析）。 */}
+          {moduleList.length > 0 ? (
+            <div className="rounded border-border/60 border p-2" data-testid="change-assets-touched-modules">
+              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+                <span>模块触达</span>
+                <span className="text-[10px] text-muted-foreground/70">
+                  {moduleList.length} 个模块
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {moduleList.map((m) => (
+                  <button
+                    key={`${m.project}/${m.id}`}
+                    type="button"
+                    data-testid={`change-assets-module-${m.id}`}
+                    onClick={() => setModuleDoc(m.doc ?? null)}
+                    title={m.doc ? `查看模块文档：${m.doc}` : `${m.project}/${m.id}（模块图未登记 doc）`}
+                    className="rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] hover:border-brand-300 hover:bg-brand-50/60"
+                  >
+                    {m.name || m.id}
+                    <span className="ml-1 text-[9px] text-muted-foreground/70">
+                      {m.project}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
           ) : null}
 
@@ -369,6 +434,30 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
             <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
               {testPath !== null ? (
                 <TestFileBody workspaceId={workspaceId} rawPath={testPath} />
+              ) : null}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 模块文档预览弹窗（2026-09-26-change-asset-transparency / FR-02）：
+          路径确定（镜像内相对 docs/…），explorer 读仓库文件需补 .sillyspec/
+          前缀；无 doc 模块 chip 不开弹窗（title 已说明未登记）。 */}
+      <Dialog open={moduleDoc !== null} onOpenChange={(v) => !v && setModuleDoc(null)}>
+        <DialogContent className="flex h-[80vh] max-w-4xl flex-col gap-0 p-0">
+          <DialogHeader className="border-b px-4 py-3">
+            <DialogTitle className="text-sm">模块文档</DialogTitle>
+            <DialogDescription className="truncate font-mono text-[11px]">
+              {moduleDoc}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+            <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
+              {moduleDoc !== null ? (
+                <FilePreview
+                  workspaceId={workspaceId}
+                  filePath={`.sillyspec/${moduleDoc}`}
+                />
               ) : null}
             </div>
           </div>

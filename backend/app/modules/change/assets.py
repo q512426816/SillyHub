@@ -30,6 +30,7 @@ import re
 import uuid
 from pathlib import Path
 
+import yaml
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,9 +42,11 @@ from app.modules.change.schema import (
     ChangeDecisionEntry,
     ChangeDeltaMeta,
     ChangeFrEntry,
+    ChangeKnowledgeTouch,
     ChangePatchFileRead,
     ChangePatchMeta,
     ChangeTestRow,
+    ChangeTouchedModule,
 )
 
 log = get_logger(__name__)
@@ -52,6 +55,9 @@ log = get_logger(__name__)
 # 上游格式演进时本层同步，D-001@v1 故障面；未知行一律跳过）。
 _ENTRY_HEAD_RE = re.compile(r"^##\s+(FR-\S+|D-\d+@v\d+)\s+(.+)$")
 _OWNER_LINE_RE = re.compile(r"^变更：(.+)$")
+# 「待复核：<变更名>」归属行（flow done 对触达域 active 条目打标；知识触达
+# 反查用——2026-09-26-change-asset-transparency，与「变更：」行同构）。
+_REVIEW_MARK_RE = re.compile(r"^待复核：(.+)$")
 _STATUS_LINE_RE = re.compile(r"^状态：(\S+)")
 # git 块头（``diff --git a/<old> b/<new>``；两侧可被引号包裹——特殊字符路径形态）。
 _PATCH_HEADER_RE = re.compile(r"^diff --git (?P<old>\"[^\"]*\"|\S+) (?P<new>\"[^\"]*\"|\S+)$")
@@ -62,11 +68,18 @@ _PATCH_FILES_MAX = 500
 _PATCH_FILE_MAX_CHARS = 200_000
 
 
-def _parse_entries_owned_by(text: str, change_key: str) -> list[tuple[str, str, str | None]]:
-    """解析域文件条目（节头分条 + ``变更：`` 行归属过滤）。
+def _parse_entries_owned_by(
+    text: str,
+    change_key: str,
+    *,
+    owner_line_re: re.Pattern[str] = _OWNER_LINE_RE,
+) -> list[tuple[str, str, str | None]]:
+    """解析域文件条目（节头分条 + 归属行过滤，默认 ``变更：``）。
 
     返回 ``(id, title, status)`` 三元组列表；status 行缺省 None（fr 条目
     恒有、decisions 个别条目无——对齐 CLI 两文件的现实容差）。
+    ``owner_line_re``（2026-09-26-change-asset-transparency）允许换归属行
+    正则（知识触达反查用 ``待复核：`` 标记行）。
     """
     entries: list[tuple[str, str, str | None]] = []
     cur_id: str | None = None
@@ -85,7 +98,7 @@ def _parse_entries_owned_by(text: str, change_key: str) -> list[tuple[str, str, 
             continue
         if cur_id is None:
             continue
-        owner = _OWNER_LINE_RE.match(line)
+        owner = owner_line_re.match(line)
         if owner:
             owned = owner.group(1).strip() == change_key
             continue
@@ -99,9 +112,16 @@ def _parse_entries_owned_by(text: str, change_key: str) -> list[tuple[str, str, 
 
 
 def _scan_domain_files(
-    spec_root: Path, domain: str, change_key: str
+    spec_root: Path,
+    domain: str,
+    change_key: str,
+    *,
+    owner_line_re: re.Pattern[str] = _OWNER_LINE_RE,
 ) -> list[tuple[str, str, str | None, str]]:
-    """扫 ``spec_root/knowledge/<domain>/*.md``，返回归属条目 ``(id,title,status,rel_file)``。"""
+    """扫 ``spec_root/knowledge/<domain>/*.md``，返回归属条目 ``(id,title,status,rel_file)``。
+
+    ``owner_line_re`` 透传（知识触达反查用 ``待复核：`` 标记）。
+    """
     out: list[tuple[str, str, str | None, str]] = []
     domain_dir = spec_root / "knowledge" / domain
     if not domain_dir.is_dir():
@@ -112,7 +132,9 @@ def _scan_domain_files(
         except OSError as exc:
             log.warning("change.assets_read_domain_file_failed", file=str(md), error=str(exc))
             continue
-        for entry_id, title, status in _parse_entries_owned_by(text, change_key):
+        for entry_id, title, status in _parse_entries_owned_by(
+            text, change_key, owner_line_re=owner_line_re
+        ):
             out.append((entry_id, title, status, md.relative_to(spec_root).as_posix()))
     return out
 
@@ -348,6 +370,73 @@ def _read_delta_meta(change_dir: Path) -> ChangeDeltaMeta | None:
     return ChangeDeltaMeta(headline=headline, before_lines=before_lines, delta_lines=delta_lines)
 
 
+def _read_touched_modules(spec_root: Path, file_list: list[str]) -> list["ChangeTouchedModule"]:
+    """模块触达：交付文件清单 × 镜像模块图（docs/<项目>/modules/_module-map.yaml）。
+
+    paths glob 语义按现行形态（单前缀 + ``**``）简化为去 ``**`` 前缀匹配；
+    文件路径相对仓库根（如 ``backend/app/...``），匹配前先剥项目顶层段。
+    模块中文名从 doc 文件首行 ``#`` h1 提取（conventions 模块卡规范），失败
+    回退模块 id。逐图/逐模块 fail-open，缺图 → 空列表。
+    """
+    out: list[ChangeTouchedModule] = []
+    seen: set[tuple[str, str]] = set()
+    docs_dir = spec_root / "docs"
+    if not docs_dir.is_dir():
+        return out
+    for map_path in sorted(docs_dir.glob("*/modules/_module-map.yaml")):
+        project = map_path.parent.parent.name
+        try:
+            data = yaml.safe_load(map_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            log.info("change.assets_module_map_unavailable", file=str(map_path), error=str(exc))
+            continue
+        mods = data.get("modules") if isinstance(data, dict) else None
+        if not isinstance(mods, dict):
+            continue
+        # 项目内相对路径：仓库相对文件剥 ``<project>/`` 顶层段后与前缀比对。
+        rel_files = [f[len(project) + 1 :] for f in file_list if f.startswith(f"{project}/")]
+        if not rel_files:
+            continue
+        for mod_id, mod in mods.items():
+            if not isinstance(mod, dict) or (project, mod_id) in seen:
+                continue
+            prefixes = []
+            for p in mod.get("paths") or []:
+                p = str(p)
+                prefixes.append((p[:-2] if p.endswith("**") else p).rstrip("/"))
+            prefixes = [p for p in prefixes if p]
+            if not any(
+                f == pref or f.startswith(f"{pref}/") for f in rel_files for pref in prefixes
+            ):
+                continue
+            seen.add((project, mod_id))
+            doc = str(mod.get("doc") or "") or None
+            name = mod_id
+            if doc:
+                try:
+                    # doc 相对项目 docs 根（map 的 doc: modules/change.md 即
+                    # docs/<project>/modules/change.md——模块图 schema 惯例）。
+                    h1 = next(
+                        line
+                        for line in (map_path.parent.parent / doc)
+                        .read_text(encoding="utf-8")
+                        .splitlines()
+                        if line.startswith("# ")
+                    )
+                    name = h1[2:].strip() or mod_id
+                except (OSError, StopIteration):
+                    pass
+            out.append(
+                ChangeTouchedModule(
+                    id=mod_id,
+                    name=name,
+                    project=project,
+                    doc=f"docs/{project}/{doc}" if doc else None,
+                )
+            )
+    return out
+
+
 class ChangeAssetsQueryService:
     """变更沉淀资产只读聚合服务（唯一数据源，对接 assets 端点）。"""
 
@@ -361,9 +450,20 @@ class ChangeAssetsQueryService:
         spec_root = await self._spec_root(workspace_id)
         archived = change.location == "archive" or change.status == "archived"
 
-        fr_rows, dec_rows = await asyncio.gather(
+        fr_rows, dec_rows, touch_rows = await asyncio.gather(
             asyncio.to_thread(_scan_domain_files, spec_root, "fr", change.change_key),
             asyncio.to_thread(_scan_domain_files, spec_root, "decisions", change.change_key),
+            # 知识触达（2026-09-26-change-asset-transparency / FR-01）：
+            # 「待复核：」标记反查双域（fr + decisions 同构一轮）。
+            asyncio.to_thread(
+                lambda: [
+                    row
+                    for domain in ("fr", "decisions")
+                    for row in _scan_domain_files(
+                        spec_root, domain, change.change_key, owner_line_re=_REVIEW_MARK_RE
+                    )
+                ]
+            ),
         )
         result = ChangeAssetsRead(
             change_key=change.change_key,
@@ -371,6 +471,9 @@ class ChangeAssetsQueryService:
             fr_entries=[ChangeFrEntry(id=i, title=t, status=s, file=f) for i, t, s, f in fr_rows],
             decisions=[
                 ChangeDecisionEntry(id=i, title=t, status=s, file=f) for i, t, s, f in dec_rows
+            ],
+            knowledge_touch=[
+                ChangeKnowledgeTouch(id=i, title=t, file=f) for i, t, _s, f in touch_rows
             ],
         )
         if not archived:
@@ -390,6 +493,10 @@ class ChangeAssetsQueryService:
         result.test_rows = test_rows
         result.patch = patch
         result.delta = delta
+        # 模块触达（FR-02）：归档 file_list（既有 patch meta 数据）× 模块图。
+        result.touched_modules = await asyncio.to_thread(
+            _read_touched_modules, spec_root, patch.file_list if patch else []
+        )
         return result
 
     async def get_patch_file_diff(

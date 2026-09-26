@@ -38762,6 +38762,20 @@
             "type": "array",
             "title": "Decisions"
           },
+          "knowledge_touch": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeKnowledgeTouch"
+            },
+            "type": "array",
+            "title": "Knowledge Touch"
+          },
+          "touched_modules": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeTouchedModule"
+            },
+            "type": "array",
+            "title": "Touched Modules"
+          },
           "test_rows": {
             "items": {
               "$ref": "#/components/schemas/ChangeTestRow"
@@ -39333,6 +39347,30 @@
         ],
         "title": "ChangeFrEntry",
         "description": "FR 索引条目（knowledge/fr 域文件内归属本变更的节）。"
+      },
+      "ChangeKnowledgeTouch": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "file": {
+            "type": "string",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "file"
+        ],
+        "title": "ChangeKnowledgeTouch",
+        "description": "知识触达条目（2026-09-26-change-asset-transparency / FR-01）。\n\n本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查\n（flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准\n不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。"
       },
       "ChangeList": {
         "properties": {
@@ -40136,6 +40174,41 @@
         ],
         "title": "ChangeTimelineRead",
         "description": "变更合成时间线聚合（GET /changes/{cid}/timeline）。\n\n``born_at`` 来自 requirements.md frontmatter created_at（工件元数据补位，\nwatcher 后拉起时事件流缺诞生事件）；events 恒 provisional（观测语义，\n红线 D-004 延续：只展示不消费）。"
+      },
+      "ChangeTouchedModule": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "project": {
+            "type": "string",
+            "title": "Project"
+          },
+          "doc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doc"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "project"
+        ],
+        "title": "ChangeTouchedModule",
+        "description": "模块触达条目（FR-02）——交付文件清单 × 镜像模块图匹配的模块。\n\n``name`` 从模块 doc 首行 h1 提取（conventions 模块卡规范），失败回退\n模块 id；``doc`` 是镜像内相对路径（docs/<项目>/modules/…，explorer 预览\n侧行以此为锚点打开仓库文件）。"
       },
       "ChangeUsageRead": {
         "properties": {

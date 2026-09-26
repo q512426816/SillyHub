@@ -385,3 +385,64 @@ describe("ChangeAssetsCard 测试文件路径解析", () => {
     expect(tip).not.toHaveTextContent("工作区目录可能已被移动或删除");
   });
 });
+
+// ── 资产透明面（2026-09-26-change-asset-transparency / FR-01~03）────────────
+describe("ChangeAssetsCard 资产透明面", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSearch.mockResolvedValue(matchesOf(["backend/app/x.py"]));
+  });
+
+  it("知识触达组：待复核条目渲染并带知识库 file+anchor 深链 href", async () => {
+    mockGet.mockResolvedValue({
+      ...FULL,
+      knowledge_touch: [
+        {
+          id: "FR-auto-backend-015",
+          title: "THIN 辅助阶段与派发配置",
+          file: "knowledge/fr/auto-backend.md",
+        },
+      ],
+    });
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+
+    const group = await screen.findByTestId("change-assets-knowledge-touch");
+    expect(group).toHaveTextContent("FR-auto-backend-015");
+    expect(group).toHaveTextContent("THIN 辅助阶段与派发配置");
+    const link = group.querySelector("a");
+    expect(link).not.toBeNull();
+    expect(decodeURIComponent(link!.getAttribute("href") ?? "")).toContain(
+      "file=knowledge/fr/auto-backend.md&anchor=FR-auto-backend-015",
+    );
+  });
+
+  it("模块触达组：chip 渲染中文名，点击打开模块文档预览弹窗（.sillyspec 前缀）", async () => {
+    mockGet.mockResolvedValue({
+      ...FULL,
+      touched_modules: [
+        { id: "change", name: "变更中心", project: "backend", doc: "docs/backend/modules/change.md" },
+      ],
+    });
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+
+    const chip = await screen.findByTestId("change-assets-module-change");
+    expect(chip).toHaveTextContent("变更中心");
+    fireEvent.click(chip);
+    // 弹窗打开且 FilePreview 收到补 .sillyspec/ 前缀的仓库相对路径。
+    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
+      ".sillyspec/docs/backend/modules/change.md",
+    );
+  });
+
+  it("两组无数据时不渲染（fail-open 同款逐组门控）", async () => {
+    mockGet.mockResolvedValue(FULL);
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+
+    expect(await screen.findByTestId("change-assets-tests")).toBeInTheDocument();
+    expect(screen.queryByTestId("change-assets-knowledge-touch")).toBeNull();
+    expect(screen.queryByTestId("change-assets-touched-modules")).toBeNull();
+  });
+});

@@ -812,6 +812,33 @@ class ChangeDecisionEntry(BaseModel):
     file: str
 
 
+class ChangeKnowledgeTouch(BaseModel):
+    """知识触达条目（2026-09-26-change-asset-transparency / FR-01）。
+
+    本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查
+    （flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准
+    不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。
+    """
+
+    id: str
+    title: str
+    file: str
+
+
+class ChangeTouchedModule(BaseModel):
+    """模块触达条目（FR-02）——交付文件清单 × 镜像模块图匹配的模块。
+
+    ``name`` 从模块 doc 首行 h1 提取（conventions 模块卡规范），失败回退
+    模块 id；``doc`` 是镜像内相对路径（docs/<项目>/modules/…，explorer 预览
+    侧行以此为锚点打开仓库文件）。
+    """
+
+    id: str
+    name: str
+    project: str
+    doc: str | None = None
+
+
 class ChangeTestRow(BaseModel):
     """测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。
 
@@ -877,6 +904,11 @@ class ChangeAssetsRead(BaseModel):
     archived: bool = False
     fr_entries: list[ChangeFrEntry] = Field(default_factory=list)
     decisions: list[ChangeDecisionEntry] = Field(default_factory=list)
+
+    # ── 资产透明面（2026-09-26-change-asset-transparency）────────────────────
+
+    knowledge_touch: list[ChangeKnowledgeTouch] = Field(default_factory=list)
+    touched_modules: list[ChangeTouchedModule] = Field(default_factory=list)
     test_rows: list[ChangeTestRow] = Field(default_factory=list)
     patch: ChangePatchMeta | None = None
     delta: ChangeDeltaMeta | None = None

@@ -132,13 +132,31 @@ def _seed_mirror(spec_root: Path, *, with_trace: bool = True) -> None:
     dec_dir.mkdir(parents=True)
     (fr_dir / "auto-test.md").write_text(
         f"# FR\n\n## FR-auto-test-001 金样本条目\n变更：{KEY}\n状态：active\n全文：x#FR-01\n\n"
-        "## FR-auto-test-002 他属\n变更：someone-else\n状态：active\n",
+        "## FR-auto-test-002 他属\n变更：someone-else\n状态：active\n\n"
+        # 知识触达（2026-09-26-change-asset-transparency）：他属条目带本变更
+        # 待复核标记 → knowledge_touch 收录（与「变更：」归属正交）。
+        f"## FR-auto-test-003 注入命中\n待复核：{KEY}\n状态：active\n",
         encoding="utf-8",
     )
     (dec_dir / "backend.md").write_text(
-        f"# 决策\n\n## D-001@v1 金样本决策\n变更：{KEY}\n理由：z\n\n## D-009@v1 无主\n理由：w\n",
+        f"# 决策\n\n## D-001@v1 金样本决策\n变更：{KEY}\n理由：z\n\n## D-009@v1 无主\n理由：w\n\n"
+        f"## D-002@v1 注入命中决策\n待复核：{KEY}\n理由：r\n",
         encoding="utf-8",
     )
+    # 模块图 + 模块 doc（模块触达面）：change 模块命中交付文件、core 不命中；
+    # doc 有/无 h1 各一（中文名提取与回退面）。
+    mod_dir = spec_root / "docs" / "backend" / "modules"
+    mod_dir.mkdir(parents=True)
+    (mod_dir / "_module-map.yaml").write_text(
+        "schema_version: 2\nmodules:\n"
+        "  change:\n    status: active\n    doc: modules/change.md\n"
+        "    paths:\n      - app/modules/change/**\n"
+        "  core:\n    status: active\n    doc: modules/core.md\n"
+        "    paths:\n      - app/core/**\n",
+        encoding="utf-8",
+    )
+    (mod_dir / "change.md").write_text("# 变更中心\n\nchange 模块卡。\n", encoding="utf-8")
+    (mod_dir / "core.md").write_text("core 模块卡（无 h1）。\n", encoding="utf-8")
     change_dir = spec_root / "changes" / "archive" / KEY
     change_dir.mkdir(parents=True)
     if with_trace:
@@ -207,6 +225,12 @@ async def test_golden_aggregation(db_session, tmp_path: Path) -> None:
         == "backend/app/modules/change/tests/test_assets.py::金样本聚合 用例"
         " （共享前置：seed 镜像三件）"
     )
+    # 知识触达（2026-09-26-change-asset-transparency）：待复核标记反查双域。
+    assert [(t.id, t.file) for t in result.knowledge_touch] == [
+        ("FR-auto-test-003", "knowledge/fr/auto-test.md"),
+        ("D-002@v1", "knowledge/decisions/backend.md"),
+    ]
+    assert result.touched_modules == []  # 无 change-patch.json → file_list 空
     assert result.patch is None  # 无 change-patch.json → 容错 None
     assert result.delta is not None
     assert result.delta.before_lines == 2
@@ -560,3 +584,66 @@ async def test_patch_file_http_unknown_change_404(
         headers=auth_headers,
     )
     assert resp.status_code == 404, resp.text
+
+
+# ── 资产透明面（2026-09-26-change-asset-transparency）──────────────────────
+
+
+async def test_touched_modules_glob_and_name(db_session, tmp_path: Path) -> None:
+    """模块触达：file_list × 模块图前缀匹配；中文名 h1 提取 / 无 h1 回退 id。"""
+    spec_root = tmp_path / "spec-root-mod"
+    _seed_mirror(spec_root)
+    change_dir = spec_root / "changes" / "archive" / KEY
+    (change_dir / "change-patch.json").write_text(
+        json.dumps(
+            {
+                "totals": {"files": 2, "additions": 3, "deletions": 1},
+                "files": [
+                    "backend/app/modules/change/assets.py",
+                    "frontend/src/lib/api-types.ts",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    # backend/app/modules/change/** 命中（中文名取 doc h1）；frontend 文件与
+    # backend 项目段不同不收；core 前缀未触不收。
+    assert [(m.id, m.name, m.project) for m in result.touched_modules] == [
+        ("change", "变更中心", "backend"),
+    ]
+
+
+def test_touched_modules_name_fallback(tmp_path: Path) -> None:
+    """纯函数：doc 无 h1 → 中文名回退 id；无 doc 模块 → doc=None 仍可触达。"""
+    from app.modules.change.assets import _read_touched_modules
+
+    mod_dir = tmp_path / "docs" / "p" / "modules"
+    mod_dir.mkdir(parents=True)
+    (mod_dir / "_module-map.yaml").write_text(
+        "modules:\n"
+        "  a:\n    doc: modules/a.md\n    paths: [src/a/**]\n"
+        "  b:\n    paths: [src/b/**]\n",
+        encoding="utf-8",
+    )
+    (mod_dir / "a.md").write_text("无标题文档\n", encoding="utf-8")
+    mods = _read_touched_modules(tmp_path, ["p/src/a/x.ts", "p/src/b/y.ts"])
+    assert [(m.id, m.name, m.doc) for m in mods] == [
+        ("a", "a", "docs/p/modules/a.md"),
+        ("b", "b", None),
+    ]
+
+
+def test_knowledge_touch_empty_without_marker(tmp_path: Path) -> None:
+    """纯函数：无待复核标记的域文件 → 空组（fail-open）。"""
+    from app.modules.change.assets import _REVIEW_MARK_RE, _scan_domain_files
+
+    fr_dir = tmp_path / "knowledge" / "fr"
+    fr_dir.mkdir(parents=True)
+    (fr_dir / "x.md").write_text("## FR-x-001 条目\n变更：someone\n", encoding="utf-8")
+    assert (
+        _scan_domain_files(tmp_path, "fr", "2026-09-26-none", owner_line_re=_REVIEW_MARK_RE) == []
+    )

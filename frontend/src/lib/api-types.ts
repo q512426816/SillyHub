@@ -13369,6 +13369,10 @@ export interface components {
             fr_entries?: components["schemas"]["ChangeFrEntry"][];
             /** Decisions */
             decisions?: components["schemas"]["ChangeDecisionEntry"][];
+            /** Knowledge Touch */
+            knowledge_touch?: components["schemas"]["ChangeKnowledgeTouch"][];
+            /** Touched Modules */
+            touched_modules?: components["schemas"]["ChangeTouchedModule"][];
             /** Test Rows */
             test_rows?: components["schemas"]["ChangeTestRow"][];
             patch?: components["schemas"]["ChangePatchMeta"] | null;
@@ -13594,6 +13598,22 @@ export interface components {
             title: string;
             /** Status */
             status?: string | null;
+            /** File */
+            file: string;
+        };
+        /**
+         * ChangeKnowledgeTouch
+         * @description 知识触达条目（2026-09-26-change-asset-transparency / FR-01）。
+         *
+         *     本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查
+         *     （flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准
+         *     不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。
+         */
+        ChangeKnowledgeTouch: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
             /** File */
             file: string;
         };
@@ -13890,6 +13910,24 @@ export interface components {
             /** Tasks */
             tasks?: components["schemas"]["TimelineTask"][];
             stats?: components["schemas"]["TimelineStats"];
+        };
+        /**
+         * ChangeTouchedModule
+         * @description 模块触达条目（FR-02）——交付文件清单 × 镜像模块图匹配的模块。
+         *
+         *     ``name`` 从模块 doc 首行 h1 提取（conventions 模块卡规范），失败回退
+         *     模块 id；``doc`` 是镜像内相对路径（docs/<项目>/modules/…，explorer 预览
+         *     侧行以此为锚点打开仓库文件）。
+         */
+        ChangeTouchedModule: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Project */
+            project: string;
+            /** Doc */
+            doc?: string | null;
         };
         /**
          * ChangeUsageRead
