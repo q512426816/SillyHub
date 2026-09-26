@@ -143,3 +143,28 @@ CLI 仓自有知识面本地可恢复：`.sillyspec/.pre-merge-backup-2026-09-24
 python -c "import sys;sys.path.insert(0,'backend');from pathlib import Path;from app.modules.knowledge.parser import parse_knowledge_entries as p;print(len(p(Path('.sillyspec'))))"
 # 3) 与 hits 锚点求交（hits 行 = .runtime/knowledge-hits.jsonl 或 .pre-merge-backup-*）
 ```
+
+## 处置记录（2026-09-26）
+
+逐项核销（多由并行会话/平台部署收口，标注落点）：
+
+- **T1（上行卡死）✅**：daemon 侧两刀落地——指纹断点（2026-09-25-daemon-hits-upload-fingerprint：
+  行数+尾行哈希，文件被替换自动从头重报，服务端 line_hash 幂等兜底）+ 周期兜底通道
+  （`304eba982`：hits 上行解耦 postSpecSync 成败，spec 推送冲突不再连带卡死遥测）。
+  CLI 侧「merge 不清空」为流程纪律项：指纹断点使清空后自动重报，损害已结构性消除。
+- **T4（锚点漂移校验）✅（本日修）**：`sillyspec knowledge validate` 新增 `anchor_drift`
+  告警（容错归一比对：剥非字母数字+小写+截断前缀容忍；刻意不引入第四套严格 slug——
+  单一源是 T2 方向）。新增 `test/knowledge-validate-anchor-drift.test.mjs` 4/4
+  （真漂移告警 / 三代规则并存形态不误报 / 截断容忍）。
+- **P1/P2/P3 ✅**：`80645bf25`+`6e023509d`（stats 分母分层 + 失效命中期单列 + 数据截止
+  时间，前端旧后端过渡 ?? 兜底）。
+- **P4 ✅**：`40d215410`（scan-docs 统计口径两修：模块层不数变更日志 + 时间按源文件）。
+- **P5 ✅（运行面收口）**：runbook 全链路恢复（见 spec-push-conflict-recovery-runbook
+  处置记录）；全量同步「同内容跳过」复活语义 `38e19b003`；同步回执可见性 `a65d22984`。
+
+**延后（设计/功能级，非缺陷）**：T2 锚点规则单一源（平台容错已落地为实际解法，「统一
+slug 规范或改稳定条目 ID」留架构提案）；T3 decisions/fr 条目级命中粒度（需 CLI 写侧
++平台读侧协同，功能立项）。 INDEX 侧锚点修正的实例修复（R17 四条 `d3342a85`、
+unmapped 七条 `546685bb`）已随各自变更落账。
+
+归档（核心缺陷全清，延后项如上）。

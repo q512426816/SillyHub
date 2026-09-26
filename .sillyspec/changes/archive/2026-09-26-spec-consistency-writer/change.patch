@@ -1,0 +1,2017 @@
+diff --git a/backend/app/modules/spec_workspace/model.py b/backend/app/modules/spec_workspace/model.py
+index 37d70438f..2fd8a7a5b 100644
+--- a/backend/app/modules/spec_workspace/model.py
++++ b/backend/app/modules/spec_workspace/model.py
+@@ -96,6 +96,17 @@ class SpecWorkspace(BaseModel, table=True):
+         default=None,
+         sa_column=Column(DateTime(timezone=True), nullable=True),
+     )
++    # 2026-09-26-spec-consistency-writer：最后写入方身份（user:<id>:<email 摘要>）
++    # 与时间——双写者漂移（manifest 基线互不知情）是 SpecPushConflict 一周僵局的
++    # 根因，写方切换即漂移信号。
++    last_writer: str | None = Field(
++        default=None,
++        sa_column=Column(String(128), nullable=True),
++    )
++    last_writer_at: datetime | None = Field(
++        default=None,
++        sa_column=Column(DateTime(timezone=True), nullable=True),
++    )
+     created_at: datetime = Field(
+         default_factory=lambda: datetime.now(UTC),
+         sa_column=Column(DateTime(timezone=True), nullable=False),
+diff --git a/backend/app/modules/spec_workspace/router.py b/backend/app/modules/spec_workspace/router.py
+index af5d75c3a..0f4e3fdf3 100644
+--- a/backend/app/modules/spec_workspace/router.py
++++ b/backend/app/modules/spec_workspace/router.py
+@@ -36,6 +36,7 @@ from app.modules.spec_workspace.schema import (
+     ManifestHealIn,
+     ManifestHealOut,
+     SpecBootstrapRunStartResponse,
++    SpecConsistencyOut,
+     SpecIncrementalSyncRequest,
+     SpecIncrementalSyncResponse,
+     SpecWorkspaceRead,
+@@ -53,6 +54,13 @@ router = APIRouter(
+ SessionDep = Annotated[AsyncSession, Depends(get_session)]
+ 
+ 
++def _sync_writer_label(user: User) -> str:
++    """写入方身份摘要（2026-09-26-spec-consistency-writer）：daemon 服务身份经
++    X-API-Key 解析为 User（runtime 绑定），CLI/人经 Bearer——用 id+email 前缀摘要，
++    前端/日志可辨「daemon vs 人/CLI」双写者形态。"""
++    return f"user:{str(user.id)[:8]}:{(user.email or '')[:24]}"
++
++
+ class SpecSyncResponse(BaseModel):
+     """Response DTO for the spec sync endpoint (FR-05 / D-003)."""
+ 
+@@ -271,7 +279,9 @@ async def sync_spec_workspace(
+     files_processed（逐文件级进度，D-004@V2）。
+     """
+     service = SpecWorkspaceService(session)
+-    result = await service.apply_sync(workspace_id, tar_bytes, change_write_id=change_write_id)
++    result = await service.apply_sync(
++        workspace_id, tar_bytes, change_write_id=change_write_id, writer=_sync_writer_label(_user)
++    )
+     return SpecSyncResponse(
+         ok=True,
+         reparsed=result["reparsed_docs"],
+@@ -310,6 +320,7 @@ async def sync_spec_workspace_incremental(
+         payload.ops,
+         change_write_id=change_write_id,
+         change_dirs=payload.change_dirs,
++        writer=_sync_writer_label(_user),
+     )
+     return SpecIncrementalSyncResponse(
+         ok=True,
+@@ -379,6 +390,27 @@ async def heal_manifest_tombstones(
+     return ManifestHealOut(healed=result["healed"], skipped=result["skipped"])
+ 
+ 
++# ── 三向对账端点（2026-09-26-spec-consistency-writer）───────────────────────────
++
++
++@router.get("/spec-workspace/consistency", response_model=SpecConsistencyOut)
++async def get_spec_consistency(
++    workspace_id: uuid.UUID,
++    session: SessionDep,
++    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
++) -> SpecConsistencyOut:
++    """镜像磁盘树 × manifest 行对账：disk_only / manifest_ghost（幽灵行）/
++    tombstoned_on_disk 三类分歧 + 计数——镜像损坏直接可见（此前靠手写脚本）。"""
++    service = SpecWorkspaceService(session)
++    result = await service.consistency(workspace_id)
++    return SpecConsistencyOut(
++        disk_only=result["disk_only"],
++        manifest_ghost=result["manifest_ghost"],
++        tombstoned_on_disk=result["tombstoned_on_disk"],
++        counts=result["counts"],
++    )
++
++
+ # ── Spec Conflicts ─────────────────────────────────────────────────────────────
+ 
+ 
+diff --git a/backend/app/modules/spec_workspace/schema.py b/backend/app/modules/spec_workspace/schema.py
+index 13e9b5c37..fe39d1f68 100644
+--- a/backend/app/modules/spec_workspace/schema.py
++++ b/backend/app/modules/spec_workspace/schema.py
+@@ -42,6 +42,9 @@ class SpecWorkspaceRead(BaseModel):
+     last_synced_at: datetime | None
+     created_at: datetime
+     updated_at: datetime
++    # 2026-09-26-spec-consistency-writer：最后写入方（双写者漂移信号）。
++    last_writer: str | None = None
++    last_writer_at: datetime | None = None
+ 
+ 
+ class SpecWorkspaceUpdate(BaseModel):
+@@ -150,3 +153,26 @@ class ManifestHealOut(BaseModel):
+ 
+     healed: list[str]
+     skipped: list[str]
++
++
++# ── 三向对账 DTO（2026-09-26-spec-consistency-writer）──────────────────────────
++
++
++class ConsistencyDivergenceItem(BaseModel):
++    """单条分歧（path 为 spec_root 相对 POSIX 路径）。"""
++
++    path: str
++    detail: str | None = None
++
++
++class SpecConsistencyOut(BaseModel):
++    """GET /spec-workspace/consistency：镜像磁盘树 × manifest 行对账。
++
++    四类分歧 + 计数汇总；disk_only/manifest_ghost 是镜像损坏的直接证据
++    （2026-09-25 生产实证：c84182bc 缺 13 文件、b97 缺整个 generated/）。
++    """
++
++    disk_only: list[ConsistencyDivergenceItem]
++    manifest_ghost: list[ConsistencyDivergenceItem]
++    tombstoned_on_disk: list[ConsistencyDivergenceItem]
++    counts: dict[str, int]
+diff --git a/backend/app/modules/spec_workspace/service.py b/backend/app/modules/spec_workspace/service.py
+index 14314a66e..a3e0a8ccb 100644
+--- a/backend/app/modules/spec_workspace/service.py
++++ b/backend/app/modules/spec_workspace/service.py
+@@ -1137,6 +1137,88 @@ class SpecWorkspaceService:
+     SYNC_CONFLICT_STAGE = "spec-sync"
+     SYNC_CONFLICT_TYPE = "sync"
+ 
++    async def _note_writer(self, workspace_id: uuid.UUID, writer: str) -> None:
++        """记录最后写入方（双写者漂移信号，2026-09-26-spec-consistency-writer）。
++
++        写方切换（与 last_writer 不同）记 structlog warning——daemon 与 CLI
++        platform sync 双写是 manifest 基线漂移（SpecPushConflict 僵局）的根因。
++        独立短事务（同步主流程各阶段已自行 commit，此处幂等可重入）。
++        """
++        spec_ws = await self.get(workspace_id)
++        if spec_ws.last_writer and spec_ws.last_writer != writer:
++            log.warning(
++                "spec_workspace.sync_writer_changed",
++                workspace_id=str(workspace_id),
++                previous_writer=spec_ws.last_writer,
++                new_writer=writer,
++            )
++        spec_ws.last_writer = writer[:128]
++        spec_ws.last_writer_at = datetime.now(UTC)
++        await self._session.commit()
++
++    async def consistency(self, workspace_id: uuid.UUID) -> dict:
++        """镜像磁盘树 × manifest 行三向对账（磁盘侧两方 + 清单行）。
++
++        四类分歧（2026-09-25 生产实证的三份快照不一致直接可见化）：
++        - disk_only：磁盘有、清单无行（全量覆盖后未对齐 / 行丢失）；
++        - manifest_ghost：行 exists=True 但磁盘缺文件（幽灵行—— resurrect 修复的场景）；
++        - tombstoned_on_disk：行 platform_deleted=True 但磁盘文件还在（删除残留）。
++        """
++        spec_ws = await self.get(workspace_id)
++        spec_root = Path(spec_ws.spec_root)
++        rows = (
++            await self._session.execute(
++                select(
++                    SpecFileManifest.path,
++                    SpecFileManifest.exists,
++                    SpecFileManifest.platform_deleted,
++                ).where(SpecFileManifest.workspace_id == workspace_id)
++            )
++        ).all()
++        manifest_paths = {r.path.replace("\\", "/") for r in rows}
++
++        def _walk(root: Path) -> set[str]:
++            out: set[str] = set()
++            if not root.is_dir():
++                return out
++            for p in root.rglob("*"):
++                if not p.is_file():
++                    continue
++                rel = p.relative_to(root).as_posix()
++                if any(part == ".runtime" for part in rel.split("/")):
++                    continue
++                if PurePosixPath(rel).name in SERVER_EXCLUDED_FILENAMES:
++                    continue
++                out.add(rel)
++            return out
++
++        disk_paths = await asyncio.to_thread(_walk, spec_root)
++
++        disk_only = sorted(disk_paths - manifest_paths)
++        row_by_path = {r.path.replace("\\", "/"): r for r in rows}
++        manifest_ghost = sorted(p for p in (manifest_paths - disk_paths) if row_by_path[p].exists)
++        tombstoned_on_disk = sorted(
++            p for p in (manifest_paths & disk_paths) if row_by_path[p].platform_deleted
++        )
++        return {
++            "disk_only": [{"path": p, "detail": "磁盘有、清单无行"} for p in disk_only],
++            "manifest_ghost": [
++                {"path": p, "detail": "清单 exists=True 但磁盘缺文件（幽灵行）"}
++                for p in manifest_ghost
++            ],
++            "tombstoned_on_disk": [
++                {"path": p, "detail": "platform_deleted 墓碑但磁盘文件仍在"}
++                for p in tombstoned_on_disk
++            ],
++            "counts": {
++                "disk_files": len(disk_paths),
++                "manifest_rows": len(manifest_paths),
++                "disk_only": len(disk_only),
++                "manifest_ghost": len(manifest_ghost),
++                "tombstoned_on_disk": len(tombstoned_on_disk),
++            },
++        }
++
+     async def heal_manifest_tombstones(
+         self,
+         workspace_id: uuid.UUID,
+@@ -1659,6 +1741,8 @@ class SpecWorkspaceService:
+         workspace_id: uuid.UUID,
+         tar_bytes: bytes,
+         change_write_id: str | None = None,
++        *,
++        writer: str | None = None,
+     ) -> dict[str, int]:
+         """Overwrite spec_root with tar, then reparse docs + changes (D-003).
+ 
+@@ -1684,6 +1768,15 @@ class SpecWorkspaceService:
+             converged_files=converged_files,
+             converged_dirs=converged_dirs,
+         )
++        if writer is not None:
++            try:
++                await self._note_writer(workspace_id, writer)
++            except Exception as exc:
++                log.warning(
++                    "spec_workspace.note_writer_failed",
++                    workspace_id=str(workspace_id),
++                    error=str(exc),
++                )
+         return {
+             "reparsed_docs": reparsed_docs,
+             "reparsed_changes": reparsed_changes,
+@@ -2071,6 +2164,8 @@ class SpecWorkspaceService:
+         self,
+         workspace_id: uuid.UUID,
+         ops: list[FileOp],
++        *,
++        writer: str | None = None,
+         change_write_id: str | None = None,
+         change_dirs: list[str] | None = None,
+     ) -> dict[str, object]:
+@@ -2605,6 +2700,17 @@ class SpecWorkspaceService:
+                 error=str(exc),
+             )
+ 
++        # 2026-09-26-spec-consistency-writer：写方记录（冲突注册表前，独立事务幂等）。
++        if writer is not None:
++            try:
++                await self._note_writer(workspace_id, writer)
++            except Exception as exc:
++                log.warning(
++                    "spec_workspace.note_writer_failed",
++                    workspace_id=str(workspace_id),
++                    error=str(exc),
++                )
++
+         # 2026-09-26-spec-sync-receipt-visibility：冲突进注册表——此前增量冲突只活在
+         # daemon 日志一行 warn，spec-conflicts 注册表恒空、无横幅，c84182bc 冲突挂
+         # 一周无人知晓。有冲突 → 幂等 upsert 开放行（供 GET /spec-conflicts 与前端
+diff --git a/backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py b/backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
+index 892714886..fc8f58bf3 100644
+--- a/backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
++++ b/backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
+@@ -222,7 +222,7 @@ class TestConvergeStaleFiles:
+         spec_root = tmp_path / "spec-root"
+         (spec_root / ".sillyspec").mkdir(parents=True)
+         (spec_root / ".sillyspec" / "local.yaml").write_text("cached: true", encoding="utf-8")
+-        (spec_root / "docs").mkdir()
++        (spec_root / "docs").mkdir(parents=True)
+         (spec_root / "docs" / "A.md").write_text("# A", encoding="utf-8")
+         await _make_spec_workspace(db_session, ws, spec_root)
+ 
+@@ -412,3 +412,70 @@ class TestResurrectMissingFiles:
+ 
+         assert target.read_bytes() == content
+         assert int(target.stat().st_mtime) == old  # 未 move（skip 分支保持原文件不动）
++
++
++# ===========================================================================
++# 2026-09-26-spec-consistency-writer：三向对账 + 写方记录
++# ===========================================================================
++
++
++class TestConsistencyAndWriter:
++    async def test_consistency_four_divergences(self, db_session, tmp_path) -> None:
++        """disk_only / manifest_ghost / tombstoned_on_disk 三类分歧 + 计数。"""
++        ws = await _make_workspace(db_session)
++        spec_root = tmp_path / "spec-root"
++        await _make_spec_workspace(db_session, ws, spec_root)
++        # 磁盘：ok.md（有行）/ disk_only.md（无行）/ tomb.md（行墓碑但文件在）
++        (spec_root / "docs").mkdir(parents=True)
++        (spec_root / "docs" / "ok.md").write_text("ok", encoding="utf-8")
++        (spec_root / "docs" / "disk_only.md").write_text("x", encoding="utf-8")
++        (spec_root / "docs" / "tomb.md").write_text("t", encoding="utf-8")
++        # manifest：ok（对齐）/ disk_only（无行）/ ghost（行在线无文件）/ tomb（墓碑但文件在）
++        for path, exists, deleted in [
++            ("docs/ok.md", True, False),
++            ("docs/ghost.md", True, False),
++            ("docs/tomb.md", True, True),
++        ]:
++            db_session.add(
++                SpecFileManifest(
++                    workspace_id=ws.id,
++                    path=path,
++                    content_hash="h",
++                    version=1,
++                    exists=exists,
++                    platform_deleted=deleted,
++                )
++            )
++        await db_session.commit()
++
++        result = await SpecWorkspaceService(db_session).consistency(ws.id)
++
++        assert [d["path"] for d in result["disk_only"]] == ["docs/disk_only.md"]
++        assert [d["path"] for d in result["manifest_ghost"]] == ["docs/ghost.md"]
++        assert [d["path"] for d in result["tombstoned_on_disk"]] == ["docs/tomb.md"]
++        assert result["counts"]["disk_files"] == 3
++        assert result["counts"]["manifest_rows"] == 3
++
++    async def test_writer_recorded_and_switch_warns(self, db_session, tmp_path) -> None:
++        """写方记录（首写无警、切换 warn 语义面）；全量同步透传 last_writer。"""
++        ws = await _make_workspace(db_session)
++        spec_root = tmp_path / "spec-root"
++        await _make_spec_workspace(db_session, ws, spec_root)
++        svc = SpecWorkspaceService(db_session)
++        tar = _build_tar({"docs/a.md": b"# a"})
++
++        await svc.apply_sync(ws.id, tar, writer="user:11111111:a@x")
++        await db_session.refresh(await svc.get(ws.id))
++        spec_ws = await svc.get(ws.id)
++        assert spec_ws.last_writer == "user:11111111:a@x"
++        assert spec_ws.last_writer_at is not None
++
++        # 同写方再同步：last_writer 不变
++        await svc.apply_sync(ws.id, tar, writer="user:11111111:a@x")
++        spec_ws = await svc.get(ws.id)
++        assert spec_ws.last_writer == "user:11111111:a@x"
++
++        # 切换写方：值更新（warn 由 structlog 发出，不在此断言日志面）
++        await svc.apply_sync(ws.id, tar, writer="user:22222222:b@y")
++        spec_ws = await svc.get(ws.id)
++        assert spec_ws.last_writer == "user:22222222:b@y"
+diff --git a/backend/migrations/versions/20260926083000_spec_workspace_last_writer.py b/backend/migrations/versions/20260926083000_spec_workspace_last_writer.py
+new file mode 100644
+index 000000000..d8639686a
+--- /dev/null
++++ b/backend/migrations/versions/20260926083000_spec_workspace_last_writer.py
+@@ -0,0 +1,34 @@
++"""spec_workspace last_writer/last_writer_at（2026-09-26-spec-consistency-writer）
++
++Revision ID: 20260926083000
++Revises: 20260926063000
++Create Date: 2026-09-26
++
++双写者漂移信号（daemon 与 CLI platform sync 双写是 manifest 基线漂移、
++SpecPushConflict 一周僵局的根因）：每次 apply_sync/apply_ops 记录写入方身份
++与时间；GET /spec-workspace 透传展示。
++"""
++
++import sqlalchemy as sa
++from alembic import op
++
++revision = "20260926083000"
++down_revision = "20260926063000"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.add_column(
++        "spec_workspaces",
++        sa.Column("last_writer", sa.String(length=128), nullable=True),
++    )
++    op.add_column(
++        "spec_workspaces",
++        sa.Column("last_writer_at", sa.DateTime(timezone=True), nullable=True),
++    )
++
++
++def downgrade() -> None:
++    op.drop_column("spec_workspaces", "last_writer_at")
++    op.drop_column("spec_workspaces", "last_writer")
+diff --git a/backend/openapi.json b/backend/openapi.json
+index a0fa9c89c..c77234d02 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -33128,6 +33128,50 @@
+         }
+       }
+     },
++    "/api/workspaces/{workspace_id}/spec-workspace/consistency": {
++      "get": {
++        "tags": [
++          "spec-workspace"
++        ],
++        "summary": "Get Spec Consistency",
++        "description": "镜像磁盘树 × manifest 行对账：disk_only / manifest_ghost（幽灵行）/\ntombstoned_on_disk 三类分歧 + 计数——镜像损坏直接可见（此前靠手写脚本）。",
++        "operationId": "get_spec_consistency_api_workspaces__workspace_id__spec_workspace_consistency_get",
++        "parameters": [
++          {
++            "name": "workspace_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Workspace Id"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/SpecConsistencyOut"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/workspaces/{workspace_id}/spec-conflicts": {
+       "get": {
+         "tags": [
+@@ -33583,15 +33627,15 @@
+         }
+       }
+     },
+-    "/api/changes/{name}/events": {
++    "/api/changes/{name}/documents": {
+       "post": {
+         "tags": [
+           "platform-sync",
+           "platform-sync"
+         ],
+-        "summary": "Push Change Events",
+-        "description": "POST change 事件批量上行（design §接口定义 / FR-01~FR-03，watcher 观测通道）。\n\nCLI ``watcher.js`` 周期批推（1..200 条/请求，schema 层 422）。router 只收发\n透传零业务判定（D-004 红线：不触发通知/审批/门控）——批内+已存键 dedup 跳过、\n``provisional`` 恒 True、5000 上限修剪全在 service ``append_events``（task-02）。\n响应 ``{accepted, deduplicated}``（两者之和 = 请求条数）。\n\nworkspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写：无凭据\n401 / shk_live_·JWT 403，对齐 quicklog-entries 范式）；body 不含也不接受\nworkspace 字段（extra=ignore 吞掉，G6 同款）。",
+-        "operationId": "push_change_events_api_changes__name__events_post",
++        "summary": "Push Documents",
++        "description": "POST 四件套文档全文（CLI ``sync.js syncDocuments`` :442-497 预留契约）。\n\nbody 是扁平 map（键限四件套白名单，schema 层 422）。定向 upsert ``documents``\n列（D-003@v1 单写者，不触碰 latest_progress/approval）；行不存在 INSERT 占位\n（下行端点由占位行守卫视为「无进度」）。全量替换语义（整列覆盖，与 CLI 全量推一致）。\n\n仅 shpsync_ token 可写（task-06 / D-004@v1，workspace_id 由 token 派生）。",
++        "operationId": "push_documents_api_changes__name__documents_post",
+         "parameters": [
+           {
+             "name": "name",
+@@ -33608,7 +33652,7 @@
+           "content": {
+             "application/json": {
+               "schema": {
+-                "$ref": "#/components/schemas/ChangeEventPushRequest"
++                "$ref": "#/components/schemas/app__modules__platform_sync__schema__DocumentsSyncRequest"
+               }
+             }
+           }
+@@ -33619,7 +33663,7 @@
+             "content": {
+               "application/json": {
+                 "schema": {
+-                  "$ref": "#/components/schemas/ChangeEventPushOk"
++                  "$ref": "#/components/schemas/DocumentsSyncOk"
+                 }
+               }
+             }
+@@ -33635,65 +33679,34 @@
+             }
+           }
+         }
+-      },
+-      "get": {
++      }
++    },
++    "/api/quicklog-entries": {
++      "post": {
+         "tags": [
+           "platform-sync",
+           "platform-sync"
+         ],
+-        "summary": "List Change Events",
+-        "description": "GET change 事件增量列表（design §接口定义 / FR-04，``ts ASC, id ASC`` 稳定正序）。\n\n鉴权 scope 复用 ``_read_args`` 翻译（shpsync_ → token 绑定 workspace；JWT/\nshk_live_ → CHANGE_READ 并集，本表 workspace_id NOT NULL 无 NULL 桶）。\n``since`` ISO 8601 可选增量游标：``ts > since`` 严格大于（增量不含边界行），\n``Z`` 后缀容忍（替换 +00:00 再解析），naive 值由 service 按 UTC 解释（X-07\n方言防御）；解析失败 422 中文。``limit`` 默认 500 上限 5000（单变更上限内\n全量窗口）；``total`` 是过滤后总行数、不含 limit 截断。change 无事件 →\n200 空列表不 404（事件表独立于 change 行存在，观测面宽松）。\nChangeEventItem ``from_attributes`` 直接 model_validate ORM 行（router 零手工映射）。",
+-        "operationId": "list_change_events_api_changes__name__events_get",
+-        "parameters": [
+-          {
+-            "name": "name",
+-            "in": "path",
+-            "required": true,
+-            "schema": {
+-              "type": "string",
+-              "title": "Name"
++        "summary": "Push Quicklog Entry",
++        "description": "POST quicklog 条目推送（design §5.2 / FR-03 / D-003 双链路推送落点）。\n\nCLI quicklog.js 两触发点（allocate/complete）best-effort POST；语义恒 200 成功体\n（幂等 upsert，同 ``ql_id`` 整条覆盖 D-004，无 base_ts 乐观锁）。失败由 CLI 静默\n兜底（文件解析链路），平台端无重试语义。\n\nworkspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写，G6/D-004@v1）；\nbody 不含也不接受 workspace 字段（extra=ignore 宽松）。payload 裸存原文（D-005）。",
++        "operationId": "push_quicklog_entry_api_quicklog_entries_post",
++        "requestBody": {
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/QuicklogEntryPushRequest"
++              }
+             }
+           },
+-          {
+-            "name": "since",
+-            "in": "query",
+-            "required": false,
+-            "schema": {
+-              "anyOf": [
+-                {
+-                  "type": "string"
+-                },
+-                {
+-                  "type": "null"
+-                }
+-              ],
+-              "description": "ISO 8601 增量游标（ts > since 严格大于）",
+-              "title": "Since"
+-            },
+-            "description": "ISO 8601 增量游标（ts > since 严格大于）"
+-          },
+-          {
+-            "name": "limit",
+-            "in": "query",
+-            "required": false,
+-            "schema": {
+-              "type": "integer",
+-              "maximum": 5000,
+-              "minimum": 1,
+-              "description": "返回条数，默认 500 上限 5000",
+-              "default": 500,
+-              "title": "Limit"
+-            },
+-            "description": "返回条数，默认 500 上限 5000"
+-          }
+-        ],
++          "required": true
++        },
+         "responses": {
+           "200": {
+             "description": "Successful Response",
+             "content": {
+               "application/json": {
+                 "schema": {
+-                  "$ref": "#/components/schemas/ChangeEventListResponse"
++                  "$ref": "#/components/schemas/QuicklogPushOk"
+                 }
+               }
+             }
+@@ -33711,15 +33724,15 @@
+         }
+       }
+     },
+-    "/api/changes/{name}/documents": {
++    "/api/changes/{name}/events": {
+       "post": {
+         "tags": [
+           "platform-sync",
+           "platform-sync"
+         ],
+-        "summary": "Push Documents",
+-        "description": "POST 四件套文档全文（CLI ``sync.js syncDocuments`` :442-497 预留契约）。\n\nbody 是扁平 map（键限四件套白名单，schema 层 422）。定向 upsert ``documents``\n列（D-003@v1 单写者，不触碰 latest_progress/approval）；行不存在 INSERT 占位\n（下行端点由占位行守卫视为「无进度」）。全量替换语义（整列覆盖，与 CLI 全量推一致）。\n\n仅 shpsync_ token 可写（task-06 / D-004@v1，workspace_id 由 token 派生）。",
+-        "operationId": "push_documents_api_changes__name__documents_post",
++        "summary": "Push Change Event",
++        "description": "POST 单条变更旁路观测事件（sillyspec watcher/哨兵推送，恒 provisional）。\n\n鉴权同 spec-sync 推送（``require_platform_sync_write``，仅 shpsync_ token，\nD-001@v1；无凭据 401 / JWT·shk_live_ 403）；workspace_id 恒由 token 派生，\nbody 不含也不接受 workspace 字段（extra=ignore）。\n\n语义恒 200（watcher best-effort 推送，任意 2xx 即成功）：幂等去重（D-002：\n事件 id 优先回退 ts+rule，重复推 ``deduplicated=true`` 不增行）+ 上限保护\n（D-003：单变更 >5000 截断最旧 ``truncated=N``，不拒绝）。\n\n红线 D-004@v1：零业务判定——append-only 落库即止，provisional 原值透传，\n不触发任何流程动作（无状态机/审批/通知联动）。",
++        "operationId": "push_change_event_api_changes__name__events_post",
+         "parameters": [
+           {
+             "name": "name",
+@@ -33736,7 +33749,7 @@
+           "content": {
+             "application/json": {
+               "schema": {
+-                "$ref": "#/components/schemas/app__modules__platform_sync__schema__DocumentsSyncRequest"
++                "$ref": "#/components/schemas/ChangeEventPushRequest"
+               }
+             }
+           }
+@@ -33747,7 +33760,7 @@
+             "content": {
+               "application/json": {
+                 "schema": {
+-                  "$ref": "#/components/schemas/DocumentsSyncOk"
++                  "$ref": "#/components/schemas/ChangeEventPushOk"
+                 }
+               }
+             }
+@@ -33763,34 +33776,51 @@
+             }
+           }
+         }
+-      }
+-    },
+-    "/api/quicklog-entries": {
+-      "post": {
++      },
++      "get": {
+         "tags": [
+           "platform-sync",
+           "platform-sync"
+         ],
+-        "summary": "Push Quicklog Entry",
+-        "description": "POST quicklog 条目推送（design §5.2 / FR-03 / D-003 双链路推送落点）。\n\nCLI quicklog.js 两触发点（allocate/complete）best-effort POST；语义恒 200 成功体\n（幂等 upsert，同 ``ql_id`` 整条覆盖 D-004，无 base_ts 乐观锁）。失败由 CLI 静默\n兜底（文件解析链路），平台端无重试语义。\n\nworkspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写，G6/D-004@v1）；\nbody 不含也不接受 workspace 字段（extra=ignore 宽松）。payload 裸存原文（D-005）。",
+-        "operationId": "push_quicklog_entry_api_quicklog_entries_post",
+-        "requestBody": {
+-          "content": {
+-            "application/json": {
+-              "schema": {
+-                "$ref": "#/components/schemas/QuicklogEntryPushRequest"
+-              }
++        "summary": "List Change Events",
++        "description": "GET 变更旁路观测事件（ts 正序增量，前端面板消费端点）。\n\n鉴权读 scope（``require_platform_sync``：shpsync_ token 绑定 workspace 收件箱；\nJWT/shk_live_ CHANGE_READ 并集——变更详情页面板走 JWT 会话即此通道，X-003）。\n``since`` 严格大于（字典序）；无 since 回最新 200 条（反转后仍正序，Grill\nX-001）。零业务判定（D-004）：原值透传纯读取，不触发任何流程动作。",
++        "operationId": "list_change_events_api_changes__name__events_get",
++        "parameters": [
++          {
++            "name": "name",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "title": "Name"
+             }
+           },
+-          "required": true
+-        },
++          {
++            "name": "since",
++            "in": "query",
++            "required": false,
++            "schema": {
++              "anyOf": [
++                {
++                  "type": "string"
++                },
++                {
++                  "type": "null"
++                }
++              ],
++              "description": "增量游标：只回 ts 严格大于该值的事件（ISO 8601 UTC）",
++              "title": "Since"
++            },
++            "description": "增量游标：只回 ts 严格大于该值的事件（ISO 8601 UTC）"
++          }
++        ],
+         "responses": {
+           "200": {
+             "description": "Successful Response",
+             "content": {
+               "application/json": {
+                 "schema": {
+-                  "$ref": "#/components/schemas/QuicklogPushOk"
++                  "$ref": "#/components/schemas/ChangeEventListResponse"
+                 }
+               }
+             }
+@@ -38912,49 +38942,23 @@
+             "format": "uuid",
+             "title": "Id"
+           },
+-          "ts": {
+-            "type": "string",
+-            "format": "date-time",
+-            "title": "Ts"
+-          },
+           "kind": {
+             "type": "string",
+             "title": "Kind"
+           },
+-          "stage": {
+-            "anyOf": [
+-              {
+-                "type": "string"
+-              },
+-              {
+-                "type": "null"
+-              }
+-            ],
+-            "title": "Stage"
+-          },
+-          "detail": {
+-            "anyOf": [
+-              {
+-                "type": "string"
+-              },
+-              {
+-                "type": "null"
+-              }
+-            ],
+-            "title": "Detail"
+-          },
+           "rule": {
+-            "anyOf": [
+-              {
+-                "type": "string"
+-              },
+-              {
+-                "type": "null"
+-              }
+-            ],
++            "type": "string",
+             "title": "Rule"
+           },
+           "severity": {
++            "type": "string",
++            "title": "Severity"
++          },
++          "provisional": {
++            "type": "boolean",
++            "title": "Provisional"
++          },
++          "detail": {
+             "anyOf": [
+               {
+                 "type": "string"
+@@ -38963,186 +38967,147 @@
+                 "type": "null"
+               }
+             ],
+-            "title": "Severity"
+-          },
+-          "provisional": {
+-            "type": "boolean",
+-            "title": "Provisional"
++            "title": "Detail"
+           },
+-          "created_at": {
++          "ts": {
+             "type": "string",
+-            "format": "date-time",
+-            "title": "Created At"
++            "title": "Ts"
+           }
+         },
+         "type": "object",
+         "required": [
+           "id",
+-          "ts",
+           "kind",
++          "rule",
++          "severity",
+           "provisional",
+-          "created_at"
++          "detail",
++          "ts"
+         ],
+         "title": "ChangeEventItem",
+-        "description": "GET /changes/{name}/events 列表项（design §接口定义）。\n\n``id`` 是 ``platform_change_events`` **行主键 UUID**（平台生成）——与\n``ChangeEventPush.id``（CLI 侧事件去重 id，dedup_key 优先源）同名异义：\n请求体的 id 不回显（已折叠进 dedup_key），读侧行 id 只标识落库行。\n``dedup_key`` 同为内部幂等实现细节，不透出。\n``ts`` / ``created_at`` 序列化为 ISO 8601 字符串；``from_attributes`` 支持\nORM 行直接 ``model_validate``（与 AgentLogListItem 同款，router 零手工映射）。"
++        "description": "GET /changes/{name}/events 单条事件（task-02，snake_case 原样 X-06）。"
+       },
+       "ChangeEventListResponse": {
+         "properties": {
++          "change_name": {
++            "type": "string",
++            "title": "Change Name"
++          },
++          "count": {
++            "type": "integer",
++            "title": "Count"
++          },
+           "items": {
+             "items": {
+               "$ref": "#/components/schemas/ChangeEventItem"
+             },
+             "type": "array",
+             "title": "Items"
+-          },
+-          "total": {
+-            "type": "integer",
+-            "title": "Total",
+-            "description": "过滤后总行数（不含 limit 截断）"
+           }
+         },
+         "type": "object",
+         "required": [
+-          "total"
++          "change_name",
++          "count"
+         ],
+         "title": "ChangeEventListResponse",
+-        "description": "GET /changes/{name}/events 200 响应（FR-04：since 增量正序）。\n\n``items`` 按 ``ts ASC, id ASC`` 稳定正序、受 ``limit`` 截断；``total`` 是\n过滤后（scope + since）总行数，不含 limit 截断。change 无事件 → 200 空列表\n（事件表独立于 change 行存在，不 404）。"
++        "description": "GET /changes/{name}/events 200 响应（ts 正序；since 严格大于增量）。"
+       },
+-      "ChangeEventPush": {
++      "ChangeEventPushOk": {
+         "properties": {
+-          "kind": {
++          "change_name": {
+             "type": "string",
+-            "maxLength": 64,
+-            "minLength": 1,
+-            "title": "Kind"
++            "title": "Change Name"
+           },
+-          "ts": {
+-            "type": "number",
+-            "maximum": 253402300799999.0,
+-            "minimum": 1000000000000.0,
+-            "title": "Ts",
+-            "description": "事件 epoch 毫秒（[1e12, 253402300799999] 值域校验，D-003 + M-2）"
++          "stored": {
++            "type": "boolean",
++            "title": "Stored",
++            "description": "本条是否新写入（False=去重命中）"
+           },
+-          "stage": {
++          "deduplicated": {
++            "type": "boolean",
++            "title": "Deduplicated",
++            "description": "True=同去重键已存在，未新增行"
++          },
++          "truncated": {
++            "type": "integer",
++            "title": "Truncated",
++            "description": "因上限截断删除的最旧行数",
++            "default": 0
++          }
++        },
++        "type": "object",
++        "required": [
++          "change_name",
++          "stored",
++          "deduplicated"
++        ],
++        "title": "ChangeEventPushOk",
++        "description": "POST /changes/{name}/events 200 响应（恒 200，幂等/截断语义由计数表达）。"
++      },
++      "ChangeEventPushRequest": {
++        "properties": {
++          "id": {
+             "anyOf": [
+               {
+                 "type": "string",
+-                "maxLength": 64
++                "maxLength": 512
+               },
+               {
+                 "type": "null"
+               }
+             ],
+-            "title": "Stage"
++            "title": "Id"
+           },
+-          "detail": {
+-            "anyOf": [
+-              {
+-                "type": "string"
+-              },
+-              {
+-                "type": "null"
+-              }
+-            ],
+-            "title": "Detail"
++          "kind": {
++            "type": "string",
++            "maxLength": 64,
++            "minLength": 1,
++            "title": "Kind"
+           },
+           "rule": {
+-            "anyOf": [
+-              {
+-                "type": "string",
+-                "maxLength": 128
+-              },
+-              {
+-                "type": "null"
+-              }
+-            ],
++            "type": "string",
++            "maxLength": 128,
++            "minLength": 1,
+             "title": "Rule"
+           },
+           "severity": {
+-            "anyOf": [
+-              {
+-                "type": "string",
+-                "maxLength": 32
+-              },
+-              {
+-                "type": "null"
+-              }
+-            ],
+-            "title": "Severity"
+-          },
+-          "id": {
+-            "anyOf": [
+-              {
+-                "type": "string",
+-                "maxLength": 320
+-              },
+-              {
+-                "type": "null"
+-              }
+-            ],
+-            "title": "Id",
+-            "description": "CLI 侧事件去重 id（dedup_key 优先源）"
++            "type": "string",
++            "maxLength": 16,
++            "title": "Severity",
++            "default": "info"
+           },
+           "provisional": {
++            "type": "boolean",
++            "title": "Provisional",
++            "default": true
++          },
++          "detail": {
+             "anyOf": [
+               {
+-                "type": "boolean"
++                "type": "string"
+               },
+               {
+                 "type": "null"
+               }
+             ],
+-            "title": "Provisional",
+-            "description": "接收但忽略落库值——平台恒存 True（D-004 红线）"
++            "title": "Detail"
++          },
++          "ts": {
++            "type": "string",
++            "maxLength": 64,
++            "minLength": 1,
++            "title": "Ts"
+           }
+         },
+         "type": "object",
+         "required": [
+           "kind",
++          "rule",
+           "ts"
+         ],
+-        "title": "ChangeEventPush",
+-        "description": "POST /changes/{name}/events 单条事件（CLI watcher 实际形态，FR-01 / D-007@v1）。\n\n必填仅 ``kind`` + ``ts``：``ts`` 是 epoch **毫秒** number，值域 ``ge=1e12``\n校验（D-003@v1 故障面防御——秒级时间戳/小数值在 Pydantic 层先行 422，防\n毫秒/秒混淆污染 dedup_key 拼串与排序）。其余 optional，字符串 ``max_length``\n与 ORM 列宽对齐（stage 64 / rule 128 / severity 32 / id 320）；``detail``\n不在 schema 限长——服务端截 2000 落库（宽松接收、落库截断，task-02 service 层）。\n``extra=ignore`` 宽松吞掉 CLI schema 升版的未知字段（D-007@v1，与\nAgentLogEntry 同款）。\n\n``provisional`` 接收但**忽略落库值**——平台恒存 True（D-004@v1 红线数据层\n落地在 service；此处仅为宽松接收不 422）。\n``id`` 是 CLI 侧事件去重 id（dedup_key 优先源，D-002），与 ``ChangeEventItem.id``\n（平台行主键 UUID）**同名异义**，见 ChangeEventItem docstring。"
+-      },
+-      "ChangeEventPushOk": {
+-        "properties": {
+-          "accepted": {
+-            "type": "integer",
+-            "title": "Accepted",
+-            "description": "本次新落库的事件数"
+-          },
+-          "deduplicated": {
+-            "type": "integer",
+-            "title": "Deduplicated",
+-            "description": "命中 dedup_key 被跳过的事件数（批内重复 + 已存键）"
+-          }
+-        },
+-        "type": "object",
+-        "required": [
+-          "accepted",
+-          "deduplicated"
+-        ],
+-        "title": "ChangeEventPushOk",
+-        "description": "POST /changes/{name}/events 200 响应（FR-01 / FR-02）。\n\n``accepted`` + ``deduplicated`` = 请求条数（批内重复与已存键都计入\ndeduplicated；dedup 语义是跳过不是覆盖，不更新原行）。"
+-      },
+-      "ChangeEventPushRequest": {
+-        "properties": {
+-          "events": {
+-            "items": {
+-              "$ref": "#/components/schemas/ChangeEventPush"
+-            },
+-            "type": "array",
+-            "maxItems": 200,
+-            "minItems": 1,
+-            "title": "Events"
+-          }
+-        },
+-        "type": "object",
+-        "required": [
+-          "events"
+-        ],
+         "title": "ChangeEventPushRequest",
+-        "description": "POST /changes/{name}/events 请求体（批量 1..200 条，FR-01）。\n\n**不声明 workspace 字段**——workspace 一律由 shpsync_ token 派生（G6 同款，\nbody 出现的值被 extra=ignore 吞掉）；同批内同 dedup_key 的重复条目由 service\n层批内去重只插首条（防撞唯一约束 500，task-02）。"
++        "description": "POST /changes/{name}/events 请求（sillyspec watcher 推送，恒 provisional）。\n\n单事件 JSON（kind/rule/severity/provisional/detail/ts[/id]）。``id`` 可选——\n去重键首选（缺失回退 ``ts+'|'+rule``，D-002）；``severity``/``provisional``\n缺省 info/true（schema 兜底，落库原值透传）。**不含也不接受 workspace 字段**\n——workspace_id 恒由 shpsync_ token 派生（body 出现被 extra=ignore 吞掉，\n与 quicklog-entries 同款宽松口径：CLI 字段演进不破推送）。"
+       },
+       "ChangeFileContent": {
+         "properties": {
+@@ -40576,6 +40541,31 @@
+         "title": "ConfirmCaptchaResponse",
+         "description": "GET /auth/captcha/confirm 返回:一次性 captcha_id(点「我不是机器人」时取)。"
+       },
++      "ConsistencyDivergenceItem": {
++        "properties": {
++          "path": {
++            "type": "string",
++            "title": "Path"
++          },
++          "detail": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Detail"
++          }
++        },
++        "type": "object",
++        "required": [
++          "path"
++        ],
++        "title": "ConsistencyDivergenceItem",
++        "description": "单条分歧（path 为 spec_root 相对 POSIX 路径）。"
++      },
+       "ControlCommandItem": {
+         "properties": {
+           "id": {
+@@ -68081,6 +68071,47 @@
+         "title": "SpecConflictResolve",
+         "description": "Request body for resolving a spec conflict."
+       },
++      "SpecConsistencyOut": {
++        "properties": {
++          "disk_only": {
++            "items": {
++              "$ref": "#/components/schemas/ConsistencyDivergenceItem"
++            },
++            "type": "array",
++            "title": "Disk Only"
++          },
++          "manifest_ghost": {
++            "items": {
++              "$ref": "#/components/schemas/ConsistencyDivergenceItem"
++            },
++            "type": "array",
++            "title": "Manifest Ghost"
++          },
++          "tombstoned_on_disk": {
++            "items": {
++              "$ref": "#/components/schemas/ConsistencyDivergenceItem"
++            },
++            "type": "array",
++            "title": "Tombstoned On Disk"
++          },
++          "counts": {
++            "additionalProperties": {
++              "type": "integer"
++            },
++            "type": "object",
++            "title": "Counts"
++          }
++        },
++        "type": "object",
++        "required": [
++          "disk_only",
++          "manifest_ghost",
++          "tombstoned_on_disk",
++          "counts"
++        ],
++        "title": "SpecConsistencyOut",
++        "description": "GET /spec-workspace/consistency：镜像磁盘树 × manifest 行对账。\n\n四类分歧 + 计数汇总；disk_only/manifest_ghost 是镜像损坏的直接证据\n（2026-09-25 生产实证：c84182bc 缺 13 文件、b97 缺整个 generated/）。"
++      },
+       "SpecIncrementalSyncRequest": {
+         "properties": {
+           "ops": {
+@@ -68286,6 +68317,29 @@
+             "type": "string",
+             "format": "date-time",
+             "title": "Updated At"
++          },
++          "last_writer": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Last Writer"
++          },
++          "last_writer_at": {
++            "anyOf": [
++              {
++                "type": "string",
++                "format": "date-time"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Last Writer At"
+           }
+         },
+         "type": "object",
+@@ -75525,21 +75579,6 @@
+             },
+             "type": "array",
+             "title": "Platform Deleted"
+-          },
+-          "applied_ops": {
+-            "type": "integer",
+-            "title": "Applied Ops",
+-            "default": 0
+-          },
+-          "skipped_conflict": {
+-            "type": "integer",
+-            "title": "Skipped Conflict",
+-            "default": 0
+-          },
+-          "skipped_tombstone": {
+-            "type": "integer",
+-            "title": "Skipped Tombstone",
+-            "default": 0
+           }
+         },
+         "type": "object",
+diff --git a/frontend/src/components/changes/detail/__tests__/change-events-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-events-card.test.tsx
+index ecb019c26..b102c8cc3 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-events-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-events-card.test.tsx
+@@ -30,12 +30,16 @@ vi.mock("@/lib/changes", async (importOriginal) => ({
+ }));
+ 
+ /** 造一行观测事件：seq 唯一即可（id UUID / ts ISO，仅作 key 与渲染输入）。 */
++// 2026-09-26-spec-consistency-writer 顺手修旧债（CLAUDE.md 规则 21）：gen:types
++// 重生成后契约对齐已提交后端——ChangeEventItem 的 rule/severity 非空、无 stage /
++// created_at 字段；列表响应用 count（旧 fixture 的 total/stage/null 形态来自未
++// 提交的后端草稿，观测事件 v3 会话继续演进时以其后端为准再对齐）。
+ function eventOf(
+   seq: string,
+   kind: string,
+   opts: {
+-    severity?: string | null;
+-    rule?: string | null;
++    severity?: string;
++    rule?: string;
+     detail?: string | null;
+     provisional?: boolean;
+   } = {},
+@@ -44,17 +48,15 @@ function eventOf(
+     id: `00000000-0000-0000-0000-0000000000${seq}`,
+     ts: `2026-09-23T04:00:00.${seq}Z`,
+     kind,
+-    stage: null,
+     detail: opts.detail ?? null,
+-    rule: opts.rule ?? null,
+-    severity: opts.severity ?? null,
++    rule: opts.rule ?? "default-rule",
++    severity: opts.severity ?? "info",
+     provisional: opts.provisional ?? true,
+-    created_at: "2026-09-23T04:00:00Z",
+   };
+ }
+ 
+ function resp(items: ChangeEventItem[]): ChangeEventListResponse {
+-  return { items, total: items.length };
++  return { items, count: items.length, change_name: "chg-events" };
+ }
+ 
+ function renderCard() {
+diff --git a/frontend/src/components/changes/detail/change-observation-events-card.test.tsx b/frontend/src/components/changes/detail/change-observation-events-card.spec.tsx
+similarity index 100%
+rename from frontend/src/components/changes/detail/change-observation-events-card.test.tsx
+rename to frontend/src/components/changes/detail/change-observation-events-card.spec.tsx
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 9bf207022..9786487df 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -11055,6 +11055,27 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/spec-workspace/consistency": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Spec Consistency
++         * @description 镜像磁盘树 × manifest 行对账：disk_only / manifest_ghost（幽灵行）/
++         *     tombstoned_on_disk 三类分歧 + 计数——镜像损坏直接可见（此前靠手写脚本）。
++         */
++        get: operations["get_spec_consistency_api_workspaces__workspace_id__spec_workspace_consistency_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/spec-conflicts": {
+         parameters: {
+             query?: never;
+@@ -11299,48 +11320,6 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
+-    "/api/changes/{name}/events": {
+-        parameters: {
+-            query?: never;
+-            header?: never;
+-            path?: never;
+-            cookie?: never;
+-        };
+-        /**
+-         * List Change Events
+-         * @description GET change 事件增量列表（design §接口定义 / FR-04，``ts ASC, id ASC`` 稳定正序）。
+-         *
+-         *     鉴权 scope 复用 ``_read_args`` 翻译（shpsync_ → token 绑定 workspace；JWT/
+-         *     shk_live_ → CHANGE_READ 并集，本表 workspace_id NOT NULL 无 NULL 桶）。
+-         *     ``since`` ISO 8601 可选增量游标：``ts > since`` 严格大于（增量不含边界行），
+-         *     ``Z`` 后缀容忍（替换 +00:00 再解析），naive 值由 service 按 UTC 解释（X-07
+-         *     方言防御）；解析失败 422 中文。``limit`` 默认 500 上限 5000（单变更上限内
+-         *     全量窗口）；``total`` 是过滤后总行数、不含 limit 截断。change 无事件 →
+-         *     200 空列表不 404（事件表独立于 change 行存在，观测面宽松）。
+-         *     ChangeEventItem ``from_attributes`` 直接 model_validate ORM 行（router 零手工映射）。
+-         */
+-        get: operations["list_change_events_api_changes__name__events_get"];
+-        put?: never;
+-        /**
+-         * Push Change Events
+-         * @description POST change 事件批量上行（design §接口定义 / FR-01~FR-03，watcher 观测通道）。
+-         *
+-         *     CLI ``watcher.js`` 周期批推（1..200 条/请求，schema 层 422）。router 只收发
+-         *     透传零业务判定（D-004 红线：不触发通知/审批/门控）——批内+已存键 dedup 跳过、
+-         *     ``provisional`` 恒 True、5000 上限修剪全在 service ``append_events``（task-02）。
+-         *     响应 ``{accepted, deduplicated}``（两者之和 = 请求条数）。
+-         *
+-         *     workspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写：无凭据
+-         *     401 / shk_live_·JWT 403，对齐 quicklog-entries 范式）；body 不含也不接受
+-         *     workspace 字段（extra=ignore 吞掉，G6 同款）。
+-         */
+-        post: operations["push_change_events_api_changes__name__events_post"];
+-        delete?: never;
+-        options?: never;
+-        head?: never;
+-        patch?: never;
+-        trace?: never;
+-    };
+     "/api/changes/{name}/documents": {
+         parameters: {
+             query?: never;
+@@ -11394,6 +11373,46 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/changes/{name}/events": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * List Change Events
++         * @description GET 变更旁路观测事件（ts 正序增量，前端面板消费端点）。
++         *
++         *     鉴权读 scope（``require_platform_sync``：shpsync_ token 绑定 workspace 收件箱；
++         *     JWT/shk_live_ CHANGE_READ 并集——变更详情页面板走 JWT 会话即此通道，X-003）。
++         *     ``since`` 严格大于（字典序）；无 since 回最新 200 条（反转后仍正序，Grill
++         *     X-001）。零业务判定（D-004）：原值透传纯读取，不触发任何流程动作。
++         */
++        get: operations["list_change_events_api_changes__name__events_get"];
++        put?: never;
++        /**
++         * Push Change Event
++         * @description POST 单条变更旁路观测事件（sillyspec watcher/哨兵推送，恒 provisional）。
++         *
++         *     鉴权同 spec-sync 推送（``require_platform_sync_write``，仅 shpsync_ token，
++         *     D-001@v1；无凭据 401 / JWT·shk_live_ 403）；workspace_id 恒由 token 派生，
++         *     body 不含也不接受 workspace 字段（extra=ignore）。
++         *
++         *     语义恒 200（watcher best-effort 推送，任意 2xx 即成功）：幂等去重（D-002：
++         *     事件 id 优先回退 ts+rule，重复推 ``deduplicated=true`` 不增行）+ 上限保护
++         *     （D-003：单变更 >5000 截断最旧 ``truncated=N``，不拒绝）。
++         *
++         *     红线 D-004@v1：零业务判定——append-only 落库即止，provisional 原值透传，
++         *     不触发任何流程动作（无状态机/审批/通知联动）。
++         */
++        post: operations["push_change_event_api_changes__name__events_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/agent-logs": {
+         parameters: {
+             query?: never;
+@@ -13399,14 +13418,7 @@ export interface components {
+         };
+         /**
+          * ChangeEventItem
+-         * @description GET /changes/{name}/events 列表项（design §接口定义）。
+-         *
+-         *     ``id`` 是 ``platform_change_events`` **行主键 UUID**（平台生成）——与
+-         *     ``ChangeEventPush.id``（CLI 侧事件去重 id，dedup_key 优先源）同名异义：
+-         *     请求体的 id 不回显（已折叠进 dedup_key），读侧行 id 只标识落库行。
+-         *     ``dedup_key`` 同为内部幂等实现细节，不透出。
+-         *     ``ts`` / ``created_at`` 序列化为 ISO 8601 字符串；``from_attributes`` 支持
+-         *     ORM 行直接 ``model_validate``（与 AgentLogListItem 同款，router 零手工映射）。
++         * @description GET /changes/{name}/events 单条事件（task-02，snake_case 原样 X-06）。
+          */
+         ChangeEventItem: {
+             /**
+@@ -13414,120 +13426,86 @@ export interface components {
+              * Format: uuid
+              */
+             id: string;
+-            /**
+-             * Ts
+-             * Format: date-time
+-             */
+-            ts: string;
+             /** Kind */
+             kind: string;
+-            /** Stage */
+-            stage?: string | null;
+-            /** Detail */
+-            detail?: string | null;
+             /** Rule */
+-            rule?: string | null;
++            rule: string;
+             /** Severity */
+-            severity?: string | null;
++            severity: string;
+             /** Provisional */
+             provisional: boolean;
+-            /**
+-             * Created At
+-             * Format: date-time
+-             */
+-            created_at: string;
++            /** Detail */
++            detail: string | null;
++            /** Ts */
++            ts: string;
+         };
+         /**
+          * ChangeEventListResponse
+-         * @description GET /changes/{name}/events 200 响应（FR-04：since 增量正序）。
+-         *
+-         *     ``items`` 按 ``ts ASC, id ASC`` 稳定正序、受 ``limit`` 截断；``total`` 是
+-         *     过滤后（scope + since）总行数，不含 limit 截断。change 无事件 → 200 空列表
+-         *     （事件表独立于 change 行存在，不 404）。
++         * @description GET /changes/{name}/events 200 响应（ts 正序；since 严格大于增量）。
+          */
+         ChangeEventListResponse: {
++            /** Change Name */
++            change_name: string;
++            /** Count */
++            count: number;
+             /** Items */
+             items?: components["schemas"]["ChangeEventItem"][];
+-            /**
+-             * Total
+-             * @description 过滤后总行数（不含 limit 截断）
+-             */
+-            total: number;
+         };
+         /**
+-         * ChangeEventPush
+-         * @description POST /changes/{name}/events 单条事件（CLI watcher 实际形态，FR-01 / D-007@v1）。
+-         *
+-         *     必填仅 ``kind`` + ``ts``：``ts`` 是 epoch **毫秒** number，值域 ``ge=1e12``
+-         *     校验（D-003@v1 故障面防御——秒级时间戳/小数值在 Pydantic 层先行 422，防
+-         *     毫秒/秒混淆污染 dedup_key 拼串与排序）。其余 optional，字符串 ``max_length``
+-         *     与 ORM 列宽对齐（stage 64 / rule 128 / severity 32 / id 320）；``detail``
+-         *     不在 schema 限长——服务端截 2000 落库（宽松接收、落库截断，task-02 service 层）。
+-         *     ``extra=ignore`` 宽松吞掉 CLI schema 升版的未知字段（D-007@v1，与
+-         *     AgentLogEntry 同款）。
+-         *
+-         *     ``provisional`` 接收但**忽略落库值**——平台恒存 True（D-004@v1 红线数据层
+-         *     落地在 service；此处仅为宽松接收不 422）。
+-         *     ``id`` 是 CLI 侧事件去重 id（dedup_key 优先源，D-002），与 ``ChangeEventItem.id``
+-         *     （平台行主键 UUID）**同名异义**，见 ChangeEventItem docstring。
++         * ChangeEventPushOk
++         * @description POST /changes/{name}/events 200 响应（恒 200，幂等/截断语义由计数表达）。
+          */
+-        ChangeEventPush: {
+-            /** Kind */
+-            kind: string;
++        ChangeEventPushOk: {
++            /** Change Name */
++            change_name: string;
+             /**
+-             * Ts
+-             * @description 事件 epoch 毫秒（[1e12, 253402300799999] 值域校验，D-003 + M-2）
++             * Stored
++             * @description 本条是否新写入（False=去重命中）
+              */
+-            ts: number;
+-            /** Stage */
+-            stage?: string | null;
+-            /** Detail */
+-            detail?: string | null;
+-            /** Rule */
+-            rule?: string | null;
+-            /** Severity */
+-            severity?: string | null;
++            stored: boolean;
+             /**
+-             * Id
+-             * @description CLI 侧事件去重 id（dedup_key 优先源）
++             * Deduplicated
++             * @description True=同去重键已存在，未新增行
+              */
+-            id?: string | null;
++            deduplicated: boolean;
+             /**
+-             * Provisional
+-             * @description 接收但忽略落库值——平台恒存 True（D-004 红线）
++             * Truncated
++             * @description 因上限截断删除的最旧行数
++             * @default 0
+              */
+-            provisional?: boolean | null;
++            truncated: number;
+         };
+         /**
+-         * ChangeEventPushOk
+-         * @description POST /changes/{name}/events 200 响应（FR-01 / FR-02）。
++         * ChangeEventPushRequest
++         * @description POST /changes/{name}/events 请求（sillyspec watcher 推送，恒 provisional）。
+          *
+-         *     ``accepted`` + ``deduplicated`` = 请求条数（批内重复与已存键都计入
+-         *     deduplicated；dedup 语义是跳过不是覆盖，不更新原行）。
++         *     单事件 JSON（kind/rule/severity/provisional/detail/ts[/id]）。``id`` 可选——
++         *     去重键首选（缺失回退 ``ts+'|'+rule``，D-002）；``severity``/``provisional``
++         *     缺省 info/true（schema 兜底，落库原值透传）。**不含也不接受 workspace 字段**
++         *     ——workspace_id 恒由 shpsync_ token 派生（body 出现被 extra=ignore 吞掉，
++         *     与 quicklog-entries 同款宽松口径：CLI 字段演进不破推送）。
+          */
+-        ChangeEventPushOk: {
++        ChangeEventPushRequest: {
++            /** Id */
++            id?: string | null;
++            /** Kind */
++            kind: string;
++            /** Rule */
++            rule: string;
+             /**
+-             * Accepted
+-             * @description 本次新落库的事件数
++             * Severity
++             * @default info
+              */
+-            accepted: number;
++            severity: string;
+             /**
+-             * Deduplicated
+-             * @description 命中 dedup_key 被跳过的事件数（批内重复 + 已存键）
++             * Provisional
++             * @default true
+              */
+-            deduplicated: number;
+-        };
+-        /**
+-         * ChangeEventPushRequest
+-         * @description POST /changes/{name}/events 请求体（批量 1..200 条，FR-01）。
+-         *
+-         *     **不声明 workspace 字段**——workspace 一律由 shpsync_ token 派生（G6 同款，
+-         *     body 出现的值被 extra=ignore 吞掉）；同批内同 dedup_key 的重复条目由 service
+-         *     层批内去重只插首条（防撞唯一约束 500，task-02）。
+-         */
+-        ChangeEventPushRequest: {
+-            /** Events */
+-            events: components["schemas"]["ChangeEventPush"][];
++            provisional: boolean;
++            /** Detail */
++            detail?: string | null;
++            /** Ts */
++            ts: string;
+         };
+         /** ChangeFileContent */
+         ChangeFileContent: {
+@@ -14093,6 +14071,16 @@ export interface components {
+             /** Captcha Id */
+             captcha_id: string;
+         };
++        /**
++         * ConsistencyDivergenceItem
++         * @description 单条分歧（path 为 spec_root 相对 POSIX 路径）。
++         */
++        ConsistencyDivergenceItem: {
++            /** Path */
++            path: string;
++            /** Detail */
++            detail?: string | null;
++        };
+         /**
+          * ControlCommandItem
+          * @description 补拉返回的单条控制指令（task-04 provides 契约：id/kind/payload/created_at）。
+@@ -24728,6 +24716,25 @@ export interface components {
+             /** Details Json */
+             details_json?: string | null;
+         };
++        /**
++         * SpecConsistencyOut
++         * @description GET /spec-workspace/consistency：镜像磁盘树 × manifest 行对账。
++         *
++         *     四类分歧 + 计数汇总；disk_only/manifest_ghost 是镜像损坏的直接证据
++         *     （2026-09-25 生产实证：c84182bc 缺 13 文件、b97 缺整个 generated/）。
++         */
++        SpecConsistencyOut: {
++            /** Disk Only */
++            disk_only: components["schemas"]["ConsistencyDivergenceItem"][];
++            /** Manifest Ghost */
++            manifest_ghost: components["schemas"]["ConsistencyDivergenceItem"][];
++            /** Tombstoned On Disk */
++            tombstoned_on_disk: components["schemas"]["ConsistencyDivergenceItem"][];
++            /** Counts */
++            counts: {
++                [key: string]: number;
++            };
++        };
+         /**
+          * SpecIncrementalSyncRequest
+          * @description Request body for the incremental sync endpoint (design §7).
+@@ -24873,6 +24880,10 @@ export interface components {
+              * Format: date-time
+              */
+             updated_at: string;
++            /** Last Writer */
++            last_writer?: string | null;
++            /** Last Writer At */
++            last_writer_at?: string | null;
+         };
+         /**
+          * SpecWorkspaceUpdate
+@@ -27782,21 +27793,6 @@ export interface components {
+             } | null;
+             /** Platform Deleted */
+             platform_deleted?: string[];
+-            /**
+-             * Applied Ops
+-             * @default 0
+-             */
+-            applied_ops: number;
+-            /**
+-             * Skipped Conflict
+-             * @default 0
+-             */
+-            skipped_conflict: number;
+-            /**
+-             * Skipped Tombstone
+-             * @default 0
+-             */
+-            skipped_tombstone: number;
+         };
+         /**
+          * SpecSyncResponse
+@@ -47565,6 +47561,37 @@ export interface operations {
+             };
+         };
+     };
++    get_spec_consistency_api_workspaces__workspace_id__spec_workspace_consistency_get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["SpecConsistencyOut"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     list_spec_conflicts_api_workspaces__workspace_id__spec_conflicts_get: {
+         parameters: {
+             query?: {
+@@ -47863,21 +47890,20 @@ export interface operations {
+             };
+         };
+     };
+-    list_change_events_api_changes__name__events_get: {
++    push_documents_api_changes__name__documents_post: {
+         parameters: {
+-            query?: {
+-                /** @description ISO 8601 增量游标（ts > since 严格大于） */
+-                since?: string | null;
+-                /** @description 返回条数，默认 500 上限 5000 */
+-                limit?: number;
+-            };
++            query?: never;
+             header?: never;
+             path: {
+                 name: string;
+             };
+             cookie?: never;
+         };
+-        requestBody?: never;
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["app__modules__platform_sync__schema__DocumentsSyncRequest"];
++            };
++        };
+         responses: {
+             /** @description Successful Response */
+             200: {
+@@ -47885,7 +47911,7 @@ export interface operations {
+                     [name: string]: unknown;
+                 };
+                 content: {
+-                    "application/json": components["schemas"]["ChangeEventListResponse"];
++                    "application/json": components["schemas"]["DocumentsSyncOk"];
+                 };
+             };
+             /** @description Validation Error */
+@@ -47899,18 +47925,16 @@ export interface operations {
+             };
+         };
+     };
+-    push_change_events_api_changes__name__events_post: {
++    push_quicklog_entry_api_quicklog_entries_post: {
+         parameters: {
+             query?: never;
+             header?: never;
+-            path: {
+-                name: string;
+-            };
++            path?: never;
+             cookie?: never;
+         };
+         requestBody: {
+             content: {
+-                "application/json": components["schemas"]["ChangeEventPushRequest"];
++                "application/json": components["schemas"]["QuicklogEntryPushRequest"];
+             };
+         };
+         responses: {
+@@ -47920,7 +47944,7 @@ export interface operations {
+                     [name: string]: unknown;
+                 };
+                 content: {
+-                    "application/json": components["schemas"]["ChangeEventPushOk"];
++                    "application/json": components["schemas"]["QuicklogPushOk"];
+                 };
+             };
+             /** @description Validation Error */
+@@ -47934,20 +47958,19 @@ export interface operations {
+             };
+         };
+     };
+-    push_documents_api_changes__name__documents_post: {
++    list_change_events_api_changes__name__events_get: {
+         parameters: {
+-            query?: never;
++            query?: {
++                /** @description 增量游标：只回 ts 严格大于该值的事件（ISO 8601 UTC） */
++                since?: string | null;
++            };
+             header?: never;
+             path: {
+                 name: string;
+             };
+             cookie?: never;
+         };
+-        requestBody: {
+-            content: {
+-                "application/json": components["schemas"]["app__modules__platform_sync__schema__DocumentsSyncRequest"];
+-            };
+-        };
++        requestBody?: never;
+         responses: {
+             /** @description Successful Response */
+             200: {
+@@ -47955,7 +47978,7 @@ export interface operations {
+                     [name: string]: unknown;
+                 };
+                 content: {
+-                    "application/json": components["schemas"]["DocumentsSyncOk"];
++                    "application/json": components["schemas"]["ChangeEventListResponse"];
+                 };
+             };
+             /** @description Validation Error */
+@@ -47969,16 +47992,18 @@ export interface operations {
+             };
+         };
+     };
+-    push_quicklog_entry_api_quicklog_entries_post: {
++    push_change_event_api_changes__name__events_post: {
+         parameters: {
+             query?: never;
+             header?: never;
+-            path?: never;
++            path: {
++                name: string;
++            };
+             cookie?: never;
+         };
+         requestBody: {
+             content: {
+-                "application/json": components["schemas"]["QuicklogEntryPushRequest"];
++                "application/json": components["schemas"]["ChangeEventPushRequest"];
+             };
+         };
+         responses: {
+@@ -47988,7 +48013,7 @@ export interface operations {
+                     [name: string]: unknown;
+                 };
+                 content: {
+-                    "application/json": components["schemas"]["QuicklogPushOk"];
++                    "application/json": components["schemas"]["ChangeEventPushOk"];
+                 };
+             };
+             /** @description Validation Error */
+diff --git a/.sillyspec/changes/2026-09-26-spec-consistency-writer/design.md b/.sillyspec/changes/2026-09-26-spec-consistency-writer/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-spec-consistency-writer/design.md
+@@ -0,0 +1,75 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T00:02:17.793Z
++---
++# 设计记录（Design Record）— 2026-09-26-spec-consistency-writer
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-consistency-writer 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++两件事同批（同属「spec 快照一致性可见化」）：①consistency() 内存对账——rglob 磁盘树（排
++.runtime/local.yaml，线程池）× SpecFileManifest 行，输出 disk_only（磁盘有清单无）/manifest_ghost
++（行 exists=True 磁盘缺——正是 resurrect 修的幽灵形态）/tombstoned_on_disk（墓碑但文件在）三类
+++ counts；新端点 GET /spec-workspace/consistency。②写方记录——SpecWorkspace 增 last_writer/
++last_writer_at 两列（alembic 20260926083000），apply_sync/apply_ops 尾部 _note_writer（独立短事务
++幂等；写方切换 structlog warning——daemon 与 CLI 双写是 manifest 漂移根因），身份从路由 _user 派生
++摘要 user:<id8>:<email24>，Read DTO 透传。
++
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-consistency-writer 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++改动：spec_workspace/{model,schema,service,router}.py、migrations/versions/
++20260926083000_spec_workspace_last_writer.py、测试 test_full_sync_convergence.py 增 TestConsistencyAndWriter
++（四分歧用例 + 写方记录/切换用例）、api-types.ts/openapi.json 重生成（含 change-events 旧债顺手
++修——gen:types 暴露观测事件会话已提交测试与已提交后端契约不一致，按 CLAUDE.md 规则 21 顺手对齐，
++其 v3 会话继续演进时以后端为准）。对外可见：新端点 + Read DTO 两字段 + DB 迁移（部署时 alembic 自动跑）。
++
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-consistency-writer 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序：对账是请求内一次快照（磁盘 walk 与行 SELECT 之间有毫秒级窗口，并发同步中读到的
++是中间态——对账是诊断面非账面，容忍）。2. 并发写：_note_writer 独立 commit；两写方并发最后落
++last_writer 后写者（漂移 warning 已各自发出）。3. 切换：迁移幂等（add_column）；对账无状态。4. 作用域：
++对账按 workspace_id；写方摘要不含敏感全量（email 截 24 字符）。
++
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-consistency-writer 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：对账的磁盘 walk 在万级文件树上秒级（rglob 同步 IO 已移线程池，对齐既有范式）——
++低频诊断端点可接受。次生：写方摘要 user:<id>:<email> 无法区分「daemon 服务身份」与「人」——当前
++鉴权解析后都是 User；daemon 轨道身份细分（runtime_id）留待 auth 层提供 principal 类型后增强。放弃：
++①对账进周期任务+告警——先给手动端点验证口径，自动化等消费面确认；②三向含「本地树」（daemon 侧）
++——平台看不到本地树，属 daemon 侧职责，分界清晰。
++
++## 文件变更清单
++
++- backend/app/modules/spec_workspace/model.py
++- backend/app/modules/spec_workspace/schema.py
++- backend/app/modules/spec_workspace/service.py
++- backend/app/modules/spec_workspace/router.py
++- backend/migrations/versions/20260926083000_spec_workspace_last_writer.py
++- backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
++- backend/openapi.json
++- frontend/src/lib/api-types.ts
++- frontend/src/components/changes/detail/__tests__/change-events-card.test.tsx
+
+diff --git a/.sillyspec/changes/2026-09-26-spec-consistency-writer/flow-state.yaml b/.sillyspec/changes/2026-09-26-spec-consistency-writer/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-spec-consistency-writer/flow-state.yaml
+@@ -0,0 +1,16 @@
++tier: thick
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: de0c88a3acd1a1b54f19928731eea8fe8d95ede2
++updatedAt: '2026-09-26T00:17:58.162Z'
++upgrade_reason: verify 实测失败（实测失败：test + lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
++gate_summary: >-
++  test: skipped — 跳过原因：test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）。｜lint: passed ← cd backend && uv run ruff check
++  . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
++  typecheck（11.1s）｜门文件 23 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-spec-consistency-writer/proposal.md b/.sillyspec/changes/2026-09-26-spec-consistency-writer/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-spec-consistency-writer/proposal.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T00:02:17.792Z
++---
++# 提案书（Proposal）— 2026-09-26-spec-consistency-writer
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:272bba6c8d1a411693ae1bb379d51d926586db6b4b37a850e4c06fef93dc5ad3:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-consistency-writer 留痕重锚 -->
++任务原话转写：动机：spec 镜像/清单/本地树三份快照无一致性校验（2026-09-25 生产实证：c84182bc 镜像缺 13 个知识文件、b97 缺整个 generated/ 41 个，靠手写对账脚本才发现）；同步端点身份不透明（daemon 与 CLI platform sync 双写者互不知情，manifest 基线漂移是 SpecPushConflict 一周僵局根因）。
++
++成功标准：
++- 新端点 GET /workspaces/{id}/spec-workspace/consistency：对账镜像磁盘树（spec_root rglob）与 SpecFileManifest 行，输出四类分歧——disk_only（磁盘有清单无）、manifest_ghost（行 exists=True 但磁盘缺）、tombstoned_on_disk（行 platform_deleted=True 且磁盘文件在——残留）、counts 汇总；返回结构化 DTO
++- spec-workspace 读模型（GET /spec-workspace）增 last_writer 字段：每次 apply_sync/apply_ops 记录写入方身份（daemon X-API-Key 的 runtime_id / CLI Bearer 的 principal 摘要），前端 spec 面板可显示「最后写入方 + 时间」；写方切换（不同 principal 连续写入）记 structlog warning（双写者漂移信号）
++- 单测：四类分歧各一用例（构造镜像/清单错位）+ last_writer 记录与切换告警
++- gen:types 契约同步；既有 spec_workspace 测试零回归
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:7d32ec547982828b5047851dd1f41a0839ecd7af2e991f93463004a8b8c57214:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-consistency-writer 留痕重锚 -->
++按成功标准机械推导，共 8 条验收面：
++1. 新端点 GET /workspaces/{id}/spec-workspace/consistency：对账镜像磁盘树（spec_root rglob）与 SpecFileManifest 行，输出四类分歧——disk_only（磁盘有清单无）、manifest_ghost（行 exists=True 但磁盘缺）、tombstoned_on_disk（行 platform_deleted=True 且磁盘文件在——残留）、counts 汇总
++2. 返回结构化 DTO
++3. spec-workspace 读模型（GET /spec-workspace）增 last_writer 字段：每次 apply_sync/apply_ops 记录写入方身份（daemon X-API-Key 的 runtime_id / CLI Bearer 的 principal 摘要），前端 spec 面板可显示「最后写入方 + 时间」
++4. 写方切换（不同 principal 连续写入）记 structlog warning（双写者漂移信号）
++5. 单测：四类分歧各一用例（构造镜像
++6. 清单错位）+ last_writer 记录与切换告警
++7. gen:types 契约同步
++8. 既有 spec_workspace 测试零回归
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:5e8172c9bfe45237d5d290d8806aa00db6911e6c7f25dc60472aaf3e78a5122d:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-spec-consistency-writer 留痕重锚 -->
++1. 新端点 GET /workspaces/{id}/spec-workspace/consistency：对账镜像磁盘树（spec_root rglob）与 SpecFileManifest 行，输出四类分歧——disk_only（磁盘有清单无）、manifest_ghost（行 exists=True 但磁盘缺）、tombstoned_on_disk（行 platform_deleted=True 且磁盘文件在——残留）、counts 汇总
++2. 返回结构化 DTO
++3. spec-workspace 读模型（GET /spec-workspace）增 last_writer 字段：每次 apply_sync/apply_ops 记录写入方身份（daemon X-API-Key 的 runtime_id / CLI Bearer 的 principal 摘要），前端 spec 面板可显示「最后写入方 + 时间」
++4. 写方切换（不同 principal 连续写入）记 structlog warning（双写者漂移信号）
++5. 单测：四类分歧各一用例（构造镜像
++6. 清单错位）+ last_writer 记录与切换告警
++7. gen:types 契约同步
++8. 既有 spec_workspace 测试零回归
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-spec-consistency-writer/requirements.md b/.sillyspec/changes/2026-09-26-spec-consistency-writer/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-spec-consistency-writer/requirements.md
+@@ -0,0 +1,78 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T00:02:17.793Z
++---
++# 需求规格（Requirements）— 2026-09-26-spec-consistency-writer
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++### FR-01: 三向对账端点
++
++- Given：镜像磁盘树与 manifest 行存在错位
++- When：GET /spec-workspace/consistency
++- Then：disk_only / manifest_ghost / tombstoned_on_disk 三类分歧 + counts 汇总（.runtime/local.yaml 排除口径与同步一致）
++
++### FR-02: 写方记录
++
++- Given：apply_sync 或 apply_ops 成功执行
++- When：带 writer 参数
++- Then：SpecWorkspace.last_writer/last_writer_at 更新（独立短事务幂等；同写方重复不警）
++
++### FR-03: 写方切换告警
++
++- Given：last_writer 与本次 writer 不同
++- When：_note_writer
++- Then：structlog warning（previous/new 写方）——双写者漂移信号
++
++### FR-04: Read DTO 透传
++
++- Given：GET /spec-workspace
++- When：读取
++- Then：响应含 last_writer / last_writer_at
++
++### FR-05: DB 迁移
++
++- Given：部署新镜像
++- When：alembic upgrade head
++- Then：spec_workspaces 增两列（幂等 add_column；downgrade 可回）
++
++### FR-06: 契约与零回归
++
++- Given：schema 变更
++- When：gen:types + 定向测试
++- Then：api-types/openapi 同步提交；模块 164 passed 1 skipped（含新 2）；mypy 0 错；tsc 0 错（含 change-events 旧债顺手修）
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++tests/test_full_sync_convergence.py::TestConsistencyAndWriter::test_consistency_four_divergences（三类分歧+计数断言）
++
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++同文件 ::test_writer_recorded_and_switch_warns（首写记录/同写方不变/切换更新）
++
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++同上用例（切换段；warn 为 structlog 面不在断言，service 代码锚 _note_writer）
++
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++api-types.ts/openapi.json 重生成 diff 含 SpecWorkspaceRead.last_writer 字段（gen 产物即证据）
++
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++migrations/versions/20260926083000（手写迁移，ast 语法校验 + 表名 spec_workspaces 对齐 model __tablename__）
++
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：backend uv run pytest app/modules/spec_workspace -q --no-cov（164 passed 1 skipped）+ mypy 0 错 + frontend tsc 0 错（5 passed events card）
++
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：backend uv run pytest app/modules/spec_workspace -q --no-cov（164 passed 1 skipped）+ mypy 0 错 + frontend tsc 0 错（5 passed events card）
++
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++定向：backend uv run pytest app/modules/spec_workspace -q --no-cov（164 passed 1 skipped）+ mypy 0 错 + frontend tsc 0 错（5 passed events card）
++
+
+diff --git a/.sillyspec/changes/2026-09-26-spec-consistency-writer/tasks.md b/.sillyspec/changes/2026-09-26-spec-consistency-writer/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-spec-consistency-writer/tasks.md
+@@ -0,0 +1,17 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T00:02:17.793Z
++---
++# 任务注册表（Tasks）— 2026-09-26-spec-consistency-writer
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++- [x] task-01: 新端点 GET /workspaces/{id}/spec-workspace/consistency：对账镜像磁盘树（spec_root rglob）与 Sp…
++- [x] task-02: 返回结构化 DTO
++- [x] task-03: spec-workspace 读模型（GET /spec-workspace）增 last_writer 字段：每次 apply_sync/apply_ops…
++- [x] task-04: 写方切换（不同 principal 连续写入）记 structlog warning（双写者漂移信号）
++- [x] task-05: 单测：四类分歧各一用例（构造镜像
++- [x] task-06: 清单错位）+ last_writer 记录与切换告警
++- [x] task-07: gen:types 契约同步
++- [x] task-08: 既有 spec_workspace 测试零回归

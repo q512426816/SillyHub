@@ -103,3 +103,19 @@ b97 镜像缺整个 `knowledge/generated/`。
    永久卡死 keep-local——对齐 fed6e9e9a 在 progress 通道的 heal 补 spec 通道）。
 6. 服务器清理：images.tar.gz 已删 + prune；backup tag ×4 留作回滚（确认稳定后可
    `docker rmi` 清理）。daemon 本地旧 hits 状态文件待其下一轮同步自愈（指纹断点已上线）。
+
+## 处置记录（2026-09-26）
+
+runbook 使命已于 2026-09-25 全链路收口（见「收口结果」节），尾注两「待修」项本日核实清账：
+
+1. **待修①（CLI 冲突回执消费 platform_deleted）已修**（sillyspec 仓工作树，未提交）：
+   `src/spec-sync.js` 冲突分支消费回执 `platform_deleted` 列表——墓碑拒收路径与版本冲突
+   分离叙事：纯墓碑形态不再译成「又有更新/版本冲突」（专用横幅明示「resolve --keep-local
+   重推无效」+ manifest-heal 恢复指引，不给三态处置线）；混合形态墓碑路径从待裁决集分离、
+   单独提示；冲突文件记 `platform_deleted` 字段。新增
+   `test/spec-sync-platform-deleted-receipt.test.mjs` 2/2，spec-sync 全家回归 14/14。
+2. **待修②（平台缺墓碑清除通道）已修**（并行会话，已提交）：`cdabe79b9`
+   `POST manifest-heal` 人工恢复通道（platform_deleted 置 False + exists 置 True + 关闭
+   spec-sync 冲突行），随 `21ff163ad` 收口 openapi/api-types。
+
+无遗留，归档。

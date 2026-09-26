@@ -1,0 +1,31 @@
+{
+  "change": "2026-09-26-spec-consistency-writer",
+  "baseline": "de0c88a3acd1a1b54f19928731eea8fe8d95ede2",
+  "head": "be2883b6f40375652f6e48221fea775117a774f8",
+  "files": [
+    "backend/app/modules/spec_workspace/model.py",
+    "backend/app/modules/spec_workspace/router.py",
+    "backend/app/modules/spec_workspace/schema.py",
+    "backend/app/modules/spec_workspace/service.py",
+    "backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py",
+    "backend/migrations/versions/20260926083000_spec_workspace_last_writer.py",
+    "backend/openapi.json",
+    "frontend/src/components/changes/detail/__tests__/change-events-card.test.tsx",
+    "frontend/src/components/changes/detail/change-observation-events-card.spec.tsx",
+    "frontend/src/lib/api-types.ts",
+    ".sillyspec/changes/2026-09-26-spec-consistency-writer/design.md",
+    ".sillyspec/changes/2026-09-26-spec-consistency-writer/flow-state.yaml",
+    ".sillyspec/changes/2026-09-26-spec-consistency-writer/proposal.md",
+    ".sillyspec/changes/2026-09-26-spec-consistency-writer/requirements.md",
+    ".sillyspec/changes/2026-09-26-spec-consistency-writer/tasks.md"
+  ],
+  "totals": {
+    "files": 15,
+    "additions": 1002,
+    "deletions": 428
+  },
+  "savedAt": "2026-09-26T00:17:58.822Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "95851acc0022e400da42eb7f0a7f11fe65f557eec80916efb52cdf123aa89365",
+  "patchStatus": "ok"
+}

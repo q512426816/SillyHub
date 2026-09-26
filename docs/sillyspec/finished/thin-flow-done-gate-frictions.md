@@ -102,3 +102,24 @@
 - 薄流程 adopt 边界两坑（同期）：docs/sillyspec/thin-flow-adopt-edge-cases.md
 - 平台侧变更留档：.sillyspec/changes/archive/2026-09-25-change-detail-assets-usability/
   （review.json 的 5 项非阻断 findings 与本文件坑 4 的 test:skipped 根因互证）
+
+## 处置记录（2026-09-26）
+
+五坑逐项核销（多为并行会话 2026-09-25 深夜~26 凌晨落地，标注落点）：
+
+- **坑 1（勾选态 × 指纹门自相矛盾）✅**：2026-09-25-thin-done-gate-calibration 落地
+  勾选归一——`src/machine-draft.js` `TASK_CHECK_STATE_RE`（`^([-*] \[)[ xX](?= task-\d)`
+  hash 前归一回 `[ ]`，口径只认 task-NN 行不扩大书写面，旧台账兼容）。
+- **坑 2（哨兵只认 subject）✅**：`src/flow.js` ledger 子步 `--format=%B%x1e`（正文
+  逐行进词边界匹配）。
+- **坑 3（AGENT 槽标记丢失只在收口炸）✅（改善形态）**：报错已带零猜测恢复指引（槽
+  标记被删时从 `.runtime/step-guides/` 指纹缓存取骨架原文，或删 design.md 重入
+  flow start 补生成）——「打印缺失标记原文模板」以缓存指引等价覆盖。
+- **坑 4（多会话冻结面归属噪声）◐**：`35567c41` B（变更目录 mtime >7 天的陈旧声明
+  忽略）削掉主要劫持源；剩余「他侧同窗口活跃提交夹带/剔除」是共享主仓固有形态，坑内
+  绕过（审计真相以 git 历史为准）维持。**重冻结入口**（按当前 HEAD 重算+重锚）留设计项。
+- **坑 5（模块已登记仍 test: skipped）✅**：`35567c41` C（skipped 时实测面透传 reason
+  首句——「无测试面」vs「未命中」可区分）；同 commit E（design 声明文件不在冻结面警告）
+  削掉「收窄输入被削」主因。
+
+归档（坑 4 重冻结入口为延后设计项，非缺陷）。

@@ -27,3 +27,20 @@
   docs/sillyspec/finished/thin-flow-quick-retirement.md
 - 本文件仅记录 adopt 边界两小坑，不阻塞平台侧 thin 派发（平台 writer 不走 adopt 路径——
   变更目录由 flow start 全新建，预建仅空目录放行形态）。
+
+## 处置记录（2026-09-26）
+
+**坑 1（0 字节 db 残留）**：现主干复现不出（临时目录 git 仓 + 预建 proposal/design 走
+adopt 收编 EXIT 0，`.runtime` 无 sillyspec.db 残留，重入 flow start 恢复简报正常无
+「损坏」）——3.30.0 时代形态，当前 adopt 路径已不产生该残骸。不做代码改动（无可修的
+病灶），若再现实证按新坑立案。
+
+**坑 2（收编补件 ENOENT 噪音）✅ 已修**（sillyspec 仓工作树，未提交）：复现确认根因
+——`writeAtomicSync` 开 tmp 文件不保证父目录存在，adopt 收编补件时 `.runtime/` 尚未
+创建 → draft-ledger 原子写 ENOENT。修复：`src/fs-atomic.js` `writeAtomicSync` 增
+`mkdirSync(dir, { recursive: true })` 保位（原子写契约是「写出完整文件」，缺父目录按
+mkdir -p 语义；已存在零成本，权限类失败仍如实抛错）——整类写点受益，非只 adopt 一处。
+验证：同场景复跑噪音消失、补件正常（📌 收编补生成 requirements.md、tasks.md）；
+flow-protocol/flow-review 25/25、原子性三套件 3/3 全绿。
+
+归档。

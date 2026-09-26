@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-spec-consistency-writer",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "亲测发现前端 changes/detail 存在一例红测试，但与本变更 diff 无关（判定为变更外既有漂移）",
+      "evidence": "vitest run src/components/changes/detail → 1 failed | 94 passed。失败用例『未知 stage 组头显示原 stage 名（quick 兜底）』：组件渲染『快速任务（存量）』而测试断言原文 'quick'（data-stage=\"quick\" 存在，仅组头文案不匹配）。该组件与测试均不在本变更 patch 内；api-types 重生成段（spec consistency 路径 / change-events 契约回退 / SpecWorkspaceRead / SpecIncrementalSyncResponse）不涉及 stage 标签映射，因果独立。FR-06 承诺面为 tsc 0 错 + events card 5 passed（实测通过），未承诺前端全绿，故不构成承诺违反，仅披露。",
+      "location": "frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx"
+    },
+    {
+      "severity": "P3",
+      "title": "patch 含未在 design 文件清单申报的文件重命名（.test.tsx → .spec.tsx）",
+      "evidence": "change.patch 含 change-observation-events-card.test.tsx → change-observation-events-card.spec.tsx（similarity 100%，纯重命名），design 文件变更清单未列。实测非隐藏测试：frontend/vitest.config.ts 仅设 exclude: [\"e2e/**\"]，include 走 vitest 默认（**/*.{test,spec}），两种后缀均被收集执行且通过。属披露缺口，无行为影响。",
+      "location": ".sillyspec/changes/2026-09-26-spec-consistency-writer/change.patch; frontend/src/components/changes/detail/change-observation-events-card.spec.tsx"
+    },
+    {
+      "severity": "P3",
+      "title": "docstring『四类分歧』措辞与实际三类分歧列表 + counts 不符",
+      "evidence": "service.consistency 与 SpecConsistencyOut docstring 均称『四类分歧』，实际输出为 disk_only/manifest_ghost/tombstoned_on_disk 三类列表 + counts（FR-01 亦写三类；proposal 机器稿把『counts 汇总』计入四类枚举导致措辞传染）。纯文档措辞，无行为影响。",
+      "location": "backend/app/modules/spec_workspace/service.py:1146; backend/app/modules/spec_workspace/schema.py:127"
+    },
+    {
+      "severity": "P3",
+      "title": "_sync_writer_label docstring 过度承诺『可辨 daemon vs 人/CLI』，design 已承认无法结构性区分",
+      "evidence": "docstring 称摘要『前端/日志可辨 daemon vs 人/CLI 双写者形态』，但摘要 user:<id8>:<email24> 不含身份类型字段——design 槽4 明确承认 auth 层解析后都是 User、无法区分，需等 principal 类型。实际只能靠人工识别 daemon 服务账号 email 的启发式。设计披露诚实、代码注释超前，建议措辞对齐。",
+      "location": "backend/app/modules/spec_workspace/router.py:39"
+    }
+  ],
+  "dimensionNotes": {
+    "frImplementationTests": "FR↔实现↔测试三方一致：FR-01 对账端点（router GET /spec-workspace/consistency + service.consistency，测试断言三类列表+counts）；FR-02/03 写方记录与切换 warning（apply_sync/apply_ops 尾部 _note_writer，测试覆盖首写/同写方不变/切换更新；warning 面已在测试绑定中显式声明不在断言）；FR-04 Read DTO model_validate(spec_ws) 透传两字段且 openapi/api-types 均含；FR-05 迁移 20260926083000 两列与 model 列型一致（String(128)/DateTime(timezone=True)）；FR-06 实测兑现（见 liveRuns）。",
+    "blindFourQuestions": "乱序=磁盘 walk 与行 SELECT 间毫秒级快照窗口，读态容忍（诊断面，裁决可接受）；并发=两写方竞态 last-write-wins、各自已发切换 warning（可接受）；切换=add_column nullable 幂等 + downgrade 反序可回，down_revision 20260926063000 全库唯一子节点、线性链无分叉；作用域=对账按 workspace_id 过滤、摘要 email 截 24 字符不含全量。四问答均成立。",
+    "disclosureBoundaries": "四条取舍逐条裁决：①对账容忍毫秒中间态——可接受（诊断端点非账面，无锁读中间态最坏表现为误报一条分歧，低频手动触发）；②写方摘要无法区分 daemon 与人——可接受（auth 层现状限制，design 诚实披露并留 principal 增强轨道，仅 docstring 措辞超前见 finding 4）；③本地树对账归 daemon 侧——可接受（平台物理上看不到本地树，职责分界清晰，强行三向需 daemon 上报先建消费面）；④rglob 万级树秒级——可接受（asyncio.to_thread 移出事件循环、对齐既有范式，低频诊断端点无 SLO）。",
+    "protections": "①排除口径与同步逐字符同构：consistency _walk 的 any(part=='.runtime') + SERVER_EXCLUDED_FILENAMES（=frozenset({'local.yaml'})）与同步 staging 基准 walk（service.py:1188-1190）一致，local.yaml 任意深度按文件名排除；②三类判定正确：disk_only=disk−manifest；manifest_ghost=manifest−disk ∧ row.exists；tombstoned_on_disk=manifest∩disk ∧ row.platform_deleted（exists=False 且文件缺=双侧已删视为一致，合理）；③_note_writer 独立 commit、同写方重复不警（条件要求已设值且不同）、writer[:128] 对齐列宽、调用侧 try/except 吞为 warning 不失败同步主流程；④迁移两列 nullable add_column、downgrade 反序 drop；⑤Read DTO 两字段经 model_validate 透传（router.py:88）；⑥观测事件修复仅动测试文件内 eventOf/resp 构造器（去 stage/created_at、rule/severity 转必填、total→count+change_name），组件零改动，与重生成后的已提交后端契约一致。",
+    "liveRuns": "cd backend && uv run pytest app/modules/spec_workspace -q --no-cov → 164 passed, 1 skipped（与承诺数字完全一致；skip 为 Windows symlink 平台限制既有项）；uv run mypy app → Success: no issues found in 979 source files；frontend pnpm exec tsc --noEmit → exit 0；pnpm exec vitest run src/components/changes/detail → 94 passed, 1 failed（失败项与本变更无关，见 findings[0]）。",
+    "scopeIntegrity": "只读评审：除 review.json 外未改任何文件、未执行任何 git 写操作。"
+  },
+  "reviewedAt": "2026-09-26T08:26:00+08:00"
+}
