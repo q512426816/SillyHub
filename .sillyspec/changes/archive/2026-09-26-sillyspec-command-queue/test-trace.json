@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-sillyspec-command-queue",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-26-sillyspec-command-queue:flow:FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-platform-command.test.ts「guard 排队：并发到达不忙拒，FIFO 依序执行 > 命令 in-flight（前一条挂起）→ 第二条排队不执行不记结果；放行后依序执行（c1 先 c2 后）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-sillyspec-command-queue"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-26-sillyspec-command-queue:flow:FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-platform-command.test.ts「isUpgradeInFlight()=true（npm 升级链在跑）→ 排队轮询等待：升级结束前不执行不记结果，结束后依序执行」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-sillyspec-command-queue"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-26-sillyspec-command-queue:flow:FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-platform-command.test.ts「排队命令逐条完成逐条补发：首条完成先报（携 c1 结果），次条出队执行完再报（携 c2 结果，共两次）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-sillyspec-command-queue"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-26-sillyspec-command-queue:flow:FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-platform-command.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-sillyspec-command-queue"
+    }
+  ]
+}

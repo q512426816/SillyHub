@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-sillyspec-command-queue",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结件与交付不符：混入另一变更的前端改动，且缺本变更模块文档 hunk",
+      "evidence": "冻结件含 frontend/.../changes/[cid]/page.tsx 与 page-restore-assets.test.tsx 两 hunk，注释自证属 2026-09-26-thin-badge-survives-archive（『评审 P1 收窄补齐』字样）；同时 tasks.md task-04 勾选声称已追加 .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md 变更索引（工作区 68 行实存），但 691 行冻结 patch 无该文件 hunk——『代码事实唯一来源』既被污染又不完整，事后按 patch 审计/回放会把徽章逻辑误归本变更、漏掉文档产出。daemon 交付本体不受影响。",
+      "location": ".sillyspec/changes/2026-09-26-sillyspec-command-queue/change.patch:21-92"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01 承诺的『前一条失败/防御 reject 出口后依序执行』无直接用例",
+      "evidence": "FR-01 Then 明写『含执行失败/防御 reject 出口后依序执行』，但 sillyspec-platform-command.test.ts 排队五用例（298-392）全部为成功路径放行（gate resolve / isUpgradeInFlight 翻 false），无 runResolve reject→下一条仍出队执行的断言；机理上 exec 已被 run 内 try/catch 兜底（daemon.ts:7395-7405）、链尾吞异常双保险（7407-7413），链条不会断，属覆盖缺口非行为缺陷。",
+      "location": "sillyhub-daemon/tests/sillyspec-platform-command.test.ts:298"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——链尾在 WS 消息分发时同步读改写（daemon.ts:7407-7413），到达序=执行序；升级等待在每条出队时自判自轮询，不依赖全局序，无风险面",
+    "并发": "ok（边界已裁决：可接受——同窗两条完成的心跳补发极端时序下 backend 字段级 last-write-wins 可能让旧结果短暂胜出，仅回显层且 ≤15s 全量心跳自愈；design 槽3 已披露，命令本体秒级间隔远大于 HTTP 往返；队列单消费者、结果槽单写者依序写，latest-wins 语义不变）",
+    "切换": "ok（边界已裁决：可接受——①内存队列 daemon 重启即丢：与既有 fire-and-forget 无持久化语义一致，前端无回显可幂等重试；②长升级链后命令可能撞前端 150s 回显恢复窗：命令实际仍执行、结果落槽经心跳补报，恢复按钮重试幂等无害，冲突计数 ≤75s 采集自愈；③升级等待用 1s 轮询而非事件化：与 manager deferred 复查同级惯例、零侵入，分钟级升级下 1s 粒度无感。等待定时器 unref 真实存在 daemon.ts:7390-7392）",
+    "作用域": "ok（边界已裁决：可接受——队列进程级单例跨工作区串行是刻意延续『本机 sillyspec CLI 单写者』语义，resolve 携 workspaceId 定位 cwd 不串台；多 daemon 实例由 runtime lock 单实例锁互斥 daemon.ts:1598；不设队列深度上限：单管理员低频 + 命令秒级，设上限即重造忙拒，与本次用户裁决相悖）"
+  },
+  "reviewedAt": "2026-09-26T22:04:54+08:00"
+}

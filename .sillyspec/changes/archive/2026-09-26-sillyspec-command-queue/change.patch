@@ -1,0 +1,691 @@
+diff --git a/.sillyspec/changes/2026-09-26-sillyspec-command-queue/tasks.md b/.sillyspec/changes/2026-09-26-sillyspec-command-queue/tasks.md
+new file mode 100644
+index 000000000..69c480caf
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-sillyspec-command-queue/tasks.md
+@@ -0,0 +1,14 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T13:50:07.076Z
++---
++# 任务注册表（Tasks）— 2026-09-26-sillyspec-command-queue
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: daemon.ts 队列化改造——`_runSillySpecCommand` 两臂忙拒改 FIFO promise 链尾（`_sillyspecCommandQueueTail` 置换 `_sillyspecCommandInFlight`；升级臂改出队时轮询等待 `SILLYSPEC_COMMAND_UPGRADE_POLL_MS`，定时器 unref 对齐 deferred 重查惯例）；删 `SILLYSPEC_COMMAND_BUSY_ERROR` 常量；`_nudgeHeartbeatAfterCommandResult` 去 busy 相位收敛单参；相关 doc 注释同步（executor 接口 isUpgradeInFlight 注释、case 分发注释）
++- [x] task-02: 测试改造——sillyspec-platform-command.test.ts 忙拒 describe 块（4 用例 + nudge 忙拒用例）改写排队语义：并发到达排队依序执行 / 升级链等待后执行（resolve+ghost 两式，fake timers 推进轮询）/ nudge 改各条完成各补发（双 gate 锁执行序防结果槽竞态）；模块头注释行为矩阵同步
++- [x] task-03: 聚焦验证 + 显式 pathspec 提交——sillyspec-platform-command 套件 41 绿 + 近邻 daemon-heartbeat-sillyspec/sillyspec-conflict-snapshot 51 绿 + daemon tsc 0（不跑全量），git add -- 显式文件提交（commit 正文含 task-NN）
++- [x] task-04: 模块文档追加记录——.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md 变更索引置顶追加本变更条目（忙拒→排队语义更替，注明推翻 D-001 拒排队裁决的生产实证）
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+index 7a8e2f72a..ac8eca2db 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+@@ -242,4 +242,18 @@ describe("归档轻量出身双徽章", () => {
+     expect(await screen.findByText("已归档")).toBeInTheDocument();
+     expect(screen.queryByText("轻量变更")).toBeNull();
+   });
++
++  it("FR-01 评审 P1 收窄补齐：location=archive 而非 stage=archived 时同样双徽章", async () => {
++    renderPage(
++      makeChange({
++        current_stage: "execute",
++        status: "in_progress",
++        location: "archive",
++        change_type: "quick",
++        created_at: "2026-09-26T10:00:00Z",
++      }),
++    );
++    expect(await screen.findByText("已归档")).toBeInTheDocument();
++    expect(screen.getByText("轻量变更")).toBeInTheDocument();
++  });
+ });
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index 907d000dc..6b12a4d15 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -273,20 +273,20 @@ export default function ChangeDetailPage({ params }: Props) {
+             <span className="truncate">{change.title ?? change.change_key}</span>
+             {(() => {
+               const stage = change.current_stage ?? "draft";
+-              const statusBadge = STATUS_BADGE[stage];
+               // 轻量出身标识在归档后存活（2026-09-26-thin-badge-survives-archive
+               // / FR-01）：thin-flow「归档时自动翻转」让 stage 变 archived，出身
+-              // 随徽章消失——归档态若为轻量出身（thin 写入分流 2026-09-25 上线，
+-              // 此后新 quick 类型变更全部分流 thin，change_type 保留 "quick"），
+-              // 在「已归档」旁并排补「轻量变更」徽章。
++              // 随徽章消失——归档态（isTerminalChange 双条件：status=archived 或
++              // location=archive，评审 P1 收窄补齐）若为轻量出身（thin 写入分流
++              // 2026-09-25 上线，此后新 quick 类型变更全部分流 thin，change_type
++              // 保留 "quick"），在「已归档」旁并排补「轻量变更」徽章。
+               const thinBadge = STATUS_BADGE.thin;
+               const thinOrigin =
+                 Boolean(thinBadge) &&
+-                stage === "archived" &&
++                isTerminalChange(change) &&
+                 change.change_type === "quick" &&
+                 new Date(change.created_at ?? 0) >=
+                   new Date("2026-09-25T00:00:00+08:00");
+-              if (statusBadge) {
++              if (isTerminalChange(change)) {
+                 return (
+                   <>
+                     {thinOrigin && thinBadge ? (
+@@ -294,10 +294,16 @@ export default function ChangeDetailPage({ params }: Props) {
+                         {thinBadge.label}
+                       </Badge>
+                     ) : null}
+-                    <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
++                    <Badge variant="success">已归档</Badge>
+                   </>
+                 );
+               }
++              const statusBadge = STATUS_BADGE[stage];
++              if (statusBadge) {
++                return (
++                  <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
++                );
++              }
+               return (
+                 <Badge variant="outline">
+                   {WORKFLOW_STAGE_LABELS[stage] ?? stage ?? "未知"}
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 8f9d58821..72d1de8d2 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -1535,14 +1535,21 @@ export interface SillySpecCommandExecutor {
+    * 收敛（闭环依据 design §5 Phase2 第2条）。结果全收敛写结果槽不 reject。
+    */
+   runGhostCleanup(): Promise<void>;
+-  /** npm 升级链在跑判定（running/deferred 期间 true）——忙拒的第二臂（task-06）。 */
++  /**
++   * npm 升级链在跑判定（running/deferred 期间 true）——排队命令出队执行前轮询
++   * 等待的依据（2026-09-26-sillyspec-command-queue：原忙拒第二臂改等待）。
++   */
+   isUpgradeInFlight(): boolean;
+   /** 写命令结果内存槽（latest-wins；心跳 sillyspec_command_result 回传源，task-06）。 */
+   recordCommandResult(result: SillySpecCommandResult): void;
+ }
+ 
+-/** 忙拒结果固定 error 文案（design §5 Phase2 第4条，页面据此可重试）。 */
+-const SILLYSPEC_COMMAND_BUSY_ERROR = 'another sillyspec command is running';
++/**
++ * 排队命令等待 npm 升级链结束的轮询间隔（2026-09-26-sillyspec-command-queue：
++ * 忙拒改 FIFO 排队后，升级链在跑时出队命令轮询等待；间隔与 manager deferred
++ * 复查同级，定时器 unref 不阻进程退出）。
++ */
++const SILLYSPEC_COMMAND_UPGRADE_POLL_MS = 1000;
+ 
+ // ── Daemon class（核心）──────────────────────────────────────────────────────
+ 
+@@ -1653,14 +1660,13 @@ export class Daemon {
+   /** CLEANUP 指令 in-flight guard：并发指令去重（对齐 terminal-observer cleanupStarted 模式）。 */
+   private _cleanupInFlight = false;
+   /**
+-   * 2026-09-04-conflict-resolve-entry task-05（design §5 Phase2 第4条）：sillyspec
+-   * 平台命令（resolve/ghost_cleanup）in-flight guard——同一时刻仅允许一条命令在跑
+-   *（串行保护，仿 _cleanupInFlight）。置位/复位归本卡（_runSillyspecCommand 的
+-   * try/finally）；忙时新指令立即记 failed 不排队（D-001 拒排队语义，Grill 裁决
+-   * 维持）。忙判定第二臂（npm 升级链在跑）经 SillySpecCommandExecutor.isUpgradeInFlight
+-   * 探询（task-06 实现）。
++   * 2026-09-26-sillyspec-command-queue：sillyspec 平台命令（resolve/ghost_cleanup）
++   * FIFO 串行队列的链尾 promise——并发到达的命令 `.then(run, run)` 排尾，前一条
++   * 完成（含防御 reject 出口）后下一条自动执行。取代 2026-09-04-conflict-resolve
++   * -entry task-05 的 in-flight 忙拒 guard（D-001 拒排队语义按用户裁决推翻：生产
++   * 实证 2026-09-25 两条裁决并发被双双拒记 failed 红字）。
+    */
+-  private _sillyspecCommandInFlight = false;
++  private _sillyspecCommandQueueTail: Promise<void> = Promise.resolve();
+   /**
+    * task-09（FR-02 / D-002@v1）：interactive 转发 per-run 确定性 flatSeq 计数。
+    *
+@@ -7213,7 +7219,8 @@ export class Daemon {
+       // 同路径直连分发——不进 control-dispatcher、不入 CONTROL_KIND 词表、不经
+       // run/lease/control_commands 状态机（机器级 fire-and-forget，无回执）。
+       // 执行结果经心跳 sillyspec_command_result 回传（SillySpecCommandResult，
+-      // 挂接归 task-06）；忙拒与转发骨架见 _runSillySpecCommand。
++      // 挂接归 task-06）；排队串行与转发骨架见 _runSillySpecCommand
++      //（2026-09-26-sillyspec-command-queue：原忙拒改 FIFO 排队）。
+       case MSG.SILLYSPEC_RESOLVE: {
+         // payload: SillySpecResolvePayload（backend 白名单已校验；入口仍做缺字段/
+         // 值域校验——缺 change 或 strategy 不在 keep_local/take_platform 值域 →
+@@ -7349,22 +7356,23 @@ export class Daemon {
+   }
+ 
+   /**
+-   * task-05（design §5 Phase2 第4条）：sillyspec 平台命令统一转发 + in-flight
+-   * 串行 guard。
++   * task-05（design §5 Phase2 第4条；2026-09-26-sillyspec-command-queue 重写）：
++   * sillyspec 平台命令统一转发 + FIFO 串行队列。
+    *
+-   * - 忙判定两臂：本 guard 在跑（``_sillyspecCommandInFlight``）或 npm 升级链在跑
+-   *   （executor.isUpgradeInFlight 探询，task-06 实现）——命令执行与升级链共用
+-   *   同一 in-flight 判定，升级进行中到达的命令同样记 failed busy；
+-   * - 忙时立即记 failed（error 固定文案 {@link SILLYSPEC_COMMAND_BUSY_ERROR}）
+-   *   不排队，让页面可见可重试（D-001 拒排队语义）；结果写入走与转发同一最小
+-   *   接口（recordCommandResult，结果槽实现归 task-06）；
+-   * - guard 置位同步先于执行、finally 复位（仿 _cleanupInFlight 模式）；
+-   * - ql-20260911-024（回显提速第一级）：忙拒落槽与执行完成（finally）均立即
+-   *   补发一次心跳（_nudgeHeartbeatAfterCommandResult），结果不等 15s 节拍；
++   * - 并发到达不忙拒不丢执行：新命令排到 `_sillyspecCommandQueueTail` 链尾，
++   *   前一条完成（含防御 reject 出口）后依序执行——原「忙时立即记 failed 不
++   *   排队」（D-001 拒排队语义）按用户裁决推翻（生产实证 2026-09-25 两条并发
++   *   裁决被双双拒挂失败红字）；
++   * - npm 升级链在跑（executor.isUpgradeInFlight，task-06）→ 出队执行前轮询
++   *   等待其结束（SILLYSPEC_COMMAND_UPGRADE_POLL_MS——npm 正在替换 CLI bin，
++   *   并发 spawn 有半安装件风险），原第二臂「记 failed busy」同样改等待；
++   * - 每条命令完成（finally 统一出口）立即补发一次心跳
++   *   （_nudgeHeartbeatAfterCommandResult，ql-20260911-024 回显提速语义不变），
++   *   排队命令逐条完成逐条捎出，结果不等 15s 节拍；
+    * - executor 未接线（task-06 未落地 / 测试未注入实现）→ warn 丢弃不崩
+    *   （同 plan_response_no_manager 惯例，tsc 独立编译不依赖 task-06）。
+    */
+-  private async _runSillySpecCommand(
++  private _runSillySpecCommand(
+     action: 'resolve' | 'ghost_cleanup',
+     identify: Pick<SillySpecCommandResult, 'change' | 'strategy'>,
+     exec: (executor: SillySpecCommandExecutor) => Promise<void>,
+@@ -7372,33 +7380,38 @@ export class Daemon {
+     const executor = this._sillyspecCommandExecutor();
+     if (!executor) {
+       this._logger.warn('sillyspec_command_no_executor', { action });
+-      return;
+-    }
+-    if (this._sillyspecCommandInFlight || executor.isUpgradeInFlight()) {
+-      this._logger.warn('sillyspec_command_rejected_busy', { action, ...identify });
+-      executor.recordCommandResult({
+-        action,
+-        ...identify,
+-        state: 'failed',
+-        error: SILLYSPEC_COMMAND_BUSY_ERROR,
+-        executed_at: new Date().toISOString(),
+-      });
+-      this._nudgeHeartbeatAfterCommandResult(action, 'busy');
+-      return;
+-    }
+-    this._sillyspecCommandInFlight = true;
+-    try {
+-      await exec(executor);
+-    } catch (e) {
+-      // 防御兜底：约定 executor 全路径收敛不 reject（task-06，结果自写槽），
+-      // 此处仅防异常上抛阻塞 WS 接收（同 plan_response_route_failed 收敛语义）。
+-      this._logger.error('sillyspec_command_route_failed', { action, error: e });
+-    } finally {
+-      this._sillyspecCommandInFlight = false;
+-      // ql-20260911-024（回显提速第一级）：finally 统一补发——成功/防御 reject
+-      // 两出口结果均已落槽（executor 终判先于 return 落槽）。
+-      this._nudgeHeartbeatAfterCommandResult(action, 'done');
+-    }
++      return Promise.resolve();
++    }
++    const run = async (): Promise<void> => {
++      while (executor.isUpgradeInFlight()) {
++        this._logger.debug('sillyspec_command_wait_upgrade', { action, ...identify });
++        await new Promise<void>((resolve) => {
++          const timer = setTimeout(resolve, SILLYSPEC_COMMAND_UPGRADE_POLL_MS);
++          if (typeof timer.unref === 'function') {
++            timer.unref();
++          }
++        });
++      }
++      try {
++        await exec(executor);
++      } catch (e) {
++        // 防御兜底：约定 executor 全路径收敛不 reject（task-06，结果自写槽），
++        // 此处仅防异常上抛阻塞 WS 接收（同 plan_response_route_failed 收敛语义）。
++        this._logger.error('sillyspec_command_route_failed', { action, error: e });
++      } finally {
++        // ql-20260911-024（回显提速第一级）：finally 统一补发——命令完成落槽即
++        // 捎出（executor 终判先于 return 落槽）。
++        this._nudgeHeartbeatAfterCommandResult(action);
++      }
++    };
++    const chained = this._sillyspecCommandQueueTail.then(run, run);
++    // 链尾吞异常纯防御（run 全路径已收敛不 reject）；返回原始 chained 保留完成
++    // 点给潜在 await 方，调用方 void fire-and-forget 不受影响。
++    this._sillyspecCommandQueueTail = chained.then(
++      () => undefined,
++      () => undefined,
++    );
++    return chained;
+   }
+ 
+   /**
+@@ -7409,12 +7422,10 @@ export class Daemon {
+    * 往返。fire-and-forget 不阻塞 WS 接收（_sendHeartbeatOnce 全路径 catch 不
+    * reject）；未注册 runtime 时其内部 return false 静默跳过；与 15s 循环短暂
+    * 重叠无害——心跳是无状态全量上报，backend 侧字段级 last-write-wins。
++   *（2026-09-26-sillyspec-command-queue：忙拒相位随排队化消亡，收敛单参。）
+    */
+-  private _nudgeHeartbeatAfterCommandResult(
+-    action: 'resolve' | 'ghost_cleanup',
+-    phase: 'busy' | 'done',
+-  ): void {
+-    this._logger.debug('sillyspec_command_heartbeat_nudge', { action, phase });
++  private _nudgeHeartbeatAfterCommandResult(action: 'resolve' | 'ghost_cleanup'): void {
++    this._logger.debug('sillyspec_command_heartbeat_nudge', { action });
+     void this._sendHeartbeatOnce();
+   }
+ 
+diff --git a/sillyhub-daemon/tests/sillyspec-platform-command.test.ts b/sillyhub-daemon/tests/sillyspec-platform-command.test.ts
+index 4a9c4b0a1..14a2c335c 100644
+--- a/sillyhub-daemon/tests/sillyspec-platform-command.test.ts
++++ b/sillyhub-daemon/tests/sillyspec-platform-command.test.ts
+@@ -8,9 +8,10 @@
+  *     strategy) 原样透传；缺 change/strategy 或值域外 → warn 丢弃不调用不记结果；
+  *     SILLYSPEC_GHOST_CLEANUP → runGhostCleanup()；fire-and-forget（不 await
+  *     不 reject）；executor 未接线（duck-type 探测未命中）warn 丢弃不崩。
+- *   - guard 忙拒：命令 in-flight 或 isUpgradeInFlight → 执行方法不调、
+- *     recordCommandResult 记 failed（error='another sillyspec command is
+- *     running'，executed_at ISO）；guard finally 复位后放行下一条。
++ *   - guard 排队（2026-09-26-sillyspec-command-queue，原 task-07 忙拒改写）：
++ *     并发到达或 isUpgradeInFlight → 不忙拒不记 failed——FIFO 排队待前一条
++ *     完成（含失败出口）后依序执行；升级链在跑时出队前轮询等待（fake timers
++ *     推进 1s 轮询）；排队期间不产生结果/心跳。
+  *   - flag 映射（manager 执行器层）：keep_local→--keep-local、take_platform→
+  *     --take-platform，execFile 数组形参不经 shell、cwd=主仓根、超时注入透传
+  *     （缺省 120s）；运行时脏 strategy → failed 不 spawn。
+@@ -109,7 +110,7 @@ const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+ // ── daemon 层 harness：假 manager（四方法 executor + 心跳读口全可编程）─────────
+ 
+ /**
+- * 假 SillySpecManager：SillySpecCommandExecutor 四方法全 vi.fn（忙拒/分发断言
++ * 假 SillySpecManager：SillySpecCommandExecutor 四方法全 vi.fn（排队/分发断言
+  * 载体），getSnapshot/getStatusSnapshot 供心跳读口缺省零值（不携带任何 sillyspec_* 键）。
+  */
+ function makeFakeExecutorManager() {
+@@ -281,9 +282,9 @@ describe('task-07 case 分发：SILLYSPEC_RESOLVE / SILLYSPEC_GHOST_CLEANUP 直
+   });
+ });
+ 
+-// ── guard 忙拒（design §5 Phase2 第4条：in-flight 串行 + 升级链共用判定）──────
++// ── guard 排队（2026-09-26-sillyspec-command-queue：原忙拒两臂改 FIFO 串行）────
+ 
+-describe('task-07 guard 忙拒：忙时立即记 failed 不排队', () => {
++describe('guard 排队（2026-09-26-sillyspec-command-queue）：并发到达不忙拒，FIFO 依序执行', () => {
+   let restoreConsole: () => void;
+ 
+   beforeEach(() => {
+@@ -294,7 +295,7 @@ describe('task-07 guard 忙拒：忙时立即记 failed 不排队', () => {
+     vi.restoreAllMocks();
+   });
+ 
+-  it('命令 in-flight（guard 在跑）→ 第二条不调执行方法，记 failed（文案精确 + identify 透传 + ISO 戳）', async () => {
++  it('命令 in-flight（前一条挂起）→ 第二条排队不执行不记结果；放行后依序执行（c1 先 c2 后）', async () => {
+     const h = makeDispatchHarness();
+     let release!: () => void;
+     const gate = new Promise<void>((r) => (release = r));
+@@ -303,48 +304,47 @@ describe('task-07 guard 忙拒：忙时立即记 failed 不排队', () => {
+       type: MSG.SILLYSPEC_RESOLVE,
+       payload: { change: 'c1', strategy: 'keep_local' },
+     });
+-    // 第一条挂起期间第二条到达 → 忙拒。
++    // 第一条挂起期间第二条到达 → 排队：不执行、不记任何结果。
+     await h.handleWsMessage({
+       type: MSG.SILLYSPEC_RESOLVE,
+       payload: { change: 'c2', strategy: 'take_platform' },
+     });
+     expect(h.manager.runResolve).toHaveBeenCalledTimes(1); // 第二条未执行
+-    expect(h.manager.recordCommandResult).toHaveBeenCalledTimes(1);
+-    expect(h.manager.recordCommandResult).toHaveBeenCalledWith({
+-      action: 'resolve',
+-      change: 'c2',
+-      strategy: 'take_platform',
+-      state: 'failed',
+-      error: 'another sillyspec command is running',
+-      executed_at: expect.any(String),
+-    });
+-    const recorded = h.manager.recordCommandResult.mock.calls[0]![0] as {
+-      executed_at: string;
+-    };
+-    expect(recorded.executed_at).toMatch(ISO_RE);
++    expect(h.manager.recordCommandResult).not.toHaveBeenCalled(); // 无 busy failed
+     release();
+     await flushAsync();
++    // 前一条完成 → 第二条出队依序执行；顺序 = 到达序（c1 先、c2 后）。
++    expect(h.manager.runResolve).toHaveBeenCalledTimes(2);
++    expect(h.manager.runResolve.mock.calls[0]![0]).toBe('c1');
++    expect(h.manager.runResolve.mock.calls[1]![0]).toBe('c2');
++    expect(h.manager.recordCommandResult).not.toHaveBeenCalled();
+   });
+ 
+-  it('isUpgradeInFlight()=true（npm 升级链在跑）→ 忙拒第二臂：不调执行方法、记 failed busy', async () => {
+-    const h = makeDispatchHarness();
+-    h.manager.isUpgradeInFlight.mockReturnValue(true);
+-    await h.handleWsMessage({
+-      type: MSG.SILLYSPEC_RESOLVE,
+-      payload: { change: 'c1', strategy: 'keep_local' },
+-    });
+-    expect(h.manager.runResolve).not.toHaveBeenCalled();
+-    expect(h.manager.recordCommandResult).toHaveBeenCalledWith({
+-      action: 'resolve',
+-      change: 'c1',
+-      strategy: 'keep_local',
+-      state: 'failed',
+-      error: 'another sillyspec command is running',
+-      executed_at: expect.any(String),
+-    });
++  it('isUpgradeInFlight()=true（npm 升级链在跑）→ 排队轮询等待：升级结束前不执行不记结果，结束后依序执行', async () => {
++    vi.useFakeTimers();
++    try {
++      const h = makeDispatchHarness();
++      h.manager.isUpgradeInFlight.mockReturnValue(true);
++      await h.handleWsMessage({
++        type: MSG.SILLYSPEC_RESOLVE,
++        payload: { change: 'c1', strategy: 'keep_local' },
++      });
++      // 微任务冲净：命令已出队进入升级等待轮询（1s 定时器挂起）。
++      await vi.advanceTimersByTimeAsync(0);
++      expect(h.manager.runResolve).not.toHaveBeenCalled();
++      expect(h.manager.recordCommandResult).not.toHaveBeenCalled(); // 无 busy failed
++      // 升级结束 → 下一轮轮询放行执行。
++      h.manager.isUpgradeInFlight.mockReturnValue(false);
++      await vi.advanceTimersByTimeAsync(1000);
++      expect(h.manager.runResolve).toHaveBeenCalledTimes(1);
++      expect(h.manager.runResolve).toHaveBeenCalledWith('c1', 'keep_local', '');
++      expect(h.manager.recordCommandResult).not.toHaveBeenCalled();
++    } finally {
++      vi.useRealTimers();
++    }
+   });
+ 
+-  it('ghost_cleanup 忙拒：failed 结果只含 action/state/error/executed_at（无 change/strategy 键）', async () => {
++  it('ghost_cleanup 排队：前一条挂起期间第二条到达 → 排队，放行后两步依序执行', async () => {
+     const h = makeDispatchHarness();
+     let release!: () => void;
+     const gate = new Promise<void>((r) => (release = r));
+@@ -352,36 +352,36 @@ describe('task-07 guard 忙拒：忙时立即记 failed 不排队', () => {
+     await h.handleWsMessage({ type: MSG.SILLYSPEC_GHOST_CLEANUP, payload: {} });
+     await h.handleWsMessage({ type: MSG.SILLYSPEC_GHOST_CLEANUP, payload: {} });
+     expect(h.manager.runGhostCleanup).toHaveBeenCalledTimes(1);
+-    expect(h.manager.recordCommandResult).toHaveBeenCalledWith({
+-      action: 'ghost_cleanup',
+-      state: 'failed',
+-      error: 'another sillyspec command is running',
+-      executed_at: expect.any(String),
+-    });
++    expect(h.manager.recordCommandResult).not.toHaveBeenCalled(); // 无 busy failed
+     release();
+     await flushAsync();
++    expect(h.manager.runGhostCleanup).toHaveBeenCalledTimes(2);
++  });
++
++  it('升级链等待同样适用于 ghost_cleanup（共用判定跨命令种类）', async () => {
++    vi.useFakeTimers();
++    try {
++      const h = makeDispatchHarness();
++      h.manager.isUpgradeInFlight.mockReturnValue(true);
++      await h.handleWsMessage({ type: MSG.SILLYSPEC_GHOST_CLEANUP, payload: {} });
++      await vi.advanceTimersByTimeAsync(0);
++      expect(h.manager.runGhostCleanup).not.toHaveBeenCalled();
++      expect(h.manager.recordCommandResult).not.toHaveBeenCalled();
++      h.manager.isUpgradeInFlight.mockReturnValue(false);
++      await vi.advanceTimersByTimeAsync(1000);
++      expect(h.manager.runGhostCleanup).toHaveBeenCalledTimes(1);
++    } finally {
++      vi.useRealTimers();
++    }
+   });
+ 
+-  it('升级链忙拒同样拦截 ghost_cleanup（共用判定跨命令种类）', async () => {
+-    const h = makeDispatchHarness();
+-    h.manager.isUpgradeInFlight.mockReturnValue(true);
+-    await h.handleWsMessage({ type: MSG.SILLYSPEC_GHOST_CLEANUP, payload: {} });
+-    expect(h.manager.runGhostCleanup).not.toHaveBeenCalled();
+-    expect(h.manager.recordCommandResult).toHaveBeenCalledWith({
+-      action: 'ghost_cleanup',
+-      state: 'failed',
+-      error: 'another sillyspec command is running',
+-      executed_at: expect.any(String),
+-    });
+-  });
+-
+-  it('resolve 完成后 guard 复位 → 下一条放行（不误锁）', async () => {
++  it('resolve 完成后队列排空 → 下一条直达执行（不误锁）', async () => {
+     const h = makeDispatchHarness();
+     await h.handleWsMessage({
+       type: MSG.SILLYSPEC_RESOLVE,
+       payload: { change: 'c1', strategy: 'keep_local' },
+     });
+-    await flushAsync(); // 默认 mock 立即 resolve，finally 复位
++    await flushAsync(); // 默认 mock 立即 resolve，队列链尾已排空
+     await h.handleWsMessage({
+       type: MSG.SILLYSPEC_RESOLVE,
+       payload: { change: 'c2', strategy: 'keep_local' },
+@@ -864,7 +864,7 @@ function makeNudgeHarness() {
+   };
+ }
+ 
+-describe('ql-20260911-024 结果落槽即补发心跳：命令完成/忙拒后不等 15s 节拍', () => {
++describe('ql-20260911-024 结果落槽即补发心跳：命令完成不等 15s 节拍', () => {
+   let restoreConsole: () => void;
+ 
+   beforeEach(() => {
+@@ -896,36 +896,43 @@ describe('ql-20260911-024 结果落槽即补发心跳：命令完成/忙拒后
+     });
+   });
+ 
+-  it('guard 忙拒 → failed busy 结果同样立即补发；放行后首条完成再补发（共两次）', async () => {
++  it('排队命令逐条完成逐条补发：首条完成先报（携 c1 结果），次条出队执行完再报（携 c2 结果，共两次）', async () => {
+     const h = makeNudgeHarness();
+-    let release!: (v: SillySpecProgressOutcome) => void;
+-    const gate = new Promise<SillySpecProgressOutcome>((r) => (release = r));
+-    h.runProgressJson.mockImplementationOnce(() => gate);
++    let release1!: (v: SillySpecProgressOutcome) => void;
++    let release2!: (v: SillySpecProgressOutcome) => void;
++    // 双 gate 锁死两条命令的执行序：结果槽 latest-wins，若次条先完成会覆盖
++    // 首条结果导致首条补发读到 c2 —— 逐条放行保证断言确定性。
++    const gate1 = new Promise<SillySpecProgressOutcome>((r) => (release1 = r));
++    const gate2 = new Promise<SillySpecProgressOutcome>((r) => (release2 = r));
++    h.runProgressJson.mockImplementationOnce(() => gate1).mockImplementationOnce(() => gate2);
+     await h.handleWsMessage({
+       type: MSG.SILLYSPEC_RESOLVE,
+       payload: { change: 'c1', strategy: 'keep_local' },
+     });
+-    // 第一条挂起占住 guard 期间第二条到达 → 忙拒落槽 → nudge 补发（第一次）。
++    // 首条挂起占队期间次条到达 → 排队：不产生结果、不触发补发。
+     await h.handleWsMessage({
+       type: MSG.SILLYSPEC_RESOLVE,
+       payload: { change: 'c2', strategy: 'take_platform' },
+     });
++    expect(h.heartbeatMock).not.toHaveBeenCalled();
++    // 放行首条 → 完成落槽 → finally nudge 补发（第一次，携带 c1 success）。
++    release1({ code: 0, stdout: '', timedOut: false });
+     await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(1));
+     expect(h.heartbeatMock.mock.calls[0]![6]).toEqual({
+       action: 'resolve',
+-      change: 'c2',
+-      strategy: 'take_platform',
+-      state: 'failed',
+-      error: 'another sillyspec command is running',
++      change: 'c1',
++      strategy: 'keep_local',
++      state: 'success',
++      exit_code: 0,
+       executed_at: expect.any(String),
+     });
+-    // 放行首条 → 命令完成落槽 → finally nudge 补发（第二次，携带 c1 success）。
+-    release({ code: 0, stdout: '', timedOut: false });
++    // 次条出队执行 → 完成落槽 → nudge 再补发（第二次，携带 c2 success）。
++    release2({ code: 0, stdout: '', timedOut: false });
+     await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(2));
+     expect(h.heartbeatMock.mock.calls[1]![6]).toEqual({
+       action: 'resolve',
+-      change: 'c1',
+-      strategy: 'keep_local',
++      change: 'c2',
++      strategy: 'take_platform',
+       state: 'success',
+       exit_code: 0,
+       executed_at: expect.any(String),
+diff --git a/.sillyspec/changes/2026-09-26-sillyspec-command-queue/design.md b/.sillyspec/changes/2026-09-26-sillyspec-command-queue/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-sillyspec-command-queue/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T13:50:07.076Z
++---
++# 设计记录（Design Record）— 2026-09-26-sillyspec-command-queue
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-sillyspec-command-queue 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++daemon.ts `_runSillySpecCommand` 的两臂忙拒（`_sillyspecCommandInFlight` 标志 + `executor.isUpgradeInFlight()`）改为单一 FIFO 串行队列：布尔标志换 `_sillyspecCommandQueueTail` promise 链尾，每条命令 `.then(run, run)` 排尾——前一条完成（含防御 reject 出口）后下一条自动执行；npm 升级臂从「立即记 failed」改为出队执行前轮询等待（`SILLYSPEC_COMMAND_UPGRADE_POLL_MS`=1s，定时器 unref 对齐 manager deferred 重查惯例——npm 正在替换 CLI bin，与其并发 spawn 有半安装件风险，必须等）。选排队而非忙拒+前端自动重试：命令幂等且秒级（resolve/ghost_cleanup 实测 0.2-0.7s + 秒级），FIFO 最简且保序；原 D-001 拒排队裁决依据「单管理员低频场景」被生产实证推翻（2026-09-25 sillyspec 工作区两条裁决与升级链/彼此并发双双被拒，用户判「忙拒绝没必要」）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-sillyspec-command-queue 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++仅 daemon 内部私有成员变化：`_runSillySpecCommand` 签名不变（返回 promise 现在该条命令执行完成才 settle，调用方 `void` fire-and-forget 不受影响）；删除模块内常量 `SILLYSPEC_COMMAND_BUSY_ERROR`（未 export，仅本文件与测试字符串引用）；私有方法 `_nudgeHeartbeatAfterCommandResult(action, phase)` 收敛为单参（busy 相位随忙拒路径消亡）。WS 消息（SILLYSPEC_RESOLVE/SILLYSPEC_GHOST_CLEANUP）、执行器接口 SillySpecCommandExecutor 四方法、心跳 sillyspec_command_result 载荷形状、backend 与前端契约零变化——对外行为唯一差异：忙时不再记 failed busy 红字，改排队执行。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-sillyspec-command-queue 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：FIFO 链尾天然保序——后到者永远在前一条 settle（含 reject 出口）后才执行；升级等待在每条命令出队时自判自轮询，不依赖到达序与全局状态。
++2. 并发写：队列单消费者（promise 链串行），`_lastCommandResult` 结果槽仍单写者依序写，latest-wins 语义不变；每条落槽即 nudge 心跳即时捎出（_sendHeartbeatOnce 全量上报最新槽），同窗多条结果先落先发不互相吞没（命令本体秒级，间隔远大于本机心跳 HTTP 往返）。
++3. 切换/生命周期：队列是内存态，daemon 重启即丢——与现状一致（fire-and-forget 无持久队列，D-001 不建队列表边界保持）；升级等待定时器 1s 级且 unref，不阻进程退出。
++4. 作用域：队列是 daemon 进程级单例，延续「本机 sillyspec CLI 单写者」语义——resolve 自带 workspaceId 定位 cwd 不串台；多 daemon 实例本就被 runtime lock 单实例锁互斥。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-sillyspec-command-queue 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：排在长升级链（npm 安装分钟级）后的命令可能撞前端 150s 回显恢复窗（ECHO_TIMEOUT_MS）——前端恢复按钮可重试，重复排队条目执行幂等裁决（重复 resolve 同一 change 无害，冲突已消解则 no-op），且冲突计数 ≤75s 采集刷新自愈；不设队列深度上限（单管理员洪水不存在，设上限反而重新发明忙拒）。试过放弃的方案：①保留忙拒+前端自动重试——复杂度推给两端且用户仍见失败红字，与本次反馈直接冲突；②升级完成事件化（await 一次性 promise）——升级链状态机（_update running/deferred→终态+10min 展示窗）无单点完成信号，deferred 复查本身已是 1s 轮询实现，事件化需动 manager 状态机超出薄改范围；出队时 1s 轮询与其等价且零侵入。
+
+diff --git a/.sillyspec/changes/2026-09-26-sillyspec-command-queue/flow-state.yaml b/.sillyspec/changes/2026-09-26-sillyspec-command-queue/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-sillyspec-command-queue/flow-state.yaml
+@@ -0,0 +1,15 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: f3dbf6d32f286a928557741ea40a3046e6527fd9
++updatedAt: '2026-09-26T13:59:19.264Z'
++gate_summary: >-
++  test: skipped — 跳过原因：test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）。｜lint: passed ← cd backend && uv run ruff check
++  . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
++  typecheck（11.2s）｜门文件 7 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-sillyspec-command-queue/proposal.md b/.sillyspec/changes/2026-09-26-sillyspec-command-queue/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-sillyspec-command-queue/proposal.md
+@@ -0,0 +1,44 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T13:50:07.072Z
++---
++# 提案书（Proposal）— 2026-09-26-sillyspec-command-queue
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:c27455fadf6b89d8f2e2c3bd9b6e88d5ff97e325bcd41c67e60b20df80087e38:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-sillyspec-command-queue 留痕重锚 -->
++任务原话转写：动机：平台同步区冲突裁决与 npm 升级链并发时命令被「another sillyspec command is running」忙拒记 failed（生产实证 2026-09-25 sillyspec 工作区两条裁决双双被拒挂失败红字），用户需手动重试——单管理员低频假设不成立，改为排队串行执行。
++成功标准：
++- daemon 侧 sillyspec 平台命令（resolve/ghost_cleanup）不再忙拒：并发到达 FIFO 排队，前一条完成（含失败出口）后依序执行
++- npm 升级链在跑时到达的命令同样排队等待升级结束后执行，不再记 failed busy
++- 每条命令完成落槽后仍立即补发心跳（ql-20260911-024 回显提速语义不变）
++- 忙拒固定文案 SILLYSPEC_COMMAND_BUSY_ERROR 与相关忙拒测试断言移除，新增排队执行/等待升级两类用例
++- 仅跑 sillyhub-daemon 聚焦测试（sillyspec-platform-command 近邻）+ tsc 0，不跑全量
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:16761205dcd9b01425d494c8d618eaec443ecec56d42e35734168432b167c93a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-sillyspec-command-queue 留痕重锚 -->
++按成功标准机械推导，共 7 条验收面：
++1. daemon 侧 sillyspec 平台命令（resolve
++2. ghost_cleanup）不再忙拒：并发到达 FIFO 排队，前一条完成（含失败出口）后依序执行
++3. npm 升级链在跑时到达的命令同样排队等待升级结束后执行，不再记 failed busy
++4. 每条命令完成落槽后仍立即补发心跳（ql-20260911-024 回显提速语义不变）
++5. 忙拒固定文案 SILLYSPEC_COMMAND_BUSY_ERROR 与相关忙拒测试断言移除，新增排队执行
++6. 等待升级两类用例
++7. 仅跑 sillyhub-daemon 聚焦测试（sillyspec-platform-command 近邻）+ tsc 0，不跑全量
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:b3f360f37ca6d4ce47cd380c3f005da11d67f22360e63431158e01b9e3ca20c6:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-sillyspec-command-queue 留痕重锚 -->
++1. daemon 侧 sillyspec 平台命令（resolve
++2. ghost_cleanup）不再忙拒：并发到达 FIFO 排队，前一条完成（含失败出口）后依序执行
++3. npm 升级链在跑时到达的命令同样排队等待升级结束后执行，不再记 failed busy
++4. 每条命令完成落槽后仍立即补发心跳（ql-20260911-024 回显提速语义不变）
++5. 忙拒固定文案 SILLYSPEC_COMMAND_BUSY_ERROR 与相关忙拒测试断言移除，新增排队执行
++6. 等待升级两类用例
++7. 仅跑 sillyhub-daemon 聚焦测试（sillyspec-platform-command 近邻）+ tsc 0，不跑全量
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-sillyspec-command-queue/requirements.md b/.sillyspec/changes/2026-09-26-sillyspec-command-queue/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-sillyspec-command-queue/requirements.md
+@@ -0,0 +1,42 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T13:50:07.075Z
++---
++# 需求规格（Requirements）— 2026-09-26-sillyspec-command-queue
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可；机器摘录碎片已按语义重组为 4 条） -->
++### FR-01: 平台命令并发到达改 FIFO 排队串行执行（不再忙拒）
++Given daemon 已接线 sillyspec 命令执行器且无升级链在跑
++When SILLYSPEC_RESOLVE / SILLYSPEC_GHOST_CLEANUP 消息并发到达（前一条尚未完成）
++Then 后到命令不记 failed 不丢执行——排队待前一条完成（含执行失败/防御 reject 出口）后依序执行，结果仍逐条写结果槽
++
++### FR-02: npm 升级链在跑时到达的命令排队等待升级结束再执行
++Given executor.isUpgradeInFlight() 为 true（升级链 running/deferred）
++When 平台命令到达
++Then 不再记 failed busy（原固定文案 SILLYSPEC_COMMAND_BUSY_ERROR 忙拒路径删除）——轮询等待升级链结束后依序执行
++
++### FR-03: 命令完成落槽后心跳补发语义保持
++Given 命令经队列执行完成（成功或失败）
++When 结果写入 _lastCommandResult 结果槽
++Then 仍立即补发一次心跳（ql-20260911-024 回显提速语义不变）；排队本身不产生心跳/结果
++
++### FR-04: 测试面更新——忙拒断言移除 + 排队/等待升级新用例
++Given daemon 源码与测试基线
++When 忙拒常量与忙拒断言清理完成后
++Then sillyspec-platform-command.test.ts 新增「并发排队依序执行」与「升级链等待后执行」两类用例，聚焦套件全绿 + tsc 0（不跑全量，全量留 CI）
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++sillyhub-daemon/tests/sillyspec-platform-command.test.ts「guard 排队：并发到达不忙拒，FIFO 依序执行 > 命令 in-flight（前一条挂起）→ 第二条排队不执行不记结果；放行后依序执行（c1 先 c2 后）」与「ghost_cleanup 排队：前一条挂起期间第二条到达 → 排队，放行后两步依序执行」
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++sillyhub-daemon/tests/sillyspec-platform-command.test.ts「isUpgradeInFlight()=true（npm 升级链在跑）→ 排队轮询等待：升级结束前不执行不记结果，结束后依序执行」与「升级链等待同样适用于 ghost_cleanup（共用判定跨命令种类）」
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++sillyhub-daemon/tests/sillyspec-platform-command.test.ts「排队命令逐条完成逐条补发：首条完成先报（携 c1 结果），次条出队执行完再报（携 c2 结果，共两次）」
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++sillyhub-daemon/tests/sillyspec-platform-command.test.ts 聚焦全量 41 passed + cd sillyhub-daemon && pnpm typecheck（tsc 0）
