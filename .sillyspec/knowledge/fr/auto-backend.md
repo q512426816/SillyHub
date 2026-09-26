@@ -146,6 +146,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
+待复核：2026-09-26-assets-test-binding-raw-text
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given StageEnum 现有 QUICK 辅助阶段先例（backend/app/modules/change/model.py:65-72）；When 变更中心为 quick 类型新变更派发 agent；Then StageEnum 含 THIN="thin"（进 spec_auxiliary_stages，不进 TRANSITIONS/STAGE_ORDER，跑完即终态
@@ -186,6 +187,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
+待复核：2026-09-26-assets-test-binding-raw-text
 依据决策：D-002@v1
 场景正文：
 - 场景：默认场景 — Given thin 派发 agent 需执行 2 调用协议；When agent 收到派发 prompt；Then prompt 指示：flow start 带 --input 多行文本（动机行 + 独立节头行「成功标准：」+ 每行一条 `- <标准>`——单行内联会被清晰度
@@ -226,6 +228,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
+待复核：2026-09-26-assets-test-binding-raw-text
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given change_writer 分类器输出 change_type="quick"；When service.py/proxy.py 写入新变更；Then initial_stage="thin"（原 "quick"）；change_type 标签保留 "quick" 不改；stages JSON 初值含 thin
@@ -257,6 +260,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
+待复核：2026-09-26-assets-test-binding-raw-text
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given thin 派发 agent 在会话内执行 `sillyspec flow start|done|amend-draft --change <名>`；When daemon run_sync submit_commit 解析 bash 命令；Then extract_spec_bindings 产出 SpecCommandBinding(kind="change", change_key=<名>)，会话正确写
@@ -288,6 +292,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
+待复核：2026-09-26-assets-test-binding-raw-text
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given thin 变更在 sillyspec.db 停留 current_stage='scan'/status='active'，归档翻 status='archiv；When ① daemon run_sync 回调 sync_stage_status（dispatch.py:1784 一带）或 ② CLI progress 上行 _；Then 平台 change.current_stage=='thin' 且 DB 行非 archived 时：不回写 current_stage、不写 stages['
@@ -319,6 +324,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
+待复核：2026-09-26-assets-test-binding-raw-text
 依据决策：D-001@v1、D-002@v1
 场景正文：
 - 场景：默认场景 — Given 前端七处硬编码触点（徽章映射/STATUS_BADGE/STAGE_OPTIONS 双副本/说明卡/概览卡两处旁路判断/移动端审批卡/时间线组标签）；When thin 变更出现在列表/详情/概览/移动端；Then 徽章「◈ 轻量变更」品牌紫阶（quick 改「快速任务（存量）」琥珀）；筛选下拉含「轻量变更」（桌面+移动两份副本）；详情页 thin 两段式说明卡（桌面+移动
@@ -329,6 +335,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
+待复核：2026-09-26-assets-test-binding-raw-text
 依据决策：D-002@v1
 场景正文：
 - 场景：默认场景 — Given quick 为存量过渡通道（CLI 横幅语义）；When 用户查看 quicklog 面板/quick 说明卡/统计卡/流程指引文档；Then quicklog tab 计数标「存量 · N」、空态文案换退役指引（桌面 quicklog-table:346 + 移动 :873 两处必改）；quick 说
@@ -339,6 +346,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
+待复核：2026-09-26-assets-test-binding-raw-text
 场景正文：
 - 场景：默认场景 — Given 上游 3.30.0 已有变更名白名单但平台入口无校验；watcher 事件按 change_name 字符串归属；When thin 变更派发/CLI 侧自建 thin 目录 reparse/watcher 事件上行；Then 派发入口对 thin 变更校验 change_key（`^[A-Za-z0-9_.\-]+$`，拒 `..`/`default`/`quick-<hex8>`）
 全文：.sillyspec/changes/archive/2026-09-25-change-center-thin-flow/requirements.md#FR-08
@@ -364,6 +372,7 @@ created_at: 2026-09-22T17:00:51.578Z
   confirmed_at: null
   source_change: 2026-09-25-change-center-thin-flow
   status: active
+
 ## FR-auto-backend-026 命中锚点归一回退匹配
 变更：2026-09-25-knowledge-anchor-match-tolerance
 状态：active
@@ -453,6 +462,7 @@ created_at: 2026-09-22T17:00:51.578Z
 摘要：（无场景名）
 全文：.sillyspec/changes/archive/2026-09-25-knowledge-anchor-match-tolerance/requirements.md#FR-06
 最近确认：bf47e2a9402502c5aeaee1a70e923b5ff438ee50
+
 ## FR-auto-backend-032 模块层实有分子只数模块文档
 变更：2026-09-25-scan-docs-stats-caliber
 状态：active
@@ -554,10 +564,12 @@ created_at: 2026-09-22T17:00:51.578Z
 摘要：（无场景名）
 全文：.sillyspec/changes/archive/2026-09-25-scan-docs-stats-caliber/requirements.md#FR-06
 最近确认：40d215410020316d1109efa73e51441798c6693f
+
 ## FR-auto-backend-038 同内容跳过须以「磁盘在位 + 行在线」为前提
 变更：2026-09-25-full-sync-resurrect-missing
 状态：active
 摘要：（无场景名）
+待复核：2026-09-26-manifest-heal-endpoint
 全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-01
 最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
 
@@ -577,6 +589,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-full-sync-resurrect-missing
 状态：active
 摘要：（无场景名）
+待复核：2026-09-26-manifest-heal-endpoint
 全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-02
 最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
 
@@ -596,6 +609,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-full-sync-resurrect-missing
 状态：active
 摘要：（无场景名）
+待复核：2026-09-26-manifest-heal-endpoint
 全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-03
 最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
 
@@ -615,6 +629,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-full-sync-resurrect-missing
 状态：active
 摘要：（无场景名）
+待复核：2026-09-26-manifest-heal-endpoint
 全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-04
 最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
 
@@ -634,6 +649,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-full-sync-resurrect-missing
 状态：active
 摘要：（无场景名）
+待复核：2026-09-26-manifest-heal-endpoint
 全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-05
 最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
 
@@ -653,6 +669,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-full-sync-resurrect-missing
 状态：active
 摘要：（无场景名）
+待复核：2026-09-26-manifest-heal-endpoint
 全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-06
 最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
 
@@ -672,6 +689,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-full-sync-resurrect-missing
 状态：active
 摘要：（无场景名）
+待复核：2026-09-26-manifest-heal-endpoint
 全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-07
 最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
 
@@ -691,5 +709,125 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-full-sync-resurrect-missing
 状态：active
 摘要：（无场景名）
+待复核：2026-09-26-manifest-heal-endpoint
 全文：.sillyspec/changes/archive/2026-09-25-full-sync-resurrect-missing/requirements.md#FR-08
 最近确认：ff6779d4e9e2ecdc2020d32e3bb3418f31153978
+
+## FR-auto-backend-046 墓碑行 heal 语义
+变更：2026-09-26-manifest-heal-endpoint
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-26-manifest-heal-endpoint/requirements.md#FR-01
+最近确认：21ff163ad11116668f0167aa68537ea552c365fb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-manifest-heal-endpoint:flow:FR-01
+  tests: tests/test_platform_deleted_guard.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-manifest-heal-endpoint
+  status: active
+
+## FR-auto-backend-047 heal 即冲突闭环
+变更：2026-09-26-manifest-heal-endpoint
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-26-manifest-heal-endpoint/requirements.md#FR-02
+最近确认：21ff163ad11116668f0167aa68537ea552c365fb
+
+## FR-auto-backend-048 输入校验与鉴权
+变更：2026-09-26-manifest-heal-endpoint
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-26-manifest-heal-endpoint/requirements.md#FR-03
+最近确认：21ff163ad11116668f0167aa68537ea552c365fb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-manifest-heal-endpoint:flow:FR-03
+  tests: tests/test_platform_deleted_guard.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-manifest-heal-endpoint
+  status: active
+
+## FR-auto-backend-049 审计与幂等
+变更：2026-09-26-manifest-heal-endpoint
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-26-manifest-heal-endpoint/requirements.md#FR-04
+最近确认：21ff163ad11116668f0167aa68537ea552c365fb
+
+## FR-auto-backend-050 零回归
+变更：2026-09-26-manifest-heal-endpoint
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-09-26-manifest-heal-endpoint/requirements.md#FR-05
+最近确认：21ff163ad11116668f0167aa68537ea552c365fb
+
+## FR-auto-backend-051 测试绑定行附带手写原文（raw_binding）
+变更：2026-09-26-assets-test-binding-raw-text
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given test-trace.json 摘录时截断 `::用例` 后缀，tests 数组只剩文件级路径，而含测试类/用例与描述的手写原文就在归档变更目录 require；When assets 聚合服务解析测试绑定（GET /changes/{cid}/assets），；Then 每条 ChangeTestRow 按锚点（FR-NN）匹配挂上新字段 `raw_binding`（绑定槽注释行之后的内容行原文，多行拼接）；requiremen
+全文：.sillyspec/changes/archive/2026-09-26-assets-test-binding-raw-text/requirements.md#FR-01
+最近确认：8f587cde7811c61df600f7b7d23c9c9eaedcd1b2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-assets-test-binding-raw-text:flow:FR-01
+  tests: backend/tests/modules/change/test_assets.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-assets-test-binding-raw-text
+  status: active
+
+## FR-auto-backend-052 类型契约同步
+变更：2026-09-26-assets-test-binding-raw-text
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given ChangeTestRow schema 新增字段，；When 后端 schema 变更落盘， 按 CLAUDE.md 规则 21 运行 `pnpm gen:types`，；Then `frontend/src/lib/api-types.ts` 与 `backend/openapi.json` 随提交更新，不落手写类型债。
+全文：.sillyspec/changes/archive/2026-09-26-assets-test-binding-raw-text/requirements.md#FR-02
+最近确认：8f587cde7811c61df600f7b7d23c9c9eaedcd1b2
+
+## FR-auto-backend-053 前端资产卡显示原文
+变更：2026-09-26-assets-test-binding-raw-text
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试绑定行的 raw_binding 存在且与 tests 文件路径列表不同值（即原文含用例级/描述信息），；When 资产卡渲染测试绑定组， 该行下方显示原文小字（muted 色，超长截断，悬停 title 可见全文）；raw_binding 为 None 或与 tests 等
+全文：.sillyspec/changes/archive/2026-09-26-assets-test-binding-raw-text/requirements.md#FR-03
+最近确认：8f587cde7811c61df600f7b7d23c9c9eaedcd1b2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-assets-test-binding-raw-text:flow:FR-03
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-assets-test-binding-raw-text
+  status: active
+
+## FR-auto-backend-054 测试与类型门禁全绿
+变更：2026-09-26-assets-test-binding-raw-text
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 三处改动落盘，；When 运行后端 change 聚焦测试（test_assets 补「含绑定槽原文的 requirements 提取、无 requirements 容错为 None」两；Then 全部通过且 0 类型错误。
+全文：.sillyspec/changes/archive/2026-09-26-assets-test-binding-raw-text/requirements.md#FR-04
+最近确认：8f587cde7811c61df600f7b7d23c9c9eaedcd1b2

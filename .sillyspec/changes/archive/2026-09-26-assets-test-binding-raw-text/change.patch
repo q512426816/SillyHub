@@ -1,0 +1,631 @@
+diff --git a/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/tasks.md b/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/tasks.md
+new file mode 100644
+index 000000000..860213bbc
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/tasks.md
+@@ -0,0 +1,17 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T07:26:45.051Z
++---
++# 任务注册表（Tasks）— 2026-09-26-assets-test-binding-raw-text
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++- [x] task-01: 后端 assets.py 新增 _read_binding_raw_text（读归档 requirements.md，正则匹配 AGENT:测试绑定FR-XX 槽注释，取其后连续非空内容行空格拼接为原文，返回锚点→原文映射，缺文件/损坏/空槽 fail-open 空映射）；_read_test_rows 增第二参数按行锚点填充 raw_binding；schema.py ChangeTestRow 加 raw_binding: str | None = None
++- [x] task-02: requirements 缺失/槽不存在/锚点缺席 → raw_binding=None，既有字段与行为零变化（金样本与既有 17 用例全过）
++- [x] task-03: 规则 21 gen:types 已跑——backend/openapi.json 与 frontend/src/lib/api-types.ts 随提交更新（raw_binding?: string | null 已生成）
++- [x] task-04: 前端资产卡测试绑定行下渲染原文小字（「原文：」前缀 + truncate + title 悬停全文）；raw_binding 与 tests 等价（纯文件级）时不渲染防重复
++- [x] task-05: 后端 test_assets 补三面——金样本断言 FR-01 槽两行拼接、无 requirements.md 容错 None 用例、_read_binding_raw_text 纯函数用例（多行拼接/空内容槽跳过/缺文件空映射）
++- [x] task-06: 前端组件测试补两用例——既有「点开预览」用例增强原文行断言（含 title 悬停全文）+ 等价不渲染用例 = 16 passed
++- [x] task-07: 后端 change 模块聚焦全量 581 passed + 2 skipped（既有 skip）
++- [x] task-08: frontend pnpm exec tsc --noEmit → exit 0
+diff --git a/backend/app/modules/change/assets.py b/backend/app/modules/change/assets.py
+index 7f42f101c..45ff77571 100644
+--- a/backend/app/modules/change/assets.py
++++ b/backend/app/modules/change/assets.py
+@@ -117,24 +117,75 @@ def _scan_domain_files(
+     return out
+ 
+ 
+-def _read_test_rows(change_dir: Path) -> list[ChangeTestRow]:
+-    """读 ``test-trace.json``（损坏/缺失 → 空列表，fail-open）。"""
++def _read_binding_raw_text(change_dir: Path) -> dict[str, str]:
++    """读归档 ``requirements.md`` 测试绑定槽的手写原文（按锚点）。
++
++    2026-09-26-assets-test-binding-raw-text：test-trace.json 摘录把绑定行的
++    ``::用例`` 后缀截断成纯文件路径，含用例级锚点与描述的原文在本文件——
++    匹配 ``<!--AGENT:测试绑定FR-XX …-->`` 槽注释，取其后连续非空内容行拼为
++    原文（到下一 ``<!--AGENT:`` 注释或空行为止），返回 ``{锚点: 原文}``。
++    fail-open：文件缺失/损坏/槽不存在 → 空映射（raw_binding 落 None）。
++    """
++    path = change_dir / "requirements.md"
++    try:
++        text = path.read_text(encoding="utf-8")
++    except (OSError, ValueError) as exc:
++        log.info("change.assets_binding_raw_unavailable", path=str(path), error=str(exc))
++        return {}
++
++    out: dict[str, str] = {}
++    # 行扫描：命中槽注释行后，收集紧随的非空内容行。
++    slot_re = re.compile(r"<!--AGENT:测试绑定(FR-[A-Za-z0-9-]+)\b.*?-->")
++    lines = text.splitlines()
++    i = 0
++    while i < len(lines):
++        m = slot_re.search(lines[i])
++        if not m:
++            i += 1
++            continue
++        anchor = m.group(1)
++        content: list[str] = []
++        j = i + 1
++        while j < len(lines):
++            line = lines[j].strip()
++            if not line or line.startswith("<!--AGENT:"):
++                break
++            content.append(line)
++            j += 1
++        if content:
++            out[anchor] = " ".join(content)
++        i = j
++    return out
++
++
++def _read_test_rows(
++    change_dir: Path,
++    binding_raw: dict[str, str] | None = None,
++) -> list[ChangeTestRow]:
++    """读 ``test-trace.json``（损坏/缺失 → 空列表，fail-open）。
++
++    ``binding_raw``（可选）是 ``_read_binding_raw_text`` 的锚点→原文映射，
++    按行锚点填充 ``raw_binding``；缺锚点 → None。
++    """
+     path = change_dir / "test-trace.json"
+     try:
+         data = json.loads(path.read_text(encoding="utf-8"))
+     except (OSError, ValueError) as exc:
+         log.info("change.assets_test_trace_unavailable", path=str(path), error=str(exc))
+         return []
++    binding_raw = binding_raw or {}
+     rows: list[ChangeTestRow] = []
+     for row in data.get("rows", []) if isinstance(data, dict) else []:
+         if not isinstance(row, dict) or not row.get("row_id"):
+             continue
++        anchor = row.get("anchor")
+         rows.append(
+             ChangeTestRow(
+                 row_id=str(row["row_id"]),
+-                anchor=row.get("anchor"),
++                anchor=anchor,
+                 tests=[str(t) for t in row.get("tests", []) if t],
+                 state=row.get("state"),
++                raw_binding=binding_raw.get(str(anchor)) if anchor else None,
+             )
+         )
+     return rows
+@@ -327,8 +378,12 @@ class ChangeAssetsQueryService:
+             return result
+ 
+         change_dir = await self._resolve_change_dir(workspace_id, change)
++        # raw_binding（2026-09-26-assets-test-binding-raw-text）：绑定槽原文
++        # 先读（快照），再喂给 _read_test_rows 按锚点挂行——两读同线程串行，
++        # 归档件 append-only 无并发面，与 patch/delta 并行不冲突。
++        binding_raw = await asyncio.to_thread(_read_binding_raw_text, change_dir)
+         test_rows, patch, delta = await asyncio.gather(
+-            asyncio.to_thread(_read_test_rows, change_dir),
++            asyncio.to_thread(_read_test_rows, change_dir, binding_raw),
+             asyncio.to_thread(_read_patch_meta, change_dir),
+             asyncio.to_thread(_read_delta_meta, change_dir),
+         )
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index db771f457..cb1248c24 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -813,12 +813,19 @@ class ChangeDecisionEntry(BaseModel):
+ 
+ 
+ class ChangeTestRow(BaseModel):
+-    """测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。"""
++    """测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。
++
++    ``raw_binding``（2026-09-26-assets-test-binding-raw-text）是该行锚点在归档
++    requirements.md「AGENT:测试绑定FR-XX」槽的手写原文——test-trace 摘录会把
++    ``::用例`` 后缀截断成纯文件路径，原文承载用例级锚点与描述文字，聚合时
++    一并带出供前端展示；槽缺失/解析失败 → None（fail-open，不影响其余字段）。
++    """
+ 
+     row_id: str
+     anchor: str | None = None
+     tests: list[str] = Field(default_factory=list)
+     state: str | None = None
++    raw_binding: str | None = None
+ 
+ 
+ class ChangePatchMeta(BaseModel):
+diff --git a/backend/app/modules/change/tests/test_assets.py b/backend/app/modules/change/tests/test_assets.py
+index b1bafe13c..dcb355c4d 100644
+--- a/backend/app/modules/change/tests/test_assets.py
++++ b/backend/app/modules/change/tests/test_assets.py
+@@ -142,6 +142,18 @@ def _seed_mirror(spec_root: Path, *, with_trace: bool = True) -> None:
+     change_dir = spec_root / "changes" / "archive" / KEY
+     change_dir.mkdir(parents=True)
+     if with_trace:
++        # 绑定槽原文（2026-09-26-assets-test-binding-raw-text）：FR-01 槽两行内容
++        # （验证多行拼接），FR-99 槽存在但 test-trace 无该锚点（验证缺锚不炸）。
++        (change_dir / "requirements.md").write_text(
++            "# 需求\n\n## 测试绑定\n\n"
++            "<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR——例外裁决书写面 -->\n"
++            "backend/app/modules/change/tests/test_assets.py::金样本聚合 用例\n"
++            "（共享前置：seed 镜像三件）\n"
++            "\n"
++            "<!--AGENT:测试绑定FR-99 哪个测试文件/用例覆盖这条 FR——例外裁决书写面 -->\n"
++            "backend/tests/other.py::无锚点行 用例\n",
++            encoding="utf-8",
++        )
+         (change_dir / "test-trace.json").write_text(
+             json.dumps(
+                 {
+@@ -188,6 +200,13 @@ async def test_golden_aggregation(db_session, tmp_path: Path) -> None:
+     assert [d.id for d in result.decisions] == ["D-001@v1"]
+     assert [r.row_id for r in result.test_rows] == [f"{KEY}:task-01:acc-0"]
+     assert result.test_rows[0].state == "candidate"
++    # raw_binding（2026-09-26-assets-test-binding-raw-text）：FR-01 槽两行内容拼接
++    # （行间以单空格连接——单行展示可读性取舍）。
++    assert (
++        result.test_rows[0].raw_binding
++        == "backend/app/modules/change/tests/test_assets.py::金样本聚合 用例"
++        " （共享前置：seed 镜像三件）"
++    )
+     assert result.patch is None  # 无 change-patch.json → 容错 None
+     assert result.delta is not None
+     assert result.delta.before_lines == 2
+@@ -231,6 +250,70 @@ async def test_not_found_reraises(db_session, tmp_path: Path) -> None:
+         await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, uuid.uuid4())
+ 
+ 
++# ── raw_binding（2026-09-26-assets-test-binding-raw-text）──────────────────
++
++
++async def test_binding_raw_missing_requirements_falls_back_none(db_session, tmp_path: Path) -> None:
++    """归档目录无 requirements.md → raw_binding=None（fail-open，既有行照常投影）。"""
++    spec_root = tmp_path / "spec-root5"
++    _seed_mirror(spec_root, with_trace=False)
++    change_dir = spec_root / "changes" / "archive" / KEY
++    # 只写 test-trace.json（requirements.md 刻意缺席）。
++    change_dir.mkdir(parents=True, exist_ok=True)
++    (change_dir / "test-trace.json").write_text(
++        json.dumps(
++            {
++                "schemaVersion": 1,
++                "change": KEY,
++                "rows": [
++                    {
++                        "row_id": f"{KEY}:task-01:acc-0",
++                        "anchor": "FR-01",
++                        "tests": ["backend/app/x.py"],
++                        "state": "candidate",
++                    }
++                ],
++            }
++        ),
++        encoding="utf-8",
++    )
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    assert len(result.test_rows) == 1
++    assert result.test_rows[0].raw_binding is None
++    assert result.test_rows[0].tests == ["backend/app/x.py"]
++
++
++def test_read_binding_raw_text_slot_extraction(tmp_path: Path) -> None:
++    """纯函数：槽注释行后内容行提取（多行拼接）；空内容槽/无槽/缺文件容错。"""
++    from app.modules.change.assets import _read_binding_raw_text
++
++    # 缺文件 → 空映射。
++    assert _read_binding_raw_text(tmp_path) == {}
++
++    d = tmp_path / "req-case"
++    d.mkdir()
++    (d / "requirements.md").write_text(
++        "# 需求\n\n"
++        "<!--AGENT:测试绑定FR-01 提示文字 -->\n"
++        "a.py::用例一\n"
++        "（共享前置说明）\n"
++        "\n"
++        "<!--AGENT:测试绑定FR-02 提示文字 -->\n"
++        "<!--AGENT:测试绑定FR-03 提示文字 -->\n"
++        "b.py::用例三\n",
++        encoding="utf-8",
++    )
++    got = _read_binding_raw_text(d)
++    # FR-01 两行拼接；FR-02 空内容槽跳过；FR-03 正常取行。
++    assert got == {
++        "FR-01": "a.py::用例一 （共享前置说明）",
++        "FR-03": "b.py::用例三",
++    }
++
++
+ # ===========================================================================
+ # change.patch 单文件切片（2026-09-25-change-detail-assets-usability / FR-04）
+ # ===========================================================================
+diff --git a/backend/openapi.json b/backend/openapi.json
+index c77234d02..e246f26b9 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -40021,6 +40021,17 @@
+               }
+             ],
+             "title": "State"
++          },
++          "raw_binding": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Raw Binding"
+           }
+         },
+         "type": "object",
+@@ -40028,7 +40039,7 @@
+           "row_id"
+         ],
+         "title": "ChangeTestRow",
+-        "description": "测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。"
++        "description": "测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。\n\n``raw_binding``（2026-09-26-assets-test-binding-raw-text）是该行锚点在归档\nrequirements.md「AGENT:测试绑定FR-XX」槽的手写原文——test-trace 摘录会把\n``::用例`` 后缀截断成纯文件路径，原文承载用例级锚点与描述文字，聚合时\n一并带出供前端展示；槽缺失/解析失败 → None（fail-open，不影响其余字段）。"
+       },
+       "ChangeUsageRead": {
+         "properties": {
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index 3ba7e63a1..9f2970291 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -76,6 +76,9 @@ const FULL = {
+       anchor: "FR-01",
+       tests: ["backend/app/x.py"],
+       state: "candidate",
++      // 手写绑定原文（2026-09-26-assets-test-binding-raw-text）：test-trace 摘录
++      // 截断 ::用例 后缀后，行下显示该原文（用例级锚点 + 描述）。
++      raw_binding: "backend/app/x.py::四组渲染 用例（共享 fixture FULL）",
+     },
+   ],
+   patch: {
+@@ -196,12 +199,43 @@ describe("ChangeAssetsCard", () => {
+ 
+     expect(await screen.findByText(/变更内 FR-01/)).toBeInTheDocument();
+ 
++    // raw_binding 原文行显示（2026-09-26-assets-test-binding-raw-text）：
++    // 行下小字含「原文：」前缀与用例级文本，title 悬停可见全文。
++    const raw = await screen.findByTestId("change-assets-test-raw-k:task-01:acc-0");
++    expect(raw).toHaveTextContent("原文：backend/app/x.py::四组渲染 用例");
++    expect(raw).toHaveAttribute(
++      "title",
++      "backend/app/x.py::四组渲染 用例（共享 fixture FULL）",
++    );
++
+     fireEvent.click(screen.getByTestId("change-assets-test-file-backend/app/x.py"));
+     expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
+       "backend/app/x.py",
+     );
+   });
+ 
++  it("raw_binding 与 tests 等价（纯文件级）时不渲染原文行", async () => {
++    mockGet.mockResolvedValue({
++      ...FULL,
++      test_rows: [
++        {
++          row_id: "k:task-02:acc-0",
++          anchor: "FR-02",
++          tests: ["backend/app/y.py"],
++          state: "candidate",
++          raw_binding: "backend/app/y.py",
++        },
++      ],
++    });
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++
++    expect(await screen.findByText(/变更内 FR-02/)).toBeInTheDocument();
++    expect(
++      screen.queryByTestId("change-assets-test-raw-k:task-02:acc-0"),
++    ).toBeNull();
++  });
++
+   it("归档留档：清单渲染 + 点开命中文件出 diff 弹窗（FR-04）", async () => {
+     mockGet.mockResolvedValue(FULL);
+     mockPatch.mockResolvedValue({
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index f5ce27b59..173e1f289 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -241,36 +241,53 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+               {data?.test_rows?.map((r) => (
+                 <div
+                   key={r.row_id}
+-                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0"
++                  className="border-b border-dashed py-1 text-xs last:border-b-0"
+                 >
+-                  <span
+-                    className="shrink-0 font-mono text-[10px] text-muted-foreground"
+-                    title="变更内锚点：对应本变更 requirements.md 的 FR 编号（与知识库 FR 索引条目 FR-<域>-NNN 不是同一套 id）"
+-                  >
+-                    变更内{" "}
+-                    {r.anchor ??
+-                      (r.row_id.split(":").slice(1, 3).join(":") || r.row_id)}
+-                  </span>
+-                  <span className="min-w-0 flex-1 truncate text-left">
+-                    {(r.tests ?? []).map((t, i) => (
+-                      <span key={t}>
+-                        {i > 0 ? <span className="text-muted-foreground/50"> ｜ </span> : null}
+-                        <button
+-                          type="button"
+-                          data-testid={`change-assets-test-file-${t}`}
+-                          onClick={() => setTestPath(t)}
+-                          title={`查看测试文件内容：${t}`}
+-                          className="rounded text-muted-foreground underline-offset-2 hover:text-brand-700 hover:underline"
+-                        >
+-                          {t}
+-                        </button>
+-                      </span>
+-                    ))}
+-                  </span>
+-                  {r.state ? (
+-                    <span className="shrink-0 rounded-full bg-amber-50 px-1.5 text-[10px] text-amber-700">
+-                      {r.state}
++                  <div className="flex items-baseline gap-2">
++                    <span
++                      className="shrink-0 font-mono text-[10px] text-muted-foreground"
++                      title="变更内锚点：对应本变更 requirements.md 的 FR 编号（与知识库 FR 索引条目 FR-<域>-NNN 不是同一套 id）"
++                    >
++                      变更内{" "}
++                      {r.anchor ??
++                        (r.row_id.split(":").slice(1, 3).join(":") || r.row_id)}
++                    </span>
++                    <span className="min-w-0 flex-1 truncate text-left">
++                      {(r.tests ?? []).map((t, i) => (
++                        <span key={t}>
++                          {i > 0 ? <span className="text-muted-foreground/50"> ｜ </span> : null}
++                          <button
++                            type="button"
++                            data-testid={`change-assets-test-file-${t}`}
++                            onClick={() => setTestPath(t)}
++                            title={`查看测试文件内容：${t}`}
++                            className="rounded text-muted-foreground underline-offset-2 hover:text-brand-700 hover:underline"
++                          >
++                            {t}
++                          </button>
++                        </span>
++                      ))}
+                     </span>
++                    {r.state ? (
++                      <span className="shrink-0 rounded-full bg-amber-50 px-1.5 text-[10px] text-amber-700">
++                        {r.state}
++                      </span>
++                    ) : null}
++                  </div>
++                  {/* 绑定原文（2026-09-26-assets-test-binding-raw-text / FR-03）：
++                      test-trace 摘录截断了 ::用例 后缀，此处显示 requirements 测试
++                      绑定槽的手写原文（用例级锚点 + 描述）；原文与 tests 列表等价
++                      （纯文件级、无附加信息）时不渲染，避免重复行。 */}
++                  {r.raw_binding &&
++                  r.raw_binding.trim() !== (r.tests ?? []).join(" ") &&
++                  !(r.tests ?? []).some((t) => r.raw_binding?.trim() === t) ? (
++                    <p
++                      data-testid={`change-assets-test-raw-${r.row_id}`}
++                      title={r.raw_binding}
++                      className="mt-0.5 truncate pl-1 text-[10px] text-muted-foreground/80"
++                    >
++                      原文：{r.raw_binding}
++                    </p>
+                   ) : null}
+                 </div>
+               ))}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 9786487df..e11cd0fde 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -13827,6 +13827,11 @@ export interface components {
+         /**
+          * ChangeTestRow
+          * @description 测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。
++         *
++         *     ``raw_binding``（2026-09-26-assets-test-binding-raw-text）是该行锚点在归档
++         *     requirements.md「AGENT:测试绑定FR-XX」槽的手写原文——test-trace 摘录会把
++         *     ``::用例`` 后缀截断成纯文件路径，原文承载用例级锚点与描述文字，聚合时
++         *     一并带出供前端展示；槽缺失/解析失败 → None（fail-open，不影响其余字段）。
+          */
+         ChangeTestRow: {
+             /** Row Id */
+@@ -13837,6 +13842,8 @@ export interface components {
+             tests?: string[];
+             /** State */
+             state?: string | null;
++            /** Raw Binding */
++            raw_binding?: string | null;
+         };
+         /**
+          * ChangeUsageRead
+diff --git a/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/design.md b/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T07:26:45.050Z
++---
++# 设计记录（Design Record）— 2026-09-26-assets-test-binding-raw-text
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-test-binding-raw-text 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++只读展示增强，三件：①后端 ChangeTestRow 加 raw_binding: str | None（schema.py），assets.py 新增 _read_binding_raw_text(change_dir)——读归档 requirements.md，按正则匹配「AGENT:测试绑定(FR-XX)」槽注释行，取其后连续非空内容行拼为原文，返回 {锚点: 原文} 映射；_read_test_rows 增第二参数接收映射填充 raw_binding（锚点缺席 → None）。②规则 21：pnpm gen:types 重生成 api-types.ts + openapi.json 随提交。③前端资产卡测试绑定行下渲染原文小字（raw_binding 与 tests 列表等价时不渲染，避免纯文件级绑定的重复行）。选「读 requirements 原文」而非改摘录器：摘录在 sillyspec CLI（外部工具，已留坑待修），requirements.md 归档件只读解析零审计影响，且对全部存量归档立即生效。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-test-binding-raw-text 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++GET /changes/{cid}/assets 响应的 test_rows[].raw_binding 新增（string | null，默认 null）；既有字段（row_id/anchor/tests/state）不动，端点签名/路径/鉴权零变化。前端消费新字段，api-types.ts 随 gen:types 再生成。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-test-binding-raw-text 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：requirements.md 是归档冻结件（append-only），聚合每次整读快照，无时序假设；槽缺失/格式漂移 → 映射缺项 → raw_binding=None。
++2. 并发写：归档目录 CLI 归档后不再写；assets 是只读聚合（asyncio.to_thread 内同步读文件），无共享可写状态。
++3. 切换/生命周期：解析失败 fail-open（log info + None），不影响 test_rows 其余字段与整卡渲染；前端 raw_binding 为 None 行为与现状逐字节一致。
++4. 作用域：change_dir 由 change_key 解析（既有逻辑），锚点匹配限定单变更目录内，无跨工作区串面。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-test-binding-raw-text 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：requirements.md 槽格式是 sillyspec 工具约定（AGENT 注释 + 内容行），工具改版后格式漂移会让正则失配——表现为 raw_binding=None 静默降级（与现状等价，不劣化），且工具坑已留档（test-trace 截断坑里建议摘录保真，若工具侧修了截断，tests 数组本身带用例名，本原文行自然退居补充信息）。试过但放弃：①改摘录器保真——外部 CLI 工具，本项目侧改不了；②前端自行拉归档 requirements.md 展示——归档件在 spec 镜像树，无逐文件读取端点，为展示开新端点收益不成比例。正则锚点取 FR-[A-Za-z0-9-]+ 宽容匹配（含 FR-auto-xxx 等未来形态），内容行截止到下一 <!--AGENT: 或空行。
+
+diff --git a/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/flow-state.yaml b/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/flow-state.yaml
+@@ -0,0 +1,15 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 26f566448b0718800c694c5054ce11a7371c17a3
++updatedAt: '2026-09-26T07:38:19.560Z'
++gate_summary: >-
++  test: skipped — 跳过原因：test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）。｜lint: passed ← cd backend && uv run ruff check
++  . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
++  typecheck（17.7s）｜门文件 8 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/proposal.md b/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/proposal.md
+@@ -0,0 +1,47 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T07:26:45.049Z
++---
++# 提案书（Proposal）— 2026-09-26-assets-test-binding-raw-text
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:83696b13f13d443cf941eacaad6eb5980a53c06bfcdada0fcd07b2ff3563c809:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-test-binding-raw-text 留痕重锚 -->
++任务原话转写：动机:test-trace.json 摘录时把测试绑定行的 ::用例名 后缀截断,资产卡测试绑定只显示文件级路径,用户看不到手写原文(含测试类/用例与描述文字);原文就在归档变更目录 requirements.md 的测试绑定槽里,可读不应浪费——展示层把原文带出来。
++
++成功标准:
++- 后端 assets 聚合解析归档 requirements.md 的 AGENT 测试绑定槽原文,按锚点匹配挂到 ChangeTestRow 新字段 raw_binding;requirements 缺失或解析失败时 raw_binding 为 None,既有行为零变化 fail-open
++- ChangeTestRow schema 变更后按 CLAUDE.md 规则 21 跑 pnpm gen:types 并随提交更新 api-types.ts 与 backend/openapi.json
++- 前端资产卡测试绑定行在 raw_binding 存在时于行下显示原文小字,超长截断且悬停可见全文
++- 后端 test_assets 补用例:含绑定槽原文的 requirements 提取、无 requirements 容错为 None
++- 前端 change-assets-card 组件测试补原文显示断言,既有 15 用例不回归;后端 change 聚焦测试全绿;frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:2f22875f37487682c2411f47ea372c0bc245d9574c825a8252e0613c7621eb9b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-test-binding-raw-text 留痕重锚 -->
++按成功标准机械推导，共 8 条验收面：
++1. 后端 assets 聚合解析归档 requirements.md 的 AGENT 测试绑定槽原文,按锚点匹配挂到 ChangeTestRow 新字段 raw_binding
++2. requirements 缺失或解析失败时 raw_binding 为 None,既有行为零变化 fail-open
++3. ChangeTestRow schema 变更后按 CLAUDE.md 规则 21 跑 pnpm gen:types 并随提交更新 api-types.ts 与 backend/openapi.json
++4. 前端资产卡测试绑定行在 raw_binding 存在时于行下显示原文小字,超长截断且悬停可见全文
++5. 后端 test_assets 补用例:含绑定槽原文的 requirements 提取、无 requirements 容错为 None
++6. 前端 change-assets-card 组件测试补原文显示断言,既有 15 用例不回归
++7. 后端 change 聚焦测试全绿
++8. frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:14b9f4fd4da6d3719dec505843fae82155fbd1010d03c6caebe6cf50cf927ed5:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-assets-test-binding-raw-text 留痕重锚 -->
++1. 后端 assets 聚合解析归档 requirements.md 的 AGENT 测试绑定槽原文,按锚点匹配挂到 ChangeTestRow 新字段 raw_binding
++2. requirements 缺失或解析失败时 raw_binding 为 None,既有行为零变化 fail-open
++3. ChangeTestRow schema 变更后按 CLAUDE.md 规则 21 跑 pnpm gen:types 并随提交更新 api-types.ts 与 backend/openapi.json
++4. 前端资产卡测试绑定行在 raw_binding 存在时于行下显示原文小字,超长截断且悬停可见全文
++5. 后端 test_assets 补用例:含绑定槽原文的 requirements 提取、无 requirements 容错为 None
++6. 前端 change-assets-card 组件测试补原文显示断言,既有 15 用例不回归
++7. 后端 change 聚焦测试全绿
++8. frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/requirements.md b/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-assets-test-binding-raw-text/requirements.md
+@@ -0,0 +1,47 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T07:26:45.050Z
++---
++# 需求规格（Requirements）— 2026-09-26-assets-test-binding-raw-text
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++<!-- 参考摘录 8 条合并为 FR-01~04（FR-01 吸收 01~02、FR-02 对应 03、FR-03 吸收 04~06、FR-04 对应 07~08） -->
++
++### FR-01: 测试绑定行附带手写原文（raw_binding）
++Given test-trace.json 摘录时截断 `::用例` 后缀，tests 数组只剩文件级路径，而含测试类/用例与描述的手写原文就在归档变更目录 requirements.md 的 AGENT 测试绑定槽里，
++When assets 聚合服务解析测试绑定（GET /changes/{cid}/assets），
++Then 每条 ChangeTestRow 按锚点（FR-NN）匹配挂上新字段 `raw_binding`（绑定槽注释行之后的内容行原文，多行拼接）；requirements.md 缺失、槽不存在或解析失败时 `raw_binding` 为 None，既有字段与行为零变化（fail-open）。
++
++### FR-02: 类型契约同步
++Given ChangeTestRow schema 新增字段，
++When 后端 schema 变更落盘，
++When 按 CLAUDE.md 规则 21 运行 `pnpm gen:types`，
++Then `frontend/src/lib/api-types.ts` 与 `backend/openapi.json` 随提交更新，不落手写类型债。
++
++### FR-03: 前端资产卡显示原文
++Given 测试绑定行的 raw_binding 存在且与 tests 文件路径列表不同值（即原文含用例级/描述信息），
++When 资产卡渲染测试绑定组，
++When 该行下方显示原文小字（muted 色，超长截断，悬停 title 可见全文）；raw_binding 为 None 或与 tests 等价时不渲染该行。
++
++### FR-04: 测试与类型门禁全绿
++Given 三处改动落盘，
++When 运行后端 change 聚焦测试（test_assets 补「含绑定槽原文的 requirements 提取、无 requirements 容错为 None」两用例）与前端 change-assets-card 套件（补原文显示断言，既有 15 用例不回归）及 `tsc --noEmit`，
++Then 全部通过且 0 类型错误。
++
++
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/tests/modules/change/test_assets.py::raw_binding 槽原文提取 用例 与 ::无 requirements 容错 None 用例
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++生成物同步由 gen:types 幂等零漂移承担（backend/openapi.json + frontend/src/lib/api-types.ts 提交面肉眼可核）;无行为断言面,不适用:纯生成物
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::raw_binding 原文显示 用例(行下小字含原文与 title 悬停;None 时行不渲染断言)
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend uv run pytest tests/modules/change/ 聚焦全绿 + 前端资产卡全套一次跑过 + pnpm exec tsc --noEmit exit 0(2026-09-26 实测)

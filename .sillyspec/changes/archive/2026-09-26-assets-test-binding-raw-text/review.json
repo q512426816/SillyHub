@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-assets-test-binding-raw-text",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01 测试绑定槽手写路径与真实测试文件路径不一致",
+      "evidence": "绑定槽写 backend/tests/modules/change/test_assets.py，而 change.patch 中实际测试文件为 backend/app/modules/change/tests/test_assets.py（测试确实存在且断言该行为，仅槽内手写指针路径少 app/、目录序不同——恰是本变更所展示的那类手写原文的指针瑕疵，非代码缺陷）",
+      "location": ".sillyspec/changes/2026-09-26-assets-test-binding-raw-text/requirements.md:38 ↔ change.patch: backend/app/modules/change/tests/test_assets.py"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-03 绑定声明「None 时行不渲染断言」，但交付前端套件无该显式断言",
+      "evidence": "通读 change-assets-card.test.tsx 全文，raw_binding 相关断言仅两处：原文显示+title 悬停（增强用例）与等价不渲染（新用例）；raw_binding 为 None 的不渲染分支仅被路径解析组用例隐式经过（fixture 无该字段）而无 queryByTestId 断言，绑定声明与交付测试面不符；None 分支与等价分支共用同一 null 渲染出口，实际风险极低",
+      "location": "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx:195-237"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决:可接受——归档冻结件每次整读快照无时序假设，槽缺失/格式漂移→映射缺项→raw_binding=None，代码与声明一致；多行内容行以单空格拼接为原文、title 亦展示拼接文本属已声明单行展示取舍，与 FR-01『多行拼接』承诺一致；内容行截止到下一 <!--AGENT: 或空行为 design 槽4 明文声明且逐字兑现，真实归档件格式（注释行+内容行+空行）经对照兼容）",
+    "并发": "ok（边界已裁决:可接受——归档目录 CLI 归档后不再写、assets 聚合全程只读（patch 中对归档件零写路径）、asyncio.to_thread 内同步读且映射为局部变量，无共享可写状态，声明与代码一致）",
+    "切换": "ok（边界已裁决:可接受——解析失败 fail-open：except (OSError, ValueError) 覆盖缺文件/目录/解码损坏，log info + 空映射，raw_binding=None 且既有字段零变化；前端 None 分支由 r.raw_binding && 短路守卫与现状逐字节一致；等价不渲染口径为对数据判等（join(\" \") 或单元素相等）而非 UI 分隔符，概念边界已在 design 槽1 声明，实现合理——另见 findings 中 None 显式断言缺失一条）",
+    "作用域": "ok（边界已裁决:可接受——仅读 change_dir/requirements.md，change_dir 沿用既有 change_key 解析，锚点匹配限定单变更目录无串台；外部摘录器截断不在本仓修、以原文行补展示为 design 槽4 明文取舍（工具侧修复后本行自然退居补充，不劣化）；gen:types 纯生成物无行为断言面为 FR-02 绑定明示豁免，且 openapi.json raw_binding anyOf string/null 与 api-types.ts raw_binding?: string | null 均已在 patch 中对齐 ChangeTestRow 实现，同步经提交面核验）"
+  },
+  "reviewedAt": "2026-09-26T07:40:52Z"
+}
