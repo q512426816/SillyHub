@@ -4,11 +4,16 @@ substeps:
   artifacts: done
   ledger: done
   patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
 baseline_commit: ede9fcfbb7d28384f27fac7af48867140c93edef
-updatedAt: '2026-09-26T12:17:20.050Z'
+updatedAt: '2026-09-26T12:21:29.783Z'
 upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
 gate_summary: >-
   test: passed ← module[frontend]（165.0s）

@@ -368,3 +368,108 @@ created_at: 2026-09-22T16:33:05.472Z
   confirmed_at: null
   source_change: 2026-09-26-assets-testfile-path-resolve
   status: active
+
+## FR-auto-frontend-027 卡片视图不再把整行 HTML 注释当正文渲染（与原文视图口径一致：注释不可见）
+变更：2026-09-26-knowledge-card-machine-block
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 卡片视图不再把整行 HTML 注释当正文渲染（与原文视图口径一致：注释不可见）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-knowledge-card-machine-block/requirements.md#FR-01
+最近确认：963dde53e652652befc497ed379f1eaefe60924b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-knowledge-card-machine-block:flow:FR-01
+  tests: frontend/src/components/knowledge/__tests__/entry-card-list.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-knowledge-card-machine-block
+  status: active
+
+## FR-auto-frontend-028 测试绑定机器块（注释标记 + row 行 + 缩进键值行）解析为结构化数据，以紧凑只读行展示 tes
+变更：2026-09-26-knowledge-card-machine-block
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 测试绑定机器块（注释标记 + row 行 + 缩进键值行）解析为结构化数据，以紧凑只读行展示 tests 路径与 state，不再整块 YAML 倾泻；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-knowledge-card-machine-block/requirements.md#FR-02
+最近确认：963dde53e652652befc497ed379f1eaefe60924b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-knowledge-card-machine-block:flow:FR-02
+  tests: frontend/src/components/knowledge/__tests__/entry-card-list.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-knowledge-card-machine-block
+  status: active
+
+## FR-auto-frontend-029 机器块的「测试绑定：」空字段头不再以悬空空值字段行出现在字段网格
+变更：2026-09-26-knowledge-card-machine-block
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 机器块的「测试绑定：」空字段头不再以悬空空值字段行出现在字段网格；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-knowledge-card-machine-block/requirements.md#FR-03
+最近确认：963dde53e652652befc497ed379f1eaefe60924b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-knowledge-card-machine-block:flow:FR-03
+  tests: frontend/src/components/knowledge/__tests__/entry-card-list.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-knowledge-card-machine-block
+  status: active
+
+## FR-auto-frontend-030 无机器块的既有条目（decisions/fr/手册）渲染零回归
+变更：2026-09-26-knowledge-card-machine-block
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 无机器块的既有条目（decisions/fr/手册）渲染零回归；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-knowledge-card-machine-block/requirements.md#FR-04
+最近确认：963dde53e652652befc497ed379f1eaefe60924b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-knowledge-card-machine-block:flow:FR-04
+  tests: __tests__/knowledge-page.test.ts | frontend/src/components/knowledge/__tests__/entry-card-list.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-knowledge-card-machine-block
+  status: active
+
+## FR-auto-frontend-031 聚焦测试全绿 + tsc 0 错
+变更：2026-09-26-knowledge-card-machine-block
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 聚焦测试全绿 + tsc 0 错；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-knowledge-card-machine-block/requirements.md#FR-05
+最近确认：963dde53e652652befc497ed379f1eaefe60924b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-knowledge-card-machine-block:flow:FR-05
+  tests: frontend/src/components/knowledge/__tests__/entry-card-list.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-knowledge-card-machine-block
+  status: active

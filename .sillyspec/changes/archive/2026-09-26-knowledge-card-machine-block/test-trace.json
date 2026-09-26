@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-knowledge-card-machine-block",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-26-knowledge-card-machine-block:flow:FR-01",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/entry-card-list.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-knowledge-card-machine-block"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-26-knowledge-card-machine-block:flow:FR-02",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/entry-card-list.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-knowledge-card-machine-block"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-26-knowledge-card-machine-block:flow:FR-03",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/entry-card-list.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-knowledge-card-machine-block"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-26-knowledge-card-machine-block:flow:FR-04",
+      "tests": [
+        "__tests__/knowledge-page.test.ts",
+        "frontend/src/components/knowledge/__tests__/entry-card-list.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-knowledge-card-machine-block"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-26-knowledge-card-machine-block:flow:FR-05",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/entry-card-list.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-knowledge-card-machine-block"
+    }
+  ]
+}
