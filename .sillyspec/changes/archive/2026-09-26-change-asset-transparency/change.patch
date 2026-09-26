@@ -1,0 +1,938 @@
+diff --git a/.sillyspec/changes/2026-09-26-change-asset-transparency/tasks.md b/.sillyspec/changes/2026-09-26-change-asset-transparency/tasks.md
+new file mode 100644
+index 000000000..c155bd430
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-change-asset-transparency/tasks.md
+@@ -0,0 +1,15 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T08:19:43.797Z
++---
++# 任务注册表（Tasks）— 2026-09-26-change-asset-transparency
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++- [x] task-01: 后端 _parse_entries_owned_by/_scan_domain_files 归属行参数化（owner_line_re，默认「变更：」零回归）；get_change_assets 聚合知识触达——「待复核：」标记反查 fr+decisions 双域 → knowledge_touch 组（id/标题/file，fail-open）
++- [x] task-02: 后端 _read_touched_modules——镜像 docs/*/modules/_module-map.yaml（yaml 安全解析逐图容错）× 归档 change-patch file_list 前缀匹配（文件剥项目顶层段），中文名 doc 首行 h1 提取失败回退 id，doc 相对路径按模块图 schema 惯例（docs/<项目>/…）→ touched_modules 组
++- [x] task-03: 前端资产卡两组渲染——知识触达行 Link 跳知识库 ?file=&anchor= 深链（FR 行同款）；模块触达 chip 点击开模块文档预览弹窗（explorer FilePreview 直挂，镜像相对路径补 .sillyspec/ 前缀）；计数并入卡头；逐组有数据才渲染
++- [x] task-04: schema DTO（ChangeKnowledgeTouch/ChangeTouchedModule + ChangeAssetsRead 两组）+ 规则 21 gen:types 同步 openapi.json 与 api-types.ts 随提交
++- [x] task-05: 后端 test_assets 补四面——金样本待复核反查双域断言、模块 glob 匹配与 h1 中文名（test_touched_modules_glob_and_name）、doc 无 h1 回退与无 doc 模块（name_fallback 纯函数）、无标记空组（empty_without_marker）= 21 passed
++- [x] task-06: 前端组件补三用例——知识触达渲染与 href 深链、模块 chip 中文名与 .sillyspec 前缀弹窗、两组无数据不渲染 = 19 passed；后端 change 模块 589 passed + 2 skipped；聚焦面 46 passed；tsc exit 0
+diff --git a/backend/app/modules/change/assets.py b/backend/app/modules/change/assets.py
+index 45ff77571..a67baab50 100644
+--- a/backend/app/modules/change/assets.py
++++ b/backend/app/modules/change/assets.py
+@@ -30,6 +30,7 @@ import re
+ import uuid
+ from pathlib import Path
+ 
++import yaml
+ from sqlalchemy import select
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+@@ -41,9 +42,11 @@ from app.modules.change.schema import (
+     ChangeDecisionEntry,
+     ChangeDeltaMeta,
+     ChangeFrEntry,
++    ChangeKnowledgeTouch,
+     ChangePatchFileRead,
+     ChangePatchMeta,
+     ChangeTestRow,
++    ChangeTouchedModule,
+ )
+ 
+ log = get_logger(__name__)
+@@ -52,6 +55,9 @@ log = get_logger(__name__)
+ # 上游格式演进时本层同步，D-001@v1 故障面；未知行一律跳过）。
+ _ENTRY_HEAD_RE = re.compile(r"^##\s+(FR-\S+|D-\d+@v\d+)\s+(.+)$")
+ _OWNER_LINE_RE = re.compile(r"^变更：(.+)$")
++# 「待复核：<变更名>」归属行（flow done 对触达域 active 条目打标；知识触达
++# 反查用——2026-09-26-change-asset-transparency，与「变更：」行同构）。
++_REVIEW_MARK_RE = re.compile(r"^待复核：(.+)$")
+ _STATUS_LINE_RE = re.compile(r"^状态：(\S+)")
+ # git 块头（``diff --git a/<old> b/<new>``；两侧可被引号包裹——特殊字符路径形态）。
+ _PATCH_HEADER_RE = re.compile(r"^diff --git (?P<old>\"[^\"]*\"|\S+) (?P<new>\"[^\"]*\"|\S+)$")
+@@ -62,11 +68,18 @@ _PATCH_FILES_MAX = 500
+ _PATCH_FILE_MAX_CHARS = 200_000
+ 
+ 
+-def _parse_entries_owned_by(text: str, change_key: str) -> list[tuple[str, str, str | None]]:
+-    """解析域文件条目（节头分条 + ``变更：`` 行归属过滤）。
++def _parse_entries_owned_by(
++    text: str,
++    change_key: str,
++    *,
++    owner_line_re: re.Pattern[str] = _OWNER_LINE_RE,
++) -> list[tuple[str, str, str | None]]:
++    """解析域文件条目（节头分条 + 归属行过滤，默认 ``变更：``）。
+ 
+     返回 ``(id, title, status)`` 三元组列表；status 行缺省 None（fr 条目
+     恒有、decisions 个别条目无——对齐 CLI 两文件的现实容差）。
++    ``owner_line_re``（2026-09-26-change-asset-transparency）允许换归属行
++    正则（知识触达反查用 ``待复核：`` 标记行）。
+     """
+     entries: list[tuple[str, str, str | None]] = []
+     cur_id: str | None = None
+@@ -85,7 +98,7 @@ def _parse_entries_owned_by(text: str, change_key: str) -> list[tuple[str, str,
+             continue
+         if cur_id is None:
+             continue
+-        owner = _OWNER_LINE_RE.match(line)
++        owner = owner_line_re.match(line)
+         if owner:
+             owned = owner.group(1).strip() == change_key
+             continue
+@@ -99,9 +112,16 @@ def _parse_entries_owned_by(text: str, change_key: str) -> list[tuple[str, str,
+ 
+ 
+ def _scan_domain_files(
+-    spec_root: Path, domain: str, change_key: str
++    spec_root: Path,
++    domain: str,
++    change_key: str,
++    *,
++    owner_line_re: re.Pattern[str] = _OWNER_LINE_RE,
+ ) -> list[tuple[str, str, str | None, str]]:
+-    """扫 ``spec_root/knowledge/<domain>/*.md``，返回归属条目 ``(id,title,status,rel_file)``。"""
++    """扫 ``spec_root/knowledge/<domain>/*.md``，返回归属条目 ``(id,title,status,rel_file)``。
++
++    ``owner_line_re`` 透传（知识触达反查用 ``待复核：`` 标记）。
++    """
+     out: list[tuple[str, str, str | None, str]] = []
+     domain_dir = spec_root / "knowledge" / domain
+     if not domain_dir.is_dir():
+@@ -112,7 +132,9 @@ def _scan_domain_files(
+         except OSError as exc:
+             log.warning("change.assets_read_domain_file_failed", file=str(md), error=str(exc))
+             continue
+-        for entry_id, title, status in _parse_entries_owned_by(text, change_key):
++        for entry_id, title, status in _parse_entries_owned_by(
++            text, change_key, owner_line_re=owner_line_re
++        ):
+             out.append((entry_id, title, status, md.relative_to(spec_root).as_posix()))
+     return out
+ 
+@@ -348,6 +370,73 @@ def _read_delta_meta(change_dir: Path) -> ChangeDeltaMeta | None:
+     return ChangeDeltaMeta(headline=headline, before_lines=before_lines, delta_lines=delta_lines)
+ 
+ 
++def _read_touched_modules(spec_root: Path, file_list: list[str]) -> list["ChangeTouchedModule"]:
++    """模块触达：交付文件清单 × 镜像模块图（docs/<项目>/modules/_module-map.yaml）。
++
++    paths glob 语义按现行形态（单前缀 + ``**``）简化为去 ``**`` 前缀匹配；
++    文件路径相对仓库根（如 ``backend/app/...``），匹配前先剥项目顶层段。
++    模块中文名从 doc 文件首行 ``#`` h1 提取（conventions 模块卡规范），失败
++    回退模块 id。逐图/逐模块 fail-open，缺图 → 空列表。
++    """
++    out: list[ChangeTouchedModule] = []
++    seen: set[tuple[str, str]] = set()
++    docs_dir = spec_root / "docs"
++    if not docs_dir.is_dir():
++        return out
++    for map_path in sorted(docs_dir.glob("*/modules/_module-map.yaml")):
++        project = map_path.parent.parent.name
++        try:
++            data = yaml.safe_load(map_path.read_text(encoding="utf-8")) or {}
++        except (OSError, yaml.YAMLError) as exc:
++            log.info("change.assets_module_map_unavailable", file=str(map_path), error=str(exc))
++            continue
++        mods = data.get("modules") if isinstance(data, dict) else None
++        if not isinstance(mods, dict):
++            continue
++        # 项目内相对路径：仓库相对文件剥 ``<project>/`` 顶层段后与前缀比对。
++        rel_files = [f[len(project) + 1 :] for f in file_list if f.startswith(f"{project}/")]
++        if not rel_files:
++            continue
++        for mod_id, mod in mods.items():
++            if not isinstance(mod, dict) or (project, mod_id) in seen:
++                continue
++            prefixes = []
++            for p in mod.get("paths") or []:
++                p = str(p)
++                prefixes.append((p[:-2] if p.endswith("**") else p).rstrip("/"))
++            prefixes = [p for p in prefixes if p]
++            if not any(
++                f == pref or f.startswith(f"{pref}/") for f in rel_files for pref in prefixes
++            ):
++                continue
++            seen.add((project, mod_id))
++            doc = str(mod.get("doc") or "") or None
++            name = mod_id
++            if doc:
++                try:
++                    # doc 相对项目 docs 根（map 的 doc: modules/change.md 即
++                    # docs/<project>/modules/change.md——模块图 schema 惯例）。
++                    h1 = next(
++                        line
++                        for line in (map_path.parent.parent / doc)
++                        .read_text(encoding="utf-8")
++                        .splitlines()
++                        if line.startswith("# ")
++                    )
++                    name = h1[2:].strip() or mod_id
++                except (OSError, StopIteration):
++                    pass
++            out.append(
++                ChangeTouchedModule(
++                    id=mod_id,
++                    name=name,
++                    project=project,
++                    doc=f"docs/{project}/{doc}" if doc else None,
++                )
++            )
++    return out
++
++
+ class ChangeAssetsQueryService:
+     """变更沉淀资产只读聚合服务（唯一数据源，对接 assets 端点）。"""
+ 
+@@ -361,9 +450,20 @@ class ChangeAssetsQueryService:
+         spec_root = await self._spec_root(workspace_id)
+         archived = change.location == "archive" or change.status == "archived"
+ 
+-        fr_rows, dec_rows = await asyncio.gather(
++        fr_rows, dec_rows, touch_rows = await asyncio.gather(
+             asyncio.to_thread(_scan_domain_files, spec_root, "fr", change.change_key),
+             asyncio.to_thread(_scan_domain_files, spec_root, "decisions", change.change_key),
++            # 知识触达（2026-09-26-change-asset-transparency / FR-01）：
++            # 「待复核：」标记反查双域（fr + decisions 同构一轮）。
++            asyncio.to_thread(
++                lambda: [
++                    row
++                    for domain in ("fr", "decisions")
++                    for row in _scan_domain_files(
++                        spec_root, domain, change.change_key, owner_line_re=_REVIEW_MARK_RE
++                    )
++                ]
++            ),
+         )
+         result = ChangeAssetsRead(
+             change_key=change.change_key,
+@@ -372,6 +472,9 @@ class ChangeAssetsQueryService:
+             decisions=[
+                 ChangeDecisionEntry(id=i, title=t, status=s, file=f) for i, t, s, f in dec_rows
+             ],
++            knowledge_touch=[
++                ChangeKnowledgeTouch(id=i, title=t, file=f) for i, t, _s, f in touch_rows
++            ],
+         )
+         if not archived:
+             # 在途变更：目录件尚不存在，跳过读取（design R-03）。
+@@ -390,6 +493,10 @@ class ChangeAssetsQueryService:
+         result.test_rows = test_rows
+         result.patch = patch
+         result.delta = delta
++        # 模块触达（FR-02）：归档 file_list（既有 patch meta 数据）× 模块图。
++        result.touched_modules = await asyncio.to_thread(
++            _read_touched_modules, spec_root, patch.file_list if patch else []
++        )
+         return result
+ 
+     async def get_patch_file_diff(
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index caccddf86..fac241ce7 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -812,6 +812,33 @@ class ChangeDecisionEntry(BaseModel):
+     file: str
+ 
+ 
++class ChangeKnowledgeTouch(BaseModel):
++    """知识触达条目（2026-09-26-change-asset-transparency / FR-01）。
++
++    本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查
++    （flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准
++    不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。
++    """
++
++    id: str
++    title: str
++    file: str
++
++
++class ChangeTouchedModule(BaseModel):
++    """模块触达条目（FR-02）——交付文件清单 × 镜像模块图匹配的模块。
++
++    ``name`` 从模块 doc 首行 h1 提取（conventions 模块卡规范），失败回退
++    模块 id；``doc`` 是镜像内相对路径（docs/<项目>/modules/…，explorer 预览
++    侧行以此为锚点打开仓库文件）。
++    """
++
++    id: str
++    name: str
++    project: str
++    doc: str | None = None
++
++
+ class ChangeTestRow(BaseModel):
+     """测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。
+ 
+@@ -877,6 +904,11 @@ class ChangeAssetsRead(BaseModel):
+     archived: bool = False
+     fr_entries: list[ChangeFrEntry] = Field(default_factory=list)
+     decisions: list[ChangeDecisionEntry] = Field(default_factory=list)
++
++    # ── 资产透明面（2026-09-26-change-asset-transparency）────────────────────
++
++    knowledge_touch: list[ChangeKnowledgeTouch] = Field(default_factory=list)
++    touched_modules: list[ChangeTouchedModule] = Field(default_factory=list)
+     test_rows: list[ChangeTestRow] = Field(default_factory=list)
+     patch: ChangePatchMeta | None = None
+     delta: ChangeDeltaMeta | None = None
+diff --git a/backend/app/modules/change/tests/test_assets.py b/backend/app/modules/change/tests/test_assets.py
+index dcb355c4d..4159e0fb7 100644
+--- a/backend/app/modules/change/tests/test_assets.py
++++ b/backend/app/modules/change/tests/test_assets.py
+@@ -132,13 +132,31 @@ def _seed_mirror(spec_root: Path, *, with_trace: bool = True) -> None:
+     dec_dir.mkdir(parents=True)
+     (fr_dir / "auto-test.md").write_text(
+         f"# FR\n\n## FR-auto-test-001 金样本条目\n变更：{KEY}\n状态：active\n全文：x#FR-01\n\n"
+-        "## FR-auto-test-002 他属\n变更：someone-else\n状态：active\n",
++        "## FR-auto-test-002 他属\n变更：someone-else\n状态：active\n\n"
++        # 知识触达（2026-09-26-change-asset-transparency）：他属条目带本变更
++        # 待复核标记 → knowledge_touch 收录（与「变更：」归属正交）。
++        f"## FR-auto-test-003 注入命中\n待复核：{KEY}\n状态：active\n",
+         encoding="utf-8",
+     )
+     (dec_dir / "backend.md").write_text(
+-        f"# 决策\n\n## D-001@v1 金样本决策\n变更：{KEY}\n理由：z\n\n## D-009@v1 无主\n理由：w\n",
++        f"# 决策\n\n## D-001@v1 金样本决策\n变更：{KEY}\n理由：z\n\n## D-009@v1 无主\n理由：w\n\n"
++        f"## D-002@v1 注入命中决策\n待复核：{KEY}\n理由：r\n",
+         encoding="utf-8",
+     )
++    # 模块图 + 模块 doc（模块触达面）：change 模块命中交付文件、core 不命中；
++    # doc 有/无 h1 各一（中文名提取与回退面）。
++    mod_dir = spec_root / "docs" / "backend" / "modules"
++    mod_dir.mkdir(parents=True)
++    (mod_dir / "_module-map.yaml").write_text(
++        "schema_version: 2\nmodules:\n"
++        "  change:\n    status: active\n    doc: modules/change.md\n"
++        "    paths:\n      - app/modules/change/**\n"
++        "  core:\n    status: active\n    doc: modules/core.md\n"
++        "    paths:\n      - app/core/**\n",
++        encoding="utf-8",
++    )
++    (mod_dir / "change.md").write_text("# 变更中心\n\nchange 模块卡。\n", encoding="utf-8")
++    (mod_dir / "core.md").write_text("core 模块卡（无 h1）。\n", encoding="utf-8")
+     change_dir = spec_root / "changes" / "archive" / KEY
+     change_dir.mkdir(parents=True)
+     if with_trace:
+@@ -207,6 +225,12 @@ async def test_golden_aggregation(db_session, tmp_path: Path) -> None:
+         == "backend/app/modules/change/tests/test_assets.py::金样本聚合 用例"
+         " （共享前置：seed 镜像三件）"
+     )
++    # 知识触达（2026-09-26-change-asset-transparency）：待复核标记反查双域。
++    assert [(t.id, t.file) for t in result.knowledge_touch] == [
++        ("FR-auto-test-003", "knowledge/fr/auto-test.md"),
++        ("D-002@v1", "knowledge/decisions/backend.md"),
++    ]
++    assert result.touched_modules == []  # 无 change-patch.json → file_list 空
+     assert result.patch is None  # 无 change-patch.json → 容错 None
+     assert result.delta is not None
+     assert result.delta.before_lines == 2
+@@ -560,3 +584,66 @@ async def test_patch_file_http_unknown_change_404(
+         headers=auth_headers,
+     )
+     assert resp.status_code == 404, resp.text
++
++
++# ── 资产透明面（2026-09-26-change-asset-transparency）──────────────────────
++
++
++async def test_touched_modules_glob_and_name(db_session, tmp_path: Path) -> None:
++    """模块触达：file_list × 模块图前缀匹配；中文名 h1 提取 / 无 h1 回退 id。"""
++    spec_root = tmp_path / "spec-root-mod"
++    _seed_mirror(spec_root)
++    change_dir = spec_root / "changes" / "archive" / KEY
++    (change_dir / "change-patch.json").write_text(
++        json.dumps(
++            {
++                "totals": {"files": 2, "additions": 3, "deletions": 1},
++                "files": [
++                    "backend/app/modules/change/assets.py",
++                    "frontend/src/lib/api-types.ts",
++                ],
++            }
++        ),
++        encoding="utf-8",
++    )
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    # backend/app/modules/change/** 命中（中文名取 doc h1）；frontend 文件与
++    # backend 项目段不同不收；core 前缀未触不收。
++    assert [(m.id, m.name, m.project) for m in result.touched_modules] == [
++        ("change", "变更中心", "backend"),
++    ]
++
++
++def test_touched_modules_name_fallback(tmp_path: Path) -> None:
++    """纯函数：doc 无 h1 → 中文名回退 id；无 doc 模块 → doc=None 仍可触达。"""
++    from app.modules.change.assets import _read_touched_modules
++
++    mod_dir = tmp_path / "docs" / "p" / "modules"
++    mod_dir.mkdir(parents=True)
++    (mod_dir / "_module-map.yaml").write_text(
++        "modules:\n"
++        "  a:\n    doc: modules/a.md\n    paths: [src/a/**]\n"
++        "  b:\n    paths: [src/b/**]\n",
++        encoding="utf-8",
++    )
++    (mod_dir / "a.md").write_text("无标题文档\n", encoding="utf-8")
++    mods = _read_touched_modules(tmp_path, ["p/src/a/x.ts", "p/src/b/y.ts"])
++    assert [(m.id, m.name, m.doc) for m in mods] == [
++        ("a", "a", "docs/p/modules/a.md"),
++        ("b", "b", None),
++    ]
++
++
++def test_knowledge_touch_empty_without_marker(tmp_path: Path) -> None:
++    """纯函数：无待复核标记的域文件 → 空组（fail-open）。"""
++    from app.modules.change.assets import _REVIEW_MARK_RE, _scan_domain_files
++
++    fr_dir = tmp_path / "knowledge" / "fr"
++    fr_dir.mkdir(parents=True)
++    (fr_dir / "x.md").write_text("## FR-x-001 条目\n变更：someone\n", encoding="utf-8")
++    assert (
++        _scan_domain_files(tmp_path, "fr", "2026-09-26-none", owner_line_re=_REVIEW_MARK_RE) == []
++    )
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 892308c92..af3750377 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -38762,6 +38762,20 @@
+             "type": "array",
+             "title": "Decisions"
+           },
++          "knowledge_touch": {
++            "items": {
++              "$ref": "#/components/schemas/ChangeKnowledgeTouch"
++            },
++            "type": "array",
++            "title": "Knowledge Touch"
++          },
++          "touched_modules": {
++            "items": {
++              "$ref": "#/components/schemas/ChangeTouchedModule"
++            },
++            "type": "array",
++            "title": "Touched Modules"
++          },
+           "test_rows": {
+             "items": {
+               "$ref": "#/components/schemas/ChangeTestRow"
+@@ -39334,6 +39348,30 @@
+         "title": "ChangeFrEntry",
+         "description": "FR 索引条目（knowledge/fr 域文件内归属本变更的节）。"
+       },
++      "ChangeKnowledgeTouch": {
++        "properties": {
++          "id": {
++            "type": "string",
++            "title": "Id"
++          },
++          "title": {
++            "type": "string",
++            "title": "Title"
++          },
++          "file": {
++            "type": "string",
++            "title": "File"
++          }
++        },
++        "type": "object",
++        "required": [
++          "id",
++          "title",
++          "file"
++        ],
++        "title": "ChangeKnowledgeTouch",
++        "description": "知识触达条目（2026-09-26-change-asset-transparency / FR-01）。\n\n本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查\n（flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准\n不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。"
++      },
+       "ChangeList": {
+         "properties": {
+           "items": {
+@@ -40137,6 +40175,41 @@
+         "title": "ChangeTimelineRead",
+         "description": "变更合成时间线聚合（GET /changes/{cid}/timeline）。\n\n``born_at`` 来自 requirements.md frontmatter created_at（工件元数据补位，\nwatcher 后拉起时事件流缺诞生事件）；events 恒 provisional（观测语义，\n红线 D-004 延续：只展示不消费）。"
+       },
++      "ChangeTouchedModule": {
++        "properties": {
++          "id": {
++            "type": "string",
++            "title": "Id"
++          },
++          "name": {
++            "type": "string",
++            "title": "Name"
++          },
++          "project": {
++            "type": "string",
++            "title": "Project"
++          },
++          "doc": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Doc"
++          }
++        },
++        "type": "object",
++        "required": [
++          "id",
++          "name",
++          "project"
++        ],
++        "title": "ChangeTouchedModule",
++        "description": "模块触达条目（FR-02）——交付文件清单 × 镜像模块图匹配的模块。\n\n``name`` 从模块 doc 首行 h1 提取（conventions 模块卡规范），失败回退\n模块 id；``doc`` 是镜像内相对路径（docs/<项目>/modules/…，explorer 预览\n侧行以此为锚点打开仓库文件）。"
++      },
+       "ChangeUsageRead": {
+         "properties": {
+           "started_at": {
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index 9f2970291..3ca495762 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -385,3 +385,64 @@ describe("ChangeAssetsCard 测试文件路径解析", () => {
+     expect(tip).not.toHaveTextContent("工作区目录可能已被移动或删除");
+   });
+ });
++
++// ── 资产透明面（2026-09-26-change-asset-transparency / FR-01~03）────────────
++describe("ChangeAssetsCard 资产透明面", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++    mockSearch.mockResolvedValue(matchesOf(["backend/app/x.py"]));
++  });
++
++  it("知识触达组：待复核条目渲染并带知识库 file+anchor 深链 href", async () => {
++    mockGet.mockResolvedValue({
++      ...FULL,
++      knowledge_touch: [
++        {
++          id: "FR-auto-backend-015",
++          title: "THIN 辅助阶段与派发配置",
++          file: "knowledge/fr/auto-backend.md",
++        },
++      ],
++    });
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++
++    const group = await screen.findByTestId("change-assets-knowledge-touch");
++    expect(group).toHaveTextContent("FR-auto-backend-015");
++    expect(group).toHaveTextContent("THIN 辅助阶段与派发配置");
++    const link = group.querySelector("a");
++    expect(link).not.toBeNull();
++    expect(decodeURIComponent(link!.getAttribute("href") ?? "")).toContain(
++      "file=knowledge/fr/auto-backend.md&anchor=FR-auto-backend-015",
++    );
++  });
++
++  it("模块触达组：chip 渲染中文名，点击打开模块文档预览弹窗（.sillyspec 前缀）", async () => {
++    mockGet.mockResolvedValue({
++      ...FULL,
++      touched_modules: [
++        { id: "change", name: "变更中心", project: "backend", doc: "docs/backend/modules/change.md" },
++      ],
++    });
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++
++    const chip = await screen.findByTestId("change-assets-module-change");
++    expect(chip).toHaveTextContent("变更中心");
++    fireEvent.click(chip);
++    // 弹窗打开且 FilePreview 收到补 .sillyspec/ 前缀的仓库相对路径。
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      ".sillyspec/docs/backend/modules/change.md",
++    );
++  });
++
++  it("两组无数据时不渲染（fail-open 同款逐组门控）", async () => {
++    mockGet.mockResolvedValue(FULL);
++    renderCard();
++    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++
++    expect(await screen.findByTestId("change-assets-tests")).toBeInTheDocument();
++    expect(screen.queryByTestId("change-assets-knowledge-touch")).toBeNull();
++    expect(screen.queryByTestId("change-assets-touched-modules")).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index 173e1f289..9b9fe32df 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -115,6 +115,8 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+   const [testPath, setTestPath] = useState<string | null>(null);
+   /** 归档留档 diff 目标（null = 关）。 */
+   const [patchPath, setPatchPath] = useState<string | null>(null);
++  /** 模块文档预览目标（镜像内相对路径，null = 关）。 */
++  const [moduleDoc, setModuleDoc] = useState<string | null>(null);
+ 
+   const patchQ = useQuery({
+     queryKey: ["changePatchFile", workspaceId, changeId, patchPath],
+@@ -132,7 +134,13 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+   const decCount = data?.decisions?.length ?? 0;
+   const rowCount = data?.test_rows?.length ?? 0;
+   const hasAudit = Boolean(data?.patch || data?.delta);
+-  const total = frCount + decCount + rowCount + (hasAudit ? 1 : 0);
++  // 资产透明面（2026-09-26-change-asset-transparency）：知识触达（待复核标记
++  // 反查）与模块触达（file_list × 模块图）两组，计数并入卡头统计。
++  const touchList = data?.knowledge_touch ?? [];
++  const moduleList = data?.touched_modules ?? [];
++  const total =
++    frCount + decCount + rowCount + (hasAudit ? 1 : 0) + (touchList.length > 0 ? 1 : 0) +
++    (moduleList.length > 0 ? 1 : 0);
+   const patchFileList = data?.patch?.file_list ?? [];
+ 
+   return (
+@@ -232,6 +240,33 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+             </div>
+           ) : null}
+ 
++          {/* 知识触达（2026-09-26-change-asset-transparency / FR-01）：本变更知识
++              注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查（flow
++              done 对触达域打标），覆盖面以标记为准，行点击跳知识库深链。 */}
++          {touchList.length > 0 ? (
++            <div className="rounded border-border/60 border p-2" data-testid="change-assets-knowledge-touch">
++              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
++                <span>知识触达（注入命中 · 待复核标记反查）</span>
++                <span className="text-[10px] text-muted-foreground/70">
++                  {touchList.length} 条
++                </span>
++              </div>
++              {touchList.map((e) => (
++                <Link
++                  key={`${e.file}#${e.id}`}
++                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
++                    e.file ?? "",
++                  )}&anchor=${encodeURIComponent(e.id ?? "")}`}
++                  title={`打开知识库并定位到 ${e.id}`}
++                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 hover:underline"
++                >
++                  <span className="font-mono text-[10px] text-violet-700">{e.id}</span>
++                  <span className="min-w-0 flex-1 truncate">{e.title}</span>
++                </Link>
++              ))}
++            </div>
++          ) : null}
++
+           {rowCount > 0 ? (
+             <div className="rounded border-border/60 border p-2" data-testid="change-assets-tests">
+               <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+@@ -294,6 +329,36 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+             </div>
+           ) : null}
+ 
++          {/* 模块触达（FR-02）：交付文件清单 × 镜像模块图匹配的模块；chip 点击
++              打开模块文档预览（explorer 读仓库文件，路径确定不走搜索解析）。 */}
++          {moduleList.length > 0 ? (
++            <div className="rounded border-border/60 border p-2" data-testid="change-assets-touched-modules">
++              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
++                <span>模块触达</span>
++                <span className="text-[10px] text-muted-foreground/70">
++                  {moduleList.length} 个模块
++                </span>
++              </div>
++              <div className="flex flex-wrap gap-1.5">
++                {moduleList.map((m) => (
++                  <button
++                    key={`${m.project}/${m.id}`}
++                    type="button"
++                    data-testid={`change-assets-module-${m.id}`}
++                    onClick={() => setModuleDoc(m.doc ?? null)}
++                    title={m.doc ? `查看模块文档：${m.doc}` : `${m.project}/${m.id}（模块图未登记 doc）`}
++                    className="rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] hover:border-brand-300 hover:bg-brand-50/60"
++                  >
++                    {m.name || m.id}
++                    <span className="ml-1 text-[9px] text-muted-foreground/70">
++                      {m.project}
++                    </span>
++                  </button>
++                ))}
++              </div>
++            </div>
++          ) : null}
++
+           {hasAudit && data ? (
+             <div className="rounded border-border/60 border p-2 text-[11px] text-muted-foreground" data-testid="change-assets-audit">
+               <div className="mb-1 text-[11px] font-medium">归档留档</div>
+@@ -375,6 +440,30 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+         </DialogContent>
+       </Dialog>
+ 
++      {/* 模块文档预览弹窗（2026-09-26-change-asset-transparency / FR-02）：
++          路径确定（镜像内相对 docs/…），explorer 读仓库文件需补 .sillyspec/
++          前缀；无 doc 模块 chip 不开弹窗（title 已说明未登记）。 */}
++      <Dialog open={moduleDoc !== null} onOpenChange={(v) => !v && setModuleDoc(null)}>
++        <DialogContent className="flex h-[80vh] max-w-4xl flex-col gap-0 p-0">
++          <DialogHeader className="border-b px-4 py-3">
++            <DialogTitle className="text-sm">模块文档</DialogTitle>
++            <DialogDescription className="truncate font-mono text-[11px]">
++              {moduleDoc}
++            </DialogDescription>
++          </DialogHeader>
++          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
++            <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
++              {moduleDoc !== null ? (
++                <FilePreview
++                  workspaceId={workspaceId}
++                  filePath={`.sillyspec/${moduleDoc}`}
++                />
++              ) : null}
++            </div>
++          </div>
++        </DialogContent>
++      </Dialog>
++
+       {/* 归档留档单文件 diff 弹窗（FR-04）：冻结 patch 切片，非实时窗口。 */}
+       <Dialog open={patchPath !== null} onOpenChange={(v) => !v && setPatchPath(null)}>
+         <DialogContent className="flex h-[80vh] max-w-5xl flex-col gap-0 p-0">
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 77dc055e9..d5e9ee0db 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -13369,6 +13369,10 @@ export interface components {
+             fr_entries?: components["schemas"]["ChangeFrEntry"][];
+             /** Decisions */
+             decisions?: components["schemas"]["ChangeDecisionEntry"][];
++            /** Knowledge Touch */
++            knowledge_touch?: components["schemas"]["ChangeKnowledgeTouch"][];
++            /** Touched Modules */
++            touched_modules?: components["schemas"]["ChangeTouchedModule"][];
+             /** Test Rows */
+             test_rows?: components["schemas"]["ChangeTestRow"][];
+             patch?: components["schemas"]["ChangePatchMeta"] | null;
+@@ -13597,6 +13601,22 @@ export interface components {
+             /** File */
+             file: string;
+         };
++        /**
++         * ChangeKnowledgeTouch
++         * @description 知识触达条目（2026-09-26-change-asset-transparency / FR-01）。
++         *
++         *     本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查
++         *     （flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准
++         *     不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。
++         */
++        ChangeKnowledgeTouch: {
++            /** Id */
++            id: string;
++            /** Title */
++            title: string;
++            /** File */
++            file: string;
++        };
+         /** ChangeList */
+         ChangeList: {
+             /** Items */
+@@ -13891,6 +13911,24 @@ export interface components {
+             tasks?: components["schemas"]["TimelineTask"][];
+             stats?: components["schemas"]["TimelineStats"];
+         };
++        /**
++         * ChangeTouchedModule
++         * @description 模块触达条目（FR-02）——交付文件清单 × 镜像模块图匹配的模块。
++         *
++         *     ``name`` 从模块 doc 首行 h1 提取（conventions 模块卡规范），失败回退
++         *     模块 id；``doc`` 是镜像内相对路径（docs/<项目>/modules/…，explorer 预览
++         *     侧行以此为锚点打开仓库文件）。
++         */
++        ChangeTouchedModule: {
++            /** Id */
++            id: string;
++            /** Name */
++            name: string;
++            /** Project */
++            project: string;
++            /** Doc */
++            doc?: string | null;
++        };
+         /**
+          * ChangeUsageRead
+          * @description 变更/快速修复完整用量（两个 usage 详情端点响应，D-005@v1）。
+diff --git a/.sillyspec/changes/2026-09-26-change-asset-transparency/design.md b/.sillyspec/changes/2026-09-26-change-asset-transparency/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-change-asset-transparency/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T08:19:43.797Z
++---
++# 设计记录（Design Record）— 2026-09-26-change-asset-transparency
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-asset-transparency 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++只读展示增强，沿用沉淀资产聚合与卡片：①后端 assets.py 两组聚合——知识触达复用既有 fr/decisions 条目解析（_parse_entries_owned_by 的「变更：」归属改为「待复核：」归属变体参数化，双域全扫）；模块触达读归档 change-patch 的 file_list（既有数据）× 镜像 docs/*/modules/_module-map.yaml（yaml 安全解析，paths 去 ** 后前缀匹配，多项目并扫），模块中文名读 doc 文件首行 h1 提取（失败回退模块 id）；DTO 两组挂 ChangeAssetsRead。②前端资产卡两组渲染：知识触达行 Link 跳知识库 ?file=&anchor=（FR 行同款）；模块触达 chip 点击开独立文件预览弹窗（explorer FilePreview 直挂，路径确定不走测试文件的搜索解析）。③规则 21 gen:types。数据可得性依据：待复核标记由 flow done 对触达域 active FR 打标（knowledge/fr/auto-backend.md 实证 2026-09-26-assets-test-binding-raw-text 六处）；模块图 schema_version 2 含 doc/paths。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-asset-transparency 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++GET /changes/{cid}/assets 响应新增两组（既有字段零变化）：knowledge_touch: [{id, title, file}] 与 touched_modules: [{id, name, project, doc}]；api-types.ts 随 gen:types 再生成。无新端点。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-asset-transparency 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：知识条目与模块图是镜像快照（append-only 为主），聚合每次整读；「待复核」标记在 flow done 时点写入，归档后稳定，在途变更读到的标记随轮询自然增长。
++2. 并发写：全只读（镜像文件 SELECT 级读）；yaml/md 解析失败逐项 fail-open 降空组，不影响其余组。
++3. 切换/生命周期：弹窗复用既有 Dialog 模式（关闭清态）；模块 doc 文件在仓库被移动/删除 → explorer 预览呈现真实错误（既有行为），不吞。
++4. 作用域：镜像根与变更目录由 workspace_id 解析（既有逻辑）；知识触达按 change_key 匹配标记（变更名全局唯一约定）；模块图按镜像内 docs 归属，无跨工作区串面。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-asset-transparency 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：「待复核」标记语义≠完整知识消费面——flow start 注入的知识命中（conventions/patterns 锚点）不落盘，本组只覆盖被 flow done 打标的 FR/决策（有覆盖交集才打标）；页脚措辞如实（「知识触达（待复核标记反查）」）不冒充全量消费记录。次风险：模块图 paths glob 语义简化为去 ** 前缀匹配——深嵌套例外路径（负 glob/多段通配）会误归/漏归，模块图现行形态（单前缀+**）下无实例，误归代价是 chip 多一个可点项（低危）。中文名 h1 提取对无 h1 文档回退 id（conventions 要求模块卡 h1 中文名，存量已合规）。试过但放弃：①CLI 侧落盘完整注入清单（含知识命中）——外部工具改动，留坑建议；②模块页独立路由——平台无模块卡页面先例，开新页面超本变更换代价值，先以文档预览弹窗承接，后续有模块中心需求再升格。
+
+diff --git a/.sillyspec/changes/2026-09-26-change-asset-transparency/flow-state.yaml b/.sillyspec/changes/2026-09-26-change-asset-transparency/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-change-asset-transparency/flow-state.yaml
+@@ -0,0 +1,15 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 552ce7d991947ae59f4c33b9871b89397707765b
++updatedAt: '2026-09-26T08:34:34.942Z'
++gate_summary: >-
++  test: skipped — 跳过原因：test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）。｜lint: passed ← cd backend && uv run ruff check
++  . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
++  typecheck（11.9s）｜门文件 8 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-change-asset-transparency/proposal.md b/.sillyspec/changes/2026-09-26-change-asset-transparency/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-change-asset-transparency/proposal.md
+@@ -0,0 +1,48 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T08:19:43.796Z
++---
++# 提案书（Proposal）— 2026-09-26-change-asset-transparency
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:dd4d7b869dd131908b054de622b4899a75170badf6f38ea547774f07bd7467e4:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-asset-transparency 留痕重锚 -->
++任务原话转写：动机:变更消费了哪些项目资产目前只存在于 flow start 控制台输出——知识注入的现行 FR 在知识库条目上有「待复核:变更名」反向标记可反查,触达模块可由 patch 文件清单乘模块图算出;用户要求页面上可见可点击跳转,实现资产管理与数据透明。
++
++成功标准:
++- 后端 assets 聚合新增两组:知识触达(扫镜像 knowledge 的 fr 与 decisions 条目,节内含 待复核:变更名 行的条目收为 id/标题/file)与模块触达(归档 change-patch 的 file_list 对镜像 docs 各项目 modules/_module-map.yaml 的 paths glob 匹配,收为 模块 id/doc 路径/所属项目,中文名从 doc 文件 h1 提取失败回退 id);两组均 fail-open 缺源降空
++- 前端资产卡渲染两组:知识触达行点击跳知识库页 file 与 anchor 深链(既有先例);模块触达 chip 点击打开 explorer 文件预览弹窗展示模块文档(仓库文件,路径确定不走搜索解析)
++- 后端聚焦测试覆盖:待复核反查金样本、decisions 同构、无标记空组、模块 glob 匹配与中文名回退;前端组件测试覆盖两组渲染与跳转 href;聚焦测试全绿
++- 规则 21:DTO 落 schema 后跑 pnpm gen:types 随提交 openapi.json 与 api-types.ts;frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:9d9b046e922443f796d186937b638220e7357877985bb1bc710455d0e4de7b19:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-asset-transparency 留痕重锚 -->
++按成功标准机械推导，共 9 条验收面：
++1. 后端 assets 聚合新增两组:知识触达(扫镜像 knowledge 的 fr 与 decisions 条目,节内含 待复核:变更名 行的条目收为 id/标题/file)与模块触达(归档 change-patch 的 file_list 对镜像 docs 各项目 modules/_module-map.yaml 的 paths glob 匹配,收为 模块 id/doc 路径/所属项目,中文名从 doc 文件 h1 提取失败回退 id)
++2. 两组均 fail-open 缺源降空
++3. 前端资产卡渲染两组:知识触达行点击跳知识库页 file 与 anchor 深链(既有先例)
++4. 模块触达 chip 点击打开 explorer 文件预览弹窗展示模块文档(仓库文件,路径确定不走搜索解析)
++5. 后端聚焦测试覆盖:待复核反查金样本、decisions 同构、无标记空组、模块 glob 匹配与中文名回退
++6. 前端组件测试覆盖两组渲染与跳转 href
++7. 聚焦测试全绿
++8. 规则 21:DTO 落 schema 后跑 pnpm gen:types 随提交 openapi.json 与 api-types.ts
++9. frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:fbc2898a76f3051219317903988b3bbd6781669a4e4c224d975a6980a62953aa:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-asset-transparency 留痕重锚 -->
++1. 后端 assets 聚合新增两组:知识触达(扫镜像 knowledge 的 fr 与 decisions 条目,节内含 待复核:变更名 行的条目收为 id/标题/file)与模块触达(归档 change-patch 的 file_list 对镜像 docs 各项目 modules/_module-map.yaml 的 paths glob 匹配,收为 模块 id/doc 路径/所属项目,中文名从 doc 文件 h1 提取失败回退 id)
++2. 两组均 fail-open 缺源降空
++3. 前端资产卡渲染两组:知识触达行点击跳知识库页 file 与 anchor 深链(既有先例)
++4. 模块触达 chip 点击打开 explorer 文件预览弹窗展示模块文档(仓库文件,路径确定不走搜索解析)
++5. 后端聚焦测试覆盖:待复核反查金样本、decisions 同构、无标记空组、模块 glob 匹配与中文名回退
++6. 前端组件测试覆盖两组渲染与跳转 href
++7. 聚焦测试全绿
++8. 规则 21:DTO 落 schema 后跑 pnpm gen:types 随提交 openapi.json 与 api-types.ts
++9. frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-change-asset-transparency/requirements.md b/.sillyspec/changes/2026-09-26-change-asset-transparency/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-change-asset-transparency/requirements.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T08:19:43.797Z
++---
++# 需求规格（Requirements）— 2026-09-26-change-asset-transparency
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++<!-- 参考摘录按实现结构重组为 FR-01~04 -->
++
++### FR-01: 知识触达组——变更消费的知识条目可跳转
++Given 知识注入的现行 FR/决策在知识库条目内有「待复核：<变更名>」反向标记（flow done 对触达域打标），
++When assets 聚合解析（GET /changes/{cid}/assets），
++Then 新增 knowledge_touch 组收录镜像 knowledge 的 fr 与 decisions 中节内含该标记的条目（id/标题/file），fail-open 缺源降空；前端资产卡渲染该组，行点击跳知识库页 ?file=&anchor= 深链（沉淀资产 FR 行同款先例）。
++
++### FR-02: 模块触达组——变更触达的模块可点开模块文档
++Given 变更交付文件清单（归档 change-patch.json file_list）与镜像模块图（docs/<项目>/modules/_module-map.yaml 的 paths glob），
++When assets 聚合解析，
++Then 新增 touched_modules 组：file_list 对各项目模块图 paths 前缀/glob 匹配去重，收为 模块 id/所属项目/doc 路径，中文名从 doc 文件 h1 提取（失败回退 id）；前端渲染 chip 行，点击打开 explorer 文件预览弹窗展示模块文档（路径确定，不走搜索解析）。
++
++### FR-03: 两组展示语义与既有组一致
++Given 两组新数据挂入沉淀资产卡，
++When 卡片渲染，
++Then 逐组「有数据才渲染」（fail-open 同款）、计数徽标并入卡头统计、空组不出现；既有四组零回归。
++
++### FR-04: 测试与类型门禁全绿
++Given 改动落盘，
++When 运行后端聚焦测试（待复核反查金样本含 fr 与 decisions、无标记空组、模块 glob 匹配与中文名 h1 提取/回退）与前端组件测试（两组渲染、知识触达 href 深链、模块 chip 弹窗）及 gen:types 后 tsc，
++Then 全部通过、openapi.json 与 api-types.ts 随提交同步、0 类型错误。
++
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_assets.py::待复核反查金样本（fr+decisions 双域） 与 ::无标记空组 用例；前端 __tests__/change-assets-card.test.tsx::知识触达组渲染与 href 深链 用例
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_assets.py::模块触达 glob 匹配与中文名提取/回退 用例；前端::模块 chip 渲染与文档预览弹窗 用例
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++既有 16 用例 + 新增用例一次跑过（change-assets-card 全套回归承担）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend uv run pytest app/modules/change/tests/test_assets.py 全绿 + pnpm gen:types 幂等 + pnpm exec tsc exit 0（2026-09-26 实测）
++

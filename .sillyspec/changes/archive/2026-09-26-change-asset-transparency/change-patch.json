@@ -1,0 +1,28 @@
+{
+  "change": "2026-09-26-change-asset-transparency",
+  "baseline": "552ce7d991947ae59f4c33b9871b89397707765b",
+  "head": "14e2cc96e8f0ae672f57bd818a40f9d54a2d97e2",
+  "files": [
+    ".sillyspec/changes/2026-09-26-change-asset-transparency/tasks.md",
+    "backend/app/modules/change/assets.py",
+    "backend/app/modules/change/schema.py",
+    "backend/app/modules/change/tests/test_assets.py",
+    "backend/openapi.json",
+    "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+    "frontend/src/components/changes/detail/change-assets-card.tsx",
+    "frontend/src/lib/api-types.ts",
+    ".sillyspec/changes/2026-09-26-change-asset-transparency/design.md",
+    ".sillyspec/changes/2026-09-26-change-asset-transparency/flow-state.yaml",
+    ".sillyspec/changes/2026-09-26-change-asset-transparency/proposal.md",
+    ".sillyspec/changes/2026-09-26-change-asset-transparency/requirements.md"
+  ],
+  "totals": {
+    "files": 12,
+    "additions": 667,
+    "deletions": 10
+  },
+  "savedAt": "2026-09-26T08:34:35.570Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "f84b8f2f17c2d2d2b00713f6aef080bdf0f8dff407d55d1c1aa7593dffc1b44d",
+  "patchStatus": "ok"
+}

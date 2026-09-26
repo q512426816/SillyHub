@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-change-asset-transparency",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-26-change-asset-transparency:flow:FR-01",
+      "tests": [
+        "__tests__/change-assets-card.test.ts",
+        "backend/app/modules/change/tests/test_assets.py::待复核反查金样本（fr+decisions"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-change-asset-transparency"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-26-change-asset-transparency:flow:FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py::模块触达"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-change-asset-transparency"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-26-change-asset-transparency:flow:FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-change-asset-transparency"
+    }
+  ]
+}

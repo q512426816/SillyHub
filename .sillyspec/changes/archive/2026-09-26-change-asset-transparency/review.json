@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-change-asset-transparency",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "模块 doc h1 读取的 fail-open 未覆盖 UnicodeDecodeError，边角违反 design 槽3「md 解析失败逐项降空」承诺",
+      "evidence": "_read_touched_modules 内 doc read_text(encoding=\"utf-8\") 的异常捕获为 except (OSError, StopIteration)，UnicodeDecodeError 属 ValueError 族不在内；get_change_assets 对该调用又无外层兜底，故镜像 doc 文件若含非 UTF-8 字节会让整个 assets 聚合抛错而非该模块降空。与既有 _scan_domain_files 只捕 OSError 同款缺口（先例一致）、镜像 doc 为仓内约定 UTF-8 markdown，触发概率低，故 P3",
+      "location": "backend/app/modules/change/assets.py:416-428（_read_touched_modules doc h1 提取 try/except 段）"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "finding",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "checklistAnswers": {
+    "frImplementationTestConsistency": {
+      "FR-01": "兑现。后端 _REVIEW_MARK_RE 反查 fr+decisions 双域（gather 第三分支，owner_line_re=_REVIEW_MARK_RE），ChangeKnowledgeTouch(id/title/file) 挂 ChangeAssetsRead，fail-open 缺源降空（domain 目录缺失返回空表）；前端组渲染 + Link 跳 /workspaces/{wid}/knowledge?file=&anchor=（真实标记样例 knowledge/fr/auto-*.md 为行首全角冒号裸变更名，正则精确匹配；知识页 page.tsx:285 实收 anchor 深链，卡内三处既有同款 href 先例成立）。测试实存且断言该行为：test_golden_aggregation 断言双域 knowledge_touch 列表、test_knowledge_touch_empty_without_marker 断言空组、前端用例断言 href 含 file=…&anchor=FR-auto-backend-015",
+      "FR-02": "兑现。_read_touched_modules 逐图 glob docs/*/modules/_module-map.yaml，yaml.safe_load 逐图 try/except 容错，file_list 剥项目顶层段后对去 ** 前缀做等值/前缀匹配，(project, mod_id) 去重，doc h1 提取失败回退 id（OSError/StopIteration 捕获）；前端 chip 点击 setModuleDoc 后 Dialog 挂 FilePreview（.sillyspec/ 前缀，路径确定不走搜索）。真实模块图（_module-map.yaml）形态为单前缀+** 与裸文件名（pyproject.toml），语义简化在现行数据下无误归实例。测试实存：test_touched_modules_glob_and_name（集成断言 change 模块命中+中文名）、test_touched_modules_name_fallback（无 h1 回退 id、无 doc 模块 doc=None 仍触达）、前端 chip 中文名+.sillyspec 前缀弹窗用例",
+      "FR-03": "兑现。touchList/moduleList.length>0 才渲染（前端空组用例断言两 testid 不存在），total 并入两组计数（每组+1，同 hasAudit 形态），对既有四组仅加法改动；零回归承诺按约定由全套跑过承担（tasks.md 记 589 passed + 2 skipped / 卡片 19 passed，自述与 patch 内容无矛盾）",
+      "FR-04": "兑现（以 change.patch 为代码事实源）。5 个新测试用例在 patch 内实存且断言对应行为；openapi.json 与 api-types.ts 均随提交更新（见 checklist 5）。运行结果（pytest 全绿/gen:types 幂等/tsc exit 0）为自述声明，patch 无法直接证伪，不构成矛盾"
+    },
+    "blindSpotFourQuestions": "design 槽3 与代码一致：乱序——每次请求整读镜像，在途变更 patch=None → touched_modules 以空 file_list 自然降空（golden 断言实证），knowledge_touch 随 flow done 打标自然增长；并发——全只读，逐图/逐模块容错（唯 UnicodeDecodeError 边角缺口见 findings P3）；切换——moduleDoc 弹窗 onOpenChange 关闭清 null，FilePreview 条件挂载；作用域——spec_root 全程由 workspace_id 解析，change_key 精确等值匹配，(project, mod_id) 去重防跨项目重复",
+    "boundaryAdjudications": [
+      {
+        "boundary": "待复核标记≠全量知识消费面（知识命中锚点不落盘，只覆盖 flow done 打标的 FR/决策）",
+        "verdict": "可接受",
+        "reason": "前端组标题「知识触达（注入命中 · 待复核标记反查）」如实披露语义，不冒充全量消费记录；完整注入清单属 CLI 外部工具，留坑建议已写明"
+      },
+      {
+        "boundary": "模块图 paths glob 语义简化为去 ** 前缀匹配（负 glob/多段通配会误归/漏归）",
+        "verdict": "可接受",
+        "reason": "真实模块图全为「单前缀+**」或裸文件名形态，无例外路径实例；误归代价仅为 chip 多一个可点项（低危），且已在 design 槽4 显式声明"
+      },
+      {
+        "boundary": "模块页不新开路由，以 explorer 文档预览弹窗承接",
+        "verdict": "可接受",
+        "reason": "平台无模块卡页面先例，Dialog+FilePreview 等信息量交付，升格留待模块中心需求，换代价值判断成立"
+      },
+      {
+        "boundary": "无 doc 模块 chip 不开弹窗",
+        "verdict": "可接受",
+        "reason": "onClick 置 null 弹窗保持关闭，title 提示「模块图未登记 doc」，触达信息不丢失；空操作按钮为轻微 UX 瑕疵但代码注释已显式裁决"
+      }
+    ],
+    "protectionClaims": "四项防护均在代码中真实生效：①owner_line_re 参数化且默认 _OWNER_LINE_RE，既有 fr/decisions 两调用点未传参 → 默认行为零回归（patch 显示原调用未改）；②待复核与变更归属正交（金样本 FR-auto-test-003 仅待复核行只进 knowledge_touch、FR-auto-test-001 仅变更行只进 fr_entries，同一正则族互不串）；③剥项目顶层段匹配 f[len(project)+1:] 且以 f\"{project}/\" 为前置过滤，f==project 不会误切；④中文名 h1 失败回退 id 由 test_touched_modules_name_fallback 覆盖（OSError/StopIteration 路径）",
+    "generatedArtifactsSync": "openapi.json：ChangeAssetsRead 新增 knowledge_touch/touched_modules 两 array 字段 + ChangeKnowledgeTouch（id/title/file 全 required）/ChangeTouchedModule（id/name/project required，doc nullable optional）两 schema；api-types.ts：对应 optional 数组字段与两 interface（doc?: string | null）完全对齐，无漂移"
+  },
+  "reviewedAt": "2026-09-26T08:37:49Z"
+}
