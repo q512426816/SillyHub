@@ -1535,14 +1535,21 @@ export interface SillySpecCommandExecutor {
    * 收敛（闭环依据 design §5 Phase2 第2条）。结果全收敛写结果槽不 reject。
    */
   runGhostCleanup(): Promise<void>;
-  /** npm 升级链在跑判定（running/deferred 期间 true）——忙拒的第二臂（task-06）。 */
+  /**
+   * npm 升级链在跑判定（running/deferred 期间 true）——排队命令出队执行前轮询
+   * 等待的依据（2026-09-26-sillyspec-command-queue：原忙拒第二臂改等待）。
+   */
   isUpgradeInFlight(): boolean;
   /** 写命令结果内存槽（latest-wins；心跳 sillyspec_command_result 回传源，task-06）。 */
   recordCommandResult(result: SillySpecCommandResult): void;
 }
 
-/** 忙拒结果固定 error 文案（design §5 Phase2 第4条，页面据此可重试）。 */
-const SILLYSPEC_COMMAND_BUSY_ERROR = 'another sillyspec command is running';
+/**
+ * 排队命令等待 npm 升级链结束的轮询间隔（2026-09-26-sillyspec-command-queue：
+ * 忙拒改 FIFO 排队后，升级链在跑时出队命令轮询等待；间隔与 manager deferred
+ * 复查同级，定时器 unref 不阻进程退出）。
+ */
+const SILLYSPEC_COMMAND_UPGRADE_POLL_MS = 1000;
 
 // ── Daemon class（核心）──────────────────────────────────────────────────────
 
@@ -1653,14 +1660,13 @@ export class Daemon {
   /** CLEANUP 指令 in-flight guard：并发指令去重（对齐 terminal-observer cleanupStarted 模式）。 */
   private _cleanupInFlight = false;
   /**
-   * 2026-09-04-conflict-resolve-entry task-05（design §5 Phase2 第4条）：sillyspec
-   * 平台命令（resolve/ghost_cleanup）in-flight guard——同一时刻仅允许一条命令在跑
-   *（串行保护，仿 _cleanupInFlight）。置位/复位归本卡（_runSillyspecCommand 的
-   * try/finally）；忙时新指令立即记 failed 不排队（D-001 拒排队语义，Grill 裁决
-   * 维持）。忙判定第二臂（npm 升级链在跑）经 SillySpecCommandExecutor.isUpgradeInFlight
-   * 探询（task-06 实现）。
+   * 2026-09-26-sillyspec-command-queue：sillyspec 平台命令（resolve/ghost_cleanup）
+   * FIFO 串行队列的链尾 promise——并发到达的命令 `.then(run, run)` 排尾，前一条
+   * 完成（含防御 reject 出口）后下一条自动执行。取代 2026-09-04-conflict-resolve
+   * -entry task-05 的 in-flight 忙拒 guard（D-001 拒排队语义按用户裁决推翻：生产
+   * 实证 2026-09-25 两条裁决并发被双双拒记 failed 红字）。
    */
-  private _sillyspecCommandInFlight = false;
+  private _sillyspecCommandQueueTail: Promise<void> = Promise.resolve();
   /**
    * task-09（FR-02 / D-002@v1）：interactive 转发 per-run 确定性 flatSeq 计数。
    *
@@ -7213,7 +7219,8 @@ export class Daemon {
       // 同路径直连分发——不进 control-dispatcher、不入 CONTROL_KIND 词表、不经
       // run/lease/control_commands 状态机（机器级 fire-and-forget，无回执）。
       // 执行结果经心跳 sillyspec_command_result 回传（SillySpecCommandResult，
-      // 挂接归 task-06）；忙拒与转发骨架见 _runSillySpecCommand。
+      // 挂接归 task-06）；排队串行与转发骨架见 _runSillySpecCommand
+      //（2026-09-26-sillyspec-command-queue：原忙拒改 FIFO 排队）。
       case MSG.SILLYSPEC_RESOLVE: {
         // payload: SillySpecResolvePayload（backend 白名单已校验；入口仍做缺字段/
         // 值域校验——缺 change 或 strategy 不在 keep_local/take_platform 值域 →
@@ -7349,22 +7356,23 @@ export class Daemon {
   }
 
   /**
-   * task-05（design §5 Phase2 第4条）：sillyspec 平台命令统一转发 + in-flight
-   * 串行 guard。
+   * task-05（design §5 Phase2 第4条；2026-09-26-sillyspec-command-queue 重写）：
+   * sillyspec 平台命令统一转发 + FIFO 串行队列。
    *
-   * - 忙判定两臂：本 guard 在跑（``_sillyspecCommandInFlight``）或 npm 升级链在跑
-   *   （executor.isUpgradeInFlight 探询，task-06 实现）——命令执行与升级链共用
-   *   同一 in-flight 判定，升级进行中到达的命令同样记 failed busy；
-   * - 忙时立即记 failed（error 固定文案 {@link SILLYSPEC_COMMAND_BUSY_ERROR}）
-   *   不排队，让页面可见可重试（D-001 拒排队语义）；结果写入走与转发同一最小
-   *   接口（recordCommandResult，结果槽实现归 task-06）；
-   * - guard 置位同步先于执行、finally 复位（仿 _cleanupInFlight 模式）；
-   * - ql-20260911-024（回显提速第一级）：忙拒落槽与执行完成（finally）均立即
-   *   补发一次心跳（_nudgeHeartbeatAfterCommandResult），结果不等 15s 节拍；
+   * - 并发到达不忙拒不丢执行：新命令排到 `_sillyspecCommandQueueTail` 链尾，
+   *   前一条完成（含防御 reject 出口）后依序执行——原「忙时立即记 failed 不
+   *   排队」（D-001 拒排队语义）按用户裁决推翻（生产实证 2026-09-25 两条并发
+   *   裁决被双双拒挂失败红字）；
+   * - npm 升级链在跑（executor.isUpgradeInFlight，task-06）→ 出队执行前轮询
+   *   等待其结束（SILLYSPEC_COMMAND_UPGRADE_POLL_MS——npm 正在替换 CLI bin，
+   *   并发 spawn 有半安装件风险），原第二臂「记 failed busy」同样改等待；
+   * - 每条命令完成（finally 统一出口）立即补发一次心跳
+   *   （_nudgeHeartbeatAfterCommandResult，ql-20260911-024 回显提速语义不变），
+   *   排队命令逐条完成逐条捎出，结果不等 15s 节拍；
    * - executor 未接线（task-06 未落地 / 测试未注入实现）→ warn 丢弃不崩
    *   （同 plan_response_no_manager 惯例，tsc 独立编译不依赖 task-06）。
    */
-  private async _runSillySpecCommand(
+  private _runSillySpecCommand(
     action: 'resolve' | 'ghost_cleanup',
     identify: Pick<SillySpecCommandResult, 'change' | 'strategy'>,
     exec: (executor: SillySpecCommandExecutor) => Promise<void>,
@@ -7372,33 +7380,38 @@ export class Daemon {
     const executor = this._sillyspecCommandExecutor();
     if (!executor) {
       this._logger.warn('sillyspec_command_no_executor', { action });
-      return;
+      return Promise.resolve();
     }
-    if (this._sillyspecCommandInFlight || executor.isUpgradeInFlight()) {
-      this._logger.warn('sillyspec_command_rejected_busy', { action, ...identify });
-      executor.recordCommandResult({
-        action,
-        ...identify,
-        state: 'failed',
-        error: SILLYSPEC_COMMAND_BUSY_ERROR,
-        executed_at: new Date().toISOString(),
-      });
-      this._nudgeHeartbeatAfterCommandResult(action, 'busy');
-      return;
-    }
-    this._sillyspecCommandInFlight = true;
-    try {
-      await exec(executor);
-    } catch (e) {
-      // 防御兜底：约定 executor 全路径收敛不 reject（task-06，结果自写槽），
-      // 此处仅防异常上抛阻塞 WS 接收（同 plan_response_route_failed 收敛语义）。
-      this._logger.error('sillyspec_command_route_failed', { action, error: e });
-    } finally {
-      this._sillyspecCommandInFlight = false;
-      // ql-20260911-024（回显提速第一级）：finally 统一补发——成功/防御 reject
-      // 两出口结果均已落槽（executor 终判先于 return 落槽）。
-      this._nudgeHeartbeatAfterCommandResult(action, 'done');
-    }
+    const run = async (): Promise<void> => {
+      while (executor.isUpgradeInFlight()) {
+        this._logger.debug('sillyspec_command_wait_upgrade', { action, ...identify });
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, SILLYSPEC_COMMAND_UPGRADE_POLL_MS);
+          if (typeof timer.unref === 'function') {
+            timer.unref();
+          }
+        });
+      }
+      try {
+        await exec(executor);
+      } catch (e) {
+        // 防御兜底：约定 executor 全路径收敛不 reject（task-06，结果自写槽），
+        // 此处仅防异常上抛阻塞 WS 接收（同 plan_response_route_failed 收敛语义）。
+        this._logger.error('sillyspec_command_route_failed', { action, error: e });
+      } finally {
+        // ql-20260911-024（回显提速第一级）：finally 统一补发——命令完成落槽即
+        // 捎出（executor 终判先于 return 落槽）。
+        this._nudgeHeartbeatAfterCommandResult(action);
+      }
+    };
+    const chained = this._sillyspecCommandQueueTail.then(run, run);
+    // 链尾吞异常纯防御（run 全路径已收敛不 reject）；返回原始 chained 保留完成
+    // 点给潜在 await 方，调用方 void fire-and-forget 不受影响。
+    this._sillyspecCommandQueueTail = chained.then(
+      () => undefined,
+      () => undefined,
+    );
+    return chained;
   }
 
   /**
@@ -7409,12 +7422,10 @@ export class Daemon {
    * 往返。fire-and-forget 不阻塞 WS 接收（_sendHeartbeatOnce 全路径 catch 不
    * reject）；未注册 runtime 时其内部 return false 静默跳过；与 15s 循环短暂
    * 重叠无害——心跳是无状态全量上报，backend 侧字段级 last-write-wins。
+   *（2026-09-26-sillyspec-command-queue：忙拒相位随排队化消亡，收敛单参。）
    */
-  private _nudgeHeartbeatAfterCommandResult(
-    action: 'resolve' | 'ghost_cleanup',
-    phase: 'busy' | 'done',
-  ): void {
-    this._logger.debug('sillyspec_command_heartbeat_nudge', { action, phase });
+  private _nudgeHeartbeatAfterCommandResult(action: 'resolve' | 'ghost_cleanup'): void {
+    this._logger.debug('sillyspec_command_heartbeat_nudge', { action });
     void this._sendHeartbeatOnce();
   }
 

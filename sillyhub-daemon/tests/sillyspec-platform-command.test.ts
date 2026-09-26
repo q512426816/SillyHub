@@ -8,9 +8,10 @@
  *     strategy) 原样透传；缺 change/strategy 或值域外 → warn 丢弃不调用不记结果；
  *     SILLYSPEC_GHOST_CLEANUP → runGhostCleanup()；fire-and-forget（不 await
  *     不 reject）；executor 未接线（duck-type 探测未命中）warn 丢弃不崩。
- *   - guard 忙拒：命令 in-flight 或 isUpgradeInFlight → 执行方法不调、
- *     recordCommandResult 记 failed（error='another sillyspec command is
- *     running'，executed_at ISO）；guard finally 复位后放行下一条。
+ *   - guard 排队（2026-09-26-sillyspec-command-queue，原 task-07 忙拒改写）：
+ *     并发到达或 isUpgradeInFlight → 不忙拒不记 failed——FIFO 排队待前一条
+ *     完成（含失败出口）后依序执行；升级链在跑时出队前轮询等待（fake timers
+ *     推进 1s 轮询）；排队期间不产生结果/心跳。
  *   - flag 映射（manager 执行器层）：keep_local→--keep-local、take_platform→
  *     --take-platform，execFile 数组形参不经 shell、cwd=主仓根、超时注入透传
  *     （缺省 120s）；运行时脏 strategy → failed 不 spawn。
@@ -109,7 +110,7 @@ const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 // ── daemon 层 harness：假 manager（四方法 executor + 心跳读口全可编程）─────────
 
 /**
- * 假 SillySpecManager：SillySpecCommandExecutor 四方法全 vi.fn（忙拒/分发断言
+ * 假 SillySpecManager：SillySpecCommandExecutor 四方法全 vi.fn（排队/分发断言
  * 载体），getSnapshot/getStatusSnapshot 供心跳读口缺省零值（不携带任何 sillyspec_* 键）。
  */
 function makeFakeExecutorManager() {
@@ -281,9 +282,9 @@ describe('task-07 case 分发：SILLYSPEC_RESOLVE / SILLYSPEC_GHOST_CLEANUP 直�
   });
 });
 
-// ── guard 忙拒（design §5 Phase2 第4条：in-flight 串行 + 升级链共用判定）──────
+// ── guard 排队（2026-09-26-sillyspec-command-queue：原忙拒两臂改 FIFO 串行）────
 
-describe('task-07 guard 忙拒：忙时立即记 failed 不排队', () => {
+describe('guard 排队（2026-09-26-sillyspec-command-queue）：并发到达不忙拒，FIFO 依序执行', () => {
   let restoreConsole: () => void;
 
   beforeEach(() => {
@@ -294,7 +295,7 @@ describe('task-07 guard 忙拒：忙时立即记 failed 不排队', () => {
     vi.restoreAllMocks();
   });
 
-  it('命令 in-flight（guard 在跑）→ 第二条不调执行方法，记 failed（文案精确 + identify 透传 + ISO 戳）', async () => {
+  it('命令 in-flight（前一条挂起）→ 第二条排队不执行不记结果；放行后依序执行（c1 先 c2 后）', async () => {
     const h = makeDispatchHarness();
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
@@ -303,48 +304,47 @@ describe('task-07 guard 忙拒：忙时立即记 failed 不排队', () => {
       type: MSG.SILLYSPEC_RESOLVE,
       payload: { change: 'c1', strategy: 'keep_local' },
     });
-    // 第一条挂起期间第二条到达 → 忙拒。
+    // 第一条挂起期间第二条到达 → 排队：不执行、不记任何结果。
     await h.handleWsMessage({
       type: MSG.SILLYSPEC_RESOLVE,
       payload: { change: 'c2', strategy: 'take_platform' },
     });
     expect(h.manager.runResolve).toHaveBeenCalledTimes(1); // 第二条未执行
-    expect(h.manager.recordCommandResult).toHaveBeenCalledTimes(1);
-    expect(h.manager.recordCommandResult).toHaveBeenCalledWith({
-      action: 'resolve',
-      change: 'c2',
-      strategy: 'take_platform',
-      state: 'failed',
-      error: 'another sillyspec command is running',
-      executed_at: expect.any(String),
-    });
-    const recorded = h.manager.recordCommandResult.mock.calls[0]![0] as {
-      executed_at: string;
-    };
-    expect(recorded.executed_at).toMatch(ISO_RE);
+    expect(h.manager.recordCommandResult).not.toHaveBeenCalled(); // 无 busy failed
     release();
     await flushAsync();
+    // 前一条完成 → 第二条出队依序执行；顺序 = 到达序（c1 先、c2 后）。
+    expect(h.manager.runResolve).toHaveBeenCalledTimes(2);
+    expect(h.manager.runResolve.mock.calls[0]![0]).toBe('c1');
+    expect(h.manager.runResolve.mock.calls[1]![0]).toBe('c2');
+    expect(h.manager.recordCommandResult).not.toHaveBeenCalled();
   });
 
-  it('isUpgradeInFlight()=true（npm 升级链在跑）→ 忙拒第二臂：不调执行方法、记 failed busy', async () => {
-    const h = makeDispatchHarness();
-    h.manager.isUpgradeInFlight.mockReturnValue(true);
-    await h.handleWsMessage({
-      type: MSG.SILLYSPEC_RESOLVE,
-      payload: { change: 'c1', strategy: 'keep_local' },
-    });
-    expect(h.manager.runResolve).not.toHaveBeenCalled();
-    expect(h.manager.recordCommandResult).toHaveBeenCalledWith({
-      action: 'resolve',
-      change: 'c1',
-      strategy: 'keep_local',
-      state: 'failed',
-      error: 'another sillyspec command is running',
-      executed_at: expect.any(String),
-    });
+  it('isUpgradeInFlight()=true（npm 升级链在跑）→ 排队轮询等待：升级结束前不执行不记结果，结束后依序执行', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = makeDispatchHarness();
+      h.manager.isUpgradeInFlight.mockReturnValue(true);
+      await h.handleWsMessage({
+        type: MSG.SILLYSPEC_RESOLVE,
+        payload: { change: 'c1', strategy: 'keep_local' },
+      });
+      // 微任务冲净：命令已出队进入升级等待轮询（1s 定时器挂起）。
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.manager.runResolve).not.toHaveBeenCalled();
+      expect(h.manager.recordCommandResult).not.toHaveBeenCalled(); // 无 busy failed
+      // 升级结束 → 下一轮轮询放行执行。
+      h.manager.isUpgradeInFlight.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(h.manager.runResolve).toHaveBeenCalledTimes(1);
+      expect(h.manager.runResolve).toHaveBeenCalledWith('c1', 'keep_local', '');
+      expect(h.manager.recordCommandResult).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('ghost_cleanup 忙拒：failed 结果只含 action/state/error/executed_at（无 change/strategy 键）', async () => {
+  it('ghost_cleanup 排队：前一条挂起期间第二条到达 → 排队，放行后两步依序执行', async () => {
     const h = makeDispatchHarness();
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
@@ -352,36 +352,36 @@ describe('task-07 guard 忙拒：忙时立即记 failed 不排队', () => {
     await h.handleWsMessage({ type: MSG.SILLYSPEC_GHOST_CLEANUP, payload: {} });
     await h.handleWsMessage({ type: MSG.SILLYSPEC_GHOST_CLEANUP, payload: {} });
     expect(h.manager.runGhostCleanup).toHaveBeenCalledTimes(1);
-    expect(h.manager.recordCommandResult).toHaveBeenCalledWith({
-      action: 'ghost_cleanup',
-      state: 'failed',
-      error: 'another sillyspec command is running',
-      executed_at: expect.any(String),
-    });
+    expect(h.manager.recordCommandResult).not.toHaveBeenCalled(); // 无 busy failed
     release();
     await flushAsync();
+    expect(h.manager.runGhostCleanup).toHaveBeenCalledTimes(2);
   });
 
-  it('升级链忙拒同样拦截 ghost_cleanup（共用判定跨命令种类）', async () => {
-    const h = makeDispatchHarness();
-    h.manager.isUpgradeInFlight.mockReturnValue(true);
-    await h.handleWsMessage({ type: MSG.SILLYSPEC_GHOST_CLEANUP, payload: {} });
-    expect(h.manager.runGhostCleanup).not.toHaveBeenCalled();
-    expect(h.manager.recordCommandResult).toHaveBeenCalledWith({
-      action: 'ghost_cleanup',
-      state: 'failed',
-      error: 'another sillyspec command is running',
-      executed_at: expect.any(String),
-    });
+  it('升级链等待同样适用于 ghost_cleanup（共用判定跨命令种类）', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = makeDispatchHarness();
+      h.manager.isUpgradeInFlight.mockReturnValue(true);
+      await h.handleWsMessage({ type: MSG.SILLYSPEC_GHOST_CLEANUP, payload: {} });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.manager.runGhostCleanup).not.toHaveBeenCalled();
+      expect(h.manager.recordCommandResult).not.toHaveBeenCalled();
+      h.manager.isUpgradeInFlight.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(h.manager.runGhostCleanup).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('resolve 完成后 guard 复位 → 下一条放行（不误锁）', async () => {
+  it('resolve 完成后队列排空 → 下一条直达执行（不误锁）', async () => {
     const h = makeDispatchHarness();
     await h.handleWsMessage({
       type: MSG.SILLYSPEC_RESOLVE,
       payload: { change: 'c1', strategy: 'keep_local' },
     });
-    await flushAsync(); // 默认 mock 立即 resolve，finally 复位
+    await flushAsync(); // 默认 mock 立即 resolve，队列链尾已排空
     await h.handleWsMessage({
       type: MSG.SILLYSPEC_RESOLVE,
       payload: { change: 'c2', strategy: 'keep_local' },
@@ -864,7 +864,7 @@ function makeNudgeHarness() {
   };
 }
 
-describe('ql-20260911-024 结果落槽即补发心跳：命令完成/忙拒后不等 15s 节拍', () => {
+describe('ql-20260911-024 结果落槽即补发心跳：命令完成不等 15s 节拍', () => {
   let restoreConsole: () => void;
 
   beforeEach(() => {
@@ -896,36 +896,43 @@ describe('ql-20260911-024 结果落槽即补发心跳：命令完成/忙拒后�
     });
   });
 
-  it('guard 忙拒 → failed busy 结果同样立即补发；放行后首条完成再补发（共两次）', async () => {
+  it('排队命令逐条完成逐条补发：首条完成先报（携 c1 结果），次条出队执行完再报（携 c2 结果，共两次）', async () => {
     const h = makeNudgeHarness();
-    let release!: (v: SillySpecProgressOutcome) => void;
-    const gate = new Promise<SillySpecProgressOutcome>((r) => (release = r));
-    h.runProgressJson.mockImplementationOnce(() => gate);
+    let release1!: (v: SillySpecProgressOutcome) => void;
+    let release2!: (v: SillySpecProgressOutcome) => void;
+    // 双 gate 锁死两条命令的执行序：结果槽 latest-wins，若次条先完成会覆盖
+    // 首条结果导致首条补发读到 c2 —— 逐条放行保证断言确定性。
+    const gate1 = new Promise<SillySpecProgressOutcome>((r) => (release1 = r));
+    const gate2 = new Promise<SillySpecProgressOutcome>((r) => (release2 = r));
+    h.runProgressJson.mockImplementationOnce(() => gate1).mockImplementationOnce(() => gate2);
     await h.handleWsMessage({
       type: MSG.SILLYSPEC_RESOLVE,
       payload: { change: 'c1', strategy: 'keep_local' },
     });
-    // 第一条挂起占住 guard 期间第二条到达 → 忙拒落槽 → nudge 补发（第一次）。
+    // 首条挂起占队期间次条到达 → 排队：不产生结果、不触发补发。
     await h.handleWsMessage({
       type: MSG.SILLYSPEC_RESOLVE,
       payload: { change: 'c2', strategy: 'take_platform' },
     });
+    expect(h.heartbeatMock).not.toHaveBeenCalled();
+    // 放行首条 → 完成落槽 → finally nudge 补发（第一次，携带 c1 success）。
+    release1({ code: 0, stdout: '', timedOut: false });
     await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(1));
     expect(h.heartbeatMock.mock.calls[0]![6]).toEqual({
       action: 'resolve',
-      change: 'c2',
-      strategy: 'take_platform',
-      state: 'failed',
-      error: 'another sillyspec command is running',
+      change: 'c1',
+      strategy: 'keep_local',
+      state: 'success',
+      exit_code: 0,
       executed_at: expect.any(String),
     });
-    // 放行首条 → 命令完成落槽 → finally nudge 补发（第二次，携带 c1 success）。
-    release({ code: 0, stdout: '', timedOut: false });
+    // 次条出队执行 → 完成落槽 → nudge 再补发（第二次，携带 c2 success）。
+    release2({ code: 0, stdout: '', timedOut: false });
     await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(2));
     expect(h.heartbeatMock.mock.calls[1]![6]).toEqual({
       action: 'resolve',
-      change: 'c1',
-      strategy: 'keep_local',
+      change: 'c2',
+      strategy: 'take_platform',
       state: 'success',
       exit_code: 0,
       executed_at: expect.any(String),
