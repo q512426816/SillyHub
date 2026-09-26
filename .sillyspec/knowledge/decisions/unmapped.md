@@ -1087,3 +1087,10 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：1d33bda33
 理由：①pi fork 采用「短命 RPC 预 fork」替代卡面「源会话活 RPC」——实证 pi fork/clone 会劫持 RPC 进程自身活跃会话（teardownCurrent+apply），活 RPC 方案须 switch_session 切回且违反 D-005 零侵扰；短命方案（临时 pi --mode rpc --session <源> → fork/clone → get_state 读新分支 → 杀 temp → B 以分支文件 spawn）附带支持源会话已结束场景，失败原样上抛不降级。②pi entryId 不在 message 事件（仅 SessionEntry 落盘后存在）→ message_end(role=user) 回查 get_fork_messages 取轮首锚，失败仅 warn=锚缺失入口灰。③task-07 发现 /runs SessionRunRead 未透出 AgentRun.engine_anchor（native 档门控无数据源）→ session_insights.py 一行增列+gen:types 归 task-08，engineAnchor prop 由 /runs 数据接线。另：task-06 路径漂移两处（建会话真身在 session-manager.ts 非 index.ts facade；CreateSessionInput 在 interactive/types.ts）=代码现实修正。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-26-change-detail-restore-assets
+锚点：未记录
+最近确认：83bde5d52c29cd07960e1d300d9541bf6a44a5ec
+理由：最大风险：恢复的挂载再次被并行会话夹带覆盖（本次事故根因即此）。缓解：新增页面级钉子测试断言资产卡与观测事件卡并存，下次任何提交删挂载会被聚焦测试拦下（CI 层面）。试过但放弃：把 aside 卡片清单抽成数组配置防漏挂——放弃，卡片间挂载条件与注释各不相同（quicklog 卡需 change_key、对账卡带 archived 语义），抽象后反而丢语义，收益不成比例。线上已部署旧镜像的窗口期：需重新部署前端镜像才能让用户看到恢复，代码层无风险。

@@ -1,0 +1,23 @@
+{
+  "change": "2026-09-26-change-detail-restore-assets",
+  "baseline": "67c63c72d4c7de0b0e4fc63e4f7d876a17355472",
+  "head": "83bde5d52c29cd07960e1d300d9541bf6a44a5ec",
+  "files": [
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+    ".sillyspec/changes/2026-09-26-change-detail-restore-assets/design.md",
+    ".sillyspec/changes/2026-09-26-change-detail-restore-assets/flow-state.yaml",
+    ".sillyspec/changes/2026-09-26-change-detail-restore-assets/proposal.md",
+    ".sillyspec/changes/2026-09-26-change-detail-restore-assets/requirements.md",
+    ".sillyspec/changes/2026-09-26-change-detail-restore-assets/tasks.md"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 341,
+    "deletions": 4
+  },
+  "savedAt": "2026-09-26T06:01:06.491Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "03dc2bae2bfc0da12ad02d1b4e265eb3a11b92700ac244e5fcf5005dcfc397ee",
+  "patchStatus": "ok"
+}

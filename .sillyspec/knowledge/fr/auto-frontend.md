@@ -153,6 +153,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-25-knowledge-quick-legacy-copy
 状态：active
 摘要：默认场景
+待复核：2026-09-26-change-detail-restore-assets
 场景正文：
 - 场景：默认场景 — Given 平台按当前契约运行；When 本变更交付并运行；Then precipitate-dialog「快速修复」蒸馏源分段带存量标注，空态文案不再引导产生新 quick 条目
 全文：.sillyspec/changes/archive/2026-09-25-knowledge-quick-legacy-copy/requirements.md#FR-01
@@ -174,6 +175,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-25-knowledge-quick-legacy-copy
 状态：active
 摘要：默认场景
+待复核：2026-09-26-change-detail-restore-assets
 场景正文：
 - 场景：默认场景 — Given 平台按当前契约运行；When 本变更交付并运行；Then distill-task-bar 与 distill-history-dialog 的 quick 相关文案带存量口径
 全文：.sillyspec/changes/archive/2026-09-25-knowledge-quick-legacy-copy/requirements.md#FR-02
@@ -195,6 +197,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-25-knowledge-quick-legacy-copy
 状态：active
 摘要：默认场景
+待复核：2026-09-26-change-detail-restore-assets
 场景正文：
 - 场景：默认场景 — Given 平台按当前契约运行；When 本变更交付并运行；Then knowledge/page.tsx 头部过时注释更新（快速修复 tab 已是存量口径）
 全文：.sillyspec/changes/archive/2026-09-25-knowledge-quick-legacy-copy/requirements.md#FR-03
@@ -204,7 +207,80 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-25-knowledge-quick-legacy-copy
 状态：active
 摘要：默认场景
+待复核：2026-09-26-change-detail-restore-assets
 场景正文：
 - 场景：默认场景 — Given 平台按当前契约运行；When 本变更交付并运行；Then 聚焦验证（tsc + 相关组件测试）全绿，存量蒸馏功能行为零改动（纯文案面）
 全文：.sillyspec/changes/archive/2026-09-25-knowledge-quick-legacy-copy/requirements.md#FR-04
 最近确认：5ae347894da3d03154c45783d115e634c8bc2390
+
+## FR-auto-frontend-019 变更详情页重新挂载沉淀资产卡
+变更：2026-09-26-change-detail-restore-assets
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given main 分支的变更详情页（`[cid]/page.tsx`）在 304eba982 被夹带的旧版页面覆盖，；When 用户打开任一变更详情页，
+全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-01
+最近确认：83bde5d52c29cd07960e1d300d9541bf6a44a5ec
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-change-detail-restore-assets:flow:FR-01
+  tests: __tests__/page-restore-assets.test.ts | frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-change-detail-restore-assets
+  status: active
+
+## FR-auto-frontend-020 标题阶段徽章恢复 thin/quick 口径
+变更：2026-09-26-change-detail-restore-assets
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given `current_stage="thin"` 的轻量变更在标题旁只显示弱化的 outline 徽章（fallback 路径），；When 详情页渲染 thin 或 quick 阶段变更，；Then thin 显示品牌紫 default 徽章「轻量变更」、quick 显示 default 徽章「快速任务（存量）」（`STATUS_BADGE` 四态：quic
+全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-02
+最近确认：83bde5d52c29cd07960e1d300d9541bf6a44a5ec
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-change-detail-restore-assets:flow:FR-02
+  tests: page-restore-assets.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-change-detail-restore-assets
+  status: active
+
+## FR-auto-frontend-021 范围对账卡恢复 archived 降级指路
+变更：2026-09-26-change-detail-restore-assets
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 已归档变更（status=archived 或 location=archive）的范围对账降级态，；When `ScopeAuditCommandCard` 渲染降级横幅，；Then 重新收到 `archived={isTerminalChange(change)}` 传参，横幅追加「真实改动面见沉淀资产 · 归档留档」指路（组件侧逻辑 9c
+全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-03
+最近确认：83bde5d52c29cd07960e1d300d9541bf6a44a5ec
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-change-detail-restore-assets:flow:FR-03
+  tests: frontend/src/components/changes/__tests__/scope-audit-command-card.test.ts | page-restore-assets.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-change-detail-restore-assets
+  status: active
+
+## FR-auto-frontend-022 聚焦测试与类型门禁全绿
+变更：2026-09-26-change-detail-restore-assets
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 三处恢复落盘，；Then 全部用例通过且类型检查 0 错。
+全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-04
+最近确认：83bde5d52c29cd07960e1d300d9541bf6a44a5ec
