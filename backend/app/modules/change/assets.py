@@ -424,7 +424,7 @@ def _read_touched_modules(spec_root: Path, file_list: list[str]) -> list["Change
                         if line.startswith("# ")
                     )
                     name = h1[2:].strip() or mod_id
-                except (OSError, StopIteration):
+                except (OSError, UnicodeDecodeError, StopIteration):
                     pass
             out.append(
                 ChangeTouchedModule(
