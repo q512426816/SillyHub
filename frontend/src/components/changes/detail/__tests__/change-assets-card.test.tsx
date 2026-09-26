@@ -296,9 +296,13 @@ describe("ChangeAssetsCard 测试文件路径解析", () => {
     expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
       "backend/app/modules/spec_workspace/tests/conv.py",
     );
-    expect(
-      screen.getByTestId("change-assets-test-redirect-note"),
-    ).toHaveTextContent("tests/conv.py");
+    // 注记须同时含原记录路径与真实路径——「」包裹形态防止真实路径包含
+    // 短路径子串导致断言空转（评审 P2①）。
+    const note = screen.getByTestId("change-assets-test-redirect-note");
+    expect(note).toHaveTextContent("记录路径「tests/conv.py」未直接命中");
+    expect(note).toHaveTextContent(
+      "backend/app/modules/spec_workspace/tests/conv.py",
+    );
   });
 
   it("worktree 副本排除：后缀多命中时跳过 .sillyspec/.runtime/ 副本取唯一真实路径", async () => {

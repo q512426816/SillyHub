@@ -455,7 +455,8 @@ function TestFileBody({
             data-testid="change-assets-test-redirect-note"
             className="shrink-0 border-b border-dashed px-2 py-1 text-[10px] text-muted-foreground"
           >
-            记录路径未直接命中，已定位到仓库内同名文件：{resolution.path}
+            记录路径「{norm}」未直接命中，已定位到仓库内同名文件：
+            <span className="font-mono">{resolution.path}</span>
           </p>
         ) : null}
         <div className="min-h-0 flex-1">
