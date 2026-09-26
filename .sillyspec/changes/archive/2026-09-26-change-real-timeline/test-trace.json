@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-change-real-timeline",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-26-change-real-timeline:flow:FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_timeline.py::金样本聚合（诞生锚+事件轴+任务面+脚注）"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-change-real-timeline"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-26-change-real-timeline:flow:FR-02",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-timeline-card.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-change-real-timeline"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-26-change-real-timeline:flow:FR-03",
+      "tests": [
+        "__tests__/page-restore-assets.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-change-real-timeline"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-26-change-real-timeline:flow:FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_timeline.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-change-real-timeline"
+    }
+  ]
+}

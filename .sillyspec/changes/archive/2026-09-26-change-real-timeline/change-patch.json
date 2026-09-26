@@ -1,0 +1,34 @@
+{
+  "change": "2026-09-26-change-real-timeline",
+  "baseline": "5f8eb2d52f4299cd52e4bcc1bbe2313ad1966a0a",
+  "head": "b4e2f4e3642542ab9c83de64546ea8b675328533",
+  "files": [
+    ".sillyspec/changes/2026-09-26-change-real-timeline/tasks.md",
+    "backend/app/modules/change/router.py",
+    "backend/app/modules/change/schema.py",
+    "backend/app/modules/change/tests/test_timeline.py",
+    "backend/app/modules/change/timeline.py",
+    "backend/openapi.json",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx",
+    "frontend/src/components/changes/detail/change-timeline-card.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/changes.ts",
+    ".sillyspec/changes/2026-09-26-change-real-timeline/design.md",
+    ".sillyspec/changes/2026-09-26-change-real-timeline/flow-state.yaml",
+    ".sillyspec/changes/2026-09-26-change-real-timeline/proposal.md",
+    ".sillyspec/changes/2026-09-26-change-real-timeline/requirements.md"
+  ],
+  "totals": {
+    "files": 18,
+    "additions": 1468,
+    "deletions": 1
+  },
+  "savedAt": "2026-09-26T08:04:39.758Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "b4e8361399fff69a400ed3e9f91dbb97f866caf6089c327378b24c41f18a0817",
+  "patchStatus": "ok"
+}

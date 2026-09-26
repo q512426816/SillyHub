@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-change-real-timeline",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02「provisional 角标」未按事件级角标实现，降级为卡级脚注披露，且无测试断言",
+      "evidence": "FR-02 Then 承诺「provisional 角标提示观测语义」，但 EventRow 渲染路径（图标/时刻/label）不消费 e.provisional，观测语义仅由卡片底部整卡脚注「观测起点≠诞生时刻…顺序推断」承担；change-timeline-card.test.tsx 四用例无一断言 provisional 呈现。语义披露存在、形态与承诺不符。",
+      "location": "frontend/src/components/changes/detail/change-timeline-card.tsx:170"
+    },
+    {
+      "severity": "P3",
+      "title": "design 槽1/槽2 文本与实现细节漂移（中文标签映射、DTO 字段清单、鉴权名、DTO 计数）",
+      "evidence": "槽2 写 events 含 detail 字段、tasks 含 commit_title——实现中 events 无 detail（label 承载 detail or kind）、commit_title 落在 events、tasks 无该字段（schema.py:886-138 与 openapi/api-types 实际自洽）；槽2 写鉴权 WORKSPACE_READ，实际端点与 assets 同为 Permission.CHANGE_READ（router.py:540/560，代码与「对齐 assets」主张一致、文档写错权限名）；槽1 写「kind→中文标签映射」，实现是 kind→图标映射 + detail 中文直显（组件头注释已自述此取舍，detail 缺失时回退英文 kind 无中文兜底）；tasks.md task-01 写「五 DTO」实为 4 个。均属文档面不准，交付契约（openapi.json/api-types.ts）与代码一致。",
+      "location": ".sillyspec/changes/2026-09-26-change-real-timeline/design.md:24 (槽2) ; backend/app/modules/change/router.py:560"
+    },
+    {
+      "severity": "P3",
+      "title": "任务提交锚 token 子串匹配可跨号误锚（task-01 命中消息中的 task-012）",
+      "evidence": "commit_sha=next((short for short,msg in reversed(commit_pairs) if task_id in msg)) 用裸子串包含而非 token 边界匹配，三位数任务号（task-011+）会误锚 task-01；属已披露「消息含 task token 顺序推断」边界内的精度损失（UI 脚注已注明推断语义），金样本测试未覆盖跨号场景。",
+      "location": "backend/app/modules/change/timeline.py:134"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决:可接受——ts 按表契约 ISO 8601 UTC 字符串存储、字典序=时间序，model.py:393 R-04 先例属实，timeline.py order_by ts.asc 与之一致；ts 不可解析时 _parse_ts→None、墙钟静默 None，降级安全。核对注记：CLI 本地 journal（.runtime jsonl）中 ts 为毫秒 epoch，但平台表契约/摄取测试/既有观测卡消费均为 ISO 字符串，推送层转换不在本仓证据面内，未构成误报依据）",
+    "并发": "ok（边界已裁决:可接受——三源全只读：events 仅 SELECT 无写、镜像文件 read_text 快照 + 正则逐行坏行跳过、git RPC 读；tasks.md 半态由 30s 轮询下轮自愈，design 槽3 与代码一致）",
+    "切换": "ok（边界已裁决:可接受——git 降级真实生效：_load_commit_window try/except Exception 返回全 None 映射不阻塞聚合且有测试（test_timeline_git_degraded_to_hash_only）；变更删除/跨工作区 ChangeNotFound 在聚合首句 _get_change；前端 isError→return null 静默、retry:false 不阻断详情页）",
+    "作用域": "ok（边界已裁决:可接受——events 查询 workspace_id+change_name 双键、归属校验先于一切聚合源、git RPC 绑定同 workspace；挂载条件是 steps 空而非 thin 出身判定（FR-03 Given 明示 thin 恒空/quick 存量同空），卡只读观测、steps 有数据分支零改动，放宽面可接受）"
+  },
+  "reviewedAt": "2026-09-26T08:08:48Z"
+}

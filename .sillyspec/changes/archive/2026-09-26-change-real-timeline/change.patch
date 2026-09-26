@@ -1,0 +1,1686 @@
+diff --git a/.sillyspec/changes/2026-09-26-change-real-timeline/tasks.md b/.sillyspec/changes/2026-09-26-change-real-timeline/tasks.md
+new file mode 100644
+index 000000000..e7d121056
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-change-real-timeline/tasks.md
+@@ -0,0 +1,15 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T07:51:57.085Z
++---
++# 任务注册表（Tasks）— 2026-09-26-change-real-timeline
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++- [x] task-01: 后端 NEW timeline.py ChangeTimelineQueryService 三源聚合——platform_change_events 正序（workspace_id+change_key）、tasks.md 任务行正则、requirements.md created_at 诞生锚；GET /changes/{cid}/timeline 端点 + schema 五 DTO；git 提交标题经 GitLogService.list_commits（daemon RPC limit 50）短哈希前缀匹配，异常降级仅哈希
++- [x] task-02: kind→图标/强调映射对齐 CLI watcher timeline（📝 内容变更/✅ 勾选/⚠️ 告警琥珀/🔀 提交/📦 归档/🁢 诞生），commit 行哈希+标题，fake-check 醒目态，provisional 观测语义脚注披露盲窗
++- [x] task-03: 前端 NEW change-timeline-card.tsx（事件轴+任务面+脚注三段式，useQuery 自取数 30s 轮询失败静默）+ 详情页 steps 为空处挂载填补空窗；api-types 生成字段 ?? 兜底防旧后端过渡窗口
++- [x] task-04: 后端 test_timeline.py 4 用例（金样本聚合含诞生锚/任务锚推断/墙钟统计、空 events 容错、git 降级仅哈希、跨工作区 404）+ 前端组件 4 用例（三段渲染/fake-check 醒目/空数据隐藏/失败隐藏）+ 页面 1 用例（steps 空挂卡且原步骤时间线不渲染）+ 三个既有页面测试 mock 工厂补 getChangeTimeline
++- [x] task-05: 规则 21 gen:types 同步 backend/openapi.json + frontend/src/lib/api-types.ts 随提交；lib/changes.ts 客户端 getChangeTimeline + 类型引 api-types 生成版
++- [x] task-06: 后端 change 模块 585 passed + 2 skipped（新增 4）；前端聚焦 27 passed；tsc exit 0；ruff/lint 干净
+diff --git a/backend/app/modules/change/router.py b/backend/app/modules/change/router.py
+index aed630638..fc6aa600a 100644
+--- a/backend/app/modules/change/router.py
++++ b/backend/app/modules/change/router.py
+@@ -45,6 +45,7 @@ from app.modules.change.schema import (
+     ChangeRead,
+     ChangeReparseResponse,
+     ChangeReparseStats,
++    ChangeTimelineRead,
+     ChangeUsageRead,
+     ChangeWarning,
+     DispatchResponse,
+@@ -78,6 +79,7 @@ from app.modules.change.scope_audit import (
+     validate_scope_change,
+ )
+ from app.modules.change.service import ChangeService
++from app.modules.change.timeline import ChangeTimelineQueryService
+ from app.modules.change.usage_service import ChangeUsageQueryService
+ from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
+ from app.modules.workspace.service import WorkspaceService
+@@ -547,6 +549,30 @@ async def get_change_assets(
+     return await ChangeAssetsQueryService(session).get_change_assets(workspace_id, change_id)
+ 
+ 
++@router.get(
++    "/changes/{change_id}/timeline",
++    response_model=ChangeTimelineRead,
++)
++async def get_change_timeline(
++    workspace_id: uuid.UUID,
++    change_id: uuid.UUID,
++    session: SessionDep,
++    user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
++) -> ChangeTimelineRead:
++    """变更合成时间线聚合（2026-09-26-change-real-timeline / FR-01）。
++
++    复刻 CLI ``sillyspec watcher timeline`` 三源合成：事件轴
++    （platform_change_events 正序 + requirements 工件 created_at 诞生锚）、
++    任务面（tasks.md 行 × 提交锚推断）、脚注统计。thin 轻量变更 steps 恒空
++    的主线叙事由本端点承载；events 恒 provisional（红线 D-004：只展示不
++    消费）。git 提交标题经 daemon best-effort 反查，失败降级仅哈希。不存
++    在/跨工作区抛 ``ChangeNotFound``（对齐 assets 端点口径）。
++    """
++    return await ChangeTimelineQueryService(session).get_change_timeline(
++        workspace_id, change_id, user.id
++    )
++
++
+ @router.get(
+     "/changes/{change_id}/assets/patch-file",
+     response_model=ChangePatchFileRead,
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index cb1248c24..caccddf86 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -880,3 +880,61 @@ class ChangeAssetsRead(BaseModel):
+     test_rows: list[ChangeTestRow] = Field(default_factory=list)
+     patch: ChangePatchMeta | None = None
+     delta: ChangeDeltaMeta | None = None
++
++
++# ── 合成时间线（2026-09-26-change-real-timeline，复刻 CLI watcher timeline）──
++
++
++class TimelineEvent(BaseModel):
++    """事件轴单条（platform_change_events 正序投影 + 提交标题增强）。
++
++    ``label`` 机器值（kind 或 detail 原文）；中文标签与图标由前端映射（对齐
++    CLI watcher timeline 语义）；``commit_title`` 仅 kind=commit 且 git 窗口
++    命中时有值（daemon 降级 → None，前端只显哈希）。
++    """
++
++    ts: str
++    kind: str
++    label: str
++    rule: str = ""
++    severity: str = "info"
++    provisional: bool = True
++    commit_title: str | None = None
++
++
++class TimelineTask(BaseModel):
++    """任务面单行（tasks.md 任务行 × 提交锚推断）。
++
++    ``commit_sha`` 是「消息含 task-NN token」的最新窗口提交短哈希（CLI 同款
++    顺序推断口径，无匹配 → None）。
++    """
++
++    id: str
++    checked: bool = False
++    desc: str = ""
++    commit_sha: str | None = None
++
++
++class TimelineStats(BaseModel):
++    """脚注统计（纯计算：墙钟=首末事件差，观测盲窗下不冒充完整历史）。"""
++
++    event_count: int = 0
++    commit_count: int = 0
++    checked: int = 0
++    total: int = 0
++    wall_clock_s: int | None = None
++
++
++class ChangeTimelineRead(BaseModel):
++    """变更合成时间线聚合（GET /changes/{cid}/timeline）。
++
++    ``born_at`` 来自 requirements.md frontmatter created_at（工件元数据补位，
++    watcher 后拉起时事件流缺诞生事件）；events 恒 provisional（观测语义，
++    红线 D-004 延续：只展示不消费）。
++    """
++
++    change_key: str
++    born_at: str | None = None
++    events: list[TimelineEvent] = Field(default_factory=list)
++    tasks: list[TimelineTask] = Field(default_factory=list)
++    stats: TimelineStats = Field(default_factory=TimelineStats)
+diff --git a/backend/app/modules/change/tests/test_timeline.py b/backend/app/modules/change/tests/test_timeline.py
+new file mode 100644
+index 000000000..e60041fc3
+--- /dev/null
++++ b/backend/app/modules/change/tests/test_timeline.py
+@@ -0,0 +1,232 @@
++"""变更合成时间线聚合测试（2026-09-26-change-real-timeline FR-01/04）。
++
++覆盖：
++- 金样本聚合：events 表（多 kind 正序）+ tasks.md 任务行 + requirements
++  created_at 诞生锚 + git 窗口标题匹配（monkeypatch GitLogService.list_commits）
++  + 任务面「消息含 task token」提交锚推断 + 脚注统计；
++- 空 events 容错（无事件行 → 事件轴空、任务面仍可从 tasks.md 出）；
++- git 通道降级（list_commits 抛错 → commit_title=None、聚合不炸）；
++- 跨工作区/不存在 → ``ChangeNotFound``。
++
++author: qinyi
++created_at: 2026-09-26
++"""
++
++from __future__ import annotations
++
++import uuid
++from pathlib import Path
++
++import pytest
++
++from app.core.errors import ChangeNotFound
++from app.modules.change.model import Change
++from app.modules.change.timeline import ChangeTimelineQueryService
++from app.modules.platform_sync.model import PlatformChangeEventORM
++from app.modules.spec_workspace.model import SpecWorkspace
++from app.modules.workspace.model import Workspace
++
++KEY = "2026-09-26-timeline-golden"
++
++
++async def _make_ws(db_session, spec_root: Path) -> Workspace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="timeline ws",
++        slug=f"timeline-{uuid.uuid4().hex[:8]}",
++        root_path=str(spec_root.parent),
++        status="active",
++        component_key="comp",
++    )
++    db_session.add(ws)
++    db_session.add(
++        SpecWorkspace(
++            id=uuid.uuid4(),
++            workspace_id=ws.id,
++            spec_root=str(spec_root),
++            strategy="platform-managed",
++            sync_status="clean",
++        )
++    )
++    await db_session.commit()
++    return ws
++
++
++async def _make_change(db_session, ws: Workspace) -> Change:
++    change = Change(
++        id=uuid.uuid4(),
++        workspace_id=ws.id,
++        change_key=KEY,
++        title=KEY,
++        status="archived",
++        location="archive",
++        path=f"changes/archive/{KEY}",
++        current_stage="archive",
++    )
++    db_session.add(change)
++    await db_session.commit()
++    return change
++
++
++def _seed_change_dir(spec_root: Path, *, with_tasks: bool = True) -> None:
++    change_dir = spec_root / "changes" / "archive" / KEY
++    change_dir.mkdir(parents=True)
++    (change_dir / "requirements.md").write_text(
++        "---\nauthor: flow-machine-draft\ncreated_at: 2026-09-26T07:00:00.000Z\n---\n# 需求\n",
++        encoding="utf-8",
++    )
++    if with_tasks:
++        (change_dir / "tasks.md").write_text(
++            "- [x] task-01: 后端聚合服务落盘\n"
++            "- [x] task-02: 前端组件三段渲染\n"
++            "- [ ] task-03: 部署验证\n",
++            encoding="utf-8",
++        )
++
++
++async def _add_event(
++    db_session, ws_id: uuid.UUID, ts: str, kind: str, detail: str | None = None, **kw
++) -> None:
++    db_session.add(
++        PlatformChangeEventORM(
++            workspace_id=ws_id,
++            change_name=KEY,
++            dedup_key=f"{ts}|{kind}|{detail}",
++            kind=kind,
++            rule=kw.get("rule", "watcher"),
++            severity=kw.get("severity", "info"),
++            provisional=True,
++            detail=detail,
++            ts=ts,
++        )
++    )
++
++
++async def test_timeline_golden_aggregation(db_session, tmp_path: Path, monkeypatch) -> None:
++    """金样本：事件轴正序 + 诞生锚 + 任务行×提交锚推断 + 统计。"""
++    spec_root = tmp_path / "spec-root"
++    _seed_change_dir(spec_root)
++    ws = await _make_ws(db_session, spec_root)
++    change = await _make_change(db_session, ws)
++    await _add_event(
++        db_session, ws.id, "2026-09-26T07:01:00Z", "file-update", "requirements.md 内容变更"
++    )
++    await _add_event(db_session, ws.id, "2026-09-26T07:02:00Z", "task-done", "checked 0→2")
++    await _add_event(
++        db_session,
++        ws.id,
++        "2026-09-26T07:02:01Z",
++        "warning",
++        "fake-check 告警",
++        rule="fake-check",
++        severity="warning",
++    )
++    await _add_event(db_session, ws.id, "2026-09-26T07:03:00Z", "commit", "4aed0e824")
++    await _add_event(
++        db_session, ws.id, "2026-09-26T07:05:00Z", "archived", "change 目录已移入 archive"
++    )
++    await db_session.commit()
++
++    # git 窗口 monkeypatch：单提交命中短哈希，message 含 task-01/task-02 token。
++    # 响应用鸭子类型轻对象——服务只访问 commits[].short/hash/message，构造真
++    # pydantic GitLogCommitsResponse 反而会因裸元素校验失败进降级分支。
++    class _FakeCommit:
++        def __init__(self, sha: str, short: str, message: str):
++            self.hash, self.short, self.message = sha, short, message
++
++    class _FakeResponse:
++        def __init__(self, commits):
++            self.commits = commits
++
++    class _FakeGitLogService:
++        def __init__(self, session):
++            pass
++
++        async def list_commits(
++            self, workspace_id, user_id, *, skip=0, limit=100, branch="", author=""
++        ):
++            return _FakeResponse(
++                [_FakeCommit("4aed0e824full", "4aed0e824", "feat: 落地（task-01 task-02）")]
++            )
++
++    monkeypatch.setattr("app.modules.change.timeline.GitLogService", _FakeGitLogService)
++
++    result = await ChangeTimelineQueryService(db_session).get_change_timeline(
++        ws.id, change.id, uuid.uuid4()
++    )
++    assert result.change_key == KEY
++    assert result.born_at == "2026-09-26T07:00:00.000Z"
++    assert [e.kind for e in result.events] == [
++        "file-update",
++        "task-done",
++        "warning",
++        "commit",
++        "archived",
++    ]
++    commit_ev = result.events[3]
++    assert commit_ev.commit_title == "feat: 落地（task-01 task-02）"
++    # 任务面：勾选态 + 提交锚按 message 含 task token 推断（task-03 无锚）。
++    assert [(t.id, t.checked) for t in result.tasks] == [
++        ("task-01", True),
++        ("task-02", True),
++        ("task-03", False),
++    ]
++    assert result.tasks[0].commit_sha == "4aed0e824"
++    assert result.tasks[2].commit_sha is None
++    # 统计：5 事件（1 commit）/ 勾选 2/3 / 墙钟 07:01→07:05 = 240s。
++    assert result.stats.event_count == 5
++    assert result.stats.commit_count == 1
++    assert (result.stats.checked, result.stats.total) == (2, 3)
++    assert result.stats.wall_clock_s == 240
++
++
++async def test_timeline_empty_events_still_yields_tasks(db_session, tmp_path: Path) -> None:
++    """空 events 容错：事件轴空、任务面照常出自 tasks.md、born 锚仍在。"""
++    spec_root = tmp_path / "spec-root2"
++    _seed_change_dir(spec_root)
++    ws = await _make_ws(db_session, spec_root)
++    change = await _make_change(db_session, ws)
++
++    result = await ChangeTimelineQueryService(db_session).get_change_timeline(
++        ws.id, change.id, uuid.uuid4()
++    )
++    assert result.events == []
++    assert len(result.tasks) == 3
++    assert result.born_at == "2026-09-26T07:00:00.000Z"
++    assert result.stats.wall_clock_s is None
++
++
++async def test_timeline_git_degraded_to_hash_only(db_session, tmp_path: Path, monkeypatch) -> None:
++    """git 通道降级：list_commits 抛错 → commit_title=None、聚合不炸。"""
++    spec_root = tmp_path / "spec-root3"
++    _seed_change_dir(spec_root, with_tasks=False)
++    ws = await _make_ws(db_session, spec_root)
++    change = await _make_change(db_session, ws)
++    await _add_event(db_session, ws.id, "2026-09-26T07:01:00Z", "commit", "4aed0e824")
++    await db_session.commit()
++
++    class _BoomGitLogService:
++        def __init__(self, session):
++            pass
++
++        async def list_commits(self, *a, **kw):
++            raise RuntimeError("daemon offline")
++
++    monkeypatch.setattr("app.modules.change.timeline.GitLogService", _BoomGitLogService)
++
++    result = await ChangeTimelineQueryService(db_session).get_change_timeline(
++        ws.id, change.id, uuid.uuid4()
++    )
++    assert result.events[0].commit_title is None
++    assert result.events[0].label == "4aed0e824"
++
++
++async def test_timeline_not_found_reraises(db_session, tmp_path: Path) -> None:
++    """不存在 → ChangeNotFound（对齐 assets 端点口径）。"""
++    spec_root = tmp_path / "spec-root4"
++    spec_root.mkdir()
++    ws = await _make_ws(db_session, spec_root)
++    with pytest.raises(ChangeNotFound):
++        await ChangeTimelineQueryService(db_session).get_change_timeline(
++            ws.id, uuid.uuid4(), uuid.uuid4()
++        )
+diff --git a/backend/app/modules/change/timeline.py b/backend/app/modules/change/timeline.py
+new file mode 100644
+index 000000000..e18a01cfd
+--- /dev/null
++++ b/backend/app/modules/change/timeline.py
+@@ -0,0 +1,203 @@
++"""变更合成时间线聚合只读服务（2026-09-26-change-real-timeline FR-01）。
++
++复刻 CLI ``sillyspec watcher timeline --change <名>`` 的合成展示到平台——
++「真实留痕」三源合成（thin 轻量变更进度不落 sillyspec.db、steps 恒空，
++主线叙事由观测事件流承担）：
++
++- 事件轴：``platform_change_events`` 表（watcher 推送，恒 provisional）按
++  ``(workspace_id, change_name=change_key, ts)`` 正序直读；
++- 诞生锚：归档/在途目录 ``requirements.md`` frontmatter ``created_at``
++  （watcher 后拉起时事件流缺诞生事件，工件元数据补位——CLI 同款口径）；
++- 任务面：``tasks.md`` ``- [x]/- [ ] task-NN:`` 行（勾选态 + 描述）；
++- 提交锚：事件 ``kind=commit`` 的 detail 短哈希 → ``GitLogService.list_commits``
++  （daemon RPC，limit 50）sha 前缀匹配标题（best-effort，失败降级仅哈希）；
++- 脚注统计：墙钟（首末事件 ts 差）/ 事件数 / 提交数 / 勾选比——纯计算。
++
++红线 D-004 延续：events 表只读、零业务判定（无流程外键、无状态机联动）；
++逐源 fail-open——单源缺失降级为空/None，不影响其余段与变更详情主功能。
++目录解析复用 ``ChangeAssetsQueryService._resolve_change_dir``（跨服务私有
++方法复用先例：assets 对 ChangeService 已同款）。
++"""
++
++from __future__ import annotations
++
++import re
++import uuid
++from datetime import datetime
++from pathlib import Path
++
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.errors import ChangeNotFound
++from app.core.logging import get_logger
++from app.modules.change.assets import ChangeAssetsQueryService
++from app.modules.change.model import Change
++from app.modules.change.schema import (
++    ChangeTimelineRead,
++    TimelineEvent,
++    TimelineStats,
++    TimelineTask,
++)
++from app.modules.git_log.service import GitLogService
++from app.modules.platform_sync.model import PlatformChangeEventORM
++
++log = get_logger(__name__)
++
++# tasks.md 任务行（thin-agent-tasks 机器预填格式，宽容匹配未来描述形态）。
++_TASK_LINE_RE = re.compile(r"^\s*-\s+\[( |x)\]\s+(task-\d+)\s*:\s*(.*)$")
++
++# requirements.md frontmatter created_at（诞生锚）。
++_BORN_RE = re.compile(r"^created_at:\s*[\"']?([^\"'\n]+)[\"']?\s*$", re.M)
++
++
++def _read_tasks(change_dir: Path) -> list[tuple[str, bool, str]]:
++    """读 ``tasks.md`` 任务行 → ``(task_id, checked, desc)``（缺文件/坏行跳过）。"""
++    try:
++        text = (change_dir / "tasks.md").read_text(encoding="utf-8")
++    except OSError as exc:
++        log.info("change.timeline_tasks_unavailable", dir=str(change_dir), error=str(exc))
++        return []
++    out: list[tuple[str, bool, str]] = []
++    for line in text.splitlines():
++        m = _TASK_LINE_RE.match(line)
++        if m:
++            out.append((m.group(2), m.group(1) == "x", m.group(3).strip()))
++    return out
++
++
++def _read_born_at(change_dir: Path) -> str | None:
++    """读 ``requirements.md`` frontmatter ``created_at``（缺失 → None）。"""
++    try:
++        text = (change_dir / "requirements.md").read_text(encoding="utf-8")
++    except OSError as exc:
++        log.info("change.timeline_born_unavailable", dir=str(change_dir), error=str(exc))
++        return None
++    m = _BORN_RE.search(text)
++    return m.group(1).strip() if m else None
++
++
++def _parse_ts(ts: str) -> datetime | None:
++    try:
++        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
++    except ValueError:
++        return None
++
++
++class ChangeTimelineQueryService:
++    def __init__(self, session: AsyncSession) -> None:
++        self._session = session
++
++    async def get_change_timeline(
++        self, workspace_id: uuid.UUID, change_id: uuid.UUID, user_id: uuid.UUID
++    ) -> ChangeTimelineRead:
++        """聚合单变更合成时间线（只读；变更不存在/跨工作区 → ChangeNotFound）。"""
++        change = await self._get_change(workspace_id, change_id)
++        change_dir = await ChangeAssetsQueryService(self._session)._resolve_change_dir(
++            workspace_id, change
++        )
++
++        # 事件轴：正序快照（ts 字符串 ISO 字典序=时间序，表注释 R-04 先例）。
++        res = await self._session.execute(
++            select(PlatformChangeEventORM)
++            .where(
++                PlatformChangeEventORM.workspace_id == workspace_id,
++                PlatformChangeEventORM.change_name == change.change_key,
++            )
++            .order_by(PlatformChangeEventORM.ts.asc())
++        )
++        rows = list(res.scalars().all())
++
++        # 提交窗口（best-effort）：commit 事件短哈希 → 标题；任务锚复用同窗口。
++        commit_shas = [r.detail for r in rows if r.kind == "commit" and r.detail]
++        titles, commit_pairs = await self._load_commit_window(workspace_id, user_id, commit_shas)
++
++        events = [
++            TimelineEvent(
++                ts=r.ts,
++                kind=r.kind,
++                label=r.detail or r.kind,
++                rule=r.rule,
++                severity=r.severity,
++                provisional=r.provisional,
++                commit_title=titles.get(r.detail or "") if r.kind == "commit" else None,
++            )
++            for r in rows
++        ]
++        # 任务面提交锚（CLI 同款「消息含 task token」推断）：倒序取最新命中。
++        tasks = [
++            TimelineTask(
++                id=task_id,
++                checked=checked,
++                desc=desc,
++                commit_sha=next(
++                    (short for short, msg in reversed(commit_pairs) if task_id in msg),
++                    None,
++                ),
++            )
++            for task_id, checked, desc in _read_tasks(change_dir)
++        ]
++
++        stats = TimelineStats(
++            event_count=len(rows),
++            commit_count=len(commit_shas),
++            checked=sum(1 for t in tasks if t.checked),
++            total=len(tasks),
++            wall_clock_s=self._wall_clock(rows),
++        )
++        return ChangeTimelineRead(
++            change_key=change.change_key,
++            born_at=_read_born_at(change_dir),
++            events=events,
++            tasks=tasks,
++            stats=stats,
++        )
++
++    async def _load_commit_window(
++        self, workspace_id: uuid.UUID, user_id: uuid.UUID, shas: list[str]
++    ) -> tuple[dict[str, str | None], list[tuple[str, str]]]:
++        """git_log 窗口 → (短哈希→标题映射, (short, message) 窗口对列表)。
++
++        daemon 离线/非 git/任何异常 → (全 None 映射, 空窗口)——调用方降级仅哈希
++        （best-effort 通道，观测事件卡先例；不阻塞聚合主响应）。
++        """
++        titles: dict[str, str | None] = {s: None for s in shas}
++        if not shas:
++            return titles, []
++        try:
++            commits = await GitLogService(self._session).list_commits(
++                workspace_id, user_id, limit=50
++            )
++        except Exception as exc:
++            log.info("change.timeline_git_titles_degraded", error=str(exc))
++            return titles, []
++        pairs = [
++            (c.short or c.hash[:9], (c.message or "").splitlines()[0] if c.message else "")
++            for c in commits.commits
++        ]
++        for sha in shas:
++            for short, title in pairs:
++                if short.startswith(sha):
++                    titles[sha] = title or None
++                    break
++        return titles, pairs
++
++    @staticmethod
++    def _wall_clock(rows: list[PlatformChangeEventORM]) -> int | None:
++        """首末事件 ts 差秒数（解析失败/不足两事件 → None）。"""
++        if len(rows) < 2:
++            return None
++        start = _parse_ts(rows[0].ts)
++        end = _parse_ts(rows[-1].ts)
++        if start is None or end is None:
++            return None
++        return int((end - start).total_seconds())
++
++    async def _get_change(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> Change:
++        res = await self._session.execute(
++            select(Change).where(Change.id == change_id, Change.workspace_id == workspace_id)
++        )
++        change = res.scalar_one_or_none()
++        if change is None:
++            raise ChangeNotFound("变更不存在或不属于该工作区")
++        return change
+diff --git a/backend/openapi.json b/backend/openapi.json
+index e246f26b9..892308c92 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -4578,6 +4578,60 @@
+         }
+       }
+     },
++    "/api/workspaces/{workspace_id}/changes/{change_id}/timeline": {
++      "get": {
++        "tags": [
++          "change"
++        ],
++        "summary": "Get Change Timeline",
++        "description": "变更合成时间线聚合（2026-09-26-change-real-timeline / FR-01）。\n\n复刻 CLI ``sillyspec watcher timeline`` 三源合成：事件轴\n（platform_change_events 正序 + requirements 工件 created_at 诞生锚）、\n任务面（tasks.md 行 × 提交锚推断）、脚注统计。thin 轻量变更 steps 恒空\n的主线叙事由本端点承载；events 恒 provisional（红线 D-004：只展示不\n消费）。git 提交标题经 daemon best-effort 反查，失败降级仅哈希。不存\n在/跨工作区抛 ``ChangeNotFound``（对齐 assets 端点口径）。",
++        "operationId": "get_change_timeline_api_workspaces__workspace_id__changes__change_id__timeline_get",
++        "parameters": [
++          {
++            "name": "workspace_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Workspace Id"
++            }
++          },
++          {
++            "name": "change_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Change Id"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/ChangeTimelineRead"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/workspaces/{workspace_id}/changes/{change_id}/assets/patch-file": {
+       "get": {
+         "tags": [
+@@ -40041,6 +40095,48 @@
+         "title": "ChangeTestRow",
+         "description": "测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。\n\n``raw_binding``（2026-09-26-assets-test-binding-raw-text）是该行锚点在归档\nrequirements.md「AGENT:测试绑定FR-XX」槽的手写原文——test-trace 摘录会把\n``::用例`` 后缀截断成纯文件路径，原文承载用例级锚点与描述文字，聚合时\n一并带出供前端展示；槽缺失/解析失败 → None（fail-open，不影响其余字段）。"
+       },
++      "ChangeTimelineRead": {
++        "properties": {
++          "change_key": {
++            "type": "string",
++            "title": "Change Key"
++          },
++          "born_at": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Born At"
++          },
++          "events": {
++            "items": {
++              "$ref": "#/components/schemas/TimelineEvent"
++            },
++            "type": "array",
++            "title": "Events"
++          },
++          "tasks": {
++            "items": {
++              "$ref": "#/components/schemas/TimelineTask"
++            },
++            "type": "array",
++            "title": "Tasks"
++          },
++          "stats": {
++            "$ref": "#/components/schemas/TimelineStats"
++          }
++        },
++        "type": "object",
++        "required": [
++          "change_key"
++        ],
++        "title": "ChangeTimelineRead",
++        "description": "变更合成时间线聚合（GET /changes/{cid}/timeline）。\n\n``born_at`` 来自 requirements.md frontmatter created_at（工件元数据补位，\nwatcher 后拉起时事件流缺诞生事件）；events 恒 provisional（观测语义，\n红线 D-004 延续：只展示不消费）。"
++      },
+       "ChangeUsageRead": {
+         "properties": {
+           "started_at": {
+@@ -71086,6 +71182,129 @@
+         "title": "TeamWorkspaceRef",
+         "description": "TeamMissionSummary.scope_workspaces 单项——scope 工作区 id+名称。\n\nql-20260825-003：范围徽标名称化（前端只拿 id 时回落 #<id8> 原始徽标）。\nname 查无 Workspace 行时为 None（前端回落 id 徽标）。"
+       },
++      "TimelineEvent": {
++        "properties": {
++          "ts": {
++            "type": "string",
++            "title": "Ts"
++          },
++          "kind": {
++            "type": "string",
++            "title": "Kind"
++          },
++          "label": {
++            "type": "string",
++            "title": "Label"
++          },
++          "rule": {
++            "type": "string",
++            "title": "Rule",
++            "default": ""
++          },
++          "severity": {
++            "type": "string",
++            "title": "Severity",
++            "default": "info"
++          },
++          "provisional": {
++            "type": "boolean",
++            "title": "Provisional",
++            "default": true
++          },
++          "commit_title": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Commit Title"
++          }
++        },
++        "type": "object",
++        "required": [
++          "ts",
++          "kind",
++          "label"
++        ],
++        "title": "TimelineEvent",
++        "description": "事件轴单条（platform_change_events 正序投影 + 提交标题增强）。\n\n``label`` 机器值（kind 或 detail 原文）；中文标签与图标由前端映射（对齐\nCLI watcher timeline 语义）；``commit_title`` 仅 kind=commit 且 git 窗口\n命中时有值（daemon 降级 → None，前端只显哈希）。"
++      },
++      "TimelineStats": {
++        "properties": {
++          "event_count": {
++            "type": "integer",
++            "title": "Event Count",
++            "default": 0
++          },
++          "commit_count": {
++            "type": "integer",
++            "title": "Commit Count",
++            "default": 0
++          },
++          "checked": {
++            "type": "integer",
++            "title": "Checked",
++            "default": 0
++          },
++          "total": {
++            "type": "integer",
++            "title": "Total",
++            "default": 0
++          },
++          "wall_clock_s": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Wall Clock S"
++          }
++        },
++        "type": "object",
++        "title": "TimelineStats",
++        "description": "脚注统计（纯计算：墙钟=首末事件差，观测盲窗下不冒充完整历史）。"
++      },
++      "TimelineTask": {
++        "properties": {
++          "id": {
++            "type": "string",
++            "title": "Id"
++          },
++          "checked": {
++            "type": "boolean",
++            "title": "Checked",
++            "default": false
++          },
++          "desc": {
++            "type": "string",
++            "title": "Desc",
++            "default": ""
++          },
++          "commit_sha": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Commit Sha"
++          }
++        },
++        "type": "object",
++        "required": [
++          "id"
++        ],
++        "title": "TimelineTask",
++        "description": "任务面单行（tasks.md 任务行 × 提交锚推断）。\n\n``commit_sha`` 是「消息含 task-NN token」的最新窗口提交短哈希（CLI 同款\n顺序推断口径，无匹配 → None）。"
++      },
+       "TokenPair": {
+         "properties": {
+           "access_token": {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx
+index cb0317bde..0e4885b9d 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx
+@@ -35,6 +35,9 @@ vi.mock("@/lib/changes", () => ({
+   getChange: mocks.getChange,
+   getAgentStatus: mocks.getAgentStatus,
+   submitStageReview: mocks.submitStageReview,
++  // 2026-09-26-change-real-timeline：steps 空的 fixture 走合成时间线分支，
++  // 组件自取数走此 mock（默认 reject → 卡静默隐藏，不涉断言面）。
++  getChangeTimeline: vi.fn().mockRejectedValue(new Error("no-timeline-in-page-tests")),
+ }));
+ 
+ vi.mock("@/lib/daemon", () => ({
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+index fbbb1f57a..9e74c2b79 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ import ChangeDetailPage from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
+ import type { ChangeRead, DispatchResponse } from "@/lib/changes";
++import { getChangeTimeline } from "@/lib/changes";
+ import type { AgentSessionListItem } from "@/lib/daemon";
+ 
+ const mocks = vi.hoisted(() => ({
+@@ -33,6 +34,9 @@ vi.mock("@/lib/changes", () => ({
+   getChange: mocks.getChange,
+   getAgentStatus: mocks.getAgentStatus,
+   submitStageReview: mocks.submitStageReview,
++  // 2026-09-26-change-real-timeline：steps 空的 fixture 走合成时间线分支，
++  // 组件自取数走此 mock（默认 reject → 卡静默隐藏，不涉断言面）。
++  getChangeTimeline: vi.fn().mockRejectedValue(new Error("no-timeline-in-page-tests")),
+ }));
+ 
+ vi.mock("@/lib/daemon", () => ({
+@@ -162,4 +166,40 @@ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets
+     const card = await screen.findByTestId("scope-audit-command-card");
+     expect(card).toHaveAttribute("data-archived", "true");
+   });
++
++  it("FR-03（2026-09-26-change-real-timeline）：steps 为空时主线挂载真实留痕时间线卡", async () => {
++    vi.mocked(getChangeTimeline).mockResolvedValue({
++      change_key: "2026-09-26-restore-fixture",
++      born_at: "2026-09-26T10:00:00.000Z",
++      events: [
++        {
++          ts: "2026-09-26T10:01:00Z",
++          kind: "file-update",
++          label: "requirements.md 内容变更",
++          rule: "watcher",
++          severity: "info",
++          provisional: true,
++          commit_title: null,
++        },
++      ],
++      tasks: [
++        { id: "task-01", checked: true, desc: "恢复钉子", commit_sha: null },
++      ],
++      stats: {
++        event_count: 1,
++        commit_count: 0,
++        checked: 1,
++        total: 1,
++        wall_clock_s: null,
++      },
++    });
++    renderPage(makeChange());
++    expect(
++      await screen.findByTestId("change-timeline-card"),
++    ).toBeInTheDocument();
++    // steps 为空 → 原步骤时间线整块不渲染（空窗由时间线卡填补）。
++    expect(
++      screen.queryByTestId("change-step-timeline-card"),
++    ).toBeNull();
++  });
+ });
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
+index 83c1b1fb3..925fec170 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
+@@ -45,6 +45,9 @@ vi.mock("@/lib/changes", () => ({
+   getChange: mocks.getChange,
+   getAgentStatus: mocks.getAgentStatus,
+   submitStageReview: mocks.submitStageReview,
++  // 2026-09-26-change-real-timeline：steps 空的 fixture 走合成时间线分支，
++  // 组件自取数走此 mock（默认 reject → 卡静默隐藏，不涉断言面）。
++  getChangeTimeline: vi.fn().mockRejectedValue(new Error("no-timeline-in-page-tests")),
+ }));
+ 
+ vi.mock("@/lib/daemon", () => ({
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index 303a55def..a690631b2 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -23,6 +23,7 @@ import {
+   WORKFLOW_STAGE_LABELS,
+ } from "@/components/changes/detail/change-stage-header";
+ import { ChangeStepTimeline } from "@/components/changes/detail/change-step-timeline";
++import { ChangeTimelineCard } from "@/components/changes/detail/change-timeline-card";
+ import {
+   ChangeLastSignal,
+   lastSignalFromSteps,
+@@ -397,7 +398,13 @@ export default function ChangeDetailPage({ params }: Props) {
+                 />
+               </div>
+             </section>
+-          ) : null}
++          ) : (
++            /* 真实留痕时间线（2026-09-26-change-real-timeline / FR-03）：steps
++               为空（thin 轻量变更进度不落库恒空、quick 存量同空）时原整块
++               不渲染是叙事空窗——换挂合成时间线卡（事件轴 × 任务面 × 脚注，
++               复刻 CLI watcher timeline；组件自取数 30s 轮询失败静默）。 */
++            <ChangeTimelineCard workspaceId={workspaceId} changeId={changeId} />
++          )}
+ 
+           <ChangeAgentRunLog
+             workspaceId={workspaceId}
+diff --git a/frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx
+new file mode 100644
+index 000000000..f0ab01aec
+--- /dev/null
++++ b/frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx
+@@ -0,0 +1,151 @@
++// 真实留痕时间线卡组件测试（2026-09-26-change-real-timeline FR-02/FR-03）。
++// 覆盖：三段渲染（事件轴含诞生锚/中文标签、任务面勾选×提交锚、脚注统计）、
++// fake-check 告警醒目态、commit 标题展示、失败/空数据静默隐藏（观测事件卡范式）。
++import { render, screen } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import { ChangeTimelineCard } from "@/components/changes/detail/change-timeline-card";
++import { getChangeTimeline } from "@/lib/changes";
++
++const mocks = vi.hoisted(() => ({ getChangeTimeline: vi.fn() }));
++
++vi.mock("@/lib/changes", () => ({
++  getChangeTimeline: mocks.getChangeTimeline,
++}));
++
++const mockTimeline = vi.mocked(getChangeTimeline);
++
++function renderCard() {
++  const client = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  return render(
++    <QueryClientProvider client={client}>
++      <ChangeTimelineCard workspaceId="ws-1" changeId="c-1" />
++    </QueryClientProvider>,
++  );
++}
++
++const GOLDEN = {
++  change_key: "k",
++  born_at: "2026-09-26T07:00:00.000Z",
++  events: [
++    {
++      ts: "2026-09-26T07:01:00Z",
++      kind: "file-update",
++      label: "requirements.md 内容变更",
++      rule: "watcher",
++      severity: "info",
++      provisional: true,
++      commit_title: null,
++    },
++    {
++      ts: "2026-09-26T07:02:01Z",
++      kind: "warning",
++      label: "tasks 勾选 task-01 无对应提交",
++      rule: "fake-check",
++      severity: "warning",
++      provisional: true,
++      commit_title: null,
++    },
++    {
++      ts: "2026-09-26T07:03:00Z",
++      kind: "commit",
++      label: "4aed0e824",
++      rule: "watcher",
++      severity: "info",
++      provisional: true,
++      commit_title: "feat: 落地（task-01 task-02）",
++    },
++  ],
++  tasks: [
++    { id: "task-01", checked: true, desc: "后端聚合服务落盘", commit_sha: "4aed0e824" },
++    { id: "task-02", checked: false, desc: "前端组件三段渲染", commit_sha: null },
++  ],
++  stats: {
++    event_count: 3,
++    commit_count: 1,
++    checked: 1,
++    total: 2,
++    wall_clock_s: 120,
++  },
++};
++
++describe("ChangeTimelineCard", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++  });
++
++  afterEach(() => {
++    vi.clearAllMocks();
++  });
++
++  it("三段渲染：诞生锚 + 事件轴（中文标签/commit 标题）+ 任务面（勾选×提交锚）+ 统计", async () => {
++    mockTimeline.mockResolvedValue(GOLDEN);
++    const { container } = renderCard();
++
++    expect(await screen.findByTestId("change-timeline-card")).toBeInTheDocument();
++    // 诞生锚行（工件 created_at 补位）。
++    expect(screen.getByTestId("change-timeline-event-born")).toHaveTextContent(
++      "变更诞生",
++    );
++    // 事件轴：file-update 中文标签直显；commit 行哈希 + 标题。
++    expect(screen.getByTestId("change-timeline-event-file-update")).toHaveTextContent(
++      "requirements.md 内容变更",
++    );
++    const commitRow = screen.getByTestId("change-timeline-event-commit");
++    expect(commitRow).toHaveTextContent("4aed0e824");
++    expect(commitRow).toHaveTextContent("feat: 落地（task-01 task-02）");
++    // 任务面：勾选态与提交锚。
++    const tasks = screen.getByTestId("change-timeline-tasks");
++    expect(tasks).toHaveTextContent("task-01");
++    expect(tasks).toHaveTextContent("后端聚合服务落盘");
++    expect(tasks).toHaveTextContent("4aed0e824");
++    // 脚注统计（120s → 2min）。
++    expect(screen.getByText(/墙钟 2min/)).toBeInTheDocument();
++    expect(container).toHaveTextContent("事件 3 · 提交 1 · 勾选 1/2");
++  });
++
++  it("fake-check 告警醒目态（琥珀强调），普通事件不上", async () => {
++    mockTimeline.mockResolvedValue(GOLDEN);
++    renderCard();
++
++    const warnRow = await screen.findByTestId("change-timeline-event-warning");
++    expect(warnRow.className).toContain("text-amber-700");
++    expect(
++      screen.getByTestId("change-timeline-event-file-update").className,
++    ).not.toContain("text-amber-700");
++  });
++
++  it("空数据（无事件/无任务/无诞生锚）整卡静默隐藏", async () => {
++    mockTimeline.mockResolvedValue({
++      change_key: "k",
++      born_at: null,
++      events: [],
++      tasks: [],
++      stats: {
++        event_count: 0,
++        commit_count: 0,
++        checked: 0,
++        total: 0,
++        wall_clock_s: null,
++      },
++    });
++    const { container } = renderCard();
++    // 空数据 → null 渲染（无卡片壳）。
++    await new Promise((r) => setTimeout(r, 30));
++    expect(
++      screen.queryByTestId("change-timeline-card"),
++    ).toBeNull();
++    expect(container.textContent).toBe("");
++  });
++
++  it("请求失败静默隐藏（观测事件卡同款范式）", async () => {
++    mockTimeline.mockRejectedValue(new Error("boom"));
++    const { container } = renderCard();
++    await new Promise((r) => setTimeout(r, 30));
++    expect(screen.queryByTestId("change-timeline-card")).toBeNull();
++    expect(container.textContent).toBe("");
++  });
++});
+diff --git a/frontend/src/components/changes/detail/change-timeline-card.tsx b/frontend/src/components/changes/detail/change-timeline-card.tsx
+new file mode 100644
+index 000000000..6b02ae94c
+--- /dev/null
++++ b/frontend/src/components/changes/detail/change-timeline-card.tsx
+@@ -0,0 +1,176 @@
++"use client";
++
++import { useQuery } from "@tanstack/react-query";
++
++import { getChangeTimeline, type TimelineEventItem } from "@/lib/changes";
++
++// ── 真实留痕时间线（2026-09-26-change-real-timeline / FR-02~03）──────────────
++// 复刻 CLI `sillyspec watcher timeline --change <名>` 的合成展示：事件轴
++// （watcher 观测流）× 任务面（tasks.md 勾选 × 提交锚）× 脚注统计。挂在变更
++// 详情页 steps 为空处（thin 轻量变更进度不落库、steps 恒空，主线叙事由本卡
++// 承担）；观测事件卡同款范式——useQuery 自取数 30s 轮询、失败静默隐藏。
++//
++// 红线 D-004 延续：事件恒 provisional（观测语义），本卡只展示不消费、
++// 无 mutation；kind → 图标/中文映射对齐 CLI 输出语义（detail 已是 CLI 同源
++// 中文文案，label 直显，kind 只决定图标与强调色）。
++
++/** kind → 图标 + 强调态（对齐 CLI watcher timeline 输出行首图标语义）。 */
++const KIND_ICON: Record<string, { icon: string; warn?: boolean }> = {
++  "file-update": { icon: "📝" },
++  "task-done": { icon: "✅" },
++  warning: { icon: "⚠️", warn: true },
++  commit: { icon: "🔀" },
++  archived: { icon: "📦" },
++};
++
++function eventIcon(kind: string) {
++  return KIND_ICON[kind] ?? { icon: "ℹ️" };
++}
++
++/** ISO ts → 本地 HH:mm:ss（失败回退原文，页面既有步骤时间线同款宽容）。 */
++function hhmmss(ts: string): string {
++  const d = new Date(ts);
++  if (Number.isNaN(d.getTime())) return ts;
++  return d.toLocaleTimeString("zh-CN", { hour12: false });
++}
++
++/** 秒 → 中文时长（<60s 显秒；<1h 显分；否则时+分）。 */
++function dur(seconds: number | null | undefined): string | null {
++  if (seconds == null) return null;
++  if (seconds < 60) return `${seconds}s`;
++  if (seconds < 3600) return `${Math.round(seconds / 60)}min`;
++  return `${Math.floor(seconds / 3600)}h${Math.round((seconds % 3600) / 60)}min`;
++}
++
++function EventRow({ e }: { e: TimelineEventItem }) {
++  const { icon, warn } = eventIcon(e.kind);
++  return (
++    <li
++      data-testid={`change-timeline-event-${e.kind}`}
++      className={`flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 ${
++        warn ? "text-amber-700" : "text-foreground"
++      }`}
++    >
++      <span className="w-16 shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
++        {hhmmss(e.ts)}
++      </span>
++      <span className="shrink-0">{icon}</span>
++      <span className="min-w-0 flex-1 truncate" title={e.commit_title ?? e.label ?? ""}>
++        {e.kind === "commit" ? (
++          <>
++            <span className="font-mono text-[10.5px] text-brand-700">{e.label}</span>
++            {e.commit_title ? (
++              <span className="ml-1 text-muted-foreground">{e.commit_title}</span>
++            ) : null}
++          </>
++        ) : (
++          (e.label ?? e.kind)
++        )}
++      </span>
++    </li>
++  );
++}
++
++export function ChangeTimelineCard({
++  workspaceId,
++  changeId,
++}: {
++  workspaceId: string;
++  changeId: string;
++}) {
++  const query = useQuery({
++    queryKey: ["changeTimeline", workspaceId, changeId],
++    queryFn: () => getChangeTimeline(workspaceId, changeId),
++    refetchInterval: 30_000,
++    retry: false,
++    refetchOnWindowFocus: false,
++  });
++
++  // 失败/未就绪静默隐藏（观测事件卡同款范式，不阻断详情页）。
++  if (query.isError || !query.data) return null;
++  // api-types 生成字段保守标 optional（list/stats 带 default 仍可能 undefined）
++  // ——运行时 ?? 兜底，旧后端过渡窗口不崩。
++  const d = query.data;
++  const events = d.events ?? [];
++  const tasks = d.tasks ?? [];
++  const stats =
++    d.stats ?? {
++      event_count: 0,
++      commit_count: 0,
++      checked: 0,
++      total: 0,
++      wall_clock_s: null,
++    };
++  if (events.length === 0 && tasks.length === 0 && !d.born_at) return null;
++  const wall = dur(stats.wall_clock_s);
++
++  return (
++    <section data-testid="change-timeline-card" className="rounded-md border bg-card">
++      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
++        <h2 className="text-xs font-medium">🧭 真实留痕时间线</h2>
++        <span className="text-[10px] text-muted-foreground">
++          {wall ? `墙钟 ${wall} · ` : ""}事件 {stats.event_count} · 提交{" "}
++          {stats.commit_count}
++          {stats.total > 0 ? ` · 勾选 ${stats.checked}/${stats.total}` : ""}
++        </span>
++      </div>
++
++      <div className="px-3 py-2.5">
++        <p className="mb-1 text-[11px] font-medium text-muted-foreground">事件时间轴</p>
++        <ul className="mb-3">
++          {d.born_at ? (
++            <li
++              data-testid="change-timeline-event-born"
++              className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs"
++            >
++              <span className="w-16 shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
++                {hhmmss(d.born_at)}
++              </span>
++              <span className="shrink-0">🁢</span>
++              <span>变更诞生（工件 created_at）</span>
++            </li>
++          ) : null}
++          {events.map((e, i) => (
++            <EventRow key={`${e.ts}-${i}`} e={e} />
++          ))}
++          {events.length === 0 && !d.born_at ? (
++            <li className="py-1 text-xs text-muted-foreground">暂无观测事件。</li>
++          ) : null}
++        </ul>
++
++        {tasks.length > 0 ? (
++          <>
++            <p className="mb-1 text-[11px] font-medium text-muted-foreground">
++              任务面（勾选 × 提交锚，顺序推断）
++            </p>
++            <ul data-testid="change-timeline-tasks">
++              {tasks.map((t) => (
++                <li
++                  key={t.id}
++                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0"
++                >
++                  <span className="w-4 shrink-0">{t.checked ? "☑" : "☐"}</span>
++                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
++                    {t.id}
++                  </span>
++                  <span className="min-w-0 flex-1 truncate" title={t.desc}>
++                    {t.desc}
++                  </span>
++                  {t.commit_sha ? (
++                    <span className="shrink-0 font-mono text-[10px] text-brand-700">
++                      {t.commit_sha}
++                    </span>
++                  ) : null}
++                </li>
++              ))}
++            </ul>
++          </>
++        ) : null}
++
++        <p className="mt-2 text-[10px] text-muted-foreground/70">
++          观测起点≠诞生时刻（watcher 后拉起/单飞锁盲窗）；任务勾选与提交锚为顺序推断。
++        </p>
++      </div>
++    </section>
++  );
++}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index e11cd0fde..77dc055e9 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -1835,6 +1835,33 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/changes/{change_id}/timeline": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Change Timeline
++         * @description 变更合成时间线聚合（2026-09-26-change-real-timeline / FR-01）。
++         *
++         *     复刻 CLI ``sillyspec watcher timeline`` 三源合成：事件轴
++         *     （platform_change_events 正序 + requirements 工件 created_at 诞生锚）、
++         *     任务面（tasks.md 行 × 提交锚推断）、脚注统计。thin 轻量变更 steps 恒空
++         *     的主线叙事由本端点承载；events 恒 provisional（红线 D-004：只展示不
++         *     消费）。git 提交标题经 daemon best-effort 反查，失败降级仅哈希。不存
++         *     在/跨工作区抛 ``ChangeNotFound``（对齐 assets 端点口径）。
++         */
++        get: operations["get_change_timeline_api_workspaces__workspace_id__changes__change_id__timeline_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/changes/{change_id}/assets/patch-file": {
+         parameters: {
+             query?: never;
+@@ -13845,6 +13872,25 @@ export interface components {
+             /** Raw Binding */
+             raw_binding?: string | null;
+         };
++        /**
++         * ChangeTimelineRead
++         * @description 变更合成时间线聚合（GET /changes/{cid}/timeline）。
++         *
++         *     ``born_at`` 来自 requirements.md frontmatter created_at（工件元数据补位，
++         *     watcher 后拉起时事件流缺诞生事件）；events 恒 provisional（观测语义，
++         *     红线 D-004 延续：只展示不消费）。
++         */
++        ChangeTimelineRead: {
++            /** Change Key */
++            change_key: string;
++            /** Born At */
++            born_at?: string | null;
++            /** Events */
++            events?: components["schemas"]["TimelineEvent"][];
++            /** Tasks */
++            tasks?: components["schemas"]["TimelineTask"][];
++            stats?: components["schemas"]["TimelineStats"];
++        };
+         /**
+          * ChangeUsageRead
+          * @description 变更/快速修复完整用量（两个 usage 详情端点响应，D-005@v1）。
+@@ -25908,6 +25954,90 @@ export interface components {
+             /** Name */
+             name?: string | null;
+         };
++        /**
++         * TimelineEvent
++         * @description 事件轴单条（platform_change_events 正序投影 + 提交标题增强）。
++         *
++         *     ``label`` 机器值（kind 或 detail 原文）；中文标签与图标由前端映射（对齐
++         *     CLI watcher timeline 语义）；``commit_title`` 仅 kind=commit 且 git 窗口
++         *     命中时有值（daemon 降级 → None，前端只显哈希）。
++         */
++        TimelineEvent: {
++            /** Ts */
++            ts: string;
++            /** Kind */
++            kind: string;
++            /** Label */
++            label: string;
++            /**
++             * Rule
++             * @default
++             */
++            rule: string;
++            /**
++             * Severity
++             * @default info
++             */
++            severity: string;
++            /**
++             * Provisional
++             * @default true
++             */
++            provisional: boolean;
++            /** Commit Title */
++            commit_title?: string | null;
++        };
++        /**
++         * TimelineStats
++         * @description 脚注统计（纯计算：墙钟=首末事件差，观测盲窗下不冒充完整历史）。
++         */
++        TimelineStats: {
++            /**
++             * Event Count
++             * @default 0
++             */
++            event_count: number;
++            /**
++             * Commit Count
++             * @default 0
++             */
++            commit_count: number;
++            /**
++             * Checked
++             * @default 0
++             */
++            checked: number;
++            /**
++             * Total
++             * @default 0
++             */
++            total: number;
++            /** Wall Clock S */
++            wall_clock_s?: number | null;
++        };
++        /**
++         * TimelineTask
++         * @description 任务面单行（tasks.md 任务行 × 提交锚推断）。
++         *
++         *     ``commit_sha`` 是「消息含 task-NN token」的最新窗口提交短哈希（CLI 同款
++         *     顺序推断口径，无匹配 → None）。
++         */
++        TimelineTask: {
++            /** Id */
++            id: string;
++            /**
++             * Checked
++             * @default false
++             */
++            checked: boolean;
++            /**
++             * Desc
++             * @default
++             */
++            desc: string;
++            /** Commit Sha */
++            commit_sha?: string | null;
++        };
+         /**
+          * TokenPair
+          * @description Issued on login + refresh.
+@@ -30778,6 +30908,38 @@ export interface operations {
+             };
+         };
+     };
++    get_change_timeline_api_workspaces__workspace_id__changes__change_id__timeline_get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++                change_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ChangeTimelineRead"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_change_patch_file_api_workspaces__workspace_id__changes__change_id__assets_patch_file_get: {
+         parameters: {
+             query: {
+diff --git a/frontend/src/lib/changes.ts b/frontend/src/lib/changes.ts
+index 519ffd280..03a272ba6 100644
+--- a/frontend/src/lib/changes.ts
++++ b/frontend/src/lib/changes.ts
+@@ -760,6 +760,22 @@ export function getChangeAssets(
+   );
+ }
+ 
++// ── 合成时间线（2026-09-26-change-real-timeline，复刻 CLI watcher timeline）──
++
++/** 合成时间线聚合响应（GET /changes/{cid}/timeline；api-types 生成版）。 */
++export type ChangeTimelineResponse = components["schemas"]["ChangeTimelineRead"];
++export type TimelineEventItem = components["schemas"]["TimelineEvent"];
++export type TimelineTaskItem = components["schemas"]["TimelineTask"];
++
++export function getChangeTimeline(
++  workspaceId: string,
++  changeId: string,
++): Promise<ChangeTimelineResponse> {
++  return apiFetch<ChangeTimelineResponse>(
++    `/api/workspaces/${workspaceId}/changes/${changeId}/timeline`,
++  );
++}
++
+ /**
+  * 读某文件在 change.patch 中的 diff 切片（2026-09-25-change-detail-assets-usability /
+  * FR-04）。冻结在收尾时点，与范围对账的实时窗口锚不同源；未命中/缺件由响应
+diff --git a/.sillyspec/changes/2026-09-26-change-real-timeline/design.md b/.sillyspec/changes/2026-09-26-change-real-timeline/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-change-real-timeline/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T07:51:57.085Z
++---
++# 设计记录（Design Record）— 2026-09-26-change-real-timeline
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-real-timeline 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++复刻 CLI `sillyspec watcher timeline` 的合成展示到平台，三件：①后端 change 模块 NEW timeline.py：ChangeTimelineQueryService 聚合三源——platform_change_events 表（platform_sync ORM，按 workspace_id+change_name=change_key 正序）、镜像 tasks.md（复用 ChangeAssetsQueryService._resolve_change_dir 先例解析在途/归档目录，正则 `- [x]/- [ ] task-NN:` 行）、requirements.md frontmatter created_at（诞生锚）；commit 事件短哈希经 GitLogService.list_commits（daemon RPC，limit 50）sha 前缀匹配标题，异常降级 title=None；统计纯计算。②GET /changes/{cid}/timeline 端点 + schema DTO（TimelineEvent/TimelineTask/TimelineStats/ChangeTimelineRead）。③前端 NEW change-timeline-card.tsx（观测事件卡同款范式：useQuery 自取数 30s 轮询失败静默）+ page.tsx 在 steps 为空时挂载（steps 有数据零改动）。kind→中文标签映射对齐 CLI 输出语义。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-real-timeline 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++新增 GET /workspaces/{ws}/changes/{cid}/timeline（鉴权 WORKSPACE_READ 对齐 assets 端点）→ ChangeTimelineRead{change_key, born_at, events: [{ts, kind, label, detail, rule, severity, provisional}], tasks: [{id, checked, desc, commit_sha, commit_title}], stats: {wall_clock_s, event_count, commit_count, checked, total}}。既有端点零变化；events 表只读（红线 D-004 延续：展示不消费）。gen:types 同步 openapi.json + api-types.ts。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-real-timeline 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：事件 ts 字符串 ISO 字典序=时间序（表注释 R-04 先例），正序查询天然稳定；watcher 重推经 dedup_key 幂等，聚合只读快照无时序假设；在途变更轮询拉新事件自然增长。
++2. 并发写：三源全只读（events 表 SELECT、镜像文件读、git RPC 读）；tasks.md 在途时 agent 会改，聚合每次整读快照，读到半态按当次行解析（正则逐行、坏行跳过），下轮轮询自愈。
++3. 切换/生命周期：git RPC 失败/超时降级 title=None 不阻塞聚合（best-effort，观测事件卡先例）；变更删除后 404；前端组件失败静默隐藏不阻断详情页。
++4. 作用域：events 查询带 workspace_id + change_name 双键；change 归属校验（ChangeNotFound 跨工作区 404）在聚合前；git RPC 绑定同 workspace 的 daemon；无跨工作区串面。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-real-timeline 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：事件流覆盖不全（watcher 后拉起/单飞锁盲窗，CLI 脚注同款披露）——展示面注明「观测起点≠诞生时刻」，墙钟统计以首末事件为界，不冒充完整历史。次风险：tasks.md 机器稿行含长描述截断规则与未来格式漂移——正则宽容匹配（task-\d+ 后冒号任意文本），坏行跳过不炸。试过但放弃：①把 CLI 命令嵌 daemon RPC 直接取渲染文本——耦合 CLI 输出格式且失去结构化（前端无法做任务面表格），且 daemon 旧版无此命令会 502；②events 表加 timeline 专用投影列——违反红线 D-004（零业务加工），聚合现算即可（变更事件量级 <100/单变更）。commit 标题匹配用 9 字符短哈希前缀——碰撞概率在 limit 50 窗口内可忽略，命中多条取最新。
+
+diff --git a/.sillyspec/changes/2026-09-26-change-real-timeline/flow-state.yaml b/.sillyspec/changes/2026-09-26-change-real-timeline/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-change-real-timeline/flow-state.yaml
+@@ -0,0 +1,15 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 5f8eb2d52f4299cd52e4bcc1bbe2313ad1966a0a
++updatedAt: '2026-09-26T08:04:39.037Z'
++gate_summary: >-
++  test: skipped — 跳过原因：test_strategy: module 但本次变更未命中任何已配置 modules（0 命中）。｜lint: passed ← cd backend && uv run ruff check
++  . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
++  typecheck（14.4s）｜门文件 14 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-change-real-timeline/proposal.md b/.sillyspec/changes/2026-09-26-change-real-timeline/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-change-real-timeline/proposal.md
+@@ -0,0 +1,49 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T07:51:57.084Z
++---
++# 提案书（Proposal）— 2026-09-26-change-real-timeline
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:e81530b33ea370e9d887eb9be7bc8966dbb715aebf2e625d55632356234719e8:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-real-timeline 留痕重锚 -->
++任务原话转写：动机:thin 轻量变更进度不落 sillyspec.db,平台详情页 steps 恒空、步骤时间线整块不渲染,主线叙事空窗;而 sillyspec 已有正式命令 watcher timeline --change 渲染真实留痕合成时间线(事件流 × tasks.md × git 提交锚),且事件流已推平台 platform_change_events 表——平台侧复刻该合成展示。
++
++成功标准:
++- 后端新增 GET /workspaces/{ws}/changes/{cid}/timeline 只读聚合端点:事件轴(platform_change_events 按 change_key 正序,requirements 工件 created_at 作诞生锚)、任务面(tasks.md 任务行含勾选态与描述,提交锚=事件 commit 短哈希经 git_log list_commits best-effort 反查标题,失败降级仅哈希)、脚注统计(墙钟/事件数/提交数/勾选比)
++- 事件 kind 渲染对齐 CLI watcher timeline 的中文与图标语义(内容变更/勾选变化/fake-check 告警/提交/归档/诞生)
++- 前端新增 ChangeTimelineCard 组件(自取数轮询,事件时间轴+任务面+脚注三段式),挂载于详情页 steps 为空处填补空窗;steps 有数据时维持原步骤时间线不动
++- 后端聚焦测试覆盖聚合金样本、空 events 容错、git 标题降级;前端组件测试覆盖三段渲染与空态;聚焦测试全绿
++- 规则 21:新端点 DTO 落 schema 后跑 pnpm gen:types 随提交 openapi.json 与 api-types.ts;frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:63cef56c6d645076370ee2fd84a780d0c6b5a62d9967722c766238de5bb207f1:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-real-timeline 留痕重锚 -->
++按成功标准机械推导，共 9 条验收面：
++1. 后端新增 GET /workspaces/{ws}/changes/{cid}/timeline 只读聚合端点:事件轴(platform_change_events 按 change_key 正序,requirements 工件 created_at 作诞生锚)、任务面(tasks.md 任务行含勾选态与描述,提交锚=事件 commit 短哈希经 git_log list_commits best-effort 反查标题,失败降级仅哈希)、脚注统计(墙钟/事件数/提交数/勾选比)
++2. 事件 kind 渲染对齐 CLI watcher timeline 的中文与图标语义(内容变更/勾选变化/fake-check 告警/提交/归档/诞生)
++3. 前端新增 ChangeTimelineCard 组件(自取数轮询,事件时间轴+任务面+脚注三段式),挂载于详情页 steps 为空处填补空窗
++4. steps 有数据时维持原步骤时间线不动
++5. 后端聚焦测试覆盖聚合金样本、空 events 容错、git 标题降级
++6. 前端组件测试覆盖三段渲染与空态
++7. 聚焦测试全绿
++8. 规则 21:新端点 DTO 落 schema 后跑 pnpm gen:types 随提交 openapi.json 与 api-types.ts
++9. frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:5d18fbda49322eae586e75fe946a749d70602751d3cdb17232e81c67e2fd4bf4:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-change-real-timeline 留痕重锚 -->
++1. 后端新增 GET /workspaces/{ws}/changes/{cid}/timeline 只读聚合端点:事件轴(platform_change_events 按 change_key 正序,requirements 工件 created_at 作诞生锚)、任务面(tasks.md 任务行含勾选态与描述,提交锚=事件 commit 短哈希经 git_log list_commits best-effort 反查标题,失败降级仅哈希)、脚注统计(墙钟/事件数/提交数/勾选比)
++2. 事件 kind 渲染对齐 CLI watcher timeline 的中文与图标语义(内容变更/勾选变化/fake-check 告警/提交/归档/诞生)
++3. 前端新增 ChangeTimelineCard 组件(自取数轮询,事件时间轴+任务面+脚注三段式),挂载于详情页 steps 为空处填补空窗
++4. steps 有数据时维持原步骤时间线不动
++5. 后端聚焦测试覆盖聚合金样本、空 events 容错、git 标题降级
++6. 前端组件测试覆盖三段渲染与空态
++7. 聚焦测试全绿
++8. 规则 21:新端点 DTO 落 schema 后跑 pnpm gen:types 随提交 openapi.json 与 api-types.ts
++9. frontend tsc 无错误
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-change-real-timeline/requirements.md b/.sillyspec/changes/2026-09-26-change-real-timeline/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-change-real-timeline/requirements.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T07:51:57.085Z
++---
++# 需求规格（Requirements）— 2026-09-26-change-real-timeline
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++<!-- 参考摘录 5 条按实现结构重组为 FR-01~04 -->
++
++### FR-01: 合成时间线聚合端点
++Given thin 轻量变更进度不落库、steps 恒空、CLI 已有 watcher timeline 正式命令且事件流已推平台表，
++When 客户端请求 GET /workspaces/{ws}/changes/{cid}/timeline，
++Then 返回三段式合成数据——事件轴（platform_change_events 按 change_key 正序 + requirements 工件 created_at 作诞生锚）、任务面（tasks.md 任务行的勾选态/描述/提交锚，提交锚 = commit 事件短哈希经 git_log list_commits best-effort 前缀匹配标题，daemon 不可用降级仅哈希）、脚注统计（墙钟/事件数/提交数/勾选比）；变更不存在或跨工作区 → 404（对齐 assets 端点口径）。
++
++### FR-02: 事件 kind 渲染对齐 CLI 语义
++Given watcher 事件 kind 为英文机器值（file-update/task-done/warning/commit/archived），
++When 前端渲染事件轴，
++Then 每条事件显示时刻 + 图标 + 中文标签（内容变更/勾选变化/告警/提交/归档/诞生，语义对齐 CLI watcher timeline 输出），warning(rule=fake-check) 行醒目呈现（红/琥珀强调），provisional 角标提示观测语义。
++
++### FR-03: 详情页空窗填补
++Given 变更 steps 为空（thin 恒空、quick 存量同空），
++When 详情页主线渲染，
++When 原步骤时间线位置挂载 ChangeTimelineCard（自取数轮询、失败静默隐藏），三段式展示事件轴 + 任务面 + 脚注；steps 有数据时维持原步骤时间线不动（零回归）。
++
++### FR-04: 测试与类型门禁全绿
++Given 三处改动落盘，
++When 运行后端聚焦测试（聚合金样本含诞生锚/任务行解析/提交标题匹配、空 events 容错、git 降级三面）与前端组件测试（三段渲染 + 空态 + steps 有数据不挂载）及 gen:types 后 tsc，
++Then 全部通过、openapi.json 与 api-types.ts 随提交同步、0 类型错误。
++
++
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_timeline.py::金样本聚合（诞生锚+事件轴+任务面+脚注） 与 ::空 events 容错 与 ::跨工作区 404 三用例
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx::事件轴中文标签与 fake-check 醒目 用例
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx 既有钉子回归（steps 空挂 timeline 卡断言可并入该文件或组件测试；steps 有数据走原时间线由 page-team-toggle 既有断言承担）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend uv run pytest app/modules/change/tests/test_timeline.py 全绿 + 前端聚焦套件一次跑过 + pnpm gen:types 幂等 + tsc exit 0（2026-09-26 实测）
