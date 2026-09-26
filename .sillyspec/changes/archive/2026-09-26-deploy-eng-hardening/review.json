@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-deploy-eng-hardening",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "type": "确认",
+      "file": "deploy/.env.example",
+      "lines": "107-109",
+      "message": "复审 P1（NEXT_PUBLIC_# 拼接注释残头）已修正：现为三行完整 # 注释并以 # NEXT_PUBLIC_COMMIT_SHA= 结尾；python 全文校验无非注释非键值残缺行。照模板复制 .env 不再断裂。",
+      "evidence": "Read deploy/.env.example L105-110；python 正则逐行校验输出「残缺行: 无」",
+      "title": "Read deploy/.env.example L105-110；python 正则逐行校验输出「残缺行: 无」",
+      "location": "deploy/.env.example:105-109"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "n/a",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-09-26T08:01:23+08:00"
+}

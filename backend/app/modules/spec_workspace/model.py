@@ -96,6 +96,17 @@ class SpecWorkspace(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # 2026-09-26-spec-consistency-writer：最后写入方身份（user:<id>:<email 摘要>）
+    # 与时间——双写者漂移（manifest 基线互不知情）是 SpecPushConflict 一周僵局的
+    # 根因，写方切换即漂移信号。
+    last_writer: str | None = Field(
+        default=None,
+        sa_column=Column(String(128), nullable=True),
+    )
+    last_writer_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),

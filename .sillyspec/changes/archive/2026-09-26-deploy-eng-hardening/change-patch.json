@@ -1,0 +1,26 @@
+{
+  "change": "2026-09-26-deploy-eng-hardening",
+  "baseline": "0491f80d29bd83e3e364c1b0f44fb681cc6f59a0",
+  "head": "b5cbc45fd99a2b1d369bed202490c83c258d1f88",
+  "files": [
+    "deploy/docker-compose.yml",
+    "deploy/scripts/build-and-save.sh",
+    "deploy/scripts/load-and-up.sh",
+    "frontend/scripts/gen-api-types.mjs",
+    "scripts/git-safe.sh",
+    ".sillyspec/changes/2026-09-26-deploy-eng-hardening/design.md",
+    ".sillyspec/changes/2026-09-26-deploy-eng-hardening/flow-state.yaml",
+    ".sillyspec/changes/2026-09-26-deploy-eng-hardening/proposal.md",
+    ".sillyspec/changes/2026-09-26-deploy-eng-hardening/requirements.md",
+    ".sillyspec/changes/2026-09-26-deploy-eng-hardening/tasks.md"
+  ],
+  "totals": {
+    "files": 10,
+    "additions": 322,
+    "deletions": 10
+  },
+  "savedAt": "2026-09-25T23:48:44.345Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "88860e028d6d08adb35ef23f8a06525db2236f4f737a915fb5b29895db0cacc0",
+  "patchStatus": "ok"
+}

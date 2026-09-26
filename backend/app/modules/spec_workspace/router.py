@@ -36,6 +36,7 @@ from app.modules.spec_workspace.schema import (
     ManifestHealIn,
     ManifestHealOut,
     SpecBootstrapRunStartResponse,
+    SpecConsistencyOut,
     SpecIncrementalSyncRequest,
     SpecIncrementalSyncResponse,
     SpecWorkspaceRead,
@@ -51,6 +52,13 @@ router = APIRouter(
 )
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+def _sync_writer_label(user: User) -> str:
+    """写入方身份摘要（2026-09-26-spec-consistency-writer）：daemon 服务身份经
+    X-API-Key 解析为 User（runtime 绑定），CLI/人经 Bearer——用 id+email 前缀摘要，
+    前端/日志可辨「daemon vs 人/CLI」双写者形态。"""
+    return f"user:{str(user.id)[:8]}:{(user.email or '')[:24]}"
 
 
 class SpecSyncResponse(BaseModel):
@@ -271,7 +279,9 @@ async def sync_spec_workspace(
     files_processed（逐文件级进度，D-004@V2）。
     """
     service = SpecWorkspaceService(session)
-    result = await service.apply_sync(workspace_id, tar_bytes, change_write_id=change_write_id)
+    result = await service.apply_sync(
+        workspace_id, tar_bytes, change_write_id=change_write_id, writer=_sync_writer_label(_user)
+    )
     return SpecSyncResponse(
         ok=True,
         reparsed=result["reparsed_docs"],
@@ -310,6 +320,7 @@ async def sync_spec_workspace_incremental(
         payload.ops,
         change_write_id=change_write_id,
         change_dirs=payload.change_dirs,
+        writer=_sync_writer_label(_user),
     )
     return SpecIncrementalSyncResponse(
         ok=True,
@@ -377,6 +388,27 @@ async def heal_manifest_tombstones(
     service = SpecWorkspaceService(session)
     result = await service.heal_manifest_tombstones(workspace_id, payload.paths)
     return ManifestHealOut(healed=result["healed"], skipped=result["skipped"])
+
+
+# ── 三向对账端点（2026-09-26-spec-consistency-writer）───────────────────────────
+
+
+@router.get("/spec-workspace/consistency", response_model=SpecConsistencyOut)
+async def get_spec_consistency(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+) -> SpecConsistencyOut:
+    """镜像磁盘树 × manifest 行对账：disk_only / manifest_ghost（幽灵行）/
+    tombstoned_on_disk 三类分歧 + 计数——镜像损坏直接可见（此前靠手写脚本）。"""
+    service = SpecWorkspaceService(session)
+    result = await service.consistency(workspace_id)
+    return SpecConsistencyOut(
+        disk_only=result["disk_only"],
+        manifest_ghost=result["manifest_ghost"],
+        tombstoned_on_disk=result["tombstoned_on_disk"],
+        counts=result["counts"],
+    )
 
 
 # ── Spec Conflicts ─────────────────────────────────────────────────────────────

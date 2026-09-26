@@ -1137,6 +1137,88 @@ class SpecWorkspaceService:
     SYNC_CONFLICT_STAGE = "spec-sync"
     SYNC_CONFLICT_TYPE = "sync"
 
+    async def _note_writer(self, workspace_id: uuid.UUID, writer: str) -> None:
+        """记录最后写入方（双写者漂移信号，2026-09-26-spec-consistency-writer）。
+
+        写方切换（与 last_writer 不同）记 structlog warning——daemon 与 CLI
+        platform sync 双写是 manifest 基线漂移（SpecPushConflict 僵局）的根因。
+        独立短事务（同步主流程各阶段已自行 commit，此处幂等可重入）。
+        """
+        spec_ws = await self.get(workspace_id)
+        if spec_ws.last_writer and spec_ws.last_writer != writer:
+            log.warning(
+                "spec_workspace.sync_writer_changed",
+                workspace_id=str(workspace_id),
+                previous_writer=spec_ws.last_writer,
+                new_writer=writer,
+            )
+        spec_ws.last_writer = writer[:128]
+        spec_ws.last_writer_at = datetime.now(UTC)
+        await self._session.commit()
+
+    async def consistency(self, workspace_id: uuid.UUID) -> dict:
+        """镜像磁盘树 × manifest 行三向对账（磁盘侧两方 + 清单行）。
+
+        四类分歧（2026-09-25 生产实证的三份快照不一致直接可见化）：
+        - disk_only：磁盘有、清单无行（全量覆盖后未对齐 / 行丢失）；
+        - manifest_ghost：行 exists=True 但磁盘缺文件（幽灵行—— resurrect 修复的场景）；
+        - tombstoned_on_disk：行 platform_deleted=True 但磁盘文件还在（删除残留）。
+        """
+        spec_ws = await self.get(workspace_id)
+        spec_root = Path(spec_ws.spec_root)
+        rows = (
+            await self._session.execute(
+                select(
+                    SpecFileManifest.path,
+                    SpecFileManifest.exists,
+                    SpecFileManifest.platform_deleted,
+                ).where(SpecFileManifest.workspace_id == workspace_id)
+            )
+        ).all()
+        manifest_paths = {r.path.replace("\\", "/") for r in rows}
+
+        def _walk(root: Path) -> set[str]:
+            out: set[str] = set()
+            if not root.is_dir():
+                return out
+            for p in root.rglob("*"):
+                if not p.is_file():
+                    continue
+                rel = p.relative_to(root).as_posix()
+                if any(part == ".runtime" for part in rel.split("/")):
+                    continue
+                if PurePosixPath(rel).name in SERVER_EXCLUDED_FILENAMES:
+                    continue
+                out.add(rel)
+            return out
+
+        disk_paths = await asyncio.to_thread(_walk, spec_root)
+
+        disk_only = sorted(disk_paths - manifest_paths)
+        row_by_path = {r.path.replace("\\", "/"): r for r in rows}
+        manifest_ghost = sorted(p for p in (manifest_paths - disk_paths) if row_by_path[p].exists)
+        tombstoned_on_disk = sorted(
+            p for p in (manifest_paths & disk_paths) if row_by_path[p].platform_deleted
+        )
+        return {
+            "disk_only": [{"path": p, "detail": "磁盘有、清单无行"} for p in disk_only],
+            "manifest_ghost": [
+                {"path": p, "detail": "清单 exists=True 但磁盘缺文件（幽灵行）"}
+                for p in manifest_ghost
+            ],
+            "tombstoned_on_disk": [
+                {"path": p, "detail": "platform_deleted 墓碑但磁盘文件仍在"}
+                for p in tombstoned_on_disk
+            ],
+            "counts": {
+                "disk_files": len(disk_paths),
+                "manifest_rows": len(manifest_paths),
+                "disk_only": len(disk_only),
+                "manifest_ghost": len(manifest_ghost),
+                "tombstoned_on_disk": len(tombstoned_on_disk),
+            },
+        }
+
     async def heal_manifest_tombstones(
         self,
         workspace_id: uuid.UUID,
@@ -1659,6 +1741,8 @@ class SpecWorkspaceService:
         workspace_id: uuid.UUID,
         tar_bytes: bytes,
         change_write_id: str | None = None,
+        *,
+        writer: str | None = None,
     ) -> dict[str, int]:
         """Overwrite spec_root with tar, then reparse docs + changes (D-003).
 
@@ -1684,6 +1768,15 @@ class SpecWorkspaceService:
             converged_files=converged_files,
             converged_dirs=converged_dirs,
         )
+        if writer is not None:
+            try:
+                await self._note_writer(workspace_id, writer)
+            except Exception as exc:
+                log.warning(
+                    "spec_workspace.note_writer_failed",
+                    workspace_id=str(workspace_id),
+                    error=str(exc),
+                )
         return {
             "reparsed_docs": reparsed_docs,
             "reparsed_changes": reparsed_changes,
@@ -2071,6 +2164,8 @@ class SpecWorkspaceService:
         self,
         workspace_id: uuid.UUID,
         ops: list[FileOp],
+        *,
+        writer: str | None = None,
         change_write_id: str | None = None,
         change_dirs: list[str] | None = None,
     ) -> dict[str, object]:
@@ -2604,6 +2699,17 @@ class SpecWorkspaceService:
                 workspace_id=str(workspace_id),
                 error=str(exc),
             )
+
+        # 2026-09-26-spec-consistency-writer：写方记录（冲突注册表前，独立事务幂等）。
+        if writer is not None:
+            try:
+                await self._note_writer(workspace_id, writer)
+            except Exception as exc:
+                log.warning(
+                    "spec_workspace.note_writer_failed",
+                    workspace_id=str(workspace_id),
+                    error=str(exc),
+                )
 
         # 2026-09-26-spec-sync-receipt-visibility：冲突进注册表——此前增量冲突只活在
         # daemon 日志一行 warn，spec-conflicts 注册表恒空、无横幅，c84182bc 冲突挂

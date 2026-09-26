@@ -42,6 +42,9 @@ class SpecWorkspaceRead(BaseModel):
     last_synced_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    # 2026-09-26-spec-consistency-writer：最后写入方（双写者漂移信号）。
+    last_writer: str | None = None
+    last_writer_at: datetime | None = None
 
 
 class SpecWorkspaceUpdate(BaseModel):
@@ -150,3 +153,26 @@ class ManifestHealOut(BaseModel):
 
     healed: list[str]
     skipped: list[str]
+
+
+# ── 三向对账 DTO（2026-09-26-spec-consistency-writer）──────────────────────────
+
+
+class ConsistencyDivergenceItem(BaseModel):
+    """单条分歧（path 为 spec_root 相对 POSIX 路径）。"""
+
+    path: str
+    detail: str | None = None
+
+
+class SpecConsistencyOut(BaseModel):
+    """GET /spec-workspace/consistency：镜像磁盘树 × manifest 行对账。
+
+    四类分歧 + 计数汇总；disk_only/manifest_ghost 是镜像损坏的直接证据
+    （2026-09-25 生产实证：c84182bc 缺 13 文件、b97 缺整个 generated/）。
+    """
+
+    disk_only: list[ConsistencyDivergenceItem]
+    manifest_ghost: list[ConsistencyDivergenceItem]
+    tombstoned_on_disk: list[ConsistencyDivergenceItem]
+    counts: dict[str, int]

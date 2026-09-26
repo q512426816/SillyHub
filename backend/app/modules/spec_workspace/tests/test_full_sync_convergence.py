@@ -222,7 +222,7 @@ class TestConvergeStaleFiles:
         spec_root = tmp_path / "spec-root"
         (spec_root / ".sillyspec").mkdir(parents=True)
         (spec_root / ".sillyspec" / "local.yaml").write_text("cached: true", encoding="utf-8")
-        (spec_root / "docs").mkdir()
+        (spec_root / "docs").mkdir(parents=True)
         (spec_root / "docs" / "A.md").write_text("# A", encoding="utf-8")
         await _make_spec_workspace(db_session, ws, spec_root)
 
@@ -412,3 +412,70 @@ class TestResurrectMissingFiles:
 
         assert target.read_bytes() == content
         assert int(target.stat().st_mtime) == old  # 未 move（skip 分支保持原文件不动）
+
+
+# ===========================================================================
+# 2026-09-26-spec-consistency-writer：三向对账 + 写方记录
+# ===========================================================================
+
+
+class TestConsistencyAndWriter:
+    async def test_consistency_four_divergences(self, db_session, tmp_path) -> None:
+        """disk_only / manifest_ghost / tombstoned_on_disk 三类分歧 + 计数。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        # 磁盘：ok.md（有行）/ disk_only.md（无行）/ tomb.md（行墓碑但文件在）
+        (spec_root / "docs").mkdir(parents=True)
+        (spec_root / "docs" / "ok.md").write_text("ok", encoding="utf-8")
+        (spec_root / "docs" / "disk_only.md").write_text("x", encoding="utf-8")
+        (spec_root / "docs" / "tomb.md").write_text("t", encoding="utf-8")
+        # manifest：ok（对齐）/ disk_only（无行）/ ghost（行在线无文件）/ tomb（墓碑但文件在）
+        for path, exists, deleted in [
+            ("docs/ok.md", True, False),
+            ("docs/ghost.md", True, False),
+            ("docs/tomb.md", True, True),
+        ]:
+            db_session.add(
+                SpecFileManifest(
+                    workspace_id=ws.id,
+                    path=path,
+                    content_hash="h",
+                    version=1,
+                    exists=exists,
+                    platform_deleted=deleted,
+                )
+            )
+        await db_session.commit()
+
+        result = await SpecWorkspaceService(db_session).consistency(ws.id)
+
+        assert [d["path"] for d in result["disk_only"]] == ["docs/disk_only.md"]
+        assert [d["path"] for d in result["manifest_ghost"]] == ["docs/ghost.md"]
+        assert [d["path"] for d in result["tombstoned_on_disk"]] == ["docs/tomb.md"]
+        assert result["counts"]["disk_files"] == 3
+        assert result["counts"]["manifest_rows"] == 3
+
+    async def test_writer_recorded_and_switch_warns(self, db_session, tmp_path) -> None:
+        """写方记录（首写无警、切换 warn 语义面）；全量同步透传 last_writer。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        svc = SpecWorkspaceService(db_session)
+        tar = _build_tar({"docs/a.md": b"# a"})
+
+        await svc.apply_sync(ws.id, tar, writer="user:11111111:a@x")
+        await db_session.refresh(await svc.get(ws.id))
+        spec_ws = await svc.get(ws.id)
+        assert spec_ws.last_writer == "user:11111111:a@x"
+        assert spec_ws.last_writer_at is not None
+
+        # 同写方再同步：last_writer 不变
+        await svc.apply_sync(ws.id, tar, writer="user:11111111:a@x")
+        spec_ws = await svc.get(ws.id)
+        assert spec_ws.last_writer == "user:11111111:a@x"
+
+        # 切换写方：值更新（warn 由 structlog 发出，不在此断言日志面）
+        await svc.apply_sync(ws.id, tar, writer="user:22222222:b@y")
+        spec_ws = await svc.get(ws.id)
+        assert spec_ws.last_writer == "user:22222222:b@y"

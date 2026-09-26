@@ -30,12 +30,16 @@ vi.mock("@/lib/changes", async (importOriginal) => ({
 }));
 
 /** 造一行观测事件：seq 唯一即可（id UUID / ts ISO，仅作 key 与渲染输入）。 */
+// 2026-09-26-spec-consistency-writer 顺手修旧债（CLAUDE.md 规则 21）：gen:types
+// 重生成后契约对齐已提交后端——ChangeEventItem 的 rule/severity 非空、无 stage /
+// created_at 字段；列表响应用 count（旧 fixture 的 total/stage/null 形态来自未
+// 提交的后端草稿，观测事件 v3 会话继续演进时以其后端为准再对齐）。
 function eventOf(
   seq: string,
   kind: string,
   opts: {
-    severity?: string | null;
-    rule?: string | null;
+    severity?: string;
+    rule?: string;
     detail?: string | null;
     provisional?: boolean;
   } = {},
@@ -44,17 +48,15 @@ function eventOf(
     id: `00000000-0000-0000-0000-0000000000${seq}`,
     ts: `2026-09-23T04:00:00.${seq}Z`,
     kind,
-    stage: null,
     detail: opts.detail ?? null,
-    rule: opts.rule ?? null,
-    severity: opts.severity ?? null,
+    rule: opts.rule ?? "default-rule",
+    severity: opts.severity ?? "info",
     provisional: opts.provisional ?? true,
-    created_at: "2026-09-23T04:00:00Z",
   };
 }
 
 function resp(items: ChangeEventItem[]): ChangeEventListResponse {
-  return { items, total: items.length };
+  return { items, count: items.length, change_name: "chg-events" };
 }
 
 function renderCard() {
