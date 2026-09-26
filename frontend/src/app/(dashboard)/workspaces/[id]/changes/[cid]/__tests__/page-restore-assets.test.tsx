@@ -242,4 +242,18 @@ describe("归档轻量出身双徽章", () => {
     expect(await screen.findByText("已归档")).toBeInTheDocument();
     expect(screen.queryByText("轻量变更")).toBeNull();
   });
+
+  it("FR-01 评审 P1 收窄补齐：location=archive 而非 stage=archived 时同样双徽章", async () => {
+    renderPage(
+      makeChange({
+        current_stage: "execute",
+        status: "in_progress",
+        location: "archive",
+        change_type: "quick",
+        created_at: "2026-09-26T10:00:00Z",
+      }),
+    );
+    expect(await screen.findByText("已归档")).toBeInTheDocument();
+    expect(screen.getByText("轻量变更")).toBeInTheDocument();
+  });
 });
