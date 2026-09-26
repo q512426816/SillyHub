@@ -1551,6 +1551,18 @@ export interface SillySpecCommandExecutor {
  */
 const SILLYSPEC_COMMAND_UPGRADE_POLL_MS = 1000;
 
+/**
+ * 排队命令等待升级链的**总预算上限**（2026-09-27-daemon-queue-stop-gaps）：
+ * deferred 升级遇长忙会话（交互会话可持续数小时）会无界滞留——复查定时器
+ * 到点仍忙仅再推迟一轮。等待若无上限，首条排队命令永不执行、`chained` 永不
+ * settle、链尾永不推进：整条 FIFO 队列楔死，结果槽永不落，平台侧收不到这批
+ * 命令的任何终态。超预算后当前命令记 failed 结果槽（前端恢复按钮可重试，
+ * 重复排队幂等无害）并放行队列后续命令。预算取 5 分钟：覆盖 running 态升级
+ * 链的正常量级（npm 树杀上限 120s + 前后探测），远超此的滞留视为病态显式
+ * 失败，优于静默无限等待。
+ */
+const SILLYSPEC_COMMAND_UPGRADE_WAIT_MAX_MS = 300_000;
+
 // ── Daemon class（核心）──────────────────────────────────────────────────────
 
 /**
@@ -2386,6 +2398,13 @@ export class Daemon {
 
     // ql-20260904-027：清服务器版本轮询定时器（同上，新进程自行重建）。
     this._stopServerVersionProbe();
+
+    // 2026-09-27-daemon-queue-stop-gaps：清 hits 周期上行定时器并置空实例——
+    // start() 无条件 new 新实例，旧实例 interval 不停会在同进程 stop→start
+    // 重启时叠加（生产 respawn 是新进程不触发；停机后到进程退出的窗口内也
+    // 不应再触发上行）。类内 start() 自带先 stop 再建，此处补实例生命周期口。
+    this._hitsPeriodic?.stop();
+    this._hitsPeriodic = null;
 
     // task-04（S1）：清推迟升级复查定时器——daemon 已停，30s 重探不应再触发
     //（正常交接路径 _tryUpdate 在 stop 前已清；此处兜底 SIGTERM 等旁路 stop）。
@@ -7366,6 +7385,10 @@ export class Daemon {
    * - npm 升级链在跑（executor.isUpgradeInFlight，task-06）→ 出队执行前轮询
    *   等待其结束（SILLYSPEC_COMMAND_UPGRADE_POLL_MS——npm 正在替换 CLI bin，
    *   并发 spawn 有半安装件风险），原第二臂「记 failed busy」同样改等待；
+   *   等待有总预算（SILLYSPEC_COMMAND_UPGRADE_WAIT_MAX_MS，
+   *   2026-09-27-daemon-queue-stop-gaps）——deferred 升级遇长忙会话可无界
+   *   滞留（复查到点仍忙仅再推迟），无上限等待会让首条命令永不执行、整条
+   *   队列楔死且结果槽永不落；超预算记 failed 槽（可重试）放行后续命令；
    * - 每条命令完成（finally 统一出口）立即补发一次心跳
    *   （_nudgeHeartbeatAfterCommandResult，ql-20260911-024 回显提速语义不变），
    *   排队命令逐条完成逐条捎出，结果不等 15s 节拍；
@@ -7383,16 +7406,36 @@ export class Daemon {
       return Promise.resolve();
     }
     const run = async (): Promise<void> => {
-      while (executor.isUpgradeInFlight()) {
-        this._logger.debug('sillyspec_command_wait_upgrade', { action, ...identify });
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, SILLYSPEC_COMMAND_UPGRADE_POLL_MS);
-          if (typeof timer.unref === 'function') {
-            timer.unref();
-          }
-        });
-      }
       try {
+        // 升级等待有总预算（见 SILLYSPEC_COMMAND_UPGRADE_WAIT_MAX_MS 注释）：
+        // 超预算记 failed 槽放行队列后续命令，不 exec——npm 可能正在替换 CLI
+        // bin，并发 spawn 有半安装件风险；平台/前端可从失败终态重试（幂等）。
+        const waitDeadline = Date.now() + SILLYSPEC_COMMAND_UPGRADE_WAIT_MAX_MS;
+        while (executor.isUpgradeInFlight()) {
+          if (Date.now() >= waitDeadline) {
+            executor.recordCommandResult({
+              action,
+              ...identify,
+              state: 'failed',
+              error: `升级链长时间未结束（等待超过 ${Math.round(
+                SILLYSPEC_COMMAND_UPGRADE_WAIT_MAX_MS / 1000,
+              )} 秒），命令未执行；请待升级完成后重试`,
+            });
+            this._logger.warn('sillyspec_command_upgrade_wait_timeout', {
+              action,
+              ...identify,
+              waitedMs: SILLYSPEC_COMMAND_UPGRADE_WAIT_MAX_MS,
+            });
+            return;
+          }
+          this._logger.debug('sillyspec_command_wait_upgrade', { action, ...identify });
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, SILLYSPEC_COMMAND_UPGRADE_POLL_MS);
+            if (typeof timer.unref === 'function') {
+              timer.unref();
+            }
+          });
+        }
         await exec(executor);
       } catch (e) {
         // 防御兜底：约定 executor 全路径收敛不 reject（task-06，结果自写槽），
@@ -7400,7 +7443,8 @@ export class Daemon {
         this._logger.error('sillyspec_command_route_failed', { action, error: e });
       } finally {
         // ql-20260911-024（回显提速第一级）：finally 统一补发——命令完成落槽即
-        // 捎出（executor 终判先于 return 落槽）。
+        // 捎出（executor 终判先于 return 落槽）；超预算 failed 槽路径同样经此
+        // 捎出（2026-09-27-daemon-queue-stop-gaps）。
         this._nudgeHeartbeatAfterCommandResult(action);
       }
     };

@@ -25,3 +25,7 @@ created_at: 2026-08-28 08:28:18
 - R8 discovery readHead fd 泄漏修复——openSync 返回值内联传 readSync 后即弃（每候选每 60s 泄 1 fd，长跑 EMFILE + Windows 上 rollout 文件无法删除）。改 fd try/finally closeSync。
 - R9 内存 Map 有界——DefaultFs stat/range 缓存与 daemon _livenessMetaByPath 在 ended/淘汰/显式移除时 forget/delete + 超限丢最早一批（4096/1024）。
 - R10 CursorDriver shell 兜底补 DA-1 注入守卫——Windows .cmd/.bat shim 解析失败回退 shell:true 时不转义参数，用户 prompt 作位置参数即注入面（批量层 sillyhub-daemon/src/task-runner/spawn-stream.ts:174-189 同款守卫此前未随交互驱动落地）。命中元字符（& | < > ^ % " 空白）硬失败按轮次 error 收敛，不 spawn。
+
+## 2026-09-27 — 命令队列升级等待有界化 + 停机清 hits 周期器（thin 2026-09-27-daemon-queue-stop-gaps）
+- FIFO 命令队列升级等待加总预算 SILLYSPEC_COMMAND_UPGRADE_WAIT_MAX_MS=300s（daemon.ts，`_runSillySpecCommand`）——deferred 升级遇长忙会话无界滞留（复查到点仍忙仅再推迟）时，原无上限 `while (isUpgradeInFlight())` 轮询让首条排队命令永不执行、`chained` 永不 settle、链尾永不推进：整队楔死且结果槽永不落，平台侧收不到任何终态。超预算记 failed 结果槽（error 含可重试提示，经 recordCommandResult 规范化截断）放行队列后续命令，不 exec（npm 可能正在替换 CLI bin）；等待段移入 try 使超时/同步异常统一走 catch/finally（心跳捎出两路径共用）。测试：sillyspec-platform-command 44 绿（新增超预算记槽+队列放行 / 预算内结束行为不变 / ghost_cleanup 同口径三用例）。
+- `_stopInternal` 补 `_hitsPeriodic?.stop()` 并置空——原只清四个兄弟定时器（恢复重试/磁盘探测/服务器版本轮询/升级复查）漏 hits 周期上行器，同进程 stop→start 会在 start() 无条件 new 新实例后叠加 interval（生产 respawn 新进程不触发；停机后到进程退出窗口内也不应再上行）。测试：新 daemon-hits-periodic-lifecycle 2 绿（stop 调用+置空 / null 幂等不炸）+ 近邻 selfupdate-orchestrator / heartbeat-sillyspec / conflict-snapshot 76 绿 + tsc 0。

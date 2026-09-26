@@ -11,7 +11,9 @@
  *   - guard 排队（2026-09-26-sillyspec-command-queue，原 task-07 忙拒改写）：
  *     并发到达或 isUpgradeInFlight → 不忙拒不记 failed——FIFO 排队待前一条
  *     完成（含失败出口）后依序执行；升级链在跑时出队前轮询等待（fake timers
- *     推进 1s 轮询）；排队期间不产生结果/心跳。
+ *     推进 1s 轮询）；排队期间不产生结果/心跳。升级等待有总预算
+ *     （2026-09-27-daemon-queue-stop-gaps）：超预算记 failed 槽放行队列
+ *     （deferred 无界滞留不再楔死整队），预算内结束行为不变。
  *   - flag 映射（manager 执行器层）：keep_local→--keep-local、take_platform→
  *     --take-platform，execFile 数组形参不经 shell、cwd=主仓根、超时注入透传
  *     （缺省 120s）；运行时脏 strategy → failed 不 spawn。
@@ -388,6 +390,85 @@ describe('guard 排队（2026-09-26-sillyspec-command-queue）：并发到达不
     });
     expect(h.manager.runResolve).toHaveBeenCalledTimes(2);
     expect(h.manager.recordCommandResult).not.toHaveBeenCalled();
+  });
+
+  // ── 2026-09-27-daemon-queue-stop-gaps：升级等待总预算（无界等待楔死队列修复）──
+
+  it('升级链持续在跑超过等待总预算 → 当前命令记 failed 槽（不 exec）并放行队列后续命令', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = makeDispatchHarness();
+      // deferred 升级遇长忙会话的无界滞留形态：isUpgradeInFlight 恒 true。
+      h.manager.isUpgradeInFlight.mockReturnValue(true);
+      await h.handleWsMessage({
+        type: MSG.SILLYSPEC_RESOLVE,
+        payload: { change: 'c1', strategy: 'keep_local' },
+      });
+      await h.handleWsMessage({
+        type: MSG.SILLYSPEC_RESOLVE,
+        payload: { change: 'c2', strategy: 'take_platform' },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.manager.runResolve).not.toHaveBeenCalled();
+      expect(h.manager.recordCommandResult).not.toHaveBeenCalled();
+      // 推进总预算（300s）+ 1 拍轮询：首条超预算记 failed 槽，不 exec。
+      await vi.advanceTimersByTimeAsync(300_000 + 1000);
+      expect(h.manager.runResolve).not.toHaveBeenCalled();
+      expect(h.manager.recordCommandResult).toHaveBeenCalledTimes(1);
+      const failed = h.manager.recordCommandResult.mock.calls[0]![0];
+      expect(failed.action).toBe('resolve');
+      expect(failed.change).toBe('c1');
+      expect(failed.strategy).toBe('keep_local');
+      expect(failed.state).toBe('failed');
+      expect(failed.error).toContain('升级链长时间未结束');
+      // 队列放行：第二条开始自己的等待（独立预算），升级结束后照常执行——
+      // 楔死形态（首条挂起链尾不推进）已消。
+      h.manager.isUpgradeInFlight.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(h.manager.runResolve).toHaveBeenCalledTimes(1);
+      expect(h.manager.runResolve).toHaveBeenCalledWith('c2', 'take_platform', '');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('升级链在总预算内结束 → 行为不变：命令照常执行、无 failed 槽（预算边界回归）', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = makeDispatchHarness();
+      h.manager.isUpgradeInFlight.mockReturnValue(true);
+      await h.handleWsMessage({
+        type: MSG.SILLYSPEC_RESOLVE,
+        payload: { change: 'c1', strategy: 'keep_local' },
+      });
+      // 预算前 1s 升级结束（299s < 300s 预算）→ 不触发超时分支。
+      await vi.advanceTimersByTimeAsync(299_000);
+      h.manager.isUpgradeInFlight.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(h.manager.runResolve).toHaveBeenCalledTimes(1);
+      expect(h.manager.recordCommandResult).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ghost_cleanup 超预算同口径：记 failed 槽（action=ghost_cleanup、无 change/strategy 键）不 exec', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = makeDispatchHarness();
+      h.manager.isUpgradeInFlight.mockReturnValue(true);
+      await h.handleWsMessage({ type: MSG.SILLYSPEC_GHOST_CLEANUP, payload: {} });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(300_000 + 1000);
+      expect(h.manager.runGhostCleanup).not.toHaveBeenCalled();
+      expect(h.manager.recordCommandResult).toHaveBeenCalledTimes(1);
+      const failed = h.manager.recordCommandResult.mock.calls[0]![0];
+      expect(failed.action).toBe('ghost_cleanup');
+      expect(failed.state).toBe('failed');
+      expect('change' in failed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
