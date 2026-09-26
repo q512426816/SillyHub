@@ -1,0 +1,23 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+baseline_commit: 43ee45c1ffc967e605e6a35482f84318e65d9e3d
+updatedAt: '2026-09-26T15:33:18.211Z'
+upgrade_reason: verify 实测失败（实测失败：lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: passed ← module[workspace,daemon,agent]+deps(py14)（239.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260926151951\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（13.4s）｜门文件 8 个
+

@@ -40,8 +40,10 @@ from app.modules.workspace.model import Workspace
 class _MockWsRpc:
     """Duck-typed HostFsWsRpc stand-in — 脚本化 send_rpc + 调用记录.
 
-    签名刻意不带 ``timeout`` 参数：探测走默认 30s 传输预算（任务卡约束），
-    若实现误透传自定义 timeout，本 mock 会 TypeError 直接红。
+    签名带 ``timeout`` 参数并记录进 calls（2026-09-26-probe-concurrent-rpc 起
+    探测透传 ``_PROBE_RPC_TIMEOUT_SECONDS`` 短预算——原「刻意不带 timeout 防
+    误透传」的默认 30s 约束已被该变更有意取代）；断言锚点见
+    TestProbeTriState.test_exists_true_dir_returns_git。
     """
 
     def __init__(
@@ -60,6 +62,7 @@ class _MockWsRpc:
         workspace_id: str,
         daemon_id: str,
         args: dict[str, Any],
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         self.calls.append(
             {
@@ -67,6 +70,7 @@ class _MockWsRpc:
                 "workspace_id": workspace_id,
                 "daemon_id": daemon_id,
                 "args": args,
+                "timeout": timeout,
             }
         )
         if self._exc is not None:
@@ -135,6 +139,11 @@ class TestProbeTriState:
         assert call["daemon_id"] == str(_INSTANCE_ID)
         # stat path 必须为 root 下 .git 绝对路径（未配置前缀 → 原样拼接）。
         assert call["args"] == {"path": daemon_client_workspace.root_path + "/.git"}
+        # 探测预算锚点（2026-09-26-probe-concurrent-rpc）：必须透传短预算而非
+        # 默认 30s——跨公网 daemon 半死时默认预算把批量探测拖到分钟级。
+        from app.modules.daemon.host_fs.delegate import _PROBE_RPC_TIMEOUT_SECONDS
+
+        assert call["timeout"] == _PROBE_RPC_TIMEOUT_SECONDS
 
     async def test_exists_true_git_file_returns_git(self, daemon_client_workspace):
         # worktree 检出：.git 是文件而非目录——exists=True 仍判 git
@@ -225,3 +234,50 @@ class TestProbeAbsolutePath:
         out = await delegate.probe_workspace_git_mode(ws)
         assert out == "direct"
         assert rpc.calls[0]["args"] == {"path": "/srv/proj/.git"}
+
+
+# ── 4. 并发安全（2026-09-26-probe-concurrent-rpc 评审 P1 回归锚点）───────────────
+
+
+class TestProbeConcurrency:
+    """多工作区并发探测下 daemon_id 解析段必须串行（评审 P1 回归锚点）。
+
+    背景：批量探测（collect_many gather / probe 端点预取）并发调用
+    probe_workspace_git_mode，每个调用内部 daemon_id 解析段用共享
+    AsyncSession 查库——AsyncSession 单任务约束禁止并发 execute，真实链路
+    里并发异常会被 resolver 的 except Exception 吞成「无绑定 daemon」误判
+    unknown（或经 git_remote 通道 5xx）。delegate 实例锁
+    _daemon_id_resolver_lock 串行化解析段：毫秒级 SELECT 排队、秒级 RPC
+    段照常并发。用 in-flight 峰值断言串行（真实驱动下并发违规的报错面
+    不可移植，不依赖驱动行为）。
+    """
+
+    async def test_concurrent_probes_resolver_section_serialized(self):
+        import asyncio
+
+        daemon_id = uuid4()
+        in_flight = 0
+        peak = 0
+
+        async def _tracking_resolver(session, workspace_id):
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.05)  # 确保三个任务的解析段在事件循环上交叠
+            in_flight -= 1
+            return daemon_id
+
+        workspaces = [_make_workspace(root_path=f"/srv/proj-{i}") for i in range(3)]
+        delegate = HostFsDelegate(
+            session=None,
+            ws_hub=None,
+            ws_rpc=_MockWsRpc(result={"exists": True, "is_dir": True, "size": 0}),
+            daemon_id_resolver=_tracking_resolver,
+        )
+        results = await asyncio.wait_for(
+            asyncio.gather(*(delegate.probe_workspace_git_mode(ws) for ws in workspaces)),
+            timeout=3.0,
+        )
+        assert list(results) == ["git", "git", "git"]
+        # 解析段至多 1 个在飞（去锁退化时 3 个任务交叠 → peak==3，此断言红）。
+        assert peak == 1, f"resolver 段并发在飞 {peak} > 1：解析段未被锁串行化"

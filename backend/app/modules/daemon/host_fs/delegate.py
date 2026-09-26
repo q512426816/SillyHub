@@ -34,6 +34,7 @@ Cross-task contract:
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from hashlib import sha256
@@ -84,6 +85,13 @@ _RPC_DEGRADED_EXC = (
 # 报错被 "rpc unavailable" 降级掩盖，且立即收残与 daemon 侧仍在跑的 add 竞态
 # 留残缺副本。150s = 120s + 回包余量，保证 daemon 自己的超时/结果恒先到达。
 _WORKTREE_RPC_TIMEOUT_SECONDS = 150.0
+
+# 探测类方法（probe_workspace_git_mode / git_remote_url）的 RPC 传输预算。
+# 两者是 UI 弹层实时探测路径（workspaces/probe 端点），daemon 真答一次 stat /
+# git remote 读秒级内完成；跨公网 daemon 网络差时默认 30s 预算会把整批探测
+# 拖到分钟级（实测 2026-09-26 生产 2-12s/次）。3s 上限后超时照旧归
+# unknown / None（fail-safe 语义不变），只是放弃得更早。
+_PROBE_RPC_TIMEOUT_SECONDS = 3.0
 
 
 # ── Domain errors (N818 — event-style, mirrors DaemonOffline / PatchConflictError) ──
@@ -220,6 +228,15 @@ class HostFsDelegate:
         # across unrelated runs (process-wide dict would also be fine for the
         # short-circuit goal, but instance-level is easier to reason about).
         self._applied_patch_ids: dict[str, set[str]] = {}
+        # daemon_id 解析段互斥锁（2026-09-26-probe-concurrent-rpc 评审 P1）：默认
+        # resolver 用本共享 AsyncSession 查库，而 AsyncSession 单任务约束禁止并发
+        # execute——批量探测（collect_many gather / probe 端点预取）并发调用本
+        # delegate 方法时，解析段必须串行化，否则并发 execute 报错被
+        # resolve_daemon_instance_for_workspace 的 except Exception 吞成「无绑定
+        # daemon」误判。解析是单条毫秒级 SELECT，锁的开销可忽略；RPC 段（秒级）
+        # 在锁外照常并发。delegate 每 request 新建（new_host_fs_delegate），
+        # 实例级锁生命周期正确。
+        self._daemon_id_resolver_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # stat
@@ -382,6 +399,7 @@ class HostFsDelegate:
             workspace=workspace,
             args={"root": resolve_root_path_for_daemon(workspace.root_path)},
             degraded={"remote_url": None},
+            timeout=_PROBE_RPC_TIMEOUT_SECONDS,
         )
         url = result.get("remote_url") if isinstance(result, dict) else None
         return str(url).strip() or None if url else None
@@ -727,8 +745,8 @@ class HostFsDelegate:
         ``resolve_root_path_for_daemon(workspace.root_path) + "/.git"`` 绝对
         路径——daemon 侧 assertWithinAllowedRoots 先于 pathResolve
         （host-fs-handler.ts），相对路径会解析到 daemon 进程 cwd 必被拒
-        （CC-06 / R-05）。send_rpc 用默认 30s 传输预算（不透传自定义
-        timeout）。
+        （CC-06 / R-05）。send_rpc 用 :data:`_PROBE_RPC_TIMEOUT_SECONDS`
+        短预算（UI 探测路径，超时归 unknown；2026-09-26-probe-concurrent-rpc）。
 
         ``unknown`` 只报状态不决策：consumer（dispatch_worker 分流 /
         mission_status / probe 端点）对 unknown 维持现状 worktree 路径，
@@ -745,6 +763,7 @@ class HostFsDelegate:
                 method="stat",
                 workspace=workspace,
                 args={"path": probe_path},
+                timeout=_PROBE_RPC_TIMEOUT_SECONDS,
             )
         except (*_RPC_DEGRADED_EXC, HostFsDelegateUnavailable) as exc:
             # 仿 host_fs_rpc_failed 通道（D-006 warn-and-degrade 日志口径）：
@@ -806,7 +825,8 @@ class HostFsDelegate:
                     "workspace_id": str(ws_id),
                 },
             )
-        daemon_id = await self._daemon_id_resolver(self._session, ws_id)
+        async with self._daemon_id_resolver_lock:
+            daemon_id = await self._daemon_id_resolver(self._session, ws_id)
         if daemon_id is None:
             raise HostFsDelegateUnavailable(
                 "workspace has no bound daemon instance (member binding resolves "

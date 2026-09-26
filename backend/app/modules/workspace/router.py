@@ -221,24 +221,41 @@ async def probe_workspaces(
     )
     entry_by_id = {uuid.UUID(entry["id"]): entry for entry in entries}
     ws_by_id = {ws.id: ws for ws in workspaces}
+    ordered = [
+        (ws_by_id[ws_id], entry_by_id[ws_id])
+        for ws_id in payload.workspace_ids
+        if entry_by_id.get(ws_id) is not None
+    ]
+    # ql-20260918-012 短路保持：已识别（repo_url 非空）直接用 DB 值零 RPC；
+    # 未识别的并发预取（2026-09-26-probe-concurrent-rpc）——逐个 await
+    # git_remote_url（跨公网 daemon RPC，秒级）会串行追加整批耗时。回填语义
+    # 不变：识别成功且与 DB 不同时写回 workspace.repo_url（本端点唯一写副作用）。
+    pending_idx = [
+        i for i, (ws, entry) in enumerate(ordered) if entry["git_mode"] == "git" and not ws.repo_url
+    ]
+    fetched: dict[int, str | None] = {}
+    if pending_idx:
+        fetched = dict(
+            zip(
+                pending_idx,
+                await asyncio.gather(
+                    *(delegate.git_remote_url(ordered[i][0]) for i in pending_idx)
+                ),
+                strict=True,
+            )
+        )
     items: list[WorkspaceProbeItem] = []
     repo_url_backfilled = False
-    for ws_id in payload.workspace_ids:
-        entry = entry_by_id.get(ws_id)
-        if entry is None:
-            continue
-        # ql-20260918-012：git 态识别远程地址——已识别的回 DB 值（零额外 RPC），
-        # 未识别的实时读取；识别成功且值变化时回填 DB（见 docstring）。
+    for i, (ws, entry) in enumerate(ordered):
         repo_url: str | None = None
-        ws = ws_by_id[ws_id]
         if entry["git_mode"] == "git":
-            repo_url = ws.repo_url or await delegate.git_remote_url(ws)
+            repo_url = ws.repo_url or fetched.get(i)
             if repo_url and repo_url != ws.repo_url:
                 ws.repo_url = repo_url
                 repo_url_backfilled = True
         items.append(
             WorkspaceProbeItem(
-                workspace_id=ws_id,
+                workspace_id=ws.id,
                 git_mode=entry["git_mode"],
                 daemon_name=entry["daemon_name"],
                 daemon_online=entry["daemon_online"],

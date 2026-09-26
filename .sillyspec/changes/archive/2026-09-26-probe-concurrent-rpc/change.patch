@@ -1,0 +1,223 @@
+diff --git a/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/design.md b/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/design.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T14:45:56.806Z
++---
++# 设计记录（Design Record）— 2026-09-26-probe-concurrent-rpc
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-probe-concurrent-rpc 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++三处最小侵入修复，不动 daemon 侧、不动响应契约：
++1. `delegate.py` 新增 `_PROBE_RPC_TIMEOUT_SECONDS = 3.0`，`probe_workspace_git_mode`（stat）与 `git_remote_url`（git_remote）两条探测通道把默认 30s 传输预算收紧为 3s——探测是 UI 弹层实时路径，daemon 真答秒级完成，超时照旧归 unknown/None（fail-safe 语义不变），只是放弃更早。选 3s 而非更长：生产实测跨公网 daemon 单次 2-12s，3s 让「daemon 半死」的尾部不再拖垮整批。
++2. `orchestrator.collect_many_workspace_statuses`：原 for 循环逐个 `await git_probe(ws)` 改为先 `asyncio.gather` 并发探测、后按 workspaces 原序组装——批量耗时从 N×单次 RPC 累加降为最慢一个。探测回调纯 WS RPC 不触碰 AsyncSession，gather 并发安全。
++3. `workspace/router.py` probe 端点：未识别 repo_url 的 git 态工作区原先在组装循环里逐个 `await git_remote_url`，改为先收集 pending 索引、gather 并发预取再组装；已识别短路（ql-20260918-012 零 RPC）与回填副作用语义原样保留。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-probe-concurrent-rpc 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++对外签名零变化：`POST /api/workspaces/probe` 响应字段（workspace_id/git_mode/daemon_name/daemon_online/repo_url）、三态取值、回填副作用、日志事件（host_fs_rpc_failed）全部不变。内部变化：
++- `HostFsDelegate.probe_workspace_git_mode` / `git_remote_url` 的 RPC 传输预算从默认 30s 变为 3s（`_PROBE_RPC_TIMEOUT_SECONDS`）——唯一可观测差异是超时类失败来得更早（原 30s 才归 unknown/None，现 3s）。
++- `collect_many_workspace_statuses(session, workspaces, *, git_probe)` 签名不变，git_probe 回调从串行变并发调用；回调实现需满足「不触碰传入 session」（现有唯一实现 probe_workspace_git_mode 是纯 RPC，满足）。
++- 新增测试常量引用：`_PROBE_RPC_TIMEOUT_SECONDS` 被 test_probe_endpoint.py import 用于断言。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-probe-concurrent-rpc 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：gather 结果按 workspaces 下标原序回填组装，条目顺序与串行版完全一致；迟到/慢 RPC 由 3s 预算截断，不存在乱序落位问题。
++2. 并发写：探测回调（stat/git_remote RPC）只读不写；唯一写副作用 repo_url 回填仍在组装循环（gather 之后）串行执行 + 单次 commit，与原实现一致，无新增并发写面。AsyncSession 只在 gather 前后单任务使用，gather 内不触碰 session（无并发 session 复用违规）。
++3. 切换/生命周期：请求中途断连时 FastAPI 取消任务，gather 随之取消，RPC 无残留写；无跨请求状态（R-02 每次实时探测不缓存，未引入缓存）。
++4. 作用域：探测按 workspace 各自的 binding 路由到各自 daemon，gather 并发不改变路由规则；不同工作区结果按下标本位组装，不会串台。同一 daemon 被多工作区绑定时并发发多条 stat RPC——daemon 侧 host_fs handler 本就按请求并发处理（WS 多路复用），无串台。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-probe-concurrent-rpc 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：把 3s 预算设得比真实慢链路还短——daemon 在线但公网高抖动（>3s）时探测会从「慢但有真答」变成「unknown」。权衡依据：探测是三态 UI 展示（unknown 时界面照常显示「未知」并维持现状路径，§5.D），拿不到真答的代价只是显示降级，而 30s 预算下整批探测拖分钟级的代价是用户可感的全局卡顿；且单次 stat 本地执行毫秒级，3s 已含 ~3 个数量级的网络余量。
++试过但放弃：给 git_probe 结果加 TTL 缓存（比如 30s 内复用）——被 R-02「每次调用实时探测不缓存」明确否决，且缓存会让「daemon 刚下线/刚变 git 态」的展示滞后，违背探测语义，放弃。
++次要风险：gather 不开 return_exceptions，若未来有 git_probe 实现抛异常，并发版会在首个异常时与其余在飞任务一起快速失败——与原串行版「首个异常中断」语义一致，不视为回归。
+
+diff --git a/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/flow-state.yaml b/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/flow-state.yaml
+@@ -0,0 +1,17 @@
++tier: thick
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 43ee45c1ffc967e605e6a35482f84318e65d9e3d
++updatedAt: '2026-09-26T15:20:05.212Z'
++upgrade_reason: verify 实测失败（实测失败：lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
++gate_summary: >-
++  test: passed ← module[workspace,daemon,agent]+deps(py14)（239.8s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260926151951\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（13.4s）｜门文件 8 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/proposal.md b/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/proposal.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T14:45:56.804Z
++---
++# 提案书（Proposal）— 2026-09-26-probe-concurrent-rpc
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:fb86b113e018e78d54e99f89f6c4dd65a2819e8b07d33dedaa5f760f24b3d833:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-probe-concurrent-rpc 留痕重锚 -->
++任务原话转写：probe 批量接口实测 2-12 秒：collect_many_workspace_statuses 对多工作区的 git_probe（跨公网 daemon RPC）在 for 循环串行 await，且 probe_workspace_git_mode/git_remote_url 用默认 30s 传输预算，N 个工作区耗时=N×单次 RPC 累加，用户网络差时单次即秒级；probe 端点 repo_url 识别循环同样串行。
++
++成功标准：
++- 批量探测多工作区时 git_probe 并发执行（gather），总耗时逼近最慢一个而非逐个累加
++- probe_workspace_git_mode 与 git_remote_url 的 RPC 预算收紧为 3 秒，超时仍归 unknown/None（三态语义与 fail-safe 不变）
++- probe 端点 git_remote_url 的逐工作区读取不再串行追加耗时（未识别的并发预取）
++- 既有 test_probe_endpoint 全量用例回归全绿，新增并发行为用例（barrier 法证明并发）与超时预算透传用例
++- 不改任何响应字段口径与既有日志事件语义
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:e76313e843abf96e79eb834cf319cc5e52568bddf82f545dc2313c9a3266b20b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-probe-concurrent-rpc 留痕重锚 -->
++按成功标准机械推导，共 6 条验收面：
++1. 批量探测多工作区时 git_probe 并发执行（gather），总耗时逼近最慢一个而非逐个累加
++2. probe_workspace_git_mode 与 git_remote_url 的 RPC 预算收紧为 3 秒，超时仍归 unknown
++3. None（三态语义与 fail-safe 不变）
++4. probe 端点 git_remote_url 的逐工作区读取不再串行追加耗时（未识别的并发预取）
++5. 既有 test_probe_endpoint 全量用例回归全绿，新增并发行为用例（barrier 法证明并发）与超时预算透传用例
++6. 不改任何响应字段口径与既有日志事件语义
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:40472e644863777df2674ec23d6111dd7f01533736e3ef4cd82d6f13d5bfee53:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-probe-concurrent-rpc 留痕重锚 -->
++1. 批量探测多工作区时 git_probe 并发执行（gather），总耗时逼近最慢一个而非逐个累加
++2. probe_workspace_git_mode 与 git_remote_url 的 RPC 预算收紧为 3 秒，超时仍归 unknown
++3. None（三态语义与 fail-safe 不变）
++4. probe 端点 git_remote_url 的逐工作区读取不再串行追加耗时（未识别的并发预取）
++5. 既有 test_probe_endpoint 全量用例回归全绿，新增并发行为用例（barrier 法证明并发）与超时预算透传用例
++6. 不改任何响应字段口径与既有日志事件语义
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/requirements.md b/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/requirements.md
+@@ -0,0 +1,64 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T14:45:56.806Z
++---
++# 需求规格（Requirements）— 2026-09-26-probe-concurrent-rpc
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 批量探测多工作区时 git_probe 并发执行（gather），总耗时逼近最慢一个而非逐个累加
++Given 系统就绪
++When 批量探测多工作区时 git_probe 并发执行（gather），总耗时逼近最慢一个而非逐个累加
++Then 行为符合本条标准描述
++
++### FR-02: probe_workspace_git_mode 与 git_remote_url 的 RPC 预算
++Given 系统就绪
++When probe_workspace_git_mode 与 git_remote_url 的 RPC 预算收紧为 3 秒，超时仍归 unknown
++Then 行为符合本条标准描述
++
++### FR-03: None（三态语义与 fail-safe 不变）
++Given 系统就绪
++When None（三态语义与 fail-safe 不变）
++Then 行为符合本条标准描述
++
++### FR-04: probe 端点 git_remote_url 的逐工作区读取不再串行追加耗时（未识别的并发预取）
++Given 端点 相关模块就绪
++When probe 端点 git_remote_url 的逐工作区读取不再串行追加耗时（未识别的并发预取）
++Then 行为符合本条标准描述
++
++### FR-05: 既有 test_probe_endpoint 全量用例回归全绿，新增并发行为用例（barrier 法
++Given 系统就绪
++When 既有 test_probe_endpoint 全量用例回归全绿，新增并发行为用例（barrier 法证明并发）与超时预算透传用例
++Then 行为符合本条标准描述
++
++### FR-06: 不改任何响应字段口径与既有日志事件语义
++Given 系统就绪
++When 不改任何响应字段口径与既有日志事件语义
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/app/modules/workspace/tests/test_probe_endpoint.py::TestProbeEndpoint::test_git_probe_concurrent_not_serial（barrier 法：串行实现挂 3s 超时，并发实现 200）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/app/modules/workspace/tests/test_probe_endpoint.py::TestProbeEndpoint::test_probe_and_remote_rpc_use_short_timeout_budget（stat/git_remote 两通道 timeout == _PROBE_RPC_TIMEOUT_SECONDS）
++- backend/app/modules/daemon/host_fs/tests/test_delegate_probe.py::TestProbeTriState::test_exists_true_dir_returns_git（delegate 层 send_rpc 收到短预算锚点）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/app/modules/workspace/tests/test_probe_endpoint.py::TestProbeEndpoint::test_rpc_failure_returns_unknown_no_5xx（超时归 unknown 不 5xx，改造后语义不变）
++- backend/app/modules/daemon/host_fs/tests/test_delegate_probe.py::TestProbeUnavailable::test_rpc_timeout_returns_unknown
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/app/modules/workspace/tests/test_probe_endpoint.py::TestProbeEndpoint::test_probe_and_remote_rpc_use_short_timeout_budget（git_remote 预取经端点全链路走通）
++- backend/app/modules/workspace/tests/test_probe_endpoint.py::TestProbeEndpoint::test_git_mode_repo_url_detected_and_backfilled（回填语义回归）
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/app/modules/workspace/tests/test_probe_endpoint.py（全量 15 passed：13 存量 + 2 新增）
++- backend/app/modules/daemon/host_fs/tests/test_delegate_probe.py（mock 契约同步后 9 passed）
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/app/modules/workspace/tests/test_probe_endpoint.py::TestProbeEndpoint::test_batch_multi_workspaces_git_and_direct（响应字段/顺序/机器口径存量断言不改仍绿）
++- backend/app/modules/agent/tests/test_mission_status.py + test_orchestrator.py（40 passed，collect_many 消费方零回归）
++- 不适用（日志事件语义）：host_fs_rpc_failed 事件未改代码路径，由 test_rpc_failure_returns_unknown_no_5xx 的 warning 通道间接覆盖 -->
+
+diff --git a/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/tasks.md b/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-probe-concurrent-rpc/tasks.md
+@@ -0,0 +1,16 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T14:45:56.807Z
++---
++# 任务注册表（Tasks）— 2026-09-26-probe-concurrent-rpc
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: 批量探测多工作区时 git_probe 并发执行（gather），总耗时逼近最慢一个而非逐个累加
++- [ ] task-02: probe_workspace_git_mode 与 git_remote_url 的 RPC 预算收紧为 3 秒，超时仍归 unknown
++- [ ] task-03: None（三态语义与 fail-safe 不变）
++- [ ] task-04: probe 端点 git_remote_url 的逐工作区读取不再串行追加耗时（未识别的并发预取）
++- [ ] task-05: 既有 test_probe_endpoint 全量用例回归全绿，新增并发行为用例（barrier 法证明并发）与超时预算透传用例
++- [ ] task-06: 不改任何响应字段口径与既有日志事件语义

@@ -12,6 +12,9 @@
   uuid 格式 → 422。
 - ql-20260918-012（工作区 Git 地址识别）：repo_url——git 态实时识别回填 DB /
   已识别回 DB 值零额外 RPC / direct 态不发 RPC / RPC 降级归 None 不 5xx。
+- 2026-09-26-probe-concurrent-rpc：多工作区 git_probe 并发执行（barrier 法：
+  串行实现会在第一个探测上死等到超时）；探测/git_remote 两 RPC 通道均透传
+  _PROBE_RPC_TIMEOUT_SECONDS 短预算（默认 30s 会把批量探测拖到分钟级）。
 """
 
 from __future__ import annotations
@@ -192,6 +195,78 @@ class TestProbeEndpoint:
         assert item2["daemon_online"] is False
         # 每工作区各探测一次（实时探测，不缓存）
         assert sorted(probed) == sorted([str(ws1), str(ws2)])
+
+    @pytest.mark.asyncio
+    async def test_git_probe_concurrent_not_serial(
+        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """多工作区探测并发执行（2026-09-26-probe-concurrent-rpc）。
+
+        barrier 法：fake 探测在 asyncio.Barrier(2) 上等齐才放行——并发实现
+        两个探测同时在飞、barrier 立即放行；退回串行实现时第一个探测永远
+        等不齐第二个，整个请求挂在 wait_for 超时上（3s 预算远大于并发路径
+        实际耗时，不会误伤）。生产行为对照：跨公网 daemon 单次 RPC 2-12s，
+        串行 N 工作区 = N 次累加。
+        """
+        import asyncio
+
+        ws1 = await _make_workspace(db_session, name="并发探测甲")
+        ws2 = await _make_workspace(db_session, name="并发探测乙")
+        barrier = asyncio.Barrier(2)
+
+        async def _fake_probe(self: HostFsDelegate, workspace: Workspace) -> str:
+            await barrier.wait()
+            # direct 态：不触发 repo_url 识别的 git_remote_url RPC——本用例
+            # 工作区未绑 daemon，git 态会走到真实 git_remote_url 抛
+            # HostFsDelegateUnavailable（接线错误不属降级集），与本用例焦点无关。
+            return "direct"
+
+        monkeypatch.setattr(HostFsDelegate, "probe_workspace_git_mode", _fake_probe)
+
+        resp = await asyncio.wait_for(_post_probe(client, auth_headers, [ws1, ws2]), timeout=3.0)
+        assert resp.status_code == 200, resp.text
+        items = resp.json()
+        assert len(items) == 2
+        assert all(item["git_mode"] == "direct" for item in items)
+
+    @pytest.mark.asyncio
+    async def test_probe_and_remote_rpc_use_short_timeout_budget(
+        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """stat 探测与 git_remote 识别均透传 _PROBE_RPC_TIMEOUT_SECONDS。
+
+        两条通道分别记录收到的 timeout 并断言等于探测预算（3s）——防退回
+        默认 30s 传输预算把批量探测拖到分钟级（生产实况回归锚点）。
+        """
+        from app.modules.daemon.host_fs.delegate import _PROBE_RPC_TIMEOUT_SECONDS
+
+        ws = await _make_workspace(db_session, name="短预算探测工作区")
+        await _make_binding_with_named_daemon(
+            db_session, ws, display_alias="预算机器", daemon_status="online"
+        )
+
+        seen_timeouts: dict[str, float | None] = {}
+
+        async def _fake_via_rpc(self: HostFsDelegate, **kwargs) -> dict:
+            seen_timeouts["stat"] = kwargs.get("timeout")
+            return {"exists": True}
+
+        async def _fake_via_rpc_or_degrade(self: HostFsDelegate, **kwargs) -> dict:
+            seen_timeouts["git_remote"] = kwargs.get("timeout")
+            return {"remote_url": "https://example.com/repo.git"}
+
+        monkeypatch.setattr(HostFsDelegate, "_via_rpc", _fake_via_rpc)
+        monkeypatch.setattr(HostFsDelegate, "_via_rpc_or_degrade", _fake_via_rpc_or_degrade)
+
+        resp = await _post_probe(client, auth_headers, [ws])
+        assert resp.status_code == 200, resp.text
+        item = resp.json()[0]
+        assert item["git_mode"] == "git"
+        assert item["repo_url"] == "https://example.com/repo.git"
+        assert seen_timeouts == {
+            "stat": _PROBE_RPC_TIMEOUT_SECONDS,
+            "git_remote": _PROBE_RPC_TIMEOUT_SECONDS,
+        }
 
     @pytest.mark.asyncio
     async def test_unbound_workspace_offline_no_name_unknown_mode(

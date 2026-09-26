@@ -14,6 +14,7 @@ worker 由主 agent 通过 ``mcp_tools`` endpoint 动态 dispatch（不预先拆
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -240,8 +241,14 @@ async def collect_many_workspace_statuses(
        ``_workspace_status_entry``）；
     3. （Workspace 行由调用方 IN 取齐后传入。）
 
-    ``git_probe`` 仍逐工作区回调（探测本身是 per-daemon RPC，无法批量）。
-    条目字段与 ``collect_single_workspace_status`` 完全一致（共享组装函数）。
+    ``git_probe`` 探测本身是 per-daemon RPC 无法批量，但**并发执行**
+    （2026-09-26-probe-concurrent-rpc）：原串行 await 时 N 工作区耗时 =
+    N×单次 RPC 累加（生产实测跨公网 daemon 单次 2-12s，批量接口整体拖到
+    十余秒）；探测回调的 RPC 段不碰 session，其内部 daemon_id 解析段由
+    delegate 实例锁串行化（AsyncSession 单任务约束，见 delegate
+    _daemon_id_resolver_lock），先 gather 并发、后按
+    workspaces 原序组装。条目字段与 ``collect_single_workspace_status``
+    完全一致（共享组装函数）。
     """
     from app.modules.daemon.model import DaemonInstance
 
@@ -282,8 +289,15 @@ async def collect_many_workspace_statuses(
             # 离线降级（daemon_by_id 空 → online=False / name=None），不阻断
             # 状态收集主流程。
             log.warning("workspace_status_daemon_prefetch_failed", count=len(daemon_ids))
+    # 探测并发（见 docstring）：probe 回调的 RPC 段不碰 session；其内部的
+    # daemon_id 解析段（共享 AsyncSession 单条 SELECT）由 delegate 实例锁
+    # 串行化（2026-09-26-probe-concurrent-rpc 评审 P1 修复），gather 安全；
+    # 不开 return_exceptions——与原串行路径同为首个异常快速失败语义。
+    git_modes: list[str] | None = None
+    if git_probe is not None:
+        git_modes = list(await asyncio.gather(*(git_probe(ws) for ws in workspaces)))
     entries: list[dict[str, Any]] = []
-    for ws in workspaces:
+    for idx, ws in enumerate(workspaces):
         runtime = runtime_by_ws.get(ws.id)
         daemon_row = (
             daemon_by_id.get(runtime.daemon_id)
@@ -291,8 +305,8 @@ async def collect_many_workspace_statuses(
             else None
         )
         entry = _workspace_status_entry(ws, runtime, daemon_row)
-        if git_probe is not None:
-            entry["git_mode"] = await git_probe(ws)
+        if git_modes is not None:
+            entry["git_mode"] = git_modes[idx]
         entries.append(entry)
     return entries
 
