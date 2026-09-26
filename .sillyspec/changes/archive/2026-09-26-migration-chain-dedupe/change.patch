@@ -1,0 +1,260 @@
+diff --git a/.sillyspec/changes/2026-09-26-migration-chain-dedupe/design.md b/.sillyspec/changes/2026-09-26-migration-chain-dedupe/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-migration-chain-dedupe/design.md
+@@ -0,0 +1,56 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T15:43:04.972Z
++---
++# 设计记录（Design Record）— 2026-09-26-migration-chain-dedupe
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-migration-chain-dedupe 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++四步单线化 + 一条矫正迁移，不改任何业务代码/ORM/接口：
++1. 删 20260926063000（change-events-r18-full 的重复建表分支）与 merge 3931ff71bd32；083000 的 down_revision 从 063000 改接主线 20260923090000——链恢复单线 22194500→040000→090000→083000→234000。
++2. 重写 20260923040000 的 create_table DDL 为与 ORM（PlatformChangeEventORM）完全一致（ts varchar(64)、severity varchar(16) NOT NULL default 'info'、rule NOT NULL、provisional server_default true、detail Text、无 stage）。选「重写旧迁移」而非「保留两份加 guard」：063000 与 040000 是同一张表的两个平行作者，留两份（哪怕幂等 guard）会让全新库按图序执行两遍建表逻辑、审计面双份；040000 记号已在线上库存在，重写其 DDL 不影响任何已应用库（记号在即不执行），只为未来新库定义正确结构。
++3. 新增 20260926234000 条件矫正迁移：对被旧版 040000 DDL 建表的 PG 库幂等对齐（ts timestamptz→varchar(64) 数据转 ISO 串、severity/rule NULL 回填+类型/约束收紧、detail→text、DROP stage），每步按 information_schema 探测——目标结构库（本地 dogfood，063000 建表）全 no-op；SQLite 测试库方言短路。
++4. stage 列 119/166 行非空历史值随列 DROP 废弃：旁路观测数据（只展示不消费），063000/ORM 语义已无此列，不值得为废弃观测字段写数据迁移——丢弃口径在此记录。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-migration-chain-dedupe 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++对外接口/ORM/业务代码零变化。变更面仅 migrations/versions/（4 文件）+ tests/（新增守护测试）：
++- 20260923040000：revision/down_revision 不变（20260923040000/20260922194500），仅 upgrade/downgrade 的 DDL 内容重写——已应用库不受影响，全新库按 ORM 结构建表。
++- 20260926083000：down_revision 20260926063000 → 20260923090000（记号与 DDL 不变）。
++- 20260926234000（新增，head）：down_revision 20260926083000；upgrade 仅 postgresql 方言干活、downgrade no-op（结构对齐不可逆）。
++- 20260926063000 / 3931ff71bd32：文件删除（versions 目录不再含这两个 revision）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-migration-chain-dedupe 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：alembic 按版本图拓扑序执行，单线后无分支顺序歧义；矫正迁移的探测-执行在单事务内顺序进行，无乱序面。
++2. 并发写：迁移由 entrypoint 启动时单进程执行（alembic upgrade head && uvicorn），无并发写面；矫正迁移的 UPDATE/ALTER 幂等（WHERE 条件限定），重复执行安全。
++3. 切换/生命周期：部署中途失败（如 ALTER 半途）——alembic PG 事务性 DDL 整体回滚，库停在 083000，重部署断点续跑；已 stamp 到新链的库回滚旧镜像会因 alembic 找不到 234000 起不来（记号超前），回滚路径=镜像回滚+psql 把 alembic_version 退回 083000（运维口径，交付汇报列明）。
++4. 作用域：变更仅 platform 自有表 platform_change_events，无跨表 FK 联动（该表只被 workspaces.id FK 引出，本迁移不动该 FK）；ts 数据转换按行独立，无跨行依赖。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-migration-chain-dedupe 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：重写 040000 DDL 造成「文件内容与历史已应用效果不一致」的审计歧义——某库记号 040000 但表结构可能是旧版也可能是（未来的）新版，只能靠矫正迁移的存在与 information_schema 探测兜底对齐。缓解：040000 docstring 显式记重写历史与适用边界；矫正迁移 234000 紧随其后，任何路径到达 head 后表结构唯一确定（幂等探测保证收敛，与起点结构无关）。
++试过但放弃：①给 063000/040000 加「表存在则跳过」幂等 guard 保留双文件——放弃：全新库仍按图序执行两份建表逻辑，且两条分支结构不一致（stage 列有无），guard 掩盖而非消除分叉，链图审计面双份；②ts 转 ISO 用 ts::text——放弃：输出「2026-09-25 06:04:02.526+00」（空格分隔、+00 后缀）与 service 层写入的 ISO 8601 格式不一致，混合格式破坏字典序比较一致性，用 to_char 统一 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'。
++次要风险：stage 历史值丢弃（119 行）——观测数据无消费方，接受；severity NULL→'info'（157 行）与 rule NULL→'' 的回填值是语义近似（历史写入端未归一），展示层无差别。
+
+diff --git a/.sillyspec/changes/2026-09-26-migration-chain-dedupe/flow-state.yaml b/.sillyspec/changes/2026-09-26-migration-chain-dedupe/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-migration-chain-dedupe/flow-state.yaml
+@@ -0,0 +1,17 @@
++tier: thick
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: a82bf152600857f3cc6980934b6a5a296fda5bdb
++updatedAt: '2026-09-26T15:56:10.023Z'
++upgrade_reason: verify 实测失败（实测失败：lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
++gate_summary: >-
++  test: passed ← module[]+deps(py7)+fr(7)（36.5s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260926155600\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（9.4s）｜门文件 9 个
++
+
+diff --git a/.sillyspec/changes/2026-09-26-migration-chain-dedupe/proposal.md b/.sillyspec/changes/2026-09-26-migration-chain-dedupe/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-migration-chain-dedupe/proposal.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T15:43:04.971Z
++---
++# 提案书（Proposal）— 2026-09-26-migration-chain-dedupe
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:fd0bcd3add4a089efce3313dafd0427ec04ab5ea1d8004e3384d18c66f0bc35f:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-migration-chain-dedupe 留痕重锚 -->
++任务原话转写：迁移链分叉真 bug：20260923040000（change-events-channel）与 20260926063000（change-events-r18-full）是两个变更各写的同名建表迁移（都 down_revision=20260922194500），建表结构还不一致（ts timestamptz vs varchar(64)、severity/rule 可空性、stage 列有无），3931ff71bd32 merge 强行归一。后果：本地 dogfood DB 卡在 063000 时 upgrade head 撞 DuplicateTableError 后端起不来（已手工 stamp 救活）；全新库按分支序应用仍会在第二支 duplicate 炸；远程 DB 表是 040000 旧结构而 ORM 按 063000 语义读写（ts 字符串/rule 非空/无 stage）——类型脱节。
++
++成功标准：
++- 迁移链恢复单线：22194500→040000→090000→083000→新矫正迁移，删除 063000 与 merge 3931ff71bd32，083000 的 down_revision 改接 20260923090000
++- 040000 的建表 DDL 改写为与当前 ORM（platform_sync/model.py PlatformChangeEventORM）完全一致的结构（ts String(64)、severity String(16) NOT NULL default info、rule NOT NULL、provisional server_default true、detail Text、无 stage 列）
++- 新增条件矫正迁移：对已被 040000 旧结构建表的 PG 库做幂等对齐（ts timestamptz→varchar(64) 数据转 ISO 串、severity/rule NULL 回填、severity varchar(32)→16、detail→text、DROP stage），已是目标结构的库全 no-op，SQLite 测试库跳过
++- tests/test_migrations_graph.py 守护通过（单头、引用闭合）；新增矫正迁移的结构断言与链测试（仿 test_archive_tombstone_repair_migration.py 先例）
++- 本地与远程 dogfood/生产 DB 经 stamp+upgrade head 后 alembic 版本落新 head 且后端正常启动（运维步骤在交付汇报中列明）
++- 不改 ORM、不改任何业务代码与接口行为
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:056457e0f281237dea16fa7dcc59ba849b49fb2bf5dd29dbea5549cee565198d:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-migration-chain-dedupe 留痕重锚 -->
++按成功标准机械推导，共 9 条验收面：
++1. 迁移链恢复单线：22194500→040000→090000→083000→新矫正迁移，删除 063000 与 merge 3931ff71bd32，083000 的 down_revision 改接 20260923090000
++2. 040000 的建表 DDL 改写为与当前 ORM（platform_sync/model.py PlatformChangeEventORM）完全一致的结构（ts String(64)、severity String(16) NOT NULL default info、rule NOT NULL、provisional server_default true、detail Text、无 stage 列）
++3. 新增条件矫正迁移：对已被 040000 旧结构建表的 PG 库做幂等对齐（ts timestamptz→varchar(64) 数据转 ISO 串、severity
++4. rule NULL 回填、severity varchar(32)→16、detail→text、DROP stage），已是目标结构的库全 no-op，SQLite 测试库跳过
++5. tests/test_migrations_graph.py 守护通过（单头、引用闭合）
++6. 新增矫正迁移的结构断言与链测试（仿 test_archive_tombstone_repair_migration.py 先例）
++7. 本地与远程 dogfood
++8. 生产 DB 经 stamp+upgrade head 后 alembic 版本落新 head 且后端正常启动（运维步骤在交付汇报中列明）
++9. 不改 ORM、不改任何业务代码与接口行为
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:53390418eece6f3795f63a86d97c058f34537aa896ca9fb486c258ffc5fc5dd2:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-26-migration-chain-dedupe 留痕重锚 -->
++1. 迁移链恢复单线：22194500→040000→090000→083000→新矫正迁移，删除 063000 与 merge 3931ff71bd32，083000 的 down_revision 改接 20260923090000
++2. 040000 的建表 DDL 改写为与当前 ORM（platform_sync/model.py PlatformChangeEventORM）完全一致的结构（ts String(64)、severity String(16) NOT NULL default info、rule NOT NULL、provisional server_default true、detail Text、无 stage 列）
++3. 新增条件矫正迁移：对已被 040000 旧结构建表的 PG 库做幂等对齐（ts timestamptz→varchar(64) 数据转 ISO 串、severity
++4. rule NULL 回填、severity varchar(32)→16、detail→text、DROP stage），已是目标结构的库全 no-op，SQLite 测试库跳过
++5. tests/test_migrations_graph.py 守护通过（单头、引用闭合）
++6. 新增矫正迁移的结构断言与链测试（仿 test_archive_tombstone_repair_migration.py 先例）
++7. 本地与远程 dogfood
++8. 生产 DB 经 stamp+upgrade head 后 alembic 版本落新 head 且后端正常启动（运维步骤在交付汇报中列明）
++9. 不改 ORM、不改任何业务代码与接口行为
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-26-migration-chain-dedupe/requirements.md b/.sillyspec/changes/2026-09-26-migration-chain-dedupe/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-migration-chain-dedupe/requirements.md
+@@ -0,0 +1,89 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T15:43:04.972Z
++---
++# 需求规格（Requirements）— 2026-09-26-migration-chain-dedupe
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 迁移链恢复单线：22194500→040000→090000→083000→新矫正迁移，删除 063
++Given 迁移 相关模块就绪
++When 迁移链恢复单线：22194500
++Then 040000
++
++### FR-02: 040000 的建表 DDL 改写为与当前 ORM（platform_sync/model.py P
++Given 系统就绪
++When 040000 的建表 DDL 改写为与当前 ORM（platform_sync/model.py PlatformChangeEventORM）完全一致的结构（
++Then 行为符合本条标准描述
++
++### FR-03: 新增条件矫正迁移：对已被 040000 旧结构建表的 PG 库做幂等对齐（ts timestampt
++Given 迁移 / 幂等 相关模块就绪
++When 新增条件矫正迁移：对已被 040000 旧结构建表的 PG 库做幂等对齐（ts timestamptz
++Then varchar(64) 数据转 ISO 串、severity
++
++### FR-04: rule NULL 回填、severity varchar(32)→16、detail→text、D
++Given 测试 相关模块就绪
++When rule NULL 回填、severity varchar(32)
++Then 16、detail
++
++### FR-05: tests/test_migrations_graph.py 守护通过（单头、引用闭合）
++Given 系统就绪
++When tests/test_migrations_graph.py 守护通过（单头、引用闭合）
++Then 行为符合本条标准描述
++
++### FR-06: 新增矫正迁移的结构断言与链测试（仿 test_archive_tombstone_repair_mi
++Given 迁移 / 测试 相关模块就绪
++When 新增矫正迁移的结构断言与链测试（仿 test_archive_tombstone_repair_migration.py 先例）
++Then 行为符合本条标准描述
++
++### FR-07: 本地与远程 dogfood
++Given 系统就绪
++When 本地与远程 dogfood
++Then 行为符合本条标准描述
++
++### FR-08: 生产 DB 经 stamp+upgrade head 后 alembic 版本落新 head 且后端
++Given 系统就绪
++When 生产 DB 经 stamp+upgrade head 后 alembic 版本落新 head 且后端正常启动（运维步骤在交付汇报中列明）
++Then 行为符合本条标准描述
++
++### FR-09: 不改 ORM、不改任何业务代码与接口行为
++Given 接口 相关模块就绪
++When 不改 ORM、不改任何业务代码与接口行为
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/tests/test_align_platform_change_events_migration.py::TestMigrationStructure::test_file_exists_and_single_head_chain（单 head=20260926234000）
++- backend/tests/test_align_platform_change_events_migration.py::TestMigrationStructure::test_duplicate_branch_purged（063000/3931ff71bd32 彻底移出）
++- backend/tests/test_align_platform_change_events_migration.py::TestMigrationStructure::test_083000_reattached_to_mainline（down_revision 接 20260923090000）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/tests/test_migrations_graph.py（全链 AST 守护：revision 唯一/引用闭合/单头，重写后的 040000 在链上图形态不变）
++- 不适用（DDL 内容等价性）：040000 重写的 create_table 与 ORM 对齐由矫正迁移测试的目标结构形态（TARGET_SHAPE）+ 本地真库升级后 information_schema 实测（FR-07 运维验证）覆盖，无独立单测面
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/tests/test_align_platform_change_events_migration.py::TestAlignBehavior::test_old_shape_emits_full_alignment（旧结构 → 全部对齐 DDL：ts USING to_char/severity·rule 收紧/detail→text）
++- backend/tests/test_align_platform_change_events_migration.py::TestAlignBehavior::test_target_shape_is_full_noop（目标结构 → 零 DDL）
++- backend/tests/test_align_platform_change_events_migration.py::TestAlignBehavior::test_sqlite_dialect_short_circuits（非 PG 方言整体 no-op）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/tests/test_align_platform_change_events_migration.py::TestAlignBehavior::test_old_shape_emits_full_alignment（断言 SET severity='info' WHERE NULL / SET rule='' WHERE NULL / DROP COLUMN stage 明细）
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/tests/test_migrations_graph.py（全量守护用例，重跑全绿）
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/tests/test_align_platform_change_events_migration.py::TestMigrationStructure（文件存在/单 head/revision 链/分支清除四断言，仿 test_archive_tombstone_repair_migration.py 先例）
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- 不适用（运维验证，非 pytest 面）：本地 dogfood 库已实跑——alembic_version 20260926083000 → 容器 entrypoint upgrade head 到 20260926234000（矫正全 no-op），information_schema 实测表结构=ORM 目标（ts varchar/rule·severity NOT NULL/detail text/无 stage），health 200；证据在交付汇报
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- 不适用（生产运维验证，非 pytest 面）：远程 stamp 083000 + 部署新镜像 upgrade head 走矫正真实 ALTER/数据转换（166 行），部署后核验表结构与 version_num=20260926234000——随本次交付一并执行
++
++<!--AGENT:测试绑定FR-09 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/tests/test_migrations_graph.py（链图守护证明变更面仅 migrations/versions）
++- backend/app/modules/platform_sync 全量 264 passed（4 失败为 HEAD 存量债，git stash 干净 HEAD 复跑同败，已按先例记 local.yaml known_failures Q 组豁免）
++- backend/tests/test_align_platform_change_events_migration.py（新守护只读迁移文件，零业务代码触碰）
+
+diff --git a/.sillyspec/changes/2026-09-26-migration-chain-dedupe/tasks.md b/.sillyspec/changes/2026-09-26-migration-chain-dedupe/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-26-migration-chain-dedupe/tasks.md
+@@ -0,0 +1,19 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T15:43:04.972Z
++---
++# 任务注册表（Tasks）— 2026-09-26-migration-chain-dedupe
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: 迁移链恢复单线：22194500→040000→090000→083000→新矫正迁移，删除 063000 与 merge 3931ff71bd32…
++- [ ] task-02: 040000 的建表 DDL 改写为与当前 ORM（platform_sync/model.py PlatformChangeEventORM）完全一致的结构（…
++- [ ] task-03: 新增条件矫正迁移：对已被 040000 旧结构建表的 PG 库做幂等对齐（ts timestamptz→varchar(64) 数据转 ISO 串、severi…
++- [ ] task-04: rule NULL 回填、severity varchar(32)→16、detail→text、DROP stage），已是目标结构的库全 no-op…
++- [ ] task-05: tests/test_migrations_graph.py 守护通过（单头、引用闭合）
++- [ ] task-06: 新增矫正迁移的结构断言与链测试（仿 test_archive_tombstone_repair_migration.py 先例）
++- [ ] task-07: 本地与远程 dogfood
++- [ ] task-08: 生产 DB 经 stamp+upgrade head 后 alembic 版本落新 head 且后端正常启动（运维步骤在交付汇报中列明）
++- [ ] task-09: 不改 ORM、不改任何业务代码与接口行为

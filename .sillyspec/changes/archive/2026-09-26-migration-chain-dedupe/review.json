@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-migration-chain-dedupe",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "severity varchar(32)→varchar(16) 收窄 ALTER 无超长防护，数据依赖的条件性失败",
+      "evidence": "矫正迁移 ALTER COLUMN severity TYPE varchar(16) 无 USING left()/substring 截断、无预检 max(length(severity))；写入端 service.py:1351 severity=str(payload.get(...)) 原值透传且事件推送无 schema 长度校验，现网列宽 varchar(32) 允许 17-32 字符值存在。生产 166 行仅 9 行非空（157 NULL 已实测）、severity 词汇实际很短，且 PG 事务性 DDL 失败即整体回滚停 083000 可手工修数重跑——风险低但非零；建议生产升级 runbook 加预检 SELECT max(length(severity)) FROM platform_change_events",
+      "location": "backend/migrations/versions/20260926234000_align_platform_change_events.py:96"
+    },
+    {
+      "severity": "P2",
+      "title": "change.patch 冻结件仅含文档 hunk，代码改动无法与补丁对照（已知工具问题）",
+      "evidence": "change.patch 260 行仅 design/flow-state/proposal/requirements/tasks 五个文档 diff，无任何代码 hunk；代码事实全部对照工作区核实。083000「仅改 down_revision 其余未动」、040000「仅 DDL 重写」的历史无改动性无法用 git 对照（评审纪律禁 git），按惯例记 P2 不独立 FAIL",
+      "location": ".sillyspec/changes/2026-09-26-migration-chain-dedupe/change.patch:1"
+    },
+    {
+      "severity": "P3",
+      "title": "040000 模块 docstring 仍描述旧结构，与重写后 DDL 矛盾",
+      "evidence": "docstring 称「12 列：ts timestamptz NOT NULL / stage varchar(64) / severity varchar(32) 可空」，实际新 DDL 为 11 列、ts varchar(64)、severity varchar(16) NOT NULL、无 stage；design 自称最大风险是审计歧义并承诺 docstring 记录重写史——upgrade() 内注释已记但模块级列清单未同步，削弱该缓解",
+      "location": "backend/migrations/versions/20260923040000_add_platform_change_events.py:13-27"
+    },
+    {
+      "severity": "P3",
+      "title": "ts 探测接受 timestamp without time zone，该死分支下 AT TIME ZONE 语义反转",
+      "evidence": "对 naive timestamp，ts AT TIME ZONE 'UTC' 产出 timestamptz，to_char 再按会话时区渲染（非 UTC）；对 timestamptz（实际旧结构）则正确转 UTC naive。实际旧 DDL 为 timestamptz、SQLite 已短路，该分支为死代码，仅潜在坑",
+      "location": "backend/migrations/versions/20260926234000_align_platform_change_events.py:79-89"
+    },
+    {
+      "severity": "P3",
+      "title": "「目标结构全 no-op/零 DDL」口径不精确：仍发两条零行 UPDATE",
+      "evidence": "TARGET_SHAPE 下 severity/rule 元数据存在即无条件执行 NULL 回填 UPDATE（0 行命中，数据无害）；test_target_shape_is_full_noop 只断言无 ALTER/DROP，与 requirements FR-03「零 DDL」绑定表述有偏差",
+      "location": "backend/tests/test_align_platform_change_events_migration.py:140-145"
+    },
+    {
+      "severity": "P3",
+      "title": "040000 DDL 与 ORM「完全一致」表述过强：两处 server_default 为 DDL 侧新增",
+      "evidence": "severity server_default='info' 与 provisional server_default=sa.true()（sa.true() 跨方言 OK：PG 渲染 TRUE、SQLite 渲染 1）在 ORM 中仅为 Python 侧 default（Field(default=...)），无 server_default；语义无害（防裸 SQL 插 NULL），但逐项对照声明有出入",
+      "location": "backend/migrations/versions/20260923040000_add_platform_change_events.py:79-89"
+    },
+    {
+      "severity": "P3",
+      "title": "design 未显式声明 MS 毫秒截断口径；rule NULL→'' 回填与 service 缺省 'unknown' 语义不一致",
+      "evidence": "to_char MS 截断到毫秒（微秒丢失）——历史值源自 watcher epoch ms（D-003），实际无损但口径未写；service.py:1351 缺省 rule 写 'unknown' 而矫正回填 NULL→''，观测数据无消费方影响可忽略",
+      "location": "backend/migrations/versions/20260926234000_align_platform_change_events.py:86-87,105"
+    },
+    {
+      "severity": "P3",
+      "title": "OLD_SHAPE/TARGET_SHAPE 为手写常量，与 ORM 无机器绑定",
+      "evidence": "测试形态常量手抄自 ORM 定义而非从 metadata 派生，ORM 后续漂移不报警；FR-02 已如实自认无独立单测面、靠 FR-07 运维实库验证兜底",
+      "location": "backend/tests/test_align_platform_change_events_migration.py:70-86"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-26T16:01:12Z"
+}

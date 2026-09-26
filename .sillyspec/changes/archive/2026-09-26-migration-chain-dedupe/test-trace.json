@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-migration-chain-dedupe",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-26-migration-chain-dedupe:flow:FR-01",
+      "tests": [
+        "backend/tests/test_align_platform_change_events_migration.py::TestMigrationStructure::test_083000_reattached_to_mainline（down_revision",
+        "backend/tests/test_align_platform_change_events_migration.py::TestMigrationStructure::test_duplicate_branch_purged（063000/3931ff71bd32",
+        "backend/tests/test_align_platform_change_events_migration.py::TestMigrationStructure::test_file_exists_and_single_head_chain（单"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-migration-chain-dedupe"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-26-migration-chain-dedupe:flow:FR-02",
+      "tests": [
+        "backend/tests/test_migrations_graph.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-migration-chain-dedupe"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-26-migration-chain-dedupe:flow:FR-03",
+      "tests": [
+        "backend/tests/test_align_platform_change_events_migration.py::TestAlignBehavior::test_old_shape_emits_full_alignment（旧结构",
+        "backend/tests/test_align_platform_change_events_migration.py::TestAlignBehavior::test_sqlite_dialect_short_circuits（非",
+        "backend/tests/test_align_platform_change_events_migration.py::TestAlignBehavior::test_target_shape_is_full_noop（目标结构"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-migration-chain-dedupe"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-26-migration-chain-dedupe:flow:FR-04",
+      "tests": [
+        "backend/tests/test_align_platform_change_events_migration.py::TestAlignBehavior::test_old_shape_emits_full_alignment（断言"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-migration-chain-dedupe"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-26-migration-chain-dedupe:flow:FR-05",
+      "tests": [
+        "backend/tests/test_migrations_graph.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-migration-chain-dedupe"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-09-26-migration-chain-dedupe:flow:FR-06",
+      "tests": [
+        "backend/tests/test_align_platform_change_events_migration.py::TestMigrationStructure（文件存在/单"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-migration-chain-dedupe"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-09-26-migration-chain-dedupe:flow:FR-09",
+      "tests": [
+        "backend/tests/test_align_platform_change_events_migration.py",
+        "backend/tests/test_migrations_graph.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-migration-chain-dedupe"
+    }
+  ]
+}
