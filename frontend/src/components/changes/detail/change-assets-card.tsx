@@ -14,10 +14,70 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { getChangeAssets, getChangePatchFile } from "@/lib/changes";
+import { fetchSearch } from "@/lib/explorer";
 
 interface ChangeAssetsCardProps {
   workspaceId: string;
   changeId: string;
+}
+
+// ── 测试文件路径解析（2026-09-26-assets-testfile-path-resolve / FR-01~02）────
+// test-trace 记录的测试文件路径可能是短路径（缺仓库内目录前缀，如
+// ``tests/x.py`` 实为 ``backend/app/modules/<m>/tests/x.py``）或反斜杠/``./``
+// 写法。归一照知识库页 normalizeKnowledgeFileParam 先例；解析决策是纯函数，
+// 由弹窗用 explorer search 的同名命中集驱动。
+
+/** 记录路径字符串归一（反斜杠→斜杠、去 ``./`` 前缀与首尾空白）。 */
+export function normalizeTestFilePath(raw: string): string {
+  return raw.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+/** 解析决策：resolved=唯一确定路径（redirected=与记录路径不同，需标注）；
+ *  candidates=多候选需用户点选；notfound=仓库内无同名命中。 */
+export type TestFileResolution =
+  | { kind: "resolved"; path: string; redirected: boolean }
+  | { kind: "candidates"; paths: string[] }
+  | { kind: "notfound" };
+
+/** sillyspec 会话工作树副本前缀——basename 命中时的已知噪音源，排除后再判唯一。 */
+const WORKTREE_COPY_PREFIX = ".sillyspec/.runtime/";
+
+/**
+ * 归一记录路径 × 同名命中集 → 解析决策。优先级：等值命中（路径原样存在）→
+ * 唯一后缀命中（短路径是真实路径的后缀）→ 排除工作树副本后的唯一后缀 → 候选
+ * 列表（含命中但结构完全不匹配的场景）。命中集元素同样归一后比较。
+ */
+export function resolveTestFilePath(
+  rawPath: string,
+  searchPaths: readonly string[],
+): TestFileResolution {
+  const norm = normalizeTestFilePath(rawPath);
+  if (norm === "") return { kind: "notfound" };
+  const hits = searchPaths.map((p) => normalizeTestFilePath(p));
+  if (hits.includes(norm)) {
+    return { kind: "resolved", path: norm, redirected: false };
+  }
+  const suffix = hits.filter((p) => p.endsWith(`/${norm}`));
+  const pickSingle = (arr: string[]): string | null =>
+    arr.length === 1 ? (arr[0] ?? null) : null;
+  const onlySuffix = pickSingle(suffix);
+  if (onlySuffix !== null) {
+    return { kind: "resolved", path: onlySuffix, redirected: true };
+  }
+  if (suffix.length > 1) {
+    const real = suffix.filter((p) => !p.startsWith(WORKTREE_COPY_PREFIX));
+    const onlyReal = pickSingle(real);
+    if (onlyReal !== null) {
+      return { kind: "resolved", path: onlyReal, redirected: true };
+    }
+    return { kind: "candidates", paths: real.length > 0 ? real : suffix };
+  }
+  // 无后缀命中：仍有同名命中（路径结构完全不同）→ 交用户选；零命中 → 未找到。
+  if (hits.length > 0) {
+    const real = hits.filter((p) => !p.startsWith(WORKTREE_COPY_PREFIX));
+    return { kind: "candidates", paths: real.length > 0 ? real : hits };
+  }
+  return { kind: "notfound" };
 }
 
 /**
@@ -276,7 +336,10 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
         </div>
       )}
 
-      {/* 测试文件预览弹窗（FR-03）：explorer 取数（仓库文件），与变更文件树同款只读预览。 */}
+      {/* 测试文件预览弹窗（FR-03）：explorer 取数（仓库文件），与变更文件树同款只读预览。
+          路径解析兜底（2026-09-26-assets-testfile-path-resolve / FR-01~02）：记录路径
+          先归一，再按文件名走 explorer search 同名命中集驱动 resolveTestFilePath——
+          等值/唯一后缀自动用真实路径，多候选列清单点选，零命中中性文案。 */}
       <Dialog open={testPath !== null} onOpenChange={(v) => !v && setTestPath(null)}>
         <DialogContent className="flex h-[80vh] max-w-4xl flex-col gap-0 p-0">
           <DialogHeader className="border-b px-4 py-3">
@@ -288,7 +351,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
             <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
               {testPath !== null ? (
-                <FilePreview workspaceId={workspaceId} filePath={testPath} />
+                <TestFileBody workspaceId={workspaceId} rawPath={testPath} />
               ) : null}
             </div>
           </div>
@@ -336,5 +399,101 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
         </DialogContent>
       </Dialog>
     </section>
+  );
+}
+
+/**
+ * 测试文件弹窗主体（2026-09-26-assets-testfile-path-resolve / FR-01~02）——
+ * 按文件名调 explorer search 取同名命中集，resolveTestFilePath 决策后渲染：
+ * resolved → FilePreview（真实路径；redirected 时在预览上方标注原记录路径）；
+ * candidates → 候选清单点选（选中后转 FilePreview）；notfound / 搜索失败
+ * 兜底用原路径直开（FilePreview 展示 explorer 侧真实错误，不吞）。
+ */
+function TestFileBody({
+  workspaceId,
+  rawPath,
+}: {
+  workspaceId: string;
+  rawPath: string;
+}) {
+  const norm = normalizeTestFilePath(rawPath);
+  const basename = norm.split("/").filter(Boolean).pop() ?? norm;
+  const [chosen, setChosen] = useState<string | null>(null);
+
+  const searchQ = useQuery({
+    queryKey: ["changeAssetsTestSearch", workspaceId, basename],
+    queryFn: () => fetchSearch(workspaceId, basename),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  if (chosen !== null) {
+    return <FilePreview workspaceId={workspaceId} filePath={chosen} />;
+  }
+  if (searchQ.isPending) {
+    return (
+      <p className="py-6 text-center text-xs text-muted-foreground">
+        正在仓库中定位测试文件…
+      </p>
+    );
+  }
+  if (searchQ.isError) {
+    // 搜索通道不可用（daemon 离线/权限等）：退回原路径直开，让 FilePreview
+    // 呈现 explorer 侧的真实错误——比「未找到」更诚实（文件可能就在）。
+    return <FilePreview workspaceId={workspaceId} filePath={norm} />;
+  }
+
+  const resolution = resolveTestFilePath(
+    rawPath,
+    searchQ.data?.matches.map((m) => m.path) ?? [],
+  );
+  if (resolution.kind === "resolved") {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        {resolution.redirected ? (
+          <p
+            data-testid="change-assets-test-redirect-note"
+            className="shrink-0 border-b border-dashed px-2 py-1 text-[10px] text-muted-foreground"
+          >
+            记录路径未直接命中，已定位到仓库内同名文件：{resolution.path}
+          </p>
+        ) : null}
+        <div className="min-h-0 flex-1">
+          <FilePreview workspaceId={workspaceId} filePath={resolution.path} />
+        </div>
+      </div>
+    );
+  }
+  if (resolution.kind === "candidates") {
+    return (
+      <div className="overflow-auto p-3" data-testid="change-assets-test-candidates">
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          仓库内有 {resolution.paths.length} 个同名测试文件，请选择要查看的路径：
+        </p>
+        <ul className="space-y-1">
+          {resolution.paths.map((p) => (
+            <li key={p}>
+              <button
+                type="button"
+                data-testid={`change-assets-test-candidate-${p}`}
+                onClick={() => setChosen(p)}
+                className="w-full truncate rounded border px-2 py-1 text-left font-mono text-[11px] hover:border-brand-300 hover:bg-brand-50/60"
+                title={p}
+              >
+                {p}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  return (
+    <p
+      data-testid="change-assets-test-notfound"
+      className="py-6 text-center text-xs text-muted-foreground"
+    >
+      未在仓库中找到该测试文件（{rawPath}）——记录路径可能不完整，或文件已被移动/删除。
+    </p>
   );
 }

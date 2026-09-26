@@ -436,8 +436,11 @@ def _map_remote_error(
         **context,
     }
     if exc.code == "not_found":
+        # 2026-09-26-assets-testfile-path-resolve：旧文案「工作区目录可能已被移动
+        # 或删除」按整目录被删场景设计，任何寻径失败都套用，会把「路径写短了/
+        # 文件被移走」误导成工作区丢失——改中性表述。
         return ExplorerPathNotFound(
-            "文件或目录不存在，工作区目录可能已被移动或删除。",
+            "文件或目录不存在：路径可能不完整，或文件已被移动/删除。",
             details=details,
         )
     if exc.code == "forbidden":
