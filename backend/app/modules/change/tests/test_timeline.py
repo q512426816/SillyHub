@@ -173,6 +173,9 @@ async def test_timeline_golden_aggregation(db_session, tmp_path: Path, monkeypat
     ]
     assert result.tasks[0].commit_sha == "4aed0e824"
     assert result.tasks[2].commit_sha is None
+    # token 边界（评审 P3 收口）：消息含 task-012 不得被 task-01 误锚。
+    # 金样本 message 只含 task-01/task-02——task-01 的锚存在已证边界正确
+    # （若用子串匹配，task-012 形态会误锚；此处由下方专项用例钉住）。
     # 统计：5 事件（1 commit）/ 勾选 2/3 / 墙钟 07:01→07:05 = 240s。
     assert result.stats.event_count == 5
     assert result.stats.commit_count == 1
@@ -230,3 +233,39 @@ async def test_timeline_not_found_reraises(db_session, tmp_path: Path) -> None:
         await ChangeTimelineQueryService(db_session).get_change_timeline(
             ws.id, uuid.uuid4(), uuid.uuid4()
         )
+
+
+async def test_timeline_task_token_boundary_no_cross_match(
+    db_session, tmp_path: Path, monkeypatch
+) -> None:
+    """token 边界：task-01 不误锚含 task-012 的消息（评审 P3 收口）。"""
+    spec_root = tmp_path / "spec-root5"
+    _seed_change_dir(spec_root)
+    ws = await _make_ws(db_session, spec_root)
+    change = await _make_change(db_session, ws)
+    await _add_event(db_session, ws.id, "2026-09-26T07:01:00Z", "commit", "aaa000111")
+    await db_session.commit()
+
+    class _C:
+        def __init__(self, sha, short, message):
+            self.hash, self.short, self.message = sha, short, message
+
+    class _R:
+        def __init__(self, commits):
+            self.commits = commits
+
+    class _Fake:
+        def __init__(self, session):
+            pass
+
+        async def list_commits(self, *a, **kw):
+            return _R([_C("f" * 20, "aaa000111", "feat: 未来的 task-012 落地")])
+
+    monkeypatch.setattr("app.modules.change.timeline.GitLogService", _Fake)
+
+    result = await ChangeTimelineQueryService(db_session).get_change_timeline(
+        ws.id, change.id, uuid.uuid4()
+    )
+    # task-01 未被 task-012 的消息误锚；无锚 None。
+    task01 = next(t for t in result.tasks if t.id == "task-01")
+    assert task01.commit_sha is None

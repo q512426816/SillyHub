@@ -125,13 +125,18 @@ class ChangeTimelineQueryService:
             for r in rows
         ]
         # 任务面提交锚（CLI 同款「消息含 task token」推断）：倒序取最新命中。
+        # token 后瞻断言 (?!\d) 防子串误锚（评审 P3：task-01 命中 task-012）。
         tasks = [
             TimelineTask(
                 id=task_id,
                 checked=checked,
                 desc=desc,
                 commit_sha=next(
-                    (short for short, msg in reversed(commit_pairs) if task_id in msg),
+                    (
+                        short
+                        for short, msg in reversed(commit_pairs)
+                        if re.search(rf"{re.escape(task_id)}(?!\d)", msg)
+                    ),
                     None,
                 ),
             )

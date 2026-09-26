@@ -107,7 +107,13 @@ export function ChangeTimelineCard({
   return (
     <section data-testid="change-timeline-card" className="rounded-md border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
-        <h2 className="text-xs font-medium">🧭 真实留痕时间线</h2>
+        <h2 className="flex items-center gap-1.5 text-xs font-medium">
+          🧭 真实留痕时间线
+          {/* provisional 观测角标（FR-02）：事件流恒 provisional，只展示不消费 */}
+          <span className="rounded-full border border-border/60 px-1.5 text-[9px] font-normal text-muted-foreground">
+            观测
+          </span>
+        </h2>
         <span className="text-[10px] text-muted-foreground">
           {wall ? `墙钟 ${wall} · ` : ""}事件 {stats.event_count} · 提交{" "}
           {stats.commit_count}

@@ -102,6 +102,8 @@ describe("ChangeTimelineCard", () => {
     expect(tasks).toHaveTextContent("task-01");
     expect(tasks).toHaveTextContent("后端聚合服务落盘");
     expect(tasks).toHaveTextContent("4aed0e824");
+    // provisional 观测角标（FR-02）：卡头 chip。
+    expect(screen.getByText("观测")).toBeInTheDocument();
     // 脚注统计（120s → 2min）。
     expect(screen.getByText(/墙钟 2min/)).toBeInTheDocument();
     expect(container).toHaveTextContent("事件 3 · 提交 1 · 勾选 1/2");
