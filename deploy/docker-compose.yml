@@ -171,7 +171,11 @@ services:
     environment:
       INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://backend:8000}
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
-      NEXT_PUBLIC_COMMIT_SHA: ${NEXT_PUBLIC_COMMIT_SHA:-}
+      # 2026-09-27-audit-followup-hardening：删此前的运行时 NEXT_PUBLIC_COMMIT_SHA
+      # 空覆盖行——与 backend 侧 COMMIT_SHA 同型问题（2026-09-26-deploy-eng-hardening
+      # 已删 backend 行）：${VAR:-} 在未 export 的服务器上以空串覆盖镜像 ENV
+      # （frontend/Dockerfile 构建期 ARG→ENV 烘焙）。版本号一律构建期烘焙，运行
+      # 时不覆盖。
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     mem_limit: 400m

@@ -637,6 +637,36 @@ def test_touched_modules_name_fallback(tmp_path: Path) -> None:
     ]
 
 
+def test_touched_modules_doc_traversal_guard(tmp_path: Path) -> None:
+    """纯函数（2026-09-27-audit-followup-hardening）：doc 含 ``..`` 段或绝对路径
+    （POSIX / 前缀、Windows 盘符/反斜杠 UNC）→ 不读盘（h1 回退 id）、doc 不
+    外发越界路径（不放预览 chip）；正常相对 doc 零回归。"""
+    from app.modules.change.assets import _read_touched_modules
+
+    mod_dir = tmp_path / "docs" / "p" / "modules"
+    mod_dir.mkdir(parents=True)
+    (mod_dir / "_module-map.yaml").write_text(
+        "modules:\n"
+        "  up:\n    doc: ../../escape.md\n    paths: [src/a/**]\n"
+        "  abs:\n    doc: /etc/passwd\n    paths: [src/b/**]\n"
+        "  win:\n    doc: 'C:\\\\Windows\\\\win.ini'\n    paths: [src/d/**]\n"
+        "  ok:\n    doc: modules/ok.md\n    paths: [src/c/**]\n",
+        encoding="utf-8",
+    )
+    # 越界目标真实存在且带 # h1——守卫缺失时 name 会被读成「逃逸成功」。
+    (tmp_path / "escape.md").write_text("# 逃逸成功\n", encoding="utf-8")
+    (mod_dir / "ok.md").write_text("# 正常模块\n", encoding="utf-8")
+    mods = _read_touched_modules(
+        tmp_path, ["p/src/a/x.ts", "p/src/b/y.ts", "p/src/d/z.ts", "p/src/c/w.ts"]
+    )
+    assert [(m.id, m.name, m.doc) for m in mods] == [
+        ("up", "up", None),
+        ("abs", "abs", None),
+        ("win", "win", None),
+        ("ok", "正常模块", "docs/p/modules/ok.md"),
+    ]
+
+
 def test_knowledge_touch_empty_without_marker(tmp_path: Path) -> None:
     """纯函数：无待复核标记的域文件 → 空组（fail-open）。"""
     from app.modules.change.assets import _REVIEW_MARK_RE, _scan_domain_files

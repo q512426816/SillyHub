@@ -10,3 +10,6 @@ created_at: 2026-08-29 22:56:30
 
 ## 2026-08-30 — 风险审查高置信缺陷修复批（quick ql-20260830-001-2e52）
 - reparse 删除闭环两修（审计②③）：_detect_renames orphaned 候选排除 location='deleted' 墓碑行（防同日新建变更被 rename 错配→出生即隐藏+上行永久 409 无逆转）；删除环遇 manifest platform_deleted=True 锚点的 'active' 行降级置软删（stats.tombstoned）不物理删——防 delete_change 步骤①commit 与步骤⑤之间的半删窗口被 reparse 物理删 CASCADE 抹掉 change_events/documents/session_links（R-09 审计保护）。
+
+## 2026-09-27 — 模块触达 doc 路径越界守卫（thin 2026-09-27-audit-followup-hardening）
+- assets.py 新增 `_safe_module_doc`：模块图 `_module-map.yaml` 的 doc 值属工作区镜像内容，未归一化直拼 `docs/<project> / doc` 可越出项目 docs 根读宿主文件（读面仅 h1 首行回显，低 severity）。越界形态（POSIX 绝对含 `//` UNC、Windows 盘符含 drive-relative、反斜杠归一后判、`..` 段）整条丢弃 → 不读盘、ChangeTouchedModule.doc=None（前端不放预览 chip）、模块名回退 id；正常相对 doc 零回归。测试：test_assets 22 绿（新 traversal 用例红→绿闭环，三形态 + 正常回归）。

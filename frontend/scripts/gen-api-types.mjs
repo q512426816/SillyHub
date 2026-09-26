@@ -34,9 +34,9 @@ function assertNoDirtyGenerated() {
     }
   });
   if (dirty.length > 0) {
-    const lines = dirty.map((f) => "  " + f).join("\\n");
+    const lines = dirty.map((f) => "  " + f).join("\n");
     console.error(
-      `[gen-api-types] 中止：以下生成物有未提交改动，重生成会把并行会话的 WIP 卷进本次提交：\\n${lines}`,
+      `[gen-api-types] 中止：以下生成物有未提交改动，重生成会把并行会话的 WIP 卷进本次提交：\n${lines}`,
     );
     console.error(
       "  处置：先提交/stash 这些文件，或确认归属后用 pnpm gen:types -- --force 跳过守卫。",

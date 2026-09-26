@@ -29,6 +29,25 @@ text / 无 stage），但重写只对**全新库**生效——已应用库的记
 information_schema，探测恒 False 整体 no-op——测试库从零 upgrade 即目标
 结构。downgrade no-op：结构对齐不可逆（旧结构的 timestamptz 精度与 stage
 值已不可恢复），回退走部署回滚而非数据反向转换。
+
+运维注记（2026-09-27-audit-followup-hardening）：本变更同时删除了平行分支
+修订 ``20260926063000`` 与 merge ``3931ff71bd32``（2026-09-26-migration-
+chain-dedupe）——**alembic_version 停在这两个被删修订号上的库**，
+``upgrade head`` 会报 "Can't locate revision" 直接失败，须按卡点分流人工
+校准版本锚点再升级（stamp 前对照旧图核对该库实际跑过哪些修订）::
+
+    # 卡 merge 3931ff71bd32（旧图两支全跑过：090000 + 063000 + 083000）：
+    alembic stamp 20260926083000      # 090000/083000 均已执行，直锚 083000
+    alembic upgrade head              # → 234000 按探测对齐/短路
+
+    # 卡 20260926063000（writer 分支中段：090000 与 083000 均未执行——旧图
+    # 083000 原接 063000 之后；platform_change_events 表由 063000 建为目标
+    # 结构，重放 090000 数据回翻 + 083000 spec_workspaces 加列无冲突，
+    # 234000 对目标结构全 no-op）：
+    alembic stamp 20260923040000      # 回锚 040000，让 090000/083000 重放
+    alembic upgrade head
+
+全新库与正常主线库（22194500→040000→090000→083000 单线）不受影响。
 """
 
 from __future__ import annotations

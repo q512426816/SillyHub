@@ -28,7 +28,7 @@ import asyncio
 import json
 import re
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 from sqlalchemy import select
@@ -370,6 +370,23 @@ def _read_delta_meta(change_dir: Path) -> ChangeDeltaMeta | None:
     return ChangeDeltaMeta(headline=headline, before_lines=before_lines, delta_lines=delta_lines)
 
 
+def _safe_module_doc(doc: str) -> str | None:
+    """模块图 doc 值安全化（2026-09-27-audit-followup-hardening）。
+
+    doc 属工作区镜像 yaml 内容（随仓库同步而来），未归一化直拼
+    ``docs/<project> / doc`` 会越出项目 docs 根读宿主文件（读面仅 h1 首行，
+    低 severity 但应守）。越界形态——POSIX 绝对（``/`` 前缀，含 ``//`` UNC
+    形态）、Windows 盘符（``C:``，含无斜杠 drive-relative）、反斜杠（归一为
+    ``/`` 后按前两条判）、``..`` 段——整条丢弃返回 None：不读盘、不放前端
+    预览 chip（doc=None），模块名自然回退 id。
+    """
+    norm = doc.replace("\\", "/")
+    posix = PurePosixPath(norm)
+    if posix.is_absolute() or ".." in posix.parts or re.match(r"^[A-Za-z]:", norm):
+        return None
+    return doc
+
+
 def _read_touched_modules(spec_root: Path, file_list: list[str]) -> list["ChangeTouchedModule"]:
     """模块触达：交付文件清单 × 镜像模块图（docs/<项目>/modules/_module-map.yaml）。
 
@@ -410,7 +427,7 @@ def _read_touched_modules(spec_root: Path, file_list: list[str]) -> list["Change
             ):
                 continue
             seen.add((project, mod_id))
-            doc = str(mod.get("doc") or "") or None
+            doc = _safe_module_doc(str(mod.get("doc") or "")) if mod.get("doc") else None
             name = mod_id
             if doc:
                 try:
