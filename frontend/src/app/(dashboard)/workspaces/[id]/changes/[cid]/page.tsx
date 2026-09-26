@@ -23,6 +23,7 @@ import {
   WORKFLOW_STAGE_LABELS,
 } from "@/components/changes/detail/change-stage-header";
 import { ChangeStepTimeline } from "@/components/changes/detail/change-step-timeline";
+import { ChangeTimelineCard } from "@/components/changes/detail/change-timeline-card";
 import {
   ChangeLastSignal,
   lastSignalFromSteps,
@@ -397,7 +398,13 @@ export default function ChangeDetailPage({ params }: Props) {
                 />
               </div>
             </section>
-          ) : null}
+          ) : (
+            /* 真实留痕时间线（2026-09-26-change-real-timeline / FR-03）：steps
+               为空（thin 轻量变更进度不落库恒空、quick 存量同空）时原整块
+               不渲染是叙事空窗——换挂合成时间线卡（事件轴 × 任务面 × 脚注，
+               复刻 CLI watcher timeline；组件自取数 30s 轮询失败静默）。 */
+            <ChangeTimelineCard workspaceId={workspaceId} changeId={changeId} />
+          )}
 
           <ChangeAgentRunLog
             workspaceId={workspaceId}

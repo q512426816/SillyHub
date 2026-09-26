@@ -35,6 +35,9 @@ vi.mock("@/lib/changes", () => ({
   getChange: mocks.getChange,
   getAgentStatus: mocks.getAgentStatus,
   submitStageReview: mocks.submitStageReview,
+  // 2026-09-26-change-real-timeline：steps 空的 fixture 走合成时间线分支，
+  // 组件自取数走此 mock（默认 reject → 卡静默隐藏，不涉断言面）。
+  getChangeTimeline: vi.fn().mockRejectedValue(new Error("no-timeline-in-page-tests")),
 }));
 
 vi.mock("@/lib/daemon", () => ({

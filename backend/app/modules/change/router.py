@@ -45,6 +45,7 @@ from app.modules.change.schema import (
     ChangeRead,
     ChangeReparseResponse,
     ChangeReparseStats,
+    ChangeTimelineRead,
     ChangeUsageRead,
     ChangeWarning,
     DispatchResponse,
@@ -78,6 +79,7 @@ from app.modules.change.scope_audit import (
     validate_scope_change,
 )
 from app.modules.change.service import ChangeService
+from app.modules.change.timeline import ChangeTimelineQueryService
 from app.modules.change.usage_service import ChangeUsageQueryService
 from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
 from app.modules.workspace.service import WorkspaceService
@@ -545,6 +547,30 @@ async def get_change_assets(
     （404 resource-hiding，对齐 usage 端点口径）。
     """
     return await ChangeAssetsQueryService(session).get_change_assets(workspace_id, change_id)
+
+
+@router.get(
+    "/changes/{change_id}/timeline",
+    response_model=ChangeTimelineRead,
+)
+async def get_change_timeline(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> ChangeTimelineRead:
+    """变更合成时间线聚合（2026-09-26-change-real-timeline / FR-01）。
+
+    复刻 CLI ``sillyspec watcher timeline`` 三源合成：事件轴
+    （platform_change_events 正序 + requirements 工件 created_at 诞生锚）、
+    任务面（tasks.md 行 × 提交锚推断）、脚注统计。thin 轻量变更 steps 恒空
+    的主线叙事由本端点承载；events 恒 provisional（红线 D-004：只展示不
+    消费）。git 提交标题经 daemon best-effort 反查，失败降级仅哈希。不存
+    在/跨工作区抛 ``ChangeNotFound``（对齐 assets 端点口径）。
+    """
+    return await ChangeTimelineQueryService(session).get_change_timeline(
+        workspace_id, change_id, user.id
+    )
 
 
 @router.get(

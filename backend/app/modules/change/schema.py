@@ -880,3 +880,61 @@ class ChangeAssetsRead(BaseModel):
     test_rows: list[ChangeTestRow] = Field(default_factory=list)
     patch: ChangePatchMeta | None = None
     delta: ChangeDeltaMeta | None = None
+
+
+# ── 合成时间线（2026-09-26-change-real-timeline，复刻 CLI watcher timeline）──
+
+
+class TimelineEvent(BaseModel):
+    """事件轴单条（platform_change_events 正序投影 + 提交标题增强）。
+
+    ``label`` 机器值（kind 或 detail 原文）；中文标签与图标由前端映射（对齐
+    CLI watcher timeline 语义）；``commit_title`` 仅 kind=commit 且 git 窗口
+    命中时有值（daemon 降级 → None，前端只显哈希）。
+    """
+
+    ts: str
+    kind: str
+    label: str
+    rule: str = ""
+    severity: str = "info"
+    provisional: bool = True
+    commit_title: str | None = None
+
+
+class TimelineTask(BaseModel):
+    """任务面单行（tasks.md 任务行 × 提交锚推断）。
+
+    ``commit_sha`` 是「消息含 task-NN token」的最新窗口提交短哈希（CLI 同款
+    顺序推断口径，无匹配 → None）。
+    """
+
+    id: str
+    checked: bool = False
+    desc: str = ""
+    commit_sha: str | None = None
+
+
+class TimelineStats(BaseModel):
+    """脚注统计（纯计算：墙钟=首末事件差，观测盲窗下不冒充完整历史）。"""
+
+    event_count: int = 0
+    commit_count: int = 0
+    checked: int = 0
+    total: int = 0
+    wall_clock_s: int | None = None
+
+
+class ChangeTimelineRead(BaseModel):
+    """变更合成时间线聚合（GET /changes/{cid}/timeline）。
+
+    ``born_at`` 来自 requirements.md frontmatter created_at（工件元数据补位，
+    watcher 后拉起时事件流缺诞生事件）；events 恒 provisional（观测语义，
+    红线 D-004 延续：只展示不消费）。
+    """
+
+    change_key: str
+    born_at: str | None = None
+    events: list[TimelineEvent] = Field(default_factory=list)
+    tasks: list[TimelineTask] = Field(default_factory=list)
+    stats: TimelineStats = Field(default_factory=TimelineStats)

@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChangeDetailPage from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
 import type { ChangeRead, DispatchResponse } from "@/lib/changes";
+import { getChangeTimeline } from "@/lib/changes";
 import type { AgentSessionListItem } from "@/lib/daemon";
 
 const mocks = vi.hoisted(() => ({
@@ -33,6 +34,9 @@ vi.mock("@/lib/changes", () => ({
   getChange: mocks.getChange,
   getAgentStatus: mocks.getAgentStatus,
   submitStageReview: mocks.submitStageReview,
+  // 2026-09-26-change-real-timeline：steps 空的 fixture 走合成时间线分支，
+  // 组件自取数走此 mock（默认 reject → 卡静默隐藏，不涉断言面）。
+  getChangeTimeline: vi.fn().mockRejectedValue(new Error("no-timeline-in-page-tests")),
 }));
 
 vi.mock("@/lib/daemon", () => ({
@@ -161,5 +165,41 @@ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets�
     renderPage(makeChange({ status: "archived", location: "archive" }));
     const card = await screen.findByTestId("scope-audit-command-card");
     expect(card).toHaveAttribute("data-archived", "true");
+  });
+
+  it("FR-03（2026-09-26-change-real-timeline）：steps 为空时主线挂载真实留痕时间线卡", async () => {
+    vi.mocked(getChangeTimeline).mockResolvedValue({
+      change_key: "2026-09-26-restore-fixture",
+      born_at: "2026-09-26T10:00:00.000Z",
+      events: [
+        {
+          ts: "2026-09-26T10:01:00Z",
+          kind: "file-update",
+          label: "requirements.md 内容变更",
+          rule: "watcher",
+          severity: "info",
+          provisional: true,
+          commit_title: null,
+        },
+      ],
+      tasks: [
+        { id: "task-01", checked: true, desc: "恢复钉子", commit_sha: null },
+      ],
+      stats: {
+        event_count: 1,
+        commit_count: 0,
+        checked: 1,
+        total: 1,
+        wall_clock_s: null,
+      },
+    });
+    renderPage(makeChange());
+    expect(
+      await screen.findByTestId("change-timeline-card"),
+    ).toBeInTheDocument();
+    // steps 为空 → 原步骤时间线整块不渲染（空窗由时间线卡填补）。
+    expect(
+      screen.queryByTestId("change-step-timeline-card"),
+    ).toBeNull();
   });
 });

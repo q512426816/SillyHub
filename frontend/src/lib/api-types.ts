@@ -1835,6 +1835,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Change Timeline
+         * @description 变更合成时间线聚合（2026-09-26-change-real-timeline / FR-01）。
+         *
+         *     复刻 CLI ``sillyspec watcher timeline`` 三源合成：事件轴
+         *     （platform_change_events 正序 + requirements 工件 created_at 诞生锚）、
+         *     任务面（tasks.md 行 × 提交锚推断）、脚注统计。thin 轻量变更 steps 恒空
+         *     的主线叙事由本端点承载；events 恒 provisional（红线 D-004：只展示不
+         *     消费）。git 提交标题经 daemon best-effort 反查，失败降级仅哈希。不存
+         *     在/跨工作区抛 ``ChangeNotFound``（对齐 assets 端点口径）。
+         */
+        get: operations["get_change_timeline_api_workspaces__workspace_id__changes__change_id__timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/changes/{change_id}/assets/patch-file": {
         parameters: {
             query?: never;
@@ -13844,6 +13871,25 @@ export interface components {
             state?: string | null;
             /** Raw Binding */
             raw_binding?: string | null;
+        };
+        /**
+         * ChangeTimelineRead
+         * @description 变更合成时间线聚合（GET /changes/{cid}/timeline）。
+         *
+         *     ``born_at`` 来自 requirements.md frontmatter created_at（工件元数据补位，
+         *     watcher 后拉起时事件流缺诞生事件）；events 恒 provisional（观测语义，
+         *     红线 D-004 延续：只展示不消费）。
+         */
+        ChangeTimelineRead: {
+            /** Change Key */
+            change_key: string;
+            /** Born At */
+            born_at?: string | null;
+            /** Events */
+            events?: components["schemas"]["TimelineEvent"][];
+            /** Tasks */
+            tasks?: components["schemas"]["TimelineTask"][];
+            stats?: components["schemas"]["TimelineStats"];
         };
         /**
          * ChangeUsageRead
@@ -25909,6 +25955,90 @@ export interface components {
             name?: string | null;
         };
         /**
+         * TimelineEvent
+         * @description 事件轴单条（platform_change_events 正序投影 + 提交标题增强）。
+         *
+         *     ``label`` 机器值（kind 或 detail 原文）；中文标签与图标由前端映射（对齐
+         *     CLI watcher timeline 语义）；``commit_title`` 仅 kind=commit 且 git 窗口
+         *     命中时有值（daemon 降级 → None，前端只显哈希）。
+         */
+        TimelineEvent: {
+            /** Ts */
+            ts: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /**
+             * Rule
+             * @default
+             */
+            rule: string;
+            /**
+             * Severity
+             * @default info
+             */
+            severity: string;
+            /**
+             * Provisional
+             * @default true
+             */
+            provisional: boolean;
+            /** Commit Title */
+            commit_title?: string | null;
+        };
+        /**
+         * TimelineStats
+         * @description 脚注统计（纯计算：墙钟=首末事件差，观测盲窗下不冒充完整历史）。
+         */
+        TimelineStats: {
+            /**
+             * Event Count
+             * @default 0
+             */
+            event_count: number;
+            /**
+             * Commit Count
+             * @default 0
+             */
+            commit_count: number;
+            /**
+             * Checked
+             * @default 0
+             */
+            checked: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /** Wall Clock S */
+            wall_clock_s?: number | null;
+        };
+        /**
+         * TimelineTask
+         * @description 任务面单行（tasks.md 任务行 × 提交锚推断）。
+         *
+         *     ``commit_sha`` 是「消息含 task-NN token」的最新窗口提交短哈希（CLI 同款
+         *     顺序推断口径，无匹配 → None）。
+         */
+        TimelineTask: {
+            /** Id */
+            id: string;
+            /**
+             * Checked
+             * @default false
+             */
+            checked: boolean;
+            /**
+             * Desc
+             * @default
+             */
+            desc: string;
+            /** Commit Sha */
+            commit_sha?: string | null;
+        };
+        /**
          * TokenPair
          * @description Issued on login + refresh.
          */
@@ -30765,6 +30895,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeAssetsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_change_timeline_api_workspaces__workspace_id__changes__change_id__timeline_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeTimelineRead"];
                 };
             };
             /** @description Validation Error */

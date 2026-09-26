@@ -4578,6 +4578,60 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/changes/{change_id}/timeline": {
+      "get": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Get Change Timeline",
+        "description": "变更合成时间线聚合（2026-09-26-change-real-timeline / FR-01）。\n\n复刻 CLI ``sillyspec watcher timeline`` 三源合成：事件轴\n（platform_change_events 正序 + requirements 工件 created_at 诞生锚）、\n任务面（tasks.md 行 × 提交锚推断）、脚注统计。thin 轻量变更 steps 恒空\n的主线叙事由本端点承载；events 恒 provisional（红线 D-004：只展示不\n消费）。git 提交标题经 daemon best-effort 反查，失败降级仅哈希。不存\n在/跨工作区抛 ``ChangeNotFound``（对齐 assets 端点口径）。",
+        "operationId": "get_change_timeline_api_workspaces__workspace_id__changes__change_id__timeline_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Change Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeTimelineRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/changes/{change_id}/assets/patch-file": {
       "get": {
         "tags": [
@@ -40041,6 +40095,48 @@
         "title": "ChangeTestRow",
         "description": "测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。\n\n``raw_binding``（2026-09-26-assets-test-binding-raw-text）是该行锚点在归档\nrequirements.md「AGENT:测试绑定FR-XX」槽的手写原文——test-trace 摘录会把\n``::用例`` 后缀截断成纯文件路径，原文承载用例级锚点与描述文字，聚合时\n一并带出供前端展示；槽缺失/解析失败 → None（fail-open，不影响其余字段）。"
       },
+      "ChangeTimelineRead": {
+        "properties": {
+          "change_key": {
+            "type": "string",
+            "title": "Change Key"
+          },
+          "born_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Born At"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineTask"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/TimelineStats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "change_key"
+        ],
+        "title": "ChangeTimelineRead",
+        "description": "变更合成时间线聚合（GET /changes/{cid}/timeline）。\n\n``born_at`` 来自 requirements.md frontmatter created_at（工件元数据补位，\nwatcher 后拉起时事件流缺诞生事件）；events 恒 provisional（观测语义，\n红线 D-004 延续：只展示不消费）。"
+      },
       "ChangeUsageRead": {
         "properties": {
           "started_at": {
@@ -71085,6 +71181,129 @@
         ],
         "title": "TeamWorkspaceRef",
         "description": "TeamMissionSummary.scope_workspaces 单项——scope 工作区 id+名称。\n\nql-20260825-003：范围徽标名称化（前端只拿 id 时回落 #<id8> 原始徽标）。\nname 查无 Workspace 行时为 None（前端回落 id 徽标）。"
+      },
+      "TimelineEvent": {
+        "properties": {
+          "ts": {
+            "type": "string",
+            "title": "Ts"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "rule": {
+            "type": "string",
+            "title": "Rule",
+            "default": ""
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity",
+            "default": "info"
+          },
+          "provisional": {
+            "type": "boolean",
+            "title": "Provisional",
+            "default": true
+          },
+          "commit_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ts",
+          "kind",
+          "label"
+        ],
+        "title": "TimelineEvent",
+        "description": "事件轴单条（platform_change_events 正序投影 + 提交标题增强）。\n\n``label`` 机器值（kind 或 detail 原文）；中文标签与图标由前端映射（对齐\nCLI watcher timeline 语义）；``commit_title`` 仅 kind=commit 且 git 窗口\n命中时有值（daemon 降级 → None，前端只显哈希）。"
+      },
+      "TimelineStats": {
+        "properties": {
+          "event_count": {
+            "type": "integer",
+            "title": "Event Count",
+            "default": 0
+          },
+          "commit_count": {
+            "type": "integer",
+            "title": "Commit Count",
+            "default": 0
+          },
+          "checked": {
+            "type": "integer",
+            "title": "Checked",
+            "default": 0
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "wall_clock_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Clock S"
+          }
+        },
+        "type": "object",
+        "title": "TimelineStats",
+        "description": "脚注统计（纯计算：墙钟=首末事件差，观测盲窗下不冒充完整历史）。"
+      },
+      "TimelineTask": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "checked": {
+            "type": "boolean",
+            "title": "Checked",
+            "default": false
+          },
+          "desc": {
+            "type": "string",
+            "title": "Desc",
+            "default": ""
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "TimelineTask",
+        "description": "任务面单行（tasks.md 任务行 × 提交锚推断）。\n\n``commit_sha`` 是「消息含 task-NN token」的最新窗口提交短哈希（CLI 同款\n顺序推断口径，无匹配 → None）。"
       },
       "TokenPair": {
         "properties": {

@@ -760,6 +760,22 @@ export function getChangeAssets(
   );
 }
 
+// ── 合成时间线（2026-09-26-change-real-timeline，复刻 CLI watcher timeline）──
+
+/** 合成时间线聚合响应（GET /changes/{cid}/timeline；api-types 生成版）。 */
+export type ChangeTimelineResponse = components["schemas"]["ChangeTimelineRead"];
+export type TimelineEventItem = components["schemas"]["TimelineEvent"];
+export type TimelineTaskItem = components["schemas"]["TimelineTask"];
+
+export function getChangeTimeline(
+  workspaceId: string,
+  changeId: string,
+): Promise<ChangeTimelineResponse> {
+  return apiFetch<ChangeTimelineResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/timeline`,
+  );
+}
+
 /**
  * 读某文件在 change.patch 中的 diff 切片（2026-09-25-change-detail-assets-usability /
  * FR-04）。冻结在收尾时点，与范围对账的实时窗口锚不同源；未命中/缺件由响应
