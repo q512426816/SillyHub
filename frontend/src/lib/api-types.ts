@@ -13827,6 +13827,11 @@ export interface components {
         /**
          * ChangeTestRow
          * @description 测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。
+         *
+         *     ``raw_binding``（2026-09-26-assets-test-binding-raw-text）是该行锚点在归档
+         *     requirements.md「AGENT:测试绑定FR-XX」槽的手写原文——test-trace 摘录会把
+         *     ``::用例`` 后缀截断成纯文件路径，原文承载用例级锚点与描述文字，聚合时
+         *     一并带出供前端展示；槽缺失/解析失败 → None（fail-open，不影响其余字段）。
          */
         ChangeTestRow: {
             /** Row Id */
@@ -13837,6 +13842,8 @@ export interface components {
             tests?: string[];
             /** State */
             state?: string | null;
+            /** Raw Binding */
+            raw_binding?: string | null;
         };
         /**
          * ChangeUsageRead

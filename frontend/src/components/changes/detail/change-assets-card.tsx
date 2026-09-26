@@ -241,36 +241,53 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
               {data?.test_rows?.map((r) => (
                 <div
                   key={r.row_id}
-                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0"
+                  className="border-b border-dashed py-1 text-xs last:border-b-0"
                 >
-                  <span
-                    className="shrink-0 font-mono text-[10px] text-muted-foreground"
-                    title="变更内锚点：对应本变更 requirements.md 的 FR 编号（与知识库 FR 索引条目 FR-<域>-NNN 不是同一套 id）"
-                  >
-                    变更内{" "}
-                    {r.anchor ??
-                      (r.row_id.split(":").slice(1, 3).join(":") || r.row_id)}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-left">
-                    {(r.tests ?? []).map((t, i) => (
-                      <span key={t}>
-                        {i > 0 ? <span className="text-muted-foreground/50"> ｜ </span> : null}
-                        <button
-                          type="button"
-                          data-testid={`change-assets-test-file-${t}`}
-                          onClick={() => setTestPath(t)}
-                          title={`查看测试文件内容：${t}`}
-                          className="rounded text-muted-foreground underline-offset-2 hover:text-brand-700 hover:underline"
-                        >
-                          {t}
-                        </button>
-                      </span>
-                    ))}
-                  </span>
-                  {r.state ? (
-                    <span className="shrink-0 rounded-full bg-amber-50 px-1.5 text-[10px] text-amber-700">
-                      {r.state}
+                  <div className="flex items-baseline gap-2">
+                    <span
+                      className="shrink-0 font-mono text-[10px] text-muted-foreground"
+                      title="变更内锚点：对应本变更 requirements.md 的 FR 编号（与知识库 FR 索引条目 FR-<域>-NNN 不是同一套 id）"
+                    >
+                      变更内{" "}
+                      {r.anchor ??
+                        (r.row_id.split(":").slice(1, 3).join(":") || r.row_id)}
                     </span>
+                    <span className="min-w-0 flex-1 truncate text-left">
+                      {(r.tests ?? []).map((t, i) => (
+                        <span key={t}>
+                          {i > 0 ? <span className="text-muted-foreground/50"> ｜ </span> : null}
+                          <button
+                            type="button"
+                            data-testid={`change-assets-test-file-${t}`}
+                            onClick={() => setTestPath(t)}
+                            title={`查看测试文件内容：${t}`}
+                            className="rounded text-muted-foreground underline-offset-2 hover:text-brand-700 hover:underline"
+                          >
+                            {t}
+                          </button>
+                        </span>
+                      ))}
+                    </span>
+                    {r.state ? (
+                      <span className="shrink-0 rounded-full bg-amber-50 px-1.5 text-[10px] text-amber-700">
+                        {r.state}
+                      </span>
+                    ) : null}
+                  </div>
+                  {/* 绑定原文（2026-09-26-assets-test-binding-raw-text / FR-03）：
+                      test-trace 摘录截断了 ::用例 后缀，此处显示 requirements 测试
+                      绑定槽的手写原文（用例级锚点 + 描述）；原文与 tests 列表等价
+                      （纯文件级、无附加信息）时不渲染，避免重复行。 */}
+                  {r.raw_binding &&
+                  r.raw_binding.trim() !== (r.tests ?? []).join(" ") &&
+                  !(r.tests ?? []).some((t) => r.raw_binding?.trim() === t) ? (
+                    <p
+                      data-testid={`change-assets-test-raw-${r.row_id}`}
+                      title={r.raw_binding}
+                      className="mt-0.5 truncate pl-1 text-[10px] text-muted-foreground/80"
+                    >
+                      原文：{r.raw_binding}
+                    </p>
                   ) : null}
                 </div>
               ))}

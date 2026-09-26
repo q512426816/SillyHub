@@ -117,24 +117,75 @@ def _scan_domain_files(
     return out
 
 
-def _read_test_rows(change_dir: Path) -> list[ChangeTestRow]:
-    """读 ``test-trace.json``（损坏/缺失 → 空列表，fail-open）。"""
+def _read_binding_raw_text(change_dir: Path) -> dict[str, str]:
+    """读归档 ``requirements.md`` 测试绑定槽的手写原文（按锚点）。
+
+    2026-09-26-assets-test-binding-raw-text：test-trace.json 摘录把绑定行的
+    ``::用例`` 后缀截断成纯文件路径，含用例级锚点与描述的原文在本文件——
+    匹配 ``<!--AGENT:测试绑定FR-XX …-->`` 槽注释，取其后连续非空内容行拼为
+    原文（到下一 ``<!--AGENT:`` 注释或空行为止），返回 ``{锚点: 原文}``。
+    fail-open：文件缺失/损坏/槽不存在 → 空映射（raw_binding 落 None）。
+    """
+    path = change_dir / "requirements.md"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        log.info("change.assets_binding_raw_unavailable", path=str(path), error=str(exc))
+        return {}
+
+    out: dict[str, str] = {}
+    # 行扫描：命中槽注释行后，收集紧随的非空内容行。
+    slot_re = re.compile(r"<!--AGENT:测试绑定(FR-[A-Za-z0-9-]+)\b.*?-->")
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        m = slot_re.search(lines[i])
+        if not m:
+            i += 1
+            continue
+        anchor = m.group(1)
+        content: list[str] = []
+        j = i + 1
+        while j < len(lines):
+            line = lines[j].strip()
+            if not line or line.startswith("<!--AGENT:"):
+                break
+            content.append(line)
+            j += 1
+        if content:
+            out[anchor] = " ".join(content)
+        i = j
+    return out
+
+
+def _read_test_rows(
+    change_dir: Path,
+    binding_raw: dict[str, str] | None = None,
+) -> list[ChangeTestRow]:
+    """读 ``test-trace.json``（损坏/缺失 → 空列表，fail-open）。
+
+    ``binding_raw``（可选）是 ``_read_binding_raw_text`` 的锚点→原文映射，
+    按行锚点填充 ``raw_binding``；缺锚点 → None。
+    """
     path = change_dir / "test-trace.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         log.info("change.assets_test_trace_unavailable", path=str(path), error=str(exc))
         return []
+    binding_raw = binding_raw or {}
     rows: list[ChangeTestRow] = []
     for row in data.get("rows", []) if isinstance(data, dict) else []:
         if not isinstance(row, dict) or not row.get("row_id"):
             continue
+        anchor = row.get("anchor")
         rows.append(
             ChangeTestRow(
                 row_id=str(row["row_id"]),
-                anchor=row.get("anchor"),
+                anchor=anchor,
                 tests=[str(t) for t in row.get("tests", []) if t],
                 state=row.get("state"),
+                raw_binding=binding_raw.get(str(anchor)) if anchor else None,
             )
         )
     return rows
@@ -327,8 +378,12 @@ class ChangeAssetsQueryService:
             return result
 
         change_dir = await self._resolve_change_dir(workspace_id, change)
+        # raw_binding（2026-09-26-assets-test-binding-raw-text）：绑定槽原文
+        # 先读（快照），再喂给 _read_test_rows 按锚点挂行——两读同线程串行，
+        # 归档件 append-only 无并发面，与 patch/delta 并行不冲突。
+        binding_raw = await asyncio.to_thread(_read_binding_raw_text, change_dir)
         test_rows, patch, delta = await asyncio.gather(
-            asyncio.to_thread(_read_test_rows, change_dir),
+            asyncio.to_thread(_read_test_rows, change_dir, binding_raw),
             asyncio.to_thread(_read_patch_meta, change_dir),
             asyncio.to_thread(_read_delta_meta, change_dir),
         )

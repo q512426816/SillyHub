@@ -142,6 +142,18 @@ def _seed_mirror(spec_root: Path, *, with_trace: bool = True) -> None:
     change_dir = spec_root / "changes" / "archive" / KEY
     change_dir.mkdir(parents=True)
     if with_trace:
+        # 绑定槽原文（2026-09-26-assets-test-binding-raw-text）：FR-01 槽两行内容
+        # （验证多行拼接），FR-99 槽存在但 test-trace 无该锚点（验证缺锚不炸）。
+        (change_dir / "requirements.md").write_text(
+            "# 需求\n\n## 测试绑定\n\n"
+            "<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR——例外裁决书写面 -->\n"
+            "backend/app/modules/change/tests/test_assets.py::金样本聚合 用例\n"
+            "（共享前置：seed 镜像三件）\n"
+            "\n"
+            "<!--AGENT:测试绑定FR-99 哪个测试文件/用例覆盖这条 FR——例外裁决书写面 -->\n"
+            "backend/tests/other.py::无锚点行 用例\n",
+            encoding="utf-8",
+        )
         (change_dir / "test-trace.json").write_text(
             json.dumps(
                 {
@@ -188,6 +200,13 @@ async def test_golden_aggregation(db_session, tmp_path: Path) -> None:
     assert [d.id for d in result.decisions] == ["D-001@v1"]
     assert [r.row_id for r in result.test_rows] == [f"{KEY}:task-01:acc-0"]
     assert result.test_rows[0].state == "candidate"
+    # raw_binding（2026-09-26-assets-test-binding-raw-text）：FR-01 槽两行内容拼接
+    # （行间以单空格连接——单行展示可读性取舍）。
+    assert (
+        result.test_rows[0].raw_binding
+        == "backend/app/modules/change/tests/test_assets.py::金样本聚合 用例"
+        " （共享前置：seed 镜像三件）"
+    )
     assert result.patch is None  # 无 change-patch.json → 容错 None
     assert result.delta is not None
     assert result.delta.before_lines == 2
@@ -229,6 +248,70 @@ async def test_not_found_reraises(db_session, tmp_path: Path) -> None:
     ws = await _make_ws_spec(db_session, spec_root)
     with pytest.raises(ChangeNotFound):
         await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, uuid.uuid4())
+
+
+# ── raw_binding（2026-09-26-assets-test-binding-raw-text）──────────────────
+
+
+async def test_binding_raw_missing_requirements_falls_back_none(db_session, tmp_path: Path) -> None:
+    """归档目录无 requirements.md → raw_binding=None（fail-open，既有行照常投影）。"""
+    spec_root = tmp_path / "spec-root5"
+    _seed_mirror(spec_root, with_trace=False)
+    change_dir = spec_root / "changes" / "archive" / KEY
+    # 只写 test-trace.json（requirements.md 刻意缺席）。
+    change_dir.mkdir(parents=True, exist_ok=True)
+    (change_dir / "test-trace.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "change": KEY,
+                "rows": [
+                    {
+                        "row_id": f"{KEY}:task-01:acc-0",
+                        "anchor": "FR-01",
+                        "tests": ["backend/app/x.py"],
+                        "state": "candidate",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    assert len(result.test_rows) == 1
+    assert result.test_rows[0].raw_binding is None
+    assert result.test_rows[0].tests == ["backend/app/x.py"]
+
+
+def test_read_binding_raw_text_slot_extraction(tmp_path: Path) -> None:
+    """纯函数：槽注释行后内容行提取（多行拼接）；空内容槽/无槽/缺文件容错。"""
+    from app.modules.change.assets import _read_binding_raw_text
+
+    # 缺文件 → 空映射。
+    assert _read_binding_raw_text(tmp_path) == {}
+
+    d = tmp_path / "req-case"
+    d.mkdir()
+    (d / "requirements.md").write_text(
+        "# 需求\n\n"
+        "<!--AGENT:测试绑定FR-01 提示文字 -->\n"
+        "a.py::用例一\n"
+        "（共享前置说明）\n"
+        "\n"
+        "<!--AGENT:测试绑定FR-02 提示文字 -->\n"
+        "<!--AGENT:测试绑定FR-03 提示文字 -->\n"
+        "b.py::用例三\n",
+        encoding="utf-8",
+    )
+    got = _read_binding_raw_text(d)
+    # FR-01 两行拼接；FR-02 空内容槽跳过；FR-03 正常取行。
+    assert got == {
+        "FR-01": "a.py::用例一 （共享前置说明）",
+        "FR-03": "b.py::用例三",
+    }
 
 
 # ===========================================================================

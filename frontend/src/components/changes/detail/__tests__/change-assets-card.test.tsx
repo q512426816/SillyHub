@@ -76,6 +76,9 @@ const FULL = {
       anchor: "FR-01",
       tests: ["backend/app/x.py"],
       state: "candidate",
+      // 手写绑定原文（2026-09-26-assets-test-binding-raw-text）：test-trace 摘录
+      // 截断 ::用例 后缀后，行下显示该原文（用例级锚点 + 描述）。
+      raw_binding: "backend/app/x.py::四组渲染 用例（共享 fixture FULL）",
     },
   ],
   patch: {
@@ -196,10 +199,41 @@ describe("ChangeAssetsCard", () => {
 
     expect(await screen.findByText(/变更内 FR-01/)).toBeInTheDocument();
 
+    // raw_binding 原文行显示（2026-09-26-assets-test-binding-raw-text）：
+    // 行下小字含「原文：」前缀与用例级文本，title 悬停可见全文。
+    const raw = await screen.findByTestId("change-assets-test-raw-k:task-01:acc-0");
+    expect(raw).toHaveTextContent("原文：backend/app/x.py::四组渲染 用例");
+    expect(raw).toHaveAttribute(
+      "title",
+      "backend/app/x.py::四组渲染 用例（共享 fixture FULL）",
+    );
+
     fireEvent.click(screen.getByTestId("change-assets-test-file-backend/app/x.py"));
     expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
       "backend/app/x.py",
     );
+  });
+
+  it("raw_binding 与 tests 等价（纯文件级）时不渲染原文行", async () => {
+    mockGet.mockResolvedValue({
+      ...FULL,
+      test_rows: [
+        {
+          row_id: "k:task-02:acc-0",
+          anchor: "FR-02",
+          tests: ["backend/app/y.py"],
+          state: "candidate",
+          raw_binding: "backend/app/y.py",
+        },
+      ],
+    });
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+
+    expect(await screen.findByText(/变更内 FR-02/)).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("change-assets-test-raw-k:task-02:acc-0"),
+    ).toBeNull();
   });
 
   it("归档留档：清单渲染 + 点开命中文件出 diff 弹窗（FR-04）", async () => {
