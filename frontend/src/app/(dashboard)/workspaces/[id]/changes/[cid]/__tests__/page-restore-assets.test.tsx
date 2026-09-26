@@ -203,3 +203,43 @@ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets�
     ).toBeNull();
   });
 });
+
+// ── 轻量出身标识归档存活（2026-09-26-thin-badge-survives-archive / FR-01~02）──
+describe("归档轻量出身双徽章", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getAgentStatus.mockResolvedValue(null as unknown as DispatchResponse);
+    mocks.listWorkspaceAgentSessions.mockResolvedValue(
+      [] as unknown as AgentSessionListItem[],
+    );
+    mocks.listQuicklogEntries.mockResolvedValue([]);
+  });
+
+  it("FR-01：归档轻量出身显示「轻量变更 + 已归档」双徽章", async () => {
+    renderPage(
+      makeChange({
+        current_stage: "archived",
+        status: "archived",
+        location: "archive",
+        change_type: "quick",
+        created_at: "2026-09-26T10:00:00Z",
+      }),
+    );
+    expect(await screen.findByText("已归档")).toBeInTheDocument();
+    expect(screen.getByText("轻量变更")).toBeInTheDocument();
+  });
+
+  it("FR-02：2026-09-25 前历史 quick 归档仅单「已归档」徽章（不误标）", async () => {
+    renderPage(
+      makeChange({
+        current_stage: "archived",
+        status: "archived",
+        location: "archive",
+        change_type: "quick",
+        created_at: "2026-09-20T10:00:00Z",
+      }),
+    );
+    expect(await screen.findByText("已归档")).toBeInTheDocument();
+    expect(screen.queryByText("轻量变更")).toBeNull();
+  });
+});

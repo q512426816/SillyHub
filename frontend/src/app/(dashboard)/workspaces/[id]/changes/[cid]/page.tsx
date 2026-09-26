@@ -274,9 +274,28 @@ export default function ChangeDetailPage({ params }: Props) {
             {(() => {
               const stage = change.current_stage ?? "draft";
               const statusBadge = STATUS_BADGE[stage];
+              // 轻量出身标识在归档后存活（2026-09-26-thin-badge-survives-archive
+              // / FR-01）：thin-flow「归档时自动翻转」让 stage 变 archived，出身
+              // 随徽章消失——归档态若为轻量出身（thin 写入分流 2026-09-25 上线，
+              // 此后新 quick 类型变更全部分流 thin，change_type 保留 "quick"），
+              // 在「已归档」旁并排补「轻量变更」徽章。
+              const thinBadge = STATUS_BADGE.thin;
+              const thinOrigin =
+                Boolean(thinBadge) &&
+                stage === "archived" &&
+                change.change_type === "quick" &&
+                new Date(change.created_at ?? 0) >=
+                  new Date("2026-09-25T00:00:00+08:00");
               if (statusBadge) {
                 return (
-                  <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
+                  <>
+                    {thinOrigin && thinBadge ? (
+                      <Badge variant={thinBadge.variant}>
+                        {thinBadge.label}
+                      </Badge>
+                    ) : null}
+                    <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
+                  </>
                 );
               }
               return (
