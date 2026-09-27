@@ -254,6 +254,8 @@ async def get_knowledge_stats(
 # 同 /knowledge/stats 先例）。从已同步 spec 内容根直接计算——rot 待复核/收件箱
 # 积压/伪域 auto-*，与 CLI `sillyspec knowledge digest` 同构；绑定类信号需仓
 # 工作树在场，留 CLI 侧。
+
+
 class GovernanceSignalOut(BaseModel):
     kind: str
     title: str
@@ -263,20 +265,83 @@ class GovernanceSignalOut(BaseModel):
 
 
 class GovernanceOut(BaseModel):
+    """v2（2026-09-27-governance-rpc-actions）：source 标数据源（daemon-rpc=CLI 单源
+    直采，local=回退计算）；actions_available 标本端可否执行动作（RPC 直采时 True）。"""
+
     healthy: bool
     signals: list[GovernanceSignalOut]
     totals: dict[str, int]
+    source: str = "local"
+    actions_available: bool = False
+
+
+class GovernanceActionIn(BaseModel):
+    kind: str  # repair-paths | redomain
+    from_domain: str | None = None
+    to_domain: str | None = None
+
+
+class GovernanceActionOut(BaseModel):
+    output: str
 
 
 @router.get("/knowledge/governance", response_model=GovernanceOut)
 async def get_knowledge_governance(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
+    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
 ) -> GovernanceOut:
-    """知识治理信号：三类超阈才见人（安静即健康态）——前端知识 tab 信号卡数据源。"""
+    """知识治理信号：三类超阈才见人（安静即健康态）——知识 tab 信号卡数据源。
+
+    v2 RPC 优先：用户已绑定 daemon 时直采 CLI digest（单源真相），回退本地计算。
+    """
     service = KnowledgeService(session)
-    return GovernanceOut(**await service.governance_signals(workspace_id))
+    data = await service.governance_signals(workspace_id, user_id=user.id)
+    return GovernanceOut(
+        **{k: v for k, v in data.items() if k in ("healthy", "signals", "totals", "source")},
+        actions_available=data.get("source") == "daemon-rpc",
+    )
+
+
+@router.post("/knowledge/governance/actions", response_model=GovernanceActionOut, status_code=200)
+async def post_knowledge_governance_action(
+    workspace_id: uuid.UUID,
+    payload: GovernanceActionIn,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_WRITE))],
+) -> GovernanceActionOut:
+    """治理动作执行（信号卡按钮端）：经绑定 daemon 白名单执行 CLI 机械动作。
+
+    kind 白名单在 daemon 侧硬编码（repair-paths / redomain）；未绑定/离线时
+    由 runtime 侧错误族映射（502/404/504）。
+    """
+    import re
+
+    class _GovActionInvalid(Exception):
+        pass
+
+    try:
+        if payload.kind not in ("repair-paths", "redomain"):
+            raise _GovActionInvalid(f"kind 仅支持 repair-paths / redomain（收到 {payload.kind!r}）")
+        if payload.kind == "redomain" and (
+            not payload.from_domain
+            or not payload.to_domain
+            or not re.fullmatch(r"[a-z0-9-]+", payload.from_domain)
+            or not re.fullmatch(r"[a-z0-9-]+", payload.to_domain)
+        ):
+            raise _GovActionInvalid("redomain 须配 from_domain/to_domain 且匹配 [a-z0-9-]+")
+    except _GovActionInvalid as exc:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    service = KnowledgeService(session)
+    result = await service.governance_action(
+        workspace_id,
+        user.id,
+        payload.kind,
+        {"from": payload.from_domain, "to": payload.to_domain},
+    )
+    return GovernanceActionOut(**result)
 
 
 @router.get("/knowledge/{filename:path}", response_model=KnowledgeEntry)

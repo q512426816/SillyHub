@@ -79,10 +79,12 @@ const ROOT_PATH_METACHAR_RE = /["'`$&|;<>()%^\n\r\0]/;
 function runSillyspecCmd(
   cmd: string,
   timeoutMs: number,
+  cwd?: string,
 ): Promise<{ ok: boolean; stdout: string; stderr: string; timedOut: boolean }> {
   return new Promise((resolve) => {
     const child = spawn(cmd, {
       shell: true,
+      ...(cwd ? { cwd } : {}),
       detached: process.platform !== 'win32',
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -209,6 +211,7 @@ export class RuntimeHandler {
       sillyspecCmd?: (
         cmd: string,
         timeoutMs: number,
+        cwd?: string,
       ) => Promise<{ ok: boolean; stdout: string; stderr: string; timedOut: boolean }>;
       /** 允许读的根目录白名单来源（design §6 第二道校验消费）。 */
       rootsProvider?: () => string[];
@@ -371,3 +374,79 @@ export class RuntimeHandler {
 
 /** 供测试/其他模块复用的常量导出；RpcError 转发自 ws-client（单一类型源）。 */
 export { ARTIFACT_MAX_BYTES, SILLYSPEC_TIMEOUT_MS, RpcError };
+
+// ── knowledge 治理 RPC（2026-09-27-governance-rpc-actions，三层治理 v2 ①②）────
+// digest 直采：收敛平台/CLI 双出口为单源（CLI 为真相——绑定信号与基线消音只在仓工作
+// 树在场时可得）；action 回传：白名单机械动作（repair-paths / redomain），平台信号卡
+// 按钮的执行端。安全：域名参数过 [a-z0-9-]+ 元字符防线（ROOT_PATH_METACHAR_RE 同款
+// 理由——spawn shell:true 命令串拼接的注入面）；kind 白名单硬编码。
+const KNOWLEDGE_DOMAIN_RE = /^[a-z0-9-]+$/;
+const KNOWLEDGE_ACTION_KINDS = new Set(['repair-paths', 'redomain']);
+
+export class KnowledgeGovernanceHandler {
+  constructor(
+    private readonly opts: {
+      sillyspecCmd?: (cmd: string, timeoutMs: number, cwd?: string) => Promise<{
+        ok: boolean; stdout: string; stderr: string; timedOut: boolean;
+      }>;
+    } = {},
+  ) {}
+
+  /** knowledge.digest：cwd=仓库根跑 `sillyspec knowledge digest --json`，stdout JSON 透传。 */
+  async digest(workspaceId: string, rootPath?: string): Promise<{ digest: unknown }> {
+    // rootPath 已由 daemon.ts 侧 normalizeRootPathParam 归一；元字符黑名单防线
+    //（spawn shell:true 命令不拼 root——cwd 传递，但路径本体仍过黑名单防异常值）。
+    const root = rootPath ?? '';
+    if (/[<>|&;$`"']/.test(root)) {
+      throw new RpcError('forbidden', `root_path suspicious: ${JSON.stringify(root)}`);
+    }
+    const cmd = 'sillyspec knowledge digest --json';
+    const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
+    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root || undefined);
+    if (!r.ok) {
+      if (r.stdout.includes('knowledge <') || r.stdout.includes('unknown_subcommand')) {
+        throw new RpcError('method_not_found', 'sillyspec knowledge digest not supported; upgrade sillyspec');
+      }
+      if (r.timedOut) throw new RpcError('timeout', `digest timed out (${SILLYSPEC_TIMEOUT_MS}ms)`);
+      throw new RpcError('internal', `digest failed: ${`${r.stdout}\n${r.stderr}`.trim().slice(0, 500)}`);
+    }
+    try {
+      const j = JSON.parse(r.stdout);
+      if (j && j.ok === true) return { digest: j };
+      throw new Error('ok!=true');
+    } catch {
+      throw new RpcError('internal', 'digest output is not valid CLI JSON envelope');
+    }
+  }
+
+  /** knowledge.action：白名单机械动作执行（repair-paths --write / redomain --write）。 */
+  async action(
+    workspaceId: string,
+    kind: string,
+    params: { from?: string; to?: string },
+    rootPath?: string,
+  ): Promise<{ output: string }> {
+    if (!KNOWLEDGE_ACTION_KINDS.has(kind)) {
+      throw new RpcError('forbidden', `action kind not allowed: ${JSON.stringify(kind)}`);
+    }
+    let cmd: string;
+    if (kind === 'repair-paths') {
+      cmd = 'sillyspec tests repair-paths --write';
+    } else {
+      const from = String(params.from ?? '');
+      const to = String(params.to ?? '');
+      if (!KNOWLEDGE_DOMAIN_RE.test(from) || !KNOWLEDGE_DOMAIN_RE.test(to)) {
+        throw new RpcError('forbidden', `redomain domains must match [a-z0-9-]+ (from=${JSON.stringify(from)} to=${JSON.stringify(to)})`);
+      }
+      cmd = `sillyspec tests --redomain --from ${from} --to ${to} --write`;
+    }
+    const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
+    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, rootPath || undefined);
+    const output = `${r.stdout}\n${r.stderr}`.trim().slice(-2000);
+    if (!r.ok) {
+      if (r.timedOut) throw new RpcError('timeout', `action timed out (${SILLYSPEC_TIMEOUT_MS}ms)`);
+      throw new RpcError('internal', `action failed: ${output}`);
+    }
+    return { output };
+  }
+}

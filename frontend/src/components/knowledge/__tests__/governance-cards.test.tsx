@@ -4,15 +4,16 @@
  * 加载/错误轻量态。数据链 getKnowledgeGovernance mock（useQuery 消费面契约）。
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { GovernanceCards } from "@/components/knowledge/governance-cards";
 
 // 惯例（仿 distill-task-bar.test.tsx）：vi.hoisted + importActual 部分 mock
-const { mocked } = vi.hoisted(() => ({ mocked: vi.fn() }));
+const { mocked, actionMocked } = vi.hoisted(() => ({ mocked: vi.fn(), actionMocked: vi.fn() }));
 vi.mock("@/lib/knowledge", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/knowledge")>()),
   getKnowledgeGovernance: mocked,
+  postKnowledgeGovernanceAction: actionMocked,
 }));
 
 function renderCards() {
@@ -74,4 +75,37 @@ it("请求失败：轻量降态不渲染卡", async () => {
   mocked.mockRejectedValue(new Error("boom"));
   renderCards();
   await waitFor(() => expect(screen.getByTestId("governance-cards").textContent).toContain("暂不可用"));
+});
+
+
+it("v2：actions_available 时伪域卡渲染迁移按钮（输入目标域+触发 mutation），local 模式隐藏", async () => {
+  mocked.mockResolvedValue({
+    healthy: false,
+    signals: [
+      { kind: "pseudo-domain", title: "伪域在库", count: 14, detail: "auto-backend 14", suggestion: "迁移" },
+      { kind: "binding-unresolved", title: "坏绑定", count: 1, detail: "FR-cli-entry-091", suggestion: "repair" },
+    ],
+    totals: { pseudo: 14 },
+    source: "daemon-rpc",
+    actions_available: true,
+  });
+  renderCards();
+  const input = await screen.findByTestId("redomain-target");
+  fireEvent.change(input, { target: { value: "platform-sync" } });
+  const btn = screen.getAllByRole("button", { name: /迁移 auto-backend/ })[0];
+  fireEvent.click(btn as HTMLElement);
+  await waitFor(() => expect(actionMocked).toHaveBeenCalledWith("ws-1", { kind: "redomain", from_domain: "auto-backend", to_domain: "platform-sync" }));
+});
+
+it("v2：local 模式（actions_available=false）不渲染动作按钮", async () => {
+  mocked.mockResolvedValue({
+    healthy: false,
+    signals: [{ kind: "pseudo-domain", title: "伪域", count: 3, detail: "auto-x 3", suggestion: "迁移" }],
+    totals: { pseudo: 3 },
+    source: "local",
+    actions_available: false,
+  });
+  renderCards();
+  await waitFor(() => expect(screen.getByTestId("governance-card-pseudo-domain")).toBeInTheDocument());
+  expect(screen.queryByTestId("governance-actions-pseudo-domain")).toBeNull();
 });

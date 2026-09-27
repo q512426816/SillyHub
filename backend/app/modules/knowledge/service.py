@@ -113,10 +113,68 @@ class KnowledgeService:
     # 积压/伪域 auto-*），与 CLI 侧 `sillyspec knowledge digest` 同构口径。绑定类信号
     # 需仓工作树在场做文件存在性校验，留 CLI 侧（平台 spec 树无源码）。unmapped 大池
     # 无 fr_unmapped_baseline 可读（local.yaml 不入同步集），只进 totals 不当警报。
-    async def governance_signals(self, workspace_id: uuid.UUID) -> dict:
+    async def governance_signals(
+        self, workspace_id: uuid.UUID, user_id: uuid.UUID | None = None
+    ) -> dict:
+        """治理信号（v2 起 RPC 优先，2026-09-27-governance-rpc-actions）。
+
+        优先经绑定 daemon 直采 ``sillyspec knowledge digest --json``——CLI 为单源
+        真相（绑定信号/基线消音只在仓工作树在场可得，平台本地计算结构性缺失）；
+        daemon 离线/超时/未注册方法/未绑定一律回退本地计算（既有函数保留为回退，
+        degrade 语义与 runtime-live 同族：读点失效不 502，页面保持可用）。
+        """
+        if user_id is not None:
+            try:
+                from app.modules.daemon.ws_hub import get_daemon_ws_hub
+                from app.modules.runtime.service import RuntimeLiveService
+
+                rt = RuntimeLiveService(self._session)
+                daemon_id, root_path = await rt._resolve_binding(workspace_id, user_id)
+                hub = get_daemon_ws_hub()
+                resp = await hub.send_rpc(
+                    daemon_id,
+                    "knowledge.digest",
+                    {"workspace_id": str(workspace_id), "root_path": root_path},
+                    timeout=60,
+                )
+                digest = resp.get("digest") if isinstance(resp, dict) else None
+                if isinstance(digest, dict) and "signals" in digest and "totals" in digest:
+                    digest = dict(digest)
+                    digest["source"] = "daemon-rpc"
+                    return digest
+            except Exception:
+                pass  # 回退本地计算（离线/超时/未绑定/未注册——degrade 不阻断）
         workspace = await self._ws_service.get(workspace_id)
         root = await self._spec_content_root(workspace)
-        return await asyncio.to_thread(_compute_governance_signals, root)
+        result = await asyncio.to_thread(_compute_governance_signals, root)
+        result["source"] = "local"
+        return result
+
+    async def governance_action(
+        self,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+        kind: str,
+        params: dict,
+    ) -> dict:
+        """治理动作执行（v2 ②：信号卡按钮 → daemon knowledge.action 白名单执行）。"""
+        from app.modules.runtime.service import RuntimeLiveService
+
+        rt = RuntimeLiveService(self._session)
+        daemon_id, root_path = await rt._resolve_binding(workspace_id, user_id)
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+        hub = get_daemon_ws_hub()
+        rpc_params: dict = {
+            "workspace_id": str(workspace_id),
+            "root_path": root_path,
+            "kind": kind,
+        }
+        for key in ("from", "to"):
+            if isinstance(params.get(key), str):
+                rpc_params[key] = params[key]
+        resp = await hub.send_rpc(daemon_id, "knowledge.action", rpc_params, timeout=120)
+        return {"output": (resp or {}).get("output", "") if isinstance(resp, dict) else ""}
 
     async def list_quicklog(self, workspace_id: uuid.UUID) -> QuicklogList:
         workspace = await self._ws_service.get(workspace_id)

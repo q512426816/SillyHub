@@ -190,7 +190,7 @@ import {
   resolveSpecDir,
   hasUnsyncedLocalChanges,
 } from './spec-sync.js';
-import { RuntimeHandler, normalizeRootPathParam } from './runtime-handler.js';
+import { RuntimeHandler, KnowledgeGovernanceHandler, normalizeRootPathParam } from './runtime-handler.js';
 // task-03（2026-09-14-session-thinking-level / FR-02）：平台七档词表校验单源
 //（session_set_thinking_level handler 层入参校验，照 backend 校验同词表镜像）。
 import { isValidPlatformLevel } from './interactive/thinking-levels.js';
@@ -1861,6 +1861,9 @@ export class Daemon {
   private readonly _runtimeHandler = new RuntimeHandler({
     rootsProvider: () => this._effectiveAllowedRoots(),
   });
+
+  /** knowledge 治理 RPC handler（2026-09-27-governance-rpc-actions：digest 直采 + action 白名单）。 */
+  private readonly _knowledgeGovHandler = new KnowledgeGovernanceHandler();
 
   /** 运行标志，三循环 while 条件。 */
   private _running = false;
@@ -7038,6 +7041,25 @@ export class Daemon {
       const filename = typeof params.filename === 'string' ? params.filename : '';
       const rootPath = normalizeRootPathParam(params.root_path);
       return handler.readArtifact(workspaceId, filename, rootPath);
+    });
+
+    // ── knowledge 治理 RPC（2026-09-27-governance-rpc-actions）────────────────
+    // digest 直采（单源收敛：CLI 为真相——绑定信号/基线消音只在仓工作树在场可得）
+    // + action 白名单执行（平台信号卡按钮端）。params 归一与 runtime.* 同款；
+    // handler 抛 RpcError 由 _dispatchRpc 原样回填。
+    const gov = this._knowledgeGovHandler;
+    ws.registerRpcHandler('knowledge.digest', async (params) => {
+      const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      const rootPath = normalizeRootPathParam(params.root_path);
+      return gov.digest(workspaceId, rootPath);
+    });
+    ws.registerRpcHandler('knowledge.action', async (params) => {
+      const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      const kind = typeof params.kind === 'string' ? params.kind : '';
+      const from = typeof params.from === 'string' ? params.from : undefined;
+      const to = typeof params.to === 'string' ? params.to : undefined;
+      const rootPath = normalizeRootPathParam(params.root_path);
+      return gov.action(workspaceId, kind, { from, to }, rootPath);
     });
   }
 

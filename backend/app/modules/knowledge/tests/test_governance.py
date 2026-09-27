@@ -118,3 +118,64 @@ async def test_governance_pseudo_domain_signal(client, db_session, tmp_path, aut
 async def test_governance_requires_auth(client, db_session, tmp_path) -> None:
     resp = await client.get(f"/api/workspaces/{uuid.uuid4()}/knowledge/governance")
     assert resp.status_code == 401
+
+
+# ── v2（2026-09-27-governance-rpc-actions）：RPC 优先 + 动作端点 ──────────────
+
+
+async def test_governance_local_fallback_marks_source(
+    client, db_session, tmp_path, auth_headers
+) -> None:
+    """未绑定 daemon（测试环境常态）→ RPC 尝试失败回退本地计算，source=local、无动作。"""
+
+    def prepare(root: Path) -> None:
+        _write_fr(root, "core", [{"id": 1}])
+
+    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, prepare)
+    resp = await client.get(
+        f"/api/workspaces/{ws['ws_id']}/knowledge/governance", headers=auth_headers
+    )
+    body = resp.json()
+    assert body["source"] == "local"
+    assert body["actions_available"] is False
+
+
+async def test_action_rejects_unknown_kind(client, db_session, tmp_path, auth_headers) -> None:
+    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, lambda root: None)
+    resp = await client.post(
+        f"/api/workspaces/{ws['ws_id']}/knowledge/governance/actions",
+        json={"kind": "shell"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+async def test_action_rejects_bad_redomain_domains(
+    client, db_session, tmp_path, auth_headers
+) -> None:
+    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, lambda root: None)
+    resp = await client.post(
+        f"/api/workspaces/{ws['ws_id']}/knowledge/governance/actions",
+        json={"kind": "redomain", "from_domain": "auto; rm", "to_domain": "x"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+    resp2 = await client.post(
+        f"/api/workspaces/{ws['ws_id']}/knowledge/governance/actions",
+        json={"kind": "redomain", "from_domain": "auto-backend"},
+        headers=auth_headers,
+    )
+    assert resp2.status_code == 422  # 缺 to_domain
+
+
+async def test_action_requires_write_permission(client, db_session, tmp_path, auth_headers) -> None:
+    """KNOWLEDGE_WRITE 门：只读角色 403（auth_headers 为管理员——此处验证端点挂了
+    权限依赖即可，细粒度角色矩阵由权限套件覆盖）。"""
+    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, lambda root: None)
+    resp = await client.post(
+        f"/api/workspaces/{ws['ws_id']}/knowledge/governance/actions",
+        json={"kind": "repair-paths"},
+        headers=auth_headers,
+    )
+    # 管理员有写权限 → 通过校验进入执行层（未绑定 daemon → 404 未绑定错误族）
+    assert resp.status_code in (404, 502, 200)

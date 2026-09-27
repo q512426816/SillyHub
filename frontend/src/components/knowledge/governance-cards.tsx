@@ -8,13 +8,17 @@
  */
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Inbox, Map, Stethoscope } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, Inbox, Map, Stethoscope, Wrench } from "lucide-react";
+import { useState } from "react";
 
 import {
   getKnowledgeGovernance,
+  postKnowledgeGovernanceAction,
+  type GovernanceOut,
   type GovernanceSignal,
 } from "@/lib/knowledge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export const governanceQueryKey = (workspaceId: string) => [
@@ -36,9 +40,33 @@ const SIGNAL_LABELS: Record<string, string> = {
   "pseudo-domain": "伪域在库",
 };
 
-function SignalCard({ signal }: { signal: GovernanceSignal }) {
+function SignalCard({
+  signal,
+  workspaceId,
+  actionsAvailable,
+}: {
+  signal: GovernanceSignal;
+  workspaceId: string;
+  actionsAvailable: boolean;
+}) {
   const Icon = SIGNAL_ICONS[signal.kind] ?? AlertTriangle;
   const label = SIGNAL_LABELS[signal.kind] ?? signal.kind;
+  const qc = useQueryClient();
+  const [target, setTarget] = useState("");
+  const [result, setResult] = useState<string | null>(null);
+  const action = useMutation({
+    mutationFn: (body: { kind: "repair-paths" | "redomain"; from_domain?: string; to_domain?: string }) =>
+      postKnowledgeGovernanceAction(workspaceId, body),
+    onSuccess: (r) => {
+      setResult(r.output?.slice(-200) || "已完成");
+      void qc.invalidateQueries({ queryKey: governanceQueryKey(workspaceId) });
+    },
+    onError: (e: Error) => setResult(`失败：${e.message}`),
+  });
+
+  const actionable = actionsAvailable && (signal.kind === "binding-unresolved" || signal.kind === "pseudo-domain");
+  const firstDomain = signal.kind === "pseudo-domain" ? (signal.detail.split(" ")[0] ?? "") : "";
+
   return (
     <div
       data-testid={`governance-card-${signal.kind}`}
@@ -57,6 +85,36 @@ function SignalCard({ signal }: { signal: GovernanceSignal }) {
       <p className="mt-1.5 text-xs text-muted-foreground">
         处置：<span className="font-mono">{signal.suggestion}</span>
       </p>
+      {actionable ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid={`governance-actions-${signal.kind}`}>
+          {signal.kind === "binding-unresolved" ? (
+            <Button size="sm" variant="outline" disabled={action.isPending} onClick={() => action.mutate({ kind: "repair-paths" })}>
+              <Wrench className="mr-1 size-3" />
+              {action.isPending ? "执行中…" : "执行 repair"}
+            </Button>
+          ) : (
+            <>
+              <input
+                data-testid="redomain-target"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                placeholder="目标域（如 platform-sync）"
+                className="h-7 w-44 rounded border bg-background px-2 text-xs"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={action.isPending || !/^[a-z0-9-]+$/.test(target)}
+                onClick={() => action.mutate({ kind: "redomain", from_domain: firstDomain, to_domain: target })}
+              >
+                <Map className="mr-1 size-3" />
+                {action.isPending ? "迁移中…" : `迁移 ${firstDomain} → ${target || "…"}`}
+              </Button>
+            </>
+          )}
+        </div>
+      ) : null}
+      {result ? <p className="mt-1.5 font-mono text-[11px] text-muted-foreground" data-testid="governance-action-result">{result}</p> : null}
     </div>
   );
 }
@@ -108,7 +166,7 @@ export function GovernanceCards({ workspaceId }: { workspaceId: string }) {
       </p>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {data.signals.map((s) => (
-          <SignalCard key={s.kind} signal={s} />
+          <SignalCard key={s.kind} signal={s} workspaceId={workspaceId} actionsAvailable={data.actions_available ?? false} />
         ))}
       </div>
     </section>

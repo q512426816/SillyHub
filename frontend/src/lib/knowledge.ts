@@ -304,6 +304,9 @@ export type GovernanceOut = {
   healthy: boolean;
   signals: GovernanceSignal[];
   totals: Record<string, number>;
+  /** v2（2026-09-27-governance-rpc-actions）：daemon-rpc=CLI 单源直采，local=回退计算 */
+  source?: string;
+  actions_available?: boolean;
 };
 
 export async function getKnowledgeGovernance(
@@ -311,5 +314,21 @@ export async function getKnowledgeGovernance(
 ): Promise<GovernanceOut> {
   return apiFetch<GovernanceOut>(
     `/api/workspaces/${workspaceId}/knowledge/governance`,
+  );
+}
+
+/**
+ * 治理动作执行（v2 ②，2026-09-27-governance-rpc-actions）：信号卡按钮 →
+ * POST /knowledge/governance/actions → daemon 白名单执行（repair-paths / redomain）。
+ */
+export type GovernanceActionKind = "repair-paths" | "redomain";
+
+export async function postKnowledgeGovernanceAction(
+  workspaceId: string,
+  body: { kind: GovernanceActionKind; from_domain?: string; to_domain?: string },
+): Promise<{ output: string }> {
+  return apiFetch<{ output: string }>(
+    `/api/workspaces/${workspaceId}/knowledge/governance/actions`,
+    { method: "POST", json: body },
   );
 }
