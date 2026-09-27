@@ -73,7 +73,7 @@ created_at: 2026-09-22T17:32:13.971Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-tombstone-heal-archive:flow:FR-03
-  tests: app/modules/platform_sync/tests/test_change_deleted_guard.py
+  tests: backend/app/modules/platform_sync/tests/test_change_deleted_guard.py
   reason: spec
   state: candidate
   discovery: machine

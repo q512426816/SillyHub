@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-session-portal-ia-restructure",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-27-session-portal-ia-restructure:flow:FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.ts",
+        "frontend/src/components/daemon/__tests__/session-usage-panel-mount.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-session-portal-ia-restructure"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-27-session-portal-ia-restructure:flow:FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-session-portal-ia-restructure"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-27-session-portal-ia-restructure:flow:FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-session-portal-ia-restructure"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-27-session-portal-ia-restructure:flow:FR-05",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-session-portal-ia-restructure"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-09-27-session-portal-ia-restructure:flow:FR-06",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.ts",
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-session-portal-ia-restructure"
+    }
+  ]
+}

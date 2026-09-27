@@ -81,3 +81,135 @@
 摘要：（无场景名）
 全文：.sillyspec/changes/archive/2026-09-11-skills-central-library/requirements.md#FR-04
 最近确认：26daa9e63
+
+## FR-app-pages-010 功能零丢失对照验收
+变更：2026-09-27-session-portal-ia-restructure
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 变更目录内存档 `feature-inventory.md`（三栏全量功能清点：左栏筛选/群聊/树/批量/行操作、中栏头部/横幅/消息流/段卡/队列/定时/团队；When 重组实现完成后逐项对照该清单；Then 每个功能点仍可达（位置/触发方式允许变化，功能语义与数据口径不变），无任何功能被删除或语义缩水
+全文：.sillyspec/changes/archive/2026-09-27-session-portal-ia-restructure/requirements.md#FR-01
+最近确认：e4e593b4cc5ba221ebd773df5105beb4adbd4d83
+
+## FR-app-pages-011 中栏右列升级为会话详情侧栏（三模式）
+变更：2026-09-27-session-portal-ia-restructure
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 桌面端单聊会话（SessionPanel page 模式）打开；When 用户点击头部「详情」开关或子代理卡片/目录；Then 右列在「收起 / 详情 / 子代理」三模式间切换：详情模式含三组——概览（状态/#id 点击复制/机器/工作区/共享徽标/引擎供应商/模型/档案/创建人/轮次/
+全文：.sillyspec/changes/archive/2026-09-27-session-portal-ia-restructure/requirements.md#FR-02
+最近确认：e4e593b4cc5ba221ebd773df5105beb4adbd4d83
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-27-session-portal-ia-restructure:flow:FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.ts | frontend/src/components/daemon/__tests__/session-usage-panel-mount.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-27-session-portal-ia-restructure
+  status: active
+
+## FR-app-pages-012 中栏头部两层化降噪
+变更：2026-09-27-session-portal-ia-restructure
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 桌面端单聊会话打开；When 渲染面板头部；Then 主行仅保留：标题 + 状态徽标（StateLabel 语义）+ 视图切换（对话/进度）+ 后台目录 + 子代理目录 + 详情开关 + 搜索 + 打断；原头部一行
+全文：.sillyspec/changes/archive/2026-09-27-session-portal-ia-restructure/requirements.md#FR-03
+最近确认：e4e593b4cc5ba221ebd773df5105beb4adbd4d83
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-27-session-portal-ia-restructure:flow:FR-03
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-27-session-portal-ia-restructure
+  status: active
+
+## FR-app-pages-013 中栏底部堆叠收敛
+变更：2026-09-27-session-portal-ia-restructure
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 桌面端单聊会话且右列详情可用；When 渲染消息流与输入区；Then 桌面端消息流上方的 SessionUsageBar 与 TaskExecutionPanel 收纳进右列详情模式（原位置不再渲染）；AgentLog 折叠栏、后
+全文：.sillyspec/changes/archive/2026-09-27-session-portal-ia-restructure/requirements.md#FR-04
+最近确认：e4e593b4cc5ba221ebd773df5105beb4adbd4d83
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-27-session-portal-ia-restructure:flow:FR-04
+  tests: frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-27-session-portal-ia-restructure
+  status: active
+
+## FR-app-pages-014 左栏筛选区紧凑化
+变更：2026-09-27-session-portal-ia-restructure
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 会话列表左栏渲染；When 筛选区布局生效；Then 搜索框与状态下拉并排一行，机器/智能体（及 workspace scope 的「关联」）下拉紧凑排布（flex-wrap 两行内），筛选联动（机器→智能体级联、
+全文：.sillyspec/changes/archive/2026-09-27-session-portal-ia-restructure/requirements.md#FR-05
+最近确认：e4e593b4cc5ba221ebd773df5105beb4adbd4d83
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-27-session-portal-ia-restructure:flow:FR-05
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-27-session-portal-ia-restructure
+  status: active
+
+## FR-app-pages-015 行为零改动红线
+变更：2026-09-27-session-portal-ia-restructure
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 本变更 diff；When 逐行审查；Then 状态机/数据流/轮询/SSE/WS 消息处理/hooks/回调签名零改动（仅 render 组织层与样式类）；深链 ?session=/?new=、四分支（群聊
+全文：.sillyspec/changes/archive/2026-09-27-session-portal-ia-restructure/requirements.md#FR-06
+最近确认：e4e593b4cc5ba221ebd773df5105beb4adbd4d83
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-27-session-portal-ia-restructure:flow:FR-06
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.ts | frontend/src/components/sessions/__tests__/sessions-portal.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-27-session-portal-ia-restructure
+  status: active
+
+## FR-app-pages-016 样式合规
+变更：2026-09-27-session-portal-ia-restructure
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 三主题（blue/ai-native/dark）任意切换；When 渲染会话门户；Then 新增/改动代码零硬编码色值（全走 themes.ts token/CSS var/brand-* 语义阶），正文可读性下限 12px（mono 元数据 11px
+全文：.sillyspec/changes/archive/2026-09-27-session-portal-ia-restructure/requirements.md#FR-07
+最近确认：e4e593b4cc5ba221ebd773df5105beb4adbd4d83
+
+## FR-app-pages-017 质量门
+变更：2026-09-27-session-portal-ia-restructure
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 实现完成；When 跑相关测试与静态检查；Then 涉及文件既有测试（改断言不改意图）全绿；tsc 零新增错误；eslint 零新增
+全文：.sillyspec/changes/archive/2026-09-27-session-portal-ia-restructure/requirements.md#FR-08
+最近确认：e4e593b4cc5ba221ebd773df5105beb4adbd4d83

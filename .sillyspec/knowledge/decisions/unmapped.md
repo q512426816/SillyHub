@@ -1143,3 +1143,94 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：8fa02468648621a9d4bf8a745cca6b1a5a895f3d
 理由：最大风险：排在长升级链（npm 安装分钟级）后的命令可能撞前端 150s 回显恢复窗（ECHO_TIMEOUT_MS）——前端恢复按钮可重试，重复排队条目执行幂等裁决（重复 resolve 同一 change 无害，冲突已消解则 no-op），且冲突计数 ≤75s 采集刷新自愈；不设队列深度上限（单管理员洪水不存在，设上限反而重新发明忙拒）。试过放弃的方案：①保留忙拒+前端自动重试——复杂度推给两端且用户仍见失败红字，与本次反馈直接冲突；②升级完成事件化（await 一次性 promise）——升级链状态机（_update running/deferred→终态+10min 展示窗）无单点完成信号，deferred 复查本身已是 1s 轮询实现，事件化需动 manager 状态机超出薄改范围；出队时 1s 轮询与其等价且零侵入。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-26-probe-concurrent-rpc
+锚点：未记录
+最近确认：43ee45c1ffc967e605e6a35482f84318e65d9e3d
+理由：最大风险：把 3s 预算设得比真实慢链路还短——daemon 在线但公网高抖动（>3s）时探测会从「慢但有真答」变成「unknown」。权衡依据：探测是三态 UI 展示（unknown 时界面照常显示「未知」并维持现状路径，§5.D），拿不到真答的代价只是显示降级，而 30s 预算下整批探测拖分钟级的代价是用户可感的全局卡顿；且单次 stat 本地执行毫秒级，3s 已含 ~3 个数量级的网络余量。 试过但放弃：给 git_probe 结果加 TTL 缓存（比如 30s 内复用）——被 R-02「每次调用实时探测不缓存」明确否决，且缓存会让「daemon 刚下线/刚变 git 态」的展示滞后，违背探测语义，放弃。 次要风险：gather 不开 return_exceptions，若未来有 git_probe 实现抛异常，并发版会在首个异常时与其余在飞任务一起快速失败——与原串行版「首个异常中断」语义一致，不视为回归。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-26-migration-chain-dedupe
+锚点：未记录
+最近确认：a82bf152600857f3cc6980934b6a5a296fda5bdb
+理由：最大风险：重写 040000 DDL 造成「文件内容与历史已应用效果不一致」的审计歧义——某库记号 040000 但表结构可能是旧版也可能是（未来的）新版，只能靠矫正迁移的存在与 information_schema 探测兜底对齐。缓解：040000 docstring 显式记重写历史与适用边界；矫正迁移 234000 紧随其后，任何路径到达 head 后表结构唯一确定（幂等探测保证收敛，与起点结构无关）。 试过但放弃：①给 063000/040000 加「表存在则跳过」幂等 guard 保留双文件——放弃：全新库仍按图序执行两份建表逻辑，且两条分支结构不一致（stage 列有无），guard 掩盖而非消除分叉，链图审计面双份；②ts 转 ISO 用 ts::text——放弃：输出「2026-09-25 06:04:02.526+00」（空格分隔、+00 后缀）与 service 层写入的 ISO 8601 格式不一致，混合格式破坏字典序比较一致性，用 to_char 统一 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'。 次要风险：stage 历史值丢弃（119 行）——观测数据无消费方，接受；severity NULL→'info'（157 行）与 rule NULL→'' 的回填值是语义近似（历史写入端未归一），展示层无差别。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-daemon-queue-stop-gaps
+锚点：未记录
+最近确认：3942b156fd3a9feb541d81daccbc763a2f5cad94
+理由：最大风险：预算 5 分钟是经验值——合法但极慢的升级链（网络差时 npm 拉包+校验）超 5 分钟会让本可成功的命令记 failed；代价有限（失败终态可重试、命令幂等、前端恢复按钮在），优于无界楔死。其次：超时后升级仍在跑，后续命令继续排队各等 5 分钟逐条 failed——「逐条显式失败」仍是活性态（链尾持续推进），非楔死。试过放弃的方案：①「排除 deferred 态出等待」——deferred 任意时刻可翻 running，会在 npm 半安装窗口并发 spawn CLI，违背安全动机，放弃；②「等待超时后照常 exec」——同半安装风险，放弃；③「给 deferred 复查本身加上限」——改 manager 状态机越界本变更范围（deferred 无限推迟对升级链自身是合理语义），放弃。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-visual-gap-fix
+锚点：未记录
+最近确认：cf8d14e36eab43d5b4c5b9ab1d1f27620f81d1bc
+理由：最大风险：两栏 grid 中 ChangesOverviewCard（内部自带高度行为）在窄栏挤压下的布局回归——已跑概览 23 用例 + 卡片 19 用例全绿对冲。试过放弃：把 WorkspaceConfigCard 也收进右栏——放弃（ql-20260821-003 用户裁决全宽展示，不推翻既有用户决策）。会话门户左栏深改（3665 行条目重构）放弃——风险收益比差，已有 11px/brand 阶打底，留待专项。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-audit-followup-hardening
+锚点：未记录
+最近确认：40d8eff338498f37fe88f548e325ba2ff9925c94
+理由：最大风险：合法但形态特殊的 doc 值（如含反斜杠的合法相对路径）被误判越界丢弃 chip——影响面仅展示降级（名回退 id），不丢模块触达本身。试过放弃：①「resolve+is_relative_to 白名单」——Windows 大小写/符号链接语义跨三平台分歧大（规则 13），纯词法判定更可移植；②「doc 保留仅去 h1 读取」——越界路径仍外发给前端 chip 可点击，留下二次面；③「同步修 explorer 预览侧」——explorer 自有寻径防护（前端传参仅展示路径），无需重复设防。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-visual-align-2
+锚点：未记录
+最近确认：05218185395f1b6b94a0557de0af22ab7fae78d7
+理由：最大风险：[&>*] 子选择器依赖子卡 SectionCard 边框类形态，子卡改版式会失效——已用详情域 134 用例对冲。放弃：时间线组件重写——核对发现其已是竖线节点形态（pl-[26px]+before 竖线），无需重写；头像完整用户名展示——原型即 20px 首字符，title 携全名。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-hover-polish
+锚点：未记录
+最近确认：05218185395f1b6b94a0557de0af22ab7fae78d7
+理由：最大风险：muted 实色在 dark 主题的悬浮对比（dark muted=zinc-700 深灰，实色悬浮为深一档——与原型 canvas 语义一致方向）；已放弃：自定义 canvas 色阶 token——三主题 muted 即语义等价物，不新增阶。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-prototype-pipeline
+锚点：未记录
+最近确认：ca9f19016291ccc7f363d1d03fe4eb84f828bcf9
+理由：最大风险：Tailwind 全量 CSS 使每产物 ~150KB、七文件合计 ~1MB 入仓——接受（纯文本 git 增量压缩后很小；后续可加按视图 content 裁剪优化，非本变更范围）。次风险：视图静态渲染无水合，交互仅 vanilla JS 子集（主题切换/tab 过滤）——规约中明示，需要完整交互的原型走 dev 预览路由（后续变更）。 试过放弃：① mermaid 文本方案——渲染产物需浏览器运行时（内联 mermaid.js ~2MB/文件）或引入 puppeteer 重依赖，放弃；② 复用 @xyflow/react——交互式定位编辑超流程「描述类」原型所需，静态渲染下自动布局不稳定，放弃。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-thin-display-fix
+锚点：未记录
+最近确认：4d340be72fb09d9a120c2f65a6416da45f4f293e
+理由：最大风险：steps 兜底判定对「无 steps 记录的标准变更」误判——判定要求 steps.length>0，空 steps 不命中（标准变更 active 期必有步骤记录，归档标准变更 steps 含四阶段痕迹已验证 observation 样本）。钉子测试暴露并修正了 quick 时间窗缺失（历史 quick 误标）；放弃：列表行归档 flow-thin 出身标识——列表投影无 steps/change created_at 有但 change_type=feature 无信号，需后端 is_thin 投影（已列遗留）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-change-list-is-thin
+锚点：未记录
+最近确认：4d340be72fb09d9a120c2f65a6416da45f4f293e
+理由：最大风险：判定口径与前端 lib/thin-lineage.ts 双实现漂移——注释互指+同口径测试锚定（后端 6 用例对齐前端 6 用例矩阵）；已放弃：ChangeRead 详情也加 is_thin——详情前端已有本地判定且正确，最小面原则不加。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-knowledge-governance-cards
+锚点：未记录
+最近确认：99c508227642192dc929cd0702441f3303a6ceff
+理由：最大风险：与 CLI digest 的口径分叉（unmapped 基线消音平台侧没有、绑定信号缺失）——双出口数字可能不一致；缓解：unmapped 只进 totals 降展示级、绑定信号 CLI 独有已在两端注释与卡面处置文案交叉指引，v2 可经 daemon RPC 直采 CLI digest --json 收敛单源。次风险：伪域 v1 只读卡（迁移动作 CLI 手工）——动作回传 v2；阈值与 CLI 同值但两处字面量（跨仓无法单源），注释互指。放弃方案：daemon RPC 实时跑 CLI digest——正确终态但需 daemon+RPC 双端改造，v1 平台直算已解 3/4 信号可见性，性价比不对等。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-assets-testfile-bracket-note
+锚点：未记录
+最近确认：99c508227642192dc929cd0702441f3303a6ceff
+理由：最大风险：真实文件名含「」字符会被误剥——测试绑定约定「」为用例名注解语法，且仓库实测无此类测试文件名，接受该权衡并在函数注释言明。放弃方案 a：改 sillyspec CLI 的 flow done 补全解析（tests[] 只存纯路径）——治本但属另一仓库存量数据救不回，已按规则 15 记 docs/sillyspec/ 活跃坑；放弃方案 b：只在 TestFileBody 局部剥——resolveTestFilePath 的 norm 与搜索入参两处口径会分裂，故统一在归一函数做。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-session-portal-ia-restructure
+锚点：未记录
+最近确认：e4e593b4cc5ba221ebd773df5105beb4adbd4d83
+理由：最大风险：session-panel-page.tsx（4615 行）JSX 大块迁移时破坏隐蔽行为——占位轮 SSE 抢先认领、触顶加载锚钉回、跳转抑制窗、发送窗口期打断回退等防呆逻辑都缝在 render 与 effect 的交界处。对策：只移动 JSX 块的容器位置，不动任何 hooks/回调/数据派生；每完成一个 task 跑相关测试再进下一步；收口时对 diff 逐行审查确认「仅 render 组织层」。实际暴露（独立评审 P1）：desktop 非 portal 宿主（分身浮层/悬浮助手）不传 onOpenSubagent，右列初版绑定宿主 props 导致它们的用量条与任务面板消失——已修复（右列容器与子代理 Provider 解耦，desktop 一律有右列）。另注：本变更工作区基线叠加于上一轮 2026-09-26-core-pages-visual-redesign 未提交的 staged 快照之上，冻结件 change.patch 因此含上一轮 38 文件捆绑（主仓库已分两笔 commit 剥离归属：先 staged 快照落地为上一轮 commit，再本变更独立 commit）。 试过放弃的方案：①ChatGPT 式单栏+抽屉布局（推翻三栏）——深链/群聊/文件模式/四分支全部重做，风险与收益不成比，放弃；②把 SessionConfigBar/CtxUsageBar 也收进右栏——配置与压缩上下文是输入前高频操作，收进右栏断操作流，放弃；③portal 层做统一四栏容器——群聊分支与文件树模式联动复杂，波及面大，放弃（改为 panel 层内解决）；④TaskExecutionPanel/UsageBar 彻底只留右栏——mobile 无右列会丢功能，放弃（mobile 维持原位）。

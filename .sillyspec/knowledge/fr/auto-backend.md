@@ -146,7 +146,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
-待复核：2026-09-26-assets-test-binding-raw-text
+待复核：2026-09-26-migration-chain-dedupe
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given StageEnum 现有 QUICK 辅助阶段先例（backend/app/modules/change/model.py:65-72）；When 变更中心为 quick 类型新变更派发 agent；Then StageEnum 含 THIN="thin"（进 spec_auxiliary_stages，不进 TRANSITIONS/STAGE_ORDER，跑完即终态
@@ -187,7 +187,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
-待复核：2026-09-26-assets-test-binding-raw-text
+待复核：2026-09-26-migration-chain-dedupe
 依据决策：D-002@v1
 场景正文：
 - 场景：默认场景 — Given thin 派发 agent 需执行 2 调用协议；When agent 收到派发 prompt；Then prompt 指示：flow start 带 --input 多行文本（动机行 + 独立节头行「成功标准：」+ 每行一条 `- <标准>`——单行内联会被清晰度
@@ -228,7 +228,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
-待复核：2026-09-26-assets-test-binding-raw-text
+待复核：2026-09-26-migration-chain-dedupe
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given change_writer 分类器输出 change_type="quick"；When service.py/proxy.py 写入新变更；Then initial_stage="thin"（原 "quick"）；change_type 标签保留 "quick" 不改；stages JSON 初值含 thin
@@ -260,7 +260,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
-待复核：2026-09-26-assets-test-binding-raw-text
+待复核：2026-09-26-migration-chain-dedupe
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given thin 派发 agent 在会话内执行 `sillyspec flow start|done|amend-draft --change <名>`；When daemon run_sync submit_commit 解析 bash 命令；Then extract_spec_bindings 产出 SpecCommandBinding(kind="change", change_key=<名>)，会话正确写
@@ -292,7 +292,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
-待复核：2026-09-26-assets-test-binding-raw-text
+待复核：2026-09-26-migration-chain-dedupe
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given thin 变更在 sillyspec.db 停留 current_stage='scan'/status='active'，归档翻 status='archiv；When ① daemon run_sync 回调 sync_stage_status（dispatch.py:1784 一带）或 ② CLI progress 上行 _；Then 平台 change.current_stage=='thin' 且 DB 行非 archived 时：不回写 current_stage、不写 stages['
@@ -324,7 +324,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
-待复核：2026-09-26-assets-test-binding-raw-text
+待复核：2026-09-26-migration-chain-dedupe
 依据决策：D-001@v1、D-002@v1
 场景正文：
 - 场景：默认场景 — Given 前端七处硬编码触点（徽章映射/STATUS_BADGE/STAGE_OPTIONS 双副本/说明卡/概览卡两处旁路判断/移动端审批卡/时间线组标签）；When thin 变更出现在列表/详情/概览/移动端；Then 徽章「◈ 轻量变更」品牌紫阶（quick 改「快速任务（存量）」琥珀）；筛选下拉含「轻量变更」（桌面+移动两份副本）；详情页 thin 两段式说明卡（桌面+移动
@@ -335,7 +335,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
-待复核：2026-09-26-assets-test-binding-raw-text
+待复核：2026-09-26-migration-chain-dedupe
 依据决策：D-002@v1
 场景正文：
 - 场景：默认场景 — Given quick 为存量过渡通道（CLI 横幅语义）；When 用户查看 quicklog 面板/quick 说明卡/统计卡/流程指引文档；Then quicklog tab 计数标「存量 · N」、空态文案换退役指引（桌面 quicklog-table:346 + 移动 :873 两处必改）；quick 说
@@ -346,7 +346,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-25-change-center-thin-flow
 状态：active
 摘要：默认场景
-待复核：2026-09-26-assets-test-binding-raw-text
+待复核：2026-09-26-migration-chain-dedupe
 场景正文：
 - 场景：默认场景 — Given 上游 3.30.0 已有变更名白名单但平台入口无校验；watcher 事件按 change_name 字符串归属；When thin 变更派发/CLI 侧自建 thin 目录 reparse/watcher 事件上行；Then 派发入口对 thin 变更校验 change_key（`^[A-Za-z0-9_.\-]+$`，拒 `..`/`default`/`quick-<hex8>`）
 全文：.sillyspec/changes/archive/2026-09-25-change-center-thin-flow/requirements.md#FR-08
@@ -373,6 +373,60 @@ created_at: 2026-09-22T17:00:51.578Z
   source_change: 2026-09-25-change-center-thin-flow
   status: active
 
+## FR-auto-backend-023 批量 upsert 分片
+变更：2026-09-25-spec-sync-pg-chunk
+状态：active
+摘要：默认场景
+待复核：2026-09-26-manifest-heal-endpoint
+场景正文：
+- 场景：默认场景 — Given 单批 spec-sync ops 含数千 add（归档移动整树形态）；When apply_ops 写 manifest；Then 按 500/批分片执行 pg_insert upsert，单语句绑定参数恒低于 asyncpg 32767 上限，行级语义（版本高位对齐/exists/幂等）逐
+全文：.sillyspec/changes/archive/2026-09-25-spec-sync-pg-chunk/requirements.md#FR-01
+最近确认：c72d04c8f196a81fce03d43ccfe9705e7d3390f8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-spec-sync-pg-chunk:flow:FR-01
+  tests: backend/app/modules/spec_workspace/tests/test_spec_sync_chunk.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-spec-sync-pg-chunk
+  status: active
+
+## FR-auto-backend-024 超大批全量落库
+变更：2026-09-25-spec-sync-pg-chunk
+状态：active
+摘要：默认场景
+待复核：2026-09-26-manifest-heal-endpoint
+场景正文：
+- 场景：默认场景 — Given 一次同步推送 1200 个 add；When 处理完成；Then 1200 行全落 manifest（批边界与尾批不丢行）、文件全写盘、版本/哈希正确
+全文：.sillyspec/changes/archive/2026-09-25-spec-sync-pg-chunk/requirements.md#FR-02
+最近确认：c72d04c8f196a81fce03d43ccfe9705e7d3390f8
+
+## FR-auto-backend-025 既有增量同步零回归
+变更：2026-09-25-spec-sync-pg-chunk
+状态：active
+摘要：默认场景
+待复核：2026-09-26-manifest-heal-endpoint
+场景正文：
+- 场景：默认场景 — Given 本变更交付；When 跑 spec_workspace 增量同步既有测试；Then 全绿（本次 33 passed 1 skipped，skip 为既有 Windows symlink 平台跳过）
+全文：.sillyspec/changes/archive/2026-09-25-spec-sync-pg-chunk/requirements.md#FR-03
+最近确认：c72d04c8f196a81fce03d43ccfe9705e7d3390f8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-25-spec-sync-pg-chunk:flow:FR-03
+  tests: backend/app/modules/spec_workspace/tests/test_spec_sync_chunk.py | backend/app/modules/spec_workspace/tests/test_sync_incremental.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-25-spec-sync-pg-chunk
+  status: active
+
 ## FR-auto-backend-026 命中锚点归一回退匹配
 变更：2026-09-25-knowledge-anchor-match-tolerance
 状态：active
@@ -383,7 +437,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-knowledge-anchor-match-tolerance:flow:FR-01
-  tests: backend/app/modules/knowledge/tests/test_parser.py | tests/test_hits.py
+  tests: backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_parser.py
   reason: spec
   state: candidate
   discovery: machine
@@ -402,7 +456,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-knowledge-anchor-match-tolerance:flow:FR-02
-  tests: tests/test_hits.py
+  tests: backend/app/modules/knowledge/tests/test_hits.py
   reason: spec
   state: candidate
   discovery: machine
@@ -421,7 +475,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-knowledge-anchor-match-tolerance:flow:FR-03
-  tests: tests/test_hits.py
+  tests: backend/app/modules/knowledge/tests/test_hits.py
   reason: spec
   state: candidate
   discovery: machine
@@ -447,7 +501,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-knowledge-anchor-match-tolerance:flow:FR-05
-  tests: tests/test_hits.py | tests/test_parser.py
+  tests: backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/task/tests/test_parser.py
   reason: spec
   state: candidate
   discovery: machine
@@ -492,7 +546,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-scan-docs-stats-caliber:flow:FR-02
-  tests: tests/test_stats.py
+  tests: backend/app/modules/scan_docs/tests/test_stats.py
   reason: spec
   state: candidate
   discovery: machine
@@ -511,7 +565,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-scan-docs-stats-caliber:flow:FR-03
-  tests: tests/test_stats.py
+  tests: backend/app/modules/scan_docs/tests/test_stats.py
   reason: spec
   state: candidate
   discovery: machine
@@ -530,7 +584,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-scan-docs-stats-caliber:flow:FR-04
-  tests: tests/test_stats.py
+  tests: backend/app/modules/scan_docs/tests/test_stats.py
   reason: spec
   state: candidate
   discovery: machine
@@ -549,7 +603,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-scan-docs-stats-caliber:flow:FR-05
-  tests: tests/test_stats.py
+  tests: backend/app/modules/scan_docs/tests/test_stats.py
   reason: spec
   state: candidate
   discovery: machine
@@ -576,7 +630,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-full-sync-resurrect-missing:flow:FR-01
-  tests: tests/test_full_sync_convergence.py
+  tests: backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
   reason: spec
   state: candidate
   discovery: machine
@@ -596,7 +650,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-full-sync-resurrect-missing:flow:FR-02
-  tests: tests/test_full_sync_convergence.py
+  tests: backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
   reason: spec
   state: candidate
   discovery: machine
@@ -616,7 +670,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-full-sync-resurrect-missing:flow:FR-03
-  tests: tests/test_full_sync_convergence.py
+  tests: backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
   reason: spec
   state: candidate
   discovery: machine
@@ -636,7 +690,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-full-sync-resurrect-missing:flow:FR-04
-  tests: tests/test_full_sync_convergence.py
+  tests: backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
   reason: spec
   state: candidate
   discovery: machine
@@ -656,7 +710,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-full-sync-resurrect-missing:flow:FR-05
-  tests: tests/test_full_sync_convergence.py
+  tests: backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
   reason: spec
   state: candidate
   discovery: machine
@@ -676,7 +730,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-full-sync-resurrect-missing:flow:FR-06
-  tests: tests/test_full_sync_convergence.py
+  tests: backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
   reason: spec
   state: candidate
   discovery: machine
@@ -696,7 +750,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-full-sync-resurrect-missing:flow:FR-07
-  tests: tests/test_full_sync_convergence.py
+  tests: backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py
   reason: spec
   state: candidate
   discovery: machine
@@ -723,7 +777,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-26-manifest-heal-endpoint:flow:FR-01
-  tests: tests/test_platform_deleted_guard.py
+  tests: backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py
   reason: spec
   state: candidate
   discovery: machine
@@ -749,7 +803,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-26-manifest-heal-endpoint:flow:FR-03
-  tests: tests/test_platform_deleted_guard.py
+  tests: backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py
   reason: spec
   state: candidate
   discovery: machine
@@ -776,6 +830,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-26-assets-test-binding-raw-text
 状态：active
 摘要：默认场景
+待复核：2026-09-26-change-asset-transparency
 场景正文：
 - 场景：默认场景 — Given test-trace.json 摘录时截断 `::用例` 后缀，tests 数组只剩文件级路径，而含测试类/用例与描述的手写原文就在归档变更目录 require；When assets 聚合服务解析测试绑定（GET /changes/{cid}/assets），；Then 每条 ChangeTestRow 按锚点（FR-NN）匹配挂上新字段 `raw_binding`（绑定槽注释行之后的内容行原文，多行拼接）；requiremen
 全文：.sillyspec/changes/archive/2026-09-26-assets-test-binding-raw-text/requirements.md#FR-01
@@ -784,7 +839,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-26-assets-test-binding-raw-text:flow:FR-01
-  tests: backend/tests/modules/change/test_assets.py
+  tests: backend/app/modules/change/tests/test_assets.py
   reason: spec
   state: candidate
   discovery: machine
@@ -797,6 +852,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-26-assets-test-binding-raw-text
 状态：active
 摘要：默认场景
+待复核：2026-09-26-change-asset-transparency
 场景正文：
 - 场景：默认场景 — Given ChangeTestRow schema 新增字段，；When 后端 schema 变更落盘， 按 CLAUDE.md 规则 21 运行 `pnpm gen:types`，；Then `frontend/src/lib/api-types.ts` 与 `backend/openapi.json` 随提交更新，不落手写类型债。
 全文：.sillyspec/changes/archive/2026-09-26-assets-test-binding-raw-text/requirements.md#FR-02
@@ -806,6 +862,7 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-26-assets-test-binding-raw-text
 状态：active
 摘要：默认场景
+待复核：2026-09-26-change-asset-transparency
 场景正文：
 - 场景：默认场景 — Given 测试绑定行的 raw_binding 存在且与 tests 文件路径列表不同值（即原文含用例级/描述信息），；When 资产卡渲染测试绑定组， 该行下方显示原文小字（muted 色，超长截断，悬停 title 可见全文）；raw_binding 为 None 或与 tests 等
 全文：.sillyspec/changes/archive/2026-09-26-assets-test-binding-raw-text/requirements.md#FR-03
@@ -814,7 +871,7 @@ created_at: 2026-09-22T17:00:51.578Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-26-assets-test-binding-raw-text:flow:FR-03
-  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -827,7 +884,371 @@ created_at: 2026-09-22T17:00:51.578Z
 变更：2026-09-26-assets-test-binding-raw-text
 状态：active
 摘要：默认场景
+待复核：2026-09-26-change-asset-transparency
 场景正文：
 - 场景：默认场景 — Given 三处改动落盘，；When 运行后端 change 聚焦测试（test_assets 补「含绑定槽原文的 requirements 提取、无 requirements 容错为 None」两；Then 全部通过且 0 类型错误。
 全文：.sillyspec/changes/archive/2026-09-26-assets-test-binding-raw-text/requirements.md#FR-04
 最近确认：8f587cde7811c61df600f7b7d23c9c9eaedcd1b2
+
+## FR-auto-backend-055 知识触达组——变更消费的知识条目可跳转
+变更：2026-09-26-change-asset-transparency
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 知识注入的现行 FR/决策在知识库条目内有「待复核：<变更名>」反向标记（flow done 对触达域打标），；When assets 聚合解析（GET /changes/{cid}/assets），；Then 新增 knowledge_touch 组收录镜像 knowledge 的 fr 与 decisions 中节内含该标记的条目（id/标题/file），fail-
+全文：.sillyspec/changes/archive/2026-09-26-change-asset-transparency/requirements.md#FR-01
+最近确认：8846b46367fb931d6e806042b88c4d591a5e8781
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-change-asset-transparency:flow:FR-01
+  tests: backend/app/modules/change/tests/test_assets.py::待复核反查金样本（fr+decisions | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-change-asset-transparency
+  status: active
+
+## FR-auto-backend-056 模块触达组——变更触达的模块可点开模块文档
+变更：2026-09-26-change-asset-transparency
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 变更交付文件清单（归档 change-patch.json file_list）与镜像模块图（docs/<项目>/modules/_module-map.yam；When assets 聚合解析，；Then 新增 touched_modules 组：file_list 对各项目模块图 paths 前缀/glob 匹配去重，收为 模块 id/所属项目/doc 路径，中
+全文：.sillyspec/changes/archive/2026-09-26-change-asset-transparency/requirements.md#FR-02
+最近确认：8846b46367fb931d6e806042b88c4d591a5e8781
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-change-asset-transparency:flow:FR-02
+  tests: backend/app/modules/change/tests/test_assets.py::模块触达
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-change-asset-transparency
+  status: active
+
+## FR-auto-backend-057 两组展示语义与既有组一致
+变更：2026-09-26-change-asset-transparency
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 两组新数据挂入沉淀资产卡，；When 卡片渲染，；Then 逐组「有数据才渲染」（fail-open 同款）、计数徽标并入卡头统计、空组不出现；既有四组零回归。
+全文：.sillyspec/changes/archive/2026-09-26-change-asset-transparency/requirements.md#FR-03
+最近确认：8846b46367fb931d6e806042b88c4d591a5e8781
+
+## FR-auto-backend-058 测试与类型门禁全绿
+变更：2026-09-26-change-asset-transparency
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 改动落盘，；When 运行后端聚焦测试（待复核反查金样本含 fr 与 decisions、无标记空组、模块 glob 匹配与中文名 h1 提取/回退）与前端组件测试（两组渲染、知识触；Then 全部通过、openapi.json 与 api-types.ts 随提交同步、0 类型错误。
+全文：.sillyspec/changes/archive/2026-09-26-change-asset-transparency/requirements.md#FR-04
+最近确认：8846b46367fb931d6e806042b88c4d591a5e8781
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-change-asset-transparency:flow:FR-04
+  tests: backend/app/modules/change/tests/test_assets.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-change-asset-transparency
+  status: active
+
+## FR-auto-backend-059 批量探测多工作区时 git_probe 并发执行（gather），总耗时逼近最慢一个而非逐个累加
+变更：2026-09-26-probe-concurrent-rpc
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 批量探测多工作区时 git_probe 并发执行（gather），总耗时逼近最慢一个而非逐个累加；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-probe-concurrent-rpc/requirements.md#FR-01
+最近确认：43ee45c1ffc967e605e6a35482f84318e65d9e3d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-probe-concurrent-rpc:flow:FR-01
+  tests: backend/app/modules/workspace/tests/test_probe_endpoint.py::TestProbeEndpoint::test_git_probe_concurrent_not_serial（barrier
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-probe-concurrent-rpc
+  status: active
+
+## FR-auto-backend-060 probe_workspace_git_mode 与 git_remote_url 的 RPC 预算
+变更：2026-09-26-probe-concurrent-rpc
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When probe_workspace_git_mode 与 git_remote_url 的 RPC 预算收紧为 3 秒，超时仍归 unknown；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-probe-concurrent-rpc/requirements.md#FR-02
+最近确认：43ee45c1ffc967e605e6a35482f84318e65d9e3d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-probe-concurrent-rpc:flow:FR-02
+  tests: backend/app/modules/daemon/host_fs/tests/test_delegate_probe.py::TestProbeTriState::test_exists_true_dir_returns_git（delegate | backend/app/modules/workspace/tests/test_probe_endpoint.py::TestProbeEndpoint::test_probe_and_remote_rpc_use_short_timeout_budget（stat/git_remote
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-probe-concurrent-rpc
+  status: active
+
+## FR-auto-backend-061 None（三态语义与 fail-safe 不变）
+变更：2026-09-26-probe-concurrent-rpc
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When None（三态语义与 fail-safe 不变）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-probe-concurrent-rpc/requirements.md#FR-03
+最近确认：43ee45c1ffc967e605e6a35482f84318e65d9e3d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-probe-concurrent-rpc:flow:FR-03
+  tests: backend/app/modules/daemon/host_fs/tests/test_delegate_probe.py::TestProbeUnavailable::test_rpc_timeout_returns_unknown | backend/app/modules/workspace/tests/test_probe_endpoint.py::TestProbeEndpoint::test_rpc_failure_returns_unknown_no_5xx（超时归
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-probe-concurrent-rpc
+  status: active
+
+## FR-auto-backend-062 probe 端点 git_remote_url 的逐工作区读取不再串行追加耗时（未识别的并发预取）
+变更：2026-09-26-probe-concurrent-rpc
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 端点 相关模块就绪；When probe 端点 git_remote_url 的逐工作区读取不再串行追加耗时（未识别的并发预取）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-probe-concurrent-rpc/requirements.md#FR-04
+最近确认：43ee45c1ffc967e605e6a35482f84318e65d9e3d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-probe-concurrent-rpc:flow:FR-04
+  tests: backend/app/modules/workspace/tests/test_probe_endpoint.py::TestProbeEndpoint::test_git_mode_repo_url_detected_and_backfilled（回填语义回归） | backend/app/modules/workspace/tests/test_probe_endpoint.py::TestProbeEndpoint::test_probe_and_remote_rpc_use_short_timeout_budget（git_remote
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-probe-concurrent-rpc
+  status: active
+
+## FR-auto-backend-063 既有 test_probe_endpoint 全量用例回归全绿，新增并发行为用例（barrier 法
+变更：2026-09-26-probe-concurrent-rpc
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 既有 test_probe_endpoint 全量用例回归全绿，新增并发行为用例（barrier 法证明并发）与超时预算透传用例；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-probe-concurrent-rpc/requirements.md#FR-05
+最近确认：43ee45c1ffc967e605e6a35482f84318e65d9e3d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-probe-concurrent-rpc:flow:FR-05
+  tests: backend/app/modules/daemon/host_fs/tests/test_delegate_probe.py | backend/app/modules/workspace/tests/test_probe_endpoint.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-probe-concurrent-rpc
+  status: active
+
+## FR-auto-backend-064 不改任何响应字段口径与既有日志事件语义
+变更：2026-09-26-probe-concurrent-rpc
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 不改任何响应字段口径与既有日志事件语义；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-probe-concurrent-rpc/requirements.md#FR-06
+最近确认：43ee45c1ffc967e605e6a35482f84318e65d9e3d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-probe-concurrent-rpc:flow:FR-06
+  tests: backend/app/modules/agent/tests/test_mission_status.py | backend/app/modules/workspace/tests/test_probe_endpoint.py::TestProbeEndpoint::test_batch_multi_workspaces_git_and_direct（响应字段/顺序/机器口径存量断言不改仍绿）
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-probe-concurrent-rpc
+  status: active
+
+## FR-auto-backend-065 迁移链恢复单线：22194500→040000→090000→083000→新矫正迁移，删除 063
+变更：2026-09-26-migration-chain-dedupe
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 迁移 相关模块就绪；When 迁移链恢复单线：22194500；Then 040000
+全文：.sillyspec/changes/archive/2026-09-26-migration-chain-dedupe/requirements.md#FR-01
+最近确认：a82bf152600857f3cc6980934b6a5a296fda5bdb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-migration-chain-dedupe:flow:FR-01
+  tests: backend/tests/test_align_platform_change_events_migration.py::TestMigrationStructure::test_083000_reattached_to_mainline（down_revision | backend/tests/test_align_platform_change_events_migration.py::TestMigrationStructure::test_duplicate_branch_purged（063000/3931ff71bd32 | backend/tests/test_align_platform_change_events_migration.py::TestMigrationStructure::test_file_exists_and_single_head_chain（单
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-migration-chain-dedupe
+  status: active
+
+## FR-auto-backend-066 040000 的建表 DDL 改写为与当前 ORM（platform_sync/model.py P
+变更：2026-09-26-migration-chain-dedupe
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 040000 的建表 DDL 改写为与当前 ORM（platform_sync/model.py PlatformChangeEventORM）完全一致的结构（；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-migration-chain-dedupe/requirements.md#FR-02
+最近确认：a82bf152600857f3cc6980934b6a5a296fda5bdb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-migration-chain-dedupe:flow:FR-02
+  tests: backend/tests/test_migrations_graph.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-migration-chain-dedupe
+  status: active
+
+## FR-auto-backend-067 新增条件矫正迁移：对已被 040000 旧结构建表的 PG 库做幂等对齐（ts timestampt
+变更：2026-09-26-migration-chain-dedupe
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 迁移 / 幂等 相关模块就绪；When 新增条件矫正迁移：对已被 040000 旧结构建表的 PG 库做幂等对齐（ts timestamptz；Then varchar(64) 数据转 ISO 串、severity
+全文：.sillyspec/changes/archive/2026-09-26-migration-chain-dedupe/requirements.md#FR-03
+最近确认：a82bf152600857f3cc6980934b6a5a296fda5bdb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-migration-chain-dedupe:flow:FR-03
+  tests: backend/tests/test_align_platform_change_events_migration.py::TestAlignBehavior::test_old_shape_emits_full_alignment（旧结构 | backend/tests/test_align_platform_change_events_migration.py::TestAlignBehavior::test_sqlite_dialect_short_circuits（非 | backend/tests/test_align_platform_change_events_migration.py::TestAlignBehavior::test_target_shape_is_full_noop（目标结构
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-migration-chain-dedupe
+  status: active
+
+## FR-auto-backend-068 rule NULL 回填、severity varchar(32)→16、detail→text、D
+变更：2026-09-26-migration-chain-dedupe
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When rule NULL 回填、severity varchar(32)；Then 16、detail
+全文：.sillyspec/changes/archive/2026-09-26-migration-chain-dedupe/requirements.md#FR-04
+最近确认：a82bf152600857f3cc6980934b6a5a296fda5bdb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-migration-chain-dedupe:flow:FR-04
+  tests: backend/tests/test_align_platform_change_events_migration.py::TestAlignBehavior::test_old_shape_emits_full_alignment（断言
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-migration-chain-dedupe
+  status: active
+
+## FR-auto-backend-069 tests/test_migrations_graph.py 守护通过（单头、引用闭合）
+变更：2026-09-26-migration-chain-dedupe
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When tests/test_migrations_graph.py 守护通过（单头、引用闭合）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-migration-chain-dedupe/requirements.md#FR-05
+最近确认：a82bf152600857f3cc6980934b6a5a296fda5bdb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-migration-chain-dedupe:flow:FR-05
+  tests: backend/tests/test_migrations_graph.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-migration-chain-dedupe
+  status: active
+
+## FR-auto-backend-070 新增矫正迁移的结构断言与链测试（仿 test_archive_tombstone_repair_mi
+变更：2026-09-26-migration-chain-dedupe
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 迁移 / 测试 相关模块就绪；When 新增矫正迁移的结构断言与链测试（仿 test_archive_tombstone_repair_migration.py 先例）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-migration-chain-dedupe/requirements.md#FR-06
+最近确认：a82bf152600857f3cc6980934b6a5a296fda5bdb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-migration-chain-dedupe:flow:FR-06
+  tests: backend/tests/test_align_platform_change_events_migration.py::TestMigrationStructure（文件存在/单
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-migration-chain-dedupe
+  status: active
+
+## FR-auto-backend-071 本地与远程 dogfood
+变更：2026-09-26-migration-chain-dedupe
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 本地与远程 dogfood；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-migration-chain-dedupe/requirements.md#FR-07
+最近确认：a82bf152600857f3cc6980934b6a5a296fda5bdb
+
+## FR-auto-backend-072 生产 DB 经 stamp+upgrade head 后 alembic 版本落新 head 且后端
+变更：2026-09-26-migration-chain-dedupe
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 生产 DB 经 stamp+upgrade head 后 alembic 版本落新 head 且后端正常启动（运维步骤在交付汇报中列明）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-migration-chain-dedupe/requirements.md#FR-08
+最近确认：a82bf152600857f3cc6980934b6a5a296fda5bdb
+
+## FR-auto-backend-073 不改 ORM、不改任何业务代码与接口行为
+变更：2026-09-26-migration-chain-dedupe
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 接口 相关模块就绪；When 不改 ORM、不改任何业务代码与接口行为；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-26-migration-chain-dedupe/requirements.md#FR-09
+最近确认：a82bf152600857f3cc6980934b6a5a296fda5bdb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-26-migration-chain-dedupe:flow:FR-09
+  tests: backend/tests/test_align_platform_change_events_migration.py | backend/tests/test_migrations_graph.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-26-migration-chain-dedupe
+  status: active

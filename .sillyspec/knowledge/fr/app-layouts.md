@@ -95,7 +95,7 @@ created_at: 2026-09-25T23:00:56.833Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-26-spec-sync-receipt-visibility:flow:FR-05
-  tests: frontend/src/components/__tests__/spec-sync-conflict-banner.test.ts
+  tests: frontend/src/components/__tests__/spec-sync-conflict-banner.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -114,7 +114,7 @@ created_at: 2026-09-25T23:00:56.833Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-26-spec-sync-receipt-visibility:flow:FR-06
-  tests: src/components/__tests__/spec-sync-conflict-banner.test.ts
+  tests: frontend/src/components/__tests__/spec-sync-conflict-banner.test.tsx
   reason: spec
   state: candidate
   discovery: machine

@@ -81,7 +81,7 @@ created_at: 2026-09-22T16:38:58.642Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-daemon-hits-upload-fingerprint:flow:FR-02
-  tests: tests/knowledge-hits-upload.test.ts
+  tests: sillyhub-daemon/tests/knowledge-hits-upload.test.ts
   reason: spec
   state: candidate
   discovery: machine
@@ -100,7 +100,7 @@ created_at: 2026-09-22T16:38:58.642Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-daemon-hits-upload-fingerprint:flow:FR-03
-  tests: tests/knowledge-hits-upload.test.ts
+  tests: sillyhub-daemon/tests/knowledge-hits-upload.test.ts
   reason: spec
   state: candidate
   discovery: machine
@@ -119,7 +119,7 @@ created_at: 2026-09-22T16:38:58.642Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-daemon-hits-upload-fingerprint:flow:FR-04
-  tests: tests/knowledge-hits-upload.test.ts
+  tests: sillyhub-daemon/tests/knowledge-hits-upload.test.ts
   reason: spec
   state: candidate
   discovery: machine
@@ -138,7 +138,7 @@ created_at: 2026-09-22T16:38:58.642Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-daemon-hits-upload-fingerprint:flow:FR-05
-  tests: tests/knowledge-hits-upload.test.ts
+  tests: sillyhub-daemon/tests/knowledge-hits-upload.test.ts
   reason: spec
   state: candidate
   discovery: machine
@@ -157,7 +157,7 @@ created_at: 2026-09-22T16:38:58.642Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-25-daemon-hits-upload-fingerprint:flow:FR-06
-  tests: tests/knowledge-hits-upload.test.ts
+  tests: sillyhub-daemon/tests/knowledge-hits-upload.test.ts
   reason: spec
   state: candidate
   discovery: machine
