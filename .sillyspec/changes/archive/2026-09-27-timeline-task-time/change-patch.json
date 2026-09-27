@@ -1,0 +1,53 @@
+{
+  "change": "2026-09-27-timeline-task-time",
+  "baseline": "6b9aa20b9e60f1d3aa8bd624ef9f093dc75f90a8",
+  "head": "e70bc7349f92f688f31f40eb7da75582f114dcce",
+  "files": [
+    "backend/app/modules/change/parser.py",
+    "backend/app/modules/change/tests/test_parser.py",
+    ".sillyspec/changes/2026-09-27-timeline-task-time/design.md",
+    ".sillyspec/changes/2026-09-27-timeline-task-time/proposal.md",
+    ".sillyspec/changes/2026-09-27-timeline-task-time/requirements.md",
+    ".sillyspec/changes/2026-09-27-timeline-task-time/tasks.md"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 414,
+    "deletions": 30
+  },
+  "savedAt": "2026-09-27T14:45:17.108Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "e32c80c9f1d0fa9a8004b5bb7a255af19e545f3e0a2a9ca7f79ce3c6852187fd",
+  "patchStatus": "ok"
+}

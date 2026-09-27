@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-timeline-task-time",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "change.patch 冻结件与承诺交付面不符：缺本变更全部代码 diff，反含另一变更（thin-affected-modules-from-patch-manifest）的 parser.py diff",
+      "evidence": "design 槽2 承诺交付 schema.py/timeline.py/test_timeline.py/change-timeline-card.tsx/openapi.json/api-types.ts，冻结补丁中六者 diff 一概没有（工作区代码已逐一核实存在且正确，功能不受影响）；补丁首两个文件是 backend/app/modules/change/parser.py 与 test_parser.py，内容为 _extract_manifest_code_paths 与多项目 module-map 合并——属另一变更主题。推断为 flow done 冻结时另一在途变更的工作区改动混入、本变更代码已先提交因而未进 diff；无论成因，冻结件作为交付面追溯件失真。",
+      "location": ".sillyspec/changes/2026-09-27-timeline-task-time/change.patch:1"
+    },
+    {
+      "severity": "P2",
+      "title": "FR-02 测试绑定自述「未勾无时刻」断言未落地，「已勾无时刻显示 ?」分支零测试覆盖",
+      "evidence": "requirements FR-02 绑定写明测试『含 ≈时刻断言与未勾无时刻』——测试文件中 ≈ 时刻断言存在（test 108-110 行），但『未勾不显示时刻』仅是 105-106 行注释、无对应 expect；全 159 行 4 用例中 rg '\\?' 零命中，card tsx:160 的三元分支（checked 且无 time → '?'）完全未被钉住。实现本身正确（已读 card 源码核实），属测试绑定三方一致的缺口而非功能违约，回归时该分支裸奔。",
+      "location": "frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx:105"
+    },
+    {
+      "severity": "P3",
+      "title": "披露边界裁决①（design 槽4『行序与勾选计数序错位固有语义』）：可接受——但中间未勾行这一最常见触发未点名列举",
+      "evidence": "核对确认：_infer_task_times 按 tasks.md 行序索引赋值（timeline.py:111-113），事件 checked N→M 只携带计数不携带行标识，任务集非行序前缀时（如 task-02 未勾、task-03 已勾：事件 1→2 的时刻落在行 1 即 task-02 上）确会错位。具体到中间未勾形态：错位时刻落在未勾行被组装处 time=... if checked else None（timeline.py:175）掩蔽，其后已勾任务显示 ?（信息丢失而非捏造）；需人工重排/未勾行后补勾等二次扰动才会把错时刻显示到已勾行——仍在槽4声明的一般原理『行序与计数序错位会标错时刻』覆盖类内，且 UI 有恒定双声明（标题行『勾选时刻 ≈ 顺序推断』tsx:150 + 脚注 tsx:180）。裁决：可接受（同类固有语义、≈ 恒定标注、错向保守）；扣分点仅为槽4括号例举『人工重排/中间插行』未含中间未勾行这一常态触发。",
+      "location": "backend/app/modules/change/timeline.py:92"
+    },
+    {
+      "severity": "P3",
+      "title": "披露边界裁决②（design 槽1『detail 用 search 子串兼容 stage 前缀』）：可接受，已由专项测试钉住；CLI inferFlipTimes 同款语义为断言不可仓内核验",
+      "evidence": "_TASK_DONE_RE=r'checked (\\d+)→(\\d+)' 用 search 子串匹配（timeline.py:89,105），test_timeline_task_time_stage_prefix_and_cursor_break 双形态（『tasks · checked 0→1』前缀式 + 金样本『checked 0→2』裸式）均断言通过；三条推断语义（游标衔接 timeline.py:109-113 / 中段断裂 break / 尾部未勾不标断裂）实现与测试一一钉住。但仓内 rg 证实 inferFlipTimes 仅出现在本变更自身注释与生成物描述中，CLI 源码不在本仓——『CLI 同款』只能按断言采信，平台侧语义由测试独立成立，故仍裁可接受。",
+      "location": "backend/app/modules/change/tests/test_timeline.py:279"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-03『后端/前端相关测试通过』为自述，评审未执行测试（只读纪律 + 12 次请求硬帽用尽）",
+      "evidence": "评审以代码审读完成 FR-01/02/03 与生成物核验：api-types.ts:26184 含 time?: string | null、openapi.json TimelineTask 含 time 属性、schema.py:956 含 time 字段、timeline.py 组装正确；测试用例存在且断言与承诺语义一致（test_timeline.py 全 6 用例 + 前端 4 用例确认在册），但本轮零执行——测试绿仅为 requirements 自述，非独立复核结论。",
+      "location": ".sillyspec/changes/2026-09-27-timeline-task-time/requirements.md:34"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-27T22:51:45+08:00"
+}

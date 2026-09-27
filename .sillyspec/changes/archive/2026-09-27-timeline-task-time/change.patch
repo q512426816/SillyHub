@@ -1,0 +1,549 @@
+diff --git a/backend/app/modules/change/parser.py b/backend/app/modules/change/parser.py
+index 333a58b0d..bcc4c1c9d 100644
+--- a/backend/app/modules/change/parser.py
++++ b/backend/app/modules/change/parser.py
+@@ -9,6 +9,7 @@ Supports legacy ``changes/change/<key>/`` layout with deprecation warnings.
+ from __future__ import annotations
+ 
+ import copy
++import json
+ import re
+ import threading
+ from dataclasses import dataclass, field
+@@ -303,7 +304,8 @@ class ChangeParser:
+ 
+         推断优先级:
+           1. module-impact.md 存在 → 提取"模块影响矩阵"表中的模块名
+-          2. 否则扫描 tasks.md + tasks/*.md → 提取文件路径 → 匹配 module-map
++          2. 否则收集文件路径（tasks.md + tasks/*.md 正文提取 ∪
++             change-patch.json files 冻结清单）→ 匹配 module-map
+ 
+         Args:
+             change_dir: 变更目录路径 (如 .sillyspec/changes/xxx/)
+@@ -345,6 +347,11 @@ class ChangeParser:
+                 except OSError:
+                     pass
+ 
++        # Path 2b: change-patch.json files 清单（thin-affected-modules-from-patch-manifest）
++        # 轻量变更 tasks.md 是成功标准镜像（无代码路径），flow done 冻结的 files
++        # 数组是其唯一可靠的交付面清单来源（CLI 新旧格式均携带）。
++        file_paths |= ChangeParser._extract_manifest_code_paths(change_dir)
++
+         if not file_paths:
+             return []
+ 
+@@ -355,6 +362,31 @@ class ChangeParser:
+ 
+         return ChangeParser._match_paths_to_modules(file_paths, module_map)
+ 
++    @staticmethod
++    def _extract_manifest_code_paths(change_dir: Path) -> set[str]:
++        """从 change-patch.json（flow done 冻结件）提取代码文件路径。
++
++        ``files`` 是变更可归属面的完整文件清单（真实交付面，含未提交与
++        untracked）。滤除 ``.sillyspec/changes/`` 前缀的变更自身治理件
++        （自指面，不构成代码模块命中——对齐 CLI 侧治理面滤除口径）；
++        缺失/JSON 损坏/结构异常一律返回空集（防御式降级，不阻塞推断）。
++        """
++        manifest_path = change_dir / "change-patch.json"
++        if not manifest_path.is_file():
++            return set()
++        try:
++            raw = json.loads(manifest_path.read_text(encoding="utf-8", errors="replace"))
++        except (OSError, ValueError):
++            return set()
++        if not isinstance(raw, dict):
++            return set()
++        files = raw.get("files")
++        if not isinstance(files, list):
++            return set()
++        return {
++            f for f in files if isinstance(f, str) and f and not f.startswith(".sillyspec/changes/")
++        }
++
+     @staticmethod
+     def _extract_from_impact_table(content: str) -> list[str]:
+         """从 module-impact.md 的 Markdown 表格提取模块名。
+@@ -425,63 +457,86 @@ class ChangeParser:
+ 
+     @staticmethod
+     def _load_module_map(sillyspec_root: Path) -> dict[str, list[str]]:
+-        """加载 _module-map.yaml（task-07：进程级缓存 + platform_managed 路径探测修复）。
++        """加载全部项目层 _module-map.yaml 并合并（thin-affected-modules-from-patch-manifest）。
+ 
+         查找路径（两处按优先级，task-07 附带修复 platform_managed 布局预存缺陷——
+         修复前只找包裹布局，扁平布局 map 路径恒空）：
+           1. ``.sillyspec/docs/*/modules/_module-map.yaml``（包裹布局，优先）
+           2. ``docs/*/modules/_module-map.yaml``（扁平布局，兜底）
+-        取第一个存在的文件。
+-
+-        缓存（design 段 4 / R-01）：模块级 dict 按 **(map 文件 resolved 绝对路径,
+-        mtime)** 复合键失效——仅按 mtime 会跨 workspace 串结果（Grill B-3）。值
+-        不可变（每次未命中重新解析新对象，调用方 mutate 不污染缓存；命中时也回新
+-        拷贝）。幂等填充、单键赋值原子，良性竞态容忍（并发 reparse 最坏各自解析一
+-        次后同键覆盖，读侧无锁）。文件删除（stat 抛错）按未命中走，探测返回 {}。
++        收集**全部**项目目录的图文件合并（同名模块 paths 取并集）。修复前按
++        ``sorted(docs_dir.iterdir())`` 取第一个命中——Windows 的 PurePath 排序
++        大小写不敏感（``SillyHub`` 排在 ``backend`` 之后），本机会稳定选中
++        backend 单项目图，而该图 paths 以 ``app/`` 开头（不带 monorepo 顶层
++        前缀）与交付面文件路径永不匹配 → 影响模块推断恒空。多图合并后口径
++        与 CLI 侧 collectModuleMaps 对齐，且不再依赖目录字母序的巧合。
++
++        缓存（design 段 4 / R-01）：模块级 dict 按 **(全部 map 文件 resolved
++        绝对路径元组, mtime 元组)** 复合键失效——仅按 mtime 会跨 workspace 串
++        结果（Grill B-3）。值不可变（每次未命中重新解析新对象，调用方 mutate
++        不污染缓存；命中时也回新拷贝）。幂等填充、单键赋值原子，良性竞态容忍
++        （并发 reparse 最坏各自解析一次后同键覆盖，读侧无锁）。文件删除（stat
++        抛错）该文件按缺席跳过；全部 stat 失败按未命中走，探测返回 {}。
+ 
+         Returns:
+             {"agent": ["backend/app/modules/agent/"], ...}
+-            paths 中的 ** 通配符被去掉，尾部保留 /
++            paths 中的 ** 通配符被去掉，尾部保留 /；同名模块跨图并集
+         """
+-        map_file = ChangeParser._find_module_map_file(sillyspec_root)
+-        if map_file is None:
++        map_files = ChangeParser._find_module_map_files(sillyspec_root)
++        if not map_files:
+             return {}
+-        try:
+-            map_key = (str(map_file.resolve()), map_file.stat().st_mtime)
+-        except OSError:
+-            # stat 抛错（删除竞态等）按未命中走，不缓存
++        key_parts: list[tuple[str, float]] = []
++        for map_file in map_files:
++            try:
++                key_parts.append((str(map_file.resolve()), map_file.stat().st_mtime))
++            except OSError:
++                # stat 抛错（删除竞态等）该文件按缺席跳过
++                continue
++        if not key_parts:
+             return {}
++        map_key = (tuple(p for p, _ in key_parts), tuple(m for _, m in key_parts))
+         cached = _MODULE_MAP_CACHE.get(map_key)
+         if cached is not None:
+             return copy.deepcopy(cached)
+ 
+-        parsed = ChangeParser._parse_module_map_yaml(map_file)
++        merged: dict[str, list[str]] = {}
++        for map_file in map_files:
++            for mod_name, prefixes in ChangeParser._parse_module_map_yaml(map_file).items():
++                existing = merged.setdefault(mod_name, [])
++                for p in prefixes:
++                    if p not in existing:
++                        existing.append(p)
+         with _MODULE_MAP_CACHE_LOCK:
+-            _MODULE_MAP_CACHE[map_key] = parsed
+-            # 清掉同路径旧 mtime 的条目，防缓存无界增长（reparse 生命周期内 map 文件
+-            # 版本数有限，但跨大量工作区常驻进程时仍收敛为每文件至多 1 条）。迭代必须
++            _MODULE_MAP_CACHE[map_key] = merged
++            # 清掉同路径集旧 mtime 的条目，防缓存无界增长（reparse 生命周期内 map 文件
++            # 版本数有限，但跨大量工作区常驻进程时仍收敛为每文件集至多 1 条）。迭代必须
+             # 持锁（见 _MODULE_MAP_CACHE 声明处注释）。
+             stale = [k for k in _MODULE_MAP_CACHE if k[0] == map_key[0] and k[1] != map_key[1]]
+             for k in stale:
+                 _MODULE_MAP_CACHE.pop(k, None)
+-        return copy.deepcopy(parsed)
++        return copy.deepcopy(merged)
+ 
+     @staticmethod
+-    def _find_module_map_file(sillyspec_root: Path) -> Path | None:
+-        """探测 _module-map.yaml：包裹布局（.sillyspec/docs）优先，扁平（docs）兜底。"""
++    def _find_module_map_files(sillyspec_root: Path) -> list[Path]:
++        """探测全部项目层 _module-map.yaml：包裹布局（.sillyspec/docs）优先，扁平（docs）兜底。
++
++        同一布局位置内跨全部项目目录收集（确定性顺序：``key=str`` 规避
++        Windows PurePath 大小写不敏感排序的平台差异）；两处布局都有时只取
++        包裹布局（既有优先级语义不变）。
++        """
+         for docs_dir in (
+             sillyspec_root / ".sillyspec" / "docs",
+             sillyspec_root / "docs",
+         ):
+             if not docs_dir.is_dir():
+                 continue
+-            for project_dir in sorted(docs_dir.iterdir()):
+-                if not project_dir.is_dir():
+-                    continue
+-                map_file = project_dir / "modules" / "_module-map.yaml"
+-                if map_file.is_file():
+-                    return map_file
+-        return None
++            files = [
++                project_dir / "modules" / "_module-map.yaml"
++                for project_dir in sorted(docs_dir.iterdir(), key=str)
++                if project_dir.is_dir() and (project_dir / "modules" / "_module-map.yaml").is_file()
++            ]
++            if files:
++                return files
++        return []
+ 
+     @staticmethod
+     def _parse_module_map_yaml(map_file: Path) -> dict[str, list[str]]:
+diff --git a/backend/app/modules/change/tests/test_parser.py b/backend/app/modules/change/tests/test_parser.py
+index ca061b1de..7f4d849d1 100644
+--- a/backend/app/modules/change/tests/test_parser.py
++++ b/backend/app/modules/change/tests/test_parser.py
+@@ -2,6 +2,7 @@
+ 
+ from __future__ import annotations
+ 
++import json
+ import shutil
+ from pathlib import Path
+ 
+@@ -462,3 +463,204 @@ class TestInferCurrentStageThin:
+         empty_dir = tmp_path / "2026-09-25-empty-change"
+         empty_dir.mkdir()
+         assert ChangeParser._infer_current_stage(empty_dir, "active") == "brainstorm"
++
++
++class TestInferAffectedComponentsFromManifest:
++    """thin-affected-modules-from-patch-manifest：change-patch.json files 第三来源。
++
++    轻量变更 tasks.md 是成功标准镜像（无代码路径），影响模块推断恒空；
++    flow done 冻结的 change-patch.json files 数组是真实交付面清单
++    （CLI 新旧格式均携带），作为补充来源并入 module-map 前缀匹配。
++    """
++
++    MAP_YAML = """\
++modules:
++  change:
++    paths:
++      - backend/app/modules/change/**
++  web:
++    paths:
++      - frontend/src/app/**
++"""
++
++    @staticmethod
++    def _make_change_dir(root: Path) -> Path:
++        change_dir = root / ".sillyspec" / "changes" / "thin-demo"
++        change_dir.mkdir(parents=True, exist_ok=True)
++        return change_dir
++
++    def test_manifest_files_inferred(self, tmp_path: Path) -> None:
++        """files 含 backend/frontend 代码路径 → 命中对应模块（治理件滤除）。"""
++        root = _make_map(tmp_path, self.MAP_YAML)
++        change_dir = self._make_change_dir(root)
++        (change_dir / "change-patch.json").write_text(
++            json.dumps(
++                {
++                    "change": "thin-demo",
++                    "files": [
++                        ".sillyspec/changes/thin-demo/tasks.md",
++                        "backend/app/modules/change/service.py",
++                        "frontend/src/app/page.tsx",
++                    ],
++                }
++            ),
++            encoding="utf-8",
++        )
++        modules = ChangeParser._infer_affected_components(change_dir, root)
++        assert modules == ["change", "web"]
++
++    def test_manifest_governance_only_yields_empty(self, tmp_path: Path) -> None:
++        """files 只剩 .sillyspec/changes/ 治理件 → 无命中（不产生伪模块）。"""
++        root = _make_map(tmp_path, self.MAP_YAML)
++        change_dir = self._make_change_dir(root)
++        (change_dir / "change-patch.json").write_text(
++            json.dumps(
++                {
++                    "files": [
++                        ".sillyspec/changes/thin-demo/design.md",
++                        ".sillyspec/changes/thin-demo/tasks.md",
++                    ]
++                }
++            ),
++            encoding="utf-8",
++        )
++        assert ChangeParser._infer_affected_components(change_dir, root) == []
++
++    def test_manifest_malformed_json_skipped(self, tmp_path: Path) -> None:
++        """JSON 损坏 → 静默空集，不抛错。"""
++        root = _make_map(tmp_path, self.MAP_YAML)
++        change_dir = self._make_change_dir(root)
++        (change_dir / "change-patch.json").write_text('{"files": [broken', encoding="utf-8")
++        assert ChangeParser._infer_affected_components(change_dir, root) == []
++
++    def test_manifest_files_not_list_skipped(self, tmp_path: Path) -> None:
++        """files 非 list（dict/str/缺键）→ 静默空集。"""
++        root = _make_map(tmp_path, self.MAP_YAML)
++        change_dir = self._make_change_dir(root)
++        (change_dir / "change-patch.json").write_text(
++            json.dumps({"files": "backend/app/modules/change/service.py"}),
++            encoding="utf-8",
++        )
++        assert ChangeParser._infer_affected_components(change_dir, root) == []
++        (change_dir / "change-patch.json").write_text(
++            json.dumps({"other": ["backend/app/modules/change/service.py"]}),
++            encoding="utf-8",
++        )
++        assert ChangeParser._infer_affected_components(change_dir, root) == []
++
++    def test_manifest_merges_with_tasks_paths(self, tmp_path: Path) -> None:
++        """tasks.md 路径与 manifest files 并集匹配（两来源互补）。"""
++        root = _make_map(tmp_path, self.MAP_YAML)
++        change_dir = self._make_change_dir(root)
++        (change_dir / "tasks.md").write_text(
++            "改动 `backend/app/modules/change/service.py` 一处", encoding="utf-8"
++        )
++        (change_dir / "change-patch.json").write_text(
++            json.dumps({"files": ["frontend/src/app/page.tsx"]}), encoding="utf-8"
++        )
++        assert ChangeParser._infer_affected_components(change_dir, root) == [
++            "change",
++            "web",
++        ]
++
++    def test_module_impact_matrix_takes_priority(self, tmp_path: Path) -> None:
++        """module-impact.md 矩阵存在时仍优先短路（既有权威口径不变）。"""
++        root = _make_map(tmp_path, self.MAP_YAML)
++        change_dir = self._make_change_dir(root)
++        (change_dir / "module-impact.md").write_text(
++            "# 影响矩阵\n\n| 模块 | 变更 |\n|---|---|\n| daemon | 新增 |\n",
++            encoding="utf-8",
++        )
++        (change_dir / "change-patch.json").write_text(
++            json.dumps({"files": ["backend/app/modules/change/service.py"]}),
++            encoding="utf-8",
++        )
++        assert ChangeParser._infer_affected_components(change_dir, root) == ["daemon"]
++
++
++class TestLoadModuleMapMultiProjectMerge:
++    """thin-affected-modules-from-patch-manifest：多项目图全收合并。
++
++    修复前 sorted(iterdir()) 取首个命中项目图——Windows PurePath 排序
++    大小写不敏感，SillyHub 排 backend 之后，本机稳定选中 backend 图
++    （其 paths 以 app/ 开头不带顶层前缀）→ 推断恒空。合并后跨全部
++    项目图收集，同名模块 prefixes 并集，与 CLI collectModuleMaps 对齐。
++    """
++
++    @pytest.fixture(autouse=True)
++    def _clear_cache(self):
++        parser_mod._MODULE_MAP_CACHE.clear()
++        yield
++        parser_mod._MODULE_MAP_CACHE.clear()
++
++    def test_all_project_maps_merged(self, tmp_path: Path) -> None:
++        """跨项目图全部合并：各自模块都进结果。"""
++        for proj, mod, prefix in (
++            ("proj-a", "modA", "backend/app/modules/a/**"),
++            ("proj-b", "modB", "frontend/src/app/**"),
++            ("proj-c", "modC", "sillyhub-daemon/src/**"),
++        ):
++            map_file = tmp_path / ".sillyspec" / "docs" / proj / "modules" / "_module-map.yaml"
++            map_file.parent.mkdir(parents=True, exist_ok=True)
++            map_file.write_text(
++                f"modules:\n  {mod}:\n    paths:\n      - {prefix}\n", encoding="utf-8"
++            )
++        m = ChangeParser._load_module_map(tmp_path)
++        assert m == {
++            "modA": ["backend/app/modules/a/"],
++            "modB": ["frontend/src/app/"],
++            "modC": ["sillyhub-daemon/src/"],
++        }
++
++    def test_same_name_module_prefixes_union(self, tmp_path: Path) -> None:
++        """同名模块跨图前缀并集（保序去重）。"""
++        for proj, prefix in (("proj-a", "backend/a/**"), ("proj-b", "backend/b/**")):
++            map_file = tmp_path / ".sillyspec" / "docs" / proj / "modules" / "_module-map.yaml"
++            map_file.parent.mkdir(parents=True, exist_ok=True)
++            map_file.write_text(
++                f"modules:\n  core:\n    paths:\n      - {prefix}\n", encoding="utf-8"
++            )
++        m = ChangeParser._load_module_map(tmp_path)
++        assert m == {"core": ["backend/a/", "backend/b/"]}
++
++    def test_cache_invalidates_on_any_map_mtime_change(self, tmp_path: Path) -> None:
++        """任一图 mtime 变化即失效重读（多文件复合键）。"""
++        files = []
++        for proj, prefix in (("proj-a", "backend/a/**"), ("proj-b", "backend/b/**")):
++            map_file = tmp_path / ".sillyspec" / "docs" / proj / "modules" / "_module-map.yaml"
++            map_file.parent.mkdir(parents=True, exist_ok=True)
++            map_file.write_text(
++                f"modules:\n  {proj[-1]}:\n    paths:\n      - {prefix}\n", encoding="utf-8"
++            )
++            files.append(map_file)
++        assert set(ChangeParser._load_module_map(tmp_path)) == {"a", "b"}
++        # 改第二张图（非首张）→ 缓存必须失效
++        files[1].write_text("modules:\n  z:\n    paths:\n      - backend/b2/**\n", encoding="utf-8")
++        assert set(ChangeParser._load_module_map(tmp_path)) == {"a", "z"}
++
++    def test_frontend_path_matches_after_merge(self, tmp_path: Path) -> None:
++        """端到端：SillyHub 式混合前缀图 + frontend 单文件清单图合并后命中。"""
++        map_a = tmp_path / ".sillyspec" / "docs" / "proj-a" / "modules" / "_module-map.yaml"
++        map_a.parent.mkdir(parents=True, exist_ok=True)
++        map_a.write_text(
++            "modules:\n  change:\n    paths:\n      - backend/app/modules/change/**\n",
++            encoding="utf-8",
++        )
++        map_b = tmp_path / ".sillyspec" / "docs" / "proj-b" / "modules" / "_module-map.yaml"
++        map_b.parent.mkdir(parents=True, exist_ok=True)
++        map_b.write_text(
++            "modules:\n  app-pages:\n    paths:\n      - frontend/src/app/**\n",
++            encoding="utf-8",
++        )
++        change_dir = tmp_path / ".sillyspec" / "changes" / "thin-x"
++        change_dir.mkdir(parents=True)
++        (change_dir / "change-patch.json").write_text(
++            json.dumps(
++                {"files": ["backend/app/modules/change/service.py", "frontend/src/app/page.tsx"]}
++            ),
++            encoding="utf-8",
++        )
++        assert ChangeParser._infer_affected_components(change_dir, tmp_path) == [
++            "change",
++            "app-pages",
++        ]
+diff --git a/.sillyspec/changes/2026-09-27-timeline-task-time/design.md b/.sillyspec/changes/2026-09-27-timeline-task-time/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-timeline-task-time/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T14:21:02.878Z
++---
++# 设计记录（Design Record）— 2026-09-27-timeline-task-time
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-task-time 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++复刻 CLI watcher timeline 的 inferFlipTimes 到平台合成时间线：timeline.py 新增 _infer_task_times 纯函数（task-done 事件的 checked N→M 计数游标衔接赋值、中段断裂停止、尾部未勾不标断裂），TimelineTask 加 time 字段回填；前端任务面加 ≈HH:mm:ss 时刻列（已勾无时刻显示 ?，未勾不显示）。detail 匹配用 search 子串——兼容 watcher 现行「stage · checked N→M」前缀形态与旧裸格式。事件数据源是已回填平台库的 watcher 事件（本变更前置：watcher 推送端点修复+历史回填已另行完成）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-task-time 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++GET /changes/{cid}/timeline 响应 TimelineTask 新增可选字段 time（str|null，翻格推断勾选时刻 ISO）；additive 无破坏。后端 schema.py + timeline.py + test_timeline.py（金样本补断言 + 专项用例）；openapi.json 再生 + 前端 api-types.ts 再生（gen:types --force，生成物）；前端 change-timeline-card.tsx 任务面时间列 + 组件测试断言。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-task-time 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：事件轴按 ts 字符串正序读取后游标推进——晚到事件 ts 在序列中天然有序（表按 ts 排序），推断与到达顺序无关；重复事件被去重键吸收，计数幂等。
++2. 并发写：不适用——只读聚合，无写路径；推断纯函数无共享状态。
++3. 切换/生命周期：请求级计算零残留；断裂/盲窗语义显式（None + 前端 ?），不冒充完整历史。
++4. 作用域：事件按 (workspace_id, change_name) 过滤，多工作区同变更名不串台（既有查询谓词）。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-task-time 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：tasks.md 行序与事件勾选计数序错位（人工重排行/中间插行）会标错时刻——CLI 同款固有语义，卡上已恒定标注「≈顺序推断」脚注，可接受。试过放弃：把推断下推到 watcher 推送时带任务 id（需改 CLI 事件协议且历史数据无法回填，放弃——推断层纯展示零协议负担）。
+
+diff --git a/.sillyspec/changes/2026-09-27-timeline-task-time/proposal.md b/.sillyspec/changes/2026-09-27-timeline-task-time/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-timeline-task-time/proposal.md
+@@ -0,0 +1,34 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T14:21:02.876Z
++---
++# 提案书（Proposal）— 2026-09-27-timeline-task-time
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:f78b4664628adc1c36c521d15e28ec9ab8e3fadd55b40e5f6cf5159d37a8f5c2:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-task-time 留痕重锚 -->
++任务原话转写：平台合成时间线卡的任务面只有勾选态+描述+提交锚，没有每任务勾选时刻（CLI watcher timeline 有 ≈翻格顺序推断，平台未复刻）——事件已回填平台库，推断有数据可依
++成功标准：
++- TimelineTask 增加 time 字段（翻格顺序推断的勾选时刻，游标衔接赋值、中段断裂停止、尾部未勾不标断裂——CLI inferFlipTimes 同款语义，detail 兼容 stage 前缀格式）
++- 前端任务面显示 ≈HH:mm:ss 时刻列（已勾无时刻显示 ?，未勾不显示）
++- openapi.json + api-types.ts 同步再生，后端/前端相关测试通过
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:77725c7d516b485baedfe66fbc062c9abb9adf480e2b4de42654db897a559839:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-task-time 留痕重锚 -->
++按成功标准机械推导，共 3 条验收面：
++1. TimelineTask 增加 time 字段（翻格顺序推断的勾选时刻，游标衔接赋值、中段断裂停止、尾部未勾不标断裂——CLI inferFlipTimes 同款语义，detail 兼容 stage 前缀格式）
++2. 前端任务面显示 ≈HH:mm:ss 时刻列（已勾无时刻显示 ?，未勾不显示）
++3. openapi.json + api-types.ts 同步再生，后端/前端相关测试通过
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:628bad2e79cb1a1790ba49c0752d37e701fad859d2b5f54f55690edb97d1f7a9:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-task-time 留痕重锚 -->
++1. TimelineTask 增加 time 字段（翻格顺序推断的勾选时刻，游标衔接赋值、中段断裂停止、尾部未勾不标断裂——CLI inferFlipTimes 同款语义，detail 兼容 stage 前缀格式）
++2. 前端任务面显示 ≈HH:mm:ss 时刻列（已勾无时刻显示 ?，未勾不显示）
++3. openapi.json + api-types.ts 同步再生，后端/前端相关测试通过
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-27-timeline-task-time/requirements.md b/.sillyspec/changes/2026-09-27-timeline-task-time/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-timeline-task-time/requirements.md
+@@ -0,0 +1,34 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T14:21:02.878Z
++---
++# 需求规格（Requirements）— 2026-09-27-timeline-task-time
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: TimelineTask 增加 time 字段（翻格顺序推断的勾选时刻，游标衔接赋值、中段断裂停止、
++Given 系统就绪
++When TimelineTask 增加 time 字段（翻格顺序推断的勾选时刻，游标衔接赋值、中段断裂停止、尾部未勾不标断裂——CLI inferFlipTimes 同
++Then 行为符合本条标准描述
++
++### FR-02: 前端任务面显示 ≈HH:mm:ss 时刻列（已勾无时刻显示 ?，未勾不显示）
++Given 前端 相关模块就绪
++When 前端任务面显示 ≈HH:mm:ss 时刻列（已勾无时刻显示 ?，未勾不显示）
++Then 行为符合本条标准描述
++
++### FR-03: openapi.json + api-types.ts 同步再生，后端/前端相关测试通过
++Given api / 前端 / 测试 相关模块就绪
++When openapi.json + api-types.ts 同步再生，后端/前端相关测试通过
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_timeline.py :: test_timeline_task_time_stage_prefix_and_cursor_break；test_timeline_golden_aggregation（金样本补 time 断言）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx :: 三段渲染：诞生锚 + 事件轴（中文标签/commit 标题）+ 任务面（勾选×提交锚）+ 统计（含 ≈时刻断言与未勾无时刻）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_timeline.py 全 6 用例 + frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx 全 4 用例；tsc --noEmit 0 错；gen:types 再生（openapi.json + api-types.ts 均含 TimelineTask.time）
+
+diff --git a/.sillyspec/changes/2026-09-27-timeline-task-time/tasks.md b/.sillyspec/changes/2026-09-27-timeline-task-time/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-timeline-task-time/tasks.md
+@@ -0,0 +1,13 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T14:21:02.879Z
++---
++# 任务注册表（Tasks）— 2026-09-27-timeline-task-time
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: TimelineTask 增加 time 字段（翻格顺序推断的勾选时刻…
++- [x] task-02: 前端任务面显示 ≈HH:mm:ss 时刻列（已勾无时刻显示 ?，未勾不显示）
++- [x] task-03: openapi.json + api-types.ts 同步再生，后端/前端相关测试通过
