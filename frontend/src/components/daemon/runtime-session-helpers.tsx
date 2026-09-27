@@ -216,6 +216,8 @@ function toAssemblerInput(entry: AgentRunLogEntry): AssemblerLogInput {
     depth: entry.depth ?? null,
     toolKind: entry.tool_kind ?? null,
     editPatch: entry.edit_patch ?? null,
+    // 2026-09-27-session-fast-replay FR-07：slim 截断标记透传（tool 段全文回填键）。
+    contentTruncated: entry.content_truncated ?? null,
   };
 }
 

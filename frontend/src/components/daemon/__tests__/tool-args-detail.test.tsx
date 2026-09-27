@@ -6,11 +6,40 @@
  * 真实文件行号（oldStart/newStart 起计、'\' 标记行跳过、多 hunk 分隔、非法回退 null）。
  * ToolExpandBody（经 ToolRowView 的接线断言在 turn-segment-views.test.tsx，本文件
  * 只测 diff 视图的红/绿行底与行号列渲染）。
+ *
+ * 2026-09-27-session-fast-replay task-04 / FR-07：ToolExpandBody slim 截断全文
+ * 按需回填——Provider 上下文驱动（无宿主零请求）、截断 result / raw 回填替换
+ * 渲染、失败降级提示。getAgentSessionLogFull 走子模块直引（组件同路径），
+ * mock "@/lib/daemon/sessions" 即拦截。
  */
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, waitFor, cleanup } from "@testing-library/react";
 
-import { computeLineDiff, DiffView, parseStructuredPatch } from "../tool-args-detail";
+import {
+  computeLineDiff,
+  DiffView,
+  parseStructuredPatch,
+  SlimLogFullProvider,
+  ToolExpandBody,
+} from "../tool-args-detail";
+import type { ToolTurnSegment } from "@/components/daemon/session-log-assembler";
+
+// MarkdownText 用 next/dynamic ssr:false，jsdom 同步 render 得 null——mock 成
+// 纯文本（同 session-panel 系测试惯例）。
+vi.mock("@/components/ui/markdown-text", () => ({
+  MarkdownText: ({ content }: { content: string }) => (
+    <div data-testid="markdown-text">{content}</div>
+  ),
+}));
+
+const fullLogApi = vi.hoisted(() => ({ getAgentSessionLogFull: vi.fn() }));
+vi.mock("@/lib/daemon/sessions", () => ({
+  getAgentSessionLogFull: fullLogApi.getAgentSessionLogFull,
+}));
+
+beforeEach(() => {
+  fullLogApi.getAgentSessionLogFull.mockReset();
+});
 
 describe("computeLineDiff（Edit 行级 diff，LCS）", () => {
   it("修改一行：ctx / del / add / ctx 序列，双侧行号各自推进", () => {
@@ -139,5 +168,160 @@ describe("parseStructuredPatch（ql-20260824-020：SDK structuredPatch → 真�
     expect(
       parseStructuredPatch(JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["?bad"] }])),
     ).toBeNull();
+  });
+});
+
+// ── FR-07（2026-09-27-session-fast-replay）：slim 截断全文按需回填 ─────────
+
+/** Bash 工具段固件（raw 可解析 args；result 按 case 装配）。 */
+function bashSegment(overrides: Partial<ToolTurnSegment> = {}): ToolTurnSegment {
+  return {
+    kind: "tool",
+    id: "tu-1",
+    raw: JSON.stringify({ tool_use_id: "tu-1", args: { command: "pnpm test" } }),
+    status: "ok",
+    toolName: "Bash",
+    primary: "pnpm test",
+    startedAt: Date.now(),
+    endedAt: Date.now(),
+    children: [],
+    subagentType: null,
+    ...overrides,
+  };
+}
+
+describe("ToolExpandBody slim 全文回填（FR-07）", () => {
+  it("非截断条目零额外请求（无 contentTruncated 标记 → getAgentSessionLogFull 不触达）", async () => {
+    render(
+      <SlimLogFullProvider sessionId="s1">
+        <ToolExpandBody
+          segment={bashSegment({ result: "正常输出（未截断）" })}
+          running={false}
+        />
+      </SlimLogFullProvider>,
+    );
+    expect(screen.getByText("pnpm test")).toBeTruthy();
+    expect(screen.getByText("正常输出（未截断）")).toBeTruthy();
+    expect(fullLogApi.getAgentSessionLogFull).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("无宿主上下文（Provider 缺省 null）：截断条目也不请求，按截断内容渲染（零回归）", async () => {
+    render(
+      <ToolExpandBody
+        segment={bashSegment({
+          result: "截断的输出",
+          resultSourceLogId: "log-r",
+          resultTruncated: true,
+        })}
+        running={false}
+      />,
+    );
+    expect(screen.getByText("截断的输出")).toBeTruthy();
+    expect(fullLogApi.getAgentSessionLogFull).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("截断 result 展开回填：loading 内联提示 → 拉全文（getAgentSessionLogFull(sessionId, log_id)）替换渲染", async () => {
+    let release!: (v: {
+      id: string;
+      run_id: string;
+      timestamp: string;
+      channel: string;
+      content_redacted: string;
+    }) => void;
+    const page = new Promise((r) => {
+      release = r as typeof release;
+    });
+    fullLogApi.getAgentSessionLogFull.mockReturnValueOnce(page);
+    render(
+      <SlimLogFullProvider sessionId="s1">
+        <ToolExpandBody
+          segment={bashSegment({
+            result: "截断的输出",
+            resultSourceLogId: "log-r",
+            resultTruncated: true,
+          })}
+          running={false}
+        />
+      </SlimLogFullProvider>,
+    );
+    // 请求已发（单条全文端点，sessionId + 源行 log id）。
+    expect(fullLogApi.getAgentSessionLogFull).toHaveBeenCalledWith("s1", "log-r");
+    // loading 态：内联「正在加载全文…」提示 + 截断内容照常渲染。
+    expect(screen.getByText("内容过长已截断，正在加载全文…")).toBeTruthy();
+    expect(screen.getByText("截断的输出")).toBeTruthy();
+
+    release({
+      id: "log-r",
+      run_id: "run-1",
+      timestamp: "2026-09-27T10:00:00Z",
+      channel: "tool_call",
+      content_redacted: "完整的命令输出全文（远超 2000 字符的原文）",
+    });
+    // 回填落地：全文替换截断文本渲染，loading 提示消失。
+    await waitFor(() =>
+      expect(
+        screen.getByText("完整的命令输出全文（远超 2000 字符的原文）"),
+      ).toBeTruthy(),
+    );
+    expect(
+      screen.queryByText("内容过长已截断，正在加载全文…"),
+    ).toBeNull();
+    expect(screen.queryByText("截断的输出")).toBeNull();
+    cleanup();
+  });
+
+  it("截断 raw 展开回填：全文 JSON 替换后参数区可解析（截断 JSON 原本解析失败）", async () => {
+    // 截断的 raw（JSON 被腰斩）——BashArgsDetail 解析不出 command，回填后可见。
+    const fullRaw = JSON.stringify({
+      tool_use_id: "tu-1",
+      args: { command: "pnpm exec vitest run --changed" },
+    });
+    fullLogApi.getAgentSessionLogFull.mockResolvedValueOnce({
+      id: "log-u",
+      run_id: "run-1",
+      timestamp: "2026-09-27T10:00:00Z",
+      channel: "tool_call",
+      content_redacted: fullRaw,
+    });
+    render(
+      <SlimLogFullProvider sessionId="s1">
+        <ToolExpandBody
+          segment={bashSegment({
+            raw: fullRaw.slice(0, 30),
+            sourceLogId: "log-u",
+            contentTruncated: true,
+          })}
+          running={false}
+        />
+      </SlimLogFullProvider>,
+    );
+    expect(fullLogApi.getAgentSessionLogFull).toHaveBeenCalledWith("s1", "log-u");
+    await waitFor(() =>
+      expect(screen.getByText("pnpm exec vitest run --changed")).toBeTruthy(),
+    );
+    cleanup();
+  });
+
+  it("回填失败：降级提示「全文加载失败，当前展示截断内容」，截断内容保留", async () => {
+    fullLogApi.getAgentSessionLogFull.mockRejectedValueOnce(new Error("boom"));
+    render(
+      <SlimLogFullProvider sessionId="s1">
+        <ToolExpandBody
+          segment={bashSegment({
+            result: "截断的输出",
+            resultSourceLogId: "log-r",
+            resultTruncated: true,
+          })}
+          running={false}
+        />
+      </SlimLogFullProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByText("全文加载失败，当前展示截断内容")).toBeTruthy(),
+    );
+    expect(screen.getByText("截断的输出")).toBeTruthy();
+    cleanup();
   });
 });

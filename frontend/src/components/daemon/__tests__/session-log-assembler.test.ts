@@ -431,6 +431,10 @@ describe("归属桶配对（Grill X-02：同桶最后未配对，不跨桶误配
       endedAt: Date.parse(ts4),
       children: [],
       subagentType: null,
+      // 2026-09-27-session-fast-replay FR-07：slim 全文回填键随构造/配对写入
+      //（tool_call 行 logId=3、tool_result 行 logId=4）。
+      sourceLogId: "3",
+      resultSourceLogId: "4",
     });
     // 主级 result 交错到达：配对主级最后未配对的 tu_P（不跳配 tu_A、不误入子桶）
     turn = applyLogToSegments(turn, makeLog("5", "stdout", "[TOOL_RESULT] 任务结果"));
@@ -456,6 +460,8 @@ describe("归属桶配对（Grill X-02：同桶最后未配对，不跨桶误配
       id: "tool:2",
       raw: "",
       result: "桶内孤儿",
+      // FR-07：兜底段由 result 行（logId=2）构造，带 result 源键。
+      resultSourceLogId: "2",
       status: "ok",
       toolName: null,
       primary: null,
@@ -511,6 +517,10 @@ describe("归属桶配对（Grill X-02：同桶最后未配对，不跨桶误配
         endedAt: null,
         children: [],
         subagentType: null,
+        // FR-07：非 JSON tool_call 段由 tool_call 行（logId=1）构造、result 行
+        //（logId=2）配对，源键随写。
+        sourceLogId: "1",
+        resultSourceLogId: "2",
       },
     ]);
   });
@@ -791,6 +801,8 @@ describe("streaming 置位与清除（§5 Phase3）", () => {
           { kind: "text", id: "text:tu_f:1", text: "子partial", streaming: false, startedAt: null, segId: "tu_f:1" },
         ],
         subagentType: null,
+        // FR-07：tool 段由 tool_call 行（logId=1）构造带源键。
+        sourceLogId: "1",
       },
       { kind: "text", id: "text:main:f:1", text: "主partial", streaming: false, startedAt: null, segId: "main:f:1" },
     ]);

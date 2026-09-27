@@ -49,6 +49,7 @@ const sessionApi = vi.hoisted(() => ({
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
   getAgentSessionLogs: vi.fn(),
+    fetchSessionTurnOutline: vi.fn().mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] }),
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
   listSessionRuns: vi.fn(),
@@ -72,6 +73,7 @@ vi.mock("@/lib/daemon", async () => {
     streamSession: sessionApi.streamSession,
     getAgentSession: sessionApi.getAgentSession,
     getAgentSessionLogs: sessionApi.getAgentSessionLogs,
+    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionRuns: sessionApi.listSessionRuns,
@@ -300,11 +302,13 @@ describe("SessionPanel variant 回归锚（不传 variant 与 desktop 一致）"
     const flexRow = chatCol.parentElement as HTMLElement;
     expect(flexRow.className).toBe("flex min-h-0 flex-1");
     expect(flexRow.parentElement).toBe(panel);
-    // ql-20260909-005：轮次 <3 刻度轨整条隐藏（短会话回收 30px 占位）——本
-    // fixture 仅 1 轮，断言轨道不渲染（常驻断言随行为翻转；≥3 轮形态由
-    // turn-catalog 组件测试覆盖）。
+    // ql-20260909-005：轮次 <3 导航列整条隐藏（短会话回收占位）——本
+    // fixture 仅 1 轮，断言列不渲染（常驻断言随行为翻转；≥3 轮形态由
+    // turn-nav-list 组件测试覆盖）。2026-09-27-session-fast-replay task-04：
+    // 挂载组件 TurnCatalog → TurnNavList（行式导航列，aria-label 随改「轮次导航」，
+    // 断言意图不变：短会话不渲染导航）。
     expect(
-      within(flexRow).queryByRole("navigation", { name: "轮次刻度导航" }),
+      within(flexRow).queryByRole("navigation", { name: "轮次导航" }),
     ).not.toBeInTheDocument();
   });
 

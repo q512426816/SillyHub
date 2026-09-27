@@ -62,9 +62,17 @@ import {
 // 目录条目类型 + TurnCatalog 刻度轨组件（task-02 产出契约）——类型供下方
 // catalogEntries 派生；组件在 desktop page 分支常驻挂载（task-05 布局接线，
 // 见会话主体渲染处）。
-import TurnCatalog, {
+// 2026-09-27-session-fast-replay task-04：desktop 常驻导航列换挂 TurnNavList
+// （FR-06 行式导航，大纲全量数据源）；TurnCatalog 组件文件保留不挂载
+//（回退能力：删 TurnNavList 挂载换回 <TurnCatalog .../> 即回旧形态）。
+import {
   type TurnCatalogEntry, type TurnCatalogEntryStatus,
 } from "@/components/sessions/turn-catalog";
+// task-04（2026-09-27-session-fast-replay / FR-06）：desktop 行式轮次导航列——
+// 大纲骨架 + 已加载轮摘要合并数据（mergeTurnNavEntries 在下方派生层）。
+import TurnNavList from "@/components/sessions/turn-nav-list";
+// FR-07：slim 截断条目展开按需全文——Provider 挂面板根供 ToolExpandBody 消费。
+import { SlimLogFullProvider } from "@/components/daemon/tool-args-detail";
 import { ApiError, safeUUID } from "@/lib/api";
 import {
   type AgentRunLogEntry, type MainAgentConfig, type WorkerPresetItem,
@@ -85,7 +93,11 @@ import { listWorkspaces } from "@/lib/workspaces";
 import { getProject } from "@/lib/ppm/project";
 import { getChange } from "@/lib/changes";
 import { getQuicklogDetail } from "@/lib/quicklog";
-import { ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow } from "@/lib/daemon";
+// task-03（2026-09-27-session-fast-replay / FR-04 FR-05）：fetchSessionTurnOutline
+// 打开链路并行拉取全量轮次大纲（导航骨架 + 未加载轮 run_id 直达跳转）。
+import {
+  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
+} from "@/lib/daemon";
 import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
 import { cn } from "@/lib/utils";
 
@@ -241,6 +253,57 @@ function truncateForSummary(
 ): string | undefined {
   if (!text) return undefined;
   return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/**
+ * task-04（2026-09-27-session-fast-replay / FR-06）：导航列合并数据——大纲
+ * items（全量骨架，后端 seq 轮号权威）为底，catalogEntries（组件内 runs+
+ * displayTurns 派生，既有逻辑保留不动）按 run_id 对齐覆盖：已加载轮用本地
+ * 实时摘要 + loaded=true；未加载轮显示大纲摘要（prompt_summary 后端截
+ * 60 字）。大纲尾部未含而 catalogEntries 已有的轮（实时新轮 SSE 先到 /
+ * 大纲尚未刷新）按时间序尾部追加、接续编号。大纲缺失（null / 拉取失败 /
+ * 空会话）→ 原样返回 catalogEntries（降级不劣于现状）。导出供测试单测合并语义。
+ */
+export function mergeTurnNavEntries(
+  outline: SessionTurnOutlineRead | null,
+  catalog: TurnCatalogEntry[],
+): TurnCatalogEntry[] {
+  if (!outline || outline.items.length === 0) return catalog;
+  // 仅已加载轮进覆盖表——catalogEntries 含未加载轮空条目（promptSummary
+  // null），不过滤会让大纲 run_id 恒命中空条目、prompt_summary 被丢弃
+  // （FR-06 未加载轮显示大纲摘要失效，评审实证）。
+  const loadedByKey = new Map(
+    catalog.filter((e) => e.loaded).map((e) => [e.key, e] as const),
+  );
+  const entries: TurnCatalogEntry[] = outline.items.map((item) => {
+    const loadedEntry = loadedByKey.get(item.run_id);
+    // 命中已加载轮：本地数据覆盖（摘要/状态实时），轮号以大纲 seq 为准。
+    if (loadedEntry) {
+      return loadedEntry.turnNo === item.seq
+        ? loadedEntry
+        : { ...loadedEntry, turnNo: item.seq };
+    }
+    return {
+      key: item.run_id,
+      turnNo: item.seq,
+      // started_at 缺失（派发失败轮）兜底 created_at（轮次定序同 orderedRuns 口径）。
+      startedAt: item.started_at ?? item.created_at,
+      status: mapRunStatus(item.status, item.error_code),
+      senderName: item.sender_name ?? null,
+      promptSummary: item.prompt_summary ?? undefined,
+      answerSummary: item.answer_summary ?? undefined,
+      loaded: false,
+    };
+  });
+  // 大纲之后到达的实时新轮（catalogEntries 孤儿/已加载但大纲未含）尾部追加。
+  const seen = new Set(outline.items.map((i) => i.run_id));
+  let tailNo = entries.length;
+  for (const e of catalog) {
+    if (seen.has(e.key)) continue;
+    tailNo += 1;
+    entries.push({ ...e, turnNo: tailNo });
+  }
+  return entries;
 }
 
 /* ── task-07（2026-09-18-single-chat-steering / FR-05 / 原型 §1 §3）→
@@ -644,6 +707,12 @@ export function SessionPanelPage({
   // gap-fix（FR-07 / FR-08）：run 级轮次快照（id → SessionRunRead），attach 时
   // 预取 + 每轮 turn_completed 后刷新，供 whoLine 注入与历史 usage 回填。
   const [runsMeta, setRunsMeta] = useState<Map<string, SessionRunRead>>(new Map());
+  // 2026-09-27-session-fast-replay task-03 / FR-04：全量轮次大纲（turn-outline
+  // 一次下发全部轮摘要）。attach 期与尾页日志并行拉取；失败静默降级——
+  // 导航列回退下方 runsMeta 派生（catalogEntries），跳转回退 interval 翻页
+  // 链路（JUMP_LOAD_EARLIER_MAX_PAGES），行为不劣于现状。大纲仅作导航元数据，
+  // 不进消息流装配链（与 displayTurns / SSE 覆盖逻辑互不干扰，design §3.1）。
+  const [turnOutline, setTurnOutline] = useState<SessionTurnOutlineRead | null>(null);
   const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
   // 2026-08-29-session-usage-stats task-04（R-04）：用量条重取信号——
   // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
@@ -925,6 +994,9 @@ export function SessionPanelPage({
     setBashProgress(null);
     setAgentTasks([]);
     setRunsMeta(new Map());
+    // task-03（2026-09-27-session-fast-replay）：大纲随会话切换清空（新会话
+    // attach 期重拉；迟到旧大纲经 cancelled 守卫丢弃，不串台）。
+    setTurnOutline(null);
     fetchedErrorRunIdsRef.current.clear();
     completedSideEffectRunIdsRef.current.clear();
     currentRunIdRef.current = null;
@@ -955,8 +1027,13 @@ export function SessionPanelPage({
       try {
         // quick：limit=100 起步（最新 100 条日志窗口）——resync 游标语义不变
         //（after=maxLogTimestamp 仍只增量拉窗口之后），更早走「加载更早消息」。
+        // task-03（2026-09-27-session-fast-replay / FR-04）：slim=true——tool 通道
+        // 超 2000 字符截断传输（回显体积主因），截断条目展开时按需拉全文
+        //（ToolExpandBody → getAgentSessionLogFull，FR-07）。SSE 实时增量不传
+        // slim，实时流零变化。
         const logs = await getAgentSessionLogs(sessionId, {
           limit: HISTORY_PAGE_SIZE,
+          slim: true,
         });
         if (cancelled) return;
         streamCursor = maxLogTimestamp(logs);
@@ -1373,6 +1450,21 @@ export function SessionPanelPage({
       setRunsMeta(new Map(runs.map((r) => [r.id, r])));
     });
 
+    // task-03（2026-09-27-session-fast-replay / FR-04）：全量轮次大纲与尾页日志
+    // 并行请求（首屏 ≤2 次即可见最近消息 + 全量轮次导航）。失败静默降级——
+    // 导航列回退 runsMeta 派生数据、跳转回退 interval 翻页（不劣于现状）。
+    // try/catch 包住同步调用点：旧测试 mock 工厂未定义本导出时（undefined /
+    // No-export 代理异常）同步抛错，同样走降级不炸面板。
+    try {
+      const outlinePromise = fetchSessionTurnOutline(sessionId).catch(() => null);
+      void outlinePromise.then((outline) => {
+        if (cancelled || !outline) return;
+        setTurnOutline(outline);
+      });
+    } catch {
+      /* 大纲拉取不可用：静默降级（导航列走 runsMeta 派生） */
+    }
+
     // F7：runs 快照刷新（onTurnCompleted 调用）——共用本 effect 的 cancelled
     // 标志（语义同上：迟到快照丢弃，不写新会话 / 不卸载后 setState）。
     const refreshRunsMeta = (id: string) => {
@@ -1478,6 +1570,9 @@ export function SessionPanelPage({
         // before_id（后端 (ts<before) OR (ts=before AND id<before_id)）。
         beforeId: historyCursorIdRef.current ?? undefined,
         limit: HISTORY_PAGE_SIZE,
+        // task-03（2026-09-27-session-fast-replay / FR-04）：触顶翻页同样 slim
+        //（与尾页窗口同口径，tool 超 2000 字符截断传输，展开按需拉全文）。
+        slim: true,
         signal: abort.signal,
       });
       // 会话身份校验（ql-20260903-018）：请求在途切换会话（新会话 effect 已
@@ -1612,8 +1707,11 @@ export function SessionPanelPage({
    *  守卫：容器存在且有布局高度（jsdom 无布局 scrollHeight=0 不触发）、
    *  连拉上限 AUTO_FILL_MAX（防整段历史全被空渲染吞掉的极端批量请求；
    *  换会话重置）。撑出滚动条（scrollHeight > clientHeight）即停走正常触顶。
-   *  经 scheduleAutoFill 调用（等布局），不直接从数据回调调（时序见其注释）。 */
-  const AUTO_FILL_MAX = 10;
+   *  经 scheduleAutoFill 调用（等布局），不直接从数据回调调（时序见其注释）。
+   *  task-03（2026-09-27-session-fast-replay / FR-04）：10 → 2 收敛——大纲已
+   *  提供全量轮次导航（不再为「目录完整」连发翻页），视口补拉仅为撑出滚动条
+   *  保留 ≤2 次封顶。 */
+  const AUTO_FILL_MAX = 2;
   const maybeAutoFill = useCallback(() => {
     const el = scrollElQueryRef.current();
     if (!el || el.scrollHeight === 0) return;
@@ -1832,10 +1930,15 @@ export function SessionPanelPage({
   }, [turnState, timelineScrollEl]);
 
   // ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05 / D-002@v1 D-005@v1）：
-  //    目录刻度点击跳转链路（TickRail onJump 消费，task-05 已接线挂载）。已加载轮
-  //    直跳定位高亮；未加载轮循环翻页（≤8 页，suppress 触顶自动加载，R-02）到
-  //    命中或到头；两档 toast 兜底（对齐 design §7，定位节奏照 handleJumpToSubagent
-  //    先例双 rAF，但锚点按 data-turn-key 属性精确匹配——FR-07 禁类名匹配）。 ----
+  //    导航列行点击跳转链路（TurnNavList onJump 消费）。已加载轮直跳定位高亮；
+  //    未加载轮优先单轮直达（task-04 2026-09-27-session-fast-replay / FR-05——
+  //    大纲有该轮 run_id 时 getAgentSessionLogs({run_id}) ≤2 次往返取整轮，
+  //    经既有 prepend 装配链前插 + 定位高亮）；大纲缺失 / 无 run_id / 单轮请求
+  //    失败 → 回退既有 interval 逐页循环（JUMP_LOAD_EARLIER_MAX_PAGES 链路保留
+  //    为回退，不删）；两档 toast 兜底（对齐 design §7，定位节奏双 rAF，锚点按
+  //    data-turn-key 属性精确匹配——FR-07 禁类名匹配）。跳转三抑制窗（触顶抑制
+  //    / active 联动抑制 / 贴底跟随抑制）与 prepend 锚钉回、复合游标、会话纪元
+  //    机制原样复用，一行不动。 ----
   const handleJumpToTurn = useCallback(
     async (entry: TurnCatalogEntry) => {
       setJumpFollowSuppress(true);
@@ -1854,14 +1957,42 @@ export function SessionPanelPage({
         if (!row) return null;
         return (row.textContent ?? "").trim().length > 60 ? row : null;
       };
-      if (!hit()) {
-        // 未加载：翻页加载目标轮。quick（ql-20260916-014）：async/await 循环
-        // 在生产环境翻到第 5 页（目标内容块首现）时整个 async 函数被冻结（
-        // setTimeout(0)/MessageChannel 双通道均挂起、事件循环健康 178 宏任务/
-        // 秒、无 fetch 错误——机制未明，疑与生产构建的调度器/优化相关）。
-        // 改确定性轮询：不用 async 循环，改单次 async 启动 + setInterval 每 250ms
-        // 检查命中/到头/上限/卸载，满足才翻下一页——不依赖 await resume 行为，
-        // 从机制上杜绝挂起。suppress 全程置位，所有出口（含卸载）恢复。
+      /** 定位高亮共用尾段（已加载直跳 / 单轮直达 prepend 提交后共用，行为与
+       *  原尾段逐字一致）：即时置当前轮 + active 联动抑制窗 + 双 rAF 后滚动
+       *  定位 + 受控 ring 高亮 2.2s 自清（连点先清旧定时器防堆积）。
+       *  单轮直达路径的行内容可能短于 hit() 的 60 字内容门——定位降级用裸
+       *  querySelector（行已在 DOM 即定位，不再回头翻页）。 */
+      const locateAndHighlight = () => {
+        setActiveTurnKey(entry.key);
+        // 抑制窗口从置位时刻起算（覆盖双 rAF 等待期——prepend 锚定滚动也可能
+        // 在该间隙触发 scroll 重算覆盖置位）。
+        jumpActiveSyncSuppressUntilRef.current =
+          performance.now() + JUMP_ACTIVE_SYNC_SUPPRESS_MS;
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const row =
+              hit() ??
+              container?.querySelector<HTMLElement>(
+                `[data-turn-key="${CSS.escape(entry.key)}"]`,
+              );
+            row?.scrollIntoView({ behavior: "smooth", block: "start" });
+            settleFollow();
+            setHighlightTurnKey(entry.key);
+            if (highlightTimerRef.current !== null) {
+              clearTimeout(highlightTimerRef.current);
+            }
+            highlightTimerRef.current = window.setTimeout(() => {
+              highlightTimerRef.current = null;
+              setHighlightTurnKey(null);
+            }, HIGHLIGHT_TURN_CLEAR_MS);
+          });
+        });
+      };
+      /** 回退链路（原样保留）：interval 逐页循环翻页。quick（ql-20260916-014）：
+       *  async/await 循环在生产环境翻到第 5 页时整个 async 函数被冻结，改确定性
+       *  轮询——单次 async 启动 + setInterval 每 40ms 检查命中/到头/上限/卸载，
+       *  满足才翻下一页。suppress 全程置位，所有出口（含卸载）恢复。 */
+      const fallbackLoop = () => {
         jumpSuppressLoadEarlierRef.current = true;
         let pages = 0;
         let timer: ReturnType<typeof setInterval> | undefined;
@@ -1888,35 +2019,92 @@ export function SessionPanelPage({
         };
         tick(); // 首页立即发起（对齐旧 async 循环的即时性），其后 40ms 间隔续翻。
         timer = setInterval(tick, 40);
+      };
+      if (!hit()) {
+        // 未加载。task-04（2026-09-27-session-fast-replay / FR-05）：大纲有该轮
+        // run_id → 单轮直达（run_id 请求升序返回整轮日志，天然满足复合游标序），
+        // 经既有 prepend 通道进状态（logsToTurns → setTurnState 前插），随后走
+        // 共用定位高亮。会话纪元归属校验 + 卸载守卫与 handleLoadEarlier 同款。
+        // 评审 medium 修复（2026-09-27-session-fast-replay 独立评审）：短轮
+        //（≤60 字）已加载时 hit() 内容门误判未命中，二次点击会再次单轮直达
+        // prepend 重复块（React key 撞）。直达请求前先按状态判：该 run 已有
+        // 带 segments/output 的轮 → 视为已加载，裸行定位（locateAndHighlight
+        // 内置裸 querySelector 降级）不再发起请求。
+        const loadedTurn = turnState.turns.find(
+          (t) => (t.realRunId ?? t.runId) === entry.key,
+        );
+        const loadedHasBody =
+          (loadedTurn?.segments?.length ?? 0) > 0 ||
+          !!(loadedTurn?.output ?? "").trim();
+        if (loadedTurn && loadedHasBody) {
+          locateAndHighlight();
+          return;
+        }
+        const outlineHit = turnOutline?.items.find(
+          (item) => item.run_id === entry.key,
+        );
+        if (outlineHit && sessionId) {
+          jumpSuppressLoadEarlierRef.current = true;
+          const epochAtStart = sessionEpochRef.current;
+          try {
+            const turnLogs = await getAgentSessionLogs(sessionId, {
+              runId: entry.key,
+            });
+            // 在途切会话 / 卸载：丢弃（suppress 复位；不动新会话状态）。
+            if (epochAtStart !== sessionEpochRef.current || !mountedRef.current) {
+              jumpSuppressLoadEarlierRef.current = false;
+              return;
+            }
+            if (turnLogs.length === 0) {
+              // run 存在但无日志（派发失败轮等）：与循环到头的口径一致。
+              jumpSuppressLoadEarlierRef.current = false;
+              settleFollow();
+              notify.error("该轮次日志不存在（可能已被清理）");
+              return;
+            }
+            // 游标前移（复合游标 ts+id 同步写，与触顶翻页同款）：目标轮比当前
+            // 游标更早时把「加载更早」起点压到该轮最旧行，后续翻页不整轮重复
+            // 拉回（跨窗口重叠行由游标后缀去重链兜底）。目标轮不早于游标
+            // （罕见乱序）不动——重叠属既有跨页同款可接受降级。
+            const oldestJump = turnLogs.reduce(
+              (m, l) => (l.timestamp < m.timestamp ? l : m),
+              turnLogs[0]!,
+            );
+            const cursorBefore = historyCursorRef.current;
+            if (cursorBefore == null || oldestJump.timestamp < cursorBefore) {
+              historyCursorRef.current = oldestJump.timestamp;
+              historyCursorIdRef.current = oldestJump.id;
+            }
+            // prepend 装配链（与 handleLoadEarlier 同款装饰）：伪 runId 加页键
+            // 后缀防 React key 撞（realRunId 保持原值——SSE 增量 / 快照认领
+            // 不受影响）；已加载窗口的空壳行保留在新块之下（时间序正确）。
+            const newTurns = logsToTurns(turnLogs);
+            if (newTurns.length > 0) {
+              const pageKey = `jump-${oldestJump.id.slice(0, 8)}`;
+              const decorated = newTurns.map((t) => ({
+                ...t,
+                runId: `${t.realRunId ?? t.runId}#e${pageKey}`,
+              }));
+              setTurnState((prev) => ({ ...prev, turns: [...decorated, ...prev.turns] }));
+            }
+            locateAndHighlight();
+            jumpSuppressLoadEarlierRef.current = false;
+            return;
+          } catch {
+            /* 单轮请求失败（404/网络）：回退 interval 翻页链路，suppress 交其管理 */
+            jumpSuppressLoadEarlierRef.current = false;
+            fallbackLoop();
+            return;
+          }
+        }
+        // 大纲缺失 / 该轮无 run_id（占位轮 / 旧会话）：回退 interval 逐页循环。
+        fallbackLoop();
         return;
       }
-      // 命中：先即时置当前轮（design §9 刻度即时 active），双 rAF 等（循环路径的）
-      // prepend DOM 提交后定位 + 受控高亮 2.2s 自清（连点先清旧定时器防堆积）。
-      // ql-20260916-004：定位期置 active 联动抑制窗口——smooth 滚动途中的 scroll
-      // 重算不再覆盖点击置位（一页多短轮时原注释「终点仍落目标轮」不成立：终点
-      // 压中判定线的是中间轮，正是点击末刻度选中不到末轮的根因）；窗口过期后恢复
-      // 有机滚动联动，用户随后滚动仍正常重算。
-      setActiveTurnKey(entry.key);
-      // 抑制窗口从置位时刻起算（覆盖双 rAF 等待期——翻页路径的 prepend 锚定
-      // 滚动也可能在该间隙触发 scroll 重算覆盖置位）。
-      jumpActiveSyncSuppressUntilRef.current =
-        performance.now() + JUMP_ACTIVE_SYNC_SUPPRESS_MS;
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          hit()?.scrollIntoView({ behavior: "smooth", block: "start" });
-          settleFollow();
-          setHighlightTurnKey(entry.key);
-          if (highlightTimerRef.current !== null) {
-            clearTimeout(highlightTimerRef.current);
-          }
-          highlightTimerRef.current = window.setTimeout(() => {
-            highlightTimerRef.current = null;
-            setHighlightTurnKey(null);
-          }, HIGHLIGHT_TURN_CLEAR_MS);
-        });
-      });
+      // 命中：直跳定位高亮（原路径）。
+      locateAndHighlight();
     },
-    [timelineScrollEl, loadEarlierOnce, notify],
+    [timelineScrollEl, loadEarlierOnce, notify, sessionId, turnOutline],
   );
 
   /** quick 会话内搜索：q 全量查询（limit=100），结果浮层展示。 */
@@ -2299,6 +2487,13 @@ export function SessionPanelPage({
     }
     return entries;
   }, [orderedRuns, displayTurns]);
+
+  /** 导航列数据（desktop TurnNavList + mobile Drawer 同源）：大纲骨架 + 已加载
+   *  轮摘要合并（FR-06「未加载轮显示大纲摘要」+ Drawer 同源要求）。 */
+  const navEntries = useMemo(
+    () => mergeTurnNavEntries(turnOutline, catalogEntries),
+    [turnOutline, catalogEntries],
+  );
 
   /* quick（2026-09-02 本地 Agent 会话信息折叠）：tool_report 会话激活后
    *（turn_count>0），对话流里 CLI 上报的历史轮（run spec_strategy=
@@ -4405,19 +4600,21 @@ export function SessionPanelPage({
           </div>
         </div>
       ) : (
-        /* task-05（2026-09-08-session-turn-nav / FR-01 FR-05 FR-06 / D-006@v1 D-007@v1）：
+        /* task-05（2026-09-08-session-turn-nav / FR-01 FR-05 FR-06 / D-006@v1 D-007@v1）→
+            2026-09-27-session-fast-replay task-04（FR-06）：
             desktop（含悬浮窗 host——不传 variant 默认 desktop，D-006 零改动自动
-            复用）主体外包「刻度轨 flex 行」：左 TurnCatalog 常驻 ~30px 轨
-            （D-007：无折叠 / 无 localStorage / 无头部），右聊天列 flex-1 min-w-0
+            复用）主体外包「导航列 flex 行」：左 TurnNavList 行式轮次导航列（约
+            220px 可拖宽 180-320，localStorage 记忆；大纲骨架 + 已加载轮摘要合并
+            数据 navEntries，未加载轮显示大纲摘要），右聊天列 flex-1 min-w-0
             占满剩余宽度；整行 min-h-0 flex-1 接管面板剩余高度，聊天列 flex-col
-            保持原纵向滚动高度链（AgentReplayBody / TurnTimeline 根均自带
-            min-h-0 flex-1，不受包裹影响）。contents 挂载点原样保留在聊天列内
-            ——触顶自动加载滚动监听与 task-04 跳转选择器（timelineScrollEl 按
-            data-testid 深查）依赖不变。mobile 分支不动（Drawer 入口属 task-06）；
-            dialog 模式不经本渲染分支自然不挂（FR-06）。 */
+            保持原纵向滚动高度链。contents 挂载点原样保留在聊天列内
+            ——触顶自动加载滚动监听与跳转选择器（timelineScrollEl 按
+            data-testid 深查）依赖不变。mobile 分支不动（Drawer 入口见下方）；
+            dialog 模式不经本渲染分支自然不挂（FR-06）。旧 TurnCatalog 组件文件
+            保留不挂载（回退能力），挂载处换回即回旧形态。 */
         <div className="flex min-h-0 flex-1">
-          <TurnCatalog
-            entries={catalogEntries}
+          <TurnNavList
+            entries={navEntries}
             activeTurnKey={activeTurnKey}
             loadingEarlier={historyLoading}
             onJump={handleJumpToTurn}
@@ -4649,9 +4846,12 @@ export function SessionPanelPage({
           （悬浮窗走 desktop 分支不挂载；dialog 模式不经本渲染分支自然不挂）。
           宽 min(78vw,300px) 左滑、遮罩可点关、destroyOnHidden（antd v6 API，
           跟随 mobile-filter-drawer 既有用法）。内容为行式列表形态（触屏无
-          hover，不复用 TickRail 飞出卡）：轮号 + 提问摘要一行 + meta，active
-          行左侧品牌细线；点击行 → handleJumpToTurn（与 desktop 同一回调）+
-          自动关闭（选中即关）。主题色全部走语义类/主题变量，不写死色值。 */}
+          hover，不复用飞出卡）：轮号 + 提问摘要一行 + meta，active 行左侧品牌
+          细线；点击行 → handleJumpToTurn（与 desktop 同一回调）+ 自动关闭
+          （选中即关）。主题色全部走语义类/主题变量，不写死色值。
+          task-04（2026-09-27-session-fast-replay / FR-06）：数据源同步换
+          navEntries（大纲骨架 + 已加载摘要合并——与 desktop TurnNavList 同源，
+          未加载轮也带大纲摘要，形态不变）。 */}
       {mobile && (
         <Drawer
           open={turnNavOpen}
@@ -4669,7 +4869,7 @@ export function SessionPanelPage({
             data-testid="session-turn-nav-list"
             className="flex flex-col gap-0.5"
           >
-            {catalogEntries.map((entry) => {
+            {navEntries.map((entry) => {
               const active = entry.key === activeTurnKey;
               return (
                 <button
@@ -4709,7 +4909,7 @@ export function SessionPanelPage({
                 </button>
               );
             })}
-            {catalogEntries.length === 0 && (
+            {navEntries.length === 0 && (
               <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">
                 暂无轮次
               </p>
@@ -4835,13 +5035,18 @@ export function SessionPanelPage({
   ) : (
     panelRoot
   );
+  // FR-07（2026-09-27-session-fast-replay）：面板根外包 slim 全文回填上下文——
+  // sessionId 作用域（预会话 null = 不启用），ToolExpandBody 展开截断条目时消费。
+  const withSlimLogFull = (tree: ReactNode) => (
+    <SlimLogFullProvider sessionId={sessionId}>{tree}</SlimLogFullProvider>
+  );
   if (!hasSubagentPanelHost) {
-    return detailColumnTree;
+    return withSlimLogFull(detailColumnTree);
   }
-  return (
+  return withSlimLogFull(
     <SubagentPanelContext.Provider value={subagentPanelContextValue}>
       {detailColumnTree}
-    </SubagentPanelContext.Provider>
+    </SubagentPanelContext.Provider>,
   );
 }
 

@@ -92,6 +92,11 @@ export interface AgentRunLogEntry {
   // 手写版此前漏同步）。
   segment_id?: string | null;
   metadata?: Record<string, unknown> | null;
+  // 2026-09-27-session-fast-replay task-03 / FR-02：slim 精简模式截断标记——
+  // GET /sessions/{id}/logs?slim=true 时 tool 通道（channel=tool_call）
+  // content_redacted 超 2000 字符截到 2000 并置 true；旧路径不置恒
+  // null/undefined（零回归）。截断条目需全文走 GET /sessions/{id}/logs/{log_id}。
+  content_truncated?: boolean | null;
 }
 
 export interface CreateAgentRunInput {

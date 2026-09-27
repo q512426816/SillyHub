@@ -53,6 +53,7 @@ const sessionApi = vi.hoisted(() => ({
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
   getAgentSessionLogs: vi.fn(),
+    fetchSessionTurnOutline: vi.fn(),
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
   // 任务执行面板挂载即取数（task-10 惰性闸门移除）：runs/tasks 都必须 resolve
@@ -81,6 +82,7 @@ vi.mock("@/lib/daemon", async () => {
     streamSession: sessionApi.streamSession,
     getAgentSession: sessionApi.getAgentSession,
     getAgentSessionLogs: sessionApi.getAgentSessionLogs,
+    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionRuns: sessionApi.listSessionRuns,
@@ -256,6 +258,7 @@ beforeEach(() => {
   });
   // dialog attach 默认链路：prefetch 空 + fake SSE + 轮询 active。
   sessionApi.getAgentSessionLogs.mockResolvedValue([]);
+    sessionApi.fetchSessionTurnOutline.mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] });
   sessionApi.getAgentSession.mockResolvedValue(makeDetail("claude"));
   sessionApi.streamSession.mockImplementation(() => ({
     close: vi.fn(),

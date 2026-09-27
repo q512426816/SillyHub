@@ -650,6 +650,14 @@ export async function getSessionUsage(
  *   - q：内容搜索（content ILIKE %q%，可与 after/before 组合）；
  *   - limit：最新 N 条语义（按 timestamp desc 取 N 再反转升序；缺省=旧全量行为，
  *     不传参数的既有调用方零影响）。
+ *
+ * 2026-09-27-session-fast-replay task-03 / FR-02 新增可选查询参数：
+ *   - run_id：单轮直达（只返回该 run 全部日志，timestamp,id 升序，上限 2000；
+ *     run 不存在或不属于该会话 404）；与 before/after 游标互斥（同传后端 422），
+ *     可与 q/limit 组合——前端跳转直达整轮取数用；
+ *   - slim：精简模式（tool 通道 content_redacted 超 2000 字符截断并置
+ *     content_truncated=true，全文走 getAgentSessionLogFull 按需回填）。
+ *     缺省 false 行为零变化（既有调用方零影响）。
  */
 export async function getAgentSessionLogs(
   sessionId: string,
@@ -657,8 +665,10 @@ export async function getAgentSessionLogs(
     after?: string;
     before?: string;
     beforeId?: string;
+    runId?: string;
     q?: string;
     limit?: number;
+    slim?: boolean;
     signal?: AbortSignal;
   },
 ): Promise<AgentRunLogEntry[]> {
@@ -666,13 +676,62 @@ export async function getAgentSessionLogs(
   if (opts?.after) params.set("after", opts.after);
   if (opts?.before) params.set("before", opts.before);
   if (opts?.before && opts?.beforeId) params.set("before_id", opts.beforeId);
+  if (opts?.runId) params.set("run_id", opts.runId);
   if (opts?.q) params.set("q", opts.q);
   if (opts?.limit != null) params.set("limit", String(opts.limit));
+  if (opts?.slim) params.set("slim", "true");
   const paramStr = params.toString();
   const qs = paramStr ? `?${paramStr}` : "";
   return apiFetch<AgentRunLogEntry[]>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/logs${qs}`,
     { signal: opts?.signal },
+  );
+}
+
+/* ---------- Session fast replay（2026-09-27-session-fast-replay task-03 / FR-01 FR-02） ---------- */
+
+/**
+ * turn-outline 单轮摘要项（生成版 components["schemas"]["TurnOutlineItemRead"]
+ * 的前端别名——轻列字段直映 AgentRun 既有列 + 窗口函数抽出的 prompt/answer 摘要；
+ * 无对应日志的摘要为 null，不伪造）。
+ */
+export type SessionTurnOutlineItem =
+  components["schemas"]["TurnOutlineItemRead"];
+
+/**
+ * turn-outline 响应体（生成版 SessionTurnOutlineRead 前端别名）：session_id +
+ * 总轮数 + 全量轮次摘要列表（created_at 升序、seq 1 起；空会话 total_turns=0
+ * + 空 items 不报错）。归属闸门与 runs/logs 端点同款（跨用户/不存在 404）。
+ */
+export type SessionTurnOutlineRead = components["schemas"]["SessionTurnOutlineRead"];
+
+/**
+ * GET /api/daemon/sessions/{id}/turn-outline — 会话全量轮次大纲（FR-01）。
+ * 一次响应返回全部轮次摘要（无 runs 端点的 500 条截断），供导航列全量骨架 +
+ * 未加载轮直达跳转（run_id 单轮请求）。服务端进程内 LRU 缓存按数据指纹失效
+ * （命中零重算），重复打开同会话成本极低。失败抛 ApiError，调用方静默降级回
+ * runsMeta 派生数据（导航列行为不劣于现状）。
+ */
+export async function fetchSessionTurnOutline(
+  sessionId: string,
+): Promise<SessionTurnOutlineRead> {
+  return apiFetch<SessionTurnOutlineRead>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/turn-outline`,
+  );
+}
+
+/**
+ * GET /api/daemon/sessions/{id}/logs/{log_id} — 单条日志全文（FR-02 / FR-07）。
+ * slim 模式的按需全文消费端点：截断条目（content_truncated=true）展开时单条
+ * 拉取渲染，非截断条目零额外请求。归属闸门同款（log → run → session 链校验，
+ * 不存在或不属于该会话 404）。
+ */
+export async function getAgentSessionLogFull(
+  sessionId: string,
+  logId: string,
+): Promise<AgentRunLogEntry> {
+  return apiFetch<AgentRunLogEntry>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/logs/${encodeURIComponent(logId)}`,
   );
 }
 

@@ -69,6 +69,11 @@ const mocks = vi.hoisted(() => ({
   listAgentSessions: vi.fn(),
   getAgentSession: vi.fn(),
   getAgentSessionLogs: vi.fn(),
+  // 2026-09-27-session-fast-replay task-03：大纲 + 单条全文（打开链路并行拉取
+  // / slim 截断展开回填）。默认空大纲 = 降级口径（导航列回退 runsMeta 派生，
+  // 既有跳转用例走 interval 翻页回退链路零改动）。
+  fetchSessionTurnOutline: vi.fn(),
+  getAgentSessionLogFull: vi.fn(),
   createSession: vi.fn(),
   injectSession: vi.fn(),
   interruptSession: vi.fn(),
@@ -139,6 +144,11 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
     listAgentSessions: (...args: unknown[]) => mocks.listAgentSessions(...args),
     getAgentSession: (...args: unknown[]) => mocks.getAgentSession(...args),
     getAgentSessionLogs: (...args: unknown[]) => mocks.getAgentSessionLogs(...args),
+    // 2026-09-27-session-fast-replay task-03：面板打开链路并行拉大纲（FR-04）。
+    fetchSessionTurnOutline: (...args: unknown[]) =>
+      mocks.fetchSessionTurnOutline(...args),
+    getAgentSessionLogFull: (...args: unknown[]) =>
+      mocks.getAgentSessionLogFull(...args),
     createSession: (...args: unknown[]) => mocks.createSession(...args),
     injectSession: (...args: unknown[]) => mocks.injectSession(...args),
     interruptSession: (...args: unknown[]) => mocks.interruptSession(...args),
@@ -431,6 +441,18 @@ beforeEach(() => {
   // 持久实现），reset 后下一行立即回填默认值，安全。
   mocks.getAgentSessionLogs.mockReset();
   mocks.getAgentSessionLogs.mockResolvedValue([]);
+  // task-03（2026-09-27-session-fast-replay）：默认空大纲（total_turns=0 + 空
+  // items）= 大纲不可用降级口径——导航列回退 runsMeta 派生，跳转走既有 interval
+  // 翻页回退，既有用例零改动；大纲驱动用例（直达跳转/未加载摘要）在本文件
+  // 轮次导航 describe 内覆写。
+  mocks.fetchSessionTurnOutline.mockReset();
+  mocks.fetchSessionTurnOutline.mockResolvedValue({
+    session_id: "s-1",
+    total_turns: 0,
+    items: [],
+  });
+  mocks.getAgentSessionLogFull.mockReset();
+  mocks.getAgentSessionLogFull.mockResolvedValue(null);
   mocks.createSession.mockResolvedValue({
     session_id: "s-new",
     run_id: "r-new",
@@ -622,9 +644,14 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
     });
     // quick（2026-09-02 群聊体验）：初始历史窗口化（limit=HISTORY_PAGE_SIZE，
     // 更早走「加载更早」；ql-20260916-014 起单源引用常量）。
+    // task-03（2026-09-27-session-fast-replay / FR-04）：尾页请求 slim=true
+    //（tool 通道超 2000 字符截断传输，展开按需拉全文）。
     expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1", {
       limit: HISTORY_PAGE_SIZE,
+      slim: true,
     });
+    // 大纲与尾页日志并行请求（FR-04 首屏 ≤2 次可见全量导航）。
+    expect(mocks.fetchSessionTurnOutline).toHaveBeenCalledWith("s-1");
     expect(mocks.getAgentSession).toHaveBeenCalledWith("s-1");
   });
 
@@ -1334,9 +1361,11 @@ describe("SessionPanel attach 运行中轮恢复竞态（ql-20260820-007）", ()
     // 历史先回灌：detail 未到前面板显 Spin（!session 分支），但 logs 恢复在
     // mount effect 内已落 turnState（此刻 logsToTurns 全 completed）。
     await waitFor(() => {
-      // quick：初始历史窗口化（limit=HISTORY_PAGE_SIZE，同 :580 适配）。
+      // quick：初始历史窗口化（limit=HISTORY_PAGE_SIZE，同 :580 适配；
+      // task-03 2026-09-27 起 slim=true）。
       expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1", {
         limit: HISTORY_PAGE_SIZE,
+        slim: true,
       });
     });
     await act(async () => {}); // flush 回灌 microtask 链（确保先于 detail 落地）
@@ -1706,6 +1735,8 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
         // id 分量（= 初始窗口最旧行 q-inj 的 id，与 before 同传）。
         beforeId: "q-inj",
         limit: HISTORY_PAGE_SIZE,
+        // task-03（2026-09-27-session-fast-replay / FR-04）：触顶翻页同 slim。
+        slim: true,
         // ql-20260903-018 加载更早请求自带 AbortController（换会话 abort 在途）。
         signal: expect.any(AbortSignal),
       });
@@ -1897,6 +1928,8 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
         //（初始窗口最旧行 w-inj）。
         beforeId: "w-inj",
         limit: HISTORY_PAGE_SIZE,
+        // task-03（2026-09-27-session-fast-replay / FR-04）：触顶翻页同 slim。
+        slim: true,
         // ql-20260903-018 加载更早请求自带 AbortController（换会话 abort 在途）。
         signal: expect.any(AbortSignal),
       });
@@ -1934,11 +1967,14 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
       await selectDefaultSession();
       expect(await screen.findByText("当前窗口提问A")).toBeTruthy();
 
-      fireEvent.scroll(await screen.findByTestId("turn-timeline-scroll"));
-      // 更早页 prepend：内容可见且当前窗口保留。
-      expect(await screen.findByText("更早提问C")).toBeTruthy();
-      expect(screen.getByText("当前窗口提问A")).toBeTruthy();
-      expect(screen.getByText("当前窗口提问B")).toBeTruthy();
+      const timeline = await screen.findByTestId("turn-timeline-scroll");
+      fireEvent.scroll(timeline);
+      // 更早页 prepend：内容可见且当前窗口保留。2026-09-27-session-fast-replay
+      // task-04 起 prepend 满 3 轮 → desktop 常驻导航列（TurnNavList）行摘要与
+      // 正文同文本——正文断言 scope 到时间线容器（防 getByText 撞车）。
+      expect(await within(timeline).findByText("更早提问C")).toBeTruthy();
+      expect(within(timeline).getByText("当前窗口提问A")).toBeTruthy();
+      expect(within(timeline).getByText("当前窗口提问B")).toBeTruthy();
 
       // React 列表重复 key 在开发模式经 console.error 报警——修复后不出现。
       const dupKeyErrors = errSpy.mock.calls.filter(
@@ -2202,6 +2238,16 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
   const flushRaf = () =>
     new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
+  /** 2026-09-27-session-fast-replay task-04 收尾：desktop 常驻 TurnNavList 行摘要
+   *  与消息流正文同文本（如「当前窗口提问」在导航列与时间线双现）——正文断言
+   *  统一 scope 到时间线容器（turn-timeline-scroll）内查找，防 getByText/
+   *  findByText 报 Found multiple elements；导航行定位仍走 role+aria-label
+   *  （buildAriaLabel 轮号+状态唯一）。 */
+  const findTimelineText = async (text: string) => {
+    const timeline = await screen.findByTestId("turn-timeline-scroll");
+    return within(timeline).findByText(text);
+  };
+
   /** task-06：mobile variant 面板直挂（⋯ 菜单/Drawer 仅 mobile 渲染分支；
    *  复用本文件模块级 mocks，QueryClient 形态对齐 renderPage）。 */
   function renderMobilePanel() {
@@ -2245,7 +2291,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     ]);
     renderPage();
     await selectDefaultSession();
-    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+    expect(await findTimelineText("当前窗口提问")).toBeTruthy();
 
     const tick = await screen.findByRole("button", { name: /^第1轮 · 完成/ });
     scrollIntoViewSpy.mockClear();
@@ -2266,7 +2312,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     mockThreeLoadedRuns();
     renderPage();
     await selectDefaultSession();
-    expect(await screen.findByText("第三轮提问")).toBeTruthy();
+    expect(await findTimelineText("第三轮提问")).toBeTruthy();
 
     const scroller = await screen.findByTestId("turn-timeline-scroll");
     // 量测前提 mock：容器顶 0、三行 top 0/50/300（判定线 = 顶 + 120px，
@@ -2306,7 +2352,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     mockThreeLoadedRuns();
     renderPage();
     await selectDefaultSession();
-    expect(await screen.findByText("第三轮提问")).toBeTruthy();
+    expect(await findTimelineText("第三轮提问")).toBeTruthy();
 
     const tick1 = await screen.findByRole("button", { name: /^第1轮 · 完成/ });
     scrollIntoViewSpy.mockClear();
@@ -2374,7 +2420,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     ]);
     renderPage();
     await selectDefaultSession();
-    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+    expect(await findTimelineText("当前窗口提问")).toBeTruthy();
 
     // 派发失败轮按 created_at 排第 2 位（failed 无孤儿补建 → 未加载），
     // 其后两轮顺位不后移（修复前：失败轮第 4、r-2 第 3、r-cur 第 2 前移）。
@@ -2407,13 +2453,13 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
       .mockResolvedValue([]); // 兜底（命中即停，理论不达）
     renderPage();
     await selectDefaultSession();
-    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+    expect(await findTimelineText("当前窗口提问")).toBeTruthy();
 
     fireEvent.click(
       await screen.findByRole("button", { name: UNLOADED_TICK_LABEL }),
     );
     // 命中后 prepend 内容可见（翻页链真实落 DOM）。
-    expect(await screen.findByText("最早轮提问")).toBeTruthy();
+    expect(await findTimelineText("最早轮提问")).toBeTruthy();
     // 两页 before 请求（游标链 08:00 → 07:30），命中即停不空转。
     await waitFor(() => expect(beforeCallCount()).toBe(2));
     expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
@@ -2422,6 +2468,8 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
       //（第二次翻页游标 = 中间轮页首行 r-mid-in）。
       beforeId: "r-mid-in",
       limit: HISTORY_PAGE_SIZE,
+      // task-03（2026-09-27-session-fast-replay / FR-04）：触顶翻页同 slim。
+      slim: true,
       // ql-20260903-018：加载更早请求自带 AbortController。
       signal: expect.any(AbortSignal),
     });
@@ -2451,7 +2499,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
       });
     renderPage();
     await selectDefaultSession();
-    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+    expect(await findTimelineText("当前窗口提问")).toBeTruthy();
 
     fireEvent.click(
       await screen.findByRole("button", { name: UNLOADED_TICK_LABEL }),
@@ -2485,7 +2533,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
       .mockResolvedValue([]);
     renderPage();
     await selectDefaultSession();
-    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+    expect(await findTimelineText("当前窗口提问")).toBeTruthy();
 
     fireEvent.click(
       await screen.findByRole("button", { name: UNLOADED_TICK_LABEL }),
@@ -2506,7 +2554,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
 
     // 第 2 页返回（满页且含目标轮）→ 命中即停、suppress 解除。
     resolvePage2(fullPage("r-old", "最早轮提问", "2026-08-15T06:30:00Z"));
-    expect(await screen.findByText("最早轮提问")).toBeTruthy();
+    expect(await findTimelineText("最早轮提问")).toBeTruthy();
     await new Promise((r) => setTimeout(r, 50));
     expect(beforeCallCount()).toBe(2);
     // 正向对照：suppress 解除后触顶恢复自动加载（第 3 页 → 兜底空页到头）。
@@ -2529,7 +2577,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
       .mockImplementation(() => fullPage("r-filler", "填充页提问", "2026-08-15T07:00:00Z"));
     const view = renderPage();
     await selectDefaultSession();
-    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+    expect(await findTimelineText("当前窗口提问")).toBeTruthy();
 
     fireEvent.click(
       await screen.findByRole("button", { name: UNLOADED_TICK_LABEL }),
@@ -2611,5 +2659,193 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
       () => expect(screen.queryByTestId("session-turn-nav-list")).toBeNull(),
       { timeout: 3000 },
     );
+  });
+
+  /* ── 2026-09-27-session-fast-replay task-03/04（FR-04 FR-05 FR-06）：大纲
+   *    并行拉取 + 未加载轮 run_id 单轮直达 + 导航列大纲摘要（TurnNavList 行式
+   *    数据合并）。默认 beforeEach 大纲为空（降级口径，上方既有用例零改动）；
+   *    以下用例覆写大纲夹具。 ── */
+
+  /** 大纲单轮条目固件（TurnOutlineItemRead 最小集：mergeTurnNavEntries 消费字段）。 */
+  function outlineItem(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      run_id: "r-x",
+      seq: 1,
+      created_at: "2026-08-15T06:00:00Z",
+      started_at: "2026-08-15T06:00:00Z",
+      finished_at: "2026-08-15T06:00:10Z",
+      status: "completed",
+      error_code: null,
+      sender_name: null,
+      engine_anchor: null,
+      auto_resume_of: null,
+      input_tokens: null,
+      output_tokens: null,
+      prompt_summary: null,
+      answer_summary: null,
+      ...overrides,
+    };
+  }
+
+  it("task-03/04：大纲与尾页日志并行请求；导航列未加载轮显示大纲摘要、已加载轮摘要覆盖（mergeTurnNavEntries）", async () => {
+    mockThreeRuns();
+    mocks.getAgentSessionLogs.mockResolvedValue(
+      fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
+    );
+    // 大纲：r-ancient completed 无日志 → 孤儿补建为已加载空壳（摘要本地优先，
+    // 大纲摘要不顶掉）；r-old failed 未加载带摘要（FR-06 空态升级主断言对象）；
+    // r-cur 已加载——大纲摘要与本地不同，断言已加载轮用本地覆盖。
+    mocks.fetchSessionTurnOutline.mockResolvedValue({
+      session_id: "s-1",
+      total_turns: 3,
+      items: [
+        outlineItem({ run_id: "r-ancient", seq: 1, prompt_summary: "最旧轮大纲摘要" }),
+        outlineItem({ run_id: "r-old", seq: 2, status: "failed", prompt_summary: "旧轮大纲摘要" }),
+        outlineItem({ run_id: "r-cur", seq: 3, prompt_summary: "当前轮大纲摘要（应被本地覆盖）" }),
+      ],
+    });
+    renderPage();
+    await selectDefaultSession();
+    expect(await findTimelineText("当前窗口提问")).toBeTruthy();
+
+    // 大纲并行请求（打开链路，与尾页日志同一 attach effect 发起）。
+    await waitFor(() =>
+      expect(mocks.fetchSessionTurnOutline).toHaveBeenCalledWith("s-1"),
+    );
+    // 未加载轮（大纲骨架）：摘要照常显示（FR-06 空态升级）。
+    // 注：2026-09-27 收尾复核发现组件 bug——mergeTurnNavEntries 的 loadedByKey
+    // 未按 loaded 过滤，未加载轮恒命中本地空摘要条目、大纲 prompt_summary 被
+    // 丢弃（FR-06 未生效）。本断言与 design 口径一致保持不改，待组件侧修复。
+    expect(
+      await screen.findByRole("button", {
+        name: /^第2轮 · 失败 · 未加载 · 旧轮大纲摘要$/,
+      }),
+    ).toBeTruthy();
+    // 已加载轮：catalogEntries 本地摘要覆盖大纲摘要（同 run_id 对齐）。
+    const curRow = await screen.findByRole("button", {
+      name: /^第3轮 · 完成 · 当前窗口提问/,
+    });
+    expect(curRow.textContent).not.toContain("当前轮大纲摘要");
+  });
+
+  it("task-04（FR-05）：大纲有 run_id 的未加载轮点击 → 单轮请求直达（零翻页）prepend + 定位高亮", async () => {
+    mockThreeRuns();
+    mocks.fetchSessionTurnOutline.mockResolvedValue({
+      session_id: "s-1",
+      total_turns: 3,
+      items: [
+        outlineItem({ run_id: "r-ancient", seq: 1 }),
+        outlineItem({ run_id: "r-old", seq: 2, status: "failed" }),
+        outlineItem({ run_id: "r-cur", seq: 3 }),
+      ],
+    });
+    mocks.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { runId?: string; before?: string }) => {
+        if (opts?.runId === "r-old") {
+          return [
+            navLog("o-1", "r-old", "user_input", "最早轮提问", "2026-08-15T06:30:00Z"),
+            navLog("o-2", "r-old", "stdout", "最早轮答复", "2026-08-15T06:30:10Z"),
+          ];
+        }
+        if (opts?.before) return []; // 到头（无更早）
+        return fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z");
+      },
+    );
+    renderPage();
+    await selectDefaultSession();
+    expect(await findTimelineText("当前窗口提问")).toBeTruthy();
+
+    const row = await screen.findByRole("button", {
+      name: /^第2轮 · 失败 · 未加载$/,
+    });
+    scrollIntoViewSpy.mockClear();
+    fireEvent.click(row);
+    // 单轮请求直达（run_id 参数，一次往返取整轮）。
+    await waitFor(() =>
+      expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1", {
+        runId: "r-old",
+      }),
+    );
+    // prepend 落 DOM：目标轮内容出现在时间线。
+    expect(await findTimelineText("最早轮提问")).toBeTruthy();
+    // 零翻页（不走 interval 回退）+ 定位高亮（smooth + block:start）+ 即时 active。
+    await waitFor(expectJumpScrolled);
+    await waitFor(() => expect(row).toHaveAttribute("aria-current", "true"));
+    expect(beforeCallCount()).toBe(0);
+    expect(mocks.notifyWarning).not.toHaveBeenCalled();
+    expect(mocks.notifyError).not.toHaveBeenCalled();
+  });
+
+  it("task-04（FR-05）：单轮请求失败 → 回退 interval 翻页链路（JUMP_LOAD_EARLIER_MAX_PAGES 保留为回退）", async () => {
+    mockThreeRuns();
+    mocks.fetchSessionTurnOutline.mockResolvedValue({
+      session_id: "s-1",
+      total_turns: 3,
+      items: [
+        outlineItem({ run_id: "r-ancient", seq: 1 }),
+        outlineItem({ run_id: "r-old", seq: 2, status: "failed" }),
+        outlineItem({ run_id: "r-cur", seq: 3 }),
+      ],
+    });
+    mocks.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { runId?: string; before?: string }) => {
+        if (opts?.runId) throw new Error("run fetch failed");
+        if (opts?.before) {
+          // 翻页第 1 页即目标轮（回退链路命中即停）。
+          return [
+            navLog("o-1", "r-old", "user_input", "最早轮提问", "2026-08-15T06:30:00Z"),
+            navLog("o-2", "r-old", "stdout", "最早轮答复", "2026-08-15T06:30:10Z"),
+          ];
+        }
+        return fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z");
+      },
+    );
+    renderPage();
+    await selectDefaultSession();
+    expect(await findTimelineText("当前窗口提问")).toBeTruthy();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /^第2轮 · 失败 · 未加载$/ }),
+    );
+    // 回退链路：单轮请求抛错 → interval 翻页接手（before 请求发起且内容到 DOM）。
+    expect(await findTimelineText("最早轮提问")).toBeTruthy();
+    await waitFor(() => expect(beforeCallCount()).toBeGreaterThanOrEqual(1));
+  });
+
+  it("task-04（FR-05）：单轮请求命中但日志为空 → 「该轮次日志不存在」兜底（≤2 次往返）", async () => {
+    mockThreeRuns();
+    mocks.fetchSessionTurnOutline.mockResolvedValue({
+      session_id: "s-1",
+      total_turns: 3,
+      items: [
+        outlineItem({ run_id: "r-ancient", seq: 1 }),
+        outlineItem({ run_id: "r-old", seq: 2, status: "failed" }),
+        outlineItem({ run_id: "r-cur", seq: 3 }),
+      ],
+    });
+    mocks.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { runId?: string; before?: string }) => {
+        if (opts?.runId) return []; // run 存在但无日志（派发失败轮）
+        if (opts?.before) return [];
+        return fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z");
+      },
+    );
+    renderPage();
+    await selectDefaultSession();
+    expect(await findTimelineText("当前窗口提问")).toBeTruthy();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /^第2轮 · 失败 · 未加载$/ }),
+    );
+    await waitFor(() =>
+      expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1", {
+        runId: "r-old",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.notifyError).toHaveBeenCalledWith("该轮次日志不存在（可能已被清理）"),
+    );
+    // 直达路径直接收口，不空转翻页。
+    expect(beforeCallCount()).toBe(0);
   });
 });

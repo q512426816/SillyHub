@@ -466,6 +466,13 @@ export interface AssemblerLogInput {
    *  hunks 含真实文件行号）。仅 Edit tool_result 行携带；配对时写到 tool 段
    *  editPatch，展开区优先于 LCS 自算。 */
   editPatch?: string | null;
+  /**
+   * 2026-09-27-session-fast-replay task-04 / FR-07：slim 截断标记（历史日志
+   * GET /logs?slim=true 时 tool 通道超 2000 字符截断并置 content_truncated=true）。
+   * 装配时随行写入 tool 段（raw / result 各自源行独立），展开区据此按需拉取
+   * 单条全文（getAgentSessionLogFull）；实时 SSE / 非 slim 历史恒 null/undefined。
+   */
+  contentTruncated?: boolean | null;
 }
 
 /** 结构化段模型（渲染与派生统计的唯一数据源，design §7）。 */
@@ -515,6 +522,19 @@ export type TurnSegment =
       taskAsync?: boolean;
       taskSummary?: string;
       taskToolName?: string;
+      /**
+       * 2026-09-27-session-fast-replay task-04 / FR-07：slim 全文回填关联键与
+       * 截断标记（可选——实时 SSE / 非 slim 历史恒缺省，零影响）：
+       *   - sourceLogId / contentTruncated：构造 raw 的 tool_use 行 log id +
+       *     该行是否被 slim 截断（截断时展开区按 log id 拉全文替换 raw 渲染）；
+       *   - resultSourceLogId / resultTruncated：配对 tool_result 行的同款
+       *     （result 也走 tool 通道，超长同样会被截断）。
+       * 段 id 是 tool_use_id 非 log id，不能直接当全文回填键——故单独携带。
+       */
+      sourceLogId?: string;
+      contentTruncated?: boolean;
+      resultSourceLogId?: string;
+      resultTruncated?: boolean;
     }
   | {
       /**
@@ -1428,6 +1448,9 @@ export function applyLogToSegments(
           endedAt: null,
           children: adoptedChildren,
           subagentType: adoptedSubagentType,
+          // FR-07 slim 全文回填键：构造 raw 的源行 log id + 截断标记。
+          ...(input.logId ? { sourceLogId: input.logId } : {}),
+          ...(input.contentTruncated === true ? { contentTruncated: true } : {}),
         },
       ]);
       break;
@@ -1473,6 +1496,10 @@ export function applyLogToSegments(
                     ? "ok"
                     : t.status,
                 endedAt: ts,
+                // FR-07 slim 全文回填键：配对 result 的源行 log id + 截断标记
+                //（条件展开不落 undefined 键，toStrictEqual 深比较零漂移）。
+                ...(input.logId ? { resultSourceLogId: input.logId } : {}),
+                ...(input.contentTruncated === true ? { resultTruncated: true } : {}),
               },
               ...children.slice(i + 1),
             ];
@@ -1495,6 +1522,9 @@ export function applyLogToSegments(
             endedAt: ts,
             children: [],
             subagentType: null,
+            // FR-07：孤儿段的 result 同样可被 slim 截断，照常携带回填键。
+            resultSourceLogId: input.logId ?? undefined,
+            resultTruncated: input.contentTruncated === true || undefined,
           },
         ];
       });

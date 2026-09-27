@@ -70,6 +70,7 @@ const sessionApi = vi.hoisted(() => ({
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
   getAgentSessionLogs: vi.fn(),
+    fetchSessionTurnOutline: vi.fn(),
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
   listSessionTeamMissions: vi.fn(),
@@ -94,6 +95,7 @@ vi.mock("@/lib/daemon", async () => {
     streamSession: sessionApi.streamSession,
     getAgentSession: sessionApi.getAgentSession,
     getAgentSessionLogs: sessionApi.getAgentSessionLogs,
+    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionTeamMissions: sessionApi.listSessionTeamMissions,
@@ -253,6 +255,7 @@ function setupPage(
     id,
   }));
   sessionApi.getAgentSessionLogs.mockResolvedValue([]);
+    sessionApi.fetchSessionTurnOutline.mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] });
   sessionApi.fetchPendingDialogs.mockResolvedValue([]);
   sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
   sessionApi.listSessionTeamMissions.mockResolvedValue([]);

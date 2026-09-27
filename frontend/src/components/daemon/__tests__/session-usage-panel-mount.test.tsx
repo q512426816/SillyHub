@@ -73,6 +73,7 @@ const daemonMock = vi.hoisted(() => ({
   listSessionRuns: vi.fn().mockResolvedValue([]),
   listSessionTasks: vi.fn().mockResolvedValue([]),
   getAgentSessionLogs: vi.fn(),
+    fetchSessionTurnOutline: vi.fn().mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] }),
   fetchPendingDialogs: vi.fn(),
   fetchSessionQueue: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),

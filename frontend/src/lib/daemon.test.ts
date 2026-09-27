@@ -14,7 +14,9 @@ import {
   createSession,
   deleteAgentSession,
   deleteDaemonRuntime,
+  fetchSessionTurnOutline,
   getAgentSession,
+  getAgentSessionLogFull,
   getAgentSessionLogs,
   injectSession,
   listAgentSessions,
@@ -297,6 +299,99 @@ describe("getAgentSessionLogs", () => {
     await getAgentSessionLogs("s1");
     url = new URL(h.lastUrl());
     expect(url.search).toBe("");
+  });
+
+  // 2026-09-27-session-fast-replay task-03 / FR-02：run_id 单轮直达 + slim 精简。
+  it("opts.runId/slim 透传为 run_id/slim query；slim=false 缺省不产参数（旧行为零回归）", async () => {
+    const h = mockFetch({ status: 200, body: [] });
+
+    await getAgentSessionLogs("s1", { runId: "run-old", slim: true });
+    let url = new URL(h.lastUrl());
+    expect(url.pathname).toBe("/api/daemon/sessions/s1/logs");
+    expect(url.searchParams.get("run_id")).toBe("run-old");
+    expect(url.searchParams.get("slim")).toBe("true");
+
+    // slim=false / 缺省：不产 slim / run_id 参数（缺省零回归）。
+    await getAgentSessionLogs("s1", { slim: false });
+    url = new URL(h.lastUrl());
+    expect(url.searchParams.has("slim")).toBe(false);
+    expect(url.searchParams.has("run_id")).toBe(false);
+  });
+});
+
+// 2026-09-27-session-fast-replay task-03 / FR-01 FR-02：大纲 + 单条全文。
+describe("fetchSessionTurnOutline / getAgentSessionLogFull", () => {
+  it("GET /sessions/{id}/turn-outline 返回 SessionTurnOutlineRead", async () => {
+    const body = {
+      session_id: "s1",
+      total_turns: 2,
+      items: [
+        {
+          run_id: "run-1",
+          seq: 1,
+          created_at: "2026-09-27T10:00:00Z",
+          started_at: "2026-09-27T10:00:01Z",
+          finished_at: "2026-09-27T10:00:20Z",
+          status: "completed",
+          error_code: null,
+          sender_name: null,
+          engine_anchor: null,
+          auto_resume_of: null,
+          input_tokens: 100,
+          output_tokens: 50,
+          prompt_summary: "第一轮提问",
+          answer_summary: "第一轮答复",
+        },
+        {
+          run_id: "run-2",
+          seq: 2,
+          created_at: "2026-09-27T10:01:00Z",
+          status: "failed",
+          prompt_summary: null,
+          answer_summary: null,
+        },
+      ],
+    };
+    const h = mockFetch({ status: 200, body });
+
+    const result = await fetchSessionTurnOutline("s1");
+    expect(result.total_turns).toBe(2);
+    expect(result.items[0]?.seq).toBe(1);
+    expect(result.items[1]?.prompt_summary).toBeNull();
+    const url = new URL(h.lastUrl());
+    expect(url.pathname).toBe("/api/daemon/sessions/s1/turn-outline");
+    expect(h.lastInit()?.method ?? "GET").toBe("GET");
+  });
+
+  it("turn-outline 404（跨用户/不存在）映射 ApiError", async () => {
+    mockFetch({
+      status: 404,
+      body: {
+        code: "HTTP_404_DAEMON_SESSION_NOT_FOUND",
+        message: "not found",
+        request_id: null,
+        details: null,
+      },
+    });
+    await expect(fetchSessionTurnOutline("any")).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("GET /sessions/{id}/logs/{log_id} 返回单条全文（log id 编码透传）", async () => {
+    const body = {
+      id: "l1",
+      run_id: "run-a",
+      timestamp: "2026-09-27T10:00:01Z",
+      channel: "tool_call",
+      content_redacted: "全文".repeat(1500),
+      content_truncated: null as boolean | null,
+    };
+    const h = mockFetch({ status: 200, body });
+
+    const result = await getAgentSessionLogFull("s1", "log/1");
+    expect(result.id).toBe("l1");
+    expect(result.content_redacted?.length).toBe(3000);
+    const url = new URL(h.lastUrl());
+    expect(url.pathname).toBe("/api/daemon/sessions/s1/logs/log%2F1");
   });
 });
 

@@ -66,6 +66,7 @@ const sessionApi = vi.hoisted(() => ({
   getAgentSession: vi.fn().mockResolvedValue(null),
   listSessionRuns: vi.fn().mockResolvedValue([]),
   getAgentSessionLogs: vi.fn(),
+    fetchSessionTurnOutline: vi.fn(),
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
   listSessionTeamMissions: vi.fn(),
@@ -99,6 +100,7 @@ vi.mock("@/lib/daemon", async () => {
     getAgentSession: sessionApi.getAgentSession,
     listSessionRuns: sessionApi.listSessionRuns, // task-08 谱系锚点 effect 挂载即取数
     getAgentSessionLogs: sessionApi.getAgentSessionLogs,
+    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionTeamMissions: sessionApi.listSessionTeamMissions,
@@ -258,6 +260,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
     sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
     sessionApi.getAgentSessionLogs.mockResolvedValue([]);
+    sessionApi.fetchSessionTurnOutline.mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] });
     sessionApi.listSessionTeamMissions.mockResolvedValue([]);
     sessionApi.triggerSessionTeamMission.mockResolvedValue({
       mission_id: "m-team-1",

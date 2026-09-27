@@ -63,6 +63,7 @@ const sessionApi = vi.hoisted(() => ({
   // undefined 会被组件 .then 同步崩）；null/[] = 无谱系/无锚数据降级。
   getAgentSession: vi.fn().mockResolvedValue(null),
   getAgentSessionLogs: vi.fn(),
+    fetchSessionTurnOutline: vi.fn(),
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
   // task-11（2026-08-22-team-session-unify）：会话内团队触发 client（弹层确认走
@@ -96,6 +97,7 @@ vi.mock("@/lib/daemon", async () => {
     streamSession: sessionApi.streamSession,
     getAgentSession: sessionApi.getAgentSession,
     getAgentSessionLogs: sessionApi.getAgentSessionLogs,
+    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionTeamMissions: sessionApi.listSessionTeamMissions,
@@ -276,6 +278,7 @@ describe("SessionPanel（dialog）", () => {
     // 默认空 []：跳过回灌直接建 SSE，与各测试验证的「SSE 建连」语义一致；不走真实
     // fetch（jsdom 无 server 会挂起，导致 streamSession 永不调用、测试超时）。
     sessionApi.getAgentSessionLogs.mockResolvedValue([]);
+    sessionApi.fetchSessionTurnOutline.mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] });
     // task-11：会话团队默认无 mission（TeamTaskBlock/chip 不出现）；弹层项目下拉
     // 默认无可选项目（仅当前工作区路径）。
     sessionApi.listSessionTeamMissions.mockResolvedValue([]);

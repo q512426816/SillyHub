@@ -14,6 +14,7 @@ const sessionApi = vi.hoisted(() => ({
   getSessionUsage: vi.fn().mockResolvedValue(null),
   injectSession: vi.fn(), interruptSession: vi.fn(), endSession: vi.fn(),
   streamSession: vi.fn(), getAgentSession: vi.fn(), getAgentSessionLogs: vi.fn(),
+    fetchSessionTurnOutline: vi.fn().mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] }),
   fetchPendingDialogs: vi.fn(), fetchSessionDialogHistory: vi.fn(),
   listSessionRuns: vi.fn(), listSessionTasks: vi.fn().mockResolvedValue([]),
   listSessionTeamMissions: vi.fn(), fetchSessionQueue: vi.fn(),

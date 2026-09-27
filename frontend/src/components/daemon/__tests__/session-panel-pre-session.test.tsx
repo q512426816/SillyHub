@@ -78,6 +78,7 @@ const sessionApi = vi.hoisted(() => ({
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
   getAgentSessionLogs: vi.fn(),
+    fetchSessionTurnOutline: vi.fn(),
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
   listSessionRuns: vi.fn(),
@@ -98,6 +99,7 @@ vi.mock("@/lib/daemon", async () => {
     streamSession: sessionApi.streamSession,
     getAgentSession: sessionApi.getAgentSession,
     getAgentSessionLogs: sessionApi.getAgentSessionLogs,
+    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionRuns: sessionApi.listSessionRuns,
@@ -322,6 +324,7 @@ function setupPre(
 ) {
   sessionApi.getAgentSession.mockResolvedValue(makeDetail());
   sessionApi.getAgentSessionLogs.mockResolvedValue([]);
+    sessionApi.fetchSessionTurnOutline.mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] });
   sessionApi.listSessionRuns.mockResolvedValue([]);
   sessionApi.fetchPendingDialogs.mockResolvedValue([]);
   sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);

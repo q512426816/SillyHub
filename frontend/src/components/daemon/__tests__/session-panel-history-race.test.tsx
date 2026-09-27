@@ -6,7 +6,12 @@
 //   1. 正向控制：翻页在途未切换会话 → 响应正常 prepend（守卫不误伤正常翻页）；
 //   2. 竞态：翻页在途切换会话 → 旧会话响应被丢弃，新会话时间线无旧会话内容。
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+
+/** 正文断言 scope 到时间线容器——TurnNavList 导航列（fast-replay FR-06）同文本不撞车。 */
+function timelineText(text: string) {
+  return within(screen.getByTestId("turn-timeline-scroll")).getByText(text);
+}
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
@@ -26,6 +31,7 @@ const sessionApi = vi.hoisted(() => ({
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
   getAgentSessionLogs: vi.fn(),
+    fetchSessionTurnOutline: vi.fn().mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] }),
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
   listSessionRuns: vi.fn(),
@@ -45,6 +51,7 @@ vi.mock("@/lib/daemon", async () => {
     streamSession: sessionApi.streamSession,
     getAgentSession: sessionApi.getAgentSession,
     getAgentSessionLogs: sessionApi.getAgentSessionLogs,
+    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionRuns: sessionApi.listSessionRuns,
@@ -227,7 +234,7 @@ describe("「加载更早」换会话竞态（ql-20260903-018）", () => {
       ).toBe(true),
     );
     pendingOlder!.resolve(makeOlderPage("A"));
-    await waitFor(() => expect(screen.getByText("A-更早内容")).toBeTruthy());
+    await waitFor(() => expect(timelineText("A-更早内容")).toBeTruthy());
   });
 
   it("竞态：翻页在途切换会话 → 旧会话响应丢弃，不串进新会话时间线", async () => {
@@ -242,14 +249,14 @@ describe("「加载更早」换会话竞态（ql-20260903-018）", () => {
     );
     // 翻页在途：切到会话 B（effect 重置 turnState + 纪元 +1 + abort）。
     rerender(<Host sessionId="sess-B" />);
-    await waitFor(() => expect(screen.getByText("B-历史0")).toBeTruthy());
-    expect(screen.queryByText("A-历史0")).toBeNull();
+    await waitFor(() => expect(timelineText("B-历史0")).toBeTruthy());
+    expect(within(screen.getByTestId("turn-timeline-scroll")).queryByText("A-历史0")).toBeNull();
 
     // A 的旧响应此刻才回来——必须被丢弃（修复前会 prepend 进 B 的时间线）。
     pendingOlder!.resolve(makeOlderPage("A"));
     // 给丢弃路径一个微任务屏障（若被误写入，waitFor 会抓到）。
-    await waitFor(() => expect(screen.getByText("B-历史0")).toBeTruthy());
-    expect(screen.queryByText("A-更早内容")).toBeNull();
-    expect(screen.queryByText("A-历史0")).toBeNull();
+    await waitFor(() => expect(timelineText("B-历史0")).toBeTruthy());
+    expect(within(screen.getByTestId("turn-timeline-scroll")).queryByText("A-更早内容")).toBeNull();
+    expect(within(screen.getByTestId("turn-timeline-scroll")).queryByText("A-历史0")).toBeNull();
   });
 });
