@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-audit-risk-fixes",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-28-audit-risk-fixes:flow:FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/knowledge-governance-handler.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-audit-risk-fixes"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-28-audit-risk-fixes:flow:FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/knowledge-governance-handler.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-audit-risk-fixes"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-28-audit-risk-fixes:flow:FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-audit-risk-fixes"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-28-audit-risk-fixes:flow:FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-audit-risk-fixes"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-09-28-audit-risk-fixes:flow:FR-06",
+      "tests": [
+        "frontend/src/components/mobile/mobile-change-detail.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-audit-risk-fixes"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-09-28-audit-risk-fixes:flow:FR-07",
+      "tests": [
+        "frontend/src/components/mobile/mobile-change-detail.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-audit-risk-fixes"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-09-28-audit-risk-fixes:flow:FR-08",
+      "tests": [
+        "changes/__tests__/page.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-audit-risk-fixes"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-09-28-audit-risk-fixes:flow:FR-09",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_governance.py::test_action_remote_error_code_and_status_mapping（timeout→504"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-audit-risk-fixes"
+    },
+    {
+      "anchor": "FR-10",
+      "row_id": "2026-09-28-audit-risk-fixes:flow:FR-10",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py::test_touched_modules_doc_traversal_guard（nul"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-audit-risk-fixes"
+    }
+  ]
+}

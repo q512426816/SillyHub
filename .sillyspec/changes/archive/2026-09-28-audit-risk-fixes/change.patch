@@ -1,0 +1,1024 @@
+diff --git a/.sillyspec/changes/2026-09-28-audit-risk-fixes/design.md b/.sillyspec/changes/2026-09-28-audit-risk-fixes/design.md
+new file mode 100644
+index 000000000..340c81b10
+Binary files /dev/null and b/.sillyspec/changes/2026-09-28-audit-risk-fixes/design.md differ
+diff --git a/.sillyspec/changes/2026-09-28-audit-risk-fixes/flow-state.yaml b/.sillyspec/changes/2026-09-28-audit-risk-fixes/flow-state.yaml
+new file mode 100644
+index 000000000..61b3fd7dc
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-audit-risk-fixes/flow-state.yaml
+@@ -0,0 +1,16 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: b14ce676f44c9792dcabf83d24b67308b6c321cf
++updatedAt: '2026-09-27T22:13:03.927Z'
++gate_summary: >-
++  test: passed ← module[]+deps(py5+jsx5)+fr(4)（101.8s）
++  结果：C:\Users\qinyi\AppData\Local\Temp\sillyspec-gate-6t6GAr\.sillyspec\.runtime\verify-runs\20260927221104\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（114.7s）｜门文件 17 个
++
+diff --git a/.sillyspec/changes/2026-09-28-audit-risk-fixes/proposal.md b/.sillyspec/changes/2026-09-28-audit-risk-fixes/proposal.md
+new file mode 100644
+index 000000000..9cea4e220
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-audit-risk-fixes/proposal.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T21:39:32.121Z
++---
++# 提案书（Proposal）— 2026-09-28-audit-risk-fixes
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:d1476c4776db6a1df84d5532fb841f2c9260a9e10266d09d06a20035c50867c5:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-audit-risk-fixes 留痕重锚 -->
++任务原话转写：24h 审查高置信缺口统一收口：knowledge 治理写 RPC 缺 allowed_roots containment（写校验弱于读）、mobile detailOpen 无守卫致 desktop 状态污染 mobile 双挂组件、thin/quick 出身判定 desktop/mobile 口径分叉、变更列表删除按钮被整行导航劫持，及三处 P3（exc.details 恒 fallback、_safe_module_doc NUL 崩溃、黑名单误拦 Windows 合法 & 路径）。
++成功标准：
++- KnowledgeGovernanceHandler digest/action 双点过 assertWithinAllowedRoots（daemon.ts 注入 rootsProvider），越界 root 拒 forbidden 且不 spawn CLI
++- knowledge root 黑名单收窄到异常值字符集，Windows 合法目录字符 & $ ' ` ; 不再误拦
++- mobile variant 下 detailColumnVisible 恒 false，localStorage 跨视口不再双挂 TaskExecutionPanel/SessionUsageBar
++- mobile-change-detail thin/quick 卡判定对齐 desktop isThinLineageChange（归档 thin 与 change_type=quick 落轻量卡）
++- 变更列表删除按钮与标题链接 stopPropagation，点击不再触发整行 location.assign
++- DaemonRpcRemoteError 重映射改用 exc.code 且 timeout→504 其余→502，错误码不再恒 remote_error
++- _safe_module_doc 拦 NUL 字节，含 \0 的 doc 不读盘整条丢弃
++- 聚焦测试全绿（daemon handler / session 变体 / mobile 详情 / changes 页 / test_governance / test_assets）
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:691cadcd64a7a3c4558dc4dd154759e1be99746046ca489b4f1cafea4fa58239:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-audit-risk-fixes 留痕重锚 -->
++按成功标准机械推导，共 11 条验收面：
++1. KnowledgeGovernanceHandler digest/action 双点过 assertWithinAllowedRoots（daemon.ts 注入 rootsProvider），越界 root 拒 forbidden 且不 spawn CLI
++2. knowledge root 黑名单收窄到异常值字符集，Windows 合法目录字符 & $ ' `
++3. 不再误拦
++4. mobile variant 下 detailColumnVisible 恒 false，localStorage 跨视口不再双挂 TaskExecutionPanel
++5. SessionUsageBar
++6. mobile-change-detail thin
++7. quick 卡判定对齐 desktop isThinLineageChange（归档 thin 与 change_type=quick 落轻量卡）
++8. 变更列表删除按钮与标题链接 stopPropagation，点击不再触发整行 location.assign
++9. DaemonRpcRemoteError 重映射改用 exc.code 且 timeout→504 其余→502，错误码不再恒 remote_error
++10. _safe_module_doc 拦 NUL 字节，含 \0 的 doc 不读盘整条丢弃
++11. 聚焦测试全绿（daemon handler / session 变体 / mobile 详情 / changes 页 / test_governance / test_assets）
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:4ba2c338f5277ab35cc6797da0a975d3e88d5be28ab93dc75c6683b2e0154ec3:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-audit-risk-fixes 留痕重锚 -->
++1. KnowledgeGovernanceHandler digest/action 双点过 assertWithinAllowedRoots（daemon.ts 注入 rootsProvider），越界 root 拒 forbidden 且不 spawn CLI
++2. knowledge root 黑名单收窄到异常值字符集，Windows 合法目录字符 & $ ' `
++3. 不再误拦
++4. mobile variant 下 detailColumnVisible 恒 false，localStorage 跨视口不再双挂 TaskExecutionPanel
++5. SessionUsageBar
++6. mobile-change-detail thin
++7. quick 卡判定对齐 desktop isThinLineageChange（归档 thin 与 change_type=quick 落轻量卡）
++8. 变更列表删除按钮与标题链接 stopPropagation，点击不再触发整行 location.assign
++9. DaemonRpcRemoteError 重映射改用 exc.code 且 timeout→504 其余→502，错误码不再恒 remote_error
++10. _safe_module_doc 拦 NUL 字节，含 \0 的 doc 不读盘整条丢弃
++11. 聚焦测试全绿（daemon handler / session 变体 / mobile 详情 / changes 页 / test_governance / test_assets）
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-09-28-audit-risk-fixes/requirements.md b/.sillyspec/changes/2026-09-28-audit-risk-fixes/requirements.md
+new file mode 100644
+index 000000000..2ce94d19f
+Binary files /dev/null and b/.sillyspec/changes/2026-09-28-audit-risk-fixes/requirements.md differ
+diff --git a/.sillyspec/changes/2026-09-28-audit-risk-fixes/tasks.md b/.sillyspec/changes/2026-09-28-audit-risk-fixes/tasks.md
+new file mode 100644
+index 000000000..c01a3e9bf
+Binary files /dev/null and b/.sillyspec/changes/2026-09-28-audit-risk-fixes/tasks.md differ
+diff --git a/backend/app/modules/change/assets.py b/backend/app/modules/change/assets.py
+index 70fb58fba..0864d165e 100644
+--- a/backend/app/modules/change/assets.py
++++ b/backend/app/modules/change/assets.py
+@@ -377,9 +377,13 @@ def _safe_module_doc(doc: str) -> str | None:
+     ``docs/<project> / doc`` 会越出项目 docs 根读宿主文件（读面仅 h1 首行，
+     低 severity 但应守）。越界形态——POSIX 绝对（``/`` 前缀，含 ``//`` UNC
+     形态）、Windows 盘符（``C:``，含无斜杠 drive-relative）、反斜杠（归一为
+-    ``/`` 后按前两条判）、``..`` 段——整条丢弃返回 None：不读盘、不放前端
+-    预览 chip（doc=None），模块名自然回退 id。
++    ``/`` 后按前两条判）、``..`` 段、NUL 字节（``\\0``——打开路径抛
++    ``ValueError: embedded null byte``，不是 ``OSError`` 子类、逃出读盘点
++    except，2026-09-28-audit-risk-fixes 补拦）——整条丢弃返回 None：不读盘、
++    不放前端预览 chip（doc=None），模块名自然回退 id。
+     """
++    if "\0" in doc:
++        return None
+     norm = doc.replace("\\", "/")
+     posix = PurePosixPath(norm)
+     if posix.is_absolute() or ".." in posix.parts or re.match(r"^[A-Za-z]:", norm):
+diff --git a/backend/app/modules/change/tests/test_assets.py b/backend/app/modules/change/tests/test_assets.py
+index 92ec0cf26..2b20a36a3 100644
+--- a/backend/app/modules/change/tests/test_assets.py
++++ b/backend/app/modules/change/tests/test_assets.py
+@@ -640,7 +640,9 @@ def test_touched_modules_name_fallback(tmp_path: Path) -> None:
+ def test_touched_modules_doc_traversal_guard(tmp_path: Path) -> None:
+     """纯函数（2026-09-27-audit-followup-hardening）：doc 含 ``..`` 段或绝对路径
+     （POSIX / 前缀、Windows 盘符/反斜杠 UNC）→ 不读盘（h1 回退 id）、doc 不
+-    外发越界路径（不放预览 chip）；正常相对 doc 零回归。"""
++    外发越界路径（不放预览 chip）；正常相对 doc 零回归。2026-09-28-audit-
++    risk-fixes 补 NUL 形态（embedded null byte 的 ValueError 非 OSError 子类、
++    逃出读盘点 except → 500）。"""
+     from app.modules.change.assets import _read_touched_modules
+ 
+     mod_dir = tmp_path / "docs" / "p" / "modules"
+@@ -650,6 +652,8 @@ def test_touched_modules_doc_traversal_guard(tmp_path: Path) -> None:
+         "  up:\n    doc: ../../escape.md\n    paths: [src/a/**]\n"
+         "  abs:\n    doc: /etc/passwd\n    paths: [src/b/**]\n"
+         "  win:\n    doc: 'C:\\\\Windows\\\\win.ini'\n    paths: [src/d/**]\n"
++        # YAML 双引号串 "\0" 解析为真实 NUL 字节。
++        '  nul:\n    doc: "modules/n\\0ul.md"\n    paths: [src/e/**]\n'
+         "  ok:\n    doc: modules/ok.md\n    paths: [src/c/**]\n",
+         encoding="utf-8",
+     )
+@@ -657,12 +661,14 @@ def test_touched_modules_doc_traversal_guard(tmp_path: Path) -> None:
+     (tmp_path / "escape.md").write_text("# 逃逸成功\n", encoding="utf-8")
+     (mod_dir / "ok.md").write_text("# 正常模块\n", encoding="utf-8")
+     mods = _read_touched_modules(
+-        tmp_path, ["p/src/a/x.ts", "p/src/b/y.ts", "p/src/d/z.ts", "p/src/c/w.ts"]
++        tmp_path,
++        ["p/src/a/x.ts", "p/src/b/y.ts", "p/src/d/z.ts", "p/src/e/v.ts", "p/src/c/w.ts"],
+     )
+     assert [(m.id, m.name, m.doc) for m in mods] == [
+         ("up", "up", None),
+         ("abs", "abs", None),
+         ("win", "win", None),
++        ("nul", "nul", None),
+         ("ok", "正常模块", "docs/p/modules/ok.md"),
+     ]
+ 
+diff --git a/backend/app/modules/daemon/router/session_insights.py b/backend/app/modules/daemon/router/session_insights.py
+index 612cb78f2..82c1d1c33 100644
+--- a/backend/app/modules/daemon/router/session_insights.py
++++ b/backend/app/modules/daemon/router/session_insights.py
+@@ -21,7 +21,7 @@ from datetime import datetime
+ from fastapi import HTTPException, Query, Request, status
+ from fastapi.responses import Response, StreamingResponse
+ from pydantic import BaseModel, Field
+-from sqlalchemy import func, or_, select
++from sqlalchemy import String, cast, func, or_, select
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ import app.modules.daemon.router as _router
+@@ -405,9 +405,12 @@ async def _session_outline_fingerprint(
+     ).one()
+     logs_row = (
+         await db.execute(
+-            select(func.max(AgentRunLog.timestamp), func.max(AgentRunLog.id)).where(
+-                AgentRunLog.run_id.in_(session_run_ids)
+-            )
++            # 生产实证（2026-09-28 阿里云 PG）：max(uuid) 在 PostgreSQL 无原生聚合
++            # （SQLite 有——单测方言盲区）；id 统一 cast 文本再取 max，双方言一致。
++            select(
++                func.max(AgentRunLog.timestamp),
++                func.max(cast(AgentRunLog.id, String)),
++            ).where(AgentRunLog.run_id.in_(session_run_ids))
+         )
+     ).one()
+     return (
+diff --git a/backend/app/modules/knowledge/service.py b/backend/app/modules/knowledge/service.py
+index c920c07f5..fdedeed7d 100644
+--- a/backend/app/modules/knowledge/service.py
++++ b/backend/app/modules/knowledge/service.py
+@@ -183,11 +183,16 @@ class KnowledgeService:
+             resp = await hub.send_rpc(daemon_id, "knowledge.action", rpc_params, timeout=120)
+         except DaemonRpcRemoteError as exc:
+             # DaemonRpcRemoteError 刻意非 AppError（要求端点重映射）——动作失败给
+-            # 可读文案+输出尾部，不落裸 500（评审 P2-② 清偿）
++            # 可读文案+输出尾部，不落裸 500（评审 P2-② 清偿）。
++            # 2026-09-28-audit-risk-fixes：错误码取 exc.code（原稿误访不存在的
++            # .details 恒回退 remote_error）；timeout→504、其余 remote 错误→502
++            # （router docstring 声明的错误族）。
+             from app.core.errors import AppError
+ 
++            code = getattr(exc, "code", None) or "remote_error"
+             raise AppError(
+-                f"治理动作执行失败（daemon: {exc.details.get('code', 'remote_error') if hasattr(exc, 'details') and isinstance(exc.details, dict) else 'remote_error'}）：{str(exc)[:300]}"
++                f"治理动作执行失败（daemon: {code}）：{str(exc)[:300]}",
++                http_status=504 if code == "timeout" else 502,
+             ) from exc
+         return {"output": (resp or {}).get("output", "") if isinstance(resp, dict) else ""}
+ 
+diff --git a/backend/app/modules/knowledge/tests/test_governance.py b/backend/app/modules/knowledge/tests/test_governance.py
+index 5eb8aff7a..375875162 100644
+--- a/backend/app/modules/knowledge/tests/test_governance.py
++++ b/backend/app/modules/knowledge/tests/test_governance.py
+@@ -179,3 +179,47 @@ async def test_action_requires_write_permission(client, db_session, tmp_path, au
+     )
+     # 管理员有写权限 → 通过校验进入执行层（未绑定 daemon → 404 未绑定错误族）
+     assert resp.status_code in (404, 502, 200)
++
++
++async def test_action_remote_error_code_and_status_mapping(
++    client, db_session, tmp_path, auth_headers, monkeypatch
++) -> None:
++    """DaemonRpcRemoteError 重映射（2026-09-28-audit-risk-fixes）：错误码取 exc.code
++    （原稿误访不存在的 .details 恒 remote_error），timeout→504、其余 remote→502。"""
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, lambda root: None)
++
++    import app.modules.daemon.ws_hub as ws_hub_mod
++    from app.modules.daemon.ws_hub import DaemonRpcRemoteError
++    from app.modules.runtime.service import RuntimeLiveService
++
++    async def _fake_resolve(self, workspace_id, user_id):
++        return "daemon-1", "/repo/x"
++
++    monkeypatch.setattr(RuntimeLiveService, "_resolve_binding", _fake_resolve)
++    monkeypatch.setattr("app.modules.workspace.service.resolve_root_path_for_daemon", lambda p: p)
++
++    class _FakeHub:
++        def __init__(self, error: dict) -> None:
++            self._error = error
++
++        async def send_rpc(self, daemon_id, method, params, timeout=60):
++            raise DaemonRpcRemoteError(self._error)
++
++    url = f"/api/workspaces/{ws['ws_id']}/knowledge/governance/actions"
++    monkeypatch.setattr(
++        ws_hub_mod,
++        "get_daemon_ws_hub",
++        lambda: _FakeHub({"code": "timeout", "message": "daemon busy"}),
++    )
++    resp = await client.post(url, json={"kind": "repair-paths"}, headers=auth_headers)
++    assert resp.status_code == 504
++    assert "timeout" in resp.json()["message"]
++
++    monkeypatch.setattr(
++        ws_hub_mod,
++        "get_daemon_ws_hub",
++        lambda: _FakeHub({"code": "internal", "message": "cli failed"}),
++    )
++    resp2 = await client.post(url, json={"kind": "repair-paths"}, headers=auth_headers)
++    assert resp2.status_code == 502
++    assert "internal" in resp2.json()["message"]
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+index 5a7459215..c73b57afc 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -92,6 +92,22 @@ vi.mock("@/lib/workspace-binding", () => ({
+   fetchMyBinding: bindingApi.fetchMyBinding,
+ }));
+ 
++// 2026-09-28-audit-risk-fixes：删除入口权限 hook 固定为平台管理员（真实 hook 走
++// session/fetchMe，本测试文件无登录态恒 false → 按钮不渲染；仅防劫持用例消费）。
++vi.mock("@/components/delete-change-confirm", async () => {
++  const actual = await vi.importActual<
++    typeof import("@/components/delete-change-confirm")
++  >("@/components/delete-change-confirm");
++  return {
++    ...actual,
++    useChangeDeleteAccess: () => ({
++      userId: null,
++      isPlatformAdmin: true,
++      workspaceRole: null,
++    }),
++  };
++});
++
+ // ── fixtures ───────────────────────────────────────────────────────────────
+ 
+ function makeChange(overrides: Partial<ChangeSummary> = {}): ChangeSummary {
+@@ -825,3 +841,49 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     );
+   });
+ });
++
++describe("变更列表行内删除入口防劫持（2026-09-28-audit-risk-fixes）", () => {
++  // 守卫缺失形态：删除按钮 click 冒泡到行 div 的 location.assign 整页导航，
++  // 删除确认弹层被页面卸载吞掉——列表页删除入口实际不可用（jsdom 不真导航，
++  // 以 assignSpy 未被调用来钉住冒泡被阻断）。
++
++  beforeEach(() => {
++    setupListChanges();
++    bindingApi.fetchMyBinding.mockResolvedValue(null);
++  });
++  afterEach(() => {
++    vi.clearAllMocks();
++    cleanup();
++  });
++
++  it("点击删除按钮：不触发行级 location.assign（stopPropagation），仅弹删除确认", async () => {
++    mocks.listChanges.mockImplementation((_wid: string, params: any) =>
++      Promise.resolve(
++        params?.pageSize === 1
++          ? { items: [], total: 1 }
++          : { items: [makeChange()], total: 1 },
++      ),
++    );
++    const realLocation = window.location;
++    const assignSpy = vi.fn();
++    Object.defineProperty(window, "location", {
++      value: { ...realLocation, assign: assignSpy },
++      writable: true,
++      configurable: true,
++    });
++    try {
++      await renderAndWait();
++      fireEvent.click(await screen.findByTestId("change-delete-entry"));
++      expect(assignSpy).not.toHaveBeenCalled();
++      expect(
++        await screen.findByTestId("delete-change-confirm"),
++      ).toBeInTheDocument();
++    } finally {
++      Object.defineProperty(window, "location", {
++        value: realLocation,
++        writable: true,
++        configurable: true,
++      });
++    }
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index 95f63c720..b40ec041d 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -523,6 +523,9 @@ export default function ChangesPage({ params }: Props) {
+             href={`/workspaces/${workspaceId}/changes/${c.id}`}
+             prefetch={false}
+             className="text-sm font-semibold leading-5 text-primary hover:underline"
++            // 2026-09-28-audit-risk-fixes：阻冒泡——否则 Link 的客户端导航与行
++            // onClick 的 location.assign 竞争（整页刷新胜出，SPA 切换失效）。
++            onClick={(e) => e.stopPropagation()}
+           >
+             {c.title || c.change_key}
+           </Link>
+@@ -583,7 +586,13 @@ export default function ChangesPage({ params }: Props) {
+             variant="ghost"
+             data-testid="change-delete-entry"
+             className="text-muted-foreground hover:text-destructive"
+-            onClick={() => setDeleteTarget(c)}
++            // 2026-09-28-audit-risk-fixes：阻冒泡——否则点击冒泡到行 div 的
++            // location.assign 整页导航，删除确认弹层被页面卸载吞掉（列表页删除
++            // 入口实际不可用；workspace-card stopFooter 同款防护）。
++            onClick={(e) => {
++              e.stopPropagation();
++              setDeleteTarget(c);
++            }}
+           >
+             删除
+           </Button>
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.tsx
+new file mode 100644
+index 000000000..f1e909f8a
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.tsx
+@@ -0,0 +1,211 @@
++// 2026-09-28-audit-risk-fixes：detailColumnVisible 的 !mobile 守卫回归锚。
++//
++// 背景：desktop 与 mobile 共享同一 localStorage 键（sillyhub.sessions.detailPanel），
++// 守卫缺失时 desktop 开过的详情偏好会在 mobile 视口生效——右列（PanelResizer+
++// 详情列）挤进窄屏、TaskExecutionPanel/SessionUsageBar 双挂、taskPanelRef 被右列
++// 实例覆盖，且 mobile 无关闭入口。守卫后：mobile 恒收起（对齐 hasSubagentPanelHost
++// 的 !mobile 口径），desktop 偏好读写不受影响。
++//
++// mock 范式照 session-panel-variant.test.tsx（模板同源，仅本用例所需面）。
++import { describe, it, expect, beforeEach, vi } from "vitest";
++import { render, screen } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++
++import { SessionPanel } from "../session-panel";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++const sessionApi = vi.hoisted(() => ({
++  getSessionUsage: vi.fn().mockResolvedValue(null),
++  createSession: vi.fn(),
++  injectSession: vi.fn(),
++  interruptSession: vi.fn(),
++  endSession: vi.fn(),
++  streamSession: vi.fn(),
++  getAgentSession: vi.fn(),
++  getAgentSessionLogs: vi.fn(),
++  fetchSessionTurnOutline: vi.fn().mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] }),
++  fetchPendingDialogs: vi.fn(),
++  fetchSessionDialogHistory: vi.fn(),
++  listSessionRuns: vi.fn(),
++  listSessionTasks: vi.fn().mockResolvedValue([]),
++  listSessionTeamMissions: vi.fn(),
++  triggerSessionTeamMission: vi.fn(),
++  fetchSessionQueue: vi.fn(),
++  deleteSessionQueueEntry: vi.fn(),
++  retrySessionQueueEntry: vi.fn(),
++}));
++
++vi.mock("@/lib/daemon", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
++  return {
++    ...actual,
++    getSessionUsage: sessionApi.getSessionUsage,
++    createSession: sessionApi.createSession,
++    injectSession: sessionApi.injectSession,
++    interruptSession: sessionApi.interruptSession,
++    endSession: sessionApi.endSession,
++    streamSession: sessionApi.streamSession,
++    getAgentSession: sessionApi.getAgentSession,
++    getAgentSessionLogs: sessionApi.getAgentSessionLogs,
++    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
++    fetchPendingDialogs: sessionApi.fetchPendingDialogs,
++    fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
++    listSessionRuns: sessionApi.listSessionRuns,
++    listSessionTasks: sessionApi.listSessionTasks,
++    listSessionTeamMissions: sessionApi.listSessionTeamMissions,
++    triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
++    fetchSessionQueue: sessionApi.fetchSessionQueue,
++    deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
++    retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
++  };
++});
++
++const workspaceApi = vi.hoisted(() => ({
++  listWorkspaces: vi.fn(),
++  listProjects: vi.fn(),
++  listProjectWorkspaces: vi.fn(),
++}));
++
++vi.mock("@/lib/workspaces", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspaces")>("@/lib/workspaces");
++  return { ...actual, listWorkspaces: workspaceApi.listWorkspaces };
++});
++vi.mock("@/lib/ppm/project", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/ppm/project")>("@/lib/ppm/project");
++  return { ...actual, listProjects: workspaceApi.listProjects };
++});
++vi.mock("@/lib/workspace", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspace")>("@/lib/workspace");
++  return { ...actual, listProjectWorkspaces: workspaceApi.listProjectWorkspaces };
++});
++vi.mock("@/lib/use-daemon-machines", () => ({
++  useDaemonMachines: () => ({ items: [] }),
++}));
++vi.mock("@/lib/agent-profiles", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>("@/lib/agent-profiles");
++  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
++});
++vi.mock("@/lib/api/llm-providers", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>("@/lib/api/llm-providers");
++  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
++});
++
++function makeDetail() {
++  return {
++    id: "sess-guard",
++    runtime_id: null,
++    lease_id: null,
++    provider: "claude",
++    status: "active",
++    agent_session_id: "ag-1",
++    config: null,
++    turn_count: 1,
++    created_at: "t",
++    last_active_at: null,
++    ended_at: null,
++    current_run_id: null,
++    workspace_id: "ws-1",
++    llm_provider_id: null,
++    agent_profile_id: null,
++    title: "守卫会话",
++    config_snapshot: null,
++  };
++}
++
++function makeHistoryLogs() {
++  return [
++    {
++      id: "log-1",
++      run_id: "run-1",
++      timestamp: "2026-09-27T10:00:00Z",
++      channel: "user_input",
++      content_redacted: "第一句",
++    },
++    {
++      id: "log-2",
++      run_id: "run-1",
++      timestamp: "2026-09-27T10:00:01Z",
++      channel: "stdout",
++      content_redacted: "答复正文",
++    },
++  ];
++}
++
++/** page 模式挂载（variant 显式声明；localStorage 预置由调用方控制）。 */
++function setupPage(variant: "desktop" | "mobile") {
++  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
++  return render(
++    <QueryClientProvider client={qc}>
++      <SessionPanel
++        mode="page"
++        sessionId="sess-guard"
++        machines={[]}
++        llmProviders={[]}
++        variant={variant}
++      />
++    </QueryClientProvider>,
++  );
++}
++
++const DETAIL_LS_KEY = "sillyhub.sessions.detailPanel";
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  window.localStorage.clear();
++  sessionApi.fetchSessionQueue.mockResolvedValue([]);
++  sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
++  sessionApi.retrySessionQueueEntry.mockResolvedValue({
++    id: "entry-1",
++    prompt: "",
++    attachment_ids: [],
++    agent_profile_id: null,
++    llm_provider_id: null,
++    status: "pending",
++    error_msg: null,
++    created_at: "2026-09-27T10:00:00Z",
++  });
++  sessionApi.getAgentSession.mockResolvedValue(makeDetail());
++  sessionApi.getAgentSessionLogs.mockResolvedValue(makeHistoryLogs());
++  sessionApi.listSessionRuns.mockResolvedValue([]);
++  sessionApi.streamSession.mockImplementation(() => ({
++    close: vi.fn(),
++    getLastEventId: () => null,
++  }));
++  sessionApi.fetchPendingDialogs.mockResolvedValue([]);
++  sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
++  sessionApi.listSessionTeamMissions.mockResolvedValue([]);
++  sessionApi.injectSession.mockResolvedValue({ run_id: "run-new", queued: false });
++  workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
++  workspaceApi.listProjects.mockResolvedValue([]);
++  workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
++});
++
++describe("detailColumnVisible 的 !mobile 守卫（localStorage 跨视口隔离）", () => {
++  it("desktop + localStorage open=true：右列（subagent-panel-column）在场（守卫不影响 desktop）", async () => {
++    window.localStorage.setItem(DETAIL_LS_KEY, JSON.stringify({ open: true }));
++    setupPage("desktop");
++
++    await screen.findByLabelText("会话面板");
++    expect(
++      await screen.findByTestId("subagent-panel-column"),
++    ).toBeInTheDocument();
++  });
++
++  it("mobile + 同一 localStorage open=true：右列不渲染（desktop 偏好不污染 mobile 视口）", async () => {
++    window.localStorage.setItem(DETAIL_LS_KEY, JSON.stringify({ open: true }));
++    setupPage("mobile");
++
++    const panel = (await screen.findByLabelText("会话面板")) as HTMLElement;
++    expect(panel.getAttribute("data-variant")).toBe("mobile");
++    expect(
++      screen.queryByTestId("subagent-panel-column"),
++    ).not.toBeInTheDocument();
++    // Resizer 同属右列装配，一并断言不在场。
++    expect(screen.queryByTestId("subagent-panel-resizer")).not.toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 91ff02f1d..2057c94dd 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -2387,7 +2387,12 @@ export function SessionPanelPage({
+   // 否则详情开关（detailOpen）打开时展示详情面板。模式由既有状态派生，零新增
+   // 状态机：点子代理卡/目录 = 自动切子代理模式；关子代理（openSubagentId→null）
+   // 后若 detailOpen 仍开则回详情模式，✕ 关详情仅置 detailOpen=false（互不干扰）。
+-  const detailColumnVisible = subagentPanelOpen || detailOpen;
++  // 2026-09-28-audit-risk-fixes 补 !mobile 守卫：desktop 与 mobile 共享同一
++  // localStorage 键，desktop 开过的偏好若在 mobile 视口生效会把右列（Resizer+
++  // 详情列）挤进窄屏、TaskExecutionPanel/SessionUsageBar 双挂且 taskPanelRef
++  // 被右列实例覆盖（mobile 无关闭入口）——右列是 desktop 概念（对齐
++  // hasSubagentPanelHost 的 !mobile 口径），mobile 恒收起、偏好值留给 desktop。
++  const detailColumnVisible = !mobile && (subagentPanelOpen || detailOpen);
+ 
+ 
+   // ── task-03（2026-09-08-session-turn-nav / FR-03 / D-002@v1 D-004@v1）：
+diff --git a/frontend/src/components/mobile/mobile-change-detail.test.tsx b/frontend/src/components/mobile/mobile-change-detail.test.tsx
+index 55a94909a..6d778d0ae 100644
+--- a/frontend/src/components/mobile/mobile-change-detail.test.tsx
++++ b/frontend/src/components/mobile/mobile-change-detail.test.tsx
+@@ -794,3 +794,89 @@ describe("MobileChangeDetail 三卡挂载 + 阶段联动（task-06 / FR-05 / FR-
+     }
+   });
+ });
++
++describe("MobileChangeDetail thin/quick 卡口径（对齐桌面 isThinLineageChange）", () => {
++  // 2026-09-28-audit-risk-fixes：原稿只判 current_stage（"thin"/"quick"），归档
++  // thin（stage 翻 archived）与 quick 分流（change_type=quick）漏进通用「无可
++  // 审批」卡——与桌面 change-stage-actions 口径分叉。现对齐 isThinLineageChange
++  // 三分支；存量 quick（时间窗外）仍落 quick 存量卡。
++
++  let queryClient: QueryClient;
++
++  beforeEach(() => {
++    queryClient = new QueryClient({
++      defaultOptions: { queries: { retry: false } },
++    });
++    changesApi.getAgentStatus.mockResolvedValue({
++      has_active_run: false,
++      config_enabled: false,
++      last_dispatch: null,
++    });
++    changeFilesApi.listChangeFiles.mockResolvedValue({ change_id: "c1", items: [] });
++    quicklogApi.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
++  });
++
++  afterEach(() => {
++    cleanup();
++    queryClient.clear();
++    vi.clearAllMocks();
++  });
++
++  function renderDetail() {
++    return render(
++      <QueryClientProvider client={queryClient}>
++        <MobileChangeDetail changeId="c1" workspaceId="ws-1" onOpenSession={vi.fn()} />
++      </QueryClientProvider>,
++    );
++  }
++
++  it("归档 thin（stage=archived + steps 无标准四阶段痕迹）→ 轻量说明卡而非「无可审批」", async () => {
++    changesApi.getChange.mockResolvedValue(
++      makeChange({
++        current_stage: "archived",
++        status: "archived",
++        location: "archive",
++        pending_review: null,
++        change_type: "feature",
++        created_at: "2026-09-26T10:00:00Z",
++        steps: [
++          {
++            name: "收口",
++            stage: "thin",
++            status: "completed",
++            output: null,
++            completed_at: "2026-09-26T18:00:00Z",
++            ordering: 1,
++            wait_reason: null,
++            kind: "step",
++          },
++        ],
++      }),
++    );
++    renderDetail();
++    expect(await screen.findByTestId("m-change-thin-card")).toBeInTheDocument();
++    expect(screen.queryByTestId("m-change-review-idle")).not.toBeInTheDocument();
++  });
++
++  it("quick 分流新变更（change_type=quick、时间窗内）→ 轻量说明卡（对齐桌面②分支）", async () => {
++    changesApi.getChange.mockResolvedValue(
++      makeChange({
++        current_stage: "execute",
++        change_type: "quick",
++        pending_review: null,
++        created_at: "2026-09-26T10:00:00Z",
++      }),
++    );
++    renderDetail();
++    expect(await screen.findByTestId("m-change-thin-card")).toBeInTheDocument();
++  });
++
++  it("存量 quick（时间窗外）→ quick 存量卡保留（零回归）", async () => {
++    // makeChange 默认 created_at=2026-08-26（thin 分流上线日前）→ 时间窗拦截。
++    changesApi.getChange.mockResolvedValue(
++      makeChange({ current_stage: "quick", pending_review: null }),
++    );
++    renderDetail();
++    expect(await screen.findByTestId("m-change-quick-card")).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/mobile/mobile-change-detail.tsx b/frontend/src/components/mobile/mobile-change-detail.tsx
+index 19e0768b8..d6e9b2baf 100644
+--- a/frontend/src/components/mobile/mobile-change-detail.tsx
++++ b/frontend/src/components/mobile/mobile-change-detail.tsx
+@@ -94,6 +94,7 @@ import {
+ } from "@/lib/changes";
+ import { listChangeSessions } from "@/lib/daemon";
+ import { listQuicklogEntries } from "@/lib/quicklog";
++import { isThinLineageChange } from "@/lib/thin-lineage";
+ import { useSession } from "@/stores/session";
+ import { cn } from "@/lib/utils";
+ 
+@@ -499,8 +500,11 @@ export function MobileChangeDetail({
+ 
+       {/* thin/quick 辅助阶段说明卡（2026-09-25-change-center-thin-flow task-08）：
+           现状两阶段均落「无可审批事项」通用卡——补专用只读说明（形态对齐桌面
+-          change-stage-actions 同名分支；移动端折叠态承载，命令以说明文本呈现）。 */}
+-      {change.current_stage === "thin" ? (
++          change-stage-actions 同名分支；移动端折叠态承载，命令以说明文本呈现）。
++          2026-09-28-audit-risk-fixes：thin 判定对齐桌面 isThinLineageChange
++          （归档 thin stage=archived 与 quick 分流 change_type=quick 同样落本卡，
++          不再漏进通用「无可审批」分支——原稿只判 current_stage 与桌面分叉）。 */}
++      {isThinLineageChange(change) ? (
+         <SecCard
+           testId="m-change-thin-card"
+           title="◈ 轻量变更 · 两段式流程"
+diff --git a/frontend/src/components/primer/__tests__/primer-structures.test.tsx b/frontend/src/components/primer/__tests__/primer-structures.test.tsx
+index 31d2f31ee..a666768e9 100644
+--- a/frontend/src/components/primer/__tests__/primer-structures.test.tsx
++++ b/frontend/src/components/primer/__tests__/primer-structures.test.tsx
+@@ -47,11 +47,16 @@ describe("UnderlineNav 受控契约", () => {
+     expect(screen.getByText("12")).toBeTruthy();
+   });
+ 
+-  it("键盘 Enter 切换到下一 tab", () => {
++  it("键盘激活只走原生 button 一次（2026-09-28-audit-risk-fixes：删容器级 onKeyDown 后不再双触发跳下一项）", () => {
+     const onChange = vi.fn();
+     renderNav("active", onChange);
+-    fireEvent.keyDown(screen.getByRole("tab", { name: /进行中/ }), { key: "Enter" });
++    // 点击激活当前项恰好一次；容器不再在 keyDown 冒泡段二次分发 onChange(下一项)。
++    fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
++    expect(onChange).toHaveBeenCalledTimes(1);
+     expect(onChange).toHaveBeenCalledWith("archived");
++    // keyDown 冒泡到容器不再产生额外 onChange（原生 button 激活由浏览器承载）。
++    fireEvent.keyDown(screen.getByRole("tab", { name: /进行中/ }), { key: "Enter" });
++    expect(onChange).toHaveBeenCalledTimes(1);
+   });
+ });
+ 
+diff --git a/frontend/src/components/primer/underline-nav.tsx b/frontend/src/components/primer/underline-nav.tsx
+index 4c0d9ea3f..be181d18a 100644
+--- a/frontend/src/components/primer/underline-nav.tsx
++++ b/frontend/src/components/primer/underline-nav.tsx
+@@ -4,7 +4,7 @@
+  * GitHub UnderlineNav 范式：文字 tab + 底部 2px 主题色指示条 + Counter 计数联动。
+  * 受控组件（value/onChange）；指示条色走主题 token（铁律：原型的 #fd8c73 仅为
+  * ai-native 参考值，落地用 --color-brand-600 随主题换肤）。
+- * 键盘可达：tab 间用 roving tabindex，Enter/Space 切换。
++ * 键盘可达：tab 间用 roving tabindex，Enter/Space 经原生 button 激活当前项。
+  */
+ import * as React from "react";
+ 
+@@ -33,19 +33,14 @@ export function UnderlineNav<T extends string>({
+   className,
+ }: UnderlineNavProps<T>) {
+   return (
++    // 2026-09-28-audit-risk-fixes：删除容器 onKeyDown——tab 是原生 <button>，
++    // Enter/Space 原生激活已触发 onClick（当前项）；原容器级处理在冒泡段再调
++    // onChange(下一项)，一次按键双触发且最终落在下一个 tab。键盘可达仍由
++    // roving tabindex + 原生 button 激活承载。
+     <div
+       role="tablist"
+       className={`flex items-center gap-1 border-b ${className ?? ""}`}
+       style={{ borderBottomColor: "hsl(var(--border))" }}
+-      onKeyDown={(e) => {
+-        if (e.key !== "Enter" && e.key !== " ") return;
+-        const idx = items.findIndex((item) => item.key === value);
+-        const next = items[(idx + 1) % items.length];
+-        if (next) {
+-          e.preventDefault();
+-          onChange(next.key);
+-        }
+-      }}
+     >
+       {items.map((item) => {
+         const active = item.key === value;
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 1998c0092..dfb47d6e9 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -1862,8 +1862,14 @@ export class Daemon {
+     rootsProvider: () => this._effectiveAllowedRoots(),
+   });
+ 
+-  /** knowledge 治理 RPC handler（2026-09-27-governance-rpc-actions：digest 直采 + action 白名单）。 */
+-  private readonly _knowledgeGovHandler = new KnowledgeGovernanceHandler();
++  /**
++   * knowledge 治理 RPC handler（2026-09-27-governance-rpc-actions：digest 直采 + action 白名单）。
++   * 2026-09-28-audit-risk-fixes：注入 rootsProvider——digest/action 双点 containment
++   * 第二道校验（写能力校验不弱于读点，防借用绑定越 allowed_roots 在宿主执行写动作）。
++   */
++  private readonly _knowledgeGovHandler = new KnowledgeGovernanceHandler({
++    rootsProvider: () => this._effectiveAllowedRoots(),
++  });
+ 
+   /** 运行标志，三循环 while 条件。 */
+   private _running = false;
+diff --git a/sillyhub-daemon/src/runtime-handler.ts b/sillyhub-daemon/src/runtime-handler.ts
+index 9f601cd64..721e7d80b 100644
+--- a/sillyhub-daemon/src/runtime-handler.ts
++++ b/sillyhub-daemon/src/runtime-handler.ts
+@@ -378,31 +378,53 @@ export { ARTIFACT_MAX_BYTES, SILLYSPEC_TIMEOUT_MS, RpcError };
+ // ── knowledge 治理 RPC（2026-09-27-governance-rpc-actions，三层治理 v2 ①②）────
+ // digest 直采：收敛平台/CLI 双出口为单源（CLI 为真相——绑定信号与基线消音只在仓工作
+ // 树在场时可得）；action 回传：白名单机械动作（repair-paths / redomain），平台信号卡
+-// 按钮的执行端。安全：域名参数过 [a-z0-9-]+ 元字符防线（ROOT_PATH_METACHAR_RE 同款
+-// 理由——spawn shell:true 命令串拼接的注入面）；kind 白名单硬编码。
++// 按钮的执行端。安全：域名参数过 [a-z0-9-]+ 元字符防线（spawn shell:true 命令串
++// 拼接的注入面）；kind 白名单硬编码。root 防线两道（2026-09-28-audit-risk-fixes
++// 补齐第二道）：①KNOWLEDGE_ROOT_ANOMALY_RE 异常值黑名单（root 只进 spawn cwd 不拼
++// 命令串，拦的是路径 API 禁形与 Windows 非法文件名字符——& $ ' ` ; 是 Windows 合法
++// 目录字符不拦，R&D 类路径不再误拒）；②assertWithinAllowedRoots containment
++// （rootsProvider 注入，与 RuntimeHandler 读点/HostFsHandler 同款——写能力校验
++// 不弱于读，防借用绑定越机器主人 allowed_roots 在宿主任意目录执行写动作）。
+ const KNOWLEDGE_DOMAIN_RE = /^[a-z0-9-]+$/;
+ const KNOWLEDGE_ACTION_KINDS = new Set(['repair-paths', 'redomain']);
++const KNOWLEDGE_ROOT_ANOMALY_RE = /[\0\r\n<>|"?*]/;
+ 
+ export class KnowledgeGovernanceHandler {
++  /** allowed_roots 白名单来源（containment 第二道校验）；缺省空数组 → 一律拒。 */
++  private readonly _rootsProvider: () => string[];
++
+   constructor(
+     private readonly opts: {
+       sillyspecCmd?: (cmd: string, timeoutMs: number, cwd?: string) => Promise<{
+         ok: boolean; stdout: string; stderr: string; timedOut: boolean;
+       }>;
++      rootsProvider?: () => string[];
+     } = {},
+-  ) {}
++  ) {
++    this._rootsProvider = opts.rootsProvider ?? (() => []);
++  }
+ 
+-  /** knowledge.digest：cwd=仓库根跑 `sillyspec knowledge digest --json`，stdout JSON 透传。 */
+-  async digest(workspaceId: string, rootPath?: string): Promise<{ digest: unknown }> {
+-    // rootPath 已由 daemon.ts 侧 normalizeRootPathParam 归一；元字符黑名单防线
+-    //（spawn shell:true 命令不拼 root——cwd 传递，但路径本体仍过黑名单防异常值）。
++  /** root 两道防线：非空 → 异常值黑名单 → allowed_roots containment。 */
++  private _guardRoot(rootPath: string | undefined): string {
+     const root = rootPath ?? '';
+-    if (/[<>|&;$`"']/.test(root)) {
++    if (!root) {
++      throw new RpcError('forbidden', 'root_path required: knowledge RPC must run inside an allowed root');
++    }
++    if (KNOWLEDGE_ROOT_ANOMALY_RE.test(root)) {
+       throw new RpcError('forbidden', `root_path suspicious: ${JSON.stringify(root)}`);
+     }
++    assertWithinAllowedRoots(root, this._rootsProvider());
++    return root;
++  }
++
++  /** knowledge.digest：cwd=仓库根跑 `sillyspec knowledge digest --json`，stdout JSON 透传。 */
++  async digest(workspaceId: string, rootPath?: string): Promise<{ digest: unknown }> {
++    // rootPath 已由 daemon.ts 侧 normalizeRootPathParam 归一；_guardRoot 两道防线
++    //（异常值黑名单 + allowed_roots containment——digest 读面同样不弱于读点，见类注释）。
++    const root = this._guardRoot(rootPath);
+     const cmd = 'sillyspec knowledge digest --json';
+     const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
+-    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root || undefined);
++    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root);
+     if (!r.ok) {
+       if (r.stdout.includes('knowledge <') || r.stdout.includes('unknown_subcommand')) {
+         throw new RpcError('method_not_found', 'sillyspec knowledge digest not supported; upgrade sillyspec');
+@@ -426,12 +448,9 @@ export class KnowledgeGovernanceHandler {
+     params: { from?: string; to?: string },
+     rootPath?: string,
+   ): Promise<{ output: string }> {
+-    // root 元字符防线（评审 P2-③ 清偿）：写能力 handler 校验不弱于读——root 只进
+-    // spawn cwd 不拼命令串，但异常值仍在此拦（digest 同款防线）。
+-    const root = rootPath ?? '';
+-    if (/[<>|&;$`"']/.test(root)) {
+-      throw new RpcError('forbidden', `root_path suspicious: ${JSON.stringify(root)}`);
+-    }
++    // root 元字符防线（评审 P2-③ 清偿）+ containment（2026-09-28-audit-risk-fixes
++    // 补齐第二道）：写能力 handler 校验不弱于读（digest 同款防线）。
++    const root = this._guardRoot(rootPath);
+     if (!KNOWLEDGE_ACTION_KINDS.has(kind)) {
+       throw new RpcError('forbidden', `action kind not allowed: ${JSON.stringify(kind)}`);
+     }
+@@ -447,7 +466,7 @@ export class KnowledgeGovernanceHandler {
+       cmd = `sillyspec tests --redomain --from ${from} --to ${to} --write`;
+     }
+     const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
+-    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, rootPath || undefined);
++    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root);
+     const output = `${r.stdout}\n${r.stderr}`.trim().slice(-2000);
+     if (!r.ok) {
+       if (r.timedOut) throw new RpcError('timeout', `action timed out (${SILLYSPEC_TIMEOUT_MS}ms)`);
+diff --git a/sillyhub-daemon/tests/knowledge-governance-handler.test.ts b/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
+index 492a934c6..dd91268f4 100644
+--- a/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
++++ b/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
+@@ -1,8 +1,11 @@
+ /**
+  * KnowledgeGovernanceHandler（2026-09-27-governance-rpc-actions）：
+  * digest 直采（CLI JSON 信封透传/失败映射 method_not_found·timeout·internal）、
+- * action 白名单（kind 拒/域名元字符拒/成功输出尾部）、root_path 元字符防线。
+- * sillyspecCmd 全注入（不发真子进程）——RuntimeHandler 测试范式。
++ * action 白名单（kind 拒/域名元字符拒/成功输出尾部）、root 防线。
++ * 2026-09-28-audit-risk-fixes：root 防线两道——异常值黑名单（\0/换行/Windows
++ * 非法文件名字符；& $ ' ` ; 合法放行）+ assertWithinAllowedRoots containment
++ * （rootsProvider 注入，越界/空 root 拒且不 spawn CLI）。
++ * sillyspecCmd 与 rootsProvider 全注入（不发真子进程）——RuntimeHandler 测试范式。
+  */
+ import { describe, expect, it, vi } from 'vitest';
+ 
+@@ -10,14 +13,20 @@ import { KnowledgeGovernanceHandler } from '../src/runtime-handler.js';
+ 
+ type CmdResult = { ok: boolean; stdout: string; stderr: string; timedOut: boolean };
+ 
+-function mk(cmdResult: CmdResult, cwdSink: string[] = []) {
++function mk(cmdResult: CmdResult, cwdSink: string[] = [], allowedRoots: string[] = ['C:/repo/x']) {
+   const sillyspecCmd = vi.fn(
+     async (_cmd: string, _timeoutMs: number, cwd?: string): Promise<CmdResult> => {
+       cwdSink.push(cwd ?? '');
+       return cmdResult;
+     },
+   );
+-  return { handler: new KnowledgeGovernanceHandler({ sillyspecCmd }), sillyspecCmd };
++  return {
++    handler: new KnowledgeGovernanceHandler({
++      sillyspecCmd,
++      rootsProvider: () => allowedRoots,
++    }),
++    sillyspecCmd,
++  };
+ }
+ 
+ const OK_ENVELOPE = JSON.stringify({
+@@ -40,19 +49,47 @@ describe('knowledge.digest', () => {
+ 
+   it('旧版 CLI 不识别子命令 → method_not_found', async () => {
+     const { handler } = mk({ ok: false, stdout: '用法: sillyspec knowledge <sub>', stderr: '', timedOut: false });
+-    await expect(handler.digest('ws-1')).rejects.toMatchObject({ code: 'method_not_found' });
++    await expect(handler.digest('ws-1', 'C:/repo/x')).rejects.toMatchObject({ code: 'method_not_found' });
+   });
+ 
+   it('超时 → timeout；非 JSON 输出 → internal', async () => {
+     const t = mk({ ok: false, stdout: '', stderr: '', timedOut: true });
+-    await expect(t.handler.digest('ws-1')).rejects.toMatchObject({ code: 'timeout' });
++    await expect(t.handler.digest('ws-1', 'C:/repo/x')).rejects.toMatchObject({ code: 'timeout' });
+     const bad = mk({ ok: true, stdout: 'not json', stderr: '', timedOut: false });
+-    await expect(bad.handler.digest('ws-1')).rejects.toMatchObject({ code: 'internal' });
++    await expect(bad.handler.digest('ws-1', 'C:/repo/x')).rejects.toMatchObject({ code: 'internal' });
+   });
+ 
+-  it('root_path 元字符 → forbidden', async () => {
++  it('root 异常值（换行/管道/NUL/Windows 非法字符）→ forbidden 且不 spawn', async () => {
+     const { handler, sillyspecCmd } = mk({ ok: true, stdout: OK_ENVELOPE, stderr: '', timedOut: false });
+-    await expect(handler.digest('ws-1', 'C:/repo; rm -rf')).rejects.toMatchObject({ code: 'forbidden' });
++    for (const bad of ['C:/repo\nrm -rf', 'C:/re|po', 'C:/re\0po', 'C:/re<po>', 'C:/re?po*']) {
++      await expect(handler.digest('ws-1', bad)).rejects.toMatchObject({ code: 'forbidden' });
++    }
++    expect(sillyspecCmd).not.toHaveBeenCalled();
++  });
++
++  it('Windows 合法目录字符 & $ 不再误拦（白名单内照常执行）', async () => {
++    const cwds: string[] = [];
++    const { handler, sillyspecCmd } = mk(
++      { ok: true, stdout: OK_ENVELOPE, stderr: '', timedOut: false },
++      cwds,
++      ['C:/R&D/repo'],
++    );
++    const r = await handler.digest('ws-1', 'C:/R&D/repo');
++    expect((r.digest as { totals: { pseudo: number } }).totals.pseudo).toBe(37);
++    expect(sillyspecCmd).toHaveBeenCalledOnce();
++    expect(cwds[0]).toBe('C:/R&D/repo');
++  });
++
++  it('root 越界 allowed_roots → forbidden 且不 spawn（containment 第二道）', async () => {
++    const { handler, sillyspecCmd } = mk({ ok: true, stdout: OK_ENVELOPE, stderr: '', timedOut: false });
++    await expect(handler.digest('ws-1', 'D:/outside/repo')).rejects.toMatchObject({ code: 'forbidden' });
++    expect(sillyspecCmd).not.toHaveBeenCalled();
++  });
++
++  it('root 缺省/空 → forbidden（必须在白名单根内执行）', async () => {
++    const { handler, sillyspecCmd } = mk({ ok: true, stdout: OK_ENVELOPE, stderr: '', timedOut: false });
++    await expect(handler.digest('ws-1')).rejects.toMatchObject({ code: 'forbidden' });
++    await expect(handler.digest('ws-1', '')).rejects.toMatchObject({ code: 'forbidden' });
+     expect(sillyspecCmd).not.toHaveBeenCalled();
+   });
+ });
+@@ -69,18 +106,32 @@ describe('knowledge.action', () => {
+ 
+   it('redomain：域名合法透传；元字符/大小写拒', async () => {
+     const ok = mk({ ok: true, stdout: '✅ 域迁移完成：2 条', stderr: '', timedOut: false });
+-    const r = await ok.handler.action('ws-1', 'redomain', { from: 'auto-backend', to: 'platform-sync' });
++    const r = await ok.handler.action('ws-1', 'redomain', { from: 'auto-backend', to: 'platform-sync' }, 'C:/repo/x');
+     expect(r.output).toContain('域迁移完成');
+     expect(String(ok.sillyspecCmd.mock.calls[0]?.[0])).toContain('--from auto-backend --to platform-sync --write');
+ 
+     const bad = mk({ ok: true, stdout: '', stderr: '', timedOut: false });
+-    await expect(bad.handler.action('ws-1', 'redomain', { from: 'auto; rm', to: 'x' })).rejects.toMatchObject({ code: 'forbidden' });
+-    await expect(bad.handler.action('ws-1', 'redomain', { from: 'Auto-Backend', to: 'x' })).rejects.toMatchObject({ code: 'forbidden' });
++    await expect(
++      bad.handler.action('ws-1', 'redomain', { from: 'auto; rm', to: 'x' }, 'C:/repo/x'),
++    ).rejects.toMatchObject({ code: 'forbidden' });
++    await expect(
++      bad.handler.action('ws-1', 'redomain', { from: 'Auto-Backend', to: 'x' }, 'C:/repo/x'),
++    ).rejects.toMatchObject({ code: 'forbidden' });
++  });
++
++  it('root 越界 allowed_roots → forbidden 且不 spawn（写点 containment）', async () => {
++    const { handler, sillyspecCmd } = mk({ ok: true, stdout: '', stderr: '', timedOut: false });
++    await expect(
++      handler.action('ws-1', 'repair-paths', {}, 'D:/outside/repo'),
++    ).rejects.toMatchObject({ code: 'forbidden' });
++    expect(sillyspecCmd).not.toHaveBeenCalled();
+   });
+ 
+   it('kind 白名单外拒', async () => {
+     const { handler, sillyspecCmd } = mk({ ok: true, stdout: '', stderr: '', timedOut: false });
+-    await expect(handler.action('ws-1', 'shell', { from: 'a', to: 'b' })).rejects.toMatchObject({ code: 'forbidden' });
++    await expect(handler.action('ws-1', 'shell', { from: 'a', to: 'b' }, 'C:/repo/x')).rejects.toMatchObject({
++      code: 'forbidden',
++    });
+     expect(sillyspecCmd).not.toHaveBeenCalled();
+   });
+ });
