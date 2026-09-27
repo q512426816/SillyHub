@@ -384,6 +384,42 @@ describe("ChangeAssetsCard 测试文件路径解析", () => {
     expect(tip).toHaveTextContent("未在仓库中找到该测试文件");
     expect(tip).not.toHaveTextContent("工作区目录可能已被移动或删除");
   });
+
+  // ── 「用例名」注解粘联（2026-09-27-assets-testfile-bracket-note）────────
+  // 生产实证：sillyspec CLI flow done 补全的 tests[] 把绑定槽「路径「用例名」」
+  // 整串收录——归一剥离后搜索与比较才成立，否则恒零命中误报未找到。
+  it("「用例名」注解剥离：按干净文件名发起搜索并等值命中预览", async () => {
+    mockSearch.mockResolvedValue(matchesOf(["test/ui-visual-guidance.test.mjs"]));
+    await openTestFile([
+      "test/ui-visual-guidance.test.mjs「detectUiTouch 正例：页面/前端/UI/视觉/组件/tsx」",
+    ]);
+    // 搜索入参必须是剥掉注解的干净文件名——粘联正是此前零命中的根因。
+    expect(mockSearch).toHaveBeenCalledWith(
+      "ws-1",
+      "ui-visual-guidance.test.mjs",
+    );
+    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
+      "test/ui-visual-guidance.test.mjs",
+    );
+    expect(
+      screen.queryByTestId("change-assets-test-redirect-note"),
+    ).toBeNull();
+  });
+
+  it("多段注解剥离：短路径唯一后缀救回并预览真实路径", async () => {
+    mockSearch.mockResolvedValue(
+      matchesOf(["packages/cli/test/ui-visual-guidance.test.mjs"]),
+    );
+    await openTestFile(["test/ui-visual-guidance.test.mjs「甲」「乙」"]);
+    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
+      "packages/cli/test/ui-visual-guidance.test.mjs",
+    );
+  });
+
+  it("全注解串：剥离后为空仍按未找到处理", async () => {
+    await openTestFile(["「只有用例名没有路径」"]);
+    expect(await screen.findByTestId("change-assets-test-notfound")).toBeTruthy();
+  });
 });
 
 // ── 资产透明面（2026-09-26-change-asset-transparency / FR-01~03）────────────

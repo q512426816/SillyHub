@@ -24,12 +24,21 @@ interface ChangeAssetsCardProps {
 // ── 测试文件路径解析（2026-09-26-assets-testfile-path-resolve / FR-01~02）────
 // test-trace 记录的测试文件路径可能是短路径（缺仓库内目录前缀，如
 // ``tests/x.py`` 实为 ``backend/app/modules/<m>/tests/x.py``）或反斜杠/``./``
-// 写法。归一照知识库页 normalizeKnowledgeFileParam 先例；解析决策是纯函数，
+// 写法，归一照知识库页 normalizeKnowledgeFileParam 先例；解析决策是纯函数，
 // 由弹窗用 explorer search 的同名命中集驱动。
+// 「用例名」注解粘联（2026-09-27-assets-testfile-bracket-note）：sillyspec CLI
+// flow done 补全的 tests[] 可能把绑定槽「路径＋用例名」整串收录（如
+// ``test/x.mjs「某用例」``，注解在「」内可多段）——归一时剥离，否则 basename
+// 连注解进 explorer search 必零命中，恒显「未在仓库中找到」。
 
-/** 记录路径字符串归一（反斜杠→斜杠、去 ``./`` 前缀与首尾空白）。 */
+/** 记录路径字符串归一（反斜杠→斜杠、去 ``./`` 前缀、剥「用例名」注解段与首尾空白）。 */
 export function normalizeTestFilePath(raw: string): string {
-  return raw.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+  return raw
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .replace(/「[^」]*」/g, "")
+    .trim();
 }
 
 /** 解析决策：resolved=唯一确定路径（redirected=与记录路径不同，需标注）；
