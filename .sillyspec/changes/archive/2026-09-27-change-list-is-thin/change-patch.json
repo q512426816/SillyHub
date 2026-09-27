@@ -1,0 +1,21 @@
+{
+  "change": "2026-09-27-change-list-is-thin",
+  "baseline": "4d340be72fb09d9a120c2f65a6416da45f4f293e",
+  "head": "4d340be72fb09d9a120c2f65a6416da45f4f293e",
+  "files": [
+    ".sillyspec/changes/2026-09-27-change-list-is-thin/design.md",
+    ".sillyspec/changes/2026-09-27-change-list-is-thin/flow-state.yaml",
+    ".sillyspec/changes/2026-09-27-change-list-is-thin/proposal.md",
+    ".sillyspec/changes/2026-09-27-change-list-is-thin/requirements.md",
+    ".sillyspec/changes/2026-09-27-change-list-is-thin/tasks.md"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 153,
+    "deletions": 0
+  },
+  "savedAt": "2026-09-27T09:15:14.968Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "2ae7d0fe2378222bb397737c0d6623d6e7c561b1adc6a20fce7b5c6a12b48472",
+  "patchStatus": "ok"
+}

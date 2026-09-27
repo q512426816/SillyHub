@@ -2050,6 +2050,54 @@ class ChangeService:
             )
         return change_read
 
+    # ── thin 出身判定（2026-09-27-change-list-is-thin，口径=前端 lib/thin-lineage.ts）──
+
+    # thin 分流上线日（thin-badge-survives-archive D-001）：此后变更才按轻量出身。
+    _THIN_FLOW_LIVE_SINCE = datetime(2026, 9, 25, tzinfo=UTC)
+    # 标准工作流阶段痕迹（步骤 stage 命中任一即非 thin 出身）。
+    _THIN_LINEAGE_EXCLUDE_STAGES = frozenset({"brainstorm", "plan", "execute", "verify"})
+
+    @classmethod
+    def _is_thin_lineage(
+        cls,
+        *,
+        current_stage: str | None,
+        change_type: str | None,
+        created_at: datetime | None,
+        latest_progress: dict | None,
+    ) -> bool:
+        """三分支出身判定（均带分流上线时间窗）：
+
+        ① current_stage='thin'（active 期）；
+        ② change_type='quick'（平台 quick 分流）；
+        ③ latest_progress.steps 非空且全无标准四阶段痕迹（归档 flow-thin 兜底
+           信号——flow 子步不落标准阶段；steps 数据已在投影 JSON 内，零新增查询）。
+        窗外（created_at < 2026-09-25）一律 False（历史 quick/非标 steps 不误标）。
+        """
+        if created_at is not None:
+            # DB 读回可能 offset-naive（SQLite 测试库）——统一按 UTC 归一后比较。
+            ca = created_at if created_at.tzinfo else created_at.replace(tzinfo=UTC)
+            if ca < cls._THIN_FLOW_LIVE_SINCE:
+                return False
+        if current_stage == "thin":
+            return True
+        if change_type == "quick":
+            return True
+        if not isinstance(latest_progress, dict):
+            return False
+        steps = latest_progress.get("steps")
+        if not isinstance(steps, list) or not steps:
+            return False
+        # 评审 F1 对齐：无效 step（非 dict / stage 非 str）视为「无阶段痕迹」（与前端
+        # thin-lineage.ts 的 `st.stage ?? ""` 语义一致）——steps 非空但全无有效 stage
+        # 时按无痕迹兜底命中，不做二次守卫（避免双端口径漂移）。
+        stages = {
+            item.get("stage")
+            for item in steps
+            if isinstance(item, dict) and isinstance(item.get("stage"), str)
+        }
+        return not (stages & cls._THIN_LINEAGE_EXCLUDE_STAGES)
+
     async def enrich_summaries(self, changes: list[Change]) -> list[ChangeSummary]:
         """Build ChangeSummary list + 批量投影 current_stage（D-002@v1 / R-03 禁 N+1）。
 
@@ -2128,6 +2176,15 @@ class ChangeService:
                 # 赋值处截 200（列表性能契约不动，两层分离）。
                 step_summary, _ = self._extract_step_progress(latest_progress)
                 summary.step_progress = step_summary
+            # 2026-09-27-change-list-is-thin：出身标识投影（终态覆盖后的 current_stage
+            # 参与判定——归档 thin 翻 archived 后仍靠 steps 兜底命中；stage_info 不命中
+            # 处用 row 现值判分支①②）。
+            summary.is_thin = self._is_thin_lineage(
+                current_stage=summary.current_stage,
+                change_type=c.change_type,
+                created_at=c.created_at,
+                latest_progress=stage_info[2] if stage_info is not None else None,
+            )
             summaries.append(summary)
         return summaries
 

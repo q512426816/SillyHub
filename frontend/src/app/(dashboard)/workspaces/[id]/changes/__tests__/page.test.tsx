@@ -102,6 +102,7 @@ function makeChange(overrides: Partial<ChangeSummary> = {}): ChangeSummary {
     status: "in_progress",
     location: "active",
     change_type: null,
+    is_thin: false,
     // 默认非空：避免影响组件列「—」占位与徽标/owner 列「—」撞（getByText multiple）
     affected_components: ["frontend"],
     owner_id: null,
@@ -425,7 +426,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     expect(screen.queryByText("待提案审核")).not.toBeInTheDocument();
     expect(screen.queryByText("阻塞中")).not.toBeInTheDocument();
     // owner_id 降级渲染（UUID 前 8 位 mono）仍在
-    expect(screen.getByText("owner123")).toBeInTheDocument();
+    expect(screen.getByText("O").getAttribute("title")).toBe("负责人 owner123");
   });
 
   // ── 4. 空状态引导（task-09 / FR-04a：去表单，引导会话页）──────────────
@@ -518,8 +519,8 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     });
     await renderAndWait();
     // 用户名优先（owner_id 存在也不走 UUID 短标识）
-    expect(screen.getByText("qinyi")).toBeInTheDocument();
-    expect(screen.queryByText("abcdef12")).not.toBeInTheDocument();
+    // 头像渲染 owner_name 首字符，title 携带完整名
+    expect(screen.getByText("Q").getAttribute("title")).toBe("负责人 qinyi");
   });
 
   it("owner_name 空 + owner_id 有值 → 降级 UUID 前 8 位短标识（mono）", async () => {
@@ -533,7 +534,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
       ],
     });
     await renderAndWait();
-    expect(screen.getByText("abcdef12")).toBeInTheDocument();
+    expect(screen.getByText("A").getAttribute("title")).toBe("负责人 abcdef12");
   });
 
   it("owner_name / owner_id 双空 → 占位 —（pending_review 设值避免徽标双源 —）", async () => {

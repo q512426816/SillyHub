@@ -16,6 +16,7 @@ import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ChangesOverviewCard } from "@/components/workspace/changes-overview-card";
 import { AgentLivenessOverviewCard } from "@/components/agent-log/agent-liveness-overview-card";
 import { WorkspaceHeroHeader } from "@/components/workspace/hero-header";
+import { MetaPanel, MetaPanelSection } from "@/components/primer";
 import { WorkspaceStatsRow } from "@/components/workspace/stats-row";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -648,7 +649,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
         {pageError && <ErrorBanner message={pageError} />}
 
-        {/* 段②：统计卡行（ql-20260820-013 第四卡=快速修复条数） */}
+        {/* 段②：统计卡行（ql-20260820-013 第四卡=快速修复条数；2026-09-27 visual-gap-fix
+            换 GitHub Insights 竖排四格） */}
         <WorkspaceStatsRow
           workspaceId={workspaceId}
           componentCount={componentCount}
@@ -657,9 +659,57 @@ export default function WorkspaceDetailPage({ params }: Props) {
           quickTotal={quickTotal}
         />
 
-        {/* 段②′：Agent 状态总览卡（2026-09-07-agent-liveness-states / D-004 第二层：
-            分组计数 + 在等你组跳转；完整状态信息只在此卡与会话详情日志面板两处） */}
-        <AgentLivenessOverviewCard workspaceId={workspaceId} />
+        {/* 2026-09-27 visual-gap-fix：段②′ 两栏（原型 Repo 首页式骨架）——
+            左主列=活跃变更总览（2026-09-02-changes-overview-card task-07 / FR-01·FR-06，
+            跨 workspace 只读健康监控卡：卡是门铃、变更中心是操作台），右栏=Agent 状态
+            总览（2026-09-07-agent-liveness-states / D-004 第二层：分组计数 + 在等你组跳转）。 */}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+          <div>
+            <ChangesOverviewCard workspaceId={workspaceId} />
+            <div className="mt-1.5 flex justify-end">
+              <Link
+                href={`/workspaces/${workspaceId}/changes`}
+                className="text-xs text-brand-600 hover:text-brand-700 hover:underline"
+                data-testid="changes-overview-entry"
+              >
+                前往变更中心查看与操作 →
+              </Link>
+            </div>
+          </div>
+          <AgentLivenessOverviewCard workspaceId={workspaceId} />
+          {/* 2026-09-27 visual-align-2：原型 About 侧栏——工作区静态档案
+              （路径/技术栈/关联项目/状态/创建时间），数据全来自已加载 workspace。 */}
+          <MetaPanel>
+            <MetaPanelSection title="About">
+              {workspace.repo_url ? (
+                <span className="break-all font-mono text-xs text-muted-foreground" title={workspace.repo_url}>
+                  {workspace.repo_url}
+                </span>
+              ) : null}
+              {workspace.tech_stack && workspace.tech_stack.length > 0 ? (
+                <span className="flex flex-wrap gap-1">
+                  {workspace.tech_stack.map((t) => (
+                    <span key={t} className="rounded-full border px-1.5 text-[11px] text-muted-foreground" style={{ borderColor: "hsl(var(--border))" }}>
+                      {t}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
+              {linkedProjectNames !== null && linkedProjectNames.length > 0 ? (
+                <span className="flex flex-wrap items-center gap-1">
+                  {linkedProjectNames.map((name) => (
+                    <span key={name} className="inline-flex h-5 items-center rounded border border-brand-200 bg-brand-50 px-1.5 text-[11px] font-semibold text-brand-700">
+                      {name}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
+              <span className="text-xs text-muted-foreground">
+                创建于 {workspace.created_at ? new Date(workspace.created_at).toLocaleDateString("zh-CN") : "—"}
+              </span>
+            </MetaPanelSection>
+          </MetaPanel>
+        </div>
 
         {/* 段③-1：基本信息卡片（编辑入口在卡头 extra） */}
         <SectionCard title="基本信息" extra={basicInfoExtra} bodyPadding="p-4">
@@ -676,24 +726,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
           onRefresh={load}
           componentCount={componentCount}
         />
-
-        {/* 段③-3：活跃变更总览（2026-09-02-changes-overview-card task-07 / FR-01·FR-06）。
-            跨 workspace 只读健康监控卡——数据源定位（my-binding.daemon_id → 机器
-            sillyspec_status）在组件内部完成，page 仅传 workspaceId。分工（design §1）：
-            卡是门铃（概览层零跳转可见 ghost/冲突红灯）、变更中心是操作台（读写操作），
-            卡尾留可见入口跳变更中心。 */}
-        <div>
-          <ChangesOverviewCard workspaceId={workspaceId} />
-          <div className="mt-1.5 flex justify-end">
-            <Link
-              href={`/workspaces/${workspaceId}/changes`}
-              className="text-xs text-brand-600 hover:text-brand-700 hover:underline"
-              data-testid="changes-overview-entry"
-            >
-              前往变更中心查看与操作 →
-            </Link>
-          </div>
-        </div>
 
         {/* 段③-4：默认智能体提供方 | 守护进程共享 最下一行两块 */}
         <div className="grid items-start gap-4 lg:grid-cols-2">

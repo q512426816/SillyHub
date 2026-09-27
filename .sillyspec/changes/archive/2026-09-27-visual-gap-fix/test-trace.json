@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-visual-gap-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-27-visual-gap-fix:flow:FR-01",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-card.test.ts",
+        "frontend/src/components/__tests__/workspace-drag-grid.test.ts",
+        "workspaces/__tests__/page.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-visual-gap-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-27-visual-gap-fix:flow:FR-02",
+      "tests": [
+        "__tests__/page-sync.test.ts",
+        "frontend/src/components/workspace/__tests__/changes-overview-card.test.ts",
+        "page.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-visual-gap-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-27-visual-gap-fix:flow:FR-03",
+      "tests": [
+        "sessions/__tests__/page.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-visual-gap-fix"
+    }
+  ]
+}

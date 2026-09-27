@@ -259,8 +259,16 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     # session_insights（拆前 #67-71：stream/runs/tasks/logs/usage）
     "stream_session_logs",
     "list_session_runs",
+    # 2026-09-27-session-fast-replay task-01：轮次大纲端点（紧跟 runs，同为
+    # session_insights 的会话观测类 GET 端点；/turn-outline 固定字面量后缀与
+    # /logs/{log_id} 均为多段路径，与 /sessions/{session_id} 单段路由不同形状，
+    # 无匹配冲突）。
+    "get_session_turn_outline",
     "list_session_tasks",
     "get_session_logs",
+    # 2026-09-27-session-fast-replay task-02：单条日志全文端点（紧跟 logs，
+    # slim 截断条目的按需展开数据源；{log_id} 段多于 /logs 路由，不抢匹配）。
+    "get_session_log_entry",
     "get_session_usage",
     # session_team（拆前 #72-73：team-mission trigger/list）
     "trigger_session_team_mission",

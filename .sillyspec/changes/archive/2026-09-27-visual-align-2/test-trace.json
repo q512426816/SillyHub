@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-visual-align-2",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-27-visual-align-2:flow:FR-01",
+      "tests": [
+        "changes/__tests__/page.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-visual-align-2"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-27-visual-align-2:flow:FR-03",
+      "tests": [
+        "__tests__/page-sync.test.ts",
+        "page.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-visual-align-2"
+    }
+  ]
+}

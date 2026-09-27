@@ -306,8 +306,8 @@ describe("WorkspaceCard 拖拽手柄挂点 (task-08 / task-10 回归)", () => {
     );
     expect(screen.queryByTitle("拖拽排序")).not.toBeInTheDocument();
     expect(screen.queryByText("⠿")).not.toBeInTheDocument();
-    // 卡片不携带挂点 group/card 定位类——其余调用方渲染结果与现状完全一致。
-    expect(screen.getByRole("article").className).not.toContain("group/card");
+    // 2026-09-27 visual-gap-fix 评审 low 修复：group/card 改无条件（hover 操作组
+    // 可见性不再耦合手柄注入）——本断言改为验证挂点 DOM 不渲染（⠿ 手柄不存在已断言）。
   });
 
   it("只传 dragHandleNode（无 dragHandleProps）：挂点渲染子节点但无 ⠿ 手柄", () => {

@@ -65,8 +65,8 @@ export function IssueRow({
             }
           : undefined
       }
-      className={`group relative ${ISSUE_ROW_GRID} px-3 py-2.5 text-sm transition-colors ${
-        interactive ? "cursor-pointer hover:bg-muted/60" : ""
+      className={`group relative ${ISSUE_ROW_GRID} px-3 py-2.5 text-sm transition-colors duration-100 ${
+        interactive ? "cursor-pointer hover:bg-muted" : ""
       } ${className ?? ""}`}
     >
       {leading ? <div className="flex items-center pt-0.5">{leading}</div> : null}

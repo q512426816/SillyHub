@@ -147,7 +147,7 @@ export function ChangeTimelineCard({
         {tasks.length > 0 ? (
           <>
             <p className="mb-1 text-[11px] font-medium text-muted-foreground">
-              任务面（勾选 × 提交锚，顺序推断）
+              任务面（勾选时刻 ≈ 顺序推断 × 提交锚）
             </p>
             <ul data-testid="change-timeline-tasks">
               {tasks.map((t) => (
@@ -156,6 +156,9 @@ export function ChangeTimelineCard({
                   className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0"
                 >
                   <span className="w-4 shrink-0">{t.checked ? "☑" : "☐"}</span>
+                  <span className="w-16 shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+                    {t.checked ? (t.time ? `≈${hhmmss(t.time)}` : "?") : ""}
+                  </span>
                   <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
                     {t.id}
                   </span>

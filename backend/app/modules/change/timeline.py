@@ -84,6 +84,36 @@ def _parse_ts(ts: str) -> datetime | None:
         return None
 
 
+# task-done 事件勾选计数（watcher 推送 detail 为「stage · checked N→M」——
+# stage 前缀并存，search 子串匹配兼容两种形态）。
+_TASK_DONE_RE = re.compile(r"checked (\d+)→(\d+)")
+
+
+def _infer_task_times(rows: list, total: int) -> list[str | None]:
+    """翻格顺序推断每任务勾选时刻（CLI ``inferFlipTimes`` 同款语义）。
+
+    task-done 事件序列（``checked N→M``）游标衔接才赋值：中段断裂（from ≠ 游标）
+    停止推断（观测盲窗丢拍，后续任务时刻不可信）；尾部未覆盖（链完整但拍数
+    少于任务数——在途未勾完）不标断裂，未勾任务自然 None。观测起点前的首勾
+    （首个事件 from>0）同断裂语义。返回按任务序号索引的时刻列表。
+    """
+    times: list[str | None] = [None] * max(0, total)
+    cursor = 0
+    for r in rows:
+        if r.kind != "task-done" or not r.detail:
+            continue
+        m = _TASK_DONE_RE.search(r.detail)
+        if not m:
+            continue
+        start, end = int(m.group(1)), int(m.group(2))
+        if start != cursor:
+            break
+        for i in range(start, min(end, total)):
+            times[i] = r.ts
+        cursor = end
+    return times
+
+
 class ChangeTimelineQueryService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -126,6 +156,9 @@ class ChangeTimelineQueryService:
         ]
         # 任务面提交锚（CLI 同款「消息含 task token」推断）：倒序取最新命中。
         # token 后瞻断言 (?!\d) 防子串误锚（评审 P3：task-01 命中 task-012）。
+        # 勾选时刻（2026-09-27-timeline-task-time）：task-done 事件游标翻格推断。
+        task_rows = _read_tasks(change_dir)
+        task_times = _infer_task_times(rows, len(task_rows))
         tasks = [
             TimelineTask(
                 id=task_id,
@@ -139,8 +172,9 @@ class ChangeTimelineQueryService:
                     ),
                     None,
                 ),
+                time=task_times[idx] if checked else None,
             )
-            for task_id, checked, desc in _read_tasks(change_dir)
+            for idx, (task_id, checked, desc) in enumerate(task_rows)
         ]
 
         stats = TimelineStats(

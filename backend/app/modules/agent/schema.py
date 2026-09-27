@@ -191,6 +191,12 @@ class AgentRunLogEntry(BaseModel):
     # source_log_id, projection}`` 供前端刷新回放还原发言者，群链路 user_input 行
     # 另有 source_group_id/sender_user_id 等审计键；存量单聊行 NULL 零影响。
     metadata: dict | None = Field(default=None, validation_alias="metadata_")
+    # 2026-09-27-session-fast-replay task-02 / FR-02：slim 模式截断标记——
+    # daemon /logs 端点 ``?slim=true`` 时 tool 通道（channel=tool_call）的
+    # content_redacted 超 2000 字符被截到 2000 并置 True；需全文走单条端点
+    # GET /sessions/{id}/logs/{log_id}。旧路径（不传 slim）不置（恒 None），
+    # 旧调用方 / openapi 零变化。
+    content_truncated: bool | None = None
     model_config = {"from_attributes": True}
 
 

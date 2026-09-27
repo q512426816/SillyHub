@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-spec-sync-pg-chunk",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design.md 称模块内常量 _ADD_CHUNK，实现为函数局部变量 add_chunk=500",
+      "evidence": "design.md 槽2（接口契约）写「模块内常量 _ADD_CHUNK=500 分片循环」，实际实现是 apply_ops 函数内局部变量 `add_chunk = 500`（service.py:2325），非模块级常量。命名口径不一致（CLAUDE.md 规则18：注释/文档与实现不一致需及时修正），无功能影响。",
+      "location": "backend/app/modules/spec_workspace/service.py:2325"
+    },
+    {
+      "severity": "P3",
+      "title": "新增测试未显式断言 manifest 行 content_hash，FR-02「哈希正确」仅间接覆盖",
+      "evidence": "FR-02 声明「版本/哈希正确」，test_bulk_adds_chunked_all_applied 断言 total==1200、尾批行 version==1、exists is True、磁盘内容回读 == \"# f1199\"（内容可反推哈希输入），但未断言 row.content_hash == ops 提交的 sha256。哈希正确性依赖磁盘内容回读间接验证 + 既有 test_sync_incremental 用例兜底。覆盖面小缺口，不影响分片正确性结论。",
+      "location": "backend/app/modules/spec_workspace/tests/test_spec_sync_chunk.py:183-197"
+    },
+    {
+      "severity": "P3",
+      "title": "重放用例走陈旧基线跳过面，分片 upsert 的 on_conflict 跨批路径未由新用例直接触发",
+      "evidence": "test_bulk_adds_replay_idempotent_after_chunking 第二次推送 base_version=0 对已存在 version=1 的行全部 conflict/stale 跳过（pending_adds 为空，不进入分片 upsert），「行数不膨胀」验证的是端点级幂等而非 chunked on_conflict_do_update 去重。作者在用例注释中已自知（「服务端 no-op/conflict 跳过面」）；upsert 冲突面由既有增量用例覆盖（33 passed 1 skipped），风险低。",
+      "location": "backend/app/modules/spec_workspace/tests/test_spec_sync_chunk.py:219-233"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-25T13:27:49+08:00"
+}

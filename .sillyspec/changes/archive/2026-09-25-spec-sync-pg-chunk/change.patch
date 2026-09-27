@@ -1,0 +1,417 @@
+diff --git a/backend/app/modules/spec_workspace/service.py b/backend/app/modules/spec_workspace/service.py
+index 951ae3194..2fd412306 100644
+--- a/backend/app/modules/spec_workspace/service.py
++++ b/backend/app/modules/spec_workspace/service.py
+@@ -2316,37 +2316,46 @@ class SpecWorkspaceService:
+             if pending_adds:
+                 from sqlalchemy.dialects.postgresql import insert as pg_insert
+ 
+-                add_stmt = pg_insert(SpecFileManifest).values(
+-                    [
+-                        {
+-                            "id": r.id,
+-                            "workspace_id": r.workspace_id,
+-                            "path": r.path,
+-                            "content_hash": r.content_hash,
+-                            "version": r.version,
+-                            "exists": r.exists,
+-                            "platform_deleted": r.platform_deleted,
+-                            "updated_at": r.updated_at,
+-                        }
+-                        for r in pending_adds
+-                    ]
+-                )
+-                add_stmt = add_stmt.on_conflict_do_update(
+-                    index_elements=["workspace_id", "path"],
+-                    set_={
+-                        "content_hash": add_stmt.excluded.content_hash,
+-                        "version": case(
+-                            (
+-                                add_stmt.excluded.version > SpecFileManifest.version,
+-                                add_stmt.excluded.version,
++                # 分片执行（2026-09-25-spec-sync-pg-chunk 生产热修）：asyncpg 单语句
++                # 绑定参数上限 32767，本表每行 8 参 → 单语句最多 ~4095 行；归档移动
++                # 整树的单批 ops 数千行直接爆 InterfaceError 500（sillyspec 狗粮区
++                # 实证，spec-sync 全链瘫痪）。取 500/批（4000 参，含余量），行级
++                # upsert 语义逐字不变（幂等，分片边界无原子性要求——conflict 跳过
++                # 语义 per-row 独立）。
++                add_chunk = 500
++                for i in range(0, len(pending_adds), add_chunk):
++                    chunk = pending_adds[i : i + add_chunk]
++                    add_stmt = pg_insert(SpecFileManifest).values(
++                        [
++                            {
++                                "id": r.id,
++                                "workspace_id": r.workspace_id,
++                                "path": r.path,
++                                "content_hash": r.content_hash,
++                                "version": r.version,
++                                "exists": r.exists,
++                                "platform_deleted": r.platform_deleted,
++                                "updated_at": r.updated_at,
++                            }
++                            for r in chunk
++                        ]
++                    )
++                    add_stmt = add_stmt.on_conflict_do_update(
++                        index_elements=["workspace_id", "path"],
++                        set_={
++                            "content_hash": add_stmt.excluded.content_hash,
++                            "version": case(
++                                (
++                                    add_stmt.excluded.version > SpecFileManifest.version,
++                                    add_stmt.excluded.version,
++                                ),
++                                else_=SpecFileManifest.version,
+                             ),
+-                            else_=SpecFileManifest.version,
+-                        ),
+-                        "exists": True,
+-                        "updated_at": add_stmt.excluded.updated_at,
+-                    },
+-                )
+-                await self._session.execute(add_stmt)
++                            "exists": True,
++                            "updated_at": add_stmt.excluded.updated_at,
++                        },
++                    )
++                    await self._session.execute(add_stmt)
+             # ql-20260905-001：增量落盘与 _write_spec_root 同语义 bump spec_version
+             # ——①保鲜：lease 下发的 latest_spec_version 变化触发他机重拉新树；
+             # ②gzip 整包缓存键联动：不 bump 则 (ws, spec_version) 同键恒吐增量
+diff --git a/backend/app/modules/spec_workspace/tests/test_spec_sync_chunk.py b/backend/app/modules/spec_workspace/tests/test_spec_sync_chunk.py
+new file mode 100644
+index 000000000..045bc97eb
+--- /dev/null
++++ b/backend/app/modules/spec_workspace/tests/test_spec_sync_chunk.py
+@@ -0,0 +1,146 @@
++"""spec-sync manifest 批量 upsert 分片测试（2026-09-25-spec-sync-pg-chunk 生产热修）。
++
++背景：apply_ops 的 pending_adds 原一次性 pg_insert().values([...])，asyncpg 单语句
++绑定参数上限 32767（本表每行 8 参 → ~4095 行封顶）——归档移动整树的单批 ops
++数千行直接 InterfaceError 500（sillyspec 狗粮区实证，spec-sync 全链瘫痪、
++CLI 反复重试刷屏）。修复：500/批分片执行，行级 upsert 语义不变。
++
++sqlite 测试库无该上限，本测试验证分片循环的功能正确性（全部落库 + 版本/哈希
++正确 + 二批重放幂等），上限本身由批大小常量含余量保证。
++
++author: qinyi
++created_at: 2026-09-25
++"""
++
++from __future__ import annotations
++
++import base64
++import hashlib
++import uuid
++from pathlib import Path
++
++from httpx import AsyncClient
++from sqlalchemy import func, select
++
++from app.modules.spec_workspace.model import SpecFileManifest, SpecWorkspace
++from app.modules.workspace.model import Workspace
++
++_COUNT = 1200  # > 2×批大小 500，覆盖多批边界与尾批不满形态
++
++
++def _b64(text: str) -> str:
++    return base64.b64encode(text.encode("utf-8")).decode("ascii")
++
++
++async def _make_ws_spec(db_session, tmp_path: Path):
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="spec-chunk ws",
++        slug=f"sc-{uuid.uuid4().hex[:8]}",
++        root_path="/tmp/spec-chunk-test",
++        status="active",
++        component_key="comp",
++    )
++    db_session.add(ws)
++    spec_root = tmp_path / "spec-root"
++    db_session.add(
++        SpecWorkspace(
++            id=uuid.uuid4(),
++            workspace_id=ws.id,
++            spec_root=str(spec_root),
++            strategy="platform-managed",
++            sync_status="clean",
++        )
++    )
++    await db_session.commit()
++    return ws, spec_root
++
++
++async def test_bulk_adds_chunked_all_applied(
++    db_session, client: AsyncClient, auth_headers, tmp_path: Path
++) -> None:
++    """超大批（1200 add，3 批）全部落库：文件写盘 + manifest 行数/版本/哈希正确。"""
++    ws, spec_root = await _make_ws_spec(db_session, tmp_path)
++
++    ops = [
++        {
++            "op": "add",
++            "path": f"docs/bulk/f{i:05d}.md",
++            "base_version": 0,
++            "content": _b64(f"# f{i}"),
++            "hash": hashlib.sha256(f"# f{i}".encode()).hexdigest(),
++        }
++        for i in range(_COUNT)
++    ]
++    resp = await client.post(
++        f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
++        headers=auth_headers,
++        json={"ops": ops},
++    )
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["ok"] is True
++    assert len(resp.json()["new_versions"]) == _COUNT
++
++    total = (
++        await db_session.execute(
++            select(func.count())
++            .select_from(SpecFileManifest)
++            .where(
++                SpecFileManifest.workspace_id == ws.id,
++                SpecFileManifest.path.like("docs/bulk/%"),
++            )
++        )
++    ).scalar_one()
++    assert total == _COUNT, "分片循环不得丢行（批边界与尾批）"
++
++    row = (
++        (
++            await db_session.execute(
++                select(SpecFileManifest).where(
++                    SpecFileManifest.workspace_id == ws.id,
++                    SpecFileManifest.path == "docs/bulk/f01199.md",
++                )
++            )
++        )
++        .scalars()
++        .one()
++    )
++    assert row.version == 1
++    assert row.exists is True
++    assert (spec_root / "docs" / "bulk" / "f01199.md").read_text(encoding="utf-8") == "# f1199"
++
++
++async def test_bulk_adds_replay_idempotent_after_chunking(
++    db_session, client: AsyncClient, auth_headers, tmp_path: Path
++) -> None:
++    """重放整批（陈旧基线冲突跳过）后再全量重推：分片 upsert 幂等，行数不膨胀。"""
++    ws, _spec_root = await _make_ws_spec(db_session, tmp_path)
++    url = f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental"
++    ops = [
++        {
++            "op": "add",
++            "path": f"docs/replay/f{i:05d}.md",
++            "base_version": 0,
++            "content": _b64(f"# r{i}"),
++            "hash": hashlib.sha256(f"# r{i}".encode()).hexdigest(),
++        }
++        for i in range(_COUNT)
++    ]
++
++    first = await client.post(url, headers=auth_headers, json={"ops": ops})
++    assert first.status_code == 200
++    # 重放（同内容同哈希，服务端 no-op/conflict 跳过面）——行数仍恒定。
++    replay = await client.post(url, headers=auth_headers, json={"ops": ops})
++    assert replay.status_code == 200
++
++    total = (
++        await db_session.execute(
++            select(func.count())
++            .select_from(SpecFileManifest)
++            .where(
++                SpecFileManifest.workspace_id == ws.id,
++                SpecFileManifest.path.like("docs/replay/%"),
++            )
++        )
++    ).scalar_one()
++    assert total == _COUNT, "upsert 幂等：重放不得产生重复行"
+diff --git a/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/design.md b/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T05:20:23.143Z
++---
++# 设计记录（Design Record）— 2026-09-25-spec-sync-pg-chunk
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-spec-sync-pg-chunk 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++apply_ops 的 pending_adds 批量 upsert 按 500/批分片执行（原一次性 values([...]) 在单批数千行时绑定参数超 asyncpg 32767 上限 → spec-sync 500 全链瘫痪）。行级 upsert 语义逐字不变（同 on_conflict_do_update，幂等），批大小含 8 倍安全余量（500 行 × 8 参 = 4000 参）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-spec-sync-pg-chunk 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++对外 API 零变化（POST /spec-workspace/sync-incremental 行为修复：大批不再 500）；模块内常量 _ADD_CHUNK=500 分片循环，无 schema/迁移。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-spec-sync-pg-chunk 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序：ops 顺序处理语义不变，分片只切 manifest 批量写，文件落盘仍逐 op 顺序。2. 并发：upsert 幂等 + 版本高位对齐 case 保留，跨批并发重放与原单语句语义一致。3. 切换：中途失败回滚同事务语义（分片在同一 session/事务内，失败整体回滚不变）。4. 作用域：rows 自带 workspace_id，分片不改变归属过滤。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-spec-sync-pg-chunk 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：批间非原子（部分批成功后后续批失败）——原语义同为单事务内多语句，失败整体回滚，原子性不变；幂等重放由 conflict 跳过兜底。放弃的方案：改 executemany 或拆多请求——前者失去 on_conflict_do_update 的版本高位对齐语义，后者改 CLI 契约，均过重。
+
+diff --git a/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/flow-state.yaml b/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/flow-state.yaml
+@@ -0,0 +1,14 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 8836eca3df557292d823e65525f5f274c03bf9b0
++updatedAt: '2026-09-25T05:25:28.334Z'
++gate_summary: >-
++  test: skipped｜lint: passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app &&
++  cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（16.5s）｜门文件 4 个
++
+
+diff --git a/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/proposal.md b/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/proposal.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T05:20:23.141Z
++---
++# 提案书（Proposal）— 2026-09-25-spec-sync-pg-chunk
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:14ecd0cd8a3cb6ca854f0cfa3d6364ac17632e7fa931f39b0b20de16001df4a1:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-spec-sync-pg-chunk 留痕重锚 -->
++任务原话转写：生产热修：spec 树增量同步 apply_ops 的 manifest 批量 upsert 未分片，单批 ops 文件数大（归档移动整树，如 sillyspec 狗粮区单批数千行）时 pg_insert(SpecFileManifest).values([...]) 绑定参数超 asyncpg 32767 上限 → POST /changes/-/spec-sync 500，CLI 反复重试刷屏（生产实测 30 分钟 963KB 错误日志），spec 镜像停更，变更详情按 path 读镜像的文件/文档数据全空。
++成功标准：
++- pending_adds 批量 upsert 按固定批大小分片执行（批大小使单语句绑定参数远低于 32767，含安全余量），行级 upsert 语义逐字不变（on_conflict_do_update 同款）
++- 超大批功能测试：>批大小数倍的 pending adds 全部落库且版本/哈希正确（sqlite 测试库虽无该上限，分片循环的正确性可验）
++- 既有 spec_workspace apply_ops 相关测试零回归
++- 生产部署后 spec-sync 恢复（CLI 重试成功、镜像更新、变更详情文件/文档数据回填）
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:0e91f8602e3b35f4a386170e2250c7697bf851d8fcba9a966df93a3b19367372:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-spec-sync-pg-chunk 留痕重锚 -->
++按成功标准机械推导，共 4 条验收面：
++1. pending_adds 批量 upsert 按固定批大小分片执行（批大小使单语句绑定参数远低于 32767，含安全余量），行级 upsert 语义逐字不变（on_conflict_do_update 同款）
++2. 超大批功能测试：>批大小数倍的 pending adds 全部落库且版本/哈希正确（sqlite 测试库虽无该上限，分片循环的正确性可验）
++3. 既有 spec_workspace apply_ops 相关测试零回归
++4. 生产部署后 spec-sync 恢复（CLI 重试成功、镜像更新、变更详情文件/文档数据回填）
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:b850435ac3d807f7086eb07fd67443adad3f91f1a9971913624ea220f3b902bc:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-spec-sync-pg-chunk 留痕重锚 -->
++1. pending_adds 批量 upsert 按固定批大小分片执行（批大小使单语句绑定参数远低于 32767，含安全余量），行级 upsert 语义逐字不变（on_conflict_do_update 同款）
++2. 超大批功能测试：>批大小数倍的 pending adds 全部落库且版本/哈希正确（sqlite 测试库虽无该上限，分片循环的正确性可验）
++3. 既有 spec_workspace apply_ops 相关测试零回归
++4. 生产部署后 spec-sync 恢复（CLI 重试成功、镜像更新、变更详情文件/文档数据回填）
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/requirements.md b/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/requirements.md
+@@ -0,0 +1,45 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T05:20:23.143Z
++---
++# 需求规格（Requirements）— 2026-09-25-spec-sync-pg-chunk
++
++## 功能需求（agent 填写——每条 FR 格式 ### FR-NN: 标题 + Given/When/Then；FR 进知识索引，写清行为语义）
++
++<!--AGENT:FR区 agent 填写功能需求（直接书写，不走 amend） -->
++### FR-01: 批量 upsert 分片
++Given 单批 spec-sync ops 含数千 add（归档移动整树形态）
++When apply_ops 写 manifest
++Then 按 500/批分片执行 pg_insert upsert，单语句绑定参数恒低于 asyncpg 32767 上限，行级语义（版本高位对齐/exists/幂等）逐字不变
++
++### FR-02: 超大批全量落库
++Given 一次同步推送 1200 个 add
++When 处理完成
++Then 1200 行全落 manifest（批边界与尾批不丢行）、文件全写盘、版本/哈希正确
++
++### FR-03: 既有增量同步零回归
++Given 本变更交付
++When 跑 spec_workspace 增量同步既有测试
++Then 全绿（本次 33 passed 1 skipped，skip 为既有 Windows symlink 平台跳过）
++<!--
++参考摘录（非约束——agent 可采纳/改写/忽略；每条格式 ### FR-NN: 标题 + Given/When/Then）
++FR-01: pending_adds 批量 upsert 按固定批大小分片执行（批大小使单语句绑定参数远低于 32767，含安全余量），行级 upsert 语义逐字不变（on_conflict_do_update 同款）
++FR-02: 超大批功能测试：>批大小数倍的 pending adds 全部落库且版本/哈希正确（sqlite 测试库虽无该上限，分片循环的正确性可验）
++FR-03: 既有 spec_workspace apply_ops 相关测试零回归
++FR-04: 生产部署后 spec-sync 恢复（CLI 重试成功、镜像更新、变更详情文件/文档数据回填）
++-->
++
++
++## 测试绑定（每条 FR 至少一行——test 文件路径或用例名；不适用要写理由；flow done 空槽拒收）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/spec_workspace/tests/test_spec_sync_chunk.py::test_bulk_adds_chunked_all_applied（1200 add 三批全落 + 尾批行核验）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++同文件两用例（含 test_bulk_adds_replay_idempotent_after_chunking：重放不膨胀）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++uv run pytest app/modules/spec_workspace/tests/test_spec_sync_chunk.py app/modules/spec_workspace/tests/test_sync_incremental.py → 33 passed 1 skipped（回执 .sillyspec/.runtime/logs/c4-test.log）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（无测试面写「不适用：理由」）——例外裁决书写面（机器段之外合法） -->
++不适用：输入成功标准仅三条（FR-04 为部署验证项，属运维动作非测试面）——生产部署后以 spec-sync 恢复 + 镜像更新 + 变更详情回填为验收（见收尾汇报）。
+
+diff --git a/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/tasks.md b/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-25-spec-sync-pg-chunk/tasks.md
+@@ -0,0 +1,16 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-25T05:20:23.143Z
++---
++# 任务注册表（Tasks）— 2026-09-25-spec-sync-pg-chunk
++
++> 机器稿（成功标准机械推导）；轻量跑直写=零任务卡（任务即 checkbox 行）；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++<!-- MACHINE-DRAFT:tasks-rows:6596d6f3749cc5934185e37a530baa962812b7f135b9c0d42c5bb3a91af312c6:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-25-spec-sync-pg-chunk 留痕重锚 -->
++- [ ] task-01: pending_adds 批量 upsert 按固定批大小分片执行（批大小使单语句绑定参数远低于 32767，含安全余量
++- [ ] task-02: 超大批功能测试：>批大小数倍的 pending adds 全部落库且版本/哈希正确（sqlite 测试库虽无该上限，分片
++- [ ] task-03: 既有 spec_workspace apply_ops 相关测试零回归
++- [ ] task-04: 生产部署后 spec-sync 恢复（CLI 重试成功、镜像更新、变更详情文件/文档数据回填）
++<!-- MACHINE-DRAFT:tasks-rows:end -->
++

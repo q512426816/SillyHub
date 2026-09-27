@@ -1,0 +1,21 @@
+{
+  "change": "2026-09-27-hover-polish",
+  "baseline": "05218185395f1b6b94a0557de0af22ab7fae78d7",
+  "head": "05218185395f1b6b94a0557de0af22ab7fae78d7",
+  "files": [
+    ".sillyspec/changes/2026-09-27-hover-polish/design.md",
+    ".sillyspec/changes/2026-09-27-hover-polish/flow-state.yaml",
+    ".sillyspec/changes/2026-09-27-hover-polish/proposal.md",
+    ".sillyspec/changes/2026-09-27-hover-polish/requirements.md",
+    ".sillyspec/changes/2026-09-27-hover-polish/tasks.md"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 153,
+    "deletions": 0
+  },
+  "savedAt": "2026-09-27T01:28:46.477Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "a45cbe150f0f49f9aabdba9e5b6f9b1adfd4cb71d7620090dbe3f7102c11cac3",
+  "patchStatus": "ok"
+}

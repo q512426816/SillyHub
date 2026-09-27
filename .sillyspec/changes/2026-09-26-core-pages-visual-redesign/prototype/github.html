@@ -1,0 +1,1419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SillyHub · 变更中心 — GitHub 式·工程师实用风原型</title>
+<style>
+/* ============================================================
+   SillyHub · GitHub Primer 风格原型
+   变更中心 / 工作区 / 会话 三视图，单文件自包含
+   ============================================================ */
+:root{
+  --bg:#ffffff;
+  --canvas:#f6f8fa;
+  --canvas-inset:#eff1f3;
+  --border:#d0d7de;
+  --border-muted:#d8dee4;
+  --fg:#1f2328;
+  --fg-muted:#59636e;
+  --fg-subtle:#818b98;
+  --accent:#0969da;
+  --accent-subtle:#ddf4ff;
+  --success:#1a7f37;
+  --success-subtle:#dafbe1;
+  --open:#8250df;
+  --open-subtle:#fbefff;
+  --danger:#cf222e;
+  --danger-subtle:#ffebe9;
+  --attention:#9a6700;
+  --attention-subtle:#fff8c5;
+  --btn-primary-bg:#2da44e;
+  --btn-primary-hover:#2c974b;
+  --header-bg:#24292f;
+  --tab-indicator:#fd8c73;
+  --counter-bg:#eff1f3;
+  --focus-ring:0 0 0 3px rgba(9,105,218,.3);
+  --mono-font:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg);
+  color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;
+  font-size:14px;
+  line-height:1.5;
+  min-width:1200px;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4,p,dl,dd,dt{margin:0}
+ul,ol{list-style:none;margin:0;padding:0}
+button{font:inherit;cursor:pointer}
+input,textarea{font:inherit;color:inherit}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code,pre,.mono{font-family:var(--mono-font)}
+::placeholder{color:var(--fg-subtle);opacity:1}
+
+/* ---------- 通用图标 ---------- */
+.icon{width:16px;height:16px;flex:none;vertical-align:text-bottom}
+.icon-12{width:12px;height:12px}
+.icon-14{width:14px;height:14px}
+
+/* ---------- 顶栏（GitHub 经典深色） ---------- */
+.topbar{
+  height:56px;
+  background:var(--header-bg);
+  color:#ffffff;
+  display:flex;
+  align-items:center;
+}
+.topbar-inner{
+  width:100%;
+  max-width:1280px;
+  margin:0 auto;
+  padding:0 32px;
+  display:flex;
+  align-items:center;
+  gap:16px;
+}
+.brand{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  color:#fff;
+  font-size:15px;
+  font-weight:600;
+  letter-spacing:.2px;
+}
+.brand:hover{text-decoration:none}
+.brand .icon{width:28px;height:28px}
+.topbar-spacer{flex:1}
+.topbar-search{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:320px;
+  height:30px;
+  padding:0 8px;
+  background:#22272d;
+  border:1px solid #3d444d;
+  border-radius:6px;
+  color:var(--fg-subtle);
+  transition:border-color .15s;
+}
+.topbar-search:focus-within{border-color:#0969da;box-shadow:var(--focus-ring)}
+.topbar-search input{
+  flex:1;
+  min-width:0;
+  background:transparent;
+  border:0;
+  outline:none;
+  color:#e6edf3;
+  font-size:13px;
+}
+.topbar-search input::placeholder{color:#57606a}
+.topbar-search kbd{
+  font-family:var(--mono-font);
+  font-size:12px;
+  color:#d0d7de;
+  border:1px solid #3d444d;
+  border-radius:3px;
+  padding:0 5px;
+  line-height:16px;
+  background:transparent;
+}
+.topbar-icon{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:32px;height:32px;
+  border:0;background:transparent;
+  border-radius:6px;
+  color:#d0d7de;
+}
+.topbar-icon:hover{background:#2f363d;color:#fff}
+.topbar-div{width:1px;height:16px;background:#3d444d;margin:0 4px}
+.avatar{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:50%;
+  color:#fff;
+  font-weight:600;
+  flex:none;
+  user-select:none;
+}
+.av-20{width:20px;height:20px;font-size:12px}
+.av-24{width:24px;height:24px;font-size:12px}
+.av-26{width:26px;height:26px;font-size:13px}
+.av-28{width:28px;height:28px;font-size:13px}
+.av-qinyi{background:#0969da}
+.av-glm{background:#1a7f37}
+.av-codex{background:#8250df}
+.av-claude{background:#9a6700}
+
+/* ---------- 原型切换工具条 ---------- */
+.switchbar{
+  background:#fff;
+  border-bottom:1px solid var(--border);
+}
+.switchbar-inner{
+  max-width:1280px;
+  margin:0 auto;
+  padding:0 32px;
+  height:52px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.switch-btn{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  height:32px;
+  padding:0 12px;
+  background:var(--canvas);
+  border:1px solid var(--border);
+  border-radius:6px;
+  color:var(--fg-muted);
+  font-size:14px;
+  transition:color .12s,border-color .12s,background .12s;
+}
+.switch-btn:hover{color:var(--accent);border-color:var(--accent)}
+.switch-btn.is-active{
+  background:var(--accent-subtle);
+  border-color:var(--accent);
+  color:var(--accent);
+  font-weight:600;
+}
+.switchbar-spacer{flex:1}
+.style-tag{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:12px;
+  color:var(--fg-muted);
+  background:var(--canvas);
+  border:1px solid var(--border);
+  border-radius:2em;
+  padding:2px 10px;
+}
+.style-tag::before{
+  content:"";
+  width:8px;height:8px;
+  border-radius:2px;
+  background:linear-gradient(135deg,#24292f 50%,#2da44e 50%);
+}
+
+/* ---------- 页面骨架 ---------- */
+.page{display:none}
+.page.active{display:block;min-height:calc(100vh - 109px)}
+.shell{
+  max-width:1280px;
+  margin:0 auto;
+  padding:24px 32px 48px;
+}
+.breadcrumb{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:14px;
+  margin-bottom:12px;
+  color:var(--fg-subtle);
+}
+.breadcrumb .sep{color:var(--border-muted)}
+.breadcrumb a{color:var(--fg-muted)}
+.breadcrumb a.strong{color:var(--fg);font-weight:600}
+.breadcrumb a.strong:hover{color:var(--accent)}
+.pagehead{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  margin-bottom:16px;
+}
+.pagehead h1{font-size:20px;font-weight:600;line-height:1.3}
+.pagehead .count-note{font-size:16px;font-weight:400;color:var(--fg-subtle)}
+.pagehead-actions{
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+/* ---------- 按钮 ---------- */
+.btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  height:32px;
+  padding:0 16px;
+  font-size:14px;
+  font-weight:500;
+  border-radius:6px;
+  border:1px solid var(--border);
+  background:#fff;
+  color:var(--fg-muted);
+  transition:color .12s,border-color .12s,background .12s;
+}
+.btn:hover{color:var(--accent);border-color:var(--accent)}
+.btn:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.btn-primary{
+  background:var(--btn-primary-bg);
+  border:1px solid rgba(31,35,40,.15);
+  box-shadow:0 1px 0 rgba(31,35,40,.1);
+  color:#fff;
+}
+.btn-primary:hover{background:var(--btn-primary-hover);color:#fff;border-color:rgba(31,35,40,.15)}
+.btn-sm{height:28px;padding:0 12px}
+.icon-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:28px;height:28px;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:var(--fg-muted);
+}
+.icon-btn:hover{background:var(--canvas-inset);color:var(--fg)}
+
+/* ---------- 输入框 ---------- */
+.input-search{position:relative;display:inline-flex;align-items:center}
+.input-search .icon{
+  position:absolute;left:8px;
+  width:14px;height:14px;
+  color:var(--fg-subtle);
+  pointer-events:none;
+}
+.input-search input{
+  width:240px;
+  height:30px;
+  padding:0 8px 0 28px;
+  background:#fff;
+  border:1px solid var(--border);
+  border-radius:6px;
+  font-size:13px;
+  outline:none;
+  transition:border-color .12s,box-shadow .12s;
+}
+.input-search input:focus{border-color:var(--accent);box-shadow:var(--focus-ring)}
+
+/* ---------- 工具条（浅灰分组：左筛选右搜索） ---------- */
+.toolbar{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  background:var(--canvas);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:8px;
+}
+.toolbar-search .input-search input{background:#fff;width:280px}
+.toolbar-search{margin-left:auto}
+.toolbar .btn{height:30px;background:#fff}
+.toolbar .btn .caret{width:12px;height:12px;color:var(--fg-subtle)}
+
+/* ---------- UnderlineNav 状态 tab（橙色指示条） ---------- */
+.unav{
+  display:flex;
+  align-items:center;
+  gap:4px;
+  margin-top:16px;
+  border-bottom:1px solid var(--border);
+}
+.unav-tab{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:8px;
+  margin-bottom:-1px;
+  border:0;
+  border-bottom:2px solid transparent;
+  background:transparent;
+  color:var(--fg-muted);
+  font-size:14px;
+}
+.unav-tab .icon{color:var(--fg-muted)}
+.unav-tab:hover{color:var(--fg)}
+.unav-tab.is-active{
+  color:var(--fg);
+  font-weight:600;
+  border-bottom-color:var(--tab-indicator);
+}
+.unav-tab.is-active .icon{color:var(--fg)}
+.counter{
+  display:inline-block;
+  min-width:20px;
+  padding:0 6px;
+  border-radius:10px;
+  background:var(--counter-bg);
+  color:var(--fg-muted);
+  font-size:12px;
+  font-weight:500;
+  line-height:18px;
+  text-align:center;
+}
+.unav-tab.is-active .counter{background:#d0d7de;color:var(--fg)}
+
+/* ---------- 标签胶囊（浅底深字 + 同色系边框） ---------- */
+.label{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  padding:0 7px;
+  border-radius:2em;
+  border:1px solid;
+  font-size:12px;
+  font-weight:500;
+  line-height:18px;
+  white-space:nowrap;
+}
+.label .ldot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.lb-green{background:var(--success-subtle);color:var(--success);border-color:rgba(26,127,55,.4)}
+.lb-purple{background:var(--open-subtle);color:var(--open);border-color:rgba(130,80,223,.4)}
+.lb-red{background:var(--danger-subtle);color:var(--danger);border-color:rgba(207,34,46,.4)}
+.lb-amber{background:var(--attention-subtle);color:var(--attention);border-color:rgba(156,103,0,.4)}
+.lb-blue{background:var(--accent-subtle);color:var(--accent);border-color:rgba(9,105,218,.4)}
+.lb-gray{background:var(--counter-bg);color:var(--fg-muted);border-color:var(--border-muted)}
+
+/* ---------- 列表容器 ---------- */
+.list-box{
+  margin-top:8px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  overflow:hidden;
+  background:#fff;
+}
+.list-foot{
+  padding:8px 16px;
+  border-top:1px solid var(--border);
+  background:var(--canvas);
+  color:var(--fg-subtle);
+  font-size:12px;
+  text-align:right;
+}
+
+/* ---------- 页面1：变更中心（Issues 列表） ---------- */
+.issue-row{
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  padding:10px 16px;
+  transition:background .1s;
+}
+.issue-row:hover{background:var(--canvas)}
+.issue-row[hidden]{display:none}
+.issue-row + .issue-row{border-top:1px solid var(--border)}
+.issue-icon{padding:2px 2px 0 0}
+.issue-icon .icon-ic{color:var(--open)}
+.issue-icon .icon-zap{color:var(--attention)}
+.issue-main{flex:1;min-width:0}
+.issue-title-row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.issue-title{
+  font-size:14px;
+  font-weight:600;
+  color:var(--accent);
+  line-height:21px;
+}
+.issue-title:hover{text-decoration:underline}
+.issue-meta{
+  margin-top:2px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  flex-wrap:wrap;
+  color:var(--fg-subtle);
+  font-size:12px;
+}
+.issue-meta .mono{font-size:12px;color:var(--fg-subtle)}
+.issue-meta .sep{color:var(--border-muted)}
+.comp{
+  font-family:var(--mono-font);
+  font-size:12px;
+  line-height:16px;
+  padding:0 7px;
+  border:1px solid var(--border);
+  border-radius:2em;
+  color:var(--fg-muted);
+  background:#fff;
+}
+.issue-side{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex:none;
+  padding-top:1px;
+}
+.issue-side .cost{
+  font-family:var(--mono-font);
+  font-size:12px;
+  color:var(--fg-subtle);
+  min-width:112px;
+  text-align:right;
+  white-space:nowrap;
+}
+.issue-side .time{
+  font-size:12px;
+  color:var(--fg-subtle);
+  min-width:72px;
+  text-align:right;
+  white-space:nowrap;
+}
+
+/* ---------- 页面2：工作区（Repositories 列表） ---------- */
+.repo-row{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:14px 16px;
+  transition:background .1s;
+}
+.repo-row:hover{background:var(--canvas)}
+.repo-row + .repo-row{border-top:1px solid var(--border)}
+.repo-icon{padding:3px 2px 0 0;color:var(--fg-subtle)}
+.repo-main{flex:1;min-width:0}
+.repo-title-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.repo-name{font-size:14px;font-weight:600;color:var(--accent)}
+.repo-name:hover{text-decoration:underline}
+.vis{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  font-size:12px;
+  color:var(--fg-subtle);
+}
+.repo-meta{
+  margin-top:4px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  font-size:12px;
+  color:var(--fg-subtle);
+}
+.repo-meta .mono{font-size:12px;color:var(--fg-subtle)}
+.repo-meta .sep{color:var(--border-muted)}
+.lang{display:inline-flex;align-items:center;gap:5px;color:var(--fg-muted);white-space:nowrap}
+.lang-dot{width:10px;height:10px;border-radius:50%;flex:none}
+.repo-side{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  flex:none;
+  padding-top:3px;
+}
+.ws-count{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  font-size:12px;
+  color:var(--fg-muted);
+  white-space:nowrap;
+}
+.repo-side .time{
+  font-size:12px;
+  color:var(--fg-subtle);
+  min-width:88px;
+  text-align:right;
+  white-space:nowrap;
+}
+.more-wrap{
+  display:flex;
+  justify-content:center;
+  margin-top:16px;
+}
+
+/* ---------- 页面3：会话（三栏 IM） ---------- */
+#page-sessions.active{
+  display:flex;
+  height:calc(100vh - 109px);
+  min-height:0;
+}
+/* 左栏 */
+.sess-rail{
+  width:300px;
+  flex:none;
+  background:var(--canvas);
+  border-right:1px solid var(--border);
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+}
+.rail-top{
+  padding:12px 12px 0;
+  border-bottom:1px solid var(--border);
+}
+.rail-search{position:relative;display:flex;align-items:center}
+.rail-search .icon{
+  position:absolute;left:8px;
+  width:14px;height:14px;
+  color:var(--fg-subtle);
+  pointer-events:none;
+}
+.rail-search input{
+  width:100%;
+  height:30px;
+  padding:0 8px 0 28px;
+  background:#fff;
+  border:1px solid var(--border);
+  border-radius:6px;
+  font-size:13px;
+  outline:none;
+}
+.rail-search input:focus{border-color:var(--accent);box-shadow:var(--focus-ring)}
+.rail-tabs{
+  display:flex;
+  gap:16px;
+  margin-top:10px;
+}
+.rail-tab{
+  padding:4px 1px 8px;
+  border:0;
+  border-bottom:2px solid transparent;
+  margin-bottom:-1px;
+  background:transparent;
+  color:var(--fg-muted);
+  font-size:12px;
+}
+.rail-tab:hover{color:var(--fg)}
+.rail-tab.is-active{color:var(--fg);font-weight:600;border-bottom-color:var(--tab-indicator)}
+.sess-list{flex:1;overflow-y:auto;min-height:0}
+.sess-item{
+  padding:8px 12px 8px 10px;
+  border-left:2px solid transparent;
+  cursor:pointer;
+}
+.sess-item:hover{background:#eaeef2}
+.sess-item.is-active{background:#fff;border-left-color:var(--accent)}
+.sess-item-line1{display:flex;align-items:baseline;gap:7px}
+.sdot{
+  width:8px;height:8px;
+  border-radius:50%;
+  flex:none;
+  align-self:center;
+}
+.dot-blue{background:var(--accent)}
+.dot-amber{background:#bf8700}
+.dot-purple{background:var(--open)}
+.dot-green{background:var(--success)}
+.dot-red{background:var(--danger)}
+.sess-item-title{
+  flex:1;min-width:0;
+  font-size:14px;
+  color:var(--fg);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.sess-item.is-active .sess-item-title{font-weight:600}
+.sess-item-time{font-size:12px;color:var(--fg-subtle);white-space:nowrap}
+.sess-item-line2{
+  margin:2px 0 0 15px;
+  font-family:var(--mono-font);
+  font-size:12px;
+  color:var(--fg-subtle);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+/* 中栏 */
+.sess-main{
+  flex:1;
+  min-width:0;
+  background:#fff;
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+}
+.sess-header{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:12px 20px;
+  background:var(--canvas);
+  border-bottom:1px solid var(--border);
+}
+.sess-header h2{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sess-header .label{font-family:var(--mono-font)}
+.sess-actions{margin-left:auto;display:flex;gap:4px}
+.msg-flow{
+  flex:1;
+  min-height:0;
+  overflow-y:auto;
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+  padding:20px 24px;
+}
+.msg{display:flex}
+.msg-user{justify-content:flex-end}
+.msg-user .bubble-user{
+  max-width:62%;
+  background:var(--accent-subtle);
+  border:1px solid rgba(9,105,218,.35);
+  color:var(--accent);
+  border-radius:6px;
+  padding:9px 12px;
+  font-size:14px;
+}
+.msg-agent{gap:10px}
+.msg-agent .bubble-agent{
+  max-width:76%;
+  background:#fff;
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:10px 14px 12px;
+}
+.agent-head{
+  display:flex;
+  align-items:baseline;
+  gap:8px;
+  margin-bottom:4px;
+}
+.agent-head .name{font-size:14px;font-weight:600;color:var(--fg)}
+.agent-head .engine{font-family:var(--mono-font);font-size:12px;color:var(--fg-subtle)}
+.agent-head .mtime{font-size:12px;color:var(--fg-subtle);margin-left:auto}
+.bubble-agent p{font-size:14px;color:var(--fg)}
+.bubble-agent code{
+  background:rgba(175,184,193,.2);
+  border-radius:6px;
+  padding:1px 4px;
+  font-size:12px;
+}
+.codeblock{
+  margin:8px 0 0;
+  background:var(--canvas);
+  border:1px solid var(--border-muted);
+  border-radius:6px;
+  padding:10px 12px;
+  font-size:12px;
+  line-height:1.6;
+  color:var(--fg);
+  overflow-x:auto;
+}
+.codeblock .cm{color:var(--fg-subtle)}
+.tool-call{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin-top:8px;
+  font-family:var(--mono-font);
+  font-size:12px;
+  color:var(--fg-muted);
+  background:var(--counter-bg);
+  border:1px solid var(--border-muted);
+  border-radius:2em;
+  padding:2px 10px;
+}
+.tool-call .icon-12{color:var(--fg-muted)}
+.test-green{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  color:var(--success);
+  font-weight:600;
+}
+.test-green .icon{color:var(--success)}
+/* 底部输入区 */
+.composer{padding:0 24px 20px}
+.composer-box{
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:#fff;
+  transition:border-color .12s,box-shadow .12s;
+}
+.composer-box:focus-within{border-color:var(--accent);box-shadow:var(--focus-ring)}
+.composer-box textarea{
+  display:block;
+  width:100%;
+  min-height:64px;
+  padding:10px 12px 4px;
+  border:0;
+  outline:none;
+  resize:none;
+  font-size:14px;
+  background:transparent;
+}
+.composer-foot{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:6px 8px 8px 12px;
+}
+.composer-foot .hint{font-size:12px;color:var(--fg-subtle)}
+.composer-foot .btn{margin-left:auto}
+/* 右栏 */
+.sess-side{
+  width:260px;
+  flex:none;
+  background:var(--canvas);
+  border-left:1px solid var(--border);
+  padding:16px;
+  overflow-y:auto;
+}
+.sess-side h3{
+  font-size:14px;
+  font-weight:600;
+  padding-bottom:8px;
+  border-bottom:1px solid var(--border);
+  margin-bottom:12px;
+}
+.info-dl dt{font-size:12px;color:var(--fg-subtle);margin-bottom:2px}
+.info-dl dd{font-size:14px;color:var(--fg);margin-bottom:12px}
+.info-dl dd .mono{font-size:12px}
+.info-dl .link-mono{
+  font-family:var(--mono-font);
+  font-size:12px;
+  color:var(--accent);
+  word-break:break-all;
+}
+.avatar-stack{display:flex;align-items:center}
+.avatar-stack .avatar{border:2px solid var(--canvas);margin-left:-8px}
+.avatar-stack .avatar:first-child{margin-left:0}
+.avatar-stack .counter{margin-left:6px}
+</style>
+</head>
+<body>
+
+<!-- ============ 内嵌 SVG 图标库（octicon 风格 16px） ============ -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <defs>
+    <symbol id="o-mark" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.04-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></symbol>
+    <symbol id="o-search" viewBox="0 0 16 16"><circle cx="6.8" cy="6.8" r="5.05" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="10.55" y1="10.55" x2="13.9" y2="13.9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="o-filter" viewBox="0 0 16 16"><path fill="currentColor" d="M.75 3h14.5a.75.75 0 0 1 0 1.5H.75a.75.75 0 0 1 0-1.5ZM3 7.75A.75.75 0 0 1 3.75 7h8.5a.75.75 0 0 1 0 1.5h-8.5A.75.75 0 0 1 3 7.75Zm3 4a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"/></symbol>
+    <symbol id="o-triangle" viewBox="0 0 16 16"><path fill="currentColor" d="m4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z"/></symbol>
+    <symbol id="o-plus" viewBox="0 0 16 16"><path fill="currentColor" d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z"/></symbol>
+    <symbol id="o-issue" viewBox="0 0 16 16"><path fill="currentColor" fill-rule="evenodd" d="M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z"/></symbol>
+    <symbol id="o-merge" viewBox="0 0 16 16"><path fill="currentColor" d="M5.45 5.154A4.25 4.25 0 0 0 9.25 7.5h1.378a2.251 2.251 0 1 1 0 1.5H9.25A5.734 5.734 0 0 1 5 7.123v3.002a2.251 2.251 0 1 1-1.5 0V5.877a2.25 2.25 0 1 1 1.95-.218ZM4.25 13.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm8.5-4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z"/></symbol>
+    <symbol id="o-zap" viewBox="0 0 16 16"><path fill="currentColor" d="M6.59.5 3.5 8.5h3l-.75 3.5 4.5-8h-3L6.59.5Z"/></symbol>
+    <symbol id="o-book" viewBox="0 0 16 16"><path fill="currentColor" d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></symbol>
+    <symbol id="o-lock" viewBox="0 0 16 16"><path fill="currentColor" d="M4 4a4 4 0 0 1 8 0v2h.25c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 12.25 15h-8.5A1.75 1.75 0 0 1 2 13.25v-5.5C2 6.784 2.784 6 3.75 6H4Zm8.25 3.5h-8.5a.25.25 0 0 0-.25.25v5.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25ZM10.5 6V4a2.5 2.5 0 1 0-5 0v2Z"/></symbol>
+    <symbol id="o-globe" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM5.78 8.75a9.64 9.64 0 0 0 1.363 4.177c.255.426.542.832.857 1.215.245-.296.551-.705.857-1.215a9.64 9.64 0 0 0 1.363-4.177h-2.49ZM4.47 8.75H1.653a6.483 6.483 0 0 0 3.003 4.573 12.7 12.7 0 0 1-.999-3.112 11.187 11.187 0 0 1-.184-1.461Zm7.06 0h2.817a6.484 6.484 0 0 1-3.003 4.573 12.7 12.7 0 0 0 .999-3.112 11.187 11.187 0 0 0 .184-1.461Zm-2.53 0h1.502c-.088.94-.297 1.844-.616 2.68a11.186 11.186 0 0 1-.886 1.757 8.524 8.524 0 0 1-.886-1.757 8.524 8.524 0 0 1-.616-2.68ZM8 1.5a6.49 6.49 0 0 0-4.131 1.53 8.226 8.226 0 0 0 1.647 1.213A11.317 11.317 0 0 1 8 1.5Zm4.131 1.53A6.49 6.49 0 0 0 8 1.5c.59.433 1.248 1.004 1.872 1.713a8.226 8.226 0 0 0 1.647-1.213ZM1.653 7.25H4.47c.03-.48.096-.956.184-1.412a12.7 12.7 0 0 1 .999-3.112A6.483 6.483 0 0 0 1.653 7.25Zm11.694 0c-.03-.48-.096-.956-.184-1.412a12.7 12.7 0 0 1-.999-3.112 6.483 6.483 0 0 0 2.181 4.524Z"/></symbol>
+    <symbol id="o-download" viewBox="0 0 16 16"><path fill="currentColor" d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path fill="currentColor" d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06Z"/></symbol>
+    <symbol id="o-archive" viewBox="0 0 16 16"><path fill="currentColor" d="M1.75 1.5a.25.25 0 0 0-.25.25v2a.25.25 0 0 0 .25.25h12.5a.25.25 0 0 0 .25-.25v-2a.25.25 0 0 0-.25-.25ZM0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v2a1.75 1.75 0 0 1-1.75 1.75h-.5v7A1.75 1.75 0 0 1 12 14.25H4a1.75 1.75 0 0 1-1.75-1.75v-7h-.5A1.75 1.75 0 0 1 0 3.75Zm3.75 3.75v7c0 .138.112.25.25.25h8a.25.25 0 0 0 .25-.25v-7ZM6 7h4a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1 0-1.5Z"/></symbol>
+    <symbol id="o-kebab" viewBox="0 0 16 16"><path fill="currentColor" d="M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"/></symbol>
+    <symbol id="o-bell" viewBox="0 0 16 16"><path fill="currentColor" d="M8 16a2 2 0 0 0 1.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.253.113-.235.25A2 2 0 0 0 8 16ZM3 5a5 5 0 0 1 10 0v2.947c0 .05.015.098.042.139l1.703 2.555A1.519 1.519 0 0 1 13.482 13H2.518a1.516 1.516 0 0 1-1.263-2.36l1.703-2.554A.255.255 0 0 0 3 7.947Zm5-3.5A3.5 3.5 0 0 0 4.5 5v2.947c0 .346-.102.683-.294.97l-1.703 2.556a.017.017 0 0 0-.003.01l.001.006.004.007.007.005.008.004.006.001h10.948l.006-.001.008-.004.007-.005.004-.007.001-.006a.017.017 0 0 0-.003-.01l-1.703-2.554a1.745 1.745 0 0 1-.294-.97V5A3.5 3.5 0 0 0 8 1.5Z"/></symbol>
+    <symbol id="o-check" viewBox="0 0 16 16"><path fill="currentColor" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></symbol>
+    <symbol id="o-gear" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0a8.2 8.2 0 0 1 .701.031C9.444.095 9.99.645 10.16 1.29l.288 1.107c.018.066.079.158.212.224.231.114.454.243.668.386.123.082.233.09.299.071l1.103-.303c.644-.176 1.392.021 1.82.63.27.385.506.792.704 1.218.315.675.111 1.422-.364 1.891l-.814.806c-.049.048-.098.147-.088.294.016.257.016.515 0 .772-.01.147.039.246.088.294l.814.806c.475.469.679 1.216.364 1.891a7.012 7.012 0 0 1-.704 1.217c-.428.61-1.176.807-1.82.63l-1.103-.303c-.066-.019-.176-.011-.299.071a4.909 4.909 0 0 1-.668.386c-.133.066-.194.158-.212.224l-.288 1.107c-.17.645-.716 1.195-1.459 1.259a8.147 8.147 0 0 1-1.402 0c-.743-.064-1.289-.614-1.459-1.259l-.288-1.107c-.018-.066-.079-.158-.212-.224a4.911 4.911 0 0 1-.668-.386c-.123-.082-.233-.09-.299-.071l-1.103.303c-.644.176-1.392-.021-1.82-.63a8.097 8.097 0 0 1-.704-1.218c-.315-.675-.111-1.422.364-1.891l.814-.806c.049-.048.098-.147.088-.294a6.214 6.214 0 0 1 0-.772c.01-.147-.039-.246-.088-.294l-.814-.806C.635 6.045.431 5.298.746 4.623a7.07 7.07 0 0 1 .704-1.217c.428-.61 1.176-.807 1.82-.63l1.103.303c.066.019.176.011.299-.071.214-.143.437-.272.668-.386.133-.066.194-.158.212-.224l.288-1.107C6.01.645 6.556.095 7.299.03 7.532.01 7.766 0 8 0Zm0 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm0 1.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z"/></symbol>
+    <symbol id="o-comment" viewBox="0 0 16 16"><path fill="currentColor" d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></symbol>
+    <symbol id="o-list" viewBox="0 0 16 16"><path fill="currentColor" d="M2 2.5h1.5V4H2Zm4.5 0H14V4H6.5ZM2 7.25h1.5v1.5H2Zm4.5 0H14v1.5H6.5ZM2 12h1.5v1.5H2Zm4.5 0H14v1.5H6.5Z"/></symbol>
+    <symbol id="o-send" viewBox="0 0 16 16"><path fill="currentColor" d="M14.8 8 1.2 1.6l2.3 6.4-2.3 6.4L14.8 8Z"/></symbol>
+    <symbol id="o-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.75V8l2.1 1.05" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="o-people" viewBox="0 0 16 16"><path fill="currentColor" d="M2 5.5a3.5 3.5 0 1 1 5.898 2.549 5.508 5.508 0 0 1 3.034 4.084.75.75 0 1 1-1.482.235 4 4 0 0 0-7.9 0 .75.75 0 0 1-1.482-.236A5.507 5.507 0 0 1 3.102 8.05 3.493 3.493 0 0 1 2 5.5ZM11 4a3.001 3.001 0 0 1 2.22 5.018 5.01 5.01 0 0 1 2.56 3.012.749.749 0 0 1-.885.954.752.752 0 0 1-.549-.514 3.507 3.507 0 0 0-2.522-2.372.75.75 0 0 1-.574-.73v-.352a.75.75 0 0 1 .416-.672A1.5 1.5 0 0 0 11 5.5.75.75 0 0 1 11 4Zm-5.5-.5a2 2 0 1 0-.001 4 2 2 0 0 0 .001-4Z"/></symbol>
+  </defs>
+</svg>
+
+<!-- ============ 顶栏 ============ -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#" onclick="return false">
+      <svg class="icon"><use href="#o-mark"/></svg>
+      <span>SillyHub</span>
+    </a>
+    <div class="topbar-spacer"></div>
+    <label class="topbar-search">
+      <svg class="icon icon-14"><use href="#o-search"/></svg>
+      <input type="text" placeholder="搜索或跳转…">
+      <kbd>/</kbd>
+    </label>
+    <span class="topbar-div"></span>
+    <button class="topbar-icon" title="通知" aria-label="通知">
+      <svg class="icon"><use href="#o-bell"/></svg>
+    </button>
+    <span class="avatar av-26 av-qinyi" title="qinyi">Q</span>
+  </div>
+</header>
+
+<!-- ============ 原型切换工具条 ============ -->
+<div class="switchbar">
+  <div class="switchbar-inner">
+    <button class="switch-btn is-active" data-target="page-changes" aria-pressed="true">
+      <svg class="icon"><use href="#o-list"/></svg>变更中心
+    </button>
+    <button class="switch-btn" data-target="page-workspaces" aria-pressed="false">
+      <svg class="icon"><use href="#o-book"/></svg>工作区
+    </button>
+    <button class="switch-btn" data-target="page-sessions" aria-pressed="false">
+      <svg class="icon"><use href="#o-comment"/></svg>会话
+    </button>
+    <div class="switchbar-spacer"></div>
+    <span class="style-tag">GitHub 式·工程师实用风</span>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 页面 1：变更中心（GitHub Issues 既视感）                       -->
+<!-- ============================================================ -->
+<section id="page-changes" class="page active">
+  <div class="shell">
+    <nav class="breadcrumb" aria-label="路径">
+      <a href="#" onclick="return false">qinyi</a>
+      <span class="sep">/</span>
+      <a class="strong" href="#" onclick="return false">multi-agent-platform</a>
+      <span class="sep">/</span>
+      <a class="strong" href="#" onclick="return false">changes</a>
+    </nav>
+
+    <div class="pagehead">
+      <h1>变更中心</h1>
+      <div class="pagehead-actions">
+        <button class="btn btn-primary">New 变更</button>
+      </div>
+    </div>
+
+    <!-- 工具条：左筛选排序，右搜索 -->
+    <div class="toolbar">
+      <button class="btn">
+        <svg class="icon icon-14"><use href="#o-filter"/></svg>筛选
+        <svg class="icon caret"><use href="#o-triangle"/></svg>
+      </button>
+      <button class="btn">
+        排序
+        <svg class="icon caret"><use href="#o-triangle"/></svg>
+      </button>
+      <div class="toolbar-search">
+        <span class="input-search">
+          <svg class="icon"><use href="#o-search"/></svg>
+          <input type="text" placeholder="搜索变更…">
+        </span>
+      </div>
+    </div>
+
+    <!-- 状态 tab：Counter 胶囊 + 橙色指示条 -->
+    <nav class="unav" id="changeTabs">
+      <button class="unav-tab is-active" data-filter="active">
+        <svg class="icon"><use href="#o-issue"/></svg>进行中
+        <span class="counter">4</span>
+      </button>
+      <button class="unav-tab" data-filter="archived">
+        <svg class="icon"><use href="#o-merge"/></svg>已归档
+        <span class="counter">12</span>
+      </button>
+      <button class="unav-tab" data-filter="thin">
+        <svg class="icon"><use href="#o-zap"/></svg>轻量修复
+        <span class="counter">8</span>
+      </button>
+    </nav>
+
+    <!-- 变更列表 -->
+    <div class="list-box">
+      <ul id="changeList">
+        <!-- 1 进行中 -->
+        <li class="issue-row" data-cat="active">
+          <div class="issue-icon"><svg class="icon icon-ic"><use href="#o-issue"/></svg></div>
+          <div class="issue-main">
+            <div class="issue-title-row">
+              <a class="issue-title" href="#" onclick="return false">观测事件通道 v3 · 重构</a>
+              <span class="label lb-green"><span class="ldot"></span>进行中 · 活跃</span>
+            </div>
+            <div class="issue-meta">
+              <span class="mono">2026-09-25-observation-events-v3-r16sf</span>
+              <span class="sep">·</span>
+              <span class="comp">backend</span>
+              <span class="comp">frontend</span>
+            </div>
+          </div>
+          <div class="issue-side">
+            <span class="label lb-blue">实现计划</span>
+            <span class="avatar av-20 av-qinyi" title="负责人 qinyi">Q</span>
+            <span class="cost">2.4M tok·18次</span>
+            <span class="time">5 分钟前</span>
+          </div>
+        </li>
+        <!-- 2 进行中 -->
+        <li class="issue-row" data-cat="active">
+          <div class="issue-icon"><svg class="icon icon-ic"><use href="#o-issue"/></svg></div>
+          <div class="issue-main">
+            <div class="issue-title-row">
+              <a class="issue-title" href="#" onclick="return false">探测并发 RPC</a>
+              <span class="label lb-green"><span class="ldot"></span>进行中 · 活跃</span>
+            </div>
+            <div class="issue-meta">
+              <span class="mono">2026-09-26-probe-concurrent-rpc</span>
+              <span class="sep">·</span>
+              <span class="comp">backend</span>
+            </div>
+          </div>
+          <div class="issue-side">
+            <span class="label lb-purple">代码扫描</span>
+            <span class="avatar av-20 av-qinyi" title="负责人 qinyi">Q</span>
+            <span class="cost">380K tok·4次</span>
+            <span class="time">11 分钟前</span>
+          </div>
+        </li>
+        <!-- 3 进行中（待处理） -->
+        <li class="issue-row" data-cat="active">
+          <div class="issue-icon"><svg class="icon icon-ic"><use href="#o-issue"/></svg></div>
+          <div class="issue-main">
+            <div class="issue-title-row">
+              <a class="issue-title" href="#" onclick="return false">扫描文档运维面板</a>
+              <span class="label lb-amber">待处理 2 项</span>
+            </div>
+            <div class="issue-meta">
+              <span class="mono">2026-09-21-scan-docs-ops-panel</span>
+              <span class="sep">·</span>
+              <span class="comp">frontend</span>
+              <span class="comp">docs</span>
+            </div>
+          </div>
+          <div class="issue-side">
+            <span class="label lb-amber">验证确认</span>
+            <span class="avatar av-20 av-qinyi" title="负责人 qinyi">Q</span>
+            <span class="cost">1.1M tok·12次</span>
+            <span class="time">5 天前</span>
+          </div>
+        </li>
+        <!-- 4 进行中 -->
+        <li class="issue-row" data-cat="active">
+          <div class="issue-icon"><svg class="icon icon-ic"><use href="#o-issue"/></svg></div>
+          <div class="issue-main">
+            <div class="issue-title-row">
+              <a class="issue-title" href="#" onclick="return false">跨仓库范围对账</a>
+              <span class="label lb-blue">进行中</span>
+            </div>
+            <div class="issue-meta">
+              <span class="mono">2026-09-20-scope-audit-cross-repo-platform</span>
+              <span class="sep">·</span>
+              <span class="comp">sillyspec</span>
+            </div>
+          </div>
+          <div class="issue-side">
+            <span class="label lb-amber">验证确认</span>
+            <span class="avatar av-20 av-qinyi" title="负责人 qinyi">Q</span>
+            <span class="cost">960K tok·9次</span>
+            <span class="time">6 天前</span>
+          </div>
+        </li>
+        <!-- 5 已归档（轻量出身） -->
+        <li class="issue-row" data-cat="archived thin">
+          <div class="issue-icon"><svg class="icon icon-ic"><use href="#o-merge"/></svg></div>
+          <div class="issue-main">
+            <div class="issue-title-row">
+              <a class="issue-title" href="#" onclick="return false">轻量徽章归档后存活</a>
+              <span class="label lb-amber"><span class="ldot"></span>出身 · 轻量变更</span>
+            </div>
+            <div class="issue-meta">
+              <span class="mono">2026-09-26-thin-badge-survives-archive</span>
+              <span class="sep">·</span>
+              <span class="comp">frontend</span>
+            </div>
+          </div>
+          <div class="issue-side">
+            <span class="label lb-gray">已归档</span>
+            <span class="avatar av-20 av-qinyi" title="负责人 qinyi">Q</span>
+            <span class="cost">210K tok·3次</span>
+            <span class="time">昨天</span>
+          </div>
+        </li>
+        <!-- 6 已归档 -->
+        <li class="issue-row" data-cat="archived">
+          <div class="issue-icon"><svg class="icon icon-ic"><use href="#o-merge"/></svg></div>
+          <div class="issue-main">
+            <div class="issue-title-row">
+              <a class="issue-title" href="#" onclick="return false">平台同步命令 FIFO 排队</a>
+            </div>
+            <div class="issue-meta">
+              <span class="mono">2026-09-26-sillyspec-command-queue</span>
+              <span class="sep">·</span>
+              <span class="comp">daemon</span>
+            </div>
+          </div>
+          <div class="issue-side">
+            <span class="label lb-gray">已归档</span>
+            <span class="avatar av-20 av-qinyi" title="负责人 qinyi">Q</span>
+            <span class="cost">780K tok·11次</span>
+            <span class="time">昨天</span>
+          </div>
+        </li>
+        <!-- 7 已归档 -->
+        <li class="issue-row" data-cat="archived">
+          <div class="issue-icon"><svg class="icon icon-ic"><use href="#o-merge"/></svg></div>
+          <div class="issue-main">
+            <div class="issue-title-row">
+              <a class="issue-title" href="#" onclick="return false">冲突裁决入口</a>
+            </div>
+            <div class="issue-meta">
+              <span class="mono">2026-09-04-conflict-resolve-entry</span>
+              <span class="sep">·</span>
+              <span class="comp">backend</span>
+              <span class="comp">daemon</span>
+            </div>
+          </div>
+          <div class="issue-side">
+            <span class="label lb-gray">已归档</span>
+            <span class="avatar av-20 av-qinyi" title="负责人 qinyi">Q</span>
+            <span class="cost">1.9M tok·25次</span>
+            <span class="time">9 月 4 日</span>
+          </div>
+        </li>
+        <!-- 8 已归档 -->
+        <li class="issue-row" data-cat="archived">
+          <div class="issue-icon"><svg class="icon icon-ic"><use href="#o-merge"/></svg></div>
+          <div class="issue-main">
+            <div class="issue-title-row">
+              <a class="issue-title" href="#" onclick="return false">智能体五态徽章</a>
+            </div>
+            <div class="issue-meta">
+              <span class="mono">2026-09-07-agent-liveness-states</span>
+              <span class="sep">·</span>
+              <span class="comp">frontend</span>
+            </div>
+          </div>
+          <div class="issue-side">
+            <span class="label lb-gray">已归档</span>
+            <span class="avatar av-20 av-qinyi" title="负责人 qinyi">Q</span>
+            <span class="cost">1.3M tok·16次</span>
+            <span class="time">9 月 21 日</span>
+          </div>
+        </li>
+      </ul>
+      <div class="list-foot" id="changeFoot">显示 4 / 4 个变更</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 页面 2：工作区（GitHub Repositories 列表既视感）                -->
+<!-- ============================================================ -->
+<section id="page-workspaces" class="page">
+  <div class="shell">
+    <div class="pagehead">
+      <h1>工作区 <span class="count-note">(10)</span></h1>
+      <div class="pagehead-actions">
+        <span class="input-search">
+          <svg class="icon"><use href="#o-search"/></svg>
+          <input type="text" placeholder="搜索工作区…">
+        </span>
+        <button class="btn btn-primary">
+          <svg class="icon icon-14"><use href="#o-plus"/></svg>New 工作区
+        </button>
+      </div>
+    </div>
+
+    <div class="list-box">
+      <ul>
+        <!-- 1 -->
+        <li class="repo-row">
+          <div class="repo-icon"><svg class="icon"><use href="#o-book"/></svg></div>
+          <div class="repo-main">
+            <div class="repo-title-row">
+              <a class="repo-name" href="#" onclick="return false">multi-agent-platform</a>
+              <span class="vis"><svg class="icon icon-12"><use href="#o-lock"/></svg>私有</span>
+            </div>
+            <div class="repo-meta">
+              <span class="mono">~/IdeaProjects/multi-agent-platform</span>
+              <span class="sep">·</span>
+              <span class="lang"><i class="lang-dot" style="background:#955d3f"></i>Next.js</span>
+              <span class="lang"><i class="lang-dot" style="background:#3572A5"></i>FastAPI</span>
+              <span class="lang"><i class="lang-dot" style="background:#5fa04e"></i>Node</span>
+            </div>
+          </div>
+          <div class="repo-side">
+            <span class="label lb-green"><span class="ldot"></span>在线</span>
+            <span class="ws-count"><span class="counter">4</span>个进行中</span>
+            <span class="time">11 分钟前</span>
+          </div>
+        </li>
+        <!-- 2 -->
+        <li class="repo-row">
+          <div class="repo-icon"><svg class="icon"><use href="#o-book"/></svg></div>
+          <div class="repo-main">
+            <div class="repo-title-row">
+              <a class="repo-name" href="#" onclick="return false">sillyhub-website</a>
+              <span class="vis"><svg class="icon icon-12"><use href="#o-lock"/></svg>私有</span>
+            </div>
+            <div class="repo-meta">
+              <span class="lang"><i class="lang-dot" style="background:#ff5a03"></i>Astro</span>
+            </div>
+          </div>
+          <div class="repo-side">
+            <span class="label lb-gray"><span class="ldot"></span>离线</span>
+            <span class="ws-count"><span class="counter">0</span>个进行中</span>
+            <span class="time">3 天前</span>
+          </div>
+        </li>
+        <!-- 3 -->
+        <li class="repo-row">
+          <div class="repo-icon"><svg class="icon"><use href="#o-book"/></svg></div>
+          <div class="repo-main">
+            <div class="repo-title-row">
+              <a class="repo-name" href="#" onclick="return false">ppm-demo</a>
+              <span class="vis"><svg class="icon icon-12"><use href="#o-lock"/></svg>私有</span>
+            </div>
+            <div class="repo-meta">
+              <span class="lang"><i class="lang-dot" style="background:#41b883"></i>Vue3</span>
+              <span class="lang"><i class="lang-dot" style="background:#f1e05a"></i>Vite</span>
+            </div>
+          </div>
+          <div class="repo-side">
+            <span class="label lb-green"><span class="ldot"></span>在线</span>
+            <span class="ws-count"><span class="counter">3</span>个进行中</span>
+            <span class="time">2 小时前</span>
+          </div>
+        </li>
+        <!-- 4 -->
+        <li class="repo-row">
+          <div class="repo-icon"><svg class="icon"><use href="#o-book"/></svg></div>
+          <div class="repo-main">
+            <div class="repo-title-row">
+              <a class="repo-name" href="#" onclick="return false">docs-portal</a>
+              <span class="vis"><svg class="icon icon-12"><use href="#o-globe"/></svg>公开</span>
+            </div>
+            <div class="repo-meta">
+              <span class="lang"><i class="lang-dot" style="background:#3178c6"></i>VitePress</span>
+            </div>
+          </div>
+          <div class="repo-side">
+            <span class="label lb-amber"><span class="ldot"></span>待接入</span>
+            <span class="ws-count"><span class="counter">0</span>个进行中</span>
+            <span class="time">—</span>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <div class="more-wrap">
+      <button class="btn">显示更多</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 页面 3：会话（三栏 IM 式）                                     -->
+<!-- ============================================================ -->
+<section id="page-sessions" class="page">
+  <!-- 左栏：会话列表 -->
+  <div class="sess-rail">
+    <div class="rail-top">
+      <div class="rail-search">
+        <svg class="icon"><use href="#o-search"/></svg>
+        <input type="text" placeholder="搜索会话…">
+      </div>
+      <nav class="rail-tabs">
+        <button class="rail-tab is-active">全部会话</button>
+        <button class="rail-tab">进行中</button>
+        <button class="rail-tab">已完成</button>
+      </nav>
+    </div>
+    <ul class="sess-list" id="sessList">
+      <li class="sess-item is-active">
+        <div class="sess-item-line1">
+          <span class="sdot dot-blue"></span>
+          <span class="sess-item-title">观测事件通道 v3 · 第 3 轮</span>
+          <span class="sess-item-time">2 分钟前</span>
+        </div>
+        <div class="sess-item-line2">glm-4.7 · 3 轮 · qinyi</div>
+      </li>
+      <li class="sess-item">
+        <div class="sess-item-line1">
+          <span class="sdot dot-amber"></span>
+          <span class="sess-item-title">探测并发 RPC 调试</span>
+          <span class="sess-item-time">11 分钟前</span>
+        </div>
+        <div class="sess-item-line2">claude-opus-4.5 · 2 轮 · qinyi</div>
+      </li>
+      <li class="sess-item">
+        <div class="sess-item-line1">
+          <span class="sdot dot-purple"></span>
+          <span class="sess-item-title">群聊 · 变更中心三人组</span>
+          <span class="sess-item-time">1 小时前</span>
+        </div>
+        <div class="sess-item-line2">3 个智能体 · 12 轮 · qinyi</div>
+      </li>
+      <li class="sess-item">
+        <div class="sess-item-line1">
+          <span class="sdot dot-green"></span>
+          <span class="sess-item-title">thin-badge 修复</span>
+          <span class="sess-item-time">昨天</span>
+        </div>
+        <div class="sess-item-line2">glm-4.7 · 1 轮 · qinyi</div>
+      </li>
+      <li class="sess-item">
+        <div class="sess-item-line1">
+          <span class="sdot dot-green"></span>
+          <span class="sess-item-title">命令排队重构</span>
+          <span class="sess-item-time">昨天</span>
+        </div>
+        <div class="sess-item-line2">claude-sonnet-4.5 · 9 轮 · qinyi</div>
+      </li>
+      <li class="sess-item">
+        <div class="sess-item-line1">
+          <span class="sdot dot-red"></span>
+          <span class="sess-item-title">规范同步排查</span>
+          <span class="sess-item-time">3 天前</span>
+        </div>
+        <div class="sess-item-line2">codex · 6 轮 · qinyi</div>
+      </li>
+    </ul>
+  </div>
+
+  <!-- 中栏：消息流 -->
+  <div class="sess-main">
+    <div class="sess-header">
+      <h2>观测事件通道 v3 · 第 3 轮</h2>
+      <span class="label lb-blue">glm-4.7</span>
+      <div class="sess-actions">
+        <button class="icon-btn" title="导出" aria-label="导出"><svg class="icon"><use href="#o-download"/></svg></button>
+        <button class="icon-btn" title="归档" aria-label="归档"><svg class="icon"><use href="#o-archive"/></svg></button>
+        <button class="icon-btn" title="更多" aria-label="更多"><svg class="icon"><use href="#o-kebab"/></svg></button>
+      </div>
+    </div>
+
+    <div class="msg-flow">
+      <!-- 用户 -->
+      <div class="msg msg-user">
+        <div class="bubble-user">把观测事件的 payload 拆成 channel + envelope 两层</div>
+      </div>
+
+      <!-- Agent -->
+      <div class="msg msg-agent">
+        <span class="avatar av-28 av-glm">G</span>
+        <div class="bubble-agent">
+          <div class="agent-head">
+            <span class="name">GLM-4.7</span>
+            <span class="engine">glm-4.7</span>
+            <span class="mtime">14:31</span>
+          </div>
+          <p>已完成拆分，<code>observation_event</code> 表新增 <code>channel</code> 列，原 payload 整体迁入 envelope，下游按 channel 订阅即可：</p>
+          <pre class="codeblock"><code><span class="cm"># backend/schemas/observation.py</span>
+class ObservationEvent(BaseModel):
+    id: str
+    channel: Literal["rpc", "ws", "queue"]   <span class="cm"># 新增</span>
+    envelope: Envelope                        <span class="cm"># payload 迁入</span>
+    ts: datetime</code></pre>
+          <div class="tool-call">
+            <svg class="icon icon-12"><use href="#o-gear"/></svg>已读 daemon.ts +215 行
+          </div>
+        </div>
+      </div>
+
+      <!-- 用户 -->
+      <div class="msg msg-user">
+        <div class="bubble-user">跑一下相关测试</div>
+      </div>
+
+      <!-- Agent -->
+      <div class="msg msg-agent">
+        <span class="avatar av-28 av-glm">G</span>
+        <div class="bubble-agent">
+          <div class="agent-head">
+            <span class="name">GLM-4.7</span>
+            <span class="engine">glm-4.7</span>
+            <span class="mtime">14:33</span>
+          </div>
+          <p><span class="test-green">41 个用例全绿<svg class="icon icon-14"><use href="#o-check"/></svg></span>，其中 6 个为 channel 路由新增用例，无回归。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 输入区 -->
+    <div class="composer">
+      <div class="composer-box">
+        <textarea placeholder="给 GLM-4.7 发送消息…" rows="3"></textarea>
+        <div class="composer-foot">
+          <span class="hint">Enter 发送 · Shift+Enter 换行 · / 引用变更</span>
+          <button class="btn btn-primary btn-sm">
+            <svg class="icon icon-14"><use href="#o-send"/></svg>发送
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右栏：会话信息 -->
+  <div class="sess-side">
+    <h3>会话信息</h3>
+    <dl class="info-dl">
+      <dt>引擎</dt>
+      <dd><span class="label lb-blue mono">glm-4.7</span></dd>
+      <dt>状态</dt>
+      <dd><span class="label lb-green"><span class="ldot"></span>进行中</span></dd>
+      <dt>已进行轮数</dt>
+      <dd>3 轮</dd>
+      <dt>累计消耗</dt>
+      <dd class="mono">2.4M tok · 18 次</dd>
+      <dt>关联变更</dt>
+      <dd><a class="link-mono" href="#" onclick="return false">2026-09-25-observation-events-v3-r16sf</a></dd>
+      <dt>参与智能体</dt>
+      <dd>
+        <div class="avatar-stack" title="GLM-4.7 / codex / qinyi">
+          <span class="avatar av-24 av-glm">G</span>
+          <span class="avatar av-24 av-codex">C</span>
+          <span class="avatar av-24 av-qinyi">Q</span>
+          <span class="counter">3</span>
+        </div>
+      </dd>
+    </dl>
+  </div>
+</section>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- 页面切换 ---------- */
+  var switchBtns = document.querySelectorAll('.switch-btn');
+  switchBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      switchBtns.forEach(function (b) {
+        b.classList.remove('is-active');
+        b.setAttribute('aria-pressed', 'false');
+      });
+      btn.classList.add('is-active');
+      btn.setAttribute('aria-pressed', 'true');
+      document.querySelectorAll('.page').forEach(function (p) {
+        p.classList.remove('active');
+      });
+      var target = document.getElementById(btn.dataset.target);
+      if (target) target.classList.add('active');
+      window.scrollTo(0, 0);
+    });
+  });
+
+  /* ---------- 变更中心：状态 tab 过滤 ---------- */
+  var footText = {
+    active: '显示 4 / 4 个变更',
+    archived: '显示 4 / 12 个变更',
+    thin: '显示 1 / 8 个轻量修复'
+  };
+  var tabs = document.querySelectorAll('#changeTabs .unav-tab');
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      tabs.forEach(function (t) { t.classList.remove('is-active'); });
+      tab.classList.add('is-active');
+      var filter = tab.dataset.filter;
+      document.querySelectorAll('#changeList .issue-row').forEach(function (row) {
+        var cats = (row.dataset.cat || '').split(/\s+/);
+        row.hidden = cats.indexOf(filter) === -1;
+      });
+      document.getElementById('changeFoot').textContent = footText[filter] || '';
+    });
+  });
+
+  /* ---------- 会话左栏：条目选中 + 小 tab 选中 ---------- */
+  var items = document.querySelectorAll('#sessList .sess-item');
+  items.forEach(function (item) {
+    item.addEventListener('click', function () {
+      items.forEach(function (i) { i.classList.remove('is-active'); });
+      item.classList.add('is-active');
+    });
+  });
+  var railTabs = document.querySelectorAll('.rail-tab');
+  railTabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      railTabs.forEach(function (t) { t.classList.remove('is-active'); });
+      tab.classList.add('is-active');
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SillyHub 三大页面重设计 · 风格选型对比</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0b0d;
+    color: #eeeff1;
+    font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    padding: 28px 40px 20px;
+    background: linear-gradient(180deg, rgba(124,58,237,.08), transparent);
+    border-bottom: 1px solid rgba(255,255,255,.07);
+  }
+  header h1 { font-size: 20px; font-weight: 600; letter-spacing: .2px; }
+  header h1 em { font-style: normal; color: #a78bfa; }
+  header p { font-size: 13px; color: rgba(238,239,241,.55); margin-top: 8px; line-height: 1.7; }
+  header p b { color: rgba(238,239,241,.85); font-weight: 500; }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 20px 40px 40px;
+  }
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+  .cell {
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #0d0e10;
+  }
+  .cell-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,.03);
+    border-bottom: 1px solid rgba(255,255,255,.07);
+  }
+  .cell-bar .num {
+    width: 20px; height: 20px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600; color: #0a0b0d;
+    flex-shrink: 0;
+  }
+  .cell-bar .name { font-size: 14px; font-weight: 600; }
+  .cell-bar .desc { font-size: 12px; color: rgba(238,239,241,.5); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell-bar a {
+    font-size: 12px; color: #a78bfa; text-decoration: none;
+    padding: 4px 10px; border: 1px solid rgba(167,139,250,.35); border-radius: 6px;
+    white-space: nowrap; transition: all .12s;
+  }
+  .cell-bar a:hover { background: rgba(167,139,250,.12); }
+  .cell iframe { width: 100%; height: 62vh; border: 0; display: block; background: #fff; }
+  footer {
+    padding: 18px 40px 32px;
+    font-size: 12px; color: rgba(238,239,241,.4);
+    border-top: 1px solid rgba(255,255,255,.06);
+    line-height: 1.8;
+  }
+  footer code {
+    font-family: ui-monaco, Consolas, monospace;
+    background: rgba(255,255,255,.06); padding: 1px 6px; border-radius: 4px;
+    color: rgba(238,239,241,.7); font-size: 11px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>SillyHub 三大页面重设计 · <em>四种风格选型对比</em></h1>
+  <p>四种业界标杆设计语言 × 三个核心页面（变更中心 / 工作区 / 会话），统一使用同一套真实数据便于公平对比。<b>每个原型内部顶部都有页面切换按钮</b>，可切换查看三个页面；点击右上角「全屏打开」可获得完整沉浸体验。</p>
+</header>
+
+<div class="grid">
+  <div class="cell">
+    <div class="cell-bar">
+      <span class="num" style="background:#a78bfa">A</span>
+      <span class="name">Linear 式 · 高级极简</span>
+      <span class="desc">深色质感 · 紫品牌 · 开发工具审美天花板</span>
+      <a href="linear.html" target="_blank">↗ 全屏打开</a>
+    </div>
+    <iframe src="linear.html" title="Linear 风格原型" loading="lazy"></iframe>
+  </div>
+  <div class="cell">
+    <div class="cell-bar">
+      <span class="num" style="background:#111">V</span>
+      <span class="name">Vercel/Geist 式 · 黑白极简</span>
+      <span class="desc">大留白 · 黑按钮 · 明亮干净的现代感</span>
+      <a href="vercel.html" target="_blank">↗ 全屏打开</a>
+    </div>
+    <iframe src="vercel.html" title="Vercel 风格原型" loading="lazy"></iframe>
+  </div>
+  <div class="cell">
+    <div class="cell-bar">
+      <span class="num" style="background:#9b9a97">N</span>
+      <span class="name">Notion 式 · 轻盈文档感</span>
+      <span class="desc">看板视图 · 块状消息 · 亲和轻盈</span>
+      <a href="notion.html" target="_blank">↗ 全屏打开</a>
+    </div>
+    <iframe src="notion.html" title="Notion 风格原型" loading="lazy"></iframe>
+  </div>
+  <div class="cell">
+    <div class="cell-bar">
+      <span class="num" style="background:#1f883d">G</span>
+      <span class="name">GitHub 式 · 工程师实用风</span>
+      <span class="desc">Issues 既视感 · 状态色语义精准 · 密度高而有序</span>
+      <a href="github.html" target="_blank">↗ 全屏打开</a>
+    </div>
+    <iframe src="github.html" title="GitHub 风格原型" loading="lazy"></iframe>
+  </div>
+</div>
+
+<footer>
+  说明：四套原型均使用 Next.js + Tailwind + antd 技术栈可真实落地的效果制作，无外部依赖。文件位置 <code>.sillyspec/changes/2026-09-26-core-pages-visual-redesign/prototype/</code><br>
+  看完四种风格后请告诉 AI 你的选择（可以只选一种，也可以说「A 的配色 + V 的布局」这类组合意见）。
+</footer>
+</body>
+</html>

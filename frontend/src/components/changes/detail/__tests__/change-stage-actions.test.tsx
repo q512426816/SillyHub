@@ -27,6 +27,7 @@ function makeChange(over: Partial<ChangeRead>): ChangeRead {
     stages: {},
     affected_components: [],
     change_type: null,
+    is_thin: false,
     location: "active",
     updated_at: "2026-08-14T10:00:00Z",
     ...over,

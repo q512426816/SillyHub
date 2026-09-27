@@ -18,6 +18,8 @@ import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card
 import { ChangeFilesCard } from "@/components/changes/detail/change-files-card";
 import { ChangeSessionsCard } from "@/components/changes/detail/change-sessions-card";
 import { ChangeStageActions } from "@/components/changes/detail/change-stage-actions";
+import { StateIcon, StateLabel } from "@/components/primer";
+import { isThinLineageChange } from "@/lib/thin-lineage";
 import {
   ChangeStageHeader,
   WORKFLOW_STAGE_LABELS,
@@ -319,12 +321,9 @@ export default function ChangeDetailPage({ params }: Props) {
             </span>
             <span>类型: {change.change_type ?? "—"}</span>
             <span>位置: {change.location}</span>
-            <span>
-              影响:{" "}
-              {change.affected_components.length > 0
-                ? change.affected_components.join(", ")
-                : "—"}
-            </span>
+            {change.affected_components.length > 0 && (
+              <span>影响: {change.affected_components.join(", ")}</span>
+            )}
           </span>
         }
         // task-07：PageHeader actions 危险按钮（仅权限可见者挂载 DetailDeleteAction，
@@ -342,16 +341,46 @@ export default function ChangeDetailPage({ params }: Props) {
       />
 
       {/* 阶段步骤条（主线宏观进度；节点可点击筛选下方步骤时间线，ql-20260821-017） */}
-      <ChangeStageHeader
-        currentStage={change.current_stage ?? null}
-        stages={change.stages as Record<string, unknown> | null}
-        updatedAt={change.updated_at ?? null}
-        stepStages={stepStages}
-        focusStage={focusStage}
-        onStageClick={(stage) =>
-          setFocusStage((prev) => (prev === stage ? null : stage))
-        }
-      />
+      {isThinLineageChange(change) ? (
+        /* 2026-09-27-thin-display-fix：thin 出身不渲染六阶段 checks（flow 未走
+           主管线），改轻量流程条——对照原型轻量语义（StateLabel zap）。 */
+        <div className="flex flex-wrap items-center gap-3 rounded-md border bg-card px-3 py-2.5">
+          <StateLabel variant="attention" size="md">
+            轻量变更
+          </StateLabel>
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <StateIcon name="check" size={14} className="text-success" />
+              flow start
+            </span>
+            <span aria-hidden="true">→</span>
+            <span className="flex items-center gap-1">
+              <StateIcon name="check" size={14} className="text-success" />
+              干活（改代码 + 填槽）
+            </span>
+            <span aria-hidden="true">→</span>
+            <span className="flex items-center gap-1">
+              {isTerminalChange(change) ? (
+                <StateIcon name="check" size={14} className="text-success" />
+              ) : (
+                <StateIcon name="openCircle" size={14} className="text-primary" />
+              )}
+              {isTerminalChange(change) ? "flow done 收口归档" : "flow done 收口（进行中）"}
+            </span>
+          </span>
+        </div>
+      ) : (
+        <ChangeStageHeader
+          currentStage={change.current_stage ?? null}
+          stages={change.stages as Record<string, unknown> | null}
+          updatedAt={change.updated_at ?? null}
+          stepStages={stepStages}
+          focusStage={focusStage}
+          onStageClick={(stage) =>
+            setFocusStage((prev) => (prev === stage ? null : stage))
+          }
+        />
+      )}
 
       {/* task-12（design §8.1）：头部「最后信号」——数据源 = steps 明细最大
           completed_at（每步 --done 推送时点）纯前端派生：ChangeRead 无
@@ -380,7 +409,7 @@ export default function ChangeDetailPage({ params }: Props) {
       ) : null}
 
       {/* 左主右辅两栏（移动端 <lg 单列：次线堆叠在主线下方） */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_296px]">
         {/* 主线：审批卡 + 步骤时间线 + 智能体执行日志（只读） */}
         <main className="space-y-3">
           <ChangeStageActions
@@ -423,13 +452,14 @@ export default function ChangeDetailPage({ params }: Props) {
                 />
               </div>
             </section>
-          ) : (
-            /* 真实留痕时间线（2026-09-26-change-real-timeline / FR-03）：steps
-               为空（thin 轻量变更进度不落库恒空、quick 存量同空）时原整块
-               不渲染是叙事空窗——换挂合成时间线卡（事件轴 × 任务面 × 脚注，
-               复刻 CLI watcher timeline；组件自取数 30s 轮询失败静默）。 */
-            <ChangeTimelineCard workspaceId={workspaceId} changeId={changeId} />
-          )}
+          ) : null}
+
+          {/* 真实留痕时间线（2026-09-26-change-real-timeline / FR-03；2026-09-27-
+              timeline-coexist 共存化）：原与步骤时间线互斥（steps 空才挂载）——归档时
+              CLI unregisterChange 终态一致化补种 steps（3 行同一时间戳）会把本卡顶掉，
+              归档后真实数据（事件轴 × 任务面 × 墙钟）不可见。改恒挂载：组件自身
+              events/tasks/born 全空时静默隐藏，无观测数据零占位（厚变更不受扰）。 */}
+          <ChangeTimelineCard workspaceId={workspaceId} changeId={changeId} />
 
           <ChangeAgentRunLog
             workspaceId={workspaceId}
@@ -451,8 +481,13 @@ export default function ChangeDetailPage({ params }: Props) {
           />
         </main>
 
-        {/* 次线：变更文件 / 关联快速任务 / 会话调试 / 范围对账命令 */}
-        <aside className="space-y-3">
+        {/* 次线（2026-09-27 visual-align-2：对齐原型 MetaPanel 观感——外层统一
+            圆角边框容器，子卡去边框去阴影，六卡视觉融合为单块侧栏面板；各卡
+            自取数/折叠/头部功能零改动）：变更文件 / 关联快速任务 / 观测事件 /
+            会话 / 范围对账 / 沉淀资产 */}
+        <aside
+          className="flex flex-col gap-0 overflow-hidden rounded-lg border bg-card [&>*]:!rounded-none [&>*]:!border-x-0 [&>*]:!border-t-0 [&>*]:!shadow-none [&>*:not(:last-child)]:!border-b [&>*:last-child]:!border-b-0"
+        >
           <ChangeFilesCard workspaceId={workspaceId} changeId={changeId} />
           <QuicklogLinkedCard
             workspaceId={workspaceId}

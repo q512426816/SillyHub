@@ -60,8 +60,9 @@ const GOLDEN = {
     },
   ],
   tasks: [
-    { id: "task-01", checked: true, desc: "后端聚合服务落盘", commit_sha: "4aed0e824" },
-    { id: "task-02", checked: false, desc: "前端组件三段渲染", commit_sha: null },
+    { id: "task-01", checked: true, desc: "后端聚合服务落盘", commit_sha: "4aed0e824", time: "2026-09-26T07:02:00Z" },
+    { id: "task-02", checked: false, desc: "前端组件三段渲染", commit_sha: null, time: null },
+    { id: "task-03", checked: true, desc: "观测起点前首勾", commit_sha: null, time: null },
   ],
   stats: {
     event_count: 3,
@@ -102,6 +103,16 @@ describe("ChangeTimelineCard", () => {
     expect(tasks).toHaveTextContent("task-01");
     expect(tasks).toHaveTextContent("后端聚合服务落盘");
     expect(tasks).toHaveTextContent("4aed0e824");
+    // 勾选时刻（2026-09-27-timeline-task-time）：已勾有时刻 → ≈本地时分秒；
+    // 未勾不显示时刻列值。hhmmss 走 zh-CN 本地时区，ISO Z 转本地——断言用
+    // 同款格式化避免硬编码时区。
+    expect(tasks.textContent).toContain(
+      `≈${new Date("2026-09-26T07:02:00Z").toLocaleTimeString("zh-CN", { hour12: false })}`,
+    );
+    // 已勾但推断断裂/盲窗（time=null）→ 显示 ?；未勾（task-02）无时刻列值。
+    expect(tasks.textContent).toContain("?");
+    expect(tasks).toHaveTextContent("task-03");
+    expect(tasks).toHaveTextContent("观测起点前首勾");
     // provisional 观测角标（FR-02）：卡头 chip。
     expect(screen.getByText("观测")).toBeInTheDocument();
     // 脚注统计（120s → 2min）。

@@ -1,0 +1,21 @@
+{
+  "change": "2026-09-27-thin-display-fix",
+  "baseline": "4d340be72fb09d9a120c2f65a6416da45f4f293e",
+  "head": "4d340be72fb09d9a120c2f65a6416da45f4f293e",
+  "files": [
+    ".sillyspec/changes/2026-09-27-thin-display-fix/design.md",
+    ".sillyspec/changes/2026-09-27-thin-display-fix/flow-state.yaml",
+    ".sillyspec/changes/2026-09-27-thin-display-fix/proposal.md",
+    ".sillyspec/changes/2026-09-27-thin-display-fix/requirements.md",
+    ".sillyspec/changes/2026-09-27-thin-display-fix/tasks.md"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 188,
+    "deletions": 0
+  },
+  "savedAt": "2026-09-27T06:05:15.032Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "7eaf1ff339e006dbe5e879f93478df4a90b11ae2ac1e4d31c1f86c25c7f5fedb",
+  "patchStatus": "ok"
+}

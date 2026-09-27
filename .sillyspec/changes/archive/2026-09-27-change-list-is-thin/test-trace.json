@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-change-list-is-thin",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-27-change-list-is-thin:flow:FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_enrich_projection.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-change-list-is-thin"
+    }
+  ]
+}

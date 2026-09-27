@@ -6442,8 +6442,53 @@ export interface paths {
          *     ``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与其它
          *     session 读端点同一道闸门。查询内联在此（service.py 非本任务 allowed_path），
          *     与 get_session_detail 的 run 查询同款。
+         *
+         *     2026-09-27-session-fast-replay task-02 / FR-03：runs 瘦身 + gzip——
+         *
+         *     - ``agent_profile_snapshot`` 剥离 ``system_prompt`` 键（浅拷贝 dict.pop，
+         *       不动库数据）：前端实证仅消费 name/provider/model 等轻键，system_prompt
+         *       原文（可达数 KB/轮 × 500 轮）是 runs payload 膨胀主因；其余字段语义
+         *       零变化（design 接口契约④「结构不变仅去键」）。
+         *     - 响应走 gzip（抄本文件 /logs 的 gzip 路径：Accept-Encoding 协商 + 1KB
+         *       阈值 + 线程池压缩，长会话 500 轮 × JSON 文本压缩比 ~10x）。返回
+         *       ``Response`` 直写（response_model 仅保留 openapi 文档面，FastAPI 对
+         *       Response 返回值跳过再序列化，行为与 /logs 一致）。
          */
         get: operations["list_session_runs_api_daemon_sessions__session_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/turn-outline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Turn Outline
+         * @description Return the full turn outline of an owned session (task-01 / FR-01).
+         *
+         *     一次响应返回该会话**全部**轮次摘要（无 500 条截断，runs 端点的截断由本
+         *     端点接管全量导航职责）：每轮含 run_id / seq（created_at 升序 1 起）/
+         *     status / 起止时间 / error_code / sender_name / engine_anchor /
+         *     auto_resume_of / tokens 轻列，以及 prompt_summary（首条 user_input 前 60 字）
+         *     与 answer_summary（首条非空 stdout 前 120 字）。归属 / 存在性复用
+         *     ``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与
+         *     runs / logs 端点同一道闸门；查询内联在此（service.py 非本任务
+         *     allowed_path，对齐 list_session_runs 先例）。空会话返回 total_turns=0 +
+         *     空 items（不报错）。
+         *
+         *     缓存：进程内 LRU（键=session_id，容量 128），指纹 =（runs 总数, max(run.
+         *     created_at), max(log.timestamp), max(log.id)）——命中零重算直接回缓存值；
+         *     每请求仍先过归属闸门（缓存的是会话数据投影，不是授权结论）。
+         */
+        get: operations["get_session_turn_outline_api_daemon_sessions__session_id__turn_outline_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6513,8 +6558,48 @@ export interface paths {
          *     timestamp 无消费语义——单独传（无 ``before``）422 fail-explicit，
          *     不静默忽略（参数组合 422 写法对齐 session_team.py:420-436 /
          *     machines.py:488-494 先例）。
+         *
+         *     2026-09-27-session-fast-replay task-02 / FR-02：``run_id`` 单轮直达 +
+         *     ``slim`` 精简模式——
+         *
+         *     - ``run_id``：命中校验（run 存在且 ``agent_session_id`` 匹配，否则 404
+         *       资源隐藏），只返回该 run 全部日志（timestamp,id 升序，上限 2000 条），
+         *       供前端「未加载轮直达跳转」单次往返取整轮（替代 40ms interval 逐页
+         *       循环）；与 ``before``/``after`` 游标互斥（同传 422 fail-explicit），
+         *       可与 ``q``/``limit`` 组合（在单轮内收窄）；
+         *     - ``slim``：tool 通道（channel=tool_call）content_redacted 超 2000 字符
+         *       截断到 2000 并置 ``content_truncated=true``（AgentRunLogEntry 新可选
+         *       字段，旧路径不置恒 None，旧调用方零变化）；截断条目需全文走新增单条
+         *       端点 GET /sessions/{session_id}/logs/{log_id}。落库原文不动（slim 是
+         *       传输层语义，审计 / 导出全文照旧）。
          */
         get: operations["get_session_logs_api_daemon_sessions__session_id__logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/logs/{log_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Log Entry
+         * @description Return one full log entry of an owned session (task-02 / FR-02 / FR-07).
+         *
+         *     slim 模式的按需全文消费端点：截断条目（content_truncated=true）展开时单条
+         *     拉取渲染，非截断条目零额外请求。归属闸门与 runs / logs 同款
+         *     （``get_agent_session``，missing / 跨用户 / 软删均 404 不泄露存在性）；
+         *     行级命中校验经 log → run → session 链（``AgentRun.agent_session_id`` 匹配，
+         *     防跨会话读），日志不存在或不属于该会话同样 404。只读端点，无状态交互。
+         */
+        get: operations["get_session_log_entry_api_daemon_sessions__session_id__logs__log_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7754,6 +7839,51 @@ export interface paths {
         get: operations["get_knowledge_stats_api_workspaces__workspace_id__knowledge_stats_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/governance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Governance
+         * @description 知识治理信号：三类超阈才见人（安静即健康态）——知识 tab 信号卡数据源。
+         *
+         *     v2 RPC 优先：用户已绑定 daemon 时直采 CLI digest（单源真相），回退本地计算。
+         */
+        get: operations["get_knowledge_governance_api_workspaces__workspace_id__knowledge_governance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/governance/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Knowledge Governance Action
+         * @description 治理动作执行（信号卡按钮端）：经绑定 daemon 白名单执行 CLI 机械动作。
+         *
+         *     kind 白名单在 daemon 侧硬编码（repair-paths / redomain）；未绑定/离线时
+         *     由 runtime 侧错误族映射（502/404/504）。
+         */
+        post: operations["post_knowledge_governance_action_api_workspaces__workspace_id__knowledge_governance_actions_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -12431,6 +12561,8 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             } | null;
+            /** Content Truncated */
+            content_truncated?: boolean | null;
         };
         /** AgentRunResponse */
         AgentRunResponse: {
@@ -13852,6 +13984,11 @@ export interface components {
             location: string;
             /** Change Type */
             change_type: string | null;
+            /**
+             * Is Thin
+             * @default false
+             */
+            is_thin: boolean;
             /** Affected Components */
             affected_components: string[];
             /** Owner Id */
@@ -16415,6 +16552,58 @@ export interface components {
              * Format: date-time
              */
             timestamp: string;
+        };
+        /** GovernanceActionIn */
+        GovernanceActionIn: {
+            /** Kind */
+            kind: string;
+            /** From Domain */
+            from_domain?: string | null;
+            /** To Domain */
+            to_domain?: string | null;
+        };
+        /** GovernanceActionOut */
+        GovernanceActionOut: {
+            /** Output */
+            output: string;
+        };
+        /**
+         * GovernanceOut
+         * @description v2（2026-09-27-governance-rpc-actions）：source 标数据源（daemon-rpc=CLI 单源
+         *     直采，local=回退计算）；actions_available 标本端可否执行动作（RPC 直采时 True）。
+         */
+        GovernanceOut: {
+            /** Healthy */
+            healthy: boolean;
+            /** Signals */
+            signals: components["schemas"]["GovernanceSignalOut"][];
+            /** Totals */
+            totals: {
+                [key: string]: number;
+            };
+            /**
+             * Source
+             * @default local
+             */
+            source: string;
+            /**
+             * Actions Available
+             * @default false
+             */
+            actions_available: boolean;
+        };
+        /** GovernanceSignalOut */
+        GovernanceSignalOut: {
+            /** Kind */
+            kind: string;
+            /** Title */
+            title: string;
+            /** Count */
+            count: number;
+            /** Detail */
+            detail: string;
+            /** Suggestion */
+            suggestion: string;
         };
         /**
          * GroupChatCreate
@@ -24097,6 +24286,26 @@ export interface components {
             title: string;
         };
         /**
+         * SessionTurnOutlineRead
+         * @description turn-outline 响应体（FR-01）：session_id + 总轮数 + 全量轮次摘要列表。
+         *
+         *     空会话返回 ``total_turns=0`` + 空 ``items``（不报错，D-003 空态口径）。
+         */
+        SessionTurnOutlineRead: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Total Turns */
+            total_turns: number;
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["TurnOutlineItemRead"][];
+        };
+        /**
          * SessionUsageModelItemRead
          * @description 会话用量的单模型桶（2026-08-29-session-usage-stats task-01 / D-002@v1）。
          *
@@ -26058,7 +26267,10 @@ export interface components {
          * @description 任务面单行（tasks.md 任务行 × 提交锚推断）。
          *
          *     ``commit_sha`` 是「消息含 task-NN token」的最新窗口提交短哈希（CLI 同款
-         *     顺序推断口径，无匹配 → None）。
+         *     顺序推断口径，无匹配 → None）。``time`` 是翻格顺序推断的勾选时刻
+         *     （2026-09-27-timeline-task-time：task-done 事件 ``checked N→M`` 游标衔接
+         *     赋值——中段断裂停止推断、尾部未勾不标断裂，CLI ``inferFlipTimes`` 同款
+         *     语义；观测起点前的首勾/断裂后 → None，前端按 ? 展示）。
          */
         TimelineTask: {
             /** Id */
@@ -26075,6 +26287,8 @@ export interface components {
             desc: string;
             /** Commit Sha */
             commit_sha?: string | null;
+            /** Time */
+            time?: string | null;
         };
         /**
          * TokenPair
@@ -26361,6 +26575,55 @@ export interface components {
             };
             /** @description Agent dispatch 结果（无 dispatch 时为 null） */
             agent_dispatch?: components["schemas"]["TransitionDispatchResponse"] | null;
+        };
+        /**
+         * TurnOutlineItemRead
+         * @description turn-outline 单轮摘要项（FR-01）。
+         *
+         *     轻列字段直映 ``AgentRun`` 既有列（**不含** agent_profile_snapshot /
+         *     error_detail 大 JSON，design 做法概述①「轻列」）；``auto_resume_of`` 从
+         *     ``AgentRun.metadata_`` 的 ``{"auto_resume_of": "<源 run id>"}` 抽出（续跑轮
+         *     徽标数据源，普通轮 None）；``prompt_summary`` / ``answer_summary`` 为窗口
+         *     函数抽出的每 run 首条 channel=user_input / 首条非空 channel=stdout 日志的
+         *     截断文本（后端日志通道实际枚举 user_input/stdout/tool_call/stderr，无
+         *     "reply" 通道——assistant 文本即 stdout，见 sdk_pipeline._channel_from_event_type），
+         *     无对应日志的行为 None（不伪造）。
+         */
+        TurnOutlineItemRead: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Seq */
+            seq: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Status */
+            status: string;
+            /** Error Code */
+            error_code?: string | null;
+            /** Sender Name */
+            sender_name?: string | null;
+            /** Engine Anchor */
+            engine_anchor?: string | null;
+            /** Auto Resume Of */
+            auto_resume_of?: string | null;
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /** Prompt Summary */
+            prompt_summary?: string | null;
+            /** Answer Summary */
+            answer_summary?: string | null;
         };
         /**
          * UnreadCountResponse
@@ -38321,6 +38584,37 @@ export interface operations {
             };
         };
     };
+    get_session_turn_outline_api_daemon_sessions__session_id__turn_outline_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionTurnOutlineRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_session_tasks_api_daemon_sessions__session_id__tasks_get: {
         parameters: {
             query?: never;
@@ -38361,10 +38655,14 @@ export interface operations {
                 before?: string | null;
                 /** @description 与 before 组合的复合游标 id tiebreaker（2026-09-16-logs-cursor-tiebreaker）：同 timestamp 批次逐页可达；仅与 before 同时传，单独传 before_id 而无 before 将 422 */
                 before_id?: string | null;
-                /** @description 内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before 组合 */
+                /** @description 单轮直达（2026-09-27-session-fast-replay）：只返回该 run 的日志（timestamp,id 升序，上限 2000 条）；run 不存在或不属于该会话 404；与 before/after 游标互斥（同传 422） */
+                run_id?: string | null;
+                /** @description 内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before/run_id 组合 */
                 q?: string | null;
                 /** @description 最新 N 条语义（群聊体验 quick）：按 timestamp desc 取 N 再反转升序返回；无 before=全量最新 N，有 before=游标之前最新 N。缺省=全量（服务层上限 5000，维持既有行为） */
                 limit?: number | null;
+                /** @description 精简模式（2026-09-27-session-fast-replay）：tool 通道（tool_call）content_redacted 超 2000 字符截断到 2000 并置 content_truncated=true；需全文走 GET /sessions/{id}/logs/{log_id}。缺省 false 行为零变化 */
+                slim?: boolean;
             };
             header?: never;
             path: {
@@ -38381,6 +38679,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_log_entry_api_daemon_sessions__session_id__logs__log_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                log_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunLogEntry"];
                 };
             };
             /** @description Validation Error */
@@ -40586,6 +40916,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeStatsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_governance_api_workspaces__workspace_id__knowledge_governance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GovernanceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_knowledge_governance_action_api_workspaces__workspace_id__knowledge_governance_actions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GovernanceActionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GovernanceActionOut"];
                 };
             };
             /** @description Validation Error */

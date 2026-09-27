@@ -155,6 +155,7 @@ function makeChange(
     status: "in_progress",
     location: "active",
     change_type: null,
+    is_thin: false,
     affected_components: [],
     owner_id: null,
     current_stage: "execute",

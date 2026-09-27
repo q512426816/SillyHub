@@ -1,0 +1,23 @@
+{
+  "change": "2026-09-25-spec-sync-pg-chunk",
+  "baseline": "8836eca3df557292d823e65525f5f274c03bf9b0",
+  "head": "c72d04c8f196a81fce03d43ccfe9705e7d3390f8",
+  "files": [
+    "backend/app/modules/spec_workspace/service.py",
+    "backend/app/modules/spec_workspace/tests/test_spec_sync_chunk.py",
+    ".sillyspec/changes/2026-09-25-spec-sync-pg-chunk/design.md",
+    ".sillyspec/changes/2026-09-25-spec-sync-pg-chunk/flow-state.yaml",
+    ".sillyspec/changes/2026-09-25-spec-sync-pg-chunk/proposal.md",
+    ".sillyspec/changes/2026-09-25-spec-sync-pg-chunk/requirements.md",
+    ".sillyspec/changes/2026-09-25-spec-sync-pg-chunk/tasks.md"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 340,
+    "deletions": 30
+  },
+  "savedAt": "2026-09-25T05:25:28.897Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "da1cb8a548ee9b776fc43c9baffac7a1ff0780a806ef89e0719080fcd836b0a4",
+  "patchStatus": "ok"
+}

@@ -1234,3 +1234,24 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：e4e593b4cc5ba221ebd773df5105beb4adbd4d83
 理由：最大风险：session-panel-page.tsx（4615 行）JSX 大块迁移时破坏隐蔽行为——占位轮 SSE 抢先认领、触顶加载锚钉回、跳转抑制窗、发送窗口期打断回退等防呆逻辑都缝在 render 与 effect 的交界处。对策：只移动 JSX 块的容器位置，不动任何 hooks/回调/数据派生；每完成一个 task 跑相关测试再进下一步；收口时对 diff 逐行审查确认「仅 render 组织层」。实际暴露（独立评审 P1）：desktop 非 portal 宿主（分身浮层/悬浮助手）不传 onOpenSubagent，右列初版绑定宿主 props 导致它们的用量条与任务面板消失——已修复（右列容器与子代理 Provider 解耦，desktop 一律有右列）。另注：本变更工作区基线叠加于上一轮 2026-09-26-core-pages-visual-redesign 未提交的 staged 快照之上，冻结件 change.patch 因此含上一轮 38 文件捆绑（主仓库已分两笔 commit 剥离归属：先 staged 快照落地为上一轮 commit，再本变更独立 commit）。 试过放弃的方案：①ChatGPT 式单栏+抽屉布局（推翻三栏）——深链/群聊/文件模式/四分支全部重做，风险与收益不成比，放弃；②把 SessionConfigBar/CtxUsageBar 也收进右栏——配置与压缩上下文是输入前高频操作，收进右栏断操作流，放弃；③portal 层做统一四栏容器——群聊分支与文件树模式联动复杂，波及面大，放弃（改为 panel 层内解决）；④TaskExecutionPanel/UsageBar 彻底只留右栏——mobile 无右列会丢功能，放弃（mobile 维持原位）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-governance-rpc-actions
+锚点：未记录
+最近确认：3306460582a64242091b32ebee63a85f1b071444
+理由：最大风险：spawn shell:true 命令串注入——kind 白名单硬编码 + 域名 [a-z0-9-]+ + root_path 元字符黑名单三层，且 root 只进 cwd 不拼命令串。次风险：RPC 优先路径的 backend 测试只验回退（happy path 由 daemon 侧 handler 测试 + 真实链路 E2E 留部署后——ws_hub mock 成本高，披露）；digest 超时 60s 偏宽（CLI 大仓绑定扫描秒级实测，留观察）。放弃方案：平台直接 spawn CLI（无 daemon 链路）——平台容器不可达成员仓工作树（2026-09-11 skills-central-library 同款结论）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-timeline-coexist
+锚点：未记录
+最近确认：d3ee2bbd7cc53faf6cabdfc312554ef032dcddb3
+理由：最大风险：厚变更若事件表有历史数据，归档后详情页会多出一张合成卡——判定为可接受（信息增量，非误报；事件恒 provisional 角标已声明观测语义）。试过放弃的方案：恢复第一代 tasks.md 勾选时间戳指令（需改 CLI 流程模板且与第二代 watcher 事件流机制重复，放弃）；后端在 steps 里带真实事件时间（改 CLI 同步协议，面大，放弃）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-27-timeline-task-time
+锚点：未记录
+最近确认：365d909efbe7a04dc4429d377c5a7487713fa2b7
+理由：最大风险：tasks.md 行序与事件勾选计数序错位（人工重排行/中间插行）会标错时刻——CLI 同款固有语义，卡上已恒定标注「≈顺序推断」脚注，可接受。试过放弃：把推断下推到 watcher 推送时带任务 id（需改 CLI 事件协议且历史数据无法回填，放弃——推断层纯展示零协议负担）。

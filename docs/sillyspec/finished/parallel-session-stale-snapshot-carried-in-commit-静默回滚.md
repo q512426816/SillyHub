@@ -51,3 +51,24 @@ page.tsx` 为**空**(逐字节一致)——304eba982 的页面文件就是并行
   出 advisory(类似现有「未登记模块图的交付目录」提示,已有先例可循)。
 - 并行会话各自的工作目录隔离(会话专属 worktree)是结构性解法,`flow start` 输出里
   已提示「会话专属 worktree 自动并入」,但共享主仓场景仍靠自觉。
+
+## 处置记录（2026-09-27）
+
+恢复与页面级钉子测试（page-restore-assets.test.tsx 4 用例）文件自述已做。「待工具/
+流程根治」第一项本轮落地（sillyspec 仓工作树，未提交）：
+
+- **flow done 提交面夹带嫌疑 advisory ✅**：patch 子步新增归因检查——提交面
+  （baseline..HEAD）里未被本变更任何声明面（design 文件变更清单 ∪ requirements
+  测试绑定文件）提及的交付文件 → 点名警告 + 指引（「属并行会话在途交付 → 整文件
+  覆盖即静默回滚风险，收口提交用显式 pathspec 隔离（AGENTS.md 规则 11）；确属本
+  变更 → 补 design 自声明」）；声明面全空（adopt 等）时降为「无声明面」软提示不
+  指认夹带。advisory 不阻断收口。与既有 E 警告（声明的文件不在冻结面）互补成对：
+  E 管「承诺未兑现」，本告警管「未承诺的夹带」。
+  测试：`test/flow-done-carry-suspect-advisory.test.mjs` 2/2（夹带点名+声明文件不
+  点名+不阻断；无声明面降级形态）+ flow-protocol/flow-review 回归 25/25。
+
+- **会话专属 worktree 隔离**（结构性解法第二项）：工具面 `flow start` 已有指引、
+  `--freeze-dirty`/worktree 自动并入冻结已有通道——推广属使用流程项，非代码缺口，
+  不另改动。
+
+归档（工具面缺口闭合；流程纪律照坑内防护清单执行）。

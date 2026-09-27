@@ -2072,6 +2072,7 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => 
           status: "execute",
           location: "active",
           change_type: null,
+          is_thin: false,
           affected_components: [],
           owner_id: null,
           updated_at: "2026-08-25T10:00:00Z",

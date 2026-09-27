@@ -1,0 +1,184 @@
+diff --git a/.sillyspec/changes/2026-09-27-visual-gap-fix/design.md b/.sillyspec/changes/2026-09-27-visual-gap-fix/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-visual-gap-fix/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T23:20:17.496Z
++---
++# 设计记录（Design Record）— 2026-09-27-visual-gap-fix
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-visual-gap-fix 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++workspace-card.tsx 渲染层重写为 GitHub Repositories 行式条目（单条目两段式：主行=名称 h3+别名+类型/状态徽章+slug mono+负责人；meta 行=技术栈/关联项目/创建与扫描时间；右置守护徽标+hover 操作组），props 契约与内部行为（busy/error/别名/重扫/删除 Modal/拖拽手柄）零改动。概览页 stats-row.tsx 的 StatCard 换 Insights 竖排（label 上/mono 大数字下），page.tsx 段②′ 改两栏 grid（左=活跃变更总览+入口链，右 340px=Agent 状态总览卡），基本信息/配置卡保持全宽。会话门户沿用已落地的 11px 下限与 brand 阶（不再深改）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-visual-gap-fix 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++无对外签名变化：WorkspaceCard/WorkspaceStatsRow/AgentLivenessOverviewCard/ChangesOverviewCard props 全保留；纯前端展示层（render/className），无 API/DTO/路由改动。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-visual-gap-fix 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：不适用——纯展示层，数据到达顺序由既有 hooks 保证。
++2. 并发写：不适用——无新增写路径（别名/重扫/删除沿用既有 mutation）。
++3. 切换/生命周期：hover 操作组 opacity 过渡纯 CSS，中断无状态残留；Modal 受控态不变。
++4. 作用域：不适用——组件无跨工作区数据，props 注入。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-visual-gap-fix 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：两栏 grid 中 ChangesOverviewCard（内部自带高度行为）在窄栏挤压下的布局回归——已跑概览 23 用例 + 卡片 19 用例全绿对冲。试过放弃：把 WorkspaceConfigCard 也收进右栏——放弃（ql-20260821-003 用户裁决全宽展示，不推翻既有用户决策）。会话门户左栏深改（3665 行条目重构）放弃——风险收益比差，已有 11px/brand 阶打底，留待专项。
+
+diff --git a/.sillyspec/changes/2026-09-27-visual-gap-fix/flow-state.yaml b/.sillyspec/changes/2026-09-27-visual-gap-fix/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-visual-gap-fix/flow-state.yaml
+@@ -0,0 +1,16 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 3942b156fd3a9feb541d81daccbc763a2f5cad94
++updatedAt: '2026-09-26T23:26:33.978Z'
++gate_summary: >-
++  test: passed ← module[]+deps(jsx4)+fr(3)（6.5s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260926232625\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（8.0s）｜门文件 25 个
++
+
+diff --git a/.sillyspec/changes/2026-09-27-visual-gap-fix/proposal.md b/.sillyspec/changes/2026-09-27-visual-gap-fix/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-visual-gap-fix/proposal.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T23:20:17.494Z
++---
++# 提案书（Proposal）— 2026-09-27-visual-gap-fix
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:d01bb46088a01d25663ab5f6655e05fa7fd1564c88d7d7b508105561b3782233:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-visual-gap-fix 留痕重锚 -->
++任务原话转写：线上五页与原型骨架差距修复（D-004 降级矫枉）：工作区卡片重写为 GitHub Repositories 紧凑行式条目（单行状态点+名称+slug+守护标签+计数+时间，props 契约不变）；工作区概览主体改两栏（活跃变更主列+About MetaPanel 侧栏，统计换 StatGrid）；会话门户左栏条目两段式紧凑化。
++成功标准：
++- 工作区列表每行为单行紧凑条目（无 dl 字段表/独立 footer），hover 显操作，拖拽/别名/重扫/删除行为全部保留
++- 概览页呈 统计四格+左主右辅两栏，Hero 之后的旧卡片流结构收敛
++- 会话左栏条目高密度两段式，选中态清晰
++- 相关测试全绿 + tsc 0
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:8bc640206d8e435e9caef22ed2217e6686ceb4d74032c55dc7d452226de35ab4:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-visual-gap-fix 留痕重锚 -->
++按成功标准机械推导，共 4 条验收面：
++1. 工作区列表每行为单行紧凑条目（无 dl 字段表/独立 footer），hover 显操作，拖拽/别名/重扫/删除行为全部保留
++2. 概览页呈 统计四格+左主右辅两栏，Hero 之后的旧卡片流结构收敛
++3. 会话左栏条目高密度两段式，选中态清晰
++4. 相关测试全绿 + tsc 0
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:d6307df93d93a765a1c062b7fb868bacd50e5c6b29526b2ce38d6daef56b4bdf:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-visual-gap-fix 留痕重锚 -->
++1. 工作区列表每行为单行紧凑条目（无 dl 字段表/独立 footer），hover 显操作，拖拽/别名/重扫/删除行为全部保留
++2. 概览页呈 统计四格+左主右辅两栏，Hero 之后的旧卡片流结构收敛
++3. 会话左栏条目高密度两段式，选中态清晰
++4. 相关测试全绿 + tsc 0
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-27-visual-gap-fix/requirements.md b/.sillyspec/changes/2026-09-27-visual-gap-fix/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-visual-gap-fix/requirements.md
+@@ -0,0 +1,42 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T23:20:17.495Z
++---
++# 需求规格（Requirements）— 2026-09-27-visual-gap-fix
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 工作区列表每行为单行紧凑条目（无 dl 字段表/独立 footer），hover 显操作，拖拽/别名
++Given 系统就绪
++When 工作区列表每行为单行紧凑条目（无 dl 字段表/独立 footer），hover 显操作，拖拽/别名/重扫/删除行为全部保留
++Then 行为符合本条标准描述
++
++### FR-02: 概览页呈 统计四格+左主右辅两栏，Hero 之后的旧卡片流结构收敛
++Given 系统就绪
++When 概览页呈 统计四格+左主右辅两栏，Hero 之后的旧卡片流结构收敛
++Then 行为符合本条标准描述
++
++### FR-03: 会话左栏条目高密度两段式，选中态清晰
++Given 系统就绪
++When 会话左栏条目高密度两段式，选中态清晰
++Then 行为符合本条标准描述
++
++### FR-04: 相关测试全绿 + tsc 0
++Given 测试 相关模块就绪
++When 相关测试全绿 + tsc 0
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 -->
++frontend/src/components/__tests__/workspace-card.test.tsx（19 用例：名称/别名/守护徽标/类型徽章/时间行/hover 操作/点击激活/Modal 删除）+ frontend/src/components/__tests__/workspace-drag-grid.test.tsx（14 用例：拖拽排序接线）+ frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx（15 用例：列表接线/分页/筛选）
++
++<!--AGENT:测试绑定FR-02 -->
++frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx（16 用例：统计四数字渲染/基本信息/守护横幅/两栏组件接线）+ frontend/src/app/(dashboard)/workspaces/[id]/__tests__/page-sync.test.tsx（7 用例）+ frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx（13 用例，1 例主仓预存债已归因）
++
++<!--AGENT:测试绑定FR-03 -->
++frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx + frontend/src/components/sessions 相关套件（本变更未改门户文件，沿用 2026-09-26-core-pages-visual-redesign 已验证的 386/387 基线）
++
++<!--AGENT:测试绑定FR-04 -->
++frontend 全量相关套件 702/704（2 失败=已知主仓预存债：changes-overview-card ghost 折叠、pre-session-picker cursor caps，基线复现归因）+ pnpm typecheck 0 + pnpm lint 0
+
+diff --git a/.sillyspec/changes/2026-09-27-visual-gap-fix/tasks.md b/.sillyspec/changes/2026-09-27-visual-gap-fix/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-visual-gap-fix/tasks.md
+@@ -0,0 +1,14 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-26T23:20:17.496Z
++---
++# 任务注册表（Tasks）— 2026-09-27-visual-gap-fix
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: 工作区列表每行为单行紧凑条目（无 dl 字段表/独立 footer），hover 显操作，拖拽/别名/重扫/删除行为全部保留
++- [ ] task-02: 概览页呈 统计四格+左主右辅两栏，Hero 之后的旧卡片流结构收敛
++- [ ] task-03: 会话左栏条目高密度两段式，选中态清晰
++- [ ] task-04: 相关测试全绿 + tsc 0

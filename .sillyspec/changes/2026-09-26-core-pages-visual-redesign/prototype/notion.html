@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SillyHub · Notion 式原型</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   SillyHub · Notion 式·轻盈文档感 原型
+   单文件自包含：无外部字体 / 无 CDN / 无外链图片
+   色板：内容区 #ffffff · 外围 #f7f7f5 · 暖黑 #37352f
+   ═══════════════════════════════════════════════════════════════ */
+:root{
+  --bg:#f7f7f5;            /* Notion app 背景 */
+  --surface:#ffffff;       /* 内容区 */
+  --border:#e9e9e7;        /* 卡片 1px 边 */
+  --border-soft:#efefec;   /* 更浅分割线 */
+  --border-strong:#dcdcd9; /* 按钮边 */
+  --text:#37352f;          /* 暖黑主文字 */
+  --text-2:#787774;        /* 次级 */
+  --text-3:#9b9a97;        /* 弱化 */
+  --hover:#f1f1ef;         /* hover 浅灰 */
+  --accent:#7c4dcf;        /* 紫（tag / 选中条 / 发送键） */
+  --purple-bg:#f3ecfd; --purple-tx:#7c4dcf;
+  --blue-bg:#e7f3f8;   --blue-tx:#337ea9;
+  --green-bg:#edf3ec;  --green-tx:#448361;
+  --orange-bg:#faebdd; --orange-tx:#b3592b;
+  --yellow-bg:#fbf3db; --yellow-tx:#9a6b13;
+  --gray-bg:#f1f1ef;   --gray-tx:#787774;
+  --rose-bg:#fdebec;   --rose-tx:#b4554d;
+  --shadow:0 1px 2px rgba(15,15,15,.04);          /* 极柔卡片阴影 */
+  --shadow-lift:0 4px 12px rgba(15,15,15,.08);    /* hover 浮起 */
+  --mono:ui-monaco,ui-monospace,'SF Mono',Monaco,Consolas,'Courier New',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{overflow-x:hidden}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+  background:var(--bg);color:var(--text);
+  font-size:14px;line-height:1.6;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+button{font-family:inherit;border:none;background:none;cursor:pointer;color:inherit}
+::selection{background:#e8ddfb}
+
+/* 细滚动条（IM 面板 / 侧栏） */
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#dcdcd9;border-radius:6px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:#c5c5c2;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ═══ 原型切换工具条（文件顶部，融入风格） ═══ */
+.proto{
+  position:sticky;top:0;z-index:60;height:44px;
+  display:flex;align-items:center;gap:6px;padding:0 16px;
+  background:var(--bg);border-bottom:1px solid var(--border);
+}
+.proto-logo{
+  width:18px;height:18px;border-radius:5px;background:var(--accent);
+  color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;
+  margin-right:6px;
+}
+.proto-brand{font-size:13px;color:var(--text-2);margin-right:10px;font-weight:500}
+.proto-btn{
+  display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;
+  border-radius:6px;font-size:13px;color:var(--text-2);
+  transition:background .1s;white-space:nowrap;
+}
+.proto-btn:hover{background:var(--hover);color:var(--text)}
+.proto-btn.active{
+  background:var(--surface);color:var(--text);font-weight:500;
+  box-shadow:var(--shadow);border:1px solid var(--border);
+}
+.proto-spacer{flex:1}
+.proto-style{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--text-3)}
+.proto-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block}
+
+/* ═══ 页面容器 ═══ */
+.page{display:none;min-height:calc(100vh - 45px)}
+.page.app.active{display:flex}
+.page.im{height:calc(100vh - 45px);min-height:620px}
+.page.im.active{display:flex;flex-direction:column;overflow:hidden;height:calc(100vh - 45px)}
+.hidden{display:none !important}
+
+/* ═══ 应用壳：侧栏（Notion 灵魂） ═══ */
+.sidebar{
+  width:240px;flex:none;background:var(--bg);
+  border-right:1px solid var(--border);
+  padding:10px 8px 12px;display:flex;flex-direction:column;gap:2px;
+  position:sticky;top:45px;align-self:flex-start;
+  height:calc(100vh - 45px);overflow-y:auto;
+}
+.ws-switch{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;transition:background .1s}
+.ws-switch:hover{background:var(--hover)}
+.ws-switch-avatar{
+  width:20px;height:20px;border-radius:5px;background:var(--purple-bg);
+  display:flex;align-items:center;justify-content:center;font-size:12px;
+}
+.ws-switch-name{font-size:14px;font-weight:600;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-switch .chev{color:var(--text-3);flex:none}
+.ws-add{
+  width:22px;height:22px;border-radius:5px;display:flex;align-items:center;justify-content:center;
+  color:var(--text-3);font-size:14px;line-height:1;
+}
+.ws-add:hover{background:#e7e7e4;color:var(--text)}
+.side-search{
+  display:flex;align-items:center;gap:8px;height:28px;margin:8px 4px 10px;padding:0 8px;
+  border-radius:6px;color:var(--text-3);font-size:13px;cursor:pointer;transition:background .1s;
+}
+.side-search:hover{background:var(--hover);color:var(--text-2)}
+.side-label{font-size:12px;color:var(--text-3);padding:8px 10px 4px;font-weight:500}
+.nav-item{
+  display:flex;align-items:center;gap:9px;height:28px;padding:0 9px;margin:0 2px;
+  border-radius:6px;font-size:14px;color:var(--text-2);
+  cursor:pointer;transition:background .1s;user-select:none;
+}
+.nav-item .ico{width:18px;text-align:center;flex:none;font-size:14px}
+.nav-item:hover{background:var(--hover);color:var(--text)}
+.nav-item.active{background:#eaeae7;color:var(--text);font-weight:500}
+.side-foot{margin-top:auto;padding-top:10px;border-top:1px solid var(--border-soft)}
+
+/* ═══ 主区 + 顶栏 ═══ */
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{
+  height:45px;flex:none;background:var(--surface);
+  border-bottom:1px solid var(--border-soft);
+  display:flex;align-items:center;gap:6px;padding:0 16px;
+}
+.crumb{display:flex;align-items:center;gap:8px;min-width:0;font-size:14px}
+.crumb a{color:var(--text-2);text-decoration:none;white-space:nowrap}
+.crumb a:hover{color:var(--text);text-decoration:underline;text-decoration-color:#b7b7b4;text-underline-offset:3px}
+.crumb .cur{color:var(--text);font-weight:500;white-space:nowrap}
+.crumb .slash{color:#d3d3d0;font-size:13px}
+.top-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+.avatar{
+  width:24px;height:24px;border-radius:5px;flex:none;
+  background:linear-gradient(135deg,#a07ae8,#7c4dcf);
+  color:#fff;font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+}
+.topbar.im-top{border-bottom:1px solid var(--border-soft)}
+
+/* ═══ 文档列（Notion 内容居中 900px） ═══ */
+.page-body{background:var(--surface);flex:1;padding:0 32px 96px}
+.doc-col{max-width:900px;margin:0 auto;padding-top:40px}
+.doc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.doc-title{display:flex;align-items:flex-start;gap:12px;font-size:30px;line-height:1.25}
+.doc-title .t-emoji{font-size:29px;line-height:1.25;transform:translateY(1px)}
+.doc-title h1{font-size:30px;font-weight:700;letter-spacing:-.02em}
+.doc-sub{margin-top:8px;font-size:14px;color:var(--text-2)}
+.doc-sub .sep{margin:0 7px;color:#c9c8c5}
+.doc-sub .hl{color:var(--text)}
+
+/* Notion 拖拽把手：块 hover 左侧浮现 ⋮⋮ */
+.block{position:relative}
+.grip{
+  position:absolute;left:-30px;top:6px;width:14px;height:20px;
+  color:#c9c8c5;opacity:0;transition:opacity .1s;cursor:grab;
+}
+.block:hover .grip{opacity:1}
+.grip:hover{color:var(--text-3)}
+
+/* 通用按钮 */
+.ghost-btn{
+  display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;flex:none;
+  background:var(--surface);border:1px solid var(--border-strong);border-radius:6px;
+  font-size:13px;font-weight:500;color:var(--text);
+  box-shadow:var(--shadow);transition:background .1s;white-space:nowrap;
+}
+.ghost-btn:hover{background:var(--bg)}
+.ghost-btn.mini{height:28px}
+.ghost-btn svg{flex:none}
+
+/* ═══ 视图切换 tab（Notion 数据库视图） ═══ */
+.viewbar{
+  display:flex;align-items:flex-end;gap:4px;
+  margin:30px 0 0;padding-bottom:0;border-bottom:1px solid #ececea;
+}
+.viewtab{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 6px 9px;margin-bottom:-1px;
+  font-size:13px;font-weight:500;color:var(--text-3);
+  border-bottom:2px solid transparent;cursor:pointer;
+  transition:color .1s,border-color .1s;white-space:nowrap;user-select:none;
+}
+.viewtab:hover{color:var(--text-2)}
+.viewtab.active{color:var(--text);border-bottom-color:var(--text)}
+.viewtab svg{opacity:.8}
+.viewbar .spacer{flex:1}
+.searchbox{
+  display:flex;align-items:center;gap:7px;width:210px;height:28px;
+  margin-bottom:5px;padding:0 10px;background:var(--bg);
+  border:1px solid transparent;border-radius:6px;color:var(--text-3);
+  transition:border-color .1s,background .1s;
+}
+.searchbox:hover{border-color:var(--border)}
+.searchbox input{
+  border:none;outline:none;background:transparent;width:100%;
+  font-size:13px;color:var(--text);font-family:inherit;
+}
+.searchbox input::placeholder{color:var(--text-3)}
+.viewbar .ghost-btn{margin-bottom:5px}
+
+/* ═══ 彩色 tag 胶囊（浅底深字 · 圆角 4px） ═══ */
+.tag{
+  display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 8px;
+  border-radius:4px;font-size:12px;line-height:1;white-space:nowrap;font-weight:500;
+}
+.tag.mono{font-family:var(--mono);font-weight:400}
+.tag-purple{background:var(--purple-bg);color:var(--purple-tx)}
+.tag-blue{background:var(--blue-bg);color:var(--blue-tx)}
+.tag-green{background:var(--green-bg);color:var(--green-tx)}
+.tag-orange{background:var(--orange-bg);color:var(--orange-tx)}
+.tag-yellow{background:var(--yellow-bg);color:var(--yellow-tx)}
+.tag-gray{background:var(--gray-bg);color:var(--gray-tx)}
+.tag-rose{background:var(--rose-bg);color:var(--rose-tx)}
+.tag .tdot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.9}
+
+/* ═══ 看板视图 ═══ */
+.board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:18px;align-items:start}
+.col{min-width:0}
+.col-head{display:flex;align-items:center;gap:7px;padding:2px 4px 10px}
+.col-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.col-name{font-size:13px;font-weight:600;color:var(--text-2)}
+.col-count{
+  font-size:12px;color:var(--text-3);background:var(--gray-bg);
+  border-radius:4px;padding:1px 7px;line-height:1.5;
+}
+.col-more{margin-left:auto;color:var(--text-3);display:flex;align-items:center;height:18px}
+.col-stack{display:flex;flex-direction:column;gap:8px}
+.card{
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  box-shadow:var(--shadow);padding:12px;cursor:pointer;min-width:0;
+  transition:box-shadow .1s,transform .1s,border-color .1s;
+}
+.card:hover{box-shadow:var(--shadow-lift);transform:translateY(-1px);border-color:#e0e0dd}
+.card-title{font-size:14px;font-weight:600;line-height:1.45;word-break:break-word}
+.card-key{
+  margin-top:3px;font-family:var(--mono);font-size:12px;color:var(--text-3);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.card-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:9px}
+.card-comp{
+  margin-top:7px;font-family:var(--mono);font-size:12px;color:var(--text-3);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.card-foot{
+  display:flex;justify-content:space-between;gap:8px;margin-top:9px;
+  font-size:12px;color:var(--text-3);white-space:nowrap;
+}
+.card-foot .cost{flex:none}
+
+/* ═══ 列表视图（Notion 表格行） ═══ */
+.tablewrap{
+  margin-top:18px;background:var(--surface);
+  border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);
+  overflow:hidden;
+}
+.row{
+  display:grid;align-items:center;gap:10px;padding:9px 14px;
+  grid-template-columns:16px minmax(0,1.25fr) minmax(0,1fr) 92px 52px 108px 78px;
+  border-top:1px solid var(--border-soft);font-size:13px;
+}
+.row.head{
+  border-top:none;background:#fafaf9;padding-top:10px;padding-bottom:10px;
+  font-size:12px;color:var(--text-3);font-weight:500;
+}
+.row:not(.head):hover{background:#fafaf8}
+.rdot{width:8px;height:8px;border-radius:50%}
+.r-title{font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r-key{font-family:var(--mono);font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r-owner,.r-time{color:var(--text-2)}
+.r-cost{font-family:var(--mono);font-size:12px;color:var(--text-3);white-space:nowrap}
+.r-time{text-align:right;color:var(--text-3)}
+
+/* ═══ 工作区页 ═══ */
+.ws-container{
+  margin-top:26px;background:var(--surface);
+  border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);
+  padding:12px;
+}
+.ws-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.ws-card{
+  background:var(--surface);border:1px solid #ececea;border-radius:8px;
+  padding:16px;cursor:pointer;min-width:0;transition:box-shadow .1s,border-color .1s,transform .1s;
+}
+.ws-card:hover{box-shadow:var(--shadow-lift);border-color:#e0e0dd;transform:translateY(-1px)}
+.ws-top{display:flex;align-items:center;gap:12px}
+.ws-avatar{
+  width:40px;height:40px;border-radius:8px;flex:none;font-size:20px;
+  display:flex;align-items:center;justify-content:center;
+}
+.av-purple{background:var(--purple-bg)}
+.av-green{background:var(--green-bg)}
+.av-orange{background:var(--orange-bg)}
+.av-blue{background:var(--blue-bg)}
+.ws-name{font-size:15px;font-weight:600;line-height:1.4}
+.ws-slug{font-family:var(--mono);font-size:12px;color:var(--text-3)}
+.ws-path{
+  margin-top:12px;font-family:var(--mono);font-size:12px;color:var(--text-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.ws-path .pfx{margin-right:6px}
+.ws-stack{display:flex;flex-wrap:wrap;gap:4px;margin-top:9px}
+.ws-foot{
+  display:flex;align-items:center;gap:6px;margin-top:14px;
+  font-size:12px;color:var(--text-3);white-space:nowrap;overflow:hidden;
+}
+.guard{display:inline-flex;align-items:center;gap:5px;flex:none;font-weight:500}
+.g-dot{width:7px;height:7px;border-radius:50%;flex:none}
+.g-on .g-dot{background:#4f9c6f;box-shadow:0 0 0 2px var(--green-bg)}
+.g-off .g-dot{background:#b8b7b4}
+.g-wait .g-dot{background:transparent;border:1.5px solid #b8b7b4;box-sizing:border-box;width:8px;height:8px}
+.g-on{color:var(--green-tx)}
+.g-off{color:var(--text-3)}
+.g-wait{color:var(--text-3)}
+.ws-foot .sep{color:#d3d3d0}
+.loadmore{
+  display:block;margin:30px auto 0;padding:6px 16px;border-radius:6px;
+  font-size:13px;color:var(--text-2);transition:background .1s,color .1s;
+}
+.loadmore:hover{background:var(--hover);color:var(--text)}
+
+/* ═══ 会话页 · 三栏 IM ═══ */
+.im-body{flex:1;display:flex;min-height:0}
+.im-left{
+  width:300px;flex:none;background:var(--bg);
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;min-height:0;
+}
+.im-left-head{padding:14px 14px 4px;display:flex;align-items:center;gap:8px}
+.im-left-head h2{font-size:15px;font-weight:700;flex:1}
+.icon-btn{
+  width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+  color:var(--text-2);transition:background .1s;flex:none;
+}
+.icon-btn:hover{background:var(--hover);color:var(--text)}
+.im-search{
+  display:flex;align-items:center;gap:7px;margin:8px 14px 6px;height:28px;padding:0 10px;
+  background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-3);
+}
+.im-search input{border:none;outline:none;background:transparent;width:100%;font-size:13px;font-family:inherit}
+.im-search input::placeholder{color:var(--text-3)}
+.im-list{flex:1;overflow-y:auto;padding:6px 10px 16px;min-height:0}
+.sess-group{font-size:12px;color:var(--text-3);font-weight:500;margin:14px 6px 5px}
+.sess-item{position:relative;display:block;padding:7px 10px;border-radius:6px;cursor:pointer;transition:background .1s}
+.sess-item:hover{background:#efefec}
+.sess-item.sel{background:var(--surface);box-shadow:0 1px 2px rgba(15,15,15,.06),0 0 0 1px #efefec}
+.sess-item.sel::before{
+  content:'';position:absolute;left:-10px;top:9px;bottom:9px;width:2.5px;
+  background:var(--accent);border-radius:2px;
+}
+.s-row1{display:flex;align-items:center;gap:9px}
+.s-ava{
+  width:24px;height:24px;border-radius:6px;flex:none;font-size:13px;
+  display:flex;align-items:center;justify-content:center;
+}
+.s-title{flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.s-time{flex:none;font-size:12px;color:var(--text-3);font-weight:400}
+.s-time.done{color:var(--green-tx)}
+.s-row2{display:flex;align-items:center;gap:5px;margin-top:4px;padding-left:33px}
+.s-meta{font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 中栏：块式消息（非气泡） */
+.im-mid{flex:1;min-width:0;background:var(--surface);display:flex;flex-direction:column;min-height:0}
+.im-mid-head{
+  height:52px;flex:none;border-bottom:1px solid var(--border-soft);
+  display:flex;align-items:center;gap:8px;padding:0 20px;
+}
+.im-mid-head .t{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.messages{flex:1;overflow-y:auto;min-height:0;padding:26px 40px 30px}
+.msgs-inner{max-width:720px;margin:0 auto}
+.day-sep{display:flex;align-items:center;gap:12px;margin-bottom:22px;color:var(--text-3);font-size:12px}
+.day-sep::before,.day-sep::after{content:'';flex:1;height:1px;background:var(--border-soft)}
+.msg{display:flex;gap:11px}
+.msg + .msg{margin-top:22px}
+.msg-ava{
+  width:28px;height:28px;border-radius:6px;flex:none;margin-top:1px;
+  display:flex;align-items:center;justify-content:center;font-size:15px;
+}
+.msg-ava.u{background:var(--purple-bg);color:var(--purple-tx);font-size:12px;font-weight:700;font-family:var(--mono)}
+.msg-ava.a{background:var(--blue-bg);font-size:15px}
+.msg-main{min-width:0;flex:1}
+.msg-head{display:flex;align-items:baseline;gap:8px}
+.msg-name{font-size:13px;font-weight:700}
+.msg-time{font-size:12px;color:var(--text-3)}
+.msg-body{font-size:14px;margin-top:2px;word-break:break-word}
+.msg-body code{
+  font-family:var(--mono);font-size:12.5px;color:#eb5757;
+  background:rgba(135,131,120,.14);border-radius:3px;padding:2px 5px;
+}
+pre.code{
+  margin-top:10px;background:var(--bg);border:1px solid #ececea;border-radius:6px;
+  padding:10px 14px;font-family:var(--mono);font-size:12.5px;line-height:1.75;
+  color:var(--text);overflow-x:auto;
+}
+pre.code .cm{color:var(--text-3)}
+.tool{
+  margin-top:10px;display:flex;align-items:center;gap:8px;
+  background:var(--bg);border:1px solid #ececea;border-radius:6px;
+  padding:6px 12px;font-family:var(--mono);font-size:12px;color:var(--text-2);
+}
+.tool .tick{color:var(--green-tx);font-weight:700}
+.tool .ms{margin-left:auto;color:var(--text-3);flex:none}
+
+/* Notion 式无边框输入区 */
+.composer{flex:none;border-top:1px solid var(--border-soft);padding:10px 40px 12px}
+.composer-inner{max-width:720px;margin:0 auto}
+.composer-area{min-height:52px;padding:8px 4px;font-size:13px;color:var(--text-3)}
+.composer-bar{display:flex;align-items:center;gap:2px}
+.composer-bar .icon-btn{width:28px;height:28px;font-size:15px}
+.composer-bar .at{font-size:14px;font-weight:600;color:var(--text-2)}
+.composer-bar .spacer{flex:1}
+.send{
+  width:26px;height:26px;border-radius:50%;background:var(--accent);
+  color:#fff;display:flex;align-items:center;justify-content:center;
+  transition:filter .1s;
+}
+.send:hover{filter:brightness(1.08)}
+
+/* 右栏：会话信息 */
+.im-right{
+  width:260px;flex:none;background:var(--bg);
+  border-left:1px solid var(--border);overflow-y:auto;padding:16px 16px 24px;
+}
+.im-right h3{font-size:14px;font-weight:700;margin-bottom:2px}
+.info-list{margin-top:8px}
+.info-row{
+  display:flex;justify-content:space-between;align-items:flex-start;gap:12px;
+  padding:7px 0;border-bottom:1px solid var(--border-soft);font-size:13px;
+}
+.info-row dt{color:var(--text-3);flex:none;font-size:12.5px;padding-top:1px}
+.info-row dd{text-align:right;min-width:0;word-break:break-word}
+.info-row dd.mono{font-family:var(--mono);font-size:12px;color:var(--text-2)}
+.im-right h4{font-size:13px;font-weight:600;margin:20px 0 6px;color:var(--text-2)}
+.party{display:flex;align-items:center;gap:10px;padding:5px 0}
+.party .s-ava{width:26px;height:26px;font-size:14px}
+.party .p-name{font-size:13px;font-weight:500}
+.party .p-role{margin-left:auto}
+.side-link{
+  display:inline-block;margin-top:18px;font-size:13px;color:var(--text-2);cursor:pointer;
+  text-decoration:underline;text-decoration-color:#b7b7b4;text-underline-offset:3px;
+}
+.side-link:hover{color:var(--text)}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ 原型切换工具条 ═══════════════════ -->
+<div class="proto" id="proto">
+  <span class="proto-logo">S</span>
+  <span class="proto-brand">SillyHub 原型</span>
+  <button class="proto-btn active" data-page="changes">📋 变更中心</button>
+  <button class="proto-btn" data-page="workspaces">🗂️ 工作区</button>
+  <button class="proto-btn" data-page="sessions">💬 会话</button>
+  <span class="proto-spacer"></span>
+  <span class="proto-style"><i class="proto-dot"></i>Notion 式·轻盈文档感</span>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     页面 1 · 变更中心（默认显示）
+     ══════════════════════════════════════════════════════════════ -->
+<section class="page app active" id="page-changes">
+
+  <!-- Notion 式窄侧栏 -->
+  <aside class="sidebar">
+    <div class="ws-switch">
+      <span class="ws-switch-avatar">🗂️</span>
+      <span class="ws-switch-name">SillyHub</span>
+      <svg class="chev" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="ws-add">＋</span>
+    </div>
+    <div class="side-search">
+      <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.3" stroke="currentColor" stroke-width="1.4"/><path d="M9.4 9.4L12.6 12.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      搜索
+    </div>
+    <div class="side-label">工作区</div>
+    <div class="nav-item" data-page="workspaces"><span class="ico">🏠</span>工作区</div>
+    <div class="nav-item active" data-page="changes"><span class="ico">📋</span>变更中心</div>
+    <div class="nav-item" data-page="sessions"><span class="ico">💬</span>会话</div>
+    <div class="nav-item"><span class="ico">📁</span>文件</div>
+    <div class="side-foot">
+      <div class="nav-item"><span class="ico">⚙️</span>设置</div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <!-- 白底极简顶栏 -->
+    <header class="topbar">
+      <nav class="crumb">
+        <a href="#">🗂 SillyHub</a>
+        <span class="slash">/</span>
+        <a href="#">multi-agent-platform</a>
+        <span class="slash">/</span>
+        <span class="cur">变更中心</span>
+      </nav>
+      <div class="top-actions">
+        <button class="ghost-btn mini">共享</button>
+        <button class="icon-btn" title="更多">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="13" cy="8" r="1.6"/></svg>
+        </button>
+        <span class="avatar" title="qinyi">Q</span>
+      </div>
+    </header>
+
+    <div class="page-body">
+      <div class="doc-col">
+
+        <!-- 页头（带装饰性拖拽把手 ①） -->
+        <div class="doc-head block">
+          <svg class="grip" width="14" height="20" viewBox="0 0 14 20" fill="currentColor"><circle cx="3.5" cy="3.5" r="1.7"/><circle cx="10.5" cy="3.5" r="1.7"/><circle cx="3.5" cy="10" r="1.7"/><circle cx="10.5" cy="10" r="1.7"/><circle cx="3.5" cy="16.5" r="1.7"/><circle cx="10.5" cy="16.5" r="1.7"/></svg>
+          <div>
+            <div class="doc-title"><span class="t-emoji">📋</span><h1>变更中心</h1></div>
+            <p class="doc-sub"><span class="hl">4 个进行中</span><span class="sep">·</span>12 个已归档<span class="sep">·</span>由 qinyi 维护</p>
+          </div>
+          <button class="ghost-btn">＋ 新建</button>
+        </div>
+
+        <!-- 视图 tab + 搜索 + 筛选 -->
+        <div class="viewbar">
+          <div class="viewtab active" data-view="board" role="button" tabindex="0">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="5" height="6" rx="1.2"/><rect x="8" y="1" width="5" height="6" rx="1.2"/><rect x="1" y="8" width="5" height="5" rx="1.2"/><rect x="8" y="8" width="5" height="5" rx="1.2"/></svg>
+            看板
+            <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.6L5 6.6l3-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="viewtab" data-view="list" role="button" tabindex="0">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1.5 3h11M1.5 7h11M1.5 11h11"/></svg>
+            列表
+          </div>
+          <span class="spacer"></span>
+          <label class="searchbox">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.3" stroke="currentColor" stroke-width="1.4"/><path d="M9.4 9.4L12.6 12.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            <input type="text" placeholder="搜索变更…">
+          </label>
+          <button class="ghost-btn mini">
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M1.8 2.2h10.4L8.3 6.9v4.4L5.7 12.6V6.9L1.8 2.2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+            筛选
+            <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.6L5 6.6l3-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+
+        <!-- 看板视图（默认）· 装饰性把手 ② -->
+        <div class="board block" id="view-board">
+          <svg class="grip" width="14" height="20" viewBox="0 0 14 20" fill="currentColor"><circle cx="3.5" cy="3.5" r="1.7"/><circle cx="10.5" cy="3.5" r="1.7"/><circle cx="3.5" cy="10" r="1.7"/><circle cx="10.5" cy="10" r="1.7"/><circle cx="3.5" cy="16.5" r="1.7"/><circle cx="10.5" cy="16.5" r="1.7"/></svg>
+
+          <!-- 列 1 · 进行中 -->
+          <div class="col">
+            <div class="col-head">
+              <span class="col-dot" style="background:#7c4dcf"></span>
+              <span class="col-name">进行中</span>
+              <span class="col-count">2</span>
+              <span class="col-more"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/></svg></span>
+            </div>
+            <div class="col-stack">
+              <article class="card" title="2026-09-25-observation-events-v3-r16sf">
+                <h3 class="card-title">观测事件通道 v3 · 重构</h3>
+                <div class="card-key">2026-09-25-observation-events-v3-r16sf</div>
+                <div class="card-tags">
+                  <span class="tag tag-purple">实现计划</span>
+                  <span class="tag tag-green"><span class="tdot"></span>活跃</span>
+                </div>
+                <div class="card-comp">backend · frontend</div>
+                <div class="card-foot"><span>qinyi · 5 分钟前</span><span class="cost">2.4M tok · 18 次</span></div>
+              </article>
+              <article class="card" title="2026-09-26-probe-concurrent-rpc">
+                <h3 class="card-title">探测并发 RPC</h3>
+                <div class="card-key">2026-09-26-probe-concurrent-rpc</div>
+                <div class="card-tags">
+                  <span class="tag tag-blue">代码扫描</span>
+                  <span class="tag tag-green"><span class="tdot"></span>活跃</span>
+                </div>
+                <div class="card-comp">backend</div>
+                <div class="card-foot"><span>qinyi · 11 分钟前</span><span class="cost">380K tok · 4 次</span></div>
+              </article>
+            </div>
+          </div>
+
+          <!-- 列 2 · 验证确认 -->
+          <div class="col">
+            <div class="col-head">
+              <span class="col-dot" style="background:#d97a4a"></span>
+              <span class="col-name">验证确认</span>
+              <span class="col-count">2</span>
+              <span class="col-more"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/></svg></span>
+            </div>
+            <div class="col-stack">
+              <article class="card" title="2026-09-21-scan-docs-ops-panel">
+                <h3 class="card-title">扫描文档运维面板</h3>
+                <div class="card-key">2026-09-21-scan-docs-ops-panel</div>
+                <div class="card-tags">
+                  <span class="tag tag-orange">验证确认</span>
+                  <span class="tag tag-rose">待处理 2 项</span>
+                </div>
+                <div class="card-comp">frontend · docs</div>
+                <div class="card-foot"><span>qinyi · 5 天前</span><span class="cost">1.1M tok · 12 次</span></div>
+              </article>
+              <article class="card" title="2026-09-20-scope-audit-cross-repo-platform">
+                <h3 class="card-title">跨仓库范围对账</h3>
+                <div class="card-key">2026-09-20-scope-audit-cross-repo-platform</div>
+                <div class="card-tags">
+                  <span class="tag tag-orange">验证确认</span>
+                  <span class="tag tag-purple">进行中</span>
+                </div>
+                <div class="card-comp">sillyspec</div>
+                <div class="card-foot"><span>qinyi · 6 天前</span><span class="cost">960K tok · 9 次</span></div>
+              </article>
+            </div>
+          </div>
+
+          <!-- 列 3 · 已归档 -->
+          <div class="col">
+            <div class="col-head">
+              <span class="col-dot" style="background:#b0afac"></span>
+              <span class="col-name">已归档</span>
+              <span class="col-count">3</span>
+              <span class="col-more"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/></svg></span>
+            </div>
+            <div class="col-stack">
+              <article class="card" title="2026-09-26-sillyspec-command-queue">
+                <h3 class="card-title">平台同步命令 FIFO 排队</h3>
+                <div class="card-key">2026-09-26-sillyspec-command-queue</div>
+                <div class="card-tags"><span class="tag tag-gray">已归档</span></div>
+                <div class="card-comp">daemon</div>
+                <div class="card-foot"><span>qinyi · 昨天</span><span class="cost">780K tok · 11 次</span></div>
+              </article>
+              <article class="card" title="2026-09-04-conflict-resolve-entry">
+                <h3 class="card-title">冲突裁决入口</h3>
+                <div class="card-key">2026-09-04-conflict-resolve-entry</div>
+                <div class="card-tags"><span class="tag tag-gray">已归档</span></div>
+                <div class="card-comp">backend · daemon</div>
+                <div class="card-foot"><span>qinyi · 9 月 4 日</span><span class="cost">1.9M tok · 25 次</span></div>
+              </article>
+              <article class="card" title="2026-09-07-agent-liveness-states">
+                <h3 class="card-title">智能体五态徽章</h3>
+                <div class="card-key">2026-09-07-agent-liveness-states</div>
+                <div class="card-tags"><span class="tag tag-gray">已归档</span></div>
+                <div class="card-comp">frontend</div>
+                <div class="card-foot"><span>qinyi · 9 月 21 日</span><span class="cost">1.3M tok · 16 次</span></div>
+              </article>
+            </div>
+          </div>
+
+          <!-- 列 4 · 轻量修复 -->
+          <div class="col">
+            <div class="col-head">
+              <span class="col-dot" style="background:#d9a90f"></span>
+              <span class="col-name">轻量修复</span>
+              <span class="col-count">1</span>
+              <span class="col-more"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/></svg></span>
+            </div>
+            <div class="col-stack">
+              <article class="card" title="2026-09-26-thin-badge-survives-archive">
+                <h3 class="card-title">轻量徽章归档后存活</h3>
+                <div class="card-key">2026-09-26-thin-badge-survives-archive</div>
+                <div class="card-tags">
+                  <span class="tag tag-yellow">轻量变更</span>
+                  <span class="tag tag-gray">已归档</span>
+                </div>
+                <div class="card-comp">frontend</div>
+                <div class="card-foot"><span>qinyi · 昨天</span><span class="cost">210K tok · 3 次</span></div>
+              </article>
+            </div>
+          </div>
+        </div>
+
+        <!-- 列表视图（默认隐藏） -->
+        <div class="tablewrap hidden" id="view-list">
+          <div class="row head">
+            <span></span><span>变更</span><span>Key</span><span>阶段</span><span>负责人</span><span>消耗</span><span class="r-time">更新时间</span>
+          </div>
+          <div class="row">
+            <span class="rdot" style="background:#4f9c6f"></span>
+            <span class="r-title">观测事件通道 v3 · 重构</span>
+            <span class="r-key" title="2026-09-25-observation-events-v3-r16sf">2026-09-25-observation-events-v3-r16sf</span>
+            <span><span class="tag tag-purple">实现计划</span></span>
+            <span class="r-owner">qinyi</span>
+            <span class="r-cost">2.4M tok · 18 次</span>
+            <span class="r-time">5 分钟前</span>
+          </div>
+          <div class="row">
+            <span class="rdot" style="background:#4f9c6f"></span>
+            <span class="r-title">探测并发 RPC</span>
+            <span class="r-key" title="2026-09-26-probe-concurrent-rpc">2026-09-26-probe-concurrent-rpc</span>
+            <span><span class="tag tag-blue">代码扫描</span></span>
+            <span class="r-owner">qinyi</span>
+            <span class="r-cost">380K tok · 4 次</span>
+            <span class="r-time">11 分钟前</span>
+          </div>
+          <div class="row">
+            <span class="rdot" style="background:#d97a4a"></span>
+            <span class="r-title">扫描文档运维面板</span>
+            <span class="r-key" title="2026-09-21-scan-docs-ops-panel">2026-09-21-scan-docs-ops-panel</span>
+            <span><span class="tag tag-orange">验证确认</span></span>
+            <span class="r-owner">qinyi</span>
+            <span class="r-cost">1.1M tok · 12 次</span>
+            <span class="r-time">5 天前</span>
+          </div>
+          <div class="row">
+            <span class="rdot" style="background:#7c4dcf"></span>
+            <span class="r-title">跨仓库范围对账</span>
+            <span class="r-key" title="2026-09-20-scope-audit-cross-repo-platform">2026-09-20-scope-audit-cross-repo-platform</span>
+            <span><span class="tag tag-orange">验证确认</span></span>
+            <span class="r-owner">qinyi</span>
+            <span class="r-cost">960K tok · 9 次</span>
+            <span class="r-time">6 天前</span>
+          </div>
+          <div class="row">
+            <span class="rdot" style="background:#d9a90f"></span>
+            <span class="r-title">轻量徽章归档后存活</span>
+            <span class="r-key" title="2026-09-26-thin-badge-survives-archive">2026-09-26-thin-badge-survives-archive</span>
+            <span><span class="tag tag-yellow">轻量变更</span></span>
+            <span class="r-owner">qinyi</span>
+            <span class="r-cost">210K tok · 3 次</span>
+            <span class="r-time">昨天</span>
+          </div>
+          <div class="row">
+            <span class="rdot" style="background:#b0afac"></span>
+            <span class="r-title">平台同步命令 FIFO 排队</span>
+            <span class="r-key" title="2026-09-26-sillyspec-command-queue">2026-09-26-sillyspec-command-queue</span>
+            <span><span class="tag tag-gray">已归档</span></span>
+            <span class="r-owner">qinyi</span>
+            <span class="r-cost">780K tok · 11 次</span>
+            <span class="r-time">昨天</span>
+          </div>
+          <div class="row">
+            <span class="rdot" style="background:#b0afac"></span>
+            <span class="r-title">冲突裁决入口</span>
+            <span class="r-key" title="2026-09-04-conflict-resolve-entry">2026-09-04-conflict-resolve-entry</span>
+            <span><span class="tag tag-gray">已归档</span></span>
+            <span class="r-owner">qinyi</span>
+            <span class="r-cost">1.9M tok · 25 次</span>
+            <span class="r-time">9 月 4 日</span>
+          </div>
+          <div class="row">
+            <span class="rdot" style="background:#b0afac"></span>
+            <span class="r-title">智能体五态徽章</span>
+            <span class="r-key" title="2026-09-07-agent-liveness-states">2026-09-07-agent-liveness-states</span>
+            <span><span class="tag tag-gray">已归档</span></span>
+            <span class="r-owner">qinyi</span>
+            <span class="r-cost">1.3M tok · 16 次</span>
+            <span class="r-time">9 月 21 日</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════
+     页面 2 · 工作区
+     ══════════════════════════════════════════════════════════════ -->
+<section class="page app" id="page-workspaces">
+
+  <aside class="sidebar">
+    <div class="ws-switch">
+      <span class="ws-switch-avatar">🗂️</span>
+      <span class="ws-switch-name">SillyHub</span>
+      <svg class="chev" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="ws-add">＋</span>
+    </div>
+    <div class="side-search">
+      <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.3" stroke="currentColor" stroke-width="1.4"/><path d="M9.4 9.4L12.6 12.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      搜索
+    </div>
+    <div class="side-label">工作区</div>
+    <div class="nav-item active" data-page="workspaces"><span class="ico">🏠</span>工作区</div>
+    <div class="nav-item" data-page="changes"><span class="ico">📋</span>变更中心</div>
+    <div class="nav-item" data-page="sessions"><span class="ico">💬</span>会话</div>
+    <div class="nav-item"><span class="ico">📁</span>文件</div>
+    <div class="side-foot">
+      <div class="nav-item"><span class="ico">⚙️</span>设置</div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <nav class="crumb">
+        <a href="#">🗂 SillyHub</a>
+        <span class="slash">/</span>
+        <span class="cur">工作区</span>
+      </nav>
+      <div class="top-actions">
+        <button class="ghost-btn mini">共享</button>
+        <button class="icon-btn" title="更多">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="13" cy="8" r="1.6"/></svg>
+        </button>
+        <span class="avatar" title="qinyi">Q</span>
+      </div>
+    </header>
+
+    <div class="page-body">
+      <div class="doc-col">
+
+        <!-- 页头（装饰性把手 ③） -->
+        <div class="doc-head block">
+          <svg class="grip" width="14" height="20" viewBox="0 0 14 20" fill="currentColor"><circle cx="3.5" cy="3.5" r="1.7"/><circle cx="10.5" cy="3.5" r="1.7"/><circle cx="3.5" cy="10" r="1.7"/><circle cx="10.5" cy="10" r="1.7"/><circle cx="3.5" cy="16.5" r="1.7"/><circle cx="10.5" cy="16.5" r="1.7"/></svg>
+          <div>
+            <div class="doc-title"><span class="t-emoji">🗂️</span><h1>工作区</h1></div>
+            <p class="doc-sub"><span class="hl">10 个工作区</span><span class="sep">·</span>3 个守护在线</p>
+          </div>
+          <button class="ghost-btn">＋ 添加</button>
+        </div>
+
+        <!-- 白底大卡容器 + 2×2 网格 -->
+        <div class="ws-container">
+          <div class="ws-grid">
+
+            <article class="ws-card">
+              <div class="ws-top">
+                <span class="ws-avatar av-purple">🟣</span>
+                <div style="min-width:0">
+                  <div class="ws-name">multi-agent-platform</div>
+                  <div class="ws-slug">multi-agent-platform</div>
+                </div>
+              </div>
+              <div class="ws-path"><span class="pfx">📁</span>~/IdeaProjects/multi-agent-platform</div>
+              <div class="ws-stack">
+                <span class="tag tag-blue">Next.js</span>
+                <span class="tag tag-green">FastAPI</span>
+                <span class="tag tag-yellow">Node</span>
+              </div>
+              <div class="ws-foot">
+                <span class="guard g-on"><span class="g-dot"></span>守护在线</span>
+                <span class="sep">·</span>
+                <span>4 个进行中变更 · 11 分钟前扫描</span>
+              </div>
+            </article>
+
+            <article class="ws-card">
+              <div class="ws-top">
+                <span class="ws-avatar av-green">🟢</span>
+                <div style="min-width:0">
+                  <div class="ws-name">sillyhub-website</div>
+                  <div class="ws-slug">sillyhub-website</div>
+                </div>
+              </div>
+              <div class="ws-path"><span class="pfx">📁</span>~/IdeaProjects/sillyhub-website</div>
+              <div class="ws-stack">
+                <span class="tag tag-purple">Astro</span>
+              </div>
+              <div class="ws-foot">
+                <span class="guard g-off"><span class="g-dot"></span>守护离线</span>
+                <span class="sep">·</span>
+                <span>0 个进行中变更 · 3 天前扫描</span>
+              </div>
+            </article>
+
+            <article class="ws-card">
+              <div class="ws-top">
+                <span class="ws-avatar av-orange">🟠</span>
+                <div style="min-width:0">
+                  <div class="ws-name">ppm-demo</div>
+                  <div class="ws-slug">ppm-demo</div>
+                </div>
+              </div>
+              <div class="ws-path"><span class="pfx">📁</span>~/IdeaProjects/ppm-demo</div>
+              <div class="ws-stack">
+                <span class="tag tag-green">Vue3</span>
+                <span class="tag tag-blue">Vite</span>
+              </div>
+              <div class="ws-foot">
+                <span class="guard g-on"><span class="g-dot"></span>守护在线</span>
+                <span class="sep">·</span>
+                <span>3 个进行中变更 · 2 小时前扫描</span>
+              </div>
+            </article>
+
+            <article class="ws-card">
+              <div class="ws-top">
+                <span class="ws-avatar av-blue">🔵</span>
+                <div style="min-width:0">
+                  <div class="ws-name">docs-portal</div>
+                  <div class="ws-slug">docs-portal</div>
+                </div>
+              </div>
+              <div class="ws-path"><span class="pfx">📁</span>~/IdeaProjects/docs-portal</div>
+              <div class="ws-stack">
+                <span class="tag tag-gray">VitePress</span>
+              </div>
+              <div class="ws-foot">
+                <span class="guard g-wait"><span class="g-dot"></span>待接入</span>
+                <span class="sep">·</span>
+                <span>0 个进行中变更 · 尚未扫描</span>
+              </div>
+            </article>
+
+          </div>
+        </div>
+
+        <button class="loadmore">加载更多</button>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════
+     页面 3 · 会话（三栏 IM 式 · Notion 块状消息）
+     ══════════════════════════════════════════════════════════════ -->
+<section class="page im" id="page-sessions">
+
+  <!-- 顶栏（全宽） -->
+  <header class="topbar im-top">
+    <nav class="crumb">
+      <a href="#">🗂 SillyHub</a>
+      <span class="slash">/</span>
+      <a href="#">multi-agent-platform</a>
+      <span class="slash">/</span>
+      <span class="cur">会话</span>
+    </nav>
+    <div class="top-actions">
+      <button class="ghost-btn mini">共享</button>
+      <button class="icon-btn" title="更多">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="13" cy="8" r="1.6"/></svg>
+      </button>
+      <span class="avatar" title="qinyi">Q</span>
+    </div>
+  </header>
+
+  <div class="im-body">
+
+    <!-- 左栏 · 会话列表 -->
+    <aside class="im-left">
+      <div class="im-left-head">
+        <h2>💬 会话</h2>
+        <button class="icon-btn" title="新会话">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5v11M1.5 7h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <label class="im-search">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.3" stroke="currentColor" stroke-width="1.4"/><path d="M9.4 9.4L12.6 12.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <input type="text" placeholder="搜索会话…">
+      </label>
+      <div class="im-list">
+
+        <div class="sess-group">今天</div>
+        <div class="sess-item sel" data-sess>
+          <div class="s-row1">
+            <span class="s-ava av-purple">🟣</span>
+            <span class="s-title">观测事件通道 v3 · 第 3 轮</span>
+            <span class="s-time">2 分钟前</span>
+          </div>
+          <div class="s-row2">
+            <span class="tag tag-purple mono">glm-4.7</span>
+            <span class="s-meta">进行中</span>
+          </div>
+        </div>
+        <div class="sess-item" data-sess>
+          <div class="s-row1">
+            <span class="s-ava av-orange">🟠</span>
+            <span class="s-title">探测并发 RPC 调试</span>
+            <span class="s-time">11 分钟前</span>
+          </div>
+          <div class="s-row2">
+            <span class="tag tag-orange mono">claude-opus-4.5</span>
+            <span class="s-meta">等待输入</span>
+          </div>
+        </div>
+        <div class="sess-item" data-sess>
+          <div class="s-row1">
+            <span class="s-ava av-blue">👥</span>
+            <span class="s-title">群聊 · 变更中心三人组</span>
+            <span class="s-time">1 小时前</span>
+          </div>
+          <div class="s-row2">
+            <span class="tag tag-blue">群聊</span>
+            <span class="s-meta">3 个智能体</span>
+          </div>
+        </div>
+
+        <div class="sess-group">昨天</div>
+        <div class="sess-item" data-sess>
+          <div class="s-row1">
+            <span class="s-ava av-purple">🟣</span>
+            <span class="s-title">thin-badge 修复</span>
+            <span class="s-time done">已完成</span>
+          </div>
+          <div class="s-row2">
+            <span class="tag tag-purple mono">glm-4.7</span>
+          </div>
+        </div>
+        <div class="sess-item" data-sess>
+          <div class="s-row1">
+            <span class="s-ava av-green">🟢</span>
+            <span class="s-title">命令排队重构</span>
+            <span class="s-time done">已完成</span>
+          </div>
+          <div class="s-row2">
+            <span class="tag tag-yellow mono">claude-sonnet-4.5</span>
+          </div>
+        </div>
+
+        <div class="sess-group">更早</div>
+        <div class="sess-item" data-sess>
+          <div class="s-row1">
+            <span class="s-ava av-blue">🔵</span>
+            <span class="s-title">规范同步排查</span>
+            <span class="s-time">已中止</span>
+          </div>
+          <div class="s-row2">
+            <span class="tag tag-green mono">codex</span>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- 中栏 · 块式消息流 -->
+    <main class="im-mid">
+      <div class="im-mid-head">
+        <span class="t">观测事件通道 v3 · 第 3 轮</span>
+        <span class="tag tag-purple mono">glm-4.7</span>
+        <span class="tag tag-purple">进行中</span>
+        <span style="flex:1"></span>
+        <button class="icon-btn" title="会话信息">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.4" stroke="currentColor" stroke-width="1.3"/><path d="M8 7.4v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="4.9" r="0.9" fill="currentColor"/></svg>
+        </button>
+        <button class="icon-btn" title="更多">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/></svg>
+        </button>
+      </div>
+
+      <div class="messages">
+        <div class="msgs-inner">
+
+          <div class="day-sep">今天</div>
+
+          <!-- 用户消息：块式 · 无气泡 -->
+          <div class="msg">
+            <span class="msg-ava u">q</span>
+            <div class="msg-main">
+              <div class="msg-head"><span class="msg-name">qinyi</span><span class="msg-time">14:31</span></div>
+              <div class="msg-body">把观测事件的 payload 拆成 channel + envelope 两层</div>
+            </div>
+          </div>
+
+          <!-- agent 消息：🤖 前缀 + 代码块 + 工具调用 -->
+          <div class="msg">
+            <span class="msg-ava a">🤖</span>
+            <div class="msg-main">
+              <div class="msg-head"><span class="msg-name">🤖 GLM-4.7</span><span class="msg-time">14:32</span></div>
+              <div class="msg-body">
+                已完成拆分，<code>observation_event</code> 表新增 <code>channel</code> 列，envelope 统一携带 seq / topic / trace 三元组；旧字段保留为只读兼容，下个大版本再清理：
+              </div>
+              <pre class="code">await bus.publish("agent.lifecycle", {
+  seq: next_seq(),
+  envelope: { topic: "agent.state", trace: trace_id },
+})<span class="cm">  # channel 由总线按前缀路由</span></pre>
+              <div class="tool">
+                <span class="tick">✓</span>
+                sillyspec read --change 2026-09-25-observation-events-v3-r16sf
+                <span class="ms">248ms</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <span class="msg-ava u">q</span>
+            <div class="msg-main">
+              <div class="msg-head"><span class="msg-name">qinyi</span><span class="msg-time">14:35</span></div>
+              <div class="msg-body">跑一下相关测试</div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <span class="msg-ava a">🤖</span>
+            <div class="msg-main">
+              <div class="msg-head"><span class="msg-name">🤖 GLM-4.7</span><span class="msg-time">14:36</span></div>
+              <div class="msg-body">41 个用例全绿 ✅ 覆盖 channel 路由、envelope 校验和回放去重。两个待处理项已记入验证清单，随时可以进验证确认。</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Notion 式无边框输入区 -->
+      <div class="composer">
+        <div class="composer-inner">
+          <div class="composer-area">给 GLM-4.7 发送消息…</div>
+          <div class="composer-bar">
+            <button class="icon-btn" title="附件">📎</button>
+            <button class="icon-btn" title="表情">😀</button>
+            <button class="icon-btn at" title="提及">@</button>
+            <span class="spacer"></span>
+            <button class="send" title="发送">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 11.5V2.8M3.2 6.4L7 2.6l3.8 3.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 右栏 · 会话信息 -->
+    <aside class="im-right">
+      <h3>会话信息</h3>
+      <dl class="info-list">
+        <div class="info-row"><dt>变更 Key</dt><dd class="mono">2026-09-25-observation-events-v3-r16sf</dd></div>
+        <div class="info-row"><dt>所属变更</dt><dd>观测事件通道 v3 · 重构</dd></div>
+        <div class="info-row"><dt>引擎</dt><dd class="mono">glm-4.7</dd></div>
+        <div class="info-row"><dt>轮次</dt><dd>第 3 轮</dd></div>
+        <div class="info-row"><dt>状态</dt><dd><span class="tag tag-purple">进行中</span></dd></div>
+        <div class="info-row"><dt>消耗</dt><dd>2.4M tok · 18 次</dd></div>
+        <div class="info-row"><dt>组件</dt><dd class="mono">backend · frontend</dd></div>
+        <div class="info-row"><dt>创建时间</dt><dd>昨天 21:14</dd></div>
+      </dl>
+
+      <h4>参与智能体</h4>
+      <div class="party">
+        <span class="s-ava av-blue">🤖</span>
+        <span class="p-name">GLM-4.7</span>
+        <span class="p-role tag tag-purple mono">引擎</span>
+      </div>
+      <div class="party">
+        <span class="s-ava av-green">⚙️</span>
+        <span class="p-name">sillyspec-daemon</span>
+        <span class="p-role tag tag-green mono">守护</span>
+      </div>
+
+      <span class="side-link">在变更中心查看 →</span>
+    </aside>
+
+  </div>
+</section>
+
+<script>
+/* ═══ 交互脚本：页面切换 / 视图切换 / 会话选中 ═══ */
+(function () {
+  'use strict';
+
+  var pages = ['changes', 'workspaces', 'sessions'];
+
+  /* 页面切换：section 显隐 + 工具条/侧栏高亮同步 */
+  function showPage(name) {
+    pages.forEach(function (p) {
+      var sec = document.getElementById('page-' + p);
+      if (sec) sec.classList.toggle('active', p === name);
+    });
+    document.querySelectorAll('.proto-btn').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.page === name);
+    });
+    document.querySelectorAll('.nav-item[data-page]').forEach(function (n) {
+      n.classList.toggle('active', n.dataset.page === name);
+    });
+  }
+
+  /* 变更中心：看板 / 列表 视图切换（Notion 数据库视图） */
+  function showView(view) {
+    var board = document.getElementById('view-board');
+    var list = document.getElementById('view-list');
+    if (!board || !list) return;
+    board.classList.toggle('hidden', view !== 'board');
+    list.classList.toggle('hidden', view !== 'list');
+    document.querySelectorAll('.viewtab').forEach(function (t) {
+      t.classList.toggle('active', t.dataset.view === view);
+    });
+  }
+
+  /* 工具条按钮 + 侧栏导航 → 切页 */
+  document.querySelectorAll('[data-page]').forEach(function (el) {
+    el.addEventListener('click', function () {
+      showPage(el.dataset.page);
+    });
+  });
+
+  /* 视图 tab → 切视图（支持键盘） */
+  document.querySelectorAll('.viewtab').forEach(function (t) {
+    t.addEventListener('click', function () { showView(t.dataset.view); });
+    t.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showView(t.dataset.view); }
+    });
+  });
+
+  /* 会话列表条目点击 → 选中态（纯视觉） */
+  document.querySelectorAll('.sess-item').forEach(function (s) {
+    s.addEventListener('click', function () {
+      document.querySelectorAll('.sess-item').forEach(function (x) { x.classList.remove('sel'); });
+      s.classList.add('sel');
+    });
+  });
+
+  /* 默认：变更中心 + 看板视图（与初始 class 一致，显式调用一次保险） */
+  showPage('changes');
+  showView('board');
+})();
+</script>
+</body>
+</html>

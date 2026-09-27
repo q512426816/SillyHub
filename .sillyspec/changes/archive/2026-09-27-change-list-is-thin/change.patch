@@ -1,0 +1,182 @@
+diff --git a/.sillyspec/changes/2026-09-27-change-list-is-thin/design.md b/.sillyspec/changes/2026-09-27-change-list-is-thin/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-change-list-is-thin/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T09:00:33.252Z
++---
++# 设计记录（Design Record）— 2026-09-27-change-list-is-thin
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-change-list-is-thin 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 -->
++后端 ChangeSummary 加 is_thin 计算字段（DTO 层零 migration），ChangeService._is_thin_lineage 三分支判定（stage=thin / quick 且 created_at>=2026-09-25 / latest_progress.steps 全无标准四阶段痕迹且同窗——steps 数据已在投影 JSON 内零新增查询，offset-naive 归一 UTC 后比较），enrich_summaries 投影循环注入（stage_info 命中用 latest_progress、miss 用 row 现值）；前端 gen:types 后列表行消费（is_thin=true 行图标琥珀闪电+标题行「轻量」徽章，与状态图标并存对齐详情双徽章口径），16 处测试 mock 顺手补 is_thin 字段。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-change-list-is-thin 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 -->
++ChangeSummary schema +is_thin: bool=False；service +_is_thin_lineage 类方法；api-types/openapi.json 重生成同批；前端 changes/page.tsx 两处消费。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-change-list-is-thin 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 -->
++四问全 n/a：读时投影（read-only DTO 层），无写路径/状态/作用域引入。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-change-list-is-thin 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 -->
++最大风险：判定口径与前端 lib/thin-lineage.ts 双实现漂移——注释互指+同口径测试锚定（后端 6 用例对齐前端 6 用例矩阵）；已放弃：ChangeRead 详情也加 is_thin——详情前端已有本地判定且正确，最小面原则不加。
+
+diff --git a/.sillyspec/changes/2026-09-27-change-list-is-thin/flow-state.yaml b/.sillyspec/changes/2026-09-27-change-list-is-thin/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-change-list-is-thin/flow-state.yaml
+@@ -0,0 +1,17 @@
++tier: thick
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 4d340be72fb09d9a120c2f65a6416da45f4f293e
++updatedAt: '2026-09-27T09:15:13.994Z'
++upgrade_reason: verify 实测失败（实测失败：lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
++gate_summary: >-
++  test: passed ← module[]+deps(py24+jsx6)+fr(6)（93.7s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260927091459\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（14.8s）｜门文件 53 个
++
+
+diff --git a/.sillyspec/changes/2026-09-27-change-list-is-thin/proposal.md b/.sillyspec/changes/2026-09-27-change-list-is-thin/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-change-list-is-thin/proposal.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T09:00:33.251Z
++---
++# 提案书（Proposal）— 2026-09-27-change-list-is-thin
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:b7eaf511c31c150cc2a0a4c22fcf9619eb7dd1127b36bbdc2ab50933212aea2d:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-change-list-is-thin 留痕重锚 -->
++任务原话转写：变更列表投影加 is_thin 字段（2026-09-27-thin-display-fix 遗留收口）：归档轻量变更在列表行也显示出身标识。后端 ChangeSummary 加 is_thin 计算字段（零 migration），enrich_summaries 投影处判定（三分支与前端 lib/thin-lineage.ts 同口径：stage=thin / quick 且 created_at>=2026-09-25 / latest_progress.steps 全无标准四阶段痕迹且同时间窗——steps 数据已在投影 JSON 内零新增查询）；前端 gen:types 后列表行消费 is_thin 渲染出身徽章（归档轻量行=合并勾+「轻量」琥珀小徽章并存，对齐详情页双徽章口径）。
++成功标准：
++- ChangeSummary 含 is_thin（bool，default False 零破坏），后端投影测试覆盖三分支+时间窗负向
++- 前端 api-types 重生成（gen:types）+ 列表行 is_thin=true 时标题行显示「轻量」琥珀徽章，归档轻量与已归档状态并存
++- 后端相关测试全绿 + 前端列表测试全绿 + tsc 0 + openapi.json 同批提交
++- 部署后浏览器验证归档区轻量行出身标识
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:ae1fcfa7be74e26fa829d355ae18d302b09351ab72c13792cb977a58154b0151:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-change-list-is-thin 留痕重锚 -->
++按成功标准机械推导，共 4 条验收面：
++1. ChangeSummary 含 is_thin（bool，default False 零破坏），后端投影测试覆盖三分支+时间窗负向
++2. 前端 api-types 重生成（gen:types）+ 列表行 is_thin=true 时标题行显示「轻量」琥珀徽章，归档轻量与已归档状态并存
++3. 后端相关测试全绿 + 前端列表测试全绿 + tsc 0 + openapi.json 同批提交
++4. 部署后浏览器验证归档区轻量行出身标识
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:b90cae5ad60c86638b3f748fae285d00032611aa6da7fbf82cc8ebb9a0c3c9b4:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-change-list-is-thin 留痕重锚 -->
++1. ChangeSummary 含 is_thin（bool，default False 零破坏），后端投影测试覆盖三分支+时间窗负向
++2. 前端 api-types 重生成（gen:types）+ 列表行 is_thin=true 时标题行显示「轻量」琥珀徽章，归档轻量与已归档状态并存
++3. 后端相关测试全绿 + 前端列表测试全绿 + tsc 0 + openapi.json 同批提交
++4. 部署后浏览器验证归档区轻量行出身标识
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-27-change-list-is-thin/requirements.md b/.sillyspec/changes/2026-09-27-change-list-is-thin/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-change-list-is-thin/requirements.md
+@@ -0,0 +1,42 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T09:00:33.252Z
++---
++# 需求规格（Requirements）— 2026-09-27-change-list-is-thin
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: ChangeSummary 含 is_thin（bool，default False 零破坏），后端
++Given 测试 相关模块就绪
++When ChangeSummary 含 is_thin（bool，default False 零破坏），后端投影测试覆盖三分支+时间窗负向
++Then 行为符合本条标准描述
++
++### FR-02: 前端 api-types 重生成（gen:types）+ 列表行 is_thin=true 时标题行
++Given 前端 / api 相关模块就绪
++When 前端 api-types 重生成（gen:types）+ 列表行 is_thin=true 时标题行显示「轻量」琥珀徽章，归档轻量与已归档状态并存
++Then 行为符合本条标准描述
++
++### FR-03: 后端相关测试全绿 + 前端列表测试全绿 + tsc 0 + openapi.json 同批提交
++Given 测试 / 前端 / api 相关模块就绪
++When 后端相关测试全绿 + 前端列表测试全绿 + tsc 0 + openapi.json 同批提交
++Then 行为符合本条标准描述
++
++### FR-04: 部署后浏览器验证归档区轻量行出身标识
++Given 系统就绪
++When 部署后浏览器验证归档区轻量行出身标识
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 -->
++backend/app/modules/change/tests/test_enrich_projection.py 新增 6 用例（归档 flow-thin steps 兜底/标准痕迹 false/active thin 无 progress/quick 窗内 true/历史 quick false/空 steps false）——52 passed
++
++<!--AGENT:测试绑定FR-02 -->
++frontend 列表页 36 用例 + 详情域 277 + 组件域全量 437/437 全绿（16 处 mock 补字段）
++
++<!--AGENT:测试绑定FR-03 -->
++pnpm typecheck 0 + api-types.ts/openapi.json 重生成同批（diff +5/+5 行）
++
++<!--AGENT:测试绑定FR-04 -->
++部署后浏览器验证归档区轻量行（hover-polish 等行显「轻量」徽章+琥珀出身图标）
+
+diff --git a/.sillyspec/changes/2026-09-27-change-list-is-thin/tasks.md b/.sillyspec/changes/2026-09-27-change-list-is-thin/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-change-list-is-thin/tasks.md
+@@ -0,0 +1,14 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T09:00:33.252Z
++---
++# 任务注册表（Tasks）— 2026-09-27-change-list-is-thin
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: ChangeSummary 含 is_thin（bool，default False 零破坏），后端投影测试覆盖三分支+时间窗负向
++- [ ] task-02: 前端 api-types 重生成（gen:types）+ 列表行 is_thin=true 时标题行显示「轻量」琥珀徽章，归档轻量与已归档状态并存
++- [ ] task-03: 后端相关测试全绿 + 前端列表测试全绿 + tsc 0 + openapi.json 同批提交
++- [ ] task-04: 部署后浏览器验证归档区轻量行出身标识

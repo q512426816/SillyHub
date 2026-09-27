@@ -8,7 +8,7 @@ source_commit: 5a00fc7e
 
 > 本规范以 `/ppm/projects` 当前样式为**唯一基准**,后续新建或改造其它列表/管理页一律对齐。
 > 基准组件:`PpmResourceTable`(`frontend/src/components/ppm-resource-table.tsx`,通用 CRUD 表格)+ `projects/page.tsx`(页面配置)。
-> **适用范围（D-304，2026-08-20-workspace-subpages-style-unify 立）**：本规范 §1-§12 以 PPM 类列表/管理页为基准（antd 全量条款适用）；**工作区工作台式页面**（/workspaces/[id] 及其子页）按 §0.5 主题系统 + 概览页基线执行（shadcn Button/SectionCard 四件套），§4 DataTable 强制、§5 antd Button 强制、§9 bg-red-50 错误条模板、§11 Don't 清单在该范围不适用。
+> **适用范围（D-304@v2，2026-09-26-core-pages-visual-redesign 改写）**：本规范 §1-§12 以 PPM 类列表/管理页为基准（antd 全量条款适用，PPM 范围语义不变——PPM 已上线，其页面维护照旧）；**工作区工作台式页面**（/workspaces/[id] 及其子页 + /workspaces + /sessions）按 §0.5 主题系统 + §13 primer 组件库执行：结构组件（列表行/时间线/胶囊/页头/统计格）优先 `@/components/primer`，控件类（Input/Select/Modal/Tooltip/Pagination）继续 antd；§4 DataTable 强制与 §5 antd Button 强制收窄为仅 PPM 类页面适用（工作台页面列表用 IssueRow、按钮用 shadcn Button 规格）；§9 错误条/告警条模板统一语义 token（`--semantic-*-soft` 浅底阶）；§11 Don't 清单全范围适用。
 > 设计系统总纲(2026-08-20 起为 AI-Native 双主题):`.sillyspec/changes/archive/2026-08-20-frontend-ai-native-style/design.md` + 原型 `prototype-frontend-ai-native-style.html`。
 
 ## 0. 一句话原则
@@ -340,3 +340,37 @@ antd 组件主色/状态色由 `antd-providers.tsx` 的 token 统一(`colorPrima
 - [ ] grep 确认无 `@/components/ui/button` 等 shadcn 原件残留、无硬编码 hex。
 
 > 改完自检:`pnpm -C frontend exec tsc --noEmit` + `pnpm -C frontend exec eslint <改的文件>`,0 error 再 rebuild 部署。
+
+
+## 13. primer 组件库（2026-09-26-core-pages-visual-redesign 立）
+
+五核心页面（变更中心列表/详情、工作区列表/概览、会话门户）的结构组件统一入口：`import { ... } from "@/components/primer"`（十组件族）。
+
+**组件清单与契约**（详见该变更 design.md 接口定义节）：
+
+| 组件 | 用途 | 关键 props |
+|---|---|---|
+| StateIcon | 六态 16/12px stroke 图标（GitHub octicon 风） | name: openCircle/mergedCheck/zap/clock/check/x |
+| StateLabel | 状态胶囊（浅底深字细边框，六变体） | variant: open/merged/attention/done/error/neutral；iconName: zap/clock（attention 双态：轻量闪电/等待时钟） |
+| Counter | 计数胶囊 | count; active |
+| EmptyState | 空态（替代破碎「—」空表） | title/description/icon/children |
+| PageHead | 页头（面包屑+标题+副标题+操作组） | breadcrumb/title/titleExtra/subtitle/actions |
+| UnderlineNav | 下划线 tab（受控+Counter 联动） | items/value/onChange（指示条走主题 token） |
+| IssueRow/IssueRowHeader | 两段式列表行+表头（同 grid 对齐） | state/title/meta/right/leading/hoverActions |
+| StatGrid | 统计格（Insights 式 N 格） | items: {label, value, tone} |
+| Timeline/TimelineItem | 事件时间线（竖线+节点+可折叠日志） | icon/title/time/tone/children |
+| MetaPanel/MetaPanelSection | 侧栏信息面板分组 | title/children |
+
+**StateLabel 变体语义表**（业务状态映射）：
+
+| 变体 | 语义 | 底色来源 | 业务例 |
+|---|---|---|---|
+| open | 进行中（GitHub 紫开圆） | brand-50/brand-600 | 变更进行中 |
+| merged | 已归档（合并勾） | brand-50/brand-600 | 变更已归档 |
+| attention + zap | 轻量变更（闪电） | semantic-warning-soft | thin 变更出身徽章（FR-auto-frontend-020 口径） |
+| attention + clock | 等待输入（时钟） | semantic-warning-soft | 待审核/等待用户 |
+| done | 完成 | semantic-success-soft | 任务完成/守护在线 |
+| error | 失败/阻塞 | semantic-error-soft | 阻塞中/加载失败 |
+| neutral | 中性 | semantic-neutral-soft | 未绑定/存量态 |
+
+**消费纪律**：①结构组件优先 primer、控件类继续 antd（ConfigProvider token 化不变）；②组件内禁止硬编码 hex（全走 themes.ts token/CSS var）；③状态语义一律查上表映射，不自造颜色组合；④新增页面结构组件先评估 primer 复用再自建。

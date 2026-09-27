@@ -289,6 +289,7 @@ function makeMentionChange(): ChangeSummary {
     status: "active",
     location: "worktree",
     change_type: null,
+    is_thin: false,
     affected_components: [],
     owner_id: null,
     updated_at: "2026-08-26T00:00:00Z",

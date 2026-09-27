@@ -86,6 +86,7 @@ function makeChange(over: Partial<ChangeRead> = {}): ChangeRead {
     status: "in_progress",
     location: "active",
     change_type: null,
+    is_thin: false,
     affected_components: ["frontend"],
     updated_at: "2026-08-29T10:00:00Z",
     stages: {},

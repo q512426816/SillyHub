@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-visual-gap-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "hover 操作组可见性隐式耦合于拖拽手柄注入（group/card 条件类）",
+      "evidence": "article 的 group/card relative 类条件应用，无手柄注入的调用方操作按钮对鼠标用户不可见；生产唯一调用点 drag-grid 必然注入，实际影响零——主会话已顺手修复（group/card 改无条件）",
+      "location": "frontend/src/components/workspace-card.tsx:article className"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-09-26T23:29:13+00:00"
+}

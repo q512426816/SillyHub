@@ -190,21 +190,18 @@ export function WorkspaceCard({
     <article
       onClick={onActivate ? handleCardClick : undefined}
       className={cn(
-        // ql-20260820-010 对照原型 .ws-card:hover 三件套:
-        // 抬升 -4px + 紫调大阴影(shadow-lg 主题 token) + 边框加深(brand-300)
-        // task-08: 手柄挂点注入时补 group/card + relative（悬浮定位 + hover 显隐），
-        // 缺省不加——其余调用方渲染结果与现状完全一致。
-        "flex flex-col rounded-lg border bg-card shadow-sm transition-[box-shadow,transform,border-color] duration-200 hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg",
+        // 2026-09-27 visual-gap-fix：卡片重写为 GitHub Repositories 行式条目——
+        // 单条目两段式（主行=名称+徽标；meta 行=slug/技术栈/时间），hover 显操作，
+        // 守护徽标与操作右置；信息字段与行为（别名/重扫/删除/拖拽）零丢失。
+        "flex items-start gap-3 rounded-md border bg-card px-3.5 py-2.5 transition-colors duration-100 hover:bg-muted",
         onActivate && "cursor-pointer",
-        (dragHandleProps || dragHandleNode) && "group/card relative",
+        // 评审 low 修复：group/card 无条件——hover 操作组可见性不依赖手柄注入
+        "group/card relative",
       )}
     >
-      {/* task-08 / FR-04 / R-06：拖拽手柄挂点（对照原型 ⠿ 手柄）——仅 dragHandleProps
-          /dragHandleNode 注入时渲染；挂点内 click 不冒泡成整卡 onActivate（dnd 的
-          指针/键盘监听在元素自身，此处只截 click）。缺省时零 DOM 差异。 */}
       {(dragHandleProps || dragHandleNode) && (
         <div
-          className="absolute -left-3 top-2 z-10 flex flex-col items-stretch"
+          className="absolute -left-3 top-1/2 z-10 flex -translate-y-1/2 flex-col items-stretch"
           onClick={(e) => e.stopPropagation()}
         >
           {dragHandleProps && (
@@ -213,9 +210,7 @@ export function WorkspaceCard({
               {...handleRest}
               title="拖拽排序"
               className={cn(
-                // 对照原型 .handle：半出卡片左缘的 ⠿ 手柄，默认半隐、
-                // 卡 hover/手柄 hover/键盘聚焦全显；色走语义类（brand/border）。
-                "flex h-10 w-5 cursor-grab select-none items-center justify-center rounded-l-md border border-r-0 border-border bg-card text-sm text-muted-foreground opacity-0 transition-opacity duration-100 group-hover/card:opacity-60 hover:!opacity-100 hover:text-brand-600 focus-visible:opacity-100 active:cursor-grabbing",
+                "flex h-8 w-5 cursor-grab select-none items-center justify-center rounded-l-md border border-r-0 border-border bg-card text-sm text-muted-foreground opacity-0 transition-opacity duration-100 group-hover/card:opacity-60 hover:!opacity-100 hover:text-brand-600 focus-visible:opacity-100 active:cursor-grabbing",
                 handleClassName,
               )}
             >
@@ -225,51 +220,84 @@ export function WorkspaceCard({
           {dragHandleNode}
         </div>
       )}
-      <header className="flex items-start justify-between gap-2 px-4 pt-3.5">
-        <div className="min-w-0">
-          <div className="flex items-baseline gap-2">
-            <h3 className="truncate text-sm font-semibold text-foreground">
-              {workspace.display_alias ?? workspace.name}
-            </h3>
-            {hasAlias ? (
-              <span className="truncate text-[11px] text-muted-foreground">
-                原名 {workspace.name}
-              </span>
-            ) : null}
-          </div>
-          <p className="truncate font-mono text-[11px] text-muted-foreground">
-            {workspace.slug}
-          </p>
-          {workspace.owner ? (
-            <p className="truncate text-[11px] text-muted-foreground">
-              负责人：{workspace.owner.display_name ?? workspace.owner.email ?? "未记录"}
-            </p>
-          ) : null}
-        </div>
-        {/* 头部右侧徽标组：工作区状态 + 类型 + 守护（ql-20260821-007 收敛为竖排右对齐） */}
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <div className="flex items-center gap-1">
-            <span
-              className={cn(
-                "inline-flex h-5 shrink-0 items-center rounded border px-1.5 text-[10px] font-semibold",
-                typeBadgeView.className,
-              )}
-              title={`工作区类型：${typeBadgeView.label}`}
-            >
-              {typeBadgeView.label}
-            </span>
-            <Badge
-              variant={workspace.status === "active" ? "success" : "outline"}
-            >
-              {labelOf(STATUS_LABELS, workspace.status)}
-            </Badge>
-          </div>
-          {daemonBadge}
-        </div>
-      </header>
 
-      <div className="min-w-0 px-4 pt-2">
-        <dl className="grid grid-cols-[5.5rem_1fr] gap-y-1 text-xs">
+      {/* 左缘状态点（GitHub repos 列表语义：在线=绿/离线=灰/未绑定=琥珀） */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "mt-2 h-2 w-2 shrink-0 rounded-full",
+          daemonStatus === "online"
+            ? "bg-success"
+            : daemonStatus === "offline"
+              ? "bg-muted-foreground/50"
+              : "bg-warning",
+        )}
+        title={daemonStatus === "online" ? "守护进程在线" : daemonStatus === "offline" ? "守护进程离线" : "未绑定守护进程"}
+      />
+
+      {/* 主区两段式 */}
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <header className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+          <h3 className="truncate text-sm font-semibold text-primary">
+            {workspace.display_alias ?? workspace.name}
+          </h3>
+          {hasAlias ? (
+            <span className="truncate text-[11px] text-muted-foreground">
+              原名 {workspace.name}
+            </span>
+          ) : null}
+          <span
+            className={cn(
+              "inline-flex h-5 shrink-0 items-center rounded border px-1.5 text-[11px] font-semibold",
+              typeBadgeView.className,
+            )}
+            title={`工作区类型：${typeBadgeView.label}`}
+          >
+            {typeBadgeView.label}
+          </span>
+          <Badge
+            variant={workspace.status === "active" ? "success" : "outline"}
+            className="shrink-0"
+          >
+            {labelOf(STATUS_LABELS, workspace.status)}
+          </Badge>
+          <span className="truncate font-mono text-[11px] text-muted-foreground">
+            {workspace.slug}
+          </span>
+          {workspace.owner ? (
+            <span className="truncate text-[11px] text-muted-foreground">
+              负责人 {workspace.owner.display_name ?? workspace.owner.email ?? "未记录"}
+            </span>
+          ) : null}
+        </header>
+
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
+          {workspace.tech_stack && workspace.tech_stack.length > 0 && (
+            <span className="flex flex-wrap items-center gap-1">
+              {workspace.tech_stack.map((t) => (
+                <Badge key={t} variant="outline" className="text-[11px]">{t}</Badge>
+              ))}
+            </span>
+          )}
+          {linkedProjects && linkedProjects.length > 0 && (
+            <span className="flex flex-wrap items-center gap-1">
+              {linkedProjects.map((proj) => (
+                <span
+                  key={proj.project_id}
+                  title={proj.project_id}
+                  className="inline-flex h-5 items-center rounded border border-brand-200 bg-brand-50 px-1.5 text-[11px] font-semibold text-brand-700"
+                >
+                  {proj.project_name ?? proj.project_id}
+                </span>
+              ))}
+            </span>
+          )}
+          <span>创建于 {formatTs(workspace.created_at)}</span>
+          <span>最后扫描 {formatTs(workspace.last_scanned_at)}</span>
+        </div>
+
+        {/* 路径/Git 行（条件，紧凑第三行；dt/dd 语义保留） */}
+        <dl className="grid grid-cols-[5.5rem_1fr] gap-y-0.5 text-[11px]">
           <WorkspacePathFields
             workspace={workspace}
             runtime={boundRuntime}
@@ -278,83 +306,54 @@ export function WorkspaceCard({
             repoUrl={repoUrl}
             myRootPath={myRootPath}
           />
-          {workspace.tech_stack && workspace.tech_stack.length > 0 && (
-            <>
-              <dt className="text-muted-foreground">技术栈</dt>
-              <dd className="flex flex-wrap gap-1">
-                {workspace.tech_stack.map((t) => (
-                  <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>
-                ))}
-              </dd>
-            </>
-          )}
         </dl>
-        {/* ql-20260821-007：关联项目行（名称 tag；无关联不渲染整行） */}
-        {linkedProjects && linkedProjects.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1 pt-1 text-[11px]">
-            <span className="text-muted-foreground">关联项目</span>
-            {linkedProjects.map((proj) => (
-              <span
-                key={proj.project_id}
-                title={proj.project_id}
-                className="inline-flex h-5 items-center rounded border border-brand-200 bg-brand-50 px-1.5 text-[10px] font-semibold text-brand-700"
-              >
-                {proj.project_name ?? proj.project_id}
-              </span>
-            ))}
-          </div>
-        )}
-        {/* task-07：未绑定提示行（原型画面①），引导点击配置 */}
+
         {daemonStatus === "unbound" ? (
-          <p className="pt-1 text-[11px] text-warning">
+          <p className="text-[11px] text-warning">
             需先配置守护进程，点击配置
           </p>
         ) : null}
-        {/* ql-20260702：时间行（创建/最后扫描合并一行，弱化）。 */}
-        <p className="flex flex-wrap items-center gap-x-3 pt-1.5 pb-3 text-[11px] text-muted-foreground">
-          <span>创建于 {formatTs(workspace.created_at)}</span>
-          <span>最后扫描 {formatTs(workspace.last_scanned_at)}</span>
-        </p>
+        {error && (
+          <p className="text-xs text-destructive">{error}</p>
+        )}
       </div>
 
-      {error && (
-        <p className="px-4 pb-2 text-xs text-destructive">{error}</p>
-      )}
-
-      {/* ql-20260821-007：footer 删「详情/关系」（整卡可点即详情），
-          剩余操作统一 shadcn 规格：别名/重新扫描 ghost sm，删除 destructive ghost sm 右置。 */}
-      <footer
+      {/* 右侧固定区：守护徽标 + hover 操作组 */}
+      <div
         onClick={stopFooter}
-        className="mt-auto flex items-center gap-1 border-t bg-muted/30 px-3 py-2"
+        className="flex shrink-0 flex-col items-end gap-1 pt-0.5"
       >
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 px-2 text-xs"
-          onClick={() => onEditAlias(workspace)}
-          disabled={busy !== null}
-        >
-          别名
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 px-2 text-xs"
-          onClick={handleRescan}
-          disabled={busy !== null}
-        >
-          {busy === "rescan" ? "扫描中…" : "重新扫描"}
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="ml-auto h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onClick={() => setConfirmDelete(true)}
-          disabled={busy !== null}
-        >
-          {busy === "delete" ? "删除中…" : "删除"}
-        </Button>
-      </footer>
+        {daemonBadge}
+        <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover/card:opacity-100 focus-within:opacity-100">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-1.5 text-xs"
+            onClick={() => onEditAlias(workspace)}
+            disabled={busy !== null}
+          >
+            别名
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-1.5 text-xs"
+            onClick={handleRescan}
+            disabled={busy !== null}
+          >
+            {busy === "rescan" ? "扫描中…" : "重新扫描"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-1.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => setConfirmDelete(true)}
+            disabled={busy !== null}
+          >
+            {busy === "delete" ? "删除中…" : "删除"}
+          </Button>
+        </div>
+      </div>
     </article>
 
       {/* 2026-09-26 重排 FR-08：删除确认 Modal（替代 window.confirm，对齐

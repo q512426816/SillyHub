@@ -114,6 +114,11 @@ class ChangeSummary(BaseModel):
     status: str
     location: str
     change_type: str | None
+    # 2026-09-27-change-list-is-thin：thin 出身标识（计算字段，DTO 层零 migration）。
+    # 判定与前端 lib/thin-lineage.ts 同口径（三分支 + 2026-09-25 分流上线时间窗），
+    # 由 service.enrich_summaries 投影（latest_progress.steps 数据在手零新增查询）；
+    # default False（brownfield 安全，旧前端不读不受影响）。
+    is_thin: bool = False
     affected_components: list[str]
     owner_id: uuid.UUID | None
     current_stage: str | None = None
@@ -938,13 +943,17 @@ class TimelineTask(BaseModel):
     """任务面单行（tasks.md 任务行 × 提交锚推断）。
 
     ``commit_sha`` 是「消息含 task-NN token」的最新窗口提交短哈希（CLI 同款
-    顺序推断口径，无匹配 → None）。
+    顺序推断口径，无匹配 → None）。``time`` 是翻格顺序推断的勾选时刻
+    （2026-09-27-timeline-task-time：task-done 事件 ``checked N→M`` 游标衔接
+    赋值——中段断裂停止推断、尾部未勾不标断裂，CLI ``inferFlipTimes`` 同款
+    语义；观测起点前的首勾/断裂后 → None，前端按 ? 展示）。
     """
 
     id: str
     checked: bool = False
     desc: str = ""
     commit_sha: str | None = None
+    time: str | None = None
 
 
 class TimelineStats(BaseModel):

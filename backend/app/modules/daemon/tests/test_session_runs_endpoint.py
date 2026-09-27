@@ -250,9 +250,13 @@ class TestListSessionRuns:
         assert len(items) == 2
 
         # 配置轮：快照 + 供应商 id + usage 完整透传（quick ql-20260912-003-4506：
-        # 含 cache 两维，from_attributes 直映既有列）
+        # 含 cache 两维，from_attributes 直映既有列）。
+        # 2026-09-27-session-fast-replay FR-03：快照剥 system_prompt 键（响应层
+        # 浅拷贝去键，前端实证仅消费 name 等轻键）——改断言不改意图，其余键
+        # 仍逐一透传。
         cfg = items[str(configured.id)]
-        assert cfg["agent_profile_snapshot"] == snapshot
+        expected_snapshot = {k: v for k, v in snapshot.items() if k != "system_prompt"}
+        assert cfg["agent_profile_snapshot"] == expected_snapshot
         assert cfg["llm_provider_id"] == str(provider.id)
         assert cfg["input_tokens"] == 1234
         assert cfg["output_tokens"] == 567

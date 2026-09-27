@@ -1,5 +1,6 @@
 "use client";
 
+import { isThinLineageChange } from "@/lib/thin-lineage";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -129,7 +130,9 @@ export function ChangeStageActions({
 
   // thin 辅助阶段（2026-09-25-change-center-thin-flow task-08）：轻量变更只读说明卡，
   // 两段式 2 调用协议（形态对照原型 B 面）；平台无操作，执行全在会话内。
-  if (currentStage === "thin") {
+  // 2026-09-27-thin-display-fix：出身判定扩展——归档 thin（stage=archived）与
+  // quick 分流（change_type=quick）同样落本卡，不再漏进通用「无可审批」分支。
+  if (isThinLineageChange(change)) {
     const thinKey = change.change_key ?? change.id;
     return (
       <section className="space-y-2 rounded-md border border-brand-300 bg-brand-50/60 px-4 py-3">
@@ -159,7 +162,8 @@ export function ChangeStageActions({
           </p>
           <p>
             进行中状态阶段恒显示「轻量变更」，归档时自动翻转（进度不落
-            sillyspec.db，flow done 后变更自动转入归档区，无需平台操作）。
+            sillyspec.db，flow done 后变更自动转入归档区，无需平台操作）；
+            归档后本卡仍按轻量出身展示（不再落入通用「无可审批」文案）。
           </p>
         </div>
       </section>

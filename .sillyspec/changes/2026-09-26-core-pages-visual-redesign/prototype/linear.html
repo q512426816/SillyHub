@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SillyHub · Linear 式高级极简 — 高保真原型</title>
+<style>
+/* ============================================================
+   SillyHub · Linear 式高级极简（深色 / 品牌紫 #7C3AED）
+   单文件自包含原型：无 CDN / 无外部字体 / 无外部图片
+   ============================================================ */
+:root{
+  --bg:            #08090a;
+  --panel:         #0d0e10;
+  --panel-2:       #0b0c0e;
+  --hover:         rgba(255,255,255,.04);
+  --border:        rgba(255,255,255,.07);
+  --border-strong: rgba(255,255,255,.12);
+
+  --t1: #eeeff1;
+  --t2: rgba(238,239,241,.65);
+  --t3: rgba(238,239,241,.40);
+
+  --purple:       #7C3AED;
+  --purple-hover: #8b5cf6;
+  --purple-text:  #a78bfa;
+  --cyan:         #22d3ee;
+  --amber:        #f59e0b;
+  --amber-text:   #fbbf24;
+  --green:        #4ade80;
+  --red:          #f87171;
+  --gray-dot:     #6b7280;
+
+  --sans: -apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
+  --mono: ui-monospace,'SF Mono',Monaco,Consolas,'Cascadia Mono',monospace;
+
+  --radius: 8px;
+  --tr: 120ms ease;
+  --proto-h: 44px;
+  --cols: minmax(0,1fr) 118px 104px 132px 92px 64px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{background:var(--bg)}
+body{
+  font-family:var(--sans);
+  font-size:13px;
+  color:var(--t1);
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+::selection{background:rgba(124,58,237,.42);color:#fff}
+a{color:inherit;text-decoration:none}
+button{font-family:inherit;font-size:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input{font-family:inherit;font-size:13px;color:var(--t1);background:none;border:none;outline:none}
+.mono{font-family:var(--mono)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.08);border-radius:6px;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.16)}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- 内嵌 SVG 图标（stroke 1.5px / 14-16px） ---------- */
+.ic{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none;display:block}
+.ic-14{width:14px;height:14px}
+.ic-16{width:16px;height:16px}
+.ic-fill{fill:currentColor;stroke:none}
+
+/* ---------- 状态圆点 ---------- */
+.dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
+.dot-purple{background:var(--purple)}
+.dot-purple.dot-live{
+  box-shadow:0 0 0 3px rgba(124,58,237,.18),0 0 10px rgba(124,58,237,.75);
+  animation:livepulse 2.2s ease-out infinite;
+}
+@keyframes livepulse{
+  0%  {box-shadow:0 0 0 0 rgba(124,58,237,.45),0 0 10px rgba(124,58,237,.75)}
+  70% {box-shadow:0 0 0 6px rgba(124,58,237,0),0 0 10px rgba(124,58,237,.55)}
+  100%{box-shadow:0 0 0 0 rgba(124,58,237,0),0 0 10px rgba(124,58,237,.75)}
+}
+.dot-amber{background:var(--amber);box-shadow:0 0 6px rgba(245,158,11,.35)}
+.dot-gray{background:var(--gray-dot)}
+.dot-red{background:var(--red)}
+.dot-green{background:var(--green);box-shadow:0 0 0 3px rgba(74,222,128,.14),0 0 9px rgba(74,222,128,.6)}
+.dot-hollow{background:transparent;border:1.5px solid var(--gray-dot);width:9px;height:9px}
+
+/* ---------- kbd ---------- */
+kbd{
+  font-family:var(--mono);font-size:11px;line-height:1;
+  color:var(--t2);
+  background:rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.10);
+  border-bottom-color:rgba(255,255,255,.16);
+  border-radius:4px;
+  padding:3px 5px;
+}
+
+/* ---------- 按钮 ---------- */
+.btn{
+  display:inline-flex;align-items:center;gap:7px;
+  height:32px;padding:0 13px;border-radius:var(--radius);
+  font-size:13px;font-weight:500;color:var(--t1);
+  transition:background var(--tr),border-color var(--tr),color var(--tr),box-shadow var(--tr),transform var(--tr);
+  white-space:nowrap;
+}
+.btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(124,58,237,.35)}
+.btn-primary{background:var(--purple);color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.09)}
+.btn-primary:hover{background:var(--purple-hover)}
+.btn-primary:active{background:#6d33d8}
+.btn-ghost{border:1px solid var(--border-strong);color:var(--t2)}
+.btn-ghost:hover{background:var(--hover);color:var(--t1);border-color:rgba(255,255,255,.18)}
+.btn-sm{height:28px;padding:0 10px;font-size:12px}
+.icon-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:28px;border-radius:6px;color:var(--t2);
+  transition:background var(--tr),color var(--tr);
+}
+.icon-btn:hover{background:var(--hover);color:var(--t1)}
+.icon-btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(124,58,237,.35)}
+
+/* ---------- 原型切换工具条（文件级） ---------- */
+.proto{
+  position:sticky;top:0;z-index:100;
+  height:var(--proto-h);
+  display:flex;align-items:center;gap:10px;
+  padding:0 18px;
+  background:rgba(13,14,16,.92);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--border);
+}
+.proto-logo{color:var(--purple);font-size:11px;margin-right:2px}
+.proto-group{display:flex;gap:4px}
+.proto-btn{
+  height:28px;padding:0 13px;border-radius:6px;
+  font-size:12px;color:var(--t2);
+  transition:background var(--tr),color var(--tr),border-color var(--tr);
+  border:1px solid transparent;
+}
+.proto-btn:hover{background:var(--hover);color:var(--t1)}
+.proto-btn.active{
+  color:#cdbcfa;
+  background:rgba(124,58,237,.16);
+  border-color:rgba(124,58,237,.38);
+}
+.proto-tag{
+  margin-left:auto;font-size:12px;color:var(--t3);
+  display:flex;align-items:center;gap:7px;
+}
+.proto-tag::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--purple);box-shadow:0 0 6px rgba(124,58,237,.8)}
+
+/* ---------- 页面骨架 ---------- */
+.page{display:none;position:relative;min-height:calc(100vh - var(--proto-h))}
+.page--active{display:block}
+.page--im{display:none;height:calc(100vh - var(--proto-h));min-height:0}
+.page--im.page--active{display:flex;flex-direction:column}
+/* 顶部环境光：极微弱紫色径向光晕 */
+.page::before{
+  content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(620px 300px at 16% -70px, rgba(124,58,237,.12), transparent 70%),
+    radial-gradient(480px 260px at 86% -90px, rgba(34,211,238,.05), transparent 70%);
+}
+.page > *{position:relative;z-index:1}
+
+/* ---------- 全局顶栏 ---------- */
+.topbar{
+  height:48px;
+  display:flex;align-items:center;
+  padding:0 20px;position:relative;
+  border-bottom:1px solid var(--border);
+  background:rgba(9,10,11,.55);
+}
+.brand{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;letter-spacing:.1px}
+.brand-mark{color:var(--purple);font-size:12px;text-shadow:0 0 12px rgba(124,58,237,.6)}
+.search-pill{
+  position:absolute;left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;gap:8px;
+  width:290px;height:30px;padding:0 12px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background:rgba(255,255,255,.03);
+  color:var(--t3);font-size:13px;
+  transition:border-color var(--tr),background var(--tr);
+}
+.search-pill:hover{border-color:var(--border-strong);background:rgba(255,255,255,.045)}
+.search-pill kbd{margin-left:auto}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.avatar{
+  width:26px;height:26px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,#7C3AED,#4c1d95);
+  border:1px solid rgba(255,255,255,.14);
+  color:#fff;font-size:11px;font-weight:600;
+}
+
+/* ---------- 内容容器 / 页头 ---------- */
+.container{max-width:1200px;margin:0 auto;padding:34px 28px 90px}
+.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.page-head h1{font-size:22px;font-weight:600;letter-spacing:-.2px}
+.page-sub{margin-top:6px;font-size:13px;color:var(--t3)}
+
+/* ---------- 变更中心：筛选行 ---------- */
+.filterbar{
+  display:flex;align-items:center;gap:14px;
+  margin-top:26px;
+  border-bottom:1px solid var(--border);
+}
+.tabs{display:flex;gap:2px;height:38px}
+.tab{
+  position:relative;display:flex;align-items:center;gap:7px;
+  padding:0 11px;font-size:13px;color:var(--t2);
+  transition:color var(--tr);
+}
+.tab:hover{color:var(--t1)}
+.tab .count{font-size:12px;color:var(--t3);font-variant-numeric:tabular-nums}
+.tab::after{
+  content:'';position:absolute;left:10px;right:10px;bottom:-1px;height:2px;
+  border-radius:2px;background:transparent;
+  transition:background var(--tr);
+}
+.tab:hover::after{background:rgba(255,255,255,.14)}
+.tab.active{color:var(--purple-text)}
+.tab.active .count{color:rgba(167,139,250,.65)}
+.tab.active::after{background:var(--purple)}
+.filter-tools{margin-left:auto;display:flex;align-items:center;gap:10px;padding-bottom:5px}
+.input-search{
+  display:flex;align-items:center;gap:8px;
+  width:230px;height:30px;padding:0 11px;
+  border-radius:var(--radius);
+  border:1px solid var(--border);
+  background:rgba(255,255,255,.03);
+  color:var(--t3);
+  transition:border-color var(--tr),box-shadow var(--tr);
+}
+.input-search:focus-within{
+  border-color:rgba(124,58,237,.55);
+  box-shadow:0 0 0 3px rgba(124,58,237,.16);
+}
+.input-search input{flex:1;min-width:0;color:var(--t1)}
+.input-search input::placeholder{color:var(--t3)}
+.kbd-hint{display:flex;align-items:center;gap:4px;color:var(--t3);opacity:.85;padding-right:2px}
+
+/* ---------- 变更中心：列表 ---------- */
+.list{margin-top:14px}
+.list-head{
+  display:grid;grid-template-columns:var(--cols);column-gap:12px;
+  padding:0 14px 9px;
+  font-size:12px;color:var(--t3);
+  border-bottom:1px solid rgba(255,255,255,.045);
+}
+.lh-right{text-align:right}
+.rows{display:flex;flex-direction:column}
+.row{
+  position:relative;
+  display:grid;grid-template-columns:var(--cols);column-gap:12px;align-items:center;
+  padding:11px 14px;
+  border-radius:6px;
+  border-bottom:1px solid rgba(255,255,255,.035);
+  transition:background var(--tr);
+  cursor:default;
+}
+.row:hover{background:var(--hover)}
+.row-main{display:flex;align-items:center;gap:10px;min-width:0}
+.row-main .dot{width:8px;height:8px}
+.key{
+  font-family:var(--mono);font-size:13px;color:var(--t1);
+  letter-spacing:-.1px;white-space:nowrap;
+  transition:color var(--tr);
+  cursor:pointer;padding:0;border-radius:4px;
+}
+.key:hover{color:var(--purple-text)}
+.key:focus-visible{outline:none;box-shadow:0 0 0 2px rgba(124,58,237,.5)}
+.row-title{
+  font-size:13px;color:var(--t2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  min-width:0;flex:0 1 auto;
+}
+.row-sub{display:flex;align-items:center;gap:8px;min-width:0;padding-left:18px;margin-top:7px;flex-wrap:nowrap;overflow:hidden}
+.badge{
+  display:inline-flex;align-items:center;height:22px;padding:0 9px;
+  border-radius:999px;
+  border:1px solid var(--border-strong);
+  font-size:12px;color:var(--t2);white-space:nowrap;
+}
+.badge-amber{border-color:rgba(245,158,11,.38);color:var(--amber-text);background:rgba(245,158,11,.07)}
+.badge-cyan{border-color:rgba(34,211,238,.35);color:#67e8f9;background:rgba(34,211,238,.06)}
+.owner{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--t2);white-space:nowrap}
+.avatar-xs{
+  width:17px;height:17px;border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,#7C3AED,#5b21b6);
+  color:#fff;font-size:9px;font-weight:600;flex:none;
+}
+.tags{display:flex;gap:6px;min-width:0;overflow:hidden}
+.tag{
+  font-family:var(--mono);font-size:11px;line-height:1;
+  color:var(--t2);
+  border:1px solid var(--border-strong);
+  border-radius:5px;padding:4px 7px;white-space:nowrap;
+}
+.cell-tokens{font-family:var(--mono);font-size:12px;color:var(--t3);text-align:right;font-variant-numeric:tabular-nums}
+.cell-time{font-size:12px;color:var(--t3);text-align:right;white-space:nowrap}
+.cell-open{display:flex;justify-content:flex-end}
+.open-cta{
+  opacity:0;
+  font-size:12px;color:var(--t2);white-space:nowrap;
+  padding:4px 8px;border-radius:6px;
+  background:rgba(255,255,255,.05);
+  border:1px solid var(--border-strong);
+  transition:opacity var(--tr),color var(--tr),border-color var(--tr);
+}
+.row:hover .open-cta{opacity:1;color:var(--purple-text);border-color:rgba(124,58,237,.4)}
+.list-foot{margin-top:14px;padding:0 14px;font-size:12px;color:var(--t3)}
+
+/* ---------- 工作区页 ---------- */
+.ws-tools{display:flex;align-items:center;gap:10px;margin-top:24px}
+.ws-pills{display:flex;gap:6px;margin-left:6px}
+.pill{
+  height:28px;padding:0 12px;border-radius:999px;
+  font-size:12px;color:var(--t2);
+  border:1px solid transparent;
+  transition:background var(--tr),color var(--tr),border-color var(--tr);
+}
+.pill:hover{background:var(--hover);color:var(--t1)}
+.pill.active{background:rgba(255,255,255,.07);border-color:var(--border-strong);color:var(--t1)}
+.ws-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px}
+.ws-card{
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:18px 20px 16px;
+  cursor:pointer;
+  transition:border-color var(--tr),transform var(--tr),box-shadow var(--tr),background var(--tr);
+}
+.ws-card:hover{
+  border-color:rgba(124,58,237,.5);
+  background:#0e0f12;
+  transform:translateY(-2px);
+  box-shadow:0 10px 28px rgba(0,0,0,.38);
+}
+.ws-card:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(124,58,237,.35)}
+.ws-top{display:flex;align-items:center;gap:10px}
+.ws-top h3{font-size:15px;font-weight:600;letter-spacing:-.1px}
+.ws-daemon{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t3)}
+.ws-slug{margin-top:4px;font-family:var(--mono);font-size:12px;color:var(--t3)}
+.ws-path{
+  margin-top:14px;display:flex;align-items:center;gap:7px;
+  font-family:var(--mono);font-size:12px;color:var(--t2);
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+}
+.ws-path .ic{color:var(--t3)}
+.ws-stack{display:flex;gap:6px;margin-top:11px;flex-wrap:wrap}
+.ws-stack .tag{font-family:var(--sans);padding:4px 8px}
+.ws-bottom{
+  display:flex;align-items:center;gap:8px;
+  margin-top:15px;padding-top:12px;
+  border-top:1px solid var(--border);
+  font-size:12px;color:var(--t3);
+}
+.ws-more{margin-left:auto;opacity:0;transition:opacity var(--tr)}
+.ws-card:hover .ws-more{opacity:1}
+.ws-pager{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:30px}
+.ws-pager .info{font-size:12px;color:var(--t3);font-variant-numeric:tabular-nums}
+.pager-btn{
+  width:28px;height:28px;border-radius:6px;
+  border:1px solid var(--border-strong);color:var(--t2);
+  display:flex;align-items:center;justify-content:center;
+  transition:background var(--tr),color var(--tr);
+}
+.pager-btn:hover:not(:disabled){background:var(--hover);color:var(--t1)}
+.pager-btn:disabled{opacity:.32;cursor:default}
+
+/* ---------- 会话页（三栏 IM） ---------- */
+.im{flex:1;display:flex;min-height:0}
+.im-left{
+  width:300px;flex:none;
+  border-right:1px solid var(--border);
+  background:var(--panel-2);
+  display:flex;flex-direction:column;min-height:0;
+}
+.im-left-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 14px 10px 18px;
+}
+.im-left-head .t{font-size:13px;font-weight:600}
+.im-left-head .n{font-size:12px;color:var(--t3);margin-left:7px;font-weight:400}
+.im-list{flex:1;overflow-y:auto;padding:2px 6px 14px 6px}
+.sess{
+  display:block;width:100%;text-align:left;
+  padding:10px 10px 10px 14px;
+  border-left:2px solid transparent;
+  border-radius:6px;
+  transition:background var(--tr),border-color var(--tr);
+}
+.sess:hover{background:var(--hover)}
+.sess.selected{border-left-color:var(--purple);background:rgba(255,255,255,.035)}
+.sess-line1{display:flex;align-items:center;gap:8px;min-width:0}
+.sess-title{
+  font-size:13px;color:var(--t2);font-weight:500;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
+  transition:color var(--tr);
+}
+.sess.selected .sess-title,.sess:hover .sess-title{color:var(--t1)}
+.sess-time{margin-left:auto;font-size:12px;color:var(--t3);white-space:nowrap;padding-left:8px}
+.sess-line2{display:flex;align-items:center;gap:8px;margin-top:6px;padding-left:16px}
+.chip{
+  font-family:var(--mono);font-size:11px;line-height:1;
+  color:var(--t2);
+  border:1px solid var(--border-strong);
+  border-radius:5px;padding:3px 6px;white-space:nowrap;
+}
+.sess-meta{font-size:12px;color:var(--t3);white-space:nowrap}
+
+.im-mid{flex:1;min-width:0;display:flex;flex-direction:column}
+.im-head{
+  display:flex;align-items:center;gap:12px;
+  padding:11px 20px;
+  border-bottom:1px solid var(--border);
+  background:rgba(9,10,11,.4);
+}
+.im-head h2{font-size:15px;font-weight:600;letter-spacing:-.1px;white-space:nowrap}
+.badge-engine{
+  font-family:var(--mono);font-size:11px;height:22px;
+  border-color:rgba(124,58,237,.42);color:#c0aff8;background:rgba(124,58,237,.12);
+}
+.im-actions{margin-left:auto;display:flex;gap:4px}
+
+.im-msgs{flex:1;overflow-y:auto;padding:22px 26px;display:flex;flex-direction:column;gap:20px}
+.msg-user{align-self:flex-end;max-width:62%}
+.msg-user .msg-when{font-size:12px;color:var(--t3);text-align:right;margin-bottom:5px;padding-right:2px}
+.bubble{
+  background:rgba(124,58,237,.20);
+  border-left:2px solid var(--purple);
+  border-radius:8px 8px 3px 8px;
+  padding:10px 14px;
+  font-size:13px;line-height:1.65;color:var(--t1);
+}
+.msg-agent{display:flex;gap:11px;max-width:86%}
+.av-bot{
+  width:26px;height:26px;border-radius:7px;flex:none;
+  display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,#7C3AED,#4c1d95);
+  border:1px solid rgba(255,255,255,.12);
+  color:#fff;font-size:11px;font-weight:600;
+}
+.msg-body{min-width:0}
+.msg-meta{display:flex;align-items:baseline;gap:9px;margin-bottom:5px}
+.msg-name{font-size:13px;font-weight:600}
+.msg-time{font-size:12px;color:var(--t3)}
+.msg-body p{font-size:13px;line-height:1.7;color:var(--t1)}
+.msg-body code{
+  font-family:var(--mono);font-size:12px;
+  background:rgba(255,255,255,.07);
+  border-radius:4px;padding:1.5px 5px;color:#d9ccfb;
+}
+.codeblock{
+  margin:10px 0;
+  background:#0a0b0e;
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:12px 14px;
+  font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--t2);
+  overflow-x:auto;
+}
+.codeblock .k{color:#a78bfa}
+.codeblock .s{color:#9ae6b4}
+.codeblock .c{color:var(--t3)}
+.toolcall{
+  display:inline-flex;align-items:center;gap:7px;
+  margin-top:10px;
+  font-family:var(--mono);font-size:12px;color:var(--t2);
+  border:1px solid var(--border-strong);
+  border-radius:999px;
+  padding:4px 11px;
+  background:rgba(255,255,255,.02);
+}
+.toolcall .ic{color:var(--cyan)}
+.toolcall .plus{color:var(--green)}
+.pass{color:var(--green);font-weight:600}
+
+.im-input{
+  display:flex;align-items:center;gap:10px;
+  padding:14px 20px 18px;
+  border-top:1px solid var(--border);
+  background:rgba(9,10,11,.45);
+}
+.im-input input{
+  flex:1;height:42px;padding:0 16px;
+  border-radius:10px;
+  border:1px solid var(--border);
+  background:rgba(255,255,255,.04);
+  transition:border-color var(--tr),box-shadow var(--tr);
+}
+.im-input input::placeholder{color:var(--t3)}
+.im-input input:focus{border-color:rgba(124,58,237,.55);box-shadow:0 0 0 3px rgba(124,58,237,.16)}
+.btn-send{
+  width:42px;height:42px;border-radius:10px;flex:none;
+  background:var(--purple);color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 1px 2px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.09);
+  transition:background var(--tr),transform var(--tr);
+}
+.btn-send:hover{background:var(--purple-hover)}
+.btn-send:active{transform:scale(.96)}
+
+.im-right{
+  width:260px;flex:none;
+  border-left:1px solid var(--border);
+  background:var(--panel-2);
+  padding:18px 18px 24px;
+  overflow-y:auto;
+}
+.im-right h3{font-size:13px;font-weight:600;margin-bottom:4px}
+.kv{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.045)}
+.kv .k{font-size:12px;color:var(--t3);white-space:nowrap}
+.kv .v{font-size:13px;color:var(--t1);white-space:nowrap;font-variant-numeric:tabular-nums}
+.kv .v.mono{font-size:12px}
+.panel-label{margin-top:18px;font-size:12px;color:var(--t3)}
+.change-link{
+  display:block;margin-top:8px;
+  font-family:var(--mono);font-size:12px;line-height:1.6;
+  color:var(--purple-text);word-break:break-all;
+  transition:color var(--tr);
+  cursor:pointer;text-align:left;
+}
+.change-link:hover{color:#c4b5fd;text-decoration:underline;text-underline-offset:3px}
+.agents{margin-top:8px;display:flex;flex-direction:column}
+.agent-row{display:flex;align-items:center;gap:9px;padding:7px 0}
+.agent-av{
+  width:20px;height:20px;border-radius:6px;flex:none;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:9px;font-weight:600;color:var(--t1);
+  background:rgba(255,255,255,.06);border:1px solid var(--border-strong);
+}
+.agent-row .name{font-size:13px}
+.agent-row .role{margin-left:auto;font-size:12px;color:var(--t3);display:flex;align-items:center;gap:6px}
+</style>
+</head>
+<body>
+
+<!-- ================= 内嵌 SVG 图标库 ================= -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5 16.2 16.2"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M7 20l-3.2-3.2M7 20l3.2-3.2M17 20V4M17 4l-3.2 3.2M17 4l3.2 3.2"/></symbol>
+    <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M14.5 6 8.5 12l6 6"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M12 5l-6 6M12 5l6 6"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 4v10.5M12 14.5 8 10.5M12 14.5l4-4M5 19h14"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="4" rx="1"/><path d="M6 9v9.2c0 .44.36.8.8.8h10.4a.8.8 0 0 0 .8-.8V9M10 13h4"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.3" class="f"/><circle cx="12" cy="12" r="1.3" class="f"/><circle cx="18.5" cy="12" r="1.3" class="f"/></symbol>
+    <symbol id="i-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M12 3.8a8.2 8.2 0 0 1 0 16.4z"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.9v2.7M12 18.4v2.7M2.9 12h2.7M18.4 12h2.7M5.6 5.6l1.9 1.9M16.5 16.5l1.9 1.9M18.4 5.6l-1.9 1.9M7.5 16.5l-1.9 1.9"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 7.2c0-.66.54-1.2 1.2-1.2h4.6l2 2h7c.66 0 1.2.54 1.2 1.2v8.6c0 .66-.54 1.2-1.2 1.2H5.2c-.66 0-1.2-.54-1.2-1.2z"/></symbol>
+  </defs>
+</svg>
+
+<!-- ================= 原型切换工具条 ================= -->
+<div class="proto" role="toolbar" aria-label="原型页面切换">
+  <span class="proto-logo">◆</span>
+  <div class="proto-group">
+    <button type="button" class="proto-btn active" data-goto="page-changes">变更中心</button>
+    <button type="button" class="proto-btn" data-goto="page-workspaces">工作区</button>
+    <button type="button" class="proto-btn" data-goto="page-sessions">会话</button>
+  </div>
+  <span class="proto-tag">Linear 式·高级极简</span>
+</div>
+
+<!-- ============================================================
+     页面 1 · 变更中心
+     ============================================================ -->
+<section id="page-changes" class="page page--active">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">◆</span>SillyHub</div>
+    <button type="button" class="search-pill">
+      <svg class="ic ic-14"><use href="#i-search"/></svg>
+      <span>搜索…</span>
+      <kbd>⌘K</kbd>
+    </button>
+    <div class="topbar-right">
+      <button type="button" class="icon-btn" title="切换主题">
+        <svg class="ic ic-16"><use href="#i-theme"/></svg>
+      </button>
+      <div class="avatar">Q</div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="page-head">
+      <div>
+        <h1>变更中心</h1>
+        <p class="page-sub">从设计到归档，每个变更的单一事实源</p>
+      </div>
+      <button type="button" class="btn btn-primary">
+        <svg class="ic ic-14"><use href="#i-plus"/></svg>新建变更
+      </button>
+    </div>
+
+    <!-- 筛选行：状态 tab + 搜索 + 排序 -->
+    <div class="filterbar">
+      <nav class="tabs">
+        <button type="button" class="tab active" data-tab-target="active">进行中 <span class="count">4</span></button>
+        <button type="button" class="tab" data-tab-target="archived">已归档 <span class="count">12</span></button>
+        <button type="button" class="tab" data-tab-target="quick">轻量修复 <span class="count">8</span></button>
+      </nav>
+      <div class="filter-tools">
+        <div class="input-search">
+          <svg class="ic ic-14"><use href="#i-search"/></svg>
+          <input type="text" placeholder="筛选变更…">
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm">
+          <svg class="ic ic-14"><use href="#i-sort"/></svg>最新
+        </button>
+        <span class="kbd-hint" title="跳转到变更中心"><kbd>G</kbd><kbd>C</kbd></span>
+      </div>
+    </div>
+
+    <!-- 无边框列表 -->
+    <div class="list">
+      <div class="list-head">
+        <span>变更</span>
+        <span>阶段</span>
+        <span>负责人</span>
+        <span class="lh-right">消耗</span>
+        <span class="lh-right">更新时间</span>
+        <span></span>
+      </div>
+      <div class="rows" id="changeRows">
+
+        <article class="row" data-tab="active">
+          <div>
+            <div class="row-main">
+              <span class="dot dot-purple dot-live" title="进行中 · 活跃"></span>
+              <button type="button" class="key">2026-09-25-observation-events-v3-r16sf</button>
+              <span class="row-title">观测事件通道 v3 · 重构</span>
+            </div>
+            <div class="row-sub">
+              <span class="tags">
+                <span class="tag">backend</span><span class="tag">frontend</span>
+              </span>
+            </div>
+          </div>
+          <div><span class="badge">实现计划</span></div>
+          <div class="owner"><span class="avatar-xs">Q</span>qinyi</div>
+          <div class="cell-tokens">2.4M tok·18次</div>
+          <div class="cell-time">5 分钟前</div>
+          <div class="cell-open"><span class="open-cta">打开 →</span></div>
+        </article>
+
+        <article class="row" data-tab="active">
+          <div>
+            <div class="row-main">
+              <span class="dot dot-purple dot-live" title="进行中 · 活跃"></span>
+              <button type="button" class="key">2026-09-26-probe-concurrent-rpc</button>
+              <span class="row-title">探测并发 RPC</span>
+            </div>
+            <div class="row-sub">
+              <span class="tags"><span class="tag">backend</span></span>
+            </div>
+          </div>
+          <div><span class="badge">代码扫描</span></div>
+          <div class="owner"><span class="avatar-xs">Q</span>qinyi</div>
+          <div class="cell-tokens">380K tok·4次</div>
+          <div class="cell-time">11 分钟前</div>
+          <div class="cell-open"><span class="open-cta">打开 →</span></div>
+        </article>
+
+        <article class="row" data-tab="active">
+          <div>
+            <div class="row-main">
+              <span class="dot dot-amber" title="待处理 2 项"></span>
+              <button type="button" class="key">2026-09-21-scan-docs-ops-panel</button>
+              <span class="row-title">扫描文档运维面板</span>
+            </div>
+            <div class="row-sub">
+              <span class="badge badge-amber">待处理 2 项</span>
+              <span class="tags"><span class="tag">frontend</span><span class="tag">docs</span></span>
+            </div>
+          </div>
+          <div><span class="badge">验证确认</span></div>
+          <div class="owner"><span class="avatar-xs">Q</span>qinyi</div>
+          <div class="cell-tokens">1.1M tok·12次</div>
+          <div class="cell-time">5 天前</div>
+          <div class="cell-open"><span class="open-cta">打开 →</span></div>
+        </article>
+
+        <article class="row" data-tab="active">
+          <div>
+            <div class="row-main">
+              <span class="dot dot-purple" title="进行中"></span>
+              <button type="button" class="key">2026-09-20-scope-audit-cross-repo-platform</button>
+              <span class="row-title">跨仓库范围对账</span>
+            </div>
+            <div class="row-sub">
+              <span class="tags"><span class="tag">sillyspec</span></span>
+            </div>
+          </div>
+          <div><span class="badge">验证确认</span></div>
+          <div class="owner"><span class="avatar-xs">Q</span>qinyi</div>
+          <div class="cell-tokens">960K tok·9次</div>
+          <div class="cell-time">6 天前</div>
+          <div class="cell-open"><span class="open-cta">打开 →</span></div>
+        </article>
+
+        <article class="row" data-tab="quick" hidden>
+          <div>
+            <div class="row-main">
+              <span class="dot dot-gray" title="已归档"></span>
+              <button type="button" class="key">2026-09-26-thin-badge-survives-archive</button>
+              <span class="row-title">轻量徽章归档后存活</span>
+            </div>
+            <div class="row-sub">
+              <span class="badge badge-cyan">轻量变更</span>
+              <span class="tags"><span class="tag">frontend</span></span>
+            </div>
+          </div>
+          <div><span class="badge">已归档</span></div>
+          <div class="owner"><span class="avatar-xs">Q</span>qinyi</div>
+          <div class="cell-tokens">210K tok·3次</div>
+          <div class="cell-time">昨天</div>
+          <div class="cell-open"><span class="open-cta">打开 →</span></div>
+        </article>
+
+        <article class="row" data-tab="archived" hidden>
+          <div>
+            <div class="row-main">
+              <span class="dot dot-gray" title="已归档"></span>
+              <button type="button" class="key">2026-09-26-sillyspec-command-queue</button>
+              <span class="row-title">平台同步命令 FIFO 排队</span>
+            </div>
+            <div class="row-sub">
+              <span class="tags"><span class="tag">daemon</span></span>
+            </div>
+          </div>
+          <div><span class="badge">已归档</span></div>
+          <div class="owner"><span class="avatar-xs">Q</span>qinyi</div>
+          <div class="cell-tokens">780K tok·11次</div>
+          <div class="cell-time">昨天</div>
+          <div class="cell-open"><span class="open-cta">打开 →</span></div>
+        </article>
+
+        <article class="row" data-tab="archived" hidden>
+          <div>
+            <div class="row-main">
+              <span class="dot dot-gray" title="已归档"></span>
+              <button type="button" class="key">2026-09-04-conflict-resolve-entry</button>
+              <span class="row-title">冲突裁决入口</span>
+            </div>
+            <div class="row-sub">
+              <span class="tags"><span class="tag">backend</span><span class="tag">daemon</span></span>
+            </div>
+          </div>
+          <div><span class="badge">已归档</span></div>
+          <div class="owner"><span class="avatar-xs">Q</span>qinyi</div>
+          <div class="cell-tokens">1.9M tok·25次</div>
+          <div class="cell-time">9 月 4 日</div>
+          <div class="cell-open"><span class="open-cta">打开 →</span></div>
+        </article>
+
+        <article class="row" data-tab="archived" hidden>
+          <div>
+            <div class="row-main">
+              <span class="dot dot-gray" title="已归档"></span>
+              <button type="button" class="key">2026-09-07-agent-liveness-states</button>
+              <span class="row-title">智能体五态徽章</span>
+            </div>
+            <div class="row-sub">
+              <span class="tags"><span class="tag">frontend</span></span>
+            </div>
+          </div>
+          <div><span class="badge">已归档</span></div>
+          <div class="owner"><span class="avatar-xs">Q</span>qinyi</div>
+          <div class="cell-tokens">1.3M tok·16次</div>
+          <div class="cell-time">9 月 21 日</div>
+          <div class="cell-open"><span class="open-cta">打开 →</span></div>
+        </article>
+
+      </div>
+    </div>
+  </main>
+</section>
+
+<!-- ============================================================
+     页面 2 · 工作区
+     ============================================================ -->
+<section id="page-workspaces" class="page">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">◆</span>SillyHub</div>
+    <button type="button" class="search-pill">
+      <svg class="ic ic-14"><use href="#i-search"/></svg>
+      <span>搜索…</span>
+      <kbd>⌘K</kbd>
+    </button>
+    <div class="topbar-right">
+      <button type="button" class="icon-btn" title="切换主题">
+        <svg class="ic ic-16"><use href="#i-theme"/></svg>
+      </button>
+      <div class="avatar">Q</div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="page-head">
+      <div>
+        <h1>工作区</h1>
+        <p class="page-sub">接入守护进程的本地代码库</p>
+      </div>
+      <button type="button" class="btn btn-primary">
+        <svg class="ic ic-14"><use href="#i-plus"/></svg>添加工作区
+      </button>
+    </div>
+
+    <div class="ws-tools">
+      <div class="input-search">
+        <svg class="ic ic-14"><use href="#i-search"/></svg>
+        <input type="text" placeholder="搜索工作区…">
+      </div>
+      <div class="ws-pills">
+        <button type="button" class="pill active" data-ws-filter="all">全部</button>
+        <button type="button" class="pill" data-ws-filter="online">在线</button>
+        <button type="button" class="pill" data-ws-filter="offline">离线</button>
+      </div>
+    </div>
+
+    <div class="ws-grid" id="wsGrid">
+
+      <article class="ws-card" data-ws-status="online" tabindex="0">
+        <div class="ws-top">
+          <h3>multi-agent-platform</h3>
+          <span class="ws-daemon"><span class="dot dot-green"></span>在线</span>
+        </div>
+        <div class="ws-slug">multi-agent-platform</div>
+        <div class="ws-path">
+          <svg class="ic ic-14"><use href="#i-folder"/></svg>
+          ~/IdeaProjects/multi-agent-platform
+        </div>
+        <div class="ws-stack">
+          <span class="tag">Next.js</span><span class="tag">FastAPI</span><span class="tag">Node</span>
+        </div>
+        <div class="ws-bottom">
+          <span>4 个进行中变更 · 最后扫描 11 分钟前</span>
+          <button type="button" class="icon-btn ws-more" title="更多操作">
+            <svg class="ic ic-14"><use href="#i-more"/></svg>
+          </button>
+        </div>
+      </article>
+
+      <article class="ws-card" data-ws-status="offline" tabindex="0">
+        <div class="ws-top">
+          <h3>sillyhub-website</h3>
+          <span class="ws-daemon"><span class="dot dot-gray"></span>离线</span>
+        </div>
+        <div class="ws-slug">sillyhub-website</div>
+        <div class="ws-path">
+          <svg class="ic ic-14"><use href="#i-folder"/></svg>
+          ~/IdeaProjects/sillyhub-website
+        </div>
+        <div class="ws-stack">
+          <span class="tag">Astro</span>
+        </div>
+        <div class="ws-bottom">
+          <span>0 个进行中变更 · 最后扫描 3 天前</span>
+          <button type="button" class="icon-btn ws-more" title="更多操作">
+            <svg class="ic ic-14"><use href="#i-more"/></svg>
+          </button>
+        </div>
+      </article>
+
+      <article class="ws-card" data-ws-status="online" tabindex="0">
+        <div class="ws-top">
+          <h3>ppm-demo</h3>
+          <span class="ws-daemon"><span class="dot dot-green"></span>在线</span>
+        </div>
+        <div class="ws-slug">ppm-demo</div>
+        <div class="ws-path">
+          <svg class="ic ic-14"><use href="#i-folder"/></svg>
+          ~/IdeaProjects/ppm-demo
+        </div>
+        <div class="ws-stack">
+          <span class="tag">Vue3</span><span class="tag">Vite</span>
+        </div>
+        <div class="ws-bottom">
+          <span>3 个进行中变更 · 最后扫描 2 小时前</span>
+          <button type="button" class="icon-btn ws-more" title="更多操作">
+            <svg class="ic ic-14"><use href="#i-more"/></svg>
+          </button>
+        </div>
+      </article>
+
+      <article class="ws-card" data-ws-status="pending" tabindex="0">
+        <div class="ws-top">
+          <h3>docs-portal</h3>
+          <span class="ws-daemon"><span class="dot dot-hollow"></span>待接入</span>
+        </div>
+        <div class="ws-slug">docs-portal</div>
+        <div class="ws-path">
+          <svg class="ic ic-14"><use href="#i-folder"/></svg>
+          ~/IdeaProjects/docs-portal
+        </div>
+        <div class="ws-stack">
+          <span class="tag">VitePress</span>
+        </div>
+        <div class="ws-bottom">
+          <span>0 个进行中变更 · 最后扫描 —</span>
+          <button type="button" class="icon-btn ws-more" title="更多操作">
+            <svg class="ic ic-14"><use href="#i-more"/></svg>
+          </button>
+        </div>
+      </article>
+
+    </div>
+
+    <div class="ws-pager">
+      <button type="button" class="pager-btn" disabled title="上一页">
+        <svg class="ic ic-14"><use href="#i-chev-l"/></svg>
+      </button>
+      <span class="info">第 1 / 3 页 · 共 10 个</span>
+      <button type="button" class="pager-btn" title="下一页">
+        <svg class="ic ic-14"><use href="#i-chev-r"/></svg>
+      </button>
+    </div>
+  </main>
+</section>
+
+<!-- ============================================================
+     页面 3 · 会话（三栏 IM）
+     ============================================================ -->
+<section id="page-sessions" class="page page--im">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">◆</span>SillyHub</div>
+    <button type="button" class="search-pill">
+      <svg class="ic ic-14"><use href="#i-search"/></svg>
+      <span>搜索…</span>
+      <kbd>⌘K</kbd>
+    </button>
+    <div class="topbar-right">
+      <button type="button" class="icon-btn" title="切换主题">
+        <svg class="ic ic-16"><use href="#i-theme"/></svg>
+      </button>
+      <div class="avatar">Q</div>
+    </div>
+  </header>
+
+  <div class="im">
+
+    <!-- 左栏：会话列表 -->
+    <aside class="im-left">
+      <div class="im-left-head">
+        <div><span class="t">会话</span><span class="n">6</span></div>
+        <button type="button" class="icon-btn" title="新建会话">
+          <svg class="ic ic-14"><use href="#i-plus"/></svg>
+        </button>
+      </div>
+      <div class="im-list" id="sessList">
+
+        <button type="button" class="sess selected">
+          <div class="sess-line1">
+            <span class="dot dot-purple dot-live"></span>
+            <span class="sess-title">观测事件通道 v3 · 第 3 轮</span>
+            <span class="sess-time">2 分钟前</span>
+          </div>
+          <div class="sess-line2">
+            <span class="chip">glm-4.7</span>
+            <span class="sess-meta">3 轮 · qinyi</span>
+          </div>
+        </button>
+
+        <button type="button" class="sess">
+          <div class="sess-line1">
+            <span class="dot dot-amber"></span>
+            <span class="sess-title">探测并发 RPC 调试</span>
+            <span class="sess-time">11 分钟前</span>
+          </div>
+          <div class="sess-line2">
+            <span class="chip">claude-opus-4.5</span>
+            <span class="sess-meta">7 轮 · qinyi</span>
+          </div>
+        </button>
+
+        <button type="button" class="sess">
+          <div class="sess-line1">
+            <span class="dot dot-purple"></span>
+            <span class="sess-title">群聊 · 变更中心三人组</span>
+            <span class="sess-time">1 小时前</span>
+          </div>
+          <div class="sess-line2">
+            <span class="chip">3 个智能体</span>
+            <span class="sess-meta">12 轮 · qinyi</span>
+          </div>
+        </button>
+
+        <button type="button" class="sess">
+          <div class="sess-line1">
+            <span class="dot dot-gray"></span>
+            <span class="sess-title">thin-badge 修复</span>
+            <span class="sess-time">昨天</span>
+          </div>
+          <div class="sess-line2">
+            <span class="chip">glm-4.7</span>
+            <span class="sess-meta">4 轮 · qinyi</span>
+          </div>
+        </button>
+
+        <button type="button" class="sess">
+          <div class="sess-line1">
+            <span class="dot dot-gray"></span>
+            <span class="sess-title">命令排队重构</span>
+            <span class="sess-time">昨天</span>
+          </div>
+          <div class="sess-line2">
+            <span class="chip">claude-sonnet-4.5</span>
+            <span class="sess-meta">9 轮 · qinyi</span>
+          </div>
+        </button>
+
+        <button type="button" class="sess">
+          <div class="sess-line1">
+            <span class="dot dot-red"></span>
+            <span class="sess-title">规范同步排查</span>
+            <span class="sess-time">3 天前</span>
+          </div>
+          <div class="sess-line2">
+            <span class="chip">codex</span>
+            <span class="sess-meta">5 轮 · qinyi</span>
+          </div>
+        </button>
+
+      </div>
+    </aside>
+
+    <!-- 中栏：当前会话 -->
+    <div class="im-mid">
+      <div class="im-head">
+        <h2>观测事件通道 v3 · 第 3 轮</h2>
+        <span class="badge badge-engine">glm-4.7</span>
+        <div class="im-actions">
+          <button type="button" class="icon-btn" title="导出">
+            <svg class="ic ic-16"><use href="#i-export"/></svg>
+          </button>
+          <button type="button" class="icon-btn" title="归档">
+            <svg class="ic ic-16"><use href="#i-archive"/></svg>
+          </button>
+          <button type="button" class="icon-btn" title="更多">
+            <svg class="ic ic-16"><use href="#i-more"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="im-msgs">
+
+        <div class="msg-user">
+          <div class="msg-when">14:02</div>
+          <div class="bubble">把观测事件的 payload 拆成 channel + envelope 两层</div>
+        </div>
+
+        <div class="msg-agent">
+          <div class="av-bot">G</div>
+          <div class="msg-body">
+            <div class="msg-meta">
+              <span class="msg-name">GLM-4.7</span>
+              <span class="msg-time">14:03</span>
+            </div>
+            <p>已完成拆分，<code>observation_event</code> 表新增 <code>channel</code> 列，envelope 层由 DaemonDispatcher 统一写入：</p>
+            <pre class="codeblock"><span class="c">-- migration 0042 · observation v3</span>
+<span class="k">ALTER TABLE</span> observation_event
+  <span class="k">ADD COLUMN</span> channel TEXT <span class="k">NOT NULL DEFAULT</span> <span class="s">'agent'</span>;
+<span class="k">CREATE INDEX</span> idx_obs_event_channel
+  <span class="k">ON</span> observation_event (channel, created_at);</pre>
+            <div class="toolcall">
+              <svg class="ic ic-14"><use href="#i-gear"/></svg>
+              已读 daemon.ts <span class="plus">+215</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="msg-user">
+          <div class="msg-when">14:05</div>
+          <div class="bubble">跑一下相关测试</div>
+        </div>
+
+        <div class="msg-agent">
+          <div class="av-bot">G</div>
+          <div class="msg-body">
+            <div class="msg-meta">
+              <span class="msg-name">GLM-4.7</span>
+              <span class="msg-time">14:06</span>
+            </div>
+            <p>41 个用例全绿 <span class="pass">✓</span></p>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="im-input">
+        <input type="text" placeholder="给 GLM-4.7 发送消息…">
+        <button type="button" class="btn-send" title="发送">
+          <svg class="ic ic-16"><use href="#i-arrow-up"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 右栏：会话信息 -->
+    <aside class="im-right">
+      <h3>会话信息</h3>
+      <div class="kv"><span class="k">引擎</span><span class="v mono">glm-4.7</span></div>
+      <div class="kv"><span class="k">已进行</span><span class="v">3 轮</span></div>
+      <div class="kv"><span class="k">累计</span><span class="v mono">184K tok</span></div>
+
+      <div class="panel-label">关联变更</div>
+      <button type="button" class="change-link">2026-09-25-observation-events-v3-r16sf</button>
+
+      <div class="panel-label">参与智能体</div>
+      <div class="agents">
+        <div class="agent-row">
+          <span class="agent-av">G</span>
+          <span class="name">glm-4.7</span>
+          <span class="role"><span class="dot dot-green" style="width:7px;height:7px"></span>在线</span>
+        </div>
+        <div class="agent-row">
+          <span class="agent-av">CX</span>
+          <span class="name">codex</span>
+          <span class="role"><span class="dot dot-gray" style="width:7px;height:7px"></span>待命</span>
+        </div>
+        <div class="agent-row">
+          <span class="agent-av">CL</span>
+          <span class="name">claude-opus-4.5</span>
+          <span class="role"><span class="dot dot-gray" style="width:7px;height:7px"></span>待命</span>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+</section>
+
+<script>
+/* ============ 原型交互：页面切换 / 状态 tab 过滤 / 筛选胶囊 / 会话选中 ============ */
+(function () {
+  'use strict';
+
+  /* 页面切换 */
+  var protoBtns = document.querySelectorAll('.proto [data-goto]');
+  protoBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      protoBtns.forEach(function (b) { b.classList.toggle('active', b === btn); });
+      document.querySelectorAll('.page').forEach(function (page) {
+        page.classList.toggle('page--active', page.id === btn.dataset.goto);
+      });
+      window.scrollTo(0, 0);
+    });
+  });
+
+  /* 变更中心：状态 tab 过滤（进行中 / 已归档 / 轻量修复） */
+  var tabs = document.querySelectorAll('[data-tab-target]');
+  var rows = document.querySelectorAll('#changeRows .row');
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      tabs.forEach(function (t) { t.classList.toggle('active', t === tab); });
+      var target = tab.dataset.tabTarget;
+      rows.forEach(function (row) {
+        row.hidden = (row.dataset.tab !== target);
+      });
+    });
+  });
+
+  /* 工作区：守护进程状态筛选胶囊（全部 / 在线 / 离线） */
+  var pills = document.querySelectorAll('[data-ws-filter]');
+  var cards = document.querySelectorAll('#wsGrid .ws-card');
+  pills.forEach(function (pill) {
+    pill.addEventListener('click', function () {
+      pills.forEach(function (p) { p.classList.toggle('active', p === pill); });
+      var filter = pill.dataset.wsFilter;
+      cards.forEach(function (card) {
+        card.style.display = (filter === 'all' || card.dataset.wsStatus === filter) ? '' : 'none';
+      });
+    });
+  });
+
+  /* 会话列表：选中态切换（默认选中第 1 条） */
+  var sessions = document.querySelectorAll('#sessList .sess');
+  sessions.forEach(function (sess) {
+    sess.addEventListener('click', function () {
+      sessions.forEach(function (s) { s.classList.toggle('selected', s === sess); });
+    });
+  });
+})();
+</script>
+</body>
+</html>

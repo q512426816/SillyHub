@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-25-spec-sync-pg-chunk",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-25-spec-sync-pg-chunk:flow:FR-01",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_spec_sync_chunk.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-spec-sync-pg-chunk"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-25-spec-sync-pg-chunk:flow:FR-03",
+      "tests": [
+        "app/modules/spec_workspace/tests/test_spec_sync_chunk.py",
+        "app/modules/spec_workspace/tests/test_sync_incremental.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-25-spec-sync-pg-chunk"
+    }
+  ]
+}

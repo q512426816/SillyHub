@@ -57,8 +57,8 @@ export function UnderlineNav<T extends string>({
             aria-selected={active}
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(item.key)}
-            className={`relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors ${
-              active ? "font-semibold" : "font-medium hover:bg-muted/60"
+            className={`relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors duration-100 ${
+              active ? "font-semibold" : "font-medium hover:bg-muted"
             }`}
             style={{
               color: active ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))",

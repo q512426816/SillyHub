@@ -1261,6 +1261,57 @@ class SessionUsageRead(BaseModel):
     by_model: list[SessionUsageModelItemRead] = []  # input+output 降序；「未记录」恒末位
 
 
+# ── Session turn outline（2026-09-27-session-fast-replay task-01 / FR-01）─────
+# GET /api/daemon/sessions/{session_id}/turn-outline 响应 schema：一次下发该会话
+# 全部轮次摘要（轻列 + 首条 user_input / 首条非空 stdout 的截断文本），供前端
+# 打开会话时并行装配轮次导航（无 500 条截断，替代逐页翻日志的反演目录）。
+# 摘要截断口径：prompt_summary 前 60 字、answer_summary 前 120 字（按字符）。
+
+
+class TurnOutlineItemRead(BaseModel):
+    """turn-outline 单轮摘要项（FR-01）。
+
+    轻列字段直映 ``AgentRun`` 既有列（**不含** agent_profile_snapshot /
+    error_detail 大 JSON，design 做法概述①「轻列」）；``auto_resume_of`` 从
+    ``AgentRun.metadata_`` 的 ``{"auto_resume_of": "<源 run id>"}` 抽出（续跑轮
+    徽标数据源，普通轮 None）；``prompt_summary`` / ``answer_summary`` 为窗口
+    函数抽出的每 run 首条 channel=user_input / 首条非空 channel=stdout 日志的
+    截断文本（后端日志通道实际枚举 user_input/stdout/tool_call/stderr，无
+    "reply" 通道——assistant 文本即 stdout，见 sdk_pipeline._channel_from_event_type），
+    无对应日志的行为 None（不伪造）。
+    """
+
+    run_id: uuid.UUID
+    # 轮号：created_at 升序 1 起（与 runs 端点 created_at 排序口径同源）。
+    seq: int
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    status: str
+    error_code: str | None = None
+    # 轮次发送者显示名（runs 端点同款 left join users 填充；旧 run 行 None）。
+    sender_name: str | None = None
+    # 轮引擎锚点（前端「从此分叉」入口门控数据源；存量轮 None）。
+    engine_anchor: str | None = None
+    # 自动续跑轮的源 run id（metadata_.auto_resume_of 抽出；普通轮 None）。
+    auto_resume_of: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    prompt_summary: str | None = None
+    answer_summary: str | None = None
+
+
+class SessionTurnOutlineRead(BaseModel):
+    """turn-outline 响应体（FR-01）：session_id + 总轮数 + 全量轮次摘要列表。
+
+    空会话返回 ``total_turns=0`` + 空 ``items``（不报错，D-003 空态口径）。
+    """
+
+    session_id: uuid.UUID
+    total_turns: int
+    items: list[TurnOutlineItemRead] = []
+
+
 # ── Change-write task queue (task-09, FR-08 / D-004@v1) ─────────────────────
 # daemon-client workspace 的 change 代写任务队列回执：daemon 轮询
 # GET /runtimes/{rid}/pending-change-writes → claim(token)→ 本地写 → complete 回执。

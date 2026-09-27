@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-hover-polish",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "工作区 diff 混入 visual-gap-fix 改动（范围归属）",
+      "evidence": "未提交改动叠加显示，非本变更改结构——design 槽1 已补范围归属声明",
+      "location": "workspace-card.tsx"
+    },
+    {
+      "severity": "P3",
+      "title": "underline-nav 未补 duration-100",
+      "evidence": "与原型 .1s 偏差 50ms——已补",
+      "location": "underline-nav.tsx:61"
+    },
+    {
+      "severity": "P3",
+      "title": "design 槽1 事实描述偏差",
+      "evidence": "旧代码为三件套非 bg-muted/40——描述已修正",
+      "location": "design.md"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-09-27T01:30:37+00:00"
+}

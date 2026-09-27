@@ -114,6 +114,21 @@ export function formatDurationZh(ms: number | null | undefined): string {
   return `${Math.max(1, Math.round(ms / 60_000))} 分钟`;
 }
 
+/** 相对时间（原型 issue-side 口径）：N 分钟/小时/天前；超 30 天回退完整日期。 */
+function formatRelativeZh(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const diffMs = Date.now() - d.getTime();
+  const m = Math.floor(diffMs / 60_000);
+  if (m < 1) return "刚刚";
+  if (m < 60) return `${m} 分钟前`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} 小时前`;
+  const day = Math.floor(h / 24);
+  if (day <= 30) return `${day} 天前`;
+  return d.toLocaleDateString("zh-CN");
+}
+
 /** 起止时间悬浮段格式（原型「08-28 10:12」）：本地时区 MM-DD HH:mm；
  * 畸形串防御性降级「—」（对齐 change-activity-badge 的畸形时间戳先例）。 */
 function formatMmDdHm(iso: string): string {
@@ -135,10 +150,13 @@ function formatMmDdHm(iso: string): string {
 function UsageExecCell({
   usage,
   showTurns = false,
+  compact = false,
 }: {
   usage?: UsageSummaryRead | null;
   /** quicklog 列表次行追加「N 轮」（totals.num_turns），本页不启用。 */
   showTurns?: boolean;
+  /** 2026-09-27 visual-align-2：右列单行模式（原型 .issue-side .cost 口径）。 */
+  compact?: boolean;
 }) {
   if (usage === undefined) return null;
   if (usage === null) {
@@ -146,6 +164,18 @@ function UsageExecCell({
   }
   // 进行中 = started_at 有值且 finished_at 缺（R-05 时间三元组语义）
   const running = Boolean(usage.started_at) && !usage.finished_at;
+  if (compact) {
+    const tokenTotalC =
+      usage.totals.input_tokens +
+      usage.totals.output_tokens +
+      usage.totals.cache_read_tokens +
+      usage.totals.cache_creation_tokens;
+    return (
+      <span className="whitespace-nowrap">
+        {formatTokensCompact(tokenTotalC)} tok · {formatCount(usage.totals.api_requests)} 次
+      </span>
+    );
+  }
   // token 总量 = totals 四维之和（input + output + cache_read + cache_creation）
   const tokenTotal =
     usage.totals.input_tokens +
@@ -441,29 +471,44 @@ export default function ChangesPage({ params }: Props) {
   // blocked → error；待办 → attention(clock)；其余进行中 → open 开圆。
   const changeRowState = (c: ChangeSummary): StateLabelVariant => {
     if (isTerminalChange(c)) return "merged";
+    // 2026-09-27：轻量出身（后端 is_thin 投影，含 stage=thin 与 quick 分流）行图标=琥珀闪电。
+    if (c.is_thin === true || c.current_stage === "thin") return "attention";
     if (c.status === "blocked") return "error";
     if (c.pending_review) return "attention";
     return "open";
   };
 
   // 负责人渲染（task-05 / FR-04，2026-08-16-change-owner-from-token）三态语义保留：
-  // owner_name → 用户名；owner_id → UUID 前 8 位 mono 降级；双空 → "—"。
-  const renderOwner = (c: ChangeSummary): ReactNode => {
+  // owner 头像（原型 issue-side 20px 圆形首字符）：owner_name → 首字符；owner_id → 前 1 位 mono；双空 → "—"。
+  const renderOwnerAvatar = (c: ChangeSummary): ReactNode => {
     if (c.owner_name) {
-      return <span className="text-xs text-foreground">{c.owner_name}</span>;
+      return (
+        <span
+          title={`负责人 ${c.owner_name}`}
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-primary"
+          style={{ backgroundColor: "var(--color-brand-50)" }}
+        >
+          {c.owner_name.slice(0, 1).toUpperCase()}
+        </span>
+      );
     }
     if (c.owner_id) {
       return (
-        <span className="font-mono text-[11px] text-primary">
-          {c.owner_id.slice(0, 8)}
+        <span
+          title={`负责人 ${c.owner_id.slice(0, 8)}`}
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-mono text-[10px] text-primary"
+          style={{ backgroundColor: "var(--color-brand-50)" }}
+        >
+          {c.owner_id.slice(0, 1).toUpperCase()}
         </span>
       );
     }
     return <span className="text-xs text-muted-foreground">—</span>;
   };
 
-  // 单行渲染（FR-03 IssueRow 两段式）：主行 = 待办徽标 + key mono 链接 + 标题；
-  // 副行 = 阶段徽标 + 活动徽标 + 组件 + 执行用量；右侧 = 负责人 + 更新时间 + hover 删除。
+  // 单行渲染（2026-09-27 visual-align-2：对齐原型 issue-row 排版）：
+  // 主行 = 标题 14px/600 链接色 + 待办胶囊；副行 = key mono 12px 灰 · 组件胶囊 · 活动徽标；
+  // 右列 = 阶段胶囊 + 头像 + 消耗 mono + 相对时间（min-width 右对齐，原型 .issue-side 口径）。
   const renderChangeRow = (c: ChangeSummary): ReactNode => (
     <IssueRow
       key={c.id}
@@ -474,46 +519,60 @@ export default function ChangesPage({ params }: Props) {
       }}
       title={
         <>
-          {renderTodoBadge(c)}
           <Link
             href={`/workspaces/${workspaceId}/changes/${c.id}`}
             prefetch={false}
-            className="font-mono text-xs text-primary hover:underline"
+            className="text-sm font-semibold leading-5 text-primary hover:underline"
           >
-            {c.change_key}
+            {c.title || c.change_key}
           </Link>
-          {c.title && (
-            <span className="text-xs text-muted-foreground">{c.title}</span>
+          {/* 2026-09-27-change-list-is-thin：轻量出身徽章（后端 is_thin 投影）——
+              归档轻量行「轻量」与状态图标并存（对齐详情页双徽章口径）。 */}
+          {c.is_thin === true && (
+            <StateLabel variant="attention">轻量</StateLabel>
           )}
+          {renderTodoBadge(c)}
         </>
       }
       meta={
+        <>
+          <span className="font-mono text-xs text-muted-foreground">
+            {c.change_key}
+          </span>
+          {c.affected_components.length > 0 &&
+            c.affected_components.map((comp) => (
+              <span
+                key={comp}
+                className="rounded-full border px-1.5 font-mono text-xs leading-4 text-muted-foreground"
+                style={{ borderColor: "hsl(var(--border))" }}
+              >
+                {comp}
+              </span>
+            ))}
+          <ChangeActivityBadge
+            currentStepStatus={c.step_progress?.current_step_status ?? null}
+            lastPushedAt={c.last_pushed_at ?? null}
+          />
+        </>
+      }
+      right={
         <>
           <ChangeStepBadge
             stage={c.current_stage ?? "scan"}
             stepProgress={c.step_progress ?? null}
           />
-          <ChangeActivityBadge
-            currentStepStatus={c.step_progress?.current_step_status ?? null}
-            lastPushedAt={c.last_pushed_at ?? null}
-          />
-          {c.affected_components.length > 0 && (
-            <span className="font-mono">{c.affected_components.join(", ")}</span>
-          )}
-          <UsageExecCell usage={c.usage} />
-        </>
-      }
-      right={
-        <>
-          <span className="whitespace-nowrap">{renderOwner(c)}</span>
-          <span className="whitespace-nowrap tabular-nums">
-            {new Date(c.updated_at).toLocaleString("zh-CN", {
-              year: "numeric",
-              month: "2-digit",
-              day: "2-digit",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+          {renderOwnerAvatar(c)}
+          <span
+            style={{ minWidth: 112 }}
+            className="whitespace-nowrap text-right font-mono text-xs text-muted-foreground"
+          >
+            <UsageExecCell usage={c.usage} compact />
+          </span>
+          <span
+            style={{ minWidth: 72 }}
+            className="whitespace-nowrap text-right text-xs text-muted-foreground"
+          >
+            {formatRelativeZh(c.updated_at)}
           </span>
         </>
       }
@@ -687,7 +746,13 @@ export default function ChangesPage({ params }: Props) {
 
       {/* 工具条（FR-03）：一行式筛选——搜索/阶段/聚焦（进行中）+ 搜索/重置 */}
       {tab !== "quicklog" && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div
+          className="flex flex-wrap items-center gap-2 rounded-lg border px-2.5 py-2"
+          style={{
+            borderColor: "hsl(var(--border))",
+            backgroundColor: "hsl(var(--muted))",
+          }}
+        >
           <Input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
@@ -786,7 +851,10 @@ export default function ChangesPage({ params }: Props) {
               </div>
             )}
           </div>
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between border-t pt-2" style={{ borderColor: "hsl(var(--border))" }}>
+            <span className="text-xs text-muted-foreground">
+              显示 {items.length} / {total} 条
+            </span>
             <Pagination
               current={page}
               pageSize={pageSize}

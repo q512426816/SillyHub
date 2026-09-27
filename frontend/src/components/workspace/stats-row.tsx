@@ -30,19 +30,15 @@ function StatCard({
   const content = (
     <div
       className={cn(
-        "flex items-center gap-3 bg-card px-4 py-3 transition",
+        // 2026-09-27 visual-gap-fix：换 GitHub Insights 竖排（label 上/mono 大数字下）
+        "flex flex-col gap-1 bg-card px-4 py-3 transition",
         clickable
           ? "hover:bg-muted/50"
           : "",
       )}
     >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-        <Icon className="size-5" />
-      </span>
-      <div className="min-w-0">
-        <p className="text-[11px] text-muted-foreground">{label}</p>
-        <p className="text-lg font-semibold leading-tight text-foreground">{value}</p>
-      </div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="font-mono text-2xl font-semibold leading-8 text-foreground">{value}</p>
     </div>
   );
 
@@ -68,7 +64,6 @@ export function WorkspaceStatsRow({
     <section
       className={cn(
         "grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border lg:grid-cols-4",
-        "shadow-sm",
       )}
     >
       <StatCard

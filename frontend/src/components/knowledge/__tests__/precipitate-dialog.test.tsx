@@ -152,6 +152,7 @@ function changeItem(p: Partial<Record<string, unknown>> & { change_key: string }
     status: "archived",
     location: "repo",
     change_type: null,
+    is_thin: false,
     affected_components: [],
     owner_id: null,
     updated_at: "2026-09-17T09:00:00Z",

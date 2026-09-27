@@ -22,6 +22,7 @@ change/tests/conftest.py（task-08）注册 platform_change_progress + platform_
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,7 +49,12 @@ async def _make_workspace(session: AsyncSession) -> Workspace:
 
 
 async def _make_change(
-    session: AsyncSession, workspace_id: uuid.UUID, change_key: str, stage: str = "plan"
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    change_key: str,
+    stage: str = "plan",
+    change_type: str | None = None,
+    created_at: datetime | None = None,
 ) -> Change:
     change = Change(
         id=uuid.uuid4(),
@@ -60,6 +66,8 @@ async def _make_change(
         path=f"changes/{change_key}",
         current_stage=stage,
         owner_id=None,
+        change_type=change_type,
+        **({"created_at": created_at} if created_at is not None else {}),
     )
     session.add(change)
     await session.commit()
@@ -638,3 +646,130 @@ async def test_enrich_summaries_last_pushed_at_none_when_no_row_or_null(
     # join 命中但列值 NULL：投影路径走通，last_pushed_at 仍 None（不造值）
     assert by_key["lp-nullcol"].current_stage == "plan"
     assert by_key["lp-nullcol"].last_pushed_at is None
+
+
+# ── is_thin 出身投影（2026-09-27-change-list-is-thin，口径=前端 lib/thin-lineage.ts）──
+
+
+def _thin_flow_payload(steps: list[dict], status: str = "archived") -> dict:
+    """归档 flow-thin 形态的 latest_progress（steps=flow 子步、status=archived 触发终态覆盖）。"""
+    return {
+        "project": {"name": "demo"},
+        "changes": [{"name": "x", "current_stage": "archived", "status": status}],
+        "stages": [],
+        "steps": steps,
+        "batch_progress": [],
+        "approvals": [],
+    }
+
+
+def _flow_steps(stages: list[str]) -> list[dict]:
+    return [
+        {"name": f"flow-step-{i}", "stage": st, "status": "completed", "ordering": i}
+        for i, st in enumerate(stages)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_is_thin_archived_flow_thin_hit_by_steps_fallback(db_session: AsyncSession) -> None:
+    """归档 flow-thin（archived+feature+steps 全 archive）→ 分支③兜底命中（实测样本形态）。"""
+    ws = await _make_workspace(db_session)
+    c = await _make_change(db_session, ws.id, "2026-09-27-hover-polish", stage="thin")
+    await _make_progress_row(
+        db_session,
+        ws.id,
+        "2026-09-27-hover-polish",
+        _thin_flow_payload(_flow_steps(["archive", "archive", "archive"])),
+    )
+    out = await ChangeService(db_session).enrich_summaries([c])
+    assert out[0].is_thin is True
+    assert out[0].current_stage == "archived"  # 终态覆盖后仍命中（steps 兜底）
+
+
+@pytest.mark.asyncio
+async def test_is_thin_standard_change_with_stage_traces_false(db_session: AsyncSession) -> None:
+    """标准变更（steps 含 plan/execute 痕迹）→ 不命中。"""
+    ws = await _make_workspace(db_session)
+    c = await _make_change(db_session, ws.id, "standard-change", stage="plan")
+    await _make_progress_row(
+        db_session,
+        ws.id,
+        "standard-change",
+        _thin_flow_payload(_flow_steps(["archive", "plan", "execute"]), status="in_progress"),
+    )
+    out = await ChangeService(db_session).enrich_summaries([c])
+    assert out[0].is_thin is False
+
+
+@pytest.mark.asyncio
+async def test_is_thin_active_stage_thin_no_progress_row(db_session: AsyncSession) -> None:
+    """active thin（stage=thin、无 progress 行）→ 分支①命中（row 现值判定路径）。"""
+    ws = await _make_workspace(db_session)
+    c = await _make_change(db_session, ws.id, "active-thin", stage="thin")
+    out = await ChangeService(db_session).enrich_summaries([c])
+    assert out[0].is_thin is True
+
+
+@pytest.mark.asyncio
+async def test_is_thin_quick_after_live_window_true(db_session: AsyncSession) -> None:
+    """平台 quick 分流（quick + created_at>=2026-09-25）→ 分支②命中。"""
+    ws = await _make_workspace(db_session)
+    c = await _make_change(
+        db_session,
+        ws.id,
+        "quick-after-live",
+        stage="scan",
+        change_type="quick",
+        created_at=datetime(2026, 9, 26, tzinfo=UTC),
+    )
+    out = await ChangeService(db_session).enrich_summaries([c])
+    assert out[0].is_thin is True
+
+
+@pytest.mark.asyncio
+async def test_is_thin_historical_quick_before_window_false(db_session: AsyncSession) -> None:
+    """历史 quick（created_at<2026-09-25）→ 时间窗拦截不误标。"""
+    ws = await _make_workspace(db_session)
+    c = await _make_change(
+        db_session,
+        ws.id,
+        "quick-before-live",
+        stage="quick",
+        change_type="quick",
+        created_at=datetime(2026, 9, 20, tzinfo=UTC),
+    )
+    out = await ChangeService(db_session).enrich_summaries([c])
+    assert out[0].is_thin is False
+
+
+@pytest.mark.asyncio
+async def test_is_thin_empty_steps_not_fallback_hit(db_session: AsyncSession) -> None:
+    """progress 命中但 steps 为空 → 分支③不命中（steps 非空守卫）。"""
+    ws = await _make_workspace(db_session)
+    c = await _make_change(db_session, ws.id, "no-steps-change", stage="verify")
+    await _make_progress_row(
+        db_session,
+        ws.id,
+        "no-steps-change",
+        _thin_flow_payload([]),
+    )
+    out = await ChangeService(db_session).enrich_summaries([c])
+    assert out[0].is_thin is False
+
+
+@pytest.mark.asyncio
+async def test_is_thin_invalid_stage_items_align_frontend_semantics(
+    db_session: AsyncSession,
+) -> None:
+    """评审 F1 对齐：steps 非空但全无有效 stage（畸形行）→ 视为无痕迹命中
+    （与前端 thin-lineage.ts 的 stage ?? '' 语义一致）。"""
+    ws = await _make_workspace(db_session)
+    c = await _make_change(db_session, ws.id, "malformed-steps-change", stage="archived")
+    await _make_progress_row(
+        db_session,
+        ws.id,
+        "malformed-steps-change",
+        _thin_flow_payload([{"name": "x", "status": "completed"}]),
+    )
+    out = await ChangeService(db_session).enrich_summaries([c])
+    assert out[0].is_thin is True

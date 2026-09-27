@@ -47,3 +47,26 @@
 
 - 发现：2026-09-27 verify 阶段（2026-09-26-core-pages-visual-redesign）。noAI 扫描 deps(auto-js) 模块子集用 node --test 直跑 `frontend/e2e/auth.spec.ts`（playwright）与 `frontend/src/styles/themes.test.ts`（vitest describe/it）→ 必然假红；真实口径 vitest 956/958 全绿。
 - 处置：**已修复（R19，2026-09-27 用户授权）**——sillyspec verify-postcheck.js buildDepsBatches 按 .ts/.js 文件内容检测项目测试框架 import（vitest/@playwright/jest/bun:test）分流到项目运行器批（jsProject），node:test/纯 node 协议照旧 node --test；修复后主仓 verify 实测全绿、工具相关测试 17/17。known_failures 两条豁免保留至 sillyspec 仓提交 R19 后可删。
+
+## 处置记录（2026-09-27）
+
+断档恢复已于本日执行完毕（见「恢复与修复路径」节）；「长期修复建议」三条中可工具侧
+落地的两条本轮修毕（sillyspec 仓工作树，未提交）：
+
+1. **CLI 连接缺失显眼告警 ✅**：`triggerSync` 未连接分支新增 `warnPlatformNotConnectedDaily`
+   ——完成/步进时刻（complete.js 五个调用点传 `opts.completion`）每日至多一次的显眼
+   告警（「本命令的进度与 spec 树不会同步到平台」+ `platform connect` 恢复指引），
+   marker 落 runtimeRoot 跨进程节流；渲染/诊断类调用点不告警（保住顶层别名 vs run
+   前缀的字节级输出平价契约，cli-top-level-aliases 17/17 实证）。本地独立使用仍是
+   合法默认态（sync.js「不每步」契约不破）。
+2. **.runtime 嵌套回环防护 ✅**：`resolveSpecDir` 上溯遇 `<…>/.runtime/.sillyspec`
+   残骸候选跳过、继续上溯真根（合法布局恒为 `<root>/.sillyspec`，`.runtime` 在其
+   内层）——8-15 遗留形态不再可被命中。
+   测试：`test/spec-sync-not-connected-notice.test.mjs` 3/3 + spec-dir 五套件回归
+   + stage-burst/spec-sync/flow 全家 51 例全绿。
+
+**延后（daemon 侧设计项，另立变更）**：spec 推送心跳/定时触发（pending_push 周期
+重试）；全量 tar 分块上传（主仓无增量清单缓存）。附节 noAI vitest/playwright 分流
+（R19）已在 sillyspec 工作树（verify-postcheck.js）。
+
+遗留（无害脏数据）：manifest_ghost=165 平台侧清理，文件自述后续轻量变更处理。归档。

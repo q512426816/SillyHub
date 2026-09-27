@@ -741,6 +741,7 @@ beforeEach(() => {
     path: ".sillyspec/changes/2026-08-23-sessions-workspace-hub",
     affected_components: ["frontend"],
     change_type: null,
+    is_thin: false,
     owner_id: "u-me",
   });
   mocks.listAgentSessions.mockResolvedValue({

@@ -173,6 +173,11 @@ async def test_timeline_golden_aggregation(db_session, tmp_path: Path, monkeypat
     ]
     assert result.tasks[0].commit_sha == "4aed0e824"
     assert result.tasks[2].commit_sha is None
+    # 勾选时刻推断（2026-09-27-timeline-task-time）：checked 0→2 一拍覆盖两任务；
+    # task-03 未勾 → time=None（前端按不显示处理）。
+    assert result.tasks[0].time == "2026-09-26T07:02:00Z"
+    assert result.tasks[1].time == "2026-09-26T07:02:00Z"
+    assert result.tasks[2].time is None
     # token 边界（评审 P3 收口）：消息含 task-012 不得被 task-01 误锚。
     # 金样本 message 只含 task-01/task-02——task-01 的锚存在已证边界正确
     # （若用子串匹配，task-012 形态会误锚；此处由下方专项用例钉住）。
@@ -269,3 +274,36 @@ async def test_timeline_task_token_boundary_no_cross_match(
     # task-01 未被 task-012 的消息误锚；无锚 None。
     task01 = next(t for t in result.tasks if t.id == "task-01")
     assert task01.commit_sha is None
+
+
+async def test_timeline_task_time_stage_prefix_and_cursor_break(db_session, tmp_path: Path) -> None:
+    """勾选时刻推断（2026-09-27-timeline-task-time）：stage 前缀 detail 兼容
+    + 游标衔接逐拍赋值 + 观测起点首勾断裂（from≠0 全 None）。"""
+    spec_root = tmp_path / "case-a" / "spec-root6"
+    _seed_change_dir(spec_root)
+    ws = await _make_ws(db_session, spec_root)
+    change = await _make_change(db_session, ws)
+    # watcher 现行推送形态（2026-09-27-watcher-push-endpoint）：stage 并入 detail 前缀。
+    await _add_event(db_session, ws.id, "2026-09-26T07:01:00Z", "task-done", "tasks · checked 0→1")
+    await _add_event(db_session, ws.id, "2026-09-26T07:02:00Z", "task-done", "tasks · checked 1→2")
+    await db_session.commit()
+
+    result = await ChangeTimelineQueryService(db_session).get_change_timeline(
+        ws.id, change.id, uuid.uuid4()
+    )
+    assert result.tasks[0].time == "2026-09-26T07:01:00Z"
+    assert result.tasks[1].time == "2026-09-26T07:02:00Z"
+    assert result.tasks[2].time is None  # 未勾不推断时刻
+
+    # 断裂语义：首拍 from=1 ≠ 游标 0（观测起点丢首拍）→ 停止推断全 None。
+    spec_root2 = tmp_path / "case-b" / "spec-root7"
+    _seed_change_dir(spec_root2)
+    ws2 = await _make_ws(db_session, spec_root2)
+    change2 = await _make_change(db_session, ws2)
+    await _add_event(db_session, ws2.id, "2026-09-26T07:03:00Z", "task-done", "tasks · checked 1→2")
+    await db_session.commit()
+
+    result2 = await ChangeTimelineQueryService(db_session).get_change_timeline(
+        ws2.id, change2.id, uuid.uuid4()
+    )
+    assert all(t.time is None for t in result2.tasks)

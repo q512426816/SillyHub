@@ -1,0 +1,182 @@
+diff --git a/.sillyspec/changes/2026-09-27-hover-polish/design.md b/.sillyspec/changes/2026-09-27-hover-polish/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-hover-polish/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T01:26:02.698Z
++---
++# 设计记录（Design Record）— 2026-09-27-hover-polish
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-hover-polish 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 -->
++三处 hover 对齐原型口径：IssueRow 与 UnderlineNav 的 hover:bg-muted/60→hover:bg-muted（实色，原型 .issue-row:hover{background:var(--canvas)} 无透明度叠加）+transition-colors 补 duration-100（原型 .1s）；workspace-card 去 hover:border-brand-300（原型 repo-row:hover 仅背景无紫边）+bg-muted/40→bg-muted+操作组浮现补 duration-100。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-hover-polish 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 -->
++无签名变化，纯 className 修改三个组件文件。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-hover-polish 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 -->
++四问全 n/a：纯 CSS 类，无状态/写路径/作用域引入。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-hover-polish 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 -->
++最大风险：muted 实色在 dark 主题的悬浮对比（dark muted=zinc-700 深灰，实色悬浮为深一档——与原型 canvas 语义一致方向）；已放弃：自定义 canvas 色阶 token——三主题 muted 即语义等价物，不新增阶。
+
+diff --git a/.sillyspec/changes/2026-09-27-hover-polish/flow-state.yaml b/.sillyspec/changes/2026-09-27-hover-polish/flow-state.yaml
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-hover-polish/flow-state.yaml
+@@ -0,0 +1,17 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 05218185395f1b6b94a0557de0af22ab7fae78d7
++updatedAt: '2026-09-27T01:28:25.631Z'
++gate_summary: >-
++  test: skipped
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260927012816\test-result.json —
++  跳过原因：变更与测试面零关系（35 个变更文件无自身测试、无 import 依赖测试、无 FR 关联绑定）——动态子集空，不硬跑全量（防超时/预存失败面）。｜lint: passed ← cd backend && uv run
++  ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd
++  ../sillyhub-daemon && pnpm typecheck（8.9s）｜门文件 35 个
++
+
+diff --git a/.sillyspec/changes/2026-09-27-hover-polish/proposal.md b/.sillyspec/changes/2026-09-27-hover-polish/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-hover-polish/proposal.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T01:26:02.697Z
++---
++# 提案书（Proposal）— 2026-09-27-hover-polish
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:f8b2173ae44ca3189ba265cf29007bb662c1638664c85e2a55a59c5b36c7ab35:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-hover-polish 留痕重锚 -->
++任务原话转写：列表悬浮效果对齐原型：原型口径=实色浅灰背景+100ms 过渡+无边框变色（.issue-row:hover/.repo-row:hover{background:var(--canvas)}）；线上问题=透明度叠加（bg-muted/60、/40）悬浮发淡不均 + 工作区行 hover 紫边框为原型所无。
++成功标准：
++- 变更中心与工作区列表行 hover 为实色 muted 背景+transition-colors 100ms 级过渡，无紫色边框
++- 标题链接 hover 下划线保持
++- hover 操作浮现过渡平滑
++- 相关测试全绿 + tsc 0 + 部署后浏览器 hover 态截图核对
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:5358f546d1f15b4b4153ded8b36d7dd225550c4547c6e453f49adc2587fa4aa9:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-hover-polish 留痕重锚 -->
++按成功标准机械推导，共 4 条验收面：
++1. 变更中心与工作区列表行 hover 为实色 muted 背景+transition-colors 100ms 级过渡，无紫色边框
++2. 标题链接 hover 下划线保持
++3. hover 操作浮现过渡平滑
++4. 相关测试全绿 + tsc 0 + 部署后浏览器 hover 态截图核对
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:2cfb624046a809e2fdc7a0ac655b01253a1ccbbf1d86c62bc961922143c43c50:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-hover-polish 留痕重锚 -->
++1. 变更中心与工作区列表行 hover 为实色 muted 背景+transition-colors 100ms 级过渡，无紫色边框
++2. 标题链接 hover 下划线保持
++3. hover 操作浮现过渡平滑
++4. 相关测试全绿 + tsc 0 + 部署后浏览器 hover 态截图核对
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-27-hover-polish/requirements.md b/.sillyspec/changes/2026-09-27-hover-polish/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-hover-polish/requirements.md
+@@ -0,0 +1,42 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T01:26:02.698Z
++---
++# 需求规格（Requirements）— 2026-09-27-hover-polish
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 变更中心与工作区列表行 hover 为实色 muted 背景+transition-colors 1
++Given 系统就绪
++When 变更中心与工作区列表行 hover 为实色 muted 背景+transition-colors 100ms 级过渡，无紫色边框
++Then 行为符合本条标准描述
++
++### FR-02: 标题链接 hover 下划线保持
++Given 系统就绪
++When 标题链接 hover 下划线保持
++Then 行为符合本条标准描述
++
++### FR-03: hover 操作浮现过渡平滑
++Given 系统就绪
++When hover 操作浮现过渡平滑
++Then 行为符合本条标准描述
++
++### FR-04: 相关测试全绿 + tsc 0 + 部署后浏览器 hover 态截图核对
++Given 测试 相关模块就绪
++When 相关测试全绿 + tsc 0 + 部署后浏览器 hover 态截图核对
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 -->
++frontend/src/components/primer + workspace-card + 两列表页测试 95/95（hover 类变化不影响行为断言）
++
++<!--AGENT:测试绑定FR-02 -->
++同上套件 + 部署后浏览器 hover 态截图核对
++
++<!--AGENT:测试绑定FR-03 -->
++同 FR-01 套件（95/95）+ tsc 我方三文件零错误（flow-diagram.tsx 报错为并行会话新文件非本变更）
++
++<!--AGENT:测试绑定FR-04 -->
++不适用：hover 视觉态为浏览器人工核对，非自动化测试面
+
+diff --git a/.sillyspec/changes/2026-09-27-hover-polish/tasks.md b/.sillyspec/changes/2026-09-27-hover-polish/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-hover-polish/tasks.md
+@@ -0,0 +1,14 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T01:26:02.698Z
++---
++# 任务注册表（Tasks）— 2026-09-27-hover-polish
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: 变更中心与工作区列表行 hover 为实色 muted 背景+transition-colors 100ms 级过渡，无紫色边框
++- [ ] task-02: 标题链接 hover 下划线保持
++- [ ] task-03: hover 操作浮现过渡平滑
++- [ ] task-04: 相关测试全绿 + tsc 0 + 部署后浏览器 hover 态截图核对

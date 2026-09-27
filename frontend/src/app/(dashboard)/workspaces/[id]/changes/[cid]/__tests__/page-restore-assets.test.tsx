@@ -14,7 +14,7 @@
 // 卡片组件全部 stub（只验页面挂载与传参，组件内部由各自套件覆盖），范式对齐
 // 同目录 page-team-toggle.test.tsx。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChangeDetailPage from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
@@ -103,6 +103,7 @@ function makeChange(over: Partial<ChangeRead> = {}): ChangeRead {
     status: "in_progress",
     location: "active",
     change_type: "quick",
+    is_thin: false,
     affected_components: [],
     updated_at: "2026-09-26T10:00:00Z",
     stages: {},
@@ -140,9 +141,11 @@ afterEach(() => {
 describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets）", () => {
   it("FR-02：thin 阶段标题旁显示 STATUS_BADGE「轻量变更」徽章", async () => {
     renderPage(makeChange());
-    expect(await screen.findByText("轻量变更")).toBeInTheDocument();
-    // 说明卡标题带 ◈ 前缀，与徽章 exact 文本互不干扰（两条各命中一次）
-    expect(screen.getByText("◈ 轻量变更")).toBeInTheDocument();
+    // 2026-09-27-thin-display-fix：轻量流程条也含该文案——先等页面渲染（说明卡），
+    // 徽章断言 scoped 到标题区
+    expect(await screen.findByText("◈ 轻量变更")).toBeInTheDocument();
+    const h1 = within(screen.getByRole("heading", { level: 1 }));
+    expect(h1.getByText("轻量变更")).toBeInTheDocument();
   });
 
   it("FR-01：aside 同时挂载沉淀资产卡与观测事件卡", async () => {
@@ -202,6 +205,84 @@ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets�
       screen.queryByTestId("change-step-timeline-card"),
     ).toBeNull();
   });
+
+  // 2026-09-27-timeline-coexist：归档时 unregisterChange 终态一致化补种 3 行
+  // 同一时间戳 steps，原互斥挂载会把真实留痕时间线卡顶掉（归档后真实数据
+  // 不可见）。钉住共存：steps 非空 + 观测数据在 → 两卡同时渲染。
+  it("共存（2026-09-27-timeline-coexist）：归档补种 steps 后真实留痕时间线卡不被顶掉", async () => {
+    vi.mocked(getChangeTimeline).mockResolvedValue({
+      change_key: "2026-09-26-restore-fixture",
+      born_at: "2026-09-26T10:00:00.000Z",
+      events: [
+        {
+          ts: "2026-09-26T10:01:00Z",
+          kind: "task-done",
+          label: "勾选数 0→1",
+          rule: "watcher",
+          severity: "info",
+          provisional: true,
+          commit_title: null,
+        },
+      ],
+      tasks: [
+        { id: "task-01", checked: true, desc: "共存钉子", commit_sha: "ab12cd34" },
+      ],
+      stats: {
+        event_count: 1,
+        commit_count: 1,
+        checked: 1,
+        total: 1,
+        wall_clock_s: 600,
+      },
+    });
+    renderPage(
+      makeChange({
+        current_stage: "archive",
+        status: "archived",
+        location: "archive",
+        steps: [
+          {
+            name: "decision-distill 决策提炼",
+            stage: "archive",
+            status: "completed",
+            output: null,
+            completed_at: "2026-09-27T13:05:00Z",
+            ordering: 0,
+            wait_reason: null,
+            kind: "step",
+          },
+          {
+            name: "extract-module-impact 与归档语义收尾",
+            stage: "archive",
+            status: "completed",
+            output: null,
+            completed_at: "2026-09-27T13:05:00Z",
+            ordering: 1,
+            wait_reason: null,
+            kind: "step",
+          },
+          {
+            name: "确认归档",
+            stage: "archive",
+            status: "completed",
+            output: null,
+            completed_at: "2026-09-27T13:05:00Z",
+            ordering: 2,
+            wait_reason: null,
+            kind: "step",
+          },
+        ],
+      }),
+    );
+    // 补种的 3 行步骤时间线照常渲染
+    expect(
+      await screen.findByTestId("change-step-timeline-card"),
+    ).toBeInTheDocument();
+    // 真实留痕时间线卡共存（不再被互斥顶掉）
+    expect(
+      await screen.findByTestId("change-timeline-card"),
+    ).toBeInTheDocument();
+  });
 });
 
 // ── 轻量出身标识归档存活（2026-09-26-thin-badge-survives-archive / FR-01~02）──
@@ -226,7 +307,9 @@ describe("归档轻量出身双徽章", () => {
       }),
     );
     expect(await screen.findByText("已归档")).toBeInTheDocument();
-    expect(screen.getByText("轻量变更")).toBeInTheDocument();
+    // 2026-09-27-thin-display-fix：流程条也含「轻量变更」文案——徽章断言 scoped 到标题区
+    const h1 = within(screen.getByRole("heading", { level: 1 }));
+    expect(h1.getByText("轻量变更")).toBeInTheDocument();
   });
 
   it("FR-02：2026-09-25 前历史 quick 归档仅单「已归档」徽章（不误标）", async () => {
@@ -240,7 +323,9 @@ describe("归档轻量出身双徽章", () => {
       }),
     );
     expect(await screen.findByText("已归档")).toBeInTheDocument();
-    expect(screen.queryByText("轻量变更")).toBeNull();
+    // 标题区不误标（流程条判定已带时间窗，历史 quick 不触发轻量流程条）
+    const h1 = within(screen.getByRole("heading", { level: 1 }));
+    expect(h1.queryByText("轻量变更")).toBeNull();
   });
 
   it("FR-01 评审 P1 收窄补齐：location=archive 而非 stage=archived 时同样双徽章", async () => {
@@ -254,6 +339,7 @@ describe("归档轻量出身双徽章", () => {
       }),
     );
     expect(await screen.findByText("已归档")).toBeInTheDocument();
-    expect(screen.getByText("轻量变更")).toBeInTheDocument();
+    const h1 = within(screen.getByRole("heading", { level: 1 }));
+    expect(h1.getByText("轻量变更")).toBeInTheDocument();
   });
 });

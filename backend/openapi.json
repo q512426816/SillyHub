@@ -16722,7 +16722,7 @@
           "daemon"
         ],
         "summary": "List Session Runs",
-        "description": "List the AgentRuns of an owned session, each carrying error_detail (task-07 / FR-02).\n\ndesign §7.4：响应 run 项含 ``error_detail``（模型层 ModelError；成功 / 无错误\nrun 为 None），供前端拉历史与当前 run 错误。归属 / 存在性复用\n``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与其它\nsession 读端点同一道闸门。查询内联在此（service.py 非本任务 allowed_path），\n与 get_session_detail 的 run 查询同款。",
+        "description": "List the AgentRuns of an owned session, each carrying error_detail (task-07 / FR-02).\n\ndesign §7.4：响应 run 项含 ``error_detail``（模型层 ModelError；成功 / 无错误\nrun 为 None），供前端拉历史与当前 run 错误。归属 / 存在性复用\n``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与其它\nsession 读端点同一道闸门。查询内联在此（service.py 非本任务 allowed_path），\n与 get_session_detail 的 run 查询同款。\n\n2026-09-27-session-fast-replay task-02 / FR-03：runs 瘦身 + gzip——\n\n- ``agent_profile_snapshot`` 剥离 ``system_prompt`` 键（浅拷贝 dict.pop，\n  不动库数据）：前端实证仅消费 name/provider/model 等轻键，system_prompt\n  原文（可达数 KB/轮 × 500 轮）是 runs payload 膨胀主因；其余字段语义\n  零变化（design 接口契约④「结构不变仅去键」）。\n- 响应走 gzip（抄本文件 /logs 的 gzip 路径：Accept-Encoding 协商 + 1KB\n  阈值 + 线程池压缩，长会话 500 轮 × JSON 文本压缩比 ~10x）。返回\n  ``Response`` 直写（response_model 仅保留 openapi 文档面，FastAPI 对\n  Response 返回值跳过再序列化，行为与 /logs 一致）。",
         "operationId": "list_session_runs_api_daemon_sessions__session_id__runs_get",
         "parameters": [
           {
@@ -16747,6 +16747,50 @@
                     "$ref": "#/components/schemas/SessionRunRead"
                   },
                   "title": "Response List Session Runs Api Daemon Sessions  Session Id  Runs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/turn-outline": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Get Session Turn Outline",
+        "description": "Return the full turn outline of an owned session (task-01 / FR-01).\n\n一次响应返回该会话**全部**轮次摘要（无 500 条截断，runs 端点的截断由本\n端点接管全量导航职责）：每轮含 run_id / seq（created_at 升序 1 起）/\nstatus / 起止时间 / error_code / sender_name / engine_anchor /\nauto_resume_of / tokens 轻列，以及 prompt_summary（首条 user_input 前 60 字）\n与 answer_summary（首条非空 stdout 前 120 字）。归属 / 存在性复用\n``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与\nruns / logs 端点同一道闸门；查询内联在此（service.py 非本任务\nallowed_path，对齐 list_session_runs 先例）。空会话返回 total_turns=0 +\n空 items（不报错）。\n\n缓存：进程内 LRU（键=session_id，容量 128），指纹 =（runs 总数, max(run.\ncreated_at), max(log.timestamp), max(log.id)）——命中零重算直接回缓存值；\n每请求仍先过归属闸门（缓存的是会话数据投影，不是授权结论）。",
+        "operationId": "get_session_turn_outline_api_daemon_sessions__session_id__turn_outline_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTurnOutlineRead"
                 }
               }
             }
@@ -16818,7 +16862,7 @@
           "daemon"
         ],
         "summary": "Get Session Logs",
-        "description": "Return all logs of a session, aggregated across AgentRuns (D-005@v1).\n\nRead-only. Ownership / existence follow the same resource-hiding 404 as\nthe other session endpoints (no existence leak for missing / cross-user).\nResponse items reuse the existing ``AgentRunLogEntry`` DTO; ``run_id`` is\npreserved so the frontend can delineate turn boundaries.\n\nql-20260827-018：客户端 Accept-Encoding 含 gzip 且正文超过阈值时返回 gzip\n编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本\n压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与\nContent-Encoding，无需调用方改动。\n\n群聊体验 quick（2026-09-02）：``before``/``q``/``limit`` 分页与搜索参数\n（语义见各 Query description）；缺省时调用形态与原端点逐字节等价\n（after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读\n放行普通群成员读 logs，见 get_group_accessible_session）。\n\n2026-09-16-logs-cursor-tiebreaker / D-001@v1：``before_id``——与\n``before`` 组合的复合游标 id tiebreaker（``(ts < before) OR (ts ==\nbefore AND id < before_id)``），同 timestamp 批次向上翻页在批内逐页\n可达且边界零重叠；缺省时行为与原 ``<=`` 游标逐字节等价（旧客户端零\n回归）。``before_id`` 仅作为 ``before`` 的 tiebreaker 存在，无锚点\ntimestamp 无消费语义——单独传（无 ``before``）422 fail-explicit，\n不静默忽略（参数组合 422 写法对齐 session_team.py:420-436 /\nmachines.py:488-494 先例）。",
+        "description": "Return all logs of a session, aggregated across AgentRuns (D-005@v1).\n\nRead-only. Ownership / existence follow the same resource-hiding 404 as\nthe other session endpoints (no existence leak for missing / cross-user).\nResponse items reuse the existing ``AgentRunLogEntry`` DTO; ``run_id`` is\npreserved so the frontend can delineate turn boundaries.\n\nql-20260827-018：客户端 Accept-Encoding 含 gzip 且正文超过阈值时返回 gzip\n编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本\n压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与\nContent-Encoding，无需调用方改动。\n\n群聊体验 quick（2026-09-02）：``before``/``q``/``limit`` 分页与搜索参数\n（语义见各 Query description）；缺省时调用形态与原端点逐字节等价\n（after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读\n放行普通群成员读 logs，见 get_group_accessible_session）。\n\n2026-09-16-logs-cursor-tiebreaker / D-001@v1：``before_id``——与\n``before`` 组合的复合游标 id tiebreaker（``(ts < before) OR (ts ==\nbefore AND id < before_id)``），同 timestamp 批次向上翻页在批内逐页\n可达且边界零重叠；缺省时行为与原 ``<=`` 游标逐字节等价（旧客户端零\n回归）。``before_id`` 仅作为 ``before`` 的 tiebreaker 存在，无锚点\ntimestamp 无消费语义——单独传（无 ``before``）422 fail-explicit，\n不静默忽略（参数组合 422 写法对齐 session_team.py:420-436 /\nmachines.py:488-494 先例）。\n\n2026-09-27-session-fast-replay task-02 / FR-02：``run_id`` 单轮直达 +\n``slim`` 精简模式——\n\n- ``run_id``：命中校验（run 存在且 ``agent_session_id`` 匹配，否则 404\n  资源隐藏），只返回该 run 全部日志（timestamp,id 升序，上限 2000 条），\n  供前端「未加载轮直达跳转」单次往返取整轮（替代 40ms interval 逐页\n  循环）；与 ``before``/``after`` 游标互斥（同传 422 fail-explicit），\n  可与 ``q``/``limit`` 组合（在单轮内收窄）；\n- ``slim``：tool 通道（channel=tool_call）content_redacted 超 2000 字符\n  截断到 2000 并置 ``content_truncated=true``（AgentRunLogEntry 新可选\n  字段，旧路径不置恒 None，旧调用方零变化）；截断条目需全文走新增单条\n  端点 GET /sessions/{session_id}/logs/{log_id}。落库原文不动（slim 是\n  传输层语义，审计 / 导出全文照旧）。",
         "operationId": "get_session_logs_api_daemon_sessions__session_id__logs_get",
         "parameters": [
           {
@@ -16889,6 +16933,25 @@
             "description": "与 before 组合的复合游标 id tiebreaker（2026-09-16-logs-cursor-tiebreaker）：同 timestamp 批次逐页可达；仅与 before 同时传，单独传 before_id 而无 before 将 422"
           },
           {
+            "name": "run_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "单轮直达（2026-09-27-session-fast-replay）：只返回该 run 的日志（timestamp,id 升序，上限 2000 条）；run 不存在或不属于该会话 404；与 before/after 游标互斥（同传 422）",
+              "title": "Run Id"
+            },
+            "description": "单轮直达（2026-09-27-session-fast-replay）：只返回该 run 的日志（timestamp,id 升序，上限 2000 条）；run 不存在或不属于该会话 404；与 before/after 游标互斥（同传 422）"
+          },
+          {
             "name": "q",
             "in": "query",
             "required": false,
@@ -16902,10 +16965,10 @@
                   "type": "null"
                 }
               ],
-              "description": "内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before 组合",
+              "description": "内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before/run_id 组合",
               "title": "Q"
             },
-            "description": "内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before 组合"
+            "description": "内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before/run_id 组合"
           },
           {
             "name": "limit",
@@ -16926,6 +16989,18 @@
               "title": "Limit"
             },
             "description": "最新 N 条语义（群聊体验 quick）：按 timestamp desc 取 N 再反转升序返回；无 before=全量最新 N，有 before=游标之前最新 N。缺省=全量（服务层上限 5000，维持既有行为）"
+          },
+          {
+            "name": "slim",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "精简模式（2026-09-27-session-fast-replay）：tool 通道（tool_call）content_redacted 超 2000 字符截断到 2000 并置 content_truncated=true；需全文走 GET /sessions/{id}/logs/{log_id}。缺省 false 行为零变化",
+              "default": false,
+              "title": "Slim"
+            },
+            "description": "精简模式（2026-09-27-session-fast-replay）：tool 通道（tool_call）content_redacted 超 2000 字符截断到 2000 并置 content_truncated=true；需全文走 GET /sessions/{id}/logs/{log_id}。缺省 false 行为零变化"
           }
         ],
         "responses": {
@@ -16937,6 +17012,60 @@
                   "type": "array",
                   "items": {},
                   "title": "Response Get Session Logs Api Daemon Sessions  Session Id  Logs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/logs/{log_id}": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Get Session Log Entry",
+        "description": "Return one full log entry of an owned session (task-02 / FR-02 / FR-07).\n\nslim 模式的按需全文消费端点：截断条目（content_truncated=true）展开时单条\n拉取渲染，非截断条目零额外请求。归属闸门与 runs / logs 同款\n（``get_agent_session``，missing / 跨用户 / 软删均 404 不泄露存在性）；\n行级命中校验经 log → run → session 链（``AgentRun.agent_session_id`` 匹配，\n防跨会话读），日志不存在或不属于该会话同样 404。只读端点，无状态交互。",
+        "operationId": "get_session_log_entry_api_daemon_sessions__session_id__logs__log_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "log_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Log Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunLogEntry"
                 }
               }
             }
@@ -20295,6 +20424,104 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/KnowledgeStatsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/knowledge/governance": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Get Knowledge Governance",
+        "description": "知识治理信号：三类超阈才见人（安静即健康态）——知识 tab 信号卡数据源。\n\nv2 RPC 优先：用户已绑定 daemon 时直采 CLI digest（单源真相），回退本地计算。",
+        "operationId": "get_knowledge_governance_api_workspaces__workspace_id__knowledge_governance_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GovernanceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/knowledge/governance/actions": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Post Knowledge Governance Action",
+        "description": "治理动作执行（信号卡按钮端）：经绑定 daemon 白名单执行 CLI 机械动作。\n\nkind 白名单在 daemon 侧硬编码（repair-paths / redomain）；未绑定/离线时\n由 runtime 侧错误族映射（502/404/504）。",
+        "operationId": "post_knowledge_governance_action_api_workspaces__workspace_id__knowledge_governance_actions_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GovernanceActionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GovernanceActionOut"
                 }
               }
             }
@@ -36350,6 +36577,17 @@
               }
             ],
             "title": "Metadata"
+          },
+          "content_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Truncated"
           }
         },
         "type": "object",
@@ -39976,6 +40214,11 @@
               }
             ],
             "title": "Change Type"
+          },
+          "is_thin": {
+            "type": "boolean",
+            "title": "Is Thin",
+            "default": false
           },
           "affected_components": {
             "items": {
@@ -45927,6 +46170,127 @@
           "timestamp"
         ],
         "title": "GitOperationResponse"
+      },
+      "GovernanceActionIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "from_domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Domain"
+          },
+          "to_domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Domain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "GovernanceActionIn"
+      },
+      "GovernanceActionOut": {
+        "properties": {
+          "output": {
+            "type": "string",
+            "title": "Output"
+          }
+        },
+        "type": "object",
+        "required": [
+          "output"
+        ],
+        "title": "GovernanceActionOut"
+      },
+      "GovernanceOut": {
+        "properties": {
+          "healthy": {
+            "type": "boolean",
+            "title": "Healthy"
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/GovernanceSignalOut"
+            },
+            "type": "array",
+            "title": "Signals"
+          },
+          "totals": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Totals"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": "local"
+          },
+          "actions_available": {
+            "type": "boolean",
+            "title": "Actions Available",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "healthy",
+          "signals",
+          "totals"
+        ],
+        "title": "GovernanceOut",
+        "description": "v2（2026-09-27-governance-rpc-actions）：source 标数据源（daemon-rpc=CLI 单源\n直采，local=回退计算）；actions_available 标本端可否执行动作（RPC 直采时 True）。"
+      },
+      "GovernanceSignalOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "suggestion": {
+            "type": "string",
+            "title": "Suggestion"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "title",
+          "count",
+          "detail",
+          "suggestion"
+        ],
+        "title": "GovernanceSignalOut"
       },
       "GroupChatCreate": {
         "properties": {
@@ -66879,6 +67243,34 @@
         "title": "SessionTitleUpdateRequest",
         "description": "PATCH /api/daemon/sessions/{id}/title 请求体（task-02 / FR-03）。\n\n会话重命名：``title`` strip 后非空且 ≤255 字符（对齐 AgentSession.title\n列 String(255)）；校验归 service 层（rename_session 抛 422 语义 AppError，\n不落库）——schema 层不写 min/max，让「全空白拒绝」的中文文案与\nSessionEmptyPrompt 同口径从 service 统一出口。"
       },
+      "SessionTurnOutlineRead": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "total_turns": {
+            "type": "integer",
+            "title": "Total Turns"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TurnOutlineItemRead"
+            },
+            "type": "array",
+            "title": "Items",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "total_turns"
+        ],
+        "title": "SessionTurnOutlineRead",
+        "description": "turn-outline 响应体（FR-01）：session_id + 总轮数 + 全量轮次摘要列表。\n\n空会话返回 ``total_turns=0`` + 空 ``items``（不报错，D-003 空态口径）。"
+      },
       "SessionUsageModelItemRead": {
         "properties": {
           "model": {
@@ -71369,6 +71761,17 @@
               }
             ],
             "title": "Commit Sha"
+          },
+          "time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time"
           }
         },
         "type": "object",
@@ -71376,7 +71779,7 @@
           "id"
         ],
         "title": "TimelineTask",
-        "description": "任务面单行（tasks.md 任务行 × 提交锚推断）。\n\n``commit_sha`` 是「消息含 task-NN token」的最新窗口提交短哈希（CLI 同款\n顺序推断口径，无匹配 → None）。"
+        "description": "任务面单行（tasks.md 任务行 × 提交锚推断）。\n\n``commit_sha`` 是「消息含 task-NN token」的最新窗口提交短哈希（CLI 同款\n顺序推断口径，无匹配 → None）。``time`` 是翻格顺序推断的勾选时刻\n（2026-09-27-timeline-task-time：task-done 事件 ``checked N→M`` 游标衔接\n赋值——中段断裂停止推断、尾部未勾不标断裂，CLI ``inferFlipTimes`` 同款\n语义；观测起点前的首勾/断裂后 → None，前端按 ? 展示）。"
       },
       "TokenPair": {
         "properties": {
@@ -72025,6 +72428,149 @@
         ],
         "title": "TransitionResponse",
         "description": "POST /changes/{id}/transition 的返回类型。\n\n包含变更状态和 agent dispatch 信息。"
+      },
+      "TurnOutlineItemRead": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "seq": {
+            "type": "integer",
+            "title": "Seq"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "sender_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Name"
+          },
+          "engine_anchor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Anchor"
+          },
+          "auto_resume_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Resume Of"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "prompt_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Summary"
+          },
+          "answer_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "seq",
+          "created_at",
+          "status"
+        ],
+        "title": "TurnOutlineItemRead",
+        "description": "turn-outline 单轮摘要项（FR-01）。\n\n轻列字段直映 ``AgentRun`` 既有列（**不含** agent_profile_snapshot /\nerror_detail 大 JSON，design 做法概述①「轻列」）；``auto_resume_of`` 从\n``AgentRun.metadata_`` 的 ``{\"auto_resume_of\": \"<源 run id>\"}` 抽出（续跑轮\n徽标数据源，普通轮 None）；``prompt_summary`` / ``answer_summary`` 为窗口\n函数抽出的每 run 首条 channel=user_input / 首条非空 channel=stdout 日志的\n截断文本（后端日志通道实际枚举 user_input/stdout/tool_call/stderr，无\n\"reply\" 通道——assistant 文本即 stdout，见 sdk_pipeline._channel_from_event_type），\n无对应日志的行为 None（不伪造）。"
       },
       "UnreadCountResponse": {
         "properties": {
