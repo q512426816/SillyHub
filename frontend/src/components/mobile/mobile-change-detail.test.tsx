@@ -794,3 +794,89 @@ describe("MobileChangeDetail 三卡挂载 + 阶段联动（task-06 / FR-05 / FR-
     }
   });
 });
+
+describe("MobileChangeDetail thin/quick 卡口径（对齐桌面 isThinLineageChange）", () => {
+  // 2026-09-28-audit-risk-fixes：原稿只判 current_stage（"thin"/"quick"），归档
+  // thin（stage 翻 archived）与 quick 分流（change_type=quick）漏进通用「无可
+  // 审批」卡——与桌面 change-stage-actions 口径分叉。现对齐 isThinLineageChange
+  // 三分支；存量 quick（时间窗外）仍落 quick 存量卡。
+
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    changesApi.getAgentStatus.mockResolvedValue({
+      has_active_run: false,
+      config_enabled: false,
+      last_dispatch: null,
+    });
+    changeFilesApi.listChangeFiles.mockResolvedValue({ change_id: "c1", items: [] });
+    quicklogApi.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+  });
+
+  afterEach(() => {
+    cleanup();
+    queryClient.clear();
+    vi.clearAllMocks();
+  });
+
+  function renderDetail() {
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MobileChangeDetail changeId="c1" workspaceId="ws-1" onOpenSession={vi.fn()} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("归档 thin（stage=archived + steps 无标准四阶段痕迹）→ 轻量说明卡而非「无可审批」", async () => {
+    changesApi.getChange.mockResolvedValue(
+      makeChange({
+        current_stage: "archived",
+        status: "archived",
+        location: "archive",
+        pending_review: null,
+        change_type: "feature",
+        created_at: "2026-09-26T10:00:00Z",
+        steps: [
+          {
+            name: "收口",
+            stage: "thin",
+            status: "completed",
+            output: null,
+            completed_at: "2026-09-26T18:00:00Z",
+            ordering: 1,
+            wait_reason: null,
+            kind: "step",
+          },
+        ],
+      }),
+    );
+    renderDetail();
+    expect(await screen.findByTestId("m-change-thin-card")).toBeInTheDocument();
+    expect(screen.queryByTestId("m-change-review-idle")).not.toBeInTheDocument();
+  });
+
+  it("quick 分流新变更（change_type=quick、时间窗内）→ 轻量说明卡（对齐桌面②分支）", async () => {
+    changesApi.getChange.mockResolvedValue(
+      makeChange({
+        current_stage: "execute",
+        change_type: "quick",
+        pending_review: null,
+        created_at: "2026-09-26T10:00:00Z",
+      }),
+    );
+    renderDetail();
+    expect(await screen.findByTestId("m-change-thin-card")).toBeInTheDocument();
+  });
+
+  it("存量 quick（时间窗外）→ quick 存量卡保留（零回归）", async () => {
+    // makeChange 默认 created_at=2026-08-26（thin 分流上线日前）→ 时间窗拦截。
+    changesApi.getChange.mockResolvedValue(
+      makeChange({ current_stage: "quick", pending_review: null }),
+    );
+    renderDetail();
+    expect(await screen.findByTestId("m-change-quick-card")).toBeInTheDocument();
+  });
+});

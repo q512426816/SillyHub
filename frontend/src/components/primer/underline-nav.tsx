@@ -4,7 +4,7 @@
  * GitHub UnderlineNav 范式：文字 tab + 底部 2px 主题色指示条 + Counter 计数联动。
  * 受控组件（value/onChange）；指示条色走主题 token（铁律：原型的 #fd8c73 仅为
  * ai-native 参考值，落地用 --color-brand-600 随主题换肤）。
- * 键盘可达：tab 间用 roving tabindex，Enter/Space 切换。
+ * 键盘可达：tab 间用 roving tabindex，Enter/Space 经原生 button 激活当前项。
  */
 import * as React from "react";
 
@@ -33,19 +33,14 @@ export function UnderlineNav<T extends string>({
   className,
 }: UnderlineNavProps<T>) {
   return (
+    // 2026-09-28-audit-risk-fixes：删除容器 onKeyDown——tab 是原生 <button>，
+    // Enter/Space 原生激活已触发 onClick（当前项）；原容器级处理在冒泡段再调
+    // onChange(下一项)，一次按键双触发且最终落在下一个 tab。键盘可达仍由
+    // roving tabindex + 原生 button 激活承载。
     <div
       role="tablist"
       className={`flex items-center gap-1 border-b ${className ?? ""}`}
       style={{ borderBottomColor: "hsl(var(--border))" }}
-      onKeyDown={(e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        const idx = items.findIndex((item) => item.key === value);
-        const next = items[(idx + 1) % items.length];
-        if (next) {
-          e.preventDefault();
-          onChange(next.key);
-        }
-      }}
     >
       {items.map((item) => {
         const active = item.key === value;

@@ -92,6 +92,22 @@ vi.mock("@/lib/workspace-binding", () => ({
   fetchMyBinding: bindingApi.fetchMyBinding,
 }));
 
+// 2026-09-28-audit-risk-fixes：删除入口权限 hook 固定为平台管理员（真实 hook 走
+// session/fetchMe，本测试文件无登录态恒 false → 按钮不渲染；仅防劫持用例消费）。
+vi.mock("@/components/delete-change-confirm", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/components/delete-change-confirm")
+  >("@/components/delete-change-confirm");
+  return {
+    ...actual,
+    useChangeDeleteAccess: () => ({
+      userId: null,
+      isPlatformAdmin: true,
+      workspaceRole: null,
+    }),
+  };
+});
+
 // ── fixtures ───────────────────────────────────────────────────────────────
 
 function makeChange(overrides: Partial<ChangeSummary> = {}): ChangeSummary {
@@ -823,5 +839,51 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     await waitFor(() =>
       expect(screen.getByText("后端解析失败啦")).toBeInTheDocument(),
     );
+  });
+});
+
+describe("变更列表行内删除入口防劫持（2026-09-28-audit-risk-fixes）", () => {
+  // 守卫缺失形态：删除按钮 click 冒泡到行 div 的 location.assign 整页导航，
+  // 删除确认弹层被页面卸载吞掉——列表页删除入口实际不可用（jsdom 不真导航，
+  // 以 assignSpy 未被调用来钉住冒泡被阻断）。
+
+  beforeEach(() => {
+    setupListChanges();
+    bindingApi.fetchMyBinding.mockResolvedValue(null);
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+    cleanup();
+  });
+
+  it("点击删除按钮：不触发行级 location.assign（stopPropagation），仅弹删除确认", async () => {
+    mocks.listChanges.mockImplementation((_wid: string, params: any) =>
+      Promise.resolve(
+        params?.pageSize === 1
+          ? { items: [], total: 1 }
+          : { items: [makeChange()], total: 1 },
+      ),
+    );
+    const realLocation = window.location;
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { ...realLocation, assign: assignSpy },
+      writable: true,
+      configurable: true,
+    });
+    try {
+      await renderAndWait();
+      fireEvent.click(await screen.findByTestId("change-delete-entry"));
+      expect(assignSpy).not.toHaveBeenCalled();
+      expect(
+        await screen.findByTestId("delete-change-confirm"),
+      ).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "location", {
+        value: realLocation,
+        writable: true,
+        configurable: true,
+      });
+    }
   });
 });

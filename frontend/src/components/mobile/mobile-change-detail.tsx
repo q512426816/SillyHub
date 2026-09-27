@@ -94,6 +94,7 @@ import {
 } from "@/lib/changes";
 import { listChangeSessions } from "@/lib/daemon";
 import { listQuicklogEntries } from "@/lib/quicklog";
+import { isThinLineageChange } from "@/lib/thin-lineage";
 import { useSession } from "@/stores/session";
 import { cn } from "@/lib/utils";
 
@@ -499,8 +500,11 @@ export function MobileChangeDetail({
 
       {/* thin/quick 辅助阶段说明卡（2026-09-25-change-center-thin-flow task-08）：
           现状两阶段均落「无可审批事项」通用卡——补专用只读说明（形态对齐桌面
-          change-stage-actions 同名分支；移动端折叠态承载，命令以说明文本呈现）。 */}
-      {change.current_stage === "thin" ? (
+          change-stage-actions 同名分支；移动端折叠态承载，命令以说明文本呈现）。
+          2026-09-28-audit-risk-fixes：thin 判定对齐桌面 isThinLineageChange
+          （归档 thin stage=archived 与 quick 分流 change_type=quick 同样落本卡，
+          不再漏进通用「无可审批」分支——原稿只判 current_stage 与桌面分叉）。 */}
+      {isThinLineageChange(change) ? (
         <SecCard
           testId="m-change-thin-card"
           title="◈ 轻量变更 · 两段式流程"

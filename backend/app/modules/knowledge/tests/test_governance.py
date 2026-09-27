@@ -179,3 +179,47 @@ async def test_action_requires_write_permission(client, db_session, tmp_path, au
     )
     # 管理员有写权限 → 通过校验进入执行层（未绑定 daemon → 404 未绑定错误族）
     assert resp.status_code in (404, 502, 200)
+
+
+async def test_action_remote_error_code_and_status_mapping(
+    client, db_session, tmp_path, auth_headers, monkeypatch
+) -> None:
+    """DaemonRpcRemoteError 重映射（2026-09-28-audit-risk-fixes）：错误码取 exc.code
+    （原稿误访不存在的 .details 恒 remote_error），timeout→504、其余 remote→502。"""
+    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, lambda root: None)
+
+    import app.modules.daemon.ws_hub as ws_hub_mod
+    from app.modules.daemon.ws_hub import DaemonRpcRemoteError
+    from app.modules.runtime.service import RuntimeLiveService
+
+    async def _fake_resolve(self, workspace_id, user_id):
+        return "daemon-1", "/repo/x"
+
+    monkeypatch.setattr(RuntimeLiveService, "_resolve_binding", _fake_resolve)
+    monkeypatch.setattr("app.modules.workspace.service.resolve_root_path_for_daemon", lambda p: p)
+
+    class _FakeHub:
+        def __init__(self, error: dict) -> None:
+            self._error = error
+
+        async def send_rpc(self, daemon_id, method, params, timeout=60):
+            raise DaemonRpcRemoteError(self._error)
+
+    url = f"/api/workspaces/{ws['ws_id']}/knowledge/governance/actions"
+    monkeypatch.setattr(
+        ws_hub_mod,
+        "get_daemon_ws_hub",
+        lambda: _FakeHub({"code": "timeout", "message": "daemon busy"}),
+    )
+    resp = await client.post(url, json={"kind": "repair-paths"}, headers=auth_headers)
+    assert resp.status_code == 504
+    assert "timeout" in resp.json()["message"]
+
+    monkeypatch.setattr(
+        ws_hub_mod,
+        "get_daemon_ws_hub",
+        lambda: _FakeHub({"code": "internal", "message": "cli failed"}),
+    )
+    resp2 = await client.post(url, json={"kind": "repair-paths"}, headers=auth_headers)
+    assert resp2.status_code == 502
+    assert "internal" in resp2.json()["message"]

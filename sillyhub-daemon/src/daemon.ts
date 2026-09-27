@@ -1862,8 +1862,14 @@ export class Daemon {
     rootsProvider: () => this._effectiveAllowedRoots(),
   });
 
-  /** knowledge 治理 RPC handler（2026-09-27-governance-rpc-actions：digest 直采 + action 白名单）。 */
-  private readonly _knowledgeGovHandler = new KnowledgeGovernanceHandler();
+  /**
+   * knowledge 治理 RPC handler（2026-09-27-governance-rpc-actions：digest 直采 + action 白名单）。
+   * 2026-09-28-audit-risk-fixes：注入 rootsProvider——digest/action 双点 containment
+   * 第二道校验（写能力校验不弱于读点，防借用绑定越 allowed_roots 在宿主执行写动作）。
+   */
+  private readonly _knowledgeGovHandler = new KnowledgeGovernanceHandler({
+    rootsProvider: () => this._effectiveAllowedRoots(),
+  });
 
   /** 运行标志，三循环 while 条件。 */
   private _running = false;

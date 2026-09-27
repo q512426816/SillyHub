@@ -523,6 +523,9 @@ export default function ChangesPage({ params }: Props) {
             href={`/workspaces/${workspaceId}/changes/${c.id}`}
             prefetch={false}
             className="text-sm font-semibold leading-5 text-primary hover:underline"
+            // 2026-09-28-audit-risk-fixes：阻冒泡——否则 Link 的客户端导航与行
+            // onClick 的 location.assign 竞争（整页刷新胜出，SPA 切换失效）。
+            onClick={(e) => e.stopPropagation()}
           >
             {c.title || c.change_key}
           </Link>
@@ -583,7 +586,13 @@ export default function ChangesPage({ params }: Props) {
             variant="ghost"
             data-testid="change-delete-entry"
             className="text-muted-foreground hover:text-destructive"
-            onClick={() => setDeleteTarget(c)}
+            // 2026-09-28-audit-risk-fixes：阻冒泡——否则点击冒泡到行 div 的
+            // location.assign 整页导航，删除确认弹层被页面卸载吞掉（列表页删除
+            // 入口实际不可用；workspace-card stopFooter 同款防护）。
+            onClick={(e) => {
+              e.stopPropagation();
+              setDeleteTarget(c);
+            }}
           >
             删除
           </Button>

@@ -378,31 +378,53 @@ export { ARTIFACT_MAX_BYTES, SILLYSPEC_TIMEOUT_MS, RpcError };
 // ── knowledge 治理 RPC（2026-09-27-governance-rpc-actions，三层治理 v2 ①②）────
 // digest 直采：收敛平台/CLI 双出口为单源（CLI 为真相——绑定信号与基线消音只在仓工作
 // 树在场时可得）；action 回传：白名单机械动作（repair-paths / redomain），平台信号卡
-// 按钮的执行端。安全：域名参数过 [a-z0-9-]+ 元字符防线（ROOT_PATH_METACHAR_RE 同款
-// 理由——spawn shell:true 命令串拼接的注入面）；kind 白名单硬编码。
+// 按钮的执行端。安全：域名参数过 [a-z0-9-]+ 元字符防线（spawn shell:true 命令串
+// 拼接的注入面）；kind 白名单硬编码。root 防线两道（2026-09-28-audit-risk-fixes
+// 补齐第二道）：①KNOWLEDGE_ROOT_ANOMALY_RE 异常值黑名单（root 只进 spawn cwd 不拼
+// 命令串，拦的是路径 API 禁形与 Windows 非法文件名字符——& $ ' ` ; 是 Windows 合法
+// 目录字符不拦，R&D 类路径不再误拒）；②assertWithinAllowedRoots containment
+// （rootsProvider 注入，与 RuntimeHandler 读点/HostFsHandler 同款——写能力校验
+// 不弱于读，防借用绑定越机器主人 allowed_roots 在宿主任意目录执行写动作）。
 const KNOWLEDGE_DOMAIN_RE = /^[a-z0-9-]+$/;
 const KNOWLEDGE_ACTION_KINDS = new Set(['repair-paths', 'redomain']);
+const KNOWLEDGE_ROOT_ANOMALY_RE = /[\0\r\n<>|"?*]/;
 
 export class KnowledgeGovernanceHandler {
+  /** allowed_roots 白名单来源（containment 第二道校验）；缺省空数组 → 一律拒。 */
+  private readonly _rootsProvider: () => string[];
+
   constructor(
     private readonly opts: {
       sillyspecCmd?: (cmd: string, timeoutMs: number, cwd?: string) => Promise<{
         ok: boolean; stdout: string; stderr: string; timedOut: boolean;
       }>;
+      rootsProvider?: () => string[];
     } = {},
-  ) {}
+  ) {
+    this._rootsProvider = opts.rootsProvider ?? (() => []);
+  }
+
+  /** root 两道防线：非空 → 异常值黑名单 → allowed_roots containment。 */
+  private _guardRoot(rootPath: string | undefined): string {
+    const root = rootPath ?? '';
+    if (!root) {
+      throw new RpcError('forbidden', 'root_path required: knowledge RPC must run inside an allowed root');
+    }
+    if (KNOWLEDGE_ROOT_ANOMALY_RE.test(root)) {
+      throw new RpcError('forbidden', `root_path suspicious: ${JSON.stringify(root)}`);
+    }
+    assertWithinAllowedRoots(root, this._rootsProvider());
+    return root;
+  }
 
   /** knowledge.digest：cwd=仓库根跑 `sillyspec knowledge digest --json`，stdout JSON 透传。 */
   async digest(workspaceId: string, rootPath?: string): Promise<{ digest: unknown }> {
-    // rootPath 已由 daemon.ts 侧 normalizeRootPathParam 归一；元字符黑名单防线
-    //（spawn shell:true 命令不拼 root——cwd 传递，但路径本体仍过黑名单防异常值）。
-    const root = rootPath ?? '';
-    if (/[<>|&;$`"']/.test(root)) {
-      throw new RpcError('forbidden', `root_path suspicious: ${JSON.stringify(root)}`);
-    }
+    // rootPath 已由 daemon.ts 侧 normalizeRootPathParam 归一；_guardRoot 两道防线
+    //（异常值黑名单 + allowed_roots containment——digest 读面同样不弱于读点，见类注释）。
+    const root = this._guardRoot(rootPath);
     const cmd = 'sillyspec knowledge digest --json';
     const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
-    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root || undefined);
+    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root);
     if (!r.ok) {
       if (r.stdout.includes('knowledge <') || r.stdout.includes('unknown_subcommand')) {
         throw new RpcError('method_not_found', 'sillyspec knowledge digest not supported; upgrade sillyspec');
@@ -426,12 +448,9 @@ export class KnowledgeGovernanceHandler {
     params: { from?: string; to?: string },
     rootPath?: string,
   ): Promise<{ output: string }> {
-    // root 元字符防线（评审 P2-③ 清偿）：写能力 handler 校验不弱于读——root 只进
-    // spawn cwd 不拼命令串，但异常值仍在此拦（digest 同款防线）。
-    const root = rootPath ?? '';
-    if (/[<>|&;$`"']/.test(root)) {
-      throw new RpcError('forbidden', `root_path suspicious: ${JSON.stringify(root)}`);
-    }
+    // root 元字符防线（评审 P2-③ 清偿）+ containment（2026-09-28-audit-risk-fixes
+    // 补齐第二道）：写能力 handler 校验不弱于读（digest 同款防线）。
+    const root = this._guardRoot(rootPath);
     if (!KNOWLEDGE_ACTION_KINDS.has(kind)) {
       throw new RpcError('forbidden', `action kind not allowed: ${JSON.stringify(kind)}`);
     }
@@ -447,7 +466,7 @@ export class KnowledgeGovernanceHandler {
       cmd = `sillyspec tests --redomain --from ${from} --to ${to} --write`;
     }
     const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
-    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, rootPath || undefined);
+    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root);
     const output = `${r.stdout}\n${r.stderr}`.trim().slice(-2000);
     if (!r.ok) {
       if (r.timedOut) throw new RpcError('timeout', `action timed out (${SILLYSPEC_TIMEOUT_MS}ms)`);

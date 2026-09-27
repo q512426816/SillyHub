@@ -2387,7 +2387,12 @@ export function SessionPanelPage({
   // 否则详情开关（detailOpen）打开时展示详情面板。模式由既有状态派生，零新增
   // 状态机：点子代理卡/目录 = 自动切子代理模式；关子代理（openSubagentId→null）
   // 后若 detailOpen 仍开则回详情模式，✕ 关详情仅置 detailOpen=false（互不干扰）。
-  const detailColumnVisible = subagentPanelOpen || detailOpen;
+  // 2026-09-28-audit-risk-fixes 补 !mobile 守卫：desktop 与 mobile 共享同一
+  // localStorage 键，desktop 开过的偏好若在 mobile 视口生效会把右列（Resizer+
+  // 详情列）挤进窄屏、TaskExecutionPanel/SessionUsageBar 双挂且 taskPanelRef
+  // 被右列实例覆盖（mobile 无关闭入口）——右列是 desktop 概念（对齐
+  // hasSubagentPanelHost 的 !mobile 口径），mobile 恒收起、偏好值留给 desktop。
+  const detailColumnVisible = !mobile && (subagentPanelOpen || detailOpen);
 
 
   // ── task-03（2026-09-08-session-turn-nav / FR-03 / D-002@v1 D-004@v1）：

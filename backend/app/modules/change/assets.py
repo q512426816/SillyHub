@@ -377,9 +377,13 @@ def _safe_module_doc(doc: str) -> str | None:
     ``docs/<project> / doc`` 会越出项目 docs 根读宿主文件（读面仅 h1 首行，
     低 severity 但应守）。越界形态——POSIX 绝对（``/`` 前缀，含 ``//`` UNC
     形态）、Windows 盘符（``C:``，含无斜杠 drive-relative）、反斜杠（归一为
-    ``/`` 后按前两条判）、``..`` 段——整条丢弃返回 None：不读盘、不放前端
-    预览 chip（doc=None），模块名自然回退 id。
+    ``/`` 后按前两条判）、``..`` 段、NUL 字节（``\\0``——打开路径抛
+    ``ValueError: embedded null byte``，不是 ``OSError`` 子类、逃出读盘点
+    except，2026-09-28-audit-risk-fixes 补拦）——整条丢弃返回 None：不读盘、
+    不放前端预览 chip（doc=None），模块名自然回退 id。
     """
+    if "\0" in doc:
+        return None
     norm = doc.replace("\\", "/")
     posix = PurePosixPath(norm)
     if posix.is_absolute() or ".." in posix.parts or re.match(r"^[A-Za-z]:", norm):

@@ -47,11 +47,16 @@ describe("UnderlineNav 受控契约", () => {
     expect(screen.getByText("12")).toBeTruthy();
   });
 
-  it("键盘 Enter 切换到下一 tab", () => {
+  it("键盘激活只走原生 button 一次（2026-09-28-audit-risk-fixes：删容器级 onKeyDown 后不再双触发跳下一项）", () => {
     const onChange = vi.fn();
     renderNav("active", onChange);
-    fireEvent.keyDown(screen.getByRole("tab", { name: /进行中/ }), { key: "Enter" });
+    // 点击激活当前项恰好一次；容器不再在 keyDown 冒泡段二次分发 onChange(下一项)。
+    fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
+    expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith("archived");
+    // keyDown 冒泡到容器不再产生额外 onChange（原生 button 激活由浏览器承载）。
+    fireEvent.keyDown(screen.getByRole("tab", { name: /进行中/ }), { key: "Enter" });
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 });
 

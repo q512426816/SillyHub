@@ -183,11 +183,16 @@ class KnowledgeService:
             resp = await hub.send_rpc(daemon_id, "knowledge.action", rpc_params, timeout=120)
         except DaemonRpcRemoteError as exc:
             # DaemonRpcRemoteError 刻意非 AppError（要求端点重映射）——动作失败给
-            # 可读文案+输出尾部，不落裸 500（评审 P2-② 清偿）
+            # 可读文案+输出尾部，不落裸 500（评审 P2-② 清偿）。
+            # 2026-09-28-audit-risk-fixes：错误码取 exc.code（原稿误访不存在的
+            # .details 恒回退 remote_error）；timeout→504、其余 remote 错误→502
+            # （router docstring 声明的错误族）。
             from app.core.errors import AppError
 
+            code = getattr(exc, "code", None) or "remote_error"
             raise AppError(
-                f"治理动作执行失败（daemon: {exc.details.get('code', 'remote_error') if hasattr(exc, 'details') and isinstance(exc.details, dict) else 'remote_error'}）：{str(exc)[:300]}"
+                f"治理动作执行失败（daemon: {code}）：{str(exc)[:300]}",
+                http_status=504 if code == "timeout" else 502,
             ) from exc
         return {"output": (resp or {}).get("output", "") if isinstance(resp, dict) else ""}
 
