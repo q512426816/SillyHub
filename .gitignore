@@ -65,7 +65,7 @@ sillyhub-daemon/isolate-*.log
 
 # Local / temp
 .loop-progress.md
-prototype/
+/prototype/
 .playwright-mcp/
 bash.exe.stackdump
 .claude/worktrees/
