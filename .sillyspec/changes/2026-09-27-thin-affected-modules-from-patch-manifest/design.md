@@ -13,7 +13,7 @@ created_at: 2026-09-27T14:11:35.878Z
 <!-- MACHINE-DRAFT:design-approach:end -->
 
 <!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
-改 `backend/app/modules/change/parser.py` 的 `_infer_affected_components`：在既有两来源（module-impact.md 矩阵、tasks.md/tasks/*.md 代码路径）之外，新增第三来源——读同目录 `change-patch.json` 的 `files` 数组（flow done 冻结的真实改动文件清单，CLI 新旧格式均携带），滤除 `.sillyspec/changes/` 治理面前缀后并入文件路径集合，统一走既有 `_match_paths_to_modules` 前缀匹配。选这个方案而非直接信 CLI 新三键 `modules[].id`，是因为该 id 是 flow 运行仓自己项目图的模块名，对本仓 module-map 无意义；`files` 是与仓无关的通用真相，且存量 38 个 thin 归档件全部携带，可一次性回填。`_load_module_map` 单图口径不动：SillyHub 主图（字母序第一）36 模块已覆盖 backend/frontend/daemon 三面前缀，多图合并反而引入 multi-agent-platform 粗粒度图的冗余命中。
+改 `backend/app/modules/change/parser.py` 的 `_infer_affected_components`：在既有两来源（module-impact.md 矩阵、tasks.md/tasks/*.md 代码路径）之外，新增第三来源——读同目录 `change-patch.json` 的 `files` 数组（flow done 冻结的真实改动文件清单，CLI 新旧格式均携带），滤除 `.sillyspec/changes/` 治理面前缀后并入文件路径集合，统一走既有 `_match_paths_to_modules` 前缀匹配。选这个方案而非直接信 CLI 新三键 `modules[].id`，是因为该 id 是 flow 运行仓自己项目图的模块名，对本仓 module-map 无意义；`files` 是与仓无关的通用真相，且存量 38 个 thin 归档件全部携带，可一次性回填。实现期实测发现单图口径在 Windows 上恒空（PurePath 排序大小写不敏感，SillyHub 排 backend 之后，且 backend 图 paths 以 app/ 开头与交付路径永不匹配），方案升级为 `_load_module_map` 多图全收合并（跨全部项目目录收集、同名模块前缀并集、缓存键升级为路径元组+mtime 元组复合指纹）——粗粒度图（multi-agent-platform 的 backend/frontend 顶层模块）会与细粒度模块并存命中，属可接受的展示冗余。
 
 ## 接口契约
 <!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-thin-affected-modules-from-patch-manifest 留痕重锚 -->
@@ -35,7 +35,7 @@ created_at: 2026-09-27T14:11:35.878Z
 1. 乱序/迟到：change-patch.json 在 flow done 时点冻结，reparse 任何时候读到都是同一份清单；文件晚于 tasks.md 出现不影响（每次解析都重新读全部来源，无跨次状态）。
 2. 并发写：只读路径，`json.load` 期间文件被写坏最坏抛 JSONDecodeError → 被 OSError/解析防御捕获按空集处理；与既有 `_MODULE_MAP_CACHE` 的 mtime 复合键缓存无交互（manifest 不进缓存）。
 3. 切换/中断：无状态写入，解析失败静默降级为「该来源贡献空集」，不阻塞 reparse 主流程。
-4. 作用域：change_dir 是 per-change 独立目录，manifest 天然按变更隔离；workspace 维度的 module-map 已有 (resolved path, mtime) 缓存键防跨工作区串台（既有机制，未动）。
+4. 作用域：change_dir 是 per-change 独立目录，manifest 天然按变更隔离；module-map 缓存键随多图合并升级为（全部图 resolved 路径元组, mtime 元组）复合指纹，跨 workspace 天然隔离（路径集不同键不同）。
 
 ## 风险与死路
 <!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-thin-affected-modules-from-patch-manifest 留痕重锚 -->
@@ -43,4 +43,4 @@ created_at: 2026-09-27T14:11:35.878Z
 <!-- MACHINE-DRAFT:design-risks:end -->
 
 <!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
-最大风险：files 含 CLI 侧冻结的 `.sillyspec/docs/` 交付文档路径（note 声明保留），可能命中文档类模块产生轻微噪声——实测本仓 SillyHub 图无 docs/ 前缀模块，噪声为零，故只滤 `.sillyspec/changes/` 而不扩大滤除面。放弃的方案：①直接读 CLI 新三键 `modules[].id`——id 语义绑定 flow 运行仓的项目图，跨仓无意义，且存量件无此键；②`_load_module_map` 改多图合并——与 CLI 侧 collectModuleMaps 对齐会引入 multi-agent-platform 粗粒度图（`backend/**` 全命中），细粒度结果被粗模块稀释，展示变差。
+最大风险：files 含 CLI 侧冻结的 `.sillyspec/docs/` 交付文档路径（note 声明保留），可能命中文档类模块产生轻微噪声——实测本仓 SillyHub 图无 docs/ 前缀模块，噪声为零，故只滤 `.sillyspec/changes/` 而不扩大滤除面。放弃的方案：直接读 CLI 新三键 `modules[].id`——id 语义绑定 flow 运行仓的项目图，跨仓无意义，且存量件无此键。曾评估并否决「维持单图」：单图选择依赖目录字母序巧合且 Windows 平台失效（实测坐实），多图合并的粗粒度冗余命中（backend/frontend 顶层粗模块与细模块并存）经真实数据冒烟权衡为可接受展示代价，最终落地多图合并（本条为评审 P2 清偿修正——原稿写作时基于「SillyHub 单图已覆盖」的错误前提）。

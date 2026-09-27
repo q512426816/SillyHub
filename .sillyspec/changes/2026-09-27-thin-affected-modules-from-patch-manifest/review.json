@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-thin-affected-modules-from-patch-manifest",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "design.md 设计记录与交付代码矛盾：声称「单图口径不动、多图合并已放弃、缓存键既有机制未动」，实际交付多图全收合并 + 缓存键升级",
+      "evidence": "change.design.md 槽1（做法概述）称「_load_module_map 单图口径不动…多图合并反而引入冗余命中」、槽4 称「多图合并——…放弃」、槽3-4 称缓存键「既有机制，未动」；而冻结 diff 中 parser.py 实际把 _find_module_map_file 改为 _find_module_map_files 跨全部项目目录收集（key=str 确定性排序）、_load_module_map 多图合并同名前缀并集、_MODULE_MAP_CACHE 键从 (path, mtime) 升级为（路径元组, mtime 元组）。机理：实现期发现 Windows PurePath 大小写不敏感排序稳定选中 backend 单项目图致推断恒空、原方案不可行，被迫切换为合并，但设计记录未走 amend-draft 留痕重锚，留下三条失真声明；且设计拒绝合并的论据（multi-agent-platform 粗粒度图稀释细粒度命中）与 docs 噪声测定的口径（单图 36 模块）均基于旧单图事实，合并生效后（合并图 182 模块）未经设计侧重新裁决，仅靠 tasks.md 冒烟记载兜底。无数据正确性风险（合并逻辑确定性、并集保序去重正确、缓存指纹严格变强、4 个专项测试 + 本仓冒烟 29/38 实证），tasks.md task-02 与 requirements FR-01 绑定均已按合并口径如实记载，故 P2（承诺面失真、误导后续维护者）而非 P1。",
+      "location": ".sillyspec/changes/2026-09-27-thin-affected-modules-from-patch-manifest/design.md:16,38,46 vs backend/app/modules/change/parser.py:459,487-496,501-504"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-27T15:14:44Z"
+}
