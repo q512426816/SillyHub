@@ -30,9 +30,13 @@ Then 行为符合本条标准描述
 ## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
 
 <!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::注解剥离（一段/多段「」段移除）+ 全注解串：剥离后为空仍按未找到处理
 
 <!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::注解剥离：按干净文件名发起搜索并等值命中预览（断言 mockSearch 收到干净 basename）
 
 <!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::多段注解剥离：短路径唯一后缀救回并预览真实路径
 
 <!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::ChangeAssetsCard 测试文件路径解析 全套 22 passed（新增 3 条覆盖多段注解与搜索入参干净文件名）
