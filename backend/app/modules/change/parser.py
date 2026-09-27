@@ -9,6 +9,7 @@ Supports legacy ``changes/change/<key>/`` layout with deprecation warnings.
 from __future__ import annotations
 
 import copy
+import json
 import re
 import threading
 from dataclasses import dataclass, field
@@ -303,7 +304,8 @@ class ChangeParser:
 
         推断优先级:
           1. module-impact.md 存在 → 提取"模块影响矩阵"表中的模块名
-          2. 否则扫描 tasks.md + tasks/*.md → 提取文件路径 → 匹配 module-map
+          2. 否则收集文件路径（tasks.md + tasks/*.md 正文提取 ∪
+             change-patch.json files 冻结清单）→ 匹配 module-map
 
         Args:
             change_dir: 变更目录路径 (如 .sillyspec/changes/xxx/)
@@ -345,6 +347,11 @@ class ChangeParser:
                 except OSError:
                     pass
 
+        # Path 2b: change-patch.json files 清单（thin-affected-modules-from-patch-manifest）
+        # 轻量变更 tasks.md 是成功标准镜像（无代码路径），flow done 冻结的 files
+        # 数组是其唯一可靠的交付面清单来源（CLI 新旧格式均携带）。
+        file_paths |= ChangeParser._extract_manifest_code_paths(change_dir)
+
         if not file_paths:
             return []
 
@@ -354,6 +361,31 @@ class ChangeParser:
             return []
 
         return ChangeParser._match_paths_to_modules(file_paths, module_map)
+
+    @staticmethod
+    def _extract_manifest_code_paths(change_dir: Path) -> set[str]:
+        """从 change-patch.json（flow done 冻结件）提取代码文件路径。
+
+        ``files`` 是变更可归属面的完整文件清单（真实交付面，含未提交与
+        untracked）。滤除 ``.sillyspec/changes/`` 前缀的变更自身治理件
+        （自指面，不构成代码模块命中——对齐 CLI 侧治理面滤除口径）；
+        缺失/JSON 损坏/结构异常一律返回空集（防御式降级，不阻塞推断）。
+        """
+        manifest_path = change_dir / "change-patch.json"
+        if not manifest_path.is_file():
+            return set()
+        try:
+            raw = json.loads(manifest_path.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, ValueError):
+            return set()
+        if not isinstance(raw, dict):
+            return set()
+        files = raw.get("files")
+        if not isinstance(files, list):
+            return set()
+        return {
+            f for f in files if isinstance(f, str) and f and not f.startswith(".sillyspec/changes/")
+        }
 
     @staticmethod
     def _extract_from_impact_table(content: str) -> list[str]:
@@ -425,63 +457,86 @@ class ChangeParser:
 
     @staticmethod
     def _load_module_map(sillyspec_root: Path) -> dict[str, list[str]]:
-        """加载 _module-map.yaml（task-07：进程级缓存 + platform_managed 路径探测修复）。
+        """加载全部项目层 _module-map.yaml 并合并（thin-affected-modules-from-patch-manifest）。
 
         查找路径（两处按优先级，task-07 附带修复 platform_managed 布局预存缺陷——
         修复前只找包裹布局，扁平布局 map 路径恒空）：
           1. ``.sillyspec/docs/*/modules/_module-map.yaml``（包裹布局，优先）
           2. ``docs/*/modules/_module-map.yaml``（扁平布局，兜底）
-        取第一个存在的文件。
+        收集**全部**项目目录的图文件合并（同名模块 paths 取并集）。修复前按
+        ``sorted(docs_dir.iterdir())`` 取第一个命中——Windows 的 PurePath 排序
+        大小写不敏感（``SillyHub`` 排在 ``backend`` 之后），本机会稳定选中
+        backend 单项目图，而该图 paths 以 ``app/`` 开头（不带 monorepo 顶层
+        前缀）与交付面文件路径永不匹配 → 影响模块推断恒空。多图合并后口径
+        与 CLI 侧 collectModuleMaps 对齐，且不再依赖目录字母序的巧合。
 
-        缓存（design 段 4 / R-01）：模块级 dict 按 **(map 文件 resolved 绝对路径,
-        mtime)** 复合键失效——仅按 mtime 会跨 workspace 串结果（Grill B-3）。值
-        不可变（每次未命中重新解析新对象，调用方 mutate 不污染缓存；命中时也回新
-        拷贝）。幂等填充、单键赋值原子，良性竞态容忍（并发 reparse 最坏各自解析一
-        次后同键覆盖，读侧无锁）。文件删除（stat 抛错）按未命中走，探测返回 {}。
+        缓存（design 段 4 / R-01）：模块级 dict 按 **(全部 map 文件 resolved
+        绝对路径元组, mtime 元组)** 复合键失效——仅按 mtime 会跨 workspace 串
+        结果（Grill B-3）。值不可变（每次未命中重新解析新对象，调用方 mutate
+        不污染缓存；命中时也回新拷贝）。幂等填充、单键赋值原子，良性竞态容忍
+        （并发 reparse 最坏各自解析一次后同键覆盖，读侧无锁）。文件删除（stat
+        抛错）该文件按缺席跳过；全部 stat 失败按未命中走，探测返回 {}。
 
         Returns:
             {"agent": ["backend/app/modules/agent/"], ...}
-            paths 中的 ** 通配符被去掉，尾部保留 /
+            paths 中的 ** 通配符被去掉，尾部保留 /；同名模块跨图并集
         """
-        map_file = ChangeParser._find_module_map_file(sillyspec_root)
-        if map_file is None:
+        map_files = ChangeParser._find_module_map_files(sillyspec_root)
+        if not map_files:
             return {}
-        try:
-            map_key = (str(map_file.resolve()), map_file.stat().st_mtime)
-        except OSError:
-            # stat 抛错（删除竞态等）按未命中走，不缓存
+        key_parts: list[tuple[str, float]] = []
+        for map_file in map_files:
+            try:
+                key_parts.append((str(map_file.resolve()), map_file.stat().st_mtime))
+            except OSError:
+                # stat 抛错（删除竞态等）该文件按缺席跳过
+                continue
+        if not key_parts:
             return {}
+        map_key = (tuple(p for p, _ in key_parts), tuple(m for _, m in key_parts))
         cached = _MODULE_MAP_CACHE.get(map_key)
         if cached is not None:
             return copy.deepcopy(cached)
 
-        parsed = ChangeParser._parse_module_map_yaml(map_file)
+        merged: dict[str, list[str]] = {}
+        for map_file in map_files:
+            for mod_name, prefixes in ChangeParser._parse_module_map_yaml(map_file).items():
+                existing = merged.setdefault(mod_name, [])
+                for p in prefixes:
+                    if p not in existing:
+                        existing.append(p)
         with _MODULE_MAP_CACHE_LOCK:
-            _MODULE_MAP_CACHE[map_key] = parsed
-            # 清掉同路径旧 mtime 的条目，防缓存无界增长（reparse 生命周期内 map 文件
-            # 版本数有限，但跨大量工作区常驻进程时仍收敛为每文件至多 1 条）。迭代必须
+            _MODULE_MAP_CACHE[map_key] = merged
+            # 清掉同路径集旧 mtime 的条目，防缓存无界增长（reparse 生命周期内 map 文件
+            # 版本数有限，但跨大量工作区常驻进程时仍收敛为每文件集至多 1 条）。迭代必须
             # 持锁（见 _MODULE_MAP_CACHE 声明处注释）。
             stale = [k for k in _MODULE_MAP_CACHE if k[0] == map_key[0] and k[1] != map_key[1]]
             for k in stale:
                 _MODULE_MAP_CACHE.pop(k, None)
-        return copy.deepcopy(parsed)
+        return copy.deepcopy(merged)
 
     @staticmethod
-    def _find_module_map_file(sillyspec_root: Path) -> Path | None:
-        """探测 _module-map.yaml：包裹布局（.sillyspec/docs）优先，扁平（docs）兜底。"""
+    def _find_module_map_files(sillyspec_root: Path) -> list[Path]:
+        """探测全部项目层 _module-map.yaml：包裹布局（.sillyspec/docs）优先，扁平（docs）兜底。
+
+        同一布局位置内跨全部项目目录收集（确定性顺序：``key=str`` 规避
+        Windows PurePath 大小写不敏感排序的平台差异）；两处布局都有时只取
+        包裹布局（既有优先级语义不变）。
+        """
         for docs_dir in (
             sillyspec_root / ".sillyspec" / "docs",
             sillyspec_root / "docs",
         ):
             if not docs_dir.is_dir():
                 continue
-            for project_dir in sorted(docs_dir.iterdir()):
-                if not project_dir.is_dir():
-                    continue
-                map_file = project_dir / "modules" / "_module-map.yaml"
-                if map_file.is_file():
-                    return map_file
-        return None
+            files = [
+                project_dir / "modules" / "_module-map.yaml"
+                for project_dir in sorted(docs_dir.iterdir(), key=str)
+                if project_dir.is_dir() and (project_dir / "modules" / "_module-map.yaml").is_file()
+            ]
+            if files:
+                return files
+        return []
 
     @staticmethod
     def _parse_module_map_yaml(map_file: Path) -> dict[str, list[str]]:

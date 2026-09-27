@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -462,3 +463,204 @@ class TestInferCurrentStageThin:
         empty_dir = tmp_path / "2026-09-25-empty-change"
         empty_dir.mkdir()
         assert ChangeParser._infer_current_stage(empty_dir, "active") == "brainstorm"
+
+
+class TestInferAffectedComponentsFromManifest:
+    """thin-affected-modules-from-patch-manifest：change-patch.json files 第三来源。
+
+    轻量变更 tasks.md 是成功标准镜像（无代码路径），影响模块推断恒空；
+    flow done 冻结的 change-patch.json files 数组是真实交付面清单
+    （CLI 新旧格式均携带），作为补充来源并入 module-map 前缀匹配。
+    """
+
+    MAP_YAML = """\
+modules:
+  change:
+    paths:
+      - backend/app/modules/change/**
+  web:
+    paths:
+      - frontend/src/app/**
+"""
+
+    @staticmethod
+    def _make_change_dir(root: Path) -> Path:
+        change_dir = root / ".sillyspec" / "changes" / "thin-demo"
+        change_dir.mkdir(parents=True, exist_ok=True)
+        return change_dir
+
+    def test_manifest_files_inferred(self, tmp_path: Path) -> None:
+        """files 含 backend/frontend 代码路径 → 命中对应模块（治理件滤除）。"""
+        root = _make_map(tmp_path, self.MAP_YAML)
+        change_dir = self._make_change_dir(root)
+        (change_dir / "change-patch.json").write_text(
+            json.dumps(
+                {
+                    "change": "thin-demo",
+                    "files": [
+                        ".sillyspec/changes/thin-demo/tasks.md",
+                        "backend/app/modules/change/service.py",
+                        "frontend/src/app/page.tsx",
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        modules = ChangeParser._infer_affected_components(change_dir, root)
+        assert modules == ["change", "web"]
+
+    def test_manifest_governance_only_yields_empty(self, tmp_path: Path) -> None:
+        """files 只剩 .sillyspec/changes/ 治理件 → 无命中（不产生伪模块）。"""
+        root = _make_map(tmp_path, self.MAP_YAML)
+        change_dir = self._make_change_dir(root)
+        (change_dir / "change-patch.json").write_text(
+            json.dumps(
+                {
+                    "files": [
+                        ".sillyspec/changes/thin-demo/design.md",
+                        ".sillyspec/changes/thin-demo/tasks.md",
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert ChangeParser._infer_affected_components(change_dir, root) == []
+
+    def test_manifest_malformed_json_skipped(self, tmp_path: Path) -> None:
+        """JSON 损坏 → 静默空集，不抛错。"""
+        root = _make_map(tmp_path, self.MAP_YAML)
+        change_dir = self._make_change_dir(root)
+        (change_dir / "change-patch.json").write_text('{"files": [broken', encoding="utf-8")
+        assert ChangeParser._infer_affected_components(change_dir, root) == []
+
+    def test_manifest_files_not_list_skipped(self, tmp_path: Path) -> None:
+        """files 非 list（dict/str/缺键）→ 静默空集。"""
+        root = _make_map(tmp_path, self.MAP_YAML)
+        change_dir = self._make_change_dir(root)
+        (change_dir / "change-patch.json").write_text(
+            json.dumps({"files": "backend/app/modules/change/service.py"}),
+            encoding="utf-8",
+        )
+        assert ChangeParser._infer_affected_components(change_dir, root) == []
+        (change_dir / "change-patch.json").write_text(
+            json.dumps({"other": ["backend/app/modules/change/service.py"]}),
+            encoding="utf-8",
+        )
+        assert ChangeParser._infer_affected_components(change_dir, root) == []
+
+    def test_manifest_merges_with_tasks_paths(self, tmp_path: Path) -> None:
+        """tasks.md 路径与 manifest files 并集匹配（两来源互补）。"""
+        root = _make_map(tmp_path, self.MAP_YAML)
+        change_dir = self._make_change_dir(root)
+        (change_dir / "tasks.md").write_text(
+            "改动 `backend/app/modules/change/service.py` 一处", encoding="utf-8"
+        )
+        (change_dir / "change-patch.json").write_text(
+            json.dumps({"files": ["frontend/src/app/page.tsx"]}), encoding="utf-8"
+        )
+        assert ChangeParser._infer_affected_components(change_dir, root) == [
+            "change",
+            "web",
+        ]
+
+    def test_module_impact_matrix_takes_priority(self, tmp_path: Path) -> None:
+        """module-impact.md 矩阵存在时仍优先短路（既有权威口径不变）。"""
+        root = _make_map(tmp_path, self.MAP_YAML)
+        change_dir = self._make_change_dir(root)
+        (change_dir / "module-impact.md").write_text(
+            "# 影响矩阵\n\n| 模块 | 变更 |\n|---|---|\n| daemon | 新增 |\n",
+            encoding="utf-8",
+        )
+        (change_dir / "change-patch.json").write_text(
+            json.dumps({"files": ["backend/app/modules/change/service.py"]}),
+            encoding="utf-8",
+        )
+        assert ChangeParser._infer_affected_components(change_dir, root) == ["daemon"]
+
+
+class TestLoadModuleMapMultiProjectMerge:
+    """thin-affected-modules-from-patch-manifest：多项目图全收合并。
+
+    修复前 sorted(iterdir()) 取首个命中项目图——Windows PurePath 排序
+    大小写不敏感，SillyHub 排 backend 之后，本机稳定选中 backend 图
+    （其 paths 以 app/ 开头不带顶层前缀）→ 推断恒空。合并后跨全部
+    项目图收集，同名模块 prefixes 并集，与 CLI collectModuleMaps 对齐。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        parser_mod._MODULE_MAP_CACHE.clear()
+        yield
+        parser_mod._MODULE_MAP_CACHE.clear()
+
+    def test_all_project_maps_merged(self, tmp_path: Path) -> None:
+        """跨项目图全部合并：各自模块都进结果。"""
+        for proj, mod, prefix in (
+            ("proj-a", "modA", "backend/app/modules/a/**"),
+            ("proj-b", "modB", "frontend/src/app/**"),
+            ("proj-c", "modC", "sillyhub-daemon/src/**"),
+        ):
+            map_file = tmp_path / ".sillyspec" / "docs" / proj / "modules" / "_module-map.yaml"
+            map_file.parent.mkdir(parents=True, exist_ok=True)
+            map_file.write_text(
+                f"modules:\n  {mod}:\n    paths:\n      - {prefix}\n", encoding="utf-8"
+            )
+        m = ChangeParser._load_module_map(tmp_path)
+        assert m == {
+            "modA": ["backend/app/modules/a/"],
+            "modB": ["frontend/src/app/"],
+            "modC": ["sillyhub-daemon/src/"],
+        }
+
+    def test_same_name_module_prefixes_union(self, tmp_path: Path) -> None:
+        """同名模块跨图前缀并集（保序去重）。"""
+        for proj, prefix in (("proj-a", "backend/a/**"), ("proj-b", "backend/b/**")):
+            map_file = tmp_path / ".sillyspec" / "docs" / proj / "modules" / "_module-map.yaml"
+            map_file.parent.mkdir(parents=True, exist_ok=True)
+            map_file.write_text(
+                f"modules:\n  core:\n    paths:\n      - {prefix}\n", encoding="utf-8"
+            )
+        m = ChangeParser._load_module_map(tmp_path)
+        assert m == {"core": ["backend/a/", "backend/b/"]}
+
+    def test_cache_invalidates_on_any_map_mtime_change(self, tmp_path: Path) -> None:
+        """任一图 mtime 变化即失效重读（多文件复合键）。"""
+        files = []
+        for proj, prefix in (("proj-a", "backend/a/**"), ("proj-b", "backend/b/**")):
+            map_file = tmp_path / ".sillyspec" / "docs" / proj / "modules" / "_module-map.yaml"
+            map_file.parent.mkdir(parents=True, exist_ok=True)
+            map_file.write_text(
+                f"modules:\n  {proj[-1]}:\n    paths:\n      - {prefix}\n", encoding="utf-8"
+            )
+            files.append(map_file)
+        assert set(ChangeParser._load_module_map(tmp_path)) == {"a", "b"}
+        # 改第二张图（非首张）→ 缓存必须失效
+        files[1].write_text("modules:\n  z:\n    paths:\n      - backend/b2/**\n", encoding="utf-8")
+        assert set(ChangeParser._load_module_map(tmp_path)) == {"a", "z"}
+
+    def test_frontend_path_matches_after_merge(self, tmp_path: Path) -> None:
+        """端到端：SillyHub 式混合前缀图 + frontend 单文件清单图合并后命中。"""
+        map_a = tmp_path / ".sillyspec" / "docs" / "proj-a" / "modules" / "_module-map.yaml"
+        map_a.parent.mkdir(parents=True, exist_ok=True)
+        map_a.write_text(
+            "modules:\n  change:\n    paths:\n      - backend/app/modules/change/**\n",
+            encoding="utf-8",
+        )
+        map_b = tmp_path / ".sillyspec" / "docs" / "proj-b" / "modules" / "_module-map.yaml"
+        map_b.parent.mkdir(parents=True, exist_ok=True)
+        map_b.write_text(
+            "modules:\n  app-pages:\n    paths:\n      - frontend/src/app/**\n",
+            encoding="utf-8",
+        )
+        change_dir = tmp_path / ".sillyspec" / "changes" / "thin-x"
+        change_dir.mkdir(parents=True)
+        (change_dir / "change-patch.json").write_text(
+            json.dumps(
+                {"files": ["backend/app/modules/change/service.py", "frontend/src/app/page.tsx"]}
+            ),
+            encoding="utf-8",
+        )
+        assert ChangeParser._infer_affected_components(change_dir, tmp_path) == [
+            "change",
+            "app-pages",
+        ]
