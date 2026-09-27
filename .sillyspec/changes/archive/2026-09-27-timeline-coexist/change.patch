@@ -1,0 +1,150 @@
+diff --git a/.sillyspec/changes/2026-09-27-timeline-coexist/design.md b/.sillyspec/changes/2026-09-27-timeline-coexist/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-timeline-coexist/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T13:35:24.365Z
++---
++# 设计记录（Design Record）— 2026-09-27-timeline-coexist
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-coexist 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++变更详情页（changes/[cid]/page.tsx）把「步骤时间线卡」与「真实留痕时间线卡」的互斥挂载改为共存：steps 非空时步骤卡照常渲染，ChangeTimelineCard 恒挂载（组件自身 events/tasks/born 全空时静默 return null，无观测数据零占位）。归因：归档时 CLI unregisterChange 终态一致化会补种 3 行同一时间戳 steps，原互斥逻辑（steps 空才挂合成卡）恰好被这批补种行顶掉，归档后的轻量变更看不到事件轴/任务面/墙钟真实数据。选恒挂载而非「归档态才双显」：空态判定本就内聚在组件里（观测事件卡同款范式），页面不需要重复条件，厚变更无事件流数据时行为零变化。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-coexist 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++后端与 API 零改动（GET /changes/{cid}/timeline 与 ChangeRead.steps 均为既有接口）。前端仅两文件：page.tsx 三元互斥改为「steps 卡条件渲染 + 合成卡无条件挂载」；page-restore-assets.test.tsx 新增共存钉子用例（归档补种 steps fixture + timeline mockResolvedValue → 断言两 testid 同屏）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-coexist 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：不适用——纯展示层挂载条件改动，数据顺序语义由既有 timeline/steps 接口承担，本变更不触碰。
++2. 并发写：不适用——无共享可变状态，ChangeTimelineCard 自取数（react-query 30s 轮询），与步骤卡（随 change 查询渲染）数据通道独立。
++3. 切换/生命周期：合成卡 query 失败 retry:false 静默隐藏（既有行为），切换变更/下线不影响步骤卡；两卡无共享取消逻辑。
++4. 作用域：组件按 workspaceId+changeId 取数，query key 含两 id，跨工作区不串台。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-coexist 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：厚变更若事件表有历史数据，归档后详情页会多出一张合成卡——判定为可接受（信息增量，非误报；事件恒 provisional 角标已声明观测语义）。试过放弃的方案：恢复第一代 tasks.md 勾选时间戳指令（需改 CLI 流程模板且与第二代 watcher 事件流机制重复，放弃）；后端在 steps 里带真实事件时间（改 CLI 同步协议，面大，放弃）。
+
+diff --git a/.sillyspec/changes/2026-09-27-timeline-coexist/proposal.md b/.sillyspec/changes/2026-09-27-timeline-coexist/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-timeline-coexist/proposal.md
+@@ -0,0 +1,34 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T13:35:24.363Z
++---
++# 提案书（Proposal）— 2026-09-27-timeline-coexist
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:01765362b419f8972048bd3ed62cd3ae994bbe3aec73705422ae8a52e70016df:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-coexist 留痕重锚 -->
++任务原话转写：归档后的轻量变更详情页：unregisterChange 终态一致化补种的 3 行同一时间戳步骤把真实留痕时间线卡互斥顶掉，归档后看不到事件轴/任务面/墙钟等真实数据
++成功标准：
++- 变更详情页步骤时间线卡与真实留痕时间线卡共存：steps 非空时合成时间线卡也渲染（组件自身空态静默隐藏兜底不变）
++- thin 在途（steps 恒空）行为不变：合成卡独立承担叙事
++- 相关前端测试同步更新并全部通过
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:395d2cb4819cdb34164dfa5f0f2849246f562ea717259b715e1d284a97877ff6:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-coexist 留痕重锚 -->
++按成功标准机械推导，共 3 条验收面：
++1. 变更详情页步骤时间线卡与真实留痕时间线卡共存：steps 非空时合成时间线卡也渲染（组件自身空态静默隐藏兜底不变）
++2. thin 在途（steps 恒空）行为不变：合成卡独立承担叙事
++3. 相关前端测试同步更新并全部通过
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:1fe0eec18f478cebd8cfdf433d330c10a7465966e50e6cb6b34b5a798cb9ae6f:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-timeline-coexist 留痕重锚 -->
++1. 变更详情页步骤时间线卡与真实留痕时间线卡共存：steps 非空时合成时间线卡也渲染（组件自身空态静默隐藏兜底不变）
++2. thin 在途（steps 恒空）行为不变：合成卡独立承担叙事
++3. 相关前端测试同步更新并全部通过
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-27-timeline-coexist/requirements.md b/.sillyspec/changes/2026-09-27-timeline-coexist/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-timeline-coexist/requirements.md
+@@ -0,0 +1,34 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T13:35:24.365Z
++---
++# 需求规格（Requirements）— 2026-09-27-timeline-coexist
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 变更详情页步骤时间线卡与真实留痕时间线卡共存：steps 非空时合成时间线卡也渲染（组件自身空态静默
++Given 组件 相关模块就绪
++When 变更详情页步骤时间线卡与真实留痕时间线卡共存：steps 非空时合成时间线卡也渲染（组件自身空态静默隐藏兜底不变）
++Then 行为符合本条标准描述
++
++### FR-02: thin 在途（steps 恒空）行为不变：合成卡独立承担叙事
++Given 系统就绪
++When thin 在途（steps 恒空）行为不变：合成卡独立承担叙事
++Then 行为符合本条标准描述
++
++### FR-03: 相关前端测试同步更新并全部通过
++Given 前端 / 测试 相关模块就绪
++When 相关前端测试同步更新并全部通过
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx :: 共存（2026-09-27-timeline-coexist）：归档补种 steps 后真实留痕时间线卡不被顶掉
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx :: FR-03（2026-09-26-change-real-timeline）：steps 为空时主线挂载真实留痕时间线卡
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx :: 变更详情页恢复钉子（2026-09-26-change-detail-restore-assets） 全部 9 用例；防回归面 page-team-toggle.test.tsx（13 用例）/ page-last-signal.test.tsx（5 用例）/ change-timeline-card.test.tsx（4 用例）
+
+diff --git a/.sillyspec/changes/2026-09-27-timeline-coexist/tasks.md b/.sillyspec/changes/2026-09-27-timeline-coexist/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-timeline-coexist/tasks.md
+@@ -0,0 +1,13 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T13:35:24.366Z
++---
++# 任务注册表（Tasks）— 2026-09-27-timeline-coexist
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: 变更详情页步骤时间线卡与真实留痕时间线卡共存：steps 非空时合成时间线卡也渲染（组件自身空态静默隐藏兜底不变）
++- [ ] task-02: thin 在途（steps 恒空）行为不变：合成卡独立承担叙事
++- [ ] task-03: 相关前端测试同步更新并全部通过

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-timeline-coexist",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结件不含本变更的前端代码改动，仅含 .sillyspec 四件套——代码事实只能由工作区现状佐证",
+      "evidence": "change.patch 全文 151 行只新增 .sillyspec/changes/2026-09-27-timeline-coexist/{design,proposal,requirements,tasks}.md 四个规范文件；design 槽2 承诺的 page.tsx（互斥改共存）与 page-restore-assets.test.tsx（共存钉子用例）均不在冻结 diff 中。代码事实已由工作区核实兑现（page.tsx:428-455 steps 卡条件渲染 + :462 ChangeTimelineCard 无条件挂载；test:212-285 共存用例断言两 testid 同屏），无行为缺陷，但作为「代码事实唯一来源」的交付留档未捕获核心代码，归档后 patch 资产不完整（可追溯性缺口，非功能问题）",
+      "location": ".sillyspec/changes/2026-09-27-timeline-coexist/change.patch:1-151"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok；边界已裁决：可接受（厚变更归档后事件表有历史数据会多出一张合成卡——信息增量而非误报，恒 provisional 观测角标已声明观测语义，无数据正确性风险；防抖面：卡内 query retry:false 失败静默隐藏、events/tasks/born 全空 return null 均在 change-timeline-card.tsx:86/90/104 属实生效）",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-27T13:49:24Z"
+}

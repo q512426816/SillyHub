@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-governance-rpc-actions",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "governance RPC 下发 root_path 未经 resolve_root_path_for_daemon 容器→宿主改写——容器部署下 digest 特性静默失效、action 恒失败",
+      "evidence": "runtime 模块对同一 _resolve_binding 返回值恒做改写后下发（get_progress/get_user_inputs/list_artifacts/read_artifact 均 resolve_root_path_for_daemon(root_path)，backend/app/modules/runtime/service.py:212-246，workspace/service.py:82 docstring 明言「backend 下发 root_path 给 daemon 时……做 container→host 改写」）；knowledge service 两处（digest params、action params）直发裸 binding.root_path。配置 container_path_prefix/host_path_prefix 的部署下 daemon 收到容器侧路径→spawn cwd 不存在→digest 报 internal 被 catch 静默回退 local（RPC 单源收敛特性整体失效、无告警）、action 直接失败。裸机部署（前缀未配）为 no-op 故测试与当前环境不爆。实测三模块测试/tsc 全绿不能覆盖此拓扑",
+      "location": "backend/app/modules/knowledge/service.py:127-131,168-171"
+    },
+    {
+      "severity": "P2",
+      "title": "governance_action 未重映射 DaemonRpcRemoteError——daemon 侧动作失败呈 500 通用文案，router 声明的错误族映射仅部分成立",
+      "evidence": "ws_hub.send_rpc 在 daemon 回 error dict 时抛 DaemonRpcRemoteError，该类刻意非 AppError（backend/app/modules/daemon/runtime/service.py:128 docstring：「Deliberately NOT an AppError: the HTTP endpoint re-maps it to DaemonRpcForbiddenError (403) or DaemonRpcRemoteGatewayError (502)」）；runtime 模块经 _send_runtime_rpc→_map_runtime_remote_error 落实该约定，knowledge service.governance_action 直调 hub.send_rpc 绕过映射。未绑定(404)/离线(504)/RPC 超时(504) 三族经 AppError 全局处理器成立，但 daemon 侧动作失败（spawn 30s 超时→RpcError timeout、internal）→ DaemonRpcRemoteError → 通用 Exception 处理器 500「服务器内部错误」，且丢失 daemon 输出尾部（design 承诺的失败信息面）。router.py:292 docstring「未绑定/离线时由 runtime 侧错误族映射（502/404/504）」与实际不符",
+      "location": "backend/app/modules/knowledge/service.py:153-177"
+    },
+    {
+      "severity": "P2",
+      "title": "FR-01/task-01「root_path 三道校验（RuntimeHandler 同款）」与实现不符：digest 仅一道自拟窄黑名单、action 零道，且写能力 handler 未接 allowed_roots 纵深防线",
+      "evidence": "requirements FR-01 与 task-01 均声明「RuntimeHandler 同款 spawn 模式：root_path 三道校验」（RuntimeHandler 三道=元字符→assertWithinAllowedRoots→存在性）；实现中 digest 只有 /[<>|&;$`\"']/ 一道（字符集较 ROOT_PATH_METACHAR_RE 缺 ()%^\\n\\r\\0），action 对 rootPath 无任何校验。注入面核实为无——root 只进 spawn cwd 选项不拼命令串（runSillyspecCmd 第三参，runtime-handler.ts:79-97 核实），故非直接可利用；但 repair-paths --write / redomain --write 会在任意 RPC 指定 cwd 下写 .sillyspec/knowledge，而 sibling handler（HostFsHandler/RuntimeHandler）均对 backend 来源请求强制 allowed_roots containment，本 handler 完全未接 rootsProvider/assertWithinAllowedRoots（file-rpc.js 已 import 在同文件可用）——纵深防御缺位 + requirements 声明与实现不对齐（design 槽1 仅承诺元字符黑名单，与实现一致，FR 文未随改）",
+      "location": "sillyhub-daemon/src/runtime-handler.ts:381-451"
+    },
+    {
+      "severity": "P3",
+      "title": "RPC happy path 信封契约漂移无测试拦截：GovernanceSignalOut.suggestion 必填 vs CLI 契约可选（披露的 ws_hub mock 缺口恰在此接缝）",
+      "evidence": "backend GovernanceSignalOut 五字段全必填（router.py:258-263，suggestion 无默认值）；CLI 侧 mk() 为 suggestion 可选契约（sillyspec src/knowledge-digest.js:113 `...(suggestion ? { suggestion } : {})`），当前 4 个 mk 调用点恰好都传值故今日不爆——一旦 CLI 版本产出无 suggestion 信号（契约允许），GovernanceOut 校验即 500 且被读路径外（response_model 在 router 层）。daemon 测试的 OK_ENVELOPE 假信封自带全部字段、backend 测试只测回退，两半都钉不住该接缝——「happy path 留 E2E（ws_hub mock 成本披露）」裁决可接受，但建议 GovernanceSignalOut.suggestion 加默认值或在 service 形状校验处逐 signal 兜底，成本低",
+      "location": "backend/app/modules/knowledge/router.py:258-263"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-07 披露「design 已披露差异」指针失准——design.md 四槽均未提及 domains 数组差异，披露仅存在于 FR-07 绑定槽自身（实质如实，非缩水欺瞒）",
+      "evidence": "FR-07 绑定写「结构化 domains 数组留 v3（design 已披露差异）」，但 design.md 槽1/槽4 通篇无 domains 数组或「detail 首词解析」字样——差异披露的交叉引用不实。披露实质核实为如实：组件 firstDomain=signal.detail.split(\" \")[0]（governance-cards.tsx），detail 格式「域 计数、域 计数」首词即域名，测试断言 from_domain:\"auto-backend\" 与实现一致；未做逐域按钮（仅首域可迁移，余域靠迁移后 refetch 迭代）确为实现面收窄但已被绑定槽如实陈述，非欺瞒",
+      "location": ".sillyspec/changes/2026-09-27-governance-rpc-actions/requirements.md:86"
+    },
+    {
+      "severity": "P3",
+      "title": "tasks.md task-08~11 已交付未勾选——「边干边勾」哨兵证据面缺 4/11",
+      "evidence": "提交版与当前工作树 tasks.md（二者相同，tasks.md 无未提交改动）task-08（前端按钮）/task-09（local 隐藏）/task-10（三模块测试）/task-11（pathspec 提交）均为 [ ]，而对应功能均已交付且测试绿（本评审实测复核）；commit message 亦只标 task-01..07。AGENTS 纪律「完成一条=立即勾，勾选是收口哨兵证据面」，flow done 未拦（gate 不查勾选面）",
+      "location": ".sillyspec/changes/2026-09-27-governance-rpc-actions/tasks.md:18-21"
+    },
+    {
+      "severity": "P3",
+      "title": "回退 except Exception 静默无日志——degrade 语义正确但不可观测",
+      "evidence": "governance_signals 的 try/except 全谱捕获后直接 pass（service.py:133-148），无任何 log——「离线/超时/未绑定/未注册」（可预期）与「信封形状不匹配/代码 bug」（应修）不可区分，容器部署下 digest 永久回退这类问题（见 P2-1）将完全无痕迹。degrade 本身属设计内（design 槽3「RPC 失败全谱回退」），不吞错升级、不为过，唯缺一行 warn 日志",
+      "location": "backend/app/modules/knowledge/service.py:147-148"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 机器残句与 daemon 侧实现不对齐（不可达路径）+ FR-11「11 个交付文件」计数不确",
+      "evidence": "①FR-02「缓存回退读点时降级跑」若读作 daemon 侧语义：digest 收 undefined root_path 时 spawn 于 daemon 进程 cwd（非 spec 缓存目录也非显式降级标记，结果取决于 daemon 启动目录）——当前 backend 恒发 root_path（binding.root_path 列 NOT NULL 恒有值）故不可达，FR-02 绑定以「daemon 侧缓存回退场景属运行时读点选择」话术滑过而非直陈未实现；机器文残句本可在 AGENT 槽澄清而未澄清。②FR-11「11 个交付文件+变更目录」：git show --stat 实为 9 代码文件+5 变更目录文件=14（零夹带核实成立：14 文件全部属本变更，change-patch.json files 清单与提交面一致，他会话进行中文件未被扫入）",
+      "location": ".sillyspec/changes/2026-09-27-governance-rpc-actions/requirements.md:71,98"
+    },
+    {
+      "severity": "P3",
+      "title": "盲维槽3「动作串行经 daemon 单 spawn」论证不严——无任何串行化机制",
+      "evidence": "「单 spawn」仅指每动作一个子进程；并发到达的两个 action RPC 各自 spawn 并发写同一 .sillyspec/knowledge（daemon 无队列/锁/互斥）。实际风险被前端 isPending 单飞（单卡按钮防重复点击）与单用户操作场景压住，跨用户同 workspace 并发 redomain 同域在 CLI 文件写无原子保障下存在交错写可能——论证应落在 UI 单飞+低频而非虚构的 daemon 串行性",
+      "location": "backend/app/modules/knowledge/service.py:153-177"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受）——digest 每请求现采无缓存（service 无缓存态，核实成立）；action 幂等性依托 CLI 端（repair-paths 路径归一幂等、redomain 源域清空后自然 no-op）——外部依赖论证，daemon/frontend 侧以 isPending 单飞补位；ws_hub 对迟到回包的 resolve_rpc 丢弃机制为既有先例，本变更未触碰",
+    "并发": "ok（边界已裁决：可接受）——「digest 读与 action 写并发时旧一拍快照可接受（信号非账本）」核实成立：digest 只读快照、无账本语义、UI invalidateQueries 自愈；「动作串行经 daemon 单 spawn」声明无机制支撑（见 findings P3），实际安全边界=前端单飞+低频人操作，建议后续以 daemon 侧按 workspace 串行化或 CLI 原子写收口",
+    "切换": "ok（边界已裁决：可接受，附条件）——「action 失败显式报错不回退（写操作无本地等价物）」理由成立且实现如实（governance_action 无 catch，防误降级为本地伪成功）；读路径 catch 全谱含协议错误属设计内 degrade（design 槽3「任何失败回退本地」原文如此），不吞错升级，唯静默无日志（P3）；「显式报错」在 daemon 侧失败场景退化为 500 通用文案（P2 错误族映射缺口）",
+    "作用域": "ok（边界已裁决：可接受，附条件）——RuntimeLiveService._resolve_binding 引用真实（backend/app/modules/runtime/service.py:129，返回 (daemon_id, root_path)、未绑定抛 RuntimeNotBound 404，四个既有方法同源消费）；私有方法跨模块复用与 explorer._resolve_binding「同语义」先例一致，可接受；root_path 元字符+域名元字符+kind 白名单三防线核验有效（root 只进 spawn cwd 不拼命令串、域名 [a-z0-9-]+ 无逃逸元字符、kind 集合硬编码，frontend/backend/daemon 三层同域校验），但 allowed_roots containment 缺席（P2）与容器路径改写缺席（P2）为本维真实缺口"
+  },
+  "reviewedAt": "2026-09-27T20:33:22+08:00"
+}
