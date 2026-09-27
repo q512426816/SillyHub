@@ -1,0 +1,3013 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index 6b12a4d15..aa6ae3d9f 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -374,7 +374,7 @@ export default function ChangeDetailPage({ params }: Props) {
+         </div>
+       ) : null}
+       {successMsg ? (
+-        <div className="rounded border border-green-300 bg-green-50 px-3 py-2 text-xs text-green-700">
++        <div style={{ borderColor: "hsl(var(--success))", backgroundColor: "var(--semantic-success-soft)" }} className="rounded border px-3 py-2 text-xs text-success">
+           {successMsg}
+         </div>
+       ) : null}
+@@ -403,7 +403,7 @@ export default function ChangeDetailPage({ params }: Props) {
+             >
+               <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+                 <h2 className="text-xs font-medium">
+-                  📋 步骤时间线 ({change.steps.length})
++                  步骤时间线 ({change.steps.length})
+                 </h2>
+                 {focusStage ? (
+                   <button
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+index ac8017d60..a63c2d5c1 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -224,7 +224,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     expect(screen.getByText(/只看待我处理/)).toBeInTheDocument();
+ 
+     await act(async () => {
+-      fireEvent.click(screen.getByRole("button", { name: /已归档/ }));
++      fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
+     });
+     await waitFor(() =>
+       expect(lastMainLoadParams()?.location).toBe("archive"),
+@@ -238,7 +238,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+   it("点快速修复 tab → 渲染 QuicklogTable，变更查询区/阶段筛选隐藏，主 load 不发", async () => {
+     await renderAndWait();
+     // quicklog 计数 mock 默认 0 → tab 按钮存在
+-    const quicklogTab = screen.getByRole("button", { name: /快速修复/ });
++    const quicklogTab = screen.getByRole("tab", { name: /快速修复/ });
+     await act(async () => {
+       fireEvent.click(quicklogTab);
+     });
+@@ -253,7 +253,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+       ([, q]: any[]) => q?.pageSize !== 1,
+     ).length;
+     await act(async () => {
+-      fireEvent.click(screen.getByRole("button", { name: /进行中/ }));
++      fireEvent.click(screen.getByRole("tab", { name: /进行中/ }));
+     });
+     const mainCallsAfter = mocks.listChanges.mock.calls.filter(
+       ([, q]: any[]) => q?.pageSize !== 1,
+@@ -307,8 +307,8 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     setupListChanges({ activeTotal: 5, archiveTotal: 3 });
+     await renderAndWait();
+ 
+-    const activeTab = screen.getByRole("button", { name: /^进行中/ });
+-    const archiveTab = screen.getByRole("button", { name: /已归档/ });
++    const activeTab = screen.getByRole("tab", { name: /^进行中/ });
++    const archiveTab = screen.getByRole("tab", { name: /已归档/ });
+     await waitFor(() => expect(activeTab).toHaveTextContent("5"));
+     await waitFor(() => expect(archiveTab).toHaveTextContent("3"));
+   });
+@@ -353,7 +353,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     expect(screen.getByText(/只看待我处理/)).toBeInTheDocument();
+ 
+     await act(async () => {
+-      fireEvent.click(screen.getByRole("button", { name: /已归档/ }));
++      fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
+     });
+     await waitFor(() =>
+       expect(screen.queryByText(/只看待我处理/)).not.toBeInTheDocument(),
+@@ -410,7 +410,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     expect(screen.getByText("待归档确认")).toBeInTheDocument();
+   });
+ 
+-  it("pending_review=null 且非 blocked → 占位 —（owner_id 设值避免双源 —）", async () => {
++  it("pending_review=null 且非 blocked → 无待办徽标（owner_id 设值，行内无 — 占位噪音）", async () => {
+     setupListChanges({
+       items: [
+         makeChange({
+@@ -421,7 +421,11 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+       ],
+     });
+     await renderAndWait();
+-    expect(screen.getByText("—")).toBeInTheDocument();
++    // 2026-09-26 重排：待办列并入两段式行首，无待办即不渲染徽标（不再有「—」占位）
++    expect(screen.queryByText("待提案审核")).not.toBeInTheDocument();
++    expect(screen.queryByText("阻塞中")).not.toBeInTheDocument();
++    // owner_id 降级渲染（UUID 前 8 位 mono）仍在
++    expect(screen.getByText("owner123")).toBeInTheDocument();
+   });
+ 
+   // ── 4. 空状态引导（task-09 / FR-04a：去表单，引导会话页）──────────────
+@@ -474,7 +478,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+   it("已归档空 → 「还没有归档的变更」", async () => {
+     await renderAndWait();
+     await act(async () => {
+-      fireEvent.click(screen.getByRole("button", { name: /已归档/ }));
++      fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
+     });
+     await waitFor(() =>
+       expect(screen.getByText(/还没有归档的变更/)).toBeInTheDocument(),
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index da3224de0..68b1fa768 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -9,17 +9,20 @@ import {
+   useQuery,
+   useQueryClient,
+ } from "@tanstack/react-query";
+-import { Checkbox, Input, Select, type TableProps } from "antd";
++import { Checkbox, Input, Pagination, Select } from "antd";
+ 
++import { PageContainer } from "@/components/layout";
+ import {
+-  DataTable,
+-  PageContainer,
+-  PageHeader,
+-  SectionCard,
+-} from "@/components/layout";
++  EmptyState,
++  IssueRow,
++  IssueRowHeader,
++  PageHead,
++  StateLabel,
++  UnderlineNav,
++  type StateLabelVariant,
++} from "@/components/primer";
+ import { Button, buttonVariants } from "@/components/ui/button";
+ import { ErrorBanner } from "@/components/ui/error-banner";
+-import { StatusBadge } from "@/components/ui/status-badge";
+ import { ChangeStepBadge } from "@/components/changes/change-step-badge";
+ import { ChangeActivityBadge } from "@/components/changes/change-activity-badge";
+ import { PlatformSyncSection } from "@/components/changes/platform-sync-section";
+@@ -50,16 +53,6 @@ interface Props {
+   params: { id: string };
+ }
+ 
+-// 查询条件垂直 Field（label 在上，控件在下），对齐 admin/roles / admin/users。
+-function Field({ label, children }: { label: string; children: ReactNode }) {
+-  return (
+-    <div className="flex w-full flex-col gap-1">
+-      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+-      {children}
+-    </div>
+-  );
+-}
+-
+ const TABS = [
+   { key: "active", label: "进行中" },
+   { key: "archive", label: "已归档" },
+@@ -425,26 +418,36 @@ export default function ChangesPage({ params }: Props) {
+     }
+   };
+ 
+-  // 待办徽标渲染（D-007 / design §7）：blocked 优先，否则 pending_review 投影，否则空占位。
++  // 待办徽标（D-007 / design §7）：blocked 优先，否则 pending_review 投影；
++  // primer StateLabel 承载（attention+clock=等待语义，error=阻塞），文本口径不变。
+   const renderTodoBadge = (c: ChangeSummary): ReactNode => {
+     if (c.status === "blocked") {
+-      return <StatusBadge kind="error">阻塞中</StatusBadge>;
++      return (
++        <StateLabel variant="error">阻塞中</StateLabel>
++      );
+     }
+     if (c.pending_review && PENDING_REVIEW_LABEL[c.pending_review]) {
+       return (
+-        <StatusBadge kind="warning">
++        <StateLabel variant="attention" iconName="clock">
+           {PENDING_REVIEW_LABEL[c.pending_review]}
+-        </StatusBadge>
++        </StateLabel>
+       );
+     }
+-    return <span className="text-xs text-muted-foreground">—</span>;
++    return null;
+   };
+ 
+-  // 负责人列渲染（task-05 / FR-04，2026-08-16-change-owner-from-token）：owner_name
+-  // = 后端 enrich 批量 join users 填充（display_name 优先 username fallback，
+-  // design §5 Phase 2.1，task-04 落地）。三态：owner_name 非空 → 用户名（可读，
+-  // 小字号）；owner_name 空且 owner_id 有值 → UUID 前 8 位短标识降级（mono，
+-  // enrich 未覆盖的兜底路径）；双空 → "—"（从未上行过 owner 的存量变更）。
++  // IssueRow 状态映射（FR-03 / design 第二层状态语义）：
++  // 终态（archived/location=archive，isTerminalChange 同款双条件）→ merged 合并勾；
++  // blocked → error；待办 → attention(clock)；其余进行中 → open 开圆。
++  const changeRowState = (c: ChangeSummary): StateLabelVariant => {
++    if (isTerminalChange(c)) return "merged";
++    if (c.status === "blocked") return "error";
++    if (c.pending_review) return "attention";
++    return "open";
++  };
++
++  // 负责人渲染（task-05 / FR-04，2026-08-16-change-owner-from-token）三态语义保留：
++  // owner_name → 用户名；owner_id → UUID 前 8 位 mono 降级；双空 → "—"。
+   const renderOwner = (c: ChangeSummary): ReactNode => {
+     if (c.owner_name) {
+       return <span className="text-xs text-foreground">{c.owner_name}</span>;
+@@ -459,124 +462,62 @@ export default function ChangesPage({ params }: Props) {
+     return <span className="text-xs text-muted-foreground">—</span>;
+   };
+ 
+-  const columns: TableProps<ChangeSummary>["columns"] = [
+-    {
+-      title: "待办状态",
+-      key: "todo",
+-      // task-12（design §8.1）：列内追加活动徽标（真值表三态：进行中/停滞/空闲），
+-      // 消费 step_progress.current_step_status + last_pushed_at（task-11 投影）；
+-      // 数据随既有 30s 智能轮询刷新，零新增请求。宽度 120→150 容纳
+-      // 「停滞 · 最后信号 x 小时前」最长文案单行不折行。
+-      width: 150,
+-      render: (_v: unknown, c: ChangeSummary) => (
+-        <div className="flex flex-col items-start gap-1">
++  // 单行渲染（FR-03 IssueRow 两段式）：主行 = 待办徽标 + key mono 链接 + 标题；
++  // 副行 = 阶段徽标 + 活动徽标 + 组件 + 执行用量；右侧 = 负责人 + 更新时间 + hover 删除。
++  const renderChangeRow = (c: ChangeSummary): ReactNode => (
++    <IssueRow
++      key={c.id}
++      state={changeRowState(c)}
++      onClick={() => {
++        // 行级导航保持 Link 语义：整行点击进详情（链接本身也保留可点）。
++        window.location.assign(`/workspaces/${workspaceId}/changes/${c.id}`);
++      }}
++      title={
++        <>
+           {renderTodoBadge(c)}
++          <Link
++            href={`/workspaces/${workspaceId}/changes/${c.id}`}
++            prefetch={false}
++            className="font-mono text-xs text-primary hover:underline"
++          >
++            {c.change_key}
++          </Link>
++          {c.title && (
++            <span className="text-xs text-muted-foreground">{c.title}</span>
++          )}
++        </>
++      }
++      meta={
++        <>
++          <ChangeStepBadge
++            stage={c.current_stage ?? "scan"}
++            stepProgress={c.step_progress ?? null}
++          />
+           <ChangeActivityBadge
+             currentStepStatus={c.step_progress?.current_step_status ?? null}
+             lastPushedAt={c.last_pushed_at ?? null}
+           />
+-        </div>
+-      ),
+-    },
+-    {
+-      title: "标题",
+-      key: "title",
+-      render: (_v: unknown, c: ChangeSummary) => (
+-        <Link
+-          href={`/workspaces/${workspaceId}/changes/${c.id}`}
+-          prefetch={false}
+-          className="group inline-block"
+-        >
+-          <span className="block font-mono text-[11px] text-primary group-hover:underline">
+-            {c.change_key}
+-          </span>
+-          {c.title && (
+-            <span className="block text-[11px] text-muted-foreground">
+-              {c.title}
+-            </span>
++          {c.affected_components.length > 0 && (
++            <span className="font-mono">{c.affected_components.join(", ")}</span>
+           )}
+-        </Link>
+-      ),
+-    },
+-    {
+-      title: "负责人",
+-      key: "owner",
+-      width: 90,
+-      render: (_v: unknown, c: ChangeSummary) => renderOwner(c),
+-    },
+-    {
+-      title: "阶段",
+-      key: "stage",
+-      // task-06 / FR-03：换 ChangeStepBadge（stage 主行 + step 摘要副行）。
+-      // step_progress 缺省传 null 由组件内部降级只渲染 stage 主行（D-003@v1，
+-      // 视觉与现状一致）；宽度 90→150 容纳「step x/y · 当前步名」副行。
+-      width: 150,
+-      render: (_v: unknown, c: ChangeSummary) => (
+-        <ChangeStepBadge
+-          stage={c.current_stage ?? "scan"}
+-          stepProgress={c.step_progress ?? null}
+-        />
+-      ),
+-    },
+-    {
+-      title: "影响组件",
+-      key: "affected_components",
+-      ellipsis: true,
+-      render: (c: ChangeSummary) => (
+-        <span className="text-[11px]">
+-          {c.affected_components.length > 0
+-            ? c.affected_components.join(", ")
+-            : "—"}
+-        </span>
+-      ),
+-    },
+-    {
+-      // task-08（D-004@v1）：执行列——紧凑两行（耗时+进行中标记 / token·次），
+-      // 起止时间走整格 title 悬浮；数据源 c.usage（task-06 投影，None →「—」）
+-      title: "执行",
+-      key: "usage",
+-      width: 170,
+-      render: (_v: unknown, c: ChangeSummary) => (
+-        <UsageExecCell usage={c.usage} />
+-      ),
+-    },
+-    {
+-      title: (
+-        <button
+-          type="button"
+-          onClick={toggleSort}
+-          className="inline-flex items-center gap-0.5 font-normal text-primary hover:underline"
+-          title="点击切换升序/降序"
+-        >
+-          更新时间
+-          <span aria-hidden>{sortDir === "updated_at_desc" ? "↓" : "↑"}</span>
+-        </button>
+-      ),
+-      dataIndex: "updated_at",
+-      key: "updated_at",
+-      align: "right",
+-      width: 140,
+-      render: (v: string) => (
+-        <span className="text-[11px] text-muted-foreground">
+-          {new Date(v).toLocaleString("zh-CN", {
+-            year: "numeric",
+-            month: "2-digit",
+-            day: "2-digit",
+-            hour: "2-digit",
+-            minute: "2-digit",
+-          })}
+-        </span>
+-      ),
+-    },
+-    // task-07（design §6.3 / FR-05d）：操作列删除入口——仅权限可见者渲染
+-    // （canDeleteChange 三判启发式，后端权威）；无权行渲染空占位（不加「—」，
+-    // 避免与待办/负责人列的「—」占位叠加干扰可读性）。active/archive 两 tab
+-    // 均可删（§6.1 归档区变更同样可删）。
+-    {
+-      title: "操作",
+-      key: "actions",
+-      width: 70,
+-      render: (_v: unknown, c: ChangeSummary) =>
++          <UsageExecCell usage={c.usage} />
++        </>
++      }
++      right={
++        <>
++          <span className="whitespace-nowrap">{renderOwner(c)}</span>
++          <span className="whitespace-nowrap tabular-nums">
++            {new Date(c.updated_at).toLocaleString("zh-CN", {
++              year: "numeric",
++              month: "2-digit",
++              day: "2-digit",
++              hour: "2-digit",
++              minute: "2-digit",
++            })}
++          </span>
++        </>
++      }
++      hoverActions={
+         canDeleteChange(c, deleteAccess) ? (
+           <Button
+             size="sm"
+@@ -587,9 +528,10 @@ export default function ChangesPage({ params }: Props) {
+           >
+             删除
+           </Button>
+-        ) : null,
+-    },
+-  ];
++        ) : null
++      }
++    />
++  );
+ 
+   // 副标题（task-06）：workspace 名 + 计数。
+   // 聚焦时 N=total（当前待我处理），M=tabTotals.active（进行中总数，单独 useQuery 拉）。
+@@ -685,7 +627,13 @@ export default function ChangesPage({ params }: Props) {
+ 
+   return (
+     <PageContainer size="full">
+-      <PageHeader
++      {/* 四层结构（FR-03 / 原型「变更中心」视图）：页头 → 工具条 → 状态 tab → 行式列表 */}
++      <PageHead
++        breadcrumb={
++          <span>
++            {workspace?.name ?? "—"} / <span className="text-foreground">变更中心</span>
++          </span>
++        }
+         title="变更中心"
+         subtitle={renderSubtitle()}
+         actions={
+@@ -703,72 +651,103 @@ export default function ChangesPage({ params }: Props) {
+ 
+       {bannerError && <ErrorBanner message={bannerError} />}
+ 
+-      {stats && (
+-        <div className="rounded border border-success/30 bg-success/10 px-3 py-2 text-xs text-success">
+-          已重新扫描：解析 {stats.parsed}，新增 {stats.created} · 更新{" "}
+-          {stats.updated} · 删除 {stats.deleted}。
+-          {warnings.length > 0 && ` ${warnings.length} 个警告。`}
++      {/* 条件区收敛（FR-03 / G-2）：reparse 结果与解析警告合并为单条可折叠 flash 条；
++          无内容零占位。PlatformSyncSection 自渲染 null（无冲突时）。 */}
++      {(stats || warnings.length > 0) && (
++        <div className="flex flex-col gap-1.5 rounded-md border px-3 py-2 text-xs"
++          style={{ borderColor: "hsl(var(--warning))", backgroundColor: "var(--semantic-warning-soft)" }}
++        >
++          {stats && (
++            <div className="text-foreground">
++              已重新扫描：解析 {stats.parsed}，新增 {stats.created} · 更新{" "}
++              {stats.updated} · 删除 {stats.deleted}。
++              {warnings.length > 0 && ` ${warnings.length} 个警告。`}
++            </div>
++          )}
++          {warnings.length > 0 && (
++            <details>
++              <summary className="cursor-pointer text-warning">解析警告（{warnings.length}）</summary>
++              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-warning">
++                {warnings.map((w, i) => (
++                  <li key={i}>
++                    <span className="font-mono">[{w.code}]</span>{" "}
++                    {w.change_key ?? "—"}: {w.detail}
++                  </li>
++                ))}
++              </ul>
++            </details>
++          )}
+         </div>
+       )}
+ 
+-      {warnings.length > 0 && (
+-        <SectionCard title="解析警告">
+-          <ul className="list-disc space-y-0.5 pl-4 text-xs text-warning">
+-            {warnings.map((w, i) => (
+-              <li key={i}>
+-                <span className="font-mono">[{w.code}]</span>{" "}
+-                {w.change_key ?? "—"}: {w.detail}
+-              </li>
+-            ))}
+-          </ul>
+-        </SectionCard>
+-      )}
+-
+       {/* 平台同步处理区（2026-09-04-conflict-resolve-entry task-09 / FR-01~05）：
+           本机未决同步冲突 + ghost 残留的一键裁决/清理；无绑定或无 sillyspec_status
+           时组件自渲染 null，页面行为与现状一致（design §9） */}
+       <PlatformSyncSection workspaceId={workspaceId} />
+ 
+-      {/* 主 tab：进行中 / 已归档（按 location，D-007），挂数量（tabTotals 独立 useQuery 拉） */}
+-      <div className="flex items-center gap-1">
+-        {TABS.map((t) => {
+-          const cnt =
++      {/* 工具条（FR-03）：一行式筛选——搜索/阶段/聚焦（进行中）+ 搜索/重置 */}
++      {tab !== "quicklog" && (
++        <div className="flex flex-wrap items-center gap-2">
++          <Input
++            value={searchInput}
++            onChange={(e) => setSearchInput(e.target.value)}
++            placeholder="搜索 Key / 标题 / 组件…"
++            allowClear
++            onPressEnter={() => handleSearchClick()}
++            className="w-64"
++          />
++          <Select
++            value={stageFilter}
++            onChange={(v) => setStageFilter(v ?? "")}
++            className="w-36"
++          >
++            {STAGE_OPTIONS.map((opt) => (
++              <Select.Option key={opt.value} value={opt.value}>
++                {opt.label}
++              </Select.Option>
++            ))}
++          </Select>
++          {tab === "active" && (
++            <Checkbox
++              checked={focusMine}
++              onChange={(e) => {
++                setFocusMine(e.target.checked);
++                setPage(1);
++              }}
++            >
++              只看待我处理
++            </Checkbox>
++          )}
++          <div className="ml-auto flex items-center gap-2">
++            <Button size="sm" onClick={handleSearchClick}>
++              搜索
++            </Button>
++            <Button size="sm" variant="outline" onClick={handleResetClick}>
++              重置
++            </Button>
++          </div>
++        </div>
++      )}
++
++      {/* 状态 tab（FR-03 UnderlineNav）：计数实时联动（quicklog 存量口径在 label 注明） */}
++      <UnderlineNav<ChangesTab>
++        value={tab}
++        onChange={handleTabChange}
++        items={TABS.map((t) => ({
++          key: t.key,
++          label:
++            t.key === "quicklog" ? "快速修复（存量）" : t.label,
++          counter:
+             t.key === "active"
+               ? tabTotals.active
+               : t.key === "archive"
+                 ? tabTotals.archive
+-                : tabTotals.quicklog;
+-          return (
+-            <button
+-              key={t.key}
+-              onClick={() => handleTabChange(t.key as ChangesTab)}
+-              className={`border-b-2 pb-1.5 text-xs font-medium transition-colors ${
+-                tab === t.key
+-                  ? "border-primary text-primary"
+-                  : "border-transparent text-muted-foreground hover:text-foreground"
+-              } mr-3 last:mr-0`}
+-            >
+-              {t.label}
+-              {cnt !== undefined && (
+-                <span className="ml-1 inline-block min-w-[18px] rounded-full bg-muted px-1.5 text-[11px] text-muted-foreground">
+-                  {/* 存量口径（task-09）：quick 通道已退役，quicklog 计数只含存量条目 */}
+-                  {t.key === "quicklog" ? `存量 · ${cnt}` : cnt}
+-                </span>
+-              )}
+-            </button>
+-          );
+-        })}
+-      </div>
++                : tabTotals.quicklog,
++        }))}
++      />
+ 
+-      {/* task-08（D-001/FR-05）：快速修复 tab——独立查询区（无阶段/聚焦概念）+ QuicklogTable */}
+-      {tab === "quicklog" && (
+-        <SectionCard bodyPadding="p-2">
+-          <QuicklogTable
+-            workspaceId={workspaceId}
+-            onSelect={setQuicklogSelected}
+-          />
+-        </SectionCard>
+-      )}
++      {/* task-08（D-001/FR-05）：快速修复 tab——独立查询区 + QuicklogTable */}
++      {tab === "quicklog" && <QuicklogTable workspaceId={workspaceId} onSelect={setQuicklogSelected} />}
+ 
+       {/* task-09（FR-06/D-006）：quicklog 条目详情抽屉 */}
+       <QuicklogDrawer
+@@ -777,90 +756,51 @@ export default function ChangesPage({ params }: Props) {
+         onClose={() => setQuicklogSelected(null)}
+       />
+ 
++      {/* 行式列表（FR-03 antd Table 退役）：表头排序 + IssueRow 行 + EmptyState + 分页 */}
+       {tab !== "quicklog" && (
+-      <SectionCard bodyPadding="p-2">
+-        {/* 工具栏：搜索 + 重置（右对齐，对齐 FRONTEND_PAGE_STYLE §2） */}
+-        <div className="mb-2 flex items-center justify-end gap-2">
+-          <Button size="sm" onClick={handleSearchClick}>
+-            搜索
+-          </Button>
+-          <Button size="sm" variant="outline" onClick={handleResetClick}>
+-            重置
+-          </Button>
+-        </div>
+-        {/* 查询区：进行中 3 格（关键词/阶段/待我处理聚焦）、归档 2 格，消留白
+-            （task-06 原 grid-cols-4 右半空；ql-20260818-004 聚焦下放第三格） */}
+-        <div
+-          className={cn(
+-            "grid w-full gap-3",
+-            tab === "active" ? "grid-cols-3" : "grid-cols-2",
+-          )}
+-        >
+-          <Field label="关键词">
+-            <Input
+-              value={searchInput}
+-              onChange={(e) => setSearchInput(e.target.value)}
+-              placeholder="搜索 Key / 标题 / 组件…"
+-              allowClear
+-              onPressEnter={() => handleSearchClick()}
++        <>
++          <div className="overflow-hidden rounded-lg border" style={{ borderColor: "hsl(var(--border))" }}>
++            <IssueRowHeader
++              title="变更"
++              right={
++                <button
++                  type="button"
++                  onClick={toggleSort}
++                  className="inline-flex items-center gap-0.5 hover:underline"
++                  title="点击切换升序/降序"
++                >
++                  更新时间
++                  <span aria-hidden>{sortDir === "updated_at_desc" ? "↓" : "↑"}</span>
++                </button>
++              }
+             />
+-          </Field>
+-          <Field label="阶段">
+-            <Select
+-              value={stageFilter}
+-              onChange={(v) => setStageFilter(v ?? "")}
+-              className="w-full"
+-            >
+-              {STAGE_OPTIONS.map((opt) => (
+-                <Select.Option key={opt.value} value={opt.value}>
+-                  {opt.label}
+-                </Select.Option>
+-              ))}
+-            </Select>
+-          </Field>
+-          {/* 聚焦筛选（D-007 → ql-20260818-004 下放查询区）：仅进行中视图，
+-              默认不勾选；items-end 与左侧 Input/Select 控件底对齐 */}
+-          {tab === "active" && (
+-            <div className="flex w-full items-end pb-1.5">
+-              <Checkbox
+-                checked={focusMine}
+-                onChange={(e) => {
+-                  setFocusMine(e.target.checked);
+-                  setPage(1);
+-                }}
+-              >
+-                只看待我处理
+-              </Checkbox>
+-            </div>
+-          )}
+-        </div>
+-      </SectionCard>
+-      )}
+-
+-      {tab !== "quicklog" && (
+-      <DataTable<ChangeSummary>
+-        rowKey="id"
+-        columns={columns}
+-        dataSource={items}
+-        loading={loading}
+-        size="small"
+-        bordered
+-        scroll={{ y: "calc(100vh - 430px)" }}
+-        pagination={{
+-          current: page,
+-          pageSize,
+-          total,
+-          showSizeChanger: true,
+-          pageSizeOptions: [10, 20, 50, 100],
+-          showTotal: (t) => `共 ${t} 条`,
+-          onChange: (p, s) => {
+-            setPage(p);
+-            setPageSize(s);
+-          },
+-        }}
+-        // 空态走自定义 ReactNode（分场景 + CTA），透传给 antd Table locale.emptyText
+-        locale={{ emptyText: renderEmpty() }}
+-      />
++            {loading ? (
++              <div className="py-10 text-center text-xs text-muted-foreground">
++                加载中…
++              </div>
++            ) : items.length === 0 ? (
++              renderEmpty()
++            ) : (
++              <div className="divide-y" style={{ borderColor: "hsl(var(--border))" }}>
++                {items.map((c) => renderChangeRow(c))}
++              </div>
++            )}
++          </div>
++          <div className="flex justify-end">
++            <Pagination
++              current={page}
++              pageSize={pageSize}
++              total={total}
++              showSizeChanger
++              pageSizeOptions={[10, 20, 50, 100]}
++              showTotal={(t) => `共 ${t} 条`}
++              onChange={(p, s) => {
++                setPage(p);
++                setPageSize(s);
++              }}
++            />
++          </div>
++        </>
+       )}
+ 
+       {/* task-07：删除确认弹层（受控 target，null = 关闭；确认先关弹层再
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx
+index 931a4edd2..421a825be 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx
+@@ -327,7 +327,7 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
+     expect(screen.getByText("项目组组件")).toBeInTheDocument();
+     expect(screen.getByText("进行中变更")).toBeInTheDocument();
+     expect(screen.getByText("已归档变更")).toBeInTheDocument();
+-    const quickCard = screen.getByText("快速修复").closest("a");
++    const quickCard = screen.getByText(/快速修复/).closest("a");
+     expect(quickCard).toHaveAttribute(
+       "href",
+       "/workspaces/ws-1/changes?tab=quicklog",
+@@ -408,18 +408,21 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
+     // 不应出现"请先绑定"占位
+     expect(screen.queryByText("请先绑定守护进程。")).not.toBeInTheDocument();
+ 
+-    // ql-20260820-013 信息区已平铺为 SectionCard 卡片（原 Collapse 移除），
+-    // select 不再处于折叠面板，querySelector 取法保留（语义不变）。
++    // 2026-09-26 重排 FR-06：原生 select 换 antd Select——打开下拉断言选项
++    // （语义不变：选项含 Claude Code、不含 Codex）。
++    // 按「智能体提供方」label 定位兄弟 antd Select（避免命中页面上其他 Select）
+     const select = await waitFor(() => {
+-      const el = document.querySelector('select');
+-      expect(el).toBeInstanceOf(HTMLSelectElement);
+-      return el as HTMLSelectElement;
++      const label = screen.getByText("智能体提供方");
++      const el = label.parentElement?.querySelector(".ant-select");
++      expect(el).not.toBeNull();
++      return el as HTMLElement;
+     });
+     expect(select).toBeInTheDocument();
+-    // 选项应包含 claude
+-    expect(select).toContainHTML("Claude Code");
++    fireEvent.mouseDown(select);
++    // 选项应包含 claude（antd option 渲染在下拉浮层）
++    expect(await screen.findByText("Claude Code")).toBeInTheDocument();
+     // 不应包含 codex（那是另一个 daemon 的）
+-    expect(select).not.toContainHTML("Codex");
++    expect(screen.queryByText("Codex")).not.toBeInTheDocument();
+   });
+ 
+   it("default_agent 卡片展示：已绑 daemon 无在线 provider 时显示无 provider 提示", async () => {
+@@ -606,14 +609,18 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
+     // 只读态：状态徽标显示「活跃」（状态行 dl 内）
+     expect(screen.getByText("活跃")).toBeInTheDocument();
+ 
+-    // 展开「编辑」→ 状态下拉出现
++    // 展开「编辑」→ 状态下拉出现（antd Select）
+     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+     const statusLabel = screen.getByText("状态（归档后默认不再出现在工作区列表）");
+-    const statusSelect = statusLabel.parentElement?.querySelector("select");
+-    expect(statusSelect).not.toBeNull();
++    const statusSelectWrap = await waitFor(() => {
++      const el = statusLabel.parentElement?.querySelector(".ant-select");
++      expect(el).not.toBeNull();
++      return el as HTMLElement;
++    });
+ 
+-    // 改「已归档」→ 保存按钮解禁 → 点保存
+-    fireEvent.change(statusSelect!, { target: { value: "archived" } });
++    // 改「已归档」（打开下拉点选）→ 保存按钮解禁 → 点保存
++    fireEvent.mouseDown(statusSelectWrap);
++    fireEvent.click(await screen.findByTitle("已归档"));
+     fireEvent.click(screen.getByRole("button", { name: "保存" }));
+ 
+     await waitFor(() =>
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+index f68eb2663..586d5786f 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+@@ -45,7 +45,7 @@ import {
+   WorkspaceAccessGuide,
+   type AccessGuideInitial,
+ } from "@/components/workspace-access-guide";
+-import { Modal } from "antd";
++import { Modal, Select, Input} from "antd";
+ import { useSession } from "@/stores/session";
+ 
+ /* ------------------------------------------------------------------ */
+@@ -423,68 +423,64 @@ export default function WorkspaceDetailPage({ params }: Props) {
+                 <label className="text-[11px] text-muted-foreground">
+                   状态（归档后默认不再出现在工作区列表）
+                 </label>
+-                <select
++                {/* 2026-09-26 重排 FR-06：原生 select 换 antd（存量值动态 option 语义保留） */}
++                <Select
+                   value={statusDraft}
+-                  onChange={(e) => setStatusDraft(e.target.value)}
+-                  className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+-                >
+-                  <option value="active">活跃</option>
+-                  <option value="archived">已归档</option>
+-                  {/* 存量过渡态（pending 等）：词表外当前值追加原值选项防止 React
+-                      select 失配回跳（形态对齐 typeDraft 存量值处理）。 */}
+-                  {statusDraft !== "active" && statusDraft !== "archived" && (
+-                    <option value={statusDraft}>
+-                      {WORKSPACE_STATUS_LABEL[statusDraft] ?? statusDraft}（存量值）
+-                    </option>
+-                  )}
+-                </select>
++                  onChange={(v) => setStatusDraft(v)}
++                  className="w-full"
++                  options={[
++                    { value: "active", label: "活跃" },
++                    { value: "archived", label: "已归档" },
++                    ...(statusDraft !== "active" && statusDraft !== "archived"
++                      ? [{
++                          value: statusDraft,
++                          label: `${WORKSPACE_STATUS_LABEL[statusDraft] ?? statusDraft}（存量值）`,
++                        }]
++                      : []),
++                  ]}
++                />
+               </div>
+               <div className="space-y-1">
+                 <label className="text-[11px] text-muted-foreground">
+                   工作区类型（不选即&ldquo;未分类&rdquo;）
+                 </label>
+-                <select
++                <Select
+                   value={typeDraft ?? ""}
+-                  onChange={(e) => setTypeDraft(e.target.value === "" ? null : e.target.value)}
+-                  className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+-                >
+-                  <option value="">未分类</option>
+-                  {WORKSPACE_TYPE_OPTIONS.map((option) => (
+-                    <option key={option.value} value={option.value}>
+-                      {option.label}
+-                    </option>
+-                  ))}
+-                  {/* 存量未知旧值：下拉值集合外的当前值,追加原值选项防止 React
+-                      select 失配回跳第一项（形态对齐 default_agent 离线追加选项）。 */}
+-                  {typeDraft && !WORKSPACE_TYPE_OPTIONS.some((o) => o.value === typeDraft) && (
+-                    <option value={typeDraft}>{typeDraft}（存量值）</option>
+-                  )}
+-                </select>
++                  onChange={(v) => setTypeDraft(v === "" ? null : v)}
++                  className="w-full"
++                  options={[
++                    { value: "", label: "未分类" },
++                    ...WORKSPACE_TYPE_OPTIONS.map((option) => ({
++                      value: option.value,
++                      label: option.label,
++                    })),
++                    ...(typeDraft && !WORKSPACE_TYPE_OPTIONS.some((o) => o.value === typeDraft)
++                      ? [{ value: typeDraft, label: `${typeDraft}（存量值）` }]
++                      : []),
++                  ]}
++                />
+               </div>
+               <div className="space-y-1">
+                 <label className="text-[11px] text-muted-foreground">
+                   角色（如&ldquo;订单模块&rdquo;，≤100 字符）
+                 </label>
+-                <input
+-                  type="text"
++                <Input
+                   value={roleDraft}
+                   maxLength={100}
+                   onChange={(e) => setRoleDraft(e.target.value)}
+                   placeholder="描述这个工作区在项目中的角色"
+-                  className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+                 />
+               </div>
+               <div className="space-y-1">
+                 <label className="text-[11px] text-muted-foreground">
+                   用途说明（≤2000 字符）
+                 </label>
+-                <textarea
++                <Input.TextArea
+                   value={descriptionDraft}
+                   maxLength={2000}
+                   rows={3}
+                   onChange={(e) => setDescriptionDraft(e.target.value)}
+                   placeholder="这个工作区的用途说明"
+-                  className="w-full resize-y rounded border border-input bg-background p-2.5 text-sm focus:border-ring focus:outline-none"
+                 />
+               </div>
+             </div>
+@@ -542,23 +538,24 @@ export default function WorkspaceDetailPage({ params }: Props) {
+               <div className="flex items-end gap-2">
+                 <div className="flex-1 space-y-1">
+                   <label className="text-[11px] text-muted-foreground">智能体提供方</label>
+-                  <select
++                  <Select
+                     value={defaultAgent ?? ""}
+-                    onChange={(e) => setDefaultAgent(e.target.value === "" ? null : e.target.value)}
+-                    className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+-                  >
+-                    <option value="">未设置（自动选最近在线的提供方）</option>
+-                    {boundDaemonProviders.map((p) => (
+-                      <option key={p} value={p}>
+-                        {PROVIDER_META[p]?.label ?? p}
+-                      </option>
+-                    ))}
+-                    {defaultAgent && !boundDaemonProviders.includes(defaultAgent) && (
+-                      <option value={defaultAgent}>
+-                        {PROVIDER_META[defaultAgent]?.label ?? defaultAgent}（离线）
+-                      </option>
+-                    )}
+-                  </select>
++                    onChange={(v) => setDefaultAgent(v === "" ? null : v)}
++                    className="w-full"
++                    options={[
++                      { value: "", label: "未设置（自动选最近在线的提供方）" },
++                      ...boundDaemonProviders.map((p) => ({
++                        value: p,
++                        label: PROVIDER_META[p]?.label ?? p,
++                      })),
++                      ...(defaultAgent && !boundDaemonProviders.includes(defaultAgent)
++                        ? [{
++                            value: defaultAgent,
++                            label: `${PROVIDER_META[defaultAgent]?.label ?? defaultAgent}（离线）`,
++                          }]
++                        : []),
++                    ]}
++                  />
+                 </div>
+                 <div className="flex-1 space-y-1">
+                   <label className="text-[11px] text-muted-foreground">智能体模型</label>
+@@ -608,7 +605,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
+                 variant="outline"
+                 size="sm"
+                 onClick={() => setAccessEditing(true)}
+-                className="h-7 border-white/20 bg-white/10 text-xs text-white hover:bg-white/20 hover:text-white"
++                className="h-7 text-xs"
+                 data-testid="binding-edit-entry"
+               >
+                 编辑我的接入配置
+@@ -623,7 +620,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
+           <div
+             role="status"
+             data-testid="archived-workspace-banner"
+-            className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-800"
++            style={{ borderColor: "hsl(var(--warning))", backgroundColor: "var(--semantic-warning-soft)" }}
++            className="flex flex-wrap items-center gap-2 rounded-md border px-4 py-2.5 text-xs text-warning"
+           >
+             <Archive className="h-3.5 w-3.5 shrink-0" />
+             <span>
+diff --git a/frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx
+index a31a09a61..8694798db 100644
+--- a/frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx
+@@ -268,6 +268,17 @@ afterEach(() => {
+   vi.restoreAllMocks();
+ });
+ 
++
++// 2026-09-26 重排 FR-05：分页换 antd Pagination——翻页按钮改类选择器
++// （.ant-pagination-next/prev 内 button；语义与旧 aria-label 查询一致）。
++function pagerButton(_container: unknown, dir: "next" | "prev"): HTMLButtonElement {
++  const btn = document.querySelector(`.ant-pagination-${dir} button`);
++  if (!(btn instanceof HTMLButtonElement)) {
++    throw new Error(`找不到分页 ${dir} 按钮`);
++  }
++  return btn;
++}
++
+ describe("WorkspacesPage 选择器改造 (task-07)", () => {
+   // ql-20260821-007：平台管理/系统设置旁路链接已按用户反馈删除（顶部菜单另有入口），用例移除。
+ 
+@@ -408,7 +419,7 @@ describe("WorkspacesPage 拖拽排序接线 (task-09/task-10)", () => {
+ 
+   /** 当前页翻到第 2 页（0 基 page=1）——四象限/同页/自锚都以当前页 1 为基准。 */
+   async function gotoPage1() {
+-    fireEvent.click(screen.getByLabelText("下一页"));
++    fireEvent.click(pagerButton(null, "next"));
+     await waitFor(() =>
+       expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
+         expect.objectContaining({ offset: 12 }),
+@@ -545,9 +556,9 @@ describe("WorkspacesPage 拖拽排序接线 (task-09/task-10)", () => {
+     mockPagedList(26);
+     renderPage(<WorkspacesPage />);
+     await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(12));
+-    expect(screen.getByText("共 26 条 · 第 1 页")).toBeInTheDocument();
+-    expect((screen.getByLabelText("上一页") as HTMLButtonElement).disabled).toBe(true);
+-    expect((screen.getByLabelText("下一页") as HTMLButtonElement).disabled).toBe(false);
++    expect(screen.getByText("共 26 条")).toBeInTheDocument();
++    expect(pagerButton(null, "prev").disabled).toBe(true);
++    expect(pagerButton(null, "next").disabled).toBe(false);
+ 
+     // 第 2 页：满页 12 张、无重复 id。
+     await gotoPage1();
+@@ -560,7 +571,7 @@ describe("WorkspacesPage 拖拽排序接线 (task-09/task-10)", () => {
+     expect((gridMock.lastProps as { total?: number }).total).toBe(26);
+ 
+     // 第 3 页（末页）：允许不满（26-24=2），total 不变，下一页禁用。
+-    fireEvent.click(screen.getByLabelText("下一页"));
++    fireEvent.click(pagerButton(null, "next"));
+     await waitFor(() =>
+       expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
+         expect.objectContaining({ offset: 24 }),
+@@ -568,10 +579,10 @@ describe("WorkspacesPage 拖拽排序接线 (task-09/task-10)", () => {
+     );
+     await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(2));
+     expect((gridMock.lastProps as { total?: number }).total).toBe(26);
+-    expect((screen.getByLabelText("下一页") as HTMLButtonElement).disabled).toBe(true);
++    expect(pagerButton(null, "next").disabled).toBe(true);
+ 
+     // 模拟 move 成功（onMoved 上抛 rank→page=1）→ 翻页 reload：limit 仍恒 12。
+-    fireEvent.click(screen.getByLabelText("上一页")); // 便于区分 onMoved 触发的 reload
++    fireEvent.click(pagerButton(null, "prev")); // 便于区分 onMoved 触发的 reload
+     await waitFor(() =>
+       expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
+         expect.objectContaining({ offset: 12 }),
+diff --git a/frontend/src/app/(dashboard)/workspaces/page.tsx b/frontend/src/app/(dashboard)/workspaces/page.tsx
+index 45bd59339..e91be408c 100644
+--- a/frontend/src/app/(dashboard)/workspaces/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/page.tsx
+@@ -4,10 +4,11 @@ import Link from "next/link";
+ import { useRouter } from "next/navigation";
+ import { useCallback, useEffect, useState } from "react";
+ import { listLinkedProjects, type PpmProjectBrief } from "@/lib/workspace";
+-import { Input, Modal, Select } from "antd";
++import { Input, Modal, Pagination, Select } from "antd";
+ 
+ import { Button, buttonVariants } from "@/components/ui/button";
+-import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
++import { PageContainer, SectionCard } from "@/components/layout";
++import { PageHead } from "@/components/primer";
+ import { ErrorBanner } from "@/components/ui/error-banner";
+ import { EmptyState } from "@/components/ui/empty-state";
+ import { FolderGit2 } from "lucide-react";
+@@ -387,8 +388,8 @@ export default function WorkspacesPage() {
+ 
+   return (
+     <PageContainer size="full">
+-      <PageHeader
+-        title="选择工作区"
++      <PageHead
++        title="工作区"
+         subtitle="选择一个工作区开始，或在右上角进入平台后台"
+         actions={
+           <>
+@@ -525,31 +526,15 @@ export default function WorkspacesPage() {
+             onMoved={handleMoved}
+             onMoveFailed={() => void reload()}
+           />
+-          {/* task-08 / FR-04：服务端分页器 */}
+-          <div className="flex items-center justify-between gap-2 pt-1">
+-            <span className="text-[11px] text-muted-foreground">
+-              共 {total} 条 · 第 {page + 1} 页
+-            </span>
+-            <div className="flex items-center gap-1.5">
+-              <Button
+-                size="sm"
+-                variant="outline"
+-                disabled={page === 0}
+-                onClick={() => setPage((p) => Math.max(0, p - 1))}
+-                aria-label="上一页"
+-              >
+-                上一页
+-              </Button>
+-              <Button
+-                size="sm"
+-                variant="outline"
+-                disabled={(page + 1) * WORKSPACE_PAGE_SIZE >= total}
+-                onClick={() => setPage((p) => p + 1)}
+-                aria-label="下一页"
+-              >
+-                下一页
+-              </Button>
+-            </div>
++          {/* 2026-09-26 重排 FR-05：服务端分页规范化（antd Pagination，0 基页码 +1） */}
++          <div className="flex justify-end pt-1">
++            <Pagination
++              current={page + 1}
++              pageSize={WORKSPACE_PAGE_SIZE}
++              total={total}
++              showTotal={(t) => `共 ${t} 条`}
++              onChange={(p) => setPage(Math.max(0, p - 1))}
++            />
+           </div>
+         </>
+       )}
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index 7f4a7e960..f6ac88401 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -56,6 +56,13 @@
+     --info: 192 91% 36%;
+     --info-foreground: 0 0% 100%;
+ 
++    /* ---- semantic soft 浅底阶（2026-09-26-core-pages-visual-redesign FR-02，值=themes.ts semanticSoft，改动须同步） ---- */
++    --semantic-success-soft: #ecfdf5;
++    --semantic-warning-soft: #fffbeb;
++    --semantic-error-soft: #fef2f2;
++    --semantic-info-soft: #ecfeff;
++    --semantic-neutral-soft: #f1f5f9;
++
+     /* ---- --color-* 主题变量(值=themes.ts aiNativeTheme,hex 直供需要具体色值的消费方;改动须与 themes.ts 同步) ---- */
+     --color-primary: #7C3AED;
+     --color-primary-hover: #6D28D9;
+@@ -171,6 +178,12 @@
+     --info: 189 94% 43%;
+     --info-foreground: 0 0% 100%;
+ 
++    /* semantic soft 浅底阶（FR-02，值=themes.ts semanticSoft，改动须同步） */
++    --semantic-success-soft: #ecfdf5;
++    --semantic-warning-soft: #fffbeb;
++    --semantic-error-soft: #fef2f2;
++    --semantic-info-soft: #ecfeff;
++    --semantic-neutral-soft: #f1f5f9;
+     --color-primary: #2563eb;
+     --color-primary-hover: #1d4ed8;
+     --color-accent: #06b6d4;
+@@ -253,6 +266,12 @@
+     --info: 187 85% 53%; /* =#22d3ee cyan-400,与 accent 同值 */
+     --info-foreground: 0 0% 100%;
+ 
++    /* semantic soft 浅底阶（FR-02，dark=主值 15% 透明度 rgba，改动须与 themes.ts 同步） */
++    --semantic-success-soft: rgba(16, 185, 129, 0.15);
++    --semantic-warning-soft: rgba(245, 158, 11, 0.15);
++    --semantic-error-soft: rgba(239, 68, 68, 0.15);
++    --semantic-info-soft: rgba(34, 211, 238, 0.15);
++    --semantic-neutral-soft: rgba(161, 161, 170, 0.15);
+     --color-primary: #0891b2;
+     --color-primary-hover: #06b6d4; /* cyan-500,暗色 hover 提亮一档 */
+     --color-accent: #22d3ee; /* cyan-400 */
+diff --git a/frontend/src/components/changes/detail/__tests__/change-stage-header.test.tsx b/frontend/src/components/changes/detail/__tests__/change-stage-header.test.tsx
+index fc961cf8c..6e74f3017 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-stage-header.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-stage-header.test.tsx
+@@ -8,10 +8,10 @@ describe("ChangeStageHeader", () => {
+     const { container } = render(
+       <ChangeStageHeader currentStage="execute" stages={null} updatedAt={null} />,
+     );
+-    expect(screen.getByText("执行").className).toContain("font-medium");
+-    expect(screen.getByText("需求分析").className).toContain("text-muted-foreground");
++    expect(screen.getByText("执行").className).toContain("font-semibold");
++    expect(screen.getByText("需求分析").className).toContain("text-foreground"); // checks 风格：完成段前景色+绿勾图标
+     // 对勾数量 = 已完成 2 个
+-    expect(container.querySelectorAll(".text-white").length).toBeGreaterThanOrEqual(2);
++    expect(container.querySelectorAll("svg").length).toBeGreaterThanOrEqual(2); // 完成段 StateIcon check
+   });
+ 
+   it("非线性阶段（quick/blocked）返回 null 不渲染", () => {
+@@ -26,11 +26,11 @@ describe("ChangeStageHeader", () => {
+       <ChangeStageHeader currentStage="archived" stages={null} updatedAt={null} />,
+     );
+     expect(screen.getByText("归档")).toBeInTheDocument();
+-    expect(screen.getByText("归档").className).toContain("font-medium");
++    expect(screen.getByText("归档").className).toContain("font-semibold");
+     // 已完成 4 个（brainstorm/plan/execute/verify）+ 当前 archive 节点共 5 个可见
+-    expect(container.querySelectorAll(".rounded-full").length).toBe(5);
++    expect(container.querySelectorAll("span.rounded-full").length).toBe(0); // archived 全完成无待办空心圆
+     // 对勾数量应 ≥ 4
+-    expect(container.querySelectorAll(".text-white").length).toBeGreaterThanOrEqual(4);
++    expect(container.querySelectorAll("svg").length).toBeGreaterThanOrEqual(4); // 前四段完成 StateIcon check
+   });
+ 
+   it("未知阶段返回 null", () => {
+@@ -135,16 +135,14 @@ describe("ChangeStageHeader 阶段-步骤联动", () => {
+     expect(planBtn).toHaveAttribute("aria-pressed", "true");
+     // 圆点（按钮内首个 div）带 brand ring（ring-offset-2 为选中态独有，
+     // 悬停态是 group-hover:ring-offset-1，避免子串误伤）；标签为 brand 色
+-    const circle = planBtn.querySelector("div");
++    const circle = planBtn;
+     expect(circle?.className).toContain("ring-brand-500");
+     expect(circle?.className).toContain("ring-offset-2");
+     expect(screen.getByText("规划").className).toContain("text-brand-600");
+     // 未选中节点 aria-pressed=false 且无选中 ring
+     const brainstormBtn = screen.getByRole("button", { name: /需求分析/ });
+     expect(brainstormBtn).toHaveAttribute("aria-pressed", "false");
+-    expect(brainstormBtn.querySelector("div")?.className).not.toContain(
+-      "ring-offset-2",
+-    );
++    expect(brainstormBtn.className).not.toContain("ring-offset-2");
+   });
+ 
+   it("archived 终态联动：归档节点可点击并回调 'archive'", () => {
+diff --git a/frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx b/frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx
+index 7f2255315..19618d100 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx
+@@ -120,7 +120,7 @@ describe("ChangeStepTimeline", () => {
+         ]}
+       />,
+     );
+-    expect(screen.getByText("quick")).toBeInTheDocument();
++    expect(screen.getByText(/快速任务|quick/)).toBeInTheDocument();
+     expect(screen.getByText("1/1 步")).toBeInTheDocument();
+   });
+ 
+diff --git a/frontend/src/components/changes/detail/change-stage-header.tsx b/frontend/src/components/changes/detail/change-stage-header.tsx
+index ccd1f4dca..695b8e351 100644
+--- a/frontend/src/components/changes/detail/change-stage-header.tsx
++++ b/frontend/src/components/changes/detail/change-stage-header.tsx
+@@ -1,18 +1,22 @@
+ "use client";
+ 
+ /**
+- * 阶段步骤条（主线顶部宏观进度，2026-08-11-change-detail-layout-rework / FR-01 / D-001）。
++ * 阶段 checks 横条（主线顶部宏观进度，2026-08-11-change-detail-layout-rework / FR-01 / D-001；
++ * 2026-09-26-core-pages-visual-redesign task-06 重排为 GitHub PR checks 风格 / FR-04）。
+  *
+- * 从原 page.tsx 顶部内联步骤条原样抽取：5 大阶段圆形节点，已完成显对勾、
+- * 当前高亮、未到弱化；非线性三态（quick/blocked/archived）或未知阶段 indexOf<0 时返回 null
+- * 不渲染（由 PageHeader 徽标承载）。导出 WORKFLOW_STAGE_LABELS 供 page.tsx 复用避免重复。
++ * 视觉：✓已完成=语义绿勾图标、●当前=主题色高亮、○待办=灰空心（primer StateIcon），
++ * 阶段间连接线，对照原型「变更详情」视图六阶段 checks 横条；非线性三态
++ * （quick/blocked/archived）或未知阶段 indexOf<0 时返回 null 不渲染（由 PageHeader
++ * 徽标承载）。导出 WORKFLOW_STAGE_LABELS 供 page.tsx 复用避免重复。
+  *
+  * 阶段-步骤联动（ql-20260821-017）：传入 stepStages + onStageClick 时节点升级为
+  * button——有步骤数据的阶段可点击（aria-pressed 表选中、brand ring 高亮），点击
+  * 由 page.tsx 切换 focusStage 筛选下方步骤时间线；无步骤数据阶段 disabled 弱化。
+- * 未传联动 props 时渲染与旧版纯展示完全一致（向后兼容，旧测试零改动）。
++ * 未传联动 props 时渲染与纯展示一致（向后兼容）。
+  */
+ 
++import { StateIcon } from "@/components/primer";
++
+ export const WORKFLOW_STAGES = [
+   "brainstorm", "plan", "execute", "verify", "archive",
+ ] as const;
+@@ -73,7 +77,7 @@ export function ChangeStageHeader({
+     stagesObj?.[displayStage]?.lastActive ?? updatedAt ?? null;
+ 
+   return (
+-    <div className="rounded-md border bg-card px-3 py-2">
++    <div className="rounded-md border bg-card px-3 py-2.5">
+       <div className="flex flex-wrap items-center gap-1">
+         {WORKFLOW_STAGES.map((stage, i) => {
+           const isCompleted = currentIndex > i;
+@@ -81,12 +85,15 @@ export function ChangeStageHeader({
+           const hasSteps = stepStages?.includes(stage) ?? false;
+           const isFocused = focusStage === stage;
+ 
+-          const circleClass = `w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-medium transition-shadow ${
+-            isCurrent
+-              ? "bg-primary text-primary-foreground"
+-              : isCompleted
+-                ? "bg-emerald-500 text-white"
+-                : "bg-muted text-muted-foreground"
++          // checks 段：图标（✓绿勾 / ●当前主题色开圆 / ○灰空心）+ 阶段名
++          const segClass = `flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs transition-colors ${
++            isFocused
++              ? "font-semibold text-brand-600"
++              : isCurrent
++                ? "font-semibold text-foreground"
++                : isCompleted
++                  ? "text-foreground"
++                  : "text-muted-foreground"
+           } ${
+             linked && isFocused
+               ? "ring-2 ring-brand-500 ring-offset-2 ring-offset-card"
+@@ -97,22 +104,18 @@ export function ChangeStageHeader({
+               : ""
+           }`;
+ 
+-          const labelClass = `ml-1 text-[11px] transition-colors ${
+-            isFocused
+-              ? "text-brand-600 font-medium"
+-              : isCurrent
+-                ? "text-foreground font-medium"
+-                : "text-muted-foreground"
+-          }`;
+-
+           const nodeInner = (
+             <>
+-              <div className={circleClass}>
+-                {isCompleted ? "✓" : i + 1}
+-              </div>
+-              <span className={labelClass}>
+-                {WORKFLOW_STAGE_LABELS[stage]}
+-              </span>
++              {isCompleted ? (
++                <StateIcon name="check" size={16} className="shrink-0 text-success" />
++              ) : isCurrent ? (
++                <StateIcon name="openCircle" size={16} className="shrink-0 text-primary" />
++              ) : (
++                <span className="flex h-4 w-4 shrink-0 items-center justify-center">
++                  <span className="h-3 w-3 rounded-full border-2 border-border" />
++                </span>
++              )}
++              {WORKFLOW_STAGE_LABELS[stage]}
+             </>
+           );
+ 
+@@ -131,7 +134,7 @@ export function ChangeStageHeader({
+                         ? "点击取消筛选，显示全部步骤"
+                         : "点击筛选该阶段步骤"
+                   }
+-                  className={`group flex items-center rounded-md py-0.5 pr-0.5 ${
++                  className={`group ${segClass} ${
+                     hasSteps
+                       ? "cursor-pointer"
+                       : "cursor-not-allowed opacity-60"
+@@ -140,17 +143,17 @@ export function ChangeStageHeader({
+                   {nodeInner}
+                 </button>
+               ) : (
+-                nodeInner
++                <span className={segClass}>{nodeInner}</span>
+               )}
+               {i < WORKFLOW_STAGES.length - 1 && (
+-                <div className="mx-1 h-px w-3 bg-border" />
++                <div aria-hidden="true" className="mx-1 h-px w-4 bg-border" />
+               )}
+             </div>
+           );
+         })}
+       </div>
+       {lastActive ? (
+-        <p className="mt-1.5 text-[11px] text-muted-foreground">
++        <p className="mt-1.5 text-xs text-muted-foreground">
+           当前阶段: {new Date(lastActive).toLocaleString("zh-CN")}
+         </p>
+       ) : null}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 42c687f8a..d5d04147c 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -3527,7 +3527,7 @@ export function SessionPanelPage({
+             <p
+               role="alert"
+               aria-label="创建会话错误"
+-              className="mx-5 mb-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive"
++              className="mx-5 mb-3 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+             >
+               {preError}（输入已保留，可直接重试）
+             </p>
+@@ -3538,7 +3538,7 @@ export function SessionPanelPage({
+   }
+   if (detailQuery.isError) {
+     return (
+-      <div className="m-6 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive" aria-label="会话详情加载失败">
++      <div className="m-6 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" aria-label="会话详情加载失败">
+         加载会话详情失败：{errMessage(detailQuery.error, "未知错误")}
+         <Button
+           size="small"
+@@ -4081,7 +4081,7 @@ export function SessionPanelPage({
+       {!machineOnline && !suspended && (
+         <div
+           className={cn(
+-            "flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800",
++            "flex items-center gap-2 border-b px-5 py-2 text-xs text-warning",
+             mobile && "px-3",
+           )}
+         >
+@@ -4467,7 +4467,7 @@ export function SessionPanelPage({
+                     <span className="shrink-0 text-[12px] font-semibold text-foreground">
+                       第{entry.turnNo}轮
+                     </span>
+-                    <span className="truncate text-[10px] text-muted-foreground">
++                    <span className="truncate text-[11px] text-muted-foreground">
+                       {turnNavRowMeta(entry)}
+                     </span>
+                   </span>
+diff --git a/frontend/src/components/primer/__tests__/primer-atoms.test.tsx b/frontend/src/components/primer/__tests__/primer-atoms.test.tsx
+new file mode 100644
+index 000000000..b21706134
+--- /dev/null
++++ b/frontend/src/components/primer/__tests__/primer-atoms.test.tsx
+@@ -0,0 +1,89 @@
++/**
++ * primer 原子组件单测（2026-09-26-core-pages-visual-redesign task-02 / FR-01）。
++ *
++ * 覆盖矩阵：StateLabel 六变体渲染 × iconName 双态 × withIcon 开关 × size 两档、
++ * Counter 数字与 active、EmptyState 插槽与中文默认文案。
++ * 依据：tasks/task-02.md acceptance「六变体渲染矩阵 + iconName 双态 + Counter active + EmptyState 插槽」。
++ */
++import { render, screen } from "@testing-library/react";
++import { describe, expect, it } from "vitest";
++
++import { Counter } from "../counter";
++import { EmptyState } from "../empty-state";
++import { StateLabel } from "../state-label";
++
++const VARIANTS = ["open", "merged", "attention", "done", "error", "neutral"] as const;
++
++describe("StateLabel 六变体矩阵", () => {
++  it.each(VARIANTS)("variant=%s 渲染文案与 svg 图标", (variant) => {
++    const { container } = render(
++      <StateLabel variant={variant}>进行中</StateLabel>,
++    );
++    expect(screen.getByText("进行中")).toBeTruthy();
++    expect(container.querySelector("svg")).toBeTruthy();
++  });
++
++  it("attention 双态：默认 zap，iconName=clock 覆写为时钟（两 svg path 集不同）", () => {
++    const { container } = render(<StateLabel variant="attention">等待</StateLabel>);
++    const zapPaths = container.querySelector("svg")?.innerHTML;
++    const { container: c2 } = render(
++      <StateLabel variant="attention" iconName="clock">
++        等待
++      </StateLabel>,
++    );
++    const clockPaths = c2.querySelector("svg")?.innerHTML;
++    expect(zapPaths).toBeTruthy();
++    expect(clockPaths).toBeTruthy();
++    expect(zapPaths).not.toEqual(clockPaths);
++  });
++
++  it("withIcon=false 不渲染图标", () => {
++    const { container } = render(
++      <StateLabel variant="done" withIcon={false}>
++        完成
++      </StateLabel>,
++    );
++    expect(container.querySelector("svg")).toBeNull();
++  });
++
++  it("size=md 使用 text-sm 类", () => {
++    render(
++      <StateLabel variant="open" size="md">
++        页头态
++      </StateLabel>,
++    );
++    const el = screen.getByText("页头态").closest("span");
++    expect(el?.className).toContain("text-sm");
++  });
++});
++
++describe("Counter", () => {
++  it("渲染数字，默认非 active（无描边色）", () => {
++    render(<Counter count={4} />);
++    expect(screen.getByText("4")).toBeTruthy();
++  });
++
++  it("active 变体带主题色 inline style", () => {
++    render(<Counter count={12} active />);
++    const el = screen.getByText("12");
++    expect(el.style.borderColor).toBe("var(--color-brand-600)");
++  });
++});
++
++describe("EmptyState", () => {
++  it("默认中文标题「暂无数据」+ description + action 插槽", () => {
++    render(
++      <EmptyState description="当前筛选下没有变更">
++        <button type="button">新建变更</button>
++      </EmptyState>,
++    );
++    expect(screen.getByText("暂无数据")).toBeTruthy();
++    expect(screen.getByText("当前筛选下没有变更")).toBeTruthy();
++    expect(screen.getByRole("button", { name: "新建变更" })).toBeTruthy();
++  });
++
++  it("title 可覆写", () => {
++    render(<EmptyState title="还没有会话" />);
++    expect(screen.getByText("还没有会话")).toBeTruthy();
++  });
++});
+diff --git a/frontend/src/components/primer/__tests__/primer-structures.test.tsx b/frontend/src/components/primer/__tests__/primer-structures.test.tsx
+new file mode 100644
+index 000000000..31d2f31ee
+--- /dev/null
++++ b/frontend/src/components/primer/__tests__/primer-structures.test.tsx
+@@ -0,0 +1,186 @@
++/**
++ * primer 结构组件单测（2026-09-26-core-pages-visual-redesign task-03 / FR-01 FR-03）。
++ *
++ * 覆盖矩阵：UnderlineNav 受控切换+counter 联动+键盘切换、IssueRow 插槽渲染+hover
++ * 操作+键盘激活、IssueRowHeader 列头、StatGrid tone 着色、PageHead 四插槽。
++ * 依据：tasks/task-03.md acceptance。
++ */
++import { fireEvent, render, screen } from "@testing-library/react";
++import { describe, expect, it, vi } from "vitest";
++
++import { IssueRow, IssueRowHeader } from "../issue-row";
++import { MetaPanel, MetaPanelSection } from "../meta-panel";
++import { StateIcon } from "../state-icon";
++import { Timeline, TimelineItem } from "../timeline";
++import { PageHead } from "../page-head";
++import { StatGrid } from "../stat-grid";
++import { UnderlineNav } from "../underline-nav";
++
++type TabKey = "active" | "archived";
++
++function renderNav(value: TabKey, onChange: (k: TabKey) => void) {
++  return render(
++    <UnderlineNav<TabKey>
++      value={value}
++      onChange={onChange}
++      items={[
++        { key: "active", label: "进行中", counter: 4 },
++        { key: "archived", label: "已归档", counter: 12 },
++      ]}
++    />,
++  );
++}
++
++describe("UnderlineNav 受控契约", () => {
++  it("受控切换：点击非当前 tab 触发 onChange 且不内部改态", () => {
++    const onChange = vi.fn();
++    renderNav("active", onChange);
++    fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
++    expect(onChange).toHaveBeenCalledWith("archived");
++    // 受控：未传新 value 前选中态不变
++    expect(screen.getByRole("tab", { name: /已归档/ }).getAttribute("aria-selected")).toBe("false");
++  });
++
++  it("Counter 联动：两项计数渲染，当前项 active", () => {
++    renderNav("active", () => {});
++    expect(screen.getByText("4").className).toContain("border");
++    expect(screen.getByText("12")).toBeTruthy();
++  });
++
++  it("键盘 Enter 切换到下一 tab", () => {
++    const onChange = vi.fn();
++    renderNav("active", onChange);
++    fireEvent.keyDown(screen.getByRole("tab", { name: /进行中/ }), { key: "Enter" });
++    expect(onChange).toHaveBeenCalledWith("archived");
++  });
++});
++
++describe("IssueRow", () => {
++  it("六 state 图标渲染 + leading/meta/right 插槽", () => {
++    const { container } = render(
++      <IssueRow
++        state="open"
++        title={<span>2026-09-25-observation-events-v3</span>}
++        meta={<span>实现计划</span>}
++        right={<span>5 分钟前</span>}
++        leading={<input type="checkbox" aria-label="选择" />}
++      />,
++    );
++    expect(container.querySelector("svg")).toBeTruthy();
++    expect(screen.getByText("2026-09-25-observation-events-v3")).toBeTruthy();
++    expect(screen.getByText("实现计划")).toBeTruthy();
++    expect(screen.getByText("5 分钟前")).toBeTruthy();
++    expect(screen.getByRole("checkbox", { name: "选择" })).toBeTruthy();
++  });
++
++  it("hoverActions 默认 hidden（group-hover 浮现类）", () => {
++    render(
++      <IssueRow
++        state="done"
++        title="t"
++        hoverActions={<button type="button">打开</button>}
++      />,
++    );
++    const wrap = screen.getByRole("button", { name: "打开" }).parentElement;
++    expect(wrap?.className).toContain("hidden");
++    expect(wrap?.className).toContain("group-hover:flex");
++  });
++
++  it("onClick 行可键盘激活（Enter）", () => {
++    const onClick = vi.fn();
++    render(<IssueRow state="open" title="行标题" onClick={onClick} />);
++    fireEvent.keyDown(screen.getByText("行标题").closest("div[role=button]")!, { key: "Enter" });
++    expect(onClick).toHaveBeenCalledTimes(1);
++  });
++});
++
++describe("IssueRowHeader", () => {
++  it("列头三段渲染", () => {
++    render(
++      <IssueRowHeader title="变更" right="更新时间" leading={<span>选</span>} />,
++    );
++    expect(screen.getByText("变更")).toBeTruthy();
++    expect(screen.getByText("更新时间")).toBeTruthy();
++    expect(screen.getByText("选")).toBeTruthy();
++  });
++});
++
++describe("StatGrid", () => {
++  it("tone=brand/warning 语义着色，default 无 inline 色", () => {
++    render(
++      <StatGrid
++        items={[
++          { label: "进行中变更", value: 4, tone: "brand" },
++          { label: "待办处理", value: 2, tone: "warning" },
++          { label: "会话", value: 12 },
++        ]}
++      />,
++    );
++    expect(screen.getByText("4").style.color).toBe("var(--color-brand-600)");
++    expect(screen.getByText("2").style.color).toContain("var(--warning)");
++    expect(screen.getByText("12").style.color).toBe("");
++  });
++});
++
++describe("PageHead", () => {
++  it("面包屑/标题/titleExtra/副标题/actions 五插槽齐渲染", () => {
++    render(
++      <PageHead
++        breadcrumb={<span>workspaces / changes</span>}
++        title="变更中心"
++        titleExtra={<span>标签</span>}
++        subtitle="4 个进行中 · 12 个已归档"
++        actions={<button type="button">新建变更</button>}
++      />,
++    );
++    expect(screen.getByText("workspaces / changes")).toBeTruthy();
++    expect(screen.getByRole("heading", { name: "变更中心" })).toBeTruthy();
++    expect(screen.getByText("标签")).toBeTruthy();
++    expect(screen.getByText("4 个进行中 · 12 个已归档")).toBeTruthy();
++    expect(screen.getByRole("button", { name: "新建变更" })).toBeTruthy();
++  });
++});
++
++describe("Timeline / TimelineItem（task-04 追加）", () => {
++  it("children 折叠交互：默认隐藏，点击展开再收起", () => {
++    render(
++      <Timeline>
++        <TimelineItem icon={<StateIcon name="check" size={12} />} title="需求设计完成" time="1 天前">
++          日志行 1
++        </TimelineItem>
++      </Timeline>,
++    );
++    expect(screen.queryByText("日志行 1")).toBeNull();
++    fireEvent.click(screen.getByRole("button", { name: "展开详情" }));
++    expect(screen.getByText("日志行 1")).toBeTruthy();
++    fireEvent.click(screen.getByRole("button", { name: "收起详情" }));
++    expect(screen.queryByText("日志行 1")).toBeNull();
++  });
++
++  it("tone=current 节点用主题色 inline style", () => {
++    const { container } = render(
++      <TimelineItem icon={<StateIcon name="zap" size={12} />} title="执行中" tone="current" />,
++    );
++    const ring = container.querySelector("div.rounded-full") as HTMLElement;
++    expect(ring.style.borderColor).toBe("var(--color-brand-600)");
++  });
++});
++
++describe("MetaPanel / MetaPanelSection（task-04 追加）", () => {
++  it("分组渲染：标题 + children 进容器", () => {
++    render(
++      <MetaPanel>
++        <MetaPanelSection title="负责人">
++          <span>qinyi</span>
++        </MetaPanelSection>
++        <MetaPanelSection title="消耗统计">
++          <span>2.4M tok</span>
++        </MetaPanelSection>
++      </MetaPanel>,
++    );
++    expect(screen.getByText("负责人")).toBeTruthy();
++    expect(screen.getByText("qinyi")).toBeTruthy();
++    expect(screen.getByText("消耗统计")).toBeTruthy();
++    expect(screen.getByText("2.4M tok")).toBeTruthy();
++  });
++});
+diff --git a/frontend/src/components/primer/counter.tsx b/frontend/src/components/primer/counter.tsx
+new file mode 100644
+index 000000000..08472a6e5
+--- /dev/null
++++ b/frontend/src/components/primer/counter.tsx
+@@ -0,0 +1,35 @@
++/**
++ * Counter —— primer 计数胶囊（2026-09-26-core-pages-visual-redesign FR-01）。
++ *
++ * GitHub Counter 质感：灰底圆角胶囊内的数字，active 变体加主题色描边，
++ * 用于 UnderlineNav tab 计数 / 列表行计数等。
++ */
++import * as React from "react";
++
++export interface CounterProps {
++  /** 计数值。 */
++  count: number;
++  /** active=主题色描边（当前 tab 语义）。 */
++  active?: boolean;
++  className?: string;
++}
++
++export function Counter({ count, active = false, className }: CounterProps) {
++  return (
++    <span
++      style={
++        active
++          ? {
++              borderColor: "var(--color-brand-600)",
++              color: "var(--color-brand-600)",
++            }
++          : undefined
++      }
++      className={`inline-flex min-w-[1.25rem] items-center justify-center rounded-full border bg-muted px-1.5 text-xs font-medium leading-5 ${
++        active ? "" : "border-transparent text-muted-foreground"
++      } ${className ?? ""}`}
++    >
++      {count}
++    </span>
++  );
++}
+diff --git a/frontend/src/components/primer/empty-state.tsx b/frontend/src/components/primer/empty-state.tsx
+new file mode 100644
+index 000000000..7b77ee340
+--- /dev/null
++++ b/frontend/src/components/primer/empty-state.tsx
+@@ -0,0 +1,42 @@
++/**
++ * EmptyState —— primer 空态原语（2026-09-26-core-pages-visual-redesign FR-01 / FR-08）。
++ *
++ * 替代破碎的「—」占位表格空态：图标+标题+描述+可选 action 插槽，
++ * 中文文案默认值，供列表页/门户空分支消费。
++ */
++import * as React from "react";
++
++export interface EmptyStateProps {
++  /** 标题（默认「暂无数据」）。 */
++  title?: string;
++  /** 描述一行（可选）。 */
++  description?: string;
++  /** 图标节点（可选，默认不渲染）。 */
++  icon?: React.ReactNode;
++  /** 操作区插槽（如「新建」按钮）。 */
++  children?: React.ReactNode;
++  className?: string;
++}
++
++export function EmptyState({
++  title = "暂无数据",
++  description,
++  icon,
++  children,
++  className,
++}: EmptyStateProps) {
++  return (
++    <div
++      className={`flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center ${className ?? ""}`}
++    >
++      {icon ? <div className="text-muted-foreground">{icon}</div> : null}
++      <div className="text-sm font-medium">{title}</div>
++      {description ? (
++        <div className="max-w-md text-xs leading-5 text-muted-foreground">
++          {description}
++        </div>
++      ) : null}
++      {children ? <div className="mt-2">{children}</div> : null}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/primer/index.ts b/frontend/src/components/primer/index.ts
+new file mode 100644
+index 000000000..e6a8402cc
+--- /dev/null
++++ b/frontend/src/components/primer/index.ts
+@@ -0,0 +1,40 @@
++/**
++ * primer 组件库桶导出（2026-09-26-core-pages-visual-redesign task-04 / FR-01）。
++ *
++ * 十个组件族的唯一入口：页面消费方一律 `@/components/primer` 导入。
++ * 只做 re-export，零逻辑。
++ */
++export { Counter, type CounterProps } from "./counter";
++export { EmptyState, type EmptyStateProps } from "./empty-state";
++export {
++  IssueRow,
++  IssueRowHeader,
++  ISSUE_ROW_GRID,
++  type IssueRowProps,
++  type IssueRowHeaderProps,
++} from "./issue-row";
++export {
++  MetaPanel,
++  MetaPanelSection,
++  type MetaPanelProps,
++  type MetaPanelSectionProps,
++} from "./meta-panel";
++export { PageHead, type PageHeadProps } from "./page-head";
++export { StatGrid, type StatGridItem, type StatGridProps } from "./stat-grid";
++export { StateIcon, type StateIconName, type StateIconProps } from "./state-icon";
++export {
++  StateLabel,
++  type StateLabelProps,
++  type StateLabelVariant,
++} from "./state-label";
++export {
++  Timeline,
++  TimelineItem,
++  type TimelineItemProps,
++  type TimelineProps,
++} from "./timeline";
++export {
++  UnderlineNav,
++  type UnderlineNavItem,
++  type UnderlineNavProps,
++} from "./underline-nav";
+diff --git a/frontend/src/components/primer/issue-row.tsx b/frontend/src/components/primer/issue-row.tsx
+new file mode 100644
+index 000000000..0e0eb7322
+--- /dev/null
++++ b/frontend/src/components/primer/issue-row.tsx
+@@ -0,0 +1,123 @@
++/**
++ * IssueRow / IssueRowHeader —— primer 两段式列表行（2026-09-26-core-pages-visual-redesign FR-01 / FR-03）。
++ *
++ * GitHub Issues 行范式：左状态图标 + 主行（标题+key）+ 副行元数据 + 右侧元数据列；
++ * hover 背景微亮 + hoverActions 浮现。leading 插槽供批量模式由列表容器渲染 checkbox。
++ * IssueRowHeader 与行同 grid template 对齐（表头语义）。
++ */
++import * as React from "react";
++
++import { StateIcon } from "./state-icon";
++import type { StateLabelVariant } from "./state-label";
++
++/** 行网格列：行首插槽 | 状态图标 | 主体（两段） | 右侧元数据。 */
++export const ISSUE_ROW_GRID =
++  "grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-start gap-x-3";
++
++export interface IssueRowProps {
++  /** 状态变体，决定左侧 16px 状态图标。 */
++  state: StateLabelVariant;
++  /** 主行标题（通常含 key mono 链接）。 */
++  title: React.ReactNode;
++  /** 副行元数据（阶段胶囊/组件 tag/消耗，可选）。 */
++  meta?: React.ReactNode;
++  /** 右侧元数据列（负责人/时间）。 */
++  right?: React.ReactNode;
++  /** 整行点击。 */
++  onClick?: () => void;
++  /** hover 时浮现的快捷操作（右侧）。 */
++  hoverActions?: React.ReactNode;
++  /** 行首插槽（批量模式 checkbox 由容器传入）。 */
++  leading?: React.ReactNode;
++  className?: string;
++}
++
++const STATE_TO_ICON: Record<StateLabelVariant, Parameters<typeof StateIcon>[0]["name"]> =
++  {
++    open: "openCircle",
++    merged: "mergedCheck",
++    attention: "zap",
++    done: "check",
++    error: "x",
++    neutral: "check",
++  };
++
++export function IssueRow({
++  state,
++  title,
++  meta,
++  right,
++  onClick,
++  hoverActions,
++  leading,
++  className,
++}: IssueRowProps) {
++  const interactive = typeof onClick === "function";
++  return (
++    <div
++      role={interactive ? "button" : undefined}
++      tabIndex={interactive ? 0 : undefined}
++      onClick={onClick}
++      onKeyDown={
++        interactive
++          ? (e) => {
++              if (e.key === "Enter") onClick();
++            }
++          : undefined
++      }
++      className={`group relative ${ISSUE_ROW_GRID} px-3 py-2.5 text-sm transition-colors ${
++        interactive ? "cursor-pointer hover:bg-muted/60" : ""
++      } ${className ?? ""}`}
++    >
++      {leading ? <div className="flex items-center pt-0.5">{leading}</div> : null}
++      <div className="flex items-center pt-0.5 text-muted-foreground">
++        <StateIcon name={STATE_TO_ICON[state]} size={16} />
++      </div>
++      <div className="flex min-w-0 flex-col gap-1">
++        <div className="flex min-w-0 flex-wrap items-center gap-x-2">{title}</div>
++        {meta ? (
++          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
++            {meta}
++          </div>
++        ) : null}
++      </div>
++      <div className="flex items-start justify-end gap-3 text-xs text-muted-foreground">
++        {right}
++        {hoverActions ? (
++          <div className="hidden items-center gap-1 group-hover:flex">
++            {hoverActions}
++          </div>
++        ) : null}
++      </div>
++    </div>
++  );
++}
++
++export interface IssueRowHeaderProps {
++  /** 列头内容：与 IssueRow 的 leading/title/right 三段对齐。 */
++  leading?: React.ReactNode;
++  title: React.ReactNode;
++  right?: React.ReactNode;
++  className?: string;
++}
++
++export function IssueRowHeader({
++  leading,
++  title,
++  right,
++  className,
++}: IssueRowHeaderProps) {
++  return (
++    <div
++      className={`${ISSUE_ROW_GRID} border-b px-3 py-2 text-xs font-medium text-muted-foreground ${
++        className ?? ""
++      }`}
++      style={{ borderBottomColor: "hsl(var(--border))" }}
++    >
++      {leading ? <div>{leading}</div> : <div />}
++      <div />
++      <div>{title}</div>
++      <div className="flex justify-end">{right}</div>
++    </div>
++  );
++}
+diff --git a/frontend/src/components/primer/meta-panel.tsx b/frontend/src/components/primer/meta-panel.tsx
+new file mode 100644
+index 000000000..846b909b3
+--- /dev/null
++++ b/frontend/src/components/primer/meta-panel.tsx
+@@ -0,0 +1,44 @@
++/**
++ * MetaPanel / MetaPanelSection —— primer 侧栏信息面板（2026-09-26-core-pages-visual-redesign FR-01 / FR-04）。
++ *
++ * GitHub PR sidebar 范式：细边框圆角浅底容器 + 若干 title+children 分组，
++ * 供变更详情六组信息 / 会话右栏信息面板消费。
++ */
++import * as React from "react";
++
++export interface MetaPanelProps {
++  children: React.ReactNode;
++  className?: string;
++}
++
++export function MetaPanel({ children, className }: MetaPanelProps) {
++  return (
++    <aside
++      className={`rounded-lg border text-sm ${className ?? ""}`}
++      style={{
++        borderColor: "hsl(var(--border))",
++        backgroundColor: "hsl(var(--muted))",
++      }}
++    >
++      {children}
++    </aside>
++  );
++}
++
++export interface MetaPanelSectionProps {
++  /** 分组标题（如「负责人」「消耗统计」）。 */
++  title: string;
++  children: React.ReactNode;
++}
++
++export function MetaPanelSection({ title, children }: MetaPanelSectionProps) {
++  return (
++    <section
++      className="border-b px-4 py-3 last:border-b-0"
++      style={{ borderBottomColor: "hsl(var(--border))" }}
++    >
++      <h3 className="mb-2 text-xs font-semibold text-muted-foreground">{title}</h3>
++      <div className="flex flex-col gap-1.5 text-sm">{children}</div>
++    </section>
++  );
++}
+diff --git a/frontend/src/components/primer/page-head.tsx b/frontend/src/components/primer/page-head.tsx
+new file mode 100644
+index 000000000..baa089f6d
+--- /dev/null
++++ b/frontend/src/components/primer/page-head.tsx
+@@ -0,0 +1,52 @@
++/**
++ * PageHead —— primer 页头（2026-09-26-core-pages-visual-redesign FR-01）。
++ *
++ * GitHub 页头范式：面包屑 → 标题（20px/600）+副标题 → 右侧操作组，
++ * 承载五页面重排后的第一层结构（对照原型 prototype-github-redesign.html）。
++ */
++import * as React from "react";
++
++export interface PageHeadProps {
++  /** 面包屑节点（可选，调用方自带斜杠分隔灰字链接）。 */
++  breadcrumb?: React.ReactNode;
++  /** 页面标题。 */
++  title: React.ReactNode;
++  /** 标题右侧补充（如状态 StateLabel，可选）。 */
++  titleExtra?: React.ReactNode;
++  /** 副标题灰字（可选）。 */
++  subtitle?: React.ReactNode;
++  /** 右侧操作组插槽。 */
++  actions?: React.ReactNode;
++  className?: string;
++}
++
++export function PageHead({
++  breadcrumb,
++  title,
++  titleExtra,
++  subtitle,
++  actions,
++  className,
++}: PageHeadProps) {
++  return (
++    <div className={`flex flex-col gap-2 ${className ?? ""}`}>
++      {breadcrumb ? (
++        <nav className="text-xs text-muted-foreground" aria-label="面包屑">
++          {breadcrumb}
++        </nav>
++      ) : null}
++      <div className="flex flex-wrap items-center justify-between gap-3">
++        <div className="flex min-w-0 flex-wrap items-center gap-2.5">
++          <h1 className="truncate text-xl font-semibold leading-7">{title}</h1>
++          {titleExtra}
++        </div>
++        {actions ? (
++          <div className="flex flex-shrink-0 items-center gap-2">{actions}</div>
++        ) : null}
++      </div>
++      {subtitle ? (
++        <div className="text-xs leading-5 text-muted-foreground">{subtitle}</div>
++      ) : null}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/primer/stat-grid.tsx b/frontend/src/components/primer/stat-grid.tsx
+new file mode 100644
+index 000000000..249327a8c
+--- /dev/null
++++ b/frontend/src/components/primer/stat-grid.tsx
+@@ -0,0 +1,49 @@
++/**
++ * StatGrid —— primer 统计格（2026-09-26-core-pages-visual-redesign FR-01 / FR-06）。
++ *
++ * GitHub Insights 范式：细边框容器内 N 格统计（label 灰小字 + value 大数字 mono），
++ * tone=brand/warning 走语义阶着色，供工作区概览统计四格等消费。
++ */
++import * as React from "react";
++
++export interface StatGridItem {
++  label: string;
++  value: React.ReactNode;
++  /** default=前景色 / brand=品牌阶 / warning=警示阶。 */
++  tone?: "default" | "brand" | "warning";
++}
++
++export interface StatGridProps {
++  items: StatGridItem[];
++  className?: string;
++}
++
++const TONE_COLOR: Record<NonNullable<StatGridItem["tone"]>, string | undefined> = {
++  default: undefined,
++  brand: "var(--color-brand-600)",
++  warning: "hsl(var(--warning))",
++};
++
++export function StatGrid({ items, className }: StatGridProps) {
++  return (
++    <div
++      className={`grid divide-x overflow-hidden rounded-lg border ${className ?? ""}`}
++      style={{
++        gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))`,
++        borderColor: "hsl(var(--border))",
++      }}
++    >
++      {items.map((item) => (
++        <div key={item.label} className="flex flex-col gap-1 px-4 py-3">
++          <div className="text-xs text-muted-foreground">{item.label}</div>
++          <div
++            className="font-mono text-2xl font-semibold leading-8"
++            style={item.tone && item.tone !== "default" ? { color: TONE_COLOR[item.tone] } : undefined}
++          >
++            {item.value}
++          </div>
++        </div>
++      ))}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/primer/state-icon.tsx b/frontend/src/components/primer/state-icon.tsx
+new file mode 100644
+index 000000000..04188dbfc
+--- /dev/null
++++ b/frontend/src/components/primer/state-icon.tsx
+@@ -0,0 +1,85 @@
++/**
++ * StateIcon —— primer 状态图标集（2026-09-26-core-pages-visual-redesign FR-01 / D-001@v1）。
++ *
++ * GitHub octicon 风格 16px stroke 图标（stroke 1.5、currentColor 继承文字色），
++ * 是 StateLabel 的默认图标源，也可独立用于列表行/时间线节点。
++ *
++ * 设计依据:
++ * - .sillyspec/changes/2026-09-26-core-pages-visual-redesign/design.md 接口定义节
++ * - 对照原型 prototype-github-redesign.html（issue-opened / git-merge / zap / clock）
++ */
++import * as React from "react";
++
++export type StateIconName =
++  | "openCircle"
++  | "mergedCheck"
++  | "zap"
++  | "clock"
++  | "check"
++  | "x";
++
++export interface StateIconProps {
++  /** 图标名。 */
++  name: StateIconName;
++  /** 边长(px)，列表行内 16 / 胶囊内 12。 */
++  size?: number;
++  className?: string;
++}
++
++/** 单图标 viewBox=0 0 16 16、fill none、stroke currentColor(1.5)。 */
++function glyph(name: StateIconName): React.ReactNode {
++  switch (name) {
++    case "openCircle":
++      return (
++        <>
++          <circle cx="8" cy="8" r="5.5" />
++          <circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none" />
++        </>
++      );
++    case "mergedCheck":
++      return (
++        <>
++          <path d="M4 13V8a4 4 0 014-4h3.5" />
++          <circle cx="4" cy="13.5" r="1.6" />
++          <path d="M8.5 8.5l2 2 3.5-3.5" />
++        </>
++      );
++    case "zap":
++      return <path d="M9 1.5L3 9h3.5L6.5 14.5 13 7H9.5L9 1.5z" />;
++    case "clock":
++      return (
++        <>
++          <circle cx="8" cy="8" r="6" />
++          <path d="M8 4.5V8l2.5 1.5" />
++        </>
++      );
++    case "check":
++      return <path d="M3 8.5l3.5 3.5L13 4.5" />;
++    case "x":
++      return (
++        <>
++          <path d="M4 4l8 8" />
++          <path d="M12 4l-8 8" />
++        </>
++      );
++  }
++}
++
++export function StateIcon({ name, size = 16, className }: StateIconProps) {
++  return (
++    <svg
++      width={size}
++      height={size}
++      viewBox="0 0 16 16"
++      fill="none"
++      stroke="currentColor"
++      strokeWidth={1.5}
++      strokeLinecap="round"
++      strokeLinejoin="round"
++      aria-hidden="true"
++      className={className}
++    >
++      {glyph(name)}
++    </svg>
++  );
++}
+diff --git a/frontend/src/components/primer/state-label.tsx b/frontend/src/components/primer/state-label.tsx
+new file mode 100644
+index 000000000..f143356b5
+--- /dev/null
++++ b/frontend/src/components/primer/state-label.tsx
+@@ -0,0 +1,100 @@
++/**
++ * StateLabel —— primer 状态胶囊（2026-09-26-core-pages-visual-redesign FR-01 / D-001@v1）。
++ *
++ * GitHub Label 质感的浅底深字细边框胶囊，颜色全部经主题 token：
++ * open/merged 走 brand 阶（进行中/已归档的 GitHub 紫语义随主题换肤），
++ * attention/done/error/neutral 走 semantic soft 底 + HSL 语义主值文字，
++ * 零硬编码 hex（铁律，值见 themes.ts semanticSoft 与 globals.css）。
++ *
++ * attention 双态用 iconName 区分：zap=轻量变更闪电 / clock=等待输入时钟（默认 zap）。
++ * thin/quick 徽章口径承接 FR-auto-frontend-020（轻量出身归档后仍可辨识）。
++ */
++import * as React from "react";
++
++import { StateIcon, type StateIconName } from "./state-icon";
++
++export type StateLabelVariant =
++  | "open"
++  | "merged"
++  | "attention"
++  | "done"
++  | "error"
++  | "neutral";
++
++export interface StateLabelProps {
++  /** 状态变体，决定配色与默认图标。 */
++  variant: StateLabelVariant;
++  /** 状态文案，如「进行中」「已归档」。 */
++  children: React.ReactNode;
++  /** 是否带 12px 状态图标（默认 true）。 */
++  withIcon?: boolean;
++  /** 图标覆写，仅 variant=attention 时有意义：zap=轻量闪电(默认) / clock=等待时钟。 */
++  iconName?: "zap" | "clock";
++  /** sm=列表行内(默认) / md=页头。 */
++  size?: "sm" | "md";
++  className?: string;
++}
++
++/** 变体 → 配色 token（底色 / 文字与边框色，全部 CSS var，零硬编码）。 */
++const VARIANT_STYLE: Record<
++  StateLabelVariant,
++  { bg: string; fg: string; icon: StateIconName }
++> = {
++  open: {
++    bg: "var(--color-brand-50)",
++    fg: "var(--color-brand-600)",
++    icon: "openCircle",
++  },
++  merged: {
++    bg: "var(--color-brand-50)",
++    fg: "var(--color-brand-600)",
++    icon: "mergedCheck",
++  },
++  attention: {
++    bg: "var(--semantic-warning-soft)",
++    fg: "hsl(var(--warning))",
++    icon: "zap",
++  },
++  done: {
++    bg: "var(--semantic-success-soft)",
++    fg: "hsl(var(--success))",
++    icon: "check",
++  },
++  error: {
++    bg: "var(--semantic-error-soft)",
++    fg: "hsl(var(--error))",
++    icon: "x",
++  },
++  neutral: {
++    bg: "var(--semantic-neutral-soft)",
++    fg: "hsl(var(--muted-foreground))",
++    icon: "check",
++  },
++};
++
++const SIZE_CLASS: Record<NonNullable<StateLabelProps["size"]>, string> = {
++  sm: "text-xs px-2 py-0.5 gap-1",
++  md: "text-sm px-2.5 py-1 gap-1.5",
++};
++
++export function StateLabel({
++  variant,
++  children,
++  withIcon = true,
++  iconName,
++  size = "sm",
++  className,
++}: StateLabelProps) {
++  const style = VARIANT_STYLE[variant];
++  const icon: StateIconName =
++    variant === "attention" && iconName ? iconName : style.icon;
++  return (
++    <span
++      style={{ backgroundColor: style.bg, color: style.fg, borderColor: style.fg }}
++      className={`inline-flex items-center rounded-md border font-medium ${SIZE_CLASS[size]} ${className ?? ""}`}
++    >
++      {withIcon ? <StateIcon name={icon} size={12} /> : null}
++      {children}
++    </span>
++  );
++}
+diff --git a/frontend/src/components/primer/timeline.tsx b/frontend/src/components/primer/timeline.tsx
+new file mode 100644
+index 000000000..53ee8678c
+--- /dev/null
++++ b/frontend/src/components/primer/timeline.tsx
+@@ -0,0 +1,92 @@
++/**
++ * Timeline / TimelineItem —— primer 事件时间线（2026-09-26-core-pages-visual-redesign FR-01 / FR-04）。
++ *
++ * GitHub timeline 范式：左侧 3px 竖线 + 节点圆标 + 事件标题/时间 + 可折叠日志块
++ * （children），tone 区分 default/current/success 三态。业务事件类型映射由消费页面做。
++ */
++import * as React from "react";
++
++export interface TimelineItemProps {
++  /** 节点图标（StateIcon 或业务图标）。 */
++  icon: React.ReactNode;
++  /** 事件标题。 */
++  title: React.ReactNode;
++  /** 事件时间（可选，右侧灰字）。 */
++  time?: React.ReactNode;
++  /** 节点色调：default=中性 / current=当前进行（主题色）/ success=完成（语义绿）。 */
++  tone?: "default" | "current" | "success";
++  /** 可折叠内容块（日志/输出，可选；提供时渲染折叠开关）。 */
++  children?: React.ReactNode;
++}
++
++const TONE_RING: Record<NonNullable<TimelineItemProps["tone"]>, string> = {
++  default: "hsl(var(--muted-foreground))",
++  current: "var(--color-brand-600)",
++  success: "hsl(var(--success))",
++};
++
++export function TimelineItem({
++  icon,
++  title,
++  time,
++  tone = "default",
++  children,
++}: TimelineItemProps) {
++  const [open, setOpen] = React.useState(false);
++  return (
++    <li className="relative flex gap-3 pb-5 last:pb-0">
++      <div className="flex flex-col items-center">
++        <div
++          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border"
++          style={{
++            borderColor: TONE_RING[tone],
++            color: TONE_RING[tone],
++            backgroundColor: "hsl(var(--card))",
++          }}
++        >
++          {icon}
++        </div>
++        <div
++          aria-hidden="true"
++          className="mt-1 w-px flex-1"
++          style={{ backgroundColor: "hsl(var(--border))" }}
++        />
++      </div>
++      <div className="min-w-0 flex-1 pt-1">
++        <div className="flex flex-wrap items-center justify-between gap-x-3">
++          <div className="text-sm font-medium">{title}</div>
++          {time ? (
++            <div className="text-xs text-muted-foreground">{time}</div>
++          ) : null}
++        </div>
++        {children ? (
++          <div className="mt-1.5">
++            <button
++              type="button"
++              onClick={() => setOpen((v) => !v)}
++              className="text-xs text-muted-foreground hover:underline"
++            >
++              {open ? "收起详情" : "展开详情"}
++            </button>
++            {open ? (
++              <div className="mt-1.5 whitespace-pre-wrap rounded-md border px-3 py-2 font-mono text-xs leading-5"
++                style={{ borderColor: "hsl(var(--border))", backgroundColor: "hsl(var(--muted))" }}
++              >
++                {children}
++              </div>
++            ) : null}
++          </div>
++        ) : null}
++      </div>
++    </li>
++  );
++}
++
++export interface TimelineProps {
++  children: React.ReactNode;
++  className?: string;
++}
++
++export function Timeline({ children, className }: TimelineProps) {
++  return <ul className={`flex flex-col ${className ?? ""}`}>{children}</ul>;
++}
+diff --git a/frontend/src/components/primer/underline-nav.tsx b/frontend/src/components/primer/underline-nav.tsx
+new file mode 100644
+index 000000000..9e821d4a3
+--- /dev/null
++++ b/frontend/src/components/primer/underline-nav.tsx
+@@ -0,0 +1,79 @@
++/**
++ * UnderlineNav —— primer 下划线 tab（2026-09-26-core-pages-visual-redesign FR-01 / FR-03）。
++ *
++ * GitHub UnderlineNav 范式：文字 tab + 底部 2px 主题色指示条 + Counter 计数联动。
++ * 受控组件（value/onChange）；指示条色走主题 token（铁律：原型的 #fd8c73 仅为
++ * ai-native 参考值，落地用 --color-brand-600 随主题换肤）。
++ * 键盘可达：tab 间用 roving tabindex，Enter/Space 切换。
++ */
++import * as React from "react";
++
++import { Counter } from "./counter";
++
++export interface UnderlineNavItem<T extends string> {
++  key: T;
++  label: React.ReactNode;
++  /** tab 计数（可选，渲染 Counter）。 */
++  counter?: number;
++}
++
++export interface UnderlineNavProps<T extends string> {
++  items: Array<UnderlineNavItem<T>>;
++  /** 受控当前 key。 */
++  value: T;
++  /** 切换回调（过滤即时切换，计数实时刷新由调用方数据驱动）。 */
++  onChange: (key: T) => void;
++  className?: string;
++}
++
++export function UnderlineNav<T extends string>({
++  items,
++  value,
++  onChange,
++  className,
++}: UnderlineNavProps<T>) {
++  return (
++    <div
++      role="tablist"
++      className={`flex items-center gap-1 border-b ${className ?? ""}`}
++      style={{ borderBottomColor: "hsl(var(--border))" }}
++      onKeyDown={(e) => {
++        if (e.key !== "Enter" && e.key !== " ") return;
++        const idx = items.findIndex((item) => item.key === value);
++        const next = items[(idx + 1) % items.length];
++        if (next) {
++          e.preventDefault();
++          onChange(next.key);
++        }
++      }}
++    >
++      {items.map((item) => {
++        const active = item.key === value;
++        return (
++          <button
++            key={item.key}
++            type="button"
++            role="tab"
++            aria-selected={active}
++            tabIndex={active ? 0 : -1}
++            onClick={() => onChange(item.key)}
++            className={`relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors ${
++              active ? "font-semibold" : "font-medium hover:bg-muted/60"
++            }`}
++            style={{
++              color: active ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))",
++              borderBottomColor: active
++                ? "var(--color-brand-600)"
++                : "transparent",
++            }}
++          >
++            {item.label}
++            {typeof item.counter === "number" ? (
++              <Counter count={item.counter} active={active} />
++            ) : null}
++          </button>
++        );
++      })}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index c63b5d0d5..d84dfa67f 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -1804,7 +1804,7 @@ function WorkspaceTreeList({
+           />
+         )}
+         {sessionsQuery.isError ? (
+-          <div className="m-1 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
++          <div className="m-1 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+             加载会话失败：{sessionsQuery.error?.message ?? "未知错误"}
+             <Button
+               size="small"
+@@ -2028,7 +2028,7 @@ function GroupChatSection({
+       >
+         <span
+           aria-hidden
+-          className={`w-3.5 shrink-0 text-center text-[10px] leading-none text-muted-foreground transition-transform ${
++          className={`w-3.5 shrink-0 text-center text-[11px] leading-none text-muted-foreground transition-transform ${
+             collapsed ? "" : "rotate-90"
+           }`}
+         >
+@@ -2069,7 +2069,7 @@ function GroupChatSection({
+            原直接平铺比会话行左移一档。 */
+         <div className="px-1.5">
+         {error ? (
+-          <div className="mx-0.5 flex items-center gap-1.5 rounded border border-destructive/30 bg-red-50 px-2 py-1.5 text-[11px] text-destructive">
++          <div className="mx-0.5 flex items-center gap-1.5 rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
+             加载群聊失败：{error}
+             <Button size="small" onClick={onRetry}>
+               重新加载
+@@ -2196,7 +2196,7 @@ function GroupChatRow({
+           </span>
+           <span
+             title="群聊：多用户 + 多 Agent 同会话协作"
+-            className="inline-flex h-4 shrink-0 items-center rounded bg-info/10 px-1.5 text-[10px] font-semibold leading-none text-info"
++            className="inline-flex h-4 shrink-0 items-center rounded bg-info/10 px-1.5 text-[11px] font-semibold leading-none text-info"
+           >
+             群聊
+           </span>
+@@ -2205,7 +2205,7 @@ function GroupChatRow({
+           {group.archived_at && (
+             <span
+               title={`已归档（${formatRelativeTime(group.archived_at)}）`}
+-              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-px text-[10px] font-medium leading-4 text-muted-foreground"
++              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-px text-[11px] font-medium leading-4 text-muted-foreground"
+             >
+               <Archive aria-hidden className="h-2.5 w-2.5" />
+               已归档
+@@ -2219,7 +2219,7 @@ function GroupChatRow({
+           {mentionUnread && (
+             <span
+               data-testid="group-mention-unread-badge"
+-              className="shrink-0 rounded bg-brand-100 px-1 text-[10px] font-semibold leading-4 text-brand-700"
++              className="shrink-0 rounded bg-brand-100 px-1 text-[11px] font-semibold leading-4 text-brand-700"
+             >
+               [有人@我]
+             </span>
+@@ -2239,7 +2239,7 @@ function GroupChatRow({
+         <span
+           data-testid="group-unread-badge"
+           aria-label={`${group.unread_count >= 99 ? "99+" : group.unread_count} 条未读`}
+-          className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-brand-100 px-1 text-[10px] font-semibold leading-none text-brand-700"
++          className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-brand-100 px-1 text-[11px] font-semibold leading-none text-brand-700"
+         >
+           {group.unread_count >= 99 ? "99+" : group.unread_count}
+         </span>
+@@ -2600,7 +2600,7 @@ function WorkspaceGroupNode({
+       >
+         <span
+           aria-hidden
+-          className={`w-3.5 shrink-0 text-center text-[10px] leading-none text-muted-foreground transition-transform ${
++          className={`w-3.5 shrink-0 text-center text-[11px] leading-none text-muted-foreground transition-transform ${
+             expanded ? "rotate-90" : ""
+           }`}
+         >
+@@ -2767,7 +2767,7 @@ function WorkspaceGroupNode({
+                   >
+                     <span
+                       aria-hidden
+-                      className={`text-[10px] text-muted-foreground transition-transform ${
++                      className={`text-[11px] text-muted-foreground transition-transform ${
+                         subOrphanEffectiveOpen ? "rotate-90" : ""
+                       }`}
+                     >
+@@ -2775,7 +2775,7 @@ function WorkspaceGroupNode({
+                     </span>
+                     <span
+                       aria-hidden
+-                      className="inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[9px] font-bold text-violet-600 dark:bg-violet-500/20 dark:text-violet-300"
++                      className="inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-600 dark:bg-brand-500/20 dark:text-brand-300"
+                     >
+                       子
+                     </span>
+@@ -2801,7 +2801,7 @@ function WorkspaceGroupNode({
+                   >
+                     <span
+                       aria-hidden
+-                      className={`text-[10px] text-muted-foreground transition-transform ${
++                      className={`text-[11px] text-muted-foreground transition-transform ${
+                         toolSectionOpen ? "rotate-90" : ""
+                       }`}
+                     >
+@@ -2894,7 +2894,7 @@ function WorkspaceGroupNode({
+                         {/* 2026-08-26-subsession-portal-grouping：父行附属分身
+                             折叠组（组级 violet 徽标 + 子行缩进，design §4.B） */}
+                         {childSubs && childSubs.length > 0 && (
+-                          <div className="ml-3 border-l border-violet-300/60 pl-2 dark:border-violet-500/40">
++                          <div className="ml-3 border-l border-brand-300/60 pl-2 dark:border-brand-500/40">
+                             <div
+                               role="button"
+                               tabIndex={0}
+@@ -2908,13 +2908,13 @@ function WorkspaceGroupNode({
+                             >
+                               <span
+                                 aria-hidden
+-                                className={`text-[10px] transition-transform ${parentOpen ? "rotate-90" : ""}`}
++                                className={`text-[11px] transition-transform ${parentOpen ? "rotate-90" : ""}`}
+                               >
+                                 ▶
+                               </span>
+                               <span
+                                 aria-hidden
+-                                className="inline-flex items-center rounded px-1 py-px text-[10px] font-medium text-violet-600 dark:text-violet-300"
++                                className="inline-flex items-center rounded px-1 py-px text-[11px] font-medium text-brand-600 dark:text-brand-300"
+                               >
+                                 分身 {childSubs.length}
+                               </span>
+@@ -2984,13 +2984,13 @@ function WorkspaceGroupNode({
+                             >
+                               <span
+                                 aria-hidden
+-                                className={`text-[10px] transition-transform ${forkOpen ? "rotate-90" : ""}`}
++                                className={`text-[11px] transition-transform ${forkOpen ? "rotate-90" : ""}`}
+                               >
+                                 ▶
+                               </span>
+                               <span
+                                 aria-hidden
+-                                className="inline-flex items-center rounded px-1 py-px text-[10px] font-medium text-brand-600 dark:text-brand-300"
++                                className="inline-flex items-center rounded px-1 py-px text-[11px] font-medium text-brand-600 dark:text-brand-300"
+                               >
+                                 ↦ 分叉 {childForks.length}
+                               </span>
+@@ -3361,7 +3361,7 @@ function SessionRow({
+           {session.archived_at && (
+             <span
+               title={`已归档（${formatRelativeTime(session.archived_at)}）`}
+-              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-px text-[10px] font-medium leading-4 text-muted-foreground"
++              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-px text-[11px] font-medium leading-4 text-muted-foreground"
+             >
+               <Archive aria-hidden className="h-2.5 w-2.5" />
+               已归档
+@@ -3371,7 +3371,7 @@ function SessionRow({
+             <span
+               title="由 SillySpec CLI 自动上报创建的本地 Agent 会话"
+               data-testid="tool-report-badge"
+-              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-brand-600 bg-brand-100 px-1.5 py-px text-[10px] font-medium leading-4 text-brand-700"
++              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-brand-600 bg-brand-100 px-1.5 py-px text-[11px] font-medium leading-4 text-brand-700"
+             >
+               <FileText aria-hidden className="h-2.5 w-2.5" />
+               本地 Agent
+@@ -3384,7 +3384,7 @@ function SessionRow({
+             <span
+               title="由既有会话分叉创建的子会话（继承分叉点前上下文）"
+               data-testid="fork-origin-badge"
+-              className="inline-flex shrink-0 items-center rounded-full border border-brand-600 bg-brand-100 px-1.5 py-px text-[10px] font-medium leading-4 text-brand-700"
++              className="inline-flex shrink-0 items-center rounded-full border border-brand-600 bg-brand-100 px-1.5 py-px text-[11px] font-medium leading-4 text-brand-700"
+             >
+               🔗 分叉
+             </span>
+@@ -3560,7 +3560,7 @@ function SessionRow({
+           workspaceIdToName?.has(session.workspace_id) && (
+             <Tag
+               title={workspaceIdToName.get(session.workspace_id)}
+-              className="m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
++              className="m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[11px] leading-4"
+               color="cyan"
+             >
+               <FolderOpen aria-hidden className="mr-0.5 inline h-3 w-3" />
+@@ -3570,7 +3570,7 @@ function SessionRow({
+         {variant === "flat" && machineName && (
+           <Tag
+             title={machineOffline ? `${machineName}（离线）` : machineName}
+-            className={`m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[10px] leading-4 ${
++            className={`m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[11px] leading-4 ${
+               machineOffline ? "line-through opacity-60" : ""
+             }`}
+           >
+@@ -3586,7 +3586,7 @@ function SessionRow({
+              维持既有语义档着色）。 */
+           <span
+             className={cn(
+-              "inline-flex h-4 shrink-0 items-center gap-1 rounded px-1.5 text-[10px] font-semibold leading-none",
++              "inline-flex h-4 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] font-semibold leading-none",
+               isToolReport
+                 ? "bg-info/10 text-info"
+                 : engineValue === "codex"
+@@ -3612,7 +3612,7 @@ function SessionRow({
+              点分隔纯文本——原三组 12px 图标（User/BookUser/Cloud）在 320px 左栏
+              内拥挤；全量信息仍在 title 悬浮。 */
+           <span
+-            className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[10px] leading-4 text-muted-foreground/80"
++            className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[11px] leading-4 text-muted-foreground/80"
+             title={[
+               `${session.owner_name ?? "—"}`,
+               snapshot?.profile_name ?? null,
+@@ -3638,7 +3638,7 @@ function SessionRow({
+             {snapshot?.profile_name && (
+               <Tag
+                 title={snapshot.profile_name}
+-                className="m-0 max-w-[150px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
++                className="m-0 max-w-[150px] truncate rounded-sm px-1 py-0 text-[11px] leading-4"
+                 color="blue"
+               >
+                 <BookUser aria-hidden className="mr-0.5 inline h-3 w-3" />
+@@ -3648,13 +3648,13 @@ function SessionRow({
+             {snapshot?.provider_name && (
+               <Tag
+                 title={snapshot.provider_name}
+-                className="m-0 max-w-[130px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
++                className="m-0 max-w-[130px] truncate rounded-sm px-1 py-0 text-[11px] leading-4"
+               >
+                 <Cloud aria-hidden className="mr-0.5 inline h-3 w-3" />
+                 {snapshot.provider_name}
+               </Tag>
+             )}
+-            <Tag className="m-0 shrink-0 rounded-sm px-1 py-0 text-[10px] leading-4">
++            <Tag className="m-0 shrink-0 rounded-sm px-1 py-0 text-[11px] leading-4">
+               {session.turn_count} 轮
+             </Tag>
+           </>
+diff --git a/frontend/src/components/top-bar.tsx b/frontend/src/components/top-bar.tsx
+index 29541b541..7d555522d 100644
+--- a/frontend/src/components/top-bar.tsx
++++ b/frontend/src/components/top-bar.tsx
+@@ -122,13 +122,13 @@ export function TopBar({ displayName, onLogout, avatar }: TopBarProps) {
+           return (
+             <span key={`${label}-${idx}`} className="flex items-center gap-1">
+               {idx > 0 && (
+-                <ChevronRight className="h-3.5 w-3.5 text-slate-400" aria-hidden />
++                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+               )}
+               <span
+                 className={
+                   isLast
+-                    ? "truncate font-medium text-slate-800"
+-                    : "truncate text-slate-500"
++                    ? "truncate font-medium text-foreground"
++                    : "truncate text-muted-foreground"
+                 }
+               >
+                 {label}
+@@ -141,11 +141,11 @@ export function TopBar({ displayName, onLogout, avatar }: TopBarProps) {
+       {/* 右侧：搜索 + 通知 + 用户 */}
+       <div className="flex shrink-0 items-center gap-3">
+         <div className="relative hidden sm:block">
+-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
++          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+           <input
+             type="search"
+             placeholder="搜索..."
+-            className="w-[240px] rounded-md border border-transparent bg-slate-100 py-1.5 pl-8 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:bg-card focus:outline-none"
++            className="w-[240px] rounded-md border border-transparent bg-muted py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-brand-400 focus:bg-card focus:outline-none"
+             aria-label="全局搜索"
+           />
+         </div>
+@@ -161,7 +161,7 @@ export function TopBar({ displayName, onLogout, avatar }: TopBarProps) {
+           <DropdownMenuTrigger asChild>
+             <button
+               type="button"
+-              className="flex items-center gap-2 rounded-md p-1 transition-colors hover:bg-slate-100"
++              className="flex items-center gap-2 rounded-md p-1 transition-colors hover:bg-muted"
+               aria-label="用户菜单"
+             >
+               {/* task-09（FR-05）：有头像时渲染图片（src 由 useAvatarSrc 解析）；
+@@ -173,7 +173,7 @@ export function TopBar({ displayName, onLogout, avatar }: TopBarProps) {
+                   {initial}
+                 </AvatarFallback>
+               </Avatar>
+-              <span className="hidden max-w-[120px] truncate text-sm text-slate-700 md:inline">
++              <span className="hidden max-w-[120px] truncate text-sm text-foreground md:inline">
+                 {displayName}
+               </span>
+             </button>
+diff --git a/frontend/src/components/workspace-card.tsx b/frontend/src/components/workspace-card.tsx
+index 2569a0c27..bf49c780e 100644
+--- a/frontend/src/components/workspace-card.tsx
++++ b/frontend/src/components/workspace-card.tsx
+@@ -3,6 +3,8 @@
+ import Link from "next/link";
+ import { useState } from "react";
+ 
++import { Modal } from "antd";
++
+ import { Badge } from "@/components/ui/badge";
+ import { Button } from "@/components/ui/button";
+ import { WorkspacePathFields } from "@/components/workspace-path-fields";
+@@ -112,6 +114,8 @@ export function WorkspaceCard({
+ }: Props) {
+   const [busy, setBusy] = useState<"rescan" | "delete" | null>(null);
+   const [error, setError] = useState<string | null>(null);
++  // 2026-09-26 重排 FR-05/FR-08：删除确认 window.confirm → antd Modal（受控）。
++  const [confirmDelete, setConfirmDelete] = useState(false);
+ 
+   const formatTs = (raw: string | null) =>
+     raw ? new Date(raw).toLocaleString("zh-CN") : "—";
+@@ -130,13 +134,12 @@ export function WorkspaceCard({
+   };
+ 
+   const handleDelete = async () => {
+-    if (!window.confirm(`确认删除工作区 "${workspace.name}"？源文件不会被改动。`)) {
+-      return;
+-    }
++    // FR-08：确认走 antd Modal（onOk 进这里），不再 window.confirm。
+     setError(null);
+     setBusy("delete");
+     try {
+       await deleteWorkspace(workspace.id);
++      setConfirmDelete(false);
+       onChanged();
+     } catch (err) {
+       setError(err instanceof ApiError ? err.message : "删除失败");
+@@ -183,6 +186,7 @@ export function WorkspaceCard({
+     dragHandleProps ?? {};
+ 
+   return (
++    <>
+     <article
+       onClick={onActivate ? handleCardClick : undefined}
+       className={cn(
+@@ -345,12 +349,27 @@ export function WorkspaceCard({
+           size="sm"
+           variant="ghost"
+           className="ml-auto h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+-          onClick={handleDelete}
++          onClick={() => setConfirmDelete(true)}
+           disabled={busy !== null}
+         >
+           {busy === "delete" ? "删除中…" : "删除"}
+         </Button>
+       </footer>
+     </article>
++
++      {/* 2026-09-26 重排 FR-08：删除确认 Modal（替代 window.confirm，对齐
++          FRONTEND_PAGE_STYLE §8 高危场景语义；源文件不受影响的文案保留）。 */}
++      <Modal
++        title={`确认删除工作区 "${workspace.name}"？`}
++        open={confirmDelete}
++        okText="删除"
++        cancelText="取消"
++        okButtonProps={{ danger: true, loading: busy === "delete" }}
++        onOk={handleDelete}
++        onCancel={() => setConfirmDelete(false)}
++      >
++        <p className="text-sm text-muted-foreground">源文件不会被改动。</p>
++      </Modal>
++    </>
+   );
+ }
+diff --git a/frontend/src/components/workspace-drag-grid.tsx b/frontend/src/components/workspace-drag-grid.tsx
+index 7c9e26b8d..6ff245fe6 100644
+--- a/frontend/src/components/workspace-drag-grid.tsx
++++ b/frontend/src/components/workspace-drag-grid.tsx
+@@ -361,7 +361,7 @@ export function WorkspaceDragGrid({
+         >
+           <div
+             ref={gridRef}
+-            className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3"
++            className="flex flex-col gap-2"
+           >
+             {order.map((w) => (
+               <SortableWorkspaceCard
+diff --git a/frontend/src/components/workspace/hero-header.tsx b/frontend/src/components/workspace/hero-header.tsx
+index ccb0e38b0..b277dda26 100644
+--- a/frontend/src/components/workspace/hero-header.tsx
++++ b/frontend/src/components/workspace/hero-header.tsx
+@@ -3,8 +3,8 @@
+ import Link from "next/link";
+ import { ArrowLeft } from "lucide-react";
+ 
+-import { Badge } from "@/components/ui/badge";
+ import { buttonVariants } from "@/components/ui/button";
++import { PageHead, StateLabel } from "@/components/primer";
+ import { cn } from "@/lib/utils";
+ import type { Workspace } from "@/lib/workspaces";
+ 
+@@ -23,56 +23,39 @@ const WORKSPACE_STATUS_LABEL: Record<string, string> = {
+   deleted: "已删除",
+ };
+ 
++/**
++ * 2026-09-26 重排（FR-06 / D-001@v1）：深色渐变 Hero 退役，改 GitHub Repo 首页式
++ * 白底页头（PageHead + StateLabel 状态胶囊 + slug mono 副标题）——props 契约不变
++ * （workspace + extraActions），调用方零改动；对照原型「工作区概览」视图。
++ */
+ export function WorkspaceHeroHeader({
+   workspace,
+   extraActions,
+ }: WorkspaceHeroHeaderProps): JSX.Element {
+   return (
+-    <section
+-      className={cn(
+-        // brand-panel-gradient：暗色下深青渐变覆盖钩子（ql-20260824-017，
+-        // from-brand-700/800 在 dark 映射亮青档，白字标题发白）
+-        "brand-panel-gradient relative overflow-hidden rounded-lg bg-gradient-to-br from-brand-700 via-brand-800 to-slate-950 px-6 py-6 text-white shadow-sm",
+-      )}
+-    >
+-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+-        {/* 左侧：名称 + 状态 + slug */}
+-        <div className="min-w-0 space-y-2">
+-          <div className="flex flex-wrap items-center gap-3">
+-            <h1 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
+-              {workspace.name}
+-            </h1>
+-            <Badge
+-              variant={workspace.status === "active" ? "success" : "outline"}
+-              className={cn(
+-                "shrink-0 border-white/20 text-[11px]",
+-                workspace.status === "active"
+-                  ? "bg-white/10 text-white"
+-                  : "bg-transparent text-white/80",
+-              )}
+-            >
+-              {WORKSPACE_STATUS_LABEL[workspace.status] ?? workspace.status}
+-            </Badge>
+-          </div>
+-          <p className="font-mono text-xs text-white/60">{workspace.slug}</p>
+-        </div>
+-
+-        {/* 右侧：操作组（ql-20260821-003：编辑信息与基本信息卡头重复已删；
+-            extraActions slot 供外部按钮（编辑我的接入配置）挂在返回列表左边） */}
+-        <div className="flex shrink-0 items-center gap-2">
++    <PageHead
++      title={workspace.name}
++      titleExtra={
++        <StateLabel
++          variant={workspace.status === "active" ? "done" : "neutral"}
++          size="md"
++        >
++          {WORKSPACE_STATUS_LABEL[workspace.status] ?? workspace.status}
++        </StateLabel>
++      }
++      subtitle={<span className="font-mono">{workspace.slug}</span>}
++      actions={
++        <div className="flex items-center gap-2">
+           {extraActions}
+           <Link
+             href="/workspaces"
+-            className={cn(
+-              buttonVariants({ variant: "outline", size: "sm" }),
+-              "border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white",
+-            )}
++            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+           >
+             <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+             返回列表
+           </Link>
+         </div>
+-      </div>
+-    </section>
++      }
++    />
+   );
+ }
+diff --git a/frontend/src/styles/themes.test.ts b/frontend/src/styles/themes.test.ts
+index 137762c9b..56afcab72 100644
+--- a/frontend/src/styles/themes.test.ts
++++ b/frontend/src/styles/themes.test.ts
+@@ -259,3 +259,41 @@ describe("task-10: dark 主题取值完整性与对称翻转（2026-08-23-fronte
+     });
+   });
+ });
++
++// hex → rgba(…, alpha) 字符串（dark soft 断言用：soft 必须=主值 15% 透明度，防两处漂移）
++function hexToRgba(hex: string, alpha: number): string {
++  const r = Number.parseInt(hex.slice(1, 3), 16);
++  const g = Number.parseInt(hex.slice(3, 5), 16);
++  const b = Number.parseInt(hex.slice(5, 7), 16);
++  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
++}
++
++describe("task-01: semantic soft 浅底阶（2026-09-26-core-pages-visual-redesign）", () => {
++  it("三套主题 semanticSoft 五档（success/warning/error/info/neutral）键齐全", () => {
++    for (const name of THEME_NAMES) {
++      expect(Object.keys(themes[name].color.semanticSoft).sort()).toEqual([
++        ...SEMANTIC_KEYS,
++      ].sort());
++    }
++  });
++
++  it("浅色两主题 soft=同族 Tailwind v3 50 档（emerald/amber/red/cyan-50 + slate-100）", () => {
++    const LIGHT_SOFT = {
++      success: "#ecfdf5", // emerald-50
++      warning: "#fffbeb", // amber-50
++      error: "#fef2f2", // red-50
++      info: "#ecfeff", // cyan-50
++      neutral: "#f1f5f9", // slate-100
++    };
++    expect(themes.blue.color.semanticSoft).toEqual(LIGHT_SOFT);
++    expect(themes["ai-native"].color.semanticSoft).toEqual(LIGHT_SOFT);
++  });
++
++  it("dark soft=各自 semantic 主值 15% 透明度 rgba（同一语义色透明度变体，非独立调色）", () => {
++    for (const key of SEMANTIC_KEYS) {
++      expect(themes.dark.color.semanticSoft[key]).toBe(
++        hexToRgba(themes.dark.color.semantic[key], 0.15),
++      );
++    }
++  });
++});
+diff --git a/frontend/src/styles/themes.ts b/frontend/src/styles/themes.ts
+index 83dc79b25..9a910c9b7 100644
+--- a/frontend/src/styles/themes.ts
++++ b/frontend/src/styles/themes.ts
+@@ -47,6 +47,15 @@ export interface ThemeColorDef {
+     info: string;
+     neutral: string;
+   };
++  /** 语义浅底阶（2026-09-26-core-pages-visual-redesign FR-02）：StateLabel 浅底深字胶囊的底色。
++   * 浅色两主题=同族 Tailwind v3 50 档（neutral=slate-100）；dark=semantic 主值 15% 透明度 rgba。 */
++  semanticSoft: {
++    success: string;
++    warning: string;
++    error: string;
++    info: string;
++    neutral: string;
++  };
+ }
+ 
+ export interface ThemeDef {
+@@ -103,6 +112,13 @@ const blueTheme: ThemeDef = {
+       info: '#06b6d4',
+       neutral: '#64748b',
+     },
++    semanticSoft: {
++      success: '#ecfdf5', // emerald-50
++      warning: '#fffbeb', // amber-50
++      error: '#fef2f2', // red-50
++      info: '#ecfeff', // cyan-50
++      neutral: '#f1f5f9', // slate-100
++    },
+   },
+ };
+ 
+@@ -139,6 +155,13 @@ const aiNativeTheme: ThemeDef = {
+       info: '#0891B2',
+       neutral: '#64748b',
+     },
++    semanticSoft: {
++      success: '#ecfdf5', // emerald-50
++      warning: '#fffbeb', // amber-50
++      error: '#fef2f2', // red-50
++      info: '#ecfeff', // cyan-50
++      neutral: '#f1f5f9', // slate-100
++    },
+   },
+ };
+ 
+@@ -199,6 +222,14 @@ const darkTheme: ThemeDef = {
+       info: '#22d3ee',
+       neutral: '#a1a1aa',
+     },
++    // dark soft=主值 15% 透明度(同一语义色透明度变体,深底上的浅色晕染,非独立调色)
++    semanticSoft: {
++      success: 'rgba(16, 185, 129, 0.15)',
++      warning: 'rgba(245, 158, 11, 0.15)',
++      error: 'rgba(239, 68, 68, 0.15)',
++      info: 'rgba(34, 211, 238, 0.15)',
++      neutral: 'rgba(161, 161, 170, 0.15)',
++    },
+   },
+ };

@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { listLinkedProjects, type PpmProjectBrief } from "@/lib/workspace";
-import { Input, Modal, Select } from "antd";
+import { Input, Modal, Pagination, Select } from "antd";
 
 import { Button, buttonVariants } from "@/components/ui/button";
-import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+import { PageContainer, SectionCard } from "@/components/layout";
+import { PageHead } from "@/components/primer";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FolderGit2 } from "lucide-react";
@@ -387,8 +388,8 @@ export default function WorkspacesPage() {
 
   return (
     <PageContainer size="full">
-      <PageHeader
-        title="选择工作区"
+      <PageHead
+        title="工作区"
         subtitle="选择一个工作区开始，或在右上角进入平台后台"
         actions={
           <>
@@ -525,31 +526,15 @@ export default function WorkspacesPage() {
             onMoved={handleMoved}
             onMoveFailed={() => void reload()}
           />
-          {/* task-08 / FR-04：服务端分页器 */}
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <span className="text-[11px] text-muted-foreground">
-              共 {total} 条 · 第 {page + 1} 页
-            </span>
-            <div className="flex items-center gap-1.5">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={page === 0}
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-                aria-label="上一页"
-              >
-                上一页
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={(page + 1) * WORKSPACE_PAGE_SIZE >= total}
-                onClick={() => setPage((p) => p + 1)}
-                aria-label="下一页"
-              >
-                下一页
-              </Button>
-            </div>
+          {/* 2026-09-26 重排 FR-05：服务端分页规范化（antd Pagination，0 基页码 +1） */}
+          <div className="flex justify-end pt-1">
+            <Pagination
+              current={page + 1}
+              pageSize={WORKSPACE_PAGE_SIZE}
+              total={total}
+              showTotal={(t) => `共 ${t} 条`}
+              onChange={(p) => setPage(Math.max(0, p - 1))}
+            />
           </div>
         </>
       )}

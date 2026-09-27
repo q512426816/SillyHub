@@ -268,6 +268,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+
+// 2026-09-26 重排 FR-05：分页换 antd Pagination——翻页按钮改类选择器
+// （.ant-pagination-next/prev 内 button；语义与旧 aria-label 查询一致）。
+function pagerButton(_container: unknown, dir: "next" | "prev"): HTMLButtonElement {
+  const btn = document.querySelector(`.ant-pagination-${dir} button`);
+  if (!(btn instanceof HTMLButtonElement)) {
+    throw new Error(`找不到分页 ${dir} 按钮`);
+  }
+  return btn;
+}
+
 describe("WorkspacesPage 选择器改造 (task-07)", () => {
   // ql-20260821-007：平台管理/系统设置旁路链接已按用户反馈删除（顶部菜单另有入口），用例移除。
 
@@ -408,7 +419,7 @@ describe("WorkspacesPage 拖拽排序接线 (task-09/task-10)", () => {
 
   /** 当前页翻到第 2 页（0 基 page=1）——四象限/同页/自锚都以当前页 1 为基准。 */
   async function gotoPage1() {
-    fireEvent.click(screen.getByLabelText("下一页"));
+    fireEvent.click(pagerButton(null, "next"));
     await waitFor(() =>
       expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
         expect.objectContaining({ offset: 12 }),
@@ -545,9 +556,9 @@ describe("WorkspacesPage 拖拽排序接线 (task-09/task-10)", () => {
     mockPagedList(26);
     renderPage(<WorkspacesPage />);
     await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(12));
-    expect(screen.getByText("共 26 条 · 第 1 页")).toBeInTheDocument();
-    expect((screen.getByLabelText("上一页") as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByLabelText("下一页") as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText("共 26 条")).toBeInTheDocument();
+    expect(pagerButton(null, "prev").disabled).toBe(true);
+    expect(pagerButton(null, "next").disabled).toBe(false);
 
     // 第 2 页：满页 12 张、无重复 id。
     await gotoPage1();
@@ -560,7 +571,7 @@ describe("WorkspacesPage 拖拽排序接线 (task-09/task-10)", () => {
     expect((gridMock.lastProps as { total?: number }).total).toBe(26);
 
     // 第 3 页（末页）：允许不满（26-24=2），total 不变，下一页禁用。
-    fireEvent.click(screen.getByLabelText("下一页"));
+    fireEvent.click(pagerButton(null, "next"));
     await waitFor(() =>
       expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
         expect.objectContaining({ offset: 24 }),
@@ -568,10 +579,10 @@ describe("WorkspacesPage 拖拽排序接线 (task-09/task-10)", () => {
     );
     await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(2));
     expect((gridMock.lastProps as { total?: number }).total).toBe(26);
-    expect((screen.getByLabelText("下一页") as HTMLButtonElement).disabled).toBe(true);
+    expect(pagerButton(null, "next").disabled).toBe(true);
 
     // 模拟 move 成功（onMoved 上抛 rank→page=1）→ 翻页 reload：limit 仍恒 12。
-    fireEvent.click(screen.getByLabelText("上一页")); // 便于区分 onMoved 触发的 reload
+    fireEvent.click(pagerButton(null, "prev")); // 便于区分 onMoved 触发的 reload
     await waitFor(() =>
       expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
         expect.objectContaining({ offset: 12 }),

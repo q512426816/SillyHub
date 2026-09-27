@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useState } from "react";
 
+import { Modal } from "antd";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
@@ -112,6 +114,8 @@ export function WorkspaceCard({
 }: Props) {
   const [busy, setBusy] = useState<"rescan" | "delete" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 2026-09-26 重排 FR-05/FR-08：删除确认 window.confirm → antd Modal（受控）。
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const formatTs = (raw: string | null) =>
     raw ? new Date(raw).toLocaleString("zh-CN") : "—";
@@ -130,13 +134,12 @@ export function WorkspaceCard({
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`确认删除工作区 "${workspace.name}"？源文件不会被改动。`)) {
-      return;
-    }
+    // FR-08：确认走 antd Modal（onOk 进这里），不再 window.confirm。
     setError(null);
     setBusy("delete");
     try {
       await deleteWorkspace(workspace.id);
+      setConfirmDelete(false);
       onChanged();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "删除失败");
@@ -183,6 +186,7 @@ export function WorkspaceCard({
     dragHandleProps ?? {};
 
   return (
+    <>
     <article
       onClick={onActivate ? handleCardClick : undefined}
       className={cn(
@@ -345,12 +349,27 @@ export function WorkspaceCard({
           size="sm"
           variant="ghost"
           className="ml-auto h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onClick={handleDelete}
+          onClick={() => setConfirmDelete(true)}
           disabled={busy !== null}
         >
           {busy === "delete" ? "删除中…" : "删除"}
         </Button>
       </footer>
     </article>
+
+      {/* 2026-09-26 重排 FR-08：删除确认 Modal（替代 window.confirm，对齐
+          FRONTEND_PAGE_STYLE §8 高危场景语义；源文件不受影响的文案保留）。 */}
+      <Modal
+        title={`确认删除工作区 "${workspace.name}"？`}
+        open={confirmDelete}
+        okText="删除"
+        cancelText="取消"
+        okButtonProps={{ danger: true, loading: busy === "delete" }}
+        onOk={handleDelete}
+        onCancel={() => setConfirmDelete(false)}
+      >
+        <p className="text-sm text-muted-foreground">源文件不会被改动。</p>
+      </Modal>
+    </>
   );
 }

@@ -45,7 +45,7 @@ import {
   WorkspaceAccessGuide,
   type AccessGuideInitial,
 } from "@/components/workspace-access-guide";
-import { Modal } from "antd";
+import { Modal, Select, Input} from "antd";
 import { useSession } from "@/stores/session";
 
 /* ------------------------------------------------------------------ */
@@ -423,68 +423,64 @@ export default function WorkspaceDetailPage({ params }: Props) {
                 <label className="text-[11px] text-muted-foreground">
                   状态（归档后默认不再出现在工作区列表）
                 </label>
-                <select
+                {/* 2026-09-26 重排 FR-06：原生 select 换 antd（存量值动态 option 语义保留） */}
+                <Select
                   value={statusDraft}
-                  onChange={(e) => setStatusDraft(e.target.value)}
-                  className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
-                >
-                  <option value="active">活跃</option>
-                  <option value="archived">已归档</option>
-                  {/* 存量过渡态（pending 等）：词表外当前值追加原值选项防止 React
-                      select 失配回跳（形态对齐 typeDraft 存量值处理）。 */}
-                  {statusDraft !== "active" && statusDraft !== "archived" && (
-                    <option value={statusDraft}>
-                      {WORKSPACE_STATUS_LABEL[statusDraft] ?? statusDraft}（存量值）
-                    </option>
-                  )}
-                </select>
+                  onChange={(v) => setStatusDraft(v)}
+                  className="w-full"
+                  options={[
+                    { value: "active", label: "活跃" },
+                    { value: "archived", label: "已归档" },
+                    ...(statusDraft !== "active" && statusDraft !== "archived"
+                      ? [{
+                          value: statusDraft,
+                          label: `${WORKSPACE_STATUS_LABEL[statusDraft] ?? statusDraft}（存量值）`,
+                        }]
+                      : []),
+                  ]}
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] text-muted-foreground">
                   工作区类型（不选即&ldquo;未分类&rdquo;）
                 </label>
-                <select
+                <Select
                   value={typeDraft ?? ""}
-                  onChange={(e) => setTypeDraft(e.target.value === "" ? null : e.target.value)}
-                  className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
-                >
-                  <option value="">未分类</option>
-                  {WORKSPACE_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                  {/* 存量未知旧值：下拉值集合外的当前值,追加原值选项防止 React
-                      select 失配回跳第一项（形态对齐 default_agent 离线追加选项）。 */}
-                  {typeDraft && !WORKSPACE_TYPE_OPTIONS.some((o) => o.value === typeDraft) && (
-                    <option value={typeDraft}>{typeDraft}（存量值）</option>
-                  )}
-                </select>
+                  onChange={(v) => setTypeDraft(v === "" ? null : v)}
+                  className="w-full"
+                  options={[
+                    { value: "", label: "未分类" },
+                    ...WORKSPACE_TYPE_OPTIONS.map((option) => ({
+                      value: option.value,
+                      label: option.label,
+                    })),
+                    ...(typeDraft && !WORKSPACE_TYPE_OPTIONS.some((o) => o.value === typeDraft)
+                      ? [{ value: typeDraft, label: `${typeDraft}（存量值）` }]
+                      : []),
+                  ]}
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] text-muted-foreground">
                   角色（如&ldquo;订单模块&rdquo;，≤100 字符）
                 </label>
-                <input
-                  type="text"
+                <Input
                   value={roleDraft}
                   maxLength={100}
                   onChange={(e) => setRoleDraft(e.target.value)}
                   placeholder="描述这个工作区在项目中的角色"
-                  className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
                 />
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] text-muted-foreground">
                   用途说明（≤2000 字符）
                 </label>
-                <textarea
+                <Input.TextArea
                   value={descriptionDraft}
                   maxLength={2000}
                   rows={3}
                   onChange={(e) => setDescriptionDraft(e.target.value)}
                   placeholder="这个工作区的用途说明"
-                  className="w-full resize-y rounded border border-input bg-background p-2.5 text-sm focus:border-ring focus:outline-none"
                 />
               </div>
             </div>
@@ -542,23 +538,24 @@ export default function WorkspaceDetailPage({ params }: Props) {
               <div className="flex items-end gap-2">
                 <div className="flex-1 space-y-1">
                   <label className="text-[11px] text-muted-foreground">智能体提供方</label>
-                  <select
+                  <Select
                     value={defaultAgent ?? ""}
-                    onChange={(e) => setDefaultAgent(e.target.value === "" ? null : e.target.value)}
-                    className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
-                  >
-                    <option value="">未设置（自动选最近在线的提供方）</option>
-                    {boundDaemonProviders.map((p) => (
-                      <option key={p} value={p}>
-                        {PROVIDER_META[p]?.label ?? p}
-                      </option>
-                    ))}
-                    {defaultAgent && !boundDaemonProviders.includes(defaultAgent) && (
-                      <option value={defaultAgent}>
-                        {PROVIDER_META[defaultAgent]?.label ?? defaultAgent}（离线）
-                      </option>
-                    )}
-                  </select>
+                    onChange={(v) => setDefaultAgent(v === "" ? null : v)}
+                    className="w-full"
+                    options={[
+                      { value: "", label: "未设置（自动选最近在线的提供方）" },
+                      ...boundDaemonProviders.map((p) => ({
+                        value: p,
+                        label: PROVIDER_META[p]?.label ?? p,
+                      })),
+                      ...(defaultAgent && !boundDaemonProviders.includes(defaultAgent)
+                        ? [{
+                            value: defaultAgent,
+                            label: `${PROVIDER_META[defaultAgent]?.label ?? defaultAgent}（离线）`,
+                          }]
+                        : []),
+                    ]}
+                  />
                 </div>
                 <div className="flex-1 space-y-1">
                   <label className="text-[11px] text-muted-foreground">智能体模型</label>
@@ -608,7 +605,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
                 variant="outline"
                 size="sm"
                 onClick={() => setAccessEditing(true)}
-                className="h-7 border-white/20 bg-white/10 text-xs text-white hover:bg-white/20 hover:text-white"
+                className="h-7 text-xs"
                 data-testid="binding-edit-entry"
               >
                 编辑我的接入配置
@@ -623,7 +620,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
           <div
             role="status"
             data-testid="archived-workspace-banner"
-            className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-800"
+            style={{ borderColor: "hsl(var(--warning))", backgroundColor: "var(--semantic-warning-soft)" }}
+            className="flex flex-wrap items-center gap-2 rounded-md border px-4 py-2.5 text-xs text-warning"
           >
             <Archive className="h-3.5 w-3.5 shrink-0" />
             <span>

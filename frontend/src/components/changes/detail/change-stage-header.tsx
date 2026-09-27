@@ -1,17 +1,21 @@
 "use client";
 
 /**
- * 阶段步骤条（主线顶部宏观进度，2026-08-11-change-detail-layout-rework / FR-01 / D-001）。
+ * 阶段 checks 横条（主线顶部宏观进度，2026-08-11-change-detail-layout-rework / FR-01 / D-001；
+ * 2026-09-26-core-pages-visual-redesign task-06 重排为 GitHub PR checks 风格 / FR-04）。
  *
- * 从原 page.tsx 顶部内联步骤条原样抽取：5 大阶段圆形节点，已完成显对勾、
- * 当前高亮、未到弱化；非线性三态（quick/blocked/archived）或未知阶段 indexOf<0 时返回 null
- * 不渲染（由 PageHeader 徽标承载）。导出 WORKFLOW_STAGE_LABELS 供 page.tsx 复用避免重复。
+ * 视觉：✓已完成=语义绿勾图标、●当前=主题色高亮、○待办=灰空心（primer StateIcon），
+ * 阶段间连接线，对照原型「变更详情」视图六阶段 checks 横条；非线性三态
+ * （quick/blocked/archived）或未知阶段 indexOf<0 时返回 null 不渲染（由 PageHeader
+ * 徽标承载）。导出 WORKFLOW_STAGE_LABELS 供 page.tsx 复用避免重复。
  *
  * 阶段-步骤联动（ql-20260821-017）：传入 stepStages + onStageClick 时节点升级为
  * button——有步骤数据的阶段可点击（aria-pressed 表选中、brand ring 高亮），点击
  * 由 page.tsx 切换 focusStage 筛选下方步骤时间线；无步骤数据阶段 disabled 弱化。
- * 未传联动 props 时渲染与旧版纯展示完全一致（向后兼容，旧测试零改动）。
+ * 未传联动 props 时渲染与纯展示一致（向后兼容）。
  */
+
+import { StateIcon } from "@/components/primer";
 
 export const WORKFLOW_STAGES = [
   "brainstorm", "plan", "execute", "verify", "archive",
@@ -73,7 +77,7 @@ export function ChangeStageHeader({
     stagesObj?.[displayStage]?.lastActive ?? updatedAt ?? null;
 
   return (
-    <div className="rounded-md border bg-card px-3 py-2">
+    <div className="rounded-md border bg-card px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-1">
         {WORKFLOW_STAGES.map((stage, i) => {
           const isCompleted = currentIndex > i;
@@ -81,12 +85,15 @@ export function ChangeStageHeader({
           const hasSteps = stepStages?.includes(stage) ?? false;
           const isFocused = focusStage === stage;
 
-          const circleClass = `w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-medium transition-shadow ${
-            isCurrent
-              ? "bg-primary text-primary-foreground"
-              : isCompleted
-                ? "bg-emerald-500 text-white"
-                : "bg-muted text-muted-foreground"
+          // checks 段：图标（✓绿勾 / ●当前主题色开圆 / ○灰空心）+ 阶段名
+          const segClass = `flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs transition-colors ${
+            isFocused
+              ? "font-semibold text-brand-600"
+              : isCurrent
+                ? "font-semibold text-foreground"
+                : isCompleted
+                  ? "text-foreground"
+                  : "text-muted-foreground"
           } ${
             linked && isFocused
               ? "ring-2 ring-brand-500 ring-offset-2 ring-offset-card"
@@ -97,22 +104,18 @@ export function ChangeStageHeader({
               : ""
           }`;
 
-          const labelClass = `ml-1 text-[11px] transition-colors ${
-            isFocused
-              ? "text-brand-600 font-medium"
-              : isCurrent
-                ? "text-foreground font-medium"
-                : "text-muted-foreground"
-          }`;
-
           const nodeInner = (
             <>
-              <div className={circleClass}>
-                {isCompleted ? "✓" : i + 1}
-              </div>
-              <span className={labelClass}>
-                {WORKFLOW_STAGE_LABELS[stage]}
-              </span>
+              {isCompleted ? (
+                <StateIcon name="check" size={16} className="shrink-0 text-success" />
+              ) : isCurrent ? (
+                <StateIcon name="openCircle" size={16} className="shrink-0 text-primary" />
+              ) : (
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                  <span className="h-3 w-3 rounded-full border-2 border-border" />
+                </span>
+              )}
+              {WORKFLOW_STAGE_LABELS[stage]}
             </>
           );
 
@@ -131,7 +134,7 @@ export function ChangeStageHeader({
                         ? "点击取消筛选，显示全部步骤"
                         : "点击筛选该阶段步骤"
                   }
-                  className={`group flex items-center rounded-md py-0.5 pr-0.5 ${
+                  className={`group ${segClass} ${
                     hasSteps
                       ? "cursor-pointer"
                       : "cursor-not-allowed opacity-60"
@@ -140,17 +143,17 @@ export function ChangeStageHeader({
                   {nodeInner}
                 </button>
               ) : (
-                nodeInner
+                <span className={segClass}>{nodeInner}</span>
               )}
               {i < WORKFLOW_STAGES.length - 1 && (
-                <div className="mx-1 h-px w-3 bg-border" />
+                <div aria-hidden="true" className="mx-1 h-px w-4 bg-border" />
               )}
             </div>
           );
         })}
       </div>
       {lastActive ? (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">
+        <p className="mt-1.5 text-xs text-muted-foreground">
           当前阶段: {new Date(lastActive).toLocaleString("zh-CN")}
         </p>
       ) : null}

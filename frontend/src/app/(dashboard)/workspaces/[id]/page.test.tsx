@@ -327,7 +327,7 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     expect(screen.getByText("项目组组件")).toBeInTheDocument();
     expect(screen.getByText("进行中变更")).toBeInTheDocument();
     expect(screen.getByText("已归档变更")).toBeInTheDocument();
-    const quickCard = screen.getByText("快速修复").closest("a");
+    const quickCard = screen.getByText(/快速修复/).closest("a");
     expect(quickCard).toHaveAttribute(
       "href",
       "/workspaces/ws-1/changes?tab=quicklog",
@@ -408,18 +408,21 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     // 不应出现"请先绑定"占位
     expect(screen.queryByText("请先绑定守护进程。")).not.toBeInTheDocument();
 
-    // ql-20260820-013 信息区已平铺为 SectionCard 卡片（原 Collapse 移除），
-    // select 不再处于折叠面板，querySelector 取法保留（语义不变）。
+    // 2026-09-26 重排 FR-06：原生 select 换 antd Select——打开下拉断言选项
+    // （语义不变：选项含 Claude Code、不含 Codex）。
+    // 按「智能体提供方」label 定位兄弟 antd Select（避免命中页面上其他 Select）
     const select = await waitFor(() => {
-      const el = document.querySelector('select');
-      expect(el).toBeInstanceOf(HTMLSelectElement);
-      return el as HTMLSelectElement;
+      const label = screen.getByText("智能体提供方");
+      const el = label.parentElement?.querySelector(".ant-select");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
     });
     expect(select).toBeInTheDocument();
-    // 选项应包含 claude
-    expect(select).toContainHTML("Claude Code");
+    fireEvent.mouseDown(select);
+    // 选项应包含 claude（antd option 渲染在下拉浮层）
+    expect(await screen.findByText("Claude Code")).toBeInTheDocument();
     // 不应包含 codex（那是另一个 daemon 的）
-    expect(select).not.toContainHTML("Codex");
+    expect(screen.queryByText("Codex")).not.toBeInTheDocument();
   });
 
   it("default_agent 卡片展示：已绑 daemon 无在线 provider 时显示无 provider 提示", async () => {
@@ -606,14 +609,18 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     // 只读态：状态徽标显示「活跃」（状态行 dl 内）
     expect(screen.getByText("活跃")).toBeInTheDocument();
 
-    // 展开「编辑」→ 状态下拉出现
+    // 展开「编辑」→ 状态下拉出现（antd Select）
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
     const statusLabel = screen.getByText("状态（归档后默认不再出现在工作区列表）");
-    const statusSelect = statusLabel.parentElement?.querySelector("select");
-    expect(statusSelect).not.toBeNull();
+    const statusSelectWrap = await waitFor(() => {
+      const el = statusLabel.parentElement?.querySelector(".ant-select");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
 
-    // 改「已归档」→ 保存按钮解禁 → 点保存
-    fireEvent.change(statusSelect!, { target: { value: "archived" } });
+    // 改「已归档」（打开下拉点选）→ 保存按钮解禁 → 点保存
+    fireEvent.mouseDown(statusSelectWrap);
+    fireEvent.click(await screen.findByTitle("已归档"));
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() =>

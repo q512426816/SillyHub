@@ -361,7 +361,7 @@ export function WorkspaceDragGrid({
         >
           <div
             ref={gridRef}
-            className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3"
+            className="flex flex-col gap-2"
           >
             {order.map((w) => (
               <SortableWorkspaceCard

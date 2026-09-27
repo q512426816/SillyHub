@@ -9,17 +9,20 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Checkbox, Input, Select, type TableProps } from "antd";
+import { Checkbox, Input, Pagination, Select } from "antd";
 
+import { PageContainer } from "@/components/layout";
 import {
-  DataTable,
-  PageContainer,
-  PageHeader,
-  SectionCard,
-} from "@/components/layout";
+  EmptyState,
+  IssueRow,
+  IssueRowHeader,
+  PageHead,
+  StateLabel,
+  UnderlineNav,
+  type StateLabelVariant,
+} from "@/components/primer";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { StatusBadge } from "@/components/ui/status-badge";
 import { ChangeStepBadge } from "@/components/changes/change-step-badge";
 import { ChangeActivityBadge } from "@/components/changes/change-activity-badge";
 import { PlatformSyncSection } from "@/components/changes/platform-sync-section";
@@ -48,16 +51,6 @@ import { getWorkspace, type Workspace } from "@/lib/workspaces";
 
 interface Props {
   params: { id: string };
-}
-
-// 查询条件垂直 Field（label 在上，控件在下），对齐 admin/roles / admin/users。
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex w-full flex-col gap-1">
-      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
-      {children}
-    </div>
-  );
 }
 
 const TABS = [
@@ -425,26 +418,36 @@ export default function ChangesPage({ params }: Props) {
     }
   };
 
-  // 待办徽标渲染（D-007 / design §7）：blocked 优先，否则 pending_review 投影，否则空占位。
+  // 待办徽标（D-007 / design §7）：blocked 优先，否则 pending_review 投影；
+  // primer StateLabel 承载（attention+clock=等待语义，error=阻塞），文本口径不变。
   const renderTodoBadge = (c: ChangeSummary): ReactNode => {
     if (c.status === "blocked") {
-      return <StatusBadge kind="error">阻塞中</StatusBadge>;
+      return (
+        <StateLabel variant="error">阻塞中</StateLabel>
+      );
     }
     if (c.pending_review && PENDING_REVIEW_LABEL[c.pending_review]) {
       return (
-        <StatusBadge kind="warning">
+        <StateLabel variant="attention" iconName="clock">
           {PENDING_REVIEW_LABEL[c.pending_review]}
-        </StatusBadge>
+        </StateLabel>
       );
     }
-    return <span className="text-xs text-muted-foreground">—</span>;
+    return null;
   };
 
-  // 负责人列渲染（task-05 / FR-04，2026-08-16-change-owner-from-token）：owner_name
-  // = 后端 enrich 批量 join users 填充（display_name 优先 username fallback，
-  // design §5 Phase 2.1，task-04 落地）。三态：owner_name 非空 → 用户名（可读，
-  // 小字号）；owner_name 空且 owner_id 有值 → UUID 前 8 位短标识降级（mono，
-  // enrich 未覆盖的兜底路径）；双空 → "—"（从未上行过 owner 的存量变更）。
+  // IssueRow 状态映射（FR-03 / design 第二层状态语义）：
+  // 终态（archived/location=archive，isTerminalChange 同款双条件）→ merged 合并勾；
+  // blocked → error；待办 → attention(clock)；其余进行中 → open 开圆。
+  const changeRowState = (c: ChangeSummary): StateLabelVariant => {
+    if (isTerminalChange(c)) return "merged";
+    if (c.status === "blocked") return "error";
+    if (c.pending_review) return "attention";
+    return "open";
+  };
+
+  // 负责人渲染（task-05 / FR-04，2026-08-16-change-owner-from-token）三态语义保留：
+  // owner_name → 用户名；owner_id → UUID 前 8 位 mono 降级；双空 → "—"。
   const renderOwner = (c: ChangeSummary): ReactNode => {
     if (c.owner_name) {
       return <span className="text-xs text-foreground">{c.owner_name}</span>;
@@ -459,124 +462,62 @@ export default function ChangesPage({ params }: Props) {
     return <span className="text-xs text-muted-foreground">—</span>;
   };
 
-  const columns: TableProps<ChangeSummary>["columns"] = [
-    {
-      title: "待办状态",
-      key: "todo",
-      // task-12（design §8.1）：列内追加活动徽标（真值表三态：进行中/停滞/空闲），
-      // 消费 step_progress.current_step_status + last_pushed_at（task-11 投影）；
-      // 数据随既有 30s 智能轮询刷新，零新增请求。宽度 120→150 容纳
-      // 「停滞 · 最后信号 x 小时前」最长文案单行不折行。
-      width: 150,
-      render: (_v: unknown, c: ChangeSummary) => (
-        <div className="flex flex-col items-start gap-1">
+  // 单行渲染（FR-03 IssueRow 两段式）：主行 = 待办徽标 + key mono 链接 + 标题；
+  // 副行 = 阶段徽标 + 活动徽标 + 组件 + 执行用量；右侧 = 负责人 + 更新时间 + hover 删除。
+  const renderChangeRow = (c: ChangeSummary): ReactNode => (
+    <IssueRow
+      key={c.id}
+      state={changeRowState(c)}
+      onClick={() => {
+        // 行级导航保持 Link 语义：整行点击进详情（链接本身也保留可点）。
+        window.location.assign(`/workspaces/${workspaceId}/changes/${c.id}`);
+      }}
+      title={
+        <>
           {renderTodoBadge(c)}
+          <Link
+            href={`/workspaces/${workspaceId}/changes/${c.id}`}
+            prefetch={false}
+            className="font-mono text-xs text-primary hover:underline"
+          >
+            {c.change_key}
+          </Link>
+          {c.title && (
+            <span className="text-xs text-muted-foreground">{c.title}</span>
+          )}
+        </>
+      }
+      meta={
+        <>
+          <ChangeStepBadge
+            stage={c.current_stage ?? "scan"}
+            stepProgress={c.step_progress ?? null}
+          />
           <ChangeActivityBadge
             currentStepStatus={c.step_progress?.current_step_status ?? null}
             lastPushedAt={c.last_pushed_at ?? null}
           />
-        </div>
-      ),
-    },
-    {
-      title: "标题",
-      key: "title",
-      render: (_v: unknown, c: ChangeSummary) => (
-        <Link
-          href={`/workspaces/${workspaceId}/changes/${c.id}`}
-          prefetch={false}
-          className="group inline-block"
-        >
-          <span className="block font-mono text-[11px] text-primary group-hover:underline">
-            {c.change_key}
-          </span>
-          {c.title && (
-            <span className="block text-[11px] text-muted-foreground">
-              {c.title}
-            </span>
+          {c.affected_components.length > 0 && (
+            <span className="font-mono">{c.affected_components.join(", ")}</span>
           )}
-        </Link>
-      ),
-    },
-    {
-      title: "负责人",
-      key: "owner",
-      width: 90,
-      render: (_v: unknown, c: ChangeSummary) => renderOwner(c),
-    },
-    {
-      title: "阶段",
-      key: "stage",
-      // task-06 / FR-03：换 ChangeStepBadge（stage 主行 + step 摘要副行）。
-      // step_progress 缺省传 null 由组件内部降级只渲染 stage 主行（D-003@v1，
-      // 视觉与现状一致）；宽度 90→150 容纳「step x/y · 当前步名」副行。
-      width: 150,
-      render: (_v: unknown, c: ChangeSummary) => (
-        <ChangeStepBadge
-          stage={c.current_stage ?? "scan"}
-          stepProgress={c.step_progress ?? null}
-        />
-      ),
-    },
-    {
-      title: "影响组件",
-      key: "affected_components",
-      ellipsis: true,
-      render: (c: ChangeSummary) => (
-        <span className="text-[11px]">
-          {c.affected_components.length > 0
-            ? c.affected_components.join(", ")
-            : "—"}
-        </span>
-      ),
-    },
-    {
-      // task-08（D-004@v1）：执行列——紧凑两行（耗时+进行中标记 / token·次），
-      // 起止时间走整格 title 悬浮；数据源 c.usage（task-06 投影，None →「—」）
-      title: "执行",
-      key: "usage",
-      width: 170,
-      render: (_v: unknown, c: ChangeSummary) => (
-        <UsageExecCell usage={c.usage} />
-      ),
-    },
-    {
-      title: (
-        <button
-          type="button"
-          onClick={toggleSort}
-          className="inline-flex items-center gap-0.5 font-normal text-primary hover:underline"
-          title="点击切换升序/降序"
-        >
-          更新时间
-          <span aria-hidden>{sortDir === "updated_at_desc" ? "↓" : "↑"}</span>
-        </button>
-      ),
-      dataIndex: "updated_at",
-      key: "updated_at",
-      align: "right",
-      width: 140,
-      render: (v: string) => (
-        <span className="text-[11px] text-muted-foreground">
-          {new Date(v).toLocaleString("zh-CN", {
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </span>
-      ),
-    },
-    // task-07（design §6.3 / FR-05d）：操作列删除入口——仅权限可见者渲染
-    // （canDeleteChange 三判启发式，后端权威）；无权行渲染空占位（不加「—」，
-    // 避免与待办/负责人列的「—」占位叠加干扰可读性）。active/archive 两 tab
-    // 均可删（§6.1 归档区变更同样可删）。
-    {
-      title: "操作",
-      key: "actions",
-      width: 70,
-      render: (_v: unknown, c: ChangeSummary) =>
+          <UsageExecCell usage={c.usage} />
+        </>
+      }
+      right={
+        <>
+          <span className="whitespace-nowrap">{renderOwner(c)}</span>
+          <span className="whitespace-nowrap tabular-nums">
+            {new Date(c.updated_at).toLocaleString("zh-CN", {
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </span>
+        </>
+      }
+      hoverActions={
         canDeleteChange(c, deleteAccess) ? (
           <Button
             size="sm"
@@ -587,9 +528,10 @@ export default function ChangesPage({ params }: Props) {
           >
             删除
           </Button>
-        ) : null,
-    },
-  ];
+        ) : null
+      }
+    />
+  );
 
   // 副标题（task-06）：workspace 名 + 计数。
   // 聚焦时 N=total（当前待我处理），M=tabTotals.active（进行中总数，单独 useQuery 拉）。
@@ -685,7 +627,13 @@ export default function ChangesPage({ params }: Props) {
 
   return (
     <PageContainer size="full">
-      <PageHeader
+      {/* 四层结构（FR-03 / 原型「变更中心」视图）：页头 → 工具条 → 状态 tab → 行式列表 */}
+      <PageHead
+        breadcrumb={
+          <span>
+            {workspace?.name ?? "—"} / <span className="text-foreground">变更中心</span>
+          </span>
+        }
         title="变更中心"
         subtitle={renderSubtitle()}
         actions={
@@ -703,25 +651,33 @@ export default function ChangesPage({ params }: Props) {
 
       {bannerError && <ErrorBanner message={bannerError} />}
 
-      {stats && (
-        <div className="rounded border border-success/30 bg-success/10 px-3 py-2 text-xs text-success">
-          已重新扫描：解析 {stats.parsed}，新增 {stats.created} · 更新{" "}
-          {stats.updated} · 删除 {stats.deleted}。
-          {warnings.length > 0 && ` ${warnings.length} 个警告。`}
+      {/* 条件区收敛（FR-03 / G-2）：reparse 结果与解析警告合并为单条可折叠 flash 条；
+          无内容零占位。PlatformSyncSection 自渲染 null（无冲突时）。 */}
+      {(stats || warnings.length > 0) && (
+        <div className="flex flex-col gap-1.5 rounded-md border px-3 py-2 text-xs"
+          style={{ borderColor: "hsl(var(--warning))", backgroundColor: "var(--semantic-warning-soft)" }}
+        >
+          {stats && (
+            <div className="text-foreground">
+              已重新扫描：解析 {stats.parsed}，新增 {stats.created} · 更新{" "}
+              {stats.updated} · 删除 {stats.deleted}。
+              {warnings.length > 0 && ` ${warnings.length} 个警告。`}
+            </div>
+          )}
+          {warnings.length > 0 && (
+            <details>
+              <summary className="cursor-pointer text-warning">解析警告（{warnings.length}）</summary>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-warning">
+                {warnings.map((w, i) => (
+                  <li key={i}>
+                    <span className="font-mono">[{w.code}]</span>{" "}
+                    {w.change_key ?? "—"}: {w.detail}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
-      )}
-
-      {warnings.length > 0 && (
-        <SectionCard title="解析警告">
-          <ul className="list-disc space-y-0.5 pl-4 text-xs text-warning">
-            {warnings.map((w, i) => (
-              <li key={i}>
-                <span className="font-mono">[{w.code}]</span>{" "}
-                {w.change_key ?? "—"}: {w.detail}
-              </li>
-            ))}
-          </ul>
-        </SectionCard>
       )}
 
       {/* 平台同步处理区（2026-09-04-conflict-resolve-entry task-09 / FR-01~05）：
@@ -729,46 +685,69 @@ export default function ChangesPage({ params }: Props) {
           时组件自渲染 null，页面行为与现状一致（design §9） */}
       <PlatformSyncSection workspaceId={workspaceId} />
 
-      {/* 主 tab：进行中 / 已归档（按 location，D-007），挂数量（tabTotals 独立 useQuery 拉） */}
-      <div className="flex items-center gap-1">
-        {TABS.map((t) => {
-          const cnt =
+      {/* 工具条（FR-03）：一行式筛选——搜索/阶段/聚焦（进行中）+ 搜索/重置 */}
+      {tab !== "quicklog" && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="搜索 Key / 标题 / 组件…"
+            allowClear
+            onPressEnter={() => handleSearchClick()}
+            className="w-64"
+          />
+          <Select
+            value={stageFilter}
+            onChange={(v) => setStageFilter(v ?? "")}
+            className="w-36"
+          >
+            {STAGE_OPTIONS.map((opt) => (
+              <Select.Option key={opt.value} value={opt.value}>
+                {opt.label}
+              </Select.Option>
+            ))}
+          </Select>
+          {tab === "active" && (
+            <Checkbox
+              checked={focusMine}
+              onChange={(e) => {
+                setFocusMine(e.target.checked);
+                setPage(1);
+              }}
+            >
+              只看待我处理
+            </Checkbox>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            <Button size="sm" onClick={handleSearchClick}>
+              搜索
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleResetClick}>
+              重置
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* 状态 tab（FR-03 UnderlineNav）：计数实时联动（quicklog 存量口径在 label 注明） */}
+      <UnderlineNav<ChangesTab>
+        value={tab}
+        onChange={handleTabChange}
+        items={TABS.map((t) => ({
+          key: t.key,
+          label:
+            t.key === "quicklog" ? "快速修复（存量）" : t.label,
+          counter:
             t.key === "active"
               ? tabTotals.active
               : t.key === "archive"
                 ? tabTotals.archive
-                : tabTotals.quicklog;
-          return (
-            <button
-              key={t.key}
-              onClick={() => handleTabChange(t.key as ChangesTab)}
-              className={`border-b-2 pb-1.5 text-xs font-medium transition-colors ${
-                tab === t.key
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              } mr-3 last:mr-0`}
-            >
-              {t.label}
-              {cnt !== undefined && (
-                <span className="ml-1 inline-block min-w-[18px] rounded-full bg-muted px-1.5 text-[11px] text-muted-foreground">
-                  {/* 存量口径（task-09）：quick 通道已退役，quicklog 计数只含存量条目 */}
-                  {t.key === "quicklog" ? `存量 · ${cnt}` : cnt}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+                : tabTotals.quicklog,
+        }))}
+      />
 
-      {/* task-08（D-001/FR-05）：快速修复 tab——独立查询区（无阶段/聚焦概念）+ QuicklogTable */}
-      {tab === "quicklog" && (
-        <SectionCard bodyPadding="p-2">
-          <QuicklogTable
-            workspaceId={workspaceId}
-            onSelect={setQuicklogSelected}
-          />
-        </SectionCard>
-      )}
+      {/* task-08（D-001/FR-05）：快速修复 tab——独立查询区 + QuicklogTable */}
+      {tab === "quicklog" && <QuicklogTable workspaceId={workspaceId} onSelect={setQuicklogSelected} />}
 
       {/* task-09（FR-06/D-006）：quicklog 条目详情抽屉 */}
       <QuicklogDrawer
@@ -777,90 +756,51 @@ export default function ChangesPage({ params }: Props) {
         onClose={() => setQuicklogSelected(null)}
       />
 
+      {/* 行式列表（FR-03 antd Table 退役）：表头排序 + IssueRow 行 + EmptyState + 分页 */}
       {tab !== "quicklog" && (
-      <SectionCard bodyPadding="p-2">
-        {/* 工具栏：搜索 + 重置（右对齐，对齐 FRONTEND_PAGE_STYLE §2） */}
-        <div className="mb-2 flex items-center justify-end gap-2">
-          <Button size="sm" onClick={handleSearchClick}>
-            搜索
-          </Button>
-          <Button size="sm" variant="outline" onClick={handleResetClick}>
-            重置
-          </Button>
-        </div>
-        {/* 查询区：进行中 3 格（关键词/阶段/待我处理聚焦）、归档 2 格，消留白
-            （task-06 原 grid-cols-4 右半空；ql-20260818-004 聚焦下放第三格） */}
-        <div
-          className={cn(
-            "grid w-full gap-3",
-            tab === "active" ? "grid-cols-3" : "grid-cols-2",
-          )}
-        >
-          <Field label="关键词">
-            <Input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="搜索 Key / 标题 / 组件…"
-              allowClear
-              onPressEnter={() => handleSearchClick()}
+        <>
+          <div className="overflow-hidden rounded-lg border" style={{ borderColor: "hsl(var(--border))" }}>
+            <IssueRowHeader
+              title="变更"
+              right={
+                <button
+                  type="button"
+                  onClick={toggleSort}
+                  className="inline-flex items-center gap-0.5 hover:underline"
+                  title="点击切换升序/降序"
+                >
+                  更新时间
+                  <span aria-hidden>{sortDir === "updated_at_desc" ? "↓" : "↑"}</span>
+                </button>
+              }
             />
-          </Field>
-          <Field label="阶段">
-            <Select
-              value={stageFilter}
-              onChange={(v) => setStageFilter(v ?? "")}
-              className="w-full"
-            >
-              {STAGE_OPTIONS.map((opt) => (
-                <Select.Option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </Select.Option>
-              ))}
-            </Select>
-          </Field>
-          {/* 聚焦筛选（D-007 → ql-20260818-004 下放查询区）：仅进行中视图，
-              默认不勾选；items-end 与左侧 Input/Select 控件底对齐 */}
-          {tab === "active" && (
-            <div className="flex w-full items-end pb-1.5">
-              <Checkbox
-                checked={focusMine}
-                onChange={(e) => {
-                  setFocusMine(e.target.checked);
-                  setPage(1);
-                }}
-              >
-                只看待我处理
-              </Checkbox>
-            </div>
-          )}
-        </div>
-      </SectionCard>
-      )}
-
-      {tab !== "quicklog" && (
-      <DataTable<ChangeSummary>
-        rowKey="id"
-        columns={columns}
-        dataSource={items}
-        loading={loading}
-        size="small"
-        bordered
-        scroll={{ y: "calc(100vh - 430px)" }}
-        pagination={{
-          current: page,
-          pageSize,
-          total,
-          showSizeChanger: true,
-          pageSizeOptions: [10, 20, 50, 100],
-          showTotal: (t) => `共 ${t} 条`,
-          onChange: (p, s) => {
-            setPage(p);
-            setPageSize(s);
-          },
-        }}
-        // 空态走自定义 ReactNode（分场景 + CTA），透传给 antd Table locale.emptyText
-        locale={{ emptyText: renderEmpty() }}
-      />
+            {loading ? (
+              <div className="py-10 text-center text-xs text-muted-foreground">
+                加载中…
+              </div>
+            ) : items.length === 0 ? (
+              renderEmpty()
+            ) : (
+              <div className="divide-y" style={{ borderColor: "hsl(var(--border))" }}>
+                {items.map((c) => renderChangeRow(c))}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end">
+            <Pagination
+              current={page}
+              pageSize={pageSize}
+              total={total}
+              showSizeChanger
+              pageSizeOptions={[10, 20, 50, 100]}
+              showTotal={(t) => `共 ${t} 条`}
+              onChange={(p, s) => {
+                setPage(p);
+                setPageSize(s);
+              }}
+            />
+          </div>
+        </>
       )}
 
       {/* task-07：删除确认弹层（受控 target，null = 关闭；确认先关弹层再

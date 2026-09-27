@@ -3527,7 +3527,7 @@ export function SessionPanelPage({
             <p
               role="alert"
               aria-label="创建会话错误"
-              className="mx-5 mb-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive"
+              className="mx-5 mb-3 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
             >
               {preError}（输入已保留，可直接重试）
             </p>
@@ -3538,7 +3538,7 @@ export function SessionPanelPage({
   }
   if (detailQuery.isError) {
     return (
-      <div className="m-6 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive" aria-label="会话详情加载失败">
+      <div className="m-6 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" aria-label="会话详情加载失败">
         加载会话详情失败：{errMessage(detailQuery.error, "未知错误")}
         <Button
           size="small"
@@ -4081,7 +4081,7 @@ export function SessionPanelPage({
       {!machineOnline && !suspended && (
         <div
           className={cn(
-            "flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800",
+            "flex items-center gap-2 border-b px-5 py-2 text-xs text-warning",
             mobile && "px-3",
           )}
         >
@@ -4467,7 +4467,7 @@ export function SessionPanelPage({
                     <span className="shrink-0 text-[12px] font-semibold text-foreground">
                       第{entry.turnNo}轮
                     </span>
-                    <span className="truncate text-[10px] text-muted-foreground">
+                    <span className="truncate text-[11px] text-muted-foreground">
                       {turnNavRowMeta(entry)}
                     </span>
                   </span>

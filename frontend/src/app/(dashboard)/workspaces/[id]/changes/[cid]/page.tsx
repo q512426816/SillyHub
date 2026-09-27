@@ -374,7 +374,7 @@ export default function ChangeDetailPage({ params }: Props) {
         </div>
       ) : null}
       {successMsg ? (
-        <div className="rounded border border-green-300 bg-green-50 px-3 py-2 text-xs text-green-700">
+        <div style={{ borderColor: "hsl(var(--success))", backgroundColor: "var(--semantic-success-soft)" }} className="rounded border px-3 py-2 text-xs text-success">
           {successMsg}
         </div>
       ) : null}
@@ -403,7 +403,7 @@ export default function ChangeDetailPage({ params }: Props) {
             >
               <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
                 <h2 className="text-xs font-medium">
-                  📋 步骤时间线 ({change.steps.length})
+                  步骤时间线 ({change.steps.length})
                 </h2>
                 {focusStage ? (
                   <button

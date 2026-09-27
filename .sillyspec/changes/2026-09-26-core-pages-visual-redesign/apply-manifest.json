@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-core-pages-visual-redesign",
+  "appliedAt": "2026-09-26T17:32:21.809Z",
+  "baseHash": "a17b23577d44ed9bcf8c05bd3d8f433f1be708c8",
+  "files": [
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+      "sha256": "ed2223c55ab1fa957916d55d2922b3890dcc1bf158d699551d63594ad8411b8c"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx",
+      "sha256": "1606d285afb5d33d3c86e132e970254bcd6df2a58564845b223ba5501c04469d"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+      "sha256": "093c1196b997fd11fee6ea82693d2d7727115282cd3394b6ba46774dd7fbc1e1"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx",
+      "sha256": "7b8c6241c29c73fed457164a4619ef982120000e07b93222e5f405a7910eeeeb"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/page.tsx",
+      "sha256": "d6da6d0006dea1537897cfcb8f8cad6e0b937588fcfac84cdc5488a11f416500"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx",
+      "sha256": "948bb8044e6a50e0cf354e23427cbeff310a84d4f5786f644824c4223ab28f3c"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/page.tsx",
+      "sha256": "b786adde096a1de59e0cf4689ea2acc2244fee0e1a7f65e402700aa6ee0c5b0a"
+    },
+    {
+      "path": "frontend/src/app/globals.css",
+      "sha256": "e5209a0fc00a371b5858a9613c2ca57bb5fa708d7a68b8ab2bd7db9739e44639"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-stage-header.test.tsx",
+      "sha256": "c7b5a7859a6baeca321ed5945c93c660df4fe74462b8488af99b0fd3c77689f6"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx",
+      "sha256": "78ec197b536548254771c0ede52763b2add7af883055c0b111972b6733799f41"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-stage-header.tsx",
+      "sha256": "84f70f1e6043af6094c63d7c8d40015f515411467f285dc3041928da3894a37c"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "c35f4a69a55e1b674f1e90860d224b836eee4cedfe2c6a77a04ac383a960ad35"
+    },
+    {
+      "path": "frontend/src/components/primer/__tests__/primer-atoms.test.tsx",
+      "sha256": "fb55833f44da544918d49fa17e7dd67bf5095e999e7477b8aeadb5806e189215"
+    },
+    {
+      "path": "frontend/src/components/primer/__tests__/primer-structures.test.tsx",
+      "sha256": "d49a844038448e0afdc4fcfd76c51e9b5bcff3700d3ec72d12b30652fc6408f9"
+    },
+    {
+      "path": "frontend/src/components/primer/counter.tsx",
+      "sha256": "d67ec93e2f79f28ff2d534906b4ae8e5ce219e6646d082c15589eb25e6e5d0ae"
+    },
+    {
+      "path": "frontend/src/components/primer/empty-state.tsx",
+      "sha256": "4d02fe4fb85962b8b24994251bce8843c8b7210b7a305a40c3c99b5cb9d61e0a"
+    },
+    {
+      "path": "frontend/src/components/primer/index.ts",
+      "sha256": "51e9724ac9d4dbccbaead34f2bea167946d9b578e5c6d9ea9812507fb2de6738"
+    },
+    {
+      "path": "frontend/src/components/primer/issue-row.tsx",
+      "sha256": "2eac0cf0faf01dbe2de82eb61b5c6f6513513337bd126d45d262f25b5703f2e1"
+    },
+    {
+      "path": "frontend/src/components/primer/meta-panel.tsx",
+      "sha256": "151f7e911c5f22a194bb0ea4e48829c03eeb02b2df96629e0670afe7b3c4b2ba"
+    },
+    {
+      "path": "frontend/src/components/primer/page-head.tsx",
+      "sha256": "b03119c34237b1c9e35c16c69c2c988d70c5a81bd088de9e84605a7a54cddd48"
+    },
+    {
+      "path": "frontend/src/components/primer/stat-grid.tsx",
+      "sha256": "c4b17ab4a4eea2cf2a82edc05a7c9996d5daa34ded2b1f72f1973a65f3fc22c5"
+    },
+    {
+      "path": "frontend/src/components/primer/state-icon.tsx",
+      "sha256": "68a47e8819964c74cd23b5b2d5f679f4ac90a387e9b3c69828ab25a23a9aeef6"
+    },
+    {
+      "path": "frontend/src/components/primer/state-label.tsx",
+      "sha256": "3a2676119f0b1abb3c86245ce92f854ea7092e8b7955295d452b1d1aaab9ba38"
+    },
+    {
+      "path": "frontend/src/components/primer/timeline.tsx",
+      "sha256": "72a8a161805f920886f865096845b2a1ca9bdcfdbccde06998e5ddd9555dc530"
+    },
+    {
+      "path": "frontend/src/components/primer/underline-nav.tsx",
+      "sha256": "05e211e55634f95fc8fe1e40ab9dfc7d1e42ae02dd14dcb0810b051971d4bf03"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-list-panel.tsx",
+      "sha256": "2d610302208ac962759a68959a45de95e0c0bb14a2643dd4132dae19218181c7"
+    },
+    {
+      "path": "frontend/src/components/top-bar.tsx",
+      "sha256": "564e5c8e95ff417892d4c93caaa685b12c57ccd41a6928e00b9d140df0663bea"
+    },
+    {
+      "path": "frontend/src/components/workspace-card.tsx",
+      "sha256": "8192275a77074f9a31fae3d6daad5462a80d13b05f76ba5b1394c66825dff202"
+    },
+    {
+      "path": "frontend/src/components/workspace-drag-grid.tsx",
+      "sha256": "3e85f5bff506758e8fbe9ca59fa92b2574e72d8b66fde1db93a4675ede5c675a"
+    },
+    {
+      "path": "frontend/src/components/workspace/hero-header.tsx",
+      "sha256": "be70e2aee774d50b00515342fbbd1026df6791dd10bc82568f8eb83ab2bfcbe4"
+    },
+    {
+      "path": "frontend/src/styles/themes.test.ts",
+      "sha256": "8290662b1092a9a464da9a2b5c1a0d631ab4eeb22a057bee5da01b25aa3b09a8"
+    },
+    {
+      "path": "frontend/src/styles/themes.ts",
+      "sha256": "f51f4ae9a5babcdb4f2c2ec0237bd4c98da146cb166790f30a492d4a5a69f6f1"
+    }
+  ]
+}

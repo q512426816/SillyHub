@@ -224,7 +224,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     expect(screen.getByText(/只看待我处理/)).toBeInTheDocument();
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /已归档/ }));
+      fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
     });
     await waitFor(() =>
       expect(lastMainLoadParams()?.location).toBe("archive"),
@@ -238,7 +238,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
   it("点快速修复 tab → 渲染 QuicklogTable，变更查询区/阶段筛选隐藏，主 load 不发", async () => {
     await renderAndWait();
     // quicklog 计数 mock 默认 0 → tab 按钮存在
-    const quicklogTab = screen.getByRole("button", { name: /快速修复/ });
+    const quicklogTab = screen.getByRole("tab", { name: /快速修复/ });
     await act(async () => {
       fireEvent.click(quicklogTab);
     });
@@ -253,7 +253,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
       ([, q]: any[]) => q?.pageSize !== 1,
     ).length;
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /进行中/ }));
+      fireEvent.click(screen.getByRole("tab", { name: /进行中/ }));
     });
     const mainCallsAfter = mocks.listChanges.mock.calls.filter(
       ([, q]: any[]) => q?.pageSize !== 1,
@@ -307,8 +307,8 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     setupListChanges({ activeTotal: 5, archiveTotal: 3 });
     await renderAndWait();
 
-    const activeTab = screen.getByRole("button", { name: /^进行中/ });
-    const archiveTab = screen.getByRole("button", { name: /已归档/ });
+    const activeTab = screen.getByRole("tab", { name: /^进行中/ });
+    const archiveTab = screen.getByRole("tab", { name: /已归档/ });
     await waitFor(() => expect(activeTab).toHaveTextContent("5"));
     await waitFor(() => expect(archiveTab).toHaveTextContent("3"));
   });
@@ -353,7 +353,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     expect(screen.getByText(/只看待我处理/)).toBeInTheDocument();
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /已归档/ }));
+      fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
     });
     await waitFor(() =>
       expect(screen.queryByText(/只看待我处理/)).not.toBeInTheDocument(),
@@ -410,7 +410,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     expect(screen.getByText("待归档确认")).toBeInTheDocument();
   });
 
-  it("pending_review=null 且非 blocked → 占位 —（owner_id 设值避免双源 —）", async () => {
+  it("pending_review=null 且非 blocked → 无待办徽标（owner_id 设值，行内无 — 占位噪音）", async () => {
     setupListChanges({
       items: [
         makeChange({
@@ -421,7 +421,11 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
       ],
     });
     await renderAndWait();
-    expect(screen.getByText("—")).toBeInTheDocument();
+    // 2026-09-26 重排：待办列并入两段式行首，无待办即不渲染徽标（不再有「—」占位）
+    expect(screen.queryByText("待提案审核")).not.toBeInTheDocument();
+    expect(screen.queryByText("阻塞中")).not.toBeInTheDocument();
+    // owner_id 降级渲染（UUID 前 8 位 mono）仍在
+    expect(screen.getByText("owner123")).toBeInTheDocument();
   });
 
   // ── 4. 空状态引导（task-09 / FR-04a：去表单，引导会话页）──────────────
@@ -474,7 +478,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
   it("已归档空 → 「还没有归档的变更」", async () => {
     await renderAndWait();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /已归档/ }));
+      fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
     });
     await waitFor(() =>
       expect(screen.getByText(/还没有归档的变更/)).toBeInTheDocument(),

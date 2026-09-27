@@ -8,10 +8,10 @@ describe("ChangeStageHeader", () => {
     const { container } = render(
       <ChangeStageHeader currentStage="execute" stages={null} updatedAt={null} />,
     );
-    expect(screen.getByText("执行").className).toContain("font-medium");
-    expect(screen.getByText("需求分析").className).toContain("text-muted-foreground");
+    expect(screen.getByText("执行").className).toContain("font-semibold");
+    expect(screen.getByText("需求分析").className).toContain("text-foreground"); // checks 风格：完成段前景色+绿勾图标
     // 对勾数量 = 已完成 2 个
-    expect(container.querySelectorAll(".text-white").length).toBeGreaterThanOrEqual(2);
+    expect(container.querySelectorAll("svg").length).toBeGreaterThanOrEqual(2); // 完成段 StateIcon check
   });
 
   it("非线性阶段（quick/blocked）返回 null 不渲染", () => {
@@ -26,11 +26,11 @@ describe("ChangeStageHeader", () => {
       <ChangeStageHeader currentStage="archived" stages={null} updatedAt={null} />,
     );
     expect(screen.getByText("归档")).toBeInTheDocument();
-    expect(screen.getByText("归档").className).toContain("font-medium");
+    expect(screen.getByText("归档").className).toContain("font-semibold");
     // 已完成 4 个（brainstorm/plan/execute/verify）+ 当前 archive 节点共 5 个可见
-    expect(container.querySelectorAll(".rounded-full").length).toBe(5);
+    expect(container.querySelectorAll("span.rounded-full").length).toBe(0); // archived 全完成无待办空心圆
     // 对勾数量应 ≥ 4
-    expect(container.querySelectorAll(".text-white").length).toBeGreaterThanOrEqual(4);
+    expect(container.querySelectorAll("svg").length).toBeGreaterThanOrEqual(4); // 前四段完成 StateIcon check
   });
 
   it("未知阶段返回 null", () => {
@@ -135,16 +135,14 @@ describe("ChangeStageHeader 阶段-步骤联动", () => {
     expect(planBtn).toHaveAttribute("aria-pressed", "true");
     // 圆点（按钮内首个 div）带 brand ring（ring-offset-2 为选中态独有，
     // 悬停态是 group-hover:ring-offset-1，避免子串误伤）；标签为 brand 色
-    const circle = planBtn.querySelector("div");
+    const circle = planBtn;
     expect(circle?.className).toContain("ring-brand-500");
     expect(circle?.className).toContain("ring-offset-2");
     expect(screen.getByText("规划").className).toContain("text-brand-600");
     // 未选中节点 aria-pressed=false 且无选中 ring
     const brainstormBtn = screen.getByRole("button", { name: /需求分析/ });
     expect(brainstormBtn).toHaveAttribute("aria-pressed", "false");
-    expect(brainstormBtn.querySelector("div")?.className).not.toContain(
-      "ring-offset-2",
-    );
+    expect(brainstormBtn.className).not.toContain("ring-offset-2");
   });
 
   it("archived 终态联动：归档节点可点击并回调 'archive'", () => {

@@ -1804,7 +1804,7 @@ function WorkspaceTreeList({
           />
         )}
         {sessionsQuery.isError ? (
-          <div className="m-1 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+          <div className="m-1 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             加载会话失败：{sessionsQuery.error?.message ?? "未知错误"}
             <Button
               size="small"
@@ -2028,7 +2028,7 @@ function GroupChatSection({
       >
         <span
           aria-hidden
-          className={`w-3.5 shrink-0 text-center text-[10px] leading-none text-muted-foreground transition-transform ${
+          className={`w-3.5 shrink-0 text-center text-[11px] leading-none text-muted-foreground transition-transform ${
             collapsed ? "" : "rotate-90"
           }`}
         >
@@ -2069,7 +2069,7 @@ function GroupChatSection({
            原直接平铺比会话行左移一档。 */
         <div className="px-1.5">
         {error ? (
-          <div className="mx-0.5 flex items-center gap-1.5 rounded border border-destructive/30 bg-red-50 px-2 py-1.5 text-[11px] text-destructive">
+          <div className="mx-0.5 flex items-center gap-1.5 rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
             加载群聊失败：{error}
             <Button size="small" onClick={onRetry}>
               重新加载
@@ -2196,7 +2196,7 @@ function GroupChatRow({
           </span>
           <span
             title="群聊：多用户 + 多 Agent 同会话协作"
-            className="inline-flex h-4 shrink-0 items-center rounded bg-info/10 px-1.5 text-[10px] font-semibold leading-none text-info"
+            className="inline-flex h-4 shrink-0 items-center rounded bg-info/10 px-1.5 text-[11px] font-semibold leading-none text-info"
           >
             群聊
           </span>
@@ -2205,7 +2205,7 @@ function GroupChatRow({
           {group.archived_at && (
             <span
               title={`已归档（${formatRelativeTime(group.archived_at)}）`}
-              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-px text-[10px] font-medium leading-4 text-muted-foreground"
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-px text-[11px] font-medium leading-4 text-muted-foreground"
             >
               <Archive aria-hidden className="h-2.5 w-2.5" />
               已归档
@@ -2219,7 +2219,7 @@ function GroupChatRow({
           {mentionUnread && (
             <span
               data-testid="group-mention-unread-badge"
-              className="shrink-0 rounded bg-brand-100 px-1 text-[10px] font-semibold leading-4 text-brand-700"
+              className="shrink-0 rounded bg-brand-100 px-1 text-[11px] font-semibold leading-4 text-brand-700"
             >
               [有人@我]
             </span>
@@ -2239,7 +2239,7 @@ function GroupChatRow({
         <span
           data-testid="group-unread-badge"
           aria-label={`${group.unread_count >= 99 ? "99+" : group.unread_count} 条未读`}
-          className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-brand-100 px-1 text-[10px] font-semibold leading-none text-brand-700"
+          className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-brand-100 px-1 text-[11px] font-semibold leading-none text-brand-700"
         >
           {group.unread_count >= 99 ? "99+" : group.unread_count}
         </span>
@@ -2600,7 +2600,7 @@ function WorkspaceGroupNode({
       >
         <span
           aria-hidden
-          className={`w-3.5 shrink-0 text-center text-[10px] leading-none text-muted-foreground transition-transform ${
+          className={`w-3.5 shrink-0 text-center text-[11px] leading-none text-muted-foreground transition-transform ${
             expanded ? "rotate-90" : ""
           }`}
         >
@@ -2767,7 +2767,7 @@ function WorkspaceGroupNode({
                   >
                     <span
                       aria-hidden
-                      className={`text-[10px] text-muted-foreground transition-transform ${
+                      className={`text-[11px] text-muted-foreground transition-transform ${
                         subOrphanEffectiveOpen ? "rotate-90" : ""
                       }`}
                     >
@@ -2775,7 +2775,7 @@ function WorkspaceGroupNode({
                     </span>
                     <span
                       aria-hidden
-                      className="inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[9px] font-bold text-violet-600 dark:bg-violet-500/20 dark:text-violet-300"
+                      className="inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-600 dark:bg-brand-500/20 dark:text-brand-300"
                     >
                       子
                     </span>
@@ -2801,7 +2801,7 @@ function WorkspaceGroupNode({
                   >
                     <span
                       aria-hidden
-                      className={`text-[10px] text-muted-foreground transition-transform ${
+                      className={`text-[11px] text-muted-foreground transition-transform ${
                         toolSectionOpen ? "rotate-90" : ""
                       }`}
                     >
@@ -2894,7 +2894,7 @@ function WorkspaceGroupNode({
                         {/* 2026-08-26-subsession-portal-grouping：父行附属分身
                             折叠组（组级 violet 徽标 + 子行缩进，design §4.B） */}
                         {childSubs && childSubs.length > 0 && (
-                          <div className="ml-3 border-l border-violet-300/60 pl-2 dark:border-violet-500/40">
+                          <div className="ml-3 border-l border-brand-300/60 pl-2 dark:border-brand-500/40">
                             <div
                               role="button"
                               tabIndex={0}
@@ -2908,13 +2908,13 @@ function WorkspaceGroupNode({
                             >
                               <span
                                 aria-hidden
-                                className={`text-[10px] transition-transform ${parentOpen ? "rotate-90" : ""}`}
+                                className={`text-[11px] transition-transform ${parentOpen ? "rotate-90" : ""}`}
                               >
                                 ▶
                               </span>
                               <span
                                 aria-hidden
-                                className="inline-flex items-center rounded px-1 py-px text-[10px] font-medium text-violet-600 dark:text-violet-300"
+                                className="inline-flex items-center rounded px-1 py-px text-[11px] font-medium text-brand-600 dark:text-brand-300"
                               >
                                 分身 {childSubs.length}
                               </span>
@@ -2984,13 +2984,13 @@ function WorkspaceGroupNode({
                             >
                               <span
                                 aria-hidden
-                                className={`text-[10px] transition-transform ${forkOpen ? "rotate-90" : ""}`}
+                                className={`text-[11px] transition-transform ${forkOpen ? "rotate-90" : ""}`}
                               >
                                 ▶
                               </span>
                               <span
                                 aria-hidden
-                                className="inline-flex items-center rounded px-1 py-px text-[10px] font-medium text-brand-600 dark:text-brand-300"
+                                className="inline-flex items-center rounded px-1 py-px text-[11px] font-medium text-brand-600 dark:text-brand-300"
                               >
                                 ↦ 分叉 {childForks.length}
                               </span>
@@ -3361,7 +3361,7 @@ function SessionRow({
           {session.archived_at && (
             <span
               title={`已归档（${formatRelativeTime(session.archived_at)}）`}
-              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-px text-[10px] font-medium leading-4 text-muted-foreground"
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-px text-[11px] font-medium leading-4 text-muted-foreground"
             >
               <Archive aria-hidden className="h-2.5 w-2.5" />
               已归档
@@ -3371,7 +3371,7 @@ function SessionRow({
             <span
               title="由 SillySpec CLI 自动上报创建的本地 Agent 会话"
               data-testid="tool-report-badge"
-              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-brand-600 bg-brand-100 px-1.5 py-px text-[10px] font-medium leading-4 text-brand-700"
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-brand-600 bg-brand-100 px-1.5 py-px text-[11px] font-medium leading-4 text-brand-700"
             >
               <FileText aria-hidden className="h-2.5 w-2.5" />
               本地 Agent
@@ -3384,7 +3384,7 @@ function SessionRow({
             <span
               title="由既有会话分叉创建的子会话（继承分叉点前上下文）"
               data-testid="fork-origin-badge"
-              className="inline-flex shrink-0 items-center rounded-full border border-brand-600 bg-brand-100 px-1.5 py-px text-[10px] font-medium leading-4 text-brand-700"
+              className="inline-flex shrink-0 items-center rounded-full border border-brand-600 bg-brand-100 px-1.5 py-px text-[11px] font-medium leading-4 text-brand-700"
             >
               🔗 分叉
             </span>
@@ -3560,7 +3560,7 @@ function SessionRow({
           workspaceIdToName?.has(session.workspace_id) && (
             <Tag
               title={workspaceIdToName.get(session.workspace_id)}
-              className="m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
+              className="m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[11px] leading-4"
               color="cyan"
             >
               <FolderOpen aria-hidden className="mr-0.5 inline h-3 w-3" />
@@ -3570,7 +3570,7 @@ function SessionRow({
         {variant === "flat" && machineName && (
           <Tag
             title={machineOffline ? `${machineName}（离线）` : machineName}
-            className={`m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[10px] leading-4 ${
+            className={`m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[11px] leading-4 ${
               machineOffline ? "line-through opacity-60" : ""
             }`}
           >
@@ -3586,7 +3586,7 @@ function SessionRow({
              维持既有语义档着色）。 */
           <span
             className={cn(
-              "inline-flex h-4 shrink-0 items-center gap-1 rounded px-1.5 text-[10px] font-semibold leading-none",
+              "inline-flex h-4 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] font-semibold leading-none",
               isToolReport
                 ? "bg-info/10 text-info"
                 : engineValue === "codex"
@@ -3612,7 +3612,7 @@ function SessionRow({
              点分隔纯文本——原三组 12px 图标（User/BookUser/Cloud）在 320px 左栏
              内拥挤；全量信息仍在 title 悬浮。 */
           <span
-            className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[10px] leading-4 text-muted-foreground/80"
+            className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[11px] leading-4 text-muted-foreground/80"
             title={[
               `${session.owner_name ?? "—"}`,
               snapshot?.profile_name ?? null,
@@ -3638,7 +3638,7 @@ function SessionRow({
             {snapshot?.profile_name && (
               <Tag
                 title={snapshot.profile_name}
-                className="m-0 max-w-[150px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
+                className="m-0 max-w-[150px] truncate rounded-sm px-1 py-0 text-[11px] leading-4"
                 color="blue"
               >
                 <BookUser aria-hidden className="mr-0.5 inline h-3 w-3" />
@@ -3648,13 +3648,13 @@ function SessionRow({
             {snapshot?.provider_name && (
               <Tag
                 title={snapshot.provider_name}
-                className="m-0 max-w-[130px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
+                className="m-0 max-w-[130px] truncate rounded-sm px-1 py-0 text-[11px] leading-4"
               >
                 <Cloud aria-hidden className="mr-0.5 inline h-3 w-3" />
                 {snapshot.provider_name}
               </Tag>
             )}
-            <Tag className="m-0 shrink-0 rounded-sm px-1 py-0 text-[10px] leading-4">
+            <Tag className="m-0 shrink-0 rounded-sm px-1 py-0 text-[11px] leading-4">
               {session.turn_count} 轮
             </Tag>
           </>

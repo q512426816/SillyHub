@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-26-core-pages-visual-redesign",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-26-core-pages-visual-redesign:task-01:acc-0-75fae08a",
+      "tests": [
+        "frontend/src/styles/themes.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-core-pages-visual-redesign"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-26-core-pages-visual-redesign:task-01:acc-1-69bbfc29",
+      "tests": [
+        "frontend/src/styles/themes.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-core-pages-visual-redesign"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-26-core-pages-visual-redesign:task-01:acc-2-8da07d1b",
+      "tests": [
+        "frontend/src/styles/themes.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-core-pages-visual-redesign"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-09-26-core-pages-visual-redesign:task-08:acc-0-ed614a42",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-core-pages-visual-redesign"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-09-26-core-pages-visual-redesign:task-08:acc-1-b8697a82",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-core-pages-visual-redesign"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-09-26-core-pages-visual-redesign:task-08:acc-2-f55d14c1",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-26-core-pages-visual-redesign"
+    }
+  ]
+}

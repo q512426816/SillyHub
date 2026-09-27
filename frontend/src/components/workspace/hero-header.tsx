@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { PageHead, StateLabel } from "@/components/primer";
 import { cn } from "@/lib/utils";
 import type { Workspace } from "@/lib/workspaces";
 
@@ -23,56 +23,39 @@ const WORKSPACE_STATUS_LABEL: Record<string, string> = {
   deleted: "已删除",
 };
 
+/**
+ * 2026-09-26 重排（FR-06 / D-001@v1）：深色渐变 Hero 退役，改 GitHub Repo 首页式
+ * 白底页头（PageHead + StateLabel 状态胶囊 + slug mono 副标题）——props 契约不变
+ * （workspace + extraActions），调用方零改动；对照原型「工作区概览」视图。
+ */
 export function WorkspaceHeroHeader({
   workspace,
   extraActions,
 }: WorkspaceHeroHeaderProps): JSX.Element {
   return (
-    <section
-      className={cn(
-        // brand-panel-gradient：暗色下深青渐变覆盖钩子（ql-20260824-017，
-        // from-brand-700/800 在 dark 映射亮青档，白字标题发白）
-        "brand-panel-gradient relative overflow-hidden rounded-lg bg-gradient-to-br from-brand-700 via-brand-800 to-slate-950 px-6 py-6 text-white shadow-sm",
-      )}
-    >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        {/* 左侧：名称 + 状态 + slug */}
-        <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
-              {workspace.name}
-            </h1>
-            <Badge
-              variant={workspace.status === "active" ? "success" : "outline"}
-              className={cn(
-                "shrink-0 border-white/20 text-[11px]",
-                workspace.status === "active"
-                  ? "bg-white/10 text-white"
-                  : "bg-transparent text-white/80",
-              )}
-            >
-              {WORKSPACE_STATUS_LABEL[workspace.status] ?? workspace.status}
-            </Badge>
-          </div>
-          <p className="font-mono text-xs text-white/60">{workspace.slug}</p>
-        </div>
-
-        {/* 右侧：操作组（ql-20260821-003：编辑信息与基本信息卡头重复已删；
-            extraActions slot 供外部按钮（编辑我的接入配置）挂在返回列表左边） */}
-        <div className="flex shrink-0 items-center gap-2">
+    <PageHead
+      title={workspace.name}
+      titleExtra={
+        <StateLabel
+          variant={workspace.status === "active" ? "done" : "neutral"}
+          size="md"
+        >
+          {WORKSPACE_STATUS_LABEL[workspace.status] ?? workspace.status}
+        </StateLabel>
+      }
+      subtitle={<span className="font-mono">{workspace.slug}</span>}
+      actions={
+        <div className="flex items-center gap-2">
           {extraActions}
           <Link
             href="/workspaces"
-            className={cn(
-              buttonVariants({ variant: "outline", size: "sm" }),
-              "border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white",
-            )}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
           >
             <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
             返回列表
           </Link>
         </div>
-      </div>
-    </section>
+      }
+    />
   );
 }

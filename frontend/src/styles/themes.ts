@@ -47,6 +47,15 @@ export interface ThemeColorDef {
     info: string;
     neutral: string;
   };
+  /** 语义浅底阶（2026-09-26-core-pages-visual-redesign FR-02）：StateLabel 浅底深字胶囊的底色。
+   * 浅色两主题=同族 Tailwind v3 50 档（neutral=slate-100）；dark=semantic 主值 15% 透明度 rgba。 */
+  semanticSoft: {
+    success: string;
+    warning: string;
+    error: string;
+    info: string;
+    neutral: string;
+  };
 }
 
 export interface ThemeDef {
@@ -103,6 +112,13 @@ const blueTheme: ThemeDef = {
       info: '#06b6d4',
       neutral: '#64748b',
     },
+    semanticSoft: {
+      success: '#ecfdf5', // emerald-50
+      warning: '#fffbeb', // amber-50
+      error: '#fef2f2', // red-50
+      info: '#ecfeff', // cyan-50
+      neutral: '#f1f5f9', // slate-100
+    },
   },
 };
 
@@ -138,6 +154,13 @@ const aiNativeTheme: ThemeDef = {
       error: '#DC2626',
       info: '#0891B2',
       neutral: '#64748b',
+    },
+    semanticSoft: {
+      success: '#ecfdf5', // emerald-50
+      warning: '#fffbeb', // amber-50
+      error: '#fef2f2', // red-50
+      info: '#ecfeff', // cyan-50
+      neutral: '#f1f5f9', // slate-100
     },
   },
 };
@@ -198,6 +221,14 @@ const darkTheme: ThemeDef = {
       error: '#ef4444',
       info: '#22d3ee',
       neutral: '#a1a1aa',
+    },
+    // dark soft=主值 15% 透明度(同一语义色透明度变体,深底上的浅色晕染,非独立调色)
+    semanticSoft: {
+      success: 'rgba(16, 185, 129, 0.15)',
+      warning: 'rgba(245, 158, 11, 0.15)',
+      error: 'rgba(239, 68, 68, 0.15)',
+      info: 'rgba(34, 211, 238, 0.15)',
+      neutral: 'rgba(161, 161, 170, 0.15)',
     },
   },
 };

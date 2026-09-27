@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-26-core-pages-visual-redesign",
+  "generatedAt": "2026-09-26T17:57:23.465Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-26-core-pages-visual-redesign",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 3
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-26-core-pages-visual-redesign",
+      "metrics": {
+        "tasks": 13,
+        "hasTest": 12
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-26-core-pages-visual-redesign",
+      "metrics": {
+        "backendEndpoints": 621,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-26-core-pages-visual-redesign",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-26-core-pages-visual-redesign",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-09-26-core-pages-visual-redesign",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-09-26-core-pages-visual-redesign",
+      "metrics": {
+        "checkedFiles": 14,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "handover": {
+    "count": 5,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "三主题（blue/ai-native/dark）五页面浏览器截图走查（task-12 acceptance 第 3 条）",
+        "condition": "部署后打开平台逐页切主题走查（代码级 token 链路验证+独立审查 7/7 已佐证；本机无 dev 后端故缓验）",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "五页面 DOM 对照原型五视图逐区域点验（task-05/06/07/09/10/11 对照条款）",
+        "condition": "部署后平台逐页与 prototype-github-redesign.html 并排比对（行为断言已由 956 用例覆盖，视觉对照建议人工过目）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "FR-04 MetaPanel 六组全收敛（D-004@v1 降级为保留既有五卡）",
+        "condition": "后续优化变更承载（信息字段零丢失，视觉已统一）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "主仓预存债 2 例：changes-overview-card ghost 折叠、pre-session-picker cursor caps",
+        "condition": "归属并行会话修复（主仓基线复现同样挂，非本变更引入）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "SillySpec 工具 R19 修复（.ts vitest 误跑）在 sillyspec 仓工作区未提交",
+        "condition": "sillyspec 仓归属流程提交（工具测试 17/17 已验证）",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 33,
+  "apiFace": {
+    "endpoints": [],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "consumerHints": {},
+  "smokeRan": "not-configured",
+  "conclusion": "PASS WITH NOTES",
+  "tests": {
+    "command": "module[]+deps(jsx2)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-26T23:00:34.817Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

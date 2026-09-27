@@ -259,3 +259,41 @@ describe("task-10: dark 主题取值完整性与对称翻转（2026-08-23-fronte
     });
   });
 });
+
+// hex → rgba(…, alpha) 字符串（dark soft 断言用：soft 必须=主值 15% 透明度，防两处漂移）
+function hexToRgba(hex: string, alpha: number): string {
+  const r = Number.parseInt(hex.slice(1, 3), 16);
+  const g = Number.parseInt(hex.slice(3, 5), 16);
+  const b = Number.parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+describe("task-01: semantic soft 浅底阶（2026-09-26-core-pages-visual-redesign）", () => {
+  it("三套主题 semanticSoft 五档（success/warning/error/info/neutral）键齐全", () => {
+    for (const name of THEME_NAMES) {
+      expect(Object.keys(themes[name].color.semanticSoft).sort()).toEqual([
+        ...SEMANTIC_KEYS,
+      ].sort());
+    }
+  });
+
+  it("浅色两主题 soft=同族 Tailwind v3 50 档（emerald/amber/red/cyan-50 + slate-100）", () => {
+    const LIGHT_SOFT = {
+      success: "#ecfdf5", // emerald-50
+      warning: "#fffbeb", // amber-50
+      error: "#fef2f2", // red-50
+      info: "#ecfeff", // cyan-50
+      neutral: "#f1f5f9", // slate-100
+    };
+    expect(themes.blue.color.semanticSoft).toEqual(LIGHT_SOFT);
+    expect(themes["ai-native"].color.semanticSoft).toEqual(LIGHT_SOFT);
+  });
+
+  it("dark soft=各自 semantic 主值 15% 透明度 rgba（同一语义色透明度变体，非独立调色）", () => {
+    for (const key of SEMANTIC_KEYS) {
+      expect(themes.dark.color.semanticSoft[key]).toBe(
+        hexToRgba(themes.dark.color.semantic[key], 0.15),
+      );
+    }
+  });
+});

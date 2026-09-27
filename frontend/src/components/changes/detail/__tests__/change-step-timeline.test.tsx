@@ -120,7 +120,7 @@ describe("ChangeStepTimeline", () => {
         ]}
       />,
     );
-    expect(screen.getByText("quick")).toBeInTheDocument();
+    expect(screen.getByText(/快速任务|quick/)).toBeInTheDocument();
     expect(screen.getByText("1/1 步")).toBeInTheDocument();
   });
 

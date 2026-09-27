@@ -122,13 +122,13 @@ export function TopBar({ displayName, onLogout, avatar }: TopBarProps) {
           return (
             <span key={`${label}-${idx}`} className="flex items-center gap-1">
               {idx > 0 && (
-                <ChevronRight className="h-3.5 w-3.5 text-slate-400" aria-hidden />
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
               )}
               <span
                 className={
                   isLast
-                    ? "truncate font-medium text-slate-800"
-                    : "truncate text-slate-500"
+                    ? "truncate font-medium text-foreground"
+                    : "truncate text-muted-foreground"
                 }
               >
                 {label}
@@ -141,11 +141,11 @@ export function TopBar({ displayName, onLogout, avatar }: TopBarProps) {
       {/* 右侧：搜索 + 通知 + 用户 */}
       <div className="flex shrink-0 items-center gap-3">
         <div className="relative hidden sm:block">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="search"
             placeholder="搜索..."
-            className="w-[240px] rounded-md border border-transparent bg-slate-100 py-1.5 pl-8 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:bg-card focus:outline-none"
+            className="w-[240px] rounded-md border border-transparent bg-muted py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-brand-400 focus:bg-card focus:outline-none"
             aria-label="全局搜索"
           />
         </div>
@@ -161,7 +161,7 @@ export function TopBar({ displayName, onLogout, avatar }: TopBarProps) {
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="flex items-center gap-2 rounded-md p-1 transition-colors hover:bg-slate-100"
+              className="flex items-center gap-2 rounded-md p-1 transition-colors hover:bg-muted"
               aria-label="用户菜单"
             >
               {/* task-09（FR-05）：有头像时渲染图片（src 由 useAvatarSrc 解析）；
@@ -173,7 +173,7 @@ export function TopBar({ displayName, onLogout, avatar }: TopBarProps) {
                   {initial}
                 </AvatarFallback>
               </Avatar>
-              <span className="hidden max-w-[120px] truncate text-sm text-slate-700 md:inline">
+              <span className="hidden max-w-[120px] truncate text-sm text-foreground md:inline">
                 {displayName}
               </span>
             </button>
