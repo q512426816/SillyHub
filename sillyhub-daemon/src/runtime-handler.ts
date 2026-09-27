@@ -426,6 +426,12 @@ export class KnowledgeGovernanceHandler {
     params: { from?: string; to?: string },
     rootPath?: string,
   ): Promise<{ output: string }> {
+    // root 元字符防线（评审 P2-③ 清偿）：写能力 handler 校验不弱于读——root 只进
+    // spawn cwd 不拼命令串，但异常值仍在此拦（digest 同款防线）。
+    const root = rootPath ?? '';
+    if (/[<>|&;$`"']/.test(root)) {
+      throw new RpcError('forbidden', `root_path suspicious: ${JSON.stringify(root)}`);
+    }
     if (!KNOWLEDGE_ACTION_KINDS.has(kind)) {
       throw new RpcError('forbidden', `action kind not allowed: ${JSON.stringify(kind)}`);
     }

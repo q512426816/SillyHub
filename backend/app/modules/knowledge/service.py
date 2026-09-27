@@ -131,10 +131,15 @@ class KnowledgeService:
                 rt = RuntimeLiveService(self._session)
                 daemon_id, root_path = await rt._resolve_binding(workspace_id, user_id)
                 hub = get_daemon_ws_hub()
+                from app.modules.workspace.service import resolve_root_path_for_daemon
+
                 resp = await hub.send_rpc(
                     daemon_id,
                     "knowledge.digest",
-                    {"workspace_id": str(workspace_id), "root_path": root_path},
+                    {
+                        "workspace_id": str(workspace_id),
+                        "root_path": resolve_root_path_for_daemon(root_path),
+                    },
                     timeout=60,
                 )
                 digest = resp.get("digest") if isinstance(resp, dict) else None
@@ -162,18 +167,28 @@ class KnowledgeService:
 
         rt = RuntimeLiveService(self._session)
         daemon_id, root_path = await rt._resolve_binding(workspace_id, user_id)
-        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+        from app.modules.daemon.ws_hub import DaemonRpcRemoteError, get_daemon_ws_hub
+        from app.modules.workspace.service import resolve_root_path_for_daemon
 
         hub = get_daemon_ws_hub()
         rpc_params: dict = {
             "workspace_id": str(workspace_id),
-            "root_path": root_path,
+            "root_path": resolve_root_path_for_daemon(root_path),
             "kind": kind,
         }
         for key in ("from", "to"):
             if isinstance(params.get(key), str):
                 rpc_params[key] = params[key]
-        resp = await hub.send_rpc(daemon_id, "knowledge.action", rpc_params, timeout=120)
+        try:
+            resp = await hub.send_rpc(daemon_id, "knowledge.action", rpc_params, timeout=120)
+        except DaemonRpcRemoteError as exc:
+            # DaemonRpcRemoteError 刻意非 AppError（要求端点重映射）——动作失败给
+            # 可读文案+输出尾部，不落裸 500（评审 P2-② 清偿）
+            from app.core.errors import AppError
+
+            raise AppError(
+                f"治理动作执行失败（daemon: {exc.details.get('code', 'remote_error') if hasattr(exc, 'details') and isinstance(exc.details, dict) else 'remote_error'}）：{str(exc)[:300]}"
+            ) from exc
         return {"output": (resp or {}).get("output", "") if isinstance(resp, dict) else ""}
 
     async def list_quicklog(self, workspace_id: uuid.UUID) -> QuicklogList:
