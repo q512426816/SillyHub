@@ -1699,34 +1699,22 @@ function WorkspaceTreeList({
         {/* X-009：「关联」筛选下拉（task-10 / FR-05）——服务端过滤（与上方
             状态/机器层的纯视图过滤不同，选中即换查询键重拉）；选项分组
             「变更」（活跃未归档）/「快速修复」（非占位）/「PPM 任务」「PPM
-            问题」（进行中，task-06），allowClear 清除恢复。 */}
-        {isWorkspaceScope && (
-          <Select
-            id="slp-assoc"
-            size="small"
-            showSearch
-            allowClear
-            className="w-full"
-            placeholder="关联：变更/快速修复/PPM"
-            aria-label="关联筛选"
-            value={assocFilter}
-            onChange={(v) => setAssocFilter(v)}
-            optionFilterProp="label"
-            options={assocOptions}
-          />
-        )}
+            问题」（进行中，task-06），allowClear 清除恢复。
+            2026-09-27-session-portal-ia-restructure（FR-05）：自独占一行并入
+            筛选 flex-wrap 区（窄栏自然换行到尾行占满），scope 入口筛选区自
+            三行收敛为两行内——控件 props/联动/记忆零变化，仅容器重排。 */}
         {/* 两层筛选下拉（ql-20260908-005：胶囊 tab → 下拉，防机器多撑爆）。
             第一层机器（「全部机器」清空，showSearch 机器多时可搜）；第二层
             智能体仅选中机器后出现（依赖语义不变），随选随占一行尾部宽度。
             ql-20260909-005：状态下拉自搜索行挪入本行尾部（w-24），筛选控件
             聚一行。 */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <Select
             id="slp-machine"
             size="small"
             showSearch
             optionFilterProp="label"
-            className="min-w-0 flex-1"
+            className="min-w-[120px] flex-[2_1_120px]"
             aria-label="机器筛选"
             value={filterMachineId}
             onChange={(v) => pickMachineTab(v ?? "")}
@@ -1755,11 +1743,26 @@ function WorkspaceTreeList({
           <Select
             id="slp-status"
             size="small"
-            className="w-24 shrink-0"
+            className="w-[88px] shrink-0"
             value={status}
             onChange={(v) => setStatus(v ?? "")}
             options={STATUS_OPTIONS.map((o) => ({ ...o }))}
           />
+          {isWorkspaceScope && (
+            <Select
+              id="slp-assoc"
+              size="small"
+              showSearch
+              allowClear
+              className="min-w-[140px] flex-[1_1_140px]"
+              placeholder="关联：变更/快速修复/PPM"
+              aria-label="关联筛选"
+              value={assocFilter}
+              onChange={(v) => setAssocFilter(v)}
+              optionFilterProp="label"
+              options={assocOptions}
+            />
+          )}
         </div>
       </div>
 

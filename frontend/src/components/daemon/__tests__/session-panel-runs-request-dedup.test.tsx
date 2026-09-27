@@ -154,7 +154,17 @@ let capturedHandlers: CapturedStreamHandlers | null = null;
 function Host({ sessionId }: { sessionId: string; children?: ReactNode }) {
   return (
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <SessionPanel mode="page" sessionId={sessionId} machines={[]} llmProviders={[]} />
+      {/* 右列「详情」模式与子代理右栏同宿主约定（onOpenSubagent 声明右列能力，
+          对齐 sessions-portal 传法）——配合 beforeEach 预置开合记忆，任务面板
+          挂载口径与本套件断言（runsMeta + 任务面板各 1 条）保持不变。 */}
+      <SessionPanel
+        mode="page"
+        sessionId={sessionId}
+        machines={[]}
+        llmProviders={[]}
+        onOpenSubagent={() => {}}
+        onSubagentPanelClose={() => {}}
+      />
     </QueryClientProvider>
   );
 }
@@ -163,6 +173,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   failedRunIds = new Set();
   capturedHandlers = null;
+  // 2026-09-27-session-portal-ia-restructure（FR-04）：desktop TaskExecutionPanel
+  // 迁入右列「详情」模式——预置开合记忆为打开，保持本套件「任务面板挂载下的
+  // 请求扇出口径」（runsMeta + 任务面板各 1 条）不变。
+  window.localStorage.setItem(
+    "sillyhub.sessions.detailPanel",
+    JSON.stringify({ open: true }),
+  );
   sessionApi.getAgentSession.mockImplementation(async (sid: string) => makeDetail(sid));
   sessionApi.getAgentSessionLogs.mockImplementation(async () => makeHistory());
   sessionApi.listSessionRuns.mockImplementation(async () =>

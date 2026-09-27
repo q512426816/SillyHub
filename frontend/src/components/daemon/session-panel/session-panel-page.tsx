@@ -2,12 +2,12 @@
 
 /** page 模式内部子组件 SessionPanelPage（含 react-query，R4；自 session-panel.tsx 原样搬移；纯派生外提 ./page-helpers，handler/闭包保持组件内 R-03）。 */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import dayjs, { type Dayjs } from "dayjs";
 import {
-  Ban, Bot, ClipboardList, FolderOpen, ListOrdered, Lock, Monitor, MoreHorizontal, PauseCircle,
-  Puzzle, Search, TriangleAlert, Zap,
+  Ban, Bot, ClipboardList, FolderOpen, Info, ListOrdered, Lock, Monitor, MoreHorizontal, PauseCircle,
+  Puzzle, Search, TriangleAlert, X, Zap,
 } from "lucide-react";
 import { Badge, Button, Drawer, Input, Spin } from "antd";
 import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
@@ -48,6 +48,9 @@ import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
 import { SubagentPanelContext } from "@/components/daemon/subagent-panel-context";
 import type { SubagentPanelContextValue } from "@/components/daemon/subagent-panel-context";
 import { SubagentDetailPanel } from "@/components/daemon/subagent-detail-panel";
+// 2026-09-27-session-portal-ia-restructure（FR-02）：右列「详情」模式分组容器——
+// primer MetaPanel（变更详情右栏同款信息面板范式，FRONTEND_PAGE_STYLE §13）。
+import { MetaPanel, MetaPanelSection } from "@/components/primer";
 import { PanelResizer, usePanelWidth } from "@/components/ui/panel-resizer";
 import {
   SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT,
@@ -132,6 +135,11 @@ import {
 const CATALOG_PROMPT_SUMMARY_MAX = 60;
 /** 目录飞出卡正文摘要截断长度（design §6：首个 text 段 / output 截 120 字）。 */
 const CATALOG_ANSWER_SUMMARY_MAX = 120;
+
+/** 2026-09-27-session-portal-ia-restructure（FR-02）：右列「详情」模式开合的
+ *  localStorage 记忆键（值 JSON：{open: boolean}）——与左栏宽度/文件预览宽度
+ *  等门户级偏好键同前缀 sillyhub.sessions.*。 */
+const SESSIONS_DETAIL_PANEL_LS_KEY = "sillyhub.sessions.detailPanel";
 
 /* ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05 / D-002@v1 D-005@v1）：
  *    跳转链路 handleJumpToTurn + activeTurnKey 滚动联动的常量。 ────────────── */
@@ -2149,6 +2157,29 @@ export function SessionPanelPage({
   // useSubagentPanel() 返回 null 回退原内联展开（FR-05 零回归）。不能无条件挂
   // 空值 Provider：紧凑卡片点击 openSubagent=noop 会「点了没反应」，比内联回退更差。
   const hasSubagentPanelHost = !mobile && onOpenSubagent != null;
+  // ── 2026-09-27-session-portal-ia-restructure（FR-02）：右列「详情」模式 ──
+  // 详情侧栏开合（布尔态，localStorage 记忆用户偏好——与宽度/展开记忆同模式）；
+  // 列内容模式不设独立状态，由既有 openSubagentId 派生（subagentPanelOpen 时列
+  // 内容为子代理面板，否则为详情面板——「点子代理卡 = 切子代理模式」由单槽位
+  // 语义自然承载，零新增状态机）。写入失败静默（隐私模式等），读取异常回 false。
+  const [detailOpen, setDetailOpen] = useState<boolean>(() => {
+    try {
+      const raw = window.localStorage.getItem(SESSIONS_DETAIL_PANEL_LS_KEY);
+      return raw != null ? (JSON.parse(raw) as { open?: boolean }).open === true : false;
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SESSIONS_DETAIL_PANEL_LS_KEY,
+        JSON.stringify({ open: detailOpen }),
+      );
+    } catch {
+      /* localStorage 不可用时静默——开合退化为会话内态 */
+    }
+  }, [detailOpen]);
   const subagentPanelContextValue = useMemo<SubagentPanelContextValue>(
     () => ({
       openSubagent: onOpenSubagent ?? (() => {}),
@@ -2162,6 +2193,13 @@ export function SessionPanelPage({
   const handleSubagentPanelClose = useCallback(() => {
     onSubagentPanelClose?.();
   }, [onSubagentPanelClose]);
+
+  // 2026-09-27-session-portal-ia-restructure（FR-02）：右列可见性与内容模式
+  // ——子代理命中段（subagentPanelOpen，既有单槽位语义）优先展示子代理面板，
+  // 否则详情开关（detailOpen）打开时展示详情面板。模式由既有状态派生，零新增
+  // 状态机：点子代理卡/目录 = 自动切子代理模式；关子代理（openSubagentId→null）
+  // 后若 detailOpen 仍开则回详情模式，✕ 关详情仅置 detailOpen=false（互不干扰）。
+  const detailColumnVisible = subagentPanelOpen || detailOpen;
 
 
   // ── task-03（2026-09-08-session-turn-nav / FR-03 / D-002@v1 D-004@v1）：
@@ -3686,6 +3724,153 @@ export function SessionPanelPage({
     </>
   );
 
+  // ── 2026-09-27-session-portal-ia-restructure（FR-02/FR-04）：右列「详情」
+  //    模式内容——概览（会话元信息 MetaPanel）+ 用量（SessionUsageBar 自头部
+  //    下方迁入）+ 任务（TaskExecutionPanel 自消息流上方迁入；ref/props 零变化，
+  //    仅挂载点迁移——taskPanelRef 仍指向同一组件实例，实时事件注入链路不变）。
+  //    desktop 专用（mobile 无右列，两组件维持原路径：用量 ⋯ 菜单 / 任务面板原位）。
+  const detailColumn = (
+    <div className="flex h-full min-h-0 flex-col bg-card" data-testid="session-detail-column-content">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <span className="text-xs font-semibold text-foreground">会话详情</span>
+        <button
+          type="button"
+          aria-label="关闭详情面板"
+          title="关闭详情面板"
+          data-testid="session-detail-close"
+          onClick={() => {
+            setDetailOpen(false);
+          }}
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <X aria-hidden className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        <div className="flex flex-col gap-3">
+          <MetaPanel>
+            <MetaPanelSection title="概览">
+              <DetailMetaRow label="状态">
+                <Badge status={statusBadge.status} text={statusBadge.text} />
+              </DetailMetaRow>
+              <DetailMetaRow label="会话 ID">
+                <button
+                  type="button"
+                  aria-label="复制会话 ID"
+                  title={`点击复制会话 ID：${session.id}`}
+                  onClick={() => {
+                    void navigator.clipboard
+                      ?.writeText(session.id)
+                      .then(() => notify.success("已复制会话 ID"))
+                      .catch(() => notify.error(new Error("复制失败")));
+                  }}
+                  className="shrink-0 cursor-pointer rounded bg-muted px-1.5 py-px font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                >
+                  #{session.id.slice(0, 8)}
+                </button>
+              </DetailMetaRow>
+              {machineName && (
+                <DetailMetaRow label="机器">
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <Monitor aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    <span className="truncate text-foreground">{machineName}</span>
+                  </span>
+                </DetailMetaRow>
+              )}
+              {workspaceName && (
+                <DetailMetaRow label="工作区">
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <FolderOpen aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    <span className="truncate font-medium text-foreground">{workspaceName}</span>
+                  </span>
+                </DetailMetaRow>
+              )}
+              <DetailMetaRow label="引擎 / 供应商">
+                <span className="text-foreground">{providerLabelOf(session.provider)}</span>
+              </DetailMetaRow>
+              {(session.config_snapshot?.model || session.config?.model) && (
+                <DetailMetaRow label="模型">
+                  <span className="truncate text-foreground">
+                    {session.config_snapshot?.model ?? session.config?.model}
+                  </span>
+                </DetailMetaRow>
+              )}
+              {session.config_snapshot?.profile_name && (
+                <DetailMetaRow label="档案">
+                  <span className="truncate text-foreground">
+                    {session.config_snapshot.profile_name}
+                  </span>
+                </DetailMetaRow>
+              )}
+              <DetailMetaRow label="轮次">
+                <span className="text-foreground">{session.turn_count} 轮</span>
+              </DetailMetaRow>
+              {session.owner_name && (
+                <DetailMetaRow label="创建人">
+                  <span className="truncate text-foreground">{session.owner_name}</span>
+                </DetailMetaRow>
+              )}
+              <DetailMetaRow label="创建时间">
+                <span className="text-foreground">
+                  {session.created_at
+                    ? new Date(session.created_at).toLocaleString("zh-CN", {
+                        year: "numeric",
+                        month: "2-digit",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: false,
+                      })
+                    : "—"}
+                </span>
+              </DetailMetaRow>
+              {isPlatformSharedSession && (
+                <span
+                  data-testid="session-detail-platform-shared-badge"
+                  title="本会话使用平台共享智能体——读平台源码不受限，写操作限制在共享输出目录"
+                  className="inline-flex shrink-0 items-center self-start rounded-full border border-brand-300 bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700"
+                >
+                  平台共享会话
+                </span>
+              )}
+            </MetaPanelSection>
+          </MetaPanel>
+          <MetaPanel>
+            <MetaPanelSection title="用量">
+              {/* FR-04：自头部下方迁入（组件与 props 零变化；refreshSignal 轮终态
+                  递增链路不变，R-04 自取数）。 */}
+              <SessionUsageBar sessionId={session.id} refreshSignal={usageRefresh} />
+            </MetaPanelSection>
+          </MetaPanel>
+          <MetaPanel>
+            <MetaPanelSection title="任务执行">
+              {/* FR-04：自消息流上方迁入（mobile 维持原位）。 */}
+              <TaskExecutionPanel
+                ref={taskPanelRef}
+                mobile={false}
+                sessionId={session.id}
+                runningTasks={agentTasks.filter((t) => t.status === "running")}
+                bashProgress={bashProgress}
+                teamMissions={teamMissions}
+                workspaceId={session.workspace_id ?? preContext?.workspaceId ?? null}
+                onRefreshMissions={() => {
+                  void refreshTeamMissions();
+                }}
+                onOpenWorkerSession={(subSessionId) => {
+                  setWorkerSessionId(subSessionId);
+                }}
+                planObjective={planPending?.summary.objective ?? null}
+                planTasks={planPending?.summary.tasks ?? null}
+                runsRefreshSignal={usageRefresh}
+                tasksRefreshSignal={tasksRefresh}
+              />
+            </MetaPanelSection>
+          </MetaPanel>
+        </div>
+      </div>
+    </div>
+  );
+
   // task-03（design §5.B）：面板根 JSX 先构造成变量——右栏打开时外包 flex 行
   //（[本节点 flex-1 min-w-0] + 把手 + 右列），未打开 / 无右栏能力宿主原样返回
   //（className 与 DOM 结构零变化，session-panel-variant 断言不回归）。
@@ -3696,7 +3881,9 @@ export function SessionPanelPage({
         mobile ? PANEL_ROOT_CLS_MOBILE : PANEL_ROOT_CLS_DESKTOP,
         // task-03：右栏打开时面板根作为 flex 行左单元格（flex-1 min-w-0）；
         // 高度链不破坏——外层 flex 行 h-full + 默认 stretch 拉满，h-full 原类保留。
-        subagentPanelOpen && "min-w-0 flex-1",
+        // IA 重构（FR-02）：条件自 subagentPanelOpen 扩为 detailColumnVisible
+        // （子代理或详情任一打开均收窄中栏）。
+        detailColumnVisible && "min-w-0 flex-1",
       )}
       // task-06（2026-09-08-session-turn-nav / R-05）：mobile 轮次导航 Drawer
       // （getContainer=false 内联渲染）的定位上下文——仅 mobile 补
@@ -3712,65 +3899,33 @@ export function SessionPanelPage({
       <header
         className={mobile ? PANEL_HEADER_CLS_MOBILE : PANEL_HEADER_CLS_DESKTOP}
       >
-        <div className="flex min-w-0 items-center gap-2">
-          {title && (
-            <span className="truncate text-sm font-semibold text-foreground">
-              {title}
-            </span>
+        {/* 2026-09-27-session-portal-ia-restructure（FR-03）：头部两层化——
+            行1 = 标题 + 状态徽标 + 高频操作（后台/子代理目录、详情开关、视图
+            切换、搜索、打断）；行2 = 元信息 meta（#id 复制 · 共享徽标 · 机器 ·
+            工作区，muted 小字降噪）。mobile 保持单行（meta 收纳 ⋯ 菜单）；
+            header 自身类零变化（session-panel-variant 断言锚不回归）。 */}
+        <div
+          className={cn(
+            "flex min-w-0",
+            mobile ? "items-center gap-2" : "flex-1 flex-col gap-1",
           )}
-          {/* 会话 id 短码：点击复制完整 id（排障/引用入口），notify 反馈。
-              mobile 收纳进 ⋯ 菜单（见头部右侧）。
-              2026-09-09-sessions-visual-refresh task-07（FR-07）：id/机器/工作区
-              三个平铺 chip 收敛为面包屑式一行（id chip · 机器 · 工作区粗体），
-              「·」muted 分隔——头部降噪。 */}
-          {!mobile && (
-            <span className="hidden min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground sm:flex">
-              <button
-                type="button"
-                aria-label="复制会话 ID"
-                title={`点击复制会话 ID：${session.id}`}
-                onClick={() => {
-                  void navigator.clipboard
-                    ?.writeText(session.id)
-                    .then(() => notify.success("已复制会话 ID"))
-                    .catch(() => notify.error(new Error("复制失败")));
-                }}
-                className="shrink-0 cursor-pointer rounded bg-muted px-1.5 py-px font-mono text-[10.5px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-              >
-                #{session.id.slice(0, 8)}
-              </button>
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            {title && (
+              <span className="truncate text-sm font-semibold text-foreground">
+                {title}
+              </span>
+            )}
+            {/* 状态徽标升行1——会话关键信号一眼可见（原与 meta 同 span）。 */}
+            {!mobile && (
               <Badge status={statusBadge.status} text={statusBadge.text} />
-              {isPlatformSharedSession && (
-                <span
-                  data-testid="session-platform-shared-badge"
-                  title="本会话使用平台共享智能体——读平台源码不受限，写操作限制在共享输出目录"
-                  className="inline-flex shrink-0 items-center rounded-full border border-brand-300 bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700"
-                >
-                  平台共享
-                </span>
+            )}
+            <div
+              className={cn(
+                "flex shrink-0 items-center gap-2",
+                !mobile && "ml-auto",
               )}
-              {machineName && (
-                <>
-                  <span aria-hidden className="opacity-50">·</span>
-                  <span className="inline-flex min-w-0 items-center gap-1">
-                    <Monitor aria-hidden className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{machineName}</span>
-                  </span>
-                </>
-              )}
-              {workspaceName && (
-                <>
-                  <span aria-hidden className="opacity-50">·</span>
-                  <span className="inline-flex min-w-0 items-center gap-1 font-semibold text-foreground">
-                    <FolderOpen aria-hidden className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{workspaceName}</span>
-                  </span>
-                </>
-              )}
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
+            >
           {/* ql-20260826-010：后台活动目录——bash/后台任务/团队任务收编头部下拉
               （原三段常驻消息流与输入区之间挤占聊天窗口）。mobile 再收纳进 ⋯ 菜单。 */}
           {!mobile && (
@@ -3797,6 +3952,30 @@ export function SessionPanelPage({
                 onJumpTo={handleJumpToSubagent}
                 activeId={activeSubagentId}
               />
+              {/* 2026-09-27-session-portal-ia-restructure（FR-02/FR-03）：右列
+                  「详情」开关——概览/用量/任务执行的收纳入口；desktop（非 mobile）
+                  渲染（右列不依赖子代理宿主 props——详情模式自足，评审 P1 修复：
+                  分身浮层/悬浮助手等 page 宿主同样获得用量与任务面板）；
+                  激活态品牌色标识（aria-pressed）。 */}
+              {!mobile && (
+                <button
+                  type="button"
+                  aria-label="会话详情"
+                  aria-pressed={detailColumnVisible}
+                  title="会话详情：概览 / 用量 / 任务执行"
+                  data-testid="session-detail-toggle"
+                  onClick={() => {
+                    setDetailOpen((v) => !v);
+                  }}
+                  className={cn(
+                    "inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                    detailColumnVisible &&
+                      "border-brand-300 bg-brand-50 text-brand-700 hover:bg-brand-100 hover:text-brand-700",
+                  )}
+                >
+                  <Info aria-hidden className="h-4 w-4" />
+                </button>
+              )}
             </>
           )}
           {turnState.turns.length > 0 && (
@@ -4025,21 +4204,66 @@ export function SessionPanelPage({
               )}
             </div>
           )}
+            </div>
+          </div>
+          {/* 2026-09-27-session-portal-ia-restructure（FR-03）：行2 元信息 meta
+              ——#id 短码（点击复制，ql-20260815-010）· 平台共享徽标 · 机器 ·
+              工作区（粗体）。原头部 meta span 内容原样搬移：交互/文案/类零变化，
+              位置自标题右侧降为独立次行（头部降噪分层）。 */}
+          {!mobile && (
+            <span className="hidden min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground sm:flex">
+              <button
+                type="button"
+                aria-label="复制会话 ID"
+                title={`点击复制会话 ID：${session.id}`}
+                onClick={() => {
+                  void navigator.clipboard
+                    ?.writeText(session.id)
+                    .then(() => notify.success("已复制会话 ID"))
+                    .catch(() => notify.error(new Error("复制失败")));
+                }}
+                className="shrink-0 cursor-pointer rounded bg-muted px-1.5 py-px font-mono text-[10.5px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+              >
+                #{session.id.slice(0, 8)}
+              </button>
+              {isPlatformSharedSession && (
+                <span
+                  data-testid="session-platform-shared-badge"
+                  title="本会话使用平台共享智能体——读平台源码不受限，写操作限制在共享输出目录"
+                  className="inline-flex shrink-0 items-center rounded-full border border-brand-300 bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700"
+                >
+                  平台共享
+                </span>
+              )}
+              {machineName && (
+                <>
+                  <span aria-hidden className="opacity-50">·</span>
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <Monitor aria-hidden className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{machineName}</span>
+                  </span>
+                </>
+              )}
+              {workspaceName && (
+                <>
+                  <span aria-hidden className="opacity-50">·</span>
+                  <span className="inline-flex min-w-0 items-center gap-1 font-semibold text-foreground">
+                    <FolderOpen aria-hidden className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{workspaceName}</span>
+                  </span>
+                </>
+              )}
+            </span>
+          )}
         </div>
       </header>
 
-      {/* 2026-08-29-session-usage-stats task-04（FR-02 / 原型场景一 / D-001@v1）：
-          会话累计用量条——page 模式挂会话头部下方（分隔信息条）；session 已
-          narrow 非 null（预会话/加载/错误态上方已提前 return，天然满足「有
-          sessionId 才渲染」）。refreshSignal 挂 onTurnCompleted 轮终态递增
-          （usageRefresh，R-04：组件自取数，不引入 react-query）。
-          ql-20260915-009：mobile 页面不常驻——六项统计在窄视口换行占两行，纯辅助
-          信息不该占手机会话主体（对齐竞品聊天页「内容为王、统计收走」形态；
-          ql-20260915-011 起 mobile 收进 ⋯ 菜单「会话用量」区，收入口不砍功能；
-          desktop 照旧）。 */}
-      {!mobile && (
-        <SessionUsageBar sessionId={session.id} refreshSignal={usageRefresh} />
-      )}
+      {/* 2026-08-29-session-usage-stats task-04（FR-02）：会话累计用量条挂载点
+          迁移记录——desktop 原挂本位（头部下方信息条）于
+          2026-09-27-session-portal-ia-restructure（FR-04）迁入右列「详情」模式
+          （见 detailColumn 装配）；mobile 仍走 ⋯ 菜单「会话用量」区（收入口
+          不砍功能，见头部 mobile 分支）。refreshSignal（usageRefresh，轮终态
+          递增）与组件 props 零变化。 */}
 
       {/* task-10 / design A5+A6（原型⑤）：suspended 挂起横幅（info 色，双主题
           token 阶）。挂起时后台状态权威（backend 已判定 daemon 离线超时/优雅
@@ -4132,31 +4356,34 @@ export function SessionPanelPage({
       )}
 
       {/* task-08（2026-09-04-session-task-execution-panel / FR-01 / D-004@v1）：
-          任务执行折叠面板——横幅之下、会话主体之上的横向信息条层级（AgentLogCard
-          同层）。desktop / mobile 两 variant 共用本渲染路径（对照 AgentLogCard
-          单挂载先例；组件自适应容器宽度，折叠条常驻空数据显示 0 计数）。运行中
-          区数据与头部 ActivityCatalog 同源（agentTasks / bashProgress /
-          teamMissions 既有内存态，不新建 state / SSE）；实时事件经 taskPanelRef
-          由上方 onAgentTaskStatus 分发注入。 */}
-      <TaskExecutionPanel
-        ref={taskPanelRef}
-        mobile={mobile}
-        sessionId={session.id}
-        runningTasks={agentTasks.filter((t) => t.status === "running")}
-        bashProgress={bashProgress}
-        teamMissions={teamMissions}
-        workspaceId={session.workspace_id ?? preContext?.workspaceId ?? null}
-        onRefreshMissions={() => {
-          void refreshTeamMissions();
-        }}
-        onOpenWorkerSession={(subSessionId) => {
-          setWorkerSessionId(subSessionId);
-        }}
-        planObjective={planPending?.summary.objective ?? null}
-        planTasks={planPending?.summary.tasks ?? null}
-        runsRefreshSignal={usageRefresh}
-        tasksRefreshSignal={tasksRefresh}
-      />
+          任务执行折叠面板——2026-09-27-session-portal-ia-restructure（FR-04）起
+          desktop 自本位（横幅之下、会话主体之上）迁入右列「详情」模式（见
+          detailColumn 装配，ref/props 零变化仅挂载点迁移）；mobile 无右列，
+          维持本位挂载（收入口不砍功能）。运行中区数据与头部 ActivityCatalog
+          同源（agentTasks / bashProgress / teamMissions 既有内存态，不新建
+          state / SSE）；实时事件经 taskPanelRef 由上方 onAgentTaskStatus
+          分发注入——desktop 迁移后 ref 仍指向同一组件实例，注入链路不变。 */}
+      {mobile && (
+        <TaskExecutionPanel
+          ref={taskPanelRef}
+          mobile={mobile}
+          sessionId={session.id}
+          runningTasks={agentTasks.filter((t) => t.status === "running")}
+          bashProgress={bashProgress}
+          teamMissions={teamMissions}
+          workspaceId={session.workspace_id ?? preContext?.workspaceId ?? null}
+          onRefreshMissions={() => {
+            void refreshTeamMissions();
+          }}
+          onOpenWorkerSession={(subSessionId) => {
+            setWorkerSessionId(subSessionId);
+          }}
+          planObjective={planPending?.summary.objective ?? null}
+          planTasks={planPending?.summary.tasks ?? null}
+          runsRefreshSignal={usageRefresh}
+          tasksRefreshSignal={tasksRefresh}
+        />
+      )}
 
       {/* 会话主体（task-07 / 2026-08-23-agent-activity-sessions design §3.4）：
           - origin=tool_report 且 turn_count===0（未继续过对话）→ 本地 Agent
@@ -4569,47 +4796,69 @@ export function SessionPanelPage({
 
   // ── task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design
   //    §5.B §5.E）：子代理右栏装配 ──────────────────────────────────────────
-  // 无右栏能力宿主（未传 onOpenSubagent / mobile）：原样返回，不挂 Provider——
-  // SubagentBlockView 走原内联展开，行为零回归（FR-05；挂载条件见
-  // hasSubagentPanelHost 注释）。预会话 / 加载 / 错误三个提前 return 分支无
-  // turns 渲染，天然不需要 Provider。
+  // IA 重构（2026-09-27-session-portal-ia-restructure / 评审 P1 修复）：右列容器
+  // 与子代理宿主能力**解耦**——desktop（非 mobile）一律具备右列（详情模式自足，
+  // 不依赖 onOpenSubagent：分身浮层 WorkerSessionOverlay / 悬浮助手等 page 宿主
+  // 同样保留用量条与任务面板，仅收进右列）；SubagentPanelContext.Provider 仍按
+  // hasSubagentPanelHost 渐进增强挂载（未传 props 的宿主 useSubagentPanel 返回
+  // null，子代理段走原内联展开，FR-05 零回归不变）。未传 onOpenSubagent 时
+  // activeSubagentId 恒 null → subagentPanelOpen 恒 false → 右列恒为详情模式，
+  // 不会出现「点了没反应」的子代理空面板。
+  const detailColumnTree = detailColumnVisible ? (
+    <div className="flex h-full min-h-0 w-full overflow-hidden">
+      {panelRoot}
+      <PanelResizer
+        width={subagentPanelWidth}
+        onWidthChange={setSubagentPanelWidth}
+        defaultWidth={SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT}
+        minWidth={SESSIONS_FILE_PREVIEW_WIDTH_MIN}
+        maxWidth={SESSIONS_FILE_PREVIEW_WIDTH_MAX}
+        ariaLabel="调整详情面板宽度"
+        testId="subagent-panel-resizer"
+        side="right"
+      />
+      <div
+        className="min-w-0 shrink-0"
+        style={{ width: `${subagentPanelWidth}px` }}
+        data-testid="subagent-panel-column"
+      >
+        {subagentPanelOpen ? (
+          <SubagentDetailPanel
+            segment={openSubagentSegment}
+            onClose={handleSubagentPanelClose}
+          />
+        ) : (
+          detailColumn
+        )}
+      </div>
+    </div>
+  ) : (
+    panelRoot
+  );
   if (!hasSubagentPanelHost) {
-    return panelRoot;
+    return detailColumnTree;
   }
-  // 右栏打开（openSubagentId 命中段）：面板根外包 flex 行
-  // [panelRoot flex-1 min-w-0] + PanelResizer（side=right，把手在右列左缘，
-  // 拖左增宽——对齐 sessions-portal 文件预览列）+ 右列（宽度 usePanelWidth 记忆，
-  // 与文件预览同键单槽位）内挂 SubagentDetailPanel（段活引用，SSE 实时刷新）。
-  // 段失效间隙（openSubagentSegment null）不渲染右列，等 effect 自动关闭。
   return (
     <SubagentPanelContext.Provider value={subagentPanelContextValue}>
-      {subagentPanelOpen ? (
-        <div className="flex h-full min-h-0 w-full overflow-hidden">
-          {panelRoot}
-          <PanelResizer
-            width={subagentPanelWidth}
-            onWidthChange={setSubagentPanelWidth}
-            defaultWidth={SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT}
-            minWidth={SESSIONS_FILE_PREVIEW_WIDTH_MIN}
-            maxWidth={SESSIONS_FILE_PREVIEW_WIDTH_MAX}
-            ariaLabel="调整子代理面板宽度"
-            testId="subagent-panel-resizer"
-            side="right"
-          />
-          <div
-            className="min-w-0 shrink-0"
-            style={{ width: `${subagentPanelWidth}px` }}
-            data-testid="subagent-panel-column"
-          >
-            <SubagentDetailPanel
-              segment={openSubagentSegment}
-              onClose={handleSubagentPanelClose}
-            />
-          </div>
-        </div>
-      ) : (
-        panelRoot
-      )}
+      {detailColumnTree}
     </SubagentPanelContext.Provider>
+  );
+}
+
+/** 2026-09-27-session-portal-ia-restructure（FR-02）：详情面板概览组的
+ *  「label + 值」行（MetaPanelSection 内统一栅距；label xs muted 固定宽，
+ *  值列 min-w-0 截断防撑破窄列）。 */
+function DetailMetaRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <span className="flex min-w-0 items-center gap-2 text-xs">
+      <span className="w-16 shrink-0 text-muted-foreground">{label}</span>
+      <span className="min-w-0 flex-1">{children}</span>
+    </span>
   );
 }

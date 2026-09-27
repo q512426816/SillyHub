@@ -462,14 +462,35 @@ describe("SessionPanel variant='mobile' 布局类与收纳", () => {
     }
   });
 
-  it("desktop：用量条照常渲染（有数据即显示，零回归锚）", async () => {
+  it("desktop：右列「详情」打开后用量条照常渲染（有数据即显示，零回归锚）", async () => {
+    // 2026-09-27-session-portal-ia-restructure（FR-04）：desktop 用量条自头部
+    // 下方迁入右列「详情」模式——断言意图不变（有数据即显示），先清开合记忆
+    // 再点头部「详情」开关展开（挂载点断言随实现更新）。右列与子代理面板同
+    // 宿主约定（onOpenSubagent 声明右列能力，对齐 sessions-portal 传法）。
+    window.localStorage.removeItem("sillyhub.sessions.detailPanel");
     sessionApi.getSessionUsage.mockResolvedValue(usagePayload);
     try {
-      setupPage();
+      const qc = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      render(
+        <QueryClientProvider client={qc}>
+          <SessionPanel
+            mode="page"
+            sessionId="sess-variant"
+            machines={[]}
+            llmProviders={[]}
+            onOpenSubagent={() => {}}
+            onSubagentPanelClose={() => {}}
+          />
+        </QueryClientProvider>,
+      );
+      fireEvent.click(await screen.findByTestId("session-detail-toggle"));
       expect(await screen.findByLabelText("输入")).toBeInTheDocument();
       expect(screen.getByLabelText("缓存命中率")).toBeInTheDocument();
     } finally {
       sessionApi.getSessionUsage.mockResolvedValue(null);
+      window.localStorage.removeItem("sillyhub.sessions.detailPanel");
     }
   });
 });

@@ -17,7 +17,7 @@
 // （props 经 data-* 透出供断言）。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 vi.mock("@/components/ui/markdown-text", () => ({
@@ -184,6 +184,9 @@ async function fireTurnCompleted(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // 2026-09-27-session-portal-ia-restructure（FR-04）：desktop 用量条迁入右列
+  // 「详情」模式，开合记忆 localStorage——逐用例清键保证初值确定（默认收起）。
+  window.localStorage.removeItem("sillyhub.sessions.detailPanel");
   daemonMock.getAgentSessionLogs.mockResolvedValue([]);
   daemonMock.fetchSessionQueue.mockResolvedValue([]);
   daemonMock.fetchSessionDialogHistory.mockResolvedValue([]);
@@ -214,17 +217,32 @@ afterEach(() => {
 /* ────────────────────── 挂载点（page / dialog） ────────────────────── */
 
 describe("SessionUsageBar 挂载点（2026-08-29-session-usage-stats task-04）", () => {
-  it("page 模式：会话头部下方渲染，收到当前会话 sessionId；不触发真实取数", async () => {
+  it("page 模式：右列「详情」打开后渲染，收到当前会话 sessionId；不触发真实取数", async () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
     render(
       <QueryClientProvider client={qc}>
-        <SessionPanel mode="page" sessionId="s-1" machines={[]} llmProviders={[]} />
+        {/* 右列「详情」模式与子代理右栏同宿主约定：声明 onOpenSubagent 即具备
+            右列能力（sessions-portal 门户传法）；测试补传对齐真实宿主形态。 */}
+        <SessionPanel
+          mode="page"
+          sessionId="s-1"
+          machines={[]}
+          llmProviders={[]}
+          onOpenSubagent={() => {}}
+          onSubagentPanelClose={() => {}}
+        />
       </QueryClientProvider>,
     );
     await flushEstablish();
 
+    // 2026-09-27-session-portal-ia-restructure（FR-04）：desktop 用量条自头部
+    // 下方迁入右列「详情」模式——默认收起不占版面，点头部「详情」开关展开断言
+    // （挂载与刷新信号意图不变，位置断言随挂载点更新）。
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("session-detail-toggle"));
+    });
     expect(usageStub()).toHaveAttribute("data-session-id", "s-1");
     // 面板测试已 stub 用量条：不应触发真实 getSessionUsage 取数。
     expect(daemonMock.getSessionUsage).not.toHaveBeenCalled();
@@ -251,10 +269,21 @@ describe("SessionUsageBar 挂载点（2026-08-29-session-usage-stats task-04）"
     });
     render(
       <QueryClientProvider client={qc}>
-        <SessionPanel mode="page" sessionId="s-1" machines={[]} llmProviders={[]} />
+        <SessionPanel
+          mode="page"
+          sessionId="s-1"
+          machines={[]}
+          llmProviders={[]}
+          onOpenSubagent={() => {}}
+          onSubagentPanelClose={() => {}}
+        />
       </QueryClientProvider>,
     );
     await flushEstablish();
+    // FR-04：用量条在右列「详情」模式内（同上用例，先展开再断言信号链路）。
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("session-detail-toggle"));
+    });
     expect(usageStub()).toHaveAttribute("data-refresh-signal", "0");
 
     await fireTurnCompleted();
