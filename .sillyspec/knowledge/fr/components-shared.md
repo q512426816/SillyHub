@@ -2,6 +2,7 @@
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
+待复核：2026-09-27-session-fast-replay
 依据决策：D-005@v1、D-007@v1
 场景正文：
 - 场景：默认场景 — Given 一个 mission 的所有 Worker Run 进入终态（completed/failed/killed） mission 仍有 pending/runni；When 最后一个 Worker 的 lease 在 complete_lease（backend/app/modules/daemon/lease/service.py:278）完成 某 Worker lease comp；Then complete_lease 末尾 mission 分支检测到 `run.mission_id 非空` 且 `derive_status(mission) in
@@ -12,6 +13,7 @@
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
+待复核：2026-09-27-session-fast-replay
 依据决策：D-007@v1
 场景正文：
 - 场景：默认场景 — Given Worker Run 属于某 mission（run.mission_id 非空） interactive 多轮会话不 end session；When 该 Worker 的 lease 在 complete_lease 完成（batch 或 interactive 路径） Worker lease comple；Then complete_lease 开头按 lease.agent_run_id 调 collect_completed_artifacts 回灌 AgentArti
@@ -22,6 +24,7 @@
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
+待复核：2026-09-27-session-fast-replay
 依据决策：D-008@v1
 场景正文：
 - 场景：默认场景 — Given mission 的 dispatch 循环（backend/app/modules/agent/router.py:680-687）准备 dispatch 下一个 Worker 累计成本 < 预算 且 activ；When 调 can_dispatch_worker(mission_id) 返回 (false, reason) can_dispatch_worker 检查；Then 拒绝 dispatch 该 Worker；剩余未 dispatch 的 pending Run 标记 killed；Mission 进入收敛流程（Finaliz
@@ -32,6 +35,7 @@
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
+待复核：2026-09-27-session-fast-replay
 依据决策：D-008@v1
 场景正文：
 - 场景：默认场景 — Given mission 累计成本达到预算上限；When can_dispatch_worker 检查；Then 返回 (false, "budget_exceeded")；已完成的 Worker Artifact 不丢弃，Finalizer 用已有（可能不完整的）Arti
@@ -42,6 +46,7 @@
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
+待复核：2026-09-27-session-fast-replay
 依据决策：D-004@v2
 场景正文：
 - 场景：默认场景 — Given v1 Worker（read-only 或写类）dispatch execute team 写类 Worker 产出 patch；When Worker 在 daemon 执行 Finalizer 收敛；Then 工具层不强制审批（batch 默认 policy + prompt 约束）；read-only 与写类均走 batch patch 经人审 apply-back
@@ -52,6 +57,7 @@
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
+待复核：2026-09-27-session-fast-replay
 依据决策：D-001@v1、D-003@v1
 场景正文：
 - 场景：默认场景 — Given bootstrap 入口选择 team 档 bootstrap 入口未选 team（single 默认）；When 启动 team bootstrap 启动 bootstrap
@@ -62,6 +68,7 @@
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
+待复核：2026-09-27-session-fast-replay
 依据决策：D-002@v1
 场景正文：
 - 场景：默认场景 — Given bootstrap 或 execute 入口 auto 档；When 选择路由模式 任务特征（任务数/模块跨度/风险/预计上下文）满足 team 阈值（阈值待 plan 定义）；Then 可选 single（现状）/ team / auto（按任务数·模块跨度·风险·预计上下文自动选）；其他 stage 固定 single 自动选 team；否则
@@ -72,6 +79,7 @@
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
+待复核：2026-09-27-session-fast-replay
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given mission 详情页 后端 MissionWorkerRunResponse；When 渲染 序列化 Worker；Then 显示 Mission 树（Worker 层级/DAG）；每个 Worker 可点击查看日志（复用 agent-log-viewer 按 run_id）；成本/预
@@ -82,6 +90,7 @@
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
+待复核：2026-09-27-session-fast-replay
 依据决策：D-001@v1、D-005@v1、D-006@v1
 场景正文：
 - 场景：默认场景 — Given EXECUTE stage 选择 team 档（single 默认） execute team 风险评估过高；When 启动 execute team 前置 Wave1/2/3 未跑通；Then plan.md Wave/Task 分给 Worker，每 Worker 在独立 worktree（基于主分支）写不同 task → 出 patch Artif
@@ -92,6 +101,7 @@
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
+待复核：2026-09-27-session-fast-replay
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given 未配置 team/auto team 档出问题；When 任何入口 切回 single；Then 走 single=现状，现有 AgentRun/DaemonLease/complete_lease（非 mission 分支）行为不变 恢复现状（路由默认值回
@@ -216,3 +226,185 @@
 - 场景：默认场景 — When 请求 workbench 三个接口；Then 要求 `PPM_TASK_READ` 权限（复用 `require_permission_any(Permission.PPM_TASK_READ)`，不新建权
 全文：.sillyspec/changes/archive/2026-07-14-2026-07-13-ppm-personal-workbench-prototype/requirements.md#FR-12
 最近确认：af41fac1d
+
+## FR-components-shared-023 _infer_affected_components 在 module-impact.md 与 ta
+变更：2026-09-27-thin-affected-modules-from-patch-manifest
+状态：active
+摘要：默认场景
+待复核：2026-09-27-session-fast-replay
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When _infer_affected_components 在 module-impact.md 与 tasks 路径两来源之外增加 change-patch.jso；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-27-thin-affected-modules-from-patch-manifest/requirements.md#FR-01
+最近确认：8acb0f197f8b660e404eefa917b0fbebd621e1ac
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-01
+  tests: backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest::test_manifest_files_inferred
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-27-thin-affected-modules-from-patch-manifest
+  status: active
+
+## FR-components-shared-024 files 中 .sillyspec/changes/ 前缀的变更治理件不参与匹配（不产生伪命中），
+变更：2026-09-27-thin-affected-modules-from-patch-manifest
+状态：active
+摘要：默认场景
+待复核：2026-09-27-session-fast-replay
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When files 中 .sillyspec/changes/ 前缀的变更治理件不参与匹配（不产生伪命中），其余代码路径直接参与前缀匹配；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-27-thin-affected-modules-from-patch-manifest/requirements.md#FR-02
+最近确认：8acb0f197f8b660e404eefa917b0fbebd621e1ac
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-02
+  tests: backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest::test_manifest_governance_only_yields_empty
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-27-thin-affected-modules-from-patch-manifest
+  status: active
+
+## FR-components-shared-025 change-patch.json 缺失/JSON 损坏/files 非 list 时静默跳过不抛错
+变更：2026-09-27-thin-affected-modules-from-patch-manifest
+状态：active
+摘要：默认场景
+待复核：2026-09-27-session-fast-replay
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When change-patch.json 缺失/JSON 损坏/files 非 list 时静默跳过不抛错，module-impact.md 优先级与既有两来源行为零；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-27-thin-affected-modules-from-patch-manifest/requirements.md#FR-03
+最近确认：8acb0f197f8b660e404eefa917b0fbebd621e1ac
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-03
+  tests: backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest::test_manifest_malformed_json_skipped
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-27-thin-affected-modules-from-patch-manifest
+  status: active
+
+## FR-components-shared-026 新增 pytest 用例覆盖：files 推断命中、治理件滤除、畸形件防御、module-impac
+变更：2026-09-27-thin-affected-modules-from-patch-manifest
+状态：active
+摘要：默认场景
+待复核：2026-09-27-session-fast-replay
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 新增 pytest 用例覆盖：files 推断命中、治理件滤除、畸形件防御、module-impact.md 优先回归，全部通过；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-27-thin-affected-modules-from-patch-manifest/requirements.md#FR-04
+最近确认：8acb0f197f8b660e404eefa917b0fbebd621e1ac
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-04
+  tests: backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest（6
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-27-thin-affected-modules-from-patch-manifest
+  status: active
+
+## FR-components-shared-027 既有 change 模块测试（test_parser.py 全量）零回归
+变更：2026-09-27-thin-affected-modules-from-patch-manifest
+状态：active
+摘要：默认场景
+待复核：2026-09-27-session-fast-replay
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 既有 change 模块测试（test_parser.py 全量）零回归；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-27-thin-affected-modules-from-patch-manifest/requirements.md#FR-05
+最近确认：8acb0f197f8b660e404eefa917b0fbebd621e1ac
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-05
+  tests: backend/app/modules/change/tests/test_parser.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-27-thin-affected-modules-from-patch-manifest
+  status: active
+
+## FR-components-shared-028 轮次大纲端点（全轮摘要一次下发 + 会话级缓存）
+变更：2026-09-27-session-fast-replay
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 后端 daemon 模块就绪；When 前端 GET /api/daemon/sessions/{id}/turn-outline；Then 一次响应返回该会话全部轮次摘要（无 500 条截断）：每轮含 run_id、seq 轮号（created_at 升序 1 起）、status/started_a
+全文：.sillyspec/changes/archive/2026-09-27-session-fast-replay/requirements.md#FR-01
+最近确认：a2bdb21f8a1936075294b826d6cd225a84cb31c1
+
+## FR-components-shared-029 日志端点按轮直达 + slim 模式 + 单条全文
+变更：2026-09-27-session-fast-replay
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given /sessions/{id}/logs 端点就绪；When 传 run_id 参数或 slim=true；Then run_id 命中时只返回该 run 全部日志（升序，上限 2000 条；run 不存在或不属于该会话 404）；slim=true 时 tool 通道 con
+全文：.sillyspec/changes/archive/2026-09-27-session-fast-replay/requirements.md#FR-02
+最近确认：a2bdb21f8a1936075294b826d6cd225a84cb31c1
+
+## FR-components-shared-030 runs 瘦身 + gzip
+变更：2026-09-27-session-fast-replay
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given /sessions/{id}/runs 端点就绪；When 前端拉 runs；Then 响应中 agent_profile_snapshot 剥离 system_prompt 键（保留 name/provider/model 等轻键——前端实证仅消
+全文：.sillyspec/changes/archive/2026-09-27-session-fast-replay/requirements.md#FR-03
+最近确认：a2bdb21f8a1936075294b826d6cd225a84cb31c1
+
+## FR-components-shared-031 首屏接线（大纲并行尾页）
+变更：2026-09-27-session-fast-replay
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 前端打开会话；When 首屏装配；Then getTurnOutline 与尾页日志（slim=true）并行请求，首屏 ≤2 次请求即可见最近消息+全量轮次导航；既有触顶翻页保留（before 复合游标
+全文：.sillyspec/changes/archive/2026-09-27-session-fast-replay/requirements.md#FR-04
+最近确认：a2bdb21f8a1936075294b826d6cd225a84cb31c1
+
+## FR-components-shared-032 未加载轮直达跳转
+变更：2026-09-27-session-fast-replay
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 大纲显示某轮未加载；When 用户点击该轮（导航列或既有入口）；Then 以 run_id 单轮请求直达（≤2 次往返）并 prepend 定位高亮——替代既有 40ms interval 逐页循环（JUMP_LOAD_EARLIER
+全文：.sillyspec/changes/archive/2026-09-27-session-fast-replay/requirements.md#FR-05
+最近确认：a2bdb21f8a1936075294b826d6cd225a84cb31c1
+
+## FR-components-shared-033 行式轮次导航列（TurnCatalog 重做）
+变更：2026-09-27-session-fast-replay
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given desktop 会话面板渲染；When 轮次导航挂载；Then 左侧常驻行式导航列（约 220px，可拖宽收窄）：每行整行命中区（≥40px 高）含轮号+状态点+prompt 摘要+相对时间，当前轮高亮滚动联动保留，未加载轮
+全文：.sillyspec/changes/archive/2026-09-27-session-fast-replay/requirements.md#FR-06
+最近确认：a2bdb21f8a1936075294b826d6cd225a84cb31c1
+
+## FR-components-shared-034 slim 工具详情按需全文
+变更：2026-09-27-session-fast-replay
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given slim 模式下工具条目被截断；When 用户展开工具详情；Then 截断条目展开时按需拉取单条全文（getAgentSessionLogFull）渲染，非截断条目零额外请求
+全文：.sillyspec/changes/archive/2026-09-27-session-fast-replay/requirements.md#FR-07
+最近确认：a2bdb21f8a1936075294b826d6cd225a84cb31c1
+
+## FR-components-shared-035 行为零回归 + 质量门
+变更：2026-09-27-session-fast-replay
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 本变更 diff 与测试；When 审查与运行；Then SSE 实时流/steering 三态/深链 ?session=/草稿/队列/触顶锚定/content-visibility 等既有行为零回归；旧会话数据（无大
+全文：.sillyspec/changes/archive/2026-09-27-session-fast-replay/requirements.md#FR-08
+最近确认：a2bdb21f8a1936075294b826d6cd225a84cb31c1

@@ -1,0 +1,22 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+baseline_commit: 6b9aa20b9e60f1d3aa8bd624ef9f093dc75f90a8
+updatedAt: '2026-09-27T17:34:29.625Z'
+gate_summary: >-
+  test: passed ← module[]+deps(py25+jsx5)+fr(4)（187.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260927172241\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（23.9s）｜门文件 78 个
+

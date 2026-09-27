@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-session-fast-replay",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "id": "F2",
+      "severity": "P3",
+      "dimension": "切换",
+      "title": "design 槽4 承诺的『跨页边界（相邻/重叠两种情形）』测试未交付",
+      "evidence": "design.md 槽4：『测试覆盖跨页边界（目标轮与已加载窗口相邻/重叠两种情形）』。page.test.tsx task-03/04 块新增的 FR-05 用例（直达/回退/空日志/合并）目标轮 r-old(06:30) 与已加载窗口 r-cur(08:00) 均远离，patch 全文 grep 无相邻/重叠边界用例（命中处仅为注释与 openapi 文案）。",
+      "impact": "prepend 装配链在目标轮与已加载窗口相邻/重叠时（游标压线、后缀去重链兜底路径）无测试锚点，F1 类回归更难被拦截。"
+    },
+    {
+      "id": "F3",
+      "severity": "P3",
+      "dimension": "一致性",
+      "title": "tasks.md task-01 勾选声称的『>500 轮不截断』后端测试不存在",
+      "evidence": "tasks.md task-01 [x]：『后端测试（摘要正确性/缓存命中/权限/空会话/>500 轮不截断）』。test_session_fast_replay.py 实测 15 用例（4+5+3+3，与声明的 15 一致），最多 seed 2 run，无 >500 轮用例。实现侧 run 轻列查询确无 LIMIT（FR-01『无 500 条截断』代码成立），缺的只是所声称的测试。",
+      "impact": "自述与实物不符：无截断行为（尤其 seq 连续性与 LRU 大 outline）缺防回归锚。"
+    },
+    {
+      "id": "F4",
+      "severity": "P3",
+      "dimension": "一致性",
+      "title": "tasks.md task-05 勾选声称的『性能对照记录（请求数与 payload 前后量化）』无产物",
+      "evidence": "变更目录仅 change-patch.json/change.patch/design.md/flow-state.yaml/proposal.md/requirements.md/tasks.md；patch 全文仅 tasks.md 该行自身命中『请求数与/payload 前后』关键词，无任何量化记录（请求数、字节数对照）落盘。",
+      "impact": "优化收益无量化证据面，验收只剩机制推理。"
+    },
+    {
+      "id": "F5",
+      "severity": "P3",
+      "dimension": "一致性",
+      "title": "page.test.tsx 合并用例注释宣称组件 bug『待组件侧修复』，与已交付的修复代码矛盾（陈旧注释）",
+      "evidence": "page.test.tsx task-03/04 合并用例注释：『mergeTurnNavEntries 的 loadedByKey 未按 loaded 过滤……待组件侧修复』；而 session-panel-page.tsx 交付代码已含 catalog.filter((e)=>e.loaded)（注释标『评审实证』），断言 /^第2轮 · 失败 · 未加载 · 旧轮大纲摘要$/ 期望的正是修复后行为（测试可通过）。",
+      "impact": "误导后续维护者以为 FR-06 未生效；注释未随修复更新。"
+    },
+    {
+      "id": "F6",
+      "severity": "P3",
+      "dimension": "交付卫生",
+      "title": "冻结件 change.patch 混入多个并行变更的无关改动",
+      "evidence": "patch 含 backend/app/modules/change/{parser,service,timeline}.py 及其测试、frontend/src/lib/thin-lineage.ts 与各测试 is_thin 字段（2026-09-27-thin-display-fix）、FRONTEND_PAGE_STYLE.md §13（2026-09-26-core-pages-visual-redesign）、docs/sillyspec 目录迁移、.zcode/skills/sillyspec-quick/SKILL.md、primer 样式微调等，均不在本变更 design 接口契约声明面内。本变更自身交付物（daemon session_insights/schema、前端面板/导航/lib、openapi+api-types、测试）齐全。",
+      "impact": "冻结 diff 无法作为本变更的纯净回归基线，跨变更归因混浊；非功能缺陷。"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-28T01:29:04+08:00"
+}

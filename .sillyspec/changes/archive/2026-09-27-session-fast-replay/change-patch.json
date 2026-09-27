@@ -1,0 +1,197 @@
+{
+  "change": "2026-09-27-session-fast-replay",
+  "baseline": "6b9aa20b9e60f1d3aa8bd624ef9f093dc75f90a8",
+  "head": "0bcceb8ddda3a2fc6bd6e3f2a48440042c34d5de",
+  "files": [
+    ".sillyspec/changes/2026-09-27-session-fast-replay/design.md",
+    ".sillyspec/changes/2026-09-27-session-fast-replay/flow-state.yaml",
+    ".sillyspec/changes/2026-09-27-session-fast-replay/proposal.md",
+    ".sillyspec/changes/2026-09-27-session-fast-replay/requirements.md",
+    ".sillyspec/changes/2026-09-27-session-fast-replay/tasks.md",
+    ".sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md",
+    ".zcode/skills/sillyspec-quick/SKILL.md",
+    "backend/app/modules/agent/schema.py",
+    "backend/app/modules/change/parser.py",
+    "backend/app/modules/change/schema.py",
+    "backend/app/modules/change/service.py",
+    "backend/app/modules/change/tests/test_enrich_projection.py",
+    "backend/app/modules/change/tests/test_parser.py",
+    "backend/app/modules/change/tests/test_timeline.py",
+    "backend/app/modules/change/timeline.py",
+    "backend/app/modules/daemon/router/__init__.py",
+    "backend/app/modules/daemon/router/session_insights.py",
+    "backend/app/modules/daemon/schema.py",
+    "backend/app/modules/daemon/tests/test_session_fast_replay.py",
+    "backend/app/modules/daemon/tests/test_session_runs_endpoint.py",
+    "backend/openapi.json",
+    "docs/sillyspec/finished/2026-09-27-spec-sync-413-and-nested-runtime.md",
+    "docs/sillyspec/finished/change-birth-stage-scan-to-brainstorm.md",
+    "docs/sillyspec/finished/parallel-session-stale-snapshot-carried-in-commit-静默回滚.md",
+    "docs/sillyspec/finished/test-trace-extract-truncates-case-suffix-测试绑定用例名被截.md",
+    "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/page.tsx",
+    "frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx",
+    "frontend/src/components/__tests__/delete-change-confirm.test.tsx",
+    "frontend/src/components/__tests__/workspace-card.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx",
+    "frontend/src/components/changes/detail/change-stage-actions.tsx",
+    "frontend/src/components/changes/detail/change-timeline-card.tsx",
+    "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-input-bar-mention.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-log-assembler.test.ts",
+    "frontend/src/components/daemon/__tests__/session-mention-popover.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-ctx-tokens.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-prompt.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-team.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-ux-fixes.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-suspended-display.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-usage-panel-mount.test.tsx",
+    "frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx",
+    "frontend/src/components/daemon/runtime-session-helpers.tsx",
+    "frontend/src/components/daemon/session-log-assembler.ts",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/tool-args-detail.tsx",
+    "frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx",
+    "frontend/src/components/mobile/mobile-change-card.test.tsx",
+    "frontend/src/components/primer/issue-row.tsx",
+    "frontend/src/components/primer/underline-nav.tsx",
+    "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+    "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+    "frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx",
+    "frontend/src/components/sessions/turn-nav-list.tsx",
+    "frontend/src/components/workspace-card.tsx",
+    "frontend/src/components/workspace/stats-row.tsx",
+    "frontend/src/lib/__tests__/session-mention-sources.test.tsx",
+    "frontend/src/lib/__tests__/thin-lineage.test.ts",
+    "frontend/src/lib/agent.ts",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/daemon.test.ts",
+    "frontend/src/lib/daemon/sessions.ts",
+    "frontend/src/lib/thin-lineage.ts"
+  ],
+  "totals": {
+    "files": 82,
+    "additions": 5202,
+    "deletions": 389
+  },
+  "savedAt": "2026-09-27T17:23:08.690Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 7,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 5,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 14,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 57,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 7,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 9,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 41,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 7,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [
+    {
+      "dir": ".zcode/skills/sillyspec-quick",
+      "files": 1
+    }
+  ],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "2598a5b16536b9ff305088ac069c5b446879952fbecda4cbe0c2b4ec9815e7a6",
+  "patchStatus": "ok"
+}

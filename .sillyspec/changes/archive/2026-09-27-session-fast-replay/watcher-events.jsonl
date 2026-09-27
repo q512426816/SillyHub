@@ -1,0 +1,25 @@
+{"ts":1790518116696,"kind":"file","stage":"proposal","detail":"proposal.md 出现","provisional":true}
+{"ts":1790518116696,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1790518116696,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1790518116696,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1790518385326,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1790518444737,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790518482295,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790518482295,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1790518482956,"kind":"warning","stage":null,"rule":"fake-check","severity":"warning","detail":"tasks 勾选 task-00 无对应提交（消息不含该 task id）且无 review.json 变更——假勾选嫌疑，人判","provisional":true}
+{"ts":1790519385694,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790519528549,"kind":"commit","stage":null,"detail":"e70bc7349","provisional":true}
+{"ts":1790520431807,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790520734696,"kind":"commit","stage":null,"detail":"365d909ef","provisional":true}
+{"ts":1790521527229,"kind":"commit","stage":null,"detail":"aada6c172","provisional":true}
+{"ts":1790521564223,"kind":"commit","stage":null,"detail":"66ae9a0d4","provisional":true}
+{"ts":1790521889863,"kind":"commit","stage":null,"detail":"54df4859d","provisional":true}
+{"ts":1790522050308,"kind":"commit","stage":null,"detail":"723d325fd","provisional":true}
+{"ts":1790522136911,"kind":"commit","stage":null,"detail":"8acb0f197","provisional":true}
+{"ts":1790523040658,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790529393813,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790529393813,"kind":"task-done","stage":"tasks","detail":"checked 1→7","provisional":true}
+{"ts":1790529394856,"kind":"warning","stage":null,"rule":"fake-check","severity":"warning","detail":"tasks 勾选 task-01、task-02、task-03、task-04、task-05、task-06 无对应提交（消息不含该 task id）且无 review.json 变更——假勾选嫌疑，人判","provisional":true}
+{"ts":1790529531852,"kind":"commit","stage":null,"detail":"0bcceb8dd","provisional":true}
+{"ts":1790530434455,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790530437675,"kind":"commit","stage":null,"detail":"a2bdb21f8","provisional":true}

@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-thin-affected-modules-from-patch-manifest",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest::test_manifest_files_inferred"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-thin-affected-modules-from-patch-manifest"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest::test_manifest_governance_only_yields_empty"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-thin-affected-modules-from-patch-manifest"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-03",
+      "tests": [
+        "backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest::test_manifest_malformed_json_skipped"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-thin-affected-modules-from-patch-manifest"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest（6"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-thin-affected-modules-from-patch-manifest"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-05",
+      "tests": [
+        "backend/app/modules/change/tests/test_parser.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-thin-affected-modules-from-patch-manifest"
+    }
+  ]
+}
