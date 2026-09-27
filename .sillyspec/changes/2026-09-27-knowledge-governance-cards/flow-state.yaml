@@ -1,9 +1,11 @@
-tier: thin
+tier: thick
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
 born_face: thin
 with_tasks: false
 review_force: null
 baseline_commit: 4d340be72fb09d9a120c2f65a6416da45f4f293e
-updatedAt: '2026-09-27T09:43:47.546Z'
+updatedAt: '2026-09-27T10:00:32.863Z'
+upgrade_reason: verify 实测失败（实测失败：lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
 
