@@ -21,7 +21,7 @@ from datetime import datetime
 from fastapi import HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.modules.daemon.router as _router
@@ -405,9 +405,12 @@ async def _session_outline_fingerprint(
     ).one()
     logs_row = (
         await db.execute(
-            select(func.max(AgentRunLog.timestamp), func.max(AgentRunLog.id)).where(
-                AgentRunLog.run_id.in_(session_run_ids)
-            )
+            # 生产实证（2026-09-28 阿里云 PG）：max(uuid) 在 PostgreSQL 无原生聚合
+            # （SQLite 有——单测方言盲区）；id 统一 cast 文本再取 max，双方言一致。
+            select(
+                func.max(AgentRunLog.timestamp),
+                func.max(cast(AgentRunLog.id, String)),
+            ).where(AgentRunLog.run_id.in_(session_run_ids))
         )
     ).one()
     return (
