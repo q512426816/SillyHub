@@ -35,11 +35,21 @@ Then 行为符合本条标准描述
 ## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
 
 <!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest::test_manifest_files_inferred；test_manifest_merges_with_tasks_paths；TestLoadModuleMapMultiProjectMerge::test_frontend_path_matches_after_merge（多图合并为 FR-01 生效前置）
+
 
 <!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest::test_manifest_governance_only_yields_empty
+
 
 <!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest::test_manifest_malformed_json_skipped；test_manifest_files_not_list_skipped；test_module_impact_matrix_takes_priority（module-impact 优先回归）
+
 
 <!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest（6 用例）+ TestLoadModuleMapMultiProjectMerge（4 用例）——39/39 passed
+
 
 <!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/change/tests/test_parser.py 全量 39 passed；change 模块全量 607 passed + 2 skipped（既有跳过标记）
+
