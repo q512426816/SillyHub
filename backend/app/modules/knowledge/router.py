@@ -6,6 +6,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import require_permission
@@ -246,6 +247,36 @@ async def get_knowledge_stats(
     """知识运营指标：覆盖率(+8周趋势)/死条目(90天)/密度/生效速度 + 使用率榜。"""
     service = HitsService(session)
     return await service.stats(workspace_id)
+
+
+# ── 治理信号（2026-09-27-knowledge-governance-cards 三层治理②层平台出口）──────
+# 字面量路由必须在下方 GET /knowledge/{filename:path} 通配之前（声明顺序铁律，
+# 同 /knowledge/stats 先例）。从已同步 spec 内容根直接计算——rot 待复核/收件箱
+# 积压/伪域 auto-*，与 CLI `sillyspec knowledge digest` 同构；绑定类信号需仓
+# 工作树在场，留 CLI 侧。
+class GovernanceSignalOut(BaseModel):
+    kind: str
+    title: str
+    count: int
+    detail: str
+    suggestion: str
+
+
+class GovernanceOut(BaseModel):
+    healthy: bool
+    signals: list[GovernanceSignalOut]
+    totals: dict[str, int]
+
+
+@router.get("/knowledge/governance", response_model=GovernanceOut)
+async def get_knowledge_governance(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
+) -> GovernanceOut:
+    """知识治理信号：三类超阈才见人（安静即健康态）——前端知识 tab 信号卡数据源。"""
+    service = KnowledgeService(session)
+    return GovernanceOut(**await service.governance_signals(workspace_id))
 
 
 @router.get("/knowledge/{filename:path}", response_model=KnowledgeEntry)

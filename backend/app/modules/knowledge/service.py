@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from pathlib import Path
 
@@ -107,6 +108,16 @@ class KnowledgeService:
             details={"workspace_id": str(workspace_id), "filename": filename},
         )
 
+    # ── 治理信号（2026-09-27-knowledge-governance-cards）───────────────────────
+    # 三层治理②层的平台出口：从已同步 spec 内容根直接计算三类信号（rot 待复核/收件箱
+    # 积压/伪域 auto-*），与 CLI 侧 `sillyspec knowledge digest` 同构口径。绑定类信号
+    # 需仓工作树在场做文件存在性校验，留 CLI 侧（平台 spec 树无源码）。unmapped 大池
+    # 无 fr_unmapped_baseline 可读（local.yaml 不入同步集），只进 totals 不当警报。
+    async def governance_signals(self, workspace_id: uuid.UUID) -> dict:
+        workspace = await self._ws_service.get(workspace_id)
+        root = await self._spec_content_root(workspace)
+        return await asyncio.to_thread(_compute_governance_signals, root)
+
     async def list_quicklog(self, workspace_id: uuid.UUID) -> QuicklogList:
         workspace = await self._ws_service.get(workspace_id)
         root = await self._spec_content_root(workspace)
@@ -156,3 +167,93 @@ class KnowledgeService:
             content=e.content if include_content else None,
             last_modified_at=e.last_modified_at,
         )
+
+
+# ── 治理信号计算（模块级纯函数，2026-09-27-knowledge-governance-cards）────────
+# 与 CLI 侧 sillyspec knowledge digest 同构：rot 待复核行按域计数（阈 100）、
+# uncategorized.md 收件箱（阈 20）、auto-* 伪域条目（阈 0 恒报）。只读扫描，
+# 阈内静默（安静即健康态，防仪式化）。
+GOV_ROT_THRESHOLD = 100
+GOV_INBOX_THRESHOLD = 20
+
+
+def _compute_governance_signals(content_root: Path) -> dict:
+    fr_dir = content_root / "knowledge" / "fr"
+    rot_by_domain: dict[str, int] = {}
+    pseudo_by_domain: dict[str, int] = {}
+    totals = {"rot": 0, "inbox": 0, "pseudo": 0, "unmapped_pool": 0}
+
+    if fr_dir.is_dir():
+        for f in sorted(fr_dir.glob("*.md")):
+            domain = f.stem
+            text = f.read_text(encoding="utf-8", errors="replace")
+            rot = 0
+            entries = 0
+            for line in text.splitlines():
+                if line.startswith("## "):
+                    entries += 1
+                elif line.startswith("待复核："):
+                    rot += 1
+            if rot:
+                rot_by_domain[domain] = rot
+                totals["rot"] += rot
+            if domain.startswith("auto-") or domain.startswith("auto_"):
+                if entries:
+                    pseudo_by_domain[domain] = entries
+                    totals["pseudo"] += entries
+            elif domain == "unmapped":
+                totals["unmapped_pool"] = entries  # 大池只进 totals 不当警报（无基线可读）
+
+    inbox_titles: list[str] = []
+    unc = content_root / "knowledge" / "uncategorized.md"
+    if unc.is_file():
+        for line in unc.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.match(r"^## (.+)$", line)
+            if m:
+                inbox_titles.append(m.group(1).strip())
+        totals["inbox"] = len(inbox_titles)
+
+    signals: list[dict] = []
+
+    def _add(kind: str, title: str, count: int, detail: str, suggestion: str) -> None:
+        signals.append(
+            {
+                "kind": kind,
+                "title": title,
+                "count": count,
+                "detail": detail,
+                "suggestion": suggestion,
+            }
+        )
+
+    if totals["rot"] > GOV_ROT_THRESHOLD:
+        top = sorted(rot_by_domain.items(), key=lambda kv: -kv[1])[:5]
+        _add(
+            "rot",
+            f"rot 待复核批量标记（{totals['rot']} 条 > {GOV_ROT_THRESHOLD}）",
+            totals["rot"],
+            "、".join(f"{d} {n}" for d, n in top),
+            "批量复核：文案漂移类可批量承接，行为类逐条对账（sillyspec knowledge digest 同口径）",
+        )
+    if totals["inbox"] > GOV_INBOX_THRESHOLD:
+        _add(
+            "inbox",
+            f"知识收件箱积压（{totals['inbox']} 条 > {GOV_INBOX_THRESHOLD}）",
+            totals["inbox"],
+            "；".join(inbox_titles[:5]) + (" 等" if len(inbox_titles) > 5 else ""),
+            "sillyspec knowledge inbox 逐条 classify 清账",
+        )
+    if totals["pseudo"] > 0:
+        _add(
+            "pseudo-domain",
+            f"伪域在库（auto-* 共 {totals['pseudo']} 条）",
+            totals["pseudo"],
+            "、".join(f"{d} {n}" for d, n in sorted(pseudo_by_domain.items())),
+            "按交付路径建议域迁移（sillyspec knowledge digest 附建议；redomain 动作 v2）",
+        )
+
+    return {
+        "healthy": not signals,
+        "signals": signals,
+        "totals": totals,
+    }

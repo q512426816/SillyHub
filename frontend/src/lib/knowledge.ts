@@ -285,3 +285,31 @@ export async function getQuicklog(
     `/api/workspaces/${workspaceId}/quicklog/${encodeURIComponent(filename)}`,
   );
 }
+
+/**
+ * 知识治理信号（2026-09-27-knowledge-governance-cards 三层治理②层平台出口）：
+ * GET /knowledge/governance——三类信号（rot 待复核/收件箱积压/伪域 auto-*）超阈才见人。
+ * 类型本地声明（api-types.ts 带并行会话未提交改动、gen:types 守卫拦再生成——
+ * 该会话落地后可切换 components["schemas"] 生成式，形状与 backend GovernanceOut 一致）。
+ */
+export type GovernanceSignal = {
+  kind: string;
+  title: string;
+  count: number;
+  detail: string;
+  suggestion: string;
+};
+
+export type GovernanceOut = {
+  healthy: boolean;
+  signals: GovernanceSignal[];
+  totals: Record<string, number>;
+};
+
+export async function getKnowledgeGovernance(
+  workspaceId: string,
+): Promise<GovernanceOut> {
+  return apiFetch<GovernanceOut>(
+    `/api/workspaces/${workspaceId}/knowledge/governance`,
+  );
+}

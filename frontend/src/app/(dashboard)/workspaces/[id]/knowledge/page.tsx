@@ -59,6 +59,7 @@ import { MergeDialog } from "@/components/knowledge/merge-dialog";
 import { PrecipitateDialog } from "@/components/knowledge/precipitate-dialog";
 import { DistillHistoryDialog } from "@/components/knowledge/distill-history-dialog";
 import { OpsDashboard, knowledgeStatsQueryKey } from "@/components/knowledge/ops-dashboard";
+import { GovernanceCards } from "@/components/knowledge/governance-cards";
 import { Button } from "@/components/ui/button";
 import { FileNodeIcon } from "@/components/ui/file-node-icon";
 import { MarkdownText } from "@/components/ui/markdown-text";
@@ -514,6 +515,10 @@ export default function KnowledgePage({ params }: Props) {
           死条目内嵌清单 + 使用率榜全量；内部三态自理（加载/暂无使用数据/错误），
           不依赖知识列表加载态（stats 与列表是两条独立数据链）。 */}
       <OpsDashboard workspaceId={workspaceId} />
+
+      {/* 治理信号卡（2026-09-27-knowledge-governance-cards 三层治理②层）：三类信号
+          （待复核/收件箱/伪域）超阈才见人——安静即健康态；healthy 单行安语带底数。 */}
+      <GovernanceCards workspaceId={workspaceId} />
 
       {/* 蒸馏任务条（task-08 / 原型 .distill-bar 位）：无进行中任务时不渲染；
           任务完成经 onCompleted 重拉列表，候选出现在待审核区；D-010① merged_to
