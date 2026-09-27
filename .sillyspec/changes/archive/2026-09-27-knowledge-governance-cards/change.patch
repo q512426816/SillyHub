@@ -1,0 +1,756 @@
+diff --git a/.sillyspec/changes/2026-09-27-knowledge-governance-cards/design.md b/.sillyspec/changes/2026-09-27-knowledge-governance-cards/design.md
+new file mode 100644
+index 000000000..4a24c9373
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-knowledge-governance-cards/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T09:43:47.555Z
++---
++# 设计记录（Design Record）— 2026-09-27-knowledge-governance-cards
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-knowledge-governance-cards 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++三层治理②层的平台出口：backend knowledge 模块新增 GET /workspaces/{ws}/knowledge/governance（KNOWLEDGE_READ，字面量路由注册在 {filename:path} 通配之前——声明顺序铁律），service.governance_signals 经 asyncio.to_thread 调模块级纯函数 _compute_governance_signals 从已同步 spec 内容根直接扫描：fr/*.md 待复核行按域计数（阈 100）+ auto-* 伪域条目（阈 0 恒报）+ uncategorized.md 收件箱（阈 20）；unmapped 大池只进 totals 不当警报（local.yaml 不入同步集、无 fr_unmapped_baseline 可读——与 CLI digest 的口径差异，有意取舍）。绑定类信号留 CLI 侧（需仓工作树做文件存在性校验，平台 spec 树无源码）。frontend：GovernanceCards 组件（useQuery 消费 getKnowledgeGovernance，OpsDashboard stats 同款模式）挂知识 tab OpsDashboard 之下；healthy 单行安语带底数，超阈逐卡（kind 图标/计数/明细/处置 CLI 命令文案；动作回传 v2 走 merge/reject 同款 RPC）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-knowledge-governance-cards 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++新端点 GET /workspaces/{ws}/knowledge/governance → GovernanceOut{healthy,signals[{kind,title,count,detail,suggestion}],totals{rot,inbox,pseudo,unmapped_pool}}；前端 lib/knowledge.ts 增 getKnowledgeGovernance + GovernanceSignal/GovernanceOut 本地类型（api-types.ts 带并行会话未提交改动、gen:types 守卫拦再生成——本地声明过渡，形状与 backend 逐字一致，该会话落地后可切生成式）；知识页 OpsDashboard 下挂 <GovernanceCards workspaceId>。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-knowledge-governance-cards 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++乱序：信号每次请求现扫同步树，无缓存态。并发写：只读扫描零竞态；与 spec sync 并发时读到的是最后一次落盘的一致快照。切换/生命周期：healthy/超阈/加载/错误四态自理，不依赖知识列表加载态（与 stats 同为独立数据链）。作用域：spec 内容根按 _spec_content_root 既有解析（spec_root 优先、root_path/.sillyspec 兜底），跨工作区天然隔离。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-knowledge-governance-cards 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：与 CLI digest 的口径分叉（unmapped 基线消音平台侧没有、绑定信号缺失）——双出口数字可能不一致；缓解：unmapped 只进 totals 降展示级、绑定信号 CLI 独有已在两端注释与卡面处置文案交叉指引，v2 可经 daemon RPC 直采 CLI digest --json 收敛单源。次风险：伪域 v1 只读卡（迁移动作 CLI 手工）——动作回传 v2；阈值与 CLI 同值但两处字面量（跨仓无法单源），注释互指。放弃方案：daemon RPC 实时跑 CLI digest——正确终态但需 daemon+RPC 双端改造，v1 平台直算已解 3/4 信号可见性，性价比不对等。
+diff --git a/.sillyspec/changes/2026-09-27-knowledge-governance-cards/flow-state.yaml b/.sillyspec/changes/2026-09-27-knowledge-governance-cards/flow-state.yaml
+new file mode 100644
+index 000000000..3641065aa
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-knowledge-governance-cards/flow-state.yaml
+@@ -0,0 +1,17 @@
++tier: thick
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 4d340be72fb09d9a120c2f65a6416da45f4f293e
++updatedAt: '2026-09-27T10:08:12.108Z'
++upgrade_reason: verify 实测失败（实测失败：lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
++gate_summary: >-
++  test: passed ← module[]+deps(py25+jsx1)（97.9s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260927100759\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（12.3s）｜门文件 57 个
++
+diff --git a/.sillyspec/changes/2026-09-27-knowledge-governance-cards/proposal.md b/.sillyspec/changes/2026-09-27-knowledge-governance-cards/proposal.md
+new file mode 100644
+index 000000000..305934808
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-knowledge-governance-cards/proposal.md
+@@ -0,0 +1,39 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T09:43:47.554Z
++---
++# 提案书（Proposal）— 2026-09-27-knowledge-governance-cards
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:0be8b836687b35c81e9d791d88e20c3d8079653a26cf86899c8eaa29bc15e3cc:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-knowledge-governance-cards 留痕重锚 -->
++任务原话转写：知识资产治理三层设计出口（用户确认看平台）：CLI 侧 digest 已落（sillyspec 仓 2026-09-27-knowledge-digest），平台侧无消费面——rot 待复核/收件箱积压/伪域落库三类信号沉睡在已同步的 knowledge 树里，用户无页面可见。本件建平台侧信号卡。
++成功标准：
++- backend knowledge 模块新增 GET /workspaces/{ws}/knowledge/governance（KNOWLEDGE_READ）：从平台已同步 spec 内容根直接计算三类信号（rot 待复核行按域计数阈 100 / uncategorized.md 收件箱阈 20 / auto-*+unmapped 伪域条目阈 0——与 CLI digest 同构口径，绑定类信号留 CLI 侧因需仓工作树在场），返回 healthy/signals/totals
++- frontend 知识 tab 顶部新增治理信号卡区：healthy 一行安语、超阈逐卡（kind/计数/明细/处置指引——CLI 命令文案）；取数走既有 api 模式（react-query）
++- pytest 覆盖端点（三类信号 fixture + 阈内 healthy + 权限）+ vitest 组件测试（渲染/healthy/计数）
++- 显式 pathspec 提交，不夹带并行会话 staged 面
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:87b76baf796824a437fe7341c994e6144c5c208b0ff1638d0bc0e1e6bc3548e5:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-knowledge-governance-cards 留痕重锚 -->
++按成功标准机械推导，共 5 条验收面：
++1. backend knowledge 模块新增 GET /workspaces/{ws}/knowledge/governance（KNOWLEDGE_READ）：从平台已同步 spec 内容根直接计算三类信号（rot 待复核行按域计数阈 100 / uncategorized.md 收件箱阈 20 / auto-*+unmapped 伪域条目阈 0——与 CLI digest 同构口径，绑定类信号留 CLI 侧因需仓工作树在场），返回 healthy/signals/totals
++2. frontend 知识 tab 顶部新增治理信号卡区：healthy 一行安语、超阈逐卡（kind/计数/明细/处置指引——CLI 命令文案）
++3. 取数走既有 api 模式（react-query）
++4. pytest 覆盖端点（三类信号 fixture + 阈内 healthy + 权限）+ vitest 组件测试（渲染/healthy/计数）
++5. 显式 pathspec 提交，不夹带并行会话 staged 面
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:24cb94a00a6b19eac6a1417ef8d917da090ee1909b6a14e8e6149f65cd3d6d66:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-knowledge-governance-cards 留痕重锚 -->
++1. backend knowledge 模块新增 GET /workspaces/{ws}/knowledge/governance（KNOWLEDGE_READ）：从平台已同步 spec 内容根直接计算三类信号（rot 待复核行按域计数阈 100 / uncategorized.md 收件箱阈 20 / auto-*+unmapped 伪域条目阈 0——与 CLI digest 同构口径，绑定类信号留 CLI 侧因需仓工作树在场），返回 healthy/signals/totals
++2. frontend 知识 tab 顶部新增治理信号卡区：healthy 一行安语、超阈逐卡（kind/计数/明细/处置指引——CLI 命令文案）
++3. 取数走既有 api 模式（react-query）
++4. pytest 覆盖端点（三类信号 fixture + 阈内 healthy + 权限）+ vitest 组件测试（渲染/healthy/计数）
++5. 显式 pathspec 提交，不夹带并行会话 staged 面
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-09-27-knowledge-governance-cards/requirements.md b/.sillyspec/changes/2026-09-27-knowledge-governance-cards/requirements.md
+new file mode 100644
+index 000000000..8d8bf3808
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-knowledge-governance-cards/requirements.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T09:43:47.554Z
++---
++# 需求规格（Requirements）— 2026-09-27-knowledge-governance-cards
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: backend knowledge 模块新增 GET /workspaces/{ws}/knowle
++Given 系统就绪
++When backend knowledge 模块新增 GET /workspaces/{ws}/knowledge/governance（KNOWLEDGE_READ）
++Then 行为符合本条标准描述
++
++### FR-02: frontend 知识 tab 顶部新增治理信号卡区：healthy 一行安语、超阈逐卡（kind/
++Given 系统就绪
++When frontend 知识 tab 顶部新增治理信号卡区：healthy 一行安语、超阈逐卡（kind/计数/明细/处置指引——CLI 命令文案）
++Then 行为符合本条标准描述
++
++### FR-03: 取数走既有 api 模式（react-query）
++Given api 相关模块就绪
++When 取数走既有 api 模式（react-query）
++Then 行为符合本条标准描述
++
++### FR-04: pytest 覆盖端点（三类信号 fixture + 阈内 healthy + 权限）+ vites
++Given 端点 / 组件 / 测试 相关模块就绪
++When pytest 覆盖端点（三类信号 fixture + 阈内 healthy + 权限）+ vitest 组件测试（渲染/healthy/计数）
++Then 行为符合本条标准描述
++
++### FR-05: 显式 pathspec 提交，不夹带并行会话 staged 面
++Given 系统就绪
++When 显式 pathspec 提交，不夹带并行会话 staged 面
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/knowledge/tests/test_governance.py（端点三态：healthy/rot+inbox 超阈/伪域——4 用例含 401）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/knowledge/__tests__/governance-cards.test.tsx（healthy 安语带底数/超阈逐卡/失败降态——3 用例）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/knowledge/__tests__/governance-cards.test.tsx「超阈」用例（处置文案含 classify/sillyspec 命令）+ backend suggestion 字段断言
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/knowledge/tests/test_governance.py test_governance_rot_and_inbox_signals（阈 100/20 逐项）+ test_governance_healthy（阈内静默）
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：健康态语义属性——由 FR-04 的阈内静默用例覆盖（healthy=true 且 signals 空）
+diff --git a/.sillyspec/changes/2026-09-27-knowledge-governance-cards/tasks.md b/.sillyspec/changes/2026-09-27-knowledge-governance-cards/tasks.md
+new file mode 100644
+index 000000000..7945cbb8b
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-knowledge-governance-cards/tasks.md
+@@ -0,0 +1,15 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T09:43:47.555Z
++---
++# 任务注册表（Tasks）— 2026-09-27-knowledge-governance-cards
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: backend knowledge 模块新增 GET /workspaces/{ws}/knowledge/governance（KNOWLEDGE_READ）…
++- [x] task-02: frontend 知识 tab 顶部新增治理信号卡区：healthy 一行安语、超阈逐卡（kind/计数/明细/处置指引——CLI 命令文案）
++- [x] task-03: 取数走既有 api 模式（react-query）
++- [x] task-04: pytest 覆盖端点（三类信号 fixture + 阈内 healthy + 权限）+ vitest 组件测试（渲染/healthy/计数）
++- [x] task-05: 显式 pathspec 提交，不夹带并行会话 staged 面
+diff --git a/backend/app/modules/knowledge/router.py b/backend/app/modules/knowledge/router.py
+index a792a3f74..b501f37f4 100644
+--- a/backend/app/modules/knowledge/router.py
++++ b/backend/app/modules/knowledge/router.py
+@@ -6,6 +6,7 @@ import uuid
+ from typing import Annotated
+ 
+ from fastapi import APIRouter, Depends, status
++from pydantic import BaseModel
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.core.auth_deps import require_permission
+@@ -248,6 +249,36 @@ async def get_knowledge_stats(
+     return await service.stats(workspace_id)
+ 
+ 
++# ── 治理信号（2026-09-27-knowledge-governance-cards 三层治理②层平台出口）──────
++# 字面量路由必须在下方 GET /knowledge/{filename:path} 通配之前（声明顺序铁律，
++# 同 /knowledge/stats 先例）。从已同步 spec 内容根直接计算——rot 待复核/收件箱
++# 积压/伪域 auto-*，与 CLI `sillyspec knowledge digest` 同构；绑定类信号需仓
++# 工作树在场，留 CLI 侧。
++class GovernanceSignalOut(BaseModel):
++    kind: str
++    title: str
++    count: int
++    detail: str
++    suggestion: str
++
++
++class GovernanceOut(BaseModel):
++    healthy: bool
++    signals: list[GovernanceSignalOut]
++    totals: dict[str, int]
++
++
++@router.get("/knowledge/governance", response_model=GovernanceOut)
++async def get_knowledge_governance(
++    workspace_id: uuid.UUID,
++    session: SessionDep,
++    _user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
++) -> GovernanceOut:
++    """知识治理信号：三类超阈才见人（安静即健康态）——前端知识 tab 信号卡数据源。"""
++    service = KnowledgeService(session)
++    return GovernanceOut(**await service.governance_signals(workspace_id))
++
++
+ @router.get("/knowledge/{filename:path}", response_model=KnowledgeEntry)
+ async def get_knowledge(
+     workspace_id: uuid.UUID,
+diff --git a/backend/app/modules/knowledge/service.py b/backend/app/modules/knowledge/service.py
+index a509c765e..3a55ee120 100644
+--- a/backend/app/modules/knowledge/service.py
++++ b/backend/app/modules/knowledge/service.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+ 
+ import asyncio
++import re
+ import uuid
+ from pathlib import Path
+ 
+@@ -107,6 +108,16 @@ class KnowledgeService:
+             details={"workspace_id": str(workspace_id), "filename": filename},
+         )
+ 
++    # ── 治理信号（2026-09-27-knowledge-governance-cards）───────────────────────
++    # 三层治理②层的平台出口：从已同步 spec 内容根直接计算三类信号（rot 待复核/收件箱
++    # 积压/伪域 auto-*），与 CLI 侧 `sillyspec knowledge digest` 同构口径。绑定类信号
++    # 需仓工作树在场做文件存在性校验，留 CLI 侧（平台 spec 树无源码）。unmapped 大池
++    # 无 fr_unmapped_baseline 可读（local.yaml 不入同步集），只进 totals 不当警报。
++    async def governance_signals(self, workspace_id: uuid.UUID) -> dict:
++        workspace = await self._ws_service.get(workspace_id)
++        root = await self._spec_content_root(workspace)
++        return await asyncio.to_thread(_compute_governance_signals, root)
++
+     async def list_quicklog(self, workspace_id: uuid.UUID) -> QuicklogList:
+         workspace = await self._ws_service.get(workspace_id)
+         root = await self._spec_content_root(workspace)
+@@ -156,3 +167,93 @@ class KnowledgeService:
+             content=e.content if include_content else None,
+             last_modified_at=e.last_modified_at,
+         )
++
++
++# ── 治理信号计算（模块级纯函数，2026-09-27-knowledge-governance-cards）────────
++# 与 CLI 侧 sillyspec knowledge digest 同构：rot 待复核行按域计数（阈 100）、
++# uncategorized.md 收件箱（阈 20）、auto-* 伪域条目（阈 0 恒报）。只读扫描，
++# 阈内静默（安静即健康态，防仪式化）。
++GOV_ROT_THRESHOLD = 100
++GOV_INBOX_THRESHOLD = 20
++
++
++def _compute_governance_signals(content_root: Path) -> dict:
++    fr_dir = content_root / "knowledge" / "fr"
++    rot_by_domain: dict[str, int] = {}
++    pseudo_by_domain: dict[str, int] = {}
++    totals = {"rot": 0, "inbox": 0, "pseudo": 0, "unmapped_pool": 0}
++
++    if fr_dir.is_dir():
++        for f in sorted(fr_dir.glob("*.md")):
++            domain = f.stem
++            text = f.read_text(encoding="utf-8", errors="replace")
++            rot = 0
++            entries = 0
++            for line in text.splitlines():
++                if line.startswith("## "):
++                    entries += 1
++                elif line.startswith("待复核："):
++                    rot += 1
++            if rot:
++                rot_by_domain[domain] = rot
++                totals["rot"] += rot
++            if domain.startswith("auto-") or domain.startswith("auto_"):
++                if entries:
++                    pseudo_by_domain[domain] = entries
++                    totals["pseudo"] += entries
++            elif domain == "unmapped":
++                totals["unmapped_pool"] = entries  # 大池只进 totals 不当警报（无基线可读）
++
++    inbox_titles: list[str] = []
++    unc = content_root / "knowledge" / "uncategorized.md"
++    if unc.is_file():
++        for line in unc.read_text(encoding="utf-8", errors="replace").splitlines():
++            m = re.match(r"^## (.+)$", line)
++            if m:
++                inbox_titles.append(m.group(1).strip())
++        totals["inbox"] = len(inbox_titles)
++
++    signals: list[dict] = []
++
++    def _add(kind: str, title: str, count: int, detail: str, suggestion: str) -> None:
++        signals.append(
++            {
++                "kind": kind,
++                "title": title,
++                "count": count,
++                "detail": detail,
++                "suggestion": suggestion,
++            }
++        )
++
++    if totals["rot"] > GOV_ROT_THRESHOLD:
++        top = sorted(rot_by_domain.items(), key=lambda kv: -kv[1])[:5]
++        _add(
++            "rot",
++            f"rot 待复核批量标记（{totals['rot']} 条 > {GOV_ROT_THRESHOLD}）",
++            totals["rot"],
++            "、".join(f"{d} {n}" for d, n in top),
++            "批量复核：文案漂移类可批量承接，行为类逐条对账（sillyspec knowledge digest 同口径）",
++        )
++    if totals["inbox"] > GOV_INBOX_THRESHOLD:
++        _add(
++            "inbox",
++            f"知识收件箱积压（{totals['inbox']} 条 > {GOV_INBOX_THRESHOLD}）",
++            totals["inbox"],
++            "；".join(inbox_titles[:5]) + (" 等" if len(inbox_titles) > 5 else ""),
++            "sillyspec knowledge inbox 逐条 classify 清账",
++        )
++    if totals["pseudo"] > 0:
++        _add(
++            "pseudo-domain",
++            f"伪域在库（auto-* 共 {totals['pseudo']} 条）",
++            totals["pseudo"],
++            "、".join(f"{d} {n}" for d, n in sorted(pseudo_by_domain.items())),
++            "按交付路径建议域迁移（sillyspec knowledge digest 附建议；redomain 动作 v2）",
++        )
++
++    return {
++        "healthy": not signals,
++        "signals": signals,
++        "totals": totals,
++    }
+diff --git a/backend/app/modules/knowledge/tests/test_governance.py b/backend/app/modules/knowledge/tests/test_governance.py
+new file mode 100644
+index 000000000..c5ff725af
+--- /dev/null
++++ b/backend/app/modules/knowledge/tests/test_governance.py
+@@ -0,0 +1,120 @@
++"""治理信号端点（2026-09-27-knowledge-governance-cards 三层治理②层平台出口）。
++
++GET /workspaces/{ws}/knowledge/governance 从已同步 spec 内容根直接计算三类信号
++（rot 待复核/收件箱积压/伪域 auto-*），与 CLI 侧 `sillyspec knowledge digest`
++同构口径——阈内静默（安静即健康态），超阈逐卡。绑定类信号需仓工作树在场，
++留 CLI 侧（平台 spec 树无源码）。
++"""
++
++import shutil
++import uuid
++from pathlib import Path
++
++COMPONENT_FIXTURES = Path(__file__).parent.parent.parent / "change" / "tests" / "fixtures" / "valid"
++
++
++def _write_fr(root: Path, domain: str, entries: list[dict]) -> None:
++    fr_dir = root / "knowledge" / "fr"
++    fr_dir.mkdir(parents=True, exist_ok=True)
++    lines = ["---", "author: t", "---", "", f"# FR 索引 — {domain}", ""]
++    for e in entries:
++        lines.append(f"## FR-{domain}-{e['id']:03d} 条目")
++        lines.append("状态：active")
++        if e.get("review"):
++            lines.append(f"待复核：{e['review']}")
++        lines.append("")
++    (fr_dir / f"{domain}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
++
++
++async def _mk_ws(client, db_session, tmp_path, auth_headers, prepare) -> dict:
++    root = tmp_path / "gov-ws"
++    shutil.copytree(COMPONENT_FIXTURES, root)
++    (root / "knowledge").mkdir(parents=True, exist_ok=True)
++    (root / "knowledge" / "INDEX.md").write_text("# idx\n", encoding="utf-8")
++    prepare(root)
++    resp = await client.post(
++        "/api/workspaces",
++        json={"name": f"gov-{uuid.uuid4().hex[:6]}", "root_path": str(root), "type": "other"},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 201, resp.text
++    from sqlmodel import select
++
++    from app.modules.spec_workspace.model import SpecWorkspace
++
++    spec_ws = (
++        await db_session.execute(
++            select(SpecWorkspace).where(SpecWorkspace.workspace_id == uuid.UUID(resp.json()["id"]))
++        )
++    ).scalar_one()
++    spec_ws.spec_root = str(root)
++    await db_session.commit()
++    return {"ws_id": resp.json()["id"], "root": root}
++
++
++async def test_governance_healthy(client, db_session, tmp_path, auth_headers) -> None:
++    def prepare(root: Path) -> None:
++        _write_fr(root, "core", [{"id": 1, "review": "x"}])  # rot 1 < 100
++        (root / "knowledge" / "uncategorized.md").write_text(
++            "# U\n\n## a\n## b\n", encoding="utf-8"
++        )
++
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, prepare)
++    resp = await client.get(
++        f"/api/workspaces/{ws['ws_id']}/knowledge/governance", headers=auth_headers
++    )
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["healthy"] is True
++    assert body["signals"] == []
++    assert body["totals"]["rot"] == 1
++    assert body["totals"]["inbox"] == 2
++    assert body["totals"]["pseudo"] == 0
++
++
++async def test_governance_rot_and_inbox_signals(client, db_session, tmp_path, auth_headers) -> None:
++    def prepare(root: Path) -> None:
++        _write_fr(root, "cli", [{"id": i, "review": "x"} for i in range(1, 52)])  # 51 条 rot
++        _write_fr(root, "runtime", [{"id": i, "review": "x"} for i in range(1, 51)])  # 50 条
++        (root / "knowledge" / "uncategorized.md").write_text(
++            "# U\n\n" + "\n".join(f"## 条目{i}" for i in range(1, 23)), encoding="utf-8"
++        )  # 22 条 > 20
++
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, prepare)
++    resp = await client.get(
++        f"/api/workspaces/{ws['ws_id']}/knowledge/governance", headers=auth_headers
++    )
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["healthy"] is False
++    kinds = {s["kind"] for s in body["signals"]}
++    assert kinds == {"rot", "inbox"}
++    rot = next(s for s in body["signals"] if s["kind"] == "rot")
++    assert rot["count"] == 101
++    assert "cli 51" in rot["detail"] and "runtime 50" in rot["detail"]
++    inbox = next(s for s in body["signals"] if s["kind"] == "inbox")
++    assert inbox["count"] == 22
++    assert "classify" in inbox["suggestion"]
++
++
++async def test_governance_pseudo_domain_signal(client, db_session, tmp_path, auth_headers) -> None:
++    def prepare(root: Path) -> None:
++        _write_fr(root, "auto-backend", [{"id": 1}, {"id": 2}])
++        _write_fr(root, "unmapped", [{"id": i} for i in range(1, 4)])  # 大池只进 totals
++
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, prepare)
++    resp = await client.get(
++        f"/api/workspaces/{ws['ws_id']}/knowledge/governance", headers=auth_headers
++    )
++    body = resp.json()
++    assert body["healthy"] is False
++    pseudo = next(s for s in body["signals"] if s["kind"] == "pseudo-domain")
++    assert pseudo["count"] == 2
++    assert "auto-backend 2" in pseudo["detail"]
++    assert body["totals"]["unmapped_pool"] == 3  # unmapped 不当警报只进 totals
++    assert body["totals"]["pseudo"] == 2
++
++
++async def test_governance_requires_auth(client, db_session, tmp_path) -> None:
++    resp = await client.get(f"/api/workspaces/{uuid.uuid4()}/knowledge/governance")
++    assert resp.status_code == 401
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+index 85e260400..466ab32d1 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+@@ -59,6 +59,7 @@ import { MergeDialog } from "@/components/knowledge/merge-dialog";
+ import { PrecipitateDialog } from "@/components/knowledge/precipitate-dialog";
+ import { DistillHistoryDialog } from "@/components/knowledge/distill-history-dialog";
+ import { OpsDashboard, knowledgeStatsQueryKey } from "@/components/knowledge/ops-dashboard";
++import { GovernanceCards } from "@/components/knowledge/governance-cards";
+ import { Button } from "@/components/ui/button";
+ import { FileNodeIcon } from "@/components/ui/file-node-icon";
+ import { MarkdownText } from "@/components/ui/markdown-text";
+@@ -515,6 +516,10 @@ export default function KnowledgePage({ params }: Props) {
+           不依赖知识列表加载态（stats 与列表是两条独立数据链）。 */}
+       <OpsDashboard workspaceId={workspaceId} />
+ 
++      {/* 治理信号卡（2026-09-27-knowledge-governance-cards 三层治理②层）：三类信号
++          （待复核/收件箱/伪域）超阈才见人——安静即健康态；healthy 单行安语带底数。 */}
++      <GovernanceCards workspaceId={workspaceId} />
++
+       {/* 蒸馏任务条（task-08 / 原型 .distill-bar 位）：无进行中任务时不渲染；
+           任务完成经 onCompleted 重拉列表，候选出现在待审核区；D-010① merged_to
+           反链点击选中目标知识条目。 */}
+diff --git a/frontend/src/components/knowledge/__tests__/governance-cards.test.tsx b/frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
+new file mode 100644
+index 000000000..859d21021
+--- /dev/null
++++ b/frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
+@@ -0,0 +1,77 @@
++/**
++ * GovernanceCards 组件测试（2026-09-27-knowledge-governance-cards）。
++ * 三态：healthy 单行安语带底数；超阈逐卡（kind 图标/计数/明细/处置指引）；
++ * 加载/错误轻量态。数据链 getKnowledgeGovernance mock（useQuery 消费面契约）。
++ */
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { render, screen, waitFor } from "@testing-library/react";
++import { afterEach, expect, it, vi } from "vitest";
++import { GovernanceCards } from "@/components/knowledge/governance-cards";
++
++// 惯例（仿 distill-task-bar.test.tsx）：vi.hoisted + importActual 部分 mock
++const { mocked } = vi.hoisted(() => ({ mocked: vi.fn() }));
++vi.mock("@/lib/knowledge", async (importActual) => ({
++  ...(await importActual<typeof import("@/lib/knowledge")>()),
++  getKnowledgeGovernance: mocked,
++}));
++
++function renderCards() {
++  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
++  return render(
++    <QueryClientProvider client={qc}>
++      <GovernanceCards workspaceId="ws-1" />
++    </QueryClientProvider>,
++  );
++}
++
++afterEach(() => mocked.mockReset());
++
++it("healthy：单行安语 + 底数（unmapped 池在场才展示）", async () => {
++  mocked.mockResolvedValue({
++    healthy: true,
++    signals: [],
++    totals: { rot: 3, inbox: 5, pseudo: 0, unmapped_pool: 12 },
++  });
++  renderCards();
++  await waitFor(() =>
++    expect(screen.getByTestId("governance-cards").textContent).toContain("安静即健康态"),
++  );
++  expect(screen.getByTestId("governance-cards").textContent).toContain("rot 3");
++  expect(screen.getByTestId("governance-cards").textContent).toContain("unmapped 池 12");
++  expect(screen.queryByTestId("governance-card-rot")).toBeNull();
++});
++
++it("超阈：逐卡渲染 kind/计数/处置指引", async () => {
++  mocked.mockResolvedValue({
++    healthy: false,
++    signals: [
++      {
++        kind: "rot",
++        title: "rot 待复核批量标记（101 条 > 100）",
++        count: 101,
++        detail: "cli 51、runtime 50",
++        suggestion: "批量复核：文案漂移类可批量承接",
++      },
++      {
++        kind: "inbox",
++        title: "知识收件箱积压（39 条 > 20）",
++        count: 39,
++        detail: "install.sh 改动需重建 backend 镜像 等",
++        suggestion: "sillyspec knowledge inbox 逐条 classify 清账",
++      },
++    ],
++    totals: { rot: 101, inbox: 39, pseudo: 0 },
++  });
++  renderCards();
++  await waitFor(() => expect(screen.getByTestId("governance-card-rot")).toBeInTheDocument());
++  expect(screen.getByTestId("governance-card-rot").textContent).toContain("101");
++  expect(screen.getByTestId("governance-card-rot").textContent).toContain("cli 51");
++  expect(screen.getByTestId("governance-card-inbox").textContent).toContain("classify");
++  expect(screen.getByTestId("governance-cards").textContent).toContain("2 类治理信号超阈");
++});
++
++it("请求失败：轻量降态不渲染卡", async () => {
++  mocked.mockRejectedValue(new Error("boom"));
++  renderCards();
++  await waitFor(() => expect(screen.getByTestId("governance-cards").textContent).toContain("暂不可用"));
++});
+diff --git a/frontend/src/components/knowledge/governance-cards.tsx b/frontend/src/components/knowledge/governance-cards.tsx
+new file mode 100644
+index 000000000..ba177a488
+--- /dev/null
++++ b/frontend/src/components/knowledge/governance-cards.tsx
+@@ -0,0 +1,116 @@
++/**
++ * GovernanceCards — 知识治理信号卡（2026-09-27-knowledge-governance-cards）。
++ *
++ * 三层治理②层的平台出口：知识 tab 顶部信号卡区。数据链 useQuery 消费
++ * GET /knowledge/governance（getKnowledgeGovernance 封装，与 OpsDashboard
++ * stats 同款模式）。healthy 一行安语（安静即健康态，防仪式化）；超阈逐卡
++ * （kind/计数/明细/处置指引——CLI 命令文案，动作回传 v2 走 merge/reject 同款 RPC）。
++ */
++"use client";
++
++import { useQuery } from "@tanstack/react-query";
++import { AlertTriangle, Inbox, Map, Stethoscope } from "lucide-react";
++
++import {
++  getKnowledgeGovernance,
++  type GovernanceSignal,
++} from "@/lib/knowledge";
++import { cn } from "@/lib/utils";
++
++export const governanceQueryKey = (workspaceId: string) => [
++  "workspaces",
++  workspaceId,
++  "knowledge",
++  "governance",
++];
++
++const SIGNAL_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
++  rot: Stethoscope,
++  inbox: Inbox,
++  "pseudo-domain": Map,
++};
++
++const SIGNAL_LABELS: Record<string, string> = {
++  rot: "待复核批量标记",
++  inbox: "收件箱积压",
++  "pseudo-domain": "伪域在库",
++};
++
++function SignalCard({ signal }: { signal: GovernanceSignal }) {
++  const Icon = SIGNAL_ICONS[signal.kind] ?? AlertTriangle;
++  const label = SIGNAL_LABELS[signal.kind] ?? signal.kind;
++  return (
++    <div
++      data-testid={`governance-card-${signal.kind}`}
++      className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950/40"
++    >
++      <div className="flex items-center gap-2">
++        <Icon className="size-4 text-amber-600 dark:text-amber-400" />
++        <span className="text-sm font-medium">{label}</span>
++        <span className="ml-auto font-mono text-sm text-amber-700 dark:text-amber-300">
++          {signal.count}
++        </span>
++      </div>
++      {signal.detail ? (
++        <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground">{signal.detail}</p>
++      ) : null}
++      <p className="mt-1.5 text-xs text-muted-foreground">
++        处置：<span className="font-mono">{signal.suggestion}</span>
++      </p>
++    </div>
++  );
++}
++
++export function GovernanceCards({ workspaceId }: { workspaceId: string }) {
++  const { data, isLoading, isError } = useQuery({
++    queryKey: governanceQueryKey(workspaceId),
++    queryFn: () => getKnowledgeGovernance(workspaceId),
++  });
++
++  if (isLoading) {
++    return (
++      <section data-testid="governance-cards" className="text-xs text-muted-foreground">
++        治理信号加载中…
++      </section>
++    );
++  }
++  if (isError || !data) {
++    return (
++      <section data-testid="governance-cards" className="text-xs text-muted-foreground">
++        治理信号暂不可用
++      </section>
++    );
++  }
++
++  if (data.healthy) {
++    return (
++      <section
++        data-testid="governance-cards"
++        className={cn(
++          "rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-xs text-green-800",
++          "dark:border-green-800 dark:bg-green-950/40 dark:text-green-300",
++        )}
++      >
++        ✅ 治理信号全部在阈内（待复核/收件箱/伪域）——安静即健康态，无需动作
++        <span className="ml-2 font-mono text-[11px] text-muted-foreground">
++          底数：rot {data.totals.rot ?? 0}｜收件箱 {data.totals.inbox ?? 0}｜伪域{" "}
++          {data.totals.pseudo ?? 0}
++          {data.totals.unmapped_pool ? `｜unmapped 池 ${data.totals.unmapped_pool}` : ""}
++        </span>
++      </section>
++    );
++  }
++
++  return (
++    <section data-testid="governance-cards" className="space-y-2">
++      <p className="text-xs text-muted-foreground">
++        ⚠️ {data.signals.length} 类治理信号超阈（处置指引为 CLI 命令，动作回传 v2）：
++      </p>
++      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
++        {data.signals.map((s) => (
++          <SignalCard key={s.kind} signal={s} />
++        ))}
++      </div>
++    </section>
++  );
++}
+diff --git a/frontend/src/lib/knowledge.ts b/frontend/src/lib/knowledge.ts
+index c82d1d17d..8a82570a8 100644
+--- a/frontend/src/lib/knowledge.ts
++++ b/frontend/src/lib/knowledge.ts
+@@ -285,3 +285,31 @@ export async function getQuicklog(
+     `/api/workspaces/${workspaceId}/quicklog/${encodeURIComponent(filename)}`,
+   );
+ }
++
++/**
++ * 知识治理信号（2026-09-27-knowledge-governance-cards 三层治理②层平台出口）：
++ * GET /knowledge/governance——三类信号（rot 待复核/收件箱积压/伪域 auto-*）超阈才见人。
++ * 类型本地声明（api-types.ts 带并行会话未提交改动、gen:types 守卫拦再生成——
++ * 该会话落地后可切换 components["schemas"] 生成式，形状与 backend GovernanceOut 一致）。
++ */
++export type GovernanceSignal = {
++  kind: string;
++  title: string;
++  count: number;
++  detail: string;
++  suggestion: string;
++};
++
++export type GovernanceOut = {
++  healthy: boolean;
++  signals: GovernanceSignal[];
++  totals: Record<string, number>;
++};
++
++export async function getKnowledgeGovernance(
++  workspaceId: string,
++): Promise<GovernanceOut> {
++  return apiFetch<GovernanceOut>(
++    `/api/workspaces/${workspaceId}/knowledge/governance`,
++  );
++}

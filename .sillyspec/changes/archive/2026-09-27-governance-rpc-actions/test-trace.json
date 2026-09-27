@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-governance-rpc-actions",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-27-governance-rpc-actions:flow:FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/knowledge-governance-handler.test.ts「digest 成功」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-governance-rpc-actions"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-09-27-governance-rpc-actions:flow:FR-08",
+      "tests": [
+        "governance-cards.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-governance-rpc-actions"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "change": "2026-09-27-knowledge-governance-cards",
+  "baseline": "4d340be72fb09d9a120c2f65a6416da45f4f293e",
+  "head": "7b0158cef7c55f8c652a22ce8d8e25887fe31d57",
+  "files": [
+    ".sillyspec/changes/2026-09-27-knowledge-governance-cards/design.md",
+    ".sillyspec/changes/2026-09-27-knowledge-governance-cards/flow-state.yaml",
+    ".sillyspec/changes/2026-09-27-knowledge-governance-cards/proposal.md",
+    ".sillyspec/changes/2026-09-27-knowledge-governance-cards/requirements.md",
+    ".sillyspec/changes/2026-09-27-knowledge-governance-cards/tasks.md",
+    "backend/app/modules/knowledge/router.py",
+    "backend/app/modules/knowledge/service.py",
+    "backend/app/modules/knowledge/tests/test_governance.py",
+    "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx",
+    "frontend/src/components/knowledge/__tests__/governance-cards.test.tsx",
+    "frontend/src/components/knowledge/governance-cards.tsx",
+    "frontend/src/lib/knowledge.ts"
+  ],
+  "totals": {
+    "files": 12,
+    "additions": 642,
+    "deletions": 0
+  },
+  "savedAt": "2026-09-27T10:08:28.687Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "patchSha256": "49f309f8fa45b54aa5323683b80c5c157d2d1d78ab059449c2119a8d71e6e7c4",
+  "patchStatus": "ok"
+}

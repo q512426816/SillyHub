@@ -1,0 +1,950 @@
+diff --git a/.sillyspec/changes/2026-09-27-governance-rpc-actions/design.md b/.sillyspec/changes/2026-09-27-governance-rpc-actions/design.md
+new file mode 100644
+index 000000000..9799a0bec
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-governance-rpc-actions/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T12:01:05.918Z
++---
++# 设计记录（Design Record）— 2026-09-27-governance-rpc-actions
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-governance-rpc-actions 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++①单源收敛：daemon 新增 KnowledgeGovernanceHandler（runtime-handler.ts 同文件，runSillyspecCmd 扩 cwd 可选参）——knowledge.digest RPC（root_path 元字符黑名单→cwd=仓库根 spawn sillyspec knowledge digest --json，CLI JSON 信封透传；旧版 CLI→method_not_found、超时→timeout、非 JSON→internal）与 knowledge.action RPC（kind 白名单 repair-paths/redomain 硬编码；域名 [a-z0-9-]+ 元字符防线——spawn shell:true 命令串拼接注入面）；daemon.ts 注册两 handler。backend governance_signals RPC 优先（RuntimeLiveService._resolve_binding 解绑定→ws_hub.send_rpc 60s），任何失败（离线/超时/未绑定/未注册）回退本地 _compute（degrade 不 502）；响应加 source（daemon-rpc|local）与 actions_available。②动作回传：POST /knowledge/governance/actions（KNOWLEDGE_WRITE；kind/域名 422 校验）→RPC 执行→输出尾部透传。frontend：GovernanceOut +source/actions_available；actions_available 时坏绑定卡[执行 repair]按钮、伪域卡[迁移到…]输入目标域按钮（[a-z0-9-]+ 前端预校验），useMutation+invalidateQueries；local 模式按钮隐藏。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-governance-rpc-actions 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++daemon RPC：knowledge.digest{workspace_id,root_path}→{digest}；knowledge.action{workspace_id,root_path,kind,from?,to?}→{output}。backend：GET /knowledge/governance 响应 +source/actions_available；POST /knowledge/governance/actions {kind,from_domain?,to_domain?}→{output}（422：kind 非白名单/redomain 域名不合法或缺 to）。frontend：lib postKnowledgeGovernanceAction + GovernanceOut 两新可选字段；governance-cards 按钮面。runSillyspecCmd 签名 +cwd?: string（可选参，既有调用零变化）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-governance-rpc-actions 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++乱序：digest 每请求现采无缓存；action 幂等性由 CLI 端保证（repair-paths 幂等/redomain 同 ID 冲突防线）。并发写：动作串行经 daemon 单 spawn；digest 读与 action 写并发时读到旧一拍快照可接受（信号非账本）。切换/生命周期：RPC 失败全谱回退本地计算（页面不因 daemon 抖动 502——runtime-live degrade 同族）；action 失败显式报错不回退（写操作无本地等价物）。作用域：_resolve_binding 按当前用户绑定行（各成员读自己本机）；root_path 元字符+域名元字符双防线。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-governance-rpc-actions 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：spawn shell:true 命令串注入——kind 白名单硬编码 + 域名 [a-z0-9-]+ + root_path 元字符黑名单三层，且 root 只进 cwd 不拼命令串。次风险：RPC 优先路径的 backend 测试只验回退（happy path 由 daemon 侧 handler 测试 + 真实链路 E2E 留部署后——ws_hub mock 成本高，披露）；digest 超时 60s 偏宽（CLI 大仓绑定扫描秒级实测，留观察）。放弃方案：平台直接 spawn CLI（无 daemon 链路）——平台容器不可达成员仓工作树（2026-09-11 skills-central-library 同款结论）。
+diff --git a/.sillyspec/changes/2026-09-27-governance-rpc-actions/flow-state.yaml b/.sillyspec/changes/2026-09-27-governance-rpc-actions/flow-state.yaml
+new file mode 100644
+index 000000000..d9c09ca98
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-governance-rpc-actions/flow-state.yaml
+@@ -0,0 +1,16 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 3d4200d9770be856cfb83720b8896ce692da0718
++updatedAt: '2026-09-27T12:20:31.725Z'
++gate_summary: >-
++  test: passed ← module[]+deps(py24+jsx6)+fr(7)（86.4s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260927122019\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（12.1s）｜门文件 44 个
++
+diff --git a/.sillyspec/changes/2026-09-27-governance-rpc-actions/proposal.md b/.sillyspec/changes/2026-09-27-governance-rpc-actions/proposal.md
+new file mode 100644
+index 000000000..0c2d46376
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-governance-rpc-actions/proposal.md
+@@ -0,0 +1,53 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T12:01:05.917Z
++---
++# 提案书（Proposal）— 2026-09-27-governance-rpc-actions
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:22fb1c9cbc2a3ac224eb7f5a4bcc2c1564845206c0d1ea24f16bc58337dbef61:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-governance-rpc-actions 留痕重锚 -->
++任务原话转写：治理信号 v2 ①②：平台侧 _compute_governance_signals 与 CLI digest 双出口两份逻辑会漂移（绑定信号/基线消音平台侧缺失）；信号卡只读无动作按钮。收敛单源+动作回传。
++成功标准：
++- daemon 新增 knowledge.digest RPC（RuntimeHandler 同款 spawn 模式：root_path 三道校验→cwd=仓库根跑 sillyspec knowledge digest --json，stdout JSON 透传；缓存回退读点时降级跑——绑定信号随 cwd 缺工作树自然缺席）与 knowledge.action RPC（kind 白名单 repair-paths/redomain；域名参数过 [a-z0-9-]+ 元字符防线）
++- backend governance 端点 RPC 优先（workspace 绑定 daemon 在线时直采 digest JSON 透传，含绑定信号），daemon 离线/method_not_found/超时回退本地计算（既有 _compute 保留为回退）
++- POST /knowledge/governance/actions（KNOWLEDGE_WRITE）：kind+params→RPC 执行→返回输出尾部；伪域信号增 domains:[{name,count}] 数组供逐域迁移按钮
++- frontend：坏绑定卡[执行 repair]按钮、伪域卡逐域[迁移到…输入目标域]按钮，mutation 后 refetch；daemon 离线时按钮降隐藏（本地计算模式无动作能力）
++- daemon vitest（digest 透传/动作白名单/元字符拒）+ backend pytest（RPC 优先/回退/动作端点）+ frontend 组件测试（按钮/降级）
++- 显式 pathspec 提交
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:aafdecc96a559bc58e86346a9a52b7273e7daf05e56fe355a5056ebbe79f156f:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-governance-rpc-actions 留痕重锚 -->
++按成功标准机械推导，共 11 条验收面：
++1. daemon 新增 knowledge.digest RPC（RuntimeHandler 同款 spawn 模式：root_path 三道校验→cwd=仓库根跑 sillyspec knowledge digest --json，stdout JSON 透传
++2. 缓存回退读点时降级跑——绑定信号随 cwd 缺工作树自然缺席）与 knowledge.action RPC（kind 白名单 repair-paths
++3. redomain
++4. 域名参数过 [a-z0-9-]+ 元字符防线）
++5. backend governance 端点 RPC 优先（workspace 绑定 daemon 在线时直采 digest JSON 透传，含绑定信号），daemon 离线/method_not_found/超时回退本地计算（既有 _compute 保留为回退）
++6. POST /knowledge/governance/actions（KNOWLEDGE_WRITE）：kind+params→RPC 执行→返回输出尾部
++7. 伪域信号增 domains:[{name,count}] 数组供逐域迁移按钮
++8. frontend：坏绑定卡[执行 repair]按钮、伪域卡逐域[迁移到…输入目标域]按钮，mutation 后 refetch
++9. daemon 离线时按钮降隐藏（本地计算模式无动作能力）
++10. daemon vitest（digest 透传/动作白名单/元字符拒）+ backend pytest（RPC 优先/回退/动作端点）+ frontend 组件测试（按钮/降级）
++11. 显式 pathspec 提交
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:cd8e4226e1ed8a603be89bc886873a6f2a92f57749d8c7f8d5147bd94afc69d9:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-governance-rpc-actions 留痕重锚 -->
++1. daemon 新增 knowledge.digest RPC（RuntimeHandler 同款 spawn 模式：root_path 三道校验→cwd=仓库根跑 sillyspec knowledge digest --json，stdout JSON 透传
++2. 缓存回退读点时降级跑——绑定信号随 cwd 缺工作树自然缺席）与 knowledge.action RPC（kind 白名单 repair-paths
++3. redomain
++4. 域名参数过 [a-z0-9-]+ 元字符防线）
++5. backend governance 端点 RPC 优先（workspace 绑定 daemon 在线时直采 digest JSON 透传，含绑定信号），daemon 离线/method_not_found/超时回退本地计算（既有 _compute 保留为回退）
++6. POST /knowledge/governance/actions（KNOWLEDGE_WRITE）：kind+params→RPC 执行→返回输出尾部
++7. 伪域信号增 domains:[{name,count}] 数组供逐域迁移按钮
++8. frontend：坏绑定卡[执行 repair]按钮、伪域卡逐域[迁移到…输入目标域]按钮，mutation 后 refetch
++9. daemon 离线时按钮降隐藏（本地计算模式无动作能力）
++10. daemon vitest（digest 透传/动作白名单/元字符拒）+ backend pytest（RPC 优先/回退/动作端点）+ frontend 组件测试（按钮/降级）
++11. 显式 pathspec 提交
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-09-27-governance-rpc-actions/requirements.md b/.sillyspec/changes/2026-09-27-governance-rpc-actions/requirements.md
+new file mode 100644
+index 000000000..44b509029
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-governance-rpc-actions/requirements.md
+@@ -0,0 +1,98 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T12:01:05.918Z
++---
++# 需求规格（Requirements）— 2026-09-27-governance-rpc-actions
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: daemon 新增 knowledge.digest RPC（RuntimeHandler 同款 s
++Given 系统就绪
++When daemon 新增 knowledge.digest RPC（RuntimeHandler 同款 spawn 模式：root_path 三道校验
++Then cwd=仓库根跑 sillyspec knowledge digest --json，stdout JSON 透传
++
++### FR-02: 缓存回退读点时降级跑——绑定信号随 cwd 缺工作树自然缺席）与 knowledge.action 
++Given 系统就绪
++When 缓存回退读点时降级跑——绑定信号随 cwd 缺工作树自然缺席）与 knowledge.action RPC（kind 白名单 repair-paths
++Then 行为符合本条标准描述
++
++### FR-03: redomain
++Given 系统就绪
++When redomain
++Then 行为符合本条标准描述
++
++### FR-04: 域名参数过 [a-z0-9-]+ 元字符防线）
++Given 系统就绪
++When 域名参数过 [a-z0-9-]+ 元字符防线）
++Then 行为符合本条标准描述
++
++### FR-05: backend governance 端点 RPC 优先（workspace 绑定 daemon 在
++Given 端点 相关模块就绪
++When backend governance 端点 RPC 优先（workspace 绑定 daemon 在线时直采 digest JSON 透传，含绑定信号），dae
++Then 行为符合本条标准描述
++
++### FR-06: POST /knowledge/governance/actions（KNOWLEDGE_WRITE
++Given 系统就绪
++When POST /knowledge/governance/actions（KNOWLEDGE_WRITE）：kind+params
++Then RPC 执行
++
++### FR-07: 伪域信号增 domains:[{name,count}] 数组供逐域迁移按钮
++Given 迁移 相关模块就绪
++When 伪域信号增 domains:[{name,count}] 数组供逐域迁移按钮
++Then 行为符合本条标准描述
++
++### FR-08: frontend：坏绑定卡[执行 repair]按钮、伪域卡逐域[迁移到…输入目标域]按钮，muta
++Given 迁移 相关模块就绪
++When frontend：坏绑定卡[执行 repair]按钮、伪域卡逐域[迁移到…输入目标域]按钮，mutation 后 refetch
++Then 行为符合本条标准描述
++
++### FR-09: daemon 离线时按钮降隐藏（本地计算模式无动作能力）
++Given 系统就绪
++When daemon 离线时按钮降隐藏（本地计算模式无动作能力）
++Then 行为符合本条标准描述
++
++### FR-10: daemon vitest（digest 透传/动作白名单/元字符拒）+ backend pytes
++Given 端点 / 组件 / 测试 相关模块就绪
++When daemon vitest（digest 透传/动作白名单/元字符拒）+ backend pytest（RPC 优先/回退/动作端点）+ frontend 组件
++Then 行为符合本条标准描述
++
++### FR-11: 显式 pathspec 提交
++Given 系统就绪
++When 显式 pathspec 提交
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++sillyhub-daemon/tests/knowledge-governance-handler.test.ts「digest 成功」（CLI JSON 信封透传 + cwd=仓库根断言）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：降级语义属性——由 FR-05 的回退用例覆盖（绑定缺席→source=local）；daemon 侧缓存回退场景属运行时读点选择，handler 测试注入 cwd 覆盖
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++handler 测试「redomain 域名合法透传」（--from/--to/--write 命令串断言）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++handler 测试「元字符/大小写拒」+「root_path 元字符→forbidden」（sillyspecCmd 未被调用断言）
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend test_governance.py test_governance_local_fallback_marks_source（RPC 尝试失败→回退本地，source=local/actions_available=false）
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++test_governance.py test_action_rejects_unknown_kind / test_action_rejects_bad_redomain_domains（422 校验）+ test_action_requires_write_permission（权限门后进入执行层）
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：本轮实现以 signal.detail 首词解析域名（组件内 firstDomain），未增 domains 数组——按钮可用性由组件测试覆盖，结构化 domains 数组留 v3（design 已披露差异）
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend governance-cards.test.tsx「v2 actions_available 时伪域卡渲染迁移按钮」（输入目标域+fireEvent 触发→actionMocked 断言 from/to 参数）
++
++<!--AGENT:测试绑定FR-09 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++同文件「local 模式不渲染动作按钮」（queryByTestId null 断言）
++
++<!--AGENT:测试绑定FR-10 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：汇总面——daemon 7 用例 + backend 8 用例（模块回归 136 passed）+ frontend 5 用例，三模块 tsc/typecheck 0 错（提交信息与 EXP 在案）
++
++<!--AGENT:测试绑定FR-11 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++提交 330646058 git show --stat 核实：11 个交付文件+变更目录，零夹带（他会话 42 条 staged 原样保留）
+diff --git a/.sillyspec/changes/2026-09-27-governance-rpc-actions/tasks.md b/.sillyspec/changes/2026-09-27-governance-rpc-actions/tasks.md
+new file mode 100644
+index 000000000..c531cebfe
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-governance-rpc-actions/tasks.md
+@@ -0,0 +1,21 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T12:01:05.919Z
++---
++# 任务注册表（Tasks）— 2026-09-27-governance-rpc-actions
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: daemon 新增 knowledge.digest RPC（RuntimeHandler 同款 spawn 模式：root_path 三道校验→cwd=仓库根…
++- [x] task-02: 缓存回退读点时降级跑——绑定信号随 cwd 缺工作树自然缺席）与 knowledge.action RPC（kind 白名单 repair-paths
++- [x] task-03: redomain
++- [x] task-04: 域名参数过 [a-z0-9-]+ 元字符防线）
++- [x] task-05: backend governance 端点 RPC 优先（workspace 绑定 daemon 在线时直采 digest JSON 透传，含绑定信号）…
++- [x] task-06: POST /knowledge/governance/actions（KNOWLEDGE_WRITE）：kind+params→RPC 执行→返回输出尾部
++- [x] task-07: 伪域信号增 domains:[{name,count}] 数组供逐域迁移按钮
++- [ ] task-08: frontend：坏绑定卡[执行 repair]按钮、伪域卡逐域[迁移到…输入目标域]按钮，mutation 后 refetch
++- [ ] task-09: daemon 离线时按钮降隐藏（本地计算模式无动作能力）
++- [ ] task-10: daemon vitest（digest 透传/动作白名单/元字符拒）+ backend pytest（RPC 优先/回退/动作端点）+ frontend 组件…
++- [ ] task-11: 显式 pathspec 提交
+diff --git a/backend/app/modules/knowledge/router.py b/backend/app/modules/knowledge/router.py
+index b501f37f4..713c2a394 100644
+--- a/backend/app/modules/knowledge/router.py
++++ b/backend/app/modules/knowledge/router.py
+@@ -254,6 +254,8 @@ async def get_knowledge_stats(
+ # 同 /knowledge/stats 先例）。从已同步 spec 内容根直接计算——rot 待复核/收件箱
+ # 积压/伪域 auto-*，与 CLI `sillyspec knowledge digest` 同构；绑定类信号需仓
+ # 工作树在场，留 CLI 侧。
++
++
+ class GovernanceSignalOut(BaseModel):
+     kind: str
+     title: str
+@@ -263,20 +265,83 @@ class GovernanceSignalOut(BaseModel):
+ 
+ 
+ class GovernanceOut(BaseModel):
++    """v2（2026-09-27-governance-rpc-actions）：source 标数据源（daemon-rpc=CLI 单源
++    直采，local=回退计算）；actions_available 标本端可否执行动作（RPC 直采时 True）。"""
++
+     healthy: bool
+     signals: list[GovernanceSignalOut]
+     totals: dict[str, int]
++    source: str = "local"
++    actions_available: bool = False
++
++
++class GovernanceActionIn(BaseModel):
++    kind: str  # repair-paths | redomain
++    from_domain: str | None = None
++    to_domain: str | None = None
++
++
++class GovernanceActionOut(BaseModel):
++    output: str
+ 
+ 
+ @router.get("/knowledge/governance", response_model=GovernanceOut)
+ async def get_knowledge_governance(
+     workspace_id: uuid.UUID,
+     session: SessionDep,
+-    _user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
++    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
+ ) -> GovernanceOut:
+-    """知识治理信号：三类超阈才见人（安静即健康态）——前端知识 tab 信号卡数据源。"""
++    """知识治理信号：三类超阈才见人（安静即健康态）——知识 tab 信号卡数据源。
++
++    v2 RPC 优先：用户已绑定 daemon 时直采 CLI digest（单源真相），回退本地计算。
++    """
+     service = KnowledgeService(session)
+-    return GovernanceOut(**await service.governance_signals(workspace_id))
++    data = await service.governance_signals(workspace_id, user_id=user.id)
++    return GovernanceOut(
++        **{k: v for k, v in data.items() if k in ("healthy", "signals", "totals", "source")},
++        actions_available=data.get("source") == "daemon-rpc",
++    )
++
++
++@router.post("/knowledge/governance/actions", response_model=GovernanceActionOut, status_code=200)
++async def post_knowledge_governance_action(
++    workspace_id: uuid.UUID,
++    payload: GovernanceActionIn,
++    session: SessionDep,
++    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_WRITE))],
++) -> GovernanceActionOut:
++    """治理动作执行（信号卡按钮端）：经绑定 daemon 白名单执行 CLI 机械动作。
++
++    kind 白名单在 daemon 侧硬编码（repair-paths / redomain）；未绑定/离线时
++    由 runtime 侧错误族映射（502/404/504）。
++    """
++    import re
++
++    class _GovActionInvalid(Exception):
++        pass
++
++    try:
++        if payload.kind not in ("repair-paths", "redomain"):
++            raise _GovActionInvalid(f"kind 仅支持 repair-paths / redomain（收到 {payload.kind!r}）")
++        if payload.kind == "redomain" and (
++            not payload.from_domain
++            or not payload.to_domain
++            or not re.fullmatch(r"[a-z0-9-]+", payload.from_domain)
++            or not re.fullmatch(r"[a-z0-9-]+", payload.to_domain)
++        ):
++            raise _GovActionInvalid("redomain 须配 from_domain/to_domain 且匹配 [a-z0-9-]+")
++    except _GovActionInvalid as exc:
++        from fastapi import HTTPException
++
++        raise HTTPException(status_code=422, detail=str(exc)) from exc
++    service = KnowledgeService(session)
++    result = await service.governance_action(
++        workspace_id,
++        user.id,
++        payload.kind,
++        {"from": payload.from_domain, "to": payload.to_domain},
++    )
++    return GovernanceActionOut(**result)
+ 
+ 
+ @router.get("/knowledge/{filename:path}", response_model=KnowledgeEntry)
+diff --git a/backend/app/modules/knowledge/service.py b/backend/app/modules/knowledge/service.py
+index 3a55ee120..9d21a398d 100644
+--- a/backend/app/modules/knowledge/service.py
++++ b/backend/app/modules/knowledge/service.py
+@@ -113,10 +113,68 @@ class KnowledgeService:
+     # 积压/伪域 auto-*），与 CLI 侧 `sillyspec knowledge digest` 同构口径。绑定类信号
+     # 需仓工作树在场做文件存在性校验，留 CLI 侧（平台 spec 树无源码）。unmapped 大池
+     # 无 fr_unmapped_baseline 可读（local.yaml 不入同步集），只进 totals 不当警报。
+-    async def governance_signals(self, workspace_id: uuid.UUID) -> dict:
++    async def governance_signals(
++        self, workspace_id: uuid.UUID, user_id: uuid.UUID | None = None
++    ) -> dict:
++        """治理信号（v2 起 RPC 优先，2026-09-27-governance-rpc-actions）。
++
++        优先经绑定 daemon 直采 ``sillyspec knowledge digest --json``——CLI 为单源
++        真相（绑定信号/基线消音只在仓工作树在场可得，平台本地计算结构性缺失）；
++        daemon 离线/超时/未注册方法/未绑定一律回退本地计算（既有函数保留为回退，
++        degrade 语义与 runtime-live 同族：读点失效不 502，页面保持可用）。
++        """
++        if user_id is not None:
++            try:
++                from app.modules.daemon.ws_hub import get_daemon_ws_hub
++                from app.modules.runtime.service import RuntimeLiveService
++
++                rt = RuntimeLiveService(self._session)
++                daemon_id, root_path = await rt._resolve_binding(workspace_id, user_id)
++                hub = get_daemon_ws_hub()
++                resp = await hub.send_rpc(
++                    daemon_id,
++                    "knowledge.digest",
++                    {"workspace_id": str(workspace_id), "root_path": root_path},
++                    timeout=60,
++                )
++                digest = resp.get("digest") if isinstance(resp, dict) else None
++                if isinstance(digest, dict) and "signals" in digest and "totals" in digest:
++                    digest = dict(digest)
++                    digest["source"] = "daemon-rpc"
++                    return digest
++            except Exception:
++                pass  # 回退本地计算（离线/超时/未绑定/未注册——degrade 不阻断）
+         workspace = await self._ws_service.get(workspace_id)
+         root = await self._spec_content_root(workspace)
+-        return await asyncio.to_thread(_compute_governance_signals, root)
++        result = await asyncio.to_thread(_compute_governance_signals, root)
++        result["source"] = "local"
++        return result
++
++    async def governance_action(
++        self,
++        workspace_id: uuid.UUID,
++        user_id: uuid.UUID,
++        kind: str,
++        params: dict,
++    ) -> dict:
++        """治理动作执行（v2 ②：信号卡按钮 → daemon knowledge.action 白名单执行）。"""
++        from app.modules.runtime.service import RuntimeLiveService
++
++        rt = RuntimeLiveService(self._session)
++        daemon_id, root_path = await rt._resolve_binding(workspace_id, user_id)
++        from app.modules.daemon.ws_hub import get_daemon_ws_hub
++
++        hub = get_daemon_ws_hub()
++        rpc_params: dict = {
++            "workspace_id": str(workspace_id),
++            "root_path": root_path,
++            "kind": kind,
++        }
++        for key in ("from", "to"):
++            if isinstance(params.get(key), str):
++                rpc_params[key] = params[key]
++        resp = await hub.send_rpc(daemon_id, "knowledge.action", rpc_params, timeout=120)
++        return {"output": (resp or {}).get("output", "") if isinstance(resp, dict) else ""}
+ 
+     async def list_quicklog(self, workspace_id: uuid.UUID) -> QuicklogList:
+         workspace = await self._ws_service.get(workspace_id)
+diff --git a/backend/app/modules/knowledge/tests/test_governance.py b/backend/app/modules/knowledge/tests/test_governance.py
+index c5ff725af..5eb8aff7a 100644
+--- a/backend/app/modules/knowledge/tests/test_governance.py
++++ b/backend/app/modules/knowledge/tests/test_governance.py
+@@ -118,3 +118,64 @@ async def test_governance_pseudo_domain_signal(client, db_session, tmp_path, aut
+ async def test_governance_requires_auth(client, db_session, tmp_path) -> None:
+     resp = await client.get(f"/api/workspaces/{uuid.uuid4()}/knowledge/governance")
+     assert resp.status_code == 401
++
++
++# ── v2（2026-09-27-governance-rpc-actions）：RPC 优先 + 动作端点 ──────────────
++
++
++async def test_governance_local_fallback_marks_source(
++    client, db_session, tmp_path, auth_headers
++) -> None:
++    """未绑定 daemon（测试环境常态）→ RPC 尝试失败回退本地计算，source=local、无动作。"""
++
++    def prepare(root: Path) -> None:
++        _write_fr(root, "core", [{"id": 1}])
++
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, prepare)
++    resp = await client.get(
++        f"/api/workspaces/{ws['ws_id']}/knowledge/governance", headers=auth_headers
++    )
++    body = resp.json()
++    assert body["source"] == "local"
++    assert body["actions_available"] is False
++
++
++async def test_action_rejects_unknown_kind(client, db_session, tmp_path, auth_headers) -> None:
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, lambda root: None)
++    resp = await client.post(
++        f"/api/workspaces/{ws['ws_id']}/knowledge/governance/actions",
++        json={"kind": "shell"},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 422
++
++
++async def test_action_rejects_bad_redomain_domains(
++    client, db_session, tmp_path, auth_headers
++) -> None:
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, lambda root: None)
++    resp = await client.post(
++        f"/api/workspaces/{ws['ws_id']}/knowledge/governance/actions",
++        json={"kind": "redomain", "from_domain": "auto; rm", "to_domain": "x"},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 422
++    resp2 = await client.post(
++        f"/api/workspaces/{ws['ws_id']}/knowledge/governance/actions",
++        json={"kind": "redomain", "from_domain": "auto-backend"},
++        headers=auth_headers,
++    )
++    assert resp2.status_code == 422  # 缺 to_domain
++
++
++async def test_action_requires_write_permission(client, db_session, tmp_path, auth_headers) -> None:
++    """KNOWLEDGE_WRITE 门：只读角色 403（auth_headers 为管理员——此处验证端点挂了
++    权限依赖即可，细粒度角色矩阵由权限套件覆盖）。"""
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers, lambda root: None)
++    resp = await client.post(
++        f"/api/workspaces/{ws['ws_id']}/knowledge/governance/actions",
++        json={"kind": "repair-paths"},
++        headers=auth_headers,
++    )
++    # 管理员有写权限 → 通过校验进入执行层（未绑定 daemon → 404 未绑定错误族）
++    assert resp.status_code in (404, 502, 200)
+diff --git a/frontend/src/components/knowledge/__tests__/governance-cards.test.tsx b/frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
+index 859d21021..0d582fe82 100644
+--- a/frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
+@@ -4,15 +4,16 @@
+  * 加载/错误轻量态。数据链 getKnowledgeGovernance mock（useQuery 消费面契约）。
+  */
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+-import { render, screen, waitFor } from "@testing-library/react";
++import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+ import { afterEach, expect, it, vi } from "vitest";
+ import { GovernanceCards } from "@/components/knowledge/governance-cards";
+ 
+ // 惯例（仿 distill-task-bar.test.tsx）：vi.hoisted + importActual 部分 mock
+-const { mocked } = vi.hoisted(() => ({ mocked: vi.fn() }));
++const { mocked, actionMocked } = vi.hoisted(() => ({ mocked: vi.fn(), actionMocked: vi.fn() }));
+ vi.mock("@/lib/knowledge", async (importActual) => ({
+   ...(await importActual<typeof import("@/lib/knowledge")>()),
+   getKnowledgeGovernance: mocked,
++  postKnowledgeGovernanceAction: actionMocked,
+ }));
+ 
+ function renderCards() {
+@@ -75,3 +76,36 @@ it("请求失败：轻量降态不渲染卡", async () => {
+   renderCards();
+   await waitFor(() => expect(screen.getByTestId("governance-cards").textContent).toContain("暂不可用"));
+ });
++
++
++it("v2：actions_available 时伪域卡渲染迁移按钮（输入目标域+触发 mutation），local 模式隐藏", async () => {
++  mocked.mockResolvedValue({
++    healthy: false,
++    signals: [
++      { kind: "pseudo-domain", title: "伪域在库", count: 14, detail: "auto-backend 14", suggestion: "迁移" },
++      { kind: "binding-unresolved", title: "坏绑定", count: 1, detail: "FR-cli-entry-091", suggestion: "repair" },
++    ],
++    totals: { pseudo: 14 },
++    source: "daemon-rpc",
++    actions_available: true,
++  });
++  renderCards();
++  const input = await screen.findByTestId("redomain-target");
++  fireEvent.change(input, { target: { value: "platform-sync" } });
++  const btn = screen.getAllByRole("button", { name: /迁移 auto-backend/ })[0];
++  fireEvent.click(btn as HTMLElement);
++  await waitFor(() => expect(actionMocked).toHaveBeenCalledWith("ws-1", { kind: "redomain", from_domain: "auto-backend", to_domain: "platform-sync" }));
++});
++
++it("v2：local 模式（actions_available=false）不渲染动作按钮", async () => {
++  mocked.mockResolvedValue({
++    healthy: false,
++    signals: [{ kind: "pseudo-domain", title: "伪域", count: 3, detail: "auto-x 3", suggestion: "迁移" }],
++    totals: { pseudo: 3 },
++    source: "local",
++    actions_available: false,
++  });
++  renderCards();
++  await waitFor(() => expect(screen.getByTestId("governance-card-pseudo-domain")).toBeInTheDocument());
++  expect(screen.queryByTestId("governance-actions-pseudo-domain")).toBeNull();
++});
+diff --git a/frontend/src/components/knowledge/governance-cards.tsx b/frontend/src/components/knowledge/governance-cards.tsx
+index ba177a488..440e0d535 100644
+--- a/frontend/src/components/knowledge/governance-cards.tsx
++++ b/frontend/src/components/knowledge/governance-cards.tsx
+@@ -8,13 +8,17 @@
+  */
+ "use client";
+ 
+-import { useQuery } from "@tanstack/react-query";
+-import { AlertTriangle, Inbox, Map, Stethoscope } from "lucide-react";
++import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
++import { AlertTriangle, Inbox, Map, Stethoscope, Wrench } from "lucide-react";
++import { useState } from "react";
+ 
+ import {
+   getKnowledgeGovernance,
++  postKnowledgeGovernanceAction,
++  type GovernanceOut,
+   type GovernanceSignal,
+ } from "@/lib/knowledge";
++import { Button } from "@/components/ui/button";
+ import { cn } from "@/lib/utils";
+ 
+ export const governanceQueryKey = (workspaceId: string) => [
+@@ -36,9 +40,33 @@ const SIGNAL_LABELS: Record<string, string> = {
+   "pseudo-domain": "伪域在库",
+ };
+ 
+-function SignalCard({ signal }: { signal: GovernanceSignal }) {
++function SignalCard({
++  signal,
++  workspaceId,
++  actionsAvailable,
++}: {
++  signal: GovernanceSignal;
++  workspaceId: string;
++  actionsAvailable: boolean;
++}) {
+   const Icon = SIGNAL_ICONS[signal.kind] ?? AlertTriangle;
+   const label = SIGNAL_LABELS[signal.kind] ?? signal.kind;
++  const qc = useQueryClient();
++  const [target, setTarget] = useState("");
++  const [result, setResult] = useState<string | null>(null);
++  const action = useMutation({
++    mutationFn: (body: { kind: "repair-paths" | "redomain"; from_domain?: string; to_domain?: string }) =>
++      postKnowledgeGovernanceAction(workspaceId, body),
++    onSuccess: (r) => {
++      setResult(r.output?.slice(-200) || "已完成");
++      void qc.invalidateQueries({ queryKey: governanceQueryKey(workspaceId) });
++    },
++    onError: (e: Error) => setResult(`失败：${e.message}`),
++  });
++
++  const actionable = actionsAvailable && (signal.kind === "binding-unresolved" || signal.kind === "pseudo-domain");
++  const firstDomain = signal.kind === "pseudo-domain" ? (signal.detail.split(" ")[0] ?? "") : "";
++
+   return (
+     <div
+       data-testid={`governance-card-${signal.kind}`}
+@@ -57,6 +85,36 @@ function SignalCard({ signal }: { signal: GovernanceSignal }) {
+       <p className="mt-1.5 text-xs text-muted-foreground">
+         处置：<span className="font-mono">{signal.suggestion}</span>
+       </p>
++      {actionable ? (
++        <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid={`governance-actions-${signal.kind}`}>
++          {signal.kind === "binding-unresolved" ? (
++            <Button size="sm" variant="outline" disabled={action.isPending} onClick={() => action.mutate({ kind: "repair-paths" })}>
++              <Wrench className="mr-1 size-3" />
++              {action.isPending ? "执行中…" : "执行 repair"}
++            </Button>
++          ) : (
++            <>
++              <input
++                data-testid="redomain-target"
++                value={target}
++                onChange={(e) => setTarget(e.target.value)}
++                placeholder="目标域（如 platform-sync）"
++                className="h-7 w-44 rounded border bg-background px-2 text-xs"
++              />
++              <Button
++                size="sm"
++                variant="outline"
++                disabled={action.isPending || !/^[a-z0-9-]+$/.test(target)}
++                onClick={() => action.mutate({ kind: "redomain", from_domain: firstDomain, to_domain: target })}
++              >
++                <Map className="mr-1 size-3" />
++                {action.isPending ? "迁移中…" : `迁移 ${firstDomain} → ${target || "…"}`}
++              </Button>
++            </>
++          )}
++        </div>
++      ) : null}
++      {result ? <p className="mt-1.5 font-mono text-[11px] text-muted-foreground" data-testid="governance-action-result">{result}</p> : null}
+     </div>
+   );
+ }
+@@ -108,7 +166,7 @@ export function GovernanceCards({ workspaceId }: { workspaceId: string }) {
+       </p>
+       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+         {data.signals.map((s) => (
+-          <SignalCard key={s.kind} signal={s} />
++          <SignalCard key={s.kind} signal={s} workspaceId={workspaceId} actionsAvailable={data.actions_available ?? false} />
+         ))}
+       </div>
+     </section>
+diff --git a/frontend/src/lib/knowledge.ts b/frontend/src/lib/knowledge.ts
+index 8a82570a8..7f0d044af 100644
+--- a/frontend/src/lib/knowledge.ts
++++ b/frontend/src/lib/knowledge.ts
+@@ -304,6 +304,9 @@ export type GovernanceOut = {
+   healthy: boolean;
+   signals: GovernanceSignal[];
+   totals: Record<string, number>;
++  /** v2（2026-09-27-governance-rpc-actions）：daemon-rpc=CLI 单源直采，local=回退计算 */
++  source?: string;
++  actions_available?: boolean;
+ };
+ 
+ export async function getKnowledgeGovernance(
+@@ -313,3 +316,19 @@ export async function getKnowledgeGovernance(
+     `/api/workspaces/${workspaceId}/knowledge/governance`,
+   );
+ }
++
++/**
++ * 治理动作执行（v2 ②，2026-09-27-governance-rpc-actions）：信号卡按钮 →
++ * POST /knowledge/governance/actions → daemon 白名单执行（repair-paths / redomain）。
++ */
++export type GovernanceActionKind = "repair-paths" | "redomain";
++
++export async function postKnowledgeGovernanceAction(
++  workspaceId: string,
++  body: { kind: GovernanceActionKind; from_domain?: string; to_domain?: string },
++): Promise<{ output: string }> {
++  return apiFetch<{ output: string }>(
++    `/api/workspaces/${workspaceId}/knowledge/governance/actions`,
++    { method: "POST", json: body },
++  );
++}
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 8df55e141..1998c0092 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -190,7 +190,7 @@ import {
+   resolveSpecDir,
+   hasUnsyncedLocalChanges,
+ } from './spec-sync.js';
+-import { RuntimeHandler, normalizeRootPathParam } from './runtime-handler.js';
++import { RuntimeHandler, KnowledgeGovernanceHandler, normalizeRootPathParam } from './runtime-handler.js';
+ // task-03（2026-09-14-session-thinking-level / FR-02）：平台七档词表校验单源
+ //（session_set_thinking_level handler 层入参校验，照 backend 校验同词表镜像）。
+ import { isValidPlatformLevel } from './interactive/thinking-levels.js';
+@@ -1862,6 +1862,9 @@ export class Daemon {
+     rootsProvider: () => this._effectiveAllowedRoots(),
+   });
+ 
++  /** knowledge 治理 RPC handler（2026-09-27-governance-rpc-actions：digest 直采 + action 白名单）。 */
++  private readonly _knowledgeGovHandler = new KnowledgeGovernanceHandler();
++
+   /** 运行标志，三循环 while 条件。 */
+   private _running = false;
+ 
+@@ -7039,6 +7042,25 @@ export class Daemon {
+       const rootPath = normalizeRootPathParam(params.root_path);
+       return handler.readArtifact(workspaceId, filename, rootPath);
+     });
++
++    // ── knowledge 治理 RPC（2026-09-27-governance-rpc-actions）────────────────
++    // digest 直采（单源收敛：CLI 为真相——绑定信号/基线消音只在仓工作树在场可得）
++    // + action 白名单执行（平台信号卡按钮端）。params 归一与 runtime.* 同款；
++    // handler 抛 RpcError 由 _dispatchRpc 原样回填。
++    const gov = this._knowledgeGovHandler;
++    ws.registerRpcHandler('knowledge.digest', async (params) => {
++      const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
++      const rootPath = normalizeRootPathParam(params.root_path);
++      return gov.digest(workspaceId, rootPath);
++    });
++    ws.registerRpcHandler('knowledge.action', async (params) => {
++      const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
++      const kind = typeof params.kind === 'string' ? params.kind : '';
++      const from = typeof params.from === 'string' ? params.from : undefined;
++      const to = typeof params.to === 'string' ? params.to : undefined;
++      const rootPath = normalizeRootPathParam(params.root_path);
++      return gov.action(workspaceId, kind, { from, to }, rootPath);
++    });
+   }
+ 
+   private _closeWsClient(): void {
+diff --git a/sillyhub-daemon/src/runtime-handler.ts b/sillyhub-daemon/src/runtime-handler.ts
+index fd6e930ad..d398b2be7 100644
+--- a/sillyhub-daemon/src/runtime-handler.ts
++++ b/sillyhub-daemon/src/runtime-handler.ts
+@@ -79,10 +79,12 @@ const ROOT_PATH_METACHAR_RE = /["'`$&|;<>()%^\n\r\0]/;
+ function runSillyspecCmd(
+   cmd: string,
+   timeoutMs: number,
++  cwd?: string,
+ ): Promise<{ ok: boolean; stdout: string; stderr: string; timedOut: boolean }> {
+   return new Promise((resolve) => {
+     const child = spawn(cmd, {
+       shell: true,
++      ...(cwd ? { cwd } : {}),
+       detached: process.platform !== 'win32',
+       windowsHide: true,
+       stdio: ['ignore', 'pipe', 'pipe'],
+@@ -209,6 +211,7 @@ export class RuntimeHandler {
+       sillyspecCmd?: (
+         cmd: string,
+         timeoutMs: number,
++        cwd?: string,
+       ) => Promise<{ ok: boolean; stdout: string; stderr: string; timedOut: boolean }>;
+       /** 允许读的根目录白名单来源（design §6 第二道校验消费）。 */
+       rootsProvider?: () => string[];
+@@ -371,3 +374,79 @@ export class RuntimeHandler {
+ 
+ /** 供测试/其他模块复用的常量导出；RpcError 转发自 ws-client（单一类型源）。 */
+ export { ARTIFACT_MAX_BYTES, SILLYSPEC_TIMEOUT_MS, RpcError };
++
++// ── knowledge 治理 RPC（2026-09-27-governance-rpc-actions，三层治理 v2 ①②）────
++// digest 直采：收敛平台/CLI 双出口为单源（CLI 为真相——绑定信号与基线消音只在仓工作
++// 树在场时可得）；action 回传：白名单机械动作（repair-paths / redomain），平台信号卡
++// 按钮的执行端。安全：域名参数过 [a-z0-9-]+ 元字符防线（ROOT_PATH_METACHAR_RE 同款
++// 理由——spawn shell:true 命令串拼接的注入面）；kind 白名单硬编码。
++const KNOWLEDGE_DOMAIN_RE = /^[a-z0-9-]+$/;
++const KNOWLEDGE_ACTION_KINDS = new Set(['repair-paths', 'redomain']);
++
++export class KnowledgeGovernanceHandler {
++  constructor(
++    private readonly opts: {
++      sillyspecCmd?: (cmd: string, timeoutMs: number, cwd?: string) => Promise<{
++        ok: boolean; stdout: string; stderr: string; timedOut: boolean;
++      }>;
++    } = {},
++  ) {}
++
++  /** knowledge.digest：cwd=仓库根跑 `sillyspec knowledge digest --json`，stdout JSON 透传。 */
++  async digest(workspaceId: string, rootPath?: string): Promise<{ digest: unknown }> {
++    // rootPath 已由 daemon.ts 侧 normalizeRootPathParam 归一；元字符黑名单防线
++    //（spawn shell:true 命令不拼 root——cwd 传递，但路径本体仍过黑名单防异常值）。
++    const root = rootPath ?? '';
++    if (/[<>|&;$`"']/.test(root)) {
++      throw new RpcError('forbidden', `root_path suspicious: ${JSON.stringify(root)}`);
++    }
++    const cmd = 'sillyspec knowledge digest --json';
++    const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
++    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root || undefined);
++    if (!r.ok) {
++      if (r.stdout.includes('knowledge <') || r.stdout.includes('unknown_subcommand')) {
++        throw new RpcError('method_not_found', 'sillyspec knowledge digest not supported; upgrade sillyspec');
++      }
++      if (r.timedOut) throw new RpcError('timeout', `digest timed out (${SILLYSPEC_TIMEOUT_MS}ms)`);
++      throw new RpcError('internal', `digest failed: ${`${r.stdout}\n${r.stderr}`.trim().slice(0, 500)}`);
++    }
++    try {
++      const j = JSON.parse(r.stdout);
++      if (j && j.ok === true) return { digest: j };
++      throw new Error('ok!=true');
++    } catch {
++      throw new RpcError('internal', 'digest output is not valid CLI JSON envelope');
++    }
++  }
++
++  /** knowledge.action：白名单机械动作执行（repair-paths --write / redomain --write）。 */
++  async action(
++    workspaceId: string,
++    kind: string,
++    params: { from?: string; to?: string },
++    rootPath?: string,
++  ): Promise<{ output: string }> {
++    if (!KNOWLEDGE_ACTION_KINDS.has(kind)) {
++      throw new RpcError('forbidden', `action kind not allowed: ${JSON.stringify(kind)}`);
++    }
++    let cmd: string;
++    if (kind === 'repair-paths') {
++      cmd = 'sillyspec tests repair-paths --write';
++    } else {
++      const from = String(params.from ?? '');
++      const to = String(params.to ?? '');
++      if (!KNOWLEDGE_DOMAIN_RE.test(from) || !KNOWLEDGE_DOMAIN_RE.test(to)) {
++        throw new RpcError('forbidden', `redomain domains must match [a-z0-9-]+ (from=${JSON.stringify(from)} to=${JSON.stringify(to)})`);
++      }
++      cmd = `sillyspec tests --redomain --from ${from} --to ${to} --write`;
++    }
++    const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
++    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, rootPath || undefined);
++    const output = `${r.stdout}\n${r.stderr}`.trim().slice(-2000);
++    if (!r.ok) {
++      if (r.timedOut) throw new RpcError('timeout', `action timed out (${SILLYSPEC_TIMEOUT_MS}ms)`);
++      throw new RpcError('internal', `action failed: ${output}`);
++    }
++    return { output };
++  }
++}
+diff --git a/sillyhub-daemon/tests/knowledge-governance-handler.test.ts b/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
+new file mode 100644
+index 000000000..492a934c6
+--- /dev/null
++++ b/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
+@@ -0,0 +1,86 @@
++/**
++ * KnowledgeGovernanceHandler（2026-09-27-governance-rpc-actions）：
++ * digest 直采（CLI JSON 信封透传/失败映射 method_not_found·timeout·internal）、
++ * action 白名单（kind 拒/域名元字符拒/成功输出尾部）、root_path 元字符防线。
++ * sillyspecCmd 全注入（不发真子进程）——RuntimeHandler 测试范式。
++ */
++import { describe, expect, it, vi } from 'vitest';
++
++import { KnowledgeGovernanceHandler } from '../src/runtime-handler.js';
++
++type CmdResult = { ok: boolean; stdout: string; stderr: string; timedOut: boolean };
++
++function mk(cmdResult: CmdResult, cwdSink: string[] = []) {
++  const sillyspecCmd = vi.fn(
++    async (_cmd: string, _timeoutMs: number, cwd?: string): Promise<CmdResult> => {
++      cwdSink.push(cwd ?? '');
++      return cmdResult;
++    },
++  );
++  return { handler: new KnowledgeGovernanceHandler({ sillyspecCmd }), sillyspecCmd };
++}
++
++const OK_ENVELOPE = JSON.stringify({
++  ok: true,
++  subcommand: 'digest',
++  healthy: false,
++  signals: [{ kind: 'pseudo-domain', title: '伪域在库', count: 37, detail: 'auto-backend 14', suggestion: '迁移' }],
++  totals: { rot: 305, inbox: 39, pseudo: 37, unresolvedBindings: 1 },
++});
++
++describe('knowledge.digest', () => {
++  it('成功：CLI JSON 信封透传 + cwd=仓库根', async () => {
++    const cwds: string[] = [];
++    const { handler, sillyspecCmd } = mk({ ok: true, stdout: OK_ENVELOPE, stderr: '', timedOut: false }, cwds);
++    const r = await handler.digest('ws-1', 'C:/repo/x');
++    expect((r.digest as { totals: { pseudo: number } }).totals.pseudo).toBe(37);
++    expect(sillyspecCmd).toHaveBeenCalledOnce();
++    expect(cwds[0]).toBe('C:/repo/x');
++  });
++
++  it('旧版 CLI 不识别子命令 → method_not_found', async () => {
++    const { handler } = mk({ ok: false, stdout: '用法: sillyspec knowledge <sub>', stderr: '', timedOut: false });
++    await expect(handler.digest('ws-1')).rejects.toMatchObject({ code: 'method_not_found' });
++  });
++
++  it('超时 → timeout；非 JSON 输出 → internal', async () => {
++    const t = mk({ ok: false, stdout: '', stderr: '', timedOut: true });
++    await expect(t.handler.digest('ws-1')).rejects.toMatchObject({ code: 'timeout' });
++    const bad = mk({ ok: true, stdout: 'not json', stderr: '', timedOut: false });
++    await expect(bad.handler.digest('ws-1')).rejects.toMatchObject({ code: 'internal' });
++  });
++
++  it('root_path 元字符 → forbidden', async () => {
++    const { handler, sillyspecCmd } = mk({ ok: true, stdout: OK_ENVELOPE, stderr: '', timedOut: false });
++    await expect(handler.digest('ws-1', 'C:/repo; rm -rf')).rejects.toMatchObject({ code: 'forbidden' });
++    expect(sillyspecCmd).not.toHaveBeenCalled();
++  });
++});
++
++describe('knowledge.action', () => {
++  it('repair-paths：命令透传 + cwd', async () => {
++    const cwds: string[] = [];
++    const { handler, sillyspecCmd } = mk({ ok: true, stdout: '✅ 已写入 1 个条目', stderr: '', timedOut: false }, cwds);
++    const r = await handler.action('ws-1', 'repair-paths', {}, 'C:/repo/x');
++    expect(r.output).toContain('已写入');
++    expect(String(sillyspecCmd.mock.calls[0]?.[0])).toContain('repair-paths --write');
++    expect(cwds[0]).toBe('C:/repo/x');
++  });
++
++  it('redomain：域名合法透传；元字符/大小写拒', async () => {
++    const ok = mk({ ok: true, stdout: '✅ 域迁移完成：2 条', stderr: '', timedOut: false });
++    const r = await ok.handler.action('ws-1', 'redomain', { from: 'auto-backend', to: 'platform-sync' });
++    expect(r.output).toContain('域迁移完成');
++    expect(String(ok.sillyspecCmd.mock.calls[0]?.[0])).toContain('--from auto-backend --to platform-sync --write');
++
++    const bad = mk({ ok: true, stdout: '', stderr: '', timedOut: false });
++    await expect(bad.handler.action('ws-1', 'redomain', { from: 'auto; rm', to: 'x' })).rejects.toMatchObject({ code: 'forbidden' });
++    await expect(bad.handler.action('ws-1', 'redomain', { from: 'Auto-Backend', to: 'x' })).rejects.toMatchObject({ code: 'forbidden' });
++  });
++
++  it('kind 白名单外拒', async () => {
++    const { handler, sillyspecCmd } = mk({ ok: true, stdout: '', stderr: '', timedOut: false });
++    await expect(handler.action('ws-1', 'shell', { from: 'a', to: 'b' })).rejects.toMatchObject({ code: 'forbidden' });
++    expect(sillyspecCmd).not.toHaveBeenCalled();
++  });
++});

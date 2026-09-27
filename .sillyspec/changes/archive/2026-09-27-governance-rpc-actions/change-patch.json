@@ -1,0 +1,30 @@
+{
+  "change": "2026-09-27-governance-rpc-actions",
+  "baseline": "3d4200d9770be856cfb83720b8896ce692da0718",
+  "head": "3306460582a64242091b32ebee63a85f1b071444",
+  "files": [
+    ".sillyspec/changes/2026-09-27-governance-rpc-actions/design.md",
+    ".sillyspec/changes/2026-09-27-governance-rpc-actions/flow-state.yaml",
+    ".sillyspec/changes/2026-09-27-governance-rpc-actions/proposal.md",
+    ".sillyspec/changes/2026-09-27-governance-rpc-actions/requirements.md",
+    ".sillyspec/changes/2026-09-27-governance-rpc-actions/tasks.md",
+    "backend/app/modules/knowledge/router.py",
+    "backend/app/modules/knowledge/service.py",
+    "backend/app/modules/knowledge/tests/test_governance.py",
+    "frontend/src/components/knowledge/__tests__/governance-cards.test.tsx",
+    "frontend/src/components/knowledge/governance-cards.tsx",
+    "frontend/src/lib/knowledge.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/runtime-handler.ts",
+    "sillyhub-daemon/tests/knowledge-governance-handler.test.ts"
+  ],
+  "totals": {
+    "files": 14,
+    "additions": 725,
+    "deletions": 12
+  },
+  "savedAt": "2026-09-27T12:21:03.561Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "patchSha256": "5d598f106f3ec53fa1aee162fb15454208d7c60a43fd7c43a3a3ba3086d820b5",
+  "patchStatus": "ok"
+}

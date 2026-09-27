@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-knowledge-governance-cards",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "两处解析口径细节宽于 CLI digest 且未列入披露清单——「同构口径」实为近似",
+      "evidence": "平台条目计数认任意 '## ' 段头（service.py:193 `line.startswith(\"## \")`），CLI 仅认严格 FR 段头格式（sillyspec src/knowledge-digest.js:44 `/^## (FR-[\\w.-]+-\\d+|FR-\\d+)/`）；平台「待复核：」行不限位置计数（service.py:195），CLI 仅计条目段内（knowledge-digest.js:45-48 `if (cur)` 门）。伪域/rot 文件含非 FR 段头或文件头游离待复核行时平台计数 > CLI，双出口数字细微不一致——恰为 design 槽4 自认最大风险的具体化，但这两个细节未在披露边界条目中出现。机器生成文件格式统一，实际偏差概率低，方向偏灵敏（平台多报不少报），留档即可。",
+      "location": "backend/app/modules/knowledge/service.py:193-195"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-05 绑定作答中 7b0158cef 指代有歧义",
+      "evidence": "作答写「已即时 soft reset 恢复共享暂存区并重提交（7b0158cef）」，但 git show --stat 7b0158cef 仅含 flow-state.yaml 一个文件（docs 证据锚点提交）；主交付本体是 5ff40235a（12 文件 = 7 交付 + 5 变更目录，零夹带已独立核实）。括号引用易读作「重提交本体=7b0158cef」。事实链（误扫恢复、最终面干净、pathspec 合规）本身成立，仅措辞精度问题。",
+      "location": ".sillyspec/changes/2026-09-27-knowledge-governance-cards/requirements.md:50"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-27T10:15:00Z"
+}
