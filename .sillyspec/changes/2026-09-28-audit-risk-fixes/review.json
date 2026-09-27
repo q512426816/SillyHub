@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-audit-risk-fixes",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "交付 diff 含第 7 处未披露改动：session_insights 指纹 max(id) 改 cast 文本，超出需求/设计声明范围",
+      "evidence": "change.patch 中 backend/app/modules/daemon/router/session_insights.py 的 `_session_outline_fingerprint` 把 func.max(AgentRunLog.id) 改为 func.max(cast(AgentRunLog.id, String))（修 PostgreSQL 无原生 uuid max 聚合的生产 500），但 requirements 的 FR-01~FR-11 与 design 的六处修复清单（①~⑥）均未覆盖此改动，也无测试绑定——冻结 diff 与设计承诺面不一致，破坏 FR↔实现可追溯性；改动本身方向安全（双方言一致、无指纹回归风险），非数据正确性问题",
+      "location": "backend/app/modules/daemon/router/session_insights.py:405-415（change.patch 行 169-184）"
+    },
+    {
+      "severity": "P3",
+      "title": "design 盲维④「mobile 不读不写」陈述与实现不符（不污染结论仍成立）",
+      "evidence": "session-panel-page.tsx 中 detailOpen 惰性初始化在 mobile 变体同样读 localStorage，且持久化 useEffect 在 mobile 挂载时会把读到的同值写回（写回值恒等、无污染；唯一用户写入入口「会话详情」开关按钮被 {!mobile &&} 门控，mobile 确无用户路径写入）——设计答「mobile 不读不写」在字面上失实，仅「不污染」成立",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:2353-2370"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok：新增防线均为 spawn 前同步校验（_guardRoot 在 sillyspecCmd 调用前），不引入乱序面；design 声称的平台侧 except Exception 降级为既有代码、超本 diff 范围（采信，未重验）",
+    "并发": "ok：containment 每次 digest/action 调用现取 rootsProvider()（runtime-handler.ts 两处 _guardRoot 内联调用 assertWithinAllowedRoots(root, this._rootsProvider())），无构造期快照冻结；前端改动均为渲染分支，无共享写状态",
+    "切换": "ok：边界已裁决：可接受——design 声明「desktop 关详情期间实时事件丢弃（重开时快照对账自愈）为既有行为」，核实 diff 仅在 detailColumnVisible 加 !mobile 前缀，desktop 分支未触碰，既有行为面非本变更引入",
+    "作用域": "finding：mobile/desktop 共享 localStorage 键的实际机制为「mobile 读 + 挂载写回同值、用户写入被 !mobile 门控」，不污染结论成立但 design「不读不写」陈述失实（见 P3）；黑名单收窄前提边界已裁决：可接受——核实 root 仅作 spawn cwd 传参、从不拼入命令串（from/to 另有 [a-z0-9-]+ 防线），前提已在类注释钉死，containment 为真物理边界"
+  },
+  "reviewedAt": "2026-09-28T06:22:46+08:00"
+}
