@@ -1,0 +1,43 @@
+{
+  "change": "2026-09-27-prototype-pipeline",
+  "baseline": "05218185395f1b6b94a0557de0af22ab7fae78d7",
+  "head": "ca9f19016291ccc7f363d1d03fe4eb84f828bcf9",
+  "files": [
+    ".gitignore",
+    ".sillyspec/changes/2026-09-27-prototype-pipeline/design.md",
+    ".sillyspec/changes/2026-09-27-prototype-pipeline/proposal.md",
+    ".sillyspec/changes/2026-09-27-prototype-pipeline/requirements.md",
+    ".sillyspec/changes/2026-09-27-prototype-pipeline/tasks.md",
+    "frontend/.gitignore",
+    "frontend/package.json",
+    "frontend/prototype-dist/change-center.html",
+    "frontend/prototype-dist/change-detail.html",
+    "frontend/prototype-dist/index.html",
+    "frontend/prototype-dist/session-portal.html",
+    "frontend/prototype-dist/sillyspec-flow.html",
+    "frontend/prototype-dist/workspace-list.html",
+    "frontend/prototype-dist/workspace-overview.html",
+    "frontend/scripts/prototype-build.mjs",
+    "frontend/src/components/prototype/README.md",
+    "frontend/src/components/prototype/__tests__/flow-diagram.test.tsx",
+    "frontend/src/components/prototype/__tests__/prototype-smoke.test.tsx",
+    "frontend/src/components/prototype/change-center-view.tsx",
+    "frontend/src/components/prototype/change-detail-view.tsx",
+    "frontend/src/components/prototype/demo-chrome.tsx",
+    "frontend/src/components/prototype/flow-diagram.tsx",
+    "frontend/src/components/prototype/session-portal-view.tsx",
+    "frontend/src/components/prototype/sillyspec-flow-view.tsx",
+    "frontend/src/components/prototype/workspace-list-view.tsx",
+    "frontend/src/components/prototype/workspace-overview-view.tsx",
+    ".sillyspec/changes/2026-09-27-prototype-pipeline/flow-state.yaml"
+  ],
+  "totals": {
+    "files": 27,
+    "additions": 2457,
+    "deletions": 2
+  },
+  "savedAt": "2026-09-27T02:01:40.424Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录 + 本变更目录工作树件；含未提交与 untracked）",
+  "patchSha256": "7bd6f6f9c891a29620c7cb810faa79f24ff2beb6211e2a2322ac5fcf7117ca38",
+  "patchStatus": "ok"
+}

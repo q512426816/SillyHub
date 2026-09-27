@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-prototype-pipeline",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "冻结件 change.patch 缺 FR-05 交付物 PROTOTYPE.md，审计对账面不完整",
+      "evidence": "交付提交 c2b3a9d8d 实含 27 个文件（git show --stat 确认含 .sillyspec/docs/SillyHub/scan/PROTOTYPE.md，且该文件仅由此提交创建），而 change.patch 仅冻结 26 个文件、无 PROTOTYPE.md——FR-05 实质已交付在仓（三类原型的源方言/产物形态/批准与晋升路径均有明文），但作为『代码事实唯一来源』的冻结 diff 漏掉了它，评审/复盘对账面与提交面不一致",
+      "location": ".sillyspec/changes/2026-09-27-prototype-pipeline/change.patch（对照 c2b3a9d8d 文件清单）"
+    },
+    {
+      "severity": "P3",
+      "title": "design 槽3『产物仅在全部成功后原子写出/中断只残留 .build』与实现不符",
+      "evidence": "prototype-build.mjs 第 130-135 行对 7 个 HTML 逐文件 writeFileSync，无 temp+rename/事务包裹——编译成功后的写循环中途被中断会残留部分更新的已跟踪产物（超出『只残留 .build』声明）；因输出确定性，重编译自愈且 FR-07 重编译对账门可拦截",
+      "location": "frontend/scripts/prototype-build.mjs:130-135"
+    },
+    {
+      "severity": "P3",
+      "title": "design 槽3『.build 中间目录会话私有』不成立——共享固定路径",
+      "evidence": "OUT_DIR=prototype-dist/.build 是工作区内固定共享路径而非按会话隔离；同工作区多 agent 并行跑 build 时在 .build 冲突（并发 tsc 写/读到半写的 app.css），后果为响亮失败（exit 1）或极端下半截 CSS 产物，确定性输出＋FR-07 对账兜底后残余风险低，但『会话私有』声明与代码事实不符",
+      "location": "frontend/scripts/prototype-build.mjs:18(OUT_DIR 定义处)"
+    },
+    {
+      "severity": "P3",
+      "title": "computeLayers 注释称『环上节点保持原值不发散』，实际有环输入逐轮抬升",
+      "evidence": "迭代松弛对未钉住节点每轮按前驱+1 抬升（a→b→b→a 每轮约 +2），仅靠 round<nodes.length 的轮次上限封顶终止——有环图输入会静默产出横向摊大的退化布局而非注释声称的保持原值；纯布局退化、有界且确定，当前入仓视图无环",
+      "location": "frontend/src/components/prototype/flow-diagram.tsx:85-104(computeLayers)"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "finding",
+    "切换": "finding",
+    "作用域": "ok"
+  },
+  "boundaryAdjudications": [
+    {
+      "boundary": "产物 ~150KB/文件、七文件合计 ~1MB 全量 Tailwind CSS 入仓（design 槽4 / PROTOTYPE.md 铁律）",
+      "verdict": "可接受",
+      "reason": "纯文本 git 增量压缩后体积小，且入仓产物是 FR-07 重编译对账机制的前提；按视图裁剪已明示为后续优化项"
+    },
+    {
+      "boundary": "产物交互仅 vanilla JS 子集（主题切换/tab 过滤），完整交互走 dev 预览为后续演进（design 槽4 / README / PROTOTYPE.md 铁律）",
+      "verdict": "可接受",
+      "reason": "产物定位是离线批准件而非可交互应用，限制已在规约三处明示，无数据正确性风险"
+    },
+    {
+      "boundary": "mermaid 文本方案放弃（内联 runtime ~2MB/文件或引入 puppeteer）",
+      "verdict": "可接受",
+      "reason": "放弃理由量化且替代方案 FlowDiagram 零依赖达成 FR-03"
+    },
+    {
+      "boundary": "复用 @xyflow/react 放弃（交互式编辑超描述类原型所需，静态自动布局不稳定）",
+      "verdict": "可接受",
+      "reason": "与 FR-03 零新增依赖承诺自洽，确定性分层布局由测试钉住"
+    },
+    {
+      "boundary": "FR-01/05/06/07 测试绑定作答『不适用（无 vitest 面）』，以收口实测/对账证据替代",
+      "verdict": "可接受",
+      "reason": "构建产物与文档类承诺本质无单测面；FR-06 的 diff 面核对经本评审独立复核为真（c2b3a9d8d 仅新增文件＋package.json 脚本行＋.gitignore 两处），FR-01 零外部引用经产物 grep 独立复核为真"
+    }
+  ],
+  "reviewedAt": "2026-09-27T02:06:56Z"
+}
