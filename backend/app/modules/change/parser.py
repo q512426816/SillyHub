@@ -22,14 +22,14 @@ from app.modules.change.title_norm import normalize_display_title
 
 log = get_logger(__name__)
 
-# task-07（perf-remediation）：_load_module_map 进程级缓存——键为 (map 文件
-# resolved 绝对路径, mtime) 复合键（仅按 mtime 会跨 workspace 串结果，Grill B-3），
-# 值不可变（命中回 deepcopy 拷贝，调用方 mutate 不污染缓存）。这是 parser 唯一
-# 的模块级可变状态（design 段 4 / R-01 对「无状态」前提的明示例外）。
+# task-07（perf-remediation）：_load_module_map 进程级缓存——键为 (全部 map 文件
+# resolved 绝对路径元组, mtime 元组) 复合键（多图合并版；仅按 mtime 会跨 workspace
+# 串结果，Grill B-3），值不可变（命中回 deepcopy 拷贝，调用方 mutate 不污染缓存）。
+# 这是 parser 唯一的模块级可变状态（design 段 4 / R-01 对「无状态」前提的明示例外）。
 # 写侧（插入 + stale 清理的迭代）持锁：_parse_module_map 经 asyncio.to_thread
 # 并发执行，多线程同时迭代+插入同一 dict 会抛「dictionary changed size during
 # iteration」打断 reparse；读侧 .get / 单键赋值 GIL 原子，无锁。
-_MODULE_MAP_CACHE: dict[tuple[str, float], dict[str, list[str]]] = {}
+_MODULE_MAP_CACHE: dict[tuple[tuple[str, ...], tuple[float, ...]], dict[str, list[str]]] = {}
 _MODULE_MAP_CACHE_LOCK = threading.Lock()
 
 # Re-export constants from SpecPathResolver for backward compatibility
