@@ -1,0 +1,306 @@
+diff --git a/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/design.md b/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/design.md
+new file mode 100644
+index 000000000..4974c8204
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T10:06:59.928Z
++---
++# 设计记录（Design Record）— 2026-09-27-assets-testfile-bracket-note
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-assets-testfile-bracket-note 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++在 frontend/src/components/changes/detail/change-assets-card.tsx 的 normalizeTestFilePath 追加一步「」注解段剥离（/「[^」]*」/g 全局移除后再 trim）。该函数是测试文件路径解析的唯一归一入口：resolveTestFilePath 的等值/后缀比较与 TestFileBody 的 basename→explorer search 查询串都取自它的输出，一处剥离即同时修正搜索入参与比较基准。选前端归一而非改 sillyspec CLI 的 test-trace 产物：CLI 修复只能救未来记录，存量已冻结数据（如 sillyspec 仓 2026-09-27-ui-visual-guidance 归档件）里「路径「用例描述」」粘联只能靠读侧容错救回，与既有短路径/反斜杠归一同层同性质。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-assets-testfile-bracket-note 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++导出纯函数 normalizeTestFilePath(raw) 行为变化：输出额外剥离「…」注解段（一段或多段，含全串皆注解时输出空串——空串在 resolveTestFilePath 既有分支按 notfound 处理）。无端点/文件格式/后端改动；explorer search 请求的查询串从「文件名+注解」变为干净文件名。导出签名不变。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-assets-testfile-bracket-note 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：不适用——纯同步字符串归一，无事件序。2. 并发写：不适用——只读输入串，无共享可变状态。3. 切换/生命周期：弹窗每次打开用当次 rawPath 现算，无跨打开缓存（queryKey 含 basename，归一后 key 稳定）。4. 作用域：归一同时应用于记录路径与 explorer 命中集两侧，比较口径一致，不因工作区不同而串台；「」在测试文件真实路径中出现的概率可忽略（项目测试绑定约定用「」作用例名注解）。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-assets-testfile-bracket-note 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：真实文件名含「」字符会被误剥——测试绑定约定「」为用例名注解语法，且仓库实测无此类测试文件名，接受该权衡并在函数注释言明。放弃方案 a：改 sillyspec CLI 的 flow done 补全解析（tests[] 只存纯路径）——治本但属另一仓库存量数据救不回，已按规则 15 记 docs/sillyspec/ 活跃坑；放弃方案 b：只在 TestFileBody 局部剥——resolveTestFilePath 的 norm 与搜索入参两处口径会分裂，故统一在归一函数做。
+diff --git a/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/flow-state.yaml b/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/flow-state.yaml
+new file mode 100644
+index 000000000..a227c678e
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/flow-state.yaml
+@@ -0,0 +1,16 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 7b0158cef7c55f8c652a22ce8d8e25887fe31d57
++updatedAt: '2026-09-27T10:12:26.457Z'
++gate_summary: >-
++  test: passed ← module[]+deps(py24+jsx6)+fr(8)（107.3s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20260927101217\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（8.7s）｜门文件 53 个
++
+diff --git a/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/proposal.md b/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/proposal.md
+new file mode 100644
+index 000000000..e804eec13
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/proposal.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T10:06:59.927Z
++---
++# 提案书（Proposal）— 2026-09-27-assets-testfile-bracket-note
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:aee4f180fa634b24a5be229dac6cdd273706b358563cc06eece5867ea9a6230a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-assets-testfile-bracket-note 留痕重锚 -->
++任务原话转写：test-trace tests[] 记录的测试文件路径可能粘着「用例描述」注解（sillyspec CLI flow done 补全产物，实证：sillyspec 仓 2026-09-27-ui-visual-guidance 的 FR-01~04/06 行为 test/ui-visual-guidance.test.mjs「detectUiTouch 正例：…」），前端 normalizeTestFilePath 未剥离该注解，basename 连注解进 explorer search 必零命中，用户点开测试文件恒见「未在仓库中找到该测试文件」误报。
++
++成功标准：
++- normalizeTestFilePath 剥离路径中的「…」注解段（支持一段或多段），剥离后为空仍按未找到处理
++- TestFileBody 用剥离后的文件名发起 explorer search，粘注解路径可等值/后缀命中并打开真实测试文件预览
++- 既有 change-assets-card 路径解析用例全绿，新增用例覆盖多段注解与搜索入参为干净文件名
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:d0abcfd5bc63c7453b20a2dbb79ecafc03c3a98301dc09f2537cdfb2c3728413:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-assets-testfile-bracket-note 留痕重锚 -->
++按成功标准机械推导，共 4 条验收面：
++1. normalizeTestFilePath 剥离路径中的「…」注解段（支持一段或多段），剥离后为空仍按未找到处理
++2. TestFileBody 用剥离后的文件名发起 explorer search，粘注解路径可等值
++3. 后缀命中并打开真实测试文件预览
++4. 既有 change-assets-card 路径解析用例全绿，新增用例覆盖多段注解与搜索入参为干净文件名
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:4bdc71fe69591f9aef1f946979e6f9c7ae9d9ff04171738afbd8e0e5940fca4f:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-27-assets-testfile-bracket-note 留痕重锚 -->
++1. normalizeTestFilePath 剥离路径中的「…」注解段（支持一段或多段），剥离后为空仍按未找到处理
++2. TestFileBody 用剥离后的文件名发起 explorer search，粘注解路径可等值
++3. 后缀命中并打开真实测试文件预览
++4. 既有 change-assets-card 路径解析用例全绿，新增用例覆盖多段注解与搜索入参为干净文件名
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/requirements.md b/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/requirements.md
+new file mode 100644
+index 000000000..5dbb9ffea
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/requirements.md
+@@ -0,0 +1,42 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T10:06:59.928Z
++---
++# 需求规格（Requirements）— 2026-09-27-assets-testfile-bracket-note
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: normalizeTestFilePath 剥离路径中的「…」注解段（支持一段或多段），剥离后为空仍
++Given 系统就绪
++When normalizeTestFilePath 剥离路径中的「…」注解段（支持一段或多段），剥离后为空仍按未找到处理
++Then 行为符合本条标准描述
++
++### FR-02: TestFileBody 用剥离后的文件名发起 explorer search，粘注解路径可等值
++Given 系统就绪
++When TestFileBody 用剥离后的文件名发起 explorer search，粘注解路径可等值
++Then 行为符合本条标准描述
++
++### FR-03: 后缀命中并打开真实测试文件预览
++Given 测试 相关模块就绪
++When 后缀命中并打开真实测试文件预览
++Then 行为符合本条标准描述
++
++### FR-04: 既有 change-assets-card 路径解析用例全绿，新增用例覆盖多段注解与搜索入参为干净文
++Given 系统就绪
++When 既有 change-assets-card 路径解析用例全绿，新增用例覆盖多段注解与搜索入参为干净文件名
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::注解剥离（一段/多段「」段移除）+ 全注解串：剥离后为空仍按未找到处理
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::注解剥离：按干净文件名发起搜索并等值命中预览（断言 mockSearch 收到干净 basename）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::多段注解剥离：短路径唯一后缀救回并预览真实路径
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::ChangeAssetsCard 测试文件路径解析 全套 22 passed（新增 3 条覆盖多段注解与搜索入参干净文件名）
+diff --git a/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/tasks.md b/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/tasks.md
+new file mode 100644
+index 000000000..9c4abea75
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/tasks.md
+@@ -0,0 +1,14 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-27T10:06:59.928Z
++---
++# 任务注册表（Tasks）— 2026-09-27-assets-testfile-bracket-note
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: normalizeTestFilePath 剥离路径中的「…」注解段（支持一段或多段），剥离后为空仍按未找到处理
++- [x] task-02: TestFileBody 用剥离后的文件名发起 explorer search，粘注解路径可等值
++- [x] task-03: 后缀命中并打开真实测试文件预览
++- [x] task-04: 既有 change-assets-card 路径解析用例全绿，新增用例覆盖多段注解与搜索入参为干净文件名
+diff --git a/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/visual-evidence.md b/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/visual-evidence.md
+new file mode 100644
+index 000000000..6b1957d25
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-27-assets-testfile-bracket-note/visual-evidence.md
+@@ -0,0 +1,9 @@
++# UI 视觉证据 — 2026-09-27-assets-testfile-bracket-note
++
++本变更是纯逻辑修复（测试文件路径归一增加「用例名」注解剥离），不改任何页面结构、样式或文案面：
++
++- 触及的唯一前端文件 `change-assets-card.tsx` 仅改 `normalizeTestFilePath` 纯函数与其头注释；无 JSX/className/布局改动，无视觉基准可比对需求。
++- 行为变化只体现在数据瑕疵场景（记录路径粘「注解」）：原先弹窗显示「未在仓库中找到该测试文件」误报，现在能定位并预览真实测试文件——这是既有 FR-01~02 设计内的 resolved 分支，非视觉降级。
++- 无因约束对不齐基准而缩小/收敛范围的降级，无需用户裁决留痕。
++
++验证：`pnpm vitest run src/components/changes/detail/__tests__/change-assets-card.test.tsx` 22 passed（含新增 3 条注解剥离用例）；`pnpm exec tsc --noEmit` 零错。
+diff --git a/docs/sillyspec/test-trace-tests-glue-bracket-note.md b/docs/sillyspec/test-trace-tests-glue-bracket-note.md
+new file mode 100644
+index 000000000..bc29da12c
+--- /dev/null
++++ b/docs/sillyspec/test-trace-tests-glue-bracket-note.md
+@@ -0,0 +1,27 @@
++# test-trace tests[] 把「用例名」注解粘进路径（flow done 补全解析缺陷）— 活跃坑
++
++- 发现日：2026-09-27（sillyspec 仓 `2026-09-27-ui-visual-guidance` 变更归档件实证）
++- 影响工具：SillySpec CLI `flow done` 自动补全（tests[] 生成侧），版本 3.31.0
++- 状态：**活跃**——CLI 侧未修；平台读侧已防御（见「已做缓解」）
++
++## 现象
++
++requirements.md 测试绑定槽按约定写「项目相对全路径＋用例名」，用例名用「」包裹：
++
++```
++test/ui-visual-guidance.test.mjs「detectUiTouch 正例：页面/前端/UI/视觉/组件/tsx」
++```
++
++`flow done` 把整串（路径＋首个「注解」）收进 `test-trace.json` 的 `tests[]`，FR-01~04/06 六行有五行带注解粘联（同槽多段注解只粘首段；槽内以空格分隔的写法如 `path 全部 12 用例（…）` 则被按空白切开、未粘联——粘联与否取决于「」是否紧跟路径）。
++
++## 危害
++
++平台变更详情页「沉淀资产」卡的测试文件点击按归一后 basename 调 explorer search，粘联路径必然零命中 → 用户恒见「未在仓库中找到该测试文件」误报（文件其实就在仓库里）。sillyspec 仓 `2026-09-27-ui-visual-guidance` 归档后五条 FR 的测试锚点全部不可点开。
++
++## 已做缓解（平台读侧，2026-09-27-assets-testfile-bracket-note）
++
++`frontend/src/components/changes/detail/change-assets-card.tsx` 的 `normalizeTestFilePath` 增加 `/「[^」]*」/g` 剥离，存量粘联数据点开即恢复。
++
++## 待 CLI 侧修复
++
++`flow done` 补全生成 `tests[]` 时应把路径与「用例名」注解拆开，`tests[]` 只存纯路径（用例名走已有 raw_binding / 摘录通道）。修复后本记录移 `docs/sillyspec/finished/`。
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index 3ca495762..7472c7b39 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -384,6 +384,42 @@ describe("ChangeAssetsCard 测试文件路径解析", () => {
+     expect(tip).toHaveTextContent("未在仓库中找到该测试文件");
+     expect(tip).not.toHaveTextContent("工作区目录可能已被移动或删除");
+   });
++
++  // ── 「用例名」注解粘联（2026-09-27-assets-testfile-bracket-note）────────
++  // 生产实证：sillyspec CLI flow done 补全的 tests[] 把绑定槽「路径「用例名」」
++  // 整串收录——归一剥离后搜索与比较才成立，否则恒零命中误报未找到。
++  it("「用例名」注解剥离：按干净文件名发起搜索并等值命中预览", async () => {
++    mockSearch.mockResolvedValue(matchesOf(["test/ui-visual-guidance.test.mjs"]));
++    await openTestFile([
++      "test/ui-visual-guidance.test.mjs「detectUiTouch 正例：页面/前端/UI/视觉/组件/tsx」",
++    ]);
++    // 搜索入参必须是剥掉注解的干净文件名——粘联正是此前零命中的根因。
++    expect(mockSearch).toHaveBeenCalledWith(
++      "ws-1",
++      "ui-visual-guidance.test.mjs",
++    );
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      "test/ui-visual-guidance.test.mjs",
++    );
++    expect(
++      screen.queryByTestId("change-assets-test-redirect-note"),
++    ).toBeNull();
++  });
++
++  it("多段注解剥离：短路径唯一后缀救回并预览真实路径", async () => {
++    mockSearch.mockResolvedValue(
++      matchesOf(["packages/cli/test/ui-visual-guidance.test.mjs"]),
++    );
++    await openTestFile(["test/ui-visual-guidance.test.mjs「甲」「乙」"]);
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      "packages/cli/test/ui-visual-guidance.test.mjs",
++    );
++  });
++
++  it("全注解串：剥离后为空仍按未找到处理", async () => {
++    await openTestFile(["「只有用例名没有路径」"]);
++    expect(await screen.findByTestId("change-assets-test-notfound")).toBeTruthy();
++  });
+ });
+ 
+ // ── 资产透明面（2026-09-26-change-asset-transparency / FR-01~03）────────────
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index 9b9fe32df..5c53dc373 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -24,12 +24,21 @@ interface ChangeAssetsCardProps {
+ // ── 测试文件路径解析（2026-09-26-assets-testfile-path-resolve / FR-01~02）────
+ // test-trace 记录的测试文件路径可能是短路径（缺仓库内目录前缀，如
+ // ``tests/x.py`` 实为 ``backend/app/modules/<m>/tests/x.py``）或反斜杠/``./``
+-// 写法。归一照知识库页 normalizeKnowledgeFileParam 先例；解析决策是纯函数，
++// 写法，归一照知识库页 normalizeKnowledgeFileParam 先例；解析决策是纯函数，
+ // 由弹窗用 explorer search 的同名命中集驱动。
++// 「用例名」注解粘联（2026-09-27-assets-testfile-bracket-note）：sillyspec CLI
++// flow done 补全的 tests[] 可能把绑定槽「路径＋用例名」整串收录（如
++// ``test/x.mjs「某用例」``，注解在「」内可多段）——归一时剥离，否则 basename
++// 连注解进 explorer search 必零命中，恒显「未在仓库中找到」。
+ 
+-/** 记录路径字符串归一（反斜杠→斜杠、去 ``./`` 前缀与首尾空白）。 */
++/** 记录路径字符串归一（反斜杠→斜杠、去 ``./`` 前缀、剥「用例名」注解段与首尾空白）。 */
+ export function normalizeTestFilePath(raw: string): string {
+-  return raw.trim().replace(/\\/g, "/").replace(/^\.\//, "");
++  return raw
++    .trim()
++    .replace(/\\/g, "/")
++    .replace(/^\.\//, "")
++    .replace(/「[^」]*」/g, "")
++    .trim();
+ }
+ 
+ /** 解析决策：resolved=唯一确定路径（redirected=与记录路径不同，需标注）；

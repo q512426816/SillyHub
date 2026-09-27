@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-assets-testfile-bracket-note",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-27-assets-testfile-bracket-note:flow:FR-01",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-assets-testfile-bracket-note"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-27-assets-testfile-bracket-note:flow:FR-02",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-assets-testfile-bracket-note"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-27-assets-testfile-bracket-note:flow:FR-03",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-assets-testfile-bracket-note"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-27-assets-testfile-bracket-note:flow:FR-04",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-27-assets-testfile-bracket-note"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-27-assets-testfile-bracket-note",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "全注解串在真实环境走 422 错误回退而非承诺的 notfound 中性文案（绑定用例因 mock 可解析而未覆盖该路径）",
+      "evidence": "normalizeTestFilePath 把纯注解串剥成空串后 basename 也为空串，TestFileBody 无 enabled 门控仍无条件发 fetchSearch(wsId, \"\")，而后端 explorer search 的 q 参数带 Query(min_length=1) 校验必回 422（apiFetch 抛 ApiError），于是走 searchQ.isError 回退分支渲染 FilePreview(filePath=\"\")——resolveTestFilePath 的空串短路（change-assets-card.tsx:64）只在搜索成功落定时才轮得到生效。新增用例「全注解串」的 mockSearch 可解析（beforeEach 默认命中集），故断言通过但掩盖了生产 422 路径。影响面限定：该形态（tests[] 出现无路径纯注解串）是 CLI 粘联不会产生的输入（粘联=路径+注解），降级形态为错误面板而非崩溃，不阻断本变更。",
+      "location": "frontend/src/components/changes/detail/change-assets-card.tsx:535-559（配合 backend/app/modules/explorer/router.py:115 的 min_length=1）"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a（设计称不适用，代码核实成立：纯同步字符串归一，无事件序）",
+    "并发": "n/a（设计称不适用，代码核实成立：纯函数只读输入，无共享可变状态）",
+    "切换": "ok（弹窗关=卸载重置 chosen 态；queryKey 含归一后 basename，跨文件切换不串缓存——change-assets-card.tsx:536-543 属实）",
+    "作用域": "ok（边界已裁决：可接受——①真实文件名含「」会被误剥：可接受，「」为测试绑定注解语法、全仓 find 实测无含「」文件名、失败形态为优雅降级且注释言明；②CLI 侧治本属另一仓、平台读侧防御：可接受，存量归档冻结数据只能读侧救回，坑已按规则 15 记 docs/sillyspec/test-trace-tests-glue-bracket-note.md 并写明 CLI 修复后移档条件）"
+  },
+  "reviewedAt": "2026-09-27T18:16:18+08:00"
+}

@@ -1,0 +1,25 @@
+{
+  "change": "2026-09-27-assets-testfile-bracket-note",
+  "baseline": "7b0158cef7c55f8c652a22ce8d8e25887fe31d57",
+  "head": "99c508227642192dc929cd0702441f3303a6ceff",
+  "files": [
+    ".sillyspec/changes/2026-09-27-assets-testfile-bracket-note/design.md",
+    ".sillyspec/changes/2026-09-27-assets-testfile-bracket-note/flow-state.yaml",
+    ".sillyspec/changes/2026-09-27-assets-testfile-bracket-note/proposal.md",
+    ".sillyspec/changes/2026-09-27-assets-testfile-bracket-note/requirements.md",
+    ".sillyspec/changes/2026-09-27-assets-testfile-bracket-note/tasks.md",
+    ".sillyspec/changes/2026-09-27-assets-testfile-bracket-note/visual-evidence.md",
+    "docs/sillyspec/test-trace-tests-glue-bracket-note.md",
+    "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+    "frontend/src/components/changes/detail/change-assets-card.tsx"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 236,
+    "deletions": 3
+  },
+  "savedAt": "2026-09-27T10:13:04.685Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "patchSha256": "cde2ec445d7d8d9876c25ececc61cbfea3bb873bd0a42e64244b5f5448372058",
+  "patchStatus": "ok"
+}
