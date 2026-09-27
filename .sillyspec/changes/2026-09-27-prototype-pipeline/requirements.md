@@ -45,15 +45,22 @@ Then 行为符合本条标准描述
 ## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
 
 <!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+不适用：构建命令产物验收（无 vitest 面）——证据=收口实测 lint passed＋产物零外部引用 grep 0＋FR-07 重编译对账
 
 <!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/components/prototype/__tests__/prototype-smoke.test.tsx「变更中心/变更详情/工作区列表」三用例（视图渲染与关键结构断言）；tsc/eslint 由收口 lint 门承接
 
 <!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/components/prototype/__tests__/flow-diagram.test.tsx 全部 6 用例（渲染完整性/最长路径分层/泳道分离/token 着色零硬编码/虚线边/显式 layer 钉住）
 
 <!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/components/prototype/__tests__/prototype-smoke.test.tsx「SillySpec 流程：双泳道状态机渲染」（data-flow-id 断言 t-done/f-verify 在位）
 
 <!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+不适用：文档交付（.sillyspec/docs/SillyHub/scan/PROTOTYPE.md），无测试面
 
 <!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+不适用：约束对账——diff 面核对（commit c2b3a9d8d 仅新增文件＋package.json/.gitignore 三处配置行，业务页面与组件零改动）
 
 <!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+不适用：命令对账（提交后重跑 pnpm prototype:build，git status --prototype-dist 为零输出），无 vitest 面
