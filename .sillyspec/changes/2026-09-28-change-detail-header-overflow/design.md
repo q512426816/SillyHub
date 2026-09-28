@@ -18,6 +18,12 @@ created_at: 2026-09-28T14:40:31.962Z
 2. 详情页标题 `frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx:244`：flex 行内 `<span className="truncate">` 补 `min-w-0`——同为 flex 项 min-width:auto 陷阱，超长标题目前无法收缩截断，防下一起同型报告。
 方案选择：改组件而非详情页局部包一层 overflow-hidden——根因在 PageHeader 的宽度约束链，组件级修复一处收口全部使用方；且 min-w-0 只放宽收缩下限，对正常宽度内容零视觉影响。
 
+文件变更清单（自声明，收口对账面）：
+- `frontend/src/components/layout/page-header.tsx`（task-01：左列 div 补 min-w-0 + 注释）
+- `frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx`（task-02：标题 truncate span 补 min-w-0 + 注释）
+- `frontend/src/components/layout/__tests__/page-header.test.tsx`（task-03：新增回归测试 3 用例）
+- `.sillyspec/changes/2026-09-28-change-detail-header-overflow/*`（变更四件套 + visual-evidence.md + before-prod-1600.png）
+
 ## 接口契约
 <!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-change-detail-header-overflow 留痕重锚 -->
 动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？

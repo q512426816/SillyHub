@@ -36,7 +36,7 @@ Then 行为符合本条标准描述
 - frontend/src/components/layout/__tests__/page-header.test.tsx · 「详情页同款长描述场景：truncate span 渲染在 min-w-0 列内（收缩链前置条件）」（jsdom 无布局引擎，几何断言由 Playwright 生产实测承担：修复前后 scrollWidth 2219→1600/1280 清零、省略号截断，证据见变更目录 visual-evidence.md A/B 节）
 
 <!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
-- frontend/src/components/layout/__tests__/page-header.test.tsx · 「基本结构：title 进 h1 / subtitle 进 p / actions 右侧槽」＋「详情页同款长描述场景」（标题 min-w-0 truncate 类名与收缩链结构断言；超长标题的布局几何同 FR-02 由 Playwright 生产实测覆盖）
+- frontend/src/components/layout/__tests__/page-header.test.tsx · 「基本结构：title 进 h1 / subtitle 进 p / actions 右侧槽」＋「详情页同款长描述场景」（左列收缩链结构断言；标题 span 的 min-w-0 类名与超长标题布局几何由 Playwright 生产实测覆盖——评审 P3 修正：测试未单列标题类名断言，作答与事实对齐）
 
 <!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
 - frontend/src/components/layout/__tests__/page-header.test.tsx · 全部 3 用例（3/3 绿）
