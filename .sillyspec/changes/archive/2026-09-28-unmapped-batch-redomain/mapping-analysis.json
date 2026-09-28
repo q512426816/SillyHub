@@ -1,0 +1,903 @@
+{
+ "2026-05-27-platform-native-sillyspec": {
+  "n": 8,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 84,
+   "frontend": 17
+  }
+ },
+ "2026-05-28-agent-log-streaming": {
+  "n": 4,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 10,
+   "frontend": 6
+  }
+ },
+ "2026-05-28-component-as-workspace": {
+  "n": 10,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 62,
+   "frontend": 16
+  }
+ },
+ "2026-05-29-harness-control-plane": {
+  "n": 5,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 33,
+   "frontend": 7
+  }
+ },
+ "2026-05-29-knowledge-lifecycle": {
+  "n": 5,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 17,
+   "frontend": 5
+  }
+ },
+ "2026-05-29-local-runner-execution-loop": {
+  "n": 6,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 24,
+   "frontend": 5
+  }
+ },
+ "2026-05-29-server-sandbox-runner": {
+  "n": 5,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 19
+  }
+ },
+ "2026-05-29-workspace-intake-spec-bootstrap": {
+  "n": 4,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 22,
+   "frontend": 6
+  }
+ },
+ "2026-05-30-agent-adapter": {
+  "n": 9,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 25,
+   "frontend": 13
+  }
+ },
+ "2026-05-30-change-writer": {
+  "n": 7,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 16
+  }
+ },
+ "2026-05-30-execution-coordinator": {
+  "n": 7,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 1
+  }
+ },
+ "2026-05-30-tool-gateway": {
+  "n": 9,
+  "domain": "backend",
+  "via": "name",
+  "areas": {}
+ },
+ "2026-06-02-spec-bootstrap-agent-stream-interaction": {
+  "n": 5,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "backend": 17,
+   "frontend": 13
+  }
+ },
+ "2026-06-02-sse-reliable-stream": {
+  "n": 7,
+  "domain": "backend",
+  "via": "text",
+  "areas": {
+   "frontend": 13,
+   "backend": 9
+  }
+ },
+ "2026-06-03-workspace-bootstrap-flow": {
+  "n": 5,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "backend": 8,
+   "frontend": 6
+  }
+ },
+ "2026-06-04-fix-agent-driven-change-center-flow": {
+  "n": 11,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 19,
+   "frontend": 6
+  }
+ },
+ "2026-06-05-agent-74b61b": {
+  "n": 3,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 14,
+   "backend": 2
+  }
+ },
+ "2026-06-08-2026-06-05-agent-log-width": {
+  "n": 4,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 13
+  }
+ },
+ "2026-06-08-2026-06-08-change-center-columns": {
+  "n": 6,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 8,
+   "frontend": 3
+  }
+ },
+ "2026-06-09-daemon-agent-detection": {
+  "n": 5,
+  "domain": "daemon",
+  "via": "docs",
+  "areas": {
+   "daemon": 27,
+   "frontend": 4
+  }
+ },
+ "2026-06-09-local-daemon": {
+  "n": 10,
+  "domain": "daemon",
+  "via": "name",
+  "areas": {
+   "backend": 33,
+   "frontend": 5,
+   "daemon": 18
+  }
+ },
+ "2026-06-10-user-management": {
+  "n": 6,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 31,
+   "frontend": 12
+  }
+ },
+ "2026-06-10-user-management-v2": {
+  "n": 6,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 10,
+   "frontend": 5
+  }
+ },
+ "2026-06-14-2026-06-13-daemon-nodejs-rewrite": {
+  "n": 10,
+  "domain": "daemon",
+  "via": "docs",
+  "areas": {
+   "backend": 7,
+   "daemon": 55
+  }
+ },
+ "2026-06-14-2026-06-14-agent-runtime-selection": {
+  "n": 8,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 31,
+   "frontend": 12,
+   "daemon": 1
+  }
+ },
+ "2026-06-16-admin-org-role-center": {
+  "n": 16,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 70,
+   "frontend": 28
+  }
+ },
+ "2026-06-16-daemon-api-key": {
+  "n": 10,
+  "domain": "daemon",
+  "via": "name",
+  "areas": {
+   "backend": 30,
+   "daemon": 13,
+   "frontend": 11
+  }
+ },
+ "2026-06-16-workspace-members": {
+  "n": 8,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "backend": 12,
+   "frontend": 14
+  }
+ },
+ "2026-06-18-2026-06-18-workspace-client-path": {
+  "n": 6,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "backend": 20,
+   "daemon": 11,
+   "frontend": 8
+  }
+ },
+ "2026-06-19-agent-stage-dispatch-superseded": {
+  "n": 10,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 29,
+   "frontend": 4
+  }
+ },
+ "2026-06-21-2026-06-21-frontend-style-system": {
+  "n": 7,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 17,
+   "backend": 1
+  }
+ },
+ "2026-06-22-2026-06-22-daemon-service-split": {
+  "n": 5,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 8
+  }
+ },
+ "2026-06-22-2026-06-22-unify-agent-run-sse-hook": {
+  "n": 7,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 39,
+   "backend": 3
+  }
+ },
+ "2026-06-23-2026-06-23-codex-interactive-session": {
+  "n": 10,
+  "domain": "daemon",
+  "via": "manual",
+  "areas": {
+   "daemon": 56,
+   "backend": 25,
+   "frontend": 22
+  }
+ },
+ "2026-06-23-runtimes-session-dialog": {
+  "n": 6,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 17
+  }
+ },
+ "2026-06-23-spec-transport-tar-sync": {
+  "n": 8,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "daemon": 17,
+   "backend": 27
+  }
+ },
+ "2026-06-24-2026-06-24-concurrent-refresh-revoke": {
+  "n": 7,
+  "domain": "backend",
+  "via": "text",
+  "areas": {
+   "backend": 26,
+   "frontend": 36
+  }
+ },
+ "2026-06-24-runtime-usage-stats": {
+  "n": 5,
+  "domain": "frontend",
+  "via": "text",
+  "areas": {
+   "daemon": 10,
+   "backend": 16,
+   "frontend": 11
+  }
+ },
+ "2026-06-25-2026-06-25-admin-global-daemon-workspace-management": {
+  "n": 6,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 58,
+   "frontend": 33
+  }
+ },
+ "2026-06-25-2026-06-25-frontend-error-handling": {
+  "n": 6,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 18,
+   "backend": 4
+  }
+ },
+ "2026-06-25-2026-06-25-interactive-idle-timeout-fix": {
+  "n": 7,
+  "domain": "daemon",
+  "via": "manual",
+  "areas": {
+   "daemon": 11,
+   "backend": 13
+  }
+ },
+ "2026-06-28-daemon-client-spec-sync-strategy": {
+  "n": 14,
+  "domain": "daemon",
+  "via": "name",
+  "areas": {
+   "daemon": 16,
+   "backend": 18,
+   "frontend": 10
+  }
+ },
+ "2026-06-28-daemon-subagent-transcript": {
+  "n": 9,
+  "domain": "daemon",
+  "via": "name",
+  "areas": {
+   "daemon": 11,
+   "backend": 17,
+   "frontend": 8
+  }
+ },
+ "2026-07-02-2026-07-02-change-detail-file-tree-editor": {
+  "n": 9,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 29,
+   "frontend": 17
+  }
+ },
+ "2026-07-04-2026-07-04-daemon-version-management": {
+  "n": 9,
+  "domain": "daemon",
+  "via": "name",
+  "areas": {
+   "daemon": 9,
+   "backend": 32,
+   "frontend": 17
+  }
+ },
+ "2026-07-05-2026-07-05-agent-log-type-tags": {
+  "n": 11,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "frontend": 21,
+   "backend": 37,
+   "daemon": 10
+  }
+ },
+ "2026-07-07-2026-07-07-platform-json-contract-align": {
+  "n": 5,
+  "domain": "daemon",
+  "via": "docs",
+  "areas": {
+   "daemon": 32
+  }
+ },
+ "2026-07-09-2026-07-09-change-detail-session": {
+  "n": 5,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 17,
+   "frontend": 11
+  }
+ },
+ "2026-07-09-2026-07-09-workspace-prioritization": {
+  "n": 6,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 30
+  }
+ },
+ "2026-07-09-change-detail-session": {
+  "n": 5,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 17,
+   "frontend": 11
+  }
+ },
+ "2026-07-11-2026-07-11-daemon-client-container-overreach": {
+  "n": 3,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "frontend": 10,
+   "backend": 33
+  }
+ },
+ "2026-07-11-unify-runtime-session-dialog": {
+  "n": 8,
+  "domain": "frontend",
+  "via": "manual",
+  "areas": {
+   "backend": 8,
+   "frontend": 9
+  }
+ },
+ "2026-07-12-2026-07-12-worker-worktree-isolation": {
+  "n": 6,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 18,
+   "daemon": 7
+  }
+ },
+ "2026-07-14-2026-07-14-ppm-projects-style-redesign": {
+  "n": 6,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 20
+  }
+ },
+ "2026-07-15-2026-07-14-daemon-install-os-aware": {
+  "n": 6,
+  "domain": "daemon",
+  "via": "name",
+  "areas": {
+   "daemon": 12,
+   "backend": 11,
+   "frontend": 6
+  }
+ },
+ "2026-07-15-2026-07-15-milestone-detail-auto-task": {
+  "n": 7,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 11,
+   "frontend": 3
+  }
+ },
+ "2026-07-15-2026-07-15-project-members-rebuild": {
+  "n": 8,
+  "domain": "frontend",
+  "via": "name",
+  "areas": {
+   "frontend": 21,
+   "backend": 15
+  }
+ },
+ "2026-07-15-workbench-calendar-load-actual": {
+  "n": 8,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 6,
+   "frontend": 2
+  }
+ },
+ "2026-07-22-2026-07-22-mobile-app-ui": {
+  "n": 9,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 43,
+   "backend": 7
+  }
+ },
+ "2026-07-22-2026-07-22-task-execute-attachments": {
+  "n": 5,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 21,
+   "frontend": 13
+  }
+ },
+ "2026-07-26-2026-07-25-daemon-borrow-for-business": {
+  "n": 7,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 54,
+   "daemon": 7,
+   "frontend": 21
+  }
+ },
+ "2026-07-26-2026-07-26-ungate-workspace-entry": {
+  "n": 5,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 28
+  }
+ },
+ "2026-07-28-2026-07-28-llm-provider-presets-and-usage": {
+  "n": 8,
+  "domain": "frontend",
+  "via": "text",
+  "areas": {
+   "frontend": 31,
+   "backend": 26
+  }
+ },
+ "2026-07-29-model-error-visibility": {
+  "n": 4,
+  "domain": "frontend",
+  "via": "text",
+  "areas": {
+   "frontend": 6,
+   "daemon": 12,
+   "backend": 18
+  }
+ },
+ "2026-07-30-sidebar-menu-restructure": {
+  "n": 6,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 23,
+   "backend": 8
+  }
+ },
+ "2026-08-02-proxy-create-race-fix": {
+  "n": 6,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 14
+  }
+ },
+ "2026-08-03-session-stream-partial-revoke": {
+  "n": 7,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 16,
+   "backend": 4
+  }
+ },
+ "2026-08-04-agent-profile-ui-redesign": {
+  "n": 10,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "backend": 14,
+   "frontend": 43
+  }
+ },
+ "2026-08-05-daemon-start-time": {
+  "n": 3,
+  "domain": "daemon",
+  "via": "name",
+  "areas": {
+   "backend": 28,
+   "frontend": 13,
+   "daemon": 10
+  }
+ },
+ "2026-08-05-daemon-version": {
+  "n": 3,
+  "domain": "daemon",
+  "via": "name",
+  "areas": {
+   "backend": 13,
+   "daemon": 17
+  }
+ },
+ "2026-08-10-sillyhub-platform-sync": {
+  "n": 8,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 42,
+   "frontend": 4
+  }
+ },
+ "2026-08-11-change-detail-layout-rework": {
+  "n": 6,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "backend": 2,
+   "frontend": 35
+  }
+ },
+ "2026-08-11-change-progress-projection": {
+  "n": 8,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 36,
+   "frontend": 4
+  }
+ },
+ "2026-08-11-mcp-token-management-ui": {
+  "n": 6,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 30
+  }
+ },
+ "2026-08-12-init-provision-local-yaml": {
+  "n": 8,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 26,
+   "daemon": 13
+  }
+ },
+ "2026-08-13-change-center-rework": {
+  "n": 13,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 26,
+   "frontend": 15
+  }
+ },
+ "2026-08-13-platform-managed-file-sync": {
+  "n": 7,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "backend": 20,
+   "daemon": 13,
+   "frontend": 3
+  }
+ },
+ "2026-08-18-workspace-file-browser": {
+  "n": 6,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "backend": 17,
+   "daemon": 6,
+   "frontend": 16
+  }
+ },
+ "2026-08-19-sessions-portal": {
+  "n": 8,
+  "domain": "frontend",
+  "via": "name",
+  "areas": {
+   "frontend": 24,
+   "backend": 15,
+   "daemon": 5
+  }
+ },
+ "2026-08-19-sessions-workspace-selector": {
+  "n": 6,
+  "domain": "frontend",
+  "via": "manual",
+  "areas": {
+   "backend": 9,
+   "frontend": 15,
+   "daemon": 3
+  }
+ },
+ "2026-08-20-frontend-ai-native-style": {
+  "n": 6,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 15
+  }
+ },
+ "2026-08-20-sessions-workspace-selector": {
+  "n": 6,
+  "domain": "frontend",
+  "via": "manual",
+  "areas": {
+   "backend": 10,
+   "frontend": 18,
+   "daemon": 3
+  }
+ },
+ "2026-08-20-workspace-nav-consolidate": {
+  "n": 3,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 10
+  }
+ },
+ "2026-08-20-workspace-overview-redesign": {
+  "n": 5,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 13
+  }
+ },
+ "2026-08-20-workspace-subpages-style-unify": {
+  "n": 6,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 12
+  }
+ },
+ "2026-08-21-table-column-resize": {
+  "n": 4,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 11
+  }
+ },
+ "2026-08-22-session-panel-unify": {
+  "n": 9,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 25
+  }
+ },
+ "2026-08-22-workspace-sessions-portal": {
+  "n": 7,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 44,
+   "backend": 5
+  }
+ },
+ "2026-08-24-platform-session-feedback-fix": {
+  "n": 4,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "frontend": 20,
+   "backend": 25,
+   "daemon": 5
+  }
+ },
+ "2026-08-25-workspace-git-log": {
+  "n": 8,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "frontend": 18,
+   "backend": 21,
+   "daemon": 2
+  }
+ },
+ "2026-08-26-mobile-workspace-page": {
+  "n": 11,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "frontend": 25
+  }
+ },
+ "2026-08-26-onlyoffice-preview": {
+  "n": 6,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 7,
+   "frontend": 4
+  }
+ },
+ "2026-08-26-workspace-git-status": {
+  "n": 7,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "daemon": 4,
+   "backend": 6,
+   "frontend": 8
+  }
+ },
+ "2026-08-27-background-subagent-progress": {
+  "n": 9,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "daemon": 10,
+   "backend": 11,
+   "frontend": 15
+  }
+ },
+ "2026-08-29-frontend-e2e-playwright": {
+  "n": 9,
+  "domain": "frontend",
+  "via": "docs",
+  "areas": {
+   "backend": 14,
+   "frontend": 59
+  }
+ },
+ "2026-08-31-machine-sillyspec-version": {
+  "n": 5,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "backend": 20,
+   "daemon": 20,
+   "frontend": 10
+  }
+ },
+ "agent-driven-change-center": {
+  "n": 14,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 30,
+   "frontend": 7
+  }
+ },
+ "change-center-redesign": {
+  "n": 6,
+  "domain": "backend",
+  "via": "name",
+  "areas": {
+   "backend": 13,
+   "frontend": 11
+  }
+ },
+ "change-workflow-engine": {
+  "n": 6,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 8,
+   "frontend": 5
+  }
+ },
+ "workspace-spec-root-managed-p0": {
+  "n": 4,
+  "domain": "backend",
+  "via": "docs",
+  "areas": {
+   "backend": 12
+  }
+ }
+}

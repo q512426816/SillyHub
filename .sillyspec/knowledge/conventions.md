@@ -92,3 +92,42 @@ Tailwind 的 `md:` / `lg:` 等前缀按**浏览器视口**宽度生效，与组�
 ## 模块卡片 H1 用中文名（module-id）
 
 平台（SillyHub）文档列表按 markdown 首个 H1 提取 title 展示（backend scan_docs parser._extract_title）。模块卡片 H1 必须写「# 中文短名（module-id）」全角括号格式（如 `# 变更中心（change）`），不能只写英文 module-id——否则平台文档列表显示一墙英文代号不可读。scan 文档/flows/术语表同理用中文标题。墓碑卡中文名带「已删除」标记。2026-08-18 ql-20260818-003 补齐 200 张卡片时确立。
+
+## 2026-06-15 — Alembic migration 目录与 schema 领先版本号的处理
+
+- **目录路径**：`backend/alembic.ini` 的 `script_location = migrations`，所以 migration 文件真实路径是 `backend/migrations/versions/`，**不是**默认的 `backend/alembic/versions/`。确认 head 用 `cd backend && alembic history` / `alembic heads`。
+- **schema 领先 alembic 版本号**：当 model 先加列但漏补 migration 时，开发库会因某次 SQLModel `metadata.create_all` / 手动改动已把列加进表，而 `alembic_version` 表还停在旧 head。此时 `alembic upgrade head` 对新 migration 的 `ADD COLUMN` 报 `DuplicateColumnError`。
+- **正确处理**（不破坏数据、不手动改表）：`alembic stamp <新revision>` 把版本号对齐到新 migration（告诉 alembic「列已存在，版本到此」），再 `alembic downgrade -1` + `alembic upgrade head` 往返验证双向 DDL。`stamp` 是 alembic 处理「schema 已手动变更但版本号滞后」的标准手段。
+- **干净库不受影响**：全新库 upgrade head 会从建表 migration 顺序执行到新 ADD COLUMN，列那时不存在，正常通过——这正是补 migration 要解决的「干净部署必崩」。
+- **模块文档惯例**：`backend/migrations/versions/**` 不命中任何业务模块 glob（如 `backend/app/modules/agent/**`），故 migration 改动跳过模块文档同步。
+
+## 2026-06-24 — daemon 任何自 spawn 路径 Windows 必须 resolveWindowsCmdShim（.cmd/.bat/.ps1）
+
+> 来源：ql-20260624-002-b2f7（codex-app-server-driver）。batch task-runner 早有 resolveWindowsCmdShim，interactive codex driver 漏接——当时的漏接已接线修复，本条保留为新增 spawn 路径的防回归约定。
+
+- 现象：codex interactive session 在 Windows 永远起不来，daemon 日志 `interactive_session_create_failed code=EINVAL error=spawn EINVAL`。
+- 根因：agent-detector 在 Windows 给的是 npm cmd-shim `codex.cmd`；driver 直接 `spawn(codex.cmd, args, {stdio})` 无 shell/无 wrapper 解析 → Windows CreateProcess 对 `.cmd/.bat/.ps1` 返回 EINVAL。batch `task-runner.ts` 早用通用 `cmd-shim.ts` 的 `resolveWindowsCmdShim`，唯独 interactive codex driver 漏接。
+- codex 特殊点：cmd-shim 引用的不是真 .exe 而是 `codex.js`（node ESM 入口），`codex.js` 内部 `stdio:"inherit"` spawn 真 `codex.exe`，故解析结果 = `node.exe + [codex.js]`。
+- 通用坑（防回归）：**任何自己 `child_process.spawn` 的路径**（interactive driver / 新 provider runtime / 任何长驻 stdio 子进程），Windows 上 spawn agent-detector 给的 `.cmd/.bat/.ps1` wrapper 前必须先 `resolveWindowsCmdShim` 解析成 `{exe, prependArgs}` 再 `spawn(exe, [...prependArgs, ...业务args], {shell:false})`，解析失败才回退 `shell:true`。新增 interactive driver 时对照 `task-runner.ts` 接线，别各自 spawn——否则只在 Windows 环境暴露（posix CI 跑不到，易漏）。
+
+## 2026-07-08 — Pydantic 必填派生字段不能用 model_validate(ORM)+model_copy 两段式
+
+> 来源：2026-07-07-daemon-machine-runtime-hierarchy task-03/04（_build_machine_read bug，task-04 测试捕获）。
+
+- 现象：DTO 含必填派生字段（如 `runtime_count: int` 无 default），用 `Model.model_validate(orm_instance)` + `model_copy(update={派生字段: 值})` 两段式构造时，`model_validate` 在 `model_copy` 填值**前**就抛 `ValidationError: Field required`（ORM 无此属性）。
+- 解法：派生字段在构造时显式传——全字段直构 `Model(field1=orm.x, ..., 派生字段=value)`；或给派生字段加 `default=0`（model_validate 用 default 不崩，model_copy 覆盖真实值，适合派生字段总有组装覆盖的场景）。
+- 对比 `_runtime_read`（router.py:433）用 model_validate + model_copy 不崩，因 DaemonRuntimeRead 所有字段在 ORM 都有或 optional；DaemonMachineRead 崩是因 runtime_count/online_runtime_count 必填且 ORM 无。
+- 通用坑：DTO 有"派生/聚合"必填字段（不在源 ORM 上）时，避开 model_validate(ORM) 两段式，用全字段直构或给派生字段 default。
+
+## 2026-08-19 — Windows 下 execFile 调 npm 全局 CLI 必 ENOENT，须 spawn+shell 或 cmd-shim 解析
+
+> 来源：2026-08-19-runtime-live-daemon-read task-11 实现期实测 + 仓内先例交叉验证。
+
+- 现象：`execFile('sillyspec', [...])` 在 Windows 返回 ENOENT——npm 全局 bin 是 `.cmd` shim（`C:\nvm4w\nodejs\sillyspec.cmd`），execFile 无 PATHEXT 解析；Node ≥18.20 同时因 CVE-2024-27980 拒绝无 shell 调 `.cmd`/.bat。
+- 仓内范式：① `spec-sync.ts runInitCmd`（X-06 注释）`spawn(cmd, {shell:true})` + 超时 taskkill /T /F 杀树；② `cmd-shim.ts resolveWindowsCmdShim` 读 `.cmd` 提取真实 exe + target 直接 spawn（重任务用）；③ `preflight.ts runWithTreeKill` 同范式。
+- 注入防线：shell:true 时命令串拼接是注入面，入参必须白名单（本例 workspace_id UUID 正则先于拼接，`; rm -rf` / `&& calc` / `$(whoami)` / 反引号全拒）。
+- 通用坑：task 卡/设计文档写「execFile 非 shell 防注入」在 Windows 调 npm bin 场景是**纸上方案**——落地前先实测平台行为，防注入诉求改为入参白名单 + shell 隔离双层。
+
+## MCP server 子进程不继承 claude.exe 完整环境：env 必须放 mcpServers[*].env
+
+claude.exe（2.1.x）spawn MCP server 子进程时 env 为「白名单基线（PATH/HOME 等 12 个）+ per-server env 覆盖合并」，不继承完整父环境。给 MCP server 注入自定义变量（如 MCP_SESSION_ID）必须放在 options.mcpServers['<server>'].env（daemon mcp-config.ts 的 server config env 字段），放 SDK 顶层 options.env 无效。证据链：claude-sdk-driver.ts:407 透传 → sdk.d.ts:1092 McpStdioServerConfig.env → sdk.mjs --mcp-config 全量序列化 → claude.exe StdioClientTransport.start spawn env 合并。来源：2026-08-22-team-session-unify spike-01。

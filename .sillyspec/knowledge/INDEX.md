@@ -108,7 +108,6 @@
 ## FR 需求索引
 - host-fs-handler|FR|需求|承接 → [fr/host-fs-handler.md](fr/host-fs-handler.md)
 - styles|FR|需求|承接 → [fr/styles.md](fr/styles.md)
-- unmapped|FR|需求|承接 → [fr/unmapped.md](fr/unmapped.md)
 - lib-changes|FR|需求|承接 → [fr/lib-changes.md](fr/lib-changes.md)
 - lib-menu-permissions|FR|需求|承接 → [fr/lib-menu-permissions.md](fr/lib-menu-permissions.md)
 - build|FR|需求|承接 → [fr/build.md](fr/build.md)
@@ -142,3 +141,4 @@
 - backend|FR|需求|承接 → [fr/backend.md](fr/backend.md)
 - frontend|FR|需求|承接 → [fr/frontend.md](fr/frontend.md)
 - sillyspec|FR|需求|承接 → [fr/sillyspec.md](fr/sillyspec.md)
+- auto-sillyspec|sillyspec|FR|需求|承接 → [fr/auto-sillyspec.md](fr/auto-sillyspec.md)

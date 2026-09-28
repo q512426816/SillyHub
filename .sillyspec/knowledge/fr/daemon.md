@@ -1182,3 +1182,850 @@
 - 场景：默认场景 — Given 系统就绪；When 推送后四 workflow CI 转绿（或仅剩与本次无关的新失败并说明）；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-28-ci-failures-sweep/requirements.md#FR-09
 最近确认：e31d0e07bd259252cdced59554fba8de5bec566a
+
+## FR-unmapped-122 多 Agent 二进制检测
+变更：2026-06-09-daemon-agent-detection
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 本地安装了 claude、codex、cursor 等 agent CLI 环境变量 `SILLYHUB_CLAUDE_PATH` 设置为自定义路径；When daemon 启动并执行 agent 检测 daemon 检测 claude agent；Then 所有在 PATH 中可找到的 agent 都被识别，返回名称、路径、版本 使用环境变量指定的路径而非 PATH 查找
+全文：.sillyspec/changes/archive/2026-06-09-daemon-agent-detection/requirements.md#FR-01
+最近确认：98d3e56dd
+
+## FR-unmapped-123 版本校验
+变更：2026-06-09-daemon-agent-detection
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 本地 claude 版本为 1.9.0（低于 2.0.0 最低要求） 本地 codex 版本为 0.200.0（高于 0.100.0 最低要求）；When daemon 检测并校验版本 daemon 检测并校验版本；Then 该 agent 被标记为可用但版本不合规，注册时上报版本警告 该 agent 正常通过版本校验
+全文：.sillyspec/changes/archive/2026-06-09-daemon-agent-detection/requirements.md#FR-02
+最近确认：98d3e56dd
+
+## FR-unmapped-124 多 Runtime 注册
+变更：2026-06-09-daemon-agent-detection
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 本地检测到 claude、codex、cursor 三种 agent；When daemon 向服务器注册；Then 服务器创建 3 条 daemon_runtime 记录，provider 分别为 "claude"、"codex"、"cursor"
+全文：.sillyspec/changes/archive/2026-06-09-daemon-agent-detection/requirements.md#FR-03
+最近确认：98d3e56dd
+
+## FR-unmapped-125 执行协议分类
+变更：2026-06-09-daemon-agent-detection
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 任务分配给 provider="claude" 的 runtime 任务分配给 provider="codex" 的 runtime 任务分配给 provide；When TaskRunner 执行任务 TaskRunner 执行任务 TaskRunner 执行任务；Then 使用 stream-json 协议解析输出 使用 JSON-RPC 2.0 协议通信 直接读取 stdout 纯文本
+全文：.sillyspec/changes/archive/2026-06-09-daemon-agent-detection/requirements.md#FR-04
+最近确认：98d3e56dd
+
+## FR-unmapped-126 前端展示
+变更：2026-06-09-daemon-agent-detection
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 服务器上注册了多个 daemon runtime；When 用户访问 /runtimes 页面；Then 表格中显示每个 runtime 的 provider 类型和版本
+全文：.sillyspec/changes/archive/2026-06-09-daemon-agent-detection/requirements.md#FR-05
+最近确认：98d3e56dd
+
+## FR-unmapped-127 守护进程注册
+变更：2026-06-09-local-daemon
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-09-local-daemon/requirements.md#FR-01
+最近确认：98d3e56dd
+
+## FR-unmapped-128 任务认领
+变更：2026-06-09-local-daemon
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-09-local-daemon/requirements.md#FR-02
+最近确认：98d3e56dd
+
+## FR-unmapped-129 任务执行
+变更：2026-06-09-local-daemon
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-09-local-daemon/requirements.md#FR-03
+最近确认：98d3e56dd
+
+## FR-unmapped-130 心跳续期
+变更：2026-06-09-local-daemon
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-09-local-daemon/requirements.md#FR-04
+最近确认：98d3e56dd
+
+## FR-unmapped-131 进度报告
+变更：2026-06-09-local-daemon
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-09-local-daemon/requirements.md#FR-05
+最近确认：98d3e56dd
+
+## FR-unmapped-132 任务完成
+变更：2026-06-09-local-daemon
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-09-local-daemon/requirements.md#FR-06
+最近确认：98d3e56dd
+
+## FR-unmapped-133 运行时管理
+变更：2026-06-09-local-daemon
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-09-local-daemon/requirements.md#FR-07
+最近确认：98d3e56dd
+
+## FR-unmapped-134 运行位置选择
+变更：2026-06-09-local-daemon
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-09-local-daemon/requirements.md#FR-08
+最近确认：98d3e56dd
+
+## FR-unmapped-135 优雅降级
+变更：2026-06-09-local-daemon
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-09-local-daemon/requirements.md#FR-09
+最近确认：98d3e56dd
+
+## FR-unmapped-136 密钥隔离
+变更：2026-06-09-local-daemon
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-09-local-daemon/requirements.md#FR-10
+最近确认：98d3e56dd
+
+## FR-unmapped-149 协议抽象层（方案B 核心）
+变更：2026-06-14-2026-06-13-daemon-nodejs-rewrite
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 12 种 agent provider 各自有不同的 stdout 协议（stream_json / json_rpc / jsonl / ndjson / t；When TaskRunner 按 provider 取对应 `ProtocolAdapter` 开发者只新增一个 `ProtocolAdapter` 实现；Then adapter 的 `parse(line)` 将原始行转为统一 `AgentEvent`（text/tool_use/tool_result/error/co
+全文：.sillyspec/changes/archive/2026-06-14-2026-06-13-daemon-nodejs-rewrite/requirements.md#FR-01
+最近确认：4a456728a
+
+## FR-unmapped-150 provider → protocol 映射
+变更：2026-06-14-2026-06-13-daemon-nodejs-rewrite
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given provider 名称；When 调用 `getBackend(provider)`；Then 按 `PROTOCOL_PROVIDERS` 映射（stream_json:[claude,gemini,cursor] / json_rpc:[codex,h
+全文：.sillyspec/changes/archive/2026-06-14-2026-06-13-daemon-nodejs-rewrite/requirements.md#FR-02
+最近确认：4a456728a
+
+## FR-unmapped-151 通信契约对齐（G-02，P0）
+变更：2026-06-14-2026-06-13-daemon-nodejs-rewrite
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given backend 的 `protocol.py` 定义的消息常量 WS 断线；When daemon 发送/接收 WS 消息 触发重连
+全文：.sillyspec/changes/archive/2026-06-14-2026-06-13-daemon-nodejs-rewrite/requirements.md#FR-03
+最近确认：4a456728a
+
+## FR-unmapped-152 lease 生命周期
+变更：2026-06-14-2026-06-13-daemon-nodejs-rewrite
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given daemon 收到 `task_available`；When 执行一次任务；Then 完整走通 `claim(拿 claim_token) → start → 流式 messages(submit) → complete(带 patch+stat
+全文：.sillyspec/changes/archive/2026-06-14-2026-06-13-daemon-nodejs-rewrite/requirements.md#FR-04
+最近确认：4a456728a
+
+## FR-unmapped-153 凭证管理（0600）
+变更：2026-06-14-2026-06-13-daemon-nodejs-rewrite
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 工具配置含 `{{USER_GITHUB_TOKEN}}` 占位符；When 渲染环境变量；Then 优先从 `~/.sillyhub/daemon/credentials.json` 取值，次取环境变量；凭证文件写入后权限为 `0600`（POSIX）。
+全文：.sillyspec/changes/archive/2026-06-14-2026-06-13-daemon-nodejs-rewrite/requirements.md#FR-05
+最近确认：4a456728a
+
+## FR-unmapped-154 workspace git mirror
+变更：2026-06-14-2026-06-13-daemon-nodejs-rewrite
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 任务携带 repo_url + branch；When 准备工作区；Then 执行 git mirror / pull --ff-only，执行后 collect git diff 生成 patch + files_changed；Win
+全文：.sillyspec/changes/archive/2026-06-14-2026-06-13-daemon-nodejs-rewrite/requirements.md#FR-06
+最近确认：4a456728a
+
+## FR-unmapped-155 agent 检测（12 provider）
+变更：2026-06-14-2026-06-13-daemon-nodejs-rewrite
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 本机环境；When daemon 启动检测；Then 对 12 种 provider 按优先级（env 覆盖 → PATH 查找 → 标记不可用）探测，做 `--version` 与最低版本校验，每个检测到的 ag
+全文：.sillyspec/changes/archive/2026-06-14-2026-06-13-daemon-nodejs-rewrite/requirements.md#FR-07
+最近确认：4a456728a
+
+## FR-unmapped-156 stdin control_request 应答
+变更：2026-06-14-2026-06-13-daemon-nodejs-rewrite
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 子进程（如 stream_json/claude）通过 stdin 发出 control_request；When backend 等待批准；Then daemon 保持 stdin 开启并按策略应答（自动批准工具使用），避免子进程 hang。
+全文：.sillyspec/changes/archive/2026-06-14-2026-06-13-daemon-nodejs-rewrite/requirements.md#FR-08
+最近确认：4a456728a
+
+## FR-unmapped-157 CLI（commander）
+变更：2026-06-14-2026-06-13-daemon-nodejs-rewrite
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 用户在终端；When 执行 `start / stop / status / logs`；Then 与 Python 版（Click）命令名、配置项（--server/--token）、PID 文件、日志文件路径一致。
+全文：.sillyspec/changes/archive/2026-06-14-2026-06-13-daemon-nodejs-rewrite/requirements.md#FR-09
+最近确认：4a456728a
+
+## FR-unmapped-158 增量可交付（G-04）
+变更：2026-06-14-2026-06-13-daemon-nodejs-rewrite
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 任一 Wave 完成；When 验收；Then `tsc` 编译通过 + `vitest` 该 Wave 单测全绿即可推进，不依赖后续 Wave。
+全文：.sillyspec/changes/archive/2026-06-14-2026-06-13-daemon-nodejs-rewrite/requirements.md#FR-10
+最近确认：4a456728a
+
+## FR-unmapped-183 Admin 签发 API Key
+变更：2026-06-16-daemon-api-key
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-16-daemon-api-key/requirements.md#FR-01
+最近确认：98d3e56dd
+
+## FR-unmapped-184 Admin 列出 API Keys
+变更：2026-06-16-daemon-api-key
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-16-daemon-api-key/requirements.md#FR-02
+最近确认：98d3e56dd
+
+## FR-unmapped-185 Admin 吊销 API Key
+变更：2026-06-16-daemon-api-key
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-16-daemon-api-key/requirements.md#FR-03
+最近确认：98d3e56dd
+
+## FR-unmapped-186 API Key 鉴权（X-API-Key header）
+变更：2026-06-16-daemon-api-key
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-16-daemon-api-key/requirements.md#FR-04
+最近确认：98d3e56dd
+
+## FR-unmapped-187 鉴权 dependency header 优先级
+变更：2026-06-16-daemon-api-key
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-16-daemon-api-key/requirements.md#FR-05
+最近确认：98d3e56dd
+
+## FR-unmapped-188 API Key 持久化 last_used_at
+变更：2026-06-16-daemon-api-key
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-16-daemon-api-key/requirements.md#FR-06
+最近确认：98d3e56dd
+
+## FR-unmapped-189 daemon CLI --api-key 选项
+变更：2026-06-16-daemon-api-key
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-16-daemon-api-key/requirements.md#FR-07
+最近确认：98d3e56dd
+
+## FR-unmapped-190 daemon config.json 持久化 api_key
+变更：2026-06-16-daemon-api-key
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-16-daemon-api-key/requirements.md#FR-08
+最近确认：98d3e56dd
+
+## FR-unmapped-191 前端 API Keys 管理页
+变更：2026-06-16-daemon-api-key
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-16-daemon-api-key/requirements.md#FR-09
+最近确认：98d3e56dd
+
+## FR-unmapped-192 runtimes 页面启动命令优先用 API Key
+变更：2026-06-16-daemon-api-key
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-16-daemon-api-key/requirements.md#FR-10
+最近确认：98d3e56dd
+
+## FR-unmapped-236 Codex runtime 创建 interactive session
+变更：2026-06-23-2026-06-23-codex-interactive-session
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1、D-003@v1、D-005@v1、D-009@v1
+场景正文：
+- 场景：默认场景 — Given `/runtimes` 中存在在线 Codex runtime；When 用户在 Codex runtime 会话弹窗中发送首条消息；Then frontend 调用 `createSession({provider:"codex"})`
+全文：.sillyspec/changes/archive/2026-06-23-2026-06-23-codex-interactive-session/requirements.md#FR-01
+最近确认：3cace8c05
+
+## FR-unmapped-237 Codex 支持同一 session 多轮对话
+变更：2026-06-23-2026-06-23-codex-interactive-session
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1、D-003@v1、D-009@v1
+场景正文：
+- 场景：默认场景 — Given Codex `AgentSession` 已 active；When 用户发送第二条消息；Then frontend 调用 `injectSession(sessionId,prompt)`
+全文：.sillyspec/changes/archive/2026-06-23-2026-06-23-codex-interactive-session/requirements.md#FR-02
+最近确认：3cace8c05
+
+## FR-unmapped-238 Codex 支持运行中 interrupt
+变更：2026-06-23-2026-06-23-codex-interactive-session
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：默认场景 — Given Codex turn 正在运行且 driver 已收到 `turn/started`；When 用户点击打断；Then backend 下发 `SESSION_INTERRUPT`
+全文：.sillyspec/changes/archive/2026-06-23-2026-06-23-codex-interactive-session/requirements.md#FR-03
+最近确认：3cace8c05
+
+## FR-unmapped-239 Codex 输出进入现有日志与 SSE
+变更：2026-06-23-2026-06-23-codex-interactive-session
+状态：active
+摘要：默认场景
+依据决策：D-003@v1、D-004@v1
+场景正文：
+- 场景：默认场景 — Given Codex app-server 输出 agent message、tool use、tool result 或 error；When daemon 收到 JSON-RPC notification；Then Codex driver 将其归一化为 flat message
+全文：.sillyspec/changes/archive/2026-06-23-2026-06-23-codex-interactive-session/requirements.md#FR-04
+最近确认：3cace8c05
+
+## FR-unmapped-240 Codex session 支持 end 与历史回看
+变更：2026-06-23-2026-06-23-codex-interactive-session
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given Codex `AgentSession` 处于 active 或 running；When 用户点击结束会话；Then backend 下发 `SESSION_END`
+全文：.sillyspec/changes/archive/2026-06-23-2026-06-23-codex-interactive-session/requirements.md#FR-05
+最近确认：3cace8c05
+
+## FR-unmapped-241 Codex 支持 reopen 与 daemon recovery
+变更：2026-06-23-2026-06-23-codex-interactive-session
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1、D-003@v1、D-007@v1
+场景正文：
+- 场景：默认场景 — Given Codex ended/failed session 有 `agent_session_id` thread id Codex session 缺少 threa；When 用户点击继续对话或 daemon 启动恢复 尝试 reopen/recovery；Then backend 允许 provider `codex` reopen 系统不得伪造新 thread
+全文：.sillyspec/changes/archive/2026-06-23-2026-06-23-codex-interactive-session/requirements.md#FR-06
+最近确认：3cace8c05
+
+## FR-unmapped-242 frontend Codex runtime 不走 quick-chat
+变更：2026-06-23-2026-06-23-codex-interactive-session
+状态：active
+摘要：默认场景
+依据决策：D-005@v1
+场景正文：
+- 场景：默认场景 — Given runtime provider 为 `codex`；When `/runtimes` 弹窗渲染右侧会话区；Then 使用 `InteractiveSessionChatSection`
+全文：.sillyspec/changes/archive/2026-06-23-2026-06-23-codex-interactive-session/requirements.md#FR-07
+最近确认：3cace8c05
+
+## FR-unmapped-243 Codex 普通 approval 策略与 Claude Code 一致
+变更：2026-06-23-2026-06-23-codex-interactive-session
+状态：active
+摘要：默认场景
+依据决策：D-006@v1、D-008@v1
+场景正文：
+- 场景：默认场景 — Given Codex session 配置为 `manual_approval=true` 且 `ask_user_only=true` Codex session 配置；When app-server 发出 command/file/permission approval request app-server 发出 command/fil；Then daemon 按 ask-only 策略 allow-through 并记录 metadata daemon 发送 backend `PERMISSION_RE
+全文：.sillyspec/changes/archive/2026-06-23-2026-06-23-codex-interactive-session/requirements.md#FR-08
+最近确认：3cace8c05
+
+## FR-unmapped-244 Codex 用户输入请求复用现有 dialog 卡片
+变更：2026-06-23-2026-06-23-codex-interactive-session
+状态：active
+摘要：默认场景
+依据决策：D-006@v1、D-008@v1、D-010@v1
+场景正文：
+- 场景：默认场景 — Given Codex app-server 发出 `item/tool/requestUserInput` Codex app-server 发出复杂 MCP elici；When daemon 收到 server request daemon 处理该 request；Then daemon 归一化为现有 `AskUserDialogCard` 可渲染的 `questions/options` request fail-closed
+全文：.sillyspec/changes/archive/2026-06-23-2026-06-23-codex-interactive-session/requirements.md#FR-09
+最近确认：3cace8c05
+
+## FR-unmapped-245 Claude Code interactive 行为不回退
+变更：2026-06-23-2026-06-23-codex-interactive-session
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-006@v1、D-008@v1、D-009@v1
+场景正文：
+- 场景：默认场景 — Given provider 为 `claude`；When 用户创建、inject、interrupt、end、reopen、触发 AskUserQuestion；Then 现有 Claude Code 行为保持一致
+全文：.sillyspec/changes/archive/2026-06-23-2026-06-23-codex-interactive-session/requirements.md#FR-10
+最近确认：3cace8c05
+
+## FR-unmapped-284 daemon idle 自动回收默认禁用（D-001）
+变更：2026-06-25-2026-06-25-interactive-idle-timeout-fix
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-25-2026-06-25-interactive-idle-timeout-fix/requirements.md#FR-1
+最近确认：4337b8a51
+
+## FR-unmapped-285 idle 逃生口保留（D-001）
+变更：2026-06-25-2026-06-25-interactive-idle-timeout-fix
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-25-2026-06-25-interactive-idle-timeout-fix/requirements.md#FR-2
+最近确认：4337b8a51
+
+## FR-unmapped-286 scan 完成主动 end_session（D-002）
+变更：2026-06-25-2026-06-25-interactive-idle-timeout-fix
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-25-2026-06-25-interactive-idle-timeout-fix/requirements.md#FR-3
+最近确认：4337b8a51
+
+## FR-unmapped-287 stage 完成主动 end_session（D-002）
+变更：2026-06-25-2026-06-25-interactive-idle-timeout-fix
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-25-2026-06-25-interactive-idle-timeout-fix/requirements.md#FR-4
+最近确认：4337b8a51
+
+## FR-unmapped-288 多轮对话不自动 end（D-002@v1 边界）
+变更：2026-06-25-2026-06-25-interactive-idle-timeout-fix
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-25-2026-06-25-interactive-idle-timeout-fix/requirements.md#FR-5
+最近确认：4337b8a51
+
+## FR-unmapped-289 完成驱动 end 失败不阻塞 lease（D-002@v1 容错）
+变更：2026-06-25-2026-06-25-interactive-idle-timeout-fix
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-25-2026-06-25-interactive-idle-timeout-fix/requirements.md#FR-6
+最近确认：4337b8a51
+
+## FR-unmapped-290 手动终止链路保持不变（D-003）
+变更：2026-06-25-2026-06-25-interactive-idle-timeout-fix
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-25-2026-06-25-interactive-idle-timeout-fix/requirements.md#FR-7
+最近确认：4337b8a51
+
+## FR-unmapped-291 WorkspaceCreate 支持 spec_strategy 字段
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+依据决策：D-001@v1、D-004@v1
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-01
+最近确认：98d3e56dd
+
+## FR-unmapped-292 daemon-client 创建时 strategy 落 spec_workspaces
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+依据决策：D-001@v1、D-003@v1、D-004@v1
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-02
+最近确认：98d3e56dd
+
+## FR-unmapped-293 strategy 经 scan lease payload 透传（backend→daemon）
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+依据决策：D-001@v1
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-03
+最近确认：98d3e56dd
+
+## FR-unmapped-294 daemon 接收 specStrategy
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+依据决策：D-001@v1
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-04
+最近确认：98d3e56dd
+
+## FR-unmapped-295 pullSpecBundle platform-managed 分支现状回归
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+依据决策：D-004@v1
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-05
+最近确认：98d3e56dd
+
+## FR-unmapped-296 pullSpecBundle repo-mirrored 分支单次导入
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+依据决策：D-002@v1
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-06
+最近确认：98d3e56dd
+
+## FR-unmapped-297 pullSpecBundle repo-native 分支建 junction
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+依据决策：D-005@v1
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-07
+最近确认：98d3e56dd
+
+## FR-unmapped-298 junction 生命周期（复用/降级）
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-08
+最近确认：98d3e56dd
+
+## FR-unmapped-299 repo-native rm 防误删守卫
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-09
+最近确认：98d3e56dd
+
+## FR-unmapped-300 packSpecDir 穿 junction + postSpecSync 三策略都走
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+依据决策：D-005@v1
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-10
+最近确认：98d3e56dd
+
+## FR-unmapped-301 前端创建表单 strategy 选项
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+依据决策：D-004@v1、D-005@v1
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-11
+最近确认：98d3e56dd
+
+## FR-unmapped-302 AgentRun.spec_strategy 读真实值
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+依据决策：D-001@v1
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-12
+最近确认：98d3e56dd
+
+## FR-unmapped-303 model.py repo-mirrored 注释更新
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+依据决策：D-002@v1
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-13
+最近确认：98d3e56dd
+
+## FR-unmapped-304 daemon-client 详情页扫描入口（首次/重新 scan 触发）
+变更：2026-06-28-daemon-client-spec-sync-strategy
+状态：active
+摘要：（无场景名）
+依据决策：D-006@v1
+全文：.sillyspec/changes/archive/2026-06-28-daemon-client-spec-sync-strategy/requirements.md#FR-14
+最近确认：98d3e56dd
+
+## FR-unmapped-305 开启子代理 text/thinking 流出（Claude SDK）
+变更：2026-06-28-daemon-subagent-transcript
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-006@v1
+场景正文：
+- 场景：默认场景 — Given 主 agent 在 Claude interactive session 中调用 Task/Agent tool 派生子代理；When `ClaudeSdkDriver.start()` 设置 `options.forwardSubagentText = true`；Then 子代理的 text/thinking 作为带 `parent_tool_use_id` 的 assistant/user message 经主流 query g
+全文：.sillyspec/changes/archive/2026-06-28-daemon-subagent-transcript/requirements.md#FR-01
+最近确认：f7f73d86c
+
+## FR-unmapped-306 子代理消息归属识别与原样透传
+变更：2026-06-28-daemon-subagent-transcript
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-008@v1
+场景正文：
+- 场景：默认场景 — Given daemon consume 收到一条带 `parent_tool_use_id` 非空的 SDK message（assistant 或 user）；When `_onMessage` 处理并经 `onTurnMessage` 转发；Then msg 顶层保留 `parent_tool_use_id`/`subagent_type`/`task_description`（原样，不剥离），backend
+全文：.sillyspec/changes/archive/2026-06-28-daemon-subagent-transcript/requirements.md#FR-02
+最近确认：f7f73d86c
+
+## FR-unmapped-307 partial buffer 按 parent_tool_use_id 分桶隔离
+变更：2026-06-28-daemon-subagent-transcript
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given 主 agent 与一个或多个子代理在同一 interactive session 并发产出 partial（streaming delta）；When `_bufferPartial` / `_clearPartialBufferSync` / `_flushPartial` / `_emitOverrideS；Then 各自按 `parentKey = parent_tool_use_id ?? 'main'` 独立分桶；子代理完整 assistant message 只清自己
+全文：.sillyspec/changes/archive/2026-06-28-daemon-subagent-transcript/requirements.md#FR-03
+最近确认：f7f73d86c
+
+## FR-unmapped-308 agentSessionId 不被子代理 init 覆盖
+变更：2026-06-28-daemon-subagent-transcript
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given 主 session 已写入 `agentSessionId`（主 system/init 先到），随后子代理 system/init 到达；When `_onMessage` 处理子代理 system/init；Then 直接跳过（`parent_tool_use_id` 非空守卫 + 现有 `===undefined` 守卫），主 session resume key 不被覆盖
+全文：.sillyspec/changes/archive/2026-06-28-daemon-subagent-transcript/requirements.md#FR-04
+最近确认：f7f73d86c
+
+## FR-unmapped-309 depth 维护与透传
+变更：2026-06-28-daemon-subagent-transcript
+状态：active
+摘要：默认场景
+依据决策：D-007@v1
+场景正文：
+- 场景：默认场景 — Given `SessionState.subagentDepth: Map<tool_use_id, depth>`；When `_onMessage` 处理 assistant message（含 tool_use blocks）与子代理消息
+全文：.sillyspec/changes/archive/2026-06-28-daemon-subagent-transcript/requirements.md#FR-05
+最近确认：f7f73d86c
+
+## FR-unmapped-310 agent_run_logs 加归属列 + migration
+变更：2026-06-28-daemon-subagent-transcript
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given `agent_run_logs` 表（现有无归属列）；When 执行 alembic migration；Then 加 `parent_tool_use_id VARCHAR(200) NULL` / `subagent_type VARCHAR(100) NULL` / `
+全文：.sillyspec/changes/archive/2026-06-28-daemon-subagent-transcript/requirements.md#FR-06
+最近确认：f7f73d86c
+
+## FR-unmapped-311 _extract_sdk_messages 每条注入归属 + 落库
+变更：2026-06-28-daemon-subagent-transcript
+状态：active
+摘要：默认场景
+依据决策：D-008@v1
+场景正文：
+- 场景：默认场景 — Given backend 收到 daemon 透传的 SDK message（带 parent_tool_use_id/subagent_type/depth）；When `_extract_sdk_messages` 展开为 flat records 且 `submit_messages` 落库；Then **每条** flat record 都带 parent_tool_use_id/subagent_type/depth（非首条 stamp，D-008）；落库
+全文：.sillyspec/changes/archive/2026-06-28-daemon-subagent-transcript/requirements.md#FR-07
+最近确认：f7f73d86c
+
+## FR-unmapped-312 前端徽标 + 深度渲染
+变更：2026-06-28-daemon-subagent-transcript
+状态：active
+摘要：默认场景
+依据决策：D-005@v1
+场景正文：
+- 场景：默认场景 — Given 前端收到带归属列的 `agent_run_logs` 行；When `agent-log-viewer` / `logsToTurns` 渲染；Then `subagent_type` 非空 → 行首渲染 `[子代理:<subagent_type>]` 徽标（中文）；`depth > 0` → 按 depth 缩
+全文：.sillyspec/changes/archive/2026-06-28-daemon-subagent-transcript/requirements.md#FR-08
+最近确认：f7f73d86c
+
+## FR-unmapped-313 向后兼容
+变更：2026-06-28-daemon-subagent-transcript
+状态：active
+摘要：默认场景
+依据决策：D-004@v1、D-005@v1
+场景正文：
+- 场景：默认场景 — Given 历史 `agent_run_logs` 行（归属列 NULL）或未升级 daemon 的旧路径（msg 无归属字段）；When 前端渲染；Then 按 main agent 渲染（parent=null/depth=NULL→0），行为与现状一致
+全文：.sillyspec/changes/archive/2026-06-28-daemon-subagent-transcript/requirements.md#FR-09
+最近确认：f7f73d86c
+
+## FR-unmapped-323 daemon register 上报版本
+变更：2026-07-04-2026-07-04-daemon-version-management
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given daemon 启动并以 release 构建（DAEMON_VERSION=语义版本，BUILD_ID=git SHA） daemon 为 dev 构建（BUI；When daemon 调 POST /api/daemon/register register；Then 请求体含 `daemon_version`（语义版本）+ `daemon_build_id`（SHA） 请求体含 `daemon_version`，`daemo
+全文：.sillyspec/changes/archive/2026-07-04-2026-07-04-daemon-version-management/requirements.md#FR-01
+最近确认：3849dbf33
+
+## FR-unmapped-324 daemon heartbeat 上报版本
+变更：2026-07-04-2026-07-04-daemon-version-management
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given daemon 已注册且在线；When daemon 周期性调 heartbeat（HTTP 或 WS）；Then payload 含 `daemon_version` + `daemon_build_id`
+全文：.sillyspec/changes/archive/2026-07-04-2026-07-04-daemon-version-management/requirements.md#FR-02
+最近确认：3849dbf33
+
+## FR-unmapped-325 backend 持久化 daemon 版本
+变更：2026-07-04-2026-07-04-daemon-version-management
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given backend 收到带 daemon_version/daemon_build_id 的 register/heartbeat 收到旧 daemon 不带版本字；When service 处理 upsert daemon_instances upsert；Then daemon_instances.version = 语义版本，daemon_instances.build_id = SHA 被写入 version/buil
+全文：.sillyspec/changes/archive/2026-07-04-2026-07-04-daemon-version-management/requirements.md#FR-03
+最近确认：3849dbf33
+
+## FR-unmapped-326 backend DTO 返回 daemon 版本
+变更：2026-07-04-2026-07-04-daemon-version-management
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given daemon_instances 已存 version/build_id；When 前端调 GET /api/daemon/runtimes/page 或 GET /api/daemon/instances；Then 响应每项含 daemon_version/daemon_build_id（runtime 行）或 version/build_id（instance 行）
+全文：.sillyspec/changes/archive/2026-07-04-2026-07-04-daemon-version-management/requirements.md#FR-04
+最近确认：3849dbf33
+
+## FR-unmapped-327 GET /api/daemon/version 返回 latest 双字段
+变更：2026-07-04-2026-07-04-daemon-version-management
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 部署 bundle 提取失败 self-update 端点 POST /runtimes/{id}/self-update；When 前端调 GET /api/daemon/version；Then 响应含 `latest_version`（语义版本）+ `latest_build_id`（SHA），保留旧 latest/minRequired/downlo
+全文：.sillyspec/changes/archive/2026-07-04-2026-07-04-daemon-version-management/requirements.md#FR-05
+最近确认：3849dbf33
+
+## FR-unmapped-328 前端展示 daemon 版本 + 徽标
+变更：2026-07-04-2026-07-04-daemon-version-management
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 管理员打开 runtimes 管理页 runtime.daemon_build_id == latest.latest_build_id（且非 dev/unkn；When runtime 列表渲染；Then 每个 runtime 行显示其 daemon 版本号 + SHA 短码 + 徽标 显示「最新」徽标 显示「可升级」徽标 显示「未知」徽标
+全文：.sillyspec/changes/archive/2026-07-04-2026-07-04-daemon-version-management/requirements.md#FR-06
+最近确认：3849dbf33
+
+## FR-unmapped-329 前端升级按钮调 self-update
+变更：2026-07-04-2026-07-04-daemon-version-management
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given runtime 行显示「可升级」或「未知」，且 runtime 在线 self-update 端点返回 DaemonRuntimeOffline；When 管理员点击「升级到最新版」
+全文：.sillyspec/changes/archive/2026-07-04-2026-07-04-daemon-version-management/requirements.md#FR-07
+最近确认：3849dbf33
+
+## FR-unmapped-330 前端 offline 禁用升级按钮
+变更：2026-07-04-2026-07-04-daemon-version-management
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given runtime 离线；Then 升级按钮禁用（disabled），不可点击
+全文：.sillyspec/changes/archive/2026-07-04-2026-07-04-daemon-version-management/requirements.md#FR-08
+最近确认：3849dbf33
+
+## FR-unmapped-331 兼容旧 daemon
+变更：2026-07-04-2026-07-04-daemon-version-management
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 已部署的旧 daemon（不上报版本字段）；When 它 register/heartbeat；Then backend 不报错（字段 Optional），version/build_id 存 NULL，前端显示「未知」
+全文：.sillyspec/changes/archive/2026-07-04-2026-07-04-daemon-version-management/requirements.md#FR-09
+最近确认：3849dbf33
+
+## FR-unmapped-343 daemon 停止写 `.sillyspec-platform.json`
+变更：2026-07-07-2026-07-07-platform-json-contract-align
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-07-07-2026-07-07-platform-json-contract-align/requirements.md#FR-01
+最近确认：af41fac1d
+
+## FR-unmapped-344 `spec_version` 状态独立文件
+变更：2026-07-07-2026-07-07-platform-json-contract-align
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-07-07-2026-07-07-platform-json-contract-align/requirements.md#FR-02
+最近确认：af41fac1d
+
+## FR-unmapped-345 保鲜读写迁移到新位置
+变更：2026-07-07-2026-07-07-platform-json-contract-align
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-07-07-2026-07-07-platform-json-contract-align/requirements.md#FR-03
+最近确认：af41fac1d
+
+## FR-unmapped-346 `hasUnsyncedLocalChanges` 读新位置
+变更：2026-07-07-2026-07-07-platform-json-contract-align
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-07-07-2026-07-07-platform-json-contract-align/requirements.md#FR-04
+最近确认：af41fac1d
+
+## FR-unmapped-347 dead code 清理
+变更：2026-07-07-2026-07-07-platform-json-contract-align
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-07-07-2026-07-07-platform-json-contract-align/requirements.md#FR-05
+最近确认：af41fac1d
+
+## FR-unmapped-387 前端按操作系统自动检测并显示对应安装命令
+变更：2026-07-15-2026-07-14-daemon-install-os-aware
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given 用户打开 `/runtimes` 页面且 `InstallDaemonBlock` 已在客户端 mount；When 读取 `navigator.userAgent` 判定 OS（`/Win/` → Windows，其余 → unix）；Then 默认显示对应平台的安装命令（Windows → PowerShell 一行；unix → curl\|bash），首屏不渲染命令以避免 hydration 不一
+全文：.sillyspec/changes/archive/2026-07-15-2026-07-14-daemon-install-os-aware/requirements.md#FR-01
+最近确认：af41fac1d
+
+## FR-unmapped-388 Windows 显示 PowerShell 一行（后端动态内嵌 server_url）
+变更：2026-07-15-2026-07-14-daemon-install-os-aware
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-003@v1
+场景正文：
+- 场景：默认场景 — Given OS 选中为 Windows 且 `serverUrl = window.location.origin` 已就绪；When 渲染 Windows 命令；Then 显示 `irm <serverUrl>/daemon/install.ps1 | iex`，并附琥珀提示「在 PowerShell 或 cmd 中运行」；复制按
+全文：.sillyspec/changes/archive/2026-07-15-2026-07-14-daemon-install-os-aware/requirements.md#FR-02
+最近确认：af41fac1d
+
+## FR-unmapped-389 提供 OS 手动切换开关
+变更：2026-07-15-2026-07-14-daemon-install-os-aware
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given `InstallDaemonBlock` 展开；When 用户点击「macOS / Linux」或「Windows」切换按钮；Then 命令与提示切换为对应平台；默认选中值跟随 FR-01 自动检测，可被手动覆盖
+全文：.sillyspec/changes/archive/2026-07-15-2026-07-14-daemon-install-os-aware/requirements.md#FR-03
+最近确认：af41fac1d
+
+## FR-unmapped-390 macOS / Linux 命令保持现状
+变更：2026-07-15-2026-07-14-daemon-install-os-aware
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given OS 选中为 unix；When 渲染命令；Then 显示 `curl -fsSL <serverUrl>/daemon/install.sh | bash -s -- --server-url <serverUr
+全文：.sillyspec/changes/archive/2026-07-15-2026-07-14-daemon-install-os-aware/requirements.md#FR-04
+最近确认：af41fac1d
+
+## FR-unmapped-391 install.ps1 复刻 install.sh 全逻辑（含 mcp-server.js）
+变更：2026-07-15-2026-07-14-daemon-install-os-aware
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-003@v1
+场景正文：
+- 场景：默认场景 — Given Windows 用户执行 `irm <serverUrl>/daemon/install.ps1 | iex`；When install.ps1 运行
+全文：.sillyspec/changes/archive/2026-07-15-2026-07-14-daemon-install-os-aware/requirements.md#FR-05
+最近确认：af41fac1d
+
+## FR-unmapped-392 后端 GET /daemon/install.ps1 公开端点
+变更：2026-07-15-2026-07-14-daemon-install-os-aware
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-003@v1
+场景正文：
+- 场景：默认场景 — Given backend 镜像已打包 install.ps1 模板 请求经前端 rewrite 反代到达 backend；When `GET /daemon/install.ps1`（无 /api 前缀） 推导 server_url；Then 返回 200 + `Content-Type: application/x-powershell`，body 为模板且 `{{SERVER_URL}}` 已替换
+全文：.sillyspec/changes/archive/2026-07-15-2026-07-14-daemon-install-os-aware/requirements.md#FR-06
+最近确认：af41fac1d
+
+## FR-unmapped-483 daemon 上报 started_at（覆盖 D-001@v1）
+变更：2026-08-05-daemon-start-time
+状态：active
+摘要：（无场景名）
+依据决策：D-001@v1
+全文：.sillyspec/changes/archive/2026-08-05-daemon-start-time/requirements.md#FR-01
+最近确认：b9b0454bb
+
+## FR-unmapped-484 backend 存储 + machines 返回 started_at（覆盖 D-001@v1, D-002@v1）
+变更：2026-08-05-daemon-start-time
+状态：active
+摘要：（无场景名）
+依据决策：D-001@v1、D-002@v1
+全文：.sillyspec/changes/archive/2026-08-05-daemon-start-time/requirements.md#FR-02
+最近确认：b9b0454bb
+
+## FR-unmapped-485 前端机器头显示 started_at
+变更：2026-08-05-daemon-start-time
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-08-05-daemon-start-time/requirements.md#FR-03
+最近确认：b9b0454bb
+
+## FR-unmapped-486 runtime 读端点返回 daemon 版本（覆盖 D-004@v1）
+变更：2026-08-05-daemon-version
+状态：active
+摘要：（无场景名）
+依据决策：D-004@v1
+全文：.sillyspec/changes/archive/2026-08-05-daemon-version/requirements.md#FR-01
+最近确认：9afbfe036
+
+## FR-unmapped-487 构建号每次 build 自动变化（覆盖 D-001@v1, D-002@v1）
+变更：2026-08-05-daemon-version
+状态：active
+摘要：（无场景名）
+依据决策：D-001@v1、D-002@v1
+全文：.sillyspec/changes/archive/2026-08-05-daemon-version/requirements.md#FR-02
+最近确认：9afbfe036
+
+## FR-unmapped-488 build-id.ts 移出版控后 tsc 不缺文件（覆盖 D-003@v1）
+变更：2026-08-05-daemon-version
+状态：active
+摘要：（无场景名）
+依据决策：D-003@v1
+全文：.sillyspec/changes/archive/2026-08-05-daemon-version/requirements.md#FR-03
+最近确认：9afbfe036

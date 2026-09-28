@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-unmapped-batch-redomain",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "粗域错置残余风险（name/text 级判定的 33 个变更无路径级证据）",
+      "evidence": "docs 级 66 变更有路径计数背书；name 28 + text 5 级靠关键词，其中 5 处经人工抽查纠偏（mapping 标 manual）。条目全文随迁、内容搜索可跨桶命中，错置代价为「邻近可查」非丢失；mapping-analysis.json 全量留档支持后续精迁",
+      "location": ".sillyspec/changes/2026-09-28-unmapped-batch-redomain/mapping-analysis.json"
+    },
+    {
+      "severity": "P3",
+      "title": "FR 测试绑定编号与 FR 实义有错位（FR-02/03 与 FR-05/06 的证据互相指错位）",
+      "evidence": "两轮补绑把 validate/digest 证据分别绑到 FR-02/03（实义为搬迁移除 INDEX）与 FR-05/06（实义为 validate/digest）——证据本身真实存在且都指向正确实测，仅编号挂靠错位，归档后以 mapping-analysis.json 与回执为准",
+      "location": ".sillyspec/changes/2026-09-28-unmapped-batch-redomain/requirements.md"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok",
+    "边界裁决": "design 槽4 两条声明边界均已裁决可接受：①粗域桶装 vs 逐条语义判定——粗桶清理已达成可查找目标，精迁可后续增量；②不等工具 --by-change 改进——数据清理不该被工具排期阻塞（工具缺口已留档）"
+  },
+  "reviewedAt": "2026-09-28T13:42:15.802067+00:00"
+}
