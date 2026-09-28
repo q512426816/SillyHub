@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-turn-nav-hover-flyout",
+  "reviewer": "subagent-recheck",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "P3",
+      "fr": "FR-04",
+      "title": "留档（不阻塞）：FR-04 触屏通道测试绑定措辞仍失真——page.test 45 用例是回归面非触屏点按通道绑定；FR-03 绑定槽亦未补引新增外部收起用例",
+      "summary": "首轮 low 项未修：FR-04 测试绑定仍指向 page.test.tsx 45 用例零改动（aria-label 契约回归面），未绑定到实际触屏通道用例；机制本身已由组件测试覆盖，仅记录失真。",
+      "evidence": "requirements.md 测试绑定 FR-04 槽原文仍为「frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx 45 用例零改动通过（aria-label 契约延续）；tsc/eslint 实测见 verify 输出」——该 45 用例是契约回归面（FR-06 面），与触屏 hover:none 点按展开/收起通道无直接对应；实际通道现由 turn-nav-list.test.tsx「pin 锁定常开（把手切换）…」「评审 P1：pin 展开时点击组件外部 → 收起（触屏关闭通道）」「评审 P1：点击组件内部（浮层行）不触发外部收起」覆盖，绑定槽未引用。同类：FR-03 绑定槽（「浮层行点击跳转…＋刻度点击…＋activeTurnKey…」）也未补引新增的两条外部收起用例。按首轮裁决口径留 P3 不阻塞。",
+      "location": ".sillyspec/changes/2026-09-28-turn-nav-hover-flyout/requirements.md 测试绑定 FR-04 槽（及 FR-03 槽）"
+    }
+  ],
+  "dimensionNotes": {
+    "P1-FR03-外部收起": "已修复：turn-nav-list.tsx L149-164 新增 rootRef（L246 挂根 div）+ pointerdown 外部收起 effect——expanded 门控注册、root.contains(target) 判内、命中即 clearTimers+setPinned(false)+setHoverOpen(false)（pin/悬停两态同收）、依赖数组 [expanded, clearTimers] 含卸载解绑；测试 L219-227「评审 P1：pin 展开时点击组件外部 → 收起」（pointerDown(document.body) → 浮层消失且 aria-expanded=false）与 L229-235「点击组件内部（浮层行）不触发外部收起」正反两用例齐备，实现↔测试↔FR-03 三面闭环。",
+    "medium-浮层滚动联动": "已修复：active effect（L220-236）查询根由 railRef 改为 rootRef（根 div 同时含窄轨刻度 L291 与浮层行 L360，浮层渲染在根 div 子树内 L329），querySelectorAll 循环对全部 [data-turn-key] 命中（CSS.escape 转义）逐个 scrollIntoView({block:\"nearest\"})，浮层展开时行侧随 active 联动滚入；L217-218/L227-228 注释改为「窄轨刻度与浮层行共用 [data-turn-key]——两者都滚入」与实现一致，注释失实问题消除；测试 L295-314 轨内断言（callTimes=1 + instances[0]=ticks[0]）在浮层未展开场景下与实现一致。浮层展开态的行侧滚动分支无专属用例（静态核对代码路径正确），残留微瑕不阻塞。",
+    "残留微瑕（不进 findings）": "① 文件头 L19 括注「active 联动仅滚自身轨内」措辞偏窄（现亦滚浮层行，但两者均组件自身 DOM，主断言「不操作聊天区 DOM/滚动」仍成立）；② railRef（L213 声明、L278 挂载）已无读取方，属旧实现遗留死 ref（无害，不违反 tsc/eslint 门）。均为措辞/清理级，留作后续顺手处理。",
+    "首轮其余维度": "乱序/并发/切换/作用域四维首轮结论未受本轮修复影响（新增 pointerdown 监听为幂等布尔翻转，无新增时序/并发面）；本轮仅静态核对工作树实物，未重跑测试套件。"
+  },
+  "reviewedAt": "2026-09-28T10:03:25+08:00"
+}

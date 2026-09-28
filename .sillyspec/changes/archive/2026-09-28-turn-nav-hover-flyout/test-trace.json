@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-turn-nav-hover-flyout",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-28-turn-nav-hover-flyout:flow:FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/turn-nav-list.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-turn-nav-hover-flyout"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-28-turn-nav-hover-flyout:flow:FR-04",
+      "tests": [
+        "sessions/__tests__/page.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-turn-nav-hover-flyout"
+    }
+  ]
+}
