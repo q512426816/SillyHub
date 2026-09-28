@@ -14,7 +14,6 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ChangesOverviewCard } from "@/components/workspace/changes-overview-card";
-import { AgentLivenessOverviewCard } from "@/components/agent-log/agent-liveness-overview-card";
 import { WorkspaceHeroHeader } from "@/components/workspace/hero-header";
 import { MetaPanel, MetaPanelSection } from "@/components/primer";
 import { WorkspaceStatsRow } from "@/components/workspace/stats-row";
@@ -661,8 +660,9 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
         {/* 2026-09-27 visual-gap-fix：段②′ 两栏（原型 Repo 首页式骨架）——
             左主列=活跃变更总览（2026-09-02-changes-overview-card task-07 / FR-01·FR-06，
-            跨 workspace 只读健康监控卡：卡是门铃、变更中心是操作台），右栏=Agent 状态
-            总览（2026-09-07-agent-liveness-states / D-004 第二层：分组计数 + 在等你组跳转）。 */}
+            跨 workspace 只读健康监控卡：卡是门铃、变更中心是操作台），右栏=About 侧栏。
+            2026-09-28-remove-liveness-overview-card：右栏原「Agent 状态总览」卡已删
+            （liveness 上报链路未建立，恒显「未知」无信息量，排查结论见变更目录）。 */}
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
           <div>
             <ChangesOverviewCard workspaceId={workspaceId} />
@@ -676,7 +676,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
               </Link>
             </div>
           </div>
-          <AgentLivenessOverviewCard workspaceId={workspaceId} />
+          {/* 2026-09-28-remove-liveness-overview-card：原此处挂 <AgentLivenessOverviewCard>。 */}
           {/* 2026-09-27 visual-align-2：原型 About 侧栏——工作区静态档案
               （路径/技术栈/关联项目/状态/创建时间），数据全来自已加载 workspace。 */}
           <MetaPanel>
