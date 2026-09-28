@@ -177,7 +177,7 @@ agent 模块测试跑 SQLite（aiosqlite），FOR UPDATE 语法不被支持（�
 
 SDK 0.3.181（捆 CLI 2.1.181+）运行时确实发射 `system/task_started`（task_id+tool_use_id+description+subagent_type）、`task_notification`（status:completed|failed|stopped + output_file，~64s 量级延迟）、`task_updated`（patch.status/end_time）与 `background_tasks_changed`；**task_progress 短任务零发射**（"正在做什么"展示需回退 transcript 推导）。消费点：session-manager `_onMessage` system 分支（2026-08-27-background-subagent-progress task-03），持久化方言 `[TASK_*]` stdout 单行 JSON 行带 parent_tool_use_id。（来源：同变更 task-01 spike 静态+动态双实证）
 
-## 2026-08-27 — 会话 token 两套口径：计费量（Σ 跨调用可加）vs 上下文量（瞬时，取最近一次调用）
+## 2026-08-27 — 会话 token 两套口径：计费量（跨调用可加）vs 上下文量（瞬时，取最近一次调用）
 
 - **语义勘误**：Anthropic 原生 stream 事件里 `cache_read/cache_creation_input_tokens` 是**本调用**的缓存前缀量（replace 取最新 = 最近一次调用的缓存读取），不是"会话级累计快照"（ql-20260710-001 旧注释误读；batch stream-json.ts 实为 :498-511 逐调用 `+=`，:552/1143-1148 引用有误）。
 - **SDK result usage 聚合口径**（7 会话 28 轮 DB 实证，spike-r09.md）：`SDKResultSuccess.usage.input_tokens` = 该 query 内 Σ 逐调用 input；跨轮不累计（与 daemon 会话累计计数器是两个量）。

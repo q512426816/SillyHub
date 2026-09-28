@@ -20,6 +20,11 @@
 - basemodel|apperror|异常命名|分层|schema.py|service|请求内实例化|sqlmodel基类 → [backend 模块分层与基类/异常约定](conventions.md#backend-模块分层与基类异常约定routerserviceschema--basemodel--apperror)
 - sse|fetch-sse|eventsource|流式|ReadableStream|authorization → [前端 SSE 消费统一 fetch-sse：token 走 Authorization header，禁用 EventSource](conventions.md#前端-sse-消费统一-fetch-ssetoken-走-authorization-header禁用-eventsource)
 - tailwind|md:|断点|视口|容器断点|侧栏|grid-cols → [Tailwind md: 是视口断点非容器断点：侧栏内嵌组件禁用响应式前缀](conventions.md#tailwind-md-是视口断点非容器断点侧栏内嵌组件禁用响应式前缀)
+- alembic|migration|目录|stamp|版本号|DuplicateColumn|干净部署 → [2026-06-15 — Alembic migration 目录与 schema 领先版本号的处理](conventions.md#2026-06-15--alembic-migration-目录与-schema-领先版本号的处理)
+- resolveWindowsCmdShim|spawn|EINVAL|cmd-shim|windows|interactive driver|子进程 → [2026-06-24 — daemon 任何自 spawn 路径 Windows 必须 resolveWindowsCmdShim（.cmd/.bat/.ps1）](conventions.md#2026-06-24--daemon-任何自-spawn-路径-windows-必须-resolvewindowscmdshimcmdbatps1)
+- pydantic|派生字段|model_validate|model_copy|必填|ValidationError → [2026-07-08 — Pydantic 必填派生字段不能用 model_validate(ORM)+model_copy 两段式](conventions.md#2026-07-08--pydantic-必填派生字段不能用-model_validateormmodel_copy-两段式)
+- execFile|ENOENT|npm|全局 CLI|shell:true|cmd-shim|PATHEXT → [2026-08-19 — Windows 下 execFile 调 npm 全局 CLI 必 ENOENT，须 spawn+shell 或 cmd-shim 解析](conventions.md#2026-08-19--windows-下-execfile-调-npm-全局-cli-必-enoent须-spawnshell-或-cmd-shim-解析)
+- mcpServers|env|白名单|注入|claude.exe|MCP_SESSION_ID → [MCP server 子进程不继承 claude.exe 完整环境：env 必须放 mcpServers[*].env](conventions.md#mcp-server-子进程不继承-claudeexe-完整环境env-必须放-mcpserversenv)
 
 ## Patterns
 
@@ -33,22 +38,28 @@
 - base_ts|base_version|乐观锁|字典序|冲突|进度上行 → [platform_sync 两套乐观锁语义：base_ts 字典序与 base_version 整数版本](patterns.md#platform_sync-两套乐观锁语义base_ts-字典序与-base_version-整数版本)
 - spec|增量同步|manifest|fileop|spec-sync|spec-manifest|软删 → [Spec 文件增量同步协议：manifest 比对 + FileOp 上行 + apply_ops 单写者](patterns.md#spec-文件增量同步协议manifest-比对--fileop-上行--apply_ops-单写者)
 - change_write|代写|占坑|claim|daemon_change_writes|回灌|sync-manual → [Daemon 代写队列：占坑 commit + lease-polling claim + GC 回灌](patterns.md#daemon-代写队列占坑-commit--lease-polling-claim--gc-回灌)
+- facade|拆分|循环 import|lazy import|子包|patch 跟随|重构 → [2026-06-22 — 单类巨石拆 facade+子包的 import 策略（避免 module-level 循环 / 跨域调用 / 测试 patch 跟随）](patterns.md#2026-06-22--单类巨石拆-facade子包的-import-策略避免-module-level-循环--跨域调用--测试-patch-跟随)
+- codex|driver|provider-neutral|interactive|app-server|thread → [2026-06-24 — Codex Interactive Session 沉淀的通用经验（provider-neutral driver）](patterns.md#2026-06-24--codex-interactive-session-沉淀的通用经验provider-neutral-driver)
+- turn/completed|codex|收尾|收敛|parse|吞信号|卡死 → [2026-06-24 — codex turn 收敛强契约：turn/completed 不可被 parse 吞信号](patterns.md#2026-06-24--codex-turn-收敛强契约turncompleted-不可被-parse-吞信号)
+- aiosqlite|FOR UPDATE|部分唯一索引|IntegrityError|并发|懒建|唯一性 → [aiosqlite 不支持 SELECT FOR UPDATE：并发唯一性守卫用部分唯一索引+IntegrityError 捕获](patterns.md#aiosqlite-不支持-select-for-update并发唯一性守卫用部分唯一索引integrityerror-捕获)
+- task_started|task_notification|task_updated|SDK|后台任务|生命周期|0.3.181 → [Claude Agent SDK 0.3.181 的 task_* 生命周期系统消息可消费](patterns.md#claude-agent-sdk-03181-的-task_-生命周期系统消息可消费)
+- token|计费|上下文窗口|ctx_tokens|usage|口径|cache_read → [2026-08-27 — 会话 token 两套口径：计费量（跨调用可加）vs 上下文量（瞬时，取最近一次调用）](patterns.md#2026-08-27--会话-token-两套口径计费量跨调用可加vs-上下文量瞬时取最近一次调用)
 
 ## Known Issues
 - 导出|乱码|GBK|控制台码页|PYTHONIOENCODING|TOOL_RESULT|替换字符 → [会话日志 TOOL_RESULT 中文乱码（Windows 控制台码页，落库即坏不可导出还原）](known-issues.md#会话日志-tool_result-中文乱码windows-控制台码页落库即坏不可导出还原)
 
-- daemon|python|node|重写|typescript → [sillyhub-daemon 从 Python 重写为 Node.js](known-issues.md#sillyhub-daemon-于-2026-06-14-从-python-重写为-nodejs)
-- ci|hook|git-add|绕过|pretooluse → [CI hook 复合命令可绕过 claude PreToolUse 层](known-issues.md#ci-hook-复合命令可绕过-claude-pretooluse-层)
+- daemon|python|node|重写|typescript → [sillyhub-daemon 从 Python 重写为 Node.js](known-issues.md#-sillyhub-daemon-于-2026-06-14-从-python-重写为-nodejs)
+- ci|hook|git-add|绕过|pretooluse → [CI hook 复合命令可绕过 claude PreToolUse 层](known-issues.md#-ci-hook-复合命令可绕过-claude-pretooluse-层)
 - daemon|session|卡死|重启|recovery|已修复 → [daemon 重启 session 恢复已修复](known-issues.md#-daemon-重启-session-恢复已修复gap-83--commit-40e21d3)
-- agentrunlog|metadata|日志|submit-messages → [AgentRunLog 无 metadata 列](known-issues.md#agentrunlog-无-metadata-列三层日志-metadata-丢失)
-- daemon|实例|taskkill|pid → [本机可能存在多个 daemon 实例](known-issues.md#本机可能存在多个-daemon-实例)
+- agentrunlog|metadata|日志|submit-messages → [AgentRunLog 无 metadata 列](known-issues.md#-agentrunlog-无-metadata-列--三层日志-metadata-丢失)
+- daemon|实例|taskkill|pid → [本机可能存在多个 daemon 实例](known-issues.md#-本机可能存在多个-daemon-实例)
 - docker|backend|热重载|reload|rebuild|挂载 → [Docker backend 容器不热重载](known-issues.md#-docker-backend-容器不热重载挂载非-app无---reload)
 - healthcheck|busybox|frontend|已解决|node-fetch → [frontend healthcheck busybox 误报已解决](known-issues.md#-frontend-healthcheck-busybox-误报问题已解决commit-46591be0)
-- daemon|pnpm|overrides|claude-agent-sdk|二进制|钉死|0.3.181 → [daemon pnpm overrides 钉死 claude-agent-sdk 8 平台二进制](known-issues.md#-daemon-pnpm-overrides-把-claude-agent-sdk-8-平台二进制硬钉-0.3.181)
+- daemon|pnpm|overrides|claude-agent-sdk|二进制|钉死|0.3.181 → [daemon pnpm overrides 钉死 claude-agent-sdk 8 平台二进制](known-issues.md#-daemon-pnpm-overrides-把-claude-agent-sdk-8-平台二进制硬钉-03181)
 - frontend|react-query|已启用|queryclient|apifetch|zustand → [frontend react-query 已正式启用](known-issues.md#-frontend-react-query-已正式启用2026-07-openapi-类型迁移commit-fecaa155--29b3c86b)
 - frontend|lockfile|antd|shadcn|双ui库 → [frontend 与 daemon 各自独立 lockfile + 双 UI 库并存](known-issues.md#-frontend-与-daemon-各自独立-lockfile--双-ui-库并存)
 - audit|audit_hooks|审计|auditlog|测试|生产 → [audit_hooks 只在测试 lifespan 注册](known-issues.md#-audit_hooks-只在测试-lifespan-注册生产审计要业务代码显式写-auditlog)
-- docker|postgres|pg|端口|映射|alembic|连不上 → [全 Docker 部署本地 PG 容器端口未映射 host](known-issues.md#-全-docker-部署本地-pg-容器端口未映射-hostrun-alembicpytest-连不上)
+- docker|postgres|pg|端口|映射|alembic|连不上 → [全 Docker 部署本地 PG 容器端口未映射 host](known-issues.md#-全-docker-部署本地-pg-容器端口未映射-hosthost-跑-alembicpytest-连不上)
 - export-excel|路由顺序|422|uuid|路径参数|item_id|fastapi|ppm|导出|字面量 → [ppm export-excel 路由必须前置 item_id](known-issues.md#-ppm-导出-export-excel-路由必须前置于-item_id-路由)
 - alembic|migration|多head|revision|crash|并行 → [alembic 并行变更撞 revision 多 head：启动 crash-loop](known-issues.md#-alembic-并行变更撞-revision-多-head启动-crash-loop)
 - gen:types|api-types|漂移|e2e|playwright|puppeteer|闸门 → [前端测试闸门缺口：gen:types:check 未进 CI，E2E 零落地](known-issues.md#-前端测试闸门缺口gentypescheck-未进-cie2e-零落地)
@@ -57,6 +68,24 @@
 - worktree|gc|expires_at|租约|回收|泄漏 → [worktree 过期租约无自动 GC：expires_at 与索引闲置](known-issues.md#-worktree-过期租约无自动-gcexpires_at-与索引闲置)
 - spec_guardian|tool_gateway|死代码|run_guard|守护门 → [spec_guardian 死代码与 tool_gateway 注释失配：守护门从未在生产生效](known-issues.md#-spec_guardian-死代码与-tool_gateway-注释失配守护门从未在生产生效)
 - god 文件|daemon.ts|session-manager|task-runner|大文件 → [daemon 三个 3000+ 行 god 文件（daemon.ts 4047 / session-manager.ts 3897 / task-runner.ts 3156）](known-issues.md#-daemon-三个-3000-行-god-文件daemonts-4047--session-managerts-3897--task-runnerts-3156)
+- sync_stage_status|dual-db|change_key|spec_root|root_path → [🟢 2026-06-05 — sync_stage_status 找不到 change_key 的 dual-db 问题（已修复）](known-issues.md#-2026-06-05--sync_stage_status-找不到-change_key-的-dual-db-问题已修复)
+- auto_dispatch|has_pending_step|stage_completed|调度 → [🟢 2026-06-05 — auto_dispatch_next_step 只在 has_pending_step 时触发（已修复）](known-issues.md#-2026-06-05--auto_dispatch_next_step-只在-has_pending_step-时触发已修复)
+- complete_stage|reparse|文档列表|change_documents → [🟢 2026-06-05 — complete_stage 不调用 reparse 导致文档不全（已修复）](known-issues.md#-2026-06-05--complete_stage-不调用-reparse-导致文档不全已修复)
+- login_enabled|get_current_user|disable-login|token 失效|安全 → [🟢 2026-06-17 — login_enabled 必须在 get_current_user 检查，不能只在 login 入口（commit d62ec975）](known-issues.md#-2026-06-17--login_enabled-必须在-get_current_user-检查不能只在-login-入口commit-d62ec975)
+- alembic.ini|em-dash|gbk|configparser|unicode → [🟢 2026-06-19 — alembic.ini 注释含 UTF-8 em-dash 导致 Windows gbk configparser 崩溃（已修复）](known-issues.md#-2026-06-19--alembicini-注释含-utf-8-em-dash-导致-windows-gbk-configparser-崩溃已修复)
+- cursor-agent|ps1|版本目录|正则|待识别 → [🟢 2026-06-20 — cursor-agent 官方 ps1 版本目录正则不匹配新版目录命名，导致 cursor 完全不可用（已修复）](known-issues.md#-2026-06-20--cursor-agent-官方-ps1-版本目录正则不匹配新版目录命名导致-cursor-完全不可用已修复)
+- etl|迁移顺序|maps|map_fk|孤儿|resync → [🟢 2026-06-21 — ETL 迁移函数执行顺序依赖 maps 构建时机，ppm 模块整表成孤儿（已修复）](known-issues.md#-2026-06-21--etl-迁移函数执行顺序依赖-maps-构建时机ppm-模块整表成孤儿已修复)
+- allowed_roots|list_dir|cc|cwd|file-rpc → [🟡 2026-06-26 — daemon allowed_roots 只管 list_dir RPC，不管 CC 执行 cwd](known-issues.md#-2026-06-26--daemon-allowed_roots-只管-list_dir-rpc不管-cc-执行-cwd)
+- install.sh|镜像|下发|heredoc|baked|daemon_dist → [🟡 2026-06-30 — install.sh 改动需重建 backend 镜像才下发（baked into image）+ bash heredoc ${VAR} 转义陷阱](known-issues.md#-2026-06-30--installsh-改动需重建-backend-镜像才下发baked-into-image-bash-heredoc-var-转义陷阱)
+- rewrite|proxy|econnreset|sse|keepalive|build_id|git sha|分发 → [🟡 2026-07-01 — Next.js rewrite proxy 对长请求 socket hang up + daemon 分发以 git SHA 为版本号](known-issues.md#-2026-07-01--nextjs-rewrite-proxy-对长请求-socket-hang-up--daemon-分发以-git-sha-为版本号)
+- apt|deb.debian.org|digest 漂移|tuna|dockerfile → [🟢 2026-07-13 — backend rebuild apt 连不上 deb.debian.org（base image digest 漂移致 apt 缓存失效裸奔，已修复）](known-issues.md#-2026-07-13--backend-rebuild-apt-连不上-debdebianorgbase-image-digest-漂移致-apt-缓存失效裸奔已修复)
+- wsl|盘符|/mnt/e|win_to_unix_path|cmd bash|nvm → [🟢 2026-07-13 — install.sh WSL 下 1c/1d 盘符转换 bug（/e/ vs /mnt/e/）+ CMD bash 默认解析到 WSL（已修复）](known-issues.md#-2026-07-13--installsh-wsl-下-1c1d-盘符转换-buge-vs-mnte-cmd-bash-默认解析到-wsl已修复)
+- wsl|userprofile|用户名|mkdir|drvfs → [🟢 2026-07-13 — install.sh WSL 下 $USER ≠ Windows 用户名（拼 /mnt/c/Users/<name> 目录坑，已修复）](known-issues.md#-2026-07-13--installsh-wsl-下-user--windows-用户名拼-mntcusersname-目录坑已修复)
+- master_key|sillyspec_master_key|fromhex|cipher|500|hex → [🟢 2026-07-29 — SILLYSPEC_MASTER_KEY 非 hex 值致 get_cipher() 裸 ValueError 全模块 500（部署已修复）](known-issues.md#-2026-07-29--sillyspec_master_key-非-hex-值致-get_cipher-裸-valueerror-全模块-500部署已修复)
+- agentmission|session_id|判别口径|default_factory|查表 → [🟡 AgentMission.session_id 列非 NULL 不可信：判别口径须查表确认指向真实 AgentSession](known-issues.md#-agentmissionsession_id-列非-null-不可信判别口径须查表确认指向真实-agentsession)
+- 后台子代理|canusetool|fail-closed|running turn|死锁|宽限 → [🟡 2026-08-24 — 后台子代理脱离平台 running turn 后权限回调 fail-closed 死锁（已有宽限缓解）](known-issues.md#-2026-08-24--后台子代理脱离平台-running-turn-后权限回调-fail-closed-死锁已有宽限缓解)
+- sessions/events|路由顺序|422|uuid_parsing|多行装饰器|路由表断言 → [🟢 daemon sessions /events 字面量路由被 /sessions/{session_id} 参数路由吞掉（FastAPI 路由顺序，commit 0c7860f7）](known-issues.md#-daemon-sessions-events-字面量路由被-sessionssession_id-参数路由吞掉fastapi-路由顺序commit-0c7860f7)
+- antd v6|wrapperclassname|styles.container|vi.mock|桶导出|fullscreen → [🟡 2026-08-26 — antd v6 实测三坑：Image 无 wrapperClassName、Modal 语义 styles.container、枚举式 vi.mock 须随桶导出同步](known-issues.md#-2026-08-26--antd-v6-实测三坑image-无-wrapperclassnamemodal-语义-stylescontainer枚举式-vimock-须随桶导出同步)
 
 ## SillySpec Gotchas
 
@@ -70,6 +99,10 @@
 - sillyspec|execute|exec-run|review.json|残留|复用 → [exec-run ID 复用 review.json 残留](sillyspec-gotchas.md#execute-的-exec-run-id-可能复用旧目录reviewjson-残留需先-read-再覆盖)
 - sillyspec|plan|postcheck|多变更|resolvechangedir|空 progress → [plan postcheck 多变更校验错](sillyspec-gotchas.md#plan-postcheck-多变更环境校验错变更progressjson-空--sort-reverse)
 - sillyspec|reopen|from-step|done|回填|completed|重开 → [reopen --from-step N 后 --done 会把后续未执行步骤回填 completed](sillyspec-gotchas.md#reopen---from-step-n-后---done-会把后续未执行步骤回填-completed)
+- quick|done|边界审计|危险文件|force-baseline|并发会话|脏文件 → [quick --done 边界审计把并发会话的 .sillyspec 脏文件判危险（--force-baseline 但不暂存）](sillyspec-gotchas.md#quick---done-边界审计把并发会话的-sillyspec-脏文件判危险--force-baseline-但不暂存)
+- worktree|doctor|junction|installed|静默失败|复核 → [worktree doctor 标记 installed 但 node_modules junction 实际未建](sillyspec-gotchas.md#worktree-doctor-标记-installed-但-node_modules-junction-实际未建)
+- mklink|junction|msys|powershell|new-item|cygpath → [Git Bash 下修 worktree node_modules junction：cmd mklink 传参必败，用 PowerShell New-Item Junction](sillyspec-gotchas.md#git-bash-下修-worktree-node_modules-junctioncmd-mklink-传参必败用-powershell-new-item-junction)
+- worktree|verify-result|产物分裂|主仓库|模块文档|回写 → [worktree 内执行回归/文档任务时 SillySpec 产物与主仓库分裂](sillyspec-gotchas.md#worktree-内执行回归文档任务时-sillyspec-产物与主仓库分裂)
 
 ## Testing Gotchas
 
@@ -79,10 +112,18 @@
 - antd|datepicker|dayjs|locale|中文|日历表头 → [antd v5 DatePicker dayjs locale](testing-gotchas.md#前端antd-v5-datepicker-周几日历表头显示英文仅-configprovider-locale-不够)
 - antd|autoletterspacing|中文按钮|getbyrole|字间空格 → [antd v5 autoLetterSpacing 字间空格](testing-gotchas.md#前端antd-v5-两字中文按钮-autoletterspacing-致-dom-字间空格getbyrole-匹配失败)
 - markdown-text|next/dynamic|ssr:false|jsdom|null|getbytext → [MarkdownText jsdom 渲染 null](testing-gotchas.md#前端markdowntext-用-nextdynamic-ssrfalsejsdom-测试同步-render-得-null)
+- cleanup_stale_runtimes|list_machines|心跳|online|offline|造数 → [后端：daemon 列表测试造 status 必须符合 cleanup_stale_runtimes 不变量（online ⟺ 心跳<45s）](testing-gotchas.md#后端daemon-列表测试造-status-必须符合-cleanup_stale_runtimes-不变量online--心跳45s)
+- 限流|429|login|跨用例|预存|create_access_token → [后端：auth login 限流跨用例累计致 admin 套件偶发 429（预存，非回归）](testing-gotchas.md#后端auth-login-限流跨用例累计致-admin-套件偶发-429预存非回归)
+- 契约测试|跨端|mock|camelcase|字段值|锚定真实输出|静默忽略 → [跨端：mock 各自绿但契约断裂——契约测试须锚定真实输出并断言字段值](testing-gotchas.md#跨端mock-各自绿但契约断裂契约测试须锚定真实输出并断言字段值)
+- daemon|vitest|include|tests/|src 不放测试 → [daemon：vitest include 仅 tests/**，src 内不放测试](testing-gotchas.md#daemonvitest-include-仅-testssrc-内不放测试)
+- daemon|集成验证|x-api-key|ws|403|userprofile|第二实例 → [daemon：本机集成验证 WS 鉴权只认 X-API-Key + USERPROFILE 隔离跑第二实例](testing-gotchas.md#daemon本机集成验证-ws-鉴权只认-x-api-key--userprofile-隔离跑第二实例)
+- daemon|测试目录|双目录|app/modules/daemon/tests|tests/modules/daemon → [后端：daemon 模块测试双目录惯例（app/modules/daemon/tests/ 为主）](testing-gotchas.md#后端daemon-模块测试双目录惯例appmodulesdaemontests-为主)
+- jsdom|avatar|avatarimage|window.image|objecturl|stub → [前端：jsdom 下 shadcn/Radix Avatar 的 AvatarImage 永不渲染，需 stub window.Image](testing-gotchas.md#前端jsdom-下-shadcnradix-avatar-的-avatarimage-永不渲染需-stub-windowimage)
+- git bash|e2e|/tmp|curl|json|sqlite|dev 后端 → [Git Bash 本地 e2e 验收环境坑：/tmp 路径分叉、curl 多行 JSON 传参、无 PG 起 dev 后端](testing-gotchas.md#git-bash-本地-e2e-验收环境坑tmp-路径分叉curl-多行-json-传参无-pg-起-dev-后端)
 
 ## Uncategorized（暂存区，未加索引）
 
-`uncategorized.md` 存放项目特定架构经验、历史记录、尚未提炼成通用 pattern 的知识。条目成熟后应迁出到上述分类文件。当前内容包括：install.sh 分发机制、sync_stage_status / auto_dispatch / complete_stage stage 调度链路、Alembic migration 目录惯例、cursor-agent 版本探测、ETL 迁移顺序、单类拆 facade import 策略、Codex interactive driver 抽象、Windows spawn EINVAL、codex turn 收敛强契约、daemon allowed_roots 范围、Next.js rewrite proxy 等。直接读 `uncategorized.md` 浏览。
+`uncategorized.md` 是知识收件箱：execute/verify 中发现的坑先暂存于此，条目成熟后迁出到上述分类文件并在对应节加索引。**2026-09-28 清账**：原有 41 条已全部归类（known-issues 18 / patterns 6 / conventions 5 / testing-gotchas 8 / sillyspec-gotchas 4，见变更 2026-09-28-knowledge-inbox-clear），当前收件箱为空。
 
 ## Decisions
 - unmapped|decision|决策|三波交付|打包 → [decisions/unmapped.md](decisions/unmapped.md)
