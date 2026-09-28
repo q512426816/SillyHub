@@ -24,9 +24,14 @@
 - 新增 `frontend/src/components/layout/__tests__/page-header.test.tsx`（3 用例）：左列 min-w-0 类名锚 + 详情页同款长描述收缩链结构断言 → 3/3 绿
 - 详情页既有测试 `changes/[cid]/__tests__` 3 文件 28 用例全绿；`tsc --noEmit` 0 错
 
-## 修复验证 C：部署后原生复测
+## 修复验证 C：部署后原生复测（2026-09-28 23:05，镜像 COMMIT_SHA=389282de4）
 
-- （部署后填写：见下）
+- 部署：本地 build-and-save（PROD_API_URL=https://crrcdt.ppdmq.top）→ scp → load-and-up.sh，容器 healthy
+- 详情页 fr-review-batch（描述 282 字）无任何注入实测：
+  - @1600：`scrollWidth 1600 == clientWidth 1600`（横向滚动清零），左列 `min-w-0` 类在位、宽 1186px，描述行省略号截断 ✅
+  - @1280：`scrollWidth 1280 == clientWidth 1280`，左列 866px，截断 ✅
+- 列表页回归：无横向滚动、6 行 0 叠压（上一轮列表修复不受影响）✅
+- 截图：`after-prod-1600.png`（本目录）
 
 ## 降级裁决
 
