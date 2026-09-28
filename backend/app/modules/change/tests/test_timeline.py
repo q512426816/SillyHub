@@ -233,11 +233,14 @@ async def test_task_anchor_scoped_to_change_commits(
             pass
 
         async def list_commits(self, *a, **kw):
-            # 倒序形态：他变更提交（bbb2222，两天前，同号 token）排在窗口最前
+            # 窗口形态（对抗排布）：他变更提交（bbb2222，同号 token）在窗口**末位**——
+            # 服务端对 commit_pairs 做 reversed 倒序匹配，旧代码（无窗口过滤）会先撞
+            # bbb2222 误锚；修复后 anchor_pairs 只含本变更事件的 aaa1111。判别力：
+            # 本用例在未修复代码上必须失败（reversed 首位即误锚）。
             return _R(
                 [
-                    _C("bbb2222full", "bbb2222", "feat: 旧变更（task-01）"),
                     _C("aaa1111full", "aaa1111", "feat: 本变更（task-01）"),
+                    _C("bbb2222full", "bbb2222", "feat: 旧变更（task-01）"),
                 ]
             )
 

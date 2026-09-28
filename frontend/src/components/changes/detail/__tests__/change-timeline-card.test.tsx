@@ -162,3 +162,30 @@ describe("ChangeTimelineCard", () => {
     expect(container.textContent).toBe("");
   });
 });
+
+// ── 2026-09-28-timeline-anchor-scope：watcher-signal-widen 新事件 kind 图标 ──
+it("渲染 gate-run/config-change/fake-check-cleared/verify 四新 kind 图标", async () => {
+  mockTimeline.mockResolvedValue({
+    change_key: "k",
+    born_at: null,
+    events: [
+      { ts: "2026-09-28T05:00:00Z", kind: "gate-run", label: "门实测 failed（29.6s）", rule: "watcher", severity: "info", provisional: true, commit_title: null },
+      { ts: "2026-09-28T05:01:00Z", kind: "config-change", label: "本地配置 local.yaml 有变更（内容不上行）", rule: "watcher", severity: "info", provisional: true, commit_title: null },
+      { ts: "2026-09-28T05:02:00Z", kind: "fake-check-cleared", label: "task task-01 勾选证据补齐（提交 abc1234）", rule: "fake-check-cleared", severity: "info", provisional: true, commit_title: null },
+      { ts: "2026-09-28T05:03:00Z", kind: "verify", label: "质量扫描记录更新", rule: "watcher", severity: "info", provisional: true, commit_title: null },
+    ],
+    tasks: [],
+    stats: { event_count: 4, commit_count: 0, checked: 0, total: 0, wall_clock_s: 180 },
+  });
+  renderCard();
+  await screen.findByTestId("change-timeline-card");
+  const text = screen.getByTestId("change-timeline-card").textContent ?? "";
+  expect(text).toContain("门实测 failed");
+  expect(text).toContain("local.yaml 有变更");
+  expect(text).toContain("勾选证据补齐");
+  expect(text).toContain("质量扫描记录更新");
+  // 四 kind 均有专属图标（非 fallback ℹ️）：DOM 内四图标各至少一次
+  for (const icon of ["🔬", "🔧", "🩹", "🧾"]) {
+    expect(screen.getByTestId("change-timeline-card").innerHTML).toContain(icon);
+  }
+});
