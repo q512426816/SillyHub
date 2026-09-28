@@ -1,0 +1,18 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+baseline_commit: 843ceca2e5a92f2c1b2ff38409ac213fa0b68e07
+updatedAt: '2026-09-28T06:28:42.791Z'
+gate_summary: 'test: —｜lint: —｜门文件 0 个'
+

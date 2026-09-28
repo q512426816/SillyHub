@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "roadmap-retire",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "提示面枚举不全：design 称 .claude/skills「两处」，实际三套 skills 镜像共 9 个文件提及 ROADMAP",
+      "evidence": "grep 复核：.claude/.codex/.opencode 三目录各有 sillyspec-archive(描述)、sillyspec-explore(:84 cat 2>/dev/null)、sillyspec-init(:18/:167 绿地流程文案)提及；design 槽2 仅点名 archive+explore 两处。均为提示/文案面（init 描述的是新项目 init 生成流程、explore 自带容缺、archive 描述最坏致 untracked 脏文件——design 乱序答已覆盖），无功能性消费漏网，故不构成 P1/P2，仅披露计数不准。",
+      "location": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.claude\\skills\\sillyspec-init\\SKILL.md:167（另 .codex/.opencode 同构镜像）"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-03 测试绑定作答与 FR 主题错位（答的是提交纪律而非 daemon 注释核验）",
+      "evidence": "requirements.md FR-03 主题为 daemon sillyspec-manager.ts:2184 非消费点，其「不适用」理由却写「提交只含 2 路径」——内容本身属实（实测 HEAD 34fc294d4 恰含 D .sillyspec/ROADMAP.md + A tasks.md 两路径，并行会话 2026-09-28-frontend-apple-style 仍 untracked 未被带走），无虚报，但锚定对象与 FR 编号错一位（该理由更贴合 FR-01/task-03）。",
+      "location": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\changes\\roadmap-retire\\requirements.md:39"
+    },
+    {
+      "severity": "P3",
+      "title": "生成态扫描文档残留过期树条目（非承诺违反，后续产品级出清候选）",
+      "evidence": ".sillyspec/docs/SillyHub/scan/STRUCTURE.md:168 目录树仍列 ROADMAP.md；属机器生成历史文档，无任何读代码消费，design 声明的边界（skills 文案留待产品级变更）未覆盖它亦未承诺其干净——仅记录为残留清理项，不计违约。",
+      "location": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\docs\\SillyHub\\scan\\STRUCTURE.md:168"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "checklistAnswers": {
+    "1_FR_vs_fact": "ok：HEAD 34fc294d4 提交面恰 2 路径（D .sillyspec/ROADMAP.md、A .sillyspec/changes/roadmap-retire/tasks.md），backend/frontend/daemon/sillyhub-daemon 源码零触碰；change.patch 仅含 roadmap-retire 四件治理工件（新文件），删除本体按交付过滤不入冻结面（题设已裁预期，非 P1）；工作树实测 NOT_IN_WORKTREE。",
+    "2_readside_claims": "ok（附 P3 枚举不准）：平台仓 src 全量 grep（排除 .sillyspec/changes、node_modules、.git）功能性命中为 0——daemon sillyspec-manager.ts:2184 实为注释（变更目录优先级说明举例）；tests/sillyspec-conflict-snapshot.test.ts:290-321 为自建临时 fixture 不依赖仓内文件；skills/docs 命中均为提示或历史文案。sillyspec CLI 读点三条逐一核实：src/stages/status.js:16 cat 2>/dev/null、src/stages/archive.js:60「存在→」条件化、src/run/next.js:135 绿地存在性探测（缺席=正常分支）；lite/thin 豁免措辞实在 src/run/complete-handlers.js:3129/3166（liteArchiveChange「module-impact/ROADMAP 豁免」）。无任何把缺席当错误的消费点。",
+    "3_boundary_rulings": ".claude/skills 文案留待产品级变更=可接受（全部为提示面：explore 自带 2>/dev/null 容缺、init 指向绿地新项目流程、archive 描述最坏产生 untracked 脏文件且显式可见，源面在 sillyspec 仓统一出清合理；枚举计数不准记 P3）；lite/thin 豁免措辞不动=可接受（该措辞描述 lite 归档自身行为，删文件后成无对象 no-op，改动反而违 FR-02 读侧零改动）；spec-sync best-effort 容忍根级文件缺席=可接受（daemon src 无缺席即报错的代码路径，conflict-snapshot 测试自建 fixture，best-effort 语义与静态证据一致）。",
+    "4_four_true_sources": "ok 四套全实证：.sillyspec/knowledge/fr/ 存在；.sillyspec/changes/archive/ 存在且成规模（2026-05-25 起多条）；sillyspec progress show 于 CLI src/index.js:175 注册；变更中心归档 tab 于 frontend src/app/(dashboard)/workspaces/[id]/changes/page.tsx:58（archive tab）+ :538-544（proposal 动机段提取的描述行）。",
+    "5_binding_answers": "ok 无虚报：FR-01 删除由提交面锚定（实测成立）；FR-02 所引四个静态锚点（status.js:16/archive.js:60/next.js:135/manager.ts:2184）逐一核实存在且语义相符；FR-03「提交只含 2 路径、并行 untracked 未带走」实测属实（仅锚定错位记 P3）；FR-04 实测跳过为 CLI 对纯 doc 删除既定行为、本变更无被测代码——成立。"
+  },
+  "reviewedAt": "2026-09-28T14:27:56+08:00"
+}

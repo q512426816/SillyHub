@@ -90,3 +90,39 @@ created_at: 2026-09-22T17:32:13.971Z
 - 场景：默认场景 — Given D-002@v1（reparse 是 location owner）与 P1 ingest 不变量；When 本变更落库；Then 复活通道是唯一新增 location 写点且仅 deleted→archive 单向；镜像不软删不恢复
 全文：.sillyspec/changes/archive/2026-09-25-tombstone-heal-archive/requirements.md#FR-04
 最近确认：fed6e9e9a27b6363273addd25ac98f316e90db36
+
+## FR-auto-sillyspec-006 .sillyspec/ROADMAP.md 自平台仓删除并显式 pathspec 提交
+变更：roadmap-retire
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When .sillyspec/ROADMAP.md 自平台仓删除并显式 pathspec 提交；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/roadmap-retire/requirements.md#FR-01
+最近确认：34fc294d4fdbac3dc4a088097220cf748f47744f
+
+## FR-auto-sillyspec-007 读侧零改动：sillyspec CLI next.js 绿地探测/status cat/lite 豁
+变更：roadmap-retire
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 读侧零改动：sillyspec CLI next.js 绿地探测/status cat/lite 豁免措辞均不动（条件化自失活）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/roadmap-retire/requirements.md#FR-02
+最近确认：34fc294d4fdbac3dc4a088097220cf748f47744f
+
+## FR-auto-sillyspec-008 daemon sillyspec-manager.ts:2184 仅为注释示例非消费点
+变更：roadmap-retire
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When daemon sillyspec-manager.ts:2184 仅为注释示例非消费点；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/roadmap-retire/requirements.md#FR-03
+最近确认：34fc294d4fdbac3dc4a088097220cf748f47744f
+
+## FR-auto-sillyspec-009 纯 doc 删除，收口实测自动跳过代码面
+变更：roadmap-retire
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 纯 doc 删除，收口实测自动跳过代码面；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/roadmap-retire/requirements.md#FR-04
+最近确认：34fc294d4fdbac3dc4a088097220cf748f47744f
