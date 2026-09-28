@@ -196,10 +196,12 @@ describe("变更详情页退化（task-10，D-003@v1）", () => {
     cleanup();
   });
 
-  it("保留只读展示区：阶段步骤条 / 执行日志 / 文件卡 / 会话卡", async () => {
+  it("保留只读展示区：阶段步骤条 / 文件卡 / 会话卡（执行日志卡已移除）", async () => {
     setup();
     await renderPage();
-    expect(screen.getByTestId("change-agent-run-log")).toBeInTheDocument();
+    // 智能体运行状态卡已移除（2026-09-28-change-ux-detail-batch 用户裁决：
+    // thin 变更「当前阶段未配置智能体」常驻属噪音，组件保留供移动端）
+    expect(screen.queryByTestId("change-agent-run-log")).toBeNull();
     expect(screen.getByTestId("change-files-card")).toBeInTheDocument();
     expect(screen.getByTestId("change-sessions-card")).toBeInTheDocument();
     // 阶段步骤条（主线宏观进度，ChangeStageHeader 真实渲染；页头徽标同文案 → 用 getAllByText）
@@ -249,12 +251,14 @@ describe("变更详情页退化（task-10，D-003@v1）", () => {
     );
   });
 
-  it("关联快速任务区块：无关联时空态文案", async () => {
+  it("关联快速任务区块：无关联时整卡不渲染（2026-09-28-change-ux-detail-batch）", async () => {
     setup();
     await renderPage();
-    expect(
-      await screen.findByText("暂无关联快速任务"),
-    ).toBeInTheDocument();
+    // 空列表静默隐藏（有数据才渲染）——等取数落定后再断缺席
+    await waitFor(() =>
+      expect(mocks.listQuicklogEntries).toHaveBeenCalled(),
+    );
+    expect(screen.queryByTestId("quicklog-linked-card")).toBeNull();
   });
 
   it("无任何执行控制按钮（触发/推进/验证门禁/团队 switch）", async () => {

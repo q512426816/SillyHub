@@ -314,24 +314,16 @@ function DegradedNotice({
   reason: string;
   archived: boolean;
 }) {
+  // 2026-09-28-change-ux-detail-batch（用户裁决）：双段说明压成单行——保留
+  // 「已降级 + 不出三态」事实与归档指路（信息不丢），去第二段复述性长文。
   return (
-    <>
-      <p
-        className="text-[11px] leading-relaxed text-warning"
-        data-testid="scope-audit-degraded-view"
-      >
-        ⚠️ 本视图已降级：{reason}
-      </p>
-      <p
-        className="mt-1 text-[11px] leading-relaxed text-muted-foreground"
-        data-testid="scope-audit-degraded-scope"
-      >
-        该视图无三态列（计划侧不可用），下方明细是实时窗口采集的文件面
-        {archived
-          ? "——本变更已归档，其真实改动面见「沉淀资产 · 归档留档」。"
-          : "，不代表本变更的计划外改动。"}
-      </p>
-    </>
+    <p
+      className="text-[11px] leading-relaxed text-warning"
+      data-testid="scope-audit-degraded-view"
+    >
+      ⚠️ 已降级为实时窗口视图（计划侧不可用，不出三态）：{reason}
+      {archived ? "；真实改动面见「沉淀资产 · 归档留档」。" : "。"}
+    </p>
   );
 }
 
@@ -677,10 +669,8 @@ export function ScopeAuditCommandCard({
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-xs font-medium">⚖️ 范围对账（scope-audit）</h2>
-          <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
-            「计划改动 × 实际改动」对账：三态全表 + 行数；advisory
-            只读不设门禁。计划侧不可用时降级为实时窗口视图，卡面显式标注、不出三态。
-          </p>
+          {/* 2026-09-28-change-ux-detail-batch（用户裁决）：头部说明副标题移除——
+              「计划 × 实际」语义由三态 chips 与明细自带，长文案属面板噪音。 */}
         </div>
       </div>
       <div className="mt-2" data-testid="scope-audit-summary">

@@ -343,6 +343,19 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     expect(screen.getAllByText("no-desc-change").length).toBeGreaterThan(0);
   });
 
+  // ── 2026-09-28-change-ux-detail-batch：平台同步区收进工具条按钮 + 抽屉 ────
+
+  it("平台同步：工具条按钮常驻，点开抽屉承载处理区（未绑定时中性提示）", async () => {
+    await renderAndWait();
+    // 工具条按钮在搜索/重置旁常驻
+    expect(screen.getByRole("button", { name: "平台同步" })).toBeInTheDocument();
+    // 点开抽屉：未绑定数据源（fetchMyBinding→null）→ drawerHint 中性提示
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "平台同步" }));
+    });
+    expect(await screen.findByText(/暂无同步状态/)).toBeInTheDocument();
+  });
+
   it("tab 计数 pill 显示（tabTotals 独立 query 拉，不被聚焦污染）", async () => {
     setupListChanges({ activeTotal: 5, archiveTotal: 3 });
     await renderAndWait();

@@ -102,13 +102,31 @@ describe("ChangeAssetsCard", () => {
     mockSearch.mockResolvedValue(matchesOf(["backend/app/x.py"]));
   });
 
+  it("默认展开（2026-09-28-change-ux-detail-batch）：分组直接可见，点击头部可收起", async () => {
+    mockGet.mockResolvedValue(FULL);
+    renderCard();
+
+    // 分组零点击直接可见（用户裁决：默认展开 + 主栏网格形态）
+    expect(await screen.findByTestId("change-assets-fr")).toBeInTheDocument();
+    expect(screen.getByTestId("change-assets-audit")).toBeInTheDocument();
+    // 头部态为 open；点击后收起、分组隐藏
+    const toggle = screen.getByRole("button", { name: /沉淀资产/ });
+    expect(toggle).toHaveAttribute("data-state", "open");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: /沉淀资产/ })).toHaveAttribute(
+      "data-state",
+      "closed",
+    );
+    expect(screen.queryByTestId("change-assets-fr")).toBeNull();
+  });
+
   it("四组渲染：展开后 fr/决策/测试绑定/归档留档逐组出现，计数徽标正确", async () => {
     mockGet.mockResolvedValue(FULL);
     renderCard();
 
     expect(await screen.findByText(/FR 1 · 决策 1/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /沉淀资产/ }));
+    // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
     expect(await screen.findByTestId("change-assets-fr")).toBeInTheDocument();
     expect(screen.getByTestId("change-assets-decisions")).toBeInTheDocument();
     expect(screen.getByTestId("change-assets-tests")).toBeInTheDocument();
@@ -126,7 +144,7 @@ describe("ChangeAssetsCard", () => {
       delta: null,
     });
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     expect(await screen.findByTestId("change-assets-fr")).toBeInTheDocument();
     expect(screen.queryByTestId("change-assets-decisions")).toBeNull();
@@ -145,7 +163,7 @@ describe("ChangeAssetsCard", () => {
       delta: null,
     });
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     expect(
       await screen.findByTestId("change-assets-inflight"),
@@ -162,7 +180,7 @@ describe("ChangeAssetsCard", () => {
       delta: null,
     });
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     expect(await screen.findByText("本变更暂无沉淀资产记录。")).toBeInTheDocument();
   });
@@ -178,7 +196,7 @@ describe("ChangeAssetsCard", () => {
   it("FR/决策索引行：href 带 file+anchor 深链（FR-01/02）", async () => {
     mockGet.mockResolvedValue(FULL);
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     const frLink = (await screen.findByText("FR-auto-x-001")).closest("a");
     expect(frLink).toHaveAttribute(
@@ -195,7 +213,7 @@ describe("ChangeAssetsCard", () => {
   it("测试绑定行：锚点标注「变更内」且测试文件可点开预览（FR-03）", async () => {
     mockGet.mockResolvedValue(FULL);
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     expect(await screen.findByText(/变更内 FR-01/)).toBeInTheDocument();
 
@@ -228,7 +246,7 @@ describe("ChangeAssetsCard", () => {
       ],
     });
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     expect(await screen.findByText(/变更内 FR-02/)).toBeInTheDocument();
     expect(
@@ -245,7 +263,7 @@ describe("ChangeAssetsCard", () => {
       truncated: false,
     });
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     expect(await screen.findByTestId("change-assets-patch-files")).toBeInTheDocument();
     expect(screen.getByTestId("change-assets-patch-file-src/flow.js")).toBeInTheDocument();
@@ -267,7 +285,7 @@ describe("ChangeAssetsCard", () => {
       truncated: false,
     });
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     fireEvent.click(await screen.findByTestId("change-assets-patch-file-src/flow.js"));
     expect(await screen.findByTestId("change-assets-patch-note")).toHaveTextContent(
@@ -281,7 +299,7 @@ describe("ChangeAssetsCard", () => {
       patch: { ...FULL.patch, files_truncated: true },
     });
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     expect(await screen.findByText("清单已截断")).toBeInTheDocument();
   });
@@ -301,9 +319,9 @@ describe("ChangeAssetsCard 测试文件路径解析", () => {
       ],
     });
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
     fireEvent.click(
-      screen.getByTestId(`change-assets-test-file-${tests[0]}`),
+      await screen.findByTestId(`change-assets-test-file-${tests[0]}`),
     );
   }
 
@@ -441,7 +459,7 @@ describe("ChangeAssetsCard 资产透明面", () => {
       ],
     });
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     const group = await screen.findByTestId("change-assets-knowledge-touch");
     expect(group).toHaveTextContent("FR-auto-backend-015");
@@ -461,7 +479,7 @@ describe("ChangeAssetsCard 资产透明面", () => {
       ],
     });
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     const chip = await screen.findByTestId("change-assets-module-change");
     expect(chip).toHaveTextContent("变更中心");
@@ -475,7 +493,7 @@ describe("ChangeAssetsCard 资产透明面", () => {
   it("两组无数据时不渲染（fail-open 同款逐组门控）", async () => {
     mockGet.mockResolvedValue(FULL);
     renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
+    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     expect(await screen.findByTestId("change-assets-tests")).toBeInTheDocument();
     expect(screen.queryByTestId("change-assets-knowledge-touch")).toBeNull();

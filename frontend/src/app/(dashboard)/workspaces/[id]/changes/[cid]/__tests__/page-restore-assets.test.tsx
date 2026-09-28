@@ -131,20 +131,30 @@ afterEach(() => {
 });
 
 describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets）", () => {
+  it("2026-09-28-change-ux-detail-batch：头部显示变更描述（单行截断 + 悬浮全文），无描述零占位", async () => {
+    renderPage(
+      makeChange({ description: "登录页在移动端偶发白屏，用户反馈强烈。" }),
+    );
+    const desc = await screen.findByTitle(
+      "登录页在移动端偶发白屏，用户反馈强烈。",
+    );
+    expect(desc).toHaveTextContent("登录页在移动端偶发白屏");
+  });
+
   it("FR-02：thin 阶段标题旁显示 STATUS_BADGE「轻量变更」徽章", async () => {
     renderPage(makeChange());
-    // 2026-09-27-thin-display-fix：轻量流程条也含该文案——先等页面渲染（说明卡），
-    // 徽章断言 scoped 到标题区
-    expect(await screen.findByText("◈ 轻量变更")).toBeInTheDocument();
+    // 2026-09-28-change-ux-detail-batch：◈ 轻量变更说明卡（协议长文案）已移除
+    // ——出身标识由标题徽章 + 顶部轻量流程条承载；先等流程条渲染再 scoped 断言。
+    expect(await screen.findByText("flow start")).toBeInTheDocument();
+    expect(screen.queryByText("◈ 轻量变更")).toBeNull();
     const h1 = within(screen.getByRole("heading", { level: 1 }));
     expect(h1.getByText("轻量变更")).toBeInTheDocument();
   });
 
-  it("FR-01：aside 挂载沉淀资产卡；观测事件卡已移除（2026-09-28-drop-observation-card 反向钉）", async () => {
+  it("FR-01：沉淀资产卡挂载（2026-09-28-change-ux-detail-batch 起在主栏，默认展开——展开态钉在组件自身测试）；观测事件卡已移除（2026-09-28-drop-observation-card 反向钉）", async () => {
     renderPage(makeChange());
-    expect(
-      await screen.findByTestId("change-assets-card"),
-    ).toBeInTheDocument();
+    const card = await screen.findByTestId("change-assets-card");
+    expect(card).toBeInTheDocument();
     expect(
       screen.queryByTestId("change-observation-events-card"),
     ).toBeNull();

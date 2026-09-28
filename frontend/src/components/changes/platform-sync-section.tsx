@@ -214,12 +214,16 @@ export interface PlatformSyncSectionProps {
   /** 移动端紧凑布局：冲突行纵向堆叠 + 按钮铺满 44px 触摸热区（m/ 页适配模式）。 */
   compact?: boolean;
   className?: string;
+  /** 2026-09-28-change-ux-detail-batch：抽屉承载模式——无绑定数据源（原本
+   * return null）时渲染中性提示而非空白，避免点开按钮见空抽屉。 */
+  drawerHint?: boolean;
 }
 
 export function PlatformSyncSection({
   workspaceId,
   compact = false,
   className,
+  drawerHint = false,
 }: PlatformSyncSectionProps) {
   const { modal } = App.useApp();
   const notify = useNotify();
@@ -372,8 +376,17 @@ export function PlatformSyncSection({
   /**
    * 整卡不渲染条件（design §5 Phase 3 / §9）：无绑定（含加载中）、机器缺失
    * 或 sillyspec_status 缺失（CLI 能力缺失/旧后端）——页面行为与现状一致。
+   * 抽屉承载模式（drawerHint）下改为中性提示，避免空抽屉（2026-09-28-
+   * change-ux-detail-batch）。
    */
-  if (machine === null || status === null) return null;
+  if (machine === null || status === null) {
+    if (!drawerHint) return null;
+    return (
+      <p className="px-1 py-6 text-center text-xs text-muted-foreground">
+        暂无同步状态（未绑定数据源机器或 CLI 未上报）。
+      </p>
+    );
+  }
 
   // 机器在线判定（session-panel machineOnline 先例）：「查看对比」需实时读取
   // 本地快照（D-001@v1 方案A 无缓存），离线时禁用入口。

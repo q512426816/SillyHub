@@ -13,7 +13,6 @@ import {
   canDeleteChange,
   useChangeDeleteAccess,
 } from "@/components/delete-change-confirm";
-import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
 import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
 import { ChangeFilesCard } from "@/components/changes/detail/change-files-card";
 import { ChangeSessionsCard } from "@/components/changes/detail/change-sessions-card";
@@ -36,11 +35,9 @@ import { ScopeAuditCommandCard } from "@/components/changes/scope-audit-command-
 import { ApiError } from "@/lib/api";
 import {
   deleteChange,
-  getAgentStatus,
   getChange,
   submitStageReview,
   type ChangeRead,
-  type DispatchResponse,
 } from "@/lib/changes";
 import { useNotify } from "@/lib/errors";
 import {
@@ -125,10 +122,6 @@ export default function ChangeDetailPage({ params }: Props) {
   // next/navigation invariant）。
   const deleteAccess = useChangeDeleteAccess(workspaceId);
 
-  // ── 执行日志流（只读展示：agent 运行状态 / SSE 日志，task-10 退化后保留）──
-  const [agentStatus, setAgentStatus] = useState<DispatchResponse | null>(null);
-  const [loadingAgentStatus, setLoadingAgentStatus] = useState(false);
-
   // ── 审批卡（唯一操作区）state ───────────────────────────────────────
   const [transitioning, setTransitioning] = useState(false);
   const [gateComment, setGateComment] = useState("");
@@ -147,19 +140,16 @@ export default function ChangeDetailPage({ params }: Props) {
   // 入口自然缺席，focusStage 恒为 null 无副作用。
   const [focusStage, setFocusStage] = useState<string | null>(null);
 
-  // ── 辅助数据（agent 状态 / 绑定会话近似）：一次性加载，不随详情轮询 ──
+  // ── 辅助数据（绑定会话近似）：一次性加载，不随详情轮询（agent 状态链随
+  //     智能体运行状态卡移除一并退役，2026-09-28-change-ux-detail-batch）──
   useEffect(() => {
     let cancelled = false;
     setPageError(null);
     const loadSide = async () => {
-      const [as, sessions] = await Promise.all([
-        getAgentStatus(workspaceId, changeId).catch(() => null),
-        listWorkspaceAgentSessions(workspaceId, { include_ended: true }).catch(
-          () => [],
-        ),
-      ]);
+      const sessions = await listWorkspaceAgentSessions(workspaceId, {
+        include_ended: true,
+      }).catch(() => []);
       if (cancelled) return;
-      setAgentStatus(as);
       // §8 绑定查询语义 = 工作区最近活跃会话（coalesce(last_active_at, created_at) desc）
       setBoundSession(sessions?.[0] ?? null);
     };
@@ -167,18 +157,6 @@ export default function ChangeDetailPage({ params }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, changeId]);
-
-  const refreshAgentStatus = useCallback(async () => {
-    setLoadingAgentStatus(true);
-    try {
-      const as = await getAgentStatus(workspaceId, changeId);
-      setAgentStatus(as);
-    } catch {
-      /* silent */
-    } finally {
-      setLoadingAgentStatus(false);
-    }
   }, [workspaceId, changeId]);
 
   // ── 审批唯一入口 submitStageReview（task-10：notify_session 透传，注入移后端 best-effort）──
@@ -204,16 +182,12 @@ export default function ChangeDetailPage({ params }: Props) {
           setSuccessMsg("✅ 审批已生效，已通知绑定会话");
           setTimeout(() => setSuccessMsg(null), 3000);
         }
-        // 审批后刷新（task-07）：变更详情改 query 失效重取，agent 状态保持原拉取
-        const [, updatedAgentStatus] = await Promise.all([
-          queryClient
-            .invalidateQueries({
-              queryKey: CHANGE_QUERY_KEY(workspaceId, changeId),
-            })
-            .catch(() => undefined),
-          getAgentStatus(workspaceId, changeId).catch(() => null),
-        ]);
-        setAgentStatus(updatedAgentStatus);
+        // 审批后刷新（task-07）：变更详情改 query 失效重取
+        await queryClient
+          .invalidateQueries({
+            queryKey: CHANGE_QUERY_KEY(workspaceId, changeId),
+          })
+          .catch(() => undefined);
       } catch (err) {
         setPageError(err instanceof ApiError ? err.message : "操作失败");
       } finally {
@@ -246,10 +220,6 @@ export default function ChangeDetailPage({ params }: Props) {
       </PageContainer>
     );
   }
-
-  // 执行日志流派生（只读：无 dispatch 后不再有 localRunId 兜底）
-  const panelRunId = agentStatus?.last_dispatch?.run_id ?? null;
-  const panelIsActive = agentStatus?.has_active_run ?? false;
 
   // 阶段-步骤联动派生：steps 条目出现的阶段去重（含 quick 等非线性 stage，
   // 但步骤条只渲染 5 大阶段节点，非 WORKFLOW_STAGES 值仅参与 includes 判断）
@@ -322,6 +292,17 @@ export default function ChangeDetailPage({ params }: Props) {
             <span>位置: {change.location}</span>
             {change.affected_components.length > 0 && (
               <span>影响: {change.affected_components.join(", ")}</span>
+            )}
+            {/* 2026-09-28-change-ux-detail-batch：详情页头部补变更描述（列表行同源
+                proposal 动机段）——w-full 独占 flex-wrap 一行 + truncate 单行截断，
+                悬浮看全文；无描述零占位。 */}
+            {change.description && (
+              <span
+                title={change.description}
+                className="w-full min-w-0 truncate text-xs text-muted-foreground"
+              >
+                {change.description}
+              </span>
             )}
           </span>
         }
@@ -460,24 +441,14 @@ export default function ChangeDetailPage({ params }: Props) {
               events/tasks/born 全空时静默隐藏，无观测数据零占位（厚变更不受扰）。 */}
           <ChangeTimelineCard workspaceId={workspaceId} changeId={changeId} />
 
-          <ChangeAgentRunLog
-            workspaceId={workspaceId}
-            panelRunId={panelRunId}
-            panelIsActive={panelIsActive}
-            agentStatus={agentStatus}
-            gateStatus={null}
-            // steps/currentStage 链路已随旧 SillySpecStepProgress 挂载退役
-            // （task-07，step 明细统一走上方 ChangeStepTimeline；prop 已删
-            // ql-20260816-001）
-            teamMode={false}
-            stageTeamMissionId={null}
-            onDone={() => void refreshAgentStatus()}
-            onGateStatusChanged={() => undefined}
-            onRefresh={() => void refreshAgentStatus()}
-            refreshing={loadingAgentStatus}
-            onDispatch={() => undefined}
-            dispatching={false}
-          />
+          {/* 沉淀资产（2026-09-28-change-ux-detail-batch：自 aside 移主栏 + 默认展开
+              + 分组固定高度滚动网格——侧栏 296px 窄列里折叠卡「点了看不到东西」，
+              归档资产是详情页主信息之一，宽列网格展开才是可用形态）。 */}
+          <ChangeAssetsCard workspaceId={workspaceId} changeId={changeId} />
+
+          {/* 智能体运行状态卡已移除（2026-09-28-change-ux-detail-batch 用户裁决）：
+              thin 变更无派发，「当前阶段未配置智能体」常驻属噪音；完整流程的执行
+              观测走会话页。组件保留（mobile-change-detail 仍在用）。 */}
         </main>
 
         {/* 次线（2026-09-27 visual-align-2：对齐原型 MetaPanel 观感——外层统一
@@ -509,11 +480,9 @@ export default function ChangeDetailPage({ params }: Props) {
             }}
             archived={isTerminalChange(change)}
           />
-          {/* 2026-09-25-change-precipitated-assets（D-001@v1 方案 a）：「沉淀资产」
-              折叠卡——本变更经归档沉淀的 FR 索引/决策蒸馏/测试绑定/patch 留档/
-              delta 摘要只读聚合（GET /changes/{cid}/assets），四组逐组有数据才
-              渲染、失败静默隐藏（QuicklogLinkedCard 同款范式）。 */}
-          <ChangeAssetsCard workspaceId={workspaceId} changeId={changeId} />
+          {/* 2026-09-25-change-precipitated-assets 卡已移主栏（2026-09-28-
+              change-ux-detail-batch）。 */}
+          {/* 智能体运行状态卡已移除（2026-09-28-change-ux-detail-batch）。 */}
         </aside>
       </div>
     </PageContainer>

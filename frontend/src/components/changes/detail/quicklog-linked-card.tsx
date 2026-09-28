@@ -27,6 +27,10 @@ interface QuicklogLinkedCardProps {
  * 变更详情页反向「关联的快速任务」区块（task-10 / FR-07）。
  * linked_change 筛选拉取，只读展示；点击条目跳变更中心快速修复 tab。
  * 拉取失败静默降级（区块隐藏），不影响详情主内容。
+ *
+ * 2026-09-28-change-ux-detail-batch（用户裁决）：有数据才渲染——加载中/空列表/
+ * 失败一律不占位（此前「暂无关联快速任务」空态卡在详情页侧栏成常驻噪音，
+ * ChangeAssetsCard 同款 fail-open 范式）。
  */
 export function QuicklogLinkedCard({
   workspaceId,
@@ -46,10 +50,11 @@ export function QuicklogLinkedCard({
     refetchOnWindowFocus: false,
   });
 
-  // 失败静默：区块隐藏（约束：不影响详情主内容）
-  if (query.isError) return null;
+  // 失败/加载中/空列表：区块整体隐藏（约束：不影响详情主内容）
+  if (query.isError || query.isPending) return null;
 
   const items = query.data?.items ?? [];
+  if (items.length === 0) return null;
 
   return (
     <section
@@ -58,19 +63,12 @@ export function QuicklogLinkedCard({
     >
       <div className="flex items-center justify-between border-b px-3 py-2">
         <h2 className="text-xs font-medium">⚡ 关联的快速任务</h2>
-        {query.data && items.length > 0 && (
-          <span className="inline-block min-w-[18px] rounded-full bg-muted px-1.5 text-center text-[11px] text-muted-foreground">
-            {query.data.total}
-          </span>
-        )}
+        <span className="inline-block min-w-[18px] rounded-full bg-muted px-1.5 text-center text-[11px] text-muted-foreground">
+          {query.data?.total ?? items.length}
+        </span>
       </div>
       <div className="flex flex-col gap-1.5 px-3 py-2.5">
-        {query.isPending ? (
-          <p className="text-xs text-muted-foreground">加载中…</p>
-        ) : items.length === 0 ? (
-          <p className="text-xs text-muted-foreground">暂无关联快速任务</p>
-        ) : (
-          items.map((it) => {
+        {items.map((it) => {
             const m = STATUS_META[it.status] ?? {
               label: it.status,
               kind: "neutral" as const,
@@ -105,8 +103,7 @@ export function QuicklogLinkedCard({
                 </span>
               </Link>
             );
-          })
-        )}
+          })}
       </div>
     </section>
   );

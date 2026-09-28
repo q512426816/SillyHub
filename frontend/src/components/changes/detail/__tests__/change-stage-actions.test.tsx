@@ -153,7 +153,7 @@ describe("ChangeStageActions 审批卡（task-10）", () => {
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 
-  it("thin 阶段：两段式只读说明卡（flow start/done 命令 + 断点续/fail-closed）", () => {
+  it("thin 阶段：两段式说明卡已移除（2026-09-28-change-ux-detail-batch 用户裁决），不落通用「无可审批」文案", () => {
     const props = makeProps({
       change: makeChange({
         current_stage: "thin",
@@ -161,14 +161,16 @@ describe("ChangeStageActions 审批卡（task-10）", () => {
         change_key: "2026-09-25-thin-demo",
       }),
     });
-    render(<ChangeStageActions {...props} />);
-    expect(screen.getByText("◈ 轻量变更")).toBeInTheDocument();
-    expect(screen.getByText(/sillyspec flow start --change 2026-09-25-thin-demo/)).toBeInTheDocument();
-    expect(screen.getByText(/sillyspec flow done --change 2026-09-25-thin-demo/)).toBeInTheDocument();
-    expect(screen.getByText(/断点续/)).toBeInTheDocument();
-    expect(screen.getByText(/fail-closed/)).toBeInTheDocument();
-    // 只读说明：无执行控制按钮
-    expect(screen.queryByText(/通过并通知绑定会话/)).not.toBeInTheDocument();
+    const { container } = render(<ChangeStageActions {...props} />);
+    // 说明卡整卡不渲染（协议长文案属 CLI/会话面知识，顶部轻量流程条已承载形态）
+    expect(screen.queryByText("◈ 轻量变更")).not.toBeInTheDocument();
+    expect(screen.queryByText(/sillyspec flow start/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/fail-closed/)).not.toBeInTheDocument();
+    // 出身拦截仍在：不落入通用「无可审批」分支
+    expect(
+      screen.queryByText(/当前无可审批事项/),
+    ).not.toBeInTheDocument();
+    expect(container.firstChild).toBeNull();
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 

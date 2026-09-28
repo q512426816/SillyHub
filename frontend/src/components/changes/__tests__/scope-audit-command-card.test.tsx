@@ -389,12 +389,15 @@ describe("ql-20260911-001-c0be change 目标：对账结果摘要", () => {
       />,
     );
 
+    // 2026-09-28-change-ux-detail-batch：降级说明压成单行（degraded-scope 段
+    // 移除）——单行内同时带「不出三态」口径与归档指路。
     expect(
       await screen.findByTestId("scope-audit-degraded-view"),
-    ).toHaveTextContent(/不出三态列/);
-    expect(screen.getByTestId("scope-audit-degraded-scope")).toHaveTextContent(
+    ).toHaveTextContent(/不出三态/);
+    expect(screen.getByTestId("scope-audit-degraded-view")).toHaveTextContent(
       /真实改动面见「沉淀资产 · 归档留档」/,
     );
+    expect(screen.queryByTestId("scope-audit-degraded-scope")).toBeNull();
     // 关键钉子：三态 chips 一个都不许出现（0/0/0 会被读成「无计划外改动」）
     expect(screen.queryByTestId("scope-audit-chip-planned")).toBeNull();
     expect(screen.queryByTestId("scope-audit-chip-unplanned")).toBeNull();
@@ -417,9 +420,10 @@ describe("ql-20260911-001-c0be change 目标：对账结果摘要", () => {
         target={{ kind: "change", workspaceId: "ws-1", changeKey: "c1" }}
       />,
     );
-    expect(
-      await screen.findByTestId("scope-audit-degraded-scope"),
-    ).toHaveTextContent(/不代表本变更的计划外改动/);
+    // 单行降级提示（2026-09-28-change-ux-detail-batch）：未归档不带留档指路
+    const notice = await screen.findByTestId("scope-audit-degraded-view");
+    expect(notice).toHaveTextContent(/实时窗口视图/);
+    expect(notice).not.toHaveTextContent(/归档留档/);
   });
 
   // FR-05 后半句「明细弹窗同样带降级横幅」（评审 P3 覆盖缺口补钉）：
@@ -447,7 +451,7 @@ describe("ql-20260911-001-c0be change 目标：对账结果摘要", () => {
       within(rows.parentElement as HTMLElement).getByTestId(
         "scope-audit-degraded-view",
       ),
-    ).toHaveTextContent(/不出三态列/);
+    ).toHaveTextContent(/不出三态/);
     // 行内无 verdict → 不渲染空徽章（行只剩路径/类型/行数三列）
     const row = within(rows).getByTestId("scope-audit-row-src/flow.js");
     expect(row.querySelector('[data-diff-kind]')).toBeNull();

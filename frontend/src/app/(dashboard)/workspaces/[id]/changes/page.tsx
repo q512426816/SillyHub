@@ -9,7 +9,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Checkbox, Input, Pagination, Select } from "antd";
+import { Checkbox, Drawer, Input, Pagination, Select } from "antd";
 
 import { PageContainer } from "@/components/layout";
 import {
@@ -265,6 +265,8 @@ export default function ChangesPage({ params }: Props) {
   const [search, setSearch] = useState(initialSearch);
   // ql-20260818-004：「只看待我处理」下放为查询条件（仅进行中视图），默认不勾选
   const [focusMine, setFocusMine] = useState(false);
+  // 2026-09-28-change-ux-detail-batch：平台同步处理区抽屉开关（常驻卡收进按钮）
+  const [syncDrawerOpen, setSyncDrawerOpen] = useState(false);
   const [stageFilter, setStageFilter] = useState("");
   const [sortDir, setSortDir] = useState<SortDir>("updated_at_desc");
   const [page, setPage] = useState(1);
@@ -538,11 +540,14 @@ export default function ChangesPage({ params }: Props) {
           {/* 2026-09-28-change-list-description：变更描述行（proposal 动机段提取，
               后端回填）——title 归一化后常回退 key 派生名，此前行内只剩 change_key
               可辨。basis-full 让描述独占 flex-wrap 一行；truncate 单行截断，悬浮
-              title 看全文；无描述（旧行/无动机段）零占位。 */}
+              title 看全文；无描述（旧行/无动机段）零占位。
+              2026-09-28-change-ux-detail-batch：补 min-w-0——flex 项默认
+              min-width:auto，长文本 nowrap 撑破行宽、溢出覆盖右列阶段/时间与
+              meta 行影响模块 chips（用户实证）；min-w-0 允许收缩，truncate 生效。 */}
           {c.description && (
             <span
               title={c.description}
-              className="basis-full truncate text-xs font-normal text-muted-foreground"
+              className="basis-full min-w-0 truncate text-xs font-normal text-muted-foreground"
             >
               {c.description}
             </span>
@@ -761,9 +766,18 @@ export default function ChangesPage({ params }: Props) {
       )}
 
       {/* 平台同步处理区（2026-09-04-conflict-resolve-entry task-09 / FR-01~05）：
-          本机未决同步冲突 + ghost 残留的一键裁决/清理；无绑定或无 sillyspec_status
-          时组件自渲染 null，页面行为与现状一致（design §9） */}
-      <PlatformSyncSection workspaceId={workspaceId} />
+          2026-09-28-change-ux-detail-batch（用户裁决）——自常驻卡收进工具条按钮
+          （搜索/重置旁）+ 右侧抽屉承载：零冲突零 ghost 时整卡是常驻噪音；
+          有未决冲突 / ghost 时仍应可达，按钮常驻。 */}
+      <Drawer
+        open={syncDrawerOpen}
+        onClose={() => setSyncDrawerOpen(false)}
+        title="平台同步"
+        width={460}
+        destroyOnHidden
+      >
+        <PlatformSyncSection workspaceId={workspaceId} drawerHint />
+      </Drawer>
 
       {/* 工具条（FR-03）：一行式筛选——搜索/阶段/聚焦（进行中）+ 搜索/重置 */}
       {tab !== "quicklog" && (
@@ -805,6 +819,14 @@ export default function ChangesPage({ params }: Props) {
             </Checkbox>
           )}
           <div className="ml-auto flex items-center gap-2">
+            {/* 2026-09-28-change-ux-detail-batch：平台同步入口（常驻卡收进抽屉） */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setSyncDrawerOpen(true)}
+            >
+              平台同步
+            </Button>
             <Button size="sm" onClick={handleSearchClick}>
               搜索
             </Button>

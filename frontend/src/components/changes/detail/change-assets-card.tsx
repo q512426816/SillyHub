@@ -119,7 +119,9 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
     refetchOnWindowFocus: false,
   });
 
-  const [open, setOpen] = useState(false);
+  // 2026-09-28-change-ux-detail-batch：默认展开（用户裁决）——卡随本变更移入
+  // 详情页主栏宽列，折叠态默认值不再是侧栏窄列的防噪手段。
+  const [open, setOpen] = useState(true);
   /** 测试文件预览目标（null = 关）。 */
   const [testPath, setTestPath] = useState<string | null>(null);
   /** 归档留档 diff 目标（null = 关）。 */
@@ -177,28 +179,32 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
       </button>
 
       {open && (
-        <div className="flex flex-col gap-2 px-3 py-2">
+        /* 2026-09-28-change-ux-detail-batch：分组改网格（md 两列对齐）+ 每组
+           固定高度 h-64（超出组内滚动）——主栏宽列下的可扫读形态，替代侧栏
+           窄列的纵向长堆叠。空态段跨满两列。 */
+        <div className="grid grid-cols-1 gap-2 px-3 py-2 md:grid-cols-2">
           {data && !data.archived && total === 0 ? (
             <p
               data-testid="change-assets-inflight"
-              className="py-3 text-center text-[11px] text-muted-foreground"
+              className="py-3 text-center text-[11px] text-muted-foreground md:col-span-2"
             >
               变更归档后，此处会汇总其沉淀的 FR / 决策 / 测试绑定与留档。
             </p>
           ) : null}
 
           {data && data.archived && total === 0 ? (
-            <p className="py-3 text-center text-[11px] text-muted-foreground">
+            <p className="py-3 text-center text-[11px] text-muted-foreground md:col-span-2">
               本变更暂无沉淀资产记录。
             </p>
           ) : null}
 
           {frCount > 0 ? (
-            <div className="rounded border-border/60 border p-2" data-testid="change-assets-fr">
-              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-fr">
+              <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>需求规则（FR 索引）</span>
                 <span className="text-[10px] text-muted-foreground/70">knowledge/fr</span>
               </div>
+              <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
               {data?.fr_entries?.map((e) => (
                 <Link
                   key={e.id}
@@ -217,17 +223,19 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                   ) : null}
                 </Link>
               ))}
+              </div>
             </div>
           ) : null}
 
           {decCount > 0 ? (
-            <div className="rounded border-border/60 border p-2" data-testid="change-assets-decisions">
-              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-decisions">
+              <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>决策蒸馏</span>
                 <span className="text-[10px] text-muted-foreground/70">
                   knowledge/decisions
                 </span>
               </div>
+              <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
               {data?.decisions?.map((d) => (
                 <Link
                   key={d.id}
@@ -246,6 +254,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                   ) : null}
                 </Link>
               ))}
+              </div>
             </div>
           ) : null}
 
@@ -253,13 +262,14 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
               注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查（flow
               done 对触达域打标），覆盖面以标记为准，行点击跳知识库深链。 */}
           {touchList.length > 0 ? (
-            <div className="rounded border-border/60 border p-2" data-testid="change-assets-knowledge-touch">
-              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
+              <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>知识触达（注入命中 · 待复核标记反查）</span>
                 <span className="text-[10px] text-muted-foreground/70">
                   {touchList.length} 条
                 </span>
               </div>
+              <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
               {touchList.map((e) => (
                 <Link
                   key={`${e.file}#${e.id}`}
@@ -273,15 +283,17 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                   <span className="min-w-0 flex-1 truncate">{e.title}</span>
                 </Link>
               ))}
+              </div>
             </div>
           ) : null}
 
           {rowCount > 0 ? (
-            <div className="rounded border-border/60 border p-2" data-testid="change-assets-tests">
-              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-tests">
+              <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>测试绑定</span>
                 <span className="text-[10px] text-muted-foreground/70">test-trace</span>
               </div>
+              <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
               {data?.test_rows?.map((r) => (
                 <div
                   key={r.row_id}
@@ -335,20 +347,21 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                   ) : null}
                 </div>
               ))}
+              </div>
             </div>
           ) : null}
 
           {/* 模块触达（FR-02）：交付文件清单 × 镜像模块图匹配的模块；chip 点击
               打开模块文档预览（explorer 读仓库文件，路径确定不走搜索解析）。 */}
           {moduleList.length > 0 ? (
-            <div className="rounded border-border/60 border p-2" data-testid="change-assets-touched-modules">
-              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-touched-modules">
+              <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>模块触达</span>
                 <span className="text-[10px] text-muted-foreground/70">
                   {moduleList.length} 个模块
                 </span>
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="mt-1 flex min-h-0 flex-1 flex-wrap content-start gap-1.5 overflow-y-auto">
                 {moduleList.map((m) => (
                   <button
                     key={`${m.project}/${m.id}`}
@@ -369,9 +382,9 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
           ) : null}
 
           {hasAudit && data ? (
-            <div className="rounded border-border/60 border p-2 text-[11px] text-muted-foreground" data-testid="change-assets-audit">
-              <div className="mb-1 text-[11px] font-medium">归档留档</div>
-              <div className="flex flex-wrap gap-x-3 gap-y-1">
+            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2 text-[11px] text-muted-foreground" data-testid="change-assets-audit">
+              <div className="shrink-0 text-[11px] font-medium">归档留档</div>
+              <div className="mt-1 flex shrink-0 flex-wrap gap-x-3 gap-y-1">
                 {data.patch ? (
                   <span>
                     patch{" "}
@@ -392,8 +405,8 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                 ) : null}
               </div>
               {patchFileList.length > 0 ? (
-                <div className="mt-1.5 border-t border-dashed pt-1.5">
-                  <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
+                <div className="mt-1.5 flex min-h-0 flex-1 flex-col overflow-hidden border-t border-dashed pt-1.5">
+                  <div className="mb-1 flex shrink-0 items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
                     <span>改动文件（点开看该文件在 change.patch 中的 diff）</span>
                     {data.patch?.files_truncated ? (
                       <span className="shrink-0 text-warning">清单已截断</span>
@@ -401,7 +414,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                   </div>
                   <ul
                     data-testid="change-assets-patch-files"
-                    className="max-h-40 overflow-auto"
+                    className="min-h-0 flex-1 overflow-y-auto"
                   >
                     {patchFileList.map((p) => (
                       <li key={p} className="border-b border-dashed last:border-b-0">

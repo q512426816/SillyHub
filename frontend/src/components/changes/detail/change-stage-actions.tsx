@@ -128,46 +128,13 @@ export function ChangeStageActions({
   const currentStage = change.current_stage ?? "draft";
   const gatePanel = APPROVAL_PANELS[change.pending_review ?? ""];
 
-  // thin 辅助阶段（2026-09-25-change-center-thin-flow task-08）：轻量变更只读说明卡，
-  // 两段式 2 调用协议（形态对照原型 B 面）；平台无操作，执行全在会话内。
-  // 2026-09-27-thin-display-fix：出身判定扩展——归档 thin（stage=archived）与
-  // quick 分流（change_type=quick）同样落本卡，不再漏进通用「无可审批」分支。
+  // thin 辅助阶段（2026-09-25-change-center-thin-flow task-08）：轻量变更只读说明卡。
+  // 2026-09-28-change-ux-detail-batch（用户裁决）：两段式协议长文案不再渲染——
+  // 协议说明属 CLI/会话面知识，详情页顶部轻量流程条（flow start → 干活 →
+  // flow done）已承载形态认知，长文卡对浏览者是噪音。出身判定（归档 thin /
+  // quick 分流）仅用于拦截进通用「无可审批」分支。
   if (isThinLineageChange(change)) {
-    const thinKey = change.change_key ?? change.id;
-    return (
-      <section className="space-y-2 rounded-md border border-brand-300 bg-brand-50/60 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">◈ 轻量变更</span>
-          <span className="text-xs text-muted-foreground">
-            两段式流程（flow start → 干活 → flow done），不走完整审批流
-          </span>
-        </div>
-        <div className="space-y-1.5 text-[11px] text-muted-foreground">
-          <p>
-            协议 1/2 —— 智能体在会话中执行
-            <code className="mx-1 rounded bg-background px-1.5 py-0.5 text-[11px]">
-              sillyspec flow start --change {thinKey}
-            </code>
-            启动（需求需多行文本，含独立「成功标准：」节头行 + 每行一条
-            <code className="mx-1 rounded bg-background px-1.5 py-0.5 text-[11px]">- 标准</code>
-            列表行，单行内联会被清晰度门拒绝）。
-          </p>
-          <p>
-            协议 2/2 —— 干活（改代码 + 写测试 + 填 design/requirements 槽位）后执行
-            <code className="mx-1 rounded bg-background px-1.5 py-0.5 text-[11px]">
-              sillyspec flow done --change {thinKey}
-            </code>
-            收口：中间态退出码 1 属正常（空槽拒收/实测失败自动升厚），修复后重跑同
-            命令即可断点续跑；实测失败即整单失败（fail-closed）。
-          </p>
-          <p>
-            进行中状态阶段恒显示「轻量变更」，归档时自动翻转（进度不落
-            sillyspec.db，flow done 后变更自动转入归档区，无需平台操作）；
-            归档后本卡仍按轻量出身展示（不再落入通用「无可审批」文案）。
-          </p>
-        </div>
-      </section>
-    );
+    return null;
   }
 
   // quick 独立阶段（D-003）：无平台执行控制，仅只读说明（存量通道，已退役）。
