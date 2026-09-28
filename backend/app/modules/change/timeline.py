@@ -159,6 +159,15 @@ class ChangeTimelineQueryService:
         # 勾选时刻（2026-09-27-timeline-task-time）：task-done 事件游标翻格推断。
         task_rows = _read_tasks(change_dir)
         task_times = _infer_task_times(rows, len(task_rows))
+        # 任务锚窗口收窄（2026-09-28-timeline-anchor-scope）：仅本变更 commit 事件的提交参与
+        # 锚匹配——全局 50 窗口倒序匹配会让其他变更的同号 task token 撞车（4d84c48d 实证：
+        # 两天前 governance-autopilot 的 task-01~05 抢走本变更全部锚）。titles 仍用全局窗口
+        # （标题展示用途，与锚定无关）；本变更无 commit 事件 → 锚恒 None（无锚优于错锚）。
+        anchor_pairs = [
+            (short, msg)
+            for short, msg in commit_pairs
+            if any(short.startswith(sha) for sha in commit_shas)
+        ]
         tasks = [
             TimelineTask(
                 id=task_id,
@@ -167,7 +176,7 @@ class ChangeTimelineQueryService:
                 commit_sha=next(
                     (
                         short
-                        for short, msg in reversed(commit_pairs)
+                        for short, msg in reversed(anchor_pairs)
                         if re.search(rf"{re.escape(task_id)}(?!\d)", msg)
                     ),
                     None,

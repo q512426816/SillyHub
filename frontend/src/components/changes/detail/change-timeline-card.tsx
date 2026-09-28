@@ -21,6 +21,11 @@ const KIND_ICON: Record<string, { icon: string; warn?: boolean }> = {
   warning: { icon: "⚠️", warn: true },
   commit: { icon: "🔀" },
   archived: { icon: "📦" },
+  // watcher-signal-widen 新事件面（2026-09-28-timeline-anchor-scope 补图标）
+  "gate-run": { icon: "🔬" },
+  "config-change": { icon: "🔧" },
+  "fake-check-cleared": { icon: "🩹" },
+  verify: { icon: "🧾" },
 };
 
 function eventIcon(kind: string) {
