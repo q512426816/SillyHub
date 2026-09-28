@@ -30,9 +30,13 @@ Then 行为符合本条标准描述
 ## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
 
 <!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx 全部 16 用例（mock 清除后页面仍正常渲染，卡片断言不存在）+ frontend tsc --noEmit 零错（import 摘除）
 
 <!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend tsc --noEmit 零错（组件文件删除后若存在残留 import 即编译失败）；grep 全仓 AgentLivenessOverviewCard/agent-liveness-overview-card 零命中（本仓唯一消费方即详情页）
 
 <!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx：16/16 passed（pnpm vitest run，2026-09-28 实测）
 
 <!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/hooks/__tests__/use-session-liveness.test.ts + frontend/src/components/sessions/__tests__/session-list-panel.test.tsx：116/116 passed（pnpm vitest run，2026-09-28 实测）
