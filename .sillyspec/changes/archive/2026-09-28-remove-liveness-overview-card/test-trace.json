@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-remove-liveness-overview-card",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-28-remove-liveness-overview-card:flow:FR-01",
+      "tests": [
+        "page.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-remove-liveness-overview-card"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-28-remove-liveness-overview-card:flow:FR-03",
+      "tests": [
+        "page.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-remove-liveness-overview-card"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-28-remove-liveness-overview-card:flow:FR-04",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.ts",
+        "frontend/src/hooks/__tests__/use-session-liveness.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-remove-liveness-overview-card"
+    }
+  ]
+}

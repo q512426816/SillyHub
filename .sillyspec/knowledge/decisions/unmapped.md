@@ -1346,3 +1346,10 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：e723b484ed1475bdff0907cd3be3dfbf5bc8e4a1
 理由：最大风险：INDEX 锚点手写错（GitHub 中文 slug 规则：标点删除、空格转连字符）致索引点击不可达——用 node 脚本按同规则自检 41 条锚点后跑 sillyspec knowledge validate 双保险。次风险：归类判断主观（个别条目跨类，如 Next.js 代理条目兼含 SSE 范式）——按条目主锚（主要教训）归类，正文整体迁移不拆条，不丢信息。放弃的方案：按条目拆分跨类内容到多个文件（破坏原条目完整性与可回溯性，放弃）；已修复条目删除（违背收件箱头注「已修复项保留并标注状态便于回溯」，放弃）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-28-remove-liveness-overview-card
+锚点：未记录
+最近确认：2f29e2693a12839bf3f71fb8684b5db57fc628b3
+理由：最大风险：误删共享受害面——agent-liveness-overview-card.tsx 删除若连带删 lib 层（listWorkspaceAgentLogs / liveness-badge）会打断会话列表活性链路；已核对引用（grep 全仓）确认仅摘卡不动数据层。放弃的方案：①「无有效数据时隐藏卡片」——判定条件含糊（库里恰有一条 manual_test idle 测试行会让门失效），且链路未建立期间卡片等于死代码，不如删干净；日后链路修复可从 git 历史整卡恢复。②「修链路保功能」——需 daemon 指回本机后端 + 各 workspace local.yaml 下发 platform token + daemon 常驻，为一个总览卡付出整条运维链路成本，用户已裁决不值得。

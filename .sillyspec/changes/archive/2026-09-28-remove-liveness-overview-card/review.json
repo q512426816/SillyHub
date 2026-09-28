@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-remove-liveness-overview-card",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02 测试绑定「grep 全仓零命中」与实际不符（变更自身墓碑注释含关键词）",
+      "evidence": "requirements.md L36 声称 grep 全仓 AgentLivenessOverviewCard/agent-liveness-overview-card 零命中，但本变更自己留的墓碑注释含该字符串（page.tsx:679、page.test.tsx:52-53）；实质承诺（无残留 import/代码引用）已独立复核成立——不限文件类型全仓 grep（排除 .sillyspec/node_modules/.git）仅命中这两条注释，tsc --noEmit 实测 exit 0，属证据表述精度问题而非违诺",
+      "location": "frontend/src/app/(dashboard)/workspaces/[id]/page.tsx:679"
+    },
+    {
+      "severity": "P3",
+      "title": "模块文档 frontend.md 仍把已删卡片记载为现有组件（archive 步同步备忘）",
+      "evidence": ".sillyspec/docs/multi-agent-platform/modules/frontend.md L184 仍列 agent-liveness-overview-card.tsx 为工作台现有组件；本变更为 thin 流程、模块文档同步属 archive 阶段职责，当前尚非违诺，但归档时若漏做模块影响分析会留下陈旧记载",
+      "location": ".sillyspec/docs/multi-agent-platform/modules/frontend.md:184"
+    }
+  ],
+  "boundaryAdjudications": [
+    {
+      "boundary": "纯删除、不修 liveness 上报链路（链路结构性无数据，卡片恒显「未知（100）」无信息量）",
+      "verdict": "可接受",
+      "reason": "排查证据具体（本机库 platform_agent_logs 724/725 行 state NULL、daemon 连远程 crrcdt.ppdmq.top、local.yaml 无 platform token）且用户裁决留痕于 visual-evidence.md；删的只是展示面，数据层与两条下游活性链路全保留，日后链路修复可从 git 历史整卡恢复，无数据正确性风险"
+    },
+    {
+      "boundary": "数据层保留不动（GET /api/agent-logs、listWorkspaceAgentLogs、liveness-badge 不删）",
+      "verdict": "可接受",
+      "reason": "diff 实测零触碰 lib 层与徽章组件；两个下游消费方（use-session-liveness→session-list-panel 行尾小灯、agent-log-card 行徽章）健在，本次实测 116/116 用例全绿确认无连带断裂"
+    },
+    {
+      "boundary": "删卡而非「无有效数据时隐藏卡片」（design 槽4 放弃方案①）",
+      "verdict": "可接受",
+      "reason": "隐藏门判定条件含糊（库里恰有一条 manual_test idle 测试行会让门失效照常显卡），链路未建立期间卡片即死代码；删净并以墓碑注释留痕优于半死状态"
+    },
+    {
+      "boundary": "不修链路保功能（放弃方案②：daemon 指回本机后端 + token 下发 + 常驻在线）",
+      "verdict": "可接受",
+      "reason": "为一个总览卡付出整条运维链路成本与价值不匹配，属显式产品取舍而非技术缺陷，决策链完整（排查实录→用户裁决→放弃理由留痕）"
+    },
+    {
+      "boundary": "无后端/接口/类型契约变化（不动 api-types.ts 与 OpenAPI）",
+      "verdict": "可接受",
+      "reason": "diff 实测仅 3 个前端文件（page.tsx 接线、page.test.tsx mock 清理、组件文件删除），后端 schema 零改动，CLAUDE.md 规则 21 的 gen:types 触发条件不成立，无需生成物同步"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-28T22:22:36+08:00"
+}
