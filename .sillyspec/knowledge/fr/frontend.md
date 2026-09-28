@@ -3393,3 +3393,75 @@ created_at: 2026-09-28T13:29:15.726Z
 - 场景：默认场景 — Given frontend devDependencies 含零引用的 puppeteer；When 移除 puppeteer 并更新 pnpm-lock.yaml（与 package.json 同 commit）；Then 依赖树无 puppeteer，`pnpm install --frozen-lockfile` 一致，@playwright/test 保留
 全文：.sillyspec/changes/archive/2026-08-29-frontend-e2e-playwright/requirements.md#FR-09
 最近确认：0ea257289
+
+## FR-auto-frontend-101 工作区详情页不再渲染 Agent 状态总览卡片
+变更：2026-09-28-remove-liveness-overview-card
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 工作区详情页不再渲染 Agent 状态总览卡片；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-remove-liveness-overview-card/requirements.md#FR-01
+最近确认：2f29e2693a12839bf3f71fb8684b5db57fc628b3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-remove-liveness-overview-card:flow:FR-01
+  tests: page.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-remove-liveness-overview-card
+  status: active
+
+## FR-auto-frontend-102 agent-liveness-overview-card.tsx 组件文件删除且无残留 import
+变更：2026-09-28-remove-liveness-overview-card
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 组件 相关模块就绪；When agent-liveness-overview-card.tsx 组件文件删除且无残留 import；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-remove-liveness-overview-card/requirements.md#FR-02
+最近确认：2f29e2693a12839bf3f71fb8684b5db57fc628b3
+
+## FR-auto-frontend-103 page.test.tsx 清理对应 mock 后工作区详情页测试通过
+变更：2026-09-28-remove-liveness-overview-card
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When page.test.tsx 清理对应 mock 后工作区详情页测试通过；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-remove-liveness-overview-card/requirements.md#FR-03
+最近确认：2f29e2693a12839bf3f71fb8684b5db57fc628b3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-remove-liveness-overview-card:flow:FR-03
+  tests: page.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-remove-liveness-overview-card
+  status: active
+
+## FR-auto-frontend-104 会话列表活性链路（use-session-liveness / liveness-badge）不受影
+变更：2026-09-28-remove-liveness-overview-card
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 会话列表活性链路（use-session-liveness / liveness-badge）不受影响；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-remove-liveness-overview-card/requirements.md#FR-04
+最近确认：2f29e2693a12839bf3f71fb8684b5db57fc628b3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-remove-liveness-overview-card:flow:FR-04
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.ts | frontend/src/hooks/__tests__/use-session-liveness.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-remove-liveness-overview-card
+  status: active
