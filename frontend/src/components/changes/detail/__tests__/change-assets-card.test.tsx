@@ -471,6 +471,31 @@ describe("ChangeAssetsCard 资产透明面", () => {
     );
   });
 
+  it("在途变更知识触达：实时命中渲染（live 标签区分归档反查口径）", async () => {
+    // 2026-09-28-knowledge-touch-live：在途（archived=false）也能有触达——数据来自
+    // knowledge_hits inject 行（后端合并），标签显示「实时」而非「待复核标记反查」。
+    mockGet.mockResolvedValue({
+      ...FULL,
+      archived: false,
+      knowledge_touch: [
+        { id: "-audit_hooks-只在测试", title: "-audit_hooks-只在测试", file: "known-issues.md" },
+      ],
+    });
+    renderCard();
+    await screen.findByRole("button", { name: /沉淀资产/ });
+
+    const group = await screen.findByTestId("change-assets-knowledge-touch");
+    expect(group).toHaveTextContent("知识触达（注入命中 · 实时）");
+    expect(group).toHaveTextContent("-audit_hooks-只在测试");
+    // 实时锚点行深链：file=裸知识文件（不带 knowledge/ 前缀）
+    const link = group.querySelector("a");
+    expect(decodeURIComponent(link!.getAttribute("href") ?? "")).toContain(
+      "file=known-issues.md&anchor=-audit_hooks-",
+    );
+    // 在途引导空态不出现（已有触达数据）
+    expect(screen.queryByTestId("change-assets-inflight")).toBeNull();
+  });
+
   it("模块触达组：chip 渲染中文名，点击打开模块文档预览弹窗（.sillyspec 前缀）", async () => {
     mockGet.mockResolvedValue({
       ...FULL,

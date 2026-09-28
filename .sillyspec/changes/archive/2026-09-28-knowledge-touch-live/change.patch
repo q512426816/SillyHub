@@ -1,0 +1,437 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx
+index 421a825be..585204c79 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx
+@@ -49,15 +49,8 @@ vi.mock("@/components/workspace/changes-overview-card", () => ({
+ vi.mock("@/components/workspace-daemon-switcher", () => ({
+   WorkspaceDaemonSwitcher: () => null,
+ }));
+-// 2026-09-07-arch-large-file-split 归档遗留测试债（agent-liveness merge 带入）：
+-// page 段②′ 挂 <AgentLivenessOverviewCard>，其内部 useQuery 需 QueryClientProvider，
+-// 本测试裸 render 无 Provider → 16 用例全挂。仿上方 ChangesOverviewCard 先例
+-// data-testid 隔离（卡内行为由组件自身测试覆盖），仅断言挂载与 workspaceId 透传。
+-vi.mock("@/components/agent-log/agent-liveness-overview-card", () => ({
+-  AgentLivenessOverviewCard: ({ workspaceId }: { workspaceId: string }) => (
+-    <div data-testid="agent-liveness-overview-card-mock" data-workspace-id={workspaceId} />
+-  ),
+-}));
++// 2026-09-28-remove-liveness-overview-card：AgentLivenessOverviewCard 已删（liveness
++// 上报链路未建立恒显「未知」），page 不再挂载，对应 vi.mock 一并移除。
+ vi.mock("@/components/workspace-path-fields", () => ({
+   WorkspacePathFields: () => null,
+ }));
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+index 176446718..25e4a3a40 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+@@ -14,7 +14,6 @@ import { ErrorBanner } from "@/components/ui/error-banner";
+ import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
+ import { WorkspacePathFields } from "@/components/workspace-path-fields";
+ import { ChangesOverviewCard } from "@/components/workspace/changes-overview-card";
+-import { AgentLivenessOverviewCard } from "@/components/agent-log/agent-liveness-overview-card";
+ import { WorkspaceHeroHeader } from "@/components/workspace/hero-header";
+ import { MetaPanel, MetaPanelSection } from "@/components/primer";
+ import { WorkspaceStatsRow } from "@/components/workspace/stats-row";
+@@ -661,8 +660,9 @@ export default function WorkspaceDetailPage({ params }: Props) {
+ 
+         {/* 2026-09-27 visual-gap-fix：段②′ 两栏（原型 Repo 首页式骨架）——
+             左主列=活跃变更总览（2026-09-02-changes-overview-card task-07 / FR-01·FR-06，
+-            跨 workspace 只读健康监控卡：卡是门铃、变更中心是操作台），右栏=Agent 状态
+-            总览（2026-09-07-agent-liveness-states / D-004 第二层：分组计数 + 在等你组跳转）。 */}
++            跨 workspace 只读健康监控卡：卡是门铃、变更中心是操作台），右栏=About 侧栏。
++            2026-09-28-remove-liveness-overview-card：右栏原「Agent 状态总览」卡已删
++            （liveness 上报链路未建立，恒显「未知」无信息量，排查结论见变更目录）。 */}
+         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+           <div>
+             <ChangesOverviewCard workspaceId={workspaceId} />
+@@ -676,7 +676,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
+               </Link>
+             </div>
+           </div>
+-          <AgentLivenessOverviewCard workspaceId={workspaceId} />
++          {/* 2026-09-28-remove-liveness-overview-card：原此处挂 <AgentLivenessOverviewCard>。 */}
+           {/* 2026-09-27 visual-align-2：原型 About 侧栏——工作区静态档案
+               （路径/技术栈/关联项目/状态/创建时间），数据全来自已加载 workspace。 */}
+           <MetaPanel>
+diff --git a/frontend/src/components/agent-log/agent-liveness-overview-card.tsx b/frontend/src/components/agent-log/agent-liveness-overview-card.tsx
+deleted file mode 100644
+index 18968e966..000000000
+--- a/frontend/src/components/agent-log/agent-liveness-overview-card.tsx
++++ /dev/null
+@@ -1,117 +0,0 @@
+-"use client";
+-
+-/**
+- * agent-log/agent-liveness-overview-card.tsx —— 工作台「Agent 状态总览」卡片。
+- *
+- * 2026-09-07-agent-liveness-states task-14（design §5.4 D-004 两层展示第二层 /
+- * FR-05）：会话列表空间紧张，完整状态信息只出现在本卡（分组计数 + 「在等你」
+- * 组明细与跳转）与 agent 日志面板行徽章两处。数据 GET /api/agent-logs（daemon
+- * liveness tailer 每 10s 推送落库，30s 轮询刷新即可满足 ≤40s 可见性口径；
+- * 卡内计数为快照非实时）。双主题铁律：语义色阶（info/warning/destructive/muted）。
+- */
+-import { useQuery } from "@tanstack/react-query";
+-import Link from "next/link";
+-import dayjs from "dayjs";
+-import relativeTime from "dayjs/plugin/relativeTime";
+-import "dayjs/locale/zh-cn";
+-
+-import { SectionCard } from "@/components/layout";
+-import { LIVENESS_META, livenessTitle } from "@/components/agent-log/liveness-badge";
+-import { LivenessDot } from "@/components/agent-log/liveness-badge";
+-import { listWorkspaceAgentLogs, type AgentLogListItem } from "@/lib/agent-logs";
+-import { cn } from "@/lib/utils";
+-
+-dayjs.extend(relativeTime);
+-dayjs.locale("zh-cn");
+-
+-/** 展示顺序：在等你 > 在干活 > 空闲 > 已结束 > 未知（人数多的状态在前无意义，按紧急度）。 */
+-const STATE_ORDER = ["blocked", "working", "idle", "ended", "unknown"] as const;
+-
+-export function AgentLivenessOverviewCard({ workspaceId }: { workspaceId: string }) {
+-  const q = useQuery({
+-    queryKey: ["agent-liveness-overview", workspaceId],
+-    queryFn: () => listWorkspaceAgentLogs(100),
+-    refetchInterval: 30_000,
+-  });
+-  const entries = q.data?.items ?? [];
+-  const byState = new Map<NonNullable<AgentLogListItem["state"]>, AgentLogListItem[]>(
+-    STATE_ORDER.map((st) => [st, []]),
+-  );
+-  for (const e of entries) {
+-    byState.get(e.state)?.push(e);
+-  }
+-  const blocked = byState.get("blocked") ?? [];
+-
+-  return (
+-    <SectionCard
+-      title="Agent 状态总览"
+-      bodyPadding="p-4"
+-      extra={
+-        <span className="text-[11px] text-muted-foreground">
+-          {q.isFetching ? "刷新中…" : entries.length > 0 ? "≤30s 快照" : ""}
+-        </span>
+-      }
+-    >
+-      {q.isError ? (
+-        <p className="text-xs text-muted-foreground">状态加载失败，稍后自动重试。</p>
+-      ) : entries.length === 0 ? (
+-        <p className="text-xs text-muted-foreground">
+-          暂无已登记的 agent 会话（daemon 在线并上报后此处展示各会话活性）。
+-        </p>
+-      ) : (
+-        <div className="space-y-3">
+-          {/* 分组计数行 */}
+-          <div className="flex flex-wrap items-center gap-2" data-testid="liveness-overview-counts">
+-            {STATE_ORDER.filter((st) => (byState.get(st) ?? []).length > 0).map((st) => {
+-              const meta = LIVENESS_META[st];
+-              const n = (byState.get(st) ?? []).length;
+-              return (
+-                <span
+-                  key={st}
+-                  className={cn(
+-                    "inline-flex h-5 items-center gap-1 rounded-full border px-2 text-[11px]",
+-                    meta.badgeCls,
+-                  )}
+-                >
+-                  <span className={cn("h-1.5 w-1.5 rounded-full", meta.dotCls, meta.pulse && "animate-pulse")} />
+-                  {meta.label}（{n}）
+-                </span>
+-              );
+-            })}
+-          </div>
+-          {/* 「在等你」明细：会话 + 等待时长 + 跳转（D-004：完整信息只在此处） */}
+-          {blocked.length > 0 && (
+-            <ul className="space-y-1.5" data-testid="liveness-overview-blocked">
+-              {blocked.slice(0, 5).map((e) => (
+-                <li
+-                  key={e.id}
+-                  className="flex items-center justify-between gap-2 rounded-md border border-destructive/20 bg-destructive/5 px-2.5 py-1.5 text-xs"
+-                >
+-                  <span className="flex min-w-0 items-center gap-2">
+-                    <LivenessDot state="blocked" />
+-                    <span className="truncate">
+-                      {e.harness}
+-                      {e.session_id ? ` · ${e.session_id.slice(0, 8)}` : ""}
+-                      <span className="text-muted-foreground">
+-                        {e.last_event_at ? ` · 等待 ${dayjs(e.last_event_at).fromNow(true)}` : ""}
+-                      </span>
+-                    </span>
+-                  </span>
+-                  <Link
+-                    href={`/workspaces/${workspaceId}/sessions`}
+-                    className="shrink-0 text-info-600 hover:underline"
+-                  >
+-                    去处理 →
+-                  </Link>
+-                </li>
+-              ))}
+-              {blocked.length > 5 && (
+-                <li className="px-2.5 text-[11px] text-muted-foreground">另有 {blocked.length - 5} 个会话在等你…</li>
+-              )}
+-            </ul>
+-          )}
+-        </div>
+-      )}
+-    </SectionCard>
+-  );
+-}
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-touch-live/decisions.md b/.sillyspec/changes/2026-09-28-knowledge-touch-live/decisions.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-touch-live/decisions.md
+@@ -0,0 +1,6 @@
++
++## 用户裁决（2026-09-28-knowledge-touch-live）
++
++用户实测反馈「知识触达不应该归档后才显示，应该过程中就能看到；其余部分可能也有类似情况」——本轮即按该反馈裁决：
++- **知识触达改实时**（live 命中与标记反查合并）：执行期数据已实时入库，展示层不该等归档标记。裁决：**可接受**。
++- **其余资产组（FR/决策/测试绑定/模块触达）维持归档态**：经审计，其结构化产物在 flow done 才生成（归档前只有 .md 原文，文档区已实时可读）——非展示层错位而是产物时点，实时化需临时索引器属独立大特性。裁决：**可接受（设计内）**。
+
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-touch-live/design.md b/.sillyspec/changes/2026-09-28-knowledge-touch-live/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-touch-live/design.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T13:57:00.343Z
++---
++# 设计记录（Design Record）— 2026-09-28-knowledge-touch-live
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-touch-live 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） --
++backend assets.py 单函数新增 + get_change_assets 接线 + frontend 资产卡两处文案（数据链无新端点，响应 schema 字段不变）：
++- 新增 _live_touch_rows(session, ws, change_key)：查 knowledge_hits 表 type='inject' 且 change_name=本变更的 matched_anchors（按 occurred_at 排序保确定性），file#slug / 裸文件两形态展开去重，(id,title)=slug（裸文件=文件名），上限 100 条。
++- get_change_assets：live 查询与三路文件扫描 asyncio.gather 并行；与标记反查行合并——标记行在前（归档后复核权威口径），live 补差，去重 key=(去 knowledge/ 前缀的 file, id)。
++- frontend：在途态标签「知识触达（注入命中 · 实时）」区分归档态「（待复核标记反查）」；在途空态文案改为「执行中的知识注入命中会实时出现…FR/决策/测试绑定归档后汇总」。
++- 审计结论（不动）：详情页文档区读变更目录实时可见；FR/决策/测试绑定/模块触达为 flow done 生成的结构化产物，归档前不存在结构化形态（设计内）。
++>
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-touch-live 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） --
++响应模型零变化（ChangeKnowledgeTouch id/title/file 既有字段）。行为变化：GET /changes/{id}/assets 的 knowledge_touch 在途变更也非空（live 命中），归档态为标记+live 合并去重列表（标记行序在前）。无新端点/无 schema 改动/api-types 零变化。
++>
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-touch-live 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） --
++1. 乱序/迟到：hits 行按 occurred_at 排序，上行乱序不破坏展示序；dedupe 幂等（任意行序结果集相同）。
++2. 并发写：纯读查询+既有 gather 结构；knowledge_hits 上行幂等（line_hash uq）不产生重复锚。
++3. 切换/生命周期：live 与标记两口径合并在单次请求内完成，无中间态；变更归档瞬间两数据源共存——去重 key 保证无重复。
++4. 作用域：查询带 workspace_id + change_name 双条件（跨工作区/跨变更隔离）；局部 import KnowledgeHit 防模块环。
++>
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-touch-live 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） --
++最大风险：live 锚 title 用 slug 原文（非知识条目标题原文）——slug 是标题的连字符化形态，可读但有损（空格变连字符）；条目卡深链按锚 id 命中不受影响。取标题原文需读全知识文件树，代价不成比例，取舍为 slug 即可读。放弃的方案：①在途也做 FR/决策/测试绑定实时索引——结构化产物归档时才生成，实时化=给在途变更建临时索引器（大特性且与「归档产物」语义冲突，用户审计确认只错位在知识触达）；②前端单独拉 /knowledge/stats 再按 change 过滤——stats 无 per-change 明细端点，且资产卡自取数模式（useQuery 单源）会被打破。
++>
+
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-touch-live/proposal.md b/.sillyspec/changes/2026-09-28-knowledge-touch-live/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-touch-live/proposal.md
+@@ -0,0 +1,51 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T13:57:00.341Z
++---
++# 提案书（Proposal）— 2026-09-28-knowledge-touch-live
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:18451b30e5a481578f162f813166e26f9080f4dbbd506a90960ae2565732bf3c:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-touch-live 留痕重锚 -->
++任务原话转写：变更详情页资产卡「知识触达」改实时：现在只做 flow done 打的「待复核：」标记反查（归档后才有数据），而 knowledge_hits 表的 inject 行（带 change_name + matched_anchors）执行时即实时入库无人消费。
++- backend assets.py：knowledge_touch 并入实时命中——查本变更 inject 行的 matched_anchors（file#slug / 裸文件两形态），与标记反查行合并去重（key=file+id），live 上限 100 条防载荷
++- frontend 资产卡：在途态标签「知识触达（注入命中 · 实时）」区分归档态「待复核标记反查」；空态文案改写（在途也能有知识触达，FR/决策/测试绑定仍是归档产物）
++- 审计结论（不动）：文档区读变更目录实时可见；FR/决策/测试绑定/模块触达为归档时生成的结构化产物，设计内
++
++成功标准：
++- 在途变更（未归档）若已有知识注入，资产卡即可见知识触达条目（数据来自 knowledge_hits inject 行，非标记）
++- 归档后标记反查与实时命中合并且去重（同一条目不重复出现）
++- 裸文件锚点（无 #）可显示；live 合并上限 100 条
++- backend 资产测试新增在途命中用例 + frontend 卡测试同步，全绿；tsc/eslint/ruff/mypy 0
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:5b74b2a6579297f90f8c435c2ad354dfc32196bc7d4a9bce5a6b7d5f7d1faecf:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-touch-live 留痕重锚 -->
++按成功标准机械推导，共 9 条验收面：
++1. backend assets.py：knowledge_touch 并入实时命中——查本变更 inject 行的 matched_anchors（file#slug / 裸文件两形态），与标记反查行合并去重（key=file+id），live 上限 100 条防载荷
++2. frontend 资产卡：在途态标签「知识触达（注入命中 · 实时）」区分归档态「待复核标记反查」；空态文案改写（在途也能有知识触达，FR/决策/测试绑定仍是归档产物）
++3. 审计结论（不动）：文档区读变更目录实时可见；FR/决策/测试绑定/模块触达为归档时生成的结构化产物，设计内
++4. 在途变更（未归档）若已有知识注入，资产卡即可见知识触达条目（数据来自 knowledge_hits inject 行，非标记）
++5. 归档后标记反查与实时命中合并且去重（同一条目不重复出现）
++6. 裸文件锚点（无 #）可显示
++7. live 合并上限 100 条
++8. backend 资产测试新增在途命中用例 + frontend 卡测试同步，全绿
++9. tsc/eslint/ruff/mypy 0
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:459ff8e827abc4dab10219ea401c261c12f03334f02a7f3826cc018c37e422c3:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-touch-live 留痕重锚 -->
++1. backend assets.py：knowledge_touch 并入实时命中——查本变更 inject 行的 matched_anchors（file#slug / 裸文件两形态），与标记反查行合并去重（key=file+id），live 上限 100 条防载荷
++2. frontend 资产卡：在途态标签「知识触达（注入命中 · 实时）」区分归档态「待复核标记反查」；空态文案改写（在途也能有知识触达，FR/决策/测试绑定仍是归档产物）
++3. 审计结论（不动）：文档区读变更目录实时可见；FR/决策/测试绑定/模块触达为归档时生成的结构化产物，设计内
++4. 在途变更（未归档）若已有知识注入，资产卡即可见知识触达条目（数据来自 knowledge_hits inject 行，非标记）
++5. 归档后标记反查与实时命中合并且去重（同一条目不重复出现）
++6. 裸文件锚点（无 #）可显示
++7. live 合并上限 100 条
++8. backend 资产测试新增在途命中用例 + frontend 卡测试同步，全绿
++9. tsc/eslint/ruff/mypy 0
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-touch-live/requirements.md b/.sillyspec/changes/2026-09-28-knowledge-touch-live/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-touch-live/requirements.md
+@@ -0,0 +1,83 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T13:57:00.343Z
++---
++# 需求规格（Requirements）— 2026-09-28-knowledge-touch-live
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: backend assets.py：knowledge_touch 并入实时命中——查本变更 inj
++Given 上限 相关模块就绪
++When backend assets.py：knowledge_touch 并入实时命中——查本变更 inject 行的 matched_anchors（file#sl
++Then 行为符合本条标准描述
++
++### FR-02: frontend 资产卡：在途态标签「知识触达（注入命中 · 实时）」区分归档态「待复核标记反查」；
++Given 测试 相关模块就绪
++When frontend 资产卡：在途态标签「知识触达（注入命中 · 实时）」区分归档态「待复核标记反查」；空态文案改写（在途也能有知识触达，FR/决策/测试绑定仍是归
++Then 行为符合本条标准描述
++
++### FR-03: 审计结论（不动）：文档区读变更目录实时可见；FR/决策/测试绑定/模块触达为归档时生成的结构化产物，
++Given 测试 相关模块就绪
++When 审计结论（不动）：文档区读变更目录实时可见；FR/决策/测试绑定/模块触达为归档时生成的结构化产物，设计内
++Then 行为符合本条标准描述
++
++### FR-04: 在途变更（未归档）若已有知识注入，资产卡即可见知识触达条目（数据来自 knowledge_hits 
++Given 系统就绪
++When 在途变更（未归档）若已有知识注入，资产卡即可见知识触达条目（数据来自 knowledge_hits inject 行，非标记）
++Then 行为符合本条标准描述
++
++### FR-05: 归档后标记反查与实时命中合并且去重（同一条目不重复出现）
++Given 系统就绪
++When 归档后标记反查与实时命中合并且去重（同一条目不重复出现）
++Then 行为符合本条标准描述
++
++### FR-06: 裸文件锚点（无 #）可显示
++Given 系统就绪
++When 裸文件锚点（无 #）可显示
++Then 行为符合本条标准描述
++
++### FR-07: live 合并上限 100 条
++Given 上限 相关模块就绪
++When live 合并上限 100 条
++Then 行为符合本条标准描述
++
++### FR-08: backend 资产测试新增在途命中用例 + frontend 卡测试同步，全绿
++Given 测试 相关模块就绪
++When backend 资产测试新增在途命中用例 + frontend 卡测试同步，全绿
++Then 行为符合本条标准描述
++
++### FR-09: tsc/eslint/ruff/mypy 0
++Given 系统就绪
++When tsc/eslint/ruff/mypy 0
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++backend/app/modules/change/tests/test_assets.py › test_live_touch_hits_inflight（在途无标记 + inject 行种子 → 触达三条两形态断言 + 他变更名/非 inject 行排除）
++>
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++同文件 › test_live_touch_merges_with_markers_dedupe（标记行序在前 + 同 (file,id) 归一去重 + live 补差）
++>
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++同文件 › test_live_touch_hits_inflight（patterns.md 裸文件断言）+ _live_touch_rows len>=100 早退（实现内建）
++>
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx › 在途变更知识触达：实时命中渲染（「（注入命中 · 实时）」标签 + known-issues.md 裸文件深链 + 在途空态不出现）；全文件 24 用例全绿
++>
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++backend test_assets.py 全文件 24 passed + ruff check/format 0 + mypy 0；frontend tsc 0
++>
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++<!--AGENT:测试绑定FR-09 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-touch-live/tasks.md b/.sillyspec/changes/2026-09-28-knowledge-touch-live/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-touch-live/tasks.md
+@@ -0,0 +1,19 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T13:57:00.344Z
++---
++# 任务注册表（Tasks）— 2026-09-28-knowledge-touch-live
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: backend assets.py：knowledge_touch 并入实时命中——查本变更 inject 行的 matched_anchors（file#sl…
++- [x] task-02: frontend 资产卡：在途态标签「知识触达（注入命中 · 实时）」区分归档态「待复核标记反查」；空态文案改写（在途也能有知识触达…
++- [x] task-03: 审计结论（不动）：文档区读变更目录实时可见；FR/决策/测试绑定/模块触达为归档时生成的结构化产物，设计内
++- [x] task-04: 在途变更（未归档）若已有知识注入，资产卡即可见知识触达条目（数据来自 knowledge_hits inject 行，非标记）
++- [ ] task-05: 归档后标记反查与实时命中合并且去重（同一条目不重复出现）
++- [ ] task-06: 裸文件锚点（无 #）可显示
++- [ ] task-07: live 合并上限 100 条
++- [ ] task-08: backend 资产测试新增在途命中用例 + frontend 卡测试同步，全绿
++- [ ] task-09: tsc/eslint/ruff/mypy 0
+
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-touch-live/visual-evidence.md b/.sillyspec/changes/2026-09-28-knowledge-touch-live/visual-evidence.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-touch-live/visual-evidence.md
+@@ -0,0 +1,11 @@
++# 视觉证据 — 2026-09-28-knowledge-touch-live
++
++## 结论：无视觉降级项
++
++- 变更详情页资产卡布局零变化（触达组 h-64 固定高度/滚动/行形态均沿用既有）；
++- 仅两处**文案**变化：在途态触达组标签多一种「（注入命中 · 实时）」文案形态；在途空态引导句改写（原「变更归档后，此处会汇总…」改为「执行中的知识注入命中会实时出现在『知识触达』…」）——均为新增信息量，无任何元素移除或规格下调。
++- 「裸文件」锚点行为为知识库深链既有前缀归一能力（页面 2026-09-25 深链 FR）。
++
++## 像素级截图说明
++
++同前轮条件（Docker 旧镜像/登录凭据）：由 24+24 前后端用例 DOM 断言覆盖；部署后可在任一在途变更详情页直接核验。

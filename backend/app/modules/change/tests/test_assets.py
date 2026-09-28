@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -683,3 +684,107 @@ def test_knowledge_touch_empty_without_marker(tmp_path: Path) -> None:
     assert (
         _scan_domain_files(tmp_path, "fr", "2026-09-26-none", owner_line_re=_REVIEW_MARK_RE) == []
     )
+
+
+# ===========================================================================
+# 知识触达实时命中（2026-09-28-knowledge-touch-live）
+# ===========================================================================
+
+
+async def test_live_touch_hits_inflight(db_session, tmp_path: Path) -> None:
+    """在途变更（未归档无标记）从 knowledge_hits inject 行即可见知识触达。
+
+    file#slug 与裸文件两形态；跨行去重；他变更名/他类型行不进本变更触达面。
+    """
+    from app.modules.knowledge.hits import KnowledgeHit
+
+    spec_root = tmp_path / "spec-root"
+    _seed_mirror(spec_root)
+    # 在途真实形态：标记是 flow done 落的——归档前知识文件里没有「待复核：」行
+    # （扫描本身不看归档态；剥离后模拟在途库状态）。
+    for md in (
+        spec_root / "knowledge" / "fr" / "auto-test.md",
+        spec_root / "knowledge" / "decisions" / "backend.md",
+    ):
+        stripped = md.read_text(encoding="utf-8").replace("待复核：" + KEY + chr(10), "")
+        md.write_text(stripped, encoding="utf-8")
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=False)
+    db_session.add_all(
+        [
+            KnowledgeHit(
+                workspace_id=ws.id,
+                line_hash="h-live-1",
+                occurred_at=datetime.now(UTC),
+                type="inject",
+                change_name=KEY,
+                matched_anchors=[
+                    "known-issues.md#-audit_hooks-只在测试",
+                    "conventions.md#目录约定",
+                ],
+            ),
+            KnowledgeHit(
+                workspace_id=ws.id,
+                line_hash="h-live-2",
+                occurred_at=datetime.now(UTC),
+                type="inject",
+                change_name=KEY,
+                matched_anchors=["known-issues.md#-audit_hooks-只在测试", "patterns.md"],
+            ),
+            # 他变更名 inject 行：不进本变更触达面。
+            KnowledgeHit(
+                workspace_id=ws.id,
+                line_hash="h-live-3",
+                occurred_at=datetime.now(UTC),
+                type="inject",
+                change_name="someone-else",
+                matched_anchors=["styles.md#x"],
+            ),
+            # 非 inject 行（rot 遥测）：不进触达面。
+            KnowledgeHit(
+                workspace_id=ws.id,
+                line_hash="h-live-4",
+                occurred_at=datetime.now(UTC),
+                type="fr-rot-suspect",
+                change_name=KEY,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    assert result.archived is False
+    assert [(t.id, t.file) for t in result.knowledge_touch] == [
+        ("-audit_hooks-只在测试", "known-issues.md"),
+        ("目录约定", "conventions.md"),
+        ("patterns.md", "patterns.md"),
+    ]
+
+
+async def test_live_touch_merges_with_markers_dedupe(db_session, tmp_path: Path) -> None:
+    """归档态：标记反查行在前（复核权威），实时命中补差；同 (file,id) 归一去重。"""
+    from app.modules.knowledge.hits import KnowledgeHit
+
+    spec_root = tmp_path / "spec-root"
+    _seed_mirror(spec_root)
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+    # live 锚与标记行同条目（fr/auto-test.md#FR-auto-test-003，前缀形态不同）+ 一条新命中
+    db_session.add(
+        KnowledgeHit(
+            workspace_id=ws.id,
+            line_hash="h-dedupe-1",
+            occurred_at=datetime.now(UTC),
+            type="inject",
+            change_name=KEY,
+            matched_anchors=["fr/auto-test.md#FR-auto-test-003", "testing-gotchas.md#陷阱条目"],
+        )
+    )
+    await db_session.commit()
+
+    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    assert [(t.id, t.file) for t in result.knowledge_touch] == [
+        ("FR-auto-test-003", "knowledge/fr/auto-test.md"),
+        ("D-002@v1", "knowledge/decisions/backend.md"),
+        ("陷阱条目", "testing-gotchas.md"),
+    ]

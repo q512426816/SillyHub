@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-knowledge-touch-live",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "live 锚 title 用 slug 原文（非条目标题原文）",
+      "evidence": "_live_touch_rows (id,title)=slug——连字符化形态可读但有损；深链按锚 id 命中不受影响，取原文需读全知识树代价不成比例（design 槽4 已披露取舍）",
+      "location": "backend/app/modules/change/assets.py:_live_touch_rows"
+    },
+    {
+      "severity": "P3",
+      "title": "首轮门禁实测失败（快照环境瞬态）复跑通过",
+      "evidence": "首轮 flow done test 门 FAIL，未改任何代码直接重跑即过——疑为隔离快照 monorepo 依赖布局瞬态（工具输出指引同款）；已在对话留痕，代码侧无对应失败复现（本地 24+24 全绿）",
+      "location": "N/A"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok",
+    "边界裁决": "decisions.md 用户裁决两条均裁可接受：知识触达改实时（用户反馈驱动）；其余资产组维持归档态（产物时点设计内，实时化属独立特性）。slug title 取舍已在 design 槽4 披露并裁决"
+  },
+  "reviewedAt": "2026-09-28T14:14:41.535980+00:00"
+}

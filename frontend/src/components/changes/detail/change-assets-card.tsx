@@ -188,7 +188,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
               data-testid="change-assets-inflight"
               className="py-3 text-center text-[11px] text-muted-foreground md:col-span-2"
             >
-              变更归档后，此处会汇总其沉淀的 FR / 决策 / 测试绑定与留档。
+              执行中的知识注入命中会实时出现在「知识触达」；FR / 决策 / 测试绑定与留档在归档后汇总。
             </p>
           ) : null}
 
@@ -264,7 +264,11 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
           {touchList.length > 0 ? (
             <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
-                <span>知识触达（注入命中 · 待复核标记反查）</span>
+                <span>
+                  {data?.archived
+                    ? "知识触达（注入命中 · 待复核标记反查）"
+                    : "知识触达（注入命中 · 实时）"}
+                </span>
                 <span className="text-[10px] text-muted-foreground/70">
                   {touchList.length} 条
                 </span>

@@ -13,7 +13,6 @@ created_at: 2026-09-27T10:13:08.181Z
 变更：2026-09-27-knowledge-governance-cards
 状态：active
 摘要：默认场景
-待复核：2026-09-27-governance-rpc-actions
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When backend knowledge 模块新增 GET /workspaces/{ws}/knowledge/governance（KNOWLEDGE_READ）；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-knowledge-governance-cards/requirements.md#FR-01
@@ -24,10 +23,10 @@ created_at: 2026-09-27T10:13:08.181Z
 - row: 2026-09-27-knowledge-governance-cards:flow:FR-01
   tests: backend/app/modules/knowledge/tests/test_governance.py
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: 2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
   source_change: 2026-09-27-knowledge-governance-cards
   status: active
 
@@ -35,7 +34,6 @@ created_at: 2026-09-27T10:13:08.181Z
 变更：2026-09-27-knowledge-governance-cards
 状态：active
 摘要：默认场景
-待复核：2026-09-27-governance-rpc-actions
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When frontend 知识 tab 顶部新增治理信号卡区：healthy 一行安语、超阈逐卡（kind/计数/明细/处置指引——CLI 命令文案）；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-knowledge-governance-cards/requirements.md#FR-02
@@ -43,13 +41,13 @@ created_at: 2026-09-27T10:13:08.181Z
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
-- row: 2026-09-27-knowledge-governance-cards:flow:FR-02
-  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.ts
+- row: manual:mulbwez0:frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
+  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
   reason: spec
-  state: candidate
-  discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
   source_change: 2026-09-27-knowledge-governance-cards
   status: active
 
@@ -57,7 +55,6 @@ created_at: 2026-09-27T10:13:08.181Z
 变更：2026-09-27-knowledge-governance-cards
 状态：active
 摘要：默认场景
-待复核：2026-09-27-governance-rpc-actions
 场景正文：
 - 场景：默认场景 — Given api 相关模块就绪；When 取数走既有 api 模式（react-query）；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-knowledge-governance-cards/requirements.md#FR-03
@@ -65,13 +62,13 @@ created_at: 2026-09-27T10:13:08.181Z
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
-- row: 2026-09-27-knowledge-governance-cards:flow:FR-03
-  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.ts
+- row: manual:mulbwfld:frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
+  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
   reason: spec
-  state: candidate
-  discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
   source_change: 2026-09-27-knowledge-governance-cards
   status: active
 
@@ -79,7 +76,6 @@ created_at: 2026-09-27T10:13:08.181Z
 变更：2026-09-27-knowledge-governance-cards
 状态：active
 摘要：默认场景
-待复核：2026-09-27-governance-rpc-actions
 场景正文：
 - 场景：默认场景 — Given 端点 / 组件 / 测试 相关模块就绪；When pytest 覆盖端点（三类信号 fixture + 阈内 healthy + 权限）+ vitest 组件测试（渲染/healthy/计数）；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-knowledge-governance-cards/requirements.md#FR-04
@@ -90,10 +86,10 @@ created_at: 2026-09-27T10:13:08.181Z
 - row: 2026-09-27-knowledge-governance-cards:flow:FR-04
   tests: backend/app/modules/knowledge/tests/test_governance.py
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: 2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
   source_change: 2026-09-27-knowledge-governance-cards
   status: active
 
@@ -101,7 +97,6 @@ created_at: 2026-09-27T10:13:08.181Z
 变更：2026-09-27-knowledge-governance-cards
 状态：active
 摘要：默认场景
-待复核：2026-09-27-governance-rpc-actions
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 显式 pathspec 提交，不夹带并行会话 staged 面；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-knowledge-governance-cards/requirements.md#FR-05

@@ -458,6 +458,51 @@ def _read_touched_modules(spec_root: Path, file_list: list[str]) -> list["Change
     return out
 
 
+async def _live_touch_rows(
+    session: AsyncSession, workspace_id: uuid.UUID, change_key: str
+) -> list[tuple[str, str, str]]:
+    """知识触达实时命中（2026-09-28-knowledge-touch-live）。
+
+    ``knowledge_hits`` 表 inject 行的 ``matched_anchors``（``文件#锚`` / 裸文件
+    两形态）展开去重——CLI 执行期逐任务写入、daemon 周期上行，变更在途即可见
+    （此前只有 flow done 打的「待复核：」标记反查，归档前恒空）。返回
+    ``(id, title, file)``：id/title 取锚 slug（裸文件取文件名），file 为知识库
+    根相对路径（不带 knowledge/ 前缀——与标记反查行的 spec_root 相对路径在
+    合并处归一同 key）。上限 100 条防载荷（实际单变更数十量级）。
+    """
+    from app.modules.knowledge.hits import KnowledgeHit  # 局部 import 防模块环
+
+    rows = (
+        (
+            await session.execute(
+                select(KnowledgeHit.matched_anchors)
+                .where(
+                    KnowledgeHit.workspace_id == workspace_id,
+                    KnowledgeHit.change_name == change_key,
+                    KnowledgeHit.type == "inject",
+                )
+                .order_by(KnowledgeHit.occurred_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[str, str, str]] = []
+    for anchors in rows:
+        for raw in anchors or []:
+            file, _, slug = str(raw).partition("#")
+            ident = slug or file
+            key = (file, ident)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((ident, ident, file))
+            if len(out) >= 100:
+                return out
+    return out
+
+
 class ChangeAssetsQueryService:
     """变更沉淀资产只读聚合服务（唯一数据源，对接 assets 端点）。"""
 
@@ -471,11 +516,11 @@ class ChangeAssetsQueryService:
         spec_root = await self._spec_root(workspace_id)
         archived = change.location == "archive" or change.status == "archived"
 
-        fr_rows, dec_rows, touch_rows = await asyncio.gather(
+        fr_rows, dec_rows, touch_rows, live_rows = await asyncio.gather(
             asyncio.to_thread(_scan_domain_files, spec_root, "fr", change.change_key),
             asyncio.to_thread(_scan_domain_files, spec_root, "decisions", change.change_key),
             # 知识触达（2026-09-26-change-asset-transparency / FR-01）：
-            # 「待复核：」标记反查双域（fr + decisions 同构一轮）。
+            # 「待复核：」标记反查双域（fr + decisions 同构一轮）——归档后复核口径。
             asyncio.to_thread(
                 lambda: [
                     row
@@ -485,7 +530,24 @@ class ChangeAssetsQueryService:
                     )
                 ]
             ),
+            # 实时命中（2026-09-28-knowledge-touch-live）：knowledge_hits inject 行
+            # 在途即有——与标记反查合并，标记行在前（复核权威），实时补差去重。
+            _live_touch_rows(self._session, workspace_id, change.change_key),
         )
+        touch_merged: list[ChangeKnowledgeTouch] = []
+        seen_touch: set[tuple[str, str]] = set()
+
+        def _merge_touch(entry_id: str, title: str, file: str) -> None:
+            key = (file.removeprefix("knowledge/"), entry_id)
+            if key in seen_touch:
+                return
+            seen_touch.add(key)
+            touch_merged.append(ChangeKnowledgeTouch(id=entry_id, title=title, file=file))
+
+        for i, t, _s, f in touch_rows:
+            _merge_touch(i, t, f)
+        for i, t, f in live_rows:
+            _merge_touch(i, t, f)
         result = ChangeAssetsRead(
             change_key=change.change_key,
             archived=archived,
@@ -493,9 +555,7 @@ class ChangeAssetsQueryService:
             decisions=[
                 ChangeDecisionEntry(id=i, title=t, status=s, file=f) for i, t, s, f in dec_rows
             ],
-            knowledge_touch=[
-                ChangeKnowledgeTouch(id=i, title=t, file=f) for i, t, _s, f in touch_rows
-            ],
+            knowledge_touch=touch_merged,
         )
         if not archived:
             # 在途变更：目录件尚不存在，跳过读取（design R-03）。
