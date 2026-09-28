@@ -1,20 +1,20 @@
 /**
- * TurnNavList（行式轮次导航列）组件单测（2026-09-27-session-fast-replay task-04 /
- * FR-06）。
+ * TurnNavList（轮次导航——2026-09-28-turn-nav-hover-flyout 形态）组件单测。
  *
- * 依据：
- *   - components/sessions/turn-nav-list.tsx（本 task 实现）
- *   - design.md §做法概述⑤ / FR-06：desktop 常驻行式导航列（约 220px 可拖宽）、
- *     每行整行命中（≥40px）含轮号+状态点+摘要+相对时间、当前轮高亮滚动联动、
- *     未加载轮显示大纲摘要、>200 轮固定行高 + content-visibility、aria-label
- *     轮号/状态/摘要语义保留（TurnCatalog task-02 契约延续）。
+ * 形态（2026-09-28 用户反馈「220px 常驻太占地方」后的折中）：
+ *   - 平时 44px 窄轨：把手（当前轮号 + 展开指示，点击 pin）+ 垂直刻度（每轮
+ *     一段，当前轮高亮；刻度本身是 button，aria-label 与行式版同构——可达性
+ *     不降级，点击直跳该轮）；
+ *   - 悬停 300ms 防抖滑出行式浮层（absolute 不挤压聊天区）；整体移开 250ms
+ *     收起；pin 锁定常开；浮层内点行跳转（非 pin 态选完即收）。
  *
- * 测试风格对齐同目录 turn-catalog.test.tsx（testing-library + cleanup；纯受控
- * 组件不 mock 网络层；jsdom 缺口补 scrollIntoView stub）。合并语义
- * （mergeTurnNavEntries）在 session-panel-page 派生层，由 page.test 覆盖。
+ * 依据：components/sessions/turn-nav-list.tsx（本变更实现）/ 成功标准。
+ * 测试风格对齐 turn-catalog.test.tsx（testing-library + cleanup；纯受控组件
+ * 不 mock 网络层；jsdom 缺口补 scrollIntoView stub）。合并语义
+ * （mergeTurnNavEntries）在派生层，由 page.test 覆盖。
  */
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
-import { cleanup, render, screen, fireEvent, within } from "@testing-library/react";
+import { cleanup, render, fireEvent, within, act } from "@testing-library/react";
 
 import TurnNavList, {
   type TurnNavListProps,
@@ -27,9 +27,11 @@ beforeEach(() => {
   // jsdom 未实现 scrollIntoView（activeTurnKey 变化 → 行滚入轨内可视区链路）。
   Element.prototype.scrollIntoView = vi.fn();
   window.localStorage.clear();
+  vi.useFakeTimers();
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
 });
 
@@ -102,15 +104,29 @@ function renderNav(
   return { ...utils, onJump };
 }
 
-function getNav(container: HTMLElement): HTMLElement {
-  return within(container).getByRole("navigation");
+/** 窄轨刻度（默认渲染；aria-label/点击契约与行式版同构）。 */
+function getTicks(container: HTMLElement): HTMLElement[] {
+  return within(container).getAllByTestId("turn-nav-tick");
 }
 
-function getRows(container: HTMLElement): HTMLElement[] {
-  return within(getNav(container)).getAllByRole("button");
+/** 把手（pin 切换入口）。 */
+function getToggle(container: HTMLElement): HTMLElement {
+  return within(container).getByTestId("turn-nav-toggle");
 }
 
-/** 行状态点（轮号旁 aria-hidden 小圆点——按 rounded-full 视觉类定位，结构无关）。 */
+/** pin 展开后返回浮层行列表；未展开抛错（调用方先确保展开）。 */
+function getFlyoutRows(container: HTMLElement): HTMLElement[] {
+  return within(within(container).getByTestId("turn-nav-flyout")).getAllByTestId(
+    "turn-nav-row",
+  );
+}
+
+/** 通过把手 pin 展开（触屏主通道，同步无 timer 依赖）。 */
+function pinOpen(container: HTMLElement) {
+  fireEvent.click(getToggle(container));
+}
+
+/** 行/刻度状态点（aria-hidden 小圆点——按 rounded-full 视觉类定位，结构无关）。 */
 function getDot(row: HTMLElement): HTMLElement {
   const dot = Array.from(row.querySelectorAll("span")).find((s) =>
     s.className.includes("rounded-full"),
@@ -121,7 +137,7 @@ function getDot(row: HTMLElement): HTMLElement {
 // ── 0. 短会话隐藏（TurnCatalog ql-20260909-005 同口径保留） ─────────────
 
 describe("TurnNavList 短会话隐藏", () => {
-  it("entries < 3 → 整列不渲染（0/1/2 条均隐藏）；3 条起出现", () => {
+  it("entries < 3 → 整列不渲染（0/1/2 条均隐藏）；3 条起出现窄轨", () => {
     const { container } = renderNav([]);
     expect(container.textContent).toBe("");
 
@@ -130,34 +146,15 @@ describe("TurnNavList 短会话隐藏", () => {
     two.unmount();
 
     const three = renderNav(FIXTURES);
-    expect(within(three.container).getByRole("navigation")).toBeTruthy();
-    expect(within(three.container).getAllByRole("button")).toHaveLength(3);
+    expect(within(three.container).getByTestId("turn-nav-rail")).toBeTruthy();
+    expect(getTicks(three.container)).toHaveLength(3);
   });
 });
 
-// ── 1. 行渲染（轮号/状态点/摘要/相对时间/aria-label） ────────────────────
+// ── 1. 窄轨渲染（刻度契约延续：aria-label / data-turn-key / aria-current） ─
 
-describe("TurnNavList 行渲染", () => {
-  it("每行整行命中区（button + data-turn-key），导航语义 aria-label=轮次导航", () => {
-    const { container } = renderNav(FIXTURES);
-    const nav = getNav(container);
-    expect(nav).toHaveAttribute("aria-label", "轮次导航");
-    const rows = getRows(container);
-    expect(rows).toHaveLength(3);
-    expect(rows[0]).toHaveAttribute("data-turn-key", "run-1");
-  });
-
-  it("行内容：第N轮 + 摘要 + 相对时间（HH 跨度回退日期档不在此断言时刻值）", () => {
-    const { container } = renderNav(FIXTURES);
-    const rows = getRows(container);
-    expect(rows[0]!.textContent).toContain("第1轮");
-    expect(rows[0]!.textContent).toContain("调研 sessions 页面组件结构与渲染链路");
-    // AT_0925 为本地时区固化时刻——相对时间档位由渲染期 Date.now 决定，只断
-    // 轮号 + 摘要 + 状态点结构（相对时间文案随现实时钟漂移，不硬编码）。
-    expect(getDot(rows[0]!)).toBeTruthy();
-  });
-
-  it("aria-label = 第N轮 · 状态 · 提问摘要（截 30 字）；未加载追加「未加载」", () => {
+describe("TurnNavList 窄轨刻度", () => {
+  it("刻度 aria-label = 第N轮 · 状态 · 提问摘要（截 30 字）；未加载追加「未加载」", () => {
     const long30 =
       "先调研 sessions 页面的组件结构并梳理 TurnTimeline 渲染链路与跳转锚点缺口"; // >30 字
     const { container } = renderNav([
@@ -165,44 +162,148 @@ describe("TurnNavList 行渲染", () => {
       ENTRY_FAILED,
       ENTRY_UNLOADED_OUTLINE,
     ]);
-    const rows = getRows(container);
-    expect(rows[0]).toHaveAttribute(
+    const ticks = getTicks(container);
+    expect(ticks[0]).toHaveAttribute(
       "aria-label",
       `第1轮 · 完成 · ${long30.slice(0, 30)}…`,
     );
-    expect(rows[1]).toHaveAttribute("aria-label", "第2轮 · 失败 · 跳转定位怎么实现？");
+    expect(ticks[1]).toHaveAttribute("aria-label", "第2轮 · 失败 · 跳转定位怎么实现？");
     // 未加载轮带大纲摘要：状态后缀「未加载」+ 大纲摘要照常进 label。
-    expect(rows[2]).toHaveAttribute(
+    expect(ticks[2]).toHaveAttribute(
       "aria-label",
       "第3轮 · 已停止 · 未加载 · 更早一轮的大纲摘要",
     );
   });
 
-  it("未加载且大纲无摘要 → 占位文案「未加载 — 点击加载该轮并定位」", () => {
+  it("把手显示当前轮号（#N）；无 active 显 —；aria-expanded 随展开态", () => {
+    const { container } = renderNav(FIXTURES, { activeTurnKey: "run-2" });
+    const toggle = getToggle(container);
+    expect(toggle.textContent).toContain("#2");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    pinOpen(container);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+});
+
+// ── 2. 展开/收起（悬停防抖 / pin / 浮层不挤压） ──────────────────────────
+
+describe("TurnNavList 展开收起", () => {
+  it("悬停 300ms 防抖滑出浮层；不足 300ms 离开不展开；展开后移开 250ms 收起", () => {
+    const { container } = renderNav(FIXTURES);
+    const column = within(container).getByTestId("turn-nav-column");
+    fireEvent.mouseEnter(column);
+    act(() => vi.advanceTimersByTime(200));
+    expect(within(container).queryByTestId("turn-nav-flyout")).toBeNull();
+    act(() => vi.advanceTimersByTime(100)); // 满 300ms
+    expect(within(container).getByTestId("turn-nav-flyout")).toBeTruthy();
+
+    fireEvent.mouseLeave(column);
+    act(() => vi.advanceTimersByTime(150));
+    expect(within(container).getByTestId("turn-nav-flyout")).toBeTruthy(); // 防抖间隙
+    act(() => vi.advanceTimersByTime(100)); // 满 250ms
+    expect(within(container).queryByTestId("turn-nav-flyout")).toBeNull();
+  });
+
+  it("pin 锁定常开（把手切换）；移开不收；浮层头显示总轮数与收起钮", () => {
+    const { container } = renderNav(FIXTURES);
+    pinOpen(container);
+    const column = within(container).getByTestId("turn-nav-column");
+    fireEvent.mouseLeave(column);
+    act(() => vi.advanceTimersByTime(1000));
+    const flyout = within(container).getByTestId("turn-nav-flyout");
+    expect(flyout.textContent).toContain("共 3 轮");
+    fireEvent.click(within(flyout).getByRole("button", { name: "收起轮次导航" }));
+    expect(within(container).queryByTestId("turn-nav-flyout")).toBeNull();
+  });
+
+  it("浮层行内容：第N轮 + 摘要 + 相对时间；未加载无摘要占位文案", () => {
     const { container } = renderNav([
       ENTRY_COMPLETED,
       ENTRY_FAILED,
       ENTRY_UNLOADED_BARE,
     ]);
-    const row = getRows(container)[2]!;
-    expect(row.textContent).toContain("未加载 — 点击加载该轮并定位");
-    expect(row).toHaveAttribute("aria-label", "第4轮 · 已停止 · 未加载");
+    pinOpen(container);
+    const rows = getFlyoutRows(container);
+    expect(rows[0]!.textContent).toContain("第1轮");
+    expect(rows[0]!.textContent).toContain("调研 sessions 页面组件结构与渲染链路");
+    expect(rows[2]!.textContent).toContain("未加载 — 点击加载该轮并定位");
+    expect(getDot(rows[0]!)).toBeTruthy();
   });
 
-  it("状态点配色：failed → destructive；running → warning 脉冲；active → brand", () => {
-    const { container } = renderNav([
-      { ...ENTRY_FAILED, key: "run-f", turnNo: 1 },
-      { ...ENTRY_COMPLETED, key: "run-r", turnNo: 2, status: "running" },
-      { ...ENTRY_COMPLETED, key: "run-a", turnNo: 3 },
-    ]);
-    const rows = getRows(container);
-    expect(getDot(rows[0]!).className).toContain("bg-destructive");
-    expect(getDot(rows[1]!).className).toContain("bg-warning");
-    expect(getDot(rows[1]!).className).toContain("animate-pulse");
+  it("浮层 absolute 不挤压布局：列容器宽度恒为窄轨 44px（展开前后不变）", () => {
+    const { container } = renderNav(FIXTURES);
+    const rail = within(container).getByTestId("turn-nav-rail");
+    expect(rail.style.width).toBe("44px");
+    pinOpen(container);
+    expect(within(container).getByTestId("turn-nav-rail").style.width).toBe("44px");
   });
 });
 
-// ── 2. 长列表防卡（FR-06：>200 轮固定行高 + content-visibility） ─────────
+// ── 3. 交互：点击 / Enter / active 联动 / loadingEarlier ─────────────────
+
+describe("TurnNavList 交互与联动", () => {
+  it("刻度点击直跳回调 onJump 携带完整 entry；Enter 键同样触发（键盘可达）", () => {
+    const { container, onJump } = renderNav(FIXTURES);
+    const ticks = getTicks(container);
+    fireEvent.click(ticks[2]!);
+    expect(onJump).toHaveBeenCalledTimes(1);
+    expect(onJump).toHaveBeenCalledWith(ENTRY_UNLOADED_OUTLINE);
+
+    fireEvent.keyDown(ticks[0]!, { key: "Enter" });
+    expect(onJump).toHaveBeenCalledTimes(2);
+    expect(onJump).toHaveBeenLastCalledWith(ENTRY_COMPLETED);
+  });
+
+  it("浮层行点击跳转：非 pin 态选完即收（悬停态同收）；pin 态保持展开", () => {
+    // 悬停展开态
+    const a = renderNav(FIXTURES);
+    const colA = within(a.container).getByTestId("turn-nav-column");
+    fireEvent.mouseEnter(colA);
+    act(() => vi.advanceTimersByTime(350));
+    fireEvent.click(getFlyoutRows(a.container)[1]!);
+    expect(a.onJump).toHaveBeenCalledWith(ENTRY_FAILED);
+    expect(within(a.container).queryByTestId("turn-nav-flyout")).toBeNull();
+    a.unmount();
+
+    // pin 态：跳转后保持展开
+    const b = renderNav(FIXTURES);
+    pinOpen(b.container);
+    const bRows = getFlyoutRows(b.container);
+    fireEvent.click(bRows[1]!);
+    expect(b.onJump).toHaveBeenCalledWith(ENTRY_FAILED);
+    expect(within(b.container).getByTestId("turn-nav-flyout")).toBeTruthy();
+  });
+
+  it("activeTurnKey 命中刻度/行 aria-current=true；变化时轨内 scrollIntoView（block:nearest，首渲不滚）", () => {
+    const onJump = vi.fn();
+    const scrollSpy = Element.prototype.scrollIntoView as Mock;
+    const view = render(
+      <TurnNavList entries={FIXTURES} activeTurnKey="run-2" onJump={onJump} />,
+    );
+    const ticks = getTicks(view.container);
+    expect(ticks[1]).toHaveAttribute("aria-current", "true");
+    expect(ticks[0]).not.toHaveAttribute("aria-current");
+    // ref 守卫：首次渲染（含初始 active）不滚动。
+    expect(scrollSpy).not.toHaveBeenCalled();
+
+    // active 变化 → 命中刻度 scrollIntoView({ block: "nearest" })。
+    view.rerender(
+      <TurnNavList entries={FIXTURES} activeTurnKey="run-1" onJump={onJump} />,
+    );
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
+    expect(scrollSpy).toHaveBeenCalledWith({ block: "nearest" });
+    expect(scrollSpy.mock.instances[0]).toBe(ticks[0]);
+  });
+
+  it("loadingEarlier → 轨标注 aria-busy（跳转加载进行中）", () => {
+    const { container } = renderNav(FIXTURES, { loadingEarlier: true });
+    expect(
+      within(container).getByTestId("turn-nav-rail-ticks"),
+    ).toHaveAttribute("aria-busy", "true");
+  });
+});
+
+// ── 4. 长列表防卡（FR-06：>200 轮固定行高 + content-visibility） ─────────
 
 describe("TurnNavList 长列表防卡", () => {
   function makeMany(n: number): TurnNavEntry[] {
@@ -218,86 +319,19 @@ describe("TurnNavList 长列表防卡", () => {
     }));
   }
 
-  it("≤200 轮行高自适应（无 content-visibility 内联样式）；>200 轮固定行高 + contentVisibility:auto", () => {
+  it("≤200 轮浮层行高自适应（无 content-visibility 内联样式）；>200 轮固定行高 + contentVisibility:auto", () => {
     const short = renderNav(makeMany(200));
-    const shortRow = getRows(short.container)[0]!;
+    pinOpen(short.container);
+    const shortRow = getFlyoutRows(short.container)[0]!;
     expect(shortRow.className).not.toContain("h-[44px]");
     expect(shortRow.style.contentVisibility).toBe("");
     short.unmount();
 
     const long = renderNav(makeMany(201));
-    const longRow = getRows(long.container)[0]!;
+    pinOpen(long.container);
+    const longRow = getFlyoutRows(long.container)[0]!;
     expect(longRow.className).toContain("h-[44px]");
     expect(longRow.style.contentVisibility).toBe("auto");
     expect(longRow.style.containIntrinsicSize).toBe("44px");
-  });
-});
-
-// ── 3. 交互：点击 / Enter / active 联动 / loadingEarlier ─────────────────
-
-describe("TurnNavList 交互与联动", () => {
-  it("点击行回调 onJump 携带完整 entry；Enter 键同样触发（键盘可达）", () => {
-    const { container, onJump } = renderNav(FIXTURES);
-    const rows = getRows(container);
-    fireEvent.click(rows[2]!);
-    expect(onJump).toHaveBeenCalledTimes(1);
-    expect(onJump).toHaveBeenCalledWith(ENTRY_UNLOADED_OUTLINE);
-
-    fireEvent.keyDown(rows[0]!, { key: "Enter" });
-    expect(onJump).toHaveBeenCalledTimes(2);
-    expect(onJump).toHaveBeenLastCalledWith(ENTRY_COMPLETED);
-  });
-
-  it("activeTurnKey 命中行 aria-current=true；变化时轨内 scrollIntoView（block:nearest，首渲不滚）", () => {
-    const onJump = vi.fn();
-    const scrollSpy = Element.prototype.scrollIntoView as Mock;
-    const view = render(
-      <TurnNavList entries={FIXTURES} activeTurnKey="run-2" onJump={onJump} />,
-    );
-    const rows = getRows(view.container);
-    expect(rows[1]).toHaveAttribute("aria-current", "true");
-    expect(rows[0]).not.toHaveAttribute("aria-current");
-    // ref 守卫：首次渲染（含初始 active）不滚动。
-    expect(scrollSpy).not.toHaveBeenCalled();
-
-    // active 变化 → 命中行 scrollIntoView({ block: "nearest" })。
-    view.rerender(
-      <TurnNavList entries={FIXTURES} activeTurnKey="run-1" onJump={onJump} />,
-    );
-    expect(scrollSpy).toHaveBeenCalledTimes(1);
-    expect(scrollSpy).toHaveBeenCalledWith({ block: "nearest" });
-    expect(scrollSpy.mock.instances[0]).toBe(rows[0]);
-    expect(rows[0]).toHaveAttribute("aria-current", "true");
-    expect(rows[1]).not.toHaveAttribute("aria-current");
-  });
-
-  it("loadingEarlier → 轨标注 aria-busy（跳转加载进行中）", () => {
-    const { container } = renderNav(FIXTURES, { loadingEarlier: true });
-    expect(getNav(container)).toHaveAttribute("aria-busy", "true");
-  });
-});
-
-// ── 4. 列宽：默认 220 + 记忆键 + 拖宽把手 ────────────────────────────────
-
-describe("TurnNavList 列宽", () => {
-  it("默认 220px；把手挂载（role=separator）；localStorage 记忆键 sillyhub.sessions.turnNavWidth", () => {
-    const { container } = renderNav(FIXTURES);
-    const column = container.querySelector<HTMLElement>(
-      '[data-testid="turn-nav-column"]',
-    );
-    expect(column).toBeTruthy();
-    expect(column!.style.width).toBe("220px");
-    const resizer = within(container).getByRole("separator", {
-      name: "调整轮次导航宽度",
-    });
-    expect(resizer).toHaveAttribute("aria-valuenow", "220");
-    expect(resizer).toHaveAttribute("aria-valuemin", "180");
-    expect(resizer).toHaveAttribute("aria-valuemax", "320");
-    // 拖宽写 localStorage（双击复位默认不改宽；用键盘 ArrowRight +16 验证记忆）。
-    fireEvent.keyDown(resizer, { key: "ArrowRight" });
-    expect(column!.style.width).toBe("236px");
-    expect(window.localStorage.getItem("sillyhub.sessions.turnNavWidth")).toBe(
-      "236",
-    );
   });
 });

@@ -1,0 +1,46 @@
+---
+author: flow-machine-draft
+created_at: 2026-09-28T01:42:46.081Z
+---
+# 设计记录（Design Record）— 2026-09-28-drop-observation-card
+
+> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
+> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
+
+## 做法概述
+<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-drop-observation-card 留痕重锚 -->
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+<!-- MACHINE-DRAFT:design-approach:end -->
+
+<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
+纯删除变更：详情页 aside 的「观测事件」折叠卡移除挂载，事件流水由主栏真实留痕时间线卡独家承担（两者同表 platform_change_events 双显，产品裁决去重）。连带清死代码：旧一代无挂载的 change-events-card.tsx（2026-09-23 首版卡，r18-full 时已被 observation 卡取代但未删）、lib/change-events.ts（新卡专用封装，唯一用户随卡删）、lib/changes.ts 的旧 listChangeEvents 段（唯一用户是旧卡）。后端 GET /changes/{name}/events 端点保留（CLI watcher 推送与调试面）。
+
+## 接口契约
+<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-drop-observation-card 留痕重锚 -->
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
+<!-- MACHINE-DRAFT:design-contract:end -->
+
+<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
+前端删除 4 文件（change-observation-events-card.tsx+spec / change-events-card.tsx+test）+ lib/change-events.ts；page.tsx 去挂载去 import；changes.ts 删观测事件段；assets-card 注释范式提法改 QuicklogLinkedCard。无 API/后端改动；restore-assets 测试 FR-01 用例改反向钉（断言观测事件卡不在场防回潮）。
+
+## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
+<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-drop-observation-card 留痕重锚 -->
+1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
+2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
+3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
+<!-- MACHINE-DRAFT:design-boundaries:end -->
+
+<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
+1. 乱序/迟到：不适用——纯 UI 删除，无数据通路改动（主栏时间线卡自取数不受影响）。
+2. 并发写：不适用——无共享状态变化。
+3. 切换/生命周期：不适用——删的是自取数组件，失败静默隐藏语义随组件整体消失，无残留查询。
+4. 作用域：不适用——无跨工作区数据面；后端端点与表全保留（CLI 推送链路零触碰）。
+
+## 风险与死路
+<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-drop-observation-card 留痕重锚 -->
+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
+<!-- MACHINE-DRAFT:design-risks:end -->
+
+<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
+最大风险：观测事件卡的 warning 告警自动展开提醒能力随卡消失——可接受（主栏时间线卡事件轴同款 warn 色渲染 warning 行，信息不丢，只失去「自动展开」交互；如后续需要可给时间线卡加告警高亮）。放弃方案：保留两卡但观测卡收敛为仅 warning（用户裁决「直接不要了」，从简执行）。

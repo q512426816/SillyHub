@@ -1,0 +1,29 @@
+{
+  "change": "2026-09-28-drop-observation-card",
+  "baseline": "7e998a5c6bfd9fffb426588186c47e250ddf2bf5",
+  "head": "7e998a5c6bfd9fffb426588186c47e250ddf2bf5",
+  "files": [
+    ".sillyspec/changes/2026-09-28-drop-observation-card/design.md",
+    ".sillyspec/changes/2026-09-28-drop-observation-card/proposal.md",
+    ".sillyspec/changes/2026-09-28-drop-observation-card/requirements.md",
+    ".sillyspec/changes/2026-09-28-drop-observation-card/tasks.md"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 139,
+    "deletions": 0
+  },
+  "savedAt": "2026-09-28T01:51:23.966Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "7d3958a9650fe484365ce96a7d500f6332fb518cc1dd9bbbcd8862ea78b2d2a9",
+  "patchStatus": "ok"
+}

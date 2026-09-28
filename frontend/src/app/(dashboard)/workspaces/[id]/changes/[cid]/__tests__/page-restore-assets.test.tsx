@@ -7,8 +7,8 @@
 // 断言面（对应 FR-01 / FR-02 / FR-03）：
 //   1. current_stage="thin" → 标题旁 STATUS_BADGE 徽章精确文本「轻量变更」
 //      （说明卡标题带 ◈ 前缀、正文为长句，exact 匹配不误中）
-//   2. aside 同时挂载沉淀资产卡与观测事件卡（ChangeAssetsCard 恢复挂载，
-//      ChangeObservationEventsCard 为 304eba982 有效交付，二者并存不互斥）
+//   2. aside 挂载沉淀资产卡；观测事件卡已移除（2026-09-28-drop-observation-card
+//      与主栏时间线卡同表双显，反向钉防回潮）
 //   3. 范围对账卡收到 archived 传参（isTerminalChange 派生，非终态 false）
 //
 // 卡片组件全部 stub（只验页面挂载与传参，组件内部由各自套件覆盖），范式对齐
@@ -51,14 +51,6 @@ vi.mock("@/lib/quicklog", () => ({
 vi.mock("@/components/changes/detail/change-assets-card", () => ({
   ChangeAssetsCard: () => <div data-testid="change-assets-card" />,
 }));
-vi.mock(
-  "@/components/changes/detail/change-observation-events-card",
-  () => ({
-    ChangeObservationEventsCard: () => (
-      <div data-testid="change-observation-events-card" />
-    ),
-  }),
-);
 // 范围对账卡 stub 透传 archived（FR-03 传参断言面；target 字面量同页透传不验）
 vi.mock("@/components/changes/scope-audit-command-card", () => ({
   ScopeAuditCommandCard: ({
@@ -148,14 +140,14 @@ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets�
     expect(h1.getByText("轻量变更")).toBeInTheDocument();
   });
 
-  it("FR-01：aside 同时挂载沉淀资产卡与观测事件卡", async () => {
+  it("FR-01：aside 挂载沉淀资产卡；观测事件卡已移除（2026-09-28-drop-observation-card 反向钉）", async () => {
     renderPage(makeChange());
     expect(
       await screen.findByTestId("change-assets-card"),
     ).toBeInTheDocument();
     expect(
-      screen.getByTestId("change-observation-events-card"),
-    ).toBeInTheDocument();
+      screen.queryByTestId("change-observation-events-card"),
+    ).toBeNull();
   });
 
   it("FR-03：范围对账卡收到 archived 传参（非终态变更为 false，非 unset）", async () => {

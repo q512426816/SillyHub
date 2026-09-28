@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-drop-observation-card",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-28T00:00:00Z"
+}

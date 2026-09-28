@@ -1,0 +1,29 @@
+{
+  "change": "2026-09-28-turn-nav-hover-flyout",
+  "baseline": "7e998a5c6bfd9fffb426588186c47e250ddf2bf5",
+  "head": "7e998a5c6bfd9fffb426588186c47e250ddf2bf5",
+  "files": [
+    ".sillyspec/changes/2026-09-28-turn-nav-hover-flyout/design.md",
+    ".sillyspec/changes/2026-09-28-turn-nav-hover-flyout/proposal.md",
+    ".sillyspec/changes/2026-09-28-turn-nav-hover-flyout/requirements.md",
+    ".sillyspec/changes/2026-09-28-turn-nav-hover-flyout/tasks.md"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 168,
+    "deletions": 0
+  },
+  "savedAt": "2026-09-28T01:55:10.989Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "0d135c5cba8b762f6952a42e558c5a93978a94203663b68c5b1bc48520ac5aba",
+  "patchStatus": "ok"
+}

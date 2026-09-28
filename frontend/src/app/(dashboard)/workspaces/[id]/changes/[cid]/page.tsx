@@ -31,7 +31,6 @@ import {
   lastSignalFromSteps,
 } from "@/components/changes/change-activity-badge";
 import { ChangeUsageCard } from "@/components/changes/detail/change-usage-card";
-import { ChangeObservationEventsCard } from "@/components/changes/detail/change-observation-events-card";
 import { QuicklogLinkedCard } from "@/components/changes/detail/quicklog-linked-card";
 import { ScopeAuditCommandCard } from "@/components/changes/scope-audit-command-card";
 import { ApiError } from "@/lib/api";
@@ -493,10 +492,10 @@ export default function ChangeDetailPage({ params }: Props) {
             workspaceId={workspaceId}
             changeKey={change.change_key}
           />
-          {/* 2026-09-26-change-events-r18-full task-03（FR-07/FR-08）：「观测事件」
-              折叠卡——watcher 推送的旁路观测信号只读展示（红线 D-004：零业务逻辑，
-              纯渲染；组件自取数 30s 轮询，失败静默隐藏不阻断详情页）。 */}
-          <ChangeObservationEventsCard changeKey={change.change_key} />
+          {/* 2026-09-28-drop-observation-card：原「观测事件」折叠卡移除——与主栏
+              真实留痕时间线卡同表同数据双显（r18-full FR-07/08 与 change-real-timeline
+              重叠），产品裁决事件流水由主栏时间线卡独家承担；后端
+              GET /changes/{name}/events 端点保留（CLI 推送/调试面）。 */}
           <ChangeSessionsCard workspaceId={workspaceId} changeId={changeId} />
           {/* ql-20260910-014-6c29：scope-audit 范围对账结果卡（ql-20260911-001-c0be
               升级：本机跑对账出三态计数+锚点合计+明细弹窗行联动单文件 diff，本地命令折叠为兜底；identifier=
@@ -513,7 +512,7 @@ export default function ChangeDetailPage({ params }: Props) {
           {/* 2026-09-25-change-precipitated-assets（D-001@v1 方案 a）：「沉淀资产」
               折叠卡——本变更经归档沉淀的 FR 索引/决策蒸馏/测试绑定/patch 留档/
               delta 摘要只读聚合（GET /changes/{cid}/assets），四组逐组有数据才
-              渲染、失败静默隐藏（ChangeObservationEventsCard 同款范式）。 */}
+              渲染、失败静默隐藏（QuicklogLinkedCard 同款范式）。 */}
           <ChangeAssetsCard workspaceId={workspaceId} changeId={changeId} />
         </aside>
       </div>

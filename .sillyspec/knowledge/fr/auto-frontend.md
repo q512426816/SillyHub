@@ -228,7 +228,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-change-detail-restore-assets
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-turn-nav-hover-flyout
 场景正文：
 - 场景：默认场景 — Given main 分支的变更详情页（`[cid]/page.tsx`）在 304eba982 被夹带的旧版页面覆盖，；When 用户打开任一变更详情页，
 全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-01
@@ -250,7 +250,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-change-detail-restore-assets
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-turn-nav-hover-flyout
 场景正文：
 - 场景：默认场景 — Given `current_stage="thin"` 的轻量变更在标题旁只显示弱化的 outline 徽章（fallback 路径），；When 详情页渲染 thin 或 quick 阶段变更，；Then thin 显示品牌紫 default 徽章「轻量变更」、quick 显示 default 徽章「快速任务（存量）」（`STATUS_BADGE` 四态：quic
 全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-02
@@ -272,7 +272,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-change-detail-restore-assets
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-turn-nav-hover-flyout
 场景正文：
 - 场景：默认场景 — Given 已归档变更（status=archived 或 location=archive）的范围对账降级态，；When `ScopeAuditCommandCard` 渲染降级横幅，；Then 重新收到 `archived={isTerminalChange(change)}` 传参，横幅追加「真实改动面见沉淀资产 · 归档留档」指路（组件侧逻辑 9c
 全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-03
@@ -294,7 +294,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-change-detail-restore-assets
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-turn-nav-hover-flyout
 场景正文：
 - 场景：默认场景 — Given 三处恢复落盘，；Then 全部用例通过且类型检查 0 错。
 全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-04
@@ -304,7 +304,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-assets-testfile-path-resolve
 状态：active
 摘要：默认场景
-待复核：2026-09-27-assets-testfile-bracket-note
+待复核：2026-09-28-turn-nav-hover-flyout
 场景正文：
 - 场景：默认场景 — Given 归档件 test-trace.json 记录的测试文件路径可能是短路径（如 `tests/test_full_sync_convergence.py`，实为仓库；When 用户在沉淀资产卡「测试绑定」行点开测试文件预览，；Then 弹窗先对记录路径做知识库同款字符串归一（反斜杠→斜杠、去 `./` 前缀），再按文件名调 explorer search 全树搜索：命中路径与归一路径**等值*
 全文：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/requirements.md#FR-01
@@ -326,7 +326,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-assets-testfile-path-resolve
 状态：active
 摘要：默认场景
-待复核：2026-09-27-assets-testfile-bracket-note
+待复核：2026-09-28-turn-nav-hover-flyout
 场景正文：
 - 场景：默认场景 — Given 记录路径在仓库内零命中或多候选（用户需自选），；When 预览弹窗渲染解析结果，；Then 前端显示中性提示（未在仓库中找到该测试文件、路径可能不完整或已被移动/删除；多候选时列候选），不出现「工作区目录可能已被移动或删除」语义；explorer 后端
 全文：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/requirements.md#FR-02
@@ -348,7 +348,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-assets-testfile-path-resolve
 状态：active
 摘要：默认场景
-待复核：2026-09-27-assets-testfile-bracket-note
+待复核：2026-09-28-turn-nav-hover-flyout
 场景正文：
 - 场景：默认场景 — Given 路径解析逻辑落盘，；When 运行 change-assets-card 组件套件，；Then 新增用例（等值命中直用、短路径唯一后缀救回、worktree 副本排除后救回、零命中中性文案）与既有 10 用例全部通过。
 全文：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/requirements.md#FR-03
@@ -370,7 +370,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-assets-testfile-path-resolve
 状态：active
 摘要：默认场景
-待复核：2026-09-27-assets-testfile-bracket-note
+待复核：2026-09-28-turn-nav-hover-flyout
 场景正文：
 - 场景：默认场景 — Given explorer 文案修改落盘，；When 运行后端 explorer 聚焦测试与 `frontend tsc --noEmit`，；Then 全部通过且类型检查 0 错。
 全文：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/requirements.md#FR-04
@@ -750,6 +750,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-27-assets-testfile-bracket-note
 状态：active
 摘要：默认场景
+待复核：2026-09-28-turn-nav-hover-flyout
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When normalizeTestFilePath 剥离路径中的「…」注解段（支持一段或多段），剥离后为空仍按未找到处理；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-assets-testfile-bracket-note/requirements.md#FR-01
@@ -771,6 +772,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-27-assets-testfile-bracket-note
 状态：active
 摘要：默认场景
+待复核：2026-09-28-turn-nav-hover-flyout
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When TestFileBody 用剥离后的文件名发起 explorer search，粘注解路径可等值；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-assets-testfile-bracket-note/requirements.md#FR-02
@@ -792,6 +794,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-27-assets-testfile-bracket-note
 状态：active
 摘要：默认场景
+待复核：2026-09-28-turn-nav-hover-flyout
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 后缀命中并打开真实测试文件预览；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-assets-testfile-bracket-note/requirements.md#FR-03
@@ -813,6 +816,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-27-assets-testfile-bracket-note
 状态：active
 摘要：默认场景
+待复核：2026-09-28-turn-nav-hover-flyout
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 既有 change-assets-card 路径解析用例全绿，新增用例覆盖多段注解与搜索入参为干净文件名；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-assets-testfile-bracket-note/requirements.md#FR-04
@@ -958,3 +962,51 @@ created_at: 2026-09-22T16:33:05.472Z
   confirmed_at: null
   source_change: 2026-09-27-timeline-task-time
   status: active
+
+## FR-auto-frontend-062 变更详情页不再挂载观测事件卡（desktop 与移动端全挂载点清除）
+变更：2026-09-28-drop-observation-card
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 变更详情页不再挂载观测事件卡（desktop 与移动端全挂载点清除）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-drop-observation-card/requirements.md#FR-01
+最近确认：7e998a5c6bfd9fffb426588186c47e250ddf2bf5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-drop-observation-card:flow:FR-01
+  tests: __tests__/page-restore-assets.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-drop-observation-card
+  status: active
+
+## FR-auto-frontend-063 卡组件与其前端封装若无其他引用则一并删除（不留死代码）
+变更：2026-09-28-drop-observation-card
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 组件 / 前端 相关模块就绪；When 卡组件与其前端封装若无其他引用；Then 一并删除（不留死代码）
+全文：.sillyspec/changes/archive/2026-09-28-drop-observation-card/requirements.md#FR-02
+最近确认：7e998a5c6bfd9fffb426588186c47e250ddf2bf5
+
+## FR-auto-frontend-064 相关测试同步更新（原断言该卡在场的用例改口径）并全部通过
+变更：2026-09-28-drop-observation-card
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 相关测试同步更新（原断言该卡在场的用例改口径）并全部通过；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-drop-observation-card/requirements.md#FR-03
+最近确认：7e998a5c6bfd9fffb426588186c47e250ddf2bf5
+
+## FR-auto-frontend-065 后端 /changes/{name}/events 端点不动（CLI 推送与调试面仍在用）
+变更：2026-09-28-drop-observation-card
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 端点 相关模块就绪；When 后端 /changes/{name}/events 端点不动（CLI 推送与调试面仍在用）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-drop-observation-card/requirements.md#FR-04
+最近确认：7e998a5c6bfd9fffb426588186c47e250ddf2bf5

@@ -1276,3 +1276,10 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：afc294c0cd99859b03ece73a26494b0d0a855938
 理由：最大风险：黑名单收窄以「root 只进 spawn cwd、绝不拼命令串」为前提——若未来 knowledge 命令改为拼接 root，& 等字符会重新构成注入面；已在类注释钉死该前提，改命令构造时必须回看。containment 是真正的物理边界，黑名单仅异常值防线。 试过放弃的方案：把 issue-row 的 div onKeyDown 一并删除（F-3 同源直觉）——div role=button 无原生键盘激活，删了是可访问性回归；只删 underline-nav 的容器级处理（tab 是真 button，原生激活足够）。 不可修项留档：66ae9a0d4 提交点 ImportError 是 git 历史事实（HEAD 已由 723d325fd 补全），不改写历史。 评审 P2 裁决（change.patch 冻结区间夹带）：session_insights.py 的 `func.max(cast(AgentRunLog.id, String))` hunk 属并行会话提交 66393f432（turn-outline 指纹 PG 无 uuid 聚合修复，生产 500），非本变更交付文件面——baseline(b14ce676f)..HEAD 区间采集把它扫入冻结件，属区间机械现象（先例：多份归档提交的「并行会话增量不夹带」注记）。该 hunk 的行为承诺与测试（15 用例）在 66393f432 自身留档，本变更不重复承接，边界已裁决：可接受。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-28-drop-observation-card
+锚点：未记录
+最近确认：7e998a5c6bfd9fffb426588186c47e250ddf2bf5
+理由：最大风险：观测事件卡的 warning 告警自动展开提醒能力随卡消失——可接受（主栏时间线卡事件轴同款 warn 色渲染 warning 行，信息不丢，只失去「自动展开」交互；如后续需要可给时间线卡加告警高亮）。放弃方案：保留两卡但观测卡收敛为仅 warning（用户裁决「直接不要了」，从简执行）。

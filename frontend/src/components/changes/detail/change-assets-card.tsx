@@ -94,7 +94,7 @@ export function resolveTestFilePath(
  * D-001@v1 方案 a）。
  *
  * 本变更经归档沉淀的项目资产只读聚合：FR 索引条目 / 决策蒸馏条目 / 测试绑定
- * 行 / patch 留档统计 / delta 摘要。useQuery 自取数（ChangeEventsCard 同款
+ * 行 / patch 留档统计 / delta 摘要。useQuery 自取数（QuicklogLinkedCard 同款
  * 范式）+ 失败静默隐藏；四组逐组「有数据才渲染」（design fail-open）；
  * 在途变更（archived=false）显示引导空态（design R-03 对应展示面）。
  * 纯展示零业务逻辑，无 mutation。
