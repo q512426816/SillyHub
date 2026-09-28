@@ -14,9 +14,13 @@
 - quicklog-table.test.tsx 追加 3 用例：fixed 布局内联样式锚（table 元素 table-layout=fixed）/ 标题按钮 block w-full min-w-0 类名锚 / 状态备注外层 flex + max-w-full truncate 结构锚
 - 19/19 绿（16 既有 + 3 新增）；tsc 0 错；flow done lint 门禁 ruff/mypy/pnpm lint/typecheck 全过
 
-## C. 部署后原生复测
+## C. 部署后原生复测（2026-09-28 23:50，镜像 COMMIT_SHA=e231b269b）
 
-- （部署后填写）
+- 同场景复测（sillyspec 工作区快速修复 tab，搜索"2026-09-24-b"，1600×900）：
+  - 修复前：标题/ql_id 等 8+ 文本元素越界（elRight 875 > cellRight 854）
+  - 修复后：**视觉级重叠 0**（visualOverlaps: []）；table 元素 `table-layout: fixed` 在线生效
+  - 影响模块列文本有 8px 矩形越界但位于 `ellipsis: true` 单元格内（antd 单元格级裁切，非视觉叠压，属设计内行为）
+- 截图：`after-prod-quicklog-1600.png`（本目录）
 
 ## 降级裁决
 
