@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-knowledge-inbox-clear",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "存量条目「后台任务写通道宽限无界」无 INDEX 索引行（存量缺口，非本变更引入）",
+      "evidence": "known-issues.md 共 40 个 ## 条目而 INDEX.md Known Issues 节仅 39 行；迁移的 18 条恰为 L164-L289 的日期块（12🟢+6🟡，与 FR-03 证据吻合），缺索引行的是 L144 存量条目（登记于 2026-09-16-background-task-grace-timeout，早于本变更基线），FR-05 承诺面仅覆盖迁移条目，不构成违诺；与其余四文件 16/16、14/14 全覆盖对照属既有遗漏，建议下次顺手补",
+      "location": ".sillyspec/knowledge/known-issues.md:144"
+    },
+    {
+      "severity": "P3",
+      "title": "design「唯一改写点」表述与 tasks 披露的顺手修复面不一致",
+      "evidence": "design.md 槽2 称唯一改写点是 known-issues 内 1 处交叉引用，但 tasks.md task-05/07 另披露顺手修复 6 条存量坏锚点、消除 1 条 flag_like_keyword warning——实际改写既有 INDEX 行的面大于契约表述；属良性（有披露、无删除条目/索引），仅为设计文档口径与实际改动面不一致",
+      "location": ".sillyspec/changes/2026-09-28-knowledge-inbox-clear/design.md:24"
+    },
+    {
+      "severity": "P3",
+      "title": "针对旧版的数量性验收证据无法独立复核",
+      "evidence": "change.patch 按惯例过滤了 knowledge 交付文件，旧版 uncategorized.md 与旧 INDEX 不可得，「286 行删除」「6 条存量锚点修复」「正文忠实保留不删减」只能采信作答；已用间接证据对冲：五文件 ## 计数 40/16/16/14/14 与作答一致、18+6+5+8+4=41 算术闭合、INDEX 五分类节恰 99 条链接与「99/99 校验」声明吻合、抽查 18 条锚点（含 emoji 前缀、双空格转双连字符、全角标点删除等难点样例）按 GitHub slug 规则全部命中",
+      "location": ".sillyspec/changes/2026-09-28-knowledge-inbox-clear/change.patch"
+    },
+    {
+      "severity": "P3",
+      "title": "存量条目残留 [[wiki 链]] 未转（task-06 范围外备忘）",
+      "evidence": "sillyspec-gotchas.md L45「[[sillyspec-must-run-at-repo-root]]」位于非迁移的存量条目内，task-06 仅承诺迁移条目间的 wiki 链改写，不构成违诺，留作后续清理",
+      "location": ".sillyspec/knowledge/sillyspec-gotchas.md:45"
+    }
+  ],
+  "boundaryAdjudications": [
+    {
+      "boundary": "正文忠实保留不删减（仅补丢标题、改交叉引用、追加两条现状备注）",
+      "verdict": "可接受",
+      "reason": "迁移类变更最大化可回溯性，三类例外均在 design/tasks 显式披露；字节级保留因旧版被 patch 过滤未能复核，属证据可得性限制而非设计缺陷"
+    },
+    {
+      "boundary": "不拆分跨类条目、按主锚归类（如 Next.js 代理条目兼含 SSE 范式）",
+      "verdict": "可接受",
+      "reason": "条目完整性与可回溯性优先于分类纯度，跨类信息随正文整体迁移不丢失"
+    },
+    {
+      "boundary": "已修复项保留不删除，标 🟢/🟡 状态",
+      "verdict": "可接受",
+      "reason": "符合收件箱头注「已修复项保留并标注状态便于回溯」的既有约定，实测迁移 18 条恰为 12🟢+6🟡 与 FR-03 承诺一致"
+    },
+    {
+      "boundary": "顺手修复超 FR 范围（6 条存量锚点 + 1 条 warning 关键词 + worktree doctor 条目 \\f 控制字符还原）",
+      "verdict": "可接受",
+      "reason": "同一知识面内的良性修复、无删除性改动且已在 tasks.md 披露；仅 design「唯一改写点」口径未同步（见 P3 finding）"
+    },
+    {
+      "boundary": "七条测试绑定全部填「不适用」",
+      "verdict": "可接受",
+      "reason": "纯知识库文档迁移确无 pytest/vitest 用例面；替代验收证据（## 计数、grep、node 锚点脚本、validate 命令）与本次独立抽验结果一致，其中 FR-07 validate ok=true 因只读+请求预算约束未重跑，采信作答且无反证"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-28T15:45:00+08:00"
+}

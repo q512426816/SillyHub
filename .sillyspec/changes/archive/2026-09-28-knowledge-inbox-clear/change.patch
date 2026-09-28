@@ -1,0 +1,208 @@
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/flow-state.yaml b/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/flow-state.yaml
+new file mode 100644
+index 000000000..72cddf0b7
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/flow-state.yaml
+@@ -0,0 +1,9 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 4dfba3a2ab2d4a78936d98ebb6fc734ce5af6236
++updatedAt: '2026-09-28T13:37:18.180Z'
++
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/design.md b/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/design.md
+new file mode 100644
+index 000000000..e57ec508e
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T13:37:18.188Z
++---
++# 设计记录（Design Record）— 2026-09-28-knowledge-inbox-clear
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-inbox-clear 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++纯知识库文档迁移，不改任何代码。逐条读取 `.sillyspec/knowledge/uncategorized.md` 的 41 条（40 个 `##` 条目 + 1 条丢标题的 SSE 路由条目），按内容归入五个既有分类文件：known-issues 18 条（项目坑/外部依赖行为，已修复项按文件既有惯例标 🟢 已修复、未修复现状项标 🟡）、patterns 6 条（可复用架构/设计模式）、conventions 5 条（仓库编码约定）、testing-gotchas 8 条（测试环境/方法论坑）、sillyspec-gotchas 4 条（SillySpec 工具行为坑）。正文忠实保留不删减，仅：补写丢标题条目的标题、更新指向 uncategorized 旧标题的 wiki 交叉引用、对两条条目追加经代码核验的现状备注（master key 健壮性缺口仍开放、后台子代理死锁已有宽限缓解）。INDEX.md 五个分类节补 41 行关键词索引，Uncategorized 节改为已清空说明。选此方案是因为五个分类文件与 INDEX 路由是仓库既有知识库结构，迁移而非重写可保留全部可回溯信息。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-inbox-clear 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++无代码接口变化。文件格式变化：uncategorized.md 由 41 条内容缩减为仅收件箱头注 + 清账说明一行；known-issues/patterns/conventions/testing-gotchas/sillyspec-gotchas 五文件各追加 N 条 `##` 条目（沿用各文件既有标题格式）；INDEX.md 新增 41 行 `关键词 → [标题](文件#锚点)` 索引。消费方为 sillyspec knowledge search/inspect 匹配引擎与按关键词读 INDEX 的子代理——均为内容增量，无删除既有索引或条目（唯一改写点：known-issues 内 1 处「关联 uncategorized」交叉引用改为指向 conventions 新条目）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-inbox-clear 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：不适用——纯静态文档迁移，无事件流；条目按原文件顺序迁移，顺序不构成语义。
++2. 并发写：同机存在并行会话（frontend-apple-style）。开工前已核实 INDEX.md 与五个分类文件在基线 4dfba3a2a 处干净、并行会话的知识面改动已提交；本变更只编辑上述 6 个文件并显式 pathspec 提交，不碰并行会话未跟踪的 `.sillyspec/changes/2026-09-28-frontend-apple-style/`。若并行会话中途再写 knowledge/，提交时 pathspec 圈定即隔离。
++3. 切换/生命周期：中断安全——每文件一次完整写入，未完成文件不提交；flow done 支持断点续跑。
++4. 作用域：仅本仓 `.sillyspec/knowledge/`，不触 worktree/其他仓，无跨实例串台面。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-inbox-clear 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：INDEX 锚点手写错（GitHub 中文 slug 规则：标点删除、空格转连字符）致索引点击不可达——用 node 脚本按同规则自检 41 条锚点后跑 sillyspec knowledge validate 双保险。次风险：归类判断主观（个别条目跨类，如 Next.js 代理条目兼含 SSE 范式）——按条目主锚（主要教训）归类，正文整体迁移不拆条，不丢信息。放弃的方案：按条目拆分跨类内容到多个文件（破坏原条目完整性与可回溯性，放弃）；已修复条目删除（违背收件箱头注「已修复项保留并标注状态便于回溯」，放弃）。
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/proposal.md b/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/proposal.md
+new file mode 100644
+index 000000000..df24c8c44
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/proposal.md
+@@ -0,0 +1,47 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T13:37:18.187Z
++---
++# 提案书（Proposal）— 2026-09-28-knowledge-inbox-clear
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:449b8658eca1648af30ec669168ec4e665541cb5d4c82db655726a2677f0138d:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-inbox-clear 留痕重锚 -->
++任务原话转写：清账知识收件箱：uncategorized.md 41 条待归类经验（40 个 ## 条目 + 1 条丢标题的 SSE 路由条目）逐条归类到五个分类文件，已修复项标注状态，保持可检索与交叉引用完整。
++
++成功标准：
++- uncategorized.md 全部条目迁出，文件仅保留收件箱头注与清账说明
++- 每条按内容归入 known-issues / patterns / conventions / testing-gotchas / sillyspec-gotchas 之一，正文忠实保留不删减
++- 已修复项按 known-issues 既有惯例标题带状态标记（已修复），未修复或现状认知项标记为待关注
++- 丢失标题的 SSE 路由条目补写标题后归入 FastAPI 路由顺序同族条目
++- INDEX.md 五个分类节补齐迁移条目索引行，Uncategorized 节改为已清空说明，索引锚点可解析
++- known-issues.md 内指向 uncategorized 旧条目的交叉引用改为指向新位置
++- sillyspec knowledge validate 无 errors
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:23b085044135ecc505b1c875920a0788630e2b6c5ac9c834e1dac9de7d54dee6:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-inbox-clear 留痕重锚 -->
++按成功标准机械推导，共 7 条验收面：
++1. uncategorized.md 全部条目迁出，文件仅保留收件箱头注与清账说明
++2. 每条按内容归入 known-issues / patterns / conventions / testing-gotchas / sillyspec-gotchas 之一，正文忠实保留不删减
++3. 已修复项按 known-issues 既有惯例标题带状态标记（已修复），未修复或现状认知项标记为待关注
++4. 丢失标题的 SSE 路由条目补写标题后归入 FastAPI 路由顺序同族条目
++5. INDEX.md 五个分类节补齐迁移条目索引行，Uncategorized 节改为已清空说明，索引锚点可解析
++6. known-issues.md 内指向 uncategorized 旧条目的交叉引用改为指向新位置
++7. sillyspec knowledge validate 无 errors
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:e6fc83363ab857b1e18762496ba162f27b02bfb96999f43b3b00c2ad5a126eee:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-inbox-clear 留痕重锚 -->
++1. uncategorized.md 全部条目迁出，文件仅保留收件箱头注与清账说明
++2. 每条按内容归入 known-issues / patterns / conventions / testing-gotchas / sillyspec-gotchas 之一，正文忠实保留不删减
++3. 已修复项按 known-issues 既有惯例标题带状态标记（已修复），未修复或现状认知项标记为待关注
++4. 丢失标题的 SSE 路由条目补写标题后归入 FastAPI 路由顺序同族条目
++5. INDEX.md 五个分类节补齐迁移条目索引行，Uncategorized 节改为已清空说明，索引锚点可解析
++6. known-issues.md 内指向 uncategorized 旧条目的交叉引用改为指向新位置
++7. sillyspec knowledge validate 无 errors
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/requirements.md b/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/requirements.md
+new file mode 100644
+index 000000000..3a36e2b5b
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/requirements.md
+@@ -0,0 +1,59 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T13:37:18.188Z
++---
++# 需求规格（Requirements）— 2026-09-28-knowledge-inbox-clear
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: uncategorized.md 全部条目迁出，文件仅保留收件箱头注与清账说明
++Given 系统就绪
++When uncategorized.md 全部条目迁出，文件仅保留收件箱头注与清账说明
++Then 行为符合本条标准描述
++
++### FR-02: 每条按内容归入 known-issues / patterns / conventions / te
++Given 系统就绪
++When 每条按内容归入 known-issues / patterns / conventions / testing-gotchas / sillyspec-gotc
++Then 行为符合本条标准描述
++
++### FR-03: 已修复项按 known-issues 既有惯例标题带状态标记（已修复），未修复或现状认知项标记为待关
++Given 系统就绪
++When 已修复项按 known-issues 既有惯例标题带状态标记（已修复），未修复或现状认知项标记为待关注
++Then 行为符合本条标准描述
++
++### FR-04: 丢失标题的 SSE 路由条目补写标题后归入 FastAPI 路由顺序同族条目
++Given api 相关模块就绪
++When 丢失标题的 SSE 路由条目补写标题后归入 FastAPI 路由顺序同族条目
++Then 行为符合本条标准描述
++
++### FR-05: INDEX.md 五个分类节补齐迁移条目索引行，Uncategorized 节改为已清空说明，索引锚
++Given 迁移 相关模块就绪
++When INDEX.md 五个分类节补齐迁移条目索引行，Uncategorized 节改为已清空说明，索引锚点可解析
++Then 行为符合本条标准描述
++
++### FR-06: known-issues.md 内指向 uncategorized 旧条目的交叉引用改为指向新位置
++Given 系统就绪
++When known-issues.md 内指向 uncategorized 旧条目的交叉引用改为指向新位置
++Then 行为符合本条标准描述
++
++### FR-07: sillyspec knowledge validate 无 errors
++Given 系统就绪
++When sillyspec knowledge validate 无 errors
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 不适用：纯知识库文档迁移，无代码测试面。验收证据=uncategorized.md 仅余头注与清账说明（提交 e723b484e 内 286 行删除），人工比对原文 41 条全部迁出 -->
++
++<!--AGENT:测试绑定FR-02 不适用：同上，分类落位属文档内容判断。验收证据=五分类文件 ## 标题计数（known-issues 40 / patterns 16 / conventions 16 / testing-gotchas 14 / sillyspec-gotchas 14），41 = 18+6+5+8+4 增量核对 -->
++
++<!--AGENT:测试绑定FR-03 不适用：同上，状态标记属标题文本。验收证据=known-issues 新增 18 条中 12 条 🟢（含「已修复」字样或 commit 号）、6 条 🟡，grep 可复核 -->
++
++<!--AGENT:测试绑定FR-04 不适用：同上。验收证据=known-issues.md「daemon sessions /events 字面量路由被 /sessions/{session_id} 参数路由吞掉」条目标题与正文（commit 0c7860f7 经 git log 验证存在），并与 ppm export-excel 同族条目交叉引用 -->
++
++<!--AGENT:测试绑定FR-05 不适用：锚点可解析性无 pytest/vitest 用例面。验收证据=一次性 node 脚本按 GitHub slug 规则（小写、去标点、空格转连字符）全量校验 INDEX 99 条链接 99/99 命中分类文件 ## 标题，0 断链 -->
++
++<!--AGENT:测试绑定FR-06 不适用：同上，交叉引用属文档文本。验收证据=known-issues.md alembic 多 head 条目关联行现指向 conventions「2026-06-15 — Alembic migration 目录与 schema 领先版本号的处理」，grep uncategorized 关联字样为零 -->
++
++<!--AGENT:测试绑定FR-07 不适用：验收命令本身即 CLI 工具 sillyspec knowledge validate，非项目测试套件用例。实测输出 ok=true、errors=[]、warnings=[]（2026-09-28 收口前最后一次运行） -->
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/tasks.md b/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/tasks.md
+new file mode 100644
+index 000000000..59ee2845d
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-inbox-clear/tasks.md
+@@ -0,0 +1,17 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T13:37:18.189Z
++---
++# 任务注册表（Tasks）— 2026-09-28-knowledge-inbox-clear
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: uncategorized.md 全部条目迁出，文件仅保留收件箱头注与清账说明
++- [x] task-02: 每条按内容归入 known-issues（18）/ patterns（6）/ conventions（5）/ testing-gotchas（8）/ sillyspec-gotchas（4），正文忠实保留不删减；worktree doctor 条目内路径文本损坏处（\f 控制字符吃掉 \frontend）修复还原
++- [x] task-03: 已修复项按 known-issues 既有惯例标题带 🟢 状态标记（12 条），未修复或现状认知项标 🟡（6 条）；两条「待确认」标题标记经正文证据核实后摘除；两条条目追加代码核验的现状备注（crypto.py:49 健壮性缺口仍开放 / hasBackgroundTaskGrace 宽限缓解已落地）
++- [x] task-04: 丢失标题的 SSE 路由条目补写标题（含 commit 0c7860f7 已验证存在）后归入 known-issues FastAPI 路由顺序同族条目，交叉引用 ppm export-excel 条目
++- [x] task-05: INDEX.md 五个分类节补齐 41 行迁移条目索引，Uncategorized 节改为已清空说明；锚点经 node 脚本按 GitHub slug 规则全量校验 99/99 可解析（顺手修复 6 条改动前即存在的存量坏锚点）
++- [x] task-06: known-issues.md 内指向 uncategorized 旧条目的交叉引用（alembic 多 head 关联行）改为指向 conventions 新位置；迁移条目间的 [[wiki 链]] 改为同文件条目引用
++- [x] task-07: sillyspec knowledge validate 无 errors（ok=true，errors=[]；唯一 flag_like_keyword warning 已顺手消除）
