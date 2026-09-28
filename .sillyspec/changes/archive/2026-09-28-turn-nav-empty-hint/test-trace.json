@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-turn-nav-empty-hint",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-28-turn-nav-empty-hint:flow:FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/turn-nav-list.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-turn-nav-empty-hint"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-28-turn-nav-empty-hint:flow:FR-04",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/turn-catalog.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-turn-nav-empty-hint"
+    }
+  ]
+}

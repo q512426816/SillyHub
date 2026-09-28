@@ -192,7 +192,9 @@ const TURN_NAV_STATUS_LABEL: Record<TurnCatalogEntryStatus, string> = {
 };
 
 /** 未加载行占位文案（与 turn-catalog 飞出卡 meta 尾注同款语义）。 */
-const TURN_NAV_UNLOADED_HINT = "未加载 — 点击加载该轮并定位";
+// 2026-09-28-turn-nav-empty-hint：无摘要轮中性占位（旧「未加载 — 点击加载」
+// 语义错误——大纲已含轮次状态/时间，仅该轮无文本可显；群聊空 user_input 实证）。
+const TURN_NAV_UNLOADED_HINT = "（无内容记录）";
 
 /** Drawer 行 meta 文本：HH:mm · 状态 · 发送者（未加载追加尾注；格式照 turn-catalog flyoutMeta）。 */
 function turnNavRowMeta(entry: TurnCatalogEntry): string {

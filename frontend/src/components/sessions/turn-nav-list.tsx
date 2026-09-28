@@ -116,8 +116,14 @@ function buildAriaLabel(entry: TurnNavEntry): string {
   return parts.join(" · ");
 }
 
-/** 未加载且大纲也无摘要的占位文案（Drawer TURN_NAV_UNLOADED_HINT 同源语义）。 */
-const UNLOADED_HINT = "未加载 — 点击加载该轮并定位";
+/**
+ * 无文本摘要轮的中性占位（2026-09-28-turn-nav-empty-hint）：实证群聊会话存在
+ * 仅 1 条空 content user_input 的 run（群聊用户正文在群消息表，agent 日志留空
+ * 记录）——大纲如实返回空摘要。旧文案「未加载 — 点击加载…」语义错误（轮次
+ * 状态/时间已在大纲中，非未加载）且指令多余；「未加载」状态语义保留在
+ * aria-label（buildAriaLabel 后缀）。
+ */
+const EMPTY_HINT = "（无内容记录）";
 
 export default function TurnNavList({
   entries,
@@ -410,7 +416,7 @@ export default function TurnNavList({
                         : "text-muted-foreground",
                     )}
                   >
-                    {entry.promptSummary ?? UNLOADED_HINT}
+                    {entry.promptSummary ?? EMPTY_HINT}
                   </span>
                 </button>
               );

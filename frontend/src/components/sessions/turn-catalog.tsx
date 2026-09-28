@@ -118,7 +118,7 @@ function flyoutMeta(entry: TurnCatalogEntry): string {
   const base = `${formatHHmm(entry.startedAt)} · ${STATUS_LABEL[entry.status]} · ${
     entry.senderName ?? "我"
   }`;
-  return entry.loaded ? base : `${base} · 未加载 — 点击加载该轮并定位`;
+  return entry.loaded ? base : `${base} · 未加载`;
 }
 
 /**

@@ -244,7 +244,7 @@ describe("TurnNavList 展开收起", () => {
     const rows = getFlyoutRows(container);
     expect(rows[0]!.textContent).toContain("第1轮");
     expect(rows[0]!.textContent).toContain("调研 sessions 页面组件结构与渲染链路");
-    expect(rows[2]!.textContent).toContain("未加载 — 点击加载该轮并定位");
+    expect(rows[2]!.textContent).toContain("（无内容记录）");
     expect(getDot(rows[0]!)).toBeTruthy();
   });
 

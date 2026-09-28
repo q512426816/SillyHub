@@ -244,7 +244,7 @@ describe("TurnCatalog 飞出卡", () => {
     expect(flyout.className).not.toContain("show");
   });
 
-  it("键盘 focus 触发飞出卡；未加载条目 meta 追加「未加载 — 点击加载该轮并定位」", () => {
+  it("键盘 focus 触发飞出卡；未加载条目 meta 追加「（无内容记录）」", () => {
     const { container } = renderCatalog(FIXTURES);
     const ticks = getTicks(container);
     fireEvent.focus(ticks[2]!);
@@ -253,7 +253,9 @@ describe("TurnCatalog 飞出卡", () => {
     expect(flyout.className).toContain("show");
     expect(flyout.textContent).toContain("3 轮");
     expect(flyout.textContent).toContain("09:25 · 已停止 · W");
-    expect(flyout.textContent).toContain("未加载 — 点击加载该轮并定位");
+    // 2026-09-28-turn-nav-empty-hint：旧组件保留回退，meta 显「未加载」标记即可
+    //（占位文案新语义属 TurnNavList 面）。
+    expect(flyout.textContent).toContain("未加载");
   });
 
   it("飞出卡垂直定位随刻度居中并钳制在轨内上下 8px（R-09）", () => {

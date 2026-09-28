@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-turn-nav-empty-hint",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-03 测试绑定声称「Drawer 行与浮层行共用同一常量源」，实物为两处独立同值常量",
+      "evidence": "requirements.md FR-03 绑定写「Drawer 行与浮层行共用同一常量源（session-panel-page TURN_NAV_UNLOADED_HINT），由 FR-01 用例 + 组件同构保证」。代码实物：turn-nav-list.tsx:126 定义 EMPTY_HINT=\"（无内容记录）\"，session-panel-page.tsx:197 另定义 TURN_NAV_UNLOADED_HINT=\"（无内容记录）\"——同值不同源，并非共用单一常量，存在未来文案漂移风险；绑定表述与代码事实不符。",
+      "location": "frontend/src/components/sessions/turn-nav-list.tsx:126; frontend/src/components/daemon/session-panel/session-panel-page.tsx:197; .sillyspec/changes/2026-09-28-turn-nav-empty-hint/requirements.md (FR-03 测试绑定槽)"
+    },
+    {
+      "severity": "P3",
+      "title": "turn-catalog.test.tsx 用例标题与断言不一致：标题写「（无内容记录）」断言只查「未加载」",
+      "evidence": "用例标题（:247）「键盘 focus 触发飞出卡；未加载条目 meta 追加「（无内容记录）」」，但实际断言（:258）为 expect(flyout.textContent).toContain(\"未加载\")，注释（:256）也说明旧组件保留回退、meta 显「未加载」标记即可。旧组件最终行为是 turn-catalog.tsx:121 追加「· 未加载」尾注（符合 design），标题未同步改写，误导后续维护者。",
+      "location": "frontend/src/components/sessions/__tests__/turn-catalog.test.tsx:247-258"
+    },
+    {
+      "severity": "P3",
+      "title": "change.patch 仅含 4 个 spec 新文件，无前端代码 hunk；代码改动尚在工作区未提交",
+      "evidence": "change.patch 全部内容为 .sillyspec/changes/2026-09-28-turn-nav-empty-hint/ 下 design.md/proposal.md/requirements.md/tasks.md 四个新文件；git status 显示 6 个前端文件（turn-nav-list.tsx、turn-catalog.tsx、session-panel-page.tsx 及 3 个测试）为未提交的 M 状态。本次评审已直查工作区实物确认改动落位，但单凭 patch 无法追溯代码面——收口归档前须按 tasks.md 约定随交付显式 pathspec 提交代码。",
+      "location": ".sillyspec/changes/2026-09-28-turn-nav-empty-hint/change.patch; git status（6 文件 M）"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a（静态文案常量，无时序面，design 槽3 已答）",
+    "并发": "n/a（无状态纯展示，design 槽3 已答）",
+    "切换": "n/a（无状态，会话切换不涉文案常量生命周期）",
+    "作用域": "ok（文案变化不影响数据口径；「未加载」aria 语义三处保留——turn-nav-list.tsx:113、turn-catalog.tsx:110、session-panel-page.tsx:215；群聊跨表兜底不做已在 design 槽1/槽4 明确声明为已知限制并另立变更）"
+  },
+  "reviewedAt": "2026-09-28T02:44:19Z"
+}

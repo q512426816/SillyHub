@@ -1,0 +1,186 @@
+diff --git a/.sillyspec/changes/2026-09-28-turn-nav-empty-hint/design.md b/.sillyspec/changes/2026-09-28-turn-nav-empty-hint/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-turn-nav-empty-hint/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T02:37:49.047Z
++---
++# 设计记录（Design Record）— 2026-09-28-turn-nav-empty-hint
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-turn-nav-empty-hint 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++生产实证（46 轮群聊会话 API 直查）：14 轮 turn-outline 的 prompt/answer 摘要均为空——逐轮 run_id 直查证实这些 run 仅含 1 条 content 为空串的 user_input 日志（群聊轮用户正文存群消息表，agent 日志只留空记录），大纲如实返回空。前端占位文案「未加载 — 点击加载该轮并定位」语义错误：轮次状态/时间已在大纲中（非未加载），指令文案也多余。修法：三处同源占位（TurnNavList 浮层行/Drawer 行/旧 TurnCatalog aria 后缀）改中性——浮层与 Drawer 显「（无内容记录）」（muted），旧组件 aria 后缀缩为「· 未加载」；「未加载」状态语义保留在 aria-label 与视觉降调，不动数据链路（群聊摘要跨表兜底列为已知限制，本变更不做）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-turn-nav-empty-hint 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++无接口/props 变化。纯前端文案常量：turn-nav-list.tsx 的 UNLOADED_HINT→EMPTY_HINT、session-panel-page.tsx 的 TURN_NAV_UNLOADED_HINT 值改「（无内容记录）」、turn-catalog.tsx aria 后缀去指令段；测试断言同步（3 文件）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-turn-nav-empty-hint 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：静态文案常量，无时序面。2. 并发写：无状态。3. 切换/生命周期：无状态。4. 作用域：文案变化不影响数据口径；「未加载」aria 语义保留（读屏可辨已加载与否），已加载与未加载轮的视觉降调不变。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-turn-nav-empty-hint 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：无摘要轮与「确实坏了的大纲」混淆——用户看到「（无内容记录）」可能仍疑惑。对策：本变更实证了空摘要=空数据（非故障）；若后续群聊摘要兜底（group message 表取正文）立项，该占位自然消减。放弃的方案：后端跨表取群消息正文兜底——超出文案修正范围且需群聊数据链路验证，另立变更。
+
+diff --git a/.sillyspec/changes/2026-09-28-turn-nav-empty-hint/proposal.md b/.sillyspec/changes/2026-09-28-turn-nav-empty-hint/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-turn-nav-empty-hint/proposal.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T02:37:49.046Z
++---
++# 提案书（Proposal）— 2026-09-28-turn-nav-empty-hint
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:14c801f7c8d0a0d1273d17ba60a4a8ff189011206560c3431469bcf1131126bb:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-turn-nav-empty-hint 留痕重锚 -->
++任务原话转写：轮次导航无摘要轮的占位文案语义修正。
++
++动机：用户看到导航列「未加载 — 点击加载该轮并定位」占位误以为轮次信息没加载。实证（生产 46 轮群聊会话）：14 轮 prompt/answer 摘要均为空——这些 run 只有 1 条空 content 的 user_input 日志（群聊轮用户正文在群消息表，agent 日志留空记录），大纲如实返回空摘要；但占位文案说「未加载」是错误语义（轮次状态/时间已在大纲中），指令文案「点击加载该轮并定位」也多余（点击是导航列普遍行为）。
++
++成功标准：
++- 无摘要轮显示中性占位「（无内容记录）」（muted 样式），不再出现「未加载/点击加载」误导文案
++- 「未加载」状态语义保留在 aria-label（读屏可辨）与视觉（未加载行 muted 降调不变）
++- 桌面窄轨/浮层行与 mobile Drawer 的同源占位文案一并修正
++- 相关测试改断言不改意图全绿，tsc/eslint 零新增
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:64e7dab729f3b6f3190a4a43b37e8a1282fa3dc3709a8ba805f5f07f7fdf3e09:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-turn-nav-empty-hint 留痕重锚 -->
++按成功标准机械推导，共 7 条验收面：
++1. 无摘要轮显示中性占位「（无内容记录）」（muted 样式），不再出现「未加载
++2. 点击加载」误导文案
++3. 「未加载」状态语义保留在 aria-label（读屏可辨）与视觉（未加载行 muted 降调不变）
++4. 桌面窄轨
++5. 浮层行与 mobile Drawer 的同源占位文案一并修正
++6. 相关测试改断言不改意图全绿，tsc
++7. eslint 零新增
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:1b3641ce3711c540d4394e30e9e8162d14a30f3909ae083c5af771fd4bbff285:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-turn-nav-empty-hint 留痕重锚 -->
++1. 无摘要轮显示中性占位「（无内容记录）」（muted 样式），不再出现「未加载
++2. 点击加载」误导文案
++3. 「未加载」状态语义保留在 aria-label（读屏可辨）与视觉（未加载行 muted 降调不变）
++4. 桌面窄轨
++5. 浮层行与 mobile Drawer 的同源占位文案一并修正
++6. 相关测试改断言不改意图全绿，tsc
++7. eslint 零新增
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-28-turn-nav-empty-hint/requirements.md b/.sillyspec/changes/2026-09-28-turn-nav-empty-hint/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-turn-nav-empty-hint/requirements.md
+@@ -0,0 +1,63 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T02:37:49.047Z
++---
++# 需求规格（Requirements）— 2026-09-28-turn-nav-empty-hint
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 无摘要轮显示中性占位「（无内容记录）」（muted 样式），不再出现「未加载
++Given 系统就绪
++When 无摘要轮显示中性占位「（无内容记录）」（muted 样式），不再出现「未加载
++Then 行为符合本条标准描述
++
++### FR-02: 点击加载」误导文案
++Given 系统就绪
++When 点击加载」误导文案
++Then 行为符合本条标准描述
++
++### FR-03: 「未加载」状态语义保留在 aria-label（读屏可辨）与视觉（未加载行 muted 降调不变）
++Given 系统就绪
++When 「未加载」状态语义保留在 aria-label（读屏可辨）与视觉（未加载行 muted 降调不变）
++Then 行为符合本条标准描述
++
++### FR-04: 桌面窄轨
++Given 系统就绪
++When 桌面窄轨
++Then 行为符合本条标准描述
++
++### FR-05: 浮层行与 mobile Drawer 的同源占位文案一并修正
++Given 系统就绪
++When 浮层行与 mobile Drawer 的同源占位文案一并修正
++Then 行为符合本条标准描述
++
++### FR-06: 相关测试改断言不改意图全绿，tsc
++Given 测试 相关模块就绪
++When 相关测试改断言不改意图全绿，tsc
++Then 行为符合本条标准描述
++
++### FR-07: eslint 零新增
++Given 系统就绪
++When eslint 零新增
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- FR-01: `frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx`「浮层行内容：第N轮 + 摘要 + 相对时间；未加载无摘要占位文案」（占位断言「（无内容记录）」）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- FR-02: 同文件「刻度 aria-label = 第N轮 · 状态 · 提问摘要…未加载追加『未加载』」（aria 状态语义保留）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- FR-03: 不适用：Drawer 行与浮层行共用同一常量源（session-panel-page TURN_NAV_UNLOADED_HINT），由 FR-01 用例 + 组件同构保证；page.test 45 用例回归面覆盖挂载级
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- FR-04: `frontend/src/components/sessions/__tests__/turn-catalog.test.tsx`「键盘 focus 触发飞出卡…」（旧组件 aria 后缀「· 未加载」断言）+ sessions/__tests__ 与 sessions 页面 404/405 全量（唯一失败为登记预存债）
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-28-turn-nav-empty-hint/tasks.md b/.sillyspec/changes/2026-09-28-turn-nav-empty-hint/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-turn-nav-empty-hint/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T02:37:49.047Z
++---
++# 任务注册表（Tasks）— 2026-09-28-turn-nav-empty-hint
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: 三处占位文案改中性（浮层/Drawer「（无内容记录）」、旧组件 aria「· 未加载」）+ 测试断言同步（3 文件）+ 全量验证（404/405，唯一失败为登记预存债 cursor caps；tsc/eslint 零新增）

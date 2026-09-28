@@ -2614,7 +2614,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     // 第2轮已加载（提问摘要），触屏无 hover 的行式形态（非 TickRail 飞出卡）。
     expect(screen.queryByTestId("session-mobile-more-menu")).toBeNull();
     expect(within(list).getByText("第1轮")).toBeTruthy();
-    expect(within(list).getByText("未加载 — 点击加载该轮并定位")).toBeTruthy();
+    expect(within(list).getByText("（无内容记录）")).toBeTruthy();
     expect(within(list).getByText("第2轮")).toBeTruthy();
     expect(within(list).getByText("首问")).toBeTruthy();
 
