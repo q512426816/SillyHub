@@ -30,9 +30,14 @@ Then 行为符合本条标准描述
 ## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
 
 <!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- frontend/src/components/changes/__tests__/quicklog-table.test.tsx · 「DataTable 采用 fixed 布局——table 元素 table-layout=fixed」＋「标题按钮宽度跟随单元格——block w-full min-w-0 类名锚」（类名/内联样式锚，jsdom 无表格布局引擎，几何断言由部署后生产全单元格扫描承担，见 visual-evidence.md）
 
 <!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- frontend/src/components/changes/__tests__/quicklog-table.test.tsx · 「标题按钮宽度跟随单元格——block w-full min-w-0 类名锚（原 max-w-[420px] 自适应越界）」（结构锚）；修复前生产实测基线 elRight 875 > cellRight 854、修复后生产全单元格扫描 0 越界（visual-evidence.md A/C 节，几何验收）
 
 <!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- frontend/src/components/changes/__tests__/quicklog-table.test.tsx · 「状态列备注跟随单元格——外层 flex + 备注 max-w-full（原 inline-flex/160px 固定上限越界）」
 
 <!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- frontend/src/components/changes/__tests__/quicklog-table.test.tsx · 全部 19 用例（16 既有 + 3 新增，19/19 绿）
+- tsc：frontend `pnpm exec tsc --noEmit` 0 错；lint 门禁 ruff/mypy/pnpm lint/typecheck 全过（flow done 实测）
