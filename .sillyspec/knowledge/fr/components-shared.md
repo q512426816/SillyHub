@@ -2,51 +2,94 @@
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 依据决策：D-005@v1、D-007@v1
 场景正文：
-- 场景：默认场景 — Given 一个 mission 的所有 Worker Run 进入终态（completed/failed/killed） mission 仍有 pending/runni；When 最后一个 Worker 的 lease 在 complete_lease（backend/app/modules/daemon/lease/service.py:278）完成 某 Worker lease comp；Then complete_lease 末尾 mission 分支检测到 `run.mission_id 非空` 且 `derive_status(mission) in
+- 场景：默认场景 — Given 一个 mission 的所有 Worker Run 进入终态（completed/failed/killed） mission 仍有 pending/runni；When 最后一个 Worker 的 lease 在 complete_lease（backend/app/modules/daemon/lease/service.py:362）完成 某 Worker lease comp；Then complete_lease 末尾 mission 分支检测到 `run.mission_id 非空` 且 `derive_status(mission) in
 全文：.sillyspec/changes/archive/2026-06-28-team-mainline-integration/requirements.md#FR-01
 最近确认：98d3e56dd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulcuig3:backend/app/modules/agent/tests/test_finalizer.py
+  tests: backend/app/modules/agent/tests/test_finalizer.py
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-06-28-team-mainline-integration
+  status: active
 
 ## FR-components-shared-002 Artifact 自动收集触发（与 session end 解耦）
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 依据决策：D-007@v1
 场景正文：
 - 场景：默认场景 — Given Worker Run 属于某 mission（run.mission_id 非空） interactive 多轮会话不 end session；When 该 Worker 的 lease 在 complete_lease 完成（batch 或 interactive 路径） Worker lease comple；Then complete_lease 开头按 lease.agent_run_id 调 collect_completed_artifacts 回灌 AgentArti
 全文：.sillyspec/changes/archive/2026-06-28-team-mainline-integration/requirements.md#FR-02
 最近确认：98d3e56dd
 
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulcuirl:backend/app/modules/agent/tests/test_finalizer.py
+  tests: backend/app/modules/agent/tests/test_finalizer.py
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-06-28-team-mainline-integration
+  status: active
+
 ## FR-components-shared-003 治理门挂载到 dispatch 循环
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 依据决策：D-008@v1
 场景正文：
-- 场景：默认场景 — Given mission 的 dispatch 循环（backend/app/modules/agent/router.py:680-687）准备 dispatch 下一个 Worker 累计成本 < 预算 且 activ；When 调 can_dispatch_worker(mission_id) 返回 (false, reason) can_dispatch_worker 检查；Then 拒绝 dispatch 该 Worker；剩余未 dispatch 的 pending Run 标记 killed；Mission 进入收敛流程（Finaliz
+- 场景：默认场景 — Given mission 的 dispatch 循环（backend/app/modules/agent/control.py:285 can_dispatch_worker，调用点 mcp_tools.py/mcp_gateway/tools.py）准备 dispatch 下一个 Worker 累计成本 < 预算 且 activ；When 调 can_dispatch_worker(mission_id) 返回 (false, reason) can_dispatch_worker 检查；Then 拒绝 dispatch 该 Worker；剩余未 dispatch 的 pending Run 标记 killed；Mission 进入收敛流程（Finaliz
 全文：.sillyspec/changes/archive/2026-06-28-team-mainline-integration/requirements.md#FR-03
 最近确认：98d3e56dd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulcuj0s:backend/app/modules/agent/tests/test_finalizer.py
+  tests: backend/app/modules/agent/tests/test_finalizer.py
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-06-28-team-mainline-integration
+  status: active
 
 ## FR-components-shared-004 超预算收敛信号（非错误）
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 依据决策：D-008@v1
 场景正文：
 - 场景：默认场景 — Given mission 累计成本达到预算上限；When can_dispatch_worker 检查；Then 返回 (false, "budget_exceeded")；已完成的 Worker Artifact 不丢弃，Finalizer 用已有（可能不完整的）Arti
 全文：.sillyspec/changes/archive/2026-06-28-team-mainline-integration/requirements.md#FR-04
 最近确认：98d3e56dd
 
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulcuj9h:backend/app/modules/agent/tests/test_finalizer.py
+  tests: backend/app/modules/agent/tests/test_finalizer.py
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-06-28-team-mainline-integration
+  status: active
+
 ## FR-components-shared-005 工具治理 v1 降级（不强制、patch 人审兜底）
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 依据决策：D-004@v2
 场景正文：
 - 场景：默认场景 — Given v1 Worker（read-only 或写类）dispatch execute team 写类 Worker 产出 patch；When Worker 在 daemon 执行 Finalizer 收敛；Then 工具层不强制审批（batch 默认 policy + prompt 约束）；read-only 与写类均走 batch patch 经人审 apply-back
@@ -57,56 +100,111 @@
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 依据决策：D-001@v1、D-003@v1
 场景正文：
 - 场景：默认场景 — Given bootstrap 入口选择 team 档 bootstrap 入口未选 team（single 默认）；When 启动 team bootstrap 启动 bootstrap
 全文：.sillyspec/changes/archive/2026-06-28-team-mainline-integration/requirements.md#FR-06
 最近确认：98d3e56dd
 
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulcujjx:backend/app/modules/agent/tests/test_orchestrator.py
+  tests: backend/app/modules/agent/tests/test_orchestrator.py
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-06-28-team-mainline-integration
+  status: active
+
 ## FR-components-shared-007 auto/team 三档路由（第一版 bootstrap+execute 入口）
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 依据决策：D-002@v1
 场景正文：
-- 场景：默认场景 — Given bootstrap 或 execute 入口 auto 档；When 选择路由模式 任务特征（任务数/模块跨度/风险/预计上下文）满足 team 阈值（阈值待 plan 定义）；Then 可选 single（现状）/ team / auto（按任务数·模块跨度·风险·预计上下文自动选）；其他 stage 固定 single 自动选 team；否则
+- 场景：默认场景 — Given bootstrap 或 execute 入口 auto 档；When 选择路由模式 任务特征（任务数/模块跨度/风险/预计上下文）满足 team 阈值（阈值待 plan 定义）；Then 可选 single（现状）/ team（实态 2026-09-28 复核：stages.team_mode 布尔两档，auto 档未实现）；其他 stage 固定 single 自动选 team；否则
 全文：.sillyspec/changes/archive/2026-06-28-team-mainline-integration/requirements.md#FR-07
 最近确认：98d3e56dd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulcuqal:backend/app/modules/change/tests/test_dispatch_execute_team_mode.py
+  tests: backend/app/modules/change/tests/test_dispatch_execute_team_mode.py
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-06-28-team-mainline-integration
+  status: active
 
 ## FR-components-shared-008 前端 Mission 可观测性
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given mission 详情页 后端 MissionWorkerRunResponse；When 渲染 序列化 Worker；Then 显示 Mission 树（Worker 层级/DAG）；每个 Worker 可点击查看日志（复用 agent-log-viewer 按 run_id）；成本/预
 全文：.sillyspec/changes/archive/2026-06-28-team-mainline-integration/requirements.md#FR-08
 最近确认：98d3e56dd
 
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulcuqjo:frontend/src/components/__tests__/team-progress.test.tsx
+  tests: frontend/src/components/__tests__/team-progress.test.tsx | frontend/src/components/daemon/__tests__/team-task-block.test.tsx
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-06-28-team-mainline-integration
+  status: active
+
 ## FR-components-shared-009 execute team（多 worktree patch + 受控 apply-back）
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 依据决策：D-001@v1、D-005@v1、D-006@v1
 场景正文：
 - 场景：默认场景 — Given EXECUTE stage 选择 team 档（single 默认） execute team 风险评估过高；When 启动 execute team 前置 Wave1/2/3 未跑通；Then plan.md Wave/Task 分给 Worker，每 Worker 在独立 worktree（基于主分支）写不同 task → 出 patch Artif
 全文：.sillyspec/changes/archive/2026-06-28-team-mainline-integration/requirements.md#FR-09
 最近确认：98d3e56dd
 
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulcuqs3:backend/app/modules/agent/tests/test_worktree_integration.py
+  tests: backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-06-28-team-mainline-integration
+  status: active
+
 ## FR-components-shared-010 兼容与回退
 变更：2026-06-28-team-mainline-integration
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given 未配置 team/auto team 档出问题；When 任何入口 切回 single；Then 走 single=现状，现有 AgentRun/DaemonLease/complete_lease（非 mission 分支）行为不变 恢复现状（路由默认值回
 全文：.sillyspec/changes/archive/2026-06-28-team-mainline-integration/requirements.md#FR-10
 最近确认：98d3e56dd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulcur1u:backend/app/modules/agent/tests/test_finalizer.py
+  tests: backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-06-28-team-mainline-integration
+  status: active
 
 ## FR-components-shared-011 工作台页面与入口
 变更：2026-07-14-2026-07-13-ppm-personal-workbench-prototype
@@ -231,7 +329,6 @@
 变更：2026-09-27-thin-affected-modules-from-patch-manifest
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When _infer_affected_components 在 module-impact.md 与 tasks 路径两来源之外增加 change-patch.jso；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-thin-affected-modules-from-patch-manifest/requirements.md#FR-01
@@ -242,10 +339,10 @@
 - row: 2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-01
   tests: backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest::test_manifest_files_inferred
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
   source_change: 2026-09-27-thin-affected-modules-from-patch-manifest
   status: active
 
@@ -253,7 +350,6 @@
 变更：2026-09-27-thin-affected-modules-from-patch-manifest
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When files 中 .sillyspec/changes/ 前缀的变更治理件不参与匹配（不产生伪命中），其余代码路径直接参与前缀匹配；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-thin-affected-modules-from-patch-manifest/requirements.md#FR-02
@@ -264,10 +360,10 @@
 - row: 2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-02
   tests: backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest::test_manifest_governance_only_yields_empty
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
   source_change: 2026-09-27-thin-affected-modules-from-patch-manifest
   status: active
 
@@ -275,7 +371,6 @@
 变更：2026-09-27-thin-affected-modules-from-patch-manifest
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When change-patch.json 缺失/JSON 损坏/files 非 list 时静默跳过不抛错，module-impact.md 优先级与既有两来源行为零；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-thin-affected-modules-from-patch-manifest/requirements.md#FR-03
@@ -286,10 +381,10 @@
 - row: 2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-03
   tests: backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest::test_manifest_malformed_json_skipped
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
   source_change: 2026-09-27-thin-affected-modules-from-patch-manifest
   status: active
 
@@ -297,7 +392,6 @@
 变更：2026-09-27-thin-affected-modules-from-patch-manifest
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 新增 pytest 用例覆盖：files 推断命中、治理件滤除、畸形件防御、module-impact.md 优先回归，全部通过；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-thin-affected-modules-from-patch-manifest/requirements.md#FR-04
@@ -308,10 +402,10 @@
 - row: 2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-04
   tests: backend/app/modules/change/tests/test_parser.py::TestInferAffectedComponentsFromManifest（6
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
   source_change: 2026-09-27-thin-affected-modules-from-patch-manifest
   status: active
 
@@ -319,7 +413,6 @@
 变更：2026-09-27-thin-affected-modules-from-patch-manifest
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-fast-replay
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 既有 change 模块测试（test_parser.py 全量）零回归；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-thin-affected-modules-from-patch-manifest/requirements.md#FR-05
@@ -330,10 +423,10 @@
 - row: 2026-09-27-thin-affected-modules-from-patch-manifest:flow:FR-05
   tests: backend/app/modules/change/tests/test_parser.py
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
   source_change: 2026-09-27-thin-affected-modules-from-patch-manifest
   status: active
 
