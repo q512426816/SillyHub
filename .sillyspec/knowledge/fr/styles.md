@@ -2,7 +2,6 @@
 变更：2026-09-20-agent-reply-no-bubble
 状态：active
 摘要：v2 段模型文本段（主路径）；旧数据回退路径；连续多文本段
-待复核：2026-09-27-session-portal-ia-restructure
 依据决策：D-001@v1、D-002@v1、D-004@v1、D-005@v1
 场景正文：
 - 场景：v2 段模型文本段（主路径） — Given 会话时间线渲染含 text 段的 turn（segments 非 undefined）；When TextSegmentView 渲染文本段；Then 容器为 `.seg-text-body`：无 border/底色/阴影/气泡内边距，铺在时间线背景上，max-width 为 min(100%, 48rem)；
@@ -11,11 +10,22 @@
 全文：.sillyspec/changes/archive/2026-09-20-agent-reply-no-bubble/requirements.md#FR-01
 最近确认：fbbf02f4b
 
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulct608:frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-09-20-agent-reply-no-bubble
+  status: active
+
 ## FR-styles-002 mobile 可读性规则随类名迁移
 变更：2026-09-20-agent-reply-no-bubble
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-portal-ia-restructure
 依据决策：D-003@v1、D-005@v1
 场景正文：
 - 场景：默认场景 — Given 会话时间线以 mobile 变体渲染（data-variant="mobile"）；When agent 文本段显示；Then `.seg-text-body` 应用 font-size 14px / line-height 24px；规则不携带 max-width 覆盖（阅读限宽由 m
@@ -26,7 +36,6 @@
 变更：2026-09-20-agent-reply-no-bubble
 状态：active
 摘要：用户消息气泡；轮内引导消息三态气泡
-待复核：2026-09-27-session-portal-ia-restructure
 依据决策：D-001@v1
 场景正文：
 - 场景：用户消息气泡 — Given 会话时间线渲染用户消息（turn.prompt）；When 用户气泡渲染；Then 类名 `.turn-bubble` 与品牌色右对齐气泡样式与改前一致
@@ -38,42 +47,86 @@
 变更：2026-08-23-frontend-dark-theme
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-portal-ia-restructure
 依据决策：D-003@v1、D-004@v1、D-006@v1
 场景正文：
-- 场景：默认场景 — Given 用户处于任一页面（列表页/工作区/会话/监控/登录页） dark 主题下的 antd 组件（Table/Menu/Tabs/Modal/Form 等）；When 切换到 dark 主题 渲染或交互（悬浮/选中/聚焦）；Then 页面底、卡片、边框、表格、表单、弹窗、菜单、气泡、图表文字全部呈现暗色取值（bg=slate-900 系），无残留纯白大色块；品牌强调为亮紫（brand-600
+- 场景：默认场景 — Given 用户处于任一页面（列表页/工作区/会话/监控/登录页） dark 主题下的 antd 组件（Table/Menu/Tabs/Modal/Form 等）；When 切换到 dark 主题 渲染或交互（悬浮/选中/聚焦）；Then 页面底、卡片、边框、表格、表单、弹窗、菜单、气泡、图表文字全部呈现暗色取值（bg=zinc-950 系，slate 阶=zinc 翻转），无残留纯白大色块；品牌强调为亮青（brand-600=cyan-400 #22d3ee，ql-20260824-014 去紫改青）
 全文：.sillyspec/changes/archive/2026-08-23-frontend-dark-theme/requirements.md#FR-01
 最近确认：6a6cc9fc6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulctb26:frontend/src/styles/themes.test.ts
+  tests: frontend/src/styles/themes.test.ts
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-08-23-frontend-dark-theme
+  status: active
 
 ## FR-styles-005 三主题切换控件与记忆
 变更：2026-08-23-frontend-dark-theme
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-portal-ia-restructure
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given 顶栏主题切换按钮（Palette 图标） 用户已手动选择任一主题；When 点击 刷新页面
 全文：.sillyspec/changes/archive/2026-08-23-frontend-dark-theme/requirements.md#FR-02
 最近确认：6a6cc9fc6
 
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulcth8e:frontend/src/stores/theme.test.ts
+  tests: frontend/src/stores/theme.test.ts
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-08-23-frontend-dark-theme
+  status: active
+
 ## FR-styles-006 首次访问跟随系统明暗
 变更：2026-08-23-frontend-dark-theme
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-portal-ia-restructure
 依据决策：D-002@v1
 场景正文：
 - 场景：默认场景 — Given localStorage 无 `sillyhub-theme` 记录（从未手动选择） localStorage 无记录且系统为浅色 matchMedia 不可用；When 打开页面且系统为暗色模式（prefers-color-scheme: dark） 打开页面 打开页面；Then 首帧直接呈现 dark 主题（防闪烁脚本判定，React hydrate 后不回跳浅色） 默认 ai-native 主题（现状不变） 回落 ai-native（
 全文：.sillyspec/changes/archive/2026-08-23-frontend-dark-theme/requirements.md#FR-03
 最近确认：6a6cc9fc6
 
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulctomc:frontend/src/stores/theme.test.ts
+  tests: frontend/src/stores/theme.test.ts
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-08-23-frontend-dark-theme
+  status: active
+
 ## FR-styles-007 浅色两主题零回归
 变更：2026-08-23-frontend-dark-theme
 状态：active
 摘要：默认场景
-待复核：2026-09-27-session-portal-ia-restructure
 依据决策：D-003@v1、D-004@v1、D-005@v1
 场景正文：
 - 场景：默认场景 — Given blue 或 ai-native 主题；When 本变更上线后渲染任意页面；Then slate 阶 CSS 变量取值与现状逐值相等；bg-card 场景仍为纯白；斑马纹/spinner 等修正点在浅色下与现状视觉等值；观感与上线前一致
 全文：.sillyspec/changes/archive/2026-08-23-frontend-dark-theme/requirements.md#FR-04
 最近确认：6a6cc9fc6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: manual:mulctuly:frontend/src/styles/themes.test.ts
+  tests: frontend/src/styles/themes.test.ts
+  reason: spec
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: 473c0b3113e666b6e068323b092fd5467ee889a2
+  source_change: 2026-08-23-frontend-dark-theme
+  status: active
