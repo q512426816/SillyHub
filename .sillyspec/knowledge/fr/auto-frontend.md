@@ -1010,3 +1010,90 @@ created_at: 2026-09-22T16:33:05.472Z
 - 场景：默认场景 — Given 端点 相关模块就绪；When 后端 /changes/{name}/events 端点不动（CLI 推送与调试面仍在用）；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-28-drop-observation-card/requirements.md#FR-04
 最近确认：7e998a5c6bfd9fffb426588186c47e250ddf2bf5
+
+## FR-auto-frontend-066 无摘要轮显示中性占位「（无内容记录）」（muted 样式），不再出现「未加载
+变更：2026-09-28-turn-nav-empty-hint
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 无摘要轮显示中性占位「（无内容记录）」（muted 样式），不再出现「未加载；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-turn-nav-empty-hint/requirements.md#FR-01
+最近确认：efcfdb431ec658f274de81ca9028bbee247b6beb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-turn-nav-empty-hint:flow:FR-01
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-turn-nav-empty-hint
+  status: active
+
+## FR-auto-frontend-067 点击加载」误导文案
+变更：2026-09-28-turn-nav-empty-hint
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 点击加载」误导文案；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-turn-nav-empty-hint/requirements.md#FR-02
+最近确认：efcfdb431ec658f274de81ca9028bbee247b6beb
+
+## FR-auto-frontend-068 「未加载」状态语义保留在 aria-label（读屏可辨）与视觉（未加载行 muted 降调不变）
+变更：2026-09-28-turn-nav-empty-hint
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 「未加载」状态语义保留在 aria-label（读屏可辨）与视觉（未加载行 muted 降调不变）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-turn-nav-empty-hint/requirements.md#FR-03
+最近确认：efcfdb431ec658f274de81ca9028bbee247b6beb
+
+## FR-auto-frontend-069 桌面窄轨
+变更：2026-09-28-turn-nav-empty-hint
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 桌面窄轨；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-turn-nav-empty-hint/requirements.md#FR-04
+最近确认：efcfdb431ec658f274de81ca9028bbee247b6beb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-turn-nav-empty-hint:flow:FR-04
+  tests: frontend/src/components/sessions/__tests__/turn-catalog.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-turn-nav-empty-hint
+  status: active
+
+## FR-auto-frontend-070 浮层行与 mobile Drawer 的同源占位文案一并修正
+变更：2026-09-28-turn-nav-empty-hint
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 浮层行与 mobile Drawer 的同源占位文案一并修正；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-turn-nav-empty-hint/requirements.md#FR-05
+最近确认：efcfdb431ec658f274de81ca9028bbee247b6beb
+
+## FR-auto-frontend-071 相关测试改断言不改意图全绿，tsc
+变更：2026-09-28-turn-nav-empty-hint
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 相关测试改断言不改意图全绿，tsc；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-turn-nav-empty-hint/requirements.md#FR-06
+最近确认：efcfdb431ec658f274de81ca9028bbee247b6beb
+
+## FR-auto-frontend-072 eslint 零新增
+变更：2026-09-28-turn-nav-empty-hint
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When eslint 零新增；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-turn-nav-empty-hint/requirements.md#FR-07
+最近确认：efcfdb431ec658f274de81ca9028bbee247b6beb

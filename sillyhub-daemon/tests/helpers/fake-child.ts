@@ -123,8 +123,15 @@ export function readStdin(child: FakeChild): string {
  * 让出控制流直到 spawn 被实际调用（监听 spawn mock 调用）。
  * 比 setImmediate 等固定 tick 更可靠 —— 真实等待实现层完成 workspace 准备、
  * credential 渲染、getBackend、startLease 等所有 await 步骤后到达 spawn。
+ * （2026-09-28 CI 修复：applyClaudeSettings 空对象改真实 unlink（26e362d61 撤下
+ * 语义）后 spawn 前多一次真实 fs 调用，固定一拍不再够 —— cache/stats/budget
+ * 三文件 11 用例 emit exit 早于 listener 注册全部 60s 挂死，统一换本 helper。）
  *
  * 测试在 runner.runLease(lease) 之后、_emitExit/_emitError 之前调此函数。
+ *
+ * 同文件第二次 runLease 必须传 minCalls=2：mock.calls 计数跨轮累计，默认
+ * `> 0` 在第二轮立即返回（第一轮的调用还在），第二轮 emit 早于该轮 listener
+ * 注册 → p2 永等超时（task-runner-policy-cache T2 死锁链，CI 2026-09-28）。
  *
  * 轮询预算必须按真实时间（不按次数）：spawn 前有真实 fs/网络 IO（spec pull、
  * workspace 准备），慢盘 CI 上 1000 次 setImmediate 可能在 IO 完成前就耗尽。
@@ -132,12 +139,12 @@ export function readStdin(child: FakeChild): string {
  * listener，事件丢失 → await child.once('exit') 永等 → 30s 测试超时
  * （CI run 32625847696 / task-runner.test.ts:360 注释记录的死锁链）。
  */
-export async function waitForSpawn(timeoutMs = 10_000): Promise<void> {
+export async function waitForSpawn(timeoutMs = 10_000, minCalls = 1): Promise<void> {
   const { spawn } = await import('node:child_process');
   const mocked = spawn as unknown as { mock?: { calls: unknown[] } };
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (mocked.mock && mocked.mock.calls.length > 0) {
+    if (mocked.mock && mocked.mock.calls.length >= minCalls) {
       // spawn 已调；再多让一拍让 listener 注册完成
       await new Promise<void>((resolve) => setImmediate(resolve));
       return;
@@ -145,7 +152,7 @@ export async function waitForSpawn(timeoutMs = 10_000): Promise<void> {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
   throw new Error(
-    `waitForSpawn: ${timeoutMs}ms 内 spawn 未被调用 —— 实现层在 spawn 前卡住/失败，` +
+    `waitForSpawn: ${timeoutMs}ms 内 spawn 未被调用（minCalls=${minCalls}）—— 实现层在 spawn 前卡住/失败，` +
       `或本用例预期不 spawn 却误用了 waitForSpawn（静默等待会引发 emitExit 丢事件死锁）`,
   );
 }

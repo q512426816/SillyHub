@@ -53,8 +53,10 @@ export interface WorkerSessionOverlayProps {
    */
   statusHint?: string | null;
   /**
-   * task-08：右上关闭按钮文案——分叉溯源场景语义是「关闭」而非「返回主控」；
-   * 缺省「返回主控」（分身既有文案）。
+   * task-08：右上关闭按钮文案（aria-label 与可见文本同源）——分叉溯源场景语义
+   * 是「关闭」而非返回；缺省保分身既有形态：aria-label「关闭分身会话」+
+   * 可见文本「返回主控」（2026-09-28 CI 修复：泛化时缺省值两处误统一为
+   * 「返回主控」，aria-label 与「零回归」注释矛盾，恢复旧 aria-label）。
    */
   closeLabel?: string;
 }
@@ -95,7 +97,7 @@ export function WorkerSessionOverlay({
           <button
             type="button"
             onClick={onClose}
-            aria-label={closeLabel ?? "返回主控"}
+            aria-label={closeLabel ?? "关闭分身会话"}
             className="shrink-0 rounded-md border border-border px-2.5 py-0.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             {closeLabel ?? "返回主控"}

@@ -494,8 +494,11 @@ class TestPruneSpecBackups:
 
         def _counting_scandir(path):
             # 只统计对 backup_root 本级的扫描：rmtree 内部也会 scandir 子目录，
-            # 那些不是「全量列举备份区」的那一次。
-            if Path(path) == tmp_path:
+            # 那些不是「全量列举备份区」的那一次。Linux rmtree 走 fd 优化路径
+            # （os.scandir(topfd) 传 int 文件描述符，shutil._rmtree_safe_fd），
+            # Path(int) 会 TypeError——非路径形态（fd）直接透传不计数
+            # （CI 2026-09-28 Linux 稳定复现，Windows 本地路径形态不可见）。
+            if isinstance(path, (str, os.PathLike)) and Path(path) == tmp_path:
                 scans.append(Path(path))
             return real_scandir(path)
 

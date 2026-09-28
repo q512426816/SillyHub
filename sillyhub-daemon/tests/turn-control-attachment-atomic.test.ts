@@ -54,7 +54,10 @@ describe('ql-20260922-001 writeAttachmentFile 落盘原子化 + size 校验自�
 
     await writeAttachmentFile(null as never, cwd, 'b-different-name.txt', buf);
 
-    expect((await stat(dest)).mtimeMs).toBe(past.getTime());
+    // utimes 按 timespec（秒+纳秒）设置，Linux stat().mtimeMs 返回浮点毫秒，
+    // 与整数毫秒期望存在 ≤1ms 的纳秒舍入差（CI 2026-09-28 实测 720.999 vs
+    // 721，toBe 严格相等随时间戳纳秒部分偶发失败）——亚毫秒容差断言。
+    expect(Math.abs((await stat(dest)).mtimeMs - past.getTime())).toBeLessThan(1);
   });
 
   it('核心回归：同 sha256 路径上的半截文件 → 重写自愈为完整内容', async () => {

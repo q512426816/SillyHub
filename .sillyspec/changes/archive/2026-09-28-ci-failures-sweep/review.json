@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-ci-failures-sweep",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "e2e N2/N3 修复未经本机实证，依赖 e2e-ci 在线验证",
+      "evidence": "frontend/e2e/fixtures.ts 冒烟角色补 agent_session/agent_profile/skill:read 三键——根因链（779b7d6d3 权限化只种子现存角色→每次 run 新建冒烟角色仅 workspace:read→菜单不渲染）由代码与提交史交叉证实，但本机无 Docker 全栈，N2/N3 实际转绿待 CI 确认",
+      "location": "frontend/e2e/fixtures.ts:118"
+    },
+    {
+      "severity": "P3",
+      "title": "flow done 归属收窄把 service.py 剔出本变更实测面（工具归属判定）",
+      "evidence": "第一轮 flow done 输出「剔除 1 个他侧声明文件（service.py）」，但隔离快照实测（test+lint passed）的 14 个文件工作树内容含 service.py 的守卫 B+复活通道改动，实测结论有效；仅 FR 域路由未含该文件",
+      "location": "backend/app/modules/platform_sync/service.py:262"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok",
+    "边界裁决": "design 槽4 两条声明边界均已裁决可接受：①e2e 未本机实证——可接受（e2e-ci 在线验证为既定验证通道，findings P3 留痕）；②并行会话旧基线提交回退风险——可接受（仓库已知协作形态，本次已从 fed6e9e9a 恢复，非本次可根治）"
+  },
+  "reviewedAt": "2026-09-28T04:57:15.408781+00:00"
+}

@@ -436,11 +436,12 @@ function makeFakeWs(): {
 }
 
 describe('daemon._registerRuntimeRpcHandler 注册器', () => {
-  it('四方法名逐字对齐 design §6.1；params 归一转发 RuntimeHandler', async () => {
+  it('六方法名逐字对齐（runtime.* 四键 design §6.1 + knowledge.* 两键 2026-09-27-governance-rpc-actions design「daemon RPC」节）；params 归一转发 RuntimeHandler', async () => {
     const daemon = Object.create(Daemon.prototype) as unknown as {
       _config: { runtime_id: string };
       _logger: { warn: ReturnType<typeof vi.fn> };
       _runtimeHandler: RuntimeHandler;
+      _knowledgeGovHandler: Record<string, () => Promise<unknown>>;
       _registerRuntimeRpcHandler: (ws: unknown) => void;
     };
     daemon._config = { runtime_id: 'rt-test' };
@@ -464,11 +465,20 @@ describe('daemon._registerRuntimeRpcHandler 注册器', () => {
         return { content: null };
       },
     } as unknown as RuntimeHandler;
+    daemon._knowledgeGovHandler = {
+      digest: async () => ({ digest: {} }),
+      action: async () => ({ output: '' }),
+    };
 
     const ws = makeFakeWs();
     daemon._registerRuntimeRpcHandler(ws);
 
+    // knowledge.digest / knowledge.action 为 2026-09-27-governance-rpc-actions
+    // 新增（同注册器挂载）；此用例只钉方法名集合与 runtime.* 转发，gov 行为
+    // 由 daemon 侧 governance 测试覆盖。
     expect([...ws.methods.keys()].sort()).toEqual([
+      'knowledge.action',
+      'knowledge.digest',
       'runtime.list_artifacts',
       'runtime.read_artifact',
       'runtime.read_progress',

@@ -97,19 +97,27 @@ async def test_workspace_platform_admin_role_grants_permission(
 
 @pytest.mark.asyncio
 async def test_platform_level_grant_hit(db_session: AsyncSession) -> None:
-    """平台级 UserRole grant（无 workspace 归属）命中。"""
+    """平台级 UserRole grant 语义（2026-09-20-workspace-member-visibility 收紧后）：
+    持业务权限的平台级非成员**不**收工作区广播；持 PLATFORM_ADMIN 的命中任意
+    permission（9109db20b 存量修正漏掉本用例，断言随段 2 收紧反转，2026-09-28
+    CI 修复补齐）。"""
     from app.modules.admin.model import UserRole
 
     ws = uuid.uuid4()
-    role = await _make_role(db_session, permissions=[Permission.CHANGE_CREATE])
-    user = await _make_user(db_session)
-    db_session.add(UserRole(user_id=user.id, role_id=role.id))
+    biz_role = await _make_role(db_session, permissions=[Permission.CHANGE_CREATE])
+    admin_role = await _make_role(db_session, permissions=[Permission.PLATFORM_ADMIN])
+    biz_user = await _make_user(db_session)
+    admin_user = await _make_user(db_session)
+    db_session.add(UserRole(user_id=biz_user.id, role_id=biz_role.id))
+    db_session.add(UserRole(user_id=admin_user.id, role_id=admin_role.id))
     await db_session.commit()
 
     got = await list_user_ids_with_permission(
         db_session, workspace_id=ws, permission=Permission.CHANGE_CREATE
     )
-    assert set(got) == {user.id}
+    # 段 2 仅匹配 platform:admin：业务权限平台级持有者不进广播面
+    assert biz_user.id not in got
+    assert set(got) == {admin_user.id}
 
 
 @pytest.mark.asyncio

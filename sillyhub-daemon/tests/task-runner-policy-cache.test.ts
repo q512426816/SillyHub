@@ -196,7 +196,9 @@ describe('task-16: batch spawn 用 PolicyCache per-runtime allowed_roots', () =>
     const p2 = runner.runLease(
       makeLease({ leaseId: 'l2', runtimeId: 'rt-codex', provider: 'codex' }),
     );
-    await waitForSpawn();
+    // minCalls=2：mock.calls 跨轮累计，默认 >0 会因第一轮的调用立即返回，
+    // 第二轮 emit 早于 listener 注册 → p2 永等（waitForSpawn 注释死锁链）。
+    await waitForSpawn(10_000, 2);
     fakeChild._emitLines(['{"type":"result","session_id":"s2"}']);
     fakeChild._emitExit(0);
     await p2;

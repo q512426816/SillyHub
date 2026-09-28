@@ -1,0 +1,246 @@
+diff --git a/.sillyspec/changes/2026-09-28-ci-failures-sweep/design.md b/.sillyspec/changes/2026-09-28-ci-failures-sweep/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-ci-failures-sweep/design.md
+@@ -0,0 +1,59 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T04:20:18.434Z
++---
++# 设计记录（Design Record）— 2026-09-28-ci-failures-sweep
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-ci-failures-sweep 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++四 workflow 红=四类独立根因，逐类修复：
++①daemon 12 用例 60s 超时=26e362d61 给 spawn 前新增真实 fs 调用（applyClaudeSettings 空对象改 unlink 撤下语义），「setImmediate 等一拍」不再够用→fake child exit 事件早于 listener 注册→runLease 永等（fake-child.ts waitForSpawn docblock 记载的同款死锁链，2026-07-08 linkSkillsToWorkdir 复发）。修：4 测试文件 12 处固定一拍换 waitForSpawn()+helper 加 minCalls 参数（第二轮 lease 的 mock.calls 跨轮累计陷阱）。
++②daemon runtime-handler=实现按 2026-09-27-governance-rpc-actions design 注册 knowledge.digest/action 两 RPC，测试「四方法名」断言未同步→改六方法断言+补 _knowledgeGovHandler stub。
++③backend platform_sync 双缺口=守卫 B（thin stage 不被 CLI scan 洗回，01a9dfcbd 遗留 patch 从未提交）+复活通道（fed6e9e9a 的 _heal_deleted_row_to_archive 被 304eba982 基于旧基线的 hits 改动整段误冲掉）→前者应用遗留 patch，后者从 fed6e9e9a 原样恢复。
++④frontend 4 用例=task-08 泛化时把 closeLabel 缺省 aria-label 从「关闭分身会话」误统一为「返回主控」（与其自身「零回归」注释矛盾，实现回归→修实现）；caps 第 16 键 sessionFork 与 quick 徽标「（存量）」文案为测试断言漂移→修测试。
++⑤backend 其余 3=测试自身问题：thin_stage_guard 事件构造用旧批量 body/旧 ts:int shape（r18 重构后 422）；scandir mock 遇 Linux rmtree fd 优化路径传 int 炸；rbac platform_level 用例漏跟 9109db20b 段 2 收紧（该变更自述「存量 6 旧语义用例修正」漏掉此例）。
++⑥e2e N2/N3=779b7d6d3 菜单权限化只给现存角色种子授权，e2e 每次运行新建的冒烟角色（仅 workspace:read）不再渲染智能体会话/档案/技能菜单→fixtures.ts 冒烟角色补 agent_session/agent_profile/skill:read 三键。
++⑦daemon mtime flaky=utimes 按秒+纳秒 timespec 设置，Linux stat().mtimeMs 浮点毫秒与整数期望 ≤1ms 舍入差偶发红→容差断言。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-ci-failures-sweep 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++对外行为变化两处（均为恢复既定设计语义，非新契约）：
++①backend upsert_progress 已删拒收分支恢复 archived 复活通道：body changes[] 同名条目 status=='archived' 且行 location=='deleted' 时翻回 'archive' 并走正常接受（200）；其余已删形态维持 409 change_deleted（fed6e9e9a 原语义）。
++②backend _sync_change_stage_status 加 thin 守卫 B：平台行 current_stage=='thin' 且上行 status 非 archived → 跳过 current_stage 覆盖（CLI scan 停留态不洗回 thin），status/时间戳照常（01a9dfcbd/2026-09-25-change-center-thin-flow task-05 原设计）。
++③frontend WorkerSessionOverlay 关闭按钮缺省 aria-label 恢复「关闭分身会话」（可见文本「返回主控」不变；closeLabel 显式传入时两者同源，分叉场景「关闭」不变）。
++其余全为测试自身修正（断言/shape/mock 形态）与测试 helper 扩参（waitForSpawn 加可选 minCalls=1 缺省，既有调用零变化）；e2e fixtures 冒烟角色权限集扩三键（e2e 内部夹具，非产品接口）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-ci-failures-sweep 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：复活通道只认「行当前 location=='deleted' 且本次载荷 status=='archived'」，先 deleted 后 archived 的顺序依赖与 CLI 终态透传链一致；乱序（archived 先到）走正常接受无复活需求，幂等（heal 已是 archive 返回 False）。thin 守卫 B 是纯读侧跳过覆盖，无顺序假设。
++2. 并发写：heal 与拒收同在 upsert_progress 入口串行段；waitForSpawn 是测试 helper 仅测试进程内。
++3. 切换/生命周期：复活通道 commit 后行进正常接受分支，中断窗口与既有 upsert 相同；守卫 B 无独立生命周期。
++4. 作用域：heal 查询带 (workspace_id, change_key) 精确条件；e2e 冒烟角色 per-run 唯一 key，权限补键不外溢；rbac 语义变化是恢复 9109db20b 既定语义（平台级业务权限非成员本就不应收工作区广播）。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-ci-failures-sweep 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：daemon 超时修复依赖「waitForSpawn 轮询 mock.calls」的既有 helper 语义，若未来 spawn 前路径再加真实 IO，waitForSpawn 本身仍稳（真实时间预算轮询）；但**同文件多轮 runLease** 的用例若忘传 minCalls 会复发第二轮丢事件——已在 helper docblock 写死该死锁链与用法。
++放弃的方案：①给 applyClaudeSettings 打 mock 挡 unlink——放弃，撤下语义是有意产品行为，mock 会掩盖真实 IO 时序；②e2e 改用平台 admin 身份绕过菜单权限——放弃，N4 负向断言依赖非 admin 形态，且冒烟角色语义就是普通成员。
++残留风险：e2e N2/N3 本机无 Docker 全栈未实证（e2e-ci 验证）；304eba982 冲掉 fed6e9e9a 的模式提示并行会话基于旧基线提交会回退他人已合入改动——本仓库已知协作形态，非本次可根治。
+
+diff --git a/.sillyspec/changes/2026-09-28-ci-failures-sweep/proposal.md b/.sillyspec/changes/2026-09-28-ci-failures-sweep/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-ci-failures-sweep/proposal.md
+@@ -0,0 +1,53 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T04:20:18.432Z
++---
++# 提案书（Proposal）— 2026-09-28-ci-failures-sweep
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:665aaef2ad26e58f55b7682b2ab9cf11bb8f4526020a0789080bd98556864d94:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-ci-failures-sweep 留痕重锚 -->
++任务原话转写：修复近期 CI 全线失败（backend/frontend/daemon/e2e 四 workflow 红）：
++- backend-ci 6 用例稳定失败（rbac 广播空集 / thin_stage_guard 409+422+stage 覆写 / soft_delete 节流 TypeError int→Path）
++- frontend-ci 4 用例稳定失败（分身会话浮层找不到关闭按钮 ×2 / getProviderCaps 14vs13 键 / ChangesOverviewCard ghost 文案）
++- daemon-ci 12 用例 60s 超时（batch runLease spawn 集成）+ runtime-handler 注册器多了 knowledge.action/knowledge.digest 2 方法
++- e2e N2/N3 侧边栏导航 toBeVisible 元素找不到（含重试均失败）
++- turn-control-attachment-atomic mtimeMs 0.001ms 浮点差异为 flaky（09-27 过 09-28 挂）
++
++成功标准：
++- 上列 backend/frontend/daemon/e2e 失败用例根因定位并修复，本地仅跑相关测试通过
++- 修复不违背「非测试逻辑本身有误时禁止改测试通过」原则：实现 bug 修实现，测试过时/平台差异修测试断言并注明依据
++- flaky 用例（mtime 精度）改为精度容差断言，注明文件系统精度依据
++- 推送后四 workflow CI 转绿（或仅剩与本次无关的新失败并说明）
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:9e23cf2f5e002a371a443b10013053541ac34331fe5edec7e6d2bd875ef03569:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-ci-failures-sweep 留痕重锚 -->
++按成功标准机械推导，共 9 条验收面：
++1. frontend-ci 4 用例稳定失败（分身会话浮层找不到关闭按钮 ×2 / getProviderCaps 14vs13 键 / ChangesOverviewCard ghost 文案）
++2. daemon-ci 12 用例 60s 超时（batch runLease spawn 集成）+ runtime-handler 注册器多了 knowledge.action/knowledge.digest 2 方法
++3. e2e N2/N3 侧边栏导航 toBeVisible 元素找不到（含重试均失败）
++4. turn-control-attachment-atomic mtimeMs 0.001ms 浮点差异为 flaky（09-27 过 09-28 挂）
++5. 上列 backend/frontend/daemon/e2e 失败用例根因定位并修复，本地仅跑相关测试通过
++6. 修复不违背「非测试逻辑本身有误时禁止改测试通过」原则：实现 bug 修实现，测试过时
++7. 平台差异修测试断言并注明依据
++8. flaky 用例（mtime 精度）改为精度容差断言，注明文件系统精度依据
++9. 推送后四 workflow CI 转绿（或仅剩与本次无关的新失败并说明）
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:e685479f5bb3521b77cc34677e7d4711622a665e2f368f71711ed95d00c77f3e:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-ci-failures-sweep 留痕重锚 -->
++1. frontend-ci 4 用例稳定失败（分身会话浮层找不到关闭按钮 ×2 / getProviderCaps 14vs13 键 / ChangesOverviewCard ghost 文案）
++2. daemon-ci 12 用例 60s 超时（batch runLease spawn 集成）+ runtime-handler 注册器多了 knowledge.action/knowledge.digest 2 方法
++3. e2e N2/N3 侧边栏导航 toBeVisible 元素找不到（含重试均失败）
++4. turn-control-attachment-atomic mtimeMs 0.001ms 浮点差异为 flaky（09-27 过 09-28 挂）
++5. 上列 backend/frontend/daemon/e2e 失败用例根因定位并修复，本地仅跑相关测试通过
++6. 修复不违背「非测试逻辑本身有误时禁止改测试通过」原则：实现 bug 修实现，测试过时
++7. 平台差异修测试断言并注明依据
++8. flaky 用例（mtime 精度）改为精度容差断言，注明文件系统精度依据
++9. 推送后四 workflow CI 转绿（或仅剩与本次无关的新失败并说明）
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-28-ci-failures-sweep/requirements.md b/.sillyspec/changes/2026-09-28-ci-failures-sweep/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-ci-failures-sweep/requirements.md
+@@ -0,0 +1,92 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T04:20:18.434Z
++---
++# 需求规格（Requirements）— 2026-09-28-ci-failures-sweep
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: frontend-ci 4 用例稳定失败（分身会话浮层找不到关闭按钮 ×2 / getProvide
++Given 系统就绪
++When frontend-ci 4 用例稳定失败（分身会话浮层找不到关闭按钮 ×2 / getProviderCaps 14vs13 键 / ChangesOvervi
++Then 行为符合本条标准描述
++
++### FR-02: daemon-ci 12 用例 60s 超时（batch runLease spawn 集成）+ r
++Given 系统就绪
++When daemon-ci 12 用例 60s 超时（batch runLease spawn 集成）+ runtime-handler 注册器多了 knowledge
++Then 行为符合本条标准描述
++
++### FR-03: e2e N2/N3 侧边栏导航 toBeVisible 元素找不到（含重试均失败）
++Given e2e 相关模块就绪
++When e2e N2/N3 侧边栏导航 toBeVisible 元素找不到（含重试均失败）
++Then 行为符合本条标准描述
++
++### FR-04: turn-control-attachment-atomic mtimeMs 0.001ms 浮点差
++Given 系统就绪
++When turn-control-attachment-atomic mtimeMs 0.001ms 浮点差异为 flaky（09-27 过 09-28 挂）
++Then 行为符合本条标准描述
++
++### FR-05: 上列 backend/frontend/daemon/e2e 失败用例根因定位并修复，本地仅跑相关测
++Given e2e / 测试 相关模块就绪
++When 上列 backend/frontend/daemon/e2e 失败用例根因定位并修复，本地仅跑相关测试通过
++Then 行为符合本条标准描述
++
++### FR-06: 修复不违背「非测试逻辑本身有误时禁止改测试通过」原则：实现 bug 修实现，测试过时
++Given 测试 相关模块就绪
++When 修复不违背「非测试逻辑本身有误时禁止改测试通过」原
++Then ：实现 bug 修实现，测试过时
++
++### FR-07: 平台差异修测试断言并注明依据
++Given 测试 相关模块就绪
++When 平台差异修测试断言并注明依据
++Then 行为符合本条标准描述
++
++### FR-08: flaky 用例（mtime 精度）改为精度容差断言，注明文件系统精度依据
++Given 系统就绪
++When flaky 用例（mtime 精度）改为精度容差断言，注明文件系统精度依据
++Then 行为符合本条标准描述
++
++### FR-09: 推送后四 workflow CI 转绿（或仅剩与本次无关的新失败并说明）
++Given 系统就绪
++When 推送后四 workflow CI 转绿（或仅剩与本次无关的新失败并说明）
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/daemon/__tests__/session-panel-team.test.tsx › SessionPanel task-14 分身会话浮层（FR-08 / design §5.E） › dialog 模式：浮层复用 SessionPanel（attach 到 sub_session_id）→ 关闭还原主控面板；page 模式用例
++frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx › cursor 态 caps 门控前置事实（getProviderCaps 查表值） › 十六键与 daemon 单源一致；未知 provider 默认拒绝（boolean 全 false + dialog/sessionFork none）不抛错
++frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx › ChangesOverviewCard（task-06 / 活跃变更总览） › ghost 折叠组——默认折一行（计数+跳变更中心入口），展开逐行，再点收起
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++sillyhub-daemon/tests/stats-passthrough.test.ts › task-06 / case3~case5、task-07 a/b（5 用例，waitForSpawn 替换固定一拍）
++sillyhub-daemon/tests/cache-passthrough.test.ts › ndjson / stream-json provider 成功路径（2 用例）
++sillyhub-daemon/tests/task-runner-budget.test.ts › task-08 budget 软切断 4 用例
++sillyhub-daemon/tests/task-runner-policy-cache.test.ts › T2 claude/codex 各取各的 roots（不串扰）（waitForSpawn(10_000, 2)）
++sillyhub-daemon/tests/runtime-handler.test.ts › daemon._registerRuntimeRpcHandler 注册器 › 六方法名逐字对齐（runtime.* 四键 + knowledge.* 两键）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/e2e/navigation.spec.ts › N2 侧边栏点击智能体会话进入 /sessions；N3 侧边栏进入智能体档案与技能管理（e2e-ci 全栈环境验证，本机无 Docker 未实证）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++sillyhub-daemon/tests/turn-control-attachment-atomic.test.ts › 同内容再写：size 相符 → 复用既有文件（mtime 不变）——亚毫秒容差断言
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/platform_sync/tests/test_thin_stage_guard.py（5 用例：thin 守卫 B + 事件归属两前提）
++backend/app/modules/platform_sync/tests/test_change_deleted_guard.py（16 用例：含 archived 复活 3 用例）
++backend/tests/modules/auth/test_rbac_broadcast.py › test_platform_level_grant_hit（语义反转双断言）
++backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py › TestPruneSpecBackups › test_throttled_second_call_is_noop（fd 透传）
++sillyhub-daemon/tests/helpers/fake-child.ts waitForSpawn 全消费方 12 文件 140 用例回归
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：过程性原则条（修复方式约束），无独立测试面——落地证据为实现侧三处修复：frontend/src/components/daemon/session-panel/worker-session-overlay.tsx aria-label 恢复、backend/app/modules/platform_sync/service.py 守卫 B 应用与复活通道恢复、其余漂移项逐处注明变更号依据
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py › TestPruneSpecBackups › test_throttled_second_call_is_noop（Linux rmtree fd 优化路径依据：shutil._rmtree_safe_fd os.scandir(topfd) 传 int fd，注释注明）
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++sillyhub-daemon/tests/turn-control-attachment-atomic.test.ts › 同内容再写用例（utimes timespec 秒+纳秒 vs stat().mtimeMs 浮点毫秒 ≤1ms 舍入，注释注明文件系统精度依据）
++
++<!--AGENT:测试绑定FR-09 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：CI 推送后由 GitHub Actions 四 workflow（backend-ci/frontend-ci/daemon-ci/e2e-ci）在线验证，本仓库内无对应测试文件
+
+diff --git a/.sillyspec/changes/2026-09-28-ci-failures-sweep/tasks.md b/.sillyspec/changes/2026-09-28-ci-failures-sweep/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-ci-failures-sweep/tasks.md
+@@ -0,0 +1,19 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T04:20:18.434Z
++---
++# 任务注册表（Tasks）— 2026-09-28-ci-failures-sweep
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: frontend-ci 4 用例稳定失败（分身会话浮层找不到关闭按钮 ×2 / getProviderCaps 14vs13 键 / ChangesOvervi…
++- [ ] task-02: daemon-ci 12 用例 60s 超时（batch runLease spawn 集成）+ runtime-handler 注册器多了 knowledge…
++- [ ] task-03: e2e N2/N3 侧边栏导航 toBeVisible 元素找不到（含重试均失败）
++- [ ] task-04: turn-control-attachment-atomic mtimeMs 0.001ms 浮点差异为 flaky（09-27 过 09-28 挂）
++- [ ] task-05: 上列 backend/frontend/daemon/e2e 失败用例根因定位并修复，本地仅跑相关测试通过
++- [ ] task-06: 修复不违背「非测试逻辑本身有误时禁止改测试通过」原则：实现 bug 修实现，测试过时
++- [ ] task-07: 平台差异修测试断言并注明依据
++- [ ] task-08: flaky 用例（mtime 精度）改为精度容差断言，注明文件系统精度依据
++- [ ] task-09: 推送后四 workflow CI 转绿（或仅剩与本次无关的新失败并说明）

@@ -115,7 +115,17 @@ export class TestApiClient {
       json: {
         key,
         name: `E2E Smoke ${runId}`,
-        permission_keys: ["workspace:read"],
+        // 侧边栏菜单挂独立 read 权限后（menu-permissions.ts skills/mcp/
+        // agent-profiles/sessions 四菜单）冒烟角色仅 workspace:read 不再渲染
+        // 智体会话/智能体档案/技能管理入口，N2/N3 无从点击——补最小必要三键
+        // （2026-09-28 CI 修复；N4 负向断言的 api_key/git_identity admin 菜单
+        // 不在此列，负向语义不受影响）。
+        permission_keys: [
+          "workspace:read",
+          "agent_session:read",
+          "agent_profile:read",
+          "skill:read",
+        ],
       },
     });
   }

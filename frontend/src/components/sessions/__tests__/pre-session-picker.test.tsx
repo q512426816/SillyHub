@@ -615,7 +615,7 @@ describe("对话框路径 Cursor 引擎可选（runtime-session-helpers 白名�
 // 表值前置事实（与 daemon providers.ts PROVIDER_CAPS.cursor 一致；thinking=true
 // 为 Reverse Sync / design 真相，不以过期任务卡 thinking=false 为准）。
 describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", () => {
-  it("十四键与 daemon 单源一致；未知 provider 默认拒绝（boolean 全 false + dialog none）不抛错", () => {
+  it("十六键与 daemon 单源一致；未知 provider 默认拒绝（boolean 全 false + dialog/sessionFork none）不抛错", () => {
     // dialog='marker' 为 2026-09-09-askuser-pi-cursor task-12（FR-06）新增的
     // string 枚举键初值（spike no-go 则随 task-08 三端改 'none'）。
     // ql-20260912-002：56a37498b（provider-adapter-registry）给 caps 加第 10 键
@@ -636,6 +636,10 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
     // ql-20260921-005（连带测试同款）：第 15 键 attachments（会话附件链路开通，
     // disk-only 落盘也算）随 @generated 产物加入后本全对象 toEqual 必红——同步
     // 补齐（cursor=true 走落盘+路径清单 / 未知引擎回退=false）。
+    // 2026-09-22-session-fork-continuation task-03（D-008，连带测试同款）：第 16
+    // 键 sessionFork（string 枚举：native 原生截断 / seed 种子克隆 / none 无通道）
+    // 随 @generated 产物加入后本全对象 toEqual 必红——同步补齐（cursor='none'
+    // / 未知引擎回退='none'；a2bdb21f8 登记的预存债，本次 CI 修复清偿）。
     const caps = getProviderCaps("cursor");
     expect(caps).toEqual({
       resume: true,
@@ -653,6 +657,7 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
       compact: false,
       thinking_level: false,
       steering: false,
+      sessionFork: "none",
     });
     // 任务卡点名的门控前置事实（model_select / mcp / thinking）再显式锁一次。
     expect(caps.model_select).toBe(true);
@@ -674,6 +679,7 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
       compact: false,
       thinking_level: false,
       steering: false,
+      sessionFork: "none",
     });
   });
 

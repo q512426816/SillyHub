@@ -31,7 +31,7 @@ vi.mock('../src/adapters/index.js', () => ({
 import { spawn } from 'node:child_process';
 import { TaskRunner, extractBudgetUsageTokens } from '../src/task-runner.js';
 import { StreamJsonAdapter } from '../src/adapters/stream-json.js';
-import { createFakeChild } from './helpers/fake-child.js';
+import { createFakeChild, waitForSpawn } from './helpers/fake-child.js';
 import type { LeaseCtx } from '../src/types.js';
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
@@ -151,7 +151,7 @@ describe('task-08 / budget 软切断（batch runLease 集成）', () => {
     const lease = makeLease({ budget_tokens: 100 });
     const runPromise = runner.runLease(lease);
 
-    await new Promise((r) => setImmediate(r));
+    await waitForSpawn();
 
     child._emitLines([
       JSON.stringify({
@@ -217,7 +217,7 @@ describe('task-08 / budget 软切断（batch runLease 集成）', () => {
     const lease = makeLease({ budget_tokens: 1000 });
     const runPromise = runner.runLease(lease);
 
-    await new Promise((r) => setImmediate(r));
+    await waitForSpawn();
 
     child._emitLines([
       JSON.stringify({
@@ -280,7 +280,7 @@ describe('task-08 / budget 软切断（batch runLease 集成）', () => {
     expect(lease.budget_tokens).toBeUndefined();
     const runPromise = runner.runLease(lease);
 
-    await new Promise((r) => setImmediate(r));
+    await waitForSpawn();
 
     child._emitLines([
       JSON.stringify({
@@ -333,7 +333,7 @@ describe('task-08 / budget 软切断（batch runLease 集成）', () => {
     const lease = makeLease({ budget_tokens: 10 });
     const runPromise = runner.runLease(lease);
 
-    await new Promise((r) => setImmediate(r));
+    await waitForSpawn();
 
     const resultLine = JSON.stringify({
       type: 'result',

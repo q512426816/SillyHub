@@ -39,7 +39,7 @@ import { TaskRunner } from '../src/task-runner.js';
 import { StreamJsonAdapter } from '../src/adapters/stream-json.js';
 import { NdjsonAdapter } from '../src/adapters/ndjson.js';
 import { HubClient } from '../src/hub-client.js';
-import { createFakeChild, type FakeChild } from './helpers/fake-child.js';
+import { createFakeChild, waitForSpawn, type FakeChild } from './helpers/fake-child.js';
 import type { AgentEvent, LeaseCtx, ProviderConfig } from '../src/types.js';
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
@@ -290,7 +290,7 @@ describe('task-06 / case3: _spawnAndStream 收集 complete.stats → _finish 透
     const runPromise = runner.runLease(lease);
 
     // 等一拍让 spawn 调用 + listener 注册
-    await new Promise((r) => setImmediate(r));
+    await waitForSpawn();
 
     // 推 assistant 行（带 usage）
     child._emitLines([
@@ -360,7 +360,7 @@ describe('task-06 / case4: completeLease payload 含 stats / exit_code / status'
     const lease = makeLease();
     const runPromise = runner.runLease(lease);
 
-    await new Promise((r) => setImmediate(r));
+    await waitForSpawn();
 
     child._emitLines([
       JSON.stringify({
@@ -499,7 +499,7 @@ describe('task-06 / case5: StreamJsonAdapter resetAccumulator', () => {
 
     const lease = makeLease();
     const runPromise = runner.runLease(lease);
-    await new Promise((r) => setImmediate(r));
+    await waitForSpawn();
 
     child._emitLines([
       JSON.stringify({
@@ -572,7 +572,7 @@ describe('task-07 / batch stats 增补 model / api_requests', () => {
     const lease = makeLease({ provider_config: providerConfig });
     const runPromise = runner.runLease(lease);
 
-    await new Promise((r) => setImmediate(r));
+    await waitForSpawn();
 
     // 2 个 turn：各 1 条 message_start（task-07 口径：计数 == num_turns）
     child._emitLines([
@@ -640,7 +640,7 @@ describe('task-07 / batch stats 增补 model / api_requests', () => {
     const lease = makeLease({ provider_config: { agent_kind: 'claude' } });
     const runPromise = runner.runLease(lease);
 
-    await new Promise((r) => setImmediate(r));
+    await waitForSpawn();
 
     child._emitLines([
       messageStartLine('msg_1', 50),
@@ -695,7 +695,7 @@ describe('task-07 / batch stats 增补 model / api_requests', () => {
     });
     const runPromise = runner.runLease(lease);
 
-    await new Promise((r) => setImmediate(r));
+    await waitForSpawn();
 
     child._endStdout();
     child._emitExit(0);

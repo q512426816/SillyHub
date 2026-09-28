@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-ci-failures-sweep",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-28-ci-failures-sweep:flow:FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-team.test.ts",
+        "frontend/src/components/sessions/__tests__/pre-session-picker.test.ts",
+        "frontend/src/components/workspace/__tests__/changes-overview-card.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-ci-failures-sweep"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-28-ci-failures-sweep:flow:FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/cache-passthrough.test.ts",
+        "sillyhub-daemon/tests/runtime-handler.test.ts",
+        "sillyhub-daemon/tests/stats-passthrough.test.ts",
+        "sillyhub-daemon/tests/task-runner-budget.test.ts",
+        "sillyhub-daemon/tests/task-runner-policy-cache.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-ci-failures-sweep"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-28-ci-failures-sweep:flow:FR-03",
+      "tests": [
+        "frontend/e2e/navigation.spec.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-ci-failures-sweep"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-28-ci-failures-sweep:flow:FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/turn-control-attachment-atomic.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-ci-failures-sweep"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-28-ci-failures-sweep:flow:FR-05",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_change_deleted_guard.py",
+        "backend/app/modules/platform_sync/tests/test_thin_stage_guard.py",
+        "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py",
+        "backend/tests/modules/auth/test_rbac_broadcast.py",
+        "sillyhub-daemon/tests/helpers/fake-child.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-ci-failures-sweep"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-09-28-ci-failures-sweep:flow:FR-07",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-ci-failures-sweep"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-09-28-ci-failures-sweep:flow:FR-08",
+      "tests": [
+        "sillyhub-daemon/tests/turn-control-attachment-atomic.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-ci-failures-sweep"
+    }
+  ]
+}

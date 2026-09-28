@@ -156,8 +156,9 @@ async def test_mainline_stage_unchanged_by_guard(
 
 # ── watcher 事件归属两前提对账（R-06；本变更不动事件通道，仅锁定归属语义）──
 
-#: 值域内基准毫秒（schema 校验 ≥1e12）。
-_EVT_TS = 1_758_566_000_000
+#: 事件时间戳基准（ISO 字符串——ChangeEventPushRequest.ts 为 str，d1d813970
+#: 毫秒 int → str 后本文件事件构造未随 schema 同步，422 漂移 2026-09-28 修复）。
+_EVT_TS = "2026-09-22T10:00:00Z"
 
 
 async def _mint_second_ws_token(
@@ -206,17 +207,24 @@ async def test_event_attribution_requires_exact_change_key(
     await _seed_change_row(db_session, ws_id, THIN_NAME, current_stage="thin")
     variant_name = f"{THIN_NAME}x"  # 一字之差的变体（非逐字一致）
     events = [
-        {"kind": "file_changed", "ts": _EVT_TS, "stage": "thin", "detail": "exact"},
-        {"kind": "file_changed", "ts": _EVT_TS + 1000, "stage": "thin", "detail": "variant"},
+        {"kind": "file_changed", "rule": "spec/docs/thin-guard", "ts": _EVT_TS, "detail": "exact"},
+        {
+            "kind": "file_changed",
+            "rule": "spec/docs/thin-guard",
+            "ts": "2026-09-22T10:00:01Z",
+            "detail": "variant",
+        },
     ]
+    # 端点 body 为单事件对象（ChangeEventPushRequest；旧批量 {"events":[…]}
+    # 形态 422，随 router 现势修正）
     resp_exact = await client.post(
         f"/api/changes/{THIN_NAME}/events",
-        json={"events": [events[0]]},
+        json=events[0],
         headers=headers,
     )
     resp_variant = await client.post(
         f"/api/changes/{variant_name}/events",
-        json={"events": [events[1]]},
+        json=events[1],
         headers=headers,
     )
     assert resp_exact.status_code == 200
@@ -243,10 +251,15 @@ async def test_event_attribution_requires_same_workspace(
     ws_id, headers = shpsync_headers
     other_ws_id, other_headers = await _mint_second_ws_token(db_session)
     await _seed_change_row(db_session, ws_id, THIN_NAME, current_stage="thin")
-    event = {"kind": "stage_started", "ts": _EVT_TS, "stage": "thin", "detail": "cross-ws"}
+    event = {
+        "kind": "stage_started",
+        "rule": "spec/docs/thin-guard",
+        "ts": _EVT_TS,
+        "detail": "cross-ws",
+    }
     resp = await client.post(
         f"/api/changes/{THIN_NAME}/events",
-        json={"events": [event]},
+        json=event,
         headers=other_headers,  # 他 ws 的 shpsync_ token（合法写凭据）
     )
     assert resp.status_code == 200

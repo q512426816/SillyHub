@@ -255,7 +255,9 @@ describe("ChangesOverviewCard（task-06 / 活跃变更总览）", () => {
     fireEvent.click(toggle);
     expect(await screen.findByText("quick-ghost-9")).toBeInTheDocument();
     expect(screen.getByText("ghost")).toBeInTheDocument();
-    expect(screen.getByText("⚡ quick")).toBeInTheDocument();
+    // 2026-09-25-change-center-thin-flow task-07：quick 徽标加「（存量）」软退役
+    // 口径（design 七触点之一），断言随文案同步。
+    expect(screen.getByText("⚡ quick（存量）")).toBeInTheDocument();
     expect(screen.getByText("2/3")).toBeInTheDocument();
     expect(screen.getByText("最近活跃 2 分钟前")).toBeInTheDocument();
 

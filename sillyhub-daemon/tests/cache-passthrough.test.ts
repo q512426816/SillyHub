@@ -47,7 +47,7 @@ import {
 import { StreamJsonAdapter } from '../src/adapters/stream-json.js';
 import { NdjsonAdapter } from '../src/adapters/ndjson.js';
 import type { ProtocolAdapter } from '../src/adapters/protocol-adapter.js';
-import { createFakeChild } from './helpers/fake-child.js';
+import { createFakeChild, waitForSpawn } from './helpers/fake-child.js';
 import type { LeaseCtx } from '../src/types.js';
 
 // ── 测试工具（对齐 stats-passthrough.test.ts）─────────────────────────────────
@@ -200,7 +200,7 @@ describe('task-16 / 集成: ndjson batch runLease → TaskResult.stats 含 cache
     const runPromise = runner.runLease(lease);
 
     // 等一拍让 spawn 调用 + listener 注册
-    await new Promise((r) => setImmediate(r));
+    await waitForSpawn();
 
     // ndjson 不产 complete 事件（关键：模拟真实 ndjson 无 stats 事件）。
     // 直接结束 stdout + exit 0。
@@ -241,7 +241,7 @@ describe('task-16 / 集成: ndjson batch runLease → TaskResult.stats 含 cache
     const lease = makeLease({ provider: 'claude' });
     const runPromise = runner.runLease(lease);
 
-    await new Promise((r) => setImmediate(r));
+    await waitForSpawn();
 
     // assistant 行（带 cache_*_input_tokens 全名）+ result 行（带 usage 全名）
     child._emitLines([
