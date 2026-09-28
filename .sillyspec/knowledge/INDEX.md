@@ -141,4 +141,3 @@
 - backend|FR|需求|承接 → [fr/backend.md](fr/backend.md)
 - frontend|FR|需求|承接 → [fr/frontend.md](fr/frontend.md)
 - sillyspec|FR|需求|承接 → [fr/sillyspec.md](fr/sillyspec.md)
-- auto-sillyspec|sillyspec|FR|需求|承接 → [fr/auto-sillyspec.md](fr/auto-sillyspec.md)

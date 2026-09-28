@@ -74,3 +74,28 @@ created_at: 2026-07-05 02:00:00
 - 现象（2026-08-18 实测两轮）：变更中间步骤需要重做时用 reopen `--from-step N` 重开，之后（只重跑了部分步骤就）跑 `--done` 收尾，CLI 会把 N 之后**尚未重新执行/未验证的步骤也一并回填 completed**——progress 显示全绿，但进度与真实产出不符。
 - 规避：reopen 后把受影响及后续步骤逐一真实重跑再 `--done`；`--done` 前用 `sillyspec progress show` 逐条对照步骤状态与落盘产物，对不上的步骤不要靠 `--done` 推进。
 - 本条为踩坑时点记录（2026-08-18），工具修复后应更新或删除。
+
+## quick --done 边界审计把并发会话的 .sillyspec 脏文件判危险（--force-baseline 但不暂存）
+
+> 来源：ql-20260808-001-4068 --done 首跑被 `.sillyspec/docs/SillyHub/scan/CONCERNS.md` 拦。现状（2026-09-28）：`sillyspec run quick` 已退役、仅存量收尾，新小修复走 `flow start/done`；本条的边界审计语义与 force-baseline/allow-new 解耦原则对 flow done 同样适用。
+
+- 现象：quick step3 `--done` 报「危险文件变更: CONCERNS.md」exit 1；该文件是另一流程（2026-08-08 多代理审计）写的 scan 产物，本 quick 全程未碰、未暂存。
+- 根因：`--done` 边界审计比对 step1 baseline 与当前 git status，凡 `.sillyspec/` 下非关联变更的脏文件都可能被判危险。CONCERNS.md 在 quick 启动时已是 24 个 baseline 脏文件之一（来源 change 流程）。审计说明「并发其他会话的 `.sillyspec/changes/<非关联变更>/` 放行」，但对 `docs/scan/` 这类共享路径无并发豁免。
+- 处置：确认归属（`git diff` 看是审计报告，含本 quick 的 3 个洞，是任务**来源**而非代码改动）后，重跑 `--done --force-baseline --allow-new` 仅压制危险路径判定让流程过；**绝不 `git add` 该文件**，也不删——留给那个 change/审计流程自己处理。
+- 通用坑：① 遇到 --done 危险文件拦截，先 `git diff <file>` 判归属：是本流程产物（force-baseline）还是他人/并发产物（force-baseline 但**别提交它**）。force-baseline 只解锁流程，不等于把该文件纳入本 quick 提交集。② `--allow-new` 与 `--force-baseline` 解耦：新建测试文件用前者，压制危险判定用后者，别为一个目的滥开另一个。
+
+## worktree doctor 标记 installed 但 node_modules junction 实际未建
+
+sillyspec execute 的 worktree doctor --fix 对 frontend/daemon node_modules 报 depsStatus=installed/re-provisioned 成功，但 worktree 内 frontend/node_modules、sillyhub-daemon/node_modules 实际不存在（ls 报 No such file）——doctor 的 provision 第 2 段 junction 在某些环境下静默失败且状态仍写 installed。规避：doctor --fix 后必须 ls `<worktree>/frontend/node_modules/.bin` 复核；缺失时手动建 junction（`cmd //c mklink /J "<worktree>\frontend\node_modules" "<主仓>\frontend\node_modules"`，daemon 同理；Git Bash 下 mklink 传参必败，用 PowerShell New-Item Junction——见下条），再跑一次 .bin 存在性检查。backend .venv 不受影响（worktree 自建）。来源：2026-08-22-team-session-unify Wave1（execute step3）。
+
+## Git Bash 下修 worktree node_modules junction：cmd mklink 传参必败，用 PowerShell New-Item Junction
+
+worktree doctor 静默失败后手动补链时（上一条 junction 坑的修复动作），Git Bash 里 `cmd //c mklink /J "<绝对路径>" "<目标>"` 两种写法都报「无效开关 - 路径」——MSYS 对反斜杠参数做了路径转换劫持，双反斜杠转义也救不回。可靠姿势：`powershell -NoProfile -Command "New-Item -ItemType Junction -Path '<win路径>' -Target '<win路径>'"`（路径先用 cygpath -w "$(pwd)/相对路径" 转绝对 Windows 路径），建完 `(Get-Item).LinkType` 应输出 Junction，再 ls .bin 抽查。补链后 worktree frontend 内 pnpm exec tsc/vitest 直接可用（同 lockfile 链主仓 node_modules）。来源：2026-08-22-session-panel-unify execute step3。
+
+## worktree 内执行回归/文档任务时 SillySpec 产物与主仓库分裂
+
+> 来源：2026-08-24-sessions-live-updates task-07。
+
+- 现象：子代理按「工作目录 = worktree」跑 task-07 全量回归 + 模块文档同步，把 verify-result.md、模块文档修改等产物写进 worktree 并提交到 worktree 分支；主仓库同路径文件未更新。SillySpec CLI 在主仓库运行，验收/归档阶段可能看不到 verify-result.md；未来合并 worktree 分支时，若主仓库也补了一份同内容文件，会触发 both-added 冲突。
+- 根因：代码实现与测试必须在 worktree（隔离其它并发变更），但 SillySpec 进度产物（verify-result.md、tasks.md、review.json、模块文档变更索引）属于项目级文档，主仓库的 SillySpec 流程实时消费它们。
+- 规避：派发 regression/docs 类 task 时，在 prompt 里明确分层——源码/测试命令在 worktree 执行，`.sillyspec/changes/<change>/verify-result.md`、`.sillyspec/docs/.../modules/*.md` 等产物回写主仓库；或在子代理返回后由主代理复核并把产物从 worktree 同步到主仓库。不要依赖「worktree 分支合并后再消费」，否则主仓库 execute/verify 进度对账会缺证据。

@@ -59,10 +59,6 @@ created_at: 2026-07-05 02:00:00
 - 测试造 data：设 `status="online"` 的 instance，`last_heartbeat_at` 必须 `<45s`（如 `now - timedelta(seconds=30)`），否则 cleanup 改 offline 污染排序/统计断言；设 `status="offline"` + 新心跳的 instance 保持 offline（cleanup 不 resurrect），可安全验证"online 优先于心跳新鲜度"。
 - 通用坑：调用 `list_*`（内部 cleanup）的测试，造的 instance.status 必须与 last_heartbeat_at 一致（online ⟺ <45s），不能凭空设 online + 老 heartbeat。
 
-## 后端：Pydantic 必填派生字段构造坑（model_validate(ORM)+model_copy 两段式必崩）
-
-> 来源：2026-07-07-daemon-machine-runtime-hierarchy task-03/04。归类补充：构造解法与通用规则见 conventions「2026-07-08 — Pydantic 必填派生字段不能用 model_validate(ORM)+model_copy 两段式」条目，此处登记测试视角——该类 bug 由 task-04 测试捕获（`ValidationError: Field required`），DTO 含 ORM 上不存在的必填派生字段时，测试断言会先于业务逻辑暴露此构造问题，属测试能兜住的构造期错误。
-
 ## 后端：auth login 限流跨用例累计致 admin 套件偶发 429（预存，非回归）
 
 > 来源：ql-20260808-001-4068（安全加固三联）跑 `tests/modules/admin` 时发现。
