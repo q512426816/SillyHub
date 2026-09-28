@@ -39,14 +39,20 @@ Then 行为符合本条标准描述
 
 ## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
 
-<!--AGENT:测试绑定FR-01 不适用：纯知识库复核，无代码测试面。验收证据=九域 fr 文件终态（提交 2f29e2693/b9f40ac17/4d34ed131/529f34e40/c23caca58/473c0b311/310cc5382/1fcb24f5b）：守恒核对 260 = 62 confirm + 8 重绑 + 142 新绑 + 38 无测试面 + 9 废弃 + 1 纯修正（用户口径 260 条已核实：初始 grep 计 263 含 backend 域 3 处场景正文文字引用误计） -->
+<!--AGENT:测试绑定FR-01 -->
+不适用：纯知识库复核，无代码测试面。验收证据=九域 fr 文件终态（提交 2f29e2693/b9f40ac17/4d34ed131/529f34e40/c23caca58/473c0b311/310cc5382/1fcb24f5b）：守恒核对 260 = 62 confirm + 8 重绑 + 142 新绑 + 38 无测试面 + 9 废弃 + 1 纯修正（用户口径 260 条已核实：初始 grep 计 263 含 backend 域 3 处场景正文文字引用误计）
 
-<!--AGENT:测试绑定FR-02 不适用：同上。证据形态由 sillyspec tests CLI 强校验（--confirm 的 evidence 必须解析为盘上 *.test.*/test_*.py 形态文件，resolve 失败 exit 1）+ --bind 的路径存在性校验，212 条绑定/翻牌命令全过即机械化证明；2 条悬空 .ts 路径被发现并重绑为真实 .tsx -->
+<!--AGENT:测试绑定FR-02 -->
+不适用：同上。证据形态由 sillyspec tests CLI 强校验（--confirm 的 evidence 必须解析为盘上 *.test.*/test_*.py 形态文件，resolve 失败 exit 1）+ --bind 路径存在性校验，212 条绑定/翻牌命令全过即机械化证明；2 条悬空 .ts 路径被发现并重绑为真实 .tsx
 
-<!--AGENT:测试绑定FR-03 不适用：同上。验收证据=`grep -c '^待复核：'` 九域全部为 0（收口前实测）；范围外 candidate 存量 123 行未动 -->
+<!--AGENT:测试绑定FR-03 -->
+不适用：同上。验收证据=`grep -c '^待复核：'` 九域全部为 0（收口前实测）；范围外 candidate 存量 123 行未动
 
-<!--AGENT:测试绑定FR-04 不适用：同上。验收证据=sillyspec knowledge validate 六次分波运行 + 收口终验全部 ok=true 零 errors（validate 含条目结构/绑定块健康检查）；绑定子块全部经 CLI 写入未手改 -->
+<!--AGENT:测试绑定FR-04 -->
+不适用：同上。验收证据=sillyspec knowledge validate 分波六次 + 收口终验全部 ok=true 零 errors（validate 含条目结构/绑定块健康检查）；绑定子块全部经 CLI 写入未手改
 
-<!--AGENT:测试绑定FR-05 不适用：验收命令本身即 CLI 工具 sillyspec knowledge validate，非项目测试套件用例。收口前最后一次运行 ok=true、errors=[]、warnings=[] -->
+<!--AGENT:测试绑定FR-05 -->
+不适用：验收命令本身即 CLI 工具 sillyspec knowledge validate，非项目测试套件用例。收口前最后一次运行 ok=true、errors=[]、warnings=[]
 
-<!--AGENT:测试绑定FR-06 不适用：同上。验收证据=git log：九域 8 笔分波提交（每笔显式 pathspec 单域文件 + 标题带 task-NN）+ 本收口提交，无跨域夹带 -->
+<!--AGENT:测试绑定FR-06 -->
+不适用：同上。验收证据=git log：九域 8 笔分波提交（每笔显式 pathspec 单域文件 + 标题带 task-NN）+ 收口提交，无跨域夹带
