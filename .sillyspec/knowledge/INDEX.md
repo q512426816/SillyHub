@@ -143,3 +143,4 @@
 - claude-settings|FR|需求|承接 → [fr/claude-settings.md](fr/claude-settings.md)
 - app-layouts|FR|需求|承接 → [fr/app-layouts.md](fr/app-layouts.md)
 - lib-knowledge|FR|需求|承接 → [fr/lib-knowledge.md](fr/lib-knowledge.md)
+- auto-rontend|rontend|FR|需求|承接 → [fr/auto-rontend.md](fr/auto-rontend.md)

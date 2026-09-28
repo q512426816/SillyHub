@@ -87,7 +87,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-16-mobile-changes-parity
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-change-ux-detail-batch
 依据决策：D-003@v1
 场景正文：
 - 场景：默认场景 — Given 用户在移动变更列表页（任一变更 tab） 重新扫描返回警告列表 重新扫描请求失败；When 点击工具栏「重新扫描」按钮 警告数 > 0 返回 ApiError；Then 调用 reparseChanges(workspaceId)，成功后显示「已重新扫描：解析 N，新增 N · 更新 N · 删除 N。W 个警告。」反馈条（文案
@@ -98,7 +98,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-16-mobile-changes-parity
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-change-ux-detail-batch
 依据决策：D-003@v1
 场景正文：
 - 场景：默认场景 — Given ChangeSummary.owner_name 非空 owner_name 空且 owner_id 有值 owner_name 与 owner_id 均空 a；When 渲染卡片元信息行 渲染元信息行 渲染元信息行 渲染元信息行 渲染执行用量行 渲染执行用量行 渲染执行用量行 渲染徽标行；Then 显示负责人名（owner_name） 显示 owner_id 前 8 位（mono 弱化色） 负责人段显示「—」 影响组件段省略（不占位） 显示「—」占位 整行
@@ -109,7 +109,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-16-mobile-changes-parity
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-change-ux-detail-batch
 依据决策：D-003@v1
 场景正文：
 - 场景：默认场景 — Given 用户打开筛选抽屉 URL 含 ?tab=quicklog 或 ?tab=archive（合法值） URL 含 ?search=词 未操作任何筛选、URL 无参数；When 切换「排序」chip（↓ 最近优先 / ↑ 最早优先）并确定 页面初始加载 页面初始加载 页面加载；Then sortDir 生效进主列表 query key，列表按所选方向请求 初始 tab 为该值（非法值回 active） 搜索词初始化为该值（输入框与已提交 sta
@@ -120,7 +120,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-16-mobile-changes-parity
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-change-ux-detail-batch
 依据决策：D-003@v1
 场景正文：
 - 场景：默认场景 — Given 用户在快速修复 tab 用户选择状态=疑似中断并确定 作者选项数据 用户关闭「显示空壳占位」并确定 quicklog tab 处于抽屉筛选状态；When 打开筛选抽屉 quicklog 列表请求发出 quicklog 列表响应到达 请求发出 点击重置；Then 可见状态 4 态 chips、作者 chips、显示空壳占位开关 query key 与请求参数带 status="stale"（槽位与桌面 QuicklogT
@@ -131,7 +131,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-16-mobile-changes-parity
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-change-ux-detail-batch
 依据决策：D-004@v1
 场景正文：
 - 场景：默认场景 — Given change.steps 存在且至少一步有 completed_at change.steps 无 completed_at（或 steps 缺失） 任意变更详；When 详情页渲染 详情页渲染 渲染；Then StageStepper 下方显示 ChangeLastSignal（最后信号相对时间） 最后信号行不渲染 挂载 ChangeUsageCard(kind="c
@@ -142,7 +142,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-16-mobile-changes-parity
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-change-ux-detail-batch
 依据决策：D-004@v1
 场景正文：
 - 场景：默认场景 — Given steps 中某阶段有条目 时间线处于阶段筛选态 某阶段在 steps 中无条目；When 点击步骤条该阶段节点 再次点击同阶段节点或点清除 chip 渲染步骤条；Then 时间线仅显示该阶段步骤，卡头出现「阶段名 ✕」清除 chip 取消筛选恢复全量 该节点不可点（无筛选效果）
@@ -153,7 +153,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-16-mobile-changes-parity
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-change-ux-detail-batch
 依据决策：D-004@v1
 场景正文：
 - 场景：默认场景 — Given 用户对目标变更有删除权限（canDeleteChange 启发式通过） 用户无权限 change 尚在加载（null） 用户点击删除并确认 deleteChan；When 打开 ⋯ 菜单 打开 ⋯ 菜单 渲染 ⋯ 菜单 deleteChange 成功 mutation onError；Then 出现 danger 项「删除变更」 不出现删除项（其余动作不受影响） 不出现删除项 toast「变更 {change_key} 已删除」+ 失效 ["chang
@@ -164,7 +164,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-25-knowledge-quick-legacy-copy
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 平台按当前契约运行；When 本变更交付并运行；Then precipitate-dialog「快速修复」蒸馏源分段带存量标注，空态文案不再引导产生新 quick 条目
 全文：.sillyspec/changes/archive/2026-09-25-knowledge-quick-legacy-copy/requirements.md#FR-01
@@ -186,7 +186,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-25-knowledge-quick-legacy-copy
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 平台按当前契约运行；When 本变更交付并运行；Then distill-task-bar 与 distill-history-dialog 的 quick 相关文案带存量口径
 全文：.sillyspec/changes/archive/2026-09-25-knowledge-quick-legacy-copy/requirements.md#FR-02
@@ -208,7 +208,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-25-knowledge-quick-legacy-copy
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 平台按当前契约运行；When 本变更交付并运行；Then knowledge/page.tsx 头部过时注释更新（快速修复 tab 已是存量口径）
 全文：.sillyspec/changes/archive/2026-09-25-knowledge-quick-legacy-copy/requirements.md#FR-03
@@ -218,7 +218,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-25-knowledge-quick-legacy-copy
 状态：active
 摘要：默认场景
-待复核：2026-09-27-thin-affected-modules-from-patch-manifest
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 平台按当前契约运行；When 本变更交付并运行；Then 聚焦验证（tsc + 相关组件测试）全绿，存量蒸馏功能行为零改动（纯文案面）
 全文：.sillyspec/changes/archive/2026-09-25-knowledge-quick-legacy-copy/requirements.md#FR-04
@@ -228,7 +228,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-change-detail-restore-assets
 状态：active
 摘要：默认场景
-待复核：2026-09-28-turn-nav-hover-flyout
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given main 分支的变更详情页（`[cid]/page.tsx`）在 304eba982 被夹带的旧版页面覆盖，；When 用户打开任一变更详情页，
 全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-01
@@ -250,7 +250,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-change-detail-restore-assets
 状态：active
 摘要：默认场景
-待复核：2026-09-28-turn-nav-hover-flyout
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given `current_stage="thin"` 的轻量变更在标题旁只显示弱化的 outline 徽章（fallback 路径），；When 详情页渲染 thin 或 quick 阶段变更，；Then thin 显示品牌紫 default 徽章「轻量变更」、quick 显示 default 徽章「快速任务（存量）」（`STATUS_BADGE` 四态：quic
 全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-02
@@ -272,7 +272,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-change-detail-restore-assets
 状态：active
 摘要：默认场景
-待复核：2026-09-28-turn-nav-hover-flyout
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 已归档变更（status=archived 或 location=archive）的范围对账降级态，；When `ScopeAuditCommandCard` 渲染降级横幅，；Then 重新收到 `archived={isTerminalChange(change)}` 传参，横幅追加「真实改动面见沉淀资产 · 归档留档」指路（组件侧逻辑 9c
 全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-03
@@ -294,7 +294,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-change-detail-restore-assets
 状态：active
 摘要：默认场景
-待复核：2026-09-28-turn-nav-hover-flyout
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 三处恢复落盘，；Then 全部用例通过且类型检查 0 错。
 全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-04
@@ -304,7 +304,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-assets-testfile-path-resolve
 状态：active
 摘要：默认场景
-待复核：2026-09-28-turn-nav-hover-flyout
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 归档件 test-trace.json 记录的测试文件路径可能是短路径（如 `tests/test_full_sync_convergence.py`，实为仓库；When 用户在沉淀资产卡「测试绑定」行点开测试文件预览，；Then 弹窗先对记录路径做知识库同款字符串归一（反斜杠→斜杠、去 `./` 前缀），再按文件名调 explorer search 全树搜索：命中路径与归一路径**等值*
 全文：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/requirements.md#FR-01
@@ -326,7 +326,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-assets-testfile-path-resolve
 状态：active
 摘要：默认场景
-待复核：2026-09-28-turn-nav-hover-flyout
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 记录路径在仓库内零命中或多候选（用户需自选），；When 预览弹窗渲染解析结果，；Then 前端显示中性提示（未在仓库中找到该测试文件、路径可能不完整或已被移动/删除；多候选时列候选），不出现「工作区目录可能已被移动或删除」语义；explorer 后端
 全文：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/requirements.md#FR-02
@@ -348,7 +348,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-assets-testfile-path-resolve
 状态：active
 摘要：默认场景
-待复核：2026-09-28-turn-nav-hover-flyout
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 路径解析逻辑落盘，；When 运行 change-assets-card 组件套件，；Then 新增用例（等值命中直用、短路径唯一后缀救回、worktree 副本排除后救回、零命中中性文案）与既有 10 用例全部通过。
 全文：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/requirements.md#FR-03
@@ -370,7 +370,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-26-assets-testfile-path-resolve
 状态：active
 摘要：默认场景
-待复核：2026-09-28-turn-nav-hover-flyout
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given explorer 文案修改落盘，；When 运行后端 explorer 聚焦测试与 `frontend tsc --noEmit`，；Then 全部通过且类型检查 0 错。
 全文：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/requirements.md#FR-04
@@ -750,7 +750,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-27-assets-testfile-bracket-note
 状态：active
 摘要：默认场景
-待复核：2026-09-28-turn-nav-hover-flyout
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When normalizeTestFilePath 剥离路径中的「…」注解段（支持一段或多段），剥离后为空仍按未找到处理；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-assets-testfile-bracket-note/requirements.md#FR-01
@@ -772,7 +772,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-27-assets-testfile-bracket-note
 状态：active
 摘要：默认场景
-待复核：2026-09-28-turn-nav-hover-flyout
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When TestFileBody 用剥离后的文件名发起 explorer search，粘注解路径可等值；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-assets-testfile-bracket-note/requirements.md#FR-02
@@ -794,7 +794,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-27-assets-testfile-bracket-note
 状态：active
 摘要：默认场景
-待复核：2026-09-28-turn-nav-hover-flyout
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 后缀命中并打开真实测试文件预览；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-assets-testfile-bracket-note/requirements.md#FR-03
@@ -816,7 +816,7 @@ created_at: 2026-09-22T16:33:05.472Z
 变更：2026-09-27-assets-testfile-bracket-note
 状态：active
 摘要：默认场景
-待复核：2026-09-28-turn-nav-hover-flyout
+待复核：2026-09-28-change-ux-detail-batch
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 既有 change-assets-card 路径解析用例全绿，新增用例覆盖多段注解与搜索入参为干净文件名；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-assets-testfile-bracket-note/requirements.md#FR-04
@@ -1193,3 +1193,222 @@ created_at: 2026-09-22T16:33:05.472Z
 - 场景：默认场景 — Given 系统就绪；When eslint 0 错；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-28-knowledge-gov-ux/requirements.md#FR-08
 最近确认：5d0197df01aea20721421612c2b497a8ecc38be2
+
+## FR-auto-frontend-081 列表行描述单行截断不再溢出覆盖右列/影响模块（min-w-0 修复），悬浮全文保留
+变更：2026-09-28-change-ux-detail-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 列表行描述单行截断不再溢出覆盖右列/影响模块（min-w-0 修复），悬浮全文保留；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-01
+最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-ux-detail-batch:flow:FR-01
+  tests: changes/__tests__/page.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-ux-detail-batch
+  status: active
+
+## FR-auto-frontend-082 详情页头部显示变更描述（单行截断+悬浮全文）
+变更：2026-09-28-change-ux-detail-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 详情页头部显示变更描述（单行截断+悬浮全文）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-02
+最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-ux-detail-batch:flow:FR-02
+  tests: __tests__/page-restore-assets.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-ux-detail-batch
+  status: active
+
+## FR-auto-frontend-083 平台同步处理区收进工具条按钮（搜索/重置旁），点开抽屉承载原处理区
+变更：2026-09-28-change-ux-detail-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 平台同步处理区收进工具条按钮（搜索/重置旁），点开抽屉承载原处理区；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-03
+最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-ux-detail-batch:flow:FR-03
+  tests: changes/__tests__/page.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-ux-detail-batch
+  status: active
+
+## FR-auto-frontend-084 无绑定数据源时抽屉内中性提示
+变更：2026-09-28-change-ux-detail-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 无绑定数据源时抽屉内中性提示；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-04
+最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-ux-detail-batch:flow:FR-04
+  tests: changes/__tests__/page.test.ts | platform-sync-section.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-ux-detail-batch
+  status: active
+
+## FR-auto-frontend-085 详情页轻量变更说明卡（协议 1/2、2/2 长文案）不再渲染
+变更：2026-09-28-change-ux-detail-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 详情页轻量变更说明卡（协议 1/2、2/2 长文案）不再渲染；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-05
+最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-ux-detail-batch:flow:FR-05
+  tests: frontend/src/components/changes/detail/__tests__/change-stage-actions.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-ux-detail-batch
+  status: active
+
+## FR-auto-frontend-086 顶部轻量流程条保留
+变更：2026-09-28-change-ux-detail-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 顶部轻量流程条保留；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-06
+最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-ux-detail-batch:flow:FR-06
+  tests: __tests__/page-restore-assets.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-ux-detail-batch
+  status: active
+
+## FR-auto-frontend-087 沉淀资产卡默认展开、移入主栏，各分组卡片固定高度（超出滚动）网格对齐
+变更：2026-09-28-change-ux-detail-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 沉淀资产卡默认展开、移入主栏，各分组卡片固定高度（超出滚动）网格对齐；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-07
+最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-ux-detail-batch:flow:FR-07
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-ux-detail-batch
+  status: active
+
+## FR-auto-frontend-088 智能体运行状态卡自桌面详情页移除（组件与移动端用法保留）
+变更：2026-09-28-change-ux-detail-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 组件 相关模块就绪；When 智能体运行状态卡自桌面详情页移除（组件与移动端用法保留）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-08
+最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-ux-detail-batch:flow:FR-08
+  tests: __tests__/page-team-toggle.test.ts | change-agent-run-log.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-ux-detail-batch
+  status: active
+
+## FR-auto-frontend-089 关联快速任务卡无关联时不渲染（有数据才显示）
+变更：2026-09-28-change-ux-detail-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 关联快速任务卡无关联时不渲染（有数据才显示）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-09
+最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-ux-detail-batch:flow:FR-09
+  tests: __tests__/page-team-toggle.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-ux-detail-batch
+  status: active
+
+## FR-auto-frontend-090 范围对账卡去头部说明副标题与降级双段说明，压缩为单行降级提示（归档指路保留）
+变更：2026-09-28-change-ux-detail-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 范围对账卡去头部说明副标题与降级双段说明，压缩为单行降级提示（归档指路保留）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-10
+最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-ux-detail-batch:flow:FR-10
+  tests: frontend/src/components/changes/__tests__/scope-audit-command-card.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-ux-detail-batch
+  status: active
+
+## FR-auto-frontend-091 相关前端测试更新通过，tsc/eslint 0 错
+变更：2026-09-28-change-ux-detail-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 前端 / 测试 相关模块就绪；When 相关前端测试更新通过，tsc/eslint 0 错；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-11
+最近确认：cde844492f904c089f4a044415a56b755f9e6bb5

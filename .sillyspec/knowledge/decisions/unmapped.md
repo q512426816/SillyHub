@@ -1318,3 +1318,10 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：34fc294d4fdbac3dc4a088097220cf748f47744f
 理由：最大风险：误判「无消费」——已复核：平台仓自有代码（frontend/backend/daemon src）grep 仅 daemon 注释 1 处；消费真实来自 sillyspec CLI 的通用读点（全条件化）；.claude/skills 为提示面。放弃的方案：机器化维护单行条目——lite/thin 豁免使字典永远缺主力通道数据，补齐需动 lite 归档语义，为已被四套真源覆盖的文件不值。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-28-change-ux-detail-batch
+锚点：未记录
+最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+理由：最大风险：布局类改动（grid/h-64/滚动）在真实浏览器的观感无法由 jsdom 断言——已按 tailwind 语义保守实现（md 两列、h-64 固定高、min-h-0 flex-1 overflow-y-auto 链条齐全），真机目验移交用户；列表行修复是标准 flex 陷阱修法（min-w-0），确定性高。放弃的方案：沉淀资产每组独立 max-h（行高不齐对不齐）——改统一 h-64 换取网格对齐；平台同步保留常驻但折叠——用户明确要求收进按钮，折叠态仍占一行。

@@ -1,0 +1,1230 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+index 74ecdc495..e09dbe067 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+@@ -131,20 +131,30 @@ afterEach(() => {
+ });
+ 
+ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets）", () => {
++  it("2026-09-28-change-ux-detail-batch：头部显示变更描述（单行截断 + 悬浮全文），无描述零占位", async () => {
++    renderPage(
++      makeChange({ description: "登录页在移动端偶发白屏，用户反馈强烈。" }),
++    );
++    const desc = await screen.findByTitle(
++      "登录页在移动端偶发白屏，用户反馈强烈。",
++    );
++    expect(desc).toHaveTextContent("登录页在移动端偶发白屏");
++  });
++
+   it("FR-02：thin 阶段标题旁显示 STATUS_BADGE「轻量变更」徽章", async () => {
+     renderPage(makeChange());
+-    // 2026-09-27-thin-display-fix：轻量流程条也含该文案——先等页面渲染（说明卡），
+-    // 徽章断言 scoped 到标题区
+-    expect(await screen.findByText("◈ 轻量变更")).toBeInTheDocument();
++    // 2026-09-28-change-ux-detail-batch：◈ 轻量变更说明卡（协议长文案）已移除
++    // ——出身标识由标题徽章 + 顶部轻量流程条承载；先等流程条渲染再 scoped 断言。
++    expect(await screen.findByText("flow start")).toBeInTheDocument();
++    expect(screen.queryByText("◈ 轻量变更")).toBeNull();
+     const h1 = within(screen.getByRole("heading", { level: 1 }));
+     expect(h1.getByText("轻量变更")).toBeInTheDocument();
+   });
+ 
+-  it("FR-01：aside 挂载沉淀资产卡；观测事件卡已移除（2026-09-28-drop-observation-card 反向钉）", async () => {
++  it("FR-01：沉淀资产卡挂载（2026-09-28-change-ux-detail-batch 起在主栏，默认展开——展开态钉在组件自身测试）；观测事件卡已移除（2026-09-28-drop-observation-card 反向钉）", async () => {
+     renderPage(makeChange());
+-    expect(
+-      await screen.findByTestId("change-assets-card"),
+-    ).toBeInTheDocument();
++    const card = await screen.findByTestId("change-assets-card");
++    expect(card).toBeInTheDocument();
+     expect(
+       screen.queryByTestId("change-observation-events-card"),
+     ).toBeNull();
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
+index 16eddb1bb..156d3d913 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
+@@ -196,10 +196,12 @@ describe("变更详情页退化（task-10，D-003@v1）", () => {
+     cleanup();
+   });
+ 
+-  it("保留只读展示区：阶段步骤条 / 执行日志 / 文件卡 / 会话卡", async () => {
++  it("保留只读展示区：阶段步骤条 / 文件卡 / 会话卡（执行日志卡已移除）", async () => {
+     setup();
+     await renderPage();
+-    expect(screen.getByTestId("change-agent-run-log")).toBeInTheDocument();
++    // 智能体运行状态卡已移除（2026-09-28-change-ux-detail-batch 用户裁决：
++    // thin 变更「当前阶段未配置智能体」常驻属噪音，组件保留供移动端）
++    expect(screen.queryByTestId("change-agent-run-log")).toBeNull();
+     expect(screen.getByTestId("change-files-card")).toBeInTheDocument();
+     expect(screen.getByTestId("change-sessions-card")).toBeInTheDocument();
+     // 阶段步骤条（主线宏观进度，ChangeStageHeader 真实渲染；页头徽标同文案 → 用 getAllByText）
+@@ -249,12 +251,14 @@ describe("变更详情页退化（task-10，D-003@v1）", () => {
+     );
+   });
+ 
+-  it("关联快速任务区块：无关联时空态文案", async () => {
++  it("关联快速任务区块：无关联时整卡不渲染（2026-09-28-change-ux-detail-batch）", async () => {
+     setup();
+     await renderPage();
+-    expect(
+-      await screen.findByText("暂无关联快速任务"),
+-    ).toBeInTheDocument();
++    // 空列表静默隐藏（有数据才渲染）——等取数落定后再断缺席
++    await waitFor(() =>
++      expect(mocks.listQuicklogEntries).toHaveBeenCalled(),
++    );
++    expect(screen.queryByTestId("quicklog-linked-card")).toBeNull();
+   });
+ 
+   it("无任何执行控制按钮（触发/推进/验证门禁/团队 switch）", async () => {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index 83213206e..a8cc23e98 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -13,7 +13,6 @@ import {
+   canDeleteChange,
+   useChangeDeleteAccess,
+ } from "@/components/delete-change-confirm";
+-import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
+ import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
+ import { ChangeFilesCard } from "@/components/changes/detail/change-files-card";
+ import { ChangeSessionsCard } from "@/components/changes/detail/change-sessions-card";
+@@ -36,11 +35,9 @@ import { ScopeAuditCommandCard } from "@/components/changes/scope-audit-command-
+ import { ApiError } from "@/lib/api";
+ import {
+   deleteChange,
+-  getAgentStatus,
+   getChange,
+   submitStageReview,
+   type ChangeRead,
+-  type DispatchResponse,
+ } from "@/lib/changes";
+ import { useNotify } from "@/lib/errors";
+ import {
+@@ -125,10 +122,6 @@ export default function ChangeDetailPage({ params }: Props) {
+   // next/navigation invariant）。
+   const deleteAccess = useChangeDeleteAccess(workspaceId);
+ 
+-  // ── 执行日志流（只读展示：agent 运行状态 / SSE 日志，task-10 退化后保留）──
+-  const [agentStatus, setAgentStatus] = useState<DispatchResponse | null>(null);
+-  const [loadingAgentStatus, setLoadingAgentStatus] = useState(false);
+-
+   // ── 审批卡（唯一操作区）state ───────────────────────────────────────
+   const [transitioning, setTransitioning] = useState(false);
+   const [gateComment, setGateComment] = useState("");
+@@ -147,19 +140,16 @@ export default function ChangeDetailPage({ params }: Props) {
+   // 入口自然缺席，focusStage 恒为 null 无副作用。
+   const [focusStage, setFocusStage] = useState<string | null>(null);
+ 
+-  // ── 辅助数据（agent 状态 / 绑定会话近似）：一次性加载，不随详情轮询 ──
++  // ── 辅助数据（绑定会话近似）：一次性加载，不随详情轮询（agent 状态链随
++  //     智能体运行状态卡移除一并退役，2026-09-28-change-ux-detail-batch）──
+   useEffect(() => {
+     let cancelled = false;
+     setPageError(null);
+     const loadSide = async () => {
+-      const [as, sessions] = await Promise.all([
+-        getAgentStatus(workspaceId, changeId).catch(() => null),
+-        listWorkspaceAgentSessions(workspaceId, { include_ended: true }).catch(
+-          () => [],
+-        ),
+-      ]);
++      const sessions = await listWorkspaceAgentSessions(workspaceId, {
++        include_ended: true,
++      }).catch(() => []);
+       if (cancelled) return;
+-      setAgentStatus(as);
+       // §8 绑定查询语义 = 工作区最近活跃会话（coalesce(last_active_at, created_at) desc）
+       setBoundSession(sessions?.[0] ?? null);
+     };
+@@ -169,18 +159,6 @@ export default function ChangeDetailPage({ params }: Props) {
+     };
+   }, [workspaceId, changeId]);
+ 
+-  const refreshAgentStatus = useCallback(async () => {
+-    setLoadingAgentStatus(true);
+-    try {
+-      const as = await getAgentStatus(workspaceId, changeId);
+-      setAgentStatus(as);
+-    } catch {
+-      /* silent */
+-    } finally {
+-      setLoadingAgentStatus(false);
+-    }
+-  }, [workspaceId, changeId]);
+-
+   // ── 审批唯一入口 submitStageReview（task-10：notify_session 透传，注入移后端 best-effort）──
+   const handleGateAction = useCallback(
+     async (action: string) => {
+@@ -204,16 +182,12 @@ export default function ChangeDetailPage({ params }: Props) {
+           setSuccessMsg("✅ 审批已生效，已通知绑定会话");
+           setTimeout(() => setSuccessMsg(null), 3000);
+         }
+-        // 审批后刷新（task-07）：变更详情改 query 失效重取，agent 状态保持原拉取
+-        const [, updatedAgentStatus] = await Promise.all([
+-          queryClient
+-            .invalidateQueries({
+-              queryKey: CHANGE_QUERY_KEY(workspaceId, changeId),
+-            })
+-            .catch(() => undefined),
+-          getAgentStatus(workspaceId, changeId).catch(() => null),
+-        ]);
+-        setAgentStatus(updatedAgentStatus);
++        // 审批后刷新（task-07）：变更详情改 query 失效重取
++        await queryClient
++          .invalidateQueries({
++            queryKey: CHANGE_QUERY_KEY(workspaceId, changeId),
++          })
++          .catch(() => undefined);
+       } catch (err) {
+         setPageError(err instanceof ApiError ? err.message : "操作失败");
+       } finally {
+@@ -247,10 +221,6 @@ export default function ChangeDetailPage({ params }: Props) {
+     );
+   }
+ 
+-  // 执行日志流派生（只读：无 dispatch 后不再有 localRunId 兜底）
+-  const panelRunId = agentStatus?.last_dispatch?.run_id ?? null;
+-  const panelIsActive = agentStatus?.has_active_run ?? false;
+-
+   // 阶段-步骤联动派生：steps 条目出现的阶段去重（含 quick 等非线性 stage，
+   // 但步骤条只渲染 5 大阶段节点，非 WORKFLOW_STAGES 值仅参与 includes 判断）
+   const stepStages =
+@@ -323,6 +293,17 @@ export default function ChangeDetailPage({ params }: Props) {
+             {change.affected_components.length > 0 && (
+               <span>影响: {change.affected_components.join(", ")}</span>
+             )}
++            {/* 2026-09-28-change-ux-detail-batch：详情页头部补变更描述（列表行同源
++                proposal 动机段）——w-full 独占 flex-wrap 一行 + truncate 单行截断，
++                悬浮看全文；无描述零占位。 */}
++            {change.description && (
++              <span
++                title={change.description}
++                className="w-full min-w-0 truncate text-xs text-muted-foreground"
++              >
++                {change.description}
++              </span>
++            )}
+           </span>
+         }
+         // task-07：PageHeader actions 危险按钮（仅权限可见者挂载 DetailDeleteAction，
+@@ -460,24 +441,14 @@ export default function ChangeDetailPage({ params }: Props) {
+               events/tasks/born 全空时静默隐藏，无观测数据零占位（厚变更不受扰）。 */}
+           <ChangeTimelineCard workspaceId={workspaceId} changeId={changeId} />
+ 
+-          <ChangeAgentRunLog
+-            workspaceId={workspaceId}
+-            panelRunId={panelRunId}
+-            panelIsActive={panelIsActive}
+-            agentStatus={agentStatus}
+-            gateStatus={null}
+-            // steps/currentStage 链路已随旧 SillySpecStepProgress 挂载退役
+-            // （task-07，step 明细统一走上方 ChangeStepTimeline；prop 已删
+-            // ql-20260816-001）
+-            teamMode={false}
+-            stageTeamMissionId={null}
+-            onDone={() => void refreshAgentStatus()}
+-            onGateStatusChanged={() => undefined}
+-            onRefresh={() => void refreshAgentStatus()}
+-            refreshing={loadingAgentStatus}
+-            onDispatch={() => undefined}
+-            dispatching={false}
+-          />
++          {/* 沉淀资产（2026-09-28-change-ux-detail-batch：自 aside 移主栏 + 默认展开
++              + 分组固定高度滚动网格——侧栏 296px 窄列里折叠卡「点了看不到东西」，
++              归档资产是详情页主信息之一，宽列网格展开才是可用形态）。 */}
++          <ChangeAssetsCard workspaceId={workspaceId} changeId={changeId} />
++
++          {/* 智能体运行状态卡已移除（2026-09-28-change-ux-detail-batch 用户裁决）：
++              thin 变更无派发，「当前阶段未配置智能体」常驻属噪音；完整流程的执行
++              观测走会话页。组件保留（mobile-change-detail 仍在用）。 */}
+         </main>
+ 
+         {/* 次线（2026-09-27 visual-align-2：对齐原型 MetaPanel 观感——外层统一
+@@ -509,11 +480,9 @@ export default function ChangeDetailPage({ params }: Props) {
+             }}
+             archived={isTerminalChange(change)}
+           />
+-          {/* 2026-09-25-change-precipitated-assets（D-001@v1 方案 a）：「沉淀资产」
+-              折叠卡——本变更经归档沉淀的 FR 索引/决策蒸馏/测试绑定/patch 留档/
+-              delta 摘要只读聚合（GET /changes/{cid}/assets），四组逐组有数据才
+-              渲染、失败静默隐藏（QuicklogLinkedCard 同款范式）。 */}
+-          <ChangeAssetsCard workspaceId={workspaceId} changeId={changeId} />
++          {/* 2026-09-25-change-precipitated-assets 卡已移主栏（2026-09-28-
++              change-ux-detail-batch）。 */}
++          {/* 智能体运行状态卡已移除（2026-09-28-change-ux-detail-batch）。 */}
+         </aside>
+       </div>
+     </PageContainer>
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+index bdc2e9082..68e0bf164 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -343,6 +343,19 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     expect(screen.getAllByText("no-desc-change").length).toBeGreaterThan(0);
+   });
+ 
++  // ── 2026-09-28-change-ux-detail-batch：平台同步区收进工具条按钮 + 抽屉 ────
++
++  it("平台同步：工具条按钮常驻，点开抽屉承载处理区（未绑定时中性提示）", async () => {
++    await renderAndWait();
++    // 工具条按钮在搜索/重置旁常驻
++    expect(screen.getByRole("button", { name: "平台同步" })).toBeInTheDocument();
++    // 点开抽屉：未绑定数据源（fetchMyBinding→null）→ drawerHint 中性提示
++    await act(async () => {
++      fireEvent.click(screen.getByRole("button", { name: "平台同步" }));
++    });
++    expect(await screen.findByText(/暂无同步状态/)).toBeInTheDocument();
++  });
++
+   it("tab 计数 pill 显示（tabTotals 独立 query 拉，不被聚焦污染）", async () => {
+     setupListChanges({ activeTotal: 5, archiveTotal: 3 });
+     await renderAndWait();
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index ecb917855..1b3bfe0c9 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -9,7 +9,7 @@ import {
+   useQuery,
+   useQueryClient,
+ } from "@tanstack/react-query";
+-import { Checkbox, Input, Pagination, Select } from "antd";
++import { Checkbox, Drawer, Input, Pagination, Select } from "antd";
+ 
+ import { PageContainer } from "@/components/layout";
+ import {
+@@ -265,6 +265,8 @@ export default function ChangesPage({ params }: Props) {
+   const [search, setSearch] = useState(initialSearch);
+   // ql-20260818-004：「只看待我处理」下放为查询条件（仅进行中视图），默认不勾选
+   const [focusMine, setFocusMine] = useState(false);
++  // 2026-09-28-change-ux-detail-batch：平台同步处理区抽屉开关（常驻卡收进按钮）
++  const [syncDrawerOpen, setSyncDrawerOpen] = useState(false);
+   const [stageFilter, setStageFilter] = useState("");
+   const [sortDir, setSortDir] = useState<SortDir>("updated_at_desc");
+   const [page, setPage] = useState(1);
+@@ -538,11 +540,14 @@ export default function ChangesPage({ params }: Props) {
+           {/* 2026-09-28-change-list-description：变更描述行（proposal 动机段提取，
+               后端回填）——title 归一化后常回退 key 派生名，此前行内只剩 change_key
+               可辨。basis-full 让描述独占 flex-wrap 一行；truncate 单行截断，悬浮
+-              title 看全文；无描述（旧行/无动机段）零占位。 */}
++              title 看全文；无描述（旧行/无动机段）零占位。
++              2026-09-28-change-ux-detail-batch：补 min-w-0——flex 项默认
++              min-width:auto，长文本 nowrap 撑破行宽、溢出覆盖右列阶段/时间与
++              meta 行影响模块 chips（用户实证）；min-w-0 允许收缩，truncate 生效。 */}
+           {c.description && (
+             <span
+               title={c.description}
+-              className="basis-full truncate text-xs font-normal text-muted-foreground"
++              className="basis-full min-w-0 truncate text-xs font-normal text-muted-foreground"
+             >
+               {c.description}
+             </span>
+@@ -761,9 +766,18 @@ export default function ChangesPage({ params }: Props) {
+       )}
+ 
+       {/* 平台同步处理区（2026-09-04-conflict-resolve-entry task-09 / FR-01~05）：
+-          本机未决同步冲突 + ghost 残留的一键裁决/清理；无绑定或无 sillyspec_status
+-          时组件自渲染 null，页面行为与现状一致（design §9） */}
+-      <PlatformSyncSection workspaceId={workspaceId} />
++          2026-09-28-change-ux-detail-batch（用户裁决）——自常驻卡收进工具条按钮
++          （搜索/重置旁）+ 右侧抽屉承载：零冲突零 ghost 时整卡是常驻噪音；
++          有未决冲突 / ghost 时仍应可达，按钮常驻。 */}
++      <Drawer
++        open={syncDrawerOpen}
++        onClose={() => setSyncDrawerOpen(false)}
++        title="平台同步"
++        width={460}
++        destroyOnHidden
++      >
++        <PlatformSyncSection workspaceId={workspaceId} drawerHint />
++      </Drawer>
+ 
+       {/* 工具条（FR-03）：一行式筛选——搜索/阶段/聚焦（进行中）+ 搜索/重置 */}
+       {tab !== "quicklog" && (
+@@ -805,6 +819,14 @@ export default function ChangesPage({ params }: Props) {
+             </Checkbox>
+           )}
+           <div className="ml-auto flex items-center gap-2">
++            {/* 2026-09-28-change-ux-detail-batch：平台同步入口（常驻卡收进抽屉） */}
++            <Button
++              size="sm"
++              variant="outline"
++              onClick={() => setSyncDrawerOpen(true)}
++            >
++              平台同步
++            </Button>
+             <Button size="sm" onClick={handleSearchClick}>
+               搜索
+             </Button>
+diff --git a/frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx b/frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx
+index ce99f8994..ac5751031 100644
+--- a/frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx
++++ b/frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx
+@@ -389,12 +389,15 @@ describe("ql-20260911-001-c0be change 目标：对账结果摘要", () => {
+       />,
+     );
+ 
++    // 2026-09-28-change-ux-detail-batch：降级说明压成单行（degraded-scope 段
++    // 移除）——单行内同时带「不出三态」口径与归档指路。
+     expect(
+       await screen.findByTestId("scope-audit-degraded-view"),
+-    ).toHaveTextContent(/不出三态列/);
+-    expect(screen.getByTestId("scope-audit-degraded-scope")).toHaveTextContent(
++    ).toHaveTextContent(/不出三态/);
++    expect(screen.getByTestId("scope-audit-degraded-view")).toHaveTextContent(
+       /真实改动面见「沉淀资产 · 归档留档」/,
+     );
++    expect(screen.queryByTestId("scope-audit-degraded-scope")).toBeNull();
+     // 关键钉子：三态 chips 一个都不许出现（0/0/0 会被读成「无计划外改动」）
+     expect(screen.queryByTestId("scope-audit-chip-planned")).toBeNull();
+     expect(screen.queryByTestId("scope-audit-chip-unplanned")).toBeNull();
+@@ -417,9 +420,10 @@ describe("ql-20260911-001-c0be change 目标：对账结果摘要", () => {
+         target={{ kind: "change", workspaceId: "ws-1", changeKey: "c1" }}
+       />,
+     );
+-    expect(
+-      await screen.findByTestId("scope-audit-degraded-scope"),
+-    ).toHaveTextContent(/不代表本变更的计划外改动/);
++    // 单行降级提示（2026-09-28-change-ux-detail-batch）：未归档不带留档指路
++    const notice = await screen.findByTestId("scope-audit-degraded-view");
++    expect(notice).toHaveTextContent(/实时窗口视图/);
++    expect(notice).not.toHaveTextContent(/归档留档/);
+   });
+ 
+   // FR-05 后半句「明细弹窗同样带降级横幅」（评审 P3 覆盖缺口补钉）：
+@@ -447,7 +451,7 @@ describe("ql-20260911-001-c0be change 目标：对账结果摘要", () => {
+       within(rows.parentElement as HTMLElement).getByTestId(
+         "scope-audit-degraded-view",
+       ),
+-    ).toHaveTextContent(/不出三态列/);
++    ).toHaveTextContent(/不出三态/);
+     // 行内无 verdict → 不渲染空徽章（行只剩路径/类型/行数三列）
+     const row = within(rows).getByTestId("scope-audit-row-src/flow.js");
+     expect(row.querySelector('[data-diff-kind]')).toBeNull();
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index 7472c7b39..c3ebe770e 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -102,13 +102,31 @@ describe("ChangeAssetsCard", () => {
+     mockSearch.mockResolvedValue(matchesOf(["backend/app/x.py"]));
+   });
+ 
++  it("默认展开（2026-09-28-change-ux-detail-batch）：分组直接可见，点击头部可收起", async () => {
++    mockGet.mockResolvedValue(FULL);
++    renderCard();
++
++    // 分组零点击直接可见（用户裁决：默认展开 + 主栏网格形态）
++    expect(await screen.findByTestId("change-assets-fr")).toBeInTheDocument();
++    expect(screen.getByTestId("change-assets-audit")).toBeInTheDocument();
++    // 头部态为 open；点击后收起、分组隐藏
++    const toggle = screen.getByRole("button", { name: /沉淀资产/ });
++    expect(toggle).toHaveAttribute("data-state", "open");
++    fireEvent.click(toggle);
++    expect(screen.getByRole("button", { name: /沉淀资产/ })).toHaveAttribute(
++      "data-state",
++      "closed",
++    );
++    expect(screen.queryByTestId("change-assets-fr")).toBeNull();
++  });
++
+   it("四组渲染：展开后 fr/决策/测试绑定/归档留档逐组出现，计数徽标正确", async () => {
+     mockGet.mockResolvedValue(FULL);
+     renderCard();
+ 
+     expect(await screen.findByText(/FR 1 · 决策 1/)).toBeInTheDocument();
+ 
+-    fireEvent.click(screen.getByRole("button", { name: /沉淀资产/ }));
++    // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+     expect(await screen.findByTestId("change-assets-fr")).toBeInTheDocument();
+     expect(screen.getByTestId("change-assets-decisions")).toBeInTheDocument();
+     expect(screen.getByTestId("change-assets-tests")).toBeInTheDocument();
+@@ -126,7 +144,7 @@ describe("ChangeAssetsCard", () => {
+       delta: null,
+     });
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     expect(await screen.findByTestId("change-assets-fr")).toBeInTheDocument();
+     expect(screen.queryByTestId("change-assets-decisions")).toBeNull();
+@@ -145,7 +163,7 @@ describe("ChangeAssetsCard", () => {
+       delta: null,
+     });
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     expect(
+       await screen.findByTestId("change-assets-inflight"),
+@@ -162,7 +180,7 @@ describe("ChangeAssetsCard", () => {
+       delta: null,
+     });
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     expect(await screen.findByText("本变更暂无沉淀资产记录。")).toBeInTheDocument();
+   });
+@@ -178,7 +196,7 @@ describe("ChangeAssetsCard", () => {
+   it("FR/决策索引行：href 带 file+anchor 深链（FR-01/02）", async () => {
+     mockGet.mockResolvedValue(FULL);
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     const frLink = (await screen.findByText("FR-auto-x-001")).closest("a");
+     expect(frLink).toHaveAttribute(
+@@ -195,7 +213,7 @@ describe("ChangeAssetsCard", () => {
+   it("测试绑定行：锚点标注「变更内」且测试文件可点开预览（FR-03）", async () => {
+     mockGet.mockResolvedValue(FULL);
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     expect(await screen.findByText(/变更内 FR-01/)).toBeInTheDocument();
+ 
+@@ -228,7 +246,7 @@ describe("ChangeAssetsCard", () => {
+       ],
+     });
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     expect(await screen.findByText(/变更内 FR-02/)).toBeInTheDocument();
+     expect(
+@@ -245,7 +263,7 @@ describe("ChangeAssetsCard", () => {
+       truncated: false,
+     });
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     expect(await screen.findByTestId("change-assets-patch-files")).toBeInTheDocument();
+     expect(screen.getByTestId("change-assets-patch-file-src/flow.js")).toBeInTheDocument();
+@@ -267,7 +285,7 @@ describe("ChangeAssetsCard", () => {
+       truncated: false,
+     });
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     fireEvent.click(await screen.findByTestId("change-assets-patch-file-src/flow.js"));
+     expect(await screen.findByTestId("change-assets-patch-note")).toHaveTextContent(
+@@ -281,7 +299,7 @@ describe("ChangeAssetsCard", () => {
+       patch: { ...FULL.patch, files_truncated: true },
+     });
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     expect(await screen.findByText("清单已截断")).toBeInTheDocument();
+   });
+@@ -301,9 +319,9 @@ describe("ChangeAssetsCard 测试文件路径解析", () => {
+       ],
+     });
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+     fireEvent.click(
+-      screen.getByTestId(`change-assets-test-file-${tests[0]}`),
++      await screen.findByTestId(`change-assets-test-file-${tests[0]}`),
+     );
+   }
+ 
+@@ -441,7 +459,7 @@ describe("ChangeAssetsCard 资产透明面", () => {
+       ],
+     });
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     const group = await screen.findByTestId("change-assets-knowledge-touch");
+     expect(group).toHaveTextContent("FR-auto-backend-015");
+@@ -461,7 +479,7 @@ describe("ChangeAssetsCard 资产透明面", () => {
+       ],
+     });
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     const chip = await screen.findByTestId("change-assets-module-change");
+     expect(chip).toHaveTextContent("变更中心");
+@@ -475,7 +493,7 @@ describe("ChangeAssetsCard 资产透明面", () => {
+   it("两组无数据时不渲染（fail-open 同款逐组门控）", async () => {
+     mockGet.mockResolvedValue(FULL);
+     renderCard();
+-    fireEvent.click(await screen.findByRole("button", { name: /沉淀资产/ }));
++    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     expect(await screen.findByTestId("change-assets-tests")).toBeInTheDocument();
+     expect(screen.queryByTestId("change-assets-knowledge-touch")).toBeNull();
+diff --git a/frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx b/frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx
+index 91cd261f2..97a34dda8 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx
+@@ -153,7 +153,7 @@ describe("ChangeStageActions 审批卡（task-10）", () => {
+     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+   });
+ 
+-  it("thin 阶段：两段式只读说明卡（flow start/done 命令 + 断点续/fail-closed）", () => {
++  it("thin 阶段：两段式说明卡已移除（2026-09-28-change-ux-detail-batch 用户裁决），不落通用「无可审批」文案", () => {
+     const props = makeProps({
+       change: makeChange({
+         current_stage: "thin",
+@@ -161,14 +161,16 @@ describe("ChangeStageActions 审批卡（task-10）", () => {
+         change_key: "2026-09-25-thin-demo",
+       }),
+     });
+-    render(<ChangeStageActions {...props} />);
+-    expect(screen.getByText("◈ 轻量变更")).toBeInTheDocument();
+-    expect(screen.getByText(/sillyspec flow start --change 2026-09-25-thin-demo/)).toBeInTheDocument();
+-    expect(screen.getByText(/sillyspec flow done --change 2026-09-25-thin-demo/)).toBeInTheDocument();
+-    expect(screen.getByText(/断点续/)).toBeInTheDocument();
+-    expect(screen.getByText(/fail-closed/)).toBeInTheDocument();
+-    // 只读说明：无执行控制按钮
+-    expect(screen.queryByText(/通过并通知绑定会话/)).not.toBeInTheDocument();
++    const { container } = render(<ChangeStageActions {...props} />);
++    // 说明卡整卡不渲染（协议长文案属 CLI/会话面知识，顶部轻量流程条已承载形态）
++    expect(screen.queryByText("◈ 轻量变更")).not.toBeInTheDocument();
++    expect(screen.queryByText(/sillyspec flow start/)).not.toBeInTheDocument();
++    expect(screen.queryByText(/fail-closed/)).not.toBeInTheDocument();
++    // 出身拦截仍在：不落入通用「无可审批」分支
++    expect(
++      screen.queryByText(/当前无可审批事项/),
++    ).not.toBeInTheDocument();
++    expect(container.firstChild).toBeNull();
+     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+   });
+ 
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index e4deb9c36..7139e3f36 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -119,7 +119,9 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+     refetchOnWindowFocus: false,
+   });
+ 
+-  const [open, setOpen] = useState(false);
++  // 2026-09-28-change-ux-detail-batch：默认展开（用户裁决）——卡随本变更移入
++  // 详情页主栏宽列，折叠态默认值不再是侧栏窄列的防噪手段。
++  const [open, setOpen] = useState(true);
+   /** 测试文件预览目标（null = 关）。 */
+   const [testPath, setTestPath] = useState<string | null>(null);
+   /** 归档留档 diff 目标（null = 关）。 */
+@@ -177,28 +179,32 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+       </button>
+ 
+       {open && (
+-        <div className="flex flex-col gap-2 px-3 py-2">
++        /* 2026-09-28-change-ux-detail-batch：分组改网格（md 两列对齐）+ 每组
++           固定高度 h-64（超出组内滚动）——主栏宽列下的可扫读形态，替代侧栏
++           窄列的纵向长堆叠。空态段跨满两列。 */
++        <div className="grid grid-cols-1 gap-2 px-3 py-2 md:grid-cols-2">
+           {data && !data.archived && total === 0 ? (
+             <p
+               data-testid="change-assets-inflight"
+-              className="py-3 text-center text-[11px] text-muted-foreground"
++              className="py-3 text-center text-[11px] text-muted-foreground md:col-span-2"
+             >
+               变更归档后，此处会汇总其沉淀的 FR / 决策 / 测试绑定与留档。
+             </p>
+           ) : null}
+ 
+           {data && data.archived && total === 0 ? (
+-            <p className="py-3 text-center text-[11px] text-muted-foreground">
++            <p className="py-3 text-center text-[11px] text-muted-foreground md:col-span-2">
+               本变更暂无沉淀资产记录。
+             </p>
+           ) : null}
+ 
+           {frCount > 0 ? (
+-            <div className="rounded border-border/60 border p-2" data-testid="change-assets-fr">
+-              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
++            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-fr">
++              <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+                 <span>需求规则（FR 索引）</span>
+                 <span className="text-[10px] text-muted-foreground/70">knowledge/fr</span>
+               </div>
++              <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
+               {data?.fr_entries?.map((e) => (
+                 <Link
+                   key={e.id}
+@@ -217,17 +223,19 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                   ) : null}
+                 </Link>
+               ))}
++              </div>
+             </div>
+           ) : null}
+ 
+           {decCount > 0 ? (
+-            <div className="rounded border-border/60 border p-2" data-testid="change-assets-decisions">
+-              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
++            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-decisions">
++              <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+                 <span>决策蒸馏</span>
+                 <span className="text-[10px] text-muted-foreground/70">
+                   knowledge/decisions
+                 </span>
+               </div>
++              <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
+               {data?.decisions?.map((d) => (
+                 <Link
+                   key={d.id}
+@@ -246,6 +254,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                   ) : null}
+                 </Link>
+               ))}
++              </div>
+             </div>
+           ) : null}
+ 
+@@ -253,13 +262,14 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+               注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查（flow
+               done 对触达域打标），覆盖面以标记为准，行点击跳知识库深链。 */}
+           {touchList.length > 0 ? (
+-            <div className="rounded border-border/60 border p-2" data-testid="change-assets-knowledge-touch">
+-              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
++            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
++              <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+                 <span>知识触达（注入命中 · 待复核标记反查）</span>
+                 <span className="text-[10px] text-muted-foreground/70">
+                   {touchList.length} 条
+                 </span>
+               </div>
++              <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
+               {touchList.map((e) => (
+                 <Link
+                   key={`${e.file}#${e.id}`}
+@@ -273,15 +283,17 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                   <span className="min-w-0 flex-1 truncate">{e.title}</span>
+                 </Link>
+               ))}
++              </div>
+             </div>
+           ) : null}
+ 
+           {rowCount > 0 ? (
+-            <div className="rounded border-border/60 border p-2" data-testid="change-assets-tests">
+-              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
++            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-tests">
++              <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+                 <span>测试绑定</span>
+                 <span className="text-[10px] text-muted-foreground/70">test-trace</span>
+               </div>
++              <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
+               {data?.test_rows?.map((r) => (
+                 <div
+                   key={r.row_id}
+@@ -335,20 +347,21 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                   ) : null}
+                 </div>
+               ))}
++              </div>
+             </div>
+           ) : null}
+ 
+           {/* 模块触达（FR-02）：交付文件清单 × 镜像模块图匹配的模块；chip 点击
+               打开模块文档预览（explorer 读仓库文件，路径确定不走搜索解析）。 */}
+           {moduleList.length > 0 ? (
+-            <div className="rounded border-border/60 border p-2" data-testid="change-assets-touched-modules">
+-              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-muted-foreground">
++            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-touched-modules">
++              <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+                 <span>模块触达</span>
+                 <span className="text-[10px] text-muted-foreground/70">
+                   {moduleList.length} 个模块
+                 </span>
+               </div>
+-              <div className="flex flex-wrap gap-1.5">
++              <div className="mt-1 flex min-h-0 flex-1 flex-wrap content-start gap-1.5 overflow-y-auto">
+                 {moduleList.map((m) => (
+                   <button
+                     key={`${m.project}/${m.id}`}
+@@ -369,9 +382,9 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+           ) : null}
+ 
+           {hasAudit && data ? (
+-            <div className="rounded border-border/60 border p-2 text-[11px] text-muted-foreground" data-testid="change-assets-audit">
+-              <div className="mb-1 text-[11px] font-medium">归档留档</div>
+-              <div className="flex flex-wrap gap-x-3 gap-y-1">
++            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2 text-[11px] text-muted-foreground" data-testid="change-assets-audit">
++              <div className="shrink-0 text-[11px] font-medium">归档留档</div>
++              <div className="mt-1 flex shrink-0 flex-wrap gap-x-3 gap-y-1">
+                 {data.patch ? (
+                   <span>
+                     patch{" "}
+@@ -392,8 +405,8 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                 ) : null}
+               </div>
+               {patchFileList.length > 0 ? (
+-                <div className="mt-1.5 border-t border-dashed pt-1.5">
+-                  <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
++                <div className="mt-1.5 flex min-h-0 flex-1 flex-col overflow-hidden border-t border-dashed pt-1.5">
++                  <div className="mb-1 flex shrink-0 items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
+                     <span>改动文件（点开看该文件在 change.patch 中的 diff）</span>
+                     {data.patch?.files_truncated ? (
+                       <span className="shrink-0 text-warning">清单已截断</span>
+@@ -401,7 +414,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                   </div>
+                   <ul
+                     data-testid="change-assets-patch-files"
+-                    className="max-h-40 overflow-auto"
++                    className="min-h-0 flex-1 overflow-y-auto"
+                   >
+                     {patchFileList.map((p) => (
+                       <li key={p} className="border-b border-dashed last:border-b-0">
+diff --git a/frontend/src/components/changes/detail/change-stage-actions.tsx b/frontend/src/components/changes/detail/change-stage-actions.tsx
+index eafadc5f6..681035410 100644
+--- a/frontend/src/components/changes/detail/change-stage-actions.tsx
++++ b/frontend/src/components/changes/detail/change-stage-actions.tsx
+@@ -128,46 +128,13 @@ export function ChangeStageActions({
+   const currentStage = change.current_stage ?? "draft";
+   const gatePanel = APPROVAL_PANELS[change.pending_review ?? ""];
+ 
+-  // thin 辅助阶段（2026-09-25-change-center-thin-flow task-08）：轻量变更只读说明卡，
+-  // 两段式 2 调用协议（形态对照原型 B 面）；平台无操作，执行全在会话内。
+-  // 2026-09-27-thin-display-fix：出身判定扩展——归档 thin（stage=archived）与
+-  // quick 分流（change_type=quick）同样落本卡，不再漏进通用「无可审批」分支。
++  // thin 辅助阶段（2026-09-25-change-center-thin-flow task-08）：轻量变更只读说明卡。
++  // 2026-09-28-change-ux-detail-batch（用户裁决）：两段式协议长文案不再渲染——
++  // 协议说明属 CLI/会话面知识，详情页顶部轻量流程条（flow start → 干活 →
++  // flow done）已承载形态认知，长文卡对浏览者是噪音。出身判定（归档 thin /
++  // quick 分流）仅用于拦截进通用「无可审批」分支。
+   if (isThinLineageChange(change)) {
+-    const thinKey = change.change_key ?? change.id;
+-    return (
+-      <section className="space-y-2 rounded-md border border-brand-300 bg-brand-50/60 px-4 py-3">
+-        <div className="flex items-center gap-2">
+-          <span className="text-sm font-semibold">◈ 轻量变更</span>
+-          <span className="text-xs text-muted-foreground">
+-            两段式流程（flow start → 干活 → flow done），不走完整审批流
+-          </span>
+-        </div>
+-        <div className="space-y-1.5 text-[11px] text-muted-foreground">
+-          <p>
+-            协议 1/2 —— 智能体在会话中执行
+-            <code className="mx-1 rounded bg-background px-1.5 py-0.5 text-[11px]">
+-              sillyspec flow start --change {thinKey}
+-            </code>
+-            启动（需求需多行文本，含独立「成功标准：」节头行 + 每行一条
+-            <code className="mx-1 rounded bg-background px-1.5 py-0.5 text-[11px]">- 标准</code>
+-            列表行，单行内联会被清晰度门拒绝）。
+-          </p>
+-          <p>
+-            协议 2/2 —— 干活（改代码 + 写测试 + 填 design/requirements 槽位）后执行
+-            <code className="mx-1 rounded bg-background px-1.5 py-0.5 text-[11px]">
+-              sillyspec flow done --change {thinKey}
+-            </code>
+-            收口：中间态退出码 1 属正常（空槽拒收/实测失败自动升厚），修复后重跑同
+-            命令即可断点续跑；实测失败即整单失败（fail-closed）。
+-          </p>
+-          <p>
+-            进行中状态阶段恒显示「轻量变更」，归档时自动翻转（进度不落
+-            sillyspec.db，flow done 后变更自动转入归档区，无需平台操作）；
+-            归档后本卡仍按轻量出身展示（不再落入通用「无可审批」文案）。
+-          </p>
+-        </div>
+-      </section>
+-    );
++    return null;
+   }
+ 
+   // quick 独立阶段（D-003）：无平台执行控制，仅只读说明（存量通道，已退役）。
+diff --git a/frontend/src/components/changes/detail/quicklog-linked-card.tsx b/frontend/src/components/changes/detail/quicklog-linked-card.tsx
+index 86276fd69..5f95d985c 100644
+--- a/frontend/src/components/changes/detail/quicklog-linked-card.tsx
++++ b/frontend/src/components/changes/detail/quicklog-linked-card.tsx
+@@ -27,6 +27,10 @@ interface QuicklogLinkedCardProps {
+  * 变更详情页反向「关联的快速任务」区块（task-10 / FR-07）。
+  * linked_change 筛选拉取，只读展示；点击条目跳变更中心快速修复 tab。
+  * 拉取失败静默降级（区块隐藏），不影响详情主内容。
++ *
++ * 2026-09-28-change-ux-detail-batch（用户裁决）：有数据才渲染——加载中/空列表/
++ * 失败一律不占位（此前「暂无关联快速任务」空态卡在详情页侧栏成常驻噪音，
++ * ChangeAssetsCard 同款 fail-open 范式）。
+  */
+ export function QuicklogLinkedCard({
+   workspaceId,
+@@ -46,10 +50,11 @@ export function QuicklogLinkedCard({
+     refetchOnWindowFocus: false,
+   });
+ 
+-  // 失败静默：区块隐藏（约束：不影响详情主内容）
+-  if (query.isError) return null;
++  // 失败/加载中/空列表：区块整体隐藏（约束：不影响详情主内容）
++  if (query.isError || query.isPending) return null;
+ 
+   const items = query.data?.items ?? [];
++  if (items.length === 0) return null;
+ 
+   return (
+     <section
+@@ -58,19 +63,12 @@ export function QuicklogLinkedCard({
+     >
+       <div className="flex items-center justify-between border-b px-3 py-2">
+         <h2 className="text-xs font-medium">⚡ 关联的快速任务</h2>
+-        {query.data && items.length > 0 && (
+-          <span className="inline-block min-w-[18px] rounded-full bg-muted px-1.5 text-center text-[11px] text-muted-foreground">
+-            {query.data.total}
+-          </span>
+-        )}
++        <span className="inline-block min-w-[18px] rounded-full bg-muted px-1.5 text-center text-[11px] text-muted-foreground">
++          {query.data?.total ?? items.length}
++        </span>
+       </div>
+       <div className="flex flex-col gap-1.5 px-3 py-2.5">
+-        {query.isPending ? (
+-          <p className="text-xs text-muted-foreground">加载中…</p>
+-        ) : items.length === 0 ? (
+-          <p className="text-xs text-muted-foreground">暂无关联快速任务</p>
+-        ) : (
+-          items.map((it) => {
++        {items.map((it) => {
+             const m = STATUS_META[it.status] ?? {
+               label: it.status,
+               kind: "neutral" as const,
+@@ -105,8 +103,7 @@ export function QuicklogLinkedCard({
+                 </span>
+               </Link>
+             );
+-          })
+-        )}
++          })}
+       </div>
+     </section>
+   );
+diff --git a/frontend/src/components/changes/platform-sync-section.tsx b/frontend/src/components/changes/platform-sync-section.tsx
+index 4b9bac230..f42a416bf 100644
+--- a/frontend/src/components/changes/platform-sync-section.tsx
++++ b/frontend/src/components/changes/platform-sync-section.tsx
+@@ -214,12 +214,16 @@ export interface PlatformSyncSectionProps {
+   /** 移动端紧凑布局：冲突行纵向堆叠 + 按钮铺满 44px 触摸热区（m/ 页适配模式）。 */
+   compact?: boolean;
+   className?: string;
++  /** 2026-09-28-change-ux-detail-batch：抽屉承载模式——无绑定数据源（原本
++   * return null）时渲染中性提示而非空白，避免点开按钮见空抽屉。 */
++  drawerHint?: boolean;
+ }
+ 
+ export function PlatformSyncSection({
+   workspaceId,
+   compact = false,
+   className,
++  drawerHint = false,
+ }: PlatformSyncSectionProps) {
+   const { modal } = App.useApp();
+   const notify = useNotify();
+@@ -372,8 +376,17 @@ export function PlatformSyncSection({
+   /**
+    * 整卡不渲染条件（design §5 Phase 3 / §9）：无绑定（含加载中）、机器缺失
+    * 或 sillyspec_status 缺失（CLI 能力缺失/旧后端）——页面行为与现状一致。
++   * 抽屉承载模式（drawerHint）下改为中性提示，避免空抽屉（2026-09-28-
++   * change-ux-detail-batch）。
+    */
+-  if (machine === null || status === null) return null;
++  if (machine === null || status === null) {
++    if (!drawerHint) return null;
++    return (
++      <p className="px-1 py-6 text-center text-xs text-muted-foreground">
++        暂无同步状态（未绑定数据源机器或 CLI 未上报）。
++      </p>
++    );
++  }
+ 
+   // 机器在线判定（session-panel machineOnline 先例）：「查看对比」需实时读取
+   // 本地快照（D-001@v1 方案A 无缓存），离线时禁用入口。
+diff --git a/frontend/src/components/changes/scope-audit-command-card.tsx b/frontend/src/components/changes/scope-audit-command-card.tsx
+index fdd6ae13e..a3ad33889 100644
+--- a/frontend/src/components/changes/scope-audit-command-card.tsx
++++ b/frontend/src/components/changes/scope-audit-command-card.tsx
+@@ -314,24 +314,16 @@ function DegradedNotice({
+   reason: string;
+   archived: boolean;
+ }) {
++  // 2026-09-28-change-ux-detail-batch（用户裁决）：双段说明压成单行——保留
++  // 「已降级 + 不出三态」事实与归档指路（信息不丢），去第二段复述性长文。
+   return (
+-    <>
+-      <p
+-        className="text-[11px] leading-relaxed text-warning"
+-        data-testid="scope-audit-degraded-view"
+-      >
+-        ⚠️ 本视图已降级：{reason}
+-      </p>
+-      <p
+-        className="mt-1 text-[11px] leading-relaxed text-muted-foreground"
+-        data-testid="scope-audit-degraded-scope"
+-      >
+-        该视图无三态列（计划侧不可用），下方明细是实时窗口采集的文件面
+-        {archived
+-          ? "——本变更已归档，其真实改动面见「沉淀资产 · 归档留档」。"
+-          : "，不代表本变更的计划外改动。"}
+-      </p>
+-    </>
++    <p
++      className="text-[11px] leading-relaxed text-warning"
++      data-testid="scope-audit-degraded-view"
++    >
++      ⚠️ 已降级为实时窗口视图（计划侧不可用，不出三态）：{reason}
++      {archived ? "；真实改动面见「沉淀资产 · 归档留档」。" : "。"}
++    </p>
+   );
+ }
+ 
+@@ -677,10 +669,8 @@ export function ScopeAuditCommandCard({
+       <div className="flex items-center justify-between gap-2">
+         <div className="min-w-0">
+           <h2 className="text-xs font-medium">⚖️ 范围对账（scope-audit）</h2>
+-          <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+-            「计划改动 × 实际改动」对账：三态全表 + 行数；advisory
+-            只读不设门禁。计划侧不可用时降级为实时窗口视图，卡面显式标注、不出三态。
+-          </p>
++          {/* 2026-09-28-change-ux-detail-batch（用户裁决）：头部说明副标题移除——
++              「计划 × 实际」语义由三态 chips 与明细自带，长文案属面板噪音。 */}
+         </div>
+       </div>
+       <div className="mt-2" data-testid="scope-audit-summary">
+diff --git a/.sillyspec/changes/2026-09-28-change-ux-detail-batch/tasks.md b/.sillyspec/changes/2026-09-28-change-ux-detail-batch/tasks.md
+new file mode 100644
+index 000000000..61cabaa4a
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-change-ux-detail-batch/tasks.md
+@@ -0,0 +1,19 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T09:04:42.689Z
++---
++# 任务注册表（Tasks）— 2026-09-28-change-ux-detail-batch
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: 列表行描述 min-w-0 修复（flex 项 min-width:auto 陷阱，truncate 生效不再覆盖右列/影响模块）
++- [x] task-02: 详情页头部描述行（w-full+truncate+悬浮全文）
++- [x] task-03: 平台同步收进工具条按钮 + Drawer（drawerHint 中性提示；无绑定不再空白抽屉）
++- [x] task-04: ChangeStageActions thin 长文案卡退役（return null，出身拦截保留；顶部轻量流程条不动）
++- [x] task-05: 沉淀资产默认展开 + 移主栏 + md 两列网格 h-64 固定高度组内滚动
++- [x] task-06: 智能体运行状态卡自桌面详情页移除（agentStatus 取数链一并退役；组件+测试保留供移动端）
++- [x] task-07: 关联快速任务空列表静默隐藏（加载中/失败/空三态均不渲染）
++- [x] task-08: scope-audit 卡去说明副标题 + 降级双段压单行（degraded-scope testid 退役，归档指路保留）
++- [x] task-09: 测试随行为更新（assets 23P 含默认展开新钉子/stage-actions 反向钉/详情页 41P/列表页含抽屉钉子）——受影响面 30 文件 370P 全绿，tsc 0 错，eslint 0 错（3 warning 为预存债，较 HEAD 还少 1）
+diff --git a/.sillyspec/changes/2026-09-28-change-ux-detail-batch/design.md b/.sillyspec/changes/2026-09-28-change-ux-detail-batch/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-change-ux-detail-batch/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T09:04:42.689Z
++---
++# 设计记录（Design Record）— 2026-09-28-change-ux-detail-batch
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-change-ux-detail-batch 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++纯前端八点体验修正（用户实测反馈逐条对号）：①列表行描述 span 补 min-w-0——flex 项默认 min-width:auto，长文 nowrap 撑破行宽溢出覆盖右列阶段/时间与 meta 行影响模块，min-w-0 收缩后 truncate 生效；②详情页 PageHeader subtitle 追加描述行（w-full 独占 + truncate + title 悬浮）；③平台同步常驻卡收进工具条「平台同步」按钮 + antd Drawer（destroyOnHidden），组件加 drawerHint prop：未绑定数据源时抽屉内出中性提示而非空白；④ChangeStageActions thin 分支改 return null（协议长文案退役，出身拦截保留）；⑤ChangeAssetsCard 默认展开（useState(true)）+ 自 aside 移主栏 + 分组改 md:grid-cols-2 网格、每组 h-64 固定高度 flex-col + 内层 overflow-y-auto；⑥详情页移除 ChangeAgentRunLog 挂载及其 agentStatus 取数链（getAgentStatus/refreshAgentStatus/panelRunId 全退，组件保留供 mobile-change-detail）；⑦QuicklogLinkedCard 空列表/加载中/失败一律不渲染；⑧ScopeAuditCommandCard 去头部说明副标题、DegradedNotice 双段压单行（保留「不出三态」口径与归档指路）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-change-ux-detail-batch 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++无后端/端点/schema 变更。前端契约面：PlatformSyncSectionProps 新增可选 drawerHint（默认 false 向后兼容，m/ 页用法零改动）；ChangeStageActions thin 出身返回 null（消费方仅详情页主栏首位）；ChangeAssetsCard 默认展开 + 挂载位 aside→main；QuicklogLinkedCard 空态由文案改静默隐藏；scope-audit 卡删 scope-audit-degraded-scope testid（降级口径并入 degraded-view 单行）。ChangeAgentRunLog 组件与其测试保留（移动端消费），仅桌面详情页摘挂载。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-change-ux-detail-batch 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到到达：不适用——全部为展示层组件，数据到达顺序由既有 useQuery 保证，无新增时序假设。
++2. 并发写：不适用——零 mutation，纯只读展示。
++3. 切换/生命周期：Drawer destroyOnHidden 关闭即卸载处理区（含其内部轮询查询），无泄漏；assets 卡默认展开仅初始态，收起交互保留。
++4. 作用域：不适用——无跨工作区数据；drawerHint 为 prop 级开关不影响 m/ 页既有 compact 用法。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-change-ux-detail-batch 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：布局类改动（grid/h-64/滚动）在真实浏览器的观感无法由 jsdom 断言——已按 tailwind 语义保守实现（md 两列、h-64 固定高、min-h-0 flex-1 overflow-y-auto 链条齐全），真机目验移交用户；列表行修复是标准 flex 陷阱修法（min-w-0），确定性高。放弃的方案：沉淀资产每组独立 max-h（行高不齐对不齐）——改统一 h-64 换取网格对齐；平台同步保留常驻但折叠——用户明确要求收进按钮，折叠态仍占一行。
+
+diff --git a/.sillyspec/changes/2026-09-28-change-ux-detail-batch/proposal.md b/.sillyspec/changes/2026-09-28-change-ux-detail-batch/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-change-ux-detail-batch/proposal.md
+@@ -0,0 +1,56 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T09:04:42.688Z
++---
++# 提案书（Proposal）— 2026-09-28-change-ux-detail-batch
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:702d7bed37cf2b5c57ad160f00814ed16ae01da52c68bf5a2510a2253625ed5b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-change-ux-detail-batch 留痕重锚 -->
++任务原话转写：变更中心列表与详情页一批 UI 体验问题（用户实测反馈）：①列表行描述过长溢出覆盖右列状态与影响模块（basis-full flex 项缺 min-w-0，truncate 失效）；②详情页不显示变更描述；③平台同步处理区常驻占位过大，应收进按钮；④详情页轻量变更两段式说明文案冗长不需要；⑤沉淀资产折叠卡在侧栏窄列难用——应默认展开、移主栏、卡片固定高度滚动对齐；⑥智能体运行状态卡（当前阶段未配置智能体）对 thin 变更是纯噪音；⑦关联快速任务空态占位；⑧范围对账卡说明文案冗长。
++成功标准：
++- 列表行描述单行截断不再溢出覆盖右列/影响模块（min-w-0 修复），悬浮全文保留
++- 详情页头部显示变更描述（单行截断+悬浮全文）
++- 平台同步处理区收进工具条按钮（搜索/重置旁），点开抽屉承载原处理区；无绑定数据源时抽屉内中性提示
++- 详情页轻量变更说明卡（协议 1/2、2/2 长文案）不再渲染；顶部轻量流程条保留
++- 沉淀资产卡默认展开、移入主栏，各分组卡片固定高度（超出滚动）网格对齐
++- 智能体运行状态卡自桌面详情页移除（组件与移动端用法保留）
++- 关联快速任务卡无关联时不渲染（有数据才显示）
++- 范围对账卡去头部说明副标题与降级双段说明，压缩为单行降级提示（归档指路保留）
++- 相关前端测试更新通过，tsc/eslint 0 错
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:d9ce0e9ee0e51a6ec7b07489713015ec2424a22f50b5c4a93466433fe092bf24:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-change-ux-detail-batch 留痕重锚 -->
++按成功标准机械推导，共 11 条验收面：
++1. 列表行描述单行截断不再溢出覆盖右列/影响模块（min-w-0 修复），悬浮全文保留
++2. 详情页头部显示变更描述（单行截断+悬浮全文）
++3. 平台同步处理区收进工具条按钮（搜索/重置旁），点开抽屉承载原处理区
++4. 无绑定数据源时抽屉内中性提示
++5. 详情页轻量变更说明卡（协议 1/2、2/2 长文案）不再渲染
++6. 顶部轻量流程条保留
++7. 沉淀资产卡默认展开、移入主栏，各分组卡片固定高度（超出滚动）网格对齐
++8. 智能体运行状态卡自桌面详情页移除（组件与移动端用法保留）
++9. 关联快速任务卡无关联时不渲染（有数据才显示）
++10. 范围对账卡去头部说明副标题与降级双段说明，压缩为单行降级提示（归档指路保留）
++11. 相关前端测试更新通过，tsc/eslint 0 错
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:1635b85c47213bc0e56e9579e3fe549c22b06cedfed7efbb838b3e676261bfab:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-change-ux-detail-batch 留痕重锚 -->
++1. 列表行描述单行截断不再溢出覆盖右列/影响模块（min-w-0 修复），悬浮全文保留
++2. 详情页头部显示变更描述（单行截断+悬浮全文）
++3. 平台同步处理区收进工具条按钮（搜索/重置旁），点开抽屉承载原处理区
++4. 无绑定数据源时抽屉内中性提示
++5. 详情页轻量变更说明卡（协议 1/2、2/2 长文案）不再渲染
++6. 顶部轻量流程条保留
++7. 沉淀资产卡默认展开、移入主栏，各分组卡片固定高度（超出滚动）网格对齐
++8. 智能体运行状态卡自桌面详情页移除（组件与移动端用法保留）
++9. 关联快速任务卡无关联时不渲染（有数据才显示）
++10. 范围对账卡去头部说明副标题与降级双段说明，压缩为单行降级提示（归档指路保留）
++11. 相关前端测试更新通过，tsc/eslint 0 错
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-28-change-ux-detail-batch/requirements.md b/.sillyspec/changes/2026-09-28-change-ux-detail-batch/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-change-ux-detail-batch/requirements.md
+@@ -0,0 +1,98 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T09:04:42.689Z
++---
++# 需求规格（Requirements）— 2026-09-28-change-ux-detail-batch
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 列表行描述单行截断不再溢出覆盖右列/影响模块（min-w-0 修复），悬浮全文保留
++Given 系统就绪
++When 列表行描述单行截断不再溢出覆盖右列/影响模块（min-w-0 修复），悬浮全文保留
++Then 行为符合本条标准描述
++
++### FR-02: 详情页头部显示变更描述（单行截断+悬浮全文）
++Given 系统就绪
++When 详情页头部显示变更描述（单行截断+悬浮全文）
++Then 行为符合本条标准描述
++
++### FR-03: 平台同步处理区收进工具条按钮（搜索/重置旁），点开抽屉承载原处理区
++Given 系统就绪
++When 平台同步处理区收进工具条按钮（搜索/重置旁），点开抽屉承载原处理区
++Then 行为符合本条标准描述
++
++### FR-04: 无绑定数据源时抽屉内中性提示
++Given 系统就绪
++When 无绑定数据源时抽屉内中性提示
++Then 行为符合本条标准描述
++
++### FR-05: 详情页轻量变更说明卡（协议 1/2、2/2 长文案）不再渲染
++Given 系统就绪
++When 详情页轻量变更说明卡（协议 1/2、2/2 长文案）不再渲染
++Then 行为符合本条标准描述
++
++### FR-06: 顶部轻量流程条保留
++Given 系统就绪
++When 顶部轻量流程条保留
++Then 行为符合本条标准描述
++
++### FR-07: 沉淀资产卡默认展开、移入主栏，各分组卡片固定高度（超出滚动）网格对齐
++Given 系统就绪
++When 沉淀资产卡默认展开、移入主栏，各分组卡片固定高度（超出滚动）网格对齐
++Then 行为符合本条标准描述
++
++### FR-08: 智能体运行状态卡自桌面详情页移除（组件与移动端用法保留）
++Given 组件 相关模块就绪
++When 智能体运行状态卡自桌面详情页移除（组件与移动端用法保留）
++Then 行为符合本条标准描述
++
++### FR-09: 关联快速任务卡无关联时不渲染（有数据才显示）
++Given 系统就绪
++When 关联快速任务卡无关联时不渲染（有数据才显示）
++Then 行为符合本条标准描述
++
++### FR-10: 范围对账卡去头部说明副标题与降级双段说明，压缩为单行降级提示（归档指路保留）
++Given 系统就绪
++When 范围对账卡去头部说明副标题与降级双段说明，压缩为单行降级提示（归档指路保留）
++Then 行为符合本条标准描述
++
++### FR-11: 相关前端测试更新通过，tsc/eslint 0 错
++Given 前端 / 测试 相关模块就绪
++When 相关前端测试更新通过，tsc/eslint 0 错
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx :: 「变更行渲染描述（悬浮全文可读），无描述行零占位」（类名含 min-w-0；jsdom 不渲像素，溢出修复机理由类名+代码审阅锚定 changes/page.tsx 描述 span）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx :: 「头部显示变更描述（单行截断 + 悬浮全文）」
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx :: 「平台同步：工具条按钮常驻，点开抽屉承载处理区（未绑定时中性提示）」
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx :: 同上用例 findByText(/暂无同步状态/) 断言；组件面 platform-sync-section.test.tsx（drawerHint 分支经页面集成覆盖，组件单测未单列）
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx :: 「thin 阶段：两段式说明卡已移除…不落通用『无可审批』文案」（反向钉：◈/flow start/fail-closed 文案缺席+container 空）
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx :: 「FR-02：thin 阶段标题旁显示…」（findByText("flow start") 断言流程条在场）
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx :: 「默认展开…分组直接可见，点击头部可收起」+「四组渲染」（网格/固定高度为 CSS 语义，jsdom 断言结构与默认态；观感移交真机目验）
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx :: 「保留只读展示区…（执行日志卡已移除）」（queryByTestId change-agent-run-log 为 Null 反向钉）；组件本体 change-agent-run-log.test.tsx 保留全绿（移动端用法）
++
++<!--AGENT:测试绑定FR-09 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx :: 「关联快速任务区块：无关联时整卡不渲染」+「命中条目列出…」（有数据路径正向钉）
++
++<!--AGENT:测试绑定FR-10 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx :: 「ok=true 降级：不渲染三态 chips…归档变更指路留档」（单行含不出三态+归档留档）+「降级 + 未归档：口径提示不带留档指路」
++
++<!--AGENT:测试绑定FR-11 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++受影响面 vitest 30 文件 370P（changes 列表/详情页 + components/changes + components/mobile）+ tsc --noEmit 0 错 + eslint 触碰文件 0 错（3 warning 预存债，较 HEAD 同文件 4 条少 1，git stash 对照实证）；flow done 实测门 test+lint 双绿（deps py1+jsx6+FR 绑定 7）

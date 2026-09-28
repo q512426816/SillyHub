@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-change-ux-detail-batch",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01/FR-02「单行截断」仅由 CSS 类承载，绑定测试未断言 min-w-0/truncate 类名（绑定作答已如实披露，非违规）",
+      "evidence": "jsdom 无布局引擎，测试只断言描述渲染+title 悬浮全文；min-w-0/truncate 修复锚定在 changes/page.tsx 与 [cid]/page.tsx 的类名字符串上——类名若被后续重构移除，现有测试不拦截（回归面脆弱，非承诺违反：绑定作答明写「机理由类名+代码审阅锚定」）",
+      "location": "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx:548 (basis-full min-w-0 truncate span); frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx:325"
+    },
+    {
+      "severity": "P3",
+      "title": "drawerHint 中性提示在加载中即短暂显示「未绑定数据源机器或 CLI 未上报」",
+      "evidence": "machine===null 涵盖 pending 态（原注释「无绑定（含加载中）」语义被 drawerHint 分支继承）：抽屉打开瞬间到 binding/machines 查询落定前，中性提示文案断言了尚未证实的「未绑定」，查询返回后自动替换为真实内容——纯瞬态观感噪音，无数据正确性影响，FR-04 承诺（无绑定时出提示而非空白）本身成立",
+      "location": "frontend/src/components/changes/platform-sync-section.tsx:379-387"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-28T09:31:26Z",
+  "checklistDetail": {
+    "frTriConsistency": "11/11 FR 对 patch 逐条核实一致：①列表行 span 补 min-w-0（changes/page.tsx）+绑定测试在 page.test.tsx:325 真实断言渲染+title；②详情页 PageHeader subtitle 增描述行（w-full min-w-0 truncate+title）+新测试 findByTitle 断言；③syncDrawerOpen state+antd Drawer(title 平台同步,width 460,destroyOnHidden)+工具条 ml-auto 区按钮位于搜索/重置旁+测试点开断言；④drawerHint 分支渲染「暂无同步状态（未绑定数据源机器或 CLI 未上报）」+findByText(/暂无同步状态/) 断言；⑤thin 分支 return null 且 isThinLineageChange 出身拦截保留、测试反向钉 ◈/flow start/fail-closed/「当前无可审批事项」缺席+container.firstChild null；⑥顶部轻量流程条 patch 未触碰、工作树 [cid]/page.tsx:334 在场、测试 findByText(\"flow start\") 正向钉；⑦useState(true)+挂载 aside→main+grid md:grid-cols-2+每组 h-64 flex-col overflow-hidden+内层 min-h-0 flex-1 overflow-y-auto+新测试默认展开/可收起；⑧桌面详情页摘挂载、mobile-change-detail.tsx:742 用法保留、change-agent-run-log.test.tsx 保留、page-team-toggle 反向钉 Null；⑨isError||isPending→null+items.length===0→null、测试 waitFor 取数落定后断缺席+既有命中条目正向钉；⑩头部副标题 <p> 删除+DegradedNotice 双段压单行（degraded-scope testid 退役并断 Null）+归档指路「真实改动面见「沉淀资产 · 归档留档」」保留并断言。FR-11：绑定测试全部真实存在且断言相应行为（静态核验）；vitest 30 文件 370P/tsc/eslint 实跑结果未独立复跑（评审只读纪律），实测执行由 flow done 实测门机器把关，静态面（测试存在性+断言正确性+无死测试）已核",
+    "blindDimensions": "盲维四答「不适用/纯展示层」经 diff 全量扫描属实：零新增 mutation（diff 中无任何 useMutation/写操作）、仅新增本地 useState(syncDrawerOpen)、quicklog 三态门控为终态判断无时序假设、无跨工作区状态；切换维承诺经实证：antd 实测 6.4.4（destroyOnHidden 为有效 prop）且 PlatformSyncSection 内确有 refetchInterval 轮询（platform-sync-section.tsx:264），关闭抽屉卸载查询的生命周期承诺成立",
+    "disclosureAdjudication": "①布局观感 jsdom 不可断言移交真机目验——可接受：jsdom 无布局引擎属客观限制，min-w-0 truncate / h-64 flex-col overflow-hidden / min-h-0 flex-1 overflow-y-auto / md:grid-cols-2 类名链条在 patch 静态齐全，残余风险仅像素级观感；②lint 3 warning 预存债——可接受：收口门为 0 错（warning 不阻断），「较 HEAD 少 1」的 stash 对照无法独立复核（评审禁 git 操作），但与触碰文件 0 错声明互洽，warning 非本变更新增错误的说法无反证",
+    "protectionClaims": "agentStatus 取数链退役删净——实证：grep [cid]/page.tsx 对 getAgentStatus/refreshAgentStatus/panelRunId/DispatchResponse/agentStatus/loadingAgentStatus 全部零匹配，import 与类型随删无残留；drawerHint 默认 false 向后兼容——实证：m/ 页 frontend/src/app/m/workspaces/[id]/changes/page.tsx:955 用法 <PlatformSyncSection workspaceId compact /> 无 drawerHint，走原 return null 分支行为不变",
+    "generatedArtifacts": "不适用确认：patch 文件清单仅 9 个前端源/测试文件 + 4 个 .sillyspec 治理文档（tasks/design/proposal/requirements），无 api-types/openapi/schema 任何生成物夹带"
+  }
+}
