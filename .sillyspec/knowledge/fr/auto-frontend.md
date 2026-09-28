@@ -13,6 +13,7 @@ created_at: 2026-09-28T14:14:42.799Z
 变更：2026-09-28-knowledge-touch-live
 状态：active
 摘要：默认场景
+待复核：2026-09-28-fr-review-batch
 场景正文：
 - 场景：默认场景 — Given 上限 相关模块就绪；When backend assets.py：knowledge_touch 并入实时命中——查本变更 inject 行的 matched_anchors（file#sl；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-28-knowledge-touch-live/requirements.md#FR-01
@@ -113,3 +114,141 @@ created_at: 2026-09-28T14:14:42.799Z
 - 场景：默认场景 — Given 系统就绪；When tsc/eslint/ruff/mypy 0；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-28-knowledge-touch-live/requirements.md#FR-09
 最近确认：2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
+
+## FR-auto-frontend-105 PageHeader 组件左侧内容列有 min-w-0，flex 收缩可用，超长标题/副标题不再撑破
+变更：2026-09-28-change-detail-header-overflow
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 组件 相关模块就绪；When PageHeader 组件左侧内容列有 min-w-0，flex 收缩可用，超长标题/副标题不再撑破头部宽度；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-detail-header-overflow/requirements.md#FR-01
+最近确认：389282de4db4ae033db1905cd02834f70d14ba1b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-detail-header-overflow:flow:FR-01
+  tests: frontend/src/components/layout/__tests__/page-header.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-detail-header-overflow
+  status: active
+
+## FR-auto-frontend-106 详情页头部描述行在 1600/1280 宽度下有省略号截断，document.scrollWidth
+变更：2026-09-28-change-detail-header-overflow
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 详情页头部描述行在 1600/1280 宽度下有省略号截断，document.scrollWidth 等于视口宽（无横向滚动）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-detail-header-overflow/requirements.md#FR-02
+最近确认：389282de4db4ae033db1905cd02834f70d14ba1b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-detail-header-overflow:flow:FR-02
+  tests: frontend/src/components/layout/__tests__/page-header.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-detail-header-overflow
+  status: active
+
+## FR-auto-frontend-107 详情页标题超长时也能截断（flex 行内 truncate 项补 min-w-0）
+变更：2026-09-28-change-detail-header-overflow
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 详情页标题超长时也能截断（flex 行内 truncate 项补 min-w-0）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-detail-header-overflow/requirements.md#FR-03
+最近确认：389282de4db4ae033db1905cd02834f70d14ba1b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-detail-header-overflow:flow:FR-03
+  tests: frontend/src/components/layout/__tests__/page-header.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-detail-header-overflow
+  status: active
+
+## FR-auto-frontend-108 相关前端测试与 tsc 通过
+变更：2026-09-28-change-detail-header-overflow
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 前端 / 测试 相关模块就绪；When 相关前端测试与 tsc 通过；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-detail-header-overflow/requirements.md#FR-04
+最近确认：389282de4db4ae033db1905cd02834f70d14ba1b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-detail-header-overflow:flow:FR-04
+  tests: __tests__/page-restore-assets.test.ts | frontend/src/components/layout/__tests__/page-header.test.ts | page-last-signal.test.ts | page-team-toggle.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-detail-header-overflow
+  status: active
+
+## FR-auto-frontend-109 263 条待复核条目逐条产出裁决：相符翻正（candidate 行 confirm 翻 active
+变更：2026-09-28-fr-review-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 263 条待复核条目逐条产出裁决：相符翻正（candidate 行 confirm 翻 active，无行；Then bind 真实测试）/ 绑定过时重绑 / 内容过时最小修正 / 特性已死标 superseded+退役理由 / 无测试面清标记留档报告
+全文：.sillyspec/changes/archive/2026-09-28-fr-review-batch/requirements.md#FR-01
+最近确认：bccffba0b0d15714673700b5743c33378eff8c06
+
+## FR-auto-frontend-110 每条翻正的证据路径必须是盘上真实测试形态文件（test_*.py / *.test.*），不许悬空路
+变更：2026-09-28-fr-review-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 每条翻正的证据路径必须是盘上真实测试形态文件（test_*.py / *.test.*），不许悬空路径；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-fr-review-batch/requirements.md#FR-02
+最近确认：bccffba0b0d15714673700b5743c33378eff8c06
+
+## FR-auto-frontend-111 复核完成的条目清除「待复核：」标记行，未复核的不动
+变更：2026-09-28-fr-review-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 复核完成的条目清除「待复核：」标记行，未复核的不动；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-fr-review-batch/requirements.md#FR-03
+最近确认：bccffba0b0d15714673700b5743c33378eff8c06
+
+## FR-auto-frontend-112 fr 文件条目格式不被破坏（标题/状态/场景正文/绑定子块结构保持）
+变更：2026-09-28-fr-review-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When fr 文件条目格式不被破坏（标题/状态/场景正文/绑定子块结构保持）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-fr-review-batch/requirements.md#FR-04
+最近确认：bccffba0b0d15714673700b5743c33378eff8c06
+
+## FR-auto-frontend-113 sillyspec knowledge validate 无 errors
+变更：2026-09-28-fr-review-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When sillyspec knowledge validate 无 errors；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-fr-review-batch/requirements.md#FR-05
+最近确认：bccffba0b0d15714673700b5743c33378eff8c06
+
+## FR-auto-frontend-114 分批（按域分波）处理，每波显式 pathspec 提交
+变更：2026-09-28-fr-review-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 分批（按域分波）处理，每波显式 pathspec 提交；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-fr-review-batch/requirements.md#FR-06
+最近确认：bccffba0b0d15714673700b5743c33378eff8c06

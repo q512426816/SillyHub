@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-fr-review-batch",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "冻结件 change.patch 混入 7 个业务代码文件 diff，与「纯知识库复核、无业务代码改动」定性冲突，并连带在 auto-frontend 伪域留下本变更名下的悬空待复核标记",
+      "evidence": "change.patch 的 11 个 diff 中前 7 个为 backend/app/modules/change/assets.py、backend/app/modules/change/tests/test_assets.py、frontend/.../changes/[cid]/page.tsx、change-assets-card.tsx(+test)、page-header.tsx(+test) 等业务代码，内容特征精确匹配并行变更 2026-09-28-knowledge-touch-live 的 FR（assets.py knowledge_touch 并入实时命中等）；系 flow done 冻结工作区未提交差异时把并行改动一并冻入（任务简报所述「冻结面仅变更目录工件」与实际不符）。同一机理下 flow done 按文件路径投票在伪域 auto-frontend.md:16 打上「待复核：2026-09-28-fr-review-batch」，该域不在九域复核范围，标记未被处理，成为本变更名下的悬空复核债务。九域 fr 交付本体未受污染（patch 内无 knowledge/fr 文件 diff）。",
+      "location": ".sillyspec/changes/2026-09-28-fr-review-batch/change.patch:1"
+    },
+    {
+      "severity": "P3",
+      "title": "披露口径「范围外 candidate 存量 123 行未动」数字不可复现",
+      "evidence": "实测 state: candidate 行：九域 107、全目录 127、范围外域仅 20，任何自然口径均得不出 123；范围外域 confirmed_by: agent 行为 0（无越权写入反证），「未动」实质可信，仅披露数字口径失准。",
+      "location": ".sillyspec/changes/2026-09-28-fr-review-batch/requirements.md:49"
+    },
+    {
+      "severity": "P3",
+      "title": "backend.md 尾部 7 条目缺 '## FR-' 标题行（孤儿状态行），无法归因",
+      "evidence": "backend.md 4698/4704/4715/4724/4733/4742/4751 行的「状态：active」无对应 '^## ' 标题行，条目正文（变更/摘要/全文/最近确认）完整，源自存量变更 workspace-spec-root-managed-p0 与 2026-09-20-workspace-member-visibility；backend 全部 agent 绑定行位于前 880 行，尾部区域无本次写入痕迹，倾向存量格式而非本变更破坏，但评审约束禁 git 无法 diff 定论。",
+      "location": ".sillyspec/knowledge/fr/backend.md:4698"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "finding"
+  },
+  "reviewedAt": "2026-09-28T23:20:00+08:00"
+}
