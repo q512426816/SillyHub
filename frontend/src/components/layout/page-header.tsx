@@ -27,7 +27,11 @@ export const PageHeader = React.forwardRef<HTMLElement, PageHeaderProps>(
       className={cn("flex items-center justify-between", className)}
       {...props}
     >
-      <div>
+      {/* 2026-09-28-change-detail-header-overflow：flex 项默认 min-width:auto，
+          其内 nowrap 长文（如详情页描述行）的 min-content 会把本列撑破 header
+          宽度并产生页面级横向滚动（生产实测 1861>1228）——min-w-0 放宽收缩
+          下限，让子级 truncate/w-full 链路生效；正常宽度内容零视觉影响。 */}
+      <div className="min-w-0">
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
       </div>

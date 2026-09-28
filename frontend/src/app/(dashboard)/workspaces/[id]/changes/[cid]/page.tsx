@@ -241,7 +241,10 @@ export default function ChangeDetailPage({ params }: Props) {
       <PageHeader
         title={
           <span className="flex items-center gap-2">
-            <span className="truncate">{change.title ?? change.change_key}</span>
+            {/* 2026-09-28-change-detail-header-overflow：flex 行内 truncate 项
+                补 min-w-0——同为 flex 项 min-width:auto 陷阱，超长标题否则无法
+                收缩截断（列表行同款修复先例 cde844492 ①）。 */}
+            <span className="min-w-0 truncate">{change.title ?? change.change_key}</span>
             {(() => {
               const stage = change.current_stage ?? "draft";
               // 轻量出身标识在归档后存活（2026-09-26-thin-badge-survives-archive
