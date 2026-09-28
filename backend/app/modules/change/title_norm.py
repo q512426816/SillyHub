@@ -12,6 +12,10 @@ design/plan/tasks 各自的中文类型词 + 可选括号英文/说明 + 可选 
 **不得**把裸英文标题（``Proposal`` 等）当模板：parser 既有测试 fixture 用英文 H1
 表达自定义标题，收录会连坐断言（plan 审查备忘）。冒号形式（``提案：xxx``）视为
 作者自定义语义标题，原样保留。
+
+2026-09-28-change-list-description：同文件追加 ``extract_description``——
+变更描述（proposal.md 动机段）的共享提取，供 reparse 与 documents 推送
+两条写路径同源消费（与 title 同居一文件防互相回翻，动机同上）。
 """
 
 from __future__ import annotations
@@ -83,3 +87,71 @@ def normalize_display_title(h1: str | None, change_key: str) -> str:
     if not stripped or TEMPLATE_H1_RE.match(stripped):
         return semantic
     return stripped
+
+
+# ── 变更描述提取（2026-09-28-change-list-description）────────────────────────
+#
+# 列表辨识痛点：title 提取自 proposal H1，CLI 模板 H1 归一化后回退 key 派生名，
+# 变更中心行只剩 change_key 可辨。描述真源在 proposal.md ``## 动机`` 段，两种
+# 真实书写形态都要吃满：
+#
+# - thin 机器稿：``任务原话转写：<--input 原文>``（含内联「成功标准：」段与
+#   MACHINE-DRAFT/AGENT HTML 注释包裹，src/flow-draft.js proposal-motivation 槽）；
+# - 完整流程：agent/人书写的散文动机段（止于下一个 # 标题）。
+
+#: 描述落库上限（与 title 同宽 String(500)；展示侧另有单行截断）。
+DESCRIPTION_MAX_LEN = 500
+
+#: 动机段标题：``## 动机``（容许编号/括号变体 ``## 1. 动机（背景）``）。
+_MOTIVATION_HEADING_RE = re.compile(r"^#{2,3}\s*(?:\d+[.)]\s*)?动机(?:（[^）]*）)?\s*$")
+
+#: 段内列表行（thin 原话的成功标准条目不入描述——首段散文行才是描述）。
+_LIST_LINE_RE = re.compile(r"^\s*(?:[-*+]\s|\d+[.、]\s)")
+
+#: thin 机器稿前缀（CLI flow-draft proposal-motivation 槽字面）。
+_TRANSCRIPT_PREFIX_RE = re.compile(r"^任务原话转写：")
+
+#: 截断锚：首个「成功标准」出现处（thin 原话把 --input 整段转写，标准段不入描述；
+#: 完整流程散文罕见该词，误伤面可忽略）。
+_SUCCESS_CRITERIA_RE = re.compile(r"成功标准\s*[：:]")
+
+
+def extract_description(text: str | None) -> str | None:
+    """proposal.md 全文 → 动机段描述（纯函数，None 安全）。
+
+    规则（保守：任一步无产出 → None，前端零占位）：
+
+    1. 定位 ``## 动机`` 标题行，段内容取到下一个 ``#`` 标题或文件末尾；
+    2. 剥 HTML 注释（MACHINE-DRAFT/AGENT 槽标记）；
+    3. 空行分段，取首个非空段；
+    4. 段内剥列表行（``-`` / ``1.``）——剥后为空则回退保留原段；
+    5. 剥行首 ``任务原话转写：`` 前缀；在首个 ``成功标准：`` 处截断；
+    6. 空白折叠为单行，超 ``DESCRIPTION_MAX_LEN`` 截断。
+    """
+    if not text:
+        return None
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if _MOTIVATION_HEADING_RE.match(line.strip()):
+            start = i + 1
+            break
+    if start is None:
+        return None
+    body: list[str] = []
+    for line in lines[start:]:
+        if line.lstrip().startswith("#"):
+            break
+        body.append(line)
+    cleaned = re.sub(r"<!--.*?-->", " ", "\n".join(body), flags=re.DOTALL)
+    for para in re.split(r"\n\s*\n", cleaned):
+        kept = [ln for ln in para.splitlines() if not _LIST_LINE_RE.match(ln)]
+        candidate = "\n".join(kept) if kept else para
+        candidate = _TRANSCRIPT_PREFIX_RE.sub("", candidate.strip())
+        m = _SUCCESS_CRITERIA_RE.search(candidate)
+        if m:
+            candidate = candidate[: m.start()]
+        candidate = re.sub(r"\s+", " ", candidate).strip()
+        if candidate:
+            return candidate[:DESCRIPTION_MAX_LEN].rstrip() or None
+    return None

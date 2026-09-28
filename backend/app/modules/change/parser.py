@@ -18,7 +18,7 @@ from pathlib import Path
 
 from app.core.logging import get_logger
 from app.core.spec_paths import SpecPathResolver
-from app.modules.change.title_norm import normalize_display_title
+from app.modules.change.title_norm import extract_description, normalize_display_title
 
 log = get_logger(__name__)
 
@@ -79,6 +79,9 @@ class ParseWarning:
 class ParsedChange:
     change_key: str
     title: str | None = None
+    # 2026-09-28-change-list-description：proposal.md 动机段提取的一行描述
+    # （title_norm.extract_description 共享规则，与 title 同写路径同源）。
+    description: str | None = None
     status: str = "draft"
     location: str = "active"
     path: str = ""
@@ -231,6 +234,17 @@ class ChangeParser:
         return True
 
     @staticmethod
+    def _read_proposal(change_dir: Path) -> str | None:
+        """proposal.md 全文（None：缺失/不可读）——title/description 提取共读一源。"""
+        proposal = change_dir / SpecPathResolver.PROPOSAL
+        if not proposal.is_file():
+            return None
+        try:
+            return proposal.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+
+    @staticmethod
     def _extract_title(change_dir: Path) -> str | None:
         """Return the first ``# `` heading in proposal.md, or None.
 
@@ -239,16 +253,13 @@ class ChangeParser:
         ——模板 H1 回退 key 派生名），本函数保持裸 H1 提取语义；两写路径
         （reparse / documents 推送重派生）共用同一归一化，防互相回翻。
         """
-        proposal = change_dir / SpecPathResolver.PROPOSAL
-        if not proposal.is_file():
+        text = ChangeParser._read_proposal(change_dir)
+        if text is None:
             return None
-        try:
-            for line in proposal.read_text(encoding="utf-8", errors="replace").splitlines():
-                stripped = line.strip()
-                if stripped.startswith("# "):
-                    return stripped[2:].strip() or None
-        except OSError:
-            return None
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("# "):
+                return stripped[2:].strip() or None
         return None
 
     @staticmethod
@@ -676,6 +687,9 @@ class ChangeParser:
         # P2a：归一化让 reparse 与 platform_sync 的 documents 推送重派生同源
         # （模板 H1 无语义 → key 去日期前缀），两写路径不互相回翻。
         parsed.title = normalize_display_title(self._extract_title(change_dir), change_key)
+        # 2026-09-28-change-list-description：描述与 title 同读一源、同归一化模块
+        # （动机段 → 一行文本），reparse 与 documents 推送不互相回翻。
+        parsed.description = extract_description(self._read_proposal(change_dir))
 
         # Scan standard documents using SpecPathResolver constants
         for doc_type, filename in STANDARD_FILENAMES.items():

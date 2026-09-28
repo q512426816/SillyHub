@@ -1161,7 +1161,7 @@ export default function MobileChangesPage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSearchClick();
               }}
-              placeholder="搜索 Key / 标题 / 组件…"
+              placeholder="搜索 Key / 标题 / 描述 / 组件…"
               aria-label="搜索变更"
               data-testid="m-changes-search-input"
               className="min-h-[44px] min-w-0 flex-1 rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50"

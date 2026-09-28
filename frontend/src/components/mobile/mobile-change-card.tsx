@@ -219,6 +219,14 @@ export function MobileChangeCard({ change, onClick }: MobileChangeCardProps) {
             {formatRelativeTime(change.updated_at)}
           </span>
         </span>
+        {/* 变更描述（2026-09-28-change-list-description，对齐桌面列表描述行）：
+            proposal 动机段提取的一行文本——title 归一化后常回退 key 派生名，描述
+            补足辨识信息。无描述（旧行/无动机段）零占位；移动无 hover 不加 title。 */}
+        {change.description && (
+          <span className="block truncate text-xs text-muted-foreground">
+            {change.description}
+          </span>
+        )}
         {/* 阶段徽标（ChangeStepBadge：stage 主行 + step 摘要副行）+ 待办徽标 + 活动徽标 */}
         <span className="flex flex-wrap items-center gap-2">
           <ChangeStepBadge

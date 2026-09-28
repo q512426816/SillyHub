@@ -13867,6 +13867,8 @@ export interface components {
             change_key: string;
             /** Title */
             title: string | null;
+            /** Description */
+            description?: string | null;
             /** Status */
             status: string;
             /** Location */
@@ -13978,6 +13980,8 @@ export interface components {
             change_key: string;
             /** Title */
             title: string | null;
+            /** Description */
+            description?: string | null;
             /** Status */
             status: string;
             /** Location */

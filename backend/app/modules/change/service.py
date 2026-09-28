@@ -189,7 +189,7 @@ class ChangeService:
     ) -> tuple[list[Change], int]:
         """List changes for a workspace, with pagination + search (ql-20260701-005).
 
-        ``search`` ILIKE-matches change_key or title. Returns ``(items, total)``
+        ``search`` ILIKE-matches change_key / title / description. Returns ``(items, total)``
         where total is the count **before** pagination (matching admin/roles 分页
         查询模式).
 
@@ -253,10 +253,13 @@ class ChangeService:
             base = base.where(col(Change.current_stage) == current_stage)
         if search:
             pattern = f"%{search}%"
+            # 2026-09-28-change-list-description：description 入搜索面——title 归一化
+            # 后常回退 key 派生名，「按变更内容找变更」此前只能命中 key。
             base = base.where(
                 or_(
                     col(Change.change_key).ilike(pattern),
                     col(Change.title).ilike(pattern),
+                    col(Change.description).ilike(pattern),
                 )
             )
         if pending_keys is not None:
@@ -2736,6 +2739,7 @@ class ChangeService:
             workspace_id=workspace_id,
             change_key=parsed.change_key,
             title=parsed.title,
+            description=parsed.description,
             status=parsed.status,
             location=parsed.location,
             path=parsed.path,
@@ -2757,6 +2761,9 @@ class ChangeService:
         workspace_id: uuid.UUID,
     ) -> None:
         row.title = parsed.title
+        # 2026-09-28-change-list-description：文件是权威源（proposal.md 动机段），
+        # 与 title 同口径整体覆盖——动机段被删/清空时描述随 None。
+        row.description = parsed.description
         # change_type: only overwrite when DB value is None (protect user-set values)
         if row.change_type is None and parsed.change_type is not None:
             row.change_type = parsed.change_type

@@ -535,6 +535,18 @@ export default function ChangesPage({ params }: Props) {
             <StateLabel variant="attention">轻量</StateLabel>
           )}
           {renderTodoBadge(c)}
+          {/* 2026-09-28-change-list-description：变更描述行（proposal 动机段提取，
+              后端回填）——title 归一化后常回退 key 派生名，此前行内只剩 change_key
+              可辨。basis-full 让描述独占 flex-wrap 一行；truncate 单行截断，悬浮
+              title 看全文；无描述（旧行/无动机段）零占位。 */}
+          {c.description && (
+            <span
+              title={c.description}
+              className="basis-full truncate text-xs font-normal text-muted-foreground"
+            >
+              {c.description}
+            </span>
+          )}
         </>
       }
       meta={
@@ -765,7 +777,7 @@ export default function ChangesPage({ params }: Props) {
           <Input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="搜索 Key / 标题 / 组件…"
+            placeholder="搜索 Key / 标题 / 描述 / 组件…"
             allowClear
             onPressEnter={() => handleSearchClick()}
             className="w-64"

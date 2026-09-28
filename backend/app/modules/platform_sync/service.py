@@ -1161,7 +1161,11 @@ class PlatformSyncService:
         if workspace_id is None:
             return
         from app.modules.change.model import Change
-        from app.modules.change.title_norm import extract_h1, normalize_display_title
+        from app.modules.change.title_norm import (
+            extract_description,
+            extract_h1,
+            normalize_display_title,
+        )
 
         try:
             async with self._session.begin_nested():
@@ -1202,6 +1206,12 @@ class PlatformSyncService:
                         if h1 is not None:
                             break
                 row.title = normalize_display_title(h1, name)
+                # 2026-09-28-change-list-description：描述只在 proposal.md 随本次推送
+                # 在场时重派生（与 parser 同源 title_norm.extract_description，reparse
+                # 不回翻）；部分推送（仅深阶段文档）不动既有描述——best-effort 只补不改。
+                proposal_content = documents.get("proposal.md")
+                if proposal_content:
+                    row.description = extract_description(proposal_content)
                 await self._session.flush()
         except IntegrityError:
             await self._session.rollback()

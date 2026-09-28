@@ -334,3 +334,171 @@ async def test_sync_docs_cleans_stale_master_rows(db_session) -> None:
         .all()
     )
     assert remaining == [], "存量 MASTER 占位脏行应被 seen_keys 删除环清理"
+
+
+# ── description 提取（2026-09-28-change-list-description）─────────────────────
+# 列表辨识痛点：title 提取自 proposal H1，模板 H1 归一化后回退 key 派生名——
+# 变更中心行只剩 change_key 可辨。描述真源在 proposal.md `## 动机` 段
+# （thin 机器稿=「任务原话转写：<--input>」、完整流程=agent 散文），本组测试
+# 锚定共享提取纯函数 + 两条写路径同源 + 搜索命中。
+
+
+class TestExtractDescription:
+    """纯函数：proposal.md 全文 → 动机段描述。"""
+
+    def test_thin_machine_shape(self) -> None:
+        """thin 机器稿形态：注释包裹 + 任务原话转写前缀 + 内联成功标准截断 + 列表行剥除。"""
+        from app.modules.change.title_norm import extract_description
+
+        text = (
+            "---\nauthor: flow-machine-draft\n---\n"
+            "# 提案书（Proposal）— 2026-09-28-x\n\n"
+            "## 动机\n"
+            "<!-- MACHINE-DRAFT:proposal-motivation:abc:begin 机器预填段 -->\n"
+            "任务原话转写：修复近期 CI 全线失败（backend/frontend/daemon/e2e 四 workflow 红）：\n"
+            "- backend-ci 6 用例稳定失败\n"
+            "- frontend-ci 4 用例稳定失败\n"
+            "\n"
+            "成功标准：\n"
+            "- 上列失败用例根因定位并修复\n"
+            "<!-- MACHINE-DRAFT:proposal-motivation:end -->\n"
+            "\n"
+            "## 变更范围\n机器段。\n"
+        )
+        assert (
+            extract_description(text)
+            == "修复近期 CI 全线失败（backend/frontend/daemon/e2e 四 workflow 红）："
+        )
+
+    def test_fullflow_prose_shape(self) -> None:
+        """完整流程形态：散文动机段，止于下一个 ## 标题。"""
+        from app.modules.change.title_norm import extract_description
+
+        text = (
+            "# Proposal: demo\n\n## 动机\n\n"
+            "SillyHub 平台管理的每个 Workspace 应有独立的\nspec 文档目录，而非堆积在自身仓库。\n\n"
+            "当前问题：\n1. 表有模型 0 行数据\n\n"
+            "## 关键问题\n- 如题\n"
+        )
+        assert (
+            extract_description(text)
+            == "SillyHub 平台管理的每个 Workspace 应有独立的 spec 文档目录，而非堆积在自身仓库。"
+        )
+
+    def test_no_motivation_section_returns_none(self) -> None:
+        from app.modules.change.title_norm import extract_description
+
+        assert extract_description("# 提案书（Proposal）\n\n直接正文。\n") is None
+        assert extract_description("") is None
+        assert extract_description(None) is None
+
+    def test_empty_after_strip_returns_none(self) -> None:
+        """动机段只有注释/空行 → None（前端零占位）。"""
+        from app.modules.change.title_norm import extract_description
+
+        text = "## 动机\n<!-- AGENT:槽1 -->\n\n## 变更范围\n"
+        assert extract_description(text) is None
+
+    def test_list_only_paragraph_fallback_kept(self) -> None:
+        """段内剥列表后为空 → 回退保留原段（不静默丢整段）。"""
+        from app.modules.change.title_norm import extract_description
+
+        text = "## 动机\n- 第一条动机\n- 第二条动机\n\n## 变更范围\n"
+        assert extract_description(text) == "- 第一条动机 - 第二条动机"
+
+    def test_truncate_500(self) -> None:
+        from app.modules.change.title_norm import DESCRIPTION_MAX_LEN, extract_description
+
+        text = f"## 动机\n{'字' * 600}\n"
+        out = extract_description(text)
+        assert out is not None and len(out) == DESCRIPTION_MAX_LEN
+
+
+class TestParserDescription:
+    """parser 集成：reparse 路径提取 description（与 title 同源不互翻）。"""
+
+    def test_proposal_motivation_parsed(self, tmp_path: Path) -> None:
+        key = "2026-09-28-desc-thin"
+        _write_change_dir(tmp_path, key, "提案书（Proposal）", master=False)
+        (tmp_path / ".sillyspec" / "changes" / key / "proposal.md").write_text(
+            "# 提案书（Proposal）\n\n## 动机\n任务原话转写：登录页移动端白屏修复。\n\n成功标准：\n- 白屏消失\n",
+            encoding="utf-8",
+        )
+        parsed = _parse_one(tmp_path, key)
+        assert parsed.description == "登录页移动端白屏修复。"
+
+    def test_no_proposal_yields_none(self, tmp_path: Path) -> None:
+        key = "2026-09-28-desc-none"
+        _write_change_dir(tmp_path, key, None, master=False)
+        parsed = _parse_one(tmp_path, key)
+        assert parsed.description is None
+
+
+class TestUpsertDocumentsDescription:
+    """documents 推送路径：description 重派生（与 title 同一 best-effort 语义）。"""
+
+    async def test_push_with_motivation_sets_description(self, db_session) -> None:
+        ws_id = await _make_workspace(db_session)
+        name = "2026-09-28-doc-desc"
+        docs = dict(_TEMPLATE_DOCS)
+        docs["proposal.md"] = (
+            "# 提案书（Proposal）\n\n## 动机\n登录页在移动端偶发白屏，用户反馈强烈。\n\n## 变更范围\n"
+        )
+        await _push_documents(db_session, ws_id, name, docs)
+        row = await _get_change(db_session, ws_id, name)
+        assert row is not None
+        assert row.description == "登录页在移动端偶发白屏，用户反馈强烈。"
+
+    async def test_partial_push_without_proposal_keeps_description(self, db_session) -> None:
+        """迟到部分推送（仅 design.md）不动既有 description。"""
+        from app.modules.change.model import Change
+
+        ws_id = await _make_workspace(db_session)
+        name = "2026-09-28-doc-partial"
+        db_session.add(
+            Change(
+                id=uuid.uuid4(),
+                workspace_id=ws_id,
+                change_key=name,
+                title=name,
+                description="既有描述不该被部分推送清掉",
+                status="draft",
+                location="active",
+                path=f"changes/{name}",
+                updated_at=datetime.now(UTC),
+            )
+        )
+        await db_session.commit()
+        await _push_documents(db_session, ws_id, name, {"design.md": "# 设计文档（Design）\n"})
+        row = await _get_change(db_session, ws_id, name)
+        assert row.description == "既有描述不该被部分推送清掉"
+
+
+class TestListSearchHitsDescription:
+    """列表搜索 ILIKE 扩列：change_key/title 之外的 description 命中。"""
+
+    async def test_search_by_description(self, db_session) -> None:
+        from app.modules.change.model import Change
+        from app.modules.change.service import ChangeService
+
+        ws_id = await _make_workspace(db_session)
+        name = "2026-09-28-search-desc"
+        db_session.add(
+            Change(
+                id=uuid.uuid4(),
+                workspace_id=ws_id,
+                change_key=name,
+                title=name,
+                description="登录页在移动端偶发白屏",
+                status="draft",
+                location="active",
+                path=f"changes/{name}",
+                updated_at=datetime.now(UTC),
+            )
+        )
+        await db_session.commit()
+        items, total = await ChangeService(db_session).list_(
+            ws_id, location="active", search="偶发白屏"
+        )
+        assert total == 1
+        assert items[0].change_key == name

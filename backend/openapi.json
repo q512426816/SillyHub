@@ -39883,6 +39883,17 @@
             ],
             "title": "Title"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -40195,6 +40206,17 @@
               }
             ],
             "title": "Title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "status": {
             "type": "string",

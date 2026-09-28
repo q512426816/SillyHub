@@ -158,6 +158,11 @@ class Change(BaseModel, table=True):
     )
     change_key: str = Field(sa_column=Column(String(200), nullable=False))
     title: str | None = Field(default=None, sa_column=Column(String(500), nullable=True))
+    # 2026-09-28-change-list-description：变更描述（proposal.md 动机段提取，
+    # title_norm.extract_description 共享规则）——title 归一化后常回退 key 派生名，
+    # 列表辨识只能靠 key；描述补足「这个变更是干什么的」一行文本。可空：无动机段
+    # 的变更/旧数据为 None，前端零占位。
+    description: str | None = Field(default=None, sa_column=Column(String(500), nullable=True))
     status: str = Field(
         default="draft", sa_column=Column(String(30), nullable=False, default="draft")
     )

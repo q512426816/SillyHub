@@ -42,6 +42,9 @@ def _make_parsed(
     MagicMock 默认属性返回 mock 对象与 datetime 比较抛 TypeError，None 短路守卫。"""
     parsed = MagicMock()
     parsed.title = "Demo Parsed"
+    # 2026-09-28-change-list-description：description 显式 None——_apply_parsed 现落
+    # 此字段，隐式 MagicMock 属性会被 sqlite 绑定拒绝（同 last_modified_at 守卫理由）。
+    parsed.description = None
     parsed.status = "active"
     parsed.change_type = "feature"
     parsed.affected_components = []

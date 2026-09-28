@@ -74,6 +74,9 @@ class ChangeRead(BaseModel):
     workspace_id: uuid.UUID
     change_key: str
     title: str | None
+    # 2026-09-28-change-list-description：proposal.md 动机段提取的一行描述（表列，
+    # reparse/推送回填）。optional None（brownfield 安全，旧客户端不读不受影响）。
+    description: str | None = None
     status: str
     location: str
     path: str
@@ -111,6 +114,9 @@ class ChangeSummary(BaseModel):
     id: uuid.UUID
     change_key: str
     title: str | None
+    # 2026-09-28-change-list-description：列表行描述（同 ChangeRead.description）。
+    # optional None：无动机段/旧行零占位（前端不渲染该行）。
+    description: str | None = None
     status: str
     location: str
     change_type: str | None

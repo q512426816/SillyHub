@@ -312,12 +312,35 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
       );
       // 搜索框回显
       expect(
-        (screen.getByPlaceholderText("搜索 Key / 标题 / 组件…") as HTMLInputElement)
+        (screen.getByPlaceholderText("搜索 Key / 标题 / 描述 / 组件…") as HTMLInputElement)
           .value,
       ).toBe("2026-08-16-change-center-quick-tab");
     } finally {
       mocks.searchParams = new URLSearchParams();
     }
+  });
+
+  // ── 2026-09-28-change-list-description：列表行描述展示 ─────────────────
+
+  it("变更行渲染描述（悬浮全文可读），无描述行零占位", async () => {
+    setupListChanges({
+      items: [
+        makeChange({ description: "登录页在移动端偶发白屏，用户反馈强烈。" }),
+        makeChange({
+          id: "ch-2",
+          change_key: "no-desc-change",
+          title: null,
+          description: null,
+        }),
+      ],
+      total: 2,
+    });
+    await renderAndWait();
+    // 有描述：行内渲染，title 悬浮承载全文（truncate 单行截断）
+    const desc = screen.getByTitle("登录页在移动端偶发白屏，用户反馈强烈。");
+    expect(desc).toHaveTextContent("登录页在移动端偶发白屏");
+    // 无描述：不渲染空占位；该行标题降级 change_key（链接行 + meta 行各一处）
+    expect(screen.getAllByText("no-desc-change").length).toBeGreaterThan(0);
   });
 
   it("tab 计数 pill 显示（tabTotals 独立 query 拉，不被聚焦污染）", async () => {
