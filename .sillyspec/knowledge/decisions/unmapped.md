@@ -1304,3 +1304,10 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：e31d0e07bd259252cdced59554fba8de5bec566a
 理由：最大风险：daemon 超时修复依赖「waitForSpawn 轮询 mock.calls」的既有 helper 语义，若未来 spawn 前路径再加真实 IO，waitForSpawn 本身仍稳（真实时间预算轮询）；但**同文件多轮 runLease** 的用例若忘传 minCalls 会复发第二轮丢事件——已在 helper docblock 写死该死锁链与用法。 放弃的方案：①给 applyClaudeSettings 打 mock 挡 unlink——放弃，撤下语义是有意产品行为，mock 会掩盖真实 IO 时序；②e2e 改用平台 admin 身份绕过菜单权限——放弃，N4 负向断言依赖非 admin 形态，且冒烟角色语义就是普通成员。 残留风险：e2e N2/N3 本机无 Docker 全栈未实证（e2e-ci 验证）；304eba982 冲掉 fed6e9e9a 的模式提示并行会话基于旧基线提交会回退他人已合入改动——本仓库已知协作形态，非本次可根治。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：change-list-description
+锚点：未记录
+最近确认：581ee6412672d6db110f6f0ec6e3114278bef231
+理由：最大风险：提取规则对动机段书写形态的覆盖面——动机段可能只有列表、可能含「成功标准」字样在散文中、可能空段。对策：规则保守（无动机段/剥后为空 → None，前端零占位），500 字符截断防长文破版，纯函数加一组形态回归测试（thin 机器稿/完整流程散文/列表首段/无动机段/空前缀）。 放弃的方案：① CLI 侧给 thin proposal 起语义 H1——只惠及未来 thin，存量与完整流程不受益，且机器自动起标题质量不可控；② 前端行内直接拉 proposal 文档渲染——列表页多一轮文档请求、且 search 仍搜不到，不解决「找」的本痛点。

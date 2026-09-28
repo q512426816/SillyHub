@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "change": "change-list-description",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01 绑定高估：reparse 侧落库无 DB 级断言（仅 parser 级提取）",
+      "evidence": "绑定写「TestUpsertDocumentsDescription（列落库经两写路径断言）」，但该类只锚推送路径落库；reparse 侧仅 TestParserDescription 断言 parsed.description（parser 级），_build_change/_apply_parsed 把非空 description 持久化到 DB 行无直接断言（test_reparse_guard fixture 只设 description=None 防 TypeError）。实现本身在场（service.py:2739/2761 赋值行），属测试绑定措辞与实际覆盖面不符，非功能缺失。",
+      "location": "backend/app/modules/change/tests/test_title_normalization.py:306 (TestUpsertDocumentsDescription); backend/app/modules/change/service.py:2761 (_apply_parsed)"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-03 绑定措辞错位：list_ 返回 ORM Change 行而非 ChangeSummary DTO，DTO 序列化无断言",
+      "evidence": "ChangeService.list_ 签名返回 tuple[list[Change], int]（ORM 行），TestListSearchHitsDescription 断言的是 ORM 行字段；ChangeSummary/ChangeRead 的 description 透出（schema.py:125/135，from_attributes 透传）无任何测试直接断言。透传字段无行为分支、openapi.json 再生成已提交且 gen:types:check CI 守门，风险低——绑定把 ORM 行读说成「summary 行经 list_ 读取」是措辞高估。",
+      "location": "backend/app/modules/change/service.py:189 (list_ 签名); backend/app/modules/change/schema.py:114-116 (ChangeSummary.description)"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-06 移动侧描述渲染无行为断言，绑定以「41P 全绿」充当覆盖",
+      "evidence": "patch 未触及任何移动端测试文件；description 字段为本变更新引入，既有 m/.../changes 41P 不可能断言新行为——「MobileChangeCard 经页面测试 41P 全绿渲染」只证明无回归，不证明描述行渲染/零占位被测。桌面侧「零占位」断言也偏弱：只断 getAllByText(\"no-desc-change\")>0（key 降级本就渲染），未断言无占位元素（结构上条件渲染 {c.description && ...} 保证成立）。实现本体在场（mobile-change-card.tsx 条件渲染、page.tsx 条件渲染）。",
+      "location": "frontend/src/components/mobile/mobile-change-card.tsx:688; frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx:590-609"
+    },
+    {
+      "severity": "P3",
+      "title": "patch 夹带 FR 范围外两处测试修改（CI 债清理）",
+      "evidence": "sillyhub-daemon/tests/task-runner-lease-cancel-idempotent.test.tsx 新增 claude-settings mock、frontend session-fork-lineage.test.tsx 改关闭按钮期望——两处与本变更八条 FR 无关，注释自证为 2026-09-28 CI 修复。不构成数据正确性风险，但进入本 change 冻结提交面属范围卫生问题（追责/回滚粒度混杂）。",
+      "location": "sillyhub-daemon/tests/task-runner-lease-cancel-idempotent.test.tsx:25-33; frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx:484-489"
+    },
+    {
+      "severity": "P3",
+      "title": "推送路径空串 proposal 语义与设计措辞偏差：description 保留旧值而 title 重置",
+      "evidence": "design 盲维1 说「仅在 proposal.md 在场时重派生」，代码用真值判断 if proposal_content:（空串视为缺席）——proposal.md 被清空推送时 description 保留旧值，而同事务 title 无条件 normalize_display_title(None, name) 重置为 key 派生名，两列口径不对称且偏离「文件权威源」声明。触发面极窄（空串推送），reparse 全量重解析可纠正。",
+      "location": "backend/app/modules/platform_sync/service.py:1212-1214"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——边界已裁决：可接受。①推送缺席 proposal.md 不动现值：代码 if proposal_content 守卫＋test_partial_push_without_proposal_keeps_description 锚定，与 title best-effort 语义一致；②reparse 时文件缺失写 None 清空：显式声明的文件权威源口径，与 title 同款（_apply_parsed 同样无条件覆写 title），可接受。残留 P3：空串推送的措辞偏差（finding 5）。",
+    "并发": "ok——边界已裁决：可接受。两路径各在事务内 upsert：推送侧 begin_nested + IntegrityError 回滚静默（service.py:1216-1223，race-lost 日志范式），ux_changes_workspace_key 唯一约束实在（model.py:140）；reparse/推送同消费 title_norm.extract_description 单一纯函数，无互翻窗口（互翻风险只存在于两路径不同源时，此处同源）。",
+    "切换": "ok——边界已裁决：可接受。中断事务整体回滚（begin_nested + rollback），description 与事务内其它写同生死；已删行不被推送重派生的 GAP-1 防复活守卫真实存在且生效（既有行 location=='deleted' 提前 return + 行缺失时 _change_key_deleted 双形态守卫，platform_sync/service.py:1180-1188）——防护声明核实为真。",
+    "作用域": "ok——边界已裁决：可接受。推送查询恒带 workspace_id+change_key 双过滤（platform_sync/service.py:1174-1177）；list_ 按入参 workspace 过滤；description 按 (workspace_id, change_key) 行存储，extract_description 纯函数无全局态，无跨工作区串台面。"
+  },
+  "reviewedAt": "2026-09-28T13:53:53+08:00"
+}

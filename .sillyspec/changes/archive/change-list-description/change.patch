@@ -1,0 +1,929 @@
+diff --git a/.sillyspec/changes/change-list-description/tasks.md b/.sillyspec/changes/change-list-description/tasks.md
+new file mode 100644
+index 000000000..e6f97e519
+--- /dev/null
++++ b/.sillyspec/changes/change-list-description/tasks.md
+@@ -0,0 +1,18 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T05:26:25.187Z
++---
++# 任务注册表（Tasks）— change-list-description
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: 提取规则共享纯函数 `title_norm.extract_description`（动机段→剥注释/「任务原话转写：」前缀→首个非空段→段内列表行剥除→「成功标准」截断→500 上限），形态回归 6 例（thin 机器稿/完整流程散文/无动机段/全空/纯列表回退/截断）
++- [x] task-02: `changes.description` 可空列（model + 迁移 20260928140000，offline SQL 渲染验证 `ALTER TABLE changes ADD COLUMN description VARCHAR(500)`）
++- [x] task-03: reparse 写路径接入（`_read_proposal` 单源共读，`ParsedChange.description` → `_build_change`/`_apply_parsed` 持久化；test_reparse_guard MagicMock fixture 补 description=None 显式属性）
++- [x] task-04: documents 推送写路径接入（proposal.md 在场才重派生，部分推送不动既有描述——不互翻测试锚定）
++- [x] task-05: ChangeSummary/ChangeRead 带 description（optional None，brownfield 安全）；列表搜索 ILIKE 扩列命中 description（service 层测试：按描述词命中且不计错行）
++- [x] task-06: 变更中心列表行展示描述——桌面 IssueRow 标题块 basis-full 单行 truncate + 悬浮全文、移动 MobileChangeCard 描述行（无 hover 不加 title），无描述零占位（桌面 page.test 断言两态）；双端搜索 placeholder 提及描述
++- [x] task-07: 相关测试全绿——backend test_title_normalization 28P + change/platform_sync 模块 886P（1 失败系 fixture 债已清偿复跑绿）+ reparse_guard 13P；frontend 桌面 132P + 移动 41P + tsc 0 错 + eslint 0 错（2 warning 为预存债非本变更文件行）
++- [x] task-08: `pnpm gen:types` 再生成 api-types.ts（ChangeSummary/ChangeRead 含 description）+ openapi.json 随变更提交；provider-caps 再生成零内容差异不入提交面
+diff --git a/backend/app/modules/change/model.py b/backend/app/modules/change/model.py
+index 67463f725..71b0af803 100644
+--- a/backend/app/modules/change/model.py
++++ b/backend/app/modules/change/model.py
+@@ -158,6 +158,11 @@ class Change(BaseModel, table=True):
+     )
+     change_key: str = Field(sa_column=Column(String(200), nullable=False))
+     title: str | None = Field(default=None, sa_column=Column(String(500), nullable=True))
++    # 2026-09-28-change-list-description：变更描述（proposal.md 动机段提取，
++    # title_norm.extract_description 共享规则）——title 归一化后常回退 key 派生名，
++    # 列表辨识只能靠 key；描述补足「这个变更是干什么的」一行文本。可空：无动机段
++    # 的变更/旧数据为 None，前端零占位。
++    description: str | None = Field(default=None, sa_column=Column(String(500), nullable=True))
+     status: str = Field(
+         default="draft", sa_column=Column(String(30), nullable=False, default="draft")
+     )
+diff --git a/backend/app/modules/change/parser.py b/backend/app/modules/change/parser.py
+index fd0b3db63..ecfbf0501 100644
+--- a/backend/app/modules/change/parser.py
++++ b/backend/app/modules/change/parser.py
+@@ -18,7 +18,7 @@ from pathlib import Path
+ 
+ from app.core.logging import get_logger
+ from app.core.spec_paths import SpecPathResolver
+-from app.modules.change.title_norm import normalize_display_title
++from app.modules.change.title_norm import extract_description, normalize_display_title
+ 
+ log = get_logger(__name__)
+ 
+@@ -79,6 +79,9 @@ class ParseWarning:
+ class ParsedChange:
+     change_key: str
+     title: str | None = None
++    # 2026-09-28-change-list-description：proposal.md 动机段提取的一行描述
++    # （title_norm.extract_description 共享规则，与 title 同写路径同源）。
++    description: str | None = None
+     status: str = "draft"
+     location: str = "active"
+     path: str = ""
+@@ -230,6 +233,17 @@ class ChangeParser:
+             return False
+         return True
+ 
++    @staticmethod
++    def _read_proposal(change_dir: Path) -> str | None:
++        """proposal.md 全文（None：缺失/不可读）——title/description 提取共读一源。"""
++        proposal = change_dir / SpecPathResolver.PROPOSAL
++        if not proposal.is_file():
++            return None
++        try:
++            return proposal.read_text(encoding="utf-8", errors="replace")
++        except OSError:
++            return None
++
+     @staticmethod
+     def _extract_title(change_dir: Path) -> str | None:
+         """Return the first ``# `` heading in proposal.md, or None.
+@@ -239,16 +253,13 @@ class ChangeParser:
+         ——模板 H1 回退 key 派生名），本函数保持裸 H1 提取语义；两写路径
+         （reparse / documents 推送重派生）共用同一归一化，防互相回翻。
+         """
+-        proposal = change_dir / SpecPathResolver.PROPOSAL
+-        if not proposal.is_file():
+-            return None
+-        try:
+-            for line in proposal.read_text(encoding="utf-8", errors="replace").splitlines():
+-                stripped = line.strip()
+-                if stripped.startswith("# "):
+-                    return stripped[2:].strip() or None
+-        except OSError:
++        text = ChangeParser._read_proposal(change_dir)
++        if text is None:
+             return None
++        for line in text.splitlines():
++            stripped = line.strip()
++            if stripped.startswith("# "):
++                return stripped[2:].strip() or None
+         return None
+ 
+     @staticmethod
+@@ -676,6 +687,9 @@ class ChangeParser:
+         # P2a：归一化让 reparse 与 platform_sync 的 documents 推送重派生同源
+         # （模板 H1 无语义 → key 去日期前缀），两写路径不互相回翻。
+         parsed.title = normalize_display_title(self._extract_title(change_dir), change_key)
++        # 2026-09-28-change-list-description：描述与 title 同读一源、同归一化模块
++        # （动机段 → 一行文本），reparse 与 documents 推送不互相回翻。
++        parsed.description = extract_description(self._read_proposal(change_dir))
+ 
+         # Scan standard documents using SpecPathResolver constants
+         for doc_type, filename in STANDARD_FILENAMES.items():
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index 5406e053a..208aec46c 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -74,6 +74,9 @@ class ChangeRead(BaseModel):
+     workspace_id: uuid.UUID
+     change_key: str
+     title: str | None
++    # 2026-09-28-change-list-description：proposal.md 动机段提取的一行描述（表列，
++    # reparse/推送回填）。optional None（brownfield 安全，旧客户端不读不受影响）。
++    description: str | None = None
+     status: str
+     location: str
+     path: str
+@@ -111,6 +114,9 @@ class ChangeSummary(BaseModel):
+     id: uuid.UUID
+     change_key: str
+     title: str | None
++    # 2026-09-28-change-list-description：列表行描述（同 ChangeRead.description）。
++    # optional None：无动机段/旧行零占位（前端不渲染该行）。
++    description: str | None = None
+     status: str
+     location: str
+     change_type: str | None
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index b222eec92..c27f470ef 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -189,7 +189,7 @@ class ChangeService:
+     ) -> tuple[list[Change], int]:
+         """List changes for a workspace, with pagination + search (ql-20260701-005).
+ 
+-        ``search`` ILIKE-matches change_key or title. Returns ``(items, total)``
++        ``search`` ILIKE-matches change_key / title / description. Returns ``(items, total)``
+         where total is the count **before** pagination (matching admin/roles 分页
+         查询模式).
+ 
+@@ -253,10 +253,13 @@ class ChangeService:
+             base = base.where(col(Change.current_stage) == current_stage)
+         if search:
+             pattern = f"%{search}%"
++            # 2026-09-28-change-list-description：description 入搜索面——title 归一化
++            # 后常回退 key 派生名，「按变更内容找变更」此前只能命中 key。
+             base = base.where(
+                 or_(
+                     col(Change.change_key).ilike(pattern),
+                     col(Change.title).ilike(pattern),
++                    col(Change.description).ilike(pattern),
+                 )
+             )
+         if pending_keys is not None:
+@@ -2736,6 +2739,7 @@ class ChangeService:
+             workspace_id=workspace_id,
+             change_key=parsed.change_key,
+             title=parsed.title,
++            description=parsed.description,
+             status=parsed.status,
+             location=parsed.location,
+             path=parsed.path,
+@@ -2757,6 +2761,9 @@ class ChangeService:
+         workspace_id: uuid.UUID,
+     ) -> None:
+         row.title = parsed.title
++        # 2026-09-28-change-list-description：文件是权威源（proposal.md 动机段），
++        # 与 title 同口径整体覆盖——动机段被删/清空时描述随 None。
++        row.description = parsed.description
+         # change_type: only overwrite when DB value is None (protect user-set values)
+         if row.change_type is None and parsed.change_type is not None:
+             row.change_type = parsed.change_type
+diff --git a/backend/app/modules/change/tests/test_reparse_guard.py b/backend/app/modules/change/tests/test_reparse_guard.py
+index 49d1147f0..58349c3ea 100644
+--- a/backend/app/modules/change/tests/test_reparse_guard.py
++++ b/backend/app/modules/change/tests/test_reparse_guard.py
+@@ -42,6 +42,9 @@ def _make_parsed(
+     MagicMock 默认属性返回 mock 对象与 datetime 比较抛 TypeError，None 短路守卫。"""
+     parsed = MagicMock()
+     parsed.title = "Demo Parsed"
++    # 2026-09-28-change-list-description：description 显式 None——_apply_parsed 现落
++    # 此字段，隐式 MagicMock 属性会被 sqlite 绑定拒绝（同 last_modified_at 守卫理由）。
++    parsed.description = None
+     parsed.status = "active"
+     parsed.change_type = "feature"
+     parsed.affected_components = []
+diff --git a/backend/app/modules/change/tests/test_title_normalization.py b/backend/app/modules/change/tests/test_title_normalization.py
+index 9e76ff4af..5d412185e 100644
+--- a/backend/app/modules/change/tests/test_title_normalization.py
++++ b/backend/app/modules/change/tests/test_title_normalization.py
+@@ -334,3 +334,171 @@ async def test_sync_docs_cleans_stale_master_rows(db_session) -> None:
+         .all()
+     )
+     assert remaining == [], "存量 MASTER 占位脏行应被 seen_keys 删除环清理"
++
++
++# ── description 提取（2026-09-28-change-list-description）─────────────────────
++# 列表辨识痛点：title 提取自 proposal H1，模板 H1 归一化后回退 key 派生名——
++# 变更中心行只剩 change_key 可辨。描述真源在 proposal.md `## 动机` 段
++# （thin 机器稿=「任务原话转写：<--input>」、完整流程=agent 散文），本组测试
++# 锚定共享提取纯函数 + 两条写路径同源 + 搜索命中。
++
++
++class TestExtractDescription:
++    """纯函数：proposal.md 全文 → 动机段描述。"""
++
++    def test_thin_machine_shape(self) -> None:
++        """thin 机器稿形态：注释包裹 + 任务原话转写前缀 + 内联成功标准截断 + 列表行剥除。"""
++        from app.modules.change.title_norm import extract_description
++
++        text = (
++            "---\nauthor: flow-machine-draft\n---\n"
++            "# 提案书（Proposal）— 2026-09-28-x\n\n"
++            "## 动机\n"
++            "<!-- MACHINE-DRAFT:proposal-motivation:abc:begin 机器预填段 -->\n"
++            "任务原话转写：修复近期 CI 全线失败（backend/frontend/daemon/e2e 四 workflow 红）：\n"
++            "- backend-ci 6 用例稳定失败\n"
++            "- frontend-ci 4 用例稳定失败\n"
++            "\n"
++            "成功标准：\n"
++            "- 上列失败用例根因定位并修复\n"
++            "<!-- MACHINE-DRAFT:proposal-motivation:end -->\n"
++            "\n"
++            "## 变更范围\n机器段。\n"
++        )
++        assert (
++            extract_description(text)
++            == "修复近期 CI 全线失败（backend/frontend/daemon/e2e 四 workflow 红）："
++        )
++
++    def test_fullflow_prose_shape(self) -> None:
++        """完整流程形态：散文动机段，止于下一个 ## 标题。"""
++        from app.modules.change.title_norm import extract_description
++
++        text = (
++            "# Proposal: demo\n\n## 动机\n\n"
++            "SillyHub 平台管理的每个 Workspace 应有独立的\nspec 文档目录，而非堆积在自身仓库。\n\n"
++            "当前问题：\n1. 表有模型 0 行数据\n\n"
++            "## 关键问题\n- 如题\n"
++        )
++        assert (
++            extract_description(text)
++            == "SillyHub 平台管理的每个 Workspace 应有独立的 spec 文档目录，而非堆积在自身仓库。"
++        )
++
++    def test_no_motivation_section_returns_none(self) -> None:
++        from app.modules.change.title_norm import extract_description
++
++        assert extract_description("# 提案书（Proposal）\n\n直接正文。\n") is None
++        assert extract_description("") is None
++        assert extract_description(None) is None
++
++    def test_empty_after_strip_returns_none(self) -> None:
++        """动机段只有注释/空行 → None（前端零占位）。"""
++        from app.modules.change.title_norm import extract_description
++
++        text = "## 动机\n<!-- AGENT:槽1 -->\n\n## 变更范围\n"
++        assert extract_description(text) is None
++
++    def test_list_only_paragraph_fallback_kept(self) -> None:
++        """段内剥列表后为空 → 回退保留原段（不静默丢整段）。"""
++        from app.modules.change.title_norm import extract_description
++
++        text = "## 动机\n- 第一条动机\n- 第二条动机\n\n## 变更范围\n"
++        assert extract_description(text) == "- 第一条动机 - 第二条动机"
++
++    def test_truncate_500(self) -> None:
++        from app.modules.change.title_norm import DESCRIPTION_MAX_LEN, extract_description
++
++        text = f"## 动机\n{'字' * 600}\n"
++        out = extract_description(text)
++        assert out is not None and len(out) == DESCRIPTION_MAX_LEN
++
++
++class TestParserDescription:
++    """parser 集成：reparse 路径提取 description（与 title 同源不互翻）。"""
++
++    def test_proposal_motivation_parsed(self, tmp_path: Path) -> None:
++        key = "2026-09-28-desc-thin"
++        _write_change_dir(tmp_path, key, "提案书（Proposal）", master=False)
++        (tmp_path / ".sillyspec" / "changes" / key / "proposal.md").write_text(
++            "# 提案书（Proposal）\n\n## 动机\n任务原话转写：登录页移动端白屏修复。\n\n成功标准：\n- 白屏消失\n",
++            encoding="utf-8",
++        )
++        parsed = _parse_one(tmp_path, key)
++        assert parsed.description == "登录页移动端白屏修复。"
++
++    def test_no_proposal_yields_none(self, tmp_path: Path) -> None:
++        key = "2026-09-28-desc-none"
++        _write_change_dir(tmp_path, key, None, master=False)
++        parsed = _parse_one(tmp_path, key)
++        assert parsed.description is None
++
++
++class TestUpsertDocumentsDescription:
++    """documents 推送路径：description 重派生（与 title 同一 best-effort 语义）。"""
++
++    async def test_push_with_motivation_sets_description(self, db_session) -> None:
++        ws_id = await _make_workspace(db_session)
++        name = "2026-09-28-doc-desc"
++        docs = dict(_TEMPLATE_DOCS)
++        docs["proposal.md"] = (
++            "# 提案书（Proposal）\n\n## 动机\n登录页在移动端偶发白屏，用户反馈强烈。\n\n## 变更范围\n"
++        )
++        await _push_documents(db_session, ws_id, name, docs)
++        row = await _get_change(db_session, ws_id, name)
++        assert row is not None
++        assert row.description == "登录页在移动端偶发白屏，用户反馈强烈。"
++
++    async def test_partial_push_without_proposal_keeps_description(self, db_session) -> None:
++        """迟到部分推送（仅 design.md）不动既有 description。"""
++        from app.modules.change.model import Change
++
++        ws_id = await _make_workspace(db_session)
++        name = "2026-09-28-doc-partial"
++        db_session.add(
++            Change(
++                id=uuid.uuid4(),
++                workspace_id=ws_id,
++                change_key=name,
++                title=name,
++                description="既有描述不该被部分推送清掉",
++                status="draft",
++                location="active",
++                path=f"changes/{name}",
++                updated_at=datetime.now(UTC),
++            )
++        )
++        await db_session.commit()
++        await _push_documents(db_session, ws_id, name, {"design.md": "# 设计文档（Design）\n"})
++        row = await _get_change(db_session, ws_id, name)
++        assert row.description == "既有描述不该被部分推送清掉"
++
++
++class TestListSearchHitsDescription:
++    """列表搜索 ILIKE 扩列：change_key/title 之外的 description 命中。"""
++
++    async def test_search_by_description(self, db_session) -> None:
++        from app.modules.change.model import Change
++        from app.modules.change.service import ChangeService
++
++        ws_id = await _make_workspace(db_session)
++        name = "2026-09-28-search-desc"
++        db_session.add(
++            Change(
++                id=uuid.uuid4(),
++                workspace_id=ws_id,
++                change_key=name,
++                title=name,
++                description="登录页在移动端偶发白屏",
++                status="draft",
++                location="active",
++                path=f"changes/{name}",
++                updated_at=datetime.now(UTC),
++            )
++        )
++        await db_session.commit()
++        items, total = await ChangeService(db_session).list_(
++            ws_id, location="active", search="偶发白屏"
++        )
++        assert total == 1
++        assert items[0].change_key == name
+diff --git a/backend/app/modules/change/title_norm.py b/backend/app/modules/change/title_norm.py
+index 08b391b99..4fdb23890 100644
+--- a/backend/app/modules/change/title_norm.py
++++ b/backend/app/modules/change/title_norm.py
+@@ -12,6 +12,10 @@ design/plan/tasks 各自的中文类型词 + 可选括号英文/说明 + 可选
+ **不得**把裸英文标题（``Proposal`` 等）当模板：parser 既有测试 fixture 用英文 H1
+ 表达自定义标题，收录会连坐断言（plan 审查备忘）。冒号形式（``提案：xxx``）视为
+ 作者自定义语义标题，原样保留。
++
++2026-09-28-change-list-description：同文件追加 ``extract_description``——
++变更描述（proposal.md 动机段）的共享提取，供 reparse 与 documents 推送
++两条写路径同源消费（与 title 同居一文件防互相回翻，动机同上）。
+ """
+ 
+ from __future__ import annotations
+@@ -83,3 +87,71 @@ def normalize_display_title(h1: str | None, change_key: str) -> str:
+     if not stripped or TEMPLATE_H1_RE.match(stripped):
+         return semantic
+     return stripped
++
++
++# ── 变更描述提取（2026-09-28-change-list-description）────────────────────────
++#
++# 列表辨识痛点：title 提取自 proposal H1，CLI 模板 H1 归一化后回退 key 派生名，
++# 变更中心行只剩 change_key 可辨。描述真源在 proposal.md ``## 动机`` 段，两种
++# 真实书写形态都要吃满：
++#
++# - thin 机器稿：``任务原话转写：<--input 原文>``（含内联「成功标准：」段与
++#   MACHINE-DRAFT/AGENT HTML 注释包裹，src/flow-draft.js proposal-motivation 槽）；
++# - 完整流程：agent/人书写的散文动机段（止于下一个 # 标题）。
++
++#: 描述落库上限（与 title 同宽 String(500)；展示侧另有单行截断）。
++DESCRIPTION_MAX_LEN = 500
++
++#: 动机段标题：``## 动机``（容许编号/括号变体 ``## 1. 动机（背景）``）。
++_MOTIVATION_HEADING_RE = re.compile(r"^#{2,3}\s*(?:\d+[.)]\s*)?动机(?:（[^）]*）)?\s*$")
++
++#: 段内列表行（thin 原话的成功标准条目不入描述——首段散文行才是描述）。
++_LIST_LINE_RE = re.compile(r"^\s*(?:[-*+]\s|\d+[.、]\s)")
++
++#: thin 机器稿前缀（CLI flow-draft proposal-motivation 槽字面）。
++_TRANSCRIPT_PREFIX_RE = re.compile(r"^任务原话转写：")
++
++#: 截断锚：首个「成功标准」出现处（thin 原话把 --input 整段转写，标准段不入描述；
++#: 完整流程散文罕见该词，误伤面可忽略）。
++_SUCCESS_CRITERIA_RE = re.compile(r"成功标准\s*[：:]")
++
++
++def extract_description(text: str | None) -> str | None:
++    """proposal.md 全文 → 动机段描述（纯函数，None 安全）。
++
++    规则（保守：任一步无产出 → None，前端零占位）：
++
++    1. 定位 ``## 动机`` 标题行，段内容取到下一个 ``#`` 标题或文件末尾；
++    2. 剥 HTML 注释（MACHINE-DRAFT/AGENT 槽标记）；
++    3. 空行分段，取首个非空段；
++    4. 段内剥列表行（``-`` / ``1.``）——剥后为空则回退保留原段；
++    5. 剥行首 ``任务原话转写：`` 前缀；在首个 ``成功标准：`` 处截断；
++    6. 空白折叠为单行，超 ``DESCRIPTION_MAX_LEN`` 截断。
++    """
++    if not text:
++        return None
++    lines = text.splitlines()
++    start = None
++    for i, line in enumerate(lines):
++        if _MOTIVATION_HEADING_RE.match(line.strip()):
++            start = i + 1
++            break
++    if start is None:
++        return None
++    body: list[str] = []
++    for line in lines[start:]:
++        if line.lstrip().startswith("#"):
++            break
++        body.append(line)
++    cleaned = re.sub(r"<!--.*?-->", " ", "\n".join(body), flags=re.DOTALL)
++    for para in re.split(r"\n\s*\n", cleaned):
++        kept = [ln for ln in para.splitlines() if not _LIST_LINE_RE.match(ln)]
++        candidate = "\n".join(kept) if kept else para
++        candidate = _TRANSCRIPT_PREFIX_RE.sub("", candidate.strip())
++        m = _SUCCESS_CRITERIA_RE.search(candidate)
++        if m:
++            candidate = candidate[: m.start()]
++        candidate = re.sub(r"\s+", " ", candidate).strip()
++        if candidate:
++            return candidate[:DESCRIPTION_MAX_LEN].rstrip() or None
++    return None
+diff --git a/backend/app/modules/platform_sync/service.py b/backend/app/modules/platform_sync/service.py
+index 47bbaa43a..5b05c4aef 100644
+--- a/backend/app/modules/platform_sync/service.py
++++ b/backend/app/modules/platform_sync/service.py
+@@ -1161,7 +1161,11 @@ class PlatformSyncService:
+         if workspace_id is None:
+             return
+         from app.modules.change.model import Change
+-        from app.modules.change.title_norm import extract_h1, normalize_display_title
++        from app.modules.change.title_norm import (
++            extract_description,
++            extract_h1,
++            normalize_display_title,
++        )
+ 
+         try:
+             async with self._session.begin_nested():
+@@ -1202,6 +1206,12 @@ class PlatformSyncService:
+                         if h1 is not None:
+                             break
+                 row.title = normalize_display_title(h1, name)
++                # 2026-09-28-change-list-description：描述只在 proposal.md 随本次推送
++                # 在场时重派生（与 parser 同源 title_norm.extract_description，reparse
++                # 不回翻）；部分推送（仅深阶段文档）不动既有描述——best-effort 只补不改。
++                proposal_content = documents.get("proposal.md")
++                if proposal_content:
++                    row.description = extract_description(proposal_content)
+                 await self._session.flush()
+         except IntegrityError:
+             await self._session.rollback()
+diff --git a/backend/migrations/versions/20260928140000_add_change_description.py b/backend/migrations/versions/20260928140000_add_change_description.py
+new file mode 100644
+index 000000000..bdbf4f348
+--- /dev/null
++++ b/backend/migrations/versions/20260928140000_add_change_description.py
+@@ -0,0 +1,34 @@
++"""add changes.description (proposal motivation excerpt)
++
++Revision ID: 20260928140000
++Revises: 20260926234000
++Create Date: 2026-09-28 14:00:00.000000
++
++2026-09-28-change-list-description：变更中心列表辨识只能靠 change_key（title
++自 proposal 模板 H1 归一化后回退 key 派生名）。新增 ``changes.description``
++可空列，存 proposal.md 动机段提取的一行描述（reparse 与 documents 推送
++两写路径同源回填；提取规则见 ``title_norm.extract_description``）。
++"""
++
++from __future__ import annotations
++
++from typing import Sequence
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "20260928140000"
++down_revision: str | None = "20260926234000"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++
++def upgrade() -> None:
++    op.add_column(
++        "changes",
++        sa.Column("description", sa.String(length=500), nullable=True),
++    )
++
++
++def downgrade() -> None:
++    op.drop_column("changes", "description")
+diff --git a/backend/openapi.json b/backend/openapi.json
+index df492920e..011c9701a 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -39883,6 +39883,17 @@
+             ],
+             "title": "Title"
+           },
++          "description": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Description"
++          },
+           "status": {
+             "type": "string",
+             "title": "Status"
+@@ -40196,6 +40207,17 @@
+             ],
+             "title": "Title"
+           },
++          "description": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Description"
++          },
+           "status": {
+             "type": "string",
+             "title": "Status"
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+index c73b57afc..bdc2e9082 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -312,7 +312,7 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+       );
+       // 搜索框回显
+       expect(
+-        (screen.getByPlaceholderText("搜索 Key / 标题 / 组件…") as HTMLInputElement)
++        (screen.getByPlaceholderText("搜索 Key / 标题 / 描述 / 组件…") as HTMLInputElement)
+           .value,
+       ).toBe("2026-08-16-change-center-quick-tab");
+     } finally {
+@@ -320,6 +320,29 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     }
+   });
+ 
++  // ── 2026-09-28-change-list-description：列表行描述展示 ─────────────────
++
++  it("变更行渲染描述（悬浮全文可读），无描述行零占位", async () => {
++    setupListChanges({
++      items: [
++        makeChange({ description: "登录页在移动端偶发白屏，用户反馈强烈。" }),
++        makeChange({
++          id: "ch-2",
++          change_key: "no-desc-change",
++          title: null,
++          description: null,
++        }),
++      ],
++      total: 2,
++    });
++    await renderAndWait();
++    // 有描述：行内渲染，title 悬浮承载全文（truncate 单行截断）
++    const desc = screen.getByTitle("登录页在移动端偶发白屏，用户反馈强烈。");
++    expect(desc).toHaveTextContent("登录页在移动端偶发白屏");
++    // 无描述：不渲染空占位；该行标题降级 change_key（链接行 + meta 行各一处）
++    expect(screen.getAllByText("no-desc-change").length).toBeGreaterThan(0);
++  });
++
+   it("tab 计数 pill 显示（tabTotals 独立 query 拉，不被聚焦污染）", async () => {
+     setupListChanges({ activeTotal: 5, archiveTotal: 3 });
+     await renderAndWait();
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index b40ec041d..ecb917855 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -535,6 +535,18 @@ export default function ChangesPage({ params }: Props) {
+             <StateLabel variant="attention">轻量</StateLabel>
+           )}
+           {renderTodoBadge(c)}
++          {/* 2026-09-28-change-list-description：变更描述行（proposal 动机段提取，
++              后端回填）——title 归一化后常回退 key 派生名，此前行内只剩 change_key
++              可辨。basis-full 让描述独占 flex-wrap 一行；truncate 单行截断，悬浮
++              title 看全文；无描述（旧行/无动机段）零占位。 */}
++          {c.description && (
++            <span
++              title={c.description}
++              className="basis-full truncate text-xs font-normal text-muted-foreground"
++            >
++              {c.description}
++            </span>
++          )}
+         </>
+       }
+       meta={
+@@ -765,7 +777,7 @@ export default function ChangesPage({ params }: Props) {
+           <Input
+             value={searchInput}
+             onChange={(e) => setSearchInput(e.target.value)}
+-            placeholder="搜索 Key / 标题 / 组件…"
++            placeholder="搜索 Key / 标题 / 描述 / 组件…"
+             allowClear
+             onPressEnter={() => handleSearchClick()}
+             className="w-64"
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/page.tsx b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+index 2e19b4fa6..07e13c6d4 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+@@ -1161,7 +1161,7 @@ export default function MobileChangesPage() {
+               onKeyDown={(e) => {
+                 if (e.key === "Enter") handleSearchClick();
+               }}
+-              placeholder="搜索 Key / 标题 / 组件…"
++              placeholder="搜索 Key / 标题 / 描述 / 组件…"
+               aria-label="搜索变更"
+               data-testid="m-changes-search-input"
+               className="min-h-[44px] min-w-0 flex-1 rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50"
+diff --git a/frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx b/frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx
+index 304cc9991..6a527da10 100644
+--- a/frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx
+@@ -481,7 +481,12 @@ describe("WorkerSessionOverlay 标题参数化", () => {
+     );
+     expect(screen.getByRole("dialog", { name: "分身会话" })).toBeInTheDocument();
+     expect(screen.queryByTestId("overlay-status-hint")).toBeNull();
+-    expect(screen.getByRole("button", { name: "返回主控" })).toBeInTheDocument();
++    // 关闭按钮缺省保分身既有形态：可见文本「返回主控」+ aria-label「关闭分身
++    // 会话」（2026-09-28 CI 修复恢复 task-14 原形态——task-08 泛化时缺省值两处
++    // 误统一为「返回主控」，与「零回归」注释矛盾，session-panel-team 两用例钉
++    // aria-label 旧值）。
++    const closeBtn = screen.getByRole("button", { name: "关闭分身会话" });
++    expect(closeBtn).toHaveTextContent("返回主控");
+     expect(screen.getByTestId("overlay-session-panel")).toHaveAttribute(
+       "data-session-id",
+       "sub-12345678",
+diff --git a/frontend/src/components/mobile/mobile-change-card.tsx b/frontend/src/components/mobile/mobile-change-card.tsx
+index f5f1043b3..b3154f805 100644
+--- a/frontend/src/components/mobile/mobile-change-card.tsx
++++ b/frontend/src/components/mobile/mobile-change-card.tsx
+@@ -219,6 +219,14 @@ export function MobileChangeCard({ change, onClick }: MobileChangeCardProps) {
+             {formatRelativeTime(change.updated_at)}
+           </span>
+         </span>
++        {/* 变更描述（2026-09-28-change-list-description，对齐桌面列表描述行）：
++            proposal 动机段提取的一行文本——title 归一化后常回退 key 派生名，描述
++            补足辨识信息。无描述（旧行/无动机段）零占位；移动无 hover 不加 title。 */}
++        {change.description && (
++          <span className="block truncate text-xs text-muted-foreground">
++            {change.description}
++          </span>
++        )}
+         {/* 阶段徽标（ChangeStepBadge：stage 主行 + step 摘要副行）+ 待办徽标 + 活动徽标 */}
+         <span className="flex flex-wrap items-center gap-2">
+           <ChangeStepBadge
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 70878ec24..3b9d7bdba 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -13867,6 +13867,8 @@ export interface components {
+             change_key: string;
+             /** Title */
+             title: string | null;
++            /** Description */
++            description?: string | null;
+             /** Status */
+             status: string;
+             /** Location */
+@@ -13978,6 +13980,8 @@ export interface components {
+             change_key: string;
+             /** Title */
+             title: string | null;
++            /** Description */
++            description?: string | null;
+             /** Status */
+             status: string;
+             /** Location */
+diff --git a/sillyhub-daemon/tests/task-runner-lease-cancel-idempotent.test.ts b/sillyhub-daemon/tests/task-runner-lease-cancel-idempotent.test.ts
+index 2ec294109..319aebafc 100644
+--- a/sillyhub-daemon/tests/task-runner-lease-cancel-idempotent.test.ts
++++ b/sillyhub-daemon/tests/task-runner-lease-cancel-idempotent.test.ts
+@@ -22,6 +22,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+ vi.mock('../src/skill-manager.js', () => ({
+   linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })),
+ }));
++// 26e362d61（applyClaudeSettings 空对象改真实 unlink 撤下语义）后 spawn 前多
++// 一次真实 fs 调用——本文件 fake timers（vi.useFakeTimers）下 fs 线程池回调不
++// 被推进，waitForSpawnAndListener 的 advanceTimers 循环在慢盘上等不到 spawn →
++// cancel 时 child 未 spawn → kill 未调（CI 2026-09-28 首挂 / Windows 本地 R-06
++// 两用例同根族翻车）。本文件被测面是 cancel→kill 链，settings 撤下是无关副作用，
++// 按上文 skill-manager 同款先例（2026-07-08 ql-20260710）mock 掉消除真实 IO。
++vi.mock('../src/claude-settings.js', () => ({
++  applyClaudeSettings: vi.fn(async () => undefined),
++}));
+ 
+ let mockAdapter: Record<string, unknown> = {};
+diff --git a/.sillyspec/changes/change-list-description/design.md b/.sillyspec/changes/change-list-description/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/change-list-description/design.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T05:26:25.187Z
++---
++# 设计记录（Design Record）— change-list-description
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change change-list-description 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++数据已在场、缺的是搬运与展示：proposal.md `## 动机` 段两种真实形态（thin 机器稿=「任务原话转写：<--input 原文>」、完整流程=agent 书写散文）都含可读描述，平台只取了 H1 当 title（模板 H1 归一化后回退 key 派生名）。
++方案：title_norm.py 新增共享纯函数 `extract_description(text)`（动机段首个非空段落→剥 HTML 注释→剥「任务原话转写：」前缀→在首个「成功标准」处截断→段内列表行剥除→空白折叠→截 500），两条写路径（change parser reparse / platform_sync documents 推送）同源消费写入 `changes.description` 新列（String(500) 可空，alembic 迁移），ChangeSummary/ChangeRead 透出，列表搜索 ILIKE 加命中该列，前端变更中心（桌面+移动）行内在标题下渲染单行截断描述（悬浮全文，无描述零占位）。
++不选 CLI 侧改模板 H1：只覆盖未来 thin 变更、存量与完整流程变更不受益，且自动起语义标题易碎；平台侧一次覆盖两类变更与存量（reparse/推送即回填）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change change-list-description 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++- `title_norm.extract_description(text: str | None) -> str | None`（新共享纯函数，与 extract_h1/normalize_display_title 同居）。
++- `changes` 表新增列 `description VARCHAR(500) NULL`（迁移 20260928140000，down_revision=20260926234000）。
++- `ParsedChange.description: str | None`（新字段）；`ChangeService._build_change/_apply_parsed` 持久化。
++- `platform_sync._sync_change_title_from_documents` 同步重派生 description（proposal.md 推送内容）。
++- DTO：`ChangeRead.description: str | None = None`、`ChangeSummary.description: str | None = None`（optional，brownfield 安全）——OpenAPI 变更，前端 `pnpm gen:types` 再生成 api-types.ts。
++- `GET /changes` 搜索：ILIKE 范围由 change_key/title 扩为 change_key/title/description（查询参数签名不变）。
++- 前端：变更中心列表行（桌面 changes/page.tsx + 移动 m/.../changes/page.tsx）标题块新增描述行；搜索框 placeholder 提及描述。无其它端点/命令变更。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change change-list-description 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到到达：documents 推送只带部分四件套（无 proposal.md）→ extract_description(None) 返回 None，行保持现值不被清空？否——本设计推送路径仅在 proposal.md 在场时重派生，缺席不动现值（与 title 的 best-effort 语义一致：迟到推送只补不改不删）；reparse 时 proposal.md 缺失 → parsed.description=None，_apply_parsed 会写 None（清空）——接受：文件是权威源，文件没了描述随没，与 title 同口径。
++2. 并发写：reparse 与 documents 推送并发同 key——两路径各在事务内 upsert，撞 ux_changes_workspace_key 唯一约束回滚静默（既有 _ensure_change_row race-lost 范式）；description 与 title 同源同函数，不存在互翻窗口。
++3. 切换/生命周期：中断的 reparse/推送事务整体回滚，description 与该事务其它写同生死；已删行（location='deleted'）不被推送路径重派生（GAP-1 防复活守卫复用，title 同款）。
++4. 作用域：description 按 (workspace_id, change_key) 行存储，查询恒带 workspace 过滤，不跨工作区串台；提取函数纯函数无全局态。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change change-list-description 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：提取规则对动机段书写形态的覆盖面——动机段可能只有列表、可能含「成功标准」字样在散文中、可能空段。对策：规则保守（无动机段/剥后为空 → None，前端零占位），500 字符截断防长文破版，纯函数加一组形态回归测试（thin 机器稿/完整流程散文/列表首段/无动机段/空前缀）。
++放弃的方案：① CLI 侧给 thin proposal 起语义 H1——只惠及未来 thin，存量与完整流程不受益，且机器自动起标题质量不可控；② 前端行内直接拉 proposal 文档渲染——列表页多一轮文档请求、且 search 仍搜不到，不解决「找」的本痛点。
+
+diff --git a/.sillyspec/changes/change-list-description/proposal.md b/.sillyspec/changes/change-list-description/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/change-list-description/proposal.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T05:26:25.186Z
++---
++# 提案书（Proposal）— change-list-description
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:d553101bf4ac809d34b170be8b13528c6569ba4e85e9d8daee68dcef5fa1d8a1:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change change-list-description 留痕重锚 -->
++任务原话转写：变更中心列表（进行中/已归档）里普通变更与轻量变更两类行都只能靠 change_key 辨识——title 提取自 proposal 模板 H1 会被归一化回退 key 派生名，动机描述没进列表也没进搜索，变更多了找目标只能逐个点开。让平台从 proposal.md 动机段提取变更描述入库并在列表展示、搜索可命中。
++成功标准：
++- Change 表新增 description 可空列（alembic 迁移），reparse 与文档推送两条写路径同源提取不互翻
++- 提取规则：proposal.md 动机段首个非空段落，剥机器注释与「任务原话转写：」前缀、截到「成功标准」行前，最长 500 字符
++- ChangeSummary/ChangeRead 带 description；列表搜索 ILIKE 同时命中 change_key/title/description
++- 变更中心列表（桌面与移动）行内展示描述（单行截断、悬浮全文），无描述行零占位
++- 相关 backend pytest 与 frontend 测试通过；api-types 由 pnpm gen:types 再生成并随变更提交
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:8e86e7db21c977e10e69588409d4f8c42151e01d0a2d93fcf4b1db20b37026fe:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change change-list-description 留痕重锚 -->
++按成功标准机械推导，共 8 条验收面：
++1. Change 表新增 description 可空列（alembic 迁移），reparse 与文档推送两条写路径同源提取不互翻
++2. 提取规则：proposal.md 动机段首个非空段落，剥机器注释与「任务原话转写：」前缀、截到「成功标准」行前，最长 500 字符
++3. ChangeSummary
++4. ChangeRead 带 description
++5. 列表搜索 ILIKE 同时命中 change_key/title/description
++6. 变更中心列表（桌面与移动）行内展示描述（单行截断、悬浮全文），无描述行零占位
++7. 相关 backend pytest 与 frontend 测试通过
++8. api-types 由 pnpm gen:types 再生成并随变更提交
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:d840c31f0118603b8d72a8881cbe8ed287a02ddbf06970e79b62816a9e521321:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change change-list-description 留痕重锚 -->
++1. Change 表新增 description 可空列（alembic 迁移），reparse 与文档推送两条写路径同源提取不互翻
++2. 提取规则：proposal.md 动机段首个非空段落，剥机器注释与「任务原话转写：」前缀、截到「成功标准」行前，最长 500 字符
++3. ChangeSummary
++4. ChangeRead 带 description
++5. 列表搜索 ILIKE 同时命中 change_key/title/description
++6. 变更中心列表（桌面与移动）行内展示描述（单行截断、悬浮全文），无描述行零占位
++7. 相关 backend pytest 与 frontend 测试通过
++8. api-types 由 pnpm gen:types 再生成并随变更提交
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/change-list-description/requirements.md b/.sillyspec/changes/change-list-description/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/change-list-description/requirements.md
+@@ -0,0 +1,75 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T05:26:25.187Z
++---
++# 需求规格（Requirements）— change-list-description
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: Change 表新增 description 可空列（alembic 迁移），reparse 与文档
++Given 迁移 相关模块就绪
++When Change 表新增 description 可空列（alembic 迁移），reparse 与文档推送两条写路径同源提取不互翻
++Then 行为符合本条标准描述
++
++### FR-02: 提取规则：proposal.md 动机段首个非空段落，剥机器注释与「任务原话转写：」前缀、截到「成功
++Given 系统就绪
++When 提取规
++Then ：proposal.md 动机段首个非空段落，剥机器注释与「任务原话转写：」前缀、截到「成功标准」行前，最长 500 字符
++
++### FR-03: ChangeSummary
++Given 系统就绪
++When ChangeSummary
++Then 行为符合本条标准描述
++
++### FR-04: ChangeRead 带 description
++Given 系统就绪
++When ChangeRead 带 description
++Then 行为符合本条标准描述
++
++### FR-05: 列表搜索 ILIKE 同时命中 change_key/title/description
++Given 系统就绪
++When 列表搜索 ILIKE 同时命中 change_key/title/description
++Then 行为符合本条标准描述
++
++### FR-06: 变更中心列表（桌面与移动）行内展示描述（单行截断、悬浮全文），无描述行零占位
++Given 系统就绪
++When 变更中心列表（桌面与移动）行内展示描述（单行截断、悬浮全文），无描述行零占位
++Then 行为符合本条标准描述
++
++### FR-07: 相关 backend pytest 与 frontend 测试通过
++Given 测试 相关模块就绪
++When 相关 backend pytest 与 frontend 测试通过
++Then 行为符合本条标准描述
++
++### FR-08: api-types 由 pnpm gen:types 再生成并随变更提交
++Given api 相关模块就绪
++When api-types 由 pnpm gen:types 再生成并随变更提交
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++backend/app/modules/change/tests/test_title_normalization.py :: TestUpsertDocumentsDescription（列落库经两写路径断言）；迁移链 offline SQL 渲染验证（alembic upgrade 20260926234000:20260928140000 --sql）
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++backend/app/modules/change/tests/test_title_normalization.py :: TestExtractDescription（thin 机器形态/完整流程散文/无动机段/全空/纯列表回退/500 截断 6 例）
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++backend/app/modules/change/tests/test_title_normalization.py :: TestListSearchHitsDescription（summary 行经 list_ 读取）＋ TestUpsertDocumentsDescription（行字段回读）
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++不适用：ChangeRead.description 与 ChangeSummary 同源 schema 字段（model_config from_attributes 同一路径），列表侧 TestListSearchHitsDescription 已覆盖读路径；详情端点无独立行为分支
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++backend/app/modules/change/tests/test_title_normalization.py :: TestListSearchHitsDescription :: test_search_by_description（按描述词命中）
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx :: 「变更行渲染描述（悬浮全文可读），无描述行零占位」；移动侧 frontend/src/components/mobile（MobileChangeCard 经 m/workspaces/[id]/changes 页面测试 41P 全绿渲染）
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++backend/app/modules/change/tests/test_title_normalization.py（28P）＋ test_reparse_guard.py（13P）＋ change/platform_sync 模块 886P；frontend 桌面 changes 页 132P＋移动 41P＋tsc/eslint 0
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++
++不适用：生成物工序（api-types.ts/openapi.json 再生成随交 f5269e9fc 提交面），无运行时行为可测；gen:types:check 守门 CI

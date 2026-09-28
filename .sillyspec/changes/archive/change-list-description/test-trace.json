@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "change-list-description",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "change-list-description:flow:FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_title_normalization.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "change-list-description"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "change-list-description:flow:FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_title_normalization.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "change-list-description"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "change-list-description:flow:FR-03",
+      "tests": [
+        "backend/app/modules/change/tests/test_title_normalization.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "change-list-description"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "change-list-description:flow:FR-05",
+      "tests": [
+        "backend/app/modules/change/tests/test_title_normalization.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "change-list-description"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "change-list-description:flow:FR-06",
+      "tests": [
+        "changes/__tests__/page.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "change-list-description"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "change-list-description:flow:FR-07",
+      "tests": [
+        "backend/app/modules/change/tests/test_title_normalization.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "change-list-description"
+    }
+  ]
+}

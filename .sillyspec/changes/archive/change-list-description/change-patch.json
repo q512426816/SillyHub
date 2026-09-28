@@ -1,0 +1,131 @@
+{
+  "change": "change-list-description",
+  "baseline": "75d64045415d9e75820d1f5d4d89ee012208ace0",
+  "head": "581ee6412672d6db110f6f0ec6e3114278bef231",
+  "files": [
+    ".sillyspec/changes/change-list-description/tasks.md",
+    "backend/app/modules/change/model.py",
+    "backend/app/modules/change/parser.py",
+    "backend/app/modules/change/schema.py",
+    "backend/app/modules/change/service.py",
+    "backend/app/modules/change/tests/test_reparse_guard.py",
+    "backend/app/modules/change/tests/test_title_normalization.py",
+    "backend/app/modules/change/title_norm.py",
+    "backend/app/modules/platform_sync/service.py",
+    "backend/migrations/versions/20260928140000_add_change_description.py",
+    "backend/openapi.json",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+    "frontend/src/app/m/workspaces/[id]/changes/page.tsx",
+    "frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx",
+    "frontend/src/components/mobile/mobile-change-card.tsx",
+    "frontend/src/lib/api-types.ts",
+    "sillyhub-daemon/tests/task-runner-lease-cancel-idempotent.test.ts",
+    ".sillyspec/changes/change-list-description/design.md",
+    ".sillyspec/changes/change-list-description/proposal.md",
+    ".sillyspec/changes/change-list-description/requirements.md"
+  ],
+  "totals": {
+    "files": 21,
+    "additions": 612,
+    "deletions": 16
+  },
+  "savedAt": "2026-09-28T05:48:51.771Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 7,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "platform_sync",
+      "files": 1,
+      "doc": "docs/backend/modules/platform_sync.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "migrations",
+      "files": 1,
+      "doc": "docs/backend/modules/migrations.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 10,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 7,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "platform_sync",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/platform_sync.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "97345bd3e0e688ddfe7eab307a2d7e8a7f9b1a5077665c54efe32d667a87750b",
+  "patchStatus": "ok"
+}
