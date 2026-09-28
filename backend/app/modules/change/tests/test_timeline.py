@@ -204,6 +204,52 @@ async def test_timeline_empty_events_still_yields_tasks(db_session, tmp_path: Pa
     assert result.stats.wall_clock_s is None
 
 
+async def test_task_anchor_scoped_to_change_commits(
+    db_session, tmp_path: Path, monkeypatch
+) -> None:
+    """锚定限本变更 commit 事件窗口（2026-09-28-timeline-anchor-scope / 4d84c48d 实证钉）。
+
+    全局 git 窗口含他变更提交（消息同号 task token 且更近）——锚必须取本变更 commit 事件的
+    提交；他变更提交不再抢锚。
+    """
+    spec_root = tmp_path / "spec-root"
+    _seed_change_dir(spec_root)
+    ws = await _make_ws(db_session, spec_root)
+    change = await _make_change(db_session, ws)
+    await _add_event(db_session, ws.id, "2026-09-28T05:02:00Z", "task-done", "checked 0→1")
+    await _add_event(db_session, ws.id, "2026-09-28T05:03:00Z", "commit", "aaa1111")
+    await db_session.commit()
+
+    class _C:
+        def __init__(self, sha: str, short: str, message: str):
+            self.hash, self.short, self.message = sha, short, message
+
+    class _R:
+        def __init__(self, commits):
+            self.commits = commits
+
+    class _S:
+        def __init__(self, session):
+            pass
+
+        async def list_commits(self, *a, **kw):
+            # 倒序形态：他变更提交（bbb2222，两天前，同号 token）排在窗口最前
+            return _R(
+                [
+                    _C("bbb2222full", "bbb2222", "feat: 旧变更（task-01）"),
+                    _C("aaa1111full", "aaa1111", "feat: 本变更（task-01）"),
+                ]
+            )
+
+    monkeypatch.setattr("app.modules.change.timeline.GitLogService", _S)
+    result = await ChangeTimelineQueryService(db_session).get_change_timeline(
+        ws.id, change.id, uuid.uuid4()
+    )
+    anchors = {t.id: t.commit_sha for t in result.tasks}
+    assert anchors["task-01"] == "aaa1111"
+    assert anchors["task-02"] is None  # 本变更 commit 消息不含 task-02 → 无锚而非错锚
+
+
 async def test_timeline_git_degraded_to_hash_only(db_session, tmp_path: Path, monkeypatch) -> None:
     """git 通道降级：list_commits 抛错 → commit_title=None、聚合不炸。"""
     spec_root = tmp_path / "spec-root3"
