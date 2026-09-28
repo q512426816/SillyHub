@@ -1,0 +1,29 @@
+{
+  "change": "2026-09-28-knowledge-gov-ux",
+  "baseline": "5d0197df01aea20721421612c2b497a8ecc38be2",
+  "head": "5d0197df01aea20721421612c2b497a8ecc38be2",
+  "files": [
+    ".sillyspec/changes/2026-09-28-knowledge-gov-ux/design.md",
+    ".sillyspec/changes/2026-09-28-knowledge-gov-ux/proposal.md",
+    ".sillyspec/changes/2026-09-28-knowledge-gov-ux/requirements.md",
+    ".sillyspec/changes/2026-09-28-knowledge-gov-ux/tasks.md"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 203,
+    "deletions": 0
+  },
+  "savedAt": "2026-09-28T06:52:47.491Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "83f053987d26fb9dbaa34ca9c0faac49cf47f41636679718e0eafed87aed4eb4",
+  "patchStatus": "ok"
+}

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-knowledge-gov-ux",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-28-knowledge-gov-ux:flow:FR-01",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/governance-cards.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-knowledge-gov-ux"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-09-28-knowledge-gov-ux:flow:FR-07",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/governance-cards.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-knowledge-gov-ux"
+    }
+  ]
+}

@@ -1097,3 +1097,99 @@ created_at: 2026-09-22T16:33:05.472Z
 - 场景：默认场景 — Given 系统就绪；When eslint 零新增；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-28-turn-nav-empty-hint/requirements.md#FR-07
 最近确认：efcfdb431ec658f274de81ca9028bbee247b6beb
+
+## FR-auto-frontend-073 目标：每个信号用人话说明（这是什么/要不要紧/影响什么），可机械处理的给一键按钮（推荐目标预填 +
+变更：2026-09-28-knowledge-gov-ux
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 目标：每个信号用人话说明（这是什么/要不要紧/影响什么），可机械处理的给一键按钮（推荐目标预填 + 确认弹窗 + 完成反馈），不能一键的（需内容判断的）明说建议；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-gov-ux/requirements.md#FR-01
+最近确认：5d0197df01aea20721421612c2b497a8ecc38be2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-knowledge-gov-ux:flow:FR-01
+  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-knowledge-gov-ux
+  status: active
+
+## FR-auto-frontend-074 动作复用既有 POST /knowledge/governance/actions（redomain
+变更：2026-09-28-knowledge-gov-ux
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 动作复用既有 POST /knowledge/governance/actions（redomain/repair），不加新写通道；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-gov-ux/requirements.md#FR-02
+最近确认：5d0197df01aea20721421612c2b497a8ecc38be2
+
+## FR-auto-frontend-075 伪域各池（auto-sillyhub-daemon/auto-backend/auto-fronte
+变更：2026-09-28-knowledge-gov-ux
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 伪域各池（auto-sillyhub-daemon/auto-backend/auto-frontend/auto-sillyspec）每池一行：人话描述+条数；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-gov-ux/requirements.md#FR-03
+最近确认：5d0197df01aea20721421612c2b497a8ecc38be2
+
+## FR-auto-frontend-076 信号卡标题
+变更：2026-09-28-knowledge-gov-ux
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 信号卡标题；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-gov-ux/requirements.md#FR-04
+最近确认：5d0197df01aea20721421612c2b497a8ecc38be2
+
+## FR-auto-frontend-077 说明全部改为非开发者可懂文案，不再出现 CLI 命令字样
+变更：2026-09-28-knowledge-gov-ux
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 说明全部改为非开发者可懂文案，不再出现 CLI 命令字样；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-gov-ux/requirements.md#FR-05
+最近确认：5d0197df01aea20721421612c2b497a8ecc38be2
+
+## FR-auto-frontend-078 操作成功/失败有明确反馈（结果行/toast + 刷新）
+变更：2026-09-28-knowledge-gov-ux
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 操作成功/失败有明确反馈（结果行/toast + 刷新）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-gov-ux/requirements.md#FR-06
+最近确认：5d0197df01aea20721421612c2b497a8ecc38be2
+
+## FR-auto-frontend-079 既有 governance 前端测试同步更新全绿，tsc
+变更：2026-09-28-knowledge-gov-ux
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 前端 / 测试 相关模块就绪；When 既有 governance 前端测试同步更新全绿，tsc；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-gov-ux/requirements.md#FR-07
+最近确认：5d0197df01aea20721421612c2b497a8ecc38be2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-knowledge-gov-ux:flow:FR-07
+  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-knowledge-gov-ux
+  status: active
+
+## FR-auto-frontend-080 eslint 0 错
+变更：2026-09-28-knowledge-gov-ux
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When eslint 0 错；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-gov-ux/requirements.md#FR-08
+最近确认：5d0197df01aea20721421612c2b497a8ecc38be2

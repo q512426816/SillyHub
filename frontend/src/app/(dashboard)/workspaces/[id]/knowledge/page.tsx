@@ -516,8 +516,10 @@ export default function KnowledgePage({ params }: Props) {
           不依赖知识列表加载态（stats 与列表是两条独立数据链）。 */}
       <OpsDashboard workspaceId={workspaceId} />
 
-      {/* 治理信号卡（2026-09-27-knowledge-governance-cards 三层治理②层）：三类信号
-          （待复核/收件箱/伪域）超阈才见人——安静即健康态；healthy 单行安语带底数。 */}
+      {/* 治理信号卡（2026-09-27-knowledge-governance-cards 三层治理②层）：
+          2026-09-28-knowledge-gov-ux 人话改版——每类信号说清「是什么/要不要紧/
+          怎么处理」，伪域分池一键归位（推荐去向预填 + 确认），判断类（收件箱/
+          rot）明说交给 AI 会话；healthy 单行安语带人话底数。 */}
       <GovernanceCards workspaceId={workspaceId} />
 
       {/* 蒸馏任务条（task-08 / 原型 .distill-bar 位）：无进行中任务时不渲染；

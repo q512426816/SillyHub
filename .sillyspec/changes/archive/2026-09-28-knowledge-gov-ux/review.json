@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-knowledge-gov-ux",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "分池数据靠 detail 字符串解析（前端耦合 backend 拼装格式）",
+      "evidence": "governance-cards.tsx parsePools 正则解析「auto-backend 73、…」——格式由 backend service _add 单点拼装但跨端契约无守护；格式漂移时降级整卡说明不误动作（容错已设计），FR-02 后端零改动保 thin 是有意取舍",
+      "location": "frontend/src/components/knowledge/governance-cards.tsx:52"
+    },
+    {
+      "severity": "P3",
+      "title": "auto-backend/auto-frontend 整池粗归位为粗粒度路由",
+      "evidence": "73/72 条混主题池一键迁入粗域 backend/frontend——dry-run 验证可行且 Popconfirm 文案如实说明只调归属；精分需工具支持分批迁移（已在对话留档为工具缺口）",
+      "location": "frontend/src/components/knowledge/governance-cards.tsx:37"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok",
+    "边界裁决": "design 槽4 三条声明边界均已裁决可接受：①判断类操作不做页面按钮（诚实产品决策）；②detail 解析替代后端结构化字段（thin 边界优先，降级路径在）；③unmapped 无消音按钮（无 CLI 动作支撑不放假按钮）。粗归位语义已在确认弹窗如实披露"
+  },
+  "reviewedAt": "2026-09-28T06:53:01.696472+00:00"
+}
