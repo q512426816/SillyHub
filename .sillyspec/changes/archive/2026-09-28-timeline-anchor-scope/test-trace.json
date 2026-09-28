@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-timeline-anchor-scope",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-28-timeline-anchor-scope:flow:FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_timeline.py「test_task_anchor_scoped_to_change_commits」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-timeline-anchor-scope"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-28-timeline-anchor-scope:flow:FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_timeline.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-timeline-anchor-scope"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-28-timeline-anchor-scope:flow:FR-03",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-timeline-card.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-timeline-anchor-scope"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-28-timeline-anchor-scope:flow:FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_timeline.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-timeline-anchor-scope"
+    }
+  ]
+}

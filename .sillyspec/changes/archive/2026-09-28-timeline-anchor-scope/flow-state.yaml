@@ -1,0 +1,24 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+baseline_commit: 3b9802aa7241bfe95897e38c109d6e67d717164d
+born_face: thin
+edit_ratio: 0
+gate_summary: >-
+  test: passed ← module[]+deps(py1)（6.9s）
+  结果：C:\Users\qinyi\AppData\Local\Temp\sillyspec-gate-P2ysIc\.sillyspec\.runtime\verify-runs\20260928102729\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（46.3s）｜门文件 3 个
+review_force: null
+updatedAt: '2026-09-28T10:48:38.455Z'
+upgrade_reason: verify 实测失败（实测失败：lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+with_tasks: false
+
