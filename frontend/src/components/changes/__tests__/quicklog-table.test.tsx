@@ -310,6 +310,54 @@ describe("QuicklogTable 执行列（task-08 / FR-05 / D-004@v1）", () => {
   });
 });
 
+describe("表格溢出防回归（2026-09-28-quicklog-title-overflow）", () => {
+  it("DataTable 采用 fixed 布局——table 元素 table-layout=fixed", async () => {
+    mocks.listQuicklogEntries.mockResolvedValue({
+      items: [makeEntry()],
+      total: 1,
+    });
+    renderTable();
+    await screen.findByText("修侧栏宽度塌陷");
+    const table = document.querySelector(".ant-table table");
+    expect(table).toBeTruthy();
+    // antd tableLayout="fixed" 以内联样式落到 table 元素（jsdom 内联样式可断言）
+    expect((table as HTMLElement).style.tableLayout).toBe("fixed");
+  });
+
+  it("标题按钮宽度跟随单元格——block w-full min-w-0 类名锚（原 max-w-[420px] 自适应越界）", async () => {
+    mocks.listQuicklogEntries.mockResolvedValue({
+      items: [makeEntry({ title: "P1：stage.wall 误用 SESSION 语义导致门禁误判的超长标题示例文本" })],
+      total: 1,
+    });
+    renderTable();
+    // 表内按钮与筛选区分页按钮同 role——用按钮的 title（=条目标题）精确定位
+    const btn = await screen.findByTitle("P1：stage.wall 误用 SESSION 语义导致门禁误判的超长标题示例文本");
+    expect(btn.tagName).toBe("BUTTON");
+    expect(btn.className).toContain("block");
+    expect(btn.className).toContain("w-full");
+    expect(btn.className).toContain("min-w-0");
+    // truncate span 结构保持（标题行 + ql_id 行各自 block）
+    expect(btn.querySelector("span.block.truncate")).toBeTruthy();
+  });
+
+  it("状态列备注跟随单元格——外层 flex + 备注 max-w-full（原 inline-flex/160px 固定上限越界）", async () => {
+    mocks.listQuicklogEntries.mockResolvedValue({
+      items: [makeEntry({ status: "stale", status_note: "停滞 · 最后信号 6 小时前 · 附加说明超长文本示例" })],
+      total: 1,
+    });
+    renderTable();
+    await screen.findByText("疑似中断");
+    // title 挂在外层容器上（悬浮看全文），备注是其中的截断子项
+    const outer = screen.getByTitle(/停滞 · 最后信号/);
+    expect(outer.className).toContain("flex");
+    expect(outer.className).not.toContain("inline-flex");
+    // 备注是外层里带截断类的子 span（首个 span 是 StatusBadge 内部节点）
+    const note = outer.querySelector("span.max-w-full.truncate");
+    expect(note).toBeTruthy();
+    expect(note?.textContent).toContain("停滞 · 最后信号");
+  });
+});
+
 describe("quicklogPollInterval（轮询纯函数 FR-05）", () => {
   it("存在 in_progress → 30000", () => {
     expect(

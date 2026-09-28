@@ -1,0 +1,10 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+baseline_commit: 51cdb099c039f712ae13ee6e7f9836fa25a55d0b
+updatedAt: '2026-09-28T15:35:32.329Z'
+baseline_sha256: 09575d9a7c9123f1cf87d5d0469c790c0c5354734d11a8c354b7f4b1cda4a491
+

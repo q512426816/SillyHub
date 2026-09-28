@@ -39,10 +39,13 @@ const STATUS_OPTIONS = [
 function StatusColumn({ status, note }: { status: string; note?: string | null }) {
   const meta = STATUS_META[status] ?? { label: status, kind: "neutral" as const };
   return (
-    <span title={note ?? undefined} className="inline-flex flex-col gap-0.5">
+    // 2026-09-28-quicklog-title-overflow：inline-flex 按内容自适应宽（备注子项
+    // 曾配 160px 固定上限）会越过 130px 状态列单元格——改 block flex 拉伸到
+    // 单元格宽，备注 max-w-full 跟随截断（tableLayout=fixed 前提下边界确定）。
+    <span title={note ?? undefined} className="flex flex-col gap-0.5">
       <StatusBadge kind={meta.kind}>{meta.label}</StatusBadge>
       {note && (
-        <span className="max-w-[160px] truncate text-[10px] text-muted-foreground">
+        <span className="max-w-full truncate text-[10px] text-muted-foreground">
           {note}
         </span>
       )}
@@ -220,7 +223,11 @@ export function QuicklogTable({ workspaceId, onSelect }: QuicklogTableProps) {
         <button
           type="button"
           onClick={() => onSelect?.(e)}
-          className="group max-w-[420px] text-left"
+          // 2026-09-28-quicklog-title-overflow：原 max-w-[420px] 自适应内容宽，
+          // auto 布局下标题列实际更窄时按钮连同 truncate span 越过单元格压进
+          // 相邻列（生产实测 elRight 875 > cellRight 854）——block w-full 跟随
+          // 单元格宽（fixed 布局下为剩余宽度），420 保留为宽屏视觉上限。
+          className="group block w-full min-w-0 max-w-[420px] text-left"
           title={e.placeholder ? "空壳占位条目" : e.title}
         >
           <span className="block truncate text-xs text-foreground group-hover:underline">
@@ -433,6 +440,10 @@ export function QuicklogTable({ workspaceId, onSelect }: QuicklogTableProps) {
         loading={loading}
         size="small"
         bordered
+        // 2026-09-28-quicklog-title-overflow：fixed 布局——auto 下列宽按内容
+        // min-content 协商，无 width 的标题列分得宽度小于内容自适应宽时溢出
+        // 压邻列；fixed 下定宽列严格执行、标题列稳定分得剩余宽度。
+        tableLayout="fixed"
         scroll={{ y: "calc(100vh - 470px)" }}
         pagination={{
           current: page,
