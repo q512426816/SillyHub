@@ -1,13 +1,13 @@
 ---
 author: sillyspec-fr-index
-created_at: 2026-09-22T17:00:51.578Z
+created_at: 2026-09-28T13:29:09.736Z
 ---
 
-# FR 索引 — auto-backend
+# FR 索引 — backend
 
 > fr-index 从归档变更 requirements.md 幂等提炼（「最近确认」= 归档时 HEAD）。条目字段行为机械解析契约，勿手改。
 > superseded 条目保留供取代链回溯；brainstorm 注入默认只给 active。
-> 伪域（auto- 前缀）：由文件路径段投票派生，无模块卡——为该域补模块卡后，新变更将自动落回真域
+> 模块卡：modules/backend.md（域=模块 id 同构；行为条目↔模块契约互跳）
 
 ## FR-auto-backend-001 ctx 打标会话身份锚定
 变更：2026-09-11-agent-log-attribution-refactor
@@ -1252,3 +1252,96 @@ created_at: 2026-09-22T17:00:51.578Z
   confirmed_at: null
   source_change: 2026-09-26-migration-chain-dedupe
   status: active
+
+## FR-auto-backend-074 任务锚窗口收窄：仅本变更 commit 事件的提交参与锚匹配（titles 映射仍可用全局 50 窗
+变更：2026-09-28-timeline-anchor-scope
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 任务锚窗口收窄：仅本变更 commit 事件的提交参与锚匹配（titles 映射仍可用全局 50 窗口取标题——那是展示用途与锚定无关）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-timeline-anchor-scope/requirements.md#FR-01
+最近确认：34d39ff7c1306f64976528484698bf7330463691
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-timeline-anchor-scope:flow:FR-01
+  tests: backend/app/modules/change/tests/test_timeline.py「test_task_anchor_scoped_to_change_commits」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-timeline-anchor-scope
+  status: active
+
+## FR-auto-backend-075 全局窗口无本变更提交时锚为 None（显示无锚而非错锚）
+变更：2026-09-28-timeline-anchor-scope
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 全局窗口无本变更提交时锚为 None（显示无锚而非错锚）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-timeline-anchor-scope/requirements.md#FR-02
+最近确认：34d39ff7c1306f64976528484698bf7330463691
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-timeline-anchor-scope:flow:FR-02
+  tests: backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-timeline-anchor-scope
+  status: active
+
+## FR-auto-backend-076 前端事件行图标表补 gate-run、config-change、fake-check-cleare
+变更：2026-09-28-timeline-anchor-scope
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 前端 相关模块就绪；When 前端事件行图标表补 gate-run、config-change、fake-check-cleared 三个新事件 kind（watcher-signal-wi；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-timeline-anchor-scope/requirements.md#FR-03
+最近确认：34d39ff7c1306f64976528484698bf7330463691
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-timeline-anchor-scope:flow:FR-03
+  tests: frontend/src/components/changes/detail/__tests__/change-timeline-card.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-timeline-anchor-scope
+  status: active
+
+## FR-auto-backend-077 后端测试：锚定限本变更事件窗口（他变更提交含同号 token 不误锚）、无窗口提交时 None
+变更：2026-09-28-timeline-anchor-scope
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 后端测试：锚定限本变更事件窗口（他变更提交含同号 token 不误锚）、无窗口提交时 None；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-timeline-anchor-scope/requirements.md#FR-04
+最近确认：34d39ff7c1306f64976528484698bf7330463691
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-timeline-anchor-scope:flow:FR-04
+  tests: backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-timeline-anchor-scope
+  status: active
+
+## FR-auto-backend-078 前端卡片测试补三个新 kind 图标渲染
+变更：2026-09-28-timeline-anchor-scope
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 前端 / 测试 相关模块就绪；When 前端卡片测试补三个新 kind 图标渲染；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-timeline-anchor-scope/requirements.md#FR-05
+最近确认：34d39ff7c1306f64976528484698bf7330463691

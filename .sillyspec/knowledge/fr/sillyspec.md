@@ -1,13 +1,13 @@
 ---
 author: sillyspec-fr-index
-created_at: 2026-09-22T17:32:13.971Z
+created_at: 2026-09-28T13:29:24.005Z
 ---
 
-# FR 索引 — auto-sillyspec
+# FR 索引 — sillyspec
 
 > fr-index 从归档变更 requirements.md 幂等提炼（「最近确认」= 归档时 HEAD）。条目字段行为机械解析契约，勿手改。
 > superseded 条目保留供取代链回溯；brainstorm 注入默认只给 active。
-> 伪域（auto- 前缀）：由文件路径段投票派生，无模块卡——为该域补模块卡后，新变更将自动落回真域
+> 模块卡：modules/sillyspec.md（域=模块 id 同构；行为条目↔模块契约互跳）
 
 ## FR-auto-sillyspec-001 known-issues 观察项登记
 变更：2026-09-16-background-task-grace-timeout
