@@ -481,7 +481,12 @@ describe("WorkerSessionOverlay 标题参数化", () => {
     );
     expect(screen.getByRole("dialog", { name: "分身会话" })).toBeInTheDocument();
     expect(screen.queryByTestId("overlay-status-hint")).toBeNull();
-    expect(screen.getByRole("button", { name: "返回主控" })).toBeInTheDocument();
+    // 关闭按钮缺省保分身既有形态：可见文本「返回主控」+ aria-label「关闭分身
+    // 会话」（2026-09-28 CI 修复恢复 task-14 原形态——task-08 泛化时缺省值两处
+    // 误统一为「返回主控」，与「零回归」注释矛盾，session-panel-team 两用例钉
+    // aria-label 旧值）。
+    const closeBtn = screen.getByRole("button", { name: "关闭分身会话" });
+    expect(closeBtn).toHaveTextContent("返回主控");
     expect(screen.getByTestId("overlay-session-panel")).toHaveAttribute(
       "data-session-id",
       "sub-12345678",

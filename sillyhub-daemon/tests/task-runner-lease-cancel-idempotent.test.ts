@@ -22,6 +22,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('../src/skill-manager.js', () => ({
   linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })),
 }));
+// 26e362d61（applyClaudeSettings 空对象改真实 unlink 撤下语义）后 spawn 前多
+// 一次真实 fs 调用——本文件 fake timers（vi.useFakeTimers）下 fs 线程池回调不
+// 被推进，waitForSpawnAndListener 的 advanceTimers 循环在慢盘上等不到 spawn →
+// cancel 时 child 未 spawn → kill 未调（CI 2026-09-28 首挂 / Windows 本地 R-06
+// 两用例同根族翻车）。本文件被测面是 cancel→kill 链，settings 撤下是无关副作用，
+// 按上文 skill-manager 同款先例（2026-07-08 ql-20260710）mock 掉消除真实 IO。
+vi.mock('../src/claude-settings.js', () => ({
+  applyClaudeSettings: vi.fn(async () => undefined),
+}));
 
 let mockAdapter: Record<string, unknown> = {};
 
