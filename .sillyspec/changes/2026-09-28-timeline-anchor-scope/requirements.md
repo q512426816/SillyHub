@@ -47,3 +47,4 @@ frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx �
 backend/app/modules/change/tests/test_timeline.py 7/7 全绿（含既有金样本回归）
 
 <!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+不适用：API 契约零变化（TimelineTask.commit_sha 语义收窄由 FR-01/02 用例锁定；tsc/ruff/mypy 全过为类型面佐证）
