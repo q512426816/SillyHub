@@ -216,6 +216,24 @@ describe("TurnNavList 展开收起", () => {
     expect(within(container).queryByTestId("turn-nav-flyout")).toBeNull();
   });
 
+  it("评审 P1：pin 展开时点击组件外部 → 收起（触屏关闭通道）", () => {
+    const { container } = renderNav(FIXTURES);
+    pinOpen(container);
+    expect(within(container).getByTestId("turn-nav-flyout")).toBeTruthy();
+    // 模拟点击组件外（document body——组件根之外的目标）。
+    fireEvent.pointerDown(document.body);
+    expect(within(container).queryByTestId("turn-nav-flyout")).toBeNull();
+    expect(getToggle(container)).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("评审 P1：点击组件内部（浮层行）不触发外部收起", () => {
+    const { container } = renderNav(FIXTURES);
+    pinOpen(container);
+    const row = getFlyoutRows(container)[1]!;
+    fireEvent.pointerDown(row);
+    expect(within(container).getByTestId("turn-nav-flyout")).toBeTruthy();
+  });
+
   it("浮层行内容：第N轮 + 摘要 + 相对时间；未加载无摘要占位文案", () => {
     const { container } = renderNav([
       ENTRY_COMPLETED,

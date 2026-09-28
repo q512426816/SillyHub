@@ -146,6 +146,23 @@ export default function TurnNavList({
 
   useEffect(() => clearTimers, [clearTimers]);
 
+  // 评审 P1 修复（2026-09-28）：展开态点击组件外部 → 收起（触屏 pin 后的主要
+  // 关闭通道之一；把手✕/再点把手仍可用）。pointerdown 统一鼠标/触屏；卸载解绑。
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!expanded) return;
+    const onDocPointerDown = (e: PointerEvent) => {
+      const root = rootRef.current;
+      if (root && e.target instanceof Node && !root.contains(e.target)) {
+        clearTimers();
+        setPinned(false);
+        setHoverOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [expanded, clearTimers]);
+
   /** 窄轨/浮层 enter：取消关合计时，300ms 后展开。 */
   const handleEnter = useCallback(() => {
     if (closeTimerRef.current !== null) {
@@ -205,13 +222,16 @@ export default function TurnNavList({
       mountedRef.current = true;
       return;
     }
-    const rail = railRef.current;
-    if (!activeTurnKey || !rail) return;
-    const row = rail.querySelector(
+    const root = rootRef.current;
+    if (!activeTurnKey || !root) return;
+    // 评审 medium 修复：窄轨刻度与浮层行共用 [data-turn-key]——两者都滚入各自
+    // 可视区（浮层展开时行随 active 联动，与行式列时代行为对齐）。
+    for (const row of root.querySelectorAll(
       `[data-turn-key="${CSS.escape(activeTurnKey)}"]`,
-    );
-    if (row && typeof row.scrollIntoView === "function") {
-      row.scrollIntoView({ block: "nearest" });
+    )) {
+      if (typeof row.scrollIntoView === "function") {
+        row.scrollIntoView({ block: "nearest" });
+      }
     }
   }, [activeTurnKey]);
 
@@ -223,6 +243,7 @@ export default function TurnNavList({
 
   return (
     <div
+      ref={rootRef}
       className="relative flex min-h-0 shrink-0 flex-col"
       data-testid="turn-nav-column"
       onMouseEnter={handleEnter}

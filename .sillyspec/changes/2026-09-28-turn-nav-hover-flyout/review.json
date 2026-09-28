@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-turn-nav-hover-flyout",
+  "reviewer": "subagent",
+  "verdict": "FAIL",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "P3",
+      "fr": "FR-03",
+      "summary": "「点外部收起」未实现：pin 锁定态下点击浮层外部（如聊天区）不会收起，且无测试覆盖、无例外裁决留痕",
+      "evidence": "frontend/src/components/sessions/turn-nav-list.tsx 全组件无 document/window 级外部点击监听；pin 态仅有两条收起路径——把手再点（togglePin）与浮层头「收起✕」钮（仅 pinned 时渲染 L321-330）；handleLeave 计时器只 setHoverOpen(false)，pinned 保持 true → expanded 常开。design.md 槽1 明确承诺「再点或点浮层外收起」；requirements FR-03 原文「点外部收起」；12 用例中「pin 锁定常开（把手切换）；移开不收；浮层头显示总轮数与收起钮」无外部点按收起断言。FR↔实现↔测试三面均缺，属未裁决的功能缺口。",
+      "title": "「点外部收起」未实现：pin 锁定态下点击浮层外部（如聊天区）不会收起，且无测试覆盖、无例外裁决留痕"
+    },
+    {
+      "id": "F2",
+      "severity": "P3",
+      "fr": "FR-05",
+      "summary": "「当前轮高亮滚动联动」浮层侧只做高亮、未做滚动定位，且源码注释与实现不符",
+      "evidence": "turn-nav-list.tsx L203-216 滚动 effect 以 railRef（刻度 nav，L256-263）为 querySelector 根，只滚刻度；浮层行（L333-394，带 data-turn-key/aria-current）不是 railRef 子树、永不 scrollIntoView；effect 依赖仅 activeTurnKey，展开浮层时也不定位 active 行——长会话开浮层后当前轮可能在视口外。L200-201 注释声称「窄轨刻度与浮层行共用 [data-turn-key] 命中」与实际作用域不符（违反仓库规则 18 注释一致性）；测试用例断言亦仅「轨内 scrollIntoView」。",
+      "title": "「当前轮高亮滚动联动」浮层侧只做高亮、未做滚动定位，且源码注释与实现不符"
+    },
+    {
+      "id": "F3",
+      "severity": "P3",
+      "fr": "FR-06",
+      "summary": "交付 diff 不完整：change.patch 仅含 .sillyspec 4 个文档文件（191 行），不含 turn-nav-list.tsx 及测试实现 diff；实现实际随 commit 57b61916c 交付，且该 commit 与 2026-09-28-drop-observation-card 混合提交",
+      "evidence": "change.patch 全文仅 design.md/proposal.md/requirements.md/tasks.md 四个新增文档；git show --stat 57b61916c 同时含本变更 .sillyspec 产物与 drop-observation-card 的代码删除；工作树 clean（代码已落库），实物核对以工作树为准，但变更级可追溯性受损。",
+      "title": "交付 diff 不完整：change.patch 仅含 .sillyspec 4 个文档文件（191 行），不含 turn-nav-list.tsx 及测试实现 diff；实现实际随 commit 57b61916c 交付，且该 commit 与 2026-09-28-drop-observation-card 混合提交"
+    },
+    {
+      "id": "F4",
+      "severity": "P3",
+      "fr": "FR-04",
+      "summary": "触屏 FR 的测试绑定失真：绑定到 page.test 45 用例零改动（实为 FR-06 回归面），无 hover:none/触屏直接用例",
+      "evidence": "requirements.md FR-04 测试绑定指向 page.test.tsx 45 用例（aria-label 契约延续），与触屏点按通道无直接关系；实际通道（把手点击 pin 切换，触屏无需 hover）由 FR-02/03 的 pin 用例间接覆盖，机制成立但绑定记录误导。",
+      "title": "触屏 FR 的测试绑定失真：绑定到 page.test 45 用例零改动（实为 FR-06 回归面），无 hover:none/触屏直接用例"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（pinned/hoverOpen 纯 UI 布尔态，与 entries/activeTurnKey 到达时序无关）",
+    "并发": "ok（双计时器互斥取消+双 null 守卫+useEffect 卸载清 timer 齐备，enter/leave 交错最坏一次幂等翻转；浮层 z-30 absolute 相对 relative 根容器，静态核对未见越出/串台证据）",
+    "切换": "ok（展开态为内存态不跨会话持久化，切走即收；entries<3 早退在全部 hooks 之后，React 规则无违例）",
+    "作用域": "ok（拖宽与宽度记忆键退役已在 design 槽2 显式裁决，旧 localStorage 键遗留无害已声明；跨会话/跨面板无串台面）"
+  },
+  "reviewedAt": "2026-09-28T09:58:45+08:00"
+}
