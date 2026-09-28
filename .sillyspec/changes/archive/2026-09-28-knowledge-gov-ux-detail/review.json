@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-knowledge-gov-ux-detail",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "深链文件名按域推导依赖「域名=fr 文件名」约定",
+      "evidence": "openFile(`fr/${domain}.md`)——digest 域名与 fr/ 文件名一致为实证约定（unmapped/auto-*/lib-api 均对），漂移时页面既有「查无文件静默停列表」兜底，不报错不误导",
+      "location": "frontend/src/components/knowledge/governance-cards.tsx:118"
+    },
+    {
+      "severity": "P3",
+      "title": "复制指令提示词内嵌 CLI 语法（tests confirm/classify）",
+      "evidence": "提示词面向 AI 会话消费（用户粘贴给 ZCode），含 CLI 语法是给 AI 的操作指令非页面 UI 文案——与「页面不出现 CLI 字样」的 FR 口径不冲突（断言只限卡片正文）",
+      "location": "frontend/src/components/knowledge/governance-cards.tsx:65"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok",
+    "边界裁决": "design 槽4 三条声明边界均已裁决可接受（rot/inbox 向导改复制指令入口——用户反馈裁决；后端明细端点不做——深链直达知识文件已覆盖；一键派发 AI 会话不绑定本卡——独立大特性）。剪贴板回退为能力兜底非视觉降级（visual-evidence.md 已澄清）"
+  },
+  "reviewedAt": "2026-09-28T08:50:37.197759+00:00"
+}

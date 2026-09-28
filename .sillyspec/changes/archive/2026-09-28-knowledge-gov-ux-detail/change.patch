@@ -1,0 +1,296 @@
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/decisions.md b/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/decisions.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/decisions.md
+@@ -0,0 +1,6 @@
++
++## 用户裁决（2026-09-28-knowledge-gov-ux-detail）
++
++用户实测一轮改版后反馈两条，本轮即按该反馈裁决：
++- **「rot/收件箱没有处理入口」→ 复制 AI 处理指令按钮**：判断类工作（逐条内容归类/代码对账）不做页面表单向导（假 automation 比没有入口更危险），以「一键复制即用提示词」为入口，匹配用户既有「拿提示词开 AI 会话」工作流。裁决：**可接受**。
++- **「看不到具体数据，得先看到才能处置」→ 查看明细深链**：每池/每域/收件箱/坏绑定明细全部可见（深链复用页面既有 ?file= 能力，零后端改动）。裁决：**可接受**（数据可见性完整）。
+
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/design.md b/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/design.md
+@@ -0,0 +1,53 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T08:46:09.452Z
++---
++# 设计记录（Design Record）— 2026-09-28-knowledge-gov-ux-detail
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-gov-ux-detail 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） --
++governance-cards.tsx 单文件二轮（数据链/动作通道零变化）：
++- 「看得到才能处置」：每池/每域/收件箱加「查看明细」入口——router.push 同页深链 ?file=fr/<域>.md（伪域每池含 unmapped 与未知池如 auto-round5）/ fr/<域>.md（rot 分域 chip，detail 解析）/ uncategorized.md（收件箱），复用页面既有深链消费（参数组合变更即触发选中+滚动）。
++- 「处理入口」：rot/inbox 加「复制 AI 处理指令」按钮——navigator.clipboard.writeText 复制即用提示词（含计数与分布，rot 带 tests confirm 语法、inbox 带 classify 目标文件口径）；clipboard 不可用/失败时内联展示提示词全文供手动复制（降级为展示非静默）。
++- binding-unresolved 正文下补明细行（锚点 ID 列表，原版有数据未展示）。
++>
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-gov-ux-detail 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） --
++无对外接口变化：GET/POST 端点未动，后端零改动。前端组件内新增交互：查看明细（router.push 本页查询参数，不新增路由）、复制指令（浏览器 clipboard API，非平台接口）；新增 testid：view-fr-<domain> / view-inbox-file / copy-ai-prompt-<kind> / copy-ai-prompt-result / copy-ai-prompt-fallback / governance-binding-detail / governance-rot-domains。
++>
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-gov-ux-detail 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） --
++1. 乱序/迟到：detail 解析沿用 matchAll 容错（漂移→入口消失不误跳）；深链目标文件不存在时页面既有「查无此文件静默停列表」语义兜底。
++2. 并发写：查看/复制均为本地导航与剪贴板操作，无服务端写；归位 mutation 并发语义沿用一轮（isPending 全池禁用）。
++3. 切换/生命周期：router.push 软导航页面不重挂载，深链消费 ref 按参数组合去重（页面既有语义）；clipboard 状态仅组件内展示态。
++4. 作用域：深链 URL 以 workspaceId 构造（既有鉴权上下文内）；提示词为纯文本无注入面（clipboard 写出，不经解释器）。
++>
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-gov-ux-detail 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） --
++最大风险：深链文件名按域推导（fr/<domain>.md）依赖「伪域/rot 域名=文件名」约定——digest 的域名即 fr/ 文件名（unmapped/auto-*/lib-api 均实证），漂移时页面静默停列表（不报错不误导，可接受）；目标文件在 daemon 检出而非主仓（平台数据源即 daemon 视图，一致性天然成立）。放弃的方案：①rot/inbox 做成页面内向导（逐条分类表单/复核向导）——判断类工作做成表单比复制指令更重且假 automation；②后端加明细列表端点——digest 明细已够入口用途，完整数据在知识文件里且深链直达，后端零改动保 thin；③复制按钮换成「一键派发 AI 会话」——平台会话派发是独立大特性，不绑架本卡。
++>
+
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/proposal.md b/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/proposal.md
+@@ -0,0 +1,56 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T08:46:09.450Z
++---
++# 提案书（Proposal）— 2026-09-28-knowledge-gov-ux-detail
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:75764110c09bb858c491f06bec8ac20e37541fcc7b65689124723e1fb726f3af:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-gov-ux-detail 留痕重锚 -->
++任务原话转写：治理信号卡二轮（用户实测反馈）：①rot/收件箱两卡没有处理入口；②未归位/路径失效看不到具体条目，得先看到才能处置。
++- 每池/每域/收件箱加「查看明细」深链（?file=fr/<domain>.md / uncategorized.md，复用页面既有深链消费能力，同页软导航）
++- rot/收件箱卡加「复制 AI 处理指令」按钮（clipboard 复制即用提示词，含分布/计数；失败降级为内联展示提示词文本）
++- binding-unresolved 卡正文补明细（锚点 id 列表）
++- 伪域未知池（如 auto-round5）也给查看链接
++
++成功标准：
++- 四类卡都能看到具体数据入口（深链到本页对应知识文件）
++- rot/inbox 有一键复制处理指令入口（复制成功有反馈；clipboard 不可用时内联显示可手动复制）
++- 分池行查看链接跳转参数正确（?file=fr/<domain>.md）
++- 既有测试同步更新全绿，tsc/eslint 0 错
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:38a91f6ce6ca00f7861e8e99cbd560111917db0c0ba36accb8c11c1773050bb7:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-gov-ux-detail 留痕重锚 -->
++按成功标准机械推导，共 11 条验收面：
++1. 每池/每域/收件箱加「查看明细」深链（?file=fr/<domain>.md / uncategorized.md，复用页面既有深链消费能力，同页软导航）
++2. rot/收件箱卡加「复制 AI 处理指令」按钮（clipboard 复制即用提示词，含分布/计数；失败降级为内联展示提示词文本）
++3. binding-unresolved 卡正文补明细（锚点 id 列表）
++4. 伪域未知池（如 auto-round5）也给查看链接
++5. 四类卡都能看到具体数据入口（深链到本页对应知识文件）
++6. rot
++7. inbox 有一键复制处理指令入口（复制成功有反馈
++8. clipboard 不可用时内联显示可手动复制）
++9. 分池行查看链接跳转参数正确（?file=fr/<domain>.md）
++10. 既有测试同步更新全绿，tsc
++11. eslint 0 错
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:b7f30fe27ac1975f6792b9add23b823343de3d606a7cc8c369a11921b35fff4a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-28-knowledge-gov-ux-detail 留痕重锚 -->
++1. 每池/每域/收件箱加「查看明细」深链（?file=fr/<domain>.md / uncategorized.md，复用页面既有深链消费能力，同页软导航）
++2. rot/收件箱卡加「复制 AI 处理指令」按钮（clipboard 复制即用提示词，含分布/计数；失败降级为内联展示提示词文本）
++3. binding-unresolved 卡正文补明细（锚点 id 列表）
++4. 伪域未知池（如 auto-round5）也给查看链接
++5. 四类卡都能看到具体数据入口（深链到本页对应知识文件）
++6. rot
++7. inbox 有一键复制处理指令入口（复制成功有反馈
++8. clipboard 不可用时内联显示可手动复制）
++9. 分池行查看链接跳转参数正确（?file=fr/<domain>.md）
++10. 既有测试同步更新全绿，tsc
++11. eslint 0 错
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/requirements.md b/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/requirements.md
+@@ -0,0 +1,109 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T08:46:09.452Z
++---
++# 需求规格（Requirements）— 2026-09-28-knowledge-gov-ux-detail
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 每池/每域/收件箱加「查看明细」深链（?file=fr/<domain>.md / uncatego
++Given 系统就绪
++When 每池/每域/收件箱加「查看明细」深链（?file=fr/<domain>.md / uncategorized.md，复用页面既有深链消费能力，同页软导航）
++Then 行为符合本条标准描述
++
++### FR-02: rot/收件箱卡加「复制 AI 处理指令」按钮（clipboard 复制即用提示词，含分布/计数；失
++Given 系统就绪
++When rot/收件箱卡加「复制 AI 处理指令」按钮（clipboard 复制即用提示词，含分布/计数；失败降级为内联展示提示词文本）
++Then 行为符合本条标准描述
++
++### FR-03: binding-unresolved 卡正文补明细（锚点 id 列表）
++Given 系统就绪
++When binding-unresolved 卡正文补明细（锚点 id 列表）
++Then 行为符合本条标准描述
++
++### FR-04: 伪域未知池（如 auto-round5）也给查看链接
++Given 系统就绪
++When 伪域未知池（如 auto-round5）也给查看链接
++Then 行为符合本条标准描述
++
++### FR-05: 四类卡都能看到具体数据入口（深链到本页对应知识文件）
++Given 系统就绪
++When 四类卡都能看到具体数据入口（深链到本页对应知识文件）
++Then 行为符合本条标准描述
++
++### FR-06: rot
++Given 系统就绪
++When rot
++Then 行为符合本条标准描述
++
++### FR-07: inbox 有一键复制处理指令入口（复制成功有反馈
++Given 系统就绪
++When inbox 有一键复制处理指令入口（复制成功有反馈
++Then 行为符合本条标准描述
++
++### FR-08: clipboard 不可用时内联显示可手动复制）
++Given 系统就绪
++When clipboard 不可用时内联显示可手动复制）
++Then 行为符合本条标准描述
++
++### FR-09: 分池行查看链接跳转参数正确（?file=fr/<domain>.md）
++Given 系统就绪
++When 分池行查看链接跳转参数正确（?file=fr/<domain>.md）
++Then 行为符合本条标准描述
++
++### FR-10: 既有测试同步更新全绿，tsc
++Given 测试 相关模块就绪
++When 既有测试同步更新全绿，tsc
++Then 行为符合本条标准描述
++
++### FR-11: eslint 0 错
++Given 系统就绪
++When eslint 0 错
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++frontend/src/components/knowledge/__tests__/governance-cards.test.tsx › 伪域分池查看明细（view-fr-auto-backend/auto-round5/unmapped 三链断言 router.push 参数）
++>
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++同上 › rot：分域查看链接（view-fr-lib-api）+ 复制 AI 指令（writeText 内容含计数与分布 + copy-ai-prompt-result 已复制反馈）；inbox：查看明细深链 + 复制 AI 指令；clipboard 失败内联降级
++>
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++同上 › binding-unresolved：锚点明细可见（governance-binding-detail 含 FR-cli-091）
++>
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++同上 › 伪域分池查看明细 用例（?file=fr%2F<域>.md 编码断言）
++>
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++同上 › rot/inbox 两用例 + local 模式用例（查看链接不依赖 daemon 在线仍可用断言）
++>
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++frontend/src/components/knowledge/__tests__/governance-cards.test.tsx 全文件 10 用例（本地实测 10 passed）+ npx tsc --noEmit 0 错
++>
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++不适用：静态门禁项——npx eslint 两文件实测 0 error 0 warning
++>
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++不适用：机械动作为既有端点（一轮 FR-02 已钉 redomain/repair-paths 调用契约，本轮未改通道）——同文件 一键归位/binding 用例回归覆盖
++>
++
++<!--AGENT:测试绑定FR-09 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++同上 › 伪域分池查看明细 用例（auto-round5 未知池 view 链断言）
++>
++
++<!--AGENT:测试绑定FR-10 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++同上 › local 模式用例（无归位按钮但查看明细在）
++>
++
++<!--AGENT:测试绑定FR-11 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） --
++不适用：无视觉规格变化（新增均为既有样式体系内的小号文字链/按钮，visual-evidence.md 留痕无视觉降级）
++>
+
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/tasks.md b/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/tasks.md
+@@ -0,0 +1,21 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-28T08:46:09.452Z
++---
++# 任务注册表（Tasks）— 2026-09-28-knowledge-gov-ux-detail
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: 每池/每域/收件箱加「查看明细」深链（?file=fr/<domain>.md / uncategorized.md，复用页面既有深链消费能力，同页软导航）
++- [ ] task-02: rot/收件箱卡加「复制 AI 处理指令」按钮（clipboard 复制即用提示词，含分布/计数；失败降级为内联展示提示词文本）
++- [ ] task-03: binding-unresolved 卡正文补明细（锚点 id 列表）
++- [ ] task-04: 伪域未知池（如 auto-round5）也给查看链接
++- [ ] task-05: 四类卡都能看到具体数据入口（深链到本页对应知识文件）
++- [ ] task-06: rot
++- [ ] task-07: inbox 有一键复制处理指令入口（复制成功有反馈
++- [ ] task-08: clipboard 不可用时内联显示可手动复制）
++- [ ] task-09: 分池行查看链接跳转参数正确（?file=fr/<domain>.md）
++- [ ] task-10: 既有测试同步更新全绿，tsc
++- [ ] task-11: eslint 0 错
+
+diff --git a/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/visual-evidence.md b/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/visual-evidence.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-28-knowledge-gov-ux-detail/visual-evidence.md
+@@ -0,0 +1,16 @@
++# 视觉证据 — 2026-09-28-knowledge-gov-ux-detail
++
++## 结论：无视觉降级项
++
++本轮在一轮人话卡片基础上**追加入口**，视觉结构零下调：
++- 卡片容器/色阶/网格布局/图标体系不变；
++- 新增元素均为既有样式体系内的小号元素：文字链「查看明细」（text-xs 下划线，hover 变前景色）、分域 chip（border-border 圆角小标签）、「复制 AI 处理指令」按钮（既有 Button size=sm variant=outline）；
++- 无任何元素被移除或缩小（一轮的分池行/归位按钮原样保留，仅行尾追加查看链接）。
++
++## 「降级」字样澄清（非视觉降级）
++
++「clipboard 失败时内联降级」——指复制功能的技术回退（展示提示词全文供手动复制），是**能力兜底**而非视觉规格下调。
++
++## 像素级截图说明
++
++同一轮：本地 Docker 前端跑旧镜像、dev 端口被占且页面需登录凭据，未产出像素截图；行为与文案由 10 用例 DOM 断言覆盖（查看深链参数/复制内容与反馈/明细可见性/离线只读），部署后可在页面上直接核验。
