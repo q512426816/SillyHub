@@ -15,15 +15,21 @@ import { JsonlPreviewer } from "./jsonl-previewer";
 import { JsonView, knownJsonView, tryParseJson } from "@/components/files/structured-views";
 import type { PreviewerProps } from "./index";
 
+/**
+ * jsonl 文件名兜底转发（2026-09-29-change-detail-timeline-files-polish）：后端
+ * guess_type 对 .jsonl 在部分平台返回 application/json——mime 优先级高于扩展名
+ * 导致 jsonl 绕过 EXT_MAP 命中本渲染器；整体 parse 必失败，不转发会落纯文本，
+ * 结构化预览失效。分发放在壳组件（hooks 全在 JsonPreviewerBody 内，壳不持有
+ * hooks——提前 return 不违反 rules-of-hooks）。
+ */
 export function JsonPreviewer(props: PreviewerProps) {
-  // 2026-09-29-change-detail-timeline-files-polish：后端 guess_type 对 .jsonl
-  // 在部分平台返回 application/json——mime 优先级高于扩展名导致 jsonl 绕过
-  // EXT_MAP 命中本渲染器；按文件名转发 JsonlPreviewer（整体 parse 必失败，
-  // 不转发会落纯文本，结构化预览失效）。
   if (props.meta.name.toLowerCase().endsWith(".jsonl")) {
     return <JsonlPreviewer {...props} />;
   }
-  const { blob, meta, fill } = props;
+  return <JsonPreviewerBody {...props} />;
+}
+
+function JsonPreviewerBody({ blob, meta, fill }: PreviewerProps) {
   const [text, setText] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
