@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-29-jump-empty-turn-dup",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-29-jump-empty-turn-dup:flow:FR-01",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-29-jump-empty-turn-dup"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-29-jump-empty-turn-dup:flow:FR-02",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-29-jump-empty-turn-dup"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-29-jump-empty-turn-dup:flow:FR-03",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-29-jump-empty-turn-dup"
+    }
+  ]
+}

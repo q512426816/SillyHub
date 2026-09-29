@@ -1,0 +1,13 @@
+{"ts":1790641296040,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790641302758,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790641306180,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790641312735,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790641319386,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790641319386,"kind":"task-done","stage":"tasks","detail":"checked 0→3","provisional":true}
+{"ts":1790641319619,"kind":"warning","stage":null,"rule":"fake-check","severity":"warning","detail":"tasks 勾选 task-01、task-02、task-03 无对应提交（消息不含该 task id）且无 review.json 变更——假勾选嫌疑，人判","provisional":true}
+{"ts":1790641336028,"kind":"commit","stage":null,"detail":"19e1cb6e6","provisional":true}
+{"ts":1790641336244,"kind":"info","stage":null,"rule":"fake-check-cleared","severity":"info","detail":"task task-01 勾选证据补齐（提交 19e1cb6e6）——前拍假勾选嫌疑消解","provisional":true}
+{"ts":1790641336244,"kind":"info","stage":null,"rule":"fake-check-cleared","severity":"info","detail":"task task-02 勾选证据补齐（提交 19e1cb6e6）——前拍假勾选嫌疑消解","provisional":true}
+{"ts":1790641336244,"kind":"info","stage":null,"rule":"fake-check-cleared","severity":"info","detail":"task task-03 勾选证据补齐（提交 19e1cb6e6）——前拍假勾选嫌疑消解","provisional":true}
+{"ts":1790641415899,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1790641422565,"kind":"commit","stage":null,"detail":"46e58f4b3","provisional":true}

@@ -1,0 +1,328 @@
+diff --git a/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/flow-state.yaml b/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/flow-state.yaml
+new file mode 100644
+index 000000000..b3ecb7d78
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/flow-state.yaml
+@@ -0,0 +1,10 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: ad4aa9a7c6d70e82e8c55ed1607b298c98755451
++updatedAt: '2026-09-29T00:09:15.883Z'
++baseline_sha256: d695d58246bd052a0ef5202fb4e288a60a5a5e65ac2991f77e80d934fca23862
++
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index b25111b19..cf2d2544f 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -2848,4 +2848,70 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+     // 直达路径直接收口，不空转翻页。
+     expect(beforeCallCount()).toBe(0);
+   });
++
++  it("task-01/02（2026-09-29-jump-empty-turn-dup）：零正文轮（有日志但全不可渲染）二次点击不重复单轮直达 prepend", async () => {
++    mockThreeRuns();
++    mocks.fetchSessionTurnOutline.mockResolvedValue({
++      session_id: "s-1",
++      total_turns: 3,
++      items: [
++        outlineItem({ run_id: "r-ancient", seq: 1 }),
++        outlineItem({ run_id: "r-old", seq: 2, status: "failed" }),
++        outlineItem({ run_id: "r-cur", seq: 3 }),
++      ],
++    });
++    mocks.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { runId?: string; before?: string }) => {
++        if (opts?.runId === "r-ancient") {
++          // run 有日志但全部不可渲染（群聊空 user_input 形态——正文在群消息表，
++          // e31d0e07b 实证某会话 46 轮中 14 轮；[SYSTEM] 前缀行 classifySessionLog
++          // 恒 null）→ logsToTurns 产出零 segments/output 的空轮。r-ancient 为
++          // completed 态——空轮走 TurnTimeline 紧凑配置行（~40 字 < hit() 60 字
++          // 内容门），正是重复直达的触发形态。
++          return [
++            navLog("a-e1", "r-ancient", "user_input", "", "2026-08-15T06:10:00Z"),
++            navLog("a-e2", "r-ancient", "stdout", "[SYSTEM] dispatched", "2026-08-15T06:10:01Z"),
++          ];
++        }
++        if (opts?.before) return [];
++        return fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z");
++      },
++    );
++    renderPage();
++    await selectDefaultSession();
++    expect(await findTimelineText("当前窗口提问")).toBeTruthy();
++
++    /** run_id 单轮请求计数（防重复直达的核心回归锚）。 */
++    const runIdCallCount = () =>
++      mocks.getAgentSessionLogs.mock.calls.filter(
++        (c) => c[1] && "runId" in (c[1] as Record<string, unknown>),
++      ).length;
++    /** 时间线内 r-ancient 行数（修复前重复 prepend 会造同装饰键重复行）。 */
++    const ancientRowCount = () =>
++      document
++        .querySelector('[data-testid="turn-timeline-scroll"]')
++        ?.querySelectorAll('[data-turn-key="r-ancient"]').length ?? 0;
++
++    // 首次点击：未加载 → 单轮直达恰一次（定位高亮，行为不变；零正文不 prepend）。
++    const row1 = await screen.findByRole("button", { name: /^第1轮/ });
++    scrollIntoViewSpy.mockClear();
++    fireEvent.click(row1);
++    await waitFor(() => expect(runIdCallCount()).toBe(1));
++    await waitFor(expectJumpScrolled);
++    expect(ancientRowCount()).toBeLessThanOrEqual(1);
++    // 直达路径收口（不空转翻页）。
++    expect(beforeCallCount()).toBe(0);
++
++    // 二次点击：该轮已直达过且确认零正文 → 幂等短路直接定位，不再发起 run_id
++    // 请求、不重复 prepend（修复前：hit() 60 字门不认短空行 + handleJumpToTurn
++    // 闭包不含 turnState 的陈旧查找 → 每次点击重复直达，pageKey=jump-<最旧日志id>
++    // 恒相同 → 装饰 runId 撞 React key + 空块累积）。
++    scrollIntoViewSpy.mockClear();
++    fireEvent.click(row1);
++    await waitFor(expectJumpScrolled);
++    expect(runIdCallCount()).toBe(1);
++    expect(ancientRowCount()).toBeLessThanOrEqual(1);
++    expect(beforeCallCount()).toBe(0);
++    expect(mocks.notifyError).not.toHaveBeenCalled();
++  });
+ });
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index a0740b2bb..e009956f3 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -715,6 +715,12 @@ export function SessionPanelPage({
+   // 链路（JUMP_LOAD_EARLIER_MAX_PAGES），行为不劣于现状。大纲仅作导航元数据，
+   // 不进消息流装配链（与 displayTurns / SSE 覆盖逻辑互不干扰，design §3.1）。
+   const [turnOutline, setTurnOutline] = useState<SessionTurnOutlineRead | null>(null);
++  // 2026-09-29-jump-empty-turn-dup：零正文轮直达幂等标记（run_id 集合）——单轮
++  // 直达拉回的日志无可渲染正文（群聊空 user_input / 纯系统行轮，e31d0e07b 实证
++  // 46 轮中 14 轮）时记名，该轮后续点击直接定位不再发请求。用 ref 而非 state：
++  // handleJumpToTurn 的 deps 刻意不含 turnState（防每帧重建击穿导航列 memo），
++  // ref 读取不受闭包陈旧影响。
++  const jumpEmptyJumpedRunIdsRef = useRef<Set<string>>(new Set());
+   const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
+   // 2026-08-29-session-usage-stats task-04（R-04）：用量条重取信号——
+   // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
+@@ -999,6 +1005,9 @@ export function SessionPanelPage({
+     // task-03（2026-09-27-session-fast-replay）：大纲随会话切换清空（新会话
+     // attach 期重拉；迟到旧大纲经 cancelled 守卫丢弃，不串台）。
+     setTurnOutline(null);
++    // 2026-09-29-jump-empty-turn-dup：零正文直达幂等标记随会话切换重置（新会话
++    // 同名 run 的日志形态可能不同，不跨会话继承）。
++    jumpEmptyJumpedRunIdsRef.current = new Set();
+     fetchedErrorRunIdsRef.current.clear();
+     completedSideEffectRunIdsRef.current.clear();
+     currentRunIdRef.current = null;
+@@ -2032,6 +2041,16 @@ export function SessionPanelPage({
+         // prepend 重复块（React key 撞）。直达请求前先按状态判：该 run 已有
+         // 带 segments/output 的轮 → 视为已加载，裸行定位（locateAndHighlight
+         // 内置裸 querySelector 降级）不再发起请求。
++        // 2026-09-29-jump-empty-turn-dup：已直达过且确认零正文的轮——直接定位，
++        // 不再发请求。修复前：零正文轮 loadedHasBody 恒 false、hit() 60 字内容门
++        // 不认短空行（紧凑配置行 ~40 字），且本回调闭包刻意不依赖 turnState
++        // （deps 防每帧重建），loadedTurn 查找受陈旧闭包拖累不可靠——每次点击都
++        // 重复 run_id 直达并 prepend 装饰键（jump-<该轮最旧日志id> 恒相同）撞
++        // React key 的重复空块。ref 标记不受闭包陈旧影响，判定恒当前。
++        if (jumpEmptyJumpedRunIdsRef.current.has(entry.key)) {
++          locateAndHighlight();
++          return;
++        }
+         const loadedTurn = turnState.turns.find(
+           (t) => (t.realRunId ?? t.runId) === entry.key,
+         );
+@@ -2081,13 +2100,21 @@ export function SessionPanelPage({
+             // 后缀防 React key 撞（realRunId 保持原值——SSE 增量 / 快照认领
+             // 不受影响）；已加载窗口的空壳行保留在新块之下（时间序正确）。
+             const newTurns = logsToTurns(turnLogs);
+-            if (newTurns.length > 0) {
++            // 2026-09-29-jump-empty-turn-dup：零可渲染正文（或装配无产出）不
++            // prepend——run_id 直达与已装配状态同日志源，重拉必同形，prepend 只会
++            // 造出装饰键相同的重复空块。改记幂等标记，该轮后续点击走上方短路。
++            const anyBody = newTurns.some(
++              (t) => (t.segments?.length ?? 0) > 0 || !!(t.output ?? "").trim(),
++            );
++            if (newTurns.length > 0 && anyBody) {
+               const pageKey = `jump-${oldestJump.id.slice(0, 8)}`;
+               const decorated = newTurns.map((t) => ({
+                 ...t,
+                 runId: `${t.realRunId ?? t.runId}#e${pageKey}`,
+               }));
+               setTurnState((prev) => ({ ...prev, turns: [...decorated, ...prev.turns] }));
++            } else {
++              jumpEmptyJumpedRunIdsRef.current.add(entry.key);
+             }
+             locateAndHighlight();
+             jumpSuppressLoadEarlierRef.current = false;
+diff --git a/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/design.md b/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/design.md
+new file mode 100644
+index 000000000..1e2f3b0ad
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-29T00:09:15.861Z
++---
++# 设计记录（Design Record）— 2026-09-29-jump-empty-turn-dup
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-jump-empty-turn-dup 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++session-panel-page.tsx handleJumpToTurn 单轮直达路径两处修补：①新增 `jumpEmptyJumpedRunIdsRef`（Set&lt;string&gt;）幂等标记——直达拉回的日志装配后无可渲染正文（segments/output 全空，群聊空 user_input 形态）时记名该 run，该轮后续点击直接定位高亮、不再发 run_id 请求；会话切换时重置（新会话同名 run 日志形态可能不同）。②prepend 门控——零正文（或装配无产出）不再 prepend：run_id 直达与已装配状态同日志源，重拉必同形，prepend 只会造装饰键（jump-&lt;该轮最旧日志id&gt; 恒相同）撞 React key 的重复空块。用 ref 而非 state：handleJumpToTurn 的 deps 刻意不含 turnState（防每帧重建击穿导航列 memo），原 loadedTurn 查找受陈旧闭包拖累本就不可靠（本次诊断实证），ref 读取恒当前。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-jump-empty-turn-dup 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++无对外签名/端点/文件格式变化。组件内部新增一个 ref 与一处 prepend 条件分支。既有行为不变面全部保留：有正文轮的单轮直达（一次请求 + prepend + 定位高亮 + 零翻页）、请求失败回退 interval 翻页、run 无日志「该轮次日志不存在」兜底、loadedHasBody 已加载短路。新增回归测试 1 例（sessions page.test.tsx，先红后绿实证）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-jump-empty-turn-dup 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：标记只记「该 run 直达拉回零正文」这一已发生事实，与迟到大纲/快照无交互；SSE 后续若为该 run 增量上正文，走既有 SSE 覆盖链正常渲染——标记只拦重复直达请求，不拦 SSE。切会话后迟到的直达响应由既有纪元/卸载守卫丢弃。
++2. 并发写：导航点击是用户串行动作，ref Set 读写都在事件回调内（React 合成事件无并发交错）；双击竞态下两次直达同源同形，Set.add 幂等，无脏态。
++3. 切换/生命周期：会话切换重置 effect 内清空标记（与 setTurnOutline(null) 同点）；卸载后 ref 随组件回收，不落任何外部存储。
++4. 作用域：标记是组件内存态，不进 localStorage/后端——跨工作区/跨实例天然隔离；同一会话内 run_id 唯一，无同名撞车。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-jump-empty-turn-dup 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：把「日志在窗口外」误判为「零正文」导致内容永不加载——不会发生：判定基于本次 run_id 直达拉回的**全量** run 日志（该请求不受游标窗口限制），拉回有正文即照旧 prepend；仅拉回全空才标记。试过放弃的方案：①「turn 在 turnState 存在即视为已加载不再拉」——孤儿空壳（displayTurns 补建/翻页空壳）不在 turnState 或因陈旧闭包查不到，且壳轮的日志可能在已加载窗口之外、首点必须拉，存在性判定会弄丢首次加载机会；②「扩 loadedHasBody 判定条件」——治标不治本，陈旧闭包（deps 无 turnState）下二次点击依旧查不到首次 prepend 的轮。ref 标记不受闭包影响，是稳态判定。实证：stash 掉修复跑新用例红（expected 2 to be 1——二次点击重复直达），恢复后绿。
+diff --git a/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/proposal.md b/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/proposal.md
+new file mode 100644
+index 000000000..29d719c48
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/proposal.md
+@@ -0,0 +1,35 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-29T00:09:15.860Z
++---
++# 提案书（Proposal）— 2026-09-29-jump-empty-turn-dup
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:d80719216406ec177b5a26873e4f91bd4969af25b06f354a6c2947a5ec95deab:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-jump-empty-turn-dup 留痕重锚 -->
++任务原话转写：会话轮次导航直达跳转对「有日志但零可渲染正文」的轮次（群聊空 user_input 形态，e31d0e07b 实证 14/46 轮）防重判定失效：loadedHasBody 恒 false，每次点击都重新发起 run_id 单轮请求并 prepend 装饰键相同的重复块（React key 撞 + 空块累积）。修复：该轮已进装配状态即视为已加载，不再发起直达请求。
++
++成功标准：
++- 二次点击已在装配状态中的零正文轮，不再发起 run_id 单轮请求（调用计数不增长、无重复 prepend 块）
++- 首次点击未加载轮的单轮直达行为不变（一次请求 + prepend + 定位高亮 + 零翻页）
++- 既有直达/回退/空日志兜底用例全绿，聚焦测试 + tsc/eslint 0 错
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:e9da9f3c1b8f298eeec08896f9211bd1f63245e80b9d894b6f7ee2871955a99e:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-jump-empty-turn-dup 留痕重锚 -->
++按成功标准机械推导，共 3 条验收面：
++1. 二次点击已在装配状态中的零正文轮，不再发起 run_id 单轮请求（调用计数不增长、无重复 prepend 块）
++2. 首次点击未加载轮的单轮直达行为不变（一次请求 + prepend + 定位高亮 + 零翻页）
++3. 既有直达/回退/空日志兜底用例全绿，聚焦测试 + tsc/eslint 0 错
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:e353b806502060dc5bf030f422bb3fffbf0bc2341495f40b5fc3fa2cba188eb5:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-jump-empty-turn-dup 留痕重锚 -->
++1. 二次点击已在装配状态中的零正文轮，不再发起 run_id 单轮请求（调用计数不增长、无重复 prepend 块）
++2. 首次点击未加载轮的单轮直达行为不变（一次请求 + prepend + 定位高亮 + 零翻页）
++3. 既有直达/回退/空日志兜底用例全绿，聚焦测试 + tsc/eslint 0 错
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/requirements.md b/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/requirements.md
+new file mode 100644
+index 000000000..9eb0e6c8d
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/requirements.md
+@@ -0,0 +1,34 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-29T00:09:15.861Z
++---
++# 需求规格（Requirements）— 2026-09-29-jump-empty-turn-dup
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 二次点击已在装配状态中的零正文轮，不再发起 run_id 单轮请求（调用计数不增长、无重复 prep
++Given 系统就绪
++When 二次点击已在装配状态中的零正文轮，不再发起 run_id 单轮请求（调用计数不增长、无重复 prepend 块）
++Then 行为符合本条标准描述
++
++### FR-02: 首次点击未加载轮的单轮直达行为不变（一次请求 + prepend + 定位高亮 + 零翻页）
++Given 高亮 相关模块就绪
++When 首次点击未加载轮的单轮直达行为不变（一次请求 + prepend + 定位高亮 + 零翻页）
++Then 行为符合本条标准描述
++
++### FR-03: 既有直达/回退/空日志兜底用例全绿，聚焦测试 + tsc/eslint 0 错
++Given 测试 相关模块就绪
++When 既有直达/回退/空日志兜底用例全绿，聚焦测试 + tsc/eslint 0 错
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx :: task-01/02（2026-09-29-jump-empty-turn-dup）：零正文轮（有日志但全不可渲染）二次点击不重复单轮直达 prepend（runIdCallCount 二次点击后恒 1 + ancientRowCount ≤1；stash 修复实证先红 expected 2 to be 1）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx :: task-01/02（2026-09-29-jump-empty-turn-dup）：零正文轮（有日志但全不可渲染）二次点击不重复单轮直达 prepend（首点 runIdCallCount=1 + expectJumpScrolled 定位高亮 + beforeCallCount=0）；frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx :: task-04（FR-05）：大纲有 run_id 的未加载轮点击 → 单轮请求直达（零翻页）prepend + 定位高亮（既有有正文直达回归）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx :: task-04（FR-05）：单轮请求失败 → 回退 interval 翻页链路 + task-04（FR-05）：单轮请求命中但日志为空 → 「该轮次日志不存在」兜底（既有回退/兜底回归，46/46 全绿）；tsc/eslint 0 错为命令门（pnpm -C frontend exec tsc --noEmit / eslint 两触达文件 0 error，5 warning 预存债），无单用例面
+diff --git a/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/tasks.md b/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/tasks.md
+new file mode 100644
+index 000000000..a0944c819
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/tasks.md
+@@ -0,0 +1,13 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-29T00:09:15.861Z
++---
++# 任务注册表（Tasks）— 2026-09-29-jump-empty-turn-dup
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge，OS Guardrails 同款纪律）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: 二次点击已在装配状态中的零正文轮，不再发起 run_id 单轮请求（调用计数不增长、无重复 prepend 块）——jumpEmptyJumpedRunIdsRef 幂等短路 + 零正文不 prepend；回归用例先红（expected 2 to be 1）后绿实证
++- [x] task-02: 首次点击未加载轮的单轮直达行为不变（一次请求 + prepend + 定位高亮 + 零翻页）——新用例首点断言 + 既有 task-04 三用例（直达/回退/空日志兜底）复跑绿
++- [x] task-03: 既有直达/回退/空日志兜底用例全绿，聚焦测试 + tsc/eslint 0 错——page.test.tsx 46/46 + 相邻 history-race/turn-nav-list 17/17 + tsc 0 + eslint 0 error（5 warning 均预存债）
+diff --git a/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/visual-evidence.md b/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/visual-evidence.md
+new file mode 100644
+index 000000000..caa2f4f9c
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-29-jump-empty-turn-dup/visual-evidence.md
+@@ -0,0 +1,12 @@
++# 视觉证据（visual-evidence）— 2026-09-29-jump-empty-turn-dup
++
++## 结论：非视觉变更，无视觉基准对照项
++
++本变更是会话轮次导航**交互行为修复**（重复请求/重复块防御），不改任何样式、
++布局、文案与组件结构。触发路径（点击零正文轮次行）在 jsdom 测试环境覆盖：
++
++- 回归用例断言「时间线内该轮行数 ≤1」——修复前重复 prepend 会造出同装饰键
++  重复行（React key 撞 + 空块累积），修复后恒 ≤1；
++- 其余可见行为（定位高亮、smooth 滚动、active 联动）由既有 46 用例断言不变。
++
++无视觉降级项，无需要用户裁决的取舍。

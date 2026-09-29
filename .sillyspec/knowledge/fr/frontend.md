@@ -3542,3 +3542,66 @@ created_at: 2026-09-28T13:29:15.726Z
   confirmed_at: null
   source_change: 2026-09-28-remove-liveness-overview-card
   status: active
+
+## FR-auto-sillyspec-017 二次点击已在装配状态中的零正文轮，不再发起 run_id 单轮请求（调用计数不增长、无重复 prep
+变更：2026-09-29-jump-empty-turn-dup
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 二次点击已在装配状态中的零正文轮，不再发起 run_id 单轮请求（调用计数不增长、无重复 prepend 块）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-29-jump-empty-turn-dup/requirements.md#FR-01
+最近确认：46e58f4b3a574fafdc1f01d3250f768b8a9654f1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-29-jump-empty-turn-dup:flow:FR-01
+  tests: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-29-jump-empty-turn-dup
+  status: active
+
+## FR-auto-sillyspec-018 首次点击未加载轮的单轮直达行为不变（一次请求 + prepend + 定位高亮 + 零翻页）
+变更：2026-09-29-jump-empty-turn-dup
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 高亮 相关模块就绪；When 首次点击未加载轮的单轮直达行为不变（一次请求 + prepend + 定位高亮 + 零翻页）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-29-jump-empty-turn-dup/requirements.md#FR-02
+最近确认：46e58f4b3a574fafdc1f01d3250f768b8a9654f1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-29-jump-empty-turn-dup:flow:FR-02
+  tests: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-29-jump-empty-turn-dup
+  status: active
+
+## FR-auto-sillyspec-019 既有直达/回退/空日志兜底用例全绿，聚焦测试 + tsc/eslint 0 错
+变更：2026-09-29-jump-empty-turn-dup
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 既有直达/回退/空日志兜底用例全绿，聚焦测试 + tsc/eslint 0 错；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-29-jump-empty-turn-dup/requirements.md#FR-03
+最近确认：46e58f4b3a574fafdc1f01d3250f768b8a9654f1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-29-jump-empty-turn-dup:flow:FR-03
+  tests: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-29-jump-empty-turn-dup
+  status: active

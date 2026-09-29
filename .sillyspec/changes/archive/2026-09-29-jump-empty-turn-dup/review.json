@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-29-jump-empty-turn-dup",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01 措辞「已在装配状态中」与实现实际判定条件（已直达过且拉回零正文的 ref 标记）存在文档级错位",
+      "evidence": "FR-01 When 句沿任务原话「二次点击已在装配状态中的零正文轮」，但实现短路条件是 jumpEmptyJumpedRunIdsRef.has(entry.key)（已直达过且确认零正文），且零正文轮本就不再 prepend、从不进装配态；机制偏差已在 design 槽4 披露（放弃装配态存在性判定的理由成立——孤儿空壳不在 turnState + 陈旧闭包），行为承诺（调用计数不增长、无重复 prepend 块）经新用例断言兑现，仅 FR 措辞未随机制对齐。",
+      "location": ".sillyspec/changes/2026-09-29-jump-empty-turn-dup/requirements.md:10-12 vs frontend/src/components/daemon/session-panel/session-panel-page.tsx:2050"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-29T00:28:25Z"
+}

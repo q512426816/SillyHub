@@ -1,0 +1,24 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+baseline_commit: ad4aa9a7c6d70e82e8c55ed1607b298c98755451
+updatedAt: '2026-09-29T00:29:06.995Z'
+baseline_sha256: d695d58246bd052a0ef5202fb4e288a60a5a5e65ac2991f77e80d934fca23862
+gate_summary: >-
+  test: skipped
+  结果：C:\Users\qinyi\AppData\Local\Temp\sillyspec-gate-J29TdQ\.sillyspec\.runtime\verify-runs\20260929002226\test-result.json
+  — 跳过原因：变更与测试面零关系（5 个变更文件无自身测试、无 import 依赖测试、无 FR 关联绑定）——动态子集空，不硬跑全量（防超时/预存失败面）。｜lint: passed ← cd backend && uv run
+  ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd
+  ../sillyhub-daemon && pnpm typecheck（51.1s）｜门文件 5 个
+
