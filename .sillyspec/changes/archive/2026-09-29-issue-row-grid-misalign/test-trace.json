@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-29-issue-row-grid-misalign",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-29-issue-row-grid-misalign:flow:FR-01",
+      "tests": [
+        "frontend/src/components/primer/__tests__/primer-structures.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-29-issue-row-grid-misalign"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-29-issue-row-grid-misalign:flow:FR-04",
+      "tests": [
+        "changes/__tests__/page.test.tsx",
+        "frontend/src/components/primer/__tests__/primer-structures.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-29-issue-row-grid-misalign"
+    }
+  ]
+}

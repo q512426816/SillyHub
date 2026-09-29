@@ -1,0 +1,49 @@
+{
+  "change": "2026-09-29-issue-row-grid-misalign",
+  "baseline": "c557b038e8c70e176d086a1da13e0a5b6f67637a",
+  "head": "e91a93c06ae925e879212ce286fcd3ce38560a2b",
+  "files": [
+    ".sillyspec/changes/2026-09-29-issue-row-grid-misalign/design.md",
+    ".sillyspec/changes/2026-09-29-issue-row-grid-misalign/flow-state.yaml",
+    ".sillyspec/changes/2026-09-29-issue-row-grid-misalign/grid-repro.html",
+    ".sillyspec/changes/2026-09-29-issue-row-grid-misalign/proposal.md",
+    ".sillyspec/changes/2026-09-29-issue-row-grid-misalign/requirements.md",
+    ".sillyspec/changes/2026-09-29-issue-row-grid-misalign/tasks.md",
+    ".sillyspec/changes/2026-09-29-issue-row-grid-misalign/visual-evidence.md",
+    "frontend/src/components/primer/__tests__/primer-structures.test.tsx",
+    "frontend/src/components/primer/issue-row.tsx"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 335,
+    "deletions": 1
+  },
+  "savedAt": "2026-09-29T01:10:46.558Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "a0ec030fcb6739ee1170d2d2deece1e4c340f25538477ac4a8c5fb027b64923a",
+  "patchStatus": "ok"
+}
