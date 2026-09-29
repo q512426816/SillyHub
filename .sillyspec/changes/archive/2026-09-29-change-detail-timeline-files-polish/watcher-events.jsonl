@@ -1,0 +1,14 @@
+{"ts":1790670357502,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790670377371,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790670390713,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790671593354,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"brainstorm/plan 期已 20 分钟无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790673403914,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790673403914,"kind":"task-done","stage":"tasks","detail":"checked 0→6","provisional":true}
+{"ts":1790673404138,"kind":"warning","stage":null,"rule":"fake-check","severity":"warning","detail":"tasks 勾选 task-01、task-02、task-03、task-04、task-05、task-06 无对应提交（消息不含该 task id）且无 review.json 变更——假勾选嫌疑，人判","provisional":true}
+{"ts":1790673453996,"kind":"commit","stage":null,"detail":"fa799e68b","provisional":true}
+{"ts":1790673483785,"kind":"commit","stage":null,"detail":"36f1fa795","provisional":true}
+{"ts":1790673812739,"kind":"commit","stage":null,"detail":"1954d3fef","provisional":true}
+{"ts":1790674498073,"kind":"gate-run","stage":"verify","detail":"门实测 passed（77.2s） · 20260929093457","provisional":true}
+{"ts":1790674530724,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1790674538192,"kind":"commit","stage":null,"detail":"ef7160884","provisional":true}
+{"ts":1790674820987,"kind":"commit","stage":null,"detail":"5307276fa","provisional":true}

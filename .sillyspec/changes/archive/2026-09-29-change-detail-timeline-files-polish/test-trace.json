@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-29-change-detail-timeline-files-polish",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-29-change-detail-timeline-files-polish:flow:FR-01",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx「ChangeTimelineCard 事件折叠（阈值 30）」",
+        "frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx「fake-check 告警醒目态（琥珀强调）」",
+        "frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx「三段渲染：诞生锚 + 事件轴（中文标签/commit 标题）+ 任务面（勾选×提交锚）+ 统计」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-29-change-detail-timeline-files-polish"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-29-change-detail-timeline-files-polish:flow:FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_files_router.py::test_list_files（.jsonl",
+        "frontend/src/components/__tests__/change-file-tree.test.tsx",
+        "frontend/src/components/files/__tests__/file-preview-modal.test.tsx",
+        "frontend/src/components/files/__tests__/preview-registry.test.ts",
+        "frontend/src/components/files/__tests__/structured-views.test.tsx「tryParseJsonl」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-29-change-detail-timeline-files-polish"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-29-change-detail-timeline-files-polish:flow:FR-03",
+      "tests": [
+        "frontend/src/components/__tests__/change-file-tree.test.tsx「固定产物树节点主显中文名 + 原名对照，非固定名维持原名」",
+        "frontend/src/components/__tests__/change-file-tree.test.tsx「选中固定产物：内容标题中文名 + 原路径对照；全屏 meta.name 恒原名」",
+        "frontend/src/components/mobile/mobile-change-detail.test.tsx「文档 chip 点击打开 FilePreviewModal」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-29-change-detail-timeline-files-polish"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-29-change-detail-timeline-files-polish:flow:FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_files_router.py",
+        "frontend/src/components/__tests__/change-file-tree.test.tsx",
+        "frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-29-change-detail-timeline-files-polish"
+    }
+  ]
+}

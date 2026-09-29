@@ -1,0 +1,1402 @@
+diff --git a/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/flow-state.yaml b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/flow-state.yaml
+new file mode 100644
+index 000000000..c14866a68
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/flow-state.yaml
+@@ -0,0 +1,10 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 790c594bf0570259215b5c18178c481f6f856a22
++updatedAt: '2026-09-29T08:25:19.951Z'
++baseline_sha256: bea6a8d8b1e3f1d5815be62318f481b868d315a73d5b235f4dc4820843f81179
++
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index c27f470ef..a94c20583 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -438,6 +438,8 @@ class ChangeService:
+     # is_text 判定的文本扩展名（编辑器对非文本只读，D-007）。
+     # ql-20260917-004：补 .log/.patch/.diff——verify-logs/*.log 与 scope-audit.patch
+     # 此前被误判非文本，文件树给「非文本文件」占位、全屏预览落 fallback。
++    # 2026-09-29-change-detail-timeline-files-polish：补 .jsonl——watcher-events.jsonl
++    # 同为纯文本（每行一个 JSON），此前判非文本导致内容预览不可用。
+     _TEXT_SUFFIXES = frozenset(
+         {
+             ".md",
+@@ -451,6 +453,7 @@ class ChangeService:
+             ".log",
+             ".patch",
+             ".diff",
++            ".jsonl",
+         }
+     )
+ 
+diff --git a/backend/app/modules/change/tests/test_files_router.py b/backend/app/modules/change/tests/test_files_router.py
+index eb5f0ec6b..ee9827c8b 100644
+--- a/backend/app/modules/change/tests/test_files_router.py
++++ b/backend/app/modules/change/tests/test_files_router.py
+@@ -82,6 +82,21 @@ async def test_list_files(
+     # is_text 标记正确
+     md = next(it for it in body["items"] if it["path"].endswith(".md"))
+     assert md["is_text"] is True
++    # .jsonl 判定文本（2026-09-29-change-detail-timeline-files-polish：
++    # watcher-events.jsonl 此前被判非文本，内容预览整体不可用）
++    change_dir = (
++        Path(workspace_with_changes["spec_root"]) / "changes" / workspace_with_changes["change_key"]
++    )
++    (change_dir / "watcher-events.jsonl").write_text(
++        '{"ts":1,"kind":"file","detail":"proposal.md 出现"}\n', encoding="utf-8"
++    )
++    resp2 = await client.get(
++        f"/api/workspaces/{ws_id}/changes/{change_id}/files",
++        headers=auth_headers,
++    )
++    assert resp2.status_code == 200, resp2.text
++    jsonl = next(it for it in resp2.json()["items"] if it["path"] == "watcher-events.jsonl")
++    assert jsonl["is_text"] is True
+ 
+ 
+ async def test_read_file_content(
+diff --git a/frontend/src/components/__tests__/change-file-tree.test.tsx b/frontend/src/components/__tests__/change-file-tree.test.tsx
+index 08db70efc..bf39f5f3d 100644
+--- a/frontend/src/components/__tests__/change-file-tree.test.tsx
++++ b/frontend/src/components/__tests__/change-file-tree.test.tsx
+@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+ 
+ // vi.mock 解耦后端（task-15 / FR-09）；fetchChangeFileRaw 为 raw 端点取数
+ // （2026-08-26-file-fullscreen-preview task-02 / D-009：预览恒走 raw 不走 content）
++// changeFileCnName（2026-09-29-change-detail-timeline-files-polish）为纯映射
++// 函数——mock 里内联等价实现，供中文名展示断言用
+ vi.mock("@/lib/change-files", () => ({
+   buildChangeFileTree: (items: { path: string; name: string; is_text: boolean }[]) =>
+     items.map((i) => ({ name: i.name, path: i.path, children: [], doc: i })),
+@@ -10,6 +12,13 @@ vi.mock("@/lib/change-files", () => ({
+   saveChangeFileContent: vi.fn(),
+   listPendingChangeFiles: vi.fn(),
+   fetchChangeFileRaw: vi.fn(),
++  changeFileCnName: (name: string): string | null => {
++    const table: Record<string, string> = {
++      "proposal.md": "变更提案",
++      "watcher-events.jsonl": "观测事件流",
++    };
++    return table[name.split("/").pop() ?? name] ?? null;
++  },
+ }));
+ 
+ // FilePreviewModal 浅 mock：弹窗本体（antd Modal + 渲染器树）已有专属测试
+@@ -359,3 +368,82 @@ describe("ChangeFileTree", () => {
+     expect(mockedGetContent).toHaveBeenCalledTimes(1);
+   });
+ });
++
++// ── 2026-09-29-change-detail-timeline-files-polish：中文名展示 + jsonl 预览 ──
++describe("ChangeFileTree 固定产物中文名与 jsonl 预览", () => {
++  it("固定产物树节点主显中文名 + 原名对照，非固定名维持原名", async () => {
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("变更提案")).toBeInTheDocument());
++    // proposal.md 原名以小字对照保留（且可与中文名同时在场）
++    expect(screen.getByText("proposal.md")).toBeInTheDocument();
++    // 非固定名（logo.png）不受映射影响
++    expect(screen.getByText("logo.png")).toBeInTheDocument();
++  });
++
++  it("选中固定产物：内容标题中文名 + 原路径对照；全屏 meta.name 恒原名", async () => {
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("变更提案")).toBeInTheDocument());
++    fireEvent.click(screen.getByText("变更提案"));
++    await waitFor(() => expect(screen.getByTestId("md")).toBeInTheDocument());
++    // 内容标题容器：中文名与原路径同场。选中后「变更提案」在树节点（button
++    // 内）与内容标题两处出现——取不在 button 内的那处（即标题）
++    const titleZh = screen
++      .getAllByText("变更提案")
++      .find((el) => el.closest("button") === null);
++    expect(titleZh).toBeDefined();
++    const header = titleZh!.closest("div.flex");
++    expect(header).not.toBeNull();
++    expect(header!.textContent).toContain("proposal.md");
++    // 全屏预览 meta.name 恒为原文件名（下载不被改名）
++    fireEvent.click(screen.getByRole("button", { name: "全屏预览" }));
++    await waitFor(() => expect(screen.getByTestId("file-preview-modal")).toBeInTheDocument());
++    expect(modalProps.at(-1)!.target?.meta.name).toBe("proposal.md");
++  });
++
++  it("watcher-events.jsonl 内联预览：专用表格视图渲染（时刻/类型/详情）", async () => {
++    mockedListChangeFiles.mockResolvedValue({
++      change_id: "c1",
++      items: [
++        { path: "watcher-events.jsonl", name: "watcher-events.jsonl", size: 200, last_modified_at: null, is_text: true },
++      ],
++    });
++    mockedGetContent.mockResolvedValue({
++      path: "watcher-events.jsonl",
++      content:
++        '{"ts":1790518116696,"kind":"file","stage":"proposal","detail":"proposal.md 出现","provisional":true}\n' +
++        '{"ts":1790518385326,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}',
++      exists: true,
++    });
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    // 映射名「观测事件流」主显（mock 表内含 watcher-events.jsonl）
++    await waitFor(() => expect(screen.getByText("观测事件流")).toBeInTheDocument());
++    fireEvent.click(screen.getByText("观测事件流"));
++    // watcher-events 专用表格视图在场（非纯文本 pre）
++    await waitFor(() =>
++      expect(document.querySelector('[data-testid="watcher-events-view"]')).not.toBeNull(),
++    );
++    const view = document.querySelector('[data-testid="watcher-events-view"]')!;
++    expect(view.textContent).toContain("文件出现");
++    expect(view.textContent).toContain("requirements.md 内容变更");
++  });
++
++  it("非 watcher 的 jsonl 内联预览：通用逐行树；非法 jsonl 回落纯文本", async () => {
++    mockedListChangeFiles.mockResolvedValue({
++      change_id: "c1",
++      items: [
++        { path: "hits.jsonl", name: "hits.jsonl", size: 50, last_modified_at: null, is_text: true },
++      ],
++    });
++    mockedGetContent.mockResolvedValue({
++      path: "hits.jsonl",
++      content: '{"q":"a"}\nnot-json-line',
++      exists: true,
++    });
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("hits.jsonl")).toBeInTheDocument());
++    fireEvent.click(screen.getByText("hits.jsonl"));
++    // 任一行非法 → 纯文本兜底（无 jsonl-view）
++    await waitFor(() => expect(screen.getByText(/not-json-line/)).toBeInTheDocument());
++    expect(document.querySelector('[data-testid="jsonl-view"]')).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/change-file-tree.tsx b/frontend/src/components/change-file-tree.tsx
+index 6aa61bf9e..871101983 100644
+--- a/frontend/src/components/change-file-tree.tsx
++++ b/frontend/src/components/change-file-tree.tsx
+@@ -19,7 +19,7 @@ import { FileNodeIcon, fileExt } from "@/components/ui/file-node-icon";
+ import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
+ import { useObjectUrl } from "@/components/files/use-object-url";
+ // ql-20260917-004/010：固定结构产物可视化视图（json 表格/折叠树 + diff 红绿懒加载）
+-import { DiffView, JsonView, knownJsonView, tryParseJson } from "@/components/files/structured-views";
++import { DiffView, JsonView, JsonlView, knownJsonView, knownJsonlView, tryParseJson, tryParseJsonl } from "@/components/files/structured-views";
+ import { ApiError } from "@/lib/api";
+ // 变更名自动链接（2026-08-31 变更关联审计 P3）：变更文档正文提名的变更名
+ // 渲染为详情页直链（含归档变更；名单 staleTime 5 分钟，见 lib/change-autolink）
+@@ -27,6 +27,7 @@ import { remarkChangeLink, useChangeNameIndex } from "@/lib/change-autolink";
+ import { formatFileSize } from "@/lib/file/utils";
+ import {
+   buildChangeFileTree,
++  changeFileCnName,
+   fetchChangeFileRaw,
+   getChangeFileContent,
+   listChangeFiles,
+@@ -124,6 +125,20 @@ function FilePreview({
+   if (fileExt(path) === "patch" || fileExt(path) === "diff") {
+     return <DiffView content={content} />;
+   }
++  // jsonl 逐行视图（2026-09-29-change-detail-timeline-files-polish）：
++  // watcher-events.jsonl 专用表格 / 其余合法 jsonl 逐行折叠树；非法回落纯文本
++  if (fileExt(path) === "jsonl") {
++    const lines = tryParseJsonl(content);
++    if (lines !== null) {
++      const known = knownJsonlView(path, lines);
++      if (known !== null) return <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40 p-2">{known}</div>;
++      return (
++        <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40">
++          <JsonlView lines={lines} />
++        </div>
++      );
++    }
++  }
+   // 其他纯文本：只读源码预览（点「编辑」才可改）。whitespace-pre：不折行，超宽横向滚动
+   return (
+     <pre className="min-w-0 flex-1 overflow-auto rounded-md border border-input bg-background p-3 font-mono text-xs leading-relaxed whitespace-pre">
+@@ -301,6 +316,9 @@ function TreeView({
+         if (!doc) return null;
+         const isPending = pendingPaths.has(doc.path);
+         const isSelected = selectedPath === doc.path;
++        // 固定产物中文名（2026-09-29-change-detail-timeline-files-polish）：
++        // 主显中文 + muted 小字原名对照；非固定名回落原名展示
++        const cnName = changeFileCnName(doc.path);
+         return (
+           <button
+             key={doc.path}
+@@ -313,8 +331,13 @@ function TreeView({
+             onClick={() => onSelect(doc)}
+           >
+             <FileIcon />
+-            <span className="truncate">{doc.name}</span>
+-            <span className="ml-auto flex items-center gap-1">
++            <span className="min-w-0 flex-1 truncate">{cnName ?? doc.name}</span>
++            <span className="ml-auto flex shrink-0 items-center gap-1">
++              {cnName && (
++                <span className="font-mono text-[10px] font-normal text-muted-foreground/70" title={doc.path}>
++                  {doc.name}
++                </span>
++              )}
+               {isPending && (
+                 <Badge variant="warning" className="text-[10px] px-1.5">
+                   排队中
+@@ -579,7 +602,16 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
+           ) : (
+             <div className="flex h-full min-w-0 flex-col gap-2">
+               <div className="flex items-center justify-between gap-2">
+-                <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{selected.path}</span>
++                {/* 固定产物中文名主显 + 原路径对照（2026-09-29-change-detail-
++                    timeline-files-polish）；非固定名维持原路径 mono 展示 */}
++                {changeFileCnName(selected.path) ? (
++                  <span className="min-w-0 truncate text-[11px]" title={selected.path}>
++                    <span className="font-medium text-foreground">{changeFileCnName(selected.path)}</span>
++                    <span className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">{selected.path}</span>
++                  </span>
++                ) : (
++                  <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{selected.path}</span>
++                )}
+                 <div className="flex items-center gap-2">
+                   {saveStatus !== "idle" && (
+                     <span className={`text-[11px] ${statusLabel[saveStatus].color}`}>
+diff --git a/frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx
+index 05e19b230..a3f888566 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx
+@@ -1,7 +1,8 @@
+ // 真实留痕时间线卡组件测试（2026-09-26-change-real-timeline FR-02/FR-03）。
+ // 覆盖：三段渲染（事件轴含诞生锚/中文标签、任务面勾选×提交锚、脚注统计）、
+-// fake-check 告警醒目态、commit 标题展示、失败/空数据静默隐藏（观测事件卡范式）。
+-import { render, screen } from "@testing-library/react";
++// fake-check 告警醒目态、commit 标题展示、失败/空数据静默隐藏（观测事件卡范式）、
++// 超阈值折叠/展开（2026-09-29-change-detail-timeline-files-polish）。
++import { fireEvent, render, screen } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+@@ -103,11 +104,15 @@ describe("ChangeTimelineCard", () => {
+     expect(tasks).toHaveTextContent("task-01");
+     expect(tasks).toHaveTextContent("后端聚合服务落盘");
+     expect(tasks).toHaveTextContent("4aed0e824");
+-    // 勾选时刻（2026-09-27-timeline-task-time）：已勾有时刻 → ≈本地时分秒；
+-    // 未勾不显示时刻列值。hhmmss 走 zh-CN 本地时区，ISO Z 转本地——断言用
+-    // 同款格式化避免硬编码时区。
++    // 勾选时刻（2026-09-27-timeline-task-time）：已勾有时刻 → ≈本地时刻；
++    // 未勾不显示时刻列值。2026-09-29-change-detail-timeline-files-polish 起
++    // 时刻带 MM-dd 日期前缀（跨天防歧义）；hhmmss 走 zh-CN 本地时区，ISO Z
++    // 转本地——断言用同款格式化避免硬编码时区。
++    const taskTs = new Date("2026-09-26T07:02:00Z");
++    const mm = `${taskTs.getMonth() + 1}`.padStart(2, "0");
++    const dd = `${taskTs.getDate()}`.padStart(2, "0");
+     expect(tasks.textContent).toContain(
+-      `≈${new Date("2026-09-26T07:02:00Z").toLocaleTimeString("zh-CN", { hour12: false })}`,
++      `≈${mm}-${dd} ${taskTs.toLocaleTimeString("zh-CN", { hour12: false })}`,
+     );
+     // 已勾但推断断裂/盲窗（time=null）→ 显示 ?；未勾（task-02）无时刻列值。
+     expect(tasks.textContent).toContain("?");
+@@ -189,3 +194,57 @@ it("渲染 gate-run/config-change/fake-check-cleared/verify 四新 kind 图标",
+     expect(screen.getByTestId("change-timeline-card").innerHTML).toContain(icon);
+   }
+ });
++
++// ── 2026-09-29-change-detail-timeline-files-polish：超阈值折叠/展开 ──────
++describe("ChangeTimelineCard 事件折叠（阈值 30）", () => {
++  function manyEvents(n: number) {
++    return Array.from({ length: n }, (_, i) => ({
++      ts: `2026-09-26T07:${String(10 + Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}Z`,
++      kind: "file-update",
++      label: `事件 ${i + 1}`,
++      rule: "watcher",
++      severity: "info",
++      provisional: true,
++      commit_title: null,
++    }));
++  }
++
++  function respOf(n: number) {
++    return {
++      change_key: "k",
++      born_at: null as string | null,
++      events: manyEvents(n),
++      tasks: [],
++      stats: { event_count: n, commit_count: 0, checked: 0, total: 0, wall_clock_s: null },
++    };
++  }
++
++  it("≤30 条不折叠（无提示按钮，全部行在场）", async () => {
++    mockTimeline.mockResolvedValue(respOf(30));
++    renderCard();
++    await screen.findByTestId("change-timeline-card");
++    expect(screen.queryByTestId("change-timeline-expand")).toBeNull();
++    expect(screen.getByText("事件 1")).toBeInTheDocument();
++    expect(screen.getByText("事件 30")).toBeInTheDocument();
++  });
++
++  it(">30 条默认只渲染最近 30 条 + 折叠提示；展开后全量 + 收起按钮", async () => {
++    mockTimeline.mockResolvedValue(respOf(35));
++    renderCard();
++    await screen.findByTestId("change-timeline-card");
++    // 最早的 5 条被折叠
++    expect(screen.queryByText("事件 1")).toBeNull();
++    expect(screen.queryByText("事件 5")).toBeNull();
++    expect(screen.getByText("事件 6")).toBeInTheDocument();
++    expect(screen.getByText("事件 35")).toBeInTheDocument();
++    expect(screen.getByTestId("change-timeline-expand")).toHaveTextContent("已折叠较早的 5 条事件");
++
++    fireEvent.click(screen.getByTestId("change-timeline-expand"));
++    expect(screen.getByText("事件 1")).toBeInTheDocument();
++    expect(screen.getByTestId("change-timeline-collapse")).toBeInTheDocument();
++
++    fireEvent.click(screen.getByTestId("change-timeline-collapse"));
++    expect(screen.queryByText("事件 1")).toBeNull();
++    expect(screen.getByText("事件 35")).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/changes/detail/change-timeline-card.tsx b/frontend/src/components/changes/detail/change-timeline-card.tsx
+index 9c0f034d8..59fc8c1a9 100644
+--- a/frontend/src/components/changes/detail/change-timeline-card.tsx
++++ b/frontend/src/components/changes/detail/change-timeline-card.tsx
+@@ -1,5 +1,7 @@
+ "use client";
+ 
++import { useState } from "react";
++
+ import { useQuery } from "@tanstack/react-query";
+ 
+ import { getChangeTimeline, type TimelineEventItem } from "@/lib/changes";
+@@ -13,6 +15,13 @@ import { getChangeTimeline, type TimelineEventItem } from "@/lib/changes";
+ // 红线 D-004 延续：事件恒 provisional（观测语义），本卡只展示不消费、
+ // 无 mutation；kind → 图标/中文映射对齐 CLI 输出语义（detail 已是 CLI 同源
+ // 中文文案，label 直显，kind 只决定图标与强调色）。
++//
++// 2026-09-29-change-detail-timeline-files-polish：展示效果重做——事件轴从
++// border-dashed 平铺改「节点圆点 + 连线」竖向时间轴（借 primer Timeline 的
++// 节点/连线/tone 视觉语言，行距收紧——事件密集场景 primer 本体 pb-5 太占
++// 空间，不直接复用）；卡内容区限高内部滚动（事件/任务多不再撑爆详情页）；
++// 事件超过阈值默认只渲染最近一段 +「展开全部」切换；时刻带日期（跨天变更
++// 不再只有时分秒产生歧义）。
+ 
+ /** kind → 图标 + 强调态（对齐 CLI watcher timeline 输出行首图标语义）。 */
+ const KIND_ICON: Record<string, { icon: string; warn?: boolean }> = {
+@@ -26,17 +35,21 @@ const KIND_ICON: Record<string, { icon: string; warn?: boolean }> = {
+   "config-change": { icon: "🔧" },
+   "fake-check-cleared": { icon: "🩹" },
+   verify: { icon: "🧾" },
++  // 诞生锚（工件 created_at 补位行，非事件流 kind）
++  born: { icon: "🌱" },
+ };
+ 
+ function eventIcon(kind: string) {
+   return KIND_ICON[kind] ?? { icon: "ℹ️" };
+ }
+ 
+-/** ISO ts → 本地 HH:mm:ss（失败回退原文，页面既有步骤时间线同款宽容）。 */
+-function hhmmss(ts: string): string {
++/** ISO ts → 本地 MM-dd HH:mm:ss（带日期防跨天歧义；失败回退原文）。 */
++function eventTime(ts: string): string {
+   const d = new Date(ts);
+   if (Number.isNaN(d.getTime())) return ts;
+-  return d.toLocaleTimeString("zh-CN", { hour12: false });
++  const mm = `${d.getMonth() + 1}`.padStart(2, "0");
++  const dd = `${d.getDate()}`.padStart(2, "0");
++  return `${mm}-${dd} ${d.toLocaleTimeString("zh-CN", { hour12: false })}`;
+ }
+ 
+ /** 秒 → 中文时长（<60s 显秒；<1h 显分；否则时+分）。 */
+@@ -47,35 +60,80 @@ function dur(seconds: number | null | undefined): string | null {
+   return `${Math.floor(seconds / 3600)}h${Math.round((seconds % 3600) / 60)}min`;
+ }
+ 
+-function EventRow({ e }: { e: TimelineEventItem }) {
+-  const { icon, warn } = eventIcon(e.kind);
++/** 事件折叠阈值：超过则默认只渲染最近 N 条（较早的可展开）。 */
++const EVENT_COLLAPSE_LIMIT = 30;
++
++/** 时间轴节点色调：告警 amber / 提交 brand / 诞生 success / 其余中性。 */
++function dotTone(kind: string, warn?: boolean): string {
++  if (warn) return "bg-amber-500";
++  if (kind === "commit") return "bg-brand-500";
++  if (kind === "born") return "bg-success";
++  return "bg-muted-foreground/60";
++}
++
++/**
++ * 时间轴单行：左侧「节点圆点 + 向下连线」（末行不画连线）+ 时刻 + 图标 +
++ * 标签。warn 行 amber 强调整行（既有测试锚点：li 级 text-amber-700）。
++ */
++function TimelineRow({
++  testId,
++  ts,
++  icon,
++  label,
++  kind,
++  warn,
++  isLast,
++  children,
++}: {
++  testId?: string;
++  ts: string;
++  icon: string;
++  label: React.ReactNode;
++  kind: string;
++  warn?: boolean;
++  isLast: boolean;
++  children?: React.ReactNode;
++}) {
+   return (
+     <li
+-      data-testid={`change-timeline-event-${e.kind}`}
+-      className={`flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 ${
+-        warn ? "text-amber-700" : "text-foreground"
+-      }`}
++      data-testid={testId}
++      className={`flex gap-2 ${warn ? "text-amber-700" : "text-foreground"}`}
+     >
+-      <span className="w-16 shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+-        {hhmmss(e.ts)}
+-      </span>
+-      <span className="shrink-0">{icon}</span>
+-      <span className="min-w-0 flex-1 truncate" title={e.commit_title ?? e.label ?? ""}>
+-        {e.kind === "commit" ? (
+-          <>
+-            <span className="font-mono text-[10.5px] text-brand-700">{e.label}</span>
+-            {e.commit_title ? (
+-              <span className="ml-1 text-muted-foreground">{e.commit_title}</span>
+-            ) : null}
+-          </>
+-        ) : (
+-          (e.label ?? e.kind)
+-        )}
++      <span aria-hidden className="flex shrink-0 flex-col items-center self-stretch">
++        <span className={`mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full ${dotTone(kind, warn)}`} />
++        {!isLast && <span className="mt-0.5 w-px flex-1 bg-border" />}
+       </span>
++      <div className="min-w-0 flex-1 pb-2 pl-0.5">
++        <div className="flex items-baseline gap-2 py-0.5 text-xs leading-5">
++          <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
++            {ts}
++          </span>
++          <span className="shrink-0" aria-hidden>
++            {icon}
++          </span>
++          <span className="min-w-0 flex-1 truncate">{label}</span>
++        </div>
++        {children}
++      </div>
+     </li>
+   );
+ }
+ 
++/** 事件行标签：commit 行哈希（brand mono）+ 标题；其余 label 直显。 */
++function EventLabel({ e }: { e: TimelineEventItem }) {
++  if (e.kind === "commit") {
++    return (
++      <>
++        <span className="font-mono text-[10.5px] text-brand-700">{e.label}</span>
++        {e.commit_title ? (
++          <span className="ml-1 text-muted-foreground">{e.commit_title}</span>
++        ) : null}
++      </>
++    );
++  }
++  return <span title={e.label ?? ""}>{e.label ?? e.kind}</span>;
++}
++
+ export function ChangeTimelineCard({
+   workspaceId,
+   changeId,
+@@ -83,6 +141,7 @@ export function ChangeTimelineCard({
+   workspaceId: string;
+   changeId: string;
+ }) {
++  const [expanded, setExpanded] = useState(false);
+   const query = useQuery({
+     queryKey: ["changeTimeline", workspaceId, changeId],
+     queryFn: () => getChangeTimeline(workspaceId, changeId),
+@@ -109,6 +168,30 @@ export function ChangeTimelineCard({
+   if (events.length === 0 && tasks.length === 0 && !d.born_at) return null;
+   const wall = dur(stats.wall_clock_s);
+ 
++  // 事件轴行集：诞生锚（如有）置顶 + 事件流；超阈值折叠较早段（默认最近
++  // EVENT_COLLAPSE_LIMIT 行，展开切换在轴顶提示行）。
++  const allRows: { testId: string; ts: string; kind: string; label: React.ReactNode; warn?: boolean }[] = [];
++  if (d.born_at) {
++    allRows.push({
++      testId: "change-timeline-event-born",
++      ts: d.born_at,
++      kind: "born",
++      label: <span>变更诞生</span>,
++    });
++  }
++  for (const e of events) {
++    allRows.push({
++      testId: `change-timeline-event-${e.kind}`,
++      ts: e.ts,
++      kind: e.kind,
++      label: <EventLabel e={e} />,
++      warn: eventIcon(e.kind).warn,
++    });
++  }
++  const collapsed = !expanded && allRows.length > EVENT_COLLAPSE_LIMIT;
++  const visibleRows = collapsed ? allRows.slice(allRows.length - EVENT_COLLAPSE_LIMIT) : allRows;
++  const hiddenCount = allRows.length - visibleRows.length;
++
+   return (
+     <section data-testid="change-timeline-card" className="rounded-md border bg-card">
+       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
+@@ -127,62 +210,85 @@ export function ChangeTimelineCard({
+       </div>
+ 
+       <div className="px-3 py-2.5">
+-        <p className="mb-1 text-[11px] font-medium text-muted-foreground">事件时间轴</p>
+-        <ul className="mb-3">
+-          {d.born_at ? (
+-            <li
+-              data-testid="change-timeline-event-born"
+-              className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs"
++        {/* 限高滚动容器：事件/任务多时卡内滚动，不再撑爆详情页 */}
++        <div className="max-h-[420px] overflow-y-auto pr-1">
++          <p className="mb-1 text-[11px] font-medium text-muted-foreground">事件时间轴</p>
++          {hiddenCount > 0 && (
++            <button
++              type="button"
++              data-testid="change-timeline-expand"
++              className="mb-1 rounded border border-border/60 bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
++              onClick={() => setExpanded(true)}
+             >
+-              <span className="w-16 shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+-                {hhmmss(d.born_at)}
+-              </span>
+-              <span className="shrink-0">🁢</span>
+-              <span>变更诞生（工件 created_at）</span>
+-            </li>
+-          ) : null}
+-          {events.map((e, i) => (
+-            <EventRow key={`${e.ts}-${i}`} e={e} />
+-          ))}
+-          {events.length === 0 && !d.born_at ? (
+-            <li className="py-1 text-xs text-muted-foreground">暂无观测事件。</li>
+-          ) : null}
+-        </ul>
+-
+-        {tasks.length > 0 ? (
+-          <>
+-            <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+-              任务面（勾选时刻 ≈ 顺序推断 × 提交锚）
+-            </p>
+-            <ul data-testid="change-timeline-tasks">
+-              {tasks.map((t) => (
+-                <li
+-                  key={t.id}
+-                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0"
+-                >
+-                  <span className="w-4 shrink-0">{t.checked ? "☑" : "☐"}</span>
+-                  <span className="w-16 shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+-                    {t.checked ? (t.time ? `≈${hhmmss(t.time)}` : "?") : ""}
+-                  </span>
+-                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+-                    {t.id}
+-                  </span>
+-                  <span className="min-w-0 flex-1 truncate" title={t.desc}>
+-                    {t.desc}
+-                  </span>
+-                  {t.commit_sha ? (
+-                    <span className="shrink-0 font-mono text-[10px] text-brand-700">
+-                      {t.commit_sha}
++              已折叠较早的 {hiddenCount} 条事件，点击展开全部 {allRows.length} 条
++            </button>
++          )}
++          {expanded && allRows.length > EVENT_COLLAPSE_LIMIT && (
++            <button
++              type="button"
++              data-testid="change-timeline-collapse"
++              className="mb-1 rounded border border-border/60 bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
++              onClick={() => setExpanded(false)}
++            >
++              收起较早事件，仅显示最近 {EVENT_COLLAPSE_LIMIT} 条
++            </button>
++          )}
++          <ul>
++            {visibleRows.map((r, i) => {
++              const { icon, warn } = eventIcon(r.kind);
++              return (
++                <TimelineRow
++                  key={`${r.testId}-${i}`}
++                  testId={r.testId}
++                  ts={eventTime(r.ts)}
++                  icon={icon}
++                  label={r.label}
++                  kind={r.kind}
++                  warn={warn}
++                  isLast={i === visibleRows.length - 1}
++                />
++              );
++            })}
++            {visibleRows.length === 0 && (
++              <li className="py-1 text-xs text-muted-foreground">暂无观测事件。</li>
++            )}
++          </ul>
++
++          {tasks.length > 0 ? (
++            <div className="mt-2">
++              <p className="mb-1 text-[11px] font-medium text-muted-foreground">
++                任务进度（勾选时间 ≈ 为推断值）
++              </p>
++              <ul data-testid="change-timeline-tasks">
++                {tasks.map((t) => (
++                  <li
++                    key={t.id}
++                    className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0"
++                  >
++                    <span className="w-4 shrink-0">{t.checked ? "☑" : "☐"}</span>
++                    <span className="w-[6.5rem] shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
++                      {t.checked ? (t.time ? `≈${eventTime(t.time)}` : "?") : ""}
+                     </span>
+-                  ) : null}
+-                </li>
+-              ))}
+-            </ul>
+-          </>
+-        ) : null}
++                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
++                      {t.id}
++                    </span>
++                    <span className="min-w-0 flex-1 truncate" title={t.desc}>
++                      {t.desc}
++                    </span>
++                    {t.commit_sha ? (
++                      <span className="shrink-0 font-mono text-[10px] text-brand-700">
++                        {t.commit_sha}
++                      </span>
++                    ) : null}
++                  </li>
++                ))}
++              </ul>
++            </div>
++          ) : null}
++        </div>
+ 
+         <p className="mt-2 text-[10px] text-muted-foreground/70">
+-          观测起点≠诞生时刻（watcher 后拉起/单飞锁盲窗）；任务勾选与提交锚为顺序推断。
++          时间线由文件监控自动记录，可能不完整（早期事件缺失属正常）；任务勾选时间为推断值。
+         </p>
+       </div>
+     </section>
+diff --git a/frontend/src/components/files/__tests__/file-preview-modal.test.tsx b/frontend/src/components/files/__tests__/file-preview-modal.test.tsx
+index a0ba64e6d..352d28a0d 100644
+--- a/frontend/src/components/files/__tests__/file-preview-modal.test.tsx
++++ b/frontend/src/components/files/__tests__/file-preview-modal.test.tsx
+@@ -31,6 +31,8 @@ vi.mock("../previewers", () => ({
+   JsonPreviewer: () => <div data-testid="json-previewer" />,
+   PatchPreviewer: () => <div data-testid="patch-previewer" />,
+   TextPreviewer: () => <div data-testid="text-previewer" />,
++  // 2026-09-29-change-detail-timeline-files-polish：jsonl 渲染器 stub
++  JsonlPreviewer: () => <div data-testid="jsonl-previewer" />,
+ }));
+ 
+ const mockFetch = vi.fn(() => Promise.resolve(new Blob(["test"], { type: "text/plain" })));
+diff --git a/frontend/src/components/files/__tests__/preview-registry.test.ts b/frontend/src/components/files/__tests__/preview-registry.test.ts
+index 6084cc36b..c1882b589 100644
+--- a/frontend/src/components/files/__tests__/preview-registry.test.ts
++++ b/frontend/src/components/files/__tests__/preview-registry.test.ts
+@@ -137,3 +137,20 @@ describe("matchRenderer", () => {
+     expect(matchRenderer("application/octet-stream", "daemon-start.log")).toBe("text");
+   });
+ });
++
++// ── 2026-09-29-change-detail-timeline-files-polish：jsonl 渲染键 ─────────
++describe("matchRenderer jsonl（watcher-events.jsonl 等）", () => {
++  it("扩展名 jsonl/ndjson（mime 未知/回落）→ jsonl 渲染器", () => {
++    expect(matchRenderer(null, "watcher-events.jsonl")).toBe("jsonl" satisfies RendererKey);
++    expect(matchRenderer("application/octet-stream", "hits.ndjson")).toBe("jsonl");
++  });
++
++  it("application/jsonl / x-ndjson mime 命中 jsonl", () => {
++    expect(matchRenderer("application/jsonl", "file.bin")).toBe("jsonl");
++    expect(matchRenderer("application/x-ndjson", "file.bin")).toBe("jsonl");
++  });
++
++  it("jsonl 文件带 application/json mime 仍走 json 渲染器（由 JsonPreviewer 按名转发兜底）", () => {
++    expect(matchRenderer("application/json", "watcher-events.jsonl")).toBe("json");
++  });
++});
+diff --git a/frontend/src/components/files/__tests__/structured-views.test.tsx b/frontend/src/components/files/__tests__/structured-views.test.tsx
+index 4f4dbbc31..9e721e4c1 100644
+--- a/frontend/src/components/files/__tests__/structured-views.test.tsx
++++ b/frontend/src/components/files/__tests__/structured-views.test.tsx
+@@ -5,7 +5,7 @@
+ import { fireEvent, render, screen } from "@testing-library/react";
+ import { describe, expect, it } from "vitest";
+ 
+-import { DiffView, JsonView, knownJsonView, tryParseJson } from "../structured-views";
++import { DiffView, JsonView, JsonlView, knownJsonView, knownJsonlView, tryParseJson, tryParseJsonl, type JsonValue } from "../structured-views";
+ 
+ describe("tryParseJson", () => {
+   it("合法 json → 解析值", () => {
+@@ -202,3 +202,57 @@ describe("knownJsonView", () => {
+     expect(knownJsonView("some/dir/verify-facts.json", verifyFacts)).not.toBeNull();
+   });
+ });
++
++// ── 2026-09-29-change-detail-timeline-files-polish：JSONL 视图族 ─────────
++describe("tryParseJsonl", () => {
++  it("逐行合法（含空行容忍）→ 行值数组", () => {
++    expect(tryParseJsonl('{"a":1}\n\n{"b":2}\r\n')).toEqual([{ a: 1 }, { b: 2 }]);
++  });
++
++  it("任一行非法 / 全空 → null（调用方回落纯文本）", () => {
++    expect(tryParseJsonl('{"a":1}\nnot-json')).toBeNull();
++    expect(tryParseJsonl("")).toBeNull();
++    expect(tryParseJsonl("   \n  ")).toBeNull();
++  });
++});
++
++describe("knownJsonlView（watcher-events.jsonl 专用表格）", () => {
++  // 显式 JsonValue[]：第三行缺 stage 键（真实缺键场景），裸字面量联合类型
++  // 带 stage?: undefined 不满足索引签名
++  const lines: JsonValue[] = [
++    { ts: 1790518116696, kind: "file", stage: "proposal", detail: "proposal.md 出现", provisional: true },
++    { ts: 1790518385326, kind: "file-update", stage: "requirements", detail: "requirements.md 内容变更", provisional: true },
++    { ts: 1790519000000, kind: "commit", detail: "提交 790c594bf", provisional: true },
++  ];
++
++  it("watcher-events.jsonl → 时刻/类型徽章/阶段/详情表格", () => {
++    const node = knownJsonlView("watcher-events.jsonl", lines);
++    expect(node).not.toBeNull();
++    const { container } = render(<div>{node}</div>);
++    const el = container.querySelector('[data-testid="watcher-events-view"]');
++    expect(el).not.toBeNull();
++    expect(el!.textContent).toContain("文件出现");
++    expect(el!.textContent).toContain("文件变更");
++    expect(el!.textContent).toContain("提交");
++    expect(el!.textContent).toContain("proposal");
++    expect(el!.textContent).toContain("proposal.md 出现");
++    expect(el!.textContent).toContain("行数 3");
++  });
++
++  it("完整路径按 basename 分发；其他名/结构不符 → null", () => {
++    expect(knownJsonlView("some/dir/watcher-events.jsonl", lines)).not.toBeNull();
++    expect(knownJsonlView("events.jsonl", lines)).toBeNull();
++    // 名字命中但结构漂移（无 kind 字段行）→ null
++    expect(knownJsonlView("watcher-events.jsonl", [{ foo: 1 }])).toBeNull();
++  });
++});
++
++describe("JsonlView（通用逐行树）", () => {
++  it("每行独立渲染折叠树，含行号", () => {
++    const { container } = render(<JsonlView lines={[{ a: 1 }, [1, 2]]} />);
++    expect(container.querySelector('[data-testid="jsonl-view"]')).not.toBeNull();
++    expect(container.textContent).toContain("第 1 行");
++    expect(container.textContent).toContain("第 2 行");
++    expect(container.querySelectorAll('[data-testid="json-view"]').length).toBe(2);
++  });
++});
+diff --git a/frontend/src/components/files/file-preview-modal.tsx b/frontend/src/components/files/file-preview-modal.tsx
+index a255c5167..a1412ce72 100644
+--- a/frontend/src/components/files/file-preview-modal.tsx
++++ b/frontend/src/components/files/file-preview-modal.tsx
+@@ -38,6 +38,7 @@ import {
+   MarkdownPreviewer,
+   FallbackPreviewer,
+   JsonPreviewer,
++  JsonlPreviewer,
+   PatchPreviewer,
+   TextPreviewer,
+   type PreviewerProps,
+@@ -87,6 +88,8 @@ const RENDERER_MAP: Record<string, ComponentType<PreviewerProps>> = {
+   json: JsonPreviewer,
+   patch: PatchPreviewer,
+   text: TextPreviewer,
++  // 2026-09-29-change-detail-timeline-files-polish：jsonl 逐行视图（watcher-events.jsonl）
++  jsonl: JsonlPreviewer,
+   fallback: FallbackPreviewer,
+ };
+ 
+diff --git a/frontend/src/components/files/preview-registry.ts b/frontend/src/components/files/preview-registry.ts
+index 26a5a437f..dc28726c4 100644
+--- a/frontend/src/components/files/preview-registry.ts
++++ b/frontend/src/components/files/preview-registry.ts
+@@ -10,7 +10,7 @@
+  * 依据：design.md §5 + §7。
+  */
+ 
+-export type RendererKey = "image" | "pdf" | "docx" | "xlsx" | "markdown" | "html" | "json" | "patch" | "text" | "fallback";
++export type RendererKey = "image" | "pdf" | "docx" | "xlsx" | "markdown" | "html" | "json" | "jsonl" | "patch" | "text" | "fallback";
+ 
+ // svg/bmp/ico（2026-08-26-file-fullscreen-preview）：explorer 内联图片含这三类，
+ // 统一预览需一致可看（Design Grill C-05）。
+@@ -32,6 +32,11 @@ const MIME_MAP: Record<string, RendererKey> = {
+   "text/html": "html",
+   // ql-20260917-004：json 结构化视图 / 纯文本渲染器（.log 全屏此前落 fallback）
+   "application/json": "json",
++  // 2026-09-29-change-detail-timeline-files-polish：jsonl 逐行结构化视图。
++  // 后端 guess_type 对 .jsonl 部分平台返回 application/json——该场景由
++  // JsonPreviewer 内按文件名转发 jsonl 视图兜底（mime 优先于扩展名）。
++  "application/jsonl": "jsonl",
++  "application/x-ndjson": "jsonl",
+   "text/plain": "text",
+   // mimetypes.guess_type 对 .log 在部分平台返回 text/x-log
+   "text/x-log": "text",
+@@ -48,6 +53,8 @@ const EXT_MAP: Record<string, RendererKey> = {
+   html: "html", htm: "html",
+   // ql-20260917-004：json 折叠树 / unified diff 红绿视图 / 纯文本
+   json: "json",
++  // 2026-09-29-change-detail-timeline-files-polish：jsonl 逐行视图（watcher-events）
++  jsonl: "jsonl", ndjson: "jsonl",
+   patch: "patch", diff: "patch",
+   log: "text", txt: "text",
+ };
+diff --git a/frontend/src/components/files/previewers/index.ts b/frontend/src/components/files/previewers/index.ts
+index 5344d21b1..539b6065e 100644
+--- a/frontend/src/components/files/previewers/index.ts
++++ b/frontend/src/components/files/previewers/index.ts
+@@ -30,3 +30,6 @@ export { HtmlPreviewer } from "./html-previewer";
+ export { JsonPreviewer } from "./json-previewer";
+ export { PatchPreviewer } from "./patch-previewer";
+ export { TextPreviewer } from "./text-previewer";
++// 2026-09-29-change-detail-timeline-files-polish：jsonl 逐行结构化渲染器
++// （watcher-events.jsonl 专用表格 + 通用逐行树，此前落 fallback）
++export { JsonlPreviewer } from "./jsonl-previewer";
+diff --git a/frontend/src/components/files/previewers/json-previewer.tsx b/frontend/src/components/files/previewers/json-previewer.tsx
+index b446e2d4a..6b9ad2e7d 100644
+--- a/frontend/src/components/files/previewers/json-previewer.tsx
++++ b/frontend/src/components/files/previewers/json-previewer.tsx
+@@ -11,10 +11,25 @@
+ 
+ import { useEffect, useState } from "react";
+ 
++import { JsonlPreviewer } from "./jsonl-previewer";
+ import { JsonView, knownJsonView, tryParseJson } from "@/components/files/structured-views";
+ import type { PreviewerProps } from "./index";
+ 
+-export function JsonPreviewer({ blob, meta, fill }: PreviewerProps) {
++/**
++ * jsonl 文件名兜底转发（2026-09-29-change-detail-timeline-files-polish）：后端
++ * guess_type 对 .jsonl 在部分平台返回 application/json——mime 优先级高于扩展名
++ * 导致 jsonl 绕过 EXT_MAP 命中本渲染器；整体 parse 必失败，不转发会落纯文本，
++ * 结构化预览失效。分发放在壳组件（hooks 全在 JsonPreviewerBody 内，壳不持有
++ * hooks——提前 return 不违反 rules-of-hooks）。
++ */
++export function JsonPreviewer(props: PreviewerProps) {
++  if (props.meta.name.toLowerCase().endsWith(".jsonl")) {
++    return <JsonlPreviewer {...props} />;
++  }
++  return <JsonPreviewerBody {...props} />;
++}
++
++function JsonPreviewerBody({ blob, meta, fill }: PreviewerProps) {
+   const [text, setText] = useState<string | null>(null);
+   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+   const [error, setError] = useState<string | null>(null);
+diff --git a/frontend/src/components/files/previewers/jsonl-previewer.tsx b/frontend/src/components/files/previewers/jsonl-previewer.tsx
+new file mode 100644
+index 000000000..988b6b96b
+--- /dev/null
++++ b/frontend/src/components/files/previewers/jsonl-previewer.tsx
+@@ -0,0 +1,74 @@
++"use client";
++
++/**
++ * JsonlPreviewer — JSONL 渲染器（2026-09-29-change-detail-timeline-files-polish）。
++ *
++ * blob.text() → tryParseJsonl → watcher-events.jsonl（按 meta.name 分发）走
++ * 专用表格视图，其余合法 jsonl 走 JsonlView 逐行折叠树；任一行非法回落纯文本。
++ * 统一消费 PreviewerProps。
++ */
++
++import { useEffect, useState } from "react";
++
++import { JsonlView, knownJsonlView, tryParseJsonl } from "@/components/files/structured-views";
++import type { PreviewerProps } from "./index";
++
++export function JsonlPreviewer({ blob, meta, fill }: PreviewerProps) {
++  const [text, setText] = useState<string | null>(null);
++  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
++  const [error, setError] = useState<string | null>(null);
++
++  useEffect(() => {
++    let cancelled = false;
++    setStatus("loading");
++    setError(null);
++    blob
++      .text()
++      .then((t: string) => {
++        if (!cancelled) {
++          setText(t);
++          setStatus("ok");
++        }
++      })
++      .catch((e: unknown) => {
++        if (!cancelled) {
++          setError(e instanceof Error ? e.message : "读取失败");
++          setStatus("error");
++        }
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, [blob]);
++
++  if (status === "loading") {
++    return (
++      <div className="flex min-h-[420px] items-center justify-center p-8 text-slate-500">
++        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
++        <span className="ml-3">正在读取 JSONL…</span>
++      </div>
++    );
++  }
++  if (status === "error") {
++    return (
++      <div className="flex min-h-[420px] flex-col items-center justify-center gap-2 p-8 text-center">
++        <p className="text-sm font-semibold text-slate-700">JSONL 读取失败</p>
++        <p className="max-w-md text-xs text-slate-500">{error}</p>
++      </div>
++    );
++  }
++
++  const lines = text !== null ? tryParseJsonl(text) : null;
++  const wrap = fill ? "h-full min-h-[420px] w-full overflow-auto p-4" : "max-h-[60vh] w-full overflow-auto p-4";
++  const known = lines !== null ? knownJsonlView(meta.name, lines) : null;
++  return (
++    <div className={wrap} data-testid="jsonl-previewer">
++      {known ?? (lines !== null ? (
++        <JsonlView lines={lines} />
++      ) : (
++        // 非法 JSONL：纯文本兜底（jsonl 扩展名不保证逐行合法）
++        <pre className="min-w-0 font-mono text-xs leading-relaxed whitespace-pre-wrap">{text}</pre>
++      ))}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/files/structured-views.tsx b/frontend/src/components/files/structured-views.tsx
+index 3d39359dd..a91e8a8e6 100644
+--- a/frontend/src/components/files/structured-views.tsx
++++ b/frontend/src/components/files/structured-views.tsx
+@@ -29,7 +29,9 @@ import { cn } from "@/lib/utils";
+ 
+ // ── JSON 视图 ─────────────────────────────────────────────────────────
+ 
+-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
++// JsonValue 导出（2026-09-29-change-detail-timeline-files-polish）：消费方
++// 测试构造 jsonl 行数组需要显式标注（对象缺键的联合类型不满足索引签名）。
++export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+ 
+ /** 尝试解析；失败返回 null（调用方回落纯文本）。 */
+ export function tryParseJson(text: string): JsonValue | null {
+@@ -501,3 +503,115 @@ export function knownJsonView(name: string, value: JsonValue): ReactNode | null
+   }
+   return null;
+ }
++
++// ── JSONL 视图（2026-09-29-change-detail-timeline-files-polish）─────────
++//
++// watcher-events.jsonl 等 jsonl 产物此前全屏落 fallback / 内联落纯文本——
++// 逐行 JSON 结构其实固定。范式与 knownJsonView 一致：已知固定结构
++// （watcher-events.jsonl）走专用表格视图，其余合法 jsonl 走通用逐行折叠树，
++// 非法（任一行 parse 失败）由调用方回落纯文本。
++
++/**
++ * 逐行解析 jsonl。返回行值数组（空行跳过）；任一非空行非法返回 null
++ * （调用方回落纯文本——半结构化文件不装作可结构化）。
++ */
++export function tryParseJsonl(text: string): JsonValue[] | null {
++  const out: JsonValue[] = [];
++  for (const raw of text.split(/\r?\n/)) {
++    const line = raw.trim();
++    if (!line) continue;
++    try {
++      out.push(JSON.parse(line) as JsonValue);
++    } catch {
++      return null;
++    }
++  }
++  return out.length > 0 ? out : null;
++}
++
++/** 通用 jsonl 视图：每行一个折叠块（行号 + 该行 JsonView 树，行级缩进隔开）。 */
++export function JsonlView({ lines }: { lines: JsonValue[] }) {
++  return (
++    <div data-testid="jsonl-view" className="flex min-w-0 flex-col gap-1.5 p-1">
++      {lines.map((v, i) => (
++        <div key={i} className="min-w-0 rounded border-l-2 border-border pl-2">
++          <div className="flex min-w-0 items-baseline gap-1.5 font-mono text-[10px] text-muted-foreground/70">
++            第 {i + 1} 行
++          </div>
++          <JsonView value={v} />
++        </div>
++      ))}
++    </div>
++  );
++}
++
++/** watcher-events.jsonl kind → 中文徽章（对齐 CLI watcher 语义与时间线卡图标面）。 */
++const WATCHER_KIND_BADGE: Record<string, { label: string; className: string }> = {
++  file: { label: "文件出现", className: "bg-muted text-muted-foreground" },
++  "file-update": { label: "文件变更", className: "bg-primary/10 text-primary" },
++  "task-done": { label: "任务勾选", className: "bg-success/15 text-success" },
++  commit: { label: "提交", className: "bg-brand-100 text-brand-700" },
++  warning: { label: "告警", className: "bg-warning/15 text-warning" },
++  "gate-run": { label: "门实测", className: "bg-primary/10 text-primary" },
++  info: { label: "信息", className: "bg-muted text-muted-foreground" },
++};
++
++/** epoch 毫秒 → 本地时刻（跨天事件带日期；缺键/非法数值回退占位）。 */
++function watcherTs(v: JsonValue | undefined): string {
++  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return v == null ? "—" : String(v);
++  return new Date(v).toLocaleString("zh-CN", { hour12: false });
++}
++
++/**
++ * watcher-events.jsonl 专用视图：时刻/类型徽章/阶段/详情表格 + 观测语义脚注。
++ * 行结构 `{ts, kind, stage?, detail?, provisional}`（daemon watcher 观测流）。
++ */
++function WatcherEventsView({ lines }: { lines: JsonValue[] }) {
++  const rows = lines.filter(isRecord);
++  return (
++    <div data-testid="watcher-events-view" className="flex flex-col gap-2">
++      <DataTable head={["时刻", "类型", "阶段", "详情"]}>
++        {rows.map((r, i) => {
++          const kind = typeof r.kind === "string" ? r.kind : "";
++          const badge = WATCHER_KIND_BADGE[kind];
++          return (
++            <tr key={i} className="border-t border-border align-top">
++              <td className="whitespace-nowrap px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-muted-foreground">
++                {watcherTs(r.ts)}
++              </td>
++              <td className="px-2.5 py-1.5">
++                {badge ? (
++                  <span className={cn("whitespace-nowrap rounded px-1.5 py-0.5 text-[11px]", badge.className)}>
++                    {badge.label}
++                  </span>
++                ) : (
++                  <span className="whitespace-nowrap rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
++                    {kind || "—"}
++                  </span>
++                )}
++              </td>
++              <td className="whitespace-nowrap px-2.5 py-1.5 text-muted-foreground">
++                {typeof r.stage === "string" && r.stage ? r.stage : "—"}
++              </td>
++              <td className="px-2.5 py-1.5 text-foreground">
++                {typeof r.detail === "string" && r.detail ? r.detail : "—"}
++              </td>
++            </tr>
++          );
++        })}
++      </DataTable>
++      <p className="text-[10px] text-muted-foreground/70">
++        watcher 观测流（恒 provisional）：由文件监控自动记录，只展示不消费；行数 {rows.length}。
++      </p>
++    </div>
++  );
++}
++
++/** 已知固定结构 jsonl → 专用视图；不命中返回 null（调用方回落 JsonlView）。 */
++export function knownJsonlView(name: string, lines: JsonValue[]): ReactNode | null {
++  const basename = name.split("/").pop() ?? name;
++  if (basename === "watcher-events.jsonl" && lines.some((l) => isRecord(l) && typeof l.kind === "string")) {
++    return <WatcherEventsView lines={lines} />;
++  }
++  return null;
++}
+diff --git a/frontend/src/components/mobile/mobile-change-detail.tsx b/frontend/src/components/mobile/mobile-change-detail.tsx
+index d6e9b2baf..5124818f0 100644
+--- a/frontend/src/components/mobile/mobile-change-detail.tsx
++++ b/frontend/src/components/mobile/mobile-change-detail.tsx
+@@ -82,6 +82,7 @@ import {
+ import { StatusBadge } from "@/components/ui/status-badge";
+ import { ApiError } from "@/lib/api";
+ import {
++  changeFileCnName,
+   fetchChangeFileRaw,
+   listChangeFiles,
+   type ChangeFileEntry,
+@@ -691,8 +692,10 @@ export function MobileChangeDetail({
+                   📄
+                 </span>
+                 <span className="min-w-0 flex-1">
++                  {/* 固定产物主显中文名（2026-09-29-change-detail-timeline-
++                      files-polish）；副行 path 保留原名对照，全屏下载名不变 */}
+                   <span className="block truncate text-[13px] text-foreground">
+-                    {f.name}
++                    {changeFileCnName(f.path) ?? f.name}
+                   </span>
+                   <span className="block text-[11px] text-muted-foreground">
+                     {f.path}
+diff --git a/frontend/src/lib/change-files.ts b/frontend/src/lib/change-files.ts
+index 26cc57a55..983fc4abd 100644
+--- a/frontend/src/lib/change-files.ts
++++ b/frontend/src/lib/change-files.ts
+@@ -172,3 +172,33 @@ export function buildChangeFileTree(items: ChangeFileEntry[]): ChangeFileTreeNod
+   return sortNodes(root.children);
+ }
+ 
++// ── 固定产物中文名（2026-09-29-change-detail-timeline-files-polish）─────
++
++/**
++ * SillySpec 变更目录固定产物文件名 → 中文名。按 basename 精确匹配（目录
++ * 位置无关）；非固定名（截图、临时复现页等）返回 null 由调用方回落原名。
++ * 名单依据近三日 49 个变更目录统计（≥7 次出现的固定件）。
++ */
++const CHANGE_FILE_CN: Record<string, string> = {
++  "proposal.md": "变更提案",
++  "requirements.md": "需求规格",
++  "design.md": "设计方案",
++  "tasks.md": "任务清单",
++  "decisions.md": "决策记录",
++  "flow-state.yaml": "流程状态",
++  "change.patch": "代码补丁",
++  "change-patch.json": "补丁清单",
++  "review.json": "评审记录",
++  "verify-result.md": "验证结果",
++  "test-trace.json": "测试轨迹",
++  "visual-evidence.md": "视觉证据",
++  "watcher-events.jsonl": "观测事件流",
++  "timeline.md": "时间线记录",
++};
++
++/** 文件名（或含路径）→ 中文名；非固定产物返回 null。 */
++export function changeFileCnName(name: string): string | null {
++  const basename = name.split("/").pop() ?? name;
++  return CHANGE_FILE_CN[basename] ?? null;
++}
++
+diff --git a/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/design.md b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/design.md
+new file mode 100644
+index 000000000..6c48787a0
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/design.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-29T08:25:19.927Z
++---
++# 设计记录（Design Record）— 2026-09-29-change-detail-timeline-files-polish
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-change-detail-timeline-files-polish 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++三处纯展示层优化，不动数据链路：
++1. 时间线卡（change-timeline-card.tsx）：事件轴从 border-dashed 平铺改为「节点圆点 + 连线」竖向时间轴结构（借用 primer Timeline 的视觉语言但行距收紧，事件密集场景 primer 本体 pb-5 太占空间，不直接复用）；卡内容区限高 max-h 内部滚动；事件超过 30 条默认只渲染最近 30 条 + 「展开全部」切换（useState）。
++2. watcher-events.jsonl 预览：后端 _TEXT_SUFFIXES 补 .jsonl（当前被判非文本，内容预览完全不可用，这是用户诉求的根因）；前端 structured-views.tsx 新增 tryParseJsonl + JsonlView（通用逐行视图）+ watcher-events.jsonl 专用表格视图（时刻/kind 中文徽章/阶段/详情，ts epoch ms 转本地时刻）；preview-registry EXT_MAP 加 jsonl 键、新建 jsonl-previewer、file-preview-modal RENDERER_MAP 注册、JsonPreviewer 对 .jsonl 文件名兜底转发（防后端 mime 报 application/json 时走 json 分支）、change-file-tree FilePreview 加 jsonl 分支（内联）。
++3. 中文名映射：change-file-tree.tsx 内置固定产物名 → 中文映射表（proposal.md→变更提案 等 14 项，按近三日 49 个变更目录统计）；树节点主显中文名 + muted 小字原名，内容区标题同理；下载/全屏预览 meta.name 保留原文件名（下载文件不被改名）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-change-detail-timeline-files-polish 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++- 后端：ChangeService._TEXT_SUFFIXES 增加 ".jsonl"——变更文件列表 is_text 判定变化（watcher-events.jsonl 从非文本→文本），content 端点对其可读；无新端点、无 DTO 变化（openapi.json 不变，无需 gen:types）。
++- 前端 structured-views.tsx 新导出：tryParseJsonl(text) / JsonlView / knownJsonlView（纯新增，既有导出签名不变）。
++- preview-registry.ts：RendererKey 联合类型加 "jsonl"，EXT_MAP 加 jsonl 键（纯扩展，既有映射不变）。
++- file-preview-modal.tsx：RENDERER_MAP 加 "jsonl" 条目。
++- change-file-tree.tsx / change-timeline-card.tsx：组件内部渲染调整，Props 签名不变。
++对外可见行为：变更文件弹窗中 watcher-events.jsonl 可预览（内联 + 全屏）；固定产物文件显示中文名；时间线卡视觉变化 + 限高 + 折叠。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-change-detail-timeline-files-polish 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到到达：时间线数据来自后端聚合接口（正序投影），前端只读渲染无排序假设；watcher-events.jsonl 逐行渲染保持文件原序，不排序不聚合，乱序输入按原样呈现（观测语义，红线 D-004 延续：只展示不消费）。
++2. 并发写：全部为只读展示组件；useQuery 30s 轮询与既有范式一致，无 mutation；折叠开关是纯 UI 本地 state，数据刷新不重置也无碍（展开态以已渲染列表为准）。
++3. 切换/生命周期：切换变更（changeId 变化）时组件因 key/queryKey 变化重新挂载/取数，折叠态随之重置，属预期；限高滚动容器无全局状态。
++4. 作用域：中文名映射按文件 basename 精确匹配（不含路径前缀），同目录下任意子路径中的同名固定产物也会命中映射——SillySpec 变更目录结构里这些文件名即语义身份，跨工作区不串台（映射是无副作用常量表）。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-change-detail-timeline-files-polish 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：现有时间线卡测试断言行级 className（text-amber-700 醒目态）与 testid——重构 DOM 结构时须保住这两个锚点；jsonl 预览的 mime 不确定性（后端 guess_type 对 .jsonl 在不同平台可能返回 None/application/json/text-plain）已用三层兜底（EXT_MAP + JsonPreviewer 名字转发 + 解析失败回落纯文本）覆盖。
++试过放弃的方案：直接复用 primer Timeline 组件做事件轴——放弃：其节点 h-7 + pb-5 行距是稀疏事件范式（GitHub 活动流），事件密集的留痕时间线用它会把卡片撑得更高，与「限高防撑爆」目标矛盾；只借其「节点+连线+tone」视觉语言自建紧凑行。另放弃在 openFullscreenPreview 里把 meta.name 换成中文名——下载文件会得到中文名文件，破坏本地对照能力。
+diff --git a/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/proposal.md b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/proposal.md
+new file mode 100644
+index 000000000..743d4290c
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/proposal.md
+@@ -0,0 +1,38 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-29T08:25:19.926Z
++---
++# 提案书（Proposal）— 2026-09-29-change-detail-timeline-files-polish
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:ca912a9705ac1ff2ef28f6c28799e4d934d117d1ccf9ba3f800a572394fc8c3d:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-change-detail-timeline-files-polish 留痕重锚 -->
++任务原话转写：变更详情页三处阅读体验优化:真实留痕时间线视觉与长度控制、变更文件弹窗支持 watcher-events.jsonl 结构化预览、固定产物文件名中文显示。
++
++成功标准:
++- 时间线卡事件轴有节点连线时间轴视觉,事件/任务多时限高内部滚动不再撑爆详情页,事件超过阈值默认折叠可展开
++- 变更文件弹窗内联与全屏预览均能结构化渲染 watcher-events.jsonl(逐行解析,时刻/类型/详情人类可读)
++- 变更目录固定产物文件(proposal.md/design.md/tasks.md/flow-state.yaml/change.patch 等)在文件树与内容标题按中文名展示,原名保留可对照
++- 既有时间线卡与变更文件树相关测试不回归,新增能力有测试覆盖
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:777e40b67f6f11c673589dfa4d04c174fed169c4a5a9f57a1d9eed8c8f815d35:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-change-detail-timeline-files-polish 留痕重锚 -->
++按成功标准机械推导，共 4 条验收面：
++1. 时间线卡事件轴有节点连线时间轴视觉,事件/任务多时限高内部滚动不再撑爆详情页,事件超过阈值默认折叠可展开
++2. 变更文件弹窗内联与全屏预览均能结构化渲染 watcher-events.jsonl(逐行解析,时刻/类型/详情人类可读)
++3. 变更目录固定产物文件(proposal.md/design.md/tasks.md/flow-state.yaml/change.patch 等)在文件树与内容标题按中文名展示,原名保留可对照
++4. 既有时间线卡与变更文件树相关测试不回归,新增能力有测试覆盖
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:8b81ee40c3e5a2f5c0daf6c3cd9abe718bb1b016b256891ec34095f6ae129787:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-29-change-detail-timeline-files-polish 留痕重锚 -->
++1. 时间线卡事件轴有节点连线时间轴视觉,事件/任务多时限高内部滚动不再撑爆详情页,事件超过阈值默认折叠可展开
++2. 变更文件弹窗内联与全屏预览均能结构化渲染 watcher-events.jsonl(逐行解析,时刻/类型/详情人类可读)
++3. 变更目录固定产物文件(proposal.md/design.md/tasks.md/flow-state.yaml/change.patch 等)在文件树与内容标题按中文名展示,原名保留可对照
++4. 既有时间线卡与变更文件树相关测试不回归,新增能力有测试覆盖
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/requirements.md b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/requirements.md
+new file mode 100644
+index 000000000..c528e2b8c
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/requirements.md
+@@ -0,0 +1,52 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-29T08:25:19.927Z
++---
++# 需求规格（Requirements）— 2026-09-29-change-detail-timeline-files-polish
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 时间线卡事件轴有节点连线时间轴视觉,事件/任务多时限高内部滚动不再撑爆详情页,事件超过阈值默认折叠可
++Given 折叠 相关模块就绪
++When 时间线卡事件轴有节点连线时间轴视觉,事件/任务多时限高内部滚动不再撑爆详情页,事件超过阈值默认折叠可展开
++Then 行为符合本条标准描述
++
++### FR-02: 变更文件弹窗内联与全屏预览均能结构化渲染 watcher-events.jsonl(逐行解析,时刻/
++Given 系统就绪
++When 变更文件弹窗内联与全屏预览均能结构化渲染 watcher-events.jsonl(逐行解析,时刻/类型/详情人类可读)
++Then 行为符合本条标准描述
++
++### FR-03: 变更目录固定产物文件(proposal.md/design.md/tasks.md/flow-sta
++Given 系统就绪
++When 变更目录固定产物文件(proposal.md/design.md/tasks.md/flow-state.yaml/change.patch 等)在文件树与内容
++Then 行为符合本条标准描述
++
++### FR-04: 既有时间线卡与变更文件树相关测试不回归,新增能力有测试覆盖
++Given 测试 相关模块就绪
++When 既有时间线卡与变更文件树相关测试不回归,新增能力有测试覆盖
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx「三段渲染：诞生锚 + 事件轴（中文标签/commit 标题）+ 任务面（勾选×提交锚）+ 统计」（时间轴行结构/任务面/统计回归）
++- frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx「ChangeTimelineCard 事件折叠（阈值 30）」×2 用例（≤30 不折叠 / >30 默认折最近 30 + 展开收起）
++- frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx「fake-check 告警醒目态（琥珀强调）」（节点 tone/warn 行为锚点）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/app/modules/change/tests/test_files_router.py::test_list_files（.jsonl is_text=True 判定——预览链路根因）
++- frontend/src/components/files/__tests__/structured-views.test.tsx「tryParseJsonl」×2 + 「knownJsonlView（watcher-events.jsonl 专用表格）」×2 + 「JsonlView（通用逐行树）」（解析/专用表格/通用树）
++- frontend/src/components/__tests__/change-file-tree.test.tsx「watcher-events.jsonl 内联预览：专用表格视图渲染」+「非 watcher 的 jsonl 内联预览：通用逐行树；非法 jsonl 回落纯文本」（内联分支）
++- frontend/src/components/files/__tests__/preview-registry.test.ts「matchRenderer jsonl（watcher-events.jsonl 等）」×3（全屏 registry 键 + json mime 兜底语义）
++- frontend/src/components/files/__tests__/file-preview-modal.test.tsx（RENDERER_MAP 注册 jsonl 渲染器接线）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- frontend/src/components/__tests__/change-file-tree.test.tsx「固定产物树节点主显中文名 + 原名对照，非固定名维持原名」（树节点映射）
++- frontend/src/components/__tests__/change-file-tree.test.tsx「选中固定产物：内容标题中文名 + 原路径对照；全屏 meta.name 恒原名」（标题映射 + 下载名不变）
++- frontend/src/components/mobile/mobile-change-detail.test.tsx「文档 chip 点击打开 FilePreviewModal」（移动端 chip 接线回归，aria-label/取数锚不因中文名展示漂移）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx 全文件（既有三段渲染/醒目态/空数据静默隐藏/失败静默隐藏/四新 kind 图标回归 + 新增折叠用例）
++- frontend/src/components/__tests__/change-file-tree.test.tsx 全文件（既有树/预览/编辑/保存/全屏 15 用例回归 + 新增中文名/jsonl 4 用例）
++- backend/app/modules/change/tests/test_files_router.py 全文件（15 用例回归含新增 .jsonl 断言）；flow done 实测门 test=passed（deps py25+jsx1）+ lint=passed 为整体回归证据
+diff --git a/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/shots/01-timeline-card.png b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/shots/01-timeline-card.png
+new file mode 100644
+index 000000000..136da4f3a
+Binary files /dev/null and b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/shots/01-timeline-card.png differ
+diff --git a/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/shots/02-files-dialog-cn.png b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/shots/02-files-dialog-cn.png
+new file mode 100644
+index 000000000..120619d20
+Binary files /dev/null and b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/shots/02-files-dialog-cn.png differ
+diff --git a/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/shots/03-jsonl-preview.png b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/shots/03-jsonl-preview.png
+new file mode 100644
+index 000000000..69b79ab6c
+Binary files /dev/null and b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/shots/03-jsonl-preview.png differ
+diff --git a/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/tasks.md b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/tasks.md
+new file mode 100644
+index 000000000..8ae89fb89
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/tasks.md
+@@ -0,0 +1,16 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-29T08:25:19.927Z
++---
++# 任务注册表（Tasks）— 2026-09-29-change-detail-timeline-files-polish
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge + 2026-09-29 心跳指针）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。📌 任务面在 ①spec 阶段定稿：覆写为真实实现步骤（全 `- [ ]`）后再动代码；执行循环：Working on task N/M → 做一件 → 勾一格 → 下一个——收口硬门拒单拍多格勾选（--allow-batch-tick 可显式旁路留痕）。`flow status --change <名>` 为自愿查看/恢复面（恢复时给下一任务指针与进度，非协议必需——D-007）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: 后端 `_TEXT_SUFFIXES` 补 `.jsonl`，watcher-events.jsonl 判定恢复为文本（预览链路根因）
++- [x] task-02: structured-views 新增 tryParseJsonl/JsonlView/watcher-events 专用表格视图 + 单测
++- [x] task-03: 预览链路注册 jsonl：preview-registry EXT_MAP/RendererKey、jsonl-previewer、RENDERER_MAP、JsonPreviewer 名字兜底、FilePreview 内联分支
++- [x] task-04: 变更文件树固定产物中文名映射（树节点 + 内容标题主显中文、原名小字对照，下载名不变）+ 单测
++- [x] task-05: 时间线卡优化：节点连线时间轴视觉 + 内容限高内部滚动 + 事件超 30 条折叠/展开 + 文案通俗化，保住既有测试锚点（testid/amber 醒目态）
++- [x] task-06: 跑前端相关测试（时间线卡/文件树/structured-views/preview-registry）+ 后端 change 模块相关测试，全绿后提交
+diff --git a/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/visual-evidence.md b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/visual-evidence.md
+new file mode 100644
+index 000000000..538c8a363
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-29-change-detail-timeline-files-polish/visual-evidence.md
+@@ -0,0 +1,38 @@
++# 视觉证据（2026-09-29-change-detail-timeline-files-polish）
++
++## 验证环境
++
++- 本机 dev 链路：前端 Next dev server `:3005`（实时改动代码，`INTERNAL_API_BASE_URL` 指向本机后端）+ 本机后端 uvicorn `:8002`（含 `.jsonl` 文本判定改动），连 Docker Compose 的 PG/Redis。
++- 验证账号：admin（dev 库密码已重置，见文末备注）。
++- 验证变更：`2026-09-28-audit-risk-fixes`（从本仓 `.sillyspec/changes/archive/` 拷入平台镜像 + reparse，含 watcher-events.jsonl 15 行与完整固定产物文件集）。
++- 截图工具：项目自带 Playwright（`@playwright/test` chromium），脚本注入 localStorage 登录态后对真实页面截图；截图存 `shots/`。
++
++## 三处改动截图结论
++
++### 1. 时间线卡（shots/01-timeline-card.png）
++
++- 卡头统计行正常（墙钟/事件/提交/勾选）。
++- 事件时间轴：🌱 节点圆点 + 时刻（MM-dd HH:mm:ss 带日期）+ 图标 + 文本单行渲染；该变更事件流仅 1 条（born 锚，platform_change_events 无历史回填），单行无连线属预期（连线画在节点之间，末行不画；多行场景由组件测试覆盖渲染结构）。
++- 任务面 10 条任务受 `max-h-[420px]` 限高保护，卡内滚动不再撑爆详情页——**限高生效证据：任务区只露出最后约 5 行，上方在滚动容器内**。
++- 视觉评审（AI 图片分析）发现的非阻塞项：任务行与时间线行间距偏大（限高滚动设计的自然结果，保留）；emoji 与文字基线轻微不齐（库默认行为，不做像素级调基线）；任务描述截断有 title 悬浮提示兜底。
++
++### 2. 变更文件弹窗中文名（shots/02-files-dialog-cn.png）
++
++- 文件树主显中文名 + 小字英文原名对照，映射全部命中：变更提案(proposal.md)、需求规格(requirements.md)、设计方案(design.md)、决策记录(decisions.md)、流程状态(flow-state.yaml)、代码补丁(change.patch)、任务清单(tasks.md)、评审记录(review.json)、验证结果(verify-result.md)、测试轨迹(test-trace.json)、补丁清单(change-patch.json)。
++- 文件夹/文件图标正常，树与预览区布局无重叠截断。
++
++### 3. watcher-events.jsonl 预览（shots/03-jsonl-preview.png）
++
++- 内联预览渲染为**表格视图**（表头：时刻/类型/阶段/详情），不再是原始 JSON 文本——`.jsonl` 文本判定 + FilePreview jsonl 分支 + watcher-events 专用视图三层链路端到端生效。
++- 类型列中文徽章（文件出现/文件变更/任务勾选等）按 kind 着色；时刻列 MM-dd HH:mm:ss；标题栏「观测事件流」中文名 + 原路径对照。
++- 全屏预览链路（preview-registry jsonl 键 + JsonlPreviewer + JsonPreviewer 名字转发）由组件测试覆盖（file-preview-modal.test/preview-registry.test/previewers-basic.test 28 用例绿），截图未重复展开。
++
++## 用户裁决留痕
++
++无视觉降级——三处均按原始意图实现，未发生「因约束对不齐基准而缩小范围/统一样式」需要用户签字的场景。
++
++## 备注（环境副作用，收尾已恢复/说明）
++
++- dev 库 admin 密码已重置为 `Dev2026!reset`（原密码为历史迁移值不可知；本项目未上线，规则 11 允许重置开发数据）。
++- 平台镜像 `C:/data/spec-workspaces/b97f8231.../changes/` 下补拷了 `2026-09-28-audit-risk-fixes`（真实归档变更，reparse 入库）——本就是该工作区应有数据，保留。
++- 本机 dev server(:3005)/后端(:8002) 为验证临时拉起，收尾关闭。
