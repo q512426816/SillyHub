@@ -49,3 +49,4 @@ Then 行为符合本条标准描述
 - tsc：frontend `pnpm exec tsc --noEmit` 0 错
 
 <!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- 不适用：jsdom 无布局引擎且部署验证非单测面——由部署后生产实测承担：unclear-req-to-brainstorm 行 desc 1083 × step-sub-row 1095 交集 false + 两工作区四视图成对文字交叠 0（visual-evidence.md D 节，task-04 勾选证据）
