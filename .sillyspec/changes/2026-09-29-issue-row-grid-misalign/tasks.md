@@ -12,4 +12,4 @@ created_at: 2026-09-29T00:49:55.977Z
 - [x] task-02: primer-structures.test.tsx 追加占位回归用例（无 leading 4 子元素 + 占位 aria-hidden；带 leading 同 4）13/13 绿；消费方 changes 页 39/39 绿 + tsc 0 错
 - [x] task-03: 机理 A/B 静态对照（grid-repro.html）：无占位交集 true（右列内容左溢出盒 337px）vs 有占位交集 false，证据落 visual-evidence.md A/B 节
 - [x] task-04: 部署生产后复测全过——unclear-req-to-brainstorm 行 desc.right 1083 × step-sub-row.left 1095 交集 false（间隙 12px、desc 省略号截断 714px）；两工作区×进行中/归档四视图成对文字交叠 0、无横向滚动（左溢采样为 hidden 悬停按钮包围盒归零误报，非视觉叠压）
-- [ ] task-05: 部署生产后同行复测交集 false + 列表全行扫描零叠压
+- [x] task-05: 部署生产后同行复测交集 false + 列表全行扫描零叠压（与 task-04 同一部署验证面：unclear-req-to-brainstorm 行 desc 1083 × step-sub-row 1095 交集 false；四视图成对交叠 0——评审 P3 指出与 task-04 重复，簿记合并说明）
