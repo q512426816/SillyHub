@@ -441,8 +441,10 @@ export default function ChangeDetailPage({ params }: Props) {
               timeline-coexist 共存化）：原与步骤时间线互斥（steps 空才挂载）——归档时
               CLI unregisterChange 终态一致化补种 steps（3 行同一时间戳）会把本卡顶掉，
               归档后真实数据（事件轴 × 任务面 × 墙钟）不可见。改恒挂载：组件自身
-              events/tasks/born 全空时静默隐藏，无观测数据零占位（厚变更不受扰）。 */}
-          <ChangeTimelineCard workspaceId={workspaceId} changeId={changeId} />
+              events/tasks/born 全空时静默隐藏，无观测数据零占位（厚变更不受扰）。
+              key=changeId（2026-09-29-change-detail-timeline-files-polish 评审 P3）：
+              路由参数切换不重挂载，折叠展开态会跨变更残留——key 化随切换重挂归零。 */}
+          <ChangeTimelineCard key={changeId} workspaceId={workspaceId} changeId={changeId} />
 
           {/* 沉淀资产（2026-09-28-change-ux-detail-batch：自 aside 移主栏 + 默认展开
               + 分组固定高度滚动网格——侧栏 296px 窄列里折叠卡「点了看不到东西」，

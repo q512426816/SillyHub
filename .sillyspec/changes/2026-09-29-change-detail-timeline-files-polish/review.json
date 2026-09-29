@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-29-change-detail-timeline-files-polish",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02 测试绑定对 file-preview-modal.test.tsx 覆盖声称过强：RENDERER_MAP jsonl 接线无任何用例断言",
+      "evidence": "该测试文件仅往 vi.mock 工厂加 JsonlPreviewer stub（无断言、无用例经弹窗驱动 .jsonl 目标），RENDERER_MAP[\"jsonl\"]=JsonlPreviewer 这行接线在全部测试中从未被执行验证；全屏链路实际被测的只有 matchRenderer 键解析（preview-registry.test.ts）与 JsonPreviewer 转发语义，接线本身是覆盖空洞（一行 map，风险低）",
+      "location": "frontend/src/components/files/__tests__/file-preview-modal.test.tsx:35"
+    },
+    {
+      "severity": "P3",
+      "title": "design 槽3 切换问作答与实现不符：ChangeTimelineCard 挂载无 key，切换变更不重挂载，折叠态残留",
+      "evidence": "作答称「组件因 key/queryKey 变化重新挂载/取数，折叠态随之重置」；实际挂载点 <ChangeTimelineCard workspaceId changeId /> 无 key，App Router 动态段导航不重挂载组件，queryKey 变化只触发重取——useState(false) 的 expanded 在切换变更后保留（变更 A 展开后切到变更 B 默认全展开）。影响纯展示级，机理陈述失实",
+      "location": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx:445"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "finding",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-29T09:39:14Z"
+}
