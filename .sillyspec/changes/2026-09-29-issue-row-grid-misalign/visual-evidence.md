@@ -19,9 +19,12 @@
 - primer-structures.test.tsx 追加用例：leading 缺席渲染 aria-hidden 空占位、行恒 4 子元素（带 leading 同为 4）；13/13 绿
 - 消费方回归：changes 列表页 39/39 绿；tsc 0 错
 
-## D. 部署后原生复测
+## D. 部署后原生复测（2026-09-29，部署含本修复镜像）
 
-- （部署后填写）
+- 同行复测（sillyspec 归档 unclear-req-to-brainstorm）：desc right **1083** × step-sub-row left **1095** → 交集 **false**（间隙 12px；desc 省略号截断于 714px 主体列宽）——修复前 desc 1507 × step-sub-row 1083 交集 true
+- 全行扫描（正确方法论：成对叶子文本元素两两不相交 + 右列内容不左溢容器盒）：
+  - multi-agent-platform 进行中（5 行）/ 归档（20 行）、sillyspec 归档（20 行）/ 进行中（2 行）四视图 **成对交叠 0**、无横向滚动
+  - 左溢计数实为 hidden 悬停删除按钮包围盒归零的采样误报（父级 display:none），非视觉叠压
 
 ## 降级裁决
 

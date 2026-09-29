@@ -11,5 +11,5 @@ created_at: 2026-09-29T00:49:55.977Z
 - [x] task-01: issue-row.tsx leading 缺席渲染空占位 div（aria-hidden），四子元素落设计轨道，对齐 IssueRowHeader 占位先例
 - [x] task-02: primer-structures.test.tsx 追加占位回归用例（无 leading 4 子元素 + 占位 aria-hidden；带 leading 同 4）13/13 绿；消费方 changes 页 39/39 绿 + tsc 0 错
 - [x] task-03: 机理 A/B 静态对照（grid-repro.html）：无占位交集 true（右列内容左溢出盒 337px）vs 有占位交集 false，证据落 visual-evidence.md A/B 节
-- [ ] task-04: 部署生产后同行复测 desc × step-sub-row 交集 false + 列表全行扫描零叠压（部署后勾选）
+- [x] task-04: 部署生产后复测全过——unclear-req-to-brainstorm 行 desc.right 1083 × step-sub-row.left 1095 交集 false（间隙 12px、desc 省略号截断 714px）；两工作区×进行中/归档四视图成对文字交叠 0、无横向滚动（左溢采样为 hidden 悬停按钮包围盒归零误报，非视觉叠压）
 - [ ] task-05: 部署生产后同行复测交集 false + 列表全行扫描零叠压
