@@ -25,7 +25,10 @@ Then 行为符合本条标准描述
 ## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
 
 <!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx :: task-01/02（2026-09-29-jump-empty-turn-dup）：零正文轮（有日志但全不可渲染）二次点击不重复单轮直达 prepend（runIdCallCount 二次点击后恒 1 + ancientRowCount ≤1；stash 修复实证先红 expected 2 to be 1）
 
 <!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx :: task-01/02（2026-09-29-jump-empty-turn-dup）：零正文轮（有日志但全不可渲染）二次点击不重复单轮直达 prepend（首点 runIdCallCount=1 + expectJumpScrolled 定位高亮 + beforeCallCount=0）；frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx :: task-04（FR-05）：大纲有 run_id 的未加载轮点击 → 单轮请求直达（零翻页）prepend + 定位高亮（既有有正文直达回归）
 
 <!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx :: task-04（FR-05）：单轮请求失败 → 回退 interval 翻页链路 + task-04（FR-05）：单轮请求命中但日志为空 → 「该轮次日志不存在」兜底（既有回退/兜底回归，46/46 全绿）；tsc/eslint 0 错为命令门（pnpm -C frontend exec tsc --noEmit / eslint 两触达文件 0 error，5 warning 预存债），无单用例面
