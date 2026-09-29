@@ -2848,4 +2848,70 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     // 直达路径直接收口，不空转翻页。
     expect(beforeCallCount()).toBe(0);
   });
+
+  it("task-01/02（2026-09-29-jump-empty-turn-dup）：零正文轮（有日志但全不可渲染）二次点击不重复单轮直达 prepend", async () => {
+    mockThreeRuns();
+    mocks.fetchSessionTurnOutline.mockResolvedValue({
+      session_id: "s-1",
+      total_turns: 3,
+      items: [
+        outlineItem({ run_id: "r-ancient", seq: 1 }),
+        outlineItem({ run_id: "r-old", seq: 2, status: "failed" }),
+        outlineItem({ run_id: "r-cur", seq: 3 }),
+      ],
+    });
+    mocks.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { runId?: string; before?: string }) => {
+        if (opts?.runId === "r-ancient") {
+          // run 有日志但全部不可渲染（群聊空 user_input 形态——正文在群消息表，
+          // e31d0e07b 实证某会话 46 轮中 14 轮；[SYSTEM] 前缀行 classifySessionLog
+          // 恒 null）→ logsToTurns 产出零 segments/output 的空轮。r-ancient 为
+          // completed 态——空轮走 TurnTimeline 紧凑配置行（~40 字 < hit() 60 字
+          // 内容门），正是重复直达的触发形态。
+          return [
+            navLog("a-e1", "r-ancient", "user_input", "", "2026-08-15T06:10:00Z"),
+            navLog("a-e2", "r-ancient", "stdout", "[SYSTEM] dispatched", "2026-08-15T06:10:01Z"),
+          ];
+        }
+        if (opts?.before) return [];
+        return fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z");
+      },
+    );
+    renderPage();
+    await selectDefaultSession();
+    expect(await findTimelineText("当前窗口提问")).toBeTruthy();
+
+    /** run_id 单轮请求计数（防重复直达的核心回归锚）。 */
+    const runIdCallCount = () =>
+      mocks.getAgentSessionLogs.mock.calls.filter(
+        (c) => c[1] && "runId" in (c[1] as Record<string, unknown>),
+      ).length;
+    /** 时间线内 r-ancient 行数（修复前重复 prepend 会造同装饰键重复行）。 */
+    const ancientRowCount = () =>
+      document
+        .querySelector('[data-testid="turn-timeline-scroll"]')
+        ?.querySelectorAll('[data-turn-key="r-ancient"]').length ?? 0;
+
+    // 首次点击：未加载 → 单轮直达恰一次（定位高亮，行为不变；零正文不 prepend）。
+    const row1 = await screen.findByRole("button", { name: /^第1轮/ });
+    scrollIntoViewSpy.mockClear();
+    fireEvent.click(row1);
+    await waitFor(() => expect(runIdCallCount()).toBe(1));
+    await waitFor(expectJumpScrolled);
+    expect(ancientRowCount()).toBeLessThanOrEqual(1);
+    // 直达路径收口（不空转翻页）。
+    expect(beforeCallCount()).toBe(0);
+
+    // 二次点击：该轮已直达过且确认零正文 → 幂等短路直接定位，不再发起 run_id
+    // 请求、不重复 prepend（修复前：hit() 60 字门不认短空行 + handleJumpToTurn
+    // 闭包不含 turnState 的陈旧查找 → 每次点击重复直达，pageKey=jump-<最旧日志id>
+    // 恒相同 → 装饰 runId 撞 React key + 空块累积）。
+    scrollIntoViewSpy.mockClear();
+    fireEvent.click(row1);
+    await waitFor(expectJumpScrolled);
+    expect(runIdCallCount()).toBe(1);
+    expect(ancientRowCount()).toBeLessThanOrEqual(1);
+    expect(beforeCallCount()).toBe(0);
+    expect(mocks.notifyError).not.toHaveBeenCalled();
+  });
 });

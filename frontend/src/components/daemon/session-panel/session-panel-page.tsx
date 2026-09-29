@@ -715,6 +715,12 @@ export function SessionPanelPage({
   // 链路（JUMP_LOAD_EARLIER_MAX_PAGES），行为不劣于现状。大纲仅作导航元数据，
   // 不进消息流装配链（与 displayTurns / SSE 覆盖逻辑互不干扰，design §3.1）。
   const [turnOutline, setTurnOutline] = useState<SessionTurnOutlineRead | null>(null);
+  // 2026-09-29-jump-empty-turn-dup：零正文轮直达幂等标记（run_id 集合）——单轮
+  // 直达拉回的日志无可渲染正文（群聊空 user_input / 纯系统行轮，e31d0e07b 实证
+  // 46 轮中 14 轮）时记名，该轮后续点击直接定位不再发请求。用 ref 而非 state：
+  // handleJumpToTurn 的 deps 刻意不含 turnState（防每帧重建击穿导航列 memo），
+  // ref 读取不受闭包陈旧影响。
+  const jumpEmptyJumpedRunIdsRef = useRef<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
   // 2026-08-29-session-usage-stats task-04（R-04）：用量条重取信号——
   // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
@@ -999,6 +1005,9 @@ export function SessionPanelPage({
     // task-03（2026-09-27-session-fast-replay）：大纲随会话切换清空（新会话
     // attach 期重拉；迟到旧大纲经 cancelled 守卫丢弃，不串台）。
     setTurnOutline(null);
+    // 2026-09-29-jump-empty-turn-dup：零正文直达幂等标记随会话切换重置（新会话
+    // 同名 run 的日志形态可能不同，不跨会话继承）。
+    jumpEmptyJumpedRunIdsRef.current = new Set();
     fetchedErrorRunIdsRef.current.clear();
     completedSideEffectRunIdsRef.current.clear();
     currentRunIdRef.current = null;
@@ -2032,6 +2041,16 @@ export function SessionPanelPage({
         // prepend 重复块（React key 撞）。直达请求前先按状态判：该 run 已有
         // 带 segments/output 的轮 → 视为已加载，裸行定位（locateAndHighlight
         // 内置裸 querySelector 降级）不再发起请求。
+        // 2026-09-29-jump-empty-turn-dup：已直达过且确认零正文的轮——直接定位，
+        // 不再发请求。修复前：零正文轮 loadedHasBody 恒 false、hit() 60 字内容门
+        // 不认短空行（紧凑配置行 ~40 字），且本回调闭包刻意不依赖 turnState
+        // （deps 防每帧重建），loadedTurn 查找受陈旧闭包拖累不可靠——每次点击都
+        // 重复 run_id 直达并 prepend 装饰键（jump-<该轮最旧日志id> 恒相同）撞
+        // React key 的重复空块。ref 标记不受闭包陈旧影响，判定恒当前。
+        if (jumpEmptyJumpedRunIdsRef.current.has(entry.key)) {
+          locateAndHighlight();
+          return;
+        }
         const loadedTurn = turnState.turns.find(
           (t) => (t.realRunId ?? t.runId) === entry.key,
         );
@@ -2081,13 +2100,21 @@ export function SessionPanelPage({
             // 后缀防 React key 撞（realRunId 保持原值——SSE 增量 / 快照认领
             // 不受影响）；已加载窗口的空壳行保留在新块之下（时间序正确）。
             const newTurns = logsToTurns(turnLogs);
-            if (newTurns.length > 0) {
+            // 2026-09-29-jump-empty-turn-dup：零可渲染正文（或装配无产出）不
+            // prepend——run_id 直达与已装配状态同日志源，重拉必同形，prepend 只会
+            // 造出装饰键相同的重复空块。改记幂等标记，该轮后续点击走上方短路。
+            const anyBody = newTurns.some(
+              (t) => (t.segments?.length ?? 0) > 0 || !!(t.output ?? "").trim(),
+            );
+            if (newTurns.length > 0 && anyBody) {
               const pageKey = `jump-${oldestJump.id.slice(0, 8)}`;
               const decorated = newTurns.map((t) => ({
                 ...t,
                 runId: `${t.realRunId ?? t.runId}#e${pageKey}`,
               }));
               setTurnState((prev) => ({ ...prev, turns: [...decorated, ...prev.turns] }));
+            } else {
+              jumpEmptyJumpedRunIdsRef.current.add(entry.key);
             }
             locateAndHighlight();
             jumpSuppressLoadEarlierRef.current = false;
