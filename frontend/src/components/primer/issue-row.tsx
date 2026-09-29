@@ -69,7 +69,17 @@ export function IssueRow({
         interactive ? "cursor-pointer hover:bg-muted" : ""
       } ${className ?? ""}`}
     >
-      {leading ? <div className="flex items-center pt-0.5">{leading}</div> : null}
+      {/* 2026-09-29-issue-row-grid-misalign：leading 缺席必须留空占位（对齐下方
+          IssueRowHeader 同款先例）——否则行内子元素左移错轨：主体列落进第 2 轨
+          auto（按内容撑宽）、右列内容落进第 3 轨 minmax(0,1fr)（可缩到 0）。长
+          描述行右列被压到比内容窄时 justify-end 内容向左溢出画出自身容器盒，
+          与描述文字互相叠压（用户 DOM 实证 + Playwright 复现 desc.right 1507 ×
+          step-sub-row.left 1083 交集）。 */}
+      {leading ? (
+        <div className="flex items-center pt-0.5">{leading}</div>
+      ) : (
+        <div aria-hidden />
+      )}
       <div className="flex items-center pt-0.5 text-muted-foreground">
         <StateIcon name={STATE_TO_ICON[state]} size={16} />
       </div>

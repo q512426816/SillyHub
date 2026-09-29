@@ -91,6 +91,38 @@ describe("IssueRow", () => {
     expect(wrap?.className).toContain("group-hover:flex");
   });
 
+  it("leading 缺席渲染空占位——四子元素落设计轨道（2026-09-29-issue-row-grid-misalign）", () => {
+    // 回归锚：此前 null 让主体列落第 2 轨 auto、右列内容挤进 1fr 轨被压后左溢
+    // 出自身容器盒（与描述文字叠压）；占位 div（aria-hidden）对齐 IssueRowHeader
+    // 先例，让主体回 1fr 轨、右列回 auto 轨。
+    const { container } = render(
+      <IssueRow
+        state="open"
+        title="标题"
+        meta={<span>meta</span>}
+        right={<span>右侧</span>}
+        onClick={() => {}}
+      />,
+    );
+    const row = container.querySelector("div[role=button]")!;
+    const kids = Array.from(row.children);
+    expect(kids).toHaveLength(4);
+    const [placeholder] = kids;
+    expect(placeholder?.getAttribute("aria-hidden")).toBe("true");
+    expect(placeholder?.childElementCount).toBe(0);
+    // 带 leading 时占位槽由 leading 承担，子元素数不变（4）
+    const { container: c2 } = render(
+      <IssueRow
+        state="open"
+        title="标题2"
+        leading={<input type="checkbox" aria-label="选择2" />}
+        right={<span>右侧2</span>}
+        onClick={() => {}}
+      />,
+    );
+    expect(Array.from(c2.querySelector("div[role=button]")!.children)).toHaveLength(4);
+  });
+
   it("onClick 行可键盘激活（Enter）", () => {
     const onClick = vi.fn();
     render(<IssueRow state="open" title="行标题" onClick={onClick} />);
