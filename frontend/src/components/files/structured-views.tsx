@@ -29,7 +29,9 @@ import { cn } from "@/lib/utils";
 
 // ── JSON 视图 ─────────────────────────────────────────────────────────
 
-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+// JsonValue 导出（2026-09-29-change-detail-timeline-files-polish）：消费方
+// 测试构造 jsonl 行数组需要显式标注（对象缺键的联合类型不满足索引签名）。
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 /** 尝试解析；失败返回 null（调用方回落纯文本）。 */
 export function tryParseJson(text: string): JsonValue | null {
@@ -498,6 +500,118 @@ export function knownJsonView(name: string, value: JsonValue): ReactNode | null 
   }
   if (basename === "verify-facts.json" && isRecord(value.probes)) {
     return <VerifyFactsView value={value} />;
+  }
+  return null;
+}
+
+// ── JSONL 视图（2026-09-29-change-detail-timeline-files-polish）─────────
+//
+// watcher-events.jsonl 等 jsonl 产物此前全屏落 fallback / 内联落纯文本——
+// 逐行 JSON 结构其实固定。范式与 knownJsonView 一致：已知固定结构
+// （watcher-events.jsonl）走专用表格视图，其余合法 jsonl 走通用逐行折叠树，
+// 非法（任一行 parse 失败）由调用方回落纯文本。
+
+/**
+ * 逐行解析 jsonl。返回行值数组（空行跳过）；任一非空行非法返回 null
+ * （调用方回落纯文本——半结构化文件不装作可结构化）。
+ */
+export function tryParseJsonl(text: string): JsonValue[] | null {
+  const out: JsonValue[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    try {
+      out.push(JSON.parse(line) as JsonValue);
+    } catch {
+      return null;
+    }
+  }
+  return out.length > 0 ? out : null;
+}
+
+/** 通用 jsonl 视图：每行一个折叠块（行号 + 该行 JsonView 树，行级缩进隔开）。 */
+export function JsonlView({ lines }: { lines: JsonValue[] }) {
+  return (
+    <div data-testid="jsonl-view" className="flex min-w-0 flex-col gap-1.5 p-1">
+      {lines.map((v, i) => (
+        <div key={i} className="min-w-0 rounded border-l-2 border-border pl-2">
+          <div className="flex min-w-0 items-baseline gap-1.5 font-mono text-[10px] text-muted-foreground/70">
+            第 {i + 1} 行
+          </div>
+          <JsonView value={v} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** watcher-events.jsonl kind → 中文徽章（对齐 CLI watcher 语义与时间线卡图标面）。 */
+const WATCHER_KIND_BADGE: Record<string, { label: string; className: string }> = {
+  file: { label: "文件出现", className: "bg-muted text-muted-foreground" },
+  "file-update": { label: "文件变更", className: "bg-primary/10 text-primary" },
+  "task-done": { label: "任务勾选", className: "bg-success/15 text-success" },
+  commit: { label: "提交", className: "bg-brand-100 text-brand-700" },
+  warning: { label: "告警", className: "bg-warning/15 text-warning" },
+  "gate-run": { label: "门实测", className: "bg-primary/10 text-primary" },
+  info: { label: "信息", className: "bg-muted text-muted-foreground" },
+};
+
+/** epoch 毫秒 → 本地时刻（跨天事件带日期；缺键/非法数值回退占位）。 */
+function watcherTs(v: JsonValue | undefined): string {
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return v == null ? "—" : String(v);
+  return new Date(v).toLocaleString("zh-CN", { hour12: false });
+}
+
+/**
+ * watcher-events.jsonl 专用视图：时刻/类型徽章/阶段/详情表格 + 观测语义脚注。
+ * 行结构 `{ts, kind, stage?, detail?, provisional}`（daemon watcher 观测流）。
+ */
+function WatcherEventsView({ lines }: { lines: JsonValue[] }) {
+  const rows = lines.filter(isRecord);
+  return (
+    <div data-testid="watcher-events-view" className="flex flex-col gap-2">
+      <DataTable head={["时刻", "类型", "阶段", "详情"]}>
+        {rows.map((r, i) => {
+          const kind = typeof r.kind === "string" ? r.kind : "";
+          const badge = WATCHER_KIND_BADGE[kind];
+          return (
+            <tr key={i} className="border-t border-border align-top">
+              <td className="whitespace-nowrap px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+                {watcherTs(r.ts)}
+              </td>
+              <td className="px-2.5 py-1.5">
+                {badge ? (
+                  <span className={cn("whitespace-nowrap rounded px-1.5 py-0.5 text-[11px]", badge.className)}>
+                    {badge.label}
+                  </span>
+                ) : (
+                  <span className="whitespace-nowrap rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                    {kind || "—"}
+                  </span>
+                )}
+              </td>
+              <td className="whitespace-nowrap px-2.5 py-1.5 text-muted-foreground">
+                {typeof r.stage === "string" && r.stage ? r.stage : "—"}
+              </td>
+              <td className="px-2.5 py-1.5 text-foreground">
+                {typeof r.detail === "string" && r.detail ? r.detail : "—"}
+              </td>
+            </tr>
+          );
+        })}
+      </DataTable>
+      <p className="text-[10px] text-muted-foreground/70">
+        watcher 观测流（恒 provisional）：由文件监控自动记录，只展示不消费；行数 {rows.length}。
+      </p>
+    </div>
+  );
+}
+
+/** 已知固定结构 jsonl → 专用视图；不命中返回 null（调用方回落 JsonlView）。 */
+export function knownJsonlView(name: string, lines: JsonValue[]): ReactNode | null {
+  const basename = name.split("/").pop() ?? name;
+  if (basename === "watcher-events.jsonl" && lines.some((l) => isRecord(l) && typeof l.kind === "string")) {
+    return <WatcherEventsView lines={lines} />;
   }
   return null;
 }

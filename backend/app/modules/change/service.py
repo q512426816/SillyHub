@@ -438,6 +438,8 @@ class ChangeService:
     # is_text 判定的文本扩展名（编辑器对非文本只读，D-007）。
     # ql-20260917-004：补 .log/.patch/.diff——verify-logs/*.log 与 scope-audit.patch
     # 此前被误判非文本，文件树给「非文本文件」占位、全屏预览落 fallback。
+    # 2026-09-29-change-detail-timeline-files-polish：补 .jsonl——watcher-events.jsonl
+    # 同为纯文本（每行一个 JSON），此前判非文本导致内容预览不可用。
     _TEXT_SUFFIXES = frozenset(
         {
             ".md",
@@ -451,6 +453,7 @@ class ChangeService:
             ".log",
             ".patch",
             ".diff",
+            ".jsonl",
         }
     )
 

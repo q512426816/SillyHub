@@ -82,6 +82,7 @@ import {
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
 import {
+  changeFileCnName,
   fetchChangeFileRaw,
   listChangeFiles,
   type ChangeFileEntry,
@@ -691,8 +692,10 @@ export function MobileChangeDetail({
                   📄
                 </span>
                 <span className="min-w-0 flex-1">
+                  {/* 固定产物主显中文名（2026-09-29-change-detail-timeline-
+                      files-polish）；副行 path 保留原名对照，全屏下载名不变 */}
                   <span className="block truncate text-[13px] text-foreground">
-                    {f.name}
+                    {changeFileCnName(f.path) ?? f.name}
                   </span>
                   <span className="block text-[11px] text-muted-foreground">
                     {f.path}

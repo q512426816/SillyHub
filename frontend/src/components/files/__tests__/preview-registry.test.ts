@@ -137,3 +137,20 @@ describe("matchRenderer", () => {
     expect(matchRenderer("application/octet-stream", "daemon-start.log")).toBe("text");
   });
 });
+
+// ── 2026-09-29-change-detail-timeline-files-polish：jsonl 渲染键 ─────────
+describe("matchRenderer jsonl（watcher-events.jsonl 等）", () => {
+  it("扩展名 jsonl/ndjson（mime 未知/回落）→ jsonl 渲染器", () => {
+    expect(matchRenderer(null, "watcher-events.jsonl")).toBe("jsonl" satisfies RendererKey);
+    expect(matchRenderer("application/octet-stream", "hits.ndjson")).toBe("jsonl");
+  });
+
+  it("application/jsonl / x-ndjson mime 命中 jsonl", () => {
+    expect(matchRenderer("application/jsonl", "file.bin")).toBe("jsonl");
+    expect(matchRenderer("application/x-ndjson", "file.bin")).toBe("jsonl");
+  });
+
+  it("jsonl 文件带 application/json mime 仍走 json 渲染器（由 JsonPreviewer 按名转发兜底）", () => {
+    expect(matchRenderer("application/json", "watcher-events.jsonl")).toBe("json");
+  });
+});

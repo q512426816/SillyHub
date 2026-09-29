@@ -172,3 +172,33 @@ export function buildChangeFileTree(items: ChangeFileEntry[]): ChangeFileTreeNod
   return sortNodes(root.children);
 }
 
+// ── 固定产物中文名（2026-09-29-change-detail-timeline-files-polish）─────
+
+/**
+ * SillySpec 变更目录固定产物文件名 → 中文名。按 basename 精确匹配（目录
+ * 位置无关）；非固定名（截图、临时复现页等）返回 null 由调用方回落原名。
+ * 名单依据近三日 49 个变更目录统计（≥7 次出现的固定件）。
+ */
+const CHANGE_FILE_CN: Record<string, string> = {
+  "proposal.md": "变更提案",
+  "requirements.md": "需求规格",
+  "design.md": "设计方案",
+  "tasks.md": "任务清单",
+  "decisions.md": "决策记录",
+  "flow-state.yaml": "流程状态",
+  "change.patch": "代码补丁",
+  "change-patch.json": "补丁清单",
+  "review.json": "评审记录",
+  "verify-result.md": "验证结果",
+  "test-trace.json": "测试轨迹",
+  "visual-evidence.md": "视觉证据",
+  "watcher-events.jsonl": "观测事件流",
+  "timeline.md": "时间线记录",
+};
+
+/** 文件名（或含路径）→ 中文名；非固定产物返回 null。 */
+export function changeFileCnName(name: string): string | null {
+  const basename = name.split("/").pop() ?? name;
+  return CHANGE_FILE_CN[basename] ?? null;
+}
+

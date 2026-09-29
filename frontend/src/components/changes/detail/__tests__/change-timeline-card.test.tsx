@@ -1,7 +1,8 @@
 // 真实留痕时间线卡组件测试（2026-09-26-change-real-timeline FR-02/FR-03）。
 // 覆盖：三段渲染（事件轴含诞生锚/中文标签、任务面勾选×提交锚、脚注统计）、
-// fake-check 告警醒目态、commit 标题展示、失败/空数据静默隐藏（观测事件卡范式）。
-import { render, screen } from "@testing-library/react";
+// fake-check 告警醒目态、commit 标题展示、失败/空数据静默隐藏（观测事件卡范式）、
+// 超阈值折叠/展开（2026-09-29-change-detail-timeline-files-polish）。
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -103,11 +104,15 @@ describe("ChangeTimelineCard", () => {
     expect(tasks).toHaveTextContent("task-01");
     expect(tasks).toHaveTextContent("后端聚合服务落盘");
     expect(tasks).toHaveTextContent("4aed0e824");
-    // 勾选时刻（2026-09-27-timeline-task-time）：已勾有时刻 → ≈本地时分秒；
-    // 未勾不显示时刻列值。hhmmss 走 zh-CN 本地时区，ISO Z 转本地——断言用
-    // 同款格式化避免硬编码时区。
+    // 勾选时刻（2026-09-27-timeline-task-time）：已勾有时刻 → ≈本地时刻；
+    // 未勾不显示时刻列值。2026-09-29-change-detail-timeline-files-polish 起
+    // 时刻带 MM-dd 日期前缀（跨天防歧义）；hhmmss 走 zh-CN 本地时区，ISO Z
+    // 转本地——断言用同款格式化避免硬编码时区。
+    const taskTs = new Date("2026-09-26T07:02:00Z");
+    const mm = `${taskTs.getMonth() + 1}`.padStart(2, "0");
+    const dd = `${taskTs.getDate()}`.padStart(2, "0");
     expect(tasks.textContent).toContain(
-      `≈${new Date("2026-09-26T07:02:00Z").toLocaleTimeString("zh-CN", { hour12: false })}`,
+      `≈${mm}-${dd} ${taskTs.toLocaleTimeString("zh-CN", { hour12: false })}`,
     );
     // 已勾但推断断裂/盲窗（time=null）→ 显示 ?；未勾（task-02）无时刻列值。
     expect(tasks.textContent).toContain("?");
@@ -188,4 +193,58 @@ it("渲染 gate-run/config-change/fake-check-cleared/verify 四新 kind 图标",
   for (const icon of ["🔬", "🔧", "🩹", "🧾"]) {
     expect(screen.getByTestId("change-timeline-card").innerHTML).toContain(icon);
   }
+});
+
+// ── 2026-09-29-change-detail-timeline-files-polish：超阈值折叠/展开 ──────
+describe("ChangeTimelineCard 事件折叠（阈值 30）", () => {
+  function manyEvents(n: number) {
+    return Array.from({ length: n }, (_, i) => ({
+      ts: `2026-09-26T07:${String(10 + Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}Z`,
+      kind: "file-update",
+      label: `事件 ${i + 1}`,
+      rule: "watcher",
+      severity: "info",
+      provisional: true,
+      commit_title: null,
+    }));
+  }
+
+  function respOf(n: number) {
+    return {
+      change_key: "k",
+      born_at: null as string | null,
+      events: manyEvents(n),
+      tasks: [],
+      stats: { event_count: n, commit_count: 0, checked: 0, total: 0, wall_clock_s: null },
+    };
+  }
+
+  it("≤30 条不折叠（无提示按钮，全部行在场）", async () => {
+    mockTimeline.mockResolvedValue(respOf(30));
+    renderCard();
+    await screen.findByTestId("change-timeline-card");
+    expect(screen.queryByTestId("change-timeline-expand")).toBeNull();
+    expect(screen.getByText("事件 1")).toBeInTheDocument();
+    expect(screen.getByText("事件 30")).toBeInTheDocument();
+  });
+
+  it(">30 条默认只渲染最近 30 条 + 折叠提示；展开后全量 + 收起按钮", async () => {
+    mockTimeline.mockResolvedValue(respOf(35));
+    renderCard();
+    await screen.findByTestId("change-timeline-card");
+    // 最早的 5 条被折叠
+    expect(screen.queryByText("事件 1")).toBeNull();
+    expect(screen.queryByText("事件 5")).toBeNull();
+    expect(screen.getByText("事件 6")).toBeInTheDocument();
+    expect(screen.getByText("事件 35")).toBeInTheDocument();
+    expect(screen.getByTestId("change-timeline-expand")).toHaveTextContent("已折叠较早的 5 条事件");
+
+    fireEvent.click(screen.getByTestId("change-timeline-expand"));
+    expect(screen.getByText("事件 1")).toBeInTheDocument();
+    expect(screen.getByTestId("change-timeline-collapse")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("change-timeline-collapse"));
+    expect(screen.queryByText("事件 1")).toBeNull();
+    expect(screen.getByText("事件 35")).toBeInTheDocument();
+  });
 });

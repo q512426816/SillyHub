@@ -31,6 +31,8 @@ vi.mock("../previewers", () => ({
   JsonPreviewer: () => <div data-testid="json-previewer" />,
   PatchPreviewer: () => <div data-testid="patch-previewer" />,
   TextPreviewer: () => <div data-testid="text-previewer" />,
+  // 2026-09-29-change-detail-timeline-files-polish：jsonl 渲染器 stub
+  JsonlPreviewer: () => <div data-testid="jsonl-previewer" />,
 }));
 
 const mockFetch = vi.fn(() => Promise.resolve(new Blob(["test"], { type: "text/plain" })));

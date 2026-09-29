@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 
 // vi.mock 解耦后端（task-15 / FR-09）；fetchChangeFileRaw 为 raw 端点取数
 // （2026-08-26-file-fullscreen-preview task-02 / D-009：预览恒走 raw 不走 content）
+// changeFileCnName（2026-09-29-change-detail-timeline-files-polish）为纯映射
+// 函数——mock 里内联等价实现，供中文名展示断言用
 vi.mock("@/lib/change-files", () => ({
   buildChangeFileTree: (items: { path: string; name: string; is_text: boolean }[]) =>
     items.map((i) => ({ name: i.name, path: i.path, children: [], doc: i })),
@@ -10,6 +12,13 @@ vi.mock("@/lib/change-files", () => ({
   saveChangeFileContent: vi.fn(),
   listPendingChangeFiles: vi.fn(),
   fetchChangeFileRaw: vi.fn(),
+  changeFileCnName: (name: string): string | null => {
+    const table: Record<string, string> = {
+      "proposal.md": "变更提案",
+      "watcher-events.jsonl": "观测事件流",
+    };
+    return table[name.split("/").pop() ?? name] ?? null;
+  },
 }));
 
 // FilePreviewModal 浅 mock：弹窗本体（antd Modal + 渲染器树）已有专属测试
@@ -357,5 +366,84 @@ describe("ChangeFileTree", () => {
     expect(mockedFetchRaw).toHaveBeenCalledWith("ws", "c1", "proposal.md");
     // 打开弹窗不新增 content 端点调用（预览取数与编辑取数分离）
     expect(mockedGetContent).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── 2026-09-29-change-detail-timeline-files-polish：中文名展示 + jsonl 预览 ──
+describe("ChangeFileTree 固定产物中文名与 jsonl 预览", () => {
+  it("固定产物树节点主显中文名 + 原名对照，非固定名维持原名", async () => {
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("变更提案")).toBeInTheDocument());
+    // proposal.md 原名以小字对照保留（且可与中文名同时在场）
+    expect(screen.getByText("proposal.md")).toBeInTheDocument();
+    // 非固定名（logo.png）不受映射影响
+    expect(screen.getByText("logo.png")).toBeInTheDocument();
+  });
+
+  it("选中固定产物：内容标题中文名 + 原路径对照；全屏 meta.name 恒原名", async () => {
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("变更提案")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("变更提案"));
+    await waitFor(() => expect(screen.getByTestId("md")).toBeInTheDocument());
+    // 内容标题容器：中文名与原路径同场。选中后「变更提案」在树节点（button
+    // 内）与内容标题两处出现——取不在 button 内的那处（即标题）
+    const titleZh = screen
+      .getAllByText("变更提案")
+      .find((el) => el.closest("button") === null);
+    expect(titleZh).toBeDefined();
+    const header = titleZh!.closest("div.flex");
+    expect(header).not.toBeNull();
+    expect(header!.textContent).toContain("proposal.md");
+    // 全屏预览 meta.name 恒为原文件名（下载不被改名）
+    fireEvent.click(screen.getByRole("button", { name: "全屏预览" }));
+    await waitFor(() => expect(screen.getByTestId("file-preview-modal")).toBeInTheDocument());
+    expect(modalProps.at(-1)!.target?.meta.name).toBe("proposal.md");
+  });
+
+  it("watcher-events.jsonl 内联预览：专用表格视图渲染（时刻/类型/详情）", async () => {
+    mockedListChangeFiles.mockResolvedValue({
+      change_id: "c1",
+      items: [
+        { path: "watcher-events.jsonl", name: "watcher-events.jsonl", size: 200, last_modified_at: null, is_text: true },
+      ],
+    });
+    mockedGetContent.mockResolvedValue({
+      path: "watcher-events.jsonl",
+      content:
+        '{"ts":1790518116696,"kind":"file","stage":"proposal","detail":"proposal.md 出现","provisional":true}\n' +
+        '{"ts":1790518385326,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}',
+      exists: true,
+    });
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    // 映射名「观测事件流」主显（mock 表内含 watcher-events.jsonl）
+    await waitFor(() => expect(screen.getByText("观测事件流")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("观测事件流"));
+    // watcher-events 专用表格视图在场（非纯文本 pre）
+    await waitFor(() =>
+      expect(document.querySelector('[data-testid="watcher-events-view"]')).not.toBeNull(),
+    );
+    const view = document.querySelector('[data-testid="watcher-events-view"]')!;
+    expect(view.textContent).toContain("文件出现");
+    expect(view.textContent).toContain("requirements.md 内容变更");
+  });
+
+  it("非 watcher 的 jsonl 内联预览：通用逐行树；非法 jsonl 回落纯文本", async () => {
+    mockedListChangeFiles.mockResolvedValue({
+      change_id: "c1",
+      items: [
+        { path: "hits.jsonl", name: "hits.jsonl", size: 50, last_modified_at: null, is_text: true },
+      ],
+    });
+    mockedGetContent.mockResolvedValue({
+      path: "hits.jsonl",
+      content: '{"q":"a"}\nnot-json-line',
+      exists: true,
+    });
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("hits.jsonl")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("hits.jsonl"));
+    // 任一行非法 → 纯文本兜底（无 jsonl-view）
+    await waitFor(() => expect(screen.getByText(/not-json-line/)).toBeInTheDocument());
+    expect(document.querySelector('[data-testid="jsonl-view"]')).toBeNull();
   });
 });

@@ -38,6 +38,7 @@ import {
   MarkdownPreviewer,
   FallbackPreviewer,
   JsonPreviewer,
+  JsonlPreviewer,
   PatchPreviewer,
   TextPreviewer,
   type PreviewerProps,
@@ -87,6 +88,8 @@ const RENDERER_MAP: Record<string, ComponentType<PreviewerProps>> = {
   json: JsonPreviewer,
   patch: PatchPreviewer,
   text: TextPreviewer,
+  // 2026-09-29-change-detail-timeline-files-polish：jsonl 逐行视图（watcher-events.jsonl）
+  jsonl: JsonlPreviewer,
   fallback: FallbackPreviewer,
 };
 

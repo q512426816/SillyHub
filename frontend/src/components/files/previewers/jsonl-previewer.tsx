@@ -1,29 +1,19 @@
 "use client";
 
 /**
- * JsonPreviewer — JSON 渲染器（ql-20260917-004/010）。
+ * JsonlPreviewer — JSONL 渲染器（2026-09-29-change-detail-timeline-files-polish）。
  *
- * blob.text() → tryParseJson → 三个固定结构报告文件（scope-audit/
- * apply-manifest/verify-facts，按 meta.name 分发）走表格摘要视图，其余
- * 合法 json 走 JsonView 折叠树；解析失败回落纯文本。
+ * blob.text() → tryParseJsonl → watcher-events.jsonl（按 meta.name 分发）走
+ * 专用表格视图，其余合法 jsonl 走 JsonlView 逐行折叠树；任一行非法回落纯文本。
  * 统一消费 PreviewerProps。
  */
 
 import { useEffect, useState } from "react";
 
-import { JsonlPreviewer } from "./jsonl-previewer";
-import { JsonView, knownJsonView, tryParseJson } from "@/components/files/structured-views";
+import { JsonlView, knownJsonlView, tryParseJsonl } from "@/components/files/structured-views";
 import type { PreviewerProps } from "./index";
 
-export function JsonPreviewer(props: PreviewerProps) {
-  // 2026-09-29-change-detail-timeline-files-polish：后端 guess_type 对 .jsonl
-  // 在部分平台返回 application/json——mime 优先级高于扩展名导致 jsonl 绕过
-  // EXT_MAP 命中本渲染器；按文件名转发 JsonlPreviewer（整体 parse 必失败，
-  // 不转发会落纯文本，结构化预览失效）。
-  if (props.meta.name.toLowerCase().endsWith(".jsonl")) {
-    return <JsonlPreviewer {...props} />;
-  }
-  const { blob, meta, fill } = props;
+export function JsonlPreviewer({ blob, meta, fill }: PreviewerProps) {
   const [text, setText] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -55,29 +45,28 @@ export function JsonPreviewer(props: PreviewerProps) {
     return (
       <div className="flex min-h-[420px] items-center justify-center p-8 text-slate-500">
         <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
-        <span className="ml-3">正在读取 JSON…</span>
+        <span className="ml-3">正在读取 JSONL…</span>
       </div>
     );
   }
   if (status === "error") {
     return (
       <div className="flex min-h-[420px] flex-col items-center justify-center gap-2 p-8 text-center">
-        <p className="text-sm font-semibold text-slate-700">JSON 读取失败</p>
+        <p className="text-sm font-semibold text-slate-700">JSONL 读取失败</p>
         <p className="max-w-md text-xs text-slate-500">{error}</p>
       </div>
     );
   }
 
-  const parsed = text !== null ? tryParseJson(text) : null;
+  const lines = text !== null ? tryParseJsonl(text) : null;
   const wrap = fill ? "h-full min-h-[420px] w-full overflow-auto p-4" : "max-h-[60vh] w-full overflow-auto p-4";
-  // 三个固定结构报告文件（按文件名分发）走表格摘要视图，其余走折叠树
-  const known = parsed !== null ? knownJsonView(meta.name, parsed) : null;
+  const known = lines !== null ? knownJsonlView(meta.name, lines) : null;
   return (
-    <div className={wrap}>
-      {known ?? (parsed !== null ? (
-        <JsonView value={parsed} />
+    <div className={wrap} data-testid="jsonl-previewer">
+      {known ?? (lines !== null ? (
+        <JsonlView lines={lines} />
       ) : (
-        // 非法 JSON：纯文本兜底（json 扩展名不保证内容合法）
+        // 非法 JSONL：纯文本兜底（jsonl 扩展名不保证逐行合法）
         <pre className="min-w-0 font-mono text-xs leading-relaxed whitespace-pre-wrap">{text}</pre>
       ))}
     </div>

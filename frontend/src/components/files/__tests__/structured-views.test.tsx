@@ -5,7 +5,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { DiffView, JsonView, knownJsonView, tryParseJson } from "../structured-views";
+import { DiffView, JsonView, JsonlView, knownJsonView, knownJsonlView, tryParseJson, tryParseJsonl, type JsonValue } from "../structured-views";
 
 describe("tryParseJson", () => {
   it("合法 json → 解析值", () => {
@@ -200,5 +200,59 @@ describe("knownJsonView", () => {
     expect(knownJsonView("scope-audit.json", { mode: "full-flow", ok: true })).toBeNull();
     // 完整路径按 basename 分发
     expect(knownJsonView("some/dir/verify-facts.json", verifyFacts)).not.toBeNull();
+  });
+});
+
+// ── 2026-09-29-change-detail-timeline-files-polish：JSONL 视图族 ─────────
+describe("tryParseJsonl", () => {
+  it("逐行合法（含空行容忍）→ 行值数组", () => {
+    expect(tryParseJsonl('{"a":1}\n\n{"b":2}\r\n')).toEqual([{ a: 1 }, { b: 2 }]);
+  });
+
+  it("任一行非法 / 全空 → null（调用方回落纯文本）", () => {
+    expect(tryParseJsonl('{"a":1}\nnot-json')).toBeNull();
+    expect(tryParseJsonl("")).toBeNull();
+    expect(tryParseJsonl("   \n  ")).toBeNull();
+  });
+});
+
+describe("knownJsonlView（watcher-events.jsonl 专用表格）", () => {
+  // 显式 JsonValue[]：第三行缺 stage 键（真实缺键场景），裸字面量联合类型
+  // 带 stage?: undefined 不满足索引签名
+  const lines: JsonValue[] = [
+    { ts: 1790518116696, kind: "file", stage: "proposal", detail: "proposal.md 出现", provisional: true },
+    { ts: 1790518385326, kind: "file-update", stage: "requirements", detail: "requirements.md 内容变更", provisional: true },
+    { ts: 1790519000000, kind: "commit", detail: "提交 790c594bf", provisional: true },
+  ];
+
+  it("watcher-events.jsonl → 时刻/类型徽章/阶段/详情表格", () => {
+    const node = knownJsonlView("watcher-events.jsonl", lines);
+    expect(node).not.toBeNull();
+    const { container } = render(<div>{node}</div>);
+    const el = container.querySelector('[data-testid="watcher-events-view"]');
+    expect(el).not.toBeNull();
+    expect(el!.textContent).toContain("文件出现");
+    expect(el!.textContent).toContain("文件变更");
+    expect(el!.textContent).toContain("提交");
+    expect(el!.textContent).toContain("proposal");
+    expect(el!.textContent).toContain("proposal.md 出现");
+    expect(el!.textContent).toContain("行数 3");
+  });
+
+  it("完整路径按 basename 分发；其他名/结构不符 → null", () => {
+    expect(knownJsonlView("some/dir/watcher-events.jsonl", lines)).not.toBeNull();
+    expect(knownJsonlView("events.jsonl", lines)).toBeNull();
+    // 名字命中但结构漂移（无 kind 字段行）→ null
+    expect(knownJsonlView("watcher-events.jsonl", [{ foo: 1 }])).toBeNull();
+  });
+});
+
+describe("JsonlView（通用逐行树）", () => {
+  it("每行独立渲染折叠树，含行号", () => {
+    const { container } = render(<JsonlView lines={[{ a: 1 }, [1, 2]]} />);
+    expect(container.querySelector('[data-testid="jsonl-view"]')).not.toBeNull();
+    expect(container.textContent).toContain("第 1 行");
+    expect(container.textContent).toContain("第 2 行");
+    expect(container.querySelectorAll('[data-testid="json-view"]').length).toBe(2);
   });
 });

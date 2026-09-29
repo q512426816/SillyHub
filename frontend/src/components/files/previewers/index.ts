@@ -30,3 +30,6 @@ export { HtmlPreviewer } from "./html-previewer";
 export { JsonPreviewer } from "./json-previewer";
 export { PatchPreviewer } from "./patch-previewer";
 export { TextPreviewer } from "./text-previewer";
+// 2026-09-29-change-detail-timeline-files-polish：jsonl 逐行结构化渲染器
+// （watcher-events.jsonl 专用表格 + 通用逐行树，此前落 fallback）
+export { JsonlPreviewer } from "./jsonl-previewer";

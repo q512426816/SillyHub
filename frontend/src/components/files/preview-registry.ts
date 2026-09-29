@@ -10,7 +10,7 @@
  * 依据：design.md §5 + §7。
  */
 
-export type RendererKey = "image" | "pdf" | "docx" | "xlsx" | "markdown" | "html" | "json" | "patch" | "text" | "fallback";
+export type RendererKey = "image" | "pdf" | "docx" | "xlsx" | "markdown" | "html" | "json" | "jsonl" | "patch" | "text" | "fallback";
 
 // svg/bmp/ico（2026-08-26-file-fullscreen-preview）：explorer 内联图片含这三类，
 // 统一预览需一致可看（Design Grill C-05）。
@@ -32,6 +32,11 @@ const MIME_MAP: Record<string, RendererKey> = {
   "text/html": "html",
   // ql-20260917-004：json 结构化视图 / 纯文本渲染器（.log 全屏此前落 fallback）
   "application/json": "json",
+  // 2026-09-29-change-detail-timeline-files-polish：jsonl 逐行结构化视图。
+  // 后端 guess_type 对 .jsonl 部分平台返回 application/json——该场景由
+  // JsonPreviewer 内按文件名转发 jsonl 视图兜底（mime 优先于扩展名）。
+  "application/jsonl": "jsonl",
+  "application/x-ndjson": "jsonl",
   "text/plain": "text",
   // mimetypes.guess_type 对 .log 在部分平台返回 text/x-log
   "text/x-log": "text",
@@ -48,6 +53,8 @@ const EXT_MAP: Record<string, RendererKey> = {
   html: "html", htm: "html",
   // ql-20260917-004：json 折叠树 / unified diff 红绿视图 / 纯文本
   json: "json",
+  // 2026-09-29-change-detail-timeline-files-polish：jsonl 逐行视图（watcher-events）
+  jsonl: "jsonl", ndjson: "jsonl",
   patch: "patch", diff: "patch",
   log: "text", txt: "text",
 };

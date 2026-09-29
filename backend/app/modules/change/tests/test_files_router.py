@@ -82,6 +82,21 @@ async def test_list_files(
     # is_text 标记正确
     md = next(it for it in body["items"] if it["path"].endswith(".md"))
     assert md["is_text"] is True
+    # .jsonl 判定文本（2026-09-29-change-detail-timeline-files-polish：
+    # watcher-events.jsonl 此前被判非文本，内容预览整体不可用）
+    change_dir = (
+        Path(workspace_with_changes["spec_root"]) / "changes" / workspace_with_changes["change_key"]
+    )
+    (change_dir / "watcher-events.jsonl").write_text(
+        '{"ts":1,"kind":"file","detail":"proposal.md 出现"}\n', encoding="utf-8"
+    )
+    resp2 = await client.get(
+        f"/api/workspaces/{ws_id}/changes/{change_id}/files",
+        headers=auth_headers,
+    )
+    assert resp2.status_code == 200, resp2.text
+    jsonl = next(it for it in resp2.json()["items"] if it["path"] == "watcher-events.jsonl")
+    assert jsonl["is_text"] is True
 
 
 async def test_read_file_content(

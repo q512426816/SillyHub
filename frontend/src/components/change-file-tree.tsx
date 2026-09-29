@@ -19,7 +19,7 @@ import { FileNodeIcon, fileExt } from "@/components/ui/file-node-icon";
 import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import { useObjectUrl } from "@/components/files/use-object-url";
 // ql-20260917-004/010：固定结构产物可视化视图（json 表格/折叠树 + diff 红绿懒加载）
-import { DiffView, JsonView, knownJsonView, tryParseJson } from "@/components/files/structured-views";
+import { DiffView, JsonView, JsonlView, knownJsonView, knownJsonlView, tryParseJson, tryParseJsonl } from "@/components/files/structured-views";
 import { ApiError } from "@/lib/api";
 // 变更名自动链接（2026-08-31 变更关联审计 P3）：变更文档正文提名的变更名
 // 渲染为详情页直链（含归档变更；名单 staleTime 5 分钟，见 lib/change-autolink）
@@ -27,6 +27,7 @@ import { remarkChangeLink, useChangeNameIndex } from "@/lib/change-autolink";
 import { formatFileSize } from "@/lib/file/utils";
 import {
   buildChangeFileTree,
+  changeFileCnName,
   fetchChangeFileRaw,
   getChangeFileContent,
   listChangeFiles,
@@ -123,6 +124,20 @@ function FilePreview({
   // 内部回落纯文本
   if (fileExt(path) === "patch" || fileExt(path) === "diff") {
     return <DiffView content={content} />;
+  }
+  // jsonl 逐行视图（2026-09-29-change-detail-timeline-files-polish）：
+  // watcher-events.jsonl 专用表格 / 其余合法 jsonl 逐行折叠树；非法回落纯文本
+  if (fileExt(path) === "jsonl") {
+    const lines = tryParseJsonl(content);
+    if (lines !== null) {
+      const known = knownJsonlView(path, lines);
+      if (known !== null) return <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40 p-2">{known}</div>;
+      return (
+        <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40">
+          <JsonlView lines={lines} />
+        </div>
+      );
+    }
   }
   // 其他纯文本：只读源码预览（点「编辑」才可改）。whitespace-pre：不折行，超宽横向滚动
   return (
@@ -301,6 +316,9 @@ function TreeView({
         if (!doc) return null;
         const isPending = pendingPaths.has(doc.path);
         const isSelected = selectedPath === doc.path;
+        // 固定产物中文名（2026-09-29-change-detail-timeline-files-polish）：
+        // 主显中文 + muted 小字原名对照；非固定名回落原名展示
+        const cnName = changeFileCnName(doc.path);
         return (
           <button
             key={doc.path}
@@ -313,8 +331,13 @@ function TreeView({
             onClick={() => onSelect(doc)}
           >
             <FileIcon />
-            <span className="truncate">{doc.name}</span>
-            <span className="ml-auto flex items-center gap-1">
+            <span className="min-w-0 flex-1 truncate">{cnName ?? doc.name}</span>
+            <span className="ml-auto flex shrink-0 items-center gap-1">
+              {cnName && (
+                <span className="font-mono text-[10px] font-normal text-muted-foreground/70" title={doc.path}>
+                  {doc.name}
+                </span>
+              )}
               {isPending && (
                 <Badge variant="warning" className="text-[10px] px-1.5">
                   排队中
@@ -579,7 +602,16 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
           ) : (
             <div className="flex h-full min-w-0 flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{selected.path}</span>
+                {/* 固定产物中文名主显 + 原路径对照（2026-09-29-change-detail-
+                    timeline-files-polish）；非固定名维持原路径 mono 展示 */}
+                {changeFileCnName(selected.path) ? (
+                  <span className="min-w-0 truncate text-[11px]" title={selected.path}>
+                    <span className="font-medium text-foreground">{changeFileCnName(selected.path)}</span>
+                    <span className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">{selected.path}</span>
+                  </span>
+                ) : (
+                  <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{selected.path}</span>
+                )}
                 <div className="flex items-center gap-2">
                   {saveStatus !== "idle" && (
                     <span className={`text-[11px] ${statusLabel[saveStatus].color}`}>
