@@ -1,0 +1,16 @@
+{"ts":1790755587040,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790755600499,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790755752675,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790755752675,"kind":"task-done","stage":"tasks","detail":"checked 0→5","provisional":true}
+{"ts":1790755772752,"kind":"commit","stage":null,"detail":"feeb67df5","provisional":true}
+{"ts":1790755799428,"kind":"commit","stage":null,"detail":"72f15d715","provisional":true}
+{"ts":1790755974828,"kind":"gate-run","stage":"verify","detail":"门实测 failed（1.2s） · 20260930081252","provisional":true}
+{"ts":1790756194055,"kind":"config-change","stage":null,"detail":"本地配置 local.yaml 有变更（内容不上行）","provisional":true}
+{"ts":1790756247398,"kind":"commit","stage":null,"detail":"f25088da3","provisional":true}
+{"ts":1790756526824,"kind":"config-change","stage":null,"detail":"本地配置 local.yaml 有变更（内容不上行）","provisional":true}
+{"ts":1790756553659,"kind":"commit","stage":null,"detail":"5cf2567e1","provisional":true}
+{"ts":1790756655712,"kind":"gate-run","stage":"verify","detail":"门实测 failed（1.2s） · 20260930082415","provisional":true}
+{"ts":1790757089788,"kind":"commit","stage":null,"detail":"e45e1ca3c","provisional":true}
+{"ts":1790757106388,"kind":"gate-run","stage":"verify","detail":"门实测 passed（1.3s） · 20260930083143","provisional":true}
+{"ts":1790757142549,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1790757152564,"kind":"commit","stage":null,"detail":"f547f62ad","provisional":true}

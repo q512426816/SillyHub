@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-breadcrumb-dedupe-zh",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-30-breadcrumb-dedupe-zh:flow:FR-01",
+      "tests": [
+        "changes/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-breadcrumb-dedupe-zh"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-30-breadcrumb-dedupe-zh:flow:FR-03",
+      "tests": [
+        "frontend/src/components/__tests__/top-bar.test.tsx「buildBreadcrumbs 段名中文化」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-breadcrumb-dedupe-zh"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-30-breadcrumb-dedupe-zh:flow:FR-04",
+      "tests": [
+        "frontend/src/components/__tests__/top-bar.test.tsx「buildBreadcrumbs 段名中文化」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-breadcrumb-dedupe-zh"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-30-breadcrumb-dedupe-zh:flow:FR-05",
+      "tests": [
+        "changes/__tests__/page.test.tsx",
+        "frontend/src/components/__tests__/top-bar.test.tsx",
+        "frontend/src/components/primer/__tests__/primer-structures.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-breadcrumb-dedupe-zh"
+    }
+  ]
+}

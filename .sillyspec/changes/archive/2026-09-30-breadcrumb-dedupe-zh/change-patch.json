@@ -1,0 +1,67 @@
+{
+  "change": "2026-09-30-breadcrumb-dedupe-zh",
+  "baseline": "075f77663163004ea23ba683624e648046f8aa0d",
+  "head": "f547f62adaef92e24395514578f6899b242f0f10",
+  "files": [
+    ".sillyspec/changes/2026-09-30-breadcrumb-dedupe-zh/design.md",
+    ".sillyspec/changes/2026-09-30-breadcrumb-dedupe-zh/flow-state.yaml",
+    ".sillyspec/changes/2026-09-30-breadcrumb-dedupe-zh/proposal.md",
+    ".sillyspec/changes/2026-09-30-breadcrumb-dedupe-zh/requirements.md",
+    ".sillyspec/changes/2026-09-30-breadcrumb-dedupe-zh/tasks.md",
+    ".sillyspec/changes/2026-09-30-breadcrumb-dedupe-zh/visual-evidence.md",
+    "docs/sillyspec/dynamic-deps-e2e-vitest-exclude-false-red.md",
+    "frontend/e2e/auth.spec.ts",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/tasks/[tid]/page.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+    "frontend/src/components/__tests__/top-bar.test.tsx",
+    "frontend/src/components/top-bar.tsx",
+    "frontend/vitest.config.ts"
+  ],
+  "totals": {
+    "files": 13,
+    "additions": 373,
+    "deletions": 35
+  },
+  "savedAt": "2026-09-30T08:32:33.016Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "115a35148b34435dade2e00672eccca1a0fd55b4670732e77362aa40b4ce263e",
+  "patchStatus": "ok"
+}
