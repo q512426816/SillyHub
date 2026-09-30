@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-title-adopt-clobber-guard",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-04「500 上限三条写路径共用」措辞与实际截断覆盖面有落差：documents/reparse 派生 title 未截断",
+      "evidence": "TITLE_MAX_LEN 截断仅实用于 CLI body 写侧（platform_sync/service.py 收养段 body_title=...[:TITLE_MAX_LEN] 与占位建行 title=...[:TITLE_MAX_LEN] or name），而 documents 推送 _sync_change_title_from_documents 的 new_title 与 reparse _apply_parsed 的 parsed.title 均未截断——超 500 字 H1 在 Postgres 仍会 DataError（documents 路径有既有 except Exception 降级告警 service.py:1279 已核实；reparse 失败为预存行为非本变更引入）。design 槽4 已将该遗留显式披露并划出变更范围，触发需 500+ 字 H1 的病态输入，无数据正确性风险。裁决：可接受（兜底形态判定部分三条路径确实共用，仅截断覆盖面与 FR-04 字面表述不一致，属措辞落差而非实现缺失）。",
+      "location": "backend/app/modules/change/service.py:2766"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-30T09:00:35+08:00"
+}
