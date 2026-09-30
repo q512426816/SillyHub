@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-change-detail-header-overflow",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-28-change-detail-header-overflow:flow:FR-01",
+      "tests": [
+        "frontend/src/components/layout/__tests__/page-header.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-change-detail-header-overflow"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-28-change-detail-header-overflow:flow:FR-02",
+      "tests": [
+        "frontend/src/components/layout/__tests__/page-header.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-change-detail-header-overflow"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-28-change-detail-header-overflow:flow:FR-03",
+      "tests": [
+        "frontend/src/components/layout/__tests__/page-header.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-change-detail-header-overflow"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-28-change-detail-header-overflow:flow:FR-04",
+      "tests": [
+        "__tests__/page-restore-assets.test.ts",
+        "frontend/src/components/layout/__tests__/page-header.test.ts",
+        "page-last-signal.test.ts",
+        "page-team-toggle.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-28-change-detail-header-overflow"
+    }
+  ]
+}

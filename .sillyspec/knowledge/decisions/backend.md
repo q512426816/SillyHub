@@ -355,3 +355,11 @@ supersedes：D-003@v1
 理由：用户前轮方案对比后裁决「好，做」选定方案 a——后端新增聚合端点按变更名解析 spec 树镜像（knowledge/fr/*.md 与 knowledge/decisions/*.md 的「变更：」行过滤 + 归档目录 test-trace.json/change-patch.json/delta.md 容错读取），前端观测事件卡同构折叠卡；并裁决本变更走「轻量变更+头脑风暴预段」（原话：好，做，第二个变更走轻量变更附加头脑风暴）。b（CLI 命令：tests 无 --json/derive 无对应 facet/decisions list 只读 active）与 c（前端自行解析：全量拉 60+ 域文件 N+1 + CLI 机械解析契约前端化双端漂移）经两子代理核对证伪排除。
 故障面：解析契约与 CLI 演进漂移——「变更：」行格式属 CLI 机械契约，上游改格式需同步本解析（加版本容错与未知行跳过）。
 退役判据：若平台后续引入结构化资产表（CLI 直推 DB），本解析层可退役改读表。
+
+## D-005@v2 接手参数载体从 inject 修正为 takeover 端点
+状态：implemented
+变更：2026-09-30-tool-report-activation-wrong-machine
+锚点：backend/app/modules/daemon/router/session_crud.py（takeover 路由新增处）
+最近确认：58a3516c9
+理由：接手参数载体为新端点 POST /sessions/{id}/takeover 的 TakeoverRequest（prompt/provider/agent_profile_id/llm_provider_id），语义不变（handoff 档引擎+档案重选，校验所选引擎 ∈ 原机支持集合）。
+supersedes：D-005@v1

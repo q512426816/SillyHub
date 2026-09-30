@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-28-quicklog-title-overflow",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "绑定作答引用的 visual-evidence.md 未随产物交付，FR-04 生产几何验收（0 越界）无凭据",
+      "evidence": "requirements.md FR-01/FR-02 测试绑定以完成时口吻引用「visual-evidence.md A/C 节，修复后生产全单元格扫描 0 越界」，但变更目录仅含 change.patch/change-patch.json/design.md/flow-state.yaml/proposal.md/requirements.md/tasks.md，无 visual-evidence.md——几何验收证据链缺口（design 槽4 声明该验收由部署后生产扫描承担，文件属计划中尚未生成，非代码面承诺违反）",
+      "location": ".sillyspec/changes/2026-09-28-quicklog-title-overflow/requirements.md:36"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a（作答不适用属实：diff 仅布局属性+className，无输入/事件时序）",
+    "并发": "n/a（作答不适用属实：无共享可变状态）",
+    "切换": "n/a（作答不适用属实：纯渲染，无会话/请求态）",
+    "作用域": "ok，边界已裁决：可接受——tableLayout 仅加在 quicklog-table.tsx:436-446 QuicklogTable 自身 DataTable 调用，共享封装 layout/data-table.tsx 未动且 ...rest 透传实证生效，其余消费方不受影响；声明的取舍（fixed 布局极窄视口定宽列裁切、桌面消费+移动端独立页面；420 宽屏上限保留；jsdom 几何断言由部署后生产扫描承担）逐条裁决均为可接受"
+  },
+  "reviewedAt": "2026-09-28T15:43:16Z"
+}
