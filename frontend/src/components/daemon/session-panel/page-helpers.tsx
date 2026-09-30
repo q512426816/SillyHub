@@ -22,6 +22,7 @@ import {
   type SharedAgentActiveView,
   type TeamMissionSummary,
   PROVIDER_META,
+  SESSION_SUPPORTED_PROVIDERS,
 } from "@/lib/daemon";
 import type {
   LlmProviderRead,
@@ -840,7 +841,13 @@ export function deriveTakeoverChrome(opts: {
     for (const m of machines) {
       if (m.status !== "online") continue;
       for (const rt of m.runtimes ?? []) {
-        if (rt.provider && rt.status === "online") all.add(rt.provider);
+        if (
+          rt.provider &&
+          rt.status === "online" &&
+          (SESSION_SUPPORTED_PROVIDERS as readonly string[]).includes(rt.provider)
+        ) {
+          all.add(rt.provider);
+        }
       }
     }
     return { tier, machineOnline: true, machineLabel, engines: [...all].sort() };
@@ -853,10 +860,18 @@ export function deriveTakeoverChrome(opts: {
   if (!hit || hit.status !== "online") {
     return { tier, machineOnline: false, machineLabel, engines: [] };
   }
+  // 2026-09-30-takeover-handoff-any-location 用户裁决：候选对齐「新建会话 ·
+  // 选择运行位置」白名单（SESSION_SUPPORTED_PROVIDERS）——openclaw/kimi 等
+  // 不可会话引擎不再出现在接手引擎下拉。
   const engines = [
     ...new Set(
       (hit.runtimes ?? [])
-        .filter((rt) => rt.provider && rt.status === "online")
+        .filter(
+          (rt) =>
+            rt.provider &&
+            rt.status === "online" &&
+            (SESSION_SUPPORTED_PROVIDERS as readonly string[]).includes(rt.provider),
+        )
         .map((rt) => rt.provider as string),
     ),
   ].sort();

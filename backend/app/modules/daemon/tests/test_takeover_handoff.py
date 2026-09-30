@@ -255,10 +255,16 @@ class TestHandoffEndToEnd:
         )
         source_id = source.id
 
+        # 2026-09-30-takeover-handoff-any-location：白名单外引擎（openclaw
+        # 不可会话）→ 422 独立文案（对齐新建会话 SESSION_SUPPORTED 口径）。
+        resp = await _takeover(client, auth_headers, source_id, prompt="hi", provider="openclaw")
+        assert resp.status_code == 422, resp.text
+        assert "不支持会话" in resp.json()["message"]
+
         # 非法重选：原机无 pi。
         resp = await _takeover(client, auth_headers, source_id, prompt="hi", provider="pi")
         assert resp.status_code == 422, resp.text
-        assert "不在原机支持的引擎集合" in resp.json()["message"]
+        assert "不在原机支持的可会话引擎集合" in resp.json()["message"]
 
         # 合法重选：codex（同机另一 provider 行）。
         mocked_hub.send_rpc.return_value = {"status": "parsed", "messages": [], "truncated": False}

@@ -30,6 +30,7 @@ from sqlmodel import col
 
 from app.core.errors import AppError
 from app.modules.agent.model import AgentSession
+from app.modules.agent.provider_caps import PROVIDER_CAPS
 from app.modules.daemon.model import DaemonRuntime
 
 # 可 resume harness 集合（D-004@v1：daemon caps.resume=True 且 platform_agent_
@@ -453,16 +454,34 @@ async def takeover_session(
     # ── 原机四级匹配（先于任何写库——匹配失败不落半成品）──────────────────
     machine_rows, _match_tier = await resolve_takeover_machine(db, source, user_id=user_id)
 
-    # ── provider 行选择 + handoff 重选校验（D-005@v2）──────────────────────
-    # 原机在线 provider 集合 = 命中机器全部 runtime 行的 provider 值；显式重选
-    # 不在集合 → 422（"用户选错引擎"与"原机没有"分口径）；默认 provider 无行
-    # → 409 no_machine 语义（机器在线但没装该引擎执行端）。
-    machine_providers = {rt.provider for rt in machine_rows}
-    provider_rows = [rt for rt in machine_rows if rt.provider == effective_provider]
+    # ── provider 行选择 + handoff 重选校验（D-005@v2 + 2026-09-30 用户裁决：
+    #    候选对齐「新建会话 · 选择运行位置」的引擎白名单，仅可会话引擎——
+    #    PROVIDER_CAPS 四键 claude/codex/pi/cursor，与前端 SESSION_SUPPORTED_
+    #    PROVIDERS 同源语义；openclaw/opencode/kimi 等不可会话引擎不再入选）──
+    # 原机在线可会话引擎 = 命中机器 runtime 行 provider ∩ 白名单；显式重选不在
+    # 集合 → 422（"用户选错引擎"与"原机没有"分口径）；默认 provider 无行 →
+    # 409 no_machine 语义（机器在线但没装可会话引擎）。
+    session_capable = set(PROVIDER_CAPS)
+    machine_providers = {rt.provider for rt in machine_rows if rt.provider in session_capable}
+    provider_rows = [
+        rt
+        for rt in machine_rows
+        if rt.provider == effective_provider and rt.provider in session_capable
+    ]
     if not provider_rows:
         if provider and provider.strip() and provider.strip() != (source.provider or ""):
+            if effective_provider not in session_capable:
+                raise ToolReportTakeoverProviderInvalid(
+                    f"所选引擎 '{effective_provider}' 不支持会话（可用：claude、"
+                    "codex、pi、cursor），请重新选择。",
+                    details={
+                        "session_id": str(session_id),
+                        "provider": effective_provider,
+                        "session_capable": sorted(session_capable),
+                    },
+                )
             raise ToolReportTakeoverProviderInvalid(
-                f"所选引擎 '{effective_provider}' 不在原机支持的引擎集合"
+                f"所选引擎 '{effective_provider}' 不在原机支持的可会话引擎集合"
                 f"（{('、'.join(sorted(p for p in machine_providers if p))) or '空'}）"
                 "内，请从原机可用引擎中选择。",
                 details={
@@ -472,7 +491,8 @@ async def takeover_session(
                 },
             )
         raise ToolReportTakeoverNoMachine(
-            "该机器在线但没有对应引擎的执行端，请检查该机器 daemon 的引擎配置。",
+            "该机器在线但没有可会话的引擎执行端（需要 Claude Code、Codex、PI 或"
+            " Cursor 在线），请检查该机器 daemon 的引擎配置。",
             details={
                 "session_id": str(session_id),
                 "provider": effective_provider,

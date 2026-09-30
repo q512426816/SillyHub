@@ -154,11 +154,13 @@ function renderNote(chrome: Parameters<typeof TakeoverBridgeNote>[0]["chrome"], 
 }
 
 describe("TakeoverBridgeNote", () => {
-  it("handoff 档：黄条（分叉+交接文档）+ 引擎选择器（原机在线引擎）", () => {
+  it("handoff 档：黄条（分叉+交接文档）+ 引擎选择器（白名单内引擎）", () => {
     renderNote({
       tier: "handoff",
       machineOnline: true,
       machineLabel: "WIN-A",
+      // 白名单过滤由 deriveTakeoverChrome 完成（openclaw 已滤除）——组件
+      // 收到的 engines 即已过滤集合，断言不含不可会话引擎的渲染面。
       engines: ["claude", "codex"],
     });
     expect(screen.getByText(/分叉出新会话/)).toBeInTheDocument();
@@ -169,6 +171,18 @@ describe("TakeoverBridgeNote", () => {
       "claude",
       "codex",
     ]);
+  });
+
+  it("白名单过滤：deriveTakeoverChrome 滤除 openclaw/kimi 等不可会话引擎", () => {
+    const machineWithExtras = {
+      ...machine("WIN-A", ["claude", "openclaw", "kimi", "codex"]),
+    };
+    const chrome = deriveTakeoverChrome({
+      harness: "zcode",
+      reportedMachineName: "WIN-A",
+      machines: [machineWithExtras],
+    });
+    expect(chrome.engines).toEqual(["claude", "codex"]);
   });
 
   it("native 档：绿条（接续原会话+机器名）无选择器", () => {
