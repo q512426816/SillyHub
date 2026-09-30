@@ -1,6 +1,6 @@
 # 动态依赖测试推断把 e2e 用例交给 vitest → 被 exclude 面拦成「No test files found」假红
 
-- 状态：活跃坑（待 sillyspec 工具修复；本仓已用注释改写绕开触发）
+- 状态：已处理（2026-09-30 用户授权修复 sillyspec 仓三缺陷，三路验证通过；本仓 passWithNoTests 兜底已撤）
 - 发现：2026-09-30，`2026-09-30-breadcrumb-dedupe-zh` flow done 测试门。
 
 ## 现象
@@ -62,3 +62,29 @@ exit≠0 且输出里检测不到失败行（×/FAIL 等）时保守判 failed�
 sillyspec 发版含上述任一修复后，改一次 `frontend/src/components/top-bar.tsx`（或任何
 被 e2e 注释引用的源文件）跑 flow done，确认依赖批不再产生
 `vitest run e2e/auth.spec.ts` 命令。
+
+## 处置记录（2026-09-30，用户授权修复）
+
+sillyspec 仓（npm link 直连源码，CLI 3.31.0 即时生效）三处修复落地：
+
+1. **①依赖命中剥注释后匹配**：`stripCommentsForDepMatch`（字符串感知状态机，JS //
+   块注释 / py # 注释）——注释里的路径/导入串字面引用不再算依赖边，代码内
+   import/require/dynamic import/vi.mock 引用照常命中。
+2. **②isTestFilePath 补 jsx|tsx**：`.test.tsx/.spec.jsx` 算测试文件——自家 tsx
+   测试进依赖面（原先反被当 src 漏跑）。
+3. **③jsProject 批过滤 e2e/cypress**：端到端目录文件不进项目运行器批，转
+   `deps(auto-jsx-e2e-skip)` 披露式 skip 批（不产命令不拦门）；jsNative 批
+   （node:test 协议）不受影响。
+
+**三路验证**：
+- sillyspec 仓单测：新增 `test/dynamic-deps-comment-edge.test.mjs` 8 用例 +
+  受影响既有 6 套件 31 用例全绿（零回归）；
+- 批组成复算（multi-agent-platform 原始失败面）：注释引用路 / changedTests 路
+  都不再产生 `vitest run e2e/auth.spec.ts`；自家 top-bar.test.tsx 进跑面；
+- 门禁函数端到端（runVerifyTestCheck faceOverride 原始失败面）：deps(auto-jsx)
+  实跑 3 文件全绿 + e2e 走披露式 skip。
+
+**本仓配套收尾（2026-09-30-vitest-passwithnotests-rollback）**：
+`frontend/vitest.config.ts` 的 `passWithNoTests` 兜底已撤（恢复正常空收集报错
+语义——未来真正错误的空收集不再被掩盖）；撤除前后门禁复核均全绿，确认修复
+不依赖兜底。本文件随之处理完毕移入 finished/。

@@ -8,12 +8,6 @@ export default defineConfig({
     // E2E（Playwright）与单测（Vitest）双栈隔离（D-009@v1）：vitest 默认 include
     // **/*.{test,spec}.?() 会收集 e2e/*.spec.ts，此处显式排除，同时保留默认排除项。
     exclude: ["e2e/**", ...configDefaults.exclude],
-    // 被排除文件被显式过滤时不算失败（sillyspec verify 门禁的依赖推断曾把
-    // e2e/auth.spec.ts 点名传给 vitest，exclude 面拦下后「No test files found」
-    // exit 1 假红——工具缺陷三层根因见
-    // docs/sillyspec/dynamic-deps-e2e-vitest-exclude-false-red.md）。正常
-    // 全量/CI 恒有测试文件命中，此开关零影响。
-    passWithNoTests: true,
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
