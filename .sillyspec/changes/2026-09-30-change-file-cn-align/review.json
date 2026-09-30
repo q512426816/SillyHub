@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-change-file-cn-align",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "「原名截断 hover title 兜底」声明不成立：shrink-0 与 truncate 同挂使 ellipsis 永不触发（死代码）",
+      "evidence": "design 槽4 声称窄列下『原名 shrink-0+truncate 双兜底（原名截断 hover 有 title 全路径）』。实际原名 span 同挂 shrink-0 与 truncate：flex 子项被 shrink-0 禁止收缩后宽度恒等于内容宽，overflow:hidden+text-overflow:ellipsis 无截断对象，truncate 是永不生效的死代码。真实行为：极窄列时中文名 span（min-w-0+truncate）先缩尽到 0，此后原名 span 仍不可缩，将视觉溢出外层 span 的盒（按钮行与外层 span 链上均无 overflow-hidden），可能盖到 ml-auto 徽标区，而非按声明截断。title={doc.path} 恒渲染（与是否截断无关），hover 兜底事实上存在但机制与声明不符。裁决：可接受——changeFileCnName 命中的固定产物原名长度有界（最长约 26 字符），280px 列内实际溢出概率低，且既有截图证据未见异常；但声明与代码事实不符，记 P3 留痕。",
+      "location": "frontend/src/components/change-file-tree.tsx:340; .sillyspec/changes/2026-09-30-change-file-cn-align/design.md:43"
+    },
+    {
+      "severity": "P3",
+      "title": "design 槽4「外层 min-w-0+truncate」表述错位：外层 span 无 truncate，truncate 挂在内层中文名 span",
+      "evidence": "实际代码：外层文本 span 为 'flex min-w-0 flex-1 items-baseline gap-1.5'（无 truncate，且 flex 容器上 truncate 也无意义）；truncate 实挂内层中文名 span 'min-w-0 truncate'。中文名截断这一等效防护真实存在（外层 min-w-0+flex-1 收束宽度 + 内层 min-w-0+truncate 生效，本机实页与 19 用例回归绿），但设计文档对防护位置的描述与 diff 不符，属文档精度问题而非防护缺失。裁决：可接受，建议后续更正措辞。",
+      "location": "frontend/src/components/change-file-tree.tsx:336-337; .sillyspec/changes/2026-09-30-change-file-cn-align/design.md:43"
+    },
+    {
+      "severity": "P3",
+      "title": "design 槽4 FR 编号引用错位：把「原名保留可对照」语义归到 FR-03",
+      "evidence": "槽4 称放弃隐藏原名方案的理由是『丢失「原名保留可对照」的 FR-03 语义』，但本变更 requirements.md 中 FR-03 是『change-file-tree 相关测试不回归』；原名对照语义属 FR-01『中文名与英文小字紧凑相邻排列（含原名对照在场）』的范畴（或上一变更 2026-09-29 的 FR）。放弃方案本身的裁决（保留原名可对照 > 只显中文名）成立且与视觉证据一致，仅编号引用错位。裁决：可接受，纯文档瑕疵。",
+      "location": ".sillyspec/changes/2026-09-30-change-file-cn-align/design.md:43"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-30T10:40:37+08:00"
+}

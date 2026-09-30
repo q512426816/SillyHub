@@ -337,7 +337,7 @@ function TreeView({
               <span className="min-w-0 truncate">{cnName ?? doc.name}</span>
               {cnName && (
                 <span
-                  className="shrink-0 truncate font-mono text-[10px] font-normal text-muted-foreground/70"
+                  className="min-w-0 truncate font-mono text-[10px] font-normal text-muted-foreground/70"
                   title={doc.path}
                 >
                   {doc.name}
