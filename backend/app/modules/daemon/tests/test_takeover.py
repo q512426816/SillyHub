@@ -315,6 +315,15 @@ class TestFourTierMatching:
         msg = resp.json()["message"]
         assert "DESKTOP-HJ0AM09" in msg
         assert "不会换到其它机器" in msg
+        # 第三态（无身份且零命中）文案可诊断：另一会话无机器身份且 cwd 不被任何
+        # 白名单覆盖 → 断言「未携带机器身份」指引面（2026-09-30-takeover-tier3）。
+        naked = await _seed_tool_report_session(
+            db_session, cwd="Z:/nowhere/project", reported_machine_name=None
+        )
+        resp2 = await _takeover(client, auth_headers, naked.id)
+        assert resp2.status_code == 409, resp2.text
+        assert "未携带机器身份" in resp2.json()["message"]
+        assert resp2.json()["details"]["machine_candidates"] == []
         # 未建任何接手会话。
         after_sessions = (
             (await db_session.execute(select(AgentSession).where(AgentSession.origin == "fork")))
@@ -355,7 +364,7 @@ class TestFourTierMatching:
         mocked_redis,
     ) -> None:
         """2026-09-30-takeover-tier3-ambiguous-msg：③级多机命中 → 409 文案列出
-        全部命中机器名（可诊断——用户知道该清哪台 allowed_roords）。"""
+        全部命中机器名（可诊断——用户知道该清哪台 allowed_roots）。"""
         owner_id = await _admin_user_id(db_session)
         # 两台机器（daemon_instance 各异）白名单都覆盖 cwd。
         rt_win = await _create_runtime(db_session, owner_id, name="DESKTOP-HJ0AM09")
