@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-takeover-handoff-any-location",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-30-takeover-handoff-any-location:flow:FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover_handoff.py::TestHandoffEndToEnd::test_provider_reselect_422_and_ok（含"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-takeover-handoff-any-location"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-30-takeover-handoff-any-location:flow:FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-takeover-handoff-any-location"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-30-takeover-handoff-any-location:flow:FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-takeover-handoff-any-location"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-09-30-takeover-handoff-any-location:flow:FR-06",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover.py::TestTiersAndForkCreation::test_native_tier_resume_session_id_in_lease（native",
+        "frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-takeover-handoff-any-location"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-09-30-takeover-handoff-any-location:flow:FR-07",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-takeover-handoff-any-location"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-09-30-takeover-handoff-any-location:flow:FR-08",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover.py",
+        "frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-takeover-handoff-any-location"
+    }
+  ]
+}

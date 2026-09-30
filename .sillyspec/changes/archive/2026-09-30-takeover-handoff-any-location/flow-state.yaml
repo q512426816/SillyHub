@@ -1,0 +1,23 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+baseline_commit: e9cbff78c7335e780ccfc82e1ae6bb0351cfa552
+updatedAt: '2026-09-30T07:43:38.030Z'
+baseline_sha256: a7ccdcabb1a3c396c7587eb1d91affcf87a30c82164fc3519ba22a97223c6584
+gate_summary: >-
+  test: passed ← module[]+deps(py1)（15.4s）
+  结果：C:\Users\qinyi\AppData\Local\Temp\sillyspec-gate-YKgU9C\.sillyspec\.runtime\verify-runs\20260930073813\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（46.1s）｜门文件 7 个
+

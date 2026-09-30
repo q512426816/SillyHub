@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-takeover-handoff-any-location",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "422 文案中的可用引擎清单为手写硬编码，与 PROVIDER_CAPS 键集无程序性绑定",
+      "evidence": "后端 422 消息内嵌「（可用：claude、codex、pi、cursor）」字面量；白名单本体来自 set(PROVIDER_CAPS)，但该中文清单若新增第五个可会话引擎需人工同步（前端 SESSION_SUPPORTED_PROVIDERS docblock 亦自认『新增引擎时四处一起改』约定，后端 provider_caps.py 有 test_provider_caps_alignment.py 守护表值但不守护此消息文案）。当前四键两端口径完全一致，仅存在演进期漂移风险。",
+      "location": "backend/app/modules/daemon/session/service/takeover.py:475-476"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-08 声明的测试全绿与 tsc/lint/mypy 零错未在本次只读评审中独立复跑",
+      "evidence": "只读纪律（禁改文件/禁 git/预算 ≤6 次调用）下未执行测试套件；requirements.md FR-08 绑定声明『21 用例全绿 + 7 用例全绿 + tsc/lint/mypy 零错』按书面采信。代码层面已核对：openclaw 422 断言、既有断言文案随消息同步更新（『不在原机支持的可会话引擎集合』）、前端 deriveTakeoverChrome 滤除断言（openclaw/kimi → ['claude','codex']）及测试文件所需 import（deriveTakeoverChrome/machine）均在位。",
+      "location": ".sillyspec/changes/2026-09-30-takeover-handoff-any-location/requirements.md:74"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-30"
+}

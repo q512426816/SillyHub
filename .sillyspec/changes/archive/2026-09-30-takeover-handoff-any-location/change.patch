@@ -1,0 +1,375 @@
+diff --git a/backend/app/modules/daemon/session/service/takeover.py b/backend/app/modules/daemon/session/service/takeover.py
+index e4ac8058e..63fbf7d7b 100644
+--- a/backend/app/modules/daemon/session/service/takeover.py
++++ b/backend/app/modules/daemon/session/service/takeover.py
+@@ -30,6 +30,7 @@ from sqlmodel import col
+ 
+ from app.core.errors import AppError
+ from app.modules.agent.model import AgentSession
++from app.modules.agent.provider_caps import PROVIDER_CAPS
+ from app.modules.daemon.model import DaemonRuntime
+ 
+ # 可 resume harness 集合（D-004@v1：daemon caps.resume=True 且 platform_agent_
+@@ -453,16 +454,34 @@ async def takeover_session(
+     # ── 原机四级匹配（先于任何写库——匹配失败不落半成品）──────────────────
+     machine_rows, _match_tier = await resolve_takeover_machine(db, source, user_id=user_id)
+ 
+-    # ── provider 行选择 + handoff 重选校验（D-005@v2）──────────────────────
+-    # 原机在线 provider 集合 = 命中机器全部 runtime 行的 provider 值；显式重选
+-    # 不在集合 → 422（"用户选错引擎"与"原机没有"分口径）；默认 provider 无行
+-    # → 409 no_machine 语义（机器在线但没装该引擎执行端）。
+-    machine_providers = {rt.provider for rt in machine_rows}
+-    provider_rows = [rt for rt in machine_rows if rt.provider == effective_provider]
++    # ── provider 行选择 + handoff 重选校验（D-005@v2 + 2026-09-30 用户裁决：
++    #    候选对齐「新建会话 · 选择运行位置」的引擎白名单，仅可会话引擎——
++    #    PROVIDER_CAPS 四键 claude/codex/pi/cursor，与前端 SESSION_SUPPORTED_
++    #    PROVIDERS 同源语义；openclaw/opencode/kimi 等不可会话引擎不再入选）──
++    # 原机在线可会话引擎 = 命中机器 runtime 行 provider ∩ 白名单；显式重选不在
++    # 集合 → 422（"用户选错引擎"与"原机没有"分口径）；默认 provider 无行 →
++    # 409 no_machine 语义（机器在线但没装可会话引擎）。
++    session_capable = set(PROVIDER_CAPS)
++    machine_providers = {rt.provider for rt in machine_rows if rt.provider in session_capable}
++    provider_rows = [
++        rt
++        for rt in machine_rows
++        if rt.provider == effective_provider and rt.provider in session_capable
++    ]
+     if not provider_rows:
+         if provider and provider.strip() and provider.strip() != (source.provider or ""):
++            if effective_provider not in session_capable:
++                raise ToolReportTakeoverProviderInvalid(
++                    f"所选引擎 '{effective_provider}' 不支持会话（可用：claude、"
++                    "codex、pi、cursor），请重新选择。",
++                    details={
++                        "session_id": str(session_id),
++                        "provider": effective_provider,
++                        "session_capable": sorted(session_capable),
++                    },
++                )
+             raise ToolReportTakeoverProviderInvalid(
+-                f"所选引擎 '{effective_provider}' 不在原机支持的引擎集合"
++                f"所选引擎 '{effective_provider}' 不在原机支持的可会话引擎集合"
+                 f"（{('、'.join(sorted(p for p in machine_providers if p))) or '空'}）"
+                 "内，请从原机可用引擎中选择。",
+                 details={
+@@ -472,7 +491,8 @@ async def takeover_session(
+                 },
+             )
+         raise ToolReportTakeoverNoMachine(
+-            "该机器在线但没有对应引擎的执行端，请检查该机器 daemon 的引擎配置。",
++            "该机器在线但没有可会话的引擎执行端（需要 Claude Code、Codex、PI 或"
++            " Cursor 在线），请检查该机器 daemon 的引擎配置。",
+             details={
+                 "session_id": str(session_id),
+                 "provider": effective_provider,
+diff --git a/backend/app/modules/daemon/tests/test_takeover_handoff.py b/backend/app/modules/daemon/tests/test_takeover_handoff.py
+index 6bdfc6e5c..b669f01a7 100644
+--- a/backend/app/modules/daemon/tests/test_takeover_handoff.py
++++ b/backend/app/modules/daemon/tests/test_takeover_handoff.py
+@@ -255,10 +255,16 @@ class TestHandoffEndToEnd:
+         )
+         source_id = source.id
+ 
++        # 2026-09-30-takeover-handoff-any-location：白名单外引擎（openclaw
++        # 不可会话）→ 422 独立文案（对齐新建会话 SESSION_SUPPORTED 口径）。
++        resp = await _takeover(client, auth_headers, source_id, prompt="hi", provider="openclaw")
++        assert resp.status_code == 422, resp.text
++        assert "不支持会话" in resp.json()["message"]
++
+         # 非法重选：原机无 pi。
+         resp = await _takeover(client, auth_headers, source_id, prompt="hi", provider="pi")
+         assert resp.status_code == 422, resp.text
+-        assert "不在原机支持的引擎集合" in resp.json()["message"]
++        assert "不在原机支持的可会话引擎集合" in resp.json()["message"]
+ 
+         # 合法重选：codex（同机另一 provider 行）。
+         mocked_hub.send_rpc.return_value = {"status": "parsed", "messages": [], "truncated": False}
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx
+index 00184ef4f..398cfebee 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx
+@@ -154,11 +154,13 @@ function renderNote(chrome: Parameters<typeof TakeoverBridgeNote>[0]["chrome"],
+ }
+ 
+ describe("TakeoverBridgeNote", () => {
+-  it("handoff 档：黄条（分叉+交接文档）+ 引擎选择器（原机在线引擎）", () => {
++  it("handoff 档：黄条（分叉+交接文档）+ 引擎选择器（白名单内引擎）", () => {
+     renderNote({
+       tier: "handoff",
+       machineOnline: true,
+       machineLabel: "WIN-A",
++      // 白名单过滤由 deriveTakeoverChrome 完成（openclaw 已滤除）——组件
++      // 收到的 engines 即已过滤集合，断言不含不可会话引擎的渲染面。
+       engines: ["claude", "codex"],
+     });
+     expect(screen.getByText(/分叉出新会话/)).toBeInTheDocument();
+@@ -171,6 +173,18 @@ describe("TakeoverBridgeNote", () => {
+     ]);
+   });
+ 
++  it("白名单过滤：deriveTakeoverChrome 滤除 openclaw/kimi 等不可会话引擎", () => {
++    const machineWithExtras = {
++      ...machine("WIN-A", ["claude", "openclaw", "kimi", "codex"]),
++    };
++    const chrome = deriveTakeoverChrome({
++      harness: "zcode",
++      reportedMachineName: "WIN-A",
++      machines: [machineWithExtras],
++    });
++    expect(chrome.engines).toEqual(["claude", "codex"]);
++  });
++
+   it("native 档：绿条（接续原会话+机器名）无选择器", () => {
+     renderNote(
+       {
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index b927c211a..416847883 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -22,6 +22,7 @@ import {
+   type SharedAgentActiveView,
+   type TeamMissionSummary,
+   PROVIDER_META,
++  SESSION_SUPPORTED_PROVIDERS,
+ } from "@/lib/daemon";
+ import type {
+   LlmProviderRead,
+@@ -840,7 +841,13 @@ export function deriveTakeoverChrome(opts: {
+     for (const m of machines) {
+       if (m.status !== "online") continue;
+       for (const rt of m.runtimes ?? []) {
+-        if (rt.provider && rt.status === "online") all.add(rt.provider);
++        if (
++          rt.provider &&
++          rt.status === "online" &&
++          (SESSION_SUPPORTED_PROVIDERS as readonly string[]).includes(rt.provider)
++        ) {
++          all.add(rt.provider);
++        }
+       }
+     }
+     return { tier, machineOnline: true, machineLabel, engines: [...all].sort() };
+@@ -853,10 +860,18 @@ export function deriveTakeoverChrome(opts: {
+   if (!hit || hit.status !== "online") {
+     return { tier, machineOnline: false, machineLabel, engines: [] };
+   }
++  // 2026-09-30-takeover-handoff-any-location 用户裁决：候选对齐「新建会话 ·
++  // 选择运行位置」白名单（SESSION_SUPPORTED_PROVIDERS）——openclaw/kimi 等
++  // 不可会话引擎不再出现在接手引擎下拉。
+   const engines = [
+     ...new Set(
+       (hit.runtimes ?? [])
+-        .filter((rt) => rt.provider && rt.status === "online")
++        .filter(
++          (rt) =>
++            rt.provider &&
++            rt.status === "online" &&
++            (SESSION_SUPPORTED_PROVIDERS as readonly string[]).includes(rt.provider),
++        )
+         .map((rt) => rt.provider as string),
+     ),
+   ].sort();
+diff --git a/.sillyspec/changes/2026-09-30-takeover-handoff-any-location/design.md b/.sillyspec/changes/2026-09-30-takeover-handoff-any-location/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-takeover-handoff-any-location/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T07:27:52.459Z
++---
++# 设计记录（Design Record）— 2026-09-30-takeover-handoff-any-location
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-handoff-any-location 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++用户裁决修正（对话中二次收窄）：不做「任意在线机器」选择——仅把 handoff 档接手引擎候选对齐「新建会话 · 选择运行位置」的白名单（SESSION_SUPPORTED_PROVIDERS=claude/codex/pi/cursor，后端同源=PROVIDER_CAPS 四键）。执行位置仍锁原机（D-002 不变）。改动：前端 deriveTakeoverChrome 两处 engines 派生加白名单过滤；后端 takeover handoff 分支 session_capable 集合过滤 machine_providers/provider_rows，白名单外重选 422「不支持会话」独立文案，默认无白名单行 409「可会话引擎」文案。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-handoff-any-location 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++TakeoverRequest.provider 语义不变（可选重选）；重选校验集合从「原机全部 provider」收窄为「原机 provider ∩ PROVIDER_CAPS」；错误文案两分（白名单外 vs 原机没有）。前端 deriveTakeoverChrome 返回的 engines 恒为白名单内集合。无新端点/字段。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-handoff-any-location 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++乱序：不涉及（静态集合过滤）。并发：白名单为编译期常量无共享态。切换：422/409 先于写库无半成品。作用域：machine_rows 恒限会话属主，白名单全局常量不串台。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-handoff-any-location 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++测试：后端 test_takeover_handoff.py 增 openclaw 422「不支持会话」断言（6 用例绿）；前端 session-panel-takeover.test.tsx 增白名单过滤用例（7 用例绿）+ tsc/lint/mypy 零错。回滚=revert 单 commit（纯过滤与文案，无 schema 面）。死路：无。
+
+diff --git a/.sillyspec/changes/2026-09-30-takeover-handoff-any-location/proposal.md b/.sillyspec/changes/2026-09-30-takeover-handoff-any-location/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-takeover-handoff-any-location/proposal.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T07:27:52.459Z
++---
++# 提案书（Proposal）— 2026-09-30-takeover-handoff-any-location
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:5792a1e0c24f73b7e9b0c42059fb50060f399f03c5442559719f4c6913238b31:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-handoff-any-location 留痕重锚 -->
++任务原话转写：真机验收后用户裁决：handoff 档（zcode 等无 adapter 会话）接手的执行位置应与「新建会话 · 选择运行位置」完全一致——任意在线机器 × 该机白名单引擎（SESSION_SUPPORTED_PROVIDERS：claude/codex/pi/cursor），而非仅原机引擎；原机仅用于读交接文档（读取失败提示后仍可继续，上下文从新会话起步）。native 档（claude-code/codex resume）仍锁原机不变（D-002 宁拒不猜）。当前实现问题：接手引擎下拉只列原机引擎且未过滤白名单（openclaw/kimi 等不可会话引擎也列出）。
++成功标准：
++- handoff 档 TakeoverRequest 支持可选 runtime_id（用户所选机器+引擎），服务端校验属主+在线后用作派发位置；缺省保持原四级匹配（原机）不回归
++- handoff 档原机匹配失败不再阻塞（显式 runtime_id 时 handoff_doc=false 降级继续）；未传 runtime_id 且原机无匹配仍 409
++- 前端 handoff 档选择器为两级（在线机器 → 该机白名单在线引擎），默认预选上报机器；native 档不渲染选择器且仍锁原机
++- 接手引擎候选过滤 SESSION_SUPPORTED_PROVIDERS（不可会话引擎不再出现）
++- 既有 takeover 用例零回归 + 新增覆盖（runtime_id 显式/原机离线降级/白名单过滤）
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:302840e4208e22792ddc3ba749012f8649f998ba7f8f7f04e1565de87cd595bd:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-handoff-any-location 留痕重锚 -->
++按成功标准机械推导，共 8 条验收面：
++1. handoff 档 TakeoverRequest 支持可选 runtime_id（用户所选机器+引擎），服务端校验属主+在线后用作派发位置
++2. 缺省保持原四级匹配（原机）不回归
++3. handoff 档原机匹配失败不再阻塞（显式 runtime_id 时 handoff_doc=false 降级继续）
++4. 未传 runtime_id 且原机无匹配仍 409
++5. 前端 handoff 档选择器为两级（在线机器 → 该机白名单在线引擎），默认预选上报机器
++6. native 档不渲染选择器且仍锁原机
++7. 接手引擎候选过滤 SESSION_SUPPORTED_PROVIDERS（不可会话引擎不再出现）
++8. 既有 takeover 用例零回归 + 新增覆盖（runtime_id 显式/原机离线降级/白名单过滤）
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:f8a1a9b3cedb166287f50484c3eed345df1ffa329eca9f1f9100d15fb8ca2b5a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-handoff-any-location 留痕重锚 -->
++1. handoff 档 TakeoverRequest 支持可选 runtime_id（用户所选机器+引擎），服务端校验属主+在线后用作派发位置
++2. 缺省保持原四级匹配（原机）不回归
++3. handoff 档原机匹配失败不再阻塞（显式 runtime_id 时 handoff_doc=false 降级继续）
++4. 未传 runtime_id 且原机无匹配仍 409
++5. 前端 handoff 档选择器为两级（在线机器 → 该机白名单在线引擎），默认预选上报机器
++6. native 档不渲染选择器且仍锁原机
++7. 接手引擎候选过滤 SESSION_SUPPORTED_PROVIDERS（不可会话引擎不再出现）
++8. 既有 takeover 用例零回归 + 新增覆盖（runtime_id 显式/原机离线降级/白名单过滤）
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-30-takeover-handoff-any-location/requirements.md b/.sillyspec/changes/2026-09-30-takeover-handoff-any-location/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-takeover-handoff-any-location/requirements.md
+@@ -0,0 +1,74 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T07:27:52.459Z
++---
++# 需求规格（Requirements）— 2026-09-30-takeover-handoff-any-location
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: handoff 档 TakeoverRequest 支持可选 runtime_id（用户所选机器+引
++Given 系统就绪
++When handoff 档 TakeoverRequest 支持可选 runtime_id（用户所选机器+引擎），服务端校验属主+在线后用作派发位置
++Then 行为符合本条标准描述
++
++### FR-02: 缺省保持原四级匹配（原机）不回归
++Given 系统就绪
++When 缺省保持原四级匹配（原机）不回归
++Then 行为符合本条标准描述
++
++### FR-03: handoff 档原机匹配失败不再阻塞（显式 runtime_id 时 handoff_doc=fa
++Given 系统就绪
++When handoff 档原机匹配失败不再阻塞（显式 runtime_id 时 handoff_doc=false 降级继续）
++Then 行为符合本条标准描述
++
++### FR-04: 未传 runtime_id 且原机无匹配仍 409
++Given 系统就绪
++When 未传 runtime_id 且原机无匹配仍 409
++Then 行为符合本条标准描述
++
++### FR-05: 前端 handoff 档选择器为两级（在线机器 → 该机白名单在线引擎），默认预选上报机器
++Given 前端 相关模块就绪
++When 前端 handoff 档选择器为两级（在线机器
++Then 该机白名单在线引擎），默认预选上报机器
++
++### FR-06: native 档不渲染选择器且仍锁原机
++Given 系统就绪
++When native 档不渲染选择器且仍锁原机
++Then 行为符合本条标准描述
++
++### FR-07: 接手引擎候选过滤 SESSION_SUPPORTED_PROVIDERS（不可会话引擎不再出现）
++Given 系统就绪
++When 接手引擎候选过滤 SESSION_SUPPORTED_PROVIDERS（不可会话引擎不再出现）
++Then 行为符合本条标准描述
++
++### FR-08: 既有 takeover 用例零回归 + 新增覆盖（runtime_id 显式/原机离线降级/白名单过
++Given 系统就绪
++When 既有 takeover 用例零回归 + 新增覆盖（runtime_id 显式/原机离线降级/白名单过滤）
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/daemon/tests/test_takeover_handoff.py::TestHandoffEndToEnd::test_provider_reselect_422_and_ok（含 openclaw 422 白名单断言）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx（白名单过滤用例：engines 恒白名单内）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/daemon/tests/test_takeover.py（四级矩阵零回归 15 用例）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：FR-01/03/04（runtime_id 显式/原机离线降级链）随用户裁决「不做任意机器」一并收窄不实施——原机匹配失败仍 409（D-002 不变），由 backend/app/modules/daemon/tests/test_takeover.py 四级矩阵既有覆盖。
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：两级机器选择器随用户裁决收窄不实施——仅引擎下拉（白名单过滤），见 FR-02 绑定。
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/daemon/tests/test_takeover.py::TestTiersAndForkCreation::test_native_tier_resume_session_id_in_lease（native 锁原机+resume）+ session-panel-takeover.test.tsx native 用例（无选择器断言）。
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx（deriveTakeoverChrome 白名单过滤用例）+ backend test_takeover_handoff.py（openclaw 422「不支持会话」）。
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/daemon/tests/test_takeover.py + test_takeover_handoff.py（21 用例全绿）+ session-panel-takeover.test.tsx（7 用例全绿）；tsc/lint/mypy 零错。
+
+diff --git a/.sillyspec/changes/2026-09-30-takeover-handoff-any-location/tasks.md b/.sillyspec/changes/2026-09-30-takeover-handoff-any-location/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-takeover-handoff-any-location/tasks.md
+@@ -0,0 +1,18 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T07:27:52.459Z
++---
++# 任务注册表（Tasks）— 2026-09-30-takeover-handoff-any-location
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge + 2026-09-29 心跳指针）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。📌 任务面在 ①spec 阶段定稿：覆写为真实实现步骤（全 `- [ ]`）后再动代码；执行循环：Working on task N/M → 做一件 → 勾一格 → 下一个——收口硬门拒单拍多格勾选（--allow-batch-tick 可显式旁路留痕）。`flow status --change <名>` 为自愿查看/恢复面（恢复时给下一任务指针与进度，非协议必需——D-007）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: handoff 档 TakeoverRequest 支持可选 runtime_id（用户所选机器+引擎），服务端校验属主+在线后用作派发位置
++- [ ] task-02: 缺省保持原四级匹配（原机）不回归
++- [ ] task-03: handoff 档原机匹配失败不再阻塞（显式 runtime_id 时 handoff_doc=false 降级继续）
++- [ ] task-04: 未传 runtime_id 且原机无匹配仍 409
++- [ ] task-05: 前端 handoff 档选择器为两级（在线机器 → 该机白名单在线引擎），默认预选上报机器
++- [ ] task-06: native 档不渲染选择器且仍锁原机
++- [ ] task-07: 接手引擎候选过滤 SESSION_SUPPORTED_PROVIDERS（不可会话引擎不再出现）
++- [ ] task-08: 既有 takeover 用例零回归 + 新增覆盖（runtime_id 显式/原机离线降级/白名单过滤）
