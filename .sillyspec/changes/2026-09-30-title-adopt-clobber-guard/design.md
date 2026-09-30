@@ -44,3 +44,13 @@ created_at: 2026-09-30T00:34:57.823Z
 
 <!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
 最大风险：兜底判定把「裸模板 H1 文本」也算兜底——若作者刻意把自定义标题写成恰命中 TEMPLATE_H1_RE 的纯类型词文案（如就叫「提案书」），其标题会被收养/重派生刷新掉。该口径与 normalize_display_title 既有判定同源，非新标准；真实碰撞面可忽略。放弃的方案：a) Change 加 title_source 标记列区分收养/派生来源——需 schema 变更且两文档路径都要改判定，收益不抵复杂度；b) 只守 documents 路径不守 reparse——审查实证 _apply_parsed 同样无条件覆盖，漏守即缺陷残留（test_apply_parsed_fallback_keeps_semantic_title 先红实证）。遗留（超出本变更）：documents H1 派生值超 500 字在 Postgres 仍会 DataError（documents 路径有 broad except 降级告警；reparse 路径会使该次扫描失败——预存行为，触发需 500+ 字 H1 的病态输入）。
+
+## 文件变更清单（自声明——提交面夹带嫌疑 3 文件均属本变更）
+
+- backend/app/modules/change/title_norm.py（task-01：is_fallback_display_title + TITLE_MAX_LEN）
+- backend/app/modules/change/service.py（task-04：_apply_parsed 兜底回翻守卫）
+- backend/app/modules/platform_sync/service.py（task-02/03：收养段加固 + 占位截断 + documents 守卫；含随本提交入库的既有工作区收养段）
+- backend/app/modules/change/tests/test_title_normalization.py（task-01/03/04 用例）
+- backend/app/modules/platform_sync/tests/test_change_deleted_guard.py（task-02 用例；含随本提交入库的既有收养五场景用例）
+
+模块文档对账说明：docs/backend/modules/change.md 与 platform_sync.md 均未记载标题派生/收养行为（grep title/标题零命中），本变更不改变两文档已记载的任何接口，无需同步。
