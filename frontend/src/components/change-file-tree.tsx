@@ -317,7 +317,9 @@ function TreeView({
         const isPending = pendingPaths.has(doc.path);
         const isSelected = selectedPath === doc.path;
         // 固定产物中文名（2026-09-29-change-detail-timeline-files-polish）：
-        // 主显中文 + muted 小字原名对照；非固定名回落原名展示
+        // 主显中文 + muted 小字原名对照；非固定名回落原名展示。2026-09-30-
+        // change-file-cn-align：中文名与原名紧凑相邻左对齐（原名 flex 内
+        // shrink-0 紧跟，不再 ml-auto 推行尾两端分离）；徽标仍靠行右端。
         const cnName = changeFileCnName(doc.path);
         return (
           <button
@@ -331,13 +333,18 @@ function TreeView({
             onClick={() => onSelect(doc)}
           >
             <FileIcon />
-            <span className="min-w-0 flex-1 truncate">{cnName ?? doc.name}</span>
-            <span className="ml-auto flex shrink-0 items-center gap-1">
+            <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+              <span className="min-w-0 truncate">{cnName ?? doc.name}</span>
               {cnName && (
-                <span className="font-mono text-[10px] font-normal text-muted-foreground/70" title={doc.path}>
+                <span
+                  className="shrink-0 truncate font-mono text-[10px] font-normal text-muted-foreground/70"
+                  title={doc.path}
+                >
                   {doc.name}
                 </span>
               )}
+            </span>
+            <span className="ml-auto flex shrink-0 items-center gap-1">
               {isPending && (
                 <Badge variant="warning" className="text-[10px] px-1.5">
                   排队中
