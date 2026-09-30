@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-breadcrumb-dedupe-zh",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 声明的命名权威原则与「Skills 保留原文」在部分段上未被执行",
+      "evidence": "design 风险槽声明「以侧边栏 menuLabel 为第一权威」且「Skills 等专业术语保留原文」，但 SEGMENT_LABEL 实取页签/短名：skills→「技能管理」（menuLabel 值，工作区页签实为英文 Skills，与保留原文声明矛盾）、sessions→「会话」（menuLabel 为「智能体会话」）、runtimes→「运行时」（menuLabel 为「守护进程运行时」）——标签均有既有出处、未新造叫法（FR-04 本体仍成立），仅与 design 声明的取舍方向不一致，无数据正确性风险",
+      "location": "frontend/src/components/top-bar.tsx:52"
+    },
+    {
+      "severity": "P3",
+      "title": "「段名全站语义唯一」盲维声明不完全成立：同段跨子树语境命名分歧",
+      "evidence": "mcp 段在 /settings/mcp（菜单/页面自称「MCP 资产库」）与 /workspaces/[id]/mcp（页签「MCP」）两语境命名不同，SEGMENT_LABEL 全局映射取「MCP」，致 /settings/mcp 面包屑显示「设置 > MCP」与侧边栏菜单「MCP 资产库」不一致；skills 段同理（/settings/skills 菜单「技能管理」与工作区页签 Skills 同段共用一名）。后果限于文案一致性，非数据串台",
+      "location": "frontend/src/components/top-bar.tsx:53"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-04 测试绑定作答的来源声明不准确：「个人中心」并非取自两份命名权威文件",
+      "evidence": "绑定作答声称断言值「逐一取自 menu-permissions.ts menuLabel 与 workspace-tabs.tsx label」并列出「个人中心」，但 grep 两文件均无该值；实际出处是 account/page.tsx 页面自身既有命名（layout.tsx 亦有）——「不新造叫法」承诺仍兑现，仅来源声明与事实不符",
+      "location": ".sillyspec/changes/2026-09-30-breadcrumb-dedupe-zh/requirements.md:47"
+    },
+    {
+      "severity": "P3",
+      "title": "patch 含 design 未声明的测试基建改动（vitest passWithNoTests + e2e 注释改写）",
+      "evidence": "frontend/vitest.config.ts 新增 passWithNoTests: true（改变「显式传入被 exclude 文件」时的 exit 语义）与 e2e/auth.spec.ts 注释改写均不在 design.md 做法概述/接口契约声明内（契约作答称「无文件格式变化」）；披露仅存在于 patch 内新增文档 docs/sillyspec/dynamic-deps-e2e-vitest-exclude-false-red.md（64 行三层根因，内容透明、论证合理），但设计记录层漏项",
+      "location": "frontend/vitest.config.ts:19"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "finding"
+  },
+  "reviewedAt": "2026-09-30T17:20:00+08:00"
+}
