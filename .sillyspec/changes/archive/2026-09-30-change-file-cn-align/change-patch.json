@@ -1,0 +1,48 @@
+{
+  "change": "2026-09-30-change-file-cn-align",
+  "baseline": "42b424514cad13324747bbff50b25691a688ee90",
+  "head": "d79156b03d44c236461b8aa2e21b041bbb16e08c",
+  "files": [
+    ".sillyspec/changes/2026-09-30-change-file-cn-align/01-files-dialog-aligned.png",
+    ".sillyspec/changes/2026-09-30-change-file-cn-align/design.md",
+    ".sillyspec/changes/2026-09-30-change-file-cn-align/flow-state.yaml",
+    ".sillyspec/changes/2026-09-30-change-file-cn-align/proposal.md",
+    ".sillyspec/changes/2026-09-30-change-file-cn-align/requirements.md",
+    ".sillyspec/changes/2026-09-30-change-file-cn-align/tasks.md",
+    ".sillyspec/changes/2026-09-30-change-file-cn-align/visual-evidence.md",
+    "frontend/src/components/change-file-tree.tsx"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 170,
+    "deletions": 4
+  },
+  "savedAt": "2026-09-30T02:37:37.596Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "3a77e2098131d8dec0f6b9360d65086d17af105f90d071eb64db7c4e37453b57",
+  "patchStatus": "ok"
+}

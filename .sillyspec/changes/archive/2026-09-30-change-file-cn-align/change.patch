@@ -1,0 +1,228 @@
+diff --git a/.sillyspec/changes/2026-09-30-change-file-cn-align/flow-state.yaml b/.sillyspec/changes/2026-09-30-change-file-cn-align/flow-state.yaml
+new file mode 100644
+index 000000000..d0e7627eb
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-change-file-cn-align/flow-state.yaml
+@@ -0,0 +1,10 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 42b424514cad13324747bbff50b25691a688ee90
++updatedAt: '2026-09-30T02:32:53.266Z'
++baseline_sha256: e8f2c1ab1add3415278ff3cee557b632a7954943db2495c49a92713f83ec81d3
++
+diff --git a/frontend/src/components/change-file-tree.tsx b/frontend/src/components/change-file-tree.tsx
+index 871101983..f78322069 100644
+--- a/frontend/src/components/change-file-tree.tsx
++++ b/frontend/src/components/change-file-tree.tsx
+@@ -317,7 +317,9 @@ function TreeView({
+         const isPending = pendingPaths.has(doc.path);
+         const isSelected = selectedPath === doc.path;
+         // 固定产物中文名（2026-09-29-change-detail-timeline-files-polish）：
+-        // 主显中文 + muted 小字原名对照；非固定名回落原名展示
++        // 主显中文 + muted 小字原名对照；非固定名回落原名展示。2026-09-30-
++        // change-file-cn-align：中文名与原名紧凑相邻左对齐（原名 flex 内
++        // shrink-0 紧跟，不再 ml-auto 推行尾两端分离）；徽标仍靠行右端。
+         const cnName = changeFileCnName(doc.path);
+         return (
+           <button
+@@ -331,13 +333,18 @@ function TreeView({
+             onClick={() => onSelect(doc)}
+           >
+             <FileIcon />
+-            <span className="min-w-0 flex-1 truncate">{cnName ?? doc.name}</span>
+-            <span className="ml-auto flex shrink-0 items-center gap-1">
++            <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
++              <span className="min-w-0 truncate">{cnName ?? doc.name}</span>
+               {cnName && (
+-                <span className="font-mono text-[10px] font-normal text-muted-foreground/70" title={doc.path}>
++                <span
++                  className="shrink-0 truncate font-mono text-[10px] font-normal text-muted-foreground/70"
++                  title={doc.path}
++                >
+                   {doc.name}
+                 </span>
+               )}
++            </span>
++            <span className="ml-auto flex shrink-0 items-center gap-1">
+               {isPending && (
+                 <Badge variant="warning" className="text-[10px] px-1.5">
+                   排队中
+diff --git a/.sillyspec/changes/2026-09-30-change-file-cn-align/01-files-dialog-aligned.png b/.sillyspec/changes/2026-09-30-change-file-cn-align/01-files-dialog-aligned.png
+new file mode 100644
+index 000000000..0cde3981c
+Binary files /dev/null and b/.sillyspec/changes/2026-09-30-change-file-cn-align/01-files-dialog-aligned.png differ
+diff --git a/.sillyspec/changes/2026-09-30-change-file-cn-align/design.md b/.sillyspec/changes/2026-09-30-change-file-cn-align/design.md
+new file mode 100644
+index 000000000..c1ad0e08f
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-change-file-cn-align/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T02:32:53.242Z
++---
++# 设计记录（Design Record）— 2026-09-30-change-file-cn-align
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-change-file-cn-align 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++change-file-tree.tsx 树节点行布局返工：上一变更把英文原名小字放 ml-auto 徽标区导致与中文名两端分离、各行参差不齐。改为外层文本 span（flex-1）内部「中文名 truncate + 原名 shrink-0」紧凑相邻左对齐；徽标（排队中/只读）保留 ml-auto 靠右。纯 className 布局调整，无逻辑变化。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-change-file-cn-align 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++无。仅 change-file-tree.tsx 树节点 JSX 类名与 span 嵌套结构调整，组件 Props、导出、数据链路、测试锚点（文本内容/testid）均不变。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-change-file-cn-align 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序：不适用——纯展示布局，数据序不变。2. 并发：不适用——无状态无 mutation。3. 切换：不适用——无本地 state（选中态/展开态既有机制不变）。4. 作用域：不适用——无跨组件数据。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-change-file-cn-align 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：窄列（280px 文件树列 + 深层缩进）下中文名+原名同排可能溢出——已用外层 min-w-0+truncate、原名 shrink-0+truncate 双兜底（原名截断 hover 有 title 全路径）。放弃的方案：原名整体隐藏只显中文名——放弃：丢失「原名保留可对照」的 FR-03 语义。
+diff --git a/.sillyspec/changes/2026-09-30-change-file-cn-align/proposal.md b/.sillyspec/changes/2026-09-30-change-file-cn-align/proposal.md
+new file mode 100644
+index 000000000..187eacda2
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-change-file-cn-align/proposal.md
+@@ -0,0 +1,35 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T02:32:53.241Z
++---
++# 提案书（Proposal）— 2026-09-30-change-file-cn-align
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:8ad8edc983e35940e6e19a961456e98759b3e2c44693db679fec0dee3c3bd825:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-change-file-cn-align 留痕重锚 -->
++任务原话转写：变更文件树中文名布局返工:上一变更把英文小字原名 ml-auto 推到行最右端,与中文名两端分离且各行参差不齐;改为中文名后紧跟英文小字的左对齐紧凑排列。
++
++成功标准:
++- 文件树行内中文名与英文小字紧凑相邻排列(左对齐),不再两端分离
++- 徽标(排队中/只读)仍靠行右端不受影响
++- change-file-tree 相关测试不回归
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:db1644aa8b87d7ffa4b0941829d8553f025a931c05bea65f816a241d9c027e53:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-change-file-cn-align 留痕重锚 -->
++按成功标准机械推导，共 3 条验收面：
++1. 文件树行内中文名与英文小字紧凑相邻排列(左对齐),不再两端分离
++2. 徽标(排队中/只读)仍靠行右端不受影响
++3. change-file-tree 相关测试不回归
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:a6309891580d107d9fcdc28d817b0bc4b2271460fa81eb01c0a65d1ee597ac62:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-change-file-cn-align 留痕重锚 -->
++1. 文件树行内中文名与英文小字紧凑相邻排列(左对齐),不再两端分离
++2. 徽标(排队中/只读)仍靠行右端不受影响
++3. change-file-tree 相关测试不回归
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-09-30-change-file-cn-align/requirements.md b/.sillyspec/changes/2026-09-30-change-file-cn-align/requirements.md
+new file mode 100644
+index 000000000..839823e1c
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-change-file-cn-align/requirements.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T02:32:53.242Z
++---
++# 需求规格（Requirements）— 2026-09-30-change-file-cn-align
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 文件树行内中文名与英文小字紧凑相邻排列(左对齐),不再两端分离
++Given 系统就绪
++When 文件树行内中文名与英文小字紧凑相邻排列(左对齐),不再两端分离
++Then 行为符合本条标准描述
++
++### FR-02: 徽标(排队中/只读)仍靠行右端不受影响
++Given 徽标 相关模块就绪
++When 徽标(排队中/只读)仍靠行右端不受影响
++Then 行为符合本条标准描述
++
++### FR-03: change-file-tree 相关测试不回归
++Given 测试 相关模块就绪
++When change-file-tree 相关测试不回归
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- frontend/src/components/__tests__/change-file-tree.test.tsx「固定产物树节点主显中文名 + 原名对照，非固定名维持原名」（文本层回归；紧凑排列为纯 className 布局，无断言面，视觉由 visual-evidence.md 截图证据覆盖）
++
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- 不适用：徽标区未改动——ml-auto 徽标 span 原样保留，既有「渲染文件树列出全部文件」（含只读徽标断言）回归绿即可，无新增行为
++
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- frontend/src/components/__tests__/change-file-tree.test.tsx 全文件 19 用例回归（布局调整不破坏文本锚点/getByText 命中）
++
+diff --git a/.sillyspec/changes/2026-09-30-change-file-cn-align/tasks.md b/.sillyspec/changes/2026-09-30-change-file-cn-align/tasks.md
+new file mode 100644
+index 000000000..590bbbebd
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-change-file-cn-align/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T02:32:53.242Z
++---
++# 任务注册表（Tasks）— 2026-09-30-change-file-cn-align
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge + 2026-09-29 心跳指针）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。📌 任务面在 ①spec 阶段定稿：覆写为真实实现步骤（全 `- [x] task-01: 树节点行布局改中文名+原名紧凑左对齐（原名移出 ml-auto 徽标区）
++- [x] task-02: change-file-tree 测试回归 + 实页截图视觉验证（紧凑排列、徽标仍靠右）
+diff --git a/.sillyspec/changes/2026-09-30-change-file-cn-align/visual-evidence.md b/.sillyspec/changes/2026-09-30-change-file-cn-align/visual-evidence.md
+new file mode 100644
+index 000000000..3f89dc5b8
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-change-file-cn-align/visual-evidence.md
+@@ -0,0 +1,16 @@
++# 视觉证据（2026-09-30-change-file-cn-align）
++
++## 验证环境
++
++本机 dev 链路（前端 :3005 实时代码 + 本机后端 :8002），Playwright 实页截图；验证变更与账号同上一变更（2026-09-28-audit-risk-fixes / admin）。
++
++## 结论（01-files-dialog-aligned.png）
++
++- 文件树每行「中文名 + 英文小字原名」紧凑相邻、紧跟排列在左侧区域——AI 图片分析逐行确认（变更提案|proposal.md 等紧跟成整体）。
++- 不再存在原名被推到行最右端与中文名两端分离的参差布局。
++- 徽标（只读/排队中）仍靠行右端不受影响。
++- 既有测试锚点（文本内容/getByText 命中原名 span）不受布局调整影响，19/19 回归绿。
++
++## 用户裁决留痕
++
++无视觉降级。
