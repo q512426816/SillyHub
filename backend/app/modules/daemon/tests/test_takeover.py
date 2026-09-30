@@ -345,6 +345,41 @@ class TestFourTierMatching:
         resp = await _takeover(client, auth_headers, source.id)
         assert resp.status_code == 409, resp.text
 
+    @pytest.mark.asyncio
+    async def test_tier3_ambiguous_lists_machine_names(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+    ) -> None:
+        """2026-09-30-takeover-tier3-ambiguous-msg：③级多机命中 → 409 文案列出
+        全部命中机器名（可诊断——用户知道该清哪台 allowed_roords）。"""
+        owner_id = await _admin_user_id(db_session)
+        # 两台机器（daemon_instance 各异）白名单都覆盖 cwd。
+        rt_win = await _create_runtime(db_session, owner_id, name="DESKTOP-HJ0AM09")
+        rt_win.daemon_instance_id = uuid.uuid4()
+        rt_win.allowed_roots = ["C:\\Users\\qinyi"]
+        db_session.add(rt_win)
+        rt_mac = await _create_runtime(db_session, owner_id, name="qinyideMac-mini-3.local")
+        rt_mac.daemon_instance_id = uuid.uuid4()
+        rt_mac.allowed_roots = ["/Users/qinyi", "C:/Users/qinyi/IdeaProjects/multi-agent-platform"]
+        db_session.add(rt_mac)
+        await db_session.commit()
+
+        source = await _seed_tool_report_session(db_session)  # 无机器身份 → ③级
+        resp = await _takeover(client, auth_headers, source.id)
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        msg = body["message"]
+        assert "DESKTOP-HJ0AM09" in msg and "qinyideMac-mini-3.local" in msg
+        assert "2 台在线机器" in msg
+        assert set(body.get("details", {}).get("machine_candidates", [])) == {
+            "DESKTOP-HJ0AM09",
+            "qinyideMac-mini-3.local",
+        }
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # 分档 + fork 落库 + 源会话红线（D-006@v1）

@@ -146,16 +146,52 @@ async def resolve_takeover_machine(
     )
     machine_id, hostname = await _latest_reported_machine(db, source)
 
-    def _fail(reason_tier: str) -> ToolReportTakeoverNoMachine:
-        who = machine_id or hostname or "（未知机器）"
+    def _machine_names(rows: list[DaemonRuntime]) -> list[str]:
+        """命中机器名去重保序（daemon_instance 分组，display 名=name，缺省 id 短码）。"""
+        seen: set[object] = set()
+        names: list[str] = []
+        for rt in rows:
+            key = rt.daemon_instance_id or rt.id
+            if key in seen:
+                continue
+            seen.add(key)
+            names.append(rt.name or str(rt.id)[:8])
+        return names
+
+    def _fail(
+        reason_tier: str,
+        candidates_rows: list[DaemonRuntime] | None = None,
+    ) -> ToolReportTakeoverNoMachine:
+        who = machine_id or hostname
+        # 歧义场景（多机命中）：列出候选机器名让用户可诊断（清哪台配置/开哪台）。
+        cand = _machine_names(candidates_rows) if candidates_rows else []
+        if cand:
+            msg = (
+                f"该会话的工作目录被 {len(cand)} 台在线机器的白名单同时覆盖"
+                f"（{'、'.join(cand)}），无法确定原机——请在产生该会话的机器上"
+                "清理其它机器 daemon 配置里不该有的该路径（allowed_roots）后重试，"
+                "或在该机器重跑一次 CLI 上报（携带机器身份）；不会换机执行。"
+            )
+        elif who:
+            msg = (
+                f"该会话产生于机器 {who}，当前没有可用的对应在线执行端"
+                "——请在该机器上启动 daemon（sillyhub-daemon）后重试；"
+                "不会换到其它机器执行。"
+            )
+        else:
+            msg = (
+                "该会话的历史上报未携带机器身份，且当前没有任何在线机器的"
+                "工作目录白名单（allowed_roots）覆盖该会话目录"
+                f"（{source.cwd or '未知'}）——请在产生该会话的机器上启动 daemon"
+                "（并确认其 allowed_roots 含该目录）后重试；不会换到其它机器执行。"
+            )
         return ToolReportTakeoverNoMachine(
-            f"该会话产生于机器 {who}，当前没有可用的对应在线执行端"
-            "——请在该机器上启动 daemon（sillyhub-daemon）后重试；"
-            "不会换到其它机器执行。",
+            msg,
             details={
                 "session_id": str(source.id),
                 "machine_id": machine_id,
                 "hostname": hostname,
+                "machine_candidates": cand,
                 "match_tier": reason_tier,
             },
         )
@@ -165,7 +201,7 @@ async def resolve_takeover_machine(
         groups = {rt.daemon_instance_id for rt in rows}
         if len(groups) == 1:
             return rows
-        raise _fail(f"{tier}_ambiguous")
+        raise _fail(f"{tier}_ambiguous", candidates_rows=rows)
 
     # ── ① machine_id 精确（daemon 心跳 metadata 同源）──────────────────────
     if machine_id:
