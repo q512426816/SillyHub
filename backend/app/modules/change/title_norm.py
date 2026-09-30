@@ -89,6 +89,31 @@ def normalize_display_title(h1: str | None, change_key: str) -> str:
     return stripped
 
 
+#: title 落库上限（与 Change.title String(500) 同宽）。CLI ``body.changes[].title``
+#: 无 schema 长度校验（progress 裸 dict 透传），写侧统一截断防 Postgres 列宽溢出
+#: （SQLite 测试库不强制列宽、拦不住——2026-09-30-title-adopt-clobber-guard 发现2）。
+TITLE_MAX_LEN = 500
+
+
+def is_fallback_display_title(title: str | None, change_key: str) -> bool:
+    """title 是否为兜底形态：空 / 等于 change_key / 等于去日期前缀语义名 / 裸模板 H1 文本。
+
+    2026-09-30-title-adopt-clobber-guard：title 的三条写路径（platform_sync CLI
+    收养 ``_ensure_change_row``、documents 推送 ``_sync_change_title_from_documents``
+    、reparse ``_apply_parsed``）共用此判定，统一规则——兜底形态（无语义）可被
+    任一来源升级；语义标题（自定义 H1 / 收养的 CLI 概括）只被自定义 H1
+    （--title 改名通道，派生值非兜底形态）覆盖，不被兜底形态回翻。裸模板 H1
+    文本（历史行存过 raw 模板标题）无语义，同判兜底（可被重派生刷新）。
+    """
+    cur = (title or "").strip()
+    if not cur:
+        return True
+    if TEMPLATE_H1_RE.match(cur):
+        return True
+    semantic = DISPLAY_KEY_PREFIX_RE.sub("", change_key).strip() or change_key
+    return cur in (change_key, semantic)
+
+
 # ── 变更描述提取（2026-09-28-change-list-description）────────────────────────
 #
 # 列表辨识痛点：title 提取自 proposal H1，CLI 模板 H1 归一化后回退 key 派生名，

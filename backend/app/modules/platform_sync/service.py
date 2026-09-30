@@ -46,7 +46,11 @@ from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionL
 
 # ql-20260909-016：pending 集缓存失效挂点（change.pending_cache 只依赖 redis，无环）。
 from app.modules.change.pending_cache import bump_pending_epoch
-from app.modules.change.title_norm import DISPLAY_KEY_PREFIX_RE
+from app.modules.change.title_norm import (
+    DISPLAY_KEY_PREFIX_RE,
+    TITLE_MAX_LEN,
+    is_fallback_display_title,
+)
 from app.modules.daemon.session_events import publish_sessions_changed
 from app.modules.platform_sync.model import (
     AgentSessionLogORM,
@@ -693,6 +697,44 @@ class PlatformSyncService:
             )
         ).scalar_one_or_none()
         if existing is not None:
+            # 既有行标题收养（用户需求 2026-09-29：CLI 上行 changes[].title 为 agent 总结的
+            # 中文概括 ≤50 字）：行 title 为兜底形态（空/等于 key/等于去日期前缀/裸模板 H1
+            # 文本，判定收敛 title_norm.is_fallback_display_title——2026-09-30-title-adopt-
+            # clobber-guard task-01）时采纳上行标题；已有语义标题（自定义 H1 / 已收养概括）
+            # 不覆盖（改标题走 CLI 重入 --title 的文档推送改名通道，派生值非兜底形态恒覆盖）。
+            # 发现2 加固：TITLE_MAX_LEN 截断（body 裸 dict 无 schema 校验，防 Postgres
+            # String(500) 列宽溢出）+ 写库 try/except best-effort（与下方占位建行同约定），
+            # 失败仅告警不阻断进度上行主流程。
+            info_existing = next(
+                (
+                    c
+                    for c in (body.get("changes") or [])
+                    if isinstance(c, dict) and c.get("name") == name
+                ),
+                {},
+            )
+            body_title = str(info_existing.get("title") or "").strip()[:TITLE_MAX_LEN]
+            if (
+                body_title
+                and is_fallback_display_title(existing.title, name)
+                and (existing.title or "").strip() != body_title
+            ):
+                existing.title = body_title
+                try:
+                    await self._session.commit()
+                    log.info(
+                        "platform_sync.change_title_adopted_from_body",
+                        workspace_id=str(workspace_id),
+                        change_key=name,
+                    )
+                except Exception as exc:
+                    await self._session.rollback()
+                    log.warning(
+                        "platform_sync.change_title_adopt_failed",
+                        workspace_id=str(workspace_id),
+                        change_key=name,
+                        error=str(exc),
+                    )
             return
         # task-04：行缺失 + manifest platform_deleted 前缀锚点 → 不建占位（防复活）。
         if await self._change_key_deleted(workspace_id, name):
@@ -715,7 +757,9 @@ class PlatformSyncService:
             id=uuid.uuid4(),
             workspace_id=workspace_id,
             change_key=name,
-            title=info.get("title") or name,
+            # 同收养段口径：CLI body title 裸 dict 无校验，截 TITLE_MAX_LEN
+            # 防列宽溢出；空值回落 change_key（2026-09-30-title-adopt-clobber-guard）。
+            title=(str(info.get("title") or "").strip()[:TITLE_MAX_LEN]) or name,
             status="draft",
             location="active",
             # platform-managed 镜像扁平布局（无 .sillyspec/ 包裹），与 parser
@@ -1164,6 +1208,7 @@ class PlatformSyncService:
         from app.modules.change.title_norm import (
             extract_description,
             extract_h1,
+            is_fallback_display_title,
             normalize_display_title,
         )
 
@@ -1205,7 +1250,17 @@ class PlatformSyncService:
                         h1 = extract_h1(content)
                         if h1 is not None:
                             break
-                row.title = normalize_display_title(h1, name)
+                new_title = normalize_display_title(h1, name)
+                # 兜底回翻守卫（2026-09-30-title-adopt-clobber-guard 发现1）：派生值
+                # 为兜底形态（模板 H1/缺失 → key 派生名）而既有 title 已是语义标题
+                # （自定义 H1 / CLI 收养概括 _ensure_change_row）时不覆盖——routine
+                # 文档同步不得把收养标题回翻成 key 派生名；自定义 H1（--title 改名
+                # 通道）派生值非兜底形态，恒覆盖不受影响。判定与收养守卫同源
+                # （title_norm.is_fallback_display_title，三写路径共用）。
+                if is_fallback_display_title(row.title, name) or not is_fallback_display_title(
+                    new_title, name
+                ):
+                    row.title = new_title
                 # 2026-09-28-change-list-description：描述只在 proposal.md 随本次推送
                 # 在场时重派生（与 parser 同源 title_norm.extract_description，reparse
                 # 不回翻）；部分推送（仅深阶段文档）不动既有描述——best-effort 只补不改。

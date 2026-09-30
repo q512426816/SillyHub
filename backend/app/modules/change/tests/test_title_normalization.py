@@ -271,6 +271,121 @@ class TestUpsertDocumentsTitle:
         assert row.path == f"changes/{name}"
 
 
+# ── 2026-09-30-title-adopt-clobber-guard：兜底形态判定 + 三写路径回翻守卫 ────────
+
+
+class TestIsFallbackDisplayTitle:
+    """title 兜底形态判定（三写路径共用）：空 / 裸 key / 去前缀语义名 / 裸模板 H1 文本。"""
+
+    def test_empty_and_missing(self) -> None:
+        from app.modules.change.title_norm import is_fallback_display_title
+
+        assert is_fallback_display_title(None, "2026-09-30-x") is True
+        assert is_fallback_display_title("", "2026-09-30-x") is True
+        assert is_fallback_display_title("   ", "2026-09-30-x") is True
+
+    def test_key_and_semantic_forms(self) -> None:
+        from app.modules.change.title_norm import is_fallback_display_title
+
+        assert is_fallback_display_title("2026-09-30-x", "2026-09-30-x") is True
+        assert is_fallback_display_title("x", "2026-09-30-x") is True
+        # key 无日期前缀 → semantic 即 key 本身
+        assert is_fallback_display_title("bare-key", "bare-key") is True
+
+    def test_raw_template_h1_text_is_fallback(self) -> None:
+        from app.modules.change.title_norm import is_fallback_display_title
+
+        # 历史行存过 raw 模板标题（见 test_existing_row_title_refreshed 场景）——
+        # 无语义同兜底，可被收养 / 重派生刷新
+        assert is_fallback_display_title("提案书（Proposal）", "2026-09-30-x") is True
+        assert is_fallback_display_title("设计文档（Design）—— 旧稿", "2026-09-30-x") is True
+
+    def test_semantic_titles_not_fallback(self) -> None:
+        from app.modules.change.title_norm import is_fallback_display_title
+
+        assert is_fallback_display_title("知识页伪域池一键归位", "2026-09-30-x") is False
+        assert is_fallback_display_title("提案：共识收口", "2026-09-30-x") is False
+
+
+async def _seed_change_row(db_session: Any, ws_id: Any, name: str, title: str | None) -> None:
+    from app.modules.change.model import Change
+
+    db_session.add(
+        Change(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            change_key=name,
+            title=title,
+            status="active",
+            location="active",
+            path=f"changes/{name}",
+            updated_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+
+
+async def _adopt_cli_title(db_session: Any, ws_id: Any, name: str, cli_title: str) -> None:
+    """service 直调 CLI 收养通道（_ensure_change_row，deleted_guard 测试同范式）。"""
+    from app.modules.platform_sync.service import PlatformSyncService
+
+    body = {
+        "changes": [
+            {"name": name, "current_stage": "execute", "status": "in_progress", "title": cli_title}
+        ]
+    }
+    await PlatformSyncService(db_session)._ensure_change_row(ws_id, name, body)
+
+
+class TestAdoptedTitleClobberGuard:
+    """收养标题不被文档派生兜底值回翻（documents 推送 / reparse 两路径）。"""
+
+    async def test_adopted_title_survives_template_docs_push(self, db_session) -> None:
+        """收养中文概括后 routine 模板 H1 文档推送 → title 保持收养值不回翻。"""
+        ws_id = await _make_workspace(db_session)
+        name = "2026-09-30-ta"
+        await _seed_change_row(db_session, ws_id, name, name)
+        await _adopt_cli_title(db_session, ws_id, name, "知识页伪域池一键归位")
+        assert (await _get_change(db_session, ws_id, name)).title == "知识页伪域池一键归位"
+
+        await _push_documents(db_session, ws_id, name, dict(_TEMPLATE_DOCS))
+        assert (await _get_change(db_session, ws_id, name)).title == "知识页伪域池一键归位", (
+            "模板 H1 documents 推送不得把收养标题回翻成 key 派生名"
+        )
+
+    async def test_custom_h1_docs_push_overrides_adopted_title(self, db_session) -> None:
+        """自定义 H1（--title 改名通道）文档推送仍覆盖收养标题（改名能力不回归）。"""
+        ws_id = await _make_workspace(db_session)
+        name = "2026-09-30-tb"
+        await _seed_change_row(db_session, ws_id, name, None)
+        await _adopt_cli_title(db_session, ws_id, name, "治理卡明细深链体验优化")
+        docs = dict(_TEMPLATE_DOCS)
+        docs["tasks.md"] = "# 我重新命名的变更\n\n- task-01"
+        await _push_documents(db_session, ws_id, name, docs)
+        assert (await _get_change(db_session, ws_id, name)).title == "我重新命名的变更", (
+            "自定义 H1 文档推送应覆盖收养标题"
+        )
+
+    def test_apply_parsed_fallback_keeps_semantic_title(self) -> None:
+        """reparse 兜底派生值不覆盖语义标题；自定义派生值仍覆盖（单元级）。"""
+        from app.modules.change.model import Change
+        from app.modules.change.parser import ParsedChange
+        from app.modules.change.service import ChangeService
+
+        name = "2026-09-30-tc"
+        row = Change(change_key=name, title="收养的中文标题")
+        # 兜底形态派生值（模板 H1/缺失 → key 去日期前缀）：不回翻语义标题
+        ChangeService._apply_parsed(
+            row, ParsedChange(change_key=name, title="tc"), workspace_id=uuid.uuid4()
+        )
+        assert row.title == "收养的中文标题", "reparse 兜底派生值不得覆盖语义标题"
+        # 自定义 H1 派生值：恒覆盖（改名通道）
+        ChangeService._apply_parsed(
+            row, ParsedChange(change_key=name, title="新自定义名"), workspace_id=uuid.uuid4()
+        )
+        assert row.title == "新自定义名", "自定义 H1 派生值仍应覆盖（改名能力不回归）"
+
+
 # ── _sync_docs 存量 MASTER 脏行清理（P3 收敛环）───────────────────────────────
 
 

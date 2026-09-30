@@ -522,3 +522,125 @@ async def test_cli_tombstone_archived_idempotent(client, db_session):
         assert resp.status_code == 200
     change = await _get_change(db_session, ws_id, "tomb-arch2")
     assert change.location == "active", "archived 载荷幂等 no-op，不动 location"
+
+
+async def test_body_title_adopted_for_existing_row(client, db_session):
+    """上行 changes[].title 收养既有行（用户需求 2026-09-29：CLI 标题为中文概括 ≤50 字）。
+
+    空 / 等于 change_key / 等于 key 去日期前缀语义名（模板 H1 归一化的英文 key 兜底）
+    → 采纳上行标题；已有语义标题不覆盖。
+    """
+    from datetime import UTC, datetime
+
+    from app.modules.change.model import Change
+
+    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
+
+    async def _seed(name: str, title: str | None):
+        db_session.add(
+            Change(
+                id=_uuid.uuid4(),
+                workspace_id=ws_id,
+                change_key=name,
+                title=title,
+                status="active",
+                location="active",
+                path=f"changes/{name}",
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        await db_session.commit()
+
+    async def _push_with_title(name: str, title: str):
+        body = {
+            "project": {"name": "demo"},
+            "changes": [
+                {"name": name, "current_stage": "execute", "status": "in_progress", "title": title}
+            ],
+            "stages": [],
+            "steps": [],
+            "batch_progress": [],
+            "approvals": [],
+        }
+        return await _push(client, headers[0], name, body=body)
+
+    # ① title == change_key（英文 key 兜底形态）→ 收养
+    await _seed("2026-09-29-ta", "2026-09-29-ta")
+    assert (await _push_with_title("2026-09-29-ta", "知识页伪域池一键归位")).status_code == 200
+    assert (await _get_change(db_session, ws_id, "2026-09-29-ta")).title == "知识页伪域池一键归位"
+
+    # ② title == key 去日期前缀语义名 → 收养
+    await _seed("2026-09-29-tb", "tb")
+    assert (await _push_with_title("2026-09-29-tb", "治理卡明细深链体验优化")).status_code == 200
+    assert (await _get_change(db_session, ws_id, "2026-09-29-tb")).title == "治理卡明细深链体验优化"
+
+    # ③ title 空 → 收养
+    await _seed("2026-09-29-tc", None)
+    assert (await _push_with_title("2026-09-29-tc", "变更列表筛选与描述行")).status_code == 200
+    assert (await _get_change(db_session, ws_id, "2026-09-29-tc")).title == "变更列表筛选与描述行"
+
+    # ④ 已有语义标题 → 不覆盖
+    await _seed("2026-09-29-td", "已有中文语义标题")
+    assert (await _push_with_title("2026-09-29-td", "上行的新标题")).status_code == 200
+    assert (await _get_change(db_session, ws_id, "2026-09-29-td")).title == "已有中文语义标题"
+
+    # ⑤ 占位行新建（行缺失）→ title 直接取上行
+    assert (await _push_with_title("2026-09-29-te", "新占位行的中文标题")).status_code == 200
+    assert (await _get_change(db_session, ws_id, "2026-09-29-te")).title == "新占位行的中文标题"
+
+
+# ── 2026-09-30-title-adopt-clobber-guard：CLI 超长标题截断（发现2·HTTP 面）──
+
+
+async def test_long_cli_title_truncated_progress_still_ok(client, db_session):
+    """body.changes[].title 超 500 字 → 截断 500 落库、progress 上行仍 200。
+
+    body 裸 dict 无 schema 长度校验，Change.title 为 String(500)（Postgres 强制
+    列宽、SQLite 测试库不强制）——写侧统一截断防生产溢出，且截断/收养写库
+    best-effort 不阻断上行主流程。
+    """
+    from datetime import UTC, datetime
+
+    from app.modules.change.model import Change
+
+    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
+    name = "2026-09-30-long-title"
+    db_session.add(
+        Change(
+            id=_uuid.uuid4(),
+            workspace_id=ws_id,
+            change_key=name,
+            title=name,
+            status="active",
+            location="active",
+            path=f"changes/{name}",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+
+    resp = await _push(
+        client,
+        headers[0],
+        name,
+        body={
+            "project": {"name": "demo"},
+            "changes": [
+                {
+                    "name": name,
+                    "current_stage": "execute",
+                    "status": "in_progress",
+                    "title": "甲" * 600,
+                }
+            ],
+            "stages": [],
+            "steps": [],
+            "batch_progress": [],
+            "approvals": [],
+        },
+    )
+    assert resp.status_code == 200, "超长 title 截断后落库，不得阻断 progress 上行"
+    change = await _get_change(db_session, ws_id, name)
+    assert change.title == "甲" * 500, "落库前应截断到 TITLE_MAX_LEN（Change.title String(500)）"

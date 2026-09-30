@@ -2763,7 +2763,17 @@ class ChangeService:
         *,
         workspace_id: uuid.UUID,
     ) -> None:
-        row.title = parsed.title
+        # 兜底回翻守卫（2026-09-30-title-adopt-clobber-guard 发现1）：parsed.title
+        # 为兜底形态（模板 H1/缺失 → key 派生名）而既有 title 已是语义标题（自定义
+        # H1 / platform_sync CLI 收养概括 _ensure_change_row）时不覆盖——reparse 不得
+        # 把收养标题回翻成 key 派生名；自定义 H1 派生值非兜底形态，恒覆盖（改名
+        # 能力不回归）。判定与收养/documents 守卫同源（title_norm，三写路径共用）。
+        from app.modules.change.title_norm import is_fallback_display_title
+
+        if is_fallback_display_title(row.title, parsed.change_key) or not is_fallback_display_title(
+            parsed.title, parsed.change_key
+        ):
+            row.title = parsed.title
         # 2026-09-28-change-list-description：文件是权威源（proposal.md 动机段），
         # 与 title 同口径整体覆盖——动机段被删/清空时描述随 None。
         row.description = parsed.description
