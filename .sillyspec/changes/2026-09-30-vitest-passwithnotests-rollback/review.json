@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-vitest-passwithnotests-rollback",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "tasks.md 预填模板与任务行粘连，task-01 checkbox 未保持独立行形态",
+      "evidence": "冻结 diff 显示 task-01 的 `- [x]` 被粘入预填模板 blockquote 长行（『…覆写为真实实现步骤（全 `- [x] task-01: …』），非独立 checkbox 列表行；仅流程元文件格式噪音，不影响交付面（vitest.config.ts 与 docs 移动均正确落盘）",
+      "location": ".sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/tasks.md:7 (change.patch:236)"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "n/a",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-09-30T08:57:51Z"
+}
