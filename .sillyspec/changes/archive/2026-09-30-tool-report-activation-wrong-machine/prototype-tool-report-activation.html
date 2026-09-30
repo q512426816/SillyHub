@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · tool_report 会话激活治理（重置按钮 / 衔接方式提示 / 原机离线报错）</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --card: #ffffff; --border: #e5e7eb; --text: #1f2328;
+    --text-2: #6b7280; --brand: #2f6fed; --brand-bg: #eef4ff;
+    --ok: #16a34a; --ok-bg: #f0fdf4; --warn: #b45309; --warn-bg: #fffbeb;
+    --err: #dc2626; --err-bg: #fef2f2; --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--text); padding: 28px; }
+  h1 { font-size: 18px; margin-bottom: 6px; }
+  .sub { color: var(--text-2); font-size: 13px; margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1180px; }
+  .case h2 { font-size: 14px; margin-bottom: 10px; }
+  .panel { background: var(--card); border: 1px solid var(--border);
+           border-radius: var(--radius); overflow: hidden; }
+  .panel-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+                border-bottom: 1px solid var(--border); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .dot.pending { background: #d97706; }
+  .panel-head .title { font-weight: 600; font-size: 14px; flex: 1; }
+  .panel-head .meta { font-size: 12px; color: var(--text-2); }
+  .icon-btn { border: 1px solid var(--border); background: transparent; border-radius: 6px;
+              padding: 3px 8px; font-size: 12px; color: var(--text-2); cursor: pointer; }
+  .icon-btn.reset { color: var(--err); border-color: #fecaca; }
+  .icon-btn.reset:hover { background: var(--err-bg); }
+  .body { padding: 14px 16px; min-height: 150px; font-size: 13px; }
+  .msg { padding: 8px 12px; border-radius: 8px; background: var(--bg); margin-bottom: 8px;
+         max-width: 78%; }
+  .msg.user { background: var(--brand-bg); margin-left: auto; }
+  .msg.sys { color: var(--text-2); font-style: italic; }
+  .fail-turn { border: 1px solid #fecaca; background: var(--err-bg); border-radius: 8px;
+               padding: 10px 12px; font-size: 12.5px; }
+  .fail-turn b { color: var(--err); }
+  /* 输入区 + 衔接提示条 */
+  .input-wrap { border-top: 1px solid var(--border); padding: 12px 16px 14px; }
+  .bridge-note { display: flex; gap: 8px; align-items: flex-start; border-radius: 8px;
+                 padding: 8px 10px; font-size: 12px; margin-bottom: 10px; line-height: 1.55; }
+  .bridge-note.resume { background: var(--ok-bg); color: var(--ok); }
+  .bridge-note.handoff { background: var(--warn-bg); color: var(--warn); }
+  .bridge-note.offline { background: var(--err-bg); color: var(--err); }
+  .input-row { display: flex; gap: 10px; }
+  .input-row input { flex: 1; border: 1px solid var(--border); border-radius: 8px;
+                     padding: 9px 12px; font-size: 13px; outline: none; }
+  .input-row input:disabled { background: var(--bg); color: var(--text-2); }
+  .btn { border: none; border-radius: 8px; padding: 9px 18px; font-size: 13px;
+         background: var(--brand); color: #fff; cursor: pointer; }
+  .btn:disabled { background: #c3c9d4; cursor: not-allowed; }
+  .btn.ghost { background: transparent; color: var(--brand); border: 1px solid var(--brand); }
+  /* 接手 agent 选择行（zcode 交接） */
+  .agent-pick { display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+                font-size: 12px; color: var(--text-2); flex-wrap: wrap; }
+  .agent-pick select { border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
+                       font-size: 12.5px; color: var(--text); background: var(--card);
+                       outline: none; max-width: 220px; }
+  .tag { font-size: 11px; border-radius: 4px; padding: 1px 6px; margin-left: 8px; }
+  .tag.machine { background: var(--bg); color: var(--text-2); border: 1px solid var(--border); }
+  .tag.local { background: #f5f3ff; color: #6d28d9; }
+  /* 重置确认弹窗 */
+  .dialog-mask { position: fixed; inset: 0; background: rgba(15,20,30,.45);
+                 display: none; align-items: center; justify-content: center; }
+  .dialog-mask.show { display: flex; }
+  .dialog { background: #fff; border-radius: 12px; padding: 22px 24px; width: 420px;
+            box-shadow: 0 18px 50px rgba(0,0,0,.18); }
+  .dialog h3 { font-size: 15px; margin-bottom: 10px; }
+  .dialog p { font-size: 13px; color: var(--text-2); line-height: 1.7; margin-bottom: 18px; }
+  .dialog .row { display: flex; justify-content: flex-end; gap: 10px; }
+  .note { max-width: 1180px; margin-top: 22px; background: var(--card);
+          border: 1px dashed var(--border); border-radius: var(--radius);
+          padding: 14px 18px; font-size: 12.5px; color: var(--text-2); line-height: 1.8; }
+</style>
+</head>
+<body>
+  <h1>tool_report 会话激活治理 — UI 状态原型</h1>
+  <p class="sub">变更 2026-09-30-tool-report-activation-wrong-machine · 展示 3 个新增界面状态：衔接方式提示 / 原机离线报错 / 钉死会话重置</p>
+
+  <div class="grid">
+    <!-- 案例 1：未激活 claude-code 会话 -->
+    <div class="case">
+      <h2>① 未激活 · claude-code 会话（可回原会话）</h2>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="dot pending"></span>
+          <span class="title">本地 · 2026-09-30-title-adopt-clobber-guard<span class="tag local">本地 Agent</span></span>
+          <span class="meta">claude-code</span>
+        </div>
+        <div class="body">
+          <div class="msg sys">（本地日志回放主体 — 12 轮对话回放，保持现状）</div>
+        </div>
+        <div class="input-wrap">
+          <div class="bridge-note resume">✚ 继续对话将<b>接续原 claude 会话</b>（resume 原引擎会话，上下文延续），派发到上报机器 <b>DESKTOP-HJ0AM09</b>。</div>
+          <div class="input-row">
+            <input placeholder="发送第一句话继续对话…（Enter 发送）">
+            <button class="btn">发送</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 案例 2：未激活 zcode 会话 -->
+    <div class="case">
+      <h2>② 未激活 · zcode 会话（交接文档续聊）</h2>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="dot pending"></span>
+          <span class="title">本地 · 2026-09-30-title-adopt-clobber-guard<span class="tag local">本地 Agent</span></span>
+          <span class="meta">zcode</span>
+        </div>
+        <div class="body">
+          <div class="msg sys">（本地日志回放主体 — 8 轮对话回放，保持现状）</div>
+        </div>
+        <div class="input-wrap">
+          <div class="bridge-note handoff">⚑ zcode 会话不支持引擎级续聊：继续对话将<b>分叉出新会话</b>（列表标注「分叉自本会话」），由所选 agent 接手，自动生成交接文档（目标 / 最近操作 / 涉及文件）注入新会话首 prompt；本会话保持只读回放。</div>
+          <div class="agent-pick">
+            接手 agent（原机 DESKTOP-HJ0AM09）：
+            <select>
+              <option>claude（默认映射）</option>
+              <option>codex</option>
+              <option>pi</option>
+              <option>cursor</option>
+            </select>
+            <select>
+              <option>智能体档案：不指定</option>
+              <option>智能体档案：后端开发</option>
+              <option>智能体档案：代码评审</option>
+            </select>
+          </div>
+          <div class="input-row">
+            <input placeholder="发送第一句话开始新 agent 接手…">
+            <button class="btn">发送</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 案例 3：原机离线 -->
+    <div class="case">
+      <h2>③ 激活被拒 · 原机离线（409 中文报错）</h2>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="dot pending"></span>
+          <span class="title">本地 · 修复登录超时<span class="tag local">本地 Agent</span></span>
+          <span class="meta">claude-code</span>
+        </div>
+        <div class="body">
+          <div class="fail-turn" style="margin-bottom:10px;">
+            <b>无法继续该会话</b>：该会话产生于机器 <b>DESKTOP-HJ0AM09</b>，当前不在线。会话只能在原机器上继续 —— 请开启该机器的 daemon（sillyhub-daemon）后重试，不会换到其它机器执行。
+          </div>
+          <div class="msg sys">（本地日志回放主体保持可浏览）</div>
+        </div>
+        <div class="input-wrap">
+          <div class="input-row">
+            <input disabled placeholder="原机离线，输入不可用…">
+            <button class="btn" disabled>发送</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 案例 4：钉死会话重置 -->
+    <div class="case">
+      <h2>④ 已钉死/失败会话 · 一键重置（存量恢复）</h2>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="dot"></span>
+          <span class="title">本地 · 2026-09-30-title-adopt-clobber-guard<span class="tag local">本地 Agent</span><span class="tag machine">机器：qinyideMac-mini-3</span></span>
+          <button class="icon-btn" title="更多操作">⋯</button>
+          <button class="icon-btn reset" onclick="document.getElementById('dlg').classList.add('show')">重置为未激活</button>
+        </div>
+        <div class="body">
+          <div class="fail-turn">
+            <b>本轮对话被中断</b> —— 会话工作目录 C:/Users/qinyi/IdeaProjects/multi-agent-platform 不存在，可能为错机派发或工作区绑定机器路径错配，daemon 拒绝自动创建目录，拒绝启动分身会话
+          </div>
+        </div>
+        <div class="input-wrap">
+          <div class="input-row">
+            <input placeholder="输入消息…">
+            <button class="btn ghost" onclick="document.getElementById('dlg').classList.add('show')">重置后重试</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 重置确认弹窗 -->
+  <div class="dialog-mask" id="dlg">
+    <div class="dialog">
+      <h3>重置为未激活会话？</h3>
+      <p>将解除与机器 <b>qinyideMac-mini-3</b> 的绑定（清空 lease / runtime / 轮次计数，丢弃失败轮），会话回到「本地 Agent 日志回放」状态，可重新发送首条消息激活（将按上报机器重新派发）。本地日志与历史回放不受影响。</p>
+      <div class="row">
+        <button class="btn ghost" onclick="document.getElementById('dlg').classList.remove('show')">取消</button>
+        <button class="btn" onclick="document.getElementById('dlg').classList.remove('show')">确认重置</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    说明：①② 为未激活 tool_report 会话输入区新增「衔接方式提示条」（resume=绿 / handoff=黄）；② 增加「接手 agent」选择行——zcode 等无 adapter 会话由用户重选原机支持的引擎与智能体档案（默认按 harness 映射），激活请求携带所选 provider/档案；③ 为原机离线时输入禁用 + 409 错误卡（回放仍可浏览）；④ 为 tool_report 会话专属「重置为未激活」入口（头部按钮 + 失败轮内快捷入口），带确认弹窗。触发范围：仅 origin=tool_report 会话；普通 chat 会话不渲染这些元素。样式沿用 AI-Native 主题 token（brand/ok/warn/err 语义阶）。
+  </div>
+</body>
+</html>

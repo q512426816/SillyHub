@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-30-tool-report-activation-wrong-machine",
+  "generatedAt": "2026-09-30T04:57:52.319Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-30-tool-report-activation-wrong-machine",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 2,
+        "worktreeHits": 6,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-30-tool-report-activation-wrong-machine",
+      "metrics": {
+        "tasks": 7,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-30-tool-report-activation-wrong-machine",
+      "metrics": {
+        "backendEndpoints": 3579,
+        "frontendCalls": 4
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-30-tool-report-activation-wrong-machine",
+      "metrics": {
+        "deletions": 1,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-30-tool-report-activation-wrong-machine",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-09-30-tool-report-activation-wrong-machine",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-09-30-tool-report-activation-wrong-machine",
+      "metrics": {
+        "checkedFiles": 8,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "runtimeEvidence": [
+    {
+      "claim": "backend 全量静态三件（ruff check/format --check/mypy）通过，含本变更全部新文件",
+      "command": "cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/verify-backend-static.log（等价分段实测：ruff All checks passed / 1323 files already formatted / mypy Success: no issues found in 988 source files）"
+    },
+    {
+      "claim": "takeover/reset/协议/心跳全链 pytest 通过（含既有懒激活用例改写后的回归）",
+      "command": "cd backend && uv run pytest app/modules/daemon/tests/test_takeover.py app/modules/daemon/tests/test_takeover_handoff.py app/modules/daemon/tests/test_tool_report_activation.py app/modules/daemon/tests/test_session_optimize_round2.py app/modules/daemon/tests/test_heartbeat_machine_id.py app/modules/platform_sync/tests -q --no-cov",
+      "exitCode": 0,
+      "logPath": "分段实测合计 59+6+15+274 用例全绿（execute 各 Wave 记录）"
+    },
+    {
+      "claim": "frontend tsc/lint/vitest 组件测试与 daemon typecheck/vitest 通过",
+      "command": "cd frontend && pnpm exec tsc --noEmit && pnpm lint && pnpm exec vitest run src/components/daemon/__tests__/session-panel-takeover.test.tsx && cd ../sillyhub-daemon && pnpm typecheck && pnpm exec vitest run tests/config-machine-id.test.ts tests/daemon-heartbeat-sillyspec.test.ts tests/daemon-heartbeat-pending.test.ts",
+      "exitCode": 0,
+      "logPath": "分段实测：tsc 0 错 / lint 0 Error / 组件 6+相关回归 36 绿 / daemon typecheck 通过 / daemon 51 用例绿"
+    }
+  ],
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "存量钉死会话 473a8c37 的实际解锁（reset 端点已就绪，未在生产库执行）",
+        "condition": "部署后在会话面板点「重置为未激活」，预期 status=pending 回放恢复；再发首条消息走 takeover（原机 Windows daemon 需在线）",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "takeover 真机端到端（claude-code resume 原会话 / zcode 交接文档）",
+        "condition": "部署后：Windows 机器 daemon 在线时对两个真实本地会话各发一条接手消息，验证 resume 上下文延续与 handoff 交接文档注入（本会话验证为 mock RPC 层）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "CLI（sillyspec 仓）machineId 上报改造（D-001 Phase 6 跨仓另立变更）",
+        "condition": "sillyspec 仓变更落地后，老 CLI hostname 回落自动升级为 machineId ①级精确匹配，无需平台侧改动",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{session_id}/takeover",
+        "rowIdx": 1
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{session_id}/takeover",
+        "rowIdx": 1
+      }
+    ]
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/daemon/tests/test_takeover.py",
+      "backend/app/modules/daemon/tests/test_takeover_handoff.py",
+      "backend/app/modules/platform_sync/tests/test_agent_log_machine.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(py20+jsx10)+fr(62)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-30T06:11:25.277Z"
+  }
+}

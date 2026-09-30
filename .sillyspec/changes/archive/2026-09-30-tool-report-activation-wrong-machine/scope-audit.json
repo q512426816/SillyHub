@@ -1,0 +1,316 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "b8eb58eb205feae79d49db83dd964ab5738fb515",
+  "totals": {
+    "files": 37,
+    "additions": 3304,
+    "deletions": 751
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/daemon/router/__init__.py",
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/heartbeat.py",
+      "additions": 22,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_crud.py",
+      "additions": 74,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/schema.py",
+      "additions": 43,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/__init__.py",
+      "additions": 0,
+      "deletions": 24,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/helpers.py",
+      "additions": 87,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/inject.py",
+      "additions": 13,
+      "deletions": 28,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/ppm_activation.py",
+      "additions": 1,
+      "deletions": 412,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/takeover.py",
+      "additions": 486,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_heartbeat_machine_id.py",
+      "additions": 160,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_optimize_round2.py",
+      "additions": 9,
+      "deletions": 109,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_takeover.py",
+      "additions": 560,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_takeover_handoff.py",
+      "additions": 272,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_tool_report_activation.py",
+      "additions": 20,
+      "deletions": 165,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/model.py",
+      "additions": 14,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/schema.py",
+      "additions": 26,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/service.py",
+      "additions": 43,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_agent_log_machine.py",
+      "additions": 192,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/migrations/versions/20260930110000_tool_report_machine.py",
+      "additions": 41,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 293,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/platform-agent-log-protocol.md",
+      "additions": 70,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx",
+      "additions": 200,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+      "additions": 56,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "additions": 124,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/takeover-bridge-note.tsx",
+      "additions": 68,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 221,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/daemon/sessions.ts",
+      "additions": 37,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/src/config.ts",
+      "additions": 39,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "additions": 44,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/hub-client.ts",
+      "additions": 20,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/config-machine-id.test.ts",
+      "additions": 56,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/daemon-heartbeat-pending.test.ts",
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts",
+      "additions": 8,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "NEW:backend/migrations/versions/2026xxxx_tool_report_machine.py",
+      "planned": "新增",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/fork.py",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    },
+    {
+      "path": "frontend/src/lib/agent-logs.ts",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    },
+    {
+      "path": "NEW:frontend/src/lib/takeover.ts",
+      "planned": "新增",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "f972a19f37c247e7c9c82dd08a92f39ed644afb2bdd4d5509f22921f0eabe351",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-30T04:51:50.254Z"
+}
