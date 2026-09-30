@@ -30,15 +30,27 @@ interface ChangeAssetsCardProps {
 // flow done 补全的 tests[] 可能把绑定槽「路径＋用例名」整串收录（如
 // ``test/x.mjs「某用例」``，注解在「」内可多段）——归一时剥离，否则 basename
 // 连注解进 explorer search 必零命中，恒显「未在仓库中找到」。
+//
+// 用例锚四形态剥锚（2026-09-30-assets-testfile-nodeid-anchor）：tests[] 条目
+// 按 2026-09-26-binding-anchor-fidelity 契约带锚原样收录，锚共四形态（「」组 /
+// ``::`` / ``#`` / ``>``），文件面消费须剥锚——「」沿用既有全局剥离（注解文本
+// 可含锚界符字符，先剥防误切），``::``/``#``/``>`` 取首个界符前路径段；锚后
+// 粘联的全角括号注解残段（flow done 按空白切 token 的截断形，实证
+// ``…::test_x（documents``）与闭合形一并剥。不剥的后果：整串进 basename 必
+// 零命中（本轮实证：2026-09-30-title-adopt-clobber-guard 归档件 pytest 节点
+// ID 串全部误报未找到）。
 
-/** 记录路径字符串归一（反斜杠→斜杠、去 ``./`` 前缀、剥「用例名」注解段与首尾空白）。 */
+/** 记录路径字符串归一（反斜杠→斜杠、去 ``./`` 前缀、剥「用例名」注解段与
+ *  ``::``/``#``/``>`` 用例锚、去尾部粘联全角括号注解残段与首尾空白）。 */
 export function normalizeTestFilePath(raw: string): string {
   return raw
     .trim()
     .replace(/\\/g, "/")
     .replace(/^\.\//, "")
     .replace(/「[^」]*」/g, "")
-    .trim();
+    .split(/::|#|>/)[0]
+    ?.replace(/（[^）]*）?$/, "")
+    .trim() ?? "";
 }
 
 /** 解析决策：resolved=唯一确定路径（redirected=与记录路径不同，需标注）；

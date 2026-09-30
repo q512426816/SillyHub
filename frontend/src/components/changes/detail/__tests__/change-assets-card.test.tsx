@@ -438,6 +438,71 @@ describe("ChangeAssetsCard 测试文件路径解析", () => {
     await openTestFile(["「只有用例名没有路径」"]);
     expect(await screen.findByTestId("change-assets-test-notfound")).toBeTruthy();
   });
+
+  // ── 用例锚四形态 + 全角括号残段（2026-09-30-assets-testfile-nodeid-anchor）──
+  // 生产实证：2026-09-30-title-adopt-clobber-guard 归档件 tests[] 为 pytest 节点
+  // ID + flow done 空白切 token 的注解残段（…::test_x（documents）——剥锚契约
+  // 四形态（「」/#/::/>）此前读侧只落了「」，其余形态整串进 basename 必零命中
+  // 误报「未在仓库中找到该测试文件」（文件实际就在仓库里）。
+  const TITLE_NORM = "backend/app/modules/change/tests/test_title_normalization.py";
+
+  it(":: 用例锚（pytest 节点 ID）剥离：按纯路径等值命中预览，无重定向注记", async () => {
+    mockSearch.mockResolvedValue(matchesOf([TITLE_NORM]));
+    await openTestFile([
+      `${TITLE_NORM}::TestAdoptedTitleClobberGuard::test_apply_parsed_fallback_keeps_semantic_title`,
+    ]);
+    // 搜索入参必须是剥锚后的干净 basename——整串进搜索正是此前零命中的根因。
+    expect(mockSearch).toHaveBeenCalledWith("ws-1", "test_title_normalization.py");
+    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
+      TITLE_NORM,
+    );
+    expect(
+      screen.queryByTestId("change-assets-test-redirect-note"),
+    ).toBeNull();
+  });
+
+  it(":: 锚后粘联全角括号残段（截断未闭合形）一并剥离（生产实证串）", async () => {
+    mockSearch.mockResolvedValue(matchesOf([TITLE_NORM]));
+    await openTestFile([
+      `${TITLE_NORM}::TestAdoptedTitleClobberGuard::test_adopted_title_survives_template_docs_push（documents`,
+    ]);
+    expect(mockSearch).toHaveBeenCalledWith("ws-1", "test_title_normalization.py");
+    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
+      TITLE_NORM,
+    );
+  });
+
+  it("闭合形全角括号注解粘联（无锚界符）同样剥除", async () => {
+    mockSearch.mockResolvedValue(matchesOf([TITLE_NORM]));
+    await openTestFile([`${TITLE_NORM}（documents 推送不回翻，实现前先红实证）`]);
+    expect(mockSearch).toHaveBeenCalledWith("ws-1", "test_title_normalization.py");
+    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
+      TITLE_NORM,
+    );
+  });
+
+  it("# 与 > 形态锚剥离：同归纯路径，短路径唯一后缀救回", async () => {
+    mockSearch.mockResolvedValue(
+      matchesOf(["packages/cli/test/flow-draft.test.mjs"]),
+    );
+    await openTestFile([
+      "test/flow-draft.test.mjs#extractTestAnchors 多段锚全收",
+      "test/flow-draft.test.mjs>flow draft>多段锚全收",
+    ]);
+    expect(mockSearch).toHaveBeenCalledWith("ws-1", "flow-draft.test.mjs");
+    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
+      "packages/cli/test/flow-draft.test.mjs",
+    );
+    // 同组第二条（> 形态）同样可点开预览——两形态归一路径。
+    fireEvent.click(
+      screen.getByTestId(
+        "change-assets-test-file-test/flow-draft.test.mjs>flow draft>多段锚全收",
+      ),
+    );
+    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
+      "packages/cli/test/flow-draft.test.mjs",
+    );
+  });
 });
 
 // ── 资产透明面（2026-09-26-change-asset-transparency / FR-01~03）────────────
