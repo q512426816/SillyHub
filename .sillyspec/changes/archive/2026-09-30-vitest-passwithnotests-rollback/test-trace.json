@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-vitest-passwithnotests-rollback",
+  "rows": [
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-30-vitest-passwithnotests-rollback:flow:FR-04",
+      "tests": [
+        "frontend/src/components/__tests__/top-bar.test.tsx",
+        "test/dynamic-deps-comment-edge.test.mjs"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-vitest-passwithnotests-rollback"
+    }
+  ]
+}

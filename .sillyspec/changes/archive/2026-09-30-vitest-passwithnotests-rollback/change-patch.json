@@ -1,0 +1,48 @@
+{
+  "change": "2026-09-30-vitest-passwithnotests-rollback",
+  "baseline": "52f2356033ae40a0fc42865e1898e0526455e16a",
+  "head": "7ada140398fd1baa4e616f3c241bae3bd42a757e",
+  "files": [
+    ".sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/design.md",
+    ".sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/flow-state.yaml",
+    ".sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/proposal.md",
+    ".sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/requirements.md",
+    ".sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/tasks.md",
+    ".sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/visual-evidence.md",
+    "docs/sillyspec/finished/dynamic-deps-e2e-vitest-exclude-false-red.md",
+    "frontend/vitest.config.ts"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 199,
+    "deletions": 7
+  },
+  "savedAt": "2026-09-30T08:54:59.705Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "896710f6af8e9445982ae636697242f6bd61db84527fa10bab26f6e53db7b63c",
+  "patchStatus": "ok"
+}

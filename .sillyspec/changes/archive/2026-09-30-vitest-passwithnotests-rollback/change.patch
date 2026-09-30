@@ -1,0 +1,261 @@
+diff --git a/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/flow-state.yaml b/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/flow-state.yaml
+new file mode 100644
+index 000000000..39ae53a82
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/flow-state.yaml
+@@ -0,0 +1,10 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 52f2356033ae40a0fc42865e1898e0526455e16a
++updatedAt: '2026-09-30T08:51:56.148Z'
++baseline_sha256: 32bad8a2015fee6158f440c0dc04a1ad3c7de5028e374beb7e4265104fbad202
++
+diff --git a/docs/sillyspec/dynamic-deps-e2e-vitest-exclude-false-red.md b/docs/sillyspec/finished/dynamic-deps-e2e-vitest-exclude-false-red.md
+similarity index 69%
+rename from docs/sillyspec/dynamic-deps-e2e-vitest-exclude-false-red.md
+rename to docs/sillyspec/finished/dynamic-deps-e2e-vitest-exclude-false-red.md
+index 7e69ba55f..2bb9940a7 100644
+--- a/docs/sillyspec/dynamic-deps-e2e-vitest-exclude-false-red.md
++++ b/docs/sillyspec/finished/dynamic-deps-e2e-vitest-exclude-false-red.md
+@@ -1,6 +1,6 @@
+ # 动态依赖测试推断把 e2e 用例交给 vitest → 被 exclude 面拦成「No test files found」假红
+ 
+-- 状态：活跃坑（待 sillyspec 工具修复；本仓已用注释改写绕开触发）
++- 状态：已处理（2026-09-30 用户授权修复 sillyspec 仓三缺陷，三路验证通过；本仓 passWithNoTests 兜底已撤）
+ - 发现：2026-09-30，`2026-09-30-breadcrumb-dedupe-zh` flow done 测试门。
+ 
+ ## 现象
+@@ -62,3 +62,29 @@ exit≠0 且输出里检测不到失败行（×/FAIL 等）时保守判 failed
+ sillyspec 发版含上述任一修复后，改一次 `frontend/src/components/top-bar.tsx`（或任何
+ 被 e2e 注释引用的源文件）跑 flow done，确认依赖批不再产生
+ `vitest run e2e/auth.spec.ts` 命令。
++
++## 处置记录（2026-09-30，用户授权修复）
++
++sillyspec 仓（npm link 直连源码，CLI 3.31.0 即时生效）三处修复落地：
++
++1. **①依赖命中剥注释后匹配**：`stripCommentsForDepMatch`（字符串感知状态机，JS //
++   块注释 / py # 注释）——注释里的路径/导入串字面引用不再算依赖边，代码内
++   import/require/dynamic import/vi.mock 引用照常命中。
++2. **②isTestFilePath 补 jsx|tsx**：`.test.tsx/.spec.jsx` 算测试文件——自家 tsx
++   测试进依赖面（原先反被当 src 漏跑）。
++3. **③jsProject 批过滤 e2e/cypress**：端到端目录文件不进项目运行器批，转
++   `deps(auto-jsx-e2e-skip)` 披露式 skip 批（不产命令不拦门）；jsNative 批
++   （node:test 协议）不受影响。
++
++**三路验证**：
++- sillyspec 仓单测：新增 `test/dynamic-deps-comment-edge.test.mjs` 8 用例 +
++  受影响既有 6 套件 31 用例全绿（零回归）；
++- 批组成复算（multi-agent-platform 原始失败面）：注释引用路 / changedTests 路
++  都不再产生 `vitest run e2e/auth.spec.ts`；自家 top-bar.test.tsx 进跑面；
++- 门禁函数端到端（runVerifyTestCheck faceOverride 原始失败面）：deps(auto-jsx)
++  实跑 3 文件全绿 + e2e 走披露式 skip。
++
++**本仓配套收尾（2026-09-30-vitest-passwithnotests-rollback）**：
++`frontend/vitest.config.ts` 的 `passWithNoTests` 兜底已撤（恢复正常空收集报错
++语义——未来真正错误的空收集不再被掩盖）；撤除前后门禁复核均全绿，确认修复
++不依赖兜底。本文件随之处理完毕移入 finished/。
+diff --git a/frontend/vitest.config.ts b/frontend/vitest.config.ts
+index b7e329691..22b2561bd 100644
+--- a/frontend/vitest.config.ts
++++ b/frontend/vitest.config.ts
+@@ -8,12 +8,6 @@ export default defineConfig({
+     // E2E（Playwright）与单测（Vitest）双栈隔离（D-009@v1）：vitest 默认 include
+     // **/*.{test,spec}.?() 会收集 e2e/*.spec.ts，此处显式排除，同时保留默认排除项。
+     exclude: ["e2e/**", ...configDefaults.exclude],
+-    // 被排除文件被显式过滤时不算失败（sillyspec verify 门禁的依赖推断曾把
+-    // e2e/auth.spec.ts 点名传给 vitest，exclude 面拦下后「No test files found」
+-    // exit 1 假红——工具缺陷三层根因见
+-    // docs/sillyspec/dynamic-deps-e2e-vitest-exclude-false-red.md）。正常
+-    // 全量/CI 恒有测试文件命中，此开关零影响。
+-    passWithNoTests: true,
+     environment: "jsdom",
+     globals: true,
+     setupFiles: ["./src/test/setup.ts"],
+diff --git a/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/design.md b/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/design.md
+new file mode 100644
+index 000000000..21b0a0926
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T08:51:56.126Z
++---
++# 设计记录（Design Record）— 2026-09-30-vitest-passwithnotests-rollback
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-vitest-passwithnotests-rollback 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++sillyspec 仓依赖推断三缺陷已修复（用户授权，npm link 直连源码即时生效）：①依赖命中剥注释后匹配（字符串感知状态机——注释里的路径字面引用不再算依赖边）②isTestFilePath 正则补 jsx|tsx（自家 .test.tsx 进依赖面）③jsProject 批过滤 e2e/cypress 端到端目录（进 skip 批留痕不产命令）。三路验证：sillyspec 仓新 8 用例 + 受影响既有 31 用例全绿；原始失败面批组成复算（两路都不再产生 vitest run e2e/auth.spec.ts，真实测试入跑面）；门禁函数端到端（deps(auto-jsx) 实跑全绿 + e2e 走披露式 skip）。故本仓撤掉 passWithNoTests 兜底（恢复正常空收集报错语义），缺陷文档移 finished/ 附处置记录。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-vitest-passwithnotests-rollback 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++frontend/vitest.config.ts 移除 test.passWithNoTests（其余配置零改动）；docs/sillyspec/dynamic-deps-e2e-vitest-exclude-false-red.md → docs/sillyspec/finished/（追加处置记录）。无后端/接口/文件格式变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-vitest-passwithnotests-rollback 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：静态配置回滚 + 文档移动，无事件流，不适用。
++2. 并发写：单仓单会话顺序编辑，不适用。
++3. 切换/生命周期：vitest 配置为构建期静态读取，无运行态残留；文档移动为 git rename。
++4. 作用域：配置回滚影响 frontend 包自身测试语义（恢复 vitest 默认——显式过滤无匹配时 exit 1），该语义恢复正是本变更目的；缺陷文档移 finished/ 只影响知识检索位置，docs/sillyspec/finished/ 为既有惯例目录。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-vitest-passwithnotests-rollback 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：若 sillyspec 修复未生效（CLI 未链接源码）而撤掉兜底会复现假红——已核实 npm ls -g sillyspec 指向 C:/Users/qinyi/IdeaProjects/sillyspec（npm link），且撤除前用原始失败面在修复后源码上复跑门禁函数确认全绿，风险已消除。试过放弃的方案：保留 passWithNoTests 作为双保险——放弃理由：它会掩盖未来真正错误的空收集（如过滤条件写错时 CI 静默通过），兜底价值低于语义保真。
+diff --git a/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/proposal.md b/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/proposal.md
+new file mode 100644
+index 000000000..e21a31672
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/proposal.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T08:51:56.125Z
++---
++# 提案书（Proposal）— 2026-09-30-vitest-passwithnotests-rollback
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:76b5ac967d58499f14cac0e33c361b3bc07cc3439452a2d031550d3ddb337a3e:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-vitest-passwithnotests-rollback 留痕重锚 -->
++任务原话转写：sillyspec 仓依赖推断三缺陷已修复（注释剥离散/tsx 正则/e2e 目录过滤），vitest passWithNoTests 兜底不再必要，撤掉并归档工具缺陷记录。
++成功标准：
++- frontend/vitest.config.ts 移除 passWithNoTests，恢复正常 vitest 语义（空收集报错）
++- 门禁复核：原始失败面下不再产生 vitest run e2e/auth.spec.ts 命令（已在 sillyspec 仓验证）
++- 工具缺陷文档移入 docs/sillyspec/finished/ 并附处置记录
++- 撤除后相关测试与门禁实测通过
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:6d4970d28c0993e413955ce4679712946f0289a3a3115a01ebebaf27c9c2a44f:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-vitest-passwithnotests-rollback 留痕重锚 -->
++按成功标准机械推导，共 4 条验收面：
++1. frontend/vitest.config.ts 移除 passWithNoTests，恢复正常 vitest 语义（空收集报错）
++2. 门禁复核：原始失败面下不再产生 vitest run e2e/auth.spec.ts 命令（已在 sillyspec 仓验证）
++3. 工具缺陷文档移入 docs/sillyspec/finished/ 并附处置记录
++4. 撤除后相关测试与门禁实测通过
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:1a976b721a416719b2058061b9d7a45aef6391f4575abe1daecdbf80338f45b1:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-vitest-passwithnotests-rollback 留痕重锚 -->
++1. frontend/vitest.config.ts 移除 passWithNoTests，恢复正常 vitest 语义（空收集报错）
++2. 门禁复核：原始失败面下不再产生 vitest run e2e/auth.spec.ts 命令（已在 sillyspec 仓验证）
++3. 工具缺陷文档移入 docs/sillyspec/finished/ 并附处置记录
++4. 撤除后相关测试与门禁实测通过
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/requirements.md b/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/requirements.md
+new file mode 100644
+index 000000000..88e2493d3
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/requirements.md
+@@ -0,0 +1,42 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T08:51:56.126Z
++---
++# 需求规格（Requirements）— 2026-09-30-vitest-passwithnotests-rollback
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: frontend/vitest.config.ts 移除 passWithNoTests，恢复正常 
++Given 系统就绪
++When frontend/vitest.config.ts 移除 passWithNoTests，恢复正常 vitest 语义（空收集报错）
++Then 行为符合本条标准描述
++
++### FR-02: 门禁复核：原始失败面下不再产生 vitest run e2e/auth.spec.ts 命令（已在 
++Given e2e 相关模块就绪
++When 门禁复核：原始失败面下不再产生 vitest run e2e/auth.spec.ts 命令（已在 sillyspec 仓验证）
++Then 行为符合本条标准描述
++
++### FR-03: 工具缺陷文档移入 docs/sillyspec/finished/ 并附处置记录
++Given 系统就绪
++When 工具缺陷文档移入 docs/sillyspec/finished/ 并附处置记录
++Then 行为符合本条标准描述
++
++### FR-04: 撤除后相关测试与门禁实测通过
++Given 测试 相关模块就绪
++When 撤除后相关测试与门禁实测通过
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：纯配置回滚（移除 test.passWithNoTests），无行为断言面。验证=撤除后正常目标测试照常执行（frontend/src/components/__tests__/top-bar.test.tsx 9 用例通过）——空收集报错语义恢复属消极验证（不应触发的路径不再触发）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：该复核在 sillyspec 仓侧完成（test/dynamic-deps-comment-edge.test.mjs 8 用例 + 原始失败面批组成两路复算 + runVerifyTestCheck 端到端全绿），本仓无对应测试文件；处置实录见 docs/sillyspec/finished/dynamic-deps-e2e-vitest-exclude-false-red.md 处置记录节
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：纯文档移动与追加（git mv → docs/sillyspec/finished/ + 处置记录），无测试面
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/__tests__/top-bar.test.tsx 9 用例通过（撤除后语义正常）；sillyspec 仓 test/dynamic-deps-comment-edge.test.mjs 8 用例 + 受影响既有 31 用例全绿；本仓门禁实测 test=动态子集空合法跳过（配置/文档面无测试关系）、lint=passed
+diff --git a/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/tasks.md b/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/tasks.md
+new file mode 100644
+index 000000000..94a45c3cc
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/tasks.md
+@@ -0,0 +1,12 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T08:51:56.126Z
++---
++# 任务注册表（Tasks）— 2026-09-30-vitest-passwithnotests-rollback
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge + 2026-09-29 心跳指针）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。📌 任务面在 ①spec 阶段定稿：覆写为真实实现步骤（全 `- [x] task-01: frontend/vitest.config.ts 移除 passWithNoTests 兜底（恢复 vitest 默认空收集报错语义）
++- [x] task-02: 撤除后复核——原始失败面门禁函数复跑全绿（不依赖 passWithNoTests）
++- [x] task-03: 缺陷文档移 docs/sillyspec/finished/ 并附处置记录（三缺陷修复内容 + 三路验证实录）
++- [x] task-04: 相关测试跑绿 + flow done 收口
+diff --git a/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/visual-evidence.md b/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/visual-evidence.md
+new file mode 100644
+index 000000000..1fae5ba25
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-vitest-passwithnotests-rollback/visual-evidence.md
+@@ -0,0 +1,16 @@
++# 视觉证据 — 2026-09-30-vitest-passwithnotests-rollback
++
++## 用户可见的视觉差异
++
++无。本变更是测试配置回滚（frontend/vitest.config.ts 移除 passWithNoTests）与
++工具缺陷文档归档（docs/sillyspec/ → finished/），不触任何页面/组件/UI 文件。
++
++## 验证方式
++
++- 撤除后正常目标测试照常执行通过（top-bar.test.tsx）；
++- 门禁函数端到端复核（原始失败面 faceOverride）：deps(auto-jsx) 实跑 3 文件
++  全绿、e2e 走披露式 skip——修复不依赖 passWithNoTests 兜底。
++
++## 视觉降级
++
++无降级（无 UI 改动）。
