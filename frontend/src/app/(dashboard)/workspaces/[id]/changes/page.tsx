@@ -712,13 +712,10 @@ export default function ChangesPage({ params }: Props) {
 
   return (
     <PageContainer size="full">
-      {/* 四层结构（FR-03 / 原型「变更中心」视图）：页头 → 工具条 → 状态 tab → 行式列表 */}
+      {/* 四层结构（FR-03 / 原型「变更中心」视图）：页头 → 工具条 → 状态 tab → 行式列表。
+          2026-09-30-breadcrumb-dedupe-zh：页头不再渲染「工作区名 / 变更中心」页内
+          面包屑——顶栏已有【工作区 > 变更中心】同位信息，页内重复。 */}
       <PageHead
-        breadcrumb={
-          <span>
-            {workspace?.name ?? "—"} / <span className="text-foreground">变更中心</span>
-          </span>
-        }
         title="变更中心"
         subtitle={renderSubtitle()}
         actions={

@@ -25,17 +25,52 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 
 /**
  * 面包屑段名映射：pathname split 后的段值 → 中文标签。
- * 仅做常见段降级，未命中直接显示原段值，不报错不阻断。
+ * 顶栏面包屑是页面位置的唯一指示（2026-09-30-breadcrumb-dedupe-zh 起页内
+ * 面包屑已移除），静态路由段须全覆盖；中文命名权威 = 侧边栏菜单
+ * lib/menu-permissions.ts 的 menuLabel + 工作区页签 workspace-tabs.tsx 的
+ * label，不新造叫法；MCP/Git/API 等专业术语保留原文（CLAUDE.md 规则 12）。
+ * 动态段（[cid]/[tid] 等 id）无静态名，未命中直接显示原段值，不报错不阻断。
  */
 const SEGMENT_LABEL: Record<string, string> = {
+  // 平台级一级段
   workspaces: "工作区",
   ppm: "项目管理",
   admin: "系统管理",
   settings: "设置",
   runtimes: "运行时",
+  account: "个人中心",
+  // 工作区子页段
+  changes: "变更中心",
+  tasks: "任务看板",
+  sessions: "会话",
+  explorer: "文件",
+  knowledge: "知识库",
+  components: "组件",
+  topology: "拓扑图",
+  "scan-docs": "扫描文档",
+  runtime: "运行时",
+  "agent-profiles": "智能体档案",
+  skills: "技能管理",
+  mcp: "MCP",
+  "mcp-tokens": "MCP 令牌",
+  members: "成员",
+  files: "方案文件",
+  "git-log": "Git 日志",
+  approvals: "审批中心",
+  audit: "审计中心",
+  incidents: "事件",
+  releases: "发布",
+  quicklog: "快速修复",
+  // 系统管理 / 设置子页段
   users: "用户",
   organizations: "组织",
   roles: "角色",
+  menus: "菜单管理",
+  "api-keys": "API 密钥",
+  "git-identities": "Git 身份管理",
+  providers: "我的供应商",
+  // 项目管理平台（ppm）子页段
+  workbench: "个人工作台",
   projects: "项目",
   customers: "客户",
   "project-members": "项目成员",
@@ -45,12 +80,15 @@ const SEGMENT_LABEL: Record<string, string> = {
   "milestone-details": "里程碑明细",
   "problem-list": "问题清单",
   "task-plans": "任务计划",
+  "task-execute": "任务执行",
   "work-hours": "工时",
   "work-hour-statistics": "工时统计",
   kanban: "看板",
+  "weekly-plan": "实施计划汇总",
 };
 
-function buildBreadcrumbs(pathname: string): string[] {
+/** 导出供单测断言段名中文化（与 resolvePlatformSwitch 同款纯函数出口）。 */
+export function buildBreadcrumbs(pathname: string): string[] {
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length === 0) return ["首页"];
 

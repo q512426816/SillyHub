@@ -335,31 +335,8 @@ export default function TaskDetailPage({ params }: Props) {
 
   return (
     <PageContainer size="full" className="gap-5">
-      {/* ---- Breadcrumb ---- */}
-      <nav className="flex items-center gap-1 text-[11px] text-muted-foreground">
-        <Link
-          href={`/workspaces/${workspaceId}/changes`}
-          className="hover:underline"
-        >
-          变更中心
-        </Link>
-        <span>/</span>
-        <Link
-          href={`/workspaces/${workspaceId}/changes/${changeId}`}
-          className="hover:underline"
-        >
-          {changeKey}
-        </Link>
-        <span>/</span>
-        <Link
-          href={`/workspaces/${workspaceId}/changes/${changeId}/tasks`}
-          className="hover:underline"
-        >
-          任务看板
-        </Link>
-        <span>/</span>
-        <span className="text-foreground">{task.task_key}</span>
-      </nav>
+      {/* 2026-09-30-breadcrumb-dedupe-zh：页内「变更中心 / changeKey / 任务看板 /
+          task_key」面包屑已移除——顶栏已有同位信息（页内返回入口见下方任务看板链接）。 */}
 
       {/* ---- Error banner ---- */}
       {pageError && (

@@ -43,7 +43,66 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: () => {} }),
 }));
 
-import { resolvePlatformSwitch, TopBar } from "@/components/top-bar";
+import { buildBreadcrumbs, resolvePlatformSwitch, TopBar } from "@/components/top-bar";
+
+/**
+ * 2026-09-30-breadcrumb-dedupe-zh：面包屑段名中文化回归。
+ *
+ * 顶栏面包屑是页面位置的唯一指示（页内面包屑已随本变更移除），段名映射
+ * SEGMENT_LABEL 必须覆盖全部静态路由段；中文命名权威 = 侧边栏菜单
+ * lib/menu-permissions.ts 的 menuLabel + 工作区页签 workspace-tabs.tsx
+ * 的 label，MCP/Git/API 等专业术语保留原文（CLAUDE.md 规则 12）。
+ * 动态段（[cid]/[tid] 等 id）无静态名，维持原样显示。
+ */
+describe("buildBreadcrumbs 段名中文化", () => {
+  it("工作区子路由段名映射为中文（用户示例：changes → 变更中心）", () => {
+    expect(buildBreadcrumbs("/workspaces/ws-1/changes")).toEqual([
+      "工作区",
+      "变更中心",
+    ]);
+    expect(buildBreadcrumbs("/workspaces/ws-1/files")).toEqual([
+      "工作区",
+      "方案文件",
+    ]);
+    expect(buildBreadcrumbs("/workspaces/ws-1/git-log")).toEqual([
+      "工作区",
+      "Git 日志",
+    ]);
+    expect(buildBreadcrumbs("/workspaces/ws-1/mcp-tokens")).toEqual([
+      "工作区",
+      "MCP 令牌",
+    ]);
+    expect(buildBreadcrumbs("/workspaces/ws-1/knowledge")).toEqual([
+      "工作区",
+      "知识库",
+    ]);
+  });
+
+  it("深路由静态段中文化、动态段原样透传", () => {
+    expect(
+      buildBreadcrumbs("/workspaces/ws-1/changes/c-42/tasks/t-7"),
+    ).toEqual(["工作区", "变更中心", "c-42", "任务看板", "t-7"]);
+  });
+
+  it("设置/系统管理/PPM 子页段名映射为中文", () => {
+    expect(buildBreadcrumbs("/settings/api-keys")).toEqual(["设置", "API 密钥"]);
+    expect(buildBreadcrumbs("/settings/providers")).toEqual([
+      "设置",
+      "我的供应商",
+    ]);
+    expect(buildBreadcrumbs("/admin/menus")).toEqual(["系统管理", "菜单管理"]);
+    expect(buildBreadcrumbs("/ppm/workbench")).toEqual([
+      "项目管理",
+      "个人工作台",
+    ]);
+    expect(buildBreadcrumbs("/account")).toEqual(["个人中心"]);
+  });
+
+  it("根路径与列表页保持既有行为", () => {
+    expect(buildBreadcrumbs("/")).toEqual(["首页"]);
+    expect(buildBreadcrumbs("/workspaces")).toEqual(["工作区"]);
+  });
+});
 
 describe("resolvePlatformSwitch", () => {
   it("SillyHub（非 /ppm 路径）→ 提示「切换到项目管理平台」，目标 /ppm", () => {
