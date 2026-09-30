@@ -35,11 +35,23 @@ Then 行为符合本条标准描述
 ## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
 
 <!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_adopted_title_survives_template_docs_push（documents 推送不回翻，实现前先红实证）
+- backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_apply_parsed_fallback_keeps_semantic_title（reparse 兜底派生不覆盖段，实现前先红实证）
 
 <!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_custom_h1_docs_push_overrides_adopted_title（documents 推送自定义 H1 覆盖收养标题）
+- backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_apply_parsed_fallback_keeps_semantic_title 后半段（ParsedChange 自定义 title 覆盖语义标题）
+- backend/app/modules/change/tests/test_title_normalization.py::TestUpsertDocumentsTitle::test_custom_h1_in_deepest_doc_wins（既有改名回归保护，不回归）
 
 <!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- backend/app/modules/platform_sync/tests/test_change_deleted_guard.py::test_long_cli_title_truncated_progress_still_ok（600 字截 500 落库 + progress 上行仍 200；收养写库 try/except 为结构性 best-effort——失败注入需 mock commit，未单测，见 design 槽3/槽4）
 
 <!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- backend/app/modules/change/tests/test_title_normalization.py::TestIsFallbackDisplayTitle（四态兜底判定纯函数：空/key/去前缀语义名/裸模板 H1 文本 vs 语义标题）
+- backend/app/modules/change/tests/test_title_normalization.py::TestUpsertDocumentsTitle::test_existing_row_title_refreshed（裸模板文本仍可被刷新——判定收敛不破坏既有语义）
+- TITLE_MAX_LEN 截断由 FR-03 绑定用例覆盖（断言 落库值 == "甲"*500）
 
 <!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- backend/app/modules/change/tests/test_title_normalization.py 全文件 35 用例（含既有归一化/描述提取回归）
+- backend/app/modules/platform_sync/tests/test_change_deleted_guard.py 全文件 18 用例（含收养五场景 + 删除守卫回归）
+- backend/app/modules/platform_sync/tests/test_router.py -k documents 5 用例（端点回归）
