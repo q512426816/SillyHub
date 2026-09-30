@@ -16,7 +16,7 @@
  * - antd Form：登录名 name="account" placeholder="登录名"；密码 name="password"
  *   placeholder="请输入密码"（Input.Password）；提交按钮文本"登录"。
  * - 登录失败：setState error 渲染在 .text-red-600 提示块，401 文案含「用户名或密码」。
- * - 登出入口（frontend/src/components/top-bar.tsx）：aria-label="用户菜单" 按钮 →
+ * - 登出入口（顶栏 top-bar 组件，components/top-bar）：aria-label="用户菜单" 按钮 →
  *   DropdownMenuItem「退出登录」→ 二次确认弹窗（logout-confirm-dialog.tsx）
  *   「确认退出登录？」→ 确认按钮「确认退出」。
  */
