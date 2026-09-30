@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-takeover-tier3-ambiguous-msg",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-30-takeover-tier3-ambiguous-msg:flow:FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier3_ambiguous_lists_machine_names"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-takeover-tier3-ambiguous-msg"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-30-takeover-tier3-ambiguous-msg:flow:FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching（既有四级矩阵用例零回归）"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-takeover-tier3-ambiguous-msg"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-30-takeover-tier3-ambiguous-msg:flow:FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier4_no_match_409_with_machine_name（无命中文案态回归）"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-takeover-tier3-ambiguous-msg"
+    }
+  ]
+}

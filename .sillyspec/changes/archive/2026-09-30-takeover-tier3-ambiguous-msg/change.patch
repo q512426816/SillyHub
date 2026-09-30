@@ -1,0 +1,264 @@
+diff --git a/backend/app/modules/daemon/session/service/takeover.py b/backend/app/modules/daemon/session/service/takeover.py
+index 3b225343e..e4ac8058e 100644
+--- a/backend/app/modules/daemon/session/service/takeover.py
++++ b/backend/app/modules/daemon/session/service/takeover.py
+@@ -146,16 +146,52 @@ async def resolve_takeover_machine(
+     )
+     machine_id, hostname = await _latest_reported_machine(db, source)
+ 
+-    def _fail(reason_tier: str) -> ToolReportTakeoverNoMachine:
+-        who = machine_id or hostname or "（未知机器）"
++    def _machine_names(rows: list[DaemonRuntime]) -> list[str]:
++        """命中机器名去重保序（daemon_instance 分组，display 名=name，缺省 id 短码）。"""
++        seen: set[object] = set()
++        names: list[str] = []
++        for rt in rows:
++            key = rt.daemon_instance_id or rt.id
++            if key in seen:
++                continue
++            seen.add(key)
++            names.append(rt.name or str(rt.id)[:8])
++        return names
++
++    def _fail(
++        reason_tier: str,
++        candidates_rows: list[DaemonRuntime] | None = None,
++    ) -> ToolReportTakeoverNoMachine:
++        who = machine_id or hostname
++        # 歧义场景（多机命中）：列出候选机器名让用户可诊断（清哪台配置/开哪台）。
++        cand = _machine_names(candidates_rows) if candidates_rows else []
++        if cand:
++            msg = (
++                f"该会话的工作目录被 {len(cand)} 台在线机器的白名单同时覆盖"
++                f"（{'、'.join(cand)}），无法确定原机——请在产生该会话的机器上"
++                "清理其它机器 daemon 配置里不该有的该路径（allowed_roots）后重试，"
++                "或在该机器重跑一次 CLI 上报（携带机器身份）；不会换机执行。"
++            )
++        elif who:
++            msg = (
++                f"该会话产生于机器 {who}，当前没有可用的对应在线执行端"
++                "——请在该机器上启动 daemon（sillyhub-daemon）后重试；"
++                "不会换到其它机器执行。"
++            )
++        else:
++            msg = (
++                "该会话的历史上报未携带机器身份，且当前没有任何在线机器的"
++                "工作目录白名单（allowed_roots）覆盖该会话目录"
++                f"（{source.cwd or '未知'}）——请在产生该会话的机器上启动 daemon"
++                "（并确认其 allowed_roots 含该目录）后重试；不会换到其它机器执行。"
++            )
+         return ToolReportTakeoverNoMachine(
+-            f"该会话产生于机器 {who}，当前没有可用的对应在线执行端"
+-            "——请在该机器上启动 daemon（sillyhub-daemon）后重试；"
+-            "不会换到其它机器执行。",
++            msg,
+             details={
+                 "session_id": str(source.id),
+                 "machine_id": machine_id,
+                 "hostname": hostname,
++                "machine_candidates": cand,
+                 "match_tier": reason_tier,
+             },
+         )
+@@ -165,7 +201,7 @@ async def resolve_takeover_machine(
+         groups = {rt.daemon_instance_id for rt in rows}
+         if len(groups) == 1:
+             return rows
+-        raise _fail(f"{tier}_ambiguous")
++        raise _fail(f"{tier}_ambiguous", candidates_rows=rows)
+ 
+     # ── ① machine_id 精确（daemon 心跳 metadata 同源）──────────────────────
+     if machine_id:
+diff --git a/backend/app/modules/daemon/tests/test_takeover.py b/backend/app/modules/daemon/tests/test_takeover.py
+index b23a48134..161ee006c 100644
+--- a/backend/app/modules/daemon/tests/test_takeover.py
++++ b/backend/app/modules/daemon/tests/test_takeover.py
+@@ -345,6 +345,41 @@ class TestFourTierMatching:
+         resp = await _takeover(client, auth_headers, source.id)
+         assert resp.status_code == 409, resp.text
+ 
++    @pytest.mark.asyncio
++    async def test_tier3_ambiguous_lists_machine_names(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        mocked_hub,
++        mocked_redis,
++    ) -> None:
++        """2026-09-30-takeover-tier3-ambiguous-msg：③级多机命中 → 409 文案列出
++        全部命中机器名（可诊断——用户知道该清哪台 allowed_roords）。"""
++        owner_id = await _admin_user_id(db_session)
++        # 两台机器（daemon_instance 各异）白名单都覆盖 cwd。
++        rt_win = await _create_runtime(db_session, owner_id, name="DESKTOP-HJ0AM09")
++        rt_win.daemon_instance_id = uuid.uuid4()
++        rt_win.allowed_roots = ["C:\\Users\\qinyi"]
++        db_session.add(rt_win)
++        rt_mac = await _create_runtime(db_session, owner_id, name="qinyideMac-mini-3.local")
++        rt_mac.daemon_instance_id = uuid.uuid4()
++        rt_mac.allowed_roots = ["/Users/qinyi", "C:/Users/qinyi/IdeaProjects/multi-agent-platform"]
++        db_session.add(rt_mac)
++        await db_session.commit()
++
++        source = await _seed_tool_report_session(db_session)  # 无机器身份 → ③级
++        resp = await _takeover(client, auth_headers, source.id)
++        assert resp.status_code == 409, resp.text
++        body = resp.json()
++        msg = body["message"]
++        assert "DESKTOP-HJ0AM09" in msg and "qinyideMac-mini-3.local" in msg
++        assert "2 台在线机器" in msg
++        assert set(body.get("details", {}).get("machine_candidates", [])) == {
++            "DESKTOP-HJ0AM09",
++            "qinyideMac-mini-3.local",
++        }
++
+ 
+ # ════════════════════════════════════════════════════════════════════════════
+ # 分档 + fork 落库 + 源会话红线（D-006@v1）
+diff --git a/.sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/design.md b/.sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T06:59:16.541Z
++---
++# 设计记录（Design Record）— 2026-09-30-takeover-tier3-ambiguous-msg
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-tier3-ambiguous-msg 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++takeover.py 的 _fail 按场景分三态文案：歧义（多机命中）列出全部命中机器名并指引清理非本机 allowed_roots 或重跑 CLI 上报；有身份无在线（原文案保留）；无身份无命中（说明「历史上报未携带机器身份」+ 指引 allowed_roots 配置）。details 增 machine_candidates 机器名列表。选文案修复而非自动选机：无机器身份时无可靠信号区分原机，宁拒不猜（D-002@v1）不变。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-tier3-ambiguous-msg 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++HTTP_409_TOOL_REPORT_TAKEOVER_NO_MACHINE 的 message 文案三态化 + details 新增 machine_candidates（list[str]，空=无命中场景）。无签名/端点变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-tier3-ambiguous-msg 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++乱序：不涉及（错误文案组装纯读候选行快照）。并发：候选读取与判定同事务同源。中断：409 先于任何写库无半成品。作用域：候选域恒限会话属主 runtime 不跨用户。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-tier3-ambiguous-msg 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++风险：机器名含 runtime.name 为空时回退 id 短码（文案仍可诊断）。死路：无——三种失败态各有明确指引。回滚=revert 单 commit（纯文案+details 字段，无 schema/协议面）。
+
+diff --git a/.sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/proposal.md b/.sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/proposal.md
+@@ -0,0 +1,34 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T06:59:16.539Z
++---
++# 提案书（Proposal）— 2026-09-30-takeover-tier3-ambiguous-msg
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:dc59b3c3afa35085d619d92351aacb8d1aeda74e79e4c696d87ec01eea568f96:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-tier3-ambiguous-msg 留痕重锚 -->
++任务原话转写：真机验收发现 takeover ③级（allowed_roots）多机命中时 409 文案只显示「（未知机器）」——存量上报无机器身份场景完全不可诊断，用户不知道哪台机器命中、该清哪台配置。修复：歧义/无命中时把命中机器名列表（daemon_runtimes.name 去重）拼进中文文案与 details（machine_candidates），并把指引改为「多台机器的工作目录白名单均覆盖该路径时，请清理非本机路径的 allowed_roots 配置后重试」。
++成功标准：
++- takeover ③级歧义时 409 文案包含全部命中机器名（而非「（未知机器）」）
++- 无命中且无机器身份时文案说明「未识别上报机器」并指引 allowed_roots 配置
++- 既有 test_takeover.py 用例不回归（ambiguous 用例文案断言更新）
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:f01b55169145919fb4c2f5528a0a64aa9ae7c434ffe69292c522a3f27d003425:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-tier3-ambiguous-msg 留痕重锚 -->
++按成功标准机械推导，共 3 条验收面：
++1. takeover ③级歧义时 409 文案包含全部命中机器名（而非「（未知机器）」）
++2. 无命中且无机器身份时文案说明「未识别上报机器」并指引 allowed_roots 配置
++3. 既有 test_takeover.py 用例不回归（ambiguous 用例文案断言更新）
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:6eb2379a8dfc96d9f9ae296b9c2e5cf2f96ce5cb58aba423aaa2b45ceac507d5:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-takeover-tier3-ambiguous-msg 留痕重锚 -->
++1. takeover ③级歧义时 409 文案包含全部命中机器名（而非「（未知机器）」）
++2. 无命中且无机器身份时文案说明「未识别上报机器」并指引 allowed_roots 配置
++3. 既有 test_takeover.py 用例不回归（ambiguous 用例文案断言更新）
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/requirements.md b/.sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/requirements.md
+@@ -0,0 +1,34 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T06:59:16.541Z
++---
++# 需求规格（Requirements）— 2026-09-30-takeover-tier3-ambiguous-msg
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: takeover ③级歧义时 409 文案包含全部命中机器名（而非「（未知机器）」）
++Given 系统就绪
++When takeover ③级歧义时 409 文案包含全部命中机器名（而非「（未知机器）」）
++Then 行为符合本条标准描述
++
++### FR-02: 无命中且无机器身份时文案说明「未识别上报机器」并指引 allowed_roots 配置
++Given 系统就绪
++When 无命中且无机器身份时文案说明「未识别上报机器」并指引 allowed_roots 配置
++Then 行为符合本条标准描述
++
++### FR-03: 既有 test_takeover.py 用例不回归（ambiguous 用例文案断言更新）
++Given 系统就绪
++When 既有 test_takeover.py 用例不回归（ambiguous 用例文案断言更新）
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier3_ambiguous_lists_machine_names
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching（既有四级矩阵用例零回归）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier4_no_match_409_with_machine_name（无命中文案态回归）
+
+diff --git a/.sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/tasks.md b/.sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/tasks.md
+@@ -0,0 +1,13 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T06:59:16.541Z
++---
++# 任务注册表（Tasks）— 2026-09-30-takeover-tier3-ambiguous-msg
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge + 2026-09-29 心跳指针）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。📌 任务面在 ①spec 阶段定稿：覆写为真实实现步骤（全 `- [ ]`）后再动代码；执行循环：Working on task N/M → 做一件 → 勾一格 → 下一个——收口硬门拒单拍多格勾选（--allow-batch-tick 可显式旁路留痕）。`flow status --change <名>` 为自愿查看/恢复面（恢复时给下一任务指针与进度，非协议必需——D-007）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: takeover ③级歧义时 409 文案包含全部命中机器名（而非「（未知机器）」）
++- [ ] task-02: 无命中且无机器身份时文案说明「未识别上报机器」并指引 allowed_roots 配置
++- [ ] task-03: 既有 test_takeover.py 用例不回归（ambiguous 用例文案断言更新）

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-takeover-tier3-ambiguous-msg",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "FR-02 第三态文案（无命中且无机器身份）无直接断言，测试绑定弱化为「零回归」",
+      "evidence": "实现三态分支真实存在且语义正确（takeover.py else 分支「该会话的历史上报未携带机器身份，且当前没有任何在线机器的工作目录白名单（allowed_roots）覆盖…」，含 allowed_roots 指引，符合 FR-02），但 grep test_takeover.py 全文无「未携带机器身份」「未知机器」等第三态文案断言；FR-02 测试绑定仅写「TestFourTierMatching（既有四级矩阵用例零回归）」未绑定具体用例，而 FR-03 绑定的 test_tier4_no_match_409_with_machine_name（:288）名称即 with_machine_name，走第二态（who 存在）。第三态新文案分支零断言覆盖（新用例 :349 只覆盖歧义态）。",
+      "location": "backend/app/modules/daemon/tests/test_takeover.py:288,349; .sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/requirements.md:30-31"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-03「ambiguous 用例文案断言更新」声明与 diff 不符：commit 仅新增用例，既有 ambiguous 用例零改动",
+      "evidence": "commit 9b71712 对 test_takeover.py 的 diff 仅为 +35 行纯新增（test_tier3_ambiguous_lists_machine_names），既有 test_ambiguous_hostname_409（:327）未改一字——零回归成立的原因是它只断言 status_code==409 而不断言文案，requirements.md:20-23 括号里「ambiguous 用例文案断言更新」与实际 diff 不符（文案断言实际以新增用例形式兑现）。另新用例 docstring 有错别字「allowed_roords」（:358，应为 allowed_roots）。",
+      "location": "backend/app/modules/daemon/tests/test_takeover.py:327,358; .sillyspec/changes/2026-09-30-takeover-tier3-ambiguous-msg/requirements.md:20-23"
+    },
+    {
+      "severity": "P3",
+      "title": "无声明边界：三条隐性取舍未在 requirements 披露（均可接受，已逐条裁决）",
+      "evidence": "thin requirements 无任何边界声明段，实际存在：(a) rt.name 缺省时候选名显示 str(rt.id)[:8] 短码（takeover.py _machine_names）——可接受，保底可辨识；(b) details.machine_candidates 在非歧义 409 时恒为空列表而非缺省键，旧客户端若精确比对 details 键集会感知——可接受，details 为 dict[str,Any] 弱类型（core/errors.py:45）且项目未上线（CLAUDE.md 规则 11）；(c) candidates_rows 经参数化 helper 传递（raise _fail(f\"{tier}_ambiguous\", candidates_rows=rows)），若 ①②级同名歧义路径存在则同样列名——影响超出变更标题「③级」所述，属同向超范围外溢，无回归风险，可接受。",
+      "location": "backend/app/modules/daemon/session/service/takeover.py:149-165,204"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "n/a",
+    "作用域": "finding"
+  },
+  "reviewedAt": "2026-09-30T15:45:00+08:00"
+}

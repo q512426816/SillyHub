@@ -1,0 +1,24 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+baseline_commit: 55a3d80482338d86a192797f0fd352613f8458b6
+updatedAt: '2026-09-30T07:14:29.165Z'
+baseline_sha256: 8e56263a7f3381b6ebdd2dd6e4d2c7dc576c204ac73e6ef37698fa5435239283
+gate_summary: >-
+  test: passed ← module[]+deps(py2)（43.5s）
+  结果：C:\Users\qinyi\AppData\Local\Temp\sillyspec-gate-5eFzar\.sillyspec\.runtime\verify-runs\20260930070739\test-result.json｜lint:
+  skipped ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（58.4s） — 跳过原因：环境缺件：二进制「next」不存在（'next'
+  不是内部或外部命令，也不是可运行的程序）——非代码失败不拦门；在对应包目录补装依赖（pnpm/npm install、uv sync 等）后 lint 恢复实测。｜门文件 5 个
+
