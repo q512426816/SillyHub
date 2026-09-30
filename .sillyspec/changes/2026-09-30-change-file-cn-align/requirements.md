@@ -25,7 +25,13 @@ Then 行为符合本条标准描述
 ## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
 
 <!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- frontend/src/components/__tests__/change-file-tree.test.tsx「固定产物树节点主显中文名 + 原名对照，非固定名维持原名」（文本层回归；紧凑排列为纯 className 布局，无断言面，视觉由 visual-evidence.md 截图证据覆盖）
+
 
 <!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- 不适用：徽标区未改动——ml-auto 徽标 span 原样保留，既有「渲染文件树列出全部文件」（含只读徽标断言）回归绿即可，无新增行为
+
 
 <!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+- frontend/src/components/__tests__/change-file-tree.test.tsx 全文件 19 用例回归（布局调整不破坏文本锚点/getByText 命中）
+
