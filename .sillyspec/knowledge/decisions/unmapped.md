@@ -1381,3 +1381,31 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：46e58f4b3a574fafdc1f01d3250f768b8a9654f1
 理由：最大风险：把「日志在窗口外」误判为「零正文」导致内容永不加载——不会发生：判定基于本次 run_id 直达拉回的**全量** run 日志（该请求不受游标窗口限制），拉回有正文即照旧 prepend；仅拉回全空才标记。试过放弃的方案：①「turn 在 turnState 存在即视为已加载不再拉」——孤儿空壳（displayTurns 补建/翻页空壳）不在 turnState 或因陈旧闭包查不到，且壳轮的日志可能在已加载窗口之外、首点必须拉，存在性判定会弄丢首次加载机会；②「扩 loadedHasBody 判定条件」——治标不治本，陈旧闭包（deps 无 turnState）下二次点击依旧查不到首次 prepend 的轮。ref 标记不受闭包影响，是稳态判定。实证：stash 掉修复跑新用例红（expected 2 to be 1——二次点击重复直达），恢复后绿。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-29-issue-row-grid-misalign
+锚点：未记录
+最近确认：790c594bf0570259215b5c18178c481f6f856a22
+理由：最大风险：占位 div 占据首轨 auto 宽度——空 div 无内容宽≈0，轨道宽 0，视觉零位移；对带 leading 调用零影响。放弃方案：改 ISSUE_ROW_GRID 为三轨模板/条件模板——两套模板分叉后 header/row 对齐约束翻倍，占位是同文件既有先例的最小修复。 另注：三断点①②按会话自主模式跳过等待（用户已给 DOM 级证据、根因有 Playwright 复现锚定、改动一行），③归档结果照常汇报。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-29-change-detail-timeline-files-polish
+锚点：未记录
+最近确认：5307276fa19543342bc4b11b9fe3f165f53ecf87
+理由：最大风险：现有时间线卡测试断言行级 className（text-amber-700 醒目态）与 testid——重构 DOM 结构时须保住这两个锚点；jsonl 预览的 mime 不确定性（后端 guess_type 对 .jsonl 在不同平台可能返回 None/application/json/text-plain）已用三层兜底（EXT_MAP + JsonPreviewer 名字转发 + 解析失败回落纯文本）覆盖。 试过放弃的方案：直接复用 primer Timeline 组件做事件轴——放弃：其节点 h-7 + pb-5 行距是稀疏事件范式（GitHub 活动流），事件密集的留痕时间线用它会把卡片撑得更高，与「限高防撑爆」目标矛盾；只借其「节点+连线+tone」视觉语言自建紧凑行。另放弃在 openFullscreenPreview 里把 meta.name 换成中文名——下载文件会得到中文名文件，破坏本地对照能力。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-30-title-adopt-clobber-guard
+锚点：未记录
+最近确认：5da89fb8c48a2117e379b3d759cc72b19e1b33c4
+理由：最大风险：兜底判定把「裸模板 H1 文本」也算兜底——若作者刻意把自定义标题写成恰命中 TEMPLATE_H1_RE 的纯类型词文案（如就叫「提案书」），其标题会被收养/重派生刷新掉。该口径与 normalize_display_title 既有判定同源，非新标准；真实碰撞面可忽略。放弃的方案：a) Change 加 title_source 标记列区分收养/派生来源——需 schema 变更且两文档路径都要改判定，收益不抵复杂度；b) 只守 documents 路径不守 reparse——审查实证 _apply_parsed 同样无条件覆盖，漏守即缺陷残留（test_apply_parsed_fallback_keeps_semantic_title 先红实证）。遗留（超出本变更）：documents H1 派生值超 500 字在 Postgres 仍会 DataError（documents 路径有 broad except 降级告警；reparse 路径会使该次扫描失败——预存行为，触发需 500+ 字 H1 的病态输入）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-30-assets-testfile-nodeid-anchor
+锚点：未记录
+最近确认：bac7255cc57ba16fe9efcb44032e435a0d4d508e
+理由：最大风险：锚界符（::/#/>）误伤真实路径片段——若测试文件名本身含这些字符会被截短，但本仓测试文件命名无此形态，且截短后仍有 basename 同名搜索 + 唯一后缀救回兜底，最坏退化为多候选点选而非误报未找到。半角 ( 出现在合法文件名中（如 file(1).py），为降误伤面只剥全角（，半角不剥（本轮实证数据全部为全角）。试过放弃的方案：① 改 test-trace.json 存量数据剥锚——归档件是冻结审计件不可补（先例 2026-09-26 摘录保真坑同判）；② 收紧 CLI 书写约定禁止锚后粘注解——书写契约已由 binding-anchor-fidelity 落定且 CLI 侧已有单源剥锚，重定契约属设计反转，不采纳。

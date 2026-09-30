@@ -1,0 +1,272 @@
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index 914197056..15d124124 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -438,6 +438,71 @@ describe("ChangeAssetsCard 测试文件路径解析", () => {
+     await openTestFile(["「只有用例名没有路径」"]);
+     expect(await screen.findByTestId("change-assets-test-notfound")).toBeTruthy();
+   });
++
++  // ── 用例锚四形态 + 全角括号残段（2026-09-30-assets-testfile-nodeid-anchor）──
++  // 生产实证：2026-09-30-title-adopt-clobber-guard 归档件 tests[] 为 pytest 节点
++  // ID + flow done 空白切 token 的注解残段（…::test_x（documents）——剥锚契约
++  // 四形态（「」/#/::/>）此前读侧只落了「」，其余形态整串进 basename 必零命中
++  // 误报「未在仓库中找到该测试文件」（文件实际就在仓库里）。
++  const TITLE_NORM = "backend/app/modules/change/tests/test_title_normalization.py";
++
++  it(":: 用例锚（pytest 节点 ID）剥离：按纯路径等值命中预览，无重定向注记", async () => {
++    mockSearch.mockResolvedValue(matchesOf([TITLE_NORM]));
++    await openTestFile([
++      `${TITLE_NORM}::TestAdoptedTitleClobberGuard::test_apply_parsed_fallback_keeps_semantic_title`,
++    ]);
++    // 搜索入参必须是剥锚后的干净 basename——整串进搜索正是此前零命中的根因。
++    expect(mockSearch).toHaveBeenCalledWith("ws-1", "test_title_normalization.py");
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      TITLE_NORM,
++    );
++    expect(
++      screen.queryByTestId("change-assets-test-redirect-note"),
++    ).toBeNull();
++  });
++
++  it(":: 锚后粘联全角括号残段（截断未闭合形）一并剥离（生产实证串）", async () => {
++    mockSearch.mockResolvedValue(matchesOf([TITLE_NORM]));
++    await openTestFile([
++      `${TITLE_NORM}::TestAdoptedTitleClobberGuard::test_adopted_title_survives_template_docs_push（documents`,
++    ]);
++    expect(mockSearch).toHaveBeenCalledWith("ws-1", "test_title_normalization.py");
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      TITLE_NORM,
++    );
++  });
++
++  it("闭合形全角括号注解粘联（无锚界符）同样剥除", async () => {
++    mockSearch.mockResolvedValue(matchesOf([TITLE_NORM]));
++    await openTestFile([`${TITLE_NORM}（documents 推送不回翻，实现前先红实证）`]);
++    expect(mockSearch).toHaveBeenCalledWith("ws-1", "test_title_normalization.py");
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      TITLE_NORM,
++    );
++  });
++
++  it("# 与 > 形态锚剥离：同归纯路径，短路径唯一后缀救回", async () => {
++    mockSearch.mockResolvedValue(
++      matchesOf(["packages/cli/test/flow-draft.test.mjs"]),
++    );
++    await openTestFile([
++      "test/flow-draft.test.mjs#extractTestAnchors 多段锚全收",
++      "test/flow-draft.test.mjs>flow draft>多段锚全收",
++    ]);
++    expect(mockSearch).toHaveBeenCalledWith("ws-1", "flow-draft.test.mjs");
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      "packages/cli/test/flow-draft.test.mjs",
++    );
++    // 同组第二条（> 形态）同样可点开预览——两形态归一路径。
++    fireEvent.click(
++      screen.getByTestId(
++        "change-assets-test-file-test/flow-draft.test.mjs>flow draft>多段锚全收",
++      ),
++    );
++    expect(await screen.findByTestId("file-preview-stub")).toHaveTextContent(
++      "packages/cli/test/flow-draft.test.mjs",
++    );
++  });
+ });
+ 
+ // ── 资产透明面（2026-09-26-change-asset-transparency / FR-01~03）────────────
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index fecbba427..93143e07e 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -30,15 +30,27 @@ interface ChangeAssetsCardProps {
+ // flow done 补全的 tests[] 可能把绑定槽「路径＋用例名」整串收录（如
+ // ``test/x.mjs「某用例」``，注解在「」内可多段）——归一时剥离，否则 basename
+ // 连注解进 explorer search 必零命中，恒显「未在仓库中找到」。
++//
++// 用例锚四形态剥锚（2026-09-30-assets-testfile-nodeid-anchor）：tests[] 条目
++// 按 2026-09-26-binding-anchor-fidelity 契约带锚原样收录，锚共四形态（「」组 /
++// ``::`` / ``#`` / ``>``），文件面消费须剥锚——「」沿用既有全局剥离（注解文本
++// 可含锚界符字符，先剥防误切），``::``/``#``/``>`` 取首个界符前路径段；锚后
++// 粘联的全角括号注解残段（flow done 按空白切 token 的截断形，实证
++// ``…::test_x（documents``）与闭合形一并剥。不剥的后果：整串进 basename 必
++// 零命中（本轮实证：2026-09-30-title-adopt-clobber-guard 归档件 pytest 节点
++// ID 串全部误报未找到）。
+ 
+-/** 记录路径字符串归一（反斜杠→斜杠、去 ``./`` 前缀、剥「用例名」注解段与首尾空白）。 */
++/** 记录路径字符串归一（反斜杠→斜杠、去 ``./`` 前缀、剥「用例名」注解段与
++ *  ``::``/``#``/``>`` 用例锚、去尾部粘联全角括号注解残段与首尾空白）。 */
+ export function normalizeTestFilePath(raw: string): string {
+   return raw
+     .trim()
+     .replace(/\\/g, "/")
+     .replace(/^\.\//, "")
+     .replace(/「[^」]*」/g, "")
+-    .trim();
++    .split(/::|#|>/)[0]
++    ?.replace(/（[^）]*）?$/, "")
++    .trim() ?? "";
+ }
+ 
+ /** 解析决策：resolved=唯一确定路径（redirected=与记录路径不同，需标注）；
+diff --git a/.sillyspec/changes/2026-09-30-assets-testfile-nodeid-anchor/design.md b/.sillyspec/changes/2026-09-30-assets-testfile-nodeid-anchor/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-assets-testfile-nodeid-anchor/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T01:41:27.826Z
++---
++# 设计记录（Design Record）— 2026-09-30-assets-testfile-nodeid-anchor
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-assets-testfile-nodeid-anchor 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++只改前端读侧归一纯函数 `normalizeTestFilePath`（frontend/src/components/changes/detail/change-assets-card.tsx，2026-09-26-assets-testfile-path-resolve / 2026-09-27-assets-testfile-bracket-note 同一函数的续修）：在既有「」注解剥离之后新增两步——取首个用例锚界符（:: / # / >）之前的路径段，再剥尾部粘联的全角括号注解残段（未闭合截断形与闭合形）。选这个方案因为它就是 2026-09-26-binding-anchor-fidelity 落定契约（tests[] 带锚原样收录、文件面剥锚、展示面保持完整锚点）的读侧补齐——CLI 侧 testAnchorFile 已统一剥锚，平台读侧此前只落了「」一种形态，:: 形整串进 basename 必零命中。TestFileBody 的 basename 派生与 resolveTestFilePath 的等值/后缀比较均消费同一归一结果，一处修改两处生效；不改数据侧（归档 test-trace 是冻结审计件，先例 2026-09-26 摘录保真坑同判不可补）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-assets-testfile-nodeid-anchor 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++导出纯函数 normalizeTestFilePath(raw: string): string 行为扩展（签名不变；无 HTTP 端点 / 后端 / 文件格式改动）：输入新增三类可剥形态——:: 起的用例锚段（pytest 节点 ID）、# / > 起的锚段、尾部粘联的全角括号注解残段。对既有输入（纯路径、「」注解、反斜杠与 ./ 写法）输出不变。组件展示面（测试绑定行按钮 label、弹窗标题）仍原样投影完整锚点串，不变。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-assets-testfile-nodeid-anchor 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：不适用事件序——纯字符串归一函数，同一输入恒同一输出。
++2. 并发写：无共享可变状态（纯函数）；消费的 test-trace.json 是归档冻结件，读侧从不改写，弹窗每次打开按当前记录串现算。
++3. 切换/生命周期：弹窗关闭即弃解析结果，无缓存态残留；explorer search 走 react-query 既有 queryKey（workspaceId+basename），不引入新生命周期。
++4. 作用域：按 workspaceId 调 explorer search，与既有实现同域不串台；剥锚只发生在展示归一层，不回写任何持久化数据。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-assets-testfile-nodeid-anchor 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：锚界符（::/#/>）误伤真实路径片段——若测试文件名本身含这些字符会被截短，但本仓测试文件命名无此形态，且截短后仍有 basename 同名搜索 + 唯一后缀救回兜底，最坏退化为多候选点选而非误报未找到。半角 ( 出现在合法文件名中（如 file(1).py），为降误伤面只剥全角（，半角不剥（本轮实证数据全部为全角）。试过放弃的方案：① 改 test-trace.json 存量数据剥锚——归档件是冻结审计件不可补（先例 2026-09-26 摘录保真坑同判）；② 收紧 CLI 书写约定禁止锚后粘注解——书写契约已由 binding-anchor-fidelity 落定且 CLI 侧已有单源剥锚，重定契约属设计反转，不采纳。
+
+diff --git a/.sillyspec/changes/2026-09-30-assets-testfile-nodeid-anchor/proposal.md b/.sillyspec/changes/2026-09-30-assets-testfile-nodeid-anchor/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-assets-testfile-nodeid-anchor/proposal.md
+@@ -0,0 +1,36 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T01:36:37.062Z
++---
++# 提案书（Proposal）— 2026-09-30-assets-testfile-nodeid-anchor
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:6d613a7eba4144a2e0e6b72ea7df9d65196bf64f03195ad4e0209a0039922921:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-assets-testfile-nodeid-anchor 留痕重锚 -->
++任务原话转写：变更详情「沉淀资产」测试绑定行，对含 :: 用例锚（pytest 节点 ID）的记录串误报「未在仓库中找到该测试文件」——2026-09-30-title-adopt-clobber-guard 归档件实证，文件实际存在。根因：读侧剥锚 normalizeTestFilePath 只实现了「」形态，未跟上 2026-09-26-binding-anchor-fidelity 落定的用例锚四形态契约（「」组/::/#/>），锚后粘联的全角括号注解残段也未剥，整串进 basename 必零命中。
++
++成功标准：
++- 记录串含 :: 用例锚（file::Class::method 形）时，点开测试文件弹窗按剥锚后纯路径搜索并等值/后缀命中，预览仓库内真实文件，不再零命中误报
++- 锚后粘联的全角括号注解残段（未闭合截断形与闭合形）一并剥除，不影响搜索与路径比较
++- # 与 > 两形态锚同样剥除（四形态契约对齐），既有「」剥离、短路径/反斜杠/点斜杠归一与 worktree 副本排除行为不回退，存量用例全绿
++- 新增单元测试覆盖 :: 锚、括号残段、井号与大广于锚（含本轮生产实证串），并断言搜索入参为剥锚后干净 basename
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:3118f3513fcc33b268809193995f987e99348efb50cad1e9222e0ea57e09736e:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-assets-testfile-nodeid-anchor 留痕重锚 -->
++按成功标准机械推导，共 3 条验收面：
++1. 记录串含 :: 用例锚（file::Class::method 形）时，点开测试文件弹窗按剥锚后纯路径搜索并等值/后缀命中，预览仓库内真实文件，不再零命中误报
++2. 锚后粘联的全角括号注解残段（未闭合截断形与闭合形）一并剥除，不影响搜索与路径比较
++3. 新增单元测试覆盖 :: 锚、括号残段、井号与大广于锚（含本轮生产实证串），并断言搜索入参为剥锚后干净 basename
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:b69491ff51a2fc563847e3e8c9daf35573a7cdcf523eaa3a387d1b20530ddc69:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-assets-testfile-nodeid-anchor 留痕重锚 -->
++1. 记录串含 :: 用例锚（file::Class::method 形）时，点开测试文件弹窗按剥锚后纯路径搜索并等值/后缀命中，预览仓库内真实文件，不再零命中误报
++2. 锚后粘联的全角括号注解残段（未闭合截断形与闭合形）一并剥除，不影响搜索与路径比较
++3. 新增单元测试覆盖 :: 锚、括号残段、井号与大广于锚（含本轮生产实证串），并断言搜索入参为剥锚后干净 basename
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-09-30-assets-testfile-nodeid-anchor/requirements.md b/.sillyspec/changes/2026-09-30-assets-testfile-nodeid-anchor/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-assets-testfile-nodeid-anchor/requirements.md
+@@ -0,0 +1,44 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T01:36:37.063Z
++---
++# 需求规格（Requirements）— 2026-09-30-assets-testfile-nodeid-anchor
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: `::` 用例锚剥离——pytest 节点 ID 记录串可定位真实文件
++Given 变更详情「沉淀资产」卡渲染归档 test-trace 的测试绑定行，tests[] 条目为 `file::Class::method` 形整串（pytest 节点 ID，生产实证：2026-09-30-title-adopt-clobber-guard 归档件）
++When 用户点开该测试文件
++Then 归一层剥掉 `::` 起的用例锚得到纯路径，按干净 basename 发起 explorer search 并等值/后缀命中，弹窗预览仓库内真实文件——不再恒显「未在仓库中找到该测试文件」误报（文件实际存在）
++
++### FR-02: 锚后粘联的全角括号注解残段一并剥除
++Given tests[] 条目的用例锚后粘联全角括号注解残段——flow done 摘录按空白切 token 产生的未闭合截断形（如 `test_x（documents`），或闭合形（`（…）`）
++When 归一层剥锚
++Then 残段随锚一并剥除得到纯路径，不影响 basename 搜索入参与路径等值/后缀比较
++
++### FR-03: `#` 与 `>` 形态锚同样剥除（四形态契约对齐）且既有归一行为不回退
++Given tests[] 条目按 2026-09-26-binding-anchor-fidelity 契约带锚原样收录，锚形态共四种（「」组 / `::` / `#` / `>`）
++When 归一层剥锚
++Then `#`/`>` 形态与 `::` 同归纯路径；既有「」注解剥离、反斜杠/`./` 归一、短路径唯一后缀救回与 worktree 副本排除行为全部保持（存量路径解析用例全绿）
++
++### FR-04: 单元测试覆盖四形态锚与括号残段剥离
++Given change-assets-card 组件测试套件
++When 覆盖 `::` 锚（含本轮生产实证串）、全角括号残段（截断形与闭合形）、`#`/`>` 锚
++Then 断言 explorer search 入参为剥锚后干净 basename、弹窗预览真实路径；存量用例不回退
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「:: 用例锚（pytest 节点 ID）剥离：按纯路径等值命中预览，无重定向注记」
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「:: 锚后粘联全角括号残段（截断未闭合形）一并剥离（生产实证串）」
++- frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「闭合形全角括号注解粘联（无锚界符）同样剥除」
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「# 与 > 形态锚剥离：同归纯路径，短路径唯一后缀救回」
++- backend 无涉；存量不回退由同套件「ChangeAssetsCard 测试文件路径解析」既有用例整组保证
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「2026-09-30-assets-testfile-nodeid-anchor 新增四用例（:: 锚/截断残段/闭合残段/#> 锚）整体」
+
+diff --git a/.sillyspec/changes/2026-09-30-assets-testfile-nodeid-anchor/tasks.md b/.sillyspec/changes/2026-09-30-assets-testfile-nodeid-anchor/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-assets-testfile-nodeid-anchor/tasks.md
+@@ -0,0 +1,13 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T01:36:37.063Z
++---
++# 任务注册表（Tasks）— 2026-09-30-assets-testfile-nodeid-anchor
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge + 2026-09-29 心跳指针）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。📌 任务面在 ①spec 阶段定稿：覆写为真实实现步骤（全 `- [ ]`）后再动代码；执行循环：Working on task N/M → 做一件 → 勾一格 → 下一个——收口硬门拒单拍多格勾选（--allow-batch-tick 可显式旁路留痕）。`flow status --change <名>` 为自愿查看/恢复面（恢复时给下一任务指针与进度，非协议必需——D-007）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: normalizeTestFilePath 补齐用例锚剥除——「」剥离前置保持，新增取首个锚界符（`::`/`#`/`>`）前路径段 + 剥尾部粘联全角括号注解残段（截断未闭合形与闭合形；半角 `(` 不剥），纯路径输入行为零变化
++- [x] task-02: change-assets-card.test.tsx「测试文件路径解析」组新增四用例：`::` 锚（生产实证串）、全角括号残段截断形、闭合形粘联、`#`/`>` 锚——断言搜索入参为剥锚后干净 basename 且弹窗预览真实路径
++- [ ] task-03: 跑 change-assets-card 测试套件全绿（存量路径解析用例不回退），随后 flow done 收口

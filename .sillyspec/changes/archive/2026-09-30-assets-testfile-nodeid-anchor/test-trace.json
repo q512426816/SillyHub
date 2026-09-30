@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-assets-testfile-nodeid-anchor",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-30-assets-testfile-nodeid-anchor:flow:FR-01",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「:: 用例锚（pytest 节点 ID）剥离：按纯路径等值命中预览，无重定向注记」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-assets-testfile-nodeid-anchor"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-30-assets-testfile-nodeid-anchor:flow:FR-02",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「:: 锚后粘联全角括号残段（截断未闭合形）一并剥离（生产实证串）」",
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「闭合形全角括号注解粘联（无锚界符）同样剥除」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-assets-testfile-nodeid-anchor"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-30-assets-testfile-nodeid-anchor:flow:FR-03",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「# 与 > 形态锚剥离：同归纯路径，短路径唯一后缀救回」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-assets-testfile-nodeid-anchor"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-30-assets-testfile-nodeid-anchor:flow:FR-04",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「2026-09-30-assets-testfile-nodeid-anchor 新增四用例（:: 锚/截断残段/闭合残段/#> 锚）整体」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-assets-testfile-nodeid-anchor"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-assets-testfile-nodeid-anchor",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok（normalizeTestFilePath/resolveTestFilePath 均为纯函数，change-assets-card.tsx:45-54/71-102，同一输入恒同一输出，无事件序风险面；边界已裁决：可接受）",
+    "并发": "ok（diff 仅改纯函数与测试，无共享可变状态；消费的 test-trace 为归档冻结件，读侧 useQuery 从不改写；边界已裁决：可接受）",
+    "切换": "ok（弹窗 testPath=null 即卸载 TestFileBody，chosen 等局部态随卸载即弃；explorer search 走既有 queryKey [changeAssetsTestSearch, workspaceId, basename]（change-assets-card.tsx:568），无新生命周期；边界已裁决：可接受）",
+    "作用域": "ok（fetchSearch(workspaceId, basename)/getChangeAssets(workspaceId, changeId) 均带 workspaceId 作用域（change-assets-card.tsx:569/129），剥锚只发生在展示归一层字符串，不回写任何持久化数据，不串台；边界已裁决：可接受）"
+  },
+  "reviewedAt": "2026-09-30T10:00:29+08:00"
+}
