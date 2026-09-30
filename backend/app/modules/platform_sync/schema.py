@@ -291,6 +291,28 @@ class AgentLogEntry(BaseModel):
     # ``(harness, quick_id or change_key or '')`` 分组归属（2026-09-11-agent-log-attribution-refactor D-006@v2：quick 优先；两键互斥，CLI 双向清空）。
     change_key: str | None = Field(default=None, max_length=128)
     quick_id: str | None = Field(default=None, max_length=128)
+    # ── 2026-09-30-tool-report-activation-wrong-machine task-03（协议 v2 / FR-01）──
+    # 上报机器身份块（可选，老 CLI 不携带 → None，extra=ignore 兼容）。daemon 注入
+    # 路径由 daemon 自动附带自身身份；CLI 直跑路径带本机 hostname（machineId 待
+    # CLI v2 起）。落 platform_agent_logs 两列（service 层），会话聚合组内最新
+    # entry 的身份写 config_snapshot.latest_reported_machine（takeover 匹配源）。
+    machine: AgentLogMachineBlock | None = None
+
+
+class AgentLogMachineBlock(BaseModel):
+    """协议 v2 entry 级 machine 块（docs/platform-agent-log-protocol.md §machine）。
+
+    定义于 AgentLogEntry 之后但其字段类型引用（Pydantic v2 前向引用在模块加载
+    完成时自动 rebuild）。两键均可空但至少一键非空才有意义（双空等价缺块，
+    service 层跳过快照写入）；``machine_id``=上报方持久 machineId
+    （~/.sillyhub/daemon/machine-id 同源），``hostname``=上报方主机名（匹配
+    daemon_runtimes.name）。
+    """
+
+    model_config = {"extra": "ignore"}
+
+    machine_id: str | None = Field(default=None, max_length=64)
+    hostname: str | None = Field(default=None, max_length=255)
 
 
 class AgentLogPushRequest(BaseModel):
@@ -393,6 +415,10 @@ class AgentLogListItem(BaseModel):
     last_command: str | None = None
     scan_run_id: str | None = None
     pushed_at: str | None = None
+    # 2026-09-30-tool-report task-07（FR-01 数据流 consumer）：上报机器身份两列
+    # 下发（前端衔接提示条按最新 entry 机器名 + machines 在线态 join）。
+    reported_machine_id: str | None = None
+    reported_machine_name: str | None = None
     # 2026-08-23-agent-activity-sessions task-04（design §3.3.2 / FR-04）：所属平台
     # 会话（hub 关联或 tool_report 聚合写入）；NULL = 未归属（存量行不回填，R-03）。
     agent_session_id: uuid.UUID | None = None

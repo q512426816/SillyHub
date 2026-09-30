@@ -262,6 +262,12 @@ class DaemonHeartbeatRequest(BaseModel):
     # backend 响应 spec_versions 回权威版本供 daemon 判定后台预取。缺省（旧
     # daemon）= 空列表，响应 spec_versions 恒 {}，零破坏。
     spec_cache: list[DaemonHeartbeatSpecCacheItem] = Field(default_factory=list)
+    # 本机持久 machineId（2026-09-30-tool-report-activation-wrong-machine task-02 /
+    # FR-01 / D-001@v1）：daemon 读 ~/.sillyhub/daemon/machine-id（readOrCreate-
+    # MachineId）随心跳携带；端点合并落该 daemon 全部 daemon_runtimes.metadata.
+    # machine_id（takeover 四级匹配①级精确锚）。兄弟字段语义（None=不覆盖，
+    # 旧 daemon 不携带零破坏）；本字段无清除态（身份恒在，覆盖同值幂等）。
+    machine_id: str | None = Field(default=None, max_length=64)
 
 
 class DaemonHeartbeatRuntimePolicy(BaseModel):
@@ -393,6 +399,22 @@ async def daemon_heartbeat(
         .scalars()
         .all()
     )
+    # 2026-09-30-tool-report task-02（FR-01）：machine_id 合并落该 daemon 全部
+    # runtime 的 metadata.machine_id（兄弟字段语义：None 不覆盖，旧 daemon 零
+    # 破坏；同值幂等——dict copy 后写防 JSON in-place mutation 不持久化，对齐
+    # session/service.py _merge_lease_metadata 模式）。写在该 daemon 各 runtime
+    # 行而非 daemon_instances：takeover ①级按 runtime 匹配（一台 daemon 多
+    # provider runtime 共享同一 machine_id）。
+    if data.machine_id:
+        for rt in rt_rows:
+            meta = dict(rt.metadata_ or {})
+            if meta.get("machine_id") != data.machine_id:
+                meta["machine_id"] = data.machine_id
+                rt.metadata_ = meta
+                session.add(rt)
+        # heartbeat_daemon（上方 RuntimeService）内部已 commit 至心跳本体；本段
+        # 追加写后显式提交，否则随请求 session 关闭回滚（machine_id 丢写）。
+        await session.commit()
     # task-04（design A1/A2）：pending 控制指令计数（该 daemon 全部 runtime 的
     # pending 行，一次聚合查询）——daemon 据此触发控制指令补拉对账。
     # （RuntimeService 已在函数上方 import，task-06 起心跳本体也走它。）

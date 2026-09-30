@@ -73,6 +73,45 @@ export function daemonBinDir(): string {
   return join(daemonStateDir(), 'bin');
 }
 
+// ── 机器身份（2026-09-30-tool-report-activation-wrong-machine task-02 / FR-01）──
+
+/**
+ * 机器持久 machineId 文件路径 `<daemonStateDir()>/machine-id`。
+ *
+ * 机器身份约定（docs/platform-agent-log-protocol.md v2）：本机所有上报通道
+ * （daemon 心跳 / 上报日志 machine 块）共享同一 machineId。文件存纯文本 uuid
+ * （36 字符，无换行）。随 daemonStateDir() 隔离（测试用 SILLYHUB_DAEMON_DIR
+ * 重定向，不污染真实身份文件）。
+ */
+export function machineIdPath(): string {
+  return join(daemonStateDir(), 'machine-id');
+}
+
+/**
+ * 读取本机持久 machineId，不存在则生成并原子落盘（幂等，返回值稳定）。
+ *
+ * 读失败（权限/损坏）→ 重新生成覆写（身份文件非权威数据，可自愈）；写失败
+ * （只读文件系统等）→ 返回内存值不落盘（best-effort，调用方照常携带上报，
+ * 代价是重启后身份变化——比阻塞心跳链路划算）。
+ */
+export async function readOrCreateMachineId(): Promise<string> {
+  const path = machineIdPath();
+  try {
+    const existing = (await readFile(path, 'utf8')).trim();
+    if (existing.length > 0) return existing;
+  } catch {
+    // 不存在/不可读 → 落到下方生成分支。
+  }
+  const id = randomUUID();
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, id, 'utf8');
+  } catch {
+    // best-effort 落盘：失败返回内存值（见 docstring）。
+  }
+  return id;
+}
+
 /**
  * 默认配置目录 `~/.sillyhub/daemon`。
  *

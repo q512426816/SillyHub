@@ -1,17 +1,14 @@
-"""task-05（2026-08-23-agent-activity-sessions）：tool_report 会话懒激活单测。
+"""tool_report 会话「inject 懒激活退役」单测（2026-09-30-tool-report-
+activation-wrong-machine task-06 / D-006@v1）。
 
-design §3.3.4 / D-010（机器自选回落平台既有语义）：
+懒激活分支已退役（原路径错机派发且钉死源会话——设计裁决见 design 背景），
+本文件钉死退役后语义：
 
-- 激活成功：``inject_session`` 首条消息自动绑定机器（prepare_interactive_dispatch
-  既有自选）+ 建 interactive lease + status pending→active + turn_count=1 +
-  cwd（最新关联 entry.agent_cwd 优先 / 回落 workspace.root_path）+
-  config_snapshot 补 machine_name（保留 harness 键）+ 首轮 AgentRun/user_input 日志。
-- 无在线机器：``NoOnlineDaemonError``（裸 Exception）转 ``ToolReportActivateNoDaemon``
-  （409 中文），不裸抛 500；会话保持 pending、无 run/lease 落库。
-- 已激活（lease 存在）直通：不进激活分支，走既有 inject 原路（turn_count 递增）。
-- chat 会话（origin 缺省）零回归：pending 无 lease 的 chat 会话仍走既有守卫
-  （DaemonSessionNotActive），不被激活分支拦截。
-- 列表 origin 下发 + 标题派生 session.title 优先（design §3.3.2/§3.3.4）。
+- 未激活 tool_report 会话调 ``inject_session`` → 409 ToolReportTakeoverInvalid
+  中文指引 takeover（原会话零写：status/turn_count/lease/runs 不变）；
+- 已激活（lease 存在）直通既有 inject 原路（turn_count 递增）零回归；
+- chat 会话（origin 缺省）pending 无 lease 仍走既有 DaemonSessionNotActive 守卫；
+- 列表/详情 origin 下发与标题派生（原 task-05 存量语义保留段）。
 
 夹具范式镜像 ``test_inject_orchestrator_tagging.py``（in-memory SQLite + mock hub
 / redis）。``platform_agent_logs`` 表未在根 conftest 的 db_engine import 列表 →
@@ -30,11 +27,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
-from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
+from app.modules.daemon.model import DaemonRuntime
 from app.modules.daemon.service import DaemonService
 from app.modules.daemon.session.service import (
     DaemonSessionNotActive,
-    ToolReportActivateNoDaemon,
 )
 from app.modules.platform_sync.model import AgentSessionLogORM
 from app.modules.workspace.model import Workspace
@@ -199,149 +195,26 @@ def mocked_redis():
 
 class TestActivationSuccess:
     @pytest.mark.asyncio
-    async def test_activate_binds_machine_and_first_turn(
+    @pytest.mark.asyncio
+    async def test_pending_tool_report_inject_409_takeover_guide(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
-        """首条消息触发激活：lease/runtime 回填 + active + turn_count=1 + cwd 取
-        最新关联 entry.agent_cwd + config_snapshot 补 machine_name（保留 harness）。"""
+        """未激活 tool_report 会话调 inject → 409 中文指引 takeover，原会话零写。"""
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
-        ws = await _make_workspace(db_session)
-        sess = await _make_tool_report_session(db_session, uid, workspace_id=ws.id)
-        await _make_agent_log_entry(
-            db_session,
-            workspace_id=ws.id,
-            agent_session_id=sess.id,
-            agent_cwd="C:/Users/t05/IdeaProjects/proj",
-        )
+        sess = await _make_tool_report_session(db_session, uid, runtime_id=rt.id)
 
         svc = DaemonService(db_session)
-        result = await svc.inject_session(sess.id, uid, prompt="继续这个会话")
+        with pytest.raises(Exception) as exc_info:
+            await svc.inject_session(sess.id, uid, prompt="你好")
 
-        # 会话字段：三元组回填 + active + turn_count=1（对齐 create :954-958）。
-        await db_session.refresh(sess)
-        assert sess.status == "active"
-        assert sess.turn_count == 1
-        assert sess.runtime_id == rt.id
-        assert sess.lease_id == result.lease_id
-        assert sess.cwd == "C:/Users/t05/IdeaProjects/proj"
-        # provider 保持 task-04 的 D-007 映射，不覆盖。
-        assert sess.provider == "claude"
-        # config_snapshot：补 machine_name/agent_name，保留既有 harness 键。
-        snap = sess.config_snapshot or {}
-        assert snap.get("harness") == "claude-code"
-        assert "machine_name" in snap
-        assert "agent_name" in snap
+        err = exc_info.value
+        assert getattr(err, "code", "") == "HTTP_409_TOOL_REPORT_TAKEOVER_INVALID"
+        assert "接手" in str(err)
 
-        # 首轮 run + user_input 日志（首条消息即首轮）。
-        runs = (
-            (await db_session.execute(select(AgentRun).where(AgentRun.agent_session_id == sess.id)))
-            .scalars()
-            .all()
-        )
-        assert len(runs) == 1
-        assert runs[0].status == "pending"
-        assert runs[0].spec_strategy == "interactive"
-        assert runs[0].id == result.agent_run.id
-        logs = (
-            (await db_session.execute(select(AgentRunLog).where(AgentRunLog.run_id == runs[0].id)))
-            .scalars()
-            .all()
-        )
-        assert any(log.channel == "user_input" for log in logs)
-
-        # interactive lease 存在，metadata 携带首条 prompt（claim 侧驱动首轮）。
-        lease = await db_session.get(DaemonTaskLease, sess.lease_id)
-        assert lease is not None
-        assert lease.kind == "interactive"
-        assert (lease.metadata_ or {}).get("prompt") == "继续这个会话"
-        # lease metadata 的 cwd 取 entry.agent_cwd（prepare 透传）。
-        assert (lease.metadata_ or {}).get("cwd") == "C:/Users/t05/IdeaProjects/proj"
-
-        # SESSION_INJECT 控制消息下发（daemon SessionManager 拿确切首 prompt）。
-        mocked_hub.send_session_control.assert_awaited()
-        call_args = mocked_hub.send_session_control.await_args
-        assert call_args.args[1] == "daemon:session_inject"
-        assert call_args.args[2]["prompt"] == "继续这个会话"
-
-    @pytest.mark.asyncio
-    async def test_activate_cwd_falls_back_to_workspace_root(
-        self, db_session, mocked_hub, mocked_redis
-    ) -> None:
-        """最新关联 entry 无 agent_cwd → cwd 回落 workspace.root_path。"""
-        uid = await _create_user(db_session)
-        await _create_runtime(db_session, uid)
-        ws = await _make_workspace(db_session, root_path="/ws/fallback-root")
-        sess = await _make_tool_report_session(db_session, uid, workspace_id=ws.id)
-        await _make_agent_log_entry(
-            db_session, workspace_id=ws.id, agent_session_id=sess.id, agent_cwd=None
-        )
-
-        svc = DaemonService(db_session)
-        await svc.inject_session(sess.id, uid, prompt="go")
-
-        await db_session.refresh(sess)
-        assert sess.cwd == "/ws/fallback-root"
-        lease = await db_session.get(DaemonTaskLease, sess.lease_id)
-        assert (lease.metadata_ or {}).get("cwd") == "/ws/fallback-root"
-
-    @pytest.mark.asyncio
-    async def test_activate_picks_latest_entry_by_last_seen(
-        self, db_session, mocked_hub, mocked_redis
-    ) -> None:
-        """多关联 entry 时取 last_seen_at 最新一条的 agent_cwd。"""
-        uid = await _create_user(db_session)
-        await _create_runtime(db_session, uid)
-        ws = await _make_workspace(db_session)
-        sess = await _make_tool_report_session(db_session, uid, workspace_id=ws.id)
-        await _make_agent_log_entry(
-            db_session,
-            workspace_id=ws.id,
-            agent_session_id=sess.id,
-            agent_cwd="C:/old-cwd",
-            last_seen_at="2026-08-23T01:00:00.000Z",
-            log_path="C:/logs/old.jsonl",
-        )
-        await _make_agent_log_entry(
-            db_session,
-            workspace_id=ws.id,
-            agent_session_id=sess.id,
-            agent_cwd="C:/newest-cwd",
-            last_seen_at="2026-08-23T09:30:00.000Z",
-            log_path="C:/logs/newest.jsonl",
-        )
-
-        svc = DaemonService(db_session)
-        await svc.inject_session(sess.id, uid, prompt="go")
-
-        await db_session.refresh(sess)
-        assert sess.cwd == "C:/newest-cwd"
-
-
-# ── 2. 无在线机器 → 409 中文（NoOnlineDaemonError 不裸抛）──────────────────
-
-
-class TestActivationOffline:
-    @pytest.mark.asyncio
-    async def test_no_online_daemon_raises_409_chinese(self, db_session) -> None:
-        """无在线 runtime（自有无 + workspace 无绑定可借）→ ToolReportActivateNoDaemon
-        （409 中文），不裸抛 NoOnlineDaemonError 500；会话保持 pending 零残留。"""
-        uid = await _create_user(db_session)
-        ws = await _make_workspace(db_session)
-        sess = await _make_tool_report_session(db_session, uid, workspace_id=ws.id)
-        await _make_agent_log_entry(
-            db_session, workspace_id=ws.id, agent_session_id=sess.id, agent_cwd="C:/proj"
-        )
-
-        svc = DaemonService(db_session)
-        with pytest.raises(ToolReportActivateNoDaemon) as exc_info:
-            await svc.inject_session(sess.id, uid, prompt="继续")
-
-        assert exc_info.value.http_status == 409
-        assert "当前没有可用的在线守护进程" in exc_info.value.message
-        # 激活失败不留半成品：会话仍 pending、无 lease、无 run。
         await db_session.refresh(sess)
         assert sess.status == "pending"
+        assert sess.turn_count == 0
         assert sess.lease_id is None
         runs = (
             (await db_session.execute(select(AgentRun).where(AgentRun.agent_session_id == sess.id)))
@@ -350,24 +223,6 @@ class TestActivationOffline:
         )
         assert runs == []
 
-    @pytest.mark.asyncio
-    async def test_offline_runtime_row_still_raises_409(self, db_session) -> None:
-        """runtime 行存在但 status=offline（_get_online_runtime 不选中）→ 同 409。"""
-        uid = await _create_user(db_session)
-        await _create_runtime(db_session, uid, status="offline")
-        ws = await _make_workspace(db_session)
-        sess = await _make_tool_report_session(db_session, uid, workspace_id=ws.id)
-
-        svc = DaemonService(db_session)
-        with pytest.raises(ToolReportActivateNoDaemon):
-            await svc.inject_session(sess.id, uid, prompt="继续")
-
-
-# ── 3. 已激活直通（不进激活分支）+ chat 会话零回归 ──────────────────────────
-
-
-class TestPassthrough:
-    @pytest.mark.asyncio
     async def test_already_activated_goes_normal_inject(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:

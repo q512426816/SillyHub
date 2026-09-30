@@ -212,6 +212,14 @@ export interface HeartbeatBody {
    * 权威版本。undefined/空数组 → 键不出现（旧 backend 零感知）。
    */
   spec_cache?: { workspace_id: string; spec_version: number }[];
+  /**
+   * 2026-09-30-tool-report-activation-wrong-machine task-02（FR-01 / D-001@v1）：
+   * 本机持久 machineId（config.readOrCreateMachineId，~/.sillyhub/daemon/
+   * machine-id）。backend 落各 daemon_runtimes.metadata.machine_id（takeover
+   * 四级匹配①级精确锚）。undefined → 键不出现（旧 backend 零感知）；本机身份
+   * 恒可得，无 null/清除态。
+   */
+  machine_id?: string;
 }
 
 /**
@@ -854,6 +862,13 @@ export class HubClient {
      * 前端按当前工作区取 map[wsId] 而非机器级单值。
      */
     sillyspecStatusMap?: Record<string, SillySpecStatusSummary> | null,
+    /**
+     * 2026-09-30-tool-report-activation-wrong-machine task-02（FR-01）：本机持久
+     * machineId（daemon 启动时 readOrCreateMachineId 读一次缓存）。可选追加
+     * 末位——undefined 时请求体不含 machine_id 键（旧 backend 零感知，既有
+     * 11 参调用零破坏）；非空字符串 → 键出现（本机身份恒可得，无 null 态）。
+     */
+    machineId?: string,
   ): Promise<HeartbeatResponse> {
     const body: HeartbeatBody = {
       daemon_local_id: daemonLocalId,
@@ -898,6 +913,11 @@ export class HubClient {
     // 键不出现（旧 backend 零感知）。
     if (specCache && specCache.length > 0) {
       body.spec_cache = specCache;
+    }
+    // 2026-09-30-tool-report task-02：本机持久 machineId——非空才携带（键不出现
+    // = 旧 backend 零感知；本机身份无清除态）。
+    if (machineId) {
+      body.machine_id = machineId;
     }
     return this._request<HeartbeatResponse>(
       'POST',

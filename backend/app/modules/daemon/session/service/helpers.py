@@ -661,3 +661,90 @@ async def _bind_inject_session_links(
                 bind_ppm_item_kind=bind_ppm_item_kind,
                 bind_ppm_item_id=str(bind_ppm_item_id),
             )
+
+
+async def reset_tool_report_session(
+    svc,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> tuple[AgentSession, int]:
+    """存量已激活 tool_report 会话一键回滚到未激活只读态（task-06 / FR-05 / D-003@v1）。
+
+    背景：旧懒激活路径（已退役）可能把会话钉死在错误机器（错机 cwd 守卫秒败、
+    重试恒失败）。本端点按需手动恢复：回滚 status=pending / turn_count=0 /
+    runtime_id=NULL / lease_id=NULL，失败 run 行保留（error_code 不动，审计）；
+    发布 sessions_changed 让前端回放主体恢复。
+
+    守卫：origin=tool_report（chat 会话 409）、属主（404）、无 running run
+    （409——运行中拒绝，防打断在途轮）。返回 (会话行, 清掉的 run 计数)。
+    """
+    from sqlalchemy import select
+
+    from app.modules.agent.model import AgentRun
+
+    db = svc._session
+    session = (
+        (
+            await db.execute(
+                select(AgentSession).where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+            )
+        )
+        .scalars()
+        .one_or_none()
+    )
+    from .errors import DaemonSessionNotFound
+    from .takeover import ToolReportTakeoverInvalid
+
+    if session is None:
+        raise DaemonSessionNotFound(
+            f"AgentSession '{session_id}' not found.",
+            details={"session_id": str(session_id)},
+        )
+    if (session.origin or "chat") != "tool_report":
+        raise ToolReportTakeoverInvalid(
+            "仅本地 Agent 会话（tool_report）支持重置。",
+            details={"session_id": str(session_id), "origin": session.origin},
+        )
+    if session.status == "pending" and session.lease_id is None:
+        raise ToolReportTakeoverInvalid(
+            "该会话已是未激活状态，无需重置。",
+            details={"session_id": str(session_id), "status": session.status},
+        )
+    active_runs = (
+        (
+            await db.execute(
+                select(AgentRun.id).where(
+                    AgentRun.agent_session_id == session_id,
+                    AgentRun.status.in_(("pending", "running")),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if active_runs:
+        raise ToolReportTakeoverInvalid(
+            "该会话仍有进行中的轮次，请等其结束后再重置。",
+            details={
+                "session_id": str(session_id),
+                "active_runs": [str(r) for r in active_runs],
+            },
+        )
+    cleared = (
+        (await db.execute(select(AgentRun.id).where(AgentRun.agent_session_id == session_id)))
+        .scalars()
+        .all()
+    )
+    # 回滚四字段（失败 run 行保留审计；错误码不动）。
+    session.status = "pending"
+    session.turn_count = 0
+    session.runtime_id = None
+    session.lease_id = None
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    await _svc.publish_sessions_changed("status_changed", session.id, session.user_id)
+    return session, len(cleared)

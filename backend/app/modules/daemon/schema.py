@@ -326,6 +326,49 @@ class SessionForkResponse(BaseModel):
     lineage: SessionForkLineage
 
 
+class SessionTakeoverRequest(BaseModel):
+    """POST /api/daemon/sessions/{id}/takeover 请求体（tool_report 接手，D-006@v1）。
+
+    ``prompt`` 必填（首条消息即接手轮首 prompt；handoff 档 task-05 起前缀交接
+    文档）；``provider``/``agent_profile_id``/``llm_provider_id`` 仅 handoff 档
+    重选有意义（引擎须 ∈ 原机 runtime 支持集合，service 校验；native 档忽略
+    ——引擎跟随源会话 harness）。
+    """
+
+    prompt: str = Field(min_length=1)
+    provider: str | None = Field(default=None, max_length=30)
+    agent_profile_id: str | None = Field(default=None, max_length=64)
+    llm_provider_id: str | None = Field(default=None, max_length=64)
+
+
+class SessionTakeoverResponse(BaseModel):
+    """POST /api/daemon/sessions/{id}/takeover 响应（design §接口定义）。
+
+    ``session_id``：新接手会话（origin='fork'，fork_of=源 tool_report 会话）；
+    ``tier``：'native'（resume 原引擎会话）| 'handoff'（交接文档新会话）；
+    ``handoff_doc``：handoff 档是否含交接文档（False=读取降级普通新会话）。
+    错误语义：404 会话不存在；409 非 tool_report/已激活/原机离线（中文含机器
+    名）；422 handoff 引擎重选不属原机支持集合。
+    """
+
+    session_id: uuid.UUID
+    run_id: uuid.UUID
+    lease_id: uuid.UUID
+    tier: Literal["native", "handoff"]
+    handoff_doc: bool = Field(description="False=交接文档缺失降级普通新会话")
+
+
+class SessionResetToolReportResponse(BaseModel):
+    """POST /api/daemon/sessions/{id}/reset-tool-report 响应（task-06 / FR-05）。
+
+    错误语义：404 会话不存在；409 非 tool_report / 已是未激活 / 有 running run。
+    """
+
+    session_id: uuid.UUID
+    status: Literal["pending"]
+    cleared_runs: int = Field(description="该会话累计 run 数（行保留审计，仅计数）")
+
+
 class SessionInjectRequest(BaseModel):
     """POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。
 

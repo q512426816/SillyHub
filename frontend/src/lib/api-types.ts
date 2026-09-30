@@ -5915,6 +5915,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/takeover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Takeover Session Endpoint
+         * @description Take over a dormant tool_report session by forking a new session (D-006@v1).
+         *
+         *     2026-09-30-tool-report-activation-wrong-machine task-04：未激活本地 Agent
+         *     会话首条消息 = 分叉式接手——原机四级钉定匹配（machineId → hostname →
+         *     allowed_roots 唯一 → 409 中文不换机，D-002@v1）、harness 分档（claude-code/
+         *     codex native 档 lease 携带 resume_session_id 回原引擎会话；其余 handoff 档
+         *     桩，交接文档归 task-05）、经 create 链落 fork 形态新会话（fork_of=源会话，
+         *     源会话零 run → fork_at_run_id/engine_fork_anchor NULL）。源会话保持只读
+         *     （status/turn_count/lease/runtime 零写）。校验与匹配归 service takeover.py。
+         */
+        post: operations["takeover_session_endpoint_api_daemon_sessions__session_id__takeover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/reset-tool-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Tool Report Session Endpoint
+         * @description Reset a legacy-activated tool_report session back to dormant (task-06 / FR-05).
+         *
+         *     2026-09-30-tool-report-activation-wrong-machine task-06：存量被旧懒激活路径
+         *     钉死在错误机器的会话一键回滚——status=pending / turn_count=0 / runtime 与
+         *     lease 清空（失败 run 行保留审计），前端回放主体恢复，可重新 takeover。
+         *     守卫与回滚归 service helpers.reset_tool_report_session（running 拒绝等）。
+         */
+        post: operations["reset_tool_report_session_endpoint_api_daemon_sessions__session_id__reset_tool_report_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/inject": {
         parameters: {
             query?: never;
@@ -11920,6 +11973,7 @@ export interface components {
             change_key?: string | null;
             /** Quick Id */
             quick_id?: string | null;
+            machine?: components["schemas"]["AgentLogMachineBlock"] | null;
         };
         /**
          * AgentLogListItem
@@ -11971,6 +12025,10 @@ export interface components {
             scan_run_id?: string | null;
             /** Pushed At */
             pushed_at?: string | null;
+            /** Reported Machine Id */
+            reported_machine_id?: string | null;
+            /** Reported Machine Name */
+            reported_machine_name?: string | null;
             /** Agent Session Id */
             agent_session_id?: string | null;
             /**
@@ -12003,6 +12061,22 @@ export interface components {
         AgentLogListResponse: {
             /** Items */
             items?: components["schemas"]["AgentLogListItem"][];
+        };
+        /**
+         * AgentLogMachineBlock
+         * @description 协议 v2 entry 级 machine 块（docs/platform-agent-log-protocol.md §machine）。
+         *
+         *     定义于 AgentLogEntry 之后但其字段类型引用（Pydantic v2 前向引用在模块加载
+         *     完成时自动 rebuild）。两键均可空但至少一键非空才有意义（双空等价缺块，
+         *     service 层跳过快照写入）；``machine_id``=上报方持久 machineId
+         *     （~/.sillyhub/daemon/machine-id 同源），``hostname``=上报方主机名（匹配
+         *     daemon_runtimes.name）。
+         */
+        AgentLogMachineBlock: {
+            /** Machine Id */
+            machine_id?: string | null;
+            /** Hostname */
+            hostname?: string | null;
         };
         /**
          * AgentLogMessageItem
@@ -14684,6 +14758,8 @@ export interface components {
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
             /** Spec Cache */
             spec_cache?: components["schemas"]["DaemonHeartbeatSpecCacheItem"][];
+            /** Machine Id */
+            machine_id?: string | null;
         };
         /**
          * DaemonHeartbeatResponse
@@ -24112,6 +24188,29 @@ export interface components {
             status: string;
         };
         /**
+         * SessionResetToolReportResponse
+         * @description POST /api/daemon/sessions/{id}/reset-tool-report 响应（task-06 / FR-05）。
+         *
+         *     错误语义：404 会话不存在；409 非 tool_report / 已是未激活 / 有 running run。
+         */
+        SessionResetToolReportResponse: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "pending";
+            /**
+             * Cleared Runs
+             * @description 该会话累计 run 数（行保留审计，仅计数）
+             */
+            cleared_runs: number;
+        };
+        /**
          * SessionRunRead
          * @description GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。
          *
@@ -24225,6 +24324,62 @@ export interface components {
              * @description daemon 本地 uuid（daemon_instances.id）
              */
             daemon_local_id: string;
+        };
+        /**
+         * SessionTakeoverRequest
+         * @description POST /api/daemon/sessions/{id}/takeover 请求体（tool_report 接手，D-006@v1）。
+         *
+         *     ``prompt`` 必填（首条消息即接手轮首 prompt；handoff 档 task-05 起前缀交接
+         *     文档）；``provider``/``agent_profile_id``/``llm_provider_id`` 仅 handoff 档
+         *     重选有意义（引擎须 ∈ 原机 runtime 支持集合，service 校验；native 档忽略
+         *     ——引擎跟随源会话 harness）。
+         */
+        SessionTakeoverRequest: {
+            /** Prompt */
+            prompt: string;
+            /** Provider */
+            provider?: string | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+        };
+        /**
+         * SessionTakeoverResponse
+         * @description POST /api/daemon/sessions/{id}/takeover 响应（design §接口定义）。
+         *
+         *     ``session_id``：新接手会话（origin='fork'，fork_of=源 tool_report 会话）；
+         *     ``tier``：'native'（resume 原引擎会话）| 'handoff'（交接文档新会话）；
+         *     ``handoff_doc``：handoff 档是否含交接文档（False=读取降级普通新会话）。
+         *     错误语义：404 会话不存在；409 非 tool_report/已激活/原机离线（中文含机器
+         *     名）；422 handoff 引擎重选不属原机支持集合。
+         */
+        SessionTakeoverResponse: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Lease Id
+             * Format: uuid
+             */
+            lease_id: string;
+            /**
+             * Tier
+             * @enum {string}
+             */
+            tier: "native" | "handoff";
+            /**
+             * Handoff Doc
+             * @description False=交接文档缺失降级普通新会话
+             */
+            handoff_doc: boolean;
         };
         /**
          * SessionThinkingLevelRequest
@@ -37773,6 +37928,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionForkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    takeover_session_endpoint_api_daemon_sessions__session_id__takeover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionTakeoverRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionTakeoverResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_tool_report_session_endpoint_api_daemon_sessions__session_id__reset_tool_report_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResetToolReportResponse"];
                 };
             };
             /** @description Validation Error */

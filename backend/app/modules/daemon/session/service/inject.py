@@ -42,6 +42,7 @@ from .helpers import _bind_inject_session_links, _strip_team_command_prefix
 from .inject_gates import _resolve_inject_turn_config
 from .queue import _handle_busy_turn
 from .results import SessionDispatchResult, _PrelockedInjectAttachments
+from .takeover import ToolReportTakeoverInvalid
 
 
 async def inject_session(
@@ -201,35 +202,19 @@ async def inject_session(
         bind_ppm_item_id=bind_ppm_item_id,
     )
 
-    # ── task-05（design §3.3.4 / D-010）：tool_report 会话懒激活分支 ──────────
-    # CLI 工具上报聚合出的「本地 Agent 会话」（origin='tool_report'，创建时
-    # status='pending' 且无 lease/runtime）首次被用户继续（首条消息）时，才
-    # 绑定机器建 interactive lease——首条消息即首轮（prompt 存 lease metadata
-    # 并下发 SESSION_INJECT），激活成功直接返回激活派发结果；已激活（lease
-    # 存在）的 tool_report 会话与 origin 缺省的 chat 会话不进本分支，走既有
-    # inject 路径零回归（design §3.3.4 第 5 点）。
-    # 二审 #2：切换字段（agent_profile_id/llm_provider_id）与附件透传进激活
-    # 事务（照 create_session 语义落配置，附件随首轮下发），不再静默丢弃。
-    # task-11（2026-08-29-usage-by-provider-model）：激活轮暂不支持会话级选
-    # 模型——激活路径的供应商配置经 claim 链组装（lease/context），快照级
-    # model 同步不在本 task 范围；显式 422 拒绝而非静默丢弃（铁律：不吞参数）。
+    # ── 2026-09-30-tool-report-activation-wrong-machine task-06（D-006@v1）──
+    # 懒激活分支退役：未激活 tool_report 会话的继续对话改走分叉式接手
+    # （POST /sessions/{id}/takeover——原会话只读，fork 形态新会话 + 原机钉定
+    # 派发）。本端点对 pending tool_report 会话直接 409 中文指引，不再原地
+    # 激活（旧路径 cwd 随上报、机器自选，错机派发且钉死源会话——设计退役）。
     if getattr(session, "origin", "chat") == "tool_report" and session.lease_id is None:
-        if model:
-            raise DaemonSessionConfigInvalid(
-                "该会话尚未激活，暂不支持在激活消息中切换模型；请激活后再选模型。",
-                details={
-                    "reason": "activation_model_unsupported",
-                    "session_id": str(session.id),
-                },
-            )
-        return await svc._activate_tool_report_session(
-            session,
-            user_id,
-            prompt=prompt,
-            agent_profile_id=agent_profile_id,
-            llm_provider_id=llm_provider_id,
-            attachment_ids=list(attachment_ids) if attachment_ids else None,
-            prelocked_attachments=prelocked_attachments,
+        raise ToolReportTakeoverInvalid(
+            "该本地 Agent 会话尚未继续过对话：请使用「接手」（takeover）继续"
+            "——将按上报机器派发并分叉出新会话，原会话保持只读回放。",
+            details={
+                "session_id": str(session.id),
+                "reason": "takeover_required",
+            },
         )
     return await svc._inject_into_session(
         session,

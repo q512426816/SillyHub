@@ -43,7 +43,7 @@ import { mkdir, stat, readFile, writeFile, rename, unlink, chmod, readdir, rm } 
 
 import { join, dirname } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { type DaemonConfig, DEFAULT_CONFIG_DIR, daemonBinDir, daemonStateDir, normalizeAllowedRoots } from './config.js';
+import { type DaemonConfig, DEFAULT_CONFIG_DIR, daemonBinDir, daemonStateDir, normalizeAllowedRoots, readOrCreateMachineId } from './config.js';
 // task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套预取
 // （fetchMcpBundle）+ bundle 类型（会话级缓存值）。
 import { fetchMcpBundle, normalizeWorkerDepth } from './mcp-config.js';
@@ -896,6 +896,12 @@ interface ClientLike {
      * 末位参数）。undefined=未启用（键不出现，backend 保留）；对象=整包直写。
      */
     sillyspecStatusMap?: Record<string, SillySpecStatusSummary> | null,
+    /**
+     * 2026-09-30-tool-report task-02（FR-01）：本机持久 machineId（对齐
+     * hub-client heartbeat 末位参数）。undefined=键不出现（读取未完成/旧
+     * backend）；非空字符串=键出现（本机身份恒可得，无 null 态）。
+     */
+    machineId?: string,
   ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
   /**
@@ -1585,6 +1591,14 @@ export class Daemon {
    * undefined 时不向 backend 上报（hub-client 转 null）。运行期恒定。
    */
   private readonly _startedAt: number | undefined;
+  /**
+   * 2026-09-30-tool-report-activation-wrong-machine task-02（FR-01）：本机持久
+   * machineId（~/.sillyhub/daemon/machine-id，readOrCreateMachineId 读一次缓存）。
+   * null=尚未读取/读取失败（心跳不携带 machine_id 键）；读取成功后运行期恒定。
+   * 心跳链路是异步的，懒读取经 _machineIdPromise 单飞（并发心跳不重复读盘）。
+   */
+  private _machineId: string | null = null;
+  private _machineIdPromise: Promise<string> | null = null;
   /**
    * task-04（D-002@v3）：交互式会话管理器。null/undefined 时 interactive lease 记 error
    * 不崩（AC-14 过渡期）。生产路径由 main.ts 在构造 daemon 时传入。
@@ -5381,6 +5395,27 @@ export class Daemon {
   }
 
   /**
+   * 2026-09-30-tool-report task-02（FR-01）：确保本机 machineId 已读（单飞）。
+   * 首次调用发起 readOrCreateMachineId（并发复用同一 promise）；成功后写
+   * ``_machineId`` 运行期恒定，失败清 promise 允许下一拍重试（best-effort，
+   * 不阻塞心跳链路）。
+   */
+  private _ensureMachineId(): Promise<string> {
+    if (this._machineId !== null) return Promise.resolve(this._machineId);
+    this._machineIdPromise ??= readOrCreateMachineId()
+      .then((id) => {
+        this._machineId = id;
+        return id;
+      })
+      .catch(() => {
+        // 读取/落盘双失败（极端）：清单飞允许下一拍重试；本拍心跳不带键。
+        this._machineIdPromise = null;
+        return '';
+      });
+    return this._machineIdPromise;
+  }
+
+  /**
    * 本机 spec 缓存清单（心跳上报）：枚举 specs 根下各工作区目录，读
    * ``.runtime/spec-version.json`` 版本（无版本文件的目录不上报——上报 null
    * 无意义，backend 无从比较）。读失败容忍跳过（best-effort）。
@@ -5602,6 +5637,10 @@ export class Daemon {
       // ql-20260907-010：心跳前对齐会话活跃记账（自愈清账），随后上报本机
       // spec 缓存清单（best-effort；未枚举到/读失败 → 空数组 → 键不出现）。
       this._reconcileSpecSessionActivity();
+      // 2026-09-30-tool-report task-02（FR-01）：心跳前确保本机 machineId 已读
+      // （首拍懒读取单飞；失败本拍不带 machine_id 键，下一拍重试收敛——与 spec
+      // 缓存 best-effort 口径一致，不阻塞心跳链路）。
+      void this._ensureMachineId();
       // 运行态门控：spec 缓存上报属运行态心跳行为（未 start 的 daemon——含
       // 直调 _sendHeartbeatOnce 的测试前置——不上报；生产心跳循环/重连对账恒为
       // 运行态，零影响）。
@@ -5665,6 +5704,10 @@ export class Daemon {
           : typeof this._sillyspecManager.getStatusMapSnapshot === 'function'
             ? this._sillyspecManager.getStatusMapSnapshot()
             : undefined,
+        // 第 11 参（2026-09-30-tool-report task-02 / FR-01）：本机持久 machineId。
+        // 首拍经下方 _ensureMachineId 懒读取（单飞）；读取失败/未完成 → undefined
+        //（键不出现，本拍不带，下一拍收敛）。已缓存则直传（运行期恒定）。
+        this._machineId ?? undefined,
       );
       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
       // task-06（2026-08-30-daemon-self-heal / D-001）：重置前先捕获降级起点，

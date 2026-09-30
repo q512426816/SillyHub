@@ -1886,6 +1886,14 @@ class PlatformSyncService:
                     last_command=entry.last_command,
                     scan_run_id=scan_run_id,
                     pushed_at=pushed_at,
+                    # 2026-09-30-tool-report task-03（协议 v2 / FR-01）：机器身份两列
+                    # 随 entry 落库（缺块 → None 与老协议逐字节同形）。
+                    reported_machine_id=(
+                        entry.machine.machine_id if entry.machine is not None else None
+                    ),
+                    reported_machine_name=(
+                        entry.machine.hostname if entry.machine is not None else None
+                    ),
                     created_at=now,
                     updated_at=now,
                 )
@@ -1906,6 +1914,14 @@ class PlatformSyncService:
                 row.last_seen_at = entry.last_seen_at
                 row.invocations = entry.invocations
                 row.last_command = entry.last_command
+                # 2026-09-30-tool-report task-03：覆盖路径同步机器身份（整行覆盖
+                # 语义 D-005——老 CLI 重推无 machine 块 → 两列回 None，与上报为准）。
+                row.reported_machine_id = (
+                    entry.machine.machine_id if entry.machine is not None else None
+                )
+                row.reported_machine_name = (
+                    entry.machine.hostname if entry.machine is not None else None
+                )
                 row.scan_run_id = scan_run_id
                 row.pushed_at = pushed_at
                 row.updated_at = now
@@ -2060,6 +2076,33 @@ class PlatformSyncService:
                         )
                     )
                     created_group_sessions.append((group_session_id, user_id))
+                # ── 2026-09-30-tool-report-activation-wrong-machine task-03（FR-01）──
+                # 组内最新 entry（last_seen_at 最大者，缺省取列表末条）的机器身份
+                # 写会话快照 latest_reported_machine（{machine_id, hostname}，双空
+                # 块不写——等价缺块）。dict copy 后整体替换防 JSON in-place mutation
+                # 不持久化（对齐 _merge_lease_metadata 先例）；hub 分支会话有
+                # runtime 绑定，不走本快照路径。
+                _latest_entry = (
+                    max(
+                        group_items,
+                        key=lambda t: t[0].last_seen_at or "",
+                    )[0]
+                    if group_items
+                    else None
+                )
+                _latest_machine = _latest_entry.machine if _latest_entry is not None else None
+                if _latest_machine is not None and (
+                    _latest_machine.machine_id or _latest_machine.hostname
+                ):
+                    _group_session = await self._session.get(AgentSession, group_session_id)
+                    if _group_session is not None:
+                        _snap = dict(_group_session.config_snapshot or {})
+                        _snap["latest_reported_machine"] = {
+                            "machine_id": _latest_machine.machine_id,
+                            "hostname": _latest_machine.hostname,
+                        }
+                        _group_session.config_snapshot = _snap
+                        self._session.add(_group_session)
                 for _entry, log_row in group_items:
                     log_row.agent_session_id = group_session_id
                 # task-06（design §5.W2.3 / D-003）：tool_report 会话同款 ctx 绑定——

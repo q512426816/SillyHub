@@ -33,7 +33,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+from app.modules.agent.model import AgentRun, AgentSession
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.service import DaemonService
 from app.modules.daemon.session.service import (
@@ -351,124 +351,24 @@ class TestPrelockedAttachmentAssembly:
         assert att.session_id is None
 
 
-# ── 2. P1 二审 #2：tool_report 懒激活透传切换字段与附件 ─────────────────────
+# ── 2. P1 二审 #2：tool_report 懒激活透传（已退役，2026-09-30-tool-report task-06）──
 
 
-class TestToolReportActivationPassthrough:
-    async def test_activation_applies_switch_fields(
+class TestToolReportActivationRetired:
+    async def test_pending_tool_report_inject_rejected(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
-        """激活轮携带 agent_profile_id + llm_provider_id：照 create_session 语义
-        落会话三列 + 首轮 run 快照 + lease metadata + config_snapshot 展示键。"""
+        """懒激活退役：未激活 tool_report 会话 inject → 409 takeover 指引
+        （切换字段/附件随消息激活的旧语义一并退役——继续对话统一走 takeover）。"""
         uid = await _create_user(db_session)
         await _create_runtime(db_session, uid)
         sess = await _make_tool_report_session(db_session, uid)
-        profile = await _make_profile(db_session, uid)
-        lp = await _make_llm_provider(db_session, uid)
 
-        result = await DaemonService(db_session).inject_session(
-            sess.id,
-            uid,
-            prompt="继续这个会话",
-            agent_profile_id=str(profile.id),
-            llm_provider_id=str(lp.id),
-        )
-
-        # 会话三列 + config_snapshot（保留 harness 键）。
-        await db_session.refresh(sess)
-        assert sess.status == "active"
-        assert sess.agent_profile_id == profile.id
-        assert sess.llm_provider_id == lp.id
-        snap = sess.config_snapshot or {}
-        assert snap.get("harness") == "claude-code"
-        assert snap.get("profile_name") == "猫娘档案"
-        assert snap.get("provider_name") == "Kimi 中转"
-        assert snap.get("engine") == "claude"
-
-        # 首轮 run 配置快照（D-008）。
-        run = result.agent_run
-        assert run.agent_profile_id == profile.id
-        assert (run.agent_profile_snapshot or {}).get("system_prompt") == "你是猫娘"
-        assert run.llm_provider_id == lp.id
-
-        # lease metadata：档案提示词维度键 + 会话级供应商独立键。
-        lease = await db_session.get(DaemonTaskLease, sess.lease_id)
-        assert lease is not None
-        meta = lease.metadata_ or {}
-        assert meta.get("system_prompt") == "你是猫娘"
-        assert meta.get("session_llm_provider_id") == str(lp.id)
-
-    async def test_activation_rejects_switch_only_empty_prompt(self, db_session) -> None:
-        """空 prompt 仅带切换字段 → 明确中文 409（提示先发消息激活），不再静默
-        丢弃字段建空轮（daemon 拒建空 prompt 会话，会留 pending 死轮）。"""
-        uid = await _create_user(db_session)
-        sess = await _make_tool_report_session(db_session, uid)
-        profile = await _make_profile(db_session, uid)
-
-        with pytest.raises(DaemonSessionNotActive) as exc_info:
+        with pytest.raises(Exception) as exc_info:
             await DaemonService(db_session).inject_session(
-                sess.id,
-                uid,
-                prompt="",
-                agent_profile_id=str(profile.id),
+                sess.id, uid, prompt="hi", agent_profile_id=None, llm_provider_id=None
             )
-
-        assert "尚未激活" in exc_info.value.message
-        # 激活未发生：会话保持 pending、无 run、无 lease。
-        await db_session.refresh(sess)
-        assert sess.status == "pending"
-        assert sess.lease_id is None
-        runs = (
-            (await db_session.execute(select(AgentRun).where(AgentRun.agent_session_id == sess.id)))
-            .scalars()
-            .all()
-        )
-        assert runs == []
-
-    async def test_activation_attachment_rides_first_turn(
-        self, db_session, mocked_hub, mocked_redis
-    ) -> None:
-        """附件随激活首轮下发：draft→bound 回填 + user_input 标记行 + SESSION_INJECT
-        payload attachments 键（对齐主路径 inject 机制；无多模态供应商 → 磁盘
-        落盘路由 deliver=disk，无需真实 MinIO）。"""
-        uid = await _create_user(db_session)
-        await _create_runtime(db_session, uid)
-        sess = await _make_tool_report_session(db_session, uid)
-        att = await _make_attachment(
-            db_session, uid, kind="image", media_type="image/png", name="shot.png"
-        )
-
-        await DaemonService(db_session).inject_session(
-            sess.id, uid, prompt="看看这张图", attachment_ids=[att.id]
-        )
-
-        await db_session.refresh(sess)
-        assert sess.status == "active"
-        # 附件 draft→bound。
-        await db_session.refresh(att)
-        assert att.session_id == sess.id
-        # user_input 日志头部带标记行（D-3）。
-        log = (
-            (
-                await db_session.execute(
-                    select(AgentRunLog)
-                    .where(AgentRunLog.channel == "user_input")
-                    .order_by(AgentRunLog.timestamp.desc())
-                )
-            )
-            .scalars()
-            .first()
-        )
-        assert log is not None
-        assert log.content_redacted.startswith(f"[附件:{att.id}|image|shot.png]")
-        # SESSION_INJECT payload 携带 attachments（deliver=disk 磁盘路由）。
-        mocked_hub.send_session_control.assert_awaited()
-        payload = mocked_hub.send_session_control.await_args.args[2]
-        assert payload["prompt"] == "看看这张图"
-        attachments = payload.get("attachments") or []
-        assert len(attachments) == 1
-        assert attachments[0]["deliver"] == "disk"
-        assert attachments[0]["id"] == str(att.id)
+        assert getattr(exc_info.value, "code", "") == "HTTP_409_TOOL_REPORT_TAKEOVER_INVALID"
 
 
 # ── 3. P2 二审 #3：pending_approval 算活跃（词表单源回归）────────────────────

@@ -358,6 +358,20 @@ class AgentSessionLogORM(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # ── 2026-09-30-tool-report-activation-wrong-machine task-01（design 数据
+    # 模型 / FR-01 / D-001@v1）──上报机器身份两列：entries 级 machine 块落库。
+    # reported_machine_id=上报方持久 machineId（daemon 心跳同源 ~/.sillyhub/
+    # machine-id，CLI v2 起携带；NULL=老协议/CLI 未升级）；reported_machine_
+    # name=上报方 hostname（takeover 四级匹配②级匹配 daemon_runtimes.name）。
+    # 均 nullable 无唯一约束（hostname 允许多条上报），存量行不回填。
+    reported_machine_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    reported_machine_name: str | None = Field(
+        default=None,
+        sa_column=Column(String(255), nullable=True),
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(

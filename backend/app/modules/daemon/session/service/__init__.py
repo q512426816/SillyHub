@@ -154,7 +154,6 @@ from .errors import (  # noqa: E402
     DaemonSessionTurnConflict,
     DaemonSessionWorkspaceNotFound,
     SessionEmptyPrompt,
-    ToolReportActivateNoDaemon,
 )
 
 # task-05（2026-09-22-session-fork-continuation）：fork 子域（服务 + 种子组装
@@ -249,7 +248,6 @@ __all__ = [
     # 服务类 + 后台派发入口（2）
     "SessionService",
     "SuspendBatchResult",
-    "ToolReportActivateNoDaemon",
     # 私有符号保位（6，R-04——run_sync 顶部 import 与跨文件 lazy import 消费）
     "_apply_session_terminal_status",
     "_merge_lease_metadata",
@@ -455,28 +453,6 @@ class SessionService(BackgroundTaskMixin):
             run=run,
             lease_id=lease_id,
             error=error,
-        )
-
-    async def _activate_tool_report_session(
-        self,
-        session: AgentSession,
-        user_id: uuid.UUID,
-        *,
-        prompt: str,
-        agent_profile_id: str | None = None,
-        llm_provider_id: str | None = None,
-        attachment_ids: list[uuid.UUID] | None = None,
-        prelocked_attachments: _PrelockedInjectAttachments | None = None,
-    ) -> SessionDispatchResult:
-        return await _ppm_activation._activate_tool_report_session(
-            self,
-            session=session,
-            user_id=user_id,
-            prompt=prompt,
-            agent_profile_id=agent_profile_id,
-            llm_provider_id=llm_provider_id,
-            attachment_ids=attachment_ids,
-            prelocked_attachments=prelocked_attachments,
         )
 
     async def _validate_inject_attachment_rows(

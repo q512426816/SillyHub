@@ -219,6 +219,10 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     # create，同为 session_crud 的会话创建类端点；{session_id}/fork 与下方
     # {session_id} 控制类端点同形状，注册序即本表序）。
     "fork_session",
+    # 2026-09-30-tool-report-activation-wrong-machine task-04：tool_report 会话
+    # 接手端点（fork 同族——同为经 create 链建新会话的 {session_id} 创建类端点）。
+    "takeover_session_endpoint",
+    "reset_tool_report_session_endpoint",
     "inject_session",
     # 2026-09-14-session-ctx-compact task-02 / FR-02：统一压缩端点（紧跟 inject，
     # 同为 session_crud 的 {session_id} 控制类端点）。

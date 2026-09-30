@@ -806,3 +806,59 @@ export function deriveTimelineSessionStatus(
 export function providerLabelOf(provider: string): string {
   return PROVIDER_META[provider]?.label ?? provider;
 }
+
+// ── 2026-09-30-tool-report-activation-wrong-machine task-07（FR-06 / D-004@v1
+//    / D-005@v2 / D-006@v1）：tool_report 会话衔接 chrome 派生 ────────────────
+
+/** 可 resume harness 集合（与后端 takeover._RESUMABLE_HARNESS 同源镜像——claude-code
+ * transcript / codex rollout 的 platform_agent_logs.session_id 即引擎会话 id）。 */
+export const TAKEOVER_RESUMABLE_HARNESS = new Set(["claude-code", "codex"]);
+
+/** takeover 衔接 chrome（未激活 tool_report 会话输入区提示条数据源）。 */
+export function deriveTakeoverChrome(opts: {
+  /** 会话 harness（config_snapshot.harness；空串=未知）。 */
+  harness: string;
+  /** 最新上报 entry 的机器名（platform_agent_logs.reported_machine_name）。 */
+  reportedMachineName: string | null;
+  /** machines 列表（在线态 join + 原机引擎集合）。 */
+  machines: DaemonMachineRead[];
+}): {
+  tier: "native" | "handoff";
+  machineOnline: boolean;
+  machineLabel: string;
+  /** 原机在线引擎集合（handoff 档接手选择器数据；空=原机离线）。 */
+  engines: string[];
+} {
+  const { harness, reportedMachineName, machines } = opts;
+  const tier: "native" | "handoff" = TAKEOVER_RESUMABLE_HARNESS.has(harness)
+    ? "native"
+    : "handoff";
+  const machineLabel = reportedMachineName ?? "（未知机器）";
+  if (!reportedMachineName) {
+    // 存量上报无机器身份：在线态未知（交后端四级匹配裁决），engines 全集兜底。
+    const all = new Set<string>();
+    for (const m of machines) {
+      if (m.status !== "online") continue;
+      for (const rt of m.runtimes ?? []) {
+        if (rt.provider && rt.status === "online") all.add(rt.provider);
+      }
+    }
+    return { tier, machineOnline: true, machineLabel, engines: [...all].sort() };
+  }
+  const hit = machines.find(
+    (m) =>
+      (m.display_alias?.trim() || m.hostname) === reportedMachineName ||
+      m.hostname === reportedMachineName,
+  );
+  if (!hit || hit.status !== "online") {
+    return { tier, machineOnline: false, machineLabel, engines: [] };
+  }
+  const engines = [
+    ...new Set(
+      (hit.runtimes ?? [])
+        .filter((rt) => rt.provider && rt.status === "online")
+        .map((rt) => rt.provider as string),
+    ),
+  ].sort();
+  return { tier, machineOnline: engines.length > 0, machineLabel, engines };
+}

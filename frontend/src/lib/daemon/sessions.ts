@@ -979,6 +979,12 @@ export async function deleteScheduledMessage(
 export type SessionForkRequest = components["schemas"]["SessionForkRequest"];
 /** POST /api/daemon/sessions/{id}/fork 响应体（api-types 生成版，禁手写）。 */
 export type SessionForkResponse = components["schemas"]["SessionForkResponse"];
+export type SessionTakeoverRequest =
+  components["schemas"]["SessionTakeoverRequest"];
+export type SessionTakeoverResponse =
+  components["schemas"]["SessionTakeoverResponse"];
+export type SessionResetToolReportResponse =
+  components["schemas"]["SessionResetToolReportResponse"];
 
 /**
  * POST /api/daemon/sessions/{id}/fork — 在源会话 ``atRunId`` 轮之后分叉出新
@@ -993,5 +999,36 @@ export async function forkSession(
   return apiFetch<SessionForkResponse>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/fork`,
     { method: "POST", json: body },
+  );
+}
+
+/**
+ * POST /api/daemon/sessions/{id}/takeover——未激活 tool_report 会话分叉式接手
+ * （2026-09-30-tool-report-activation-wrong-machine task-07 / FR-02 / D-006@v1）。
+ *
+ * 成功响应 new_session_id 即接手会话（origin='fork'，fork_of=源会话）——调用方
+ * 切换会话面板；handoff 档 handoff_doc=false 表示交接文档降级（提示条告知）。
+ * 409 中文（原机离线含机器名）直接抛 ApiError 由调用方 notify。
+ */
+export async function takeoverSession(
+  sessionId: string,
+  body: SessionTakeoverRequest,
+): Promise<SessionTakeoverResponse> {
+  return apiFetch<SessionTakeoverResponse>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/takeover`,
+    { method: "POST", json: body },
+  );
+}
+
+/**
+ * POST /api/daemon/sessions/{id}/reset-tool-report——存量被旧懒激活钉死的
+ * tool_report 会话一键回滚只读态（task-06 / FR-05）。running 轮期间 409。
+ */
+export async function resetToolReportSession(
+  sessionId: string,
+): Promise<SessionResetToolReportResponse> {
+  return apiFetch<SessionResetToolReportResponse>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/reset-tool-report`,
+    { method: "POST" },
   );
 }

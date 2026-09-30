@@ -15565,6 +15565,104 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/takeover": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Takeover Session Endpoint",
+        "description": "Take over a dormant tool_report session by forking a new session (D-006@v1).\n\n2026-09-30-tool-report-activation-wrong-machine task-04：未激活本地 Agent\n会话首条消息 = 分叉式接手——原机四级钉定匹配（machineId → hostname →\nallowed_roots 唯一 → 409 中文不换机，D-002@v1）、harness 分档（claude-code/\ncodex native 档 lease 携带 resume_session_id 回原引擎会话；其余 handoff 档\n桩，交接文档归 task-05）、经 create 链落 fork 形态新会话（fork_of=源会话，\n源会话零 run → fork_at_run_id/engine_fork_anchor NULL）。源会话保持只读\n（status/turn_count/lease/runtime 零写）。校验与匹配归 service takeover.py。",
+        "operationId": "takeover_session_endpoint_api_daemon_sessions__session_id__takeover_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionTakeoverRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTakeoverResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/reset-tool-report": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Reset Tool Report Session Endpoint",
+        "description": "Reset a legacy-activated tool_report session back to dormant (task-06 / FR-05).\n\n2026-09-30-tool-report-activation-wrong-machine task-06：存量被旧懒激活路径\n钉死在错误机器的会话一键回滚——status=pending / turn_count=0 / runtime 与\nlease 清空（失败 run 行保留审计），前端回放主体恢复，可重新 takeover。\n守卫与回滚归 service helpers.reset_tool_report_session（running 拒绝等）。",
+        "operationId": "reset_tool_report_session_endpoint_api_daemon_sessions__session_id__reset_tool_report_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResetToolReportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/inject": {
       "post": {
         "tags": [
@@ -34840,6 +34938,16 @@
               }
             ],
             "title": "Quick Id"
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentLogMachineBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -35017,6 +35125,28 @@
             ],
             "title": "Pushed At"
           },
+          "reported_machine_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Machine Id"
+          },
+          "reported_machine_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Machine Name"
+          },
           "agent_session_id": {
             "anyOf": [
               {
@@ -35113,6 +35243,37 @@
         "type": "object",
         "title": "AgentLogListResponse",
         "description": "GET /agent-logs 200 响应（按 last_seen_at DESC NULLS LAST 排序，design §3.2）。"
+      },
+      "AgentLogMachineBlock": {
+        "properties": {
+          "machine_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine Id"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          }
+        },
+        "type": "object",
+        "title": "AgentLogMachineBlock",
+        "description": "协议 v2 entry 级 machine 块（docs/platform-agent-log-protocol.md §machine）。\n\n定义于 AgentLogEntry 之后但其字段类型引用（Pydantic v2 前向引用在模块加载\n完成时自动 rebuild）。两键均可空但至少一键非空才有意义（双空等价缺块，\nservice 层跳过快照写入）；``machine_id``=上报方持久 machineId\n（~/.sillyhub/daemon/machine-id 同源），``hostname``=上报方主机名（匹配\ndaemon_runtimes.name）。"
       },
       "AgentLogMessageItem": {
         "properties": {
@@ -41845,6 +42006,18 @@
             },
             "type": "array",
             "title": "Spec Cache"
+          },
+          "machine_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine Id"
           }
         },
         "type": "object",
@@ -66893,6 +67066,33 @@
         "title": "SessionReopenResponse",
         "description": "Response body for POST /sessions/{id}/reopen (task-05 / FR-2).\n\n``status`` is the backend-side placeholder state immediately after a\nsuccessful reopen request — the daemon runs the SDK resume asynchronously\n(task-07 drives the full lease/WS transition, task-08 the daemon SDK\nresume), so the endpoint never blocks on daemon confirmation (design §4.3.1\nstep 7)."
       },
+      "SessionResetToolReportResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "status": {
+            "type": "string",
+            "const": "pending",
+            "title": "Status"
+          },
+          "cleared_runs": {
+            "type": "integer",
+            "title": "Cleared Runs",
+            "description": "该会话累计 run 数（行保留审计，仅计数）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "status",
+          "cleared_runs"
+        ],
+        "title": "SessionResetToolReportResponse",
+        "description": "POST /api/daemon/sessions/{id}/reset-tool-report 响应（task-06 / FR-05）。\n\n错误语义：404 会话不存在；409 非 tool_report / 已是未激活 / 有 running run。"
+      },
       "SessionRunRead": {
         "properties": {
           "id": {
@@ -67178,6 +67378,99 @@
         ],
         "title": "SessionSuspendBatchRequest",
         "description": "Body for POST /sessions/suspend-batch（task-05）.\n\ndaemon ``stop()`` 在 markOffline 前上报自身标识；backend 按\n``daemon_local_id``（= ``daemon_instances.id``）定位该 daemon 全部 runtime\n名下的 active 会话做三步挂起收敛（daemon 侧调用方属 task-08）。"
+      },
+      "SessionTakeoverRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Prompt"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 30
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id"
+          },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "SessionTakeoverRequest",
+        "description": "POST /api/daemon/sessions/{id}/takeover 请求体（tool_report 接手，D-006@v1）。\n\n``prompt`` 必填（首条消息即接手轮首 prompt；handoff 档 task-05 起前缀交接\n文档）；``provider``/``agent_profile_id``/``llm_provider_id`` 仅 handoff 档\n重选有意义（引擎须 ∈ 原机 runtime 支持集合，service 校验；native 档忽略\n——引擎跟随源会话 harness）。"
+      },
+      "SessionTakeoverResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "lease_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Lease Id"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "native",
+              "handoff"
+            ],
+            "title": "Tier"
+          },
+          "handoff_doc": {
+            "type": "boolean",
+            "title": "Handoff Doc",
+            "description": "False=交接文档缺失降级普通新会话"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "run_id",
+          "lease_id",
+          "tier",
+          "handoff_doc"
+        ],
+        "title": "SessionTakeoverResponse",
+        "description": "POST /api/daemon/sessions/{id}/takeover 响应（design §接口定义）。\n\n``session_id``：新接手会话（origin='fork'，fork_of=源 tool_report 会话）；\n``tier``：'native'（resume 原引擎会话）| 'handoff'（交接文档新会话）；\n``handoff_doc``：handoff 档是否含交接文档（False=读取降级普通新会话）。\n错误语义：404 会话不存在；409 非 tool_report/已激活/原机离线（中文含机器\n名）；422 handoff 引擎重选不属原机支持集合。"
       },
       "SessionThinkingLevelRequest": {
         "properties": {

@@ -49,6 +49,9 @@ from app.modules.daemon.schema import (
     SessionForkResponse,
     SessionInjectRequest,
     SessionReopenResponse,
+    SessionResetToolReportResponse,
+    SessionTakeoverRequest,
+    SessionTakeoverResponse,
     SessionThinkingLevelRequest,
     SessionThinkingLevelResponse,
     SessionThinkingLevelsResponse,
@@ -572,6 +575,77 @@ async def create_session(
         lease_id=result.lease_id,
         status=s.status or "active",
         stream_url=f"/api/daemon/sessions/{s.id}/stream",
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/takeover",
+    response_model=SessionTakeoverResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def takeover_session_endpoint(
+    session_id: uuid.UUID,
+    data: SessionTakeoverRequest,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> SessionTakeoverResponse:
+    """Take over a dormant tool_report session by forking a new session (D-006@v1).
+
+    2026-09-30-tool-report-activation-wrong-machine task-04：未激活本地 Agent
+    会话首条消息 = 分叉式接手——原机四级钉定匹配（machineId → hostname →
+    allowed_roots 唯一 → 409 中文不换机，D-002@v1）、harness 分档（claude-code/
+    codex native 档 lease 携带 resume_session_id 回原引擎会话；其余 handoff 档
+    桩，交接文档归 task-05）、经 create 链落 fork 形态新会话（fork_of=源会话，
+    源会话零 run → fork_at_run_id/engine_fork_anchor NULL）。源会话保持只读
+    （status/turn_count/lease/runtime 零写）。校验与匹配归 service takeover.py。
+    """
+    from app.modules.daemon.session.service.takeover import (
+        takeover_session as _takeover_session_svc,
+    )
+
+    result = await _takeover_session_svc(
+        DaemonService(session),
+        user.id,
+        session_id=session_id,
+        prompt=data.prompt,
+        provider=data.provider,
+        agent_profile_id=data.agent_profile_id,
+        llm_provider_id=data.llm_provider_id,
+    )
+    return SessionTakeoverResponse(
+        session_id=result.agent_session.id,
+        run_id=result.agent_run.id if result.agent_run is not None else uuid.UUID(int=0),
+        lease_id=result.lease_id,
+        tier=result.tier,
+        handoff_doc=result.handoff_doc,
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/reset-tool-report",
+    response_model=SessionResetToolReportResponse,
+)
+async def reset_tool_report_session_endpoint(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> SessionResetToolReportResponse:
+    """Reset a legacy-activated tool_report session back to dormant (task-06 / FR-05).
+
+    2026-09-30-tool-report-activation-wrong-machine task-06：存量被旧懒激活路径
+    钉死在错误机器的会话一键回滚——status=pending / turn_count=0 / runtime 与
+    lease 清空（失败 run 行保留审计），前端回放主体恢复，可重新 takeover。
+    守卫与回滚归 service helpers.reset_tool_report_session（running 拒绝等）。
+    """
+    from app.modules.daemon.session.service.helpers import (
+        reset_tool_report_session as _reset_svc,
+    )
+
+    result_session, cleared = await _reset_svc(DaemonService(session), session_id, user.id)
+    return SessionResetToolReportResponse(
+        session_id=result_session.id,
+        status="pending",
+        cleared_runs=cleared,
     )
 
 

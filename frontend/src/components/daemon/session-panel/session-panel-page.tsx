@@ -96,7 +96,7 @@ import { getQuicklogDetail } from "@/lib/quicklog";
 // task-03（2026-09-27-session-fast-replay / FR-04 FR-05）：fetchSessionTurnOutline
 // 打开链路并行拉取全量轮次大纲（导航骨架 + 未加载轮 run_id 直达跳转）。
 import {
-  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
+  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, resetToolReportSession, takeoverSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
 } from "@/lib/daemon";
 import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
 import { cn } from "@/lib/utils";
@@ -131,8 +131,10 @@ import {
   resolveAgentDisplayName, resolveCtxRoleMapping, resolvePageProjectId,
   resolvePreChangeName, resolvePreQuicklogName, resolvePreWorkspaceName,
   resolveWorkspaceName, splitToolReportTurns, type SessionPanelPageProps,
-  ACTIVE_RUN_STATUSES,
+  ACTIVE_RUN_STATUSES, deriveTakeoverChrome,
 } from "./page-helpers";
+import { listAgentLogs } from "@/lib/agent-logs";
+import { TakeoverBridgeNote } from "./takeover-bridge-note";
 
 /* ── task-03（2026-09-08-session-turn-nav / FR-03 / D-002@v1 D-004@v1）：
  *    轮次目录 catalogEntries 派生的局部纯工具（非导出，仅供下方 useMemo 消费；
@@ -2541,6 +2543,75 @@ export function SessionPanelPage({
     () => splitToolReportTurns(isToolReportActivated, displayTurns, runsMeta),
     [isToolReportActivated, displayTurns, runsMeta],
   );
+  // ── 2026-09-30-tool-report task-07（FR-06 / D-004@v1 / D-005@v2 / D-006@v1）──
+  // tool_report 接手 chrome：衔接提示条（native=接续原会话 / handoff=分叉+
+  // 交接文档）+ handoff 接手引擎选择器 + 原机在线态；发送走 takeover 端点
+  // （成功即跳接手会话浮层）；存量已激活（turn_count>0）渲染「重置为未激活」。
+  const takeoverSessionId = session?.id ?? "";
+  const takeoverIsToolReport = session?.origin === "tool_report";
+  const takeoverLogsQ = useQuery({
+    queryKey: ["agentLogs", "list", takeoverSessionId],
+    queryFn: () => listAgentLogs(takeoverSessionId),
+    enabled: takeoverIsToolReport,
+  });
+  const takeoverReportedMachine =
+    takeoverLogsQ.data?.items?.[0]?.reported_machine_name ?? null;
+  const takeoverHarness = String(
+    (session?.config_snapshot as Record<string, unknown> | null)?.harness ?? "",
+  );
+  const takeoverChrome = deriveTakeoverChrome({
+    harness: takeoverHarness,
+    reportedMachineName: takeoverReportedMachine,
+    machines,
+  });
+  // handoff 档接手引擎重选（D-005@v2）：null=默认映射（后端 harness→provider），
+  // 显式值随 takeover 请求下发（服务端校验 ∈ 原机集合，非法 422 中文）。
+  const [takeoverProvider, setTakeoverProvider] = useState<string | null>(null);
+  const [takeoverSending, setTakeoverSending] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const handleTakeoverSend = useCallback(
+    async (prompt: string) => {
+      if (!sessionId || takeoverSending) return;
+      setTakeoverSending(true);
+      try {
+        const resp = await takeoverSession(sessionId, {
+          prompt,
+          ...(takeoverProvider ? { provider: takeoverProvider } : {}),
+        });
+        onSessionListRefresh?.();
+        if (resp.handoff_doc === false && resp.tier === "handoff") {
+          notify.warning(
+            "交接文档生成失败（原机日志暂不可读），已按普通新会话继续",
+          );
+        }
+        setLineageOverlay({
+          sessionId: resp.session_id,
+          title: "接手会话",
+          statusHint: null,
+        });
+      } catch (err) {
+        notify.error(err, "接手失败");
+      } finally {
+        setTakeoverSending(false);
+      }
+    },
+    [sessionId, takeoverSending, takeoverProvider, onSessionListRefresh, notify],
+  );
+  const handleResetToolReport = useCallback(async () => {
+    if (!sessionId || resetting) return;
+    setResetting(true);
+    try {
+      await resetToolReportSession(sessionId);
+      await qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
+      onSessionListRefresh?.();
+      notify.success("已重置为未激活，可重新发起接手");
+    } catch (err) {
+      notify.error(err, "重置失败");
+    } finally {
+      setResetting(false);
+    }
+  }, [sessionId, resetting, qc, onSessionListRefresh, notify]);
+
   const [localReportOpen, setLocalReportOpen] = useState(false);
   // CtxUsageBar：环分子（task-08 / FR-01 改口径）= displayTurns 逆序第一个非 null
   // 的 ctxTokens（最近一次模型调用提示词大小，瞬时量；SSE 实时 + runsMeta 历史回填
@@ -3155,6 +3226,14 @@ export function SessionPanelPage({
       notify.warning(
         `单条消息最长 ${MAX_PROMPT_LEN} 字（当前 ${prompt.length} 字），请精简后再发送`,
       );
+      return;
+    }
+    // 2026-09-30-tool-report task-07（D-006@v1）：未激活 tool_report 会话发送 =
+    // 分叉式接手（takeover 端点，成功即跳接手会话浮层）——不走占位轮 inject 路径
+    // （后端对 pending tool_report 的 inject 恒 409 指引 takeover）。
+    if (isToolReportBody) {
+      void handleTakeoverSend(prompt);
+      setInput("");
       return;
     }
     const teamCmd = parseTeamCommand(prompt);
@@ -4778,11 +4857,53 @@ export function SessionPanelPage({
           }}
           onClose={closeTeamPopover}
         />
+        {/* 2026-09-30-tool-report task-07（FR-06）：tool_report 会话接手 chrome——
+            未激活=衔接提示条（native 绿/handoff 黄）+ handoff 引擎选择器 + 原机
+            离线红条；存量已激活（旧懒激活钉死）=「重置为未激活」一键恢复入口。 */}
+        {session.origin === "tool_report" && isToolReportBody && (
+          <div className="mb-2 flex flex-wrap items-center gap-2 px-5 text-xs">
+            <TakeoverBridgeNote
+              chrome={takeoverChrome}
+              harness={takeoverHarness}
+              provider={takeoverProvider}
+              onProviderChange={setTakeoverProvider}
+            />
+          </div>
+        )}
+        {session.origin === "tool_report" &&
+          !isToolReportBody &&
+          session.status === "active" &&
+          turnState.currentRunId == null && (
+            <div className="mb-2 px-5 text-xs">
+              <button
+                type="button"
+                className="rounded-md border border-red-200 px-2 py-1 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                disabled={resetting}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "重置为未激活会话？将解除机器绑定（清空 lease / runtime / 轮次计数，丢弃失败轮），会话回到本地日志回放状态，可重新发起接手。本地日志与历史回放不受影响。",
+                    )
+                  ) {
+                    void handleResetToolReport();
+                  }
+                }}
+              >
+                {resetting ? "重置中…" : "重置为未激活"}
+              </button>
+            </div>
+          )}
         <SessionInputBar
           value={input}
           onChange={setInput}
           onSend={handleSend}
-          disabled={sendingDisabled}
+          disabled={
+            sendingDisabled ||
+            // task-07（D-002@v1 原机优先）：未激活 tool_report 会话原机离线 →
+            // 输入禁用（回放仍可浏览；接手必须原机在线，宁拒不换机）。
+            (isToolReportBody && !takeoverChrome.machineOnline) ||
+            takeoverSending
+          }
           placeholder={placeholder}
           creating={false}
           // 2026-08-20 task-12：附件门控（D-6 codex 禁用；FR-10 降级提示）与回传。
