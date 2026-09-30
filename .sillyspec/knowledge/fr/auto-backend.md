@@ -71,3 +71,108 @@ created_at: 2026-09-28T13:59:17.523Z
 - 场景：默认场景 — Given 系统就绪；When sillyspec knowledge validate 无 errors；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-28-knowledge-inbox-clear/requirements.md#FR-07
 最近确认：e723b484ed1475bdff0907cd3be3dfbf5bc8e4a1
+
+## FR-auto-backend-086 收养后的语义标题在模板 H1 documents 推送与全量 reparse 后保持不变（不被回翻为
+变更：2026-09-30-title-adopt-clobber-guard
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 收养后的语义标题在模板 H1 documents 推送与全量 reparse 后保持不变（不被回翻为 key 派生名）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-30-title-adopt-clobber-guard/requirements.md#FR-01
+最近确认：5da89fb8c48a2117e379b3d759cc72b19e1b33c4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-30-title-adopt-clobber-guard:flow:FR-01
+  tests: backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_adopted_title_survives_template_docs_push（documents | backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_apply_parsed_fallback_keeps_semantic_title（reparse
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-30-title-adopt-clobber-guard
+  status: active
+
+## FR-auto-backend-087 自定义 H1（--title 改名通道）经 documents 推送/reparse 仍能覆盖既有标
+变更：2026-09-30-title-adopt-clobber-guard
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 自定义 H1（--title 改名通道）经 documents 推送/reparse 仍能覆盖既有标题（改名能力不回归）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-30-title-adopt-clobber-guard/requirements.md#FR-02
+最近确认：5da89fb8c48a2117e379b3d759cc72b19e1b33c4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-30-title-adopt-clobber-guard:flow:FR-02
+  tests: backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_apply_parsed_fallback_keeps_semantic_title | backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_custom_h1_docs_push_overrides_adopted_title（documents | backend/app/modules/change/tests/test_title_normalization.py::TestUpsertDocumentsTitle::test_custom_h1_in_deepest_doc_wins（既有改名回归保护
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-30-title-adopt-clobber-guard
+  status: active
+
+## FR-auto-backend-088 body.changes[].title 超 500 字时截断到 500 再落库，收养段写库异常仅告
+变更：2026-09-30-title-adopt-clobber-guard
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When body.changes[].title 超 500 字时截断到 500 再落库，收养段写库异常仅告警不阻断 progress 上行（200 不变）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-30-title-adopt-clobber-guard/requirements.md#FR-03
+最近确认：5da89fb8c48a2117e379b3d759cc72b19e1b33c4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-30-title-adopt-clobber-guard:flow:FR-03
+  tests: backend/app/modules/platform_sync/tests/test_change_deleted_guard.py::test_long_cli_title_truncated_progress_still_ok（600
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-30-title-adopt-clobber-guard
+  status: active
+
+## FR-auto-backend-089 兜底形态判定（空/等于 key/等于去日期前缀）与 500 上限收敛到 title_norm 一处，
+变更：2026-09-30-title-adopt-clobber-guard
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 上限 相关模块就绪；When 兜底形态判定（空/等于 key/等于去日期前缀）与 500 上限收敛到 title_norm 一处，三条写路径共用；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-30-title-adopt-clobber-guard/requirements.md#FR-04
+最近确认：5da89fb8c48a2117e379b3d759cc72b19e1b33c4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-30-title-adopt-clobber-guard:flow:FR-04
+  tests: backend/app/modules/change/tests/test_title_normalization.py::TestIsFallbackDisplayTitle（四态兜底判定纯函数 | backend/app/modules/change/tests/test_title_normalization.py::TestUpsertDocumentsTitle::test_existing_row_title_refreshed（裸模板文本仍可被刷新——判定收敛不破坏既有语义）
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-30-title-adopt-clobber-guard
+  status: active
+
+## FR-auto-backend-090 相关测试全绿（platform_sync 收养/documents 交互 + title_norm
+变更：2026-09-30-title-adopt-clobber-guard
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 相关测试全绿（platform_sync 收养/documents 交互 + title_norm 助手 + _apply_parsed 守卫）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-30-title-adopt-clobber-guard/requirements.md#FR-05
+最近确认：5da89fb8c48a2117e379b3d759cc72b19e1b33c4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-30-title-adopt-clobber-guard:flow:FR-05
+  tests: backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/platform_sync/tests/test_change_deleted_guard.py | backend/app/modules/platform_sync/tests/test_router.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-30-title-adopt-clobber-guard
+  status: active

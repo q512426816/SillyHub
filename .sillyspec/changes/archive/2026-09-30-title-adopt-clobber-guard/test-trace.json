@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-30-title-adopt-clobber-guard",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-30-title-adopt-clobber-guard:flow:FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_adopted_title_survives_template_docs_push（documents",
+        "backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_apply_parsed_fallback_keeps_semantic_title（reparse"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-title-adopt-clobber-guard"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-09-30-title-adopt-clobber-guard:flow:FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_apply_parsed_fallback_keeps_semantic_title",
+        "backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_custom_h1_docs_push_overrides_adopted_title（documents",
+        "backend/app/modules/change/tests/test_title_normalization.py::TestUpsertDocumentsTitle::test_custom_h1_in_deepest_doc_wins（既有改名回归保护"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-title-adopt-clobber-guard"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-09-30-title-adopt-clobber-guard:flow:FR-03",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_change_deleted_guard.py::test_long_cli_title_truncated_progress_still_ok（600"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-title-adopt-clobber-guard"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-09-30-title-adopt-clobber-guard:flow:FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_title_normalization.py::TestIsFallbackDisplayTitle（四态兜底判定纯函数",
+        "backend/app/modules/change/tests/test_title_normalization.py::TestUpsertDocumentsTitle::test_existing_row_title_refreshed（裸模板文本仍可被刷新——判定收敛不破坏既有语义）"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-title-adopt-clobber-guard"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-09-30-title-adopt-clobber-guard:flow:FR-05",
+      "tests": [
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/platform_sync/tests/test_change_deleted_guard.py",
+        "backend/app/modules/platform_sync/tests/test_router.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-30-title-adopt-clobber-guard"
+    }
+  ]
+}

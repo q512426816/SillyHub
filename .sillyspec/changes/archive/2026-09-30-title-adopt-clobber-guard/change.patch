@@ -1,0 +1,612 @@
+diff --git a/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/flow-state.yaml b/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/flow-state.yaml
+new file mode 100644
+index 000000000..ce4a80b49
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/flow-state.yaml
+@@ -0,0 +1,10 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: fb4d88e5251e376b441cc9a88dc49889a3976cdf
++updatedAt: '2026-09-30T00:34:57.844Z'
++baseline_sha256: ceebb45e1d6aedea5a518c5d91f4eee880b0039bc4ca36ba2676a4ff8d751518
++
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index a94c20583..9b11bf253 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -2763,7 +2763,17 @@ class ChangeService:
+         *,
+         workspace_id: uuid.UUID,
+     ) -> None:
+-        row.title = parsed.title
++        # 兜底回翻守卫（2026-09-30-title-adopt-clobber-guard 发现1）：parsed.title
++        # 为兜底形态（模板 H1/缺失 → key 派生名）而既有 title 已是语义标题（自定义
++        # H1 / platform_sync CLI 收养概括 _ensure_change_row）时不覆盖——reparse 不得
++        # 把收养标题回翻成 key 派生名；自定义 H1 派生值非兜底形态，恒覆盖（改名
++        # 能力不回归）。判定与收养/documents 守卫同源（title_norm，三写路径共用）。
++        from app.modules.change.title_norm import is_fallback_display_title
++
++        if is_fallback_display_title(row.title, parsed.change_key) or not is_fallback_display_title(
++            parsed.title, parsed.change_key
++        ):
++            row.title = parsed.title
+         # 2026-09-28-change-list-description：文件是权威源（proposal.md 动机段），
+         # 与 title 同口径整体覆盖——动机段被删/清空时描述随 None。
+         row.description = parsed.description
+diff --git a/backend/app/modules/change/tests/test_title_normalization.py b/backend/app/modules/change/tests/test_title_normalization.py
+index 5d412185e..7d43bb315 100644
+--- a/backend/app/modules/change/tests/test_title_normalization.py
++++ b/backend/app/modules/change/tests/test_title_normalization.py
+@@ -271,6 +271,121 @@ class TestUpsertDocumentsTitle:
+         assert row.path == f"changes/{name}"
+ 
+ 
++# ── 2026-09-30-title-adopt-clobber-guard：兜底形态判定 + 三写路径回翻守卫 ────────
++
++
++class TestIsFallbackDisplayTitle:
++    """title 兜底形态判定（三写路径共用）：空 / 裸 key / 去前缀语义名 / 裸模板 H1 文本。"""
++
++    def test_empty_and_missing(self) -> None:
++        from app.modules.change.title_norm import is_fallback_display_title
++
++        assert is_fallback_display_title(None, "2026-09-30-x") is True
++        assert is_fallback_display_title("", "2026-09-30-x") is True
++        assert is_fallback_display_title("   ", "2026-09-30-x") is True
++
++    def test_key_and_semantic_forms(self) -> None:
++        from app.modules.change.title_norm import is_fallback_display_title
++
++        assert is_fallback_display_title("2026-09-30-x", "2026-09-30-x") is True
++        assert is_fallback_display_title("x", "2026-09-30-x") is True
++        # key 无日期前缀 → semantic 即 key 本身
++        assert is_fallback_display_title("bare-key", "bare-key") is True
++
++    def test_raw_template_h1_text_is_fallback(self) -> None:
++        from app.modules.change.title_norm import is_fallback_display_title
++
++        # 历史行存过 raw 模板标题（见 test_existing_row_title_refreshed 场景）——
++        # 无语义同兜底，可被收养 / 重派生刷新
++        assert is_fallback_display_title("提案书（Proposal）", "2026-09-30-x") is True
++        assert is_fallback_display_title("设计文档（Design）—— 旧稿", "2026-09-30-x") is True
++
++    def test_semantic_titles_not_fallback(self) -> None:
++        from app.modules.change.title_norm import is_fallback_display_title
++
++        assert is_fallback_display_title("知识页伪域池一键归位", "2026-09-30-x") is False
++        assert is_fallback_display_title("提案：共识收口", "2026-09-30-x") is False
++
++
++async def _seed_change_row(db_session: Any, ws_id: Any, name: str, title: str | None) -> None:
++    from app.modules.change.model import Change
++
++    db_session.add(
++        Change(
++            id=uuid.uuid4(),
++            workspace_id=ws_id,
++            change_key=name,
++            title=title,
++            status="active",
++            location="active",
++            path=f"changes/{name}",
++            updated_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++
++async def _adopt_cli_title(db_session: Any, ws_id: Any, name: str, cli_title: str) -> None:
++    """service 直调 CLI 收养通道（_ensure_change_row，deleted_guard 测试同范式）。"""
++    from app.modules.platform_sync.service import PlatformSyncService
++
++    body = {
++        "changes": [
++            {"name": name, "current_stage": "execute", "status": "in_progress", "title": cli_title}
++        ]
++    }
++    await PlatformSyncService(db_session)._ensure_change_row(ws_id, name, body)
++
++
++class TestAdoptedTitleClobberGuard:
++    """收养标题不被文档派生兜底值回翻（documents 推送 / reparse 两路径）。"""
++
++    async def test_adopted_title_survives_template_docs_push(self, db_session) -> None:
++        """收养中文概括后 routine 模板 H1 文档推送 → title 保持收养值不回翻。"""
++        ws_id = await _make_workspace(db_session)
++        name = "2026-09-30-ta"
++        await _seed_change_row(db_session, ws_id, name, name)
++        await _adopt_cli_title(db_session, ws_id, name, "知识页伪域池一键归位")
++        assert (await _get_change(db_session, ws_id, name)).title == "知识页伪域池一键归位"
++
++        await _push_documents(db_session, ws_id, name, dict(_TEMPLATE_DOCS))
++        assert (await _get_change(db_session, ws_id, name)).title == "知识页伪域池一键归位", (
++            "模板 H1 documents 推送不得把收养标题回翻成 key 派生名"
++        )
++
++    async def test_custom_h1_docs_push_overrides_adopted_title(self, db_session) -> None:
++        """自定义 H1（--title 改名通道）文档推送仍覆盖收养标题（改名能力不回归）。"""
++        ws_id = await _make_workspace(db_session)
++        name = "2026-09-30-tb"
++        await _seed_change_row(db_session, ws_id, name, None)
++        await _adopt_cli_title(db_session, ws_id, name, "治理卡明细深链体验优化")
++        docs = dict(_TEMPLATE_DOCS)
++        docs["tasks.md"] = "# 我重新命名的变更\n\n- task-01"
++        await _push_documents(db_session, ws_id, name, docs)
++        assert (await _get_change(db_session, ws_id, name)).title == "我重新命名的变更", (
++            "自定义 H1 文档推送应覆盖收养标题"
++        )
++
++    def test_apply_parsed_fallback_keeps_semantic_title(self) -> None:
++        """reparse 兜底派生值不覆盖语义标题；自定义派生值仍覆盖（单元级）。"""
++        from app.modules.change.model import Change
++        from app.modules.change.parser import ParsedChange
++        from app.modules.change.service import ChangeService
++
++        name = "2026-09-30-tc"
++        row = Change(change_key=name, title="收养的中文标题")
++        # 兜底形态派生值（模板 H1/缺失 → key 去日期前缀）：不回翻语义标题
++        ChangeService._apply_parsed(
++            row, ParsedChange(change_key=name, title="tc"), workspace_id=uuid.uuid4()
++        )
++        assert row.title == "收养的中文标题", "reparse 兜底派生值不得覆盖语义标题"
++        # 自定义 H1 派生值：恒覆盖（改名通道）
++        ChangeService._apply_parsed(
++            row, ParsedChange(change_key=name, title="新自定义名"), workspace_id=uuid.uuid4()
++        )
++        assert row.title == "新自定义名", "自定义 H1 派生值仍应覆盖（改名能力不回归）"
++
++
+ # ── _sync_docs 存量 MASTER 脏行清理（P3 收敛环）───────────────────────────────
+ 
+ 
+diff --git a/backend/app/modules/change/title_norm.py b/backend/app/modules/change/title_norm.py
+index 4fdb23890..4f49c38d6 100644
+--- a/backend/app/modules/change/title_norm.py
++++ b/backend/app/modules/change/title_norm.py
+@@ -89,6 +89,31 @@ def normalize_display_title(h1: str | None, change_key: str) -> str:
+     return stripped
+ 
+ 
++#: title 落库上限（与 Change.title String(500) 同宽）。CLI ``body.changes[].title``
++#: 无 schema 长度校验（progress 裸 dict 透传），写侧统一截断防 Postgres 列宽溢出
++#: （SQLite 测试库不强制列宽、拦不住——2026-09-30-title-adopt-clobber-guard 发现2）。
++TITLE_MAX_LEN = 500
++
++
++def is_fallback_display_title(title: str | None, change_key: str) -> bool:
++    """title 是否为兜底形态：空 / 等于 change_key / 等于去日期前缀语义名 / 裸模板 H1 文本。
++
++    2026-09-30-title-adopt-clobber-guard：title 的三条写路径（platform_sync CLI
++    收养 ``_ensure_change_row``、documents 推送 ``_sync_change_title_from_documents``
++    、reparse ``_apply_parsed``）共用此判定，统一规则——兜底形态（无语义）可被
++    任一来源升级；语义标题（自定义 H1 / 收养的 CLI 概括）只被自定义 H1
++    （--title 改名通道，派生值非兜底形态）覆盖，不被兜底形态回翻。裸模板 H1
++    文本（历史行存过 raw 模板标题）无语义，同判兜底（可被重派生刷新）。
++    """
++    cur = (title or "").strip()
++    if not cur:
++        return True
++    if TEMPLATE_H1_RE.match(cur):
++        return True
++    semantic = DISPLAY_KEY_PREFIX_RE.sub("", change_key).strip() or change_key
++    return cur in (change_key, semantic)
++
++
+ # ── 变更描述提取（2026-09-28-change-list-description）────────────────────────
+ #
+ # 列表辨识痛点：title 提取自 proposal H1，CLI 模板 H1 归一化后回退 key 派生名，
+diff --git a/backend/app/modules/platform_sync/service.py b/backend/app/modules/platform_sync/service.py
+index 5b05c4aef..b3e4fcd2d 100644
+--- a/backend/app/modules/platform_sync/service.py
++++ b/backend/app/modules/platform_sync/service.py
+@@ -46,7 +46,11 @@ from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionL
+ 
+ # ql-20260909-016：pending 集缓存失效挂点（change.pending_cache 只依赖 redis，无环）。
+ from app.modules.change.pending_cache import bump_pending_epoch
+-from app.modules.change.title_norm import DISPLAY_KEY_PREFIX_RE
++from app.modules.change.title_norm import (
++    DISPLAY_KEY_PREFIX_RE,
++    TITLE_MAX_LEN,
++    is_fallback_display_title,
++)
+ from app.modules.daemon.session_events import publish_sessions_changed
+ from app.modules.platform_sync.model import (
+     AgentSessionLogORM,
+@@ -693,6 +697,44 @@ class PlatformSyncService:
+             )
+         ).scalar_one_or_none()
+         if existing is not None:
++            # 既有行标题收养（用户需求 2026-09-29：CLI 上行 changes[].title 为 agent 总结的
++            # 中文概括 ≤50 字）：行 title 为兜底形态（空/等于 key/等于去日期前缀/裸模板 H1
++            # 文本，判定收敛 title_norm.is_fallback_display_title——2026-09-30-title-adopt-
++            # clobber-guard task-01）时采纳上行标题；已有语义标题（自定义 H1 / 已收养概括）
++            # 不覆盖（改标题走 CLI 重入 --title 的文档推送改名通道，派生值非兜底形态恒覆盖）。
++            # 发现2 加固：TITLE_MAX_LEN 截断（body 裸 dict 无 schema 校验，防 Postgres
++            # String(500) 列宽溢出）+ 写库 try/except best-effort（与下方占位建行同约定），
++            # 失败仅告警不阻断进度上行主流程。
++            info_existing = next(
++                (
++                    c
++                    for c in (body.get("changes") or [])
++                    if isinstance(c, dict) and c.get("name") == name
++                ),
++                {},
++            )
++            body_title = str(info_existing.get("title") or "").strip()[:TITLE_MAX_LEN]
++            if (
++                body_title
++                and is_fallback_display_title(existing.title, name)
++                and (existing.title or "").strip() != body_title
++            ):
++                existing.title = body_title
++                try:
++                    await self._session.commit()
++                    log.info(
++                        "platform_sync.change_title_adopted_from_body",
++                        workspace_id=str(workspace_id),
++                        change_key=name,
++                    )
++                except Exception as exc:
++                    await self._session.rollback()
++                    log.warning(
++                        "platform_sync.change_title_adopt_failed",
++                        workspace_id=str(workspace_id),
++                        change_key=name,
++                        error=str(exc),
++                    )
+             return
+         # task-04：行缺失 + manifest platform_deleted 前缀锚点 → 不建占位（防复活）。
+         if await self._change_key_deleted(workspace_id, name):
+@@ -715,7 +757,9 @@ class PlatformSyncService:
+             id=uuid.uuid4(),
+             workspace_id=workspace_id,
+             change_key=name,
+-            title=info.get("title") or name,
++            # 同收养段口径：CLI body title 裸 dict 无校验，截 TITLE_MAX_LEN
++            # 防列宽溢出；空值回落 change_key（2026-09-30-title-adopt-clobber-guard）。
++            title=(str(info.get("title") or "").strip()[:TITLE_MAX_LEN]) or name,
+             status="draft",
+             location="active",
+             # platform-managed 镜像扁平布局（无 .sillyspec/ 包裹），与 parser
+@@ -1164,6 +1208,7 @@ class PlatformSyncService:
+         from app.modules.change.title_norm import (
+             extract_description,
+             extract_h1,
++            is_fallback_display_title,
+             normalize_display_title,
+         )
+ 
+@@ -1205,7 +1250,17 @@ class PlatformSyncService:
+                         h1 = extract_h1(content)
+                         if h1 is not None:
+                             break
+-                row.title = normalize_display_title(h1, name)
++                new_title = normalize_display_title(h1, name)
++                # 兜底回翻守卫（2026-09-30-title-adopt-clobber-guard 发现1）：派生值
++                # 为兜底形态（模板 H1/缺失 → key 派生名）而既有 title 已是语义标题
++                # （自定义 H1 / CLI 收养概括 _ensure_change_row）时不覆盖——routine
++                # 文档同步不得把收养标题回翻成 key 派生名；自定义 H1（--title 改名
++                # 通道）派生值非兜底形态，恒覆盖不受影响。判定与收养守卫同源
++                # （title_norm.is_fallback_display_title，三写路径共用）。
++                if is_fallback_display_title(row.title, name) or not is_fallback_display_title(
++                    new_title, name
++                ):
++                    row.title = new_title
+                 # 2026-09-28-change-list-description：描述只在 proposal.md 随本次推送
+                 # 在场时重派生（与 parser 同源 title_norm.extract_description，reparse
+                 # 不回翻）；部分推送（仅深阶段文档）不动既有描述——best-effort 只补不改。
+diff --git a/backend/app/modules/platform_sync/tests/test_change_deleted_guard.py b/backend/app/modules/platform_sync/tests/test_change_deleted_guard.py
+index 20a7aad50..5001af83f 100644
+--- a/backend/app/modules/platform_sync/tests/test_change_deleted_guard.py
++++ b/backend/app/modules/platform_sync/tests/test_change_deleted_guard.py
+@@ -522,3 +522,125 @@ async def test_cli_tombstone_archived_idempotent(client, db_session):
+         assert resp.status_code == 200
+     change = await _get_change(db_session, ws_id, "tomb-arch2")
+     assert change.location == "active", "archived 载荷幂等 no-op，不动 location"
++
++
++async def test_body_title_adopted_for_existing_row(client, db_session):
++    """上行 changes[].title 收养既有行（用户需求 2026-09-29：CLI 标题为中文概括 ≤50 字）。
++
++    空 / 等于 change_key / 等于 key 去日期前缀语义名（模板 H1 归一化的英文 key 兜底）
++    → 采纳上行标题；已有语义标题不覆盖。
++    """
++    from datetime import UTC, datetime
++
++    from app.modules.change.model import Change
++
++    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
++
++    async def _seed(name: str, title: str | None):
++        db_session.add(
++            Change(
++                id=_uuid.uuid4(),
++                workspace_id=ws_id,
++                change_key=name,
++                title=title,
++                status="active",
++                location="active",
++                path=f"changes/{name}",
++                created_at=datetime.now(UTC),
++                updated_at=datetime.now(UTC),
++            )
++        )
++        await db_session.commit()
++
++    async def _push_with_title(name: str, title: str):
++        body = {
++            "project": {"name": "demo"},
++            "changes": [
++                {"name": name, "current_stage": "execute", "status": "in_progress", "title": title}
++            ],
++            "stages": [],
++            "steps": [],
++            "batch_progress": [],
++            "approvals": [],
++        }
++        return await _push(client, headers[0], name, body=body)
++
++    # ① title == change_key（英文 key 兜底形态）→ 收养
++    await _seed("2026-09-29-ta", "2026-09-29-ta")
++    assert (await _push_with_title("2026-09-29-ta", "知识页伪域池一键归位")).status_code == 200
++    assert (await _get_change(db_session, ws_id, "2026-09-29-ta")).title == "知识页伪域池一键归位"
++
++    # ② title == key 去日期前缀语义名 → 收养
++    await _seed("2026-09-29-tb", "tb")
++    assert (await _push_with_title("2026-09-29-tb", "治理卡明细深链体验优化")).status_code == 200
++    assert (await _get_change(db_session, ws_id, "2026-09-29-tb")).title == "治理卡明细深链体验优化"
++
++    # ③ title 空 → 收养
++    await _seed("2026-09-29-tc", None)
++    assert (await _push_with_title("2026-09-29-tc", "变更列表筛选与描述行")).status_code == 200
++    assert (await _get_change(db_session, ws_id, "2026-09-29-tc")).title == "变更列表筛选与描述行"
++
++    # ④ 已有语义标题 → 不覆盖
++    await _seed("2026-09-29-td", "已有中文语义标题")
++    assert (await _push_with_title("2026-09-29-td", "上行的新标题")).status_code == 200
++    assert (await _get_change(db_session, ws_id, "2026-09-29-td")).title == "已有中文语义标题"
++
++    # ⑤ 占位行新建（行缺失）→ title 直接取上行
++    assert (await _push_with_title("2026-09-29-te", "新占位行的中文标题")).status_code == 200
++    assert (await _get_change(db_session, ws_id, "2026-09-29-te")).title == "新占位行的中文标题"
++
++
++# ── 2026-09-30-title-adopt-clobber-guard：CLI 超长标题截断（发现2·HTTP 面）──
++
++
++async def test_long_cli_title_truncated_progress_still_ok(client, db_session):
++    """body.changes[].title 超 500 字 → 截断 500 落库、progress 上行仍 200。
++
++    body 裸 dict 无 schema 长度校验，Change.title 为 String(500)（Postgres 强制
++    列宽、SQLite 测试库不强制）——写侧统一截断防生产溢出，且截断/收养写库
++    best-effort 不阻断上行主流程。
++    """
++    from datetime import UTC, datetime
++
++    from app.modules.change.model import Change
++
++    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
++    name = "2026-09-30-long-title"
++    db_session.add(
++        Change(
++            id=_uuid.uuid4(),
++            workspace_id=ws_id,
++            change_key=name,
++            title=name,
++            status="active",
++            location="active",
++            path=f"changes/{name}",
++            created_at=datetime.now(UTC),
++            updated_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++    resp = await _push(
++        client,
++        headers[0],
++        name,
++        body={
++            "project": {"name": "demo"},
++            "changes": [
++                {
++                    "name": name,
++                    "current_stage": "execute",
++                    "status": "in_progress",
++                    "title": "甲" * 600,
++                }
++            ],
++            "stages": [],
++            "steps": [],
++            "batch_progress": [],
++            "approvals": [],
++        },
++    )
++    assert resp.status_code == 200, "超长 title 截断后落库，不得阻断 progress 上行"
++    change = await _get_change(db_session, ws_id, name)
++    assert change.title == "甲" * 500, "落库前应截断到 TITLE_MAX_LEN（Change.title String(500)）"
+diff --git a/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/design.md b/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/design.md
+new file mode 100644
+index 000000000..b402b5530
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T00:34:57.823Z
++---
++# 设计记录（Design Record）— 2026-09-30-title-adopt-clobber-guard
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-title-adopt-clobber-guard 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++收敛「title 兜底形态」判定到 title_norm.is_fallback_display_title 一处（空 / 等于 change_key / 等于去日期前缀语义名 / 裸模板 H1 文本四态；裸模板文本入列是既有回归 test_existing_row_title_refreshed 的语义——raw 模板标题无语义、须可被重派生刷新），配 TITLE_MAX_LEN=500（与 Change.title String(500) 同宽）。三条 title 写路径统一规则：兜底形态可被任一来源升级；语义标题（自定义 H1 / CLI 收养概括）只被自定义 H1（--title 改名通道，派生值非兜底形态）覆盖，不被兜底形态回翻。落点：① platform_sync `_ensure_change_row` 收养段判定换助手 + body_title 截断 + commit 包 try/except best-effort，占位建行 title 同口径截断；② `_sync_change_title_from_documents` 派生值兜底且既有语义标题时跳过覆盖；③ change `_apply_parsed`（reparse）同规则守卫。选此方案而非给收养标题加「来源标记」字段：三写路径只差一个纯函数判定，无 schema 变更、无迁移，判定收敛后 reparse 与 documents 的既有同源幂等（title_norm 2026-09-16 收敛）不受扰。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-title-adopt-clobber-guard 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++对外端点签名零变化。行为变化三处：① POST /changes/{name}/progress——body.changes[].title 超过 500 字时落库值截断为前 500 字（此前超长值在 Postgres 会让请求 500，SQLite 测试库静默存全量）；收养写库失败（DB 故障）降级为告警日志 platform_sync.change_title_adopt_failed，上行仍 200。② documents 推送 / reparse——派生 title 为兜底形态（key 派生名）而库里已是语义标题时不再覆盖（此前无条件覆盖，收养标题被回翻）；自定义 H1 派生值恒覆盖不变。③ title_norm 新增纯函数 is_fallback_display_title(title, change_key) -> bool 与常量 TITLE_MAX_LEN（无新依赖）。CLI 契约（≤50 字概括）不受影响。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-title-adopt-clobber-guard 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：收养（progress）与文档派生（documents/reparse）到达顺序无关化——两方向都不回翻语义标题；模板 H1 迟到推送不再冲掉收养值（本次主缺陷）。若用户把自定义 H1 改回模板形态，标题保留旧语义值不回退——与收养守卫同语义（兜底永不赢过语义），接受此权衡。
++2. 并发写：收养写包 try/except + rollback，失败仅告警（占位建行 race-lost 同范式）；documents 侧本有 begin_nested + IntegrityError/Exception 双兜底；reparse 单事务。两进程同时收养同一行：后 commit 者胜，值都是 CLI 同源概括，无撕裂。
++3. 切换/生命周期：收养失败 rollback 后 existing 身份映射过期对象随即 return 不再被读，无脏属性外泄；progress 上行主流程（_apply 已 commit 的进度行）不被收养失败拖垮。
++4. 作用域：判定与写入均带 workspace_id + change_key 双键，无跨工作区串台面；is_fallback_display_title 为纯函数无状态。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-title-adopt-clobber-guard 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：兜底判定把「裸模板 H1 文本」也算兜底——若作者刻意把自定义标题写成恰命中 TEMPLATE_H1_RE 的纯类型词文案（如就叫「提案书」），其标题会被收养/重派生刷新掉。该口径与 normalize_display_title 既有判定同源，非新标准；真实碰撞面可忽略。放弃的方案：a) Change 加 title_source 标记列区分收养/派生来源——需 schema 变更且两文档路径都要改判定，收益不抵复杂度；b) 只守 documents 路径不守 reparse——审查实证 _apply_parsed 同样无条件覆盖，漏守即缺陷残留（test_apply_parsed_fallback_keeps_semantic_title 先红实证）。遗留（超出本变更）：documents H1 派生值超 500 字在 Postgres 仍会 DataError（documents 路径有 broad except 降级告警；reparse 路径会使该次扫描失败——预存行为，触发需 500+ 字 H1 的病态输入）。
+diff --git a/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/proposal.md b/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/proposal.md
+new file mode 100644
+index 000000000..5c87a2040
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/proposal.md
+@@ -0,0 +1,40 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T00:34:57.823Z
++---
++# 提案书（Proposal）— 2026-09-30-title-adopt-clobber-guard
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:4a70f56869ed36f3b7d6af564b954f1cdc419c75ceb04c2150f0dcf9995d37c6:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-title-adopt-clobber-guard 留痕重锚 -->
++任务原话转写：标题收养（工作区未提交的 _ensure_change_row 改动）与文档派生两条写路径互相覆盖，且收养段写库无保护：CLI 收养中文标题后，documents 推送（_sync_change_title_from_documents service.py:1232）与全量 reparse（_apply_parsed change/service.py:2766）都会把它无条件回写成 key 派生兜底名，标题随推送顺序翻转；同时 body.changes[].title 裸 dict 无长度校验（Change.title String(500)，Postgres 强制列宽），收养段 commit 无 try/except，异常会让 progress 上行 500 且部分状态已落库。
++成功标准：
++- 收养后的语义标题在模板 H1 documents 推送与全量 reparse 后保持不变（不被回翻为 key 派生名）
++- 自定义 H1（--title 改名通道）经 documents 推送/reparse 仍能覆盖既有标题（改名能力不回归）
++- body.changes[].title 超 500 字时截断到 500 再落库，收养段写库异常仅告警不阻断 progress 上行（200 不变）
++- 兜底形态判定（空/等于 key/等于去日期前缀）与 500 上限收敛到 title_norm 一处，三条写路径共用
++- 相关测试全绿（platform_sync 收养/documents 交互 + title_norm 助手 + _apply_parsed 守卫）
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:b73bc62f0c3413006f6dacc7fa812b6e17772f44d82c91db107132392b825561:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-title-adopt-clobber-guard 留痕重锚 -->
++按成功标准机械推导，共 5 条验收面：
++1. 收养后的语义标题在模板 H1 documents 推送与全量 reparse 后保持不变（不被回翻为 key 派生名）
++2. 自定义 H1（--title 改名通道）经 documents 推送/reparse 仍能覆盖既有标题（改名能力不回归）
++3. body.changes[].title 超 500 字时截断到 500 再落库，收养段写库异常仅告警不阻断 progress 上行（200 不变）
++4. 兜底形态判定（空/等于 key/等于去日期前缀）与 500 上限收敛到 title_norm 一处，三条写路径共用
++5. 相关测试全绿（platform_sync 收养/documents 交互 + title_norm 助手 + _apply_parsed 守卫）
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:5ee570d7c8ee79d4b6c9a96d89ad31f59a47188b622087f5f6424225c90182a9:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-09-30-title-adopt-clobber-guard 留痕重锚 -->
++1. 收养后的语义标题在模板 H1 documents 推送与全量 reparse 后保持不变（不被回翻为 key 派生名）
++2. 自定义 H1（--title 改名通道）经 documents 推送/reparse 仍能覆盖既有标题（改名能力不回归）
++3. body.changes[].title 超 500 字时截断到 500 再落库，收养段写库异常仅告警不阻断 progress 上行（200 不变）
++4. 兜底形态判定（空/等于 key/等于去日期前缀）与 500 上限收敛到 title_norm 一处，三条写路径共用
++5. 相关测试全绿（platform_sync 收养/documents 交互 + title_norm 助手 + _apply_parsed 守卫）
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/requirements.md b/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/requirements.md
+new file mode 100644
+index 000000000..45429067f
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/requirements.md
+@@ -0,0 +1,57 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T00:34:57.823Z
++---
++# 需求规格（Requirements）— 2026-09-30-title-adopt-clobber-guard
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 收养后的语义标题在模板 H1 documents 推送与全量 reparse 后保持不变（不被回翻为
++Given 系统就绪
++When 收养后的语义标题在模板 H1 documents 推送与全量 reparse 后保持不变（不被回翻为 key 派生名）
++Then 行为符合本条标准描述
++
++### FR-02: 自定义 H1（--title 改名通道）经 documents 推送/reparse 仍能覆盖既有标
++Given 系统就绪
++When 自定义 H1（--title 改名通道）经 documents 推送/reparse 仍能覆盖既有标题（改名能力不回归）
++Then 行为符合本条标准描述
++
++### FR-03: body.changes[].title 超 500 字时截断到 500 再落库，收养段写库异常仅告
++Given 系统就绪
++When body.changes[].title 超 500 字时截断到 500 再落库，收养段写库异常仅告警不阻断 progress 上行（200 不变）
++Then 行为符合本条标准描述
++
++### FR-04: 兜底形态判定（空/等于 key/等于去日期前缀）与 500 上限收敛到 title_norm 一处，
++Given 上限 相关模块就绪
++When 兜底形态判定（空/等于 key/等于去日期前缀）与 500 上限收敛到 title_norm 一处，三条写路径共用
++Then 行为符合本条标准描述
++
++### FR-05: 相关测试全绿（platform_sync 收养/documents 交互 + title_norm 
++Given 测试 相关模块就绪
++When 相关测试全绿（platform_sync 收养/documents 交互 + title_norm 助手 + _apply_parsed 守卫）
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_adopted_title_survives_template_docs_push（documents 推送不回翻，实现前先红实证）
++- backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_apply_parsed_fallback_keeps_semantic_title（reparse 兜底派生不覆盖段，实现前先红实证）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_custom_h1_docs_push_overrides_adopted_title（documents 推送自定义 H1 覆盖收养标题）
++- backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_apply_parsed_fallback_keeps_semantic_title 后半段（ParsedChange 自定义 title 覆盖语义标题）
++- backend/app/modules/change/tests/test_title_normalization.py::TestUpsertDocumentsTitle::test_custom_h1_in_deepest_doc_wins（既有改名回归保护，不回归）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/app/modules/platform_sync/tests/test_change_deleted_guard.py::test_long_cli_title_truncated_progress_still_ok（600 字截 500 落库 + progress 上行仍 200；收养写库 try/except 为结构性 best-effort——失败注入需 mock commit，未单测，见 design 槽3/槽4）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/app/modules/change/tests/test_title_normalization.py::TestIsFallbackDisplayTitle（四态兜底判定纯函数：空/key/去前缀语义名/裸模板 H1 文本 vs 语义标题）
++- backend/app/modules/change/tests/test_title_normalization.py::TestUpsertDocumentsTitle::test_existing_row_title_refreshed（裸模板文本仍可被刷新——判定收敛不破坏既有语义）
++- TITLE_MAX_LEN 截断由 FR-03 绑定用例覆盖（断言 落库值 == "甲"*500）
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++- backend/app/modules/change/tests/test_title_normalization.py 全文件 35 用例（含既有归一化/描述提取回归）
++- backend/app/modules/platform_sync/tests/test_change_deleted_guard.py 全文件 18 用例（含收养五场景 + 删除守卫回归）
++- backend/app/modules/platform_sync/tests/test_router.py -k documents 5 用例（端点回归）
+diff --git a/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/tasks.md b/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/tasks.md
+new file mode 100644
+index 000000000..a77426835
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-30-title-adopt-clobber-guard/tasks.md
+@@ -0,0 +1,14 @@
++---
++author: flow-machine-draft
++created_at: 2026-09-30T00:34:57.824Z
++---
++# 任务注册表（Tasks）— 2026-09-30-title-adopt-clobber-guard
++
++> 机器预填草稿已被 agent 按实际实现路径覆写（保持 checkbox 行形态）；验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++- [x] task-01: title_norm 收敛两助手——`is_fallback_display_title`（空/等于 key/等于去日期前缀判定，三写路径共用）+ `TITLE_MAX_LEN=500`（与 Change.title String(500) 同宽），附 test_title_normalization.py 纯函数用例
++- [x] task-02: platform_sync `_ensure_change_row` 收养段加固——判定换 `is_fallback_display_title`、body_title 截断 TITLE_MAX_LEN、commit 包 try/except best-effort（失败告警不阻断 progress 上行）；占位建行 title 同口径截断；附超长截断 + 200 不变用例
++- [x] task-03: `_sync_change_title_from_documents` 兜底回翻守卫——派生值为兜底形态且既有 title 为语义标题时不覆盖；自定义 H1（--title 改名通道）恒覆盖；附收养后模板 H1 推送不回翻 / 自定义 H1 仍覆盖两用例
++- [x] task-04: change `_apply_parsed` 兜底回翻守卫（reparse 路径同规则）；附单元用例（兜底 parsed.title 不覆盖语义行 title / 自定义 parsed.title 仍覆盖）
++- [x] task-05: 相关测试全绿——test_change_deleted_guard.py + test_title_normalization.py + test_router.py -k documents + ruff/mypy 相关文件零新增问题
