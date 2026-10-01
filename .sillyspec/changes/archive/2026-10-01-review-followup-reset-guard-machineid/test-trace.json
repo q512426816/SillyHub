@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-01-review-followup-reset-guard-machineid",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-01-review-followup-reset-guard-machineid:flow:FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover.py::TestResetToolReport::test_reset_soft_deleted_session_rejected（软删会话重置"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-01-review-followup-reset-guard-machineid"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-01-review-followup-reset-guard-machineid:flow:FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/config-machine-id.test.ts::readOrCreateMachineId"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-01-review-followup-reset-guard-machineid"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-01-review-followup-reset-guard-machineid:flow:FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover.py",
+        "sillyhub-daemon/tests/config-machine-id.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-01-review-followup-reset-guard-machineid"
+    }
+  ]
+}

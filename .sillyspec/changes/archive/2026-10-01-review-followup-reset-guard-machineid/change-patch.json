@@ -1,0 +1,63 @@
+{
+  "change": "2026-10-01-review-followup-reset-guard-machineid",
+  "baseline": "5704be597e95e46d5aa46e1dafb2e192bb8c157d",
+  "head": "9f38792b6b354fb02d4e6b43d23726a68b1056e1",
+  "files": [
+    ".sillyspec/changes/2026-10-01-review-followup-reset-guard-machineid/design.md",
+    ".sillyspec/changes/2026-10-01-review-followup-reset-guard-machineid/flow-state.yaml",
+    ".sillyspec/changes/2026-10-01-review-followup-reset-guard-machineid/proposal.md",
+    ".sillyspec/changes/2026-10-01-review-followup-reset-guard-machineid/requirements.md",
+    ".sillyspec/changes/2026-10-01-review-followup-reset-guard-machineid/tasks.md",
+    "backend/app/modules/daemon/session/service/helpers.py",
+    "backend/app/modules/daemon/tests/test_takeover.py",
+    "sillyhub-daemon/src/config.ts",
+    "sillyhub-daemon/tests/config-machine-id.test.ts"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 226,
+    "deletions": 16
+  },
+  "savedAt": "2026-10-01T11:29:40.164Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "d54fdd84c618807daa2568241f634654536d64d632b9ceee22eb91b2fb78774b",
+  "patchStatus": "ok"
+}

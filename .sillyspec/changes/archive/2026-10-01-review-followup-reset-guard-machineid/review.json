@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-01-review-followup-reset-guard-machineid",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "n/a（不适用成立：reset 为单请求查询-守卫-单行写，machine-id 为单文件读改写，无事件序依赖——代码证实）",
+    "并发": "ok（边界已裁决：可接受——wx(O_EXCL|O_CREAT) 独占创建 + EEXIST 回读胜者在 config.ts 逐行兑现，并发首启先写者定型；放弃 temp+rename 的理由真实（并发 rename 仍 last-write-wins + Windows EPERM 面）；残片并发自愈或在途写 TOCTOU 窗口的瞬时分歧属已声明的 best-effort/下次读取自愈语义覆盖，非数据正确性风险）",
+    "切换": "ok（边界已裁决：可接受——写失败（只读 fs）返回内存值 best-effort 在代码兜底（catch 后 return id），不阻塞心跳；半写残片经 uuid 形状校验不达标，下次读取触发普通写截断覆写自愈——均与声明一致）",
+    "作用域": "ok（machine-id 随 SILLYHUB_DAEMON_DIR 隔离，测试 beforeEach mkdtemp+stubEnv 证实不污染真实身份文件；reset 守卫与 takeover.py:402 同形，无跨工作区串台面）"
+  },
+  "reviewedAt": "2026-10-01T11:32:20Z",
+  "_checklist": {
+    "FR三方一致": "FR-01/FR-02 实现与测试绑定逐条核实存在且断言该行为（软删 404 用例与残片自愈用例均在 patch 中，fixture/import 齐备）；FR-03 为测试执行面声明（16 passed/4 passed/ruff/typecheck 未独立复跑——只读纪律下验证了用例存在性与断言内容，无反证）",
+    "盲维四问": "四问作答与代码事实全部相符，无失实",
+    "披露边界裁决": [
+      "best-effort 写失败返回内存值（重启身份变化换心跳不阻塞）→ 可接受：身份文件非权威，代码确实兜底，最坏代价为服务端多一条机器记录",
+      "放弃 temp+rename 改用 wx+回读胜者 → 可接受：放弃理由（rename 并发仍 last-write-wins、Windows 目标占用 EPERM）技术上成立，wx 方案对主矛盾（并发首启双生成漂移）确实收敛",
+      "非 uuid 形（含大写 uuid/手工短码）即覆写 → 可接受：机器身份由 daemon 自生成小写 36 字符 uuid，非 uuid 形按损坏态处理且覆写一次后幂等",
+      "FR-03 仅跑触达文件相关测试不跑全量 → 可接受：两处行级修补各附先红后绿用例 + 同文件回归面，风险敞口与修补粒度相称"
+    ],
+    "防护声明": "wx=O_EXCL|O_CREAT 语义正确；EEXIST 回读胜者、残片覆写自愈、软删 404 守卫、takeover 同款对齐（takeover.py:402）均真实存在且生效",
+    "生成物同步": "n/a（patch 仅触达 helpers.py/test_takeover.py/config.ts/config-machine-id.test.ts + .sillyspec 流程文档，无 OpenAPI/前端类型/生成物面）"
+  }
+}
