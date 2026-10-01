@@ -602,3 +602,28 @@ class TestResetToolReport:
             headers=auth_headers,
         )
         assert resp.status_code == 404, resp.text
+
+    @pytest.mark.asyncio
+    async def test_reset_soft_deleted_session_rejected(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        mocked_redis,
+    ) -> None:
+        """软删（deleted_at 置位）会话重置 → 404（对齐 takeover 同款守卫）。
+
+        2026-10-01-review-followup-reset-guard-machineid task-01：reset 查询
+        原缺 deleted_at 过滤，软删会话可被属主重置并广播事件——守卫补齐后
+        与 takeover 会话查询完全同形。
+        """
+        source = await self._seed_activated_session(db_session)
+        source.deleted_at = datetime.now(UTC)
+        db_session.add(source)
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/api/daemon/sessions/{source.id}/reset-tool-report",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 404, resp.text

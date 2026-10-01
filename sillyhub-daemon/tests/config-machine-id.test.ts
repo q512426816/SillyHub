@@ -53,4 +53,19 @@ describe('readOrCreateMachineId', () => {
     expect(id).not.toBe('   ');
     expect((await readFile(machineIdPath(), 'utf8')).trim()).toBe(id);
   });
+
+  it('非 uuid 形半写残片自愈——不采纳残片，覆写为新 uuid（2026-10-01-review-followup-reset-guard-machineid task-03）', async () => {
+    const { machineIdPath, readOrCreateMachineId } = await import('../src/config.js');
+    // 半写残片：非空但不是 36 字符 uuid 形（崩溃截断形）。旧实现非空即采纳，
+    // 残片会被当作机器身份永久持有——现须形状校验后覆写自愈。
+    await writeFile(machineIdPath(), '0f1e2d3c-4b5a-4c6d-8e9f', 'utf8');
+    const id = await readOrCreateMachineId();
+    expect(id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+    expect(id).not.toBe('0f1e2d3c-4b5a-4c6d-8e9f');
+    expect((await readFile(machineIdPath(), 'utf8')).trim()).toBe(id);
+    // 自愈后再读幂等稳定（覆写值被后续调用采纳）。
+    expect(await readOrCreateMachineId()).toBe(id);
+  });
 });

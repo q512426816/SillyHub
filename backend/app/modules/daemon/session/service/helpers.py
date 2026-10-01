@@ -675,8 +675,9 @@ async def reset_tool_report_session(
     runtime_id=NULL / lease_id=NULL，失败 run 行保留（error_code 不动，审计）；
     发布 sessions_changed 让前端回放主体恢复。
 
-    守卫：origin=tool_report（chat 会话 409）、属主（404）、无 running run
-    （409——运行中拒绝，防打断在途轮）。返回 (会话行, 清掉的 run 计数)。
+    守卫：origin=tool_report（chat 会话 409）、属主（404）、软删（404，对齐
+    takeover 同款守卫——2026-10-01-review-followup-reset-guard-machineid）、
+    无 running run（409——运行中拒绝，防打断在途轮）。返回 (会话行, 清掉的 run 计数)。
     """
     from sqlalchemy import select
 
@@ -689,6 +690,7 @@ async def reset_tool_report_session(
                 select(AgentSession).where(
                     AgentSession.id == session_id,
                     AgentSession.user_id == user_id,
+                    col(AgentSession.deleted_at).is_(None),
                 )
             )
         )

@@ -88,28 +88,52 @@ export function machineIdPath(): string {
 }
 
 /**
- * 读取本机持久 machineId，不存在则生成并原子落盘（幂等，返回值稳定）。
+ * 读取本机持久 machineId，缺失/非 uuid 形则生成并以独占创建（wx）落盘。
  *
- * 读失败（权限/损坏）→ 重新生成覆写（身份文件非权威数据，可自愈）；写失败
- * （只读文件系统等）→ 返回内存值不落盘（best-effort，调用方照常携带上报，
- * 代价是重启后身份变化——比阻塞心跳链路划算）。
+ * 语义（2026-10-01-review-followup-reset-guard-machineid task-04 对齐实现——
+ * 原注释宣称「原子落盘」与裸 writeFile 实现不符，且并发首启会双生成后
+ * last-write-wins 漂移一次）：
+ *
+ * - 幂等：文件已是 uuid 形 → 原值返回，重启后稳定；
+ * - 并发首启：wx（O_EXCL|O_CREAT）独占创建，先写者定型；后写者 EEXIST
+ *   回读胜者（同机身份收敛到首个写入者，不再覆写漂移）；
+ * - 损坏自愈：内容空/非 uuid 形（半写残片）→ 重新生成覆写（普通写截断）；
+ * - 写失败（只读文件系统等）→ 返回内存值不落盘（best-effort，调用方照常
+ *   携带上报，代价是重启后身份变化——比阻塞心跳链路划算）。
  */
+const MACHINE_ID_SHAPE_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 export async function readOrCreateMachineId(): Promise<string> {
   const path = machineIdPath();
-  try {
-    const existing = (await readFile(path, 'utf8')).trim();
-    if (existing.length > 0) return existing;
-  } catch {
-    // 不存在/不可读 → 落到下方生成分支。
-  }
+  const readWinner = async (): Promise<string | null> => {
+    try {
+      const existing = (await readFile(path, 'utf8')).trim();
+      return MACHINE_ID_SHAPE_RE.test(existing) ? existing : null;
+    } catch {
+      // 不存在/不可读 → 无胜者可回读。
+      return null;
+    }
+  };
+  const existing = await readWinner();
+  if (existing !== null) return existing;
   const id = randomUUID();
   try {
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, id, 'utf8');
+    await writeFile(path, id, { encoding: 'utf8', flag: 'wx' });
+    return id;
   } catch {
-    // best-effort 落盘：失败返回内存值（见 docstring）。
+    // 独占创建失败三分支：并发抢写（回读胜者）/既有残片（非 uuid 形，普通
+    // 写覆写自愈）/目录或权限问题（回读也无果时 best-effort 返回内存值）。
+    const winner = await readWinner();
+    if (winner !== null) return winner;
+    try {
+      await writeFile(path, id, { encoding: 'utf8' });
+    } catch {
+      // best-effort 落盘：失败返回内存值（见 docstring）。
+    }
+    return id;
   }
-  return id;
 }
 
 /**
