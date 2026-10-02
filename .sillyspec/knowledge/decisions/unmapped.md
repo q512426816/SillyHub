@@ -1416,3 +1416,56 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：d1e177421b7887da267d28e28f269b66169c6e6d
 理由：最大风险：窄列（280px 文件树列 + 深层缩进）下中文名+原名同排可能溢出——已用外层 min-w-0+truncate、原名 shrink-0+truncate 双兜底（原名截断 hover 有 title 全路径）。放弃的方案：原名整体隐藏只显中文名——放弃：丢失「原名保留可对照」的 FR-03 语义。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-30-takeover-tier3-ambiguous-msg
+锚点：未记录
+最近确认：a9c4c690dd8402bdb7387669a6d182a4c1af88ab
+理由：风险：机器名含 runtime.name 为空时回退 id 短码（文案仍可诊断）。死路：无——三种失败态各有明确指引。回滚=revert 单 commit（纯文案+details 字段，无 schema/协议面）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-30-takeover-handoff-any-location
+锚点：未记录
+最近确认：d9131ca545a1a0a85c49180ecc938d532cf58ab6
+理由：测试：后端 test_takeover_handoff.py 增 openclaw 422「不支持会话」断言（6 用例绿）；前端 session-panel-takeover.test.tsx 增白名单过滤用例（7 用例绿）+ tsc/lint/mypy 零错。回滚=revert 单 commit（纯过滤与文案，无 schema 面）。死路：无。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-30-breadcrumb-dedupe-zh
+锚点：未记录
+最近确认：6a3bdf9684653bcbe9eae4eaf3b66dd76448d2eb
+理由：最大风险：中文命名与用户心智不一致（如 changes 译「变更中心」而页签叫「变更」）——以侧边栏 menuLabel 为第一权威、页签 label 为工作区语境补充，两侧本来就有「变更中心/变更」粒度差，面包屑取菜单级「变更中心」与被删页内面包屑文案一致。试过放弃的方案：把动态 id 段也替换为业务名（changeKey/task_key）——需要 TopBar 拉工作区数据引入请求依赖，超出本次「去重复+中文化」范围，放弃；id 段维持现状原样显示。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-09-30-vitest-passwithnotests-rollback
+锚点：未记录
+最近确认：557497bae50851b1723c49d0f973a0a06f6dc744
+理由：最大风险：若 sillyspec 修复未生效（CLI 未链接源码）而撤掉兜底会复现假红——已核实 npm ls -g sillyspec 指向 C:/Users/qinyi/IdeaProjects/sillyspec（npm link），且撤除前用原始失败面在修复后源码上复跑门禁函数确认全绿，风险已消除。试过放弃的方案：保留 passWithNoTests 作为双保险——放弃理由：它会掩盖未来真正错误的空收集（如过滤条件写错时 CI 静默通过），兜底价值低于语义保真。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-01-review-followup-reset-guard-machineid
+锚点：未记录
+最近确认：9f38792b6b354fb02d4e6b43d23726a68b1056e1
+理由：最大风险：machine-id 收紧「非 uuid 形即覆写」可能误伤手工预置的非标准身份串（如有人手写短码）——但协议文档明约「纯文本 uuid（36 字符）」，非 uuid 形本就是损坏态，误伤面为零。试过但放弃：temp+rename 真·原子替换——两个并发写者各自 rename 仍是 last-write-wins，不解决本问题主矛盾（并发双生成漂移），反而多一次跨平台 rename 语义差异（Windows 目标被占用 EPERM）面；wx 独占创建 + 回读胜者用更小的面收敛同一目标。
+
+## D-002@v1 实现方案=后端聚合 stats 端点 + 独立前端面板组件
+状态：implemented
+变更：2026-09-21-scan-docs-ops-panel
+锚点：未记录
+最近确认：e05d03fed
+理由：用户方案选择题选定（2026-09-21）：新增 GET /workspaces/{ws}/scan-docs/stats（SCAN_DOCS_READ），四指标+榜单全部后端 SQL 聚合 + 解析库内 _module-map.yaml 行；前端独立 ScanDocsStatsPanel 组件（视觉对齐知识库 OpsDashboard）挂 scan-docs 页 PageHeader 之下，useQuery 消费。否决的替代：前端全量自算（口径散落、逐项目拉 yaml 详情请求多）、物化快照表（296 行量级过度设计）。
+故障面：新增 DTO 触发 gen:types 类型链（api-types.ts + openapi.json 同步提交）。
+退役判据：若扫描文档指标演进到需要跨工作区汇总或遥测实时推送，聚合端点形态重议（本决策只钉「口径在后端算」）。
+
+## D-003@v1 注入频次遥测=docs-inject 行复用 knowledge-hits 通道（并入本变更）
+状态：implemented
+变更：2026-09-21-scan-docs-ops-panel
+锚点：未记录
+最近确认：e05d03fed
+理由：CLI 在模块上下文注入点（prompt.js renderModuleContext 及 execute.js 孪生处）经既有 appendKnowledgeHit 追加 `{type:'docs-inject', change, query, matchedFiles:[docs 相对路径], at}` 行——复用 knowledge-hits.jsonl 通道而非新建文件：daemon 上行链路整 jsonl 原样转发零改动；平台 HitsService.ingest 对白名单外 type 宽容前向落库（hits.py:233「外型存原值」），且 USAGE_TYPES 白名单不含 docs-inject，不污染知识库统计。平台 stats 聚合读 type='docs-inject' 行做 30 天窗口指标与文档级频次榜。
+故障面：跨仓交付（sillyspec CLI 独立发版节奏）——CLI 未升级环境永远空态；docs-inject 行量随 quick/execute 步骤注入频次增长（每步一行，量级=知识 inject 同款，可控）。
+退役判据：若未来 docs 注入改为平台侧统一注入（不经 CLI），本遥测型随 CLI 注入下线一并退役。
