@@ -45,6 +45,33 @@ class TestNormalizeDisplayTitle:
         assert normalize_display_title("设计文档（Design）—— 旧稿", "2026-09-15-x") == "x"
         assert normalize_display_title("需求规格（Requirements）- draft", "2026-09-15-x") == "x"
 
+    def test_thin_flow_h1_family_falls_back_to_key(self) -> None:
+        """thin flow-draft 模板家族（2026-10-02 校准）：raw H1 全部回退语义名。
+
+        sillyspec src/flow-draft.js 字面家族——设计记录（Design Record）/
+        任务注册表（Tasks）/决策记录（Decisions）/验证回执（flow），均带
+        「— <change_key>」后缀。此前词表漏收：documents 推送按最深阶段文档
+        （tasks.md）重派生 title 时被误判自定义语义标题，覆盖 CLI 收养标题
+        （变更中心显示「任务注册表（Tasks）— <变更名>」病根）。
+        """
+        from app.modules.change.title_norm import normalize_display_title
+
+        assert (
+            normalize_display_title(
+                "任务注册表（Tasks）— 2026-10-01-review-followup-reset-guard-machineid",
+                "2026-10-01-review-followup-reset-guard-machineid",
+            )
+            == "review-followup-reset-guard-machineid"
+        )
+        assert (
+            normalize_display_title("设计记录（Design Record）— 2026-10-01-x", "2026-10-01-x")
+            == "x"
+        )
+        assert normalize_display_title("决策记录（Decisions）— 2026-10-01-x", "2026-10-01-x") == "x"
+        assert normalize_display_title("验证回执（flow）— 2026-10-01-x", "2026-10-01-x") == "x"
+        # 无后缀裸模板同判
+        assert normalize_display_title("任务注册表（Tasks）", "2026-10-01-x") == "x"
+
     def test_custom_h1_kept_as_is(self) -> None:
         from app.modules.change.title_norm import normalize_display_title
 
@@ -192,6 +219,14 @@ _TEMPLATE_DOCS = {
     "tasks.md": "# 任务清单（Tasks）\n\n- task-01",
 }
 
+#: thin flow-draft 四件套实测 H1（— <change_key> 后缀变体，2026-10-02 校准）。
+_THIN_TEMPLATE_DOCS = {
+    "proposal.md": "# 提案书（Proposal）— KEY\n\n## 动机\n任务原话转写：修复标题显示。\n\n成功标准：\n- 修复\n",
+    "requirements.md": "# 需求规格（Requirements）— KEY\n\nFR-01。",
+    "design.md": "# 设计记录（Design Record）— KEY\n\n做法概述。",
+    "tasks.md": "# 任务注册表（Tasks）— KEY\n\n- [ ] task-01: 修复",
+}
+
 
 class TestUpsertDocumentsTitle:
     async def test_template_docs_yield_key_derived_title(self, db_session) -> None:
@@ -202,6 +237,18 @@ class TestUpsertDocumentsTitle:
         row = await _get_change(db_session, ws_id, name)
         assert row is not None, "documents 通道应建占位行"
         assert row.title == "ehs-reward-punishment"
+
+    async def test_thin_template_docs_yield_key_derived_title(self, db_session) -> None:
+        """thin 四件套模板 H1（— 后缀变体）→ title=去日期前缀语义名（用户病根回归）。"""
+        ws_id = await _make_workspace(db_session)
+        name = "2026-10-01-review-followup-reset-guard-machineid"
+        docs = {k: v.replace("KEY", name) for k, v in _THIN_TEMPLATE_DOCS.items()}
+        await _push_documents(db_session, ws_id, name, docs)
+        row = await _get_change(db_session, ws_id, name)
+        assert row is not None, "thin documents 通道应建占位行"
+        assert row.title == "review-followup-reset-guard-machineid", (
+            "tasks.md 模板 H1「任务注册表（Tasks）— <变更名>」不得原样成为 title"
+        )
 
     async def test_custom_h1_in_deepest_doc_wins(self, db_session) -> None:
         """最深阶段文档（tasks.md）自定义 H1 → 原样采用（按最新阶段文档重派生）。"""
@@ -300,6 +347,26 @@ class TestIsFallbackDisplayTitle:
         assert is_fallback_display_title("提案书（Proposal）", "2026-09-30-x") is True
         assert is_fallback_display_title("设计文档（Design）—— 旧稿", "2026-09-30-x") is True
 
+    def test_raw_thin_template_h1_text_is_fallback(self) -> None:
+        """thin 模板 raw H1 存量行同判兜底（病根自愈门：可被重派生/收养刷新）。"""
+        from app.modules.change.title_norm import is_fallback_display_title
+
+        assert (
+            is_fallback_display_title(
+                "任务注册表（Tasks）— 2026-10-01-review-followup-reset-guard-machineid",
+                "2026-10-01-review-followup-reset-guard-machineid",
+            )
+            is True
+        )
+        assert (
+            is_fallback_display_title("设计记录（Design Record）— 2026-10-01-x", "2026-10-01-x")
+            is True
+        )
+        assert (
+            is_fallback_display_title("决策记录（Decisions）— 2026-10-01-x", "2026-10-01-x") is True
+        )
+        assert is_fallback_display_title("验证回执（flow）— 2026-10-01-x", "2026-10-01-x") is True
+
     def test_semantic_titles_not_fallback(self) -> None:
         from app.modules.change.title_norm import is_fallback_display_title
 
@@ -364,6 +431,22 @@ class TestAdoptedTitleClobberGuard:
         await _push_documents(db_session, ws_id, name, docs)
         assert (await _get_change(db_session, ws_id, name)).title == "我重新命名的变更", (
             "自定义 H1 文档推送应覆盖收养标题"
+        )
+
+    async def test_adopted_title_survives_thin_template_docs_push(self, db_session) -> None:
+        """收养中文概括后 thin 模板文档推送 → 不被「任务注册表（Tasks）— …」回翻覆盖。
+
+        用户实证病根：CLI 收养好标题后，routine documents 推送按最深阶段文档
+        重派生出（未归一化的）模板 H1，误判语义标题恒覆盖——收养值被模板文案顶掉。
+        """
+        ws_id = await _make_workspace(db_session)
+        name = "2026-10-01-review-followup-reset-guard-machineid"
+        await _seed_change_row(db_session, ws_id, name, name)
+        await _adopt_cli_title(db_session, ws_id, name, "reset 软删守卫补齐")
+        docs = {k: v.replace("KEY", name) for k, v in _THIN_TEMPLATE_DOCS.items()}
+        await _push_documents(db_session, ws_id, name, docs)
+        assert (await _get_change(db_session, ws_id, name)).title == "reset 软删守卫补齐", (
+            "thin 模板 H1 documents 推送不得把收养标题回翻"
         )
 
     def test_apply_parsed_fallback_keeps_semantic_title(self) -> None:
