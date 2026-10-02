@@ -63,6 +63,12 @@ quicklog 双源合并查询（平台上行条目 × 文件条目）也在本模�
     SUM(COALESCE)，ctx_tokens 排除、兜底 api_requests 恒 0，「未记录」桶恒末位）
     + 时间三元组 MIN/MAX/SUM（执行时间口径，全 NULL→None）+ `summarize_changes` /
     `summarize_quicklogs`（批量摘要锚点 UNION/DISTINCT 后 GROUP BY）。
+    2026-10-02-change-center-token-usage task-03 追加**本地段**：详情（_aggregate_usage
+    并「本地 CLI」桶）/列表摘要（_merge_local_rows 四维相加，纯本地条目新建 None
+    三元组摘要）/quicklog 三处同构——`platform_agent_logs` 快照（platform_sync
+    usage_ingest 摄取）按会话锚点 SUM 四维，`NOT EXISTS agent_runs` 会话级二选一
+    防双计（run 权威），桶 api_requests 恒 0、totals=Σby_model 守恒延续；本地段
+    不贡献时间三元组/轮次/请求次数（无来源诚实值）。
   - `ChangeService`：list/get/update_progress/approve/reject/
     transition(_with_dispatch)/submit_feedback/check_archive_gate/reparse(scope)/
     complete_stage + review 四方法 + `_bind_change_to_session` / `_project_current_stage` /

@@ -1,0 +1,124 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "af3acf002ec320d4540611fdfba679958d2bf406",
+  "totals": {
+    "files": 13,
+    "additions": 1196,
+    "deletions": 17
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/change/schema.py",
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_usage_stats.py",
+      "additions": 196,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/change/usage_service.py",
+      "additions": 167,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/model.py",
+      "additions": 26,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/router.py",
+      "additions": 10,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/schema.py",
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_usage_ingest.py",
+      "additions": 378,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/usage_ingest.py",
+      "additions": 235,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/migrations/versions/20261002010000_add_platform_agent_log_usage.py",
+      "additions": 67,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 2,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx",
+      "additions": 75,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-usage-card.tsx",
+      "additions": 24,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 8,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "845cd338b41b96bfef9cdd58ec7b1900dcbff22c3a305bd827ed4090496fb0f4",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-02T16:24:54.887Z"
+}

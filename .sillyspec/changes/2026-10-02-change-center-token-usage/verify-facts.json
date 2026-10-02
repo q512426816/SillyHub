@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-02-change-center-token-usage",
+  "generatedAt": "2026-10-02T16:33:54.803Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-02-change-center-token-usage",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 1,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-02-change-center-token-usage",
+      "metrics": {
+        "tasks": 4,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-02-change-center-token-usage",
+      "metrics": {
+        "backendEndpoints": 2313,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-02-change-center-token-usage",
+      "metrics": {
+        "deletions": 1,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-02-change-center-token-usage",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-02-change-center-token-usage",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-02-change-center-token-usage",
+      "metrics": {
+        "checkedFiles": 5,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "env-blocked",
+        "item": "task-04 前端全量：verify 阶段 deps(auto-jsx) 前端子集与 lint（next 二进制缺件）被 CLI 跳过",
+        "condition": "cd frontend && pnpm install 后重跑 `pnpm test`（全量）与 `pnpm lint`；本会话已手动实测组件测试 9/9 与 tsc 0 错（见测试结果节），全量留 CI",
+        "severity": "blocking"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "task-02/03/04 真机端到端：本地 CLI 跑 sillyspec 命令上报后，变更中心用量卡出现「本地 CLI」桶",
+        "condition": "部署后任一变更详情页打开用量卡折叠明细，确认快照五列有值时桶行出现（daemon 在线 + 已跑过至少一次上报）",
+        "severity": "advisory"
+      },
+      {
+        "type": "db-script",
+        "item": "task-01 生产/开发库执行 alembic upgrade head（migration 20261002010000）",
+        "condition": "部署时随既有序执行；down 备查 `alembic downgrade 20260930110000`（离线 DDL 对称已实测）",
+        "severity": "blocking"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 3,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/agent-logs",
+        "rowIdx": 1
+      }
+    ],
+    "declared": 0,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/api/agent-logs",
+        "rowIdx": 1
+      }
+    ]
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/platform_sync/tests/test_usage_ingest.py",
+      "backend/app/modules/change/tests/test_usage_stats.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

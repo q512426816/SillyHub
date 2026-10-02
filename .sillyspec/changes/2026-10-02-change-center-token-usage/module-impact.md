@@ -25,6 +25,6 @@ created_at: 2026-10-02
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `docs/backend/modules/platform_sync.md`（如存在，否则归 backend.md） | 补 usage_ingest 摄取链路条目 + 快照五列说明（execute 收尾同步） | pending |
-| `docs/backend/modules/change.md`（如存在，否则归 backend.md） | usage_service 本地段口径补录（execute 收尾同步） | pending |
-| `_module-map.yaml` | usage_ingest.py 归 platform_sync 既有目录，无需新映射条目；待 scan 刷新 | pending |
+| `.sillyspec/docs/backend/modules/platform_sync.md` | agent 会话日志上报节补用量快照摄取条目（usage_ingest 链路/候选/节流/降级/快照五列） | done |
+| `.sillyspec/docs/backend/modules/change.md` | ChangeUsageQueryService 条目补本地段口径（三处入口/二选一防双计/守恒/诚实值） | done |
+| `_module-map.yaml` | usage_ingest.py 归 platform_sync 既有目录，无需新映射条目；待 scan 刷新 | skipped |

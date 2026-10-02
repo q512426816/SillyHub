@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-02-change-center-token-usage",
+  "appliedAt": "2026-10-02T16:23:45.336Z",
+  "baseHash": "ab1495353e6bec57f02547b71fa472066069604f",
+  "files": [
+    {
+      "path": "backend/app/modules/change/schema.py",
+      "sha256": "10a83ccdb075843d91d59a15f5b7a37daa9e6525c8023d50fcb0097809bb152b"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_usage_stats.py",
+      "sha256": "d56b2841eae2a25e2fe92df746c38585edae2747464c8ed7824dbfd51b1ed696"
+    },
+    {
+      "path": "backend/app/modules/change/usage_service.py",
+      "sha256": "ae8f85478b670d5267339448385e6ea351d16bbcc8f3ee7f63e63cfaa1ddb6a8"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/model.py",
+      "sha256": "765c02ec51493a0503f78590cc310a07c38e0b38caf89fd4937c00ebe02af512"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/router.py",
+      "sha256": "d1b45b4f222edc25a2de47ec049b81403fdf422c7ed6f68598627a3521e9a681"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/schema.py",
+      "sha256": "09a2c4c1701b84234fc45034a1f3cc0cb40fd3b057431a0815fadf30064db9cf"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_usage_ingest.py",
+      "sha256": "0b043eabc0703af9d27ca5292d632037edf43bcc3fd25ec345aed665df6727cc"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/usage_ingest.py",
+      "sha256": "d48859dfa5dd822a85e5b98e21091f7de0dab8cde00471effe11c12bf78e5972"
+    },
+    {
+      "path": "backend/migrations/versions/20261002010000_add_platform_agent_log_usage.py",
+      "sha256": "b9ac0df96ef77a5bb1da2e0ec4a2833eb46ccb50ef2722ee1673f30ce9ef181f"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "61eb02c694feca6e7ddaae030ebeae9e689e61ecd47c28c866cec07970740f5c"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx",
+      "sha256": "8578f18c33dd56641a8e12631a737dcb79dab2ff6ec43405d332cf57e7b733c7"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-usage-card.tsx",
+      "sha256": "402bf467542f0edd179b13a8db3be1860ddc4f3b4e89a7b5ad4eeaf843171ddf"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "ec95f18aea5023a0e5ea549711214306373ef7f661d685cc9e07d9b3f53e5b98"
+    }
+  ]
+}

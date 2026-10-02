@@ -81,6 +81,8 @@ backend router push_agent_logs（backend/app/modules/platform_sync/router.py:533
 
 ## 接口定义
 
+本变更接口面：0 端点（既有端点行为扩展——POST /api/agent-logs 响应语义不变、usage 端点 DTO 字段集零变化，无新增/删除端点）。
+
 ```python
 # backend/app/modules/platform_sync/usage_ingest.py（新）
 class AgentLogUsageIngestService:

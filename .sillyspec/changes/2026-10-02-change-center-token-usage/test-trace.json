@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-02-change-center-token-usage",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-02-change-center-token-usage:task-02:acc-0-c923036f",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_usage_ingest.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-02-change-center-token-usage"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-02-change-center-token-usage:task-02:acc-1-f27e8f0b",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_usage_ingest.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-02-change-center-token-usage"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-02-change-center-token-usage:task-02:acc-2-5493d570",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_usage_ingest.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-02-change-center-token-usage"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-02-change-center-token-usage:task-02:acc-3-11cd8d62",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_usage_ingest.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-02-change-center-token-usage"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-02-change-center-token-usage:task-03:acc-0-f61e3d02",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-02-change-center-token-usage"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-02-change-center-token-usage:task-03:acc-1-733c02ef",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-02-change-center-token-usage"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-02-change-center-token-usage:task-03:acc-2-ae5c134d",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-02-change-center-token-usage"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-02-change-center-token-usage:task-04:acc-0-ca3d9e65",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-02-change-center-token-usage"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-02-change-center-token-usage:task-04:acc-1-66e6bc18",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-02-change-center-token-usage"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-02-change-center-token-usage:task-04:acc-2-ac0f5209",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-02-change-center-token-usage"
+    }
+  ]
+}

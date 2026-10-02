@@ -1,0 +1,1480 @@
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index 208aec46c..cc7dc135e 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -570,6 +570,10 @@ class UsageByModelItemRead(BaseModel):
+     「未记录」桶）。数据流：producer = change/usage_service.py
+     ChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =
+     前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。
++
++    2026-10-02-change-center-token-usage task-03：新增第三桶「本地 CLI」
++    （usage_service._LOCAL_CLI_MODEL）——本地 CLI 会话快照四维（api_requests
++    恒 0，排序按数值参与不特殊置位）；前端按桶名渲染绿阶 tag。DTO 字段集不变。
+     """
+ 
+     model: str  # 模型名；兜底桶 = run.model 或 "未记录"（排序恒末位）
+diff --git a/backend/app/modules/change/tests/test_usage_stats.py b/backend/app/modules/change/tests/test_usage_stats.py
+index 2c6dcd72a..be563fb05 100644
+--- a/backend/app/modules/change/tests/test_usage_stats.py
++++ b/backend/app/modules/change/tests/test_usage_stats.py
+@@ -39,7 +39,9 @@ from __future__ import annotations
+ import uuid
+ from datetime import UTC, datetime
+ from pathlib import Path
++from typing import Any
+ 
++import pytest
+ from httpx import AsyncClient
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+@@ -49,6 +51,7 @@ from app.modules.agent.model import AgentRun, AgentRunModelUsage, AgentSession
+ from app.modules.auth.model import User
+ from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionLink
+ from app.modules.change.usage_service import ChangeUsageQueryService
++from app.modules.platform_sync.model import AgentSessionLogORM
+ from app.modules.workspace.model import Workspace
+ 
+ # 固定种子时间（断言经 _naive 归一为 naive 墙钟：SQLite DateTime 读写丢时区，
+@@ -1208,3 +1211,196 @@ class TestListUsageProjection:
+         assert usage["duration_ms"] == 1500
+ 
+         assert items[ql_unbound]["usage"] is None
++
++
++# ── 14-19：本地 CLI 段聚合（2026-10-02-change-center-token-usage task-03）──
++
++
++class TestLocalCliSegment:
++    """本地 CLI 快照并入聚合（FR-02：二选一防双计 / 守恒 / NULL 跳过 / quicklog）。
++
++    快照行直写 ``platform_agent_logs``（producer usage_ingest 已在
++    test_usage_ingest.py 覆盖，此处只验聚合消费口径）。
++    """
++
++    @pytest.fixture(autouse=True)
++    async def _ensure_agent_logs_table(self, db_engine: Any) -> None:
++        """建 ``platform_agent_logs`` 表（根 conftest 未注册该 model，参照
++        change/tests/conftest.py 自包含建表模式）。"""
++        from app.models.base import BaseModel
++        from app.modules.platform_sync import model as _ps_model
++
++        async with db_engine.begin() as conn:
++            await conn.run_sync(
++                BaseModel.metadata.create_all,
++                tables=[_ps_model.AgentSessionLogORM.__table__],
++            )
++
++    @staticmethod
++    async def _make_log_entry(
++        db_session: AsyncSession,
++        workspace_id: uuid.UUID,
++        session_id: uuid.UUID,
++        *,
++        parsed: bool = True,
++        tokens: tuple[int, int, int, int] = (100, 20, 50, 10),
++    ) -> AgentSessionLogORM:
++        """快照行直写：parsed=False 造 NULL 快照（存量未摄取行）。"""
++        row = AgentSessionLogORM(
++            workspace_id=workspace_id,
++            log_path=f"C:/Users/qinyi/.zcode/cli/rollout/model-io-{uuid.uuid4().hex}.jsonl",
++            harness="zcode",
++            format="zcode-model-io-jsonl",
++            agent_session_id=session_id,
++            usage_input_tokens=tokens[0] if parsed else None,
++            usage_output_tokens=tokens[1] if parsed else None,
++            usage_cache_read_tokens=tokens[2] if parsed else None,
++            usage_cache_write_tokens=tokens[3] if parsed else None,
++            usage_parsed_at=_T12 if parsed else None,
++        )
++        db_session.add(row)
++        await db_session.commit()
++        return row
++
++    async def test_local_only_change_bucket_and_conservation(
++        self, db_session: AsyncSession
++    ) -> None:
++        """14. 纯本地变更：桶行出现 + totals=Σby_model 守恒 + 三元组 None/轮次 0。"""
++        uid = await _make_user(db_session)
++        ws = await _make_workspace(db_session, root_path="C:/local-only")
++        change = await _make_change(db_session, ws.id, "2026-10-02-local-only")
++        sess = await _make_session(db_session, uid)
++        await _make_change_link(db_session, change_id=change.id, session_id=sess.id)
++        await self._make_log_entry(db_session, ws.id, sess.id, tokens=(100, 20, 50, 10))
++
++        usage = await ChangeUsageQueryService(db_session).get_change_usage(ws.id, change.id)
++
++        assert len(usage.by_model) == 1
++        local = usage.by_model[0]
++        assert local.model == "本地 CLI"
++        assert (local.input_tokens, local.output_tokens) == (100, 20)
++        assert (local.cache_read_tokens, local.cache_creation_tokens) == (50, 10)
++        assert local.api_requests == 0
++        # 守恒：totals = Σ by_model；本地段不贡献三元组/轮次/请求（诚实值）。
++        assert usage.totals.input_tokens == 100 == sum(i.input_tokens for i in usage.by_model)
++        assert usage.totals.output_tokens == 20
++        assert usage.totals.cache_read_tokens == 50
++        assert usage.totals.cache_creation_tokens == 10
++        assert usage.totals.api_requests == 0
++        assert usage.totals.num_turns == 0
++        assert usage.started_at is None and usage.finished_at is None
++        assert usage.duration_ms is None
++
++    async def test_dual_count_guard_run_authoritative(self, db_session: AsyncSession) -> None:
++        """15. 双计防护：同会话有 runs 也有快照 → 只计 run（NOT EXISTS，R-01）。"""
++        uid = await _make_user(db_session)
++        ws = await _make_workspace(db_session, root_path="C:/dual-count")
++        change = await _make_change(db_session, ws.id, "2026-10-02-dual")
++        sess = await _make_session(db_session, uid)
++        await _make_change_link(db_session, change_id=change.id, session_id=sess.id)
++        await _make_run(
++            db_session,
++            agent_session_id=sess.id,
++            model="GLM-5.3",
++            input_tokens=10,
++            output_tokens=5,
++            cache_read_tokens=3,
++            cache_creation_tokens=2,
++            started_at=_T10,
++            finished_at=_T1030,
++            duration_ms=1000,
++            num_turns=1,
++        )
++        await self._make_log_entry(db_session, ws.id, sess.id, tokens=(100, 20, 50, 10))
++
++        usage = await ChangeUsageQueryService(db_session).get_change_usage(ws.id, change.id)
++
++        # run 权威：本地桶不出现，数字 = run 值。
++        assert [i.model for i in usage.by_model] == ["GLM-5.3"]
++        assert usage.totals.input_tokens == 10
++        assert usage.totals.output_tokens == 5
++
++    async def test_null_snapshot_and_shared_session(self, db_session: AsyncSession) -> None:
++        """16. NULL 快照不计入；17. 共享会话两变更各计一次（口径特性）。"""
++        uid = await _make_user(db_session)
++        ws = await _make_workspace(db_session, root_path="C:/null-shared")
++        change_a = await _make_change(db_session, ws.id, "2026-10-02-null")
++        change_b = await _make_change(db_session, ws.id, "2026-10-02-shared")
++        sess_a = await _make_session(db_session, uid)
++        sess_shared = await _make_session(db_session, uid)
++        await _make_change_link(db_session, change_id=change_a.id, session_id=sess_a.id)
++        await _make_change_link(db_session, change_id=change_b.id, session_id=sess_shared.id)
++        await self._make_log_entry(db_session, ws.id, sess_a.id, parsed=False)
++        await self._make_log_entry(db_session, ws.id, sess_shared.id, tokens=(200, 40, 80, 20))
++
++        svc = ChangeUsageQueryService(db_session)
++        usage_a = await svc.get_change_usage(ws.id, change_a.id)
++        usage_b = await svc.get_change_usage(ws.id, change_b.id)
++
++        # NULL 快照（存量未摄取）不进聚合：显示与改造前一致。
++        assert usage_a.by_model == []
++        assert usage_a.totals.input_tokens == 0
++        # 共享会话在两个变更各完整计一次（本地段同 run 段口径特性）。
++        assert usage_b.totals.input_tokens == 200
++        assert usage_b.by_model[0].model == "本地 CLI"
++
++    async def test_quicklog_local_segment(self, db_session: AsyncSession) -> None:
++        """18. quicklog 本地段同口径（quicklog_session_links 锚点）。"""
++        uid = await _make_user(db_session)
++        ws = await _make_workspace(db_session, root_path="C:/ql-local")
++        sess = await _make_session(db_session, uid)
++        ql_id = "ql-20261002-001-abc"
++        await _make_quicklog_link(db_session, workspace_id=ws.id, ql_id=ql_id, session_id=sess.id)
++        await self._make_log_entry(db_session, ws.id, sess.id, tokens=(300, 60, 90, 30))
++
++        usage = await ChangeUsageQueryService(db_session).get_quicklog_usage(ws.id, ql_id)
++
++        assert usage.totals.input_tokens == 300
++        assert usage.totals.cache_creation_tokens == 30
++        assert usage.by_model[0].model == "本地 CLI"
++
++    async def test_summary_merge_local_and_pure_local(self, db_session: AsyncSession) -> None:
++        """19. 列表摘要合并：混合变更（run 会话 + 本地会话）四维相加；纯本地变更
++        新建 None 三元组摘要。注意混合 = 两个会话各占一源——同会话双源是 15 的
++        二选一防护场景，不在此重复。"""
++        uid = await _make_user(db_session)
++        ws = await _make_workspace(db_session, root_path="C:/summary-merge")
++        change_mixed = await _make_change(db_session, ws.id, "2026-10-02-mixed")
++        change_pure = await _make_change(db_session, ws.id, "2026-10-02-pure")
++        sess_run = await _make_session(db_session, uid)
++        sess_local = await _make_session(db_session, uid)
++        sess_pure = await _make_session(db_session, uid)
++        await _make_change_link(db_session, change_id=change_mixed.id, session_id=sess_run.id)
++        await _make_change_link(db_session, change_id=change_mixed.id, session_id=sess_local.id)
++        await _make_change_link(db_session, change_id=change_pure.id, session_id=sess_pure.id)
++        await _make_run(
++            db_session,
++            agent_session_id=sess_run.id,
++            model="GLM-5.3",
++            input_tokens=10,
++            output_tokens=5,
++            cache_read_tokens=3,
++            cache_creation_tokens=2,
++            started_at=_T10,
++            finished_at=_T11,
++            duration_ms=500,
++            num_turns=1,
++        )
++        await self._make_log_entry(db_session, ws.id, sess_local.id, tokens=(100, 20, 50, 10))
++        await self._make_log_entry(db_session, ws.id, sess_pure.id, tokens=(40, 8, 12, 4))
++
++        summary = await ChangeUsageQueryService(db_session).summarize_changes(
++            [change_mixed.id, change_pure.id]
++        )
++
++        mixed = summary[change_mixed.id]
++        assert (mixed.totals.input_tokens, mixed.totals.output_tokens) == (110, 25)
++        assert (mixed.totals.cache_read_tokens, mixed.totals.cache_creation_tokens) == (53, 12)
++        # run 段三元组保留；本地段不贡献。
++        assert _naive(mixed.started_at) == _T10.replace(tzinfo=None)
++        assert mixed.totals.num_turns == 1
++
++        pure = summary[change_pure.id]
++        assert pure.totals.input_tokens == 40
++        assert pure.started_at is None and pure.duration_ms is None
++        assert pure.totals.num_turns == 0
+diff --git a/backend/app/modules/change/usage_service.py b/backend/app/modules/change/usage_service.py
+index ccf751e59..b2c4af849 100644
+--- a/backend/app/modules/change/usage_service.py
++++ b/backend/app/modules/change/usage_service.py
+@@ -19,6 +19,13 @@ quicklog 列表组装（task-03）→ 本服务 → ``ChangeUsageRead`` / ``Usag
+ 防 IN 膨胀与 N+1，R-03）；集合不 join ``agent_sessions`` 本体、不过滤
+ ``deleted_at``（D-006@v1：软删会话消耗真实发生，计入统计；无
+ ``agent_session_id`` 的孤儿 run 经派发锚点 ``change_id`` 仍命中，不丢数）。
++
++2026-10-02-change-center-token-usage task-03（FR-02 / D-001@v1）：详情与列表
++各追加「本地段」——``platform_agent_logs`` 用量快照按会话锚点
++（change_session_links / quicklog_session_links）SUM 四维，会话级二选一
++（``NOT EXISTS agent_runs``，run 权威防双计，design R-01）后并入
++「本地 CLI」桶（api_requests 恒 0），totals=Σby_model 守恒延续；本地段不
++贡献时间三元组/轮次/请求次数（daemon 解析器无该数据来源，诚实值）。
+ """
+ 
+ from __future__ import annotations
+@@ -40,11 +47,19 @@ from app.modules.change.schema import (
+     UsageSummaryRead,
+     UsageTotalsRead,
+ )
++from app.modules.platform_sync.model import AgentSessionLogORM
+ 
+ #: 兜底桶名：run.model 为 NULL 的历史 run 归此桶，by_model 恒末位（R-04，
+ #: 对齐 by_provider「未记录」与 session-usage 同名先例）。
+ _UNRECORDED_MODEL = "未记录"
+ 
++#: 本地 CLI 桶名（2026-10-02-change-center-token-usage task-03 / design 数据模型节）：
++#: 本地 CLI 会话（origin=tool_report）经 usage_ingest 落库的快照四维并入此桶。
++#: ``api_requests`` 恒 0——daemon 解析器 totalUsage 无请求数来源（诚实值，对齐
++#: 「未记录」兜底桶先例）；排序按 input+output 数值参与、不特殊置位（「未记录」
++#: 仍恒末位）。前端按桶名渲染绿阶 tag（task-04，与后端约定值）。
++_LOCAL_CLI_MODEL = "本地 CLI"
++
+ 
+ class ChangeUsageQueryService:
+     """变更/快速修复执行用量的只读聚合服务（唯一数据源，对接线层 task-03/04）。
+@@ -89,7 +104,12 @@ class ChangeUsageQueryService:
+                     "change_id": str(change_id),
+                 },
+             )
+-        return await self._aggregate_usage(self._change_run_ids(change_id))
++        local_rows = (
++            (await self._session.execute(self._local_change_rows_stmt([change_id])))
++            .mappings()
++            .all()
++        )
++        return await self._aggregate_usage(self._change_run_ids(change_id), local_rows)
+ 
+     async def get_quicklog_usage(self, workspace_id: uuid.UUID, ql_id: str) -> ChangeUsageRead:
+         """快速修复维度完整用量（恒走会话链路，聚合口径同详情）。
+@@ -98,7 +118,12 @@ class ChangeUsageQueryService:
+         文件源条目无 DB 行；严格 404 语义由 router 层对齐详情端点做（task-04）。
+         本方法对空集合返回全零 totals + 空 by_model + 三元组 None（R-05）。
+         """
+-        return await self._aggregate_usage(self._quicklog_run_ids(workspace_id, ql_id))
++        local_rows = (
++            (await self._session.execute(self._local_quicklog_rows_stmt(workspace_id, [ql_id])))
++            .mappings()
++            .all()
++        )
++        return await self._aggregate_usage(self._quicklog_run_ids(workspace_id, ql_id), local_rows)
+ 
+     # ── 列表批量摘要（UsageSummaryRead，零 N+1）────────────────────────
+ 
+@@ -109,21 +134,30 @@ class ChangeUsageQueryService:
+ 
+         (锚点 change_id, run) 两锚点 UNION 后外层 GROUP BY change_id；
+         空列表零查询返回 ``{}``。无执行变更不进结果（调用方按 None 降级）。
++
++        2026-10-02-change-center-token-usage task-03：run 段摘要后追加本地段
++        合并（快照四维相加；三元组/轮次/请求不动——本地无来源，口径同详情）。
+         """
+         if not change_ids:
+             return {}
+         rows = await self._summarize_anchor(self._change_summary_anchor(change_ids))
+-        return {row["group_key"]: self._row_to_summary(row) for row in rows}
++        summary = {row["group_key"]: self._row_to_summary(row) for row in rows}
++        await self._merge_local_rows(summary, self._local_change_rows_stmt(change_ids))
++        return summary
+ 
+     async def summarize_quicklogs(
+         self, workspace_id: uuid.UUID, ql_ids: list[str]
+     ) -> dict[str, UsageSummaryRead]:
+         """一次查询出整页快速修复摘要（quicklog_session_links JOIN runs 后
+-        DISTINCT (ql_id, run_id) 再 GROUP BY ql_id）；空列表零查询返回 ``{}``。"""
++        DISTINCT (ql_id, run_id) 再 GROUP BY ql_id）；空列表零查询返回 ``{}``。
++
++        2026-10-02-change-center-token-usage task-03：本地段合并同变更侧。"""
+         if not ql_ids:
+             return {}
+         rows = await self._summarize_anchor(self._quicklog_summary_anchor(workspace_id, ql_ids))
+-        return {row["group_key"]: self._row_to_summary(row) for row in rows}
++        summary = {row["group_key"]: self._row_to_summary(row) for row in rows}
++        await self._merge_local_rows(summary, self._local_quicklog_rows_stmt(workspace_id, ql_ids))
++        return summary
+ 
+     # ── 去重执行集合（子查询形态，两类口径共用）────────────────────────
+ 
+@@ -237,9 +271,120 @@ class ChangeUsageQueryService:
+             .subquery()
+         )
+ 
++    # ── 本地 CLI 段（2026-10-02-change-center-token-usage task-03）────────
++
++    @staticmethod
++    def _local_usage_columns() -> list[Any]:
++        """本地段快照四维聚合列（usage_parsed_at IS NOT NULL 已过滤 NULL 快照，
++        COALESCE 仅防御极端部分 NULL 行）。"""
++        return [
++            func.sum(func.coalesce(AgentSessionLogORM.usage_input_tokens, 0)).label("input_tokens"),
++            func.sum(func.coalesce(AgentSessionLogORM.usage_output_tokens, 0)).label(
++                "output_tokens"
++            ),
++            func.sum(func.coalesce(AgentSessionLogORM.usage_cache_read_tokens, 0)).label(
++                "cache_read_tokens"
++            ),
++            func.sum(func.coalesce(AgentSessionLogORM.usage_cache_write_tokens, 0)).label(
++                "cache_creation_tokens"
++            ),
++        ]
++
++    @staticmethod
++    def _local_no_runs_condition() -> Any:
++        """会话级二选一防双计（design R-01）：该会话在 ``agent_runs`` 有行则快照
++        不计——run 终态数据是权威，快照只补 run 缺失的会话。
++
++        NOT EXISTS 反连接对齐兜底段 :294 先例（防 NOT IN 子查询膨胀）。"""
++        return ~exists().where(AgentRun.agent_session_id == AgentSessionLogORM.agent_session_id)
++
++    @classmethod
++    def _local_change_rows_stmt(cls, change_ids: list[uuid.UUID]) -> Any:
++        """变更侧本地段：``platform_agent_logs`` 快照按 ``change_session_links``
++        会话锚点 GROUP BY change_id 求和（design 接口定义 B-2 伪码的落地）。
++
++        不 join ``agent_sessions`` 本体：快照行 ``agent_session_id`` 直连 link 表
++        即定位（软删会话口径延续 D-006@v1 计入）。"""
++        return (
++            select(
++                col(ChangeSessionLink.change_id).label("group_key"),
++                *cls._local_usage_columns(),
++            )
++            .select_from(AgentSessionLogORM)
++            .join(
++                ChangeSessionLink,
++                col(ChangeSessionLink.session_id) == col(AgentSessionLogORM.agent_session_id),
++            )
++            .where(
++                col(ChangeSessionLink.change_id).in_(change_ids),
++                col(AgentSessionLogORM.usage_parsed_at).is_not(None),
++                cls._local_no_runs_condition(),
++            )
++            .group_by(col(ChangeSessionLink.change_id))
++        )
++
++    @classmethod
++    def _local_quicklog_rows_stmt(cls, workspace_id: uuid.UUID, ql_ids: list[str]) -> Any:
++        """快速修复侧本地段（锚点换 ``quicklog_session_links``，其余同变更侧）。"""
++        return (
++            select(
++                col(QuicklogSessionLink.ql_id).label("group_key"),
++                *cls._local_usage_columns(),
++            )
++            .select_from(AgentSessionLogORM)
++            .join(
++                QuicklogSessionLink,
++                col(QuicklogSessionLink.session_id) == col(AgentSessionLogORM.agent_session_id),
++            )
++            .where(
++                col(QuicklogSessionLink.workspace_id) == workspace_id,
++                col(QuicklogSessionLink.ql_id).in_(ql_ids),
++                col(AgentSessionLogORM.usage_parsed_at).is_not(None),
++                cls._local_no_runs_condition(),
++            )
++            .group_by(col(QuicklogSessionLink.ql_id))
++        )
++
++    async def _merge_local_rows(
++        self, summary: dict[Any, UsageSummaryRead], local_stmt: Any
++    ) -> None:
++        """列表摘要与本地段合并：四维相加；纯本地条目新建全 None 三元组摘要。
++
++        本地段不贡献时间三元组/轮次/请求次数（无来源诚实值，FR-02）。"""
++        local_rows = (await self._session.execute(local_stmt)).mappings().all()
++        for row in local_rows:
++            key = row["group_key"]
++            cur = summary.get(key)
++            if cur is None:
++                summary[key] = UsageSummaryRead(
++                    started_at=None,
++                    finished_at=None,
++                    duration_ms=None,
++                    totals=self._local_totals(row),
++                )
++                continue
++            cur.totals.input_tokens += int(row["input_tokens"] or 0)
++            cur.totals.output_tokens += int(row["output_tokens"] or 0)
++            cur.totals.cache_read_tokens += int(row["cache_read_tokens"] or 0)
++            cur.totals.cache_creation_tokens += int(row["cache_creation_tokens"] or 0)
++
++    @staticmethod
++    def _local_totals(row: RowMapping) -> UsageTotalsRead:
++        """本地段行 → totals（api_requests/num_turns 恒 0——无来源）。"""
++        return UsageTotalsRead(
++            input_tokens=int(row["input_tokens"] or 0),
++            output_tokens=int(row["output_tokens"] or 0),
++            cache_read_tokens=int(row["cache_read_tokens"] or 0),
++            cache_creation_tokens=int(row["cache_creation_tokens"] or 0),
++            api_requests=0,
++            num_turns=0,
++        )
++
+     # ── 详情两段聚合（对齐 daemon/session/service.get_session_usage 范式）──
+ 
+-    async def _aggregate_usage(self, run_ids: Subquery) -> ChangeUsageRead:
++    async def _aggregate_usage(
++        self, run_ids: Subquery, local_rows: list[RowMapping] | None = None
++    ) -> ChangeUsageRead:
+         """集合上两段聚合 + 时间三元组，全部 SQL 侧完成（R-03 防膨胀）：
+ 
+         1. 明细段（主源）：``agent_run_model_usage`` JOIN 集合，GROUP BY
+@@ -255,6 +400,11 @@ class ChangeUsageQueryService:
+         两段按 model 名 dict 归并求和（兜底段 run.model 可能与明细段同名——
+         同名桶相加不丢）；by_model 按 input+output 降序、「未记录」恒末位；
+         totals = 两段之和 + ``SUM(num_turns)``；空集合返回全 0 + 空 by_model。
++
++        2026-10-02-change-center-token-usage task-03：``local_rows`` 为本地 CLI
++        快照行（会话级二选一已在上游 SQL 过滤双计），并入「本地 CLI」桶
++        （api_requests 恒 0）——totals=Σby_model 守恒自动延续；本地段不贡献
++        时间三元组/轮次/请求次数（无来源诚实值，FR-02）。
+         """
+         in_set = AgentRun.id.in_(select(run_ids.c.id))
+ 
+@@ -344,6 +494,17 @@ class ChangeUsageQueryService:
+                 int(row["cache_creation_tokens"] or 0),
+                 0,
+             )
++        for row in local_rows or []:
++            # 本地 CLI 桶（task-03）：快照四维并入，api_requests 恒 0（解析器
++            # 无请求数来源，与兜底桶同族诚实值）。
++            _merge(
++                _LOCAL_CLI_MODEL,
++                int(row["input_tokens"] or 0),
++                int(row["output_tokens"] or 0),
++                int(row["cache_read_tokens"] or 0),
++                int(row["cache_creation_tokens"] or 0),
++                0,
++            )
+ 
+         # ── 时间三元组 + 轮次（集合上聚合；无 GROUP BY 恒返回一行）──
+         time_stmt = select(
+diff --git a/backend/app/modules/platform_sync/model.py b/backend/app/modules/platform_sync/model.py
+index bfab17ad8..54228bb23 100644
+--- a/backend/app/modules/platform_sync/model.py
++++ b/backend/app/modules/platform_sync/model.py
+@@ -372,6 +372,32 @@ class AgentSessionLogORM(BaseModel, table=True):
+         default=None,
+         sa_column=Column(String(255), nullable=True),
+     )
++    # ── 2026-10-02-change-center-token-usage task-01（design 数据模型 / FR-01）──
++    # 用量快照五列（producer：usage_ingest 摄取任务；consumer：change/usage_service
++    # 聚合本地段）。一个 entry = 一个日志文件 = 一份全生命周期累计快照，覆盖写幂等；
++    # NULL = 未摄取 / 解析不支持（存量行不回填，聚合侧过滤 NULL 自然跳过）。
++    # 列名映射链：daemon totalUsage.cacheWriteTokens → usage_cache_write_tokens
++    # ↔ run 侧 cache_creation_tokens（语义同缓存写入）。
++    usage_input_tokens: int | None = Field(
++        default=None,
++        sa_column=Column(BigInteger, nullable=True),
++    )
++    usage_output_tokens: int | None = Field(
++        default=None,
++        sa_column=Column(BigInteger, nullable=True),
++    )
++    usage_cache_read_tokens: int | None = Field(
++        default=None,
++        sa_column=Column(BigInteger, nullable=True),
++    )
++    usage_cache_write_tokens: int | None = Field(
++        default=None,
++        sa_column=Column(BigInteger, nullable=True),
++    )
++    usage_parsed_at: datetime | None = Field(
++        default=None,
++        sa_column=Column(DateTime(timezone=True), nullable=True),
++    )
+     created_at: datetime = Field(
+         default_factory=lambda: datetime.now(UTC),
+         sa_column=Column(
+diff --git a/backend/app/modules/platform_sync/router.py b/backend/app/modules/platform_sync/router.py
+index bf11a024c..8acf0efdf 100644
+--- a/backend/app/modules/platform_sync/router.py
++++ b/backend/app/modules/platform_sync/router.py
+@@ -81,6 +81,10 @@ from app.modules.platform_sync.schema import (
+ )
+ from app.modules.platform_sync.service import PlatformSyncService
+ 
++# 2026-10-02-change-center-token-usage task-02：上报后用量摄取 fire 入口
++# （usage_ingest 对本模块的反向引用是函数级延迟 import，模块级单向无环）。
++from app.modules.platform_sync.usage_ingest import fire_usage_ingest_for_push
++
+ if TYPE_CHECKING:
+     # 仅类型标注用（helper 返回值）；运行时 import 维持函数级（防模块加载环，
+     # 与 read_agent_log_content 既有函数级 import 惯例一致）。
+@@ -566,6 +570,12 @@ async def push_agent_logs(
+         user_id=_user.id,
+         hub_session_id=body.hub_session_id,
+     )
++    # 2026-10-02-change-center-token-usage task-02（design 总体方案 / D-002@v1）：
++    # 落库（含 service 唯一 commit :2119）成功后 fire-and-forget 用量摄取——
++    # 后台任务自开 session 经回放 RPC 通道让 daemon 解析日志 totalUsage 覆盖写
++    # 快照五列；不阻塞本响应、失败仅记日志不放大（下次上报幂等补齐，R-03/R-06）。
++    # fire 点在 commit 之后：后台任务读到的行已提交可见（Grill X1 实证）。
++    fire_usage_ingest_for_push(scope.workspace_id, body.entries)
+     return AgentLogPushOk(upserted=upserted)
+ 
+ 
+diff --git a/backend/app/modules/platform_sync/schema.py b/backend/app/modules/platform_sync/schema.py
+index 240abfcaa..9425d3a52 100644
+--- a/backend/app/modules/platform_sync/schema.py
++++ b/backend/app/modules/platform_sync/schema.py
+@@ -549,6 +549,10 @@ class AgentLogTotalUsage(BaseModel):
+     ``inputTokens`` 等）——四项口径与 daemon 一致**无 ``total_tokens``**（daemon
+     侧累计即不产出该项）；daemon 原文 camelCase 经 ``validation_alias`` 双名对齐。
+     老 daemon / 早退分支（unsupported/parse_error/too_large）不携带即整项 None。
++
++    2026-10-02-change-center-token-usage task-02：新增第二消费方——usage_ingest
++    摄取任务复用同一 alias 对齐链，把 totalUsage 落 platform_agent_logs 快照五列
++    （cacheWriteTokens → usage_cache_write_tokens）；DTO 字段集不变。
+     """
+ 
+     model_config = {"extra": "ignore"}
+diff --git a/backend/app/modules/platform_sync/tests/test_usage_ingest.py b/backend/app/modules/platform_sync/tests/test_usage_ingest.py
+new file mode 100644
+index 000000000..e6782d5cb
+--- /dev/null
++++ b/backend/app/modules/platform_sync/tests/test_usage_ingest.py
+@@ -0,0 +1,378 @@
++"""agent-logs 用量快照摄取测试（2026-10-02-change-center-token-usage task-02）。
++
++覆盖（task 卡 acceptance / design FR-01）：
++
++- 候选筛选：白名单外 format / 无会话归属 / exists=False 不发 RPC 不落库；
++- 节流：size+mtime 与库一致且 300s 内已解析 → 跳过；日志增长（mtime 变化）不跳过；
++- 成功落库：status=parsed + totalUsage → 五列快照（cacheWriteTokens →
++  usage_cache_write_tokens 映射锚定）；
++- 降级：totalUsage null / status 非 parsed / RPC AppError（旧 daemon
++  method_not_found 422、无绑定 daemon 404、网关 502）静默跳过不抛；
++- 幂等：重复摄取覆盖写同值；
++- fire 入口：fire_usage_ingest_for_push 创建任务并执行（run 函数被调用）；
++- 端点挂载：POST /api/agent-logs 响应后 fire 被调用且参数透传（上报语义不变）。
++
++RPC 层（_resolve_agent_log_read_target / _send_agent_log_rpc）全部 monkeypatch
++（延迟 import 按 router 模块属性解析，patch router 命名空间即可拦截）——不依赖
++真实 daemon 连接；后台任务路径（run_usage_ingest_for_push 的自开 session）同样
++patch 掉，本文件只验 service 层语义与挂载接线。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime, timedelta
++from typing import Any
++
++import pytest
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.errors import AppError
++from app.modules.platform_sync.model import AgentSessionLogORM
++from app.modules.platform_sync.schema import AgentLogEntry
++from app.modules.platform_sync.usage_ingest import (
++    AgentLogUsageIngestService,
++    fire_usage_ingest_for_push,
++)
++
++
++def _entry(
++    log_path: str,
++    *,
++    format: str = "zcode-model-io-jsonl",
++    size_bytes: int | None = 1000,
++    mtime_ms: float | None = 1787446398096.0,
++    exists: bool = True,
++) -> AgentLogEntry:
++    """白名单内最小 entry（其余字段走 AgentLogEntry 默认）。"""
++    return AgentLogEntry(
++        harness="zcode",
++        log_path=log_path,
++        format=format,
++        exists=exists,
++        size_bytes=size_bytes,
++        mtime_ms=mtime_ms,
++    )
++
++
++async def _seed_row(
++    db_session: AsyncSession,
++    workspace_id: uuid.UUID,
++    *,
++    log_path: str = "C:/Users/qinyi/.zcode/cli/rollout/model-io-sess-a.jsonl",
++    format: str = "zcode-model-io-jsonl",
++    linked_session: uuid.UUID | None = None,
++    size_bytes: int | None = 1000,
++    mtime_ms: float | None = 1787446398096.0,
++    parsed_at: datetime | None = None,
++) -> AgentSessionLogORM:
++    row = AgentSessionLogORM(
++        workspace_id=workspace_id,
++        log_path=log_path,
++        harness="zcode",
++        format=format,
++        agent_session_id=linked_session,
++        size_bytes=size_bytes,
++        mtime_ms=mtime_ms,
++        usage_parsed_at=parsed_at,
++    )
++    db_session.add(row)
++    await db_session.commit()
++    await db_session.refresh(row)
++    return row
++
++
++_DEFAULT_TOTAL_USAGE: dict[str, int] = {
++    "inputTokens": 1200,
++    "outputTokens": 340,
++    "cacheReadTokens": 5600,
++    "cacheWriteTokens": 780,
++}
++
++
++def _rpc_result(
++    *,
++    status: str = "parsed",
++    total_usage: dict[str, int] | None = None,
++) -> dict[str, Any]:
++    return {
++        "status": status,
++        "totalUsage": _DEFAULT_TOTAL_USAGE if total_usage is None else total_usage,
++    }
++
++
++class _RpcChannel:
++    """测试用 RPC 桩：calls 记录每次定位调用，results 为应答/异常队列。"""
++
++    def __init__(self) -> None:
++        self.calls: list[dict[str, Any]] = []
++        self.results: list[Any] = []
++
++
++@pytest.fixture()
++def rpc_channel(monkeypatch: pytest.MonkeyPatch) -> _RpcChannel:
++    """patch 定位+RPC 为记录器：按 results 队列顺序回结果/异常（空则默认成功体）。"""
++    ch = _RpcChannel()
++
++    async def fake_resolve(session, entry_id, scope):
++        row = (
++            await session.execute(
++                select(AgentSessionLogORM).where(AgentSessionLogORM.id == entry_id)
++            )
++        ).scalar_one()
++        ch.calls.append({"entry_id": entry_id, "workspace": scope.workspace_id})
++        return row, uuid.UUID(int=1)
++
++    async def fake_send(entry, daemon_id, method, args, **kw):
++        item = ch.results.pop(0) if ch.results else _rpc_result()
++        if isinstance(item, Exception):
++            raise item
++        return item
++
++    monkeypatch.setattr(
++        "app.modules.platform_sync.router._resolve_agent_log_read_target",
++        fake_resolve,
++    )
++    monkeypatch.setattr("app.modules.platform_sync.router._send_agent_log_rpc", fake_send)
++    return ch
++
++
++@pytest.mark.asyncio
++async def test_ingest_writes_snapshot_with_column_mapping(
++    db_session: AsyncSession, rpc_channel: _RpcChannel
++) -> None:
++    """parsed + totalUsage → 五列落库；cacheWriteTokens → usage_cache_write_tokens。"""
++    ws = uuid.uuid4()
++    session_id = uuid.uuid4()
++    row = await _seed_row(db_session, ws, linked_session=session_id)
++
++    ingested = await AgentLogUsageIngestService(db_session).ingest_for_push(
++        ws, [_entry(row.log_path)]
++    )
++
++    assert ingested == 1
++    await db_session.refresh(row)
++    assert row.usage_input_tokens == 1200
++    assert row.usage_output_tokens == 340
++    assert row.usage_cache_read_tokens == 5600
++    # 列名映射链锚定（design X6）：daemon cacheWriteTokens ↔ 本列。
++    assert row.usage_cache_write_tokens == 780
++    assert row.usage_parsed_at is not None
++    assert len(rpc_channel.calls) == 1
++
++
++@pytest.mark.asyncio
++async def test_ingest_skips_unsupported_format_and_unlinked(
++    db_session: AsyncSession, rpc_channel: _RpcChannel
++) -> None:
++    """白名单外 format（codex/cursor）与无会话归属的 entry：零 RPC、不落库。"""
++    ws = uuid.uuid4()
++    codex_row = await _seed_row(
++        db_session, ws, format="codex-rollout-jsonl", linked_session=uuid.uuid4()
++    )
++    unlinked_row = await _seed_row(
++        db_session,
++        ws,
++        log_path="C:/x/model-io-sess-b.jsonl",
++        linked_session=None,
++    )
++
++    svc = AgentLogUsageIngestService(db_session)
++    count = await svc.ingest_for_push(
++        ws,
++        [
++            _entry(codex_row.log_path, format="codex-rollout-jsonl"),
++            _entry(unlinked_row.log_path),
++        ],
++    )
++
++    assert count == 0
++    assert rpc_channel.calls == []
++    for row in (codex_row, unlinked_row):
++        await db_session.refresh(row)
++        assert row.usage_parsed_at is None
++
++
++@pytest.mark.asyncio
++async def test_ingest_throttles_unchanged_recent_snapshot(
++    db_session: AsyncSession, rpc_channel: _RpcChannel
++) -> None:
++    """size+mtime 一致且 300s 内已解析 → 跳过；mtime 增长 → 照常解析。"""
++    ws = uuid.uuid4()
++    fresh_row = await _seed_row(
++        db_session,
++        ws,
++        linked_session=uuid.uuid4(),
++        parsed_at=datetime.now(UTC) - timedelta(seconds=60),
++    )
++    grown_row = await _seed_row(
++        db_session,
++        ws,
++        log_path="C:/x/model-io-sess-c.jsonl",
++        linked_session=uuid.uuid4(),
++        parsed_at=datetime.now(UTC) - timedelta(seconds=60),
++        mtime_ms=1787446399999.0,  # 库中 mtime 与上报不一致 = 日志已增长
++    )
++
++    count = await AgentLogUsageIngestService(db_session).ingest_for_push(
++        ws,
++        [_entry(fresh_row.log_path), _entry(grown_row.log_path)],
++    )
++
++    assert count == 1
++    assert [c["entry_id"] for c in rpc_channel.calls] == [grown_row.id]
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize(
++    ("result", "label"),
++    [
++        ({"status": "parsed", "totalUsage": None}, "totalUsage null（零 usage 契约）"),
++        (_rpc_result(status="unsupported"), "unsupported"),
++        (_rpc_result(status="too_large"), "too_large"),
++    ],
++)
++async def test_ingest_skips_non_parsed_or_null_usage(
++    db_session: AsyncSession,
++    rpc_channel: _RpcChannel,
++    result: dict[str, Any],
++    label: str,
++) -> None:
++    """非 parsed / null totalUsage：不落库不抛（参数化：label 仅为断言可读性）。"""
++    assert label
++    ws = uuid.uuid4()
++    row = await _seed_row(db_session, ws, linked_session=uuid.uuid4())
++    rpc_channel.results.append(result)
++
++    count = await AgentLogUsageIngestService(db_session).ingest_for_push(ws, [_entry(row.log_path)])
++
++    assert count == 0
++    await db_session.refresh(row)
++    assert row.usage_input_tokens is None
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize(
++    ("exc", "label"),
++    [
++        (
++            AppError(
++                "老 daemon 未注册该 RPC。",
++                code="HTTP_422_AGENT_LOG_UNSUPPORTED",
++                http_status=422,
++            ),
++            "method_not_found 422",
++        ),
++        (
++            AppError(
++                "未找到可读取该日志的机器。",
++                code="HTTP_404_AGENT_LOG_NO_BOUND_DAEMON",
++                http_status=404,
++            ),
++            "无绑定 daemon 404",
++        ),
++        # Execute Review P3-2：意外非 AppError 异常同样落防御兜底分支（best-effort
++        # 语义下任何意外都不抛进 gather/上报链路）。
++        (RuntimeError("意外炸裂"), "意外非 AppError"),
++    ],
++)
++async def test_ingest_degrades_on_app_error(
++    db_session: AsyncSession,
++    rpc_channel: _RpcChannel,
++    exc: Exception,
++    label: str,
++) -> None:
++    """RPC 语义性失败（旧 daemon/无绑定机器）静默跳过：不抛、快照保持 NULL。"""
++    assert label
++    ws = uuid.uuid4()
++    row = await _seed_row(db_session, ws, linked_session=uuid.uuid4())
++    rpc_channel.results.append(exc)
++
++    count = await AgentLogUsageIngestService(db_session).ingest_for_push(ws, [_entry(row.log_path)])
++
++    assert count == 0
++    await db_session.refresh(row)
++    assert row.usage_parsed_at is None
++
++
++@pytest.mark.asyncio
++async def test_ingest_idempotent_overwrite(
++    db_session: AsyncSession, rpc_channel: _RpcChannel
++) -> None:
++    """两次摄取覆盖写同值：终态一致（幂等，RPC 两次都被发起——无节流命中）。"""
++    ws = uuid.uuid4()
++    row = await _seed_row(db_session, ws, linked_session=uuid.uuid4())
++
++    svc = AgentLogUsageIngestService(db_session)
++    first = await svc.ingest_for_push(ws, [_entry(row.log_path, mtime_ms=1.0)])
++    second = await svc.ingest_for_push(ws, [_entry(row.log_path, mtime_ms=2.0)])
++
++    assert first == second == 1
++    await db_session.refresh(row)
++    assert row.usage_input_tokens == 1200
++    assert row.usage_cache_write_tokens == 780
++
++
++@pytest.mark.asyncio
++async def test_fire_usage_ingest_creates_and_runs_task(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """fire 入口创建后台任务并执行 run 函数（强引用集进出平衡）。"""
++
++    from app.modules.platform_sync import usage_ingest
++
++    seen: list[tuple[uuid.UUID, int]] = []
++
++    async def fake_run(workspace_id, entries):
++        seen.append((workspace_id, len(entries)))
++        return 0
++
++    monkeypatch.setattr(usage_ingest, "run_usage_ingest_for_push", fake_run)
++
++    ws = uuid.uuid4()
++    task = fire_usage_ingest_for_push(ws, [_entry("C:/x/a.jsonl")])
++    assert task in usage_ingest._background_tasks  # 强引用防 GC 语义锚定
++    await task
++    assert seen == [(ws, 1)]
++    assert task not in usage_ingest._background_tasks  # done 回调出引用集
++
++
++@pytest.mark.asyncio
++async def test_push_endpoint_fires_ingest_with_entries(
++    client: Any,
++    shpsync_headers: tuple[Any, dict[str, str]],
++    db_session: AsyncSession,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """POST /api/agent-logs 200 后 fire 被调用且 workspace/entries 透传（挂载接线）。"""
++    from app.modules.platform_sync import router as ps_router
++
++    fired: list[tuple[uuid.UUID, list[AgentLogEntry]]] = []
++
++    def fake_fire(workspace_id, entries):
++        fired.append((workspace_id, entries))
++
++    monkeypatch.setattr(ps_router, "fire_usage_ingest_for_push", fake_fire)
++
++    ws_id, headers = shpsync_headers
++    resp = await client.post(
++        "/api/agent-logs",
++        json={
++            "pushed_at": "2026-10-02T00:00:00.000Z",
++            "entries": [
++                {
++                    "harness": "zcode",
++                    "log_path": "C:/Users/qinyi/.zcode/cli/rollout/model-io-s.jsonl",
++                    "format": "zcode-model-io-jsonl",
++                    "exists": True,
++                }
++            ],
++        },
++        headers=headers,
++    )
++
++    assert resp.status_code == 200
++    assert len(fired) == 1
++    assert fired[0][0] == ws_id
++    assert fired[0][1][0].format == "zcode-model-io-jsonl"
+diff --git a/backend/app/modules/platform_sync/usage_ingest.py b/backend/app/modules/platform_sync/usage_ingest.py
+new file mode 100644
+index 000000000..938c0cfcb
+--- /dev/null
++++ b/backend/app/modules/platform_sync/usage_ingest.py
+@@ -0,0 +1,235 @@
++"""agent-logs 上报后用量快照摄取（2026-10-02-change-center-token-usage task-02）。
++
++上报链路顺带解析（design 总体方案 / D-002@v1）：CLI 每次 ``POST /api/agent-logs``
++落库元信息后，backend 以 fire-and-forget 后台任务对候选 entry 逐个经既有「会话
++回放」WS RPC 通道（``host_fs.read_agent_log_messages``）让 daemon 解析日志，把
++daemon 解析器累计口径的 ``totalUsage`` 四项覆盖写进 ``platform_agent_logs`` 用量
++快照五列（task-01 迁移）。消费方：change/usage_service 聚合本地段（task-03）。
++
++铁律（design 风险登记 R-02/R-03/R-06 + Grill B-1 裁定）：
++
++- **best-effort 全降级**：daemon 离线 / 超时 / method_not_found（旧 daemon）/
++  unsupported / too_large / parse_error / totalUsage null 一律 ``log.info`` 跳过，
++  不抛不重试——下次上报全量解析幂等补齐；上报响应路径零阻塞零失败放大。
++- **节流**：同 entry 的 ``size_bytes``+``mtime_ms`` 与库中一致 且
++  ``usage_parsed_at`` 距今 < 300s → 跳过（日志未增长不重复解析）。
++- **并发**：``asyncio.Semaphore(3)`` 限并发 RPC；单 entry 复用
++  ``send_host_fs_rpc`` 默认 30s 传输预算。
++- **scope 构造（Grill B-1）**：后台任务无请求上下文，按 ingest 的 workspace_id
++  自构造 ``PlatformSyncAuthScope(workspace_id=...)`` 精确匹配复用
++  ``_resolve_agent_log_read_target``（其内部只消费 workspace 归属做定位）。
++- **后台任务自开短 session**（``get_session_factory()``，先例
++  agent/worker_redispatch.py:394-419）+ 模块级强引用集防 GC（语义等价
++  daemon/_background_tasks.fire_background_task 先例；类宿主形态不适用——本
++  service 实例在任务体内才创建，host 无处安放）。
++"""
++
++from __future__ import annotations
++
++import asyncio
++import uuid
++from datetime import UTC, datetime
++
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.logging import get_logger
++from app.modules.platform_sync.model import AgentSessionLogORM
++from app.modules.platform_sync.schema import AgentLogEntry
++
++log = get_logger(__name__)
++
++#: 有解析器且输出 totalUsage 的 format 白名单（registry.ts 三解析器中 cursor 恒
++#: null、codex 未注册——对它们发 RPC 是纯浪费，候选期直接过滤）。
++INGEST_FORMATS: frozenset[str] = frozenset({"zcode-model-io-jsonl", "claude-code-jsonl"})
++
++#: 节流窗口（秒）：size+mtime 未变且窗口内已成功解析过 → 跳过（design R-02）。
++INGEST_THROTTLE_WINDOW_S: float = 300.0
++
++#: 单次摄取的并发 RPC 上限（design R-02：一批最多 50 entry，限并发防 RPC 风暴）。
++INGEST_CONCURRENCY: int = 3
++
++#: 模块级强引用集（防 asyncio.create_task 的 task 被 GC——等价
++#: BackgroundTaskMixin._background_tasks 语义，见模块 docstring）。
++_background_tasks: set[asyncio.Task] = set()
++
++
++def _on_ingest_task_done(task: asyncio.Task) -> None:
++    """done 回调：出引用集 + 意外异常记日志（best-effort 任务自身不抛）。"""
++    _background_tasks.discard(task)
++    try:
++        exc = task.exception()
++    except (asyncio.InvalidStateError, asyncio.CancelledError):
++        return
++    if exc is not None:
++        log.warning("usage_ingest_task_failed", exc_info=exc)
++
++
++class AgentLogUsageIngestService:
++    """agent-logs 用量快照摄取（上报后异步调用，覆盖写幂等）。"""
++
++    def __init__(self, session: AsyncSession) -> None:
++        self._session = session
++
++    async def ingest_for_push(
++        self,
++        workspace_id: uuid.UUID,
++        entries: list[AgentLogEntry],
++    ) -> int:
++        """上报后摄取入口：候选筛选 → 节流 → 并发 RPC 解析 → 覆盖写快照。
++
++        Returns 本次成功落库快照的 entry 数（失败/跳过不计，不抛——best-effort）。
++        """
++        candidates = [
++            e for e in entries if (e.format or "") in INGEST_FORMATS and e.exists is not False
++        ]
++        if not candidates:
++            return 0
++
++        # 上报是 (workspace_id, log_path) 整行覆盖 upsert——按复合键批量取回库中
++        # 行（含归属/节流判定所需列），不在内存里猜 id。
++        rows = (
++            (
++                await self._session.execute(
++                    select(AgentSessionLogORM).where(
++                        AgentSessionLogORM.workspace_id == workspace_id,
++                        AgentSessionLogORM.log_path.in_([e.log_path for e in candidates]),
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++        by_path = {r.log_path: r for r in rows}
++
++        now = datetime.now(UTC)
++        pending: list[AgentSessionLogORM] = []
++        for entry in candidates:
++            row = by_path.get(entry.log_path)
++            if row is None:
++                # upsert 已落库却查无此行：异常态，跳过等下次上报（不抛）。
++                log.info("usage_ingest_row_missing", log_path=entry.log_path)
++                continue
++            if row.agent_session_id is None:
++                # 无会话归属：daemon 两级定位第一步即回落 workspace 绑定，且聚合
++                # 侧按会话锚点 SUM 永远取不到该行——解析无收益，跳过。
++                continue
++            if self._throttled(row, entry, now):
++                continue
++            pending.append(row)
++        if not pending:
++            return 0
++
++        sem = asyncio.Semaphore(INGEST_CONCURRENCY)
++
++        async def _guarded(row: AgentSessionLogORM) -> bool:
++            async with sem:
++                return await self._ingest_one(row)
++
++        results = await asyncio.gather(*[_guarded(r) for r in pending])
++        await self._session.commit()
++        return sum(1 for ok in results if ok)
++
++    @staticmethod
++    def _throttled(row: AgentSessionLogORM, entry: AgentLogEntry, now: datetime) -> bool:
++        """节流判定：日志未增长（size+mtime 与库一致）且 300s 内已解析过 → 跳过。"""
++        if (
++            row.size_bytes is not None
++            and row.size_bytes == entry.size_bytes
++            and row.mtime_ms is not None
++            and row.mtime_ms == entry.mtime_ms
++            and row.usage_parsed_at is not None
++        ):
++            parsed_at = row.usage_parsed_at
++            if parsed_at.tzinfo is None:
++                parsed_at = parsed_at.replace(tzinfo=UTC)
++            return (now - parsed_at).total_seconds() < INGEST_THROTTLE_WINDOW_S
++        return False
++
++    async def _ingest_one(self, row: AgentSessionLogORM) -> bool:
++        """单 entry 解析 + 覆盖写（全降级不抛；返回是否成功落库）。"""
++        from app.core.errors import AppError
++        from app.modules.platform_sync.auth import PlatformSyncAuthScope
++
++        # 延迟 import：router 模块级 import 本模块（挂载 fire），反向 import 会
++        # 成环——函数内解析先例见 router._resolve_agent_log_read_target 自身。
++        from app.modules.platform_sync.router import (
++            _resolve_agent_log_read_target,
++            _send_agent_log_rpc,
++        )
++        from app.modules.platform_sync.schema import AgentLogTotalUsage
++
++        try:
++            entry, daemon_id = await _resolve_agent_log_read_target(
++                self._session,
++                row.id,
++                # Grill B-1：后台任务自构造 workspace 精确 scope（该函数只消费
++                # workspace 归属做校验与定位，不做 token 校验）。
++                PlatformSyncAuthScope(workspace_id=row.workspace_id),
++            )
++            result = await _send_agent_log_rpc(
++                entry,
++                daemon_id,
++                "read_agent_log_messages",
++                {"path": entry.log_path, "format": entry.format},
++                unsupported_on_method_not_found=True,
++            )
++        except AppError as exc:
++            # 定位/RPC 语义性失败（404 无绑定 daemon / 422 旧 daemon 未注册 /
++            # 离线 / 超时 / 409 白名单外 / 502 网关）——按 design R-03 静默跳过。
++            log.info(
++                "usage_ingest_skipped",
++                entry_id=str(row.id),
++                code=getattr(exc, "code", None),
++            )
++            return False
++        except Exception:
++            # 防御兜底：best-effort 语义下任何意外都不抛进 gather/上报链路。
++            log.warning("usage_ingest_unexpected_error", entry_id=str(row.id))
++            return False
++
++        if result.get("status") != "parsed":
++            # unsupported / parse_error / too_large——解析器已给分层结论，不落库。
++            return False
++        raw_usage = result.get("totalUsage")
++        if not raw_usage:
++            # 零 usage 时 daemon 契约为 null（不伪造 0）——无快照可落。
++            return False
++        usage = AgentLogTotalUsage.model_validate(raw_usage)
++
++        # 覆盖写幂等：全量解析结果整体替换五列（cacheWriteTokens 已由
++        # validation_alias 对齐 cache_write_tokens；None 项按 0 落库——聚合侧
++        # SUM(COALESCE) 口径与其等价，快照内保持确定性数值）。
++        row.usage_input_tokens = usage.input_tokens or 0
++        row.usage_output_tokens = usage.output_tokens or 0
++        row.usage_cache_read_tokens = usage.cache_read_tokens or 0
++        row.usage_cache_write_tokens = usage.cache_write_tokens or 0
++        row.usage_parsed_at = datetime.now(UTC)
++        return True
++
++
++async def run_usage_ingest_for_push(
++    workspace_id: uuid.UUID,
++    entries: list[AgentLogEntry],
++) -> int:
++    """后台任务体：自开短 session 执行摄取（不进请求事务，design R-06）。"""
++    from app.core.db import get_session_factory
++
++    async with get_session_factory()() as db:
++        return await AgentLogUsageIngestService(db).ingest_for_push(workspace_id, entries)
++
++
++def fire_usage_ingest_for_push(
++    workspace_id: uuid.UUID,
++    entries: list[AgentLogEntry],
++) -> asyncio.Task:
++    """fire-and-forget 摄取（router push_agent_logs 在 service commit 后调用）。"""
++    task = asyncio.create_task(run_usage_ingest_for_push(workspace_id, entries))
++    _background_tasks.add(task)
++    task.add_done_callback(_on_ingest_task_done)
++    log.info(
++        "usage_ingest_fired",
++        workspace_id=str(workspace_id),
++        entries=len(entries),
++    )
++    return task
+diff --git a/backend/migrations/versions/20261002010000_add_platform_agent_log_usage.py b/backend/migrations/versions/20261002010000_add_platform_agent_log_usage.py
+new file mode 100644
+index 000000000..04d323372
+--- /dev/null
++++ b/backend/migrations/versions/20261002010000_add_platform_agent_log_usage.py
+@@ -0,0 +1,67 @@
++"""platform_agent_logs 用量快照五列（四维 token + 解析时间）
++
++Revision ID: 20261002010000
++Revises: 20260930110000
++Create Date: 2026-10-02 01:00:00
++
++Change 2026-10-02-change-center-token-usage task-01（design 数据模型 / FR-01）：
++
++1. ``platform_agent_logs`` 加 5 列用量快照：四维 token（usage_input_tokens /
++   usage_output_tokens / usage_cache_read_tokens / usage_cache_write_tokens，
++   BigInteger）+ usage_parsed_at（DateTime UTC）。producer = usage_ingest 摄取
++   任务（task-02，daemon 解析日志 totalUsage 覆盖写）；consumer = change/
++   usage_service 聚合本地段（task-03，按 agent_session_id 会话锚点 SUM）。
++2. 全部 nullable、无 server_default：NULL = 未摄取 / 解析不支持（存量行不
++   回填，design 非目标——聚合侧 ``usage_parsed_at IS NOT NULL`` 过滤自然跳过，
++   显示与改造前一致）。
++
++down_revision 接执行时唯一 head 20260930110000（alembic heads 实测单 head，
++无分叉）。downgrade 对称删五列，删后聚合本地段空结果与改造前完全一致。
++
++author: qinyi
++created_at: 2026-10-02 23:25:00
++"""
++
++from __future__ import annotations
++
++from typing import Sequence
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "20261002010000"
++down_revision: str | None = "20260930110000"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++
++def upgrade() -> None:
++    # 列与 platform_sync/model.py AgentSessionLogORM 逐列对齐（防 autogenerate 漂移）。
++    op.add_column(
++        "platform_agent_logs",
++        sa.Column("usage_input_tokens", sa.BigInteger(), nullable=True),
++    )
++    op.add_column(
++        "platform_agent_logs",
++        sa.Column("usage_output_tokens", sa.BigInteger(), nullable=True),
++    )
++    op.add_column(
++        "platform_agent_logs",
++        sa.Column("usage_cache_read_tokens", sa.BigInteger(), nullable=True),
++    )
++    op.add_column(
++        "platform_agent_logs",
++        sa.Column("usage_cache_write_tokens", sa.BigInteger(), nullable=True),
++    )
++    op.add_column(
++        "platform_agent_logs",
++        sa.Column("usage_parsed_at", sa.DateTime(timezone=True), nullable=True),
++    )
++
++
++def downgrade() -> None:
++    op.drop_column("platform_agent_logs", "usage_parsed_at")
++    op.drop_column("platform_agent_logs", "usage_cache_write_tokens")
++    op.drop_column("platform_agent_logs", "usage_cache_read_tokens")
++    op.drop_column("platform_agent_logs", "usage_output_tokens")
++    op.drop_column("platform_agent_logs", "usage_input_tokens")
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 54c6157ac..7ae0390cc 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -35861,7 +35861,7 @@
+         },
+         "type": "object",
+         "title": "AgentLogTotalUsage",
+-        "description": "全会话累计 token 用量四项（2026-09-19-tool-report-session-replay task-08）。\n\n对齐 daemon ``AgentLogMessagesResult.totalUsage``（registry.ts，键为 camelCase\n``inputTokens`` 等）——四项口径与 daemon 一致**无 ``total_tokens``**（daemon\n侧累计即不产出该项）；daemon 原文 camelCase 经 ``validation_alias`` 双名对齐。\n老 daemon / 早退分支（unsupported/parse_error/too_large）不携带即整项 None。"
++        "description": "全会话累计 token 用量四项（2026-09-19-tool-report-session-replay task-08）。\n\n对齐 daemon ``AgentLogMessagesResult.totalUsage``（registry.ts，键为 camelCase\n``inputTokens`` 等）——四项口径与 daemon 一致**无 ``total_tokens``**（daemon\n侧累计即不产出该项）；daemon 原文 camelCase 经 ``validation_alias`` 双名对齐。\n老 daemon / 早退分支（unsupported/parse_error/too_large）不携带即整项 None。\n\n2026-10-02-change-center-token-usage task-02：新增第二消费方——usage_ingest\n摄取任务复用同一 alias 对齐链，把 totalUsage 落 platform_agent_logs 快照五列\n（cacheWriteTokens → usage_cache_write_tokens）；DTO 字段集不变。"
+       },
+       "AgentProfileAggregatedItem": {
+         "properties": {
+@@ -73012,7 +73012,7 @@
+           "model"
+         ],
+         "title": "UsageByModelItemRead",
+-        "description": "分模型用量明细项（ChangeUsageRead.by_model 列表行）。\n\n明细段 = agent_run_model_usage 按 model GROUP BY（SUM 四维 token +\napi_requests）；兜底段 = 集合中无明细行的 run 归并到 run.model（缺失归\n「未记录」桶）。数据流：producer = change/usage_service.py\nChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =\n前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。"
++        "description": "分模型用量明细项（ChangeUsageRead.by_model 列表行）。\n\n明细段 = agent_run_model_usage 按 model GROUP BY（SUM 四维 token +\napi_requests）；兜底段 = 集合中无明细行的 run 归并到 run.model（缺失归\n「未记录」桶）。数据流：producer = change/usage_service.py\nChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =\n前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。\n\n2026-10-02-change-center-token-usage task-03：新增第三桶「本地 CLI」\n（usage_service._LOCAL_CLI_MODEL）——本地 CLI 会话快照四维（api_requests\n恒 0，排序按数值参与不特殊置位）；前端按桶名渲染绿阶 tag。DTO 字段集不变。"
+       },
+       "UsageData": {
+         "properties": {
+diff --git a/frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx
+index f90908b8d..f0edaab52 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx
+@@ -181,10 +181,12 @@ describe("ChangeUsageCard（task-07）", () => {
+     });
+     expect(mocks.getChangeUsage).not.toHaveBeenCalled();
+ 
+-    // 展开后注脚按 kind 分叉：quicklog 声明统计关联会话内全部执行。
++    // 展开后注脚按 kind 分叉：quicklog 声明统计关联会话内全部执行 + 本地 CLI 口径。
+     fireEvent.click(await screen.findByRole("button", { name: "按模型明细" }));
+     expect(
+-      await screen.findByText(/统计关联会话内全部执行（快速修复经会话绑定关联）/),
++      await screen.findByText(
++        /统计关联会话内全部执行与本地 CLI 会话（快速修复经会话绑定关联）；本地 CLI 用量来自落库快照/,
++      ),
+     ).toBeInTheDocument();
+   });
+ 
+@@ -220,7 +222,7 @@ describe("ChangeUsageCard（task-07）", () => {
+     expect(screen.getByText("172")).toBeInTheDocument(); // glm-4.7 行请求次数
+     expect(
+       screen.getByText(
+-        /统计平台派发执行与关联会话执行，按执行去重合并；会话服务多个变更时消耗在各变更分别显示；已删除会话的执行仍计入；耗时为纯执行时长累加/,
++        /统计平台派发执行、关联会话执行与本地 CLI 会话，按执行去重合并；本地 CLI 用量来自 daemon 解析日志的落库快照/,
+       ),
+     ).toBeInTheDocument();
+ 
+@@ -265,4 +267,74 @@ describe("ChangeUsageCard（task-07）", () => {
+     expect(screen.queryByText("进行中")).not.toBeInTheDocument();
+     expect(screen.queryByRole("button", { name: "按模型明细" })).not.toBeInTheDocument();
+   });
++
++  // ── 2026-10-02-change-center-token-usage task-04：本地 CLI 桶渲染 ──
++
++  it("「本地 CLI」桶行渲染绿阶 tag、请求列「—」、数字照常（本地 CLI 用量并入）", async () => {
++    mocks.getChangeUsage.mockResolvedValue(
++      usageOf({
++        by_model: [
++          ...usageOf().by_model,
++          {
++            model: "本地 CLI",
++            input_tokens: 861_000, // 861.0K
++            output_tokens: 24_300,
++            cache_read_tokens: 1_500_000, // 1.5M
++            cache_creation_tokens: 98_000,
++            api_requests: 0, // 无来源恒 0 → 渲染「—」
++          },
++        ],
++      }),
++    );
++    renderCard();
++
++    fireEvent.click(await screen.findByRole("button", { name: "按模型明细" }));
++    const localTag = await screen.findByText("本地 CLI");
++    expect(localTag).toBeInTheDocument();
++    // 绿阶样式锚定（区别于「未记录」灰阶与模型行 brand 阶）。
++    expect(localTag.className).toContain("text-emerald-700");
++    expect(screen.getByText("861.0K")).toBeInTheDocument();
++    expect(screen.getByText("1.5M")).toBeInTheDocument();
++    // 请求列：本地 CLI 行显示「—」而非「0」（零来源展示语义）。
++    expect(screen.getByText("—")).toBeInTheDocument();
++    expect(screen.queryByText(/^0$/)).not.toBeInTheDocument();
++  });
++
++  it("纯本地变更（三元组全 None + totals 非 0）→ 不触发「尚无关联执行」空态，时间显示「—」", async () => {
++    mocks.getChangeUsage.mockResolvedValue(
++      usageOf({
++        started_at: null,
++        finished_at: null,
++        duration_ms: null,
++        totals: {
++          input_tokens: 861_000,
++          output_tokens: 24_300,
++          cache_read_tokens: 1_500_000,
++          cache_creation_tokens: 98_000,
++          api_requests: 0,
++          num_turns: 0,
++        },
++        by_model: [
++          {
++            model: "本地 CLI",
++            input_tokens: 861_000,
++            output_tokens: 24_300,
++            cache_read_tokens: 1_500_000,
++            cache_creation_tokens: 98_000,
++            api_requests: 0,
++          },
++        ],
++      }),
++    );
++    renderCard();
++
++    // hasNoExecution 要求 totals 全 0——纯本地非 0 → 正常渲染用量卡。
++    expect(await screen.findByTestId("change-usage-card")).toBeInTheDocument();
++    expect(screen.getByText("861.0K")).toBeInTheDocument();
++    expect(
++      screen.queryByText(/尚无关联执行/),
++    ).not.toBeInTheDocument();
++    // started None → 不误渲染「进行中」标记。
++    expect(screen.queryByText("进行中")).not.toBeInTheDocument();
++  });
+ });
+diff --git a/frontend/src/components/changes/detail/change-usage-card.tsx b/frontend/src/components/changes/detail/change-usage-card.tsx
+index 3ece03545..a57a55f4b 100644
+--- a/frontend/src/components/changes/detail/change-usage-card.tsx
++++ b/frontend/src/components/changes/detail/change-usage-card.tsx
+@@ -34,12 +34,20 @@ import { cn } from "@/lib/utils";
+ /** 「未记录」兜底桶名（backend usage_service 对无明细 run 的统一填充值，恒末位）。 */
+ const UNRECORDED_MODEL = "未记录";
+ 
++/** 「本地 CLI」桶名（backend usage_service._LOCAL_CLI_MODEL 约定值，
++ * 2026-10-02-change-center-token-usage task-04）：本地 CLI 会话（ZCode/Claude
++ * Code 等直接本地跑）经 daemon 解析日志落库的快照四维归并桶，请求次数无来源
++ * 恒 0（渲染「—」）。 */
++const LOCAL_CLI_MODEL = "本地 CLI";
++
+ /** 口径注脚（usage-note 小字）：按 kind 分叉——change 声明并集去重/共享会话/
+- * 软删会话/纯执行时长口径；quicklog 声明恒走关联会话链路（无派发锚点）。 */
++ * 软删会话/纯执行时长口径；quicklog 声明恒走关联会话链路（无派发锚点）。
++ * 2026-10-02 task-04：两 kind 均补本地 CLI 会话口径（快照落库、请求/轮次不计）。 */
+ const USAGE_NOTE_TEXT: Record<ChangeUsageCardProps["kind"], string> = {
+   change:
+-    "统计平台派发执行与关联会话执行，按执行去重合并；会话服务多个变更时消耗在各变更分别显示；已删除会话的执行仍计入；耗时为纯执行时长累加",
+-  quicklog: "统计关联会话内全部执行（快速修复经会话绑定关联）",
++    "统计平台派发执行、关联会话执行与本地 CLI 会话，按执行去重合并；本地 CLI 用量来自 daemon 解析日志的落库快照，请求次数与轮次无来源不计；会话服务多个变更时消耗在各变更分别显示；已删除会话的执行仍计入；耗时为纯执行时长累加",
++  quicklog:
++    "统计关联会话内全部执行与本地 CLI 会话（快速修复经会话绑定关联）；本地 CLI 用量来自落库快照，请求次数与轮次无来源不计",
+ };
+ 
+ export interface ChangeUsageCardProps {
+@@ -314,8 +322,9 @@ export function ChangeUsageCard({ kind, workspaceId, refKey }: ChangeUsageCardPr
+                   className="border-b border-slate-100 last:border-b-0"
+                 >
+                   <td className="px-1.5 py-1">
+-                    {/* 「未记录」兜底桶 → 灰阶 tag（无按模型明细的旧执行归并）；
+-                        正常模型 → brand 阶 tag（对齐 session-usage-bar 先例）。 */}
++                    {/* 三分支桶 tag：「未记录」灰阶（无按模型明细的旧执行归并）、
++                        「本地 CLI」绿阶（本地会话快照桶，task-04）、正常模型
++                        brand 阶（对齐 session-usage-bar 先例）。 */}
+                     {row.model === UNRECORDED_MODEL ? (
+                       <span
+                         title="无按模型明细的历史执行归并，请求次数无来源按 0 计"
+@@ -323,6 +332,13 @@ export function ChangeUsageCard({ kind, workspaceId, refKey }: ChangeUsageCardPr
+                       >
+                         {UNRECORDED_MODEL}
+                       </span>
++                    ) : row.model === LOCAL_CLI_MODEL ? (
++                      <span
++                        title="本地 CLI 会话（ZCode / Claude Code 等直接本地跑）上报解析的累计用量"
++                        className="inline-flex items-center rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700"
++                      >
++                        {LOCAL_CLI_MODEL}
++                      </span>
+                     ) : (
+                       <span
+                         title={row.model}
+@@ -345,7 +361,9 @@ export function ChangeUsageCard({ kind, workspaceId, refKey }: ChangeUsageCardPr
+                     {formatTokensCompact(row.cache_creation_tokens)}
+                   </td>
+                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
+-                    {formatCount(row.api_requests)}
++                    {/* 本地 CLI 桶请求次数无来源（恒 0 诚实值）→「—」（对齐
++                        「未记录」桶的零来源展示语义，task-04）。 */}
++                    {row.model === LOCAL_CLI_MODEL ? "—" : formatCount(row.api_requests)}
+                   </td>
+                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
+                     {formatHitRate(cacheHitRate(row))}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 0fc20b618..0a46ed119 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -12347,6 +12347,10 @@ export interface components {
+          *     ``inputTokens`` 等）——四项口径与 daemon 一致**无 ``total_tokens``**（daemon
+          *     侧累计即不产出该项）；daemon 原文 camelCase 经 ``validation_alias`` 双名对齐。
+          *     老 daemon / 早退分支（unsupported/parse_error/too_large）不携带即整项 None。
++         *
++         *     2026-10-02-change-center-token-usage task-02：新增第二消费方——usage_ingest
++         *     摄取任务复用同一 alias 对齐链，把 totalUsage 落 platform_agent_logs 快照五列
++         *     （cacheWriteTokens → usage_cache_write_tokens）；DTO 字段集不变。
+          */
+         AgentLogTotalUsage: {
+             /** Input Tokens */
+@@ -26838,6 +26842,10 @@ export interface components {
+          *     「未记录」桶）。数据流：producer = change/usage_service.py
+          *     ChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =
+          *     前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。
++         *
++         *     2026-10-02-change-center-token-usage task-03：新增第三桶「本地 CLI」
++         *     （usage_service._LOCAL_CLI_MODEL）——本地 CLI 会话快照四维（api_requests
++         *     恒 0，排序按数值参与不特殊置位）；前端按桶名渲染绿阶 tag。DTO 字段集不变。
+          */
+         UsageByModelItemRead: {
+             /** Model */
