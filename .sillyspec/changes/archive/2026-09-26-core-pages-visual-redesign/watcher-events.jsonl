@@ -1,0 +1,176 @@
+{"ts":1790438292947,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"brainstorm/plan 期已 20 分钟无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790438587769,"kind":"commit","stage":null,"detail":"9adc7bf4d","provisional":true}
+{"ts":1790439788224,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"brainstorm/plan 期已 20 分钟无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790440036785,"kind":"file","stage":"proposal","detail":"decisions.md 出现","provisional":true}
+{"ts":1790440059905,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1790440139067,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790440139067,"kind":"task-done","stage":"design","detail":"checked 0→6","provisional":true}
+{"ts":1790440149138,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1790440202090,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790440205481,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790440212153,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790440222107,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790440241949,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790440285051,"kind":"file","stage":"proposal","detail":"proposal.md 出现","provisional":true}
+{"ts":1790440308052,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1790440314708,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1790440321431,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1790440324855,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1790440515670,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790440538868,"kind":"file-update","stage":"proposal","detail":"proposal.md 内容变更","provisional":true}
+{"ts":1790440538868,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790440581707,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1790440714068,"kind":"file","stage":"plan","detail":"plan.md 出现","provisional":true}
+{"ts":1790440720832,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790440787273,"kind":"file-update","stage":"plan","detail":"plan.md 内容变更","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-01.md 出现","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-02.md 出现","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-03.md 出现","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-04.md 出现","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-05.md 出现","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-06.md 出现","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-07.md 出现","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-08.md 出现","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-09.md 出现","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-10.md 出现","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-11.md 出现","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-12.md 出现","provisional":true}
+{"ts":1790440817127,"kind":"file","stage":"tasks","detail":"tasks/task-13.md 出现","provisional":true}
+{"ts":1790440877814,"kind":"file-update","stage":"tasks","detail":"tasks/task-01.md 内容变更","provisional":true}
+{"ts":1790440919385,"kind":"file-update","stage":"tasks","detail":"tasks/task-02.md 内容变更","provisional":true}
+{"ts":1790440919385,"kind":"file-update","stage":"tasks","detail":"tasks/task-03.md 内容变更","provisional":true}
+{"ts":1790440919385,"kind":"file-update","stage":"tasks","detail":"tasks/task-04.md 内容变更","provisional":true}
+{"ts":1790440974765,"kind":"file-update","stage":"tasks","detail":"tasks/task-05.md 内容变更","provisional":true}
+{"ts":1790440974765,"kind":"file-update","stage":"tasks","detail":"tasks/task-06.md 内容变更","provisional":true}
+{"ts":1790440974765,"kind":"file-update","stage":"tasks","detail":"tasks/task-07.md 内容变更","provisional":true}
+{"ts":1790440974765,"kind":"file-update","stage":"tasks","detail":"tasks/task-08.md 内容变更","provisional":true}
+{"ts":1790441014779,"kind":"file-update","stage":"tasks","detail":"tasks/task-09.md 内容变更","provisional":true}
+{"ts":1790441014779,"kind":"file-update","stage":"tasks","detail":"tasks/task-10.md 内容变更","provisional":true}
+{"ts":1790441014779,"kind":"file-update","stage":"tasks","detail":"tasks/task-11.md 内容变更","provisional":true}
+{"ts":1790441014779,"kind":"file-update","stage":"tasks","detail":"tasks/task-12.md 内容变更","provisional":true}
+{"ts":1790441014779,"kind":"file-update","stage":"tasks","detail":"tasks/task-13.md 内容变更","provisional":true}
+{"ts":1790441024787,"kind":"file-update","stage":"tasks","detail":"tasks/task-09.md 内容变更","provisional":true}
+{"ts":1790441024787,"kind":"file-update","stage":"tasks","detail":"tasks/task-10.md 内容变更","provisional":true}
+{"ts":1790441024787,"kind":"file-update","stage":"tasks","detail":"tasks/task-11.md 内容变更","provisional":true}
+{"ts":1790441041308,"kind":"file","stage":"verify","detail":"module-impact.md 出现","provisional":true}
+{"ts":1790441071298,"kind":"file-update","stage":"tasks","detail":"tasks/task-01.md 内容变更","provisional":true}
+{"ts":1790441071298,"kind":"file-update","stage":"tasks","detail":"tasks/task-03.md 内容变更","provisional":true}
+{"ts":1790441071298,"kind":"file-update","stage":"tasks","detail":"tasks/task-10.md 内容变更","provisional":true}
+{"ts":1790441071298,"kind":"file-update","stage":"tasks","detail":"tasks/task-11.md 内容变更","provisional":true}
+{"ts":1790441101136,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790441134313,"kind":"file-update","stage":"plan","detail":"plan.md 内容变更","provisional":true}
+{"ts":1790441150855,"kind":"file-update","stage":"plan","detail":"plan.md 内容变更","provisional":true}
+{"ts":1790441150855,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790441150855,"kind":"file-update","stage":"tasks","detail":"tasks/task-03.md 内容变更","provisional":true}
+{"ts":1790441291266,"kind":"file-update","stage":"tasks","detail":"tasks/task-03.md 内容变更","provisional":true}
+{"ts":1790441291266,"kind":"file-update","stage":"tasks","detail":"tasks/task-04.md 内容变更","provisional":true}
+{"ts":1790441291266,"kind":"file-update","stage":"tasks","detail":"tasks/task-09.md 内容变更","provisional":true}
+{"ts":1790441311427,"kind":"file-update","stage":"tasks","detail":"tasks/task-10.md 内容变更","provisional":true}
+{"ts":1790441400307,"kind":"file","stage":"verify","detail":"symbol-impact.md 出现","provisional":true}
+{"ts":1790441423810,"kind":"file-update","stage":"verify","detail":"symbol-impact.md 内容变更","provisional":true}
+{"ts":1790441427264,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790441427264,"kind":"task-done","stage":"tasks","detail":"checked 0→8","provisional":true}
+{"ts":1790441427496,"kind":"warning","stage":null,"rule":"fake-check","severity":"warning","detail":"tasks 勾选 task-01、task-02、task-03、task-04、task-05、task-06、task-07、task-08 无对应提交（消息不含该 task id）且无 review.json 变更——假勾选嫌疑，人判","provisional":true}
+{"ts":1790442330728,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790442618156,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：.tmp-fix-helper.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790442678460,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：.tmp-fix2.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790442789375,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：.tmp-fix3.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790442923704,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：.tmp-fix4.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790442963832,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：.tmp-fix5.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790443073572,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790443073572,"kind":"task-done","stage":"tasks","detail":"checked 8→9","provisional":true}
+{"ts":1790443243673,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：.tmp-fix6.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790443387500,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1790443485564,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790443485564,"kind":"task-done","stage":"tasks","detail":"checked 9→11","provisional":true}
+{"ts":1790443485844,"kind":"warning","stage":null,"rule":"fake-check","severity":"warning","detail":"tasks 勾选 task-11 无对应提交（消息不含该 task id）且无 review.json 变更——假勾选嫌疑，人判","provisional":true}
+{"ts":1790443613468,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790443613468,"kind":"task-done","stage":"tasks","detail":"checked 11→12","provisional":true}
+{"ts":1790443672950,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1790443672950,"kind":"task-done","stage":"tasks","detail":"checked 12→13","provisional":true}
+{"ts":1790443673212,"kind":"warning","stage":null,"rule":"fake-check","severity":"warning","detail":"tasks 勾选 task-13 无对应提交（消息不含该 task id）且无 review.json 变更——假勾选嫌疑，人判","provisional":true}
+{"ts":1790443937537,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790443937537,"kind":"file-update","stage":"tasks","detail":"tasks/task-01.md 内容变更","provisional":true}
+{"ts":1790443937537,"kind":"file-update","stage":"tasks","detail":"tasks/task-04.md 内容变更","provisional":true}
+{"ts":1790443941334,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx、frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx、frontend/src/components/changes/detail/__tests__/change-stage-header.test.tsx、frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx、frontend/src/components/workspace/hero-header.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790444044337,"kind":"file-update","stage":"verify","detail":"module-impact.md 内容变更","provisional":true}
+{"ts":1790444270084,"kind":"verify","stage":"verify","detail":"质量扫描记录出现","provisional":true}
+{"ts":1790444596052,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1790444792655,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1790445354783,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1790445407436,"kind":"file","stage":"verify","detail":"verify-result.md 出现","provisional":true}
+{"ts":1790445433845,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1790445443947,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1790445447411,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1790445463859,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1790445500221,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1790446403237,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790463584219,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1790463603966,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1790463630263,"kind":"file-update","stage":"tasks","detail":"tasks/task-09.md 内容变更","provisional":true}
+{"ts":1790463630263,"kind":"file-update","stage":"tasks","detail":"tasks/task-10.md 内容变更","provisional":true}
+{"ts":1790463630263,"kind":"file-update","stage":"tasks","detail":"tasks/task-11.md 内容变更","provisional":true}
+{"ts":1790464532982,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790464605487,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/src/daemon.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790464638887,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/tests/sillyspec-platform-command.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790464662352,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/tests/daemon-hits-periodic-lifecycle.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790464745627,"kind":"commit","stage":null,"detail":"3d810c4df","provisional":true}
+{"ts":1790464785893,"kind":"commit","stage":null,"detail":"3942b156f","provisional":true}
+{"ts":1790464786208,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx、frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx、frontend/src/components/changes/detail/__tests__/change-stage-header.test.tsx、frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx、frontend/src/components/workspace/hero-header.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790464871119,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：.tmp-rowcard.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790464935822,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/workspace/stats-row.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790464986500,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：.tmp-two-col.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790465164751,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/tests/sillyspec-platform-command.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790465280339,"kind":"commit","stage":null,"detail":"cf8d14e36","provisional":true}
+{"ts":1790465360047,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/change/tests/test_assets.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790465393353,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/change/assets.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790465410014,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/__tests__/workspace-card.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790465436451,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：deploy/docker-compose.yml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790465439928,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/scripts/gen-api-types.mjs——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790465446582,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/migrations/versions/20260926234000_align_platform_change_events.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790465559841,"kind":"commit","stage":null,"detail":"8ecb895fa","provisional":true}
+{"ts":1790465593385,"kind":"commit","stage":null,"detail":"bc60a4ccc","provisional":true}
+{"ts":1790466027809,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/migrations/versions/20260926234000_align_platform_change_events.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790466040906,"kind":"commit","stage":null,"detail":"40d8eff33","provisional":true}
+{"ts":1790466064130,"kind":"commit","stage":null,"detail":"052181853","provisional":true}
+{"ts":1790466967171,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790469598450,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/prototype-demo/——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790469611557,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/prototype-demo/——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790472315720,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/scripts/prototype-build.mjs——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790472443658,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/.gitignore、frontend/package.json——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790472470008,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/prototype-dist/——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790472820379,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/prototype/、gitignore——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790472837118,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：.gitignore、frontend/prototype-dist/change-center.html、frontend/prototype-dist/change-detail.html、frontend/prototype-dist/index.html、frontend/prototype-dist/session-portal.html、frontend/prototype-dist/sillyspec-flow.html、frontend/prototype-dist/workspace-list.html、frontend/prototype-dist/workspace-overview.html、frontend/src/components/prototype/__tests__/flow-diagram.test.tsx、frontend/src/components/prototype/__tests__/prototype-smoke.test.tsx、frontend/src/components/prototype/change-center-view.tsx、frontend/src/components/prototype/change-detail-view.tsx、frontend/src/components/prototype/demo-chrome.tsx、frontend/src/components/prototype/flow-diagram.tsx、frontend/src/components/prototype/session-portal-view.tsx、frontend/src/components/prototype/sillyspec-flow-view.tsx、frontend/src/components/prototype/workspace-list-view.tsx、frontend/src/components/prototype/workspace-overview-view.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790472853897,"kind":"commit","stage":null,"detail":"c2b3a9d8d","provisional":true}
+{"ts":1790472854163,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/__tests__/workspace-card.test.tsx、frontend/src/components/workspace/stats-row.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790473757291,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790474441754,"kind":"commit","stage":null,"detail":"6a8724a35","provisional":true}
+{"ts":1790474494298,"kind":"commit","stage":null,"detail":"ca9f19016","provisional":true}
+{"ts":1790474895592,"kind":"commit","stage":null,"detail":"4d340be72","provisional":true}
+{"ts":1790474895828,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/__tests__/workspace-card.test.tsx、frontend/src/components/workspace/stats-row.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1790475798915,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790902784984,"kind":"file-update","stage":"proposal","detail":"proposal.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"plan","detail":"plan.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"verify","detail":"module-impact.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"verify","detail":"symbol-impact.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-01.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-02.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-03.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-04.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-05.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-06.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-07.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-08.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-09.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-10.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-11.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-12.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"file-update","stage":"tasks","detail":"tasks/task-13.md 内容变更","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"commit","stage":null,"detail":"f41468b59","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"gate-run","stage":"verify","detail":"门实测 passed（2.3s） · 20260926225907","provisional":true,"backfill":true}
+{"ts":1790902784984,"kind":"config-change","stage":null,"detail":"本地配置 local.yaml 在场","provisional":true,"backfill":true}
