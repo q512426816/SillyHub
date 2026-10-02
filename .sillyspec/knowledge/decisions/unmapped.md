@@ -1469,3 +1469,24 @@ supersedes：D-004@v1
 理由：CLI 在模块上下文注入点（prompt.js renderModuleContext 及 execute.js 孪生处）经既有 appendKnowledgeHit 追加 `{type:'docs-inject', change, query, matchedFiles:[docs 相对路径], at}` 行——复用 knowledge-hits.jsonl 通道而非新建文件：daemon 上行链路整 jsonl 原样转发零改动；平台 HitsService.ingest 对白名单外 type 宽容前向落库（hits.py:233「外型存原值」），且 USAGE_TYPES 白名单不含 docs-inject，不污染知识库统计。平台 stats 聚合读 type='docs-inject' 行做 30 天窗口指标与文档级频次榜。
 故障面：跨仓交付（sillyspec CLI 独立发版节奏）——CLI 未升级环境永远空态；docs-inject 行量随 quick/execute 步骤注入频次增长（每步一行，量级=知识 inject 同款，可控）。
 退役判据：若未来 docs 注入改为平台侧统一注入（不经 CLI），本遥测型随 CLI 注入下线一并退役。
+
+## D-001@v1 repoPath 不出 daemon（本地路径隐私）
+状态：implemented
+变更：2026-09-20-scope-audit-cross-repo-platform
+锚点：未记录
+最近确认：42c464536
+理由：不透传。daemon 投影白名单不含 repoPath——先例 ql-20260911-003-355a P2：daemon 原始消息含本机路径只进服务端结构化日志、不随 details 下发客户端。前端分组与展示用 repo key（sub-grid-security 等）足够；排查需要真实路径时看服务端日志或本机 CLI。
+
+## D-002@v1 全链 additive 兼容，不加版本门禁
+状态：implemented
+变更：2026-09-20-scope-audit-cross-repo-platform
+锚点：未记录
+最近确认：42c464536
+理由：三层各自缺省回退：daemon 侧 parsed.repos 非数组 → 投影 repos=null；backend 侧 result.repos 非法形态 → repos=[]；前端 repos 空/缺 → 走现状单段渲染（三态 chips 从 rows 统计）。不新增 sillyspec_capability_missing 类版本门禁错误——契约 v2 是 additive，旧 CLI 输出仍合法 v1。
+
+## D-005@v1 实现方案选 A——全链投影 + 按仓分段
+状态：implemented
+变更：2026-09-20-scope-audit-cross-repo-platform
+锚点：未记录
+最近确认：42c464536
+理由：方案A。daemon 投影行级 cross_repo + 信封 repos[]（每仓锚点/三态计数/降级），backend schema 全量透传 + gen:types，前端卡面按仓分段 + 明细按仓分节 + note 顶摘要层。理由：任务书验收「主仓段+各跨仓段真实三态与锚点档」只有 A 同时具备行级仓归属（明细分组/单文件 diff 联动判仓）与信封级汇总（卡面分段计数单一源）；B 缺行级仓归属致明细层不可按仓分组；C 不满足已确认的按仓分类展示诉求。
