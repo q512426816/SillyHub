@@ -1,0 +1,328 @@
+diff --git a/backend/app/modules/change/tests/test_title_normalization.py b/backend/app/modules/change/tests/test_title_normalization.py
+index 7d43bb315..9e69aa4ce 100644
+--- a/backend/app/modules/change/tests/test_title_normalization.py
++++ b/backend/app/modules/change/tests/test_title_normalization.py
+@@ -45,6 +45,33 @@ class TestNormalizeDisplayTitle:
+         assert normalize_display_title("设计文档（Design）—— 旧稿", "2026-09-15-x") == "x"
+         assert normalize_display_title("需求规格（Requirements）- draft", "2026-09-15-x") == "x"
+ 
++    def test_thin_flow_h1_family_falls_back_to_key(self) -> None:
++        """thin flow-draft 模板家族（2026-10-02 校准）：raw H1 全部回退语义名。
++
++        sillyspec src/flow-draft.js 字面家族——设计记录（Design Record）/
++        任务注册表（Tasks）/决策记录（Decisions）/验证回执（flow），均带
++        「— <change_key>」后缀。此前词表漏收：documents 推送按最深阶段文档
++        （tasks.md）重派生 title 时被误判自定义语义标题，覆盖 CLI 收养标题
++        （变更中心显示「任务注册表（Tasks）— <变更名>」病根）。
++        """
++        from app.modules.change.title_norm import normalize_display_title
++
++        assert (
++            normalize_display_title(
++                "任务注册表（Tasks）— 2026-10-01-review-followup-reset-guard-machineid",
++                "2026-10-01-review-followup-reset-guard-machineid",
++            )
++            == "review-followup-reset-guard-machineid"
++        )
++        assert (
++            normalize_display_title("设计记录（Design Record）— 2026-10-01-x", "2026-10-01-x")
++            == "x"
++        )
++        assert normalize_display_title("决策记录（Decisions）— 2026-10-01-x", "2026-10-01-x") == "x"
++        assert normalize_display_title("验证回执（flow）— 2026-10-01-x", "2026-10-01-x") == "x"
++        # 无后缀裸模板同判
++        assert normalize_display_title("任务注册表（Tasks）", "2026-10-01-x") == "x"
++
+     def test_custom_h1_kept_as_is(self) -> None:
+         from app.modules.change.title_norm import normalize_display_title
+ 
+@@ -192,6 +219,14 @@ _TEMPLATE_DOCS = {
+     "tasks.md": "# 任务清单（Tasks）\n\n- task-01",
+ }
+ 
++#: thin flow-draft 四件套实测 H1（— <change_key> 后缀变体，2026-10-02 校准）。
++_THIN_TEMPLATE_DOCS = {
++    "proposal.md": "# 提案书（Proposal）— KEY\n\n## 动机\n任务原话转写：修复标题显示。\n\n成功标准：\n- 修复\n",
++    "requirements.md": "# 需求规格（Requirements）— KEY\n\nFR-01。",
++    "design.md": "# 设计记录（Design Record）— KEY\n\n做法概述。",
++    "tasks.md": "# 任务注册表（Tasks）— KEY\n\n- [ ] task-01: 修复",
++}
++
+ 
+ class TestUpsertDocumentsTitle:
+     async def test_template_docs_yield_key_derived_title(self, db_session) -> None:
+@@ -203,6 +238,18 @@ class TestUpsertDocumentsTitle:
+         assert row is not None, "documents 通道应建占位行"
+         assert row.title == "ehs-reward-punishment"
+ 
++    async def test_thin_template_docs_yield_key_derived_title(self, db_session) -> None:
++        """thin 四件套模板 H1（— 后缀变体）→ title=去日期前缀语义名（用户病根回归）。"""
++        ws_id = await _make_workspace(db_session)
++        name = "2026-10-01-review-followup-reset-guard-machineid"
++        docs = {k: v.replace("KEY", name) for k, v in _THIN_TEMPLATE_DOCS.items()}
++        await _push_documents(db_session, ws_id, name, docs)
++        row = await _get_change(db_session, ws_id, name)
++        assert row is not None, "thin documents 通道应建占位行"
++        assert row.title == "review-followup-reset-guard-machineid", (
++            "tasks.md 模板 H1「任务注册表（Tasks）— <变更名>」不得原样成为 title"
++        )
++
+     async def test_custom_h1_in_deepest_doc_wins(self, db_session) -> None:
+         """最深阶段文档（tasks.md）自定义 H1 → 原样采用（按最新阶段文档重派生）。"""
+         ws_id = await _make_workspace(db_session)
+@@ -300,6 +347,26 @@ class TestIsFallbackDisplayTitle:
+         assert is_fallback_display_title("提案书（Proposal）", "2026-09-30-x") is True
+         assert is_fallback_display_title("设计文档（Design）—— 旧稿", "2026-09-30-x") is True
+ 
++    def test_raw_thin_template_h1_text_is_fallback(self) -> None:
++        """thin 模板 raw H1 存量行同判兜底（病根自愈门：可被重派生/收养刷新）。"""
++        from app.modules.change.title_norm import is_fallback_display_title
++
++        assert (
++            is_fallback_display_title(
++                "任务注册表（Tasks）— 2026-10-01-review-followup-reset-guard-machineid",
++                "2026-10-01-review-followup-reset-guard-machineid",
++            )
++            is True
++        )
++        assert (
++            is_fallback_display_title("设计记录（Design Record）— 2026-10-01-x", "2026-10-01-x")
++            is True
++        )
++        assert (
++            is_fallback_display_title("决策记录（Decisions）— 2026-10-01-x", "2026-10-01-x") is True
++        )
++        assert is_fallback_display_title("验证回执（flow）— 2026-10-01-x", "2026-10-01-x") is True
++
+     def test_semantic_titles_not_fallback(self) -> None:
+         from app.modules.change.title_norm import is_fallback_display_title
+ 
+@@ -366,6 +433,22 @@ class TestAdoptedTitleClobberGuard:
+             "自定义 H1 文档推送应覆盖收养标题"
+         )
+ 
++    async def test_adopted_title_survives_thin_template_docs_push(self, db_session) -> None:
++        """收养中文概括后 thin 模板文档推送 → 不被「任务注册表（Tasks）— …」回翻覆盖。
++
++        用户实证病根：CLI 收养好标题后，routine documents 推送按最深阶段文档
++        重派生出（未归一化的）模板 H1，误判语义标题恒覆盖——收养值被模板文案顶掉。
++        """
++        ws_id = await _make_workspace(db_session)
++        name = "2026-10-01-review-followup-reset-guard-machineid"
++        await _seed_change_row(db_session, ws_id, name, name)
++        await _adopt_cli_title(db_session, ws_id, name, "reset 软删守卫补齐")
++        docs = {k: v.replace("KEY", name) for k, v in _THIN_TEMPLATE_DOCS.items()}
++        await _push_documents(db_session, ws_id, name, docs)
++        assert (await _get_change(db_session, ws_id, name)).title == "reset 软删守卫补齐", (
++            "thin 模板 H1 documents 推送不得把收养标题回翻"
++        )
++
+     def test_apply_parsed_fallback_keeps_semantic_title(self) -> None:
+         """reparse 兜底派生值不覆盖语义标题；自定义派生值仍覆盖（单元级）。"""
+         from app.modules.change.model import Change
+diff --git a/backend/app/modules/change/title_norm.py b/backend/app/modules/change/title_norm.py
+index 4f49c38d6..7263aff1c 100644
+--- a/backend/app/modules/change/title_norm.py
++++ b/backend/app/modules/change/title_norm.py
+@@ -29,6 +29,12 @@ DISPLAY_KEY_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+ #: 模板 H1 正则：`<中文类型词>` + 可选 `（...）` 括号段 + 可选 `—/-` 后缀段。
+ #: 类型词按长前缀优先排列（`提案书` 在 `提案` 前），防短词先匹配截断。
+ #: 后缀分隔接受 em dash / 双 em dash / 连字符（CLI 模板历史用 `—`）。
++#: 2026-10-02 校准补 thin flow-draft 家族（sillyspec src/flow-draft.js 字面）：
++#: `设计记录（Design Record）`/`任务注册表（Tasks）`/`决策记录（Decisions）`/
++#: `验证回执（flow）`，均带 `— <change_key>` 后缀——此前漏收（只有 `任务注册`，
++#: 尾字 `表` 挡住后缀匹配）致 documents 推送按最深阶段文档（tasks.md）重派生
++#: title 时模板 H1 被误判自定义语义标题，覆盖 CLI 收养标题（变更中心显示
++#: 「任务注册表（Tasks）— <变更名>」病根）。
+ _TEMPLATE_TYPE_WORDS = (
+     "提案书",
+     "提案",
+@@ -36,16 +42,20 @@ _TEMPLATE_TYPE_WORDS = (
+     "需求文档",
+     "需求",
+     "设计文档",
++    "设计记录",
+     "设计",
++    "决策记录",
+     "实现计划",
+     "轻量计划",
+     "详细计划",
+     "计划",
+     "任务清单",
++    "任务注册表",
+     "任务注册",
+     "任务分解",
+     "任务",
+     "验证报告",
++    "验证回执",
+     "模块影响分析",
+     "模块影响",
+ )
+diff --git a/.sillyspec/changes/2026-10-02-title-norm-thin-h1-family/design.md b/.sillyspec/changes/2026-10-02-title-norm-thin-h1-family/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-02-title-norm-thin-h1-family/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-02T01:19:25.817Z
++---
++# 设计记录（Design Record）— 2026-10-02-title-norm-thin-h1-family
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-02-title-norm-thin-h1-family 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++只改后端 `backend/app/modules/change/title_norm.py` 的 `_TEMPLATE_TYPE_WORDS` 词表：补收 thin（flow-draft）模板 H1 家族四个类型词——`设计记录`（插在 `设计` 前）、`任务注册表`（插在 `任务注册` 前）、`决策记录`、`验证回执`。根因：CLI 轻量变更的四件套文档 H1 是「类型词（英文）— <变更名>」形态，documents 推送按最深阶段文档（tasks.md）重派生 title 时靠该词表识别模板并回退 change_key 去日期前缀；词表只有 `任务注册`（尾字「表」挡住后缀匹配），模板 H1 被误判为自定义语义标题，反把 CLI 收养的好标题覆盖。纯词表补收即闭环（归一化/兜底判定/回翻守卫三写路径同源消费同一正则），不动任何写路径逻辑。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-02-title-norm-thin-h1-family 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++函数/端点签名零变化：`normalize_display_title` / `is_fallback_display_title` / `TEMPLATE_H1_RE` 对外形状不变，仅正则可匹配集合扩大（新增 thin 模板四词命中）。对外可见行为变化仅一处——thin 变更经 documents 推送/reparse 派生的 ux_changes.title 从「任务注册表（Tasks）— <变更名>」等 raw 模板文案变为 change_key 去日期前缀语义名（或保留 CLI 收养标题不被回翻）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-02-title-norm-thin-h1-family 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到到达：成立。词表是纯静态正则，documents 迟到推送/reparse 乱序到达时同一 H1 恒判模板，幂等；存量被污染的 title 行（存过 raw 模板文案）在修复后被 `is_fallback_display_title` 判为兜底形态，下一次任意推送/reparse 即自愈刷新，不依赖到达顺序。
++2. 并发写：无新增面。三写路径（CLI 收养/documents 推送/reparse）本就共用该判定做回翻守卫，词表补收只让「模板 H1」回到正确的兜底侧，不改锁与事务语义。
++3. 切换/生命周期：安全。变更中途收口/重开不涉及——正则无状态； archived 变更不再推送，其历史行保持原值直到有新推送（可接受，见风险节）。
++4. 作用域：词表按 sillyspec CLI 模板家族校准，是进程内常量，不落库不跨仓；多实例同版本同行为。若 CLI 未来再新增模板 H1 类型词，需同步补词表（已知维护耦合，注释已标注来源 flow-draft.js）。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-02-title-norm-thin-h1-family 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：误伤面——若某作者自定义标题恰为「设计记录」「任务注册表」等裸类型词（无冒号/无后续内容），会被当模板回退语义名。该风险与既有词表条目（「设计」「任务」等更短的词）同级且更小（新词更长更具体），既有测试锚定冒号自定义标题保留不受影响。遗留：已归档变更不再有 documents 推送，其存量污染 title 行不会自动刷新（新变更与活跃变更自愈）；如需清洗可后续做一次性 reparse/修数，不在本变更范围。放弃的方案：在 documents 推送侧按文件名（tasks.md/design.md）硬判模板而不看 H1 内容——放弃理由：会废掉「自定义 H1 覆盖收养标题」的改名通道（tasks.md 写自定义 H1 是合法改名路径，有既有测试锚定）。
+
+diff --git a/.sillyspec/changes/2026-10-02-title-norm-thin-h1-family/proposal.md b/.sillyspec/changes/2026-10-02-title-norm-thin-h1-family/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-02-title-norm-thin-h1-family/proposal.md
+@@ -0,0 +1,39 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-02T01:19:25.815Z
++---
++# 提案书（Proposal）— 2026-10-02-title-norm-thin-h1-family
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:105e7a8d5f33cc15cfe96310072aadbac051f07b67c9204b0644e5d961cd000a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-02-title-norm-thin-h1-family 留痕重锚 -->
++任务原话转写：变更中心把 thin 变更标题显示成「任务注册表（Tasks）— <变更名>」：flow-draft 新模板 H1 家族（任务注册表/设计记录/决策记录/验证回执，均带「— <变更名>」后缀）未收录进 title_norm._TEMPLATE_TYPE_WORDS，documents 推送按最深阶段文档（tasks.md）重派生 ux_changes.title 时模板 H1 被误判为自定义语义标题，反把 CLI 收养的好标题覆盖。
++成功标准：
++- 「任务注册表（Tasks）— <变更名>」「设计记录（Design Record）— <变更名>」「决策记录（Decisions）— <变更名>」「验证回执（flow）— <变更名>」均命中 TEMPLATE_H1_RE，normalize_display_title 回退去日期前缀语义名
++- is_fallback_display_title 对上述 raw 模板标题判 True（存量污染行可被后续推送/reparse 自愈刷新）
++- 收养语义标题在 thin 模板四件套 documents 推送后不回翻；既有词表条目与冒号自定义标题行为不变
++- backend test_title_normalization.py 新增用例全绿且既有用例无回归
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:f3836948c0fdb7200d5ba490f04f7b8b241eb2b827f9691af1a738b253a2145c:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-02-title-norm-thin-h1-family 留痕重锚 -->
++按成功标准机械推导，共 5 条验收面：
++1. 「任务注册表（Tasks）— <变更名>」「设计记录（Design Record）— <变更名>」「决策记录（Decisions）— <变更名>」「验证回执（flow）— <变更名>」均命中 TEMPLATE_H1_RE，normalize_display_title 回退去日期前缀语义名
++2. is_fallback_display_title 对上述 raw 模板标题判 True（存量污染行可被后续推送/reparse 自愈刷新）
++3. 收养语义标题在 thin 模板四件套 documents 推送后不回翻
++4. 既有词表条目与冒号自定义标题行为不变
++5. backend test_title_normalization.py 新增用例全绿且既有用例无回归
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:a4063a2b2ffc64f82afe391eb4b485381db87ba4140b5cf82816e64ce3d0d7e5:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-02-title-norm-thin-h1-family 留痕重锚 -->
++1. 「任务注册表（Tasks）— <变更名>」「设计记录（Design Record）— <变更名>」「决策记录（Decisions）— <变更名>」「验证回执（flow）— <变更名>」均命中 TEMPLATE_H1_RE，normalize_display_title 回退去日期前缀语义名
++2. is_fallback_display_title 对上述 raw 模板标题判 True（存量污染行可被后续推送/reparse 自愈刷新）
++3. 收养语义标题在 thin 模板四件套 documents 推送后不回翻
++4. 既有词表条目与冒号自定义标题行为不变
++5. backend test_title_normalization.py 新增用例全绿且既有用例无回归
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-10-02-title-norm-thin-h1-family/requirements.md b/.sillyspec/changes/2026-10-02-title-norm-thin-h1-family/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-02-title-norm-thin-h1-family/requirements.md
+@@ -0,0 +1,45 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-02T01:19:25.817Z
++---
++# 需求规格（Requirements）— 2026-10-02-title-norm-thin-h1-family
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 「任务注册表（Tasks）— <变更名>」「设计记录（Design Record）— <变更名>」「
++Given 系统就绪
++When 「任务注册表（Tasks）— <变更名>」「设计记录（Design Record）— <变更名>」「决策记录（Decisions）— <变更名>」「验证回执（f
++Then 行为符合本条标准描述
++
++### FR-02: is_fallback_display_title 对上述 raw 模板标题判 True（存量污染行
++Given 系统就绪
++When is_fallback_display_title 对上述 raw 模板标题判 True（存量污染行可被后续推送/reparse 自愈刷新）
++Then 行为符合本条标准描述
++
++### FR-03: 收养语义标题在 thin 模板四件套 documents 推送后不回翻
++Given 系统就绪
++When 收养语义标题在 thin 模板四件套 documents 推送后不回翻
++Then 行为符合本条标准描述
++
++### FR-04: 既有词表条目与冒号自定义标题行为不变
++Given 系统就绪
++When 既有词表条目与冒号自定义标题行为不变
++Then 行为符合本条标准描述
++
++### FR-05: backend test_title_normalization.py 新增用例全绿且既有用例无回归
++Given 系统就绪
++When backend test_title_normalization.py 新增用例全绿且既有用例无回归
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 backend/app/modules/change/tests/test_title_normalization.py::TestNormalizeDisplayTitle::test_thin_flow_h1_family_falls_back_to_key；::TestUpsertDocumentsTitle::test_thin_template_docs_yield_key_derived_title ——例外裁决书写面（机器段之外合法） -->
++
++<!--AGENT:测试绑定FR-02 backend/app/modules/change/tests/test_title_normalization.py::TestIsFallbackDisplayTitle::test_raw_thin_template_h1_text_is_fallback ——例外裁决书写面（机器段之外合法） -->
++
++<!--AGENT:测试绑定FR-03 backend/app/modules/change/tests/test_title_normalization.py::TestAdoptedTitleClobberGuard::test_adopted_title_survives_thin_template_docs_push ——例外裁决书写面（机器段之外合法） -->
++
++<!--AGENT:测试绑定FR-04 backend/app/modules/change/tests/test_title_normalization.py::TestNormalizeDisplayTitle::test_custom_h1_kept_as_is + ::test_template_h1_falls_back_to_key + ::test_template_h1_with_key_suffix_falls_back（既有用例不回归） ——例外裁决书写面（机器段之外合法） -->
++
++<!--AGENT:测试绑定FR-05 backend/app/modules/change/tests/test_title_normalization.py 全文件 39 用例（35 既有 + 4 新增）实测全绿；platform_sync + change 两模块 907 passed / 2 skipped（既有无关跳过） ——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-10-02-title-norm-thin-h1-family/tasks.md b/.sillyspec/changes/2026-10-02-title-norm-thin-h1-family/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-02-title-norm-thin-h1-family/tasks.md
+@@ -0,0 +1,15 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-02T01:19:25.817Z
++---
++# 任务注册表（Tasks）— 2026-10-02-title-norm-thin-h1-family
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge + 2026-09-29 心跳指针）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。📌 任务面在 ①spec 阶段定稿：覆写为真实实现步骤（全 `- [ ]`）后再动代码；执行循环：Working on task N/M → 做一件 → 勾一格 → 下一个——收口硬门拒单拍多格勾选（--allow-batch-tick 可显式旁路留痕）。`flow status --change <名>` 为自愿查看/恢复面（恢复时给下一任务指针与进度，非协议必需——D-007）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: 「任务注册表（Tasks）— <变更名>」「设计记录（Design Record）— <变更名>」「决策记录（Decisions）— <变更名>」「验证回执（f…
++- [ ] task-02: is_fallback_display_title 对上述 raw 模板标题判 True（存量污染行可被后续推送/reparse 自愈刷新）
++- [ ] task-03: 收养语义标题在 thin 模板四件套 documents 推送后不回翻
++- [ ] task-04: 既有词表条目与冒号自定义标题行为不变
++- [ ] task-05: backend test_title_normalization.py 新增用例全绿且既有用例无回归

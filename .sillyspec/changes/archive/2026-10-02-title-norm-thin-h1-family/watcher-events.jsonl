@@ -1,0 +1,11 @@
+{"ts":1790905169274,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"brainstorm/plan 期已 20 分钟无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790905398661,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790905405459,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790905412123,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790905418829,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1790905435294,"kind":"gate-run","stage":"verify","detail":"门实测 passed（10.3s） · 20261002014353","provisional":true}
+{"ts":1790905501494,"kind":"gate-run","stage":"verify","detail":"门实测 passed（11.0s） · 20261002014500","provisional":true}
+{"ts":1790905521714,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1790906723404,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"brainstorm/plan 期已 20 分钟无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1790907221212,"kind":"commit","stage":null,"detail":"c854d8960","provisional":true}
+{"ts":1790908123181,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}

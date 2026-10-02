@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-02-title-norm-thin-h1-family",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "requirements.md 机器预填 FR 骨架文本截断，FR-01/FR-02 标题不完整",
+      "evidence": "冻结件内 FR-01 标题止于「…<变更名>」「」悬空引号、When 行止于「验证回执（f」，FR-02 标题止于「（存量污染行」未闭合，系 flow-draft 机器骨架按上限截断且 agent 未覆盖；意图可由 proposal.md 成功标准与测试绑定完整恢复，不影响代码与测试事实，属冻结件文档瑕疵非承诺违反",
+      "location": ".sillyspec/changes/2026-10-02-title-norm-thin-h1-family/requirements.md:10-18"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-02T02:40:55Z"
+}
