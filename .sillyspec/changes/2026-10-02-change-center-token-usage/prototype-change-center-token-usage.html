@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型：变更中心执行用量 — 本地 CLI 用量并入</title>
+<style>
+  /* 对齐项目 AI-Native 主题（浅色）静态近似值：slate 色阶 + brand 阶 */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f8fafc; color: #0f172a; padding: 32px 24px; font-size: 14px;
+  }
+  .page-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+  .page-sub { font-size: 12px; color: #64748b; margin-bottom: 24px; line-height: 1.7; }
+  .card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 28px; max-width: 860px;
+  }
+  .card h2 { font-size: 12px; font-weight: 500; }
+  .scenario { font-size: 11px; color: #94a3b8; margin: 20px 0 6px; max-width: 860px; }
+  .usage-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-top: 6px; }
+  .u-item { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+  .u-label { font-size: 11.5px; color: #64748b; }
+  .u-value { font-size: 13px; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; }
+  .u-value.time { font-weight: 500; }
+  .u-value.brand { color: #1d4ed8; }
+  .badge-progress {
+    display: inline-flex; align-items: center; border: 1px solid #fde68a; background: #fffbeb;
+    border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 500; color: #b45309;
+  }
+  .usage-toggle {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 4px; border: none;
+    background: none; border-radius: 4px; padding: 2px 6px; font-size: 11px; font-weight: 500;
+    color: #1d4ed8; cursor: pointer;
+  }
+  .usage-toggle:hover { background: #eff6ff; }
+  table.models { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 8px; }
+  table.models th {
+    border-bottom: 1px solid #e2e8f0; padding: 4px 6px; font-size: 10px; font-weight: 500;
+    color: #94a3b8; text-align: right;
+  }
+  table.models th:first-child { text-align: left; }
+  table.models td {
+    border-bottom: 1px solid #f1f5f9; padding: 4px 6px; text-align: right;
+    color: #334155; font-variant-numeric: tabular-nums;
+  }
+  table.models tr:last-child td { border-bottom: none; }
+  table.models td:first-child { text-align: left; }
+  .tag { display: inline-flex; align-items: center; border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 500; }
+  .tag.model { border: 1px solid #c7d2fe; background: #eff6ff; color: #1d4ed8; font-family: ui-monospace, monospace; }
+  .tag.unrecorded { border: 1px solid #e2e8f0; background: #f1f5f9; color: #94a3b8; }
+  .tag.local-cli { border: 1px solid #a7f3d0; background: #ecfdf5; color: #047857; }
+  .usage-note { margin-top: 6px; font-size: 10px; line-height: 1.7; color: #94a3b8; }
+  .legend { max-width: 860px; font-size: 11.5px; color: #475569; line-height: 1.9;
+    background: #fff; border: 1px dashed #cbd5e1; border-radius: 6px; padding: 12px 16px; }
+  .legend b { color: #0f172a; }
+  .hl { background: #fef9c3; padding: 0 2px; border-radius: 2px; }
+</style>
+</head>
+<body>
+  <div class="page-title">变更中心 · 执行用量卡 — 本地 CLI 用量并入（原型）</div>
+  <div class="page-sub">
+    改造点：本地 CLI 会话（ZCode/Claude Code 等直接本地跑、日志上报平台）的 token 用量并入变更中心统计。<br>
+    摘要行数字为「平台执行 + 本地 CLI」合并值；明细表新增 <span class="hl">「本地 CLI」桶行</span>（绿阶 tag，与「未记录」灰阶兜底桶同构）；注脚口径声明更新。
+  </div>
+
+  <div class="scenario">场景一 · 混合执行（平台派发 + 本地 CLI 都有），明细展开态</div>
+  <section class="card">
+    <h2>执行用量</h2>
+    <div class="usage-summary">
+      <span class="u-item"><span class="u-label">开始</span><span class="u-value time">10-01 09:12</span></span>
+      <span class="u-item"><span class="u-label">结束</span><span class="u-value time">10-02 14:35</span></span>
+      <span class="u-item"><span class="u-label">耗时</span><span class="u-value time">2.1 小时</span></span>
+      <span class="u-item"><span class="u-label">轮次</span><span class="u-value">18</span></span>
+      <span class="u-item"><span class="u-label">输入</span><span class="u-value">3.4M</span></span>
+      <span class="u-item"><span class="u-label">输出</span><span class="u-value">96.5K</span></span>
+      <span class="u-item"><span class="u-label">缓存读取</span><span class="u-value">5.8M</span></span>
+      <span class="u-item"><span class="u-label">缓存写入</span><span class="u-value">412.0K</span></span>
+      <span class="u-item"><span class="u-label">请求次数</span><span class="u-value">126</span></span>
+      <span class="u-item"><span class="u-label">缓存命中率</span><span class="u-value brand">63.0%</span></span>
+      <button class="usage-toggle" onclick="toggleDetail(this)">按模型明细 <span>▾</span></button>
+    </div>
+    <div class="detail-block">
+      <table class="models">
+        <thead>
+          <tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读取</th><th>缓存写入</th><th>请求</th><th>命中率</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tag model" title="GLM-5.3">GLM-5.3</span></td>
+            <td>2.1M</td><td>61.2K</td><td>3.6M</td><td>260.4K</td><td>83</td><td>63.2%</td>
+          </tr>
+          <tr>
+            <td><span class="tag local-cli" title="本地 CLI 会话（ZCode / Claude Code 等直接本地跑）上报解析的累计用量">本地 CLI</span></td>
+            <td>1.3M</td><td>35.3K</td><td>2.2M</td><td>151.6K</td><td>—</td><td>62.9%</td>
+          </tr>
+          <tr>
+            <td><span class="tag model" title="claude-sonnet-4-5">claude-sonnet-4-5</span></td>
+            <td>18.4K</td><td>9.8K</td><td>402.1K</td><td>0</td><td>22</td><td>95.6%</td>
+          </tr>
+          <tr>
+            <td><span class="tag unrecorded" title="无按模型明细的历史执行归并，请求次数无来源按 0 计">未记录</span></td>
+            <td>4.0K</td><td>0.9K</td><td>88.0K</td><td>0</td><td>0</td><td>95.7%</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="usage-note">
+        口径：统计平台派发执行、关联会话执行与本地 CLI 会话（按执行去重合并）；本地 CLI 用量来自 daemon 解析日志的落库快照，请求次数与轮次无来源不计；会话服务多个变更时消耗在各变更分别显示；已删除会话的执行仍计入；耗时为纯执行时长累加。
+      </p>
+    </div>
+  </section>
+
+  <div class="scenario">场景二 · 纯本地 CLI 执行（无平台派发），明细展开态</div>
+  <section class="card">
+    <h2>执行用量</h2>
+    <div class="usage-summary">
+      <span class="u-item"><span class="u-label">开始</span><span class="u-value time">10-02 09:40</span></span>
+      <span class="u-item"><span class="u-label">结束</span><span class="u-value muted" style="color:#94a3b8">—</span></span>
+      <span class="badge-progress">进行中</span>
+      <span class="u-item"><span class="u-label">轮次</span><span class="u-value">0</span></span>
+      <span class="u-item"><span class="u-label">输入</span><span class="u-value">861.0K</span></span>
+      <span class="u-item"><span class="u-label">输出</span><span class="u-value">24.3K</span></span>
+      <span class="u-item"><span class="u-label">缓存读取</span><span class="u-value">1.5M</span></span>
+      <span class="u-item"><span class="u-label">缓存写入</span><span class="u-value">98.0K</span></span>
+      <span class="u-item"><span class="u-label">请求次数</span><span class="u-value">0</span></span>
+      <span class="u-item"><span class="u-label">缓存命中率</span><span class="u-value brand">63.5%</span></span>
+      <button class="usage-toggle" onclick="toggleDetail(this)">按模型明细 <span>▾</span></button>
+    </div>
+    <div class="detail-block">
+      <table class="models">
+        <thead>
+          <tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读取</th><th>缓存写入</th><th>请求</th><th>命中率</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tag local-cli" title="本地 CLI 会话（ZCode / Claude Code 等直接本地跑）上报解析的累计用量">本地 CLI</span></td>
+            <td>861.0K</td><td>24.3K</td><td>1.5M</td><td>98.0K</td><td>—</td><td>63.5%</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="usage-note">
+        口径：统计平台派发执行、关联会话执行与本地 CLI 会话（按执行去重合并）；本地 CLI 用量来自 daemon 解析日志的落库快照，请求次数与轮次无来源不计；会话服务多个变更时消耗在各变更分别显示；已删除会话的执行仍计入；耗时为纯执行时长累加。
+      </p>
+    </div>
+  </section>
+
+  <div class="legend">
+    <b>图例说明</b><br>
+    · <span class="hl">黄色高亮</span> = 本次新增/改动的部分；「本地 CLI」桶行使用绿阶 tag 区分于平台执行模型行（蓝阶）与历史兜底行（灰阶「未记录」）。<br>
+    · 「本地 CLI」行的「请求」列显示「—」（解析器不输出请求数）；「轮次」同理不计本地 CLI（摘要行轮次仅统计平台执行）。<br>
+    · 列表页「执行」列的 token 总量自动包含本地 CLI 用量（数据来自列表摘要批量聚合，无 UI 结构变化，不在本原型重复展示）。<br>
+    · 变更详情页与快速修复抽屉共用本卡片（kind=change/quicklog），快速修复注脚同步更新。
+  </div>
+
+<script>
+  function toggleDetail(btn) {
+    const block = btn.closest('.card').querySelector('.detail-block');
+    const open = block.style.display !== 'none';
+    block.style.display = open ? 'none' : 'block';
+    btn.querySelector('span').textContent = open ? '▸' : '▾';
+  }
+  // 初始收起，点击展开（对齐线上折叠交互）
+  document.querySelectorAll('.detail-block').forEach(b => b.style.display = 'none');
+  document.querySelectorAll('.usage-toggle span').forEach(s => s.textContent = '▸');
+</script>
+</body>
+</html>

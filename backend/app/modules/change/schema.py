@@ -570,6 +570,10 @@ class UsageByModelItemRead(BaseModel):
     「未记录」桶）。数据流：producer = change/usage_service.py
     ChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =
     前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。
+
+    2026-10-02-change-center-token-usage task-03：新增第三桶「本地 CLI」
+    （usage_service._LOCAL_CLI_MODEL）——本地 CLI 会话快照四维（api_requests
+    恒 0，排序按数值参与不特殊置位）；前端按桶名渲染绿阶 tag。DTO 字段集不变。
     """
 
     model: str  # 模型名；兜底桶 = run.model 或 "未记录"（排序恒末位）

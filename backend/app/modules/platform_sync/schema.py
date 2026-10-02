@@ -549,6 +549,10 @@ class AgentLogTotalUsage(BaseModel):
     ``inputTokens`` 等）——四项口径与 daemon 一致**无 ``total_tokens``**（daemon
     侧累计即不产出该项）；daemon 原文 camelCase 经 ``validation_alias`` 双名对齐。
     老 daemon / 早退分支（unsupported/parse_error/too_large）不携带即整项 None。
+
+    2026-10-02-change-center-token-usage task-02：新增第二消费方——usage_ingest
+    摄取任务复用同一 alias 对齐链，把 totalUsage 落 platform_agent_logs 快照五列
+    （cacheWriteTokens → usage_cache_write_tokens）；DTO 字段集不变。
     """
 
     model_config = {"extra": "ignore"}

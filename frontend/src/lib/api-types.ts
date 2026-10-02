@@ -12347,6 +12347,10 @@ export interface components {
          *     ``inputTokens`` 等）——四项口径与 daemon 一致**无 ``total_tokens``**（daemon
          *     侧累计即不产出该项）；daemon 原文 camelCase 经 ``validation_alias`` 双名对齐。
          *     老 daemon / 早退分支（unsupported/parse_error/too_large）不携带即整项 None。
+         *
+         *     2026-10-02-change-center-token-usage task-02：新增第二消费方——usage_ingest
+         *     摄取任务复用同一 alias 对齐链，把 totalUsage 落 platform_agent_logs 快照五列
+         *     （cacheWriteTokens → usage_cache_write_tokens）；DTO 字段集不变。
          */
         AgentLogTotalUsage: {
             /** Input Tokens */
@@ -26838,6 +26842,10 @@ export interface components {
          *     「未记录」桶）。数据流：producer = change/usage_service.py
          *     ChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =
          *     前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。
+         *
+         *     2026-10-02-change-center-token-usage task-03：新增第三桶「本地 CLI」
+         *     （usage_service._LOCAL_CLI_MODEL）——本地 CLI 会话快照四维（api_requests
+         *     恒 0，排序按数值参与不特殊置位）；前端按桶名渲染绿阶 tag。DTO 字段集不变。
          */
         UsageByModelItemRead: {
             /** Model */

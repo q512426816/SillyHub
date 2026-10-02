@@ -181,10 +181,12 @@ describe("ChangeUsageCard（task-07）", () => {
     });
     expect(mocks.getChangeUsage).not.toHaveBeenCalled();
 
-    // 展开后注脚按 kind 分叉：quicklog 声明统计关联会话内全部执行。
+    // 展开后注脚按 kind 分叉：quicklog 声明统计关联会话内全部执行 + 本地 CLI 口径。
     fireEvent.click(await screen.findByRole("button", { name: "按模型明细" }));
     expect(
-      await screen.findByText(/统计关联会话内全部执行（快速修复经会话绑定关联）/),
+      await screen.findByText(
+        /统计关联会话内全部执行与本地 CLI 会话（快速修复经会话绑定关联）；本地 CLI 用量来自落库快照/,
+      ),
     ).toBeInTheDocument();
   });
 
@@ -220,7 +222,7 @@ describe("ChangeUsageCard（task-07）", () => {
     expect(screen.getByText("172")).toBeInTheDocument(); // glm-4.7 行请求次数
     expect(
       screen.getByText(
-        /统计平台派发执行与关联会话执行，按执行去重合并；会话服务多个变更时消耗在各变更分别显示；已删除会话的执行仍计入；耗时为纯执行时长累加/,
+        /统计平台派发执行、关联会话执行与本地 CLI 会话，按执行去重合并；本地 CLI 用量来自 daemon 解析日志的落库快照/,
       ),
     ).toBeInTheDocument();
 
@@ -264,5 +266,75 @@ describe("ChangeUsageCard（task-07）", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("进行中")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "按模型明细" })).not.toBeInTheDocument();
+  });
+
+  // ── 2026-10-02-change-center-token-usage task-04：本地 CLI 桶渲染 ──
+
+  it("「本地 CLI」桶行渲染绿阶 tag、请求列「—」、数字照常（本地 CLI 用量并入）", async () => {
+    mocks.getChangeUsage.mockResolvedValue(
+      usageOf({
+        by_model: [
+          ...usageOf().by_model,
+          {
+            model: "本地 CLI",
+            input_tokens: 861_000, // 861.0K
+            output_tokens: 24_300,
+            cache_read_tokens: 1_500_000, // 1.5M
+            cache_creation_tokens: 98_000,
+            api_requests: 0, // 无来源恒 0 → 渲染「—」
+          },
+        ],
+      }),
+    );
+    renderCard();
+
+    fireEvent.click(await screen.findByRole("button", { name: "按模型明细" }));
+    const localTag = await screen.findByText("本地 CLI");
+    expect(localTag).toBeInTheDocument();
+    // 绿阶样式锚定（区别于「未记录」灰阶与模型行 brand 阶）。
+    expect(localTag.className).toContain("text-emerald-700");
+    expect(screen.getByText("861.0K")).toBeInTheDocument();
+    expect(screen.getByText("1.5M")).toBeInTheDocument();
+    // 请求列：本地 CLI 行显示「—」而非「0」（零来源展示语义）。
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.queryByText(/^0$/)).not.toBeInTheDocument();
+  });
+
+  it("纯本地变更（三元组全 None + totals 非 0）→ 不触发「尚无关联执行」空态，时间显示「—」", async () => {
+    mocks.getChangeUsage.mockResolvedValue(
+      usageOf({
+        started_at: null,
+        finished_at: null,
+        duration_ms: null,
+        totals: {
+          input_tokens: 861_000,
+          output_tokens: 24_300,
+          cache_read_tokens: 1_500_000,
+          cache_creation_tokens: 98_000,
+          api_requests: 0,
+          num_turns: 0,
+        },
+        by_model: [
+          {
+            model: "本地 CLI",
+            input_tokens: 861_000,
+            output_tokens: 24_300,
+            cache_read_tokens: 1_500_000,
+            cache_creation_tokens: 98_000,
+            api_requests: 0,
+          },
+        ],
+      }),
+    );
+    renderCard();
+
+    // hasNoExecution 要求 totals 全 0——纯本地非 0 → 正常渲染用量卡。
+    expect(await screen.findByTestId("change-usage-card")).toBeInTheDocument();
+    expect(screen.getByText("861.0K")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/尚无关联执行/),
+    ).not.toBeInTheDocument();
+    // started None → 不误渲染「进行中」标记。
+    expect(screen.queryByText("进行中")).not.toBeInTheDocument();
   });
 });

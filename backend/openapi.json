@@ -35861,7 +35861,7 @@
         },
         "type": "object",
         "title": "AgentLogTotalUsage",
-        "description": "全会话累计 token 用量四项（2026-09-19-tool-report-session-replay task-08）。\n\n对齐 daemon ``AgentLogMessagesResult.totalUsage``（registry.ts，键为 camelCase\n``inputTokens`` 等）——四项口径与 daemon 一致**无 ``total_tokens``**（daemon\n侧累计即不产出该项）；daemon 原文 camelCase 经 ``validation_alias`` 双名对齐。\n老 daemon / 早退分支（unsupported/parse_error/too_large）不携带即整项 None。"
+        "description": "全会话累计 token 用量四项（2026-09-19-tool-report-session-replay task-08）。\n\n对齐 daemon ``AgentLogMessagesResult.totalUsage``（registry.ts，键为 camelCase\n``inputTokens`` 等）——四项口径与 daemon 一致**无 ``total_tokens``**（daemon\n侧累计即不产出该项）；daemon 原文 camelCase 经 ``validation_alias`` 双名对齐。\n老 daemon / 早退分支（unsupported/parse_error/too_large）不携带即整项 None。\n\n2026-10-02-change-center-token-usage task-02：新增第二消费方——usage_ingest\n摄取任务复用同一 alias 对齐链，把 totalUsage 落 platform_agent_logs 快照五列\n（cacheWriteTokens → usage_cache_write_tokens）；DTO 字段集不变。"
       },
       "AgentProfileAggregatedItem": {
         "properties": {
@@ -73012,7 +73012,7 @@
           "model"
         ],
         "title": "UsageByModelItemRead",
-        "description": "分模型用量明细项（ChangeUsageRead.by_model 列表行）。\n\n明细段 = agent_run_model_usage 按 model GROUP BY（SUM 四维 token +\napi_requests）；兜底段 = 集合中无明细行的 run 归并到 run.model（缺失归\n「未记录」桶）。数据流：producer = change/usage_service.py\nChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =\n前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。"
+        "description": "分模型用量明细项（ChangeUsageRead.by_model 列表行）。\n\n明细段 = agent_run_model_usage 按 model GROUP BY（SUM 四维 token +\napi_requests）；兜底段 = 集合中无明细行的 run 归并到 run.model（缺失归\n「未记录」桶）。数据流：producer = change/usage_service.py\nChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =\n前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。\n\n2026-10-02-change-center-token-usage task-03：新增第三桶「本地 CLI」\n（usage_service._LOCAL_CLI_MODEL）——本地 CLI 会话快照四维（api_requests\n恒 0，排序按数值参与不特殊置位）；前端按桶名渲染绿阶 tag。DTO 字段集不变。"
       },
       "UsageData": {
         "properties": {

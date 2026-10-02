@@ -81,6 +81,10 @@ from app.modules.platform_sync.schema import (
 )
 from app.modules.platform_sync.service import PlatformSyncService
 
+# 2026-10-02-change-center-token-usage task-02：上报后用量摄取 fire 入口
+# （usage_ingest 对本模块的反向引用是函数级延迟 import，模块级单向无环）。
+from app.modules.platform_sync.usage_ingest import fire_usage_ingest_for_push
+
 if TYPE_CHECKING:
     # 仅类型标注用（helper 返回值）；运行时 import 维持函数级（防模块加载环，
     # 与 read_agent_log_content 既有函数级 import 惯例一致）。
@@ -566,6 +570,12 @@ async def push_agent_logs(
         user_id=_user.id,
         hub_session_id=body.hub_session_id,
     )
+    # 2026-10-02-change-center-token-usage task-02（design 总体方案 / D-002@v1）：
+    # 落库（含 service 唯一 commit :2119）成功后 fire-and-forget 用量摄取——
+    # 后台任务自开 session 经回放 RPC 通道让 daemon 解析日志 totalUsage 覆盖写
+    # 快照五列；不阻塞本响应、失败仅记日志不放大（下次上报幂等补齐，R-03/R-06）。
+    # fire 点在 commit 之后：后台任务读到的行已提交可见（Grill X1 实证）。
+    fire_usage_ingest_for_push(scope.workspace_id, body.entries)
     return AgentLogPushOk(upserted=upserted)
 
 

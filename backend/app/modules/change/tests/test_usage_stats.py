@@ -39,7 +39,9 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,6 +51,7 @@ from app.modules.agent.model import AgentRun, AgentRunModelUsage, AgentSession
 from app.modules.auth.model import User
 from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionLink
 from app.modules.change.usage_service import ChangeUsageQueryService
+from app.modules.platform_sync.model import AgentSessionLogORM
 from app.modules.workspace.model import Workspace
 
 # 固定种子时间（断言经 _naive 归一为 naive 墙钟：SQLite DateTime 读写丢时区，
@@ -1208,3 +1211,196 @@ class TestListUsageProjection:
         assert usage["duration_ms"] == 1500
 
         assert items[ql_unbound]["usage"] is None
+
+
+# ── 14-19：本地 CLI 段聚合（2026-10-02-change-center-token-usage task-03）──
+
+
+class TestLocalCliSegment:
+    """本地 CLI 快照并入聚合（FR-02：二选一防双计 / 守恒 / NULL 跳过 / quicklog）。
+
+    快照行直写 ``platform_agent_logs``（producer usage_ingest 已在
+    test_usage_ingest.py 覆盖，此处只验聚合消费口径）。
+    """
+
+    @pytest.fixture(autouse=True)
+    async def _ensure_agent_logs_table(self, db_engine: Any) -> None:
+        """建 ``platform_agent_logs`` 表（根 conftest 未注册该 model，参照
+        change/tests/conftest.py 自包含建表模式）。"""
+        from app.models.base import BaseModel
+        from app.modules.platform_sync import model as _ps_model
+
+        async with db_engine.begin() as conn:
+            await conn.run_sync(
+                BaseModel.metadata.create_all,
+                tables=[_ps_model.AgentSessionLogORM.__table__],
+            )
+
+    @staticmethod
+    async def _make_log_entry(
+        db_session: AsyncSession,
+        workspace_id: uuid.UUID,
+        session_id: uuid.UUID,
+        *,
+        parsed: bool = True,
+        tokens: tuple[int, int, int, int] = (100, 20, 50, 10),
+    ) -> AgentSessionLogORM:
+        """快照行直写：parsed=False 造 NULL 快照（存量未摄取行）。"""
+        row = AgentSessionLogORM(
+            workspace_id=workspace_id,
+            log_path=f"C:/Users/qinyi/.zcode/cli/rollout/model-io-{uuid.uuid4().hex}.jsonl",
+            harness="zcode",
+            format="zcode-model-io-jsonl",
+            agent_session_id=session_id,
+            usage_input_tokens=tokens[0] if parsed else None,
+            usage_output_tokens=tokens[1] if parsed else None,
+            usage_cache_read_tokens=tokens[2] if parsed else None,
+            usage_cache_write_tokens=tokens[3] if parsed else None,
+            usage_parsed_at=_T12 if parsed else None,
+        )
+        db_session.add(row)
+        await db_session.commit()
+        return row
+
+    async def test_local_only_change_bucket_and_conservation(
+        self, db_session: AsyncSession
+    ) -> None:
+        """14. 纯本地变更：桶行出现 + totals=Σby_model 守恒 + 三元组 None/轮次 0。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/local-only")
+        change = await _make_change(db_session, ws.id, "2026-10-02-local-only")
+        sess = await _make_session(db_session, uid)
+        await _make_change_link(db_session, change_id=change.id, session_id=sess.id)
+        await self._make_log_entry(db_session, ws.id, sess.id, tokens=(100, 20, 50, 10))
+
+        usage = await ChangeUsageQueryService(db_session).get_change_usage(ws.id, change.id)
+
+        assert len(usage.by_model) == 1
+        local = usage.by_model[0]
+        assert local.model == "本地 CLI"
+        assert (local.input_tokens, local.output_tokens) == (100, 20)
+        assert (local.cache_read_tokens, local.cache_creation_tokens) == (50, 10)
+        assert local.api_requests == 0
+        # 守恒：totals = Σ by_model；本地段不贡献三元组/轮次/请求（诚实值）。
+        assert usage.totals.input_tokens == 100 == sum(i.input_tokens for i in usage.by_model)
+        assert usage.totals.output_tokens == 20
+        assert usage.totals.cache_read_tokens == 50
+        assert usage.totals.cache_creation_tokens == 10
+        assert usage.totals.api_requests == 0
+        assert usage.totals.num_turns == 0
+        assert usage.started_at is None and usage.finished_at is None
+        assert usage.duration_ms is None
+
+    async def test_dual_count_guard_run_authoritative(self, db_session: AsyncSession) -> None:
+        """15. 双计防护：同会话有 runs 也有快照 → 只计 run（NOT EXISTS，R-01）。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/dual-count")
+        change = await _make_change(db_session, ws.id, "2026-10-02-dual")
+        sess = await _make_session(db_session, uid)
+        await _make_change_link(db_session, change_id=change.id, session_id=sess.id)
+        await _make_run(
+            db_session,
+            agent_session_id=sess.id,
+            model="GLM-5.3",
+            input_tokens=10,
+            output_tokens=5,
+            cache_read_tokens=3,
+            cache_creation_tokens=2,
+            started_at=_T10,
+            finished_at=_T1030,
+            duration_ms=1000,
+            num_turns=1,
+        )
+        await self._make_log_entry(db_session, ws.id, sess.id, tokens=(100, 20, 50, 10))
+
+        usage = await ChangeUsageQueryService(db_session).get_change_usage(ws.id, change.id)
+
+        # run 权威：本地桶不出现，数字 = run 值。
+        assert [i.model for i in usage.by_model] == ["GLM-5.3"]
+        assert usage.totals.input_tokens == 10
+        assert usage.totals.output_tokens == 5
+
+    async def test_null_snapshot_and_shared_session(self, db_session: AsyncSession) -> None:
+        """16. NULL 快照不计入；17. 共享会话两变更各计一次（口径特性）。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/null-shared")
+        change_a = await _make_change(db_session, ws.id, "2026-10-02-null")
+        change_b = await _make_change(db_session, ws.id, "2026-10-02-shared")
+        sess_a = await _make_session(db_session, uid)
+        sess_shared = await _make_session(db_session, uid)
+        await _make_change_link(db_session, change_id=change_a.id, session_id=sess_a.id)
+        await _make_change_link(db_session, change_id=change_b.id, session_id=sess_shared.id)
+        await self._make_log_entry(db_session, ws.id, sess_a.id, parsed=False)
+        await self._make_log_entry(db_session, ws.id, sess_shared.id, tokens=(200, 40, 80, 20))
+
+        svc = ChangeUsageQueryService(db_session)
+        usage_a = await svc.get_change_usage(ws.id, change_a.id)
+        usage_b = await svc.get_change_usage(ws.id, change_b.id)
+
+        # NULL 快照（存量未摄取）不进聚合：显示与改造前一致。
+        assert usage_a.by_model == []
+        assert usage_a.totals.input_tokens == 0
+        # 共享会话在两个变更各完整计一次（本地段同 run 段口径特性）。
+        assert usage_b.totals.input_tokens == 200
+        assert usage_b.by_model[0].model == "本地 CLI"
+
+    async def test_quicklog_local_segment(self, db_session: AsyncSession) -> None:
+        """18. quicklog 本地段同口径（quicklog_session_links 锚点）。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/ql-local")
+        sess = await _make_session(db_session, uid)
+        ql_id = "ql-20261002-001-abc"
+        await _make_quicklog_link(db_session, workspace_id=ws.id, ql_id=ql_id, session_id=sess.id)
+        await self._make_log_entry(db_session, ws.id, sess.id, tokens=(300, 60, 90, 30))
+
+        usage = await ChangeUsageQueryService(db_session).get_quicklog_usage(ws.id, ql_id)
+
+        assert usage.totals.input_tokens == 300
+        assert usage.totals.cache_creation_tokens == 30
+        assert usage.by_model[0].model == "本地 CLI"
+
+    async def test_summary_merge_local_and_pure_local(self, db_session: AsyncSession) -> None:
+        """19. 列表摘要合并：混合变更（run 会话 + 本地会话）四维相加；纯本地变更
+        新建 None 三元组摘要。注意混合 = 两个会话各占一源——同会话双源是 15 的
+        二选一防护场景，不在此重复。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/summary-merge")
+        change_mixed = await _make_change(db_session, ws.id, "2026-10-02-mixed")
+        change_pure = await _make_change(db_session, ws.id, "2026-10-02-pure")
+        sess_run = await _make_session(db_session, uid)
+        sess_local = await _make_session(db_session, uid)
+        sess_pure = await _make_session(db_session, uid)
+        await _make_change_link(db_session, change_id=change_mixed.id, session_id=sess_run.id)
+        await _make_change_link(db_session, change_id=change_mixed.id, session_id=sess_local.id)
+        await _make_change_link(db_session, change_id=change_pure.id, session_id=sess_pure.id)
+        await _make_run(
+            db_session,
+            agent_session_id=sess_run.id,
+            model="GLM-5.3",
+            input_tokens=10,
+            output_tokens=5,
+            cache_read_tokens=3,
+            cache_creation_tokens=2,
+            started_at=_T10,
+            finished_at=_T11,
+            duration_ms=500,
+            num_turns=1,
+        )
+        await self._make_log_entry(db_session, ws.id, sess_local.id, tokens=(100, 20, 50, 10))
+        await self._make_log_entry(db_session, ws.id, sess_pure.id, tokens=(40, 8, 12, 4))
+
+        summary = await ChangeUsageQueryService(db_session).summarize_changes(
+            [change_mixed.id, change_pure.id]
+        )
+
+        mixed = summary[change_mixed.id]
+        assert (mixed.totals.input_tokens, mixed.totals.output_tokens) == (110, 25)
+        assert (mixed.totals.cache_read_tokens, mixed.totals.cache_creation_tokens) == (53, 12)
+        # run 段三元组保留；本地段不贡献。
+        assert _naive(mixed.started_at) == _T10.replace(tzinfo=None)
+        assert mixed.totals.num_turns == 1
+
+        pure = summary[change_pure.id]
+        assert pure.totals.input_tokens == 40
+        assert pure.started_at is None and pure.duration_ms is None
+        assert pure.totals.num_turns == 0

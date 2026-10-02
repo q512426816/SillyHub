@@ -19,6 +19,13 @@ quicklog 列表组装（task-03）→ 本服务 → ``ChangeUsageRead`` / ``Usag
 防 IN 膨胀与 N+1，R-03）；集合不 join ``agent_sessions`` 本体、不过滤
 ``deleted_at``（D-006@v1：软删会话消耗真实发生，计入统计；无
 ``agent_session_id`` 的孤儿 run 经派发锚点 ``change_id`` 仍命中，不丢数）。
+
+2026-10-02-change-center-token-usage task-03（FR-02 / D-001@v1）：详情与列表
+各追加「本地段」——``platform_agent_logs`` 用量快照按会话锚点
+（change_session_links / quicklog_session_links）SUM 四维，会话级二选一
+（``NOT EXISTS agent_runs``，run 权威防双计，design R-01）后并入
+「本地 CLI」桶（api_requests 恒 0），totals=Σby_model 守恒延续；本地段不
+贡献时间三元组/轮次/请求次数（daemon 解析器无该数据来源，诚实值）。
 """
 
 from __future__ import annotations
@@ -40,10 +47,18 @@ from app.modules.change.schema import (
     UsageSummaryRead,
     UsageTotalsRead,
 )
+from app.modules.platform_sync.model import AgentSessionLogORM
 
 #: 兜底桶名：run.model 为 NULL 的历史 run 归此桶，by_model 恒末位（R-04，
 #: 对齐 by_provider「未记录」与 session-usage 同名先例）。
 _UNRECORDED_MODEL = "未记录"
+
+#: 本地 CLI 桶名（2026-10-02-change-center-token-usage task-03 / design 数据模型节）：
+#: 本地 CLI 会话（origin=tool_report）经 usage_ingest 落库的快照四维并入此桶。
+#: ``api_requests`` 恒 0——daemon 解析器 totalUsage 无请求数来源（诚实值，对齐
+#: 「未记录」兜底桶先例）；排序按 input+output 数值参与、不特殊置位（「未记录」
+#: 仍恒末位）。前端按桶名渲染绿阶 tag（task-04，与后端约定值）。
+_LOCAL_CLI_MODEL = "本地 CLI"
 
 
 class ChangeUsageQueryService:
@@ -89,7 +104,12 @@ class ChangeUsageQueryService:
                     "change_id": str(change_id),
                 },
             )
-        return await self._aggregate_usage(self._change_run_ids(change_id))
+        local_rows = (
+            (await self._session.execute(self._local_change_rows_stmt([change_id])))
+            .mappings()
+            .all()
+        )
+        return await self._aggregate_usage(self._change_run_ids(change_id), local_rows)
 
     async def get_quicklog_usage(self, workspace_id: uuid.UUID, ql_id: str) -> ChangeUsageRead:
         """快速修复维度完整用量（恒走会话链路，聚合口径同详情）。
@@ -98,7 +118,12 @@ class ChangeUsageQueryService:
         文件源条目无 DB 行；严格 404 语义由 router 层对齐详情端点做（task-04）。
         本方法对空集合返回全零 totals + 空 by_model + 三元组 None（R-05）。
         """
-        return await self._aggregate_usage(self._quicklog_run_ids(workspace_id, ql_id))
+        local_rows = (
+            (await self._session.execute(self._local_quicklog_rows_stmt(workspace_id, [ql_id])))
+            .mappings()
+            .all()
+        )
+        return await self._aggregate_usage(self._quicklog_run_ids(workspace_id, ql_id), local_rows)
 
     # ── 列表批量摘要（UsageSummaryRead，零 N+1）────────────────────────
 
@@ -109,21 +134,30 @@ class ChangeUsageQueryService:
 
         (锚点 change_id, run) 两锚点 UNION 后外层 GROUP BY change_id；
         空列表零查询返回 ``{}``。无执行变更不进结果（调用方按 None 降级）。
+
+        2026-10-02-change-center-token-usage task-03：run 段摘要后追加本地段
+        合并（快照四维相加；三元组/轮次/请求不动——本地无来源，口径同详情）。
         """
         if not change_ids:
             return {}
         rows = await self._summarize_anchor(self._change_summary_anchor(change_ids))
-        return {row["group_key"]: self._row_to_summary(row) for row in rows}
+        summary = {row["group_key"]: self._row_to_summary(row) for row in rows}
+        await self._merge_local_rows(summary, self._local_change_rows_stmt(change_ids))
+        return summary
 
     async def summarize_quicklogs(
         self, workspace_id: uuid.UUID, ql_ids: list[str]
     ) -> dict[str, UsageSummaryRead]:
         """一次查询出整页快速修复摘要（quicklog_session_links JOIN runs 后
-        DISTINCT (ql_id, run_id) 再 GROUP BY ql_id）；空列表零查询返回 ``{}``。"""
+        DISTINCT (ql_id, run_id) 再 GROUP BY ql_id）；空列表零查询返回 ``{}``。
+
+        2026-10-02-change-center-token-usage task-03：本地段合并同变更侧。"""
         if not ql_ids:
             return {}
         rows = await self._summarize_anchor(self._quicklog_summary_anchor(workspace_id, ql_ids))
-        return {row["group_key"]: self._row_to_summary(row) for row in rows}
+        summary = {row["group_key"]: self._row_to_summary(row) for row in rows}
+        await self._merge_local_rows(summary, self._local_quicklog_rows_stmt(workspace_id, ql_ids))
+        return summary
 
     # ── 去重执行集合（子查询形态，两类口径共用）────────────────────────
 
@@ -237,9 +271,120 @@ class ChangeUsageQueryService:
             .subquery()
         )
 
+    # ── 本地 CLI 段（2026-10-02-change-center-token-usage task-03）────────
+
+    @staticmethod
+    def _local_usage_columns() -> list[Any]:
+        """本地段快照四维聚合列（usage_parsed_at IS NOT NULL 已过滤 NULL 快照，
+        COALESCE 仅防御极端部分 NULL 行）。"""
+        return [
+            func.sum(func.coalesce(AgentSessionLogORM.usage_input_tokens, 0)).label("input_tokens"),
+            func.sum(func.coalesce(AgentSessionLogORM.usage_output_tokens, 0)).label(
+                "output_tokens"
+            ),
+            func.sum(func.coalesce(AgentSessionLogORM.usage_cache_read_tokens, 0)).label(
+                "cache_read_tokens"
+            ),
+            func.sum(func.coalesce(AgentSessionLogORM.usage_cache_write_tokens, 0)).label(
+                "cache_creation_tokens"
+            ),
+        ]
+
+    @staticmethod
+    def _local_no_runs_condition() -> Any:
+        """会话级二选一防双计（design R-01）：该会话在 ``agent_runs`` 有行则快照
+        不计——run 终态数据是权威，快照只补 run 缺失的会话。
+
+        NOT EXISTS 反连接对齐兜底段 :294 先例（防 NOT IN 子查询膨胀）。"""
+        return ~exists().where(AgentRun.agent_session_id == AgentSessionLogORM.agent_session_id)
+
+    @classmethod
+    def _local_change_rows_stmt(cls, change_ids: list[uuid.UUID]) -> Any:
+        """变更侧本地段：``platform_agent_logs`` 快照按 ``change_session_links``
+        会话锚点 GROUP BY change_id 求和（design 接口定义 B-2 伪码的落地）。
+
+        不 join ``agent_sessions`` 本体：快照行 ``agent_session_id`` 直连 link 表
+        即定位（软删会话口径延续 D-006@v1 计入）。"""
+        return (
+            select(
+                col(ChangeSessionLink.change_id).label("group_key"),
+                *cls._local_usage_columns(),
+            )
+            .select_from(AgentSessionLogORM)
+            .join(
+                ChangeSessionLink,
+                col(ChangeSessionLink.session_id) == col(AgentSessionLogORM.agent_session_id),
+            )
+            .where(
+                col(ChangeSessionLink.change_id).in_(change_ids),
+                col(AgentSessionLogORM.usage_parsed_at).is_not(None),
+                cls._local_no_runs_condition(),
+            )
+            .group_by(col(ChangeSessionLink.change_id))
+        )
+
+    @classmethod
+    def _local_quicklog_rows_stmt(cls, workspace_id: uuid.UUID, ql_ids: list[str]) -> Any:
+        """快速修复侧本地段（锚点换 ``quicklog_session_links``，其余同变更侧）。"""
+        return (
+            select(
+                col(QuicklogSessionLink.ql_id).label("group_key"),
+                *cls._local_usage_columns(),
+            )
+            .select_from(AgentSessionLogORM)
+            .join(
+                QuicklogSessionLink,
+                col(QuicklogSessionLink.session_id) == col(AgentSessionLogORM.agent_session_id),
+            )
+            .where(
+                col(QuicklogSessionLink.workspace_id) == workspace_id,
+                col(QuicklogSessionLink.ql_id).in_(ql_ids),
+                col(AgentSessionLogORM.usage_parsed_at).is_not(None),
+                cls._local_no_runs_condition(),
+            )
+            .group_by(col(QuicklogSessionLink.ql_id))
+        )
+
+    async def _merge_local_rows(
+        self, summary: dict[Any, UsageSummaryRead], local_stmt: Any
+    ) -> None:
+        """列表摘要与本地段合并：四维相加；纯本地条目新建全 None 三元组摘要。
+
+        本地段不贡献时间三元组/轮次/请求次数（无来源诚实值，FR-02）。"""
+        local_rows = (await self._session.execute(local_stmt)).mappings().all()
+        for row in local_rows:
+            key = row["group_key"]
+            cur = summary.get(key)
+            if cur is None:
+                summary[key] = UsageSummaryRead(
+                    started_at=None,
+                    finished_at=None,
+                    duration_ms=None,
+                    totals=self._local_totals(row),
+                )
+                continue
+            cur.totals.input_tokens += int(row["input_tokens"] or 0)
+            cur.totals.output_tokens += int(row["output_tokens"] or 0)
+            cur.totals.cache_read_tokens += int(row["cache_read_tokens"] or 0)
+            cur.totals.cache_creation_tokens += int(row["cache_creation_tokens"] or 0)
+
+    @staticmethod
+    def _local_totals(row: RowMapping) -> UsageTotalsRead:
+        """本地段行 → totals（api_requests/num_turns 恒 0——无来源）。"""
+        return UsageTotalsRead(
+            input_tokens=int(row["input_tokens"] or 0),
+            output_tokens=int(row["output_tokens"] or 0),
+            cache_read_tokens=int(row["cache_read_tokens"] or 0),
+            cache_creation_tokens=int(row["cache_creation_tokens"] or 0),
+            api_requests=0,
+            num_turns=0,
+        )
+
     # ── 详情两段聚合（对齐 daemon/session/service.get_session_usage 范式）──
 
-    async def _aggregate_usage(self, run_ids: Subquery) -> ChangeUsageRead:
+    async def _aggregate_usage(
+        self, run_ids: Subquery, local_rows: list[RowMapping] | None = None
+    ) -> ChangeUsageRead:
         """集合上两段聚合 + 时间三元组，全部 SQL 侧完成（R-03 防膨胀）：
 
         1. 明细段（主源）：``agent_run_model_usage`` JOIN 集合，GROUP BY
@@ -255,6 +400,11 @@ class ChangeUsageQueryService:
         两段按 model 名 dict 归并求和（兜底段 run.model 可能与明细段同名——
         同名桶相加不丢）；by_model 按 input+output 降序、「未记录」恒末位；
         totals = 两段之和 + ``SUM(num_turns)``；空集合返回全 0 + 空 by_model。
+
+        2026-10-02-change-center-token-usage task-03：``local_rows`` 为本地 CLI
+        快照行（会话级二选一已在上游 SQL 过滤双计），并入「本地 CLI」桶
+        （api_requests 恒 0）——totals=Σby_model 守恒自动延续；本地段不贡献
+        时间三元组/轮次/请求次数（无来源诚实值，FR-02）。
         """
         in_set = AgentRun.id.in_(select(run_ids.c.id))
 
@@ -338,6 +488,17 @@ class ChangeUsageQueryService:
             # 兜底桶 api_requests 恒 0（历史 run 无调用次数来源，诚实值 R-04）。
             _merge(
                 str(row["model"]),
+                int(row["input_tokens"] or 0),
+                int(row["output_tokens"] or 0),
+                int(row["cache_read_tokens"] or 0),
+                int(row["cache_creation_tokens"] or 0),
+                0,
+            )
+        for row in local_rows or []:
+            # 本地 CLI 桶（task-03）：快照四维并入，api_requests 恒 0（解析器
+            # 无请求数来源，与兜底桶同族诚实值）。
+            _merge(
+                _LOCAL_CLI_MODEL,
                 int(row["input_tokens"] or 0),
                 int(row["output_tokens"] or 0),
                 int(row["cache_read_tokens"] or 0),

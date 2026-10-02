@@ -372,6 +372,32 @@ class AgentSessionLogORM(BaseModel, table=True):
         default=None,
         sa_column=Column(String(255), nullable=True),
     )
+    # ── 2026-10-02-change-center-token-usage task-01（design 数据模型 / FR-01）──
+    # 用量快照五列（producer：usage_ingest 摄取任务；consumer：change/usage_service
+    # 聚合本地段）。一个 entry = 一个日志文件 = 一份全生命周期累计快照，覆盖写幂等；
+    # NULL = 未摄取 / 解析不支持（存量行不回填，聚合侧过滤 NULL 自然跳过）。
+    # 列名映射链：daemon totalUsage.cacheWriteTokens → usage_cache_write_tokens
+    # ↔ run 侧 cache_creation_tokens（语义同缓存写入）。
+    usage_input_tokens: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, nullable=True),
+    )
+    usage_output_tokens: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, nullable=True),
+    )
+    usage_cache_read_tokens: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, nullable=True),
+    )
+    usage_cache_write_tokens: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, nullable=True),
+    )
+    usage_parsed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(

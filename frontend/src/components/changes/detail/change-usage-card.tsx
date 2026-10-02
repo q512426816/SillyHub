@@ -34,12 +34,20 @@ import { cn } from "@/lib/utils";
 /** 「未记录」兜底桶名（backend usage_service 对无明细 run 的统一填充值，恒末位）。 */
 const UNRECORDED_MODEL = "未记录";
 
+/** 「本地 CLI」桶名（backend usage_service._LOCAL_CLI_MODEL 约定值，
+ * 2026-10-02-change-center-token-usage task-04）：本地 CLI 会话（ZCode/Claude
+ * Code 等直接本地跑）经 daemon 解析日志落库的快照四维归并桶，请求次数无来源
+ * 恒 0（渲染「—」）。 */
+const LOCAL_CLI_MODEL = "本地 CLI";
+
 /** 口径注脚（usage-note 小字）：按 kind 分叉——change 声明并集去重/共享会话/
- * 软删会话/纯执行时长口径；quicklog 声明恒走关联会话链路（无派发锚点）。 */
+ * 软删会话/纯执行时长口径；quicklog 声明恒走关联会话链路（无派发锚点）。
+ * 2026-10-02 task-04：两 kind 均补本地 CLI 会话口径（快照落库、请求/轮次不计）。 */
 const USAGE_NOTE_TEXT: Record<ChangeUsageCardProps["kind"], string> = {
   change:
-    "统计平台派发执行与关联会话执行，按执行去重合并；会话服务多个变更时消耗在各变更分别显示；已删除会话的执行仍计入；耗时为纯执行时长累加",
-  quicklog: "统计关联会话内全部执行（快速修复经会话绑定关联）",
+    "统计平台派发执行、关联会话执行与本地 CLI 会话，按执行去重合并；本地 CLI 用量来自 daemon 解析日志的落库快照，请求次数与轮次无来源不计；会话服务多个变更时消耗在各变更分别显示；已删除会话的执行仍计入；耗时为纯执行时长累加",
+  quicklog:
+    "统计关联会话内全部执行与本地 CLI 会话（快速修复经会话绑定关联）；本地 CLI 用量来自落库快照，请求次数与轮次无来源不计",
 };
 
 export interface ChangeUsageCardProps {
@@ -314,14 +322,22 @@ export function ChangeUsageCard({ kind, workspaceId, refKey }: ChangeUsageCardPr
                   className="border-b border-slate-100 last:border-b-0"
                 >
                   <td className="px-1.5 py-1">
-                    {/* 「未记录」兜底桶 → 灰阶 tag（无按模型明细的旧执行归并）；
-                        正常模型 → brand 阶 tag（对齐 session-usage-bar 先例）。 */}
+                    {/* 三分支桶 tag：「未记录」灰阶（无按模型明细的旧执行归并）、
+                        「本地 CLI」绿阶（本地会话快照桶，task-04）、正常模型
+                        brand 阶（对齐 session-usage-bar 先例）。 */}
                     {row.model === UNRECORDED_MODEL ? (
                       <span
                         title="无按模型明细的历史执行归并，请求次数无来源按 0 计"
                         className="inline-flex items-center rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400"
                       >
                         {UNRECORDED_MODEL}
+                      </span>
+                    ) : row.model === LOCAL_CLI_MODEL ? (
+                      <span
+                        title="本地 CLI 会话（ZCode / Claude Code 等直接本地跑）上报解析的累计用量"
+                        className="inline-flex items-center rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700"
+                      >
+                        {LOCAL_CLI_MODEL}
                       </span>
                     ) : (
                       <span
@@ -345,7 +361,9 @@ export function ChangeUsageCard({ kind, workspaceId, refKey }: ChangeUsageCardPr
                     {formatTokensCompact(row.cache_creation_tokens)}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
-                    {formatCount(row.api_requests)}
+                    {/* 本地 CLI 桶请求次数无来源（恒 0 诚实值）→「—」（对齐
+                        「未记录」桶的零来源展示语义，task-04）。 */}
+                    {row.model === LOCAL_CLI_MODEL ? "—" : formatCount(row.api_requests)}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
                     {formatHitRate(cacheHitRate(row))}
