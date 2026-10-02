@@ -488,6 +488,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-027 卡片视图不再把整行 HTML 注释当正文渲染（与原文视图口径一致：注释不可见）
 变更：2026-09-26-knowledge-card-machine-block
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 卡片视图不再把整行 HTML 注释当正文渲染（与原文视图口径一致：注释不可见）；Then 行为符合本条标准描述
@@ -509,6 +510,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-028 测试绑定机器块（注释标记 + row 行 + 缩进键值行）解析为结构化数据，以紧凑只读行展示 tes
 变更：2026-09-26-knowledge-card-machine-block
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 测试绑定机器块（注释标记 + row 行 + 缩进键值行）解析为结构化数据，以紧凑只读行展示 tests 路径与 state，不再整块 YAML 倾泻；Then 行为符合本条标准描述
@@ -530,6 +532,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-029 机器块的「测试绑定：」空字段头不再以悬空空值字段行出现在字段网格
 变更：2026-09-26-knowledge-card-machine-block
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 机器块的「测试绑定：」空字段头不再以悬空空值字段行出现在字段网格；Then 行为符合本条标准描述
@@ -551,6 +554,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-030 无机器块的既有条目（decisions/fr/手册）渲染零回归
 变更：2026-09-26-knowledge-card-machine-block
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 无机器块的既有条目（decisions/fr/手册）渲染零回归；Then 行为符合本条标准描述
@@ -572,6 +576,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-031 聚焦测试全绿 + tsc 0 错
 变更：2026-09-26-knowledge-card-machine-block
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 聚焦测试全绿 + tsc 0 错；Then 行为符合本条标准描述
@@ -593,6 +598,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-032 工作区列表每行为单行紧凑条目（无 dl 字段表/独立 footer），hover 显操作，拖拽/别名
 变更：2026-09-27-visual-gap-fix
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 工作区列表每行为单行紧凑条目（无 dl 字段表/独立 footer），hover 显操作，拖拽/别名/重扫/删除行为全部保留；Then 行为符合本条标准描述
@@ -614,6 +620,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-033 概览页呈 统计四格+左主右辅两栏，Hero 之后的旧卡片流结构收敛
 变更：2026-09-27-visual-gap-fix
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 概览页呈 统计四格+左主右辅两栏，Hero 之后的旧卡片流结构收敛；Then 行为符合本条标准描述
@@ -635,6 +642,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-034 会话左栏条目高密度两段式，选中态清晰
 变更：2026-09-27-visual-gap-fix
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 会话左栏条目高密度两段式，选中态清晰；Then 行为符合本条标准描述
@@ -656,6 +664,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-035 相关测试全绿 + tsc 0
 变更：2026-09-27-visual-gap-fix
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 相关测试全绿 + tsc 0；Then 行为符合本条标准描述
@@ -665,6 +674,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-036 变更中心每行两段层级与原型一致（标题主行+key 副行），底部有显示 x
 变更：2026-09-27-visual-align-2
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 变更中心每行两段层级与原型一致（标题主行+key 副行），底部有显示 x；Then 行为符合本条标准描述
@@ -686,6 +696,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-037 y
 变更：2026-09-27-visual-align-2
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When y；Then 行为符合本条标准描述
@@ -695,6 +706,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-038 变更详情右侧为单块 MetaPanel 分组（负责人/消耗/变更文件/关联会话/快速任务/观测事件）
 变更：2026-09-27-visual-align-2
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 变更详情右侧为单块 MetaPanel 分组（负责人/消耗/变更文件/关联会话/快速任务/观测事件），时间线为竖线节点形态；Then 行为符合本条标准描述
@@ -716,6 +728,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-039 概览右栏为 About 侧栏（路径/技术栈/关联项目/成员/创建时间）
 变更：2026-09-27-visual-align-2
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 概览右栏为 About 侧栏（路径/技术栈/关联项目/成员/创建时间）；Then 行为符合本条标准描述
@@ -725,6 +738,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-040 相关测试全绿 + tsc 0 + 部署后截图与原型并排核对一致
 变更：2026-09-27-visual-align-2
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 相关测试全绿 + tsc 0 + 部署后截图与原型并排核对一致；Then 行为符合本条标准描述
@@ -743,6 +757,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-042 审批区对 thin 出身变更显示轻量只读说明卡而非「当前无可审批事项」
 变更：2026-09-27-thin-display-fix
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 审批区对 thin 出身变更显示轻量只读说明卡而非「当前无可审批事项」；Then 行为符合本条标准描述
@@ -752,6 +767,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-043 标题区影响字段空值时不渲染占位噪音
 变更：2026-09-27-thin-display-fix
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 标题区影响字段空值时不渲染占位噪音；Then 行为符合本条标准描述
@@ -761,6 +777,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-044 列表行 active thin（stage=thin）状态图标为琥珀闪电
 变更：2026-09-27-thin-display-fix
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 列表行 active thin（stage=thin）状态图标为琥珀闪电；Then 行为符合本条标准描述
@@ -770,6 +787,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-045 判定函数导出+单测覆盖三分支
 变更：2026-09-27-thin-display-fix
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 判定函数导出+单测覆盖三分支；Then 行为符合本条标准描述
@@ -779,6 +797,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-046 相关测试全绿 + tsc 0 + 部署后浏览器验证 hover-polish 详情
 变更：2026-09-27-thin-display-fix
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 相关测试全绿 + tsc 0 + 部署后浏览器验证 hover-polish 详情；Then 行为符合本条标准描述
@@ -788,6 +807,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-047 遗留如实登记：归档 flow-thin 在列表行无出身信号（列表投影无 steps，需后端加 is_
 变更：2026-09-27-thin-display-fix
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 遗留如实登记：归档 flow-thin 在列表行无出身信号（列表投影无 steps，需后端加 is_thin 投影——记入后续建议不在本刀）；Then 行为符合本条标准描述
@@ -797,6 +817,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-048 ChangeSummary 含 is_thin（bool，default False 零破坏），后端
 变更：2026-09-27-change-list-is-thin
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When ChangeSummary 含 is_thin（bool，default False 零破坏），后端投影测试覆盖三分支+时间窗负向；Then 行为符合本条标准描述
@@ -818,6 +839,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-049 前端 api-types 重生成（gen:types）+ 列表行 is_thin=true 时标题行
 变更：2026-09-27-change-list-is-thin
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 前端 / api 相关模块就绪；When 前端 api-types 重生成（gen:types）+ 列表行 is_thin=true 时标题行显示「轻量」琥珀徽章，归档轻量与已归档状态并存；Then 行为符合本条标准描述
@@ -827,6 +849,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-050 后端相关测试全绿 + 前端列表测试全绿 + tsc 0 + openapi.json 同批提交
 变更：2026-09-27-change-list-is-thin
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 / 前端 / api 相关模块就绪；When 后端相关测试全绿 + 前端列表测试全绿 + tsc 0 + openapi.json 同批提交；Then 行为符合本条标准描述
@@ -836,6 +859,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-051 部署后浏览器验证归档区轻量行出身标识
 变更：2026-09-27-change-list-is-thin
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 部署后浏览器验证归档区轻量行出身标识；Then 行为符合本条标准描述
@@ -845,6 +869,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-052 normalizeTestFilePath 剥离路径中的「…」注解段（支持一段或多段），剥离后为空仍
 变更：2026-09-27-assets-testfile-bracket-note
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When normalizeTestFilePath 剥离路径中的「…」注解段（支持一段或多段），剥离后为空仍按未找到处理；Then 行为符合本条标准描述
@@ -866,6 +891,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-053 TestFileBody 用剥离后的文件名发起 explorer search，粘注解路径可等值
 变更：2026-09-27-assets-testfile-bracket-note
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When TestFileBody 用剥离后的文件名发起 explorer search，粘注解路径可等值；Then 行为符合本条标准描述
@@ -887,6 +913,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-054 后缀命中并打开真实测试文件预览
 变更：2026-09-27-assets-testfile-bracket-note
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 后缀命中并打开真实测试文件预览；Then 行为符合本条标准描述
@@ -908,6 +935,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-055 既有 change-assets-card 路径解析用例全绿，新增用例覆盖多段注解与搜索入参为干净文
 变更：2026-09-27-assets-testfile-bracket-note
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 既有 change-assets-card 路径解析用例全绿，新增用例覆盖多段注解与搜索入参为干净文件名；Then 行为符合本条标准描述
@@ -929,6 +957,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-056 变更详情页步骤时间线卡与真实留痕时间线卡共存：steps 非空时合成时间线卡也渲染（组件自身空态静默
 变更：2026-09-27-timeline-coexist
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 组件 相关模块就绪；When 变更详情页步骤时间线卡与真实留痕时间线卡共存：steps 非空时合成时间线卡也渲染（组件自身空态静默隐藏兜底不变）；Then 行为符合本条标准描述
@@ -950,6 +979,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-057 thin 在途（steps 恒空）行为不变：合成卡独立承担叙事
 变更：2026-09-27-timeline-coexist
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When thin 在途（steps 恒空）行为不变：合成卡独立承担叙事；Then 行为符合本条标准描述
@@ -971,6 +1001,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-058 相关前端测试同步更新并全部通过
 变更：2026-09-27-timeline-coexist
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 前端 / 测试 相关模块就绪；When 相关前端测试同步更新并全部通过；Then 行为符合本条标准描述
@@ -992,6 +1023,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-059 TimelineTask 增加 time 字段（翻格顺序推断的勾选时刻，游标衔接赋值、中段断裂停止、
 变更：2026-09-27-timeline-task-time
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When TimelineTask 增加 time 字段（翻格顺序推断的勾选时刻，游标衔接赋值、中段断裂停止、尾部未勾不标断裂——CLI inferFlipTimes 同；Then 行为符合本条标准描述
@@ -1013,6 +1045,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-060 前端任务面显示 ≈HH:mm:ss 时刻列（已勾无时刻显示 ?，未勾不显示）
 变更：2026-09-27-timeline-task-time
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 前端 相关模块就绪；When 前端任务面显示 ≈HH:mm:ss 时刻列（已勾无时刻显示 ?，未勾不显示）；Then 行为符合本条标准描述
@@ -1034,6 +1067,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-061 openapi.json + api-types.ts 同步再生，后端/前端相关测试通过
 变更：2026-09-27-timeline-task-time
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given api / 前端 / 测试 相关模块就绪；When openapi.json + api-types.ts 同步再生，后端/前端相关测试通过；Then 行为符合本条标准描述
@@ -1043,6 +1077,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-062 变更详情页不再挂载观测事件卡（desktop 与移动端全挂载点清除）
 变更：2026-09-28-drop-observation-card
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 变更详情页不再挂载观测事件卡（desktop 与移动端全挂载点清除）；Then 行为符合本条标准描述
@@ -1073,6 +1108,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-064 相关测试同步更新（原断言该卡在场的用例改口径）并全部通过
 变更：2026-09-28-drop-observation-card
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 相关测试同步更新（原断言该卡在场的用例改口径）并全部通过；Then 行为符合本条标准描述
@@ -1082,6 +1118,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-065 后端 /changes/{name}/events 端点不动（CLI 推送与调试面仍在用）
 变更：2026-09-28-drop-observation-card
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 端点 相关模块就绪；When 后端 /changes/{name}/events 端点不动（CLI 推送与调试面仍在用）；Then 行为符合本条标准描述
@@ -1091,6 +1128,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-066 无摘要轮显示中性占位「（无内容记录）」（muted 样式），不再出现「未加载
 变更：2026-09-28-turn-nav-empty-hint
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 无摘要轮显示中性占位「（无内容记录）」（muted 样式），不再出现「未加载；Then 行为符合本条标准描述
@@ -1112,6 +1150,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-067 点击加载」误导文案
 变更：2026-09-28-turn-nav-empty-hint
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 点击加载」误导文案；Then 行为符合本条标准描述
@@ -1121,6 +1160,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-068 「未加载」状态语义保留在 aria-label（读屏可辨）与视觉（未加载行 muted 降调不变）
 变更：2026-09-28-turn-nav-empty-hint
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 「未加载」状态语义保留在 aria-label（读屏可辨）与视觉（未加载行 muted 降调不变）；Then 行为符合本条标准描述
@@ -1130,6 +1170,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-069 桌面窄轨
 变更：2026-09-28-turn-nav-empty-hint
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 桌面窄轨；Then 行为符合本条标准描述
@@ -1151,6 +1192,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-070 浮层行与 mobile Drawer 的同源占位文案一并修正
 变更：2026-09-28-turn-nav-empty-hint
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 浮层行与 mobile Drawer 的同源占位文案一并修正；Then 行为符合本条标准描述
@@ -1160,6 +1202,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-071 相关测试改断言不改意图全绿，tsc
 变更：2026-09-28-turn-nav-empty-hint
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 相关测试改断言不改意图全绿，tsc；Then 行为符合本条标准描述
@@ -1169,6 +1212,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-072 eslint 零新增
 变更：2026-09-28-turn-nav-empty-hint
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When eslint 零新增；Then 行为符合本条标准描述
@@ -1178,6 +1222,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-073 目标：每个信号用人话说明（这是什么/要不要紧/影响什么），可机械处理的给一键按钮（推荐目标预填 +
 变更：2026-09-28-knowledge-gov-ux
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 目标：每个信号用人话说明（这是什么/要不要紧/影响什么），可机械处理的给一键按钮（推荐目标预填 + 确认弹窗 + 完成反馈），不能一键的（需内容判断的）明说建议；Then 行为符合本条标准描述
@@ -1199,6 +1244,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-074 动作复用既有 POST /knowledge/governance/actions（redomain
 变更：2026-09-28-knowledge-gov-ux
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 动作复用既有 POST /knowledge/governance/actions（redomain/repair），不加新写通道；Then 行为符合本条标准描述
@@ -1208,6 +1254,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-075 伪域各池（auto-sillyhub-daemon/auto-backend/auto-fronte
 变更：2026-09-28-knowledge-gov-ux
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 伪域各池（auto-sillyhub-daemon/auto-backend/auto-frontend/auto-sillyspec）每池一行：人话描述+条数；Then 行为符合本条标准描述
@@ -1217,6 +1264,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-076 信号卡标题
 变更：2026-09-28-knowledge-gov-ux
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 信号卡标题；Then 行为符合本条标准描述
@@ -1226,6 +1274,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-077 说明全部改为非开发者可懂文案，不再出现 CLI 命令字样
 变更：2026-09-28-knowledge-gov-ux
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 说明全部改为非开发者可懂文案，不再出现 CLI 命令字样；Then 行为符合本条标准描述
@@ -1235,6 +1284,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-078 操作成功/失败有明确反馈（结果行/toast + 刷新）
 变更：2026-09-28-knowledge-gov-ux
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 操作成功/失败有明确反馈（结果行/toast + 刷新）；Then 行为符合本条标准描述
@@ -1244,6 +1294,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-079 既有 governance 前端测试同步更新全绿，tsc
 变更：2026-09-28-knowledge-gov-ux
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 前端 / 测试 相关模块就绪；When 既有 governance 前端测试同步更新全绿，tsc；Then 行为符合本条标准描述
@@ -1265,6 +1316,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-080 eslint 0 错
 变更：2026-09-28-knowledge-gov-ux
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When eslint 0 错；Then 行为符合本条标准描述
@@ -1274,6 +1326,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-081 列表行描述单行截断不再溢出覆盖右列/影响模块（min-w-0 修复），悬浮全文保留
 变更：2026-09-28-change-ux-detail-batch
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 列表行描述单行截断不再溢出覆盖右列/影响模块（min-w-0 修复），悬浮全文保留；Then 行为符合本条标准描述
@@ -1295,6 +1348,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-082 详情页头部显示变更描述（单行截断+悬浮全文）
 变更：2026-09-28-change-ux-detail-batch
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 详情页头部显示变更描述（单行截断+悬浮全文）；Then 行为符合本条标准描述
@@ -1316,6 +1370,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-083 平台同步处理区收进工具条按钮（搜索/重置旁），点开抽屉承载原处理区
 变更：2026-09-28-change-ux-detail-batch
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 平台同步处理区收进工具条按钮（搜索/重置旁），点开抽屉承载原处理区；Then 行为符合本条标准描述
@@ -1337,6 +1392,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-084 无绑定数据源时抽屉内中性提示
 变更：2026-09-28-change-ux-detail-batch
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 无绑定数据源时抽屉内中性提示；Then 行为符合本条标准描述
@@ -1358,6 +1414,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-085 详情页轻量变更说明卡（协议 1/2、2/2 长文案）不再渲染
 变更：2026-09-28-change-ux-detail-batch
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 详情页轻量变更说明卡（协议 1/2、2/2 长文案）不再渲染；Then 行为符合本条标准描述
@@ -1379,6 +1436,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-086 顶部轻量流程条保留
 变更：2026-09-28-change-ux-detail-batch
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 顶部轻量流程条保留；Then 行为符合本条标准描述
@@ -1400,6 +1458,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-087 沉淀资产卡默认展开、移入主栏，各分组卡片固定高度（超出滚动）网格对齐
 变更：2026-09-28-change-ux-detail-batch
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 沉淀资产卡默认展开、移入主栏，各分组卡片固定高度（超出滚动）网格对齐；Then 行为符合本条标准描述
@@ -1421,6 +1480,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-088 智能体运行状态卡自桌面详情页移除（组件与移动端用法保留）
 变更：2026-09-28-change-ux-detail-batch
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 组件 相关模块就绪；When 智能体运行状态卡自桌面详情页移除（组件与移动端用法保留）；Then 行为符合本条标准描述
@@ -1442,6 +1502,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-089 关联快速任务卡无关联时不渲染（有数据才显示）
 变更：2026-09-28-change-ux-detail-batch
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 关联快速任务卡无关联时不渲染（有数据才显示）；Then 行为符合本条标准描述
@@ -1463,6 +1524,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-090 范围对账卡去头部说明副标题与降级双段说明，压缩为单行降级提示（归档指路保留）
 变更：2026-09-28-change-ux-detail-batch
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 范围对账卡去头部说明副标题与降级双段说明，压缩为单行降级提示（归档指路保留）；Then 行为符合本条标准描述
@@ -1484,6 +1546,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-091 相关前端测试更新通过，tsc/eslint 0 错
 变更：2026-09-28-change-ux-detail-batch
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 前端 / 测试 相关模块就绪；When 相关前端测试更新通过，tsc/eslint 0 错；Then 行为符合本条标准描述
@@ -1493,6 +1556,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-rontend-001 每池/每域/收件箱加「查看明细」深链（?file=fr/<domain>.md / uncatego
 变更：2026-09-28-knowledge-gov-ux-detail
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 每池/每域/收件箱加「查看明细」深链（?file=fr/<domain>.md / uncategorized.md，复用页面既有深链消费能力，同页软导航）；Then 行为符合本条标准描述
@@ -1514,6 +1578,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-rontend-002 rot/收件箱卡加「复制 AI 处理指令」按钮（clipboard 复制即用提示词，含分布/计数；失
 变更：2026-09-28-knowledge-gov-ux-detail
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When rot/收件箱卡加「复制 AI 处理指令」按钮（clipboard 复制即用提示词，含分布/计数；失败降级为内联展示提示词文本）；Then 行为符合本条标准描述
@@ -1523,6 +1588,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-rontend-003 binding-unresolved 卡正文补明细（锚点 id 列表）
 变更：2026-09-28-knowledge-gov-ux-detail
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When binding-unresolved 卡正文补明细（锚点 id 列表）；Then 行为符合本条标准描述
@@ -1532,6 +1598,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-rontend-004 伪域未知池（如 auto-round5）也给查看链接
 变更：2026-09-28-knowledge-gov-ux-detail
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 伪域未知池（如 auto-round5）也给查看链接；Then 行为符合本条标准描述
@@ -1541,6 +1608,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-rontend-005 四类卡都能看到具体数据入口（深链到本页对应知识文件）
 变更：2026-09-28-knowledge-gov-ux-detail
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 四类卡都能看到具体数据入口（深链到本页对应知识文件）；Then 行为符合本条标准描述
@@ -1550,6 +1618,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-rontend-006 rot
 变更：2026-09-28-knowledge-gov-ux-detail
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When rot；Then 行为符合本条标准描述
@@ -1571,6 +1640,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-rontend-007 inbox 有一键复制处理指令入口（复制成功有反馈
 变更：2026-09-28-knowledge-gov-ux-detail
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When inbox 有一键复制处理指令入口（复制成功有反馈；Then 行为符合本条标准描述
@@ -1580,6 +1650,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-rontend-008 clipboard 不可用时内联显示可手动复制）
 变更：2026-09-28-knowledge-gov-ux-detail
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When clipboard 不可用时内联显示可手动复制）；Then 行为符合本条标准描述
@@ -1589,6 +1660,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-rontend-009 分池行查看链接跳转参数正确（?file=fr/<domain>.md）
 变更：2026-09-28-knowledge-gov-ux-detail
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 分池行查看链接跳转参数正确（?file=fr/<domain>.md）；Then 行为符合本条标准描述
@@ -1598,6 +1670,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-rontend-010 既有测试同步更新全绿，tsc
 变更：2026-09-28-knowledge-gov-ux-detail
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 既有测试同步更新全绿，tsc；Then 行为符合本条标准描述
@@ -1607,6 +1680,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-rontend-011 eslint 0 错
 变更：2026-09-28-knowledge-gov-ux-detail
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When eslint 0 错；Then 行为符合本条标准描述
@@ -3474,6 +3548,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-101 工作区详情页不再渲染 Agent 状态总览卡片
 变更：2026-09-28-remove-liveness-overview-card
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 工作区详情页不再渲染 Agent 状态总览卡片；Then 行为符合本条标准描述
@@ -3495,6 +3570,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-102 agent-liveness-overview-card.tsx 组件文件删除且无残留 import
 变更：2026-09-28-remove-liveness-overview-card
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 组件 相关模块就绪；When agent-liveness-overview-card.tsx 组件文件删除且无残留 import；Then 行为符合本条标准描述
@@ -3504,6 +3580,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-103 page.test.tsx 清理对应 mock 后工作区详情页测试通过
 变更：2026-09-28-remove-liveness-overview-card
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When page.test.tsx 清理对应 mock 后工作区详情页测试通过；Then 行为符合本条标准描述
@@ -3525,6 +3602,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-frontend-104 会话列表活性链路（use-session-liveness / liveness-badge）不受影
 变更：2026-09-28-remove-liveness-overview-card
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 会话列表活性链路（use-session-liveness / liveness-badge）不受影响；Then 行为符合本条标准描述
@@ -3546,6 +3624,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-sillyspec-017 二次点击已在装配状态中的零正文轮，不再发起 run_id 单轮请求（调用计数不增长、无重复 prep
 变更：2026-09-29-jump-empty-turn-dup
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 二次点击已在装配状态中的零正文轮，不再发起 run_id 单轮请求（调用计数不增长、无重复 prepend 块）；Then 行为符合本条标准描述
@@ -3567,6 +3646,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-sillyspec-018 首次点击未加载轮的单轮直达行为不变（一次请求 + prepend + 定位高亮 + 零翻页）
 变更：2026-09-29-jump-empty-turn-dup
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 高亮 相关模块就绪；When 首次点击未加载轮的单轮直达行为不变（一次请求 + prepend + 定位高亮 + 零翻页）；Then 行为符合本条标准描述
@@ -3588,6 +3668,7 @@ created_at: 2026-09-28T13:29:15.726Z
 ## FR-auto-sillyspec-019 既有直达/回退/空日志兜底用例全绿，聚焦测试 + tsc/eslint 0 错
 变更：2026-09-29-jump-empty-turn-dup
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 既有直达/回退/空日志兜底用例全绿，聚焦测试 + tsc/eslint 0 错；Then 行为符合本条标准描述

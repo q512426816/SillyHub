@@ -1327,6 +1327,7 @@
 ## FR-lib-api-076 Change 表新增 description 可空列（alembic 迁移），reparse 与文档
 变更：change-list-description
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 迁移 相关模块就绪；When Change 表新增 description 可空列（alembic 迁移），reparse 与文档推送两条写路径同源提取不互翻；Then 行为符合本条标准描述
@@ -1369,6 +1370,7 @@
 ## FR-lib-api-078 ChangeSummary
 变更：change-list-description
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When ChangeSummary；Then 行为符合本条标准描述
@@ -1390,6 +1392,7 @@
 ## FR-lib-api-079 ChangeRead 带 description
 变更：change-list-description
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When ChangeRead 带 description；Then 行为符合本条标准描述
@@ -1399,6 +1402,7 @@
 ## FR-lib-api-080 列表搜索 ILIKE 同时命中 change_key/title/description
 变更：change-list-description
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 列表搜索 ILIKE 同时命中 change_key/title/description；Then 行为符合本条标准描述
@@ -1420,6 +1424,7 @@
 ## FR-lib-api-081 变更中心列表（桌面与移动）行内展示描述（单行截断、悬浮全文），无描述行零占位
 变更：change-list-description
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 变更中心列表（桌面与移动）行内展示描述（单行截断、悬浮全文），无描述行零占位；Then 行为符合本条标准描述
@@ -1441,6 +1446,7 @@
 ## FR-lib-api-082 相关 backend pytest 与 frontend 测试通过
 变更：change-list-description
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 相关 backend pytest 与 frontend 测试通过；Then 行为符合本条标准描述
@@ -1462,6 +1468,7 @@
 ## FR-lib-api-083 api-types 由 pnpm gen:types 再生成并随变更提交
 变更：change-list-description
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given api 相关模块就绪；When api-types 由 pnpm gen:types 再生成并随变更提交；Then 行为符合本条标准描述

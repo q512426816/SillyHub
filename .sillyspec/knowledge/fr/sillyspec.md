@@ -94,6 +94,7 @@ created_at: 2026-09-28T13:29:24.005Z
 ## FR-auto-sillyspec-006 .sillyspec/ROADMAP.md 自平台仓删除并显式 pathspec 提交
 变更：roadmap-retire
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When .sillyspec/ROADMAP.md 自平台仓删除并显式 pathspec 提交；Then 行为符合本条标准描述
@@ -103,6 +104,7 @@ created_at: 2026-09-28T13:29:24.005Z
 ## FR-auto-sillyspec-007 读侧零改动：sillyspec CLI next.js 绿地探测/status cat/lite 豁
 变更：roadmap-retire
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 读侧零改动：sillyspec CLI next.js 绿地探测/status cat/lite 豁免措辞均不动（条件化自失活）；Then 行为符合本条标准描述
@@ -112,6 +114,7 @@ created_at: 2026-09-28T13:29:24.005Z
 ## FR-auto-sillyspec-008 daemon sillyspec-manager.ts:2184 仅为注释示例非消费点
 变更：roadmap-retire
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When daemon sillyspec-manager.ts:2184 仅为注释示例非消费点；Then 行为符合本条标准描述
@@ -121,6 +124,7 @@ created_at: 2026-09-28T13:29:24.005Z
 ## FR-auto-sillyspec-009 纯 doc 删除，收口实测自动跳过代码面
 变更：roadmap-retire
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 纯 doc 删除，收口实测自动跳过代码面；Then 行为符合本条标准描述
@@ -139,6 +143,7 @@ created_at: 2026-09-28T13:29:24.005Z
 ## FR-auto-sillyspec-011 映射表先出后审：patch 缺失/多域混合的变更用条目文本关键词兜底判定，映射表人工复核后才落盘
 变更：2026-09-28-unmapped-batch-redomain
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 映射表先出后审：patch 缺失/多域混合的变更用条目文本关键词兜底判定，映射表人工复核后才落盘；Then 行为符合本条标准描述
@@ -148,6 +153,7 @@ created_at: 2026-09-28T13:29:24.005Z
 ## FR-auto-sillyspec-012 699 条全部迁入真域，计数守恒（迁移前后条目总数一致，无丢失无重复）
 变更：2026-09-28-unmapped-batch-redomain
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 迁移 相关模块就绪；When 699 条全部迁入真域，计数守恒（迁移前后条目总数一致，无丢失无重复）；Then 行为符合本条标准描述
@@ -157,6 +163,7 @@ created_at: 2026-09-28T13:29:24.005Z
 ## FR-auto-sillyspec-013 fr/unmapped.md 清空删除，INDEX 路由行同步
 变更：2026-09-28-unmapped-batch-redomain
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When fr/unmapped.md 清空删除，INDEX 路由行同步；Then 行为符合本条标准描述
@@ -166,6 +173,7 @@ created_at: 2026-09-28T13:29:24.005Z
 ## FR-auto-sillyspec-014 sillyspec knowledge validate 通过
 变更：2026-09-28-unmapped-batch-redomain
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When sillyspec knowledge validate 通过；Then 行为符合本条标准描述
@@ -175,6 +183,7 @@ created_at: 2026-09-28T13:29:24.005Z
 ## FR-auto-sillyspec-015 digest 伪域归零（unmapped 池 0）
 变更：2026-09-28-unmapped-batch-redomain
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When digest 伪域归零（unmapped 池 0）；Then 行为符合本条标准描述

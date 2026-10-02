@@ -631,6 +631,7 @@
 ## FR-lib-changes-036 默认 44px 窄轨：紧凑刻度+当前轮位置指示+顶部当前轮号，aria-label 保留（第N轮可达
 变更：2026-09-28-turn-nav-hover-flyout
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 默认 44px 窄轨：紧凑刻度+当前轮位置指示+顶部当前轮号，aria-label 保留（第N轮可达性）；Then 行为符合本条标准描述
@@ -652,6 +653,7 @@
 ## FR-lib-changes-037 悬停滑出完整行式列表浮层（覆盖聊天区不挤压布局，~260px），移开延迟收起
 变更：2026-09-28-turn-nav-hover-flyout
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 悬停滑出完整行式列表浮层（覆盖聊天区不挤压布局，~260px），移开延迟收起；Then 行为符合本条标准描述
@@ -661,6 +663,7 @@
 ## FR-lib-changes-038 点击窄轨可 pin 锁定，点外部收起
 变更：2026-09-28-turn-nav-hover-flyout
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 点击窄轨可 pin 锁定，点外部收起；Then 行为符合本条标准描述
@@ -670,6 +673,7 @@
 ## FR-lib-changes-039 触屏 hover:none 时点按展开收起
 变更：2026-09-28-turn-nav-hover-flyout
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 触屏 hover:none 时点按展开收起；Then 行为符合本条标准描述
@@ -691,6 +695,7 @@
 ## FR-lib-changes-040 浮层内保留全部既有功能：轮号+大纲摘要+时间、当前轮高亮滚动联动、点击跳转（含未加载轮 run_id
 变更：2026-09-28-turn-nav-hover-flyout
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 高亮 相关模块就绪；When 浮层内保留全部既有功能：轮号+大纲摘要+时间、当前轮高亮滚动联动、点击跳转（含未加载轮 run_id 直达）；Then 行为符合本条标准描述
@@ -700,6 +705,7 @@
 ## FR-lib-changes-041 既有测试改断言不改意图全绿，tsc
 变更：2026-09-28-turn-nav-hover-flyout
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 既有测试改断言不改意图全绿，tsc；Then 行为符合本条标准描述
@@ -709,6 +715,7 @@
 ## FR-lib-changes-042 eslint 零新增，主题 token 零硬编码
 变更：2026-09-28-turn-nav-hover-flyout
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When eslint 零新增，主题 token 零硬编码；Then 行为符合本条标准描述

@@ -805,6 +805,7 @@
 ## FR-daemon-040 出身判定:current_stage 为 archived 或 location 为 archive
 变更：2026-09-26-thin-badge-survives-archive
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 出身判定:current_stage 为 archived 或 location 为 archive,且 change_type 为 quick,且 creat；Then 行为符合本条标准描述
@@ -826,6 +827,7 @@
 ## FR-daemon-041 2026-09-25 前建的历史 quick 变更与普通归档变更仍只显示已归档徽章,行为零回归
 变更：2026-09-26-thin-badge-survives-archive
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 2026-09-25 前建的历史 quick 变更与普通归档变更仍只显示已归档徽章,行为零回归；Then 行为符合本条标准描述
@@ -847,6 +849,7 @@
 ## FR-daemon-042 页面级测试补双徽章用例与旧 quick 不误标用例,既有用例不回归
 变更：2026-09-26-thin-badge-survives-archive
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 页面级测试补双徽章用例与旧 quick 不误标用例,既有用例不回归；Then 行为符合本条标准描述
@@ -868,6 +871,7 @@
 ## FR-daemon-043 frontend tsc 无错误
 变更：2026-09-26-thin-badge-survives-archive
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When frontend tsc 无错误；Then 行为符合本条标准描述
@@ -961,6 +965,7 @@
 ## FR-daemon-048 排队命令等待升级链有总预算上限（5 分钟），超预算后当前命令记 failed 结果槽（含可重试提示的
 变更：2026-09-27-daemon-queue-stop-gaps
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 上限 相关模块就绪；When 排队命令等待升级链有总预算上限（5 分钟），超预算后当前命令记 failed 结果槽（含可重试提示的错误文案）并放行队列后续命令，不再永久排队；Then 行为符合本条标准描述
@@ -982,6 +987,7 @@
 ## FR-daemon-049 升级链在预算内结束的既有行为不变：命令照常执行、无 failed 槽
 变更：2026-09-27-daemon-queue-stop-gaps
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 升级链在预算内结束的既有行为不变：命令照常执行、无 failed 槽；Then 行为符合本条标准描述
@@ -1003,6 +1009,7 @@
 ## FR-daemon-050 daemon 停机（_stopInternal）停止并置空 hits 周期上行器实例，重复停机不炸
 变更：2026-09-27-daemon-queue-stop-gaps
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When daemon 停机（_stopInternal）停止并置空 hits 周期上行器实例，重复停机不炸；Then 行为符合本条标准描述
@@ -1024,6 +1031,7 @@
 ## FR-daemon-051 新增测试：超预算记 failed 槽且队列放行（fake timers 推进总预算）、预算内结束照常
 变更：2026-09-27-daemon-queue-stop-gaps
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 / 幂等 相关模块就绪；When 新增测试：超预算记 failed 槽且队列放行（fake timers 推进总预算）、预算内结束照常执行、_stopInternal 清周期器与幂等；Then 行为符合本条标准描述
@@ -1045,6 +1053,7 @@
 ## FR-daemon-052 既有聚焦测试全绿 + tsc 0 错
 变更：2026-09-27-daemon-queue-stop-gaps
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 既有聚焦测试全绿 + tsc 0 错；Then 行为符合本条标准描述
@@ -1066,6 +1075,7 @@
 ## FR-daemon-053 KnowledgeGovernanceHandler digest/action 双点过 asser
 变更：2026-09-28-audit-risk-fixes
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When KnowledgeGovernanceHandler digest/action 双点过 assertWithinAllowedRoots（daemon.ts；Then 行为符合本条标准描述
@@ -1087,6 +1097,7 @@
 ## FR-daemon-054 knowledge root 黑名单收窄到异常值字符集，Windows 合法目录字符 & $ ' `
 变更：2026-09-28-audit-risk-fixes
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When knowledge root 黑名单收窄到异常值字符集，Windows 合法目录字符 & $ ' `；Then 行为符合本条标准描述
@@ -1108,6 +1119,7 @@
 ## FR-daemon-055 不再误拦
 变更：2026-09-28-audit-risk-fixes
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 不再误拦；Then 行为符合本条标准描述
@@ -1117,6 +1129,7 @@
 ## FR-daemon-056 mobile variant 下 detailColumnVisible 恒 false，local
 变更：2026-09-28-audit-risk-fixes
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When mobile variant 下 detailColumnVisible 恒 false，localStorage 跨视口不再双挂 TaskExecutionP；Then 行为符合本条标准描述
@@ -1138,6 +1151,7 @@
 ## FR-daemon-057 SessionUsageBar
 变更：2026-09-28-audit-risk-fixes
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When SessionUsageBar；Then 行为符合本条标准描述
@@ -1159,6 +1173,7 @@
 ## FR-daemon-058 mobile-change-detail thin
 变更：2026-09-28-audit-risk-fixes
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When mobile-change-detail thin；Then 行为符合本条标准描述
@@ -1180,6 +1195,7 @@
 ## FR-daemon-059 quick 卡判定对齐 desktop isThinLineageChange（归档 thin 与
 变更：2026-09-28-audit-risk-fixes
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When quick 卡判定对齐 desktop isThinLineageChange（归档 thin 与 change_type=quick 落轻量卡）；Then 行为符合本条标准描述
@@ -1201,6 +1217,7 @@
 ## FR-daemon-060 变更列表删除按钮与标题链接 stopPropagation，点击不再触发整行 location.as
 变更：2026-09-28-audit-risk-fixes
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 变更列表删除按钮与标题链接 stopPropagation，点击不再触发整行 location.assign；Then 行为符合本条标准描述
@@ -1243,6 +1260,7 @@
 ## FR-daemon-062 _safe_module_doc 拦 NUL 字节，含 \0 的 doc 不读盘整条丢弃
 变更：2026-09-28-audit-risk-fixes
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When _safe_module_doc 拦 NUL 字节，含 \0 的 doc 不读盘整条丢弃；Then 行为符合本条标准描述
@@ -1264,6 +1282,7 @@
 ## FR-daemon-063 聚焦测试全绿（daemon handler / session 变体 / mobile 详情 / c
 变更：2026-09-28-audit-risk-fixes
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 聚焦测试全绿（daemon handler / session 变体 / mobile 详情 / changes 页 / test_governance / t；Then 行为符合本条标准描述
@@ -1481,6 +1500,7 @@
 ## FR-auto-sillyhub-daemon-012 frontend-ci 4 用例稳定失败（分身会话浮层找不到关闭按钮 ×2 / getProvide
 变更：2026-09-28-ci-failures-sweep
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When frontend-ci 4 用例稳定失败（分身会话浮层找不到关闭按钮 ×2 / getProviderCaps 14vs13 键 / ChangesOvervi；Then 行为符合本条标准描述
@@ -1502,6 +1522,7 @@
 ## FR-auto-sillyhub-daemon-013 daemon-ci 12 用例 60s 超时（batch runLease spawn 集成）+ r
 变更：2026-09-28-ci-failures-sweep
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When daemon-ci 12 用例 60s 超时（batch runLease spawn 集成）+ runtime-handler 注册器多了 knowledge；Then 行为符合本条标准描述
@@ -1523,6 +1544,7 @@
 ## FR-auto-sillyhub-daemon-014 e2e N2/N3 侧边栏导航 toBeVisible 元素找不到（含重试均失败）
 变更：2026-09-28-ci-failures-sweep
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given e2e 相关模块就绪；When e2e N2/N3 侧边栏导航 toBeVisible 元素找不到（含重试均失败）；Then 行为符合本条标准描述
@@ -1544,6 +1566,7 @@
 ## FR-auto-sillyhub-daemon-015 turn-control-attachment-atomic mtimeMs 0.001ms 浮点差
 变更：2026-09-28-ci-failures-sweep
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When turn-control-attachment-atomic mtimeMs 0.001ms 浮点差异为 flaky（09-27 过 09-28 挂）；Then 行为符合本条标准描述
@@ -1565,6 +1588,7 @@
 ## FR-auto-sillyhub-daemon-016 上列 backend/frontend/daemon/e2e 失败用例根因定位并修复，本地仅跑相关测
 变更：2026-09-28-ci-failures-sweep
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given e2e / 测试 相关模块就绪；When 上列 backend/frontend/daemon/e2e 失败用例根因定位并修复，本地仅跑相关测试通过；Then 行为符合本条标准描述
@@ -1595,6 +1619,7 @@
 ## FR-auto-sillyhub-daemon-018 平台差异修测试断言并注明依据
 变更：2026-09-28-ci-failures-sweep
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 平台差异修测试断言并注明依据；Then 行为符合本条标准描述
@@ -1616,6 +1641,7 @@
 ## FR-auto-sillyhub-daemon-019 flaky 用例（mtime 精度）改为精度容差断言，注明文件系统精度依据
 变更：2026-09-28-ci-failures-sweep
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When flaky 用例（mtime 精度）改为精度容差断言，注明文件系统精度依据；Then 行为符合本条标准描述
@@ -1637,6 +1663,7 @@
 ## FR-auto-sillyhub-daemon-020 推送后四 workflow CI 转绿（或仅剩与本次无关的新失败并说明）
 变更：2026-09-28-ci-failures-sweep
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 推送后四 workflow CI 转绿（或仅剩与本次无关的新失败并说明）；Then 行为符合本条标准描述

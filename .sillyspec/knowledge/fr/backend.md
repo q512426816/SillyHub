@@ -966,6 +966,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-059 批量探测多工作区时 git_probe 并发执行（gather），总耗时逼近最慢一个而非逐个累加
 变更：2026-09-26-probe-concurrent-rpc
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 批量探测多工作区时 git_probe 并发执行（gather），总耗时逼近最慢一个而非逐个累加；Then 行为符合本条标准描述
@@ -987,6 +988,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-060 probe_workspace_git_mode 与 git_remote_url 的 RPC 预算
 变更：2026-09-26-probe-concurrent-rpc
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When probe_workspace_git_mode 与 git_remote_url 的 RPC 预算收紧为 3 秒，超时仍归 unknown；Then 行为符合本条标准描述
@@ -1008,6 +1010,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-061 None（三态语义与 fail-safe 不变）
 变更：2026-09-26-probe-concurrent-rpc
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When None（三态语义与 fail-safe 不变）；Then 行为符合本条标准描述
@@ -1029,6 +1032,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-062 probe 端点 git_remote_url 的逐工作区读取不再串行追加耗时（未识别的并发预取）
 变更：2026-09-26-probe-concurrent-rpc
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 端点 相关模块就绪；When probe 端点 git_remote_url 的逐工作区读取不再串行追加耗时（未识别的并发预取）；Then 行为符合本条标准描述
@@ -1050,6 +1054,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-063 既有 test_probe_endpoint 全量用例回归全绿，新增并发行为用例（barrier 法
 变更：2026-09-26-probe-concurrent-rpc
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 既有 test_probe_endpoint 全量用例回归全绿，新增并发行为用例（barrier 法证明并发）与超时预算透传用例；Then 行为符合本条标准描述
@@ -1071,6 +1076,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-064 不改任何响应字段口径与既有日志事件语义
 变更：2026-09-26-probe-concurrent-rpc
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 不改任何响应字段口径与既有日志事件语义；Then 行为符合本条标准描述
@@ -1113,6 +1119,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-066 040000 的建表 DDL 改写为与当前 ORM（platform_sync/model.py P
 变更：2026-09-26-migration-chain-dedupe
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 040000 的建表 DDL 改写为与当前 ORM（platform_sync/model.py PlatformChangeEventORM）完全一致的结构（；Then 行为符合本条标准描述
@@ -1176,6 +1183,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-069 tests/test_migrations_graph.py 守护通过（单头、引用闭合）
 变更：2026-09-26-migration-chain-dedupe
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When tests/test_migrations_graph.py 守护通过（单头、引用闭合）；Then 行为符合本条标准描述
@@ -1197,6 +1205,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-070 新增矫正迁移的结构断言与链测试（仿 test_archive_tombstone_repair_mi
 变更：2026-09-26-migration-chain-dedupe
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 迁移 / 测试 相关模块就绪；When 新增矫正迁移的结构断言与链测试（仿 test_archive_tombstone_repair_migration.py 先例）；Then 行为符合本条标准描述
@@ -1218,6 +1227,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-071 本地与远程 dogfood
 变更：2026-09-26-migration-chain-dedupe
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 本地与远程 dogfood；Then 行为符合本条标准描述
@@ -1227,6 +1237,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-072 生产 DB 经 stamp+upgrade head 后 alembic 版本落新 head 且后端
 变更：2026-09-26-migration-chain-dedupe
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 生产 DB 经 stamp+upgrade head 后 alembic 版本落新 head 且后端正常启动（运维步骤在交付汇报中列明）；Then 行为符合本条标准描述
@@ -1236,6 +1247,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-073 不改 ORM、不改任何业务代码与接口行为
 变更：2026-09-26-migration-chain-dedupe
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 接口 相关模块就绪；When 不改 ORM、不改任何业务代码与接口行为；Then 行为符合本条标准描述
@@ -1257,6 +1269,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-074 任务锚窗口收窄：仅本变更 commit 事件的提交参与锚匹配（titles 映射仍可用全局 50 窗
 变更：2026-09-28-timeline-anchor-scope
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 任务锚窗口收窄：仅本变更 commit 事件的提交参与锚匹配（titles 映射仍可用全局 50 窗口取标题——那是展示用途与锚定无关）；Then 行为符合本条标准描述
@@ -1278,6 +1291,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-075 全局窗口无本变更提交时锚为 None（显示无锚而非错锚）
 变更：2026-09-28-timeline-anchor-scope
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 全局窗口无本变更提交时锚为 None（显示无锚而非错锚）；Then 行为符合本条标准描述
@@ -1299,6 +1313,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-076 前端事件行图标表补 gate-run、config-change、fake-check-cleare
 变更：2026-09-28-timeline-anchor-scope
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 前端 相关模块就绪；When 前端事件行图标表补 gate-run、config-change、fake-check-cleared 三个新事件 kind（watcher-signal-wi；Then 行为符合本条标准描述
@@ -1320,6 +1335,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-077 后端测试：锚定限本变更事件窗口（他变更提交含同号 token 不误锚）、无窗口提交时 None
 变更：2026-09-28-timeline-anchor-scope
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 后端测试：锚定限本变更事件窗口（他变更提交含同号 token 不误锚）、无窗口提交时 None；Then 行为符合本条标准描述
@@ -1341,6 +1357,7 @@ created_at: 2026-09-28T13:29:09.736Z
 ## FR-auto-backend-078 前端卡片测试补三个新 kind 图标渲染
 变更：2026-09-28-timeline-anchor-scope
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 前端 / 测试 相关模块就绪；When 前端卡片测试补三个新 kind 图标渲染；Then 行为符合本条标准描述

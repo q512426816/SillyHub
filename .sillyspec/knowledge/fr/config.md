@@ -12,6 +12,7 @@ created_at: 2026-10-01T11:33:26.735Z
 ## FR-config-001 reset_tool_report_session 会话查询补 deleted_at IS NULL
 变更：2026-10-01-review-followup-reset-guard-machineid
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When reset_tool_report_session 会话查询补 deleted_at IS NULL 守卫，软删会话重置返回 404，与 takeover 同款；Then 行为符合本条标准描述
@@ -33,6 +34,7 @@ created_at: 2026-10-01T11:33:26.735Z
 ## FR-config-002 readOrCreateMachineId 改独占创建（wx）+ 写冲突回读胜者 + 非 uuid
 变更：2026-10-01-review-followup-reset-guard-machineid
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When readOrCreateMachineId 改独占创建（wx）+ 写冲突回读胜者 + 非 uuid 形损坏覆写自愈，注释如实描述不再宣称原子落盘，附单测；Then 行为符合本条标准描述
@@ -54,6 +56,7 @@ created_at: 2026-10-01T11:33:26.735Z
 ## FR-config-003 仅跑触达文件的相关测试（backend daemon reset 用例 + sillyhub-dae
 变更：2026-10-01-review-followup-reset-guard-machineid
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 仅跑触达文件的相关测试（backend daemon reset 用例 + sillyhub-daemon config-machine-id 用例），全部通过；Then 行为符合本条标准描述

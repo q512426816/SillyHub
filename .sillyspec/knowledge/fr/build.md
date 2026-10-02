@@ -425,6 +425,7 @@
 ## FR-build-029 _read_touched_modules 对含 .. 段或绝对路径的 doc 值不读盘：模块名回退
 变更：2026-09-27-audit-followup-hardening
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When _read_touched_modules 对含 .. 段或绝对路径的 doc 值不读盘：模块名回退 id、doc 字段不外发越界路径（不放 chip），正常相；Then 行为符合本条标准描述
@@ -446,6 +447,7 @@
 ## FR-build-030 docker-compose frontend 运行时 NEXT_PUBLIC_COMMIT_SHA
 变更：2026-09-27-audit-followup-hardening
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When docker-compose frontend 运行时 NEXT_PUBLIC_COMMIT_SHA 覆盖行删除并留同 backend 口径的注释说明；Then 行为符合本条标准描述
@@ -455,6 +457,7 @@
 ## FR-build-031 gen-api-types 守卫提示的换行为真实换行（多文件列表逐行显示）
 变更：2026-09-27-audit-followup-hardening
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given api 相关模块就绪；When gen-api-types 守卫提示的换行为真实换行（多文件列表逐行显示）；Then 行为符合本条标准描述
@@ -464,6 +467,7 @@
 ## FR-build-032 234000 迁移 docstring 补 stranded revision 人工 stamp 运
 变更：2026-09-27-audit-followup-hardening
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 迁移 相关模块就绪；When 234000 迁移 docstring 补 stranded revision 人工 stamp 运维注记；Then 行为符合本条标准描述
@@ -485,6 +489,7 @@
 ## FR-build-033 test_assets 新增越界 doc 用例（..
 变更：2026-09-27-audit-followup-hardening
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When test_assets 新增越界 doc 用例（..；Then 行为符合本条标准描述
@@ -506,6 +511,7 @@
 ## FR-build-034 与绝对路径两形态）绿，既有聚焦测试绿
 变更：2026-09-27-audit-followup-hardening
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 与绝对路径两形态）绿，既有聚焦测试绿；Then 行为符合本条标准描述
@@ -527,6 +533,7 @@
 ## FR-build-035 变更中心与工作区列表行 hover 为实色 muted 背景+transition-colors 1
 变更：2026-09-27-hover-polish
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 变更中心与工作区列表行 hover 为实色 muted 背景+transition-colors 100ms 级过渡，无紫色边框；Then 行为符合本条标准描述
@@ -536,6 +543,7 @@
 ## FR-build-036 标题链接 hover 下划线保持
 变更：2026-09-27-hover-polish
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 标题链接 hover 下划线保持；Then 行为符合本条标准描述
@@ -545,6 +553,7 @@
 ## FR-build-037 hover 操作浮现过渡平滑
 变更：2026-09-27-hover-polish
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When hover 操作浮现过渡平滑；Then 行为符合本条标准描述
@@ -554,6 +563,7 @@
 ## FR-build-038 相关测试全绿 + tsc 0 + 部署后浏览器 hover 态截图核对
 变更：2026-09-27-hover-polish
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 相关测试全绿 + tsc 0 + 部署后浏览器 hover 态截图核对；Then 行为符合本条标准描述
@@ -563,6 +573,7 @@
 ## FR-build-039 pnpm prototype:build 一键产出全部原型视图的自包含 HTML（零外部引用、离线双
 变更：2026-09-27-prototype-pipeline
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When pnpm prototype:build 一键产出全部原型视图的自包含 HTML（零外部引用、离线双击可用、内嵌三主题切换）；Then 行为符合本条标准描述
@@ -572,6 +583,7 @@
 ## FR-build-040 页面类原型：视图源码（tsx，import 生产 primer 组件与 token）入仓并通过 ts
 变更：2026-09-27-prototype-pipeline
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 组件 相关模块就绪；When 页面类原型：视图源码（tsx，import 生产 primer 组件与 token）入仓并通过 tsc 与 eslint；Then 行为符合本条标准描述
@@ -644,6 +656,7 @@
 ## FR-build-044 既有业务页面与组件零改动（仅新增原型管线文件、package.json 脚本行、.gitignore
 变更：2026-09-27-prototype-pipeline
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 组件 相关模块就绪；When 既有业务页面与组件零改动（仅新增原型管线文件、package.json 脚本行、.gitignore）；Then 行为符合本条标准描述
@@ -653,6 +666,7 @@
 ## FR-build-045 编译产物入仓且与源码可对账（重编译后 git diff 为空）
 变更：2026-09-27-prototype-pipeline
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 编译产物入仓且与源码可对账（重编译后 git diff 为空）；Then 行为符合本条标准描述

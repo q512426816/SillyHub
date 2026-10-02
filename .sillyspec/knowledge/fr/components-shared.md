@@ -328,6 +328,7 @@
 ## FR-components-shared-023 _infer_affected_components 在 module-impact.md 与 ta
 变更：2026-09-27-thin-affected-modules-from-patch-manifest
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When _infer_affected_components 在 module-impact.md 与 tasks 路径两来源之外增加 change-patch.jso；Then 行为符合本条标准描述
@@ -349,6 +350,7 @@
 ## FR-components-shared-024 files 中 .sillyspec/changes/ 前缀的变更治理件不参与匹配（不产生伪命中），
 变更：2026-09-27-thin-affected-modules-from-patch-manifest
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When files 中 .sillyspec/changes/ 前缀的变更治理件不参与匹配（不产生伪命中），其余代码路径直接参与前缀匹配；Then 行为符合本条标准描述
@@ -370,6 +372,7 @@
 ## FR-components-shared-025 change-patch.json 缺失/JSON 损坏/files 非 list 时静默跳过不抛错
 变更：2026-09-27-thin-affected-modules-from-patch-manifest
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When change-patch.json 缺失/JSON 损坏/files 非 list 时静默跳过不抛错，module-impact.md 优先级与既有两来源行为零；Then 行为符合本条标准描述
@@ -391,6 +394,7 @@
 ## FR-components-shared-026 新增 pytest 用例覆盖：files 推断命中、治理件滤除、畸形件防御、module-impac
 变更：2026-09-27-thin-affected-modules-from-patch-manifest
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 新增 pytest 用例覆盖：files 推断命中、治理件滤除、畸形件防御、module-impact.md 优先回归，全部通过；Then 行为符合本条标准描述
@@ -412,6 +416,7 @@
 ## FR-components-shared-027 既有 change 模块测试（test_parser.py 全量）零回归
 变更：2026-09-27-thin-affected-modules-from-patch-manifest
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 既有 change 模块测试（test_parser.py 全量）零回归；Then 行为符合本条标准描述
@@ -505,6 +510,7 @@
 ## FR-components-shared-036 变更中心列表页页头不再渲染 multi-agent-platform / 变更中心 页内面包屑
 变更：2026-09-30-breadcrumb-dedupe-zh
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 变更中心列表页页头不再渲染 multi-agent-platform / 变更中心 页内面包屑；Then 行为符合本条标准描述
@@ -526,6 +532,7 @@
 ## FR-components-shared-037 任务详情页不再渲染 变更中心/changeKey/任务看板/task_key 页内面包屑
 变更：2026-09-30-breadcrumb-dedupe-zh
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 任务详情页不再渲染 变更中心/changeKey/任务看板/task_key 页内面包屑；Then 行为符合本条标准描述
@@ -556,6 +563,7 @@
 ## FR-components-shared-039 段名中文标签与侧边栏菜单/工作区页签既有命名一致，不新造叫法
 变更：2026-09-30-breadcrumb-dedupe-zh
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 段名中文标签与侧边栏菜单/工作区页签既有命名一致，不新造叫法；Then 行为符合本条标准描述
@@ -577,6 +585,7 @@
 ## FR-components-shared-040 受影响测试通过（仅跑相关测试，不跑全量）
 变更：2026-09-30-breadcrumb-dedupe-zh
 状态：active
+骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 测试 相关模块就绪；When 受影响测试通过（仅跑相关测试，不跑全量）；Then 行为符合本条标准描述
