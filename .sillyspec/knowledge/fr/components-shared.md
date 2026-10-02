@@ -501,3 +501,96 @@
 - 场景：默认场景 — Given 本变更 diff 与测试；When 审查与运行；Then SSE 实时流/steering 三态/深链 ?session=/草稿/队列/触顶锚定/content-visibility 等既有行为零回归；旧会话数据（无大
 全文：.sillyspec/changes/archive/2026-09-27-session-fast-replay/requirements.md#FR-08
 最近确认：a2bdb21f8a1936075294b826d6cd225a84cb31c1
+
+## FR-components-shared-036 变更中心列表页页头不再渲染 multi-agent-platform / 变更中心 页内面包屑
+变更：2026-09-30-breadcrumb-dedupe-zh
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 变更中心列表页页头不再渲染 multi-agent-platform / 变更中心 页内面包屑；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-30-breadcrumb-dedupe-zh/requirements.md#FR-01
+最近确认：6a3bdf9684653bcbe9eae4eaf3b66dd76448d2eb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-30-breadcrumb-dedupe-zh:flow:FR-01
+  tests: frontend/src/app/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-30-breadcrumb-dedupe-zh
+  status: active
+
+## FR-components-shared-037 任务详情页不再渲染 变更中心/changeKey/任务看板/task_key 页内面包屑
+变更：2026-09-30-breadcrumb-dedupe-zh
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 任务详情页不再渲染 变更中心/changeKey/任务看板/task_key 页内面包屑；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-30-breadcrumb-dedupe-zh/requirements.md#FR-02
+最近确认：6a3bdf9684653bcbe9eae4eaf3b66dd76448d2eb
+
+## FR-components-shared-038 顶栏面包屑路由段名全部映射为中文（changes→变更中心 等，MCP/Git/API 等专业术语除外）
+变更：2026-09-30-breadcrumb-dedupe-zh
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given api 相关模块就绪；When 顶栏面包屑路由段名全部映射为中文（changes；Then 变更中心 等，MCP/Git/API 等专业术语除外）
+全文：.sillyspec/changes/archive/2026-09-30-breadcrumb-dedupe-zh/requirements.md#FR-03
+最近确认：6a3bdf9684653bcbe9eae4eaf3b66dd76448d2eb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-30-breadcrumb-dedupe-zh:flow:FR-03
+  tests: frontend/src/components/__tests__/top-bar.test.tsx「buildBreadcrumbs 段名中文化」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-30-breadcrumb-dedupe-zh
+  status: active
+
+## FR-components-shared-039 段名中文标签与侧边栏菜单/工作区页签既有命名一致，不新造叫法
+变更：2026-09-30-breadcrumb-dedupe-zh
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 段名中文标签与侧边栏菜单/工作区页签既有命名一致，不新造叫法；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-30-breadcrumb-dedupe-zh/requirements.md#FR-04
+最近确认：6a3bdf9684653bcbe9eae4eaf3b66dd76448d2eb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-30-breadcrumb-dedupe-zh:flow:FR-04
+  tests: frontend/src/components/__tests__/top-bar.test.tsx「buildBreadcrumbs 段名中文化」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-30-breadcrumb-dedupe-zh
+  status: active
+
+## FR-components-shared-040 受影响测试通过（仅跑相关测试，不跑全量）
+变更：2026-09-30-breadcrumb-dedupe-zh
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 受影响测试通过（仅跑相关测试，不跑全量）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-30-breadcrumb-dedupe-zh/requirements.md#FR-05
+最近确认：6a3bdf9684653bcbe9eae4eaf3b66dd76448d2eb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-30-breadcrumb-dedupe-zh:flow:FR-05
+  tests: frontend/src/app/page.test.tsx | frontend/src/components/__tests__/top-bar.test.tsx | frontend/src/components/primer/__tests__/primer-structures.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-30-breadcrumb-dedupe-zh
+  status: active
