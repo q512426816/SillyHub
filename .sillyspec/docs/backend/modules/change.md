@@ -71,7 +71,13 @@ quicklog 双源合并查询（平台上行条目 × 文件条目）也在本模�
     caliber-fix：摄取侧输入口径归一为非缓存输入（input−cache_read，ZCode
     总输入口径 113/113 实证）；本地段参与时间三元组（MIN/MAX first/last_seen
     上报观察时间 + 跨度累加耗时）与请求次数（SUM(invocations) CLI 调用计数
-    并桶，DTO 恒 aware）；轮次仍无来源恒 0。
+    并桶，DTO 恒 aware）；轮次仍无来源恒 0。2026-10-03-local-usage-segment-
+    attribution：本地段改**双路径**——水位差分（``platform_agent_log_usage_
+    marks`` LEAD 窗口取下一水位、首水位隐式起点 0 锚定 D-004、末水位接
+    entry 当前快照、NOT EXISTS agent_runs 防双计谓词沿用）∪ 存量整行（无
+    水位 entry 互斥走既有路径）——同日志文件连续干多变更各按时段归属；
+    「关联会话卡」=最后 ctx 绑定照旧、「用量卡」=实际消耗分布（两卡可不同，
+    R-08 声明）；summarize_changes 增 workspace 锚参。
   - `ChangeService`：list/get/update_progress/approve/reject/
     transition(_with_dispatch)/submit_feedback/check_archive_gate/reparse(scope)/
     complete_stage + review 四方法 + `_bind_change_to_session` / `_project_current_stage` /

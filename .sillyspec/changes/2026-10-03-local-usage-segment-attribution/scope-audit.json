@@ -1,0 +1,84 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "19f8e96591b2bb3e3f0f2b79c062ab523fef159f",
+  "totals": {
+    "files": 8,
+    "additions": 904,
+    "deletions": 15
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/change/service.py",
+      "additions": 5,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/change/tests/conftest.py",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_usage_stats.py",
+      "additions": 311,
+      "deletions": 5,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/change/usage_service.py",
+      "additions": 237,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/model.py",
+      "additions": 58,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/service.py",
+      "additions": 92,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_agent_log_push.py",
+      "additions": 109,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/migrations/versions/20261003020000_add_agent_log_usage_marks.py",
+      "additions": 89,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "ce6001a7ab86e08ea3d5421e3b15cc6feea35e0aa771567a85fd62984b5c007a",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-03T10:53:52.055Z"
+}

@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-03-local-usage-segment-attribution",
+  "generatedAt": "2026-10-03T11:01:20.709Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-03-local-usage-segment-attribution",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-03-local-usage-segment-attribution",
+      "metrics": {
+        "tasks": 4,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-03-local-usage-segment-attribution",
+      "metrics": {
+        "backendEndpoints": 2944,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-03-local-usage-segment-attribution",
+      "metrics": {
+        "deletions": 5,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-03-local-usage-segment-attribution",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-03-local-usage-segment-attribution",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-03-local-usage-segment-attribution",
+      "metrics": {
+        "checkedFiles": 5,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "生产库执行 alembic upgrade head（migration 20261003020000 水位表）+ 部署后跨变更连续工作实机验证（一个 CLI 会话连干两变更，两变更各得各时段用量）",
+        "condition": "部署时随序执行迁移；验证步骤：连续在两个变更目录跑命令后分别看两变更用量卡",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "worktree 环境项 test_list_files",
+        "condition": "与本变更无关（基线对照三轮证实），CI 兜底",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 2,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/agent-logs",
+        "rowIdx": 1
+      }
+    ],
+    "declared": 0,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/api/agent-logs",
+        "rowIdx": 1
+      }
+    ]
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/change/tests/conftest.py",
+      "backend/app/modules/platform_sync/tests/test_agent_log_push.py",
+      "backend/app/modules/change/tests/test_usage_stats.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

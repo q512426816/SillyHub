@@ -1,0 +1,1126 @@
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index 9b11bf253..cb5c52338 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -2143,7 +2143,11 @@ class ChangeService:
+         # task-03：usage 批量摘要只收集非 deleted 行（deleted 行 usage 恒 None，
+         # 不参与聚合）；空列表 / 全 deleted → 空集合零查询。
+         usage_ids = [c.id for c in changes if c.location != "deleted"]
+-        usage_map = await ChangeUsageQueryService(self._session).summarize_changes(usage_ids)
++        # segment-attribution：列表页变更同 workspace（路由按 workspace 查询），
++        # 差分路径的 workspace 锚定取首页行。
++        usage_map = await ChangeUsageQueryService(self._session).summarize_changes(
++            changes[0].workspace_id, usage_ids
++        )
+         summaries: list[ChangeSummary] = []
+         for c in changes:
+             summary = ChangeSummary.model_validate(c)
+diff --git a/backend/app/modules/change/tests/conftest.py b/backend/app/modules/change/tests/conftest.py
+index b89b641dc..8fbb373ee 100644
+--- a/backend/app/modules/change/tests/conftest.py
++++ b/backend/app/modules/change/tests/conftest.py
+@@ -35,5 +35,8 @@ async def ensure_platform_change_progress_table(db_engine: Any) -> None:
+             tables=[
+                 _ps_model.PlatformChangeProgressORM.__table__,
+                 _ps_token_model.PlatformSyncTokenORM.__table__,
++                # 2026-10-03-local-usage-segment-attribution task-03：本地段整行
++                # 查询带 NOT EXISTS marks 互斥谓词——库缺表会「table not found」。
++                _ps_model.UsageMarkORM.__table__,
+             ],
+         )
+diff --git a/backend/app/modules/change/tests/test_usage_stats.py b/backend/app/modules/change/tests/test_usage_stats.py
+index bb6fe471c..7dd063d45 100644
+--- a/backend/app/modules/change/tests/test_usage_stats.py
++++ b/backend/app/modules/change/tests/test_usage_stats.py
+@@ -564,7 +564,7 @@ class TestChangeAggregationSemantics:
+         }
+ 
+         # 批量摘要锚点（(锚点 change_id, run) UNION 去重）同样只计一次。
+-        summary_map = await svc.summarize_changes([change.id])
++        summary_map = await svc.summarize_changes(ws.id, [change.id])
+         assert summary_map[change.id].totals.model_dump() == {
+             "input_tokens": 150,
+             "output_tokens": 60,
+@@ -610,7 +610,7 @@ class TestChangeAggregationSemantics:
+             assert [item.model for item in usage.by_model] == ["shared-model"]
+ 
+         # 批量摘要一次查询两变更各得一份完整摘要。
+-        summary_map = await svc.summarize_changes([change_a.id, change_b.id])
++        summary_map = await svc.summarize_changes(ws.id, [change_a.id, change_b.id])
+         assert set(summary_map) == {change_a.id, change_b.id}
+         assert summary_map[change_a.id].totals == usage_a.totals
+         assert summary_map[change_b.id].totals == usage_b.totals
+@@ -751,7 +751,7 @@ class TestChangeAggregationSemantics:
+             "num_turns": 2,
+         }
+ 
+-        summary_map = await svc.summarize_changes([change.id])
++        summary_map = await svc.summarize_changes(ws.id, [change.id])
+         assert summary_map[change.id].totals.model_dump() == {
+             "input_tokens": 130,
+             "output_tokens": 60,
+@@ -1399,7 +1399,7 @@ class TestLocalCliSegment:
+         await self._make_log_entry(db_session, ws.id, sess_pure.id, tokens=(40, 8, 12, 4))
+ 
+         summary = await ChangeUsageQueryService(db_session).summarize_changes(
+-            [change_mixed.id, change_pure.id]
++            ws.id, [change_mixed.id, change_pure.id]
+         )
+ 
+         mixed = summary[change_mixed.id]
+@@ -1449,7 +1449,7 @@ class TestLocalCliSegment:
+ 
+         svc = ChangeUsageQueryService(db_session)
+         usage = await svc.get_change_usage(ws.id, change.id)
+-        summary = await svc.summarize_changes([change.id])
++        summary = await svc.summarize_changes(ws.id, [change.id])
+ 
+         # 详情：开始取 MIN（本地 09:00 早于 run 10:00）、结束取 MAX（run 11:00 晚于本地 10:30）。
+         assert _naive(usage.started_at) == datetime(2026, 8, 30, 9, 0, 0, 0)
+@@ -1490,3 +1490,309 @@ class TestLocalCliSegment:
+         # 跨度 ≈ 36 分 22 秒（毫秒取整）。
+         assert usage.duration_ms == 2_181_977  # 36 分 21.977 秒
+         assert usage.totals.api_requests == 9
++
++
++# ── 22-25：水位差分归属（2026-10-03-local-usage-segment-attribution task-03）──
++
++
++class TestUsageSegmentation:
++    """水位差分双路径（FR-02/FR-03/FR-04a/FR-04b）——直写水位行模拟上报序列。"""
++
++    @pytest.fixture(autouse=True)
++    async def _tables(self, db_engine: Any) -> None:
++        from app.models.base import BaseModel
++        from app.modules.platform_sync import model as _ps_model
++
++        async with db_engine.begin() as conn:
++            await conn.run_sync(
++                BaseModel.metadata.create_all,
++                tables=[
++                    _ps_model.AgentSessionLogORM.__table__,
++                    _ps_model.UsageMarkORM.__table__,
++                ],
++            )
++
++    @staticmethod
++    async def _seed(
++        db_session: AsyncSession,
++        ws_id: uuid.UUID,
++        change_keys: list[str],
++    ) -> tuple:
++        """建变更×2 + 一个会话 + 一个 entry（快照=文件累计终值），返回 id 集。"""
++        uid = await _make_user(db_session)
++        ws = await _make_workspace(db_session, root_path=f"C:/seg-{uuid.uuid4().hex[:6]}")
++        ch_a = await _make_change(db_session, ws.id, change_keys[0])
++        ch_b = await _make_change(db_session, ws.id, change_keys[1])
++        sess = await _make_session(db_session, uid)
++        await _make_change_link(db_session, change_id=ch_a.id, session_id=sess.id)
++        row = AgentSessionLogORM(
++            workspace_id=ws.id,
++            log_path="C:/x/model-io-sess-seg.jsonl",
++            harness="zcode",
++            format="zcode-model-io-jsonl",
++            agent_session_id=sess.id,
++            first_seen_at="2026-10-03T01:00:00.000Z",
++            last_seen_at="2026-10-03T05:00:00.000Z",
++            invocations=30,
++            usage_input_tokens=400,
++            usage_output_tokens=80,
++            usage_cache_read_tokens=600,
++            usage_cache_write_tokens=20,
++            usage_parsed_at=_T12,
++        )
++        db_session.add(row)
++        await db_session.commit()
++        return ws, ch_a, ch_b, row
++
++    @staticmethod
++    async def _mark(
++        db_session: AsyncSession,
++        ws_id: uuid.UUID,
++        row: AgentSessionLogORM,
++        *,
++        seq: int,
++        change_key: str | None,
++        inv: int,
++        in_tok: int,
++        out_tok: int,
++        c_read: int,
++        c_write: int,
++    ) -> None:
++        from app.modules.platform_sync.model import UsageMarkORM
++
++        db_session.add(
++            UsageMarkORM(
++                workspace_id=ws_id,
++                log_path=row.log_path,
++                seq=seq,
++                change_key=change_key,
++                mark_invocations=inv,
++                mark_input_tokens=in_tok,
++                mark_output_tokens=out_tok,
++                mark_cache_read_tokens=c_read,
++                mark_cache_write_tokens=c_write,
++                reported_at=_T12,
++            )
++        )
++        await db_session.commit()
++
++    async def test_handover_conservat_a_then_b(self, db_session: AsyncSession) -> None:
++        """22. A→B 切换：A=基线+其时段增量（首水位起点 0，D-004），B=剩余，Σ=累计。"""
++
++        ws, ch_a, ch_b, row = await self._seed(
++            db_session, uuid.uuid4(), ["2026-10-03-seg-a", "2026-10-03-seg-b"]
++        )
++        # 水位序列：A 接管（基线 100/10/200/5/5inv）→ B 接管（累计 250/40/400/10/18inv）。
++        await self._mark(
++            db_session,
++            ws.id,
++            row,
++            seq=1,
++            change_key="2026-10-03-seg-a",
++            inv=5,
++            in_tok=100,
++            out_tok=10,
++            c_read=200,
++            c_write=5,
++        )
++        await self._mark(
++            db_session,
++            ws.id,
++            row,
++            seq=2,
++            change_key="2026-10-03-seg-b",
++            inv=18,
++            in_tok=250,
++            out_tok=40,
++            c_read=400,
++            c_write=10,
++        )
++        # entry 快照 = 文件累计（400/80/600/20/30inv，B 时期末摄取后）。
++
++        svc = ChangeUsageQueryService(db_session)
++        ua = await svc.get_change_usage(ws.id, ch_a.id)
++        ub = await svc.get_change_usage(ws.id, ch_b.id)
++
++        # A：首水位起点 0 → [0, mark_B) = 250/40/400/10/18inv（基线+A 时段）。
++        assert ua.totals.input_tokens == 250
++        assert ua.totals.api_requests == 18
++        # B：[mark_B, 当前快照] = 150/40/200/10/12inv。
++        assert ub.totals.input_tokens == 400 - 250
++        assert ub.totals.api_requests == 30 - 18
++        # 守恒：Σ = 文件累计。
++        assert ua.totals.input_tokens + ub.totals.input_tokens == 400
++        assert ua.totals.api_requests + ub.totals.api_requests == 30
++
++    async def test_lagging_ingest_boundary(self, db_session: AsyncSession) -> None:
++        """23. 摄取滞后边界（FR-04a/D-002@v2）：A 尾巴在 B 接管时未落库 → 归 B。"""
++        ws, ch_a, ch_b, row = await self._seed(
++            db_session, uuid.uuid4(), ["2026-10-03-lag-a", "2026-10-03-lag-b"]
++        )
++        # A 上报（mark=0 基线）→ A 尾巴产生但摄取未跑 → B 上报（mark 仍 0）→
++        # 摄取一次刷到 100（含 A 尾巴）→ C 不存在，末水位接当前快照。
++        await self._mark(
++            db_session,
++            ws.id,
++            row,
++            seq=1,
++            change_key="2026-10-03-lag-a",
++            inv=0,
++            in_tok=0,
++            out_tok=0,
++            c_read=0,
++            c_write=0,
++        )
++        await self._mark(
++            db_session,
++            ws.id,
++            row,
++            seq=2,
++            change_key="2026-10-03-lag-b",
++            inv=0,
++            in_tok=0,
++            out_tok=0,
++            c_read=0,
++            c_write=0,
++        )
++        row.usage_input_tokens = 100
++        row.invocations = 10
++        await db_session.commit()
++
++        svc = ChangeUsageQueryService(db_session)
++        ua = await svc.get_change_usage(ws.id, ch_a.id)
++        ub = await svc.get_change_usage(ws.id, ch_b.id)
++
++        # 边界：A=0（尾巴滞后落入 B 差分）、B=100/10（末水位 0 → 快照 100）。
++        assert ua.totals.input_tokens == 0
++        assert ub.totals.input_tokens == 100
++        assert ub.totals.api_requests == 10
++        # 总量守恒。
++        assert ua.totals.input_tokens + ub.totals.input_tokens == 100
++
++    async def test_legacy_no_marks_entry_unaffected(self, db_session: AsyncSession) -> None:
++        """24. 存量无水位 entry：整行路径（互斥排除有水位），数字与改造前一致。"""
++        ws, ch_a, ch_b, _row = await self._seed(
++            db_session, uuid.uuid4(), ["2026-10-03-leg-a", "2026-10-03-leg-b"]
++        )
++        # 无任何水位——A 经会话锚点拿整行；B 无锚点无数据。
++        svc = ChangeUsageQueryService(db_session)
++        ua = await svc.get_change_usage(ws.id, ch_a.id)
++        ub = await svc.get_change_usage(ws.id, ch_b.id)
++
++        assert ua.totals.input_tokens == 400  # 整行快照（改造前行为）
++        assert ua.totals.api_requests == 30
++        assert ub.totals.input_tokens == 0
++
++    async def test_marks_entry_excluded_from_whole_row(self, db_session: AsyncSession) -> None:
++        """25. 有水位 entry 不走整行路径（互斥防双计）：A 锚点下整行量被差分量替代。"""
++        ws, ch_a, _ch_b, row = await self._seed(
++            db_session, uuid.uuid4(), ["2026-10-03-mut-a", "2026-10-03-mut-b"]
++        )
++        # 一条水位（ctx=A，mark=快照终值）→ 基线 400 归 A（首水位锚定），整行互斥。
++        await self._mark(
++            db_session,
++            ws.id,
++            row,
++            seq=1,
++            change_key="2026-10-03-mut-a",
++            inv=30,
++            in_tok=400,
++            out_tok=80,
++            c_read=600,
++            c_write=20,
++        )
++        svc = ChangeUsageQueryService(db_session)
++        ua = await svc.get_change_usage(ws.id, ch_a.id)
++
++        # 首水位锚定语义（D-004）：mark=400 是「接管时点已累计」→ [0,400) 归
++        # 首水位 ctx=A；末水位→当前快照差分 0；整行 400 被互斥排除（合计仍
++        # 恰 400，非 800——若互斥失效会得 800）。
++        assert ua.totals.input_tokens == 400
++        assert ua.totals.api_requests == 30
++
++    async def test_segment_dual_count_guard_run_authoritative(
++        self, db_session: AsyncSession
++    ) -> None:
++        """26. 防双计（execute review P1）：entry 会话有 agent_runs 行 → 差分不计
++        （run 权威），run 段与差分段不并存。"""
++        ws, ch_a, _ch_b, row = await self._seed(
++            db_session, uuid.uuid4(), ["2026-10-03-guard-a", "2026-10-03-guard-b"]
++        )
++        # 该 entry 的会话挂一条平台 run（run 权威场景）。
++        sess_id = row.agent_session_id
++        await _make_run(
++            db_session,
++            agent_session_id=sess_id,
++            model="GLM-5.3",
++            input_tokens=10,
++            output_tokens=5,
++            started_at=_T10,
++            finished_at=_T11,
++            duration_ms=500,
++            num_turns=1,
++        )
++        await self._mark(
++            db_session,
++            ws.id,
++            row,
++            seq=1,
++            change_key="2026-10-03-guard-a",
++            inv=0,
++            in_tok=0,
++            out_tok=0,
++            c_read=0,
++            c_write=0,
++        )
++
++        svc = ChangeUsageQueryService(db_session)
++        ua = await svc.get_change_usage(ws.id, ch_a.id)
++
++        # 差分路径被谓词排除（run 权威）：A 只见 run 段 10/5，无本地桶。
++        assert ua.totals.input_tokens == 10
++        assert [i.model for i in ua.by_model] == ["GLM-5.3"]
++
++    async def test_quicklog_segment_diff(self, db_session: AsyncSession) -> None:
++        """27. quicklog 差分同构（design R-05）：ql_id 水位片段计入条目。"""
++        uid = await _make_user(db_session)
++        ws = await _make_workspace(db_session, root_path="C:/ql-seg")
++        sess = await _make_session(db_session, uid)
++        row = AgentSessionLogORM(
++            workspace_id=ws.id,
++            log_path="C:/x/model-io-sess-qlseg.jsonl",
++            harness="zcode",
++            format="zcode-model-io-jsonl",
++            agent_session_id=sess.id,
++            invocations=8,
++            usage_input_tokens=90,
++            usage_output_tokens=18,
++            usage_cache_read_tokens=120,
++            usage_cache_write_tokens=0,
++            usage_parsed_at=_T12,
++        )
++        db_session.add(row)
++        ql_id = "ql-20261003-seg-xyz"
++        await _make_quicklog_link(db_session, workspace_id=ws.id, ql_id=ql_id, session_id=sess.id)
++        from app.modules.platform_sync.model import UsageMarkORM
++
++        db_session.add(
++            UsageMarkORM(
++                workspace_id=ws.id,
++                log_path=row.log_path,
++                seq=1,
++                quick_id=ql_id,
++                mark_invocations=3,
++                mark_input_tokens=30,
++                mark_output_tokens=6,
++                mark_cache_read_tokens=40,
++                mark_cache_write_tokens=0,
++                reported_at=_T12,
++            )
++        )
++        await db_session.commit()
++
++        usage = await ChangeUsageQueryService(db_session).get_quicklog_usage(ws.id, ql_id)
++
++        # 首水位起点 0（D-004）→ 基线 3/30/6/40 归该 ql；末水位→快照补 5/60/12/80。
++        assert usage.totals.input_tokens == 90
++        assert usage.totals.api_requests == 8
++        assert usage.by_model[0].model == "本地 CLI"
+diff --git a/backend/app/modules/change/usage_service.py b/backend/app/modules/change/usage_service.py
+index c1cee8104..6bc818586 100644
+--- a/backend/app/modules/change/usage_service.py
++++ b/backend/app/modules/change/usage_service.py
+@@ -51,7 +51,7 @@ from app.modules.change.schema import (
+     UsageSummaryRead,
+     UsageTotalsRead,
+ )
+-from app.modules.platform_sync.model import AgentSessionLogORM
++from app.modules.platform_sync.model import AgentSessionLogORM, UsageMarkORM
+ 
+ #: 兜底桶名：run.model 为 NULL 的历史 run 归此桶，by_model 恒末位（R-04，
+ #: 对齐 by_provider「未记录」与 session-usage 同名先例）。
+@@ -108,11 +108,13 @@ class ChangeUsageQueryService:
+                     "change_id": str(change_id),
+                 },
+             )
+-        local_rows = (
++        local_rows = list(
+             (await self._session.execute(self._local_change_rows_stmt([change_id])))
+             .mappings()
+             .all()
+         )
++        # segment-attribution：有水位 entry 走差分路径（与整行互斥），两路并桶。
++        local_rows.extend(await self._local_segment_rows(workspace_id, change_ids=[change_id]))
+         return await self._aggregate_usage(self._change_run_ids(change_id), local_rows)
+ 
+     async def get_quicklog_usage(self, workspace_id: uuid.UUID, ql_id: str) -> ChangeUsageRead:
+@@ -122,17 +124,19 @@ class ChangeUsageQueryService:
+         文件源条目无 DB 行；严格 404 语义由 router 层对齐详情端点做（task-04）。
+         本方法对空集合返回全零 totals + 空 by_model + 三元组 None（R-05）。
+         """
+-        local_rows = (
++        local_rows = list(
+             (await self._session.execute(self._local_quicklog_rows_stmt(workspace_id, [ql_id])))
+             .mappings()
+             .all()
+         )
++        # segment-attribution：quicklog 差分路径同构并桶。
++        local_rows.extend(await self._local_segment_rows(workspace_id, ql_ids=[ql_id]))
+         return await self._aggregate_usage(self._quicklog_run_ids(workspace_id, ql_id), local_rows)
+ 
+     # ── 列表批量摘要（UsageSummaryRead，零 N+1）────────────────────────
+ 
+     async def summarize_changes(
+-        self, change_ids: list[uuid.UUID]
++        self, workspace_id: uuid.UUID, change_ids: list[uuid.UUID]
+     ) -> dict[uuid.UUID, UsageSummaryRead]:
+         """一次查询出整页变更摘要（R-03：不逐行查询、不拉 run 行进内存）。
+ 
+@@ -146,7 +150,18 @@ class ChangeUsageQueryService:
+             return {}
+         rows = await self._summarize_anchor(self._change_summary_anchor(change_ids))
+         summary = {row["group_key"]: self._row_to_summary(row) for row in rows}
+-        await self._merge_local_rows(summary, self._local_change_rows_stmt(change_ids))
++        await self._merge_local_rows(
++            summary,
++            list(
++                (await self._session.execute(self._local_change_rows_stmt(change_ids)))
++                .mappings()
++                .all()
++            ),
++        )
++        await self._merge_local_rows(
++            summary,
++            await self._local_segment_rows(workspace_id, change_ids=change_ids),
++        )
+         return summary
+ 
+     async def summarize_quicklogs(
+@@ -160,7 +175,17 @@ class ChangeUsageQueryService:
+             return {}
+         rows = await self._summarize_anchor(self._quicklog_summary_anchor(workspace_id, ql_ids))
+         summary = {row["group_key"]: self._row_to_summary(row) for row in rows}
+-        await self._merge_local_rows(summary, self._local_quicklog_rows_stmt(workspace_id, ql_ids))
++        await self._merge_local_rows(
++            summary,
++            list(
++                (await self._session.execute(self._local_quicklog_rows_stmt(workspace_id, ql_ids)))
++                .mappings()
++                .all()
++            ),
++        )
++        await self._merge_local_rows(
++            summary, await self._local_segment_rows(workspace_id, ql_ids=ql_ids)
++        )
+         return summary
+ 
+     # ── 去重执行集合（子查询形态，两类口径共用）────────────────────────
+@@ -310,6 +335,201 @@ class ChangeUsageQueryService:
+         NOT EXISTS 反连接对齐兜底段 :294 先例（防 NOT IN 子查询膨胀）。"""
+         return ~exists().where(AgentRun.agent_session_id == AgentSessionLogORM.agent_session_id)
+ 
++    # ── 水位差分路径（2026-10-03-local-usage-segment-attribution task-03）──
++
++    async def _local_segment_rows(
++        self,
++        workspace_id: uuid.UUID,
++        change_ids: list[uuid.UUID] | None = None,
++        ql_ids: list[str] | None = None,
++    ) -> list[RowMapping]:
++        """执行差分聚合并归一 group_key（change 版把 change_key 映射回 change_id）。"""
++        if change_ids is not None:
++            key_rows = (
++                await self._session.execute(
++                    select(col(Change.id), col(Change.change_key)).where(
++                        col(Change.id).in_(change_ids)
++                    )
++                )
++            ).all()
++            id_by_key = {r.change_key: r.id for r in key_rows}
++            keys = list(id_by_key.keys())
++            if not keys:
++                return []
++            rows = (
++                (
++                    await self._session.execute(
++                        self._local_segment_rows_stmt(workspace_id, change_keys=keys)
++                    )
++                )
++                .mappings()
++                .all()
++            )
++            out: list[RowMapping] = []
++            for r in rows:
++                mapped = dict(r)
++                mapped["group_key"] = id_by_key.get(r["group_key"], r["group_key"])
++                out.append(mapped)
++            return out
++        return list(
++            (
++                await self._session.execute(
++                    self._local_segment_rows_stmt(workspace_id, ql_ids=ql_ids)
++                )
++            )
++            .mappings()
++            .all()
++        )
++
++    @classmethod
++    def _local_segment_rows_stmt(
++        cls,
++        workspace_id: uuid.UUID,
++        change_keys: list[str] | None = None,
++        ql_ids: list[str] | None = None,
++    ) -> Any:
++        """水位差分聚合：变更 X 的本地量 = Σ max(0, next − eff) 片段（D-001/D-004）。
++
++        三段式 SQL：
++
++        1. ``target_paths``——workspace 内含目标 ctx 水位的 log_path 集合；
++        2. ``seg``——这些 paths 的**全部**水位行窗口（LEAD 取下一水位 mark；
++           不预先过滤 ctx——窗口需相邻全量，ctx 过滤在外层做）；join entry 行
++           取末水位兜底快照与 first/last_seen；沿 R-07 会话级防双计谓词；
++        3. 外层聚合——首水位有效起点 0（D-004 隐式锚定：片段 = next − 0，
++           即首水位 ctx 认领基线段），非首水位起点 = mark；next 为 NULL（末
++           水位）时回落 entry 当前快照；负差分防御归 0（CASE，跨方言稳）。
++        """
++        is_change = change_keys is not None
++        ctx_col = UsageMarkORM.change_key if is_change else UsageMarkORM.quick_id
++        ctx_ids: list[Any] = list(change_keys) if is_change else (ql_ids or [])
++
++        target_paths = (
++            select(col(UsageMarkORM.log_path).label("log_path"))
++            .where(
++                col(UsageMarkORM.workspace_id) == workspace_id,
++                ctx_col.in_(ctx_ids),
++            )
++            .distinct()
++            .subquery()
++        )
++
++        def _over(fn: Any, c: Any) -> Any:
++            return fn(c).over(
++                partition_by=[col(UsageMarkORM.workspace_id), col(UsageMarkORM.log_path)],
++                order_by=[col(UsageMarkORM.seq)],
++            )
++
++        first_seq = _over(func.first_value, col(UsageMarkORM.seq))
++
++        proj: list[Any] = [
++            ctx_col.label("group_key"),
++            col(UsageMarkORM.log_path).label("log_path"),
++            (col(UsageMarkORM.seq) == first_seq).label("is_first"),
++        ]
++        # 有效起点：首水位 0（D-004），否则 mark；五项（invocations + 四维 token）。
++        eff_map = {
++            "eff_invocations": UsageMarkORM.mark_invocations,
++            "eff_input_tokens": UsageMarkORM.mark_input_tokens,
++            "eff_output_tokens": UsageMarkORM.mark_output_tokens,
++            "eff_cache_read_tokens": UsageMarkORM.mark_cache_read_tokens,
++            "eff_cache_write_tokens": UsageMarkORM.mark_cache_write_tokens,
++        }
++        lead_map = {
++            "next_invocations": UsageMarkORM.mark_invocations,
++            "next_input_tokens": UsageMarkORM.mark_input_tokens,
++            "next_output_tokens": UsageMarkORM.mark_output_tokens,
++            "next_cache_read_tokens": UsageMarkORM.mark_cache_read_tokens,
++            "next_cache_write_tokens": UsageMarkORM.mark_cache_write_tokens,
++        }
++        for label, c in eff_map.items():
++            proj.append(
++                case(
++                    (col(UsageMarkORM.seq) == first_seq, 0),
++                    else_=col(c),
++                ).label(label)
++            )
++        for label, c in lead_map.items():
++            proj.append(_over(func.lead, col(c)).label(label))
++        # 末水位兜底（entry 当前快照，NULL 再 0）与 seen（三元组参与）。
++        proj.extend(
++            [
++                func.coalesce(col(AgentSessionLogORM.invocations), 0).label("snap_invocations"),
++                func.coalesce(col(AgentSessionLogORM.usage_input_tokens), 0).label(
++                    "snap_input_tokens"
++                ),
++                func.coalesce(col(AgentSessionLogORM.usage_output_tokens), 0).label(
++                    "snap_output_tokens"
++                ),
++                func.coalesce(col(AgentSessionLogORM.usage_cache_read_tokens), 0).label(
++                    "snap_cache_read_tokens"
++                ),
++                func.coalesce(col(AgentSessionLogORM.usage_cache_write_tokens), 0).label(
++                    "snap_cache_write_tokens"
++                ),
++                col(AgentSessionLogORM.first_seen_at).label("first_seen"),
++                col(AgentSessionLogORM.last_seen_at).label("last_seen"),
++            ]
++        )
++
++        seg = (
++            select(*proj)
++            .select_from(UsageMarkORM)
++            .join(target_paths, target_paths.c.log_path == col(UsageMarkORM.log_path))
++            .join(
++                AgentSessionLogORM,
++                (col(AgentSessionLogORM.workspace_id) == col(UsageMarkORM.workspace_id))
++                & (col(AgentSessionLogORM.log_path) == col(UsageMarkORM.log_path)),
++            )
++            .where(
++                col(UsageMarkORM.workspace_id) == workspace_id,
++                # R-07 会话级防双计谓词（execute review P1 修正）：与整行路径
++                # 同判——entry 会话有 agent_runs 行（平台派发）时差分不计，
++                # 防 hub 双派发窗口 run 段与差分段双计。
++                cls._local_no_runs_condition(),
++            )
++            .subquery()
++        )
++
++        # 片段值：next（末水位回落 entry 快照）− eff；负值归 0（CASE 防御）。
++        pairs = [
++            ("input_tokens", "next_input_tokens", "snap_input_tokens", "eff_input_tokens"),
++            ("output_tokens", "next_output_tokens", "snap_output_tokens", "eff_output_tokens"),
++            (
++                "cache_read_tokens",
++                "next_cache_read_tokens",
++                "snap_cache_read_tokens",
++                "eff_cache_read_tokens",
++            ),
++            (
++                "cache_creation_tokens",
++                "next_cache_write_tokens",
++                "snap_cache_write_tokens",
++                "eff_cache_write_tokens",
++            ),
++        ]
++        agg: list[Any] = []
++        for out_label, next_c, snap_c, eff_c in pairs:
++            raw = func.coalesce(seg.c[next_c], seg.c[snap_c]) - seg.c[eff_c]
++            agg.append(func.sum(case((raw < 0, 0), else_=raw)).label(out_label))
++        raw_inv = (
++            func.coalesce(seg.c["next_invocations"], seg.c["snap_invocations"])
++            - seg.c["eff_invocations"]
++        )
++        agg.insert(0, func.sum(case((raw_inv < 0, 0), else_=raw_inv)).label("api_requests"))
++        agg.extend(
++            [
++                func.min(seg.c["first_seen"]).label("first_seen"),
++                func.max(seg.c["last_seen"]).label("last_seen"),
++            ]
++        )
++
++        return (
++            select(seg.c["group_key"].label("group_key"), *agg)
++            .where(seg.c["group_key"].in_(ctx_ids))
++            .group_by(seg.c["group_key"])
++        )
++
+     @classmethod
+     def _local_change_rows_stmt(cls, change_ids: list[uuid.UUID]) -> Any:
+         """变更侧本地段：``platform_agent_logs`` 快照按 ``change_session_links``
+@@ -331,6 +551,11 @@ class ChangeUsageQueryService:
+                 col(ChangeSessionLink.change_id).in_(change_ids),
+                 col(AgentSessionLogORM.usage_parsed_at).is_not(None),
+                 cls._local_no_runs_condition(),
++                # segment-attribution：有水位行的 entry 走差分路径（互斥防双计）。
++                ~exists().where(
++                    col(UsageMarkORM.workspace_id) == col(AgentSessionLogORM.workspace_id),
++                    col(UsageMarkORM.log_path) == col(AgentSessionLogORM.log_path),
++                ),
+             )
+             .group_by(col(ChangeSessionLink.change_id))
+         )
+@@ -353,6 +578,11 @@ class ChangeUsageQueryService:
+                 col(QuicklogSessionLink.ql_id).in_(ql_ids),
+                 col(AgentSessionLogORM.usage_parsed_at).is_not(None),
+                 cls._local_no_runs_condition(),
++                # segment-attribution：互斥（同变更侧）。
++                ~exists().where(
++                    col(UsageMarkORM.workspace_id) == col(AgentSessionLogORM.workspace_id),
++                    col(UsageMarkORM.log_path) == col(AgentSessionLogORM.log_path),
++                ),
+             )
+             .group_by(col(QuicklogSessionLink.ql_id))
+         )
+@@ -391,13 +621,12 @@ class ChangeUsageQueryService:
+         return int((last - first).total_seconds() * 1000)
+ 
+     async def _merge_local_rows(
+-        self, summary: dict[Any, UsageSummaryRead], local_stmt: Any
++        self, summary: dict[Any, UsageSummaryRead], local_rows: list[RowMapping]
+     ) -> None:
+         """列表摘要与本地段合并：四维相加 + 请求次数并 invocations + 三元组参与。
+ 
+         2026-10-03-local-usage-caliber-fix：开始/结束取 MIN/MAX(first/last_seen)
+         （上报观察时间，口径注脚声明）、耗时累加观察跨度；纯本地条目不再全 None。"""
+-        local_rows = (await self._session.execute(local_stmt)).mappings().all()
+         for row in local_rows:
+             key = row["group_key"]
+             local_started = self._iso_to_dt(row["first_seen"])
+diff --git a/backend/app/modules/platform_sync/model.py b/backend/app/modules/platform_sync/model.py
+index 54228bb23..ff28bd521 100644
+--- a/backend/app/modules/platform_sync/model.py
++++ b/backend/app/modules/platform_sync/model.py
+@@ -503,3 +503,61 @@ class PlatformChangeEventORM(BaseModel, table=True):
+             server_default=text("now()"),
+         ),
+     )
++
++
++# ── Change 2026-10-03-local-usage-segment-attribution task-01（design 接口
++#    定义 / D-001@v1 / D-004@v1）──
++
++
++class UsageMarkORM(BaseModel, table=True):
++    """agent-logs 用量水位行（append-only，差分归属基座）。
++
++    每次 agent-logs 上报在 upsert 行覆盖**前**插入（service task-02）：记录
++    「ctx（change_key/quick_id 互斥，双 NULL=无变更上下文）接管时点的已落库
++    累计五值」（D-002@v2 时序）。消费方：change/usage_service 差分聚合
++    （task-03）——变更 X 的量 = Σ max(0, 下一水位 − 本水位)，首水位隐式
++    起点 0（D-004 存量锚定）。
++
++    - ``seq`` 每 entry 单调递增（插入 MAX+1）：排序/聚合/修剪统一键（X4）；
++    - 唯一键 (workspace_id, log_path, seq)；log_path 与上报复合键同构不 FK；
++    - 列域对齐（X6）：change_key=changes.change_key(200)/quick_id=ql_id(128)；
++    - 修剪（D-003@v2）：每 entry 中段保留约 200 行，**首末水位豁免**——首=
++      锚定载体（被删基线段转移新首 ctx，复审 L1）、末=聚合待消费锚点。
++    """
++
++    __tablename__ = "platform_agent_log_usage_marks"
++    __table_args__ = (
++        UniqueConstraint(
++            "workspace_id",
++            "log_path",
++            "seq",
++            name="uq_agent_log_usage_marks_path_seq",
++        ),
++        Index("ix_agent_log_usage_marks_change_key", "change_key"),
++        Index("ix_agent_log_usage_marks_quick_id", "quick_id"),
++    )
++
++    id: uuid.UUID = Field(
++        sa_column=Column(
++            Uuid(as_uuid=True),
++            primary_key=True,
++            nullable=False,
++            default=uuid.uuid4,
++        ),
++    )
++    workspace_id: uuid.UUID = Field(sa_column=Column(Uuid(as_uuid=True), nullable=False))
++    log_path: str = Field(sa_column=Column(String(1024), nullable=False))
++    seq: int = Field(sa_column=Column(BigInteger, nullable=False))
++    # 互斥 ctx：二选一；双 NULL=无变更上下文片段（差分不计任何变更）。
++    change_key: str | None = Field(sa_column=Column(String(200), nullable=True))
++    quick_id: str | None = Field(sa_column=Column(String(128), nullable=True))
++    # 接管时点已落库累计（NULL 快照按 0 语义，插入时归一）。
++    mark_invocations: int = Field(sa_column=Column(BigInteger, nullable=False))
++    mark_input_tokens: int = Field(sa_column=Column(BigInteger, nullable=False))
++    mark_output_tokens: int = Field(sa_column=Column(BigInteger, nullable=False))
++    mark_cache_read_tokens: int = Field(sa_column=Column(BigInteger, nullable=False))
++    mark_cache_write_tokens: int = Field(sa_column=Column(BigInteger, nullable=False))
++    reported_at: datetime = Field(
++        default_factory=lambda: datetime.now(UTC),
++        sa_column=Column(DateTime(timezone=True), nullable=False),
++    )
+diff --git a/backend/app/modules/platform_sync/service.py b/backend/app/modules/platform_sync/service.py
+index b91633960..8b052cd79 100644
+--- a/backend/app/modules/platform_sync/service.py
++++ b/backend/app/modules/platform_sync/service.py
+@@ -31,7 +31,7 @@ from dataclasses import dataclass
+ from datetime import UTC, datetime
+ from typing import TYPE_CHECKING, Any
+ 
+-from sqlalchemy import ColumnElement, delete, func, or_, select
++from sqlalchemy import ColumnElement, delete, exists, func, or_, select
+ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.ext.asyncio import AsyncSession
+ from sqlmodel import col
+@@ -57,6 +57,7 @@ from app.modules.platform_sync.model import (
+     PlatformChangeEventORM,
+     PlatformChangeProgressORM,
+     QuicklogEntryORM,
++    UsageMarkORM,
+ )
+ 
+ if TYPE_CHECKING:
+@@ -1862,10 +1863,68 @@ class PlatformSyncService:
+                 .all()
+             )
+             existing_by_path = {row.log_path: row for row in existing_rows}
++        # ── 水位预取（2026-10-03-local-usage-segment-attribution task-02 / D-002@v2）──
++        # 每 log_path 的当前 MAX(seq)（新 entry 无行 → 0 起）；一条 GROUP BY 批量
++        # 取，循环内本地递增免逐行 SELECT。
++        mark_seq_by_path: dict[str, int] = {}
++        if deduped:
++            seq_rows = (
++                await self._session.execute(
++                    select(
++                        UsageMarkORM.log_path.label("log_path"),
++                        func.max(UsageMarkORM.seq).label("max_seq"),
++                    )
++                    .where(
++                        col(UsageMarkORM.workspace_id) == workspace_id,
++                        col(UsageMarkORM.log_path).in_(deduped.keys()),
++                    )
++                    .group_by(UsageMarkORM.log_path)
++                )
++            ).all()
++            mark_seq_by_path = {r.log_path: int(r.max_seq or 0) for r in seq_rows}
++
+         # (entry, ORM 行) 配对留存：归属阶段需要 entry 级 harness/ctx 对应到落库行。
+         persisted: list[tuple[AgentLogEntry, AgentSessionLogORM]] = []
++        # 本批插过水位的 log_path（修剪阶段只收窄到活跃 entry，省全表扫）。
++        marked_paths: set[str] = set()
+         for entry in deduped.values():
+             row = existing_by_path.get(entry.log_path)
++            # 水位插入（D-002@v2：ctx 接管时点的已落库累计，**行覆盖前**读旧值；
++            # 新 row / NULL 快照按 0——append-only，seq 本地递增）。
++            self._session.add(
++                UsageMarkORM(
++                    id=uuid.uuid4(),
++                    workspace_id=workspace_id,
++                    log_path=entry.log_path,
++                    seq=mark_seq_by_path.get(entry.log_path, 0) + 1,
++                    change_key=entry.change_key,
++                    quick_id=entry.quick_id,
++                    mark_invocations=int(getattr(row, "invocations", 0) or 0) if row else 0,
++                    mark_input_tokens=(
++                        int(row.usage_input_tokens or 0)
++                        if row and row.usage_input_tokens is not None
++                        else 0
++                    ),
++                    mark_output_tokens=(
++                        int(row.usage_output_tokens or 0)
++                        if row and row.usage_output_tokens is not None
++                        else 0
++                    ),
++                    mark_cache_read_tokens=(
++                        int(row.usage_cache_read_tokens or 0)
++                        if row and row.usage_cache_read_tokens is not None
++                        else 0
++                    ),
++                    mark_cache_write_tokens=(
++                        int(row.usage_cache_write_tokens or 0)
++                        if row and row.usage_cache_write_tokens is not None
++                        else 0
++                    ),
++                    reported_at=now,
++                )
++            )
++            mark_seq_by_path[entry.log_path] = mark_seq_by_path.get(entry.log_path, 0) + 1
++            marked_paths.add(entry.log_path)
+             if row is None:
+                 row = AgentSessionLogORM(
+                     id=uuid.uuid4(),
+@@ -1927,6 +1986,38 @@ class PlatformSyncService:
+                 row.updated_at = now
+             persisted.append((entry, row))
+ 
++        # ── 水位修剪（D-003@v2：中段保留窗口 200，**首末豁免**——首=隐式起点
++        # 锚定载体（被删基线段转移新首 ctx，复审 L1）、末=聚合待消费锚点）──
++        # 相关子查询按行同 log_path 计算阈值：min(seq) < seq <= max(seq)-200
++        # 的中段行删除；每 entry 首末各留一行 + 最近 200 行。
++        if marked_paths:
++            mark_alias = UsageMarkORM.__table__.alias("mark_win")
++            per_path = (
++                select(
++                    mark_alias.c.log_path.label("log_path"),
++                    func.min(mark_alias.c.seq).label("min_seq"),
++                    func.max(mark_alias.c.seq).label("max_seq"),
++                )
++                .where(
++                    mark_alias.c.workspace_id == workspace_id,
++                    mark_alias.c.log_path.in_(marked_paths),
++                )
++                .group_by(mark_alias.c.log_path)
++                .subquery()
++            )
++            # EXISTS 相关删除（跨方言稳）：min(seq) < seq <= max(seq)-200 的中段行。
++            await self._session.execute(
++                delete(UsageMarkORM).where(
++                    col(UsageMarkORM.workspace_id) == workspace_id,
++                    col(UsageMarkORM.log_path).in_(marked_paths),
++                    exists().where(
++                        per_path.c.log_path == col(UsageMarkORM.log_path),
++                        col(UsageMarkORM.seq) > per_path.c.min_seq,
++                        col(UsageMarkORM.seq) <= per_path.c.max_seq - 200,
++                    ),
++                )
++            )
++
+         # ── 归属（design §3.3.3：与 entries upsert 同事务，commit 前写归属列）──
+         # task-03（2026-08-24-sessions-live-updates）：本批新 INSERT 的 tool_report
+         # 会话（session_id + user_id），commit 后逐个广播 created；命中已有会话
+diff --git a/backend/app/modules/platform_sync/tests/test_agent_log_push.py b/backend/app/modules/platform_sync/tests/test_agent_log_push.py
+index 9ad6ffa54..7f8889c75 100644
+--- a/backend/app/modules/platform_sync/tests/test_agent_log_push.py
++++ b/backend/app/modules/platform_sync/tests/test_agent_log_push.py
+@@ -1227,3 +1227,112 @@ async def test_upsert_prefetch_query_count_constant(
+         .all()
+     )
+     assert len(rows) == 15, "两轮 upsert 共 15 条独立 log_path 全部落库"
++
++
++# ── 水位记录（2026-10-03-local-usage-segment-attribution task-02 / FR-01）──
++
++
++class TestUsageMarks:
++    """上报插水位（ctx 接管时点已落库累计，D-002@v2）+ 修剪豁免首末（D-003@v2）。"""
++
++    @pytest.fixture(autouse=True)
++    async def _ensure_marks_table(self, db_engine: Any) -> None:
++        from app.models.base import BaseModel
++        from app.modules.platform_sync import model as _ps_model
++
++        async with db_engine.begin() as conn:
++            await conn.run_sync(
++                BaseModel.metadata.create_all,
++                tables=[_ps_model.UsageMarkORM.__table__],
++            )
++
++    async def _push(self, client, headers, ws_id, ctx=None, invocations=None):
++        entry = {
++            "harness": "zcode",
++            "log_path": "C:/x/model-io-sess-mark.jsonl",
++            "format": "zcode-model-io-jsonl",
++            "exists": True,
++        }
++        if ctx:
++            entry.update(ctx)
++        if invocations is not None:
++            entry["invocations"] = invocations
++        resp = await client.post(
++            "/api/agent-logs",
++            json={"pushed_at": "2026-10-03T00:00:00.000Z", "entries": [entry]},
++            headers=headers,
++        )
++        assert resp.status_code == 200, resp.text
++
++    async def _marks(self, db_session):
++        from app.modules.platform_sync.model import UsageMarkORM
++
++        return list(
++            (await db_session.execute(select(UsageMarkORM).order_by(UsageMarkORM.seq)))
++            .scalars()
++            .all()
++        )
++
++    async def test_first_push_mark_zero(self, client, shpsync_headers, db_session):
++        """新 entry 首次上报：水位 mark 全 0、ctx 记 change_key（FR-01）。"""
++        ws_id, headers = shpsync_headers
++        await self._push(client, headers, ws_id, ctx={"change_key": "2026-10-03-a"})
++        marks = await self._marks(db_session)
++        assert len(marks) == 1
++        assert marks[0].seq == 1
++        assert marks[0].change_key == "2026-10-03-a"
++        assert marks[0].mark_invocations == 0
++        assert marks[0].mark_input_tokens == 0
++
++    async def test_takeover_mark_reads_prior_values(self, client, shpsync_headers, db_session):
++        """接管时点水位 = 覆盖前旧值（含回填基线，FR-04b）：直写快照后换 ctx 上报。"""
++        from app.modules.platform_sync.model import AgentSessionLogORM
++
++        ws_id, headers = shpsync_headers
++        await self._push(client, headers, ws_id, ctx={"change_key": "2026-10-03-a"})
++        # 模拟回填基线：直写快照五列（归属仍 a）。
++        row = (await db_session.execute(select(AgentSessionLogORM))).scalar_one()
++        row.usage_input_tokens = 1500
++        row.usage_cache_read_tokens = 900
++        row.invocations = 7
++        await db_session.commit()
++        # 换 ctx=B 上报：水位 B 应= 1500/900/7（覆盖前旧值）。
++        await self._push(client, headers, ws_id, ctx={"change_key": "2026-10-03-b"})
++        marks = await self._marks(db_session)
++        assert len(marks) == 2
++        assert marks[1].change_key == "2026-10-03-b"
++        assert marks[1].seq == 2
++        assert marks[1].mark_input_tokens == 1500
++        assert marks[1].mark_cache_read_tokens == 900
++        assert marks[1].mark_invocations == 7
++
++    async def test_same_ctx_consecutive_and_null_ctx(self, client, shpsync_headers, db_session):
++        """同 ctx 连续上报插多行（seq 递增）；ctx 双空照插（差分不计但记录在）。"""
++        ws_id, headers = shpsync_headers
++        await self._push(client, headers, ws_id, ctx={"change_key": "k1"})
++        await self._push(client, headers, ws_id, ctx={"change_key": "k1"})
++        await self._push(client, headers, ws_id)  # 双空 ctx
++        marks = await self._marks(db_session)
++        assert [m.seq for m in marks] == [1, 2, 3]
++        assert marks[0].change_key == marks[1].change_key == "k1"
++        assert marks[2].change_key is None and marks[2].quick_id is None
++
++    async def test_trim_keeps_first_and_last(self, client, shpsync_headers, db_session):
++        """201 次上报后中段修剪至约 200 行，首（seq=1）末（seq=201）恒在（D-003@v2）。"""
++        ws_id, headers = shpsync_headers
++        for i in range(205):
++            await self._push(
++                client,
++                headers,
++                ws_id,
++                ctx={"change_key": f"ctx-{i}"},
++                invocations=i,
++            )
++        marks = await self._marks(db_session)
++        seqs = [m.seq for m in marks]
++        # 阈值：min=1 < seq <= max-200=5 → 删 seq 2..5（4 行）→ 剩 201 行。
++        assert seqs[0] == 1, "首水位（锚定载体）必须保留"
++        assert seqs[-1] == 205, "末水位（待消费锚点）必须保留"
++        assert len(marks) == 201, f"中段应修剪至 201 行，实得 {len(marks)}"
++        assert 2 not in seqs and 5 not in seqs, "中段 seq 2..5 应被删"
++        assert 6 in seqs, "窗口内 seq 6 起保留"
+diff --git a/backend/migrations/versions/20261003020000_add_agent_log_usage_marks.py b/backend/migrations/versions/20261003020000_add_agent_log_usage_marks.py
+new file mode 100644
+index 000000000..29b1b9532
+--- /dev/null
++++ b/backend/migrations/versions/20261003020000_add_agent_log_usage_marks.py
+@@ -0,0 +1,89 @@
++"""platform_agent_logs 用量水位表（ctx 接管时点累计快照，差分归属基座）
++
++Revision ID: 20261003020000
++Revises: 20261002010000
++Create Date: 2026-10-03 02:00:00
++
++Change 2026-10-03-local-usage-segment-attribution task-01（design 接口定义 /
++D-001@v1 / D-004@v1）：
++
++1. 建 ``platform_agent_log_usage_marks``——append-only 水位行：每次 agent-logs
++   上报在 upsert 行覆盖**前**插入（task-02），记录「ctx（change_key/quick_id
++   互斥，双 NULL=无变更上下文片段）接管时点的已落库累计五值」（D-002@v2）。
++   消费方：change/usage_service 差分聚合（task-03）——变更 X 的量 =
++   Σ max(0, 下一水位 − 本水位)，首水位隐式起点 0（D-004 存量锚定）。
++2. 唯一键 (workspace_id, log_path, seq)：seq 为每 entry 单调递增序号（插入取
++   MAX+1），排序/聚合/修剪统一用 seq（Grill X4）；log_path 与上报复合键同构
++   （不 FK entry id，省 join）。
++3. 列域对齐既有表（Grill X6）：change_key String(200) = changes.change_key；
++   quick_id String(128) = quicklog_entries.ql_id。
++4. 修剪（D-003@v2，task-02 实现）：每 entry 保留窗口约 200 行且**豁免首末**
++   ——首水位是隐式起点 0 锚定载体（被删会使基线段转移给新首 ctx，复审 L1）、
++   末水位是聚合待消费锚点。
++
++downgrade 对称删表——聚合回落存量整行路径（与改造前一致，design 兼容策略）。
++
++author: qinyi
++created_at: 2026-10-03 17:55:00
++"""
++
++from __future__ import annotations
++
++from typing import Sequence
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "20261003020000"
++down_revision: str | None = "20261002010000"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++
++def upgrade() -> None:
++    op.create_table(
++        "platform_agent_log_usage_marks",
++        sa.Column("id", sa.Uuid(as_uuid=True), primary_key=True),
++        sa.Column("workspace_id", sa.Uuid(as_uuid=True), nullable=False),
++        sa.Column("log_path", sa.String(1024), nullable=False),
++        # 每 entry 单调递增（插入 MAX+1）；排序/聚合/修剪唯一键（X4 统一 seq）。
++        sa.Column("seq", sa.BigInteger(), nullable=False),
++        # 互斥 ctx：change_key/quick_id 二选一，双 NULL=无变更上下文片段。
++        sa.Column("change_key", sa.String(200), nullable=True),
++        sa.Column("quick_id", sa.String(128), nullable=True),
++        # 接管时点已落库累计（NULL 快照按 0 语义，落库时归一为 0）。
++        sa.Column("mark_invocations", sa.BigInteger(), nullable=False),
++        sa.Column("mark_input_tokens", sa.BigInteger(), nullable=False),
++        sa.Column("mark_output_tokens", sa.BigInteger(), nullable=False),
++        sa.Column("mark_cache_read_tokens", sa.BigInteger(), nullable=False),
++        sa.Column("mark_cache_write_tokens", sa.BigInteger(), nullable=False),
++        sa.Column(
++            "reported_at",
++            sa.DateTime(timezone=True),
++            nullable=False,
++        ),
++        sa.UniqueConstraint(
++            "workspace_id",
++            "log_path",
++            "seq",
++            name="uq_agent_log_usage_marks_path_seq",
++        ),
++    )
++    op.create_index(
++        "ix_agent_log_usage_marks_change_key",
++        "platform_agent_log_usage_marks",
++        ["change_key"],
++    )
++    op.create_index(
++        "ix_agent_log_usage_marks_quick_id",
++        "platform_agent_log_usage_marks",
++        ["quick_id"],
++    )
++
++
++def downgrade() -> None:
++    op.drop_index("ix_agent_log_usage_marks_quick_id", table_name="platform_agent_log_usage_marks")
++    op.drop_index(
++        "ix_agent_log_usage_marks_change_key", table_name="platform_agent_log_usage_marks"
++    )
++    op.drop_table("platform_agent_log_usage_marks")

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-03-local-usage-segment-attribution",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-03-local-usage-segment-attribution:task-02:acc-0-5060d5df",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_agent_log_push.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-segment-attribution"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-03-local-usage-segment-attribution:task-03:acc-0-dcd82f34",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-segment-attribution"
+    }
+  ]
+}

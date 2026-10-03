@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-03-local-usage-segment-attribution",
+  "appliedAt": "2026-10-03T10:42:12.861Z",
+  "baseHash": "6023bc18e9632a5fc7d41641f44577e8085c35ed",
+  "files": [
+    {
+      "path": "backend/app/modules/change/service.py",
+      "sha256": "d07e6a844d15121d323f7bf76eef37fa4f628ff4589e9388c61915e0d5f0f77c"
+    },
+    {
+      "path": "backend/app/modules/change/tests/conftest.py",
+      "sha256": "165ea8259015fd4136c61a1bb34e4ac0ebcc9d098d18d093f63fc95ba43c4673"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_usage_stats.py",
+      "sha256": "0ec214c690dfa69a7e9e9d9e417c2cc09cab06278a72a93a44df85ece2710bfb"
+    },
+    {
+      "path": "backend/app/modules/change/usage_service.py",
+      "sha256": "c99ae9ccdfbef37333469a709d808fab422e4ab5dadd1c09acf38c1f3e856b68"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/model.py",
+      "sha256": "127208785c126a20db3e1a83cdadad0b2e76e23f9b0785e60b895099b6dd3c0a"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/service.py",
+      "sha256": "111526df0d4874b3c7c5aec4b49d485f389a94f0e4d3f35c093c3ead0c422358"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_agent_log_push.py",
+      "sha256": "173949865be3bc68a1c46042786a4ea47d100d8df455dc9a028b3b0026c2e04f"
+    },
+    {
+      "path": "backend/migrations/versions/20261003020000_add_agent_log_usage_marks.py",
+      "sha256": "1d341feedbf02ef1782b4ae21b5dbe9c5436a560a2df23f5efb4c5cd26dc04ee"
+    }
+  ]
+}
