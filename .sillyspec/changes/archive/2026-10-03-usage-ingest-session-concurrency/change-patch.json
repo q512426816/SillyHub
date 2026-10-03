@@ -1,0 +1,55 @@
+{
+  "change": "2026-10-03-usage-ingest-session-concurrency",
+  "baseline": "0dc1de6bd356290752aa57aca3bdb401c175023e",
+  "head": "08c2ae45bcbdb8f41647483e0b20fa90931299ba",
+  "files": [
+    ".sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/design.md",
+    ".sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/flow-state.yaml",
+    ".sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/proposal.md",
+    ".sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/requirements.md",
+    ".sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/tasks.md",
+    "backend/app/modules/platform_sync/tests/test_usage_ingest.py",
+    "backend/app/modules/platform_sync/usage_ingest.py",
+    "backend/tests/test_align_platform_change_events_migration.py"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 362,
+    "deletions": 38
+  },
+  "savedAt": "2026-10-03T04:03:47.685Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "platform_sync",
+      "files": 2,
+      "doc": "docs/backend/modules/platform_sync.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "platform_sync",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/platform_sync.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "11947812a909d3313da01804a76a22098a0e38f564c9654f0143ca222a71dba6",
+  "patchStatus": "ok"
+}

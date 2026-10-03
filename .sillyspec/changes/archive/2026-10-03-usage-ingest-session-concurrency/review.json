@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-03-usage-ingest-session-concurrency",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-03T08:30:00Z"
+}

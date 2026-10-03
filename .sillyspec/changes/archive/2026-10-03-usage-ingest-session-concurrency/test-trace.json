@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-03-usage-ingest-session-concurrency",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-03-usage-ingest-session-concurrency:flow:FR-01",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_usage_ingest.py::test_ingest_locate_never_overlaps_across_batch（4"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-usage-ingest-session-concurrency"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-03-usage-ingest-session-concurrency:flow:FR-02",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_usage_ingest.py::test_ingest_locate_never_overlaps_across_batch（本会话两步实证"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-usage-ingest-session-concurrency"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-03-usage-ingest-session-concurrency:flow:FR-03",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_usage_ingest.py::test_ingest_malformed_usage_isolates_failure（畸形"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-usage-ingest-session-concurrency"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-03-usage-ingest-session-concurrency:flow:FR-04",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_usage_ingest.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-usage-ingest-session-concurrency"
+    }
+  ]
+}

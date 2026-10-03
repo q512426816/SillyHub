@@ -1,0 +1,518 @@
+diff --git a/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/flow-state.yaml b/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/flow-state.yaml
+new file mode 100644
+index 000000000..f7eac09d8
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/flow-state.yaml
+@@ -0,0 +1,10 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 0dc1de6bd356290752aa57aca3bdb401c175023e
++updatedAt: '2026-10-03T03:37:59.583Z'
++baseline_sha256: ffb7c4db3e3017c10f3941f68ddbc07bf62ebbcbcafbb12b189f39c328397d5c
++
+diff --git a/backend/app/modules/platform_sync/tests/test_usage_ingest.py b/backend/app/modules/platform_sync/tests/test_usage_ingest.py
+index e6782d5cb..b4b599822 100644
+--- a/backend/app/modules/platform_sync/tests/test_usage_ingest.py
++++ b/backend/app/modules/platform_sync/tests/test_usage_ingest.py
+@@ -10,7 +10,11 @@
+   method_not_found 422、无绑定 daemon 404、网关 502）静默跳过不抛；
+ - 幂等：重复摄取覆盖写同值；
+ - fire 入口：fire_usage_ingest_for_push 创建任务并执行（run 函数被调用）；
+-- 端点挂载：POST /api/agent-logs 响应后 fire 被调用且参数透传（上报语义不变）。
++- 端点挂载：POST /api/agent-logs 响应后 fire 被调用且参数透传（上报语义不变）；
++- 回归（2026-10-03-usage-ingest-session-concurrency）：定位段永不重叠（旧实现
++  定位在 Semaphore(3) 内并发共用 AsyncSession，触发 SQLAlchemy 并发禁令）；
++  畸形 totalUsage 校验异常只废单条，不丢弃同批已成功条目（旧实现
++  model_validate 在 try 圈外，一坏整批丢）。
+ 
+ RPC 层（_resolve_agent_log_read_target / _send_agent_log_rpc）全部 monkeypatch
+ （延迟 import 按 router 模块属性解析，patch router 命名空间即可拦截）——不依赖
+@@ -20,6 +24,7 @@ patch 掉，本文件只验 service 层语义与挂载接线。
+ 
+ from __future__ import annotations
+ 
++import asyncio
+ import uuid
+ from datetime import UTC, datetime, timedelta
+ from typing import Any
+@@ -314,6 +319,97 @@ async def test_ingest_idempotent_overwrite(
+     assert row.usage_cache_write_tokens == 780
+ 
+ 
++@pytest.mark.asyncio
++async def test_ingest_locate_never_overlaps_across_batch(
++    db_session: AsyncSession,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """回归（2026-10-03-usage-ingest-session-concurrency）：定位段必须串行。
++
++    旧实现定位（_resolve_agent_log_read_target）在 Semaphore(3) 内并发——多个
++    协程持同一 AsyncSession execute，触发 SQLAlchemy 并发禁令，多日志批次摄取
++    大面积失败。fake 定位内制造并发窗口并记录重叠：旧实现必红（overlapped 或
++    count<4），新实现（定位串行在并发区外）恒绿。
++    """
++    ws = uuid.uuid4()
++    rows = [
++        await _seed_row(
++            db_session,
++            ws,
++            log_path=f"C:/x/model-io-sess-conc-{i}.jsonl",
++            linked_session=uuid.uuid4(),
++        )
++        for i in range(4)
++    ]
++
++    state = {"active": 0, "overlapped": False}
++
++    async def fake_resolve(session, entry_id, scope):
++        state["active"] += 1
++        if state["active"] > 1:
++            state["overlapped"] = True
++        try:
++            await asyncio.sleep(0.01)  # 并发窗口：旧实现下第二个协程会闯入
++            row = (
++                await session.execute(
++                    select(AgentSessionLogORM).where(AgentSessionLogORM.id == entry_id)
++                )
++            ).scalar_one()
++            return row, uuid.UUID(int=1)
++        finally:
++            state["active"] -= 1
++
++    monkeypatch.setattr(
++        "app.modules.platform_sync.router._resolve_agent_log_read_target", fake_resolve
++    )
++
++    async def fake_send(entry, daemon_id, method, args, **kw):
++        return _rpc_result()
++
++    monkeypatch.setattr("app.modules.platform_sync.router._send_agent_log_rpc", fake_send)
++
++    count = await AgentLogUsageIngestService(db_session).ingest_for_push(
++        ws, [_entry(r.log_path) for r in rows]
++    )
++
++    assert not state["overlapped"], "定位调用重叠：AsyncSession 被并发使用"
++    assert count == 4
++
++
++@pytest.mark.asyncio
++async def test_ingest_malformed_usage_isolates_failure(
++    db_session: AsyncSession,
++    rpc_channel: _RpcChannel,
++) -> None:
++    """回归：畸形 totalUsage（校验异常）只废单条，不丢弃同批已成功条目。
++
++    旧实现 model_validate 在 try 保护圈外，ValidationError 炸出 gather 且
++    commit 不可达——同批已成功条目一起丢弃。新实现校验入圈：坏条目降级跳过、
++    好条目照常落库。
++    """
++    ws = uuid.uuid4()
++    bad = await _seed_row(db_session, ws, linked_session=uuid.uuid4())
++    good = await _seed_row(
++        db_session,
++        ws,
++        log_path="C:/x/model-io-sess-good.jsonl",
++        linked_session=uuid.uuid4(),
++    )
++    # 定位按 pending 顺序串行（bad 在前），RPC 队列同序：bad 拿畸形体，good 走默认成功体。
++    # 畸形体直接字面量构造（字符串值故意违 int 契约）——不经 _rpc_result 的类型化参数。
++    rpc_channel.results.append({"status": "parsed", "totalUsage": {"inputTokens": "not-a-number"}})
++
++    count = await AgentLogUsageIngestService(db_session).ingest_for_push(
++        ws, [_entry(bad.log_path), _entry(good.log_path)]
++    )
++
++    assert count == 1
++    await db_session.refresh(bad)
++    await db_session.refresh(good)
++    assert bad.usage_parsed_at is None
++    assert good.usage_input_tokens == 1200
++
++
+ @pytest.mark.asyncio
+ async def test_fire_usage_ingest_creates_and_runs_task(
+     monkeypatch: pytest.MonkeyPatch,
+diff --git a/backend/app/modules/platform_sync/usage_ingest.py b/backend/app/modules/platform_sync/usage_ingest.py
+index 938c0cfcb..bf9a37586 100644
+--- a/backend/app/modules/platform_sync/usage_ingest.py
++++ b/backend/app/modules/platform_sync/usage_ingest.py
+@@ -13,8 +13,12 @@ daemon 解析器累计口径的 ``totalUsage`` 四项覆盖写进 ``platform_age
+   不抛不重试——下次上报全量解析幂等补齐；上报响应路径零阻塞零失败放大。
+ - **节流**：同 entry 的 ``size_bytes``+``mtime_ms`` 与库中一致 且
+   ``usage_parsed_at`` 距今 < 300s → 跳过（日志未增长不重复解析）。
+-- **并发**：``asyncio.Semaphore(3)`` 限并发 RPC；单 entry 复用
+-  ``send_host_fs_rpc`` 默认 30s 传输预算。
++- **并发**：定位段（``_resolve_agent_log_read_target``，内部多处 ``await
++  session.execute``）**串行**执行——AsyncSession 禁止并发使用；纯 RPC 段
++  ``asyncio.Semaphore(3)`` 限并发；单 entry 复用 ``send_host_fs_rpc`` 默认 30s
++  传输预算（2026-10-03-usage-ingest-session-concurrency：定位原在信号灯内并发，
++  同一 session 多协程 execute 触发 SQLAlchemy 并发禁令，多日志批次摄取大面积
++  失败，已修）。
+ - **scope 构造（Grill B-1）**：后台任务无请求上下文，按 ingest 的 workspace_id
+   自构造 ``PlatformSyncAuthScope(workspace_id=...)`` 精确匹配复用
+   ``_resolve_agent_log_read_target``（其内部只消费 workspace 归属做定位）。
+@@ -76,7 +80,7 @@ class AgentLogUsageIngestService:
+         workspace_id: uuid.UUID,
+         entries: list[AgentLogEntry],
+     ) -> int:
+-        """上报后摄取入口：候选筛选 → 节流 → 并发 RPC 解析 → 覆盖写快照。
++        """上报后摄取入口：候选筛选 → 节流 → 串行定位 → 并发 RPC 解析 → 覆盖写。
+ 
+         Returns 本次成功落库快照的 entry 数（失败/跳过不计，不抛——best-effort）。
+         """
+@@ -120,16 +124,61 @@ class AgentLogUsageIngestService:
+         if not pending:
+             return 0
+ 
++        # 定位段串行（2026-10-03-usage-ingest-session-concurrency）：定位是摄取
++        # 路径上唯一吃 session 的环节（内部多处 await session.execute），必须逐条
++        # 在并发区外完成——AsyncSession 禁止并发使用，原实现定位在 Semaphore(3)
++        # 内并发触发 SQLAlchemy 并发禁令，多日志批次摄取大面积失败。
++        located: list[tuple[AgentSessionLogORM, uuid.UUID]] = []
++        for row in pending:
++            daemon_id = await self._locate_row(row)
++            if daemon_id is not None:
++                located.append((row, daemon_id))
++        if not located:
++            return 0
++
+         sem = asyncio.Semaphore(INGEST_CONCURRENCY)
+ 
+-        async def _guarded(row: AgentSessionLogORM) -> bool:
++        async def _guarded(row: AgentSessionLogORM, daemon_id: uuid.UUID) -> bool:
+             async with sem:
+-                return await self._ingest_one(row)
++                return await self._ingest_one(row, daemon_id)
+ 
+-        results = await asyncio.gather(*[_guarded(r) for r in pending])
++        results = await asyncio.gather(*[_guarded(r, d) for r, d in located])
+         await self._session.commit()
+         return sum(1 for ok in results if ok)
+ 
++    async def _locate_row(self, row: AgentSessionLogORM) -> uuid.UUID | None:
++        """单 entry 串行定位（session 查询；AppError/意外均降级跳过返回 None）。"""
++        from app.core.errors import AppError
++        from app.modules.platform_sync.auth import PlatformSyncAuthScope
++
++        # 延迟 import：router 模块级 import 本模块（挂载 fire），反向 import 会
++        # 成环——函数内解析先例见 router._resolve_agent_log_read_target 自身。
++        from app.modules.platform_sync.router import _resolve_agent_log_read_target
++
++        try:
++            # Grill B-1：后台任务自构造 workspace 精确 scope（该函数只消费
++            # workspace 归属做校验与定位，不做 token 校验）。返回的 entry 与 row
++            # 同 session 同 id——identity map 下即同一对象，无需透传。
++            _entry, daemon_id = await _resolve_agent_log_read_target(
++                self._session,
++                row.id,
++                PlatformSyncAuthScope(workspace_id=row.workspace_id),
++            )
++        except AppError as exc:
++            # 定位语义性失败（404 无绑定 daemon / 离线 / 超时 / 409 白名单外）——
++            # 按 design R-03 静默跳过。
++            log.info(
++                "usage_ingest_skipped",
++                entry_id=str(row.id),
++                code=getattr(exc, "code", None),
++            )
++            return None
++        except Exception:
++            # 防御兜底：best-effort 语义下任何意外都不抛进上报链路。
++            log.warning("usage_ingest_locate_unexpected_error", entry_id=str(row.id))
++            return None
++        return daemon_id
++
+     @staticmethod
+     def _throttled(row: AgentSessionLogORM, entry: AgentLogEntry, now: datetime) -> bool:
+         """节流判定：日志未增长（size+mtime 与库一致）且 300s 内已解析过 → 跳过。"""
+@@ -146,37 +195,39 @@ class AgentLogUsageIngestService:
+             return (now - parsed_at).total_seconds() < INGEST_THROTTLE_WINDOW_S
+         return False
+ 
+-    async def _ingest_one(self, row: AgentSessionLogORM) -> bool:
+-        """单 entry 解析 + 覆盖写（全降级不抛；返回是否成功落库）。"""
++    async def _ingest_one(self, row: AgentSessionLogORM, daemon_id: uuid.UUID) -> bool:
++        """单 entry 纯 RPC 解析 + 覆盖写（不经 session IO；全降级不抛）。
++
++        只在并发区（Semaphore 内）调用：RPC 走 ws hub、覆盖写是纯内存 ORM 属性
++        赋值——两段都不碰 session，AsyncSession 并发禁律由此满足。校验
++        （model_validate）在 try 保护圈内：畸形 totalUsage 只废本条，不炸 gather
++        丢弃同批已成功条目（2026-10-03-usage-ingest-session-concurrency）。
++        """
+         from app.core.errors import AppError
+-        from app.modules.platform_sync.auth import PlatformSyncAuthScope
+ 
+-        # 延迟 import：router 模块级 import 本模块（挂载 fire），反向 import 会
+-        # 成环——函数内解析先例见 router._resolve_agent_log_read_target 自身。
+-        from app.modules.platform_sync.router import (
+-            _resolve_agent_log_read_target,
+-            _send_agent_log_rpc,
+-        )
++        # 延迟 import（防成环，同 _locate_row）。
++        from app.modules.platform_sync.router import _send_agent_log_rpc
+         from app.modules.platform_sync.schema import AgentLogTotalUsage
+ 
+         try:
+-            entry, daemon_id = await _resolve_agent_log_read_target(
+-                self._session,
+-                row.id,
+-                # Grill B-1：后台任务自构造 workspace 精确 scope（该函数只消费
+-                # workspace 归属做校验与定位，不做 token 校验）。
+-                PlatformSyncAuthScope(workspace_id=row.workspace_id),
+-            )
+             result = await _send_agent_log_rpc(
+-                entry,
++                row,
+                 daemon_id,
+                 "read_agent_log_messages",
+-                {"path": entry.log_path, "format": entry.format},
++                {"path": row.log_path, "format": row.format},
+                 unsupported_on_method_not_found=True,
+             )
++            if result.get("status") != "parsed":
++                # unsupported / parse_error / too_large——解析器已给分层结论，不落库。
++                return False
++            raw_usage = result.get("totalUsage")
++            if not raw_usage:
++                # 零 usage 时 daemon 契约为 null（不伪造 0）——无快照可落。
++                return False
++            usage = AgentLogTotalUsage.model_validate(raw_usage)
+         except AppError as exc:
+-            # 定位/RPC 语义性失败（404 无绑定 daemon / 422 旧 daemon 未注册 /
+-            # 离线 / 超时 / 409 白名单外 / 502 网关）——按 design R-03 静默跳过。
++            # RPC 语义性失败（422 旧 daemon 未注册 / 离线 / 超时 / 409 白名单外 /
++            # 502 网关）——按 design R-03 静默跳过。
+             log.info(
+                 "usage_ingest_skipped",
+                 entry_id=str(row.id),
+@@ -184,19 +235,11 @@ class AgentLogUsageIngestService:
+             )
+             return False
+         except Exception:
+-            # 防御兜底：best-effort 语义下任何意外都不抛进 gather/上报链路。
++            # 防御兜底（含畸形 totalUsage 的 ValidationError）：best-effort 语义下
++            # 任何意外都不抛进 gather/上报链路，只废本条。
+             log.warning("usage_ingest_unexpected_error", entry_id=str(row.id))
+             return False
+ 
+-        if result.get("status") != "parsed":
+-            # unsupported / parse_error / too_large——解析器已给分层结论，不落库。
+-            return False
+-        raw_usage = result.get("totalUsage")
+-        if not raw_usage:
+-            # 零 usage 时 daemon 契约为 null（不伪造 0）——无快照可落。
+-            return False
+-        usage = AgentLogTotalUsage.model_validate(raw_usage)
+-
+         # 覆盖写幂等：全量解析结果整体替换五列（cacheWriteTokens 已由
+         # validation_alias 对齐 cache_write_tokens；None 项按 0 落库——聚合侧
+         # SUM(COALESCE) 口径与其等价，快照内保持确定性数值）。
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index 6f1c60f12..53d74cc36 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -95,7 +95,9 @@ class TestMigrationStructure:
+         cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+         heads = ScriptDirectory.from_config(cfg).get_heads()
+         assert len(heads) == 1, f"expected single head, got {heads}"
+-        assert heads[0] == "20260926234000"
++        # 链尾锚定：20261002010000（platform_agent_logs 用量快照五列，
++        # 2026-10-02-change-center-token-usage）down_revision 接本迁移后 head 前移。
++        assert heads[0] == "20261002010000"
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/design.md b/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/design.md
+new file mode 100644
+index 000000000..90b4c1cce
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/design.md
+@@ -0,0 +1,72 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-03T03:37:59.554Z
++---
++# 设计记录（Design Record）— 2026-10-03-usage-ingest-session-concurrency
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-usage-ingest-session-concurrency 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++选「定位段串行化」：`ingest_for_push` 先在并发区外逐条串行调
++`_resolve_agent_log_read_target`（它是摄取路径上唯一吃 session 的环节——内部
++至少 3 处 `await session.execute`，见 router.py:712/744 及两个 downstream 定位
++函数），收集 `(row, daemon_id)` 对；随后 `Semaphore(3)` 只包住纯 RPC 段
++（`_send_agent_log_rpc` 经 ws hub，不经 session）与覆盖写赋值（纯内存 ORM
++属性赋值，无 DB IO），gather 后统一 commit。AsyncSession 并发禁令由此解除。
++放弃「任务内自开 session」：row 对象绑定外层 session 的 identity map，跨
++session 改写需按 id 重查再合并，复杂度高且引入双 session 事务边界；串行定位
++的代价（每 entry 3-4 个本地毫秒级查询，一批 ≤50）可忽略。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-usage-ingest-session-concurrency 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++仅 `backend/app/modules/platform_sync/usage_ingest.py` 内部重构：`_ingest_one`
++签名从 `(row)` 改为 `(row, daemon_id)`（定位职责上移到 `ingest_for_push`
++串行段）；模块级入口 `fire_usage_ingest_for_push` /
++`run_usage_ingest_for_push` 与类公开方法 `ingest_for_push` 签名不变。端点、
++DTO、数据库列、openapi 均零变化。顺手修复：`AgentLogTotalUsage.model_validate`
++挪进 `_ingest_one` 的 try 保护圈内——畸形 totalUsage 不再炸出 gather 丢弃
++同批已成功条目（批次放大缺陷）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-usage-ingest-session-concurrency 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：上报天然乱序到达——快照是全量覆盖写幂等，最后一次解析胜出，
++   与到达顺序无关；节流按 size+mtime+parsed_at 判定，日志未增长不重解析。不变。
++2. 并发写：单任务内定位串行、RPC 段按行各改各的 ORM 对象（赋值无 DB IO）；
++   两个 backend 实例并发摄取同一行仍是「覆盖写同值」幂等语义，无增量累加。
++3. 切换/生命周期：fire-and-forget 任务进程退出被取消=该批丢弃，下次上报
++   幂等补齐（既有语义不变）；session 在任务体 `async with` 内，异常路径也
++   回滚关闭。
++4. 作用域：定位用 `PlatformSyncAuthScope(workspace_id=row.workspace_id)`
++   逐行自构造，workspace_id 来自已认证 scope 透传，行内归属校验恒匹配；
++   快照列挂在行上，无跨工作区串书面。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-usage-ingest-session-concurrency 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：串行定位段拉长任务总时长——上限 50 entry × 每次 3-4 个本地查询，
++毫秒级/条，远小于 RPC 段本身（30s 预算/条），可忽略；若 daemon 全离线，
++定位仍逐条走完（每条查询+404 抛出），属既有降级路径的既有代价。
++放弃方案：① 任务内自开 session（identity map 跨 session 改写复杂，见槽1）；
++② 定位整体改为候选筛选时一次性批量 JOIN 查询——需改动 router 共享函数
++`_resolve_agent_log_read_target`，牵连 content/messages 两端点，超出本缺陷
++修复范围。
+diff --git a/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/proposal.md b/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/proposal.md
+new file mode 100644
+index 000000000..8243b25d5
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/proposal.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-03T03:37:59.553Z
++---
++# 提案书（Proposal）— 2026-10-03-usage-ingest-session-concurrency
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:77f4c8ffd2cd5f82b2fefb31ad5c33682deadeee5bc37fe5b53914ca3b8ef764:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-usage-ingest-session-concurrency 留痕重锚 -->
++任务原话转写：修复 1462b8c55 引入的 usage_ingest 并发共用 AsyncSession 缺陷：Semaphore(3) 下多个协程持同一 session 进 _resolve_agent_log_read_target 触发 SQLAlchemy 并发禁令，多日志上报场景摄取大面积失败；顺手把 AgentLogTotalUsage.model_validate 挪进兜底保护圈防一坏整批丢。
++成功标准：
++- 定位段（session 查询）串行执行，RPC 段保持 Semaphore(3) 并发，AsyncSession 不再被并发使用
++- 新增回归测试：并发窗口下断言定位调用永不重叠，且旧实现（定位在信号灯内）该测试必红
++- model_validate 校验异常不再炸出 gather，单条畸形不丢弃同批已成功条目
++- 既有 test_usage_ingest.py 全部保持通过
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:98fc0ce51a110f7612a37ab29e10c0f06c8b007787e0b685e2ff0a6ddc45d2de:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-usage-ingest-session-concurrency 留痕重锚 -->
++按成功标准机械推导，共 4 条验收面：
++1. 定位段（session 查询）串行执行，RPC 段保持 Semaphore(3) 并发，AsyncSession 不再被并发使用
++2. 新增回归测试：并发窗口下断言定位调用永不重叠，且旧实现（定位在信号灯内）该测试必红
++3. model_validate 校验异常不再炸出 gather，单条畸形不丢弃同批已成功条目
++4. 既有 test_usage_ingest.py 全部保持通过
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:d06bc72cbfd1e343dd7027bba9261e62baeedd5829b37d8ddd1debc942153aaa:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-usage-ingest-session-concurrency 留痕重锚 -->
++1. 定位段（session 查询）串行执行，RPC 段保持 Semaphore(3) 并发，AsyncSession 不再被并发使用
++2. 新增回归测试：并发窗口下断言定位调用永不重叠，且旧实现（定位在信号灯内）该测试必红
++3. model_validate 校验异常不再炸出 gather，单条畸形不丢弃同批已成功条目
++4. 既有 test_usage_ingest.py 全部保持通过
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/requirements.md b/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/requirements.md
+new file mode 100644
+index 000000000..b8dfbdbbf
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/requirements.md
+@@ -0,0 +1,42 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-03T03:37:59.554Z
++---
++# 需求规格（Requirements）— 2026-10-03-usage-ingest-session-concurrency
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 定位段（session 查询）串行执行，RPC 段保持 Semaphore(3) 并发，AsyncSession 不再被并发使用
++Given 系统就绪
++When 定位段（session 查询）串行执行，RPC 段保持 Semaphore(3) 并发，AsyncSession 不再被并发使用
++Then 行为符合本条标准描述
++
++### FR-02: 新增回归测试：并发窗口下断言定位调用永不重叠，且旧实现（定位在信号灯内）该测试必红
++Given 测试 相关模块就绪
++When 新增回归测试：并发窗口下断言定位调用永不重叠，且旧实现（定位在信号灯内）该测试必红
++Then 行为符合本条标准描述
++
++### FR-03: model_validate 校验异常不再炸出 gather，单条畸形不丢弃同批已成功条目
++Given 系统就绪
++When model_validate 校验异常不再炸出 gather，单条畸形不丢弃同批已成功条目
++Then 行为符合本条标准描述
++
++### FR-04: 既有 test_usage_ingest.py 全部保持通过
++Given 系统就绪
++When 既有 test_usage_ingest.py 全部保持通过
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/platform_sync/tests/test_usage_ingest.py::test_ingest_locate_never_overlaps_across_batch（4 条 entry 批次定位永不重叠 + count==4 全落库；同文件其余 12 用例锚定 RPC 并发语义不变）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/platform_sync/tests/test_usage_ingest.py::test_ingest_locate_never_overlaps_across_batch（本会话两步实证：旧实现 HEAD 版该用例与 FR-03 用例 2 failed，新实现 14 passed）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/platform_sync/tests/test_usage_ingest.py::test_ingest_malformed_usage_isolates_failure（畸形 totalUsage 只废单条 count==1，同批 good 照常落库）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/platform_sync/tests/test_usage_ingest.py 全文件 14 用例（重构后全绿实测；含 test_ingest_degrades_on_app_error / test_ingest_idempotent_overwrite 等既有降级与幂等语义锚定）
+diff --git a/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/tasks.md b/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/tasks.md
+new file mode 100644
+index 000000000..fa7eeb70a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-03-usage-ingest-session-concurrency/tasks.md
+@@ -0,0 +1,14 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-03T03:37:59.554Z
++---
++# 任务注册表（Tasks）— 2026-10-03-usage-ingest-session-concurrency
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge + 2026-09-29 心跳指针）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。📌 任务面在 ①spec 阶段定稿：覆写为真实实现步骤（全 `- [ ]`）后再动代码；执行循环：Working on task N/M → 做一件 → 勾一格 → 下一个——收口硬门拒单拍多格勾选（--allow-batch-tick 可显式旁路留痕）。`flow status --change <名>` 为自愿查看/恢复面（恢复时给下一任务指针与进度，非协议必需——D-007）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: 定位段（session 查询）串行执行，RPC 段保持 Semaphore(3) 并发，AsyncSession 不再被并发使用
++- [x] task-02: 新增回归测试：并发窗口下断言定位调用永不重叠，且旧实现（定位在信号灯内）该测试必红
++- [x] task-03: model_validate 校验异常不再炸出 gather，单条畸形不丢弃同批已成功条目
++- [x] task-04: 既有 test_usage_ingest.py 全部保持通过
