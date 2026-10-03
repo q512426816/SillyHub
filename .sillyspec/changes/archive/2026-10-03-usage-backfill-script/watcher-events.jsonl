@@ -1,0 +1,7 @@
+{"ts":1791008306213,"kind":"file","stage":"proposal","detail":"proposal.md 出现","provisional":true}
+{"ts":1791008306213,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1791008306213,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1791008306213,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1791008326512,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791008326512,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791008346759,"kind":"gate-run","stage":"verify","detail":"门实测 passed（18.2s） · 20261003061903","provisional":true}

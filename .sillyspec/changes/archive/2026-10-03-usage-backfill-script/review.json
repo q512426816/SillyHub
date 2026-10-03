@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-03-usage-backfill-script",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "apply 分批 commit 造成长事务行锁窗口，与在线摄取并发更新同行时在线侧可能长时间阻塞",
+      "evidence": "脚本单个 session 贯穿全循环，_ingest_one 只做内存赋值，UPDATE SQL 靠循环内 _locate_row 的 session.execute 触发 autoflush 落入事务，而 commit 每 50 条才一次（backfill_agent_log_usage.py:110-121）——单事务最多累积约 50 行的行锁，窗口最坏 = 50 条 × 单条 RPC 30s 预算 ≈ 25 分钟；若 fire-and-forget 在线摄取（usage_ingest.py:271 自开 session）恰并发 UPDATE 同一批行，PG 行锁会让在线侧事务挂起直至脚本批次 commit，两侧以不同顺序更新多行还有低概率死锁。影响有限：候选多为无快照的历史会话（不活跃），在线侧本就 best-effort、下次上报补齐，且终态两侧同源（同一 daemon 全量解析累计口径，覆盖写后写者胜收敛）。",
+      "location": "backend/scripts/backfill_agent_log_usage.py:110-121",
+      "resolved": "已修：apply 循环改逐条 commit（RPC 在事务外，单行 flush 即提交）——长事务行锁窗口消除，中断续跑语义不变（backfill_agent_log_usage.py:118-123 注释留痕）"
+    },
+    {
+      "severity": "P3",
+      "title": "私有方法 _locate_row/_ingest_one 跨边界复用，service 重构时脚本会静默漂移",
+      "evidence": "脚本直接调 svc._locate_row / svc._ingest_one（下划线私有约定），签名或语义一旦在 usage_ingest.py 重构（如 scope 构造、降级契约变化）脚本无类型/测试护栏可拦；docstring 已言明是有意决策（复用已测链路+caliber-fix 归一），一次性脚本可接受，但执行前应确认与当前 service 版本同容器部署。",
+      "location": "backend/scripts/backfill_agent_log_usage.py:111-114"
+    },
+    {
+      "severity": "P3",
+      "title": "脚本零测试覆盖，低于先例 reset 脚本的形态基线",
+      "evidence": "参照先例 reset_agent_log_attribution.py 配有 backend/tests/test_reset_agent_log_attribution.py（dry-run 无副作用/幂等断言），本脚本的候选 SQL 口径（四条件组合、NOT EXISTS 反连接）、dry-run 零副作用、每 50 条分批 commit 的中断重跑语义均无测试；复用链路 _ingest_one 虽已测，但脚本侧候选筛选与分批逻辑是新代码。一次性运维脚本可辩护，建议至少补一条候选口径断言或执行后人工比对 dry-run 计数。",
+      "location": "backend/scripts/backfill_agent_log_usage.py:52-73"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "finding",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-03T14:20:48+08:00"
+}
