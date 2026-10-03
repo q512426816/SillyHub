@@ -30,9 +30,13 @@ Then 行为符合本条标准描述
 ## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
 
 <!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/platform_sync/tests/test_usage_ingest.py::test_ingest_locate_never_overlaps_across_batch（4 条 entry 批次定位永不重叠 + count==4 全落库；同文件其余 12 用例锚定 RPC 并发语义不变）
 
 <!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/platform_sync/tests/test_usage_ingest.py::test_ingest_locate_never_overlaps_across_batch（本会话两步实证：旧实现 HEAD 版该用例与 FR-03 用例 2 failed，新实现 14 passed）
 
 <!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/platform_sync/tests/test_usage_ingest.py::test_ingest_malformed_usage_isolates_failure（畸形 totalUsage 只废单条 count==1，同批 good 照常落库）
 
 <!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/platform_sync/tests/test_usage_ingest.py 全文件 14 用例（重构后全绿实测；含 test_ingest_degrades_on_app_error / test_ingest_idempotent_overwrite 等既有降级与幂等语义锚定）
