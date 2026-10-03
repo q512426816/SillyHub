@@ -67,8 +67,11 @@ quicklog 双源合并查询（平台上行条目 × 文件条目）也在本模�
     并「本地 CLI」桶）/列表摘要（_merge_local_rows 四维相加，纯本地条目新建 None
     三元组摘要）/quicklog 三处同构——`platform_agent_logs` 快照（platform_sync
     usage_ingest 摄取）按会话锚点 SUM 四维，`NOT EXISTS agent_runs` 会话级二选一
-    防双计（run 权威），桶 api_requests 恒 0、totals=Σby_model 守恒延续；本地段
-    不贡献时间三元组/轮次/请求次数（无来源诚实值）。
+    防双计（run 权威），totals=Σby_model 守恒延续。2026-10-03-local-usage-
+    caliber-fix：摄取侧输入口径归一为非缓存输入（input−cache_read，ZCode
+    总输入口径 113/113 实证）；本地段参与时间三元组（MIN/MAX first/last_seen
+    上报观察时间 + 跨度累加耗时）与请求次数（SUM(invocations) CLI 调用计数
+    并桶，DTO 恒 aware）；轮次仍无来源恒 0。
   - `ChangeService`：list/get/update_progress/approve/reject/
     transition(_with_dispatch)/submit_feedback/check_archive_gate/reparse(scope)/
     complete_stage + review 四方法 + `_bind_change_to_session` / `_project_current_stage` /

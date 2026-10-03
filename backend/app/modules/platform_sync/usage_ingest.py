@@ -243,9 +243,19 @@ class AgentLogUsageIngestService:
         # 覆盖写幂等：全量解析结果整体替换五列（cacheWriteTokens 已由
         # validation_alias 对齐 cache_write_tokens；None 项按 0 落库——聚合侧
         # SUM(COALESCE) 口径与其等价，快照内保持确定性数值）。
-        row.usage_input_tokens = usage.input_tokens or 0
+        #
+        # 输入口径归一（2026-10-03-local-usage-caliber-fix）：ZCode 日志的
+        # inputTokens 是**总输入**（含缓存命中部分）——实测主会话 113 条调用
+        # 恒满足 totalTokens == inputTokens + outputTokens，GLM/OpenAI 口径；
+        # 而平台 agent_runs（Anthropic 口径）的 input_tokens 不含缓存命中。
+        # 此处统一归一为「非缓存输入」（input − cache_read，下限 0），下游
+        # 命中率公式 cache_read/(cache_read+input) 与「输入」展示语义即与
+        # 平台执行完全对齐（旧口径曾把命中率从 ~98% 压到 ~50%）。
+        raw_input = usage.input_tokens or 0
+        cache_read = usage.cache_read_tokens or 0
+        row.usage_input_tokens = max(0, raw_input - cache_read)
         row.usage_output_tokens = usage.output_tokens or 0
-        row.usage_cache_read_tokens = usage.cache_read_tokens or 0
+        row.usage_cache_read_tokens = cache_read
         row.usage_cache_write_tokens = usage.cache_write_tokens or 0
         row.usage_parsed_at = datetime.now(UTC)
         return True

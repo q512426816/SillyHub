@@ -185,7 +185,7 @@ describe("ChangeUsageCard（task-07）", () => {
     fireEvent.click(await screen.findByRole("button", { name: "按模型明细" }));
     expect(
       await screen.findByText(
-        /统计关联会话内全部执行与本地 CLI 会话（快速修复经会话绑定关联）；本地 CLI 用量来自落库快照/,
+        /统计关联会话内全部执行与本地 CLI 会话（快速修复经会话绑定关联）；本地 CLI 输入已归一为非缓存输入/,
       ),
     ).toBeInTheDocument();
   });
@@ -222,7 +222,7 @@ describe("ChangeUsageCard（task-07）", () => {
     expect(screen.getByText("172")).toBeInTheDocument(); // glm-4.7 行请求次数
     expect(
       screen.getByText(
-        /统计平台派发执行、关联会话执行与本地 CLI 会话，按执行去重合并；本地 CLI 用量来自 daemon 解析日志的落库快照/,
+        /统计平台派发执行、关联会话执行与本地 CLI 会话，按执行去重合并；输入均为非缓存输入口径/,
       ),
     ).toBeInTheDocument();
 
@@ -295,9 +295,33 @@ describe("ChangeUsageCard（task-07）", () => {
     expect(localTag.className).toContain("text-emerald-700");
     expect(screen.getByText("861.0K")).toBeInTheDocument();
     expect(screen.getByText("1.5M")).toBeInTheDocument();
-    // 请求列：本地 CLI 行显示「—」而非「0」（零来源展示语义）。
+    // 请求列：本地 CLI 行 api_requests=0（老日志无计数）显示「—」而非「0」。
     expect(screen.getByText("—")).toBeInTheDocument();
     expect(screen.queryByText(/^0$/)).not.toBeInTheDocument();
+  });
+
+  it("「本地 CLI」桶行 api_requests 有值（CLI 调用计数）直显千分位（caliber-fix）", async () => {
+    mocks.getChangeUsage.mockResolvedValue(
+      usageOf({
+        by_model: [
+          {
+            model: "本地 CLI",
+            input_tokens: 260_000,
+            output_tokens: 94_200,
+            cache_read_tokens: 15_400_000,
+            cache_creation_tokens: 0,
+            api_requests: 12,
+          },
+        ],
+      }),
+    );
+    renderCard();
+
+    fireEvent.click(await screen.findByRole("button", { name: "按模型明细" }));
+    expect(await screen.findByText("本地 CLI")).toBeInTheDocument();
+    // 有值直显（不再恒「—」）；命中率归一后 ~98%。
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("98.3%")).toBeInTheDocument();
   });
 
   it("纯本地变更（三元组全 None + totals 非 0）→ 不触发「尚无关联执行」空态，时间显示「—」", async () => {

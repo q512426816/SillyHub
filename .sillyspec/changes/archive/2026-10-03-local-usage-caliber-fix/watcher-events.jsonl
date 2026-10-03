@@ -1,0 +1,4 @@
+{"ts":1791006858129,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791006897836,"kind":"gate-run","stage":"verify","detail":"门实测 passed（29.2s） · 20261003055455","provisional":true}
+{"ts":1791007026046,"kind":"gate-run","stage":"verify","detail":"门实测 passed（29.2s） · 20261003055703","provisional":true}
+{"ts":1791007055660,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}

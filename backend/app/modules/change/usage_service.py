@@ -24,13 +24,17 @@ quicklog 列表组装（task-03）→ 本服务 → ``ChangeUsageRead`` / ``Usag
 各追加「本地段」——``platform_agent_logs`` 用量快照按会话锚点
 （change_session_links / quicklog_session_links）SUM 四维，会话级二选一
 （``NOT EXISTS agent_runs``，run 权威防双计，design R-01）后并入
-「本地 CLI」桶（api_requests 恒 0），totals=Σby_model 守恒延续；本地段不
-贡献时间三元组/轮次/请求次数（daemon 解析器无该数据来源，诚实值）。
+「本地 CLI」桶（api_requests = SUM(invocations) CLI 计数），totals=Σby_model
+守恒延续；本地段参与时间三元组（first/last_seen 上报观察时间取 MIN/MAX、耗时
+累加观察跨度）与请求次数（2026-10-03-local-usage-caliber-fix，轮次仍无来源
+恒 0）；摄取侧输入口径归一为非缓存输入（input − cache_read，ZCode 总输入
+口径 113/113 实证）。
 """
 
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Subquery, case, exists, func, select, union
@@ -275,8 +279,13 @@ class ChangeUsageQueryService:
 
     @staticmethod
     def _local_usage_columns() -> list[Any]:
-        """本地段快照四维聚合列（usage_parsed_at IS NOT NULL 已过滤 NULL 快照，
-        COALESCE 仅防御极端部分 NULL 行）。"""
+        """本地段快照聚合列（usage_parsed_at IS NOT NULL 已过滤 NULL 快照，
+        COALESCE 仅防御极端部分 NULL 行）。
+
+        2026-10-03-local-usage-caliber-fix 追加三项：first_seen_at /
+        last_seen_at（CLI 上报观察时间，ISO UTC String——字典序即时间序，SQL
+        MIN/MAX 直接成立）与 invocations（CLI 侧累计调用计数，D-005 留底
+        权威）——本地段据此参与时间三元组与请求次数（口径见注脚/前端文案）。"""
         return [
             func.sum(func.coalesce(AgentSessionLogORM.usage_input_tokens, 0)).label("input_tokens"),
             func.sum(func.coalesce(AgentSessionLogORM.usage_output_tokens, 0)).label(
@@ -288,6 +297,9 @@ class ChangeUsageQueryService:
             func.sum(func.coalesce(AgentSessionLogORM.usage_cache_write_tokens, 0)).label(
                 "cache_creation_tokens"
             ),
+            func.sum(func.coalesce(AgentSessionLogORM.invocations, 0)).label("api_requests"),
+            func.min(AgentSessionLogORM.first_seen_at).label("first_seen"),
+            func.max(AgentSessionLogORM.last_seen_at).label("last_seen"),
         ]
 
     @staticmethod
@@ -345,38 +357,88 @@ class ChangeUsageQueryService:
             .group_by(col(QuicklogSessionLink.ql_id))
         )
 
+    @staticmethod
+    def _iso_to_dt(value: str | None) -> datetime | None:
+        """CLI 上报 ISO 8601 UTC（Z 后缀）→ **aware UTC** datetime（None/畸形容忍
+        返 None）。
+
+        写入 DTO 恒 aware（生产 PG run 列 aware 同形态——序列化带 Z 后缀，前端
+        new Date() 正确解析；review P2 修正：曾返 naive，UTC+8 用户时间偏 8h）。
+        比较一律过 _naive_utc 剥壳（SQLite 测试库 run 列读回 naive，防混比炸），
+        剥壳后数值比较与 aware 比较等价。"""
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+    @staticmethod
+    def _naive_utc(value: datetime | None) -> datetime | None:
+        """datetime → naive（None 透传；防御 aware/naive 混比，见 _iso_to_dt）。"""
+        if value is None or value.tzinfo is None:
+            return value
+        return value.replace(tzinfo=None)
+
+    @classmethod
+    def _local_span_ms(cls, row: RowMapping) -> int:
+        """本地段上报观察跨度毫秒（last_seen − first_seen；畸形/缺失按 0）。"""
+        first = cls._iso_to_dt(row["first_seen"])
+        last = cls._iso_to_dt(row["last_seen"])
+        if first is None or last is None or last < first:
+            return 0
+        return int((last - first).total_seconds() * 1000)
+
     async def _merge_local_rows(
         self, summary: dict[Any, UsageSummaryRead], local_stmt: Any
     ) -> None:
-        """列表摘要与本地段合并：四维相加；纯本地条目新建全 None 三元组摘要。
+        """列表摘要与本地段合并：四维相加 + 请求次数并 invocations + 三元组参与。
 
-        本地段不贡献时间三元组/轮次/请求次数（无来源诚实值，FR-02）。"""
+        2026-10-03-local-usage-caliber-fix：开始/结束取 MIN/MAX(first/last_seen)
+        （上报观察时间，口径注脚声明）、耗时累加观察跨度；纯本地条目不再全 None。"""
         local_rows = (await self._session.execute(local_stmt)).mappings().all()
         for row in local_rows:
             key = row["group_key"]
+            local_started = self._iso_to_dt(row["first_seen"])
+            local_finished = self._iso_to_dt(row["last_seen"])
+            local_span = self._local_span_ms(row)
+            local_requests = int(row["api_requests"] or 0)
             cur = summary.get(key)
             if cur is None:
                 summary[key] = UsageSummaryRead(
-                    started_at=None,
-                    finished_at=None,
-                    duration_ms=None,
+                    started_at=local_started,
+                    finished_at=local_finished,
+                    duration_ms=local_span or None,
                     totals=self._local_totals(row),
                 )
                 continue
+            if local_started is not None:
+                cur_start = self._naive_utc(cur.started_at)
+                if cur_start is None or self._naive_utc(local_started) < cur_start:
+                    cur.started_at = local_started
+            if local_finished is not None:
+                cur_end = self._naive_utc(cur.finished_at)
+                if cur_end is None or self._naive_utc(local_finished) > cur_end:
+                    cur.finished_at = local_finished
+            if local_span:
+                cur.duration_ms = (cur.duration_ms or 0) + local_span
             cur.totals.input_tokens += int(row["input_tokens"] or 0)
             cur.totals.output_tokens += int(row["output_tokens"] or 0)
             cur.totals.cache_read_tokens += int(row["cache_read_tokens"] or 0)
             cur.totals.cache_creation_tokens += int(row["cache_creation_tokens"] or 0)
+            cur.totals.api_requests += local_requests
 
     @staticmethod
     def _local_totals(row: RowMapping) -> UsageTotalsRead:
-        """本地段行 → totals（api_requests/num_turns 恒 0——无来源）。"""
+        """本地段行 → totals（api_requests=SUM(invocations) CLI 计数；num_turns
+        恒 0——CLI 日志无轮次概念，诚实值）。"""
         return UsageTotalsRead(
             input_tokens=int(row["input_tokens"] or 0),
             output_tokens=int(row["output_tokens"] or 0),
             cache_read_tokens=int(row["cache_read_tokens"] or 0),
             cache_creation_tokens=int(row["cache_creation_tokens"] or 0),
-            api_requests=0,
+            api_requests=int(row["api_requests"] or 0),
             num_turns=0,
         )
 
@@ -495,15 +557,15 @@ class ChangeUsageQueryService:
                 0,
             )
         for row in local_rows or []:
-            # 本地 CLI 桶（task-03）：快照四维并入，api_requests 恒 0（解析器
-            # 无请求数来源，与兜底桶同族诚实值）。
+            # 本地 CLI 桶（task-03 + caliber-fix）：快照四维并入，api_requests =
+            # SUM(invocations)（CLI 侧累计调用计数，口径注脚声明）。
             _merge(
                 _LOCAL_CLI_MODEL,
                 int(row["input_tokens"] or 0),
                 int(row["output_tokens"] or 0),
                 int(row["cache_read_tokens"] or 0),
                 int(row["cache_creation_tokens"] or 0),
-                0,
+                int(row["api_requests"] or 0),
             )
 
         # ── 时间三元组 + 轮次（集合上聚合；无 GROUP BY 恒返回一行）──
@@ -514,6 +576,29 @@ class ChangeUsageQueryService:
             func.sum(AgentRun.num_turns).label("num_turns"),
         ).where(in_set)
         time_row = (await self._session.execute(time_stmt)).mappings().one()
+
+        # caliber-fix：本地段参与三元组——开始/结束取 MIN/MAX(first/last_seen)
+        # （上报观察时间）、耗时累加观察跨度（span=0 不动——保住 run 段全
+        # NULL 时的 None 诚实值）；轮次仍只来自 run（CLI 无轮次概念）。
+        # 比较统一过 _naive_utc（SQLite 测试库 run 列读回 naive，防混比炸）；
+        # 写入恒用 _iso_to_dt 的 aware 值（生产与 run 列同形态，review P2 修正）。
+        started_at = time_row["started_at"]
+        finished_at = time_row["finished_at"]
+        duration_ms = time_row["duration_ms"]
+        for row in local_rows or []:
+            local_started = self._iso_to_dt(row["first_seen"])
+            local_finished = self._iso_to_dt(row["last_seen"])
+            if local_started is not None:
+                cur_start = self._naive_utc(started_at)
+                if cur_start is None or self._naive_utc(local_started) < cur_start:
+                    started_at = local_started
+            if local_finished is not None:
+                cur_end = self._naive_utc(finished_at)
+                if cur_end is None or self._naive_utc(local_finished) > cur_end:
+                    finished_at = local_finished
+            local_span = self._local_span_ms(row)
+            if local_span:
+                duration_ms = (duration_ms or 0) + local_span
 
         # by_model 排序：input+output 降序；「未记录」桶恒末位（即使总量最大）。
         by_model = sorted(
@@ -533,9 +618,9 @@ class ChangeUsageQueryService:
             num_turns=int(time_row["num_turns"] or 0),
         )
         return ChangeUsageRead(
-            started_at=time_row["started_at"],
-            finished_at=time_row["finished_at"],
-            duration_ms=time_row["duration_ms"],
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_ms=duration_ms,
             totals=totals,
             by_model=by_model,
         )

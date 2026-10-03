@@ -36,18 +36,20 @@ const UNRECORDED_MODEL = "未记录";
 
 /** 「本地 CLI」桶名（backend usage_service._LOCAL_CLI_MODEL 约定值，
  * 2026-10-02-change-center-token-usage task-04）：本地 CLI 会话（ZCode/Claude
- * Code 等直接本地跑）经 daemon 解析日志落库的快照四维归并桶，请求次数无来源
- * 恒 0（渲染「—」）。 */
+ * Code 等直接本地跑）经 daemon 解析日志落库的快照四维归并桶。2026-10-03
+ * caliber-fix 后 api_requests = CLI 上报调用计数（有值直显）。 */
 const LOCAL_CLI_MODEL = "本地 CLI";
 
 /** 口径注脚（usage-note 小字）：按 kind 分叉——change 声明并集去重/共享会话/
  * 软删会话/纯执行时长口径；quicklog 声明恒走关联会话链路（无派发锚点）。
- * 2026-10-02 task-04：两 kind 均补本地 CLI 会话口径（快照落库、请求/轮次不计）。 */
+ * 2026-10-03-local-usage-caliber-fix：本地 CLI 口径更新——输入已归一为非缓存
+ * 输入（与平台执行一致）、请求次数=CLI 上报调用计数、起止/耗时含上报观察
+ * 跨度、轮次无来源不计。 */
 const USAGE_NOTE_TEXT: Record<ChangeUsageCardProps["kind"], string> = {
   change:
-    "统计平台派发执行、关联会话执行与本地 CLI 会话，按执行去重合并；本地 CLI 用量来自 daemon 解析日志的落库快照，请求次数与轮次无来源不计；会话服务多个变更时消耗在各变更分别显示；已删除会话的执行仍计入；耗时为纯执行时长累加",
+    "统计平台派发执行、关联会话执行与本地 CLI 会话，按执行去重合并；输入均为非缓存输入口径（本地 CLI 已归一）；本地 CLI 的起止为上报观察时间、请求次数为 CLI 调用计数、轮次无来源不计；会话服务多个变更时消耗在各变更分别显示；已删除会话的执行仍计入；耗时为执行时长与观察跨度累加",
   quicklog:
-    "统计关联会话内全部执行与本地 CLI 会话（快速修复经会话绑定关联）；本地 CLI 用量来自落库快照，请求次数与轮次无来源不计",
+    "统计关联会话内全部执行与本地 CLI 会话（快速修复经会话绑定关联）；本地 CLI 输入已归一为非缓存输入，起止为上报观察时间、请求次数为 CLI 调用计数、轮次无来源不计",
 };
 
 export interface ChangeUsageCardProps {
@@ -257,7 +259,18 @@ export function ChangeUsageCard({ kind, workspaceId, refKey }: ChangeUsageCardPr
           label="缓存写入"
           value={formatTokensCompact(usage.totals.cache_creation_tokens)}
         />
-        <UsageItem label="请求次数" value={formatCount(usage.totals.api_requests)} />
+        <UsageItem
+          label="请求次数"
+          // 与明细表同口径（review P3 修正）：请求次数 0 且全部来自本地 CLI 桶
+          // （老日志无 invocations 计数）→「—」，避免摘要「0」与明细「—」打架。
+          value={
+            usage.totals.api_requests === 0 &&
+            usage.by_model.length > 0 &&
+            usage.by_model.every((m) => m.model === LOCAL_CLI_MODEL)
+              ? "—"
+              : formatCount(usage.totals.api_requests)
+          }
+        />
         <UsageItem
           label="缓存命中率"
           value={formatHitRate(hit)}
@@ -361,9 +374,11 @@ export function ChangeUsageCard({ kind, workspaceId, refKey }: ChangeUsageCardPr
                     {formatTokensCompact(row.cache_creation_tokens)}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
-                    {/* 本地 CLI 桶请求次数无来源（恒 0 诚实值）→「—」（对齐
-                        「未记录」桶的零来源展示语义，task-04）。 */}
-                    {row.model === LOCAL_CLI_MODEL ? "—" : formatCount(row.api_requests)}
+                    {/* 本地 CLI 桶请求次数 = CLI 调用计数（caliber-fix 起有值
+                        直显）；0 = 老日志无计数（invocations NULL）→「—」。 */}
+                    {row.model === LOCAL_CLI_MODEL && row.api_requests === 0
+                      ? "—"
+                      : formatCount(row.api_requests)}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
                     {formatHitRate(cacheHitRate(row))}

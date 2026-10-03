@@ -1,0 +1,29 @@
+{
+  "change": "2026-10-03-local-usage-caliber-fix",
+  "baseline": "9bfb14f024d206b065210d3c1c34a4c8ce4e7305",
+  "head": "9bfb14f024d206b065210d3c1c34a4c8ce4e7305",
+  "files": [
+    ".sillyspec/changes/2026-10-03-local-usage-caliber-fix/design.md",
+    ".sillyspec/changes/2026-10-03-local-usage-caliber-fix/proposal.md",
+    ".sillyspec/changes/2026-10-03-local-usage-caliber-fix/requirements.md",
+    ".sillyspec/changes/2026-10-03-local-usage-caliber-fix/tasks.md"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 227,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-03T05:57:35.245Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "66689a7a24e2935f219c9b2e414c7d34f3ca2b3f331709dae48ba92e46d48b09",
+  "patchStatus": "ok"
+}

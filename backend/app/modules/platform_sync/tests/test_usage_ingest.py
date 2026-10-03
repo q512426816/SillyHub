@@ -88,11 +88,15 @@ async def _seed_row(
     return row
 
 
+# ZCode 真实口径样本形态（caliber-fix 实证：inputTokens 是**总输入**，含缓存
+# 命中——totalTokens == inputTokens + outputTokens 恒成立）。落库归一后期望
+# usage_input_tokens = 6800 − 5600 = 1200（非缓存输入）。
 _DEFAULT_TOTAL_USAGE: dict[str, int] = {
-    "inputTokens": 1200,
+    "inputTokens": 6800,
     "outputTokens": 340,
     "cacheReadTokens": 5600,
     "cacheWriteTokens": 780,
+    "totalTokens": 7140,
 }
 
 
@@ -158,6 +162,8 @@ async def test_ingest_writes_snapshot_with_column_mapping(
 
     assert ingested == 1
     await db_session.refresh(row)
+    # caliber-fix 口径归一：落库 = 总输入 6800 − 缓存命中 5600 = 1200（非缓存
+    # 输入，与平台 agent_runs 口径对齐——命中率公式据此归正）。
     assert row.usage_input_tokens == 1200
     assert row.usage_output_tokens == 340
     assert row.usage_cache_read_tokens == 5600
@@ -165,6 +171,33 @@ async def test_ingest_writes_snapshot_with_column_mapping(
     assert row.usage_cache_write_tokens == 780
     assert row.usage_parsed_at is not None
     assert len(rpc_channel.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_ingest_input_floor_zero_when_cache_exceeds(
+    db_session: AsyncSession, rpc_channel: _RpcChannel
+) -> None:
+    """口径归一下界防御：cache_read > input（畸形/边界样本）→ 落 0 不落负数。"""
+    ws = uuid.uuid4()
+    row = await _seed_row(db_session, ws, linked_session=uuid.uuid4())
+    rpc_channel.results.append(
+        {
+            "status": "parsed",
+            "totalUsage": {
+                "inputTokens": 100,
+                "outputTokens": 10,
+                "cacheReadTokens": 500,
+                "cacheWriteTokens": 0,
+            },
+        }
+    )
+
+    count = await AgentLogUsageIngestService(db_session).ingest_for_push(ws, [_entry(row.log_path)])
+
+    assert count == 1
+    await db_session.refresh(row)
+    assert row.usage_input_tokens == 0
+    assert row.usage_cache_read_tokens == 500
 
 
 @pytest.mark.asyncio

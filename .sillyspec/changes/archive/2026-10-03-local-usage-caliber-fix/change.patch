@@ -1,0 +1,250 @@
+diff --git a/.sillyspec/changes/2026-10-03-local-usage-caliber-fix/design.md b/.sillyspec/changes/2026-10-03-local-usage-caliber-fix/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-03-local-usage-caliber-fix/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-03T05:43:23.076Z
++---
++# 设计记录（Design Record）— 2026-10-03-local-usage-caliber-fix
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-local-usage-caliber-fix 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++摄取侧口径归一：usage_ingest._ingest_one 落库 usage_input_tokens = max(0, inputTokens − cacheReadTokens)（非缓存输入，与平台 agent_runs/Anthropic 口径对齐；ZCode/GLM 总输入口径 113/113 实证 total=input+output）；下游命中率公式与「输入」展示语义零改动自动归正（49.6%→~98.3%）。聚合侧补缺：usage_service 本地段查询列加 MIN(first_seen)/MAX(last_seen)/SUM(invocations)——三元组参与（MIN/MAX + 耗时累加观察跨度，跨度 0 不动保 None 诚实值）、请求次数并入 api_requests（CLI 上报调用计数）；轮次仍无来源恒 0。前端仅注脚文案与「本地 CLI」行请求列 0→「—」有值直显。覆盖写幂等使活跃日志下次上报自动重算存量（节流 300s 窗口外）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-local-usage-caliber-fix 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++无端点/DTO 签名变化。内部行为变化三处：①platform_agent_logs.usage_input_tokens 落库语义从「daemon 原文总输入」改为「非缓存输入」（存量旧快照在下次成功摄取时幂等覆盖为新口径）；②ChangeUsageRead/UsageSummaryRead 的 started_at/finished_at/duration_ms/api_requests 四个**既有字段**开始包含本地 CLI 段贡献（原先恒 None/0）——消费方（用量卡/列表执行列）零改动即得新值；③「本地 CLI」桶行 api_requests 从恒 0 变为 SUM(invocations)。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-local-usage-caliber-fix 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++①乱序：first/last_seen 取 SQL MIN/MAX 天然乱序免疫；ISO 串字典序=时间序（CLI 恒 UTC Z 协议），畸形串 _iso_to_dt 容忍返 None 跳过。②并发写：快照覆盖写幂等（全量解析整体替换），并发摄取同 entry 结果确定；聚合只读。③切换/中断：best-effort 摄取失败保持旧快照（不落半截——五列一次赋值后统一 commit）；时长跨度 last<first 畸形按 0。④作用域：本地段查询恒带 change_session_links/quicklog_session_links 锚点 + workspace 过滤，跨工作区不串台；naive/aware 时区混比统一过 _naive_utc 剥壳（SQLite 测试库丢 tzinfo 场景实测命中）。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-local-usage-caliber-fix 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：口径切换期新旧快照并存（存量未重摄的旧口径行 input 偏大、命中率偏低）——活跃变更下次上报自动收敛，死日志不重算可接受（展示偏高不丢数）。放弃的方案：展示层按数据源分公式（本地 CLI 用 cache_read/input、平台用现行公式）——两口径数字混一张表仍费解、公式分叉扩散到三处组件；落库归一一处收敛全部下游，且与平台列语义同构。次要风险：invocations 与 api_requests 语义近似（CLI 留底计数 vs API 调用）非严格同义，注脚已声明。
+
+diff --git a/.sillyspec/changes/2026-10-03-local-usage-caliber-fix/proposal.md b/.sillyspec/changes/2026-10-03-local-usage-caliber-fix/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-03-local-usage-caliber-fix/proposal.md
+@@ -0,0 +1,56 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-03T05:43:23.068Z
++---
++# 提案书（Proposal）— 2026-10-03-local-usage-caliber-fix
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:a3515eb71ebd065b677a3a5c7b6894dde6bcc8d21e284a6ac43266c75534fd99:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-local-usage-caliber-fix 留痕重锚 -->
++任务原话转写：修复变更中心本地 CLI 用量口径缺陷（用户验收 2026-10-02-change-center-token-usage 时发现）：ZCode 日志 inputTokens 实证含缓存命中部分（113/113 恒满足 total=input+output），现有命中率公式分母重复计入缓存读取导致命中率被腰斩（49.6%，实际约 98.3%）；且时间三元组/请求次数当时裁定不展示，但库内 first_seen/last_seen（上报观察时间）与 invocations（CLI 累计调用计数）数据现成。
++成功标准：
++- 摄取落库口径归一：usage_input_tokens 存「输入−缓存读取」（非缓存输入，与平台 agent_runs 口径对齐），max(0,...) 防负；注释锚定 113/113 实证
++- 命中率展示归正：归一后既有公式自动正确（缓存读取/(缓存读取+输入)≈98%）
++- 本地段参与时间三元组：开始=MIN(first_seen)、结束=MAX(last_seen)、耗时含跨度（ISO 字符串字典序比较）；混合场景与 run 段取 MIN/MAX、耗时相加
++- 请求次数：本地段 SUM(invocations) 并入 api_requests
++- 注脚声明口径（输入=非缓存输入；时间为上报观察跨度；请求次数含 CLI 计数）
++- 轮次维持 0（无来源）；覆盖写幂等使活跃日志下次上报自动重算
++- 聚焦测试全绿：test_usage_ingest + test_usage_stats + change-usage-card
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:38c13f15f4501133447965004f2cab7955ef989b5fbc0f1ebebbafaa965265af:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-local-usage-caliber-fix 留痕重锚 -->
++按成功标准机械推导，共 12 条验收面：
++1. 摄取落库口径归一：usage_input_tokens 存「输入−缓存读取」（非缓存输入，与平台 agent_runs 口径对齐），max(0,...) 防负
++2. 注释锚定 113/113 实证
++3. 命中率展示归正：归一后既有公式自动正确（缓存读取/(缓存读取+输入)≈98%）
++4. 本地段参与时间三元组：开始=MIN(first_seen)、结束=MAX(last_seen)、耗时含跨度（ISO 字符串字典序比较）
++5. 混合场景与 run 段取 MIN/MAX、耗时相加
++6. 请求次数：本地段 SUM(invocations) 并入 api_requests
++7. 注脚声明口径（输入=非缓存输入
++8. 时间为上报观察跨度
++9. 请求次数含 CLI 计数）
++10. 轮次维持 0（无来源）
++11. 覆盖写幂等使活跃日志下次上报自动重算
++12. 聚焦测试全绿：test_usage_ingest + test_usage_stats + change-usage-card
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:b7c40fb1eea6ea4e2063ecd5fc5cb505a4c916d2b08b9778cc162c27ccbc9e94:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-local-usage-caliber-fix 留痕重锚 -->
++1. 摄取落库口径归一：usage_input_tokens 存「输入−缓存读取」（非缓存输入，与平台 agent_runs 口径对齐），max(0,...) 防负
++2. 注释锚定 113/113 实证
++3. 命中率展示归正：归一后既有公式自动正确（缓存读取/(缓存读取+输入)≈98%）
++4. 本地段参与时间三元组：开始=MIN(first_seen)、结束=MAX(last_seen)、耗时含跨度（ISO 字符串字典序比较）
++5. 混合场景与 run 段取 MIN/MAX、耗时相加
++6. 请求次数：本地段 SUM(invocations) 并入 api_requests
++7. 注脚声明口径（输入=非缓存输入
++8. 时间为上报观察跨度
++9. 请求次数含 CLI 计数）
++10. 轮次维持 0（无来源）
++11. 覆盖写幂等使活跃日志下次上报自动重算
++12. 聚焦测试全绿：test_usage_ingest + test_usage_stats + change-usage-card
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+
+diff --git a/.sillyspec/changes/2026-10-03-local-usage-caliber-fix/requirements.md b/.sillyspec/changes/2026-10-03-local-usage-caliber-fix/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-03-local-usage-caliber-fix/requirements.md
+@@ -0,0 +1,106 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-03T05:43:23.076Z
++---
++# 需求规格（Requirements）— 2026-10-03-local-usage-caliber-fix
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 摄取落库口径归一：usage_input_tokens 存「输入−缓存读取」（非缓存输入，与平台 agent_runs 口径对齐），max(0,...) 防负
++Given 系统就绪
++When 摄取落库口径归一：usage_input_tokens 存「输入−缓存读取」（非缓存输入，与平台 agent_runs 口径对齐），max(0,...) 防负
++Then 行为符合本条标准描述
++
++### FR-02: 注释锚定 113/113 实证
++Given 系统就绪
++When 注释锚定 113/113 实证
++Then 行为符合本条标准描述
++
++### FR-03: 命中率展示归正：归一后既有公式自动正确（缓存读取/(缓存读取+输入)≈98%）
++Given 系统就绪
++When 命中率展示归正：归一后既有公式自动正确（缓存读取/(缓存读取+输入)≈98%）
++Then 行为符合本条标准描述
++
++### FR-04: 本地段参与时间三元组：开始=MIN(first_seen)、结束=MAX(last_seen)、耗时含跨度（ISO 字符串字典序比较）
++Given 系统就绪
++When 本地段参与时间三元组：开始=MIN(first_seen)、结束=MAX(last_seen)、耗时含跨度（ISO 字符串字典序比较）
++Then 行为符合本条标准描述
++
++### FR-05: 混合场景与 run 段取 MIN/MAX、耗时相加
++Given 系统就绪
++When 混合场景与 run 段取 MIN/MAX、耗时相加
++Then 行为符合本条标准描述
++
++### FR-06: 请求次数：本地段 SUM(invocations) 并入 api_requests
++Given api 相关模块就绪
++When 请求次数：本地段 SUM(invocations) 并入 api_requests
++Then 行为符合本条标准描述
++
++### FR-07: 注脚声明口径（输入=非缓存输入
++Given 系统就绪
++When 注脚声明口径（输入=非缓存输入
++Then 行为符合本条标准描述
++
++### FR-08: 时间为上报观察跨度
++Given 系统就绪
++When 时间为上报观察跨度
++Then 行为符合本条标准描述
++
++### FR-09: 请求次数含 CLI 计数）
++Given 系统就绪
++When 请求次数含 CLI 计数）
++Then 行为符合本条标准描述
++
++### FR-10: 轮次维持 0（无来源）
++Given 系统就绪
++When 轮次维持 0（无来源）
++Then 行为符合本条标准描述
++
++### FR-11: 覆盖写幂等使活跃日志下次上报自动重算
++Given 幂等 相关模块就绪
++When 覆盖写幂等使活跃日志下次上报自动重算
++Then 行为符合本条标准描述
++
++### FR-12: 聚焦测试全绿：test_usage_ingest + test_usage_stats + change-usage-card
++Given 测试 相关模块就绪
++When 聚焦测试全绿：test_usage_ingest + test_usage_stats + change-usage-card
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/platform_sync/tests/test_usage_ingest.py ::test_ingest_writes_snapshot_with_column_mapping（6800−5600=1200 断言）+ ::test_ingest_input_floor_zero_when_cache_exceeds（下界 0 防负）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/platform_sync/usage_ingest.py _ingest_one 落库段注释（113/113 实证锚定）——非测试行为：不适用：文档注释锚定，行为正确性由 FR-01 测试承载
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx 「本地 CLI 桶行 api_requests 有值直显」用例（98.3% 命中率断言）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_usage_stats.py ::test_local_only_triple_from_seen_at（03:37:50.183→04:14:12.160 三元组+跨度 2181977ms）
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_usage_stats.py ::test_local_triple_and_invocations_contribute（run 10:00→11:00 与本地 09:00→10:30 取 MIN/MAX、耗时 500+5400000）
++
++<!--AGENT:测试绑定FR-06 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_usage_stats.py ::test_local_triple_and_invocations_contribute（api_requests==12 = invocations 合计）+ ::test_local_only_triple_from_seen_at（==9）
++
++<!--AGENT:测试绑定FR-07 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx 注脚断言（「输入均为非缓存输入口径」getByText）
++
++<!--AGENT:测试绑定FR-08 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_usage_stats.py ::test_local_only_triple_from_seen_at（跨度毫秒断言）——注脚文案侧由 FR-07 用例同文件承载
++
++<!--AGENT:测试绑定FR-09 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_usage_stats.py ::test_local_triple_and_invocations_contribute（桶行 api_requests==12 断言）
++
++<!--AGENT:测试绑定FR-10 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/change/tests/test_usage_stats.py ::test_local_triple_and_invocations_contribute（num_turns==1 仅 run 段，本地不计）
++
++<!--AGENT:测试绑定FR-11 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/platform_sync/tests/test_usage_ingest.py ::test_ingest_idempotent_overwrite（两次摄取同值幂等）——自动重算=幂等+节流窗口外重摄的推论，不适用：端到端重算需真机上报，属部署后验收
++
++<!--AGENT:测试绑定FR-12 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/platform_sync/tests/test_usage_ingest.py（15 passed）+ backend/app/modules/change/tests/test_usage_stats.py（27 passed）+ frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx（10 passed）
+
+diff --git a/.sillyspec/changes/2026-10-03-local-usage-caliber-fix/tasks.md b/.sillyspec/changes/2026-10-03-local-usage-caliber-fix/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-03-local-usage-caliber-fix/tasks.md
+@@ -0,0 +1,22 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-03T05:43:23.077Z
++---
++# 任务注册表（Tasks）— 2026-10-03-local-usage-caliber-fix
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge + 2026-09-29 心跳指针）：完成一条 = 实现到位 + 相关测试跑绿 → 立即勾 `[x]`，勿攒到收口一把勾（勾选是进度锚与哨兵证据面）。📌 任务面在 ①spec 阶段定稿：覆写为真实实现步骤（全 `- [ ]`）后再动代码；执行循环：Working on task N/M → 做一件 → 勾一格 → 下一个——收口硬门拒单拍多格勾选（--allow-batch-tick 可显式旁路留痕）。`flow status --change <名>` 为自愿查看/恢复面（恢复时给下一任务指针与进度，非协议必需——D-007）。本文件收口前随交付显式 pathspec 提交。
++
++- [ ] task-01: 摄取落库口径归一：usage_input_tokens 存「输入−缓存读取」（非缓存输入，与平台 agent_runs 口径对齐），max(0,...) 防负
++- [ ] task-02: 注释锚定 113/113 实证
++- [ ] task-03: 命中率展示归正：归一后既有公式自动正确（缓存读取/(缓存读取+输入)≈98%）
++- [ ] task-04: 本地段参与时间三元组：开始=MIN(first_seen)、结束=MAX(last_seen)、耗时含跨度（ISO 字符串字典序比较）
++- [ ] task-05: 混合场景与 run 段取 MIN/MAX、耗时相加
++- [ ] task-06: 请求次数：本地段 SUM(invocations) 并入 api_requests
++- [ ] task-07: 注脚声明口径（输入=非缓存输入
++- [ ] task-08: 时间为上报观察跨度
++- [ ] task-09: 请求次数含 CLI 计数）
++- [ ] task-10: 轮次维持 0（无来源）
++- [ ] task-11: 覆盖写幂等使活跃日志下次上报自动重算
++- [ ] task-12: 聚焦测试全绿：test_usage_ingest + test_usage_stats + change-usage-card

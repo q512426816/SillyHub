@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-03-local-usage-caliber-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-03-local-usage-caliber-fix:flow:FR-01",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_usage_ingest.py::test_ingest_writes_snapshot_with_column_mapping（6800−5600=1200"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-caliber-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-03-local-usage-caliber-fix:flow:FR-03",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx「本地 CLI 桶行 api_requests 有值直显」用例"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-caliber-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-03-local-usage-caliber-fix:flow:FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py::test_local_only_triple_from_seen_at（03:37:50.183→04:14:12.160"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-caliber-fix"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-03-local-usage-caliber-fix:flow:FR-05",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py::test_local_triple_and_invocations_contribute（run"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-caliber-fix"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-03-local-usage-caliber-fix:flow:FR-06",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py::test_local_triple_and_invocations_contribute（api_requests==12"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-caliber-fix"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-03-local-usage-caliber-fix:flow:FR-07",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-caliber-fix"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-10-03-local-usage-caliber-fix:flow:FR-08",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py::test_local_only_triple_from_seen_at（跨度毫秒断言）——注脚文案侧由"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-caliber-fix"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-03-local-usage-caliber-fix:flow:FR-09",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py::test_local_triple_and_invocations_contribute（桶行"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-caliber-fix"
+    },
+    {
+      "anchor": "FR-10",
+      "row_id": "2026-10-03-local-usage-caliber-fix:flow:FR-10",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py::test_local_triple_and_invocations_contribute（num_turns==1"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-caliber-fix"
+    },
+    {
+      "anchor": "FR-11",
+      "row_id": "2026-10-03-local-usage-caliber-fix:flow:FR-11",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_usage_ingest.py::test_ingest_idempotent_overwrite（两次摄取同值幂等）——自动重算=幂等+节流窗口外重摄的推论"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-caliber-fix"
+    },
+    {
+      "anchor": "FR-12",
+      "row_id": "2026-10-03-local-usage-caliber-fix:flow:FR-12",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py",
+        "backend/app/modules/platform_sync/tests/test_usage_ingest.py",
+        "frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-03-local-usage-caliber-fix"
+    }
+  ]
+}

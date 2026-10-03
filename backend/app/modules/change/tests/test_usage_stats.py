@@ -1244,8 +1244,14 @@ class TestLocalCliSegment:
         *,
         parsed: bool = True,
         tokens: tuple[int, int, int, int] = (100, 20, 50, 10),
+        first_seen: str | None = None,
+        last_seen: str | None = None,
+        invocations: int | None = None,
     ) -> AgentSessionLogORM:
-        """快照行直写：parsed=False 造 NULL 快照（存量未摄取行）。"""
+        """快照行直写：parsed=False 造 NULL 快照（存量未摄取行）。
+
+        caliber-fix 追加 first/last_seen（ISO String）与 invocations 造数——
+        本地段三元组/请求次数来源。"""
         row = AgentSessionLogORM(
             workspace_id=workspace_id,
             log_path=f"C:/Users/qinyi/.zcode/cli/rollout/model-io-{uuid.uuid4().hex}.jsonl",
@@ -1257,6 +1263,9 @@ class TestLocalCliSegment:
             usage_cache_read_tokens=tokens[2] if parsed else None,
             usage_cache_write_tokens=tokens[3] if parsed else None,
             usage_parsed_at=_T12 if parsed else None,
+            first_seen_at=first_seen,
+            last_seen_at=last_seen,
+            invocations=invocations,
         )
         db_session.add(row)
         await db_session.commit()
@@ -1404,3 +1413,80 @@ class TestLocalCliSegment:
         assert pure.totals.input_tokens == 40
         assert pure.started_at is None and pure.duration_ms is None
         assert pure.totals.num_turns == 0
+
+    async def test_local_triple_and_invocations_contribute(self, db_session: AsyncSession) -> None:
+        """20. caliber-fix：本地段参与三元组（MIN/MAX first/last_seen + 跨度）
+        与请求次数（SUM(invocations)）；混合场景与 run 段取 MIN/MAX、耗时相加。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/caliber-fix")
+        change = await _make_change(db_session, ws.id, "2026-10-03-caliber-fix")
+        sess_local = await _make_session(db_session, uid)
+        sess_run = await _make_session(db_session, uid)
+        await _make_change_link(db_session, change_id=change.id, session_id=sess_local.id)
+        await _make_change_link(db_session, change_id=change.id, session_id=sess_run.id)
+        # run 段：10:00→11:00 耗时 500ms 轮次 1。
+        await _make_run(
+            db_session,
+            agent_session_id=sess_run.id,
+            model="GLM-5.3",
+            input_tokens=10,
+            output_tokens=5,
+            started_at=_T10,
+            finished_at=_T11,
+            duration_ms=500,
+            num_turns=1,
+        )
+        # 本地段：上报观察 09:00→10:30（跨度 5400000ms）、invocations 12。
+        await self._make_log_entry(
+            db_session,
+            ws.id,
+            sess_local.id,
+            tokens=(100, 20, 50, 10),
+            first_seen="2026-08-30T09:00:00.000Z",
+            last_seen="2026-08-30T10:30:00.000Z",
+            invocations=12,
+        )
+
+        svc = ChangeUsageQueryService(db_session)
+        usage = await svc.get_change_usage(ws.id, change.id)
+        summary = await svc.summarize_changes([change.id])
+
+        # 详情：开始取 MIN（本地 09:00 早于 run 10:00）、结束取 MAX（run 11:00 晚于本地 10:30）。
+        assert _naive(usage.started_at) == datetime(2026, 8, 30, 9, 0, 0, 0)
+        assert _naive(usage.finished_at) == datetime(2026, 8, 30, 11, 0, 0)
+        # 耗时 = run 500ms + 本地跨度 90 分钟。
+        assert usage.duration_ms == 500 + 5_400_000
+        # 请求次数 = 本地 invocations 12（run 段无 mu 明细为 0）；轮次仍只计 run。
+        assert usage.totals.api_requests == 12
+        assert usage.totals.num_turns == 1
+        # 守恒：桶行 api_requests 同值。
+        local_bucket = next(i for i in usage.by_model if i.model == "本地 CLI")
+        assert local_bucket.api_requests == 12
+
+        # 列表摘要与详情同口径。
+        assert summary[change.id].totals.api_requests == 12
+        assert summary[change.id].duration_ms == 500 + 5_400_000
+
+    async def test_local_only_triple_from_seen_at(self, db_session: AsyncSession) -> None:
+        """21. 纯本地（无 run）：三元组 = first/last_seen 跨度，不再全 None。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/pure-local")
+        change = await _make_change(db_session, ws.id, "2026-10-03-pure-local")
+        sess = await _make_session(db_session, uid)
+        await _make_change_link(db_session, change_id=change.id, session_id=sess.id)
+        await self._make_log_entry(
+            db_session,
+            ws.id,
+            sess.id,
+            first_seen="2026-08-30T03:37:50.183Z",
+            last_seen="2026-08-30T04:14:12.160Z",
+            invocations=9,
+        )
+
+        usage = await ChangeUsageQueryService(db_session).get_change_usage(ws.id, change.id)
+
+        assert _naive(usage.started_at) == datetime(2026, 8, 30, 3, 37, 50, 183000)
+        assert _naive(usage.finished_at) == datetime(2026, 8, 30, 4, 14, 12, 160000)
+        # 跨度 ≈ 36 分 22 秒（毫秒取整）。
+        assert usage.duration_ms == 2_181_977  # 36 分 21.977 秒
+        assert usage.totals.api_requests == 9
