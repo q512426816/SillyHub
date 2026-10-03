@@ -13,8 +13,12 @@ daemon 解析器累计口径的 ``totalUsage`` 四项覆盖写进 ``platform_age
   不抛不重试——下次上报全量解析幂等补齐；上报响应路径零阻塞零失败放大。
 - **节流**：同 entry 的 ``size_bytes``+``mtime_ms`` 与库中一致 且
   ``usage_parsed_at`` 距今 < 300s → 跳过（日志未增长不重复解析）。
-- **并发**：``asyncio.Semaphore(3)`` 限并发 RPC；单 entry 复用
-  ``send_host_fs_rpc`` 默认 30s 传输预算。
+- **并发**：定位段（``_resolve_agent_log_read_target``，内部多处 ``await
+  session.execute``）**串行**执行——AsyncSession 禁止并发使用；纯 RPC 段
+  ``asyncio.Semaphore(3)`` 限并发；单 entry 复用 ``send_host_fs_rpc`` 默认 30s
+  传输预算（2026-10-03-usage-ingest-session-concurrency：定位原在信号灯内并发，
+  同一 session 多协程 execute 触发 SQLAlchemy 并发禁令，多日志批次摄取大面积
+  失败，已修）。
 - **scope 构造（Grill B-1）**：后台任务无请求上下文，按 ingest 的 workspace_id
   自构造 ``PlatformSyncAuthScope(workspace_id=...)`` 精确匹配复用
   ``_resolve_agent_log_read_target``（其内部只消费 workspace 归属做定位）。
@@ -76,7 +80,7 @@ class AgentLogUsageIngestService:
         workspace_id: uuid.UUID,
         entries: list[AgentLogEntry],
     ) -> int:
-        """上报后摄取入口：候选筛选 → 节流 → 并发 RPC 解析 → 覆盖写快照。
+        """上报后摄取入口：候选筛选 → 节流 → 串行定位 → 并发 RPC 解析 → 覆盖写。
 
         Returns 本次成功落库快照的 entry 数（失败/跳过不计，不抛——best-effort）。
         """
@@ -120,15 +124,60 @@ class AgentLogUsageIngestService:
         if not pending:
             return 0
 
+        # 定位段串行（2026-10-03-usage-ingest-session-concurrency）：定位是摄取
+        # 路径上唯一吃 session 的环节（内部多处 await session.execute），必须逐条
+        # 在并发区外完成——AsyncSession 禁止并发使用，原实现定位在 Semaphore(3)
+        # 内并发触发 SQLAlchemy 并发禁令，多日志批次摄取大面积失败。
+        located: list[tuple[AgentSessionLogORM, uuid.UUID]] = []
+        for row in pending:
+            daemon_id = await self._locate_row(row)
+            if daemon_id is not None:
+                located.append((row, daemon_id))
+        if not located:
+            return 0
+
         sem = asyncio.Semaphore(INGEST_CONCURRENCY)
 
-        async def _guarded(row: AgentSessionLogORM) -> bool:
+        async def _guarded(row: AgentSessionLogORM, daemon_id: uuid.UUID) -> bool:
             async with sem:
-                return await self._ingest_one(row)
+                return await self._ingest_one(row, daemon_id)
 
-        results = await asyncio.gather(*[_guarded(r) for r in pending])
+        results = await asyncio.gather(*[_guarded(r, d) for r, d in located])
         await self._session.commit()
         return sum(1 for ok in results if ok)
+
+    async def _locate_row(self, row: AgentSessionLogORM) -> uuid.UUID | None:
+        """单 entry 串行定位（session 查询；AppError/意外均降级跳过返回 None）。"""
+        from app.core.errors import AppError
+        from app.modules.platform_sync.auth import PlatformSyncAuthScope
+
+        # 延迟 import：router 模块级 import 本模块（挂载 fire），反向 import 会
+        # 成环——函数内解析先例见 router._resolve_agent_log_read_target 自身。
+        from app.modules.platform_sync.router import _resolve_agent_log_read_target
+
+        try:
+            # Grill B-1：后台任务自构造 workspace 精确 scope（该函数只消费
+            # workspace 归属做校验与定位，不做 token 校验）。返回的 entry 与 row
+            # 同 session 同 id——identity map 下即同一对象，无需透传。
+            _entry, daemon_id = await _resolve_agent_log_read_target(
+                self._session,
+                row.id,
+                PlatformSyncAuthScope(workspace_id=row.workspace_id),
+            )
+        except AppError as exc:
+            # 定位语义性失败（404 无绑定 daemon / 离线 / 超时 / 409 白名单外）——
+            # 按 design R-03 静默跳过。
+            log.info(
+                "usage_ingest_skipped",
+                entry_id=str(row.id),
+                code=getattr(exc, "code", None),
+            )
+            return None
+        except Exception:
+            # 防御兜底：best-effort 语义下任何意外都不抛进上报链路。
+            log.warning("usage_ingest_locate_unexpected_error", entry_id=str(row.id))
+            return None
+        return daemon_id
 
     @staticmethod
     def _throttled(row: AgentSessionLogORM, entry: AgentLogEntry, now: datetime) -> bool:
@@ -146,37 +195,39 @@ class AgentLogUsageIngestService:
             return (now - parsed_at).total_seconds() < INGEST_THROTTLE_WINDOW_S
         return False
 
-    async def _ingest_one(self, row: AgentSessionLogORM) -> bool:
-        """单 entry 解析 + 覆盖写（全降级不抛；返回是否成功落库）。"""
-        from app.core.errors import AppError
-        from app.modules.platform_sync.auth import PlatformSyncAuthScope
+    async def _ingest_one(self, row: AgentSessionLogORM, daemon_id: uuid.UUID) -> bool:
+        """单 entry 纯 RPC 解析 + 覆盖写（不经 session IO；全降级不抛）。
 
-        # 延迟 import：router 模块级 import 本模块（挂载 fire），反向 import 会
-        # 成环——函数内解析先例见 router._resolve_agent_log_read_target 自身。
-        from app.modules.platform_sync.router import (
-            _resolve_agent_log_read_target,
-            _send_agent_log_rpc,
-        )
+        只在并发区（Semaphore 内）调用：RPC 走 ws hub、覆盖写是纯内存 ORM 属性
+        赋值——两段都不碰 session，AsyncSession 并发禁律由此满足。校验
+        （model_validate）在 try 保护圈内：畸形 totalUsage 只废本条，不炸 gather
+        丢弃同批已成功条目（2026-10-03-usage-ingest-session-concurrency）。
+        """
+        from app.core.errors import AppError
+
+        # 延迟 import（防成环，同 _locate_row）。
+        from app.modules.platform_sync.router import _send_agent_log_rpc
         from app.modules.platform_sync.schema import AgentLogTotalUsage
 
         try:
-            entry, daemon_id = await _resolve_agent_log_read_target(
-                self._session,
-                row.id,
-                # Grill B-1：后台任务自构造 workspace 精确 scope（该函数只消费
-                # workspace 归属做校验与定位，不做 token 校验）。
-                PlatformSyncAuthScope(workspace_id=row.workspace_id),
-            )
             result = await _send_agent_log_rpc(
-                entry,
+                row,
                 daemon_id,
                 "read_agent_log_messages",
-                {"path": entry.log_path, "format": entry.format},
+                {"path": row.log_path, "format": row.format},
                 unsupported_on_method_not_found=True,
             )
+            if result.get("status") != "parsed":
+                # unsupported / parse_error / too_large——解析器已给分层结论，不落库。
+                return False
+            raw_usage = result.get("totalUsage")
+            if not raw_usage:
+                # 零 usage 时 daemon 契约为 null（不伪造 0）——无快照可落。
+                return False
+            usage = AgentLogTotalUsage.model_validate(raw_usage)
         except AppError as exc:
-            # 定位/RPC 语义性失败（404 无绑定 daemon / 422 旧 daemon 未注册 /
-            # 离线 / 超时 / 409 白名单外 / 502 网关）——按 design R-03 静默跳过。
+            # RPC 语义性失败（422 旧 daemon 未注册 / 离线 / 超时 / 409 白名单外 /
+            # 502 网关）——按 design R-03 静默跳过。
             log.info(
                 "usage_ingest_skipped",
                 entry_id=str(row.id),
@@ -184,18 +235,10 @@ class AgentLogUsageIngestService:
             )
             return False
         except Exception:
-            # 防御兜底：best-effort 语义下任何意外都不抛进 gather/上报链路。
+            # 防御兜底（含畸形 totalUsage 的 ValidationError）：best-effort 语义下
+            # 任何意外都不抛进 gather/上报链路，只废本条。
             log.warning("usage_ingest_unexpected_error", entry_id=str(row.id))
             return False
-
-        if result.get("status") != "parsed":
-            # unsupported / parse_error / too_large——解析器已给分层结论，不落库。
-            return False
-        raw_usage = result.get("totalUsage")
-        if not raw_usage:
-            # 零 usage 时 daemon 契约为 null（不伪造 0）——无快照可落。
-            return False
-        usage = AgentLogTotalUsage.model_validate(raw_usage)
 
         # 覆盖写幂等：全量解析结果整体替换五列（cacheWriteTokens 已由
         # validation_alias 对齐 cache_write_tokens；None 项按 0 落库——聚合侧

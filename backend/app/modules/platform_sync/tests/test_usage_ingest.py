@@ -10,7 +10,11 @@
   method_not_found 422、无绑定 daemon 404、网关 502）静默跳过不抛；
 - 幂等：重复摄取覆盖写同值；
 - fire 入口：fire_usage_ingest_for_push 创建任务并执行（run 函数被调用）；
-- 端点挂载：POST /api/agent-logs 响应后 fire 被调用且参数透传（上报语义不变）。
+- 端点挂载：POST /api/agent-logs 响应后 fire 被调用且参数透传（上报语义不变）；
+- 回归（2026-10-03-usage-ingest-session-concurrency）：定位段永不重叠（旧实现
+  定位在 Semaphore(3) 内并发共用 AsyncSession，触发 SQLAlchemy 并发禁令）；
+  畸形 totalUsage 校验异常只废单条，不丢弃同批已成功条目（旧实现
+  model_validate 在 try 圈外，一坏整批丢）。
 
 RPC 层（_resolve_agent_log_read_target / _send_agent_log_rpc）全部 monkeypatch
 （延迟 import 按 router 模块属性解析，patch router 命名空间即可拦截）——不依赖
@@ -20,6 +24,7 @@ patch 掉，本文件只验 service 层语义与挂载接线。
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -312,6 +317,96 @@ async def test_ingest_idempotent_overwrite(
     await db_session.refresh(row)
     assert row.usage_input_tokens == 1200
     assert row.usage_cache_write_tokens == 780
+
+
+@pytest.mark.asyncio
+async def test_ingest_locate_never_overlaps_across_batch(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """回归（2026-10-03-usage-ingest-session-concurrency）：定位段必须串行。
+
+    旧实现定位（_resolve_agent_log_read_target）在 Semaphore(3) 内并发——多个
+    协程持同一 AsyncSession execute，触发 SQLAlchemy 并发禁令，多日志批次摄取
+    大面积失败。fake 定位内制造并发窗口并记录重叠：旧实现必红（overlapped 或
+    count<4），新实现（定位串行在并发区外）恒绿。
+    """
+    ws = uuid.uuid4()
+    rows = [
+        await _seed_row(
+            db_session,
+            ws,
+            log_path=f"C:/x/model-io-sess-conc-{i}.jsonl",
+            linked_session=uuid.uuid4(),
+        )
+        for i in range(4)
+    ]
+
+    state = {"active": 0, "overlapped": False}
+
+    async def fake_resolve(session, entry_id, scope):
+        state["active"] += 1
+        if state["active"] > 1:
+            state["overlapped"] = True
+        try:
+            await asyncio.sleep(0.01)  # 并发窗口：旧实现下第二个协程会闯入
+            row = (
+                await session.execute(
+                    select(AgentSessionLogORM).where(AgentSessionLogORM.id == entry_id)
+                )
+            ).scalar_one()
+            return row, uuid.UUID(int=1)
+        finally:
+            state["active"] -= 1
+
+    monkeypatch.setattr(
+        "app.modules.platform_sync.router._resolve_agent_log_read_target", fake_resolve
+    )
+
+    async def fake_send(entry, daemon_id, method, args, **kw):
+        return _rpc_result()
+
+    monkeypatch.setattr("app.modules.platform_sync.router._send_agent_log_rpc", fake_send)
+
+    count = await AgentLogUsageIngestService(db_session).ingest_for_push(
+        ws, [_entry(r.log_path) for r in rows]
+    )
+
+    assert not state["overlapped"], "定位调用重叠：AsyncSession 被并发使用"
+    assert count == 4
+
+
+@pytest.mark.asyncio
+async def test_ingest_malformed_usage_isolates_failure(
+    db_session: AsyncSession,
+    rpc_channel: _RpcChannel,
+) -> None:
+    """回归：畸形 totalUsage（校验异常）只废单条，不丢弃同批已成功条目。
+
+    旧实现 model_validate 在 try 保护圈外，ValidationError 炸出 gather 且
+    commit 不可达——同批已成功条目一起丢弃。新实现校验入圈：坏条目降级跳过、
+    好条目照常落库。
+    """
+    ws = uuid.uuid4()
+    bad = await _seed_row(db_session, ws, linked_session=uuid.uuid4())
+    good = await _seed_row(
+        db_session,
+        ws,
+        log_path="C:/x/model-io-sess-good.jsonl",
+        linked_session=uuid.uuid4(),
+    )
+    # 定位按 pending 顺序串行（bad 在前），RPC 队列同序：bad 拿畸形体，good 走默认成功体。
+    rpc_channel.results.append(_rpc_result(total_usage={"inputTokens": "not-a-number"}))
+
+    count = await AgentLogUsageIngestService(db_session).ingest_for_push(
+        ws, [_entry(bad.log_path), _entry(good.log_path)]
+    )
+
+    assert count == 1
+    await db_session.refresh(bad)
+    await db_session.refresh(good)
+    assert bad.usage_parsed_at is None
+    assert good.usage_input_tokens == 1200
 
 
 @pytest.mark.asyncio
