@@ -313,3 +313,19 @@ supersedes：D-003@v1
 理由：用户前轮方案对比后裁决「好，做」选定方案 a——后端新增聚合端点按变更名解析 spec 树镜像（knowledge/fr/*.md 与 knowledge/decisions/*.md 的「变更：」行过滤 + 归档目录 test-trace.json/change-patch.json/delta.md 容错读取），前端观测事件卡同构折叠卡；并裁决本变更走「轻量变更+头脑风暴预段」（原话：好，做，第二个变更走轻量变更附加头脑风暴）。b（CLI 命令：tests 无 --json/derive 无对应 facet/decisions list 只读 active）与 c（前端自行解析：全量拉 60+ 域文件 N+1 + CLI 机械解析契约前端化双端漂移）经两子代理核对证伪排除。
 故障面：解析契约与 CLI 演进漂移——「变更：」行格式属 CLI 机械契约，上游改格式需同步本解析（加版本容错与未知行跳过）。
 退役判据：若平台后续引入结构化资产表（CLI 直推 DB），本解析层可退役改读表。
+
+## D-001@v1 需求范围 = 本地 CLI 会话的 token 用量纳入变更中心统计
+状态：implemented
+变更：2026-10-02-change-center-token-usage
+锚点：未记录
+最近确认：0dc1de6bd
+理由：A——本地 CLI 会话（用户 AskUserQuestion 确认）。这类会话已建 agent_sessions 行（origin=tool_report，title=「本地 · 变更名」）并经 change_session_links 绑定变更，但其 token 用量不落库（platform_agent_logs 无 token 列），变更中心用量聚合对它们恒为空。需求 = 让这类用量也进变更中心展示，口径与平台执行展示一致。
+
+## D-002@v1 落库触发方式 = 方案 A 上报链路顺带解析（backend 拉）
+状态：implemented
+变更：2026-10-02-change-center-token-usage
+锚点：未记录
+最近确认：0dc1de6bd
+理由：方案 A（用户 AskUserQuestion 确认）。CLI 每次 POST /api/agent-logs 上报后，backend 异步经现有 WS RPC 通道让 daemon 解析本次涉及 entry 的日志用量并落库。理由：触发高频自然（CLI 每条命令都上报）、复用回放已有的解析器与 RPC 通道、改动集中 backend；daemon 离线仅暂缓（下次上报全量解析幂等补齐）。否决 B（两端改动 + 持续解析开销与观看需求无关）与 C（列表页批量 RPC 爆炸、离线空数据，不可行）。
+故障面：后台摄取任务可能因 daemon 离线/超时长期空转记日志（无失败放大，快照滞后）；上报高峰期重复解析受节流钳制但仍有 RPC 开销
+退役判据：若后续 daemon 原生周期推送用量（方案 B 复潮条件：多机环境下报频率不足、新鲜度成为实际痛点），本摄取链路可整体下线，落库快照消费端（聚合/展示）不变

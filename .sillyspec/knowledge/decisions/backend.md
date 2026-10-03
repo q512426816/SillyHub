@@ -363,3 +363,19 @@ supersedes：D-003@v1
 最近确认：58a3516c9
 理由：接手参数载体为新端点 POST /sessions/{id}/takeover 的 TakeoverRequest（prompt/provider/agent_profile_id/llm_provider_id），语义不变（handoff 档引擎+档案重选，校验所选引擎 ∈ 原机支持集合）。
 supersedes：D-005@v1
+
+## D-001@v1 需求范围 = 本地 CLI 会话的 token 用量纳入变更中心统计
+状态：implemented
+变更：2026-10-02-change-center-token-usage
+锚点：未记录
+最近确认：0dc1de6bd
+理由：A——本地 CLI 会话（用户 AskUserQuestion 确认）。这类会话已建 agent_sessions 行（origin=tool_report，title=「本地 · 变更名」）并经 change_session_links 绑定变更，但其 token 用量不落库（platform_agent_logs 无 token 列），变更中心用量聚合对它们恒为空。需求 = 让这类用量也进变更中心展示，口径与平台执行展示一致。
+
+## D-002@v1 落库触发方式 = 方案 A 上报链路顺带解析（backend 拉）
+状态：implemented
+变更：2026-10-02-change-center-token-usage
+锚点：未记录
+最近确认：0dc1de6bd
+理由：方案 A（用户 AskUserQuestion 确认）。CLI 每次 POST /api/agent-logs 上报后，backend 异步经现有 WS RPC 通道让 daemon 解析本次涉及 entry 的日志用量并落库。理由：触发高频自然（CLI 每条命令都上报）、复用回放已有的解析器与 RPC 通道、改动集中 backend；daemon 离线仅暂缓（下次上报全量解析幂等补齐）。否决 B（两端改动 + 持续解析开销与观看需求无关）与 C（列表页批量 RPC 爆炸、离线空数据，不可行）。
+故障面：后台摄取任务可能因 daemon 离线/超时长期空转记日志（无失败放大，快照滞后）；上报高峰期重复解析受节流钳制但仍有 RPC 开销
+退役判据：若后续 daemon 原生周期推送用量（方案 B 复潮条件：多机环境下报频率不足、新鲜度成为实际痛点），本摄取链路可整体下线，落库快照消费端（聚合/展示）不变
