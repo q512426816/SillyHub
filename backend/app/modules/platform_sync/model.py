@@ -503,3 +503,61 @@ class PlatformChangeEventORM(BaseModel, table=True):
             server_default=text("now()"),
         ),
     )
+
+
+# ── Change 2026-10-03-local-usage-segment-attribution task-01（design 接口
+#    定义 / D-001@v1 / D-004@v1）──
+
+
+class UsageMarkORM(BaseModel, table=True):
+    """agent-logs 用量水位行（append-only，差分归属基座）。
+
+    每次 agent-logs 上报在 upsert 行覆盖**前**插入（service task-02）：记录
+    「ctx（change_key/quick_id 互斥，双 NULL=无变更上下文）接管时点的已落库
+    累计五值」（D-002@v2 时序）。消费方：change/usage_service 差分聚合
+    （task-03）——变更 X 的量 = Σ max(0, 下一水位 − 本水位)，首水位隐式
+    起点 0（D-004 存量锚定）。
+
+    - ``seq`` 每 entry 单调递增（插入 MAX+1）：排序/聚合/修剪统一键（X4）；
+    - 唯一键 (workspace_id, log_path, seq)；log_path 与上报复合键同构不 FK；
+    - 列域对齐（X6）：change_key=changes.change_key(200)/quick_id=ql_id(128)；
+    - 修剪（D-003@v2）：每 entry 中段保留约 200 行，**首末水位豁免**——首=
+      锚定载体（被删基线段转移新首 ctx，复审 L1）、末=聚合待消费锚点。
+    """
+
+    __tablename__ = "platform_agent_log_usage_marks"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "log_path",
+            "seq",
+            name="uq_agent_log_usage_marks_path_seq",
+        ),
+        Index("ix_agent_log_usage_marks_change_key", "change_key"),
+        Index("ix_agent_log_usage_marks_quick_id", "quick_id"),
+    )
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            primary_key=True,
+            nullable=False,
+            default=uuid.uuid4,
+        ),
+    )
+    workspace_id: uuid.UUID = Field(sa_column=Column(Uuid(as_uuid=True), nullable=False))
+    log_path: str = Field(sa_column=Column(String(1024), nullable=False))
+    seq: int = Field(sa_column=Column(BigInteger, nullable=False))
+    # 互斥 ctx：二选一；双 NULL=无变更上下文片段（差分不计任何变更）。
+    change_key: str | None = Field(sa_column=Column(String(200), nullable=True))
+    quick_id: str | None = Field(sa_column=Column(String(128), nullable=True))
+    # 接管时点已落库累计（NULL 快照按 0 语义，插入时归一）。
+    mark_invocations: int = Field(sa_column=Column(BigInteger, nullable=False))
+    mark_input_tokens: int = Field(sa_column=Column(BigInteger, nullable=False))
+    mark_output_tokens: int = Field(sa_column=Column(BigInteger, nullable=False))
+    mark_cache_read_tokens: int = Field(sa_column=Column(BigInteger, nullable=False))
+    mark_cache_write_tokens: int = Field(sa_column=Column(BigInteger, nullable=False))
+    reported_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )

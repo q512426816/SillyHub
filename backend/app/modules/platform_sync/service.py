@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ColumnElement, delete, func, or_, select
+from sqlalchemy import ColumnElement, delete, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -57,6 +57,7 @@ from app.modules.platform_sync.model import (
     PlatformChangeEventORM,
     PlatformChangeProgressORM,
     QuicklogEntryORM,
+    UsageMarkORM,
 )
 
 if TYPE_CHECKING:
@@ -1862,10 +1863,68 @@ class PlatformSyncService:
                 .all()
             )
             existing_by_path = {row.log_path: row for row in existing_rows}
+        # ── 水位预取（2026-10-03-local-usage-segment-attribution task-02 / D-002@v2）──
+        # 每 log_path 的当前 MAX(seq)（新 entry 无行 → 0 起）；一条 GROUP BY 批量
+        # 取，循环内本地递增免逐行 SELECT。
+        mark_seq_by_path: dict[str, int] = {}
+        if deduped:
+            seq_rows = (
+                await self._session.execute(
+                    select(
+                        UsageMarkORM.log_path.label("log_path"),
+                        func.max(UsageMarkORM.seq).label("max_seq"),
+                    )
+                    .where(
+                        col(UsageMarkORM.workspace_id) == workspace_id,
+                        col(UsageMarkORM.log_path).in_(deduped.keys()),
+                    )
+                    .group_by(UsageMarkORM.log_path)
+                )
+            ).all()
+            mark_seq_by_path = {r.log_path: int(r.max_seq or 0) for r in seq_rows}
+
         # (entry, ORM 行) 配对留存：归属阶段需要 entry 级 harness/ctx 对应到落库行。
         persisted: list[tuple[AgentLogEntry, AgentSessionLogORM]] = []
+        # 本批插过水位的 log_path（修剪阶段只收窄到活跃 entry，省全表扫）。
+        marked_paths: set[str] = set()
         for entry in deduped.values():
             row = existing_by_path.get(entry.log_path)
+            # 水位插入（D-002@v2：ctx 接管时点的已落库累计，**行覆盖前**读旧值；
+            # 新 row / NULL 快照按 0——append-only，seq 本地递增）。
+            self._session.add(
+                UsageMarkORM(
+                    id=uuid.uuid4(),
+                    workspace_id=workspace_id,
+                    log_path=entry.log_path,
+                    seq=mark_seq_by_path.get(entry.log_path, 0) + 1,
+                    change_key=entry.change_key,
+                    quick_id=entry.quick_id,
+                    mark_invocations=int(getattr(row, "invocations", 0) or 0) if row else 0,
+                    mark_input_tokens=(
+                        int(row.usage_input_tokens or 0)
+                        if row and row.usage_input_tokens is not None
+                        else 0
+                    ),
+                    mark_output_tokens=(
+                        int(row.usage_output_tokens or 0)
+                        if row and row.usage_output_tokens is not None
+                        else 0
+                    ),
+                    mark_cache_read_tokens=(
+                        int(row.usage_cache_read_tokens or 0)
+                        if row and row.usage_cache_read_tokens is not None
+                        else 0
+                    ),
+                    mark_cache_write_tokens=(
+                        int(row.usage_cache_write_tokens or 0)
+                        if row and row.usage_cache_write_tokens is not None
+                        else 0
+                    ),
+                    reported_at=now,
+                )
+            )
+            mark_seq_by_path[entry.log_path] = mark_seq_by_path.get(entry.log_path, 0) + 1
+            marked_paths.add(entry.log_path)
             if row is None:
                 row = AgentSessionLogORM(
                     id=uuid.uuid4(),
@@ -1926,6 +1985,38 @@ class PlatformSyncService:
                 row.pushed_at = pushed_at
                 row.updated_at = now
             persisted.append((entry, row))
+
+        # ── 水位修剪（D-003@v2：中段保留窗口 200，**首末豁免**——首=隐式起点
+        # 锚定载体（被删基线段转移新首 ctx，复审 L1）、末=聚合待消费锚点）──
+        # 相关子查询按行同 log_path 计算阈值：min(seq) < seq <= max(seq)-200
+        # 的中段行删除；每 entry 首末各留一行 + 最近 200 行。
+        if marked_paths:
+            mark_alias = UsageMarkORM.__table__.alias("mark_win")
+            per_path = (
+                select(
+                    mark_alias.c.log_path.label("log_path"),
+                    func.min(mark_alias.c.seq).label("min_seq"),
+                    func.max(mark_alias.c.seq).label("max_seq"),
+                )
+                .where(
+                    mark_alias.c.workspace_id == workspace_id,
+                    mark_alias.c.log_path.in_(marked_paths),
+                )
+                .group_by(mark_alias.c.log_path)
+                .subquery()
+            )
+            # EXISTS 相关删除（跨方言稳）：min(seq) < seq <= max(seq)-200 的中段行。
+            await self._session.execute(
+                delete(UsageMarkORM).where(
+                    col(UsageMarkORM.workspace_id) == workspace_id,
+                    col(UsageMarkORM.log_path).in_(marked_paths),
+                    exists().where(
+                        per_path.c.log_path == col(UsageMarkORM.log_path),
+                        col(UsageMarkORM.seq) > per_path.c.min_seq,
+                        col(UsageMarkORM.seq) <= per_path.c.max_seq - 200,
+                    ),
+                )
+            )
 
         # ── 归属（design §3.3.3：与 entries upsert 同事务，commit 前写归属列）──
         # task-03（2026-08-24-sessions-live-updates）：本批新 INSERT 的 tool_report

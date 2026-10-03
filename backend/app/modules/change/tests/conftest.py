@@ -35,5 +35,8 @@ async def ensure_platform_change_progress_table(db_engine: Any) -> None:
             tables=[
                 _ps_model.PlatformChangeProgressORM.__table__,
                 _ps_token_model.PlatformSyncTokenORM.__table__,
+                # 2026-10-03-local-usage-segment-attribution task-03：本地段整行
+                # 查询带 NOT EXISTS marks 互斥谓词——库缺表会「table not found」。
+                _ps_model.UsageMarkORM.__table__,
             ],
         )

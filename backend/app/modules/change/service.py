@@ -2143,7 +2143,11 @@ class ChangeService:
         # task-03：usage 批量摘要只收集非 deleted 行（deleted 行 usage 恒 None，
         # 不参与聚合）；空列表 / 全 deleted → 空集合零查询。
         usage_ids = [c.id for c in changes if c.location != "deleted"]
-        usage_map = await ChangeUsageQueryService(self._session).summarize_changes(usage_ids)
+        # segment-attribution：列表页变更同 workspace（路由按 workspace 查询），
+        # 差分路径的 workspace 锚定取首页行。
+        usage_map = await ChangeUsageQueryService(self._session).summarize_changes(
+            changes[0].workspace_id, usage_ids
+        )
         summaries: list[ChangeSummary] = []
         for c in changes:
             summary = ChangeSummary.model_validate(c)

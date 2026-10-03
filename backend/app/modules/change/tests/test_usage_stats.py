@@ -564,7 +564,7 @@ class TestChangeAggregationSemantics:
         }
 
         # 批量摘要锚点（(锚点 change_id, run) UNION 去重）同样只计一次。
-        summary_map = await svc.summarize_changes([change.id])
+        summary_map = await svc.summarize_changes(ws.id, [change.id])
         assert summary_map[change.id].totals.model_dump() == {
             "input_tokens": 150,
             "output_tokens": 60,
@@ -610,7 +610,7 @@ class TestChangeAggregationSemantics:
             assert [item.model for item in usage.by_model] == ["shared-model"]
 
         # 批量摘要一次查询两变更各得一份完整摘要。
-        summary_map = await svc.summarize_changes([change_a.id, change_b.id])
+        summary_map = await svc.summarize_changes(ws.id, [change_a.id, change_b.id])
         assert set(summary_map) == {change_a.id, change_b.id}
         assert summary_map[change_a.id].totals == usage_a.totals
         assert summary_map[change_b.id].totals == usage_b.totals
@@ -751,7 +751,7 @@ class TestChangeAggregationSemantics:
             "num_turns": 2,
         }
 
-        summary_map = await svc.summarize_changes([change.id])
+        summary_map = await svc.summarize_changes(ws.id, [change.id])
         assert summary_map[change.id].totals.model_dump() == {
             "input_tokens": 130,
             "output_tokens": 60,
@@ -1399,7 +1399,7 @@ class TestLocalCliSegment:
         await self._make_log_entry(db_session, ws.id, sess_pure.id, tokens=(40, 8, 12, 4))
 
         summary = await ChangeUsageQueryService(db_session).summarize_changes(
-            [change_mixed.id, change_pure.id]
+            ws.id, [change_mixed.id, change_pure.id]
         )
 
         mixed = summary[change_mixed.id]
@@ -1449,7 +1449,7 @@ class TestLocalCliSegment:
 
         svc = ChangeUsageQueryService(db_session)
         usage = await svc.get_change_usage(ws.id, change.id)
-        summary = await svc.summarize_changes([change.id])
+        summary = await svc.summarize_changes(ws.id, [change.id])
 
         # 详情：开始取 MIN（本地 09:00 早于 run 10:00）、结束取 MAX（run 11:00 晚于本地 10:30）。
         assert _naive(usage.started_at) == datetime(2026, 8, 30, 9, 0, 0, 0)
@@ -1490,3 +1490,309 @@ class TestLocalCliSegment:
         # 跨度 ≈ 36 分 22 秒（毫秒取整）。
         assert usage.duration_ms == 2_181_977  # 36 分 21.977 秒
         assert usage.totals.api_requests == 9
+
+
+# ── 22-25：水位差分归属（2026-10-03-local-usage-segment-attribution task-03）──
+
+
+class TestUsageSegmentation:
+    """水位差分双路径（FR-02/FR-03/FR-04a/FR-04b）——直写水位行模拟上报序列。"""
+
+    @pytest.fixture(autouse=True)
+    async def _tables(self, db_engine: Any) -> None:
+        from app.models.base import BaseModel
+        from app.modules.platform_sync import model as _ps_model
+
+        async with db_engine.begin() as conn:
+            await conn.run_sync(
+                BaseModel.metadata.create_all,
+                tables=[
+                    _ps_model.AgentSessionLogORM.__table__,
+                    _ps_model.UsageMarkORM.__table__,
+                ],
+            )
+
+    @staticmethod
+    async def _seed(
+        db_session: AsyncSession,
+        ws_id: uuid.UUID,
+        change_keys: list[str],
+    ) -> tuple:
+        """建变更×2 + 一个会话 + 一个 entry（快照=文件累计终值），返回 id 集。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path=f"C:/seg-{uuid.uuid4().hex[:6]}")
+        ch_a = await _make_change(db_session, ws.id, change_keys[0])
+        ch_b = await _make_change(db_session, ws.id, change_keys[1])
+        sess = await _make_session(db_session, uid)
+        await _make_change_link(db_session, change_id=ch_a.id, session_id=sess.id)
+        row = AgentSessionLogORM(
+            workspace_id=ws.id,
+            log_path="C:/x/model-io-sess-seg.jsonl",
+            harness="zcode",
+            format="zcode-model-io-jsonl",
+            agent_session_id=sess.id,
+            first_seen_at="2026-10-03T01:00:00.000Z",
+            last_seen_at="2026-10-03T05:00:00.000Z",
+            invocations=30,
+            usage_input_tokens=400,
+            usage_output_tokens=80,
+            usage_cache_read_tokens=600,
+            usage_cache_write_tokens=20,
+            usage_parsed_at=_T12,
+        )
+        db_session.add(row)
+        await db_session.commit()
+        return ws, ch_a, ch_b, row
+
+    @staticmethod
+    async def _mark(
+        db_session: AsyncSession,
+        ws_id: uuid.UUID,
+        row: AgentSessionLogORM,
+        *,
+        seq: int,
+        change_key: str | None,
+        inv: int,
+        in_tok: int,
+        out_tok: int,
+        c_read: int,
+        c_write: int,
+    ) -> None:
+        from app.modules.platform_sync.model import UsageMarkORM
+
+        db_session.add(
+            UsageMarkORM(
+                workspace_id=ws_id,
+                log_path=row.log_path,
+                seq=seq,
+                change_key=change_key,
+                mark_invocations=inv,
+                mark_input_tokens=in_tok,
+                mark_output_tokens=out_tok,
+                mark_cache_read_tokens=c_read,
+                mark_cache_write_tokens=c_write,
+                reported_at=_T12,
+            )
+        )
+        await db_session.commit()
+
+    async def test_handover_conservat_a_then_b(self, db_session: AsyncSession) -> None:
+        """22. A→B 切换：A=基线+其时段增量（首水位起点 0，D-004），B=剩余，Σ=累计。"""
+
+        ws, ch_a, ch_b, row = await self._seed(
+            db_session, uuid.uuid4(), ["2026-10-03-seg-a", "2026-10-03-seg-b"]
+        )
+        # 水位序列：A 接管（基线 100/10/200/5/5inv）→ B 接管（累计 250/40/400/10/18inv）。
+        await self._mark(
+            db_session,
+            ws.id,
+            row,
+            seq=1,
+            change_key="2026-10-03-seg-a",
+            inv=5,
+            in_tok=100,
+            out_tok=10,
+            c_read=200,
+            c_write=5,
+        )
+        await self._mark(
+            db_session,
+            ws.id,
+            row,
+            seq=2,
+            change_key="2026-10-03-seg-b",
+            inv=18,
+            in_tok=250,
+            out_tok=40,
+            c_read=400,
+            c_write=10,
+        )
+        # entry 快照 = 文件累计（400/80/600/20/30inv，B 时期末摄取后）。
+
+        svc = ChangeUsageQueryService(db_session)
+        ua = await svc.get_change_usage(ws.id, ch_a.id)
+        ub = await svc.get_change_usage(ws.id, ch_b.id)
+
+        # A：首水位起点 0 → [0, mark_B) = 250/40/400/10/18inv（基线+A 时段）。
+        assert ua.totals.input_tokens == 250
+        assert ua.totals.api_requests == 18
+        # B：[mark_B, 当前快照] = 150/40/200/10/12inv。
+        assert ub.totals.input_tokens == 400 - 250
+        assert ub.totals.api_requests == 30 - 18
+        # 守恒：Σ = 文件累计。
+        assert ua.totals.input_tokens + ub.totals.input_tokens == 400
+        assert ua.totals.api_requests + ub.totals.api_requests == 30
+
+    async def test_lagging_ingest_boundary(self, db_session: AsyncSession) -> None:
+        """23. 摄取滞后边界（FR-04a/D-002@v2）：A 尾巴在 B 接管时未落库 → 归 B。"""
+        ws, ch_a, ch_b, row = await self._seed(
+            db_session, uuid.uuid4(), ["2026-10-03-lag-a", "2026-10-03-lag-b"]
+        )
+        # A 上报（mark=0 基线）→ A 尾巴产生但摄取未跑 → B 上报（mark 仍 0）→
+        # 摄取一次刷到 100（含 A 尾巴）→ C 不存在，末水位接当前快照。
+        await self._mark(
+            db_session,
+            ws.id,
+            row,
+            seq=1,
+            change_key="2026-10-03-lag-a",
+            inv=0,
+            in_tok=0,
+            out_tok=0,
+            c_read=0,
+            c_write=0,
+        )
+        await self._mark(
+            db_session,
+            ws.id,
+            row,
+            seq=2,
+            change_key="2026-10-03-lag-b",
+            inv=0,
+            in_tok=0,
+            out_tok=0,
+            c_read=0,
+            c_write=0,
+        )
+        row.usage_input_tokens = 100
+        row.invocations = 10
+        await db_session.commit()
+
+        svc = ChangeUsageQueryService(db_session)
+        ua = await svc.get_change_usage(ws.id, ch_a.id)
+        ub = await svc.get_change_usage(ws.id, ch_b.id)
+
+        # 边界：A=0（尾巴滞后落入 B 差分）、B=100/10（末水位 0 → 快照 100）。
+        assert ua.totals.input_tokens == 0
+        assert ub.totals.input_tokens == 100
+        assert ub.totals.api_requests == 10
+        # 总量守恒。
+        assert ua.totals.input_tokens + ub.totals.input_tokens == 100
+
+    async def test_legacy_no_marks_entry_unaffected(self, db_session: AsyncSession) -> None:
+        """24. 存量无水位 entry：整行路径（互斥排除有水位），数字与改造前一致。"""
+        ws, ch_a, ch_b, _row = await self._seed(
+            db_session, uuid.uuid4(), ["2026-10-03-leg-a", "2026-10-03-leg-b"]
+        )
+        # 无任何水位——A 经会话锚点拿整行；B 无锚点无数据。
+        svc = ChangeUsageQueryService(db_session)
+        ua = await svc.get_change_usage(ws.id, ch_a.id)
+        ub = await svc.get_change_usage(ws.id, ch_b.id)
+
+        assert ua.totals.input_tokens == 400  # 整行快照（改造前行为）
+        assert ua.totals.api_requests == 30
+        assert ub.totals.input_tokens == 0
+
+    async def test_marks_entry_excluded_from_whole_row(self, db_session: AsyncSession) -> None:
+        """25. 有水位 entry 不走整行路径（互斥防双计）：A 锚点下整行量被差分量替代。"""
+        ws, ch_a, _ch_b, row = await self._seed(
+            db_session, uuid.uuid4(), ["2026-10-03-mut-a", "2026-10-03-mut-b"]
+        )
+        # 一条水位（ctx=A，mark=快照终值）→ 基线 400 归 A（首水位锚定），整行互斥。
+        await self._mark(
+            db_session,
+            ws.id,
+            row,
+            seq=1,
+            change_key="2026-10-03-mut-a",
+            inv=30,
+            in_tok=400,
+            out_tok=80,
+            c_read=600,
+            c_write=20,
+        )
+        svc = ChangeUsageQueryService(db_session)
+        ua = await svc.get_change_usage(ws.id, ch_a.id)
+
+        # 首水位锚定语义（D-004）：mark=400 是「接管时点已累计」→ [0,400) 归
+        # 首水位 ctx=A；末水位→当前快照差分 0；整行 400 被互斥排除（合计仍
+        # 恰 400，非 800——若互斥失效会得 800）。
+        assert ua.totals.input_tokens == 400
+        assert ua.totals.api_requests == 30
+
+    async def test_segment_dual_count_guard_run_authoritative(
+        self, db_session: AsyncSession
+    ) -> None:
+        """26. 防双计（execute review P1）：entry 会话有 agent_runs 行 → 差分不计
+        （run 权威），run 段与差分段不并存。"""
+        ws, ch_a, _ch_b, row = await self._seed(
+            db_session, uuid.uuid4(), ["2026-10-03-guard-a", "2026-10-03-guard-b"]
+        )
+        # 该 entry 的会话挂一条平台 run（run 权威场景）。
+        sess_id = row.agent_session_id
+        await _make_run(
+            db_session,
+            agent_session_id=sess_id,
+            model="GLM-5.3",
+            input_tokens=10,
+            output_tokens=5,
+            started_at=_T10,
+            finished_at=_T11,
+            duration_ms=500,
+            num_turns=1,
+        )
+        await self._mark(
+            db_session,
+            ws.id,
+            row,
+            seq=1,
+            change_key="2026-10-03-guard-a",
+            inv=0,
+            in_tok=0,
+            out_tok=0,
+            c_read=0,
+            c_write=0,
+        )
+
+        svc = ChangeUsageQueryService(db_session)
+        ua = await svc.get_change_usage(ws.id, ch_a.id)
+
+        # 差分路径被谓词排除（run 权威）：A 只见 run 段 10/5，无本地桶。
+        assert ua.totals.input_tokens == 10
+        assert [i.model for i in ua.by_model] == ["GLM-5.3"]
+
+    async def test_quicklog_segment_diff(self, db_session: AsyncSession) -> None:
+        """27. quicklog 差分同构（design R-05）：ql_id 水位片段计入条目。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/ql-seg")
+        sess = await _make_session(db_session, uid)
+        row = AgentSessionLogORM(
+            workspace_id=ws.id,
+            log_path="C:/x/model-io-sess-qlseg.jsonl",
+            harness="zcode",
+            format="zcode-model-io-jsonl",
+            agent_session_id=sess.id,
+            invocations=8,
+            usage_input_tokens=90,
+            usage_output_tokens=18,
+            usage_cache_read_tokens=120,
+            usage_cache_write_tokens=0,
+            usage_parsed_at=_T12,
+        )
+        db_session.add(row)
+        ql_id = "ql-20261003-seg-xyz"
+        await _make_quicklog_link(db_session, workspace_id=ws.id, ql_id=ql_id, session_id=sess.id)
+        from app.modules.platform_sync.model import UsageMarkORM
+
+        db_session.add(
+            UsageMarkORM(
+                workspace_id=ws.id,
+                log_path=row.log_path,
+                seq=1,
+                quick_id=ql_id,
+                mark_invocations=3,
+                mark_input_tokens=30,
+                mark_output_tokens=6,
+                mark_cache_read_tokens=40,
+                mark_cache_write_tokens=0,
+                reported_at=_T12,
+            )
+        )
+        await db_session.commit()
+
+        usage = await ChangeUsageQueryService(db_session).get_quicklog_usage(ws.id, ql_id)
+
+        # 首水位起点 0（D-004）→ 基线 3/30/6/40 归该 ql；末水位→快照补 5/60/12/80。
+        assert usage.totals.input_tokens == 90
+        assert usage.totals.api_requests == 8
+        assert usage.by_model[0].model == "本地 CLI"

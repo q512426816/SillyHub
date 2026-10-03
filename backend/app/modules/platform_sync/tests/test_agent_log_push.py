@@ -1227,3 +1227,112 @@ async def test_upsert_prefetch_query_count_constant(
         .all()
     )
     assert len(rows) == 15, "两轮 upsert 共 15 条独立 log_path 全部落库"
+
+
+# ── 水位记录（2026-10-03-local-usage-segment-attribution task-02 / FR-01）──
+
+
+class TestUsageMarks:
+    """上报插水位（ctx 接管时点已落库累计，D-002@v2）+ 修剪豁免首末（D-003@v2）。"""
+
+    @pytest.fixture(autouse=True)
+    async def _ensure_marks_table(self, db_engine: Any) -> None:
+        from app.models.base import BaseModel
+        from app.modules.platform_sync import model as _ps_model
+
+        async with db_engine.begin() as conn:
+            await conn.run_sync(
+                BaseModel.metadata.create_all,
+                tables=[_ps_model.UsageMarkORM.__table__],
+            )
+
+    async def _push(self, client, headers, ws_id, ctx=None, invocations=None):
+        entry = {
+            "harness": "zcode",
+            "log_path": "C:/x/model-io-sess-mark.jsonl",
+            "format": "zcode-model-io-jsonl",
+            "exists": True,
+        }
+        if ctx:
+            entry.update(ctx)
+        if invocations is not None:
+            entry["invocations"] = invocations
+        resp = await client.post(
+            "/api/agent-logs",
+            json={"pushed_at": "2026-10-03T00:00:00.000Z", "entries": [entry]},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+    async def _marks(self, db_session):
+        from app.modules.platform_sync.model import UsageMarkORM
+
+        return list(
+            (await db_session.execute(select(UsageMarkORM).order_by(UsageMarkORM.seq)))
+            .scalars()
+            .all()
+        )
+
+    async def test_first_push_mark_zero(self, client, shpsync_headers, db_session):
+        """新 entry 首次上报：水位 mark 全 0、ctx 记 change_key（FR-01）。"""
+        ws_id, headers = shpsync_headers
+        await self._push(client, headers, ws_id, ctx={"change_key": "2026-10-03-a"})
+        marks = await self._marks(db_session)
+        assert len(marks) == 1
+        assert marks[0].seq == 1
+        assert marks[0].change_key == "2026-10-03-a"
+        assert marks[0].mark_invocations == 0
+        assert marks[0].mark_input_tokens == 0
+
+    async def test_takeover_mark_reads_prior_values(self, client, shpsync_headers, db_session):
+        """接管时点水位 = 覆盖前旧值（含回填基线，FR-04b）：直写快照后换 ctx 上报。"""
+        from app.modules.platform_sync.model import AgentSessionLogORM
+
+        ws_id, headers = shpsync_headers
+        await self._push(client, headers, ws_id, ctx={"change_key": "2026-10-03-a"})
+        # 模拟回填基线：直写快照五列（归属仍 a）。
+        row = (await db_session.execute(select(AgentSessionLogORM))).scalar_one()
+        row.usage_input_tokens = 1500
+        row.usage_cache_read_tokens = 900
+        row.invocations = 7
+        await db_session.commit()
+        # 换 ctx=B 上报：水位 B 应= 1500/900/7（覆盖前旧值）。
+        await self._push(client, headers, ws_id, ctx={"change_key": "2026-10-03-b"})
+        marks = await self._marks(db_session)
+        assert len(marks) == 2
+        assert marks[1].change_key == "2026-10-03-b"
+        assert marks[1].seq == 2
+        assert marks[1].mark_input_tokens == 1500
+        assert marks[1].mark_cache_read_tokens == 900
+        assert marks[1].mark_invocations == 7
+
+    async def test_same_ctx_consecutive_and_null_ctx(self, client, shpsync_headers, db_session):
+        """同 ctx 连续上报插多行（seq 递增）；ctx 双空照插（差分不计但记录在）。"""
+        ws_id, headers = shpsync_headers
+        await self._push(client, headers, ws_id, ctx={"change_key": "k1"})
+        await self._push(client, headers, ws_id, ctx={"change_key": "k1"})
+        await self._push(client, headers, ws_id)  # 双空 ctx
+        marks = await self._marks(db_session)
+        assert [m.seq for m in marks] == [1, 2, 3]
+        assert marks[0].change_key == marks[1].change_key == "k1"
+        assert marks[2].change_key is None and marks[2].quick_id is None
+
+    async def test_trim_keeps_first_and_last(self, client, shpsync_headers, db_session):
+        """201 次上报后中段修剪至约 200 行，首（seq=1）末（seq=201）恒在（D-003@v2）。"""
+        ws_id, headers = shpsync_headers
+        for i in range(205):
+            await self._push(
+                client,
+                headers,
+                ws_id,
+                ctx={"change_key": f"ctx-{i}"},
+                invocations=i,
+            )
+        marks = await self._marks(db_session)
+        seqs = [m.seq for m in marks]
+        # 阈值：min=1 < seq <= max-200=5 → 删 seq 2..5（4 行）→ 剩 201 行。
+        assert seqs[0] == 1, "首水位（锚定载体）必须保留"
+        assert seqs[-1] == 205, "末水位（待消费锚点）必须保留"
+        assert len(marks) == 201, f"中段应修剪至 201 行，实得 {len(marks)}"
+        assert 2 not in seqs and 5 not in seqs, "中段 seq 2..5 应被删"
+        assert 6 in seqs, "窗口内 seq 6 起保留"

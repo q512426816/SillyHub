@@ -51,7 +51,7 @@ from app.modules.change.schema import (
     UsageSummaryRead,
     UsageTotalsRead,
 )
-from app.modules.platform_sync.model import AgentSessionLogORM
+from app.modules.platform_sync.model import AgentSessionLogORM, UsageMarkORM
 
 #: 兜底桶名：run.model 为 NULL 的历史 run 归此桶，by_model 恒末位（R-04，
 #: 对齐 by_provider「未记录」与 session-usage 同名先例）。
@@ -108,11 +108,13 @@ class ChangeUsageQueryService:
                     "change_id": str(change_id),
                 },
             )
-        local_rows = (
+        local_rows = list(
             (await self._session.execute(self._local_change_rows_stmt([change_id])))
             .mappings()
             .all()
         )
+        # segment-attribution：有水位 entry 走差分路径（与整行互斥），两路并桶。
+        local_rows.extend(await self._local_segment_rows(workspace_id, change_ids=[change_id]))
         return await self._aggregate_usage(self._change_run_ids(change_id), local_rows)
 
     async def get_quicklog_usage(self, workspace_id: uuid.UUID, ql_id: str) -> ChangeUsageRead:
@@ -122,17 +124,19 @@ class ChangeUsageQueryService:
         文件源条目无 DB 行；严格 404 语义由 router 层对齐详情端点做（task-04）。
         本方法对空集合返回全零 totals + 空 by_model + 三元组 None（R-05）。
         """
-        local_rows = (
+        local_rows = list(
             (await self._session.execute(self._local_quicklog_rows_stmt(workspace_id, [ql_id])))
             .mappings()
             .all()
         )
+        # segment-attribution：quicklog 差分路径同构并桶。
+        local_rows.extend(await self._local_segment_rows(workspace_id, ql_ids=[ql_id]))
         return await self._aggregate_usage(self._quicklog_run_ids(workspace_id, ql_id), local_rows)
 
     # ── 列表批量摘要（UsageSummaryRead，零 N+1）────────────────────────
 
     async def summarize_changes(
-        self, change_ids: list[uuid.UUID]
+        self, workspace_id: uuid.UUID, change_ids: list[uuid.UUID]
     ) -> dict[uuid.UUID, UsageSummaryRead]:
         """一次查询出整页变更摘要（R-03：不逐行查询、不拉 run 行进内存）。
 
@@ -146,7 +150,18 @@ class ChangeUsageQueryService:
             return {}
         rows = await self._summarize_anchor(self._change_summary_anchor(change_ids))
         summary = {row["group_key"]: self._row_to_summary(row) for row in rows}
-        await self._merge_local_rows(summary, self._local_change_rows_stmt(change_ids))
+        await self._merge_local_rows(
+            summary,
+            list(
+                (await self._session.execute(self._local_change_rows_stmt(change_ids)))
+                .mappings()
+                .all()
+            ),
+        )
+        await self._merge_local_rows(
+            summary,
+            await self._local_segment_rows(workspace_id, change_ids=change_ids),
+        )
         return summary
 
     async def summarize_quicklogs(
@@ -160,7 +175,17 @@ class ChangeUsageQueryService:
             return {}
         rows = await self._summarize_anchor(self._quicklog_summary_anchor(workspace_id, ql_ids))
         summary = {row["group_key"]: self._row_to_summary(row) for row in rows}
-        await self._merge_local_rows(summary, self._local_quicklog_rows_stmt(workspace_id, ql_ids))
+        await self._merge_local_rows(
+            summary,
+            list(
+                (await self._session.execute(self._local_quicklog_rows_stmt(workspace_id, ql_ids)))
+                .mappings()
+                .all()
+            ),
+        )
+        await self._merge_local_rows(
+            summary, await self._local_segment_rows(workspace_id, ql_ids=ql_ids)
+        )
         return summary
 
     # ── 去重执行集合（子查询形态，两类口径共用）────────────────────────
@@ -310,6 +335,201 @@ class ChangeUsageQueryService:
         NOT EXISTS 反连接对齐兜底段 :294 先例（防 NOT IN 子查询膨胀）。"""
         return ~exists().where(AgentRun.agent_session_id == AgentSessionLogORM.agent_session_id)
 
+    # ── 水位差分路径（2026-10-03-local-usage-segment-attribution task-03）──
+
+    async def _local_segment_rows(
+        self,
+        workspace_id: uuid.UUID,
+        change_ids: list[uuid.UUID] | None = None,
+        ql_ids: list[str] | None = None,
+    ) -> list[RowMapping]:
+        """执行差分聚合并归一 group_key（change 版把 change_key 映射回 change_id）。"""
+        if change_ids is not None:
+            key_rows = (
+                await self._session.execute(
+                    select(col(Change.id), col(Change.change_key)).where(
+                        col(Change.id).in_(change_ids)
+                    )
+                )
+            ).all()
+            id_by_key = {r.change_key: r.id for r in key_rows}
+            keys = list(id_by_key.keys())
+            if not keys:
+                return []
+            rows = (
+                (
+                    await self._session.execute(
+                        self._local_segment_rows_stmt(workspace_id, change_keys=keys)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            out: list[RowMapping] = []
+            for r in rows:
+                mapped = dict(r)
+                mapped["group_key"] = id_by_key.get(r["group_key"], r["group_key"])
+                out.append(mapped)
+            return out
+        return list(
+            (
+                await self._session.execute(
+                    self._local_segment_rows_stmt(workspace_id, ql_ids=ql_ids)
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+    @classmethod
+    def _local_segment_rows_stmt(
+        cls,
+        workspace_id: uuid.UUID,
+        change_keys: list[str] | None = None,
+        ql_ids: list[str] | None = None,
+    ) -> Any:
+        """水位差分聚合：变更 X 的本地量 = Σ max(0, next − eff) 片段（D-001/D-004）。
+
+        三段式 SQL：
+
+        1. ``target_paths``——workspace 内含目标 ctx 水位的 log_path 集合；
+        2. ``seg``——这些 paths 的**全部**水位行窗口（LEAD 取下一水位 mark；
+           不预先过滤 ctx——窗口需相邻全量，ctx 过滤在外层做）；join entry 行
+           取末水位兜底快照与 first/last_seen；沿 R-07 会话级防双计谓词；
+        3. 外层聚合——首水位有效起点 0（D-004 隐式锚定：片段 = next − 0，
+           即首水位 ctx 认领基线段），非首水位起点 = mark；next 为 NULL（末
+           水位）时回落 entry 当前快照；负差分防御归 0（CASE，跨方言稳）。
+        """
+        is_change = change_keys is not None
+        ctx_col = UsageMarkORM.change_key if is_change else UsageMarkORM.quick_id
+        ctx_ids: list[Any] = list(change_keys) if is_change else (ql_ids or [])
+
+        target_paths = (
+            select(col(UsageMarkORM.log_path).label("log_path"))
+            .where(
+                col(UsageMarkORM.workspace_id) == workspace_id,
+                ctx_col.in_(ctx_ids),
+            )
+            .distinct()
+            .subquery()
+        )
+
+        def _over(fn: Any, c: Any) -> Any:
+            return fn(c).over(
+                partition_by=[col(UsageMarkORM.workspace_id), col(UsageMarkORM.log_path)],
+                order_by=[col(UsageMarkORM.seq)],
+            )
+
+        first_seq = _over(func.first_value, col(UsageMarkORM.seq))
+
+        proj: list[Any] = [
+            ctx_col.label("group_key"),
+            col(UsageMarkORM.log_path).label("log_path"),
+            (col(UsageMarkORM.seq) == first_seq).label("is_first"),
+        ]
+        # 有效起点：首水位 0（D-004），否则 mark；五项（invocations + 四维 token）。
+        eff_map = {
+            "eff_invocations": UsageMarkORM.mark_invocations,
+            "eff_input_tokens": UsageMarkORM.mark_input_tokens,
+            "eff_output_tokens": UsageMarkORM.mark_output_tokens,
+            "eff_cache_read_tokens": UsageMarkORM.mark_cache_read_tokens,
+            "eff_cache_write_tokens": UsageMarkORM.mark_cache_write_tokens,
+        }
+        lead_map = {
+            "next_invocations": UsageMarkORM.mark_invocations,
+            "next_input_tokens": UsageMarkORM.mark_input_tokens,
+            "next_output_tokens": UsageMarkORM.mark_output_tokens,
+            "next_cache_read_tokens": UsageMarkORM.mark_cache_read_tokens,
+            "next_cache_write_tokens": UsageMarkORM.mark_cache_write_tokens,
+        }
+        for label, c in eff_map.items():
+            proj.append(
+                case(
+                    (col(UsageMarkORM.seq) == first_seq, 0),
+                    else_=col(c),
+                ).label(label)
+            )
+        for label, c in lead_map.items():
+            proj.append(_over(func.lead, col(c)).label(label))
+        # 末水位兜底（entry 当前快照，NULL 再 0）与 seen（三元组参与）。
+        proj.extend(
+            [
+                func.coalesce(col(AgentSessionLogORM.invocations), 0).label("snap_invocations"),
+                func.coalesce(col(AgentSessionLogORM.usage_input_tokens), 0).label(
+                    "snap_input_tokens"
+                ),
+                func.coalesce(col(AgentSessionLogORM.usage_output_tokens), 0).label(
+                    "snap_output_tokens"
+                ),
+                func.coalesce(col(AgentSessionLogORM.usage_cache_read_tokens), 0).label(
+                    "snap_cache_read_tokens"
+                ),
+                func.coalesce(col(AgentSessionLogORM.usage_cache_write_tokens), 0).label(
+                    "snap_cache_write_tokens"
+                ),
+                col(AgentSessionLogORM.first_seen_at).label("first_seen"),
+                col(AgentSessionLogORM.last_seen_at).label("last_seen"),
+            ]
+        )
+
+        seg = (
+            select(*proj)
+            .select_from(UsageMarkORM)
+            .join(target_paths, target_paths.c.log_path == col(UsageMarkORM.log_path))
+            .join(
+                AgentSessionLogORM,
+                (col(AgentSessionLogORM.workspace_id) == col(UsageMarkORM.workspace_id))
+                & (col(AgentSessionLogORM.log_path) == col(UsageMarkORM.log_path)),
+            )
+            .where(
+                col(UsageMarkORM.workspace_id) == workspace_id,
+                # R-07 会话级防双计谓词（execute review P1 修正）：与整行路径
+                # 同判——entry 会话有 agent_runs 行（平台派发）时差分不计，
+                # 防 hub 双派发窗口 run 段与差分段双计。
+                cls._local_no_runs_condition(),
+            )
+            .subquery()
+        )
+
+        # 片段值：next（末水位回落 entry 快照）− eff；负值归 0（CASE 防御）。
+        pairs = [
+            ("input_tokens", "next_input_tokens", "snap_input_tokens", "eff_input_tokens"),
+            ("output_tokens", "next_output_tokens", "snap_output_tokens", "eff_output_tokens"),
+            (
+                "cache_read_tokens",
+                "next_cache_read_tokens",
+                "snap_cache_read_tokens",
+                "eff_cache_read_tokens",
+            ),
+            (
+                "cache_creation_tokens",
+                "next_cache_write_tokens",
+                "snap_cache_write_tokens",
+                "eff_cache_write_tokens",
+            ),
+        ]
+        agg: list[Any] = []
+        for out_label, next_c, snap_c, eff_c in pairs:
+            raw = func.coalesce(seg.c[next_c], seg.c[snap_c]) - seg.c[eff_c]
+            agg.append(func.sum(case((raw < 0, 0), else_=raw)).label(out_label))
+        raw_inv = (
+            func.coalesce(seg.c["next_invocations"], seg.c["snap_invocations"])
+            - seg.c["eff_invocations"]
+        )
+        agg.insert(0, func.sum(case((raw_inv < 0, 0), else_=raw_inv)).label("api_requests"))
+        agg.extend(
+            [
+                func.min(seg.c["first_seen"]).label("first_seen"),
+                func.max(seg.c["last_seen"]).label("last_seen"),
+            ]
+        )
+
+        return (
+            select(seg.c["group_key"].label("group_key"), *agg)
+            .where(seg.c["group_key"].in_(ctx_ids))
+            .group_by(seg.c["group_key"])
+        )
+
     @classmethod
     def _local_change_rows_stmt(cls, change_ids: list[uuid.UUID]) -> Any:
         """变更侧本地段：``platform_agent_logs`` 快照按 ``change_session_links``
@@ -331,6 +551,11 @@ class ChangeUsageQueryService:
                 col(ChangeSessionLink.change_id).in_(change_ids),
                 col(AgentSessionLogORM.usage_parsed_at).is_not(None),
                 cls._local_no_runs_condition(),
+                # segment-attribution：有水位行的 entry 走差分路径（互斥防双计）。
+                ~exists().where(
+                    col(UsageMarkORM.workspace_id) == col(AgentSessionLogORM.workspace_id),
+                    col(UsageMarkORM.log_path) == col(AgentSessionLogORM.log_path),
+                ),
             )
             .group_by(col(ChangeSessionLink.change_id))
         )
@@ -353,6 +578,11 @@ class ChangeUsageQueryService:
                 col(QuicklogSessionLink.ql_id).in_(ql_ids),
                 col(AgentSessionLogORM.usage_parsed_at).is_not(None),
                 cls._local_no_runs_condition(),
+                # segment-attribution：互斥（同变更侧）。
+                ~exists().where(
+                    col(UsageMarkORM.workspace_id) == col(AgentSessionLogORM.workspace_id),
+                    col(UsageMarkORM.log_path) == col(AgentSessionLogORM.log_path),
+                ),
             )
             .group_by(col(QuicklogSessionLink.ql_id))
         )
@@ -391,13 +621,12 @@ class ChangeUsageQueryService:
         return int((last - first).total_seconds() * 1000)
 
     async def _merge_local_rows(
-        self, summary: dict[Any, UsageSummaryRead], local_stmt: Any
+        self, summary: dict[Any, UsageSummaryRead], local_rows: list[RowMapping]
     ) -> None:
         """列表摘要与本地段合并：四维相加 + 请求次数并 invocations + 三元组参与。
 
         2026-10-03-local-usage-caliber-fix：开始/结束取 MIN/MAX(first/last_seen)
         （上报观察时间，口径注脚声明）、耗时累加观察跨度；纯本地条目不再全 None。"""
-        local_rows = (await self._session.execute(local_stmt)).mappings().all()
         for row in local_rows:
             key = row["group_key"]
             local_started = self._iso_to_dt(row["first_seen"])
