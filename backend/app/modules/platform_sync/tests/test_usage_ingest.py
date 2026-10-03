@@ -396,7 +396,8 @@ async def test_ingest_malformed_usage_isolates_failure(
         linked_session=uuid.uuid4(),
     )
     # 定位按 pending 顺序串行（bad 在前），RPC 队列同序：bad 拿畸形体，good 走默认成功体。
-    rpc_channel.results.append(_rpc_result(total_usage={"inputTokens": "not-a-number"}))
+    # 畸形体直接字面量构造（字符串值故意违 int 契约）——不经 _rpc_result 的类型化参数。
+    rpc_channel.results.append({"status": "parsed", "totalUsage": {"inputTokens": "not-a-number"}})
 
     count = await AgentLogUsageIngestService(db_session).ingest_for_push(
         ws, [_entry(bad.log_path), _entry(good.log_path)]
