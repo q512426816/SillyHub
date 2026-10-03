@@ -29,13 +29,16 @@ session 改写需按 id 重查再合并，复杂度高且引入双 session 事�
 <!-- MACHINE-DRAFT:design-contract:end -->
 
 <!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
-仅 `backend/app/modules/platform_sync/usage_ingest.py` 内部重构：`_ingest_one`
+主体仅 `backend/app/modules/platform_sync/usage_ingest.py` 内部重构：`_ingest_one`
 签名从 `(row)` 改为 `(row, daemon_id)`（定位职责上移到 `ingest_for_push`
-串行段）；模块级入口 `fire_usage_ingest_for_push` /
-`run_usage_ingest_for_push` 与类公开方法 `ingest_for_push` 签名不变。端点、
-DTO、数据库列、openapi 均零变化。顺手修复：`AgentLogTotalUsage.model_validate`
-挪进 `_ingest_one` 的 try 保护圈内——畸形 totalUsage 不再炸出 gather 丢弃
-同批已成功条目（批次放大缺陷）。
+串行段，新增私有 helper `_locate_row`）；模块级入口
+`fire_usage_ingest_for_push` / `run_usage_ingest_for_push` 与类公开方法
+`ingest_for_push` 签名不变。端点、DTO、数据库列、openapi 均零变化。
+顺手修复（披露，评审 P3 清偿）：① `AgentLogTotalUsage.model_validate` 挪进
+`_ingest_one` 的 try 保护圈内——畸形 totalUsage 不再炸出 gather 丢弃同批已
+成功条目（批次放大缺陷）；② `backend/tests/test_align_platform_change_events_
+migration.py:98` 链尾锚定前移至 20261002010000——实测门暴露的 1462b8c55
+遗留旧测试债（新迁移接续后 head 断言漏更，与本变更无因果关系，顺手清偿）。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 <!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-03-usage-ingest-session-concurrency 留痕重锚 -->
