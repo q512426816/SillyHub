@@ -527,6 +527,8 @@ describe("ChangeAssetsCard 资产透明面", () => {
     await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     const group = await screen.findByTestId("change-assets-knowledge-touch");
+    // 标题用用户语言、机制口径收进 title 悬停（2026-10-04-knowledge-touch-plain-title）。
+    expect(group).toHaveTextContent("知识触达（本变更参考过的知识）");
     expect(group).toHaveTextContent("FR-auto-backend-015");
     expect(group).toHaveTextContent("THIN 辅助阶段与派发配置");
     const link = group.querySelector("a");
@@ -536,9 +538,9 @@ describe("ChangeAssetsCard 资产透明面", () => {
     );
   });
 
-  it("在途变更知识触达：实时命中渲染（live 标签区分归档反查口径）", async () => {
+  it("在途变更知识触达：实时命中渲染（标题带「实时」尾标区分归档定稿口径）", async () => {
     // 2026-09-28-knowledge-touch-live：在途（archived=false）也能有触达——数据来自
-    // knowledge_hits inject 行（后端合并），标签显示「实时」而非「待复核标记反查」。
+    // knowledge_hits inject 行（后端合并），标题尾标「实时」提示记录仍在增长。
     mockGet.mockResolvedValue({
       ...FULL,
       archived: false,
@@ -550,7 +552,7 @@ describe("ChangeAssetsCard 资产透明面", () => {
     await screen.findByRole("button", { name: /沉淀资产/ });
 
     const group = await screen.findByTestId("change-assets-knowledge-touch");
-    expect(group).toHaveTextContent("知识触达（注入命中 · 实时）");
+    expect(group).toHaveTextContent("知识触达（本变更参考过的知识 · 实时）");
     expect(group).toHaveTextContent("-audit_hooks-只在测试");
     // 实时锚点行深链：file=裸知识文件（不带 knowledge/ 前缀）
     const link = group.querySelector("a");

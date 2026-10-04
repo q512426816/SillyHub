@@ -129,13 +129,15 @@ created_at: 2026-09-28T13:29:15.726Z
 
 ## FR-auto-frontend-008 列表页重新扫描
 变更：2026-09-16-mobile-changes-parity
-状态：active
+状态：superseded
+superseded_by：FR-styles-012
+取代链：FR-auto-frontend-008 ← FR-styles-012（2026-09-26-core-pages-visual-redesign 承接）
 摘要：默认场景
 依据决策：D-003@v1
 场景正文：
 - 场景：默认场景 — Given 用户在移动变更列表页（任一变更 tab） 重新扫描返回警告列表 重新扫描请求失败；When 点击工具栏「重新扫描」按钮 警告数 > 0 返回 ApiError；Then 调用 reparseChanges(workspaceId)，成功后显示「已重新扫描：解析 N，新增 N · 更新 N · 删除 N。W 个警告。」反馈条（文案
 全文：.sillyspec/changes/archive/2026-09-16-mobile-changes-parity/requirements.md#FR-01
-最近确认：d33092ea3
+最近确认：f41468b59
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -147,17 +149,19 @@ created_at: 2026-09-28T13:29:15.726Z
   confirmed_by: agent
   confirmed_at: 4d34ed131ad55d9d98502b0e342a9af79289fcb4
   source_change: 2026-09-16-mobile-changes-parity
-  status: active
+  status: superseded
 
 ## FR-auto-frontend-009 列表卡片信息补齐
 变更：2026-09-16-mobile-changes-parity
-状态：active
+状态：superseded
+superseded_by：FR-styles-012
+取代链：FR-auto-frontend-009 ← FR-styles-012（2026-09-26-core-pages-visual-redesign 承接）
 摘要：默认场景
 依据决策：D-003@v1
 场景正文：
 - 场景：默认场景 — Given ChangeSummary.owner_name 非空 owner_name 空且 owner_id 有值 owner_name 与 owner_id 均空 a；When 渲染卡片元信息行 渲染元信息行 渲染元信息行 渲染元信息行 渲染执行用量行 渲染执行用量行 渲染执行用量行 渲染徽标行；Then 显示负责人名（owner_name） 显示 owner_id 前 8 位（mono 弱化色） 负责人段显示「—」 影响组件段省略（不占位） 显示「—」占位 整行
 全文：.sillyspec/changes/archive/2026-09-16-mobile-changes-parity/requirements.md#FR-02
-最近确认：d33092ea3
+最近确认：f41468b59
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -169,17 +173,19 @@ created_at: 2026-09-28T13:29:15.726Z
   confirmed_by: agent
   confirmed_at: 4d34ed131ad55d9d98502b0e342a9af79289fcb4
   source_change: 2026-09-16-mobile-changes-parity
-  status: active
+  status: superseded
 
 ## FR-auto-frontend-010 列表排序切换与 URL 参数
 变更：2026-09-16-mobile-changes-parity
-状态：active
+状态：superseded
+superseded_by：FR-styles-012
+取代链：FR-auto-frontend-010 ← FR-styles-012（2026-09-26-core-pages-visual-redesign 承接）
 摘要：默认场景
 依据决策：D-003@v1
 场景正文：
 - 场景：默认场景 — Given 用户打开筛选抽屉 URL 含 ?tab=quicklog 或 ?tab=archive（合法值） URL 含 ?search=词 未操作任何筛选、URL 无参数；When 切换「排序」chip（↓ 最近优先 / ↑ 最早优先）并确定 页面初始加载 页面初始加载 页面加载；Then sortDir 生效进主列表 query key，列表按所选方向请求 初始 tab 为该值（非法值回 active） 搜索词初始化为该值（输入框与已提交 sta
 全文：.sillyspec/changes/archive/2026-09-16-mobile-changes-parity/requirements.md#FR-03
-最近确认：d33092ea3
+最近确认：f41468b59
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -191,17 +197,19 @@ created_at: 2026-09-28T13:29:15.726Z
   confirmed_by: agent
   confirmed_at: 4d34ed131ad55d9d98502b0e342a9af79289fcb4
   source_change: 2026-09-16-mobile-changes-parity
-  status: active
+  status: superseded
 
 ## FR-auto-frontend-011 quicklog tab 筛选
 变更：2026-09-16-mobile-changes-parity
-状态：active
+状态：superseded
+superseded_by：FR-styles-010
+取代链：FR-auto-frontend-011 ← FR-styles-010（2026-09-26-core-pages-visual-redesign 承接）
 摘要：默认场景
 依据决策：D-003@v1
 场景正文：
 - 场景：默认场景 — Given 用户在快速修复 tab 用户选择状态=疑似中断并确定 作者选项数据 用户关闭「显示空壳占位」并确定 quicklog tab 处于抽屉筛选状态；When 打开筛选抽屉 quicklog 列表请求发出 quicklog 列表响应到达 请求发出 点击重置；Then 可见状态 4 态 chips、作者 chips、显示空壳占位开关 query key 与请求参数带 status="stale"（槽位与桌面 QuicklogT
 全文：.sillyspec/changes/archive/2026-09-16-mobile-changes-parity/requirements.md#FR-04
-最近确认：d33092ea3
+最近确认：f41468b59
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -213,7 +221,7 @@ created_at: 2026-09-28T13:29:15.726Z
   confirmed_by: agent
   confirmed_at: 4d34ed131ad55d9d98502b0e342a9af79289fcb4
   source_change: 2026-09-16-mobile-changes-parity
-  status: active
+  status: superseded
 
 ## FR-auto-frontend-012 详情页三卡挂载
 变更：2026-09-16-mobile-changes-parity
@@ -239,13 +247,15 @@ created_at: 2026-09-28T13:29:15.726Z
 
 ## FR-auto-frontend-013 详情页阶段-时间线联动
 变更：2026-09-16-mobile-changes-parity
-状态：active
+状态：superseded
+superseded_by：FR-styles-011
+取代链：FR-auto-frontend-013 ← FR-styles-011（2026-09-26-core-pages-visual-redesign 承接）
 摘要：默认场景
 依据决策：D-004@v1
 场景正文：
 - 场景：默认场景 — Given steps 中某阶段有条目 时间线处于阶段筛选态 某阶段在 steps 中无条目；When 点击步骤条该阶段节点 再次点击同阶段节点或点清除 chip 渲染步骤条；Then 时间线仅显示该阶段步骤，卡头出现「阶段名 ✕」清除 chip 取消筛选恢复全量 该节点不可点（无筛选效果）
 全文：.sillyspec/changes/archive/2026-09-16-mobile-changes-parity/requirements.md#FR-06
-最近确认：d33092ea3
+最近确认：f41468b59
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -257,7 +267,7 @@ created_at: 2026-09-28T13:29:15.726Z
   confirmed_by: agent
   confirmed_at: 4d34ed131ad55d9d98502b0e342a9af79289fcb4
   source_change: 2026-09-16-mobile-changes-parity
-  status: active
+  status: superseded
 
 ## FR-auto-frontend-014 详情页删除入口
 变更：2026-09-16-mobile-changes-parity
@@ -343,12 +353,14 @@ created_at: 2026-09-28T13:29:15.726Z
 
 ## FR-auto-frontend-019 变更详情页重新挂载沉淀资产卡
 变更：2026-09-26-change-detail-restore-assets
-状态：active
+状态：superseded
+superseded_by：FR-styles-011
+取代链：FR-auto-frontend-019 ← FR-styles-011（2026-09-26-core-pages-visual-redesign 承接）
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given main 分支的变更详情页（`[cid]/page.tsx`）在 304eba982 被夹带的旧版页面覆盖，；When 用户打开任一变更详情页，
 全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-01
-最近确认：83bde5d52c29cd07960e1d300d9541bf6a44a5ec
+最近确认：f41468b59
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -360,16 +372,18 @@ created_at: 2026-09-28T13:29:15.726Z
   confirmed_by: agent
   confirmed_at: 3a78fbc29a02bf28ff5217254bc9a0b252c03e21
   source_change: 2026-09-26-change-detail-restore-assets
-  status: active
+  status: superseded
 
 ## FR-auto-frontend-020 标题阶段徽章恢复 thin/quick 口径
 变更：2026-09-26-change-detail-restore-assets
-状态：active
+状态：superseded
+superseded_by：FR-styles-011
+取代链：FR-auto-frontend-020 ← FR-styles-011（2026-09-26-core-pages-visual-redesign 承接）
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given `current_stage="thin"` 的轻量变更在标题旁只显示弱化的 outline 徽章（fallback 路径），；When 详情页渲染 thin 或 quick 阶段变更，；Then thin 显示品牌紫 default 徽章「轻量变更」、quick 显示 default 徽章「快速任务（存量）」（`STATUS_BADGE` 四态：quic
 全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-02
-最近确认：83bde5d52c29cd07960e1d300d9541bf6a44a5ec
+最近确认：f41468b59
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -381,7 +395,7 @@ created_at: 2026-09-28T13:29:15.726Z
   confirmed_by: agent
   confirmed_at: b9f40ac174b1f01efb0e1b73a5d00cac47efe383
   source_change: 2026-09-26-change-detail-restore-assets
-  status: active
+  status: superseded
 
 ## FR-auto-frontend-021 范围对账卡恢复 archived 降级指路
 变更：2026-09-26-change-detail-restore-assets
@@ -608,7 +622,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-visual-gap-fix:flow:FR-01
-  tests: frontend/src/components/__tests__/workspace-card.test.ts | frontend/src/components/__tests__/workspace-drag-grid.test.ts | workspaces/__tests__/page.test.ts
+  tests: frontend/src/app/page.test.tsx | frontend/src/components/__tests__/workspace-card.test.tsx | frontend/src/components/__tests__/workspace-drag-grid.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -630,7 +644,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-visual-gap-fix:flow:FR-02
-  tests: __tests__/page-sync.test.ts | frontend/src/components/workspace/__tests__/changes-overview-card.test.ts | page.test.ts
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/__tests__/page-sync.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -652,7 +666,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-visual-gap-fix:flow:FR-03
-  tests: sessions/__tests__/page.test.ts
+  tests: frontend/src/app/page.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -684,7 +698,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-visual-align-2:flow:FR-01
-  tests: changes/__tests__/page.test.ts
+  tests: frontend/src/app/page.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -716,7 +730,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-visual-align-2:flow:FR-03
-  tests: __tests__/page-sync.test.ts | page.test.ts
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/__tests__/page-sync.test.tsx | frontend/src/app/page.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -967,7 +981,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-timeline-coexist:flow:FR-01
-  tests: __tests__/page-restore-assets.test.ts
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -989,7 +1003,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-timeline-coexist:flow:FR-02
-  tests: __tests__/page-restore-assets.test.ts
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1011,7 +1025,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-timeline-coexist:flow:FR-03
-  tests: __tests__/page-restore-assets.test.ts | change-timeline-card.test.ts | page-last-signal.test.ts | page-team-toggle.test.ts
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx | frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1087,7 +1101,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-drop-observation-card:flow:FR-01
-  tests: __tests__/page-restore-assets.test.ts
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1138,7 +1152,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-turn-nav-empty-hint:flow:FR-01
-  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.ts
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1180,7 +1194,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-turn-nav-empty-hint:flow:FR-04
-  tests: frontend/src/components/sessions/__tests__/turn-catalog.test.ts
+  tests: frontend/src/components/sessions/__tests__/turn-catalog.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1232,7 +1246,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-knowledge-gov-ux:flow:FR-01
-  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.ts
+  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1304,7 +1318,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-knowledge-gov-ux:flow:FR-07
-  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.ts
+  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1336,7 +1350,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-change-ux-detail-batch:flow:FR-01
-  tests: changes/__tests__/page.test.ts
+  tests: frontend/src/app/page.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1358,7 +1372,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-change-ux-detail-batch:flow:FR-02
-  tests: __tests__/page-restore-assets.test.ts
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1380,7 +1394,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-change-ux-detail-batch:flow:FR-03
-  tests: changes/__tests__/page.test.ts
+  tests: frontend/src/app/page.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1402,7 +1416,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-change-ux-detail-batch:flow:FR-04
-  tests: changes/__tests__/page.test.ts | platform-sync-section.test.ts
+  tests: frontend/src/app/page.test.tsx | frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1424,7 +1438,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-change-ux-detail-batch:flow:FR-05
-  tests: frontend/src/components/changes/detail/__tests__/change-stage-actions.test.ts
+  tests: frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1446,7 +1460,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-change-ux-detail-batch:flow:FR-06
-  tests: __tests__/page-restore-assets.test.ts
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1468,7 +1482,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-change-ux-detail-batch:flow:FR-07
-  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.ts
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1490,7 +1504,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-change-ux-detail-batch:flow:FR-08
-  tests: __tests__/page-team-toggle.test.ts | change-agent-run-log.test.ts
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx | frontend/src/components/changes/detail/__tests__/change-agent-run-log.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1512,7 +1526,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-change-ux-detail-batch:flow:FR-09
-  tests: __tests__/page-team-toggle.test.ts
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1534,7 +1548,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-change-ux-detail-batch:flow:FR-10
-  tests: frontend/src/components/changes/__tests__/scope-audit-command-card.test.ts
+  tests: frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1566,7 +1580,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-knowledge-gov-ux-detail:flow:FR-01
-  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.ts
+  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1628,7 +1642,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-knowledge-gov-ux-detail:flow:FR-06
-  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.ts
+  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -3558,7 +3572,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-remove-liveness-overview-card:flow:FR-01
-  tests: page.test.ts
+  tests: frontend/src/app/page.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -3590,7 +3604,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-remove-liveness-overview-card:flow:FR-03
-  tests: page.test.ts
+  tests: frontend/src/app/page.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -3612,7 +3626,7 @@ created_at: 2026-09-28T13:29:15.726Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-remove-liveness-overview-card:flow:FR-04
-  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.ts | frontend/src/hooks/__tests__/use-session-liveness.test.ts
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/hooks/__tests__/use-session-liveness.test.ts
   reason: spec
   state: candidate
   discovery: machine
@@ -3685,4 +3699,354 @@ created_at: 2026-09-28T13:29:15.726Z
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-09-29-jump-empty-turn-dup
+  status: active
+
+## FR-auto-frontend-092 backend assets.py：knowledge_touch 并入实时命中——查本变更 inj
+变更：2026-09-28-knowledge-touch-live
+状态：active
+骨架：thin
+摘要：默认场景
+待复核：2026-09-28-fr-review-batch
+场景正文：
+- 场景：默认场景 — Given 上限 相关模块就绪；When backend assets.py：knowledge_touch 并入实时命中——查本变更 inject 行的 matched_anchors（file#sl；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-touch-live/requirements.md#FR-01
+最近确认：2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-knowledge-touch-live:flow:FR-01
+  tests: backend/app/modules/change/tests/test_assets.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-knowledge-touch-live
+  status: active
+
+## FR-auto-frontend-093 frontend 资产卡：知识触达标题用用户语言——在途「知识触达（本变更参考过的知识 · 实时）」、归档「知识触达（本变更参考过的知识）」，机制口径收进 title 悬停；
+变更：2026-09-28-knowledge-touch-live
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When frontend 资产卡：知识触达标题用用户语言——在途「知识触达（本变更参考过的知识 · 实时）」、归档「知识触达（本变更参考过的知识）」，数据口径（实时记录/待复核标记反查）收进 title 悬停；空态文案改写（在途也能有知识触达，FR/决策/测试绑定仍是归；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-touch-live/requirements.md#FR-02
+最近确认：2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
+
+## FR-auto-frontend-094 审计结论（不动）：文档区读变更目录实时可见；FR/决策/测试绑定/模块触达为归档时生成的结构化产物，
+变更：2026-09-28-knowledge-touch-live
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 审计结论（不动）：文档区读变更目录实时可见；FR/决策/测试绑定/模块触达为归档时生成的结构化产物，设计内；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-touch-live/requirements.md#FR-03
+最近确认：2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
+
+## FR-auto-frontend-095 在途变更（未归档）若已有知识注入，资产卡即可见知识触达条目（数据来自 knowledge_hits
+变更：2026-09-28-knowledge-touch-live
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 在途变更（未归档）若已有知识注入，资产卡即可见知识触达条目（数据来自 knowledge_hits inject 行，非标记）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-touch-live/requirements.md#FR-04
+最近确认：2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-knowledge-touch-live:flow:FR-04
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-knowledge-touch-live
+  status: active
+
+## FR-auto-frontend-096 归档后标记反查与实时命中合并且去重（同一条目不重复出现）
+变更：2026-09-28-knowledge-touch-live
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 归档后标记反查与实时命中合并且去重（同一条目不重复出现）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-touch-live/requirements.md#FR-05
+最近确认：2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
+
+## FR-auto-frontend-097 裸文件锚点（无 #）可显示
+变更：2026-09-28-knowledge-touch-live
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 裸文件锚点（无 #）可显示；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-touch-live/requirements.md#FR-06
+最近确认：2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
+
+## FR-auto-frontend-098 live 合并上限 100 条
+变更：2026-09-28-knowledge-touch-live
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 上限 相关模块就绪；When live 合并上限 100 条；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-touch-live/requirements.md#FR-07
+最近确认：2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
+
+## FR-auto-frontend-099 backend 资产测试新增在途命中用例 + frontend 卡测试同步，全绿
+变更：2026-09-28-knowledge-touch-live
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When backend 资产测试新增在途命中用例 + frontend 卡测试同步，全绿；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-touch-live/requirements.md#FR-08
+最近确认：2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
+
+## FR-auto-frontend-100 tsc/eslint/ruff/mypy 0
+变更：2026-09-28-knowledge-touch-live
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When tsc/eslint/ruff/mypy 0；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-knowledge-touch-live/requirements.md#FR-09
+最近确认：2cb3e7633c0df0ff5b263c3eb3fc845f2dcb5e3e
+
+## FR-auto-frontend-105 PageHeader 组件左侧内容列有 min-w-0，flex 收缩可用，超长标题/副标题不再撑破
+变更：2026-09-28-change-detail-header-overflow
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 组件 相关模块就绪；When PageHeader 组件左侧内容列有 min-w-0，flex 收缩可用，超长标题/副标题不再撑破头部宽度；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-detail-header-overflow/requirements.md#FR-01
+最近确认：389282de4db4ae033db1905cd02834f70d14ba1b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-detail-header-overflow:flow:FR-01
+  tests: frontend/src/components/layout/__tests__/page-header.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-detail-header-overflow
+  status: active
+
+## FR-auto-frontend-106 详情页头部描述行在 1600/1280 宽度下有省略号截断，document.scrollWidth
+变更：2026-09-28-change-detail-header-overflow
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 详情页头部描述行在 1600/1280 宽度下有省略号截断，document.scrollWidth 等于视口宽（无横向滚动）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-detail-header-overflow/requirements.md#FR-02
+最近确认：389282de4db4ae033db1905cd02834f70d14ba1b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-detail-header-overflow:flow:FR-02
+  tests: frontend/src/components/layout/__tests__/page-header.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-detail-header-overflow
+  status: active
+
+## FR-auto-frontend-107 详情页标题超长时也能截断（flex 行内 truncate 项补 min-w-0）
+变更：2026-09-28-change-detail-header-overflow
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 详情页标题超长时也能截断（flex 行内 truncate 项补 min-w-0）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-detail-header-overflow/requirements.md#FR-03
+最近确认：389282de4db4ae033db1905cd02834f70d14ba1b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-detail-header-overflow:flow:FR-03
+  tests: frontend/src/components/layout/__tests__/page-header.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-detail-header-overflow
+  status: active
+
+## FR-auto-frontend-108 相关前端测试与 tsc 通过
+变更：2026-09-28-change-detail-header-overflow
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 前端 / 测试 相关模块就绪；When 相关前端测试与 tsc 通过；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-change-detail-header-overflow/requirements.md#FR-04
+最近确认：389282de4db4ae033db1905cd02834f70d14ba1b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-change-detail-header-overflow:flow:FR-04
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx | frontend/src/components/layout/__tests__/page-header.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-change-detail-header-overflow
+  status: active
+
+## FR-auto-frontend-109 263 条待复核条目逐条产出裁决：相符翻正（candidate 行 confirm 翻 active
+变更：2026-09-28-fr-review-batch
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 263 条待复核条目逐条产出裁决：相符翻正（candidate 行 confirm 翻 active，无行；Then bind 真实测试）/ 绑定过时重绑 / 内容过时最小修正 / 特性已死标 superseded+退役理由 / 无测试面清标记留档报告
+全文：.sillyspec/changes/archive/2026-09-28-fr-review-batch/requirements.md#FR-01
+最近确认：bccffba0b0d15714673700b5743c33378eff8c06
+
+## FR-auto-frontend-110 每条翻正的证据路径必须是盘上真实测试形态文件（test_*.py / *.test.*），不许悬空路
+变更：2026-09-28-fr-review-batch
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 每条翻正的证据路径必须是盘上真实测试形态文件（test_*.py / *.test.*），不许悬空路径；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-fr-review-batch/requirements.md#FR-02
+最近确认：bccffba0b0d15714673700b5743c33378eff8c06
+
+## FR-auto-frontend-111 复核完成的条目清除「待复核：」标记行，未复核的不动
+变更：2026-09-28-fr-review-batch
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 复核完成的条目清除「待复核：」标记行，未复核的不动；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-fr-review-batch/requirements.md#FR-03
+最近确认：bccffba0b0d15714673700b5743c33378eff8c06
+
+## FR-auto-frontend-112 fr 文件条目格式不被破坏（标题/状态/场景正文/绑定子块结构保持）
+变更：2026-09-28-fr-review-batch
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When fr 文件条目格式不被破坏（标题/状态/场景正文/绑定子块结构保持）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-fr-review-batch/requirements.md#FR-04
+最近确认：bccffba0b0d15714673700b5743c33378eff8c06
+
+## FR-auto-frontend-113 sillyspec knowledge validate 无 errors
+变更：2026-09-28-fr-review-batch
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When sillyspec knowledge validate 无 errors；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-fr-review-batch/requirements.md#FR-05
+最近确认：bccffba0b0d15714673700b5743c33378eff8c06
+
+## FR-auto-frontend-114 分批（按域分波）处理，每波显式 pathspec 提交
+变更：2026-09-28-fr-review-batch
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 分批（按域分波）处理，每波显式 pathspec 提交；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-fr-review-batch/requirements.md#FR-06
+最近确认：bccffba0b0d15714673700b5743c33378eff8c06
+
+## FR-auto-frontend-115 QuicklogTable 表格 fixed 布局，标题按钮宽度跟随单元格（w-full），长标题在
+变更：2026-09-28-quicklog-title-overflow
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When QuicklogTable 表格 fixed 布局，标题按钮宽度跟随单元格（w-full），长标题在单元格边界截断出省略号，不再压过相邻列；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-quicklog-title-overflow/requirements.md#FR-01
+最近确认：e231b269b3b23711582a7b5e62f376be937624a6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-quicklog-title-overflow:flow:FR-01
+  tests: frontend/src/components/changes/__tests__/quicklog-table.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-quicklog-title-overflow
+  status: active
+
+## FR-auto-frontend-116 状态列备注跟随单元格宽截断，不再有越过自身单元格的文本元素（生产实测扫描 0 越界）
+变更：2026-09-28-quicklog-title-overflow
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 状态列备注跟随单元格宽截断，不再有越过自身单元格的文本元素（生产实测扫描 0 越界）；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-quicklog-title-overflow/requirements.md#FR-02
+最近确认：e231b269b3b23711582a7b5e62f376be937624a6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-quicklog-title-overflow:flow:FR-02
+  tests: frontend/src/components/changes/__tests__/quicklog-table.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-quicklog-title-overflow
+  status: active
+
+## FR-auto-frontend-117 既有 quicklog-table 测试全绿 + 新增回归锁定用例 + tsc 0 错
+变更：2026-09-28-quicklog-title-overflow
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 测试 相关模块就绪；When 既有 quicklog-table 测试全绿 + 新增回归锁定用例 + tsc 0 错；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-quicklog-title-overflow/requirements.md#FR-03
+最近确认：e231b269b3b23711582a7b5e62f376be937624a6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-quicklog-title-overflow:flow:FR-03
+  tests: frontend/src/components/changes/__tests__/quicklog-table.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-quicklog-title-overflow
+  status: active
+
+## FR-auto-frontend-118 部署生产后 sillyspec 工作区快速修复 tab 全单元格扫描 0 越界
+变更：2026-09-28-quicklog-title-overflow
+状态：active
+骨架：thin
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 系统就绪；When 部署生产后 sillyspec 工作区快速修复 tab 全单元格扫描 0 越界；Then 行为符合本条标准描述
+全文：.sillyspec/changes/archive/2026-09-28-quicklog-title-overflow/requirements.md#FR-04
+最近确认：e231b269b3b23711582a7b5e62f376be937624a6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-28-quicklog-title-overflow:flow:FR-04
+  tests: frontend/src/components/changes/__tests__/quicklog-table.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-28-quicklog-title-overflow
   status: active

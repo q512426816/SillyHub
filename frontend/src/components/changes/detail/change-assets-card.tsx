@@ -272,14 +272,21 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
 
           {/* 知识触达（2026-09-26-change-asset-transparency / FR-01）：本变更知识
               注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查（flow
-              done 对触达域打标），覆盖面以标记为准，行点击跳知识库深链。 */}
+              done 对触达域打标），覆盖面以标记为准，行点击跳知识库深链。标题用
+              用户语言、机制口径收进 title 悬停（2026-10-04-knowledge-touch-plain-title）。 */}
           {touchList.length > 0 ? (
             <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
-                <span>
+                <span
+                  title={
+                    data?.archived
+                      ? "按知识条目内「待复核：<变更名>」标记反查，并与执行期注入命中合并去重；覆盖以标记为准"
+                      : "执行期知识注入命中的实时记录；变更收尾后以条目内「待复核」标记为权威口径"
+                  }
+                >
                   {data?.archived
-                    ? "知识触达（注入命中 · 待复核标记反查）"
-                    : "知识触达（注入命中 · 实时）"}
+                    ? "知识触达（本变更参考过的知识）"
+                    : "知识触达（本变更参考过的知识 · 实时）"}
                 </span>
                 <span className="text-[10px] text-muted-foreground/70">
                   {touchList.length} 条
