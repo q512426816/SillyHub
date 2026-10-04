@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-04-handoff-op-detail",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02 场景的 command 键 + 截断坏 JSON regex 兜底组合无测试覆盖",
+      "evidence": "test_truncated_tool_input_regex_fallback 两个用例的 tool_input 均为 path 类键（file_path/path）的截断坏 JSON，command 键仅在 test_sections_and_dedup 中以完整 JSON（json.dumps）走 json.loads 路径断言（- Bash：ls）；FR-02 场景「path/command 键在截断点前均可取到」的 command 半边无用例。实现侧两组键共用同一 re.search 动态模板（alt 由 keys 拼接），结构上无法漂移，故仅覆盖缺口、无正确性风险。",
+      "location": "backend/app/modules/daemon/tests/test_takeover_handoff.py:146-161"
+    },
+    {
+      "severity": "P3",
+      "title": "regex 兜底路径字面 \\n 转义残留：折行压平失效且该展示边界未在 design 披露",
+      "evidence": "_unescape_json_string 仅反转义 \\\\ 与 \\\"；截断坏 JSON 中 command 值含 \\n 转义时，regex 捕获组保留字面反斜杠+n 两字符，' '.join(detail.split()) 不将其视为空白、不压平，操作行显示字面 \\n——与完整 JSON 路径（json.loads 解出真换行后压平为空格）呈现口径不一致，轻微偏离 FR-01「折行压平」承诺；design 风险节仅披露半截命令边界，未披露此项。触发面窄（2KB 截断坏 JSON + 值含转义），纯展示性。",
+      "location": "backend/app/modules/daemon/session/service/takeover.py:280"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-04T15:36:26Z"
+}

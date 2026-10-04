@@ -1,0 +1,336 @@
+diff --git a/.sillyspec/changes/2026-10-04-handoff-op-detail/flow-state.yaml b/.sillyspec/changes/2026-10-04-handoff-op-detail/flow-state.yaml
+new file mode 100644
+index 000000000..2ad233691
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-handoff-op-detail/flow-state.yaml
+@@ -0,0 +1,11 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++autopilot: false
++baseline_commit: 4599b664076ed066fa5dac79e8c86756e4ebf78f
++updatedAt: '2026-10-04T15:28:14.734Z'
++baseline_sha256: 773376a4679e1ca61d71d241baddf07d6ee5ee921b2a9bf9877d254d0f0605f3
++
+diff --git a/backend/app/modules/daemon/session/service/takeover.py b/backend/app/modules/daemon/session/service/takeover.py
+index 87e5dd0d3..35b2f4a7d 100644
+--- a/backend/app/modules/daemon/session/service/takeover.py
++++ b/backend/app/modules/daemon/session/service/takeover.py
+@@ -271,46 +271,47 @@ async def resolve_takeover_machine(
+ HANDOFF_MAX_CHARS = 12000
+ _HANDOFF_TRUNCATED_NOTE = "\n……（交接文档超出长度上限，较早内容已截断）"
+ 
+-# 涉及文件提取：path 类字段名（dict 形态直取键）与截断 JSON 兜底正则（值含
+-# 转义序列的 JSON 字符串段，`(?:[^"\\]|\\.)*`）。
++# 涉及文件/操作摘要提取的键组：path 类字段与命令字段（dict 形态直取键；
++# 截断 JSON regex 兜底，值段 `(?:[^"\\]|\\.)*` 容忍转义序列）。
+ _TOOL_FILE_KEYS = ("path", "file_path", "filePath", "notebook_path")
+-_TOOL_FILE_RE = re.compile(r'"(?:path|file_path|filePath|notebook_path)"\s*:\s*"((?:[^"\\]|\\.)*)"')
++_TOOL_COMMAND_KEYS = ("command",)
+ 
+ 
+-def _collect_tool_files(tool_input: Any, files: list[str]) -> None:
+-    """从 tool_use 的 tool_input 提取涉及文件（首个 path 类字段值）。
++def _unescape_json_string(raw: str) -> str:
++    """JSON 字符串值段的常见转义反转义（``\\\\`` 与 ``\\"``；占位防二次替换）。"""
++    return raw.replace("\\\\", "\x00").replace('\\"', '"').replace("\x00", "\\")
+ 
+-    契约是 daemon 侧 JSON.stringify 的字符串摘要（首 2KB 截断）——截断的坏
+-    JSON 走正则兜底（path 类键通常在入参前部，截断前已在串内）；dict 形态
+-    保留兼容（防御/测试）。非字符串非 dict 或无命中静默跳过。
++
++def _tool_input_field(tool_input: Any, keys: tuple[str, ...]) -> str | None:
++    """从 tool_use 的 tool_input 提取首个命中键的字符串值（涉及文件/操作摘要共用）。
++
++    契约是 daemon 侧 JSON.stringify 的字符串摘要（首 2KB 截断）——完整 JSON 走
++    json.loads；截断坏 JSON 用键名 regex 兜底（path/command 类键通常居入参前部，
++    截断前已在串内）；dict 形态保留兼容（防御/测试）。无命中返回 None。
+     """
++    candidate: dict[str, Any] | None
+     if isinstance(tool_input, str):
+         if not tool_input.strip():
+-            return
+-        candidate: dict[str, Any] | None = None
++            return None
+         try:
+             parsed = json.loads(tool_input)
+         except ValueError:
+-            # 截断坏 JSON：regex 取首个 path 类键值，反转义常见 JSON 转义
+-            # （\\ 与 \"；占位防二次替换）。
+-            match = _TOOL_FILE_RE.search(tool_input)
++            alt = "|".join(re.escape(k) for k in keys)
++            match = re.search(rf'"(?:{alt})"\s*:\s*"((?:[^"\\]|\\.)*)"', tool_input)
+             if match is None:
+-                return
+-            raw = match.group(1)
+-            val = raw.replace("\\\\", "\x00").replace('\\"', '"').replace("\x00", "\\")
+-            files.append(val.strip())
+-            return
+-        if isinstance(parsed, dict):
+-            candidate = parsed
++                return None
++            val = _unescape_json_string(match.group(1)).strip()
++            return val or None
++        candidate = parsed if isinstance(parsed, dict) else None
+     elif isinstance(tool_input, dict):
+         candidate = tool_input
+     else:
+-        return
+-    for key in _TOOL_FILE_KEYS:
+-        val = candidate.get(key)
++        return None
++    for key in keys:
++        val = (candidate or {}).get(key)
+         if isinstance(val, str) and val.strip():
+-            files.append(val.strip())
+-            break
++            return val.strip()
++    return None
+ 
+ 
+ def build_handoff_prompt(
+@@ -334,8 +335,9 @@ def build_handoff_prompt(
+     - 涉及文件（tool_use 段 tool_input 提取 path 类字段去重清单；契约是 JSON
+       字符串摘要非 dict，截断坏 JSON 走 regex 兜底——2026-10-04 契约对齐修正，
+       此前判 ``user``/``assistant`` + dict 恒不命中，真实日志只余工具名节）；
+-    - 最近操作（最近 8 条 tool_use 一行摘；is_error 只在 tool_result 段携带，
+-      按 tool_use_id 回贴配对操作行）。
++    - 最近操作（最近 8 条 tool_use 一行摘：path 类字段值/command 首段作摘要，
++      折行压平截 120，无摘要纯工具名；is_error 只在 tool_result 段携带，按
++      tool_use_id 回贴配对操作行）。
+ 
+     末尾拼用户首条消息（分隔线隔开）——首 prompt=交接文档+用户消息。
+     """
+@@ -354,11 +356,20 @@ def build_handoff_prompt(
+             if text:
+                 talk_lines.append(f"助手：{text[:500]}")
+         elif kind == "tool_use":
+-            ops.append(f"- {tool_name}")
++            tool_input = msg.get("tool_input")
++            file_path = _tool_input_field(tool_input, _TOOL_FILE_KEYS)
++            if file_path:
++                files.append(file_path)
++            # 操作行摘要：path 类字段值优先（文件工具）、无则 command 首段
++            # （Bash 类）；折行压平 + 截 120，无摘要维持纯工具名。
++            detail = file_path or _tool_input_field(tool_input, _TOOL_COMMAND_KEYS)
++            if detail:
++                ops.append(f"- {tool_name}：{' '.join(detail.split())[:120]}")
++            else:
++                ops.append(f"- {tool_name}")
+             tool_use_id = msg.get("tool_use_id")
+             if isinstance(tool_use_id, str) and tool_use_id:
+                 op_index_by_tool_use_id[tool_use_id] = len(ops) - 1
+-            _collect_tool_files(msg.get("tool_input"), files)
+         elif kind == "tool_result":
+             # 失败标记回贴配对 tool_use 行（is_error 契约上只在 tool_result 段）。
+             tool_use_id = msg.get("tool_use_id")
+diff --git a/backend/app/modules/daemon/tests/test_takeover_handoff.py b/backend/app/modules/daemon/tests/test_takeover_handoff.py
+index 466b746af..36e703bbf 100644
+--- a/backend/app/modules/daemon/tests/test_takeover_handoff.py
++++ b/backend/app/modules/daemon/tests/test_takeover_handoff.py
+@@ -99,6 +99,14 @@ class TestBuildHandoffPrompt:
+                 tool_use_id="t3",
+                 tool_input=json.dumps({"command": "ls"}),
+             ),
++            # 无可用摘要 → 纯工具名；超长命令 → 折行压平截 120。
++            _msg("tool_use", tool_name="TodoWrite", tool_use_id="t4"),
++            _msg(
++                "tool_use",
++                tool_name="Bash",
++                tool_use_id="t5",
++                tool_input=json.dumps({"command": "echo " + "x" * 200}),
++            ),
+             # 系统注入伪用户消息与 thinking 噪声：均不进最近对话。
+             _msg("user_input", text="[BACKGROUND] task done", sender="system_event"),
+             _msg("thinking", text="让我想想方案"),
+@@ -123,9 +131,15 @@ class TestBuildHandoffPrompt:
+         assert "助手：" + "好" * 500 in doc and "好" * 501 not in doc
+         assert "[BACKGROUND]" not in doc
+         assert "让我想想方案" not in doc
+-        # 最近操作：tool_use 计数 + tool_result 失败标记回贴配对行。
+-        assert "- Read" in doc and "- Bash" in doc
+-        assert "- Edit（失败）" in doc
++        # 最近操作：工具名 + 摘要（path 类值 / command 首段）；无摘要纯工具名；
++        # 失败标记回贴行尾。
++        assert "- Read：C:/a/login.py" in doc
++        assert "- Bash：ls" in doc
++        assert "- Edit：C:/a/login.py（失败）" in doc
++        assert "- TodoWrite\n" in doc
++        # 超长命令摘要截 120（"echo " + 115 个 x）。
++        assert "echo " + "x" * 115 in doc
++        assert "echo " + "x" * 116 not in doc
+         # 末尾拼用户消息。
+         assert doc.endswith("用户：继续修")
+diff --git a/.sillyspec/changes/2026-10-04-handoff-op-detail/design.md b/.sillyspec/changes/2026-10-04-handoff-op-detail/design.md
+new file mode 100644
+index 000000000..42db41ba8
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-handoff-op-detail/design.md
+@@ -0,0 +1,51 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T15:28:14.711Z
++---
++# 设计记录（Design Record）— 2026-10-04-handoff-op-detail
++
++> 四节每节必答——答案直接写在问题下方；小改动可写「不适用：<理由>」；flow done 空节拒收。
++> 需要列改动文件时在「接口契约」节加「文件变更清单」表（| 新增/修改 | 路径 | 说明 |）。
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++把 2026-10-04-handoff-doc-kind-contract 引入的 `_collect_tool_files`（单用途：path 类键提取进涉及文件节）泛化为 `_tool_input_field(tool_input, keys)`——键组参数化（`_TOOL_FILE_KEYS` / `_TOOL_COMMAND_KEYS`），涉及文件节与最近操作行共用同一提取函数（json.loads 完整解析 + 截断坏 JSON 键名 regex 兜底 + dict 兼容，反转义共用 `_unescape_json_string`）。最近操作行从纯 `- 工具名` 升级为 `- 工具名：摘要`：path 类字段值优先（文件工具）、无则 command（Bash 类），折行压平截 120；两类键均无命中退回纯工具名。选共用函数而非操作行再写一套解析：同一 tool_input 两处口径必须一致，否则文件节有路径而操作行无摘要（或反之）这种漂移比没有摘要更误导。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++`build_handoff_prompt` 签名不变（纯函数）；行为变化=最近操作节每行可携带摘要（path/command 类，压平截 120），失败标记仍回贴行尾。内部：`_collect_tool_files` 删除、新增 `_tool_input_field` / `_unescape_json_string`、常量 `_TOOL_COMMAND_KEYS`。HTTP 端点签名无变化。
++
++文件变更清单：
++
++| 新增/修改 | 路径 | 说明 |
++|---|---|---|
++| 修改 | backend/app/modules/daemon/session/service/takeover.py | 提取函数泛化 + 操作行摘要 |
++| 修改 | backend/app/modules/daemon/tests/test_takeover_handoff.py | 摘要/无摘要/截断/失败回贴断言 |
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++答：与上一变更同构——messages 是 seq 有序窗口，逐段独立提取，无跨段状态（除 tool_use_id 回贴表，语义不变）；乱序不影响摘要提取正确性。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++答：不适用：纯函数零共享状态零 IO，无并发写面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++答：不适用：与既有 handoff 链一致——文档一次性注入新会话首 prompt，源会话零写红线不变。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++答：不适用：摘要提取作用于单条消息的 tool_input，无跨会话/跨工作区数据面。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：regex 兜底从截断 JSON 取 command 时，命令值本身被 2KB 截断切断会得到半截命令进操作行（展示性，同上一变更已披露的半截路径边界；不参与匹配/写库）。120 字符截断已把该噪声压到一行内。试过放弃的方案：操作行带完整 tool_input JSON——2KB/条的原始入参让 8 行操作节膨胀到淹没对话节，且大量与涉及文件节重复；摘要（单字段值）信息密度/噪声比最优，故弃。
+diff --git a/.sillyspec/changes/2026-10-04-handoff-op-detail/proposal.md b/.sillyspec/changes/2026-10-04-handoff-op-detail/proposal.md
+new file mode 100644
+index 000000000..88179b082
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-handoff-op-detail/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T15:28:14.711Z
++---
++# 提案书（Proposal）— 2026-10-04-handoff-op-detail
++
++## 动机
++
++任务原话转写：动机：交接文档「最近操作」节只有工具名（- Read / - Bash），对接手 agent 几乎零信息量——原 v1 一行摘口径叠加 tool_input 解析缺陷从未被真实渲染检验；Bash 命令与文件路径才是交接关键信息（对话/文件节覆盖不到 Bash 命令）。
++成功标准：
++- 最近操作行携带紧凑摘要：路径类工具显示入参 path 类字段值、Bash 显示 command 首段，均截 120 字符；无可用摘要时维持纯工具名
++- 摘要提取复用 tool_input JSON 解析链（含截断坏 JSON regex 兜底），涉及文件节与操作行共用同一提取逻辑不漂移
++- 失败标记（失败）仍回贴在行尾
++- 测试覆盖路径/命令/无摘要三形态，takeover+handoff 测试全绿
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. 最近操作行携带紧凑摘要：路径类工具显示入参 path 类字段值、Bash 显示 command 首段，均截 120 字符；无可用摘要时维持纯工具名
++2. 摘要提取复用 tool_input JSON 解析链（含截断坏 JSON regex 兜底），涉及文件节与操作行共用同一提取逻辑不漂移
++3. 失败标记（失败）仍回贴在行尾
++4. 测试覆盖路径/命令/无摘要三形态，takeover+handoff 测试全绿
++
++## 成功标准（可验证）
++
++1. 最近操作行携带紧凑摘要：路径类工具显示入参 path 类字段值、Bash 显示 command 首段，均截 120 字符；无可用摘要时维持纯工具名
++2. 摘要提取复用 tool_input JSON 解析链（含截断坏 JSON regex 兜底），涉及文件节与操作行共用同一提取逻辑不漂移
++3. 失败标记（失败）仍回贴在行尾
++4. 测试覆盖路径/命令/无摘要三形态，takeover+handoff 测试全绿
+diff --git a/.sillyspec/changes/2026-10-04-handoff-op-detail/requirements.md b/.sillyspec/changes/2026-10-04-handoff-op-detail/requirements.md
+new file mode 100644
+index 000000000..b1a5082f0
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-handoff-op-detail/requirements.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T15:28:14.711Z
++---
++# 需求规格（Requirements）— 2026-10-04-handoff-op-detail
++
++## 功能需求
++
++> FR 由你撰写：每条 = `### FR-NN: 标题` + 一句带强度词的行为规定（必须=硬性；禁止=红线；
++> SHOULD=建议须注理由；可以=可选）；边界情形加场景块 `#### 场景：名` + Given/When/Then 行。
++> 标题行是成功标准锚（勿改写——收口做门柱对比）；正文与场景块归你。
++
++### FR-01: 最近操作行携带紧凑摘要：路径类工具显示入参 path 类字段值、Bash 显示 command 首段，均截 120 字符；无可用摘要时维持纯工具名
++
++- 必须：tool_use 操作行格式为 `- 工具名：摘要`，摘要取 path 类字段值优先、无则 command；折行压平并截 120 字符；两类键均无命中时必须退回纯 `- 工具名` 行（禁止出现悬空冒号）。
++
++#### 场景：主路径
++
++Given 带完整 tool_input 的 Read/Bash tool_use 段与无 tool_input 的 tool_use 段 / When 组装交接文档 / Then 前两者行内分别含路径与命令摘要（120 截断），后者为纯工具名。
++
++### FR-02: 摘要提取复用 tool_input JSON 解析链（含截断坏 JSON regex 兜底），涉及文件节与操作行共用同一提取逻辑不漂移
++
++- 必须：涉及文件节与操作行摘要走同一提取函数（`_tool_input_field`），禁止两处各自解析造成口径漂移；截断坏 JSON 的 regex 兜底对两组键同样生效。
++
++#### 场景：主路径
++
++Given tool_input 为 2KB 截断坏 JSON 且 path/command 键在截断点前 / When 提取 / Then 涉及文件与操作摘要均能取到同一值。
++
++### FR-03: 失败标记（失败）仍回贴在行尾
++
++- 必须：tool_result 携带 is_error 时「（失败）」回贴在对应操作行行尾（摘要之后），配对键 tool_use_id 语义不变。
++
++#### 场景：主路径
++
++Given tool_use（带摘要）+ 同 tool_use_id 的 is_error tool_result / When 组装 / Then 操作行为 `- 工具名：摘要（失败）`。
++
++### FR-04: 测试覆盖路径/命令/无摘要三形态，takeover+handoff 测试全绿
++
++- 必须：测试覆盖路径摘要/命令摘要/无摘要纯工具名三形态与 120 截断、失败回贴行尾；test_takeover_handoff.py 与 test_takeover.py 全量绿。
++
++#### 场景：主路径
++
++Given 更新后的 handoff 测试 / When 全量执行 / Then 26 用例全绿。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_sections_and_dedup」
++FR-02: test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_truncated_tool_input_regex_fallback」+「test_sections_and_dedup」
++FR-03: test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_sections_and_dedup」（- Edit：C:/a/login.py（失败）断言）
++FR-04: test/backend/app/modules/daemon/tests/test_takeover_handoff.py 全量 7 用例 + test_takeover.py 19 用例绿
+diff --git a/.sillyspec/changes/2026-10-04-handoff-op-detail/tasks.md b/.sillyspec/changes/2026-10-04-handoff-op-detail/tasks.md
+new file mode 100644
+index 000000000..f0b4f0bfc
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-handoff-op-detail/tasks.md
+@@ -0,0 +1,16 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T15:28:14.711Z
++---
++# 任务注册表（Tasks）— 2026-10-04-handoff-op-detail
++
++> 镜像行（task-01…task-NN）是成功标准逐条镜像=任务锚：勿删勿改写（收口对照它），完成实现路径
++> 需要更细步骤时在镜像行**后追加细化行**（保持 `- [ ] task-NN:` 行形态，编号从镜像行末尾顺延——
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决）。
++> 边干边勾：完成一条 = 实现到位 + 相关测试跑绿 → 当场勾（sillyspec task tick --change 2026-10-04-handoff-op-detail --task task-NN 即时回显进度与下一任务，或 Edit 翻格），勿攒到收口一把勾（收口硬门拒单拍多格勾选；--allow-batch-tick 可显式旁路留痕）。⚠️ harness 的 TodoWrite 类工具不替代本文件——平台进度/收口哨兵只读 tasks.md。
++> `flow status --change 2026-10-04-handoff-op-detail` 为自愿查看/恢复面。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: 最近操作行携带紧凑摘要：路径类工具显示入参 path 类字段值、Bash 显示 command 首段，均截 120 字符；无可用摘要时维持纯工具名
++- [x] task-02: 摘要提取复用 tool_input JSON 解析链（含截断坏 JSON regex 兜底），涉及文件节与操作行共用同一提取逻辑不漂移
++- [x] task-03: 失败标记（失败）仍回贴在行尾
++- [x] task-04: 测试覆盖路径/命令/无摘要三形态，takeover+handoff 测试全绿

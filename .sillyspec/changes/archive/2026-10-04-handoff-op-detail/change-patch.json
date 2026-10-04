@@ -1,0 +1,54 @@
+{
+  "change": "2026-10-04-handoff-op-detail",
+  "baseline": "4599b664076ed066fa5dac79e8c86756e4ebf78f",
+  "head": "0479804512b435b4129e8eacb2b5768802f9c1ac",
+  "files": [
+    ".sillyspec/changes/2026-10-04-handoff-op-detail/design.md",
+    ".sillyspec/changes/2026-10-04-handoff-op-detail/flow-state.yaml",
+    ".sillyspec/changes/2026-10-04-handoff-op-detail/proposal.md",
+    ".sillyspec/changes/2026-10-04-handoff-op-detail/requirements.md",
+    ".sillyspec/changes/2026-10-04-handoff-op-detail/tasks.md",
+    "backend/app/modules/daemon/session/service/takeover.py",
+    "backend/app/modules/daemon/tests/test_takeover_handoff.py"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 223,
+    "deletions": 32
+  },
+  "savedAt": "2026-10-04T15:33:18.305Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "3210365a6c5a7e9625c131ca46a8c696756b94fe476b434f65ff82a287963814",
+  "patchStatus": "ok"
+}
