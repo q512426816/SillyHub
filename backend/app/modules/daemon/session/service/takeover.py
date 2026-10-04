@@ -110,6 +110,32 @@ async def _latest_reported_machine(
     return None, None
 
 
+async def _latest_agent_cwd(db: AsyncSession, source: AgentSession) -> str | None:
+    """最新 entry 的 agent_cwd（tier3 回退源，协议 §4 口径）。
+
+    主日志优先（log_path 排除 subagent 前缀，R-04 惯例——subagent 行 cwd 是
+    worktree 副本路径，不代原会话工作目录）；agent_cwd 为空的行跳过。
+    """
+    from app.modules.platform_sync.model import AgentSessionLogORM
+
+    rows = (
+        await db.execute(
+            select(
+                AgentSessionLogORM.agent_cwd,
+                AgentSessionLogORM.log_path,
+            )
+            .where(col(AgentSessionLogORM.agent_session_id) == source.id)
+            .order_by(col(AgentSessionLogORM.last_seen_at).desc().nulls_last())
+            .limit(50)
+        )
+    ).all()
+    any_cwd = next((c for c, _p in rows if c), None)
+    return next(
+        (c for c, p in rows if c and "subagent" not in (p or "").lower()),
+        any_cwd,
+    )
+
+
 async def resolve_takeover_machine(
     db: AsyncSession,
     source: AgentSession,
@@ -122,7 +148,8 @@ async def resolve_takeover_machine(
 
     1. ``machine_id``（metadata.machine_id，daemon 心跳同源值）精确命中；
     2. ``hostname``（reported_machine_name == runtime.name）命中；
-    3. 存量无机器身份：``cwd ∈ runtime.allowed_roots`` 命中；
+    3. 存量无机器身份：``cwd ∈ runtime.allowed_roots`` 命中（cwd=会话行优先，
+       空则回退最新 entry 的 ``agent_cwd``——建桶不写会话行 cwd，协议 §4）；
     4. 无命中/机器级歧义 → 409 中文（含机器名与"开机/装 daemon"指引）——
        宁拒不猜，不静默换机。
 
@@ -146,6 +173,11 @@ async def resolve_takeover_machine(
         .all()
     )
     machine_id, hostname = await _latest_reported_machine(db, source)
+    # tier3 匹配与诊断文案共用的有效 cwd：会话行优先；platform_sync 建桶/刷新
+    # 不写会话行 cwd（恒空），空则回退最新 entry 的 agent_cwd（协议
+    # docs/platform-agent-log-protocol.md §4）——旧 CLI 无 machine 块的存量
+    # 会话靠该字段命中原机。
+    cwd = source.cwd or (await _latest_agent_cwd(db, source)) or ""
 
     def _machine_names(rows: list[DaemonRuntime]) -> list[str]:
         """命中机器名去重保序（daemon_instance 分组，display 名=name，缺省 id 短码）。"""
@@ -183,7 +215,7 @@ async def resolve_takeover_machine(
             msg = (
                 "该会话的历史上报未携带机器身份，且当前没有任何在线机器的"
                 "工作目录白名单（allowed_roots）覆盖该会话目录"
-                f"（{source.cwd or '未知'}）——请在产生该会话的机器上启动 daemon"
+                f"（{cwd or '未知'}）——请在产生该会话的机器上启动 daemon"
                 "（并确认其 allowed_roots 含该目录）后重试；不会换到其它机器执行。"
             )
         return ToolReportTakeoverNoMachine(
@@ -218,8 +250,8 @@ async def resolve_takeover_machine(
         if hits:
             return _pick_machine(hits, "hostname"), "hostname"
 
-    # ── ③ 存量无机器身份：cwd ∈ allowed_roots 唯一命中──────────────────────
-    cwd = source.cwd or ""
+    # ── ③ 存量无机器身份：cwd ∈ allowed_roots 唯一命中（cwd 已含 entry 级
+    #    agent_cwd 回退，见取值处注释）───────────────────────────────────────
     if cwd:
         hits = [
             rt

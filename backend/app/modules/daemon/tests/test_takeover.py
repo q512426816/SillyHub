@@ -72,8 +72,15 @@ async def _seed_tool_report_session(
     reported_machine_id: str | None = None,
     reported_machine_name: str | None = None,
     engine_session_id: str | None = None,
+    session_cwd: str | None = None,
+    entry_cwd: str | None = None,
 ) -> AgentSession:
-    """ORM 直落未激活 tool_report 源会话 + 关联 platform_agent_logs 行。"""
+    """ORM 直落未激活 tool_report 源会话 + 关联 platform_agent_logs 行。
+
+    ``session_cwd`` / ``entry_cwd`` 缺省跟随 ``cwd``；传 ``""`` 可单独置空——
+    真实 ingest 不写会话行 cwd（2026-10-04-takeover-tier3-agent-cwd-fallback
+    的回归形态）。
+    """
     owner_id = await _admin_user_id(db_session)
     from app.modules.workspace.model import Workspace
 
@@ -109,7 +116,7 @@ async def _seed_tool_report_session(
             ),
         },
         turn_count=0,
-        cwd=cwd,
+        cwd=cwd if session_cwd is None else session_cwd,
         last_active_at=datetime.now(UTC),
     )
     db_session.add(session)
@@ -121,7 +128,7 @@ async def _seed_tool_report_session(
             agent_session_id=session.id,
             log_path=f"C:/Users/qinyi/.logs/{uuid.uuid4()}.jsonl",
             harness=harness,
-            agent_cwd=cwd,
+            agent_cwd=cwd if entry_cwd is None else entry_cwd,
             session_id=engine_session_id,
             reported_machine_id=reported_machine_id,
             reported_machine_name=reported_machine_name,
@@ -283,6 +290,95 @@ class TestFourTierMatching:
         source = await _seed_tool_report_session(db_session)  # 无 machine 身份
         resp = await _takeover(client, auth_headers, source.id)
         assert resp.status_code == 201, resp.text
+
+    @pytest.mark.asyncio
+    async def test_tier3_fallback_entry_agent_cwd(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+    ) -> None:
+        """③回退：会话行 cwd 恒空（真实 ingest 形态）→ 最新 entry 的 agent_cwd
+        参与匹配，唯一覆盖机器可接手（2026-10-04-takeover-tier3-agent-cwd-fallback）。"""
+        owner_id = await _admin_user_id(db_session)
+        right = await _create_runtime(db_session, owner_id, name="WIN-BOX")
+        right.allowed_roots = ["C:/Users/qinyi"]
+        db_session.add(right)
+        other = await _create_runtime(db_session, owner_id, name="MAC-BOX")
+        other.allowed_roots = ["/Users/qinyi"]
+        db_session.add(other)
+        await db_session.commit()
+
+        # 会话行 cwd 空、entry 带 agent_cwd——服务器实例 7ea5177a 的真实形态。
+        source = await _seed_tool_report_session(
+            db_session, harness="zcode", provider="claude", session_cwd=""
+        )
+        resp = await _takeover(client, auth_headers, source.id)
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["tier"] == "handoff"  # zcode 不可 resume → handoff 档
+
+    @pytest.mark.asyncio
+    async def test_tier3_fallback_prefers_main_log_entry(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+    ) -> None:
+        """③回退取主日志 entry 的 agent_cwd——更新的 subagent 行（worktree 副本
+        cwd，不被白名单覆盖）不参与匹配，否则本用例应 409。"""
+        owner_id = await _admin_user_id(db_session)
+        right = await _create_runtime(db_session, owner_id, name="WIN-BOX")
+        right.allowed_roots = ["C:/Users/qinyi"]
+        db_session.add(right)
+        await db_session.commit()
+
+        source = await _seed_tool_report_session(db_session, session_cwd="")
+        ws_id = source.workspace_id
+        db_session.add(
+            AgentSessionLogORM(
+                id=uuid.uuid4(),
+                workspace_id=ws_id,
+                agent_session_id=source.id,
+                # subagent 前缀路径 + 更新 last_seen_at + worktree 副本 cwd。
+                log_path=f"C:/Users/qinyi/.logs/subagent-{uuid.uuid4()}.jsonl",
+                harness="claude-code",
+                agent_cwd="D:/worktrees/copy-xyz",
+                first_seen_at="2026-09-30T00:00:00.000Z",
+                last_seen_at="2026-09-30T02:00:00.000Z",
+            )
+        )
+        await db_session.commit()
+
+        resp = await _takeover(client, auth_headers, source.id)
+        assert resp.status_code == 201, resp.text
+
+    @pytest.mark.asyncio
+    async def test_tier3_no_cwd_anywhere_409(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+    ) -> None:
+        """③回退兜底：会话行与 entry 均无 cwd → 维持 409 原文案（目录「未知」）。"""
+        owner_id = await _admin_user_id(db_session)
+        mac = await _create_runtime(db_session, owner_id, name="MAC-BOX")
+        mac.allowed_roots = ["/Users/qinyi"]
+        db_session.add(mac)
+        await db_session.commit()
+
+        source = await _seed_tool_report_session(db_session, session_cwd="", entry_cwd="")
+        resp = await _takeover(client, auth_headers, source.id)
+        assert resp.status_code == 409, resp.text
+        msg = resp.json()["message"]
+        assert "未携带机器身份" in msg
+        assert "未知" in msg
+        assert resp.json()["details"]["machine_candidates"] == []
 
     @pytest.mark.asyncio
     async def test_tier4_no_match_409_with_machine_name(
