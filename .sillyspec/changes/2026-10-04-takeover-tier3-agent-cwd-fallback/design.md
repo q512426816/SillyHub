@@ -23,6 +23,12 @@ created_at: 2026-10-04T14:02:30.626Z
 <!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
 内部函数 `resolve_takeover_machine` 行为变化（无 HTTP 签名变化）：tier3 的 cwd 来源加 entry 级 `agent_cwd` 回退；`_fail` 第三态文案中的目录展示从 `source.cwd` 改为有效 cwd。端点 `POST /api/daemon/sessions/{id}/takeover` 对外契约不变——原先 409「未携带机器身份…」的场景中，凡 entry 带 `agent_cwd` 且被唯一在线机器白名单覆盖的，现在改为 201 接手成功（这正是协议 §4 的既定语义）。
 
+文件变更清单（自声明）：
+
+- `backend/app/modules/daemon/session/service/takeover.py`（实现）
+- `backend/app/modules/daemon/tests/test_takeover.py`（测试）
+- `.sillyspec/docs/backend/modules/daemon.md`（模块文档人工备注追加本变更条目）
+
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 <!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-takeover-tier3-agent-cwd-fallback 留痕重锚 -->
 1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？

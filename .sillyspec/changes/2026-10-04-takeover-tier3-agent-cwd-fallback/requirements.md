@@ -30,9 +30,13 @@ Then 行为符合本条标准描述
 ## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
 
 <!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier3_fallback_entry_agent_cwd（回退命中）+ test_tier3_fallback_prefers_main_log_entry（主日志优先/subagent 排除）
 
 <!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier3_fallback_entry_agent_cwd（会话行 cwd 空 + entry agent_cwd 唯一覆盖 + zcode handoff 档 → 201）
 
 <!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier3_no_cwd_anywhere_409（全空 cwd → 409「未携带机器身份」+ 目录「未知」）+ 既有 test_tier4_no_match_409_with_machine_name 回归
 
 <!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+backend/app/modules/daemon/tests/test_takeover.py 全量 19 用例（含 3 个新增回退用例）绿
