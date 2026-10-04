@@ -20,6 +20,8 @@ FR-02~04 / D-002@v1 / D-004@v1 / D-005@v2）：
 
 from __future__ import annotations
 
+import json
+import re
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -269,6 +271,47 @@ async def resolve_takeover_machine(
 HANDOFF_MAX_CHARS = 12000
 _HANDOFF_TRUNCATED_NOTE = "\n……（交接文档超出长度上限，较早内容已截断）"
 
+# 涉及文件提取：path 类字段名（dict 形态直取键）与截断 JSON 兜底正则（值含
+# 转义序列的 JSON 字符串段，`(?:[^"\\]|\\.)*`）。
+_TOOL_FILE_KEYS = ("path", "file_path", "filePath", "notebook_path")
+_TOOL_FILE_RE = re.compile(r'"(?:path|file_path|filePath|notebook_path)"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _collect_tool_files(tool_input: Any, files: list[str]) -> None:
+    """从 tool_use 的 tool_input 提取涉及文件（首个 path 类字段值）。
+
+    契约是 daemon 侧 JSON.stringify 的字符串摘要（首 2KB 截断）——截断的坏
+    JSON 走正则兜底（path 类键通常在入参前部，截断前已在串内）；dict 形态
+    保留兼容（防御/测试）。非字符串非 dict 或无命中静默跳过。
+    """
+    if isinstance(tool_input, str):
+        if not tool_input.strip():
+            return
+        candidate: dict[str, Any] | None = None
+        try:
+            parsed = json.loads(tool_input)
+        except ValueError:
+            # 截断坏 JSON：regex 取首个 path 类键值，反转义常见 JSON 转义
+            # （\\ 与 \"；占位防二次替换）。
+            match = _TOOL_FILE_RE.search(tool_input)
+            if match is None:
+                return
+            raw = match.group(1)
+            val = raw.replace("\\\\", "\x00").replace('\\"', '"').replace("\x00", "\\")
+            files.append(val.strip())
+            return
+        if isinstance(parsed, dict):
+            candidate = parsed
+    elif isinstance(tool_input, dict):
+        candidate = tool_input
+    else:
+        return
+    for key in _TOOL_FILE_KEYS:
+        val = candidate.get(key)
+        if isinstance(val, str) and val.strip():
+            files.append(val.strip())
+            break
+
 
 def build_handoff_prompt(
     *,
@@ -280,38 +323,50 @@ def build_handoff_prompt(
 ) -> str:
     """组装 handoff 档交接文档（纯函数，D-004@v1 / design Phase 2）。
 
-    数据源=daemon ``read_agent_log_messages`` RPC 归一化消息（九字段
-    NormalizedLogMessage dict）；确定性模板不调 LLM：
+    数据源=daemon ``read_agent_log_messages`` RPC 归一化消息（NormalizedLogMessage
+    dict，kind 五值契约见 platform_sync/schema.py：user_input/reply/thinking/
+    tool_use/tool_result）。确定性模板不调 LLM：
 
     - 会话元信息（harness/工作目录/消息条数）；
-    - 最近对话（user 轮全文 + assistant 轮截断 500 字/轮，**保留较早内容**，
-      超帽截尾 + 截断声明行）；
-    - 涉及文件（tool_name 为读/写/编辑类时从 tool_input 提取 path 类字段的
-      去重清单，缺失字段静默省略该节——v1 字段覆盖度降级口径）；
-    - 最近操作（最近 8 条 tool 行一行摘）。
+    - 最近对话（user_input 真人轮全文——sender=system_event 系统注入跳过、
+      reply 截断 500 字/轮；thinking 推理噪声跳过；**保留较早内容**，超帽截尾 +
+      截断声明行）；
+    - 涉及文件（tool_use 段 tool_input 提取 path 类字段去重清单；契约是 JSON
+      字符串摘要非 dict，截断坏 JSON 走 regex 兜底——2026-10-04 契约对齐修正，
+      此前判 ``user``/``assistant`` + dict 恒不命中，真实日志只余工具名节）；
+    - 最近操作（最近 8 条 tool_use 一行摘；is_error 只在 tool_result 段携带，
+      按 tool_use_id 回贴配对操作行）。
 
     末尾拼用户首条消息（分隔线隔开）——首 prompt=交接文档+用户消息。
     """
     talk_lines: list[str] = []
     files: list[str] = []
     ops: list[str] = []
+    op_index_by_tool_use_id: dict[str, int] = {}
     for msg in messages:
         kind = str(msg.get("kind") or "")
         text = str(msg.get("text") or "").strip()
         tool_name = str(msg.get("tool_name") or "")
-        if kind == "user" and text:
-            talk_lines.append(f"用户：{text}")
-        elif kind == "assistant" and text:
-            talk_lines.append(f"助手：{text[:500]}")
-        elif tool_name:
-            ops.append(f"- {tool_name}" + ("（失败）" if msg.get("is_error") else ""))
-            tool_input = msg.get("tool_input")
-            if isinstance(tool_input, dict):
-                for key in ("path", "file_path", "filePath", "notebook_path"):
-                    val = tool_input.get(key)
-                    if isinstance(val, str) and val.strip():
-                        files.append(val.strip())
-                        break
+        if kind == "user_input":
+            if text and msg.get("sender") != "system_event":
+                talk_lines.append(f"用户：{text}")
+        elif kind == "reply":
+            if text:
+                talk_lines.append(f"助手：{text[:500]}")
+        elif kind == "tool_use":
+            ops.append(f"- {tool_name}")
+            tool_use_id = msg.get("tool_use_id")
+            if isinstance(tool_use_id, str) and tool_use_id:
+                op_index_by_tool_use_id[tool_use_id] = len(ops) - 1
+            _collect_tool_files(msg.get("tool_input"), files)
+        elif kind == "tool_result":
+            # 失败标记回贴配对 tool_use 行（is_error 契约上只在 tool_result 段）。
+            tool_use_id = msg.get("tool_use_id")
+            if msg.get("is_error") and isinstance(tool_use_id, str):
+                idx = op_index_by_tool_use_id.get(tool_use_id)
+                if idx is not None and "（失败）" not in ops[idx]:
+                    ops[idx] += "（失败）"
+        # thinking 及未知 kind：跳过。
     # 涉及文件去重保序；最近操作取尾部 8 条。
     seen: set[str] = set()
     deduped_files: list[str] = []
@@ -395,9 +450,12 @@ async def _build_handoff_first_prompt(
     messages = result.get("messages") or []
     if not isinstance(messages, list):
         return None
+    # 会话行 cwd 恒空（platform_sync 建桶不写该列）——与 tier3 同口径回退所选
+    # entry 的 agent_cwd，交接文档「工作目录」不再恒 unknown。
+    effective_cwd = source.cwd or entry.agent_cwd or ""
     return build_handoff_prompt(
         harness=harness,
-        cwd=source.cwd or "",
+        cwd=effective_cwd,
         messages=[m for m in messages if isinstance(m, dict)],
         user_prompt=user_prompt,
     )
