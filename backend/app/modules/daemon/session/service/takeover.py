@@ -271,46 +271,47 @@ async def resolve_takeover_machine(
 HANDOFF_MAX_CHARS = 12000
 _HANDOFF_TRUNCATED_NOTE = "\n……（交接文档超出长度上限，较早内容已截断）"
 
-# 涉及文件提取：path 类字段名（dict 形态直取键）与截断 JSON 兜底正则（值含
-# 转义序列的 JSON 字符串段，`(?:[^"\\]|\\.)*`）。
+# 涉及文件/操作摘要提取的键组：path 类字段与命令字段（dict 形态直取键；
+# 截断 JSON regex 兜底，值段 `(?:[^"\\]|\\.)*` 容忍转义序列）。
 _TOOL_FILE_KEYS = ("path", "file_path", "filePath", "notebook_path")
-_TOOL_FILE_RE = re.compile(r'"(?:path|file_path|filePath|notebook_path)"\s*:\s*"((?:[^"\\]|\\.)*)"')
+_TOOL_COMMAND_KEYS = ("command",)
 
 
-def _collect_tool_files(tool_input: Any, files: list[str]) -> None:
-    """从 tool_use 的 tool_input 提取涉及文件（首个 path 类字段值）。
+def _unescape_json_string(raw: str) -> str:
+    """JSON 字符串值段的常见转义反转义（``\\\\`` 与 ``\\"``；占位防二次替换）。"""
+    return raw.replace("\\\\", "\x00").replace('\\"', '"').replace("\x00", "\\")
 
-    契约是 daemon 侧 JSON.stringify 的字符串摘要（首 2KB 截断）——截断的坏
-    JSON 走正则兜底（path 类键通常在入参前部，截断前已在串内）；dict 形态
-    保留兼容（防御/测试）。非字符串非 dict 或无命中静默跳过。
+
+def _tool_input_field(tool_input: Any, keys: tuple[str, ...]) -> str | None:
+    """从 tool_use 的 tool_input 提取首个命中键的字符串值（涉及文件/操作摘要共用）。
+
+    契约是 daemon 侧 JSON.stringify 的字符串摘要（首 2KB 截断）——完整 JSON 走
+    json.loads；截断坏 JSON 用键名 regex 兜底（path/command 类键通常居入参前部，
+    截断前已在串内）；dict 形态保留兼容（防御/测试）。无命中返回 None。
     """
+    candidate: dict[str, Any] | None
     if isinstance(tool_input, str):
         if not tool_input.strip():
-            return
-        candidate: dict[str, Any] | None = None
+            return None
         try:
             parsed = json.loads(tool_input)
         except ValueError:
-            # 截断坏 JSON：regex 取首个 path 类键值，反转义常见 JSON 转义
-            # （\\ 与 \"；占位防二次替换）。
-            match = _TOOL_FILE_RE.search(tool_input)
+            alt = "|".join(re.escape(k) for k in keys)
+            match = re.search(rf'"(?:{alt})"\s*:\s*"((?:[^"\\]|\\.)*)"', tool_input)
             if match is None:
-                return
-            raw = match.group(1)
-            val = raw.replace("\\\\", "\x00").replace('\\"', '"').replace("\x00", "\\")
-            files.append(val.strip())
-            return
-        if isinstance(parsed, dict):
-            candidate = parsed
+                return None
+            val = _unescape_json_string(match.group(1)).strip()
+            return val or None
+        candidate = parsed if isinstance(parsed, dict) else None
     elif isinstance(tool_input, dict):
         candidate = tool_input
     else:
-        return
-    for key in _TOOL_FILE_KEYS:
-        val = candidate.get(key)
+        return None
+    for key in keys:
+        val = (candidate or {}).get(key)
         if isinstance(val, str) and val.strip():
-            files.append(val.strip())
-            break
+            return val.strip()
+    return None
 
 
 def build_handoff_prompt(
@@ -334,8 +335,9 @@ def build_handoff_prompt(
     - 涉及文件（tool_use 段 tool_input 提取 path 类字段去重清单；契约是 JSON
       字符串摘要非 dict，截断坏 JSON 走 regex 兜底——2026-10-04 契约对齐修正，
       此前判 ``user``/``assistant`` + dict 恒不命中，真实日志只余工具名节）；
-    - 最近操作（最近 8 条 tool_use 一行摘；is_error 只在 tool_result 段携带，
-      按 tool_use_id 回贴配对操作行）。
+    - 最近操作（最近 8 条 tool_use 一行摘：path 类字段值/command 首段作摘要，
+      折行压平截 120，无摘要纯工具名；is_error 只在 tool_result 段携带，按
+      tool_use_id 回贴配对操作行）。
 
     末尾拼用户首条消息（分隔线隔开）——首 prompt=交接文档+用户消息。
     """
@@ -354,11 +356,20 @@ def build_handoff_prompt(
             if text:
                 talk_lines.append(f"助手：{text[:500]}")
         elif kind == "tool_use":
-            ops.append(f"- {tool_name}")
+            tool_input = msg.get("tool_input")
+            file_path = _tool_input_field(tool_input, _TOOL_FILE_KEYS)
+            if file_path:
+                files.append(file_path)
+            # 操作行摘要：path 类字段值优先（文件工具）、无则 command 首段
+            # （Bash 类）；折行压平 + 截 120，无摘要维持纯工具名。
+            detail = file_path or _tool_input_field(tool_input, _TOOL_COMMAND_KEYS)
+            if detail:
+                ops.append(f"- {tool_name}：{' '.join(detail.split())[:120]}")
+            else:
+                ops.append(f"- {tool_name}")
             tool_use_id = msg.get("tool_use_id")
             if isinstance(tool_use_id, str) and tool_use_id:
                 op_index_by_tool_use_id[tool_use_id] = len(ops) - 1
-            _collect_tool_files(msg.get("tool_input"), files)
         elif kind == "tool_result":
             # 失败标记回贴配对 tool_use 行（is_error 契约上只在 tool_result 段）。
             tool_use_id = msg.get("tool_use_id")

@@ -99,6 +99,14 @@ class TestBuildHandoffPrompt:
                 tool_use_id="t3",
                 tool_input=json.dumps({"command": "ls"}),
             ),
+            # 无可用摘要 → 纯工具名；超长命令 → 折行压平截 120。
+            _msg("tool_use", tool_name="TodoWrite", tool_use_id="t4"),
+            _msg(
+                "tool_use",
+                tool_name="Bash",
+                tool_use_id="t5",
+                tool_input=json.dumps({"command": "echo " + "x" * 200}),
+            ),
             # 系统注入伪用户消息与 thinking 噪声：均不进最近对话。
             _msg("user_input", text="[BACKGROUND] task done", sender="system_event"),
             _msg("thinking", text="让我想想方案"),
@@ -123,9 +131,15 @@ class TestBuildHandoffPrompt:
         assert "助手：" + "好" * 500 in doc and "好" * 501 not in doc
         assert "[BACKGROUND]" not in doc
         assert "让我想想方案" not in doc
-        # 最近操作：tool_use 计数 + tool_result 失败标记回贴配对行。
-        assert "- Read" in doc and "- Bash" in doc
-        assert "- Edit（失败）" in doc
+        # 最近操作：工具名 + 摘要（path 类值 / command 首段）；无摘要纯工具名；
+        # 失败标记回贴行尾。
+        assert "- Read：C:/a/login.py" in doc
+        assert "- Bash：ls" in doc
+        assert "- Edit：C:/a/login.py（失败）" in doc
+        assert "- TodoWrite\n" in doc
+        # 超长命令摘要截 120（"echo " + 115 个 x）。
+        assert "echo " + "x" * 115 in doc
+        assert "echo " + "x" * 116 not in doc
         # 末尾拼用户消息。
         assert doc.endswith("用户：继续修")
 
