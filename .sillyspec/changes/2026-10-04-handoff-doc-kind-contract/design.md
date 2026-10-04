@@ -28,10 +28,21 @@ created_at: 2026-10-04T14:48:49.718Z
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
-1. 乱序/迟到到达：messages 是 daemon 解析器已按全局 seq 重编号的有序窗口，组装按序遍历；tool_result 回贴依赖 tool_use 先于 tool_result 出现（seq 不变式成立）；乱序极端下回贴 miss 只丢「（失败）」标记，不影响其它节。
-2. 并发写：纯函数零共享状态、零 IO；`_build_handoff_first_prompt` 只读（entry 查询 + RPC），失败降级路径不变。
-3. 切换/生命周期：交接文档只注入新会话首 prompt（一次性写 AgentRunLog），源会话零写红线不变；请求中断=不建接手会话，无中间态。
-4. 作用域：messages 按 `agent_session_id == source.id` 过滤后经 RPC 取回，无跨会话混入；tool_use_id 回贴表是单次调用局部变量不跨请求。
+1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
+
+答：messages 是 daemon 解析器已按全局 seq 重编号的有序窗口，组装按序遍历；tool_result 回贴依赖 tool_use 先于 tool_result 出现（seq 不变式成立）；乱序极端下回贴 miss 只丢「（失败）」标记，不影响其它节。
+
+2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
+
+答：纯函数零共享状态、零 IO；`_build_handoff_first_prompt` 只读（entry 查询 + RPC），失败降级路径不变。
+
+3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+
+答：交接文档只注入新会话首 prompt（一次性写 AgentRunLog），源会话零写红线不变；请求中断=不建接手会话，无中间态。
+
+4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
+
+答：messages 按 `agent_session_id == source.id` 过滤后经 RPC 取回，无跨会话混入；tool_use_id 回贴表是单次调用局部变量不跨请求。
 
 ## 风险与死路
 
