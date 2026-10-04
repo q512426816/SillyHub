@@ -1,0 +1,276 @@
+diff --git a/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/flow-state.yaml b/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/flow-state.yaml
+new file mode 100644
+index 000000000..cfc10e95d
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/flow-state.yaml
+@@ -0,0 +1,10 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: fe63b62b058abd6c8594031e918b0c136bd5af0f
++updatedAt: '2026-10-04T07:59:55.068Z'
++baseline_sha256: 0a8488cd3a416d08bb63228baef8e3c7965220e1e9f98555bbe9138ffcfc7e5d
++
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index 15d124124..f90e3ebf7 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -527,6 +527,11 @@ describe("ChangeAssetsCard 资产透明面", () => {
+     await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     const group = await screen.findByTestId("change-assets-knowledge-touch");
++    // 标题用用户语言、机制口径收进 title 悬停（2026-10-04-knowledge-touch-plain-title）。
++    expect(group).toHaveTextContent("知识触达（本变更参考过的知识）");
++    expect(group.querySelector("span[title]")?.getAttribute("title")).toContain(
++      "标记反查",
++    );
+     expect(group).toHaveTextContent("FR-auto-backend-015");
+     expect(group).toHaveTextContent("THIN 辅助阶段与派发配置");
+     const link = group.querySelector("a");
+@@ -536,9 +541,9 @@ describe("ChangeAssetsCard 资产透明面", () => {
+     );
+   });
+ 
+-  it("在途变更知识触达：实时命中渲染（live 标签区分归档反查口径）", async () => {
++  it("在途变更知识触达：实时命中渲染（标题带「实时」尾标区分归档定稿口径）", async () => {
+     // 2026-09-28-knowledge-touch-live：在途（archived=false）也能有触达——数据来自
+-    // knowledge_hits inject 行（后端合并），标签显示「实时」而非「待复核标记反查」。
++    // knowledge_hits inject 行（后端合并），标题尾标「实时」提示记录仍在增长。
+     mockGet.mockResolvedValue({
+       ...FULL,
+       archived: false,
+@@ -550,7 +555,10 @@ describe("ChangeAssetsCard 资产透明面", () => {
+     await screen.findByRole("button", { name: /沉淀资产/ });
+ 
+     const group = await screen.findByTestId("change-assets-knowledge-touch");
+-    expect(group).toHaveTextContent("知识触达（注入命中 · 实时）");
++    expect(group).toHaveTextContent("知识触达（本变更参考过的知识 · 实时）");
++    expect(group.querySelector("span[title]")?.getAttribute("title")).toContain(
++      "实时记录",
++    );
+     expect(group).toHaveTextContent("-audit_hooks-只在测试");
+     // 实时锚点行深链：file=裸知识文件（不带 knowledge/ 前缀）
+     const link = group.querySelector("a");
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index 93143e07e..3e40f3f0c 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -272,14 +272,21 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+ 
+           {/* 知识触达（2026-09-26-change-asset-transparency / FR-01）：本变更知识
+               注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查（flow
+-              done 对触达域打标），覆盖面以标记为准，行点击跳知识库深链。 */}
++              done 对触达域打标），覆盖面以标记为准，行点击跳知识库深链。标题用
++              用户语言、机制口径收进 title 悬停（2026-10-04-knowledge-touch-plain-title）。 */}
+           {touchList.length > 0 ? (
+             <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
+               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+-                <span>
++                <span
++                  title={
++                    data?.archived
++                      ? "按知识条目内「待复核：<变更名>」标记反查，并与执行期注入命中合并去重；覆盖以标记为准"
++                      : "执行期知识注入命中的实时记录；变更收尾后以条目内「待复核」标记为权威口径"
++                  }
++                >
+                   {data?.archived
+-                    ? "知识触达（注入命中 · 待复核标记反查）"
+-                    : "知识触达（注入命中 · 实时）"}
++                    ? "知识触达（本变更参考过的知识）"
++                    : "知识触达（本变更参考过的知识 · 实时）"}
+                 </span>
+                 <span className="text-[10px] text-muted-foreground/70">
+                   {touchList.length} 条
+diff --git a/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/design.md b/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/design.md
+new file mode 100644
+index 000000000..80323face
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T07:59:55.043Z
++---
++# 设计记录（Design Record）— 2026-10-04-knowledge-touch-plain-title
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-knowledge-touch-plain-title 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++只改前端资产卡知识触达组的标题字符串与注释：归档/在途两态统一为用户语言（「知识触达（本变更参考过的知识）」，在途加「 · 实时」尾标提示记录仍在增长），原机制黑话（「注入命中 · 待复核标记反查 / 实时」）移出标题正文，数据口径说明改挂标题 span 的 title 悬停属性。同步更新组件测试断言（在途态改新文案、归档态补标题断言）并最小修正知识库 FR-auto-frontend-093 条目（其引用了旧标签文案）。选此方案：用户会话中确认的诉求即"标题说人话、机制收进悬停提示"；后端 assets.py 两路合并口径不变，不动 DTO（无需 gen:types）。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-knowledge-touch-plain-title 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++无后端/DTO/端点改动：ChangeAssetsRead 结构与 assets.py 聚合口径不变，无需 gen:types。对外可见变化仅两处：①前端 change-assets-card.tsx 知识触达组标题两态文案更换 + 新增 title 悬停属性（纯展示层，组件 props 签名不变）；②知识库 fr/frontend.md 的 FR-auto-frontend-093 条目标题与场景正文同步改写（元数据与 test-bindings 机器段不动）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-knowledge-touch-plain-title 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：不适用——纯静态展示文案，不消费时序数据；列表数据仍由后端一次性聚合返回，文案不随数据到达顺序变化。
++2. 并发写：不适用——组件无共享可变状态；知识库 fr/frontend.md 为单点编辑，sillyspec knowledge validate 通过。
++3. 切换/生命周期：不适用——React 纯渲染层字符串替换，无状态残留；archived 布尔仍由后端判定，两态切换逻辑不变。
++4. 作用域：不适用——文案硬编码于组件，不随 workspace/多实例变化，无串台面。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-knowledge-touch-plain-title 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：文案改写后与知识库 FR 条目语义漂移（FR-auto-frontend-093 引用旧标签）——已同步最小修正该条目并 validate 通过规避。试过但放弃：①把两态口径差异做成可见副标题——放弃，机制细节对普通用户是噪音，用户诉求就是"说人话"；②顺带改写空态引导文案——放弃，超范围（其行为未变，FR 语义仍准确）；③起全栈环境渲染实页截图——放弃，纯字符串替换无布局/样式变化，组件测试断言即证据面（先例 2026-09-27-assets-testfile-bracket-note 同口径）。
+diff --git a/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/proposal.md b/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/proposal.md
+new file mode 100644
+index 000000000..bb34cdd11
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/proposal.md
+@@ -0,0 +1,40 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T07:59:55.041Z
++---
++# 提案书（Proposal）— 2026-10-04-knowledge-touch-plain-title
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:de45dabef399ae0fdab4dcc94cea9ff7abc3a6e4df65ca7e43cb645e085e2e85:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-knowledge-touch-plain-title 留痕重锚 -->
++任务原话转写：变更详情页「知识触达」区块标题是后台机制黑话（注入命中 · 待复核标记反查 / 实时），用户看不懂（实测连问多轮才理解其含义），应改为用户语言，机制细节收进悬停提示。
++
++成功标准：
++- 归档态与在途态的知识触达区块标题均使用用户语言（「知识触达（本变更参考过的知识）」形态），标题正文不再出现「待复核标记反查」「注入命中」等机制黑话
++- 数据口径（在途=执行期注入命中实时记录；归档=条目内「待复核」标记反查为权威、与实时命中合并去重）以悬停提示（title 属性）形式保留，表述准确
++- change-assets-card 组件测试断言同步更新并通过
++- 知识库 FR-auto-frontend-093 条目（引用了旧标签文案）做内容过时最小修正
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:8c06422f66248fd5bd9a5bb2ad5e64860b94e5116bf342c80f77d2b7d5f3f3e3:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-knowledge-touch-plain-title 留痕重锚 -->
++按成功标准机械推导，共 5 条验收面：
++1. 归档态与在途态的知识触达区块标题均使用用户语言（「知识触达（本变更参考过的知识）」形态），标题正文不再出现「待复核标记反查」「注入命中」等机制黑话
++2. 数据口径（在途=执行期注入命中实时记录
++3. 归档=条目内「待复核」标记反查为权威、与实时命中合并去重）以悬停提示（title 属性）形式保留，表述准确
++4. change-assets-card 组件测试断言同步更新并通过
++5. 知识库 FR-auto-frontend-093 条目（引用了旧标签文案）做内容过时最小修正
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:6cae75658427bae7351ed0f8b8fa83e24aa03cbea8d458657a42a67f8675b6f1:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-knowledge-touch-plain-title 留痕重锚 -->
++1. 归档态与在途态的知识触达区块标题均使用用户语言（「知识触达（本变更参考过的知识）」形态），标题正文不再出现「待复核标记反查」「注入命中」等机制黑话
++2. 数据口径（在途=执行期注入命中实时记录
++3. 归档=条目内「待复核」标记反查为权威、与实时命中合并去重）以悬停提示（title 属性）形式保留，表述准确
++4. change-assets-card 组件测试断言同步更新并通过
++5. 知识库 FR-auto-frontend-093 条目（引用了旧标签文案）做内容过时最小修正
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/requirements.md b/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/requirements.md
+new file mode 100644
+index 000000000..cdcbb9c38
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/requirements.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T07:59:55.043Z
++---
++# 需求规格（Requirements）— 2026-10-04-knowledge-touch-plain-title
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: 归档态与在途态的知识触达区块标题均使用用户语言（「知识触达（本变更参考过的知识）」形态），标题正文不再出现「待复核标记反查」「注入命中」等机制黑话
++Given 系统就绪
++When 归档态与在途态的知识触达区块标题均使用用户语言（「知识触达（本变更参考过的知识）」形态），标题正文不再出现「待复核标记反查」「注入命中」等机制黑话
++Then 行为符合本条标准描述
++
++### FR-02: 数据口径（在途=执行期注入命中实时记录
++Given 系统就绪
++When 数据口径（在途=执行期注入命中实时记录
++Then 行为符合本条标准描述
++
++### FR-03: 归档=条目内「待复核」标记反查为权威、与实时命中合并去重）以悬停提示（title 属性）形式保留，表述准确
++Given 系统就绪
++When 归档=条目内「待复核」标记反查为权威、与实时命中合并去重）以悬停提示（title 属性）形式保留，表述准确
++Then 行为符合本条标准描述
++
++### FR-04: change-assets-card 组件测试断言同步更新并通过
++Given 组件 / 测试 相关模块就绪
++When change-assets-card 组件测试断言同步更新并通过
++Then 行为符合本条标准描述
++
++### FR-05: 知识库 FR-auto-frontend-093 条目（引用了旧标签文案）做内容过时最小修正
++Given 系统就绪
++When 知识库 FR-auto-frontend-093 条目（引用了旧标签文案）做内容过时最小修正
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::知识触达组：待复核条目渲染并带知识库 file+anchor 深链 href（归档态标题）；同文件::在途变更知识触达：实时命中渲染（标题带「实时」尾标区分归档定稿口径）（在途态标题）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::在途变更知识触达：实时命中渲染（标题带「实时」尾标区分归档定稿口径）（span[title] 含「实时记录」）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::知识触达组：待复核条目渲染并带知识库 file+anchor 深链 href（span[title] 含「标记反查」）
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx（全文件 28 用例，含上述两态标题与 tooltip 断言）
++
++<!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++不适用：知识库 FR 条目为镜像文本修正，无运行时行为测试面；格式健康由 sillyspec knowledge validate 覆盖（本次实测无 errors）
+diff --git a/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/tasks.md b/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/tasks.md
+new file mode 100644
+index 000000000..4645e2fed
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/tasks.md
+@@ -0,0 +1,15 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T07:59:55.043Z
++---
++# 任务注册表（Tasks）— 2026-10-04-knowledge-touch-plain-title
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++> ✅ 边干边勾（2026-09-26-tick-loop-nudge + 2026-09-29 心跳指针 + 2026-10-03-voluntary-task-tick tick 动词）：完成一条 = 实现到位 + 相关测试跑绿 → 当场勾 `[x]`（sillyspec task tick --change 2026-10-04-knowledge-touch-plain-title --task task-NN 即时回显进度与下一任务，或 Edit 翻格），勿攒到收口一把勾（勾选是进度锚与哨兵证据面，watcher 实时上平台）。⚠️ harness 的 TodoWrite 类工具不替代本文件——平台进度/收口证据只读 tasks.md。📌 任务面在 ①spec 阶段定稿：覆写为真实实现步骤（全 `- [ ]`）后再动代码；执行循环：Working on task N/M → 做一件 → 勾一格 → 下一个——收口硬门拒单拍多格勾选（--allow-batch-tick 可显式旁路留痕）。`flow status --change <名>` 为自愿查看/恢复面（恢复时给下一任务指针与进度，非协议必需——D-007）。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: change-assets-card.tsx 知识触达标题改用户语言（归档「知识触达（本变更参考过的知识）」/在途「… · 实时」），机制黑话移出标题正文
++- [x] task-02: 数据口径收进标题 span 的 title 悬停（在途=执行期注入命中实时记录；归档=「待复核」标记反查为权威、与实时命中合并去重）
++- [x] task-03: 组件测试断言同步更新（在途态改新文案、归档态补标题断言）并跑绿（28 passed）
++- [x] task-04: 知识库 FR-auto-frontend-093 条目内容过时最小修正（sillyspec knowledge validate 无 errors）
++- [x] task-05: 填 design 四槽 + visual-evidence.md + 显式 pathspec 提交交付文件 + flow done 收口
+diff --git a/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/visual-evidence.md b/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/visual-evidence.md
+new file mode 100644
+index 000000000..400ce10d0
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/visual-evidence.md
+@@ -0,0 +1,9 @@
++# UI 视觉证据 — 2026-10-04-knowledge-touch-plain-title
++
++本变更是纯展示文案替换（知识触达区块标题两态换用户语言 + 新增 title 悬停属性），不改任何页面结构、className 或布局：
++
++- 触及的唯一前端文件 `change-assets-card.tsx` 仅改标题 span 的字符串内容与新增 title 属性、组头注释；JSX 结构、样式类、行渲染均不变，无视觉基准可比对需求。
++- 行为变化即文案本身：归档态「知识触达（注入命中 · 待复核标记反查）」→「知识触达（本变更参考过的知识）」；在途态「知识触达（注入命中 · 实时）」→「知识触达（本变更参考过的知识 · 实时）」；机制口径移入 title 悬停（鼠标停留可见）。
++- 无因约束对不齐基准而缩小/收敛范围的降级，无需用户裁决留痕。方向与文案形态经用户会话确认（"改"）。
++
++验证：`pnpm vitest run src/components/changes/detail/__tests__/change-assets-card.test.tsx` 28 passed（含更新后的两态标题断言）；`pnpm typecheck` 零错。未起全栈渲染实页——纯字符串替换无布局面，与先例 2026-09-27-assets-testfile-bracket-note 同口径（组件测试即证据面）。

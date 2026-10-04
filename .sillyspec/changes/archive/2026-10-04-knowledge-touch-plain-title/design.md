@@ -22,6 +22,7 @@ created_at: 2026-10-04T07:59:55.043Z
 
 <!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
 无后端/DTO/端点改动：ChangeAssetsRead 结构与 assets.py 聚合口径不变，无需 gen:types。对外可见变化仅两处：①前端 change-assets-card.tsx 知识触达组标题两态文案更换 + 新增 title 悬停属性（纯展示层，组件 props 签名不变）；②知识库 fr/frontend.md 的 FR-auto-frontend-093 条目标题与场景正文同步改写（元数据与 test-bindings 机器段不动）。
+文件变更清单（自声明）：frontend/src/components/changes/detail/change-assets-card.tsx；frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx；.sillyspec/knowledge/fr/frontend.md；.sillyspec/changes/2026-10-04-knowledge-touch-plain-title/（本变更工件：design/requirements/tasks/proposal/visual-evidence/flow-state）。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 <!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-knowledge-touch-plain-title 留痕重锚 -->

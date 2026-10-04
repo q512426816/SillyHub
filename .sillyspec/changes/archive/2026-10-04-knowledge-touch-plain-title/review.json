@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-04-knowledge-touch-plain-title",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "change.patch 冻结件缺失 .sillyspec/knowledge/fr/frontend.md 的 diff，与 design 自声明文件清单/FR-05/task-04 不一致",
+      "evidence": "design 槽2 自声明变更清单含 knowledge/fr/frontend.md，tasks.md task-04 勾选声称已修正并 validate 通过，但 change.patch 全部 8 个文件条目中没有该文件；对照现文件 fr/frontend.md:3727 条目标题已引用新文案（「知识触达（本变更参考过的知识 · 实时）」），交付实际发生，属冻结证据件与自述不一致的证据链缺口，非数据正确性风险（非 P1）",
+      "location": ".sillyspec/changes/2026-10-04-knowledge-touch-plain-title/change.patch（文件清单）；对照 .sillyspec/knowledge/fr/frontend.md:3727"
+    },
+    {
+      "severity": "P3",
+      "title": "requirements.md FR-02/FR-03 标题被机器预填按分隔符截断，语句不完整",
+      "evidence": "「数据口径（在途=执行期注入命中实时记录」「归档=条目内「待复核」标记反查为权威、与实时命中合并去重）以悬停提示…」两段本是 proposal 成功标准第 2 条的一句，被机器段指纹拆成两条残缺 FR；属机器预填缺陷（指纹段禁改），语义可从 proposal/测试绑定还原，不构成实现承诺违反",
+      "location": ".sillyspec/changes/2026-10-04-knowledge-touch-plain-title/requirements.md:15-23"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a（边界已裁决：可接受）",
+    "并发": "n/a（边界已裁决：可接受）",
+    "切换": "n/a（边界已裁决：可接受）",
+    "作用域": "n/a（边界已裁决：可接受）"
+  },
+  "reviewedAt": "2026-10-04T16:09:39+08:00"
+}

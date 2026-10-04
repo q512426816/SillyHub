@@ -12,4 +12,4 @@ created_at: 2026-10-04T07:59:55.043Z
 - [x] task-02: 数据口径收进标题 span 的 title 悬停（在途=执行期注入命中实时记录；归档=「待复核」标记反查为权威、与实时命中合并去重）
 - [x] task-03: 组件测试断言同步更新（在途态改新文案、归档态补标题断言）并跑绿（28 passed）
 - [x] task-04: 知识库 FR-auto-frontend-093 条目内容过时最小修正（sillyspec knowledge validate 无 errors）
-- [ ] task-05: 填 design 四槽 + visual-evidence.md + 显式 pathspec 提交交付文件 + flow done 收口
+- [x] task-05: 填 design 四槽 + visual-evidence.md + 显式 pathspec 提交交付文件 + flow done 收口

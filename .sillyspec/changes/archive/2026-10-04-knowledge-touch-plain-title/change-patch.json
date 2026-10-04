@@ -1,0 +1,48 @@
+{
+  "change": "2026-10-04-knowledge-touch-plain-title",
+  "baseline": "fe63b62b058abd6c8594031e918b0c136bd5af0f",
+  "head": "a8d3ad5b8d85a1f303de3d358cfb010d938c7f13",
+  "files": [
+    ".sillyspec/changes/2026-10-04-knowledge-touch-plain-title/design.md",
+    ".sillyspec/changes/2026-10-04-knowledge-touch-plain-title/flow-state.yaml",
+    ".sillyspec/changes/2026-10-04-knowledge-touch-plain-title/proposal.md",
+    ".sillyspec/changes/2026-10-04-knowledge-touch-plain-title/requirements.md",
+    ".sillyspec/changes/2026-10-04-knowledge-touch-plain-title/tasks.md",
+    ".sillyspec/changes/2026-10-04-knowledge-touch-plain-title/visual-evidence.md",
+    "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+    "frontend/src/components/changes/detail/change-assets-card.tsx"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 203,
+    "deletions": 7
+  },
+  "savedAt": "2026-10-04T08:06:31.125Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "4a708a98bc8629251c976db55f70baa8f20a694d053690ef83fffdfa8650630b",
+  "patchStatus": "ok"
+}
