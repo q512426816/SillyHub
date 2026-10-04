@@ -35,11 +35,16 @@ Then 行为符合本条标准描述
 ## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
 
 <!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::知识触达组：待复核条目渲染并带知识库 file+anchor 深链 href（归档态标题）；同文件::在途变更知识触达：实时命中渲染（标题带「实时」尾标区分归档定稿口径）（在途态标题）
 
 <!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::在途变更知识触达：实时命中渲染（标题带「实时」尾标区分归档定稿口径）（span[title] 含「实时记录」）
 
 <!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::知识触达组：待复核条目渲染并带知识库 file+anchor 深链 href（span[title] 含「标记反查」）
 
 <!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx（全文件 28 用例，含上述两态标题与 tooltip 断言）
 
 <!--AGENT:测试绑定FR-05 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
+不适用：知识库 FR 条目为镜像文本修正，无运行时行为测试面；格式健康由 sillyspec knowledge validate 覆盖（本次实测无 errors）

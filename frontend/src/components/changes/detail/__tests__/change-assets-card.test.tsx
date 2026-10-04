@@ -529,6 +529,9 @@ describe("ChangeAssetsCard 资产透明面", () => {
     const group = await screen.findByTestId("change-assets-knowledge-touch");
     // 标题用用户语言、机制口径收进 title 悬停（2026-10-04-knowledge-touch-plain-title）。
     expect(group).toHaveTextContent("知识触达（本变更参考过的知识）");
+    expect(group.querySelector("span[title]")?.getAttribute("title")).toContain(
+      "标记反查",
+    );
     expect(group).toHaveTextContent("FR-auto-backend-015");
     expect(group).toHaveTextContent("THIN 辅助阶段与派发配置");
     const link = group.querySelector("a");
@@ -553,6 +556,9 @@ describe("ChangeAssetsCard 资产透明面", () => {
 
     const group = await screen.findByTestId("change-assets-knowledge-touch");
     expect(group).toHaveTextContent("知识触达（本变更参考过的知识 · 实时）");
+    expect(group.querySelector("span[title]")?.getAttribute("title")).toContain(
+      "实时记录",
+    );
     expect(group).toHaveTextContent("-audit_hooks-只在测试");
     // 实时锚点行深链：file=裸知识文件（不带 knowledge/ 前缀）
     const link = group.querySelector("a");
