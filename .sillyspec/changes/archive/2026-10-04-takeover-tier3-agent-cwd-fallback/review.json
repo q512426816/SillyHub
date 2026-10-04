@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-04-takeover-tier3-agent-cwd-fallback",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结件缺 design 自声明文件 daemon.md 的 diff（仓库实际已更新）",
+      "evidence": "design 接口契约自声明三份变更文件含 .sillyspec/docs/backend/modules/daemon.md，但 change.patch 冻结件仅含 takeover.py/test_takeover.py/流程文件；仓库实际文件 daemon.md:286 已含本变更条目（grep 证实）——属冻结件不完整、影响以 patch 为唯一事实来源的追溯，非代码缺陷",
+      "location": ".sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/change.patch"
+    },
+    {
+      "severity": "P3",
+      "title": "_latest_agent_cwd 的 limit 50 窗口未在 design 披露，超窗时主日志优先失效",
+      "evidence": "helper 按 last_seen_at 倒序仅取 50 行；当某会话 platform_agent_logs 超 50 行且最新主日志行被挤出窗口时，any_cwd 兜底可能取到 subagent worktree 副本 cwd 参与 tier3 匹配（错向需白名单恰好唯一覆盖该 worktree 路径，概率极低；宁拒不猜防护仍在）",
+      "location": "backend/app/modules/daemon/session/service/takeover.py:41"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受；limit 50 窗口缺口另记 P3 finding）",
+    "并发": "ok（边界已裁决：可接受——helper 纯只读 SELECT，与 ingest 无写竞态，作答与代码一致）",
+    "切换": "ok（边界已裁决：可接受——patch 无任何写源会话行操作，无中间态，D-006 红线保持）",
+    "作用域": "ok（边界已裁决：可接受——where agent_session_id==source.id 严格过滤，subagent 行靠主日志优先+子串排除隔离，测试 test_tier3_fallback_prefers_main_log_entry 真实验证该隔离）"
+  },
+  "reviewedAt": "2026-10-04T14:13:38Z"
+}

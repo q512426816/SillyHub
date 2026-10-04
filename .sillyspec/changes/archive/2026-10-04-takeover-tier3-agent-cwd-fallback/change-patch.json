@@ -1,0 +1,54 @@
+{
+  "change": "2026-10-04-takeover-tier3-agent-cwd-fallback",
+  "baseline": "8c08387c08269d63e9a7787abc6319c1703b1292",
+  "head": "45a176ddfb7b01e6c352630cbd0140161fc3b277",
+  "files": [
+    ".sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/design.md",
+    ".sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/flow-state.yaml",
+    ".sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/proposal.md",
+    ".sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/requirements.md",
+    ".sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/tasks.md",
+    "backend/app/modules/daemon/session/service/takeover.py",
+    "backend/app/modules/daemon/tests/test_takeover.py"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 293,
+    "deletions": 7
+  },
+  "savedAt": "2026-10-04T14:09:05.078Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "5d3ff37858742c550a2e731e4682da9801de393d681c09d45b5d842b383f8713",
+  "patchStatus": "ok"
+}

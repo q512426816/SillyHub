@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-04-takeover-tier3-agent-cwd-fallback",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-04-takeover-tier3-agent-cwd-fallback:flow:FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier3_fallback_entry_agent_cwd（回退命中）+"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-04-takeover-tier3-agent-cwd-fallback"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-04-takeover-tier3-agent-cwd-fallback:flow:FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier3_fallback_entry_agent_cwd（会话行"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-04-takeover-tier3-agent-cwd-fallback"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-04-takeover-tier3-agent-cwd-fallback:flow:FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier3_no_cwd_anywhere_409（全空"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-04-takeover-tier3-agent-cwd-fallback"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-04-takeover-tier3-agent-cwd-fallback:flow:FR-04",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_takeover.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-04-takeover-tier3-agent-cwd-fallback"
+    }
+  ]
+}

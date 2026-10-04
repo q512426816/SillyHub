@@ -1,0 +1,393 @@
+diff --git a/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/flow-state.yaml b/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/flow-state.yaml
+new file mode 100644
+index 000000000..56df6114d
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/flow-state.yaml
+@@ -0,0 +1,10 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 8c08387c08269d63e9a7787abc6319c1703b1292
++updatedAt: '2026-10-04T14:02:30.701Z'
++baseline_sha256: b17083df517e09da86c47ccffb235bfdfee2455c73aa1dcdd786ca252e8b1136
++
+diff --git a/backend/app/modules/daemon/session/service/takeover.py b/backend/app/modules/daemon/session/service/takeover.py
+index 63fbf7d7b..1813e32ad 100644
+--- a/backend/app/modules/daemon/session/service/takeover.py
++++ b/backend/app/modules/daemon/session/service/takeover.py
+@@ -110,6 +110,32 @@ async def _latest_reported_machine(
+     return None, None
+ 
+ 
++async def _latest_agent_cwd(db: AsyncSession, source: AgentSession) -> str | None:
++    """最新 entry 的 agent_cwd（tier3 回退源，协议 §4 口径）。
++
++    主日志优先（log_path 排除 subagent 前缀，R-04 惯例——subagent 行 cwd 是
++    worktree 副本路径，不代原会话工作目录）；agent_cwd 为空的行跳过。
++    """
++    from app.modules.platform_sync.model import AgentSessionLogORM
++
++    rows = (
++        await db.execute(
++            select(
++                AgentSessionLogORM.agent_cwd,
++                AgentSessionLogORM.log_path,
++            )
++            .where(col(AgentSessionLogORM.agent_session_id) == source.id)
++            .order_by(col(AgentSessionLogORM.last_seen_at).desc().nulls_last())
++            .limit(50)
++        )
++    ).all()
++    any_cwd = next((c for c, _p in rows if c), None)
++    return next(
++        (c for c, p in rows if c and "subagent" not in (p or "").lower()),
++        any_cwd,
++    )
++
++
+ async def resolve_takeover_machine(
+     db: AsyncSession,
+     source: AgentSession,
+@@ -122,7 +148,8 @@ async def resolve_takeover_machine(
+ 
+     1. ``machine_id``（metadata.machine_id，daemon 心跳同源值）精确命中；
+     2. ``hostname``（reported_machine_name == runtime.name）命中；
+-    3. 存量无机器身份：``cwd ∈ runtime.allowed_roots`` 命中；
++    3. 存量无机器身份：``cwd ∈ runtime.allowed_roots`` 命中（cwd=会话行优先，
++       空则回退最新 entry 的 ``agent_cwd``——建桶不写会话行 cwd，协议 §4）；
+     4. 无命中/机器级歧义 → 409 中文（含机器名与"开机/装 daemon"指引）——
+        宁拒不猜，不静默换机。
+ 
+@@ -146,6 +173,11 @@ async def resolve_takeover_machine(
+         .all()
+     )
+     machine_id, hostname = await _latest_reported_machine(db, source)
++    # tier3 匹配与诊断文案共用的有效 cwd：会话行优先；platform_sync 建桶/刷新
++    # 不写会话行 cwd（恒空），空则回退最新 entry 的 agent_cwd（协议
++    # docs/platform-agent-log-protocol.md §4）——旧 CLI 无 machine 块的存量
++    # 会话靠该字段命中原机。
++    cwd = source.cwd or (await _latest_agent_cwd(db, source)) or ""
+ 
+     def _machine_names(rows: list[DaemonRuntime]) -> list[str]:
+         """命中机器名去重保序（daemon_instance 分组，display 名=name，缺省 id 短码）。"""
+@@ -183,7 +215,7 @@ async def resolve_takeover_machine(
+             msg = (
+                 "该会话的历史上报未携带机器身份，且当前没有任何在线机器的"
+                 "工作目录白名单（allowed_roots）覆盖该会话目录"
+-                f"（{source.cwd or '未知'}）——请在产生该会话的机器上启动 daemon"
++                f"（{cwd or '未知'}）——请在产生该会话的机器上启动 daemon"
+                 "（并确认其 allowed_roots 含该目录）后重试；不会换到其它机器执行。"
+             )
+         return ToolReportTakeoverNoMachine(
+@@ -218,8 +250,8 @@ async def resolve_takeover_machine(
+         if hits:
+             return _pick_machine(hits, "hostname"), "hostname"
+ 
+-    # ── ③ 存量无机器身份：cwd ∈ allowed_roots 唯一命中──────────────────────
+-    cwd = source.cwd or ""
++    # ── ③ 存量无机器身份：cwd ∈ allowed_roots 唯一命中（cwd 已含 entry 级
++    #    agent_cwd 回退，见取值处注释）───────────────────────────────────────
+     if cwd:
+         hits = [
+             rt
+diff --git a/backend/app/modules/daemon/tests/test_takeover.py b/backend/app/modules/daemon/tests/test_takeover.py
+index 71e1722a1..3c168c7ed 100644
+--- a/backend/app/modules/daemon/tests/test_takeover.py
++++ b/backend/app/modules/daemon/tests/test_takeover.py
+@@ -72,8 +72,15 @@ async def _seed_tool_report_session(
+     reported_machine_id: str | None = None,
+     reported_machine_name: str | None = None,
+     engine_session_id: str | None = None,
++    session_cwd: str | None = None,
++    entry_cwd: str | None = None,
+ ) -> AgentSession:
+-    """ORM 直落未激活 tool_report 源会话 + 关联 platform_agent_logs 行。"""
++    """ORM 直落未激活 tool_report 源会话 + 关联 platform_agent_logs 行。
++
++    ``session_cwd`` / ``entry_cwd`` 缺省跟随 ``cwd``；传 ``""`` 可单独置空——
++    真实 ingest 不写会话行 cwd（2026-10-04-takeover-tier3-agent-cwd-fallback
++    的回归形态）。
++    """
+     owner_id = await _admin_user_id(db_session)
+     from app.modules.workspace.model import Workspace
+ 
+@@ -109,7 +116,7 @@ async def _seed_tool_report_session(
+             ),
+         },
+         turn_count=0,
+-        cwd=cwd,
++        cwd=cwd if session_cwd is None else session_cwd,
+         last_active_at=datetime.now(UTC),
+     )
+     db_session.add(session)
+@@ -121,7 +128,7 @@ async def _seed_tool_report_session(
+             agent_session_id=session.id,
+             log_path=f"C:/Users/qinyi/.logs/{uuid.uuid4()}.jsonl",
+             harness=harness,
+-            agent_cwd=cwd,
++            agent_cwd=cwd if entry_cwd is None else entry_cwd,
+             session_id=engine_session_id,
+             reported_machine_id=reported_machine_id,
+             reported_machine_name=reported_machine_name,
+@@ -284,6 +291,95 @@ class TestFourTierMatching:
+         resp = await _takeover(client, auth_headers, source.id)
+         assert resp.status_code == 201, resp.text
+ 
++    @pytest.mark.asyncio
++    async def test_tier3_fallback_entry_agent_cwd(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        mocked_hub,
++        mocked_redis,
++    ) -> None:
++        """③回退：会话行 cwd 恒空（真实 ingest 形态）→ 最新 entry 的 agent_cwd
++        参与匹配，唯一覆盖机器可接手（2026-10-04-takeover-tier3-agent-cwd-fallback）。"""
++        owner_id = await _admin_user_id(db_session)
++        right = await _create_runtime(db_session, owner_id, name="WIN-BOX")
++        right.allowed_roots = ["C:/Users/qinyi"]
++        db_session.add(right)
++        other = await _create_runtime(db_session, owner_id, name="MAC-BOX")
++        other.allowed_roots = ["/Users/qinyi"]
++        db_session.add(other)
++        await db_session.commit()
++
++        # 会话行 cwd 空、entry 带 agent_cwd——服务器实例 7ea5177a 的真实形态。
++        source = await _seed_tool_report_session(
++            db_session, harness="zcode", provider="claude", session_cwd=""
++        )
++        resp = await _takeover(client, auth_headers, source.id)
++        assert resp.status_code == 201, resp.text
++        assert resp.json()["tier"] == "handoff"  # zcode 不可 resume → handoff 档
++
++    @pytest.mark.asyncio
++    async def test_tier3_fallback_prefers_main_log_entry(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        mocked_hub,
++        mocked_redis,
++    ) -> None:
++        """③回退取主日志 entry 的 agent_cwd——更新的 subagent 行（worktree 副本
++        cwd，不被白名单覆盖）不参与匹配，否则本用例应 409。"""
++        owner_id = await _admin_user_id(db_session)
++        right = await _create_runtime(db_session, owner_id, name="WIN-BOX")
++        right.allowed_roots = ["C:/Users/qinyi"]
++        db_session.add(right)
++        await db_session.commit()
++
++        source = await _seed_tool_report_session(db_session, session_cwd="")
++        ws_id = source.workspace_id
++        db_session.add(
++            AgentSessionLogORM(
++                id=uuid.uuid4(),
++                workspace_id=ws_id,
++                agent_session_id=source.id,
++                # subagent 前缀路径 + 更新 last_seen_at + worktree 副本 cwd。
++                log_path=f"C:/Users/qinyi/.logs/subagent-{uuid.uuid4()}.jsonl",
++                harness="claude-code",
++                agent_cwd="D:/worktrees/copy-xyz",
++                first_seen_at="2026-09-30T00:00:00.000Z",
++                last_seen_at="2026-09-30T02:00:00.000Z",
++            )
++        )
++        await db_session.commit()
++
++        resp = await _takeover(client, auth_headers, source.id)
++        assert resp.status_code == 201, resp.text
++
++    @pytest.mark.asyncio
++    async def test_tier3_no_cwd_anywhere_409(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        mocked_hub,
++        mocked_redis,
++    ) -> None:
++        """③回退兜底：会话行与 entry 均无 cwd → 维持 409 原文案（目录「未知」）。"""
++        owner_id = await _admin_user_id(db_session)
++        mac = await _create_runtime(db_session, owner_id, name="MAC-BOX")
++        mac.allowed_roots = ["/Users/qinyi"]
++        db_session.add(mac)
++        await db_session.commit()
++
++        source = await _seed_tool_report_session(db_session, session_cwd="", entry_cwd="")
++        resp = await _takeover(client, auth_headers, source.id)
++        assert resp.status_code == 409, resp.text
++        msg = resp.json()["message"]
++        assert "未携带机器身份" in msg
++        assert "未知" in msg
++        assert resp.json()["details"]["machine_candidates"] == []
++
+     @pytest.mark.asyncio
+     async def test_tier4_no_match_409_with_machine_name(
+         self,
+diff --git a/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/design.md b/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/design.md
+new file mode 100644
+index 000000000..3e3b3afa0
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T14:02:30.626Z
++---
++# 设计记录（Design Record）— 2026-10-04-takeover-tier3-agent-cwd-fallback
++
++> 四节的「问题」是机器段（指纹保护，勿改）；你的回答写在每节问题下方的 AGENT 槽里。
++> 每节至少一行——小改动可写「不适用：<理由>」；flow done 空槽拒收。
++
++## 做法概述
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-takeover-tier3-agent-cwd-fallback 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++
++<!--AGENT:槽1 做法概述作答——例外裁决书写面（机器段之外合法） -->
++改 `backend/app/modules/daemon/session/service/takeover.py` 的 `resolve_takeover_machine`：tier3 匹配 cwd 从「只读会话行 `source.cwd`」改为「会话行优先、空则回退最新 `platform_agent_logs` 条目的 `agent_cwd`（主日志优先，排除 subagent 前缀路径，R-04 惯例）」。新增私有 helper `_latest_agent_cwd`。选接手侧回退而非建桶时回写会话行 cwd：协议 `docs/platform-agent-log-protocol.md` §4 明确 tier3 口径就是 entry 级 `agent_cwd`，且回退对存量会话（不会再上报）立即生效、零数据迁移；建桶回写只救未来上报。409 第三态文案同步用有效 cwd 展示，不再恒显「未知」。
++
++## 接口契约
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-takeover-tier3-agent-cwd-fallback 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++
++<!--AGENT:槽2 接口契约作答——例外裁决书写面（机器段之外合法） -->
++内部函数 `resolve_takeover_machine` 行为变化（无 HTTP 签名变化）：tier3 的 cwd 来源加 entry 级 `agent_cwd` 回退；`_fail` 第三态文案中的目录展示从 `source.cwd` 改为有效 cwd。端点 `POST /api/daemon/sessions/{id}/takeover` 对外契约不变——原先 409「未携带机器身份…」的场景中，凡 entry 带 `agent_cwd` 且被唯一在线机器白名单覆盖的，现在改为 201 接手成功（这正是协议 §4 的既定语义）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-takeover-tier3-agent-cwd-fallback 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++
++<!--AGENT:槽3 盲维四问作答——例外裁决书写面（机器段之外合法） -->
++1. 乱序/迟到：回退源按 `last_seen_at` 倒序取最新且主日志优先——CLI 全量重推是整行覆盖语义，乱序迟到推最终收敛到最新值；tier3 只在「会话行 cwd 为空」时启用，会话行有值时行为与旧版逐字节一致。
++2. 并发写：helper 只读（SELECT limit 50），不写任何行；与 ingest 的整行覆盖无竞态（最坏读到上一次上报的 agent_cwd，匹配结论仍指向同一台机器——allowed_roots 变更频率极低）。
++3. 切换/生命周期：takeover 本身不写源会话行（D-006 红线不变）；请求中断只是不建接手会话，无中间态。
++4. 作用域：查询按 `agent_session_id == source.id` 过滤，会话行本身已按 user_id + 未软删校验，不跨工作区串台；subagent 行可能在同会话名下，主日志优先 + 排除 subagent 前缀已隔离其 worktree 副本 cwd。
++
++## 风险与死路
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-takeover-tier3-agent-cwd-fallback 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++
++<!--AGENT:槽4 风险与死路作答——例外裁决书写面（机器段之外合法） -->
++最大风险：回退扩大 tier3 命中面后，若两台在线机器白名单都覆盖该 agent_cwd，会从「409 无匹配」变成「409 歧义（列候选机器名）」——不静默换机的红线不变，只是拒因更准；真歧义时用户按文案清理白名单即可。试过放弃的方案：建桶/刷新时把 agent_cwd 回写会话行 cwd——只对未来上报生效，存量会话（如线上 7ea5177a，已不会再被旧 CLI 重推）救不了，且给 ingest 增加一条写路径；协议 §4 的口径本就是 entry 级匹配，故弃。
+diff --git a/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/proposal.md b/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/proposal.md
+new file mode 100644
+index 000000000..343206e27
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/proposal.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T14:02:30.624Z
++---
++# 提案书（Proposal）— 2026-10-04-takeover-tier3-agent-cwd-fallback
++
++## 动机
++<!-- MACHINE-DRAFT:proposal-motivation:6b60f9630aadcf5cb736be1f03d2a4625eb44a46f4244e164c8521a6eb9a1852:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-takeover-tier3-agent-cwd-fallback 留痕重锚 -->
++任务原话转写：动机：tool_report 会话接手（takeover）tier3 读会话行 cwd 做 allowed_roots 匹配，但 platform_sync 建桶/刷新从不写会话行 cwd，旧 CLI（无 machine 块）上报的存量会话四级匹配全落空 409——协议文档 docs/platform-agent-log-protocol.md §4 明确 tier3 应按 entry 级 agent_cwd ∈ allowed_roots 匹配；线上实例：会话 7ea5177a（harness=zcode，agent_cwd=C:/Users/qinyi/IdeaProjects/multi-agent-platform，本机 daemon 在线且白名单覆盖）无法继续对话。
++成功标准：
++- resolve_takeover_machine 在会话行 cwd 为空时，取该会话最新 platform_agent_logs 条目的 agent_cwd（主日志优先，缺省任一条目）参与 tier3 匹配
++- 真实形态（会话行 cwd 为空、entry 带 agent_cwd、单机白名单覆盖）下 tier3 唯一命中在线机器并完成接手
++- 会话行与 entry 均无 cwd 时维持原 409 文案与行为（回归不变）
++- 新增回退路径有单测覆盖，daemon 模块现有 takeover 测试全绿
++<!-- MACHINE-DRAFT:proposal-motivation:end -->
++
++<!--AGENT:槽1 动机例外裁决——例外裁决书写面（机器段之外合法） -->
++
++## 变更范围
++<!-- MACHINE-DRAFT:proposal-scope:c5fa9bef1485889abbaaa8042825c43c2f45b7311006dab565ed9dc4ac87cd4b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-takeover-tier3-agent-cwd-fallback 留痕重锚 -->
++按成功标准机械推导，共 4 条验收面：
++1. resolve_takeover_machine 在会话行 cwd 为空时，取该会话最新 platform_agent_logs 条目的 agent_cwd（主日志优先，缺省任一条目）参与 tier3 匹配
++2. 真实形态（会话行 cwd 为空、entry 带 agent_cwd、单机白名单覆盖）下 tier3 唯一命中在线机器并完成接手
++3. 会话行与 entry 均无 cwd 时维持原 409 文案与行为（回归不变）
++4. 新增回退路径有单测覆盖，daemon 模块现有 takeover 测试全绿
++<!-- MACHINE-DRAFT:proposal-scope:end -->
++
++
++## 成功标准（可验证）
++<!-- MACHINE-DRAFT:proposal-criteria:146ab1ad78365f86d2d4fba548702599864216859d068ac65d399febe8846456:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-04-takeover-tier3-agent-cwd-fallback 留痕重锚 -->
++1. resolve_takeover_machine 在会话行 cwd 为空时，取该会话最新 platform_agent_logs 条目的 agent_cwd（主日志优先，缺省任一条目）参与 tier3 匹配
++2. 真实形态（会话行 cwd 为空、entry 带 agent_cwd、单机白名单覆盖）下 tier3 唯一命中在线机器并完成接手
++3. 会话行与 entry 均无 cwd 时维持原 409 文案与行为（回归不变）
++4. 新增回退路径有单测覆盖，daemon 模块现有 takeover 测试全绿
++<!-- MACHINE-DRAFT:proposal-criteria:end -->
++
++<!--AGENT:槽2 成功标准例外裁决（增删条目在此书写）——例外裁决书写面（机器段之外合法） -->
+diff --git a/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/requirements.md b/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/requirements.md
+new file mode 100644
+index 000000000..ce2571117
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/requirements.md
+@@ -0,0 +1,42 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T14:02:30.626Z
++---
++# 需求规格（Requirements）— 2026-10-04-takeover-tier3-agent-cwd-fallback
++
++## 功能需求（GWT 骨架已机器预填——可编辑覆盖；FR 进知识索引）
++
++<!--AGENT:FR区 agent 填写功能需求（GWT 骨架已预填——覆盖/修改/保留均可） -->
++### FR-01: resolve_takeover_machine 在会话行 cwd 为空时，取该会话最新 platform_agent_logs 条目的 agent_cwd（主日志优先，缺省任一条目）参与 tier3 匹配
++Given 系统就绪
++When resolve_takeover_machine 在会话行 cwd 为空时，取该会话最新 platform_agent_logs 条目的 agent_cwd（主
++Then 行为符合本条标准描述
++
++### FR-02: 真实形态（会话行 cwd 为空、entry 带 agent_cwd、单机白名单覆盖）下 tier3 唯一命中在线机器并完成接手
++Given 系统就绪
++When 真实形态（会话行 cwd 为空、entry 带 agent_cwd、单机白名单覆盖）下 tier3 唯一命中在线机器并完成接手
++Then 行为符合本条标准描述
++
++### FR-03: 会话行与 entry 均无 cwd 时维持原 409 文案与行为（回归不变）
++Given 系统就绪
++When 会话行与 entry 均无 cwd 时维持原 409 文案与行为（回归不变）
++Then 行为符合本条标准描述
++
++### FR-04: 新增回退路径有单测覆盖，daemon 模块现有 takeover 测试全绿
++Given 测试 相关模块就绪
++When 新增回退路径有单测覆盖，daemon 模块现有 takeover 测试全绿
++Then 行为符合本条标准描述
++
++## 测试绑定（每条 FR 至少一行——空槽将在 flow done 时自动从测试结果补全）
++
++<!--AGENT:测试绑定FR-01 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier3_fallback_entry_agent_cwd（回退命中）+ test_tier3_fallback_prefers_main_log_entry（主日志优先/subagent 排除）
++
++<!--AGENT:测试绑定FR-02 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier3_fallback_entry_agent_cwd（会话行 cwd 空 + entry agent_cwd 唯一覆盖 + zcode handoff 档 → 201）
++
++<!--AGENT:测试绑定FR-03 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/daemon/tests/test_takeover.py::TestFourTierMatching::test_tier3_no_cwd_anywhere_409（全空 cwd → 409「未携带机器身份」+ 目录「未知」）+ 既有 test_tier4_no_match_409_with_machine_name 回归
++
++<!--AGENT:测试绑定FR-04 哪个测试文件/用例覆盖这条 FR（项目相对全路径＋用例名；空槽将在 flow done 自动从测试结果补全——预填可加速）——例外裁决书写面（机器段之外合法） -->
++backend/app/modules/daemon/tests/test_takeover.py 全量 19 用例（含 3 个新增回退用例）绿
+\ No newline at end of file
+diff --git a/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/tasks.md b/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/tasks.md
+new file mode 100644
+index 000000000..a22c52603
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-takeover-tier3-agent-cwd-fallback/tasks.md
+@@ -0,0 +1,13 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T14:02:30.626Z
++---
++# 任务注册表（Tasks）— 2026-10-04-takeover-tier3-agent-cwd-fallback
++
++> 机器预填草稿（成功标准逐条镜像）——任务面归 agent：按实际实现路径覆写本文件（保持 checkbox 行形态），验收锚在 requirements；
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决。
++
++- [x] task-01: takeover.py 新增 `_latest_agent_cwd` helper（主日志优先、subagent 排除、agent_cwd 空行跳过），`resolve_takeover_machine` 的 tier3 cwd 改为会话行优先 + entry 级回退，409 文案同步用有效 cwd
++- [x] task-02: fixture 扩 `session_cwd`/`entry_cwd` 参数（真实 ingest 形态可构造），新增回退命中用例（zcode handoff 档 201）
++- [x] task-03: 新增主日志优先用例（更新的 subagent worktree 行不参与匹配）与全空 409 原文案用例（目录「未知」）
++- [x] task-04: 跑 `app/modules/daemon/tests/test_takeover.py` 全量（19 用例）绿
