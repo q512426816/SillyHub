@@ -1,0 +1,527 @@
+diff --git a/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/flow-state.yaml b/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/flow-state.yaml
+new file mode 100644
+index 000000000..287dfcc40
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/flow-state.yaml
+@@ -0,0 +1,10 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++baseline_commit: 3354409ddb5fd4d58029d9655b5fc8e318137909
++updatedAt: '2026-10-04T14:48:49.747Z'
++baseline_sha256: 884ea4ef88931840c5c91fd65181f68ca439438450ec15ecb0d8a3a4e3ddaac6
++
+diff --git a/backend/app/modules/daemon/session/service/takeover.py b/backend/app/modules/daemon/session/service/takeover.py
+index 1813e32ad..87e5dd0d3 100644
+--- a/backend/app/modules/daemon/session/service/takeover.py
++++ b/backend/app/modules/daemon/session/service/takeover.py
+@@ -20,6 +20,8 @@ FR-02~04 / D-002@v1 / D-004@v1 / D-005@v2）：
+ 
+ from __future__ import annotations
+ 
++import json
++import re
+ import uuid
+ from dataclasses import dataclass
+ from typing import Any
+@@ -269,6 +271,47 @@ async def resolve_takeover_machine(
+ HANDOFF_MAX_CHARS = 12000
+ _HANDOFF_TRUNCATED_NOTE = "\n……（交接文档超出长度上限，较早内容已截断）"
+ 
++# 涉及文件提取：path 类字段名（dict 形态直取键）与截断 JSON 兜底正则（值含
++# 转义序列的 JSON 字符串段，`(?:[^"\\]|\\.)*`）。
++_TOOL_FILE_KEYS = ("path", "file_path", "filePath", "notebook_path")
++_TOOL_FILE_RE = re.compile(r'"(?:path|file_path|filePath|notebook_path)"\s*:\s*"((?:[^"\\]|\\.)*)"')
++
++
++def _collect_tool_files(tool_input: Any, files: list[str]) -> None:
++    """从 tool_use 的 tool_input 提取涉及文件（首个 path 类字段值）。
++
++    契约是 daemon 侧 JSON.stringify 的字符串摘要（首 2KB 截断）——截断的坏
++    JSON 走正则兜底（path 类键通常在入参前部，截断前已在串内）；dict 形态
++    保留兼容（防御/测试）。非字符串非 dict 或无命中静默跳过。
++    """
++    if isinstance(tool_input, str):
++        if not tool_input.strip():
++            return
++        candidate: dict[str, Any] | None = None
++        try:
++            parsed = json.loads(tool_input)
++        except ValueError:
++            # 截断坏 JSON：regex 取首个 path 类键值，反转义常见 JSON 转义
++            # （\\ 与 \"；占位防二次替换）。
++            match = _TOOL_FILE_RE.search(tool_input)
++            if match is None:
++                return
++            raw = match.group(1)
++            val = raw.replace("\\\\", "\x00").replace('\\"', '"').replace("\x00", "\\")
++            files.append(val.strip())
++            return
++        if isinstance(parsed, dict):
++            candidate = parsed
++    elif isinstance(tool_input, dict):
++        candidate = tool_input
++    else:
++        return
++    for key in _TOOL_FILE_KEYS:
++        val = candidate.get(key)
++        if isinstance(val, str) and val.strip():
++            files.append(val.strip())
++            break
++
+ 
+ def build_handoff_prompt(
+     *,
+@@ -280,38 +323,50 @@ def build_handoff_prompt(
+ ) -> str:
+     """组装 handoff 档交接文档（纯函数，D-004@v1 / design Phase 2）。
+ 
+-    数据源=daemon ``read_agent_log_messages`` RPC 归一化消息（九字段
+-    NormalizedLogMessage dict）；确定性模板不调 LLM：
++    数据源=daemon ``read_agent_log_messages`` RPC 归一化消息（NormalizedLogMessage
++    dict，kind 五值契约见 platform_sync/schema.py：user_input/reply/thinking/
++    tool_use/tool_result）。确定性模板不调 LLM：
+ 
+     - 会话元信息（harness/工作目录/消息条数）；
+-    - 最近对话（user 轮全文 + assistant 轮截断 500 字/轮，**保留较早内容**，
+-      超帽截尾 + 截断声明行）；
+-    - 涉及文件（tool_name 为读/写/编辑类时从 tool_input 提取 path 类字段的
+-      去重清单，缺失字段静默省略该节——v1 字段覆盖度降级口径）；
+-    - 最近操作（最近 8 条 tool 行一行摘）。
++    - 最近对话（user_input 真人轮全文——sender=system_event 系统注入跳过、
++      reply 截断 500 字/轮；thinking 推理噪声跳过；**保留较早内容**，超帽截尾 +
++      截断声明行）；
++    - 涉及文件（tool_use 段 tool_input 提取 path 类字段去重清单；契约是 JSON
++      字符串摘要非 dict，截断坏 JSON 走 regex 兜底——2026-10-04 契约对齐修正，
++      此前判 ``user``/``assistant`` + dict 恒不命中，真实日志只余工具名节）；
++    - 最近操作（最近 8 条 tool_use 一行摘；is_error 只在 tool_result 段携带，
++      按 tool_use_id 回贴配对操作行）。
+ 
+     末尾拼用户首条消息（分隔线隔开）——首 prompt=交接文档+用户消息。
+     """
+     talk_lines: list[str] = []
+     files: list[str] = []
+     ops: list[str] = []
++    op_index_by_tool_use_id: dict[str, int] = {}
+     for msg in messages:
+         kind = str(msg.get("kind") or "")
+         text = str(msg.get("text") or "").strip()
+         tool_name = str(msg.get("tool_name") or "")
+-        if kind == "user" and text:
+-            talk_lines.append(f"用户：{text}")
+-        elif kind == "assistant" and text:
+-            talk_lines.append(f"助手：{text[:500]}")
+-        elif tool_name:
+-            ops.append(f"- {tool_name}" + ("（失败）" if msg.get("is_error") else ""))
+-            tool_input = msg.get("tool_input")
+-            if isinstance(tool_input, dict):
+-                for key in ("path", "file_path", "filePath", "notebook_path"):
+-                    val = tool_input.get(key)
+-                    if isinstance(val, str) and val.strip():
+-                        files.append(val.strip())
+-                        break
++        if kind == "user_input":
++            if text and msg.get("sender") != "system_event":
++                talk_lines.append(f"用户：{text}")
++        elif kind == "reply":
++            if text:
++                talk_lines.append(f"助手：{text[:500]}")
++        elif kind == "tool_use":
++            ops.append(f"- {tool_name}")
++            tool_use_id = msg.get("tool_use_id")
++            if isinstance(tool_use_id, str) and tool_use_id:
++                op_index_by_tool_use_id[tool_use_id] = len(ops) - 1
++            _collect_tool_files(msg.get("tool_input"), files)
++        elif kind == "tool_result":
++            # 失败标记回贴配对 tool_use 行（is_error 契约上只在 tool_result 段）。
++            tool_use_id = msg.get("tool_use_id")
++            if msg.get("is_error") and isinstance(tool_use_id, str):
++                idx = op_index_by_tool_use_id.get(tool_use_id)
++                if idx is not None and "（失败）" not in ops[idx]:
++                    ops[idx] += "（失败）"
++        # thinking 及未知 kind：跳过。
+     # 涉及文件去重保序；最近操作取尾部 8 条。
+     seen: set[str] = set()
+     deduped_files: list[str] = []
+@@ -395,9 +450,12 @@ async def _build_handoff_first_prompt(
+     messages = result.get("messages") or []
+     if not isinstance(messages, list):
+         return None
++    # 会话行 cwd 恒空（platform_sync 建桶不写该列）——与 tier3 同口径回退所选
++    # entry 的 agent_cwd，交接文档「工作目录」不再恒 unknown。
++    effective_cwd = source.cwd or entry.agent_cwd or ""
+     return build_handoff_prompt(
+         harness=harness,
+-        cwd=source.cwd or "",
++        cwd=effective_cwd,
+         messages=[m for m in messages if isinstance(m, dict)],
+         user_prompt=user_prompt,
+     )
+diff --git a/backend/app/modules/daemon/tests/test_takeover_handoff.py b/backend/app/modules/daemon/tests/test_takeover_handoff.py
+index b669f01a7..466b746af 100644
+--- a/backend/app/modules/daemon/tests/test_takeover_handoff.py
++++ b/backend/app/modules/daemon/tests/test_takeover_handoff.py
+@@ -1,14 +1,17 @@
+ """takeover handoff 档测试（2026-09-30-tool-report-activation-wrong-machine
+-task-05 / FR-04 / D-004@v1 / D-005@v2）。
++task-05 / FR-04 / D-004@v1 / D-005@v2；2026-10-04-handoff-doc-kind-contract
++改用真实 NormalizedLogMessage 契约形态——kind 五值 / tool_input JSON 字符串）。
+ 
+ 覆盖：
+ 
+ - ``build_handoff_prompt`` 纯函数：模板节（元信息/涉及文件去重/最近操作尾部 8
+-  条/最近对话 user 全文 + assistant 截断）、体积帽 + 截断声明行、字段缺失
+-  （无 tool 文件键）降级省略、末尾拼用户首条消息；
++  条/最近对话 user_input 全文 + reply 截断）、system_event 跳过、thinking 跳过、
++  tool_result 失败标记回贴配对 tool_use、tool_input 截断坏 JSON 的 regex 兜底、
++  体积帽 + 截断声明行、字段缺失降级省略、末尾拼用户首条消息；
+ - handoff 端到端：RPC 成功（mocked hub send_rpc 回 parsed messages）→
+-  handoff_doc=True 且首 prompt 含交接文档（AgentRunLog user_input 断言）；
+-  RPC 失败（send_rpc 抛错/非 parsed）→ handoff_doc=False 降级普通新会话；
++  handoff_doc=True 且首 prompt 含交接文档（AgentRunLog user_input 断言，含
++  工作目录 entry 级 agent_cwd 回退）；RPC 失败（send_rpc 抛错/非 parsed）→
++  handoff_doc=False 降级普通新会话；
+ - 引擎重选（D-005@v2）：显式 provider ∉ 原机支持集合 → 422；合法重选 →
+   新会话 provider 落所选值（原机集合含多 provider 行）。
+ 
+@@ -17,6 +20,7 @@ task-05 / FR-04 / D-004@v1 / D-005@v2）。
+ 
+ from __future__ import annotations
+ 
++import json
+ import uuid
+ from unittest.mock import AsyncMock, MagicMock, patch
+ 
+@@ -62,6 +66,7 @@ def mocked_redis():
+ 
+ 
+ def _msg(kind: str = "", *, text: str = "", tool_name: str = "", **extra) -> dict:
++    """真实契约形态：kind 五值、tool_input 为 JSON 字符串摘要。"""
+     return {"kind": kind, "text": text, "tool_name": tool_name, **extra}
+ 
+ 
+@@ -73,12 +78,31 @@ def _msg(kind: str = "", *, text: str = "", tool_name: str = "", **extra) -> dic
+ class TestBuildHandoffPrompt:
+     def test_sections_and_dedup(self) -> None:
+         messages = [
+-            _msg("user", text="先扫描下 login 超时"),
+-            _msg("assistant", text="好" * 800),  # 截断到 500
+-            _msg("tool", tool_name="Read", tool_input={"file_path": "C:/a/login.py"}),
+-            _msg("tool", tool_name="Edit", tool_input={"path": "C:/a/login.py"}),
+-            _msg("tool", tool_name="Bash", tool_input={"command": "ls"}),
+-            _msg("user", text="改成 30 秒超时"),
++            _msg("user_input", text="先扫描下 login 超时"),
++            _msg("reply", text="好" * 800),  # 截断到 500
++            _msg(
++                "tool_use",
++                tool_name="Read",
++                tool_use_id="t1",
++                tool_input=json.dumps({"file_path": "C:/a/login.py"}),
++            ),
++            _msg(
++                "tool_use",
++                tool_name="Edit",
++                tool_use_id="t2",
++                tool_input=json.dumps({"path": "C:/a/login.py"}),
++            ),
++            _msg("tool_result", tool_name="Edit", tool_use_id="t2", is_error=True),
++            _msg(
++                "tool_use",
++                tool_name="Bash",
++                tool_use_id="t3",
++                tool_input=json.dumps({"command": "ls"}),
++            ),
++            # 系统注入伪用户消息与 thinking 噪声：均不进最近对话。
++            _msg("user_input", text="[BACKGROUND] task done", sender="system_event"),
++            _msg("thinking", text="让我想想方案"),
++            _msg("user_input", text="改成 30 秒超时"),
+         ]
+         doc = build_handoff_prompt(
+             harness="zcode",
+@@ -89,33 +113,54 @@ class TestBuildHandoffPrompt:
+         assert doc.startswith("【上下文交接文档】")
+         assert "本地 harness：zcode" in doc
+         assert "工作目录：C:/proj" in doc
+-        # 涉及文件去重保序。
++        # 涉及文件去重保序（JSON 字符串 tool_input 可提取）。
+         assert doc.count("C:/a/login.py") >= 1
+         files_section = doc.split("涉及文件")[1].split("最近操作")[0]
+         assert files_section.count("C:/a/login.py") == 1
+-        # user 全文 + assistant 截断。
++        # user_input 全文 + reply 截断；system_event / thinking 不出现。
+         assert "用户：先扫描下 login 超时" in doc
+         assert "用户：改成 30 秒超时" in doc
+         assert "助手：" + "好" * 500 in doc and "好" * 501 not in doc
+-        # 最近操作。
+-        assert "- Read" in doc and "- Edit" in doc and "- Bash" in doc
++        assert "[BACKGROUND]" not in doc
++        assert "让我想想方案" not in doc
++        # 最近操作：tool_use 计数 + tool_result 失败标记回贴配对行。
++        assert "- Read" in doc and "- Bash" in doc
++        assert "- Edit（失败）" in doc
+         # 末尾拼用户消息。
+         assert doc.endswith("用户：继续修")
+ 
++    def test_truncated_tool_input_regex_fallback(self) -> None:
++        """tool_input 2KB 截断的坏 JSON（daemon 摘要口径）→ regex 兜底仍可提取
++        path 类字段；含 JSON 转义的 Windows 路径正确反转义。"""
++        truncated_unix = '{"file_path":"C:/a/login.py","old_string":"lorem ipsum '
++        truncated_win = '{"path":"C:\\\\worktrees\\\\copy-1","new_string":"xxx '
++        doc = build_handoff_prompt(
++            harness="zcode",
++            cwd="C:/proj",
++            messages=[
++                _msg("tool_use", tool_name="Edit", tool_input=truncated_unix),
++                _msg("tool_use", tool_name="Edit", tool_input=truncated_win),
++            ],
++            user_prompt="go",
++        )
++        assert "C:/a/login.py" in doc
++        assert "C:\\worktrees\\copy-1" in doc
++
+     def test_missing_fields_degrade(self) -> None:
+-        """无 tool_input path 键 / 空消息 → 省略对应节不报错。"""
++        """无 tool 段 / 空消息 → 省略对应节不报错。"""
+         doc = build_handoff_prompt(
+             harness="zcode",
+             cwd="",
+-            messages=[_msg("user", text="hi")],
++            messages=[_msg("user_input", text="hi")],
+             user_prompt="go",
+         )
+         assert "涉及文件" not in doc
+         assert "最近操作" not in doc
+         assert "最近对话" in doc
++        assert "工作目录：unknown" in doc
+ 
+     def test_max_chars_cap_and_note(self) -> None:
+-        messages = [_msg("user", text="x" * 500) for _ in range(100)]
++        messages = [_msg("user_input", text="x" * 500) for _ in range(100)]
+         doc = build_handoff_prompt(
+             harness="zcode",
+             cwd="C:/p",
+@@ -142,7 +187,10 @@ class TestHandoffEndToEnd:
+         mocked_hub,
+         mocked_redis,
+     ) -> None:
+-        """RPC parsed → handoff_doc=True，首 prompt=交接文档+用户消息。"""
++        """RPC parsed → handoff_doc=True，首 prompt=交接文档+用户消息。
++
++        会话行 cwd 置空（真实建桶形态）→ 交接文档工作目录回退 entry 级
++        agent_cwd（2026-10-04-handoff-doc-kind-contract）。"""
+         owner_id = await _admin_user_id(db_session)
+         rt = await _create_runtime(db_session, owner_id, provider="claude", name=HOSTNAME)
+         rt.allowed_roots = ["C:/Users/qinyi"]
+@@ -151,15 +199,24 @@ class TestHandoffEndToEnd:
+         await db_session.commit()
+ 
+         source = await _seed_tool_report_session(
+-            db_session, harness="zcode", provider="claude", reported_machine_name=HOSTNAME
++            db_session,
++            harness="zcode",
++            provider="claude",
++            reported_machine_name=HOSTNAME,
++            session_cwd="",
+         )
+         source_id = source.id
+ 
+         mocked_hub.send_rpc.return_value = {
+             "status": "parsed",
+             "messages": [
+-                _msg("user", text="本地任务：修 login 超时"),
+-                _msg("tool", tool_name="Edit", tool_input={"file_path": "C:/a/login.py"}),
++                _msg("user_input", text="本地任务：修 login 超时"),
++                _msg(
++                    "tool_use",
++                    tool_name="Edit",
++                    tool_use_id="t1",
++                    tool_input=json.dumps({"file_path": "C:/a/login.py"}),
++                ),
+             ],
+             "truncated": False,
+         }
+@@ -198,6 +255,11 @@ class TestHandoffEndToEnd:
+         assert user_input is not None
+         assert "【上下文交接文档】" in user_input.content_redacted
+         assert "本地任务：修 login 超时" in user_input.content_redacted
++        # 工作目录回退 entry 级 agent_cwd（fixture 默认 cwd 值）。
++        assert (
++            "工作目录：C:/Users/qinyi/IdeaProjects/multi-agent-platform"
++            in user_input.content_redacted
++        )
+         assert user_input.content_redacted.endswith("用户：接着修")
+ 
+     @pytest.mark.asyncio
+diff --git a/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/design.md b/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/design.md
+new file mode 100644
+index 000000000..17a2b3387
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/design.md
+@@ -0,0 +1,51 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T14:48:49.718Z
++---
++# 设计记录（Design Record）— 2026-10-04-handoff-doc-kind-contract
++
++> 四节每节必答——答案直接写在问题下方；小改动可写「不适用：<理由>」；flow done 空节拒收。
++> 需要列改动文件时在「接口契约」节加「文件变更清单」表（| 新增/修改 | 路径 | 说明 |）。
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++改 `backend/app/modules/daemon/session/service/takeover.py` 的 `build_handoff_prompt`（纯函数）：按消息契约（`platform_sync/schema.py:513` 钉死的 kind 五值 `user_input/reply/thinking/tool_use/tool_result`）重组装分支——此前判 `kind=="user"/"assistant"` 是死分支（契约里不存在这两值，真实日志只余 tool_name 进「最近操作」，对话与文件节全空，用户实测 200 条消息只看到 8 个工具名）；`tool_input` 按契约的 JSON 字符串摘要解析（新增 `_collect_tool_files`：json.loads，2KB 截断坏 JSON 用 regex 兜底取首个 path 类键，dict 形态保留兼容）；`_build_handoff_first_prompt` 的 cwd 与 tier3 同口径回退所选 entry 的 `agent_cwd`（会话行 cwd 建桶不写恒空，「工作目录」不再恒 unknown）。选契约对齐而非改 daemon 侧发新 kind：契约本身是对的（前端 /agent-logs/{id}/messages 消费同一份五值），错的是 handoff 组装端自造了一套词表。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++`build_handoff_prompt(harness, cwd, messages, user_prompt, max_chars)` 签名不变、纯函数；行为变化=按 kind 五值契约组装（此前 user/assistant 判断恒不命中，属修复对齐而非语义变更）：user_input（sender=system_event 跳过）→「用户：」行、reply→「助手：」行（500 截断）、thinking 跳过、tool_use→操作行+涉及文件提取、tool_result 的 is_error 按 tool_use_id 回贴配对操作行「（失败）」。`_build_handoff_first_prompt` 内部 cwd 取值加 entry.agent_cwd 回退。HTTP 端点签名无变化。
++
++文件变更清单：
++
++| 新增/修改 | 路径 | 说明 |
++|---|---|---|
++| 修改 | backend/app/modules/daemon/session/service/takeover.py | build_handoff_prompt 契约对齐 + _collect_tool_files helper + cwd 回退 |
++| 修改 | backend/app/modules/daemon/tests/test_takeover_handoff.py | 测试改真实契约消息形态 + 新增截断 JSON 兜底/cwd 回退用例 |
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++答：messages 是 daemon 解析器已按全局 seq 重编号的有序窗口，组装按序遍历；tool_result 回贴依赖 tool_use 先于 tool_result 出现（seq 不变式成立）；乱序极端下回贴 miss 只丢「（失败）」标记，不影响其它节。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++答：纯函数零共享状态、零 IO；`_build_handoff_first_prompt` 只读（entry 查询 + RPC），失败降级路径不变。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++答：交接文档只注入新会话首 prompt（一次性写 AgentRunLog），源会话零写红线不变；请求中断=不建接手会话，无中间态。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++答：messages 按 `agent_session_id == source.id` 过滤后经 RPC 取回，无跨会话混入；tool_use_id 回贴表是单次调用局部变量不跨请求。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：regex 兜底从截断 JSON 提取 path 时，若 path 类键值本身被 2KB 截断切断会取出半截路径进「涉及文件」节（展示性瑕疵，不参与任何匹配/写库）。试过放弃的方案：改 daemon 侧让 tool_input 直接下发结构化 path 字段——要动 RPC 契约 + 老 daemon 兼容窗口 + 前端同步，代价远超收益；JSON 字符串解析在 backend 侧做即可闭环，故弃。
+diff --git a/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/proposal.md b/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/proposal.md
+new file mode 100644
+index 000000000..404f23d4f
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T14:48:49.718Z
++---
++# 提案书（Proposal）— 2026-10-04-handoff-doc-kind-contract
++
++## 动机
++
++任务原话转写：动机：takeover handoff 档交接文档对真实日志全空（用户实测：200 条消息只余工具名节、工作目录 unknown）——build_handoff_prompt 判 kind=='user'/'assistant' 但消息契约是 user_input/reply/thinking/tool_use/tool_result 五值（platform_sync/schema.py:513 钉死），两分支恒不命中；tool_input 契约是 JSON 字符串摘要非 dict，涉及文件节恒空；_build_handoff_first_prompt 的 cwd 只读会话行（建桶不写恒空）不回退 entry 级 agent_cwd。
++成功标准：
++- build_handoff_prompt 按 kind 五值契约组装：user_input（sender=system_event 跳过）→ 用户行、reply → 助手行（500 截断）、thinking 跳过、tool_use → 操作行+文件提取、tool_result 失败标记回贴配对 tool_use
++- tool_input 兼容 JSON 字符串（含 2KB 截断致 json 解析失败的 regex 兜底）与 dict 双形态，涉及文件节真实数据可产出
++- _build_handoff_first_prompt 的 cwd 会话行优先、空则回退所选 entry 的 agent_cwd（与 tier3 同口径）
++- 测试改用真实契约消息形态，覆盖 system_event 跳过/失败回贴/截断 JSON 兜底/cwd 回退，takeover+handoff 相关测试全绿
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. build_handoff_prompt 按 kind 五值契约组装：user_input（sender=system_event 跳过）→ 用户行、reply → 助手行（500 截断）、thinking 跳过、tool_use → 操作行+文件提取、tool_result 失败标记回贴配对 tool_use
++2. tool_input 兼容 JSON 字符串（含 2KB 截断致 json 解析失败的 regex 兜底）与 dict 双形态，涉及文件节真实数据可产出
++3. _build_handoff_first_prompt 的 cwd 会话行优先、空则回退所选 entry 的 agent_cwd（与 tier3 同口径）
++4. 测试改用真实契约消息形态，覆盖 system_event 跳过/失败回贴/截断 JSON 兜底/cwd 回退，takeover+handoff 相关测试全绿
++
++## 成功标准（可验证）
++
++1. build_handoff_prompt 按 kind 五值契约组装：user_input（sender=system_event 跳过）→ 用户行、reply → 助手行（500 截断）、thinking 跳过、tool_use → 操作行+文件提取、tool_result 失败标记回贴配对 tool_use
++2. tool_input 兼容 JSON 字符串（含 2KB 截断致 json 解析失败的 regex 兜底）与 dict 双形态，涉及文件节真实数据可产出
++3. _build_handoff_first_prompt 的 cwd 会话行优先、空则回退所选 entry 的 agent_cwd（与 tier3 同口径）
++4. 测试改用真实契约消息形态，覆盖 system_event 跳过/失败回贴/截断 JSON 兜底/cwd 回退，takeover+handoff 相关测试全绿
+diff --git a/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/requirements.md b/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/requirements.md
+new file mode 100644
+index 000000000..34655c2e7
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/requirements.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T14:48:49.718Z
++---
++# 需求规格（Requirements）— 2026-10-04-handoff-doc-kind-contract
++
++## 功能需求
++
++> FR 由你撰写：每条 = `### FR-NN: 标题` + 一句带强度词的行为规定（必须=硬性；禁止=红线；
++> SHOULD=建议须注理由；可以=可选）；边界情形加场景块 `#### 场景：名` + Given/When/Then 行。
++> 标题行是成功标准锚（勿改写——收口做门柱对比）；正文与场景块归你。
++
++### FR-01: build_handoff_prompt 按 kind 五值契约组装：user_input（sender=system_event 跳过）→ 用户行、reply → 助手行（500 截断）、thinking 跳过、tool_use → 操作行+文件提取、tool_result 失败标记回贴配对 tool_use
++
++- 必须：build_handoff_prompt 只按 NormalizedLogMessage 契约五值 kind（user_input/reply/thinking/tool_use/tool_result）组装分支；禁止再依赖契约外 kind 值（如 user/assistant）判定对话行。
++
++#### 场景：主路径
++
++Given 含真人 user_input、reply、system_event 伪用户、thinking、tool_use、失败 tool_result 的归一化消息窗口 / When 组装交接文档 / Then 用户/助手行成对出现、系统注入与 thinking 不出现、操作行带「（失败）」回贴。
++
++### FR-02: tool_input 兼容 JSON 字符串（含 2KB 截断致 json 解析失败的 regex 兜底）与 dict 双形态，涉及文件节真实数据可产出
++
++- 必须：涉及文件提取接受契约的 JSON 字符串摘要（json.loads）与 dict 双形态；截断坏 JSON 必须 regex 兜底取首个 path 类键（含 JSON 转义反转义），无命中静默省略该节。
++
++#### 场景：主路径
++
++Given tool_use 段 tool_input 为 2KB 截断的坏 JSON 字符串（path 类键在截断点前）/ When 提取涉及文件 / Then 路径仍进入涉及文件节且转义正确反转义。
++
++### FR-03: _build_handoff_first_prompt 的 cwd 会话行优先、空则回退所选 entry 的 agent_cwd（与 tier3 同口径）
++
++- 必须：交接文档工作目录取「会话行 cwd 优先、空则所选主日志 entry 的 agent_cwd」；两者皆空回落 unknown 展示。
++
++#### 场景：主路径
++
++Given 会话行 cwd 为空且所选 entry 带 agent_cwd / When RPC parsed 组装交接文档 / Then 文档「工作目录」显示 entry 的 agent_cwd 而非 unknown。
++
++### FR-04: 测试改用真实契约消息形态，覆盖 system_event 跳过/失败回贴/截断 JSON 兜底/cwd 回退，takeover+handoff 相关测试全绿
++
++- 必须：handoff 相关测试的消息 fixture 使用契约五值 kind 与 JSON 字符串 tool_input（禁止伪造 user/assistant/dict 形态掩盖契约漂移）；覆盖四类边界（system_event 跳过/失败回贴/截断兜底/cwd 回退）。
++
++#### 场景：主路径
++
++Given test_takeover_handoff.py 与 test_takeover.py / When 全量执行 / Then 26 用例全绿。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_sections_and_dedup」
++FR-02: test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_truncated_tool_input_regex_fallback」+「test_sections_and_dedup」
++FR-03: test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestHandoffEndToEnd::test_handoff_doc_injected」（session_cwd="" 断言工作目录回退）
++FR-04: test/backend/app/modules/daemon/tests/test_takeover_handoff.py 全量 7 用例 + test_takeover.py 19 用例绿
+diff --git a/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/tasks.md b/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/tasks.md
+new file mode 100644
+index 000000000..faf24db20
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-04-handoff-doc-kind-contract/tasks.md
+@@ -0,0 +1,16 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-04T14:48:49.718Z
++---
++# 任务注册表（Tasks）— 2026-10-04-handoff-doc-kind-contract
++
++> 镜像行（task-01…task-NN）是成功标准逐条镜像=任务锚：勿删勿改写（收口对照它），完成实现路径
++> 需要更细步骤时在镜像行**后追加细化行**（保持 `- [ ] task-NN:` 行形态，编号从镜像行末尾顺延——
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决）。
++> 边干边勾：完成一条 = 实现到位 + 相关测试跑绿 → 当场勾（sillyspec task tick --change 2026-10-04-handoff-doc-kind-contract --task task-NN 即时回显进度与下一任务，或 Edit 翻格），勿攒到收口一把勾（收口硬门拒单拍多格勾选；--allow-batch-tick 可显式旁路留痕）。⚠️ harness 的 TodoWrite 类工具不替代本文件——平台进度/收口哨兵只读 tasks.md。
++> `flow status --change 2026-10-04-handoff-doc-kind-contract` 为自愿查看/恢复面。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: build_handoff_prompt 按 kind 五值契约组装：user_input（sender=system_event 跳过）→ 用户行、reply → 助手行（500 截断）、thinking 跳过、tool_use → 操作行+文件提取、tool_result 失败标记回贴配对 tool_use
++- [x] task-02: tool_input 兼容 JSON 字符串（含 2KB 截断致 json 解析失败的 regex 兜底）与 dict 双形态，涉及文件节真实数据可产出
++- [x] task-03: _build_handoff_first_prompt 的 cwd 会话行优先、空则回退所选 entry 的 agent_cwd（与 tier3 同口径）
++- [x] task-04: 测试改用真实契约消息形态，覆盖 system_event 跳过/失败回贴/截断 JSON 兜底/cwd 回退，takeover+handoff 相关测试全绿

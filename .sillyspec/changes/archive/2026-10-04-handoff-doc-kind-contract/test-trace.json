@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-04-handoff-doc-kind-contract",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-04-handoff-doc-kind-contract:flow:测试绑定FR-01",
+      "tests": [
+        "test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_sections_and_dedup」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-04-handoff-doc-kind-contract"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-04-handoff-doc-kind-contract:flow:测试绑定FR-02",
+      "tests": [
+        "test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_truncated_tool_input_regex_fallback」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-04-handoff-doc-kind-contract"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-04-handoff-doc-kind-contract:flow:测试绑定FR-03",
+      "tests": [
+        "test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestHandoffEndToEnd::test_handoff_doc_injected」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-04-handoff-doc-kind-contract"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-04-handoff-doc-kind-contract:flow:测试绑定FR-04",
+      "tests": [
+        "test/backend/app/modules/daemon/tests/test_takeover_handoff.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-04-handoff-doc-kind-contract"
+    }
+  ]
+}

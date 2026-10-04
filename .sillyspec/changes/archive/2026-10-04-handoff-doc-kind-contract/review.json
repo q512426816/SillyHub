@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-04-handoff-doc-kind-contract",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "handoff cwd 回退与 tier3 口径存在边缘差异：所选 entry 的 agent_cwd 为空时不回退更早主日志行",
+      "evidence": "tier3 用 _latest_agent_cwd（takeover.py:115-138）在最近 50 行内跳过 agent_cwd 为空的行取最新非空值；handoff 处 455 行 effective_cwd = source.cwd or entry.agent_cwd or \"\" 只取所选 entry 单行，该行 agent_cwd 为空即回落 unknown。FR-03 正文（会话行优先、空则所选 entry 的 agent_cwd）被精确兑现，但标题/design 的『与 tier3 同口径』在『最新主日志 entry 无 cwd、更早 entry 有』边缘场景不严格成立；同会话各 entry cwd 通常一致，影响仅展示性。",
+      "location": "backend/app/modules/daemon/session/service/takeover.py:455"
+    },
+    {
+      "severity": "P3",
+      "title": "tool_use 分支不再校验 tool_name 非空，tool_name 缺失时产出「- 」空操作行",
+      "evidence": "takeover.py:356-357 ops.append(f\"- {tool_name}\") 无 tool_name 真值检查（旧代码 elif tool_name: 有保护）；schema.py:517 契约 tool_name 为 str | None。kind=tool_use 且 tool_name 缺失时最近操作节出现空名行，展示性瑕疵，无数据正确性风险。",
+      "location": "backend/app/modules/daemon/session/service/takeover.py:357"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-04T15:00:59Z"
+}
