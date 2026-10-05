@@ -17,4 +17,4 @@ created_at: 2026-10-05T12:34:48.340Z
 - [x] task-05: WebAudio 合成配乐扩展至全片（约 120 小节，分章情绪），幕起始带音效
 - [x] task-06: 浏览器实测：无 JS 报错、全时间轴扫描零异常、≥10 时间点截图视觉验收无乱码无缺陷
 - [x] task-07: 线上环境截图采集（28 张，含新项目接入两张）与文档四件套落稿
-- [ ] task-08: visual-evidence.md 帧率与截图证据 + README 更新 + 显式 pathspec 提交
+- [x] task-08: visual-evidence.md 帧率与截图证据 + README 更新 + 显式 pathspec 提交
