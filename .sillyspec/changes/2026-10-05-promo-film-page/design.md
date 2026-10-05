@@ -22,7 +22,7 @@ created_at: 2026-10-05T11:25:37.369Z
 
 动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
-无平台接口变化：不改 backend 端点、前端路由、daemon 协议、构建产物。新增的对外可见面只有两个静态文件（docs/promo/sillyhub-promo.html 播放页、docs/promo/README.md 说明），无导入关系、无构建依赖。页面内部约定：`#film-canvas` 画布元素 + `window.__promoFilm` 调试句柄（play/pause/seek/t0..t1 时间轴只读），仅用于浏览器验证，不承诺任何跨页契约。
+无平台接口变化：不改 backend 端点、前端路由、daemon 协议、构建产物。新增的对外可见面只有两个静态文件（docs/promo/sillyhub-promo.html 播放页、docs/promo/README.md 说明），无导入关系、无构建依赖。页面内部约定：`#film` 画布元素 + `window.__promoFilm` 调试句柄（play/pause/seek/t0..t1 时间轴只读），仅用于浏览器验证，不承诺任何跨页契约。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 

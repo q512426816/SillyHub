@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-05-promo-film-page",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 接口契约所称画布元素 #film-canvas 与实际 id=\"film\" 不一致（纯文档口径偏差）",
+      "evidence": "design.md:25 写「#film-canvas 画布元素」，但 HTML 实际为 <canvas id=\"film\">（docs/promo/sillyhub-promo.html:100），JS getElementById('film') 与 CSS #film 均按 film 引用；不影响运行，__promoFilm 调试句柄本身真实存在且字段与描述相符",
+      "location": ".sillyspec/changes/2026-10-05-promo-film-page/design.md:25"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-05T19:52:33+08:00"
+}
