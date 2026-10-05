@@ -103,7 +103,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-session-portal-ia-restructure:flow:FR-02
-  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.ts | frontend/src/components/daemon/__tests__/session-usage-panel-mount.test.ts
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx | frontend/src/components/daemon/__tests__/session-usage-panel-mount.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -124,7 +124,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-session-portal-ia-restructure:flow:FR-03
-  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.ts
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -145,7 +145,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-session-portal-ia-restructure:flow:FR-04
-  tests: frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.ts
+  tests: frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -166,7 +166,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-session-portal-ia-restructure:flow:FR-05
-  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.ts
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -187,7 +187,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-session-portal-ia-restructure:flow:FR-06
-  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.ts | frontend/src/components/sessions/__tests__/sessions-portal.test.ts
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
   reason: spec
   state: candidate
   discovery: machine

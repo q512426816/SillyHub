@@ -200,7 +200,7 @@ created_at: 2026-09-27T10:13:08.181Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-27-governance-rpc-actions:flow:FR-08
-  tests: governance-cards.test.ts
+  tests: frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
   reason: spec
   state: candidate
   discovery: machine

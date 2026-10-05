@@ -641,7 +641,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-turn-nav-hover-flyout:flow:FR-01
-  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.ts
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -683,7 +683,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-turn-nav-hover-flyout:flow:FR-04
-  tests: sessions/__tests__/page.test.ts
+  tests: frontend/src/app/page.test.tsx
   reason: spec
   state: candidate
   discovery: machine

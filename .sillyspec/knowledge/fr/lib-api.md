@@ -1434,7 +1434,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: change-list-description:flow:FR-06
-  tests: changes/__tests__/page.test.ts
+  tests: frontend/src/app/page.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1474,3 +1474,276 @@
 - 场景：默认场景 — Given api 相关模块就绪；When api-types 由 pnpm gen:types 再生成并随变更提交；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/change-list-description/requirements.md#FR-08
 最近确认：581ee6412672d6db110f6f0ec6e3114278bef231
+
+## FR-lib-api-084 上报协议 v2 携带机器身份并落库
+变更：2026-09-30-tool-report-activation-wrong-machine
+状态：active
+摘要：默认场景；老协议兼容
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given `POST /api/platform-sync/agent-logs` 上报链路（CLI 直跑与 daemon 注入两路）；When entries 携带 `machine` 块（`machine_id?`、`hostname?`）；Then platform_agent_logs MUST 落 `reported_machine_id`/`reported_machine_name` 两列；会话聚合
+- 场景：老协议兼容 — Given 老 CLI 上报不含 machine 块；When upsert 处理该 entries；Then 两列 MUST 落 NULL 且 MUST NOT 报错（extra=ignore 既有行为），上报幂等语义不变
+全文：.sillyspec/changes/archive/2026-09-30-tool-report-activation-wrong-machine/requirements.md#FR-01
+最近确认：58a3516c9
+
+## FR-lib-api-085 分叉式接手（原会话只读）
+变更：2026-09-30-tool-report-activation-wrong-machine
+状态：active
+摘要：默认场景；旧入口拒绝
+依据决策：D-006@v1
+场景正文：
+- 场景：默认场景 — Given 未激活 tool_report 会话（status=pending、turn_count=0）；When 用户在输入区发送首条消息（POST /sessions/{id}/takeover）；Then 后端 MUST 创建新接手会话（origin='fork' + `fork_of_session_id`=源会话 + fork 三件套，源会话零 run 时 `
+- 场景：旧入口拒绝 — Given pending tool_report 会话收到 inject 请求；Then MUST 返回 409 + 中文指引（引导 takeover 端点），懒激活分支 MUST 已退役（`_activate_tool_report_session
+全文：.sillyspec/changes/archive/2026-09-30-tool-report-activation-wrong-machine/requirements.md#FR-02
+最近确认：58a3516c9
+
+## FR-lib-api-086 原机四级钉定派发
+变更：2026-09-30-tool-report-activation-wrong-machine
+状态：active
+摘要：默认场景；原机离线
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：默认场景 — Given takeover 请求；When 解析目标 runtime；Then MUST 按四级顺序匹配：① 最新 entry `reported_machine_id` 精确匹配在线 runtime → ② `reported_machi
+- 场景：原机离线 — Given 上报机器可识别（①②级命中身份）但该机器 runtime 离线；When takeover；Then MUST 409（文案含机器名），MUST NOT 建会话 MUST NOT 回退其它机器
+全文：.sillyspec/changes/archive/2026-09-30-tool-report-activation-wrong-machine/requirements.md#FR-03
+最近确认：58a3516c9
+
+## FR-lib-api-087 引擎分档衔接（native resume / handoff 交接文档）
+变更：2026-09-30-tool-report-activation-wrong-machine
+状态：active
+摘要：默认场景；handoff 引擎/档案重选；交接文档读取失败降级
+依据决策：D-004@v1、D-005@v2
+场景正文：
+- 场景：默认场景 — Given 源会话 harness 可判定；When takeover 分档；Then harness ∈ {claude-code, codex}（caps.resume=True）MUST 走 native 档：lease metadata 携
+- 场景：handoff 引擎/档案重选 — Given handoff 档请求携带 provider/agent_profile_id/llm_provider_id；When 校验；Then 所选 provider MUST 属于原机 runtime 支持集合（按 daemon_instance 聚合），不符 MUST 422；默认值 = harne
+- 场景：交接文档读取失败降级 — Given 原机在线但 RPC 读日志失败；When handoff 档组装；Then MUST 降级为普通新会话激活（不带交接文档），响应 `handoff_doc=false` 供前端提示，MUST NOT 阻塞接手
+全文：.sillyspec/changes/archive/2026-09-30-tool-report-activation-wrong-machine/requirements.md#FR-04
+最近确认：58a3516c9
+
+## FR-lib-api-088 存量钉死会话一键重置
+变更：2026-09-30-tool-report-activation-wrong-machine
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given 存量已激活（旧懒激活路径）钉死在错误机器的 tool_report 会话；When 属主调用 POST /sessions/{id}/reset-tool-report；Then 后端 MUST 校验（origin=tool_report、属主、无 running run，running 时 409）后回滚：status=pending、
+全文：.sillyspec/changes/archive/2026-09-30-tool-report-activation-wrong-machine/requirements.md#FR-05
+最近确认：58a3516c9
+
+## FR-lib-api-089 前端衔接状态 UI
+变更：2026-09-30-tool-report-activation-wrong-machine
+状态：active
+摘要：默认场景；普通会话零影响
+依据决策：D-002@v1、D-005@v2、D-006@v1
+场景正文：
+- 场景：默认场景 — Given 未激活 tool_report 会话面板；When 渲染输入区
+- 场景：普通会话零影响 — Given origin=chat 会话；When 渲染会话面板；Then 以上新元素 MUST NOT 出现
+全文：.sillyspec/changes/archive/2026-09-30-tool-report-activation-wrong-machine/requirements.md#FR-06
+最近确认：58a3516c9
+
+## FR-lib-api-090 stats 聚合端点
+变更：2026-09-21-scan-docs-ops-panel
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given workspace 的 scan_documents 表已有数据（reparse 后）；When 调用 GET /workspaces/{ws}/scan-docs/stats（SCAN_DOCS_READ）；Then 返回 ScanDocsStatsOut：coverage（std_have/std_expected/module_have/module_expected +
+全文：.sillyspec/changes/archive/2026-09-21-scan-docs-ops-panel/requirements.md#FR-01
+最近确认：e05d03fed
+
+## FR-lib-api-091 覆盖率两级口径（含模块文档层）
+变更：2026-09-21-scan-docs-ops-panel
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given docs 树按项目分组（剥 .sillyspec/docs 前缀后第一段）；When 计算覆盖率；Then 七件套：have=各项目 scan/ 下 doc_type ∈ STANDARD_DOC_TYPES 去重计数，expected=项目数×7；模块层：have=
+全文：.sillyspec/changes/archive/2026-09-21-scan-docs-ops-panel/requirements.md#FR-02
+最近确认：e05d03fed
+
+## FR-lib-api-092 运营指标面板
+变更：2026-09-21-scan-docs-ops-panel
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：默认场景 — Given workspace 已有扫描文档；When 打开 scan-docs 页；Then PageHeader 之下渲染面板（视觉对齐知识库 OpsDashboard）：指标大卡四子卡——标准文档覆盖率（百分比+两档明细+8 周趋势折线）、陈旧文档（
+全文：.sillyspec/changes/archive/2026-09-21-scan-docs-ops-panel/requirements.md#FR-03
+最近确认：e05d03fed
+
+## FR-lib-api-093 三态健壮
+变更：2026-09-21-scan-docs-ops-panel
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given stats 接口异常 / 工作区无文档 / 加载中；When 面板渲染；Then 分别显示错误条（不白屏、不影响主列表）/ 空态卡 / 加载占位，三者占住同版位避免布局跳动
+全文：.sillyspec/changes/archive/2026-09-21-scan-docs-ops-panel/requirements.md#FR-04
+最近确认：e05d03fed
+
+## FR-lib-api-094 类型链同步
+变更：2026-09-21-scan-docs-ops-panel
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given 后端新增 stats DTO；When 实现完成；Then pnpm gen:types 再生成 api-types.ts + openapi.json 并同变更提交；前端消费生成类型（components["schem
+全文：.sillyspec/changes/archive/2026-09-21-scan-docs-ops-panel/requirements.md#FR-05
+最近确认：e05d03fed
+
+## FR-lib-api-095 docs 注入遥测链（CLI→daemon→平台）
+变更：2026-09-21-scan-docs-ops-panel
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given CLI 模块上下文注入命中；When 注入发生；Then sillyspec CLI 经既有 appendKnowledgeHit 追加 `{type:'docs-inject', change, query, mat
+全文：.sillyspec/changes/archive/2026-09-21-scan-docs-ops-panel/requirements.md#FR-06
+最近确认：e05d03fed
+
+## FR-lib-api-096 注入频次指标与榜单双 tab
+变更：2026-09-21-scan-docs-ops-panel
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given knowledge_hits 表存在 type='docs-inject' 行；When stats 聚合与面板渲染；Then injection 字段返回近 30 天总次数/被注入文档数/文档级频次榜 Top 10（路径剥前缀对齐 scan_documents）；右侧榜单双 tab——
+全文：.sillyspec/changes/archive/2026-09-21-scan-docs-ops-panel/requirements.md#FR-07
+最近确认：e05d03fed
+
+## FR-lib-api-097 agent-logs 上报后异步摄取用量快照
+变更：2026-10-02-change-center-token-usage
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — When 上报响应返回后 后台任务筛选候选 再次上报触发摄取 落库 摄取；Then backend 以 fire-and-forget 后台任务对候选 entry 逐个解析用量并覆盖写 `platform_agent_logs` 五列快照；上报
+全文：.sillyspec/changes/archive/2026-10-02-change-center-token-usage/requirements.md#FR-01
+最近确认：0dc1de6bd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-02-change-center-token-usage:task-02:acc-0-c923036f
+  tests: backend/app/modules/platform_sync/tests/test_usage_ingest.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-02-change-center-token-usage
+  status: active
+- row: 2026-10-02-change-center-token-usage:task-02:acc-1-f27e8f0b
+  tests: backend/app/modules/platform_sync/tests/test_usage_ingest.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-02-change-center-token-usage
+  status: active
+- row: 2026-10-02-change-center-token-usage:task-02:acc-2-5493d570
+  tests: backend/app/modules/platform_sync/tests/test_usage_ingest.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-02-change-center-token-usage
+  status: active
+- row: 2026-10-02-change-center-token-usage:task-02:acc-3-11cd8d62
+  tests: backend/app/modules/platform_sync/tests/test_usage_ingest.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-02-change-center-token-usage
+  status: active
+
+## FR-lib-api-098 变更/快速修复用量聚合并入本地 CLI 段
+变更：2026-10-02-change-center-token-usage
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：默认场景 — When 聚合该变更用量 聚合 聚合 分别查看各变更用量 聚合；Then 本地段 SUM 四维 token 并入 totals，并形成 by_model「本地 CLI」桶行（api_requests=0）；本地段不贡献时间三元组、轮次
+全文：.sillyspec/changes/archive/2026-10-02-change-center-token-usage/requirements.md#FR-02
+最近确认：0dc1de6bd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-02-change-center-token-usage:task-03:acc-0-f61e3d02
+  tests: backend/app/modules/change/tests/test_usage_stats.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-02-change-center-token-usage
+  status: active
+- row: 2026-10-02-change-center-token-usage:task-03:acc-1-733c02ef
+  tests: backend/app/modules/change/tests/test_usage_stats.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-02-change-center-token-usage
+  status: active
+- row: 2026-10-02-change-center-token-usage:task-03:acc-2-ae5c134d
+  tests: backend/app/modules/change/tests/test_usage_stats.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-02-change-center-token-usage
+  status: active
+
+## FR-lib-api-099 前端用量展示扩展
+变更：2026-10-02-change-center-token-usage
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 变更/快速修复的用量数据含本地 CLI 段 纯本地 CLI 变更（无 runs：时间三元组 None、轮次 0）且 totals 非 0；When 用户查看详情用量卡 用户查看列表「执行」列 渲染用量卡；Then 摘要行四维 token 为合并值；明细表出现「本地 CLI」绿阶 tag 桶行（对齐「未记录」灰阶兜底桶先例），其请求列显示「—」，命中率照常计算；口径注脚更新
+全文：.sillyspec/changes/archive/2026-10-02-change-center-token-usage/requirements.md#FR-03
+最近确认：0dc1de6bd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-02-change-center-token-usage:task-04:acc-0-ca3d9e65
+  tests: frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-02-change-center-token-usage
+  status: active
+- row: 2026-10-02-change-center-token-usage:task-04:acc-1-66e6bc18
+  tests: frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-02-change-center-token-usage
+  status: active
+- row: 2026-10-02-change-center-token-usage:task-04:acc-2-ac0f5209
+  tests: frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-02-change-center-token-usage
+  status: active
+
+## FR-lib-api-100 兼容与回退
+变更：2026-10-02-change-center-token-usage
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given daemon 未升级（read_agent_log_messages 未注册） 迁移回退（downgrade）；When 摄取任务 RPC 执行；Then 回 method_not_found → 捕获跳过（复用回放通道既有异常分类），上报主流程不受影响 5 列删除，聚合本地段空结果时与改造前完全一致（API DT
+全文：.sillyspec/changes/archive/2026-10-02-change-center-token-usage/requirements.md#FR-04
+最近确认：0dc1de6bd

@@ -1139,7 +1139,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-audit-risk-fixes:flow:FR-04
-  tests: frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.ts
+  tests: frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1161,7 +1161,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-audit-risk-fixes:flow:FR-05
-  tests: frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.ts
+  tests: frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1183,7 +1183,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-audit-risk-fixes:flow:FR-06
-  tests: frontend/src/components/mobile/mobile-change-detail.test.ts
+  tests: frontend/src/components/mobile/mobile-change-detail.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1205,7 +1205,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-audit-risk-fixes:flow:FR-07
-  tests: frontend/src/components/mobile/mobile-change-detail.test.ts
+  tests: frontend/src/components/mobile/mobile-change-detail.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1227,7 +1227,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-audit-risk-fixes:flow:FR-08
-  tests: changes/__tests__/page.test.ts
+  tests: frontend/src/app/page.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -1510,7 +1510,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-28-ci-failures-sweep:flow:FR-01
-  tests: frontend/src/components/daemon/__tests__/session-panel-team.test.ts | frontend/src/components/sessions/__tests__/pre-session-picker.test.ts | frontend/src/components/workspace/__tests__/changes-overview-card.test.ts
+  tests: frontend/src/components/daemon/__tests__/session-panel-team.test.tsx | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx
   reason: spec
   state: candidate
   discovery: machine
