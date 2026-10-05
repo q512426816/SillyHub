@@ -1,0 +1,69 @@
+{
+  "change": "2026-10-05-remove-promo-film",
+  "baseline": "77048fb3b7c8871ce5bc2927e5e58c43dd5b5313",
+  "head": "f38a3bf467000f4d095262bc06360b77e39631cb",
+  "files": [
+    ".sillyspec/changes/2026-10-05-remove-promo-film/design.md",
+    ".sillyspec/changes/2026-10-05-remove-promo-film/requirements.md",
+    ".sillyspec/changes/2026-10-05-remove-promo-film/tasks.md",
+    ".sillyspec/docs/multi-agent-platform/modules/docs.md",
+    "docs/promo/README.md",
+    "docs/promo/sillyhub-promo.html",
+    "docs/promo/v2/assets/add-workspace.jpg",
+    "docs/promo/v2/assets/agent-profiles.jpg",
+    "docs/promo/v2/assets/approvals.jpg",
+    "docs/promo/v2/assets/change-detail.jpg",
+    "docs/promo/v2/assets/changes-archived.jpg",
+    "docs/promo/v2/assets/changes.jpg",
+    "docs/promo/v2/assets/fork.jpg",
+    "docs/promo/v2/assets/groupchat-members.jpg",
+    "docs/promo/v2/assets/groupchat.jpg",
+    "docs/promo/v2/assets/knowledge.jpg",
+    "docs/promo/v2/assets/local-agent-logs.jpg",
+    "docs/promo/v2/assets/login.jpg",
+    "docs/promo/v2/assets/plus-menu.jpg",
+    "docs/promo/v2/assets/ppm-kanban.jpg",
+    "docs/promo/v2/assets/ppm-plannodes.jpg",
+    "docs/promo/v2/assets/ppm-problems.jpg",
+    "docs/promo/v2/assets/ppm-projects.jpg",
+    "docs/promo/v2/assets/presession.jpg",
+    "docs/promo/v2/assets/releases.jpg",
+    "docs/promo/v2/assets/runtimes.jpg",
+    "docs/promo/v2/assets/scan-docs.jpg",
+    "docs/promo/v2/assets/session-panel.jpg",
+    "docs/promo/v2/assets/sessions.jpg",
+    "docs/promo/v2/assets/team-popover.jpg",
+    "docs/promo/v2/assets/topology.jpg",
+    "docs/promo/v2/assets/ws-home.jpg",
+    "docs/promo/v2/assets/ws-list.jpg",
+    "docs/promo/v2/assets/ws-onboarding.jpg",
+    "docs/promo/v2/index.html",
+    ".sillyspec/changes/2026-10-05-remove-promo-film/proposal.md"
+  ],
+  "totals": {
+    "files": 36,
+    "additions": 123,
+    "deletions": 2738
+  },
+  "savedAt": "2026-10-05T13:56:04.430Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "docs",
+      "files": 31,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": true,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "65cc17e7231a156bff84fdccd2149b2091cb5a80ff479d772f2f4aa0c2b2370c",
+  "patchStatus": "ok"
+}
