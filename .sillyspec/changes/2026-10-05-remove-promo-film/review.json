@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-05-remove-promo-film",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "知识库仍含两条提及 docs/promo 的历史 FR 条目——非 FR-03 违反，无需行动，仅披露",
+      "evidence": "grep 全仓库后，docs/promo 字面匹配仅存于 .sillyspec 过程记录面：本变更目录、.sillyspec/changes/archive/2026-10-05-promo-film-{page,v2}/（归档审计，design 声明保留），以及 .sillyspec/knowledge/fr/build.md 的 FR-build-094 与 FR-build-101 两条历史 FR 知识样本。根 README、模块文档 docs.md、前后端/daemon 代码与构建配置零匹配。知识库条目是历史 FR 复用样本（记录曾经的验收事实），非指向已删目录的路径依赖或链接，不在 FR-03 限定范围（README/模块文档）内，不构成功能性悬空引用。",
+      "location": ".sillyspec/knowledge/fr/build.md:1517"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-05T21:58:02+08:00"
+}
