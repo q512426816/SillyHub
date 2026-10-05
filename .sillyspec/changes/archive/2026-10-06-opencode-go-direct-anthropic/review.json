@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-06-opencode-go-direct-anthropic",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-05T17:36:39Z"
+}
