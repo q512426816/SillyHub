@@ -1,0 +1,54 @@
+{
+  "change": "2026-10-05-litellm-crashloop-quarantine",
+  "baseline": "14b5963825ddfd00a3c56f5bf1c1401077dd8afa",
+  "head": "8f647520abfa098327b3f77d37555bab2cd870de",
+  "files": [
+    ".sillyspec/changes/2026-10-05-litellm-crashloop-quarantine/design.md",
+    ".sillyspec/changes/2026-10-05-litellm-crashloop-quarantine/flow-state.yaml",
+    ".sillyspec/changes/2026-10-05-litellm-crashloop-quarantine/proposal.md",
+    ".sillyspec/changes/2026-10-05-litellm-crashloop-quarantine/requirements.md",
+    ".sillyspec/changes/2026-10-05-litellm-crashloop-quarantine/tasks.md",
+    "deploy/docker-compose.yml",
+    "docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 312,
+    "deletions": 1
+  },
+  "savedAt": "2026-10-05T00:23:41.759Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "deploy",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "build",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/build.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "98f73ece3c6e0fb2d1c703e15d20bf44f0f8bf2a448c2680dfebe258da0220b9",
+  "patchStatus": "ok"
+}

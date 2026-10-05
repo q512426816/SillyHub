@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-05-litellm-crashloop-quarantine",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "冻结 diff 中 litellm 服务 image 行由 plain 变体替换为 database 变体，与 FR-02/FR-03「仅 profiles+注释」字面红线存在口径摩擦（属用户当天早前未提交编辑混入冻结件，非本变更隔离动作）",
+      "evidence": "change.patch 行 36/61：`- image: ghcr.io/berriai/litellm:v1.95.0` → `+ image: ghcr.io/berriai/litellm-database:v1.95.0`，是两服务块内除注释与 profiles 行外的唯一语义改动，故 FR-02 测试绑定「较改动前仅增 profiles 行」与 FR-03「两服务块内除注释与 profiles 行外禁止其它改动」按冻结 diff 字面不严格成立；该改动是坑文档 2026-10-03 段在案的先前仓侧修复（非隔离动作），且最终冻结态经本评审复验（默认 config --services=5 核心服务、--profile litellm=7 服务、config --quiet 退出码 0、litellm-db-data 卷原样保留）仍满足全部 FR 行为，仅留口径提示",
+      "location": "deploy/docker-compose.yml:241（锚点见 change.patch:36,61）"
+    },
+    {
+      "severity": "P3",
+      "title": "litellm-db 处隔离注释未复述「移除=专门变更任务面」与分叉②退役口径，FR-05 场景「两处均写明」字面不完备",
+      "evidence": "litellm-db 块注释仅写「随 litellm 服务一并移出默认启用集合……恢复默认栈=删除下方 profiles 行」，缺「专门变更处理 profiles 行」归属与分叉②（自研薄适配层落地则整体退役）表述；互指主干（litellm 注释显式指坑文档 2026-10-05 段、坑文档指回 change 名）完整成立，且「删两处 profiles 行」表述本身已涵盖 litellm-db，实质遗漏风险极低",
+      "location": "deploy/docker-compose.yml:187-188"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a（design「不适用」属实：纯声明式 YAML 改动，patch 无事件流/时序假设面）",
+    "并发": "n/a（design「不适用」属实：单文件文本改动，无运行期共享状态写入）",
+    "切换": "ok（作答实质且经核验：profiles 不触碰已存在容器与卷，工作树 compose:284 litellm-db-data 卷原样；坑文档还主动披露「本机 litellm-db 在跑、默认 up -d 不会停它，需要时手动 stop」——边界已裁决：可接受，健康 postgres 镜像无 crash-loop 风险且已显式披露）",
+    "作用域": "ok（作答实质且经核验：backend depends_on 仅 postgres/redis/minio（compose:88-94），无 litellm 依赖（compose:274-275 NFR-03 注释），本机复验默认渲染恰为 5 核心服务；profile 名仅本 compose project 内生效）"
+  },
+  "reviewedAt": "2026-10-05T00:26:53Z"
+}
