@@ -2272,6 +2272,16 @@ export function SessionPanelPage({
     deriveSessionStatusFlags(session);
   const running = turnState.currentRunId != null;
 
+  // 纯日志主体判定——origin=tool_report 且 turn_count===0（未继续过对话），
+  // task-07（2026-08-23-agent-activity-sessions design §3.4 / Grill P2）。
+  // ⚠️ 必须声明在**所有**早退分支（含预会话 if (!sessionId) return）之前：
+  // handleSend 闭包引用本变量，预会话渲染早退会跳过后置声明点 → 绑定停在
+  // TDZ，新建会话首句点发送必抛 ReferenceError（d6fabf408 引入回归，
+  // session-panel-pre-session.test 15 用例实证，2026-10-06 修复上移）。
+  // 预会话/加载中 session 为 null → 可选链判 false（真会话处语义不变）。
+  const isToolReportBody =
+    session?.origin === "tool_report" && session.turn_count === 0;
+
   // ── 2026-08-20 task-12：附件门控派生（D-6 引擎 / FR-10 D-9 多模态降级）────
   const sessionEngine = session?.provider ?? null;
   // task-11（provider-abstraction）：引擎门控收敛查 ProviderCaps（attachments
@@ -3304,7 +3314,7 @@ export function SessionPanelPage({
       return;
     }
     void sendFromQueue(prompt, attachmentIds);
-  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions]);
+  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
 
   const handleInterrupt = useCallback(async () => {
     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
@@ -3911,11 +3921,8 @@ export function SessionPanelPage({
   // task-10（design A5/A6 / 原型⑤）：suspended 挂起禁用输入——daemon 不在线，
   // 恢复由 daemon 重启自动完成（D-001），用户无需（也无法）在此期间发消息。
   // 队满（D-002）不禁输入但 handleSend 阻止提交，提示由 placeholder 承载。
-  // task-07（2026-08-23-agent-activity-sessions design §3.4 / Grill P2）：纯日志
-  // 主体判定——origin=tool_report 且 turn_count===0（未继续过对话）→ 输入框
-  // placeholder 引导继续（首条消息懒激活派发，D-002）。
-  const isToolReportBody =
-    session.origin === "tool_report" && session.turn_count === 0;
+  // task-07 纯日志主体判定（isToolReportBody）已上移至派生区（早退分支前，
+  // 2026-10-06-session-send-tdz：预会话早退跳过本处声明致 handleSend 闭包 TDZ）。
   // task-14（FR-08 辅半）：纯空文本禁点不在本条件追加——空内容判断收口在共享
   // SessionInputBar 发送按钮（!value.trim() 且无附件，D-7 附件例外维持）+
   // handleSend 入口守卫（下方 !prompt && 附件空 return）；本 disabled 同时禁
