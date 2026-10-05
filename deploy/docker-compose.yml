@@ -184,6 +184,9 @@ services:
     # Wave2 LiteLLM 转换网关的独立 store DB（change 2026-08-08-llm-provider-openai-format / FR-05）。
     # 独立于项目 postgres：LiteLLM 自带 alembic 会写自己的 alembic_version 表，与项目
     # alembic_version 同名冲突，故必须独立 DB 实例（spike-litellm-routing 定稿假设）。
+    # 🚧 临时隔离（2026-10-05-litellm-crashloop-quarantine）：随 litellm 服务一并移出默认
+    # up -d 启用集合（卷定义原样保留、存量数据不动）；恢复默认栈=删除下方 profiles 行。
+    profiles: ["litellm"]
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -211,7 +214,31 @@ services:
     # 兼容上游（GLM/通义/Kimi/opencode 无 /responses）404。v1.95.0 是 gap-A（change
     # 2026-08-08）mode=chat + 流式 /v1/messages 实测通过的版本（真 claude live 会话坐实）。
     # 升级前必须重跑 gap-A 实测矩阵确认新版本 anthropic adapter 认 mode=chat。
-    image: ghcr.io/berriai/litellm:v1.95.0
+    # ⚠️ 2026-10-05 矩阵证伪（坑 litellm-v1950-image-entrypoint-not-found 处置记录）：现可 pin 的
+    # 全部 tag 无一同时满足「健康镜像 + gap-A」——v1.95.x 双变体镜像坏构建、pip 侧 anthropic
+    # /v1/messages 恒走上游 /responses（±mode=chat）、1.96+ 同病。服务保持 stop，方向分叉
+    # （跟踪上游修复 vs 重开 D-004 自研薄适配）待拍板；OpenAI 协议端点路由实测正确。
+    # ⚠️ 镜像变体必须用 litellm-database 而非 plain litellm（坑 litellm-v1950-image-entrypoint-
+    # not-found，2026-10-02 阿里云部署实证）：① plain v1.95.0 是残缺构建——层内容缺
+    # /app/.venv 的 litellm 二进制，prod_entrypoint.sh exec 127 crash-loop（BerriAI/litellm
+    # #7649 同族，ghcr manifest API 核对该 tag 在但内容缺件）；② STORE_MODEL_IN_DB=True +
+    # 外部 postgres 本就要求 database 变体（prisma/DB 栈，官方 docs 口径）。版本号维持
+    # v1.95.0 gap-A 钉语义不变（database 变体 = 同版代码 + DB 依赖）。注：main-v 前缀
+    # tag scheme 已于 ~v1.66 后弃用（main-v1.95.0 = 404），勿回退老写法。
+    # ⚠️ 2026-10-04 阿里云部署窗口实测：database 变体 v1.95.0 同族残缺（同 exec 127
+    # crash-loop，镜像 ID fea74fc80170）——两个变体的 v1.95.0 tag 在 ghcr 上均为坏构建，
+    # 服务器已 stop litellm 止循环（核心栈走直连不受影响）。待专门变更选新 tag + 重跑
+    # gap-A 矩阵后换版本号（详见 docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md
+    # 2026-10-04 段）。
+    # 🚧 临时隔离（2026-10-05-litellm-crashloop-quarantine）：此前仅靠「服务器手动 stop +
+    # 注释提醒」拦不住部署 skill 标准收尾的全量 up -d（restart:always 下必然重新 crash-loop，
+    # 且 deploy/ 无日志轮转配置，低配机日志无上限膨胀）——profiles 门控把本服务与 litellm-db
+    # 移出默认启用集合，结构性拦住。临时拉起/复验：--profile litellm 或显式
+    # up -d litellm litellm-db（Compose 显式点名自动激活 profile）。移除条件=分叉拍板后的
+    # 专门变更（坑文档 2026-10-05 段）：①上游修复版 pin 新 tag 时删两处 profiles 行恢复默认栈；
+    # ②自研薄适配层落地则本服务整体退役时一并带走（含本行）。
+    profiles: ["litellm"]
+    image: ghcr.io/berriai/litellm-database:v1.95.0
     restart: always  # NFR-03/R-08：比 unless-stopped 更强，LiteLLM SPOF 宕自动拉起
     depends_on:
       litellm-db:
