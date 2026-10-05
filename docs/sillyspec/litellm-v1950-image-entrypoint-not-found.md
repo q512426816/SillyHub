@@ -139,3 +139,11 @@ opencode_zen_openai 预设（openai_chat）保留不动，其可用性仍绑本�
 
 **对分叉的影响**：opencode 需求已不依赖 LiteLLM 复活，但其它 OpenAI 兼容上游（无原生
 anthropic 端点的）仍被分叉卡着——①上游修复 vs ②自研薄适配 的拍板继续挂起，本文件保持活跃。
+
+**追加（2026-10-06 下午，compose 同步教训）**：本次常规更新部署（load-and-up.sh 全量
+`up -d`）把已隔离的 litellm 重新拉进 crash-loop——服务器 `/opt/sillyhub/deploy/deploy/
+docker-compose.yml` 是 quarantine 提交（2026-10-05）之前的旧版（0 处 profiles 行），而
+部署 skill 只传镜像不传 compose 文件。已手动 stop + 同步仓内 compose（config --services
+实证默认集合 5 个、不含 litellm 系）。**教训：compose 结构性变更（profiles/端口/卷）合并后
+必须随下次部署同步服务器 compose 文件**（scp deploy/docker-compose.yml），镜像同步 ≠ 配置
+同步；必要时把 compose 同步并进 load-and-up.sh 收口清单。
