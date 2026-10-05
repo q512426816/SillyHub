@@ -10,7 +10,7 @@ created_at: 2026-10-05T11:25:37.369Z
 > 边干边勾：完成一条 = 实现到位 + 相关测试跑绿 → 当场勾（sillyspec task tick --change 2026-10-05-promo-film-page --task task-NN 即时回显进度与下一任务指针，或 Edit 翻格），勿攒到收口一把勾（收口硬门拒单拍多格勾选；--allow-batch-tick 可显式旁路留痕）。⚠️ harness 的 TodoWrite 类工具不替代本文件——平台进度/收口哨兵只读 tasks.md。
 > `flow status --change 2026-10-05-promo-film-page` 为自愿查看/恢复面。本文件收口前随交付显式 pathspec 提交。
 
-- [ ] task-01: 产出单文件自包含 HTML（零外部网络依赖，双击即开），放在 docs/promo/ 下
+- [x] task-01: 产出单文件自包含 HTML（零外部网络依赖，双击即开），放在 docs/promo/ 下
 - [ ] task-02: 影片分多幕场景动画，覆盖平台核心价值：规范驱动（SillySpec 生命周期）、架构（backend/daemon/agent）、多 Agent 编排、实时可视、团队协作与安全
 - [ ] task-03: 文案与平台事实一致（12 种宿主 Agent、worktree 隔离、双层审批、Docker Compose 一键起等，取自 README）
 - [ ] task-04: 提供播放器交互：播放/暂停、可拖动进度条、章节标记与跳转、静音、重播
