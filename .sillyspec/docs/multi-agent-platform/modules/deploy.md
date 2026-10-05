@@ -23,8 +23,8 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
   - `minio`（minio/minio，S3 兼容对象存储，端口 9000/9001，卷 minio-data；平台文件中心后端，`MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` 默认 minioadmin）
   - `backend`（build 自 backend/Dockerfile，env_file 加载，depends_on postgres/redis/minio(healthy)，暴露端口；environment 注入对象存储 `STORAGE_BACKEND`/`S3_ENDPOINT`(默认 `http://minio:9000`)/`S3_ACCESS_KEY`/`S3_SECRET_KEY`/`S3_BUCKET`，凭证须与 minio 服务一致）
   - `frontend`（build 自 frontend/Dockerfile，depends_on backend，env_file，端口 3000）
-  - `litellm`（ghcr.io/berriai/litellm:main-stable，OpenAI↔Anthropic 转换网关，change 2026-08-08；depends_on litellm-db(healthy)，env `LITELLM_MASTER_KEY`+`STORE_MODEL_IN_DB=True`+`DATABASE_URL`→litellm-db，healthcheck `/health/liveness`，restart=always；prod 无端口/dev `127.0.0.1:4000`；admin API 动态注册 openai 格式供应商，model_name=`usr-<uid>-<pid>` 路由，**litellm_params.model 必须 `openai/<model>` 前缀**）
-  - `litellm-db`（postgres:16-alpine，独立实例避 alembic_version 冲突，卷 litellm-db-data；持久化运行时注册的 deployment）
+  - `litellm`（ghcr.io/berriai/litellm-database:v1.95.0 pin，OpenAI↔Anthropic 转换网关，change 2026-08-08；depends_on litellm-db(healthy)，env `LITELLM_MASTER_KEY`+`STORE_MODEL_IN_DB=True`+`DATABASE_URL`→litellm-db，healthcheck `/health/liveness`，restart=always；prod 无端口/dev `127.0.0.1:4000`；admin API 动态注册 openai 格式供应商，model_name=`usr-<uid>-<pid>` 路由，**litellm_params.model 必须 `openai/<model>` 前缀**；🚧 `profiles: ["litellm"]` 临时门控（change 2026-10-05-litellm-crashloop-quarantine）——v1.95.x 坏构建隔离，默认 `up -d` 不拉起，`--profile litellm` 或显式点名恢复，移除条件见坑文档 litellm-v1950-image-entrypoint-not-found.md）
+  - `litellm-db`（postgres:16-alpine，独立实例避 alembic_version 冲突，卷 litellm-db-data；持久化运行时注册的 deployment；🚧 同上随 litellm 临时 profile 门控）
   - 命名卷：pgdata、redisdata、minio-data、worktree-data、claude-data、litellm-db-data。
 - **健康检查**：postgres/redis 用原生探测；backend/frontend 容器自带 healthcheck（frontend 用 node20 内置 fetch 零依赖）。
 
