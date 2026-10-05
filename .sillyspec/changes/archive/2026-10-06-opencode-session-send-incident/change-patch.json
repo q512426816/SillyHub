@@ -1,0 +1,55 @@
+{
+  "change": "2026-10-06-opencode-session-send-incident",
+  "baseline": "04a10a9565ca109ba8314960ce5649b169ebea08",
+  "head": "04c1d55a4799ce26f94075033910bc7ca5167355",
+  "files": [
+    ".sillyspec/changes/2026-10-06-opencode-session-send-incident/design.md",
+    ".sillyspec/changes/2026-10-06-opencode-session-send-incident/flow-state.yaml",
+    ".sillyspec/changes/2026-10-06-opencode-session-send-incident/proposal.md",
+    ".sillyspec/changes/2026-10-06-opencode-session-send-incident/requirements.md",
+    ".sillyspec/changes/2026-10-06-opencode-session-send-incident/tasks.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.md",
+    "docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 212,
+    "deletions": 6
+  },
+  "savedAt": "2026-10-05T23:29:26.750Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "aacfea685876284ff5175fb61e47be2af92dc0db865e50837b637a7949766376",
+  "patchStatus": "ok"
+}

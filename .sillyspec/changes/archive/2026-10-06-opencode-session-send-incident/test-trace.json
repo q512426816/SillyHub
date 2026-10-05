@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-06-opencode-session-send-incident",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-06-opencode-session-send-incident:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx「首句发送 → createSession 含 runtime_id + prompt + manual_approval/ask_user_only（不带 provider），成功清空输入并上报 onPreSessionCreated」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-06-opencode-session-send-incident"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-06-opencode-session-send-incident:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx",
+        "test/frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-06-opencode-session-send-incident"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-06-opencode-session-send-incident:flow:测试绑定FR-04",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx「空文本不发首句（后端 prompt 首句约束）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-06-opencode-session-send-incident"
+    }
+  ]
+}

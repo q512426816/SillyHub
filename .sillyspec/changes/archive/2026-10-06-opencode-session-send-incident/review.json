@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-06-opencode-session-send-incident",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 文件变更清单漏列 patch 内两处文档改动（frontend.md 模块文档、litellm 坑文档）",
+      "evidence": "change.patch 实改 4 个非变更目录文件，design.md 文件变更清单仅列 session-panel-page.tsx 与 llm_providers 运维数据行 2 条；两处漏列均为纯文档（模块文档同步为流程生成物、坑文档为 compose 事故追加记录），无代码行为面，但收口 parseFileChangeList 对照清单时有误报夹带的披露缺口。",
+      "location": ".sillyspec/changes/2026-10-06-opencode-session-send-incident/design.md:47-52"
+    },
+    {
+      "severity": "P3",
+      "title": "服务器 compose 同步处置仅记坑文档，未入文件变更清单/风险节披露",
+      "evidence": "部署时服务器 docker-compose.yml 为 quarantine 前旧版致 litellm crash-loop，处置（stop + 同步仓内 compose）只追加在 docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md，design 未像 llm_providers 行那样以「运维数据」条目声明此清单外动作；运维面无代码后果且教训已文档化，仅披露不完整。",
+      "location": "docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md:139-146"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-05T23:34:27Z"
+}

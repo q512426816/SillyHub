@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -19,6 +27,14 @@ input: >-
   - 未跑全量测试（仅跑本修复相关测试文件）
 autopilot: true
 baseline_commit: 04a10a9565ca109ba8314960ce5649b169ebea08
-updatedAt: '2026-10-05T23:16:41.793Z'
+updatedAt: '2026-10-05T23:35:29.251Z'
 baseline_sha256: c2af8817a7af5eb0da679793499058cac53f2ea500546b97fbc05587b3f663f0
+gate_summary: >-
+  test: skipped
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261005232859\test-result.json —
+  跳过原因：变更与测试面零关系（3 个变更文件无自身测试、无 import 依赖测试、无 FR 关联绑定）——动态子集空，不硬跑全量（防超时/预存失败面）。｜lint: passed ← cd backend && uv run ruff
+  check . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon &&
+  pnpm typecheck（25.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261005232859\test-result.json｜门文件
+  3 个
 

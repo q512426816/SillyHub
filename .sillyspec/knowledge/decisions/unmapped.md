@@ -1614,3 +1614,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：6a3bd3113b5d405935f3b2de2a54e8c30c9815ba
 理由：最大风险：轮转上限过小导致 crash-loop 排障时关键 traceback 被截丢——取 10m×3=30m 兼顾低配磁盘与排障留存（该服务已设 PYTHONUNBUFFERED=1，崩溃 traceback 即时 flush，单份 10m 足够装下完整崩溃记录）。试过但放弃的方案：①宿主 daemon.json 全局默认轮转——动服务器系统状态、影响所有容器，超出本仓变更面；②全服务统一 logging——核心服务日志保留策略变化未评估，扩大行为面，留待专门变更。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-06-opencode-session-send-incident
+锚点：未记录
+最近确认：27deb16a7b065fbf623f9f1e5e40ec8fc3d494c6
+理由：最大风险：①HTTPS_PROXY 绑定 daemon 本机代理端口（127.0.0.1:7897）——换机器/换端口失效，属环境耦合（notes 已注明，探活与会话报错即时暴露）；②上游网络环境变化（劫持消失/代理下线）时该 env 变冗余但无害（代理拒连才会断，可再清）。放弃的方案：①把 isToolReportBody 判定内联进 handleSend（session?.origin === ...）——治标不治本，渲染区 6 处消费点仍需变量，双源漂移；②在 llm-proxy（hub 服务器侧转发）承载 opencode 流量借服务器干净网络——那是 openai_chat 的 LiteLLM 路径，anthropic 直连形态无此通道，为绕网络劫持重开转换网关属方向性倒退（litellm 分叉仍未拍板）；③给 daemon 全局配代理——影响所有供应商（国内上游走代理反而劣化），per-provider extra_env 是正确粒度。

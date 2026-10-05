@@ -1,0 +1,282 @@
+diff --git a/.sillyspec/changes/2026-10-06-opencode-session-send-incident/flow-state.yaml b/.sillyspec/changes/2026-10-06-opencode-session-send-incident/flow-state.yaml
+new file mode 100644
+index 000000000..fc486eb79
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-opencode-session-send-incident/flow-state.yaml
+@@ -0,0 +1,24 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  修复新建会话发送双故障：①前端 TDZ 回归（handleSend 闭包引用声明在预会话早退之后的 isToolReportBody，新建会话首句点发送必抛 ReferenceError，d6fabf408 引入）②opencode
++  会话 SSL 证书主机名不匹配（daemon 本机直连 opencode.ai 被劫持，需走本机 Clash 7897 代理）
++
++  成功标准：
++
++  - isToolReportBody 派生上移到所有早退分支之前（session 判空安全），handleSend 依赖数组补该变量
++
++  - session-panel-pre-session.test.tsx 原先挂掉的 15 个用例全部转绿（TDZ 回归测试即现有用例）
++
++  - 服务器 OpenCode Go 供应商行 extra_env 注入 HTTPS_PROXY=http://127.0.0.1:7897，daemon 本机 Claude Code 经代理连 opencode.ai 实测 200
++
++  - 未跑全量测试（仅跑本修复相关测试文件）
++autopilot: true
++baseline_commit: 04a10a9565ca109ba8314960ce5649b169ebea08
++updatedAt: '2026-10-05T23:16:41.793Z'
++baseline_sha256: c2af8817a7af5eb0da679793499058cac53f2ea500546b97fbc05587b3f663f0
++
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.md
+index 30df34f17..40e681a4a 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.md
+@@ -130,6 +130,8 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
+ 
+ - change 2026-10-06-opencode-go-direct-anthropic | 修正 opencode_go 预设鉴权口径（实测 opencode /zen/go/v1/messages 仅认 x-api-key，Bearer 恒 401 AuthError）：auth_field ANTHROPIC_AUTH_TOKEN→ANTHROPIC_API_KEY，模型 4 槽 deepseek-v4-flash→deepseek-v4.1-flash 并补 FABLE 槽；预设测试补 auth_field + 4 槽回归断言（9/9）。同变更在阿里云服务器把 OpenCode Go 供应商行从 openai_chat（依赖已隔离 LiteLLM 死链）切 anthropic 直连，真机 Claude Code 端到端验证通过。
+ 
++- change 2026-10-06-opencode-session-send-incident | 修复新建会话首句发送必炸的 TDZ 回归（d6fabf408 引入）：handleSend 闭包引用的 isToolReportBody 原声明在预会话 if (!sessionId) 早退之后，预会话渲染跳过声明 → 绑定停 TDZ（线上 chunk 的 `ae`，session-panel-page.tsx:3234 实证，预会话测试 15 用例挂）。修法：派生上移至 deriveSessionStatusFlags 旁（所有早退前 + session 可选链）+ handleSend 依赖数组补 isToolReportBody/handleTakeoverSend。36+7 用例全绿、tsc 0、eslint 0 error。同变更处置 opencode 会话 SSL 证书主机名不匹配：daemon 本机直连 opencode.ai 被 TLS 劫持，服务器供应商行 extra_env 注入 HTTPS_PROXY=http://127.0.0.1:7897（本机 Clash，真机 Claude Code 实测过）。
++
+ - ql-20260810-003-3aa6 | 修复 ImportModuleModal（实施阶段导入弹窗）确认导入按钮 flaky 竞态：selectedRowKeys 默认全选原用 useEffect 异步初始化（与 handleUpload 的 setStep(2) 不同渲染周期），步骤2首帧 selectedRowKeys=[] → validCount=0 → 确认按钮 disabled={validCount===0} 偶发被测试/极快点击点到 disabled 致 importModulesCommit 调 0 次（全量并发跑触发，单跑独占 CPU 不触发）。改为 handleUpload 成功分支与 setStep(2) 同批 setSelectedRowKeys + 切 sheet Checkbox onChange 同步重置，删该 useEffect。行为完全一致仅消首帧竞态，全量连跑 4 次 134/1346 全过。
+ 
+ - change 2026-08-11-change-detail-layout-rework | 变更中心详情页展示结构整体重做（左主右辅两栏）：page.tsx 1119→484 行瘦身为编排层，拆 8 个展示组件——CollapsibleCard（次线折叠基件）/ ChangeFilesCard / ChangeSessionsCard / ChangeReviewHistoryCard（normalizeReviewHistory 读真实 stages.review_history，兼容 gate/rerun 双形状）/ ChangeStageHeader（5 阶段宏观进度）/ ChangeTaskBoardCard（任务摘要）/ ChangeStageActions（收口 gate 面板+推进横幅+验证门禁+触发智能体+provider/model+team toggle）/ ChangeAgentRunLog（组合 AgentRunPanel+子步骤+gate 徽标+TeamProgress，传 onDispatch=undefined 消双入口 FR-05b）。布局 `grid lg:grid-cols-[minmax(0,1fr)_320px]` 左主（操作区+执行日志）右辅（文件/会话/审核历史/任务看板），移动端 <lg 单列折叠。删除僵尸区块（审批状态 approval_status + 审查记录旧实现 listReviews 读死表 change_reviews）+ 死代码（handleExecute / handleTransition）+ 未用状态（archiveGate）。R-06 team toggle role=switch + aria-label=用团队执行 DOM 契约迁入 ChangeStageActions 零破坏。40 组件测试 + 8 迁移测试（page-team-toggle 重写指向 ChangeStageActions，3136ms→80ms），frontend 全量 142 文件 / 1386 测试零回归，tsc 0 错。
+diff --git a/docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md b/docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md
+index f2ced2344..9b0133308 100644
+--- a/docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md
++++ b/docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md
+@@ -139,3 +139,11 @@ opencode_zen_openai 预设（openai_chat）保留不动，其可用性仍绑本
+ 
+ **对分叉的影响**：opencode 需求已不依赖 LiteLLM 复活，但其它 OpenAI 兼容上游（无原生
+ anthropic 端点的）仍被分叉卡着——①上游修复 vs ②自研薄适配 的拍板继续挂起，本文件保持活跃。
++
++**追加（2026-10-06 下午，compose 同步教训）**：本次常规更新部署（load-and-up.sh 全量
++`up -d`）把已隔离的 litellm 重新拉进 crash-loop——服务器 `/opt/sillyhub/deploy/deploy/
++docker-compose.yml` 是 quarantine 提交（2026-10-05）之前的旧版（0 处 profiles 行），而
++部署 skill 只传镜像不传 compose 文件。已手动 stop + 同步仓内 compose（config --services
++实证默认集合 5 个、不含 litellm 系）。**教训：compose 结构性变更（profiles/端口/卷）合并后
++必须随下次部署同步服务器 compose 文件**（scp deploy/docker-compose.yml），镜像同步 ≠ 配置
++同步；必要时把 compose 同步并进 load-and-up.sh 收口清单。
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 239800f52..0616e5a65 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -2272,6 +2272,16 @@ export function SessionPanelPage({
+     deriveSessionStatusFlags(session);
+   const running = turnState.currentRunId != null;
+ 
++  // 纯日志主体判定——origin=tool_report 且 turn_count===0（未继续过对话），
++  // task-07（2026-08-23-agent-activity-sessions design §3.4 / Grill P2）。
++  // ⚠️ 必须声明在**所有**早退分支（含预会话 if (!sessionId) return）之前：
++  // handleSend 闭包引用本变量，预会话渲染早退会跳过后置声明点 → 绑定停在
++  // TDZ，新建会话首句点发送必抛 ReferenceError（d6fabf408 引入回归，
++  // session-panel-pre-session.test 15 用例实证，2026-10-06 修复上移）。
++  // 预会话/加载中 session 为 null → 可选链判 false（真会话处语义不变）。
++  const isToolReportBody =
++    session?.origin === "tool_report" && session.turn_count === 0;
++
+   // ── 2026-08-20 task-12：附件门控派生（D-6 引擎 / FR-10 D-9 多模态降级）────
+   const sessionEngine = session?.provider ?? null;
+   // task-11（provider-abstraction）：引擎门控收敛查 ProviderCaps（attachments
+@@ -3304,7 +3314,7 @@ export function SessionPanelPage({
+       return;
+     }
+     void sendFromQueue(prompt, attachmentIds);
+-  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions]);
++  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
+ 
+   const handleInterrupt = useCallback(async () => {
+     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
+@@ -3911,11 +3921,8 @@ export function SessionPanelPage({
+   // task-10（design A5/A6 / 原型⑤）：suspended 挂起禁用输入——daemon 不在线，
+   // 恢复由 daemon 重启自动完成（D-001），用户无需（也无法）在此期间发消息。
+   // 队满（D-002）不禁输入但 handleSend 阻止提交，提示由 placeholder 承载。
+-  // task-07（2026-08-23-agent-activity-sessions design §3.4 / Grill P2）：纯日志
+-  // 主体判定——origin=tool_report 且 turn_count===0（未继续过对话）→ 输入框
+-  // placeholder 引导继续（首条消息懒激活派发，D-002）。
+-  const isToolReportBody =
+-    session.origin === "tool_report" && session.turn_count === 0;
++  // task-07 纯日志主体判定（isToolReportBody）已上移至派生区（早退分支前，
++  // 2026-10-06-session-send-tdz：预会话早退跳过本处声明致 handleSend 闭包 TDZ）。
+   // task-14（FR-08 辅半）：纯空文本禁点不在本条件追加——空内容判断收口在共享
+   // SessionInputBar 发送按钮（!value.trim() 且无附件，D-7 附件例外维持）+
+   // handleSend 入口守卫（下方 !prompt && 附件空 return）；本 disabled 同时禁
+diff --git a/.sillyspec/changes/2026-10-06-opencode-session-send-incident/design.md b/.sillyspec/changes/2026-10-06-opencode-session-send-incident/design.md
+new file mode 100644
+index 000000000..2cc81a9fa
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-opencode-session-send-incident/design.md
+@@ -0,0 +1,52 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-05T23:16:41.772Z
++---
++# 设计记录（Design Record）— 2026-10-06-opencode-session-send-incident
++
++> 四节每节必答——问题行原样保留（勿删勿改勿用答案替换），答案另起一行写在问题行下方；小改动可写「不适用：<理由>」；flow done 空节拒收。
++> 需要列改动文件时加独立「## 文件变更清单」章节+表格（| 操作 | 路径 | 说明 |）——章节标题是 parseFileChangeList 的识别面，勿写在「接口契约」节内（收口声明面解析不到会误报夹带嫌疑）。
++> 四问原文/FR 标题/镜像任务行是收口锚——问题行从本模板原样保留或复制，勿删勿改、勿用答案整块替换问题原文、勿手打重写（标点也要逐字：2026-10-05 三度实证——句号手写成问号、答案整块替换问题原文均被锚对比拒收）。
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++双故障一根一修：①前端 TDZ——handleSend（useCallback）函数体引用 isToolReportBody，而该 const 声明在预会话 if (!sessionId) 早退**之后**（sessionBody 派生区，d6fabf408 引入）；预会话渲染（新建会话页）走早退，声明语句不执行 → 闭包绑定停 TDZ → 首句点发送必抛 ReferenceError（线上 chunk 的 ae 即此变量，session-panel-page.tsx:3234 实证 + 预会话测试文件 15 用例挂）。修法：派生上移到 deriveSessionStatusFlags 旁（所有早退分支之前），session 判空改可选链（预会话/加载中 null → false，真会话语义不变），并补进 handleSend 依赖数组（顺手补同行的 handleTakeoverSend 预存缺依赖）。②opencode SSL——daemon 所在机器直连 opencode.ai 被 TLS 劫持（证书主机名不匹配，本机 curl SEC_E_WRONG_PRINCIPAL 复现），opencode 供应商改 anthropic 直连后 Claude Code 子进程直打出网即撞此劫持；修法：供应商行 extra_env 注入 HTTPS_PROXY=http://127.0.0.1:7897（daemon 本机 Clash 混合端口，http 代理实测 200），注入器规则 6 Object.assign 原样透传给子进程，Claude Code（undici）原生尊重该 env。为什么不改代码路由层：问题分别是变量作用域错位与机器网络环境，均无代码架构面变更必要，最小修复即正确修复。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无函数签名/端点/文件格式变更。可见行为变化：①SessionPanel（page 模式）预会话态点发送从「必抛 ReferenceError（发送无效）」恢复为「走 handlePreSessionSend 创建会话」；②handleSend 依赖数组 +2 项（isToolReportBody/handleTakeoverSend），memoization 粒度变化无行为影响（两者本就在闭包内被引用）；③服务器 OpenCode Go 供应商行 extra_env 多 HTTPS_PROXY 键 + notes 追加说明（运维数据面，非 schema）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++成立/不适用：isToolReportBody 是渲染期纯派生（session 单源），无事件乱序面；HTTPS_PROXY 是静态 env，无时序语义。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用：单组件内 const 派生无共享可变状态；DB 行一次性 UPDATE（后台无流量时隙），之后只被常规表单更新路径触碰。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全：上移后的声明在每次渲染无条件执行（含预会话/加载/错误态），任意早退路径下闭包绑定必已初始化——这正是修复要消除的不变量破坏。会话切换（预会话→真会话 rerender）时 isToolReportBody 随 session 引用变化重算并在依赖数组驱动下重建 handleSend，无陈旧闭包。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会：前端是编译期单组件作用域；HTTPS_PROXY 的 extra_env 只随该供应商 provider_config 下发给其会话的子进程（GLM/DeepSeek/Kimi 等国内供应商不携带，不受代理影响）。已知边界：换 daemon 机器（无 Clash 或端口不同）时该 127.0.0.1:7897 失效，需按机器调整（provider notes 已注明）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：①HTTPS_PROXY 绑定 daemon 本机代理端口（127.0.0.1:7897）——换机器/换端口失效，属环境耦合（notes 已注明，探活与会话报错即时暴露）；②上游网络环境变化（劫持消失/代理下线）时该 env 变冗余但无害（代理拒连才会断，可再清）。放弃的方案：①把 isToolReportBody 判定内联进 handleSend（session?.origin === ...）——治标不治本，渲染区 6 处消费点仍需变量，双源漂移；②在 llm-proxy（hub 服务器侧转发）承载 opencode 流量借服务器干净网络——那是 openai_chat 的 LiteLLM 路径，anthropic 直连形态无此通道，为绕网络劫持重开转换网关属方向性倒退（litellm 分叉仍未拍板）；③给 daemon 全局配代理——影响所有供应商（国内上游走代理反而劣化），per-provider extra_env 是正确粒度。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | isToolReportBody 派生上移（早退前 + 可选链）+ 删原声明点 + handleSend 依赖数组补 isToolReportBody/handleTakeoverSend |
++| 运维数据 | 服务器 47.113.145.252 llm_providers 行 68b4b5b9 | extra_env 注入 HTTPS_PROXY=http://127.0.0.1:7897 + notes 说明（psql 一次性 UPDATE，不入仓） |
+diff --git a/.sillyspec/changes/2026-10-06-opencode-session-send-incident/proposal.md b/.sillyspec/changes/2026-10-06-opencode-session-send-incident/proposal.md
+new file mode 100644
+index 000000000..4c285d24e
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-opencode-session-send-incident/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-05T23:16:41.771Z
++---
++# 提案书（Proposal）— 2026-10-06-opencode-session-send-incident
++
++## 动机
++
++任务原话转写：修复新建会话发送双故障：①前端 TDZ 回归（handleSend 闭包引用声明在预会话早退之后的 isToolReportBody，新建会话首句点发送必抛 ReferenceError，d6fabf408 引入）②opencode 会话 SSL 证书主机名不匹配（daemon 本机直连 opencode.ai 被劫持，需走本机 Clash 7897 代理）
++成功标准：
++- isToolReportBody 派生上移到所有早退分支之前（session 判空安全），handleSend 依赖数组补该变量
++- session-panel-pre-session.test.tsx 原先挂掉的 15 个用例全部转绿（TDZ 回归测试即现有用例）
++- 服务器 OpenCode Go 供应商行 extra_env 注入 HTTPS_PROXY=http://127.0.0.1:7897，daemon 本机 Claude Code 经代理连 opencode.ai 实测 200
++- 未跑全量测试（仅跑本修复相关测试文件）
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. isToolReportBody 派生上移到所有早退分支之前（session 判空安全），handleSend 依赖数组补该变量
++2. session-panel-pre-session.test.tsx 原先挂掉的 15 个用例全部转绿（TDZ 回归测试即现有用例）
++3. 服务器 OpenCode Go 供应商行 extra_env 注入 HTTPS_PROXY=http://127.0.0.1:7897，daemon 本机 Claude Code 经代理连 opencode.ai 实测 200
++4. 未跑全量测试（仅跑本修复相关测试文件）
++
++## 成功标准（可验证）
++
++1. isToolReportBody 派生上移到所有早退分支之前（session 判空安全），handleSend 依赖数组补该变量
++2. session-panel-pre-session.test.tsx 原先挂掉的 15 个用例全部转绿（TDZ 回归测试即现有用例）
++3. 服务器 OpenCode Go 供应商行 extra_env 注入 HTTPS_PROXY=http://127.0.0.1:7897，daemon 本机 Claude Code 经代理连 opencode.ai 实测 200
++4. 未跑全量测试（仅跑本修复相关测试文件）
+diff --git a/.sillyspec/changes/2026-10-06-opencode-session-send-incident/requirements.md b/.sillyspec/changes/2026-10-06-opencode-session-send-incident/requirements.md
+new file mode 100644
+index 000000000..840aaf203
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-opencode-session-send-incident/requirements.md
+@@ -0,0 +1,58 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-05T23:16:41.772Z
++---
++# 需求规格（Requirements）— 2026-10-06-opencode-session-send-incident
++
++## 功能需求
++
++> FR 由你撰写：每条 = `### FR-NN: 标题` + 一句带强度词的行为规定（必须=硬性；禁止=红线；
++> SHOULD=建议须注理由；可以=可选）；边界情形加场景块 `#### 场景：名` + Given/When/Then 行。
++> 标题行是成功标准锚（勿改写——收口做门柱对比）；正文与场景块归你。
++
++### FR-01: isToolReportBody 派生上移到所有早退分支之前（session 判空安全），handleSend 依赖数组补该变量
++
++- isToolReportBody 必须声明在组件内所有早退分支（含预会话 if (!sessionId) return）之前且 session 判空安全（可选链），handleSend 依赖数组必须含 isToolReportBody；禁止在早退分支之后声明被回调闭包引用的渲染派生变量（TDZ 回归红线）。
++
++#### 场景：主路径
++
++- Given SessionPanel 处于预会话态（sessionId=null，session=null）
++- When 用户输入首句并点击发送
++- Then handleSend 正常执行（不抛 ReferenceError），走 handlePreSessionSend 创建会话
++
++### FR-02: session-panel-pre-session.test.tsx 原先挂掉的 15 个用例全部转绿（TDZ 回归测试即现有用例）
++
++- 修复后 session-panel-pre-session.test.tsx 必须 36/36 全绿（修复前 15 挂 21 过，挂在 Cannot access 'isToolReportBody' before initialization），且 session-panel-takeover.test.tsx 7/7 保持全绿（takeover 行为零回归）。
++
++#### 场景：主路径
++
++- Given 修复前预会话测试 15 用例因 TDZ 失败
++- When 应用上移修复并运行该文件
++- Then 36 用例全过，takeover 用例 7/7 全过
++
++### FR-03: 服务器 OpenCode Go 供应商行 extra_env 注入 HTTPS_PROXY=http://127.0.0.1:7897，daemon 本机 Claude Code 经代理连 opencode.ai 实测 200
++
++- 服务器 47.113.145.252 llm_providers 行 OpenCode Go 的 extra_env 必须含 HTTPS_PROXY=http://127.0.0.1:7897（注入器规则 6 透传给 Claude Code 子进程），且真实 Claude Code 以该环境变量组合直连 opencode.ai 实测成功。
++
++#### 场景：主路径
++
++- Given daemon 本机直连 opencode.ai TLS 被劫持（SEC_E_WRONG_PRINCIPAL）
++- When Claude Code 子进程带 HTTPS_PROXY=http://127.0.0.1:7897 + anthropic 直连 env 运行
++- Then 请求经 Clash 代理到达 opencode.ai 并正常应答（实测「收到」）
++
++### FR-04: 未跑全量测试（仅跑本修复相关测试文件）
++
++- 本变更必须且仅跑修复相关测试（session-panel-pre-session + session-panel-takeover + tsc + 单文件 eslint）且全绿；禁止跑全量测试（CI 留守，仓库规则 0）。
++
++#### 场景：主路径
++
++- Given 修复与依赖数组调整完成
++- When 运行两个相关测试文件与类型/lint 检查
++- Then 43 用例全过、tsc 0 错、eslint 0 error（1 预存 warning），全量未触发
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx「首句发送 → createSession 含 runtime_id + prompt + manual_approval/ask_user_only（不带 provider），成功清空输入并上报 onPreSessionCreated」
++FR-02: test/frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx（36/36 全绿）+ test/frontend/src/components/daemon/__tests__/session-panel-takeover.test.tsx（7/7）
++FR-03: 不适用：运维数据 + 真机网络验证（daemon 本机 Claude Code 经 Clash 7897 实测「收到」，无仓内自动化测试面；服务器行 extra_env 落库证据为 psql 查询回显）
++FR-04: test/frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx「空文本不发首句（后端 prompt 首句约束）」（跑面声明：两文件 + tsc + eslint，未跑全量）
+diff --git a/.sillyspec/changes/2026-10-06-opencode-session-send-incident/tasks.md b/.sillyspec/changes/2026-10-06-opencode-session-send-incident/tasks.md
+new file mode 100644
+index 000000000..73aff1360
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-opencode-session-send-incident/tasks.md
+@@ -0,0 +1,16 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-05T23:16:41.772Z
++---
++# 任务注册表（Tasks）— 2026-10-06-opencode-session-send-incident
++
++> 镜像行（task-01…task-NN）是成功标准逐条镜像=任务锚：勿删勿改写（收口对照它），完成实现路径
++> 需要更细步骤时在镜像行**后追加细化行**（保持 `- [ ] task-NN:` 行形态，编号从镜像行末尾顺延——
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决）。
++> 边干边勾：完成一条 = 实现到位 + 相关测试跑绿 → 当场勾（sillyspec task tick --change 2026-10-06-opencode-session-send-incident --task task-NN 即时回显进度与下一任务，或 Edit 翻格），勿攒到收口一把勾（收口硬门拒单拍多格勾选；--allow-batch-tick 可显式旁路留痕）。⚠️ harness 的 TodoWrite 类工具不替代本文件——平台进度/收口哨兵只读 tasks.md。
++> `flow status --change 2026-10-06-opencode-session-send-incident` 为自愿查看/恢复面。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: isToolReportBody 派生上移到所有早退分支之前（session 判空安全），handleSend 依赖数组补该变量
++- [x] task-02: session-panel-pre-session.test.tsx 原先挂掉的 15 个用例全部转绿（TDZ 回归测试即现有用例）
++- [x] task-03: 服务器 OpenCode Go 供应商行 extra_env 注入 HTTPS_PROXY=http://127.0.0.1:7897，daemon 本机 Claude Code 经代理连 opencode.ai 实测 200
++- [x] task-04: 未跑全量测试（仅跑本修复相关测试文件）
