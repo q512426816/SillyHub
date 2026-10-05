@@ -21,7 +21,6 @@ multi-agent-platform 的持久化设计文档与参考资料集合，位于仓�
 - **设计/规划类**（根）：execution-plan-v2-v5.md、claude-loop-v1-p0.md、change-center-redesign.md、spec-alignment.md、agent-sillyspec-stage-execution-analysis.md、sillyspec-tool-side-requirements.md。
 - **参考资料**：`docs/sillyhub_refs/`（README + ref-01~05 等外部素材整理，如 Harness Runtime、知识护城河、反虚拟公司 Agent、Take Root Harness、云端 Claude Code Runner、综合设计）。
 - **QA 验收**：`docs/qa/`（如 sillyhub-functional-review-*.md，按日期记录功能体验测试结论与问题清单）。
-- **宣传物料**：`docs/promo/`（2026-10-05 起）——`sillyhub-promo.html` 平台宣传片单文件网页（纯代码拍片：Canvas 逐帧实时渲染 8 幕 + WebAudio 合成配乐，零外部网络依赖，双击即开，文案以根 README 为事实源）+ `README.md` 使用与修改指南；改文案/章节/和弦只动该文件内常量，与平台前后端零耦合。
 
 ## 关键逻辑
 
