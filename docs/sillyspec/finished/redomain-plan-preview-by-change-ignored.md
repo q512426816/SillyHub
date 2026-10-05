@@ -36,3 +36,17 @@ sillyspec tests --redomain --from auto-sillyspec --to change \
 
 `planRedomain` 增加 `byChange` 形参与过滤（复用 redomainFrEntries 的条目过滤键），
 index.js 预览调用处透传 `byChange: byChangeD`。
+
+## 处置记录（2026-10-03）
+
+**已修**（sillyspec 仓工作树，未提交）。根因与坑文一致——`76338b4d` 收编并行会话在途的
+`--by-change` 工作时，`src/index.js` **预览调用行的 `byChange` 透传在合并中丢失**（写路径
+`redomainFrEntries` 在、`planRedomain` 的形参与过滤也在，唯独预览调用没传）——部分收编
+致回归，非设计缺口。修复：预览调用补 `byChange: byChangeD || null` + 预览输出标注
+「仅『变更：<名>』」。
+
+**测试**：`test/fr-domain-guard-and-redomain-bychange.test.mjs` 新增⑥ CLI 级预览/落盘
+同口径用例（干跑 --by-change 只列分批子集、他变更条目不进清单），6/6 全绿——原⑤用例
+只锚了 `planRedomain` 函数面，CLI 接线面无锚正是本次回归漏网原因，已补。
+
+归档。
