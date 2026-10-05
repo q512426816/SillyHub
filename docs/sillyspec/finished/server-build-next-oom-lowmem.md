@@ -43,3 +43,14 @@ ENV NODE_OPTIONS=--max-old-space-size=3072
 - 服务器 compose 必填变量随仓库演进增多（MINIO_ROOT_PASSWORD / S3_ACCESS_KEY /
   S3_SECRET_KEY / LITELLM_*）：老 `.env` 会被 `docker compose config` 逐个拦下；
   本次从运行容器回填（minio/S3 凭据保持现值）+ 新生成 litellm 密钥。
+
+## 处置记录（2026-10-03）
+
+**仓侧根治已落**（multi-agent-platform 工作树，未提交）：`frontend/Dockerfile` builder
+阶段 `pnpm build` 前注入 `ARG NODE_OPTIONS=--max-old-space-size=3072` + `ENV`（ARG 形态
+构建机可覆盖；服务器 2c/1.6G 实测该值 2h51m 通过、swap 承接溢出）——下次源码 git archive
+同步覆盖后注入不再丢失，服务器副本手工补丁可删。
+
+**遗留（环境面，非本仓）**：WSL `WslService` STOP_PENDING 卡死堵本地 Docker——恢复本地
+构建主路径（build-and-save.sh 传镜像）需修 WSL（提权重启服务/重启机器）；compose 必填
+变量清单随仓库演进增多属运维注意事项（从运行容器回填的处置已记录在案）。归档。

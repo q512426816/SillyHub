@@ -41,6 +41,12 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1 \
     NEXT_BUILD_STANDALONE=1
+# 低配服务器直构建 V8 堆 OOM 兜底（坑 server-build-next-oom-lowmem，2026-10-02 阿里云
+# 2c/1.6G 实证：next build 编译期 CALL_AND_RETRY_LAST 堆耗尽，表象是后续 COPY 的
+# BuildKit checksum 错、真因是 .next/standalone 未产出；3G 上限让 swap 承接溢出，
+# 实测 2h51m 通过。构建机内存充裕时无感（上限只影响堆顶，不预分配）。
+ARG NODE_OPTIONS=--max-old-space-size=3072
+ENV NODE_OPTIONS=${NODE_OPTIONS}
 RUN pnpm build
 
 
