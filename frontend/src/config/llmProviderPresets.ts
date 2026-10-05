@@ -198,26 +198,31 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     },
   },
   {
-    // OpenCode Go：opencode.ai 官方自营 API（cc-switch claudeProviderPresets 同名条目，
-    // 端点 https://opencode.ai/zen/go，OpenAI 兼容格式 cc-switch 标 openai_chat）。
-    // 数据逐字抄 cc-switch（R-05），affiliate（?ref=）已剔除。模型 4 槽全填 deepseek-v4-flash。
+    // OpenCode Go：opencode.ai 官方自营 API，go 端点原生 Anthropic /v1/messages 直连
+    //（2026-10-06-opencode-go-direct-anthropic 实测修正：cc-switch 原条目 auth_field 为
+    // ANTHROPIC_AUTH_TOKEN，但 /zen/go/v1/messages 仅认 x-api-key——Bearer 恒 401
+    // AuthError，必须 ANTHROPIC_API_KEY；Claude Code 原生 session 头被 opencode 识别，
+    // 无需注入 x-opencode-session。 affiliate（?ref=）已剔除）。
+    // 模型 4 槽全填 deepseek-v4.1-flash（go 模型目录在列；副通道请求缺省发内置档位名
+    // 会被 opencode 拒，gap-D 同型）。
     key: "opencode_go",
     name: "OpenCode Go",
     category: "aggregator",
     base_url: "https://opencode.ai/zen/go",
-    auth_field: "ANTHROPIC_AUTH_TOKEN",
+    auth_field: "ANTHROPIC_API_KEY",
     api_format: "anthropic",
-    default_model: "deepseek-v4-flash",
+    default_model: "deepseek-v4.1-flash",
     website_url: "https://opencode.ai/go",
     api_key_url: "https://opencode.ai/go",
     icon_color: "#211E1E",
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://opencode.ai/zen/go",
-        ANTHROPIC_MODEL: "deepseek-v4-flash",
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash",
-        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash",
-        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-flash",
+        ANTHROPIC_MODEL: "deepseek-v4.1-flash",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4.1-flash",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4.1-flash",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4.1-flash",
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "deepseek-v4.1-flash",
       },
     },
   },

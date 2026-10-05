@@ -1,0 +1,18 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  修复 opencode 供应商路由：改走 go 端点原生 anthropic 直连（x-api-key 鉴权），替代依赖已隔离 LiteLLM 的 openai_chat 死链路
+  成功标准：
+  - 前端 opencode_go 预设 auth_field 修正为 ANTHROPIC_API_KEY（实测 opencode /zen/go/v1/messages 仅认 x-api-key，Bearer 恒 401）
+  - 预设默认模型更新为 deepseek-v4.1-flash 且 4 角色槽全填该模型
+  - 阿里云服务器 OpenCode Go 供应商行已切 anthropic 直连，真实 Claude Code 端到端会话验证通过（纯文本 + 工具调用）
+  - 前端预设相关测试通过，未跑全量测试
+autopilot: true
+baseline_commit: c80ec075a7cbf97e70e0e0f39937b9f1600a3475
+updatedAt: '2026-10-05T17:27:01.019Z'
+baseline_sha256: 916de0e5be328846f2bc2d780e20d4d50a2a8220153c20f333181a219c98f8d3
+

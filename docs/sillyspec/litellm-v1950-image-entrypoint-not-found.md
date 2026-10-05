@@ -114,3 +114,28 @@ compose 维持 `litellm-database:v1.95.0` pin（无论分叉如何都是当前�
   litellm 服务整体退役时一并带走（含 profiles 行）。
 - 注：本机（非服务器）litellm-db 容器当前在跑——profiles 不触碰已存在容器，`up -d`
   不会停它，需要时手动 `docker compose stop litellm-db`。
+
+## 处置记录（2026-10-06）——opencode 供应商不再被本坑阻塞（直连绕开 LiteLLM）
+
+用户报「平台供应商 opencode 路由有问题」。根因两层：
+
+1. **平台侧（本坑）**：服务器 OpenCode Go 供应商行原配 `openai_chat`
+   （base_url 还错拼成 go 端点 + chat/completions 全端点），整条链依赖被隔离停用的
+   litellm → 必然全断。
+2. **上游侧（opencode go 端点鉴权/路由口径，实测 2026-10-06）**：
+   - go 端点**原生提供 Anthropic `/v1/messages`**（官方文档列 MiniMax/Qwen 系走它，
+     实测 deepseek-v4.1-flash 等全部模型都能路由），流式 + thinking 块标准 Anthropic 格式；
+   - 该端点**仅认 `x-api-key`**（`Authorization: Bearer` 恒 401 AuthError "Missing API key"）；
+   - 无 `x-opencode-session` 头会拒（MissingSessionID），但 **Claude Code 原生 session 头被
+     opencode 识别**（官方文档 + 本机 claude 2.1.216 真机 `-p` 会话实证，纯文本 + Read 工具
+     调用往返全通），无需注入自定义头。
+
+**处置（change 2026-10-06-opencode-go-direct-anthropic）**：opencode 供应商改走
+anthropic 直连（与 GLM/DeepSeek/Kimi 同型）：服务器 DB 行
+`api_format=anthropic / base_url=https://opencode.ai/zen/go / auth_field=ANTHROPIC_API_KEY /
+model=deepseek-v4.1-flash（+4 角色槽同填）`；前端 `opencode_go` 预设同口径修正
+（原照抄 cc-switch 的 ANTHROPIC_AUTH_TOKEN 配出来必 401——cc-switch 该条目自身有问题）。
+opencode_zen_openai 预设（openai_chat）保留不动，其可用性仍绑本坑分叉拍板。
+
+**对分叉的影响**：opencode 需求已不依赖 LiteLLM 复活，但其它 OpenAI 兼容上游（无原生
+anthropic 端点的）仍被分叉卡着——①上游修复 vs ②自研薄适配 的拍板继续挂起，本文件保持活跃。

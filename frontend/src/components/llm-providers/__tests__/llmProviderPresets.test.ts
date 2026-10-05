@@ -54,6 +54,28 @@ describe("LLM_PROVIDER_PRESETS — api_format 字段（task-06 / D-001@v1）", (
     expect(go).toBeDefined();
     expect(go!.api_format).toBe("anthropic");
   });
+
+  // 2026-10-06-opencode-go-direct-anthropic：opencode /zen/go/v1/messages 仅认 x-api-key
+  //（Bearer 恒 401 AuthError，阿里云服务器实测），auth_field 必须是 ANTHROPIC_API_KEY
+  //（原抄 cc-switch 的 ANTHROPIC_AUTH_TOKEN 配出来必 401）。
+  it("opencode_go auth_field 为 ANTHROPIC_API_KEY（/v1/messages 仅认 x-api-key）", () => {
+    const go = PRESET_BY_KEY["opencode_go"];
+    expect(go).toBeDefined();
+    expect(go!.auth_field).toBe("ANTHROPIC_API_KEY");
+  });
+
+  // 4 角色槽全填同一模型：Claude Code 副通道（标题/摘要）缺省发内置档位名，opencode
+  // 无此模型名会失败（gap-D 同型）；槽位模型与 default_model 一致（deepseek-v4.1-flash）。
+  it("opencode_go 4 角色槽与主模型全填 deepseek-v4.1-flash", () => {
+    const go = PRESET_BY_KEY["opencode_go"];
+    expect(go).toBeDefined();
+    expect(go!.default_model).toBe("deepseek-v4.1-flash");
+    const env = go!.settings_config_partial?.env as Record<string, string>;
+    expect(env.ANTHROPIC_MODEL).toBe("deepseek-v4.1-flash");
+    for (const role of ["HAIKU", "SONNET", "OPUS", "FABLE"] as const) {
+      expect(env[`ANTHROPIC_DEFAULT_${role}_MODEL`]).toBe("deepseek-v4.1-flash");
+    }
+  });
 });
 
 // ql-20260823-007：预设永不预填认证键空占位。空串 ANTHROPIC_AUTH_TOKEN 会在 daemon
