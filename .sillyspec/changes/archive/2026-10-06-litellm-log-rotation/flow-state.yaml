@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -18,6 +26,16 @@ input: >-
   - 本机 docker compose config 渲染通过，且 litellm 服务除新增 logging 外无其它配置差异
 autopilot: false
 baseline_commit: c3130b9d3ccd8847e2b0cb3d6ecfe76379e085a4
-updatedAt: '2026-10-05T17:16:19.547Z'
+updatedAt: '2026-10-05T23:07:18.690Z'
 baseline_sha256: 46fda785c65e01d355cb69f32aa6b1995655c992bffebe2b8bb90fa5142a54eb
+spec_approved: true
+spec_approved_at: '2026-10-05T23:06:27.245Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py2+jsx1)+fr(3)（28.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261005230704\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（11.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261005230704\test-result.json｜门文件
+  5 个
 

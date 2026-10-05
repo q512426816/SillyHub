@@ -1607,3 +1607,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：135a0d3a6dcbac6ce10d8c38c6882af5401d6515
 理由：最大风险：opencode go 端点行为是实测口径（仅认 x-api-key、识别 Claude Code 原生 session 头、全模型可经 /v1/messages 路由），上游未来变更口径（如强制专有 session 头、收敛 /v1/messages 模型面）会使直连失效——缓解：平台探活（GET /zen/go/v1/models）与每次会话请求会立即暴露，届时按报错口径再调整，且此形态与 cc-switch 生态用户同型，上游破坏面大、概率低。放弃的方案：① 修 litellm 换 tag 复活 openai_chat 链——2026-10-05 本地矩阵已证伪无可 pin tag（两个 v1.95.x 变体坏构建、1.96+ anthropic adapter 不认 mode=chat 恒打上游 /responses）；② 注入 x-opencode-session 自定义头——实测 Claude Code 原生 session 头已被识别（官方文档明示 + 真机验证），无需加复杂度；③ opencode_zen_openai 预设（zen 计费）也切直连——该 key 无 zen 余额（实测 Insufficient account funds），且 zen 端点 anthropic 面未验证，留待 litellm 分叉拍板一并处置。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-06-litellm-log-rotation
+锚点：未记录
+最近确认：6a3bd3113b5d405935f3b2de2a54e8c30c9815ba
+理由：最大风险：轮转上限过小导致 crash-loop 排障时关键 traceback 被截丢——取 10m×3=30m 兼顾低配磁盘与排障留存（该服务已设 PYTHONUNBUFFERED=1，崩溃 traceback 即时 flush，单份 10m 足够装下完整崩溃记录）。试过但放弃的方案：①宿主 daemon.json 全局默认轮转——动服务器系统状态、影响所有容器，超出本仓变更面；②全服务统一 logging——核心服务日志保留策略变化未评估，扩大行为面，留待专门变更。

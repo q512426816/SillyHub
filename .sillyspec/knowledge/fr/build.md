@@ -1638,3 +1638,24 @@
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-05-remove-promo-film/requirements.md#FR-03
 最近确认：5eb9b1dd74e57562ae64dee99adcbca21e1844d8
+
+## FR-build-110 deploy/docker-compose.yml 的 litellm 服务新增 logging json-file 有界配置（max-size + max-file）
+变更：2026-10-06-litellm-log-rotation
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-06-litellm-log-rotation/requirements.md#FR-01
+最近确认：6a3bd3113b5d405935f3b2de2a54e8c30c9815ba
+
+## FR-build-111 默认 up -d 启用集合不变：docker compose config --services 仍为 5 个核心服务，litellm/litellm-db 仍仅在 litellm profile
+变更：2026-10-06-litellm-log-rotation
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-06-litellm-log-rotation/requirements.md#FR-02
+最近确认：6a3bd3113b5d405935f3b2de2a54e8c30c9815ba
+
+## FR-build-112 本机 docker compose config 渲染通过，且 litellm 服务除新增 logging 外无其它配置差异
+变更：2026-10-06-litellm-log-rotation
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-06-litellm-log-rotation/requirements.md#FR-03
+最近确认：6a3bd3113b5d405935f3b2de2a54e8c30c9815ba

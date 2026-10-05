@@ -1,0 +1,332 @@
+diff --git a/.sillyspec/changes/2026-10-06-litellm-log-rotation/flow-state.yaml b/.sillyspec/changes/2026-10-06-litellm-log-rotation/flow-state.yaml
+new file mode 100644
+index 000000000..d4cab5fb1
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-litellm-log-rotation/flow-state.yaml
+@@ -0,0 +1,23 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  litellm 服务 restart:always 且 deploy/docker-compose.yml 全文件无日志轮转配置，若按隔离注释的复验路径 --profile litellm up -d 显式拉起，已知坏构建镜像
++  v1.95.0 将 crash-loop 且 json-file 日志无上限膨胀（低配服务器磁盘风险；2026-10-06 代码审查报告的残留中风险项）。
++
++
++  成功标准：
++
++  - deploy/docker-compose.yml 的 litellm 服务新增 logging json-file 有界配置（max-size + max-file）
++
++  - 默认 up -d 启用集合不变：docker compose config --services 仍为 5 个核心服务，litellm/litellm-db 仍仅在 litellm profile
++
++  - 本机 docker compose config 渲染通过，且 litellm 服务除新增 logging 外无其它配置差异
++autopilot: false
++baseline_commit: c3130b9d3ccd8847e2b0cb3d6ecfe76379e085a4
++updatedAt: '2026-10-05T17:16:19.547Z'
++baseline_sha256: 46fda785c65e01d355cb69f32aa6b1995655c992bffebe2b8bb90fa5142a54eb
++
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.md
+index f68cf234c..30df34f17 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.md
+@@ -128,6 +128,8 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
+ 
+ - change 2026-08-08-llm-provider-openai-format | llm-provider 表单加 API 格式下拉（openai 隐藏认证字段/角色映射 + 完整 URL 粘贴提示）；列表加格式徽标 + litellm_registered 状态；预设聚合站组加 opencode_zen_openai；api-types.ts 从后端 OpenAPI 重新生成（api_format/litellm_registered 字段同步）；Wave2 set-default openai 守护移除（FR-11 开放 set-default）。
+ 
++- change 2026-10-06-opencode-go-direct-anthropic | 修正 opencode_go 预设鉴权口径（实测 opencode /zen/go/v1/messages 仅认 x-api-key，Bearer 恒 401 AuthError）：auth_field ANTHROPIC_AUTH_TOKEN→ANTHROPIC_API_KEY，模型 4 槽 deepseek-v4-flash→deepseek-v4.1-flash 并补 FABLE 槽；预设测试补 auth_field + 4 槽回归断言（9/9）。同变更在阿里云服务器把 OpenCode Go 供应商行从 openai_chat（依赖已隔离 LiteLLM 死链）切 anthropic 直连，真机 Claude Code 端到端验证通过。
++
+ - ql-20260810-003-3aa6 | 修复 ImportModuleModal（实施阶段导入弹窗）确认导入按钮 flaky 竞态：selectedRowKeys 默认全选原用 useEffect 异步初始化（与 handleUpload 的 setStep(2) 不同渲染周期），步骤2首帧 selectedRowKeys=[] → validCount=0 → 确认按钮 disabled={validCount===0} 偶发被测试/极快点击点到 disabled 致 importModulesCommit 调 0 次（全量并发跑触发，单跑独占 CPU 不触发）。改为 handleUpload 成功分支与 setStep(2) 同批 setSelectedRowKeys + 切 sheet Checkbox onChange 同步重置，删该 useEffect。行为完全一致仅消首帧竞态，全量连跑 4 次 134/1346 全过。
+ 
+ - change 2026-08-11-change-detail-layout-rework | 变更中心详情页展示结构整体重做（左主右辅两栏）：page.tsx 1119→484 行瘦身为编排层，拆 8 个展示组件——CollapsibleCard（次线折叠基件）/ ChangeFilesCard / ChangeSessionsCard / ChangeReviewHistoryCard（normalizeReviewHistory 读真实 stages.review_history，兼容 gate/rerun 双形状）/ ChangeStageHeader（5 阶段宏观进度）/ ChangeTaskBoardCard（任务摘要）/ ChangeStageActions（收口 gate 面板+推进横幅+验证门禁+触发智能体+provider/model+team toggle）/ ChangeAgentRunLog（组合 AgentRunPanel+子步骤+gate 徽标+TeamProgress，传 onDispatch=undefined 消双入口 FR-05b）。布局 `grid lg:grid-cols-[minmax(0,1fr)_320px]` 左主（操作区+执行日志）右辅（文件/会话/审核历史/任务看板），移动端 <lg 单列折叠。删除僵尸区块（审批状态 approval_status + 审查记录旧实现 listReviews 读死表 change_reviews）+ 死代码（handleExecute / handleTransition）+ 未用状态（archiveGate）。R-06 team toggle role=switch + aria-label=用团队执行 DOM 契约迁入 ChangeStageActions 零破坏。40 组件测试 + 8 迁移测试（page-team-toggle 重写指向 ChangeStageActions，3136ms→80ms），frontend 全量 142 文件 / 1386 测试零回归，tsc 0 错。
+diff --git a/deploy/docker-compose.yml b/deploy/docker-compose.yml
+index 6ecc68375..908925be6 100644
+--- a/deploy/docker-compose.yml
++++ b/deploy/docker-compose.yml
+@@ -277,6 +277,15 @@ services:
+     # 超 512m → OOM kill → restart:always 循环 → 迁移永远跑不完、4000 永不监听（docker events 见 oom 事件）。
+     # 提到 1g 让一次性迁移跑完；稳态内存 ~300M，limit 只是允许尖峰。
+     mem_limit: 1g
++    # 日志轮转有界（2026-10-06-litellm-log-rotation）：本服务被显式拉起（--profile litellm
++    # 或点名 up）而镜像仍是坏构建时，restart:always 会 crash-loop，json-file 默认无上限——
++    # 低配机磁盘会被打满。10m×3=30m 兼顾磁盘与 crash-loop 排障留存。只加本服务不动
++    # 核心服务（其余服务日志策略变化未评估，留待专门变更）。
++    logging:
++      driver: json-file
++      options:
++        max-size: "10m"
++        max-file: "3"
+ 
+ volumes:
+   pgdata:
+diff --git a/docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md b/docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md
+index 69fb81a3d..f2ced2344 100644
+--- a/docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md
++++ b/docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md
+@@ -114,3 +114,28 @@ compose 维持 `litellm-database:v1.95.0` pin（无论分叉如何都是当前
+   litellm 服务整体退役时一并带走（含 profiles 行）。
+ - 注：本机（非服务器）litellm-db 容器当前在跑——profiles 不触碰已存在容器，`up -d`
+   不会停它，需要时手动 `docker compose stop litellm-db`。
++
++## 处置记录（2026-10-06）——opencode 供应商不再被本坑阻塞（直连绕开 LiteLLM）
++
++用户报「平台供应商 opencode 路由有问题」。根因两层：
++
++1. **平台侧（本坑）**：服务器 OpenCode Go 供应商行原配 `openai_chat`
++   （base_url 还错拼成 go 端点 + chat/completions 全端点），整条链依赖被隔离停用的
++   litellm → 必然全断。
++2. **上游侧（opencode go 端点鉴权/路由口径，实测 2026-10-06）**：
++   - go 端点**原生提供 Anthropic `/v1/messages`**（官方文档列 MiniMax/Qwen 系走它，
++     实测 deepseek-v4.1-flash 等全部模型都能路由），流式 + thinking 块标准 Anthropic 格式；
++   - 该端点**仅认 `x-api-key`**（`Authorization: Bearer` 恒 401 AuthError "Missing API key"）；
++   - 无 `x-opencode-session` 头会拒（MissingSessionID），但 **Claude Code 原生 session 头被
++     opencode 识别**（官方文档 + 本机 claude 2.1.216 真机 `-p` 会话实证，纯文本 + Read 工具
++     调用往返全通），无需注入自定义头。
++
++**处置（change 2026-10-06-opencode-go-direct-anthropic）**：opencode 供应商改走
++anthropic 直连（与 GLM/DeepSeek/Kimi 同型）：服务器 DB 行
++`api_format=anthropic / base_url=https://opencode.ai/zen/go / auth_field=ANTHROPIC_API_KEY /
++model=deepseek-v4.1-flash（+4 角色槽同填）`；前端 `opencode_go` 预设同口径修正
++（原照抄 cc-switch 的 ANTHROPIC_AUTH_TOKEN 配出来必 401——cc-switch 该条目自身有问题）。
++opencode_zen_openai 预设（openai_chat）保留不动，其可用性仍绑本坑分叉拍板。
++
++**对分叉的影响**：opencode 需求已不依赖 LiteLLM 复活，但其它 OpenAI 兼容上游（无原生
++anthropic 端点的）仍被分叉卡着——①上游修复 vs ②自研薄适配 的拍板继续挂起，本文件保持活跃。
+diff --git a/frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts b/frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts
+index 9ff89878b..e1e75589e 100644
+--- a/frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts
++++ b/frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts
+@@ -54,6 +54,28 @@ describe("LLM_PROVIDER_PRESETS — api_format 字段（task-06 / D-001@v1）", (
+     expect(go).toBeDefined();
+     expect(go!.api_format).toBe("anthropic");
+   });
++
++  // 2026-10-06-opencode-go-direct-anthropic：opencode /zen/go/v1/messages 仅认 x-api-key
++  //（Bearer 恒 401 AuthError，阿里云服务器实测），auth_field 必须是 ANTHROPIC_API_KEY
++  //（原抄 cc-switch 的 ANTHROPIC_AUTH_TOKEN 配出来必 401）。
++  it("opencode_go auth_field 为 ANTHROPIC_API_KEY（/v1/messages 仅认 x-api-key）", () => {
++    const go = PRESET_BY_KEY["opencode_go"];
++    expect(go).toBeDefined();
++    expect(go!.auth_field).toBe("ANTHROPIC_API_KEY");
++  });
++
++  // 4 角色槽全填同一模型：Claude Code 副通道（标题/摘要）缺省发内置档位名，opencode
++  // 无此模型名会失败（gap-D 同型）；槽位模型与 default_model 一致（deepseek-v4.1-flash）。
++  it("opencode_go 4 角色槽与主模型全填 deepseek-v4.1-flash", () => {
++    const go = PRESET_BY_KEY["opencode_go"];
++    expect(go).toBeDefined();
++    expect(go!.default_model).toBe("deepseek-v4.1-flash");
++    const env = go!.settings_config_partial?.env as Record<string, string>;
++    expect(env.ANTHROPIC_MODEL).toBe("deepseek-v4.1-flash");
++    for (const role of ["HAIKU", "SONNET", "OPUS", "FABLE"] as const) {
++      expect(env[`ANTHROPIC_DEFAULT_${role}_MODEL`]).toBe("deepseek-v4.1-flash");
++    }
++  });
+ });
+ 
+ // ql-20260823-007：预设永不预填认证键空占位。空串 ANTHROPIC_AUTH_TOKEN 会在 daemon
+diff --git a/frontend/src/config/llmProviderPresets.ts b/frontend/src/config/llmProviderPresets.ts
+index af419a266..c11f837dc 100644
+--- a/frontend/src/config/llmProviderPresets.ts
++++ b/frontend/src/config/llmProviderPresets.ts
+@@ -198,26 +198,31 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
+     },
+   },
+   {
+-    // OpenCode Go：opencode.ai 官方自营 API（cc-switch claudeProviderPresets 同名条目，
+-    // 端点 https://opencode.ai/zen/go，OpenAI 兼容格式 cc-switch 标 openai_chat）。
+-    // 数据逐字抄 cc-switch（R-05），affiliate（?ref=）已剔除。模型 4 槽全填 deepseek-v4-flash。
++    // OpenCode Go：opencode.ai 官方自营 API，go 端点原生 Anthropic /v1/messages 直连
++    //（2026-10-06-opencode-go-direct-anthropic 实测修正：cc-switch 原条目 auth_field 为
++    // ANTHROPIC_AUTH_TOKEN，但 /zen/go/v1/messages 仅认 x-api-key——Bearer 恒 401
++    // AuthError，必须 ANTHROPIC_API_KEY；Claude Code 原生 session 头被 opencode 识别，
++    // 无需注入 x-opencode-session。 affiliate（?ref=）已剔除）。
++    // 模型 4 槽全填 deepseek-v4.1-flash（go 模型目录在列；副通道请求缺省发内置档位名
++    // 会被 opencode 拒，gap-D 同型）。
+     key: "opencode_go",
+     name: "OpenCode Go",
+     category: "aggregator",
+     base_url: "https://opencode.ai/zen/go",
+-    auth_field: "ANTHROPIC_AUTH_TOKEN",
++    auth_field: "ANTHROPIC_API_KEY",
+     api_format: "anthropic",
+-    default_model: "deepseek-v4-flash",
++    default_model: "deepseek-v4.1-flash",
+     website_url: "https://opencode.ai/go",
+     api_key_url: "https://opencode.ai/go",
+     icon_color: "#211E1E",
+     settings_config_partial: {
+       env: {
+         ANTHROPIC_BASE_URL: "https://opencode.ai/zen/go",
+-        ANTHROPIC_MODEL: "deepseek-v4-flash",
+-        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash",
+-        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash",
+-        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-flash",
++        ANTHROPIC_MODEL: "deepseek-v4.1-flash",
++        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4.1-flash",
++        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4.1-flash",
++        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4.1-flash",
++        ANTHROPIC_DEFAULT_FABLE_MODEL: "deepseek-v4.1-flash",
+       },
+     },
+   },
+diff --git a/.sillyspec/changes/2026-10-06-litellm-log-rotation/design.md b/.sillyspec/changes/2026-10-06-litellm-log-rotation/design.md
+new file mode 100644
+index 000000000..f5f4a6e0e
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-litellm-log-rotation/design.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-05T17:16:19.525Z
++---
++# 设计记录（Design Record）— 2026-10-06-litellm-log-rotation
++
++> 四节每节必答——问题行原样保留（勿删勿改勿用答案替换），答案另起行写在问题行下方；小改动可写「不适用：<理由>」；flow done 空节拒收。
++> 需要列改动文件时加独立「## 文件变更清单」章节+表格（| 操作 | 路径 | 说明 |）——章节标题是 parseFileChangeList 的识别面，勿写在「接口契约」节内（收口声明面解析不到会误报夹带嫌疑）。
++> 四问原文/FR 标题/镜像任务行是收口锚——问题行/标题从本模板原样保留或复制，勿删勿改、勿用答案整块替换问题原文、勿手打重写（标点也要逐字：2026-10-05 三度实证——句号手写成问号、答案整块替换问题原文均被锚对比拒收）。
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++在 deploy/docker-compose.yml 的 litellm 服务块尾（mem_limit 之后）新增 logging 块：`driver: json-file` + `max-size: "10m"` + `max-file: "3"`。这是 2026-10-05-litellm-crashloop-quarantine 的结构性加固补全——profiles 门拦住默认 `up -d` 路径，但注释里写明的复验路径（`--profile litellm` 或显式点名拉起）一旦执行，坏构建镜像在 restart:always 下仍会 crash-loop，而整个 deploy/ 无任何日志轮转配置，json-file 默认无上限，低配服务器磁盘会被打满。
++
++选服务级 compose 配置而非其它方案的依据：改宿主 /etc/docker/daemon.json 全局默认——要动服务器系统状态且影响所有容器，超出本仓变更面；给全部服务统一加 logging——核心服务的日志保留策略变化未评估（排障时可能反而需要更长的日志留存），行为面扩大，留待专门变更评估。只给已知会 crash-loop 的 litellm 加有界轮转，变更面最小且与既有隔离门互补。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无函数/端点/命令/文件格式变化。对外可见行为仅一条：litellm 容器日志由 Docker json-file 驱动有界轮转（单文件 ≤10m、保留 ≤3 份、总量 ≤30m）。默认启用集合、镜像、网络、端口、卷、健康检查、restart 策略均不变。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++   不适用——纯静态声明式编排配置（YAML），无事件流与时序假设。
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++   日志文件由 Docker 守护进程单方管理（容器 stdout 重定向），轮转由 json-file 驱动原子执行，无双写方冲突；YAML 本身是仓库内单一文本文件，git 并发按常规文本冲突处理。
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++   安全——logging 选项在容器创建时生效，容器删除重建后轮转计数重置，无跨生命周期残留状态；回滚=还原 YAML 后 recreate 容器即恢复无界行为。服务仍被 litellm profile 门控，默认栈容器完全不受影响（不 recreate）。
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++   不会——logging 配置仅作用于本 compose 项目内 litellm 一个服务，不触碰宿主全局日志配置，也不影响同文件其它服务；本机与阿里云服务器共用同一文件同一语义。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：轮转上限过小导致 crash-loop 排障时关键 traceback 被截丢——取 10m×3=30m 兼顾低配磁盘与排障留存（该服务已设 PYTHONUNBUFFERED=1，崩溃 traceback 即时 flush，单份 10m 足够装下完整崩溃记录）。试过但放弃的方案：①宿主 daemon.json 全局默认轮转——动服务器系统状态、影响所有容器，超出本仓变更面；②全服务统一 logging——核心服务日志保留策略变化未评估，扩大行为面，留待专门变更。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | deploy/docker-compose.yml | litellm 服务新增 logging json-file 轮转块（max-size 10m / max-file 3，含 4 行注释，共 9 行新增） |
+diff --git a/.sillyspec/changes/2026-10-06-litellm-log-rotation/proposal.md b/.sillyspec/changes/2026-10-06-litellm-log-rotation/proposal.md
+new file mode 100644
+index 000000000..d5cdccc31
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-litellm-log-rotation/proposal.md
+@@ -0,0 +1,27 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-05T17:16:19.525Z
++---
++# 提案书（Proposal）— 2026-10-06-litellm-log-rotation
++
++## 动机
++
++任务原话转写：litellm 服务 restart:always 且 deploy/docker-compose.yml 全文件无日志轮转配置，若按隔离注释的复验路径 --profile litellm up -d 显式拉起，已知坏构建镜像 v1.95.0 将 crash-loop 且 json-file 日志无上限膨胀（低配服务器磁盘风险；2026-10-06 代码审查报告的残留中风险项）。
++
++成功标准：
++- deploy/docker-compose.yml 的 litellm 服务新增 logging json-file 有界配置（max-size + max-file）
++- 默认 up -d 启用集合不变：docker compose config --services 仍为 5 个核心服务，litellm/litellm-db 仍仅在 litellm profile
++- 本机 docker compose config 渲染通过，且 litellm 服务除新增 logging 外无其它配置差异
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. deploy/docker-compose.yml 的 litellm 服务新增 logging json-file 有界配置（max-size + max-file）
++2. 默认 up -d 启用集合不变：docker compose config --services 仍为 5 个核心服务，litellm/litellm-db 仍仅在 litellm profile
++3. 本机 docker compose config 渲染通过，且 litellm 服务除新增 logging 外无其它配置差异
++
++## 成功标准（可验证）
++
++1. deploy/docker-compose.yml 的 litellm 服务新增 logging json-file 有界配置（max-size + max-file）
++2. 默认 up -d 启用集合不变：docker compose config --services 仍为 5 个核心服务，litellm/litellm-db 仍仅在 litellm profile
++3. 本机 docker compose config 渲染通过，且 litellm 服务除新增 logging 外无其它配置差异
+diff --git a/.sillyspec/changes/2026-10-06-litellm-log-rotation/requirements.md b/.sillyspec/changes/2026-10-06-litellm-log-rotation/requirements.md
+new file mode 100644
+index 000000000..423f78761
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-litellm-log-rotation/requirements.md
+@@ -0,0 +1,47 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-05T17:16:19.525Z
++---
++# 需求规格（Requirements）— 2026-10-06-litellm-log-rotation
++
++## 功能需求
++
++> FR 由你撰写：每条 = `### FR-NN: 标题` + 一句带强度词的行为规定（必须=硬性；禁止=红线；
++> SHOULD=建议须注理由；可以=可选）；边界情形加场景块 `#### 场景：名` + Given/When/Then 行。
++> 标题行是成功标准锚（勿改写——收口做门柱对比）；正文与场景块归你。
++
++### FR-01: deploy/docker-compose.yml 的 litellm 服务新增 logging json-file 有界配置（max-size + max-file）
++
++- litellm 服务的容器日志**必须**经 json-file 驱动有界轮转（`max-size: "10m"` + `max-file: "3"`，总量上限 30m），**禁止**依赖 Docker 默认的 json-file 无上限行为——坏构建 crash-loop + restart:always 组合下日志会无上限膨胀打满低配机磁盘（2026-10-05-litellm-crashloop-quarantine 已识别的残留风险项）。
++
++#### 场景：主路径
++
++- Given：litellm 被显式拉起（`--profile litellm` 或点名 `up -d litellm`）且镜像仍为坏构建
++- When：容器在 `restart: always` 下持续崩溃重启写日志
++- Then：单个日志文件不超过 10m，旧文件最多保留 3 份，磁盘占用有界
++
++### FR-02: 默认 up -d 启用集合不变：docker compose config --services 仍为 5 个核心服务，litellm/litellm-db 仍仅在 litellm profile
++
++- 默认启用集合**必须**保持不变——不带 `--profile` 时 `config --services` 输出仍为 backend/frontend/minio/postgres/redis 共 5 个；litellm 与 litellm-db **必须**仅在 litellm profile 下出现，不因本变更回到默认栈。
++
++#### 场景：主路径
++
++- Given：本机 Docker 29.5.2 + Compose v5.1.3、deploy/.env 就绪
++- When：`docker compose --env-file deploy/.env config --services`（无 profile）
++- Then：输出 5 个核心服务且不含 litellm/litellm-db；同命令追加 `--profile litellm` 后输出 7 个（增 litellm、litellm-db）
++
++### FR-03: 本机 docker compose config 渲染通过，且 litellm 服务除新增 logging 外无其它配置差异
++
++- 改动后 compose **必须**在本机 Docker 29.5.2 + 真实 deploy/.env 下通过 `docker compose config` 渲染校验；litellm 服务相对基线**禁止**有 logging 块以外的任何配置差异（git diff 仅 9 行新增、单文件）。
++
++#### 场景：主路径
++
++- Given：工作区相对基线 c3130b9d3 的 compose 改动仅本变更
++- When：`docker compose --profile litellm --env-file deploy/.env config` 渲染并对照 `git diff`
++- Then：litellm 段渲染出 logging（driver json-file / max-size 10m / max-file 3），渲染无报错，diff 除该块（含注释）外无其它行
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: CLI 亲测/deploy/docker-compose.yml「--profile litellm config 渲染中 litellm 服务含 logging json-file / max-size 10m / max-file 3」
++FR-02: CLI 亲测/deploy/docker-compose.yml「config --services 默认输出 5 个核心服务（backend/frontend/minio/postgres/redis），--profile litellm 后 7 个（增 litellm/litellm-db）」
++FR-03: CLI 亲测/deploy/docker-compose.yml「config 渲染退出码 0；git diff 仅 deploy/docker-compose.yml 单文件 9 行新增（logging 块含注释），无其它改动」
+diff --git a/.sillyspec/changes/2026-10-06-litellm-log-rotation/tasks.md b/.sillyspec/changes/2026-10-06-litellm-log-rotation/tasks.md
+new file mode 100644
+index 000000000..3bae0439d
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-litellm-log-rotation/tasks.md
+@@ -0,0 +1,15 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-05T17:16:19.525Z
++---
++# 任务注册表（Tasks）— 2026-10-06-litellm-log-rotation
++
++> 镜像行（task-01…task-NN）是成功标准逐条镜像=任务锚：勿删勿改写（收口对照它），完成实现路径
++> 需要更细步骤时在镜像行**后追加细化行**（保持 `- [ ] task-NN:` 行形态，编号从镜像行末尾顺延——
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决）。
++> 边干边勾：完成一条 = 实现到位 + 相关测试跑绿 → 当场勾（sillyspec task tick --change 2026-10-06-litellm-log-rotation --task task-NN 即时回显进度与下一任务，或 Edit 翻格），勿攒到收口一把勾（收口硬门拒单拍多格勾选；--allow-batch-tick 可显式旁路留痕）。⚠️ harness 的 TodoWrite 类工具不替代本文件——平台进度/收口哨兵只读 tasks.md。
++> `flow status --change 2026-10-06-litellm-log-rotation` 为自愿查看/恢复面。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: deploy/docker-compose.yml 的 litellm 服务新增 logging json-file 有界配置（max-size + max-file）
++- [x] task-02: 默认 up -d 启用集合不变：docker compose config --services 仍为 5 个核心服务，litellm/litellm-db 仍仅在 litellm profile
++- [x] task-03: 本机 docker compose config 渲染通过，且 litellm 服务除新增 logging 外无其它配置差异

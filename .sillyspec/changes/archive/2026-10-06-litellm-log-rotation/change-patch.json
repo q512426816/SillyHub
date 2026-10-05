@@ -1,0 +1,71 @@
+{
+  "change": "2026-10-06-litellm-log-rotation",
+  "baseline": "c3130b9d3ccd8847e2b0cb3d6ecfe76379e085a4",
+  "head": "6a3bd3113b5d405935f3b2de2a54e8c30c9815ba",
+  "files": [
+    ".sillyspec/changes/2026-10-06-litellm-log-rotation/design.md",
+    ".sillyspec/changes/2026-10-06-litellm-log-rotation/flow-state.yaml",
+    ".sillyspec/changes/2026-10-06-litellm-log-rotation/proposal.md",
+    ".sillyspec/changes/2026-10-06-litellm-log-rotation/requirements.md",
+    ".sillyspec/changes/2026-10-06-litellm-log-rotation/tasks.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.md",
+    "deploy/docker-compose.yml",
+    "docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md",
+    "frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts",
+    "frontend/src/config/llmProviderPresets.ts"
+  ],
+  "totals": {
+    "files": 10,
+    "additions": 242,
+    "deletions": 9
+  },
+  "savedAt": "2026-10-05T23:07:17.291Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "deploy",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "build",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/build.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "6c4f058b729b2ee04532a6d759bb9dc23f4d00813db8c0d6b23849ad25e422a4",
+  "patchStatus": "ok"
+}
