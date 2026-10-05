@@ -1,0 +1,1208 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SillyHub · 平台宣传片 V2 — 真实产品演示</title>
+<style>
+  :root{
+    --violet:#7C3AED; --violet-l:#A78BFA; --violet-d:#4C1D95;
+    --cyan:#0891B2; --cyan-l:#22D3EE;
+    --ink:#05030c; --text:#EDE9FE; --dim:#8b83a8;
+    --sans:"PingFang SC","Microsoft YaHei","Noto Sans SC","Source Han Sans SC",sans-serif;
+    --mono:"JetBrains Mono","Cascadia Code",Consolas,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#000}
+  body{font-family:var(--sans);color:var(--text);overflow:hidden}
+  #stageWrap{position:fixed;inset:0;background:#000}
+  #film{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  #topBadge{position:absolute;top:16px;right:22px;z-index:30;display:flex;gap:8px;align-items:center;
+    font:12px/1 var(--mono);color:#b9aee0;opacity:0;transition:opacity .6s;pointer-events:none}
+  #topBadge .dot{width:6px;height:6px;border-radius:50%;background:var(--cyan-l)}
+  .playing #topBadge{opacity:.85}
+  #fpsChip{position:absolute;bottom:96px;right:26px;z-index:31;font:11px/1 var(--mono);color:#7a6fae;
+    opacity:0;transition:opacity .4s;pointer-events:none}
+  .playing #fpsChip{opacity:.7}
+  #autoChip{position:absolute;top:52px;right:22px;z-index:31;font:12px/1 var(--mono);color:#22D3EE;
+    background:rgba(8,145,178,.15);border:1px solid rgba(34,211,238,.4);border-radius:999px;
+    padding:7px 12px;opacity:0;transition:opacity .5s;pointer-events:none}
+  #autoChip.show{opacity:1}
+
+  #poster{position:absolute;inset:0;z-index:40;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(120% 90% at 50% 8%, #170b36 0%, #0a0618 45%, #030109 100%);
+    transition:opacity .8s ease, visibility .8s}
+  #poster.hide{opacity:0;visibility:hidden;pointer-events:none}
+  #poster h1{font-size:62px;font-weight:800;letter-spacing:2px;
+    background:linear-gradient(115deg,#c4b5fd 0%,#7C3AED 45%,#22D3EE 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  #poster h2{margin-top:14px;font-size:20px;font-weight:400;letter-spacing:12px;color:#cfc6ea;text-indent:12px}
+  #poster .tagline{margin-top:24px;font-size:15px;color:var(--dim);letter-spacing:3px}
+  #playBtn{margin-top:46px;display:flex;align-items:center;gap:14px;padding:16px 44px;border:none;border-radius:999px;
+    background:linear-gradient(120deg,var(--violet) 0%,#5b21b6 60%,var(--cyan) 140%);
+    color:#fff;font:600 19px/1 var(--sans);letter-spacing:6px;cursor:pointer;text-indent:6px;
+    box-shadow:0 0 0 1px rgba(167,139,250,.4),0 12px 44px rgba(124,58,237,.5);transition:transform .18s, box-shadow .18s}
+  #playBtn:hover{transform:translateY(-2px) scale(1.02);box-shadow:0 0 0 1px rgba(167,139,250,.7),0 18px 60px rgba(124,58,237,.7)}
+  #playBtn svg{width:20px;height:20px;text-indent:0}
+  #poster .meta{margin-top:42px;display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+  #poster .meta span{font:12px/1 var(--mono);color:#a99ed2;padding:8px 14px;border:1px solid rgba(139,110,214,.35);
+    border-radius:999px;background:rgba(124,58,237,.08)}
+  #poster .loadinfo{margin-top:22px;font:12px/1 var(--mono);color:#5e567e}
+  #poster .credit{position:absolute;bottom:24px;font:11px/1.9 var(--mono);color:#5e567e;text-align:center;letter-spacing:1px}
+
+  #player{position:absolute;left:0;right:0;bottom:0;z-index:35;padding:26px 26px 18px;
+    background:linear-gradient(transparent, rgba(2,1,8,.9) 55%);
+    opacity:0;transform:translateY(12px);transition:opacity .35s, transform .35s;pointer-events:none}
+  .playing #player{opacity:1;transform:none;pointer-events:auto}
+  .playing.idle #player{opacity:0;transform:translateY(12px);pointer-events:none}
+  #player .row{display:flex;align-items:center;gap:14px}
+  button.ctl{width:42px;height:42px;border-radius:10px;border:1px solid rgba(139,110,214,.3);cursor:pointer;
+    background:rgba(20,12,40,.65);color:#d8cff5;display:flex;align-items:center;justify-content:center;
+    transition:background .15s,border-color .15s;flex:none}
+  button.ctl:hover{background:rgba(124,58,237,.35);border-color:rgba(167,139,250,.7)}
+  button.ctl svg{width:19px;height:19px}
+  #timeLabel{font:13px/1 var(--mono);color:#b9aee0;min-width:118px;text-align:center;flex:none}
+  #qsel{display:flex;gap:6px;align-items:center;flex:none}
+  #qsel button{font:12px/1 var(--mono);color:#a99ed2;background:rgba(20,12,40,.65);border:1px solid rgba(139,110,214,.3);
+    border-radius:8px;padding:9px 12px;cursor:pointer}
+  #qsel button.on{color:#fff;background:rgba(124,58,237,.45);border-color:#a78bfa}
+  #bar{position:relative;flex:1;height:26px;cursor:pointer}
+  #bar .track{position:absolute;left:0;right:0;top:11px;height:4px;border-radius:99px;background:rgba(139,110,214,.22)}
+  #bar .fill{position:absolute;left:0;top:11px;height:4px;border-radius:99px;width:0;
+    background:linear-gradient(90deg,var(--violet),var(--cyan-l))}
+  #segs{position:absolute;left:0;right:0;top:11px;height:4px;display:flex;pointer-events:none}
+  #segs i{height:4px;flex:0 0 auto;border-right:1px solid rgba(5,3,12,.95)}
+  #segs i:last-child{border-right:none}
+  #bar .head{position:absolute;top:13px;width:13px;height:13px;border-radius:50%;transform:translate(-50%,-50%);
+    background:#fff;box-shadow:0 0 0 4px rgba(124,58,237,.45);left:0;pointer-events:none}
+  #tip{position:absolute;bottom:34px;transform:translateX(-50%);padding:7px 12px;border-radius:8px;white-space:nowrap;
+    background:rgba(12,7,26,.95);border:1px solid rgba(139,110,214,.4);font:12px/1 var(--mono);color:#d8cff5;
+    opacity:0;transition:opacity .15s;pointer-events:none}
+  #hint{position:absolute;top:16px;left:50%;transform:translateX(-50%);font:12px/1 var(--mono);color:#8d84ad;
+    letter-spacing:2px;opacity:0;transition:opacity .6s;pointer-events:none}
+  .playing #hint{opacity:.7}
+
+  #endcard{position:absolute;inset:0;z-index:38;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(100% 80% at 50% 30%, rgba(23,11,54,.93), rgba(3,1,9,.97) 70%);
+    opacity:0;visibility:hidden;transition:opacity .9s}
+  #endcard.show{opacity:1;visibility:visible}
+  #endcard h3{font-size:34px;font-weight:700;letter-spacing:3px;color:#e6dff9}
+  #endcard p{margin-top:12px;font-size:15px;color:var(--dim);letter-spacing:2px}
+  #endcard .btns{margin-top:36px;display:flex;gap:13px;flex-wrap:wrap;justify-content:center;max-width:1000px}
+  #endcard button{padding:13px 24px;border-radius:999px;border:1px solid rgba(139,110,214,.45);cursor:pointer;
+    background:rgba(124,58,237,.14);color:#e2dafa;font:14px/1 var(--sans);letter-spacing:2px;transition:all .15s}
+  #endcard button:hover{background:rgba(124,58,237,.4);border-color:#a78bfa}
+  #endcard button.primary{background:linear-gradient(120deg,var(--violet),#5b21b6 70%);border-color:transparent;font-weight:600}
+  #endcard .credit{position:absolute;bottom:22px;font:11px/1.9 var(--mono);color:#5e567e;text-align:center}
+</style>
+</head>
+<body>
+<div id="stageWrap">
+  <canvas id="film"></canvas>
+
+  <div id="topBadge"><span class="dot"></span><span>真实界面演示 · 界面截图来自运行中的 SillyHub · 纯代码渲染</span></div>
+  <div id="fpsChip">-- fps</div>
+  <div id="autoChip">⚙ 已自动优化画质</div>
+  <div id="hint">空格 播放/暂停 · ←→ 切幕 · M 静音 · F 全屏</div>
+
+  <div id="poster">
+    <h1>SillyHub</h1>
+    <h2>多智能体协作管理平台</h2>
+    <div class="tagline">让 AI Agent 真正落地写代码 —— 真实产品演示</div>
+    <button id="playBtn">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>
+      播放影片
+    </button>
+    <div class="meta">
+      <span>时长 05:00</span><span>11 幕</span><span>28 张真实界面</span><span>WebAudio 合成配乐</span><span>自适应画质</span>
+    </div>
+    <div class="loadinfo" id="loadInfo">界面素材准备中…</div>
+    <div class="credit">
+      本片画面由代码逐帧实时渲染，界面截图采集自真实运行中的 SillyHub · 拍摄思路致敬 lemomo-ai/lemo-opuscar<br>
+      SillyHub · multi-agent-platform · 规范驱动开发
+    </div>
+  </div>
+
+  <div id="player">
+    <div id="bar">
+      <div class="track"></div>
+      <div class="fill"></div>
+      <div id="segs"></div>
+      <div class="head"></div>
+      <div id="tip"></div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="ctl" id="btnPlay" title="播放/暂停（空格）"></button>
+      <button class="ctl" id="btnPrev" title="上一幕（←）"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zm3.5 7L19 5v14z"/></svg></button>
+      <button class="ctl" id="btnNext" title="下一幕（→）"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM5 5l9.5 7L5 19z"/></svg></button>
+      <div id="timeLabel">00:00 / 05:00</div>
+      <div style="flex:1"></div>
+      <div id="qsel">
+        <button data-q="high">高清</button><button data-q="balanced" class="on">均衡</button><button data-q="eco">省电</button>
+      </div>
+      <button class="ctl" id="btnMute" title="静音（M）"></button>
+      <button class="ctl" id="btnFull" title="全屏（F）"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h6v2H6v4H4zM14 4h6v6h-2V6h-4zM4 14h2v4h4v2H4zM18 14h2v6h-6v-2h4z"/></svg></button>
+    </div>
+  </div>
+
+  <div id="endcard">
+    <h3>SillyHub · 让 AI Agent 真正落地写代码</h3>
+    <p>规范驱动 · 多 Agent 编排 · 团队协作 · 本地执行</p>
+    <div class="btns" id="endBtns"></div>
+    <div class="credit">
+      本片 0 帧视频、0 个音频文件 —— 画面由 Canvas 实时渲染，配乐由 WebAudio 实时合成<br>
+      界面截图采集自真实运行中的 SillyHub（crrcdt.ppdmq.top） · 拍摄思路致敬 lemomo-ai/lemo-opuscar
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================================
+ * SillyHub 平台宣传片 V2 —— 真实产品演示版
+ * 11 幕 300 秒：主角为线上环境真实界面截图（浏览器窗口框 + Ken Burns + 高亮标注）
+ * 性能架构：静态层缓存 / 辉光精灵贴图（渲染循环零 shadowBlur）/ 隔帧颗粒 /
+ *           自适应画质三档 + 帧率自动降级
+ * 画面 = 主时钟 T 的确定性函数，seek 精确重放。
+ * ==========================================================================*/
+
+const DUR = 300;
+const HOST = 'crrcdt.ppdmq.top';
+const WS = 'b97f8231-9404-43bd-89de-38c281c4d875';
+
+/* ---------- 色板 ---------- */
+const C = {
+  violet:'#7C3AED', violetL:'#A78BFA', violetD:'#4C1D95',
+  cyan:'#0891B2', cyanL:'#22D3EE', text:'#EDE9FE', dim:'#9d93bd', faint:'#5e567e',
+  red:'#ef4444', amber:'#f59e0b', green:'#10b981', white:'#f8fafc',
+};
+const FONT_SANS='"PingFang SC","Microsoft YaHei","Noto Sans SC","Source Han Sans SC",sans-serif';
+const FONT_MONO='"JetBrains Mono","Cascadia Code",Consolas,"SF Mono",Menlo,monospace';
+
+/* ---------- 工具 ---------- */
+const TAU=Math.PI*2;
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+const sat=v=>clamp(v,0,1);
+const easeInOut=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+const easeOut=t=>1-Math.pow(1-t,3);
+const smooth=(a,b,v)=>{const t=sat((v-a)/(b-a));return t*t*(3-2*t);};
+function hash(n){ n=Math.imul(n^(n>>>15),2246822519); n=Math.imul(n^(n>>>13),3266489917); return ((n^(n>>>16))>>>0)/4294967296; }
+const h1=i=>hash(i*7349+13), h2=i=>hash(i*9151+37);
+function withAlpha(hex,a){ const n=parseInt(hex.slice(1),16); return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; }
+function setFont(ctx,size,weight,mono){ ctx.font=`${weight||400} ${size}px ${mono?FONT_MONO:FONT_SANS}`; }
+function roundRect(ctx,x,y,w,h,r){ r=Math.min(r,w/2,h/2); ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+/* 带字距文本（宽度按 key 缓存，避免每帧 measureText） */
+const _spCache=new Map();
+function spacedWidth(ctx,text,size,weight,mono,spacing){
+  const key=`${text}|${size}|${weight}|${mono}|${spacing}`;
+  let w=_spCache.get(key);
+  if(w===undefined){
+    setFont(ctx,size,weight,mono);
+    w=[...text].reduce((a,ch)=>a+ctx.measureText(ch).width,0)+spacing*( [...text].length-1);
+    _spCache.set(key,w);
+  }
+  return w;
+}
+function spacedText(ctx,text,cx,y,size,weight,color,spacing,mono,align){
+  setFont(ctx,size,weight,mono);
+  const w=spacedWidth(ctx,text,size,weight,mono,spacing);
+  let x = align==='left'? cx : align==='right'? cx-w : cx-w/2;
+  ctx.fillStyle=color; ctx.textBaseline='alphabetic'; ctx.textAlign='left';
+  let cx0=x;
+  for(const ch of text){ ctx.fillText(ch,cx0,y); cx0+=ctx.measureText(ch).width+spacing; }
+  return w;
+}
+
+/* ============================================================================
+ * 画布 · 坐标 · 画质
+ * ==========================================================================*/
+const canvas=document.getElementById('film');
+const ctx=canvas.getContext('2d');
+const QUALITY={ high:{dpr:2,grain:true,stars:150}, balanced:{dpr:1.35,grain:true,stars:110}, eco:{dpr:1,grain:false,stars:70} };
+let quality='balanced', dprCap=QUALITY.balanced.dpr;
+let dpr=1, fit=1, ox=0, oy=0;
+
+/* ---------- 图片资产池 ---------- */
+const ASSETS={
+  login:'login.jpg', wsList:'ws-list.jpg', addWs:'add-workspace.jpg', onboard:'ws-onboarding.jpg',
+  wsHome:'ws-home.jpg', scan:'scan-docs.jpg', topo:'topology.jpg',
+  changes:'changes.jpg', changesArc:'changes-archived.jpg', detail:'change-detail.jpg',
+  sessions:'sessions.jpg', presession:'presession.jpg',
+  groupchat:'groupchat.jpg', members:'groupchat-members.jpg', plus:'plus-menu.jpg', team:'team-popover.jpg', fork:'fork.jpg',
+  runtimes:'runtimes.jpg', panel:'session-panel.jpg', logs:'local-agent-logs.jpg',
+  approvals:'approvals.jpg',
+  ppmProjects:'ppm-projects.jpg', ppmPlan:'ppm-plannodes.jpg', ppmKanban:'ppm-kanban.jpg', ppmProblems:'ppm-problems.jpg',
+  profiles:'agent-profiles.jpg', knowledge:'knowledge.jpg', releases:'releases.jpg',
+};
+const IMG={}; let imgLoaded=0, imgTotal=0;
+for(const k of Object.keys(ASSETS)){
+  const im=new Image(); imgTotal++;
+  im.onload=()=>{ imgLoaded++; updateLoadInfo(); };
+  im.onerror=()=>{ imgLoaded++; updateLoadInfo(); };   /* 加载失败不阻塞：骨架照常显示 */
+  im.src='assets/'+ASSETS[k];
+  IMG[k]=im;
+}
+function updateLoadInfo(){
+  const el=document.getElementById('loadInfo');
+  if(imgLoaded>=imgTotal){ el.textContent='界面素材就绪 ✓ 28 / 28'; }
+  else el.textContent=`界面素材准备中… ${imgLoaded} / ${imgTotal}`;
+}
+
+/* ---------- 静态层缓存（背景 / 遮幅+暗角 覆盖层） ---------- */
+let bgLayer=null, ovLayer=null;
+function buildStaticLayers(){
+  const W=Math.round(1920*fit*dpr), H=Math.round(1080*fit*dpr);
+  /* 背景：深空渐变 + 星野 */
+  bgLayer=document.createElement('canvas'); bgLayer.width=W; bgLayer.height=H;
+  const b=bgLayer.getContext('2d');
+  const g=b.createRadialGradient(W*.5,H*.38,80*fit*dpr,W*.5,H*.5,1300*fit*dpr);
+  g.addColorStop(0,'#120a28'); g.addColorStop(.45,'#0a0618'); g.addColorStop(1,'#030109');
+  b.fillStyle=g; b.fillRect(0,0,W,H);
+  const stars=QUALITY[quality].stars;
+  for(let i=0;i<stars;i++){
+    const x=h1(i)*W, y=h2(i)*H, s=(h2(i)<.92?1.4:2.4)*fit*dpr;
+    b.fillStyle=withAlpha(h2(i)<.75?C.white:C.cyanL,.12+.4*h1(i*3));
+    b.fillRect(x,y,s,s);
+  }
+  /* 覆盖层：遮幅 + 暗角（画在场景之上） */
+  ovLayer=document.createElement('canvas'); ovLayer.width=W; ovLayer.height=H;
+  const o=ovLayer.getContext('2d');
+  const v=o.createRadialGradient(W*.5,H*.5,440*fit*dpr,W*.5,H*.5,1180*fit*dpr);
+  v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,'rgba(0,0,0,.5)');
+  o.fillStyle=v; o.fillRect(0,0,W,H);
+  o.fillStyle='#000';
+  o.fillRect(0,0,W,Math.round(78*fit*dpr)); o.fillRect(0,H-Math.round(78*fit*dpr),W,Math.round(78*fit*dpr));
+}
+function resize(){
+  dpr=Math.min(window.devicePixelRatio||1,dprCap);
+  const w=window.innerWidth, h=window.innerHeight;
+  canvas.width=Math.round(w*dpr); canvas.height=Math.round(h*dpr);
+  fit=Math.min(w/1920,h/1080); ox=(w-1920*fit)/2; oy=(h-1080*fit)/2;
+  buildStaticLayers();
+  _spCache.clear();
+  if(!playing) renderFrame();
+}
+window.addEventListener('resize',resize);
+
+/* ---------- 辉光精灵（替代 shadowBlur） ---------- */
+const GLOW={};
+(function(){
+  for(const [name,color] of Object.entries({violet:C.violetL,cyan:C.cyanL,green:C.green,red:C.red,amber:C.amber,white:'#ffffff'})){
+    const c=document.createElement('canvas'); c.width=c.height=96;
+    const g=c.getContext('2d');
+    const rg=g.createRadialGradient(48,48,2,48,48,46);
+    rg.addColorStop(0,withAlpha(color,.9)); rg.addColorStop(.35,withAlpha(color,.38)); rg.addColorStop(1,withAlpha(color,0));
+    g.fillStyle=rg; g.beginPath(); g.arc(48,48,46,0,TAU); g.fill();
+    GLOW[name]=c;
+  }
+})();
+function drawGlow(x,y,r,name,alpha){
+  ctx.save(); ctx.globalAlpha=alpha; ctx.drawImage(GLOW[name]||GLOW.violet,x-r,y-r,r*2,r*2); ctx.restore();
+}
+
+/* ---------- 颗粒（隔帧 + source-over） ---------- */
+const GRAIN=[];
+(function(){
+  for(let k=0;k<3;k++){ const c=document.createElement('canvas'); c.width=c.height=180;
+    const g=c.getContext('2d'), d=g.createImageData(180,180);
+    for(let i=0;i<d.data.length;i+=4){ const v=hash(k*99991+i)*255|0; d.data[i]=d.data[i+1]=d.data[i+2]=v; d.data[i+3]=22; }
+    g.putImageData(d,0,0); GRAIN.push(c); }
+})();
+
+/* ============================================================================
+ * 分镜：11 幕 · 每幕若干镜头（资产 + Ken Burns + 高亮时窗）
+ * 高亮矩形为截图坐标系（1920×1080 截图内）
+ * ==========================================================================*/
+const CHAPTERS=[
+  {id:'why',   t0:0,   t1:16,  name:'为什么需要它'},
+  {id:'tour',  t0:16,  t1:38,  name:'平台总览'},
+  {id:'onboard',t0:38, t1:66,  name:'新项目怎么接入'},
+  {id:'scan',  t0:66,  t1:90,  name:'接入即扫描'},
+  {id:'spec',  t0:90,  t1:130, name:'变更中心 · 两种流程'},
+  {id:'sync',  t0:130, t1:156, name:'本地干活 · 平台同步'},
+  {id:'sess',  t0:156, t1:194, name:'智能体会话 · 操作入口'},
+  {id:'team',  t0:194, t1:232, name:'群聊 · 派团队 · 分叉'},
+  {id:'run',   t0:232, t1:256, name:'运行时与韧性'},
+  {id:'ppm',   t0:256, t1:276, name:'PPM → Hub 联动'},
+  {id:'end',   t0:276, t1:300, name:'知识沉淀与启程'},
+];
+/* 镜头表：{a:资产, url, z0,z1: Ken Burns 缩放, px0,py0,px1,py1: 平移（截图坐标中心）} */
+const SHOTS={
+  why:[ {a:'login', url:`${HOST}/login`, z0:1.30,z1:1.06, px0:1380,py0:560, px1:1400,py1:560} ],
+  tour:[ {a:'wsList', url:`${HOST}/workspaces`, z0:1.05,z1:1.16, px0:960,py0:560, px1:880,py1:620} ],
+  onboard:[
+    {a:'addWs', url:`${HOST}/workspaces · 添加工作区`, z0:1.02,z1:1.14, px0:960,py0:540, px1:980,py1:560},
+    {a:'onboard', url:`${HOST}/workspaces/EHS小程序`, z0:1.14,z1:1.03, px0:1500,py0:640, px1:1480,py1:660},
+  ],
+  scan:[
+    {a:'scan', url:`${HOST}/workspaces/map · 扫描文档`, z0:1.04,z1:1.14, px0:900,py0:520, px1:860,py1:560},
+    {a:'topo', url:`${HOST}/workspaces/map · 拓扑图`, z0:1.16,z1:1.03, px0:1000,py0:540, px1:960,py1:540},
+  ],
+  spec:[
+    {a:'changes', url:`${HOST}/workspaces/map/changes`, z0:1.05,z1:1.15, px0:900,py0:420, px1:920,py1:430},
+    {a:'detail', url:`${HOST}/…/changes/promo-film-page`, z0:1.18,z1:1.04, px0:1000,py0:420, px1:980,py1:520},
+  ],
+  sync:[ {a:'detail', url:`${HOST}/…/changes/promo-film-page`, z0:1.0,z1:1.0, px0:960,py0:540, px1:960,py1:540} ],
+  sess:[
+    {a:'sessions', url:`${HOST}/sessions`, z0:1.06,z1:1.16, px0:620,py0:460, px1:560,py1:520},
+    {a:'presession', url:`${HOST}/sessions · 新会话`, z0:1.04,z1:1.16, px0:1150,py0:820, px1:1120,py1:860},
+  ],
+  team:[
+    {a:'groupchat', url:`${HOST}/sessions · 群聊`, z0:1.06,z1:1.14, px0:1150,py0:480, px1:1120,py1:520},
+    {a:'members', url:`${HOST}/sessions · 群成员`, z0:1.05,z1:1.15, px0:1420,py0:520, px1:1440,py1:560},
+    {a:'plus', url:`${HOST}/sessions · 功能菜单`, z0:1.04,z1:1.12, px0:860,py0:820, px1:880,py1:830},
+    {a:'team', url:`${HOST}/sessions · 派团队`, z0:1.10,z1:1.02, px0:960,py0:640, px1:960,py1:640},
+    {a:'fork', url:`${HOST}/sessions · 分叉`, z0:1.05,z1:1.18, px0:420,py0:640, px1:400,py1:660},
+  ],
+  run:[
+    {a:'runtimes', url:`${HOST}/runtimes`, z0:1.04,z1:1.14, px0:960,py0:520, px1:980,py1:540},
+    {a:'panel', url:`${HOST}/sessions · 会话详情`, z0:1.08,z1:1.16, px0:1150,py0:460, px1:1120,py1:500},
+    {a:'logs', url:`${HOST}/sessions · 本地 Agent 日志`, z0:1.05,z1:1.14, px0:1100,py0:560, px1:1120,py1:580},
+  ],
+  ppm:[
+    {a:'ppmProjects', url:`${HOST}/ppm/projects`, z0:1.04,z1:1.14, px0:960,py0:520, px1:940,py1:540},
+    {a:'ppmPlan', url:`${HOST}/ppm/plan-nodes`, z0:1.12,z1:1.02, px0:960,py0:540, px1:960,py1:540},
+    {a:'ppmKanban', url:`${HOST}/ppm/kanban`, z0:1.04,z1:1.14, px0:960,py0:540, px1:980,py1:540},
+    {a:'ppmProblems', url:`${HOST}/ppm/problem-list`, z0:1.10,z1:1.02, px0:960,py0:540, px1:960,py1:540},
+  ],
+  end:[
+    {a:'knowledge', url:`${HOST}/workspaces/map/knowledge`, z0:1.05,z1:1.14, px0:900,py0:520, px1:880,py1:540},
+    {a:'releases', url:`${HOST}/workspaces/map/releases`, z0:1.12,z1:1.02, px0:960,py0:540, px1:960,py1:540},
+  ],
+};
+/* 镜头资产直接引用 ASSETS 键名 */
+function assetOf(s){ return IMG[s.a]||null; }
+
+/* 高亮（时间均为幕内相对秒）：rect 为截图坐标 */
+function hl(t0,t1,x,y,w,h,label,ly){ return {t0,t1,x,y,w,h,label,ly}; }
+const HIGHLIGHTS={
+  tour:[ hl(1.5,8,300,250,1180,190,'Git 仓库注册成工作区 · 多项目多团队',-36) ],
+  onboard:[
+    hl(1.2,9.5,690,350,540,330,'① 选在线守护进程，浏览本机路径',-30),
+    hl(11,26,1390,420,500,540,'② 每人绑自己的机器与检出路径 · 代码靠 git 同步，平台不碰代码',-30),
+  ],
+  scan:[
+    hl(1.2,10.5,300,300,1050,480,'架构 · 约定 · 模块文档自动成档',-34),
+    hl(12.5,22.5,480,240,1180,660,'组件拓扑：Agent 的作业地图',-34),
+  ],
+  spec:[
+    hl(1.2,7.5,1100,182,220,50,'平台同步：CLI 侧变更拉进来',-30),
+    hl(8.5,15,300,236,900,64,'411 个归档变更 · 1066 个快速修复',34),
+    hl(16.5,22.5,620,300,1240,66,'轻量流程：start → 干活 → 收口归档',-30),
+    hl(24,29,620,392,1240,196,'执行用量全程留痕',-30),
+    hl(30.5,38.5,620,640,1240,300,'真实留痕时间线：每个动作都有据可查',-30),
+  ],
+  sync:[],  /* 画中画布局，无截图高亮 */
+  sess:[
+    hl(1.5,7,0,176,560,96,'群聊：人和 Agent 同一个会话',-30),
+    hl(7.5,13,0,272,560,110,'按工作区 × 机器分组',-30),
+    hl(13.5,19,0,610,560,80,'本地 Agent：45 个本机会话',-30),
+    hl(19.5,25.5,620,852,1290,110,'供应商 · 思考级别 · 档案 · 额度，随会话切换',-30),
+  ],
+  team:[
+    hl(1.5,8,640,300,760,150,'@提及：点名 Agent 回答',-30),
+    hl(9,14.5,1408,120,480,820,'Agent 成员：影子会话 · 团队能力',-30),
+    hl(15.5,20,610,610,360,300,'＋ 菜单：附件 · 派团队 · 技能 · 关联变更/PPM',-30),
+    hl(21,27,640,320,640,470,'派团队：主控 + 分身 · git 隔离 · 费用上限',-30),
+    hl(28.5,36,0,600,560,150,'↦ 分叉：一条会话，两条路都保留',-30),
+  ],
+  run:[
+    hl(1.5,9,300,220,1580,620,'3 台机器在线 · 各自的智能体阵容',-32),
+    hl(10.5,17,1500,200,330,600,'46 轮导航：每轮状态可回放',-32),
+    hl(18,22.5,620,760,1290,180,'中断自动恢复 · 本地日志可查',-30),
+  ],
+  ppm:[
+    hl(1.2,5.5,300,240,1560,600,'项目 · 计划 · 任务',-30),
+    hl(6.5,10.5,300,260,1560,560,'计划节点推进',-30),
+    hl(11.5,15.5,300,240,1560,640,'看板：进度一眼看清',-30),
+    hl(16.5,19.5,300,260,1560,560,'问题清单闭环',-30),
+  ],
+  end:[ hl(1.5,9,300,300,1500,520,'变更沉淀为知识 · 发布可审批',-32) ],
+};
+
+/* ============================================================================
+ * 绘制原语：浏览器窗口框 + 截图舞台
+ * ==========================================================================*/
+const FRAME={x:230,y:118,w:1460,h:884,urlH:46};  /* 外框；内部截图区含 URL 条 */
+function drawBrowserFrame(alpha,url){
+  ctx.save(); ctx.globalAlpha=alpha;
+  /* 投影：预烘焙暗块（无 shadowBlur） */
+  ctx.fillStyle='rgba(0,0,0,.45)';
+  roundRect(ctx,FRAME.x+10,FRAME.y+18,FRAME.w,FRAME.h,18); ctx.fill();
+  /* 窗体 */
+  ctx.fillStyle='rgba(13,9,28,.96)'; ctx.strokeStyle=withAlpha(C.violetL,.4); ctx.lineWidth=1.6;
+  roundRect(ctx,FRAME.x,FRAME.y,FRAME.w,FRAME.h,14); ctx.fill(); ctx.stroke();
+  /* URL 条 */
+  ctx.fillStyle='rgba(30,20,58,.9)'; roundRect(ctx,FRAME.x,FRAME.y,FRAME.w,FRAME.urlH,14); ctx.fill();
+  ctx.strokeStyle='rgba(139,110,214,.25)'; ctx.beginPath(); ctx.moveTo(FRAME.x,FRAME.y+FRAME.urlH); ctx.lineTo(FRAME.x+FRAME.w,FRAME.y+FRAME.urlH); ctx.stroke();
+  [['#ef4444',0],['#f59e0b',1],['#10b981',2]].forEach(([col,i])=>{ ctx.fillStyle=col; ctx.beginPath(); ctx.arc(FRAME.x+26+i*22,FRAME.y+23,6,0,TAU); ctx.fill(); });
+  /* 地址 */
+  ctx.fillStyle='rgba(6,4,14,.85)'; roundRect(ctx,FRAME.x+100,FRAME.y+10,FRAME.w-160,26,13); ctx.fill();
+  ctx.font=`16px ${FONT_MONO}`; ctx.fillStyle=withAlpha(C.cyanL,.9); ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.fillText('🔒 '+url, FRAME.x+114, FRAME.y+24);
+  ctx.restore();
+}
+/* 截图绘制（cover 全幅 = 同为 16:9，直接等比）+ Ken Burns；返回当前变换参数供高亮映射 */
+function drawShotImage(im,z,px,py,alpha){
+  const ix=FRAME.x+12, iy=FRAME.y+FRAME.urlH+10, iw=FRAME.w-24, ih=FRAME.h-FRAME.urlH-22;
+  ctx.save();
+  ctx.beginPath(); roundRect(ctx,ix,iy,iw,ih,8); ctx.clip();
+  ctx.globalAlpha=alpha;
+  if(im&&im.complete&&im.naturalWidth>0){
+    const base=Math.max(iw/1920,ih/1080), s=base*z;
+    const cx=ix+iw/2+(px-960)*base*(z-1)*0.9, cy=iy+ih/2+(py-540)*base*(z-1)*0.9;
+    /* 以截图中心为基准的缩放平移 */
+    const w=1920*s,h=1080*s;
+    ctx.drawImage(im,cx-w/2,cy-h/2,w,h);
+    return {ix,iy,base,s,cx,cy};
+  }else{
+    ctx.fillStyle='rgba(20,14,40,.8)'; ctx.fillRect(ix,iy,iw,ih);
+    ctx.fillStyle=withAlpha(C.faint,.8); ctx.font=`22px ${FONT_MONO}`; ctx.textAlign='center';
+    ctx.fillText('界面加载中…',ix+iw/2,iy+ih/2);
+    return {ix,iy,base:Math.max(iw/1920,ih/1080),s:Math.max(iw/1920,ih/1080)*z,cx:ix+iw/2,cy:iy+ih/2};
+  }
+}
+/* 高亮框 + 标注气泡（截图坐标 → 舞台坐标） */
+function drawHighlight(h,st,p,alpha){
+  const fade=smooth(h.t0,h.t0+.5,p)*(1-smooth(h.t1-.5,h.t1,p));
+  if(fade<=0) return;
+  /* 截图坐标 → 舞台坐标（与 drawShotImage 同一变换） */
+  const sx=st.cx+(h.x+h.w/2-960)*st.s, sy=st.cy+(h.y+h.h/2-540)*st.s;
+  const rw=h.w*st.s, rh=h.h*st.s;
+  const grow=easeOut(sat(fade*1.6));
+  ctx.save(); ctx.globalAlpha=alpha*fade;
+  const pulse=.7+.3*Math.sin(performance.now()/300);
+  ctx.strokeStyle=withAlpha(C.cyanL,.95); ctx.lineWidth=3;
+  ctx.fillStyle=withAlpha(C.cyanL,.10+.05*pulse);
+  roundRect(ctx, sx-rw/2*grow, sy-rh/2*grow, rw*grow, rh*grow, 14); ctx.fill(); ctx.stroke();
+  /* 四角刻度 */
+  ctx.strokeStyle=withAlpha('#ffffff',.9); ctx.lineWidth=3;
+  const cl=16, ex=sx-rw/2*grow, ey=sy-rh/2*grow, ew=rw*grow, eh=rh*grow;
+  [[ex,ey,1,1],[ex+ew,ey,-1,1],[ex,ey+eh,1,-1],[ex+ew,ey+eh,-1,-1]].forEach(([cx0,cy0,dx,dy])=>{
+    ctx.beginPath(); ctx.moveTo(cx0+dx*cl,cy0); ctx.lineTo(cx0,cy0); ctx.lineTo(cx0,cy0+dy*cl); ctx.stroke();
+  });
+  drawGlow(sx,sy,Math.max(rw,rh)*.6,'cyan',.10*fade);
+  /* 标注气泡 */
+  const label=h.label, ly=(h.ly!==undefined)? sy+rh/2*grow+h.ly : sy-rh/2*grow-34;
+  setFont(ctx,26,600);
+  const lw=ctx.measureText(label).width+44;
+  let bx=clamp(sx-lw/2,40,1880-lw-40);
+  const by=ly-40;
+  ctx.fillStyle='rgba(10,6,24,.92)'; ctx.strokeStyle=withAlpha(C.cyanL,.7); ctx.lineWidth=1.6;
+  roundRect(ctx,bx,by,lw,52,26); ctx.fill(); ctx.stroke();
+  ctx.fillStyle=withAlpha(C.text,.97); ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(label,bx+lw/2,by+27);
+  ctx.restore();
+}
+
+/* ============================================================================
+ * 各幕场景
+ * ==========================================================================*/
+function sceneShots(t,T,alpha,chId){
+  const ch=CHAPTERS.find(c=>c.id===chId);
+  const shots=SHOTS[chId];
+  const total=ch.t1-ch.t0;
+  const n=shots.length;
+  /* 每镜头等分幕时长，交叉淡入淡出 0.8s */
+  const seg=total/n;
+  const idx=clamp(Math.floor(t/seg),0,n-1);
+  const lt=t-idx*seg;
+  const s=shots[idx];
+  let a=alpha;
+  if(n>1){
+    a*= smooth(idx*seg-0.1, idx*seg+.7, t) * (1-smooth((idx+1)*seg-.7,(idx+1)*seg-.02,t));
+    if(idx===0) a=alpha*smooth(-0.1,.6,t)*(1-smooth(seg-.7,seg-.02,t));
+    if(idx===n-1) a=alpha*smooth(idx*seg-.1,idx*seg+.7,t)*(1-smooth(total-.7,total,t));
+  }
+  const p=sat(lt/seg);
+  const z=lerp(s.z0,s.z1,easeInOut(p));
+  const px=lerp(s.px0,s.px1,easeInOut(p)), py=lerp(s.py0,s.py1,easeInOut(p));
+  drawBrowserFrame(a,s.url);
+  const st=drawShotImage(assetOf(s),z,px,py,a);
+  /* 高亮 */
+  const hls=HIGHLIGHTS[chId]||[];
+  for(const h of hls){ drawHighlight(h,st,t,a); }
+  return st;
+}
+/* 第 1 幕：开场（黑屏大字 → 登录页） */
+function sceneWhy(t,T,alpha){
+  if(t<9.5){
+    /* 大字开场（截图淡入前） */
+    const lines=[
+      {t0:.6,t1:3.6,text:'AI 已经在写代码了',size:88},
+      {t0:4.0,t1:6.8,text:'改了什么？谁批准？怎么回滚？',size:44},
+      {t0:7.2,t1:9.4,text:'—— 谁来把关？',size:64},
+    ];
+    for(const L of lines){
+      const p=smooth(L.t0,L.t0+.5,t)*(1-smooth(L.t1-.4,L.t1,t));
+      if(p<=0)continue;
+      ctx.save(); ctx.globalAlpha=alpha*p;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      setFont(ctx,L.size,700);
+      ctx.fillStyle=L.size>60?withAlpha(C.text,p):withAlpha('#c9c0e8',p);
+      ctx.fillText(L.text,960,520+(1-p)*14);
+      ctx.restore();
+    }
+  }
+  if(t>7.6){
+    const a=alpha*smooth(7.6,9.4,t);
+    const st=sceneShots(t,T,a,'why');
+    if(t>13.4){
+      const p=smooth(13.4,14.6,t)*(1-smooth(15.2,15.9,t));
+      ctx.save(); ctx.globalAlpha=p;
+      spacedText(ctx,'SillyHub · 让 AI Agent 真正落地写代码',960,1000-86,34,600,withAlpha(C.cyanL,.95),6);
+      ctx.restore();
+    }
+  }
+}
+/* 第 6 幕：本地干活 · 平台同步（画中画：CLI 终端 ↔ 留痕时间线） */
+const CLI_LINES=[
+  {t:1.0, text:'$ sillyspec flow start --change 2026-10-06-demo-fix', c:C.dim},
+  {t:2.0, text:'✅ thin 轻量跑道 · 基线已锚定', c:C.green},
+  {t:3.4, text:'$ # 改代码 · 写测试 · git commit -m "fix: …"', c:C.dim},
+  {t:5.2, text:'✅ 提交 1 个文件', c:C.green},
+  {t:6.6, text:'$ sillyspec task tick --task task-01', c:C.dim},
+  {t:7.6, text:'✅ 已勾（1/3）', c:C.green},
+  {t:10.0,text:'$ sillyspec flow done --change 2026-10-06-demo-fix', c:C.dim},
+  {t:11.2,text:'✅ flow done 完成 · change 已归档注销', c:C.green},
+];
+const SYNC_EVENTS=[
+  {t:2.2, icon:'🌱', text:'变更诞生', toRight:true},
+  {t:5.4, icon:'🔀', text:'commit 入库', toRight:true},
+  {t:7.8, icon:'✅', text:'checked 0→1', toRight:true},
+  {t:11.4,icon:'📦', text:'归档完成', toRight:true},
+];
+function sceneSync(t,T,alpha){
+  ctx.save(); ctx.globalAlpha=alpha;
+  spacedText(ctx,'本地终端干活 · 平台实时知道',960,150,44,700,withAlpha(C.text,.95),8);
+  /* 左：终端窗口 */
+  const tx=170,ty=240,tw=760,th=640;
+  ctx.fillStyle='rgba(10,7,22,.94)'; ctx.strokeStyle='rgba(139,110,214,.35)'; ctx.lineWidth=1.6;
+  roundRect(ctx,tx,ty,tw,th,14); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='rgba(139,110,214,.10)'; roundRect(ctx,tx,ty,tw,44,14); ctx.fill();
+  [['#ef4444',0],['#f59e0b',1],['#10b981',2]].forEach(([col,i])=>{ ctx.fillStyle=col; ctx.beginPath(); ctx.arc(tx+26+i*22,ty+22,6,0,TAU); ctx.fill(); });
+  ctx.font=`15px ${FONT_MONO}`; ctx.fillStyle=C.faint; ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.fillText('本地终端 — sillyspec CLI',tx+96,ty+23);
+  CLI_LINES.forEach((ln,i)=>{
+    if(t<ln.t) return;
+    const age=t-ln.t, y=ty+86+i*66;
+    ctx.globalAlpha=alpha*Math.min(1,age/.3);
+    ctx.font=`21px ${FONT_MONO}`; ctx.textAlign='left';
+    ctx.fillStyle=ln.c;
+    const shown = ln.text;
+    ctx.fillText(shown,tx+30,y);
+    if(age<.5 && Math.floor(T*3)%2===0){ const w=ctx.measureText(shown).width; ctx.fillStyle=C.cyanL; ctx.fillRect(tx+34+w,y-10,9,18); }
+    ctx.globalAlpha=alpha;
+  });
+  /* 右：平台时间线（复用 change-detail 截图局部） */
+  const im=IMG.detail;
+  const px=1000,py=240,pw=750,ph=640;
+  ctx.fillStyle='rgba(13,9,28,.96)'; ctx.strokeStyle=withAlpha(C.violetL,.4); ctx.lineWidth=1.6;
+  roundRect(ctx,px,py,pw,ph,14); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='rgba(30,20,58,.9)'; roundRect(ctx,px,py,pw,44,14); ctx.fill();
+  ctx.font=`15px ${FONT_MONO}`; ctx.fillStyle=C.faint; ctx.textAlign='left';
+  ctx.fillText(`${HOST} · 变更详情 · 真实留痕时间线`,px+20,py+23);
+  if(im&&im.complete&&im.naturalWidth>0){
+    /* 截取 detail 截图的留痕时间线区（约 (620,640)-(1860,940)），随事件轻微上移 */
+    const scrollUp=clamp((t-2)/9,0,1)*110;
+    ctx.save();
+    ctx.beginPath(); roundRect(ctx,px+12,py+56,pw-24,ph-68,8); ctx.clip();
+    const dstW=pw-24, dstH=ph-68;
+    const scale=Math.max(dstW/1240,dstH/300);
+    ctx.globalAlpha=alpha*.96;
+    ctx.drawImage(im,620,640-scrollUp,1240,300, px+12+(dstW-1240*scale)/2, py+56, 1240*scale, 300*scale);
+    ctx.restore();
+  }
+  /* 同步脉冲：事件从终端飞向平台 */
+  for(const ev of SYNC_EVENTS){
+    const lt=t-ev.t;
+    if(lt<0||lt>1.4) continue;
+    const p=easeInOut(sat(lt/1.2));
+    const fx=lerp(tx+tw+8,px-8,p), fy=lerp(ty+100+SYNC_EVENTS.indexOf(ev)*80, py+120+SYNC_EVENTS.indexOf(ev)*70, p);
+    drawGlow(fx,fy,26,'cyan',.5*(1-p*.4));
+    ctx.fillStyle=withAlpha(C.cyanL,.95); ctx.beginPath(); ctx.arc(fx,fy,5,0,TAU); ctx.fill();
+    if(lt>1.05){
+      const q=sat((lt-1.05)/.35);
+      ctx.globalAlpha=alpha*q;
+      ctx.font=`19px ${FONT_SANS}`; ctx.textAlign='left';
+      ctx.fillStyle=withAlpha(C.text,q);
+      ctx.fillText(`${ev.icon} ${ev.text}  ${fmtClock(T)}`, px+24, py+70+SYNC_EVENTS.indexOf(ev)*44);
+      ctx.globalAlpha=alpha;
+    }
+  }
+  /* 中缝箭头 */
+  const mx=(tx+tw+px)/2;
+  ctx.strokeStyle=withAlpha(C.cyanL,.35+.15*Math.sin(T*2)); ctx.lineWidth=2; ctx.setLineDash([10,8]);
+  ctx.beginPath(); ctx.moveTo(tx+tw+14,560); ctx.lineTo(px-14,560); ctx.stroke(); ctx.setLineDash([]);
+  ctx.restore();
+}
+function fmtClock(T){ const s=Math.floor(T%60),m=Math.floor(T/60); return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; }
+
+/* 第 5 幕尾部与第 11 幕：五阶段图示（轻量复用） */
+function pipelineStrip(t,T,alpha,y){
+  const nodes=['brainstorm','plan','execute','verify','archive'];
+  const x0=560,dx=200,W=170,H=88;
+  nodes.forEach((nm,i)=>{
+    const on=sat((t-0.3-i*.5)/.4); if(on<=0)return;
+    const x=x0+i*dx;
+    ctx.save(); ctx.globalAlpha=alpha*on;
+    ctx.fillStyle='rgba(124,58,237,.16)'; ctx.strokeStyle=withAlpha(C.violetL,.85); ctx.lineWidth=2;
+    roundRect(ctx,x,y,W,H,12); ctx.fill(); ctx.stroke();
+    setFont(ctx,24,700,true); ctx.fillStyle=withAlpha(C.text,on); ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(nm,x+W/2,y+36);
+    setFont(ctx,17,400); ctx.fillStyle=withAlpha(C.dim,on);
+    ctx.fillText(['需求澄清','方案任务','代码实现','验收验证','归档沉淀'][i],x+W/2,y+64);
+    if(i<4&&sat((t-0.7-i*.5)/.4)>0){
+      ctx.strokeStyle=withAlpha(C.cyanL,.8); ctx.lineWidth=3;
+      const f=easeInOut(sat((t-0.7-i*.5)/.5));
+      ctx.beginPath(); ctx.moveTo(x+W,y+H/2); ctx.lineTo(x+W+(dx-W)*f,y+H/2); ctx.stroke();
+    }
+    ctx.restore();
+  });
+}
+function sceneSpec(t,T,alpha){
+  if(t<15.5){ sceneShots(t,T,alpha,'spec'); return; }
+  /* 尾段：两种流程图示 */
+  const a=alpha*smooth(15.5,16.8,t);
+  ctx.save(); ctx.globalAlpha=a;
+  spacedText(ctx,'大改走完整流程 · 小修走轻量流程',960,300,46,700,withAlpha(C.text,.96),8);
+  pipelineStrip(t-16.6,T,a,420);
+  /* 轻量流程条 */
+  if(t>19.4){
+    const p=sat((t-19.4)/.8);
+    ctx.globalAlpha=a*p;
+    const x0=660,W=600,y=640,H=84;
+    ctx.fillStyle='rgba(8,145,178,.12)'; ctx.strokeStyle=withAlpha(C.cyanL,.85); ctx.lineWidth=2;
+    roundRect(ctx,x0,y,W,H,42); ctx.fill(); ctx.stroke();
+    spacedText(ctx,'flow start → 干活 → flow done',960,y+52,26,600,withAlpha(C.cyanL,.95),4,true);
+    spacedText(ctx,'几分钟的小修，也有留痕与归档',960,y+H+42,22,400,withAlpha(C.dim,1),4);
+  }
+  ctx.restore();
+}
+/* 第 11 幕：知识沉淀与收尾 */
+function sceneEnd(t,T,alpha){
+  if(t<10){ sceneShots(t,T,alpha,'end'); return; }
+  const a=alpha*smooth(10,11.4,t);
+  ctx.save(); ctx.globalAlpha=a;
+  spacedText(ctx,'每次变更，都沉淀为下一次的起点',960,240,44,700,withAlpha(C.text,.96),8);
+  /* 沉淀循环图：变更 → 知识 → 注入 → 变更 */
+  const items=[['变更执行','violet'],['知识蒸馏','cyan'],['注入下一次','green']];
+  items.forEach(([txt,col],i)=>{
+    const p=sat((t-11.2-i*.7)/.7); if(p<=0)return;
+    const x=560+i*400;
+    ctx.save(); ctx.globalAlpha=a*easeOut(p);
+    ctx.fillStyle='rgba(124,58,237,.12)'; ctx.strokeStyle=withAlpha(i===1?C.cyanL:(i===2?C.green:C.violetL),.85); ctx.lineWidth=2;
+    roundRect(ctx,x-150,400,300,96,16); ctx.fill(); ctx.stroke();
+    spacedText(ctx,txt,x,456,26,600,withAlpha(C.text,.96),4);
+    if(i<2&&sat((t-12.2-i*.7)/.6)>0){
+      const f=easeInOut(sat((t-12.2-i*.7)/.6));
+      ctx.strokeStyle=withAlpha(C.cyanL,.7); ctx.lineWidth=3;
+      ctx.beginPath(); ctx.moveTo(x+158,448); ctx.lineTo(x+158+84*f,448); ctx.stroke();
+      if(f>.9){ ctx.fillStyle=withAlpha(C.cyanL,.9); ctx.beginPath(); ctx.moveTo(x+248,448); ctx.lineTo(x+232,440); ctx.lineTo(x+232,456); ctx.closePath(); ctx.fill(); }
+    }
+    ctx.restore();
+  });
+  /* 数据行 */
+  if(t>13.6){
+    const stats=[['411','归档变更'],['1066','快速修复'],['520+','智能体会话'],['3','在线机器'],['12','宿主智能体']];
+    stats.forEach((st,i)=>{
+      const p=sat((t-13.6-i*.25)/.6); if(p<=0)return;
+      const x=330+i*315;
+      ctx.save(); ctx.globalAlpha=a*easeOut(p);
+      setFont(ctx,64,800,true); ctx.textAlign='center';
+      ctx.fillStyle=withAlpha(i%2?C.cyanL:C.violetL,.95);
+      ctx.fillText(st[0],x,700);
+      setFont(ctx,20,400); ctx.fillStyle=withAlpha(C.dim,.95);
+      ctx.fillText(st[1],x,742);
+      ctx.restore();
+    });
+  }
+  /* 收尾 logo 与口号 */
+  if(t>16.5){
+    const p=easeOut(sat((t-16.5)/1.0));
+    ctx.save(); ctx.globalAlpha=a*p;
+    ctx.translate(960,880); ctx.scale(p,p);
+    ctx.strokeStyle=withAlpha(C.violetL,.95); ctx.lineWidth=4;
+    ctx.fillStyle='rgba(124,58,237,.12)';
+    ctx.beginPath();
+    for(let i=0;i<6;i++){ const an=-Math.PI/2+i*TAU/6,R=72; i?ctx.lineTo(Math.cos(an)*R,Math.sin(an)*R):ctx.moveTo(Math.cos(an)*R,Math.sin(an)*R); }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    drawGlow(0,0,150,'violet',.35*p);
+    ctx.strokeStyle=withAlpha(C.cyanL,.9); ctx.lineWidth=6; ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.beginPath(); ctx.moveTo(-16,26); ctx.lineTo(-16,-26); ctx.lineTo(16,26); ctx.lineTo(16,-26); ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha=a*p;
+    spacedText(ctx,'SillyHub',960,1010-56,56,800,withAlpha(C.text,.98),6);
+    spacedText(ctx,'一条命令，跑起来：make up',960,1010-8,24,400,withAlpha(C.dim,1),6);
+  }
+  ctx.restore();
+}
+/* 通用幕 */
+function sceneGeneric(chId){
+  return (t,T,alpha)=>sceneShots(t,T,alpha,chId);
+}
+
+/* ============================================================================
+ * 字幕（人话）与章节 HUD
+ * ==========================================================================*/
+const CAPTIONS=[
+  {t0:1.0,t1:3.8, text:'AI 已经在写代码了。'},
+  {t0:4.2,t1:6.9, text:'可它改了什么？谁批准？怎么回滚？'},
+  {t0:7.4,t1:9.3, text:'谁来把关？'},
+  {t0:10.6,t1:13.6,text:'SillyHub —— 让 AI Agent 真正落地写代码。'},
+  {t0:18.5,t1:24.5,text:'把 Git 仓库注册成「工作区」：多项目、多团队，一台平台。'},
+  {t0:25.5,t1:35.5,text:'每个工作区有自己的变更、会话、知识库——互不干扰。'},
+  {t0:41.0,t1:48.0,text:'接入第一步：选你的电脑，浏览本机路径，注册工作区。'},
+  {t0:49.0,t1:57.0,text:'第二步「我的接入」：每人绑定自己的机器与代码路径。'},
+  {t0:57.8,t1:64.0,text:'代码靠 git 同步，平台不碰代码内容。'},
+  {t0:69.0,t1:76.0,text:'接入即扫描：架构、约定、模块文档自动成档。'},
+  {t0:77.5,t1:88.0,text:'这是 Agent 的作业地图——它先懂你的项目，再动手。'},
+  {t0:93.0,t1:99.5,text:'变更中心：所有变更一处管理，还能一键同步 CLI 侧进度。'},
+  {t0:100.5,t1:108.0,text:'大改动走完整流程：需求→方案→实现→验收→归档，五道门禁。'},
+  {t0:109.0,t1:116.5,text:'执行用了多少 token、多少次请求——全程留痕。'},
+  {t0:117.5,t1:128.0,text:'真实留痕时间线：每个动作、每次勾选、每笔提交，都有据可查。'},
+  {t0:133.5,t1:140.5,text:'在本地终端干活，平台实时知道。'},
+  {t0:141.5,t1:153.5,text:'不必在平台上操作，也能被平台管控——这就是主动同步。'},
+  {t0:159.0,t1:166.0,text:'智能体会话：跨机器、跨智能体的统一操作入口。'},
+  {t0:167.0,t1:175.0,text:'会话按 工作区 × 机器 分组，本地 Agent 也收编在册。'},
+  {t0:176.0,t1:184.0,text:'供应商、思考级别、档案、额度——随会话随时切换。'},
+  {t0:196.5,t1:203.5,text:'群聊：把人和 Agent 拉进同一个会话，@ 谁谁答。'},
+  {t0:204.5,t1:211.5,text:'每个 Agent 成员有自己的影子会话与团队能力开关。'},
+  {t0:212.5,t1:219.0,text:'派团队：当前智能体升级主控，通过 MCP 派发分身。'},
+  {t0:219.8,t1:226.5,text:'分身各干各的 worktree，互不冲突；费用上限可设。'},
+  {t0:227.2,t1:230.0,text:'走岔了？分叉。两条路都保留，各走各的。'},
+  {t0:235.0,t1:242.0,text:'运行时：三台机器在线，各自的智能体阵容一目了然。'},
+  {t0:243.0,t1:253.5,text:'46 轮对话逐轮可回放，中断自动恢复，本地日志可查。'},
+  {t0:258.5,t1:264.5,text:'项目计划、任务看板、问题清单——这是 PPM 项目管理。'},
+  {t0:265.5,t1:273.5,text:'计划与问题可转 Hub 执行；会话里 @ 一下，绑定任务上下文。'},
+  {t0:279.0,t1:285.5,text:'每次变更都沉淀为知识，注入下一次开发。'},
+  {t0:286.5,t1:292.5,text:'发布有审批，版本有归档——资产越滚越厚。'},
+  {t0:293.0,t1:298.5,text:'SillyHub：规范驱动 · 多 Agent 编排 · 团队协作。',big:true},
+];
+function drawCaptions(T){
+  for(const cp of CAPTIONS){
+    if(T<cp.t0||T>cp.t1) continue;
+    const p=smooth(cp.t0,cp.t0+.5,T)*(1-smooth(cp.t1-.5,cp.t1,T));
+    if(p<=0) continue;
+    const y=1042, size=cp.big?42:33;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    setFont(ctx,size,cp.big?700:500);
+    const rise=(1-p)*10;
+    ctx.fillStyle='rgba(0,0,0,.55)';
+    ctx.fillText(cp.text,960+2,y+rise+2);
+    ctx.fillStyle=cp.big?withAlpha(C.text,p):withAlpha('#dcd4f2',p);
+    ctx.fillText(cp.text,960,y+rise);
+  }
+}
+function drawHud(T){
+  if(T<1.5) return;
+  const idx=CHAPTERS.findIndex(c=>T>=c.t0&&T<c.t1); if(idx<0) return;
+  const t0=CHAPTERS[idx].t0;
+  const p=sat((T-t0)/.6)*(1-sat((T-t0-2.6)/.8));
+  if(p<=0)return;
+  ctx.save(); ctx.globalAlpha=p*.92;
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  setFont(ctx,17,600,true); ctx.fillStyle=withAlpha(C.cyanL,.95);
+  ctx.fillText(`SC ${String(idx+1).padStart(2,'0')} / 11`,60,44);
+  setFont(ctx,17,500); ctx.fillStyle=withAlpha(C.text,.88);
+  ctx.fillText(CHAPTERS[idx].name,180,44);
+  ctx.strokeStyle=withAlpha(C.violet,.6); ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(60,62); ctx.lineTo(420,62); ctx.stroke();
+  ctx.restore();
+}
+
+/* ============================================================================
+ * 覆盖层：颗粒 / 转场闪 / 淡入淡出
+ * ==========================================================================*/
+let frameNo=0;
+function drawFilmLayers(T){
+  ctx.drawImage(ovLayer,0,0,1920,1080);
+  /* 颗粒：隔帧，低 alpha，source-over */
+  if(QUALITY[quality].grain && (frameNo&1)===0){
+    const tile=GRAIN[(frameNo>>1)%GRAIN.length];
+    ctx.save(); ctx.globalAlpha=.35;
+    ctx.drawImage(tile,0,0,1920,1080);
+    ctx.restore();
+  }
+  for(const b of CHAPTERS.slice(1)){
+    const ft=T-b.t0;
+    if(ft>-.05&&ft<.5){
+      const p=ft<0?0:sat(ft/.45), a=(1-p)*.30;
+      ctx.fillStyle=`rgba(220,212,250,${a})`; ctx.fillRect(0,0,1920,1080);
+    }
+  }
+  if(T<1.0){ ctx.fillStyle=`rgba(0,0,0,${1-sat(T/1.0)})`; ctx.fillRect(0,0,1920,1080); }
+  if(T>DUR-1.4){ ctx.fillStyle=`rgba(0,0,0,${sat((T-(DUR-1.4))/1.4)})`; ctx.fillRect(0,0,1920,1080); }
+}
+
+/* ============================================================================
+ * WebAudio 配乐（约 120 小节，分章情绪；小节 2.5s）
+ * ==========================================================================*/
+const BAR=2.5;
+const CH_MOOD={ /* 幕 → 和弦循环 与 强度 */
+  why:   {prog:['Dm','Dm','Gm','Dm'], inten:.30},
+  tour:  {prog:['F','C','Dm','Bb'],   inten:.45},
+  onboard:{prog:['Bb','F','C','Dm'],  inten:.55},
+  scan:  {prog:['Dm','Bb','F','C'],   inten:.62},
+  spec:  {prog:['Bb','F','C','Dm'],   inten:.72},
+  sync:  {prog:['Gm','C','Dm','C'],   inten:.60},
+  sess:  {prog:['F','C','Dm','Bb'],   inten:.70},
+  team:  {prog:['Dm','Bb','F','C'],   inten:.85},
+  run:   {prog:['Bb','F','C','Dm'],   inten:.66},
+  ppm:   {prog:['F','Bb','C','C'],    inten:.74},
+  end:   {prog:['Bb','F','C','F'],    inten:.80},
+};
+const CHORD_LIB={
+  Dm:{r:38,notes:[50,53,57,62]}, Bb:{r:34,notes:[46,50,53,58]},
+  F:{r:41,notes:[53,57,60,65]},  C:{r:36,notes:[48,52,55,60]},
+  Gm:{r:43,notes:[50,55,58,62]},
+};
+function moodAt(T){
+  const ch=CHAPTERS.find(c=>T>=c.t0&&T<c.t1)||CHAPTERS[CHAPTERS.length-1];
+  const m=CH_MOOD[ch.id];
+  const local=sat((T-ch.t0)/3)*sat((ch.t1-T)/2.5);   /* 幕内首尾渐强渐弱 */
+  return { prog:m.prog, inten:lerp(m.inten*.55,m.inten,local), chord:m.prog[Math.floor(T/BAR)%m.prog.length] };
+}
+const midi2f=m=>440*Math.pow(2,(m-69)/12);
+const Music={
+  ctx:null,master:null,muted:false,anchorCtx:0,anchorT:0,nextGrid:0,timer:null,livePads:[],wet:null,_nb:null,
+  init(){
+    if(this.ctx)return;
+    const AC=window.AudioContext||window.webkitAudioContext;
+    this.ctx=new AC();
+    this.master=this.ctx.createGain(); this.master.gain.value=.9;
+    const comp=this.ctx.createDynamicsCompressor(); comp.threshold.value=-18; comp.ratio.value=6;
+    this.master.connect(comp); comp.connect(this.ctx.destination);
+    this.wet=this.ctx.createGain(); this.wet.gain.value=.2;
+    const dly=this.ctx.createDelay(1); dly.delayTime.value=.29;
+    const fb=this.ctx.createGain(); fb.gain.value=.3;
+    const lp=this.ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=2400;
+    this.wet.connect(dly); dly.connect(lp); lp.connect(fb); fb.connect(dly); lp.connect(this.master);
+  },
+  t2c(filmT){ return this.anchorCtx+(filmT-this.anchorT); },
+  startAt(T){
+    this.init();
+    if(this.ctx.state==='suspended') this.ctx.resume();
+    this.anchorT=T; this.anchorCtx=this.ctx.currentTime+.06;
+    this.nextGrid=Math.ceil(T/(BAR/8));
+    clearInterval(this.timer); this.timer=setInterval(()=>this.pump(),60); this.pump();
+  },
+  stop(){ clearInterval(this.timer); this.timer=null; this.killPads(); },
+  killPads(){
+    if(!this.ctx) return; const now=this.ctx.currentTime;
+    this.livePads.forEach(n=>{ try{ n.g.gain.cancelScheduledValues(now); n.g.gain.setTargetAtTime(0,now,.05); n.o1.stop(now+.3); n.o2.stop(now+.3);}catch(e){} });
+    this.livePads=[];
+  },
+  setMuted(m){ this.muted=m; if(this.master) this.master.gain.setTargetAtTime(m?0:.9,this.ctx.currentTime,.05); },
+  pump(){
+    if(!this.timer)return;
+    const horizon=this.anchorT+(this.ctx.currentTime-this.anchorCtx)+.4;
+    const step=BAR/8;
+    while(this.anchorT+this.nextGrid*step<horizon){
+      const g=this.nextGrid, gT=g*step;
+      if(gT>DUR){ clearInterval(this.timer); this.timer=null; return; }
+      this.scheduleGrid(g,gT); this.nextGrid++;
+    }
+    for(const b of CHAPTERS){
+      const cT=this.t2c(b.t0);
+      if(cT>this.ctx.currentTime&&cT<this.ctx.currentTime+.4&&b._chime!==Math.round(cT*10)){
+        b._chime=Math.round(cT*10); this.chime(b.t0===0?0:1);
+      }
+      const rT=this.t2c(b.t0-1.2);
+      if(b.t0>0&&rT>this.ctx.currentTime&&rT<this.ctx.currentTime+.4&&b._riser!==Math.round(rT*10)){
+        b._riser=Math.round(rT*10); this.riser(1.2);
+      }
+    }
+  },
+  scheduleGrid(g,gT){
+    const inBar=g%8, bar=Math.floor(g/8), mood=moodAt(gT);
+    const chord=CHORD_LIB[mood.chord]||CHORD_LIB.F, inten=mood.inten, at=this.t2c(gT);
+    if(inBar===0){
+      this.pad(chord,at,BAR);
+      this.bass(chord.r,at,.9,inten);
+      if(inten>=.55) this.kick(at,inten);
+      /* 尾幕收束 */
+      if(gT>DUR-BAR&&inBar===0){ this.impact(); }
+    }
+    if(inBar===4&&inten>=.55){ this.kick(at,inten*.8); this.bass(chord.r+(inten>=.7?7:0),at,.5,inten*.8); }
+    if(inten>=.45&&inBar%2===0){
+      const seq=[0,1,2,3,2,1,2,3], ni=seq[inBar/2|0]%chord.notes.length;
+      this.pluck(chord.notes[ni]+12,at,inten*.9);
+    }
+    if(inten>=.78&&inBar%2===1) this.pluck(chord.notes[(inBar+2)%4]+24,at,inten*.45);
+    if(inten>=.5&&inBar%2===1) this.hat(at,inten*.7);
+  },
+  pad(chord,at,dur){
+    const c=this.ctx;
+    const g=c.createGain(); g.gain.setValueAtTime(0,at);
+    g.gain.linearRampToValueAtTime(.05,at+.55);
+    g.gain.setValueAtTime(.05,at+dur-.6); g.gain.linearRampToValueAtTime(0,at+dur);
+    const f=c.createBiquadFilter(); f.type='lowpass'; f.frequency.value=760;
+    const o1=c.createOscillator(),o2=c.createOscillator();
+    o1.type='sawtooth'; o2.type='sawtooth';
+    o1.frequency.value=midi2f(chord.notes[0]); o2.frequency.value=midi2f(chord.notes[0])*1.004;
+    o1.detune.value=-6; o2.detune.value=6;
+    chord.notes.slice(1).forEach(m=>{
+      const os=c.createOscillator(); os.type='triangle'; os.frequency.value=midi2f(m);
+      const og=c.createGain(); og.gain.setValueAtTime(0,at); og.gain.linearRampToValueAtTime(.028,at+.6);
+      og.gain.setValueAtTime(.028,at+dur-.6); og.gain.linearRampToValueAtTime(0,at+dur);
+      os.connect(og); og.connect(f); os.start(at); os.stop(at+dur+.1);
+    });
+    o1.connect(f); o2.connect(f); f.connect(g); g.connect(this.master); g.connect(this.wet);
+    o1.start(at); o2.start(at); o1.stop(at+dur+.1); o2.stop(at+dur+.1);
+    this.livePads.push({o1,o2,g});
+  },
+  bass(m,at,len,inten){
+    const c=this.ctx,g=c.createGain();
+    g.gain.setValueAtTime(0,at); g.gain.linearRampToValueAtTime(.15*lerp(.6,1,inten),at+.03);
+    g.gain.exponentialRampToValueAtTime(.001,at+len);
+    const o=c.createOscillator(); o.type='sine'; o.frequency.value=midi2f(m);
+    const o2=c.createOscillator(); o2.type='triangle'; o2.frequency.value=midi2f(m)*2;
+    const og=c.createGain(); og.gain.value=.35; o2.connect(og); og.connect(g);
+    o.connect(g); g.connect(this.master);
+    o.start(at); o2.start(at); o.stop(at+len+.05); o2.stop(at+len+.05);
+  },
+  pluck(m,at,vel){
+    const c=this.ctx,g=c.createGain();
+    g.gain.setValueAtTime(.06*vel,at); g.gain.exponentialRampToValueAtTime(.0006,at+.3);
+    const o=c.createOscillator(); o.type='triangle'; o.frequency.value=midi2f(m);
+    o.connect(g); g.connect(this.master); g.connect(this.wet);
+    o.start(at); o.stop(at+.32);
+  },
+  noiseBuf(){
+    if(this._nb)return this._nb;
+    const c=this.ctx,b=c.createBuffer(1,c.sampleRate*1.2,c.sampleRate),d=b.getChannelData(0);
+    for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;
+    return this._nb=b;
+  },
+  kick(at,inten){
+    const c=this.ctx,o=c.createOscillator(),g=c.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(150,at); o.frequency.exponentialRampToValueAtTime(44,at+.11);
+    g.gain.setValueAtTime(.2*inten,at); g.gain.exponentialRampToValueAtTime(.001,at+.24);
+    o.connect(g); g.connect(this.master); o.start(at); o.stop(at+.26);
+  },
+  hat(at,vel){
+    const c=this.ctx,s=c.createBufferSource(); s.buffer=this.noiseBuf();
+    const f=c.createBiquadFilter(); f.type='highpass'; f.frequency.value=6800;
+    const g=c.createGain(); g.gain.setValueAtTime(.045*vel,at); g.gain.exponentialRampToValueAtTime(.0005,at+.05);
+    s.connect(f); f.connect(g); g.connect(this.master); s.start(at); s.stop(at+.07);
+  },
+  chime(kind){
+    const c=this.ctx,at=c.currentTime+.02;
+    [880,1320].forEach((f0,i)=>{
+      const o=c.createOscillator(),g=c.createGain();
+      o.type='sine'; o.frequency.value=f0;
+      g.gain.setValueAtTime(i?0.04:0.07,at); g.gain.exponentialRampToValueAtTime(.0005,at+1.2);
+      o.connect(g); g.connect(this.master); g.connect(this.wet);
+      o.start(at); o.stop(at+1.25);
+    });
+  },
+  riser(dur){
+    const c=this.ctx,at=c.currentTime+.02,s=c.createBufferSource(); s.buffer=this.noiseBuf(); s.loop=true;
+    const f=c.createBiquadFilter(); f.type='bandpass'; f.Q.value=1.2;
+    f.frequency.setValueAtTime(320,at); f.frequency.exponentialRampToValueAtTime(3200,at+dur);
+    const g=c.createGain(); g.gain.setValueAtTime(.0001,at); g.gain.exponentialRampToValueAtTime(.06,at+dur*.92); g.gain.exponentialRampToValueAtTime(.0001,at+dur+.06);
+    s.connect(f); f.connect(g); g.connect(this.master); g.connect(this.wet);
+    s.start(at); s.stop(at+dur+.1);
+  },
+  impact(){
+    const c=this.ctx,at=c.currentTime+.02;
+    const o=c.createOscillator(),g=c.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(80,at); o.frequency.exponentialRampToValueAtTime(30,at+1.2);
+    g.gain.setValueAtTime(.42,at); g.gain.exponentialRampToValueAtTime(.001,at+1.4);
+    o.connect(g); g.connect(this.master); o.start(at); o.stop(at+1.45);
+  },
+};
+
+/* ============================================================================
+ * 主循环 · 帧率治理 · 播放器
+ * ==========================================================================*/
+let playing=false,T=0,lastFrame=0,idleTimer=null;
+let emaDt=16.7, overFrames=0, fpsMeterOn=false, fpsSamples=[];
+function renderFrame(){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.setTransform(dpr*fit,0,0,dpr*fit,dpr*ox,dpr*oy);
+  ctx.save(); ctx.beginPath(); ctx.rect(0,0,1920,1080); ctx.clip();
+  ctx.drawImage(bgLayer,0,0,1920,1080);
+  const ch=CHAPTERS.find(c=>T>=c.t0&&T<c.t1)||CHAPTERS[CHAPTERS.length-1];
+  const t=T-ch.t0;
+  const fade={
+    why:0, tour:.7, onboard:.7, scan:.7, spec:.7, sync:.7, sess:.7, team:.7, run:.7, ppm:.7, end:.7
+  };
+  const a = ch.id==='why'?1: smooth(ch.t0,ch.t0+fade[ch.id],T)*(1-smooth(ch.t1-fade[ch.id],ch.t1,T));
+  const aa = ch.id==='why' ? 1*(1-smooth(15.4,16,T)) : a;
+  const SCENE={
+    why:sceneWhy, tour:sceneGeneric('tour'), onboard:sceneGeneric('onboard'),
+    scan:sceneGeneric('scan'), spec:sceneSpec, sync:sceneSync,
+    sess:sceneGeneric('sess'), team:sceneGeneric('team'), run:sceneGeneric('run'),
+    ppm:sceneGeneric('ppm'), end:sceneEnd,
+  };
+  if(aa>0) SCENE[ch.id](t,T,aa);
+  drawCaptions(T);
+  drawHud(T);
+  drawFilmLayers(T);
+  ctx.restore();
+}
+function tick(ts){
+  if(!playing) return;
+  if(!lastFrame) lastFrame=ts;
+  let dt=(ts-lastFrame)/1000; lastFrame=ts;
+  dt=Math.min(dt,.1);
+  /* 帧率治理 */
+  emaDt=emaDt*.9+dt*1000*.1;
+  if(fpsMeterOn) fpsSamples.push(emaDt);
+  if(emaDt>24) overFrames++; else overFrames=Math.max(0,overFrames-2);
+  if(overFrames>90) autoDowngrade();
+  const fpsEl=document.getElementById('fpsChip');
+  if((frameNo&15)===0) fpsEl.textContent=`${Math.round(1000/emaDt)} fps · ${quality}`;
+  frameNo++;
+  T+=dt;
+  if(T>=DUR){ T=DUR; renderFrame(); finish(); return; }
+  renderFrame();
+  updateChrome();
+  requestAnimationFrame(tick);
+}
+function autoDowngrade(){
+  if(quality==='high'){ setQuality('balanced'); }
+  else if(quality==='balanced'){ setQuality('eco'); }
+  else return;
+  overFrames=0;
+  const chip=document.getElementById('autoChip');
+  chip.classList.add('show'); setTimeout(()=>chip.classList.remove('show'),2600);
+}
+function setQuality(q){
+  quality=q; dprCap=QUALITY[q].dpr;
+  document.querySelectorAll('#qsel button').forEach(b=>b.classList.toggle('on',b.dataset.q===q));
+  resize();
+}
+function fmt(s){ s=Math.max(0,Math.floor(s)); return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
+
+/* ---------- DOM ---------- */
+const stageWrap=document.getElementById('stageWrap');
+const poster=document.getElementById('poster');
+const barEl=document.getElementById('bar');
+const fillEl=document.querySelector('#bar .fill');
+const headEl=document.querySelector('#bar .head');
+const segsEl=document.getElementById('segs');
+const tipEl=document.getElementById('tip');
+const timeEl=document.getElementById('timeLabel');
+const btnPlay=document.getElementById('btnPlay');
+const btnMute=document.getElementById('btnMute');
+const endcard=document.getElementById('endcard');
+const ICON_PLAY='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>';
+const ICON_PAUSE='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>';
+const ICON_VOL='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9zM16.5 12a4.5 4.5 0 0 0-2-3.74v7.48A4.5 4.5 0 0 0 16.5 12z"/></svg>';
+const ICON_MUTED='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9zM20 8.6 18.6 7.2 16.8 9l-1.8-1.8-1.4 1.4 1.8 1.8-1.8 1.8 1.4 1.4 1.8-1.8 1.8 1.8 1.4-1.4-1.8-1.8z"/></svg>';
+btnPlay.innerHTML=ICON_PLAY; btnMute.innerHTML=ICON_VOL;
+CHAPTERS.forEach(c=>{ const i=document.createElement('i'); i.style.width=(c.t1-c.t0)/DUR*100+'%'; segsEl.appendChild(i); });
+(function(){
+  const box=document.getElementById('endBtns');
+  const rp=document.createElement('button'); rp.className='primary'; rp.textContent='↻ 重播全片';
+  rp.onclick=()=>{ endcard.classList.remove('show'); seek(0); play(); };
+  box.appendChild(rp);
+  CHAPTERS.forEach((c,i)=>{ const b=document.createElement('button');
+    b.textContent=`${String(i+1).padStart(2,'0')} ${c.name}`;
+    b.onclick=()=>{ endcard.classList.remove('show'); seek(c.t0+.05); play(); };
+    box.appendChild(b); });
+})();
+function updateChrome(){
+  const p=T/DUR;
+  fillEl.style.width=(p*100)+'%'; headEl.style.left=(p*100)+'%';
+  timeEl.textContent=`${fmt(T)} / ${fmt(DUR)}`;
+}
+function play(){
+  if(T>=DUR) T=0;
+  poster.classList.add('hide');
+  stageWrap.classList.add('playing');
+  endcard.classList.remove('show');
+  playing=true; lastFrame=0;
+  btnPlay.innerHTML=ICON_PAUSE;
+  Music.startAt(T);
+  requestAnimationFrame(tick);
+  armIdle();
+}
+function pause(){
+  playing=false; btnPlay.innerHTML=ICON_PLAY;
+  stageWrap.classList.remove('idle');
+  if(Music.ctx&&Music.ctx.state==='running') Music.ctx.suspend();
+  if(Music.timer){ clearInterval(Music.timer); Music.timer=null; }
+}
+function seek(t,keepPlay){
+  const was=playing;
+  if(was) pause();
+  T=clamp(t,0,DUR);
+  renderFrame(); updateChrome();
+  if(was||keepPlay) play();
+}
+function finish(){
+  playing=false; btnPlay.innerHTML=ICON_PLAY;
+  Music.stop(); if(Music.ctx) Music.ctx.suspend();
+  stageWrap.classList.remove('playing');
+  endcard.classList.add('show');
+}
+function toggle(){ playing?pause():play(); }
+function curChapter(){ let i=0; CHAPTERS.forEach((c,k)=>{ if(T>=c.t0) i=k; }); return i; }
+function jumpChapter(d){
+  const i=curChapter();
+  const n=clamp(d<0?(T-CHAPTERS[i].t0>1?i:i-1):i+1,0,CHAPTERS.length-1);
+  seek(CHAPTERS[n].t0+.05);
+  if(!playing) play();
+}
+function armIdle(){
+  stageWrap.classList.remove('idle');
+  clearTimeout(idleTimer);
+  idleTimer=setTimeout(()=>{ if(playing) stageWrap.classList.add('idle'); },2600);
+}
+stageWrap.addEventListener('mousemove',armIdle);
+stageWrap.addEventListener('touchstart',armIdle,{passive:true});
+document.getElementById('playBtn').addEventListener('click',()=>{ Music.init(); play(); });
+btnPlay.addEventListener('click',toggle);
+document.getElementById('btnPrev').addEventListener('click',()=>jumpChapter(-1));
+document.getElementById('btnNext').addEventListener('click',()=>jumpChapter(1));
+btnMute.addEventListener('click',()=>{ Music.init(); Music.setMuted(!Music.muted); btnMute.innerHTML=Music.muted?ICON_MUTED:ICON_VOL; });
+document.getElementById('btnFull').addEventListener('click',()=>{
+  if(document.fullscreenElement) document.exitFullscreen();
+  else stageWrap.requestFullscreen&&stageWrap.requestFullscreen();
+});
+document.querySelectorAll('#qsel button').forEach(b=>b.addEventListener('click',()=>setQuality(b.dataset.q)));
+window.addEventListener('keydown',e=>{
+  if(e.target&&/input|textarea/i.test(e.target.tagName)) return;
+  if(e.code==='Space'||e.key==='k'){ e.preventDefault(); Music.init(); toggle(); }
+  else if(e.key==='ArrowLeft') jumpChapter(-1);
+  else if(e.key==='ArrowRight') jumpChapter(1);
+  else if(e.key==='m'||e.key==='M'){ Music.init(); Music.setMuted(!Music.muted); btnMute.innerHTML=Music.muted?ICON_MUTED:ICON_VOL; }
+  else if(e.key==='f'||e.key==='F') document.getElementById('btnFull').click();
+});
+let dragging=false;
+function barSeek(e){
+  const r=barEl.getBoundingClientRect();
+  const p=clamp((e.clientX-r.left)/r.width,0,1);
+  seek(p*DUR);
+}
+barEl.addEventListener('mousedown',e=>{ dragging=true; barSeek(e); });
+window.addEventListener('mousemove',e=>{ if(dragging) barSeek(e); });
+window.addEventListener('mouseup',()=>{ dragging=false; });
+barEl.addEventListener('click',e=>{ if(!dragging) barSeek(e); });
+barEl.addEventListener('mousemove',e=>{
+  const r=barEl.getBoundingClientRect(); const p=clamp((e.clientX-r.left)/r.width,0,1);
+  const t=p*DUR; let ch=CHAPTERS[0]; CHAPTERS.forEach(c=>{ if(t>=c.t0) ch=c; });
+  tipEl.textContent=`${ch.name} · ${fmt(t)}`;
+  tipEl.style.left=(p*100)+'%'; tipEl.style.opacity=1;
+});
+barEl.addEventListener('mouseleave',()=>{ tipEl.style.opacity=0; });
+document.addEventListener('visibilitychange',()=>{ if(document.hidden&&playing) pause(); });
+
+/* 调试句柄 */
+window.__promoFilm={
+  play,pause,seek,
+  get T(){return T;}, get playing(){return playing;}, get quality(){return quality;},
+  setQuality, CHAPTERS, DUR, Music,
+  sampleFps(on){ fpsMeterOn=on; if(on) fpsSamples=[]; return fpsSamples; },
+};
+resize(); renderFrame();
+</script>
+</body>
+</html>
