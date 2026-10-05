@@ -277,6 +277,15 @@ services:
     # 超 512m → OOM kill → restart:always 循环 → 迁移永远跑不完、4000 永不监听（docker events 见 oom 事件）。
     # 提到 1g 让一次性迁移跑完；稳态内存 ~300M，limit 只是允许尖峰。
     mem_limit: 1g
+    # 日志轮转有界（2026-10-06-litellm-log-rotation）：本服务被显式拉起（--profile litellm
+    # 或点名 up）而镜像仍是坏构建时，restart:always 会 crash-loop，json-file 默认无上限——
+    # 低配机磁盘会被打满。10m×3=30m 兼顾磁盘与 crash-loop 排障留存。只加本服务不动
+    # 核心服务（其余服务日志策略变化未评估，留待专门变更）。
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   pgdata:
