@@ -18,4 +18,4 @@ created_at: 2026-10-05T11:25:37.369Z
 - [x] task-06: 视觉使用平台 AI-Native 品牌色（紫 #7C3AED / 青 #0891B2）
 - [x] task-07: 在浏览器实际打开验证：无 JS 报错、多时间点截图动画正常、文字无乱码
 - [x] task-08: 撰写 requirements FR 正文与 design 四节（含文件变更清单）
-- [ ] task-09: 浏览器验证留痕 visual-evidence.md + docs/promo/README.md + 显式 pathspec 提交
+- [x] task-09: 浏览器验证留痕 visual-evidence.md + docs/promo/README.md + 显式 pathspec 提交
