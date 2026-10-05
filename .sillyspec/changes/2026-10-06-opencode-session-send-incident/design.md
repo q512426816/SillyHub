@@ -49,4 +49,7 @@ created_at: 2026-10-05T23:16:41.772Z
 | 操作 | 路径 | 说明 |
 | --- | --- | --- |
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | isToolReportBody 派生上移（早退前 + 可选链）+ 删原声明点 + handleSend 依赖数组补 isToolReportBody/handleTakeoverSend |
+| 修改 | .sillyspec/docs/multi-agent-platform/modules/frontend.md | 模块文档补本变更条目 |
+| 修改 | docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md | 坑文档补 2026-10-06 下午段（服务器 compose 未同步致隔离失效教训） |
 | 运维数据 | 服务器 47.113.145.252 llm_providers 行 68b4b5b9 | extra_env 注入 HTTPS_PROXY=http://127.0.0.1:7897 + notes 说明（psql 一次性 UPDATE，不入仓） |
+| 运维数据 | 服务器 /opt/sillyhub/deploy/deploy/docker-compose.yml | 同步仓内 quarantine 版 compose（profiles 门控生效，默认 up -d 不再拉起 litellm；scp 同步不入仓） |
