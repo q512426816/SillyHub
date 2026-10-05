@@ -11,5 +11,5 @@ created_at: 2026-10-05T13:54:06.851Z
 > `flow status --change 2026-10-05-remove-promo-film` 为自愿查看/恢复面。本文件收口前随交付显式 pathspec 提交。
 
 - [x] task-01: docs/promo 目录整体从仓库删除（git rm 显式 pathspec，历史可恢复）
-- [ ] task-02: .sillyspec/docs/multi-agent-platform/modules/docs.md 中 promo 条目移除
+- [x] task-02: .sillyspec/docs/multi-agent-platform/modules/docs.md 中 promo 条目移除
 - [ ] task-03: 删除后仓库无悬空引用（README/模块文档不再指向 docs/promo）
