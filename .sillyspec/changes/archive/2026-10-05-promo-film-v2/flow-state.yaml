@@ -1,0 +1,21 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+autopilot: true
+baseline_commit: 5ec5f000c31637a9b1da4b367584ec4cd2e6f331
+updatedAt: '2026-10-05T13:05:46.146Z'
+baseline_sha256: 33eb26173717425f0d0c183f939fce02400bb7e66fa42b187fde7297f6fc6c0c
+allow_batch_tick: true
+gate_summary: 'test: —｜lint: —｜门文件 42 个'
+

@@ -1,0 +1,19 @@
+{"ts":1791203843292,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791203918890,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791203928967,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791203935846,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791203935846,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1791203935846,"kind":"commit","stage":null,"detail":"bf8084b3d","provisional":true}
+{"ts":1791204793676,"kind":"commit","stage":null,"detail":"471b1a401","provisional":true}
+{"ts":1791204797144,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791204797144,"kind":"task-done","stage":"tasks","detail":"checked 1→4","provisional":true}
+{"ts":1791204797144,"kind":"commit","stage":null,"detail":"5c9bb1cc1","provisional":true}
+{"ts":1791204800679,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791204800679,"kind":"task-done","stage":"tasks","detail":"checked 4→6","provisional":true}
+{"ts":1791204800679,"kind":"commit","stage":null,"detail":"121696d80","provisional":true}
+{"ts":1791204804129,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791204804129,"kind":"task-done","stage":"tasks","detail":"checked 6→8","provisional":true}
+{"ts":1791204804129,"kind":"commit","stage":null,"detail":"96f17857e","provisional":true}
+{"ts":1791204876292,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791205422921,"kind":"commit","stage":null,"detail":"f9bc0b8af","provisional":true}
+{"ts":1791205544045,"kind":"commit","stage":null,"detail":"7da35f4cb","provisional":true}
