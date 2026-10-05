@@ -64,5 +64,5 @@ v1 的两大问题分别对症：**卡顿**——渲染循环逐帧 shadowBlur/�
 | 操作 | 路径 | 说明 |
 | --- | --- | --- |
 | 新增 | docs/promo/v2/index.html | v2 宣传片单页（真实截图 11 幕 + 性能重写引擎 + WebAudio 5 分钟配乐） |
-| 新增 | docs/promo/v2/assets/*.jpg | 线上环境真实界面截图 28 张（JPEG q80） |
+| 新增 | docs/promo/v2/assets | 线上环境真实界面截图 28 张 JPEG（登录/工作区/接入/扫描/变更/会话/群聊/派团队/分叉/运行时/PPM/知识库/发布等，逐文件入库，非通配裁剪） |
 | 修改 | docs/promo/README.md | 指向 v2 为正片入口，v1 归档为历史版本 |

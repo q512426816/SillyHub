@@ -341,8 +341,8 @@ const SHOTS={
     {a:'topo', url:`${HOST}/workspaces/map · 拓扑图`, z0:1.16,z1:1.03, px0:1000,py0:540, px1:960,py1:540},
   ],
   spec:[
-    {a:'changes', url:`${HOST}/workspaces/map/changes`, z0:1.05,z1:1.15, px0:900,py0:420, px1:920,py1:430},
-    {a:'detail', url:`${HOST}/…/changes/promo-film-page`, z0:1.18,z1:1.04, px0:1000,py0:420, px1:980,py1:520},
+    {a:'changes', url:`${HOST}/workspaces/map/changes`, d:8, z0:1.05,z1:1.15, px0:900,py0:420, px1:920,py1:430},
+    {a:'detail', url:`${HOST}/…/changes/promo-film-page`, d:22, z0:1.18,z1:1.04, px0:1000,py0:400, px1:980,py1:720},
   ],
   sync:[ {a:'detail', url:`${HOST}/…/changes/promo-film-page`, z0:1.0,z1:1.0, px0:960,py0:540, px1:960,py1:540} ],
   sess:[
@@ -388,11 +388,11 @@ const HIGHLIGHTS={
     hl(12.5,22.5,480,240,1180,660,'组件拓扑：Agent 的作业地图',-34),
   ],
   spec:[
-    hl(1.2,7.5,1100,182,220,50,'平台同步：CLI 侧变更拉进来',-30),
-    hl(8.5,15,300,236,900,64,'411 个归档变更 · 1066 个快速修复',34),
-    hl(16.5,22.5,620,300,1240,66,'轻量流程：start → 干活 → 收口归档',-30),
-    hl(24,29,620,392,1240,196,'执行用量全程留痕',-30),
-    hl(30.5,38.5,620,640,1240,300,'真实留痕时间线：每个动作都有据可查',-30),
+    hl(1.2,4.0,1100,182,220,50,'平台同步：CLI 侧变更拉进来',-30),
+    hl(4.6,7.8,300,236,900,64,'411 个归档变更 · 1066 个快速修复',34),
+    hl(8.8,14,620,300,1240,66,'轻量流程：start → 干活 → 收口归档',-30),
+    hl(15,20,620,392,1240,196,'执行用量全程留痕',-30),
+    hl(21,29,620,640,1240,300,'真实留痕时间线：每个动作都有据可查',-30),
   ],
   sync:[],  /* 画中画布局，无截图高亮 */
   sess:[
@@ -505,16 +505,18 @@ function sceneShots(t,T,alpha,chId){
   const shots=SHOTS[chId];
   const total=ch.t1-ch.t0;
   const n=shots.length;
-  /* 每镜头等分幕时长，交叉淡入淡出 0.8s */
-  const seg=total/n;
-  const idx=clamp(Math.floor(t/seg),0,n-1);
-  const lt=t-idx*seg;
+  /* 镜头时长支持权重 d（缺省 1）；boundaries[i] 为镜头 i 的起始时刻 */
+  const ws=shots.map(s=>s.d||1), W=ws.reduce((a,b)=>a+b,0);
+  const bounds=[0]; ws.reduce((a,w,i)=>{ const v=a+w; bounds.push(v); return v; },0);
+  const boundsT=bounds.map(v=>v/W*total);
+  let idx=0; for(let i=0;i<n;i++){ if(t>=boundsT[i]) idx=i; }
+  const lt=t-boundsT[idx], seg=boundsT[idx+1]-boundsT[idx];
   const s=shots[idx];
   let a=alpha;
   if(n>1){
-    a*= smooth(idx*seg-0.1, idx*seg+.7, t) * (1-smooth((idx+1)*seg-.7,(idx+1)*seg-.02,t));
+    a*= smooth(boundsT[idx]-0.1, boundsT[idx]+.7, t) * (1-smooth(boundsT[idx+1]-.7,boundsT[idx+1]-.02,t));
     if(idx===0) a=alpha*smooth(-0.1,.6,t)*(1-smooth(seg-.7,seg-.02,t));
-    if(idx===n-1) a=alpha*smooth(idx*seg-.1,idx*seg+.7,t)*(1-smooth(total-.7,total,t));
+    if(idx===n-1) a=alpha*smooth(boundsT[idx]-.1,boundsT[idx]+.7,t)*(1-smooth(total-.7,total,t));
   }
   const p=sat(lt/seg);
   const z=lerp(s.z0,s.z1,easeInOut(p));
@@ -663,15 +665,15 @@ function pipelineStrip(t,T,alpha,y){
   });
 }
 function sceneSpec(t,T,alpha){
-  if(t<15.5){ sceneShots(t,T,alpha,'spec'); return; }
+  if(t<30){ sceneShots(t,T,alpha,'spec'); return; }
   /* 尾段：两种流程图示 */
-  const a=alpha*smooth(15.5,16.8,t);
+  const a=alpha*smooth(30,31.3,t);
   ctx.save(); ctx.globalAlpha=a;
   spacedText(ctx,'大改走完整流程 · 小修走轻量流程',960,300,46,700,withAlpha(C.text,.96),8);
-  pipelineStrip(t-16.6,T,a,420);
+  pipelineStrip(t-31.2,T,a,420);
   /* 轻量流程条 */
-  if(t>19.4){
-    const p=sat((t-19.4)/.8);
+  if(t>34){
+    const p=sat((t-34)/.8);
     ctx.globalAlpha=a*p;
     const x0=660,W=600,y=640,H=84;
     ctx.fillStyle='rgba(8,145,178,.12)'; ctx.strokeStyle=withAlpha(C.cyanL,.85); ctx.lineWidth=2;
@@ -759,10 +761,11 @@ const CAPTIONS=[
   {t0:57.8,t1:64.0,text:'代码靠 git 同步，平台不碰代码内容。'},
   {t0:69.0,t1:76.0,text:'接入即扫描：架构、约定、模块文档自动成档。'},
   {t0:77.5,t1:88.0,text:'这是 Agent 的作业地图——它先懂你的项目，再动手。'},
-  {t0:93.0,t1:99.5,text:'变更中心：所有变更一处管理，还能一键同步 CLI 侧进度。'},
-  {t0:100.5,t1:108.0,text:'大改动走完整流程：需求→方案→实现→验收→归档，五道门禁。'},
-  {t0:109.0,t1:116.5,text:'执行用了多少 token、多少次请求——全程留痕。'},
-  {t0:117.5,t1:128.0,text:'真实留痕时间线：每个动作、每次勾选、每笔提交，都有据可查。'},
+  {t0:93.0,t1:97.8,text:'变更中心：所有变更一处管理，还能一键同步 CLI 侧进度。'},
+  {t0:98.8,t1:104.4,text:'轻量流程：小修小补几分钟收口，同样有留痕归档。'},
+  {t0:105.2,t1:110.4,text:'执行用了多少 token、多少次请求——全程留痕。'},
+  {t0:111.0,t1:119.2,text:'真实留痕时间线：每个动作、每次勾选、每笔提交，都有据可查。'},
+  {t0:120.6,t1:128.4,text:'大改动走完整流程：需求→方案→实现→验收→归档，五道门禁。'},
   {t0:133.5,t1:140.5,text:'在本地终端干活，平台实时知道。'},
   {t0:141.5,t1:153.5,text:'不必在平台上操作，也能被平台管控——这就是主动同步。'},
   {t0:159.0,t1:166.0,text:'智能体会话：跨机器、跨智能体的统一操作入口。'},
@@ -895,6 +898,11 @@ const Music={
     this.livePads.forEach(n=>{ try{ n.g.gain.cancelScheduledValues(now); n.g.gain.setTargetAtTime(0,now,.05); n.o1.stop(now+.3); n.o2.stop(now+.3);}catch(e){} });
     this.livePads=[];
   },
+  prunePads(){
+    if(!this.ctx||!this.livePads.length) return;
+    const now=this.ctx.currentTime;
+    this.livePads=this.livePads.filter(n=>n.until>now-.2);
+  },
   setMuted(m){ this.muted=m; if(this.master) this.master.gain.setTargetAtTime(m?0:.9,this.ctx.currentTime,.05); },
   pump(){
     if(!this.timer)return;
@@ -920,6 +928,7 @@ const Music={
     const inBar=g%8, bar=Math.floor(g/8), mood=moodAt(gT);
     const chord=CHORD_LIB[mood.chord]||CHORD_LIB.F, inten=mood.inten, at=this.t2c(gT);
     if(inBar===0){
+      this.prunePads();
       this.pad(chord,at,BAR);
       this.bass(chord.r,at,.9,inten);
       if(inten>=.55) this.kick(at,inten);
@@ -952,7 +961,7 @@ const Music={
     });
     o1.connect(f); o2.connect(f); f.connect(g); g.connect(this.master); g.connect(this.wet);
     o1.start(at); o2.start(at); o1.stop(at+dur+.1); o2.stop(at+dur+.1);
-    this.livePads.push({o1,o2,g});
+    this.livePads.push({o1,o2,g,until:at+dur});
   },
   bass(m,at,len,inten){
     const c=this.ctx,g=c.createGain();
@@ -1054,8 +1063,8 @@ function tick(ts){
   /* 帧率治理 */
   emaDt=emaDt*.9+dt*1000*.1;
   if(fpsMeterOn) fpsSamples.push(emaDt);
-  if(emaDt>24) overFrames++; else overFrames=Math.max(0,overFrames-2);
-  if(overFrames>90) autoDowngrade();
+  if(emaDt>24) overFrames++; else overFrames=0;      /* 严格连续计数（FR-03：连续 60 帧） */
+  if(overFrames>60) autoDowngrade();
   const fpsEl=document.getElementById('fpsChip');
   if((frameNo&15)===0) fpsEl.textContent=`${Math.round(1000/emaDt)} fps · ${quality}`;
   frameNo++;
@@ -1127,6 +1136,7 @@ function play(){
 function pause(){
   playing=false; btnPlay.innerHTML=ICON_PLAY;
   stageWrap.classList.remove('idle');
+  Music.killPads();                                     /* 截断 pad 余音，seek 后配乐即刻对齐 */
   if(Music.ctx&&Music.ctx.state==='running') Music.ctx.suspend();
   if(Music.timer){ clearInterval(Music.timer); Music.timer=null; }
 }
@@ -1170,7 +1180,7 @@ document.getElementById('btnFull').addEventListener('click',()=>{
 document.querySelectorAll('#qsel button').forEach(b=>b.addEventListener('click',()=>setQuality(b.dataset.q)));
 window.addEventListener('keydown',e=>{
   if(e.target&&/input|textarea/i.test(e.target.tagName)) return;
-  if(e.code==='Space'||e.key==='k'){ e.preventDefault(); Music.init(); toggle(); }
+  if(e.code==='Space'||e.key.toLowerCase()==='k'){ e.preventDefault(); Music.init(); toggle(); }
   else if(e.key==='ArrowLeft') jumpChapter(-1);
   else if(e.key==='ArrowRight') jumpChapter(1);
   else if(e.key==='m'||e.key==='M'){ Music.init(); Music.setMuted(!Music.muted); btnMute.innerHTML=Music.muted?ICON_MUTED:ICON_VOL; }
