@@ -147,3 +147,32 @@ docker-compose.yml` 是 quarantine 提交（2026-10-05）之前的旧版（0 处
 实证默认集合 5 个、不含 litellm 系）。**教训：compose 结构性变更（profiles/端口/卷）合并后
 必须随下次部署同步服务器 compose 文件**（scp deploy/docker-compose.yml），镜像同步 ≠ 配置
 同步；必要时把 compose 同步并进 load-and-up.sh 收口清单。
+
+## 处置记录（2026-10-07）——compose 同步缺口已固化修复（部署教训落地）
+
+上节教训的「必要时」已落为固定动作：① `deploy-to-server` skill 的 scp 清单补上
+`deploy/docker-compose.yml`（镜像同步 ≠ 配置同步的根因就在清单缺件）；②
+`load-and-up.sh` 在 `up -d` 前打印本次启动服务集（`config --services`），配置漂移
+（多出/缺少服务）部署时立见。bash -n / YAML 校验过。分叉拍板（①上游修复跟踪 vs
+②自研薄适配）仍挂起，本文件保持活跃。
+
+## 处置记录（2026-10-06 下午 ②）——opencode「selected model 不存在」终局根因：settings_config 毒覆盖链
+
+opencode 会话残余报错（「There's an issue with the selected model (deepseek-v4.1-flash)」
++ 部分会话 SSL 报错）的最终根因不在网络也不在模型：**OpenCode Go 供应商行残留旧
+`settings_config.env`**（`ANTHROPIC_BASE_URL` 指向 `/zen/go/v1/chat/completions` 全端点 +
+无关 `sk-` key + mimo-v2.5 模型串，openai_chat 时代/导入残留）。daemon 注入器规则 7
+（settings_config.env 最高优先级，D-007）把规则 0-6 的平台注入**全部覆盖**：
+- Claude Code 实际打 `.../v1/chat/completions/v1/messages`（路径拼错）+ Bearer sk- →
+  上游 404 → 报「selected model 不存在」；
+- 上午 SSL 报错同源叠加（该 host 直连被 TLS 劫持的窗口）。
+
+处置：`UPDATE llm_providers SET settings_config = NULL`（行 68b4b5b9）；清后平台 UI
+**真实新会话**（OpenCode Go + deepseek-v4.1-flash，经本机 daemon + Clash 7897 代理）
+发送「请只回复两个字：收到」→ 模型回复「收到」，第 1 轮已完成（usage ↑35,821 ↓164），
+daemon 会话快照核对 settings_config=null / extra_env=HTTPS_PROXY / base_url / auth_field /
+model 全部正确（change 2026-10-06-opencode-settings-config-poison）。
+
+**教训：编辑供应商行数据时必须同步检查 settings_config——其 env 块优先级高于
+base_url / auth_field / model 全部平台字段，残留即毒**。旧会话的 providerConfig 快照
+含毒不回填：换供应商再切回、或直接新会话即愈。
