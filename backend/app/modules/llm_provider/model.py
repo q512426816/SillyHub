@@ -3,9 +3,12 @@
 用户级 LLM 供应商凭证（design §7 / §8）。owner = ``user_id``（D-002 用户级作用域）；
 ``encrypted_api_key`` + ``key_id`` 复用 ``core/crypto.py`` 的 ``CredentialCipher``
 （xchacha20-poly1305，D-009，照 git_identity）；``is_default`` 在
-``(user_id, agent_kind)`` 维度互斥（service 层事务内保证，R-05）。
+``(user_id, 引擎)`` 维度互斥——多引擎行对 agent_kinds 集合内每个引擎各占一个默认位
+（service 层事务内保证，R-05；D-003/D-006）。
 
-列定义须与 ``migrations/versions/20260725_create_llm_providers.py`` 一一对应（防漂移）；
+``agent_kinds`` JSON 数组列（change 2026-10-06-provider-multi-agent-kind / D-004）：
+一条凭证可服务多个引擎（claude/codex/pi...），解析链按「引擎 ∈ 集合」命中。列定义须与
+``migrations/versions/20261006120000_provider_agent_kinds.py`` 迁移终态一一对应（防漂移）；
 ``multimodal`` 列对应 ``migrations/versions/20260820100000_session_attachments_multimodal.py``。
 """
 
@@ -41,9 +44,9 @@ class LlmProvider(BaseModel, table=True):
         max_length=128,
         sa_column=Column(String(128), nullable=False),
     )
-    agent_kind: str = Field(
-        max_length=32,
-        sa_column=Column(String(32), nullable=False),
+    # 引擎集合（D-004 单列改数组）：至少一个引擎；解析链按「引擎 ∈ agent_kinds」命中。
+    agent_kinds: list[str] = Field(
+        sa_column=Column(JSON, nullable=False),
     )
     base_url: str | None = Field(
         default=None,
@@ -125,6 +128,7 @@ class LlmProvider(BaseModel, table=True):
     )
 
     __table_args__ = (
+        # 原 (user_id, agent_kind, is_default) 复合索引随 agent_kind 列删除而退役
+        # （迁移 20261006120000）；默认/引擎过滤转行级 Python 判断（每用户行数几十级）。
         Index("ix_llm_providers_user", "user_id"),
-        Index("ix_llm_providers_user_agent_default", "user_id", "agent_kind", "is_default"),
     )

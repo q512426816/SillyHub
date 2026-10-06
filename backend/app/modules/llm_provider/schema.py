@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class LlmProviderCreate(BaseModel):
@@ -18,8 +18,10 @@ class LlmProviderCreate(BaseModel):
     # 平台 worker 走独立配额池凭证（daemon 侧 PiCredentialInjector 消费）。
     # task-05（2026-09-10-multi-provider-injection / FR-04）：词表增 codex——
     # codex 不走 env 注入器，凭证经 daemon 文件层（会话隔离 CODEX_HOME，D-012）注入。
-    # agent_kind 仅 Create 有该字段，Update/FetchModelsRequest 不新增。
-    agent_kind: Literal["claude", "pi", "codex"] = "claude"
+    # change 2026-10-06-provider-multi-agent-kind（D-004）：单值改引擎集合——一条凭证
+    # 可服务多个引擎，至少一个（min_length=1，无默认值，必须显式传）；保序去重
+    # （["claude","claude"] 归一为 ["claude"]，validator 见下）。
+    agent_kinds: list[Literal["claude", "pi", "codex"]] = Field(min_length=1)
     base_url: str | None = None
     api_key: str | None = None
     model: str | None = None
@@ -39,17 +41,24 @@ class LlmProviderCreate(BaseModel):
     # 2026-08-20 task-12（D-9）：多模态三态；None=不动（更新）/auto（创建默认走列默认）。
     multimodal: str | None = Field(default=None, pattern="^(auto|true|false)$")
 
+    @field_validator("agent_kinds")
+    @classmethod
+    def _dedupe_agent_kinds(cls, v: list[str]) -> list[str]:
+        """保序去重（D-004）：重复引擎归一；去重后空表由 min_length 拦。"""
+        return list(dict.fromkeys(v))
+
     @model_validator(mode="after")
     def _forbid_pi_openai_chat(self) -> LlmProviderCreate:
-        """pi × openai_chat 禁配（task-05 / FR-04 / D-012 连带声明）。
+        """pi × openai_chat 禁配——集合级判定（task-05 / FR-04 / D-012；D-005 升级）。
 
         该组合两层注入均不生效：pi env 层不带端点（不读 BASE_URL）、文件层
         models.json 仅 anthropic 形态直连，openai_chat 通道对 pi 无消费方。
-        Create 侧在此 422（ValidationError 自然冒泡）；Update 侧无 agent_kind
-        字段（Grill B-4），组合校验落 service 层取行后判（Plan 约束 2）。
+        Create 侧在此 422（ValidationError 自然冒泡，勾集含 pi 即拒）；Update 侧
+        agent_kinds 可选（None=不动），组合校验落 service 层取行合并后判
+        （Plan 约束 2，双口径同语义）。
         codex/claude × openai_chat 不受限（codex 走 litellm_proxy 通道，D-006）。
         """
-        if self.agent_kind == "pi" and self.api_format == "openai_chat":
+        if "pi" in self.agent_kinds and self.api_format == "openai_chat":
             raise ValueError(
                 "pi 供应商不支持 openai_chat API 格式（两层注入均不生效），"
                 "请改用 anthropic 格式或选择 codex/claude 供应商"
@@ -68,12 +77,23 @@ class LlmProviderUpdate(BaseModel):
     # pattern（见 Create.auth_field 注释）；None=不动原值语义不变。
     auth_field: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
     api_format: Literal["anthropic", "openai_chat"] | None = None
+    # 引擎集合可编辑（D-004/D-006）：None=不动；非 None 时至少一个 + 保序去重
+    # （validator 见下，与 Create 同口径）。
+    agent_kinds: list[Literal["claude", "pi", "codex"]] | None = Field(default=None, min_length=1)
     model_role_mappings: dict[str, Any] | None = None
     default_fallback_model: str | None = None
     extra_env: dict[str, Any] | None = None
     settings_config: dict[str, Any] | None = None
     is_default: bool | None = None
     multimodal: str | None = Field(default=None, pattern="^(auto|true|false)$")
+
+    @field_validator("agent_kinds")
+    @classmethod
+    def _dedupe_agent_kinds(cls, v: list[str] | None) -> list[str] | None:
+        """保序去重（D-004，与 Create 同口径）；None=不动语义透传。"""
+        if v is None:
+            return None
+        return list(dict.fromkeys(v))
 
 
 class LlmProviderRead(BaseModel):
@@ -82,7 +102,7 @@ class LlmProviderRead(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     name: str
-    agent_kind: str
+    agent_kinds: list[str]
     base_url: str | None
     model: str | None
     notes: str | None
