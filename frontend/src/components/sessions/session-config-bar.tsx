@@ -409,7 +409,7 @@ export function SessionConfigBar({
     () =>
       effectiveEngine == null
         ? providers
-        : providers.filter((p) => p.agent_kind === effectiveEngine),
+        : providers.filter((p) => p.agent_kinds.includes(effectiveEngine)),
     [providers, effectiveEngine],
   );
 

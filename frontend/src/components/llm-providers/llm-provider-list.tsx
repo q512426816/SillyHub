@@ -226,7 +226,11 @@ export function LlmProviderSection() {
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">{p.name}</span>
-                  <Badge variant="warning">{p.agent_kind}</Badge>
+                  {(p.agent_kinds ?? []).map((k) => (
+                    <Badge key={k} variant="warning">
+                      {k}
+                    </Badge>
+                  ))}
                   {p.api_format === "openai_chat" && (
                     <Badge variant="outline" className="gap-0.5" title="OpenAI 格式（经 LiteLLM 网关消费）">
                       OpenAI

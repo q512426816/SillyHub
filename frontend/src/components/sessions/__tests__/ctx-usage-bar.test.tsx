@@ -78,7 +78,7 @@ function provider(over: Partial<LlmProviderRead> = {}): LlmProviderRead {
     id: "p-zhipu",
     user_id: "u-1",
     name: "智谱GLM",
-    agent_kind: "pi",
+    agent_kinds: ["pi"],
     base_url: "https://open.bigmodel.cn/api/anthropic",
     model: null,
     notes: null,

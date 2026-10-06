@@ -767,7 +767,7 @@ function LlmProviderSelect({
   });
   const providers = data ?? [];
   const options = useMemo(() => {
-    const filtered = providers.filter((p) => p.agent_kind === engineProvider);
+    const filtered = providers.filter((p) => engineProvider != null && p.agent_kinds.includes(engineProvider));
     const opts = filtered.map((p) => ({ value: p.id, label: p.name }));
     // 编辑态回显：非本人供应商（id 不在列表）→ 占位，不误解绑。
     if (value && !opts.some((o) => o.value === value)) {

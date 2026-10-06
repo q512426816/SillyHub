@@ -31,7 +31,7 @@ const INITIAL: LlmProviderRead = {
   id: "p-1",
   user_id: "u-1",
   name: "Claude 官方",
-  agent_kind: "claude",
+  agent_kinds: ["claude"],
   base_url: "https://api.anthropic.com",
   model: null,
   notes: "官方账号",
@@ -80,7 +80,7 @@ describe("LlmProviderForm — 新建模式", () => {
     expect(values.name).toBe("Kimi 中转");
     expect(values.api_key).toBe("sk-secret-1234");
     expect(values.base_url).toBe("https://api.moonshot.cn/anthropic");
-    expect(values.agent_kind).toBe("claude");
+    expect(values.agent_kinds).toEqual(["claude"]);
     expect(values.auth_field).toBe("ANTHROPIC_AUTH_TOKEN"); // 默认值
     // 4 行角色映射 + 空 extra_env 结构存在
     expect(values.model_role_mappings).toHaveProperty("sonnet");
@@ -91,7 +91,7 @@ describe("LlmProviderForm — 新建模式", () => {
     // lib 组装层零回归（task-07 扩 allowed_paths 后补）：缺省 claude 经 formToCreate
     // 产出的 POST body agent_kind 仍为 "claude"、auth_field 为缺省两选项之一。
     const body = formToCreate(values);
-    expect(body.agent_kind).toBe("claude");
+    expect(body.agent_kinds).toEqual(["claude"]);
     expect(body.auth_field).toBe("ANTHROPIC_AUTH_TOKEN");
   });
 
@@ -392,27 +392,26 @@ describe("LlmProviderForm — 字段 ↔ settings_config.env 联动（ql-2026082
 // design §5.2：pi 凭证行的 auth_field 为任意合法 env 变量名（pattern
 // ^[A-Z][A-Z0-9_]*$，与 backend task-04 同款）；claude 侧两选项下拉与 env 改名
 // 联动零回归。
+/** D-004 多选：勾/取消引擎复选框（label 文本匹配）。 */
+const toggleKind = (label: string): void => {
+  fireEvent.click(screen.getByRole("checkbox", { name: new RegExp(label) }));
+};
+
 describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
-  /** 把 Agent 种类下拉切到 pi（新建缺省 claude → pi）。 */
+  /** 把引擎集合从 [claude] 切到 [pi]（勾 Pi + 取消 Claude Code）。 */
   const switchToPi = (): void => {
-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
-      target: { value: "pi" },
-    });
+    toggleKind("Pi");
+    toggleKind("Claude Code");
   };
 
   it("pi 选项不再 disabled，切换后提交 values.agent_kind='pi'", async () => {
     const onSubmit = vi.fn();
     render(<LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />);
 
-    const kindSelect = screen.getByDisplayValue("Claude Code") as HTMLSelectElement;
-    const piOption = kindSelect.querySelector(
-      'option[value="pi"]',
-    ) as HTMLOptionElement;
-    expect(piOption.disabled).toBe(false);
-    expect(piOption.textContent).toBe("Pi"); // 不再带「（即将支持）」后缀
+    const piCheckbox = screen.getByRole("checkbox", { name: "Pi" }) as HTMLInputElement;
+    expect(piCheckbox.disabled).toBe(false);
 
-    fireEvent.change(kindSelect, { target: { value: "pi" } });
-    expect(kindSelect.value).toBe("pi");
+    switchToPi();
 
     fireEvent.change(
       screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/),
@@ -425,7 +424,7 @@ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const values = onSubmit.mock.calls[0]![0]!;
-    expect(values.agent_kind).toBe("pi");
+    expect(values.agent_kinds).toEqual(["pi"]);
   });
 
   it("pi 时认证字段泛化为可输入 env 名，ZAI_API_KEY 随 payload 透传", async () => {
@@ -453,13 +452,13 @@ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const values = onSubmit.mock.calls[0]![0]!;
-    expect(values.agent_kind).toBe("pi");
+    expect(values.agent_kinds).toEqual(["pi"]);
     expect(values.auth_field).toBe("ZAI_API_KEY");
     // lib 组装层（design §6 llm-providers.ts 行，execute 期曾在此吞 pi）：pi 表单经
     // formToCreate 产出的 POST body agent_kind==='pi' 且 auth_field 为所填 env 名
     // （backend task-04 已放开 env 名 pattern；createProvider 把该 body 原样 json 透传）。
     const body = formToCreate(values);
-    expect(body.agent_kind).toBe("pi");
+    expect(body.agent_kinds).toEqual(["pi"]);
     expect(body.auth_field).toBe("ZAI_API_KEY");
   });
 
@@ -511,15 +510,14 @@ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
     // pi 自由输入不渲染
     expect(screen.queryByPlaceholderText(/ZAI_API_KEY/)).toBeNull();
 
-    const kindSelect = screen.getByDisplayValue("Claude Code") as HTMLSelectElement;
     // task-06 起 codex 启用（凭证走 daemon CODEX_HOME 文件注入）；仅 gemini 占位。
     expect(
-      (kindSelect.querySelector('option[value="codex"]') as HTMLOptionElement)
-        .disabled,
+      (screen.getByRole("checkbox", { name: "Codex" }) as HTMLInputElement).disabled,
     ).toBe(false);
     expect(
-      (kindSelect.querySelector('option[value="gemini"]') as HTMLOptionElement)
-        .disabled,
+      (
+        screen.getByRole("checkbox", { name: /Gemini（即将支持）/ }) as HTMLInputElement
+      ).disabled,
     ).toBe(true);
   });
 });
@@ -529,26 +527,20 @@ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
 // task-01），不经 env auth_field；agent_kind 词表 backend task-05 已增 codex
 // （仅 Create），前端表单跟进放开选项。
 describe("LlmProviderForm — agent_kind=codex（task-06 / FR-05）", () => {
-  /** 把 Agent 种类下拉切到 codex（新建缺省 claude → codex）。 */
+  /** 把引擎集合从 [claude] 切到 [codex]。 */
   const switchToCodex = (): void => {
-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
-      target: { value: "codex" },
-    });
+    toggleKind("Codex");
+    toggleKind("Claude Code");
   };
 
   it("codex 选项不再 disabled（标签无「即将支持」后缀），切换后提交 values.agent_kind='codex'", async () => {
     const onSubmit = vi.fn();
     render(<LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />);
 
-    const kindSelect = screen.getByDisplayValue("Claude Code") as HTMLSelectElement;
-    const codexOption = kindSelect.querySelector(
-      'option[value="codex"]',
-    ) as HTMLOptionElement;
-    expect(codexOption.disabled).toBe(false);
-    expect(codexOption.textContent).toBe("Codex"); // 照 pi 先例：启用后不带后缀
+    const codexCheckbox = screen.getByRole("checkbox", { name: "Codex" }) as HTMLInputElement;
+    expect(codexCheckbox.disabled).toBe(false);
 
-    fireEvent.change(kindSelect, { target: { value: "codex" } });
-    expect(kindSelect.value).toBe("codex");
+    switchToCodex();
 
     fireEvent.change(
       screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/),
@@ -561,10 +553,10 @@ describe("LlmProviderForm — agent_kind=codex（task-06 / FR-05）", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const values = onSubmit.mock.calls[0]![0]!;
-    expect(values.agent_kind).toBe("codex");
+    expect(values.agent_kinds).toEqual(["codex"]);
     // lib 组装层：formToCreate 产出的 POST body agent_kind 透传 codex
     const body = formToCreate(values);
-    expect(body.agent_kind).toBe("codex");
+    expect(body.agent_kinds).toEqual(["codex"]);
   });
 
   it("编辑态 initial.agent_kind='codex' 回填 codex（未知值仍归一 claude 的边界不回归）", async () => {
@@ -572,34 +564,32 @@ describe("LlmProviderForm — agent_kind=codex（task-06 / FR-05）", () => {
     render(
       <LlmProviderForm
         mode="edit"
-        initial={{ ...INITIAL, agent_kind: "codex", name: "Codex 行" }}
+        initial={{ ...INITIAL, agent_kinds: ["codex"], name: "Codex 行" }}
         onSubmit={onSubmit}
         onCancel={vi.fn()}
       />,
     );
 
-    const kindSelect = screen.getByDisplayValue("Codex") as HTMLSelectElement;
-    expect(kindSelect.value).toBe("codex");
+    const codexCheckbox = screen.getByRole("checkbox", { name: "Codex" }) as HTMLInputElement;
+    expect(codexCheckbox.checked).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0]![0]!.agent_kind).toBe("codex");
+    expect(onSubmit.mock.calls[0]![0]!.agent_kinds).toEqual(["codex"]);
   });
 
   it("从 pi（自由 env 名）切到 codex → auth_field 归一回缺省（下拉不出无匹配空值）", () => {
     render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
     // 先切 pi 填自由 env 名
-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
-      target: { value: "pi" },
-    });
+    toggleKind("Pi");
+    toggleKind("Claude Code");
     fireEvent.change(screen.getByPlaceholderText(/ZAI_API_KEY/), {
       target: { value: "ZAI_API_KEY" },
     });
     // 切 codex：认证字段块按 claude 形态渲染（codex 不消费 auth_field），
     // pi 自由输入值不在两选项内 → 归一回缺省（照切 claude 同款先例）。
-    fireEvent.change(screen.getByDisplayValue("Pi"), {
-      target: { value: "codex" },
-    });
+    toggleKind("Codex");
+    toggleKind("Pi");
     expect(
       screen.getByDisplayValue("ANTHROPIC_AUTH_TOKEN（默认，中转站常用）"),
     ).toBeTruthy();
@@ -614,9 +604,8 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
   it("pi 选中时 openai_chat 选项 disabled + 禁配提示可见；anthropic 仍可选", () => {
     render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
 
-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
-      target: { value: "pi" },
-    });
+    toggleKind("Pi");
+    toggleKind("Claude Code");
 
     const formatSelect = screen.getAllByRole("combobox").find(
       (s) => (s as HTMLSelectElement).value === "anthropic",
@@ -635,7 +624,7 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
     ).toBeTruthy();
   });
 
-  it("openai_chat 状态下切到 pi → api_format 归一回 anthropic（照 authField 归一先例）", () => {
+  it("openai_chat 状态下 pi 复选框前置禁用（D-005 集合级前置，取代旧「切 pi 归一格式」）", () => {
     render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
 
     // 先切 OpenAI Chat（claude 允许）
@@ -644,15 +633,14 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
     ) as HTMLSelectElement;
     fireEvent.change(formatSelect, { target: { value: "openai_chat" } });
 
-    // 切 pi → 归一回 anthropic，不出「选中着 disabled 项」的悬挂态
-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
-      target: { value: "pi" },
-    });
-    const after = screen.getAllByRole("combobox").find(
-      (s) => (s as HTMLSelectElement).value === "anthropic",
-    ) as HTMLSelectElement;
-    expect(after).toBeTruthy();
-    expect(screen.queryByRole("alert")).toBeNull(); // 归一后无报错态
+    // pi 复选框禁用 + 提示；点击不可勾选（防悬挂态——勾不上即无「选中着禁配项」）
+    const piCheckbox = screen.getByRole("checkbox", { name: /Pi/ }) as HTMLInputElement;
+    expect(piCheckbox.disabled).toBe(true);
+    expect(screen.getByText(/openai 格式不可用/)).toBeTruthy();
+    fireEvent.click(piCheckbox);
+    expect(
+      (screen.getByRole("checkbox", { name: /Pi/ }) as HTMLInputElement).checked,
+    ).toBe(false);
   });
 
   it("存量 pi×openai_chat 行进编辑态（绕过下拉的路径）→ 报错文案与后端 422 逐字一致且提交被拦", async () => {
@@ -660,7 +648,7 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
     render(
       <LlmProviderForm
         mode="edit"
-        initial={{ ...INITIAL, agent_kind: "pi", api_format: "openai_chat" }}
+        initial={{ ...INITIAL, agent_kinds: ["pi"], api_format: "openai_chat" }}
         onSubmit={onSubmit}
         onCancel={vi.fn()}
       />,
@@ -689,9 +677,8 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
     const onSubmit = vi.fn();
     render(<LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />);
 
-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
-      target: { value: "codex" },
-    });
+    toggleKind("Codex");
+    toggleKind("Claude Code");
     const formatSelect = screen.getAllByRole("combobox").find(
       (s) => (s as HTMLSelectElement).value === "anthropic",
     ) as HTMLSelectElement;
@@ -712,7 +699,7 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
     fireEvent.click(screen.getByRole("button", { name: "创建供应商" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const values = onSubmit.mock.calls[0]![0]!;
-    expect(values.agent_kind).toBe("codex");
+    expect(values.agent_kinds).toEqual(["codex"]);
     expect(values.api_format).toBe("openai_chat");
   });
 
@@ -721,9 +708,8 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
     // claude 下不出现 pi 专属提示
     expect(screen.queryByText(/自定义端点/)).toBeNull();
 
-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
-      target: { value: "pi" },
-    });
+    toggleKind("Pi");
+    toggleKind("Claude Code");
     expect(
       screen.getByText(/auth\.json \/ models\.json \/ settings\.json 三文件/),
     ).toBeTruthy();
@@ -799,9 +785,8 @@ describe("LlmProviderForm — 引擎自动压缩区（claude 条件渲染）", (
     );
     // 切 pi
     // agent_kind 下拉（label「引擎类型」关联的 select）
-    fireEvent.change(screen.getByLabelText("Agent 种类"), {
-      target: { value: "pi" },
-    });
+    toggleKind("Pi");
+    toggleKind("Claude Code");
     expect(screen.queryByText("引擎自动压缩（claude）")).toBeNull();
   });
 });

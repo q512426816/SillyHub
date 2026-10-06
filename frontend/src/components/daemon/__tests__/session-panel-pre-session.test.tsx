@@ -758,7 +758,7 @@ describe("SessionPanel 预会话配置条与团队行（ql-20260823-008 完全�
       // ql-20260911-020：1e4bb818f（session-provider-switch-codex-pi task-05）给
       // 供应商下拉加 agent_kind 引擎过滤——mock 缺 agent_kind 字段被过滤后下拉空，
       // 本用例断言「选择 智谱 GLM」按钮找不到。补 kind 字段对齐真实 DTO。
-      { id: "prov-1", name: "智谱 GLM", agent_kind: "claude" },
+      { id: "prov-1", name: "智谱 GLM", agent_kinds: ["claude"] },
     ] as never);
     sessionApi.createSession.mockResolvedValue({
       session_id: "sess-pre-new",

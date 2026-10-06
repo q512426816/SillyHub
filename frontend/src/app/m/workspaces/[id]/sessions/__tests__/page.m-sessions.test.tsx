@@ -241,7 +241,7 @@ function makeProvider(id = "p-1"): LlmProviderRead {
     id,
     user_id: "u-1",
     name: `provider-${id}`,
-    agent_kind: "claude",
+    agent_kinds: ["claude"],
     base_url: null,
     model: null,
     notes: null,
