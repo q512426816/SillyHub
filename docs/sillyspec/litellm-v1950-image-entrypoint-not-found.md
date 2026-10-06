@@ -176,3 +176,21 @@ model 全部正确（change 2026-10-06-opencode-settings-config-poison）。
 **教训：编辑供应商行数据时必须同步检查 settings_config——其 env 块优先级高于
 base_url / auth_field / model 全部平台字段，残留即毒**。旧会话的 providerConfig 快照
 含毒不回填：换供应商再切回、或直接新会话即愈。
+
+## 处置记录（2026-10-06 下午 ③）——opencode「需代理」结论修正：DNS 污染，非墙；hosts 直连定稿
+
+用户反馈另一台电脑不开代理可直连 opencode.ai。对照实验修正上两节的「网络劫持」表述：
+
+- 默认 DNS / 阿里 DNS（223.5.5.5）对 opencode.ai 持续返回假 IPv4 `103.73.220.215`
+  （TCP 可连但 TLS 挂死/证书对不上）；腾讯 DNSPod（119.29.29.29）返回真 Cloudflare
+  地址 `172.65.90.21-23`；`--resolve` 绕 DNS 直连真地址 **HTTP 200 证书校验通过**——
+  **opencode.ai 未被墙，本机问题是 DNS 解析被污染**（网关无按域名拦截；另一台电脑
+  网络正常即直连可用）。
+- 处置（直连定稿，撤代理方案）：①本机 hosts 钉 `172.65.90.21 opencode.ai`
+  （管理员权限，仅此单域名，可逆）+ flushdns；②服务器供应商行 extra_env 的
+  HTTPS_PROXY 撤除（NULL），notes 改记 hosts 方案与换机处置口径。UI 真实新会话
+  端到端验证：直连模式（快照核对 extra_env=null）回复「收到」，第 1 轮已完成
+  （会话 a4eeff61）。
+- **换机口径**：其它机器若报同款「SSL 证书主机名不匹配」= 该机 DNS 同样被污染，
+  同样 hosts 钉真地址即可（可用 DNSPod 119.29.29.29 查询当前真地址，Cloudflare
+  anycast 段稳定但以查询结果为准）；不再依赖任何机器开 Clash。
