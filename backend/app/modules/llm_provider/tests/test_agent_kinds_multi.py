@@ -164,6 +164,31 @@ class TestMultiKindUpdateSemantics:
         assert all(not r.is_default for r in rows if "pi" in r.agent_kinds)
         assert [r.name for r in rows if r.is_default] == ["shrink"]
 
+    @pytest.mark.asyncio
+    async def test_explicit_null_agent_kinds_is_noop(self, db_session: AsyncSession) -> None:
+        """显式 agent_kinds=None（openapi 契约 anyOf 允许 null）= 不动（2026-10-07 followup）。
+
+        openai_chat + 默认行双态同行，一次盖住两条打穿路径：不 pop None 时
+        生效组合判定 `"pi" in None` → TypeError；默认行扩张清兄弟
+        `_clear_sibling_defaults(user, None)` → set(None) TypeError / NOT NULL 违反。
+        """
+        user_id = await _create_user(db_session, label="mk6")
+        svc = LlmProviderService(db_session)
+        row = await svc.create(
+            user_id,
+            LlmProviderCreate(
+                name="oc-null",
+                agent_kinds=["claude", "codex"],
+                api_format="openai_chat",
+                is_default=True,
+            ),
+        )
+        updated = await svc.update(row.id, user_id, LlmProviderUpdate(agent_kinds=None))
+        assert updated.agent_kinds == ["claude", "codex"]
+        assert updated.is_default is True
+        reread = await svc.get(row.id, user_id)
+        assert reread.agent_kinds == ["claude", "codex"]
+
 
 def _all_rows(user_id: uuid.UUID):
     from sqlalchemy import select

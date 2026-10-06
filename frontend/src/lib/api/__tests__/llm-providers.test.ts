@@ -236,6 +236,11 @@ describe("formToUpdate — api_key 留空不出现在 PATCH body（铁律）", (
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     });
   });
+
+  it("agent_kinds 透传到 PATCH body（编辑引擎集合真正提交，2026-10-07 followup）", () => {
+    const body = formToUpdate({ ...FORM_VALUES, agent_kinds: ["claude", "codex"] });
+    expect(body.agent_kinds).toEqual(["claude", "codex"]);
+  });
 });
 
 describe("cleanRoleMappings — 边界", () => {

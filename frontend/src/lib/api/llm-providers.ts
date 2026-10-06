@@ -464,6 +464,9 @@ export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
 export function formToUpdate(v: LlmProviderFormValues): LlmProviderUpdate {
   const update: LlmProviderUpdate = {
     name: v.name.trim(),
+    // 引擎集合必须随 PATCH 提交（2026-10-07 followup）：漏发该键 = 后端按「不传=不动」
+    // 保留旧集合，编辑态引擎复选组静默失效；空集由表单 UI 层「至少保留一个」拦截。
+    agent_kinds: v.agent_kinds,
     api_format: v.api_format,
     base_url: clean(v.base_url) ?? null,
     notes: clean(v.notes) ?? null,

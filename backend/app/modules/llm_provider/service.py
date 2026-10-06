@@ -248,6 +248,13 @@ class LlmProviderService:
         row = await self.get(provider_id, user_id)
         updates = data.model_dump(exclude_unset=True)
 
+        # 2026-10-07 followup：agent_kinds 显式 None = 不动（openapi 契约 anyOf 允许
+        # null；与 api_key/multimodal 同款 None-pop 防护）——不 pop 会让 None 进入下方
+        # 生效组合判定（"pi" in None → TypeError）与 setattr（NOT NULL 违反；默认行
+        # 还会在 _clear_sibling_defaults 触发 set(None) TypeError）。
+        if updates.get("agent_kinds") is None:
+            updates.pop("agent_kinds", None)
+
         # task-05（FR-04 / D-012；D-005 升级集合级）：pi × openai_chat 禁配 Update
         # 侧取行**合并**后判——agent_kinds / api_format 均可选（None=不动），生效组合
         # = 本次显式值 ?? 行现值；勾集含 pi 且生效格式为 openai_chat 即拒（与 Create

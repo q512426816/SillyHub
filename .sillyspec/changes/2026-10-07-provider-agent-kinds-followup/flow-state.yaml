@@ -1,0 +1,24 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  修复 2026-10-06-provider-multi-agent-kind 两处收尾缺陷：编辑供应商时引擎集合改动静默丢失（formToUpdate 漏发 agent_kinds，R-05 toast 提示与服务器实际状态相反）+
+  后端 Update 显式 agent_kinds=null 按契约合法但会打穿 500（pi in None TypeError / NOT NULL 违反）。
+
+  成功标准：
+
+  - 前端 formToUpdate 产出的 PATCH body 携带 agent_kinds（编辑引擎复选集合真正提交），frontend/src/lib/api/__tests__/llm-providers.test.ts
+  formToUpdate 用例补断言覆盖
+
+  - 后端 LlmProviderUpdate 显式 agent_kinds=null 等同「不动」：openai_chat 行传 null 不抛 TypeError、不写
+  NULL、集合不变，backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py 补用例覆盖
+
+  - 定向测试绿：后端 llm_provider 域相关测试 + 前端 llm-providers 表单/api 域测试，tsc 与 eslint（改动文件）0 error
+autopilot: true
+baseline_commit: 0fced95d49b20af6864c8e92cf638c7ed8b2e2e4
+updatedAt: '2026-10-06T23:44:31.766Z'
+baseline_sha256: e8540af34b98fb1231d253cfba52d2875c1ba9c803abbbcb6c6fd9a6153579a7
+
