@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-06-provider-multi-agent-kind",
+  "rows": [
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-06-provider-multi-agent-kind:task-09:acc-0-86eed621",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx",
+        "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx",
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+        "frontend/src/lib/api/__tests__/llm-providers.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-06-provider-multi-agent-kind"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-06-provider-multi-agent-kind:task-09:acc-1-6e302926",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx",
+        "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx",
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+        "frontend/src/lib/api/__tests__/llm-providers.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-06-provider-multi-agent-kind"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-06-provider-multi-agent-kind:task-09:acc-2-90389088",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx",
+        "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx",
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+        "frontend/src/lib/api/__tests__/llm-providers.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-06-provider-multi-agent-kind"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-06-provider-multi-agent-kind:task-09:acc-3-fd64a17e",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx",
+        "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx",
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+        "frontend/src/lib/api/__tests__/llm-providers.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-06-provider-multi-agent-kind"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-06-provider-multi-agent-kind:task-10:acc-0-fd5730b3",
+      "tests": [
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx",
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-06-provider-multi-agent-kind"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-06-provider-multi-agent-kind:task-10:acc-1-8dff8054",
+      "tests": [
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx",
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-06-provider-multi-agent-kind"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-06-provider-multi-agent-kind:task-10:acc-2-2ff978e1",
+      "tests": [
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx",
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-06-provider-multi-agent-kind"
+    }
+  ]
+}

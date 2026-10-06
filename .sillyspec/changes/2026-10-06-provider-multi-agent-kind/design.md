@@ -113,6 +113,12 @@ scale: "large"  # 多文件跨模块（backend llm_provider/daemon 解析链 + f
 
 ## 接口定义
 
+本变更接口面：0 端点。
+
+| 方法 | 路径 | 变更 |
+|---|---|---|
+| （无新端点——既有端点组字段级改造，无接口矩阵行） | | |
+
 - `LlmProviderCreate.agent_kinds: list[str]`（≥1，去重，引擎词表校验；pi∈集 且 api_format=openai_chat → 422 KindFormatForbidden）
 - `LlmProviderUpdate.agent_kinds: list[str] | None`（None=不动）
 - `LlmProviderRead.agent_kinds: list[str]`（替代原 agent_kind: str）

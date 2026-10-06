@@ -24,9 +24,7 @@ target_files:
   - backend/app/modules/daemon/tests/test_resolve_bound_provider_config.py
   - backend/app/modules/daemon/tests/test_provider_switch.py
   - backend/app/modules/daemon/tests/test_provider_switch_integration.py
-  - backend/app/modules/daemon/tests/test_control_command_dispatch.py
   - backend/tests/modules/daemon/lease/test_provider_config_payload.py
-  - backend/app/modules/session_attachment/tests/test_capability.py
 goal: >
   为 agent_kind 到 agent_kinds 多选改造补齐后端测试五域——llm_provider 域（多选/组合禁配/互斥扩张）、解析域（集合命中 + 盖会话引擎 + claim 契约）、扇出域（多引擎各推对应 config + 单引擎回归）、capability 门控域（含群聊 shadow 间接路径）、迁移域（双方言 + 存量转数组 + 索引在位），锁定 FR-01~05 与 R-01/R-06/R-07 风险应对。
 implementation:

@@ -16,14 +16,12 @@ allowed_paths:
   - frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx
   - frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx
   - frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
-  - frontend/src/components/__tests__/agent-profile-form.test.tsx
 target_files:
   - frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx
   - frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx
   - frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx
   - frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx
   - frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
-  - frontend/src/components/__tests__/agent-profile-form.test.tsx
 goal: >
   为 task-08/09 的引擎多选改造补齐前端测试并以编译/静态检查收口（design 总体
   方案 Wave3 第 11 条，R-04）：表单多选交互与 pi×openai 禁用前置、收缩空缺

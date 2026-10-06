@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-06-provider-multi-agent-kind",
+  "generatedAt": "2026-10-06T12:03:11.910Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-multi-agent-kind",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 2,
+        "globEntries": 2
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-multi-agent-kind",
+      "metrics": {
+        "tasks": 11,
+        "hasTest": 11
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-multi-agent-kind",
+      "metrics": {
+        "backendEndpoints": 4206,
+        "frontendCalls": 3
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-multi-agent-kind",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-multi-agent-kind",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-multi-agent-kind",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-multi-agent-kind",
+      "metrics": {
+        "checkedFiles": 12,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "other",
+        "item": "B4 收缩空缺 toast 弹层自动化断言（实现+E2E 实查已过）",
+        "condition": "minor",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "sess.provider=NULL 扇出跳过分支专门用例（同构走查+runtimeNULL 用例已过）",
+        "condition": "minor",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "生产 PG 迁移建议 staging 先走 upgrade/downgrade 往返（开发库已实跑背书）",
+        "condition": "minor",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/llm_provider/tests/test_llm_provider.py",
+      "backend/app/modules/llm_provider/tests/test_api_format.py",
+      "backend/app/modules/daemon/tests/test_resolve_default_provider_config.py",
+      "backend/app/modules/daemon/tests/test_resolve_bound_provider_config.py",
+      "backend/app/modules/daemon/tests/test_provider_switch.py",
+      "backend/tests/modules/daemon/lease/test_provider_config_payload.py",
+      "backend/app/modules/session_attachment/tests/test_capability.py",
+      "backend/app/modules/llm_provider/tests/test_agent_kinds_migration.py",
+      "backend/app/modules/daemon/tests/test_provider_switch_integration.py",
+      "backend/app/modules/daemon/tests/test_control_command_dispatch.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(py45+jsx24)+fr(30)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-06T12:07:27.637Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}
