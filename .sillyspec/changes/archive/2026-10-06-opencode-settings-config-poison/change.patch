@@ -1,0 +1,228 @@
+diff --git a/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/flow-state.yaml b/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/flow-state.yaml
+new file mode 100644
+index 000000000..290291dc5
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/flow-state.yaml
+@@ -0,0 +1,24 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  修复 opencode 会话模型报错根因：供应商行残留旧 settings_config.env（错误 BASE_URL 指向 /v1/chat/completions 全端点 + 无关 sk- key + mimo
++  模型串），注入器规则 7 最高优先级覆盖平台注入 → Claude Code 打错端点报「selected model 不存在」。清 NULL 后新会话 UI 端到端实测回复成功
++
++  成功标准：
++
++  - 服务器 OpenCode Go 供应商行 settings_config 已清 NULL（psql 回显核对）
++
++  - 平台 UI 真实新会话（OpenCode Go + deepseek-v4.1-flash）发送首句收到模型回复（第 1 轮已完成）
++
++  - 坑文档补记 settings_config 覆盖链教训（规则 7 优先级高于平台注入，编辑供应商数据时必须同步检查该字段）
++
++  - 无代码改动，无测试面（纯运维数据 + 文档）
++autopilot: true
++baseline_commit: 0b208e45418203c5a9b3b338ab9178967a1fd1de
++updatedAt: '2026-10-06T04:29:51.495Z'
++baseline_sha256: a8147111b84edd5742d64ec84eb5bde8be51b779d9faa514f73ebb9ec0e8c3ed
++
+diff --git a/docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md b/docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md
+index 9b0133308..668a29763 100644
+--- a/docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md
++++ b/docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md
+@@ -147,3 +147,32 @@ docker-compose.yml` 是 quarantine 提交（2026-10-05）之前的旧版（0 处
+ 实证默认集合 5 个、不含 litellm 系）。**教训：compose 结构性变更（profiles/端口/卷）合并后
+ 必须随下次部署同步服务器 compose 文件**（scp deploy/docker-compose.yml），镜像同步 ≠ 配置
+ 同步；必要时把 compose 同步并进 load-and-up.sh 收口清单。
++
++## 处置记录（2026-10-07）——compose 同步缺口已固化修复（部署教训落地）
++
++上节教训的「必要时」已落为固定动作：① `deploy-to-server` skill 的 scp 清单补上
++`deploy/docker-compose.yml`（镜像同步 ≠ 配置同步的根因就在清单缺件）；②
++`load-and-up.sh` 在 `up -d` 前打印本次启动服务集（`config --services`），配置漂移
++（多出/缺少服务）部署时立见。bash -n / YAML 校验过。分叉拍板（①上游修复跟踪 vs
++②自研薄适配）仍挂起，本文件保持活跃。
++
++## 处置记录（2026-10-06 下午 ②）——opencode「selected model 不存在」终局根因：settings_config 毒覆盖链
++
++opencode 会话残余报错（「There's an issue with the selected model (deepseek-v4.1-flash)」
+++ 部分会话 SSL 报错）的最终根因不在网络也不在模型：**OpenCode Go 供应商行残留旧
++`settings_config.env`**（`ANTHROPIC_BASE_URL` 指向 `/zen/go/v1/chat/completions` 全端点 +
++无关 `sk-` key + mimo-v2.5 模型串，openai_chat 时代/导入残留）。daemon 注入器规则 7
++（settings_config.env 最高优先级，D-007）把规则 0-6 的平台注入**全部覆盖**：
++- Claude Code 实际打 `.../v1/chat/completions/v1/messages`（路径拼错）+ Bearer sk- →
++  上游 404 → 报「selected model 不存在」；
++- 上午 SSL 报错同源叠加（该 host 直连被 TLS 劫持的窗口）。
++
++处置：`UPDATE llm_providers SET settings_config = NULL`（行 68b4b5b9）；清后平台 UI
++**真实新会话**（OpenCode Go + deepseek-v4.1-flash，经本机 daemon + Clash 7897 代理）
++发送「请只回复两个字：收到」→ 模型回复「收到」，第 1 轮已完成（usage ↑35,821 ↓164），
++daemon 会话快照核对 settings_config=null / extra_env=HTTPS_PROXY / base_url / auth_field /
++model 全部正确（change 2026-10-06-opencode-settings-config-poison）。
++
++**教训：编辑供应商行数据时必须同步检查 settings_config——其 env 块优先级高于
++base_url / auth_field / model 全部平台字段，残留即毒**。旧会话的 providerConfig 快照
++含毒不回填：换供应商再切回、或直接新会话即愈。
+diff --git a/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/design.md b/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/design.md
+new file mode 100644
+index 000000000..71153fe1e
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/design.md
+@@ -0,0 +1,42 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-06T04:29:51.468Z
++---
++# 设计记录（Design Record）— 2026-10-06-opencode-settings-config-poison
++
++> 四节每节必答——问题行原样保留（勿删勿改勿用答案替换），答案另起一行写在问题行下方；小改动可写「不适用：<理由>」；flow done 空节拒收。
++> 需要列改动文件时加独立「## 文件变更清单」章节+表格（| 操作 | 路径 | 说明 |）——章节标题是 parseFileChangeList 的识别面，勿写在「接口契约」节内（收口声明面解析不到会误报夹带嫌疑）。
++> 四问原文/FR 标题/镜像任务行是收口锚——问题行/标题从本模板原样保留或复制，勿删勿改、勿用答案整块替换问题原文、勿手打重写（标点也要逐字：2026-10-05 三度实证——句号手写成问号、答案整块替换问题原文均被锚对比拒收）。
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++纯运维数据修复 + 文档补记，无代码改动。根因：OpenCode Go 供应商行残留旧 settings_config.env（错误 ANTHROPIC_BASE_URL 指向 /zen/go/v1/chat/completions 全端点 + 无关 sk- key + mimo 模型串），daemon 注入器规则 7（settings_config.env 最高优先级）覆盖平台全部注入 → Claude Code 打错端点报「selected model 不存在」。处置：psql UPDATE settings_config=NULL（行 68b4b5b9）+ 坑文档补记覆盖链教训。选数据修复而非代码改动：注入器规则 7 的优先级设计本身是有意的（D-007 settings_config 是用户显式配置的最高意志，cc-switch 导入兼容），毒在数据残留不在代码；平台 UI 真实新会话端到端验证（发送「请只回复两个字：收到」→ 回复「收到」，第 1 轮已完成）闭环。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无代码接口变更。可见行为变化：OpenCode Go 供应商的 Claude Code 子进程 env 不再被 settings_config.env 覆盖——新会话按平台注入（base_url=https://opencode.ai/zen/go + x-api-key + deepseek-v4.1-flash 四槽 + HTTPS_PROXY）正确出网。坑文档 litellm-v1950-image-entrypoint-not-found.md 追加 2026-10-06 下午②处置记录。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用：静态配置数据修复，无事件流语义。
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用：后台无流量时隙的一次性 UPDATE（毒配置在则所有 opencode 会话必炸，无正确流量可并发）；之后行只被常规表单更新路径触碰。
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全：新会话/供应商切换时 provider_config 全量重读（claim/resolve_bound 均查行现值），清 NULL 即时生效；已知边界——修复前创建的存量会话 providerConfig 快照含毒不回填（daemon sessions.json 持久化），换供应商再切回或新会话即愈（坑文档已注明）。
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会：单行主键 UPDATE 只影响该部署实例的该供应商；settings_config 本就是 per-provider 字段，清空后该供应商会话统一走平台注入链，无跨实例语义。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：清 NULL 后丢失的 enabledPlugins/skipDangerousModePermissionPrompt/model=fable 等键原本是否被用户依赖——判定不依赖：这些键来自 openai_chat 时代/导入残留，与 anthropic 直连链路冲突且正是本次故障根因，属毒数据（若用户后续要插件开关，前端表单可重配）。放弃的方案：①保留 settings_config 仅删 env 子键——保留的 model=fable 仍会改 claude settings.json 行为且其余键语义未审计，不如整清干净；②代码层加「settings_config.env 含 ANTHROPIC_BASE_URL 时告警」防护——属产品设计面（规则 7 的优先级是有意设计），超出本事故修复范围，坑文档留教训即可。
+diff --git a/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/proposal.md b/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/proposal.md
+new file mode 100644
+index 000000000..e358b625a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-06T04:29:51.468Z
++---
++# 提案书（Proposal）— 2026-10-06-opencode-settings-config-poison
++
++## 动机
++
++任务原话转写：修复 opencode 会话模型报错根因：供应商行残留旧 settings_config.env（错误 BASE_URL 指向 /v1/chat/completions 全端点 + 无关 sk- key + mimo 模型串），注入器规则 7 最高优先级覆盖平台注入 → Claude Code 打错端点报「selected model 不存在」。清 NULL 后新会话 UI 端到端实测回复成功
++成功标准：
++- 服务器 OpenCode Go 供应商行 settings_config 已清 NULL（psql 回显核对）
++- 平台 UI 真实新会话（OpenCode Go + deepseek-v4.1-flash）发送首句收到模型回复（第 1 轮已完成）
++- 坑文档补记 settings_config 覆盖链教训（规则 7 优先级高于平台注入，编辑供应商数据时必须同步检查该字段）
++- 无代码改动，无测试面（纯运维数据 + 文档）
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. 服务器 OpenCode Go 供应商行 settings_config 已清 NULL（psql 回显核对）
++2. 平台 UI 真实新会话（OpenCode Go + deepseek-v4.1-flash）发送首句收到模型回复（第 1 轮已完成）
++3. 坑文档补记 settings_config 覆盖链教训（规则 7 优先级高于平台注入，编辑供应商数据时必须同步检查该字段）
++4. 无代码改动，无测试面（纯运维数据 + 文档）
++
++## 成功标准（可验证）
++
++1. 服务器 OpenCode Go 供应商行 settings_config 已清 NULL（psql 回显核对）
++2. 平台 UI 真实新会话（OpenCode Go + deepseek-v4.1-flash）发送首句收到模型回复（第 1 轮已完成）
++3. 坑文档补记 settings_config 覆盖链教训（规则 7 优先级高于平台注入，编辑供应商数据时必须同步检查该字段）
++4. 无代码改动，无测试面（纯运维数据 + 文档）
+diff --git a/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/requirements.md b/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/requirements.md
+new file mode 100644
+index 000000000..3a1e103ae
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/requirements.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-06T04:29:51.468Z
++---
++# 需求规格（Requirements）— 2026-10-06-opencode-settings-config-poison
++
++## 功能需求
++
++> FR 由你撰写：每条 = `### FR-NN: 标题` + 一句带强度词的行为规定（必须=硬性；禁止=红线；
++> SHOULD=建议须注理由；可以=可选）；边界情形加场景块 `#### 场景：名` + Given/When/Then 行。
++> 标题行是成功标准锚（勿改写——收口做门柱对比）；正文与场景块归你。
++
++### FR-01: 服务器 OpenCode Go 供应商行 settings_config 已清 NULL（psql 回显核对）
++
++- 服务器 47.113.145.252 llm_providers 行 OpenCode Go 的 settings_config 必须为 NULL（注入器规则 7 不再有 env 块可覆盖平台注入）。
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）
++
++### FR-02: 平台 UI 真实新会话（OpenCode Go + deepseek-v4.1-flash）发送首句收到模型回复（第 1 轮已完成）
++
++- 平台 UI 真实新会话（OpenCode Go + deepseek-v4.1-flash，经本机 daemon）发送首句必须收到模型回复且第 1 轮完成（不抛「selected model 不存在」/SSL 报错）。
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）
++
++### FR-03: 坑文档补记 settings_config 覆盖链教训（规则 7 优先级高于平台注入，编辑供应商数据时必须同步检查该字段）
++
++- 坑文档 litellm-v1950-image-entrypoint-not-found.md 必须补记 settings_config 覆盖链教训（规则 7 优先级高于平台注入全部字段，编辑供应商行须同步检查该字段）。
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）
++
++### FR-04: 无代码改动，无测试面（纯运维数据 + 文档）
++
++- 本变更禁止产生代码改动与测试面（纯运维数据 + 文档；仓库规则 0 全量留 CI 不适用——无代码可测）。
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: 不适用：运维数据修正（psql UPDATE + 回显核对），无仓内自动化测试面
++FR-02: 不适用：真机 UI 端到端验证（会话 9dd7cb17 回复「收到」第 1 轮已完成 + daemon 快照 settings_config=null 核对），无仓内自动化测试面
++FR-03: 不适用：文档改动（docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md 2026-10-06 下午②段），以文件内容为证
++FR-04: 不适用：本变更零代码文件改动（git diff 仅文档 + change 工件）
+diff --git a/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/tasks.md b/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/tasks.md
+new file mode 100644
+index 000000000..3602c3690
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-06-opencode-settings-config-poison/tasks.md
+@@ -0,0 +1,16 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-06T04:29:51.468Z
++---
++# 任务注册表（Tasks）— 2026-10-06-opencode-settings-config-poison
++
++> 镜像行（task-01…task-NN）是成功标准逐条镜像=任务锚：勿删勿改写（收口对照它），完成实现路径
++> 需要更细步骤时在镜像行**后追加细化行**（保持 `- [ ] task-NN:` 行形态，编号从镜像行末尾顺延——
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决）。
++> 边干边勾：完成一条 = 实现到位 + 相关测试跑绿 → 当场勾（sillyspec task tick --change 2026-10-06-opencode-settings-config-poison --task task-NN 即时回显进度与下一任务，或 Edit 翻格），勿攒到收口一把勾（收口硬门拒单拍多格勾选；--allow-batch-tick 可显式旁路留痕）。⚠️ harness 的 TodoWrite 类工具不替代本文件——平台进度/收口哨兵只读 tasks.md。
++> `flow status --change 2026-10-06-opencode-settings-config-poison` 为自愿查看/恢复面。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: 服务器 OpenCode Go 供应商行 settings_config 已清 NULL（psql 回显核对）
++- [x] task-02: 平台 UI 真实新会话（OpenCode Go + deepseek-v4.1-flash）发送首句收到模型回复（第 1 轮已完成）
++- [x] task-03: 坑文档补记 settings_config 覆盖链教训（规则 7 优先级高于平台注入，编辑供应商数据时必须同步检查该字段）
++- [x] task-04: 无代码改动，无测试面（纯运维数据 + 文档）

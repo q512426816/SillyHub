@@ -72,3 +72,31 @@ created_at: 2026-10-05T23:35:27.631Z
   confirmed_at: null
   source_change: 2026-10-06-opencode-session-send-incident
   status: active
+
+## FR-auto-sillyspec-049 服务器 OpenCode Go 供应商行 settings_config 已清 NULL（psql 回显核对）
+变更：2026-10-06-opencode-settings-config-poison
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-06-opencode-settings-config-poison/requirements.md#FR-01
+最近确认：18205e82742eba62c020a512efc29e2df21fc718
+
+## FR-auto-sillyspec-050 平台 UI 真实新会话（OpenCode Go + deepseek-v4.1-flash）发送首句收到模型回复（第 1 轮已完成）
+变更：2026-10-06-opencode-settings-config-poison
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-06-opencode-settings-config-poison/requirements.md#FR-02
+最近确认：18205e82742eba62c020a512efc29e2df21fc718
+
+## FR-auto-sillyspec-051 坑文档补记 settings_config 覆盖链教训（规则 7 优先级高于平台注入，编辑供应商数据时必须同步检查该字段）
+变更：2026-10-06-opencode-settings-config-poison
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-06-opencode-settings-config-poison/requirements.md#FR-03
+最近确认：18205e82742eba62c020a512efc29e2df21fc718
+
+## FR-auto-sillyspec-052 无代码改动，无测试面（纯运维数据 + 文档）
+变更：2026-10-06-opencode-settings-config-poison
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-06-opencode-settings-config-poison/requirements.md#FR-04
+最近确认：18205e82742eba62c020a512efc29e2df21fc718

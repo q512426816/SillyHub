@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-06-opencode-settings-config-poison",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "change.patch/提交 18205e827 夹带另一工作流的坑文档段「处置记录（2026-10-07）」，其对应 skill/脚本改动未随本变更入库",
+      "evidence": "git show 18205e827 --stat 仅 6 文件（5 个 change 工件 + 坑文档），但坑文档 diff 同时新增「2026-10-07 compose 同步固化」与「2026-10-06 下午 ②」两段；前者描述的 .claude/skills/deploy-to-server/SKILL.md(+6) 与 deploy/scripts/load-and-up.sh(+4) 改动不在该提交中、仍以未提交状态留在工作区（git status: M load-and-up.sh）——超出本变更 FR/design 声明范围（变更隔离面失守）；且该段日期 2026-10-07 晚于本变更提交日 2026-10-06 12:30 +0800（日期前瞻）。内容本身真实且属同一坑文档，无功能影响，属流程卫生问题。",
+      "location": "docs/sillyspec/litellm-v1950-image-entrypoint-not-found.md:151-157"
+    },
+    {
+      "severity": "P3",
+      "title": "已披露残余风险：settings_config 残留无任何自动防护，规则 7 覆盖链对其它供应商行仍可复现",
+      "evidence": "credential-injector.ts:229 规则 6 Object.assign(env, extra_env) 在前、:238 规则 7 assignSkippingEmptyStrings(env, settings_config.env) 在后同键覆盖（防护声明核对属实），代码层无「settings_config.env 含 ANTHROPIC_BASE_URL 时告警」之类校验——其它经 cc-switch 导入的供应商行若有同类残留会以相同机理再毒，当前唯一防线是坑文档人工教训。design 已在「风险与死路」显式裁决放弃方案②（属产品设计面），非本变更缺陷，记 P3 提示。",
+      "location": "sillyhub-daemon/src/credential-injector.ts:238"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-06T12:33:48+08:00"
+}
