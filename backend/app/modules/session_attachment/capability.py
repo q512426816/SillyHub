@@ -90,7 +90,9 @@ async def resolve_session_gate(
     """会话实际生效 provider 判定（lease 优先级链同源：会话绑定 > 用户默认）。
 
     - 会话显式绑定行（归属校验：仅 daemon 登记者本人）优先；
-    - 为空回退用户 is_default 同 agent_kind 行；
+    - 为空回退用户 is_default 且引擎 ∈ agent_kinds 的行（D-004 集合命中；
+      JSON contains 无双方言运算符 → user_id 先过滤后行级 Python 判断，
+      互斥粒度 (user_id, 引擎) 保证命中唯一）；
     - 再无（本机凭证）→ 保守不支持（模型未知）。
     """
     provider: LlmProvider | None = None
@@ -104,19 +106,17 @@ async def resolve_session_gate(
             )
         ).scalar_one_or_none()
     if provider is None:
-        provider = (
+        candidates = (
             (
                 await session.execute(
-                    select(LlmProvider)
-                    .where(
+                    select(LlmProvider).where(
                         LlmProvider.user_id == user_id,
-                        LlmProvider.agent_kind == agent_kind,
                         LlmProvider.is_default.is_(True),
                     )
-                    .limit(1)
                 )
             )
             .scalars()
-            .first()
+            .all()
         )
+        provider = next((p for p in candidates if agent_kind in (p.agent_kinds or [])), None)
     return resolve_gate(provider)

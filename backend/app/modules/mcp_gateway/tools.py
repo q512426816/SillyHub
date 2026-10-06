@@ -1027,7 +1027,10 @@ def _quota_pool_entry(
             "pool_kind": "independent",
             "llm_provider_id": str(row.id),
             "name": row.name,
-            "agent_kind": row.agent_kind,
+            # 池引擎值（本函数 agent_kind 参数）而非行字段——多引擎行的池归属
+            # 本就按 effective_agent 查得（D-004），描述符口径与 local_shared/
+            # undetermined 两态的 agent_kind 键一致（均为引擎值）。
+            "agent_kind": agent_kind,
             "api_format": row.api_format,
         }
     if pool_kind == "local_shared":
@@ -1225,22 +1228,26 @@ async def get_daemon_status(
         if effective_agent is not None:
             from app.modules.llm_provider.model import LlmProvider
 
-            pool_rows = (
+            # D-004 集合命中：默认行按「引擎 ∈ agent_kinds」匹配——JSON contains
+            # 无双方言运算符 → user_id 先过滤后行级 Python 判断（每用户默认行数
+            # 个位数）。确定序保留：异常多默认时池归属稳定不抖动。
+            candidate_rows = (
                 (
                     await session.execute(
                         select(LlmProvider)
                         .where(
                             LlmProvider.user_id.in_({b.user_id for b in bindings}),
-                            LlmProvider.agent_kind == effective_agent,
                             LlmProvider.is_default.is_(True),
                         )
-                        # 确定序：多默认行（数据异常态）时池归属稳定不抖动。
                         .order_by(LlmProvider.user_id, LlmProvider.name)
                     )
                 )
                 .scalars()
                 .all()
             )
+            pool_rows = [
+                row for row in candidate_rows if effective_agent in (row.agent_kinds or [])
+            ]
             for pool_row in pool_rows:
                 pool_by_user[pool_row.user_id] = _quota_pool_entry(
                     "independent", effective_agent_kind, pool_row=pool_row
