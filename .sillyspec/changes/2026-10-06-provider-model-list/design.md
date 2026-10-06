@@ -117,9 +117,11 @@ models: [
 | 修改 | frontend/src/components/daemon/session-panel/page-helpers.tsx | :502/:541 消费旧模型字段（Grill P1-4） |
 | 修改 | backend/app/modules/daemon/attachment_pipeline.py | 门控调用透传 model_name（P1-3 调用链） |
 | 修改 | backend/app/modules/daemon/group/service/shadow.py | 群聊成员门控透传各会话模型（P1-3） |
-| 修改 | frontend/src/app/m/ 会话模型选择面 | 移动端同源（grep 核实触点） |
+| 修改 | frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx | 移动端会话模型选择同源（grep 复核触点，R-08 清零核对） |
 | 修改 | backend/app/modules/llm_provider/tests/（多文件） | 服务层/折算/校验用例 |
-| 修改 | backend/app/modules/daemon/tests/test_resolve_default_provider_config.py 等 | 注入折算断言 |
+| 修改 | backend/app/modules/daemon/tests/test_resolve_default_provider_config.py | 注入折算断言（含 bound 侧同改） |
+| 修改 | backend/app/modules/daemon/tests/test_resolve_bound_provider_config.py | bound 路径折算断言 |
+| 修改 | tests/modules/daemon/lease/test_provider_config_payload.py | claim payload 契约（两键同值 + models 键） |
 | 修改 | backend/app/modules/session_attachment/tests/test_capability.py | 门控三态×列表用例 |
 | 修改 | frontend/src/components/llm-providers/__tests__/ | 表单编辑器用例 |
 
