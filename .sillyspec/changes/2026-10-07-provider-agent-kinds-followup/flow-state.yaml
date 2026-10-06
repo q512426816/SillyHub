@@ -1,6 +1,7 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -19,6 +20,6 @@ input: >-
   - 定向测试绿：后端 llm_provider 域相关测试 + 前端 llm-providers 表单/api 域测试，tsc 与 eslint（改动文件）0 error
 autopilot: true
 baseline_commit: 0fced95d49b20af6864c8e92cf638c7ed8b2e2e4
-updatedAt: '2026-10-06T23:44:31.766Z'
+updatedAt: '2026-10-06T23:51:32.419Z'
 baseline_sha256: e8540af34b98fb1231d253cfba52d2875c1ba9c803abbbcb6c6fd9a6153579a7
 
