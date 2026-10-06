@@ -47,8 +47,14 @@ PROD_API_URL=http://192.168.0.143:8001 bash deploy/scripts/build-and-save.sh
 
 ```bash
 scp -i ~/.ssh/aliyun_deploy deploy/images.tar.gz deploy/scripts/load-and-up.sh \
+  deploy/docker-compose.yml \
   root@47.113.145.252:/opt/sillyhub/deploy/deploy/
 ```
+
+> **compose 必须随包同步**（坑 litellm-v1950 处置记录 2026-10-06 教训：镜像同步 ≠ 配置
+> 同步——服务器旧版 compose 缺 profiles 门控，常规 `up -d` 把已隔离的 litellm 重新拉进
+> crash-loop）。compose 有结构性变更（profiles/端口/卷/服务增删）后不同步，服务器永远跑
+> 旧结构。`deploy/.env.*` 变量属敏感件不 scp，仍按需在服务器维护。
 
 传完确认脚本是 LF（CRLF 会让服务器 bash 报 `bad interpreter`）：
 ```bash
