@@ -75,13 +75,19 @@ async def resolve_default_provider_config(
     供 claim 路径(``_inject_provider_config``)与 set_default 即时下发(task-03/04)
     共用,避免两处各写一份「查默认 + 解密 + 构造」逻辑。
 
-    查询口径(D-008 owner 级 + R-05 is_default 互斥):
-    ``user_id AND agent_kind AND is_default=True``,三者对齐才命中。
+    查询口径(D-008 owner 级 + R-05 is_default 互斥;D-004 集合命中):
+    ``user_id AND is_default=True`` 先过滤,行级 ``agent_kind ∈ agent_kinds`` 命中
+    （JSON contains 无 SQLite/PG 双方言运算符 → Python 判断;互斥粒度
+    (user_id, 引擎) 保证同引擎至多一行默认，命中唯一）。
 
     命中:经 ``get_cipher().decrypt`` 解密 api_key 明文,构造 9 字段中性 dict
     (8 核心字段 + settings_config 原样透传,task-04 D-009),返回给调用方自行
     决定如何注入 payload / WS push。未命中 → 返回 None,调用方按 D-007 不加
     provider_config 键(claim)或不推送(set_default)。
+
+    D-005:返回 dict 的 ``agent_kind`` 键**恒为会话引擎值**（即本参数），非行字段
+    ——daemon 注入器按它分发（getInjector(agent_kind)），多引擎行对不同引擎会话
+    下发各自的引擎值。
 
     R-02:明文 api_key 仅在返回 dict 内短暂存在,由调用方立即下发 daemon
     spawn-env 后丢弃;不写 ORM/审计/日志。
@@ -93,12 +99,12 @@ async def resolve_default_provider_config(
         select(LlmProvider)
         .where(
             LlmProvider.user_id == user_id,
-            LlmProvider.agent_kind == agent_kind,
             LlmProvider.is_default.is_(True),
         )
-        .limit(1)
+        .limit(50)
     )
-    provider = (await session.execute(stmt)).scalars().first()
+    candidates = (await session.execute(stmt)).scalars().all()
+    provider = next((p for p in candidates if agent_kind in (p.agent_kinds or [])), None)
     if provider is None:
         return None
 
@@ -113,7 +119,7 @@ async def resolve_default_provider_config(
 
         settings = get_settings()
         return {
-            "agent_kind": provider.agent_kind,
+            "agent_kind": agent_kind,
             "api_format": "openai_chat",
             # task-04（security-audit-remediation / Grill M-1 / D-003@v1）：master key
             # 不再下发明文（原 litellm_auth_token 字段删除）。改下发 litellm_proxy 标记 +
@@ -130,7 +136,7 @@ async def resolve_default_provider_config(
     # 解密 api_key 明文(daemon spawn-env 注入 AUTH_TOKEN/AUTH_API_KEY 必需)
     api_key_plain = get_cipher().decrypt(provider.encrypted_api_key, provider.key_id)
     return {
-        "agent_kind": provider.agent_kind,
+        "agent_kind": agent_kind,
         "base_url": provider.base_url,
         "api_key": api_key_plain,
         "auth_field": provider.auth_field,
@@ -158,7 +164,7 @@ async def resolve_bound_provider_config(
     * **归属（方案A）**：``provider.user_id == user_id``（user_id 为 daemon 登记者
       ``runtime.user_id``）——仅当绑定 provider 属于当前执行用户时才生效，否则
       静默回退用户默认链，不泄露他人凭证。
-    * **引擎一致**：``provider.agent_kind == agent_kind``——防止 codex 引擎档案
+    * **引擎一致**：``agent_kind ∈ provider.agent_kinds``（D-004 集合命中）——防止 codex 引擎档案
       绑了 claude provider 时下发错配凭证（堵 API/DB 直写绕过前端禁用）。
 
     通过则按 ``api_format`` 构造中性 config（anthropic 8 字段 / openai_chat 6 字段），
@@ -181,7 +187,7 @@ async def resolve_bound_provider_config(
     provider = await session.get(LlmProvider, provider_id)
     if provider is None:
         return None
-    if provider.user_id != user_id or provider.agent_kind != agent_kind:
+    if provider.user_id != user_id or agent_kind not in (provider.agent_kinds or []):
         return None
 
     if provider.api_format == "openai_chat":
@@ -189,7 +195,7 @@ async def resolve_bound_provider_config(
 
         settings = get_settings()
         return {
-            "agent_kind": provider.agent_kind,
+            "agent_kind": agent_kind,
             "api_format": "openai_chat",
             # task-04（Grill M-1 / D-003@v1）：与 resolve_default_provider_config
             # 同口径——litellm_auth_token 明文删除，改 litellm_proxy 标记 + hub 代理地址
@@ -204,7 +210,7 @@ async def resolve_bound_provider_config(
 
     api_key_plain = get_cipher().decrypt(provider.encrypted_api_key, provider.key_id)
     return {
-        "agent_kind": provider.agent_kind,
+        "agent_kind": agent_kind,
         "base_url": provider.base_url,
         "api_key": api_key_plain,
         "auth_field": provider.auth_field,

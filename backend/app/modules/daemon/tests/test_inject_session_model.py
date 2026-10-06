@@ -120,7 +120,7 @@ async def _seed_provider(
         id=uuid.uuid4(),
         user_id=user_id,
         name=name,
-        agent_kind=agent_kind,
+        agent_kinds=[agent_kind],
         encrypted_api_key=ct,
         key_id=key_id,
         model=model,

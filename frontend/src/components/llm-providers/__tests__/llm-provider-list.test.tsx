@@ -45,7 +45,7 @@ const baseProvider = (over: Partial<LlmProviderRead>): LlmProviderRead => ({
   id: "p-x",
   user_id: "u-1",
   name: "供应商",
-  agent_kind: "claude",
+  agent_kinds: ["claude"],
   base_url: null,
   model: null,
   notes: null,

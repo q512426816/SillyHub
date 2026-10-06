@@ -61,7 +61,7 @@ export interface LlmProviderRead {
   id: string;
   user_id: string;
   name: string;
-  agent_kind: string;
+  agent_kinds: string[];
   base_url: string | null;
   /** 兼容字段（= default_fallback_model 简写）；表单不直接编辑，仅展示/透传。 */
   model: string | null;
@@ -93,7 +93,7 @@ export interface LlmProviderRead {
 /** POST body。 */
 export interface LlmProviderCreate {
   name: string;
-  agent_kind: LlmProviderAgentKind;
+  agent_kinds: LlmProviderAgentKind[];
   base_url?: string | null;
   api_key?: string | null;
   model?: string | null;
@@ -121,6 +121,8 @@ export interface LlmProviderUpdate {
   notes?: string | null;
   website_url?: string | null;
   auth_field?: LlmProviderAuthField;
+  /** 引擎集合（D-004 多选）；可选，不传=不动。 */
+  agent_kinds?: LlmProviderAgentKind[];
   /** API 协议格式（D-001@v1）；可选，不传=不动。 */
   api_format?: LlmProviderApiFormat;
   model_role_mappings?: Record<string, LlmProviderRoleMapping> | null;
@@ -147,7 +149,7 @@ export interface LlmProviderList {
  */
 export interface LlmProviderFormValues {
   name: string;
-  agent_kind: LlmProviderAgentKind;
+  agent_kinds: LlmProviderAgentKind[];
   /** API 协议格式（D-001@v1）；表单下拉产出，default "anthropic"（task-05）。 */
   api_format: LlmProviderApiFormat;
   base_url: string;
@@ -439,7 +441,7 @@ export function cleanSettingsConfig(
 export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
   return {
     name: v.name.trim(),
-    agent_kind: v.agent_kind,
+    agent_kinds: v.agent_kinds,
     api_format: v.api_format,
     base_url: clean(v.base_url) ?? null,
     api_key: clean(v.api_key) ?? null,

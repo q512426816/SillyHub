@@ -44914,7 +44914,7 @@
               }
             ],
             "title": "Provider Config",
-            "description": "用户默认 LLM 供应商配置。含 agent_kind/base_url/api_key(明文)/auth_field/model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create 阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。"
+            "description": "用户默认 LLM 供应商配置。agent_kind 恒为会话引擎值(D-005)。含 base_url/api_key(明文)/auth_field/model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create 阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。"
           }
         },
         "type": "object",
@@ -50028,15 +50028,18 @@
             "type": "string",
             "title": "Name"
           },
-          "agent_kind": {
-            "type": "string",
-            "enum": [
-              "claude",
-              "pi",
-              "codex"
-            ],
-            "title": "Agent Kind",
-            "default": "claude"
+          "agent_kinds": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "pi",
+                "codex"
+              ]
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Agent Kinds"
           },
           "base_url": {
             "anyOf": [
@@ -50175,7 +50178,8 @@
         },
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "agent_kinds"
         ],
         "title": "LlmProviderCreate"
       },
@@ -50299,9 +50303,12 @@
             "type": "string",
             "title": "Name"
           },
-          "agent_kind": {
-            "type": "string",
-            "title": "Agent Kind"
+          "agent_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Agent Kinds"
           },
           "base_url": {
             "anyOf": [
@@ -50438,7 +50445,7 @@
           "id",
           "user_id",
           "name",
-          "agent_kind",
+          "agent_kinds",
           "base_url",
           "model",
           "notes",
@@ -50548,6 +50555,26 @@
               }
             ],
             "title": "Api Format"
+          },
+          "agent_kinds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "pi",
+                    "codex"
+                  ]
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Kinds"
           },
           "model_role_mappings": {
             "anyOf": [

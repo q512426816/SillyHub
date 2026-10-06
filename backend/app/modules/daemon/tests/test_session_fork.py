@@ -752,7 +752,7 @@ class TestSourceInvariants:
             id=uuid.uuid4(),
             user_id=owner,
             name="GLM-Fork",
-            agent_kind="claude",
+            agent_kinds=["claude"],
             encrypted_api_key=ct,
             key_id=key_id,
             model="glm-4.7",

@@ -15900,7 +15900,7 @@ export interface components {
             stage_dispatch?: boolean | null;
             /**
              * Provider Config
-             * @description 用户默认 LLM 供应商配置。含 agent_kind/base_url/api_key(明文)/auth_field/model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create 阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。
+             * @description 用户默认 LLM 供应商配置。agent_kind 恒为会话引擎值(D-005)。含 base_url/api_key(明文)/auth_field/model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create 阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。
              */
             provider_config?: {
                 [key: string]: unknown;
@@ -18241,12 +18241,8 @@ export interface components {
         LlmProviderCreate: {
             /** Name */
             name: string;
-            /**
-             * Agent Kind
-             * @default claude
-             * @enum {string}
-             */
-            agent_kind: "claude" | "pi" | "codex";
+            /** Agent Kinds */
+            agent_kinds: ("claude" | "pi" | "codex")[];
             /** Base Url */
             base_url?: string | null;
             /** Api Key */
@@ -18350,8 +18346,8 @@ export interface components {
             user_id: string;
             /** Name */
             name: string;
-            /** Agent Kind */
-            agent_kind: string;
+            /** Agent Kinds */
+            agent_kinds: string[];
             /** Base Url */
             base_url: string | null;
             /** Model */
@@ -18416,6 +18412,8 @@ export interface components {
             auth_field?: string | null;
             /** Api Format */
             api_format?: ("anthropic" | "openai_chat") | null;
+            /** Agent Kinds */
+            agent_kinds?: ("claude" | "pi" | "codex")[] | null;
             /** Model Role Mappings */
             model_role_mappings?: {
                 [key: string]: unknown;

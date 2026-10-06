@@ -60,7 +60,7 @@ async def _seed_provider(
         id=uuid.uuid4(),
         user_id=user_id,
         name=f"t04-{name}-{uuid.uuid4().hex[:6]}",
-        agent_kind=agent_kind,
+        agent_kinds=[agent_kind],
         encrypted_api_key=ct,
         key_id=key_id,
         base_url=base_url,

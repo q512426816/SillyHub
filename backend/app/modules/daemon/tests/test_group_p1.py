@@ -185,7 +185,7 @@ async def _seed_llm_provider(db_session: AsyncSession, user_id: uuid.UUID) -> uu
             id=provider_id,
             user_id=user_id,
             name="p1-test-llm",
-            agent_kind="claude",
+            agent_kinds=["claude"],
             encrypted_api_key=b"test-key",
             key_id="test-key-id",
         )

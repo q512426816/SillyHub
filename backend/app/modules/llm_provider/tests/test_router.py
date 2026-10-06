@@ -122,6 +122,7 @@ async def _seed_provider_for_user(
             base_url="https://api.anthropic.com",
             model="claude-sonnet-4",
             is_default=is_default,
+            agent_kinds=["claude"],
         ),
     )
     return row.id
@@ -131,6 +132,7 @@ def _create_body(*, name: str = "p-http", is_default: bool = False) -> dict:
     """HTTP POST /api/llm-providers 创建 body（admin owner，最小字段集）。"""
     return {
         "name": name,
+        "agent_kinds": ["claude"],
         "api_key": "sk-http-secretkey-1234",
         "base_url": "https://api.anthropic.com",
         "model": "claude-sonnet-4",

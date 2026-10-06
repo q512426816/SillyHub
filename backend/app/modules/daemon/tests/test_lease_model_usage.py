@@ -264,7 +264,7 @@ class TestCompleteLeaseProviderFill:
             id=uuid.uuid4(),
             user_id=user_id,
             name="bound-provider",
-            agent_kind="claude_code",
+            agent_kinds=["claude_code"],
             encrypted_api_key=b"dummy",
             key_id="dummy-key",
         )
@@ -294,7 +294,7 @@ class TestCompleteLeaseProviderFill:
             id=uuid.uuid4(),
             user_id=user_id,
             name="dispatch-provider",
-            agent_kind="claude_code",
+            agent_kinds=["claude_code"],
             encrypted_api_key=b"dummy",
             key_id="dummy-key",
         )
@@ -302,7 +302,7 @@ class TestCompleteLeaseProviderFill:
             id=uuid.uuid4(),
             user_id=user_id,
             name="meta-provider",
-            agent_kind="claude_code",
+            agent_kinds=["claude_code"],
             encrypted_api_key=b"dummy",
             key_id="dummy-key",
         )

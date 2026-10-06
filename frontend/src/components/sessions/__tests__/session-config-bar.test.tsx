@@ -180,8 +180,8 @@ beforeEach(() => {
   // task-07：fixture 补 agent_kind（真实后端 LlmProviderRead 恒有该字段；缺省
   // 项会被 kind 过滤滤掉——默认两供应商按 BASE_PROPS 引擎语境给 claude kind）。
   mocks.listProviders.mockReset().mockResolvedValue([
-    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kind: "claude" },
-    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kind: "claude" },
+    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kinds: ["claude"] },
+    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kinds: ["claude"] },
   ]);
   mocks.injectSession.mockReset().mockResolvedValue(INJECT_RESPONSE);
   // task-06（thinking-level）：GET 默认五档+现值 medium（会话态用例按需覆盖）；
@@ -420,10 +420,10 @@ describe("SessionConfigBar 切换供应商", () => {
 describe("SessionConfigBar 供应商下拉 kind 过滤（task-07 / FR-03 / D-002@v1）", () => {
   /** 三 kind 混合列表——断言各引擎只列同 kind 项 + 「不指定（本机默认）」保留。 */
   const MIXED_PROVIDERS = [
-    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kind: "claude" },
-    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kind: "claude" },
-    { id: "prov-codex-1", name: "Codex 专供", model: "gpt-5.2", agent_kind: "codex" },
-    { id: "prov-pi-1", name: "Pi 专供", model: "glm-4.7-air", agent_kind: "pi" },
+    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kinds: ["claude"] },
+    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kinds: ["claude"] },
+    { id: "prov-codex-1", name: "Codex 专供", model: "gpt-5.2", agent_kinds: ["codex"] },
+    { id: "prov-pi-1", name: "Pi 专供", model: "glm-4.7-air", agent_kinds: ["pi"] },
   ];
 
   /** 按引擎渲染并打开供应商下拉（engine null = provisional 悬浮助手形态）。 */
@@ -621,7 +621,7 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     name: "GLM 平台",
     model: "glm-4.7",
     // task-07：kind 字段补齐（本组用例默认 claude 引擎语境；codex 分支内覆盖）。
-    agent_kind: "claude",
+    agent_kinds: ["claude"],
     default_fallback_model: "glm-4.6",
     model_role_mappings: {
       sonnet: { model: "glm-4.7" }, // 与 model 重复 → 去重
@@ -694,7 +694,7 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     cleanup();
     // codex 解锁：选中供应商 → 模型子下拉渲染（与 claude 同构，级联候选不变）
     mocks.listProviders.mockResolvedValue([
-      { ...GLM_PROVIDER, agent_kind: "codex" },
+      { ...GLM_PROVIDER, agent_kinds: ["codex"] },
     ] as never);
     renderBar({
       llmProviderId: "prov-glm",

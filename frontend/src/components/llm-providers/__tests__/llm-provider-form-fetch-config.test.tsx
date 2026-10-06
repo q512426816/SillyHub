@@ -40,7 +40,7 @@ const EDIT_INITIAL: LlmProviderRead = {
   id: "p-1",
   user_id: "u-1",
   name: "Claude 官方",
-  agent_kind: "claude",
+  agent_kinds: ["claude"],
   base_url: "https://api.anthropic.com",
   model: null,
   notes: null,

@@ -68,7 +68,7 @@ const READ = {
   id: "p-1",
   user_id: "u-1",
   name: "Kimi 中转",
-  agent_kind: "claude",
+  agent_kinds: ["claude"],
   base_url: "https://api.moonshot.cn/anthropic",
   model: null,
   notes: null,
@@ -85,7 +85,7 @@ const READ = {
 
 const FORM_VALUES: LlmProviderFormValues = {
   name: "Kimi 中转",
-  agent_kind: "claude",
+  agent_kinds: ["claude"],
   base_url: "https://api.moonshot.cn/anthropic",
   api_key: "sk-secret-1234",
   auth_field: "ANTHROPIC_AUTH_TOKEN",
@@ -126,7 +126,7 @@ describe("llm-providers API — method + path", () => {
     const h = mockFetch({ status: 201, body: READ });
     await createProvider({
       name: "Kimi 中转",
-      agent_kind: "claude",
+      agent_kinds: ["claude"],
       auth_field: "ANTHROPIC_AUTH_TOKEN",
     });
     expect(h.lastMethod()).toBe("POST");
@@ -164,7 +164,7 @@ describe("formToCreate — 表单值 → POST body 映射", () => {
   it("角色映射嵌套结构保留（清洗空行）、extra_env 键值对、api_key 透传", () => {
     const body = formToCreate(FORM_VALUES);
     expect(body.name).toBe("Kimi 中转");
-    expect(body.agent_kind).toBe("claude");
+    expect(body.agent_kinds).toEqual(["claude"]);
     expect(body.api_key).toBe("sk-secret-1234");
     expect(body.auth_field).toBe("ANTHROPIC_AUTH_TOKEN");
     expect(body.default_fallback_model).toBe("kimi-k2");

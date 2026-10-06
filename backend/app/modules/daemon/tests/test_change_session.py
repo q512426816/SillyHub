@@ -1038,7 +1038,7 @@ class TestSessionCreateRequestDto:
             id=uuid.uuid4(),
             user_id=admin.id,
             name="t02-provider",
-            agent_kind="claude",
+            agent_kinds=["claude"],
             encrypted_api_key=ct,
             key_id=key_id,
             model="t02-model",

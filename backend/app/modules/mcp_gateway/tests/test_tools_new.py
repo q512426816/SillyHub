@@ -510,7 +510,7 @@ async def _make_llm_provider(
         LlmProvider(
             id=provider_id,
             user_id=user_id,
-            agent_kind=agent_kind,
+            agent_kinds=[agent_kind],
             name=name,
             api_format=api_format,
             is_default=is_default,

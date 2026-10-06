@@ -273,14 +273,14 @@ async def _resolve_create_inputs(
                 f"LlmProvider '{llm_provider_id}' not found.",
                 details={"llm_provider_id": llm_provider_id},
             )
-        # agent_kind 与引擎（runtime 派生 provider，如 claude/codex）不匹配 →
-        # 422（FR-06），不静默降级。
-        if llm_provider_row.agent_kind != provider:
+        # 引擎（runtime 派生 provider，如 claude/codex）不在供应商引擎集合内 →
+        # 422（FR-06），不静默降级（D-004 集合命中语义）。
+        if provider not in (llm_provider_row.agent_kinds or []):
             raise DaemonSessionLlmProviderKindMismatch(
                 "LlmProvider agent_kind does not match the session engine.",
                 details={
                     "llm_provider_id": llm_provider_id,
-                    "agent_kind": llm_provider_row.agent_kind,
+                    "agent_kinds": llm_provider_row.agent_kinds,
                     "engine": provider,
                 },
             )
@@ -553,13 +553,13 @@ async def _resolve_inject_turn_config(
                         f"LlmProvider '{llm_provider_id}' not found.",
                         details={"llm_provider_id": llm_provider_id},
                     )
-                # FR-06：agent_kind 与会话引擎不匹配 → 422，不静默降级。
-                if provider_row.agent_kind != session.provider:
+                # FR-06：会话引擎不在供应商引擎集合内 → 422，不静默降级（D-004）。
+                if session.provider not in (provider_row.agent_kinds or []):
                     raise DaemonSessionLlmProviderKindMismatch(
                         "LlmProvider agent_kind does not match the session engine.",
                         details={
                             "llm_provider_id": llm_provider_id,
-                            "agent_kind": provider_row.agent_kind,
+                            "agent_kinds": provider_row.agent_kinds,
                             "engine": session.provider,
                         },
                     )

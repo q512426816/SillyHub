@@ -105,7 +105,7 @@ async def _seed_provider(
     svc = LlmProviderService(session)
     return await svc.create(
         user_id,
-        LlmProviderCreate(name=name, base_url=base_url, api_key=api_key),
+        LlmProviderCreate(agent_kinds=["claude"], name=name, base_url=base_url, api_key=api_key),
     )
 
 

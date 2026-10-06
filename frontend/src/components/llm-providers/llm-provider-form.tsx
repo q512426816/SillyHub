@@ -3,6 +3,8 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Download, Loader2, Package, Sparkles } from "lucide-react";
 
+import { message } from "antd";
+
 import { Button } from "@/components/ui/button";
 import { JsonEditor } from "@/components/ui/json-editor";
 import {
@@ -222,13 +224,12 @@ export function LlmProviderForm({
   const isEdit = mode === "edit";
 
   const [name, setName] = useState(initial?.name ?? "");
-  // task-07（D-002@v1）：agent 种类可选——编辑态初值取 initial（pi 行回填 pi，
-  // task-06 起 codex 行回填 codex），新建缺省 claude；其余未知值归一为 claude
-  // （下拉可选项只有 claude/codex/pi）。
-  const [agentKind, setAgentKind] = useState<LlmProviderAgentKind>(
-    initial?.agent_kind === "pi" || initial?.agent_kind === "codex"
-      ? initial.agent_kind
-      : "claude",
+  // change 2026-10-06-provider-multi-agent-kind（D-004）：单选改引擎集合——编辑态
+  // 初值取 initial.agent_kinds（去重兜底），新建缺省 ["claude"]；至少勾一个（提交侧拦）。
+  const [agentKinds, setAgentKinds] = useState<LlmProviderAgentKind[]>(
+    initial?.agent_kinds?.length
+      ? (Array.from(new Set(initial.agent_kinds)) as LlmProviderAgentKind[])
+      : ["claude"],
   );
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [websiteUrl, setWebsiteUrl] = useState(initial?.website_url ?? "");
@@ -362,9 +363,21 @@ export function LlmProviderForm({
       settingsConfig = null;
     }
 
+    // R-05（task-08）：编辑默认供应商时收缩引擎集合 → 被移除引擎的默认位空缺
+    //（不自动转移，D-003）。提交即提示（保存语义=用户确认收缩）。
+    if (isEdit && initial?.is_default) {
+      const removed = (initial.agent_kinds ?? []).filter(
+        (k: string) => !agentKinds.includes(k as LlmProviderAgentKind),
+      );
+      if (removed.length > 0) {
+        void message.warning(
+          `已移除引擎 ${removed.join("、")}：该引擎的默认供应商位已空缺（不会自动转移给其它供应商）`,
+        );
+      }
+    }
     const values: LlmProviderFormValues = {
       name,
-      agent_kind: agentKind,
+      agent_kinds: agentKinds,
       api_format: apiFormat,
       base_url: baseUrl,
       api_key: apiKey,
@@ -510,7 +523,7 @@ export function LlmProviderForm({
 
   /**
    * ql-20260920-007（2026-09-20-claude-autocompact-config / FR-02）：引擎自动压缩
-   * 三键派生态（agentKind=claude 条件区渲染用）。JSON 非法时全空（跟随引擎默认）。
+   * 三键派生态（agentKinds 含 claude 条件区渲染用）。JSON 非法时全空（跟随引擎默认）。
    *   - autoCompactWindow：number | undefined（压缩窗口 token 数）
    *   - autoCompactEnabled：boolean | undefined（三态：undefined=跟随引擎/true=开/false=关）
    *   - precomputeCompactionEnabled：boolean | undefined（勾选=开启后台预计算）
@@ -732,7 +745,7 @@ export function LlmProviderForm({
    * claude 路径不受影响（两选项下拉值恒合法）。
    */
   const piAuthFieldError: string | null = (() => {
-    if (agentKind !== "pi") return null;
+    if (!agentKinds.includes("pi")) return null;
     const v = authField.trim();
     if (v === "") {
       return "认证字段不能为空：pi 凭证需要一个 env 变量名（如 ZAI_API_KEY）。";
@@ -746,12 +759,12 @@ export function LlmProviderForm({
    * pi × openai_chat 禁配兜底（task-06 / FR-05 / D-012 连带声明）：该组合两层
    * 注入均不生效（pi env 层不带端点、文件层仅 anthropic 形态直连），后端
    * Create/Update 均已 422。表单侧下拉对 pi 禁用 openai_chat 选项 + 切 pi 时
-   * 归一 api_format（见 agentKind onChange），此处提交前再拦一道，兜住绕过
+   * 归一 api_format（见引擎勾选 onChange/openai 选项禁用），此处提交前再拦一道，兜住绕过
    * 下拉的路径（如禁配上线前的存量 pi×openai_chat 行进编辑态）。文案与后端
    * 422 逐字对齐（schema._forbid_pi_openai_chat）。
    */
   const piOpenaiChatError: string | null =
-    agentKind === "pi" && apiFormat === "openai_chat"
+    agentKinds.includes("pi") && apiFormat === "openai_chat"
       ? "pi 供应商不支持 openai_chat API 格式（两层注入均不生效），请改用 anthropic 格式或选择 codex/claude 供应商"
       : null;
   const submitDisabled =
@@ -835,41 +848,65 @@ export function LlmProviderForm({
         </div>
         <div>
           <label className={lblCls}>
-            Agent 种类 <span className="text-destructive">*</span>
+            Agent 种类（可多选） <span className="text-destructive">*</span>
           </label>
-          <select
+          {/* D-004 多选：同一份凭证可服务多个引擎；至少勾一个（提交侧拦空集）。 */}
+          <div
+            role="group"
             aria-label="Agent 种类"
-            value={agentKind}
-            onChange={(e) => {
-              const next = e.target.value as LlmProviderAgentKind;
-              setAgentKind(next);
-              // task-07：切回 claude 时若 auth_field 是 pi 自由输入的 env 名（不在
-              // 两选项下拉内）→ 归一回缺省，避免下拉出现无匹配空值。task-06：codex
-              // 认证字段同 claude 形态渲染（codex 不消费 auth_field），归一一并覆盖。
-              if (
-                next !== "pi" &&
-                !AUTH_FIELD_OPTIONS.some((o) => o.value === authField)
-              ) {
-                setAuthField("ANTHROPIC_AUTH_TOKEN");
-              }
-              // task-06（FR-05 / D-012）：pi 时 openai_chat 禁配——从 openai_chat
-              // 切到 pi 即归一回 anthropic（照上方 authField 归一先例），提交侧
-              // piOpenaiChatError 另兜存量/绕过路径。
-              if (next === "pi" && apiFormat === "openai_chat") {
-                setApiFormat("anthropic");
-              }
-            }}
-            className={`mt-0.5 ${inputCls}`}
+            className="mt-0.5 flex flex-wrap gap-x-4 gap-y-1.5"
           >
-            {AGENT_KIND_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value} disabled={o.disabled}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+            {AGENT_KIND_OPTIONS.map((o) => {
+              const checked = agentKinds.includes(o.value as LlmProviderAgentKind);
+              // task-06（FR-05 / D-012；D-005 集合级）：openai_chat 格式下 pi 项
+              // 前置禁用（后端 422 同口径，双端一致）；gemini 占位禁用照旧。
+              const piLocked =
+                o.value === "pi" && apiFormat === "openai_chat" && !checked;
+              const disabled = Boolean(o.disabled) || piLocked;
+              return (
+                <label
+                  key={o.value}
+                  className={`flex items-center gap-1.5 text-sm ${
+                    disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={(e) => {
+                      if (disabled) return; // 防编程式点击绕过禁用（如 fireEvent）
+                      const v = o.value as LlmProviderAgentKind;
+                      const next = e.target.checked
+                        ? [...agentKinds, v]
+                        : agentKinds.filter((k) => k !== v);
+                      if (next.length === 0) return; // 至少保留一个（UI 层不产生空集）
+                      setAgentKinds(next);
+                      // 取消 pi 勾选后若 auth_field 是 pi 自由输入 env 名（不在两
+                      // 选项内）→ 归一回缺省，避免下拉空值（单选时代同款归一）。
+                      if (
+                        !next.includes("pi") &&
+                        !AUTH_FIELD_OPTIONS.some((opt) => opt.value === authField)
+                      ) {
+                        setAuthField("ANTHROPIC_AUTH_TOKEN");
+                      }
+                    }}
+                    className="h-4 w-4 accent-[var(--brand)]"
+                  />
+                  {o.label}
+                  {piLocked && (
+                    <span className="text-xs text-muted-foreground">
+                      （openai 格式不可用）
+                    </span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
           <p className={hintCls}>
-            Claude Code 走默认凭证链；Pi 使用独立凭证池（认证字段可配专属 env 名）；Codex
-            凭证由 daemon 在会话级 CODEX_HOME 目录写入文件（无需认证字段）。gemini 预留。
+            一条凭证可同时服务多个引擎；Claude Code 走默认凭证链；Pi 使用独立凭证池
+            （认证字段可配专属 env 名）；Codex 凭证由 daemon 在会话级 CODEX_HOME
+            目录写入文件。gemini 预留。
           </p>
         </div>
       </div>
@@ -932,7 +969,7 @@ export function LlmProviderForm({
             <option
               key={o.value}
               value={o.value}
-              disabled={agentKind === "pi" && o.value === "openai_chat"}
+              disabled={agentKinds.includes("pi") && o.value === "openai_chat"}
             >
               {o.label}
             </option>
@@ -943,7 +980,7 @@ export function LlmProviderForm({
             ? "OpenAI 格式：Bearer 鉴权，可粘贴完整 .../v1/chat/completions 地址；经 LiteLLM 网关让 Claude Code 消费（端到端 Wave2 上线后可用）。"
             : "Anthropic 格式：ANTHROPIC_* 鉴权，兼容 Claude API 端点（官方/中转站）。"}
         </p>
-        {agentKind === "pi" && (
+        {agentKinds.includes("pi") && (
           <p className={hintCls}>
             pi 供应商不支持 openai_chat API 格式（两层注入均不生效），该选项已禁用——请保持
             Anthropic 格式，或改选 codex/claude 供应商。
@@ -976,7 +1013,7 @@ export function LlmProviderForm({
         <p className={hintCls}>
           Anthropic 格式填 base（如 <code className="text-xs">https://api.anthropic.com</code>）；OpenAI 格式可粘完整地址（如 <code className="text-xs">https://opencode.ai/zen/v1/chat/completions</code>），后端自动剥 /chat/completions。
         </p>
-        {agentKind === "pi" && (
+        {agentKinds.includes("pi") && (
           <p className={hintCls}>
             Pi 自定义端点语义（task-06 / D-008 分层）：填写=自定义端点——daemon 在会话级
             pi 目录写 auth.json / models.json / settings.json 三文件把请求路由到该端点；
@@ -1015,12 +1052,12 @@ export function LlmProviderForm({
               （零回归）；pi 泛化为可输入 env 名（datalist 建议 + pattern 即时校验拦
               提交）。task-06 起 pi × openai_chat 禁配（pi 恒 anthropic），但 pi 分支
               不折叠进 `apiFormat === "anthropic"` 条件——pi 凭证走 env 层按
-              auth_field 注 key 与格式无关，显式 `|| agentKind === "pi"` 防将来
+              auth_field 注 key 与格式无关，显式 `|| agentKinds.includes("pi")` 防将来
               词表/条件变动时 pi 认证字段凭空消失。 */}
-          {(apiFormat === "anthropic" || agentKind === "pi") && (
+          {(apiFormat === "anthropic" || agentKinds.includes("pi")) && (
           <div>
             <label className={lblCls}>认证字段</label>
-            {agentKind === "pi" ? (
+            {agentKinds.includes("pi") ? (
               <>
                 <input
                   list="pi-auth-field-suggestions"
@@ -1270,7 +1307,7 @@ export function LlmProviderForm({
           引擎自动压缩三键结构化区——仅 claude 引擎渲染（pi/codex 压缩机制各自独立，
           不走 settings.json）。三键直写 settings_config 顶层，随 spawn 前白名单
           （claude-settings.ts）落 $CLAUDE_CONFIG_DIR/settings.json。 */}
-      {agentKind === "claude" && (
+      {agentKinds.includes("claude") && (
         <details className="rounded border border-dashed border-input/70 p-3">
           <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
             引擎自动压缩（claude）

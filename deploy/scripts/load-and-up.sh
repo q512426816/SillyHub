@@ -18,6 +18,10 @@ gunzip -c "$TAR" | docker load
 
 echo "==> [2/5] docker compose up -d（用 load 进来的 :latest，不构建）"
 # compose 发现已存在 multi-agent-platform-{backend,frontend}:latest，直接用，不触发 build。
+# 服务集显影（坑 litellm-v1950 教训 2026-10-06：服务器旧 compose 缺 profiles 门控，up -d
+# 把隔离服务拉回 crash-loop——同步 scp compose 后，此处让「本次启动了哪些服务」部署时可见，
+# 多出/少了服务一眼定位配置漂移）。
+echo "    本次启动服务集：$(docker compose --env-file .env config --services | sort | tr '\n' ' ')"
 docker compose --env-file .env up -d
 
 echo "==> [3/5] 清理 dangling 镜像 + 旧 backup tag（服务器磁盘紧张）"

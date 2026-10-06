@@ -24,7 +24,7 @@ describe("LlmProviderForm — API 格式下拉（task-05 / D-001@v1）", () => {
     render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
     // Agent 种类 + API 格式 + 认证字段 = 3 个 select；+ task-12 多模态下拉 +
     // ql-20260920-007（claude 引擎自动压缩三键区，agentKind=claude 恒渲染）。
-    expect(screen.getAllByRole("combobox")).toHaveLength(5);
+    expect(screen.getAllByRole("combobox")).toHaveLength(4);
     expect(screen.getByText("模型角色映射")).toBeInTheDocument();
     expect(screen.getByText("默认兜底模型（可选）")).toBeInTheDocument();
   });
@@ -34,7 +34,7 @@ describe("LlmProviderForm — API 格式下拉（task-05 / D-001@v1）", () => {
     fireEvent.change(getSelectByValue("anthropic"), {
       target: { value: "openai_chat" },
     });
-    expect(screen.getAllByRole("combobox")).toHaveLength(4);
+    expect(screen.getAllByRole("combobox")).toHaveLength(3);
     expect(screen.queryByText("模型角色映射")).not.toBeInTheDocument();
     expect(screen.queryByText("默认兜底模型（可选）")).not.toBeInTheDocument();
     // 认证字段 option 随 select 整块移除
@@ -53,7 +53,7 @@ describe("LlmProviderForm — API 格式下拉（task-05 / D-001@v1）", () => {
     expect(screen.getByText("模型角色映射")).toBeInTheDocument();
     // task-12：+1 多模态下拉；ql-20260920-007：+1 自动压缩下拉
     //（4 = 3 既有 + multimodal + autocompact）。
-    expect(screen.getAllByRole("combobox")).toHaveLength(5);
+    expect(screen.getAllByRole("combobox")).toHaveLength(4);
   });
 
   it("OpenAI 模式提交 → values.api_format === 'openai_chat'", async () => {

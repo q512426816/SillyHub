@@ -3,7 +3,7 @@
 照 ``git_identity/service.py`` 范式：
 - ``__init__(session, *, cipher=None)`` + lazy ``_default_cipher()`` 调 ``get_cipher()``；
 - ``create/update`` 先 ``cipher.encrypt(api_key)`` 再赋 ``encrypted_api_key``（明文永不入 ORM，R-04）；
-- ``(user_id, agent_kind)`` 维度 ``is_default`` 互斥（事务内先清同组再置，R-05）；
+- ``(user_id, 引擎)`` 维度 ``is_default`` 互斥（事务内先清同组再置，R-05；D-004 多引擎行对集合内每个引擎各占一个默认位）；
 - 所有方法按 ``user_id`` 过滤（D-008 owner 级），跨用户访问 → 404/403 不泄漏存在性。
 """
 
@@ -54,7 +54,7 @@ class LlmProviderNotFound(AppError):
 class LlmProviderKindFormatForbidden(AppError):
     """pi × openai_chat 禁配 Update 侧兜底（task-05 / FR-04 / D-012 连带声明）。
 
-    ``LlmProviderUpdate`` 无 ``agent_kind`` 字段（Grill B-4），组合校验只能在
+    ``LlmProviderUpdate`` 的 ``agent_kinds`` 可选（None=不动，Grill B-4 沿袭），组合校验只能在
     ``update`` 取行后判（Plan 约束 2）；Create 侧由 schema ``model_validator``
     先行 422。code 循既有 ``HTTP_<status>_<EVENT>`` 命名范式（N818 ignore）。
     """
@@ -207,12 +207,12 @@ class LlmProviderService:
     ) -> LlmProvider:
         ct, key_id = self._cipher.encrypt(data.api_key or "")
         if data.is_default:
-            await self._clear_sibling_defaults(user_id, data.agent_kind)
+            await self._clear_sibling_defaults(user_id, data.agent_kinds)
         row = LlmProvider(
             id=uuid.uuid4(),
             user_id=user_id,
             name=data.name,
-            agent_kind=data.agent_kind,
+            agent_kinds=data.agent_kinds,
             base_url=data.base_url,
             encrypted_api_key=ct,
             key_id=key_id,
@@ -235,7 +235,7 @@ class LlmProviderService:
             "llm_provider.created",
             provider_id=str(row.id),
             user_id=str(user_id),
-            agent_kind=row.agent_kind,
+            agent_kinds=row.agent_kinds,
         )
         return row
 
@@ -248,14 +248,17 @@ class LlmProviderService:
         row = await self.get(provider_id, user_id)
         updates = data.model_dump(exclude_unset=True)
 
-        # task-05（FR-04 / D-012）：pi × openai_chat 禁配 Update 侧取行后判——
-        # Update DTO 无 agent_kind，只有拿到行才知道组合；仅当本次显式把
-        # api_format 置为 openai_chat 且行是 pi 时拒绝（codex/claude 不受限）。
-        if updates.get("api_format") == "openai_chat" and row.agent_kind == "pi":
+        # task-05（FR-04 / D-012；D-005 升级集合级）：pi × openai_chat 禁配 Update
+        # 侧取行**合并**后判——agent_kinds / api_format 均可选（None=不动），生效组合
+        # = 本次显式值 ?? 行现值；勾集含 pi 且生效格式为 openai_chat 即拒（与 Create
+        # 同口径，双端一致）。
+        effective_kinds = updates.get("agent_kinds", row.agent_kinds)
+        effective_format = updates.get("api_format", row.api_format)
+        if effective_format == "openai_chat" and "pi" in effective_kinds:
             raise LlmProviderKindFormatForbidden(
                 "pi 供应商不支持 openai_chat API 格式（两层注入均不生效），"
                 "请改用 anthropic 格式或选择 codex/claude 供应商",
-                details={"provider_id": str(provider_id), "agent_kind": row.agent_kind},
+                details={"provider_id": str(provider_id), "agent_kinds": effective_kinds},
             )
 
         # api_key 单独处理：None = 不动原密钥；非 None 才重新加密
@@ -269,13 +272,14 @@ class LlmProviderService:
         if updates.get("multimodal") is None:
             updates.pop("multimodal", None)
 
-        # is_default 互斥：置 True 前先清同 (user_id, agent_kind) 兄弟行
+        # is_default 互斥：先应用字段更新再按**新引擎集合**清兄弟（D-006 扩张语义——
+        # 默认行新增引擎时，新增引擎的旧默认兄弟同样要清，互斥不变量按
+        # (user_id, 引擎) 粒度恒成立）。收缩引擎致某引擎默认空缺不自动转移（D-003）。
         want_default = updates.pop("is_default", None)
-        if want_default:
-            await self._clear_sibling_defaults(row.user_id, row.agent_kind, except_id=row.id)
-
         for field, value in updates.items():
             setattr(row, field, value)
+        if want_default or (row.is_default and "agent_kinds" in updates):
+            await self._clear_sibling_defaults(row.user_id, row.agent_kinds, except_id=row.id)
         if want_default is not None:
             row.is_default = want_default
 
@@ -310,7 +314,7 @@ class LlmProviderService:
            不推送**，返回结构化 ``error``（D-003 回滚：原供应商继续服务运行中会话，
            不破坏 G4）。事务内此时仅有 SELECT（``self.get``）无任何 write，回滚 = 不写入。
         2. **互斥置位**：探测成功后事务内 ``_clear_sibling_defaults`` 清同
-           (user_id, agent_kind) 兄弟行 + 置本行 True（R-05 并发互斥，原子 commit）。
+           (user_id, 引擎∈集合) 兄弟行 + 置本行 True（R-05 并发互斥，原子 commit；D-003 全引擎生效）。
         3. **触发热切换**：调 ``resolve_default_provider_config``（task-02 D-006 单一
            真相源）构造新 config → ``notify_provider_switch``（task-04）向 active
            interactive session 推 ``PROVIDER_CONFIG_CHANGED``（D-001 WS 触发）。
@@ -368,8 +372,9 @@ class LlmProviderService:
                 error=probe_result.error or "凭证探测失败",
             )
 
-        # ── step 2: 事务内清同组兄弟 + 置本行 True（R-05 互斥，原子 commit）──
-        await self._clear_sibling_defaults(row.user_id, row.agent_kind, except_id=row.id)
+        # ── step 2: 事务内清同组兄弟 + 置本行 True（R-05 互斥，原子 commit；
+        # D-003/D-006 多引擎：对 agent_kinds 集合内每个引擎清兄弟——全引擎生效）──
+        await self._clear_sibling_defaults(row.user_id, row.agent_kinds, except_id=row.id)
         row.is_default = True
         await self._session.commit()
         await self._session.refresh(row)
@@ -387,8 +392,11 @@ class LlmProviderService:
                 row, user_id=row.user_id, cipher=self._cipher
             )
 
-        # ── step 3: 触发热切换推送（D-001 / D-006 单一真相源 helper）──
-        affected = await self._dispatch_provider_switch(row.user_id, row.agent_kind, unset=False)
+        # ── step 3: 触发热切换推送（D-001 / D-006 单一真相源 helper；按首个引擎
+        # resolve 主 config，其余引擎的扇出归 notify 内部按会话引擎分配）──
+        affected = await self._dispatch_provider_switch(
+            row.user_id, row.agent_kinds[0], unset=False
+        )
         return DefaultSwitchResult(
             switched=True,
             affected_sessions=affected,
@@ -413,7 +421,7 @@ class LlmProviderService:
         daemon 据此回退宿主机本机凭证管理（D-004 / design §5 Wave1 / spawn-env.ts 第 0
         层跳过）。notify best-effort（D-001）：失败仅日志告警、不阻塞 unset 成功。
 
-        若取消后该 (user_id, agent_kind) 无任何默认 → lease 不再注入 provider_config
+        若取消后该 (user_id, 引擎) 无任何默认 → lease 不再注入 provider_config
         → 新会话也回归本机（D-007 兼容策略）。
 
         返回 ``DefaultSwitchResult``：``switched`` 恒 ``True``（unset 不探测、不会失败）、
@@ -432,8 +440,9 @@ class LlmProviderService:
 
             await litellm_client.unregister(litellm_client.litellm_model_name(row.user_id, row.id))
 
-        # task-03 / D-004：触发热切换推送（provider_config=None → daemon 回退本机）。
-        affected = await self._dispatch_provider_switch(row.user_id, row.agent_kind, unset=True)
+        # task-03 / D-004：触发热切换推送（provider_config=None → daemon 回退本机；
+        # 停止场景 notify 对全部活跃会话广播 None（D-006：扇出只影响 set 场景）。
+        affected = await self._dispatch_provider_switch(row.user_id, row.agent_kinds[0], unset=True)
         return DefaultSwitchResult(switched=True, affected_sessions=affected)
 
     async def _dispatch_provider_switch(
@@ -460,7 +469,7 @@ class LlmProviderService:
 
         Args:
             user_id: LlmProvider.user_id（owner 级，D-008）。
-            agent_kind: LlmProvider.agent_kind（claude / codex，R-05 互斥维度）。
+            agent_kind: 引擎值（多引擎行由调用方逐引擎循环扇出，D-006；单值时代即本行种类）。
             unset: True = unset_default 推 None；False = set_default 推 resolve 出的新 config。
 
         Returns:
@@ -497,23 +506,32 @@ class LlmProviderService:
     async def _clear_sibling_defaults(
         self,
         user_id: uuid.UUID,
-        agent_kind: str,
+        agent_kinds: list[str],
         *,
         except_id: uuid.UUID | None = None,
     ) -> None:
-        """单事务内把同 (user_id, agent_kind) 其它行的 is_default 清成 False。"""
-        stmt = (
-            update(LlmProvider)
-            .where(
+        """单事务内把引擎集合与本行相交的其它默认行 ``is_default`` 清成 False。
+
+        D-004 集合语义：同 (user_id, 引擎) 互斥粒度不变——本行勾选的每个引擎的
+        其它默认兄弟都要清（含扩张引擎场景，D-006）。JSON contains 无 SQLite/PG
+        双方言运算符（``@>`` 仅 PG jsonb）→ user_id + is_default 先过滤后行级
+        Python 交集判断（每用户行数几十级，无性能面）。
+        """
+        result = await self._session.execute(
+            select(LlmProvider.id, LlmProvider.agent_kinds).where(
                 LlmProvider.user_id == user_id,
-                LlmProvider.agent_kind == agent_kind,
                 LlmProvider.is_default.is_(True),
             )
-            .values(is_default=False)
         )
-        if except_id is not None:
-            stmt = stmt.where(LlmProvider.id != except_id)
-        await self._session.execute(stmt)
+        target_ids = [
+            row_id
+            for row_id, kinds in result.all()
+            if set(kinds) & set(agent_kinds) and (except_id is None or row_id != except_id)
+        ]
+        if target_ids:
+            await self._session.execute(
+                update(LlmProvider).where(LlmProvider.id.in_(target_ids)).values(is_default=False)
+            )
 
     def _to_read(self, row: LlmProvider) -> LlmProviderRead:
         plaintext = self._cipher.decrypt(row.encrypted_api_key, row.key_id)

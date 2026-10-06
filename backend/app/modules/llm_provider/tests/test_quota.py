@@ -78,6 +78,7 @@ async def _create_provider_via_http(
         headers=auth_headers,
         json={
             "name": name,
+            "agent_kinds": ["claude"],
             "api_key": api_key,
             "base_url": base_url,
             "model": model,
@@ -230,6 +231,7 @@ class TestQuotaNonGlm:
             headers=auth_headers,
             json={
                 "name": "glm-nokey",
+                "agent_kinds": ["claude"],
                 "api_key": "",
                 "base_url": "https://open.bigmodel.cn/api/anthropic",
                 "model": "glm-4.7",
@@ -413,6 +415,7 @@ class TestQuotaAuthAndOwnership:
                 api_key="sk-other-quota-secret-1234",
                 base_url="https://open.bigmodel.cn/api/anthropic",
                 model="glm-4.7",
+                agent_kinds=["claude"],
             ),
         )
 

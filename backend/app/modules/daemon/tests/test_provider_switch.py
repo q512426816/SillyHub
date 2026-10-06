@@ -479,3 +479,53 @@ class TestNotifyProviderSwitchRuntimeNull:
         # 仅正常 session 被推（无 runtime 那条跳过）
         assert result == 1
         assert len(hub.calls) == 1
+
+
+class TestNotifyProviderSwitchMultiEngineFanout:
+    """D-006 扇出（change 2026-10-06-provider-multi-agent-kind / task-07）。"""
+
+    @pytest.mark.asyncio
+    async def test_sessions_receive_own_engine_config(self, db_session, monkeypatch) -> None:
+        """多引擎默认行：claude 会话复用传入 config（引擎同），pi 会话经 resolve 拿
+        agent_kind=pi 的 config——引擎不匹配的组不透传错配凭证。"""
+        from sqlalchemy import select
+
+        from app.modules.llm_provider.model import LlmProvider
+
+        user_id = await _create_user(db_session)
+        rt_c = await _create_runtime(db_session, user_id, name_suffix="mc")
+        rt_p = await _create_runtime(db_session, user_id, name_suffix="mp")
+        sid_c = await _create_interactive_session(db_session, runtime_id=rt_c.id, user_id=user_id)
+        # pi 引擎会话（工厂默认 claude，单独改写 provider 字段）
+        sid_p = await _create_interactive_session(db_session, runtime_id=rt_p.id, user_id=user_id)
+        pi_sess = (
+            await db_session.execute(select(AgentSession).where(AgentSession.id == sid_p))
+        ).scalar_one()
+        pi_sess.provider = "pi"
+        await db_session.commit()
+
+        # 多引擎默认行（直插 ORM，绕 schema 最小化依赖）
+        from app.core.crypto import get_cipher
+
+        ct, key_id = get_cipher().encrypt("sk-fanout-0001")
+        db_session.add(
+            LlmProvider(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                name="multi-default",
+                agent_kinds=["claude", "pi"],
+                encrypted_api_key=ct,
+                key_id=key_id,
+                is_default=True,
+            )
+        )
+        await db_session.commit()
+
+        hub = _patch_hub(monkeypatch)
+        claude_config = {"agent_kind": "claude", "base_url": "https://x", "api_key": "k"}
+        result = await notify_provider_switch(db_session, user_id, claude_config)
+
+        assert result == 2
+        by_session = {call[2].get("session_id"): call[2]["provider_config"] for call in hub.calls}
+        assert by_session[str(sid_c)] == claude_config  # 引擎同 → 复用
+        assert by_session[str(sid_p)]["agent_kind"] == "pi"  # 引擎异 → resolve 盖本引擎
