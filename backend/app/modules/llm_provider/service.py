@@ -392,11 +392,11 @@ class LlmProviderService:
                 row, user_id=row.user_id, cipher=self._cipher
             )
 
-        # ── step 3: 触发热切换推送（D-001 / D-006 单一真相源 helper；多引擎行逐引擎
-        # dispatch——每个引擎各 resolve 一份 config（agent_kind=该引擎），D-006 扇出）──
-        affected = 0
-        for kind in row.agent_kinds:
-            affected += await self._dispatch_provider_switch(row.user_id, kind, unset=False)
+        # ── step 3: 触发热切换推送（D-001 / D-006 单一真相源 helper；按首个引擎
+        # resolve 主 config，其余引擎的扇出归 notify 内部按会话引擎分配）──
+        affected = await self._dispatch_provider_switch(
+            row.user_id, row.agent_kinds[0], unset=False
+        )
         return DefaultSwitchResult(
             switched=True,
             affected_sessions=affected,
@@ -441,10 +441,8 @@ class LlmProviderService:
             await litellm_client.unregister(litellm_client.litellm_model_name(row.user_id, row.id))
 
         # task-03 / D-004：触发热切换推送（provider_config=None → daemon 回退本机；
-        # 多引擎行逐引擎 dispatch，D-006 扇出——每个曾覆盖的引擎都收到停止）。
-        affected = 0
-        for kind in row.agent_kinds:
-            affected += await self._dispatch_provider_switch(row.user_id, kind, unset=True)
+        # 停止场景 notify 对全部活跃会话广播 None（D-006：扇出只影响 set 场景）。
+        affected = await self._dispatch_provider_switch(row.user_id, row.agent_kinds[0], unset=True)
         return DefaultSwitchResult(switched=True, affected_sessions=affected)
 
     async def _dispatch_provider_switch(

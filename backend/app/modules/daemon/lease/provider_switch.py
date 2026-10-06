@@ -1,4 +1,4 @@
-"""notify_provider_switch — 默认供应商变更后查 active interactive session 按 daemon 分组推送热切换。
+"""notify_provider_switch — 默认供应商变更后查 active interactive session 按 daemon 分组推送热切换（D-006 扇出：按会话引擎分配 config）。
 
 change 2026-08-06-provider-switch-live-session / task-04 / FR-06 / D-005@v1 / D-006@v1。
 
@@ -107,6 +107,27 @@ async def notify_provider_switch(
     delivered_count = 0
 
     for sess in rows:
+        # ── D-006 扇出（change 2026-10-06-provider-multi-agent-kind）：多引擎默认行
+        # 对不同引擎会话各推「本会话引擎」的 config——传入 config 与会话引擎相同则
+        # 复用（单引擎场景零回归），否则经 resolve_default_provider_config 按该引擎
+        # 构造（agent_kind=该引擎）；该引擎无默认 → 跳过并告警（best-effort）。
+        # 停止场景（provider_config=None）行为不变：所有会话收 None 回退本机。
+        config_to_push = provider_config
+        if provider_config is not None and provider_config.get("agent_kind") != sess.provider:
+            from app.modules.daemon.lease.context import resolve_default_provider_config
+
+            config_to_push = await resolve_default_provider_config(
+                session, user_id, sess.provider or ""
+            )
+            if config_to_push is None:
+                log.warning(
+                    "provider_switch_engine_default_missing",
+                    session_id=str(sess.id),
+                    engine=sess.provider,
+                    user_id=str(user_id),
+                )
+                continue
+
         # ── step 2: runtime_id → daemon_id（D-005@v1 send_session_control 路由键）──
         runtime_id = sess.runtime_id
         if runtime_id is None:
@@ -134,7 +155,7 @@ async def notify_provider_switch(
         # 热切换即时性缺陷由 daemon 重连对账弥补。
         payload = {
             "session_id": str(sess.id),
-            "provider_config": provider_config,
+            "provider_config": config_to_push,
         }
         try:
             _row, delivered = await ControlCommandService(session).enqueue_and_push(
