@@ -3,6 +3,8 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Download, Loader2, Package, Sparkles } from "lucide-react";
 
+import { message } from "antd";
+
 import { Button } from "@/components/ui/button";
 import { JsonEditor } from "@/components/ui/json-editor";
 import {
@@ -361,6 +363,18 @@ export function LlmProviderForm({
       settingsConfig = null;
     }
 
+    // R-05（task-08）：编辑默认供应商时收缩引擎集合 → 被移除引擎的默认位空缺
+    //（不自动转移，D-003）。提交即提示（保存语义=用户确认收缩）。
+    if (isEdit && initial?.is_default) {
+      const removed = (initial.agent_kinds ?? []).filter(
+        (k: string) => !agentKinds.includes(k as LlmProviderAgentKind),
+      );
+      if (removed.length > 0) {
+        void message.warning(
+          `已移除引擎 ${removed.join("、")}：该引擎的默认供应商位已空缺（不会自动转移给其它供应商）`,
+        );
+      }
+    }
     const values: LlmProviderFormValues = {
       name,
       agent_kinds: agentKinds,
