@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "reviewType": "acceptance",
+  "reviewedFiles": [
+    "changes/2026-10-06-provider-multi-agent-kind/requirements.md",
+    "changes/2026-10-06-provider-multi-agent-kind/design.md",
+    "changes/2026-10-06-provider-multi-agent-kind/tasks.md",
+    "changes/2026-10-06-provider-multi-agent-kind/docs/verification-e2e.md",
+    "backend/migrations/versions/20261006120000_provider_agent_kinds.py",
+    "backend/app/modules/llm_provider/model.py",
+    "backend/app/modules/llm_provider/schema.py",
+    "backend/app/modules/llm_provider/service.py",
+    "backend/app/modules/daemon/lease/context.py",
+    "backend/app/modules/daemon/lease/provider_switch.py",
+    "backend/app/modules/daemon/session/service/inject_gates.py",
+    "backend/app/modules/session_attachment/capability.py",
+    "backend/app/modules/mcp_gateway/tools.py",
+    "backend/app/modules/agent/schema.py",
+    "backend/app/modules/daemon/protocol.py",
+    "backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py",
+    "backend/app/modules/llm_provider/tests/test_agent_kinds_migration.py",
+    "backend/app/modules/daemon/tests/test_provider_switch.py",
+    "backend/app/modules/daemon/tests/test_resolve_default_provider_config.py",
+    "frontend/src/components/llm-providers/llm-provider-form.tsx",
+    "frontend/src/components/sessions/session-config-bar.tsx",
+    "frontend/src/components/agent-profile-form.tsx",
+    "frontend/src/lib/api/llm-providers.ts",
+    "backend/openapi.json",
+    "frontend/src/lib/api-types.ts"
+  ],
+  "docHash": "e2609073d5a0b316e2db3b4481f1e0791d1487238acf256ffbe8aeeb0fd53737",
+  "specVerdict": "pass",
+  "qualityVerdict": "pass",
+  "checklist": [
+    {
+      "item": "FR-01 供应商引擎集合多选（含多引擎命中场景）",
+      "result": "pass",
+      "note": "schema.py agent_kinds list[str] min_length=1+保序去重 validator、model.py JSON 列、前端表单复选组（空集拦截 next.length===0）；多引擎命中由 test_agent_kinds_multi.py 往返用例 + test_resolve_default_provider_config.py TestMultiEngineSetHit（claude/pi 双引擎各自命中且 agent_kind 盖会话引擎）锁定。"
+    },
+    {
+      "item": "FR-02 存量迁移等价（单元素数组/不合并不清理/对称 downgrade）",
+      "result": "pass",
+      "note": "迁移 20261006120000 双方言回填 [旧值]（PG to_jsonb(ARRAY[..])::json / SQLite json_array）、无合并清理逻辑、downgrade 取首元素+复合索引恢复；test_agent_kinds_migration.py 用 MigrationContext+Operations 直驱真实 SQLite 断言终态列/索引/单元素数组与回程。"
+    },
+    {
+      "item": "FR-03 默认全引擎生效与互斥（含扩张清新增引擎兄弟、收缩空缺不转移）",
+      "result": "pass",
+      "note": "service._clear_sibling_defaults 按 user_id+is_default 过滤后行级集合交集清兄弟；update 在 want_default 或默认行改 agent_kinds 时按新集合清（扩张语义）；三个用例分别锁定 set_default 逐引擎清兄弟、扩张清新增引擎兄弟（D-006）、收缩 pi 默认空缺不转移；前端收缩 toast（llm-provider-form.tsx:368-377）实现落地。"
+    },
+    {
+      "item": "FR-04 组合禁配 pi×openai_chat 422 双端",
+      "result": "pass",
+      "note": "后端双口径：Create schema._forbid_pi_openai_chat（model_validator 422）+ update 服务层合并判定（effective_kinds=显式值??行值，LlmProviderKindFormatForbidden 422）；前端 piLocked 勾选项禁用+「（openai 格式不可用）」提示+onChange 编程式点击守卫+openai 下拉禁 pi+piOpenaiChatError 提交兜底；test_expand_to_pi_with_openai_chat_rejected 与 apiformat 6 用例绿，验收 A5 实打 422。"
+    },
+    {
+      "item": "FR-05 解析链集合化与契约保持（五路径+盖会话引擎+扇出+NULL 跳过+daemon 零改动）",
+      "result": "pass",
+      "note": "resolve_default/resolve_bound 行级 agent_kind in agent_kinds 命中且返回 dict agent_kind 恒为入参（会话引擎）；inject_gates 双段（创建/turn）not in 集合 422；capability/mcp tools 默认查询与池描述符（agent_kind 键改池引擎值）同步；notify_provider_switch 按会话引擎分配 config（引擎同复用/异则 resolve/无默认告警跳过，None 停止场景广播不变），TestNotifyProviderSwitchMultiEngineFanout 断言 claude 复用+pi 盖引擎；sillyhub-daemon diff 为 0 字节。小缺口：session.provider=NULL 会话启动扇出跳过分支（provider_switch.py resolve('')→None→告警 continue）无直接测试用例，仅实现覆盖。"
+    },
+    {
+      "item": "design 全局硬约束 7 条",
+      "result": "pass",
+      "note": "①daemon 零改动（diff 空）②agent_kind 盖会话引擎（context.py 两 resolve+测试断言）③互斥含扩张（service+测试）④存量值域不变（迁移测试 rows['p1']=='[\"claude\"]'）⑤422 双端（双口径+前端前置）⑥预设未触碰（llmProviderPresets.ts diff --stat 空）⑦无过渡期（Read DTO 删 agent_kind 单数字段，openapi.json(5 处)/api-types.ts(3 处) 同批重生成，前端同 PR 切换，无兼容层残留）。"
+    },
+    {
+      "item": "设计文件清单 vs 实际 diff 覆盖（漏改/多改）",
+      "result": "pass",
+      "note": "清单实质条目全部落地。3 个清单文件实际未改（session_attachment/tests/test_capability.py、daemon/tests/test_control_command_dispatch.py、frontend agent-profile-form.test.tsx）——grep 证实均无 agent_kind 字段引用（capability 测试为纯函数测试不 seed 行），与清单条目自注「grep 复核为准」一致，非漏改；实际多改的 ~18 个 daemon 测试文件（2 行/个）为 fixture agent_kind=x→agent_kinds=[x] 的波及面，task-07 提交说明已涵盖。"
+    },
+    {
+      "item": "测试真实绿（指定范围实跑）",
+      "result": "pass",
+      "note": "后端 uv run pytest app/modules/llm_provider/tests/ + test_provider_switch.py + test_resolve_default_provider_config.py -q --no-cov -p no:randomly → 272 passed（59.6s，exit 0）；前端 pnpm exec tsc --noEmit → exit 0；pnpm vitest run src/components/llm-providers/__tests__/ → 7 文件 79 passed。均为本评审在 worktree 内实跑。"
+    },
+    {
+      "item": "验收记录真实性（verification-e2e.md API 六项+UI 三项与代码/测试可对上）",
+      "result": "pass",
+      "note": "A1↔创建往返用例、A3↔逐引擎清兄弟用例、A4↔扩张用例、A5↔422 合并判定用例+验收实打、A6↔收缩空缺用例；B1↔list 测试、B2↔form 测试勾选组回填、B3↔apiformat 测试+UI 实查；B4 收缩 toast 实现落地但自动化断言缺（记录 C 节自述「留 CI」，与实际一致，非虚报）；C 节声明的会话命中/扇出覆盖转移与 test_resolve_*/test_provider_switch 实际用例对应；边界备注（is_default 行级布尔语义）与 service 实现及 D-03 非目标声明一致。"
+    },
+    {
+      "item": "残留风险（迁移生产部署/热切换扇出边界/provider_switch 守卫语义）",
+      "result": "gap",
+      "note": "三项需运维/后续关注（均有设计依据，非缺陷）：①PG 分支 to_jsonb 仅本机开发库实跑背书，自动化只覆盖 SQLite——生产 PG 部署建议先 staging 走一遍 upgrade/downgrade；②unset 多引擎默认行对全部活跃会话广播 None，含「其它引擎有独立默认行」的会话也被推回退本机（既有停止场景无差别广播行为，多引擎行放大影响面）；set 场景会话引擎默认空缺（收缩后）则该会话跳过热切换仅告警。③provider_switch 对传入 config 无 agent_kind 键时退化为无差别广播（当前调用方恒传 resolve 产物或 None，无实际暴露）；同引擎多会话逐会话 resolve 非组内缓存（功能等价的小性能冗余）；resolve_default .limit(50) 防御上限在互斥语义下不可达。另：capability 门控与 bound 路径的多值集合命中无专门用例（仅单值等价 fixture 切换，逻辑与 default 路径同构且有测试守护）。"
+    }
+  ],
+  "requiredEvidence": [],
+  "reviewerNotes": "只读评审完成，未做任何 git 写操作。提交链 d1dc7907d..HEAD 实际 8 个提交（任务描述称 7 个，差异为 177dea0e0 独立补 R-05 toast 提交，不影响交付完整性）。worktree 工作区 provider_caps.py 为 CRLF 行尾符伪差异（diff 内容为空），无实质未提交改动。测试面三个已知留白均与验收记录自述一致：B4 toast 自动化断言留 CI、session.provider=NULL 启动扇出分支无直接用例、capability/bound 多值命中无专门用例——实现本身均已兑现且有同构路径测试守护。specVerdict/qualityVerdict 均 pass，gap 项为残留风险登记与测试留白，不构成验收阻断。"
+}

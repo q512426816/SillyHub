@@ -54,6 +54,6 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `_module-map.yaml` | <!--TODO: 有未匹配文件，判定模块索引是否需增改（modules rebuild）--> | pending |
+| `_module-map.yaml` | 不适用：本变更未新增模块/目录，模块索引无需增改（llm_provider/daemon/frontend 均为既有模块面内改动） | skipped |
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。

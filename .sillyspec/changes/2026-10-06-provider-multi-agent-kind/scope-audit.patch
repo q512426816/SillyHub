@@ -1,0 +1,2918 @@
+diff --git a/backend/app/modules/agent/schema.py b/backend/app/modules/agent/schema.py
+index 5fce3c9f9..d98f783e9 100644
+--- a/backend/app/modules/agent/schema.py
++++ b/backend/app/modules/agent/schema.py
+@@ -100,15 +100,16 @@ class ExecutionContextResponse(BaseModel):
+     )
+     # task-06（2026-07-25-llm-provider-management / D-005@v1 / FR-03）：用户默认 LLM
+     # 供应商配置（含解密 api_key），claim/create 阶段下发给 daemon 注入 ANTHROPIC_* env。
+-    # 来源：build_claim_payload 按 lease→user_id 查 is_default 且 agent_kind 对齐的
+-    # LlmProvider，命中才填（8 字段 contract，见 task-06 provides）；用户未配默认
++    # 来源：build_claim_payload 按 lease→user_id 查 is_default 且 引擎∈agent_kinds 的
++    # LlmProvider（D-004 集合命中），命中才填（8 字段 contract，见 task-06 provides；
++    # agent_kind 键恒为会话引擎值 D-005）；用户未配默认
+     # provider → None（absent，D-007 零回归，daemon spawn-env 第0层跳过）。
+     # R-02：明文 api_key 仅在 claim/create 阶段下发；submit/complete/end 链路与
+     # AuditLog / 日志严禁回传（audit_hooks 只读 ORM 列，明文不入 ORM 故捕获不到）。
+     provider_config: dict | None = Field(
+         default=None,
+         description=(
+-            "用户默认 LLM 供应商配置。含 agent_kind/base_url/api_key(明文)/auth_field/"
++            "用户默认 LLM 供应商配置。agent_kind 恒为会话引擎值(D-005)。含 base_url/api_key(明文)/auth_field/"
+             "model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create "
+             "阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。"
+         ),
+diff --git a/backend/app/modules/daemon/lease/context.py b/backend/app/modules/daemon/lease/context.py
+index 385ecf86e..220b140c4 100644
+--- a/backend/app/modules/daemon/lease/context.py
++++ b/backend/app/modules/daemon/lease/context.py
+@@ -75,14 +75,20 @@ async def resolve_default_provider_config(
+     供 claim 路径(``_inject_provider_config``)与 set_default 即时下发(task-03/04)
+     共用,避免两处各写一份「查默认 + 解密 + 构造」逻辑。
+ 
+-    查询口径(D-008 owner 级 + R-05 is_default 互斥):
+-    ``user_id AND agent_kind AND is_default=True``,三者对齐才命中。
++    查询口径(D-008 owner 级 + R-05 is_default 互斥;D-004 集合命中):
++    ``user_id AND is_default=True`` 先过滤,行级 ``agent_kind ∈ agent_kinds`` 命中
++    （JSON contains 无 SQLite/PG 双方言运算符 → Python 判断;互斥粒度
++    (user_id, 引擎) 保证同引擎至多一行默认，命中唯一）。
+ 
+     命中:经 ``get_cipher().decrypt`` 解密 api_key 明文,构造 9 字段中性 dict
+     (8 核心字段 + settings_config 原样透传,task-04 D-009),返回给调用方自行
+     决定如何注入 payload / WS push。未命中 → 返回 None,调用方按 D-007 不加
+     provider_config 键(claim)或不推送(set_default)。
+ 
++    D-005:返回 dict 的 ``agent_kind`` 键**恒为会话引擎值**（即本参数），非行字段
++    ——daemon 注入器按它分发（getInjector(agent_kind)），多引擎行对不同引擎会话
++    下发各自的引擎值。
++
+     R-02:明文 api_key 仅在返回 dict 内短暂存在,由调用方立即下发 daemon
+     spawn-env 后丢弃;不写 ORM/审计/日志。
+     """
+@@ -93,12 +99,12 @@ async def resolve_default_provider_config(
+         select(LlmProvider)
+         .where(
+             LlmProvider.user_id == user_id,
+-            LlmProvider.agent_kind == agent_kind,
+             LlmProvider.is_default.is_(True),
+         )
+-        .limit(1)
++        .limit(50)
+     )
+-    provider = (await session.execute(stmt)).scalars().first()
++    candidates = (await session.execute(stmt)).scalars().all()
++    provider = next((p for p in candidates if agent_kind in (p.agent_kinds or [])), None)
+     if provider is None:
+         return None
+ 
+@@ -113,7 +119,7 @@ async def resolve_default_provider_config(
+ 
+         settings = get_settings()
+         return {
+-            "agent_kind": provider.agent_kind,
++            "agent_kind": agent_kind,
+             "api_format": "openai_chat",
+             # task-04（security-audit-remediation / Grill M-1 / D-003@v1）：master key
+             # 不再下发明文（原 litellm_auth_token 字段删除）。改下发 litellm_proxy 标记 +
+@@ -130,7 +136,7 @@ async def resolve_default_provider_config(
+     # 解密 api_key 明文(daemon spawn-env 注入 AUTH_TOKEN/AUTH_API_KEY 必需)
+     api_key_plain = get_cipher().decrypt(provider.encrypted_api_key, provider.key_id)
+     return {
+-        "agent_kind": provider.agent_kind,
++        "agent_kind": agent_kind,
+         "base_url": provider.base_url,
+         "api_key": api_key_plain,
+         "auth_field": provider.auth_field,
+@@ -158,7 +164,7 @@ async def resolve_bound_provider_config(
+     * **归属（方案A）**：``provider.user_id == user_id``（user_id 为 daemon 登记者
+       ``runtime.user_id``）——仅当绑定 provider 属于当前执行用户时才生效，否则
+       静默回退用户默认链，不泄露他人凭证。
+-    * **引擎一致**：``provider.agent_kind == agent_kind``——防止 codex 引擎档案
++    * **引擎一致**：``agent_kind ∈ provider.agent_kinds``（D-004 集合命中）——防止 codex 引擎档案
+       绑了 claude provider 时下发错配凭证（堵 API/DB 直写绕过前端禁用）。
+ 
+     通过则按 ``api_format`` 构造中性 config（anthropic 8 字段 / openai_chat 6 字段），
+@@ -181,7 +187,7 @@ async def resolve_bound_provider_config(
+     provider = await session.get(LlmProvider, provider_id)
+     if provider is None:
+         return None
+-    if provider.user_id != user_id or provider.agent_kind != agent_kind:
++    if provider.user_id != user_id or agent_kind not in (provider.agent_kinds or []):
+         return None
+ 
+     if provider.api_format == "openai_chat":
+@@ -189,7 +195,7 @@ async def resolve_bound_provider_config(
+ 
+         settings = get_settings()
+         return {
+-            "agent_kind": provider.agent_kind,
++            "agent_kind": agent_kind,
+             "api_format": "openai_chat",
+             # task-04（Grill M-1 / D-003@v1）：与 resolve_default_provider_config
+             # 同口径——litellm_auth_token 明文删除，改 litellm_proxy 标记 + hub 代理地址
+@@ -204,7 +210,7 @@ async def resolve_bound_provider_config(
+ 
+     api_key_plain = get_cipher().decrypt(provider.encrypted_api_key, provider.key_id)
+     return {
+-        "agent_kind": provider.agent_kind,
++        "agent_kind": agent_kind,
+         "base_url": provider.base_url,
+         "api_key": api_key_plain,
+         "auth_field": provider.auth_field,
+diff --git a/backend/app/modules/daemon/lease/provider_switch.py b/backend/app/modules/daemon/lease/provider_switch.py
+index 7de8cbc09..f4959588a 100644
+--- a/backend/app/modules/daemon/lease/provider_switch.py
++++ b/backend/app/modules/daemon/lease/provider_switch.py
+@@ -1,4 +1,4 @@
+-"""notify_provider_switch — 默认供应商变更后查 active interactive session 按 daemon 分组推送热切换。
++"""notify_provider_switch — 默认供应商变更后查 active interactive session 按 daemon 分组推送热切换（D-006 扇出：按会话引擎分配 config）。
+ 
+ change 2026-08-06-provider-switch-live-session / task-04 / FR-06 / D-005@v1 / D-006@v1。
+ 
+@@ -107,6 +107,28 @@ async def notify_provider_switch(
+     delivered_count = 0
+ 
+     for sess in rows:
++        # ── D-006 扇出（change 2026-10-06-provider-multi-agent-kind）：多引擎默认行
++        # 对不同引擎会话各推「本会话引擎」的 config——传入 config 与会话引擎相同则
++        # 复用（单引擎场景零回归），否则经 resolve_default_provider_config 按该引擎
++        # 构造（agent_kind=该引擎）；该引擎无默认 → 跳过并告警（best-effort）。
++        # 停止场景（provider_config=None）行为不变：所有会话收 None 回退本机。
++        config_to_push = provider_config
++        config_engine = (provider_config or {}).get("agent_kind")
++        if config_engine is not None and config_engine != sess.provider:
++            from app.modules.daemon.lease.context import resolve_default_provider_config
++
++            config_to_push = await resolve_default_provider_config(
++                session, user_id, sess.provider or ""
++            )
++            if config_to_push is None:
++                log.warning(
++                    "provider_switch_engine_default_missing",
++                    session_id=str(sess.id),
++                    engine=sess.provider,
++                    user_id=str(user_id),
++                )
++                continue
++
+         # ── step 2: runtime_id → daemon_id（D-005@v1 send_session_control 路由键）──
+         runtime_id = sess.runtime_id
+         if runtime_id is None:
+@@ -134,7 +156,7 @@ async def notify_provider_switch(
+         # 热切换即时性缺陷由 daemon 重连对账弥补。
+         payload = {
+             "session_id": str(sess.id),
+-            "provider_config": provider_config,
++            "provider_config": config_to_push,
+         }
+         try:
+             _row, delivered = await ControlCommandService(session).enqueue_and_push(
+diff --git a/backend/app/modules/daemon/protocol.py b/backend/app/modules/daemon/protocol.py
+index 79a80a219..886b858d4 100644
+--- a/backend/app/modules/daemon/protocol.py
++++ b/backend/app/modules/daemon/protocol.py
+@@ -316,8 +316,9 @@ class ProviderConfigChangedPayload(BaseModel):
+ 
+     change 2026-08-06-provider-switch-live-session / task-02 / design §7 WS payload。
+     用户切换默认供应商后,backend 查询用户新默认 provider(经
+-    ``resolve_default_provider_config`` helper,D-006 单一真相源),按 owning
+-    daemon 聚合后经 ``ws_hub.send_session_control`` 推送。daemon 收到后调
++    ``resolve_default_provider_config`` helper,D-006 单一真相源;D-006@多引擎:
++    各会话收到**本会话引擎**的 config——传入 config 引擎不同则按会话引擎 resolve),
++    按 owning daemon 聚合后经 ``ws_hub.send_session_control`` 推送。daemon 收到后调
+     ``sessionManager.markPendingSwitch(session_id, provider_config)``,待当前
+     turn 结束 → ``reloadWithProvider`` 重启 SDK session(env 换新 base_url/api_key
+     等),不中断对话。
+diff --git a/backend/app/modules/daemon/session/service/inject_gates.py b/backend/app/modules/daemon/session/service/inject_gates.py
+index bfae6b6a3..ce41f1198 100644
+--- a/backend/app/modules/daemon/session/service/inject_gates.py
++++ b/backend/app/modules/daemon/session/service/inject_gates.py
+@@ -273,14 +273,14 @@ async def _resolve_create_inputs(
+                 f"LlmProvider '{llm_provider_id}' not found.",
+                 details={"llm_provider_id": llm_provider_id},
+             )
+-        # agent_kind 与引擎（runtime 派生 provider，如 claude/codex）不匹配 →
+-        # 422（FR-06），不静默降级。
+-        if llm_provider_row.agent_kind != provider:
++        # 引擎（runtime 派生 provider，如 claude/codex）不在供应商引擎集合内 →
++        # 422（FR-06），不静默降级（D-004 集合命中语义）。
++        if provider not in (llm_provider_row.agent_kinds or []):
+             raise DaemonSessionLlmProviderKindMismatch(
+                 "LlmProvider agent_kind does not match the session engine.",
+                 details={
+                     "llm_provider_id": llm_provider_id,
+-                    "agent_kind": llm_provider_row.agent_kind,
++                    "agent_kinds": llm_provider_row.agent_kinds,
+                     "engine": provider,
+                 },
+             )
+@@ -553,13 +553,13 @@ async def _resolve_inject_turn_config(
+                         f"LlmProvider '{llm_provider_id}' not found.",
+                         details={"llm_provider_id": llm_provider_id},
+                     )
+-                # FR-06：agent_kind 与会话引擎不匹配 → 422，不静默降级。
+-                if provider_row.agent_kind != session.provider:
++                # FR-06：会话引擎不在供应商引擎集合内 → 422，不静默降级（D-004）。
++                if session.provider not in (provider_row.agent_kinds or []):
+                     raise DaemonSessionLlmProviderKindMismatch(
+                         "LlmProvider agent_kind does not match the session engine.",
+                         details={
+                             "llm_provider_id": llm_provider_id,
+-                            "agent_kind": provider_row.agent_kind,
++                            "agent_kinds": provider_row.agent_kinds,
+                             "engine": session.provider,
+                         },
+                     )
+diff --git a/backend/app/modules/daemon/tests/test_change_session.py b/backend/app/modules/daemon/tests/test_change_session.py
+index 1dbbfd35f..59f44658a 100644
+--- a/backend/app/modules/daemon/tests/test_change_session.py
++++ b/backend/app/modules/daemon/tests/test_change_session.py
+@@ -1038,7 +1038,7 @@ class TestSessionCreateRequestDto:
+             id=uuid.uuid4(),
+             user_id=admin.id,
+             name="t02-provider",
+-            agent_kind="claude",
++            agent_kinds=["claude"],
+             encrypted_api_key=ct,
+             key_id=key_id,
+             model="t02-model",
+diff --git a/backend/app/modules/daemon/tests/test_e2e_model_usage_flow.py b/backend/app/modules/daemon/tests/test_e2e_model_usage_flow.py
+index 0181951ec..8ecd7e4ba 100644
+--- a/backend/app/modules/daemon/tests/test_e2e_model_usage_flow.py
++++ b/backend/app/modules/daemon/tests/test_e2e_model_usage_flow.py
+@@ -55,7 +55,7 @@ async def _seed_provider(db_session: AsyncSession, uid: uuid.UUID) -> uuid.UUID:
+         id=uuid.uuid4(),
+         user_id=uid,
+         name="智谱 GLM(实测)",
+-        agent_kind="claude",
++        agent_kinds=["claude"],
+         encrypted_api_key=ct,
+         key_id=key_id,
+         model="glm-4.7",
+diff --git a/backend/app/modules/daemon/tests/test_group_cross_mention.py b/backend/app/modules/daemon/tests/test_group_cross_mention.py
+index c0469fdd6..f3842ad64 100644
+--- a/backend/app/modules/daemon/tests/test_group_cross_mention.py
++++ b/backend/app/modules/daemon/tests/test_group_cross_mention.py
+@@ -237,7 +237,7 @@ async def _seed_llm_provider(
+         id=uuid.uuid4(),
+         user_id=owner_id,
+         name=name,
+-        agent_kind="claude",
++        agent_kinds=["claude"],
+         encrypted_api_key=ct,
+         key_id=key_id,
+         model="glm-4.7",
+diff --git a/backend/app/modules/daemon/tests/test_group_p1.py b/backend/app/modules/daemon/tests/test_group_p1.py
+index cc903ca88..4fb8f4037 100644
+--- a/backend/app/modules/daemon/tests/test_group_p1.py
++++ b/backend/app/modules/daemon/tests/test_group_p1.py
+@@ -185,7 +185,7 @@ async def _seed_llm_provider(db_session: AsyncSession, user_id: uuid.UUID) -> uu
+             id=provider_id,
+             user_id=user_id,
+             name="p1-test-llm",
+-            agent_kind="claude",
++            agent_kinds=["claude"],
+             encrypted_api_key=b"test-key",
+             key_id="test-key-id",
+         )
+diff --git a/backend/app/modules/daemon/tests/test_inject_first_turn_briefing.py b/backend/app/modules/daemon/tests/test_inject_first_turn_briefing.py
+index 6ec15a14b..353ced931 100644
+--- a/backend/app/modules/daemon/tests/test_inject_first_turn_briefing.py
++++ b/backend/app/modules/daemon/tests/test_inject_first_turn_briefing.py
+@@ -371,7 +371,7 @@ async def _seed_provider(session: AsyncSession, user_id: uuid.UUID):
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name="GLM",
+-        agent_kind="claude",
++        agent_kinds=["claude"],
+         encrypted_api_key=ct,
+         key_id=key_id,
+         model="glm-4.7",
+diff --git a/backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py b/backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py
+index b2053e9d5..fbe94c7d4 100644
+--- a/backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py
++++ b/backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py
+@@ -442,7 +442,7 @@ async def _seed_provider(session: AsyncSession, user_id: uuid.UUID):
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name="GLM",
+-        agent_kind="claude",
++        agent_kinds=["claude"],
+         encrypted_api_key=ct,
+         key_id=key_id,
+         model="glm-4.7",
+diff --git a/backend/app/modules/daemon/tests/test_inject_session_model.py b/backend/app/modules/daemon/tests/test_inject_session_model.py
+index 2f821f255..7ae54dbb7 100644
+--- a/backend/app/modules/daemon/tests/test_inject_session_model.py
++++ b/backend/app/modules/daemon/tests/test_inject_session_model.py
+@@ -120,7 +120,7 @@ async def _seed_provider(
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name=name,
+-        agent_kind=agent_kind,
++        agent_kinds=[agent_kind],
+         encrypted_api_key=ct,
+         key_id=key_id,
+         model=model,
+diff --git a/backend/app/modules/daemon/tests/test_lease_context_provider_priority.py b/backend/app/modules/daemon/tests/test_lease_context_provider_priority.py
+index a194879f7..163487599 100644
+--- a/backend/app/modules/daemon/tests/test_lease_context_provider_priority.py
++++ b/backend/app/modules/daemon/tests/test_lease_context_provider_priority.py
+@@ -60,7 +60,7 @@ async def _seed_provider(
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name=f"t04-{name}-{uuid.uuid4().hex[:6]}",
+-        agent_kind=agent_kind,
++        agent_kinds=[agent_kind],
+         encrypted_api_key=ct,
+         key_id=key_id,
+         base_url=base_url,
+diff --git a/backend/app/modules/daemon/tests/test_lease_model_usage.py b/backend/app/modules/daemon/tests/test_lease_model_usage.py
+index c8a4cb7bb..f5326a777 100644
+--- a/backend/app/modules/daemon/tests/test_lease_model_usage.py
++++ b/backend/app/modules/daemon/tests/test_lease_model_usage.py
+@@ -264,7 +264,7 @@ class TestCompleteLeaseProviderFill:
+             id=uuid.uuid4(),
+             user_id=user_id,
+             name="bound-provider",
+-            agent_kind="claude_code",
++            agent_kinds=["claude_code"],
+             encrypted_api_key=b"dummy",
+             key_id="dummy-key",
+         )
+@@ -294,7 +294,7 @@ class TestCompleteLeaseProviderFill:
+             id=uuid.uuid4(),
+             user_id=user_id,
+             name="dispatch-provider",
+-            agent_kind="claude_code",
++            agent_kinds=["claude_code"],
+             encrypted_api_key=b"dummy",
+             key_id="dummy-key",
+         )
+@@ -302,7 +302,7 @@ class TestCompleteLeaseProviderFill:
+             id=uuid.uuid4(),
+             user_id=user_id,
+             name="meta-provider",
+-            agent_kind="claude_code",
++            agent_kinds=["claude_code"],
+             encrypted_api_key=b"dummy",
+             key_id="dummy-key",
+         )
+diff --git a/backend/app/modules/daemon/tests/test_provider_switch.py b/backend/app/modules/daemon/tests/test_provider_switch.py
+index d9dabdd07..cdd657b96 100644
+--- a/backend/app/modules/daemon/tests/test_provider_switch.py
++++ b/backend/app/modules/daemon/tests/test_provider_switch.py
+@@ -479,3 +479,53 @@ class TestNotifyProviderSwitchRuntimeNull:
+         # 仅正常 session 被推（无 runtime 那条跳过）
+         assert result == 1
+         assert len(hub.calls) == 1
++
++
++class TestNotifyProviderSwitchMultiEngineFanout:
++    """D-006 扇出（change 2026-10-06-provider-multi-agent-kind / task-07）。"""
++
++    @pytest.mark.asyncio
++    async def test_sessions_receive_own_engine_config(self, db_session, monkeypatch) -> None:
++        """多引擎默认行：claude 会话复用传入 config（引擎同），pi 会话经 resolve 拿
++        agent_kind=pi 的 config——引擎不匹配的组不透传错配凭证。"""
++        from sqlalchemy import select
++
++        from app.modules.llm_provider.model import LlmProvider
++
++        user_id = await _create_user(db_session)
++        rt_c = await _create_runtime(db_session, user_id, name_suffix="mc")
++        rt_p = await _create_runtime(db_session, user_id, name_suffix="mp")
++        sid_c = await _create_interactive_session(db_session, runtime_id=rt_c.id, user_id=user_id)
++        # pi 引擎会话（工厂默认 claude，单独改写 provider 字段）
++        sid_p = await _create_interactive_session(db_session, runtime_id=rt_p.id, user_id=user_id)
++        pi_sess = (
++            await db_session.execute(select(AgentSession).where(AgentSession.id == sid_p))
++        ).scalar_one()
++        pi_sess.provider = "pi"
++        await db_session.commit()
++
++        # 多引擎默认行（直插 ORM，绕 schema 最小化依赖）
++        from app.core.crypto import get_cipher
++
++        ct, key_id = get_cipher().encrypt("sk-fanout-0001")
++        db_session.add(
++            LlmProvider(
++                id=uuid.uuid4(),
++                user_id=user_id,
++                name="multi-default",
++                agent_kinds=["claude", "pi"],
++                encrypted_api_key=ct,
++                key_id=key_id,
++                is_default=True,
++            )
++        )
++        await db_session.commit()
++
++        hub = _patch_hub(monkeypatch)
++        claude_config = {"agent_kind": "claude", "base_url": "https://x", "api_key": "k"}
++        result = await notify_provider_switch(db_session, user_id, claude_config)
++
++        assert result == 2
++        by_session = {call[2].get("session_id"): call[2]["provider_config"] for call in hub.calls}
++        assert by_session[str(sid_c)] == claude_config  # 引擎同 → 复用
++        assert by_session[str(sid_p)]["agent_kind"] == "pi"  # 引擎异 → resolve 盖本引擎
+diff --git a/backend/app/modules/daemon/tests/test_provider_switch_integration.py b/backend/app/modules/daemon/tests/test_provider_switch_integration.py
+index 0a24093dc..df9c6047a 100644
+--- a/backend/app/modules/daemon/tests/test_provider_switch_integration.py
++++ b/backend/app/modules/daemon/tests/test_provider_switch_integration.py
+@@ -154,7 +154,7 @@ async def _seed_provider_row(
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name=name,
+-        agent_kind=agent_kind,
++        agent_kinds=[agent_kind],
+         base_url=base_url,
+         encrypted_api_key=ct,
+         key_id=key_id,
+diff --git a/backend/app/modules/daemon/tests/test_resolve_bound_provider_config.py b/backend/app/modules/daemon/tests/test_resolve_bound_provider_config.py
+index 51ee6413e..0b2b5d944 100644
+--- a/backend/app/modules/daemon/tests/test_resolve_bound_provider_config.py
++++ b/backend/app/modules/daemon/tests/test_resolve_bound_provider_config.py
+@@ -68,7 +68,7 @@ async def _seed_provider(
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name=name,
+-        agent_kind=agent_kind,
++        agent_kinds=[agent_kind],
+         encrypted_api_key=ct,
+         key_id=key_id,
+         base_url=base_url,
+diff --git a/backend/app/modules/daemon/tests/test_resolve_default_provider_config.py b/backend/app/modules/daemon/tests/test_resolve_default_provider_config.py
+index 0f762514e..6c0e21dc9 100644
+--- a/backend/app/modules/daemon/tests/test_resolve_default_provider_config.py
++++ b/backend/app/modules/daemon/tests/test_resolve_default_provider_config.py
+@@ -80,7 +80,7 @@ async def _seed_provider_row(
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name=name,
+-        agent_kind=agent_kind,
++        agent_kinds=[agent_kind],
+         encrypted_api_key=ct,
+         key_id=key_id,
+         base_url=base_url,
+@@ -116,6 +116,7 @@ class TestResolveDefaultProviderConfigFound:
+                 base_url="https://api.anthropic.com",
+                 model="claude-sonnet-4",
+                 is_default=True,
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+@@ -153,6 +154,7 @@ class TestResolveDefaultProviderConfigFound:
+                 api_key=plaintext,
+                 base_url="https://api.anthropic.com",
+                 is_default=True,
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+@@ -175,6 +177,7 @@ class TestResolveDefaultProviderConfigFound:
+                 api_key="sk-min-0011",
+                 base_url="https://api.anthropic.com",
+                 is_default=True,
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+@@ -222,6 +225,7 @@ class TestResolveDefaultProviderConfigNotFound:
+                 api_key="sk-notdef-0011",
+                 base_url="https://api.anthropic.com",
+                 is_default=False,  # 显式 False
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+@@ -254,6 +258,7 @@ class TestResolveDefaultProviderConfigAgentKindIsolation:
+                 api_key="sk-claude-only-0011",
+                 base_url="https://api.anthropic.com",
+                 is_default=True,
++                agent_kinds=["claude"],
+             ),
+         )
+         # codex 默认 provider（直插 ORM）。
+@@ -292,6 +297,7 @@ class TestResolveDefaultProviderConfigAgentKindIsolation:
+                 api_key="sk-x-0001",
+                 base_url="https://api.anthropic.com",
+                 is_default=True,
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+@@ -320,6 +326,7 @@ class TestResolveDefaultProviderConfigOwnerIsolation:
+                 api_key="sk-a-only-0001",
+                 base_url="https://api.anthropic.com",
+                 is_default=True,
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+@@ -415,6 +422,7 @@ class TestResolveDefaultProviderConfigReadOnly:
+                 api_key="sk-def-0011",
+                 base_url="https://api.anthropic.com",
+                 is_default=True,
++                agent_kinds=["claude"],
+             ),
+         )
+         non_default_row = await svc.create(
+@@ -424,6 +432,7 @@ class TestResolveDefaultProviderConfigReadOnly:
+                 api_key="sk-notdef-0022",
+                 base_url="https://api.anthropic.com",
+                 is_default=False,
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+@@ -597,3 +606,33 @@ class TestResolveDefaultProviderConfigOpenaiShape:
+         assert cfg is not None
+         assert "api_key" not in cfg
+         cipher_stub.decrypt.assert_not_called()
++
++
++class TestMultiEngineSetHit:
++    """D-004/D-005（change 2026-10-06 / task-07）：集合命中 + agent_kind 盖会话引擎。"""
++
++    @pytest.mark.asyncio
++    async def test_multi_kind_default_hit_and_engine_stamping(self, db_session) -> None:
++
++        from app.core.crypto import get_cipher
++        from app.modules.llm_provider.model import LlmProvider
++
++        user_id = await _create_user(db_session)
++        ct, key_id = get_cipher().encrypt("sk-multi-resolve-0001")
++        row = LlmProvider(
++            id=uuid.uuid4(),
++            user_id=user_id,
++            name="multi",
++            agent_kinds=["claude", "pi"],
++            encrypted_api_key=ct,
++            key_id=key_id,
++            is_default=True,
++        )
++        db_session.add(row)
++        await db_session.commit()
++
++        cfg_claude = await resolve_default_provider_config(db_session, user_id, "claude")
++        assert cfg_claude is not None and cfg_claude["agent_kind"] == "claude"
++        cfg_pi = await resolve_default_provider_config(db_session, user_id, "pi")
++        assert cfg_pi is not None and cfg_pi["agent_kind"] == "pi"
++        assert await resolve_default_provider_config(db_session, user_id, "codex") is None
+diff --git a/backend/app/modules/daemon/tests/test_runtime_usage_by_provider.py b/backend/app/modules/daemon/tests/test_runtime_usage_by_provider.py
+index 59998acae..9edd76d31 100644
+--- a/backend/app/modules/daemon/tests/test_runtime_usage_by_provider.py
++++ b/backend/app/modules/daemon/tests/test_runtime_usage_by_provider.py
+@@ -65,7 +65,7 @@ async def _create_provider(session: AsyncSession, user_id: uuid.UUID, name: str)
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name=name,
+-        agent_kind="claude_code",
++        agent_kinds=["claude_code"],
+         encrypted_api_key=b"irrelevant",
+         key_id=f"key-{uuid.uuid4().hex[:8]}",
+     )
+diff --git a/backend/app/modules/daemon/tests/test_session_create_config.py b/backend/app/modules/daemon/tests/test_session_create_config.py
+index 8cea3ac1f..9450600f9 100644
+--- a/backend/app/modules/daemon/tests/test_session_create_config.py
++++ b/backend/app/modules/daemon/tests/test_session_create_config.py
+@@ -177,7 +177,7 @@ async def _seed_provider(
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name=name,
+-        agent_kind=agent_kind,
++        agent_kinds=[agent_kind],
+         encrypted_api_key=ct,
+         key_id=key_id,
+         model=model,
+diff --git a/backend/app/modules/daemon/tests/test_session_fork.py b/backend/app/modules/daemon/tests/test_session_fork.py
+index 5469bc68e..299de2459 100644
+--- a/backend/app/modules/daemon/tests/test_session_fork.py
++++ b/backend/app/modules/daemon/tests/test_session_fork.py
+@@ -752,7 +752,7 @@ class TestSourceInvariants:
+             id=uuid.uuid4(),
+             user_id=owner,
+             name="GLM-Fork",
+-            agent_kind="claude",
++            agent_kinds=["claude"],
+             encrypted_api_key=ct,
+             key_id=key_id,
+             model="glm-4.7",
+diff --git a/backend/app/modules/daemon/tests/test_session_optimize_round2.py b/backend/app/modules/daemon/tests/test_session_optimize_round2.py
+index a8dc76a05..72a564d4c 100644
+--- a/backend/app/modules/daemon/tests/test_session_optimize_round2.py
++++ b/backend/app/modules/daemon/tests/test_session_optimize_round2.py
+@@ -245,7 +245,7 @@ async def _make_llm_provider(db_session: AsyncSession, uid: uuid.UUID):
+         id=uuid.uuid4(),
+         user_id=uid,
+         name="Kimi 中转",
+-        agent_kind="claude",
++        agent_kinds=["claude"],
+         encrypted_api_key=b"key",
+         key_id="k1",
+         model="kimi-latest",
+diff --git a/backend/app/modules/daemon/tests/test_session_queue.py b/backend/app/modules/daemon/tests/test_session_queue.py
+index 2b3bf403e..946297f77 100644
+--- a/backend/app/modules/daemon/tests/test_session_queue.py
++++ b/backend/app/modules/daemon/tests/test_session_queue.py
+@@ -891,7 +891,7 @@ class TestPureSwitchMerge:
+             id=uuid.uuid4(),
+             user_id=uid,
+             name="测试供应商",
+-            agent_kind="claude",
++            agent_kinds=["claude"],
+             encrypted_api_key=ct,
+             key_id=key_id,
+             model="glm-x",
+diff --git a/backend/app/modules/daemon/tests/test_session_reopen.py b/backend/app/modules/daemon/tests/test_session_reopen.py
+index eb666564b..a3d305253 100644
+--- a/backend/app/modules/daemon/tests/test_session_reopen.py
++++ b/backend/app/modules/daemon/tests/test_session_reopen.py
+@@ -696,7 +696,7 @@ async def _seed_provider(
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name=f"t014-reopen-{uuid.uuid4().hex[:6]}",
+-        agent_kind="claude",
++        agent_kinds=["claude"],
+         encrypted_api_key=ct,
+         key_id=key_id,
+         base_url=base_url,
+diff --git a/backend/app/modules/daemon/tests/test_session_runs_endpoint.py b/backend/app/modules/daemon/tests/test_session_runs_endpoint.py
+index af8ff922d..db80c2259 100644
+--- a/backend/app/modules/daemon/tests/test_session_runs_endpoint.py
++++ b/backend/app/modules/daemon/tests/test_session_runs_endpoint.py
+@@ -203,7 +203,7 @@ class TestListSessionRuns:
+             id=uuid.uuid4(),
+             user_id=admin,
+             name="GLM",
+-            agent_kind="claude",
++            agent_kinds=["claude"],
+             encrypted_api_key=ct,
+             key_id=key_id,
+             model="glm-4.7",
+diff --git a/backend/app/modules/daemon/tests/test_session_switch_config.py b/backend/app/modules/daemon/tests/test_session_switch_config.py
+index b56e61c72..a1f88cf2e 100644
+--- a/backend/app/modules/daemon/tests/test_session_switch_config.py
++++ b/backend/app/modules/daemon/tests/test_session_switch_config.py
+@@ -127,7 +127,7 @@ async def _seed_provider(
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name=name,
+-        agent_kind=agent_kind,
++        agent_kinds=[agent_kind],
+         encrypted_api_key=ct,
+         key_id=key_id,
+         model=model,
+diff --git a/backend/app/modules/llm_provider/model.py b/backend/app/modules/llm_provider/model.py
+index 28686588f..5c7779afd 100644
+--- a/backend/app/modules/llm_provider/model.py
++++ b/backend/app/modules/llm_provider/model.py
+@@ -3,9 +3,12 @@
+ 用户级 LLM 供应商凭证（design §7 / §8）。owner = ``user_id``（D-002 用户级作用域）；
+ ``encrypted_api_key`` + ``key_id`` 复用 ``core/crypto.py`` 的 ``CredentialCipher``
+ （xchacha20-poly1305，D-009，照 git_identity）；``is_default`` 在
+-``(user_id, agent_kind)`` 维度互斥（service 层事务内保证，R-05）。
++``(user_id, 引擎)`` 维度互斥——多引擎行对 agent_kinds 集合内每个引擎各占一个默认位
++（service 层事务内保证，R-05；D-003/D-006）。
+ 
+-列定义须与 ``migrations/versions/20260725_create_llm_providers.py`` 一一对应（防漂移）；
++``agent_kinds`` JSON 数组列（change 2026-10-06-provider-multi-agent-kind / D-004）：
++一条凭证可服务多个引擎（claude/codex/pi...），解析链按「引擎 ∈ 集合」命中。列定义须与
++``migrations/versions/20261006120000_provider_agent_kinds.py`` 迁移终态一一对应（防漂移）；
+ ``multimodal`` 列对应 ``migrations/versions/20260820100000_session_attachments_multimodal.py``。
+ """
+ 
+@@ -41,9 +44,9 @@ class LlmProvider(BaseModel, table=True):
+         max_length=128,
+         sa_column=Column(String(128), nullable=False),
+     )
+-    agent_kind: str = Field(
+-        max_length=32,
+-        sa_column=Column(String(32), nullable=False),
++    # 引擎集合（D-004 单列改数组）：至少一个引擎；解析链按「引擎 ∈ agent_kinds」命中。
++    agent_kinds: list[str] = Field(
++        sa_column=Column(JSON, nullable=False),
+     )
+     base_url: str | None = Field(
+         default=None,
+@@ -125,6 +128,7 @@ class LlmProvider(BaseModel, table=True):
+     )
+ 
+     __table_args__ = (
++        # 原 (user_id, agent_kind, is_default) 复合索引随 agent_kind 列删除而退役
++        # （迁移 20261006120000）；默认/引擎过滤转行级 Python 判断（每用户行数几十级）。
+         Index("ix_llm_providers_user", "user_id"),
+-        Index("ix_llm_providers_user_agent_default", "user_id", "agent_kind", "is_default"),
+     )
+diff --git a/backend/app/modules/llm_provider/schema.py b/backend/app/modules/llm_provider/schema.py
+index 25565b1fb..48356d7d7 100644
+--- a/backend/app/modules/llm_provider/schema.py
++++ b/backend/app/modules/llm_provider/schema.py
+@@ -9,7 +9,7 @@ import uuid
+ from datetime import datetime
+ from typing import Any, Literal
+ 
+-from pydantic import BaseModel, ConfigDict, Field, model_validator
++from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+ 
+ 
+ class LlmProviderCreate(BaseModel):
+@@ -18,8 +18,10 @@ class LlmProviderCreate(BaseModel):
+     # 平台 worker 走独立配额池凭证（daemon 侧 PiCredentialInjector 消费）。
+     # task-05（2026-09-10-multi-provider-injection / FR-04）：词表增 codex——
+     # codex 不走 env 注入器，凭证经 daemon 文件层（会话隔离 CODEX_HOME，D-012）注入。
+-    # agent_kind 仅 Create 有该字段，Update/FetchModelsRequest 不新增。
+-    agent_kind: Literal["claude", "pi", "codex"] = "claude"
++    # change 2026-10-06-provider-multi-agent-kind（D-004）：单值改引擎集合——一条凭证
++    # 可服务多个引擎，至少一个（min_length=1，无默认值，必须显式传）；保序去重
++    # （["claude","claude"] 归一为 ["claude"]，validator 见下）。
++    agent_kinds: list[Literal["claude", "pi", "codex"]] = Field(min_length=1)
+     base_url: str | None = None
+     api_key: str | None = None
+     model: str | None = None
+@@ -39,17 +41,24 @@ class LlmProviderCreate(BaseModel):
+     # 2026-08-20 task-12（D-9）：多模态三态；None=不动（更新）/auto（创建默认走列默认）。
+     multimodal: str | None = Field(default=None, pattern="^(auto|true|false)$")
+ 
++    @field_validator("agent_kinds")
++    @classmethod
++    def _dedupe_agent_kinds(cls, v: list[str]) -> list[str]:
++        """保序去重（D-004）：重复引擎归一；去重后空表由 min_length 拦。"""
++        return list(dict.fromkeys(v))
++
+     @model_validator(mode="after")
+     def _forbid_pi_openai_chat(self) -> LlmProviderCreate:
+-        """pi × openai_chat 禁配（task-05 / FR-04 / D-012 连带声明）。
++        """pi × openai_chat 禁配——集合级判定（task-05 / FR-04 / D-012；D-005 升级）。
+ 
+         该组合两层注入均不生效：pi env 层不带端点（不读 BASE_URL）、文件层
+         models.json 仅 anthropic 形态直连，openai_chat 通道对 pi 无消费方。
+-        Create 侧在此 422（ValidationError 自然冒泡）；Update 侧无 agent_kind
+-        字段（Grill B-4），组合校验落 service 层取行后判（Plan 约束 2）。
++        Create 侧在此 422（ValidationError 自然冒泡，勾集含 pi 即拒）；Update 侧
++        agent_kinds 可选（None=不动），组合校验落 service 层取行合并后判
++        （Plan 约束 2，双口径同语义）。
+         codex/claude × openai_chat 不受限（codex 走 litellm_proxy 通道，D-006）。
+         """
+-        if self.agent_kind == "pi" and self.api_format == "openai_chat":
++        if "pi" in self.agent_kinds and self.api_format == "openai_chat":
+             raise ValueError(
+                 "pi 供应商不支持 openai_chat API 格式（两层注入均不生效），"
+                 "请改用 anthropic 格式或选择 codex/claude 供应商"
+@@ -68,6 +77,9 @@ class LlmProviderUpdate(BaseModel):
+     # pattern（见 Create.auth_field 注释）；None=不动原值语义不变。
+     auth_field: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
+     api_format: Literal["anthropic", "openai_chat"] | None = None
++    # 引擎集合可编辑（D-004/D-006）：None=不动；非 None 时至少一个 + 保序去重
++    # （validator 见下，与 Create 同口径）。
++    agent_kinds: list[Literal["claude", "pi", "codex"]] | None = Field(default=None, min_length=1)
+     model_role_mappings: dict[str, Any] | None = None
+     default_fallback_model: str | None = None
+     extra_env: dict[str, Any] | None = None
+@@ -75,6 +87,14 @@ class LlmProviderUpdate(BaseModel):
+     is_default: bool | None = None
+     multimodal: str | None = Field(default=None, pattern="^(auto|true|false)$")
+ 
++    @field_validator("agent_kinds")
++    @classmethod
++    def _dedupe_agent_kinds(cls, v: list[str] | None) -> list[str] | None:
++        """保序去重（D-004，与 Create 同口径）；None=不动语义透传。"""
++        if v is None:
++            return None
++        return list(dict.fromkeys(v))
++
+ 
+ class LlmProviderRead(BaseModel):
+     model_config = ConfigDict(from_attributes=True)
+@@ -82,7 +102,7 @@ class LlmProviderRead(BaseModel):
+     id: uuid.UUID
+     user_id: uuid.UUID
+     name: str
+-    agent_kind: str
++    agent_kinds: list[str]
+     base_url: str | None
+     model: str | None
+     notes: str | None
+diff --git a/backend/app/modules/llm_provider/service.py b/backend/app/modules/llm_provider/service.py
+index 66a35f6d8..dbddc024f 100644
+--- a/backend/app/modules/llm_provider/service.py
++++ b/backend/app/modules/llm_provider/service.py
+@@ -3,7 +3,7 @@
+ 照 ``git_identity/service.py`` 范式：
+ - ``__init__(session, *, cipher=None)`` + lazy ``_default_cipher()`` 调 ``get_cipher()``；
+ - ``create/update`` 先 ``cipher.encrypt(api_key)`` 再赋 ``encrypted_api_key``（明文永不入 ORM，R-04）；
+-- ``(user_id, agent_kind)`` 维度 ``is_default`` 互斥（事务内先清同组再置，R-05）；
++- ``(user_id, 引擎)`` 维度 ``is_default`` 互斥（事务内先清同组再置，R-05；D-004 多引擎行对集合内每个引擎各占一个默认位）；
+ - 所有方法按 ``user_id`` 过滤（D-008 owner 级），跨用户访问 → 404/403 不泄漏存在性。
+ """
+ 
+@@ -54,7 +54,7 @@ class LlmProviderNotFound(AppError):
+ class LlmProviderKindFormatForbidden(AppError):
+     """pi × openai_chat 禁配 Update 侧兜底（task-05 / FR-04 / D-012 连带声明）。
+ 
+-    ``LlmProviderUpdate`` 无 ``agent_kind`` 字段（Grill B-4），组合校验只能在
++    ``LlmProviderUpdate`` 的 ``agent_kinds`` 可选（None=不动，Grill B-4 沿袭），组合校验只能在
+     ``update`` 取行后判（Plan 约束 2）；Create 侧由 schema ``model_validator``
+     先行 422。code 循既有 ``HTTP_<status>_<EVENT>`` 命名范式（N818 ignore）。
+     """
+@@ -207,12 +207,12 @@ class LlmProviderService:
+     ) -> LlmProvider:
+         ct, key_id = self._cipher.encrypt(data.api_key or "")
+         if data.is_default:
+-            await self._clear_sibling_defaults(user_id, data.agent_kind)
++            await self._clear_sibling_defaults(user_id, data.agent_kinds)
+         row = LlmProvider(
+             id=uuid.uuid4(),
+             user_id=user_id,
+             name=data.name,
+-            agent_kind=data.agent_kind,
++            agent_kinds=data.agent_kinds,
+             base_url=data.base_url,
+             encrypted_api_key=ct,
+             key_id=key_id,
+@@ -235,7 +235,7 @@ class LlmProviderService:
+             "llm_provider.created",
+             provider_id=str(row.id),
+             user_id=str(user_id),
+-            agent_kind=row.agent_kind,
++            agent_kinds=row.agent_kinds,
+         )
+         return row
+ 
+@@ -248,14 +248,17 @@ class LlmProviderService:
+         row = await self.get(provider_id, user_id)
+         updates = data.model_dump(exclude_unset=True)
+ 
+-        # task-05（FR-04 / D-012）：pi × openai_chat 禁配 Update 侧取行后判——
+-        # Update DTO 无 agent_kind，只有拿到行才知道组合；仅当本次显式把
+-        # api_format 置为 openai_chat 且行是 pi 时拒绝（codex/claude 不受限）。
+-        if updates.get("api_format") == "openai_chat" and row.agent_kind == "pi":
++        # task-05（FR-04 / D-012；D-005 升级集合级）：pi × openai_chat 禁配 Update
++        # 侧取行**合并**后判——agent_kinds / api_format 均可选（None=不动），生效组合
++        # = 本次显式值 ?? 行现值；勾集含 pi 且生效格式为 openai_chat 即拒（与 Create
++        # 同口径，双端一致）。
++        effective_kinds = updates.get("agent_kinds", row.agent_kinds)
++        effective_format = updates.get("api_format", row.api_format)
++        if effective_format == "openai_chat" and "pi" in effective_kinds:
+             raise LlmProviderKindFormatForbidden(
+                 "pi 供应商不支持 openai_chat API 格式（两层注入均不生效），"
+                 "请改用 anthropic 格式或选择 codex/claude 供应商",
+-                details={"provider_id": str(provider_id), "agent_kind": row.agent_kind},
++                details={"provider_id": str(provider_id), "agent_kinds": effective_kinds},
+             )
+ 
+         # api_key 单独处理：None = 不动原密钥；非 None 才重新加密
+@@ -269,13 +272,14 @@ class LlmProviderService:
+         if updates.get("multimodal") is None:
+             updates.pop("multimodal", None)
+ 
+-        # is_default 互斥：置 True 前先清同 (user_id, agent_kind) 兄弟行
++        # is_default 互斥：先应用字段更新再按**新引擎集合**清兄弟（D-006 扩张语义——
++        # 默认行新增引擎时，新增引擎的旧默认兄弟同样要清，互斥不变量按
++        # (user_id, 引擎) 粒度恒成立）。收缩引擎致某引擎默认空缺不自动转移（D-003）。
+         want_default = updates.pop("is_default", None)
+-        if want_default:
+-            await self._clear_sibling_defaults(row.user_id, row.agent_kind, except_id=row.id)
+-
+         for field, value in updates.items():
+             setattr(row, field, value)
++        if want_default or (row.is_default and "agent_kinds" in updates):
++            await self._clear_sibling_defaults(row.user_id, row.agent_kinds, except_id=row.id)
+         if want_default is not None:
+             row.is_default = want_default
+ 
+@@ -310,7 +314,7 @@ class LlmProviderService:
+            不推送**，返回结构化 ``error``（D-003 回滚：原供应商继续服务运行中会话，
+            不破坏 G4）。事务内此时仅有 SELECT（``self.get``）无任何 write，回滚 = 不写入。
+         2. **互斥置位**：探测成功后事务内 ``_clear_sibling_defaults`` 清同
+-           (user_id, agent_kind) 兄弟行 + 置本行 True（R-05 并发互斥，原子 commit）。
++           (user_id, 引擎∈集合) 兄弟行 + 置本行 True（R-05 并发互斥，原子 commit；D-003 全引擎生效）。
+         3. **触发热切换**：调 ``resolve_default_provider_config``（task-02 D-006 单一
+            真相源）构造新 config → ``notify_provider_switch``（task-04）向 active
+            interactive session 推 ``PROVIDER_CONFIG_CHANGED``（D-001 WS 触发）。
+@@ -368,8 +372,9 @@ class LlmProviderService:
+                 error=probe_result.error or "凭证探测失败",
+             )
+ 
+-        # ── step 2: 事务内清同组兄弟 + 置本行 True（R-05 互斥，原子 commit）──
+-        await self._clear_sibling_defaults(row.user_id, row.agent_kind, except_id=row.id)
++        # ── step 2: 事务内清同组兄弟 + 置本行 True（R-05 互斥，原子 commit；
++        # D-003/D-006 多引擎：对 agent_kinds 集合内每个引擎清兄弟——全引擎生效）──
++        await self._clear_sibling_defaults(row.user_id, row.agent_kinds, except_id=row.id)
+         row.is_default = True
+         await self._session.commit()
+         await self._session.refresh(row)
+@@ -387,8 +392,11 @@ class LlmProviderService:
+                 row, user_id=row.user_id, cipher=self._cipher
+             )
+ 
+-        # ── step 3: 触发热切换推送（D-001 / D-006 单一真相源 helper）──
+-        affected = await self._dispatch_provider_switch(row.user_id, row.agent_kind, unset=False)
++        # ── step 3: 触发热切换推送（D-001 / D-006 单一真相源 helper；按首个引擎
++        # resolve 主 config，其余引擎的扇出归 notify 内部按会话引擎分配）──
++        affected = await self._dispatch_provider_switch(
++            row.user_id, row.agent_kinds[0], unset=False
++        )
+         return DefaultSwitchResult(
+             switched=True,
+             affected_sessions=affected,
+@@ -413,7 +421,7 @@ class LlmProviderService:
+         daemon 据此回退宿主机本机凭证管理（D-004 / design §5 Wave1 / spawn-env.ts 第 0
+         层跳过）。notify best-effort（D-001）：失败仅日志告警、不阻塞 unset 成功。
+ 
+-        若取消后该 (user_id, agent_kind) 无任何默认 → lease 不再注入 provider_config
++        若取消后该 (user_id, 引擎) 无任何默认 → lease 不再注入 provider_config
+         → 新会话也回归本机（D-007 兼容策略）。
+ 
+         返回 ``DefaultSwitchResult``：``switched`` 恒 ``True``（unset 不探测、不会失败）、
+@@ -432,8 +440,9 @@ class LlmProviderService:
+ 
+             await litellm_client.unregister(litellm_client.litellm_model_name(row.user_id, row.id))
+ 
+-        # task-03 / D-004：触发热切换推送（provider_config=None → daemon 回退本机）。
+-        affected = await self._dispatch_provider_switch(row.user_id, row.agent_kind, unset=True)
++        # task-03 / D-004：触发热切换推送（provider_config=None → daemon 回退本机；
++        # 停止场景 notify 对全部活跃会话广播 None（D-006：扇出只影响 set 场景）。
++        affected = await self._dispatch_provider_switch(row.user_id, row.agent_kinds[0], unset=True)
+         return DefaultSwitchResult(switched=True, affected_sessions=affected)
+ 
+     async def _dispatch_provider_switch(
+@@ -460,7 +469,7 @@ class LlmProviderService:
+ 
+         Args:
+             user_id: LlmProvider.user_id（owner 级，D-008）。
+-            agent_kind: LlmProvider.agent_kind（claude / codex，R-05 互斥维度）。
++            agent_kind: 引擎值（多引擎行由调用方逐引擎循环扇出，D-006；单值时代即本行种类）。
+             unset: True = unset_default 推 None；False = set_default 推 resolve 出的新 config。
+ 
+         Returns:
+@@ -497,23 +506,32 @@ class LlmProviderService:
+     async def _clear_sibling_defaults(
+         self,
+         user_id: uuid.UUID,
+-        agent_kind: str,
++        agent_kinds: list[str],
+         *,
+         except_id: uuid.UUID | None = None,
+     ) -> None:
+-        """单事务内把同 (user_id, agent_kind) 其它行的 is_default 清成 False。"""
+-        stmt = (
+-            update(LlmProvider)
+-            .where(
++        """单事务内把引擎集合与本行相交的其它默认行 ``is_default`` 清成 False。
++
++        D-004 集合语义：同 (user_id, 引擎) 互斥粒度不变——本行勾选的每个引擎的
++        其它默认兄弟都要清（含扩张引擎场景，D-006）。JSON contains 无 SQLite/PG
++        双方言运算符（``@>`` 仅 PG jsonb）→ user_id + is_default 先过滤后行级
++        Python 交集判断（每用户行数几十级，无性能面）。
++        """
++        result = await self._session.execute(
++            select(LlmProvider.id, LlmProvider.agent_kinds).where(
+                 LlmProvider.user_id == user_id,
+-                LlmProvider.agent_kind == agent_kind,
+                 LlmProvider.is_default.is_(True),
+             )
+-            .values(is_default=False)
+         )
+-        if except_id is not None:
+-            stmt = stmt.where(LlmProvider.id != except_id)
+-        await self._session.execute(stmt)
++        target_ids = [
++            row_id
++            for row_id, kinds in result.all()
++            if set(kinds) & set(agent_kinds) and (except_id is None or row_id != except_id)
++        ]
++        if target_ids:
++            await self._session.execute(
++                update(LlmProvider).where(LlmProvider.id.in_(target_ids)).values(is_default=False)
++            )
+ 
+     def _to_read(self, row: LlmProvider) -> LlmProviderRead:
+         plaintext = self._cipher.decrypt(row.encrypted_api_key, row.key_id)
+diff --git a/backend/app/modules/llm_provider/tests/test_agent_kinds_migration.py b/backend/app/modules/llm_provider/tests/test_agent_kinds_migration.py
+new file mode 100644
+index 000000000..b8a5aab35
+--- /dev/null
++++ b/backend/app/modules/llm_provider/tests/test_agent_kinds_migration.py
+@@ -0,0 +1,111 @@
++"""agent_kind → agent_kinds JSON 迁移测试（change 2026-10-06 / task-07 / FR-02 / R-01）。
++
++不跑 alembic 命令链（env.py 走 asyncio.run，与 pytest 异步夹具冲突）；改用
++MigrationContext + Operations 直驱迁移模块的 upgrade/downgrade——对真实
++SQLite 引擎执行同样的 op 序列（batch_alter_table 语义一致）。PG 分支由生产
++开发库 2026-10-06 实跑背书（upgrade/downgrade/再 upgrade 往返 + 终态断言）。
++
++断言面（design §数据模型）：
++- 终态：agent_kind 列不存在、agent_kinds 在；存量单值行转单元素数组（值域不变）；
++- 索引：复合索引 ix_llm_providers_user_agent_default 退役、(user_id) 维度在位（R-01）；
++- 回程：agent_kind 恢复为数组首元素、复合索引恢复原形态（可回退）。
++"""
++
++from __future__ import annotations
++
++import importlib.util
++import sqlite3
++import uuid
++from pathlib import Path
++
++from alembic.migration import MigrationContext
++from alembic.operations import Operations
++from sqlalchemy import create_engine
++
++BACKEND_DIR = Path(__file__).resolve().parents[4]
++MIGRATION_FILE = BACKEND_DIR / "migrations" / "versions" / "20261006120000_provider_agent_kinds.py"
++
++# 迁移前一形态的最小 llm_providers 表（列/索引与 20260725 create 迁移一致的最小集）。
++_PRE_SCHEMA = """
++CREATE TABLE llm_providers (
++    id CHAR(32) NOT NULL PRIMARY KEY,
++    user_id CHAR(32) NOT NULL,
++    name VARCHAR(128) NOT NULL,
++    agent_kind VARCHAR(32) NOT NULL,
++    encrypted_api_key BLOB NOT NULL,
++    key_id VARCHAR(64) NOT NULL,
++    auth_field VARCHAR(64) NOT NULL,
++    api_format VARCHAR(32) NOT NULL,
++    multimodal VARCHAR(8) NOT NULL,
++    is_default BOOLEAN NOT NULL,
++    created_at DATETIME NOT NULL,
++    updated_at DATETIME NOT NULL
++);
++CREATE INDEX ix_llm_providers_user ON llm_providers (user_id);
++CREATE INDEX ix_llm_providers_user_agent_default ON llm_providers (user_id, agent_kind, is_default);
++"""
++
++
++def _load_module():
++    spec = importlib.util.spec_from_file_location("provider_agent_kinds_migration", MIGRATION_FILE)
++    mod = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(mod)
++    return mod
++
++
++def test_roundtrip_single_value_becomes_single_element_array(tmp_path: Path) -> None:
++    db = tmp_path / "mig.db"
++    engine = create_engine(f"sqlite:///{db}")
++    with engine.begin() as conn:
++        for stmt in [s.strip() for s in _PRE_SCHEMA.split(";") if s.strip()]:
++            conn.exec_driver_sql(stmt)
++        conn.exec_driver_sql(
++            "INSERT INTO llm_providers (id, user_id, name, agent_kind, encrypted_api_key,"
++            " key_id, auth_field, api_format, multimodal, is_default, created_at, updated_at)"
++            " VALUES (?,?,?,?,X'00','v1','ANTHROPIC_AUTH_TOKEN','anthropic','auto',0,'t','t')",
++            ((str(uuid.uuid4()).replace("-", "")), "u1", "p1", "claude"),
++        )
++        conn.exec_driver_sql(
++            "INSERT INTO llm_providers (id, user_id, name, agent_kind, encrypted_api_key,"
++            " key_id, auth_field, api_format, multimodal, is_default, created_at, updated_at)"
++            " VALUES (?,?,?,?,X'00','v1','ZAI_API_KEY','anthropic','auto',1,'t','t')",
++            ((str(uuid.uuid4()).replace("-", "")), "u1", "p2", "pi"),
++        )
++
++    mod = _load_module()
++
++    # ── upgrade：Operations 直驱（真实 SQLite 引擎，batch 语义一致）──
++    with engine.begin() as conn:
++        ctx = MigrationContext.configure(conn)
++        op = Operations(ctx)
++        mod.op = op
++        mod.upgrade()
++
++    raw = sqlite3.connect(db)
++    cols = [r[1] for r in raw.execute("PRAGMA table_info(llm_providers)")]
++    assert "agent_kind" not in cols
++    assert "agent_kinds" in cols
++    idx = {r[1] for r in raw.execute("PRAGMA index_list(llm_providers)")}
++    assert "ix_llm_providers_user_agent_default" not in idx  # R-01 退役
++    assert "ix_llm_providers_user" in idx  # (user_id) 维度在位
++    rows = dict(raw.execute("SELECT name, agent_kinds FROM llm_providers"))
++    assert rows["p1"] == '["claude"]'  # FR-02 值域不变性（单元素数组）
++    assert rows["p2"] == '["pi"]'
++
++    # ── downgrade：对称回程 ──
++    with engine.begin() as conn:
++        ctx = MigrationContext.configure(conn)
++        op = Operations(ctx)
++        mod.op = op
++        mod.downgrade()
++
++    cols2 = [r[1] for r in raw.execute("PRAGMA table_info(llm_providers)")]
++    assert "agent_kind" in cols2
++    assert "agent_kinds" not in cols2
++    idx2 = {r[1] for r in raw.execute("PRAGMA index_list(llm_providers)")}
++    assert "ix_llm_providers_user_agent_default" in idx2  # 复合索引恢复
++    kinds_back = dict(raw.execute("SELECT name, agent_kind FROM llm_providers"))
++    assert kinds_back["p1"] == "claude"  # 首元素恢复
++    assert kinds_back["p2"] == "pi"
++    raw.close()
++    engine.dispose()
+diff --git a/backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py b/backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py
+new file mode 100644
+index 000000000..c72c40b1e
+--- /dev/null
++++ b/backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py
+@@ -0,0 +1,171 @@
++"""多引擎 agent_kinds 集合语义（change 2026-10-06-provider-multi-agent-kind / task-07）。
++
++覆盖 D-003/D-004/D-005/D-006 的服务层新行为（既有单引擎等价面由
++test_llm_provider.py / test_api_format.py 存量用例守护）：
++
++1. 创建多引擎行 + Read 往返（集合原样、去重生效）；
++2. 默认全引擎生效 + 互斥逐引擎清：多引擎默认行设默认时，**每个勾选引擎**的
++   兄弟默认行都被清（D-006 扩张语义同面覆盖——update 扩张引擎集合同样清
++   新增引擎兄弟默认）；
++3. update 合并判定：把 agent_kinds 扩到含 pi 且行是 openai_chat → 422
++   （与 Create 同口径）；仅扩不含 pi 的引擎 → 通过；
++4. 收缩引擎：默认行从 [claude,pi] 收缩到 [claude] → pi 默认空缺不自动转移
++   （无 pi 默认行、claude 保留）。
++"""
++
++from __future__ import annotations
++
++import uuid
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.crypto import get_cipher
++from app.modules.llm_provider.model import LlmProvider
++from app.modules.llm_provider.schema import LlmProviderCreate, LlmProviderUpdate
++from app.modules.llm_provider.service import LlmProviderService
++
++from .test_llm_provider import _create_user
++
++
++@pytest.fixture
++def _mock_probe_notify(monkeypatch: pytest.MonkeyPatch) -> None:
++    """本地版 mock_probe_notify（set_default 的 probe/notify 打桩）。
++
++    与 test_llm_provider.mock_probe_notify 同源逻辑；跨模块 fixture 导入会被
++    ruff F401 autofix 反复清除（签名引用不算使用），故就地复制一份。
++    """
++
++    from app.modules.llm_provider.probe import ProviderProbeResult
++
++    async def _fake_probe(*_a: object, **_k: object) -> ProviderProbeResult:
++        return ProviderProbeResult(ok=True)
++
++    async def _fake_notify(*_a: object, **_k: object) -> int:
++        return 0
++
++    monkeypatch.setattr("app.modules.llm_provider.probe.probe_provider", _fake_probe)
++    monkeypatch.setattr(
++        "app.modules.daemon.lease.provider_switch.notify_provider_switch", _fake_notify
++    )
++
++
++async def _seed_row(
++    session: AsyncSession,
++    user_id: uuid.UUID,
++    *,
++    agent_kinds: list[str],
++    is_default: bool = False,
++    name: str = "seeded",
++) -> LlmProvider:
++    ct, key_id = get_cipher().encrypt("sk-multi-secret-0001")
++    row = LlmProvider(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        name=name,
++        agent_kinds=agent_kinds,
++        encrypted_api_key=ct,
++        key_id=key_id,
++        is_default=is_default,
++    )
++    session.add(row)
++    await session.commit()
++    await session.refresh(row)
++    return row
++
++
++class TestMultiKindCrud:
++    @pytest.mark.asyncio
++    async def test_create_multi_engine_roundtrip_and_dedupe(self, db_session: AsyncSession) -> None:
++        user_id = await _create_user(db_session, label="mk1")
++        svc = LlmProviderService(db_session)
++        created = await svc.create(
++            user_id,
++            LlmProviderCreate(name="multi", agent_kinds=["claude", "pi", "claude"]),
++        )
++        assert created.agent_kinds == ["claude", "pi"]
++        read = svc._to_read(await svc.get(created.id, user_id))
++        assert read.agent_kinds == ["claude", "pi"]
++
++
++class TestMultiKindDefaultMutex:
++    @pytest.mark.asyncio
++    async def test_set_default_clears_siblings_for_every_engine(
++        self, db_session: AsyncSession, _mock_probe_notify: None
++    ) -> None:
++        """多引擎默认行设默认 → claude 与 pi 两个引擎的旧默认兄弟都被清。"""
++        user_id = await _create_user(db_session, label="mk2")
++        svc = LlmProviderService(db_session)
++        await _seed_row(
++            db_session, user_id, agent_kinds=["claude"], is_default=True, name="old-claude"
++        )
++        await _seed_row(db_session, user_id, agent_kinds=["pi"], is_default=True, name="old-pi")
++        multi = await svc.create(
++            user_id,
++            LlmProviderCreate(
++                name="multi",
++                agent_kinds=["claude", "pi"],
++                base_url="https://api.anthropic.com",
++                api_key="sk-multi-default-0001",
++            ),
++        )
++        await svc.set_default(multi.id, user_id)
++
++        rows = (await db_session.execute(_all_rows(user_id))).scalars().all()
++        defaults = [r for r in rows if r.is_default]
++        assert [r.name for r in defaults] == ["multi"]
++
++
++class TestMultiKindUpdateSemantics:
++    @pytest.mark.asyncio
++    async def test_expand_to_pi_with_openai_chat_rejected(self, db_session: AsyncSession) -> None:
++        """openai_chat 行把引擎集合扩到含 pi → 422（合并判定）。"""
++        from app.core.errors import AppError
++
++        user_id = await _create_user(db_session, label="mk3")
++        svc = LlmProviderService(db_session)
++        row = await svc.create(
++            user_id,
++            LlmProviderCreate(name="oc", agent_kinds=["claude"], api_format="openai_chat"),
++        )
++        with pytest.raises(AppError) as exc_info:
++            await svc.update(row.id, user_id, LlmProviderUpdate(agent_kinds=["claude", "pi"]))
++        assert "pi" in str(exc_info.value.message)
++
++    @pytest.mark.asyncio
++    async def test_default_row_expand_clears_new_engine_sibling(
++        self, db_session: AsyncSession
++    ) -> None:
++        """D-006 扩张：默认行 [claude] 扩到 [claude,pi] → pi 的旧默认兄弟被清。"""
++        user_id = await _create_user(db_session, label="mk4")
++        svc = LlmProviderService(db_session)
++        await _seed_row(db_session, user_id, agent_kinds=["pi"], is_default=True, name="old-pi")
++        row = await _seed_row(
++            db_session, user_id, agent_kinds=["claude"], is_default=True, name="grow"
++        )
++        await svc.update(row.id, user_id, LlmProviderUpdate(agent_kinds=["claude", "pi"]))
++
++        rows = (await db_session.execute(_all_rows(user_id))).scalars().all()
++        defaults = {r.name: r.agent_kinds for r in rows if r.is_default}
++        assert defaults == {"grow": ["claude", "pi"]}
++
++    @pytest.mark.asyncio
++    async def test_shrink_leaves_engine_default_vacant(self, db_session: AsyncSession) -> None:
++        """收缩：默认行 [claude,pi] 收缩到 [claude] → pi 默认空缺不自动转移。"""
++        user_id = await _create_user(db_session, label="mk5")
++        svc = LlmProviderService(db_session)
++        await _seed_row(db_session, user_id, agent_kinds=["pi"], is_default=False, name="other-pi")
++        row = await _seed_row(
++            db_session, user_id, agent_kinds=["claude", "pi"], is_default=True, name="shrink"
++        )
++        await svc.update(row.id, user_id, LlmProviderUpdate(agent_kinds=["claude"]))
++
++        rows = (await db_session.execute(_all_rows(user_id))).scalars().all()
++        assert all(not r.is_default for r in rows if "pi" in r.agent_kinds)
++        assert [r.name for r in rows if r.is_default] == ["shrink"]
++
++
++def _all_rows(user_id: uuid.UUID):
++    from sqlalchemy import select
++
++    return select(LlmProvider).where(LlmProvider.user_id == user_id).order_by(LlmProvider.name)
+diff --git a/backend/app/modules/llm_provider/tests/test_api_format.py b/backend/app/modules/llm_provider/tests/test_api_format.py
+index 7f66ccaae..5ce68d6f0 100644
+--- a/backend/app/modules/llm_provider/tests/test_api_format.py
++++ b/backend/app/modules/llm_provider/tests/test_api_format.py
+@@ -271,7 +271,7 @@ class TestApiFormatPassthrough:
+             user_id,
+             LlmProviderCreate(
+                 name="opencode-zen",
+-                agent_kind="claude",
++                agent_kinds=["claude"],
+                 api_key="sk-create-openai-1234",
+                 base_url="https://opencode.ai/zen/v1/chat/completions",
+                 model="zen-1",
+@@ -291,7 +291,7 @@ class TestApiFormatPassthrough:
+             user_id,
+             LlmProviderCreate(
+                 name="anthropic-default",
+-                agent_kind="claude",
++                agent_kinds=["claude"],
+                 api_key="sk-create-anthropic-1234",
+                 base_url="https://api.anthropic.com",
+             ),
+@@ -306,7 +306,7 @@ class TestApiFormatPassthrough:
+             user_id,
+             LlmProviderCreate(
+                 name="to-switch",
+-                agent_kind="claude",
++                agent_kinds=["claude"],
+                 api_key="sk-update-openai-1234",
+                 base_url="https://api.anthropic.com",
+             ),
+diff --git a/backend/app/modules/llm_provider/tests/test_fetch_models.py b/backend/app/modules/llm_provider/tests/test_fetch_models.py
+index f9177c794..c8e7c7cd9 100644
+--- a/backend/app/modules/llm_provider/tests/test_fetch_models.py
++++ b/backend/app/modules/llm_provider/tests/test_fetch_models.py
+@@ -541,6 +541,7 @@ class TestFetchModelsDualForm:
+                 base_url="https://api.anthropic.com",
+                 api_key=plaintext,
+                 settings_config={"env": {"FOO": "bar"}, "model": "claude-sonnet-4"},
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+@@ -610,6 +611,7 @@ class TestFetchModelsDualForm:
+                 name="empty-key",
+                 base_url="https://api.anthropic.com",
+                 api_key="",  # 空明文
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+@@ -716,7 +718,7 @@ async def _seed_default_provider(
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name="ctx-default",
+-        agent_kind="claude",
++        agent_kinds=["claude"],
+         base_url="https://api.anthropic.com",
+         encrypted_api_key=ct,
+         key_id=key_id,
+@@ -865,6 +867,7 @@ class TestSettingsConfigPersistence:
+                 base_url="https://api.anthropic.com",
+                 api_key="sk-sc-persist-key-0001",
+                 settings_config=settings_cfg,
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+@@ -890,6 +893,7 @@ class TestSettingsConfigPersistence:
+                 name="sc-nil-provider",
+                 base_url="https://api.anthropic.com",
+                 api_key="sk-sc-nil-key-0002",
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+@@ -909,6 +913,7 @@ class TestSettingsConfigPersistence:
+                 base_url="https://api.anthropic.com",
+                 api_key="sk-sc-up-key-0003",
+                 settings_config={"env": {"OLD": "1"}},
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+diff --git a/backend/app/modules/llm_provider/tests/test_llm_provider.py b/backend/app/modules/llm_provider/tests/test_llm_provider.py
+index fee2d2f33..adbdc9589 100644
+--- a/backend/app/modules/llm_provider/tests/test_llm_provider.py
++++ b/backend/app/modules/llm_provider/tests/test_llm_provider.py
+@@ -64,7 +64,7 @@ def _create_payload(**overrides) -> LlmProviderCreate:
+     """默认 claude provider 创建 payload；api_key >= 8 位以便测 masked 首4...尾4。"""
+     defaults = {
+         "name": "my-claude",
+-        "agent_kind": "claude",
++        "agent_kinds": ["claude"],
+         "api_key": "sk-ant-supersecretkey-1234",
+         "base_url": "https://api.anthropic.com",
+         "model": "claude-sonnet-4",
+@@ -77,7 +77,7 @@ async def _seed_provider_row(
+     session: AsyncSession,
+     user_id: uuid.UUID,
+     *,
+-    agent_kind: str,
++    agent_kinds: list[str],
+     is_default: bool = False,
+     api_key: str = "sk-seeded-xxxxxxxx",
+     name: str = "seeded",
+@@ -92,7 +92,7 @@ async def _seed_provider_row(
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name=name,
+-        agent_kind=agent_kind,
++        agent_kinds=agent_kinds,
+         encrypted_api_key=ct,
+         key_id=key_id,
+         is_default=is_default,
+@@ -152,7 +152,7 @@ class TestCrudFlow:
+ 
+         assert row.user_id == user_id
+         assert row.name == "p1"
+-        assert row.agent_kind == "claude"
++        assert row.agent_kinds == ["claude"]
+         assert row.base_url == "https://api.anthropic.com"
+         assert row.model == "claude-sonnet-4"
+         assert row.auth_field == "ANTHROPIC_AUTH_TOKEN"  # schema 默认
+@@ -260,11 +260,11 @@ class TestCrudFlow:
+ 
+         created = await svc.create(
+             user_id,
+-            _create_payload(name="codex-pool", agent_kind="codex", api_format="openai_chat"),
++            _create_payload(name="codex-pool", agent_kinds=["codex"], api_format="openai_chat"),
+         )
+         fetched = await svc.get(created.id, user_id)
+ 
+-        assert fetched.agent_kind == "codex"
++        assert fetched.agent_kinds == ["codex"]
+         assert fetched.api_format == "openai_chat"
+         assert fetched.auth_field == "ANTHROPIC_AUTH_TOKEN"  # 缺省语义不变
+ 
+@@ -273,7 +273,7 @@ class TestCrudFlow:
+         """pi 行 patch api_format=openai_chat → 422 拒绝且行未变（D-012 禁配）。"""
+         user_id = await _create_user(db_session, label="a")
+         svc = LlmProviderService(db_session)
+-        created = await svc.create(user_id, _create_payload(name="pi-pool", agent_kind="pi"))
++        created = await svc.create(user_id, _create_payload(name="pi-pool", agent_kinds=["pi"]))
+ 
+         with pytest.raises(LlmProviderKindFormatForbidden) as exc_info:
+             await svc.update(created.id, user_id, LlmProviderUpdate(api_format="openai_chat"))
+@@ -283,14 +283,14 @@ class TestCrudFlow:
+         fresh = await db_session.get(LlmProvider, created.id)
+         assert fresh is not None
+         assert fresh.api_format == "anthropic"
+-        assert fresh.agent_kind == "pi"
++        assert fresh.agent_kinds == ["pi"]
+ 
+     @pytest.mark.asyncio
+     async def test_patch_pi_row_other_fields_still_allowed(self, db_session: AsyncSession) -> None:
+         """禁配只拦 pi×openai_chat 组合：pi 行改其它字段（含 anthropic 显式回写）照常。"""
+         user_id = await _create_user(db_session, label="a")
+         svc = LlmProviderService(db_session)
+-        created = await svc.create(user_id, _create_payload(name="pi-rename", agent_kind="pi"))
++        created = await svc.create(user_id, _create_payload(name="pi-rename", agent_kinds=["pi"]))
+ 
+         patched = await svc.update(
+             created.id,
+@@ -309,7 +309,9 @@ class TestCrudFlow:
+         user_id = await _create_user(db_session, label="a")
+         svc = LlmProviderService(db_session)
+         claude_row = await svc.create(user_id, _create_payload(name="claude-x"))
+-        codex_row = await svc.create(user_id, _create_payload(name="codex-x", agent_kind="codex"))
++        codex_row = await svc.create(
++            user_id, _create_payload(name="codex-x", agent_kinds=["codex"])
++        )
+ 
+         patched_claude = await svc.update(
+             claude_row.id, user_id, LlmProviderUpdate(api_format="openai_chat")
+@@ -540,7 +542,7 @@ class TestIsDefaultMutex:
+ 
+         stmt = select(LlmProvider).where(
+             LlmProvider.user_id == user_id,
+-            LlmProvider.agent_kind == "claude",
++            LlmProvider.agent_kinds == ["claude"],
+             LlmProvider.is_default.is_(True),
+         )
+         defaults = (await db_session.execute(stmt)).scalars().all()
+@@ -561,7 +563,7 @@ class TestIsDefaultMutex:
+ 
+         # 预置一个 codex 默认 provider（直插 ORM 绕过 schema Literal）
+         codex_row = await _seed_provider_row(
+-            db_session, user_id, agent_kind="codex", is_default=True, name="codex-default"
++            db_session, user_id, agent_kinds=["codex"], is_default=True, name="codex-default"
+         )
+         # 再创建一个 claude 默认 provider（经 service.create）
+         claude_row = await svc.create(
+@@ -592,7 +594,7 @@ class TestIsDefaultMutex:
+         # 此时同组无默认
+         stmt = select(LlmProvider).where(
+             LlmProvider.user_id == user_id,
+-            LlmProvider.agent_kind == "claude",
++            LlmProvider.agent_kinds == ["claude"],
+             LlmProvider.is_default.is_(True),
+         )
+         defaults = (await db_session.execute(stmt)).scalars().all()
+@@ -623,7 +625,7 @@ class TestIsDefaultMutex:
+         assert b.is_default is False  # 未被波及
+         stmt = select(LlmProvider).where(
+             LlmProvider.user_id == user_id,
+-            LlmProvider.agent_kind == "claude",
++            LlmProvider.agent_kinds == ["claude"],
+             LlmProvider.is_default.is_(True),
+         )
+         defaults = (await db_session.execute(stmt)).scalars().all()
+@@ -844,7 +846,7 @@ class TestSetDefaultCredentialsRollback:
+         # 全组默认数仍为 0（无任何写入）。
+         stmt = select(LlmProvider).where(
+             LlmProvider.user_id == user_id,
+-            LlmProvider.agent_kind == "claude",
++            LlmProvider.agent_kinds == ["claude"],
+             LlmProvider.is_default.is_(True),
+         )
+         defaults = (await db_session.execute(stmt)).scalars().all()
+@@ -870,7 +872,7 @@ class TestSetDefaultCredentialsRollback:
+             id=uuid.uuid4(),
+             user_id=user_id,
+             name="no-base-url",
+-            agent_kind="claude",
++            agent_kinds=["claude"],
+             encrypted_api_key=ct,
+             key_id=key_id,
+             base_url=None,  # 缺 base_url
+diff --git a/backend/app/modules/llm_provider/tests/test_llm_provider_pi_kind.py b/backend/app/modules/llm_provider/tests/test_llm_provider_pi_kind.py
+index 8abfeeefc..f940c1d48 100644
+--- a/backend/app/modules/llm_provider/tests/test_llm_provider_pi_kind.py
++++ b/backend/app/modules/llm_provider/tests/test_llm_provider_pi_kind.py
+@@ -40,8 +40,8 @@ _NAME = "pool"
+ class TestPiKindCreatable:
+     def test_pi_kind_with_env_auth_field_valid(self) -> None:
+         """agent_kind=pi + env 名 auth_field → 校验通过（独立配额池凭证行）。"""
+-        dto = LlmProviderCreate(name=_NAME, agent_kind="pi", auth_field="ZAI_API_KEY")
+-        assert dto.agent_kind == "pi"
++        dto = LlmProviderCreate(name=_NAME, agent_kinds=["pi"], auth_field="ZAI_API_KEY")
++        assert dto.agent_kinds == ["pi"]
+         assert dto.auth_field == "ZAI_API_KEY"
+ 
+     @pytest.mark.parametrize(
+@@ -49,18 +49,18 @@ class TestPiKindCreatable:
+     )
+     def test_pi_env_name_shapes_valid(self, auth_field: str) -> None:
+         """设计 §5.2 点名的三个 env 名均可作为 pi 凭证 auth_field。"""
+-        dto = LlmProviderCreate(name=_NAME, agent_kind="pi", auth_field=auth_field)
++        dto = LlmProviderCreate(name=_NAME, agent_kinds=["pi"], auth_field=auth_field)
+         assert dto.auth_field == auth_field
+ 
+     def test_pi_without_auth_field_keeps_default(self) -> None:
+         """pi 不传 auth_field → 沿用缺省 ANTHROPIC_AUTH_TOKEN（缺省语义不变）。"""
+-        dto = LlmProviderCreate(name=_NAME, agent_kind="pi")
++        dto = LlmProviderCreate(name=_NAME, agent_kinds=["pi"])
+         assert dto.auth_field == "ANTHROPIC_AUTH_TOKEN"
+ 
+     def test_unknown_kind_still_rejected(self) -> None:
+         """值域只放开 pi/codex：真未知字面量（如 gemini）仍被 Literal 拒。"""
+         with pytest.raises(ValidationError):
+-            LlmProviderCreate(name=_NAME, agent_kind="gemini")
++            LlmProviderCreate(name=_NAME, agent_kinds=["gemini"])
+ 
+ 
+ # ── 1b. codex 词表（task-05 / FR-04，D-008 衔接并行 pi 基础上增补）───────────
+@@ -69,18 +69,18 @@ class TestPiKindCreatable:
+ class TestCodexVocab:
+     def test_codex_kind_accepted(self) -> None:
+         """task-05 翻转：codex 进词表（daemon 文件层注入），Create 校验通过。"""
+-        dto = LlmProviderCreate(name=_NAME, agent_kind="codex")
+-        assert dto.agent_kind == "codex"
++        dto = LlmProviderCreate(name=_NAME, agent_kinds=["codex"])
++        assert dto.agent_kinds == ["codex"]
+ 
+     def test_codex_with_env_auth_field_valid(self) -> None:
+         """codex + env 名 auth_field 同样可建（auth_field pattern 与 kind 正交）。"""
+-        dto = LlmProviderCreate(name=_NAME, agent_kind="codex", auth_field="OPENAI_API_KEY")
+-        assert dto.agent_kind == "codex"
++        dto = LlmProviderCreate(name=_NAME, agent_kinds=["codex"], auth_field="OPENAI_API_KEY")
++        assert dto.agent_kinds == ["codex"]
+         assert dto.auth_field == "OPENAI_API_KEY"
+ 
+     def test_codex_without_auth_field_keeps_default(self) -> None:
+         """codex 不传 auth_field → 缺省 ANTHROPIC_AUTH_TOKEN（缺省语义不变）。"""
+-        dto = LlmProviderCreate(name=_NAME, agent_kind="codex")
++        dto = LlmProviderCreate(name=_NAME, agent_kinds=["codex"])
+         assert dto.auth_field == "ANTHROPIC_AUTH_TOKEN"
+ 
+ 
+@@ -91,26 +91,26 @@ class TestPiOpenaiChatForbidden:
+     def test_pi_with_openai_chat_rejected(self) -> None:
+         """pi × openai_chat 两层注入均不生效 → ValidationError（FastAPI 422）。"""
+         with pytest.raises(ValidationError):
+-            LlmProviderCreate(name=_NAME, agent_kind="pi", api_format="openai_chat")
++            LlmProviderCreate(name=_NAME, agent_kinds=["pi"], api_format="openai_chat")
+ 
+     def test_pi_with_anthropic_passes(self) -> None:
+         """pi × anthropic 是唯一合法组合（env 层注入消费）。"""
+-        dto = LlmProviderCreate(name=_NAME, agent_kind="pi", api_format="anthropic")
++        dto = LlmProviderCreate(name=_NAME, agent_kinds=["pi"], api_format="anthropic")
+         assert dto.api_format == "anthropic"
+ 
+     def test_pi_default_format_passes(self) -> None:
+         """pi 不传 api_format → 缺省 anthropic，不受禁配影响。"""
+-        dto = LlmProviderCreate(name=_NAME, agent_kind="pi")
++        dto = LlmProviderCreate(name=_NAME, agent_kinds=["pi"])
+         assert dto.api_format == "anthropic"
+ 
+     def test_codex_with_openai_chat_passes(self) -> None:
+         """codex × openai_chat 不禁（litellm_proxy 通道，D-006）。"""
+-        dto = LlmProviderCreate(name=_NAME, agent_kind="codex", api_format="openai_chat")
++        dto = LlmProviderCreate(name=_NAME, agent_kinds=["codex"], api_format="openai_chat")
+         assert dto.api_format == "openai_chat"
+ 
+     def test_claude_with_openai_chat_passes(self) -> None:
+         """claude × openai_chat 不禁（既有 litellm_proxy 用例零回归）。"""
+-        dto = LlmProviderCreate(name=_NAME, agent_kind="claude", api_format="openai_chat")
++        dto = LlmProviderCreate(name=_NAME, agent_kinds=["claude"], api_format="openai_chat")
+         assert dto.api_format == "openai_chat"
+ 
+ 
+@@ -131,11 +131,14 @@ class TestCreateAuthFieldPattern:
+     def test_invalid_env_names_rejected(self, bad: str) -> None:
+         """非 env 变量名形状（小写/空格/连字符/空串/下划线开头）→ ValidationError。"""
+         with pytest.raises(ValidationError):
+-            LlmProviderCreate(name=_NAME, auth_field=bad)
++            LlmProviderCreate(name=_NAME, agent_kinds=["pi"], auth_field=bad)
+ 
+     def test_digit_inside_valid(self) -> None:
+         """大写开头后接数字/下划线合法（env 名形状允许）。"""
+-        assert LlmProviderCreate(name=_NAME, auth_field="ZAI_KEY_2").auth_field == "ZAI_KEY_2"
++        assert (
++            LlmProviderCreate(name=_NAME, agent_kinds=["pi"], auth_field="ZAI_KEY_2").auth_field
++            == "ZAI_KEY_2"
++        )
+ 
+ 
+ # ── 3. claude 零回归（缺省与旧值逐字不变）─────────────────────────────────────
+@@ -143,22 +146,24 @@ class TestCreateAuthFieldPattern:
+ 
+ class TestClaudeZeroRegression:
+     def test_defaults_unchanged(self) -> None:
+-        """不传可选字段：agent_kind=claude、auth_field=ANTHROPIC_AUTH_TOKEN。"""
+-        dto = LlmProviderCreate(name="legacy")
+-        assert dto.agent_kind == "claude"
++        """D-004 契约变更：agent_kinds 必填（无默认）；auth_field 等可选字段缺省不变。"""
++        with pytest.raises(ValidationError):
++            LlmProviderCreate(name="legacy")  # 缺 agent_kinds → 422
++        dto = LlmProviderCreate(name="legacy", agent_kinds=["claude"])
++        assert dto.agent_kinds == ["claude"]
+         assert dto.auth_field == "ANTHROPIC_AUTH_TOKEN"
+ 
+     def test_legacy_literals_still_valid(self) -> None:
+         """旧双字面量（改前唯一合法值）在 pattern 下照常可传。"""
+-        assert LlmProviderCreate(name=_NAME, auth_field="ANTHROPIC_API_KEY").auth_field == (
+-            "ANTHROPIC_API_KEY"
+-        )
+-        assert LlmProviderCreate(name=_NAME, auth_field="ANTHROPIC_AUTH_TOKEN").auth_field == (
+-            "ANTHROPIC_AUTH_TOKEN"
+-        )
++        assert LlmProviderCreate(
++            name=_NAME, agent_kinds=["claude"], auth_field="ANTHROPIC_API_KEY"
++        ).auth_field == ("ANTHROPIC_API_KEY")
++        assert LlmProviderCreate(
++            name=_NAME, agent_kinds=["claude"], auth_field="ANTHROPIC_AUTH_TOKEN"
++        ).auth_field == ("ANTHROPIC_AUTH_TOKEN")
+ 
+     def test_claude_kind_still_valid(self) -> None:
+-        assert LlmProviderCreate(name=_NAME, agent_kind="claude").agent_kind == "claude"
++        assert LlmProviderCreate(name=_NAME, agent_kinds=["claude"]).agent_kinds == ["claude"]
+ 
+ 
+ # ── 4. Update / FetchModelsRequest 同 pattern（三处同款放宽）──────────────────
+diff --git a/backend/app/modules/llm_provider/tests/test_quota.py b/backend/app/modules/llm_provider/tests/test_quota.py
+index abb5e8269..a25680492 100644
+--- a/backend/app/modules/llm_provider/tests/test_quota.py
++++ b/backend/app/modules/llm_provider/tests/test_quota.py
+@@ -78,6 +78,7 @@ async def _create_provider_via_http(
+         headers=auth_headers,
+         json={
+             "name": name,
++            "agent_kinds": ["claude"],
+             "api_key": api_key,
+             "base_url": base_url,
+             "model": model,
+@@ -230,6 +231,7 @@ class TestQuotaNonGlm:
+             headers=auth_headers,
+             json={
+                 "name": "glm-nokey",
++                "agent_kinds": ["claude"],
+                 "api_key": "",
+                 "base_url": "https://open.bigmodel.cn/api/anthropic",
+                 "model": "glm-4.7",
+@@ -413,6 +415,7 @@ class TestQuotaAuthAndOwnership:
+                 api_key="sk-other-quota-secret-1234",
+                 base_url="https://open.bigmodel.cn/api/anthropic",
+                 model="glm-4.7",
++                agent_kinds=["claude"],
+             ),
+         )
+ 
+diff --git a/backend/app/modules/llm_provider/tests/test_router.py b/backend/app/modules/llm_provider/tests/test_router.py
+index 2b245f089..966203f1b 100644
+--- a/backend/app/modules/llm_provider/tests/test_router.py
++++ b/backend/app/modules/llm_provider/tests/test_router.py
+@@ -122,6 +122,7 @@ async def _seed_provider_for_user(
+             base_url="https://api.anthropic.com",
+             model="claude-sonnet-4",
+             is_default=is_default,
++            agent_kinds=["claude"],
+         ),
+     )
+     return row.id
+@@ -131,6 +132,7 @@ def _create_body(*, name: str = "p-http", is_default: bool = False) -> dict:
+     """HTTP POST /api/llm-providers 创建 body（admin owner，最小字段集）。"""
+     return {
+         "name": name,
++        "agent_kinds": ["claude"],
+         "api_key": "sk-http-secretkey-1234",
+         "base_url": "https://api.anthropic.com",
+         "model": "claude-sonnet-4",
+diff --git a/backend/app/modules/llm_provider/tests/test_usage.py b/backend/app/modules/llm_provider/tests/test_usage.py
+index b1a0208e7..c59708d62 100644
+--- a/backend/app/modules/llm_provider/tests/test_usage.py
++++ b/backend/app/modules/llm_provider/tests/test_usage.py
+@@ -105,7 +105,7 @@ async def _seed_provider(
+     svc = LlmProviderService(session)
+     return await svc.create(
+         user_id,
+-        LlmProviderCreate(name=name, base_url=base_url, api_key=api_key),
++        LlmProviderCreate(agent_kinds=["claude"], name=name, base_url=base_url, api_key=api_key),
+     )
+ 
+ 
+diff --git a/backend/app/modules/mcp_gateway/tests/test_tools_new.py b/backend/app/modules/mcp_gateway/tests/test_tools_new.py
+index d58a76df3..d6412806e 100644
+--- a/backend/app/modules/mcp_gateway/tests/test_tools_new.py
++++ b/backend/app/modules/mcp_gateway/tests/test_tools_new.py
+@@ -510,7 +510,7 @@ async def _make_llm_provider(
+         LlmProvider(
+             id=provider_id,
+             user_id=user_id,
+-            agent_kind=agent_kind,
++            agent_kinds=[agent_kind],
+             name=name,
+             api_format=api_format,
+             is_default=is_default,
+diff --git a/backend/app/modules/mcp_gateway/tools.py b/backend/app/modules/mcp_gateway/tools.py
+index 9a2d62683..51db2f156 100644
+--- a/backend/app/modules/mcp_gateway/tools.py
++++ b/backend/app/modules/mcp_gateway/tools.py
+@@ -1027,7 +1027,10 @@ def _quota_pool_entry(
+             "pool_kind": "independent",
+             "llm_provider_id": str(row.id),
+             "name": row.name,
+-            "agent_kind": row.agent_kind,
++            # 池引擎值（本函数 agent_kind 参数）而非行字段——多引擎行的池归属
++            # 本就按 effective_agent 查得（D-004），描述符口径与 local_shared/
++            # undetermined 两态的 agent_kind 键一致（均为引擎值）。
++            "agent_kind": agent_kind,
+             "api_format": row.api_format,
+         }
+     if pool_kind == "local_shared":
+@@ -1225,22 +1228,26 @@ async def get_daemon_status(
+         if effective_agent is not None:
+             from app.modules.llm_provider.model import LlmProvider
+ 
+-            pool_rows = (
++            # D-004 集合命中：默认行按「引擎 ∈ agent_kinds」匹配——JSON contains
++            # 无双方言运算符 → user_id 先过滤后行级 Python 判断（每用户默认行数
++            # 个位数）。确定序保留：异常多默认时池归属稳定不抖动。
++            candidate_rows = (
+                 (
+                     await session.execute(
+                         select(LlmProvider)
+                         .where(
+                             LlmProvider.user_id.in_({b.user_id for b in bindings}),
+-                            LlmProvider.agent_kind == effective_agent,
+                             LlmProvider.is_default.is_(True),
+                         )
+-                        # 确定序：多默认行（数据异常态）时池归属稳定不抖动。
+                         .order_by(LlmProvider.user_id, LlmProvider.name)
+                     )
+                 )
+                 .scalars()
+                 .all()
+             )
++            pool_rows = [
++                row for row in candidate_rows if effective_agent in (row.agent_kinds or [])
++            ]
+             for pool_row in pool_rows:
+                 pool_by_user[pool_row.user_id] = _quota_pool_entry(
+                     "independent", effective_agent_kind, pool_row=pool_row
+diff --git a/backend/app/modules/session_attachment/capability.py b/backend/app/modules/session_attachment/capability.py
+index bd66ffa32..a688dd8c8 100644
+--- a/backend/app/modules/session_attachment/capability.py
++++ b/backend/app/modules/session_attachment/capability.py
+@@ -90,7 +90,9 @@ async def resolve_session_gate(
+     """会话实际生效 provider 判定（lease 优先级链同源：会话绑定 > 用户默认）。
+ 
+     - 会话显式绑定行（归属校验：仅 daemon 登记者本人）优先；
+-    - 为空回退用户 is_default 同 agent_kind 行；
++    - 为空回退用户 is_default 且引擎 ∈ agent_kinds 的行（D-004 集合命中；
++      JSON contains 无双方言运算符 → user_id 先过滤后行级 Python 判断，
++      互斥粒度 (user_id, 引擎) 保证命中唯一）；
+     - 再无（本机凭证）→ 保守不支持（模型未知）。
+     """
+     provider: LlmProvider | None = None
+@@ -104,19 +106,17 @@ async def resolve_session_gate(
+             )
+         ).scalar_one_or_none()
+     if provider is None:
+-        provider = (
++        candidates = (
+             (
+                 await session.execute(
+-                    select(LlmProvider)
+-                    .where(
++                    select(LlmProvider).where(
+                         LlmProvider.user_id == user_id,
+-                        LlmProvider.agent_kind == agent_kind,
+                         LlmProvider.is_default.is_(True),
+                     )
+-                    .limit(1)
+                 )
+             )
+             .scalars()
+-            .first()
++            .all()
+         )
++        provider = next((p for p in candidates if agent_kind in (p.agent_kinds or [])), None)
+     return resolve_gate(provider)
+diff --git a/backend/migrations/versions/20261006120000_provider_agent_kinds.py b/backend/migrations/versions/20261006120000_provider_agent_kinds.py
+new file mode 100644
+index 000000000..ff148abde
+--- /dev/null
++++ b/backend/migrations/versions/20261006120000_provider_agent_kinds.py
+@@ -0,0 +1,89 @@
++"""llm_providers.agent_kind 单值列 → agent_kinds JSON 数组列
++
++Revision ID: 20261006120000
++Revises: 20261003020000
++Create Date: 2026-10-06 12:00:00
++
++change 2026-10-06-provider-multi-agent-kind（D-004 单列改数组）：一条供应商凭证可
++服务多个引擎会话（消灭同 key 重复建卡）。迁移口径（design §数据模型 / FR-02）：
++
++- 存量值域不变性：每行 ``agent_kinds = [旧 agent_kind]``（单元素数组），未编辑
++  行的全部解析/默认/校验语义与单值时代逐行为等价；**不合并不清理**存量重复行
++  （D-002，用户手动删）。
++- 不留双列（规则 11 项目未上线无历史兼容包袱）：agent_kind 旧列删除。
++- 索引（R-01）：含 agent_kind 的复合索引 ``ix_llm_providers_user_agent_default``
++  (user_id, agent_kind, is_default) 随列替换 drop；终态复用既有
++  ``ix_llm_providers_user`` (user_id)——每用户行数几十级，is_default/引擎过滤转
++  行级 Python 判断，无性能面（不建重复索引）。
++- 双方言（R-03，先例 20260825150000 的 ``op.get_bind().dialect.name`` 守卫）：
++  回填 JSON PG 用 ``to_jsonb(ARRAY[...])::json``，SQLite 用 ``json_array(...)``
++  （PG 无 json_array 函数）；列增删走 ``batch_alter_table``（SQLite 重建表语义）。
++- downgrade 对称可回退（requirements 非功能）：agent_kind 取数组首元素恢复，
++  复合索引重建原形态。
++"""
++
++import sqlalchemy as sa
++from alembic import op
++
++# revision identifiers, used by Alembic.
++revision = "20261006120000"
++down_revision = "20261003020000"
++branch_labels = None
++depends_on = None
++
++_TABLE = "llm_providers"
++_OLD_COMPOSITE_INDEX = "ix_llm_providers_user_agent_default"
++
++
++def _is_pg() -> bool:
++    return op.get_bind().dialect.name == "postgresql"
++
++
++def upgrade() -> None:
++    # ① 含 agent_kind 的复合索引先删（列替换前必删，否则 drop column 报索引依赖，R-01）。
++    op.drop_index(_OLD_COMPOSITE_INDEX, table_name=_TABLE)
++
++    with op.batch_alter_table(_TABLE) as batch:
++        # ② 加 agent_kinds JSON NOT NULL（server_default '[]' 占位让已有数据行通过
++        #    NOT NULL 约束，回填后 drop）。
++        batch.add_column(sa.Column("agent_kinds", sa.JSON(), nullable=False, server_default="[]"))
++
++    # ③ 回填：每行 agent_kinds = [旧 agent_kind]（FR-02 值域不变性；双方言分支 R-03）。
++    if _is_pg():
++        op.execute(f"UPDATE {_TABLE} SET agent_kinds = to_jsonb(ARRAY[agent_kind])::json")
++    else:
++        op.execute(f"UPDATE {_TABLE} SET agent_kinds = json_array(agent_kind)")
++
++    with op.batch_alter_table(_TABLE) as batch:
++        # ④ 删旧单值列（不留双列，规则 11）；同时清 ② 的 server_default 占位
++        #    （model.py 列定义无 server_default，防 model/迁移漂移）。
++        batch.drop_column("agent_kind")
++        batch.alter_column("agent_kinds", server_default=None)
++
++    # ⑤ (user_id) 维度索引：复用既有 ix_llm_providers_user，不建重复索引（R-01）。
++
++
++def downgrade() -> None:
++    with op.batch_alter_table(_TABLE) as batch:
++        # 对称回退：加回 agent_kind 单值列（server_default 占位同 upgrade ② 逻辑）。
++        batch.add_column(
++            sa.Column("agent_kind", sa.String(length=32), nullable=False, server_default="claude")
++        )
++
++    # 回填：agent_kind = agent_kinds 数组首元素（PG ->>0 / SQLite json_extract）。
++    if _is_pg():
++        op.execute(f"UPDATE {_TABLE} SET agent_kind = agent_kinds->>0")
++    else:
++        op.execute(f"UPDATE {_TABLE} SET agent_kind = json_extract(agent_kinds, '$[0]')")
++
++    with op.batch_alter_table(_TABLE) as batch:
++        batch.drop_column("agent_kinds")
++        batch.alter_column("agent_kind", server_default=None)
++
++    # 复合索引恢复原形态（upgrade ① 的逆操作）。
++    op.create_index(
++        _OLD_COMPOSITE_INDEX,
++        _TABLE,
++        ["user_id", "agent_kind", "is_default"],
++        unique=False,
++    )
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 7ae0390cc..c8c7a388e 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -44914,7 +44914,7 @@
+               }
+             ],
+             "title": "Provider Config",
+-            "description": "用户默认 LLM 供应商配置。含 agent_kind/base_url/api_key(明文)/auth_field/model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create 阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。"
++            "description": "用户默认 LLM 供应商配置。agent_kind 恒为会话引擎值(D-005)。含 base_url/api_key(明文)/auth_field/model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create 阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。"
+           }
+         },
+         "type": "object",
+@@ -50028,15 +50028,18 @@
+             "type": "string",
+             "title": "Name"
+           },
+-          "agent_kind": {
+-            "type": "string",
+-            "enum": [
+-              "claude",
+-              "pi",
+-              "codex"
+-            ],
+-            "title": "Agent Kind",
+-            "default": "claude"
++          "agent_kinds": {
++            "items": {
++              "type": "string",
++              "enum": [
++                "claude",
++                "pi",
++                "codex"
++              ]
++            },
++            "type": "array",
++            "minItems": 1,
++            "title": "Agent Kinds"
+           },
+           "base_url": {
+             "anyOf": [
+@@ -50175,7 +50178,8 @@
+         },
+         "type": "object",
+         "required": [
+-          "name"
++          "name",
++          "agent_kinds"
+         ],
+         "title": "LlmProviderCreate"
+       },
+@@ -50299,9 +50303,12 @@
+             "type": "string",
+             "title": "Name"
+           },
+-          "agent_kind": {
+-            "type": "string",
+-            "title": "Agent Kind"
++          "agent_kinds": {
++            "items": {
++              "type": "string"
++            },
++            "type": "array",
++            "title": "Agent Kinds"
+           },
+           "base_url": {
+             "anyOf": [
+@@ -50438,7 +50445,7 @@
+           "id",
+           "user_id",
+           "name",
+-          "agent_kind",
++          "agent_kinds",
+           "base_url",
+           "model",
+           "notes",
+@@ -50549,6 +50556,26 @@
+             ],
+             "title": "Api Format"
+           },
++          "agent_kinds": {
++            "anyOf": [
++              {
++                "items": {
++                  "type": "string",
++                  "enum": [
++                    "claude",
++                    "pi",
++                    "codex"
++                  ]
++                },
++                "type": "array",
++                "minItems": 1
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Agent Kinds"
++          },
+           "model_role_mappings": {
+             "anyOf": [
+               {
+diff --git a/backend/tests/modules/daemon/lease/test_provider_config_payload.py b/backend/tests/modules/daemon/lease/test_provider_config_payload.py
+index 58cebb17f..5849987ac 100644
+--- a/backend/tests/modules/daemon/lease/test_provider_config_payload.py
++++ b/backend/tests/modules/daemon/lease/test_provider_config_payload.py
+@@ -111,7 +111,7 @@ async def _create_default_provider(
+     明文永不入 ORM（R-04）。``agent_kind`` 走 schema Literal 默认 "claude"。"""
+     data = LlmProviderCreate(
+         name=f"pc-prov-{uuid.uuid4().hex[:6]}",
+-        agent_kind="claude",
++        agent_kinds=["claude"],
+         base_url=base_url,
+         api_key=plaintext,
+         model=model,
+@@ -441,7 +441,7 @@ async def _seed_openai_default_provider(
+         id=uuid.uuid4(),
+         user_id=user_id,
+         name=f"pc-openai-{uuid.uuid4().hex[:6]}",
+-        agent_kind="claude",
++        agent_kinds=["claude"],
+         encrypted_api_key=ct,
+         key_id=key_id,
+         base_url="https://opencode.ai/zen/v1/chat/completions",
+diff --git a/frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx b/frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx
+index 1becbb033..9475d0816 100644
+--- a/frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx
++++ b/frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx
+@@ -81,7 +81,7 @@ function makeProvider(id = "p-1"): LlmProviderRead {
+     id,
+     user_id: "u-1",
+     name: `provider-${id}`,
+-    agent_kind: "claude",
++    agent_kinds: ["claude"],
+     base_url: null,
+     model: null,
+     notes: null,
+diff --git a/frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx b/frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx
+index 0281a637d..3cbe2fb25 100644
+--- a/frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx
++++ b/frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx
+@@ -241,7 +241,7 @@ function makeProvider(id = "p-1"): LlmProviderRead {
+     id,
+     user_id: "u-1",
+     name: `provider-${id}`,
+-    agent_kind: "claude",
++    agent_kinds: ["claude"],
+     base_url: null,
+     model: null,
+     notes: null,
+diff --git a/frontend/src/components/agent-profile-form.tsx b/frontend/src/components/agent-profile-form.tsx
+index 5ad8f8358..24940ce4e 100644
+--- a/frontend/src/components/agent-profile-form.tsx
++++ b/frontend/src/components/agent-profile-form.tsx
+@@ -767,7 +767,7 @@ function LlmProviderSelect({
+   });
+   const providers = data ?? [];
+   const options = useMemo(() => {
+-    const filtered = providers.filter((p) => p.agent_kind === engineProvider);
++    const filtered = providers.filter((p) => engineProvider != null && p.agent_kinds.includes(engineProvider));
+     const opts = filtered.map((p) => ({ value: p.id, label: p.name }));
+     // 编辑态回显：非本人供应商（id 不在列表）→ 占位，不误解绑。
+     if (value && !opts.some((o) => o.value === value)) {
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx
+index ac473380c..273764e56 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx
+@@ -758,7 +758,7 @@ describe("SessionPanel 预会话配置条与团队行（ql-20260823-008 完全
+       // ql-20260911-020：1e4bb818f（session-provider-switch-codex-pi task-05）给
+       // 供应商下拉加 agent_kind 引擎过滤——mock 缺 agent_kind 字段被过滤后下拉空，
+       // 本用例断言「选择 智谱 GLM」按钮找不到。补 kind 字段对齐真实 DTO。
+-      { id: "prov-1", name: "智谱 GLM", agent_kind: "claude" },
++      { id: "prov-1", name: "智谱 GLM", agent_kinds: ["claude"] },
+     ] as never);
+     sessionApi.createSession.mockResolvedValue({
+       session_id: "sess-pre-new",
+diff --git a/frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx b/frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx
+index 4271e505c..314c01cd6 100644
+--- a/frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx
++++ b/frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx
+@@ -24,7 +24,7 @@ describe("LlmProviderForm — API 格式下拉（task-05 / D-001@v1）", () => {
+     render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+     // Agent 种类 + API 格式 + 认证字段 = 3 个 select；+ task-12 多模态下拉 +
+     // ql-20260920-007（claude 引擎自动压缩三键区，agentKind=claude 恒渲染）。
+-    expect(screen.getAllByRole("combobox")).toHaveLength(5);
++    expect(screen.getAllByRole("combobox")).toHaveLength(4);
+     expect(screen.getByText("模型角色映射")).toBeInTheDocument();
+     expect(screen.getByText("默认兜底模型（可选）")).toBeInTheDocument();
+   });
+@@ -34,7 +34,7 @@ describe("LlmProviderForm — API 格式下拉（task-05 / D-001@v1）", () => {
+     fireEvent.change(getSelectByValue("anthropic"), {
+       target: { value: "openai_chat" },
+     });
+-    expect(screen.getAllByRole("combobox")).toHaveLength(4);
++    expect(screen.getAllByRole("combobox")).toHaveLength(3);
+     expect(screen.queryByText("模型角色映射")).not.toBeInTheDocument();
+     expect(screen.queryByText("默认兜底模型（可选）")).not.toBeInTheDocument();
+     // 认证字段 option 随 select 整块移除
+@@ -53,7 +53,7 @@ describe("LlmProviderForm — API 格式下拉（task-05 / D-001@v1）", () => {
+     expect(screen.getByText("模型角色映射")).toBeInTheDocument();
+     // task-12：+1 多模态下拉；ql-20260920-007：+1 自动压缩下拉
+     //（4 = 3 既有 + multimodal + autocompact）。
+-    expect(screen.getAllByRole("combobox")).toHaveLength(5);
++    expect(screen.getAllByRole("combobox")).toHaveLength(4);
+   });
+ 
+   it("OpenAI 模式提交 → values.api_format === 'openai_chat'", async () => {
+diff --git a/frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx b/frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx
+index 7cb2c0aae..beb2800a8 100644
+--- a/frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx
++++ b/frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx
+@@ -40,7 +40,7 @@ const EDIT_INITIAL: LlmProviderRead = {
+   id: "p-1",
+   user_id: "u-1",
+   name: "Claude 官方",
+-  agent_kind: "claude",
++  agent_kinds: ["claude"],
+   base_url: "https://api.anthropic.com",
+   model: null,
+   notes: null,
+diff --git a/frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx b/frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx
+index 2c7684660..46e029502 100644
+--- a/frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx
++++ b/frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx
+@@ -31,7 +31,7 @@ const INITIAL: LlmProviderRead = {
+   id: "p-1",
+   user_id: "u-1",
+   name: "Claude 官方",
+-  agent_kind: "claude",
++  agent_kinds: ["claude"],
+   base_url: "https://api.anthropic.com",
+   model: null,
+   notes: "官方账号",
+@@ -80,7 +80,7 @@ describe("LlmProviderForm — 新建模式", () => {
+     expect(values.name).toBe("Kimi 中转");
+     expect(values.api_key).toBe("sk-secret-1234");
+     expect(values.base_url).toBe("https://api.moonshot.cn/anthropic");
+-    expect(values.agent_kind).toBe("claude");
++    expect(values.agent_kinds).toEqual(["claude"]);
+     expect(values.auth_field).toBe("ANTHROPIC_AUTH_TOKEN"); // 默认值
+     // 4 行角色映射 + 空 extra_env 结构存在
+     expect(values.model_role_mappings).toHaveProperty("sonnet");
+@@ -91,7 +91,7 @@ describe("LlmProviderForm — 新建模式", () => {
+     // lib 组装层零回归（task-07 扩 allowed_paths 后补）：缺省 claude 经 formToCreate
+     // 产出的 POST body agent_kind 仍为 "claude"、auth_field 为缺省两选项之一。
+     const body = formToCreate(values);
+-    expect(body.agent_kind).toBe("claude");
++    expect(body.agent_kinds).toEqual(["claude"]);
+     expect(body.auth_field).toBe("ANTHROPIC_AUTH_TOKEN");
+   });
+ 
+@@ -392,27 +392,26 @@ describe("LlmProviderForm — 字段 ↔ settings_config.env 联动（ql-2026082
+ // design §5.2：pi 凭证行的 auth_field 为任意合法 env 变量名（pattern
+ // ^[A-Z][A-Z0-9_]*$，与 backend task-04 同款）；claude 侧两选项下拉与 env 改名
+ // 联动零回归。
++/** D-004 多选：勾/取消引擎复选框（label 文本匹配）。 */
++const toggleKind = (label: string): void => {
++  fireEvent.click(screen.getByRole("checkbox", { name: new RegExp(label) }));
++};
++
+ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
+-  /** 把 Agent 种类下拉切到 pi（新建缺省 claude → pi）。 */
++  /** 把引擎集合从 [claude] 切到 [pi]（勾 Pi + 取消 Claude Code）。 */
+   const switchToPi = (): void => {
+-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+-      target: { value: "pi" },
+-    });
++    toggleKind("Pi");
++    toggleKind("Claude Code");
+   };
+ 
+   it("pi 选项不再 disabled，切换后提交 values.agent_kind='pi'", async () => {
+     const onSubmit = vi.fn();
+     render(<LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />);
+ 
+-    const kindSelect = screen.getByDisplayValue("Claude Code") as HTMLSelectElement;
+-    const piOption = kindSelect.querySelector(
+-      'option[value="pi"]',
+-    ) as HTMLOptionElement;
+-    expect(piOption.disabled).toBe(false);
+-    expect(piOption.textContent).toBe("Pi"); // 不再带「（即将支持）」后缀
++    const piCheckbox = screen.getByRole("checkbox", { name: "Pi" }) as HTMLInputElement;
++    expect(piCheckbox.disabled).toBe(false);
+ 
+-    fireEvent.change(kindSelect, { target: { value: "pi" } });
+-    expect(kindSelect.value).toBe("pi");
++    switchToPi();
+ 
+     fireEvent.change(
+       screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/),
+@@ -425,7 +424,7 @@ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
+ 
+     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+     const values = onSubmit.mock.calls[0]![0]!;
+-    expect(values.agent_kind).toBe("pi");
++    expect(values.agent_kinds).toEqual(["pi"]);
+   });
+ 
+   it("pi 时认证字段泛化为可输入 env 名，ZAI_API_KEY 随 payload 透传", async () => {
+@@ -453,13 +452,13 @@ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
+ 
+     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+     const values = onSubmit.mock.calls[0]![0]!;
+-    expect(values.agent_kind).toBe("pi");
++    expect(values.agent_kinds).toEqual(["pi"]);
+     expect(values.auth_field).toBe("ZAI_API_KEY");
+     // lib 组装层（design §6 llm-providers.ts 行，execute 期曾在此吞 pi）：pi 表单经
+     // formToCreate 产出的 POST body agent_kind==='pi' 且 auth_field 为所填 env 名
+     // （backend task-04 已放开 env 名 pattern；createProvider 把该 body 原样 json 透传）。
+     const body = formToCreate(values);
+-    expect(body.agent_kind).toBe("pi");
++    expect(body.agent_kinds).toEqual(["pi"]);
+     expect(body.auth_field).toBe("ZAI_API_KEY");
+   });
+ 
+@@ -511,15 +510,14 @@ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
+     // pi 自由输入不渲染
+     expect(screen.queryByPlaceholderText(/ZAI_API_KEY/)).toBeNull();
+ 
+-    const kindSelect = screen.getByDisplayValue("Claude Code") as HTMLSelectElement;
+     // task-06 起 codex 启用（凭证走 daemon CODEX_HOME 文件注入）；仅 gemini 占位。
+     expect(
+-      (kindSelect.querySelector('option[value="codex"]') as HTMLOptionElement)
+-        .disabled,
++      (screen.getByRole("checkbox", { name: "Codex" }) as HTMLInputElement).disabled,
+     ).toBe(false);
+     expect(
+-      (kindSelect.querySelector('option[value="gemini"]') as HTMLOptionElement)
+-        .disabled,
++      (
++        screen.getByRole("checkbox", { name: /Gemini（即将支持）/ }) as HTMLInputElement
++      ).disabled,
+     ).toBe(true);
+   });
+ });
+@@ -529,26 +527,20 @@ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
+ // task-01），不经 env auth_field；agent_kind 词表 backend task-05 已增 codex
+ // （仅 Create），前端表单跟进放开选项。
+ describe("LlmProviderForm — agent_kind=codex（task-06 / FR-05）", () => {
+-  /** 把 Agent 种类下拉切到 codex（新建缺省 claude → codex）。 */
++  /** 把引擎集合从 [claude] 切到 [codex]。 */
+   const switchToCodex = (): void => {
+-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+-      target: { value: "codex" },
+-    });
++    toggleKind("Codex");
++    toggleKind("Claude Code");
+   };
+ 
+   it("codex 选项不再 disabled（标签无「即将支持」后缀），切换后提交 values.agent_kind='codex'", async () => {
+     const onSubmit = vi.fn();
+     render(<LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />);
+ 
+-    const kindSelect = screen.getByDisplayValue("Claude Code") as HTMLSelectElement;
+-    const codexOption = kindSelect.querySelector(
+-      'option[value="codex"]',
+-    ) as HTMLOptionElement;
+-    expect(codexOption.disabled).toBe(false);
+-    expect(codexOption.textContent).toBe("Codex"); // 照 pi 先例：启用后不带后缀
++    const codexCheckbox = screen.getByRole("checkbox", { name: "Codex" }) as HTMLInputElement;
++    expect(codexCheckbox.disabled).toBe(false);
+ 
+-    fireEvent.change(kindSelect, { target: { value: "codex" } });
+-    expect(kindSelect.value).toBe("codex");
++    switchToCodex();
+ 
+     fireEvent.change(
+       screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/),
+@@ -561,10 +553,10 @@ describe("LlmProviderForm — agent_kind=codex（task-06 / FR-05）", () => {
+ 
+     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+     const values = onSubmit.mock.calls[0]![0]!;
+-    expect(values.agent_kind).toBe("codex");
++    expect(values.agent_kinds).toEqual(["codex"]);
+     // lib 组装层：formToCreate 产出的 POST body agent_kind 透传 codex
+     const body = formToCreate(values);
+-    expect(body.agent_kind).toBe("codex");
++    expect(body.agent_kinds).toEqual(["codex"]);
+   });
+ 
+   it("编辑态 initial.agent_kind='codex' 回填 codex（未知值仍归一 claude 的边界不回归）", async () => {
+@@ -572,34 +564,32 @@ describe("LlmProviderForm — agent_kind=codex（task-06 / FR-05）", () => {
+     render(
+       <LlmProviderForm
+         mode="edit"
+-        initial={{ ...INITIAL, agent_kind: "codex", name: "Codex 行" }}
++        initial={{ ...INITIAL, agent_kinds: ["codex"], name: "Codex 行" }}
+         onSubmit={onSubmit}
+         onCancel={vi.fn()}
+       />,
+     );
+ 
+-    const kindSelect = screen.getByDisplayValue("Codex") as HTMLSelectElement;
+-    expect(kindSelect.value).toBe("codex");
++    const codexCheckbox = screen.getByRole("checkbox", { name: "Codex" }) as HTMLInputElement;
++    expect(codexCheckbox.checked).toBe(true);
+ 
+     fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+-    expect(onSubmit.mock.calls[0]![0]!.agent_kind).toBe("codex");
++    expect(onSubmit.mock.calls[0]![0]!.agent_kinds).toEqual(["codex"]);
+   });
+ 
+   it("从 pi（自由 env 名）切到 codex → auth_field 归一回缺省（下拉不出无匹配空值）", () => {
+     render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+     // 先切 pi 填自由 env 名
+-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+-      target: { value: "pi" },
+-    });
++    toggleKind("Pi");
++    toggleKind("Claude Code");
+     fireEvent.change(screen.getByPlaceholderText(/ZAI_API_KEY/), {
+       target: { value: "ZAI_API_KEY" },
+     });
+     // 切 codex：认证字段块按 claude 形态渲染（codex 不消费 auth_field），
+     // pi 自由输入值不在两选项内 → 归一回缺省（照切 claude 同款先例）。
+-    fireEvent.change(screen.getByDisplayValue("Pi"), {
+-      target: { value: "codex" },
+-    });
++    toggleKind("Codex");
++    toggleKind("Pi");
+     expect(
+       screen.getByDisplayValue("ANTHROPIC_AUTH_TOKEN（默认，中转站常用）"),
+     ).toBeTruthy();
+@@ -614,9 +604,8 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
+   it("pi 选中时 openai_chat 选项 disabled + 禁配提示可见；anthropic 仍可选", () => {
+     render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+ 
+-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+-      target: { value: "pi" },
+-    });
++    toggleKind("Pi");
++    toggleKind("Claude Code");
+ 
+     const formatSelect = screen.getAllByRole("combobox").find(
+       (s) => (s as HTMLSelectElement).value === "anthropic",
+@@ -635,7 +624,7 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
+     ).toBeTruthy();
+   });
+ 
+-  it("openai_chat 状态下切到 pi → api_format 归一回 anthropic（照 authField 归一先例）", () => {
++  it("openai_chat 状态下 pi 复选框前置禁用（D-005 集合级前置，取代旧「切 pi 归一格式」）", () => {
+     render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+ 
+     // 先切 OpenAI Chat（claude 允许）
+@@ -644,15 +633,14 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
+     ) as HTMLSelectElement;
+     fireEvent.change(formatSelect, { target: { value: "openai_chat" } });
+ 
+-    // 切 pi → 归一回 anthropic，不出「选中着 disabled 项」的悬挂态
+-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+-      target: { value: "pi" },
+-    });
+-    const after = screen.getAllByRole("combobox").find(
+-      (s) => (s as HTMLSelectElement).value === "anthropic",
+-    ) as HTMLSelectElement;
+-    expect(after).toBeTruthy();
+-    expect(screen.queryByRole("alert")).toBeNull(); // 归一后无报错态
++    // pi 复选框禁用 + 提示；点击不可勾选（防悬挂态——勾不上即无「选中着禁配项」）
++    const piCheckbox = screen.getByRole("checkbox", { name: /Pi/ }) as HTMLInputElement;
++    expect(piCheckbox.disabled).toBe(true);
++    expect(screen.getByText(/openai 格式不可用/)).toBeTruthy();
++    fireEvent.click(piCheckbox);
++    expect(
++      (screen.getByRole("checkbox", { name: /Pi/ }) as HTMLInputElement).checked,
++    ).toBe(false);
+   });
+ 
+   it("存量 pi×openai_chat 行进编辑态（绕过下拉的路径）→ 报错文案与后端 422 逐字一致且提交被拦", async () => {
+@@ -660,7 +648,7 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
+     render(
+       <LlmProviderForm
+         mode="edit"
+-        initial={{ ...INITIAL, agent_kind: "pi", api_format: "openai_chat" }}
++        initial={{ ...INITIAL, agent_kinds: ["pi"], api_format: "openai_chat" }}
+         onSubmit={onSubmit}
+         onCancel={vi.fn()}
+       />,
+@@ -689,9 +677,8 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
+     const onSubmit = vi.fn();
+     render(<LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />);
+ 
+-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+-      target: { value: "codex" },
+-    });
++    toggleKind("Codex");
++    toggleKind("Claude Code");
+     const formatSelect = screen.getAllByRole("combobox").find(
+       (s) => (s as HTMLSelectElement).value === "anthropic",
+     ) as HTMLSelectElement;
+@@ -712,7 +699,7 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
+     fireEvent.click(screen.getByRole("button", { name: "创建供应商" }));
+     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+     const values = onSubmit.mock.calls[0]![0]!;
+-    expect(values.agent_kind).toBe("codex");
++    expect(values.agent_kinds).toEqual(["codex"]);
+     expect(values.api_format).toBe("openai_chat");
+   });
+ 
+@@ -721,9 +708,8 @@ describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", ()
+     // claude 下不出现 pi 专属提示
+     expect(screen.queryByText(/自定义端点/)).toBeNull();
+ 
+-    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+-      target: { value: "pi" },
+-    });
++    toggleKind("Pi");
++    toggleKind("Claude Code");
+     expect(
+       screen.getByText(/auth\.json \/ models\.json \/ settings\.json 三文件/),
+     ).toBeTruthy();
+@@ -799,9 +785,8 @@ describe("LlmProviderForm — 引擎自动压缩区（claude 条件渲染）", (
+     );
+     // 切 pi
+     // agent_kind 下拉（label「引擎类型」关联的 select）
+-    fireEvent.change(screen.getByLabelText("Agent 种类"), {
+-      target: { value: "pi" },
+-    });
++    toggleKind("Pi");
++    toggleKind("Claude Code");
+     expect(screen.queryByText("引擎自动压缩（claude）")).toBeNull();
+   });
+ });
+diff --git a/frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx b/frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx
+index 2b17eeaea..5e71bdbb6 100644
+--- a/frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx
++++ b/frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx
+@@ -45,7 +45,7 @@ const baseProvider = (over: Partial<LlmProviderRead>): LlmProviderRead => ({
+   id: "p-x",
+   user_id: "u-1",
+   name: "供应商",
+-  agent_kind: "claude",
++  agent_kinds: ["claude"],
+   base_url: null,
+   model: null,
+   notes: null,
+diff --git a/frontend/src/components/llm-providers/llm-provider-form.tsx b/frontend/src/components/llm-providers/llm-provider-form.tsx
+index c27d47ff5..3665a4d27 100644
+--- a/frontend/src/components/llm-providers/llm-provider-form.tsx
++++ b/frontend/src/components/llm-providers/llm-provider-form.tsx
+@@ -3,6 +3,8 @@
+ import { useMemo, useState, type FormEvent } from "react";
+ import { Download, Loader2, Package, Sparkles } from "lucide-react";
+ 
++import { message } from "antd";
++
+ import { Button } from "@/components/ui/button";
+ import { JsonEditor } from "@/components/ui/json-editor";
+ import {
+@@ -222,13 +224,12 @@ export function LlmProviderForm({
+   const isEdit = mode === "edit";
+ 
+   const [name, setName] = useState(initial?.name ?? "");
+-  // task-07（D-002@v1）：agent 种类可选——编辑态初值取 initial（pi 行回填 pi，
+-  // task-06 起 codex 行回填 codex），新建缺省 claude；其余未知值归一为 claude
+-  // （下拉可选项只有 claude/codex/pi）。
+-  const [agentKind, setAgentKind] = useState<LlmProviderAgentKind>(
+-    initial?.agent_kind === "pi" || initial?.agent_kind === "codex"
+-      ? initial.agent_kind
+-      : "claude",
++  // change 2026-10-06-provider-multi-agent-kind（D-004）：单选改引擎集合——编辑态
++  // 初值取 initial.agent_kinds（去重兜底），新建缺省 ["claude"]；至少勾一个（提交侧拦）。
++  const [agentKinds, setAgentKinds] = useState<LlmProviderAgentKind[]>(
++    initial?.agent_kinds?.length
++      ? (Array.from(new Set(initial.agent_kinds)) as LlmProviderAgentKind[])
++      : ["claude"],
+   );
+   const [notes, setNotes] = useState(initial?.notes ?? "");
+   const [websiteUrl, setWebsiteUrl] = useState(initial?.website_url ?? "");
+@@ -362,9 +363,21 @@ export function LlmProviderForm({
+       settingsConfig = null;
+     }
+ 
++    // R-05（task-08）：编辑默认供应商时收缩引擎集合 → 被移除引擎的默认位空缺
++    //（不自动转移，D-003）。提交即提示（保存语义=用户确认收缩）。
++    if (isEdit && initial?.is_default) {
++      const removed = (initial.agent_kinds ?? []).filter(
++        (k: string) => !agentKinds.includes(k as LlmProviderAgentKind),
++      );
++      if (removed.length > 0) {
++        void message.warning(
++          `已移除引擎 ${removed.join("、")}：该引擎的默认供应商位已空缺（不会自动转移给其它供应商）`,
++        );
++      }
++    }
+     const values: LlmProviderFormValues = {
+       name,
+-      agent_kind: agentKind,
++      agent_kinds: agentKinds,
+       api_format: apiFormat,
+       base_url: baseUrl,
+       api_key: apiKey,
+@@ -510,7 +523,7 @@ export function LlmProviderForm({
+ 
+   /**
+    * ql-20260920-007（2026-09-20-claude-autocompact-config / FR-02）：引擎自动压缩
+-   * 三键派生态（agentKind=claude 条件区渲染用）。JSON 非法时全空（跟随引擎默认）。
++   * 三键派生态（agentKinds 含 claude 条件区渲染用）。JSON 非法时全空（跟随引擎默认）。
+    *   - autoCompactWindow：number | undefined（压缩窗口 token 数）
+    *   - autoCompactEnabled：boolean | undefined（三态：undefined=跟随引擎/true=开/false=关）
+    *   - precomputeCompactionEnabled：boolean | undefined（勾选=开启后台预计算）
+@@ -732,7 +745,7 @@ export function LlmProviderForm({
+    * claude 路径不受影响（两选项下拉值恒合法）。
+    */
+   const piAuthFieldError: string | null = (() => {
+-    if (agentKind !== "pi") return null;
++    if (!agentKinds.includes("pi")) return null;
+     const v = authField.trim();
+     if (v === "") {
+       return "认证字段不能为空：pi 凭证需要一个 env 变量名（如 ZAI_API_KEY）。";
+@@ -746,12 +759,12 @@ export function LlmProviderForm({
+    * pi × openai_chat 禁配兜底（task-06 / FR-05 / D-012 连带声明）：该组合两层
+    * 注入均不生效（pi env 层不带端点、文件层仅 anthropic 形态直连），后端
+    * Create/Update 均已 422。表单侧下拉对 pi 禁用 openai_chat 选项 + 切 pi 时
+-   * 归一 api_format（见 agentKind onChange），此处提交前再拦一道，兜住绕过
++   * 归一 api_format（见引擎勾选 onChange/openai 选项禁用），此处提交前再拦一道，兜住绕过
+    * 下拉的路径（如禁配上线前的存量 pi×openai_chat 行进编辑态）。文案与后端
+    * 422 逐字对齐（schema._forbid_pi_openai_chat）。
+    */
+   const piOpenaiChatError: string | null =
+-    agentKind === "pi" && apiFormat === "openai_chat"
++    agentKinds.includes("pi") && apiFormat === "openai_chat"
+       ? "pi 供应商不支持 openai_chat API 格式（两层注入均不生效），请改用 anthropic 格式或选择 codex/claude 供应商"
+       : null;
+   const submitDisabled =
+@@ -835,41 +848,65 @@ export function LlmProviderForm({
+         </div>
+         <div>
+           <label className={lblCls}>
+-            Agent 种类 <span className="text-destructive">*</span>
++            Agent 种类（可多选） <span className="text-destructive">*</span>
+           </label>
+-          <select
++          {/* D-004 多选：同一份凭证可服务多个引擎；至少勾一个（提交侧拦空集）。 */}
++          <div
++            role="group"
+             aria-label="Agent 种类"
+-            value={agentKind}
+-            onChange={(e) => {
+-              const next = e.target.value as LlmProviderAgentKind;
+-              setAgentKind(next);
+-              // task-07：切回 claude 时若 auth_field 是 pi 自由输入的 env 名（不在
+-              // 两选项下拉内）→ 归一回缺省，避免下拉出现无匹配空值。task-06：codex
+-              // 认证字段同 claude 形态渲染（codex 不消费 auth_field），归一一并覆盖。
+-              if (
+-                next !== "pi" &&
+-                !AUTH_FIELD_OPTIONS.some((o) => o.value === authField)
+-              ) {
+-                setAuthField("ANTHROPIC_AUTH_TOKEN");
+-              }
+-              // task-06（FR-05 / D-012）：pi 时 openai_chat 禁配——从 openai_chat
+-              // 切到 pi 即归一回 anthropic（照上方 authField 归一先例），提交侧
+-              // piOpenaiChatError 另兜存量/绕过路径。
+-              if (next === "pi" && apiFormat === "openai_chat") {
+-                setApiFormat("anthropic");
+-              }
+-            }}
+-            className={`mt-0.5 ${inputCls}`}
++            className="mt-0.5 flex flex-wrap gap-x-4 gap-y-1.5"
+           >
+-            {AGENT_KIND_OPTIONS.map((o) => (
+-              <option key={o.value} value={o.value} disabled={o.disabled}>
+-                {o.label}
+-              </option>
+-            ))}
+-          </select>
++            {AGENT_KIND_OPTIONS.map((o) => {
++              const checked = agentKinds.includes(o.value as LlmProviderAgentKind);
++              // task-06（FR-05 / D-012；D-005 集合级）：openai_chat 格式下 pi 项
++              // 前置禁用（后端 422 同口径，双端一致）；gemini 占位禁用照旧。
++              const piLocked =
++                o.value === "pi" && apiFormat === "openai_chat" && !checked;
++              const disabled = Boolean(o.disabled) || piLocked;
++              return (
++                <label
++                  key={o.value}
++                  className={`flex items-center gap-1.5 text-sm ${
++                    disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
++                  }`}
++                >
++                  <input
++                    type="checkbox"
++                    checked={checked}
++                    disabled={disabled}
++                    onChange={(e) => {
++                      if (disabled) return; // 防编程式点击绕过禁用（如 fireEvent）
++                      const v = o.value as LlmProviderAgentKind;
++                      const next = e.target.checked
++                        ? [...agentKinds, v]
++                        : agentKinds.filter((k) => k !== v);
++                      if (next.length === 0) return; // 至少保留一个（UI 层不产生空集）
++                      setAgentKinds(next);
++                      // 取消 pi 勾选后若 auth_field 是 pi 自由输入 env 名（不在两
++                      // 选项内）→ 归一回缺省，避免下拉空值（单选时代同款归一）。
++                      if (
++                        !next.includes("pi") &&
++                        !AUTH_FIELD_OPTIONS.some((opt) => opt.value === authField)
++                      ) {
++                        setAuthField("ANTHROPIC_AUTH_TOKEN");
++                      }
++                    }}
++                    className="h-4 w-4 accent-[var(--brand)]"
++                  />
++                  {o.label}
++                  {piLocked && (
++                    <span className="text-xs text-muted-foreground">
++                      （openai 格式不可用）
++                    </span>
++                  )}
++                </label>
++              );
++            })}
++          </div>
+           <p className={hintCls}>
+-            Claude Code 走默认凭证链；Pi 使用独立凭证池（认证字段可配专属 env 名）；Codex
+-            凭证由 daemon 在会话级 CODEX_HOME 目录写入文件（无需认证字段）。gemini 预留。
++            一条凭证可同时服务多个引擎；Claude Code 走默认凭证链；Pi 使用独立凭证池
++            （认证字段可配专属 env 名）；Codex 凭证由 daemon 在会话级 CODEX_HOME
++            目录写入文件。gemini 预留。
+           </p>
+         </div>
+       </div>
+@@ -932,7 +969,7 @@ export function LlmProviderForm({
+             <option
+               key={o.value}
+               value={o.value}
+-              disabled={agentKind === "pi" && o.value === "openai_chat"}
++              disabled={agentKinds.includes("pi") && o.value === "openai_chat"}
+             >
+               {o.label}
+             </option>
+@@ -943,7 +980,7 @@ export function LlmProviderForm({
+             ? "OpenAI 格式：Bearer 鉴权，可粘贴完整 .../v1/chat/completions 地址；经 LiteLLM 网关让 Claude Code 消费（端到端 Wave2 上线后可用）。"
+             : "Anthropic 格式：ANTHROPIC_* 鉴权，兼容 Claude API 端点（官方/中转站）。"}
+         </p>
+-        {agentKind === "pi" && (
++        {agentKinds.includes("pi") && (
+           <p className={hintCls}>
+             pi 供应商不支持 openai_chat API 格式（两层注入均不生效），该选项已禁用——请保持
+             Anthropic 格式，或改选 codex/claude 供应商。
+@@ -976,7 +1013,7 @@ export function LlmProviderForm({
+         <p className={hintCls}>
+           Anthropic 格式填 base（如 <code className="text-xs">https://api.anthropic.com</code>）；OpenAI 格式可粘完整地址（如 <code className="text-xs">https://opencode.ai/zen/v1/chat/completions</code>），后端自动剥 /chat/completions。
+         </p>
+-        {agentKind === "pi" && (
++        {agentKinds.includes("pi") && (
+           <p className={hintCls}>
+             Pi 自定义端点语义（task-06 / D-008 分层）：填写=自定义端点——daemon 在会话级
+             pi 目录写 auth.json / models.json / settings.json 三文件把请求路由到该端点；
+@@ -1015,12 +1052,12 @@ export function LlmProviderForm({
+               （零回归）；pi 泛化为可输入 env 名（datalist 建议 + pattern 即时校验拦
+               提交）。task-06 起 pi × openai_chat 禁配（pi 恒 anthropic），但 pi 分支
+               不折叠进 `apiFormat === "anthropic"` 条件——pi 凭证走 env 层按
+-              auth_field 注 key 与格式无关，显式 `|| agentKind === "pi"` 防将来
++              auth_field 注 key 与格式无关，显式 `|| agentKinds.includes("pi")` 防将来
+               词表/条件变动时 pi 认证字段凭空消失。 */}
+-          {(apiFormat === "anthropic" || agentKind === "pi") && (
++          {(apiFormat === "anthropic" || agentKinds.includes("pi")) && (
+           <div>
+             <label className={lblCls}>认证字段</label>
+-            {agentKind === "pi" ? (
++            {agentKinds.includes("pi") ? (
+               <>
+                 <input
+                   list="pi-auth-field-suggestions"
+@@ -1270,7 +1307,7 @@ export function LlmProviderForm({
+           引擎自动压缩三键结构化区——仅 claude 引擎渲染（pi/codex 压缩机制各自独立，
+           不走 settings.json）。三键直写 settings_config 顶层，随 spawn 前白名单
+           （claude-settings.ts）落 $CLAUDE_CONFIG_DIR/settings.json。 */}
+-      {agentKind === "claude" && (
++      {agentKinds.includes("claude") && (
+         <details className="rounded border border-dashed border-input/70 p-3">
+           <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+             引擎自动压缩（claude）
+diff --git a/frontend/src/components/llm-providers/llm-provider-list.tsx b/frontend/src/components/llm-providers/llm-provider-list.tsx
+index 8709ba852..b0c01331a 100644
+--- a/frontend/src/components/llm-providers/llm-provider-list.tsx
++++ b/frontend/src/components/llm-providers/llm-provider-list.tsx
+@@ -226,7 +226,11 @@ export function LlmProviderSection() {
+               >
+                 <div className="flex flex-wrap items-center gap-2">
+                   <span className="text-sm font-medium">{p.name}</span>
+-                  <Badge variant="warning">{p.agent_kind}</Badge>
++                  {(p.agent_kinds ?? []).map((k) => (
++                    <Badge key={k} variant="warning">
++                      {k}
++                    </Badge>
++                  ))}
+                   {p.api_format === "openai_chat" && (
+                     <Badge variant="outline" className="gap-0.5" title="OpenAI 格式（经 LiteLLM 网关消费）">
+                       OpenAI
+diff --git a/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx b/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+index 5f1728437..48ee2edb8 100644
+--- a/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+@@ -78,7 +78,7 @@ function provider(over: Partial<LlmProviderRead> = {}): LlmProviderRead {
+     id: "p-zhipu",
+     user_id: "u-1",
+     name: "智谱GLM",
+-    agent_kind: "pi",
++    agent_kinds: ["pi"],
+     base_url: "https://open.bigmodel.cn/api/anthropic",
+     model: null,
+     notes: null,
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index 70359eb9a..113263f28 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -180,8 +180,8 @@ beforeEach(() => {
+   // task-07：fixture 补 agent_kind（真实后端 LlmProviderRead 恒有该字段；缺省
+   // 项会被 kind 过滤滤掉——默认两供应商按 BASE_PROPS 引擎语境给 claude kind）。
+   mocks.listProviders.mockReset().mockResolvedValue([
+-    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kind: "claude" },
+-    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kind: "claude" },
++    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kinds: ["claude"] },
++    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kinds: ["claude"] },
+   ]);
+   mocks.injectSession.mockReset().mockResolvedValue(INJECT_RESPONSE);
+   // task-06（thinking-level）：GET 默认五档+现值 medium（会话态用例按需覆盖）；
+@@ -420,10 +420,10 @@ describe("SessionConfigBar 切换供应商", () => {
+ describe("SessionConfigBar 供应商下拉 kind 过滤（task-07 / FR-03 / D-002@v1）", () => {
+   /** 三 kind 混合列表——断言各引擎只列同 kind 项 + 「不指定（本机默认）」保留。 */
+   const MIXED_PROVIDERS = [
+-    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kind: "claude" },
+-    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kind: "claude" },
+-    { id: "prov-codex-1", name: "Codex 专供", model: "gpt-5.2", agent_kind: "codex" },
+-    { id: "prov-pi-1", name: "Pi 专供", model: "glm-4.7-air", agent_kind: "pi" },
++    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kinds: ["claude"] },
++    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kinds: ["claude"] },
++    { id: "prov-codex-1", name: "Codex 专供", model: "gpt-5.2", agent_kinds: ["codex"] },
++    { id: "prov-pi-1", name: "Pi 专供", model: "glm-4.7-air", agent_kinds: ["pi"] },
+   ];
+ 
+   /** 按引擎渲染并打开供应商下拉（engine null = provisional 悬浮助手形态）。 */
+@@ -621,7 +621,7 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
+     name: "GLM 平台",
+     model: "glm-4.7",
+     // task-07：kind 字段补齐（本组用例默认 claude 引擎语境；codex 分支内覆盖）。
+-    agent_kind: "claude",
++    agent_kinds: ["claude"],
+     default_fallback_model: "glm-4.6",
+     model_role_mappings: {
+       sonnet: { model: "glm-4.7" }, // 与 model 重复 → 去重
+@@ -694,7 +694,7 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
+     cleanup();
+     // codex 解锁：选中供应商 → 模型子下拉渲染（与 claude 同构，级联候选不变）
+     mocks.listProviders.mockResolvedValue([
+-      { ...GLM_PROVIDER, agent_kind: "codex" },
++      { ...GLM_PROVIDER, agent_kinds: ["codex"] },
+     ] as never);
+     renderBar({
+       llmProviderId: "prov-glm",
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 19e3acb9d..78b2558fb 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -409,7 +409,7 @@ export function SessionConfigBar({
+     () =>
+       effectiveEngine == null
+         ? providers
+-        : providers.filter((p) => p.agent_kind === effectiveEngine),
++        : providers.filter((p) => p.agent_kinds.includes(effectiveEngine)),
+     [providers, effectiveEngine],
+   );
+ 
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 0a46ed119..4b2fc88f5 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -15900,7 +15900,7 @@ export interface components {
+             stage_dispatch?: boolean | null;
+             /**
+              * Provider Config
+-             * @description 用户默认 LLM 供应商配置。含 agent_kind/base_url/api_key(明文)/auth_field/model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create 阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。
++             * @description 用户默认 LLM 供应商配置。agent_kind 恒为会话引擎值(D-005)。含 base_url/api_key(明文)/auth_field/model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create 阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。
+              */
+             provider_config?: {
+                 [key: string]: unknown;
+@@ -18241,12 +18241,8 @@ export interface components {
+         LlmProviderCreate: {
+             /** Name */
+             name: string;
+-            /**
+-             * Agent Kind
+-             * @default claude
+-             * @enum {string}
+-             */
+-            agent_kind: "claude" | "pi" | "codex";
++            /** Agent Kinds */
++            agent_kinds: ("claude" | "pi" | "codex")[];
+             /** Base Url */
+             base_url?: string | null;
+             /** Api Key */
+@@ -18350,8 +18346,8 @@ export interface components {
+             user_id: string;
+             /** Name */
+             name: string;
+-            /** Agent Kind */
+-            agent_kind: string;
++            /** Agent Kinds */
++            agent_kinds: string[];
+             /** Base Url */
+             base_url: string | null;
+             /** Model */
+@@ -18416,6 +18412,8 @@ export interface components {
+             auth_field?: string | null;
+             /** Api Format */
+             api_format?: ("anthropic" | "openai_chat") | null;
++            /** Agent Kinds */
++            agent_kinds?: ("claude" | "pi" | "codex")[] | null;
+             /** Model Role Mappings */
+             model_role_mappings?: {
+                 [key: string]: unknown;
+diff --git a/frontend/src/lib/api/__tests__/llm-providers.test.ts b/frontend/src/lib/api/__tests__/llm-providers.test.ts
+index 4f0b26fa9..9357d7be1 100644
+--- a/frontend/src/lib/api/__tests__/llm-providers.test.ts
++++ b/frontend/src/lib/api/__tests__/llm-providers.test.ts
+@@ -68,7 +68,7 @@ const READ = {
+   id: "p-1",
+   user_id: "u-1",
+   name: "Kimi 中转",
+-  agent_kind: "claude",
++  agent_kinds: ["claude"],
+   base_url: "https://api.moonshot.cn/anthropic",
+   model: null,
+   notes: null,
+@@ -85,7 +85,7 @@ const READ = {
+ 
+ const FORM_VALUES: LlmProviderFormValues = {
+   name: "Kimi 中转",
+-  agent_kind: "claude",
++  agent_kinds: ["claude"],
+   base_url: "https://api.moonshot.cn/anthropic",
+   api_key: "sk-secret-1234",
+   auth_field: "ANTHROPIC_AUTH_TOKEN",
+@@ -126,7 +126,7 @@ describe("llm-providers API — method + path", () => {
+     const h = mockFetch({ status: 201, body: READ });
+     await createProvider({
+       name: "Kimi 中转",
+-      agent_kind: "claude",
++      agent_kinds: ["claude"],
+       auth_field: "ANTHROPIC_AUTH_TOKEN",
+     });
+     expect(h.lastMethod()).toBe("POST");
+@@ -164,7 +164,7 @@ describe("formToCreate — 表单值 → POST body 映射", () => {
+   it("角色映射嵌套结构保留（清洗空行）、extra_env 键值对、api_key 透传", () => {
+     const body = formToCreate(FORM_VALUES);
+     expect(body.name).toBe("Kimi 中转");
+-    expect(body.agent_kind).toBe("claude");
++    expect(body.agent_kinds).toEqual(["claude"]);
+     expect(body.api_key).toBe("sk-secret-1234");
+     expect(body.auth_field).toBe("ANTHROPIC_AUTH_TOKEN");
+     expect(body.default_fallback_model).toBe("kimi-k2");
+diff --git a/frontend/src/lib/api/llm-providers.ts b/frontend/src/lib/api/llm-providers.ts
+index f70d730ea..f4481c3aa 100644
+--- a/frontend/src/lib/api/llm-providers.ts
++++ b/frontend/src/lib/api/llm-providers.ts
+@@ -61,7 +61,7 @@ export interface LlmProviderRead {
+   id: string;
+   user_id: string;
+   name: string;
+-  agent_kind: string;
++  agent_kinds: string[];
+   base_url: string | null;
+   /** 兼容字段（= default_fallback_model 简写）；表单不直接编辑，仅展示/透传。 */
+   model: string | null;
+@@ -93,7 +93,7 @@ export interface LlmProviderRead {
+ /** POST body。 */
+ export interface LlmProviderCreate {
+   name: string;
+-  agent_kind: LlmProviderAgentKind;
++  agent_kinds: LlmProviderAgentKind[];
+   base_url?: string | null;
+   api_key?: string | null;
+   model?: string | null;
+@@ -121,6 +121,8 @@ export interface LlmProviderUpdate {
+   notes?: string | null;
+   website_url?: string | null;
+   auth_field?: LlmProviderAuthField;
++  /** 引擎集合（D-004 多选）；可选，不传=不动。 */
++  agent_kinds?: LlmProviderAgentKind[];
+   /** API 协议格式（D-001@v1）；可选，不传=不动。 */
+   api_format?: LlmProviderApiFormat;
+   model_role_mappings?: Record<string, LlmProviderRoleMapping> | null;
+@@ -147,7 +149,7 @@ export interface LlmProviderList {
+  */
+ export interface LlmProviderFormValues {
+   name: string;
+-  agent_kind: LlmProviderAgentKind;
++  agent_kinds: LlmProviderAgentKind[];
+   /** API 协议格式（D-001@v1）；表单下拉产出，default "anthropic"（task-05）。 */
+   api_format: LlmProviderApiFormat;
+   base_url: string;
+@@ -439,7 +441,7 @@ export function cleanSettingsConfig(
+ export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
+   return {
+     name: v.name.trim(),
+-    agent_kind: v.agent_kind,
++    agent_kinds: v.agent_kinds,
+     api_format: v.api_format,
+     base_url: clean(v.base_url) ?? null,
+     api_key: clean(v.api_key) ?? null,
