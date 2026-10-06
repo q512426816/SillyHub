@@ -1,3 +1,8 @@
+---
+author: qinyi
+created_at: 2026-10-06 21:22:47
+---
+
 # 决策记录 — 2026-10-06-provider-model-list
 
 - **D-001@v1** | type: architecture | source: user
