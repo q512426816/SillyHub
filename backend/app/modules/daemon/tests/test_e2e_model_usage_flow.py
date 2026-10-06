@@ -55,7 +55,7 @@ async def _seed_provider(db_session: AsyncSession, uid: uuid.UUID) -> uuid.UUID:
         id=uuid.uuid4(),
         user_id=uid,
         name="智谱 GLM(实测)",
-        agent_kind="claude",
+        agent_kinds=["claude"],
         encrypted_api_key=ct,
         key_id=key_id,
         model="glm-4.7",

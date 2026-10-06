@@ -203,7 +203,7 @@ class TestListSessionRuns:
             id=uuid.uuid4(),
             user_id=admin,
             name="GLM",
-            agent_kind="claude",
+            agent_kinds=["claude"],
             encrypted_api_key=ct,
             key_id=key_id,
             model="glm-4.7",

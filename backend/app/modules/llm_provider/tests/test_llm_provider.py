@@ -64,7 +64,7 @@ def _create_payload(**overrides) -> LlmProviderCreate:
     """默认 claude provider 创建 payload；api_key >= 8 位以便测 masked 首4...尾4。"""
     defaults = {
         "name": "my-claude",
-        "agent_kind": "claude",
+        "agent_kinds": ["claude"],
         "api_key": "sk-ant-supersecretkey-1234",
         "base_url": "https://api.anthropic.com",
         "model": "claude-sonnet-4",
@@ -77,7 +77,7 @@ async def _seed_provider_row(
     session: AsyncSession,
     user_id: uuid.UUID,
     *,
-    agent_kind: str,
+    agent_kinds: list[str],
     is_default: bool = False,
     api_key: str = "sk-seeded-xxxxxxxx",
     name: str = "seeded",
@@ -92,7 +92,7 @@ async def _seed_provider_row(
         id=uuid.uuid4(),
         user_id=user_id,
         name=name,
-        agent_kind=agent_kind,
+        agent_kinds=agent_kinds,
         encrypted_api_key=ct,
         key_id=key_id,
         is_default=is_default,
@@ -152,7 +152,7 @@ class TestCrudFlow:
 
         assert row.user_id == user_id
         assert row.name == "p1"
-        assert row.agent_kind == "claude"
+        assert row.agent_kinds == ["claude"]
         assert row.base_url == "https://api.anthropic.com"
         assert row.model == "claude-sonnet-4"
         assert row.auth_field == "ANTHROPIC_AUTH_TOKEN"  # schema 默认
@@ -260,11 +260,11 @@ class TestCrudFlow:
 
         created = await svc.create(
             user_id,
-            _create_payload(name="codex-pool", agent_kind="codex", api_format="openai_chat"),
+            _create_payload(name="codex-pool", agent_kinds=["codex"], api_format="openai_chat"),
         )
         fetched = await svc.get(created.id, user_id)
 
-        assert fetched.agent_kind == "codex"
+        assert fetched.agent_kinds == ["codex"]
         assert fetched.api_format == "openai_chat"
         assert fetched.auth_field == "ANTHROPIC_AUTH_TOKEN"  # 缺省语义不变
 
@@ -273,7 +273,7 @@ class TestCrudFlow:
         """pi 行 patch api_format=openai_chat → 422 拒绝且行未变（D-012 禁配）。"""
         user_id = await _create_user(db_session, label="a")
         svc = LlmProviderService(db_session)
-        created = await svc.create(user_id, _create_payload(name="pi-pool", agent_kind="pi"))
+        created = await svc.create(user_id, _create_payload(name="pi-pool", agent_kinds=["pi"]))
 
         with pytest.raises(LlmProviderKindFormatForbidden) as exc_info:
             await svc.update(created.id, user_id, LlmProviderUpdate(api_format="openai_chat"))
@@ -283,14 +283,14 @@ class TestCrudFlow:
         fresh = await db_session.get(LlmProvider, created.id)
         assert fresh is not None
         assert fresh.api_format == "anthropic"
-        assert fresh.agent_kind == "pi"
+        assert fresh.agent_kinds == ["pi"]
 
     @pytest.mark.asyncio
     async def test_patch_pi_row_other_fields_still_allowed(self, db_session: AsyncSession) -> None:
         """禁配只拦 pi×openai_chat 组合：pi 行改其它字段（含 anthropic 显式回写）照常。"""
         user_id = await _create_user(db_session, label="a")
         svc = LlmProviderService(db_session)
-        created = await svc.create(user_id, _create_payload(name="pi-rename", agent_kind="pi"))
+        created = await svc.create(user_id, _create_payload(name="pi-rename", agent_kinds=["pi"]))
 
         patched = await svc.update(
             created.id,
@@ -309,7 +309,9 @@ class TestCrudFlow:
         user_id = await _create_user(db_session, label="a")
         svc = LlmProviderService(db_session)
         claude_row = await svc.create(user_id, _create_payload(name="claude-x"))
-        codex_row = await svc.create(user_id, _create_payload(name="codex-x", agent_kind="codex"))
+        codex_row = await svc.create(
+            user_id, _create_payload(name="codex-x", agent_kinds=["codex"])
+        )
 
         patched_claude = await svc.update(
             claude_row.id, user_id, LlmProviderUpdate(api_format="openai_chat")
@@ -540,7 +542,7 @@ class TestIsDefaultMutex:
 
         stmt = select(LlmProvider).where(
             LlmProvider.user_id == user_id,
-            LlmProvider.agent_kind == "claude",
+            LlmProvider.agent_kinds == ["claude"],
             LlmProvider.is_default.is_(True),
         )
         defaults = (await db_session.execute(stmt)).scalars().all()
@@ -561,7 +563,7 @@ class TestIsDefaultMutex:
 
         # 预置一个 codex 默认 provider（直插 ORM 绕过 schema Literal）
         codex_row = await _seed_provider_row(
-            db_session, user_id, agent_kind="codex", is_default=True, name="codex-default"
+            db_session, user_id, agent_kinds=["codex"], is_default=True, name="codex-default"
         )
         # 再创建一个 claude 默认 provider（经 service.create）
         claude_row = await svc.create(
@@ -592,7 +594,7 @@ class TestIsDefaultMutex:
         # 此时同组无默认
         stmt = select(LlmProvider).where(
             LlmProvider.user_id == user_id,
-            LlmProvider.agent_kind == "claude",
+            LlmProvider.agent_kinds == ["claude"],
             LlmProvider.is_default.is_(True),
         )
         defaults = (await db_session.execute(stmt)).scalars().all()
@@ -623,7 +625,7 @@ class TestIsDefaultMutex:
         assert b.is_default is False  # 未被波及
         stmt = select(LlmProvider).where(
             LlmProvider.user_id == user_id,
-            LlmProvider.agent_kind == "claude",
+            LlmProvider.agent_kinds == ["claude"],
             LlmProvider.is_default.is_(True),
         )
         defaults = (await db_session.execute(stmt)).scalars().all()
@@ -844,7 +846,7 @@ class TestSetDefaultCredentialsRollback:
         # 全组默认数仍为 0（无任何写入）。
         stmt = select(LlmProvider).where(
             LlmProvider.user_id == user_id,
-            LlmProvider.agent_kind == "claude",
+            LlmProvider.agent_kinds == ["claude"],
             LlmProvider.is_default.is_(True),
         )
         defaults = (await db_session.execute(stmt)).scalars().all()
@@ -870,7 +872,7 @@ class TestSetDefaultCredentialsRollback:
             id=uuid.uuid4(),
             user_id=user_id,
             name="no-base-url",
-            agent_kind="claude",
+            agent_kinds=["claude"],
             encrypted_api_key=ct,
             key_id=key_id,
             base_url=None,  # 缺 base_url

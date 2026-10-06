@@ -40,8 +40,8 @@ _NAME = "pool"
 class TestPiKindCreatable:
     def test_pi_kind_with_env_auth_field_valid(self) -> None:
         """agent_kind=pi + env 名 auth_field → 校验通过（独立配额池凭证行）。"""
-        dto = LlmProviderCreate(name=_NAME, agent_kind="pi", auth_field="ZAI_API_KEY")
-        assert dto.agent_kind == "pi"
+        dto = LlmProviderCreate(name=_NAME, agent_kinds=["pi"], auth_field="ZAI_API_KEY")
+        assert dto.agent_kinds == ["pi"]
         assert dto.auth_field == "ZAI_API_KEY"
 
     @pytest.mark.parametrize(
@@ -49,18 +49,18 @@ class TestPiKindCreatable:
     )
     def test_pi_env_name_shapes_valid(self, auth_field: str) -> None:
         """设计 §5.2 点名的三个 env 名均可作为 pi 凭证 auth_field。"""
-        dto = LlmProviderCreate(name=_NAME, agent_kind="pi", auth_field=auth_field)
+        dto = LlmProviderCreate(name=_NAME, agent_kinds=["pi"], auth_field=auth_field)
         assert dto.auth_field == auth_field
 
     def test_pi_without_auth_field_keeps_default(self) -> None:
         """pi 不传 auth_field → 沿用缺省 ANTHROPIC_AUTH_TOKEN（缺省语义不变）。"""
-        dto = LlmProviderCreate(name=_NAME, agent_kind="pi")
+        dto = LlmProviderCreate(name=_NAME, agent_kinds=["pi"])
         assert dto.auth_field == "ANTHROPIC_AUTH_TOKEN"
 
     def test_unknown_kind_still_rejected(self) -> None:
         """值域只放开 pi/codex：真未知字面量（如 gemini）仍被 Literal 拒。"""
         with pytest.raises(ValidationError):
-            LlmProviderCreate(name=_NAME, agent_kind="gemini")
+            LlmProviderCreate(name=_NAME, agent_kinds=["gemini"])
 
 
 # ── 1b. codex 词表（task-05 / FR-04，D-008 衔接并行 pi 基础上增补）───────────
@@ -69,18 +69,18 @@ class TestPiKindCreatable:
 class TestCodexVocab:
     def test_codex_kind_accepted(self) -> None:
         """task-05 翻转：codex 进词表（daemon 文件层注入），Create 校验通过。"""
-        dto = LlmProviderCreate(name=_NAME, agent_kind="codex")
-        assert dto.agent_kind == "codex"
+        dto = LlmProviderCreate(name=_NAME, agent_kinds=["codex"])
+        assert dto.agent_kinds == ["codex"]
 
     def test_codex_with_env_auth_field_valid(self) -> None:
         """codex + env 名 auth_field 同样可建（auth_field pattern 与 kind 正交）。"""
-        dto = LlmProviderCreate(name=_NAME, agent_kind="codex", auth_field="OPENAI_API_KEY")
-        assert dto.agent_kind == "codex"
+        dto = LlmProviderCreate(name=_NAME, agent_kinds=["codex"], auth_field="OPENAI_API_KEY")
+        assert dto.agent_kinds == ["codex"]
         assert dto.auth_field == "OPENAI_API_KEY"
 
     def test_codex_without_auth_field_keeps_default(self) -> None:
         """codex 不传 auth_field → 缺省 ANTHROPIC_AUTH_TOKEN（缺省语义不变）。"""
-        dto = LlmProviderCreate(name=_NAME, agent_kind="codex")
+        dto = LlmProviderCreate(name=_NAME, agent_kinds=["codex"])
         assert dto.auth_field == "ANTHROPIC_AUTH_TOKEN"
 
 
@@ -91,26 +91,26 @@ class TestPiOpenaiChatForbidden:
     def test_pi_with_openai_chat_rejected(self) -> None:
         """pi × openai_chat 两层注入均不生效 → ValidationError（FastAPI 422）。"""
         with pytest.raises(ValidationError):
-            LlmProviderCreate(name=_NAME, agent_kind="pi", api_format="openai_chat")
+            LlmProviderCreate(name=_NAME, agent_kinds=["pi"], api_format="openai_chat")
 
     def test_pi_with_anthropic_passes(self) -> None:
         """pi × anthropic 是唯一合法组合（env 层注入消费）。"""
-        dto = LlmProviderCreate(name=_NAME, agent_kind="pi", api_format="anthropic")
+        dto = LlmProviderCreate(name=_NAME, agent_kinds=["pi"], api_format="anthropic")
         assert dto.api_format == "anthropic"
 
     def test_pi_default_format_passes(self) -> None:
         """pi 不传 api_format → 缺省 anthropic，不受禁配影响。"""
-        dto = LlmProviderCreate(name=_NAME, agent_kind="pi")
+        dto = LlmProviderCreate(name=_NAME, agent_kinds=["pi"])
         assert dto.api_format == "anthropic"
 
     def test_codex_with_openai_chat_passes(self) -> None:
         """codex × openai_chat 不禁（litellm_proxy 通道，D-006）。"""
-        dto = LlmProviderCreate(name=_NAME, agent_kind="codex", api_format="openai_chat")
+        dto = LlmProviderCreate(name=_NAME, agent_kinds=["codex"], api_format="openai_chat")
         assert dto.api_format == "openai_chat"
 
     def test_claude_with_openai_chat_passes(self) -> None:
         """claude × openai_chat 不禁（既有 litellm_proxy 用例零回归）。"""
-        dto = LlmProviderCreate(name=_NAME, agent_kind="claude", api_format="openai_chat")
+        dto = LlmProviderCreate(name=_NAME, agent_kinds=["claude"], api_format="openai_chat")
         assert dto.api_format == "openai_chat"
 
 
@@ -131,11 +131,14 @@ class TestCreateAuthFieldPattern:
     def test_invalid_env_names_rejected(self, bad: str) -> None:
         """非 env 变量名形状（小写/空格/连字符/空串/下划线开头）→ ValidationError。"""
         with pytest.raises(ValidationError):
-            LlmProviderCreate(name=_NAME, auth_field=bad)
+            LlmProviderCreate(name=_NAME, agent_kinds=["pi"], auth_field=bad)
 
     def test_digit_inside_valid(self) -> None:
         """大写开头后接数字/下划线合法（env 名形状允许）。"""
-        assert LlmProviderCreate(name=_NAME, auth_field="ZAI_KEY_2").auth_field == "ZAI_KEY_2"
+        assert (
+            LlmProviderCreate(name=_NAME, agent_kinds=["pi"], auth_field="ZAI_KEY_2").auth_field
+            == "ZAI_KEY_2"
+        )
 
 
 # ── 3. claude 零回归（缺省与旧值逐字不变）─────────────────────────────────────
@@ -143,22 +146,24 @@ class TestCreateAuthFieldPattern:
 
 class TestClaudeZeroRegression:
     def test_defaults_unchanged(self) -> None:
-        """不传可选字段：agent_kind=claude、auth_field=ANTHROPIC_AUTH_TOKEN。"""
-        dto = LlmProviderCreate(name="legacy")
-        assert dto.agent_kind == "claude"
+        """D-004 契约变更：agent_kinds 必填（无默认）；auth_field 等可选字段缺省不变。"""
+        with pytest.raises(ValidationError):
+            LlmProviderCreate(name="legacy")  # 缺 agent_kinds → 422
+        dto = LlmProviderCreate(name="legacy", agent_kinds=["claude"])
+        assert dto.agent_kinds == ["claude"]
         assert dto.auth_field == "ANTHROPIC_AUTH_TOKEN"
 
     def test_legacy_literals_still_valid(self) -> None:
         """旧双字面量（改前唯一合法值）在 pattern 下照常可传。"""
-        assert LlmProviderCreate(name=_NAME, auth_field="ANTHROPIC_API_KEY").auth_field == (
-            "ANTHROPIC_API_KEY"
-        )
-        assert LlmProviderCreate(name=_NAME, auth_field="ANTHROPIC_AUTH_TOKEN").auth_field == (
-            "ANTHROPIC_AUTH_TOKEN"
-        )
+        assert LlmProviderCreate(
+            name=_NAME, agent_kinds=["claude"], auth_field="ANTHROPIC_API_KEY"
+        ).auth_field == ("ANTHROPIC_API_KEY")
+        assert LlmProviderCreate(
+            name=_NAME, agent_kinds=["claude"], auth_field="ANTHROPIC_AUTH_TOKEN"
+        ).auth_field == ("ANTHROPIC_AUTH_TOKEN")
 
     def test_claude_kind_still_valid(self) -> None:
-        assert LlmProviderCreate(name=_NAME, agent_kind="claude").agent_kind == "claude"
+        assert LlmProviderCreate(name=_NAME, agent_kinds=["claude"]).agent_kinds == ["claude"]
 
 
 # ── 4. Update / FetchModelsRequest 同 pattern（三处同款放宽）──────────────────

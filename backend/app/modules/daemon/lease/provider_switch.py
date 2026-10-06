@@ -113,7 +113,8 @@ async def notify_provider_switch(
         # 构造（agent_kind=该引擎）；该引擎无默认 → 跳过并告警（best-effort）。
         # 停止场景（provider_config=None）行为不变：所有会话收 None 回退本机。
         config_to_push = provider_config
-        if provider_config is not None and provider_config.get("agent_kind") != sess.provider:
+        config_engine = (provider_config or {}).get("agent_kind")
+        if config_engine is not None and config_engine != sess.provider:
             from app.modules.daemon.lease.context import resolve_default_provider_config
 
             config_to_push = await resolve_default_provider_config(

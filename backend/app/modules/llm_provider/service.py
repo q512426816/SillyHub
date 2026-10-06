@@ -278,7 +278,7 @@ class LlmProviderService:
         want_default = updates.pop("is_default", None)
         for field, value in updates.items():
             setattr(row, field, value)
-        if want_default:
+        if want_default or (row.is_default and "agent_kinds" in updates):
             await self._clear_sibling_defaults(row.user_id, row.agent_kinds, except_id=row.id)
         if want_default is not None:
             row.is_default = want_default

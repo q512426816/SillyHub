@@ -271,7 +271,7 @@ class TestApiFormatPassthrough:
             user_id,
             LlmProviderCreate(
                 name="opencode-zen",
-                agent_kind="claude",
+                agent_kinds=["claude"],
                 api_key="sk-create-openai-1234",
                 base_url="https://opencode.ai/zen/v1/chat/completions",
                 model="zen-1",
@@ -291,7 +291,7 @@ class TestApiFormatPassthrough:
             user_id,
             LlmProviderCreate(
                 name="anthropic-default",
-                agent_kind="claude",
+                agent_kinds=["claude"],
                 api_key="sk-create-anthropic-1234",
                 base_url="https://api.anthropic.com",
             ),
@@ -306,7 +306,7 @@ class TestApiFormatPassthrough:
             user_id,
             LlmProviderCreate(
                 name="to-switch",
-                agent_kind="claude",
+                agent_kinds=["claude"],
                 api_key="sk-update-openai-1234",
                 base_url="https://api.anthropic.com",
             ),

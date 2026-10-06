@@ -154,7 +154,7 @@ async def _seed_provider_row(
         id=uuid.uuid4(),
         user_id=user_id,
         name=name,
-        agent_kind=agent_kind,
+        agent_kinds=[agent_kind],
         base_url=base_url,
         encrypted_api_key=ct,
         key_id=key_id,

@@ -80,7 +80,7 @@ async def _seed_provider_row(
         id=uuid.uuid4(),
         user_id=user_id,
         name=name,
-        agent_kind=agent_kind,
+        agent_kinds=[agent_kind],
         encrypted_api_key=ct,
         key_id=key_id,
         base_url=base_url,
@@ -116,6 +116,7 @@ class TestResolveDefaultProviderConfigFound:
                 base_url="https://api.anthropic.com",
                 model="claude-sonnet-4",
                 is_default=True,
+                agent_kinds=["claude"],
             ),
         )
 
@@ -153,6 +154,7 @@ class TestResolveDefaultProviderConfigFound:
                 api_key=plaintext,
                 base_url="https://api.anthropic.com",
                 is_default=True,
+                agent_kinds=["claude"],
             ),
         )
 
@@ -175,6 +177,7 @@ class TestResolveDefaultProviderConfigFound:
                 api_key="sk-min-0011",
                 base_url="https://api.anthropic.com",
                 is_default=True,
+                agent_kinds=["claude"],
             ),
         )
 
@@ -222,6 +225,7 @@ class TestResolveDefaultProviderConfigNotFound:
                 api_key="sk-notdef-0011",
                 base_url="https://api.anthropic.com",
                 is_default=False,  # 显式 False
+                agent_kinds=["claude"],
             ),
         )
 
@@ -254,6 +258,7 @@ class TestResolveDefaultProviderConfigAgentKindIsolation:
                 api_key="sk-claude-only-0011",
                 base_url="https://api.anthropic.com",
                 is_default=True,
+                agent_kinds=["claude"],
             ),
         )
         # codex 默认 provider（直插 ORM）。
@@ -292,6 +297,7 @@ class TestResolveDefaultProviderConfigAgentKindIsolation:
                 api_key="sk-x-0001",
                 base_url="https://api.anthropic.com",
                 is_default=True,
+                agent_kinds=["claude"],
             ),
         )
 
@@ -320,6 +326,7 @@ class TestResolveDefaultProviderConfigOwnerIsolation:
                 api_key="sk-a-only-0001",
                 base_url="https://api.anthropic.com",
                 is_default=True,
+                agent_kinds=["claude"],
             ),
         )
 
@@ -415,6 +422,7 @@ class TestResolveDefaultProviderConfigReadOnly:
                 api_key="sk-def-0011",
                 base_url="https://api.anthropic.com",
                 is_default=True,
+                agent_kinds=["claude"],
             ),
         )
         non_default_row = await svc.create(
@@ -424,6 +432,7 @@ class TestResolveDefaultProviderConfigReadOnly:
                 api_key="sk-notdef-0022",
                 base_url="https://api.anthropic.com",
                 is_default=False,
+                agent_kinds=["claude"],
             ),
         )
 
@@ -597,3 +606,33 @@ class TestResolveDefaultProviderConfigOpenaiShape:
         assert cfg is not None
         assert "api_key" not in cfg
         cipher_stub.decrypt.assert_not_called()
+
+
+class TestMultiEngineSetHit:
+    """D-004/D-005（change 2026-10-06 / task-07）：集合命中 + agent_kind 盖会话引擎。"""
+
+    @pytest.mark.asyncio
+    async def test_multi_kind_default_hit_and_engine_stamping(self, db_session) -> None:
+
+        from app.core.crypto import get_cipher
+        from app.modules.llm_provider.model import LlmProvider
+
+        user_id = await _create_user(db_session)
+        ct, key_id = get_cipher().encrypt("sk-multi-resolve-0001")
+        row = LlmProvider(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            name="multi",
+            agent_kinds=["claude", "pi"],
+            encrypted_api_key=ct,
+            key_id=key_id,
+            is_default=True,
+        )
+        db_session.add(row)
+        await db_session.commit()
+
+        cfg_claude = await resolve_default_provider_config(db_session, user_id, "claude")
+        assert cfg_claude is not None and cfg_claude["agent_kind"] == "claude"
+        cfg_pi = await resolve_default_provider_config(db_session, user_id, "pi")
+        assert cfg_pi is not None and cfg_pi["agent_kind"] == "pi"
+        assert await resolve_default_provider_config(db_session, user_id, "codex") is None

@@ -696,7 +696,7 @@ async def _seed_provider(
         id=uuid.uuid4(),
         user_id=user_id,
         name=f"t014-reopen-{uuid.uuid4().hex[:6]}",
-        agent_kind="claude",
+        agent_kinds=["claude"],
         encrypted_api_key=ct,
         key_id=key_id,
         base_url=base_url,

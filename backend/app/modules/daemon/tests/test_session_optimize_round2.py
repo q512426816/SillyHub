@@ -245,7 +245,7 @@ async def _make_llm_provider(db_session: AsyncSession, uid: uuid.UUID):
         id=uuid.uuid4(),
         user_id=uid,
         name="Kimi 中转",
-        agent_kind="claude",
+        agent_kinds=["claude"],
         encrypted_api_key=b"key",
         key_id="k1",
         model="kimi-latest",

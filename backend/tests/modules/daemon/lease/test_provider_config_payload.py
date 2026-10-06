@@ -111,7 +111,7 @@ async def _create_default_provider(
     明文永不入 ORM（R-04）。``agent_kind`` 走 schema Literal 默认 "claude"。"""
     data = LlmProviderCreate(
         name=f"pc-prov-{uuid.uuid4().hex[:6]}",
-        agent_kind="claude",
+        agent_kinds=["claude"],
         base_url=base_url,
         api_key=plaintext,
         model=model,
@@ -441,7 +441,7 @@ async def _seed_openai_default_provider(
         id=uuid.uuid4(),
         user_id=user_id,
         name=f"pc-openai-{uuid.uuid4().hex[:6]}",
-        agent_kind="claude",
+        agent_kinds=["claude"],
         encrypted_api_key=ct,
         key_id=key_id,
         base_url="https://opencode.ai/zen/v1/chat/completions",

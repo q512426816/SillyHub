@@ -237,7 +237,7 @@ async def _seed_llm_provider(
         id=uuid.uuid4(),
         user_id=owner_id,
         name=name,
-        agent_kind="claude",
+        agent_kinds=["claude"],
         encrypted_api_key=ct,
         key_id=key_id,
         model="glm-4.7",

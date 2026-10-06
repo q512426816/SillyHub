@@ -891,7 +891,7 @@ class TestPureSwitchMerge:
             id=uuid.uuid4(),
             user_id=uid,
             name="测试供应商",
-            agent_kind="claude",
+            agent_kinds=["claude"],
             encrypted_api_key=ct,
             key_id=key_id,
             model="glm-x",

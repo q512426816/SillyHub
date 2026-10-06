@@ -541,6 +541,7 @@ class TestFetchModelsDualForm:
                 base_url="https://api.anthropic.com",
                 api_key=plaintext,
                 settings_config={"env": {"FOO": "bar"}, "model": "claude-sonnet-4"},
+                agent_kinds=["claude"],
             ),
         )
 
@@ -610,6 +611,7 @@ class TestFetchModelsDualForm:
                 name="empty-key",
                 base_url="https://api.anthropic.com",
                 api_key="",  # 空明文
+                agent_kinds=["claude"],
             ),
         )
 
@@ -716,7 +718,7 @@ async def _seed_default_provider(
         id=uuid.uuid4(),
         user_id=user_id,
         name="ctx-default",
-        agent_kind="claude",
+        agent_kinds=["claude"],
         base_url="https://api.anthropic.com",
         encrypted_api_key=ct,
         key_id=key_id,
@@ -865,6 +867,7 @@ class TestSettingsConfigPersistence:
                 base_url="https://api.anthropic.com",
                 api_key="sk-sc-persist-key-0001",
                 settings_config=settings_cfg,
+                agent_kinds=["claude"],
             ),
         )
 
@@ -890,6 +893,7 @@ class TestSettingsConfigPersistence:
                 name="sc-nil-provider",
                 base_url="https://api.anthropic.com",
                 api_key="sk-sc-nil-key-0002",
+                agent_kinds=["claude"],
             ),
         )
 
@@ -909,6 +913,7 @@ class TestSettingsConfigPersistence:
                 base_url="https://api.anthropic.com",
                 api_key="sk-sc-up-key-0003",
                 settings_config={"env": {"OLD": "1"}},
+                agent_kinds=["claude"],
             ),
         )
 
