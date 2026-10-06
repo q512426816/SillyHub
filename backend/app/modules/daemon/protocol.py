@@ -316,8 +316,9 @@ class ProviderConfigChangedPayload(BaseModel):
 
     change 2026-08-06-provider-switch-live-session / task-02 / design §7 WS payload。
     用户切换默认供应商后,backend 查询用户新默认 provider(经
-    ``resolve_default_provider_config`` helper,D-006 单一真相源),按 owning
-    daemon 聚合后经 ``ws_hub.send_session_control`` 推送。daemon 收到后调
+    ``resolve_default_provider_config`` helper,D-006 单一真相源;D-006@多引擎:
+    各会话收到**本会话引擎**的 config——传入 config 引擎不同则按会话引擎 resolve),
+    按 owning daemon 聚合后经 ``ws_hub.send_session_control`` 推送。daemon 收到后调
     ``sessionManager.markPendingSwitch(session_id, provider_config)``,待当前
     turn 结束 → ``reloadWithProvider`` 重启 SDK session(env 换新 base_url/api_key
     等),不中断对话。
