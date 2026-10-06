@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "reviewType": "acceptance",
+  "reviewedFiles": [
+    "changes/2026-10-06-provider-model-list/tasks.md",
+    "changes/2026-10-06-provider-model-list/requirements.md",
+    "changes/2026-10-06-provider-model-list/design.md",
+    "changes/2026-10-06-provider-model-list/docs/verification-e2e.md",
+    "worktree backend/app/modules/llm_provider/{model,schema,service,router,litellm_client}.py",
+    "worktree backend/migrations/versions/20261006200000_provider_models.py",
+    "worktree backend/app/modules/daemon/lease/context.py",
+    "worktree backend/app/modules/session_attachment/{capability.py,tests/test_capability.py}",
+    "worktree backend/app/modules/daemon/session/service/{inject_gates,create,attachments,results,__init__}.py",
+    "worktree backend/app/modules/daemon/{attachment_pipeline.py,group/service/shadow.py,tests/test_attachment_pipeline.py}",
+    "worktree backend/app/modules/agent/{model.py,schema.py}",
+    "worktree frontend/src/components/llm-providers/llm-provider-form.tsx",
+    "worktree frontend/src/components/sessions/session-config-bar.tsx",
+    "worktree frontend/src/lib/api-types.ts",
+    "worktree frontend/src/lib/api/llm-providers.ts"
+  ],
+  "docHash": "e47d665cd693ad6df99678d88c38deacc1aae94e5cfe49300e84ffac58a07ca0",
+  "specVerdict": "pass",
+  "qualityVerdict": "pass",
+  "checklist": [
+    {
+      "item": "FR-01 供应商模型列表（models 列表存储/条目结构/前端列表编辑器）",
+      "result": "pass",
+      "note": "schema.py:15-40 ProviderModelEntry（name 防空白/三态/roles 值域/one_m）+ 三 DTO models 字段；service.py:216 create 赋值 + update 通用路径 + _to_read model_validate 透传；前端 llm-provider-form.tsx:102-284 ModelRowState/initModelRows/setModelRow/addModelRow/removeModelRow 行内编辑器 + fetch 一键加入。"
+    },
+    {
+      "item": "FR-02 多模态下沉模型级（单聊+群聊两链按生效模型判定/未命中保守 false）",
+      "result": "pass",
+      "note": "capability.py:67-104 model_name 入参 + 三态×命中 + 未命中保守 false + None 主模型兜底；单聊链 attachments.py 传 config_snapshot.model + results.py pre_model 防漂移；返工补上群聊链 shadow.py:792-798 model_name=(member.config_snapshot or {}).get(\"model\")（isinstance dict 守卫，AgentGroupMember.config_snapshot 字段在 agent/model.py:1700 核实存在）。遗留 P3：shadow 透传行无直测断言（pipeline 测试用 fake gate 签名兼容，capability 单测不覆盖该行）。"
+    },
+    {
+      "item": "FR-03 会话选模型（∈ 列表 422/空列表收紧/主模型派生/下拉源）",
+      "result": "pass",
+      "note": "inject_gates.py:619-629 校验 + :604-645 effective_model 派生；返工删除 :625 `_names and` 守卫——空列表供应商选模型现 `selected_model not in []` 恒真 → 422，R-05 兑现；create.py:667-671 派生；前端 session-config-bar.tsx:421-438 下拉源 = models、:767-768 主模型置顶。"
+    },
+    {
+      "item": "FR-04 注入折算契约保持（两键同值/mappings 形态逐字/models 新键/daemon 零改动）",
+      "result": "pass",
+      "note": "context.py:67-91 _fold_provider_models；:159 openai 分支 model=派生；:172-174/:248-250 两处 resolve 两键同值 + mappings + models 新键；attachments.py 双键覆写链保持；git diff 9c36d1cea..HEAD -- sillyhub-daemon 为空（返工后复核）。"
+    },
+    {
+      "item": "FR-05 存量自动折算（候选集含 fallback/去重保序/one_m true 优先/downgrade 反折）",
+      "result": "pass",
+      "note": "迁移 _fold_legacy_row:45-83 候选=[model]+[fallback]+4 槽非空去重保序、multimodal 一律 auto、display 丢弃、one_m 冲突 true 优先；_unfold_to_legacy:86-113 对称反折；upgrade drop 四列、downgrade 重建。"
+    },
+    {
+      "item": "硬约束：daemon 仓 diff=0",
+      "result": "pass",
+      "note": "git -C worktree diff 9c36d1cea..HEAD -- sillyhub-daemon 输出为空（含返工提交后复核）。"
+    },
+    {
+      "item": "硬约束：model 与 default_fallback_model 两键同值",
+      "result": "pass",
+      "note": "context.py:172/:248 `**dict.fromkeys((\"model\",\"default_fallback_model\"), …)`。"
+    },
+    {
+      "item": "硬约束：折算候选集含 fallback 值",
+      "result": "pass",
+      "note": "_fold_legacy_row:67 `for name in (model, fallback)`。"
+    },
+    {
+      "item": "硬约束：四旧列全删（DB + ORM，上轮 fail 项返工解除）",
+      "result": "pass",
+      "note": "返工 768f374da 删除 model.py 的 multimodal(:73-77)/model_role_mappings+default_fallback_model(:98-106) 三字段块（diff -16 行）；grep 全文残留仅 :11 docstring 说明性提及与 :53 models 列自身注释，无字段定义。ORM 与迁移 20261006200000 终态一致，SQLite create_all 与 PG schema 对齐，上轮「生产 PG undefined column 阻断」推定链消除；后端 273 passed 复验。"
+    },
+    {
+      "item": "硬约束：门控未命中保守 false",
+      "result": "pass",
+      "note": "capability.py:94-95 entry is None（model_name 非 None 未命中）→ supports_multimodal=False；仅 None 走主模型条目兜底。"
+    },
+    {
+      "item": "硬约束：预设未触碰",
+      "result": "pass",
+      "note": "全 diff（含返工）无预设数据/文件改动；预设交互用例仅 it.skip。"
+    },
+    {
+      "item": "硬约束：无过渡期（API 直接切换）",
+      "result": "pass",
+      "note": "Create/Update/Read 无旧四键；openapi.json 已再生成；前端同批收口。"
+    },
+    {
+      "item": "设计文件清单 vs diff 覆盖（上轮三项 gap 返工补齐）",
+      "result": "pass",
+      "note": "① shadow.py 透传落盘（+4 行）；② api-types.ts 已 gen:types 再生成——ProviderModelEntry $ref 5 处、LlmProviderCreate(:18241)/Read(:18347 附近) models 键在，旧 model/model_role_mappings/default_fallback_model/multimodal 键从 LlmProvider* schema 消失，tsc 0 错；③ agent/schema.py:112 文档串更新两键同值/折算/models 原始列表口径。上轮的 model.py「删四字段」经返工补全。"
+    },
+    {
+      "item": "测试真实绿（评审在 worktree 实跑指定范围，返工后复验）",
+      "result": "pass",
+      "note": "后端指定范围 `uv run pytest … -q --no-cov -p no:randomly` → 273 passed, 0 failed（59s）；前端 `pnpm exec tsc --noEmit` → exit 0；vitest 指定范围 → 8 files, 122 passed + 10 skipped。与 verification-e2e 的 form.test 29 用例、config-bar 53 用例、10 skip 可 grep 全部对上。"
+    },
+    {
+      "item": "验收记录真实性（verification-e2e.md 与代码/测试对得上）",
+      "result": "pass",
+      "note": "记录各声称（迁移实跑/折算四形态/用例计数/skip 计数/覆盖文件归属）均与实测一致；上轮风险推定（本地栈若经 ORM 查询必炸）随幻影列删除而消除。两点备注：返工的 asyncpg PG 直查补证未落 verification-e2e.md（口头补证）；经 ORM 的 API 级冒烟按 C 节既有口径延至部署窗口执行。"
+    },
+    {
+      "item": "残留风险（skip 用例/注释残留/覆盖缺口/部署注意）",
+      "result": "gap",
+      "note": "均为 P3/P4 非阻断：① 10 个 it.skip（form 5 + fetch-config 5），其中「编辑留空 api_key → values.api_key===''」并非纯退役角色映射交互，维持 P3 遗留定性；② session-config-bar.tsx :40-45/:417-418 旧口径注释未清（P4，返工方自认遗留）；③ capability.py 模块 docstring :6-7 仍写「llm_providers.multimodal 三态」旧供应商级口径——返工声称「已在实现时改写」与事实不符（该文件未在返工 diff 中，resolve_gate 函数级 docstring 为新口径，模块级为旧），P4；④ shadow.py 群聊透传行无直测断言（P3）；⑤ 部署窗口须完成经 ORM 的 API 冒烟（list providers/create session）+ 前后端同窗口部署（无过渡期）+ 旧显式 multimodal 折算后 auto（R-06 已接受）。"
+    }
+  ],
+  "requiredEvidence": [],
+  "reviewerNotes": "第二轮评审（返工复审）。评审对象提交链 856fa8c26/948e92bd9/5fbeccb5d/768f374da（baseline 9c36d1cea）。上轮 fail 的决定性缺陷（ORM 幻影三列）已解除：model.py 三字段块整块删除、grep 无字段定义残留、ORM↔迁移终态一致、后端 273 passed 复验、生产阻断推定链消除。上轮三项清单 gap 全部补齐：shadow.py 群聊门控透传 member.config_snapshot.model（字段存在性核实）、api-types.ts gen:types 再生成（models/ProviderModelEntry 在、tsc 0）、agent/schema.py 文档串更新。上轮 FR-03 gap（空列表放行）已收紧为 422。verdict 从 fail 改判 pass。遗留均为 P3/P4 非阻断：10 个 skip 用例（含一条仍有效的 api_key 编辑行为用例）、两处注释残留（其中 capability.py 模块 docstring 的返工声称与事实不符，如实记录）、群聊透传行无直测断言、经 ORM 的 API 冒烟按验收记录口径延至部署窗口执行。tasks.md 未随返工修改，docHash 与上轮一致。"
+}
