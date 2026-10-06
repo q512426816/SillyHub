@@ -1,0 +1,280 @@
+diff --git a/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/flow-state.yaml b/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/flow-state.yaml
+new file mode 100644
+index 000000000..25fe7d1de
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/flow-state.yaml
+@@ -0,0 +1,25 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  修复 2026-10-06-provider-multi-agent-kind 两处收尾缺陷：编辑供应商时引擎集合改动静默丢失（formToUpdate 漏发 agent_kinds，R-05 toast 提示与服务器实际状态相反）+
++  后端 Update 显式 agent_kinds=null 按契约合法但会打穿 500（pi in None TypeError / NOT NULL 违反）。
++
++  成功标准：
++
++  - 前端 formToUpdate 产出的 PATCH body 携带 agent_kinds（编辑引擎复选集合真正提交），frontend/src/lib/api/__tests__/llm-providers.test.ts
++  formToUpdate 用例补断言覆盖
++
++  - 后端 LlmProviderUpdate 显式 agent_kinds=null 等同「不动」：openai_chat 行传 null 不抛 TypeError、不写
++  NULL、集合不变，backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py 补用例覆盖
++
++  - 定向测试绿：后端 llm_provider 域相关测试 + 前端 llm-providers 表单/api 域测试，tsc 与 eslint（改动文件）0 error
++autopilot: true
++baseline_commit: 0fced95d49b20af6864c8e92cf638c7ed8b2e2e4
++updatedAt: '2026-10-06T23:51:32.419Z'
++baseline_sha256: e8540af34b98fb1231d253cfba52d2875c1ba9c803abbbcb6c6fd9a6153579a7
++
+diff --git a/backend/app/modules/llm_provider/service.py b/backend/app/modules/llm_provider/service.py
+index dbddc024f..23b661ba0 100644
+--- a/backend/app/modules/llm_provider/service.py
++++ b/backend/app/modules/llm_provider/service.py
+@@ -248,6 +248,13 @@ class LlmProviderService:
+         row = await self.get(provider_id, user_id)
+         updates = data.model_dump(exclude_unset=True)
+ 
++        # 2026-10-07 followup：agent_kinds 显式 None = 不动（openapi 契约 anyOf 允许
++        # null；与 api_key/multimodal 同款 None-pop 防护）——不 pop 会让 None 进入下方
++        # 生效组合判定（"pi" in None → TypeError）与 setattr（NOT NULL 违反；默认行
++        # 还会在 _clear_sibling_defaults 触发 set(None) TypeError）。
++        if updates.get("agent_kinds") is None:
++            updates.pop("agent_kinds", None)
++
+         # task-05（FR-04 / D-012；D-005 升级集合级）：pi × openai_chat 禁配 Update
+         # 侧取行**合并**后判——agent_kinds / api_format 均可选（None=不动），生效组合
+         # = 本次显式值 ?? 行现值；勾集含 pi 且生效格式为 openai_chat 即拒（与 Create
+diff --git a/backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py b/backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py
+index c72c40b1e..0ca64f75d 100644
+--- a/backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py
++++ b/backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py
+@@ -164,6 +164,31 @@ class TestMultiKindUpdateSemantics:
+         assert all(not r.is_default for r in rows if "pi" in r.agent_kinds)
+         assert [r.name for r in rows if r.is_default] == ["shrink"]
+ 
++    @pytest.mark.asyncio
++    async def test_explicit_null_agent_kinds_is_noop(self, db_session: AsyncSession) -> None:
++        """显式 agent_kinds=None（openapi 契约 anyOf 允许 null）= 不动（2026-10-07 followup）。
++
++        openai_chat + 默认行双态同行，一次盖住两条打穿路径：不 pop None 时
++        生效组合判定 `"pi" in None` → TypeError；默认行扩张清兄弟
++        `_clear_sibling_defaults(user, None)` → set(None) TypeError / NOT NULL 违反。
++        """
++        user_id = await _create_user(db_session, label="mk6")
++        svc = LlmProviderService(db_session)
++        row = await svc.create(
++            user_id,
++            LlmProviderCreate(
++                name="oc-null",
++                agent_kinds=["claude", "codex"],
++                api_format="openai_chat",
++                is_default=True,
++            ),
++        )
++        updated = await svc.update(row.id, user_id, LlmProviderUpdate(agent_kinds=None))
++        assert updated.agent_kinds == ["claude", "codex"]
++        assert updated.is_default is True
++        reread = await svc.get(row.id, user_id)
++        assert reread.agent_kinds == ["claude", "codex"]
++
+ 
+ def _all_rows(user_id: uuid.UUID):
+     from sqlalchemy import select
+diff --git a/frontend/src/lib/api/__tests__/llm-providers.test.ts b/frontend/src/lib/api/__tests__/llm-providers.test.ts
+index 9357d7be1..56c95a41c 100644
+--- a/frontend/src/lib/api/__tests__/llm-providers.test.ts
++++ b/frontend/src/lib/api/__tests__/llm-providers.test.ts
+@@ -236,6 +236,11 @@ describe("formToUpdate — api_key 留空不出现在 PATCH body（铁律）", (
+       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+     });
+   });
++
++  it("agent_kinds 透传到 PATCH body（编辑引擎集合真正提交，2026-10-07 followup）", () => {
++    const body = formToUpdate({ ...FORM_VALUES, agent_kinds: ["claude", "codex"] });
++    expect(body.agent_kinds).toEqual(["claude", "codex"]);
++  });
+ });
+ 
+ describe("cleanRoleMappings — 边界", () => {
+diff --git a/frontend/src/lib/api/llm-providers.ts b/frontend/src/lib/api/llm-providers.ts
+index f4481c3aa..a4d8f1766 100644
+--- a/frontend/src/lib/api/llm-providers.ts
++++ b/frontend/src/lib/api/llm-providers.ts
+@@ -464,6 +464,9 @@ export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
+ export function formToUpdate(v: LlmProviderFormValues): LlmProviderUpdate {
+   const update: LlmProviderUpdate = {
+     name: v.name.trim(),
++    // 引擎集合必须随 PATCH 提交（2026-10-07 followup）：漏发该键 = 后端按「不传=不动」
++    // 保留旧集合，编辑态引擎复选组静默失效；空集由表单 UI 层「至少保留一个」拦截。
++    agent_kinds: v.agent_kinds,
+     api_format: v.api_format,
+     base_url: clean(v.base_url) ?? null,
+     notes: clean(v.notes) ?? null,
+diff --git a/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/design.md b/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/design.md
+new file mode 100644
+index 000000000..25d384369
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/design.md
+@@ -0,0 +1,52 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-06T23:05:38.553Z
++---
++# 设计记录（Design Record）— 2026-10-07-provider-agent-kinds-followup
++
++> 四节每节必答——问题行原样保留（勿删勿改勿用答案替换），答案另起一行写在问题行下方；小改动可写「不适用：<理由>」；flow done 空节拒收。
++> 需要列改动文件时加独立「## 文件变更清单」章节+表格（| 操作 | 路径 | 说明 |）——章节标题是 parseFileChangeList 的识别面，勿写在「接口契约」节内（收口声明面解析不到会误报夹带嫌疑）。
++> 四问原文/FR 标题/镜像任务行是收口锚——问题行/标题从本模板原样保留或复制，勿删勿改、勿手打重写（标点也要逐字：2026-10-05 三度实证——句号手写成问号、答案整块替换问题原文均被锚对比拒收）。
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++两处独立小修（2026-10-06 代码审查报告的高置信发现 1/2）：①前端 `formToUpdate`（frontend/src/lib/api/llm-providers.ts:464）补 `agent_kinds: v.agent_kinds` 透传——`formToCreate` 已有同款先例（444 行），编辑分支唯一调用点 llm-provider-list.tsx:95 无需改动，R-05 toast 随之与服务器状态恢复一致（不改 toast 本身）。②后端 `LlmProviderService.update`（backend/app/modules/llm_provider/service.py）在 pi×openai 生效组合判定**之前**比照 `api_key`/`multimodal` 先例把显式 None pop 掉（`updates.get("agent_kinds") is None → pop`），使 `effective_kinds` 回退行值、`setattr` 不写 NULL、扩张清兄弟分支不误触发。
++
++选 pop-None 而非收紧 schema（去掉 `| None`）：openapi/api-types 契约已发布 nullable（`anyOf: [array, null]`），收紧契约会迫使第三方调用方行为变化，且服务层「显式 null=不动」与同 DTO 其它字段既有语义完全一致，变更面最小。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++`LlmProviderUpdate.agent_kinds` 显式 null 的语义从「未定义（TypeError/IntegrityError → 500）」收敛为「不动」，与 api_key/multimodal 一致；openapi schema 本身不变（仍 nullable）。`formToUpdate` 返回结构多携带 `agent_kinds` 键（类型不变，`LlmProviderUpdate.agent_kinds?:` 本就声明）。无端点/命令/文件格式/迁移变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++   不适用——同步请求/响应路径，无事件流；PATCH 字段集合在单请求内原子生效，pop None 发生在请求解析后的内存 dict 层，与到达顺序无关。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++   不适用——update 单事务内先取行后写，is_default 互斥清兄弟沿用既有 (user_id, 引擎) 粒度逻辑；pop None 位于取行后、判定前，与 api_key 处理同序，不新增并发面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++   安全——显式 null 收敛为 no-op 后，请求中断/回滚行为与既有「不传该键」路径完全一致；无迁移、无后台任务、无状态残留。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++   不会——改动限定本仓 llm_provider 服务层方法与前端映射器纯函数，不触碰跨仓/多实例共享状态；user_id 过滤口径不变。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：FR-01 修复后 `agent_kinds` 键出现在所有编辑提交 body 里，既有表单/apiformat 测试若存在对 PATCH body 的全量精确匹配断言（toEqual）会因新增键挂掉——处置：跑定向测试，按新契约补断言键（补字段属契约演进，非改测试凑绿）。试过放弃：①schema 层禁 null（`agent_kinds: list[...]` 去掉 `| None`）——把契约上合法的显式 null 变成 422，第三方调用方行为被动变化，且与同 DTO 其它 nullable 字段风格不一致；②前端映射器发 `agent_kinds: v.agent_kinds ?? null`——引入 null 与缺省两种「不动」歧义表达，无收益。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/lib/api/llm-providers.ts | formToUpdate 补 agent_kinds 透传 |
++| 修改 | frontend/src/lib/api/__tests__/llm-providers.test.ts | formToUpdate 用例补 agent_kinds 断言 |
++| 修改 | backend/app/modules/llm_provider/service.py | update 显式 agent_kinds=None pop 防护 |
++| 修改 | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | 补显式 null 等同不动用例 |
+diff --git a/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/proposal.md b/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/proposal.md
+new file mode 100644
+index 000000000..d2239f59a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/proposal.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-06T23:05:38.553Z
++---
++# 提案书（Proposal）— 2026-10-07-provider-agent-kinds-followup
++
++## 动机
++
++任务原话转写：修复 2026-10-06-provider-multi-agent-kind 两处收尾缺陷：编辑供应商时引擎集合改动静默丢失（formToUpdate 漏发 agent_kinds，R-05 toast 提示与服务器实际状态相反）+ 后端 Update 显式 agent_kinds=null 按契约合法但会打穿 500（pi in None TypeError / NOT NULL 违反）。
++成功标准：
++- 前端 formToUpdate 产出的 PATCH body 携带 agent_kinds（编辑引擎复选集合真正提交），frontend/src/lib/api/__tests__/llm-providers.test.ts formToUpdate 用例补断言覆盖
++- 后端 LlmProviderUpdate 显式 agent_kinds=null 等同「不动」：openai_chat 行传 null 不抛 TypeError、不写 NULL、集合不变，backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py 补用例覆盖
++- 定向测试绿：后端 llm_provider 域相关测试 + 前端 llm-providers 表单/api 域测试，tsc 与 eslint（改动文件）0 error
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. 前端 formToUpdate 产出的 PATCH body 携带 agent_kinds（编辑引擎复选集合真正提交），frontend/src/lib/api/__tests__/llm-providers.test.ts formToUpdate 用例补断言覆盖
++2. 后端 LlmProviderUpdate 显式 agent_kinds=null 等同「不动」：openai_chat 行传 null 不抛 TypeError、不写 NULL、集合不变，backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py 补用例覆盖
++3. 定向测试绿：后端 llm_provider 域相关测试 + 前端 llm-providers 表单/api 域测试，tsc 与 eslint（改动文件）0 error
++
++## 成功标准（可验证）
++
++1. 前端 formToUpdate 产出的 PATCH body 携带 agent_kinds（编辑引擎复选集合真正提交），frontend/src/lib/api/__tests__/llm-providers.test.ts formToUpdate 用例补断言覆盖
++2. 后端 LlmProviderUpdate 显式 agent_kinds=null 等同「不动」：openai_chat 行传 null 不抛 TypeError、不写 NULL、集合不变，backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py 补用例覆盖
++3. 定向测试绿：后端 llm_provider 域相关测试 + 前端 llm-providers 表单/api 域测试，tsc 与 eslint（改动文件）0 error
+diff --git a/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/requirements.md b/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/requirements.md
+new file mode 100644
+index 000000000..4f03fd363
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/requirements.md
+@@ -0,0 +1,47 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-06T23:05:38.553Z
++---
++# 需求规格（Requirements）— 2026-10-07-provider-agent-kinds-followup
++
++## 功能需求
++
++> FR 由你撰写：每条 = `### FR-NN: 标题` + 一句带强度词的行为规定（必须=硬性；禁止=红线；
++> SHOULD=建议须注理由；可以=可选）；边界情形加场景块 `#### 场景：名` + Given/When/Then 行。
++> 标题行是成功标准锚（勿改写——收口做门柱对比）；正文与场景块归你。
++
++### FR-01: 前端 formToUpdate 产出的 PATCH body 携带 agent_kinds（编辑引擎复选集合真正提交），frontend/src/lib/api/__tests__/llm-providers.test.ts formToUpdate 用例补断言覆盖
++
++- `formToUpdate()` 产出的 PATCH body **必须**携带 `agent_kinds` 键（透传 `FormValues.agent_kinds`），**禁止**遗漏该键使后端按「不传=不动」静默保留旧引擎集合——2026-10-06-provider-multi-agent-kind（commit 0b13d5e06）遗漏该字段导致编辑态引擎复选组完全无效，且 R-05 收缩提示（commit 177dea0e0）与服务器实际状态相反。
++
++#### 场景：主路径
++
++- Given：编辑表单引擎集合初值 ["claude","pi"]，用户取消 pi 勾选（变 ["claude"]）并提交
++- When：`formToUpdate(values)` 构造 PATCH body 经 `updateProvider` 发送
++- Then：body 含 `agent_kinds: ["claude"]`，后端行集合更新为 ["claude"]，刷新列表徽标与提交一致
++
++### FR-02: 后端 LlmProviderUpdate 显式 agent_kinds=null 等同「不动」：openai_chat 行传 null 不抛 TypeError、不写 NULL、集合不变，backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py 补用例覆盖
++
++- `LlmProviderService.update` 对显式 `agent_kinds=None`（openapi 契约 anyOf 允许 null）**必须**按「不动」处理——与同 DTO 的 `api_key`/`multimodal` 既有 None-pop 防护同款；**禁止**让 None 进入 pi×openai 生效组合判定（`"pi" in None` → TypeError 500）或 `setattr` 写 NOT NULL 列（IntegrityError 500）。
++
++#### 场景：主路径
++
++- Given：已存在 `api_format="openai_chat"`、`agent_kinds=["claude","codex"]` 的供应商行
++- When：`update` 收到 `LlmProviderUpdate(agent_kinds=None)`（显式 null，exclude_unset 含该键）
++- Then：不抛异常，返回行的 `agent_kinds` 仍为 ["claude","codex"]，DB 值不变
++
++### FR-03: 定向测试绿：后端 llm_provider 域相关测试 + 前端 llm-providers 表单/api 域测试，tsc 与 eslint（改动文件）0 error
++
++- 收口前定向测试**必须**全绿：后端 `backend/app/modules/llm_provider/tests/` 相关测试文件、前端 llm-providers api/表单域测试文件，及前端 `tsc` 0 error、eslint 对改动文件 0 error；**禁止**跑全量测试（CLAUDE.md 规则 0，全量留给 CI）。
++
++#### 场景：主路径
++
++- Given：task-01/02 实现与测试就位
++- When：定向执行后端 pytest（llm_provider 域）+ 前端 vitest（llm-providers 域）+ tsc/eslint（改动文件）
++- Then：全部退出码 0，无跳过的失败用例
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/lib/api/__tests__/llm-providers.test.ts「formToUpdate — agent_kinds 透传到 PATCH body（编辑引擎集合真正提交）」
++FR-02: backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py「update 显式 agent_kinds=null 等同不动（openai_chat 行不抛 TypeError/不写 NULL）」
++FR-03: CLI 亲测/backend+frontend 定向域「pytest llm_provider 域 + vitest llm-providers 域 + tsc/eslint 改动文件 0 error」
+diff --git a/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/tasks.md b/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/tasks.md
+new file mode 100644
+index 000000000..e54f76109
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/tasks.md
+@@ -0,0 +1,16 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-06T23:05:38.553Z
++---
++# 任务注册表（Tasks）— 2026-10-07-provider-agent-kinds-followup
++
++> 镜像行（task-01…task-NN）是成功标准逐条镜像=任务锚：勿删勿改写（收口对照它），完成实现路径
++> 需要更细步骤时在镜像行**后追加细化行**（保持 `- [ ] task-NN:` 行形态，编号从镜像行末尾顺延——
++> 默认 thin：无任务卡文件，收口=flow done 唯一裁决）。
++> 边干边勾：完成一条 = 实现到位 + 相关测试跑绿 → 当场勾（sillyspec task tick --change 2026-10-07-provider-agent-kinds-followup --task task-NN 即时回显进度与下一任务，或 Edit 翻格），勿攒到收口一把勾（收口硬门拒单拍多格勾选；--allow-batch-tick 可显式旁路留痕）。⚠️ harness 的 TodoWrite 类工具不替代本文件——平台进度/收口哨兵只读 tasks.md。
++> `flow status --change 2026-10-07-provider-agent-kinds-followup` 为自愿查看/恢复面。本文件收口前随交付显式 pathspec 提交。
++
++- [x] task-01: 前端 formToUpdate 产出的 PATCH body 携带 agent_kinds（编辑引擎复选集合真正提交），frontend/src/lib/api/__tests__/llm-providers.test.ts formToUpdate 用例补断言覆盖
++- [x] task-02: 后端 LlmProviderUpdate 显式 agent_kinds=null 等同「不动」：openai_chat 行传 null 不抛 TypeError、不写 NULL、集合不变，backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py 补用例覆盖
++- [x] task-03: 定向测试绿：后端 llm_provider 域相关测试 + 前端 llm-providers 表单/api 域测试，tsc 与 eslint（改动文件）0 error
++- [x] task-04: 显式 pathspec 提交交付文件（代码+测试+.sillyspec 工件，thin 收口纪律）

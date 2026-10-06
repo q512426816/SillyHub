@@ -1,0 +1,16 @@
+{"ts":1791327942129,"kind":"file","stage":"proposal","detail":"proposal.md 出现","provisional":true}
+{"ts":1791327942129,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1791327942129,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1791327942129,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1791328057386,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791328057386,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791328057386,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791329258450,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"brainstorm/plan 期已 20 分钟无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1791330642601,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791330642601,"kind":"task-done","stage":"tasks","detail":"checked 0→3","provisional":true}
+{"ts":1791330663615,"kind":"commit","stage":null,"detail":"44eb2e5c9","provisional":true}
+{"ts":1791330678149,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791330678149,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true}
+{"ts":1791330682200,"kind":"commit","stage":null,"detail":"7f6ee7f62","provisional":true}
+{"ts":1791330724369,"kind":"commit","stage":null,"detail":"fcefa0890","provisional":true}
+{"ts":1791330832385,"kind":"gate-run","stage":"verify","detail":"门实测 passed（89.4s） · 20261006235351","provisional":true}

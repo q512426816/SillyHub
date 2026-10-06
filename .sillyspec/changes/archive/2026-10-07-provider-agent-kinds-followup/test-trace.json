@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-07-provider-agent-kinds-followup",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-07-provider-agent-kinds-followup:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/lib/api/__tests__/llm-providers.test.ts「formToUpdate — agent_kinds 透传到 PATCH body（编辑引擎集合真正提交）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-provider-agent-kinds-followup"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-07-provider-agent-kinds-followup:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py「update 显式 agent_kinds=null 等同不动（openai_chat 行不抛 TypeError/不写 NULL）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-provider-agent-kinds-followup"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-07-provider-agent-kinds-followup",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "fcefa0890fbce6927826cf9e1fff813f0ed642e9",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受）——同步请求/响应纯函数+单请求内存 dict，design「不适用」作答与代码一致：formToUpdate 为纯映射（llm-providers.ts:464-484），pop None 发生在 model_dump 后、任何判定前（service.py:255-256），无事件流/到达顺序面",
+    "并发": "ok（边界已裁决：可接受）——update 单事务先取行后写，pop None 与 api_key/multimodal 同序（service.py:272/279），不新增并发面；边界「保持 nullable 契约（pop-None 而非收紧 schema）」可接受：与同 DTO api_key/multimodal 既有 None-pop 先例一致（service.py:272-276、279-280 已核实存在且生效），无第三方契约破坏",
+    "切换": "ok（边界已裁决：可接受）——显式 null 收敛为 no-op 后与「不传该键」路径逐行等价：pop 后 setattr 循环不写该列（service.py:286-287）、sibling-clear 条件 \"agent_kinds\" in updates 为 False 不误触发（service.py:288-289）；风险披露「全量 toEqual 断言可能挂」已核实未触发（llm-providers.test.ts 内 formToUpdate 断言均为属性级 209-243）",
+    "作用域": "ok（边界已裁决：可接受）——user_id 过滤口径不变（service.py:248 self.get(provider_id, user_id)），前端为纯函数映射器；设计声称的生成物同步边界核实成立：交付 commit 44eb2e5c9 仅触 4 个代码/测试文件+5 个 .sillyspec 工件，openapi/schema 未动，前端 LlmProviderUpdate.agent_kinds?: 本就声明（llm-providers.ts:124），后端 schema 仍 nullable（schema.py:82）"
+  },
+  "reviewedAt": "2026-10-07T12:00:00+08:00"
+}
