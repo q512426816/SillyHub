@@ -53,10 +53,15 @@ async def workspace_with_changes(
         list_resp = await client.get(f"/api/workspaces/{ws_id}/changes", headers=auth_headers)
         items = list_resp.json()["items"]
     assert len(items) > 0
+    # fixtures 含归档 change（changes/archive/2026-05-21-demo-archived——列表
+    # 默认 updated_at desc 排序，同刻 mtime 并列时归档行可能排首（CI Linux 稳定
+    # 复现）。本套件按「目录直挂 changes/<key>/」假设拼路径写读文件，归档
+    # change 实际在 archive/ 子树下会 FileNotFoundError——固定选活跃行。
+    active = next(it for it in items if it.get("location") == "active")
     return {
         "ws_id": ws_id,
-        "change_id": items[0]["id"],
-        "change_key": items[0]["change_key"],
+        "change_id": active["id"],
+        "change_key": active["change_key"],
         "root": root,
         "spec_root": str(spec_root),
     }

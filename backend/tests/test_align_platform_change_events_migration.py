@@ -95,11 +95,11 @@ class TestMigrationStructure:
         cfg = Config(str(BACKEND_DIR / "alembic.ini"))
         heads = ScriptDirectory.from_config(cfg).get_heads()
         assert len(heads) == 1, f"expected single head, got {heads}"
-        # 链尾锚定：20261002010000（platform_agent_logs 用量快照五列，
-        # 2026-10-02-change-center-token-usage）down_revision 接本迁移后 head 前移。
-        assert (
-            heads[0] == "20261003020000"
-        )  # 2026-10-03-local-usage-segment-attribution 水位表成为新 head
+        # 链尾锚定：随主线新迁移接续前移——20261003020000（水位表，
+        # 2026-10-03-local-usage-segment-attribution）→ 20261006120000
+        # （provider_agent_kinds，2026-10-06-provider-multi-agent-kind）→
+        # 20261006200000（四旧列删/存量折算，2026-10-06-provider-model-list）。
+        assert heads[0] == "20261006200000"  # 2026-10-06-provider-model-list 迁移成为新 head
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()

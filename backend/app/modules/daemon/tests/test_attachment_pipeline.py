@@ -328,7 +328,10 @@ class TestGroupWrapperEquivalence:
         assert exc_info.value.details == {"image_count": 0, "file_count": 6}
 
     async def test_group_assembly_gate_basis_owner_and_member(self) -> None:
-        """group 装配：gate 基准=群主属主 + 成员供应商/引擎，组装走共享核心。"""
+        """group 装配：gate 基准=群主属主 + 成员供应商/引擎，组装走共享核心。
+
+        D-003 群成员生效模型透传：``member.config_snapshot.model`` 作为
+        gate ``model_name`` 传入（无则 None 走主模型条目兜底）。"""
         import app.modules.session_attachment.capability as capability_module
         import app.modules.session_attachment.service as att_service
         import app.modules.storage.factory as storage_factory
@@ -340,12 +343,17 @@ class TestGroupWrapperEquivalence:
                 user_id=user_id,
                 session_llm_provider_id=session_llm_provider_id,
                 agent_kind=agent_kind,
+                model_name=model_name,
             )
             return SimpleNamespace(supports_multimodal=True)
 
         assemble_spy = AsyncMock(return_value=[{"deliver": "disk"}])
         owner, member_provider_id = uuid.uuid4(), uuid.uuid4()
-        member = SimpleNamespace(provider="claude", llm_provider_id=member_provider_id)
+        member = SimpleNamespace(
+            provider="claude",
+            llm_provider_id=member_provider_id,
+            config_snapshot={"model": "glm-4.7"},
+        )
         with (
             patch.object(capability_module, "resolve_session_gate", _fake_gate),
             patch.object(storage_factory, "get_storage_backend", lambda: object()),
@@ -361,10 +369,12 @@ class TestGroupWrapperEquivalence:
         assert seen["user_id"] == owner  # 属主=群主（成员供应商行归属者）
         assert seen["session_llm_provider_id"] == member_provider_id
         assert seen["agent_kind"] == "claude"
+        assert seen["model_name"] == "glm-4.7"  # D-003 生效模型透传
         assert assemble_spy.await_args.kwargs["supports_multimodal"] is True
 
     async def test_group_assembly_member_provider_fallback_claude(self) -> None:
-        """group 装配边界：成员 provider 缺省回落 ``claude``。"""
+        """group 装配边界：成员 provider 缺省回落 ``claude``；config_snapshot
+        非 dict（None）→ gate ``model_name=None`` 走主模型条目兜底。"""
         import app.modules.session_attachment.capability as capability_module
         import app.modules.session_attachment.service as att_service
         import app.modules.storage.factory as storage_factory
@@ -372,7 +382,7 @@ class TestGroupWrapperEquivalence:
         seen: dict[str, object] = {}
 
         async def _fake_gate(db, *, user_id, session_llm_provider_id, agent_kind, model_name=None):
-            seen["agent_kind"] = agent_kind
+            seen.update(agent_kind=agent_kind, model_name=model_name)
             return SimpleNamespace(supports_multimodal=False)
 
         assemble_spy = AsyncMock(return_value=[])
@@ -384,8 +394,9 @@ class TestGroupWrapperEquivalence:
             await _assemble_group_inject_attachments(
                 SimpleNamespace(_session=_FakeDB([])),
                 [],
-                member=SimpleNamespace(provider=None, llm_provider_id=None),
+                member=SimpleNamespace(provider=None, llm_provider_id=None, config_snapshot=None),
                 owner_user_id=uuid.uuid4(),
             )
         assert seen["agent_kind"] == "claude"
+        assert seen["model_name"] is None  # D-003 无生效模型 → 兜底
         assert assemble_spy.await_args.kwargs["supports_multimodal"] is False

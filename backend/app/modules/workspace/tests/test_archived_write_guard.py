@@ -335,11 +335,14 @@ async def test_session_interrupt_on_archived_workspace_returns_409(
 async def test_tool_report_activation_on_archived_returns_409(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """归档区 tool_report 预会话首条消息（懒激活分支）→ 409（审计④-1）。
+    """归档区 tool_report 预会话首条消息 → 409（审计④-1）。
 
-    激活分支在 inject_session 内先于 _inject_into_session（守卫原所在）提前
-    return——4d64cb28 提交信息声称覆盖激活分支但实际未拦（新测试的会话 origin
-    缺省 chat，从未测到该分支），本用例坐实收口。
+    懒激活分支已退役（2026-09-30-tool-report-activation-wrong-machine
+    task-06 / D-006@v1）：未激活 tool_report 会话的 inject 一律 409
+    takeover_required 指引走分叉式接手，本端点零写。归档禁写性质由
+    写入口兜底——takeover 分叉经 create 链落库，归档守卫沿用
+    test_session_create_on_archived_returns_409 覆盖的
+    WorkspaceService.ensure_writable 口径。
     """
     user = await _create_user(db_session)
     await _grant_platform_permission(db_session, user.id, Permission.TASK_RUN_AGENT)
@@ -354,7 +357,7 @@ async def test_tool_report_activation_on_archived_returns_409(
         headers=_headers(_token_for(user)),
     )
     assert resp.status_code == 409, resp.text
-    assert resp.json()["code"] == "HTTP_409_WORKSPACE_ARCHIVED"
+    assert resp.json()["code"] == "HTTP_409_TOOL_REPORT_TAKEOVER_INVALID"
 
 
 @pytest.mark.asyncio
