@@ -8,6 +8,7 @@ files takes precedence).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,6 +19,12 @@ from app.core.logging import get_logger
 log = get_logger(__name__)
 
 VALID_STATUSES = frozenset({"draft", "ready", "in_progress", "review", "done", "cancelled"})
+
+# tasks.md 注册表行（2026-10-07-taskboard-tasks-md）：宽容形态与 CLI 侧 task-tick /
+# change.timeline 判集同族——缩进、`-`/`*` bullet、`( |x|X)` 勾选态。
+_TASKS_MD_LINE_RE = re.compile(
+    r"^\s*[-*]\s+\[(?P<checked> |x|X)\]\s+(?P<key>task-\d+)\s*:\s*(?P<title>.*)$"
+)
 
 
 @dataclass
@@ -51,14 +58,22 @@ class TaskParserResult:
 
 
 class TaskParser:
-    """Parses task files from a change's ``tasks/`` subdirectory."""
+    """Parses task files from a change's ``tasks/`` subdirectory (plus ``tasks.md``)."""
 
     def parse_tasks(
         self,
         sillyspec_root: Path,
         change_rel_path: str,
     ) -> TaskParserResult:
-        """Parse all task files under ``{sillyspec_root}/{change_rel_path}/tasks/``.
+        """Parse task cards + ``tasks.md`` registry lines for one change.
+
+        两源（2026-10-07-taskboard-tasks-md，兑现本模块 docstring 既有声明——
+        ``tasks.md`` supplementary、卡片 frontmatter 优先）：
+        - ``tasks/task-*.md`` 任务卡（厚档富信息，既有行为不变）；
+        - ``tasks.md`` 注册表行 ``- [ ]/- [x] task-NN: 描述``（thin 轻量变更任务面）
+          ——勾选→``done``、未勾→``draft``、title=冒号后描述（截 500 对齐列宽）。
+          同名 task_key 卡片优先，注册表行只补卡片未覆盖的 key（厚档
+          ``--with-tasks`` 双源同 key 不重复、富信息不被覆盖）。
 
         Args:
             sillyspec_root: Absolute path to workspace root.
@@ -67,51 +82,79 @@ class TaskParser:
         result = TaskParserResult()
         tasks_dir = sillyspec_root / change_rel_path / "tasks"
 
-        if not tasks_dir.is_dir():
-            return result
-
         seen_keys: set[str] = set()
 
-        for md_file in sorted(tasks_dir.glob("task-*.md")):
-            # Path traversal guard
-            try:
-                resolved = md_file.resolve()
-                root_resolved = sillyspec_root.resolve()
-                if not str(resolved).startswith(str(root_resolved)):
+        if tasks_dir.is_dir():
+            for md_file in sorted(tasks_dir.glob("task-*.md")):
+                # Path traversal guard
+                try:
+                    resolved = md_file.resolve()
+                    root_resolved = sillyspec_root.resolve()
+                    if not str(resolved).startswith(str(root_resolved)):
+                        result.warnings.append(
+                            TaskParseWarning(
+                                code="PATH_TRAVERSAL",
+                                detail=f"Skipping file outside root: {md_file}",
+                            )
+                        )
+                        continue
+                except (OSError, ValueError):
+                    continue
+
+                # Extract task_key from filename (e.g. task-01.md -> task-01)
+                task_key = md_file.stem
+                if task_key in seen_keys:
                     result.warnings.append(
                         TaskParseWarning(
-                            code="PATH_TRAVERSAL",
-                            detail=f"Skipping file outside root: {md_file}",
+                            code="DUPLICATE_TASK_KEY",
+                            detail=f"Duplicate task key '{task_key}', skipping",
+                            task_key=task_key,
                         )
                     )
                     continue
-            except (OSError, ValueError):
-                continue
+                seen_keys.add(task_key)
 
-            # Extract task_key from filename (e.g. task-01.md -> task-01)
-            task_key = md_file.stem
-            if task_key in seen_keys:
+                parsed = self._parse_task_file(
+                    md_file,
+                    rel_path=f"{change_rel_path}/tasks/{md_file.name}",
+                )
+                result.tasks.append(parsed)
+                if parsed.status not in VALID_STATUSES:
+                    result.warnings.append(
+                        TaskParseWarning(
+                            code="INVALID_STATUS",
+                            detail=f"Unknown status '{parsed.status}' for {task_key}",
+                            task_key=task_key,
+                        )
+                    )
+
+        # tasks.md 注册表行（thin 任务面）——卡片优先，只补未见 key
+        tasks_md = sillyspec_root / change_rel_path / "tasks.md"
+        if tasks_md.is_file():
+            try:
+                text = tasks_md.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
                 result.warnings.append(
                     TaskParseWarning(
-                        code="DUPLICATE_TASK_KEY",
-                        detail=f"Duplicate task key '{task_key}', skipping",
-                        task_key=task_key,
+                        code="TASKS_MD_UNREADABLE",
+                        detail=f"Cannot read tasks.md: {exc}",
                     )
                 )
-                continue
-            seen_keys.add(task_key)
-
-            parsed = self._parse_task_file(
-                md_file,
-                rel_path=f"{change_rel_path}/tasks/{md_file.name}",
-            )
-            result.tasks.append(parsed)
-            if parsed.status not in VALID_STATUSES:
-                result.warnings.append(
-                    TaskParseWarning(
-                        code="INVALID_STATUS",
-                        detail=f"Unknown status '{parsed.status}' for {task_key}",
+                text = ""
+            for line in text.splitlines():
+                m = _TASKS_MD_LINE_RE.match(line)
+                if not m:
+                    continue
+                task_key = m.group("key")
+                if task_key in seen_keys:
+                    continue  # 卡片优先（docstring 声明）：厚档同 key 不覆盖
+                seen_keys.add(task_key)
+                result.tasks.append(
+                    ParsedTask(
                         task_key=task_key,
+                        title=m.group("title")[:500] or None,
+                        status="done" if m.group("checked").lower() == "x" else "draft",
+                        path=f"{change_rel_path}/tasks.md",
                     )
                 )
 
