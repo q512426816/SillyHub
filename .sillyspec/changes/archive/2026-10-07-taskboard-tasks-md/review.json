@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-07-taskboard-tasks-md",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "fbf4ae2753b9bbf2a14d929ecd2c900b533d6100",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "TASKS_MD_UNREADABLE 告警分支无测试覆盖",
+      "evidence": "实现存在且正确：parser.py:133-143 tasks_md.is_file() 后 read_text 捕获 OSError 产出 code='TASKS_MD_UNREADABLE' 告警并置 text=''。但 TestTasksMdRegistryLines 四用例（test_parser.py:119-189）无一断言该告警码或触发 OSError；设计盲维第 3 问引用的『坏行跳过』由 test_tolerant_line_forms 间接覆盖（非匹配行 continue，parser.py:146-147），唯 OSError 分支为纯声明零覆盖。防护本身核验通过，缺的是断言面。",
+      "location": "backend/app/modules/task/parser.py:136-143"
+    },
+    {
+      "severity": "P3",
+      "title": "行级正则不感知代码围栏，围栏内示例注册表行会误入任务板",
+      "evidence": "_TASKS_MD_LINE_RE（parser.py:25-27）逐行匹配，无 fenced code block 状态。若 tasks.md 正文以 ``` 围栏展示示例行『- [ ] task-99: 演示』，该行与真实注册表行形态不可区分，会被解析为任务。与设计披露的『行级正则』方案一致（设计盲维第 1/3 问均以行级为前提），且 tasks.md 通常由 CLI 生成、围栏概率低，属披露边界内的残余边角，不阻断。",
+      "location": "backend/app/modules/task/parser.py:25-27"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-07T14:15:09Z"
+}

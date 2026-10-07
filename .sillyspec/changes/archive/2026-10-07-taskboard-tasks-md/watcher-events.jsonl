@@ -1,0 +1,15 @@
+{"ts":1791382371717,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791382371717,"kind":"task-done","stage":"requirements","detail":"checked 0→1","provisional":true}
+{"ts":1791382371717,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791382371717,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791382371927,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791382381267,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791382382201,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791382382201,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1791382382201,"kind":"commit","stage":null,"detail":"6e75af2f3","provisional":true}
+{"ts":1791382391708,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791382392496,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791382392496,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true}
+{"ts":1791382392496,"kind":"commit","stage":null,"detail":"fbf4ae275","provisional":true}
+{"ts":1791382406005,"kind":"gate-run","stage":"verify","detail":"门实测 passed（10.6s） · 20261007141324","provisional":true}
+{"ts":1791382533508,"kind":"file","stage":"proposal","detail":"decisions.md 出现","provisional":true}

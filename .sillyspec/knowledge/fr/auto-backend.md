@@ -111,3 +111,43 @@ created_at: 2026-10-03T12:34:45.318Z
   confirmed_at: null
   source_change: 2026-10-07-spec-sync-task-reparse
   status: active
+
+## FR-auto-backend-097 任务板解析 tasks.md 注册表行
+变更：2026-10-07-taskboard-tasks-md
+状态：active
+摘要：thin 变更进任务板
+场景正文：
+- 场景：thin 变更进任务板 — Given thin 变更只有 tasks.md（两行：一勾一未勾），无任务卡目录；When 增量同步落盘 tasks.md 并连动 reparse；Then 任务板出现 task-01(done)/task-02(draft) 两行；改写勾选后跟随为全 done
+全文：.sillyspec/changes/archive/2026-10-07-taskboard-tasks-md/requirements.md#FR-01
+最近确认：fbf4ae2753b9bbf2a14d929ecd2c900b533d6100
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-taskboard-tasks-md:flow:测试绑定FR-01
+  tests: backend/app/modules/task/tests/test_parser.py「TestTasksMdRegistryLines.test_thin_tasks_md_only」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-taskboard-tasks-md
+  status: active
+
+## FR-auto-backend-098 测试双覆盖
+变更：2026-10-07-taskboard-tasks-md
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-07-taskboard-tasks-md/requirements.md#FR-02
+最近确认：fbf4ae2753b9bbf2a14d929ecd2c900b533d6100
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-taskboard-tasks-md:flow:测试绑定FR-02
+  tests: backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py「test_thin_tasks_md_registry_reaches_task_board」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-taskboard-tasks-md
+  status: active

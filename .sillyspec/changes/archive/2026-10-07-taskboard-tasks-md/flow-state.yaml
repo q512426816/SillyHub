@@ -1,0 +1,39 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  平台任务板只解析厚档任务卡（tasks/task-*.md），thin 变更的 tasks.md 注册表行（- [ ]/- [x] task-NN: 描述）不进任务板——parser docstring 声称『Also reads
+  tasks.md…frontmatter takes precedence』但实现从未兑现。补齐：任务板/看板对 thin 变更也有任务行。
+
+
+  成功标准：
+
+  - TaskParser.parse_tasks 额外解析 change 目录下 tasks.md 的任务行（宽容行形态：缩进/- 与 * bullet/( |x|X)
+  勾选态），勾选→done、未勾→draft，title=冒号后描述（截 500）
+
+  - 同名 task_key 卡片优先（厚档富信息不被注册表行覆盖，模块 docstring 既有声明兑现）；仅 tasks.md 独有的 key 追加为任务行
+
+  - parser 单测 + 同步链 e2e（thin tasks.md 增量同步 → 任务表出现行）双覆盖，task/spec_workspace 模块回归绿
+autopilot: true
+baseline_commit: ba611445b66b4c153820aa937ebbfbb38aeeda73
+updatedAt: '2026-10-07T14:15:34.329Z'
+baseline_sha256: 6b26666848352e76de49ef4de8b97be512197c049a4373cc9415f6e7467aadda
+gate_summary: >-
+  test: passed ← module[]+deps(py2)+fr(1)（10.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261007141324\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（9.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261007141324\test-result.json｜门文件
+  4 个
+

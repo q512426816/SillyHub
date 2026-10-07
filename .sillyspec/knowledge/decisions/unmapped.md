@@ -1649,3 +1649,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：f82bc067ca74946ac7c6b88d4e6382e54e6c665c
 理由：最大风险：archive_hit 全量路径下对大 workspace 逐变更 reparse 的耗时——已在后台任务里（不阻塞同步响应）且全量路径仅归档移动触发（罕见）；后续可按 location 过滤收窄。试过放弃：在 apply_ops 落盘循环里逐 op 触发——绕过调度器会复活 ql-20260909-021 修掉的风暴；放弃。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-07-taskboard-tasks-md
+锚点：未记录
+最近确认：fbf4ae2753b9bbf2a14d929ecd2c900b533d6100
+理由：最大风险：thin 行 status 只有 draft/done 两态（看板中段列空）——勾选态是 tasks.md 唯一信号，不造无据状态；后续要更细可由 status 映射规则扩展。试过放弃：把注册表行也建成卡片式富结构（priority/owner 从行文猜测）——无据造数；放弃，只取确定字段。

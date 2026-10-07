@@ -1,0 +1,68 @@
+{
+  "change": "2026-10-07-taskboard-tasks-md",
+  "baseline": "ba611445b66b4c153820aa937ebbfbb38aeeda73",
+  "head": "fbf4ae2753b9bbf2a14d929ecd2c900b533d6100",
+  "files": [
+    ".sillyspec/changes/2026-10-07-taskboard-tasks-md/design.md",
+    ".sillyspec/changes/2026-10-07-taskboard-tasks-md/requirements.md",
+    ".sillyspec/changes/2026-10-07-taskboard-tasks-md/tasks.md",
+    "backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py",
+    "backend/app/modules/task/parser.py",
+    "backend/app/modules/task/tests/test_parser.py",
+    ".sillyspec/changes/2026-10-07-taskboard-tasks-md/proposal.md"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 328,
+    "deletions": 34
+  },
+  "savedAt": "2026-10-07T14:13:34.474Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "task",
+      "files": 2,
+      "doc": "docs/backend/modules/task.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "spec_workspace",
+      "files": 1,
+      "doc": "docs/backend/modules/spec_workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "spec_workspace",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/spec_workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "task",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/task.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "285ce30cc8a7a5f36780736bb0ab5330c9706a86bf465e46f60bd604cb7ec393",
+  "patchStatus": "ok"
+}

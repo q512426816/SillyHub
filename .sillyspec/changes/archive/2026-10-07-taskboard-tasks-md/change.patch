@@ -1,0 +1,452 @@
+diff --git a/backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py b/backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py
+index d72697108..22fd3efff 100644
+--- a/backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py
++++ b/backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py
+@@ -199,3 +199,71 @@ class TestTaskReparseOnSync:
+ 
+         change = await _change_row(db_session, ws.id, key)
+         assert change is not None, "连动失败不阻断：变更表照常重建"
++
++    async def test_thin_tasks_md_registry_reaches_task_board(
++        self, db_session, client: AsyncClient, auth_headers, tmp_path
++    ) -> None:
++        """thin tasks.md 注册表行进任务板（2026-10-07-taskboard-tasks-md）：
++        增量同步 tasks.md → 连动 reparse → 任务表按勾选态建行；改写跟随。"""
++        ws = await _make_workspace(db_session)
++        spec_root = tmp_path / "spec-root"
++        await _make_spec_workspace(db_session, ws, spec_root)
++        key = "2026-10-07-thin-registry"
++
++        resp = await client.post(
++            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
++            headers=auth_headers,
++            json={
++                "ops": [
++                    _op("add", f"changes/{key}/proposal.md", content=_b64("# Thin Registry")),
++                    _op(
++                        "add",
++                        f"changes/{key}/tasks.md",
++                        content=_b64(
++                            "# 任务注册表\n\n"
++                            "- [x] task-01: 实现 A + 用例\n"
++                            "- [ ] task-02: 全量复跑绿\n"
++                        ),
++                    ),
++                ],
++                "change_dirs": [key],
++            },
++        )
++        assert resp.status_code == 200, resp.text
++        await drain_reparse_workers()
++
++        change = await _change_row(db_session, ws.id, key)
++        assert change is not None
++        ws_id, change_id = ws.id, change.id
++        rows = await _tasks_of(db_session, ws_id, change_id)
++        assert {t.task_key: t.status for t in rows} == {"task-01": "done", "task-02": "draft"}
++
++        # 改写：勾 task-02 → 两行全 done
++        resp2 = await client.post(
++            f"/api/workspaces/{ws_id}/spec-workspace/sync-incremental",
++            headers=auth_headers,
++            json={
++                "ops": [
++                    _op(
++                        "update",
++                        f"changes/{key}/tasks.md",
++                        base_version=1,
++                        content=_b64(
++                            "# 任务注册表\n\n"
++                            "- [x] task-01: 实现 A + 用例\n"
++                            "- [x] task-02: 全量复跑绿\n"
++                        ),
++                    )
++                ],
++                "change_dirs": [key],
++            },
++        )
++        assert resp2.status_code == 200, resp2.text
++        await drain_reparse_workers()
++
++        db_session.expire_all()
++        rows2 = await _tasks_of(db_session, ws_id, change_id)
++        assert {t.task_key: t.status for t in rows2} == {
++            "task-01": "done",
++            "task-02": "done",
++        }, "任务板跟随 tasks.md 勾选态"
+diff --git a/backend/app/modules/task/parser.py b/backend/app/modules/task/parser.py
+index bfdbc90f3..b54485e1a 100644
+--- a/backend/app/modules/task/parser.py
++++ b/backend/app/modules/task/parser.py
+@@ -8,6 +8,7 @@ files takes precedence).
+ 
+ from __future__ import annotations
+ 
++import re
+ from dataclasses import dataclass, field
+ from pathlib import Path
+ 
+@@ -19,6 +20,12 @@ log = get_logger(__name__)
+ 
+ VALID_STATUSES = frozenset({"draft", "ready", "in_progress", "review", "done", "cancelled"})
+ 
++# tasks.md 注册表行（2026-10-07-taskboard-tasks-md）：宽容形态与 CLI 侧 task-tick /
++# change.timeline 判集同族——缩进、`-`/`*` bullet、`( |x|X)` 勾选态。
++_TASKS_MD_LINE_RE = re.compile(
++    r"^\s*[-*]\s+\[(?P<checked> |x|X)\]\s+(?P<key>task-\d+)\s*:\s*(?P<title>.*)$"
++)
++
+ 
+ @dataclass
+ class TaskParseWarning:
+@@ -51,14 +58,22 @@ class TaskParserResult:
+ 
+ 
+ class TaskParser:
+-    """Parses task files from a change's ``tasks/`` subdirectory."""
++    """Parses task files from a change's ``tasks/`` subdirectory (plus ``tasks.md``)."""
+ 
+     def parse_tasks(
+         self,
+         sillyspec_root: Path,
+         change_rel_path: str,
+     ) -> TaskParserResult:
+-        """Parse all task files under ``{sillyspec_root}/{change_rel_path}/tasks/``.
++        """Parse task cards + ``tasks.md`` registry lines for one change.
++
++        两源（2026-10-07-taskboard-tasks-md，兑现本模块 docstring 既有声明——
++        ``tasks.md`` supplementary、卡片 frontmatter 优先）：
++        - ``tasks/task-*.md`` 任务卡（厚档富信息，既有行为不变）；
++        - ``tasks.md`` 注册表行 ``- [ ]/- [x] task-NN: 描述``（thin 轻量变更任务面）
++          ——勾选→``done``、未勾→``draft``、title=冒号后描述（截 500 对齐列宽）。
++          同名 task_key 卡片优先，注册表行只补卡片未覆盖的 key（厚档
++          ``--with-tasks`` 双源同 key 不重复、富信息不被覆盖）。
+ 
+         Args:
+             sillyspec_root: Absolute path to workspace root.
+@@ -67,51 +82,79 @@ class TaskParser:
+         result = TaskParserResult()
+         tasks_dir = sillyspec_root / change_rel_path / "tasks"
+ 
+-        if not tasks_dir.is_dir():
+-            return result
+-
+         seen_keys: set[str] = set()
+ 
+-        for md_file in sorted(tasks_dir.glob("task-*.md")):
+-            # Path traversal guard
+-            try:
+-                resolved = md_file.resolve()
+-                root_resolved = sillyspec_root.resolve()
+-                if not str(resolved).startswith(str(root_resolved)):
++        if tasks_dir.is_dir():
++            for md_file in sorted(tasks_dir.glob("task-*.md")):
++                # Path traversal guard
++                try:
++                    resolved = md_file.resolve()
++                    root_resolved = sillyspec_root.resolve()
++                    if not str(resolved).startswith(str(root_resolved)):
++                        result.warnings.append(
++                            TaskParseWarning(
++                                code="PATH_TRAVERSAL",
++                                detail=f"Skipping file outside root: {md_file}",
++                            )
++                        )
++                        continue
++                except (OSError, ValueError):
++                    continue
++
++                # Extract task_key from filename (e.g. task-01.md -> task-01)
++                task_key = md_file.stem
++                if task_key in seen_keys:
+                     result.warnings.append(
+                         TaskParseWarning(
+-                            code="PATH_TRAVERSAL",
+-                            detail=f"Skipping file outside root: {md_file}",
++                            code="DUPLICATE_TASK_KEY",
++                            detail=f"Duplicate task key '{task_key}', skipping",
++                            task_key=task_key,
+                         )
+                     )
+                     continue
+-            except (OSError, ValueError):
+-                continue
++                seen_keys.add(task_key)
+ 
+-            # Extract task_key from filename (e.g. task-01.md -> task-01)
+-            task_key = md_file.stem
+-            if task_key in seen_keys:
+-                result.warnings.append(
+-                    TaskParseWarning(
+-                        code="DUPLICATE_TASK_KEY",
+-                        detail=f"Duplicate task key '{task_key}', skipping",
+-                        task_key=task_key,
+-                    )
++                parsed = self._parse_task_file(
++                    md_file,
++                    rel_path=f"{change_rel_path}/tasks/{md_file.name}",
+                 )
+-                continue
+-            seen_keys.add(task_key)
++                result.tasks.append(parsed)
++                if parsed.status not in VALID_STATUSES:
++                    result.warnings.append(
++                        TaskParseWarning(
++                            code="INVALID_STATUS",
++                            detail=f"Unknown status '{parsed.status}' for {task_key}",
++                            task_key=task_key,
++                        )
++                    )
+ 
+-            parsed = self._parse_task_file(
+-                md_file,
+-                rel_path=f"{change_rel_path}/tasks/{md_file.name}",
+-            )
+-            result.tasks.append(parsed)
+-            if parsed.status not in VALID_STATUSES:
++        # tasks.md 注册表行（thin 任务面）——卡片优先，只补未见 key
++        tasks_md = sillyspec_root / change_rel_path / "tasks.md"
++        if tasks_md.is_file():
++            try:
++                text = tasks_md.read_text(encoding="utf-8", errors="replace")
++            except OSError as exc:
+                 result.warnings.append(
+                     TaskParseWarning(
+-                        code="INVALID_STATUS",
+-                        detail=f"Unknown status '{parsed.status}' for {task_key}",
++                        code="TASKS_MD_UNREADABLE",
++                        detail=f"Cannot read tasks.md: {exc}",
++                    )
++                )
++                text = ""
++            for line in text.splitlines():
++                m = _TASKS_MD_LINE_RE.match(line)
++                if not m:
++                    continue
++                task_key = m.group("key")
++                if task_key in seen_keys:
++                    continue  # 卡片优先（docstring 声明）：厚档同 key 不覆盖
++                seen_keys.add(task_key)
++                result.tasks.append(
++                    ParsedTask(
+                         task_key=task_key,
++                        title=m.group("title")[:500] or None,
++                        status="done" if m.group("checked").lower() == "x" else "draft",
++                        path=f"{change_rel_path}/tasks.md",
+                     )
+                 )
+ 
+diff --git a/backend/app/modules/task/tests/test_parser.py b/backend/app/modules/task/tests/test_parser.py
+index c6a7edabc..6b2e45577 100644
+--- a/backend/app/modules/task/tests/test_parser.py
++++ b/backend/app/modules/task/tests/test_parser.py
+@@ -114,3 +114,76 @@ class TestTaskParser:
+         assert len(result.tasks) == 1
+         warning_codes = [w.code for w in result.warnings]
+         assert "INVALID_STATUS" in warning_codes
++
++
++class TestTasksMdRegistryLines:
++    """tasks.md 注册表行解析（2026-10-07-taskboard-tasks-md，thin 任务面进任务板）。"""
++
++    def test_thin_tasks_md_only(self, parser: TaskParser, tmp_path: Path) -> None:
++        """无任务卡目录：tasks.md checkbox 行即任务（勾选→done / 未勾→draft）。"""
++        change_dir = tmp_path / ".sillyspec" / "changes" / "change" / "thin-demo"
++        change_dir.mkdir(parents=True)
++        (change_dir / "tasks.md").write_text(
++            "# 任务注册表\n\n"
++            "- [x] task-01: 实现 slugify + 用例，npm test 绿\n"
++            "- [ ] task-02: 全量复跑 npm test 无回归\n",
++            encoding="utf-8",
++        )
++        result = parser.parse_tasks(tmp_path, ".sillyspec/changes/change/thin-demo")
++        assert len(result.tasks) == 2
++        t01 = next(t for t in result.tasks if t.task_key == "task-01")
++        assert t01.status == "done"
++        assert t01.title == "实现 slugify + 用例，npm test 绿"
++        assert t01.path == ".sillyspec/changes/change/thin-demo/tasks.md"
++        t02 = next(t for t in result.tasks if t.task_key == "task-02")
++        assert t02.status == "draft"
++
++    def test_cards_take_precedence_over_registry(self, parser: TaskParser, tmp_path: Path) -> None:
++        """厚档双源同 key：卡片富信息优先，注册表行只补未见 key。"""
++        change_dir = tmp_path / ".sillyspec" / "changes" / "change" / "thick-demo"
++        (change_dir / "tasks").mkdir(parents=True)
++        (change_dir / "tasks" / "task-01.md").write_text(
++            "---\ntitle: '卡片富信息'\nstatus: in_progress\npriority: P0\n---\n",
++            encoding="utf-8",
++        )
++        (change_dir / "tasks.md").write_text(
++            "- [x] task-01: 注册表行（不得覆盖卡片）\n- [ ] task-02: 仅注册表独有的追加行\n",
++            encoding="utf-8",
++        )
++        result = parser.parse_tasks(tmp_path, ".sillyspec/changes/change/thick-demo")
++        assert len(result.tasks) == 2
++        t01 = next(t for t in result.tasks if t.task_key == "task-01")
++        assert t01.title == "卡片富信息"
++        assert t01.status == "in_progress"
++        assert t01.priority == "P0"
++        t02 = next(t for t in result.tasks if t.task_key == "task-02")
++        assert t02.title == "仅注册表独有的追加行"
++        assert t02.status == "draft"
++
++    def test_tolerant_line_forms(self, parser: TaskParser, tmp_path: Path) -> None:
++        """宽容形态：缩进 / `*` bullet / 大写 X / 表格与普通文本行不误匹配 / 超长截 500。"""
++        change_dir = tmp_path / ".sillyspec" / "changes" / "change" / "forms"
++        change_dir.mkdir(parents=True)
++        long_desc = "长" * 600
++        (change_dir / "tasks.md").write_text(
++            "| task-01 | 表格行不是任务 | draft |\n"
++            "普通段落 task-02 也不是\n"
++            "  - [X] task-03: 大写勾选\n"
++            f"* [ ] task-04: {long_desc}\n",
++            encoding="utf-8",
++        )
++        result = parser.parse_tasks(tmp_path, ".sillyspec/changes/change/forms")
++        keys = {t.task_key for t in result.tasks}
++        assert keys == {"task-03", "task-04"}
++        t03 = next(t for t in result.tasks if t.task_key == "task-03")
++        assert t03.status == "done"
++        t04 = next(t for t in result.tasks if t.task_key == "task-04")
++        assert t04.title is not None and len(t04.title) == 500
++
++    def test_table_format_fixture_unaffected(
++        self, parser: TaskParser, workspace_root: tuple[Path, str]
++    ) -> None:
++        """旧表格形态 tasks.md（fixture）零新增行——既有断言面不动。"""
++        root, rel_path = workspace_root
++        result = parser.parse_tasks(root, rel_path)
++        assert {t.task_key for t in result.tasks} == {"task-01", "task-02", "task-03"}
+diff --git a/.sillyspec/changes/2026-10-07-taskboard-tasks-md/design.md b/.sillyspec/changes/2026-10-07-taskboard-tasks-md/design.md
+new file mode 100644
+index 000000000..c8edcc0ff
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-taskboard-tasks-md/design.md
+@@ -0,0 +1,49 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T14:07:18.862Z
++---
++# 设计记录（Design Record）— 2026-10-07-taskboard-tasks-md
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++单点扩展 `task/parser.py`：`parse_tasks` 在卡片循环后追加 `tasks.md` 注册表行解析（行级正则 `_TASKS_MD_LINE_RE`——宽容形态与 CLI 侧 task-tick/change.timeline 判集同族），映射勾选态→status、冒号后文本→title（截 500 对齐列宽）；卡片优先以 seen_keys 集天然实现（注册表行仅补未见 key）。这兑现了 parser docstring 的既有声明（`Also reads tasks.md…frontmatter takes precedence`），且连动链（spec-sync→TaskService.reparse）上一变更已建好——本变更只让 parser 能产出 thin 行。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++`TaskParser.parse_tasks` 签名不变，产出集扩大（含 tasks.md 注册表行）；无端点/schema 变化；任务板/看板对 thin 变更从空变有任务行。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用：纯文件解析，行序即文档序，无事件依赖。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用新增面：解析无副作用；任务行落库走既有 reparse upsert（task_key 幂等）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++不适用：tasks.md 半写态由行级正则天然容忍（坏行跳过），下一轮幂等 reparse 收敛。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不适用：解析按 change_rel_path 限定，行落库经既有 change_id 归属。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：thin 行 status 只有 draft/done 两态（看板中段列空）——勾选态是 tasks.md 唯一信号，不造无据状态；后续要更细可由 status 映射规则扩展。试过放弃：把注册表行也建成卡片式富结构（priority/owner 从行文猜测）——无据造数；放弃，只取确定字段。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++|---|---|---|
++| 修改 | backend/app/modules/task/parser.py | parse_tasks 追加 tasks.md 注册表行解析（卡片优先） |
++| 修改 | backend/app/modules/task/tests/test_parser.py | TestTasksMdRegistryLines 四用例 |
++| 修改 | backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py | thin e2e 用例（同步→建行→改写跟随） |
+diff --git a/.sillyspec/changes/2026-10-07-taskboard-tasks-md/requirements.md b/.sillyspec/changes/2026-10-07-taskboard-tasks-md/requirements.md
+new file mode 100644
+index 000000000..03aba33ee
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-taskboard-tasks-md/requirements.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T14:07:18.862Z
++---
++# 需求规格（Requirements）— 2026-10-07-taskboard-tasks-md
++
++## 功能需求
++
++### FR-01: 任务板解析 tasks.md 注册表行
++
++必须：`TaskParser.parse_tasks` 在任务卡（`tasks/task-*.md`，既有行为不变）之外解析 change 目录下 `tasks.md` 的注册表行 `- [ ]/- [x] task-NN: 描述`（宽容形态：缩进、`-`/`*` bullet、`( |x|X)` 勾选态）——勾选→done、未勾→draft、title=冒号后描述截 500；同名 task_key 卡片优先（厚档 --with-tasks 双源同 key 不重复不覆盖），仅注册表独有 key 追加为任务行；旧表格形态与普通文本行不误匹配。
++
++#### 场景：thin 变更进任务板
++
++Given thin 变更只有 tasks.md（两行：一勾一未勾），无任务卡目录
++When 增量同步落盘 tasks.md 并连动 reparse
++Then 任务板出现 task-01(done)/task-02(draft) 两行；改写勾选后跟随为全 done
++
++### FR-02: 测试双覆盖
++
++必须：parser 单测覆盖 thin-only/卡片优先/宽容形态/表格零误匹配；同步链 e2e 覆盖 tasks.md 增量同步→任务表建行→改写跟随；task/spec_workspace/change 模块回归绿。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`）
++
++FR-01: backend/app/modules/task/tests/test_parser.py「TestTasksMdRegistryLines.test_thin_tasks_md_only」
++FR-02: backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py「test_thin_tasks_md_registry_reaches_task_board」
+diff --git a/.sillyspec/changes/2026-10-07-taskboard-tasks-md/tasks.md b/.sillyspec/changes/2026-10-07-taskboard-tasks-md/tasks.md
+new file mode 100644
+index 000000000..82ab8bf56
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-taskboard-tasks-md/tasks.md
+@@ -0,0 +1,8 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T14:12:51.707Z
++---
++# 任务注册表（Tasks）— 2026-10-07-taskboard-tasks-md
++
++- [x] task-01: parser 解析 tasks.md 注册表行（宽容形态/勾选映射/卡片优先）+ 单测四用例
++- [x] task-02: 同步链 e2e（thin tasks.md → 任务板建行 → 改写跟随）+ 三模块回归绿 + 收口
+diff --git a/.sillyspec/changes/2026-10-07-taskboard-tasks-md/proposal.md b/.sillyspec/changes/2026-10-07-taskboard-tasks-md/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-taskboard-tasks-md/proposal.md
+@@ -0,0 +1,27 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T14:07:18.862Z
++---
++# 提案书（Proposal）— 2026-10-07-taskboard-tasks-md
++
++## 动机
++
++任务原话转写：平台任务板只解析厚档任务卡（tasks/task-*.md），thin 变更的 tasks.md 注册表行（- [ ]/- [x] task-NN: 描述）不进任务板——parser docstring 声称『Also reads tasks.md…frontmatter takes precedence』但实现从未兑现。补齐：任务板/看板对 thin 变更也有任务行。
++
++成功标准：
++- TaskParser.parse_tasks 额外解析 change 目录下 tasks.md 的任务行（宽容行形态：缩进/- 与 * bullet/( |x|X) 勾选态），勾选→done、未勾→draft，title=冒号后描述（截 500）
++- 同名 task_key 卡片优先（厚档富信息不被注册表行覆盖，模块 docstring 既有声明兑现）；仅 tasks.md 独有的 key 追加为任务行
++- parser 单测 + 同步链 e2e（thin tasks.md 增量同步 → 任务表出现行）双覆盖，task/spec_workspace 模块回归绿
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. TaskParser.parse_tasks 额外解析 change 目录下 tasks.md 的任务行（宽容行形态：缩进/- 与 * bullet/( |x|X) 勾选态），勾选→done、未勾→draft，title=冒号后描述（截 500）
++2. 同名 task_key 卡片优先（厚档富信息不被注册表行覆盖，模块 docstring 既有声明兑现）；仅 tasks.md 独有的 key 追加为任务行
++3. parser 单测 + 同步链 e2e（thin tasks.md 增量同步 → 任务表出现行）双覆盖，task/spec_workspace 模块回归绿
++
++## 成功标准（可验证）
++
++1. TaskParser.parse_tasks 额外解析 change 目录下 tasks.md 的任务行（宽容行形态：缩进/- 与 * bullet/( |x|X) 勾选态），勾选→done、未勾→draft，title=冒号后描述（截 500）
++2. 同名 task_key 卡片优先（厚档富信息不被注册表行覆盖，模块 docstring 既有声明兑现）；仅 tasks.md 独有的 key 追加为任务行
++3. parser 单测 + 同步链 e2e（thin tasks.md 增量同步 → 任务表出现行）双覆盖，task/spec_workspace 模块回归绿
