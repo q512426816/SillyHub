@@ -16,8 +16,10 @@
  *    MobileWorkspaceHeader（tab="changes"）。
  *
  * 移动版差异（design §5.3 / §5.5）：
- *  - 三 Tab（active 进行中 / archive 已归档 / quicklog 快速修复）带计数徽标；
- *    quicklog Tab（task-07 增量续作）：listQuicklogEntries + quicklogPollInterval
+ *  - 双 Tab（active 进行中 / archive 已归档）带计数徽标——quicklog tab 已隐藏
+ *    （2026-10-07-hide-quicklog-tab：quick 通道已退役，?tab=quicklog 深链仍进
+ *    存量视图）；quicklog 视图（task-07 增量续作）：listQuicklogEntries +
+ *    quicklogPollInterval
  *    数据层 100% 复用（零复制实现），卡片点击 MobileDetailSheet 全屏详情
  *    （getQuicklogDetail，对齐原型快速修复屏；桌面 QuicklogDrawer 右抽屉不适配手机）；
  *  - 搜索框 + MobileFilterDrawer（阶段 + 排序 + 只看待我处理，应用即改 state →
@@ -104,14 +106,14 @@ import {
 import { getWorkspace, type Workspace } from "@/lib/workspaces";
 import { cn } from "@/lib/utils";
 
-/** Tab 值对齐桌面 page.tsx:52 TABS（三 Tab 语义一致）。 */
+/** Tab 值对齐桌面 page.tsx TABS（quicklog 值保留——?tab=quicklog 深链用）。 */
 type ChangesTab = "active" | "archive" | "quicklog";
 
-/** 三 Tab 配置（顺序即渲染顺序，文案对齐桌面）。 */
+/** Tab 配置（顺序即渲染顺序，文案对齐桌面）。2026-10-07-hide-quicklog-tab：
+ *  quick 通道已退役（CLI v3.30.0），「快速修复」tab 从栏内移除；深链仍进存量视图。 */
 const TABS = [
   { key: "active", label: "进行中" },
   { key: "archive", label: "已归档" },
-  { key: "quicklog", label: "快速修复" },
 ] as const;
 
 /**
@@ -954,19 +956,15 @@ export default function MobileChangesPage() {
           无绑定或无 sillyspec_status 时组件自渲染 null，页面行为与现状一致 */}
       <PlatformSyncSection workspaceId={workspaceId} compact />
 
-      {/* 三 Tab + 计数徽标（tabTotals 独立 useQuery，不随筛选变化） */}
+      {/* 双 Tab + 计数徽标（tabTotals 独立 useQuery，不随筛选变化）；quicklog
+          tab 已隐藏（2026-10-07-hide-quicklog-tab），存量视图经深链进下方条件区 */}
       <div
         role="tablist"
         aria-label="变更视图切换"
         className="flex items-center gap-1"
       >
         {TABS.map((t) => {
-          const cnt =
-            t.key === "active"
-              ? tabTotals.active
-              : t.key === "archive"
-                ? tabTotals.archive
-                : tabTotals.quicklog;
+          const cnt = t.key === "active" ? tabTotals.active : tabTotals.archive;
           const selected = tab === t.key;
           return (
             <button
@@ -986,8 +984,7 @@ export default function MobileChangesPage() {
               {t.label}
               {cnt !== undefined && (
                 <span className="inline-block min-w-[18px] rounded-full bg-muted px-1.5 text-[11px] leading-[18px] text-muted-foreground">
-                  {/* 存量口径（task-09）：quick 通道已退役，quicklog 计数只含存量条目 */}
-                  {t.key === "quicklog" ? `存量 · ${cnt}` : cnt}
+                  {cnt}
                 </span>
               )}
             </button>

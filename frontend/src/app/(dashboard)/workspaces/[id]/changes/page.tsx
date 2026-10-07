@@ -53,10 +53,12 @@ interface Props {
   params: { id: string };
 }
 
+// 2026-10-07-hide-quicklog-tab：quick 通道已退役（CLI v3.30.0），「快速修复」tab
+// 从栏内移除；quicklog 仍是合法 tab 值——?tab=quicklog 深链进存量只读视图
+// （概览统计卡 / 详情关联卡入口依赖），仅不再常驻渲染。
 const TABS = [
   { key: "active", label: "进行中" },
   { key: "archive", label: "已归档" },
-  { key: "quicklog", label: "快速修复" },
 ] as const;
 
 type ChangesTab = "active" | "archive" | "quicklog";
@@ -834,20 +836,15 @@ export default function ChangesPage({ params }: Props) {
         </div>
       )}
 
-      {/* 状态 tab（FR-03 UnderlineNav）：计数实时联动（quicklog 存量口径在 label 注明） */}
+      {/* 状态 tab（FR-03 UnderlineNav）：计数实时联动；quicklog tab 已隐藏
+          （2026-10-07-hide-quicklog-tab），存量视图经 ?tab=quicklog 深链进入 */}
       <UnderlineNav<ChangesTab>
         value={tab}
         onChange={handleTabChange}
         items={TABS.map((t) => ({
           key: t.key,
-          label:
-            t.key === "quicklog" ? "快速修复（存量）" : t.label,
-          counter:
-            t.key === "active"
-              ? tabTotals.active
-              : t.key === "archive"
-                ? tabTotals.archive
-                : tabTotals.quicklog,
+          label: t.label,
+          counter: t.key === "active" ? tabTotals.active : tabTotals.archive,
         }))}
       />
 

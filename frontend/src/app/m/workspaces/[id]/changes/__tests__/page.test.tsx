@@ -15,8 +15,9 @@
  *     非终态 30000 / 无数据 false）；
  *  7. 卡片点击钻取 /m/workspaces/[id]/changes/[cid]；
  *  8. 空态引导跳移动会话列表；
- *  9. quicklog Tab（task-07 增量续作）：卡片列表渲染（listQuicklogEntries 全参）、
- *     quicklogPollInterval 接线（in_progress|stale → 30000 / 全终态 false）、
+ *  9. quicklog 存量视图（task-07 增量续作；2026-10-07-hide-quicklog-tab 起 tab
+ *     已隐藏、统一经 ?tab=quicklog 深链进入）：卡片列表渲染（listQuicklogEntries
+ *     全参）、quicklogPollInterval 接线（in_progress|stale → 30000 / 全终态 false）、
  *     搜索词联动、点击卡片 MobileDetailSheet 全屏详情（getQuicklogDetail 内容 +
  *     「关闭」submitText）、关联变更 chip 经 listChanges(search) 解析 id 后钻取；
  * 10. 「加载更多」递增 page 追加第二页（key 含 page 槽位与桌面同构）。
@@ -316,6 +317,15 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
     );
   }
 
+  /**
+   * quicklog 深链渲染（2026-10-07-hide-quicklog-tab：quicklog tab 已从栏内
+   * 移除，存量视图改经 ?tab=quicklog URL 初始化进入）。
+   */
+  function renderQuicklogPage() {
+    nav.searchParams = new URLSearchParams("tab=quicklog");
+    return renderPage();
+  }
+
   it("主列表 query key 逐字对齐桌面 page.tsx:149（全参槽位）且请求全参", async () => {
     renderPage();
     await waitFor(() => {
@@ -336,16 +346,22 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
     );
   });
 
-  it("Tab 计数 query key 逐字为 [changesTabTotals, workspaceId]，三计数落缓存并渲染徽标", async () => {
+  it("Tab 计数 query key 逐字为 [changesTabTotals, workspaceId]，三计数落缓存；quicklog tab 隐藏后徽标仅 active/archive", async () => {
     renderPage();
     await waitFor(() => {
       expect(
         queryClient.getQueryData(["changesTabTotals", "ws-1"]),
       ).toEqual({ active: 2, archive: 0, quicklog: 3 });
     });
-    expect(
-      screen.getByTestId("m-changes-tab-quicklog").textContent,
-    ).toContain("3");
+    // 徽标仅渲染 active(2)/archive(0)；quicklog 计数照拉进缓存（与桌面
+    // changesTabTotals 镜像，深链视图仍可消费）但 tab 不再渲染
+    expect(screen.getByTestId("m-changes-tab-active").textContent).toContain(
+      "2",
+    );
+    expect(screen.getByTestId("m-changes-tab-archive").textContent).toContain(
+      "0",
+    );
+    expect(screen.queryByTestId("m-changes-tab-quicklog")).toBeNull();
   });
 
   it("tab 切换：点已归档 → location=archive 重取且落桌面同构 key", async () => {
@@ -520,11 +536,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
         return makeQlList([], 2);
       },
     );
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
+    renderQuicklogPage();
     // 卡片渲染：标题（ql_id 副行）+ 状态徽标 4 态映射 + 作者（owner 优先，两卡同值）
     // ——限定卡片列表内断言，避免与顶栏 Tab 文案（进行中）重名
     await waitFor(() => {
@@ -552,8 +564,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
   });
 
   it("quicklogPollInterval 接线：缓存条目回调 in_progress|stale → 30000 / 全终态 → false / 无数据 → false", async () => {
-    renderPage();
-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
+    renderQuicklogPage();
     await waitFor(() => {
       expect(queryClient.getQueryData(quicklogKey())).toBeTruthy();
     });
@@ -582,11 +593,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
   });
 
   it("quicklog Tab 搜索：关键词进请求与 key（与页内搜索词联动）", async () => {
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
+    renderQuicklogPage();
     await screen.findByTestId("m-quicklog-search-input");
     fireEvent.change(screen.getByTestId("m-quicklog-search-input"), {
       target: { value: "白屏" },
@@ -612,11 +619,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
         return makeQlList([], 1);
       },
     );
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
+    renderQuicklogPage();
     const card = await screen.findByRole("button", {
       name: "打开快速修复 修复 ql-1",
     });
@@ -672,11 +675,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
         return makeList([], 2);
       },
     );
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
+    renderQuicklogPage();
     fireEvent.click(
       await screen.findByRole("button", { name: "打开快速修复 修复 ql-1" }),
     );
@@ -834,15 +833,11 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
     });
   });
 
-  it("FR-03 URL ?tab=quicklog：初始 tab 为快速修复（tab 选中 + 不发主列表请求）", async () => {
-    nav.searchParams = new URLSearchParams("tab=quicklog");
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByTestId("m-changes-tab-quicklog")).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
-    });
+  it("FR-03 URL ?tab=quicklog：深链进存量视图（tab 缺席 + quicklog 请求发出 + 不发主列表请求）", async () => {
+    renderQuicklogPage();
+    // 深链落位：quicklog 视图搜索框出现，tab 栏无 quicklog testid（tab 已隐藏）
+    await screen.findByTestId("m-quicklog-search-input");
+    expect(screen.queryByTestId("m-changes-tab-quicklog")).toBeNull();
     // quicklog 列表请求发出（page:1 全参）
     await waitFor(() => {
       expect(quicklogApi.listQuicklogEntries).toHaveBeenCalledWith(
@@ -894,7 +889,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
   });
 
   it("R-03 默认参数 key 同构：主列表/quicklog 默认 key 槽位与桌面逐字一致，请求参数与改造前默认值逐字相同", async () => {
-    renderPage();
+    const { unmount } = renderPage();
     // 主列表：字面量默认 key 精确命中缓存（hash 相等即证 key 同构；sort 槽位
     // 真值 updated_at_desc = task-04 改造前固定常量 DEFAULT_SORT）
     await waitFor(() => {
@@ -909,9 +904,11 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
       page: 1,
       pageSize: 20,
     });
-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
-    // quicklog：默认 key 槽位 status:""/author:""/showPlaceholder:true 与桌面
+    // quicklog：tab 已隐藏，卸载后经 ?tab=quicklog 深链重渲（同 QueryClient
+    // 缓存续用）；默认 key 槽位 status:""/author:""/showPlaceholder:true 与桌面
     // QuicklogTable 同构（task-05 改造前固定默认值，不产生额外请求）
+    unmount();
+    renderQuicklogPage();
     await waitFor(() => {
       expect(queryClient.getQueryData(quicklogKey())).toBeTruthy();
     });
@@ -925,11 +922,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
   // ── task-08（FR-04 / D-003@v1 清单项 5）：quicklog 筛选抽屉 ──────────────────
 
   it("FR-04 状态筛选：抽屉选「疑似中断」确定 → quicklog key 与请求带 status=stale", async () => {
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
+    renderQuicklogPage();
     await screen.findByTestId("m-quicklog-search-input");
     fireEvent.click(screen.getByTestId("mobile-filter-trigger"));
     const body = await screen.findByTestId("mobile-filter-body");
@@ -977,11 +970,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
         return makeQlList([], 5);
       },
     );
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
+    renderQuicklogPage();
     await waitFor(() => {
       expect(screen.getByText("修复 ql-1")).toBeInTheDocument();
     });
@@ -1020,11 +1009,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
   });
 
   it("FR-04 占位开关：关闭「显示空壳占位」确定 → key showPlaceholder=false + 请求不带占位参数", async () => {
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
+    renderQuicklogPage();
     await screen.findByTestId("m-quicklog-search-input");
     fireEvent.click(screen.getByTestId("mobile-filter-trigger"));
     const body = await screen.findByTestId("mobile-filter-body");
@@ -1048,11 +1033,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
   });
 
   it("FR-04 重置：quicklog 抽屉筛选态全部回默认（状态/作者清空、占位回 true、搜索词一并清空）", async () => {
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
+    renderQuicklogPage();
     await screen.findByTestId("m-quicklog-search-input");
     // 先制造筛选态：搜索词 + 状态=疑似中断 + 占位关闭
     fireEvent.change(screen.getByTestId("m-quicklog-search-input"), {

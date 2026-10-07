@@ -250,48 +250,64 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     expect(screen.queryByText(/只看待我处理/)).not.toBeInTheDocument();
   });
 
-  // ── task-08（D-001/FR-05）：快速修复第三 tab ─────────────────────────
+  // ── task-08（D-001/FR-05）→ 2026-10-07-hide-quicklog-tab：快速修复 tab 已隐藏，
+  //    存量视图经 ?tab=quicklog 深链进入（概览统计卡/详情关联卡入口） ─────────
 
-  it("点快速修复 tab → 渲染 QuicklogTable，变更查询区/阶段筛选隐藏，主 load 不发", async () => {
-    await renderAndWait();
-    // quicklog 计数 mock 默认 0 → tab 按钮存在
-    const quicklogTab = screen.getByRole("tab", { name: /快速修复/ });
-    await act(async () => {
-      fireEvent.click(quicklogTab);
-    });
-    // QuicklogTable 渲染（其内部查询占位出现）
-    await waitFor(() =>
-      expect(screen.getByPlaceholderText("搜索标题 / 正文全文…")).toBeInTheDocument(),
-    );
-    // 变更中心查询区（阶段筛选）在 quicklog tab 隐藏
-    expect(screen.queryByText("全部阶段")).toBeNull();
-    // 主 load 在 quicklog tab 不再发新请求（enabled: tab !== "quicklog"）
-    const mainCallsBefore = mocks.listChanges.mock.calls.filter(
-      ([, q]: any[]) => q?.pageSize !== 1,
-    ).length;
-    await act(async () => {
-      fireEvent.click(screen.getByRole("tab", { name: /进行中/ }));
-    });
-    const mainCallsAfter = mocks.listChanges.mock.calls.filter(
-      ([, q]: any[]) => q?.pageSize !== 1,
-    ).length;
-    expect(mainCallsAfter).toBeGreaterThan(mainCallsBefore); // 切回 active 恢复发
+  it("?tab=quicklog 深链进存量视图：tab 栏不含快速修复，QuicklogTable 渲染，查询区隐藏，主 load 不发", async () => {
+    mocks.searchParams = new URLSearchParams("tab=quicklog");
+    try {
+      // 深链视图主查询禁用（enabled: tab !== "quicklog"）→ workspace 名不进副标题，
+      // 等 QuicklogTable 自带查询区占位符出现即可
+      mocks.getWorkspace.mockResolvedValue(makeWorkspace());
+      renderPage();
+      await waitFor(() =>
+        expect(screen.getByPlaceholderText("搜索标题 / 正文全文…")).toBeInTheDocument(),
+      );
+      // tab 已隐藏：tab 栏无「快速修复」入口（仅进行中/已归档）
+      expect(screen.queryByRole("tab", { name: /快速修复/ })).toBeNull();
+      // 变更中心查询区（阶段筛选）在 quicklog 视图隐藏
+      expect(screen.queryByText("全部阶段")).toBeNull();
+      // 主 load 在 quicklog 视图不发请求（enabled: tab !== "quicklog"）
+      expect(
+        mocks.listChanges.mock.calls.filter(([, q]: any[]) => q?.pageSize !== 1)
+          .length,
+      ).toBe(0);
+      // 点「进行中」tab 切回 → 主 load 恢复发
+      await act(async () => {
+        fireEvent.click(screen.getByRole("tab", { name: /进行中/ }));
+      });
+      await waitFor(() =>
+        expect(
+          mocks.listChanges.mock.calls.some(([, q]: any[]) => q?.pageSize !== 1),
+        ).toBe(true),
+      );
+    } finally {
+      mocks.searchParams = new URLSearchParams();
+    }
   });
 
-  it("快速修复 tab 计数 pill 显示（listQuicklogEntries total）", async () => {
+  it("快速修复存量视图副标题计数显示（listQuicklogEntries total）", async () => {
     setupListChanges();
     mocks.listQuicklogEntries.mockImplementation(() =>
       Promise.resolve({ items: [], total: 7 }),
     );
-    await renderAndWait();
-    await waitFor(() =>
-      expect(screen.getByText("7")).toBeInTheDocument(),
-    );
-    // ql-20260820-008：计数口径含空壳占位（与表格默认显示一致，计数不与列表脱节）
-    const countCall = mocks.listQuicklogEntries.mock.calls.find(
-      ([, p]: any[]) => p?.page_size === 1,
-    );
-    expect(countCall?.[1]?.include_placeholder).toBe(true);
+    mocks.searchParams = new URLSearchParams("tab=quicklog");
+    try {
+      mocks.getWorkspace.mockResolvedValue(makeWorkspace());
+      renderPage();
+      // 深链副标题：主查询禁用 workspace 名降级「—」，计数来自 tabTotals 的
+      // quicklog 槽位（tab 隐藏后仍拉取——副标题消费）
+      await waitFor(() =>
+        expect(screen.getByText(/7 条存量快速修复记录/)).toBeInTheDocument(),
+      );
+      // ql-20260820-008：计数口径含空壳占位（与表格默认显示一致，计数不与列表脱节）
+      const countCall = mocks.listQuicklogEntries.mock.calls.find(
+        ([, p]: any[]) => p?.page_size === 1,
+      );
+      expect(countCall?.[1]?.include_placeholder).toBe(true);
+    } finally {
+      mocks.searchParams = new URLSearchParams();
+    }
   });
 
   it("?search= 初始搜索词生效（quicklog 关联变更列跳转消费端，QA P2 修复）", async () => {
