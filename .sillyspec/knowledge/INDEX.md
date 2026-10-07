@@ -190,3 +190,4 @@
 - config-llm-provider-presets|FR|需求|承接 → [fr/config-llm-provider-presets.md](fr/config-llm-provider-presets.md)
 - auto-sillyspec|sillyspec|FR|需求|承接 → [fr/auto-sillyspec.md](fr/auto-sillyspec.md)
 - lib-llm-providers|FR|需求|承接 → [fr/lib-llm-providers.md](fr/lib-llm-providers.md)
+- auto-frontend|frontend|FR|需求|承接 → [fr/auto-frontend.md](fr/auto-frontend.md)

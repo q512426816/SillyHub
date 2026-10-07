@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-07-hide-quicklog-tab",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-07-hide-quicklog-tab:flow:测试绑定FR-01",
+      "tests": [
+        "changes/__tests__/page.test.tsx「?tab=quicklog 深链进入存量视图，tab 栏不含快速修复且主 load 不发，切回进行中恢复」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-hide-quicklog-tab"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-07-hide-quicklog-tab:flow:测试绑定FR-01",
+      "tests": [
+        "changes/__tests__/page.test.tsx「Tab 计数缓存含 quicklog，tab 栏徽标仅 active/archive 且 quicklog tab 缺席」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-hide-quicklog-tab"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-07-hide-quicklog-tab:flow:测试绑定FR-02",
+      "tests": [
+        "changes/__tests__/page.test.tsx「FR-03 URL ?tab=quicklog：初始 tab 为快速修复（tab 缺席 + 不发主列表请求）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-hide-quicklog-tab"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-07-hide-quicklog-tab:flow:测试绑定FR-03",
+      "tests": [
+        "changes/__tests__/page.test.tsx「快速修复存量视图副标题计数显示（listQuicklogEntries total）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-hide-quicklog-tab"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-07-hide-quicklog-tab:flow:测试绑定FR-03",
+      "tests": [
+        "changes/__tests__/page.test.tsx「quicklog 视图搜索/筛选抽屉/详情 Sheet（既有用例改深链进入后原断言保持）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-hide-quicklog-tab"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-07-hide-quicklog-tab:flow:测试绑定FR-04",
+      "tests": [
+        "changes/__tests__/page.test.tsx",
+        "changes/__tests__/page.test.tsx「两文件全量用例通过（仅跑此两文件）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-hide-quicklog-tab"
+    }
+  ]
+}

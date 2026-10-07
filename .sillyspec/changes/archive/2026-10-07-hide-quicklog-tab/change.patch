@@ -1,0 +1,633 @@
+diff --git a/.sillyspec/changes/2026-10-07-hide-quicklog-tab/flow-state.yaml b/.sillyspec/changes/2026-10-07-hide-quicklog-tab/flow-state.yaml
+new file mode 100644
+index 000000000..71e3f4ef7
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-hide-quicklog-tab/flow-state.yaml
+@@ -0,0 +1,22 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: |-
++  动机：sillyspec CLI v3.30.0 已退役 quick 通道（新工作一律走轻量变更），变更中心「快速修复」tab 仅剩存量只读记录，常驻展示已无入口价值，隐藏以收敛界面。
++
++  成功标准：
++  - 桌面端与移动端变更中心 tab 栏不再渲染「快速修复」tab
++  - ?tab=quicklog 深链仍进入存量快速修复视图（工作区概览统计卡 / 变更详情关联快速任务卡 / 移动端详情重绘入口不失效）
++  - 深链存量视图内副标题计数、quicklog 搜索/筛选/详情抽屉/会话页等既有行为不变
++  - 受影响的前端测试改为深链进入并全部通过（仅跑受影响测试文件）
++autopilot: false
++baseline_commit: c066911b3093db7fbbe056e76f9fa739fd7921fd
++updatedAt: '2026-10-07T12:33:44.059Z'
++baseline_sha256: 74d5ec786320ebcc2fc4a035912dd47c94fa46de14a950fbfe8ea6bb35e4a49c
++spec_approved: true
++spec_approved_at: '2026-10-07T12:33:44.057Z'
++spec_approved_by: anon@DESKTOP-HJ0AM09
++
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+index 68e0bf164..6ac9170f0 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -250,48 +250,64 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     expect(screen.queryByText(/只看待我处理/)).not.toBeInTheDocument();
+   });
+ 
+-  // ── task-08（D-001/FR-05）：快速修复第三 tab ─────────────────────────
++  // ── task-08（D-001/FR-05）→ 2026-10-07-hide-quicklog-tab：快速修复 tab 已隐藏，
++  //    存量视图经 ?tab=quicklog 深链进入（概览统计卡/详情关联卡入口） ─────────
+ 
+-  it("点快速修复 tab → 渲染 QuicklogTable，变更查询区/阶段筛选隐藏，主 load 不发", async () => {
+-    await renderAndWait();
+-    // quicklog 计数 mock 默认 0 → tab 按钮存在
+-    const quicklogTab = screen.getByRole("tab", { name: /快速修复/ });
+-    await act(async () => {
+-      fireEvent.click(quicklogTab);
+-    });
+-    // QuicklogTable 渲染（其内部查询占位出现）
+-    await waitFor(() =>
+-      expect(screen.getByPlaceholderText("搜索标题 / 正文全文…")).toBeInTheDocument(),
+-    );
+-    // 变更中心查询区（阶段筛选）在 quicklog tab 隐藏
+-    expect(screen.queryByText("全部阶段")).toBeNull();
+-    // 主 load 在 quicklog tab 不再发新请求（enabled: tab !== "quicklog"）
+-    const mainCallsBefore = mocks.listChanges.mock.calls.filter(
+-      ([, q]: any[]) => q?.pageSize !== 1,
+-    ).length;
+-    await act(async () => {
+-      fireEvent.click(screen.getByRole("tab", { name: /进行中/ }));
+-    });
+-    const mainCallsAfter = mocks.listChanges.mock.calls.filter(
+-      ([, q]: any[]) => q?.pageSize !== 1,
+-    ).length;
+-    expect(mainCallsAfter).toBeGreaterThan(mainCallsBefore); // 切回 active 恢复发
++  it("?tab=quicklog 深链进存量视图：tab 栏不含快速修复，QuicklogTable 渲染，查询区隐藏，主 load 不发", async () => {
++    mocks.searchParams = new URLSearchParams("tab=quicklog");
++    try {
++      // 深链视图主查询禁用（enabled: tab !== "quicklog"）→ workspace 名不进副标题，
++      // 等 QuicklogTable 自带查询区占位符出现即可
++      mocks.getWorkspace.mockResolvedValue(makeWorkspace());
++      renderPage();
++      await waitFor(() =>
++        expect(screen.getByPlaceholderText("搜索标题 / 正文全文…")).toBeInTheDocument(),
++      );
++      // tab 已隐藏：tab 栏无「快速修复」入口（仅进行中/已归档）
++      expect(screen.queryByRole("tab", { name: /快速修复/ })).toBeNull();
++      // 变更中心查询区（阶段筛选）在 quicklog 视图隐藏
++      expect(screen.queryByText("全部阶段")).toBeNull();
++      // 主 load 在 quicklog 视图不发请求（enabled: tab !== "quicklog"）
++      expect(
++        mocks.listChanges.mock.calls.filter(([, q]: any[]) => q?.pageSize !== 1)
++          .length,
++      ).toBe(0);
++      // 点「进行中」tab 切回 → 主 load 恢复发
++      await act(async () => {
++        fireEvent.click(screen.getByRole("tab", { name: /进行中/ }));
++      });
++      await waitFor(() =>
++        expect(
++          mocks.listChanges.mock.calls.some(([, q]: any[]) => q?.pageSize !== 1),
++        ).toBe(true),
++      );
++    } finally {
++      mocks.searchParams = new URLSearchParams();
++    }
+   });
+ 
+-  it("快速修复 tab 计数 pill 显示（listQuicklogEntries total）", async () => {
++  it("快速修复存量视图副标题计数显示（listQuicklogEntries total）", async () => {
+     setupListChanges();
+     mocks.listQuicklogEntries.mockImplementation(() =>
+       Promise.resolve({ items: [], total: 7 }),
+     );
+-    await renderAndWait();
+-    await waitFor(() =>
+-      expect(screen.getByText("7")).toBeInTheDocument(),
+-    );
+-    // ql-20260820-008：计数口径含空壳占位（与表格默认显示一致，计数不与列表脱节）
+-    const countCall = mocks.listQuicklogEntries.mock.calls.find(
+-      ([, p]: any[]) => p?.page_size === 1,
+-    );
+-    expect(countCall?.[1]?.include_placeholder).toBe(true);
++    mocks.searchParams = new URLSearchParams("tab=quicklog");
++    try {
++      mocks.getWorkspace.mockResolvedValue(makeWorkspace());
++      renderPage();
++      // 深链副标题：主查询禁用 workspace 名降级「—」，计数来自 tabTotals 的
++      // quicklog 槽位（tab 隐藏后仍拉取——副标题消费）
++      await waitFor(() =>
++        expect(screen.getByText(/7 条存量快速修复记录/)).toBeInTheDocument(),
++      );
++      // ql-20260820-008：计数口径含空壳占位（与表格默认显示一致，计数不与列表脱节）
++      const countCall = mocks.listQuicklogEntries.mock.calls.find(
++        ([, p]: any[]) => p?.page_size === 1,
++      );
++      expect(countCall?.[1]?.include_placeholder).toBe(true);
++    } finally {
++      mocks.searchParams = new URLSearchParams();
++    }
+   });
+ 
+   it("?search= 初始搜索词生效（quicklog 关联变更列跳转消费端，QA P2 修复）", async () => {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index 67ae0618e..2a5da1dda 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -53,10 +53,12 @@ interface Props {
+   params: { id: string };
+ }
+ 
++// 2026-10-07-hide-quicklog-tab：quick 通道已退役（CLI v3.30.0），「快速修复」tab
++// 从栏内移除；quicklog 仍是合法 tab 值——?tab=quicklog 深链进存量只读视图
++// （概览统计卡 / 详情关联卡入口依赖），仅不再常驻渲染。
+ const TABS = [
+   { key: "active", label: "进行中" },
+   { key: "archive", label: "已归档" },
+-  { key: "quicklog", label: "快速修复" },
+ ] as const;
+ 
+ type ChangesTab = "active" | "archive" | "quicklog";
+@@ -834,20 +836,15 @@ export default function ChangesPage({ params }: Props) {
+         </div>
+       )}
+ 
+-      {/* 状态 tab（FR-03 UnderlineNav）：计数实时联动（quicklog 存量口径在 label 注明） */}
++      {/* 状态 tab（FR-03 UnderlineNav）：计数实时联动；quicklog tab 已隐藏
++          （2026-10-07-hide-quicklog-tab），存量视图经 ?tab=quicklog 深链进入 */}
+       <UnderlineNav<ChangesTab>
+         value={tab}
+         onChange={handleTabChange}
+         items={TABS.map((t) => ({
+           key: t.key,
+-          label:
+-            t.key === "quicklog" ? "快速修复（存量）" : t.label,
+-          counter:
+-            t.key === "active"
+-              ? tabTotals.active
+-              : t.key === "archive"
+-                ? tabTotals.archive
+-                : tabTotals.quicklog,
++          label: t.label,
++          counter: t.key === "active" ? tabTotals.active : tabTotals.archive,
+         }))}
+       />
+ 
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx
+index a5504fcda..d20c937c2 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -15,8 +15,9 @@
+  *     非终态 30000 / 无数据 false）；
+  *  7. 卡片点击钻取 /m/workspaces/[id]/changes/[cid]；
+  *  8. 空态引导跳移动会话列表；
+- *  9. quicklog Tab（task-07 增量续作）：卡片列表渲染（listQuicklogEntries 全参）、
+- *     quicklogPollInterval 接线（in_progress|stale → 30000 / 全终态 false）、
++ *  9. quicklog 存量视图（task-07 增量续作；2026-10-07-hide-quicklog-tab 起 tab
++ *     已隐藏、统一经 ?tab=quicklog 深链进入）：卡片列表渲染（listQuicklogEntries
++ *     全参）、quicklogPollInterval 接线（in_progress|stale → 30000 / 全终态 false）、
+  *     搜索词联动、点击卡片 MobileDetailSheet 全屏详情（getQuicklogDetail 内容 +
+  *     「关闭」submitText）、关联变更 chip 经 listChanges(search) 解析 id 后钻取；
+  * 10. 「加载更多」递增 page 追加第二页（key 含 page 槽位与桌面同构）。
+@@ -316,6 +317,15 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+     );
+   }
+ 
++  /**
++   * quicklog 深链渲染（2026-10-07-hide-quicklog-tab：quicklog tab 已从栏内
++   * 移除，存量视图改经 ?tab=quicklog URL 初始化进入）。
++   */
++  function renderQuicklogPage() {
++    nav.searchParams = new URLSearchParams("tab=quicklog");
++    return renderPage();
++  }
++
+   it("主列表 query key 逐字对齐桌面 page.tsx:149（全参槽位）且请求全参", async () => {
+     renderPage();
+     await waitFor(() => {
+@@ -336,16 +346,22 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+     );
+   });
+ 
+-  it("Tab 计数 query key 逐字为 [changesTabTotals, workspaceId]，三计数落缓存并渲染徽标", async () => {
++  it("Tab 计数 query key 逐字为 [changesTabTotals, workspaceId]，三计数落缓存；quicklog tab 隐藏后徽标仅 active/archive", async () => {
+     renderPage();
+     await waitFor(() => {
+       expect(
+         queryClient.getQueryData(["changesTabTotals", "ws-1"]),
+       ).toEqual({ active: 2, archive: 0, quicklog: 3 });
+     });
+-    expect(
+-      screen.getByTestId("m-changes-tab-quicklog").textContent,
+-    ).toContain("3");
++    // 徽标仅渲染 active(2)/archive(0)；quicklog 计数照拉进缓存（与桌面
++    // changesTabTotals 镜像，深链视图仍可消费）但 tab 不再渲染
++    expect(screen.getByTestId("m-changes-tab-active").textContent).toContain(
++      "2",
++    );
++    expect(screen.getByTestId("m-changes-tab-archive").textContent).toContain(
++      "0",
++    );
++    expect(screen.queryByTestId("m-changes-tab-quicklog")).toBeNull();
+   });
+ 
+   it("tab 切换：点已归档 → location=archive 重取且落桌面同构 key", async () => {
+@@ -520,11 +536,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+         return makeQlList([], 2);
+       },
+     );
+-    renderPage();
+-    await waitFor(() => {
+-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
+-    });
+-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    renderQuicklogPage();
+     // 卡片渲染：标题（ql_id 副行）+ 状态徽标 4 态映射 + 作者（owner 优先，两卡同值）
+     // ——限定卡片列表内断言，避免与顶栏 Tab 文案（进行中）重名
+     await waitFor(() => {
+@@ -552,8 +564,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+   });
+ 
+   it("quicklogPollInterval 接线：缓存条目回调 in_progress|stale → 30000 / 全终态 → false / 无数据 → false", async () => {
+-    renderPage();
+-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    renderQuicklogPage();
+     await waitFor(() => {
+       expect(queryClient.getQueryData(quicklogKey())).toBeTruthy();
+     });
+@@ -582,11 +593,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+   });
+ 
+   it("quicklog Tab 搜索：关键词进请求与 key（与页内搜索词联动）", async () => {
+-    renderPage();
+-    await waitFor(() => {
+-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
+-    });
+-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    renderQuicklogPage();
+     await screen.findByTestId("m-quicklog-search-input");
+     fireEvent.change(screen.getByTestId("m-quicklog-search-input"), {
+       target: { value: "白屏" },
+@@ -612,11 +619,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+         return makeQlList([], 1);
+       },
+     );
+-    renderPage();
+-    await waitFor(() => {
+-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
+-    });
+-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    renderQuicklogPage();
+     const card = await screen.findByRole("button", {
+       name: "打开快速修复 修复 ql-1",
+     });
+@@ -672,11 +675,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+         return makeList([], 2);
+       },
+     );
+-    renderPage();
+-    await waitFor(() => {
+-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
+-    });
+-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    renderQuicklogPage();
+     fireEvent.click(
+       await screen.findByRole("button", { name: "打开快速修复 修复 ql-1" }),
+     );
+@@ -834,15 +833,11 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+     });
+   });
+ 
+-  it("FR-03 URL ?tab=quicklog：初始 tab 为快速修复（tab 选中 + 不发主列表请求）", async () => {
+-    nav.searchParams = new URLSearchParams("tab=quicklog");
+-    renderPage();
+-    await waitFor(() => {
+-      expect(screen.getByTestId("m-changes-tab-quicklog")).toHaveAttribute(
+-        "aria-selected",
+-        "true",
+-      );
+-    });
++  it("FR-03 URL ?tab=quicklog：深链进存量视图（tab 缺席 + quicklog 请求发出 + 不发主列表请求）", async () => {
++    renderQuicklogPage();
++    // 深链落位：quicklog 视图搜索框出现，tab 栏无 quicklog testid（tab 已隐藏）
++    await screen.findByTestId("m-quicklog-search-input");
++    expect(screen.queryByTestId("m-changes-tab-quicklog")).toBeNull();
+     // quicklog 列表请求发出（page:1 全参）
+     await waitFor(() => {
+       expect(quicklogApi.listQuicklogEntries).toHaveBeenCalledWith(
+@@ -894,7 +889,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+   });
+ 
+   it("R-03 默认参数 key 同构：主列表/quicklog 默认 key 槽位与桌面逐字一致，请求参数与改造前默认值逐字相同", async () => {
+-    renderPage();
++    const { unmount } = renderPage();
+     // 主列表：字面量默认 key 精确命中缓存（hash 相等即证 key 同构；sort 槽位
+     // 真值 updated_at_desc = task-04 改造前固定常量 DEFAULT_SORT）
+     await waitFor(() => {
+@@ -909,9 +904,11 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+       page: 1,
+       pageSize: 20,
+     });
+-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
+-    // quicklog：默认 key 槽位 status:""/author:""/showPlaceholder:true 与桌面
++    // quicklog：tab 已隐藏，卸载后经 ?tab=quicklog 深链重渲（同 QueryClient
++    // 缓存续用）；默认 key 槽位 status:""/author:""/showPlaceholder:true 与桌面
+     // QuicklogTable 同构（task-05 改造前固定默认值，不产生额外请求）
++    unmount();
++    renderQuicklogPage();
+     await waitFor(() => {
+       expect(queryClient.getQueryData(quicklogKey())).toBeTruthy();
+     });
+@@ -925,11 +922,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+   // ── task-08（FR-04 / D-003@v1 清单项 5）：quicklog 筛选抽屉 ──────────────────
+ 
+   it("FR-04 状态筛选：抽屉选「疑似中断」确定 → quicklog key 与请求带 status=stale", async () => {
+-    renderPage();
+-    await waitFor(() => {
+-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
+-    });
+-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    renderQuicklogPage();
+     await screen.findByTestId("m-quicklog-search-input");
+     fireEvent.click(screen.getByTestId("mobile-filter-trigger"));
+     const body = await screen.findByTestId("mobile-filter-body");
+@@ -977,11 +970,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+         return makeQlList([], 5);
+       },
+     );
+-    renderPage();
+-    await waitFor(() => {
+-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
+-    });
+-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    renderQuicklogPage();
+     await waitFor(() => {
+       expect(screen.getByText("修复 ql-1")).toBeInTheDocument();
+     });
+@@ -1020,11 +1009,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+   });
+ 
+   it("FR-04 占位开关：关闭「显示空壳占位」确定 → key showPlaceholder=false + 请求不带占位参数", async () => {
+-    renderPage();
+-    await waitFor(() => {
+-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
+-    });
+-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    renderQuicklogPage();
+     await screen.findByTestId("m-quicklog-search-input");
+     fireEvent.click(screen.getByTestId("mobile-filter-trigger"));
+     const body = await screen.findByTestId("mobile-filter-body");
+@@ -1048,11 +1033,7 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+   });
+ 
+   it("FR-04 重置：quicklog 抽屉筛选态全部回默认（状态/作者清空、占位回 true、搜索词一并清空）", async () => {
+-    renderPage();
+-    await waitFor(() => {
+-      expect(screen.getByText("变更 c1")).toBeInTheDocument();
+-    });
+-    fireEvent.click(screen.getByTestId("m-changes-tab-quicklog"));
++    renderQuicklogPage();
+     await screen.findByTestId("m-quicklog-search-input");
+     // 先制造筛选态：搜索词 + 状态=疑似中断 + 占位关闭
+     fireEvent.change(screen.getByTestId("m-quicklog-search-input"), {
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/page.tsx b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+index 07e13c6d4..72a6235bc 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+@@ -16,8 +16,10 @@
+  *    MobileWorkspaceHeader（tab="changes"）。
+  *
+  * 移动版差异（design §5.3 / §5.5）：
+- *  - 三 Tab（active 进行中 / archive 已归档 / quicklog 快速修复）带计数徽标；
+- *    quicklog Tab（task-07 增量续作）：listQuicklogEntries + quicklogPollInterval
++ *  - 双 Tab（active 进行中 / archive 已归档）带计数徽标——quicklog tab 已隐藏
++ *    （2026-10-07-hide-quicklog-tab：quick 通道已退役，?tab=quicklog 深链仍进
++ *    存量视图）；quicklog 视图（task-07 增量续作）：listQuicklogEntries +
++ *    quicklogPollInterval
+  *    数据层 100% 复用（零复制实现），卡片点击 MobileDetailSheet 全屏详情
+  *    （getQuicklogDetail，对齐原型快速修复屏；桌面 QuicklogDrawer 右抽屉不适配手机）；
+  *  - 搜索框 + MobileFilterDrawer（阶段 + 排序 + 只看待我处理，应用即改 state →
+@@ -104,14 +106,14 @@ import {
+ import { getWorkspace, type Workspace } from "@/lib/workspaces";
+ import { cn } from "@/lib/utils";
+ 
+-/** Tab 值对齐桌面 page.tsx:52 TABS（三 Tab 语义一致）。 */
++/** Tab 值对齐桌面 page.tsx TABS（quicklog 值保留——?tab=quicklog 深链用）。 */
+ type ChangesTab = "active" | "archive" | "quicklog";
+ 
+-/** 三 Tab 配置（顺序即渲染顺序，文案对齐桌面）。 */
++/** Tab 配置（顺序即渲染顺序，文案对齐桌面）。2026-10-07-hide-quicklog-tab：
++ *  quick 通道已退役（CLI v3.30.0），「快速修复」tab 从栏内移除；深链仍进存量视图。 */
+ const TABS = [
+   { key: "active", label: "进行中" },
+   { key: "archive", label: "已归档" },
+-  { key: "quicklog", label: "快速修复" },
+ ] as const;
+ 
+ /**
+@@ -954,19 +956,15 @@ export default function MobileChangesPage() {
+           无绑定或无 sillyspec_status 时组件自渲染 null，页面行为与现状一致 */}
+       <PlatformSyncSection workspaceId={workspaceId} compact />
+ 
+-      {/* 三 Tab + 计数徽标（tabTotals 独立 useQuery，不随筛选变化） */}
++      {/* 双 Tab + 计数徽标（tabTotals 独立 useQuery，不随筛选变化）；quicklog
++          tab 已隐藏（2026-10-07-hide-quicklog-tab），存量视图经深链进下方条件区 */}
+       <div
+         role="tablist"
+         aria-label="变更视图切换"
+         className="flex items-center gap-1"
+       >
+         {TABS.map((t) => {
+-          const cnt =
+-            t.key === "active"
+-              ? tabTotals.active
+-              : t.key === "archive"
+-                ? tabTotals.archive
+-                : tabTotals.quicklog;
++          const cnt = t.key === "active" ? tabTotals.active : tabTotals.archive;
+           const selected = tab === t.key;
+           return (
+             <button
+@@ -986,8 +984,7 @@ export default function MobileChangesPage() {
+               {t.label}
+               {cnt !== undefined && (
+                 <span className="inline-block min-w-[18px] rounded-full bg-muted px-1.5 text-[11px] leading-[18px] text-muted-foreground">
+-                  {/* 存量口径（task-09）：quick 通道已退役，quicklog 计数只含存量条目 */}
+-                  {t.key === "quicklog" ? `存量 · ${cnt}` : cnt}
++                  {cnt}
+                 </span>
+               )}
+             </button>
+diff --git a/.sillyspec/changes/2026-10-07-hide-quicklog-tab/design.md b/.sillyspec/changes/2026-10-07-hide-quicklog-tab/design.md
+new file mode 100644
+index 000000000..ffa82fbf1
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-hide-quicklog-tab/design.md
+@@ -0,0 +1,52 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T12:25:23.852Z
++---
++# 设计记录（Design Record）— 2026-10-07-hide-quicklog-tab
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++从桌面 `changes/page.tsx` 与移动端 `m/.../changes/page.tsx` 各自模块私有的 `TABS` 常量中移除 `quicklog` 项——tab 栏从此只渲染「进行中 / 已归档」，这是最小面的「隐藏」。`ChangesTab` 类型、`?tab=quicklog` URL 初始化、tabTotals 计数查询、QuicklogTable / QuicklogDrawer 及移动端 quicklog 视图全部保留，深链 `changes?tab=quicklog` 照常进入存量只读视图。tab 栏渲染处随之清理只为 quicklog 服务的特判分支（桌面 label「快速修复（存量）」与 counter 三分支、移动端 `存量 · N` 徽标特判），避免留死代码（CLAUDE.md 规则 18）。
++
++选「隐藏」而非「删除整链路」：存量 quicklog 记录仍是历史事实（usage / 关联变更 / quicklog 会话页均可追溯），且有三处既有深链入口（工作区概览统计卡 stats-row、变更详情 quicklog-linked-card、移动端 mobile-change-detail 重绘）依赖该视图；删除牵动后端接口、lib/quicklog、多页面与会话路由，远超本次意图，也不是用户所求（用户原话「隐藏」）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无后端接口、URL 契约、api-types 变化。前端内部可见变化仅两处：① 两页模块私有常量 `TABS` 从 3 项变 2 项（不含 quicklog）；② tab 栏渲染的 quicklog 特判分支删除。`?tab=quicklog` 深链语义、`ChangesTab` 类型取值、tabTotals 查询形状（含 quicklog 计数）均不变。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++成立。纯展示层 tab 配置收窄，无事件顺序依赖；tabTotals 三计数仍为并发 Promise.all，quicklog 计数到达晚只影响深链视图副标题计数回填时机，与现状一致。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用：本变更不触及任何共享可变数据（只读展示配置），无并发写面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全。深链进入 quicklog 视图后点「进行中/已归档」可正常切回——UnderlineNav / 移动 tablist 对 value 不在 items 中的情形天然全不选中（已核实组件实现），切换回调不受影响；QuicklogDrawer / 移动详情 Sheet 生命周期不变。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会。TABS 为两页面模块私有常量不跨页共享；stats-row / quicklog-linked-card / mobile-change-detail 三处深链 URL 零改动，多工作区无串台。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险是既有测试对「点击 tab 进入」路径的依赖（桌面 2 个用例、移动端 12 处点击 + 2 处断言）——逐一改为 `?tab=quicklog` URL 初始化进入，并为隐藏补缺席断言。放弃的方案：a) 彻底删除 quicklog 视图与后端接口（存量历史数据失去唯一入口、牵动面数倍于收益）；b) CSS/条件 className 隐藏 tab 按钮（留下永假分支死代码，违反仓库一致性规则）。两者均未采用。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx | TABS 移除 quicklog 项；UnderlineNav label/counter quicklog 特判清理；注释更新 |
++| 改 | frontend/src/app/m/workspaces/[id]/changes/page.tsx | TABS 移除 quicklog 项；tab 徽标 `存量 · N` 特判清理；注释更新 |
++| 改 | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | 2 个 quicklog 用例改深链进入 + tab 缺席断言 |
++| 改 | frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx | 12 处 tab 点击改深链进入；计数徽标/URL 初始化用例重写；新增 renderQuicklogPage 辅助 |
+diff --git a/.sillyspec/changes/2026-10-07-hide-quicklog-tab/proposal.md b/.sillyspec/changes/2026-10-07-hide-quicklog-tab/proposal.md
+new file mode 100644
+index 000000000..8ebc73f9b
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-hide-quicklog-tab/proposal.md
+@@ -0,0 +1,30 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T12:25:23.852Z
++---
++# 提案书（Proposal）— 2026-10-07-hide-quicklog-tab
++
++## 动机
++
++任务原话转写：动机：sillyspec CLI v3.30.0 已退役 quick 通道（新工作一律走轻量变更），变更中心「快速修复」tab 仅剩存量只读记录，常驻展示已无入口价值，隐藏以收敛界面。
++
++成功标准：
++- 桌面端与移动端变更中心 tab 栏不再渲染「快速修复」tab
++- ?tab=quicklog 深链仍进入存量快速修复视图（工作区概览统计卡 / 变更详情关联快速任务卡 / 移动端详情重绘入口不失效）
++- 深链存量视图内副标题计数、quicklog 搜索/筛选/详情抽屉/会话页等既有行为不变
++- 受影响的前端测试改为深链进入并全部通过（仅跑受影响测试文件）
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. 桌面端与移动端变更中心 tab 栏不再渲染「快速修复」tab
++2. ?tab=quicklog 深链仍进入存量快速修复视图（工作区概览统计卡 / 变更详情关联快速任务卡 / 移动端详情重绘入口不失效）
++3. 深链存量视图内副标题计数、quicklog 搜索/筛选/详情抽屉/会话页等既有行为不变
++4. 受影响的前端测试改为深链进入并全部通过（仅跑受影响测试文件）
++
++## 成功标准（可验证）
++
++1. 桌面端与移动端变更中心 tab 栏不再渲染「快速修复」tab
++2. ?tab=quicklog 深链仍进入存量快速修复视图（工作区概览统计卡 / 变更详情关联快速任务卡 / 移动端详情重绘入口不失效）
++3. 深链存量视图内副标题计数、quicklog 搜索/筛选/详情抽屉/会话页等既有行为不变
++4. 受影响的前端测试改为深链进入并全部通过（仅跑受影响测试文件）
+diff --git a/.sillyspec/changes/2026-10-07-hide-quicklog-tab/requirements.md b/.sillyspec/changes/2026-10-07-hide-quicklog-tab/requirements.md
+new file mode 100644
+index 000000000..45b545005
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-hide-quicklog-tab/requirements.md
+@@ -0,0 +1,56 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T12:25:23.852Z
++---
++# 需求规格（Requirements）— 2026-10-07-hide-quicklog-tab
++
++## 功能需求
++
++### FR-01: 桌面端与移动端变更中心 tab 栏不再渲染「快速修复」tab
++
++- 变更中心 tab 栏（桌面 UnderlineNav + 移动端 tablist）必须不再渲染「快速修复」tab 项；`ChangesTab` 类型中的 `"quicklog"` 值、quicklog 视图渲染链路（QuicklogTable / QuicklogDrawer / 移动端 quicklog 卡片视图）禁止删除（深链存量入口仍依赖）。
++
++#### 场景：主路径
++
++- Given 用户打开 `/workspaces/[id]/changes`（默认或 `?tab=active` / `?tab=archive`）
++- When 页面渲染完成
++- Then tab 栏仅含「进行中」「已归档」两项，不存在「快速修复」tab 按钮（桌面 role=tab 与移动端 `m-changes-tab-*` 均无）
++
++### FR-02: ?tab=quicklog 深链仍进入存量快速修复视图（工作区概览统计卡 / 变更详情关联快速任务卡 / 移动端详情重绘入口不失效）
++
++- `/workspaces/[id]/changes?tab=quicklog`（桌面与移动端同参）必须仍进入存量快速修复视图：QuicklogTable/移动端 quicklog 卡片列表照常渲染、主列表查询不发（`enabled: tab !== "quicklog"` 语义保持）；三处既有深链入口文件（stats-row / quicklog-linked-card / mobile-change-detail）必须零改动。
++
++#### 场景：深链进入
++
++- Given 工作区存在存量 quicklog 条目
++- When 用户经 `changes?tab=quicklog` 打开（如从概览统计卡点击）
++- Then 页面展示 quicklog 列表，tab 栏无「快速修复」按钮但「进行中/已归档」可点击切回主列表
++
++### FR-03: 深链存量视图内副标题计数、quicklog 搜索/筛选/详情抽屉/会话页等既有行为不变
++
++- 深链存量视图内的既有行为必须不变：tabTotals 查询照常拉取 quicklog 计数（桌面副标题「N 条存量快速修复记录」回填）、QuicklogDrawer 详情抽屉、移动端筛选抽屉/详情 Sheet、quicklog 会话页路由均保持现状。
++
++#### 场景：副标题计数
++
++- Given quicklog 存量 total=7
++- When 用户经 `?tab=quicklog` 进入
++- Then 桌面副标题显示「7 条存量快速修复记录（旧 quick 通道已退役）」
++
++### FR-04: 受影响的前端测试改为深链进入并全部通过（仅跑受影响测试文件）
++
++- 依赖「点击快速修复 tab」进入 quicklog 视图的既有用例必须改为 `?tab=quicklog` URL 初始化进入，并为 tab 隐藏补缺席断言；必须仅运行受影响的两个测试文件（全量测试留给 CI）。
++
++#### 场景：主路径
++
++- Given 改造完成
++- When 运行桌面与移动端 changes 页测试文件
++- Then 全部通过，无因 tab 隐藏而失败的用例
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例」`；空行/待填在 flow done 拒收）
++
++FR-01: test/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx「?tab=quicklog 深链进入存量视图，tab 栏不含快速修复且主 load 不发，切回进行中恢复」
++FR-01: test/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx「Tab 计数缓存含 quicklog，tab 栏徽标仅 active/archive 且 quicklog tab 缺席」
++FR-02: test/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx「FR-03 URL ?tab=quicklog：初始 tab 为快速修复（tab 缺席 + 不发主列表请求）」
++FR-03: test/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx「快速修复存量视图副标题计数显示（listQuicklogEntries total）」
++FR-03: test/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx「quicklog 视图搜索/筛选抽屉/详情 Sheet（既有用例改深链进入后原断言保持）」
++FR-04: test/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx + test/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx「两文件全量用例通过（仅跑此两文件）」
+diff --git a/.sillyspec/changes/2026-10-07-hide-quicklog-tab/tasks.md b/.sillyspec/changes/2026-10-07-hide-quicklog-tab/tasks.md
+new file mode 100644
+index 000000000..9cbde7691
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-hide-quicklog-tab/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T12:25:23.852Z
++---
++# 任务注册表（Tasks）— 2026-10-07-hide-quicklog-tab
++
++- [x] task-01: 桌面端 TABS 移除 quicklog 项 + UnderlineNav label/counter 特判清理（验证：tsc/组件无 quicklog 死分支，深链逻辑保持）
++- [x] task-02: 移动端 TABS 移除 quicklog 项 + tab 徽标「存量 · N」特判清理（验证：tablist 仅渲染 active/archive 两 testid）
++- [x] task-03: 桌面测试改造：2 个 quicklog 用例改 ?tab=quicklog 深链进入并补 tab 缺席断言（验证：vitest 该文件全绿）
++- [x] task-04: 移动端测试改造：新增 renderQuicklogPage 深链辅助，12 处 tab 点击与计数徽标/URL 初始化用例重写（验证：vitest 该文件全绿）
++- [x] task-05: 仅跑两份受影响测试文件确认全绿后，按显式 pathspec 提交交付代码与 tasks.md

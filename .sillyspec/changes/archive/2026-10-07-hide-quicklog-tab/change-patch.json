@@ -1,0 +1,49 @@
+{
+  "change": "2026-10-07-hide-quicklog-tab",
+  "baseline": "c066911b3093db7fbbe056e76f9fa739fd7921fd",
+  "head": "e62d98bcb7bddf9bc5c3313df3c47ee8ab04ab7d",
+  "files": [
+    ".sillyspec/changes/2026-10-07-hide-quicklog-tab/design.md",
+    ".sillyspec/changes/2026-10-07-hide-quicklog-tab/flow-state.yaml",
+    ".sillyspec/changes/2026-10-07-hide-quicklog-tab/proposal.md",
+    ".sillyspec/changes/2026-10-07-hide-quicklog-tab/requirements.md",
+    ".sillyspec/changes/2026-10-07-hide-quicklog-tab/tasks.md",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+    "frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx",
+    "frontend/src/app/m/workspaces/[id]/changes/page.tsx"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 290,
+    "deletions": 119
+  },
+  "savedAt": "2026-10-07T12:46:56.348Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "f1b5e30d6f85611fb19d9f5ef85f09a2d973417429a23fff9de5c32d6fc9816e",
+  "patchStatus": "ok"
+}

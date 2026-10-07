@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-07-hide-quicklog-tab",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e62d98bcb7bddf9bc5c3313df3c47ee8ab04ab7d",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "ok",
+    "边界裁决": "边界1「选隐藏而非删除整链路」：可接受——存量 quicklog 仍是历史事实且 stats-row/quicklog-linked-card/mobile-change-detail 三处深链入口依赖该视图，删除牵动后端与 lib/quicklog 远超用户『隐藏』意图，隐藏后存量视图链路完整保留，无数据正确性风险。边界2「quicklog 计数照拉进缓存但 tab 不渲染」：可接受——tabTotals（含 quicklog 槽位，桌面 Promise.all 三计数）继续拉取并被深链视图副标题（桌面 page.tsx:627-633）与桌面/移动同构缓存 key 消费，成本为一次 page_size=1 请求，无正确性风险。边界3「无 api-types/后端/URL 契约变化」：可接受——d1a06d540 仅触 4 个前端文件 + tasks.md，?tab= 白名单初始化（桌面 258-264 / 移动 469-476）与 enabled: tab !== \"quicklog\"（桌面 325 / 移动 566）零改动。无声明边界被违反。"
+  },
+  "reviewedAt": "2026-10-07T20:50:00+08:00"
+}
