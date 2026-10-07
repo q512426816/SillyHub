@@ -71,3 +71,43 @@ created_at: 2026-10-03T12:34:45.318Z
 - 场景：默认场景 — Given 存量 410 条回填快照（无水位） 迁移回退（downgrade）；When 上线后聚合 执行；Then 数字与改造前一致（整行路径） 水位表删除，聚合全部回落整行路径（与改造前一致）；API/DTO 零变化
 全文：.sillyspec/changes/archive/2026-10-03-local-usage-segment-attribution/requirements.md#FR-04
 最近确认：ba6e699c8
+
+## FR-auto-backend-095 spec-sync 自动连动任务表重解析
+变更：2026-10-07-spec-sync-task-reparse
+状态：active
+摘要：任务卡改写跟随
+场景正文：
+- 场景：任务卡改写跟随 — Given 厚档变更已有 4 张任务卡且任务表已解析 4 行；When 增量同步落盘改题后的 task-01 与新增 task-05（change_dirs 标注该变更）；Then drain 后任务表 5 行、task-01 标题为新值
+全文：.sillyspec/changes/archive/2026-10-07-spec-sync-task-reparse/requirements.md#FR-01
+最近确认：f82bc067ca74946ac7c6b88d4e6382e54e6c665c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-spec-sync-task-reparse:flow:测试绑定FR-01
+  tests: backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py「test_tasks_md_rewrite_updates_task_rows」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-spec-sync-task-reparse
+  status: active
+
+## FR-auto-backend-096 测试覆盖连动与失败面
+变更：2026-10-07-spec-sync-task-reparse
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-07-spec-sync-task-reparse/requirements.md#FR-02
+最近确认：f82bc067ca74946ac7c6b88d4e6382e54e6c665c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-spec-sync-task-reparse:flow:测试绑定FR-02
+  tests: backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py「test_task_reparse_failure_does_not_block_sync」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-spec-sync-task-reparse
+  status: active

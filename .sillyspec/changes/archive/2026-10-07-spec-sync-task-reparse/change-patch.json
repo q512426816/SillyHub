@@ -1,0 +1,53 @@
+{
+  "change": "2026-10-07-spec-sync-task-reparse",
+  "baseline": "339e5b40a6a338f6fbf7d50f1b139a6436f6e007",
+  "head": "f82bc067ca74946ac7c6b88d4e6382e54e6c665c",
+  "files": [
+    ".sillyspec/changes/2026-10-07-spec-sync-task-reparse/design.md",
+    ".sillyspec/changes/2026-10-07-spec-sync-task-reparse/requirements.md",
+    ".sillyspec/changes/2026-10-07-spec-sync-task-reparse/tasks.md",
+    "backend/app/modules/spec_workspace/service.py",
+    "backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py",
+    ".sillyspec/changes/2026-10-07-spec-sync-task-reparse/proposal.md"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 342,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-07T13:54:24.707Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "spec_workspace",
+      "files": 2,
+      "doc": "docs/backend/modules/spec_workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "spec_workspace",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/spec_workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "c3cc896ef457d49453512d521b47662524f724761277eee2162cbb941b07870c",
+  "patchStatus": "ok"
+}

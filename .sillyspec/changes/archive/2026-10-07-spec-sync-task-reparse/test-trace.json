@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-07-spec-sync-task-reparse",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-07-spec-sync-task-reparse:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py「test_tasks_md_rewrite_updates_task_rows」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-spec-sync-task-reparse"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-07-spec-sync-task-reparse:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py「test_task_reparse_failure_does_not_block_sync」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-spec-sync-task-reparse"
+    }
+  ]
+}

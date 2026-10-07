@@ -1,0 +1,40 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  平台任务板陈旧根因（hide-quicklog 实证）：spec-sync 增量落盘后自动触发的 scoped reparse 只重建变更表（ChangeService），任务表（TaskService）全后端唯一刷新入口是手动端点
+  POST /changes/{id}/tasks/reparse——agent 中途改写 tasks.md 后，文档列与变更表都会新，任务板永远停在初版解析（磁盘 5 任务、平台显示 4 条种子）。CLI
+  侧重推触发已另行修复（sillyspec 仓 tick/工件变更触发 spec-sync），本变更补平台侧闭环：reparse 执行体连动任务表。
+
+
+  成功标准：
+
+  - _run_reparse_once 在 ChangeService.reparse 后按同一 scope 连动 TaskService.reparse（非归档 name 逐行；archive_hit
+  全量；location=deleted 跳过），best-effort 失败仅告警不阻断同步
+
+  - 增量同步改写 changes/<name>/tasks.md 后（drain 调度器），任务表条目跟随新文件内容（追加/改写/删除三态收敛）
+
+  - 新增测试覆盖连动（scoped 触发→任务行更新；范围外任务不动；连动失败不阻断主流程），backend 相关测试与 lint/mypy 绿
+autopilot: true
+baseline_commit: 339e5b40a6a338f6fbf7d50f1b139a6436f6e007
+updatedAt: '2026-10-07T13:56:33.459Z'
+baseline_sha256: 1a7319151333bb01d4791311dbf88896506714a068f1df579230b118b5788985
+gate_summary: >-
+  test: passed ← module[]+deps(py17)（72.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261007135413\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（10.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261007135413\test-result.json｜门文件
+  3 个
+

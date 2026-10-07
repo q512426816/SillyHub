@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-07-spec-sync-task-reparse",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "f82bc067ca74946ac7c6b88d4e6382e54e6c665c",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "location 列若为 NULL，SQL 三值逻辑下该行被静默排除出连动",
+      "evidence": "连动过滤用 `stmt = stmt.where(col(ChangeRow.location) != \"deleted\")`。SQL 中 NULL != 'deleted' 结果为 NULL，行不匹配——若 Change.location 可空且存在 NULL 行，这些行会被跳过连动（超出 FR 只要求跳过 'deleted' 的语义）。未读 change/model.py 确认列 nullable 与否；若列有非空默认值则不触发。属边界观察，不阻断。",
+      "location": "backend/app/modules/spec_workspace/service.py:3018"
+    },
+    {
+      "severity": "P3",
+      "title": "best-effort 粒度为整块而非逐行：任一行失败后本轮剩余行不再连动",
+      "evidence": "行查询与 for 循环共处同一 try（:3009-3024），某行 TaskService.reparse 抛错即跳出循环、剩余行本轮不处理；失败面测试用 RuntimeError mock，也未覆盖 DB 层异常（如事务污染）场景。design 盲维3 已声明『中断残留由下一轮幂等 reparse 收敛』，TaskService.reparse 的 task_key upsert（task/service.py:176-183）支持该收敛，属已披露可接受；且 ChangeService.reparse 先于连动执行且自行提交，变更表重建不受污染。",
+      "location": "backend/app/modules/spec_workspace/service.py:3009-3031"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-07T15:05:00Z"
+}

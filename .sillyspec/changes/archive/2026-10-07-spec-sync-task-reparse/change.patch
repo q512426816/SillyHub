@@ -1,0 +1,388 @@
+diff --git a/backend/app/modules/spec_workspace/service.py b/backend/app/modules/spec_workspace/service.py
+index a3e0a8ccb..1307e3afc 100644
+--- a/backend/app/modules/spec_workspace/service.py
++++ b/backend/app/modules/spec_workspace/service.py
+@@ -2998,12 +2998,44 @@ class SpecWorkspaceService:
+                 workspace_id,
+                 scope=None if archive_hit else scope,
+             )
++            # 任务表连动重解析（2026-10-07-spec-sync-task-reparse）：change reparse 只重建
++            # changes 表；任务表（TaskService）此前全后端唯一刷新入口是手动 reparse 端点
++            # （task/router.py）——agent 中途改写 tasks.md 后文档列/变更表都会新，任务板
++            # 停留初版解析（hide-quicklog 实证：磁盘 5 任务、平台任务表 4 条种子）。按同一
++            # scope 连动：scope 内 change_key（archive_hit 全量）解析出行后逐个
++            # TaskService.reparse；location='deleted' 软删行跳过（spec 目录已消失无文件可
++            # 读）。best-effort：失败仅告警不阻断（R-04 同哲学——同步主流程优先）。
++            task_totals: dict[str, int] = {}
++            try:
++                from sqlmodel import col
++
++                from app.modules.change.model import Change as ChangeRow
++                from app.modules.task.service import TaskService
++
++                stmt = select(ChangeRow).where(col(ChangeRow.workspace_id) == workspace_id)
++                if not archive_hit:
++                    stmt = stmt.where(col(ChangeRow.change_key).in_(list(scope)))
++                stmt = stmt.where(col(ChangeRow.location) != "deleted")
++                rows = (await reparse_session.execute(stmt)).scalars().all()
++                task_svc = TaskService(reparse_session)
++                for row in rows:
++                    tstats, _ = await task_svc.reparse(workspace_id, row.id)
++                    for k, v in tstats.items():
++                        task_totals[k] = task_totals.get(k, 0) + v
++            except Exception as exc:
++                log.warning(
++                    "spec_workspace.task_reparse_failed",
++                    workspace_id=str(workspace_id),
++                    scoped=not archive_hit,
++                    error=str(exc),
++                )
+         log.info(
+             "spec_workspace.reparse_triggered",
+             workspace_id=str(workspace_id),
+             scoped=not archive_hit,
+             scope=scope,
+             stats=stats,
++            task_stats=task_totals,
+             deferred=not _REPARSE_INLINE,
+         )
+ 
+diff --git a/backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py b/backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py
+new file mode 100644
+index 000000000..d72697108
+--- /dev/null
++++ b/backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py
+@@ -0,0 +1,201 @@
++"""spec-sync 自动连动任务表重解析测试（2026-10-07-spec-sync-task-reparse）。
++
++背景（hide-quicklog 实证）：``_run_reparse_once`` 只调 ``ChangeService.reparse``（变更表），
++任务表（``TaskService``，厚档 ``tasks/task-*.md`` 任务卡面）全后端唯一刷新入口是手动
++reparse 端点——spec-sync 增量落盘新任务卡后任务板停留初版解析。本变更在 reparse 执行体
++里按同一 scope 连动 ``TaskService.reparse``（best-effort，失败仅告警不阻断）。
++
++覆盖：
++- 增量同步改写 ``tasks/`` 任务卡（增卡/改题）→ drain 后任务表跟随新内容
++- 连动失败（monkeypatch TaskService.reparse 抛错）→ 同步主流程 200、变更表照常重建
++
++author: qinyi
++created_at: 2026-10-07
++"""
++
++from __future__ import annotations
++
++import base64
++import uuid
++from pathlib import Path
++from unittest.mock import AsyncMock
++
++from httpx import AsyncClient
++from sqlalchemy import select
++
++from app.modules.change.model import Change
++from app.modules.spec_workspace.model import SpecWorkspace
++from app.modules.spec_workspace.service import drain_reparse_workers
++from app.modules.task.model import Task
++from app.modules.workspace.model import Workspace
++
++
++def _b64(text: str) -> str:
++    return base64.b64encode(text.encode("utf-8")).decode("ascii")
++
++
++def _op(op: str, path: str, base_version: int = 0, **extra: object) -> dict[str, object]:
++    d: dict[str, object] = {"op": op, "path": path, "base_version": base_version}
++    d.update(extra)
++    return d
++
++
++def _card(task_key: str, title: str) -> str:
++    return f"---\nid: {task_key}\ntitle: '{title}'\nstatus: draft\npriority: P1\n---\n"
++
++
++async def _make_workspace(db_session) -> Workspace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="task-reparse-on-sync ws",
++        slug=f"trs-{uuid.uuid4().hex[:8]}",
++        root_path=f"/tmp/task-reparse-test-{uuid.uuid4().hex[:12]}",
++        status="active",
++        component_key="comp",
++    )
++    db_session.add(ws)
++    await db_session.commit()
++    await db_session.refresh(ws)
++    return ws
++
++
++async def _make_spec_workspace(db_session, workspace: Workspace, spec_root: Path) -> SpecWorkspace:
++    spec_ws = SpecWorkspace(
++        id=uuid.uuid4(),
++        workspace_id=workspace.id,
++        spec_root=str(spec_root),
++        strategy="platform-managed",
++        sync_status="clean",
++    )
++    db_session.add(spec_ws)
++    await db_session.commit()
++    await db_session.refresh(spec_ws)
++    return spec_ws
++
++
++async def _tasks_of(db_session, ws_id: uuid.UUID, change_id: uuid.UUID) -> list[Task]:
++    stmt = select(Task).where(
++        Task.workspace_id == ws_id,
++        Task.change_id == change_id,
++    )
++    return list((await db_session.execute(stmt)).scalars().all())
++
++
++async def _change_row(db_session, ws_id: uuid.UUID, key: str) -> Change | None:
++    return (
++        (
++            await db_session.execute(
++                select(Change).where(
++                    Change.workspace_id == ws_id,
++                    Change.change_key == key,
++                )
++            )
++        )
++        .scalars()
++        .first()
++    )
++
++
++class TestTaskReparseOnSync:
++    async def test_tasks_md_rewrite_updates_task_rows(
++        self, db_session, client: AsyncClient, auth_headers, tmp_path
++    ) -> None:
++        """增量同步改写任务卡 → 任务表跟随（旧 4 卡 → 改题 + 增第 5 卡）。"""
++        ws = await _make_workspace(db_session)
++        spec_root = tmp_path / "spec-root"
++        await _make_spec_workspace(db_session, ws, spec_root)
++        key = "2026-10-07-card-change"
++
++        # 初版：4 张任务卡（hide-quicklog 同型——初版解析后 agent 重写）
++        first_ops = []
++        for i in range(1, 5):
++            first_ops.append(
++                _op(
++                    "add",
++                    f"changes/{key}/tasks/task-{i:02d}.md",
++                    content=_b64(_card(f"task-{i:02d}", f"初版任务 {i}")),
++                )
++            )
++        first_ops.append(_op("add", f"changes/{key}/proposal.md", content=_b64("# Card Change")))
++        resp = await client.post(
++            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
++            headers=auth_headers,
++            json={"ops": first_ops, "change_dirs": [key]},
++        )
++        assert resp.status_code == 200, resp.text
++        await drain_reparse_workers()
++
++        change = await _change_row(db_session, ws.id, key)
++        assert change is not None, "变更行已建（scoped reparse）"
++        # 纯量 id 即取（后续请求会 expire 会话对象，ORM 属性惰性 IO 在 greenlet 外炸）
++        ws_id, change_id = ws.id, change.id
++        rows = await _tasks_of(db_session, ws_id, change_id)
++        assert len(rows) == 4, f"初版任务卡入任务表（实际 {len(rows)}）"
++
++        # agent 重写：task-01 改题 + 增 task-05 → 增量同步 → 任务表跟随
++        rewrite_ops = [
++            _op(
++                "update",
++                f"changes/{key}/tasks/task-01.md",
++                base_version=1,
++                content=_b64(_card("task-01", "重写后的真实工作步骤")),
++            ),
++            _op(
++                "add",
++                f"changes/{key}/tasks/task-05.md",
++                content=_b64(_card("task-05", "追加的第 5 步")),
++            ),
++        ]
++        resp2 = await client.post(
++            f"/api/workspaces/{ws_id}/spec-workspace/sync-incremental",
++            headers=auth_headers,
++            json={"ops": rewrite_ops, "change_dirs": [key]},
++        )
++        assert resp2.status_code == 200, resp2.text
++        await drain_reparse_workers()
++
++        # 后台 reparse 用独立会话提交——刷新本会话身份映射后再断言
++        db_session.expire_all()
++        rows2 = await _tasks_of(db_session, ws_id, change_id)
++        assert len(rows2) == 5, f"任务表跟随重写（4→5，实际 {len(rows2)}）"
++        by_key = {t.task_key: t for t in rows2}
++        assert by_key["task-01"].title == "重写后的真实工作步骤"
++        assert by_key["task-05"].title == "追加的第 5 步"
++
++    async def test_task_reparse_failure_does_not_block_sync(
++        self, db_session, client: AsyncClient, auth_headers, tmp_path, monkeypatch
++    ) -> None:
++        """连动失败仅告警：TaskService.reparse 抛错 → 同步仍 200、变更表照常重建。"""
++        ws = await _make_workspace(db_session)
++        spec_root = tmp_path / "spec-root"
++        await _make_spec_workspace(db_session, ws, spec_root)
++        key = "2026-10-07-fail-change"
++
++        from app.modules.task.service import TaskService
++
++        monkeypatch.setattr(
++            TaskService,
++            "reparse",
++            AsyncMock(side_effect=RuntimeError("task reparse boom")),
++        )
++
++        resp = await client.post(
++            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
++            headers=auth_headers,
++            json={
++                "ops": [
++                    _op(
++                        "add",
++                        f"changes/{key}/proposal.md",
++                        content=_b64("# Fail Change"),
++                    )
++                ],
++                "change_dirs": [key],
++            },
++        )
++        assert resp.status_code == 200, resp.text
++        assert resp.json()["ok"] is True
++        await drain_reparse_workers()
++
++        change = await _change_row(db_session, ws.id, key)
++        assert change is not None, "连动失败不阻断：变更表照常重建"
+diff --git a/.sillyspec/changes/2026-10-07-spec-sync-task-reparse/design.md b/.sillyspec/changes/2026-10-07-spec-sync-task-reparse/design.md
+new file mode 100644
+index 000000000..d65db98df
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-spec-sync-task-reparse/design.md
+@@ -0,0 +1,48 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T13:43:18.668Z
++---
++# 设计记录（Design Record）— 2026-10-07-spec-sync-task-reparse
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++单点接线：`spec_workspace/service.py _run_reparse_once` 在既有 ChangeService.reparse 之后（同一后台会话内）按 scope 查变更行（workspace + change_key in scope；archive_hit 全量；location!='deleted'）逐行调 TaskService.reparse。选此位置因为它已是增量落盘后唯一的自动 reparse 执行体（inline/后台 runner 共用、single-flight 防抖调度器内），连动天然继承节流与合并语义，无需新调度面。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++`_run_reparse_once` 内部新增连动副作用（私有方法，签名不变）；reparse_triggered 日志多 task_stats 键。无端点/schema/文件格式变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用：连动在同一 reparse 执行体内同步串行，无独立事件序。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++复用既有 single-flight/节流窗（ql-20260909-021 调度器）——同 workspace 并发触发合并为一轮；TaskService.reparse 幂等（task_key upsert），双跑收敛。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++连动在独立会话事务内，失败仅告警不阻断；中断残留由下一轮幂等 reparse 收敛。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不适用：查询按 workspace_id + scope 限定；TaskService.reparse 按行 id 定向。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：archive_hit 全量路径下对大 workspace 逐变更 reparse 的耗时——已在后台任务里（不阻塞同步响应）且全量路径仅归档移动触发（罕见）；后续可按 location 过滤收窄。试过放弃：在 apply_ops 落盘循环里逐 op 触发——绕过调度器会复活 ql-20260909-021 修掉的风暴；放弃。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++|---|---|---|
++| 修改 | backend/app/modules/spec_workspace/service.py | _run_reparse_once 连动 TaskService.reparse（best-effort + task_stats 日志） |
++| 新增 | backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py | 连动跟随 + 失败不阻断两用例 |
+diff --git a/.sillyspec/changes/2026-10-07-spec-sync-task-reparse/requirements.md b/.sillyspec/changes/2026-10-07-spec-sync-task-reparse/requirements.md
+new file mode 100644
+index 000000000..5658804f5
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-spec-sync-task-reparse/requirements.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T13:43:18.668Z
++---
++# 需求规格（Requirements）— 2026-10-07-spec-sync-task-reparse
++
++## 功能需求
++
++### FR-01: spec-sync 自动连动任务表重解析
++
++必须：`_run_reparse_once` 在 `ChangeService.reparse` 后按同一 scope 连动 `TaskService.reparse`——非归档 name 逐行解析（archive_hit 时全量；location='deleted' 软删行跳过）；best-effort：连动失败仅告警（task_reparse_failed）不阻断同步主流程，变更表重建照常。
++
++#### 场景：任务卡改写跟随
++
++Given 厚档变更已有 4 张任务卡且任务表已解析 4 行
++When 增量同步落盘改题后的 task-01 与新增 task-05（change_dirs 标注该变更）
++Then drain 后任务表 5 行、task-01 标题为新值
++
++### FR-02: 测试覆盖连动与失败面
++
++必须：新增测试覆盖 ①改写跟随（4→5、改题生效）②连动失败不阻断（monkeypatch 抛错 → 同步 200、变更表照常重建）；spec_workspace 与 task 模块既有测试不回归。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`）
++
++FR-01: backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py「test_tasks_md_rewrite_updates_task_rows」
++FR-02: backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py「test_task_reparse_failure_does_not_block_sync」
+diff --git a/.sillyspec/changes/2026-10-07-spec-sync-task-reparse/tasks.md b/.sillyspec/changes/2026-10-07-spec-sync-task-reparse/tasks.md
+new file mode 100644
+index 000000000..8a10ea16e
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-spec-sync-task-reparse/tasks.md
+@@ -0,0 +1,8 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T13:52:27.190Z
++---
++# 任务注册表（Tasks）— 2026-10-07-spec-sync-task-reparse
++
++- [x] task-01: _run_reparse_once 连动 TaskService.reparse（scope 对齐/软删跳过/best-effort）+ 新测试两用例
++- [x] task-02: spec_workspace+task 模块回归与 lint/mypy 绿 + 规格工件定稿收口
+diff --git a/.sillyspec/changes/2026-10-07-spec-sync-task-reparse/proposal.md b/.sillyspec/changes/2026-10-07-spec-sync-task-reparse/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-spec-sync-task-reparse/proposal.md
+@@ -0,0 +1,27 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T13:43:18.668Z
++---
++# 提案书（Proposal）— 2026-10-07-spec-sync-task-reparse
++
++## 动机
++
++任务原话转写：平台任务板陈旧根因（hide-quicklog 实证）：spec-sync 增量落盘后自动触发的 scoped reparse 只重建变更表（ChangeService），任务表（TaskService）全后端唯一刷新入口是手动端点 POST /changes/{id}/tasks/reparse——agent 中途改写 tasks.md 后，文档列与变更表都会新，任务板永远停在初版解析（磁盘 5 任务、平台显示 4 条种子）。CLI 侧重推触发已另行修复（sillyspec 仓 tick/工件变更触发 spec-sync），本变更补平台侧闭环：reparse 执行体连动任务表。
++
++成功标准：
++- _run_reparse_once 在 ChangeService.reparse 后按同一 scope 连动 TaskService.reparse（非归档 name 逐行；archive_hit 全量；location=deleted 跳过），best-effort 失败仅告警不阻断同步
++- 增量同步改写 changes/<name>/tasks.md 后（drain 调度器），任务表条目跟随新文件内容（追加/改写/删除三态收敛）
++- 新增测试覆盖连动（scoped 触发→任务行更新；范围外任务不动；连动失败不阻断主流程），backend 相关测试与 lint/mypy 绿
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. _run_reparse_once 在 ChangeService.reparse 后按同一 scope 连动 TaskService.reparse（非归档 name 逐行；archive_hit 全量；location=deleted 跳过），best-effort 失败仅告警不阻断同步
++2. 增量同步改写 changes/<name>/tasks.md 后（drain 调度器），任务表条目跟随新文件内容（追加/改写/删除三态收敛）
++3. 新增测试覆盖连动（scoped 触发→任务行更新；范围外任务不动；连动失败不阻断主流程），backend 相关测试与 lint/mypy 绿
++
++## 成功标准（可验证）
++
++1. _run_reparse_once 在 ChangeService.reparse 后按同一 scope 连动 TaskService.reparse（非归档 name 逐行；archive_hit 全量；location=deleted 跳过），best-effort 失败仅告警不阻断同步
++2. 增量同步改写 changes/<name>/tasks.md 后（drain 调度器），任务表条目跟随新文件内容（追加/改写/删除三态收敛）
++3. 新增测试覆盖连动（scoped 触发→任务行更新；范围外任务不动；连动失败不阻断主流程），backend 相关测试与 lint/mypy 绿
