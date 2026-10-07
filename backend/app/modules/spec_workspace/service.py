@@ -2998,12 +2998,44 @@ class SpecWorkspaceService:
                 workspace_id,
                 scope=None if archive_hit else scope,
             )
+            # 任务表连动重解析（2026-10-07-spec-sync-task-reparse）：change reparse 只重建
+            # changes 表；任务表（TaskService）此前全后端唯一刷新入口是手动 reparse 端点
+            # （task/router.py）——agent 中途改写 tasks.md 后文档列/变更表都会新，任务板
+            # 停留初版解析（hide-quicklog 实证：磁盘 5 任务、平台任务表 4 条种子）。按同一
+            # scope 连动：scope 内 change_key（archive_hit 全量）解析出行后逐个
+            # TaskService.reparse；location='deleted' 软删行跳过（spec 目录已消失无文件可
+            # 读）。best-effort：失败仅告警不阻断（R-04 同哲学——同步主流程优先）。
+            task_totals: dict[str, int] = {}
+            try:
+                from sqlmodel import col
+
+                from app.modules.change.model import Change as ChangeRow
+                from app.modules.task.service import TaskService
+
+                stmt = select(ChangeRow).where(col(ChangeRow.workspace_id) == workspace_id)
+                if not archive_hit:
+                    stmt = stmt.where(col(ChangeRow.change_key).in_(list(scope)))
+                stmt = stmt.where(col(ChangeRow.location) != "deleted")
+                rows = (await reparse_session.execute(stmt)).scalars().all()
+                task_svc = TaskService(reparse_session)
+                for row in rows:
+                    tstats, _ = await task_svc.reparse(workspace_id, row.id)
+                    for k, v in tstats.items():
+                        task_totals[k] = task_totals.get(k, 0) + v
+            except Exception as exc:
+                log.warning(
+                    "spec_workspace.task_reparse_failed",
+                    workspace_id=str(workspace_id),
+                    scoped=not archive_hit,
+                    error=str(exc),
+                )
         log.info(
             "spec_workspace.reparse_triggered",
             workspace_id=str(workspace_id),
             scoped=not archive_hit,
             scope=scope,
             stats=stats,
+            task_stats=task_totals,
             deferred=not _REPARSE_INLINE,
         )
 
