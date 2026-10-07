@@ -29,6 +29,31 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// ── antd v6 + jsdom 的级联匹配缺陷补丁（仅本文件）────────────────────────
+// 与 agent-profile-form.test.tsx 同族（坑档案 docs/sillyspec/finished/
+// active-antd-jsdom-has-deploy-login-account.md）：jsdom 的 cssom 在
+// getComputedStyle 时对每条注册规则做 DOM 匹配，遇现代伪类（该族 `:has`，
+// 本文件 `:focus-visible`——antd Checkbox 规则 `.ant-checkbox-input:
+// focus-visible`）会把候选元素的 tag+className 拼回选择器再查询；候选
+// 元素带含逗号/括号字符的 tailwind 任意值类时生成非法选择器（CI 实测
+// `span.text-,,,,px,, .ant-checkbox-input:focus-visible`）→ nwsapi 抛
+// SyntaxError 且偶发使整用例失败（本地 ~1/20，Linux CI 并行更易触发）。
+// 真实浏览器用原生 CSS 引擎匹配（不拼 DOM 类名），不受影响——jsdom 特有
+// 缺陷。处理照先例：stub window.getComputedStyle 阻断 cascade，返回空
+// 样式表；本文件断言不依赖计算样式。仅本测试文件生效。
+window.getComputedStyle = ((_elt: Element, _pseudo?: string | null) =>
+  new Proxy(
+    {
+      getPropertyValue: () => "",
+      setProperty: () => undefined,
+      item: () => "",
+    },
+    {
+      get: (target, key) =>
+        key in target ? (target as any)[key] : key === "length" ? 0 : "",
+    },
+  )) as unknown as typeof window.getComputedStyle;
+
 // ── mocks（hoisted，让 mock 工厂能引用同一组 vi.fn）──────────────────────
 const mocks = vi.hoisted(() => ({
   listChanges: vi.fn(),
