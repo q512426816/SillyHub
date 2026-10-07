@@ -120,7 +120,7 @@ async def _seed_provider_for_user(
             name=name,
             api_key="sk-router-secretkey-1234",
             base_url="https://api.anthropic.com",
-            model="claude-sonnet-4",
+            models=[{"name": "claude-sonnet-4", "roles": ["sonnet"]}],
             is_default=is_default,
             agent_kinds=["claude"],
         ),

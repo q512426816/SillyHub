@@ -81,7 +81,11 @@ async def register(
     # litellm_params.model 带 provider 前缀（``openai/<model>``）。原纯名+provider 字段实现会导致
     # POST /model/new 返 200（DB 写入成功）但 router upsert 持续失败 "LLM Provider NOT provided"，
     # deployment 被 drop 不进路由表 → 所有请求 not found + 容器 unhealthy。model 缺失兜底 gpt-3.5-turbo。
-    raw_model = provider.model or "gpt-3.5-turbo"
+    # D-001：旧 model 列退役，取列表派生主模型（Grill P1-4：读已删列 AttributeError）。
+    from app.modules.llm_provider.service import LlmProviderService as _Svc
+
+    _primary = _Svc._derive_primary_model(provider)
+    raw_model = _primary or "gpt-3.5-turbo"
     model_value = raw_model if "/" in raw_model else f"openai/{raw_model}"
     # gap-A 二次诊断（2026-08-10）实测定稿：litellm 1.95.0 对 openai 上游默认走 Responses API
     # （调 opencode /responses 返 object="response" 格式），openai adapter 期望 chat completions →

@@ -66,6 +66,7 @@ async def _create_provider(session: AsyncSession, user_id: uuid.UUID, name: str)
         user_id=user_id,
         name=name,
         agent_kinds=["claude_code"],
+        models=[],
         encrypted_api_key=b"irrelevant",
         key_id=f"key-{uuid.uuid4().hex[:8]}",
     )

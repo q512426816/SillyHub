@@ -487,7 +487,11 @@ async function fetchProviderEntry(
   return {
     providerId: p.id,
     providerName: p.name,
-    model: p.model ?? null,
+    // D-001：主模型派生（sonnet 首条 ?? 列表首条）。
+    model:
+      p.models?.find((m) => m.roles?.includes("sonnet"))?.name ??
+      p.models?.[0]?.name ??
+      null,
     tiers: mapUsageTiersToViews(result.data ?? []),
   };
 }

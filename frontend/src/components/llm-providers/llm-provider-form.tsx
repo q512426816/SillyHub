@@ -99,10 +99,11 @@ const API_FORMAT_OPTIONS: { value: LlmProviderApiFormat; label: string }[] = [
   { value: "openai_chat", label: "OpenAI Chat（/v1/chat/completions + Bearer）" },
 ];
 
-/** 表单内部角色行状态（display/model 文本框 + one_m 勾选）。 */
-interface RoleRowState {
-  display: string;
-  model: string;
+/** 表单内部模型行状态（D-001 列表条目：name/multimodal 三态/roles 多标/one_m）。 */
+interface ModelRowState {
+  name: string;
+  multimodal: "auto" | "true" | "false";
+  roles: string[];
   one_m: boolean;
 }
 
@@ -112,20 +113,14 @@ interface EnvRowState {
   value: string;
 }
 
-function initRoleRows(
-  initial?: LlmProviderRead | null,
-): Record<string, RoleRowState> {
-  const fromServer = initial?.model_role_mappings ?? {};
-  const out: Record<string, RoleRowState> = {};
-  for (const r of ROLE_ROWS) {
-    const v: LlmProviderRoleMapping | undefined = fromServer[r.key];
-    out[r.key] = {
-      display: v?.display ?? "",
-      model: v?.model ?? "",
-      one_m: v?.one_m === true,
-    };
-  }
-  return out;
+function initModelRows(initial?: LlmProviderRead | null): ModelRowState[] {
+  const fromServer = initial?.models ?? [];
+  return fromServer.map((m) => ({
+    name: m.name ?? "",
+    multimodal: (m.multimodal ?? "auto") as ModelRowState["multimodal"],
+    roles: [...(m.roles ?? [])],
+    one_m: m.one_m === true,
+  }));
 }
 
 function initEnvRows(initial?: LlmProviderRead | null): EnvRowState[] {
@@ -242,17 +237,8 @@ export function LlmProviderForm({
   const [apiFormat, setApiFormat] = useState<LlmProviderApiFormat>(
     initial?.api_format ?? "anthropic",
   );
-  // 2026-08-20-session-multimodal-attachments task-12（D-9）：多模态三态
-  // （auto=按模型名启发式 / true/false=手动覆盖——中转站别名权威来源）。
-  const [multimodal, setMultimodal] = useState<"auto" | "true" | "false">(
-    (initial?.multimodal as "auto" | "true" | "false") ?? "auto",
-  );
-  const [defaultFallbackModel, setDefaultFallbackModel] = useState(
-    initial?.default_fallback_model ?? "",
-  );
-  const [roleRows, setRoleRows] = useState<Record<string, RoleRowState>>(() =>
-    initRoleRows(initial),
-  );
+
+  const [modelRows, setModelRows] = useState<ModelRowState[]>(() => initModelRows(initial));
   const [envRows, setEnvRows] = useState<EnvRowState[]>(() =>
     initEnvRows(initial),
   );
@@ -287,26 +273,15 @@ export function LlmProviderForm({
     msg: string;
   } | null>(null);
 
-  const setRole = (
-    role: string,
-    patch: Partial<RoleRowState>,
-  ): void => {
-    setRoleRows((prev) => {
-      const cur: RoleRowState = prev[role] ?? {
-        display: "",
-        model: "",
-        one_m: false,
-      };
-      return { ...prev, [role]: { ...cur, ...patch } };
-    });
-    // 联动（ql-20260823-007）：模型单元格变更 → env 同名角色键跟随（仅键已存在时）。
-    const model = patch.model;
-    if (model !== undefined) {
-      const envName = ROLE_ENV_NAME[role];
-      if (envName) {
-        setSettingsConfigJson((prev) => syncSettingsEnvKey(prev, envName, model));
-      }
-    }
+  const setModelRow = (idx: number, patch: Partial<ModelRowState>): void => {
+    setModelRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+    // 联动（ql-20260823-007 退役）：模型列表不再逐角色联动 env（角色在行内标记）。
+  };
+  const addModelRow = (): void => {
+    setModelRows((prev) => [...prev, { name: "", multimodal: "auto", roles: [], one_m: false }]);
+  };
+  const removeModelRow = (idx: number): void => {
+    setModelRows((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const setEnv = (idx: number, patch: Partial<EnvRowState>): void => {
@@ -334,20 +309,15 @@ export function LlmProviderForm({
       if (!k) continue;
       extraEnv[k] = r.value;
     }
-    // 角色行 → mapping（保留 4 行原始值，清洗交给 cleanRoleMappings）。
-    const mapping: Record<string, LlmProviderRoleMapping> = {};
-    for (const r of ROLE_ROWS) {
-      const s: RoleRowState = roleRows[r.key] ?? {
-        display: "",
-        model: "",
-        one_m: false,
-      };
-      mapping[r.key] = {
-        ...(s.display ? { display: s.display } : {}),
-        ...(s.model ? { model: s.model } : {}),
-        one_m: s.one_m,
-      };
-    }
+    // 模型行 → models 条目（空名行丢弃；multimodal/roles/one_m 原样）。
+    const models = modelRows
+      .filter((r) => r.name.trim() !== "")
+      .map((r) => ({
+        name: r.name.trim(),
+        multimodal: r.multimodal,
+        roles: r.roles,
+        one_m: r.one_m,
+      }));
     // 配置 JSON 面板 → settings_config 对象（task-10 / D-004）：
     // JSON 非法 / 非对象 / 空对象 一律归一为 null（schema 语义：null=未配置）。
     let settingsConfig: Record<string, unknown> | null = null;
@@ -384,12 +354,9 @@ export function LlmProviderForm({
       auth_field: authField,
       notes,
       website_url: websiteUrl,
-      model_role_mappings: mapping,
-      default_fallback_model: defaultFallbackModel,
+      models,
       extra_env: extraEnv,
       settings_config: settingsConfig,
-      // task-12：multimodal 三态随 values 透传（lib 层 PATCH/POST 组装见下）。
-      multimodal,
     };
     void onSubmit(values);
   };
@@ -455,37 +422,8 @@ export function LlmProviderForm({
    * 「一键设置」（D-002）：取 sonnet||opus||fable||haiku 第一个 model 非空值，
    * 填全部 4 角色 model 单元格（display / one_m 不动）。全空时按钮禁用。
    */
-  const handleAutoFill = (): void => {
-    const firstNonEmpty = ROLE_ROWS.map(
-      (r) => (roleRows[r.key]?.model ?? "").trim(),
-    ).find((v) => v !== "");
-    if (!firstNonEmpty) {
-      setNotice({
-        kind: "err",
-        msg: "请先在任一角色填模型名，或先「获取模型列表」选一个。",
-      });
-      return;
-    }
-    const next: Record<string, RoleRowState> = {};
-    for (const r of ROLE_ROWS) {
-      const cur: RoleRowState = roleRows[r.key] ?? {
-        display: "",
-        model: "",
-        one_m: false,
-      };
-      next[r.key] = { ...cur, model: firstNonEmpty };
-    }
-    setRoleRows(next);
-    setNotice({
-      kind: "ok",
-      msg: `✓ 已把「${firstNonEmpty}」应用到全部 4 角色。`,
-    });
-  };
-
-  // 一键设置可用性：4 角色 model 全空时禁用（D-002 全空提示以禁用承载）。
-  const autoFillDisabled = ROLE_ROWS.every(
-    (r) => (roleRows[r.key]?.model ?? "").trim() === "",
-  );
+  // D-002：一键填充退役——模型列表行内自含角色标记，无「应用到全部角色」语义。
+  const autoFillDisabled = modelRows.every((r) => r.name.trim() === "");
 
   /**
    * 5 开关当前态（D-008）：从 settingsConfigJson parse 推导；JSON 非法时全 false
@@ -692,7 +630,6 @@ export function LlmProviderForm({
     setBaseUrl(preset.base_url);
     setAuthField(preset.auth_field);
     setApiFormat(preset.api_format);
-    setDefaultFallbackModel(preset.default_model ?? "");
     setWebsiteUrl(preset.website_url);
     setApiKey("");
     try {
@@ -702,18 +639,13 @@ export function LlmProviderForm({
     } catch {
       setSettingsConfigJson("{}");
     }
-    // default_model 套用到全部 4 角色（照 handleAutoFill 范式；无 default_model 则清空）。
+    // D-001：预设 default_model → 首行模型条目（带 sonnet 主标记；无则清空列表）。
     const model = preset.default_model ?? "";
-    const nextRoles: Record<string, RoleRowState> = {};
-    for (const r of ROLE_ROWS) {
-      const cur: RoleRowState = roleRows[r.key] ?? {
-        display: "",
-        model: "",
-        one_m: false,
-      };
-      nextRoles[r.key] = { ...cur, model };
-    }
-    setRoleRows(nextRoles);
+    setModelRows(
+      model
+        ? [{ name: model, multimodal: "auto", roles: ["sonnet"], one_m: false }]
+        : [],
+    );
     setNotice({
       kind: "ok",
       msg: `✓ 已套用「${preset.name}」预设，请填写 API Key 后保存。`,
@@ -725,12 +657,11 @@ export function LlmProviderForm({
     setSelectedPresetKey(null);
     setName("");
     setBaseUrl("");
-    setDefaultFallbackModel("");
     setWebsiteUrl("");
     setApiKey("");
     setAuthField("ANTHROPIC_AUTH_TOKEN");
     setApiFormat("anthropic");
-    setRoleRows(initRoleRows(null));
+    setModelRows([]);
     setEnvRows(initEnvRows(null));
     setSettingsConfigJson("{}");
     setNotice(null);
@@ -1023,28 +954,12 @@ export function LlmProviderForm({
       </div>
 
       <div>
-        <label className={`inline-flex items-center gap-2 ${lblCls}`}>
-          多模态能力
-        </label>
-        <select
-          value={multimodal}
-          onChange={(e) =>
-            setMultimodal(e.target.value as "auto" | "true" | "false")
-          }
-          className={`mt-0.5 h-8 ${inputCls}`}
-        >
-          <option value="auto">自动（按模型名推断，未知按不支持）</option>
-          <option value="true">支持（图片/PDF 直读）</option>
-          <option value="false">不支持（图片转落盘给工具读）</option>
-        </select>
-        <p className={hintCls}>
-          影响会话附件：自动挡按模型名猜（glm-4.6v/claude/gpt-4o 等判支持，别名猜不中请手动指定）。
-        </p>
+        {/* D-003：多模态三态已下沉到模型条目（行内下拉）。 */}
       </div>
 
       <details className="rounded border border-dashed border-input/70 p-3">
         <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-          高级选项（模型映射 / 认证字段 / 自定义环境变量）
+          高级选项（认证字段 / 自定义环境变量）
         </summary>
 
         <div className="mt-3 space-y-3">
@@ -1119,9 +1034,10 @@ export function LlmProviderForm({
           {apiFormat === "anthropic" && (
           <>
           <div>
-            <label className={lblCls}>模型角色映射</label>
+            <label className={lblCls}>模型列表</label>
             <p className={hintCls}>
-              Claude Code 按角色（Sonnet/Opus/Fable/Haiku）请求模型。用中转站时把每个角色映射到中转站实际模型名；官方端点可全部留空。
+              一条供应商可定义多个模型（条数不限）；Claude 引擎在行内标记角色档位（可多标，
+              sonnet=主模型），其它引擎只填模型名。
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <Button
@@ -1144,16 +1060,18 @@ export function LlmProviderForm({
                 variant="outline"
                 size="sm"
                 className="h-7 text-xs"
-                onClick={handleAutoFill}
+                onClick={() => {
+                  if (modelRows.every((r) => r.name.trim() === "")) {
+                    setNotice({ kind: "err", msg: "请先添加至少一个模型行。" });
+                    return;
+                  }
+                  setNotice({ kind: "ok", msg: "模型行内可直接选拉取的模型。" });
+                }}
                 disabled={autoFillDisabled || isFetching}
-                title={
-                  autoFillDisabled
-                    ? "请先在任一角色填模型名，或先获取模型列表"
-                    : "把当前第一个非空模型应用到全部 4 角色"
-                }
+                title="先添加模型行，再在行内下拉选择拉取的模型"
               >
                 <Sparkles className="mr-1 h-3.5 w-3.5" />
-                一键设置
+                使用提示
               </Button>
               {notice && (
                 <span
@@ -1170,88 +1088,97 @@ export function LlmProviderForm({
                 </span>
               )}
             </div>
-            <div className="mt-1.5 overflow-x-auto">
-              <table className="w-full border-collapse text-xs">
-                <thead>
-                  <tr className="bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                    <th className="border-b px-2 py-1.5 font-semibold">角色</th>
-                    <th className="border-b px-2 py-1.5 font-semibold">显示名称（仅 UI）</th>
-                    <th className="border-b px-2 py-1.5 font-semibold">实际请求模型</th>
-                    <th className="border-b px-2 py-1.5 font-semibold">1M 上下文</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ROLE_ROWS.map((r) => {
-                    const s: RoleRowState = roleRows[r.key] ?? {
-                      display: "",
-                      model: "",
-                      one_m: false,
-                    };
-                    return (
-                      <tr key={r.key} className="border-b last:border-0">
-                        <td className="px-2 py-1.5 font-medium text-amber-700">
-                          {r.label}
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <input
-                            value={s.display}
-                            onChange={(e) =>
-                              setRole(r.key, { display: e.target.value })
+            <div className="mt-1.5 space-y-1.5">
+              {modelRows.map((row, idx) => (
+                <div
+                  key={idx}
+                  className="grid grid-cols-[1.6fr_1fr_1.4fr_auto_auto] items-center gap-1.5"
+                >
+                  <ModelInputWithFetch
+                    value={row.name}
+                    onChange={(v) => setModelRow(idx, { name: v })}
+                    fetchedModels={fetchedModels}
+                    isLoading={isFetching}
+                    onFetch={handleFetch}
+                    placeholder="模型名（如 deepseek-v4.1-flash）"
+                  />
+                  <select
+                    value={row.multimodal}
+                    onChange={(e) =>
+                      setModelRow(idx, {
+                        multimodal: e.target.value as ModelRowState["multimodal"],
+                      })
+                    }
+                    className="h-7 rounded border border-input bg-background px-1.5 text-xs"
+                    title="多模态（图片/PDF 附件）能力"
+                  >
+                    <option value="auto">自动判断</option>
+                    <option value="true">支持多模态</option>
+                    <option value="false">仅文本</option>
+                  </select>
+                  <div className="flex flex-wrap items-center gap-1" role="group" aria-label="角色标记">
+                    {agentKinds.includes("claude") &&
+                      ROLE_ROWS.map((r) => {
+                        const on = row.roles.includes(r.key);
+                        return (
+                          <button
+                            key={r.key}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() =>
+                              setModelRow(idx, {
+                                roles: on
+                                  ? row.roles.filter((x) => x !== r.key)
+                                  : [...row.roles, r.key],
+                              })
                             }
-                            className="h-7 w-full rounded border border-input bg-background px-1.5 text-xs focus:border-ring focus:outline-none"
-                            placeholder={`如 ${r.label}`}
-                          />
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <ModelInputWithFetch
-                            value={s.model}
-                            onChange={(v) => setRole(r.key, { model: v })}
-                            fetchedModels={fetchedModels}
-                            isLoading={isFetching}
-                            onFetch={handleFetch}
-                            placeholder={r.placeholder}
-                          />
-                        </td>
-                        <td className="px-2 py-1.5 text-center">
-                          <input
-                            type="checkbox"
-                            checked={s.one_m}
-                            onChange={(e) =>
-                              setRole(r.key, { one_m: e.target.checked })
-                            }
-                            className="h-3.5 w-3.5 rounded border border-input"
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                            className={`rounded border px-1.5 py-0.5 text-[11px] ${
+                              on
+                                ? "border-amber-400 bg-amber-100 text-amber-800"
+                                : "border-input text-muted-foreground"
+                            }`}
+                          >
+                            {r.label}
+                          </button>
+                        );
+                      })}
+                  </div>
+                  <label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={row.one_m}
+                      onChange={(e) => setModelRow(idx, { one_m: e.target.checked })}
+                      className="h-3.5 w-3.5 rounded border border-input"
+                    />
+                    1M
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10"
+                    onClick={() => removeModelRow(idx)}
+                  >
+                    删除
+                  </Button>
+                </div>
+              ))}
             </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-1.5 h-7 text-xs"
+              onClick={addModelRow}
+            >
+              + 添加模型
+            </Button>
             <p className={hintCls}>
-              用中转站时建议至少填 Sonnet/Opus/Haiku，否则这些请求会以原始 Claude 模型名透传给上游，可能因上游无此模型而报错。
+              sonnet 标记的首条 = 主模型（会话未选模型时用它）；多模态「自动判断」按模型名启发式。
             </p>
           </div>
 
-          <div>
-            <label className={lblCls}>默认兜底模型（可选）</label>
-            <input
-              value={defaultFallbackModel}
-              onChange={(e) => {
-                const v = e.target.value;
-                setDefaultFallbackModel(v);
-                // 联动（ql-20260823-007）：兜底模型字段 → env.ANTHROPIC_MODEL 跟随。
-                setSettingsConfigJson((prev) =>
-                  syncSettingsEnvKey(prev, "ANTHROPIC_MODEL", v),
-                );
-              }}
-              className={`mt-0.5 ${inputCls}`}
-              placeholder="如 kimi-k2（未映射的角色都走这个模型）"
-            />
-            <p className={hintCls}>
-              用中转站时建议填写：未明确映射的请求（含 Haiku 后台子任务）会以这个模型名发给上游，避免透传原始 Claude 模型名报错。
-            </p>
-          </div>
+          {/* D-001：默认兜底模型输入退役——主模型派生（sonnet 首条）承担该语义。 */}
           </>
           )}
 

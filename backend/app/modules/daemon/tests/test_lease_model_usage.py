@@ -265,6 +265,7 @@ class TestCompleteLeaseProviderFill:
             user_id=user_id,
             name="bound-provider",
             agent_kinds=["claude_code"],
+            models=[],
             encrypted_api_key=b"dummy",
             key_id="dummy-key",
         )
@@ -295,6 +296,7 @@ class TestCompleteLeaseProviderFill:
             user_id=user_id,
             name="dispatch-provider",
             agent_kinds=["claude_code"],
+            models=[],
             encrypted_api_key=b"dummy",
             key_id="dummy-key",
         )
@@ -303,6 +305,7 @@ class TestCompleteLeaseProviderFill:
             user_id=user_id,
             name="meta-provider",
             agent_kinds=["claude_code"],
+            models=[],
             encrypted_api_key=b"dummy",
             key_id="dummy-key",
         )

@@ -130,7 +130,7 @@ async def _seed_provider(
         agent_kinds=[agent_kind],
         encrypted_api_key=ct,
         key_id=key_id,
-        model=model,
+        models=[{"name": model, "roles": ["sonnet"]}],
         is_default=False,
         api_format="anthropic",
     )

@@ -81,6 +81,7 @@ async def _seed_provider_row(
         user_id=user_id,
         name=name,
         agent_kinds=[agent_kind],
+        models=[],
         encrypted_api_key=ct,
         key_id=key_id,
         base_url=base_url,
@@ -114,7 +115,7 @@ class TestResolveDefaultProviderConfigFound:
                 name="p",
                 api_key=plaintext,
                 base_url="https://api.anthropic.com",
-                model="claude-sonnet-4",
+                models=[{"name": "claude-sonnet-4", "roles": ["sonnet"]}],
                 is_default=True,
                 agent_kinds=["claude"],
             ),
@@ -125,6 +126,7 @@ class TestResolveDefaultProviderConfigFound:
         assert cfg is not None
         expected_keys = {
             "agent_kind",
+            "models",
             "base_url",
             "api_key",
             "auth_field",
@@ -465,7 +467,7 @@ async def _seed_openai_default_provider(
     session: AsyncSession,
     user_id: uuid.UUID,
     *,
-    model: str | None = "zen-1",
+    model: str | None = "zen-1",  # 兼容旧 kwarg（内部折 models 列表）
     api_key: str = "sk-openai-upstream-never-sent",
 ) -> LlmProvider:
     """task-10：直插 openai_chat 默认 provider。
@@ -484,7 +486,7 @@ async def _seed_openai_default_provider(
         base_url="https://opencode.ai/zen/v1/chat/completions",
     )
     row.api_format = "openai_chat"
-    row.model = model
+    row.models = [{"name": model or "zen-1", "roles": ["sonnet"]}]
     await session.commit()
     await session.refresh(row)
     return row
@@ -624,6 +626,7 @@ class TestMultiEngineSetHit:
             user_id=user_id,
             name="multi",
             agent_kinds=["claude", "pi"],
+            models=[],
             encrypted_api_key=ct,
             key_id=key_id,
             is_default=True,

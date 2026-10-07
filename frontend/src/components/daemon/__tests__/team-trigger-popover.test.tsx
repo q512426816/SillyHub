@@ -395,7 +395,7 @@ describe("TeamTriggerPopover 编辑回显（initialConfig）", () => {
         mainAgentConfig: {
           agent_type: "codex",
           provider: "gpt",
-          model: "gpt-5",
+          models: [{ name: "gpt-5", roles: ["sonnet"] }],
         },
         workerPreset: [
           { agent_type: "claude_code", model: "", objective: "查风险", role: "risk" },
@@ -428,7 +428,7 @@ describe("TeamTriggerPopover 编辑回显（initialConfig）", () => {
     expect(lastPayload().main_agent_config).toEqual({
       agent_type: "codex",
       provider: "gpt",
-      model: "gpt-5",
+      models: [{ name: "gpt-5", roles: ["sonnet"] }],
     });
     expect(lastPayload().worker_preset).toHaveLength(1);
   });

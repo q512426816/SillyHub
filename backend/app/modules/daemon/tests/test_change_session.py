@@ -1041,7 +1041,7 @@ class TestSessionCreateRequestDto:
             agent_kinds=["claude"],
             encrypted_api_key=ct,
             key_id=key_id,
-            model="t02-model",
+            models=[{"name": "t02-model", "roles": ["sonnet"]}],
             api_format="anthropic",
         )
         db_session.add_all([profile, provider_row])

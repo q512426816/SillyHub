@@ -420,13 +420,14 @@ export function SessionConfigBar({
    */
   const modelCandidates = useMemo(() => {
     if (!selectedProvider) return [] as string[];
-    const raw: (string | null | undefined)[] = [
-      selectedProvider.model,
-      selectedProvider.default_fallback_model,
-      ...Object.values(selectedProvider.model_role_mappings ?? {}).map(
-        (m) => m?.model,
-      ),
-    ];
+    // D-001：下拉源 = 供应商模型列表条目名（主模型置顶）。
+    const entries = selectedProvider.models ?? [];
+    const primaryIdx = entries.findIndex((m) => m.roles?.includes("sonnet"));
+    const ordered =
+      primaryIdx > 0
+        ? [entries[primaryIdx], ...entries.filter((_, i) => i !== primaryIdx)]
+        : entries;
+    const raw: (string | null | undefined)[] = ordered.map((m) => m?.name);
     const seen = new Set<string>();
     const models: string[] = [];
     for (const m of raw) {
@@ -762,7 +763,10 @@ export function SessionConfigBar({
                   key={p.id}
                   icon={<Cloud aria-hidden className="h-3 w-3" />}
                   label={p.name}
-                  sub={p.model ?? undefined}
+                  sub={
+                    p.models?.find((m) => m.roles?.includes("sonnet"))?.name ??
+                    p.models?.[0]?.name ?? undefined
+                  }
                   current={p.id === llmProviderId}
                   onClick={() =>
                     executeSwitch({

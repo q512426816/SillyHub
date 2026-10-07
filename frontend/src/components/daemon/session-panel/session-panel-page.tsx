@@ -2637,8 +2637,10 @@ export function SessionPanelPage({
     () => resolveCtxRoleMapping(ctxProvider),
     [ctxProvider],
   );
+  // D-001：主模型派生（sonnet 首条 ?? 列表首条）。
   const ctxFallbackModel =
-    ctxProvider?.default_fallback_model ?? ctxProvider?.model ?? null;
+    ctxProvider?.models?.find((m) => m.roles?.includes("sonnet"))?.name ??
+    ctxProvider?.models?.[0]?.name ?? null;
   const usedTokens = useMemo(
     () => latestCtxTokens(displayTurns),
     [displayTurns],

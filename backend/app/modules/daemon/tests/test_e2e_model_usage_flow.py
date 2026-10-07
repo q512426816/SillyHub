@@ -58,7 +58,7 @@ async def _seed_provider(db_session: AsyncSession, uid: uuid.UUID) -> uuid.UUID:
         agent_kinds=["claude"],
         encrypted_api_key=ct,
         key_id=key_id,
-        model="glm-4.7",
+        models=[{"name": "glm-4.7", "roles": ["sonnet"]}],
         api_format="anthropic",
         is_default=False,
     )

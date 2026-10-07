@@ -50041,6 +50041,14 @@
             "minItems": 1,
             "title": "Agent Kinds"
           },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderModelEntry"
+            },
+            "type": "array",
+            "title": "Models",
+            "default": []
+          },
           "base_url": {
             "anyOf": [
               {
@@ -50062,17 +50070,6 @@
               }
             ],
             "title": "Api Key"
-          },
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model"
           },
           "notes": {
             "anyOf": [
@@ -50111,29 +50108,6 @@
             "title": "Api Format",
             "default": "anthropic"
           },
-          "model_role_mappings": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Role Mappings"
-          },
-          "default_fallback_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Fallback Model"
-          },
           "extra_env": {
             "anyOf": [
               {
@@ -50162,18 +50136,6 @@
             "type": "boolean",
             "title": "Is Default",
             "default": false
-          },
-          "multimodal": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(auto|true|false)$"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Multimodal"
           }
         },
         "type": "object",
@@ -50310,6 +50272,13 @@
             "type": "array",
             "title": "Agent Kinds"
           },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderModelEntry"
+            },
+            "type": "array",
+            "title": "Models"
+          },
           "base_url": {
             "anyOf": [
               {
@@ -50320,17 +50289,6 @@
               }
             ],
             "title": "Base Url"
-          },
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model"
           },
           "notes": {
             "anyOf": [
@@ -50361,29 +50319,6 @@
           "api_format": {
             "type": "string",
             "title": "Api Format"
-          },
-          "model_role_mappings": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Role Mappings"
-          },
-          "default_fallback_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Fallback Model"
           },
           "extra_env": {
             "anyOf": [
@@ -50424,11 +50359,6 @@
             ],
             "title": "Api Key Masked"
           },
-          "multimodal": {
-            "type": "string",
-            "title": "Multimodal",
-            "default": "auto"
-          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -50446,14 +50376,12 @@
           "user_id",
           "name",
           "agent_kinds",
+          "models",
           "base_url",
-          "model",
           "notes",
           "website_url",
           "auth_field",
           "api_format",
-          "model_role_mappings",
-          "default_fallback_model",
           "extra_env",
           "is_default",
           "created_at",
@@ -50495,17 +50423,6 @@
               }
             ],
             "title": "Api Key"
-          },
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model"
           },
           "notes": {
             "anyOf": [
@@ -50576,28 +50493,19 @@
             ],
             "title": "Agent Kinds"
           },
-          "model_role_mappings": {
+          "models": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "items": {
+                  "$ref": "#/components/schemas/ProviderModelEntry"
+                },
+                "type": "array"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Model Role Mappings"
-          },
-          "default_fallback_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Fallback Model"
+            "title": "Models"
           },
           "extra_env": {
             "anyOf": [
@@ -50633,18 +50541,6 @@
               }
             ],
             "title": "Is Default"
-          },
-          "multimodal": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^(auto|true|false)$"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Multimodal"
           }
         },
         "type": "object",
@@ -60402,6 +60298,50 @@
           "decision"
         ],
         "title": "ProposalReviewRequest"
+      },
+      "ProviderModelEntry": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name"
+          },
+          "multimodal": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "true",
+              "false"
+            ],
+            "title": "Multimodal",
+            "default": "auto"
+          },
+          "roles": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "sonnet",
+                "opus",
+                "fable",
+                "haiku"
+              ]
+            },
+            "type": "array",
+            "title": "Roles",
+            "default": []
+          },
+          "one_m": {
+            "type": "boolean",
+            "title": "One M",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ProviderModelEntry",
+        "description": "模型条目（change 2026-10-06-provider-model-list / D-001/D-002）。\n\n一条模型的自包含配置：多模态三态（auto=按模型名启发式，D-03）+ 可选 Claude\n角色标记（可多标，同角色多条时注入取首条）+ one_m（1M 上下文勾选，daemon\n消费面拼 [1m] 后缀语义不变）。"
       },
       "ProviderModelUsageRead": {
         "properties": {

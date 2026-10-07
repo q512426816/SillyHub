@@ -789,11 +789,15 @@ async def _assemble_group_inject_attachments(
     ``assemble_attachments``（与单聊 inject/create 路径单源）。
     """
     provider = member.provider or "claude"
+    # D-003：群成员生效模型透传（config_snapshot.model；无则 None 走主模型条目兜底）。
     supports = await attachment_pipeline.resolve_multimodal_gate(
         svc._session,
         user_id=owner_user_id,
         session_llm_provider_id=member.llm_provider_id,
         agent_kind=provider,
+        model_name=(member.config_snapshot or {}).get("model")
+        if isinstance(member.config_snapshot, dict)
+        else None,
     )
     return await attachment_pipeline.assemble_attachments(rows, supports_multimodal=supports)
 

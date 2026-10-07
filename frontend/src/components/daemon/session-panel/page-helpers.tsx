@@ -495,12 +495,16 @@ export function findProviderById(
 export function isMultimodalDowngraded(
   provider: LlmProviderRead | null,
 ): boolean {
+  // D-003：多模态下沉模型条目——主模型条目（sonnet 首条 ?? 列表首条）三态判定。
   if (!provider) return false;
-  if (provider.multimodal === "false") return true;
-  if (provider.multimodal === "true") return false;
+  const models = provider.models ?? [];
+  const entry =
+    models.find((m) => m.roles?.includes("sonnet")) ?? models[0] ?? null;
+  if (!entry) return false;
+  if (entry.multimodal === "false") return true;
+  if (entry.multimodal === "true") return false;
   // auto：前端同源启发式（backend capability.py 权威；此处仅提示条预览）。
-  const model = provider.model ?? provider.default_fallback_model ?? "";
-  const lowered = model.toLowerCase();
+  const lowered = (entry.name ?? "").toLowerCase();
   return !/(vision|vl|glm-[34]\.\d+v|gpt-4o|gpt-4\.1|gpt-5|claude|gemini|qwen-vl|doubao-seed)/.test(
     lowered,
   );
@@ -538,9 +542,12 @@ export function resolveAgentDisplayName(
 export function resolveCtxRoleMapping(
   ctxProvider: LlmProviderRead | null,
 ): LlmProviderRoleMapping | null {
-  const mrm = ctxProvider?.model_role_mappings;
-  if (!mrm) return null;
-  return mrm["sonnet"] ?? Object.values(mrm)[0] ?? null;
+  // D-001：主模型条目折算为 ctx 环分母（one_m 语义保留）。
+  const models = ctxProvider?.models ?? [];
+  const entry =
+    models.find((m) => m.roles?.includes("sonnet")) ?? models[0] ?? null;
+  if (!entry) return null;
+  return { model: entry.name, one_m: entry.one_m === true };
 }
 
 /** ctx 环分子（task-08 / FR-01 改口径）：displayTurns 逆序第一个非 null ctxTokens。 */

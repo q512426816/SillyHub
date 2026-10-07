@@ -95,6 +95,7 @@ async def _resolve_inject_gate(
     user_id: uuid.UUID,
     gate_provider_id_basis: uuid.UUID | None,
     agent_kind: str,
+    model_name: str | None = None,
 ) -> bool:
     """多模态门控判定（D-9）。返回 ``supports_multimodal``。
 
@@ -110,6 +111,7 @@ async def _resolve_inject_gate(
         user_id=user_id,
         session_llm_provider_id=gate_provider_id_basis,
         agent_kind=agent_kind,
+        model_name=model_name,
     )
 
 
@@ -191,6 +193,7 @@ async def _preassemble_inject_attachments(
         user_id=pre.user_id,
         gate_provider_id_basis=gate_basis,
         agent_kind=pre.provider or "",
+        model_name=(pre.config_snapshot or {}).get("model"),
     )
     payload = await svc._assemble_inject_attachment_payload(rows, supports_multimodal=supports)
     return _PrelockedInjectAttachments(
@@ -199,6 +202,7 @@ async def _preassemble_inject_attachments(
         gate_supports_multimodal=supports,
         gate_provider_id_basis=gate_basis,
         agent_kind=pre.provider or "",
+        pre_model=(pre.config_snapshot or {}).get("model"),
     )
 
 
@@ -286,6 +290,7 @@ async def assemble_create_attachments(
             user_id=user_id,
             session_llm_provider_id=(llm_provider_row.id if llm_provider_row is not None else None),
             agent_kind=provider,
+            model_name=(session.config_snapshot or {}).get("model"),
         )
         return await attachment_pipeline.assemble_attachments(
             validated_attachments, supports_multimodal=_gate_supports
@@ -345,6 +350,7 @@ async def _finalize_inject_turn_writes(
             basis_same = (
                 prelocked_attachments.gate_provider_id_basis == session.llm_provider_id
                 and prelocked_attachments.agent_kind == session.provider
+                and prelocked_attachments.pre_model == (session.config_snapshot or {}).get("model")
             )
             if basis_same:
                 inject_attachments = list(prelocked_attachments.inject_attachments)

@@ -64,6 +64,33 @@ def _normalize_lease_provider(raw: str | None) -> str | None:
     return raw
 
 
+def _fold_provider_models(provider) -> tuple[dict | None, str | None]:
+    """把 models 列表折算成 daemon injector 消费键（D-002，task-04）。
+
+    返回 (model_role_mappings, primary)：
+    - mappings 形态与旧列时代逐字一致 ``{role: {model, one_m}}``（同角色多条
+      取首条——injector 单值语义）；
+    - primary = sonnet 首条 ?? 列表首条 ?? None（主模型派生）。
+    """
+    models = getattr(provider, "models", None) or []
+    mappings: dict = {}
+    primary = None
+    for e in models:
+        name = e.get("name")
+        if not name:
+            continue
+        if primary is None:
+            primary = name
+        for role in e.get("roles") or []:
+            if role not in mappings:
+                mappings[role] = {"model": name, "one_m": bool(e.get("one_m"))}
+    for e in models:
+        if "sonnet" in (e.get("roles") or []):
+            primary = e["name"]
+            break
+    return (mappings or None), primary
+
+
 async def resolve_default_provider_config(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -129,7 +156,7 @@ async def resolve_default_provider_config(
             "litellm_proxy": True,
             "litellm_base_url": f"{settings.hub_proxy_base_url.rstrip('/')}/api/daemon/llm-proxy",
             "litellm_model_name": litellm_model_name(user_id, provider.id),
-            "model": provider.model,
+            "model": _fold_provider_models(provider)[1],
         }
 
     # anthropic 分支（现有 9 字段，逐字不变，NFR-02 零回归）。
@@ -140,9 +167,11 @@ async def resolve_default_provider_config(
         "base_url": provider.base_url,
         "api_key": api_key_plain,
         "auth_field": provider.auth_field,
-        "model": provider.model,
-        "model_role_mappings": provider.model_role_mappings,
-        "default_fallback_model": provider.default_fallback_model,
+        # D-001：两键同值 = 会话所选（调用方覆写）?? 主模型派生（Grill P1-1 与
+        # attachments.py 双键覆写现状逐字对齐）；mappings 由条目折算形态不变。
+        **dict.fromkeys(("model", "default_fallback_model"), _fold_provider_models(provider)[1]),
+        "model_role_mappings": _fold_provider_models(provider)[0],
+        "models": list(getattr(provider, "models", None) or []),
         "extra_env": provider.extra_env,
         # task-04(D-009 / design §5.2):原样透传 settings_config,不解密/不加工/不判空。
         # None(含 task-01 brownfield 老行)照传 None,daemon 侧 ?.env ?? {} 链路判空。
@@ -203,7 +232,7 @@ async def resolve_bound_provider_config(
             "litellm_proxy": True,
             "litellm_base_url": f"{settings.hub_proxy_base_url.rstrip('/')}/api/daemon/llm-proxy",
             "litellm_model_name": litellm_model_name(provider.user_id, provider.id),
-            "model": provider.model,
+            "model": _fold_provider_models(provider)[1],
         }
 
     from app.core.crypto import get_cipher
@@ -214,9 +243,11 @@ async def resolve_bound_provider_config(
         "base_url": provider.base_url,
         "api_key": api_key_plain,
         "auth_field": provider.auth_field,
-        "model": provider.model,
-        "model_role_mappings": provider.model_role_mappings,
-        "default_fallback_model": provider.default_fallback_model,
+        # D-001：两键同值 = 会话所选（调用方覆写）?? 主模型派生（Grill P1-1 与
+        # attachments.py 双键覆写现状逐字对齐）；mappings 由条目折算形态不变。
+        **dict.fromkeys(("model", "default_fallback_model"), _fold_provider_models(provider)[1]),
+        "model_role_mappings": _fold_provider_models(provider)[0],
+        "models": list(getattr(provider, "models", None) or []),
         "extra_env": provider.extra_env,
         "settings_config": provider.settings_config,
     }

@@ -110,6 +110,8 @@ class _PrelockedInjectAttachments:
     gate_supports_multimodal: bool
     gate_provider_id_basis: uuid.UUID | None
     agent_kind: str
+    # D-003：预组装时模型快照（锁内复核模型漂移用）
+    pre_model: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

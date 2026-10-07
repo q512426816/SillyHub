@@ -12,6 +12,34 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+class ProviderModelEntry(BaseModel):
+    """模型条目（change 2026-10-06-provider-model-list / D-001/D-002）。
+
+    一条模型的自包含配置：多模态三态（auto=按模型名启发式，D-03）+ 可选 Claude
+    角色标记（可多标，同角色多条时注入取首条）+ one_m（1M 上下文勾选，daemon
+    消费面拼 [1m] 后缀语义不变）。
+    """
+
+    name: str = Field(min_length=1)
+    multimodal: Literal["auto", "true", "false"] = "auto"
+    roles: list[Literal["sonnet", "opus", "fable", "haiku"]] = Field(default=[])
+    one_m: bool = False
+
+    @field_validator("roles")
+    @classmethod
+    def _dedupe_roles(cls, v: list[str]) -> list[str]:
+        """保序去重（重复角色归一）。"""
+        return list(dict.fromkeys(v))
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("模型名不能为空白")
+        return v
+
+
 class LlmProviderCreate(BaseModel):
     name: str
     # task-04（2026-09-10-review-dispatch-platform-fixes / D-002@v1）：放开 pi——
@@ -22,9 +50,9 @@ class LlmProviderCreate(BaseModel):
     # 可服务多个引擎，至少一个（min_length=1，无默认值，必须显式传）；保序去重
     # （["claude","claude"] 归一为 ["claude"]，validator 见下）。
     agent_kinds: list[Literal["claude", "pi", "codex"]] = Field(min_length=1)
+    models: list[ProviderModelEntry] = []
     base_url: str | None = None
     api_key: str | None = None
-    model: str | None = None
     notes: str | None = None
     website_url: str | None = None
     # task-04（2026-09-10-review-dispatch-platform-fixes / D-002@v1）：auth_field 由
@@ -33,13 +61,9 @@ class LlmProviderCreate(BaseModel):
     # 天然命中本 pattern，缺省值不变（零回归）。
     auth_field: str = Field(default="ANTHROPIC_AUTH_TOKEN", pattern=r"^[A-Z][A-Z0-9_]*$")
     api_format: Literal["anthropic", "openai_chat"] = "anthropic"
-    model_role_mappings: dict[str, Any] | None = None
-    default_fallback_model: str | None = None
     extra_env: dict[str, Any] | None = None
     settings_config: dict[str, Any] | None = None
     is_default: bool = False
-    # 2026-08-20 task-12（D-9）：多模态三态；None=不动（更新）/auto（创建默认走列默认）。
-    multimodal: str | None = Field(default=None, pattern="^(auto|true|false)$")
 
     @field_validator("agent_kinds")
     @classmethod
@@ -70,7 +94,6 @@ class LlmProviderUpdate(BaseModel):
     name: str | None = None
     base_url: str | None = None
     api_key: str | None = None  # None = 不动原密钥
-    model: str | None = None
     notes: str | None = None
     website_url: str | None = None
     # task-04（2026-09-10-review-dispatch-platform-fixes）：与 Create 同款 env 名
@@ -80,12 +103,11 @@ class LlmProviderUpdate(BaseModel):
     # 引擎集合可编辑（D-004/D-006）：None=不动；非 None 时至少一个 + 保序去重
     # （validator 见下，与 Create 同口径）。
     agent_kinds: list[Literal["claude", "pi", "codex"]] | None = Field(default=None, min_length=1)
-    model_role_mappings: dict[str, Any] | None = None
-    default_fallback_model: str | None = None
+    # 模型列表（D-001）：None=不动；非 None 时整表替换（条目级编辑在前端完成）。
+    models: list[ProviderModelEntry] | None = None
     extra_env: dict[str, Any] | None = None
     settings_config: dict[str, Any] | None = None
     is_default: bool | None = None
-    multimodal: str | None = Field(default=None, pattern="^(auto|true|false)$")
 
     @field_validator("agent_kinds")
     @classmethod
@@ -103,23 +125,19 @@ class LlmProviderRead(BaseModel):
     user_id: uuid.UUID
     name: str
     agent_kinds: list[str]
+    models: list[ProviderModelEntry]
     base_url: str | None
-    model: str | None
     notes: str | None
     website_url: str | None
     auth_field: str
     api_format: str
-    model_role_mappings: dict[str, Any] | None
-    default_fallback_model: str | None
     extra_env: dict[str, Any] | None
     settings_config: dict[str, Any] | None = None
     is_default: bool
     # service _to_read 算后注入（默认 None = 安全方向，绝不泄漏明文，规则 X-09）
     api_key_masked: str | None = None
-    # 2026-08-20-session-multimodal-attachments task-05（D-9）：多模态能力三态
-    # （auto/true/false）。auto = 按生效模型名启发式推断（capability.py），
-    # true/false = 手动覆盖（中转站别名权威来源）。直映射列默认值。
-    multimodal: str = "auto"
+    # 多模态三态已下沉到模型条目（ProviderModelEntry.multimodal，D-003）；
+    # 供应商级字段退役（2026-10-06-provider-model-list）。
     created_at: datetime
     updated_at: datetime
 
@@ -247,6 +265,7 @@ class LlmProviderQuotaWindow(BaseModel):
 class LlmProviderQuotaData(BaseModel):
     """quota 非 null 载荷（design §7.1）：``{model, windows[]}``。"""
 
+    # 主模型名回显（router 层由 models 列表派生传入，usage_handlers 契约键）。
     model: str | None = None
     windows: list[LlmProviderQuotaWindow] = []
 

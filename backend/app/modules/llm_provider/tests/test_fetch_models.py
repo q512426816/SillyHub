@@ -722,7 +722,7 @@ async def _seed_default_provider(
         base_url="https://api.anthropic.com",
         encrypted_api_key=ct,
         key_id=key_id,
-        model="claude-sonnet-4",
+        models=[{"name": "claude-sonnet-4", "roles": ["sonnet"]}],
         auth_field="ANTHROPIC_AUTH_TOKEN",
         is_default=True,
         settings_config=settings_config,  # task-04 透传字段

@@ -274,7 +274,7 @@ class TestApiFormatPassthrough:
                 agent_kinds=["claude"],
                 api_key="sk-create-openai-1234",
                 base_url="https://opencode.ai/zen/v1/chat/completions",
-                model="zen-1",
+                models=[{"name": "zen-1", "roles": ["sonnet"]}],
                 api_format="openai_chat",
             ),
         )

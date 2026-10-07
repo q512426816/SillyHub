@@ -70,12 +70,10 @@ const READ = {
   name: "Kimi 中转",
   agent_kinds: ["claude"],
   base_url: "https://api.moonshot.cn/anthropic",
-  model: null,
+  models: [],
   notes: null,
   website_url: null,
   auth_field: "ANTHROPIC_AUTH_TOKEN",
-  model_role_mappings: null,
-  default_fallback_model: "kimi-k2",
   extra_env: null,
   is_default: false,
   api_key_masked: "sk-1...abcd",
@@ -90,15 +88,9 @@ const FORM_VALUES: LlmProviderFormValues = {
   api_key: "sk-secret-1234",
   auth_field: "ANTHROPIC_AUTH_TOKEN",
   api_format: "anthropic",
+  models: [{ name: "kimi-k2", multimodal: "auto", roles: ["sonnet"], one_m: false }],
   notes: "公司专用",
   website_url: "https://moonshot.cn",
-  model_role_mappings: {
-    sonnet: { display: "Kimi K2", model: "kimi-k2", one_m: false },
-    opus: { display: "", model: "deepseek-v4-pro", one_m: true },
-    fable: { display: "", model: "", one_m: false }, // 空行，应被清洗丢弃
-    haiku: { display: "", model: "kimi-k2", one_m: false },
-  },
-  default_fallback_model: "kimi-k2",
   extra_env: {
     API_TIMEOUT_MS: "3000000",
     "": "should-drop", // 空键丢弃
@@ -167,16 +159,10 @@ describe("formToCreate — 表单值 → POST body 映射", () => {
     expect(body.agent_kinds).toEqual(["claude"]);
     expect(body.api_key).toBe("sk-secret-1234");
     expect(body.auth_field).toBe("ANTHROPIC_AUTH_TOKEN");
-    expect(body.default_fallback_model).toBe("kimi-k2");
-
-    // 角色映射：fable 空行被丢弃，sonnet/opus/haiku 保留
-    const m = body.model_role_mappings;
-    expect(m).not.toBeNull();
-    expect(Object.keys(m!).sort()).toEqual(["haiku", "opus", "sonnet"]);
-    expect(m!.sonnet).toEqual({ display: "Kimi K2", model: "kimi-k2", one_m: false });
+    // D-001：models 整表透传（条目级清洗归表单）
+    expect(body.models!.length).toBeGreaterThan(0);
+    expect(body.models![0]!.name).toBe("kimi-k2");
     // opus 有 model 且 one_m=true → one_m 随 model 携带
-    expect(m!.opus).toEqual({ model: "deepseek-v4-pro", one_m: true });
-    expect(m!.haiku).toEqual({ model: "kimi-k2", one_m: false });
 
     // extra_env：空键丢弃，其余保留
     expect(body.extra_env).toEqual({
@@ -188,19 +174,13 @@ describe("formToCreate — 表单值 → POST body 映射", () => {
   it("全部高级项为空时 model_role_mappings/extra_env 落 null", () => {
     const body = formToCreate({
       ...FORM_VALUES,
-      model_role_mappings: {
-        sonnet: { display: "", model: "", one_m: false },
-        opus: { display: "", model: "", one_m: false },
-        fable: { display: "", model: "", one_m: false },
-        haiku: { display: "", model: "", one_m: false },
-      },
+      models: [],
       extra_env: {},
-      default_fallback_model: "",
       api_key: "sk-x",
     });
-    expect(body.model_role_mappings).toBeNull();
+    expect(body.models).toEqual([]);
     expect(body.extra_env).toBeNull();
-    expect(body.default_fallback_model).toBeNull();
+    expect(body.models).toEqual([]);
     expect(body.api_key).toBe("sk-x");
   });
 });
@@ -224,13 +204,8 @@ describe("formToUpdate — api_key 留空不出现在 PATCH body（铁律）", (
     expect(body.api_key).toBe("sk-new-4567");
   });
 
-  it("角色映射与 extra_env 同样走清洗", () => {
+  it("extra_env 清洗（角色映射断言已随旧字段退役）", () => {
     const body = formToUpdate(FORM_VALUES);
-    expect(body.model_role_mappings).not.toBeNull();
-    expect(body.model_role_mappings!.opus).toEqual({
-      model: "deepseek-v4-pro",
-      one_m: true,
-    });
     expect(body.extra_env).toEqual({
       API_TIMEOUT_MS: "3000000",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
@@ -243,27 +218,6 @@ describe("formToUpdate — api_key 留空不出现在 PATCH body（铁律）", (
   });
 });
 
-describe("cleanRoleMappings — 边界", () => {
-  it("null/undefined → null", () => {
-    expect(cleanRoleMappings(null)).toBeNull();
-    expect(cleanRoleMappings(undefined)).toBeNull();
-  });
-
-  it("仅 display 无 model → 保留 display，不带 one_m", () => {
-    const out = cleanRoleMappings({
-      sonnet: { display: "展示名", model: "", one_m: true },
-    });
-    expect(out).toEqual({ sonnet: { display: "展示名" } });
-  });
-
-  it("one_m 仅在 model 有值时携带", () => {
-    const out = cleanRoleMappings({
-      opus: { model: "opus-4", one_m: true },
-      haiku: { display: "", model: "", one_m: true }, // 无 model → 整行丢弃
-    });
-    expect(out).toEqual({ opus: { model: "opus-4", one_m: true } });
-  });
-});
 
 describe("cleanExtraEnv — 边界", () => {
   it("null/undefined → null", () => {

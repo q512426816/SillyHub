@@ -511,6 +511,7 @@ async def _make_llm_provider(
             id=provider_id,
             user_id=user_id,
             agent_kinds=[agent_kind],
+            models=[],
             name=name,
             api_format=api_format,
             is_default=is_default,

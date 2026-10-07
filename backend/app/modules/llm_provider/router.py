@@ -148,7 +148,9 @@ async def get_provider_quota(
     except SsrfBlocked:
         return LlmProviderQuotaResponse(quota=None)
 
-    quota = await query_zhipu_quota(base_url, api_key_plain, model=row.model)
+    quota = await query_zhipu_quota(
+        base_url, api_key_plain, model=LlmProviderService._derive_primary_model(row)
+    )
     return LlmProviderQuotaResponse(quota=quota)
 
 

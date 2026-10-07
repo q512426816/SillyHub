@@ -477,12 +477,14 @@ class SessionService(BackgroundTaskMixin):
         user_id: uuid.UUID,
         gate_provider_id_basis: uuid.UUID | None,
         agent_kind: str,
+        model_name: str | None = None,
     ) -> bool:
         return await _attachments._resolve_inject_gate(
             self,
             user_id=user_id,
             gate_provider_id_basis=gate_provider_id_basis,
             agent_kind=agent_kind,
+            model_name=model_name,
         )
 
     async def _assemble_inject_attachment_payload(

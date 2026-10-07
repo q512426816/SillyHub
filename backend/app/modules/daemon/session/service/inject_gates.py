@@ -611,19 +611,27 @@ async def _resolve_inject_turn_config(
     # 会话级选择」（非供应商原配）——下发 providerConfig 时才做 R-07
     # 快照同步；重置场景（②③）保持原样透传零回归。
     prior_model = (session.config_snapshot or {}).get("model")
+    from app.modules.llm_provider.service import LlmProviderService as _PSvc
+
     provider_original = (
-        (effective_provider.model or effective_provider.default_fallback_model)
-        if effective_provider is not None
-        else None
+        _PSvc._derive_primary_model(effective_provider) if effective_provider is not None else None
     )
     if selected_model is not None:
+        # D-001/FR-03：会话选模型非空必须 ∈ 供应商模型列表（切换轮在 provider_row
+        # 上校验；未带供应商切换的纯选模型轮在 effective_provider 上兜底校验）。
+        _model_list_provider = provider_row if provider_row is not None else effective_provider
+        if _model_list_provider is not None:
+            _names = [e.get("name") for e in (_model_list_provider.models or []) if e.get("name")]
+            if selected_model not in _names:
+                raise DaemonSessionConfigInvalid(
+                    f"所选模型不在供应商模型列表内：{selected_model}（可用：{', '.join(_names[:8])}）",
+                    details={"model": selected_model, "available": _names},
+                )
         effective_model: str | None = selected_model
         model_override = True
     elif provider_changed:
         effective_model = (
-            (provider_row.model or provider_row.default_fallback_model)
-            if provider_row is not None
-            else None
+            _PSvc._derive_primary_model(provider_row) if provider_row is not None else None
         )
         model_override = False
     elif model_reset:

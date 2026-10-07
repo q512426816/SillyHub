@@ -644,7 +644,6 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
     expect(caps).toEqual({
       resume: true,
       mcp: false,
-      multimodal: false,
       attachments: true,
       thinking: true,
       subagent: false,
@@ -666,7 +665,6 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
     expect(getProviderCaps("unknown-engine")).toEqual({
       resume: false,
       mcp: false,
-      multimodal: false,
       attachments: false,
       thinking: false,
       subagent: false,

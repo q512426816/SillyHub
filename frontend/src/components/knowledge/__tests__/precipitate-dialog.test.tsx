@@ -629,7 +629,7 @@ describe("PrecipitateDialog · D-010 快速修复多选 + D-009 派谁去干", (
       focus: null,
       mode: "fresh",
       llm_provider_id: PROVIDER_ID,
-      model: "glm-4.7",
+      models: [{ name: "glm-4.7", roles: ["sonnet"] }],
     });
   });
 

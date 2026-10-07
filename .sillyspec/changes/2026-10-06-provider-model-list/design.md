@@ -124,6 +124,8 @@ models: [
 | 修改 | backend/tests/modules/daemon/lease/test_provider_config_payload.py | claim payload 契约（两键同值 + models 键） |
 | 修改 | backend/app/modules/session_attachment/tests/test_capability.py | 门控三态×列表用例 |
 | 修改 | frontend/src/components/llm-providers/__tests__/ | 表单编辑器用例 |
+| 修改 | backend/app/modules/mcp_gateway/tests/test_tools_new.py | fixture 适配：_make_llm_provider 补 models=[] 必填列（执行期合理偏差，verify 收口补声明） |
+| 修改 | frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx | mock 适配：llm_provider payload model 字段切 models 条目形态（执行期合理偏差，verify 收口补声明） |
 
 （已核查无需改动：sillyhub-daemon 仓全部——injector 消费键 model/model_role_mappings/default_fallback_model 形态逐字保留。probe/quota 链的 row.model 取值切换已入 service.py/router.py 清单行，N-2。）
 

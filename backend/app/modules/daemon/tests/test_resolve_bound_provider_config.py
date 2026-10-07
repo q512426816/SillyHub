@@ -72,7 +72,7 @@ async def _seed_provider(
         encrypted_api_key=ct,
         key_id=key_id,
         base_url=base_url,
-        model=model,
+        models=[{"name": model, "roles": ["sonnet"]}],
         is_default=is_default,
         api_format=api_format,
     )

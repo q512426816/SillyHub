@@ -50,18 +50,15 @@ type FormMode =
 
 /** 摘要：默认模型 / 角色映射，供列表行展示。 */
 function modelSummary(p: LlmProviderRead): { primary: string; secondary: string } {
-  const fallback = p.default_fallback_model ?? p.model ?? "";
-  const m = p.model_role_mappings ?? {};
+  // D-001：主模型条目 + 行内角色标记摘要。
+  const models = p.models ?? [];
+  const primary = models.find((m) => m.roles?.includes("sonnet"))?.name ?? models[0]?.name ?? "";
   const mapped: string[] = [];
   for (const role of ROLE_ORDER) {
-    const model = m[role]?.model;
-    if (model) mapped.push(`${ROLE_LABELS[role]}→${model}`);
+    const entry = models.find((m) => m.roles?.includes(role));
+    if (entry) mapped.push(`${ROLE_LABELS[role]}→${entry.name}`);
   }
-  const suffix = mapped.length > 0 ? `角色映射：${mapped.join(" / ")}` : "";
-  return {
-    primary: fallback || (mapped.length > 0 ? "见角色映射" : "—"),
-    secondary: suffix,
-  };
+  return { primary, secondary: mapped.join(" · ") || (models.length > 1 ? `${models.length} 个模型` : "") };
 }
 
 export function LlmProviderSection() {

@@ -147,7 +147,7 @@ class TestGateAndAssembleCore:
         """gate 核心：基准参数透传 resolve_session_gate、返回 supports 标量。"""
         import app.modules.session_attachment.capability as capability_module
 
-        async def _fake_gate(db, *, user_id, session_llm_provider_id, agent_kind):
+        async def _fake_gate(db, *, user_id, session_llm_provider_id, agent_kind, model_name=None):
             return SimpleNamespace(
                 supports_multimodal=(agent_kind == "claude"), _basis=session_llm_provider_id
             )
@@ -170,7 +170,9 @@ class TestGateAndAssembleCore:
         """
         import app.modules.session_attachment.capability as capability_module
 
-        async def _always_supports(db, *, user_id, session_llm_provider_id, agent_kind):
+        async def _always_supports(
+            db, *, user_id, session_llm_provider_id, agent_kind, model_name=None
+        ):
             return SimpleNamespace(supports_multimodal=True)
 
         uid = uuid.uuid4()
@@ -277,7 +279,7 @@ class TestSessionWrapperEquivalence:
         """session ``_resolve_inject_gate``：基准口径计算留调用点、核心共享。"""
         import app.modules.session_attachment.capability as capability_module
 
-        async def _fake_gate(db, *, user_id, session_llm_provider_id, agent_kind):
+        async def _fake_gate(db, *, user_id, session_llm_provider_id, agent_kind, model_name=None):
             return SimpleNamespace(supports_multimodal=True, _seen=basis)
 
         basis = uuid.uuid4()
@@ -333,7 +335,7 @@ class TestGroupWrapperEquivalence:
 
         seen: dict[str, object] = {}
 
-        async def _fake_gate(db, *, user_id, session_llm_provider_id, agent_kind):
+        async def _fake_gate(db, *, user_id, session_llm_provider_id, agent_kind, model_name=None):
             seen.update(
                 user_id=user_id,
                 session_llm_provider_id=session_llm_provider_id,
@@ -369,7 +371,7 @@ class TestGroupWrapperEquivalence:
 
         seen: dict[str, object] = {}
 
-        async def _fake_gate(db, *, user_id, session_llm_provider_id, agent_kind):
+        async def _fake_gate(db, *, user_id, session_llm_provider_id, agent_kind, model_name=None):
             seen["agent_kind"] = agent_kind
             return SimpleNamespace(supports_multimodal=False)
 

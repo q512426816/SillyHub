@@ -180,8 +180,8 @@ beforeEach(() => {
   // task-07：fixture 补 agent_kind（真实后端 LlmProviderRead 恒有该字段；缺省
   // 项会被 kind 过滤滤掉——默认两供应商按 BASE_PROPS 引擎语境给 claude kind）。
   mocks.listProviders.mockReset().mockResolvedValue([
-    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kinds: ["claude"] },
-    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kinds: ["claude"] },
+    { id: "prov-kimi", name: "Kimi 中转", models: [{ name: "kimi-k2", roles: ["sonnet"] }], agent_kinds: ["claude"] },
+    { id: "prov-glm", name: "GLM 平台", models: [{ name: "glm-4.7", roles: ["sonnet"] }], agent_kinds: ["claude"] },
   ]);
   mocks.injectSession.mockReset().mockResolvedValue(INJECT_RESPONSE);
   // task-06（thinking-level）：GET 默认五档+现值 medium（会话态用例按需覆盖）；
@@ -420,10 +420,10 @@ describe("SessionConfigBar 切换供应商", () => {
 describe("SessionConfigBar 供应商下拉 kind 过滤（task-07 / FR-03 / D-002@v1）", () => {
   /** 三 kind 混合列表——断言各引擎只列同 kind 项 + 「不指定（本机默认）」保留。 */
   const MIXED_PROVIDERS = [
-    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kinds: ["claude"] },
-    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kinds: ["claude"] },
-    { id: "prov-codex-1", name: "Codex 专供", model: "gpt-5.2", agent_kinds: ["codex"] },
-    { id: "prov-pi-1", name: "Pi 专供", model: "glm-4.7-air", agent_kinds: ["pi"] },
+    { id: "prov-kimi", name: "Kimi 中转", models: [{ name: "kimi-k2", roles: ["sonnet"] }], agent_kinds: ["claude"] },
+    { id: "prov-glm", name: "GLM 平台", models: [{ name: "glm-4.7", roles: ["sonnet"] }], agent_kinds: ["claude"] },
+    { id: "prov-codex-1", name: "Codex 专供", models: [{ name: "gpt-5.2", roles: ["sonnet"] }], agent_kinds: ["codex"] },
+    { id: "prov-pi-1", name: "Pi 专供", models: [{ name: "glm-4.7-air", roles: ["sonnet"] }], agent_kinds: ["pi"] },
   ];
 
   /** 按引擎渲染并打开供应商下拉（engine null = provisional 悬浮助手形态）。 */
@@ -619,16 +619,13 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
   const GLM_PROVIDER = {
     id: "prov-glm",
     name: "GLM 平台",
-    model: "glm-4.7",
+    models: [
+      { name: "glm-4.7", roles: ["sonnet"] },
+      { name: "glm-4.6", roles: [] },
+      { name: "glm-4.5-air", roles: [] },
+    ],
     // task-07：kind 字段补齐（本组用例默认 claude 引擎语境；codex 分支内覆盖）。
     agent_kinds: ["claude"],
-    default_fallback_model: "glm-4.6",
-    model_role_mappings: {
-      sonnet: { model: "glm-4.7" }, // 与 model 重复 → 去重
-      opus: { model: "glm-4.5-air" },
-      haiku: { model: "" }, // 空串 → 过滤
-      fable: { display: "无模型角色" }, // 缺 model 键 → 过滤
-    },
   };
 
   it("选中供应商 → 模型子下拉出现，候选 = 三来源去重保序 + 首项「默认」", async () => {
@@ -640,7 +637,7 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     const values = Array.from(select.options).map((o) => o.value);
     // 首项固定「默认（跟随供应商配置）」value=""；随后 model → default_fallback
     // → role_mappings 按序去重（glm-4.7 重复只留一次；空串/缺键已过滤）。
-    expect(values).toEqual(["", "glm-4.7", "glm-4.6", "glm-4.5-air"]);
+    expect(values).toEqual(["", "glm-4.7", "glm-4.6", "glm-4.5-air"]);  // D-001：主模型置顶后全部条目
     expect(select.options[0]?.textContent).toBe("默认（跟随供应商配置）");
     // 快照无 model → 当前值即「默认」首项
     expect(select.value).toBe("");
@@ -710,7 +707,7 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     })) as HTMLSelectElement;
     // 候选照常三来源去重保序（首项「默认」）
     const values = Array.from(select.options).map((o) => o.value);
-    expect(values).toEqual(["", "glm-4.7", "glm-4.6", "glm-4.5-air"]);
+    expect(values).toEqual(["", "glm-4.7", "glm-4.6", "glm-4.5-air"]);  // D-001：主模型置顶后全部条目
     cleanup();
     // cursor 锁定：供应商+模型整块锁定，子下拉同锁不渲染（白名单外负例承接）
     mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);

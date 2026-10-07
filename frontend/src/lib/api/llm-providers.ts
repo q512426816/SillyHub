@@ -19,6 +19,16 @@ import { apiFetch } from "@/lib/api";
 // ── 嵌套结构 ────────────────────────────────────────────────────────────
 
 /**
+ * 模型列表条目（D-001：name + 多模态三态 + 角色多标 + one_m）。
+ */
+export interface ProviderModelEntry {
+  name: string;
+  multimodal: "auto" | "true" | "false";
+  roles: string[];
+  one_m: boolean;
+}
+
+/**
  * 单个角色的映射（model_role_mappings 的 value）。
  * - display：仅 UI 展示名，不影响实际请求。
  * - model：实际请求模型名；留空=该角色不注入（走默认兜底）。
@@ -63,15 +73,14 @@ export interface LlmProviderRead {
   name: string;
   agent_kinds: string[];
   base_url: string | null;
-  /** 兼容字段（= default_fallback_model 简写）；表单不直接编辑，仅展示/透传。 */
-  model: string | null;
+  /** 模型列表（D-001）。 */
+  models: ProviderModelEntry[];
   notes: string | null;
   website_url: string | null;
   auth_field: string;
   /** API 协议格式（D-001@v1）；老行迁移回填 "anthropic"。 */
   api_format: LlmProviderApiFormat;
-  model_role_mappings: Record<string, LlmProviderRoleMapping> | null;
-  default_fallback_model: string | null;
+  /** 旧三字段退役（D-001 迁移删除）。 */
   extra_env: Record<string, string> | null;
   /**
    * 高级配置片段（design §4 / D-004）：下发链路透传，daemon toEnv/settings.json
@@ -79,11 +88,6 @@ export interface LlmProviderRead {
    */
   settings_config?: Record<string, unknown> | null;
   is_default: boolean;
-  /**
-   * 2026-08-20-session-multimodal-attachments task-11（D-9）：多模态能力三态
-   * （auto=按模型名启发式 / true/false=手动覆盖）。前端附件区降级提示消费。
-   */
-  multimodal: "auto" | "true" | "false";
   /** 如 "sk-1...abcd"（首4...尾4），空 key → null，短 key → "****"。 */
   api_key_masked: string | null;
   created_at: string;
@@ -96,19 +100,16 @@ export interface LlmProviderCreate {
   agent_kinds: LlmProviderAgentKind[];
   base_url?: string | null;
   api_key?: string | null;
-  model?: string | null;
+  models?: ProviderModelEntry[];
   notes?: string | null;
   website_url?: string | null;
   auth_field: LlmProviderAuthField;
   /** API 协议格式（D-001@v1）；缺省后端默认 "anthropic"。 */
   api_format?: LlmProviderApiFormat;
-  model_role_mappings?: Record<string, LlmProviderRoleMapping> | null;
-  default_fallback_model?: string | null;
+
   extra_env?: Record<string, string> | null;
   /** 高级配置片段（design §4 / D-004）；null=清空/未配置。 */
   settings_config?: Record<string, unknown> | null;
-  /** task-12（D-9）：多模态三态（可选，缺省 auto）。 */
-  multimodal?: "auto" | "true" | "false";
 }
 
 /** PATCH body；全部可选。api_key undefined/null = 不动原密钥（后端 None 语义）。 */
@@ -117,7 +118,7 @@ export interface LlmProviderUpdate {
   base_url?: string | null;
   /** 仅在用户输入新值时携带；留空=保持原密钥。 */
   api_key?: string | null;
-  model?: string | null;
+  models?: ProviderModelEntry[];
   notes?: string | null;
   website_url?: string | null;
   auth_field?: LlmProviderAuthField;
@@ -125,13 +126,10 @@ export interface LlmProviderUpdate {
   agent_kinds?: LlmProviderAgentKind[];
   /** API 协议格式（D-001@v1）；可选，不传=不动。 */
   api_format?: LlmProviderApiFormat;
-  model_role_mappings?: Record<string, LlmProviderRoleMapping> | null;
-  default_fallback_model?: string | null;
+
   extra_env?: Record<string, string> | null;
   /** 高级配置片段（design §4 / D-004）；null=清空/未配置。 */
   settings_config?: Record<string, unknown> | null;
-  /** task-12（D-9）：多模态三态；不传=不动。 */
-  multimodal?: "auto" | "true" | "false";
 }
 
 export interface LlmProviderList {
@@ -144,10 +142,11 @@ export interface LlmProviderList {
 /**
  * 表单组件产出的中间形态；经 formToCreate / formToUpdate 映射为后端 body。
  * api_key：create 时必填、update 时空串=保持原密钥（不进 PATCH body）。
- * model_role_mappings：固定 4 行（sonnet/opus/fable/haiku），值含 display/model/one_m。
+ * models：模型列表条目（D-001，行内含多模态/角色标记/one_m）。
  * extra_env：KEY→VALUE 键值对（键重复后者覆盖）。
  */
 export interface LlmProviderFormValues {
+  models: ProviderModelEntry[];
   name: string;
   agent_kinds: LlmProviderAgentKind[];
   /** API 协议格式（D-001@v1）；表单下拉产出，default "anthropic"（task-05）。 */
@@ -157,8 +156,6 @@ export interface LlmProviderFormValues {
   auth_field: LlmProviderAuthField;
   notes: string;
   website_url: string;
-  model_role_mappings: Record<string, LlmProviderRoleMapping>;
-  default_fallback_model: string;
   extra_env: Record<string, string>;
   /**
    * 高级配置片段（design §4 / D-004；配置 JSON 面板 task-10 产出）。
@@ -448,11 +445,9 @@ export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
     notes: clean(v.notes) ?? null,
     website_url: clean(v.website_url) ?? null,
     auth_field: v.auth_field,
-    model_role_mappings: cleanRoleMappings(v.model_role_mappings),
-    default_fallback_model: clean(v.default_fallback_model) ?? null,
+    models: v.models,
     extra_env: cleanExtraEnv(v.extra_env),
     settings_config: cleanSettingsConfig(v.settings_config),
-    multimodal: v.multimodal ?? "auto",
   };
 }
 
@@ -472,11 +467,9 @@ export function formToUpdate(v: LlmProviderFormValues): LlmProviderUpdate {
     notes: clean(v.notes) ?? null,
     website_url: clean(v.website_url) ?? null,
     auth_field: v.auth_field,
-    model_role_mappings: cleanRoleMappings(v.model_role_mappings),
-    default_fallback_model: clean(v.default_fallback_model) ?? null,
+    models: v.models,
     extra_env: cleanExtraEnv(v.extra_env),
     settings_config: cleanSettingsConfig(v.settings_config),
-    ...(v.multimodal ? { multimodal: v.multimodal } : {}),
   };
   const apiKey = clean(v.api_key);
   if (apiKey) update.api_key = apiKey;

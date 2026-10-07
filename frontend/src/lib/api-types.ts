@@ -18243,12 +18243,15 @@ export interface components {
             name: string;
             /** Agent Kinds */
             agent_kinds: ("claude" | "pi" | "codex")[];
+            /**
+             * Models
+             * @default []
+             */
+            models: components["schemas"]["ProviderModelEntry"][];
             /** Base Url */
             base_url?: string | null;
             /** Api Key */
             api_key?: string | null;
-            /** Model */
-            model?: string | null;
             /** Notes */
             notes?: string | null;
             /** Website Url */
@@ -18264,12 +18267,6 @@ export interface components {
              * @enum {string}
              */
             api_format: "anthropic" | "openai_chat";
-            /** Model Role Mappings */
-            model_role_mappings?: {
-                [key: string]: unknown;
-            } | null;
-            /** Default Fallback Model */
-            default_fallback_model?: string | null;
             /** Extra Env */
             extra_env?: {
                 [key: string]: unknown;
@@ -18283,8 +18280,6 @@ export interface components {
              * @default false
              */
             is_default: boolean;
-            /** Multimodal */
-            multimodal?: string | null;
         };
         /** LlmProviderList */
         LlmProviderList: {
@@ -18348,10 +18343,10 @@ export interface components {
             name: string;
             /** Agent Kinds */
             agent_kinds: string[];
+            /** Models */
+            models: components["schemas"]["ProviderModelEntry"][];
             /** Base Url */
             base_url: string | null;
-            /** Model */
-            model: string | null;
             /** Notes */
             notes: string | null;
             /** Website Url */
@@ -18360,12 +18355,6 @@ export interface components {
             auth_field: string;
             /** Api Format */
             api_format: string;
-            /** Model Role Mappings */
-            model_role_mappings: {
-                [key: string]: unknown;
-            } | null;
-            /** Default Fallback Model */
-            default_fallback_model: string | null;
             /** Extra Env */
             extra_env: {
                 [key: string]: unknown;
@@ -18378,11 +18367,6 @@ export interface components {
             is_default: boolean;
             /** Api Key Masked */
             api_key_masked?: string | null;
-            /**
-             * Multimodal
-             * @default auto
-             */
-            multimodal: string;
             /**
              * Created At
              * Format: date-time
@@ -18402,8 +18386,6 @@ export interface components {
             base_url?: string | null;
             /** Api Key */
             api_key?: string | null;
-            /** Model */
-            model?: string | null;
             /** Notes */
             notes?: string | null;
             /** Website Url */
@@ -18414,12 +18396,8 @@ export interface components {
             api_format?: ("anthropic" | "openai_chat") | null;
             /** Agent Kinds */
             agent_kinds?: ("claude" | "pi" | "codex")[] | null;
-            /** Model Role Mappings */
-            model_role_mappings?: {
-                [key: string]: unknown;
-            } | null;
-            /** Default Fallback Model */
-            default_fallback_model?: string | null;
+            /** Models */
+            models?: components["schemas"]["ProviderModelEntry"][] | null;
             /** Extra Env */
             extra_env?: {
                 [key: string]: unknown;
@@ -18430,8 +18408,6 @@ export interface components {
             } | null;
             /** Is Default */
             is_default?: boolean | null;
-            /** Multimodal */
-            multimodal?: string | null;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -21784,6 +21760,34 @@ export interface components {
              * @default true
              */
             notify_session: boolean;
+        };
+        /**
+         * ProviderModelEntry
+         * @description 模型条目（change 2026-10-06-provider-model-list / D-001/D-002）。
+         *
+         *     一条模型的自包含配置：多模态三态（auto=按模型名启发式，D-03）+ 可选 Claude
+         *     角色标记（可多标，同角色多条时注入取首条）+ one_m（1M 上下文勾选，daemon
+         *     消费面拼 [1m] 后缀语义不变）。
+         */
+        ProviderModelEntry: {
+            /** Name */
+            name: string;
+            /**
+             * Multimodal
+             * @default auto
+             * @enum {string}
+             */
+            multimodal: "auto" | "true" | "false";
+            /**
+             * Roles
+             * @default []
+             */
+            roles: ("sonnet" | "opus" | "fable" | "haiku")[];
+            /**
+             * One M
+             * @default false
+             */
+            one_m: boolean;
         };
         /**
          * ProviderModelUsageRead

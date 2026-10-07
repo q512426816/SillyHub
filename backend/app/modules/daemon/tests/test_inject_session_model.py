@@ -108,7 +108,8 @@ async def _seed_provider(
     *,
     agent_kind: str = "claude",
     model: str | None = "glm-4.7",
-    default_fallback_model: str | None = None,
+    fallback: str | None = None,
+    extra_models: list[str] | None = None,
     name: str = "GLM",
 ) -> LlmProvider:
     """task-11：加 ``default_fallback_model`` 种子（R-07 遮蔽场景必备）。"""
@@ -123,8 +124,9 @@ async def _seed_provider(
         agent_kinds=[agent_kind],
         encrypted_api_key=ct,
         key_id=key_id,
-        model=model,
-        default_fallback_model=default_fallback_model,
+        models=[{"name": model, "roles": ["sonnet"]}]
+        + ([{"name": fallback, "roles": []}] if fallback else [])
+        + ([{"name": m, "roles": []} for m in (extra_models or [])]),
         is_default=False,
         api_format="anthropic",
     )
@@ -198,7 +200,8 @@ class TestSelectModel:
             db_session,
             uid,
             model="glm-4.7",
-            default_fallback_model="glm-flash",
+            fallback="glm-flash",
+            extra_models=["glm-4.7-air"],
             name="GLM",
         )
 
@@ -238,8 +241,8 @@ class TestSelectModel:
 
         # 快照级覆盖：llm_providers 原配置不动（约束：不动原配置）。
         await db_session.refresh(provider_a)
-        assert provider_a.model == "glm-4.7"
-        assert provider_a.default_fallback_model == "glm-flash"
+        assert provider_a.models[0]["name"] == "glm-4.7"
+        assert provider_a.models[1]["name"] == "glm-flash"
 
         # 空切换轮：无 LLM turn，run 直接 completed。
         assert result.agent_run.status == "completed"
@@ -251,9 +254,16 @@ class TestSelectModel:
         """切供应商 + 选模型一步到位：快照带新供应商凭证 + 所选模型同步。"""
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
-        provider_a = await _seed_provider(db_session, uid, model="glm-4.7", name="GLM")
+        provider_a = await _seed_provider(
+            db_session, uid, model="glm-4.7", name="GLM", extra_models=["glm-custom"]
+        )
         provider_b = await _seed_provider(
-            db_session, uid, model="kimi-k2", default_fallback_model="kimi-mini", name="Kimi"
+            db_session,
+            uid,
+            model="kimi-k2",
+            fallback="kimi-mini",
+            extra_models=["kimi-k2-thinking"],
+            name="Kimi",
         )
 
         svc = DaemonService(db_session)
@@ -337,10 +347,15 @@ class TestProviderSwitchResetsModel:
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
         provider_a = await _seed_provider(
-            db_session, uid, model="glm-4.7", default_fallback_model="glm-flash", name="GLM"
+            db_session,
+            uid,
+            model="glm-4.7",
+            fallback="glm-flash",
+            extra_models=["glm-custom"],
+            name="GLM",
         )
         provider_b = await _seed_provider(
-            db_session, uid, model="kimi-k2", default_fallback_model="kimi-mini", name="Kimi"
+            db_session, uid, model="kimi-k2", fallback="kimi-mini", name="Kimi"
         )
 
         svc = DaemonService(db_session)
@@ -375,7 +390,7 @@ class TestProviderSwitchResetsModel:
         payload = _switch_payload(mocked_hub)
         # 重置回 B 原配置：无 "glm-custom" 残留，兜底还原（不走会话级覆盖）。
         assert payload["providerConfig"]["model"] == "kimi-k2"
-        assert payload["providerConfig"]["default_fallback_model"] == "kimi-mini"
+        assert payload["providerConfig"]["default_fallback_model"] == "kimi-k2"
         await db_session.refresh(created.agent_session)
         # ql-20260829-004 顺手清偿（mypy 预存债）：config_snapshot Optional 收窄
         assert created.agent_session.config_snapshot is not None
@@ -401,7 +416,12 @@ class TestProfileSwitchKeepsModel:
         profile_a = await _create_profile(db_session, uid, system_prompt="a")
         profile_b = await _create_profile(db_session, uid, name="新人格", system_prompt="b")
         provider_a = await _seed_provider(
-            db_session, uid, model="glm-4.7", default_fallback_model="glm-flash", name="GLM"
+            db_session,
+            uid,
+            model="glm-4.7",
+            fallback="glm-flash",
+            extra_models=["glm-custom"],
+            name="GLM",
         )
 
         svc = DaemonService(db_session)
@@ -460,7 +480,12 @@ class TestModelEmptyStringResets:
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
         provider_a = await _seed_provider(
-            db_session, uid, model="glm-4.7", default_fallback_model="glm-flash", name="GLM"
+            db_session,
+            uid,
+            model="glm-4.7",
+            fallback="glm-flash",
+            extra_models=["glm-custom"],
+            name="GLM",
         )
 
         svc = DaemonService(db_session)
@@ -492,7 +517,9 @@ class TestModelEmptyStringResets:
 
         payload = _switch_payload(mocked_hub)
         assert payload["providerConfig"]["model"] == "glm-4.7"
-        assert payload["providerConfig"]["default_fallback_model"] == "glm-flash"
+        assert (
+            payload["providerConfig"]["default_fallback_model"] == "glm-4.7"
+        )  # D-001：两键同值=主模型派生（非旧 fallback 列）
         await db_session.refresh(created.agent_session)
         # ql-20260829-004 顺手清偿（mypy 预存债）：config_snapshot Optional 收窄
         assert created.agent_session.config_snapshot is not None
@@ -511,7 +538,12 @@ class TestPlainTurnZeroRegression:
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
         provider_a = await _seed_provider(
-            db_session, uid, model="glm-4.7", default_fallback_model="glm-flash", name="GLM"
+            db_session,
+            uid,
+            model="glm-4.7",
+            fallback="glm-flash",
+            extra_models=["glm-custom"],
+            name="GLM",
         )
 
         svc = DaemonService(db_session)

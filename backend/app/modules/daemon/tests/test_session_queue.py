@@ -894,7 +894,7 @@ class TestPureSwitchMerge:
             agent_kinds=["claude"],
             encrypted_api_key=ct,
             key_id=key_id,
-            model="glm-x",
+            models=[{"name": "glm-x", "roles": ["sonnet"]}],
             api_format="anthropic",
             is_default=False,
         )

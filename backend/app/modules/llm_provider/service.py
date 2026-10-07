@@ -213,20 +213,17 @@ class LlmProviderService:
             user_id=user_id,
             name=data.name,
             agent_kinds=data.agent_kinds,
+            models=[m.model_dump() for m in data.models],
             base_url=data.base_url,
             encrypted_api_key=ct,
             key_id=key_id,
-            model=data.model,
             notes=data.notes,
             website_url=data.website_url,
             auth_field=data.auth_field,
             api_format=data.api_format,
-            model_role_mappings=data.model_role_mappings,
-            default_fallback_model=data.default_fallback_model,
             extra_env=data.extra_env,
             settings_config=data.settings_config,
             is_default=data.is_default,
-            multimodal=data.multimodal or "auto",
         )
         self._session.add(row)
         await self._session.commit()
@@ -274,10 +271,6 @@ class LlmProviderService:
             ct, key_id = self._cipher.encrypt(new_api_key)
             row.encrypted_api_key = ct
             row.key_id = key_id
-
-        # 2026-08-20 task-12：multimodal 三态——显式 None 不覆盖（不传=不动）。
-        if updates.get("multimodal") is None:
-            updates.pop("multimodal", None)
 
         # is_default 互斥：先应用字段更新再按**新引擎集合**清兄弟（D-006 扩张语义——
         # 默认行新增引擎时，新增引擎的旧默认兄弟同样要清，互斥不变量按
@@ -362,7 +355,7 @@ class LlmProviderService:
             base_url=base_url,
             api_key=api_key_plain,
             auth_field=row.auth_field,
-            model=row.model,
+            model=self._derive_primary_model(row),
             api_format=row.api_format,
         )
         if not probe_result.ok:
@@ -509,6 +502,18 @@ class LlmProviderService:
             return 0
 
     # ── Helpers ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _derive_primary_model(row: LlmProvider) -> str | None:
+        """主模型派生（D-002）：sonnet 角色首条 ?? 列表首条 ?? None。
+
+        probe/quota/litellm register 等单值消费点统一走本 helper（Grill P1-2/N-2：
+        不再读已删除的 row.model 列）。"""
+        models = row.models or []
+        for e in models:
+            if "sonnet" in (e.get("roles") or []):
+                return e.get("name")
+        return models[0].get("name") if models else None
 
     async def _clear_sibling_defaults(
         self,

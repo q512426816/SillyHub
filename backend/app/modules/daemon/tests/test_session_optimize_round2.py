@@ -248,8 +248,7 @@ async def _make_llm_provider(db_session: AsyncSession, uid: uuid.UUID):
         agent_kinds=["claude"],
         encrypted_api_key=b"key",
         key_id="k1",
-        model="kimi-latest",
-        multimodal="true",
+        models=[{"name": "kimi-latest", "roles": ["sonnet"]}],
     )
     db_session.add(lp)
     await db_session.commit()

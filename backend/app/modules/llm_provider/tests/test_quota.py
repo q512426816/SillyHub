@@ -81,7 +81,7 @@ async def _create_provider_via_http(
             "agent_kinds": ["claude"],
             "api_key": api_key,
             "base_url": base_url,
-            "model": model,
+            "models": [{"name": model, "roles": ["sonnet"]}],
         },
     )
     assert create.status_code == 201, create.text
@@ -141,7 +141,7 @@ class TestQuotaGlmSuccess:
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["quota"] is not None
-        assert body["quota"]["model"] == "glm-4.7"
+        assert body["quota"]["model"] == "glm-4.7"  # quota 端点回显主模型（router 派生）
         windows = body["quota"]["windows"]
         assert len(windows) == 2
         # 5 小时窗：label（含套餐等级前缀）+ 剩余百分比 + 重置时间
@@ -414,7 +414,7 @@ class TestQuotaAuthAndOwnership:
                 name="other-quota",
                 api_key="sk-other-quota-secret-1234",
                 base_url="https://open.bigmodel.cn/api/anthropic",
-                model="glm-4.7",
+                models=[{"name": "glm-4.7", "roles": ["sonnet"]}],
                 agent_kinds=["claude"],
             ),
         )

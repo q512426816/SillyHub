@@ -64,6 +64,7 @@ async def _seed_row(
         user_id=user_id,
         name=name,
         agent_kinds=agent_kinds,
+        models=[],
         encrypted_api_key=ct,
         key_id=key_id,
         is_default=is_default,

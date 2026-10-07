@@ -109,7 +109,7 @@ class ExecutionContextResponse(BaseModel):
     provider_config: dict | None = Field(
         default=None,
         description=(
-            "用户默认 LLM 供应商配置。agent_kind 恒为会话引擎值(D-005)。含 base_url/api_key(明文)/auth_field/"
+            "用户默认 LLM 供应商配置。agent_kind 恒为会话引擎值(D-005)；model/default_fallback_model 两键同值=会话所选??主模型派生、model_role_mappings 由条目折算、models 为原始列表(D-001)。含 base_url/api_key(明文)/auth_field/"
             "model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create "
             "阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。"
         ),

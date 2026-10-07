@@ -98,6 +98,7 @@ async def resolve_multimodal_gate(
     user_id: uuid.UUID,
     session_llm_provider_id: uuid.UUID | None,
     agent_kind: str,
+    model_name: str | None = None,
 ) -> bool:
     """多模态门控判定（D-9）→ ``supports_multimodal`` 标量。
 
@@ -118,6 +119,7 @@ async def resolve_multimodal_gate(
         user_id=user_id,
         session_llm_provider_id=session_llm_provider_id,
         agent_kind=agent_kind,
+        model_name=model_name,
     )
     return gate.supports_multimodal and bool(get_provider_caps(agent_kind)["multimodal"])
 

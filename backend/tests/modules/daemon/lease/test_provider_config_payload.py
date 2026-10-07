@@ -30,8 +30,24 @@ from app.modules.llm_provider.service import LlmProviderService
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
 
 # task-06 provides 契约的 8 字段（严格集合匹配，防字段漂移）。
+"""task-07 / FR-03：``build_claim_payload`` 注入 provider_config 单测。
+
+覆盖 task-06 四路契约：
+  1. 用户配了默认 provider → payload.provider_config 全 8 字段 + api_key 明文（interactive+batch 两路）；
+  2. 用户未配（或非默认）→ provider_config absent（D-007 零回归）；
+  3. agent_type=claude_code（adapter id）经 ``_normalize_lease_provider`` 命中 agent_kind=claude provider（X-08）；
+  4. R-02：provider_config 明文 api_key 不落 AuditLog（build_claim_payload 只读不写 ORM，
+     解密后明文仅在返回 dict；audit_hooks 只读 ORM 列，明文不入 ORM 故捕获不到）。
+
+夹具范式参考 ``test_complete_lease_stage_writeback.py``（SQLite+aiosqlite + 直接构造 ORM 行）。
+不真实调 daemon（不启进程 / 不发 WS），纯 backend 函数级 + DB 夹具。
+"""
+
+
+# task-06 provides 契约的 8 字段（严格集合匹配，防字段漂移）。
 _PROVIDER_CONFIG_FIELDS: frozenset[str] = frozenset(
     {
+        "models",
         "agent_kind",
         "base_url",
         "api_key",
@@ -101,7 +117,7 @@ async def _create_default_provider(
     plaintext: str,
     base_url: str | None = "https://api.anthropic.example",
     model: str | None = None,
-    default_fallback_model: str | None = None,
+    models: list | None = None,
     model_role_mappings: dict | None = None,
     extra_env: dict | None = None,
     auth_field: str = "ANTHROPIC_AUTH_TOKEN",
@@ -114,9 +130,7 @@ async def _create_default_provider(
         agent_kinds=["claude"],
         base_url=base_url,
         api_key=plaintext,
-        model=model,
-        default_fallback_model=default_fallback_model,
-        model_role_mappings=model_role_mappings,
+        models=(models or [{"name": model or "claude-sonnet-4", "roles": ["sonnet"]}]),
         extra_env=extra_env,
         auth_field=auth_field,
         is_default=is_default,
@@ -209,8 +223,10 @@ async def test_interactive_payload_has_provider_config(db_session: AsyncSession)
         user_id,
         plaintext=plaintext,
         base_url="https://api.interactive.example",
-        model="claude-sonnet-4",
-        default_fallback_model="kimi-k2",
+        models=[
+            {"name": "claude-sonnet-4", "roles": ["sonnet"]},
+            {"name": "kimi-k2", "roles": []},
+        ],
         model_role_mappings={"sonnet": {"model": "kimi-k2", "one_m": False}},
         extra_env={"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
     )
@@ -225,9 +241,11 @@ async def test_interactive_payload_has_provider_config(db_session: AsyncSession)
     assert pc["base_url"] == "https://api.interactive.example"
     assert pc["api_key"] == plaintext  # 明文（cipher.decrypt 解出）
     assert pc["auth_field"] == "ANTHROPIC_AUTH_TOKEN"
+    # D-001 新契约：两键同值 = 主模型派生（sonnet 首条）；mappings 由条目 roles 折算
     assert pc["model"] == "claude-sonnet-4"
-    assert pc["default_fallback_model"] == "kimi-k2"
-    assert pc["model_role_mappings"] == {"sonnet": {"model": "kimi-k2", "one_m": False}}
+    assert pc["default_fallback_model"] == "claude-sonnet-4"
+    assert pc["model_role_mappings"] == {"sonnet": {"model": "claude-sonnet-4", "one_m": False}}
+    assert pc["models"][0]["name"] == "claude-sonnet-4"
     assert pc["extra_env"] == {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
     # X-10：provider.model 覆盖 payload[model]（原 lease_meta 无 model → None 被覆盖）
     assert payload["model"] == "claude-sonnet-4"
@@ -445,7 +463,7 @@ async def _seed_openai_default_provider(
         encrypted_api_key=ct,
         key_id=key_id,
         base_url="https://opencode.ai/zen/v1/chat/completions",
-        model=model,
+        models=[{"name": model or "claude-sonnet-4", "roles": ["sonnet"]}],
         api_format="openai_chat",
         is_default=True,
     )
@@ -505,3 +523,198 @@ async def test_batch_openai_provider_config_injected(db_session: AsyncSession) -
     assert pc["litellm_model_name"] == f"usr-{user_id}-{provider.id}"
     # X-10：provider.model(zen-1) 覆盖 agent_run.model(claude-sonnet-4)
     assert payload["model"] == "zen-1"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+async def _create_user(session: AsyncSession, *, suffix: str) -> uuid.UUID:
+    from app.modules.auth.model import User
+
+    user = User(
+        id=uuid.uuid4(),
+        email=f"pc-{suffix}@example.com",
+        password_hash="x",
+        display_name="pc-test",
+        status="active",
+    )
+    session.add(user)
+    await session.commit()
+    return user.id
+
+
+async def _create_workspace(session: AsyncSession) -> Workspace:
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name=f"pc-ws-{uuid.uuid4().hex[:6]}",
+        slug=f"pc-ws-{uuid.uuid4().hex[:6]}",
+        root_path="/tmp/pc-test-workspace",
+        status="active",
+    )
+    session.add(ws)
+    await session.commit()
+    await session.refresh(ws)
+    return ws
+
+
+async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRuntime:
+    rt = DaemonRuntime(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        name="pc-runtime",
+        provider="claude",
+        status="online",
+    )
+    session.add(rt)
+    await session.commit()
+    await session.refresh(rt)
+    return rt
+
+
+async def _create_default_provider(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    plaintext: str,
+    base_url: str | None = "https://api.anthropic.example",
+    model: str | None = None,
+    models: list | None = None,
+    model_role_mappings: dict | None = None,
+    extra_env: dict | None = None,
+    auth_field: str = "ANTHROPIC_AUTH_TOKEN",
+    is_default: bool = True,
+) -> LlmProvider:
+    """复用 task-03 ``LlmProviderService.create``：内部 cipher.encrypt 后赋 encrypted_api_key，
+    明文永不入 ORM（R-04）。``agent_kind`` 走 schema Literal 默认 "claude"。"""
+    data = LlmProviderCreate(
+        name=f"pc-prov-{uuid.uuid4().hex[:6]}",
+        agent_kinds=["claude"],
+        base_url=base_url,
+        api_key=plaintext,
+        models=[{"name": model or "claude-sonnet-4", "roles": ["sonnet"]}],
+        extra_env=extra_env,
+        auth_field=auth_field,
+        is_default=is_default,
+    )
+    return await LlmProviderService(session).create(user_id, data)
+
+
+async def _make_interactive_lease(
+    session: AsyncSession,
+    runtime: DaemonRuntime,
+    *,
+    provider: str = "claude_code",
+    prompt: str = "hi",
+    model: str | None = None,
+) -> DaemonTaskLease:
+    meta: dict = {
+        "session_id": str(uuid.uuid4()),
+        "run_id": str(uuid.uuid4()),
+        "prompt": prompt,
+        "provider": provider,
+        "claim_token": "test-claim-token",
+    }
+    if model is not None:
+        meta["model"] = model
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=runtime.id,
+        agent_run_id=None,
+        kind="interactive",
+        status="claimed",
+        metadata_=meta,
+    )
+    session.add(lease)
+    await session.commit()
+    await session.refresh(lease)
+    return lease
+
+
+async def _make_batch_run(
+    session: AsyncSession,
+    *,
+    agent_type: str = "claude_code",
+    model: str | None = None,
+) -> AgentRun:
+    run = AgentRun(
+        id=uuid.uuid4(),
+        agent_type=agent_type,
+        provider="claude_code",
+        model=model,
+        status="running",
+    )
+    session.add(run)
+    await session.commit()
+    await session.refresh(run)
+    return run
+
+
+async def _make_batch_lease(
+    session: AsyncSession,
+    runtime: DaemonRuntime,
+    run: AgentRun,
+) -> DaemonTaskLease:
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=runtime.id,
+        agent_run_id=run.id,
+        kind="batch",
+        status="claimed",
+        metadata_={"claim_token": "test-claim-token"},
+    )
+    session.add(lease)
+    await session.commit()
+    await session.refresh(lease)
+    return lease
+
+
+# ---------------------------------------------------------------------------
+# 用例 1：有默认 provider → payload.provider_config 全字段 + 明文 api_key
+# ---------------------------------------------------------------------------
+
+
+def _maybe_register_audit_hooks() -> None:
+    global _AUDIT_HOOKS_REGISTERED
+    if _AUDIT_HOOKS_REGISTERED:
+        return
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.core.audit_hooks import register_audit_hooks
+
+    register_audit_hooks(create_async_engine("sqlite+aiosqlite:///:memory:", future=True))
+    _AUDIT_HOOKS_REGISTERED = True
+
+
+async def _seed_openai_default_provider(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    model: str | None = "zen-1",
+) -> LlmProvider:
+    """task-10：直插 openai_chat 默认 provider（service.create 不接 api_format=openai）。
+
+    真实 cipher 加密落盘 encrypted_api_key（与生产一致），再置 api_format=openai_chat +
+    model，模拟 task-01 列 + task-05 表单创建的 openai 行。
+    """
+    from app.core.crypto import get_cipher
+
+    cipher = get_cipher()
+    ct, key_id = cipher.encrypt("sk-openai-upstream-not-sent-to-daemon")
+    row = LlmProvider(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        name=f"pc-openai-{uuid.uuid4().hex[:6]}",
+        agent_kinds=["claude"],
+        encrypted_api_key=ct,
+        key_id=key_id,
+        base_url="https://opencode.ai/zen/v1/chat/completions",
+        models=[{"name": model or "claude-sonnet-4", "roles": ["sonnet"]}],
+        api_format="openai_chat",
+        is_default=True,
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return row

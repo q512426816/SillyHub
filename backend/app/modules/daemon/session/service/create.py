@@ -27,6 +27,7 @@ from app.modules.daemon.schema import (
     PageContextCreateBlock,
     TeamMissionCreateBlock,
 )
+from app.modules.llm_provider.service import LlmProviderService as _PSvc
 from app.modules.ppm.common.session_binding import PpmItemKind, bind_session_to_ppm_item
 
 from .attachments import assemble_create_attachments
@@ -666,7 +667,7 @@ async def create_session(
                 "model": (
                     model
                     or (
-                        (llm_provider_row.model or llm_provider_row.default_fallback_model)
+                        _PSvc._derive_primary_model(llm_provider_row)
                         if llm_provider_row is not None
                         else None
                     )

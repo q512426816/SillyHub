@@ -64,16 +64,40 @@ class MultimodalGate:
     effective_provider_id: uuid.UUID | None
 
 
-def resolve_gate(provider: LlmProvider | None) -> MultimodalGate:
-    """按 provider 行三态判定（无 provider → 保守不支持，daemon 本机凭证未知）。"""
+def resolve_gate(
+    provider: LlmProvider | None,
+    model_name: str | None = None,
+) -> MultimodalGate:
+    """按「生效模型在 models 列表里的条目标记」三态判定（D-003 下沉）。
+
+    - 无 provider → 保守不支持（daemon 本机凭证未知，语义不变）；
+    - model_name 未命中列表条目（会话选了后来删掉的模型/未传）→ 保守 false；
+    - 命中条目：true/false 直判；auto 走模型名启发式（supports_multimodal_by_model_name）。
+    """
     if provider is None:
         return MultimodalGate(supports_multimodal=False, effective_provider_id=None)
-    if provider.multimodal == "true":
-        return MultimodalGate(supports_multimodal=True, effective_provider_id=provider.id)
-    if provider.multimodal == "false":
+    models = provider.models or []
+    entry = None
+    for e in models:
+        if e.get("name") == model_name:
+            entry = e
+            break
+    if entry is None and model_name is None:
+        # 模型未知（群成员无模型维度/单聊未选）→ 主模型条目兜底（对齐旧 auto 读
+        # provider.model 供应商级单值的行为，防群聊门控全保守 false 回归）。
+        for e in models:
+            if "sonnet" in (e.get("roles") or []):
+                entry = e
+                break
+        if entry is None and models:
+            entry = models[0]
+    if entry is None:
         return MultimodalGate(supports_multimodal=False, effective_provider_id=provider.id)
-    # auto：生效模型名取 model ?? default_fallback_model
-    model_name = provider.model or provider.default_fallback_model
+    flag = entry.get("multimodal", "auto")
+    if flag == "true":
+        return MultimodalGate(supports_multimodal=True, effective_provider_id=provider.id)
+    if flag == "false":
+        return MultimodalGate(supports_multimodal=False, effective_provider_id=provider.id)
     return MultimodalGate(
         supports_multimodal=supports_multimodal_by_model_name(model_name),
         effective_provider_id=provider.id,
@@ -86,6 +110,7 @@ async def resolve_session_gate(
     user_id: uuid.UUID,
     session_llm_provider_id: uuid.UUID | None,
     agent_kind: str,
+    model_name: str | None = None,
 ) -> MultimodalGate:
     """会话实际生效 provider 判定（lease 优先级链同源：会话绑定 > 用户默认）。
 
@@ -119,4 +144,4 @@ async def resolve_session_gate(
             .all()
         )
         provider = next((p for p in candidates if agent_kind in (p.agent_kinds or [])), None)
-    return resolve_gate(provider)
+    return resolve_gate(provider, model_name=model_name)

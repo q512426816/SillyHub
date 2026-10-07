@@ -71,15 +71,22 @@ def test_multimodal_heuristic_table() -> None:
 
 
 def test_resolve_gate_three_states() -> None:
+    """D-003：模型级三态（auto/true/false）× 列表命中 + 未命中保守 false。"""
     provider = type("P", (), {})()
     provider.id = uuid.uuid4()
-    provider.multimodal = "true"
-    provider.model = "glm-4.5"
-    assert resolve_gate(provider).supports_multimodal is True
-    provider.multimodal = "false"
-    assert resolve_gate(provider).supports_multimodal is False
-    provider.multimodal = "auto"
-    provider.model = "glm-4.6v"
+    provider.models = [{"name": "glm-4.5", "multimodal": "true"}]
+    assert resolve_gate(provider, "glm-4.5").supports_multimodal is True
+    provider.models = [{"name": "glm-4.5", "multimodal": "false"}]
+    assert resolve_gate(provider, "glm-4.5").supports_multimodal is False
+    # auto：启发式（glm-4.6v 可看图 / glm-4.5 不可）
+    provider.models = [{"name": "glm-4.6v", "multimodal": "auto"}]
+    assert resolve_gate(provider, "glm-4.6v").supports_multimodal is True
+    provider.models = [{"name": "glm-4.5", "multimodal": "auto"}]
+    assert resolve_gate(provider, "glm-4.5").supports_multimodal is False
+    # 未命中（会话选了列表外模型）→ 保守 false
+    provider.models = [{"name": "glm-4.6v", "multimodal": "true"}]
+    assert resolve_gate(provider, "deleted-model").supports_multimodal is False
+    # model_name 缺省 → 主模型条目兜底（对齐旧供应商级 auto 行为）
     assert resolve_gate(provider).supports_multimodal is True
     # 无 provider（本机凭证）→ 保守不支持
     gate = resolve_gate(None)

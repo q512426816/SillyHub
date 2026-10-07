@@ -231,8 +231,6 @@ class TestNotifyProviderSwitchStartStop:
             "api_key": "sk-secret",
             "auth_field": "x-api-key",
             "model": "claude-sonnet",
-            "model_role_mappings": {},
-            "default_fallback_model": "claude-haiku",
             "extra_env": {},
             "settings_config": None,
         }
@@ -514,6 +512,7 @@ class TestNotifyProviderSwitchMultiEngineFanout:
                 user_id=user_id,
                 name="multi-default",
                 agent_kinds=["claude", "pi"],
+                models=[],
                 encrypted_api_key=ct,
                 key_id=key_id,
                 is_default=True,

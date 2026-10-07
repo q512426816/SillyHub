@@ -47,7 +47,8 @@ def _make_provider(
     p.user_id = _UID
     p.api_format = api_format
     p.base_url = base_url
-    p.model = model
+    # D-001：旧 model 列退役——工厂产 models 列表（model=None → 空列表）。
+    p.models = [{"name": model, "roles": ["sonnet"]}] if model else []
     p.encrypted_api_key = b"cipher-text"
     p.key_id = "v1"
     return p

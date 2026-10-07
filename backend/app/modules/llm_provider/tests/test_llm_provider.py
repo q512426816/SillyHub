@@ -67,7 +67,7 @@ def _create_payload(**overrides) -> LlmProviderCreate:
         "agent_kinds": ["claude"],
         "api_key": "sk-ant-supersecretkey-1234",
         "base_url": "https://api.anthropic.com",
-        "model": "claude-sonnet-4",
+        "models": [{"name": "claude-sonnet-4", "roles": ["sonnet"]}],
     }
     defaults.update(overrides)
     return LlmProviderCreate(**defaults)
@@ -93,6 +93,7 @@ async def _seed_provider_row(
         user_id=user_id,
         name=name,
         agent_kinds=agent_kinds,
+        models=[],
         encrypted_api_key=ct,
         key_id=key_id,
         is_default=is_default,
@@ -154,7 +155,7 @@ class TestCrudFlow:
         assert row.name == "p1"
         assert row.agent_kinds == ["claude"]
         assert row.base_url == "https://api.anthropic.com"
-        assert row.model == "claude-sonnet-4"
+        assert row.models[0]["name"] == "claude-sonnet-4"
         assert row.auth_field == "ANTHROPIC_AUTH_TOKEN"  # schema 默认
         assert row.is_default is False
         # 明文 / 密文 / key_id 三列状态正确
@@ -873,6 +874,7 @@ class TestSetDefaultCredentialsRollback:
             user_id=user_id,
             name="no-base-url",
             agent_kinds=["claude"],
+            models=[],
             encrypted_api_key=ct,
             key_id=key_id,
             base_url=None,  # 缺 base_url
