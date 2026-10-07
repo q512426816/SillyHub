@@ -640,10 +640,14 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
     // 键 sessionFork（string 枚举：native 原生截断 / seed 种子克隆 / none 无通道）
     // 随 @generated 产物加入后本全对象 toEqual 必红——同步补齐（cursor='none'
     // / 未知引擎回退='none'；a2bdb21f8 登记的预存债，本次 CI 修复清偿）。
+    // 2026-10-07 CI 修复：multimodal 键（第 3 键，多模态块通道）被 b8afd807c
+    // 三方合并误删——provider-caps.ts 查表明含该键（cursor=false / 未知引擎
+    // 回退=false），两处全对象恢复补齐。
     const caps = getProviderCaps("cursor");
     expect(caps).toEqual({
       resume: true,
       mcp: false,
+      multimodal: false,
       attachments: true,
       thinking: true,
       subagent: false,
@@ -665,6 +669,7 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
     expect(getProviderCaps("unknown-engine")).toEqual({
       resume: false,
       mcp: false,
+      multimodal: false,
       attachments: false,
       thinking: false,
       subagent: false,

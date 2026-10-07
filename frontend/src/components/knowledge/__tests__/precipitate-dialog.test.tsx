@@ -623,13 +623,15 @@ describe("PrecipitateDialog · D-010 快速修复多选 + D-009 派谁去干", (
 
     fireEvent.click(screen.getByRole("button", { name: "新建 agent 提炼" }));
     await waitFor(() => expect(knowledgeApi.dispatchDistill).toHaveBeenCalledTimes(1));
+    // 派发载荷为单模型 model 串（后端 DistillDispatchIn.model 契约；models
+    // 列表是供应商配置面契约，b8afd807c 三方合并曾误带入此处，回归修正）。
     expect(knowledgeApi.dispatchDistill).toHaveBeenCalledWith("ws-1", {
       source_type: "session",
       source_ref: SESSION_ID,
       focus: null,
       mode: "fresh",
       llm_provider_id: PROVIDER_ID,
-      models: [{ name: "glm-4.7", roles: ["sonnet"] }],
+      model: "glm-4.7",
     });
   });
 

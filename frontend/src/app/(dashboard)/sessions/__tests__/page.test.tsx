@@ -778,7 +778,11 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
         output_tokens: 300,
       }),
     ]);
-    mocks.listProviders.mockResolvedValue([{ id: "lp-1", name: "GLM 中转" }]);
+    // agent_kinds 为 LlmProviderRead 必填键（SessionConfigBar 供应商下拉按
+    // 引擎过滤 p.agent_kinds.includes(...)——缺键崩渲染，whoLine 随整页失挂）。
+    mocks.listProviders.mockResolvedValue([
+      { id: "lp-1", name: "GLM 中转", agent_kinds: ["claude"] },
+    ]);
 
     renderPage();
     await selectDefaultSession();
