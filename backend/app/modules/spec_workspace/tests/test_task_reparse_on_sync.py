@@ -199,3 +199,71 @@ class TestTaskReparseOnSync:
 
         change = await _change_row(db_session, ws.id, key)
         assert change is not None, "连动失败不阻断：变更表照常重建"
+
+    async def test_thin_tasks_md_registry_reaches_task_board(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """thin tasks.md 注册表行进任务板（2026-10-07-taskboard-tasks-md）：
+        增量同步 tasks.md → 连动 reparse → 任务表按勾选态建行；改写跟随。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        key = "2026-10-07-thin-registry"
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={
+                "ops": [
+                    _op("add", f"changes/{key}/proposal.md", content=_b64("# Thin Registry")),
+                    _op(
+                        "add",
+                        f"changes/{key}/tasks.md",
+                        content=_b64(
+                            "# 任务注册表\n\n"
+                            "- [x] task-01: 实现 A + 用例\n"
+                            "- [ ] task-02: 全量复跑绿\n"
+                        ),
+                    ),
+                ],
+                "change_dirs": [key],
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        await drain_reparse_workers()
+
+        change = await _change_row(db_session, ws.id, key)
+        assert change is not None
+        ws_id, change_id = ws.id, change.id
+        rows = await _tasks_of(db_session, ws_id, change_id)
+        assert {t.task_key: t.status for t in rows} == {"task-01": "done", "task-02": "draft"}
+
+        # 改写：勾 task-02 → 两行全 done
+        resp2 = await client.post(
+            f"/api/workspaces/{ws_id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={
+                "ops": [
+                    _op(
+                        "update",
+                        f"changes/{key}/tasks.md",
+                        base_version=1,
+                        content=_b64(
+                            "# 任务注册表\n\n"
+                            "- [x] task-01: 实现 A + 用例\n"
+                            "- [x] task-02: 全量复跑绿\n"
+                        ),
+                    )
+                ],
+                "change_dirs": [key],
+            },
+        )
+        assert resp2.status_code == 200, resp2.text
+        await drain_reparse_workers()
+
+        db_session.expire_all()
+        rows2 = await _tasks_of(db_session, ws_id, change_id)
+        assert {t.task_key: t.status for t in rows2} == {
+            "task-01": "done",
+            "task-02": "done",
+        }, "任务板跟随 tasks.md 勾选态"
