@@ -1656,3 +1656,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：fbf4ae2753b9bbf2a14d929ecd2c900b533d6100
 理由：最大风险：thin 行 status 只有 draft/done 两态（看板中段列空）——勾选态是 tasks.md 唯一信号，不造无据状态；后续要更细可由 status 映射规则扩展。试过放弃：把注册表行也建成卡片式富结构（priority/owner 从行文猜测）——无据造数；放弃，只取确定字段。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-07-ci-failures-sweep
+锚点：未记录
+最近确认：4a538caa395a449c33567c50bf18c219b65a4466
+理由：最大风险：test_files_router 若未来 fixture 只剩归档 change，next(... location=="active") 会 StopIteration——但两活跃 change 是 fixture 固定资产，风险极低。试过放弃：为 FR-04 新增 takeover 端点归档 409 端到端用例——放弃，takeover 前置校验链（原机四级钉定/provider 行解析）夹具过重，且其写入口经 create 链已被 test_session_create_on_archived_returns_409 的 ensure_writable 守卫用例覆盖，加重复用例只增脆弱面。

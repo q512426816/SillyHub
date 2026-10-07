@@ -151,3 +151,159 @@ created_at: 2026-10-03T12:34:45.318Z
   confirmed_at: null
   source_change: 2026-10-07-taskboard-tasks-md
   status: active
+
+## FR-auto-backend-099 backend/tests/test_align_platform_change_events_migration.py 链尾锚更新为当前唯一 head 20261006200000 且该文件全绿
+变更：2026-10-07-ci-failures-sweep
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given versions 目录含 20261006120000→20261006200000 两新迁移 / When test_file_exists_and_sing
+全文：.sillyspec/changes/archive/2026-10-07-ci-failures-sweep/requirements.md#FR-01
+最近确认：4a538caa395a449c33567c50bf18c219b65a4466
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-ci-failures-sweep:flow:测试绑定FR-01
+  tests: backend/tests/test_align_platform_change_events_migration.py「TestMigrationStructure::test_file_exists_and_single_head_chain」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-ci-failures-sweep
+  status: active
+
+## FR-auto-backend-100 test_files_router.py fixture 确定性选取活跃 change（不依赖排序巧合），test_list_files 全绿
+变更：2026-10-07-ci-failures-sweep
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given fixtures 含归档 change（changes/archive/ 子树）/ When 列表排序把归档行排首（CI Linux 同刻 mtime 实况）/
+全文：.sillyspec/changes/archive/2026-10-07-ci-failures-sweep/requirements.md#FR-02
+最近确认：4a538caa395a449c33567c50bf18c219b65a4466
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-ci-failures-sweep:flow:测试绑定FR-02
+  tests: backend/app/modules/change/tests/test_files_router.py「test_list_files」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-ci-failures-sweep
+  status: active
+
+## FR-auto-backend-101 test_attachment_pipeline.py 两个 group 装配用例 member 夹具补 config_snapshot 并断言 D-003 模型透传，全绿
+变更：2026-10-07-ci-failures-sweep
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given member.config_snapshot={"model": "glm-4.7"} / When 群装配执行 / Then resolve_session_
+全文：.sillyspec/changes/archive/2026-10-07-ci-failures-sweep/requirements.md#FR-03
+最近确认：4a538caa395a449c33567c50bf18c219b65a4466
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-ci-failures-sweep:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_attachment_pipeline.py「TestGroupWrapperEquivalence::test_group_assembly_gate_basis_owner_and_member / test_group_assembly_member_provider_fallback_claude」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-ci-failures-sweep
+  status: active
+
+## FR-auto-backend-102 test_archived_write_guard.py 懒激活退役用例改断言 TOOL_REPORT_TAKEOVER_INVALID（归档写入口兜底由 create 链既有守卫用例覆盖），全绿
+变更：2026-10-07-ci-failures-sweep
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 归档工作区 + pending tool_report 会话 / When POST inject / Then 409 code=HTTP_409_TOOL_
+全文：.sillyspec/changes/archive/2026-10-07-ci-failures-sweep/requirements.md#FR-04
+最近确认：4a538caa395a449c33567c50bf18c219b65a4466
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-ci-failures-sweep:flow:测试绑定FR-04
+  tests: backend/app/modules/workspace/tests/test_archived_write_guard.py「test_tool_report_activation_on_archived_returns_409」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-ci-failures-sweep
+  status: active
+
+## FR-auto-backend-103 precipitate-dialog.test.tsx 载荷断言回归 model 单串契约，全绿
+变更：2026-10-07-ci-failures-sweep
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 选定供应商+选定模型 glm-4.7 / When 提交派发 / Then 载荷含 llm_provider_id + model: "glm-4.7"，无 m
+全文：.sillyspec/changes/archive/2026-10-07-ci-failures-sweep/requirements.md#FR-05
+最近确认：4a538caa395a449c33567c50bf18c219b65a4466
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-ci-failures-sweep:flow:测试绑定FR-05
+  tests: frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx「选定供应商 → 「获取模型」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-ci-failures-sweep
+  status: active
+
+## FR-auto-backend-104 pre-session-picker.test.tsx 两处 caps 期望对象恢复 multimodal 键，全绿
+变更：2026-10-07-ci-failures-sweep
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given provider-caps.ts 查表含 multimodal / When 全对象断言执行 / Then 两处期望对象 16 键全量相等。
+全文：.sillyspec/changes/archive/2026-10-07-ci-failures-sweep/requirements.md#FR-06
+最近确认：4a538caa395a449c33567c50bf18c219b65a4466
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-ci-failures-sweep:flow:测试绑定FR-06
+  tests: frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx「十六键与 daemon 单源一致；未知 provider 默认拒绝（boolean 全 false + dialog/sessionFork none）不抛错」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-ci-failures-sweep
+  status: active
+
+## FR-auto-backend-105 sessions page.test.tsx 供应商 mock 补 agent_kinds 必填字段，whoLine 用例全绿
+变更：2026-10-07-ci-failures-sweep
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given mock 供应商含 agent_kinds / When 渲染会话面板 / When attach 拉 run 快照 / Then 轮次配置快照 whoLine
+全文：.sillyspec/changes/archive/2026-10-07-ci-failures-sweep/requirements.md#FR-07
+最近确认：4a538caa395a449c33567c50bf18c219b65a4466
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-ci-failures-sweep:flow:测试绑定FR-07
+  tests: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「历史轮 whoLine 按 run 快照渲染（档案快照名 / 会话 agent_name / 供应商名对照）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-ci-failures-sweep
+  status: active
+
+## FR-auto-backend-106 本地仅跑上述相关测试文件全绿（全量留给 CI），四 workflow 推送后全绿
+变更：2026-10-07-ci-failures-sweep
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 上述修复落地 / When 本地跑相关文件 / Then 全绿；When push 到 main / When GitHub Actions 四 workflo
+全文：.sillyspec/changes/archive/2026-10-07-ci-failures-sweep/requirements.md#FR-08
+最近确认：4a538caa395a449c33567c50bf18c219b65a4466
