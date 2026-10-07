@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-07-ci-sweep-jsonl-mock",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-07-ci-sweep-jsonl-mock:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx「OnlyofficePreviewer 路由（DS 启用走 DS；config 失败降级本地渲染器）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-ci-sweep-jsonl-mock"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-07-ci-sweep-jsonl-mock:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/files/__tests__/file-preview-modal.test.tsx",
+        "frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-ci-sweep-jsonl-mock"
+    }
+  ]
+}

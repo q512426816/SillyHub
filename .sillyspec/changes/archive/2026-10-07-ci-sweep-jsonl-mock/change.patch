@@ -1,0 +1,189 @@
+diff --git a/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/flow-state.yaml b/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/flow-state.yaml
+new file mode 100644
+index 000000000..31cdbf045
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/flow-state.yaml
+@@ -0,0 +1,23 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  CI 红清偿补漏：frontend-ci 第 4 处失败（首轮排查 tail 截断漏看）——onlyoffice-preview.test.tsx 枚举式 vi.mock('../previewers') 缺 fa799e68b 新增的
++  JsonlPreviewer 导出，模块作用域炸掉整套件收集失败。测试文件自有注释即约定「枚举式工厂须随桶文件新导出同步补齐」，属既定惯例的漏补，生产零改动。
++
++
++  成功标准：
++
++  - onlyoffice-preview.test.tsx 的 ../previewers mock 补 JsonlPreviewer 桩导出，该文件全绿
++
++  - 顺带审计其余枚举式 previewers mock 无缺导出（file-preview-modal.test.tsx 已含 JsonlPreviewer）
++
++  - 本地仅跑相关两文件全绿（全量留 CI），frontend-ci 推送后转绿
++autopilot: true
++baseline_commit: 7b99d26200b7f519d36cce84eb83587f535c78bd
++updatedAt: '2026-10-07T15:31:05.431Z'
++baseline_sha256: 0b50d5640150d68b6c1c4092bac80da1d82b59468004cd400ea9579a8e270fca
++
+diff --git a/frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx b/frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx
+index ca8c742e8..c4ae9da5a 100644
+--- a/frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx
++++ b/frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx
+@@ -22,7 +22,8 @@ vi.mock("@/lib/api", () => ({
+ 
+ // Mock 本地渲染器（断言降级目标）+ OnlyofficePreviewer（断言 DS 路径）。
+ // 枚举式工厂须随桶文件新导出同步补齐（HtmlPreviewer，2026-08-26-file-fullscreen-preview
+-// task-04 的 RENDERER_MAP 引用）——缺导出会让 mock 在模块作用域炸掉，整套件收集失败。
++// task-04 的 RENDERER_MAP 引用；JsonlPreviewer，fa799e68b 的 jsonl 逐行视图）
++// ——缺导出会让 mock 在模块作用域炸掉，整套件收集失败。
+ vi.mock("../previewers", () => ({
+   ImagePreviewer: () => <div data-testid="image-previewer" />,
+   PdfPreviewer: () => <div data-testid="pdf-previewer" />,
+@@ -31,6 +32,7 @@ vi.mock("../previewers", () => ({
+   MarkdownPreviewer: () => <div data-testid="markdown-previewer" />,
+   HtmlPreviewer: () => <div data-testid="html-previewer" />,
+   JsonPreviewer: () => <div data-testid="json-previewer" />,
++  JsonlPreviewer: () => <div data-testid="jsonl-previewer" />,
+   PatchPreviewer: () => <div data-testid="patch-previewer" />,
+   TextPreviewer: () => <div data-testid="text-previewer" />,
+   FallbackPreviewer: () => <div data-testid="fallback-previewer" />,
+diff --git a/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/design.md b/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/design.md
+new file mode 100644
+index 000000000..e5fe465fb
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/design.md
+@@ -0,0 +1,41 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T15:31:05.409Z
++---
++# 设计记录（Design Record）— 2026-10-07-ci-sweep-jsonl-mock
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++frontend-ci 第 4 处失败（2026-10-07-ci-failures-sweep 首轮排查时 tail 截断漏看）：onlyoffice-preview.test.tsx 枚举式 vi.mock("../previewers") 缺 fa799e68b（2026-09-29）新增的 JsonlPreviewer 导出，file-preview-modal.tsx 的 RENDERER_MAP 引用该导出时在模块作用域炸掉，整套件收集失败。修法：mock 补一行桩导出并更新注释溯源；顺带审计全仓其余枚举式 previewers mock（仅 file-preview-modal.test.tsx 一处，已含 JsonlPreviewer，无需动）。选测试侧补桩而非改生产：测试文件自有注释即约定「枚举式工厂须随桶文件新导出同步补齐」，属既定惯例漏补，生产桶导出契约无恙。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无——纯测试 mock 桩补齐，生产代码零行改动，桶文件（previewers.tsx）导出面不变。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用——静态 mock 工厂补齐，无事件序参与。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用——单测试文件改动，无共享可变状态。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++不适用——mock 定义在模块收集期静态生效，无生命周期切换面。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不适用——vi.mock 作用域限单测试文件。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：桶文件未来再加导出时本 mock 再度漏补（结构性重复成本）——已有注释约定承担提示职责，暂不引入 importOriginal 部分 mock（会放弃「断言降级目标桩」的精确控制，且与既有 10 桩风格不一致）。放弃方案：改用 vi.mock(importOriginal) 展开真实导出——放弃，枚举桩正是该套件断言 DS 降级路径的手段，混入真实组件会引入无关渲染依赖。
+diff --git a/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/proposal.md b/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/proposal.md
+new file mode 100644
+index 000000000..1dc6badf7
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/proposal.md
+@@ -0,0 +1,27 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T15:31:05.409Z
++---
++# 提案书（Proposal）— 2026-10-07-ci-sweep-jsonl-mock
++
++## 动机
++
++任务原话转写：CI 红清偿补漏：frontend-ci 第 4 处失败（首轮排查 tail 截断漏看）——onlyoffice-preview.test.tsx 枚举式 vi.mock('../previewers') 缺 fa799e68b 新增的 JsonlPreviewer 导出，模块作用域炸掉整套件收集失败。测试文件自有注释即约定「枚举式工厂须随桶文件新导出同步补齐」，属既定惯例的漏补，生产零改动。
++
++成功标准：
++- onlyoffice-preview.test.tsx 的 ../previewers mock 补 JsonlPreviewer 桩导出，该文件全绿
++- 顺带审计其余枚举式 previewers mock 无缺导出（file-preview-modal.test.tsx 已含 JsonlPreviewer）
++- 本地仅跑相关两文件全绿（全量留 CI），frontend-ci 推送后转绿
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. onlyoffice-preview.test.tsx 的 ../previewers mock 补 JsonlPreviewer 桩导出，该文件全绿
++2. 顺带审计其余枚举式 previewers mock 无缺导出（file-preview-modal.test.tsx 已含 JsonlPreviewer）
++3. 本地仅跑相关两文件全绿（全量留 CI），frontend-ci 推送后转绿
++
++## 成功标准（可验证）
++
++1. onlyoffice-preview.test.tsx 的 ../previewers mock 补 JsonlPreviewer 桩导出，该文件全绿
++2. 顺带审计其余枚举式 previewers mock 无缺导出（file-preview-modal.test.tsx 已含 JsonlPreviewer）
++3. 本地仅跑相关两文件全绿（全量留 CI），frontend-ci 推送后转绿
+diff --git a/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/requirements.md b/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/requirements.md
+new file mode 100644
+index 000000000..b6bf8f744
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/requirements.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T15:31:05.409Z
++---
++# 需求规格（Requirements）— 2026-10-07-ci-sweep-jsonl-mock
++
++## 功能需求
++
++### FR-01: onlyoffice-preview.test.tsx 的 ../previewers mock 补 JsonlPreviewer 桩导出，该文件全绿
++
++- mock 工厂必须包含桶文件（previewers.tsx）当前全部被 RENDERER_MAP 引用的导出——本次必须补 JsonlPreviewer 桩（data-testid="jsonl-previewer"），套件收集不得再炸。
++
++#### 场景：主路径
++
++Given 桶文件含 JsonlPreviewer 导出 / When onlyoffice-preview.test.tsx 收集执行 / Then mock 提供全部导出，套件收集成功且全用例绿。
++
++### FR-02: 顺带审计其余枚举式 previewers mock 无缺导出（file-preview-modal.test.tsx 已含 JsonlPreviewer）
++
++- 全仓枚举式 vi.mock("../previewers") 必须逐一核对——本次审计结论：仅 onlyoffice-preview 与 file-preview-modal 两处，后者已含 JsonlPreviewer，禁止多余改动。
++
++#### 场景：主路径
++
++Given 全仓仅两处枚举式 previewers mock / When 逐一比对桶导出 / Then 除 FR-01 目标外无缺导出。
++
++### FR-03: 本地仅跑相关两文件全绿（全量留 CI），frontend-ci 推送后转绿
++
++- 本地必须只跑两个相关测试文件（20 用例）且全绿，全量必须留给 CI；推送后 frontend-ci 必须 转绿。
++
++#### 场景：主路径
++
++Given mock 补齐 / When 本地跑相关两文件 / Then 全绿；When push / Then frontend-ci success。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx「OnlyofficePreviewer 路由（DS 启用走 DS；config 失败降级本地渲染器）」全套件
++FR-02: 不适用：审计性核对（grep 全仓 vi.mock("../previewers") 仅两处，file-preview-modal.test.tsx 已含 JsonlPreviewer，无代码改动面）
++FR-03: frontend/src/components/files/__tests__/file-preview-modal.test.tsx + onlyoffice-preview.test.tsx 两文件 20 用例（本地已实证；frontend-ci 转绿以推送后 Actions 实跑为准）
+diff --git a/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/tasks.md b/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/tasks.md
+new file mode 100644
+index 000000000..5d0e6e512
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-ci-sweep-jsonl-mock/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T15:31:05.409Z
++---
++# 任务注册表（Tasks）— 2026-10-07-ci-sweep-jsonl-mock
++
++- [x] task-01: onlyoffice-preview.test.tsx 的 ../previewers mock 补 JsonlPreviewer 桩导出，该文件全绿
++- [x] task-02: 顺带审计其余枚举式 previewers mock 无缺导出（file-preview-modal.test.tsx 已含 JsonlPreviewer）
++- [x] task-03: 本地仅跑相关两文件全绿（全量留 CI），frontend-ci 推送后转绿

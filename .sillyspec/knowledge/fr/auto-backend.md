@@ -307,3 +307,54 @@ created_at: 2026-10-03T12:34:45.318Z
 - 场景：主路径 — Given 上述修复落地 / When 本地跑相关文件 / Then 全绿；When push 到 main / When GitHub Actions 四 workflo
 全文：.sillyspec/changes/archive/2026-10-07-ci-failures-sweep/requirements.md#FR-08
 最近确认：4a538caa395a449c33567c50bf18c219b65a4466
+
+## FR-auto-backend-107 onlyoffice-preview.test.tsx 的 ../previewers mock 补 JsonlPreviewer 桩导出，该文件全绿
+变更：2026-10-07-ci-sweep-jsonl-mock
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 桶文件含 JsonlPreviewer 导出 / When onlyoffice-preview.test.tsx 收集执行 / Then mock 提供全部导
+全文：.sillyspec/changes/archive/2026-10-07-ci-sweep-jsonl-mock/requirements.md#FR-01
+最近确认：768a88a694fddfb36095ef1ec42e795e77a6e582
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-ci-sweep-jsonl-mock:flow:测试绑定FR-01
+  tests: frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx「OnlyofficePreviewer 路由（DS 启用走 DS；config 失败降级本地渲染器）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-ci-sweep-jsonl-mock
+  status: active
+
+## FR-auto-backend-108 顺带审计其余枚举式 previewers mock 无缺导出（file-preview-modal.test.tsx 已含 JsonlPreviewer）
+变更：2026-10-07-ci-sweep-jsonl-mock
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 全仓仅两处枚举式 previewers mock / When 逐一比对桶导出 / Then 除 FR-01 目标外无缺导出。
+全文：.sillyspec/changes/archive/2026-10-07-ci-sweep-jsonl-mock/requirements.md#FR-02
+最近确认：768a88a694fddfb36095ef1ec42e795e77a6e582
+
+## FR-auto-backend-109 本地仅跑相关两文件全绿（全量留 CI），frontend-ci 推送后转绿
+变更：2026-10-07-ci-sweep-jsonl-mock
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given mock 补齐 / When 本地跑相关两文件 / Then 全绿；When push / Then frontend-ci success。
+全文：.sillyspec/changes/archive/2026-10-07-ci-sweep-jsonl-mock/requirements.md#FR-03
+最近确认：768a88a694fddfb36095ef1ec42e795e77a6e582
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-ci-sweep-jsonl-mock:flow:测试绑定FR-03
+  tests: frontend/src/components/files/__tests__/file-preview-modal.test.tsx | frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-ci-sweep-jsonl-mock
+  status: active

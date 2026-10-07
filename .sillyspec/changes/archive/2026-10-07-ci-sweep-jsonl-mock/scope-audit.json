@@ -1,0 +1,27 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "7b99d26200b7f519d36cce84eb83587f535c78bd",
+  "totals": {
+    "files": 1,
+    "additions": 3,
+    "deletions": 1
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx",
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "c6bd7e1ec571d1eedaf0f0a9ecbc31b4a542ec7975a4a712803f916b222a5f7c",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-07T15:32:45.280Z"
+}
