@@ -57,6 +57,8 @@ fetchProviderModels 新建态：明文 key 只进请求 body，永不落本地�
 - `api_format: "openai_chat"`（llm-provider-openai-format 变更）经服务器 LiteLLM 网关消费；老数据迁移回填 `"anthropic"`。
 - `settings_config` 高级配置片段消费方须 `?? null` 归一。
 - set-default 返回 `affected_sessions>0` 表示有运行中会话需等 turn 边界生效，UI 据此区分 toast。
+- **2026-10-06-provider-multi-agent-kind（D-004）**：`agent_kinds: string[]` 取代单值 agent_kind（Read/Create/Update/FormValues）；`formToUpdate` 必须携带 `agent_kinds`（2026-10-07 followup 修复：漏发=后端「不传=不动」静默失效）；同 user×引擎（集合内每引擎）互斥。上文「同 user×agent_kind 互斥」按此口径理解。
+- **2026-10-06-provider-model-list（D-001/D-005）**：模型列表契约——`ProviderModelEntry { name; multimodal 三态; roles 多标; one_m }` 取代 `model` / `model_role_mappings`（4 角色槽）/行级 `multimodal` / `default_fallback_model` 四旧字段（迁移 20261006200000 删列，前端零过渡期）；`LlmProviderRead/Create/Update` 与 `FormValues` 均切 `models: ProviderModelEntry[]`；`formToCreate/formToUpdate` 映射器按模型列表重写，`cleanRoleMappings` 退役（卡内上文「model_role_mappings 固定 4 行」「LlmProviderRoleMapping」描述为历史口径）；编辑器行内交互由 `llm-provider-form.tsx` 承载（29 用例），api 层断言见 `llm-providers.test.ts`。
 
 ## 人工备注
 

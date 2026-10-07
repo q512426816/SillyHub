@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-06-provider-model-list",
+  "generatedAt": "2026-10-07T06:23:24.625Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-model-list",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 2,
+        "worktreeHits": 1,
+        "globEntries": 1
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-model-list",
+      "metrics": {
+        "tasks": 11,
+        "hasTest": 10
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-model-list",
+      "metrics": {
+        "backendEndpoints": 6099,
+        "frontendCalls": 3
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-model-list",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-model-list",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-model-list",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-06-provider-model-list",
+      "metrics": {
+        "checkedFiles": 12,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "PG 迁移 20261006200000 在 development 库 upgrade→downgrade→upgrade 往返 + 存量折算产物 SQL 实查（四形态/角色归并/one_m true 优先/去重保序，旧列残留 []）",
+      "command": "cd backend && uv run alembic upgrade 20261006200000 && uv run alembic downgrade -1 && uv run alembic upgrade head（折算产物经 psql 实查 llm_providers.models）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-10-06-provider-model-list/docs/verification-e2e.md（A1~A3 段）"
+    },
+    {
+      "claim": "execute 期后端全量域 2672 绿（返工前基线）+ 返工受影响域复验 0 fail；前端触面 13 套件 237 passed + tsc 0 错",
+      "command": "cd backend && uv run pytest -q --no-cov -n auto（受影响域复验）+ cd frontend && pnpm test（触面套件）&& pnpm typecheck",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-10-06-provider-model-list/docs/verification-e2e.md（B/C 段）+ 本报告 §三"
+    }
+  ],
+  "handover": {
+    "count": 5,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "编辑器行内交互（＋添加/删行/三态下拉/角色标签多标/one_m/同角色多条仅提示不禁/空白模型名行剔除）无自动化用例——form.test 仅覆盖提交路径 models 契约（24 用例）",
+        "condition": "部署窗口 UI 手动验收（与 2026-10-06-provider-multi-agent-kind 同窗）；后续 change 补编辑器测试套",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "列表外模型 422 的「响应文案含可用模型提示」细节未断言（422 行为本身已由 `test_inject_session_model.py` 7 用例锁定）",
+        "condition": "同上窗口 UI 验收顺手核对文案",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "新模型从添加到会话生效全链贯通（经 ORM 的 API 冒烟 + 生产 UI 复验）",
+        "condition": "部署窗口执行（Runtime Evidence「未执行」声明项）",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "存量折算回显与迁移预期一致（用户视角）——数据面已由 PG 实查背书（A2），用户视角回显未验",
+        "condition": "部署窗口 UI 验收",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "task-07「测试内不出现四旧列属性读」grep 口径核查项（non-testable）",
+        "condition": "独立评审两轮核实（review.json 备案）+ CI 全量守护",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 5,
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/llm_provider/tests",
+      "backend/app/modules/daemon/tests/test_resolve_default_provider_config.py",
+      "backend/app/modules/daemon/tests/test_resolve_bound_provider_config.py",
+      "backend/tests/modules/daemon/lease/test_provider_config_payload.py",
+      "backend/app/modules/session_attachment/tests/test_capability.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "(green-cache 同指纹复用)",
+    "exitCode": 0,
+    "strategy": null,
+    "failedRemaining": [],
+    "passedAt": "2026-10-07T06:38:58.281Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

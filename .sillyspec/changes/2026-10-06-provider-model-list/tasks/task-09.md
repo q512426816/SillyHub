@@ -23,6 +23,10 @@ allowed_paths:
   - frontend/src/components/daemon/session-panel/page-helpers.tsx
   - frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx
 target_files:
+  # verify 对账修正（2026-10-07，真实 > 声明）：agent-profile-form.tsx 与移动端 [sid]/page.tsx
+  # 零 diff 移出交付清单——两者经 session-config-bar/ctx-usage-bar 间接消费 models 契约，本体
+  # 无需改（tsc 0 + 前端触面 237 绿背书）；移动端仅测试 mock 补齐（page.m-session-chat.test.tsx），
+  # 与 review.json 结论一致。
   - backend/openapi.json
   - backend/app/modules/agent/schema.py
   - frontend/src/lib/api-types.ts
@@ -30,10 +34,8 @@ target_files:
   - frontend/src/components/llm-providers/llm-provider-list.tsx
   - frontend/src/components/sessions/session-config-bar.tsx
   - frontend/src/components/sessions/ctx-usage-bar.tsx
-  - frontend/src/components/agent-profile-form.tsx
   - frontend/src/components/daemon/session-panel/session-panel-page.tsx
   - frontend/src/components/daemon/session-panel/page-helpers.tsx
-  - frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx
 goal: >
   前端消费面与类型面整体切换 models 列表（FR-01/FR-03 / Wave4-10/11，R-08）：gen:types
   重生成、llm-providers.ts 手写类型与 FormValues 收口、会话配置条与档案表单模型下拉源改

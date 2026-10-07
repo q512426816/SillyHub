@@ -13,8 +13,10 @@ decision_ids: []  # (预填源未就绪：plan 阶段后跑 prefill-refresh)
 allowed_paths:
   - frontend/src/components/llm-providers/
 target_files:
+  # verify 对账修正（2026-10-07，真实 > 声明）：model-input-with-fetch.tsx 零改动移出交付清单——
+  # implementation 原文即给「按需改造复用或退役（允许路径内处置）」自由度，实际执行为原样复用
+  # （fetch 一键加入列表由 form.tsx 模型区内联承载）；tsc 0 + 触面测试绿，与 review 结论一致。
   - frontend/src/components/llm-providers/llm-provider-form.tsx
-  - frontend/src/components/llm-providers/model-input-with-fetch.tsx
 goal: >
   供应商表单模型区改为模型列表编辑器（FR-01 / Wave4-9，R-04）：每行 = 模型名输入 + 多模态
   三态下拉 + 角色多选标签 + one_m 勾选 + 删除，底部「添加模型」；在线拉模型保留并支持一键

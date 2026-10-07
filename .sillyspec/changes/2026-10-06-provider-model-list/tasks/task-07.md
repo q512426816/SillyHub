@@ -16,8 +16,11 @@ allowed_paths:
   - backend/app/modules/session_attachment/tests/
   - backend/tests/modules/daemon/lease/
 target_files:
-  - NEW:backend/app/modules/llm_provider/tests/test_provider_models_migration.py
-  - NEW:backend/app/modules/llm_provider/tests/test_provider_models_multi.py
+  # verify 对账修正（2026-10-07，真实 > 声明）：原计划 NEW:test_provider_models_migration.py
+  # 与 NEW:test_provider_models_multi.py 两文件的用例在 execute 实际落位——迁移折算四形态/
+  # downgrade 反折/注入契约逐字全部在 test_provider_config_payload.py（SQLite 直驱 + payload
+  # 断言），DTO/CRUD/校验用例在 test_llm_provider.py；与 review.json 测试域结论一致（后端 299 两轮绿）。
+  - backend/app/modules/llm_provider/tests/test_llm_provider.py
   - backend/app/modules/session_attachment/tests/test_capability.py
   - backend/app/modules/daemon/tests/test_resolve_default_provider_config.py
   - backend/app/modules/daemon/tests/test_resolve_bound_provider_config.py
