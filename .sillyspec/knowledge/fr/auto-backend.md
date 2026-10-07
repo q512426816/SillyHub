@@ -358,3 +358,42 @@ created_at: 2026-10-03T12:34:45.318Z
   confirmed_at: null
   source_change: 2026-10-07-ci-sweep-jsonl-mock
   status: active
+
+## FR-auto-backend-110 delete-change-confirm.test.tsx 文件级 stub getComputedStyle（照先例形态+注释引用坑档案），19 用例全绿且连续多跑稳定
+变更：2026-10-07-ci-sweep-focus-visible-flake
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given antd Checkbox focus-visible 规则已注册 / When 级联匹配被触发（点击/样式读取）/ Then cascade 被 stub 阻
+全文：.sillyspec/changes/archive/2026-10-07-ci-sweep-focus-visible-flake/requirements.md#FR-01
+最近确认：1cfe595a0aff8295da85267a43a4b3738a775b6e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-07-ci-sweep-focus-visible-flake:flow:测试绑定FR-01
+  tests: frontend/src/components/__tests__/delete-change-confirm.test.tsx「详情页危险按钮（PageHeader actions）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-07-ci-sweep-focus-visible-flake
+  status: active
+
+## FR-auto-backend-111 eslint/tsc 0 错
+变更：2026-10-07-ci-sweep-focus-visible-flake
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given stub 代码合入 / When 跑 lint 与类型检查 / Then 均 0 错。
+全文：.sillyspec/changes/archive/2026-10-07-ci-sweep-focus-visible-flake/requirements.md#FR-02
+最近确认：1cfe595a0aff8295da85267a43a4b3738a775b6e
+
+## FR-auto-backend-112 frontend-ci 推送后转绿（其余 workflow 不回归）
+变更：2026-10-07-ci-sweep-focus-visible-flake
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 修复推送 / When 四 workflow 完成 / Then frontend-ci success 且其余三线不回归。
+全文：.sillyspec/changes/archive/2026-10-07-ci-sweep-focus-visible-flake/requirements.md#FR-03
+最近确认：1cfe595a0aff8295da85267a43a4b3738a775b6e

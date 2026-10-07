@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-07-ci-sweep-focus-visible-flake",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-07-ci-sweep-focus-visible-flake:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/__tests__/delete-change-confirm.test.tsx「详情页危险按钮（PageHeader actions）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-ci-sweep-focus-visible-flake"
+    }
+  ]
+}

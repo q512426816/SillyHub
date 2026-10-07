@@ -1,0 +1,27 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "4dcce0b214706b27178fc32a748273ccd4280619",
+  "totals": {
+    "files": 1,
+    "additions": 25,
+    "deletions": 0
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/__tests__/delete-change-confirm.test.tsx",
+      "additions": 25,
+      "deletions": 0,
+      "kind": "modified"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "818adac7df15f15d2102b38143a39513099d567c4f590db10324774ca8a9c81a",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-07T15:54:41.998Z"
+}
