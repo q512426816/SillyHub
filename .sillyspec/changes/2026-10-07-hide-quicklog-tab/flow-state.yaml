@@ -1,0 +1,22 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  动机：sillyspec CLI v3.30.0 已退役 quick 通道（新工作一律走轻量变更），变更中心「快速修复」tab 仅剩存量只读记录，常驻展示已无入口价值，隐藏以收敛界面。
+
+  成功标准：
+  - 桌面端与移动端变更中心 tab 栏不再渲染「快速修复」tab
+  - ?tab=quicklog 深链仍进入存量快速修复视图（工作区概览统计卡 / 变更详情关联快速任务卡 / 移动端详情重绘入口不失效）
+  - 深链存量视图内副标题计数、quicklog 搜索/筛选/详情抽屉/会话页等既有行为不变
+  - 受影响的前端测试改为深链进入并全部通过（仅跑受影响测试文件）
+autopilot: false
+baseline_commit: c066911b3093db7fbbe056e76f9fa739fd7921fd
+updatedAt: '2026-10-07T12:33:44.059Z'
+baseline_sha256: 74d5ec786320ebcc2fc4a035912dd47c94fa46de14a950fbfe8ea6bb35e4a49c
+spec_approved: true
+spec_approved_at: '2026-10-07T12:33:44.057Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+
