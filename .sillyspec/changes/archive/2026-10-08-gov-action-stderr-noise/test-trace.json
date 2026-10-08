@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-gov-action-stderr-noise",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-08-gov-action-stderr-noise:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/knowledge-governance-handler.test.ts「stderr 带 Node 实验特性告警噪声 → output 滤掉噪声、真实文案可见（成功/失败两路）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-gov-action-stderr-noise"
+    }
+  ]
+}

@@ -19,7 +19,7 @@ created_at: 2026-10-08T03:33:17.438Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-08-turn-nav-hover-mark:flow:测试绑定FR-01
-  tests: test/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「悬停刻度展开浮层后浮层内指向行有可见指向标记（与 active 高亮区分）」
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「悬停刻度展开浮层后浮层内指向行有可见指向标记（与 active 高亮区分）」
   reason: spec
   state: candidate
   discovery: machine
@@ -38,7 +38,7 @@ created_at: 2026-10-08T03:33:17.438Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-08-turn-nav-hover-mark:flow:测试绑定FR-02
-  tests: test/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「指向标记随刻度滑动与浮层行 hover 实时跟随」
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「指向标记随刻度滑动与浮层行 hover 实时跟随」
   reason: spec
   state: candidate
   discovery: machine
@@ -57,7 +57,7 @@ created_at: 2026-10-08T03:33:17.438Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-08-turn-nav-hover-mark:flow:测试绑定FR-03
-  tests: test/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「指向行滚入可视区（scrollIntoView block:nearest，指向优先回落 active）」
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「指向行滚入可视区（scrollIntoView block:nearest，指向优先回落 active）」
   reason: spec
   state: candidate
   discovery: machine
@@ -76,7 +76,7 @@ created_at: 2026-10-08T03:33:17.438Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-08-turn-nav-hover-mark:flow:测试绑定FR-04
-  tests: test/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「移开组件防抖到点清指向；收起点同步清除；既有行为零回归」
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「移开组件防抖到点清指向；收起点同步清除；既有行为零回归」
   reason: spec
   state: candidate
   discovery: machine
@@ -95,7 +95,7 @@ created_at: 2026-10-08T03:33:17.438Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-08-turn-nav-hover-mark:flow:测试绑定FR-05
-  tests: test/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「turn-nav-list 既有用例全绿（vitest run 全文件）」
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「turn-nav-list 既有用例全绿（vitest run 全文件）」
   reason: spec
   state: candidate
   discovery: machine

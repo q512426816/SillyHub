@@ -480,3 +480,22 @@ created_at: 2026-10-08T11:44:49.977Z
   confirmed_at: null
   source_change: 2026-10-09-graph-text-backslash
   status: active
+
+## FR-runtime-handler-017 daemon knowledge.action 返回的 output 过滤 Node 进程告警噪声行（(node:NNN) XxxWarning 行与其 (Use node --trace-warnings 续行），CLI 真实结果文案完整保留- 失败路径（action failed 前缀）同样不再携带告警噪声- tests/knowledge-governance-handler.test.ts 新增 stderr 含 ExperimentalWarning 场景用例，该文件既有用例全绿
+变更：2026-10-08-gov-action-stderr-noise
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-gov-action-stderr-noise/requirements.md#FR-01
+最近确认：15b0d73d3336119481d4daff23c92785176bd0cc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-gov-action-stderr-noise:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/knowledge-governance-handler.test.ts「stderr 带 Node 实验特性告警噪声 → output 滤掉噪声、真实文案可见（成功/失败两路）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-gov-action-stderr-noise
+  status: active

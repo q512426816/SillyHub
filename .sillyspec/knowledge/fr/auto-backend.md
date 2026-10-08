@@ -68,7 +68,7 @@ created_at: 2026-10-08T01:35:36.843Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-08-backend-restart-fake-failed:flow:测试绑定FR-01
-  tests: test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py「test_cleanup_fails_run_without_logs」
+  tests: backend/tests/modules/agent/test_stale_run_cleanup_liveness.py「test_cleanup_fails_run_without_logs」
   reason: spec
   state: candidate
   discovery: machine
@@ -87,7 +87,7 @@ created_at: 2026-10-08T01:35:36.843Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-08-backend-restart-fake-failed:flow:测试绑定FR-02
-  tests: test/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py「test_other_terminal_results_stay_noop」
+  tests: backend/tests/modules/daemon/test_close_interactive_run_retroactive.py「test_other_terminal_results_stay_noop」
   reason: spec
   state: candidate
   discovery: machine
@@ -106,7 +106,7 @@ created_at: 2026-10-08T01:35:36.843Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-08-backend-restart-fake-failed:flow:测试绑定FR-03
-  tests: test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py | test/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py「全文件用例集」
+  tests: backend/tests/modules/agent/test_stale_run_cleanup_liveness.py | backend/tests/modules/daemon/test_close_interactive_run_retroactive.py「全文件用例集」
   reason: spec
   state: candidate
   discovery: machine

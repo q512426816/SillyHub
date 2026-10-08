@@ -1,0 +1,47 @@
+{
+  "change": "2026-10-08-gov-action-stderr-noise",
+  "baseline": "f5ac298c9cd6c2ddbca791ff43feccc8c737a2bb",
+  "head": "15b0d73d3336119481d4daff23c92785176bd0cc",
+  "files": [
+    ".sillyspec/changes/2026-10-08-gov-action-stderr-noise/design.md",
+    ".sillyspec/changes/2026-10-08-gov-action-stderr-noise/flow-state.yaml",
+    ".sillyspec/changes/2026-10-08-gov-action-stderr-noise/proposal.md",
+    ".sillyspec/changes/2026-10-08-gov-action-stderr-noise/requirements.md",
+    ".sillyspec/changes/2026-10-08-gov-action-stderr-noise/tasks.md",
+    "sillyhub-daemon/src/runtime-handler.ts",
+    "sillyhub-daemon/tests/knowledge-governance-handler.test.ts"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 184,
+    "deletions": 1
+  },
+  "savedAt": "2026-10-08T09:07:20.568Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "4e76289858169484899124b435c1bb0563c01afaabb4430ac74a7308a2166533",
+  "patchStatus": "ok"
+}

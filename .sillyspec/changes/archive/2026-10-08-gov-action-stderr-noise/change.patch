@@ -1,0 +1,239 @@
+diff --git a/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/flow-state.yaml b/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/flow-state.yaml
+new file mode 100644
+index 000000000..3d2c6b5fe
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/flow-state.yaml
+@@ -0,0 +1,24 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  动机：知识库信号卡「一键修复路径」点完只看到 Node SQLite ExperimentalWarning——daemon 把 CLI stderr 告警拼进 output 尾部返回，前端仅展示末尾 160 字符，真实结果文案（如『1
++  个无法定位需人工核』）被挤掉，用户无法得知修复到底成没成。
++
++  成功标准：
++
++  - daemon knowledge.action 返回的 output 过滤 Node 进程告警噪声行（(node:NNN) XxxWarning 行与其 (Use node --trace-warnings 续行），CLI
++  真实结果文案完整保留
++
++  - 失败路径（action failed 前缀）同样不再携带告警噪声
++
++  - tests/knowledge-governance-handler.test.ts 新增 stderr 含 ExperimentalWarning 场景用例，该文件既有用例全绿
++autopilot: true
++baseline_commit: f5ac298c9cd6c2ddbca791ff43feccc8c737a2bb
++updatedAt: '2026-10-08T09:06:43.129Z'
++baseline_sha256: b2d87efb7f81e2fcfa348a5a760bcf3b382dcdd6fbcb328b0ab2a8cccac316db
++
+diff --git a/sillyhub-daemon/src/runtime-handler.ts b/sillyhub-daemon/src/runtime-handler.ts
+index 721e7d80b..0eb64010a 100644
+--- a/sillyhub-daemon/src/runtime-handler.ts
++++ b/sillyhub-daemon/src/runtime-handler.ts
+@@ -389,6 +389,23 @@ const KNOWLEDGE_DOMAIN_RE = /^[a-z0-9-]+$/;
+ const KNOWLEDGE_ACTION_KINDS = new Set(['repair-paths', 'redomain']);
+ const KNOWLEDGE_ROOT_ANOMALY_RE = /[\0\r\n<>|"?*]/;
+ 
++/**
++ * Node 进程告警噪声行（2026-10-08-gov-action-stderr-noise）：sillyspec CLI 用
++ * node:sqlite（Node 22+ 实验特性），每次运行必往 stderr 打
++ * `(node:PID) ExperimentalWarning: SQLite ...` + `(Use \`node --trace-warnings ...\`)`
++ * 续行。action 的 output 是 stdout+stderr 拼接取尾、前端只展示末尾 160 字符——
++ * 不滤掉这两行，真实结果文案（如「N 个无法定位需人工核」）会被噪声挤出可见区。
++ */
++const NODE_WARNING_LINE_RE = /^\(node:\d+\) \w+Warning/;
++const NODE_WARNING_HINT_RE = /^\(Use `node --trace-warnings/;
++
++function stripNodeWarningNoise(stderr: string): string {
++  return stderr
++    .split(/\r?\n/)
++    .filter((line) => !NODE_WARNING_LINE_RE.test(line) && !NODE_WARNING_HINT_RE.test(line))
++    .join('\n');
++}
++
+ export class KnowledgeGovernanceHandler {
+   /** allowed_roots 白名单来源（containment 第二道校验）；缺省空数组 → 一律拒。 */
+   private readonly _rootsProvider: () => string[];
+@@ -467,7 +484,7 @@ export class KnowledgeGovernanceHandler {
+     }
+     const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
+     const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root);
+-    const output = `${r.stdout}\n${r.stderr}`.trim().slice(-2000);
++    const output = `${r.stdout}\n${stripNodeWarningNoise(r.stderr)}`.trim().slice(-2000);
+     if (!r.ok) {
+       if (r.timedOut) throw new RpcError('timeout', `action timed out (${SILLYSPEC_TIMEOUT_MS}ms)`);
+       throw new RpcError('internal', `action failed: ${output}`);
+diff --git a/sillyhub-daemon/tests/knowledge-governance-handler.test.ts b/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
+index dd91268f4..9b8102788 100644
+--- a/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
++++ b/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
+@@ -104,6 +104,32 @@ describe('knowledge.action', () => {
+     expect(cwds[0]).toBe('C:/repo/x');
+   });
+ 
++  it('stderr 带 Node 实验特性告警噪声 → output 滤掉噪声、真实文案可见（成功/失败两路）', async () => {
++    // 实测 sillyspec CLI（node:sqlite）每次运行必打这两行 stderr（2026-10-08-gov-action-stderr-noise）
++    const noisy =
++      '(node:632) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n' +
++      '(Use `node --trace-warnings ...` to show where the warning was created)';
++    const ok = mk({
++      ok: true,
++      stdout: '✅ 绑定路径无需修复（1 个无法定位需人工核：FR-build-049:test/x.test.mjs）',
++      stderr: noisy,
++      timedOut: false,
++    });
++    const r = await ok.handler.action('ws-1', 'repair-paths', {}, 'C:/repo/x');
++    expect(r.output).not.toContain('ExperimentalWarning');
++    expect(r.output).not.toContain('node --trace-warnings');
++    expect(r.output).toContain('无法定位需人工核');
++
++    const fail = mk({ ok: false, stdout: 'boom', stderr: noisy, timedOut: false });
++    let caught: unknown;
++    await fail.handler.action('ws-1', 'repair-paths', {}, 'C:/repo/x').catch((e: unknown) => {
++      caught = e;
++    });
++    expect(caught).toBeInstanceOf(Error);
++    expect((caught as Error).message).toContain('action failed: boom');
++    expect((caught as Error).message).not.toContain('ExperimentalWarning');
++  });
++
+   it('redomain：域名合法透传；元字符/大小写拒', async () => {
+     const ok = mk({ ok: true, stdout: '✅ 域迁移完成：2 条', stderr: '', timedOut: false });
+     const r = await ok.handler.action('ws-1', 'redomain', { from: 'auto-backend', to: 'platform-sync' }, 'C:/repo/x');
+diff --git a/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/design.md b/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/design.md
+new file mode 100644
+index 000000000..2e63c03be
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/design.md
+@@ -0,0 +1,59 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T09:02:41.497Z
++---
++# 设计记录（Design Record）— 2026-10-08-gov-action-stderr-noise
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++知识信号卡「一键修复路径」的完成提示被 Node SQLite ExperimentalWarning 淹没：daemon
++`KnowledgeGovernanceHandler.action()` 把 CLI 子进程的 stdout+stderr 拼接取尾 2000 字符
++返回，前端只展示末尾 160 字符；sillyspec CLI（Node 22+ `node:sqlite`）每次运行必往
++stderr 打两行告警噪声，恰好落在拼接尾部，把真实结果文案（如「N 个无法定位需人工核」）
++挤出前端可见区。方案：daemon 侧在拼接 output 前用 `stripNodeWarningNoise()` 按行过滤
++stderr 中的 Node 进程告警行。选 daemon 侧而非前端侧：噪声源头在子进程 stderr，在源头
++滤一次，成功 output 与失败 `action failed` 前缀两路同时受益；前端尾部展示逻辑不动。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++`sillyhub-daemon/src/runtime-handler.ts`：新增模块级纯函数
++`stripNodeWarningNoise(stderr: string): string`（不导出，仅本文件使用）；
++`action()` 的 output 拼接从 `` `${r.stdout}\n${r.stderr}` `` 改为
++`` `${r.stdout}\n${stripNodeWarningNoise(r.stderr)}` ``。RPC `knowledge.action` 响应
++字段 `output` 语义微变：不再含 Node 告警噪声行，其余不变；backend / 前端零改动
++（同字段同类型）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立——过滤是对已收齐的子进程 stderr 文本做纯函数变换，无流式或乱序问题。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   不涉及——`stripNodeWarningNoise` 是无状态纯函数；action 仍是单请求单子进程，写面
++   （CLI --write）行为不变。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   安全——过滤发生在子进程 close 后拼接阶段；超时杀树路径未动，中途断连行为与改前
++   一致。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不涉及——按行过滤只影响本次 RPC 响应文本，无跨工作区状态。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：正则误伤真实错误行。缓解——只匹配行首严格形态
++`^\(node:\d+\) \w+Warning` 与 ``^\(Use `node --trace-warnings``（实测 CLI 噪声逐字），
++真实 CLI 报错文案不以这两种形态开头。放弃的方案：给子进程注入
++`NODE_OPTIONS=--no-warnings`——会静默压制 CLI 所有告警（含未来可能有价值的），
++且改的 spawn 环境面大于必要面；前端展示头 160 字符代替尾 160——CLI 结果摘要（含
++条目 ID 清单）在输出尾部，取头会丢信息。
+diff --git a/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/proposal.md b/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/proposal.md
+new file mode 100644
+index 000000000..42970cf06
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/proposal.md
+@@ -0,0 +1,22 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T09:02:41.497Z
++---
++# 提案书（Proposal）— 2026-10-08-gov-action-stderr-noise
++
++## 动机
++
++任务原话转写：动机：知识库信号卡「一键修复路径」点完只看到 Node SQLite ExperimentalWarning——daemon 把 CLI stderr 告警拼进 output 尾部返回，前端仅展示末尾 160 字符，真实结果文案（如『1 个无法定位需人工核』）被挤掉，用户无法得知修复到底成没成。
++成功标准：
++- daemon knowledge.action 返回的 output 过滤 Node 进程告警噪声行（(node:NNN) XxxWarning 行与其 (Use node --trace-warnings 续行），CLI 真实结果文案完整保留
++- 失败路径（action failed 前缀）同样不再携带告警噪声
++- tests/knowledge-governance-handler.test.ts 新增 stderr 含 ExperimentalWarning 场景用例，该文件既有用例全绿
++
++## 变更范围
++
++按成功标准机械推导，共 1 条验收面：
++1. daemon knowledge.action 返回的 output 过滤 Node 进程告警噪声行（(node:NNN) XxxWarning 行与其 (Use node --trace-warnings 续行），CLI 真实结果文案完整保留- 失败路径（action failed 前缀）同样不再携带告警噪声- tests/knowledge-governance-handler.test.ts 新增 stderr 含 ExperimentalWarning 场景用例，该文件既有用例全绿
++
++## 成功标准（可验证）
++
++1. daemon knowledge.action 返回的 output 过滤 Node 进程告警噪声行（(node:NNN) XxxWarning 行与其 (Use node --trace-warnings 续行），CLI 真实结果文案完整保留- 失败路径（action failed 前缀）同样不再携带告警噪声- tests/knowledge-governance-handler.test.ts 新增 stderr 含 ExperimentalWarning 场景用例，该文件既有用例全绿
+diff --git a/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/requirements.md b/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/requirements.md
+new file mode 100644
+index 000000000..241047ac6
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/requirements.md
+@@ -0,0 +1,23 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T09:02:41.497Z
++---
++# 需求规格（Requirements）— 2026-10-08-gov-action-stderr-noise
++
++## 功能需求
++
++### FR-01: daemon knowledge.action 返回的 output 过滤 Node 进程告警噪声行（(node:NNN) XxxWarning 行与其 (Use node --trace-warnings 续行），CLI 真实结果文案完整保留- 失败路径（action failed 前缀）同样不再携带告警噪声- tests/knowledge-governance-handler.test.ts 新增 stderr 含 ExperimentalWarning 场景用例，该文件既有用例全绿
++
++- daemon knowledge.action 拼 output 时，必须过滤 stderr 中的 Node 进程告警噪声行（行首 `(node:NNN) XxxWarning` 形态与其 `(Use \`node --trace-warnings ...\`)` 续行）；stdout 的 CLI 真实结果文案禁止被改动或丢弃，失败路径 `action failed:` 消息同样不得携带告警噪声。
++
++#### 场景：主路径
++
++- Given 子进程 stderr 含两行 SQLite ExperimentalWarning 噪声；When 执行 repair-paths
++  成功（exit 0）；Then 返回 output 含 stdout 真实文案（如「无法定位需人工核」）且不含
++  「ExperimentalWarning」「node --trace-warnings」。
++- Given 同噪声 + CLI 失败（exit≠0）；When action 抛 internal；Then 错误消息含
++  `action failed: <stdout>` 且不含告警噪声。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」；空行/待填在 flow done 拒收）
++
++FR-01: sillyhub-daemon/tests/knowledge-governance-handler.test.ts「stderr 带 Node 实验特性告警噪声 → output 滤掉噪声、真实文案可见（成功/失败两路）」
+diff --git a/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/tasks.md b/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/tasks.md
+new file mode 100644
+index 000000000..a049caa94
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-gov-action-stderr-noise/tasks.md
+@@ -0,0 +1,7 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T09:02:41.497Z
++---
++# 任务注册表（Tasks）— 2026-10-08-gov-action-stderr-noise
++
++- [x] task-01: daemon knowledge.action 返回的 output 过滤 Node 进程告警噪声行（(node:NNN) XxxWarning 行与其 (Use node --trace-warnings 续行），CLI 真实结果文案完整保留- 失败路径（action failed 前缀）同样不再携带告警噪声- tests/knowledge-governance-handler.test.ts 新增 stderr 含 ExperimentalWarning 场景用例，该文件既有用例全绿
