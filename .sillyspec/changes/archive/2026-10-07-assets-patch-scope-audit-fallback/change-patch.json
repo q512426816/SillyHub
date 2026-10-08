@@ -1,8 +1,12 @@
 {
   "change": "2026-10-07-assets-patch-scope-audit-fallback",
   "baseline": "9c8f9d8eb5f4e4c13c1d39998d6e8ba006791568",
-  "head": "ce08f8ae7194bd05be50f99933721dba33023d29",
+  "head": "fda61e707076b106387d4eb3824585a901382e6a",
   "files": [
+    "backend/app/modules/change/assets.py",
+    "backend/app/modules/change/router.py",
+    "backend/app/modules/change/schema.py",
+    "backend/app/modules/change/tests/test_assets.py",
     "backend/app/modules/change/tests/test_files_router.py",
     "backend/app/modules/daemon/tests/test_attachment_pipeline.py",
     "backend/app/modules/workspace/tests/test_archived_write_guard.py",
@@ -12,17 +16,22 @@
     "frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx",
     "frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx",
     "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+    ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/decisions.md",
     ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/design.md",
     ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/proposal.md",
     ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/requirements.md",
-    ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/tasks.md"
+    ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/tasks.md",
+    ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/test-trace.json",
+    ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/timeline.md",
+    ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/verify-result.md",
+    ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/watcher-events.jsonl"
   ],
   "totals": {
-    "files": 13,
-    "additions": 258,
-    "deletions": 21
+    "files": 22,
+    "additions": 599,
+    "deletions": 49
   },
-  "savedAt": "2026-10-08T00:36:48.232Z",
+  "savedAt": "2026-10-08T00:52:16.455Z",
   "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
   "modules": [
     {
@@ -34,7 +43,7 @@
     },
     {
       "id": "change",
-      "files": 1,
+      "files": 5,
       "doc": "docs/backend/modules/change.md",
       "docTouched": false,
       "docMissing": false
@@ -48,7 +57,7 @@
     },
     {
       "id": "backend",
-      "files": 4,
+      "files": 8,
       "doc": "docs/multi-agent-platform/modules/backend.md",
       "docTouched": false,
       "docMissing": false
@@ -69,7 +78,7 @@
     },
     {
       "id": "change",
-      "files": 1,
+      "files": 5,
       "doc": "docs/SillyHub/modules/change.md",
       "docTouched": false,
       "docMissing": false
@@ -104,6 +113,6 @@
     "docs/SillyHub/modules/_module-map.yaml",
     "docs/sillyhub-daemon/modules/_module-map.yaml"
   ],
-  "patchSha256": "c6019b2ba5e56b361cd783cb48c72d8c23de7bc501dde1268257c36dacc24224",
+  "patchSha256": "f53089fedf09a8b4e1116a73561d93f78cdf1921f6493cef2a26cf5d9c739843",
   "patchStatus": "ok"
 }

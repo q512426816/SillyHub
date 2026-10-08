@@ -4,11 +4,35 @@
   "degradedReason": null,
   "baseAnchor": "9c8f9d8eb5f4e4c13c1d39998d6e8ba006791568",
   "totals": {
-    "files": 9,
-    "additions": 78,
-    "deletions": 21
+    "files": 13,
+    "additions": 255,
+    "deletions": 49
   },
   "rows": [
+    {
+      "path": "backend/app/modules/change/assets.py",
+      "additions": 55,
+      "deletions": 19,
+      "kind": "modified"
+    },
+    {
+      "path": "backend/app/modules/change/router.py",
+      "additions": 4,
+      "deletions": 3,
+      "kind": "modified"
+    },
+    {
+      "path": "backend/app/modules/change/schema.py",
+      "additions": 8,
+      "deletions": 6,
+      "kind": "modified"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_assets.py",
+      "additions": 110,
+      "deletions": 0,
+      "kind": "modified"
+    },
     {
       "path": "backend/app/modules/change/tests/test_files_router.py",
       "additions": 7,
@@ -69,7 +93,7 @@
   },
   "note": "flow done 时点冻结（本文件落盘时采集）",
   "closedBy": "flow done",
-  "patchSha256": "c6019b2ba5e56b361cd783cb48c72d8c23de7bc501dde1268257c36dacc24224",
+  "patchSha256": "f53089fedf09a8b4e1116a73561d93f78cdf1921f6493cef2a26cf5d9c739843",
   "patchStatus": "ok",
-  "savedAt": "2026-10-08T00:36:48.232Z"
+  "savedAt": "2026-10-08T00:52:16.455Z"
 }

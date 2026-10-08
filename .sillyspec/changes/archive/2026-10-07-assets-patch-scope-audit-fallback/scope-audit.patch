@@ -1,3 +1,286 @@
+diff --git a/backend/app/modules/change/assets.py b/backend/app/modules/change/assets.py
+index cbb14a292..ffe7d1745 100644
+--- a/backend/app/modules/change/assets.py
++++ b/backend/app/modules/change/assets.py
+@@ -10,9 +10,11 @@ spec 树镜像；CLI 侧无结构化查询命令、前端自行解析有 N+1 与
+ - 决策蒸馏条目：``knowledge/decisions/*.md`` 同构（``## D-NNN@N 标题``；
+   无「变更：」行的条目跳过——CLI 容错面）；
+ - 测试绑定：归档变更目录 ``test-trace.json`` 直读（文件本身 per-change）；
+-- patch 留档：``change-patch.json`` 存在才读（存量归档无此件 → None 容错，
+-  该留档是 CLI 晚于多数归档的新功能）；``change.patch`` 的单文件切片供卡面
+-  点开看具体改动（2026-09-25-change-detail-assets-usability / FR-04）；
++- patch 留档：``change-patch.json`` 存在才读（存量归档无此件 → 回退读
++  ``scope-audit.json``——厚流程 execute --done 只落快照不冻 patch 留档，
++  通道不对称见 docs/sillyspec/thin-flow-done-no-scope-audit-snapshot.md；
++  两份都缺 → None 容错）；单文件切片优先 ``change.patch``、缺件回退
++  ``scope-audit.patch``，供卡面点开看具体改动；
+ - delta 摘要：``delta.md`` 标题行 + ``## Before``/``## Delta`` 段行数。
+ 
+ 镜像根获取对齐 ``knowledge/service.py::_spec_content_root`` 先例、变更目录
+@@ -213,19 +215,41 @@ def _read_test_rows(
+     return rows
+ 
+ 
+-def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
+-    """读 ``change-patch.json`` 的 totals + files 投影（存在才读 → 无此件 None）。"""
+-    path = change_dir / "change-patch.json"
++def _read_json_dict(path: Path) -> dict | None:
++    """读 JSON 文件为 dict（缺失/损坏/非对象 → None，fail-open）。"""
+     try:
+         data = json.loads(path.read_text(encoding="utf-8"))
+     except (OSError, ValueError) as exc:
+-        log.info("change.assets_patch_unavailable", path=str(path), error=str(exc))
+-        return None
+-    if not isinstance(data, dict):
++        log.info("change.assets_json_unavailable", file=str(path), error=str(exc))
+         return None
++    return data if isinstance(data, dict) else None
++
++
++def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
++    """读 ``change-patch.json`` 的 totals + files 投影；缺件回退 ``scope-audit.json``。
++
++    回退（2026-10-07-assets-patch-scope-audit-fallback）：厚流程 execute --done
++    只落 scope-audit.json/patch、不冻 change-patch.json——回退时 totals/patchStatus/
++    savedAt 同构直取，file_list 改从 ``rows[].path`` 投影。两份都缺/损坏 → None。
++    """
++    data = _read_json_dict(change_dir / "change-patch.json")
++    file_list: list[str] = []
++    if data is not None:
++        raw_files = data.get("files")
++        if isinstance(raw_files, list):
++            file_list = [f for f in raw_files if isinstance(f, str)]
++    else:
++        data = _read_json_dict(change_dir / "scope-audit.json")
++        if data is None:
++            return None
++        raw_rows = data.get("rows")
++        if isinstance(raw_rows, list):
++            file_list = [
++                row["path"]
++                for row in raw_rows
++                if isinstance(row, dict) and isinstance(row.get("path"), str)
++            ]
+     totals = data.get("totals") or {}
+-    raw_files = data.get("files")
+-    file_list = [f for f in raw_files if isinstance(f, str)] if isinstance(raw_files, list) else []
+     return ChangePatchMeta(
+         files=totals.get("files"),
+         additions=totals.get("additions"),
+@@ -317,21 +341,33 @@ def slice_patch_for_file(patch_text: str, rel_path: str) -> str | None:
+ 
+ 
+ def _read_patch_file_diff(change_dir: Path, rel_path: str) -> ChangePatchFileRead:
+-    """读 ``change.patch`` 并切出目标文件段（缺件/未命中/超限 → note 或 truncated）。"""
+-    path = change_dir / "change.patch"
+-    try:
+-        text = path.read_text(encoding="utf-8", errors="replace")
+-    except OSError as exc:
+-        log.info("change.assets_patch_file_unavailable", path=str(path), error=str(exc))
++    """读 ``change.patch``（缺件回退 ``scope-audit.patch``）并切出目标文件段。
++
++    两份留档分属 thin（flow done 冻 change-patch）与 heavy（execute --done 落
++    scope-audit）两通道，归档目录实际只会有其一；缺件/未命中/超限 → note 或
++    truncated（展示面 fail-open）。
++    """
++    text: str | None = None
++    source: str | None = None
++    for name in ("change.patch", "scope-audit.patch"):
++        path = change_dir / name
++        try:
++            text = path.read_text(encoding="utf-8", errors="replace")
++        except OSError as exc:
++            log.info("change.assets_patch_file_unavailable", file=str(path), error=str(exc))
++            continue
++        source = name
++        break
++    if text is None or source is None:
+         return ChangePatchFileRead(
+             path=rel_path,
+-            note="本变更归档目录没有 change.patch 留档（该件是 CLI 晚于多数归档的新功能），无法比对具体改动。",
++            note="本变更归档目录没有 change.patch / scope-audit.patch 留档（通道留痕不对称的缺口形态），无法比对具体改动。",
+         )
+     sliced = slice_patch_for_file(text, rel_path)
+     if sliced is None:
+         return ChangePatchFileRead(
+             path=rel_path,
+-            note="该文件不在 change.patch 内（留档窗口外，或仅改了不纳入 patch 的面）。",
++            note=f"该文件不在 {source} 内（留档窗口外，或仅改了不纳入 patch 的面）。",
+         )
+     truncated = len(sliced) > _PATCH_FILE_MAX_CHARS
+     return ChangePatchFileRead(
+diff --git a/backend/app/modules/change/router.py b/backend/app/modules/change/router.py
+index fc6aa600a..b72114553 100644
+--- a/backend/app/modules/change/router.py
++++ b/backend/app/modules/change/router.py
+@@ -586,9 +586,10 @@ async def get_change_patch_file(
+ ) -> ChangePatchFileRead:
+     """归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。
+ 
+-    卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch`` 并切出该
+-    文件的 diff 段——冻结在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，
+-    两者不可互替）。``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
++    卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch``（缺件回退
++    ``scope-audit.patch``——厚流程归档只落快照留档）并切出该文件的 diff 段——冻结
++    在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，两者不可互替）。
++    ``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
+     绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
+     不抛 404（读不到留档是展示面降级，不是资源不存在）。
+     """
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index cc7dc135e..7668f7bff 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -871,11 +871,12 @@ class ChangeTestRow(BaseModel):
+ 
+ 
+ class ChangePatchMeta(BaseModel):
+-    """patch 留档统计（change-patch.json 的 totals + files 投影；无留档 → 整体 None）。
++    """patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。
+ 
+-    ``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 是同一 JSON
+-    ``files`` 数组的清单投影（2026-09-25-change-detail-assets-usability / FR-04 起
+-    供卡面列出具体改动面），超上限时 ``files_truncated=True`` 显式标注。
++    ``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 的清单投影
++    按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面
++    列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退
++    形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。
+     """
+ 
+     files: int | None = None
+@@ -890,8 +891,9 @@ class ChangePatchMeta(BaseModel):
+ class ChangePatchFileRead(BaseModel):
+     """归档留档单文件 diff 切片（GET /changes/{cid}/assets/patch-file）。
+ 
+-    展示面 fail-open：``change.patch`` 缺失、文件不在 patch 内、切片超上限一律以
+-    ``note``/``truncated`` 说明而非报错（读不到留档不是变更详情的错误面）。
++    展示面 fail-open：``change.patch``（缺件回退 ``scope-audit.patch``）缺失、
++    文件不在留档内、切片超上限一律以 ``note``/``truncated`` 说明而非报错
++    （读不到留档不是变更详情的错误面）。
+     """
+ 
+     path: str
+diff --git a/backend/app/modules/change/tests/test_assets.py b/backend/app/modules/change/tests/test_assets.py
+index d75882eef..2c7d25ca3 100644
+--- a/backend/app/modules/change/tests/test_assets.py
++++ b/backend/app/modules/change/tests/test_assets.py
+@@ -493,6 +493,116 @@ async def test_patch_file_diff_truncates_with_flag(
+     assert result.truncated is True
+ 
+ 
++# ===========================================================================
++# 归档留档回退：厚流程形态（scope-audit.json/patch 独存，change-patch 缺席）
++# 2026-10-07-assets-patch-scope-audit-fallback——两通道留痕不对称的读侧修复，
++# 缺陷记录见 docs/sillyspec/thin-flow-done-no-scope-audit-snapshot.md 镜像缺口一节
++# ===========================================================================
++
++
++def _seed_snapshot_archive(spec_root: Path, *, patch_text: str | None = PATCH_SAMPLE) -> None:
++    """tmp 镜像：厚流程形态归档——只落 scope-audit.json + scope-audit.patch。"""
++    change_dir = spec_root / "changes" / "archive" / KEY
++    change_dir.mkdir(parents=True, exist_ok=True)
++    (change_dir / "scope-audit.json").write_text(
++        json.dumps(
++            {
++                "change": KEY,
++                "rows": [
++                    {
++                        "path": "src/flow.js",
++                        "additions": 2,
++                        "deletions": 0,
++                        "kind": "modified",
++                        "verdict": "planned",
++                    },
++                    {
++                        "path": "test/x.test.mjs",
++                        "additions": 1,
++                        "deletions": 0,
++                        "kind": "new",
++                        "verdict": "planned",
++                    },
++                ],
++                "totals": {"files": 2, "additions": 3, "deletions": 0},
++                "patchStatus": "ok",
++                "savedAt": "2026-09-22T21:42:02.355Z",
++            }
++        ),
++        encoding="utf-8",
++    )
++    if patch_text is not None:
++        (change_dir / "scope-audit.patch").write_text(patch_text, encoding="utf-8")
++
++
++async def test_patch_meta_falls_back_to_scope_audit_snapshot(db_session, tmp_path: Path) -> None:
++    """厚流程归档（无 change-patch.json）：totals/状态/时间直取，file_list 从 rows[].path 投影。"""
++    spec_root = tmp_path / "spec-root10"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_snapshot_archive(spec_root)
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    assert result.patch is not None
++    assert result.patch.files == 2
++    assert result.patch.additions == 3
++    assert result.patch.deletions == 0
++    assert result.patch.patch_status == "ok"
++    assert result.patch.saved_at == "2026-09-22T21:42:02.355Z"
++    assert result.patch.file_list == ["src/flow.js", "test/x.test.mjs"]
++    assert result.patch.files_truncated is False
++
++
++async def test_patch_meta_change_patch_takes_priority(db_session, tmp_path: Path) -> None:
++    """两份并存 → change-patch.json 优先（thin 形态现状不破，totals 可区分来源）。"""
++    spec_root = tmp_path / "spec-root11"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_patch_archive(spec_root)  # totals: +2/−0（快照是 +3/−0，用于区分来源）
++    _seed_snapshot_archive(spec_root)
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    assert result.patch is not None
++    assert (result.patch.additions, result.patch.deletions) == (2, 0)
++    assert result.patch.file_list == ["src/flow.js", "test/x.test.mjs"]
++
++
++async def test_patch_file_diff_falls_back_to_scope_audit_patch(db_session, tmp_path: Path) -> None:
++    """厚流程归档点开文件 → 从 scope-audit.patch 切片；未命中 note 指名该留档。"""
++    spec_root = tmp_path / "spec-root12"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_snapshot_archive(spec_root)
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++    service = ChangeAssetsQueryService(db_session)
++
++    hit = await service.get_patch_file_diff(ws.id, change.id, "src/flow.js")
++    assert hit.diff is not None and "+b" in hit.diff
++    assert hit.note is None and hit.truncated is False
++
++    miss = await service.get_patch_file_diff(ws.id, change.id, "src/not-there.js")
++    assert miss.diff is None
++    assert miss.note is not None and "不在 scope-audit.patch" in miss.note
++
++
++async def test_patch_file_diff_without_any_patch_artifact(db_session, tmp_path: Path) -> None:
++    """两份 patch 留档都缺 → note 一并说明（fail-open 不 500）。"""
++    spec_root = tmp_path / "spec-root13"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_snapshot_archive(spec_root, patch_text=None)
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_patch_file_diff(
++        ws.id, change.id, "src/flow.js"
++    )
++    assert result.diff is None
++    assert result.note is not None
++    assert "没有 change.patch" in result.note and "scope-audit.patch" in result.note
++
++
+ # ===========================================================================
+ # HTTP 面（路由注册 + 参数校验 + DTO 形状；fixture 范式照 test_files_router）
+ # ===========================================================================
 diff --git a/backend/app/modules/change/tests/test_files_router.py b/backend/app/modules/change/tests/test_files_router.py
 index ee9827c8b..dde37a87e 100644
 --- a/backend/app/modules/change/tests/test_files_router.py
@@ -266,6 +549,22 @@ index 47484763f..a296356ef 100644
        attachments: false,
        thinking: false,
        subagent: false,
+diff --git a/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/decisions.md b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/decisions.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/decisions.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T00:36:48.700Z
++---
++# 决策记录（Decisions）— 2026-10-07-assets-patch-scope-audit-fallback
++
++## D-001@v1: 风险与死路（design 槽4 收割）
++- 类型：process
++- 状态：confirmed
++- 答案：最大风险：file_list 语义按通道不同——change-patch.json 的 files 数组含 .sillyspec/ 规格工件，scope-audit.json 的 rows 只含对账表行。展示口径随之不同（各自的真实冻结 面），可接受；未来若要求统一需 CLI 侧统一留痕（第 3 层根治）。试过但放弃：在 assets 层实时重算 git diff 补数——引入实时窗口漂移，违背「归档留档冻结在收尾时点」 的既有语义。
+
 diff --git a/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/design.md b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/design.md
 new file mode 100644
 --- /dev/null
@@ -469,3 +768,181 @@ new file mode 100644
 +- [x] task-03: 两份留档都缺失时 patch 仍为 None 且 diff 端点 note 说明缺两份留档（fail-open 语义保留）
 +- [x] task-04: change-patch.json 存在时行为与现状完全一致（thin 形态回归不破）
 +- [x] task-05: assets 模块聚焦测试通过
+
+diff --git a/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/test-trace.json b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/test-trace.json
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/test-trace.json
+@@ -0,0 +1,81 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-07-assets-patch-scope-audit-fallback",
++  "rows": [
++    {
++      "anchor": "FR-01",
++      "row_id": "2026-10-07-assets-patch-scope-audit-fallback:flow:测试绑定FR-01",
++      "tests": [
++        "backend/app/modules/change/tests/test_assets.py「test_patch_meta_falls_back_to_scope_audit_snapshot」"
++      ],
++      "reason": "spec",
++      "state": "candidate",
++      "discovery": "machine",
++      "confirmed_by": null,
++      "confirmed_at": null,
++      "reconfirm": null,
++      "status": "active",
++      "source_change": "2026-10-07-assets-patch-scope-audit-fallback"
++    },
++    {
++      "anchor": "FR-02",
++      "row_id": "2026-10-07-assets-patch-scope-audit-fallback:flow:测试绑定FR-02",
++      "tests": [
++        "backend/app/modules/change/tests/test_assets.py「test_patch_file_diff_falls_back_to_scope_audit_patch」"
++      ],
++      "reason": "spec",
++      "state": "candidate",
++      "discovery": "machine",
++      "confirmed_by": null,
++      "confirmed_at": null,
++      "reconfirm": null,
++      "status": "active",
++      "source_change": "2026-10-07-assets-patch-scope-audit-fallback"
++    },
++    {
++      "anchor": "FR-03",
++      "row_id": "2026-10-07-assets-patch-scope-audit-fallback:flow:测试绑定FR-03",
++      "tests": [
++        "backend/app/modules/change/tests/test_assets.py「test_patch_file_diff_without_any_patch_artifact」"
++      ],
++      "reason": "spec",
++      "state": "candidate",
++      "discovery": "machine",
++      "confirmed_by": null,
++      "confirmed_at": null,
++      "reconfirm": null,
++      "status": "active",
++      "source_change": "2026-10-07-assets-patch-scope-audit-fallback"
++    },
++    {
++      "anchor": "FR-04",
++      "row_id": "2026-10-07-assets-patch-scope-audit-fallback:flow:测试绑定FR-04",
++      "tests": [
++        "backend/app/modules/change/tests/test_assets.py「test_patch_meta_change_patch_takes_priority」"
++      ],
++      "reason": "spec",
++      "state": "candidate",
++      "discovery": "machine",
++      "confirmed_by": null,
++      "confirmed_at": null,
++      "reconfirm": null,
++      "status": "active",
++      "source_change": "2026-10-07-assets-patch-scope-audit-fallback"
++    },
++    {
++      "anchor": "FR-05",
++      "row_id": "2026-10-07-assets-patch-scope-audit-fallback:flow:测试绑定FR-05",
++      "tests": [
++        "backend/app/modules/change/tests/test_assets.py「test_patch_meta_projects_file_list + 既有 24 例全量回归」"
++      ],
++      "reason": "spec",
++      "state": "candidate",
++      "discovery": "machine",
++      "confirmed_by": null,
++      "confirmed_at": null,
++      "reconfirm": null,
++      "status": "active",
++      "source_change": "2026-10-07-assets-patch-scope-audit-fallback"
++    }
++  ]
++}
+
+diff --git a/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/timeline.md b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/timeline.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/timeline.md
+@@ -0,0 +1,40 @@
++# 合成时间线快照 — 2026-10-07-assets-patch-scope-audit-fallback
++
++> 烤制于归档链（2026-10-08T00:50:06.321Z）：事件流机本位（.runtime gitignore），本快照随归档包进 git 跨机可读。
++> 末尾事件（含「目录已移入 archive」终拍）可能晚于烤制未入快照；勾选时刻为顺序推断（≈）。
++> 原始事件副本：本目录 watcher-events.jsonl（时点快照）。
++📅 2026-10-07-assets-patch-scope-audit-fallback — 合成时间线（thin｜事件流 × tasks.md × git 提交锚）
++
++── 事件时间轴 ──
++22:58:35  🁢 变更诞生（工件 frontmatter created_at）
++23:04:48  📝 design.md 内容变更
++23:05:08  📝 requirements.md 内容变更
++23:05:24  📝 requirements.md 内容变更
++23:05:51  📝 design.md 内容变更
++23:15:02  🔀 271efbb25  test(backend): CI 红清偿后端四处——迁移链尾锚前移 20261006200000 / fil…
++23:15:09  🔀 975fe8104  test(frontend): CI 红清偿前端三处——precipitate-dialog 载荷断言回归 D…
++23:18:05  🔀 4a538caa3  chore(ci): task-08 验证留痕——本地相关面后端 4 文件 56 绿 + 前端 3 文件 93…
++23:20:00  🔀 cfd3e078a  chore(archive): 2026-10-07-ci-failures-sweep 归档留档
++23:20:13  🔀 7b99d2620  chore(archive): 2026-10-07-ci-failures-sweep 源侧注销（归档移动收…
++23:31:42  🔀 2b568e365  test(frontend): CI 红清偿补漏第 4 处——onlyoffice-preview 枚举式 .…
++23:31:49  🔀 768a88a69  chore(ci): task-03 验证留痕——本地相关两文件 20 绿（onlyoffice-previe…
++23:32:53  🔀 4dcce0b21  chore(archive): 2026-10-07-ci-sweep-jsonl-mock 源侧注销（归档移…
++23:47:54  ⚠️ stall  execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）
++23:53:41  🔀 1cfe595a0  chore(ci): task-03 验证留痕——本地 19 用例连续 6 跑绿 + eslint 0 + t…
++23:54:50  🔀 ce08f8ae7  chore(archive): 2026-10-07-ci-sweep-focus-visible-flake…
++00:09:52  ⚠️ stall  execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）
++08:35:08  📝 tasks.md 内容变更
++08:35:08  ✅ checked 0→5
++08:36:39  · 门实测 passed（92.1s） · 20261008003638
++08:36:51  📦 change 目录已移入 archive
++
++── 任务面（勾选时刻 ≈ 顺序推断｜tasks.md 描述行 × 提交锚）──
++task-01  ≈08:35:08   归档目录无 change-patch.json 但有 scope-audit.json…  271efbb25
++task-02  ≈08:35:08   该形态下点文件看 diff 从 scope-audit.patch 切片（复用既有切片…  271efbb25
++task-03  ≈08:35:08   两份留档都缺失时 patch 仍为 None 且 diff 端点 note 说明缺两份…  271efbb25
++task-04  ≈08:35:08   change-patch.json 存在时行为与现状完全一致（thin 形态回归不破）   271efbb25
++task-05  ≈08:35:08   assets 模块聚焦测试通过                               975fe8104
++
++墙钟：9h38min｜事件 20 条｜提交 10｜任务 5/5 勾选
++阶段墙钟：design 1min｜requirements 17s｜tasks 0s｜verify 0s｜archive 0s
++注：观测起点≠诞生时刻（watcher 后拉起/单飞锁盲窗）；勾选时刻为顺序推断（事件不记任务 id）；描述行含机器稿截断。
+
+diff --git a/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/verify-result.md b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/verify-result.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/verify-result.md
+@@ -0,0 +1,13 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T00:50:05.888Z
++---
++# 验证回执（flow）— 2026-10-07-assets-patch-scope-audit-fallback
++
++- **结论**：PASS（flow done 2/2 协议调用收口）
++- **基线..收口时 HEAD**：9c8f9d8eb5..55922d6880
++- **实测面**：test: passed ← module[]+deps(py15+jsx6)+fr(10)（92.1s） 结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008003638\test-result.json
++- **独立评审**：豁免（低风险证据齐全）
++- **测试绑定**：5 行（test-trace.json，已随发号提升）
++- **交付冻结**：change.patch（sha256 c6019b2ba5e5…）
++- **生成**：2026-10-08T00:50:05.888Z（机器合成，勿手改；明细见 flow-telemetry.jsonl / change-patch.json）
+
+diff --git a/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/watcher-events.jsonl b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/watcher-events.jsonl
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/watcher-events.jsonl
+@@ -0,0 +1,20 @@
++{"ts":1791385488059,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
++{"ts":1791385508035,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
++{"ts":1791385524917,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
++{"ts":1791385551410,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
++{"ts":1791386102636,"kind":"commit","stage":null,"detail":"271efbb25","provisional":true}
++{"ts":1791386109468,"kind":"commit","stage":null,"detail":"975fe8104","provisional":true}
++{"ts":1791386285321,"kind":"commit","stage":null,"detail":"4a538caa3","provisional":true}
++{"ts":1791386400412,"kind":"commit","stage":null,"detail":"cfd3e078a","provisional":true}
++{"ts":1791386413785,"kind":"commit","stage":null,"detail":"7b99d2620","provisional":true}
++{"ts":1791387102418,"kind":"commit","stage":null,"detail":"2b568e365","provisional":true}
++{"ts":1791387109147,"kind":"commit","stage":null,"detail":"768a88a69","provisional":true}
++{"ts":1791387173851,"kind":"commit","stage":null,"detail":"4dcce0b21","provisional":true}
++{"ts":1791388074768,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
++{"ts":1791388421974,"kind":"commit","stage":null,"detail":"1cfe595a0","provisional":true}
++{"ts":1791388490261,"kind":"commit","stage":null,"detail":"ce08f8ae7","provisional":true}
++{"ts":1791389392859,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
++{"ts":1791419708086,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
++{"ts":1791419708086,"kind":"task-done","stage":"tasks","detail":"checked 0→5","provisional":true}
++{"ts":1791419799682,"kind":"gate-run","stage":"verify","detail":"门实测 passed（92.1s） · 20261008003638","provisional":true}
++{"ts":1791419811162,"kind":"archived","stage":"archive","detail":"change 目录已移入 archive","provisional":true}

@@ -1,6 +1,6 @@
 # 合成时间线快照 — 2026-10-07-assets-patch-scope-audit-fallback
 
-> 烤制于归档链（2026-10-08T00:50:06.321Z）：事件流机本位（.runtime gitignore），本快照随归档包进 git 跨机可读。
+> 烤制于归档链（2026-10-08T00:52:17.108Z）：事件流机本位（.runtime gitignore），本快照随归档包进 git 跨机可读。
 > 末尾事件（含「目录已移入 archive」终拍）可能晚于烤制未入快照；勾选时刻为顺序推断（≈）。
 > 原始事件副本：本目录 watcher-events.jsonl（时点快照）。
 📅 2026-10-07-assets-patch-scope-audit-fallback — 合成时间线（thin｜事件流 × tasks.md × git 提交锚）
