@@ -8,11 +8,11 @@ import logging
 import os
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -1420,8 +1420,22 @@ class AgentService:
 
         Called during service startup to mark any runs that were
         running when the service restarted as failed.
+
+        2026-10-08-backend-restart-fake-failed / FR-01：清理后有跳过（仍有近期
+        活跃上报的 running 轮）时，fire 延迟复扫链兜底——daemon 真死时日志停止
+        老化，复扫在宽限期后判 failed，防永卡 running。
         """
-        return await _cleanup_stale_runs_impl(self._session)
+        cleaned = await _cleanup_stale_runs_impl(self._session)
+        if await _has_recently_active_running_runs(self._session):
+            task = asyncio.create_task(_recheck_stale_runs_loop())
+            # 对齐 _fire_background_task 模式：强引用防 GC + done 回调收异常。
+            AgentService._background_tasks.add(task)
+            task.add_done_callback(AgentService._on_background_task_done)
+            log.info(
+                "stale_run_recheck_scheduled",
+                grace_seconds=int(STALE_RUN_ACTIVE_GRACE.total_seconds()),
+            )
+        return cleaned
 
     # ------------------------------------------------------------------
     # Stage dispatch (change-level, not task-level)
@@ -2393,12 +2407,25 @@ class AgentService:
         await self._session.commit()
 
 
+# 2026-10-08-backend-restart-fake-failed / FR-01：启动清理的日志活性宽限窗——
+# run 最新 agent_run_logs.timestamp 距今 ≤ 此窗视为 daemon 仍在执行（部署重启
+# 期间 daemon 上报中断通常 <2 分钟，10 分钟留足余量），跳过判死等真终态。
+STALE_RUN_ACTIVE_GRACE = timedelta(minutes=10)
+
+
 async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
     """Scan for stale running-state AgentRuns and mark them as failed.
 
     When the service restarts, the in-memory process registry is empty,
     but database records may still show status='running'.  This function
     marks them as failed so they don't appear stuck forever.
+
+    2026-10-08-backend-restart-fake-failed / FR-01：判死前先做日志活性检
+    测——run 的 agent_run_logs 最新 timestamp 距今不超过宽限窗（该列口径=
+    后端收到 daemon 上报的时刻，即「daemon 还在报」的信号）说明 daemon 仍
+    在实际执行该轮（典型场景：部署重启后端容器，本机 daemon 并未中断），
+    此时跳过判死保持 running，等真终态；误杀兜底交给 cleanup_stale_runs
+    安排的延迟复扫（daemon 真死时日志停止老化，复扫再判 failed）。
 
     Returns:
         Number of stale runs cleaned up.
@@ -2413,6 +2440,7 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
     # ql-20260815-003：late import 防 agent ↔ daemon 循环依赖（daemon.service 引 agent 模型）。
     from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
 
+    cleaned = 0
     for run in stale_runs:
         # If metadata was already written (agent actually finished but commit
         # was lost during restart), restore as completed instead of failed.
@@ -2425,6 +2453,23 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
                 exit_code=run.exit_code,
             )
         else:
+            last_log_at = (
+                await session.execute(
+                    select(func.max(AgentRunLog.timestamp)).where(AgentRunLog.run_id == run.id)
+                )
+            ).scalar_one_or_none()
+            if last_log_at is not None:
+                # SQLite 测试库读回 naive datetime（生产 PG 为 aware）；该列值
+                # 一律来自 now(UTC) 写入，naive 视作 UTC 补齐后再比较。
+                if last_log_at.tzinfo is None:
+                    last_log_at = last_log_at.replace(tzinfo=UTC)
+                if now - last_log_at <= STALE_RUN_ACTIVE_GRACE:
+                    log.info(
+                        "stale_run_cleanup_deferred_active",
+                        run_id=str(run.id),
+                        last_log_age_seconds=int((now - last_log_at).total_seconds()),
+                    )
+                    continue
             run.status = "failed"
             run.finished_at = now
             run.exit_code = -1
@@ -2445,9 +2490,48 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
         # 已不在等待答案），置 cancelled 防用户点出 no active run 报错。completed
         # 恢复分支同样作废——dialog 未答说明 agent 实际没走完应答链路。
         await cancel_pending_dialogs_for_run(session, run.id)
+        cleaned += 1
 
     await session.commit()
-    return len(stale_runs)
+    return cleaned
+
+
+async def _has_recently_active_running_runs(session: AsyncSession) -> bool:
+    """复查：是否仍有 running 轮在宽限窗内被 daemon 上报（日志 recency 判定）。"""
+    now = datetime.now(UTC)
+    run_ids = list(
+        (await session.execute(select(AgentRun.id).where(col(AgentRun.status) == "running")))
+        .scalars()
+        .all()
+    )
+    for run_id in run_ids:
+        last_log_at = (
+            await session.execute(
+                select(func.max(AgentRunLog.timestamp)).where(AgentRunLog.run_id == run_id)
+            )
+        ).scalar_one_or_none()
+        if last_log_at is None:
+            continue
+        if last_log_at.tzinfo is None:
+            last_log_at = last_log_at.replace(tzinfo=UTC)
+        if now - last_log_at <= STALE_RUN_ACTIVE_GRACE:
+            return True
+    return False
+
+
+async def _recheck_stale_runs_loop() -> None:
+    """延迟复扫链（FR-01 兜底）：睡满宽限窗重跑清理，直到无活跃上报的 running 轮。
+
+    启动清理跳过了近期活跃的轮——若 daemon 随后真死，日志停止老化，本循环在
+    下一次复扫把它们判 failed，防永卡 running；若轮正常收口或新轮持续活跃，
+    复扫自然跳过/续排。每轮自查自收敛：无活跃 running 轮即退出。
+    """
+    while True:
+        await asyncio.sleep(STALE_RUN_ACTIVE_GRACE.total_seconds())
+        async with get_session_factory()() as session:
+            await _cleanup_stale_runs_impl(session)
+            if not await _has_recently_active_running_runs(session):
+                return
 
 
 def redact_agent_output(text: str) -> str:
