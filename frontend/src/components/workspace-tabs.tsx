@@ -40,15 +40,20 @@ export function WorkspaceTabs({
   const pathname = usePathname() ?? "";
   const base = `/workspaces/${workspaceId}`;
 
-  const isActive = (tabPath: string) => {
+  // 双高亮修复（R-04 升级：最长匹配胜出）：嵌套页签（如 /knowledge 与
+  // /knowledge/graph）在目录前缀匹配下会同时点亮——改为先选出 pathname
+  // 命中（精确或 dir 前缀）里 path 最长的唯一 tab，仅它为 active。
+  const matchesPath = (tabPath: string) => {
     const full = `${base}${tabPath}`;
-    if (tabPath === "") {
-      // R-04 双高亮修复：概览仅精确匹配 base，
-      // 不再 startsWith(base+"/") 抢占所有子页的 aria-current
-      return pathname === base;
-    }
+    if (tabPath === "") return pathname === base;
     return pathname === full || pathname.startsWith(`${full}/`);
   };
+  const activeTabPath = TABS.reduce((longest, tab) => {
+    if (!matchesPath(tab.path)) return longest;
+    if (longest === null || tab.path.length > longest.length) return tab.path;
+    return longest;
+  }, null as string | null);
+  const isActive = (tabPath: string) => tabPath === activeTabPath;
 
   return (
     <>
