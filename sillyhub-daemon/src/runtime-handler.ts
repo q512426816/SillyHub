@@ -448,6 +448,23 @@ function clampGraphInt(
   return Math.min(max, Math.max(min, n));
 }
 
+/**
+ * Node 进程告警噪声行（2026-10-08-gov-action-stderr-noise）：sillyspec CLI 用
+ * node:sqlite（Node 22+ 实验特性），每次运行必往 stderr 打
+ * `(node:PID) ExperimentalWarning: SQLite ...` + `(Use \`node --trace-warnings ...\`)`
+ * 续行。action 的 output 是 stdout+stderr 拼接取尾、前端只展示末尾 160 字符——
+ * 不滤掉这两行，真实结果文案（如「N 个无法定位需人工核」）会被噪声挤出可见区。
+ */
+const NODE_WARNING_LINE_RE = /^\(node:\d+\) \w+Warning/;
+const NODE_WARNING_HINT_RE = /^\(Use `node --trace-warnings/;
+
+function stripNodeWarningNoise(stderr: string): string {
+  return stderr
+    .split(/\r?\n/)
+    .filter((line) => !NODE_WARNING_LINE_RE.test(line) && !NODE_WARNING_HINT_RE.test(line))
+    .join('\n');
+}
+
 export class KnowledgeGovernanceHandler {
   /** allowed_roots 白名单来源（containment 第二道校验）；缺省空数组 → 一律拒。 */
   private readonly _rootsProvider: () => string[];
@@ -526,7 +543,7 @@ export class KnowledgeGovernanceHandler {
     }
     const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
     const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root);
-    const output = `${r.stdout}\n${r.stderr}`.trim().slice(-2000);
+    const output = `${r.stdout}\n${stripNodeWarningNoise(r.stderr)}`.trim().slice(-2000);
     if (!r.ok) {
       if (r.timedOut) throw new RpcError('timeout', `action timed out (${SILLYSPEC_TIMEOUT_MS}ms)`);
       throw new RpcError('internal', `action failed: ${output}`);
