@@ -6,7 +6,7 @@
  *
  * 单组件配置化承载三形态（约束：禁三套重复实现），按 zone + filename 分发：
  *   - manual（手册，zone=top 非 INDEX.md）：## 小节 → 逐条正文卡（标题 + 正文
- *     markdown 纯文本）+ 条目级 🔥 徽标（锚点 `文件#slug` 对齐 hits）；
+ *     markdown 渲染）+ 条目级 🔥 徽标（锚点 `文件#slug` 对齐 hits）；
  *   - structured（决策/FR，zone∈{decisions,fr}）：## 条目（`## D-xxx@vN : 标题`
  *     / `## FR-域-NNN 标题`）+ 字段行 → 结构化卡（ID mono 徽标 + 状态 pill +
  *     字段行网格 + 理由/摘要高亮块 + 取代链条带 + 测试绑定机器块紧凑行——注释
@@ -37,6 +37,9 @@
 
 import { useState } from "react";
 
+import { App as AntdApp } from "antd";
+
+import { CardMarkdown } from "@/components/knowledge/card-markdown";
 import { cn } from "@/lib/utils";
 
 // ── 公共解析 ────────────────────────────────────────────────────────────────
@@ -49,6 +52,36 @@ function stripFrontmatter(content: string): string {
     if (lines[i]!.trim() === "---") return lines.slice(i + 1).join("\n");
   }
   return content;
+}
+
+/** frontmatter 元信息（卡片头元信息条数据源；字段缺失为 null）。 */
+export interface FrontmatterMeta {
+  author: string | null;
+  createdAt: string | null;
+}
+
+/**
+ * 解析首行 `---` 围栏 frontmatter 的 author / created_at（卡片头元信息条，
+ * 2026-09-23-md-card-render / FR-03 / D-003）。无 frontmatter / 字段缺失 →
+ * 对应字段 null（元信息条整体隐藏，不渲染空行不抛错）；created_at 原样返回
+ * （显示层截前 10 位日期，兼容 `2026-06-23 02:00:00` 与 ISO 两种形态）。
+ * 独立新增——stripFrontmatter 签名与其调用点不动（Grill CC-07 收窄方案）。
+ */
+export function parseFrontmatterMeta(content: string): FrontmatterMeta {
+  const lines = content.split("\n");
+  if ((lines[0] ?? "").trim() !== "---") return { author: null, createdAt: null };
+  const end = lines.findIndex((line, i) => i > 0 && line.trim() === "---");
+  if (end < 0) return { author: null, createdAt: null };
+  let author: string | null = null;
+  let createdAt: string | null = null;
+  for (const line of lines.slice(1, end)) {
+    const m = line.match(/^([A-Za-z_]+):\s*(.*)$/);
+    if (!m) continue;
+    const value = m[2]!.trim().replace(/^["']|["']$/g, "");
+    if (m[1] === "author" && value) author = value;
+    else if (m[1] === "created_at" && value) createdAt = value;
+  }
+  return { author, createdAt };
 }
 
 /** 恰两级的 `## ` 小节头（`### ` 因第三字符非空白不匹配，parser 同款）。 */
@@ -370,6 +403,44 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
+/**
+ * 锚点复制图标（FR-02 / D-003，原型 panel-c 卡片头 🔗）：点击复制锚点定位串
+ * （manual=``文件#slug``；SingleCard=裸文件名，Grill CC-02），antd message 成功
+ * 提示（经 <AntApp> 注入走主题）；交互对齐 DecisionCard「全文 ↗」复制先例。
+ */
+function AnchorCopyButton({ anchor }: { anchor: string }) {
+  const { message } = AntdApp.useApp();
+  return (
+    <button
+      type="button"
+      data-testid="anchor-copy-btn"
+      aria-label={`复制锚点 ${anchor}`}
+      title={`锚点定位（点击复制）：${anchor}`}
+      onClick={() => {
+        void copyText(anchor);
+        void message.success("锚点已复制");
+      }}
+      className="shrink-0 rounded px-1 text-[11px] leading-4 text-brand-600/70 transition-colors hover:bg-brand-100 hover:text-brand-700"
+    >
+      🔗
+    </button>
+  );
+}
+
+/**
+ * frontmatter 元信息行（FR-03）：显示「✍ 作者 · 日期 收录」；author/createdAt
+ * 任一缺失整条隐藏（降级不渲染空行，兼容策略）。
+ */
+function FrontmatterMetaLine({ meta }: { meta: FrontmatterMeta | null }) {
+  if (!meta?.author || !meta.createdAt) return null;
+  const date = meta.createdAt.slice(0, 10);
+  return (
+    <div data-testid="frontmatter-meta" className="px-2.5 pt-1.5 text-[10.5px] text-muted-foreground/80">
+      ✍ {meta.author} · {date} 收录
+    </div>
+  );
+}
+
 /** 依据决策域推导：当前文件（fr/<域>.md 或 decisions/<域>.md）→ decisions/<域>.md。 */
 function decisionsFileFor(filename: string): string {
   const base = filename.split("/").pop() ?? filename;
@@ -475,15 +546,14 @@ function DecisionCard({
           ) : null}
 
           {entry.reason ? (
-            <div className="mt-1.5 whitespace-pre-wrap break-words rounded bg-brand-50 px-2 py-1.5 text-[11.5px] leading-relaxed">
-              {entry.reason}
-            </div>
+            <CardMarkdown
+              content={entry.reason}
+              className="mt-1.5 rounded bg-brand-50 px-2 py-1.5 leading-relaxed"
+            />
           ) : null}
 
           {entry.body ? (
-            <p className="mt-1.5 whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-muted-foreground">
-              {entry.body}
-            </p>
+            <CardMarkdown content={entry.body} className="mt-1.5 text-muted-foreground" />
           ) : null}
 
           {entry.testBindings.length > 0 ? (
@@ -552,6 +622,9 @@ export function EntryCardList({
   className,
 }: EntryCardListProps) {
   const form = detectEntryCardForm(filename, zone);
+  // frontmatter 元信息（FR-03）：顶层解析一次向 manual/SingleCard 各卡传递；
+  // 缺失时 FrontmatterMetaLine 整条降级隐藏。
+  const meta = parseFrontmatterMeta(content);
 
   // ── manual：## 小节逐条正文卡 ──
   const sections = form === "manual" ? parseEntrySections(content, filename) : [];
@@ -618,25 +691,31 @@ export function EntryCardList({
                 key={s.anchor}
                 data-testid="manual-section-card"
                 data-entry-anchor={s.anchor}
-                className="rounded-md border border-border/60 p-2.5 transition-colors hover:border-brand-400"
+                className="overflow-hidden rounded-md border border-border/60 border-l-[3px] border-l-brand-600 transition-colors hover:border-brand-400"
               >
-                <div className="flex flex-wrap items-center gap-2">
-                  <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold">{s.title}</h4>
+                <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-brand-50 px-2.5 py-1.5">
+                  <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold text-brand-700">{s.title}</h4>
                   {n !== undefined && n > 0 ? (
                     <UseBadge count={n} title={`条目命中 ${n} 次（${s.anchor}）`} />
                   ) : null}
+                  <AnchorCopyButton anchor={s.anchor} />
                 </div>
+                <FrontmatterMetaLine meta={meta} />
                 {s.body ? (
-                  <p className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
-                    {s.body}
-                  </p>
+                  <CardMarkdown content={s.body} className="px-2.5 pb-2.5 pt-1.5 text-muted-foreground" />
                 ) : null}
               </article>
             );
           })
         ) : (
-          // 无 ## 小节的手册文件兜底：整文件单卡（正文纯文本）。
-          <SingleCard title={filename} body={stripFrontmatter(content).trim()} count={fileAnchorCount} />
+          // 无 ## 小节的手册文件兜底：整文件单卡（正文 markdown 渲染）。
+          <SingleCard
+            title={filename}
+            body={stripFrontmatter(content).trim()}
+            count={fileAnchorCount}
+            anchor={filename}
+            meta={meta}
+          />
         )
       ) : null}
 
@@ -652,7 +731,13 @@ export function EntryCardList({
             />
           ))
         ) : (
-          <SingleCard title={filename} body={stripFrontmatter(content).trim()} count={fileAnchorCount} />
+          <SingleCard
+            title={filename}
+            body={stripFrontmatter(content).trim()}
+            count={fileAnchorCount}
+            anchor={filename}
+            meta={meta}
+          />
         )
       ) : null}
 
@@ -693,26 +778,46 @@ export function EntryCardList({
       ) : null}
 
       {form === "single" ? (
-        <SingleCard title={h1 ?? filename} body={singleBody} count={fileAnchorCount} />
+        <SingleCard title={h1 ?? filename} body={singleBody} count={fileAnchorCount} anchor={filename} meta={meta} />
       ) : null}
     </div>
   );
 }
 
-/** 单条目大卡（generated / 无小节兜底；H1 标题 + 正文）。 */
-function SingleCard({ title, body, count }: { title: string; body: string; count?: number }) {
+/**
+ * 单条目大卡（generated / 无小节兜底；H1 标题 + 正文 markdown 渲染）。
+ * 卡片头与 manual 小节卡同款重构（FR-02 / D-003，原型 panel-c）：品牌色条 +
+ * brand-50 头底 + brand-700 标题 + 🔗 复制（裸文件名，Grill CC-02）+ 元信息行。
+ */
+function SingleCard({
+  title,
+  body,
+  count,
+  anchor,
+  meta,
+}: {
+  title: string;
+  body: string;
+  count?: number;
+  /** 🔗 复制串：裸文件名（与锚点跳转的文件级口径一致）。 */
+  anchor: string;
+  meta: FrontmatterMeta | null;
+}) {
   return (
-    <article data-testid="single-entry-card" className="rounded-md border border-border/60 p-2.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold">{title}</h4>
+    <article
+      data-testid="single-entry-card"
+      className="overflow-hidden rounded-md border border-border/60 border-l-[3px] border-l-brand-600 transition-colors hover:border-brand-400"
+    >
+      <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-brand-50 px-2.5 py-1.5">
+        <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold text-brand-700">{title}</h4>
         {count !== undefined && count > 0 ? (
           <UseBadge count={count} title={`文件级命中 ${count} 次`} />
         ) : null}
+        <AnchorCopyButton anchor={anchor} />
       </div>
+      <FrontmatterMetaLine meta={meta} />
       {body ? (
-        <p className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
-          {body}
-        </p>
+        <CardMarkdown content={body} className="px-2.5 pb-2.5 pt-1.5 text-muted-foreground" />
       ) : null}
     </article>
   );

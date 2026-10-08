@@ -1,0 +1,61 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "head-uncommitted-window",
+  "totals": {
+    "files": 5,
+    "additions": 354,
+    "deletions": 32
+  },
+  "rows": [
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+      "additions": 9,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/card-markdown.test.tsx",
+      "additions": 71,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx",
+      "additions": 99,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/card-markdown.tsx",
+      "additions": 45,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/entry-card-list.tsx",
+      "additions": 130,
+      "deletions": 25,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "closedBy": "execute --done",
+  "patchSha256": "1f6569e3826b1582540ad83708c29ee30677ebc109c719b13dacb25f07bac0d6",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T03:07:42.130Z"
+}

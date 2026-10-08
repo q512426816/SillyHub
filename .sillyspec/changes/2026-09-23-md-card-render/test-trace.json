@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-23-md-card-render",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-23-md-card-render:task-01:acc-0-5268d069",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/card-markdown.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-23-md-card-render"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-23-md-card-render:task-01:acc-1-b237c25a",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/card-markdown.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-23-md-card-render"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-23-md-card-render:task-01:acc-2-c1042aed",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/card-markdown.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-23-md-card-render"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-23-md-card-render:task-01:acc-3-ef076ca2",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/card-markdown.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-23-md-card-render"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-23-md-card-render:task-02:acc-0-42de4f98",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+        "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-23-md-card-render"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-23-md-card-render:task-02:acc-1-2e486057",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+        "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-23-md-card-render"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-23-md-card-render:task-02:acc-2-f1575d52",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+        "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-23-md-card-render"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-23-md-card-render:task-02:acc-3-45b95137",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+        "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-23-md-card-render"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-09-23-md-card-render:task-02:acc-4-539d3b5a",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+        "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-09-23-md-card-render"
+    }
+  ]
+}
