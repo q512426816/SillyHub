@@ -29,3 +29,24 @@ created_at: 2026-10-08T17:55:09.787Z
 摘要：最小面
 全文：.sillyspec/changes/archive/2026-10-09-daemon-api-types-regen/requirements.md#FR-03
 最近确认：7bb24ca69504433c6dafc0230047ffaadefd903a
+
+## FR-api-types-004 daemon-ci 在 Install 后、Typecheck 前跑 pnpm gen:types:check 漂移守门
+变更：2026-10-09-daemon-ci-types-gate
+状态：active
+摘要：后端改契约未重生成 daemon 类型
+全文：.sillyspec/changes/archive/2026-10-09-daemon-ci-types-gate/requirements.md#FR-01
+最近确认：58cf516f41f5a4a03bcdd85b8f52dca555bdbb4f
+
+## FR-api-types-005 触发路径包含 backend/openapi.json（漂移源头）
+变更：2026-10-09-daemon-ci-types-gate
+状态：active
+摘要：后端独改触发
+全文：.sillyspec/changes/archive/2026-10-09-daemon-ci-types-gate/requirements.md#FR-02
+最近确认：58cf516f41f5a4a03bcdd85b8f52dca555bdbb4f
+
+## FR-api-types-006 当前仓库守门实测绿（生成物同步提交）
+变更：2026-10-09-daemon-ci-types-gate
+状态：active
+摘要：绿态交付
+全文：.sillyspec/changes/archive/2026-10-09-daemon-ci-types-gate/requirements.md#FR-03
+最近确认：58cf516f41f5a4a03bcdd85b8f52dca555bdbb4f

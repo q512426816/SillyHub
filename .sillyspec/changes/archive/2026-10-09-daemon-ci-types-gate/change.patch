@@ -1,0 +1,358 @@
+diff --git a/.github/workflows/daemon-ci.yml b/.github/workflows/daemon-ci.yml
+index f525743ae..336fc6e8e 100644
+--- a/.github/workflows/daemon-ci.yml
++++ b/.github/workflows/daemon-ci.yml
+@@ -8,10 +8,12 @@ on:
+   push:
+     paths:
+       - "sillyhub-daemon/**"
++      - "backend/openapi.json"
+       - ".github/workflows/daemon-ci.yml"
+   pull_request:
+     paths:
+       - "sillyhub-daemon/**"
++      - "backend/openapi.json"
+       - ".github/workflows/daemon-ci.yml"
+   workflow_dispatch:
+ 
+@@ -40,6 +42,13 @@ jobs:
+       - name: Install dependencies
+         run: pnpm install --frozen-lockfile
+ 
++      # api-types 漂移守门（2026-10-09 风险审查后续）：daemon 生成物长期落后
++      # backend/openapi.json（RBAC 72→58 死键残留实证）而无人发现——重生成后
++      # git diff --exit-code，漂移即红。前置：后端 schema 改动须在同一变更内
++      # 跑 daemon `pnpm gen:types` 提交生成物（对齐前端 pnpm gen:types 纪律）。
++      - name: api-types drift check
++        run: pnpm gen:types:check
++
+       - name: Typecheck
+         run: pnpm typecheck
+ 
+diff --git a/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/flow-state.yaml b/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/flow-state.yaml
+new file mode 100644
+index 000000000..d81494db0
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/flow-state.yaml
+@@ -0,0 +1,23 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  动机：2026-10-09 风险审查发现 sillyhub-daemon/src/api-types.ts 落后 backend/openapi.json 多轮契约（RBAC 72→58 死键残留 + 知识图谱端点缺失）而 CI
++  无任何守门——gen:types:check 脚本已存在（重生成 + git diff --exit-code）但 daemon-ci.yml 未接，类型债会静默复发。
++
++
++  成功标准：
++
++  - daemon-ci.yml 在 Install 后、Typecheck 前新增「api-types drift check」步骤跑 pnpm gen:types:check
++
++  - 守门语义正确：仓库生成物与 openapi.json 不一致时 CI 红（exit 1），一致时零影响
++
++  - 当前仓库实测该步骤绿（刚重生成过，diff 干净）
++autopilot: true
++baseline_commit: ef7bdd6f738c3b8f75298e48507942ed60630991
++updatedAt: '2026-10-08T23:41:47.423Z'
++baseline_sha256: 2bf237e140f83526f9ed8be2a9d077fd2a1b89b517e2e38811e71d6a8ddc8f6c
++
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index b5af0133f..1affd61f7 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -7962,6 +7962,34 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/knowledge/graph/dump": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Knowledge Graph Dump
++         * @description 全图 dump（星空总览数据源）：CLI 离线预计算坐标的全量 nodes/edges/stats。
++         *
++         *     **手动 gzip 压缩**（2026-10-09-knowledge-graph-fullmap task-03 / Grill F-00：
++         *     禁止全站 GZipMiddleware——SSE 流经压缩中间件有 zlib 缓冲致事件批量延迟
++         *     风险，压缩面仅限本端点）：信封 JSON 化（ensure_ascii=False 紧凑分隔符）后
++         *     ``gzip.compress``，``Content-Encoding: gzip`` 响应头（浏览器 fetch 透明解压）；
++         *     **无条件压缩**（不可用 data=None 小包同构处理，一致性优先）；``Vary`` 标注
++         *     缓存按 Accept-Encoding 区分。旧 CLI（cli_feature_missing:dump）恒 200 信封
++         *     reason=upgrade_required，前端隐藏全图胶囊回退 orphans。
++         */
++        get: operations["get_knowledge_graph_dump_api_workspaces__workspace_id__knowledge_graph_dump_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/knowledge/governance": {
+         parameters: {
+             query?: never;
+@@ -16811,6 +16839,46 @@ export interface components {
+              */
+             status: string;
+         };
++        /**
++         * GraphDumpData
++         * @description dump 数据：nodes（含坐标）/edges/stats（与 summary 同源聚合，复用归一）。
++         */
++        GraphDumpData: {
++            /** Nodes */
++            nodes: components["schemas"]["GraphDumpNode"][];
++            /** Edges */
++            edges: components["schemas"]["GraphEdge"][];
++            stats: components["schemas"]["GraphSummary"];
++        };
++        /**
++         * GraphDumpNode
++         * @description 全图节点：GraphNodeRef + CLI 预计算确定性布局坐标（x/y，Math.round 整数值
++         *     传输为 float）。
++         */
++        GraphDumpNode: {
++            /** Id */
++            id: string;
++            /**
++             * Type
++             * @default
++             */
++            type: string;
++            /**
++             * Label
++             * @default
++             */
++            label: string;
++            /**
++             * X
++             * @default 0
++             */
++            x: number;
++            /**
++             * Y
++             * @default 0
++             */
++            y: number;
++        };
+         /**
+          * GraphEdge
+          * @description 边（s→t 定方向；strength=strong/medium/weak 三档，前端线型派生依据）。
+@@ -16828,6 +16896,20 @@ export interface components {
+              */
+             strength: string;
+         };
++        /** GraphEnvelope[GraphDumpData] */
++        GraphEnvelope_GraphDumpData_: {
++            /** Available */
++            available: boolean;
++            /** Reason */
++            reason?: ("unbound" | "offline" | "timeout" | "upgrade_required" | "invalid_input" | "rpc_error") | null;
++            /**
++             * Source
++             * @default daemon-rpc
++             * @constant
++             */
++            source: "daemon-rpc";
++            data?: components["schemas"]["GraphDumpData"] | null;
++        };
+         /** GraphEnvelope[GraphNodesData] */
+         GraphEnvelope_GraphNodesData_: {
+             /** Available */
+@@ -41623,6 +41705,37 @@ export interface operations {
+             };
+         };
+     };
++    get_knowledge_graph_dump_api_workspaces__workspace_id__knowledge_graph_dump_get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["GraphEnvelope_GraphDumpData_"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_knowledge_governance_api_workspaces__workspace_id__knowledge_governance_get: {
+         parameters: {
+             query?: never;
+diff --git a/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/design.md b/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/design.md
+new file mode 100644
+index 000000000..077af22f2
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/design.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T18:35:00.000Z
++---
++# 设计记录（Design Record）— 2026-10-09-daemon-ci-types-gate
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++daemon-ci.yml 两个小改：(1) 触发 paths 增补 `backend/openapi.json`——漂移源头是后端契约变更，原触发只看 sillyhub-daemon/** 时后端独改根本不跑 daemon-ci，守门形同虚设；(2) Install 后、Typecheck 前新增「api-types drift check」步骤跑既有 `pnpm gen:types:check`（scripts/gen-api-types.mjs 重生成 + git diff --exit-code src/api-types.ts）——零新脚本，复用仓库已有守门命令。配套提交重生成后的 api-types.ts：动手时守门当场抓到真实漂移（并行会话 dump 端点改了 openapi.json 未重生成 daemon 类型，+113 行），一并追赶。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `.github/workflows/daemon-ci.yml`：触发 paths 增补 backend/openapi.json（push/pull_request 双处）；步骤序列新增 api-types drift check（Install 与 Typecheck 之间）。
++- `sillyhub-daemon/src/api-types.ts`：重生成（+113 行，dump 端点契约追赶），类型面零运行时影响（tsc 0 error 实证）。
++- 代码 / 端点 / 协议：零改动。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用：CI 步骤顺序固定（Install → drift → Typecheck → Test），drift 在 typecheck 前拦截生成物债。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用：CI runner 各自独立 checkout；drift check 只读 openapi.json、只写生成物副本（diff 后即弃，不 push）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全：CI 失败即红不落库；本地 gen:types:check 失败只留工作区 diff（幂等，重生成即恢复）。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会：gen 脚本锚定同仓 backend/openapi.json 相对路径；CI 路径过滤只影响本仓库 workflow 触发。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：drift check 在 CI 上重生成时 openapi-typescript 版本与本地不一致会导致输出形态差误红——已由 frozen-lockfile（Install --frozen-lockfile）钉住同版本消解；本地实测同命令绿态通过。次风险：路径增补后 backend 独改也会触发 daemon-ci 全量测试，CI 时长略增（分钟级，可接受）。试过放弃：(a) 单独开一个轻量 drift workflow——放弃，daemon-ci 已有 Node/pnpm 环境，复用零成本；(b) 在 frontend-ci 里顺带守 daemon 类型——放弃，职责域错位（daemon 生成物归 daemon-ci）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | .github/workflows/daemon-ci.yml | 触发 paths + drift check 步骤 |
++| 修改 | sillyhub-daemon/src/api-types.ts | dump 端点契约追赶重生成 |
+diff --git a/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/proposal.md b/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/proposal.md
+new file mode 100644
+index 000000000..87d523591
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/proposal.md
+@@ -0,0 +1,27 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T23:41:47.398Z
++---
++# 提案书（Proposal）— 2026-10-09-daemon-ci-types-gate
++
++## 动机
++
++任务原话转写：动机：2026-10-09 风险审查发现 sillyhub-daemon/src/api-types.ts 落后 backend/openapi.json 多轮契约（RBAC 72→58 死键残留 + 知识图谱端点缺失）而 CI 无任何守门——gen:types:check 脚本已存在（重生成 + git diff --exit-code）但 daemon-ci.yml 未接，类型债会静默复发。
++
++成功标准：
++- daemon-ci.yml 在 Install 后、Typecheck 前新增「api-types drift check」步骤跑 pnpm gen:types:check
++- 守门语义正确：仓库生成物与 openapi.json 不一致时 CI 红（exit 1），一致时零影响
++- 当前仓库实测该步骤绿（刚重生成过，diff 干净）
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. daemon-ci.yml 在 Install 后、Typecheck 前新增「api-types drift check」步骤跑 pnpm gen:types:check
++2. 守门语义正确：仓库生成物与 openapi.json 不一致时 CI 红（exit 1），一致时零影响
++3. 当前仓库实测该步骤绿（刚重生成过，diff 干净）
++
++## 成功标准（可验证）
++
++1. daemon-ci.yml 在 Install 后、Typecheck 前新增「api-types drift check」步骤跑 pnpm gen:types:check
++2. 守门语义正确：仓库生成物与 openapi.json 不一致时 CI 红（exit 1），一致时零影响
++3. 当前仓库实测该步骤绿（刚重生成过，diff 干净）
+diff --git a/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/requirements.md b/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/requirements.md
+new file mode 100644
+index 000000000..b19ccef91
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/requirements.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T18:35:00.000Z
++---
++# 需求规格（Requirements）— 2026-10-09-daemon-ci-types-gate
++
++## 功能需求
++
++### FR-01: daemon-ci 在 Install 后、Typecheck 前跑 pnpm gen:types:check 漂移守门
++
++- daemon-ci.yml 必须新增「api-types drift check」步骤（`pnpm gen:types:check`，重生成 + git diff --exit-code），生成物与 backend/openapi.json 不一致时 CI 必须红。
++
++#### 场景：后端改契约未重生成 daemon 类型
++
++- Given backend/openapi.json 变更而 sillyhub-daemon/src/api-types.ts 未跟着重生成（2026-10-09 实证：dump 端点 +113 行漂移）
++- When daemon-ci 运行
++- Then gen:types:check 重生成后 diff 非空 → exit 1 → CI 红，漂移被当场拦截
++
++### FR-02: 触发路径包含 backend/openapi.json（漂移源头）
++
++- daemon-ci 的 push/pull_request 触发 paths 必须在 sillyhub-daemon/** 之外加 `backend/openapi.json`——后端独改契约时守门也要跑，否则守门只在 daemon 同改时生效、漏掉纯后端漂移场景。
++
++#### 场景：后端独改触发
++
++- Given 仅 backend/openapi.json 变更的提交
++- When push
++- Then daemon-ci 被触发并执行 drift check
++
++### FR-03: 当前仓库守门实测绿（生成物同步提交）
++
++- 本变更必须一并提交重生成后的 sillyhub-daemon/src/api-types.ts（追赶 dump 端点漂移），提交后本地重跑 gen:types:check 必须 exit 0；daemon tsc --noEmit 必须 0 error。
++
++#### 场景：绿态交付
++
++- Given 生成物 + 守门同提交
++- When 本地 pnpm gen:types:check
++- Then exit 0（diff 空）
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/sillyhub-daemon pnpm gen:types:check「守门红态实证——旧提交面重生成 diff +113 即 exit 1（已实测）；CI 接线后同语义上流水线」
++FR-02: test/.github/workflows/daemon-ci.yml「paths 含 backend/openapi.json（push/pull_request 双处，diff 可证）」
++FR-03: test/sillyhub-daemon pnpm gen:types:check「提交后重跑 exit 0 + tsc --noEmit 0 error（已实测）」
+diff --git a/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/tasks.md b/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/tasks.md
+new file mode 100644
+index 000000000..208a94711
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-daemon-ci-types-gate/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T23:41:47.398Z
++---
++# 任务注册表（Tasks）— 2026-10-09-daemon-ci-types-gate
++
++- [x] task-01: daemon-ci.yml 在 Install 后、Typecheck 前新增「api-types drift check」步骤跑 pnpm gen:types:check
++- [x] task-02: 守门语义正确：仓库生成物与 openapi.json 不一致时 CI 红（exit 1），一致时零影响
++- [x] task-03: 当前仓库实测该步骤绿（刚重生成过，diff 干净）
