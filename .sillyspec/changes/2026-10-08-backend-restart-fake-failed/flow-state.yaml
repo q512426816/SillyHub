@@ -1,0 +1,25 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  后端重启会把正在运行的轮误标为 SERVICE_RESTART_INTERRUPTED 失败（_cleanup_stale_runs_impl 只看数据库状态不探测 daemon 活性），且 daemon 迟到的成功结果被
+  interactive_run_close_already_terminal 拒收无法回正，UI 永远显示假失败。
+
+  成功标准：
+
+  - 后端重启清理时，近期仍有 daemon 上报的运行轮不再被判死，等真终态
+
+  - 被误标 SERVICE_RESTART_INTERRUPTED 的轮收到 daemon 迟到的成功结果后能回正为 completed
+
+  - 补充对应用例覆盖上述两条路径
+autopilot: false
+baseline_commit: 2b4aa20d87b6cb462cd709ec2d6b461fb7ffdee4
+updatedAt: '2026-10-08T04:04:04.859Z'
+baseline_sha256: a0f8f299cb2c4efeba6b07678b5266f9ff5ffefd9f34b9caca219666d41b674b
+spec_approved: true
+spec_approved_at: '2026-10-08T04:04:04.857Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+
