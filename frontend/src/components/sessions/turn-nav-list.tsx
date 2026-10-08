@@ -19,6 +19,12 @@
  * 请求、不操作聊天区 DOM/滚动（active 联动仅滚自身轨内）。短会话 <3 轮整条隐藏
  * （ql-20260909-005 既有口径）。颜色全走主题语义类（brand/muted-foreground 阶，
  * 随 html data-theme 换肤），零硬编码；antd 不用。
+ *
+ * 2026-10-08-turn-nav-hover-mark：浮层指向标记——hoverTurnKey 本地视觉态记录
+ * 「鼠标当前指向的轮次」（窄轨刻度与浮层行 onMouseEnter 双源写入，最后进入者
+ * 生效），浮层内该行加 ring 描边（与 activeTurnKey 当前轮的底色高亮正交区分：
+ * 描边=我在指它，底色=聊天停在哪轮）；滚动联动指向优先（hover 清除回落 active）；
+ * 组件移开 250ms 收起、pin 切换、外部 pointerdown、行跳转四个收起点同步清指向。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -134,6 +140,10 @@ export default function TurnNavList({
   /** 展开态：悬停（防抖）或 pin（把手点击锁定，触屏主通道）。 */
   const [pinned, setPinned] = useState(false);
   const [hoverOpen, setHoverOpen] = useState(false);
+  /** 浮层指向标记（2026-10-08-turn-nav-hover-mark）：鼠标当前指向的轮次 key——
+   *  窄轨刻度与浮层行 onMouseEnter 双源写入；四个收起点清除（见 handleLeave /
+   *  togglePin / 外部 pointerdown / handleRowJump）。纯视觉态，不影响跳转语义。 */
+  const [hoverTurnKey, setHoverTurnKey] = useState<string | null>(null);
   const openTimerRef = useRef<number | null>(null);
   const closeTimerRef = useRef<number | null>(null);
 
@@ -163,6 +173,7 @@ export default function TurnNavList({
         clearTimers();
         setPinned(false);
         setHoverOpen(false);
+        setHoverTurnKey(null);
       }
     };
     document.addEventListener("pointerdown", onDocPointerDown);
@@ -193,6 +204,8 @@ export default function TurnNavList({
       closeTimerRef.current = window.setTimeout(() => {
         closeTimerRef.current = null;
         setHoverOpen(false);
+        // 鼠标已离开组件（防抖到点确认非路过间隙）——指向标记一并清除。
+        setHoverTurnKey(null);
       }, CLOSE_DELAY_MS);
     }
   }, []);
@@ -201,6 +214,7 @@ export default function TurnNavList({
   const togglePin = useCallback(() => {
     clearTimers();
     setHoverOpen(false);
+    setHoverTurnKey(null);
     setPinned((v) => !v);
   }, [clearTimers]);
 
@@ -210,6 +224,7 @@ export default function TurnNavList({
       if (!pinned) {
         clearTimers();
         setHoverOpen(false);
+        setHoverTurnKey(null);
       }
       onJump(entry);
     },
@@ -229,17 +244,22 @@ export default function TurnNavList({
       return;
     }
     const root = rootRef.current;
-    if (!activeTurnKey || !root) return;
-    // 评审 medium 修复：窄轨刻度与浮层行共用 [data-turn-key]——两者都滚入各自
-    // 可视区（浮层展开时行随 active 联动，与行式列时代行为对齐）。
+    // 2026-10-08-turn-nav-hover-mark：指向优先——hoverTurnKey 存在时滚指向行
+    //（刻度 hover 触发展开后指向行滚入浮层可视区），清除后回落既有 active 联动。
+    // expanded 进依赖：悬停防抖展开的瞬间 hoverTurnKey 已就位但自身未变，补跑
+    // 一次把浮层内指向行滚入（pin 展开时同理滚一次 active 行，行为兼容）。
+    const focusKey = hoverTurnKey ?? activeTurnKey;
+    if (!focusKey || !root) return;
+    // 评审 medium 修复（2026-09-28）：窄轨刻度与浮层行共用 [data-turn-key]——两者都
+    // 滚入各自可视区（浮层展开时行随 active 联动，与行式列时代行为对齐）。
     for (const row of root.querySelectorAll(
-      `[data-turn-key="${CSS.escape(activeTurnKey)}"]`,
+      `[data-turn-key="${CSS.escape(focusKey)}"]`,
     )) {
       if (typeof row.scrollIntoView === "function") {
         row.scrollIntoView({ block: "nearest" });
       }
     }
-  }, [activeTurnKey]);
+  }, [activeTurnKey, hoverTurnKey, expanded]);
 
   // 短会话隐藏（early return 在全部 hooks 之后，React 规则）。
   if (entries.length < MIN_ENTRIES) return null;
@@ -299,6 +319,7 @@ export default function TurnNavList({
                 aria-label={buildAriaLabel(entry)}
                 aria-current={isActive ? "true" : undefined}
                 title={buildAriaLabel(entry)}
+                onMouseEnter={() => setHoverTurnKey(entry.key)}
                 onClick={() => onJump(entry)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
@@ -367,6 +388,8 @@ export default function TurnNavList({
                   data-testid="turn-nav-row"
                   aria-label={buildAriaLabel(entry)}
                   aria-current={isActive ? "true" : undefined}
+                  data-hovered={entry.key === hoverTurnKey ? "true" : undefined}
+                  onMouseEnter={() => setHoverTurnKey(entry.key)}
                   onClick={() => handleRowJump(entry)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -380,6 +403,11 @@ export default function TurnNavList({
                     isActive
                       ? "bg-muted/60 shadow-[inset_2px_0_0_0_var(--color-brand-600)]"
                       : "hover:bg-muted/50",
+                    // 2026-10-08-turn-nav-hover-mark：指向行 ring 描边（与 active
+                    // 底色高亮正交——同行叠加两语义并存：描边=我在指它，底色+左线=
+                    // 聊天当前停在哪轮）。仅描边不加底色，防与 hover:bg 同型打架。
+                    entry.key === hoverTurnKey &&
+                      "ring-1 ring-inset ring-brand-400",
                     // 长列表：固定行高（≥40px 命中区）+ content-visibility 跳出
                     // 视口的行免渲染（FR-06 >200 轮防卡）。
                     longList && "h-[44px] justify-center overflow-hidden",
