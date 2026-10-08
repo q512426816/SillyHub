@@ -27,6 +27,7 @@ import {
   graphBbox,
   liteClusterLayout,
   pickNode,
+  shouldAutoRefit,
   staticLayout,
   stepForceLayout,
   type LiteClusterInput,
@@ -297,5 +298,26 @@ describe("edgeDash（边三档线型）", () => {
   it("未知/空强度归 strong（结构边缺省档）", () => {
     expect(edgeDash("")).toEqual({ dash: [], width: 1.6 });
     expect(edgeDash("foo")).toEqual({ dash: [], width: 1.6 });
+  });
+});
+
+// ── shouldAutoRefit：力场收敛自动 re-fit 跟随判定（2026-10-09 风险审查）──────
+
+describe("shouldAutoRefit（自动 re-fit 跟随判定）", () => {
+  it("未交互：仅 90/180/270/360 tick 重适配视口，其余 tick 不动", () => {
+    expect(shouldAutoRefit(89, false)).toBe(false);
+    expect(shouldAutoRefit(90, false)).toBe(true);
+    expect(shouldAutoRefit(180, false)).toBe(true);
+    expect(shouldAutoRefit(270, false)).toBe(true);
+    expect(shouldAutoRefit(360, false)).toBe(true);
+    expect(shouldAutoRefit(361, false)).toBe(false);
+  });
+
+  it("用户交互置位（滚轮缩放/指针按下拖拽双源）后一律停跟随，refit 不再抢视口", () => {
+    // 2026-10-09：原实现只 onWheel 置位，拖拽/平移不停跟随（数据到达后前
+    // 360 tick 内 refit 把视口拽回，与「拖拽/缩放即停」声明不符）。
+    for (const t of [90, 180, 270, 360]) {
+      expect(shouldAutoRefit(t, true)).toBe(false);
+    }
   });
 });

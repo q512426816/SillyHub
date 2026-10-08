@@ -433,6 +433,31 @@ describe("卡片头锚点复制（FR-02 / D-003，原型 panel-c 🔗）", () =>
     fireEvent.click(btn);
     expect(writeText).toHaveBeenCalledWith("generated/demo.md");
   });
+
+  it("剪贴板不可用（不安全上下文 clipboard=undefined）→ 失败反馈，不再假成功", async () => {
+    // 2026-10-09 风险审查（4393ae1ae）：http 非 localhost 下 navigator.clipboard
+    // 为 undefined，原可选链 + 无条件 message.success 让「已复制」成为假成功。
+    Object.defineProperty(navigator, "clipboard", {
+      value: undefined,
+      configurable: true,
+    });
+
+    renderList({ filename: "conventions.md", zone: "top", content: MANUAL_CONTENT });
+    fireEvent.click(screen.getAllByTestId("anchor-copy-btn")[0]!);
+    expect(await screen.findByText("复制失败：剪贴板不可用")).toBeInTheDocument();
+    expect(screen.queryByText("锚点已复制")).not.toBeInTheDocument();
+  });
+
+  it("复制成功 → 成功提示按真实结果出现", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
+
+    renderList({ filename: "conventions.md", zone: "top", content: MANUAL_CONTENT });
+    fireEvent.click(screen.getAllByTestId("anchor-copy-btn")[0]!);
+    expect(await screen.findByText("锚点已复制")).toBeInTheDocument();
+  });
 });
 
 describe("决策形态渲染（zone=decisions）", () => {

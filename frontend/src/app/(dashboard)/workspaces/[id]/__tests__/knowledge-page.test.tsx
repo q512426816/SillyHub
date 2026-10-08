@@ -421,6 +421,34 @@ describe("知识库页（task-03 zone 分组树）", () => {
     expect(screen.queryByTestId("entry-card-list")).not.toBeInTheDocument();
   });
 
+  it("条目详情 fetch 失败 → 内容区就近错误态 + 重试恢复（不再永久加载占位）", async () => {
+    // 2026-10-09 风险审查（323faef56 回归）：selectEntry 中间态切断后 catch 只设
+    // 页顶 pageError，内容区无限期停在「正在加载」占位（错误条与内容区相隔整个
+    // 运营面板，无重试出口）。
+    mockGet.mockRejectedValueOnce(new Error("boom"));
+    mockGet.mockResolvedValue(
+      entry({
+        filename: "conventions.md",
+        path: ".sillyspec/knowledge/conventions.md",
+        title: "约定",
+        content: "# 你好",
+      }),
+    );
+    renderPage();
+    await waitForTree(["知识手册", "conventions.md"]);
+
+    fireEvent.click(closestAntdTreeNodeWrapper(screen.getByText("conventions.md"))!);
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith(WS, "conventions.md"));
+    // 失败 → 内容区错误分支出现，加载占位消失（非 ApiError 走通用文案）。
+    expect(await screen.findByTestId("entry-error")).toHaveTextContent("加载文档失败");
+    expect(screen.queryByTestId("entry-loading")).not.toBeInTheDocument();
+
+    // 重试 → 同文件重发 selectEntry，成功后正常渲染条目卡。
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(await screen.findByTestId("entry-card-list")).toBeInTheDocument();
+    expect(screen.queryByTestId("entry-error")).not.toBeInTheDocument();
+  });
+
   it("树栏默认 280px，拖动把手调宽并写入 localStorage 记忆", async () => {
     renderPage();
     await waitForTree(["知识手册", "INDEX.md"]);
