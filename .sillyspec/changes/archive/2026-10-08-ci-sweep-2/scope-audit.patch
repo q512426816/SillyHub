@@ -1,0 +1,383 @@
+diff --git a/.sillyspec/changes/2026-10-08-ci-sweep-2/flow-state.yaml b/.sillyspec/changes/2026-10-08-ci-sweep-2/flow-state.yaml
+new file mode 100644
+index 000000000..b502dea1d
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-ci-sweep-2/flow-state.yaml
+@@ -0,0 +1,33 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  第二轮 CI 红清偿：2026-10-08 新提交上 frontend-ci/backend-ci/daemon-ci 三线共 8 用例失败，逐一核对生产意图后全部为测试侧未跟上近期有意生产变更（生产零改动）：①frontend
++  git-log-page.test 钉 TABS=15 项，e8da254ce 知识图谱变更加了第 16 个页签（其自身 workspace-tabs.test 已更新，此数量钉漏跟）②backend
++  test_cleanup_stale_runs_error_code 钉旧 error_detail 文案，9f1f974c/89a7e9a42 宽限窗变更评审 P3 有意改文案（reason/finished_by
++  均换）③daemon 心跳 length 断言钉 10 参，d6fabf408 machine-id 尾参使平铺形态 10→11（daemon-heartbeat 两文件已同步改
++  11，sillyspec-platform-command 6 处与 selfupdate-scenarios 2 处漏跟）④daemon provider-adapter-registry 对账正则锚单数 agent_kind
++  冒号形态，2026-10-06 provider 变更把字段改为复数 agent_kinds list Literal 形态致解析失配。
++
++
++  成功标准：
++
++  - git-log-page.test.tsx TABS 数量钉 15→16（用例名+头注释同步），该文件全绿
++
++  - test_cleanup_stale_runs_error_code.py error_detail 期望改新文案（reason=no daemon activity within grace window (startup
++  cleanup / deferred recheck)/finished_by=stale_run_cleanup），全绿
++
++  - sillyspec-platform-command.test.ts 6 处与 selfupdate-scenarios.test.ts 2 处 length 断言 10→11（带 task-02 machine-id 尾参注释，同
++  daemon-heartbeat 先例），全绿
++
++  - provider-adapter-registry.test.ts readBackendAgentKindVocab 正则改 agent_kinds 复数 list Literal 形态（注释锚同步），对账恢复夹逼语义，全绿
++
++  - 本地仅跑相关测试文件全绿（全量留 CI），推送后 frontend-ci/backend-ci/daemon-ci/e2e-ci/scan-drift 全绿
++autopilot: true
++baseline_commit: fa016a4b4d444e54bbb15a1b1551a6a856bbcbc2
++updatedAt: '2026-10-08T15:12:55.391Z'
++baseline_sha256: cf464c77799d281523be36c7cfad8326796ff7bed3880e88709ed05f740de122
++
+diff --git a/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py b/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py
+index 834867d82..eb11dfaff 100644
+--- a/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py
++++ b/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py
+@@ -69,9 +69,12 @@ async def test_stale_run_failed_branch_writes_error_code(db_session) -> None:
+     await db_session.refresh(run)
+     assert run.status == "failed"
+     assert run.error_code == "SERVICE_RESTART_INTERRUPTED"
++    # 2026-10-08-backend-restart-fake-failed（评审 P3）：reason 文案兼顾复扫
++    # 场景——清理不只发生在后端重启，延迟复扫发现 daemon 停止上报同样走此
++    # 分支；finished_by 随之改 stale_run_cleanup。
+     assert run.error_detail == {
+-        "reason": "backend service restarted while run was active",
+-        "finished_by": "startup_cleanup",
++        "reason": "no daemon activity within grace window (startup cleanup / deferred recheck)",
++        "finished_by": "stale_run_cleanup",
+     }
+     assert run.exit_code == -1
+ 
+diff --git a/frontend/src/components/git-log/__tests__/git-log-page.test.tsx b/frontend/src/components/git-log/__tests__/git-log-page.test.tsx
+index 00087ae95..671460b3e 100644
+--- a/frontend/src/components/git-log/__tests__/git-log-page.test.tsx
++++ b/frontend/src/components/git-log/__tests__/git-log-page.test.tsx
+@@ -1,11 +1,12 @@
+ /**
+  * task-06：Git 日志页冒烟测试（含 WorkspaceTabs 注册断言）。
+  *
+- * 覆盖（acceptance「TABS 增至 15 项」+「空态卡/三降级卡分发」）：
++ * 覆盖（acceptance「TABS 增至 15 项」+「空态卡/三降级卡分发」；2026-10-08
++ * platform-knowledge-graph task-08 知识图谱页签插入后 TABS 增至 16 项，数量钉跟移）：
+  * 1. git_mode=no_git → 空态卡（探测说明文案）+ 工具栏（分支下拉/作者输入/刷新）；
+  * 2. 正常数据 → 列表渲染 + 副标题「已加载 N 条」+ 加载更多（skip 递增翻页）；
+  * 3. 502 查询错误 → 三降级卡（daemon 离线中文文案）；
+- * 4. WorkspaceTabs 含第 15 项「Git 日志」（纯三字段，path=/git-log，末位），
++ * 4. WorkspaceTabs 含第 16 项「Git 日志」（纯三字段，path=/git-log，末位），
+  *    当前路径高亮（explorer-page.test.tsx 先例形态照抄）。
+  *
+  * 依据：tasks/task-06.md acceptance、design.md §5.4 / §7.4。
+@@ -331,7 +332,7 @@ describe("Git 日志页正常态", () => {
+ // ── WorkspaceTabs 注册（explorer-page.test.tsx 先例照抄）──────────────
+ 
+ describe("WorkspaceTabs「Git 日志」标签（task-06）", () => {
+-  it("TABS 增至 15 项，「Git 日志」末位且 href 为 /git-log", () => {
++  it("TABS 增至 16 项，「Git 日志」末位且 href 为 /git-log", () => {
+     render(
+       <WorkspaceTabs workspaceId="ws-1">
+         <div />
+@@ -339,7 +340,7 @@ describe("WorkspaceTabs「Git 日志」标签（task-06）", () => {
+     );
+ 
+     const links = screen.getAllByRole("link");
+-    expect(links).toHaveLength(15);
++    expect(links).toHaveLength(16);
+     const labels = links.map((a) => a.textContent);
+     const gitLogIdx = labels.indexOf("Git 日志");
+     expect(gitLogIdx).toBe(labels.length - 1);
+diff --git a/sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts b/sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts
+index 04c6a543b..1d4b9844e 100644
+--- a/sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts
++++ b/sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts
+@@ -391,7 +391,7 @@ describe('task-08 SELF_UPDATE 安全层四路径集成回归', () => {
+       await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+       expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
+       const first = h.heartbeatMock.mock.calls[0]!;
+-      expect(first.length).toBe(10);
++      expect(first.length).toBe(11); // task-02 machine-id 尾参使平铺形态 10→11（d6fabf408）
+       expect(first[3]).toEqual({
+         reason: 'disk_change',
+         current_version: 'cur-p4',
+@@ -408,7 +408,7 @@ describe('task-08 SELF_UPDATE 安全层四路径集成回归', () => {
+       expect(await h.daemon.readPendingUpdate()).toBeNull();
+       await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+       const second = h.heartbeatMock.mock.calls[1]!;
+-      expect(second.length).toBe(10); // ql-20260909：心跳 10 参平铺形态（同上注）
++      expect(second.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+       expect(second[3]).toBeUndefined();
+     });
+   });
+diff --git a/sillyhub-daemon/tests/provider-adapter-registry.test.ts b/sillyhub-daemon/tests/provider-adapter-registry.test.ts
+index f722070a3..3c031eff4 100644
+--- a/sillyhub-daemon/tests/provider-adapter-registry.test.ts
++++ b/sillyhub-daemon/tests/provider-adapter-registry.test.ts
+@@ -43,7 +43,7 @@ const testsDir = dirname(fileURLToPath(import.meta.url));
+ const daemonRoot = resolve(testsDir, '..');
+ const repoRoot = resolve(daemonRoot, '..');
+ 
+-/** backend agent_kind 词表源文件（Literal 声明在 schema.py:22）。 */
++/** backend agent_kinds 词表源文件（list Literal 声明，见 readBackendAgentKindVocab 注释）。 */
+ const BACKEND_SCHEMA_PATH = join(
+   repoRoot,
+   'backend',
+@@ -62,7 +62,11 @@ const BACKEND_SCHEMA_PATH = join(
+ const API_FORMAT_VOCAB: readonly string[] = ['anthropic', 'openai_chat'];
+ 
+ /**
+- * 读 backend agent_kind Literal 词表（源文件读取式解析，不跨语言 import）。
++ * 读 backend agent_kinds Literal 词表（源文件读取式解析，不跨语言 import）。
++ *
++ * 2026-10-06-provider-multi-agent-kind：字段单数 `agent_kind: Literal[...]` 改
++ * 复数 `agent_kinds: list[Literal[...]]`（一供应商多 kind），正则锚随形态更新
++ * ——仍取首个声明（Create 块必填形，schema.py 两处同词表）。
+  *
+  * 失败语义响亮：文件缺失 / Literal 声明不匹配 / 解析为空都直接抛错（防哑绿
+  * ——「找不到词表」绝不能伪装成「词表为空子集恒真」）。
+@@ -72,16 +76,16 @@ function readBackendAgentKindVocab(): string[] {
+     throw new Error(`backend schema 源文件缺失: ${BACKEND_SCHEMA_PATH}（对账前提）`);
+   }
+   const text = readFileSync(BACKEND_SCHEMA_PATH, 'utf-8');
+-  const literal = /agent_kind\s*:\s*Literal\[([^\]]*)\]/.exec(text);
++  const literal = /agent_kinds\s*:\s*list\[Literal\[([^\]]*)\]\]/.exec(text);
+   if (literal === null) {
+     throw new Error(
+-      `未在 ${BACKEND_SCHEMA_PATH} 找到 agent_kind Literal 声明（词表锚点漂移，检查解析器与源）`,
++      `未在 ${BACKEND_SCHEMA_PATH} 找到 agent_kinds list Literal 声明（词表锚点漂移，检查解析器与源）`,
+     );
+   }
+   const vocab = [...literal[1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
+   if (vocab.length === 0) {
+     throw new Error(
+-      `agent_kind Literal 词表解析为空: ${BACKEND_SCHEMA_PATH}（词表不可能为空，解析器失配）`,
++      `agent_kinds Literal 词表解析为空: ${BACKEND_SCHEMA_PATH}（词表不可能为空，解析器失配）`,
+     );
+   }
+   return vocab;
+diff --git a/sillyhub-daemon/tests/sillyspec-platform-command.test.ts b/sillyhub-daemon/tests/sillyspec-platform-command.test.ts
+index 333113189..0d3b65bef 100644
+--- a/sillyhub-daemon/tests/sillyspec-platform-command.test.ts
++++ b/sillyhub-daemon/tests/sillyspec-platform-command.test.ts
+@@ -880,13 +880,14 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不
+       executed_at: expect.any(String),
+     };
+     expect(h.heartbeatMock).toHaveBeenCalledTimes(2);
+-    // ql-20260909（顺手修存量债）：心跳已演进到 10 参（第 8 specCache / 9
+-    // statusError / 10 status_map，2026-09-08 总览工作区级化）——length 断言
+-    // 从 7/4 时代更新；commandResult 仍第 7 参（index 6）。
+-    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(10);
++    // ql-20260909（顺手修存量债）：心跳已演进到 11 参（第 8 specCache / 9
++    // statusError / 10 status_map，2026-09-08 总览工作区级化；第 11 machineId，
++    // d6fabf408 tool-report task-02 尾参）——length 断言从 7/4 时代更新；
++    // commandResult 仍第 7 参（index 6）。
++    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+     expect(h.heartbeatMock.mock.calls[0]![6]).toEqual(expected);
+     // 窗口内每跳都携带（latest-wins 单槽重复发送）。
+-    expect(h.heartbeatMock.mock.calls[1]!.length).toBe(10);
++    expect(h.heartbeatMock.mock.calls[1]!.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+     expect(h.heartbeatMock.mock.calls[1]![6]).toEqual(expected);
+   });
+ 
+@@ -894,11 +895,11 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不
+     const h = makeHeartbeatCommandHarness();
+     await h.manager.runGhostCleanup();
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+-    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(10);
++    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+     h.advance(SILLYSPEC_TERMINAL_WINDOW_MS); // 时钟注入过 10min（不真等）
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     const call = h.heartbeatMock.mock.calls[1]!;
+-    expect(call.length).toBe(10);
++    expect(call.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+     expect(call[4]).toBeUndefined();
+     expect(call[5]).toBeUndefined();
+     expect(call[6]).toBeUndefined();
+@@ -908,7 +909,7 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不
+     const h = makeHeartbeatCommandHarness();
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     const call = h.heartbeatMock.mock.calls[0]!;
+-    expect(call.length).toBe(10);
++    expect(call.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+     expect(call[6]).toBeUndefined();
+   });
+ });
+@@ -967,7 +968,7 @@ describe('ql-20260911-024 结果落槽即补发心跳：命令完成不等 15s 
+     // waitFor 收敛微任务链后心跳恰一次（15s 循环在测试 config 拉满下不会掺入）。
+     await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(1));
+     const call = h.heartbeatMock.mock.calls[0]!;
+-    expect(call.length).toBe(10);
++    expect(call.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+     expect(call[6]).toEqual({
+       action: 'resolve',
+       change: 'c1',
+diff --git a/.sillyspec/changes/2026-10-08-ci-sweep-2/design.md b/.sillyspec/changes/2026-10-08-ci-sweep-2/design.md
+new file mode 100644
+index 000000000..745d23778
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-ci-sweep-2/design.md
+@@ -0,0 +1,41 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T15:12:55.373Z
++---
++# 设计记录（Design Record）— 2026-10-08-ci-sweep-2
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++2026-10-08 新提交上三线 CI 共 8 用例失败，逐一核对生产意图后确认全部为测试侧未跟上近期有意生产变更（生产代码零行改动）：①frontend git-log-page.test 钉 TABS=15，e8da254ce 知识图谱变更插入第 16 个页签（其自身 workspace-tabs.test 已更新，此数量钉漏跟）——改 16 并同步用例名/头注释；②backend test_cleanup_stale_runs_error_code 钉旧 error_detail 文案，9f1f974c4/89a7e9a42 宽限窗变更经评审 P3 有意改文案（reason 兼顾复扫场景、finished_by=stale_run_cleanup，生产注释明载）——期望改新文案并注释溯源；③daemon 心跳平铺形态 d6fabf408 加 machine-id 尾参后 10→11，daemon-heartbeat-pending/sillyspec 两文件已同步改 11，sillyspec-platform-command 6 处与 selfupdate-scenarios 2 处漏跟——补改并带同款尾参注释；④daemon provider-adapter-registry 对账正则锚单数 agent_kind 冒号形态，2026-10-06-provider-multi-agent-kind 把字段改复数 agent_kinds list Literal 致解析失配（防哑绿抛「锚点漂移」）——正则随形态更新，注释锚同步。修测试而非回退生产：四处生产变更均有变更档案与评审留痕，属规则 9 允许的测试过时情形。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无——纯测试侧断言/解析器对齐，生产代码零行改动。涉及对齐的既有契约：WorkspaceTabs 16 键注册表、_cleanup_stale_runs_impl error_detail 新文案、daemon heartbeat 11 参平铺形态、backend llm_provider schema agent_kinds 复数词表。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用——静态断言对齐，无事件序参与；心跳 11 参长度断言与传参顺序无关。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用——单仓测试文件改动，无共享可变状态。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++不适用——无运行时行为变化。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不适用——provider-adapter-registry 对账正则读主仓 backend schema 源（CI 与本地同路径解析，已实证两边一致）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：正则锚未来再随 schema 形态演化漂移——防哑绿抛错语义保留（失配即响亮失败），漂移会被即时暴露而非静默通过。放弃方案：回退四处生产变更让测试通过——放弃，均有变更档案/评审留痕的有意行为，回退等于推翻已验收功能；改用运行时 import 跨语言读词表——放弃，TS 无法 import Python 源，源文件读取式解析即先例形态。
+diff --git a/.sillyspec/changes/2026-10-08-ci-sweep-2/proposal.md b/.sillyspec/changes/2026-10-08-ci-sweep-2/proposal.md
+new file mode 100644
+index 000000000..449b4f373
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-ci-sweep-2/proposal.md
+@@ -0,0 +1,33 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T15:12:55.373Z
++---
++# 提案书（Proposal）— 2026-10-08-ci-sweep-2
++
++## 动机
++
++任务原话转写：第二轮 CI 红清偿：2026-10-08 新提交上 frontend-ci/backend-ci/daemon-ci 三线共 8 用例失败，逐一核对生产意图后全部为测试侧未跟上近期有意生产变更（生产零改动）：①frontend git-log-page.test 钉 TABS=15 项，e8da254ce 知识图谱变更加了第 16 个页签（其自身 workspace-tabs.test 已更新，此数量钉漏跟）②backend test_cleanup_stale_runs_error_code 钉旧 error_detail 文案，9f1f974c/89a7e9a42 宽限窗变更评审 P3 有意改文案（reason/finished_by 均换）③daemon 心跳 length 断言钉 10 参，d6fabf408 machine-id 尾参使平铺形态 10→11（daemon-heartbeat 两文件已同步改 11，sillyspec-platform-command 6 处与 selfupdate-scenarios 2 处漏跟）④daemon provider-adapter-registry 对账正则锚单数 agent_kind 冒号形态，2026-10-06 provider 变更把字段改为复数 agent_kinds list Literal 形态致解析失配。
++
++成功标准：
++- git-log-page.test.tsx TABS 数量钉 15→16（用例名+头注释同步），该文件全绿
++- test_cleanup_stale_runs_error_code.py error_detail 期望改新文案（reason=no daemon activity within grace window (startup cleanup / deferred recheck)/finished_by=stale_run_cleanup），全绿
++- sillyspec-platform-command.test.ts 6 处与 selfupdate-scenarios.test.ts 2 处 length 断言 10→11（带 task-02 machine-id 尾参注释，同 daemon-heartbeat 先例），全绿
++- provider-adapter-registry.test.ts readBackendAgentKindVocab 正则改 agent_kinds 复数 list Literal 形态（注释锚同步），对账恢复夹逼语义，全绿
++- 本地仅跑相关测试文件全绿（全量留 CI），推送后 frontend-ci/backend-ci/daemon-ci/e2e-ci/scan-drift 全绿
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. git-log-page.test.tsx TABS 数量钉 15→16（用例名+头注释同步），该文件全绿
++2. test_cleanup_stale_runs_error_code.py error_detail 期望改新文案（reason=no daemon activity within grace window (startup cleanup / deferred recheck)/finished_by=stale_run_cleanup），全绿
++3. sillyspec-platform-command.test.ts 6 处与 selfupdate-scenarios.test.ts 2 处 length 断言 10→11（带 task-02 machine-id 尾参注释，同 daemon-heartbeat 先例），全绿
++4. provider-adapter-registry.test.ts readBackendAgentKindVocab 正则改 agent_kinds 复数 list Literal 形态（注释锚同步），对账恢复夹逼语义，全绿
++5. 本地仅跑相关测试文件全绿（全量留 CI），推送后 frontend-ci/backend-ci/daemon-ci/e2e-ci/scan-drift 全绿
++
++## 成功标准（可验证）
++
++1. git-log-page.test.tsx TABS 数量钉 15→16（用例名+头注释同步），该文件全绿
++2. test_cleanup_stale_runs_error_code.py error_detail 期望改新文案（reason=no daemon activity within grace window (startup cleanup / deferred recheck)/finished_by=stale_run_cleanup），全绿
++3. sillyspec-platform-command.test.ts 6 处与 selfupdate-scenarios.test.ts 2 处 length 断言 10→11（带 task-02 machine-id 尾参注释，同 daemon-heartbeat 先例），全绿
++4. provider-adapter-registry.test.ts readBackendAgentKindVocab 正则改 agent_kinds 复数 list Literal 形态（注释锚同步），对账恢复夹逼语义，全绿
++5. 本地仅跑相关测试文件全绿（全量留 CI），推送后 frontend-ci/backend-ci/daemon-ci/e2e-ci/scan-drift 全绿
+diff --git a/.sillyspec/changes/2026-10-08-ci-sweep-2/requirements.md b/.sillyspec/changes/2026-10-08-ci-sweep-2/requirements.md
+new file mode 100644
+index 000000000..d8314b64e
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-ci-sweep-2/requirements.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T15:12:55.373Z
++---
++# 需求规格（Requirements）— 2026-10-08-ci-sweep-2
++
++## 功能需求
++
++### FR-01: git-log-page.test.tsx TABS 数量钉 15→16（用例名+头注释同步），该文件全绿
++
++- TABS 数量断言必须等于 16（知识图谱页签插入后），「Git 日志」仍必须为末位且 href=/git-log；用例名与头注释必须同步改 16。
++
++#### 场景：主路径
++
++Given WorkspaceTabs 注册 16 键（知识图谱插知识库后）/ When 渲染取 link / Then toHaveLength(16) 且 Git 日志末位。
++
++### FR-02: test_cleanup_stale_runs_error_code.py error_detail 期望改新文案（reason=no daemon activity within grace window (startup cleanup / deferred recheck)/finished_by=stale_run_cleanup），全绿
++
++- failed 分支 error_detail 期望必须等于新契约（reason/finished_by 两键），禁止 钉旧 startup_cleanup 文案；断言处必须注释溯源评审 P3 文案变更。
++
++#### 场景：主路径
++
++Given 无可恢复元数据的 stale run / When _cleanup_stale_runs_impl 执行 / Then error_detail 等于新文案两键。
++
++### FR-03: sillyspec-platform-command.test.ts 6 处与 selfupdate-scenarios.test.ts 2 处 length 断言 10→11（带 task-02 machine-id 尾参注释，同 daemon-heartbeat 先例），全绿
++
++- 心跳 mock 调用长度断言必须 为 11（machine-id 尾参平铺形态），8 处 必须 带 d6fabf408 尾参注释；ql-20260909 的「10 参」注释块必须 更新为 11 参演进链。
++
++#### 场景：主路径
++
++Given 心跳 11 参平铺（第 11 machineId，undefined 占位）/ When 断言 call.length / Then toBe(11) 且第 7 参槽位不变。
++
++### FR-04: provider-adapter-registry.test.ts readBackendAgentKindVocab 正则改 agent_kinds 复数 list Literal 形态（注释锚同步），对账恢复夹逼语义，全绿
++
++- 词表解析正则必须 匹配 agent_kinds: list[Literal[...]] 复数形态（仍取首处声明），失配 必须 响亮抛错（防哑绿保留）；注释 必须 记录单数→复数形态变更溯源。
++
++#### 场景：主路径
++
++Given backend schema 字段为复数 list Literal / When readBackendAgentKindVocab 解析 / Then 词表=["claude","pi","codex"] 且 ⊆ 聚合表键夹逼通过。
++
++### FR-05: 本地仅跑相关测试文件全绿（全量留 CI），推送后 frontend-ci/backend-ci/daemon-ci/e2e-ci/scan-drift 全绿
++
++- 本地必须 只跑相关文件（daemon 3 文件 59 用例 + backend 1 文件 2 用例 + frontend 2 文件 13 用例 + 三端 lint/tsc 门）且全绿，全量必须 留给 CI；推送后五个 workflow 必须 全绿。
++
++#### 场景：主路径
++
++Given 修复落地 / When 本地相关面跑测 / Then 全绿；When push / When 五 workflow 完成 / Then 全部 success。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/git-log/__tests__/git-log-page.test.tsx「TABS 增至 16 项，「Git 日志」末位且 href 为 /git-log」
++FR-02: backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py「test_stale_run_failed_branch_writes_error_code」
++FR-03: sillyhub-daemon/tests/sillyspec-platform-command.test.ts「task-07 心跳携带…」全套件 + sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts「路径④ pending 可见性闭环」
++FR-04: sillyhub-daemon/tests/provider-adapter-registry.test.ts「backend agent_kind 词表（源读取解析）⊆ 聚合表键（backend 可下发 kind 必有声明）」
++FR-05: 不适用：CI 门（本地相关面绿已实证 daemon 59 + backend 2 + frontend 13 + 三端 tsc/ruff/eslint 0；五 workflow 全绿以推送后 Actions 实跑为准，盯到全绿）
+diff --git a/.sillyspec/changes/2026-10-08-ci-sweep-2/tasks.md b/.sillyspec/changes/2026-10-08-ci-sweep-2/tasks.md
+new file mode 100644
+index 000000000..b84ebf4df
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-ci-sweep-2/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T15:12:55.373Z
++---
++# 任务注册表（Tasks）— 2026-10-08-ci-sweep-2
++
++- [x] task-01: git-log-page.test.tsx TABS 数量钉 15→16（用例名+头注释同步），该文件全绿
++- [x] task-02: test_cleanup_stale_runs_error_code.py error_detail 期望改新文案（reason=no daemon activity within grace window (startup cleanup / deferred recheck)/finished_by=stale_run_cleanup），全绿
++- [x] task-03: sillyspec-platform-command.test.ts 6 处与 selfupdate-scenarios.test.ts 2 处 length 断言 10→11（带 task-02 machine-id 尾参注释，同 daemon-heartbeat 先例），全绿
++- [x] task-04: provider-adapter-registry.test.ts readBackendAgentKindVocab 正则改 agent_kinds 复数 list Literal 形态（注释锚同步），对账恢复夹逼语义，全绿
++- [x] task-05: 本地仅跑相关测试文件全绿（全量留 CI），推送后 frontend-ci/backend-ci/daemon-ci/e2e-ci/scan-drift 全绿

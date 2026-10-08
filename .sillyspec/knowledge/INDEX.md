@@ -196,3 +196,4 @@
 - auto-deploy|deploy|FR|需求|承接 → [fr/auto-deploy.md](fr/auto-deploy.md)
 - auto-frontend|frontend|FR|需求|承接 → [fr/auto-frontend.md](fr/auto-frontend.md)
 - runtime-handler|FR|需求|承接 → [fr/runtime-handler.md](fr/runtime-handler.md)
+- auto-sillyhub-daemon|sillyhub-daemon|FR|需求|承接 → [fr/auto-sillyhub-daemon.md](fr/auto-sillyhub-daemon.md)

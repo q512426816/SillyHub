@@ -1,0 +1,51 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "fa016a4b4d444e54bbb15a1b1551a6a856bbcbc2",
+  "totals": {
+    "files": 5,
+    "additions": 31,
+    "deletions": 22
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+      "additions": 5,
+      "deletions": 2,
+      "kind": "modified"
+    },
+    {
+      "path": "frontend/src/components/git-log/__tests__/git-log-page.test.tsx",
+      "additions": 5,
+      "deletions": 4,
+      "kind": "modified"
+    },
+    {
+      "path": "sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts",
+      "additions": 2,
+      "deletions": 2,
+      "kind": "modified"
+    },
+    {
+      "path": "sillyhub-daemon/tests/provider-adapter-registry.test.ts",
+      "additions": 9,
+      "deletions": 5,
+      "kind": "modified"
+    },
+    {
+      "path": "sillyhub-daemon/tests/sillyspec-platform-command.test.ts",
+      "additions": 10,
+      "deletions": 9,
+      "kind": "modified"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "132186802d89822e1ec847ebc83dd63e2ae493ebef19fd72980e574e4addd12e",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T15:19:22.251Z"
+}

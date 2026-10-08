@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-ci-sweep-2",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-08-ci-sweep-2:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/git-log/__tests__/git-log-page.test.tsx「TABS 增至 16 项，「Git 日志」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-ci-sweep-2"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-08-ci-sweep-2:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py「test_stale_run_failed_branch_writes_error_code」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-ci-sweep-2"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-08-ci-sweep-2:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts「路径④ pending 可见性闭环」",
+        "sillyhub-daemon/tests/sillyspec-platform-command.test.ts「task-07 心跳携带…」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-ci-sweep-2"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-08-ci-sweep-2:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/provider-adapter-registry.test.ts「backend agent_kind 词表（源读取解析）⊆ 聚合表键（backend 可下发 kind 必有声明）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-ci-sweep-2"
+    }
+  ]
+}
