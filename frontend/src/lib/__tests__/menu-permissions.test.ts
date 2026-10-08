@@ -280,8 +280,11 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
       expect(g, `missing menu ${menuKey}`).toBeDefined();
       const keys = g!.permissions.map((p) => p.key);
       expect(keys).toContain(permKey);
-      // 不应再用 workspace:read 兜底
-      expect(keys).not.toContain("workspace:read");
+      // 不应再用 workspace:read 兜底——components 例外（2026-10-08 补齐页面列表
+      // 端点实际所需 workspace:read，非兜底而是必需）。
+      if (menuKey !== "components") {
+        expect(keys).not.toContain("workspace:read");
+      }
     });
   });
 
@@ -373,8 +376,13 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.absolute).toBe(true);
     expect(g!.matchPattern).toBe("/settings/mcp");
     // 2026-09-18-web-menu-management FR-01：改挂独立 mcp:read（去 pickerHidden 进勾选器）；
-    // 库读写仍由 API 层权限矩阵控制（非 admin 平台库写 403）
-    expect(g!.permissions).toEqual([{ key: "mcp:read", name: "MCP 查看" }]);
+    // 库读写仍由 API 层权限矩阵控制（非 admin 平台库写 403）。
+    // 2026-10-08-menu-permissions-page-audit：补 settings:admin（平台库写端点
+    // mcp_registry settings_admin_check），平台库管理员角色在此卡可配。
+    expect(g!.permissions).toEqual([
+      { key: "mcp:read", name: "MCP 查看" },
+      { key: "settings:admin", name: "平台库管理" },
+    ]);
     expect(g!.pickerHidden).toBeFalsy();
   });
 
@@ -450,14 +458,14 @@ describe("用户列明菜单的 permissions 精确匹配", () => {
     expect(keysOf("roles")).toEqual(["role:read", "role:write"].sort());
   });
 
-  it("changes = change:create/read/update/approve/archive", () => {
+  it("changes = change:create/read/update/approve/archive + task:read（2026-10-08 补齐变更任务子页所需）", () => {
     expect(keysOf("changes")).toEqual(
-      ["change:approve", "change:archive", "change:create", "change:read", "change:update"].sort(),
+      ["change:approve", "change:archive", "change:create", "change:read", "change:update", "task:read"].sort(),
     );
   });
 
-  it("audit = platform:audit:read", () => {
-    expect(keysOf("audit")).toEqual(["platform:audit:read"]);
+  it("audit = platform:audit:read + change:read（2026-10-08 补齐：工作区审计日志端点鉴权 change:read，platform:audit:read 零端点消费保留）", () => {
+    expect(keysOf("audit")).toEqual(["change:read", "platform:audit:read"].sort());
   });
 
   it("releases = deploy:staging/production/rollback", () => {

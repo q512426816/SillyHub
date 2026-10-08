@@ -117,7 +117,14 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     icon: "\u{1F4E6}",
     href: "components",
     matchPattern: "/components",
-    permissions: [{ key: "component:read", name: "组件查看" }],
+    // 2026-10-08-menu-permissions-page-audit：补 workspace:read——组件列表端点
+    // GET /api/workspaces/{ws}/components（workspace/router.py list_components）
+    // 鉴权 workspace:read，此前只挂 component:read 的用户看得到菜单但页面 403；
+    // component:read 无后端端点消费，保留为菜单门控主 key。
+    permissions: [
+      { key: "component:read", name: "组件查看" },
+      { key: "workspace:read", name: "工作区查看" },
+    ],
   },
   {
     section: "workspace",
@@ -135,12 +142,16 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     icon: "\u{1F504}",
     href: "changes",
     matchPattern: "/changes",
+    // 2026-10-08-menu-permissions-page-audit：补 task:read——变更任务列表/看板/
+    // 详情子页（GET /api/workspaces/{ws}/tasks/{tid}、/changes/{cid}/tasks/board、
+    // /tasks/reparse，task/router.py 全部 require TASK_READ）。
     permissions: [
       { key: "change:create", name: "变更创建" },
       { key: "change:read", name: "变更查看" },
       { key: "change:update", name: "变更更新" },
       { key: "change:approve", name: "变更审批" },
       { key: "change:archive", name: "变更归档" },
+      { key: "task:read", name: "任务查看" },
     ],
   },
   {
@@ -172,7 +183,14 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     icon: "\u{1F4DA}",
     href: "knowledge",
     matchPattern: "/knowledge",
-    permissions: [{ key: "knowledge:read", name: "知识查看" }],
+    // 2026-10-08-menu-permissions-page-audit：补 knowledge:write——知识库写端点
+    // 8 处 require KNOWLEDGE_WRITE（knowledge/router.py），页面有写按钮（2026-09-17
+    // knowledge-precipitation task-05 权限驱动）。此前 knowledge:write 不挂任何
+    // 菜单卡，角色勾选器配不了。
+    permissions: [
+      { key: "knowledge:read", name: "知识查看" },
+      { key: "knowledge:write", name: "知识编辑" },
+    ],
   },
   {
     section: "workspace",
@@ -219,7 +237,15 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/settings/mcp",
     absolute: true,
     matchPattern: "/settings/mcp",
-    permissions: [{ key: "mcp:read", name: "MCP 查看" }],
+    // 后端读与我的库操作任意登录用户可用地（mcp_registry CurrentUser），菜单挂
+    // mcp:read 作可见性门控。
+    // 2026-10-08-menu-permissions-page-audit：补 settings:admin——平台库写端点
+    // （mcp_registry/router.py settings_admin_check 直调 require_permission_any
+    // (SETTINGS_ADMIN)）此前只能在「设置」卡配置，平台库管理员角色在此卡补齐。
+    permissions: [
+      { key: "mcp:read", name: "MCP 查看" },
+      { key: "settings:admin", name: "平台库管理" },
+    ],
   },
   {
     // 2026-08-04-agent-profile-ui-redesign task-05 新增（D-001/D-007）：智能体档案
@@ -325,9 +351,16 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     icon: "✅",
     href: "approvals",
     matchPattern: "/approvals",
+    // 2026-10-08-menu-permissions-page-audit：补 task:read + task:run_agent——
+    // 审批页除批/拒（tool_gateway change:approve）外还拉 agent 会话列表与待处理
+    // 对话框（agent/router /workspaces/{ws}/agent-sessions、/dialogs 均 TASK_READ）
+    // 与会话权限面板（daemon 会话端点族 task:run_agent）。task:approve 无后端
+    // 端点消费，保留存量不删。
     permissions: [
       { key: "task:approve", name: "任务审批" },
       { key: "change:approve", name: "变更审批" },
+      { key: "task:read", name: "任务查看" },
+      { key: "task:run_agent", name: "会话运行" },
     ],
   },
   {
@@ -337,12 +370,18 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     icon: "\u{1F4DC}",
     href: "audit",
     matchPattern: "/audit",
+    // 2026-10-08-menu-permissions-page-audit：补 change:read——工作区审计日志
+    // GET /api/workspaces/{ws}/audit（workflow/router.py list_audit_logs）鉴权
+    // CHANGE_READ，此前持 platform:audit:read 看得到菜单但页面 403、持 change:read
+    // 打得开页面却看不到菜单（双向错位）。platform:audit:read 无后端端点消费
+    // （死目录 key），保留存量配置不删。
     permissions: [
       {
         key: "platform:audit:read",
         name: "平台审计读取",
         description: "跨工作空间的平台级审计日志访问",
       },
+      { key: "change:read", name: "变更查看" },
     ],
   },
   {
@@ -352,7 +391,13 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     icon: "\u{1F6A8}",
     href: "incidents",
     matchPattern: "/incidents",
-    permissions: [{ key: "incident:read", name: "事件查看" }],
+    // 2026-10-08-menu-permissions-page-audit：补 deploy:staging——事件上报
+    // POST /api/workspaces/{ws}/incidents（incident/router.py）鉴权
+    // DEPLOY_STAGING（发布关联事件口径），页面上报按钮需要。
+    permissions: [
+      { key: "incident:read", name: "事件查看" },
+      { key: "deploy:staging", name: "事件上报" },
+    ],
   },
 
   // ── system 系统管理（5 条：用户/组织/角色/设置/菜单）──────────
