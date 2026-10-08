@@ -8,7 +8,7 @@ Change 2026-07-25-daemon-borrow-for-business task-03 / FR-03 / D-006@v2：
      ``invalidate_all_permissions``（R-05：grant 后清缓存，首次借用不被旧缓存挡）；
   3. 端到端 RBAC 链：被授 business_member 的用户在该工作空间内
      ``has_permission(DAEMON_BORROW)`` / ``has_permission(TASK_RUN_AGENT)`` 为 True，
-     且不越权拿到 WORKSPACE_WRITE / CODE_WRITE（business_member 无写权限）。
+     且不越权拿到 WORKSPACE_WRITE / DEPLOY_PRODUCTION（business_member 无部署权限）。
 
 测试范式照抄 ``tests/modules/test_permission_cache.py``：``_FakeRedis`` 内存替身 +
 ``monkeypatch.setattr("app.core.permission_cache.get_redis", ...)``。
@@ -211,7 +211,7 @@ async def test_business_member_rbac_chain_grants_borrow_and_run_agent(
 ) -> None:
     """被授 business_member 的用户在该 ws 内 has_permission 返回:
     DAEMON_BORROW=True / TASK_RUN_AGENT=True（FR-03 触发端点 + 借用回退授权），
-    WORKSPACE_WRITE=False / CODE_WRITE=False（不越权，business_member 无写权限）。
+    WORKSPACE_WRITE=False / DEPLOY_PRODUCTION=False（不越权，business_member 无部署权限）。
     """
     # 用 _FakeRedis 替身，避免 has_permission 命中真实 Redis（降级噪声 + 慢）。
     fake_redis = _FakeRedis()
@@ -269,7 +269,7 @@ async def test_business_member_rbac_chain_grants_borrow_and_run_agent(
         await has_permission(
             db_session,
             user=user,
-            permission=Permission.CODE_WRITE,
+            permission=Permission.DEPLOY_PRODUCTION,
             workspace_id=ws.id,
         )
         is False

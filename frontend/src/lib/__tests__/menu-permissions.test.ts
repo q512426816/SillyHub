@@ -4,7 +4,7 @@ import type { MenuSection } from "../menu-permissions";
 import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
 
 /**
- * 后端 Permission 枚举镜像常量（72 项）。
+ * 后端 Permission 枚举镜像常量（58 项）。
  *
  * 与 `backend/app/modules/auth/permissions.py` 的 Permission StrEnum 保持同步。
  * 若后端扩/删枚举，需同时更新本常量；用例 5 会在漂移时失败提示。
@@ -16,12 +16,11 @@ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
  * - Workspace 子菜单独立 read/write (7, 2026-06-18 ql-003 新增 6
  *   + knowledge:write——镜像曾漏补，2026-10-08-sessions-menu-permissions 对齐)
  * - Change (5)
- * - Task (6)
+ * - Task (4, 2026-10-08-rbac-dead-permissions-cleanup 删 task:cancel/task:approve)
  * - Daemon borrow (1, 镜像曾漏补，同上对齐)
- * - Code (4)
  * - Deploy (3)
- * - Tool (4)
  * - Admin (7)
+ * （Code×4 / Tool×4 死键已随 2026-10-08-rbac-dead-permissions-cleanup 删除）
  * - PPM (18, change 2026-07-20-ppm-permission-simplify task-04 精简：删 16 个 write/delete/export/assign 摆设动作；problem-change:read 镜像曾漏补)
  * - 菜单读权限 + 菜单管理门控 (5, 2026-09-18-web-menu-management task-01 新增)
  */
@@ -29,8 +28,6 @@ const BACKEND_PERMISSION_KEYS = [
   // Platform (8, ql-004 新增 3 个管理子菜单 admin + ql-005 新增 git_identity:admin
   // + 2026-07-29-sidebar-menu-restructure 新增 llm_provider:read)
   "platform:admin",
-  "platform:billing",
-  "platform:audit:read",
   "settings:admin",
   "api_key:admin",
   "runtime:admin",
@@ -43,7 +40,6 @@ const BACKEND_PERMISSION_KEYS = [
   "workspace:member:manage",
   // Workspace 子菜单独立 read (7, 2026-06-18 ql-003 新增 6 + 2026-09-17
   // knowledge-precipitation task-02 新增 knowledge:write——镜像曾漏补)
-  "component:read",
   "topology:read",
   "scan-docs:read",
   "runtime:read",
@@ -53,32 +49,19 @@ const BACKEND_PERMISSION_KEYS = [
   // Change (5)
   "change:create",
   "change:read",
-  "change:update",
   "change:approve",
   "change:archive",
-  // Task (6)
+  // Task (4, 2026-10-08-rbac-dead-permissions-cleanup 删 task:cancel/task:approve)
   "task:read",
   "task:create",
   "task:assign",
   "task:run_agent",
-  "task:cancel",
-  "task:approve",
   // Daemon borrow (1, 2026-07-25-daemon-borrow-for-business task-03——镜像曾漏补)
   "daemon:borrow",
-  // Code (4)
-  "code:read",
-  "code:write",
-  "code:review",
-  "code:merge",
   // Deploy (3)
   "deploy:staging",
   "deploy:production",
   "deploy:rollback",
-  // Tool (4)
-  "tool:shell_exec",
-  "tool:network",
-  "tool:database",
-  "tool:secret:read",
   // Admin (7)
   "user:read",
   "user:write",
@@ -251,13 +234,14 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 72", () => {
+  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 58", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
-    // 69 (原) + 3 (2026-10-08-sessions-menu-permissions 对齐后端枚举补漏：
-    // daemon:borrow / knowledge:write / ppm:problem-change:read) = 72
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(72);
-    expect(valid.size).toBe(72);
+    // 72 (峰值) - 14 (2026-10-08-rbac-dead-permissions-cleanup 删除零端点
+    // 消费死键：code:*×4 / tool:*×4 / task:cancel / task:approve /
+    // platform:audit:read / platform:billing / component:read / change:update) = 58
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(58);
+    expect(valid.size).toBe(58);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {
@@ -266,9 +250,11 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("6 个子菜单有独立 read 权限（不再共用 workspace:read）", () => {
+  it("5 个子菜单有独立 read 权限（不再共用 workspace:read）", () => {
+    // 2026-10-08-rbac-dead-permissions-cleanup：components 的 component:read
+    // 死键删除后卡片收敛为 [workspace:read]（组件列表端点鉴权即
+    // workspace:read），退出本清单——独立 read key 剩 5 个。
     const EXPECTED: Record<string, string> = {
-      components: "component:read",
       topology: "topology:read",
       "scan-docs": "scan-docs:read",
       runtime: "runtime:read",
@@ -280,11 +266,8 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
       expect(g, `missing menu ${menuKey}`).toBeDefined();
       const keys = g!.permissions.map((p) => p.key);
       expect(keys).toContain(permKey);
-      // 不应再用 workspace:read 兜底——components 例外（2026-10-08 补齐页面列表
-      // 端点实际所需 workspace:read，非兜底而是必需）。
-      if (menuKey !== "components") {
-        expect(keys).not.toContain("workspace:read");
-      }
+      // 不应再用 workspace:read 兜底
+      expect(keys).not.toContain("workspace:read");
     });
   });
 
@@ -458,14 +441,14 @@ describe("用户列明菜单的 permissions 精确匹配", () => {
     expect(keysOf("roles")).toEqual(["role:read", "role:write"].sort());
   });
 
-  it("changes = change:create/read/update/approve/archive + task:read（2026-10-08 补齐变更任务子页所需）", () => {
+  it("changes = change:create/read/approve/archive + task:read/create/assign（2026-10-08 清理版：change:update 死键删除，活权限 task:create/assign 挂卡）", () => {
     expect(keysOf("changes")).toEqual(
-      ["change:approve", "change:archive", "change:create", "change:read", "change:update", "task:read"].sort(),
+      ["change:approve", "change:archive", "change:create", "change:read", "task:read", "task:create", "task:assign"].sort(),
     );
   });
 
-  it("audit = platform:audit:read + change:read（2026-10-08 补齐：工作区审计日志端点鉴权 change:read，platform:audit:read 零端点消费保留）", () => {
-    expect(keysOf("audit")).toEqual(["change:read", "platform:audit:read"].sort());
+  it("audit = change:read（2026-10-08 清理版：platform:audit:read 死键删除，审计日志端点鉴权 change:read）", () => {
+    expect(keysOf("audit")).toEqual(["change:read"]);
   });
 
   it("releases = deploy:staging/production/rollback", () => {

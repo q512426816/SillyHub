@@ -26,6 +26,11 @@ depends_on: str | Sequence[str] | None = None
 # Mirrors references/16-rbac.md §3 (system roles) + §2 (permission strings).
 # Permission strings are duplicated here on purpose: migrations must stay
 # importable without pulling in app.* (e.g. when generating offline SQL).
+#
+# 2026-10-08-rbac-dead-permissions-cleanup：播种清单精简——删除零端点消费的
+# 死权限字符串（component:read/write/admin、change:update、task:cancel、
+# task:approve、code:read/write/review；component:write/admin 从未入枚举）。
+# 仅影响新环境从头 seed；已部署环境存量行由迁移 202610081000 清理。
 
 SYSTEM_ROLES: list[dict[str, object]] = [
     {
@@ -43,22 +48,13 @@ SYSTEM_ROLES: list[dict[str, object]] = [
             "workspace:write",
             "workspace:admin",
             "workspace:member:manage",
-            "component:read",
-            "component:write",
-            "component:admin",
             "change:create",
             "change:read",
-            "change:update",
             "change:approve",
             "change:archive",
             "task:create",
             "task:assign",
             "task:run_agent",
-            "task:cancel",
-            "task:approve",
-            "code:read",
-            "code:write",
-            "code:review",
             "deploy:staging",
         ],
     },
@@ -68,11 +64,8 @@ SYSTEM_ROLES: list[dict[str, object]] = [
         "description": "负责工作区内的一个或多个组件。",
         "permissions": [
             "workspace:read",
-            "component:read",
-            "component:write",
             "change:read",
             "task:assign",
-            "code:review",
         ],
     },
     {
@@ -81,11 +74,8 @@ SYSTEM_ROLES: list[dict[str, object]] = [
         "description": "日常贡献者。",
         "permissions": [
             "workspace:read",
-            "component:read",
             "change:read",
             "task:run_agent",
-            "code:read",
-            "code:write",
         ],
     },
     {
@@ -95,8 +85,6 @@ SYSTEM_ROLES: list[dict[str, object]] = [
         "permissions": [
             "workspace:read",
             "change:read",
-            "code:read",
-            "code:review",
         ],
     },
     {
@@ -106,7 +94,6 @@ SYSTEM_ROLES: list[dict[str, object]] = [
         "permissions": [
             "workspace:read",
             "change:read",
-            "code:read",
             "task:run_agent",
         ],
     },
@@ -116,7 +103,6 @@ SYSTEM_ROLES: list[dict[str, object]] = [
         "description": "工作区只读访问。",
         "permissions": [
             "workspace:read",
-            "component:read",
             "change:read",
         ],
     },

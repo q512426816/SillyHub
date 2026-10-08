@@ -1,0 +1,29 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  RBAC 目录清理：14
+  个零端点消费的死权限（code:*×4、tool:*×4、task:cancel、task:approve、platform:audit:read、platform:billing、component:read、change:update）从枚举/菜单卡/种子删除，task:create
+  与 task:assign（有真实端点）挂到变更中心卡使其可配；新增迁移清理存量 role_permissions 死行（含从未入枚举的 component:write/admin）。
+
+
+  成功标准：
+
+  - 后端 Permission 枚举 72→58，删除的 14 键在 backend/app 与 sillyhub-daemon 零非测试引用（已核）
+
+  - 前端 4 菜单卡同步（components→仅 workspace:read、changes 删 change:update 加 task:create/assign、approvals 删 task:approve、audit→仅
+  change:read），角色页标签映射同步
+
+  - 种子迁移 SYSTEM_ROLES 精简 + 新增存量清理迁移（downgrade 对称回植 platform_admin，仿 20260720_drop_ppm_op 先例）
+
+  - pnpm gen:types 重生成 api-types（Permission 联合 58）并与 openapi.json 一并提交
+
+  - 后端 auth/roles 相关测试与前端 menu-permissions 测试同步更新全绿，ruff/mypy/tsc/eslint 零新增报错
+autopilot: true
+baseline_commit: e4cc5e0c6be37a1f97cffb686d01b36181f50a17
+updatedAt: '2026-10-08T02:31:02.716Z'
+baseline_sha256: e15d8135f1c0e182ea8199790fef41d6913efe90e9834c4a6401c273ba40722d
+

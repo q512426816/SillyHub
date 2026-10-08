@@ -1,10 +1,16 @@
 """Static permission catalogue.
 
-Mirrors ``references/16-rbac.md`` §2 + ``2026-06-16-admin-org-role-center``
-design §8.4. Keep this list in sync with the seed data in migration
-``202605280900_create_auth_and_rbac.py`` and the admin org/role bootstrap
-in ``auth.seed``: anything missing here is unreachable from the API layer
-regardless of what the DB grants.
+Historically mirrored ``references/16-rbac.md`` §2 + various change
+designs（2026-06-16-admin-org-role-center §8.4 等）。Keep this list in sync
+with the seed data in migration ``202605280900_create_auth_and_rbac.py``
+and the admin org/role bootstrap in ``auth.seed``: anything missing here
+is unreachable from the API layer regardless of what the DB grants.
+
+2026-10-08-rbac-dead-permissions-cleanup：删除 14 个零端点消费的死权限
+（code:*×4 / tool:*×4 / task:cancel / task:approve / platform:audit:read /
+platform:billing / component:read / change:update——2026-05-25 bootstrap
+设计的代码评审/工具门控残留，平台演进为 git 网关 + 会话 canUseTool 审批后
+从未接线）。存量授权行由迁移 202610081000 清理。
 """
 
 from __future__ import annotations
@@ -25,7 +31,6 @@ class PermissionGroup(StrEnum):
     WORKSPACE = "workspace"
     AGENT = "agent"
     CHANGE = "change"
-    AUDIT = "audit"
     # PPM (项目与问题管理) 平台级业务域 — change 2026-06-20-ppm-module-migration
     # task-02 / design §6/§7。前端菜单按 PPM 折叠展示。
     PPM = "ppm"
@@ -34,8 +39,6 @@ class PermissionGroup(StrEnum):
 class Permission(StrEnum):
     # ── Platform ────────────────────────────────────────────
     PLATFORM_ADMIN = "platform:admin"
-    PLATFORM_BILLING = "platform:billing"
-    PLATFORM_AUDIT_READ = "platform:audit:read"
 
     # ── Platform 子菜单独立管理权限 ──────────────────────────
     # 用于前端 menu 显隐粒度化：每个 management/system 子菜单有独立 admin 权限，
@@ -61,7 +64,8 @@ class Permission(StrEnum):
     # 用于前端 menu 显隐粒度化：每个 overview/management 子菜单有独立 read 权限，
     # 避免所有菜单共用 workspace:read 致 picker 重复展示。
     # 后端 router 各自 require 对应权限。
-    COMPONENT_READ = "component:read"
+    # 2026-10-08-rbac-dead-permissions-cleanup：component:read 删除（零端点
+    # 消费——组件列表端点鉴权 workspace:read，ql-003 接线意图从未落地）。
     TOPOLOGY_READ = "topology:read"
     SCAN_DOCS_READ = "scan-docs:read"
     RUNTIME_READ = "runtime:read"
@@ -73,19 +77,20 @@ class Permission(StrEnum):
     INCIDENT_READ = "incident:read"
 
     # ── Change ──────────────────────────────────────────────
+    # 2026-10-08-rbac-dead-permissions-cleanup：change:update 删除（零端点
+    # 消费——变更编辑端点走 CHANGE_CREATE + owner 判定）。
     CHANGE_CREATE = "change:create"
     CHANGE_READ = "change:read"
-    CHANGE_UPDATE = "change:update"
     CHANGE_APPROVE = "change:approve"
     CHANGE_ARCHIVE = "change:archive"
 
     # ── Task ────────────────────────────────────────────────
+    # 2026-10-08-rbac-dead-permissions-cleanup：task:cancel / task:approve
+    # 删除（零端点消费——审批走 tool_gateway change:approve，取消无端点）。
     TASK_READ = "task:read"
     TASK_CREATE = "task:create"
     TASK_ASSIGN = "task:assign"
     TASK_RUN_AGENT = "task:run_agent"
-    TASK_CANCEL = "task:cancel"
-    TASK_APPROVE = "task:approve"
 
     # ── Daemon borrow（业务/管理人员借用开发人员 daemon）──────────────────
     # change 2026-07-25-daemon-borrow-for-business task-03 / D-006@v2。
@@ -95,22 +100,10 @@ class Permission(StrEnum):
     # 借用端点、不改 agent 端点鉴权（design §5 Phase 2）。
     DAEMON_BORROW = "daemon:borrow"
 
-    # ── Code ────────────────────────────────────────────────
-    CODE_READ = "code:read"
-    CODE_WRITE = "code:write"
-    CODE_REVIEW = "code:review"
-    CODE_MERGE = "code:merge"
-
     # ── Deploy ──────────────────────────────────────────────
     DEPLOY_STAGING = "deploy:staging"
     DEPLOY_PRODUCTION = "deploy:production"
     DEPLOY_ROLLBACK = "deploy:rollback"
-
-    # ── Tool ────────────────────────────────────────────────
-    TOOL_SHELL_EXEC = "tool:shell_exec"
-    TOOL_NETWORK = "tool:network"
-    TOOL_DATABASE = "tool:database"
-    TOOL_SECRET_READ = "tool:secret:read"
 
     # ── Admin (user / organization / role management) ───────
     # Mirrors design §8.4 — added in change 2026-06-16-admin-org-role-center.
@@ -185,14 +178,11 @@ class Permission(StrEnum):
     def group(self) -> PermissionGroup:
         """Resolve the logical group for UI rendering.
 
-        Mirrors design §5.3. ``platform:audit:read`` is the lone AUDIT
-        special case; everything else keys off the ``<prefix>:`` portion
-        of the value.
+        Mirrors design §5.3. ``runtime`` 同时存在 workspace:read（子菜单）与
+        platform:admin（菜单管理），无法仅靠前缀区分，按完整 value 单独判定。
+        2026-10-08-rbac-dead-permissions-cleanup：platform:audit:read 死键删除
+        后 AUDIT 组随之移除，特判分支一并清理。
         """
-        if self is Permission.PLATFORM_AUDIT_READ:
-            return PermissionGroup.AUDIT
-        # runtime 同时存在 workspace:read（子菜单）与 platform:admin（菜单管理），
-        # 无法仅靠前缀区分，按完整 value 单独判定。
         if self is Permission.RUNTIME_READ:
             return PermissionGroup.WORKSPACE
         if self is Permission.RUNTIME_ADMIN:

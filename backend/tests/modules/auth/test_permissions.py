@@ -27,40 +27,27 @@ def test_permission_group_is_str_enum() -> None:
     assert issubclass(PermissionGroup, StrEnum)
 
 
-def test_permission_group_has_seven_members() -> None:
+def test_permission_group_has_six_members() -> None:
     members = list(PermissionGroup)
-    assert len(members) == 7
+    assert len(members) == 6
     expected = {
         PermissionGroup.PLATFORM,
         PermissionGroup.ADMIN,
         PermissionGroup.WORKSPACE,
         PermissionGroup.AGENT,
         PermissionGroup.CHANGE,
-        PermissionGroup.AUDIT,
         PermissionGroup.PPM,
     }
     assert set(members) == expected
 
 
-def test_permission_count_is_72() -> None:
-    """46 历史 + 17 PPM_* 菜单/读 + daemon:borrow + llm_provider:read + weekly-plan = 66。
-
-    cbd258eb/1f5e6ebe 菜单 unique-key 扩容回升到 63；change
-    2026-07-25-daemon-borrow-for-business task-03 / D-006@v2 再加
-    ``DAEMON_BORROW``（业务人员借用开发人员 daemon 回退授权）→ 64；
-    change 2026-07-29-sidebar-menu-restructure task-01 / D-002@v1 再加
-    ``LLM_PROVIDER_READ``（前端「我的供应商」菜单显隐 + 角色分配）→ 65；
-    change 2026-07-30-sidebar-menu-restructure task-06 / ql-20260730-005 再加
-    ``PPM_WEEKLY_PLAN_VIEW``（实施计划汇总独立菜单权限）→ 66；
-    change 2026-09-17-knowledge-precipitation task-02 / FR-02 再加
-    ``KNOWLEDGE_WRITE``（知识库写权限，管理员/owner 播种走 migration
-    20260917104400）→ 67；
-    change 2026-09-18-web-menu-management task-01 / FR-01 再加
-    ``SKILL_READ``/``MCP_READ``/``AGENT_PROFILE_READ``/``AGENT_SESSION_READ``
-    （4 个常显菜单独立读权限，task-03 种子迁移授全部现存角色保现状可见）
-    与 ``MENU_ADMIN``（菜单管理页 /admin/menus 与覆盖写端点门控）→ 72。
+def test_permission_count_is_58() -> None:
+    """72 历史 + 增量见前注；2026-10-08-rbac-dead-permissions-cleanup 删除
+    14 个零端点消费死权限（code:*×4 / tool:*×4 / task:cancel / task:approve /
+    platform:audit:read / platform:billing / component:read / change:update，
+    AUDIT 组随 platform:audit:read 移除）→ 58。
     """
-    assert len(list(Permission)) == 72
+    assert len(list(Permission)) == 58
 
 
 @pytest.mark.parametrize(
@@ -74,10 +61,7 @@ def test_permission_count_is_72() -> None:
         (Permission.ORGANIZATION_WRITE, PermissionGroup.ADMIN),
         (Permission.ROLE_READ, PermissionGroup.ADMIN),
         (Permission.ROLE_WRITE, PermissionGroup.ADMIN),
-        # Historical platform — audit special-case
-        (Permission.PLATFORM_AUDIT_READ, PermissionGroup.AUDIT),
         (Permission.PLATFORM_ADMIN, PermissionGroup.PLATFORM),
-        (Permission.PLATFORM_BILLING, PermissionGroup.PLATFORM),
         # ql-004: platform management submenu admin perms
         (Permission.SETTINGS_ADMIN, PermissionGroup.PLATFORM),
         (Permission.API_KEY_ADMIN, PermissionGroup.PLATFORM),
@@ -85,7 +69,7 @@ def test_permission_count_is_72() -> None:
         # ql-005: git_identity admin perm
         (Permission.GIT_IDENTITY_ADMIN, PermissionGroup.PLATFORM),
         # ql-003: workspace submenu independent read perms
-        (Permission.COMPONENT_READ, PermissionGroup.WORKSPACE),
+        # （2026-10-08-rbac-dead-permissions-cleanup：component:read 删除）
         (Permission.TOPOLOGY_READ, PermissionGroup.WORKSPACE),
         (Permission.SCAN_DOCS_READ, PermissionGroup.WORKSPACE),
         (Permission.RUNTIME_READ, PermissionGroup.WORKSPACE),
@@ -99,10 +83,8 @@ def test_permission_count_is_72() -> None:
         (Permission.WORKSPACE_ADMIN, PermissionGroup.WORKSPACE),
         # Change
         (Permission.CHANGE_CREATE, PermissionGroup.CHANGE),
-        # Agent (task/code/tool/deploy)
+        # Agent (task/deploy；2026-10-08 清理删 code:*/tool:* 死键)
         (Permission.TASK_READ, PermissionGroup.AGENT),
-        (Permission.CODE_REVIEW, PermissionGroup.AGENT),
-        (Permission.TOOL_NETWORK, PermissionGroup.AGENT),
         (Permission.DEPLOY_PRODUCTION, PermissionGroup.AGENT),
         # task-03: daemon 前缀归 AGENT 组（业务借用回退授权）
         (Permission.DAEMON_BORROW, PermissionGroup.AGENT),
@@ -140,13 +122,38 @@ def test_new_permission_string_values() -> None:
 
 
 def test_existing_permission_string_values_unchanged() -> None:
-    """Sanity: historical 25 entries retain their original string values."""
+    """Sanity: historical entries retain their original string values."""
     assert Permission.PLATFORM_ADMIN.value == "platform:admin"
     assert Permission.WORKSPACE_ADMIN.value == "workspace:admin"
     assert Permission.CHANGE_CREATE.value == "change:create"
     assert Permission.TASK_RUN_AGENT.value == "task:run_agent"
     assert Permission.DEPLOY_ROLLBACK.value == "deploy:rollback"
-    assert Permission.TOOL_SECRET_READ.value == "tool:secret:read"
+
+
+def test_dead_permissions_removed_from_catalog() -> None:
+    """2026-10-08-rbac-dead-permissions-cleanup：14 个零端点消费死键出目录。
+
+    删除后这些字符串不得再以 Permission 成员存在（角色写路径 list[Permission]
+    校验域随之收窄；存量授权行由迁移 20261008100000 清理）。
+    """
+    values = {p.value for p in Permission}
+    for dead in (
+        "code:read",
+        "code:write",
+        "code:review",
+        "code:merge",
+        "tool:shell_exec",
+        "tool:network",
+        "tool:database",
+        "tool:secret:read",
+        "task:cancel",
+        "task:approve",
+        "platform:audit:read",
+        "platform:billing",
+        "component:read",
+        "change:update",
+    ):
+        assert dead not in values
 
 
 def test_daemon_borrow_permission_value() -> None:
@@ -352,3 +359,78 @@ def test_knowledge_write_migration_downgrade_deletes_rows_keeps_roles() -> None:
             mod.downgrade()
         assert conn.execute(sa.text("SELECT COUNT(*) FROM role_permissions")).scalar() == 0
         assert conn.execute(sa.text("SELECT COUNT(*) FROM roles")).scalar() == 0
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-08-rbac-dead-permissions-cleanup：死权限授权行清理迁移
+# （20261008100000_drop_dead_rbac_permissions）。范式沿用上方
+# knowledge_write 迁移测试：MigrationContext + Operations 在 SQLite 内存库
+# 上回放真实 upgrade()/downgrade()。
+# ---------------------------------------------------------------------------
+
+DROP_DEAD_REVISION_ID = "20261008100000"
+
+
+def _load_drop_dead_migration():
+    """按 revision ID 在文件名里匹配导入迁移模块（borrow-shared 测试范式）。"""
+    backend_root = Path(__file__).resolve().parent.parent.parent.parent
+    versions_dir = backend_root / "migrations" / "versions"
+    for f in os.listdir(str(versions_dir)):
+        if f.endswith(".py") and DROP_DEAD_REVISION_ID in f and f != "__init__.py":
+            return importlib.import_module(f"migrations.versions.{f[:-3]}")
+    raise ImportError(f"No migration found for revision {DROP_DEAD_REVISION_ID}")
+
+
+def test_drop_dead_rbac_migration_metadata() -> None:
+    mod = _load_drop_dead_migration()
+    assert mod.revision == DROP_DEAD_REVISION_ID
+    assert mod.down_revision == "20261006200000"
+    assert len(mod.DROPPED_DEAD_PERMISSIONS) == 16
+    # 16 字符串互不重复
+    assert len(set(mod.DROPPED_DEAD_PERMISSIONS)) == 16
+
+
+def test_drop_dead_rbac_migration_upgrade_deletes_and_downgrade_replants() -> None:
+    """upgrade 删 16 死字符串全量行（其它权限保留，幂等）；downgrade 对称
+    回植 platform_admin 各 1 行（其它角色不回植，角色缺失安全 no-op）。"""
+    mod = _load_drop_dead_migration()
+    engine = sa.create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        _bootstrap_roles_tables_sqlite(conn)
+        admin_id = _seed_role(conn, "platform_admin", ["platform:admin", "code:read"])
+        owner_id = _seed_role(
+            conn, "workspace_owner", ["workspace:read", "task:approve", "component:admin"]
+        )
+
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            mod.upgrade()
+            # 幂等：重跑不抛
+            mod.upgrade()
+
+        def perms_of(rid) -> set[str]:
+            stmt = sa.text(
+                "SELECT permission FROM role_permissions WHERE role_id = :rid"
+            ).bindparams(rid=rid)
+            return {r[0] for r in conn.execute(stmt)}
+
+        # 死行全删、存活权限保留
+        assert perms_of(admin_id) == {"platform:admin"}
+        assert perms_of(owner_id) == {"workspace:read"}
+
+        with Operations.context(ctx):
+            mod.downgrade()
+
+        # 回植：platform_admin 持全部 16 键各 1 行（含原有 platform:admin）
+        admin_perms = perms_of(admin_id)
+        assert admin_perms == {"platform:admin", *mod.DROPPED_DEAD_PERMISSIONS}
+        assert len(admin_perms) == 17
+        # 其它角色不回植
+        assert perms_of(owner_id) == {"workspace:read"}
+
+        # 角色表缺失时 downgrade 安全 no-op
+        conn.execute(sa.text("DELETE FROM role_permissions"))
+        conn.execute(sa.text("DELETE FROM roles"))
+        with Operations.context(ctx):
+            mod.downgrade()
+        assert conn.execute(sa.text("SELECT COUNT(*) FROM role_permissions")).scalar() == 0

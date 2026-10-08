@@ -77,7 +77,7 @@ def test_business_member_seed_constant_contents() -> None:
     assert "daemon:borrow" in perms
     assert "workspace:read" in perms
     # 不带全量 agent / code 写权限——business_member 无自有 daemon，仅触发+借用
-    assert "code:write" not in perms
+    assert "deploy:production" not in perms
     assert "workspace:write" not in perms
     assert "workspace:admin" not in perms
 

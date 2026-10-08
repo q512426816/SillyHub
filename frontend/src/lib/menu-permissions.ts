@@ -119,12 +119,10 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     matchPattern: "/components",
     // 2026-10-08-menu-permissions-page-audit：补 workspace:read——组件列表端点
     // GET /api/workspaces/{ws}/components（workspace/router.py list_components）
-    // 鉴权 workspace:read，此前只挂 component:read 的用户看得到菜单但页面 403；
-    // component:read 无后端端点消费，保留为菜单门控主 key。
-    permissions: [
-      { key: "component:read", name: "组件查看" },
-      { key: "workspace:read", name: "工作区查看" },
-    ],
+    // 鉴权 workspace:read。
+    // 2026-10-08-rbac-dead-permissions-cleanup：component:read 死键删除（零端点
+    // 消费，ql-003 接线意图从未落地），卡片收敛为页面真实所需。
+    permissions: [{ key: "workspace:read", name: "组件查看" }],
   },
   {
     section: "workspace",
@@ -145,13 +143,18 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     // 2026-10-08-menu-permissions-page-audit：补 task:read——变更任务列表/看板/
     // 详情子页（GET /api/workspaces/{ws}/tasks/{tid}、/changes/{cid}/tasks/board、
     // /tasks/reparse，task/router.py 全部 require TASK_READ）。
+    // 2026-10-08-rbac-dead-permissions-cleanup：change:update 死键删除（变更
+    // 编辑端点走 CHANGE_CREATE + owner 判定，零消费）；补活权限 task:create
+    // （POST /api/workspaces/{ws}/tasks）与 task:assign（POST .../tasks/{tid}/
+    // transition）——有真实端点但无页面按钮（API 面），挂本卡使其可配。
     permissions: [
       { key: "change:create", name: "变更创建" },
       { key: "change:read", name: "变更查看" },
-      { key: "change:update", name: "变更更新" },
       { key: "change:approve", name: "变更审批" },
       { key: "change:archive", name: "变更归档" },
       { key: "task:read", name: "任务查看" },
+      { key: "task:create", name: "任务创建" },
+      { key: "task:assign", name: "任务转派" },
     ],
   },
   {
@@ -354,10 +357,10 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     // 2026-10-08-menu-permissions-page-audit：补 task:read + task:run_agent——
     // 审批页除批/拒（tool_gateway change:approve）外还拉 agent 会话列表与待处理
     // 对话框（agent/router /workspaces/{ws}/agent-sessions、/dialogs 均 TASK_READ）
-    // 与会话权限面板（daemon 会话端点族 task:run_agent）。task:approve 无后端
-    // 端点消费，保留存量不删。
+    // 与会话权限面板（daemon 会话端点族 task:run_agent）。
+    // 2026-10-08-rbac-dead-permissions-cleanup：task:approve 死键删除（零端点
+    // 消费——审批动作实际鉴权 change:approve）。
     permissions: [
-      { key: "task:approve", name: "任务审批" },
       { key: "change:approve", name: "变更审批" },
       { key: "task:read", name: "任务查看" },
       { key: "task:run_agent", name: "会话运行" },
@@ -372,17 +375,11 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     matchPattern: "/audit",
     // 2026-10-08-menu-permissions-page-audit：补 change:read——工作区审计日志
     // GET /api/workspaces/{ws}/audit（workflow/router.py list_audit_logs）鉴权
-    // CHANGE_READ，此前持 platform:audit:read 看得到菜单但页面 403、持 change:read
-    // 打得开页面却看不到菜单（双向错位）。platform:audit:read 无后端端点消费
-    // （死目录 key），保留存量配置不删。
-    permissions: [
-      {
-        key: "platform:audit:read",
-        name: "平台审计读取",
-        description: "跨工作空间的平台级审计日志访问",
-      },
-      { key: "change:read", name: "变更查看" },
-    ],
+    // CHANGE_READ，此前持 platform:audit:read 看得到菜单但页面 403、持
+    // change:read 打得开页面却看不到菜单（双向错位）。
+    // 2026-10-08-rbac-dead-permissions-cleanup：platform:audit:read 死键删除
+    // （全后端零端点消费），卡片收敛为页面真实所需。
+    permissions: [{ key: "change:read", name: "审计查看" }],
   },
   {
     section: "governance",

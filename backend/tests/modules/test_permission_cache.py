@@ -131,7 +131,7 @@ async def test_permissions_roundtrip_all_scopes(monkeypatch: pytest.MonkeyPatch)
     ws_id = uuid.uuid4()
     plat = {"platform:admin", "user:read"}
     all_perms = {"workspace:read", "change:create"}
-    ws_perms = {"code:read", "task:read"}
+    ws_perms = {"deploy:staging", "task:read"}
 
     await set_cached_permissions(uid, plat, scope="platform")
     await set_cached_permissions(uid, all_perms, scope="all")

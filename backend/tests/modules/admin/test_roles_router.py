@@ -69,7 +69,7 @@ async def test_create_role_success(client: AsyncClient, auth_headers):
         "description": "Read + review",
         "permission_keys": [
             Permission.TASK_READ.value,
-            Permission.CODE_REVIEW.value,
+            Permission.DEPLOY_PRODUCTION.value,
         ],
     }
     resp = await client.post("/api/admin/roles", json=payload, headers=auth_headers)
@@ -79,7 +79,7 @@ async def test_create_role_success(client: AsyncClient, auth_headers):
     assert data["is_system"] is False
     assert data["is_active"] is True
     assert sorted(data["permissions"]) == sorted(
-        [Permission.TASK_READ.value, Permission.CODE_REVIEW.value]
+        [Permission.TASK_READ.value, Permission.DEPLOY_PRODUCTION.value]
     )
     assert data["user_count"] == 0
 
@@ -149,7 +149,7 @@ async def test_update_role_replaces_permissions(client: AsyncClient, auth_header
             "name": "Dev Updated",
             "permission_keys": [
                 Permission.TASK_READ.value,
-                Permission.CODE_WRITE.value,
+                Permission.DEPLOY_ROLLBACK.value,
             ],
         },
         headers=auth_headers,
@@ -158,7 +158,7 @@ async def test_update_role_replaces_permissions(client: AsyncClient, auth_header
     data = resp.json()
     assert data["name"] == "Dev Updated"
     assert sorted(data["permissions"]) == sorted(
-        [Permission.TASK_READ.value, Permission.CODE_WRITE.value]
+        [Permission.TASK_READ.value, Permission.DEPLOY_ROLLBACK.value]
     )
 
     bound_count = (

@@ -373,11 +373,10 @@ const PERMISSION_NAME_MAP: Record<string, string> = {
     ),
   ),
   // ql-20260801-002：系统/旧权限 key（不在 picker 可选范围,menu-permissions 无定义）补中文 fallback。
-  "component:admin": "组件管理",
-  "component:write": "组件编辑",
+  // 2026-10-08-rbac-dead-permissions-cleanup：component:admin/write、
+  // platform:billing 死键删除（迁移 20261008100000 清存量行），fallback 移除。
   "daemon:borrow": "daemon 借用",
   "platform:admin": "平台管理",
-  "platform:billing": "平台计费",
   "ppm:plan:read": "计划查看",
   "ppm:problem-change:read": "问题变更查看",
   "ppm:problem:read": "问题查看",

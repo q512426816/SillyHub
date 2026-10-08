@@ -1873,9 +1873,10 @@ export interface paths {
          * Get Change Patch File
          * @description 归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。
          *
-         *     卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch`` 并切出该
-         *     文件的 diff 段——冻结在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，
-         *     两者不可互替）。``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
+         *     卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch``（缺件回退
+         *     ``scope-audit.patch``——厚流程归档只落快照留档）并切出该文件的 diff 段——冻结
+         *     在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，两者不可互替）。
+         *     ``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
          *     绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
          *     不抛 404（读不到留档是展示面降级，不是资源不存在）。
          */
@@ -13874,8 +13875,9 @@ export interface components {
          * ChangePatchFileRead
          * @description 归档留档单文件 diff 切片（GET /changes/{cid}/assets/patch-file）。
          *
-         *     展示面 fail-open：``change.patch`` 缺失、文件不在 patch 内、切片超上限一律以
-         *     ``note``/``truncated`` 说明而非报错（读不到留档不是变更详情的错误面）。
+         *     展示面 fail-open：``change.patch``（缺件回退 ``scope-audit.patch``）缺失、
+         *     文件不在留档内、切片超上限一律以 ``note``/``truncated`` 说明而非报错
+         *     （读不到留档不是变更详情的错误面）。
          */
         ChangePatchFileRead: {
             /** Path */
@@ -13892,11 +13894,12 @@ export interface components {
         };
         /**
          * ChangePatchMeta
-         * @description patch 留档统计（change-patch.json 的 totals + files 投影；无留档 → 整体 None）。
+         * @description patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。
          *
-         *     ``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 是同一 JSON
-         *     ``files`` 数组的清单投影（2026-09-25-change-detail-assets-usability / FR-04 起
-         *     供卡面列出具体改动面），超上限时 ``files_truncated=True`` 显式标注。
+         *     ``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 的清单投影
+         *     按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面
+         *     列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退
+         *     形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。
          */
         ChangePatchMeta: {
             /** Files */
@@ -20041,7 +20044,7 @@ export interface components {
          * Permission
          * @enum {string}
          */
-        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "daemon:borrow" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
+        Permission: "platform:admin" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "daemon:borrow" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
         /**
          * PermissionResponseRead
          * @description REST response body for POST /sessions/{id}/permissions/{req}/response.
