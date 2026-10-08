@@ -69,9 +69,12 @@ async def test_stale_run_failed_branch_writes_error_code(db_session) -> None:
     await db_session.refresh(run)
     assert run.status == "failed"
     assert run.error_code == "SERVICE_RESTART_INTERRUPTED"
+    # 2026-10-08-backend-restart-fake-failed（评审 P3）：reason 文案兼顾复扫
+    # 场景——清理不只发生在后端重启，延迟复扫发现 daemon 停止上报同样走此
+    # 分支；finished_by 随之改 stale_run_cleanup。
     assert run.error_detail == {
-        "reason": "backend service restarted while run was active",
-        "finished_by": "startup_cleanup",
+        "reason": "no daemon activity within grace window (startup cleanup / deferred recheck)",
+        "finished_by": "stale_run_cleanup",
     }
     assert run.exit_code == -1
 

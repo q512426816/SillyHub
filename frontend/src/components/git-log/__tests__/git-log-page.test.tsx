@@ -1,11 +1,12 @@
 /**
  * task-06：Git 日志页冒烟测试（含 WorkspaceTabs 注册断言）。
  *
- * 覆盖（acceptance「TABS 增至 15 项」+「空态卡/三降级卡分发」）：
+ * 覆盖（acceptance「TABS 增至 15 项」+「空态卡/三降级卡分发」；2026-10-08
+ * platform-knowledge-graph task-08 知识图谱页签插入后 TABS 增至 16 项，数量钉跟移）：
  * 1. git_mode=no_git → 空态卡（探测说明文案）+ 工具栏（分支下拉/作者输入/刷新）；
  * 2. 正常数据 → 列表渲染 + 副标题「已加载 N 条」+ 加载更多（skip 递增翻页）；
  * 3. 502 查询错误 → 三降级卡（daemon 离线中文文案）；
- * 4. WorkspaceTabs 含第 15 项「Git 日志」（纯三字段，path=/git-log，末位），
+ * 4. WorkspaceTabs 含第 16 项「Git 日志」（纯三字段，path=/git-log，末位），
  *    当前路径高亮（explorer-page.test.tsx 先例形态照抄）。
  *
  * 依据：tasks/task-06.md acceptance、design.md §5.4 / §7.4。
@@ -331,7 +332,7 @@ describe("Git 日志页正常态", () => {
 // ── WorkspaceTabs 注册（explorer-page.test.tsx 先例照抄）──────────────
 
 describe("WorkspaceTabs「Git 日志」标签（task-06）", () => {
-  it("TABS 增至 15 项，「Git 日志」末位且 href 为 /git-log", () => {
+  it("TABS 增至 16 项，「Git 日志」末位且 href 为 /git-log", () => {
     render(
       <WorkspaceTabs workspaceId="ws-1">
         <div />
@@ -339,7 +340,7 @@ describe("WorkspaceTabs「Git 日志」标签（task-06）", () => {
     );
 
     const links = screen.getAllByRole("link");
-    expect(links).toHaveLength(15);
+    expect(links).toHaveLength(16);
     const labels = links.map((a) => a.textContent);
     const gitLogIdx = labels.indexOf("Git 日志");
     expect(gitLogIdx).toBe(labels.length - 1);

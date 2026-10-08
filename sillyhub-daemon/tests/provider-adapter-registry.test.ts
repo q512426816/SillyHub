@@ -43,7 +43,7 @@ const testsDir = dirname(fileURLToPath(import.meta.url));
 const daemonRoot = resolve(testsDir, '..');
 const repoRoot = resolve(daemonRoot, '..');
 
-/** backend agent_kind 词表源文件（Literal 声明在 schema.py:22）。 */
+/** backend agent_kinds 词表源文件（list Literal 声明，见 readBackendAgentKindVocab 注释）。 */
 const BACKEND_SCHEMA_PATH = join(
   repoRoot,
   'backend',
@@ -62,7 +62,11 @@ const BACKEND_SCHEMA_PATH = join(
 const API_FORMAT_VOCAB: readonly string[] = ['anthropic', 'openai_chat'];
 
 /**
- * 读 backend agent_kind Literal 词表（源文件读取式解析，不跨语言 import）。
+ * 读 backend agent_kinds Literal 词表（源文件读取式解析，不跨语言 import）。
+ *
+ * 2026-10-06-provider-multi-agent-kind：字段单数 `agent_kind: Literal[...]` 改
+ * 复数 `agent_kinds: list[Literal[...]]`（一供应商多 kind），正则锚随形态更新
+ * ——仍取首个声明（Create 块必填形，schema.py 两处同词表）。
  *
  * 失败语义响亮：文件缺失 / Literal 声明不匹配 / 解析为空都直接抛错（防哑绿
  * ——「找不到词表」绝不能伪装成「词表为空子集恒真」）。
@@ -72,16 +76,16 @@ function readBackendAgentKindVocab(): string[] {
     throw new Error(`backend schema 源文件缺失: ${BACKEND_SCHEMA_PATH}（对账前提）`);
   }
   const text = readFileSync(BACKEND_SCHEMA_PATH, 'utf-8');
-  const literal = /agent_kind\s*:\s*Literal\[([^\]]*)\]/.exec(text);
+  const literal = /agent_kinds\s*:\s*list\[Literal\[([^\]]*)\]\]/.exec(text);
   if (literal === null) {
     throw new Error(
-      `未在 ${BACKEND_SCHEMA_PATH} 找到 agent_kind Literal 声明（词表锚点漂移，检查解析器与源）`,
+      `未在 ${BACKEND_SCHEMA_PATH} 找到 agent_kinds list Literal 声明（词表锚点漂移，检查解析器与源）`,
     );
   }
   const vocab = [...literal[1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
   if (vocab.length === 0) {
     throw new Error(
-      `agent_kind Literal 词表解析为空: ${BACKEND_SCHEMA_PATH}（词表不可能为空，解析器失配）`,
+      `agent_kinds Literal 词表解析为空: ${BACKEND_SCHEMA_PATH}（词表不可能为空，解析器失配）`,
     );
   }
   return vocab;

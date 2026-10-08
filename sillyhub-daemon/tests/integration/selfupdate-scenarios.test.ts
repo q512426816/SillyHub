@@ -391,7 +391,7 @@ describe('task-08 SELF_UPDATE 安全层四路径集成回归', () => {
       await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
       expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
       const first = h.heartbeatMock.mock.calls[0]!;
-      expect(first.length).toBe(10);
+      expect(first.length).toBe(11); // task-02 machine-id 尾参使平铺形态 10→11（d6fabf408）
       expect(first[3]).toEqual({
         reason: 'disk_change',
         current_version: 'cur-p4',
@@ -408,7 +408,7 @@ describe('task-08 SELF_UPDATE 安全层四路径集成回归', () => {
       expect(await h.daemon.readPendingUpdate()).toBeNull();
       await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
       const second = h.heartbeatMock.mock.calls[1]!;
-      expect(second.length).toBe(10); // ql-20260909：心跳 10 参平铺形态（同上注）
+      expect(second.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
       expect(second[3]).toBeUndefined();
     });
   });
