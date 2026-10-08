@@ -1323,7 +1323,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-04-handoff-doc-kind-contract:flow:测试绑定FR-01
-  tests: test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_sections_and_dedup」
+  tests: backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_sections_and_dedup」
   reason: spec
   state: candidate
   discovery: machine
@@ -1344,7 +1344,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-04-handoff-doc-kind-contract:flow:测试绑定FR-02
-  tests: test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_truncated_tool_input_regex_fallback」
+  tests: backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_truncated_tool_input_regex_fallback」
   reason: spec
   state: candidate
   discovery: machine
@@ -1365,7 +1365,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-04-handoff-doc-kind-contract:flow:测试绑定FR-03
-  tests: test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestHandoffEndToEnd::test_handoff_doc_injected」
+  tests: backend/app/modules/daemon/tests/test_takeover_handoff.py「TestHandoffEndToEnd::test_handoff_doc_injected」
   reason: spec
   state: candidate
   discovery: machine
@@ -1386,7 +1386,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-04-handoff-doc-kind-contract:flow:测试绑定FR-04
-  tests: test/backend/app/modules/daemon/tests/test_takeover_handoff.py
+  tests: backend/app/modules/daemon/tests/test_takeover_handoff.py
   reason: spec
   state: candidate
   discovery: machine
@@ -1407,7 +1407,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-04-handoff-op-detail:flow:测试绑定FR-01
-  tests: test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_sections_and_dedup」
+  tests: backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_sections_and_dedup」
   reason: spec
   state: candidate
   discovery: machine
@@ -1428,7 +1428,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-04-handoff-op-detail:flow:测试绑定FR-02
-  tests: test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_truncated_tool_input_regex_fallback」
+  tests: backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_truncated_tool_input_regex_fallback」
   reason: spec
   state: candidate
   discovery: machine
@@ -1449,7 +1449,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-04-handoff-op-detail:flow:测试绑定FR-03
-  tests: test/backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_sections_and_dedup」
+  tests: backend/app/modules/daemon/tests/test_takeover_handoff.py「TestBuildHandoffPrompt::test_sections_and_dedup」
   reason: spec
   state: candidate
   discovery: machine
@@ -1470,7 +1470,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-04-handoff-op-detail:flow:测试绑定FR-04
-  tests: test/backend/app/modules/daemon/tests/test_takeover_handoff.py
+  tests: backend/app/modules/daemon/tests/test_takeover_handoff.py
   reason: spec
   state: candidate
   discovery: machine

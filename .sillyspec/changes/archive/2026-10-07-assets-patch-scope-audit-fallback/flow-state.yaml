@@ -1,0 +1,44 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive:
+  events:
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  厚流程归档只有 scope-audit.json/patch 没有 change-patch.json，沉淀资产·归档留档 patch 块整块不渲染（assets._read_patch_meta 只认
+  change-patch.json）；缺陷记录见 docs/sillyspec/thin-flow-done-no-scope-audit-snapshot.md 镜像缺口一节，本次落地平台读侧回退。
+
+
+  成功标准：
+
+  - 归档目录无 change-patch.json 但有 scope-audit.json 时，归档留档 patch 块出数：files/additions/deletions 取 totals，file_list 取
+  rows[].path，patch_status/saved_at 取快照同名字段
+
+  - 该形态下点文件看 diff 从 scope-audit.patch 切片（复用既有切片函数），弹窗可看
+
+  - 两份留档都缺失时 patch 仍为 None 且 diff 端点 note 说明缺两份留档（fail-open 语义保留）
+
+  - change-patch.json 存在时行为与现状完全一致（thin 形态回归不破）
+
+  - assets 模块聚焦测试通过
+autopilot: true
+baseline_commit: 9c8f9d8eb5f4e4c13c1d39998d6e8ba006791568
+updatedAt: '2026-10-08T00:36:50.046Z'
+baseline_sha256: d9399462875a5203b82a017ff297ce2eb4d3717d120ce3ab5c3be6137832d857
+autopilot_ticked: 5
+gate_summary: >-
+  test: passed ← module[]+deps(py15+jsx6)+fr(10)（92.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008003638\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（9.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008003638\test-result.json｜门文件
+  15 个
+

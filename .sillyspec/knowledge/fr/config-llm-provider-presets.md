@@ -19,7 +19,7 @@ created_at: 2026-10-05T17:37:00.596Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-06-opencode-go-direct-anthropic:flow:测试绑定FR-01
-  tests: test/frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts「opencode_go auth_field 为 ANTHROPIC_API_KEY（/v1/messages 仅认 x-api-key）」
+  tests: frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts「opencode_go auth_field 为 ANTHROPIC_API_KEY（/v1/messages 仅认 x-api-key）」
   reason: spec
   state: candidate
   discovery: machine
@@ -38,7 +38,7 @@ created_at: 2026-10-05T17:37:00.596Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-06-opencode-go-direct-anthropic:flow:测试绑定FR-02
-  tests: test/frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts「opencode_go 4 角色槽与主模型全填 deepseek-v4.1-flash」
+  tests: frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts「opencode_go 4 角色槽与主模型全填 deepseek-v4.1-flash」
   reason: spec
   state: candidate
   discovery: machine
@@ -64,7 +64,7 @@ created_at: 2026-10-05T17:37:00.596Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-06-opencode-go-direct-anthropic:flow:测试绑定FR-04
-  tests: test/frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts「opencode_go 仍为 anthropic（与 opencode_zen_openai 区分）」
+  tests: frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts「opencode_go 仍为 anthropic（与 opencode_zen_openai 区分）」
   reason: spec
   state: candidate
   discovery: machine

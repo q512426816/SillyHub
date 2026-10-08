@@ -10,9 +10,11 @@ spec 树镜像；CLI 侧无结构化查询命令、前端自行解析有 N+1 与
 - 决策蒸馏条目：``knowledge/decisions/*.md`` 同构（``## D-NNN@N 标题``；
   无「变更：」行的条目跳过——CLI 容错面）；
 - 测试绑定：归档变更目录 ``test-trace.json`` 直读（文件本身 per-change）；
-- patch 留档：``change-patch.json`` 存在才读（存量归档无此件 → None 容错，
-  该留档是 CLI 晚于多数归档的新功能）；``change.patch`` 的单文件切片供卡面
-  点开看具体改动（2026-09-25-change-detail-assets-usability / FR-04）；
+- patch 留档：``change-patch.json`` 存在才读（存量归档无此件 → 回退读
+  ``scope-audit.json``——厚流程 execute --done 只落快照不冻 patch 留档，
+  通道不对称见 docs/sillyspec/thin-flow-done-no-scope-audit-snapshot.md；
+  两份都缺 → None 容错）；单文件切片优先 ``change.patch``、缺件回退
+  ``scope-audit.patch``，供卡面点开看具体改动；
 - delta 摘要：``delta.md`` 标题行 + ``## Before``/``## Delta`` 段行数。
 
 镜像根获取对齐 ``knowledge/service.py::_spec_content_root`` 先例、变更目录
@@ -213,19 +215,41 @@ def _read_test_rows(
     return rows
 
 
-def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
-    """读 ``change-patch.json`` 的 totals + files 投影（存在才读 → 无此件 None）。"""
-    path = change_dir / "change-patch.json"
+def _read_json_dict(path: Path) -> dict | None:
+    """读 JSON 文件为 dict（缺失/损坏/非对象 → None，fail-open）。"""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        log.info("change.assets_patch_unavailable", path=str(path), error=str(exc))
+        log.info("change.assets_json_unavailable", file=str(path), error=str(exc))
         return None
-    if not isinstance(data, dict):
-        return None
+    return data if isinstance(data, dict) else None
+
+
+def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
+    """读 ``change-patch.json`` 的 totals + files 投影；缺件回退 ``scope-audit.json``。
+
+    回退（2026-10-07-assets-patch-scope-audit-fallback）：厚流程 execute --done
+    只落 scope-audit.json/patch、不冻 change-patch.json——回退时 totals/patchStatus/
+    savedAt 同构直取，file_list 改从 ``rows[].path`` 投影。两份都缺/损坏 → None。
+    """
+    data = _read_json_dict(change_dir / "change-patch.json")
+    file_list: list[str] = []
+    if data is not None:
+        raw_files = data.get("files")
+        if isinstance(raw_files, list):
+            file_list = [f for f in raw_files if isinstance(f, str)]
+    else:
+        data = _read_json_dict(change_dir / "scope-audit.json")
+        if data is None:
+            return None
+        raw_rows = data.get("rows")
+        if isinstance(raw_rows, list):
+            file_list = [
+                row["path"]
+                for row in raw_rows
+                if isinstance(row, dict) and isinstance(row.get("path"), str)
+            ]
     totals = data.get("totals") or {}
-    raw_files = data.get("files")
-    file_list = [f for f in raw_files if isinstance(f, str)] if isinstance(raw_files, list) else []
     return ChangePatchMeta(
         files=totals.get("files"),
         additions=totals.get("additions"),
@@ -317,21 +341,33 @@ def slice_patch_for_file(patch_text: str, rel_path: str) -> str | None:
 
 
 def _read_patch_file_diff(change_dir: Path, rel_path: str) -> ChangePatchFileRead:
-    """读 ``change.patch`` 并切出目标文件段（缺件/未命中/超限 → note 或 truncated）。"""
-    path = change_dir / "change.patch"
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
-        log.info("change.assets_patch_file_unavailable", path=str(path), error=str(exc))
+    """读 ``change.patch``（缺件回退 ``scope-audit.patch``）并切出目标文件段。
+
+    两份留档分属 thin（flow done 冻 change-patch）与 heavy（execute --done 落
+    scope-audit）两通道，归档目录实际只会有其一；缺件/未命中/超限 → note 或
+    truncated（展示面 fail-open）。
+    """
+    text: str | None = None
+    source: str | None = None
+    for name in ("change.patch", "scope-audit.patch"):
+        path = change_dir / name
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            log.info("change.assets_patch_file_unavailable", file=str(path), error=str(exc))
+            continue
+        source = name
+        break
+    if text is None or source is None:
         return ChangePatchFileRead(
             path=rel_path,
-            note="本变更归档目录没有 change.patch 留档（该件是 CLI 晚于多数归档的新功能），无法比对具体改动。",
+            note="本变更归档目录没有 change.patch / scope-audit.patch 留档（通道留痕不对称的缺口形态），无法比对具体改动。",
         )
     sliced = slice_patch_for_file(text, rel_path)
     if sliced is None:
         return ChangePatchFileRead(
             path=rel_path,
-            note="该文件不在 change.patch 内（留档窗口外，或仅改了不纳入 patch 的面）。",
+            note=f"该文件不在 {source} 内（留档窗口外，或仅改了不纳入 patch 的面）。",
         )
     truncated = len(sliced) > _PATCH_FILE_MAX_CHARS
     return ChangePatchFileRead(

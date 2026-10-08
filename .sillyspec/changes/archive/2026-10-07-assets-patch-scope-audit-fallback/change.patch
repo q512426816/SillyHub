@@ -1,0 +1,471 @@
+diff --git a/backend/app/modules/change/tests/test_files_router.py b/backend/app/modules/change/tests/test_files_router.py
+index ee9827c8b..dde37a87e 100644
+--- a/backend/app/modules/change/tests/test_files_router.py
++++ b/backend/app/modules/change/tests/test_files_router.py
+@@ -53,10 +53,15 @@ async def workspace_with_changes(
+         list_resp = await client.get(f"/api/workspaces/{ws_id}/changes", headers=auth_headers)
+         items = list_resp.json()["items"]
+     assert len(items) > 0
++    # fixtures 含归档 change（changes/archive/2026-05-21-demo-archived——列表
++    # 默认 updated_at desc 排序，同刻 mtime 并列时归档行可能排首（CI Linux 稳定
++    # 复现）。本套件按「目录直挂 changes/<key>/」假设拼路径写读文件，归档
++    # change 实际在 archive/ 子树下会 FileNotFoundError——固定选活跃行。
++    active = next(it for it in items if it.get("location") == "active")
+     return {
+         "ws_id": ws_id,
+-        "change_id": items[0]["id"],
+-        "change_key": items[0]["change_key"],
++        "change_id": active["id"],
++        "change_key": active["change_key"],
+         "root": root,
+         "spec_root": str(spec_root),
+     }
+diff --git a/backend/app/modules/daemon/tests/test_attachment_pipeline.py b/backend/app/modules/daemon/tests/test_attachment_pipeline.py
+index 200a80221..08ae795bb 100644
+--- a/backend/app/modules/daemon/tests/test_attachment_pipeline.py
++++ b/backend/app/modules/daemon/tests/test_attachment_pipeline.py
+@@ -328,7 +328,10 @@ class TestGroupWrapperEquivalence:
+         assert exc_info.value.details == {"image_count": 0, "file_count": 6}
+ 
+     async def test_group_assembly_gate_basis_owner_and_member(self) -> None:
+-        """group 装配：gate 基准=群主属主 + 成员供应商/引擎，组装走共享核心。"""
++        """group 装配：gate 基准=群主属主 + 成员供应商/引擎，组装走共享核心。
++
++        D-003 群成员生效模型透传：``member.config_snapshot.model`` 作为
++        gate ``model_name`` 传入（无则 None 走主模型条目兜底）。"""
+         import app.modules.session_attachment.capability as capability_module
+         import app.modules.session_attachment.service as att_service
+         import app.modules.storage.factory as storage_factory
+@@ -340,12 +343,17 @@ class TestGroupWrapperEquivalence:
+                 user_id=user_id,
+                 session_llm_provider_id=session_llm_provider_id,
+                 agent_kind=agent_kind,
++                model_name=model_name,
+             )
+             return SimpleNamespace(supports_multimodal=True)
+ 
+         assemble_spy = AsyncMock(return_value=[{"deliver": "disk"}])
+         owner, member_provider_id = uuid.uuid4(), uuid.uuid4()
+-        member = SimpleNamespace(provider="claude", llm_provider_id=member_provider_id)
++        member = SimpleNamespace(
++            provider="claude",
++            llm_provider_id=member_provider_id,
++            config_snapshot={"model": "glm-4.7"},
++        )
+         with (
+             patch.object(capability_module, "resolve_session_gate", _fake_gate),
+             patch.object(storage_factory, "get_storage_backend", lambda: object()),
+@@ -361,10 +369,12 @@ class TestGroupWrapperEquivalence:
+         assert seen["user_id"] == owner  # 属主=群主（成员供应商行归属者）
+         assert seen["session_llm_provider_id"] == member_provider_id
+         assert seen["agent_kind"] == "claude"
++        assert seen["model_name"] == "glm-4.7"  # D-003 生效模型透传
+         assert assemble_spy.await_args.kwargs["supports_multimodal"] is True
+ 
+     async def test_group_assembly_member_provider_fallback_claude(self) -> None:
+-        """group 装配边界：成员 provider 缺省回落 ``claude``。"""
++        """group 装配边界：成员 provider 缺省回落 ``claude``；config_snapshot
++        非 dict（None）→ gate ``model_name=None`` 走主模型条目兜底。"""
+         import app.modules.session_attachment.capability as capability_module
+         import app.modules.session_attachment.service as att_service
+         import app.modules.storage.factory as storage_factory
+@@ -372,7 +382,7 @@ class TestGroupWrapperEquivalence:
+         seen: dict[str, object] = {}
+ 
+         async def _fake_gate(db, *, user_id, session_llm_provider_id, agent_kind, model_name=None):
+-            seen["agent_kind"] = agent_kind
++            seen.update(agent_kind=agent_kind, model_name=model_name)
+             return SimpleNamespace(supports_multimodal=False)
+ 
+         assemble_spy = AsyncMock(return_value=[])
+@@ -384,8 +394,9 @@ class TestGroupWrapperEquivalence:
+             await _assemble_group_inject_attachments(
+                 SimpleNamespace(_session=_FakeDB([])),
+                 [],
+-                member=SimpleNamespace(provider=None, llm_provider_id=None),
++                member=SimpleNamespace(provider=None, llm_provider_id=None, config_snapshot=None),
+                 owner_user_id=uuid.uuid4(),
+             )
+         assert seen["agent_kind"] == "claude"
++        assert seen["model_name"] is None  # D-003 无生效模型 → 兜底
+         assert assemble_spy.await_args.kwargs["supports_multimodal"] is False
+diff --git a/backend/app/modules/workspace/tests/test_archived_write_guard.py b/backend/app/modules/workspace/tests/test_archived_write_guard.py
+index 089ae4e57..13cf76722 100644
+--- a/backend/app/modules/workspace/tests/test_archived_write_guard.py
++++ b/backend/app/modules/workspace/tests/test_archived_write_guard.py
+@@ -335,11 +335,14 @@ async def test_session_interrupt_on_archived_workspace_returns_409(
+ async def test_tool_report_activation_on_archived_returns_409(
+     client: AsyncClient, db_session: AsyncSession
+ ) -> None:
+-    """归档区 tool_report 预会话首条消息（懒激活分支）→ 409（审计④-1）。
+-
+-    激活分支在 inject_session 内先于 _inject_into_session（守卫原所在）提前
+-    return——4d64cb28 提交信息声称覆盖激活分支但实际未拦（新测试的会话 origin
+-    缺省 chat，从未测到该分支），本用例坐实收口。
++    """归档区 tool_report 预会话首条消息 → 409（审计④-1）。
++
++    懒激活分支已退役（2026-09-30-tool-report-activation-wrong-machine
++    task-06 / D-006@v1）：未激活 tool_report 会话的 inject 一律 409
++    takeover_required 指引走分叉式接手，本端点零写。归档禁写性质由
++    写入口兜底——takeover 分叉经 create 链落库，归档守卫沿用
++    test_session_create_on_archived_returns_409 覆盖的
++    WorkspaceService.ensure_writable 口径。
+     """
+     user = await _create_user(db_session)
+     await _grant_platform_permission(db_session, user.id, Permission.TASK_RUN_AGENT)
+@@ -354,7 +357,7 @@ async def test_tool_report_activation_on_archived_returns_409(
+         headers=_headers(_token_for(user)),
+     )
+     assert resp.status_code == 409, resp.text
+-    assert resp.json()["code"] == "HTTP_409_WORKSPACE_ARCHIVED"
++    assert resp.json()["code"] == "HTTP_409_TOOL_REPORT_TAKEOVER_INVALID"
+ 
+ 
+ @pytest.mark.asyncio
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index 25edc83ac..de9e70b6d 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -95,11 +95,11 @@ class TestMigrationStructure:
+         cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+         heads = ScriptDirectory.from_config(cfg).get_heads()
+         assert len(heads) == 1, f"expected single head, got {heads}"
+-        # 链尾锚定：20261002010000（platform_agent_logs 用量快照五列，
+-        # 2026-10-02-change-center-token-usage）down_revision 接本迁移后 head 前移。
+-        assert (
+-            heads[0] == "20261003020000"
+-        )  # 2026-10-03-local-usage-segment-attribution 水位表成为新 head
++        # 链尾锚定：随主线新迁移接续前移——20261003020000（水位表，
++        # 2026-10-03-local-usage-segment-attribution）→ 20261006120000
++        # （provider_agent_kinds，2026-10-06-provider-multi-agent-kind）→
++        # 20261006200000（四旧列删/存量折算，2026-10-06-provider-model-list）。
++        assert heads[0] == "20261006200000"  # 2026-10-06-provider-model-list 迁移成为新 head
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index cf2d2544f..b870becf1 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -778,7 +778,11 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
+         output_tokens: 300,
+       }),
+     ]);
+-    mocks.listProviders.mockResolvedValue([{ id: "lp-1", name: "GLM 中转" }]);
++    // agent_kinds 为 LlmProviderRead 必填键（SessionConfigBar 供应商下拉按
++    // 引擎过滤 p.agent_kinds.includes(...)——缺键崩渲染，whoLine 随整页失挂）。
++    mocks.listProviders.mockResolvedValue([
++      { id: "lp-1", name: "GLM 中转", agent_kinds: ["claude"] },
++    ]);
+ 
+     renderPage();
+     await selectDefaultSession();
+diff --git a/frontend/src/components/__tests__/delete-change-confirm.test.tsx b/frontend/src/components/__tests__/delete-change-confirm.test.tsx
+index d7678190a..e3d9cec30 100644
+--- a/frontend/src/components/__tests__/delete-change-confirm.test.tsx
++++ b/frontend/src/components/__tests__/delete-change-confirm.test.tsx
+@@ -29,6 +29,31 @@ import {
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
++// ── antd v6 + jsdom 的级联匹配缺陷补丁（仅本文件）────────────────────────
++// 与 agent-profile-form.test.tsx 同族（坑档案 docs/sillyspec/finished/
++// active-antd-jsdom-has-deploy-login-account.md）：jsdom 的 cssom 在
++// getComputedStyle 时对每条注册规则做 DOM 匹配，遇现代伪类（该族 `:has`，
++// 本文件 `:focus-visible`——antd Checkbox 规则 `.ant-checkbox-input:
++// focus-visible`）会把候选元素的 tag+className 拼回选择器再查询；候选
++// 元素带含逗号/括号字符的 tailwind 任意值类时生成非法选择器（CI 实测
++// `span.text-,,,,px,, .ant-checkbox-input:focus-visible`）→ nwsapi 抛
++// SyntaxError 且偶发使整用例失败（本地 ~1/20，Linux CI 并行更易触发）。
++// 真实浏览器用原生 CSS 引擎匹配（不拼 DOM 类名），不受影响——jsdom 特有
++// 缺陷。处理照先例：stub window.getComputedStyle 阻断 cascade，返回空
++// 样式表；本文件断言不依赖计算样式。仅本测试文件生效。
++window.getComputedStyle = ((_elt: Element, _pseudo?: string | null) =>
++  new Proxy(
++    {
++      getPropertyValue: () => "",
++      setProperty: () => undefined,
++      item: () => "",
++    },
++    {
++      get: (target, key) =>
++        key in target ? (target as any)[key] : key === "length" ? 0 : "",
++    },
++  )) as unknown as typeof window.getComputedStyle;
++
+ // ── mocks（hoisted，让 mock 工厂能引用同一组 vi.fn）──────────────────────
+ const mocks = vi.hoisted(() => ({
+   listChanges: vi.fn(),
+diff --git a/frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx b/frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx
+index ca8c742e8..c4ae9da5a 100644
+--- a/frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx
++++ b/frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx
+@@ -22,7 +22,8 @@ vi.mock("@/lib/api", () => ({
+ 
+ // Mock 本地渲染器（断言降级目标）+ OnlyofficePreviewer（断言 DS 路径）。
+ // 枚举式工厂须随桶文件新导出同步补齐（HtmlPreviewer，2026-08-26-file-fullscreen-preview
+-// task-04 的 RENDERER_MAP 引用）——缺导出会让 mock 在模块作用域炸掉，整套件收集失败。
++// task-04 的 RENDERER_MAP 引用；JsonlPreviewer，fa799e68b 的 jsonl 逐行视图）
++// ——缺导出会让 mock 在模块作用域炸掉，整套件收集失败。
+ vi.mock("../previewers", () => ({
+   ImagePreviewer: () => <div data-testid="image-previewer" />,
+   PdfPreviewer: () => <div data-testid="pdf-previewer" />,
+@@ -31,6 +32,7 @@ vi.mock("../previewers", () => ({
+   MarkdownPreviewer: () => <div data-testid="markdown-previewer" />,
+   HtmlPreviewer: () => <div data-testid="html-previewer" />,
+   JsonPreviewer: () => <div data-testid="json-previewer" />,
++  JsonlPreviewer: () => <div data-testid="jsonl-previewer" />,
+   PatchPreviewer: () => <div data-testid="patch-previewer" />,
+   TextPreviewer: () => <div data-testid="text-previewer" />,
+   FallbackPreviewer: () => <div data-testid="fallback-previewer" />,
+diff --git a/frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx b/frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx
+index 4bfd3b375..8d0a9736d 100644
+--- a/frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx
+@@ -623,13 +623,15 @@ describe("PrecipitateDialog · D-010 快速修复多选 + D-009 派谁去干", (
+ 
+     fireEvent.click(screen.getByRole("button", { name: "新建 agent 提炼" }));
+     await waitFor(() => expect(knowledgeApi.dispatchDistill).toHaveBeenCalledTimes(1));
++    // 派发载荷为单模型 model 串（后端 DistillDispatchIn.model 契约；models
++    // 列表是供应商配置面契约，b8afd807c 三方合并曾误带入此处，回归修正）。
+     expect(knowledgeApi.dispatchDistill).toHaveBeenCalledWith("ws-1", {
+       source_type: "session",
+       source_ref: SESSION_ID,
+       focus: null,
+       mode: "fresh",
+       llm_provider_id: PROVIDER_ID,
+-      models: [{ name: "glm-4.7", roles: ["sonnet"] }],
++      model: "glm-4.7",
+     });
+   });
+ 
+diff --git a/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx b/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
+index 47484763f..a296356ef 100644
+--- a/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
++++ b/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
+@@ -640,10 +640,14 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
+     // 键 sessionFork（string 枚举：native 原生截断 / seed 种子克隆 / none 无通道）
+     // 随 @generated 产物加入后本全对象 toEqual 必红——同步补齐（cursor='none'
+     // / 未知引擎回退='none'；a2bdb21f8 登记的预存债，本次 CI 修复清偿）。
++    // 2026-10-07 CI 修复：multimodal 键（第 3 键，多模态块通道）被 b8afd807c
++    // 三方合并误删——provider-caps.ts 查表明含该键（cursor=false / 未知引擎
++    // 回退=false），两处全对象恢复补齐。
+     const caps = getProviderCaps("cursor");
+     expect(caps).toEqual({
+       resume: true,
+       mcp: false,
++      multimodal: false,
+       attachments: true,
+       thinking: true,
+       subagent: false,
+@@ -665,6 +669,7 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
+     expect(getProviderCaps("unknown-engine")).toEqual({
+       resume: false,
+       mcp: false,
++      multimodal: false,
+       attachments: false,
+       thinking: false,
+       subagent: false,
+diff --git a/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/design.md b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/design.md
+@@ -0,0 +1,64 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T14:58:35.066Z
++---
++# 设计记录（Design Record）— 2026-10-07-assets-patch-scope-audit-fallback
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++沉淀资产「归档留档」块数据源 `_read_patch_meta` 只认 change-patch.json，厚流程
++execute --done 只落 scope-audit.json/patch，厚变更该块整块不渲染（缺陷记录
++docs/sillyspec/thin-flow-done-no-scope-audit-snapshot.md 镜像缺口一节）。本变更是
++三层修法第 1 层（平台读侧回退）：`_read_patch_meta` 缺件回退读 scope-audit.json
++（totals/patchStatus/savedAt 同构直取，file_list 改从 rows[].path 投影）；
++`_read_patch_file_diff` 缺 change.patch 时改读 scope-audit.patch 再切片（切片函数
++复用不动）。选读侧而非改 CLI 写侧：本仓库独立可落地，存量厚归档立即出数；写侧
++统一归 sillyspec 工具仓另修。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `_read_patch_meta(change_dir) -> ChangePatchMeta | None`：签名不变，新增回退取数
++  路径（change-patch.json 优先，两份都缺/损坏 → None 语义不变）。
++- `_read_patch_file_diff(change_dir, rel_path) -> ChangePatchFileRead`：签名不变；
++  留档按 change.patch → scope-audit.patch 顺序取第一份存在者，未命中 note 指名实际
++  留档文件名，两份都缺 note 同时列两名。
++- HTTP 端点 GET /changes/{cid}/assets 与 /assets/patch-file 请求/响应 schema 零变化
++  （字段未动，仅 docstring 更新）；前端无改动，无 api-types 重生成面。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用——纯归档目录静态文件读取，无事件序；归档件 append-only，读到新旧文件均为
++合法冻结态。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++CLI 写归档件与平台读并发的窗口内，半写 JSON 解析失败 → `_read_json_dict` 返回
++None → 回退另一份或整体 None（fail-open），不抛 500；与既有 change-patch.json
++读取行为同款。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全——无状态服务函数，请求间无共享态；变更在途（未归档）本就不读目录件（既有
++design R-03 分支），不受本改动影响。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会——change_dir 由 change.path 按工作区解析（既有 `_resolve_change_dir`），
++归档目录 per-change 隔离；scope-audit.json rows 只含本变更对账行，file_list 天然
++限本变更。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：file_list 语义按通道不同——change-patch.json 的 files 数组含 .sillyspec/
++规格工件，scope-audit.json 的 rows 只含对账表行。展示口径随之不同（各自的真实冻结
++面），可接受；未来若要求统一需 CLI 侧统一留痕（第 3 层根治）。试过但放弃：在
++assets 层实时重算 git diff 补数——引入实时窗口漂移，违背「归档留档冻结在收尾时点」
++的既有语义。
+
+diff --git a/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/proposal.md b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/proposal.md
+@@ -0,0 +1,33 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T14:58:35.065Z
++---
++# 提案书（Proposal）— 2026-10-07-assets-patch-scope-audit-fallback
++
++## 动机
++
++任务原话转写：厚流程归档只有 scope-audit.json/patch 没有 change-patch.json，沉淀资产·归档留档 patch 块整块不渲染（assets._read_patch_meta 只认 change-patch.json）；缺陷记录见 docs/sillyspec/thin-flow-done-no-scope-audit-snapshot.md 镜像缺口一节，本次落地平台读侧回退。
++
++成功标准：
++- 归档目录无 change-patch.json 但有 scope-audit.json 时，归档留档 patch 块出数：files/additions/deletions 取 totals，file_list 取 rows[].path，patch_status/saved_at 取快照同名字段
++- 该形态下点文件看 diff 从 scope-audit.patch 切片（复用既有切片函数），弹窗可看
++- 两份留档都缺失时 patch 仍为 None 且 diff 端点 note 说明缺两份留档（fail-open 语义保留）
++- change-patch.json 存在时行为与现状完全一致（thin 形态回归不破）
++- assets 模块聚焦测试通过
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. 归档目录无 change-patch.json 但有 scope-audit.json 时，归档留档 patch 块出数：files/additions/deletions 取 totals，file_list 取 rows[].path，patch_status/saved_at 取快照同名字段
++2. 该形态下点文件看 diff 从 scope-audit.patch 切片（复用既有切片函数），弹窗可看
++3. 两份留档都缺失时 patch 仍为 None 且 diff 端点 note 说明缺两份留档（fail-open 语义保留）
++4. change-patch.json 存在时行为与现状完全一致（thin 形态回归不破）
++5. assets 模块聚焦测试通过
++
++## 成功标准（可验证）
++
++1. 归档目录无 change-patch.json 但有 scope-audit.json 时，归档留档 patch 块出数：files/additions/deletions 取 totals，file_list 取 rows[].path，patch_status/saved_at 取快照同名字段
++2. 该形态下点文件看 diff 从 scope-audit.patch 切片（复用既有切片函数），弹窗可看
++3. 两份留档都缺失时 patch 仍为 None 且 diff 端点 note 说明缺两份留档（fail-open 语义保留）
++4. change-patch.json 存在时行为与现状完全一致（thin 形态回归不破）
++5. assets 模块聚焦测试通过
+
+diff --git a/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/requirements.md b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/requirements.md
+@@ -0,0 +1,72 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T14:58:35.066Z
++---
++# 需求规格（Requirements）— 2026-10-07-assets-patch-scope-audit-fallback
++
++## 功能需求
++
++### FR-01: 归档目录无 change-patch.json 但有 scope-audit.json 时，归档留档 patch 块出数：files/additions/deletions 取 totals，file_list 取 rows[].path，patch_status/saved_at 取快照同名字段
++
++- 归档目录缺 change-patch.json 而存 scope-audit.json 时，`_read_patch_meta` 必须回退
++  读快照投影出 patch 统计：files/additions/deletions 取 totals，file_list 取
++  rows[].path（非字符串 path 行跳过），patch_status/saved_at 取快照同名字段。
++
++#### 场景：主路径
++
++- Given 厚流程形态归档（只有 scope-audit.json + scope-audit.patch）
++- When 查询变更沉淀资产
++- Then patch 非 None，统计与清单来自快照（files=2/+3/−0、file_list 两行、status=ok、saved_at 带时间戳）
++
++### FR-02: 该形态下点文件看 diff 从 scope-audit.patch 切片（复用既有切片函数），弹窗可看
++
++- change.patch 缺失时，`_read_patch_file_diff` 必须改读 scope-audit.patch 并复用
++  `slice_patch_for_file` 切出目标文件段；未命中时 note 必须指名实际留档文件名。
++
++#### 场景：主路径
++
++- Given 厚流程形态归档且 scope-audit.patch 含 src/flow.js 块
++- When 请求该文件 diff 切片
++- Then 返回 diff 含该块内容；请求清单外文件则 note 含「不在 scope-audit.patch」
++
++### FR-03: 两份留档都缺失时 patch 仍为 None 且 diff 端点 note 说明缺两份留档（fail-open 语义保留）
++
++- 两份留档（change-patch.json 与 scope-audit.json / change.patch 与
++  scope-audit.patch）都缺失时，行为必须保持 fail-open：patch 投影为 None，diff 端点
++  note 同时列明两份留档缺失，禁止抛错。
++
++#### 场景：主路径
++
++- Given 归档目录只有 scope-audit.json、无任何 patch 件
++- When 请求文件 diff 切片
++- Then diff=None 且 note 同时含「change.patch」与「scope-audit.patch」字样
++
++### FR-04: change-patch.json 存在时行为与现状完全一致（thin 形态回归不破）
++
++- change-patch.json 存在（含两份并存的 hypothetical 形态）时，取数必须仍以
++  change-patch.json 为唯一来源，file_list 投影与统计口径禁止变化。
++
++#### 场景：主路径
++
++- Given 归档目录同时有 change-patch.json（+2/−0）与 scope-audit.json（+3/−0）
++- When 查询变更沉淀资产
++- Then patch 统计取 change-patch.json 的 totals（+2/−0），file_list 同其 files 数组
++
++### FR-05: assets 模块聚焦测试通过
++
++- 交付必须包含 assets 模块聚焦测试且全部通过（含上述回退/优先级/双缺三态与既有
++  24 例回归），禁止跑全量测试（留给 CI）。
++
++#### 场景：主路径
++
++- Given 本变更的代码与测试已落盘
++- When 运行 `pytest app/modules/change/tests/test_assets.py`
++- Then 28 passed（既有 24 + 新增 4），ruff/mypy 对改动文件零告警
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/app/modules/change/tests/test_assets.py「test_patch_meta_falls_back_to_scope_audit_snapshot」
++FR-02: backend/app/modules/change/tests/test_assets.py「test_patch_file_diff_falls_back_to_scope_audit_patch」
++FR-03: backend/app/modules/change/tests/test_assets.py「test_patch_file_diff_without_any_patch_artifact」
++FR-04: backend/app/modules/change/tests/test_assets.py「test_patch_meta_change_patch_takes_priority」
++FR-05: backend/app/modules/change/tests/test_assets.py「test_patch_meta_projects_file_list + 既有 24 例全量回归」
+
+diff --git a/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/tasks.md b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-07T14:58:35.066Z
++---
++# 任务注册表（Tasks）— 2026-10-07-assets-patch-scope-audit-fallback
++
++- [x] task-01: 归档目录无 change-patch.json 但有 scope-audit.json 时，归档留档 patch 块出数：files/additions/deletions 取 totals，file_list 取 rows[].path，patch_status/saved_at 取快照同名字段
++- [x] task-02: 该形态下点文件看 diff 从 scope-audit.patch 切片（复用既有切片函数），弹窗可看
++- [x] task-03: 两份留档都缺失时 patch 仍为 None 且 diff 端点 note 说明缺两份留档（fail-open 语义保留）
++- [x] task-04: change-patch.json 存在时行为与现状完全一致（thin 形态回归不破）
++- [x] task-05: assets 模块聚焦测试通过

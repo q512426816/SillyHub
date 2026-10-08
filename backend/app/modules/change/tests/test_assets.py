@@ -494,6 +494,116 @@ async def test_patch_file_diff_truncates_with_flag(
 
 
 # ===========================================================================
+# 归档留档回退：厚流程形态（scope-audit.json/patch 独存，change-patch 缺席）
+# 2026-10-07-assets-patch-scope-audit-fallback——两通道留痕不对称的读侧修复，
+# 缺陷记录见 docs/sillyspec/thin-flow-done-no-scope-audit-snapshot.md 镜像缺口一节
+# ===========================================================================
+
+
+def _seed_snapshot_archive(spec_root: Path, *, patch_text: str | None = PATCH_SAMPLE) -> None:
+    """tmp 镜像：厚流程形态归档——只落 scope-audit.json + scope-audit.patch。"""
+    change_dir = spec_root / "changes" / "archive" / KEY
+    change_dir.mkdir(parents=True, exist_ok=True)
+    (change_dir / "scope-audit.json").write_text(
+        json.dumps(
+            {
+                "change": KEY,
+                "rows": [
+                    {
+                        "path": "src/flow.js",
+                        "additions": 2,
+                        "deletions": 0,
+                        "kind": "modified",
+                        "verdict": "planned",
+                    },
+                    {
+                        "path": "test/x.test.mjs",
+                        "additions": 1,
+                        "deletions": 0,
+                        "kind": "new",
+                        "verdict": "planned",
+                    },
+                ],
+                "totals": {"files": 2, "additions": 3, "deletions": 0},
+                "patchStatus": "ok",
+                "savedAt": "2026-09-22T21:42:02.355Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    if patch_text is not None:
+        (change_dir / "scope-audit.patch").write_text(patch_text, encoding="utf-8")
+
+
+async def test_patch_meta_falls_back_to_scope_audit_snapshot(db_session, tmp_path: Path) -> None:
+    """厚流程归档（无 change-patch.json）：totals/状态/时间直取，file_list 从 rows[].path 投影。"""
+    spec_root = tmp_path / "spec-root10"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_snapshot_archive(spec_root)
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    assert result.patch is not None
+    assert result.patch.files == 2
+    assert result.patch.additions == 3
+    assert result.patch.deletions == 0
+    assert result.patch.patch_status == "ok"
+    assert result.patch.saved_at == "2026-09-22T21:42:02.355Z"
+    assert result.patch.file_list == ["src/flow.js", "test/x.test.mjs"]
+    assert result.patch.files_truncated is False
+
+
+async def test_patch_meta_change_patch_takes_priority(db_session, tmp_path: Path) -> None:
+    """两份并存 → change-patch.json 优先（thin 形态现状不破，totals 可区分来源）。"""
+    spec_root = tmp_path / "spec-root11"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_patch_archive(spec_root)  # totals: +2/−0（快照是 +3/−0，用于区分来源）
+    _seed_snapshot_archive(spec_root)
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    assert result.patch is not None
+    assert (result.patch.additions, result.patch.deletions) == (2, 0)
+    assert result.patch.file_list == ["src/flow.js", "test/x.test.mjs"]
+
+
+async def test_patch_file_diff_falls_back_to_scope_audit_patch(db_session, tmp_path: Path) -> None:
+    """厚流程归档点开文件 → 从 scope-audit.patch 切片；未命中 note 指名该留档。"""
+    spec_root = tmp_path / "spec-root12"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_snapshot_archive(spec_root)
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+    service = ChangeAssetsQueryService(db_session)
+
+    hit = await service.get_patch_file_diff(ws.id, change.id, "src/flow.js")
+    assert hit.diff is not None and "+b" in hit.diff
+    assert hit.note is None and hit.truncated is False
+
+    miss = await service.get_patch_file_diff(ws.id, change.id, "src/not-there.js")
+    assert miss.diff is None
+    assert miss.note is not None and "不在 scope-audit.patch" in miss.note
+
+
+async def test_patch_file_diff_without_any_patch_artifact(db_session, tmp_path: Path) -> None:
+    """两份 patch 留档都缺 → note 一并说明（fail-open 不 500）。"""
+    spec_root = tmp_path / "spec-root13"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_snapshot_archive(spec_root, patch_text=None)
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_patch_file_diff(
+        ws.id, change.id, "src/flow.js"
+    )
+    assert result.diff is None
+    assert result.note is not None
+    assert "没有 change.patch" in result.note and "scope-audit.patch" in result.note
+
+
+# ===========================================================================
 # HTTP 面（路由注册 + 参数校验 + DTO 形状；fixture 范式照 test_files_router）
 # ===========================================================================
 

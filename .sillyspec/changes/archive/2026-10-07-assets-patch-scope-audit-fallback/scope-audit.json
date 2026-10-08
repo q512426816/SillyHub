@@ -1,0 +1,75 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "9c8f9d8eb5f4e4c13c1d39998d6e8ba006791568",
+  "totals": {
+    "files": 9,
+    "additions": 78,
+    "deletions": 21
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/change/tests/test_files_router.py",
+      "additions": 7,
+      "deletions": 2,
+      "kind": "modified"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_attachment_pipeline.py",
+      "additions": 16,
+      "deletions": 5,
+      "kind": "modified"
+    },
+    {
+      "path": "backend/app/modules/workspace/tests/test_archived_write_guard.py",
+      "additions": 9,
+      "deletions": 6,
+      "kind": "modified"
+    },
+    {
+      "path": "backend/tests/test_align_platform_change_events_migration.py",
+      "additions": 5,
+      "deletions": 5,
+      "kind": "modified"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+      "additions": 5,
+      "deletions": 1,
+      "kind": "modified"
+    },
+    {
+      "path": "frontend/src/components/__tests__/delete-change-confirm.test.tsx",
+      "additions": 25,
+      "deletions": 0,
+      "kind": "modified"
+    },
+    {
+      "path": "frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx",
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx",
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+      "additions": 5,
+      "deletions": 0,
+      "kind": "modified"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "c6019b2ba5e56b361cd783cb48c72d8c23de7bc501dde1268257c36dacc24224",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T00:36:48.232Z"
+}

@@ -1,0 +1,109 @@
+{
+  "change": "2026-10-07-assets-patch-scope-audit-fallback",
+  "baseline": "9c8f9d8eb5f4e4c13c1d39998d6e8ba006791568",
+  "head": "ce08f8ae7194bd05be50f99933721dba33023d29",
+  "files": [
+    "backend/app/modules/change/tests/test_files_router.py",
+    "backend/app/modules/daemon/tests/test_attachment_pipeline.py",
+    "backend/app/modules/workspace/tests/test_archived_write_guard.py",
+    "backend/tests/test_align_platform_change_events_migration.py",
+    "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+    "frontend/src/components/__tests__/delete-change-confirm.test.tsx",
+    "frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx",
+    "frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx",
+    "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+    ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/design.md",
+    ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/proposal.md",
+    ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/requirements.md",
+    ".sillyspec/changes/2026-10-07-assets-patch-scope-audit-fallback/tasks.md"
+  ],
+  "totals": {
+    "files": 13,
+    "additions": 258,
+    "deletions": 21
+  },
+  "savedAt": "2026-10-08T00:36:48.232Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "workspace",
+      "files": 1,
+      "doc": "docs/backend/modules/workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 1,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "workspace",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "c6019b2ba5e56b361cd783cb48c72d8c23de7bc501dde1268257c36dacc24224",
+  "patchStatus": "ok"
+}

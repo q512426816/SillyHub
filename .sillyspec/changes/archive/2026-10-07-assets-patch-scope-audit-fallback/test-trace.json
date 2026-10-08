@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-07-assets-patch-scope-audit-fallback",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-07-assets-patch-scope-audit-fallback:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py「test_patch_meta_falls_back_to_scope_audit_snapshot」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-assets-patch-scope-audit-fallback"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-07-assets-patch-scope-audit-fallback:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py「test_patch_file_diff_falls_back_to_scope_audit_patch」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-assets-patch-scope-audit-fallback"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-07-assets-patch-scope-audit-fallback:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py「test_patch_file_diff_without_any_patch_artifact」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-assets-patch-scope-audit-fallback"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-07-assets-patch-scope-audit-fallback:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py「test_patch_meta_change_patch_takes_priority」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-assets-patch-scope-audit-fallback"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-07-assets-patch-scope-audit-fallback:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py「test_patch_meta_projects_file_list + 既有 24 例全量回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-07-assets-patch-scope-audit-fallback"
+    }
+  ]
+}

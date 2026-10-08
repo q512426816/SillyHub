@@ -871,11 +871,12 @@ class ChangeTestRow(BaseModel):
 
 
 class ChangePatchMeta(BaseModel):
-    """patch 留档统计（change-patch.json 的 totals + files 投影；无留档 → 整体 None）。
+    """patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。
 
-    ``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 是同一 JSON
-    ``files`` 数组的清单投影（2026-09-25-change-detail-assets-usability / FR-04 起
-    供卡面列出具体改动面），超上限时 ``files_truncated=True`` 显式标注。
+    ``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 的清单投影
+    按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面
+    列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退
+    形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。
     """
 
     files: int | None = None
@@ -890,8 +891,9 @@ class ChangePatchMeta(BaseModel):
 class ChangePatchFileRead(BaseModel):
     """归档留档单文件 diff 切片（GET /changes/{cid}/assets/patch-file）。
 
-    展示面 fail-open：``change.patch`` 缺失、文件不在 patch 内、切片超上限一律以
-    ``note``/``truncated`` 说明而非报错（读不到留档不是变更详情的错误面）。
+    展示面 fail-open：``change.patch``（缺件回退 ``scope-audit.patch``）缺失、
+    文件不在留档内、切片超上限一律以 ``note``/``truncated`` 说明而非报错
+    （读不到留档不是变更详情的错误面）。
     """
 
     path: str

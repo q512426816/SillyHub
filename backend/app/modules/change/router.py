@@ -586,9 +586,10 @@ async def get_change_patch_file(
 ) -> ChangePatchFileRead:
     """归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。
 
-    卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch`` 并切出该
-    文件的 diff 段——冻结在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，
-    两者不可互替）。``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
+    卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch``（缺件回退
+    ``scope-audit.patch``——厚流程归档只落快照留档）并切出该文件的 diff 段——冻结
+    在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，两者不可互替）。
+    ``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
     绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
     不抛 404（读不到留档是展示面降级，不是资源不存在）。
     """
