@@ -68,16 +68,17 @@ services:
       dockerfile: Dockerfile
       # 宿主机预构建的 daemon 分发物（install.sh + sillyhub-daemon.js）；
       # 部署前需 cd sillyhub-daemon && pnpm bundle 产出 build/bundle/。
-      # 2026-07-07-daemon-skill-execution task-07：skills 上下文直接指向 .claude/skills/
-      # 子目录（Dockerfile COPY --from=skills . /app/.claude/skills/）。指向仓库根会触发
-      # compose additional_contexts 传输异常（只传 2.42kB，.claude/ 内容丢失），故直接指向子目录。
+      # 2026-10-08-backend-skills-follow-cli：skills 上下文退役——镜像技能改为从已安装
+      # sillyspec 包自带 .claude/skills 取（与容器 CLI 同包同版 lockstep），不再依赖仓库快照。
       additional_contexts:
         daemon: ../sillyhub-daemon
-        skills: ../.claude/skills
       args:
         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.241}
-        # 空 → 取最新 sillyspec；填值 → pin。
+        # 空 → 取最新 sillyspec；填值 → pin（应急回滚口，日常留空走自动）。
         SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-}
+        # 缓存爆破阀（时间戳）：打包脚本每次导出新值强制 npm 层真拉 latest；
+        # 不传则本地迭代缓存照旧。想手动刷新本地镜像也可 export 后 build。
+        SILLYSPEC_REFRESH: ${SILLYSPEC_REFRESH:-}
         # Git SHA baked into the image; export COMMIT_SHA before `up --build`.
         # 2026-09-26-deploy-eng-hardening：保留构建参数（Dockerfile ENV 烘焙链），
         # 只删下方运行时 environment 的空覆盖行。

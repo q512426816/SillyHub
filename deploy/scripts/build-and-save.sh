@@ -32,6 +32,10 @@ echo "==> [3/5] 准备 build-arg"
 # COMMIT_SHA 焙进镜像（health 端点回显版本）；export 到环境后 compose 读 ${COMMIT_SHA:-} 覆盖 .env 空值。
 export COMMIT_SHA="${COMMIT_SHA:-$(git rev-parse --short HEAD)}"
 export NEXT_PUBLIC_COMMIT_SHA="$COMMIT_SHA"
+# 2026-10-08-backend-skills-follow-cli：每次打包传新时间戳爆破 npm 层缓存，
+# 强制真拉 sillyspec latest（空 SILLYSPEC_VERSION 时）；镜像技能随同包走，自动同版。
+export SILLYSPEC_REFRESH="$(date +%Y%m%d%H%M%S)"
+echo "    SILLYSPEC_REFRESH=$SILLYSPEC_REFRESH（强制 npm 层重拉 latest）"
 # 生产打包用 PROD_API_URL 覆盖前端浏览器 API 地址（本地 .env 是 127.0.0.1 开发值，生产须替换）。
 # 环境变量优先级 > .env，故 export 的值进 build-arg 生效。
 if [ -n "${PROD_API_URL:-}" ]; then
@@ -51,6 +55,7 @@ OUT="$DEPLOY_DIR/images.tar.gz"
 docker save multi-agent-platform-backend:latest multi-agent-platform-frontend:latest \
   | gzip > "$OUT"
 echo "    产出: $OUT ($(du -h "$OUT" | cut -f1))"
+echo "    镜像内 sillyspec 版本: $(docker run --rm --entrypoint sh multi-agent-platform-backend:latest -c 'sillyspec --version 2>/dev/null' || echo 查询失败)"
 echo ""
 echo "    镜像 COMMIT_SHA=$COMMIT_SHA（health 端点将回显此值；运行时不再空覆盖）"
 echo ""

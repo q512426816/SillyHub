@@ -15,8 +15,13 @@ FROM node:${NODE_VERSION}-slim AS node-tools
 
 ARG CLAUDE_CODE_VERSION
 ARG SILLYSPEC_VERSION
+# 2026-10-08（thin 2026-10-08-backend-skills-follow-cli）：缓存爆破阀——SILLYSPEC_VERSION 留空
+# （取 npm latest）时本层缓存会冻结在首次构建的版本上（容器 3.26.0 vs latest 3.32.0 实证）。
+# 打包脚本（build-and-save.sh）每次传新时间戳强制重拉 latest；本地迭代不传则缓存照旧（快）。
+ARG SILLYSPEC_REFRESH=""
 
-RUN npm install --registry=https://registry.npmmirror.com -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION} \
+RUN echo "npm layer refresh token: ${SILLYSPEC_REFRESH:-cached}" \
+ && npm install --registry=https://registry.npmmirror.com -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION} \
  && npm cache clean --force
 
 FROM python:${PYTHON_VERSION}-slim AS builder
@@ -116,12 +121,15 @@ COPY --from=daemon scripts/install.ps1 /app/daemon-dist/install.ps1
 
 # 2026-07-07-daemon-skill-execution task-07：sillyspec skills 进镜像（server-local 模式
 # 容器内 claude 自带 skills 调 /sillyspec-* 跑 stage 流程，不经 daemon skill-manager 同步）。
-# compose additional_contexts "skills: ../.claude/skills" 直接指向 skills 目录本身。
+# 2026-10-08（thin 2026-10-08-backend-skills-follow-cli）：技能源从仓库 .claude/skills 快照
+# （additional_contexts "skills"，构建时固定、与容器 CLI 可能错位）改为已安装 sillyspec 包
+# 自带 .claude/skills——同包同版 lockstep，CLI 随 SILLYSPEC_REFRESH 拉 latest 时技能自动同版，
+# 平台侧永不错位。仓库技能目录仍服务本地工具面（ZCode/Claude CLI），由 sillyspec init 刷新。
 # COPY 到 /app/sillyspec-skills/（非 volume 路径）而非 /app/.claude/skills/——后者被
 # claude-data named volume 遮盖（volume 9h 前创建无 skills/，不会重拷镜像内容）。
 # docker-entrypoint.sh 启动时软链 /app/.claude/skills → /app/sillyspec-skills 让 claude 找到；
 # backend skills_bundle_dir config 默认 /app/sillyspec-skills 供 manifest/bundle 端点读。
-COPY --from=skills . /app/sillyspec-skills/
+COPY --from=node-tools /usr/local/lib/node_modules/sillyspec/.claude/skills /app/sillyspec-skills/
 
 # task-04（DG-02）：install.ps1 兜底转 CRLF——PowerShell 偏好 CRLF，与 install.sh 去 CR（LF）相反。
 # 源文件已 CRLF 则幂等无副作用；被 git 在镜像构建前转成 LF 则此处修复回来。注意不并入上面的
