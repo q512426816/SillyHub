@@ -753,11 +753,20 @@ export function EntryCardList({
       {form === "index" ? (
         routes.length > 0 ? (
           categories.map((cat) => (
-            <section key={cat} data-testid="index-category" data-category={cat}>
-              <h4 className="px-1 pb-1 pt-0.5 text-[10.5px] font-semibold tracking-wide text-muted-foreground/80">
-                {cat}
-              </h4>
-              <div className="flex flex-col">
+            <article
+              key={cat}
+              data-testid="index-category"
+              data-category={cat}
+              // INDEX 分组卡片化（2026-10-08 验收扩展）：与 manual 卡同款卡片头——
+              // 每个分类一张卡（紫条 + brand-50 头 + 分组名 + 🔗），路由行为卡内
+              // 可点导航（交互与 testid 不变，结构升级为统一卡片语言）。
+              className="shrink-0 overflow-hidden rounded-md border border-border/60 border-l-[3px] border-l-brand-600 transition-colors hover:border-brand-400"
+            >
+              <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-brand-50 px-2.5 py-1.5">
+                <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold text-brand-700">{cat}</h4>
+                <AnchorCopyButton anchor={`${filename}#${slugifyAnchor(cat)}`} />
+              </div>
+              <div className="flex flex-col px-1.5 py-1">
                 {routes
                   .filter((r) => r.category === cat)
                   .map((r) => (
@@ -779,7 +788,7 @@ export function EntryCardList({
                     </button>
                   ))}
               </div>
-            </section>
+            </article>
           ))
         ) : (
           <p className="px-1 py-2 text-xs text-muted-foreground">INDEX 无可点路由行。</p>
