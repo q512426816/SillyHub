@@ -114,3 +114,33 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-08-backend-restart-fake-failed
   status: active
+
+## FR-auto-backend-128 test_align_platform_change_events_migration.py 链尾锚更新为 20261008100000（注释链同步），该文件全绿
+变更：2026-10-08-ci-sweep-2-migration-anchor
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given versions 目录含 20261008100000（down_revision=20261006200000）/ When test_file_exists
+全文：.sillyspec/changes/archive/2026-10-08-ci-sweep-2-migration-anchor/requirements.md#FR-01
+最近确认：efb85fc566889705e304026f05380aacc58d77b2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-ci-sweep-2-migration-anchor:flow:测试绑定FR-01
+  tests: backend/tests/test_align_platform_change_events_migration.py「TestMigrationStructure::test_file_exists_and_single_head_chain」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-ci-sweep-2-migration-anchor
+  status: active
+
+## FR-auto-backend-129 backend-ci 推送后转绿（其余 workflow 无后端改动不触发或保持绿）
+变更：2026-10-08-ci-sweep-2-migration-anchor
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given versions 目录含 20261008100000（down_revision=20261006200000）/ When test_file_exists
+全文：.sillyspec/changes/archive/2026-10-08-ci-sweep-2-migration-anchor/requirements.md#FR-02
+最近确认：efb85fc566889705e304026f05380aacc58d77b2

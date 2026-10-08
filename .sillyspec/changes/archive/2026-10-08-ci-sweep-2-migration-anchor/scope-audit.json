@@ -1,0 +1,27 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "1a6670f3c11d17111500699fd203acf73cf5ccd5",
+  "totals": {
+    "files": 1,
+    "additions": 3,
+    "deletions": 2
+  },
+  "rows": [
+    {
+      "path": "backend/tests/test_align_platform_change_events_migration.py",
+      "additions": 3,
+      "deletions": 2,
+      "kind": "modified"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "611237db40a69c63a77043eaae18b643bff4e77c3aeb65b2b8c7ce2894560f5b",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T15:51:04.344Z"
+}

@@ -1,0 +1,39 @@
+{
+  "change": "2026-10-08-ci-sweep-2-migration-anchor",
+  "baseline": "1a6670f3c11d17111500699fd203acf73cf5ccd5",
+  "head": "efb85fc566889705e304026f05380aacc58d77b2",
+  "files": [
+    ".sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/design.md",
+    ".sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/flow-state.yaml",
+    ".sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/proposal.md",
+    ".sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/requirements.md",
+    ".sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/tasks.md",
+    "backend/tests/test_align_platform_change_events_migration.py"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 133,
+    "deletions": 2
+  },
+  "savedAt": "2026-10-08T15:51:04.344Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "611237db40a69c63a77043eaae18b643bff4e77c3aeb65b2b8c7ce2894560f5b",
+  "patchStatus": "ok"
+}

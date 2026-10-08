@@ -1,0 +1,166 @@
+diff --git a/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/flow-state.yaml b/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/flow-state.yaml
+new file mode 100644
+index 000000000..48193e7b4
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/flow-state.yaml
+@@ -0,0 +1,22 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  CI 红清偿补遗：backend-ci 唯一失败——迁移链尾锚未随 c1970cd37（2026-10-08-rbac-dead-permissions-cleanup 新迁移
++  20261008100000_drop_dead_rbac_permissions）前移，锚仍钉 20261006200000。链结构已核：down_revision 接 20261006200000、单
++  head。测试自带链尾锚随动约定，纯锚前移一行+注释。
++
++
++  成功标准：
++
++  - test_align_platform_change_events_migration.py 链尾锚更新为 20261008100000（注释链同步），该文件全绿
++
++  - backend-ci 推送后转绿（其余 workflow 无后端改动不触发或保持绿）
++autopilot: true
++baseline_commit: 1a6670f3c11d17111500699fd203acf73cf5ccd5
++updatedAt: '2026-10-08T15:49:53.456Z'
++baseline_sha256: 31910302419663d9776cbffaf4ef058d773334f24312927ca40e2c86f2f8a2c8
++
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index de9e70b6d..80cf71de3 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -98,8 +98,9 @@ class TestMigrationStructure:
+         # 链尾锚定：随主线新迁移接续前移——20261003020000（水位表，
+         # 2026-10-03-local-usage-segment-attribution）→ 20261006120000
+         # （provider_agent_kinds，2026-10-06-provider-multi-agent-kind）→
+-        # 20261006200000（四旧列删/存量折算，2026-10-06-provider-model-list）。
+-        assert heads[0] == "20261006200000"  # 2026-10-06-provider-model-list 迁移成为新 head
++        # 20261006200000（四旧列删/存量折算，2026-10-06-provider-model-list）→
++        # 20261008100000（drop_dead_rbac_permissions，2026-10-08）。
++        assert heads[0] == "20261008100000"  # drop_dead_rbac_permissions 成为新 head
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/design.md b/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/design.md
+new file mode 100644
+index 000000000..966e382aa
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/design.md
+@@ -0,0 +1,38 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T15:49:53.431Z
++---
++# 设计记录（Design Record）— 2026-10-08-ci-sweep-2-migration-anchor
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++backend-ci 唯一失败：迁移链尾锚测试仍钉 20261006200000，而并行会话 c1970cd37（2026-10-08-rbac-dead-permissions-cleanup）在第二轮清偿推送后落库新迁移 20261008100000_drop_dead_rbac_permissions 成为新 head。已核链结构（down_revision 接 20261006200000、单 head），按测试自带的「链尾锚随主线新迁移接续前移」约定，纯锚前移一行 + 注释链同步。生产零改动。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无——单测试断言常量前移，迁移链本身不变（结构已核：单 head 20261008100000）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用——静态结构断言，无事件序参与。
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用——单测试文件单行改动；并行会话若再加迁移，锚再随动（约定自愈路径即本约定）。
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++不适用——无运行时状态。
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不适用——锚读取本地 versions 目录。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：并行会话持续加迁移导致锚反复红——结构性成本已由约定承担（每次新迁移随动一行），改用「断言单 head + 链尾 ≥ 某版本」弱断言会失去精确锚定防分叉价值，放弃。
+diff --git a/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/proposal.md b/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/proposal.md
+new file mode 100644
+index 000000000..782f2b469
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/proposal.md
+@@ -0,0 +1,24 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T15:49:53.431Z
++---
++# 提案书（Proposal）— 2026-10-08-ci-sweep-2-migration-anchor
++
++## 动机
++
++任务原话转写：CI 红清偿补遗：backend-ci 唯一失败——迁移链尾锚未随 c1970cd37（2026-10-08-rbac-dead-permissions-cleanup 新迁移 20261008100000_drop_dead_rbac_permissions）前移，锚仍钉 20261006200000。链结构已核：down_revision 接 20261006200000、单 head。测试自带链尾锚随动约定，纯锚前移一行+注释。
++
++成功标准：
++- test_align_platform_change_events_migration.py 链尾锚更新为 20261008100000（注释链同步），该文件全绿
++- backend-ci 推送后转绿（其余 workflow 无后端改动不触发或保持绿）
++
++## 变更范围
++
++按成功标准机械推导，共 2 条验收面：
++1. test_align_platform_change_events_migration.py 链尾锚更新为 20261008100000（注释链同步），该文件全绿
++2. backend-ci 推送后转绿（其余 workflow 无后端改动不触发或保持绿）
++
++## 成功标准（可验证）
++
++1. test_align_platform_change_events_migration.py 链尾锚更新为 20261008100000（注释链同步），该文件全绿
++2. backend-ci 推送后转绿（其余 workflow 无后端改动不触发或保持绿）
+diff --git a/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/requirements.md b/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/requirements.md
+new file mode 100644
+index 000000000..147c11050
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/requirements.md
+@@ -0,0 +1,28 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T15:49:53.431Z
++---
++# 需求规格（Requirements）— 2026-10-08-ci-sweep-2-migration-anchor
++
++## 功能需求
++
++### FR-01: test_align_platform_change_events_migration.py 链尾锚更新为 20261008100000（注释链同步），该文件全绿
++
++- 链尾锚断言 必须 等于当前唯一 head 20261008100000，注释链 必须 记录 20261006200000→20261008100000 接续。
++
++#### 场景：主路径
++
++Given versions 目录含 20261008100000（down_revision=20261006200000）/ When test_file_exists_and_single_head_chain 执行 / Then heads 长度 1 且等于 20261008100000，文件全绿。
++
++### FR-02: backend-ci 推送后转绿（其余 workflow 无后端改动不触发或保持绿）
++
++- 链尾锚断言 必须 等于当前唯一 head 20261008100000，注释链 必须 记录 20261006200000→20261008100000 接续。
++
++#### 场景：主路径
++
++Given versions 目录含 20261008100000（down_revision=20261006200000）/ When test_file_exists_and_single_head_chain 执行 / Then heads 长度 1 且等于 20261008100000，文件全绿。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/tests/test_align_platform_change_events_migration.py「TestMigrationStructure::test_file_exists_and_single_head_chain」（本地 7 用例全绿实证）
++FR-02: 不适用：CI 门（backend-ci 转绿以推送后 GitHub Actions 实跑为准，盯到全绿）
+diff --git a/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/tasks.md b/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/tasks.md
+new file mode 100644
+index 000000000..d958cf07a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-ci-sweep-2-migration-anchor/tasks.md
+@@ -0,0 +1,8 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T15:49:53.431Z
++---
++# 任务注册表（Tasks）— 2026-10-08-ci-sweep-2-migration-anchor
++
++- [x] task-01: test_align_platform_change_events_migration.py 链尾锚更新为 20261008100000（注释链同步），该文件全绿
++- [x] task-02: backend-ci 推送后转绿（其余 workflow 无后端改动不触发或保持绿）
