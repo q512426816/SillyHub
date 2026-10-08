@@ -500,6 +500,30 @@ describe("决策形态渲染（zone=decisions）", () => {
     expect(within(supersededCard).queryByText("旧口径改道。")).not.toBeInTheDocument();
   });
 
+  it("决策卡套用新版卡片头（2026-10-08 验收扩展）：色条+头底+🔗 复制，superseded 同款", () => {
+    renderList({
+      filename: "decisions/demo.md",
+      zone: "decisions",
+      content: DECISIONS_CONTENT,
+    });
+
+    const cards = screen.getAllByTestId("decision-entry-card");
+    expect(cards[0]!.className).toContain("border-l-brand-600");
+    expect(cards[0]!.className).toContain("shrink-0");
+    // 头部条带（负 margin 撑满 + brand-50 底 + 分隔线）承载 ID/标题/pill。
+    const head = cards[0]!.querySelector("div.bg-brand-50");
+    expect(head).not.toBeNull();
+    expect(head?.querySelector('[data-testid="status-pill"]')).not.toBeNull();
+    // 每张有 ID 的决策卡各一枚 🔗（复制串=文件#条目ID）。
+    expect(screen.getAllByTestId("anchor-copy-btn")).toHaveLength(4);
+    expect(screen.getAllByTestId("anchor-copy-btn")[0]).toHaveAttribute(
+      "title",
+      "锚点定位（点击复制）：decisions/demo.md#D-002@v1",
+    );
+    // DECISIONS_CONTENT 无 frontmatter → 元信息条降级隐藏。
+    expect(screen.queryByTestId("frontmatter-meta")).not.toBeInTheDocument();
+  });
+
   it("fr zone 即使存在 rejected 也不渲染防复潮横幅（横幅仅 decisions zone）", () => {
     const rejectedFr = `${FR_CONTENT}
 ## FR-demo-domain-009 被否决的规则
