@@ -1,0 +1,46 @@
+{
+  "change": "2026-10-08-backend-dockerfile-apt-mirror-sjtu",
+  "baseline": "8bc7ea97910914c2ffcb57355524eea4d596091d",
+  "head": "d304aefe57ac5e79cc74c094f21d1760d3e5ac5f",
+  "files": [
+    ".sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/design.md",
+    ".sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/flow-state.yaml",
+    ".sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/proposal.md",
+    ".sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/requirements.md",
+    ".sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/tasks.md",
+    "backend/Dockerfile"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 159,
+    "deletions": 3
+  },
+  "savedAt": "2026-10-08T01:35:36.415Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "build",
+      "files": 1,
+      "doc": "docs/backend/modules/build.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "f23a7767a9001fb1c56cef98c4837938054419b3327cca2d015df2d195054c94",
+  "patchStatus": "ok"
+}

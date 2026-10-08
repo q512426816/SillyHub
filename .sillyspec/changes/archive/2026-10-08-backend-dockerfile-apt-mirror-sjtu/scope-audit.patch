@@ -1,0 +1,203 @@
+diff --git a/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/flow-state.yaml b/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/flow-state.yaml
+new file mode 100644
+index 000000000..0e0f9efc3
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/flow-state.yaml
+@@ -0,0 +1,22 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  backend Dockerfile 的 apt 层换源：tuna 当前对 trixie main Packages 大文件持续 500/502/EOF（连续两次构建重试失败），实测唯一稳定快路是
++  https://mirror.sjtu.edu.cn（8MB/5s 复测稳定；http 形态同样慢，须连协议一起换 https）
++
++  成功标准：
++
++  - sed 换源改为 https://mirror.sjtu.edu.cn（连协议一起换），安装的包集合与语义零变化
++
++  - backend 镜像本地构建通过（apt 层完成即验证），部署链可继续
++
++  - Dockerfile 改动以显式 pathspec 提交并在本变更内收口
++autopilot: true
++baseline_commit: 8bc7ea97910914c2ffcb57355524eea4d596091d
++updatedAt: '2026-10-08T01:32:28.999Z'
++baseline_sha256: 7dae29eac9ef5279e45855d40836dd7c3b24016d56a4c9f8396fd376fb96f043
++
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index 5a9f66868..66bd93835 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -68,12 +68,16 @@ RUN groupadd --system app && useradd --system --gid app --home /app app
+ # （Connection refused），导致 base image digest 漂移后 rebuild 时整个 runtime stage
+ # 在 apt-get update 报废。与 pip（tsinghua）/npm（npmmirror）一致配国内源。
+ # 2026-07-17（ql-20260717-004）：mirrors.aliyun.com 的 trixie Packages 索引此刻缺失且
+-# CDN 多 IP Connection failed（apt-get update 拿不到索引），改回清华 tuna
+-# （mirrors.tuna.tsinghua.edu.cn，Packages.gz 完整可达）。仅影响 build 阶段。
++# CDN 多 IP Connection failed（apt-get update 拿不到索引），改回清华 tuna。
++# 2026-10-08（thin 2026-10-08-backend-dockerfile-apt-mirror-sjtu）：tuna 对 trixie main
++# Packages 大文件持续 500/502/EOF（InRelease/小文件正常，9.6MB 索引传输中断，重试无效），
++# 实测各国内源 http 形态同慢（≈80KB/s）；https://mirror.sjtu.edu.cn 独快且稳
++# （8MB/5s 复测），连协议一起换 https。apt 包集合与语义零变化，仅影响 build 阶段。
+ # trixie 用 DEB822 /etc/apt/sources.list.d/debian.sources，旧版用 sources.list，
+ # find 覆盖两种格式；找不到文件时 -exec 不执行，退出码仍为 0，无副作用。
+ RUN find /etc/apt -type f \( -name 'sources.list' -o -name '*.sources' \) \
+-      -exec sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' {} + \
++      -exec sed -i -e 's|http://deb.debian.org|https://mirror.sjtu.edu.cn|g' \
++                   -e 's|https://deb.debian.org|https://mirror.sjtu.edu.cn|g' {} + \
+  && apt-get update -o Acquire::Retries=3 \
+  && apt-get install -y --no-install-recommends --fix-missing curl ca-certificates git libstdc++6 \
+  && rm -rf /var/lib/apt/lists/*
+diff --git a/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/design.md b/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/design.md
+new file mode 100644
+index 000000000..c9a2a27cb
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/design.md
+@@ -0,0 +1,49 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T01:32:28.964Z
++---
++# 设计记录（Design Record）— 2026-10-08-backend-dockerfile-apt-mirror-sjtu
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++backend Dockerfile runtime 层的 apt 源 sed 从 tuna 换为上海交大源。故障事实（2026-10-08 上午实测）：tuna 对 `debian/dists/trixie/main/binary-amd64/Packages.xz`（9.6MB）持续 500/502/EOF（InRelease 等小文件正常），连续两次 `build-and-save.sh` 死于该层（各重试 3 次共 12 分钟）；本机到各国内源 http 形态普遍 ≈80KB/s，唯独 `https://mirror.sjtu.edu.cn` https 形态 8MB/5s 复测稳定（http 形态同样慢，故 sed 必须连协议一起换 https）。沿用 2026-07-13/2026-07-17 两次换源先例的最小改动模式：只改 sed 目标与注释，`apt-get install` 行逐字不动。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `backend/Dockerfile` runtime 3/17 的 RUN：sed 目标由 `deb.debian.org → mirrors.tuna.tsinghua.edu.cn（http）` 改为 `http(s)://deb.debian.org → https://mirror.sjtu.edu.cn`（两条 -e 分列覆盖 http/https 两种源形态）。
++- 安装包集合（curl ca-certificates git libstdc++6）、安装参数、其余 16 层：零改动。
++- 运行时行为/对外 API/部署物：无变化（仅 build 阶段取源路径不同）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   不适用——sed 在单次镜像构建内一次性改写静态配置文件，无事件序参与。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   不适用新增面——Dockerfile 是构建输入，并发构建各自读取同一内容（read-only），无共享可变状态。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   安全——改动只影响 build 阶段；已构建镜像、运行中容器、服务器部署面均不感知。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不会——sed 的 find 限定在镜像内 /etc/apt（sources.list 与 *.sources 两种格式覆盖），不触宿主机与仓库其它文件。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：sjtu 源将来同样故障/限速（镜像站轮流抽风的先例：aliyun 2026-07-17、tuna 2026-10-08）——已在 Dockerfile 注释里留下完整的换源史与实测数据，下次故障按同模式 5 分钟内可再换。放弃的方案：① 原样重试（已试，两次死同层，tuna 服务端故障非瞬时抖动）；② 换 aliyun/ustc/huawei/http 官方源/deb.debian.org（实测同慢 ≈80KB/s，9.6MB 索引在 apt 超时内下不完）；③ 走本机 Clash 代理（7897 实测 2MB/33s 无改善）；④ 增大 apt 重试次数（传输中断形态重试无效，且要改同一行不如换源）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | backend/Dockerfile | runtime 层 apt 源 sed：tuna(http) → mirror.sjtu.edu.cn(https)，注释补 2026-10-08 换源记录与实测数据；install 行逐字不动 |
+diff --git a/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/proposal.md b/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/proposal.md
+new file mode 100644
+index 000000000..e5de4c2a8
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/proposal.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T01:32:28.963Z
++---
++# 提案书（Proposal）— 2026-10-08-backend-dockerfile-apt-mirror-sjtu
++
++## 动机
++
++任务原话转写：backend Dockerfile 的 apt 层换源：tuna 当前对 trixie main Packages 大文件持续 500/502/EOF（连续两次构建重试失败），实测唯一稳定快路是 https://mirror.sjtu.edu.cn（8MB/5s 复测稳定；http 形态同样慢，须连协议一起换 https）
++成功标准：
++- sed 换源改为 https://mirror.sjtu.edu.cn（连协议一起换），安装的包集合与语义零变化
++- backend 镜像本地构建通过（apt 层完成即验证），部署链可继续
++- Dockerfile 改动以显式 pathspec 提交并在本变更内收口
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. sed 换源改为 https://mirror.sjtu.edu.cn（连协议一起换），安装的包集合与语义零变化
++2. backend 镜像本地构建通过（apt 层完成即验证），部署链可继续
++3. Dockerfile 改动以显式 pathspec 提交并在本变更内收口
++
++## 成功标准（可验证）
++
++1. sed 换源改为 https://mirror.sjtu.edu.cn（连协议一起换），安装的包集合与语义零变化
++2. backend 镜像本地构建通过（apt 层完成即验证），部署链可继续
++3. Dockerfile 改动以显式 pathspec 提交并在本变更内收口
+diff --git a/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/requirements.md b/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/requirements.md
+new file mode 100644
+index 000000000..1fa738afc
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/requirements.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T01:32:28.964Z
++---
++# 需求规格（Requirements）— 2026-10-08-backend-dockerfile-apt-mirror-sjtu
++
++## 功能需求
++
++### FR-01: sed 换源改为 https://mirror.sjtu.edu.cn（连协议一起换），安装的包集合与语义零变化
++
++- backend Dockerfile runtime 层的 apt 源替换**必须**由 `s|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g`（保留 http）改为把 `http(s)://deb.debian.org` 整体替换为 `https://mirror.sjtu.edu.cn`（sjtu 仅 https 形态快，实测 http 同慢）；`apt-get install` 的包集合（curl ca-certificates git libstdc++6）与安装参数**禁止**任何变化。
++
++#### 场景：换源不改语义
++
++- Given：tuna 对 trixie main Packages（9.6MB）持续 500/502/EOF，连续两次构建失败；实测 https://mirror.sjtu.edu.cn 8MB/5s 稳定
++- When：按本变更 sed 后重建 backend 镜像
++- Then：apt 层完成，安装产物仍是且仅是 curl ca-certificates git libstdc++6
++
++### FR-02: backend 镜像本地构建通过（apt 层完成即验证），部署链可继续
++
++- 换源后 backend 镜像本地构建**必须**通过（`deploy/scripts/build-and-save.sh` 全流程产出 images.tar.gz）；本变更为部署阻塞清障，构建通过即交付验证。
++
++#### 场景：构建即验证
++
++- Given：改动前同命令构建两次均死于 backend runtime 3/17 apt 层
++- When：仅改源后重跑同一构建命令
++- Then：backend + frontend 两镜像构建成功并落 tar 包
++
++### FR-03: Dockerfile 改动以显式 pathspec 提交并在本变更内收口
++
++- Dockerfile 改动**必须**以显式 pathspec 提交（commit 消息带 task 编号）并 flow done 收口归档，不留未登记的工作区改动。
++
++#### 场景：收口
++
++- Given：构建通过
++- When：git add -- backend/Dockerfile + 变更目录 → commit → flow done
++- Then：变更归档注销，工作区无本变更遗留
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: 不适用：Dockerfile sed 换源无可执行的 pytest/vitest 断言面；验证方式为构建期实测（apt 层完成）+ diff 语义对照（包集合与参数行逐字未动）
++FR-02: deploy/scripts/build-and-save.sh「backend+frontend 镜像构建成功产出 images.tar.gz」（构建即验证：改动前同命令两次失败、改动后通过）
++FR-03: git log「commit 含 backend/Dockerfile 与本变更目录（task-NN 证据）+ flow done 归档回执」
+diff --git a/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/tasks.md b/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/tasks.md
+new file mode 100644
+index 000000000..215495030
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T01:32:28.964Z
++---
++# 任务注册表（Tasks）— 2026-10-08-backend-dockerfile-apt-mirror-sjtu
++
++- [x] task-01: sed 换源改为 https://mirror.sjtu.edu.cn（连协议一起换），安装的包集合与语义零变化 ✅ Dockerfile runtime 3/17 已改（两条 -e 覆盖 http/https 源形态 + 注释补实测数据），install 行逐字未动
++- [x] task-02: backend 镜像本地构建通过（apt 层完成即验证），部署链可继续——验证：改动前同命令两次失败，改动后构建产出 images.tar.gz ✅ 实测 apt 层 Fetched 10.2MB in 6s (1578 kB/s)，backend+frontend 双镜像构建成功，images.tar.gz 362M 落盘
++- [x] task-03: Dockerfile 改动以显式 pathspec 提交并在本变更内收口——验证：git log 带 task-NN 的提交 + flow done 归档回执 ✅ 提交已落（backend/Dockerfile + 变更目录，task-01 task-02 证据）

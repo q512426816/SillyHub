@@ -1,0 +1,29 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "8bc7ea97910914c2ffcb57355524eea4d596091d",
+  "totals": {
+    "files": 1,
+    "additions": 7,
+    "deletions": 3
+  },
+  "rows": [
+    {
+      "path": "backend/Dockerfile",
+      "additions": 7,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "f23a7767a9001fb1c56cef98c4837938054419b3327cca2d015df2d195054c94",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T01:35:36.415Z"
+}

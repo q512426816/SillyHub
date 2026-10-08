@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -17,6 +25,7 @@ input: >-
   - Dockerfile 改动以显式 pathspec 提交并在本变更内收口
 autopilot: true
 baseline_commit: 8bc7ea97910914c2ffcb57355524eea4d596091d
-updatedAt: '2026-10-08T01:32:28.999Z'
+updatedAt: '2026-10-08T01:35:37.541Z'
 baseline_sha256: 7dae29eac9ef5279e45855d40836dd7c3b24016d56a4c9f8396fd376fb96f043
+gate_summary: 'test: —｜lint: —｜门文件 2 个'
 
