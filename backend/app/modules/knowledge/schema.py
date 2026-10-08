@@ -359,7 +359,8 @@ class KnowledgeStatsOut(BaseModel):
 
 # ── 知识图谱 DTO（change 2026-10-08-platform-knowledge-graph task-02 / D-001@v2）─
 #
-# 图查询三端点（graph/query、graph/overview、graph/nodes）统一信封：HTTP 200 恒
+# 图查询端点（graph/query、graph/overview、graph/nodes + 2026-10-09-
+# knowledge-graph-fullmap task-03 的 graph/dump）统一信封：HTTP 200 恒
 # 回信封，不可用态由 reason 六稳定键承载（unbound/offline/timeout/upgrade_
 # required/invalid_input/rpc_error），前端按 available+reason 分支不弹错。数据面
 # 经 daemon RPC 直采 CLI ``sillyspec knowledge graph <sub> --json`` 单源真相
@@ -538,6 +539,32 @@ class GraphNodesData(BaseModel):
     nodes: list[GraphNodeRef] | None = None
 
 
+# ── 全图 dump DTO（2026-10-09-knowledge-graph-fullmap task-03 / D-002@v1）────────
+#
+# GET /knowledge/graph/dump 数据面：CLI 离线预计算坐标的全量节点/边/聚合（daemon
+# 不裁剪——全量是设计目的，D-003@v1 现算不落盘）。端点内手动 gzip 压缩传输
+# （Grill F-00：压缩面仅限本端点，禁全站 GZipMiddleware）。
+
+
+class GraphDumpNode(BaseModel):
+    """全图节点：GraphNodeRef + CLI 预计算确定性布局坐标（x/y，Math.round 整数值
+    传输为 float）。"""
+
+    id: str
+    type: str = ""
+    label: str = ""
+    x: float = 0.0
+    y: float = 0.0
+
+
+class GraphDumpData(BaseModel):
+    """dump 数据：nodes（含坐标）/edges/stats（与 summary 同源聚合，复用归一）。"""
+
+    nodes: list[GraphDumpNode]
+    edges: list[GraphEdge]
+    stats: GraphSummary
+
+
 #: query 端点 data 按 sub 分型的联合（五查询主链路 + summary/nodes 直通）。
 GraphQueryData = (
     GraphNeighborsData
@@ -551,3 +578,4 @@ GraphQueryData = (
 GraphQueryOut = GraphEnvelope[GraphQueryData]
 GraphOverviewOut = GraphEnvelope[GraphOverviewData]
 GraphNodesOut = GraphEnvelope[GraphNodesData]
+GraphDumpOut = GraphEnvelope[GraphDumpData]

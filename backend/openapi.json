@@ -20775,6 +20775,50 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/knowledge/graph/dump": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Get Knowledge Graph Dump",
+        "description": "全图 dump（星空总览数据源）：CLI 离线预计算坐标的全量 nodes/edges/stats。\n\n**手动 gzip 压缩**（2026-10-09-knowledge-graph-fullmap task-03 / Grill F-00：\n禁止全站 GZipMiddleware——SSE 流经压缩中间件有 zlib 缓冲致事件批量延迟\n风险，压缩面仅限本端点）：信封 JSON 化（ensure_ascii=False 紧凑分隔符）后\n``gzip.compress``，``Content-Encoding: gzip`` 响应头（浏览器 fetch 透明解压）；\n**无条件压缩**（不可用 data=None 小包同构处理，一致性优先）；``Vary`` 标注\n缓存按 Accept-Encoding 区分。旧 CLI（cli_feature_missing:dump）恒 200 信封\nreason=upgrade_required，前端隐藏全图胶囊回退 orphans。",
+        "operationId": "get_knowledge_graph_dump_api_workspaces__workspace_id__knowledge_graph_dump_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphEnvelope_GraphDumpData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/knowledge/governance": {
       "get": {
         "tags": [
@@ -46830,6 +46874,69 @@
         "title": "GraphDecisionRef",
         "description": "impact 决策/FR 引用（CLI 实际形状：id/type/status，status=decision 状态位）。"
       },
+      "GraphDumpData": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphDumpNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "type": "array",
+            "title": "Edges"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/GraphSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges",
+          "stats"
+        ],
+        "title": "GraphDumpData",
+        "description": "dump 数据：nodes（含坐标）/edges/stats（与 summary 同源聚合，复用归一）。"
+      },
+      "GraphDumpNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": ""
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "default": ""
+          },
+          "x": {
+            "type": "number",
+            "title": "X",
+            "default": 0.0
+          },
+          "y": {
+            "type": "number",
+            "title": "Y",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "GraphDumpNode",
+        "description": "全图节点：GraphNodeRef + CLI 预计算确定性布局坐标（x/y，Math.round 整数值\n传输为 float）。"
+      },
       "GraphEdge": {
         "properties": {
           "s": {
@@ -46858,6 +46965,54 @@
         ],
         "title": "GraphEdge",
         "description": "边（s→t 定方向；strength=strong/medium/weak 三档，前端线型派生依据）。"
+      },
+      "GraphEnvelope_GraphDumpData_": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "unbound",
+                  "offline",
+                  "timeout",
+                  "upgrade_required",
+                  "invalid_input",
+                  "rpc_error"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "source": {
+            "type": "string",
+            "const": "daemon-rpc",
+            "title": "Source",
+            "default": "daemon-rpc"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphDumpData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "GraphEnvelope[GraphDumpData]"
       },
       "GraphEnvelope_GraphNodesData_": {
         "properties": {

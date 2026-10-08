@@ -3,25 +3,30 @@
 /**
  * 知识图谱页（/workspaces/[id]/knowledge/graph）——task-07 /
  * 2026-10-08-platform-knowledge-graph / FR-05 / FR-06 / D-002@v1 / D-003@v1 /
- * D-006@v1 / D-008@v2。
+ * D-006@v1 / D-008@v2；全图默认视图 task-06 / 2026-10-09-knowledge-graph-fullmap /
+ * FR-04 / D-001@v1 / D-002@v1。
  *
  * 三栏直译归档原型（sillyspec 仓 archive/2026-10-08-knowledge-graph/
- * prototype-knowledge-graph.html）+ lite 数据面扩展（原型未覆盖新面，R-04）：
+ * prototype-knowledge-graph.html）+ 全图 dump 数据面（task-06 新面）：
  *
- *   - 左 300px：数据面胶囊（总览 lite / 查询切片——D-008@v2 状态机：执行查询或
- *     点代表节点自动切切片，胶囊手动回 lite；summary=null 旧 CLI 时 lite 胶囊
- *     隐藏）+ 查询表单（sub 七值默认 orphans / anchor·anchor2 补全输入 /
- *     edges all+16 型 / depth 1-3）+ 等价 CLI 提示条（黑底等宽动态拼）+
- *     预置演示六胶囊 + 图例（节点 10 类型与边 16 型三档点击高亮）；
- *   - 中：GraphCanvas（task-06）+ mode-chip（查询标题 · 引擎 · 节点数）；
- *   - 右 340px 三 tab：节点详情（色点/类型 chip/按边型分组出入邻居，行点击跳选；
- *     entry 类节点深链 /knowledge?file=&anchor=，page.tsx:274-279 惯例）/
- *     查询结果（ok/warn 左条结果卡；path 不可达 reason + 强边寻路注记；
- *     orphans/dangling top-50 清单 + count 口径）/ 使用说明简版。
+ *   - 左 300px：数据面胶囊（全图 / 查询切片——dump 可用即全图，点全图节点
+ *     自动下钻切切片，胶囊手动回全图；dump 不可用（upgrade_required 等）→
+ *     全图胶囊隐藏）+ 查询表单（sub 七值默认 orphans / anchor·anchor2 补全
+ *     输入 / edges all+16 型 / depth 1-3）+ 等价 CLI 提示条（黑底等宽动态拼，
+ *     全图态为 dump 命令）+ 预置演示六胶囊 + 图例（节点 10 类型与边 16 型
+ *     三档点击高亮）；
+ *   - 中：GraphCanvas（full=全图静态星空：dump 预计算坐标不跑力场 /
+ *     slice=力场切片）+ mode-chip（全图态「全图 N 节点 · 静态」）；
+ *   - 右 340px 三 tab：节点详情（色点/类型 chip/按边型分组出入邻居，行点击
+ *     跳选；entry 类节点深链 /knowledge?file=&anchor=，page.tsx:274-279 惯例）/
+ *     查询结果（full 态=图统计卡：dump.stats 节点/边/类型分布/四计数 +「点击
+ *     节点下钻」提示；切片态=ok/warn 左条结果卡，path 不可达 reason + 强边
+ *     寻路注记，orphans/dangling top-50 清单 + count 口径）/ 使用说明简版。
  *
- * 默认视图（D-006）：overview 可用即自动发起 orphans（warn 红环 + 右栏孤儿清单
- * + mode-chip「orphans · 孤儿节点」）；?preset=orphans|dangling 深链（ops 图卡
- * 清单行跳转目标）按 preset 发起。
+ * 默认视图（task-06）：dump 可用即进全图星空（D-002@v1）；不可用（reason=
+ * upgrade_required / available=false / 请求失败）→ 回退既有 orphans 默认链
+ * （D-006）；?preset=orphans|dangling 深链（ops 图卡清单行跳转目标）按 preset
+ * 发起，显式深链优先于全图默认。
  *
  * unavailable（D-001@v2 六稳定键）：全页降级卡复用 ops-dashboard 的
  * graphReasonText 六键文案；unbound 附「去绑定」入口（runtime 页）；
@@ -52,6 +57,7 @@ import {
 import { graphReasonText } from "@/components/knowledge/ops-dashboard";
 import { buttonVariants, Button } from "@/components/ui/button";
 import {
+  getKnowledgeGraphDump,
   getKnowledgeGraphNodes,
   getKnowledgeGraphOverview,
   getKnowledgeGraphQuery,
@@ -61,6 +67,7 @@ import {
   type GraphSub,
 } from "@/lib/knowledge";
 import {
+  knowledgeGraphDumpQueryKey,
   knowledgeGraphNodesQueryKey,
   knowledgeGraphOverviewQueryKey,
   knowledgeGraphQueryKey,
@@ -188,12 +195,12 @@ const DEFAULT_QUERY: GraphQueryState = {
 /** active=null 时的占位查询键（enabled=false 恒不发起）。 */
 const GRAPH_QUERY_NONE_KEY = ["knowledgeGraph", "query", "none"] as const;
 
-// ── 稳定空常量（GraphCanvas 以 nodes/edges/clusters 的 identity 变化判定新切片）──
+// ── 稳定空常量（GraphCanvas 以 nodes/edges 的 identity 变化判定新切片）──────
 const EMPTY_NODES: GraphNodeRef[] = [];
 const EMPTY_EDGES: GraphEdge[] = [];
 const EMPTY_SET: ReadonlySet<string> = new Set();
 
-/** 画布切片视图（lite 模式不用；warnIds=orphans/dangling 红环集）。 */
+/** 画布切片视图（full 模式不用；warnIds=orphans/dangling 红环集）。 */
 interface SliceView {
   nodes: GraphNodeRef[];
   edges: GraphEdge[];
@@ -451,26 +458,46 @@ export default function KnowledgeGraphPage({ params }: Props) {
   /** 图例/详情色点：themes.ts 单一源（GraphCanvas 注入同一组 CSS 变量）。 */
   const palette = useMemo(() => nodePalette(theme), [theme]);
 
-  // ── 数据链：overview（lite 数据面 + 页面可用性门）与查询切片 ──────────────
+  // ── 数据链：overview（页面可用性门）/ dump（全图数据面）/ 查询切片 ──────────
   const overviewQ = useQuery({
     queryKey: knowledgeGraphOverviewQueryKey(workspaceId),
     queryFn: () => getKnowledgeGraphOverview(workspaceId),
   });
-  const overviewData = overviewQ.data?.available ? overviewQ.data.data ?? null : null;
-  const summary = overviewData?.summary ?? null;
+
+  // 全图 dump（task-06 / D-002@v1）：overview 可用才发起（不可用整页降级，
+  // dump 无意义）；全量回包重 → staleTime 5 分钟（60s 请求超时在 lib 侧）。
+  const dumpQ = useQuery({
+    queryKey: knowledgeGraphDumpQueryKey(workspaceId),
+    queryFn: () => getKnowledgeGraphDump(workspaceId),
+    enabled: overviewQ.data?.available === true,
+    staleTime: 5 * 60_000,
+  });
+  const dumpData = dumpQ.data?.available ? dumpQ.data.data ?? null : null;
+  /** 全图可用（available=true 且有数据）；失败/不可用回退 orphans 默认链。 */
+  const dumpAvailable = dumpData != null;
+  /** 全图节点/边（identity 稳定——GraphCanvas 据此判定新数据面）。 */
+  const dumpNodes = useMemo(
+    () => dumpData?.nodes ?? EMPTY_NODES,
+    [dumpData],
+  );
+  const dumpEdges = useMemo(
+    () => dumpData?.edges ?? EMPTY_EDGES,
+    [dumpData],
+  );
+  const dumpStats = dumpData?.stats ?? null;
 
   const [draft, setDraft] = useState<GraphQueryState>(DEFAULT_QUERY);
   /** 已执行查询（null=未发起；发起即切切片模式）。 */
   const [active, setActive] = useState<GraphQueryState | null>(null);
-  /** lite ↔ 切片状态机（D-008@v2）：查询/点代表→slice；胶囊手动→lite。 */
-  const [dataMode, setDataMode] = useState<"lite" | "slice">("slice");
+  /** 全图 ↔ 切片状态机（task-06）：查询/点全图节点→slice；胶囊手动→full。 */
+  const [dataMode, setDataMode] = useState<"full" | "slice">("slice");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"detail" | "result" | "help">("result");
   const [legendNodeType, setLegendNodeType] = useState<string | null>(null);
   const [legendEdgeType, setLegendEdgeType] = useState<string | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
   const [layoutInfo, setLayoutInfo] = useState<{
-    engine: "force" | "static" | "lite";
+    engine: "force" | "static" | "full";
     nodeCount: number;
   } | null>(null);
 
@@ -485,7 +512,7 @@ export default function KnowledgeGraphPage({ params }: Props) {
     setRightTab("result");
   }, []);
 
-  /** lite 代表节点下钻：以该节点为锚点发起 neighbors（D-008@v2 状态机）。 */
+  /** 全图节点下钻：以该节点为锚点发起 neighbors（切切片，task-06 状态机）。 */
   const runNeighbors = useCallback(
     (anchor: string) => {
       runQuery({ ...DEFAULT_QUERY, sub: "neighbors", anchor });
@@ -493,18 +520,26 @@ export default function KnowledgeGraphPage({ params }: Props) {
     [runQuery],
   );
 
-  // 默认视图（D-006）：overview 可用即自动发起（?preset=dangling 深链优先，
-  // 缺省 orphans）——只在首次可用落定时执行一次（bootstrappedRef 守卫）。
+  // 默认视图（task-06 / D-002@v1）：overview 可用且 dump 定局后执行一次
+  //（bootstrappedRef 守卫）——?preset 深链优先（ops 图卡清单行显式意图）；
+  // dump 可用 → 全图星空；不可用（upgrade_required / available=false / 失败）
+  // → 回退既有 orphans 默认链（D-006）。
   const bootstrappedRef = useRef(false);
   useEffect(() => {
     if (bootstrappedRef.current || !overviewQ.data?.available) return;
+    if (dumpQ.isPending) return; // 等 dump 定局再决定首视图
     bootstrappedRef.current = true;
     const preset = searchParams.get("preset");
+    if (!preset && dumpAvailable) {
+      setDataMode("full");
+      setRightTab("result");
+      return;
+    }
     const sub: GraphSub = preset === "dangling" ? "dangling" : "orphans";
     runQuery({ ...DEFAULT_QUERY, sub });
     // runQuery 稳定（setState-only）；searchParams 仅首载消费一次。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overviewQ.data, runQuery]);
+  }, [overviewQ.data, dumpQ.isPending, dumpAvailable, runQuery]);
 
   // ── 查询切片数据链（active 进 key；norm 参数与 key 同源）─────────────────
   const activeParams = useMemo(() => {
@@ -547,7 +582,6 @@ export default function KnowledgeGraphPage({ params }: Props) {
     [activeParams, queryQ.data],
   );
   const nodeMap = useMemo(() => new Map(slice.nodes.map((n) => [n.id, n] as const)), [slice]);
-  const clusters = useMemo(() => summary?.clusters ?? [], [summary]);
 
   // ── 高亮集：选中一跳邻域 ∪ 图例节点类型 ∪ 图例边型（原型语义合并）────────
   const highlight = useMemo(() => {
@@ -599,10 +633,10 @@ export default function KnowledgeGraphPage({ params }: Props) {
     return [...groups.values()];
   }, [selectedId, slice]);
 
-  /** 画布节点选择：lite 模式代表节点=下钻 neighbors；切片模式=选中看详情。 */
+  /** 画布节点选择：全图模式=下钻 neighbors（切切片）；切片模式=选中看详情。 */
   const handleCanvasSelect = useCallback(
     (id: string | null) => {
-      if (dataMode === "lite") {
+      if (dataMode === "full") {
         if (id) runNeighbors(id);
         return;
       }
@@ -612,8 +646,9 @@ export default function KnowledgeGraphPage({ params }: Props) {
     [dataMode, runNeighbors],
   );
 
-  const goLite = useCallback(() => {
-    setDataMode("lite");
+  /** 胶囊手动回全图（状态机钉死：只有胶囊回全图）。 */
+  const goFull = useCallback(() => {
+    setDataMode("full");
     setSelectedId(null);
     setLegendNodeType(null);
     setLegendEdgeType(null);
@@ -621,20 +656,27 @@ export default function KnowledgeGraphPage({ params }: Props) {
   }, []);
 
   const engineText =
-    layoutInfo?.engine === "static"
+    layoutInfo?.engine === "static" || layoutInfo?.engine === "full"
       ? "静态布局"
-      : layoutInfo?.engine === "lite"
-        ? "lite 总览"
-        : "力场";
+      : "力场";
+  /** 全图 by_type 分布前几行（stats 卡类型分布，count 降序 top-6）。 */
+  const byTypeRows = useMemo(() => {
+    if (!dumpStats) return [];
+    return Object.entries(dumpStats.by_type ?? {})
+      .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+      .slice(0, 6);
+  }, [dumpStats]);
   const chipText =
-    dataMode === "lite"
-      ? `总览 lite · ${clusters.length} 簇 · 代表为度数前 5`
+    dataMode === "full"
+      ? `全图 ${dumpStats ? dumpStats.nodes : 0} 节点 · 静态`
       : `${active ? subTitle(active) : "查询切片"}${
           layoutInfo ? ` · ${layoutInfo.nodeCount} 节点 · ${engineText}` : ""
         }`;
 
-  // CLI 提示条（黑底等宽，动态拼当前 draft；非缺省旗标才出现）。
+  // CLI 提示条（黑底等宽，动态拼当前 draft；非缺省旗标才出现）。全图态为
+  // dump 命令（等价 CLI 语义：本页全图 = CLI dump --layout 产物）。
   const cliCommand = useMemo(() => {
+    if (dataMode === "full") return "sillyspec knowledge graph dump --layout";
     const parts = ["sillyspec", "knowledge", "graph", draft.sub];
     if (draft.anchor.trim()) parts.push(`"${draft.anchor.trim()}"`);
     if (draft.sub === "path" && draft.anchor2.trim()) parts.push(`"${draft.anchor2.trim()}"`);
@@ -642,7 +684,7 @@ export default function KnowledgeGraphPage({ params }: Props) {
     if (draft.depth !== 1) parts.push(`--depth ${draft.depth}`);
     parts.push("--json");
     return parts.join(" ");
-  }, [draft]);
+  }, [dataMode, draft]);
 
   const canRun = !(SUB_NEEDS_ANCHOR.has(draft.sub) && draft.anchor.trim() === "");
   const runDraft = useCallback(() => {
@@ -709,7 +751,7 @@ export default function KnowledgeGraphPage({ params }: Props) {
     );
   }
 
-  const lite = dataMode === "lite";
+  const full = dataMode === "full";
   const queryEnvelope = queryQ.data;
 
   return (
@@ -741,37 +783,37 @@ export default function KnowledgeGraphPage({ params }: Props) {
       <div className="flex min-h-[560px] flex-col gap-3 lg:h-[calc(100vh-235px)] lg:flex-row">
         {/* ── 左栏 300px：数据面 / 查询表单 / 预置演示 / 图例 ── */}
         <div className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto lg:w-[300px]">
-          {/* 数据面胶囊（D-008@v2 状态机；summary=null 旧 CLI 时 lite 胶囊隐藏） */}
+          {/* 数据面胶囊（task-06 状态机；dump 不可用→全图胶囊隐藏，回退切片链） */}
           <div className="rounded-lg border border-border bg-card p-3 shadow-sm">
             <div className="mb-2 flex items-baseline justify-between">
               <span className="text-xs font-bold">🗂 数据面</span>
               <span className="text-[10px] text-muted-foreground/70">daemon-rpc 单源</span>
             </div>
             <div className="flex gap-1.5" role="group" aria-label="数据面模式">
-              {summary ? (
+              {dumpAvailable ? (
                 <button
                   type="button"
-                  data-testid="mode-capsule-lite"
-                  aria-pressed={lite}
-                  onClick={goLite}
+                  data-testid="mode-capsule-full"
+                  aria-pressed={full}
+                  onClick={goFull}
                   className={cn(
                     "rounded-full border px-2.5 py-1 text-[11px] transition-colors",
-                    lite
+                    full
                       ? "border-brand-400 bg-brand-50 font-semibold text-brand-700"
                       : "border-border text-muted-foreground hover:border-brand-300 hover:text-brand-700",
                   )}
                 >
-                  总览 lite
+                  全图
                 </button>
               ) : null}
               <button
                 type="button"
                 data-testid="mode-capsule-slice"
-                aria-pressed={!lite}
+                aria-pressed={!full}
                 onClick={() => setDataMode("slice")}
                 className={cn(
                   "rounded-full border px-2.5 py-1 text-[11px] transition-colors",
-                  !lite
+                  !full
                     ? "border-brand-400 bg-brand-50 font-semibold text-brand-700"
                     : "border-border text-muted-foreground hover:border-brand-300 hover:text-brand-700",
                 )}
@@ -780,8 +822,8 @@ export default function KnowledgeGraphPage({ params }: Props) {
               </button>
             </div>
             <p className="mt-2 text-[10.5px] leading-4 text-muted-foreground/80">
-              {lite
-                ? `全图 ${summary ? `${summary.nodes} 节点 · ${summary.edges} 边` : ""}——簇气泡代表节点为度数前 5，点击代表下钻 neighbors`
+              {full
+                ? `全图 ${dumpStats ? `${dumpStats.nodes} 节点 · ${dumpStats.edges} 边` : ""}——CLI 预计算坐标静态星空，点击节点下钻 neighbors`
                 : "切片查询驱动 · 力场上限 200 节点，超限确定性静态布局"}
             </p>
           </div>
@@ -1026,13 +1068,12 @@ export default function KnowledgeGraphPage({ params }: Props) {
         <div className="relative min-h-[420px] flex-1 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
           <GraphCanvas
             className="absolute inset-0"
-            nodes={lite ? EMPTY_NODES : slice.nodes}
-            edges={lite ? EMPTY_EDGES : slice.edges}
-            mode={lite ? "lite" : "slice"}
-            clusters={lite ? clusters : undefined}
+            nodes={full ? dumpNodes : slice.nodes}
+            edges={full ? dumpEdges : slice.edges}
+            mode={full ? "full" : "slice"}
             selectedId={selectedId}
-            warnIds={slice.warnIds}
-            highlight={highlight}
+            warnIds={full ? EMPTY_SET : slice.warnIds}
+            highlight={full ? null : highlight}
             onSelect={handleCanvasSelect}
             onLayoutMode={setLayoutInfo}
             fitSignal={fitSignal}
@@ -1059,7 +1100,9 @@ export default function KnowledgeGraphPage({ params }: Props) {
             ) : null}
           </div>
           <p className="pointer-events-none absolute bottom-2 right-3 text-[10px] text-muted-foreground/60">
-            拖拽平移 · 滚轮缩放 · 点击节点看详情 · 拖动节点扰动力场
+            {full
+              ? "拖拽平移 · 滚轮缩放 · 点击节点下钻 · 远视野自动隐藏边线"
+              : "拖拽平移 · 滚轮缩放 · 点击节点看详情 · 拖动节点扰动力场"}
           </p>
         </div>
 
@@ -1208,14 +1251,16 @@ export default function KnowledgeGraphPage({ params }: Props) {
                 <div>
                   <p className="font-semibold text-foreground">数据面两模式</p>
                   <p>
-                    「总览 lite」＝全图簇气泡总览（代表节点为度数前 5，点击代表下钻
-                    neighbors）；「查询切片」＝查询驱动力场切片，&gt;200 节点自动确定性静态布局。
+                    「全图」＝dump 静态星空（CLI 预计算坐标不跑力场，点击节点下钻
+                    neighbors；远视野自动隐藏边线）；「查询切片」＝查询驱动力场切片，
+                    &gt;200 节点自动确定性静态布局。
                   </p>
                 </div>
                 <div>
-                  <p className="font-semibold text-foreground">默认视图与治理</p>
+                  <p className="font-semibold text-foreground">默认视图与回退</p>
                   <p>
-                    进入页面自动执行 orphans——孤儿条目红环警示，右栏「查询结果」为
+                    进入页面默认加载全图 dump；daemon/CLI 版本过旧（upgrade_required）
+                    时回退自动执行 orphans——孤儿条目红环警示，右栏「查询结果」为
                     top-50 清单；完整治理走 CLI（等价命令见左栏提示条）。
                   </p>
                 </div>
@@ -1235,61 +1280,56 @@ export default function KnowledgeGraphPage({ params }: Props) {
                 </div>
               </div>
             ) : (
-              /* ── 查询结果 tab（lite 总览面板 / 切片查询结果卡）── */
-              lite ? (
-                summary ? (
-                  <div>
-                    <div className="text-sm font-semibold">全图 lite 总览</div>
-                    <p className="mt-1 font-mono text-[10.5px] text-muted-foreground">
-                      {summary.nodes} 节点 · {summary.edges} 边 · 孤儿 {summary.orphans} ·
-                      悬空引用 {summary.dangling_refs}
-                    </p>
-                    <div className="mt-2.5 space-y-2.5">
-                      {clusters.map((c) => (
-                        <div
-                          key={c.key}
-                          data-testid="lite-cluster"
-                          className="rounded-md border border-border/60 p-2"
-                        >
-                          <div className="flex items-baseline justify-between gap-2">
-                            <span
-                              className="min-w-0 truncate text-[11px] font-semibold"
-                              title={`${c.key} · ${c.label}`}
-                            >
-                              {c.label || c.key}
-                            </span>
-                            <span className="shrink-0 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold text-brand-700">
-                              {c.count} 节点
-                            </span>
-                          </div>
-                          <div className="mt-1.5 flex flex-wrap gap-1">
-                            {c.representatives.map((rep) => (
-                              <button
-                                key={rep.id}
-                                type="button"
-                                data-testid="lite-rep-row"
-                                title={`${rep.id}——点击以该节点发起 neighbors`}
-                                onClick={() => runNeighbors(rep.id)}
-                                className="flex items-center gap-1 rounded-full border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:border-brand-400 hover:bg-brand-50/60 hover:text-brand-700"
-                              >
-                                <span
-                                  aria-hidden
-                                  className="h-1.5 w-1.5 rounded-full"
-                                  style={{
-                                    backgroundColor: palette[nodeTypeIndex(rep.type ?? "")],
-                                  }}
-                                />
-                                {rep.label || rep.id}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
+              /* ── 查询结果 tab（full 图统计卡 / 切片查询结果卡）── */
+              full ? (
+                dumpStats ? (
+                  <div data-testid="full-stats">
+                    <div data-testid="result-title" className="text-sm font-semibold">
+                      全图 · {dumpStats.nodes} 节点 · {dumpStats.edges} 边
                     </div>
+                    <p className="mt-1 text-[10.5px] leading-4 text-muted-foreground">
+                      CLI 预计算坐标静态星空（dump --layout 同源）
+                    </p>
+                    <div className="mt-2.5 space-y-1.5 rounded-md border border-border/60 p-2">
+                      <div className="text-[11px] font-semibold">治理四计数</div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
+                        <span>孤儿 {dumpStats.orphans}</span>
+                        <span>模块文档缺口 {dumpStats.module_doc_gaps}</span>
+                        <span>changelog 悬空 {dumpStats.changelog_danglings}</span>
+                        <span>悬空引用 {dumpStats.dangling_refs}</span>
+                      </div>
+                    </div>
+                    {byTypeRows.length > 0 ? (
+                      <div className="mt-2 rounded-md border border-border/60 p-2">
+                        <div className="text-[11px] font-semibold">节点类型分布（前几）</div>
+                        <div className="mt-1 space-y-0.5">
+                          {byTypeRows.map(([type, count]) => (
+                            <div
+                              key={type}
+                              data-testid="full-stats-bytype"
+                              className="flex items-center gap-2 text-[10.5px]"
+                            >
+                              <span
+                                aria-hidden
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{
+                                  backgroundColor: palette[nodeTypeIndex(type)],
+                                }}
+                              />
+                              <span className="font-mono">{type}</span>
+                              <span className="ml-auto text-muted-foreground">{count}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    <p className="mt-2.5 text-[10.5px] leading-4 text-muted-foreground">
+                      点击画布节点，下钻该节点 neighbors 一跳切片。
+                    </p>
                   </div>
                 ) : (
                   <p className="py-8 text-center text-[11px] text-muted-foreground">
-                    总览 lite 不可用（旧 CLI）。
+                    全图数据不可用（旧 daemon / CLI）。
                   </p>
                 )
               ) : !active ? (

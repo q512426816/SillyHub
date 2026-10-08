@@ -12,6 +12,9 @@
  * cli_feature_missing:summary|nodes；method_unregistered 是 daemon 未注册 handler
  * 的平台侧场景、非 handler 能抛，由 daemon.ts 注册 + _dispatchRpc 保证——此处仅
  * 注释说明，不造用例）、ok:false 信封→internal、清单 top-50 截断 count 保真。
+ * 2026-10-09-knowledge-graph-fullmap task-02：dump 用例组——白名单放行 + 拼串
+ * 全字面断言（`dump --layout --json`，无锚点无 search）、layout=false 与缺省拒
+ * 且不 spawn、大回包（>1000 items）全量透传（旁路 orphans/dangling top-50 裁剪）。
  * sillyspecCmd 与 rootsProvider 全注入（不发真子进程）——RuntimeHandler 测试范式。
  */
 import { describe, expect, it, vi } from 'vitest';
@@ -363,6 +366,53 @@ describe('knowledge.graph', () => {
     };
     expect(rs.orphans).toHaveLength(2);
     expect(rs.count).toBe(4);
+  });
+
+  // ── dump 用例组（2026-10-09-knowledge-graph-fullmap task-02，FR-02/D-002@v1）──
+
+  it('⑩ dump 白名单放行：拼串全字面 `dump --layout --json`（无锚点无 search）+ cwd=仓库根', async () => {
+    const cwds: string[] = [];
+    const stdout = GRAPH_OK({ query: { sub: 'dump', layout: true }, nodes: [], edges: [], orphans: [], dangling: [] });
+    const { handler, sillyspecCmd } = mk({ ok: true, stdout, stderr: '', timedOut: false }, cwds);
+    const r = await handler.graph('ws-1', { sub: 'dump', layout: true }, 'C:/repo/x');
+    expect((r.graph as { ok: boolean }).ok).toBe(true);
+    expect(sillyspecCmd).toHaveBeenCalledOnce();
+    expect(String(sillyspecCmd.mock.calls[0]?.[0])).toBe('sillyspec knowledge graph dump --layout --json');
+    expect(cwds[0]).toBe('C:/repo/x');
+    // 杂入参数不进拼串（dump 无自由串入参——anchor/search/edges 等被消毒后丢弃）
+    await handler.graph('ws-1', { sub: 'dump', layout: true, anchor: 'FR-core-engine-001', search: 'x' }, 'C:/repo/x');
+    expect(String(sillyspecCmd.mock.calls[1]?.[0])).toBe('sillyspec knowledge graph dump --layout --json');
+  });
+
+  it('⑩ dump layout=false / 缺省 → validation_rejected 且不 spawn', async () => {
+    const { handler, sillyspecCmd } = mk({ ok: true, stdout: GRAPH_OK(), stderr: '', timedOut: false });
+    await expect(handler.graph('ws-1', { sub: 'dump', layout: false }, 'C:/repo/x')).rejects.toMatchObject({
+      code: 'validation_rejected',
+    });
+    await expect(handler.graph('ws-1', { sub: 'dump' }, 'C:/repo/x')).rejects.toMatchObject({
+      code: 'validation_rejected',
+    });
+    expect(sillyspecCmd).not.toHaveBeenCalled();
+  });
+
+  it('⑩ dump 回包 >1000 items 全量透传（旁路 orphans/dangling top-50 裁剪，count 保真）', async () => {
+    const bigDump = JSON.stringify({
+      ok: true,
+      query: { sub: 'dump', layout: true },
+      count: 1807,
+      orphans: Array.from({ length: 1200 }, (_, i) => ({ id: `decision:decisions/x.md#D-${i}@v1`, type: 'decision' })),
+      dangling: Array.from({ length: 1100 }, (_, i) => ({ id: `doc:refs/x-${i}.md`, type: 'doc' })),
+    });
+    const { handler } = mk({ ok: true, stdout: bigDump, stderr: '', timedOut: false });
+    const r = (await handler.graph('ws-1', { sub: 'dump', layout: true }, 'C:/repo/x')).graph as {
+      count: number;
+      orphans: { id: string }[];
+      dangling: { id: string }[];
+    };
+    expect(r.orphans).toHaveLength(1200);
+    expect(r.orphans[1199]?.id).toBe('decision:decisions/x.md#D-1199@v1');
+    expect(r.dangling).toHaveLength(1100);
+    expect(r.count).toBe(1807);
   });
 
   it('root 防线复用：越界/缺省 → forbidden 且不 spawn（digest 同款两道防线）', async () => {

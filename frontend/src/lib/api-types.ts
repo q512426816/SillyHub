@@ -7962,6 +7962,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/knowledge/graph/dump": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Graph Dump
+         * @description 全图 dump（星空总览数据源）：CLI 离线预计算坐标的全量 nodes/edges/stats。
+         *
+         *     **手动 gzip 压缩**（2026-10-09-knowledge-graph-fullmap task-03 / Grill F-00：
+         *     禁止全站 GZipMiddleware——SSE 流经压缩中间件有 zlib 缓冲致事件批量延迟
+         *     风险，压缩面仅限本端点）：信封 JSON 化（ensure_ascii=False 紧凑分隔符）后
+         *     ``gzip.compress``，``Content-Encoding: gzip`` 响应头（浏览器 fetch 透明解压）；
+         *     **无条件压缩**（不可用 data=None 小包同构处理，一致性优先）；``Vary`` 标注
+         *     缓存按 Accept-Encoding 区分。旧 CLI（cli_feature_missing:dump）恒 200 信封
+         *     reason=upgrade_required，前端隐藏全图胶囊回退 orphans。
+         */
+        get: operations["get_knowledge_graph_dump_api_workspaces__workspace_id__knowledge_graph_dump_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/knowledge/governance": {
         parameters: {
             query?: never;
@@ -16812,6 +16840,46 @@ export interface components {
             status: string;
         };
         /**
+         * GraphDumpData
+         * @description dump 数据：nodes（含坐标）/edges/stats（与 summary 同源聚合，复用归一）。
+         */
+        GraphDumpData: {
+            /** Nodes */
+            nodes: components["schemas"]["GraphDumpNode"][];
+            /** Edges */
+            edges: components["schemas"]["GraphEdge"][];
+            stats: components["schemas"]["GraphSummary"];
+        };
+        /**
+         * GraphDumpNode
+         * @description 全图节点：GraphNodeRef + CLI 预计算确定性布局坐标（x/y，Math.round 整数值
+         *     传输为 float）。
+         */
+        GraphDumpNode: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default
+             */
+            type: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /**
+             * X
+             * @default 0
+             */
+            x: number;
+            /**
+             * Y
+             * @default 0
+             */
+            y: number;
+        };
+        /**
          * GraphEdge
          * @description 边（s→t 定方向；strength=strong/medium/weak 三档，前端线型派生依据）。
          */
@@ -16827,6 +16895,20 @@ export interface components {
              * @default
              */
             strength: string;
+        };
+        /** GraphEnvelope[GraphDumpData] */
+        GraphEnvelope_GraphDumpData_: {
+            /** Available */
+            available: boolean;
+            /** Reason */
+            reason?: ("unbound" | "offline" | "timeout" | "upgrade_required" | "invalid_input" | "rpc_error") | null;
+            /**
+             * Source
+             * @default daemon-rpc
+             * @constant
+             */
+            source: "daemon-rpc";
+            data?: components["schemas"]["GraphDumpData"] | null;
         };
         /** GraphEnvelope[GraphNodesData] */
         GraphEnvelope_GraphNodesData_: {
@@ -41610,6 +41692,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GraphEnvelope_GraphNodesData_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_graph_dump_api_workspaces__workspace_id__knowledge_graph_dump_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphEnvelope_GraphDumpData_"];
                 };
             };
             /** @description Validation Error */

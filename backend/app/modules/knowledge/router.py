@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import gzip
+import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +23,7 @@ from app.modules.knowledge.schema import (
     DistillQuickEntryList,
     DistillQuickEntryOut,
     DistillTaskRead,
+    GraphDumpOut,
     GraphNodesOut,
     GraphOverviewOut,
     GraphQueryOut,
@@ -256,8 +259,9 @@ async def get_knowledge_stats(
 
 # ── 知识图谱端点（2026-10-08-platform-knowledge-graph task-02 / D-001@v2）────────
 #
-# 字面量路由注册序铁律（文件首注释同款）：/knowledge/graph/* 三端点必须在下方
-# GET /knowledge/{filename:path} 通配之前，否则 graph/query 被当作 filename=
+# 字面量路由注册序铁律（文件首注释同款）：/knowledge/graph/* 四端点（query/
+# overview/nodes + 2026-10-09-knowledge-graph-fullmap task-03 的 dump）必须在
+# 下方 GET /knowledge/{filename:path} 通配之前，否则 graph/query 被当作 filename=
 # "graph/query" 吞掉。RPC 直采单源真相（无本地回退）：不可用态 HTTP 200 恒回
 # available=false + reason 六稳定键信封，前端按 reason 分支不弹错。
 
@@ -312,6 +316,34 @@ async def get_knowledge_graph_nodes(
     """节点搜索（锚点自动补全数据源；不可用时 data=None，前端静默禁用补全）。"""
     service = KnowledgeGraphService(session)
     return await service.nodes(workspace_id, user.id, search, limit=limit)
+
+
+@router.get("/knowledge/graph/dump", response_model=GraphDumpOut)
+async def get_knowledge_graph_dump(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
+) -> Response:
+    """全图 dump（星空总览数据源）：CLI 离线预计算坐标的全量 nodes/edges/stats。
+
+    **手动 gzip 压缩**（2026-10-09-knowledge-graph-fullmap task-03 / Grill F-00：
+    禁止全站 GZipMiddleware——SSE 流经压缩中间件有 zlib 缓冲致事件批量延迟
+    风险，压缩面仅限本端点）：信封 JSON 化（ensure_ascii=False 紧凑分隔符）后
+    ``gzip.compress``，``Content-Encoding: gzip`` 响应头（浏览器 fetch 透明解压）；
+    **无条件压缩**（不可用 data=None 小包同构处理，一致性优先）；``Vary`` 标注
+    缓存按 Accept-Encoding 区分。旧 CLI（cli_feature_missing:dump）恒 200 信封
+    reason=upgrade_required，前端隐藏全图胶囊回退 orphans。
+    """
+    service = KnowledgeGraphService(session)
+    envelope = await service.dump(workspace_id, user.id)
+    payload = json.dumps(
+        envelope.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":")
+    )
+    return Response(
+        content=gzip.compress(payload.encode("utf-8")),
+        media_type="application/json",
+        headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
+    )
 
 
 # ── 治理信号（2026-09-27-knowledge-governance-cards 三层治理②层平台出口）──────

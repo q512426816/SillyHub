@@ -1,7 +1,8 @@
-"""知识图谱三端点（change 2026-10-08-platform-knowledge-graph task-02/task-03）。
+"""知识图谱三端点（change 2026-10-08-platform-knowledge-graph task-02/task-03）
++ dump 端点组（2026-10-09-knowledge-graph-fullmap task-03）。
 
-GET /workspaces/{ws}/knowledge/graph/{query,overview,nodes} 的 RPC mock 全分支测试
-（范式复用 test_governance.py 的 _FakeHub + monkeypatch _resolve_binding /
+GET /workspaces/{ws}/knowledge/graph/{query,overview,nodes,dump} 的 RPC mock 全分支
+测试（范式复用 test_governance.py 的 _FakeHub + monkeypatch _resolve_binding /
 resolve_root_path_for_daemon 恒等——不发真 RPC）：
 
 - 五查询 happy path：CLI ``--json`` 实际形状（sillyspec@3.32.1 knowledge-graph.js）
@@ -13,9 +14,14 @@ resolve_root_path_for_daemon 恒等——不发真 RPC）：
   DaemonRpcConflict 兜底）；
 - overview 三 RPC 逐条容错组合（summary 单独降级 / orphans 单独降级 / 全失败按
   首错误整信封降级）；
-- 路由序（字面量不被 {filename:path} 通配吞）/ 权限 403 / nodes 透传 / 参数 422。
+- 路由序（字面量不被 {filename:path} 通配吞）/ 权限 403 / nodes 透传 / 参数 422；
+- dump 组：手动 gzip（Content-Encoding 头 + httpx 透明解压可还原=真 gzip 钉）、
+  大 payload（>100KB）压缩生效（spy gzip.compress 入/出字节）、压缩面未外溢
+  反例（既有小端点无 Content-Encoding 头，Grill F-00）、cli_feature_missing:dump
+  →upgrade_required 显式分支（区别 cli_feature_missing:* 其它值的 rpc_error 兜底）。
 """
 
+import gzip
 import shutil
 import uuid
 from pathlib import Path
@@ -135,6 +141,66 @@ _CLI_NODES = {
         {"id": "knowledge/fr/core.md#FR-core-001", "type": "fr", "label": "FR-core-001"},
     ],
 }
+
+# dump 形状（2026-10-09-knowledge-graph-fullmap task-03，CLI 离线预计算坐标）：
+# {ok, nodes:[{id,type,label,x,y}], edges, stats}——stats 与 summary 同源（复用
+# _CLI_SUMMARY 的 stats 断言 byType→by_type 归一在 dump 链路同样生效）。
+_CLI_DUMP = {
+    "ok": True,
+    "query": {"sub": "dump", "layout": True},
+    "nodes": [
+        # x/y 为 CLI Math.round 整数值（int 进 float DTO 承载）
+        {"id": "module:backend", "type": "module", "label": "backend", "x": 120, "y": -50},
+        {
+            "id": "knowledge/fr/core.md#FR-core-001",
+            "type": "fr",
+            "label": "FR-core-001",
+            "x": 300.5,
+            "y": 88.25,
+        },
+    ],
+    "edges": [
+        {
+            "s": "changes/2026-10-09-fullmap/design.md",
+            "t": "knowledge/fr/core.md#FR-core-001",
+            "type": "describes",
+            "strength": "medium",
+        },
+        {
+            "s": "decisions/daemon.md#D-001",
+            "t": "knowledge/fr/core.md#FR-core-001",
+            "type": "supersedes",
+            "strength": "strong",
+        },
+    ],
+    "stats": _CLI_SUMMARY["stats"],
+}
+
+
+def _big_dump_graph(node_count: int = 1600) -> dict:
+    """>100KB 大 payload mock（确定性生成：重复 id 模式压缩率高，gzip 比断言稳）。"""
+    nodes = [
+        {
+            "id": f"knowledge/gen/file-{i // 50:04d}.md#FR-gen-{i:05d}",
+            "type": "fr",
+            "label": f"FR-gen-{i:05d}·全图节点",
+            "x": float((i * 37) % 5000),
+            "y": float((i * 53) % 5000),
+        }
+        for i in range(node_count)
+    ]
+    edges = [
+        {"s": nodes[i]["id"], "t": nodes[i + 1]["id"], "type": "describes", "strength": "strong"}
+        for i in range(node_count - 1)
+    ]
+    return {
+        "ok": True,
+        "query": {"sub": "dump", "layout": True},
+        "nodes": nodes,
+        "edges": edges,
+        "stats": _CLI_SUMMARY["stats"],
+    }
+
 
 _BY_SUB = {
     "neighbors": _CLI_NEIGHBORS,
@@ -665,3 +731,194 @@ async def test_graph_query_param_validation_422(client, db_session, tmp_path, au
         base + "/knowledge/graph/nodes", params={"search": "x", "limit": 0}, headers=auth_headers
     )
     assert resp.status_code == 422
+
+
+# ── ⑦ dump 端点组（2026-10-09-knowledge-graph-fullmap task-03 / Grill F-00）────
+#
+# 端点手动 gzip（无全站中间件）：httpx 对 Content-Encoding: gzip 响应透明解压——
+# ``resp.json()`` 成功即证明 body 真为 gzip（非 gzip body 配该头会在解压时抛错），
+# 配合 ``content-encoding`` 头断言双钉；压缩「生效」的量化断言用 spy gzip.compress
+# 记录入/出字节数。
+
+
+async def test_graph_dump_happy_path_gzip_envelope(
+    client, db_session, tmp_path, auth_headers, monkeypatch
+) -> None:
+    """dump happy：Content-Encoding=gzip + 解压后信封 data.nodes 逐字段（含 x/y）。"""
+    hub = _mock_graph(monkeypatch, lambda m, p: {"graph": _CLI_DUMP})
+    ws = await _mk_ws(client, db_session, tmp_path, auth_headers)
+    resp = await client.get(
+        f"/api/workspaces/{ws['ws_id']}/knowledge/graph/dump", headers=auth_headers
+    )
+    assert resp.status_code == 200, resp.text
+    # 恒带压缩头（无条件压缩语义，Grill F-00：压缩面仅限本端点）
+    assert resp.headers["content-encoding"] == "gzip"
+    assert resp.headers["vary"] == "Accept-Encoding"
+    assert resp.headers["content-type"].startswith("application/json")
+    body = resp.json()  # httpx 透明解压；成功即 body 真为 gzip
+    assert body["available"] is True
+    assert body["reason"] is None
+    assert body["source"] == "daemon-rpc"
+    data = body["data"]
+    # nodes 逐字段：int 坐标 → float 承载；label/type/id 直传
+    assert data["nodes"][0] == {
+        "id": "module:backend",
+        "type": "module",
+        "label": "backend",
+        "x": 120.0,
+        "y": -50.0,
+    }
+    assert data["nodes"][1] == {
+        "id": "knowledge/fr/core.md#FR-core-001",
+        "type": "fr",
+        "label": "FR-core-001",
+        "x": 300.5,
+        "y": 88.25,
+    }
+    assert data["edges"] == [
+        {
+            "s": "changes/2026-10-09-fullmap/design.md",
+            "t": "knowledge/fr/core.md#FR-core-001",
+            "type": "describes",
+            "strength": "medium",
+        },
+        {
+            "s": "decisions/daemon.md#D-001",
+            "t": "knowledge/fr/core.md#FR-core-001",
+            "type": "supersedes",
+            "strength": "strong",
+        },
+    ]
+    # stats 与 summary 同源归一（byType→by_type 在 dump 链路同样生效）
+    assert data["stats"]["by_type"] == {"fr": 5, "decision": 4}
+    assert data["stats"]["by_edge"] == {"describes": 8, "supersedes": 2}
+    assert data["stats"]["nodes"] == 12
+    assert data["stats"]["clusters"][0]["key"] == "fr:core"
+    # 单 RPC 契约（sub=dump + layout=true 必带）
+    assert len(hub.calls) == 1
+    method, params = hub.calls[0]
+    assert method == "knowledge.graph"
+    assert params["sub"] == "dump"
+    assert params["layout"] is True
+    assert params["root"] == "/repo/graph"
+    assert params["workspace_id"] == ws["ws_id"]
+
+
+async def test_graph_dump_large_payload_compression_effective(
+    client, db_session, tmp_path, auth_headers, monkeypatch
+) -> None:
+    """>100KB 大 payload：压缩真实生效（spy 入/出字节，出 < 入/2）且解压可还原。"""
+    sizes: list[tuple[int, int]] = []
+    orig_compress = gzip.compress
+
+    def _spy_compress(data, *args, **kwargs):
+        out = orig_compress(data, *args, **kwargs)
+        sizes.append((len(data), len(out)))
+        return out
+
+    monkeypatch.setattr(gzip, "compress", _spy_compress)
+    big = _big_dump_graph()
+    _mock_graph(monkeypatch, lambda m, p: {"graph": big})
+    ws = await _mk_ws(client, db_session, tmp_path, auth_headers)
+    resp = await client.get(
+        f"/api/workspaces/{ws['ws_id']}/knowledge/graph/dump", headers=auth_headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-encoding"] == "gzip"
+    # 端点内单次压缩：入参 >100KB（真实全图量级），出参 < 入参/2（确定性重复
+    # id 模式 gzip 压缩比远高于此，断言留足余量防版本抖动）。
+    assert len(sizes) == 1
+    raw_len, wire_len = sizes[0]
+    assert raw_len > 100 * 1024, raw_len
+    assert wire_len * 2 < raw_len, (wire_len, raw_len)
+    # 解压可还原：节点/边数量与首末 id 逐点核对
+    body = resp.json()
+    assert body["available"] is True
+    data = body["data"]
+    assert len(data["nodes"]) == len(big["nodes"])
+    assert len(data["edges"]) == len(big["edges"])
+    assert data["nodes"][0]["id"] == big["nodes"][0]["id"]
+    assert data["nodes"][-1]["id"] == big["nodes"][-1]["id"]
+    assert data["nodes"][0]["x"] == 0.0  # (0*37)%5000 确定性坐标透传
+
+
+async def test_graph_dump_existing_endpoints_no_content_encoding(
+    client, db_session, tmp_path, auth_headers
+) -> None:
+    """压缩面未外溢反例（Grill F-00）：既有小端点响应无 Content-Encoding 头——
+    不加全站 GZipMiddleware 的零回归钉（SSE 面同理由此中间件缺席而不受影响）。"""
+    ws = await _mk_ws(client, db_session, tmp_path, auth_headers)
+    # 全局小端点
+    resp = await client.get("/api/health")
+    assert resp.status_code == 200, resp.text
+    assert "content-encoding" not in resp.headers
+    # 既有 knowledge 端点（stats，2026-09-20 交付）
+    resp = await client.get(f"/api/workspaces/{ws['ws_id']}/knowledge/stats", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    assert "content-encoding" not in resp.headers
+    # 既有 graph 端点（query，未绑定自然态恒 200 信封）——同族小包不压缩对照
+    resp = await client.get(
+        f"/api/workspaces/{ws['ws_id']}/knowledge/graph/query",
+        params={"sub": "orphans"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert "content-encoding" not in resp.headers
+
+
+async def test_graph_dump_cli_feature_missing_upgrade_required(
+    client, db_session, tmp_path, auth_headers, monkeypatch
+) -> None:
+    """cli_feature_missing:dump 显式分支 → upgrade_required（区别 rpc_error 兜底）；
+    不可用小包信封同构走 gzip。"""
+    from app.modules.daemon.ws_hub import DaemonRpcRemoteError
+
+    ws = await _mk_ws(client, db_session, tmp_path, auth_headers)
+    url = f"/api/workspaces/{ws['ws_id']}/knowledge/graph/dump"
+
+    _mock_graph(
+        monkeypatch,
+        _raise(
+            DaemonRpcRemoteError({"code": "cli_feature_missing:dump", "message": "旧 CLI 无 dump"})
+        ),
+    )
+    resp = await client.get(url, headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-encoding"] == "gzip"  # data=None 小包也同构压缩
+    assert resp.json() == {
+        "available": False,
+        "reason": "upgrade_required",
+        "source": "daemon-rpc",
+        "data": None,
+    }
+
+    # 对照：非本端点 feature 的 cli_feature_missing:* 仍走 rpc_error 兜底
+    # （显式分支按 feature 域生效，非整族翻键）
+    _mock_graph(
+        monkeypatch,
+        _raise(
+            DaemonRpcRemoteError({"code": "cli_feature_missing:summary", "message": "子探测类"})
+        ),
+    )
+    resp = await client.get(url, headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["reason"] == "rpc_error"
+
+
+async def test_graph_dump_route_order_and_permission(
+    client, db_session, tmp_path, auth_headers
+) -> None:
+    """路由序：dump 200 信封（被 {filename:path} 通配吞则 get_knowledge 404）；
+    无 KNOWLEDGE_READ 普通用户 403。未绑定自然态信封也恒带压缩头。"""
+    ws = await _mk_ws(client, db_session, tmp_path, auth_headers)
+    url = f"/api/workspaces/{ws['ws_id']}/knowledge/graph/dump"
+    resp = await client.get(url, headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert set(body) == {"available", "reason", "source", "data"}
+    assert body["source"] == "daemon-rpc"
+    assert resp.headers["content-encoding"] == "gzip"
+
+    headers = await _plain_user_headers(db_session)
+    resp = await client.get(url, headers=headers)
+    assert resp.status_code == 403, resp.text

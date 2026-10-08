@@ -129,8 +129,12 @@ export const queryKeys = {
   // 2026-10-08-platform-knowledge-graph task-05：知识图谱三键（集中工厂惯例，
   // 凡影响查询结果的变量都进 key）。overview 键被图谱页（page.tsx）与
   // ops-dashboard 图卡共用——同键共享缓存零额外请求（D-004@v1）。
+  // 2026-10-09-knowledge-graph-fullmap task-04：dump 键加入 all 桶——全图
+  // 数据面与查询切片同族，后续失效入口 queryKeys.knowledgeGraph.dump。
   knowledgeGraph: {
     all: ["knowledgeGraph"] as const,
+    dump: (workspaceId: string) =>
+      ["knowledgeGraph", "dump", workspaceId] as const,
   },
 } as const;
 
@@ -169,4 +173,13 @@ export function knowledgeGraphNodesQueryKey(
   search: string,
 ) {
   return ["knowledgeGraph", "nodes", workspaceId, search] as const;
+}
+
+/**
+ * 全图 dump 键（2026-10-09-knowledge-graph-fullmap task-04；图谱页全图数据面
+ * 消费，staleTime 5min——全量回包重）。与 queryKeys.knowledgeGraph.dump 同一
+ * 结构（useQuery 用本函数，mutation 失效走 queryKeys 入口）。
+ */
+export function knowledgeGraphDumpQueryKey(workspaceId: string) {
+  return ["knowledgeGraph", "dump", workspaceId] as const;
 }

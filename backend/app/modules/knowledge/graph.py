@@ -21,6 +21,12 @@ CLI JSON → DTO 归一化（D-007@v1），按 sillyspec@3.32.1 src/knowledge-gr
 - ``path``：from/to 在 CLI ``query`` 子对象内；hops 即 ``{s,t,type}`` 直传。
 - overview 的 summary RPC 固定带 ``clusters: 50``（真图 883 簇，平台 lite 画布
   摆不下——Phase 0 契约「daemon/平台侧调 summary 固定传 --clusters 50」）。
+- ``dump``（2026-10-09-knowledge-graph-fullmap task-03）：``{ok, nodes:[{id,
+  type,label,x,y}], edges, stats}``——nodes 在 GraphNodeRef 基础上带预计算布局
+  坐标 x/y（Math.round 整数值，DTO float 承载）；stats 与 summary 同源，复用
+  _norm_summary 归一。异常映射区别：``cli_feature_missing:dump`` 显式分支归
+  upgrade_required（旧 CLI 版本态，Grill F-02），区别于其余 cli_feature_missing:*
+  子探测类的 rpc_error 兜底。
 """
 
 from __future__ import annotations
@@ -35,6 +41,8 @@ from app.modules.knowledge.schema import (
     GraphDanglingData,
     GraphDanglingItem,
     GraphDecisionRef,
+    GraphDumpData,
+    GraphDumpNode,
     GraphEdge,
     GraphEnvelope,
     GraphHop,
@@ -56,7 +64,7 @@ GRAPH_RPC_TIMEOUT = 60
 OVERVIEW_CLUSTERS_LIMIT = 50
 
 
-def _map_reason(exc: Exception) -> str:
+def _map_reason(exc: Exception, feature: str | None = None) -> str:
     """异常族 → reason 六稳定键（D-001@v2 映射表）。
 
     RuntimeNotBound→unbound；DaemonRuntimeOffline→offline；DaemonRpcTimeout 或
@@ -65,6 +73,11 @@ def _map_reason(exc: Exception) -> str:
     （消毒拒绝）→invalid_input；其余（internal / DaemonRpcConflict / 未知 code，
     含 cli_feature_missing:* 子探测类——该态在 overview 由 summary 子块单独吸收）
     →rpc_error。
+
+    ``feature``（dump 端点传 ``"dump"``）：``cli_feature_missing:<feature>`` 显式
+    分支归 upgrade_required（2026-10-09-knowledge-graph-fullmap / Grill F-02——
+    端点主子命令缺失=旧 CLI 版本态，与 cli_subcommand_missing 同键），区别于其余
+    cli_feature_missing:* 子探测类的 rpc_error 兜底；None 时无此分支（既有行为）。
     """
     from app.modules.daemon.ws_hub import (
         DaemonRpcRemoteError,
@@ -85,6 +98,8 @@ def _map_reason(exc: Exception) -> str:
             return "timeout"
         if code in ("method_unregistered", "cli_subcommand_missing"):
             return "upgrade_required"
+        if feature is not None and code == f"cli_feature_missing:{feature}":
+            return "upgrade_required"
         if code == "validation_rejected":
             return "invalid_input"
     return "rpc_error"
@@ -96,6 +111,12 @@ def _as_list(value: Any) -> list[Any]:
 
 def _as_int(value: Any, default: int = 0) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else default
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return default
 
 
 def _as_str(value: Any) -> str:
@@ -120,21 +141,26 @@ def _node_ref(item: Any) -> GraphNodeRef:
     return GraphNodeRef(id="", type="", label="")
 
 
+def _edges_of(graph: dict[str, Any]) -> list[GraphEdge]:
+    """CLI ``edges`` 数组 → GraphEdge 列表（neighbors/dump 共用形状直传）。"""
+    return [
+        GraphEdge(
+            s=_as_str(e.get("s")),
+            t=_as_str(e.get("t")),
+            type=_as_str(e.get("type")),
+            strength=_as_str(e.get("strength")),
+        )
+        for e in _as_list(graph.get("edges"))
+        if isinstance(e, dict)
+    ]
+
+
 def _norm_neighbors(graph: dict[str, Any], anchor: str | None) -> GraphNeighborsData:
     query = _query_of(graph)
     return GraphNeighborsData(
         anchor=_as_str(query.get("key")) or _as_str(graph.get("anchor")) or _as_str(anchor),
         nodes=[_node_ref(n) for n in _as_list(graph.get("nodes"))],
-        edges=[
-            GraphEdge(
-                s=_as_str(e.get("s")),
-                t=_as_str(e.get("t")),
-                type=_as_str(e.get("type")),
-                strength=_as_str(e.get("strength")),
-            )
-            for e in _as_list(graph.get("edges"))
-            if isinstance(e, dict)
-        ],
+        edges=_edges_of(graph),
     )
 
 
@@ -270,6 +296,29 @@ def _norm_nodes(graph: dict[str, Any]) -> GraphNodesData:
     return GraphNodesData(nodes=[_node_ref(n) for n in _as_list(graph.get("nodes"))])
 
 
+def _dump_node(item: Any) -> GraphDumpNode:
+    """CLI dump 节点 → GraphDumpNode（GraphNodeRef 归一同款 + x/y 坐标）。"""
+    if isinstance(item, dict):
+        return GraphDumpNode(
+            id=_as_str(item.get("id")),
+            type=_as_str(item.get("type")),
+            label=_as_str(item.get("label")) or _as_str(item.get("title")),
+            x=_as_float(item.get("x")),
+            y=_as_float(item.get("y")),
+        )
+    return GraphDumpNode(id="", type="", label="", x=0.0, y=0.0)
+
+
+def _norm_dump(graph: dict[str, Any]) -> GraphDumpData:
+    # CLI dump 形状：{ok, nodes:[{id,type,label,x,y}], edges, stats}——stats 与
+    # summary 同源（嵌套 stats 子对象，_norm_summary 兼容），nodes/edges 全量不裁剪。
+    return GraphDumpData(
+        nodes=[_dump_node(n) for n in _as_list(graph.get("nodes"))],
+        edges=_edges_of(graph),
+        stats=_norm_summary(graph),
+    )
+
+
 def _count_of(graph: dict[str, Any]) -> int:
     """overview 计数：orphans/dangling RPC 的 count（保真原值）；无 count 回退清单长。"""
     for key in ("count",):
@@ -289,12 +338,17 @@ class KnowledgeGraphService:
         self._session = session
 
     async def _rpc(
-        self, workspace_id: uuid.UUID, user_id: uuid.UUID, params: dict[str, Any]
+        self,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+        params: dict[str, Any],
+        feature: str | None = None,
     ) -> tuple[bool, str | None, dict[str, Any] | None]:
         """单次 knowledge.graph RPC：返回 ``(available, reason, graph 数据)``。
 
         懒导入与 governance_signals 同款（避免 router 导入链早绑 ws_hub 单例）；
-        异常族全部收敛为六键 reason，不向端点抛错（HTTP 200 恒信封）。
+        异常族全部收敛为六键 reason，不向端点抛错（HTTP 200 恒信封）。``feature``
+        透传 _map_reason 的 cli_feature_missing:<feature> 显式分支（dump 用）。
         """
         try:
             from app.modules.daemon.ws_hub import get_daemon_ws_hub
@@ -315,7 +369,7 @@ class KnowledgeGraphService:
                 timeout=GRAPH_RPC_TIMEOUT,
             )
         except Exception as exc:  # 六键映射（含 _resolve_binding 的 RuntimeNotBound）
-            return False, _map_reason(exc), None
+            return False, _map_reason(exc, feature), None
         graph = resp.get("graph") if isinstance(resp, dict) else None
         if not isinstance(graph, dict):
             # daemon 回包不含 graph 对象——网关级坏包，按 rpc_error 兜底。
@@ -396,3 +450,17 @@ class KnowledgeGraphService:
         if not available or graph is None:
             return GraphEnvelope(available=False, reason=reason, data=None)
         return GraphEnvelope(available=True, reason=None, data=_norm_nodes(graph))
+
+    async def dump(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> GraphEnvelope:
+        """全图 dump（星空总览数据源，2026-10-09-knowledge-graph-fullmap task-03）。
+
+        单 RPC（sub=dump + layout=true 必带——坐标由 CLI 离线预计算，D-002@v1）；
+        不可用态沿六键，``cli_feature_missing:dump``（旧 CLI 无 dump 子命令）显式
+        归 upgrade_required（Grill F-02），前端据此隐藏全图胶囊回退 orphans。
+        """
+        available, reason, graph = await self._rpc(
+            workspace_id, user_id, {"sub": "dump", "layout": True}, feature="dump"
+        )
+        if not available or graph is None:
+            return GraphEnvelope(available=False, reason=reason, data=None)
+        return GraphEnvelope(available=True, reason=None, data=_norm_dump(graph))

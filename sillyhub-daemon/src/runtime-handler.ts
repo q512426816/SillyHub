@@ -394,7 +394,11 @@ const KNOWLEDGE_ROOT_ANOMALY_RE = /[\0\r\n<>|"?*]/;
 // （anchor/anchor2/search）共用一个黑名单正则——三者都进 shell:true 命令串
 // （锚点是 CLI 位置参数，实测 usage `[锚点...]` 非旗标），引号本身在黑名单内，
 // 拼串引号包裹即杜绝逃逸（R-01 注入面）。旧 CLI 三态细分回码见 graph 方法注释。
-const KNOWLEDGE_GRAPH_SUBS = new Set(['summary', 'nodes', 'neighbors', 'path', 'impact', 'orphans', 'dangling']);
+// 2026-10-09-knowledge-graph-fullmap task-02 加 dump（全图导出，FR-02/D-002@v1）：
+// layout 必须 true（false/缺省 validation_rejected）、拼串固定 `dump --layout --json`
+//（无锚点无 search——dump 无自由串入参，注入消毒面零新增）、回包全量透传
+//（旁路 orphans/dangling top-50 清单裁剪）。
+const KNOWLEDGE_GRAPH_SUBS = new Set(['summary', 'nodes', 'neighbors', 'path', 'impact', 'orphans', 'dangling', 'dump']);
 
 /**
  * --edges 值白名单：CLI knowledge-graph.js EDGE_STRENGTH 键集的硬拷贝（16 边型，
@@ -529,10 +533,13 @@ export class KnowledgeGovernanceHandler {
 
   /**
    * knowledge.graph：平台图查询唯一 daemon 出口（2026-10-08-platform-knowledge-graph
-   * task-01，FR-04/D-001@v2/D-005@v1）。七子命令白名单 → `sillyspec knowledge graph
-   * <sub> "<anchor>" ["<anchor2>"] --json`（锚点=CLI 位置参数，引号在黑名单内杜绝
+   * task-01，FR-04/D-001@v2/D-005@v1；2026-10-09-knowledge-graph-fullmap task-02 加
+   * dump，FR-02/D-002@v1）。八子命令白名单 → `sillyspec knowledge graph <sub>
+   * "<anchor>" ["<anchor2>"] --json`（锚点=CLI 位置参数，引号在黑名单内杜绝
    * 逃逸）；edges 值白名单 16 边型∪{all}；depth 钳 1-3；limit 钳 1-50；search ≤200；
-   * summary 固定 `--clusters 50`（缺省全量簇——本仓实测 883 簇）。
+   * summary 固定 `--clusters 50`（缺省全量簇——本仓实测 883 簇）；dump 拼串固定
+   * `dump --layout --json`（layout 必须 true，无锚点无 search）且回包全量透传
+   * （旁路清单裁剪）。
    *
    * 回码契约（D-001@v2 三态细分）：消毒/校验拒绝 → validation_rejected（backend 译
    * invalid_input）；CLI 全无 graph（stdout 含 'knowledge <' 或 unknown_subcommand，
@@ -554,6 +561,7 @@ export class KnowledgeGovernanceHandler {
       depth?: number | string;
       search?: string;
       limit?: number | string;
+      layout?: boolean;
     },
     rootPath?: string,
   ): Promise<{ graph: unknown }> {
@@ -562,6 +570,11 @@ export class KnowledgeGovernanceHandler {
     const sub = String(query.sub ?? '');
     if (!KNOWLEDGE_GRAPH_SUBS.has(sub)) {
       throw new RpcError('validation_rejected', `graph subcommand not allowed: ${JSON.stringify(sub)}`);
+    }
+    // dump 专属旗标校验（task-02，D-002@v1）：dump 是全图导出（--layout 携布局
+    // 信息），layout 必须 true——false/缺省一律 validation_rejected 且不 spawn。
+    if (sub === 'dump' && query.layout !== true) {
+      throw new RpcError('validation_rejected', 'dump requires --layout');
     }
     // 三自由串同函数消毒（R-01）：anchor/anchor2 位置参数、search 旗标值。
     const anchors: string[] = [];
@@ -590,7 +603,12 @@ export class KnowledgeGovernanceHandler {
     const limit = clampGraphInt('limit', query.limit, 1, 50);
     if (limit !== undefined) flags.push(`--limit ${limit}`);
     if (sub === 'summary') flags.push('--clusters 50');
-    const cmd = ['sillyspec knowledge graph', sub, ...anchors.map((a) => `"${a}"`), ...flags, '--json'].join(' ');
+    // dump 拼串固定（task-02）：`dump --layout --json` 无锚点无 search——dump 无
+    // 自由串入参（constraints：注入消毒面不新增参数），上方 anchor/search 消毒对
+    // dump 只是防御性先行拒绝（恶意串到不了拼串）；其余子命令维持既有拼装零变化。
+    const cmd = sub === 'dump'
+      ? 'sillyspec knowledge graph dump --layout --json'
+      : ['sillyspec knowledge graph', sub, ...anchors.map((a) => `"${a}"`), ...flags, '--json'].join(' ');
 
     const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
     const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root);
@@ -613,8 +631,14 @@ export class KnowledgeGovernanceHandler {
       if (probe) throw probe;
       throw new RpcError('internal', 'graph output is not valid CLI JSON envelope');
     }
+    // dump 回包旁路裁剪（task-02）：全图导出的语义本位是完整清单，orphans/dangling
+    // 键全量透传——top-50 截断只属于同名单命令子（下方 sub 严格等值分支），dump
+    // 提前 return 不入裁剪路径；防 WS 大帧由调用侧（backend 分页/落盘）负责。
+    if (sub === 'dump') {
+      return { graph: j };
+    }
     // 清单裁剪（design Phase 1：本仓 dangling 实测 1807 条/675KB——orphans/dangling
-    // items 截 top-50、count 保真，防 WS 大帧与前端千行清单；完整治理走 CLI/doctor。
+    // items 截 top-50、count 保真，防 WS 大帧与前端千行清单；完整治理走 CLI/doctor）。
     if (sub === 'orphans' && Array.isArray(j.orphans)) {
       j.orphans = (j.orphans as unknown[]).slice(0, 50);
     }
