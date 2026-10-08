@@ -353,3 +353,115 @@ describe("TurnNavList 长列表防卡", () => {
     expect(longRow.style.containIntrinsicSize).toBe("44px");
   });
 });
+
+// ── 5. 浮层指向标记（2026-10-08-turn-nav-hover-mark：悬停横条 → 浮层内
+//    标记指向轮，与 active 高亮区分；实时跟随 / 滚入 / 收起点清除） ────────
+
+describe("TurnNavList 浮层指向标记", () => {
+  it("悬停刻度：浮层指向行 data-hovered + ring 描边；与 active 当前轮高亮视觉区分", () => {
+    // active=第1轮（底色高亮 + aria-current），指向第2轮——两语义并存不互覆。
+    const { container } = renderNav(FIXTURES, { activeTurnKey: "run-1" });
+    pinOpen(container);
+    fireEvent.mouseEnter(getTicks(container)[1]!);
+    const rows = getFlyoutRows(container);
+    const hovered = rows[1]!;
+    const activeRow = rows[0]!;
+    expect(hovered).toHaveAttribute("data-hovered", "true");
+    expect(hovered.className).toContain("ring-inset");
+    expect(activeRow).not.toHaveAttribute("data-hovered");
+    // active 行保持既有底色高亮与 aria-current（描边=我在指它，底色=聊天停在哪轮；
+    // 断 ring-inset 而非 ring-brand-400——后者是 focus-visible:ring-brand-400 子串，
+    // 全部行常驻，不唯一）。
+    expect(activeRow).toHaveAttribute("aria-current", "true");
+    expect(activeRow.className).toContain("bg-muted/60");
+    expect(activeRow.className).not.toContain("ring-inset");
+  });
+
+  it("指向实时跟随：刻度间滑动切换；鼠标移入浮层行同步指向", () => {
+    const { container } = renderNav(FIXTURES);
+    pinOpen(container);
+    const ticks = getTicks(container);
+    fireEvent.mouseEnter(ticks[1]!);
+    fireEvent.mouseEnter(ticks[2]!); // 沿刻度滑到第 3 轮
+    let rows = getFlyoutRows(container);
+    expect(rows[2]).toHaveAttribute("data-hovered", "true");
+    expect(rows[1]).not.toHaveAttribute("data-hovered");
+
+    // 鼠标移入浮层第 1 行 → 指向同步（单一指向态，不并存双标记）。
+    fireEvent.mouseEnter(rows[0]!);
+    rows = getFlyoutRows(container);
+    expect(rows[0]).toHaveAttribute("data-hovered", "true");
+    expect(rows[2]).not.toHaveAttribute("data-hovered");
+  });
+
+  it("指向行滚入可视区（指向优先 scrollIntoView block:nearest）；指向清除后回落 active 联动", () => {
+    const scrollSpy = Element.prototype.scrollIntoView as Mock;
+    const { container } = renderNav(FIXTURES, { activeTurnKey: "run-1" });
+    pinOpen(container);
+    scrollSpy.mockClear();
+    fireEvent.mouseEnter(getTicks(container)[2]!); // 指向 run-3
+    // run-3 命中窄轨刻度 + 浮层行两个元素，均 block:nearest 滚入。
+    expect(scrollSpy).toHaveBeenCalledTimes(2);
+    expect(scrollSpy).toHaveBeenCalledWith({ block: "nearest" });
+
+    // 指向清除（移开组件防抖到点）→ 回落 active（run-1）联动：pin 锁定浮层保持
+    // 展开（既有语义），run-1 刻度 + 浮层行两元素均 block:nearest 滚入。
+    scrollSpy.mockClear();
+    fireEvent.mouseLeave(
+      within(container).getByTestId("turn-nav-column"),
+    );
+    act(() => vi.advanceTimersByTime(250));
+    expect(scrollSpy).toHaveBeenCalledTimes(2);
+    expect(scrollSpy).toHaveBeenCalledWith({ block: "nearest" });
+    expect(scrollSpy.mock.instances[0]).toBe(getTicks(container)[0]);
+  });
+
+  it("移开组件 250ms 到点清指向：浮层收起且重展开无残留标记", () => {
+    const { container } = renderNav(FIXTURES);
+    const column = within(container).getByTestId("turn-nav-column");
+    fireEvent.mouseEnter(column);
+    act(() => vi.advanceTimersByTime(350)); // 悬停展开
+    fireEvent.mouseEnter(getTicks(container)[1]!);
+    expect(getFlyoutRows(container)[1]).toHaveAttribute("data-hovered", "true");
+
+    fireEvent.mouseLeave(column);
+    act(() => vi.advanceTimersByTime(250)); // 收起 + 清指向
+    expect(within(container).queryByTestId("turn-nav-flyout")).toBeNull();
+    pinOpen(container); // 重新展开（pin）无残留
+    for (const row of getFlyoutRows(container)) {
+      expect(row).not.toHaveAttribute("data-hovered");
+    }
+  });
+
+  it("行跳转收起与外部 pointerdown 收起同步清指向", () => {
+    // 悬停展开态点行：非 pin 选完即收，指向一并清。
+    const a = renderNav(FIXTURES);
+    const colA = within(a.container).getByTestId("turn-nav-column");
+    fireEvent.mouseEnter(colA);
+    act(() => vi.advanceTimersByTime(350));
+    fireEvent.mouseEnter(getTicks(a.container)[1]!);
+    fireEvent.click(getFlyoutRows(a.container)[1]!);
+    expect(
+      within(a.container).queryByTestId("turn-nav-flyout"),
+    ).toBeNull();
+    pinOpen(a.container);
+    for (const row of getFlyoutRows(a.container)) {
+      expect(row).not.toHaveAttribute("data-hovered");
+    }
+    a.unmount();
+
+    // pin 展开态：指向后点组件外部收起，指向一并清。
+    const b = renderNav(FIXTURES);
+    pinOpen(b.container);
+    fireEvent.mouseEnter(getTicks(b.container)[2]!);
+    expect(getFlyoutRows(b.container)[2]).toHaveAttribute("data-hovered", "true");
+    fireEvent.pointerDown(document.body);
+    expect(
+      within(b.container).queryByTestId("turn-nav-flyout"),
+    ).toBeNull();
+    pinOpen(b.container);
+    for (const row of getFlyoutRows(b.container)) {
+      expect(row).not.toHaveAttribute("data-hovered");
+    }
+  });
+});
