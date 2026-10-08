@@ -1,0 +1,173 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "537f2ed0eaff05a375bc8f6ea00acd391edca723",
+  "totals": {
+    "files": 19,
+    "additions": 7079,
+    "deletions": 7
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/knowledge/graph.py",
+      "additions": 398,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/knowledge/router.py",
+      "additions": 66,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/knowledge/schema.py",
+      "additions": 197,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_graph.py",
+      "additions": 667,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 894,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx",
+      "additions": 1626,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/graph-canvas.test.ts",
+      "additions": 301,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx",
+      "additions": 415,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx",
+      "additions": 156,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/graph-canvas.tsx",
+      "additions": 1040,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/ops-dashboard.tsx",
+      "additions": 264,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/workspace-tabs.tsx",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 456,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/knowledge.ts",
+      "additions": 104,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/query-keys.ts",
+      "additions": 44,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "additions": 20,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/runtime-handler.ts",
+      "additions": 186,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/knowledge-governance-handler.test.ts",
+      "additions": 240,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/runtime-handler.test.ts",
+      "additions": 2,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "closedBy": "execute --done",
+  "patchSha256": "48d178a852993be2d54898d6bf2e3b925e630edc920e2fd8c3db8afb8cea9b3a",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T11:22:13.981Z"
+}

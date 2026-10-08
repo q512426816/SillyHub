@@ -293,3 +293,7 @@ session_id 列 NOT NULL + default_factory=uuid4（为兼容 ~50 处存量构造�
 - Image：v6 已删 `wrapperClassName`，撑高外层 wrapper 用语义槽 `classNames={{ root: "..." }}`（grep @rc-component/image 确认 root 落 wrapper div）；img 的百分比 max-h 需 wrapper 有高度基准，否则解析不了。
 - Modal：v6 语义键是 `styles.container`（v5 的 `styles.content` 不再命中内容容器）；`style+width` 挂 `.ant-modal` 根，默认 `top:100/max-width:calc(100vw-32px)`，做全屏需同时覆盖 `width=100vw + style={{top:0, maxWidth:"100vw"}}`。
 - 测试：枚举式 `vi.mock("桶文件", () => ({...}))` 工厂在桶文件新增导出时会让模块作用域引用（如 RENDERER_MAP）直接炸套件（"No X export is defined on the mock"）——桶加导出必须同步补 mock 工厂，且这类断裂是套件级（0 test 收集），vitest 汇总里表现为 1 test file failed 而非用例 failed。
+
+## wt-commit 的 -- 路径分隔符被 PowerShell 5.1 吞掉——用 --pathspec-from-file
+
+Windows PowerShell 5.1 向原生命令传参时裸 `--` 会被剥掉，`sillyspec wt-commit --change X -m "..." -- path1 path2` 报「缺少提交路径」且加引号无效。规避：路径写入临时文件后 `sillyspec wt-commit --change X -m "..." --pathspec-from-file <file>`（每行一个路径，UTF-8）。Git Bash / PowerShell 7 无此问题。（来源：2026-09-23-md-card-render task-01）

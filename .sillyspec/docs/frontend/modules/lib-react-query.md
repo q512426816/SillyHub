@@ -42,4 +42,8 @@ key 规则：凡影响查询结果的变量都进 key（params 变化 → 新查
 
 <!-- MANUAL_NOTES_START -->
 
+
+### 2026-10-08-platform-knowledge-graph 增量
+- 新增三 key 工厂：`knowledgeGraphQueryKey(wsId,sub,anchor,anchor2,edges,depth)`（可选参归一 null 防分叉键）/ `knowledgeGraphOverviewQueryKey` / `knowledgeGraphNodesQueryKey`；`queryKeys.knowledgeGraph.all` 组失效入口。图卡与图谱页共享 overview key 缓存零额外请求。
+
 <!-- MANUAL_NOTES_END -->

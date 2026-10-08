@@ -44,6 +44,7 @@
 - aiosqlite|FOR UPDATE|部分唯一索引|IntegrityError|并发|懒建|唯一性 → [aiosqlite 不支持 SELECT FOR UPDATE：并发唯一性守卫用部分唯一索引+IntegrityError 捕获](patterns.md#aiosqlite-不支持-select-for-update并发唯一性守卫用部分唯一索引integrityerror-捕获)
 - task_started|task_notification|task_updated|SDK|后台任务|生命周期|0.3.181 → [Claude Agent SDK 0.3.181 的 task_* 生命周期系统消息可消费](patterns.md#claude-agent-sdk-03181-的-task_-生命周期系统消息可消费)
 - token|计费|上下文窗口|ctx_tokens|usage|口径|cache_read → [2026-08-27 — 会话 token 两套口径：计费量（跨调用可加）vs 上下文量（瞬时，取最近一次调用）](patterns.md#2026-08-27--会话-token-两套口径计费量跨调用可加vs-上下文量瞬时取最近一次调用)
+- antd|v6|App|useApp|AntdApp|provider → [patterns.md#antd v6 App.useApp() 无 <AntdApp> provider 时 message 为 undefined——组件测试须包 AntdApp](patterns.md#antd v6 App.useApp() 无 <AntdApp> provider 时 message 为 undefined——组件测试须包 AntdApp)
 
 ## Known Issues
 - 导出|乱码|GBK|控制台码页|PYTHONIOENCODING|TOOL_RESULT|替换字符 → [会话日志 TOOL_RESULT 中文乱码（Windows 控制台码页，落库即坏不可导出还原）](known-issues.md#会话日志-tool_result-中文乱码windows-控制台码页落库即坏不可导出还原)
@@ -86,6 +87,7 @@
 - 后台子代理|canusetool|fail-closed|running turn|死锁|宽限 → [🟡 2026-08-24 — 后台子代理脱离平台 running turn 后权限回调 fail-closed 死锁（已有宽限缓解）](known-issues.md#-2026-08-24--后台子代理脱离平台-running-turn-后权限回调-fail-closed-死锁已有宽限缓解)
 - sessions/events|路由顺序|422|uuid_parsing|多行装饰器|路由表断言 → [🟢 daemon sessions /events 字面量路由被 /sessions/{session_id} 参数路由吞掉（FastAPI 路由顺序，commit 0c7860f7）](known-issues.md#-daemon-sessions-events-字面量路由被-sessionssession_id-参数路由吞掉fastapi-路由顺序commit-0c7860f7)
 - antd v6|wrapperclassname|styles.container|vi.mock|桶导出|fullscreen → [🟡 2026-08-26 — antd v6 实测三坑：Image 无 wrapperClassName、Modal 语义 styles.container、枚举式 vi.mock 须随桶导出同步](known-issues.md#-2026-08-26--antd-v6-实测三坑image-无-wrapperclassnamemodal-语义-stylescontainer枚举式-vimock-须随桶导出同步)
+- wt|commit|路径分隔符被|PowerShell|吞掉|pathspec → [known-issues.md#wt-commit 的 -- 路径分隔符被 PowerShell 5.1 吞掉——用 --pathspec-from-file](known-issues.md#wt-commit 的 -- 路径分隔符被 PowerShell 5.1 吞掉——用 --pathspec-from-file)
 
 ## SillySpec Gotchas
 
@@ -193,3 +195,4 @@
 - auto-zcode|zcode|FR|需求|承接 → [fr/auto-zcode.md](fr/auto-zcode.md)
 - auto-deploy|deploy|FR|需求|承接 → [fr/auto-deploy.md](fr/auto-deploy.md)
 - auto-frontend|frontend|FR|需求|承接 → [fr/auto-frontend.md](fr/auto-frontend.md)
+- runtime-handler|FR|需求|承接 → [fr/runtime-handler.md](fr/runtime-handler.md)

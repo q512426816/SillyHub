@@ -51,4 +51,8 @@ apiFetch(path, opts):
 
 <!-- MANUAL_NOTES_START -->
 
+
+### 2026-10-08-platform-knowledge-graph 增量
+- api-types.ts 再生成（+456 行）：三个 graph 端点 paths 与 19 个 Graph schema（GraphEnvelope 参数化族）；openapi.json 同步（+894 行）。`pnpm gen:types` 守卫下与后端 schema 一致（gen:types:check 过）。
+
 <!-- MANUAL_NOTES_END -->

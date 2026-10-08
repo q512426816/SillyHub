@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-platform-knowledge-graph",
+  "appliedAt": "2026-10-08T11:46:12.979Z",
+  "baseHash": "537f2ed0eaff05a375bc8f6ea00acd391edca723",
+  "files": [
+    {
+      "path": "backend/app/modules/knowledge/graph.py",
+      "sha256": "17fb49cef263aa6abc1c3f63f3270f4177c3511a371c55aa5d459c21ff894e1e"
+    },
+    {
+      "path": "backend/app/modules/knowledge/router.py",
+      "sha256": "9b0c86b730896a2d6fc18f0ba7d997734b608bdce9aa71bbadac10171cae7b29"
+    },
+    {
+      "path": "backend/app/modules/knowledge/schema.py",
+      "sha256": "2197021bac619656dff0d708b1da783bbeb536d0d073cd5ca564698672f0178e"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_graph.py",
+      "sha256": "f588da6af84576c95b6b8d503b4cd0d54a513e02b1a55ce59d6e8758e6fd3c29"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "91d16d03766085c4f2b367856369dfb856b2d2f57543e85b8cbefcee489c164c"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx",
+      "sha256": "9dfa85c4322ff623f5c59facaee970cc8e047ae612ad48b2be70b29af70ddb4d"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/graph-canvas.test.ts",
+      "sha256": "dd67e876c91c06146556fe5b7fe3e8cc658b1385aa06151758b4f3b8354aeaef"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx",
+      "sha256": "53a324314d77113ee7135ee0cfb38258f4d5ded08d7318fac71069a0b4605797"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx",
+      "sha256": "f29e2a17347f8e118ffd8d21deb62c0c1382d5cbd11ea4e8095434fa6478482a"
+    },
+    {
+      "path": "frontend/src/components/knowledge/graph-canvas.tsx",
+      "sha256": "009e95cebf2e62e0c77f68b990d260a1e8c0dbb2da5412627dffa265c865bf5c"
+    },
+    {
+      "path": "frontend/src/components/knowledge/ops-dashboard.tsx",
+      "sha256": "c33ef84f689d1d57bfff2aa023f33c7fcd3bdff52547a6de5211d28872792e9f"
+    },
+    {
+      "path": "frontend/src/components/workspace-tabs.tsx",
+      "sha256": "99d769859e71c6674c807796df76e76df53247f63ba122a85ebb93c796fe2923"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "80f533dee3447379c463527f80ac2acdf1a2264e0be4ef00208ef62392fe9068"
+    },
+    {
+      "path": "frontend/src/lib/knowledge.ts",
+      "sha256": "c58cdca8fbf4d95ae72feace14328f0811b8f36f1ab90a2e05d824a3fe4996ea"
+    },
+    {
+      "path": "frontend/src/lib/query-keys.ts",
+      "sha256": "f210af18f6ffe7f55ac049e31161c357337f91d4005533e2c8773cc512bd7b96"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "37a7babdf62f9deb4dfd631879786a70ee3e04930740df1aac565bcb6661d474"
+    },
+    {
+      "path": "sillyhub-daemon/src/runtime-handler.ts",
+      "sha256": "78b84fcc91d19ac2330c44549337a7c8096bdb31c2d46b77f312c03033a876a8"
+    },
+    {
+      "path": "sillyhub-daemon/tests/knowledge-governance-handler.test.ts",
+      "sha256": "0b3b664588e697b7dffc30a1d0601b3486014c8f3f7ffe20f03cc9e430697ada"
+    },
+    {
+      "path": "sillyhub-daemon/tests/runtime-handler.test.ts",
+      "sha256": "7959b6028874db87d699ca7cf6d6142587df308368973458c5e0d81e3b14d962"
+    }
+  ]
+}

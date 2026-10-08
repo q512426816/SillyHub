@@ -57,4 +57,8 @@ get: 全量 parse 后内存按 filename 精确匹配（filename 含子目录段�
 
 <!-- MANUAL_NOTES_START -->
 
+
+### 2026-10-08-platform-knowledge-graph 增量
+- 新增图查询面（2026-10-08-platform-knowledge-graph）：graph.py `KnowledgeGraphService`（RPC 直采 daemon `knowledge.graph` 单通道无本地回退，异常族→六键 reason：unbound/offline/timeout/upgrade_required/invalid_input/rpc_error；overview 按 summary(--clusters 50)→orphans→dangling 三 RPC 逐条容错）；router.py 三读端点 `GET /knowledge/graph/{query,overview,nodes}`（KNOWLEDGE_READ，**注册在 {filename:path} 通配之前**）；schema.py GraphEnvelope[T] 信封+分型 DTO（CLI 实测形状：impact closure=[str] 等）。前端消费见 frontend/modules/lib-knowledge.md。
+
 <!-- MANUAL_NOTES_END -->

@@ -37,4 +37,9 @@ list 返回 { items, total } 包装；get 按文件名定位（非 id）
 
 <!-- MANUAL_NOTES_START -->
 
+
+### 2026-10-08-platform-knowledge-graph 增量
+- 新增图查询数据面：`getKnowledgeGraphQuery(wsId, sub, {anchor,anchor2,edges,depth})` / `getKnowledgeGraphOverview()` / `getKnowledgeGraphNodes(wsId, search, limit?)` 三函数 + 16 个 Graph data 分型与三信封类型导出（全取 `components["schemas"]` 生成类型，GraphReason/GraphSub 从信封 reason 字段与 operations 参数提取零手写）。
+- 消费方：知识图谱页（app/.../knowledge/graph/page.tsx）与 OpsDashboard 图维度卡；锚点补全走 nodes 端点 debounce 300ms 静默降级。
+
 <!-- MANUAL_NOTES_END -->

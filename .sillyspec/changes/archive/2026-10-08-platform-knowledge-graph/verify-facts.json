@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-08-platform-knowledge-graph",
+  "generatedAt": "2026-10-08T11:37:52.312Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-08-platform-knowledge-graph",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 5,
+        "globEntries": 1
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-08-platform-knowledge-graph",
+      "metrics": {
+        "tasks": 10,
+        "hasTest": 8
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-08-platform-knowledge-graph",
+      "metrics": {
+        "backendEndpoints": 1691,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-08-platform-knowledge-graph",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-08-platform-knowledge-graph",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-08-platform-knowledge-graph",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-08-platform-knowledge-graph",
+      "metrics": {
+        "checkedFiles": 11,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "backend 图端点全分支（六键/容错/路由序/权限）14 用例通过",
+      "command": "cd backend && uv run pytest app/modules/knowledge/tests/test_graph.py -q --no-cov",
+      "exitCode": 0,
+      "logPath": "/tmp/kg-rh-test.log（execute 期）/tmp 下同类日志"
+    },
+    {
+      "claim": "daemon graph handler 注入矩阵与三态回码 57 用例通过",
+      "command": "cd sillyhub-daemon && pnpm test -- knowledge-governance runtime-handler",
+      "exitCode": 0,
+      "logPath": "/tmp/kg-t3.log"
+    },
+    {
+      "claim": "前端图谱页/画布/图卡 170 用例通过 + 生产构建 45 页",
+      "command": "cd frontend && pnpm test -- graph knowledge && pnpm build",
+      "exitCode": 0,
+      "logPath": "/tmp/kg-build.log"
+    },
+    {
+      "claim": "静态门（ruff/format/mypy/tsc/eslint/typecheck）全零错",
+      "command": "cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm typecheck",
+      "exitCode": 0,
+      "logPath": "/tmp/v-lint1.log /tmp/v-mypy.log /tmp/v-lint2.log /tmp/v-tc.log"
+    }
+  ],
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "env-blocked",
+        "item": "真实栈五项验收（五查询闭环/三主题截图/六键降级实测/图卡跳转/lite 真簇气泡——verify-e2e.md 清单+visual-evidence.md 截图槽）",
+        "condition": "worktree 分支合入 main 并重建 docker 镜像（backend+frontend）后，浏览器登录实测并补截图",
+        "severity": "blocking"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "部署后核对 sillyspec CLI ≥含 summary/nodes 的版本在 daemon 机器 PATH（Phase 0 已交付，全局 3.32.1 需升级或 npm link）",
+        "condition": "部署时跑 `sillyspec knowledge graph summary --json --clusters 3` 确认新子命令在场",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 3,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/api/workspaces/{workspace_id}/knowledge/graph/query",
+        "rowIdx": 1
+      },
+      {
+        "method": "GET",
+        "path": "/api/workspaces/{workspace_id}/knowledge/graph/overview",
+        "rowIdx": 2
+      },
+      {
+        "method": "GET",
+        "path": "/api/workspaces/{workspace_id}/knowledge/graph/nodes",
+        "rowIdx": 3
+      }
+    ],
+    "declared": 3,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/knowledge/tests/test_graph.py",
+      "sillyhub-daemon/tests/knowledge-governance-handler.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(py30+jsx41)+fr(71)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-08T11:43:31.696Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe3"
+    ],
+    "verdict": "mismatch",
+    "detail": [
+      {
+        "probe": "probe3",
+        "snapshot": 8,
+        "rerun": 9,
+        "severity": "warning",
+        "note": "facts 快照 hasTest 数与重跑不符（测试布局环境敏感，WARNING）"
+      }
+    ]
+  }
+}

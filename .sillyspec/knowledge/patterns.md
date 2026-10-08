@@ -183,3 +183,7 @@ SDK 0.3.181（捆 CLI 2.1.181+）运行时确实发射 `system/task_started`（t
 - **SDK result usage 聚合口径**（7 会话 28 轮 DB 实证，spike-r09.md）：`SDKResultSuccess.usage.input_tokens` = 该 query 内 Σ 逐调用 input；跨轮不累计（与 daemon 会话累计计数器是两个量）。
 - **设计教训**：上下文窗口用量（CtxUsageRing 分子）必须是"最近一次调用的 input+cache_read+cache_creation"（`AgentRun.ctx_tokens`，last-write-wins、终态不覆盖）；各轮 input_tokens 求和会跨轮重复计历史（6 轮 394 万 vs 200K 窗口爆表）。实时/终态口径必须同类（本轮计费量），否则轮结束数字跳变。
 - 关联变更：2026-08-27-session-token-usage-fix（D-001@v2/D-006）。
+
+## antd v6 App.useApp() 无 <AntdApp> provider 时 message 为 undefined——组件测试须包 AntdApp
+
+组件内 `const { message } = App.useApp()` 在无 `<App>` provider 的测试环境（testing-library 裸 render）返回的 message 是 **undefined**（antd v6 无静态 fallback），点击路径调 message.success 抛 `TypeError: message.success is not a function`。生产有全局 AntdProviders 兜住；测试 render helper 统一包 `<AntdApp>` 对齐生产。另：测试里 mock navigator.clipboard 勿用裸 `Object.defineProperty`（默认 writable:false 会把属性锁死，污染后续用例的 Object.assign 赋值——configurable+writable 都给 true）。（来源：2026-09-23-md-card-render task-02）

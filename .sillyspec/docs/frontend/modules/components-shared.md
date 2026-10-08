@@ -77,4 +77,8 @@ WorkspaceSessionSection attach 恢复:
 - 配套 `@/lib/file/api`（uploadFile/fetchFileMetaBatch/getFileDownloadUrl）+ `@/lib/file/utils`（isImageMime/FileTypeIcon/formatFileSize）。
 - `file_urls` 字段名不变，值语义从 URL 改为**文件 id**（design D-006）。
 - （2026-08-18 重扫补记：file-upload/file-viewer/file-image 已归位 components-file-center 模块，上三条仅作历史沿革保留。）
+
+### 2026-10-08-platform-knowledge-graph 增量
+- workspace-tabs.tsx TABS 数组「知识库」后追加 `{key:"knowledge-graph", label:"知识图谱", path:"/knowledge/graph"}`——菜单权限复用 knowledge 菜单卡（matchPattern "/knowledge" 前缀匹配天然覆盖子路径）。
+
 <!-- MANUAL_NOTES_END -->
