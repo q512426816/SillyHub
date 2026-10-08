@@ -109,3 +109,5 @@ whoLine: attach 时并发拉 listSessionRuns，按 realRunId??runId 匹配注入
 - ql-20260820-006-9e18 | 「我的供应商」页移除启动/停止（set-default）功能——供应商生效改 /sessions 会话级选择，本页纯 CRUD（后端端点保留待后续清理）
 - ql-20260819-002-9167 | /sessions 页移除「结束会话」按钮（结束走自然超时；runtimes 弹窗入口保留；已结束横幅/重新开启保留）
 - 2026-08-20-session-multimodal-attachments：会话附件（图片多模态/文件落盘/multimodal 三态门控）涉及本模块（详见 changes 归档）
+
+- 工作区知识库/扫描文档页（2026-09-23-md-card-render 验收追加）：文件选择链路必须带**过期响应守卫**（请求 seq 序号，晚到旧响应丢弃）与**中间态切断**（selectEntry 立即清旧 content + 加载态占位「正在加载 …」）——fetch 期间「新文件名+旧文件内容」错配渲染会产生形态幻象（INDEX 名配无路由行内容显示 0 条路由、手册名配 INDEX 内容路由行被当小节卡一闪）；限高 flex-col 滚动容器内的卡片列表，卡片必须 shrink-0 防压缩裁切。
