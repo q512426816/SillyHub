@@ -68,12 +68,16 @@ RUN groupadd --system app && useradd --system --gid app --home /app app
 # （Connection refused），导致 base image digest 漂移后 rebuild 时整个 runtime stage
 # 在 apt-get update 报废。与 pip（tsinghua）/npm（npmmirror）一致配国内源。
 # 2026-07-17（ql-20260717-004）：mirrors.aliyun.com 的 trixie Packages 索引此刻缺失且
-# CDN 多 IP Connection failed（apt-get update 拿不到索引），改回清华 tuna
-# （mirrors.tuna.tsinghua.edu.cn，Packages.gz 完整可达）。仅影响 build 阶段。
+# CDN 多 IP Connection failed（apt-get update 拿不到索引），改回清华 tuna。
+# 2026-10-08（thin 2026-10-08-backend-dockerfile-apt-mirror-sjtu）：tuna 对 trixie main
+# Packages 大文件持续 500/502/EOF（InRelease/小文件正常，9.6MB 索引传输中断，重试无效），
+# 实测各国内源 http 形态同慢（≈80KB/s）；https://mirror.sjtu.edu.cn 独快且稳
+# （8MB/5s 复测），连协议一起换 https。apt 包集合与语义零变化，仅影响 build 阶段。
 # trixie 用 DEB822 /etc/apt/sources.list.d/debian.sources，旧版用 sources.list，
 # find 覆盖两种格式；找不到文件时 -exec 不执行，退出码仍为 0，无副作用。
 RUN find /etc/apt -type f \( -name 'sources.list' -o -name '*.sources' \) \
-      -exec sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' {} + \
+      -exec sed -i -e 's|http://deb.debian.org|https://mirror.sjtu.edu.cn|g' \
+                   -e 's|https://deb.debian.org|https://mirror.sjtu.edu.cn|g' {} + \
  && apt-get update -o Acquire::Retries=3 \
  && apt-get install -y --no-install-recommends --fix-missing curl ca-certificates git libstdc++6 \
  && rm -rf /var/lib/apt/lists/*
