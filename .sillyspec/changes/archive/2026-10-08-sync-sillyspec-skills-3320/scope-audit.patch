@@ -1,0 +1,1195 @@
+diff --git a/.claude/commands/sillyspec/flow.md b/.claude/commands/sillyspec/flow.md
+new file mode 100644
+index 000000000..559124e97
+--- /dev/null
++++ b/.claude/commands/sillyspec/flow.md
+@@ -0,0 +1,39 @@
++---
++name: sillyspec:flow
++description: 轻量变更（默认快道）：需求明确的小/中改动两步收口——flow start → 直接干活 → flow done
++---
++# 何时用
++
++需求已含决策的改动：改什么、成功标准说得清（能列 1-3 条可验证标准）。需求不清晰先走 brainstorm（完成后 flow start 收编续跑）；跨模块取舍/Wave 编排/设计期人机对抗走完整五阶段（run-brainstorm 等卡）。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++# ① 立项 + 锁基线（--input 引号内换行合法，可照抄；缺「成功标准」条目会被清晰度门拦下）：
++sillyspec flow start --change <变更名> --input "<动机与背景>
++
++成功标准：
++- <可验证标准>"
++# ② 直接干活：改代码写测试；填 design.md 四节（空节 flow done 拒收；列改动文件用独立「## 文件变更清单」节）；
++#    tasks.md 是你的工作队列——机器种子改写为实现步骤（每行做什么+怎么验证，保持 `- [ ] task-NN:` 行形态），
++#    执行循环：Working on task N/M → 做一件 → 测试绿后当场勾一格（sillyspec task tick --change <名> --task task-NN
++#    即时回显进度与下一任务）→ 下一行；每格勾选要有对应提交（消息带 task-NN），一把勾收口被拒。
++#    交付代码显式 pathspec 提交（patch 冻结面=baseline..HEAD 提交面，未提交不进审计件）
++# ③ 收口（CLI 亲自实测 test/lint + 独立评审定档 + patch 留档）：
++sillyspec flow done --change <变更名>
++# 断点恢复 / 随时查进度：
++sillyspec flow status --change <变更名>
++```
++
++# 防坑清单
++
++- --input 的「成功标准：」必须独立成行，其后每行一条 `- <可验证标准>`——格式不对 CLI 会拦下给两选一（头脑风暴预段 / 确认输入已含决策），照提示走即可。
++- 触及 src/test 的改动 flow done 会亲自实测 local.yaml 的 test/lint（实测失败阻断收口，修好重跑即可）——想省一轮就先自跑。
++- 轻量→完整转道是用户决策：征得同意带 `--upgrade-thick` 重启；实测失败自动升厚。
++- 显式 pathspec 提交（`git commit -m "..." -- 文件…`），禁 git add -A。
++
++# 边界声明
++
++本卡不含步骤内容——干活与收口的具体指令由 `flow start` / `flow done` 按当前状态实时渲染（含三断点纪律、评审任务书、FR 对账）。本卡只管入口与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=8b8105282919db7993a91342e0e3672fa66d13ec2be908e2ad75f798b9b992ce -->
+diff --git a/.claude/commands/sillyspec/run-archive.md b/.claude/commands/sillyspec/run-archive.md
+new file mode 100644
+index 000000000..96ec26f46
+--- /dev/null
++++ b/.claude/commands/sillyspec/run-archive.md
+@@ -0,0 +1,27 @@
++---
++name: sillyspec:run-archive
++description: archive 归档阶段：变更产物归档+知识蒸馏+FR/决策入库
++---
++# 何时用
++
++verify PASS 后归档：目录迁移+distill 知识沉淀+活文档同步。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++sillyspec run archive --change <变更名>
++sillyspec run archive --done --change <变更名> --output "<归档摘要>"
++# 在隔离 worktree 内跑时（守卫默认拒绝，需双 flag）：
++#   sillyspec <cmd> --allow-worktree-cwd --spec-dir "<worktree>/.sillyspec"
++```
++
++# 防坑清单
++
++- 归档是移动不是复制——活跃目录会被迁走，勿在归档中途手改。
++- 跨仓同步检查（multi-repo 场景）在归档收口统一出。
++
++# 边界声明
++
++本卡不含步骤内容——每步的具体指令由 `sillyspec run archive` 按当前状态实时渲染（含门禁、审查档位、产物契约）。本卡只管启动与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=e4feb6ae5dda8582149174a9f6b837a20545740d8bb152272dc9a52aa1228419 -->
+diff --git a/.claude/commands/sillyspec/run-brainstorm.md b/.claude/commands/sillyspec/run-brainstorm.md
+new file mode 100644
+index 000000000..c993df54a
+--- /dev/null
++++ b/.claude/commands/sillyspec/run-brainstorm.md
+@@ -0,0 +1,34 @@
++---
++name: sillyspec:run-brainstorm
++description: brainstorm 头脑风暴阶段：需求澄清→四件套→设计→Grill 审查
++---
++# 何时用
++
++新能力/行为契约变更/跨模块取舍——需要落盘设计决策的变更，第一步走这里（判规模：范围明确的局部修补走 flow 轻量变更卡）。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++sillyspec run brainstorm --change <变更名> --input "<需求一句话>"
++# 每步产出后：
++sillyspec run brainstorm --done --change <变更名> --output "<摘要>"
++# 方案选择/设计确认等用户决策点（已拍板则一步落）：
++sillyspec run brainstorm --done --answer "<用户回答>" --change <变更名> --output "<摘要>"
++# 预检省一轮返工：
++sillyspec gate brainstorm --change <变更名>
++# 在隔离 worktree 内跑时（守卫默认拒绝，需双 flag）：
++#   sillyspec <cmd> --allow-worktree-cwd --spec-dir "<worktree>/.sillyspec"
++```
++
++# 防坑清单
++
++- 四件套/设计/任务卡一律用 CLI 骨架生成（fourpiece-init / design-init / taskcard）——手拼 frontmatter 会被门禁拦。
++- design.md 计划新建的文件路径必须带 `NEW:` 前缀（末步存在性核验铁律）。
++- Grill 审查档 S2=独立子代理单轮；审查者只读，唯一可写 review.json；FAIL 后 resume 同一审查者只验阻断项（禁全文重审）。
++- 用户决策点用 --answer 落既有决策，不要空等。
++
++# 边界声明
++
++本卡不含步骤内容——每步的具体指令由 `sillyspec run brainstorm` 按当前状态实时渲染（含门禁、审查档位、产物契约）。本卡只管启动与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=364590c186a83e85736fc169054d7396eb60fa0b699d32cffe3df536b2d3b994 -->
+diff --git a/.claude/commands/sillyspec/run-execute.md b/.claude/commands/sillyspec/run-execute.md
+new file mode 100644
+index 000000000..5f930c86e
+--- /dev/null
++++ b/.claude/commands/sillyspec/run-execute.md
+@@ -0,0 +1,30 @@
++---
++name: sillyspec:run-execute
++description: execute 执行阶段：按 Wave 逐任务实现（子代理或直做）+ 逐 task review
++---
++# 何时用
++
++plan 收口后写代码。多 agent 共享仓——开工前重读目标文件最新态。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++sillyspec run execute --change <变更名>
++sillyspec run execute --done --change <变更名> --output "<摘要>"
++# 逐 task review.json：
++sillyspec review write --change <变更名> --task task-NN --spec <verdict> --quality <verdict>
++# 在隔离 worktree 内跑时（守卫默认拒绝，需双 flag）：
++#   sillyspec <cmd> --allow-worktree-cwd --spec-dir "<worktree>/.sillyspec"
++```
++
++# 防坑清单
++
++- 改前重跑读最新态（多 agent 并行，Edit 前文件可能已被他侧改）。
++- review 的 changedFiles 必须与本 task 卡 target_files/allowed_paths 相交（完全不相交过不了门）。
++- 破坏性 git op 前先备份；禁止跳过 hook。
++
++# 边界声明
++
++本卡不含步骤内容——每步的具体指令由 `sillyspec run execute` 按当前状态实时渲染（含门禁、审查档位、产物契约）。本卡只管启动与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=e3cc45943a7975173bc764132457436a25f415937d11cf54b0c704769a9c4221 -->
+diff --git a/.claude/commands/sillyspec/run-plan.md b/.claude/commands/sillyspec/run-plan.md
+new file mode 100644
+index 000000000..03c0beb65
+--- /dev/null
++++ b/.claude/commands/sillyspec/run-plan.md
+@@ -0,0 +1,28 @@
++---
++name: sillyspec:run-plan
++description: plan 计划阶段：复杂度分类→分级计划→计划审查→TaskCard→Wave 校验
++---
++# 何时用
++
++brainstorm 收口后拆任务排 Wave（plan_level=light 走轻计划，仍需 Wave 结构与任务卡）。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++sillyspec run plan --change <变更名>
++sillyspec run plan --done --change <变更名> --output "<摘要>"
++# 在隔离 worktree 内跑时（守卫默认拒绝，需双 flag）：
++#   sillyspec <cmd> --allow-worktree-cwd --spec-dir "<worktree>/.sillyspec"
++```
++
++# 防坑清单
++
++- plan.md 的 Wave 段只收纯 ID 引用行（`- task-01`），带括注长文会被 execute 契约门禁拦。
++- 任务卡用 Edit 填充勿整文件重写（CRLF/漏字段回归）；taskcard 骨架占位符未替换会被 --done 硬校验拦。
++- 卡内 depends_on 必须与 tasks.md 注册表一致（分叉=执行序错乱）。
++
++# 边界声明
++
++本卡不含步骤内容——每步的具体指令由 `sillyspec run plan` 按当前状态实时渲染（含门禁、审查档位、产物契约）。本卡只管启动与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=17fb0d136c06a9cc4113565e67f28d3f9a47345ff45e0edacdd338728f54ad5e -->
+diff --git a/.claude/commands/sillyspec/run-quick.md b/.claude/commands/sillyspec/run-quick.md
+new file mode 100644
+index 000000000..c5914d31b
+--- /dev/null
++++ b/.claude/commands/sillyspec/run-quick.md
+@@ -0,0 +1,21 @@
++---
++name: sillyspec:run-quick
++description: 已退役重定向 — quick 通道已拒绝新会话（v3.31.0 起），小修补请用 /sillyspec:flow
++---
++# 通道已退役
++
++quick 通道已于 v3.31.0 直接退役：`sillyspec run quick` 对新会话一律拒绝（exit 1 并指路 flow start）。本卡只保留触发词重定向，勿执行任何 quick 新会话命令。
++
++范围明确的小修补请走**轻量变更**（/sillyspec:flow）：
++
++```bash
++sillyspec flow start --change <变更名> --input "<动机与背景>
++
++成功标准：
++- <可验证标准>"
++# → 直接干活（改代码写测试，治理工件 CLI 机器起草）
++sillyspec flow done --change <变更名>
++```
++
++升级前遗留的在途 quick 会话仍可收尾：`sillyspec run quick --change <会话ID>` 续跑 / `--done` 收口 / `--cancel` 取消（以 CLI 拒绝文案里的指引为准）。
++<!-- sillyspec-card: v3.32.0 sha256=512895e8d003f20934c2e9128e59d1d0f07a5f9cc036fc53d4b697cadfa31b02 -->
+diff --git a/.claude/commands/sillyspec/run-verify.md b/.claude/commands/sillyspec/run-verify.md
+new file mode 100644
+index 000000000..356152915
+--- /dev/null
++++ b/.claude/commands/sillyspec/run-verify.md
+@@ -0,0 +1,30 @@
++---
++name: sillyspec:run-verify
++description: verify 验证阶段：探针核验+测试对账+验收报告
++---
++# 何时用
++
++execute 收口后对照文档验收（probe 契约+known_failures 对账+测试绿）。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++sillyspec run verify --change <变更名>
++sillyspec run verify --done --change <变更名> --output "<验收摘要>"
++# 探针骨架缺失时：
++sillyspec verify-probes --init --change <变更名>   # 已存在加 --force 刷新
++# 在隔离 worktree 内跑时（守卫默认拒绝，需双 flag）：
++#   sillyspec <cmd> --allow-worktree-cwd --spec-dir "<worktree>/.sillyspec"
++```
++
++# 防坑清单
++
++- gate 失败明细落 .runtime/verify-runs/gate-<stage>-<change>.json（勿靠 stdout 记忆）。
++- 非测试逻辑有误禁改测试来过——修逻辑。
++- known_failures 豁免只在 local.yaml 声明位置复核，勿手抄。
++
++# 边界声明
++
++本卡不含步骤内容——每步的具体指令由 `sillyspec run verify` 按当前状态实时渲染（含门禁、审查档位、产物契约）。本卡只管启动与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=d3e36d42709e9cfc5fa0bdefda99294743ba27323033320146403c11910001f0 -->
+diff --git a/.claude/commands/sillyspec/status.md b/.claude/commands/sillyspec/status.md
+new file mode 100644
+index 000000000..a47d39dac
+--- /dev/null
++++ b/.claude/commands/sillyspec/status.md
+@@ -0,0 +1,28 @@
++---
++name: sillyspec:status
++description: 状态查询：进度/变更清单/断点恢复入口
++---
++# 何时用
++
++任何时刻查「我在哪、下一步做什么」——多变更并行时先看再动。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++sillyspec progress show [--change <名>] [--all] [--json]
++sillyspec status
++# 有信号变更（冲突/滞留/疑似完成）保持详情渲染；--all 展开全部
++# 在隔离 worktree 内跑时（守卫默认拒绝，需双 flag）：
++#   sillyspec <cmd> --allow-worktree-cwd --spec-dir "<worktree>/.sillyspec"
++```
++
++# 防坑清单
++
++- 多会话并行：变更各自 --change 隔离，永不 reset 他人变更。
++- 中途停下不靠额外命令存进度——上次 --done 已落盘。
++
++# 边界声明
++
++本卡不含步骤内容——每步的具体指令由 `sillyspec run status` 按当前状态实时渲染（含门禁、审查档位、产物契约）。本卡只管启动与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=763c1e45e00ea7aa31420694ee286b74fa030c2611274bcf2bd4f476a2cd9311 -->
+diff --git a/.claude/skills/sillyspec-flow/SKILL.md b/.claude/skills/sillyspec-flow/SKILL.md
+new file mode 100644
+index 000000000..d6407d357
+--- /dev/null
++++ b/.claude/skills/sillyspec-flow/SKILL.md
+@@ -0,0 +1,61 @@
++---
++name: sillyspec:flow
++description: 轻量变更（默认快道）——需求明确的小/中改动两步收口。适合用户说"直接改、快速修、顺手调整、改个文案、修个小 bug、更新一个文件、需求很明确、开干吧、把这个改了"。2 次协议调用：flow start → 直接干活（改代码写测试）→ flow done（实测门+测试绑定+patch 留档）。
++---
++
++## 何时使用
++
++- 需求已含决策：改什么、成功标准说得清（能列 1-3 条可验证标准）
++- 用户说"直接改 / 快速修 / 顺手调整 / 修个小 bug / 需求很明确 / 开干"
++- 代码已先写好需要收尾（倒推 B 模式）：`--input` 如实登记已做改动＋成功标准，不回头补流程装样子
++- 需求不清晰 → CLI 会在 flow start 处拦下给两选一（头脑风暴预段 / 确认输入已含决策）；或直接先走 `/sillyspec:brainstorm`，完成后 `flow start` 收编续跑（design 以头脑风暴版为准）
++- 大改动（跨模块取舍 / 需要 Wave 计划编排 / 设计期人机对抗）→ 不走本 skill，走完整五阶段流程
++
++## 两步协议
++
++### ① flow start（立项 + 锁基线）
++
++```bash
++sillyspec flow start --change <变更名> --input "<动机与背景>
++
++成功标准：
++- <可验证标准>"
++```
++
++`--input` 过门格式（清晰度门按此提取，缺「成功标准」条目会被拦下）：引号内换行合法，上方命令即完整可照抄实例。
++
++变更标题（面板显示用）：总结一句中文概括，≤50 字、建议 ~20 字——`--input` 首行写这句即成标题（缺省取首行推导），或显式 `--title "<标题>"` 指定（重入 start 可改）。
++
++示例：
++
++```
++登录限流计数在窗口翻转时被误清，触发误封
++成功标准：
++- INCR 计数在窗口边界不再误清
++- 新增单测覆盖窗口翻转边界，npm test 全绿
++```
++
++### ② 直接干活
++
++改代码、写测试。治理工件（proposal/requirements/design）CLI 机器起草，你只需要：
++
++- 填 design.md 四节 AGENT 槽（做法概述/接口契约/边界并发四问/风险与死路）——每节至少一行，写「不适用：<理由>」也算答，空槽 flow done 拒收
++- 干活以 tasks.md 为进度源：做一件 → 勾一格（`- [ ]` → `- [x]`）→ 继续下一条，勿攒一把勾（勾选是收口哨兵的证据面——逐 task 核提交 token/review.json）；`flow status --change <名>` 为自愿查看/恢复面（②阶段给下一任务指针与进度，非协议必需——D-007）
++- 交付代码用显式 pathspec 提交（`git commit -m "..." -- 文件1 文件2`；patch 冻结面=baseline..HEAD 提交面，未提交的代码不进审计件）
++
++### ③ flow done（收口）
++
++```bash
++sillyspec flow done --change <变更名>
++```
++
++CLI 亲自实测（测试面按变更动态推断——本变更测试 ∪ FR 关联回归 ∪ import 依赖，runner 自项目结构推断；lint 走 `local.yaml` 的 `commands.lint`；实测失败中断于对应子步、断点续，修好重跑即可）；按危险证据定档独立评审；patch 留档变更级归档。
++
++## 边界
++
++- 中断恢复：进度已落盘，`sillyspec flow status --change <名>` 随时查看，重跑续接（自愿查看/恢复面——②阶段给下一个未勾任务与进度）
++- 轻量→完整转道是用户决策：征得用户同意后带 `--upgrade-thick` 重启；轻量变更实测失败自动升厚
++- 流程状态、断点要求、收尾动作以 CLI 输出为准，不要自行编造或跳过
++
++## 用户指令
++$ARGUMENTS
+diff --git a/.codex/skills/sillyspec-flow/SKILL.md b/.codex/skills/sillyspec-flow/SKILL.md
+new file mode 100644
+index 000000000..d6407d357
+--- /dev/null
++++ b/.codex/skills/sillyspec-flow/SKILL.md
+@@ -0,0 +1,61 @@
++---
++name: sillyspec:flow
++description: 轻量变更（默认快道）——需求明确的小/中改动两步收口。适合用户说"直接改、快速修、顺手调整、改个文案、修个小 bug、更新一个文件、需求很明确、开干吧、把这个改了"。2 次协议调用：flow start → 直接干活（改代码写测试）→ flow done（实测门+测试绑定+patch 留档）。
++---
++
++## 何时使用
++
++- 需求已含决策：改什么、成功标准说得清（能列 1-3 条可验证标准）
++- 用户说"直接改 / 快速修 / 顺手调整 / 修个小 bug / 需求很明确 / 开干"
++- 代码已先写好需要收尾（倒推 B 模式）：`--input` 如实登记已做改动＋成功标准，不回头补流程装样子
++- 需求不清晰 → CLI 会在 flow start 处拦下给两选一（头脑风暴预段 / 确认输入已含决策）；或直接先走 `/sillyspec:brainstorm`，完成后 `flow start` 收编续跑（design 以头脑风暴版为准）
++- 大改动（跨模块取舍 / 需要 Wave 计划编排 / 设计期人机对抗）→ 不走本 skill，走完整五阶段流程
++
++## 两步协议
++
++### ① flow start（立项 + 锁基线）
++
++```bash
++sillyspec flow start --change <变更名> --input "<动机与背景>
++
++成功标准：
++- <可验证标准>"
++```
++
++`--input` 过门格式（清晰度门按此提取，缺「成功标准」条目会被拦下）：引号内换行合法，上方命令即完整可照抄实例。
++
++变更标题（面板显示用）：总结一句中文概括，≤50 字、建议 ~20 字——`--input` 首行写这句即成标题（缺省取首行推导），或显式 `--title "<标题>"` 指定（重入 start 可改）。
++
++示例：
++
++```
++登录限流计数在窗口翻转时被误清，触发误封
++成功标准：
++- INCR 计数在窗口边界不再误清
++- 新增单测覆盖窗口翻转边界，npm test 全绿
++```
++
++### ② 直接干活
++
++改代码、写测试。治理工件（proposal/requirements/design）CLI 机器起草，你只需要：
++
++- 填 design.md 四节 AGENT 槽（做法概述/接口契约/边界并发四问/风险与死路）——每节至少一行，写「不适用：<理由>」也算答，空槽 flow done 拒收
++- 干活以 tasks.md 为进度源：做一件 → 勾一格（`- [ ]` → `- [x]`）→ 继续下一条，勿攒一把勾（勾选是收口哨兵的证据面——逐 task 核提交 token/review.json）；`flow status --change <名>` 为自愿查看/恢复面（②阶段给下一任务指针与进度，非协议必需——D-007）
++- 交付代码用显式 pathspec 提交（`git commit -m "..." -- 文件1 文件2`；patch 冻结面=baseline..HEAD 提交面，未提交的代码不进审计件）
++
++### ③ flow done（收口）
++
++```bash
++sillyspec flow done --change <变更名>
++```
++
++CLI 亲自实测（测试面按变更动态推断——本变更测试 ∪ FR 关联回归 ∪ import 依赖，runner 自项目结构推断；lint 走 `local.yaml` 的 `commands.lint`；实测失败中断于对应子步、断点续，修好重跑即可）；按危险证据定档独立评审；patch 留档变更级归档。
++
++## 边界
++
++- 中断恢复：进度已落盘，`sillyspec flow status --change <名>` 随时查看，重跑续接（自愿查看/恢复面——②阶段给下一个未勾任务与进度）
++- 轻量→完整转道是用户决策：征得用户同意后带 `--upgrade-thick` 重启；轻量变更实测失败自动升厚
++- 流程状态、断点要求、收尾动作以 CLI 输出为准，不要自行编造或跳过
++
++## 用户指令
++$ARGUMENTS
+diff --git a/.opencode/skills/sillyspec-flow/SKILL.md b/.opencode/skills/sillyspec-flow/SKILL.md
+new file mode 100644
+index 000000000..d6407d357
+--- /dev/null
++++ b/.opencode/skills/sillyspec-flow/SKILL.md
+@@ -0,0 +1,61 @@
++---
++name: sillyspec:flow
++description: 轻量变更（默认快道）——需求明确的小/中改动两步收口。适合用户说"直接改、快速修、顺手调整、改个文案、修个小 bug、更新一个文件、需求很明确、开干吧、把这个改了"。2 次协议调用：flow start → 直接干活（改代码写测试）→ flow done（实测门+测试绑定+patch 留档）。
++---
++
++## 何时使用
++
++- 需求已含决策：改什么、成功标准说得清（能列 1-3 条可验证标准）
++- 用户说"直接改 / 快速修 / 顺手调整 / 修个小 bug / 需求很明确 / 开干"
++- 代码已先写好需要收尾（倒推 B 模式）：`--input` 如实登记已做改动＋成功标准，不回头补流程装样子
++- 需求不清晰 → CLI 会在 flow start 处拦下给两选一（头脑风暴预段 / 确认输入已含决策）；或直接先走 `/sillyspec:brainstorm`，完成后 `flow start` 收编续跑（design 以头脑风暴版为准）
++- 大改动（跨模块取舍 / 需要 Wave 计划编排 / 设计期人机对抗）→ 不走本 skill，走完整五阶段流程
++
++## 两步协议
++
++### ① flow start（立项 + 锁基线）
++
++```bash
++sillyspec flow start --change <变更名> --input "<动机与背景>
++
++成功标准：
++- <可验证标准>"
++```
++
++`--input` 过门格式（清晰度门按此提取，缺「成功标准」条目会被拦下）：引号内换行合法，上方命令即完整可照抄实例。
++
++变更标题（面板显示用）：总结一句中文概括，≤50 字、建议 ~20 字——`--input` 首行写这句即成标题（缺省取首行推导），或显式 `--title "<标题>"` 指定（重入 start 可改）。
++
++示例：
++
++```
++登录限流计数在窗口翻转时被误清，触发误封
++成功标准：
++- INCR 计数在窗口边界不再误清
++- 新增单测覆盖窗口翻转边界，npm test 全绿
++```
++
++### ② 直接干活
++
++改代码、写测试。治理工件（proposal/requirements/design）CLI 机器起草，你只需要：
++
++- 填 design.md 四节 AGENT 槽（做法概述/接口契约/边界并发四问/风险与死路）——每节至少一行，写「不适用：<理由>」也算答，空槽 flow done 拒收
++- 干活以 tasks.md 为进度源：做一件 → 勾一格（`- [ ]` → `- [x]`）→ 继续下一条，勿攒一把勾（勾选是收口哨兵的证据面——逐 task 核提交 token/review.json）；`flow status --change <名>` 为自愿查看/恢复面（②阶段给下一任务指针与进度，非协议必需——D-007）
++- 交付代码用显式 pathspec 提交（`git commit -m "..." -- 文件1 文件2`；patch 冻结面=baseline..HEAD 提交面，未提交的代码不进审计件）
++
++### ③ flow done（收口）
++
++```bash
++sillyspec flow done --change <变更名>
++```
++
++CLI 亲自实测（测试面按变更动态推断——本变更测试 ∪ FR 关联回归 ∪ import 依赖，runner 自项目结构推断；lint 走 `local.yaml` 的 `commands.lint`；实测失败中断于对应子步、断点续，修好重跑即可）；按危险证据定档独立评审；patch 留档变更级归档。
++
++## 边界
++
++- 中断恢复：进度已落盘，`sillyspec flow status --change <名>` 随时查看，重跑续接（自愿查看/恢复面——②阶段给下一个未勾任务与进度）
++- 轻量→完整转道是用户决策：征得用户同意后带 `--upgrade-thick` 重启；轻量变更实测失败自动升厚
++- 流程状态、断点要求、收尾动作以 CLI 输出为准，不要自行编造或跳过
++
++## 用户指令
++$ARGUMENTS
+diff --git a/.sillyspec/docs/frontend/modules/lib-menu-permissions.md b/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
+index 9b865df44..724f3dd10 100644
+--- a/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
++++ b/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
+@@ -9,42 +9,48 @@ created_at: 2026-08-18 01:45:00
+ # 菜单权限数据源（lib-menu-permissions）
+ 
+ ## 定位
+-菜单按权限驱动显隐的**单一声明式数据源**（`frontend/src/lib/menu-permissions.ts`，静态常量，无运行时逻辑）。定义侧边栏菜单分组（section → 菜单项）、每项可见所需的后端权限 key、路由与高亮匹配，作为 `lib-permission` 判定、app-shell 渲染、AdminRolePermissionPicker 配置的唯一真相来源。sidebar-menu-restructure 变更后为 6 section 新结构（约 29 个菜单项）。
++菜单按权限驱动显隐的**单一声明式数据源**（`frontend/src/lib/menu-permissions.ts`，静态常量，无运行时逻辑）。定义侧边栏菜单分组（section → 菜单项）、每项可见所需的后端权限 key、路由与高亮匹配，作为 `lib-permission` 判定、app-shell 渲染、AdminRolePermissionPicker 配置的唯一真相来源。sidebar-menu-restructure 变更后为 6 section 新结构（现 38 个菜单项，2026-09-18-web-menu-management 新增菜单管理后）。
+ 
+ ## 契约摘要
+ - `MENU_PERMISSION_GROUPS: MenuPermissionGroup[]` — 全部菜单项，每项字段：
+-  - `section`（六值之一）/ `menuKey`（唯一 key，关联 nav 折叠与 picker）/ `menuLabel`（中文）/ `href` + `absolute`（relative 时拼 workspace 前缀）/ `matchPattern?`（active 高亮，沿用 NavItem 语义）/ `icon`（emoji，**无渲染消费者**，历史遗留）/ `permissions: PermissionItem[]`（任一命中即可见；**空数组 = 登录即可见**）。
+-  - `pickerHidden?` — 与其他菜单共享权限时 Picker 不渲染该卡片（canSeeMenu 仍判断）。
++  - `section`（六值之一）/ `menuKey`（唯一 key，关联 nav 折叠与 picker）/ `menuLabel`（中文）/ `href` + `absolute`（relative 时拼 workspace 前缀）/ `matchPattern?`（active 高亮，沿用 NavItem 语义）/ `icon`（emoji，**无渲染消费者**，历史遗留）/ `permissions: PermissionItem[]`（任一命中即可见；**空数组 = 登录即可见**——2026-09-18 起全表已无空权限菜单）。
++  - `pickerHidden?` — 与其他菜单共享权限时 Picker 不渲染该卡片（canSeeMenu 仍判断）。2026-09-18 起全表无 pickerHidden 残留。
+   - `navHidden?` — 二级页面不在侧边栏渲染（路由仍可达、active 匹配保留），如 ppm 项目成员/里程碑明细。
+ - `MENU_SECTION_ORDER` — 渲染顺序：workspace → agent → config → governance → ppm → system。
+ - `MENU_SECTION_LABEL` — section 中文标题（工作区/智能体/配置中心/协作治理/系统管理/项目管理）。
+-- 类型 `PermissionItem`（key/name/description?）：key 必须命中后端 Permission 枚举（`backend/app/modules/auth/permissions.py`）。
++- 类型 `PermissionItem`（key/name/description?）：key 必须命中后端 Permission 枚举（`backend/app/modules/auth/permissions.py`，经 OpenAPI 生成联合类型，漂移编译期暴露）。
+ 
+ 各 section 构成：
+-- **workspace**（8 项）：工作区首页（/workspaces，absolute）、组件、拓扑、变更中心、扫描文档、运行时、知识&日志、发布。
++- **workspace**（8 项）：工作区首页（/workspaces，absolute）、组件、拓扑、变更中心、扫描文档、运行时、知识库、发布。
+   - 子菜单均有独立 read 权限（component:read / topology:read / scan-docs:read / knowledge:read 等），不共用 workspace:read。
+-- **agent**（6 项）：智能体控制台、Agent 团队（missions）、技能管理、MCP 管理、智能体档案、智能体会话。
+-  - 技能管理 / 智能体档案 / 智能体会话为 `permissions: []`（登录即可见）——分别来自 custom-skill-per-user D-003、agent-profile-ui-redesign、sessions-portal 变更。
+-  - 技能管理另带 pickerHidden（无独立权限可配）；MCP 管理要求 settings:admin。
++- **agent**（4 项）：技能管理（/settings/skills）、MCP 资产库（/settings/mcp）、智能体档案（/agent-profiles）、智能体会话（/sessions），全 absolute。
++  - 四菜单 2026-09-18-web-menu-management 起各挂独立 read 权限（skill:read / mcp:read / agent_profile:read / agent_session:read），进角色勾选器。
++  - 智能体会话 2026-10-08-sessions-menu-permissions 起补齐会话页实际权限共 4 项：agent_session:read（门控主 key）+ task:run_agent（全部 /api/daemon/sessions* 端点）+ daemon:borrow（借用会话）+ runtime:admin（机器下拉 /api/daemon/machines）——多权限菜单任一命中即可见，跨菜单重复挂载（runtime:admin 同挂 config 守护进程运行时）有 change:approve 双卡先例。
+ - **config**（4 项）：我的供应商（llm_provider:read，sidebar-menu-restructure 新增）、API 密钥（api_key:admin）、Git 身份（git_identity:admin）、守护进程运行时（runtime:admin，自 system 移入，D-006）。
+ - **governance**（3 项）：审批中心（task:approve / change:approve）、审计中心（platform:audit:read）、事件（incident:read）。
+-- **system**（4 项）：用户、组织、角色（/admin/*）、设置（settings:admin）。
++- **system**（5 项）：用户、组织、角色（/admin/*）、设置（settings:admin）、菜单管理（/admin/menus，menu:admin，2026-09-18 新增）。
+ - **ppm**（14 项）：全部 absolute 指向 /ppm/*，每菜单独立专属 key（ppm:workbench:view / ppm:project:read / ppm:kanban:view / ppm:weekly-plan:view 等）。
+   - 项目成员、里程碑明细带 navHidden（二级页面，由父页跳转进入）。
+   - 菜单权限为前端可见性语义；后端 plan 域仅认证不授权（get_current_principal + DataScope）。
+ 
+ ## 关键逻辑
+ ```
+-声明样例（登录即可见型）:
+-{ section: "agent", menuKey: "skills", href: "/settings/skills", absolute: true,
+-  permissions: [], pickerHidden: true }
+-→ canSeeMenu 经 hasAnyPermission(空 perms, user 非 null) = true
++声明样例（多权限任一命中型，sessions 2026-10-08 起）:
++{ section: "agent", menuKey: "sessions", href: "/sessions", absolute: true,
++  permissions: [
++    { key: "agent_session:read", name: "智能体会话查看" },   // 门控主 key 首位
++    { key: "task:run_agent", name: "会话运行" },              // 页面核心接口权限
++    { key: "daemon:borrow", name: "借用守护进程" },
++    { key: "runtime:admin", name: "守护进程机器查看" } ] }
++→ canSeeMenu = hasAnyPermission(4 keys, user.permissions) 任一交集即 true
++→ AdminRolePermissionPicker「智能体会话」卡按同数组渲染 4 个 checkbox
+ ```
+ 
+ ## 注意事项
+ - `icon` 字段经排查（sidebar-menu-restructure task-04）在 app-shell/picker/permission 均无消费者，新增菜单可填占位 emoji。
+ - 写错权限 key = 该菜单永远不可见；改菜单结构需同步 `lib-permission` 判定、app-shell 渲染（MENU_ICON_MAP 按 href）、页面路由三处。
+-- 空权限菜单（skills/agent-profiles/sessions）语义依赖 `lib-permission.hasAnyPermission` 的「空 = 登录即可见」分支，两文件耦合改动须一起评审。
++- 菜单 permissions 数组同时服务两个消费面：canSeeMenu 可见性（任一命中）与 AdminRolePermissionPicker 可配面——往菜单补权限会同步放宽可见性，页面实际依赖的权限应挂全（否则勾选器配不了，如 sessions 补齐前的 task:run_agent）。
++- 测试镜像常量 `BACKEND_PERMISSION_KEYS`（menu-permissions.test.ts）须与后端枚举逐项同步（现 72 项），后端扩删权限时两处一起改。
+ - 管理类菜单多为单一 admin 权限（api_key:admin / git_identity:admin / runtime:admin / settings:admin），平台超管自动通过。
+ 
+ ## 人工备注
+diff --git a/.zcode/commands/sillyspec/flow.md b/.zcode/commands/sillyspec/flow.md
+new file mode 100644
+index 000000000..559124e97
+--- /dev/null
++++ b/.zcode/commands/sillyspec/flow.md
+@@ -0,0 +1,39 @@
++---
++name: sillyspec:flow
++description: 轻量变更（默认快道）：需求明确的小/中改动两步收口——flow start → 直接干活 → flow done
++---
++# 何时用
++
++需求已含决策的改动：改什么、成功标准说得清（能列 1-3 条可验证标准）。需求不清晰先走 brainstorm（完成后 flow start 收编续跑）；跨模块取舍/Wave 编排/设计期人机对抗走完整五阶段（run-brainstorm 等卡）。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++# ① 立项 + 锁基线（--input 引号内换行合法，可照抄；缺「成功标准」条目会被清晰度门拦下）：
++sillyspec flow start --change <变更名> --input "<动机与背景>
++
++成功标准：
++- <可验证标准>"
++# ② 直接干活：改代码写测试；填 design.md 四节（空节 flow done 拒收；列改动文件用独立「## 文件变更清单」节）；
++#    tasks.md 是你的工作队列——机器种子改写为实现步骤（每行做什么+怎么验证，保持 `- [ ] task-NN:` 行形态），
++#    执行循环：Working on task N/M → 做一件 → 测试绿后当场勾一格（sillyspec task tick --change <名> --task task-NN
++#    即时回显进度与下一任务）→ 下一行；每格勾选要有对应提交（消息带 task-NN），一把勾收口被拒。
++#    交付代码显式 pathspec 提交（patch 冻结面=baseline..HEAD 提交面，未提交不进审计件）
++# ③ 收口（CLI 亲自实测 test/lint + 独立评审定档 + patch 留档）：
++sillyspec flow done --change <变更名>
++# 断点恢复 / 随时查进度：
++sillyspec flow status --change <变更名>
++```
++
++# 防坑清单
++
++- --input 的「成功标准：」必须独立成行，其后每行一条 `- <可验证标准>`——格式不对 CLI 会拦下给两选一（头脑风暴预段 / 确认输入已含决策），照提示走即可。
++- 触及 src/test 的改动 flow done 会亲自实测 local.yaml 的 test/lint（实测失败阻断收口，修好重跑即可）——想省一轮就先自跑。
++- 轻量→完整转道是用户决策：征得同意带 `--upgrade-thick` 重启；实测失败自动升厚。
++- 显式 pathspec 提交（`git commit -m "..." -- 文件…`），禁 git add -A。
++
++# 边界声明
++
++本卡不含步骤内容——干活与收口的具体指令由 `flow start` / `flow done` 按当前状态实时渲染（含三断点纪律、评审任务书、FR 对账）。本卡只管入口与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=8b8105282919db7993a91342e0e3672fa66d13ec2be908e2ad75f798b9b992ce -->
+diff --git a/.zcode/commands/sillyspec/run-archive.md b/.zcode/commands/sillyspec/run-archive.md
+new file mode 100644
+index 000000000..96ec26f46
+--- /dev/null
++++ b/.zcode/commands/sillyspec/run-archive.md
+@@ -0,0 +1,27 @@
++---
++name: sillyspec:run-archive
++description: archive 归档阶段：变更产物归档+知识蒸馏+FR/决策入库
++---
++# 何时用
++
++verify PASS 后归档：目录迁移+distill 知识沉淀+活文档同步。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++sillyspec run archive --change <变更名>
++sillyspec run archive --done --change <变更名> --output "<归档摘要>"
++# 在隔离 worktree 内跑时（守卫默认拒绝，需双 flag）：
++#   sillyspec <cmd> --allow-worktree-cwd --spec-dir "<worktree>/.sillyspec"
++```
++
++# 防坑清单
++
++- 归档是移动不是复制——活跃目录会被迁走，勿在归档中途手改。
++- 跨仓同步检查（multi-repo 场景）在归档收口统一出。
++
++# 边界声明
++
++本卡不含步骤内容——每步的具体指令由 `sillyspec run archive` 按当前状态实时渲染（含门禁、审查档位、产物契约）。本卡只管启动与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=e4feb6ae5dda8582149174a9f6b837a20545740d8bb152272dc9a52aa1228419 -->
+diff --git a/.zcode/commands/sillyspec/run-brainstorm.md b/.zcode/commands/sillyspec/run-brainstorm.md
+new file mode 100644
+index 000000000..c993df54a
+--- /dev/null
++++ b/.zcode/commands/sillyspec/run-brainstorm.md
+@@ -0,0 +1,34 @@
++---
++name: sillyspec:run-brainstorm
++description: brainstorm 头脑风暴阶段：需求澄清→四件套→设计→Grill 审查
++---
++# 何时用
++
++新能力/行为契约变更/跨模块取舍——需要落盘设计决策的变更，第一步走这里（判规模：范围明确的局部修补走 flow 轻量变更卡）。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++sillyspec run brainstorm --change <变更名> --input "<需求一句话>"
++# 每步产出后：
++sillyspec run brainstorm --done --change <变更名> --output "<摘要>"
++# 方案选择/设计确认等用户决策点（已拍板则一步落）：
++sillyspec run brainstorm --done --answer "<用户回答>" --change <变更名> --output "<摘要>"
++# 预检省一轮返工：
++sillyspec gate brainstorm --change <变更名>
++# 在隔离 worktree 内跑时（守卫默认拒绝，需双 flag）：
++#   sillyspec <cmd> --allow-worktree-cwd --spec-dir "<worktree>/.sillyspec"
++```
++
++# 防坑清单
++
++- 四件套/设计/任务卡一律用 CLI 骨架生成（fourpiece-init / design-init / taskcard）——手拼 frontmatter 会被门禁拦。
++- design.md 计划新建的文件路径必须带 `NEW:` 前缀（末步存在性核验铁律）。
++- Grill 审查档 S2=独立子代理单轮；审查者只读，唯一可写 review.json；FAIL 后 resume 同一审查者只验阻断项（禁全文重审）。
++- 用户决策点用 --answer 落既有决策，不要空等。
++
++# 边界声明
++
++本卡不含步骤内容——每步的具体指令由 `sillyspec run brainstorm` 按当前状态实时渲染（含门禁、审查档位、产物契约）。本卡只管启动与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=364590c186a83e85736fc169054d7396eb60fa0b699d32cffe3df536b2d3b994 -->
+diff --git a/.zcode/commands/sillyspec/run-execute.md b/.zcode/commands/sillyspec/run-execute.md
+new file mode 100644
+index 000000000..5f930c86e
+--- /dev/null
++++ b/.zcode/commands/sillyspec/run-execute.md
+@@ -0,0 +1,30 @@
++---
++name: sillyspec:run-execute
++description: execute 执行阶段：按 Wave 逐任务实现（子代理或直做）+ 逐 task review
++---
++# 何时用
++
++plan 收口后写代码。多 agent 共享仓——开工前重读目标文件最新态。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++sillyspec run execute --change <变更名>
++sillyspec run execute --done --change <变更名> --output "<摘要>"
++# 逐 task review.json：
++sillyspec review write --change <变更名> --task task-NN --spec <verdict> --quality <verdict>
++# 在隔离 worktree 内跑时（守卫默认拒绝，需双 flag）：
++#   sillyspec <cmd> --allow-worktree-cwd --spec-dir "<worktree>/.sillyspec"
++```
++
++# 防坑清单
++
++- 改前重跑读最新态（多 agent 并行，Edit 前文件可能已被他侧改）。
++- review 的 changedFiles 必须与本 task 卡 target_files/allowed_paths 相交（完全不相交过不了门）。
++- 破坏性 git op 前先备份；禁止跳过 hook。
++
++# 边界声明
++
++本卡不含步骤内容——每步的具体指令由 `sillyspec run execute` 按当前状态实时渲染（含门禁、审查档位、产物契约）。本卡只管启动与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=e3cc45943a7975173bc764132457436a25f415937d11cf54b0c704769a9c4221 -->
+diff --git a/.zcode/commands/sillyspec/run-plan.md b/.zcode/commands/sillyspec/run-plan.md
+new file mode 100644
+index 000000000..03c0beb65
+--- /dev/null
++++ b/.zcode/commands/sillyspec/run-plan.md
+@@ -0,0 +1,28 @@
++---
++name: sillyspec:run-plan
++description: plan 计划阶段：复杂度分类→分级计划→计划审查→TaskCard→Wave 校验
++---
++# 何时用
++
++brainstorm 收口后拆任务排 Wave（plan_level=light 走轻计划，仍需 Wave 结构与任务卡）。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++sillyspec run plan --change <变更名>
++sillyspec run plan --done --change <变更名> --output "<摘要>"
++# 在隔离 worktree 内跑时（守卫默认拒绝，需双 flag）：
++#   sillyspec <cmd> --allow-worktree-cwd --spec-dir "<worktree>/.sillyspec"
++```
++
++# 防坑清单
++
++- plan.md 的 Wave 段只收纯 ID 引用行（`- task-01`），带括注长文会被 execute 契约门禁拦。
++- 任务卡用 Edit 填充勿整文件重写（CRLF/漏字段回归）；taskcard 骨架占位符未替换会被 --done 硬校验拦。
++- 卡内 depends_on 必须与 tasks.md 注册表一致（分叉=执行序错乱）。
++
++# 边界声明
++
++本卡不含步骤内容——每步的具体指令由 `sillyspec run plan` 按当前状态实时渲染（含门禁、审查档位、产物契约）。本卡只管启动与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=17fb0d136c06a9cc4113565e67f28d3f9a47345ff45e0edacdd338728f54ad5e -->
+diff --git a/.zcode/commands/sillyspec/run-quick.md b/.zcode/commands/sillyspec/run-quick.md
+new file mode 100644
+index 000000000..c5914d31b
+--- /dev/null
++++ b/.zcode/commands/sillyspec/run-quick.md
+@@ -0,0 +1,21 @@
++---
++name: sillyspec:run-quick
++description: 已退役重定向 — quick 通道已拒绝新会话（v3.31.0 起），小修补请用 /sillyspec:flow
++---
++# 通道已退役
++
++quick 通道已于 v3.31.0 直接退役：`sillyspec run quick` 对新会话一律拒绝（exit 1 并指路 flow start）。本卡只保留触发词重定向，勿执行任何 quick 新会话命令。
++
++范围明确的小修补请走**轻量变更**（/sillyspec:flow）：
++
++```bash
++sillyspec flow start --change <变更名> --input "<动机与背景>
++
++成功标准：
++- <可验证标准>"
++# → 直接干活（改代码写测试，治理工件 CLI 机器起草）
++sillyspec flow done --change <变更名>
++```
++
++升级前遗留的在途 quick 会话仍可收尾：`sillyspec run quick --change <会话ID>` 续跑 / `--done` 收口 / `--cancel` 取消（以 CLI 拒绝文案里的指引为准）。
++<!-- sillyspec-card: v3.32.0 sha256=512895e8d003f20934c2e9128e59d1d0f07a5f9cc036fc53d4b697cadfa31b02 -->
+diff --git a/.zcode/commands/sillyspec/run-verify.md b/.zcode/commands/sillyspec/run-verify.md
+new file mode 100644
+index 000000000..356152915
+--- /dev/null
++++ b/.zcode/commands/sillyspec/run-verify.md
+@@ -0,0 +1,30 @@
++---
++name: sillyspec:run-verify
++description: verify 验证阶段：探针核验+测试对账+验收报告
++---
++# 何时用
++
++execute 收口后对照文档验收（probe 契约+known_failures 对账+测试绿）。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++sillyspec run verify --change <变更名>
++sillyspec run verify --done --change <变更名> --output "<验收摘要>"
++# 探针骨架缺失时：
++sillyspec verify-probes --init --change <变更名>   # 已存在加 --force 刷新
++# 在隔离 worktree 内跑时（守卫默认拒绝，需双 flag）：
++#   sillyspec <cmd> --allow-worktree-cwd --spec-dir "<worktree>/.sillyspec"
++```
++
++# 防坑清单
++
++- gate 失败明细落 .runtime/verify-runs/gate-<stage>-<change>.json（勿靠 stdout 记忆）。
++- 非测试逻辑有误禁改测试来过——修逻辑。
++- known_failures 豁免只在 local.yaml 声明位置复核，勿手抄。
++
++# 边界声明
++
++本卡不含步骤内容——每步的具体指令由 `sillyspec run verify` 按当前状态实时渲染（含门禁、审查档位、产物契约）。本卡只管启动与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=d3e36d42709e9cfc5fa0bdefda99294743ba27323033320146403c11910001f0 -->
+diff --git a/.zcode/commands/sillyspec/status.md b/.zcode/commands/sillyspec/status.md
+new file mode 100644
+index 000000000..a47d39dac
+--- /dev/null
++++ b/.zcode/commands/sillyspec/status.md
+@@ -0,0 +1,28 @@
++---
++name: sillyspec:status
++description: 状态查询：进度/变更清单/断点恢复入口
++---
++# 何时用
++
++任何时刻查「我在哪、下一步做什么」——多变更并行时先看再动。
++
++# 生命周期速查
++
++```bash
++export SILLYSPEC_SESSION_ID=<agent名+任务名>   # 每条命令都带（shell 状态不持久；多会话并行的所有权判定依赖它）
++sillyspec progress show [--change <名>] [--all] [--json]
++sillyspec status
++# 有信号变更（冲突/滞留/疑似完成）保持详情渲染；--all 展开全部
++# 在隔离 worktree 内跑时（守卫默认拒绝，需双 flag）：
++#   sillyspec <cmd> --allow-worktree-cwd --spec-dir "<worktree>/.sillyspec"
++```
++
++# 防坑清单
++
++- 多会话并行：变更各自 --change 隔离，永不 reset 他人变更。
++- 中途停下不靠额外命令存进度——上次 --done 已落盘。
++
++# 边界声明
++
++本卡不含步骤内容——每步的具体指令由 `sillyspec run status` 按当前状态实时渲染（含门禁、审查档位、产物契约）。本卡只管启动与防坑。
++<!-- sillyspec-card: v3.32.0 sha256=763c1e45e00ea7aa31420694ee286b74fa030c2611274bcf2bd4f476a2cd9311 -->
+diff --git a/.zcode/skills/sillyspec-flow/SKILL.md b/.zcode/skills/sillyspec-flow/SKILL.md
+new file mode 100644
+index 000000000..d6407d357
+--- /dev/null
++++ b/.zcode/skills/sillyspec-flow/SKILL.md
+@@ -0,0 +1,61 @@
++---
++name: sillyspec:flow
++description: 轻量变更（默认快道）——需求明确的小/中改动两步收口。适合用户说"直接改、快速修、顺手调整、改个文案、修个小 bug、更新一个文件、需求很明确、开干吧、把这个改了"。2 次协议调用：flow start → 直接干活（改代码写测试）→ flow done（实测门+测试绑定+patch 留档）。
++---
++
++## 何时使用
++
++- 需求已含决策：改什么、成功标准说得清（能列 1-3 条可验证标准）
++- 用户说"直接改 / 快速修 / 顺手调整 / 修个小 bug / 需求很明确 / 开干"
++- 代码已先写好需要收尾（倒推 B 模式）：`--input` 如实登记已做改动＋成功标准，不回头补流程装样子
++- 需求不清晰 → CLI 会在 flow start 处拦下给两选一（头脑风暴预段 / 确认输入已含决策）；或直接先走 `/sillyspec:brainstorm`，完成后 `flow start` 收编续跑（design 以头脑风暴版为准）
++- 大改动（跨模块取舍 / 需要 Wave 计划编排 / 设计期人机对抗）→ 不走本 skill，走完整五阶段流程
++
++## 两步协议
++
++### ① flow start（立项 + 锁基线）
++
++```bash
++sillyspec flow start --change <变更名> --input "<动机与背景>
++
++成功标准：
++- <可验证标准>"
++```
++
++`--input` 过门格式（清晰度门按此提取，缺「成功标准」条目会被拦下）：引号内换行合法，上方命令即完整可照抄实例。
++
++变更标题（面板显示用）：总结一句中文概括，≤50 字、建议 ~20 字——`--input` 首行写这句即成标题（缺省取首行推导），或显式 `--title "<标题>"` 指定（重入 start 可改）。
++
++示例：
++
++```
++登录限流计数在窗口翻转时被误清，触发误封
++成功标准：
++- INCR 计数在窗口边界不再误清
++- 新增单测覆盖窗口翻转边界，npm test 全绿
++```
++
++### ② 直接干活
++
++改代码、写测试。治理工件（proposal/requirements/design）CLI 机器起草，你只需要：
++
++- 填 design.md 四节 AGENT 槽（做法概述/接口契约/边界并发四问/风险与死路）——每节至少一行，写「不适用：<理由>」也算答，空槽 flow done 拒收
++- 干活以 tasks.md 为进度源：做一件 → 勾一格（`- [ ]` → `- [x]`）→ 继续下一条，勿攒一把勾（勾选是收口哨兵的证据面——逐 task 核提交 token/review.json）；`flow status --change <名>` 为自愿查看/恢复面（②阶段给下一任务指针与进度，非协议必需——D-007）
++- 交付代码用显式 pathspec 提交（`git commit -m "..." -- 文件1 文件2`；patch 冻结面=baseline..HEAD 提交面，未提交的代码不进审计件）
++
++### ③ flow done（收口）
++
++```bash
++sillyspec flow done --change <变更名>
++```
++
++CLI 亲自实测（测试面按变更动态推断——本变更测试 ∪ FR 关联回归 ∪ import 依赖，runner 自项目结构推断；lint 走 `local.yaml` 的 `commands.lint`；实测失败中断于对应子步、断点续，修好重跑即可）；按危险证据定档独立评审；patch 留档变更级归档。
++
++## 边界
++
++- 中断恢复：进度已落盘，`sillyspec flow status --change <名>` 随时查看，重跑续接（自愿查看/恢复面——②阶段给下一个未勾任务与进度）
++- 轻量→完整转道是用户决策：征得用户同意后带 `--upgrade-thick` 重启；轻量变更实测失败自动升厚
++- 流程状态、断点要求、收尾动作以 CLI 输出为准，不要自行编造或跳过
++
++## 用户指令
++$ARGUMENTS
+diff --git a/.zcode/skills/sillyspec-quick/SKILL.md b/.zcode/skills/sillyspec-quick/SKILL.md
+index 644908bc9..4a82e633e 100644
+--- a/.zcode/skills/sillyspec-quick/SKILL.md
++++ b/.zcode/skills/sillyspec-quick/SKILL.md
+@@ -3,37 +3,7 @@ name: sillyspec:quick
+ description: 用于明确、低风险、范围很小的直接任务。适合用户说"直接改、快速修、顺手调整、改个文案、修个小 bug、更新一个文件、不要完整流程"。跳过 brainstorm/plan，但仍按 sillyspec quick 流程执行。
+ ---
+ 
+-> ⚠️ **已退役（存量收尾 only）**——quick 通道自 SillySpec CLI 3.30.0 起**不再产生新工作**：轻量变更（thin）已转正为缺省小修复通道，`flow.mode` 缺省 thin、`run quick` 仅作存量会话的收尾入口（与 CLI `run/stage.js` 退役横幅同义）。**新的小修复不要用本技能**，改走下方「轻量变更（thin）用法」；只有恢复/收尾**已存在的** quick 会话（`quick-<hash>` sessionId）时才用本技能。
+-
+-## 轻量变更（thin）用法 —— 新的小修复走这里
+-
+-2 调用协议（`sillyspec flow start` → 干活 → `sillyspec flow done`）：
+-
+-```bash
+-# 调用 1/2：启动（--input 过门格式是硬约束，见下）
+-sillyspec flow start --change <变更名> --input "<多行需求文本>"
+-
+-# 干活：改代码 + 写测试；顺手填 design.md 四节 AGENT 槽与 requirements 测试绑定槽
+-#（每处至少一行，「不适用：<理由>」也算答——空槽会让 flow done 失败）
+-
+-# 调用 2/2：收口（归档自动完成，无需其它命令）
+-sillyspec flow done --change <变更名>
+-```
+-
+-**`--input` 过门格式（清晰度门，格式错 exit 2）**：多行文本 = 动机一行 + 独立节头行「成功标准：」+ 每行一条 `- <标准>` 列表行。**禁止单行内联**（`成功标准：xxx` 写在同一行恒被拒）：
+-
+-```
+-修复登录按钮在移动端点击无响应的问题
+-成功标准：
+-- 移动端点击登录按钮可正常提交
+-- 桌面端行为不回归
+-```
+-
+-**`flow done` 语义**：中间态 exit 1 属正常（空槽拒收 / 实测失败自动升厚），修复问题后**重跑同命令**即断点续；实测失败 = 整单失败（fail-closed）。成功后变更自动转入归档区。
+-
+-（上游技能模板尚未跟上 thin 转正，本段为本地补齐——工具缺口已在上游代码修复，留档见 `docs/sillyspec/finished/thin-flow-quick-retirement.md`。）
+-
+-## 何时使用（仅存量 quick 会话收尾）
++## 何时使用
+ 
+ - 明确、低风险、范围小的直接修改：改文案、修小 bug、更新单个文件
+ - 用户说"直接改、快速修、顺手调整、不要完整流程"
+diff --git a/AGENTS.md b/AGENTS.md
+index d7ee6f6f6..f826f10e8 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -12,7 +12,7 @@ If `.claude/CLAUDE.md` changes during a session, reread it before continuing. It
+ instructions still cannot override higher-priority system, developer, or
+ explicit user instructions.
+ 
+-<!-- SillySpec v3.29.3 START — 由 sillyspec init 注入，勿手动编辑此段 -->
++<!-- SillySpec v3.32.0 START — 由 sillyspec init 注入，勿手动编辑此段 -->
+ ## SillySpec — 规范驱动开发
+ 
+ 在执行开发任务时，遵循以下规范：
+diff --git a/docs/sillyspec/init-skills-sync-no-zcode.md b/docs/sillyspec/init-skills-sync-no-zcode.md
+new file mode 100644
+index 000000000..6277af466
+--- /dev/null
++++ b/docs/sillyspec/init-skills-sync-no-zcode.md
+@@ -0,0 +1,57 @@
++---
++title: sillyspec init 技能同步不含 zcode——detectTools 无检测分支 + skillToolDirs 无映射条目（双层缺口）
++date: 2026-10-08
++status: 活跃（工具缺陷待修；守则可先行）
++source: 2026-10-08-sync-sillyspec-skills-3320 活体——平台预置技能缺 sillyspec-flow，排查发现 CLI 升级后 .zcode/skills 静默失配
++---
++
++# init 技能同步不含 zcode（双层缺口）× 本仓 .gitignore 整目录忽略的复合坑
++
++> 一句话守则：**CLI 升级刷新内嵌技能时，`sillyspec init` 之后再跑一次
++> `sillyspec init --tool zcode`（拿命令卡），并手动把 npm 包内
++> `.claude/skills/sillyspec-*` 补拷到 `.zcode/skills/`，提交记得 `git add -f .zcode/`。**
++
++## 缺口一：detectTools 没有 zcode 分支（自动发现失灵）
++
++- `detectTools`（sillyspec `src/init.js:273-284`）只检测 `.claude`/`.cursor`/
++  `.openclaw`/`AGENTS.md`/`GEMINI.md`/`INSTRUCTIONS.md` 六个信号，
++  **没有 `.zcode` 目录检测**——即使项目里 `.zcode/skills/` 已存在，
++  zcode 也永远不会进入 tools 列表。
++- 后果：AGENTS.md 注入、命令卡、技能复制三面全部跳过 zcode。
++
++## 缺口二：skillToolDirs 无 zcode 条目（显式指定也拿不到技能）
++
++- 即使 `sillyspec init --tool zcode` 显式指定，`skillToolDirs`
++  （`src/init.js:478-483`）只有 claude/codex/openclaw/opencode 四条映射，
++  技能**仍不会**同步到 `.zcode/skills/`——只有命令卡会落
++  `.zcode/commands/sillyspec/`（2026-10-08 实测：8 张卡生成、0 个技能同步）。
++- 讽刺点：zcode 在 `VALID_TOOLS` 里，命令卡工具面注释还写着
++  「仅 zcode/claude 有落点（D-003）」——唯独技能复制这层漏了。
++
++## 复合坑（本仓特有）：.gitignore 整目录忽略 `.zcode/`
++
++- 本仓 `.gitignore:5` 是 `.zcode/`——历史文件已跟踪所以存活，但**新增**
++  技能文件（如 `sillyspec-flow/`）不进 `git status`、正常 `git add` 会跳过，
++  不 `add -f` 就静默丢提交，下次 clone 直接缺技能。
++- 守则：`.zcode/` 下新增文件一律 `git add -f`（本次变更已实操验证）。
++
++## 实测损失（不修会怎样）
++
++- 平台技能链 `.claude/skills → docker 镜像 → 后端 bundle → daemon` 以
++  仓库文件为源，CLI 升级后若只跑 init：四镜像目录里 .zcode 缺新技能；
++  会话可用技能列表（ZCode 读 `.zcode/skills/`）与 CLAUDE.md/AGENTS.md
++  引导的协议脱节（本次：规则 4 已引导 flow 协议、技能列表却无
++  `sillyspec:flow`）。
++
++## 工具侧修复建议（上游 sillyspec）
++
++1. `detectTools` 增加 `if (existsSync(join(projectDir, '.zcode'))) found.push('zcode');`
++2. `skillToolDirs` 增加 `zcode: '.zcode/skills'`；
++3. （可选）`--tool zcode` 输出里明示「技能同步 0 个」的原因，而不是只打印
++   其它工具的「✓ 已同步 (N 个)」让用户误以为全覆盖。
++
++## 关联
++
++- 上游命令卡已支持 zcode 落点（2026-09-21-flow-command-cards D-003），
++  本坑只是技能复制面；CLAUDE.md 规则 4 的 thin 协议引导依赖
++  `sillyspec-flow` 技能存在，两缺口叠加时引导与技能脱节最明显。
+diff --git a/.sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/design.md b/.sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/design.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T01:59:18.923Z
++---
++# 设计记录（Design Record）— 2026-10-08-sync-sillyspec-skills-3320
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++仓库内嵌 sillyspec 技能快照落后最新 CLI（3.32.0）：缺新增的 `sillyspec-flow`（21st 技能），`.zcode/sillyspec-quick` 被本地手补分叉，AGENTS.md 注入段停在 v3.29.3。平台预置技能链（`.claude/skills` → docker build `additional_contexts` → `/app/sillyspec-skills` → 后端 `SKILLS_GLOB` 打 bundle → daemon 软链进 worktree）以仓库文件为唯一源，故修复=刷新仓库快照。
++
++方案：主仓库根目录跑 `sillyspec init`（历史惯例，见 commit 904ef623e v3.28.3 刷新）同步 `.claude/.codex/.opencode` 三目录 + 刷新 AGENTS.md 注入段；`.zcode/skills` 因 CLI 已知缺口（detectTools 无 zcode 分支 + skillToolDirs 无映射）手动补拷 `sillyspec-flow` 并用上游原版覆盖手补过的 `sillyspec-quick`；`sillyspec init --tool zcode` 补齐 `.zcode/commands/sillyspec/` 流程命令卡；缺口本身记入 `docs/sillyspec/` 活跃坑。同步源取 npm `sillyspec@3.32.0` tgz 解包件（已验证与本地全局 CLI 开发仓逐字节一致，21 技能）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无代码接口变化。变更面全部为静态文件：四个工具目录的 `sillyspec-*` 技能文件、`AGENTS.md` 注入段、`.claude` 与 `.zcode` 的流程命令卡（新增 8 张 ×2）、`docs/sillyspec/` 新增一篇坑文档。后端技能打包链（skills_bundle_service）无需改动——manifest 版本是内容 SHA，文件变了版本自动变，daemon 侧自动拉新。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立——纯静态文件同步，无事件流；init 为版本感知幂等重入，重复跑结果一致。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   同步期间若有其它会话同时改这些目录会冲突——本次变更前 `git status` 已知有 3 个外来 menu-permissions 脏文件（其它会话工作），提交时按文件白名单显式 add 避开；`.zcode/` 因 .gitignore 整目录忽略需 `add -f`。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   init 中断可重跑（幂等）；最坏情况 `git checkout` 恢复单文件。src 提交与 flow done 归档按坑文档 thin-done-src-commit-order 时序分离（先提交 `(2026-10-08-sync-sillyspec-skills-3320)` 半角括号归属，再跑 flow done）。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   仅本仓库；`sillyspec init` 在主仓根目录跑（CLAUDE.md 规则 22），不进 worktree，不产生跨仓分裂的进度库。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：`sillyspec init` 附带刷新命令卡/指引等非技能面（v3.29.3→3.32.0 间的教学面变化），diff 面比预期大——处置：跑完后逐文件审 `git status`/`git diff`，实际改动面为「技能 + AGENTS.md 版本行 + 命令卡 + .gitignore 行尾抖动（已还原）」，无意外面。放弃方案：手写脚本只拷技能目录——放弃理由：绕开 CLI 幂等注入逻辑，AGENTS.md 版本段与命令卡仍会落后，且失去历史惯例的一致性；docker 镜像内直接改——放弃理由：镜像重建即丢，仓库才是唯一源。
++
++## 验收命令（FR-01..04 对账，实跑为准）
++
++```bash
++# 计数：四目录均应为 21
++for d in .claude .codex .opencode .zcode; do ls $d/skills | grep -c '^sillyspec-'; done
++# 逐字节：四目录 vs npm 3.32.0 包（/tmp/ss3320/package）sillyspec 技能 diff 全空
++# AGENTS.md 注入段版本：grep 'SillySpec v' AGENTS.md 显示 v3.32.0
++# 坑文档存在且活跃：grep 'status: 活跃' docs/sillyspec/init-skills-sync-no-zcode.md
++```
++
++实跑结果（2026-10-08）：四目录 count=21、文件清单与内容 diff 全空（ALL-FOUR-MATCH-NPM-3320）；AGENTS.md 注入段 v3.32.0（仅版本行变化）；坑文档已落盘。
+
+diff --git a/.sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/proposal.md b/.sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T01:59:18.923Z
++---
++# 提案书（Proposal）— 2026-10-08-sync-sillyspec-skills-3320
++
++## 动机
++
++任务原话转写：刷新仓库内嵌 SillySpec 技能到 CLI 3.32.0——平台预置技能缺新增的 sillyspec-flow，.zcode 的 sillyspec-quick 被本地手补分叉，AGENTS.md 注入段版本号停在 v3.29.3
++成功标准：
++- .claude/.codex/.opencode/.zcode 四镜像目录均有 21 个 sillyspec-* 技能（含 sillyspec-flow），内容与 npm sillyspec@3.32.0 包一致
++- .zcode/skills/sillyspec-quick/SKILL.md 去掉本地手补的退役横幅段，还原为上游原版
++- AGENTS.md 注入段版本号刷新为 v3.32.0
++- docs/sillyspec/ 新增活跃坑：init 技能同步映射不含 zcode
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. .claude/.codex/.opencode/.zcode 四镜像目录均有 21 个 sillyspec-* 技能（含 sillyspec-flow），内容与 npm sillyspec@3.32.0 包一致
++2. .zcode/skills/sillyspec-quick/SKILL.md 去掉本地手补的退役横幅段，还原为上游原版
++3. AGENTS.md 注入段版本号刷新为 v3.32.0
++4. docs/sillyspec/ 新增活跃坑：init 技能同步映射不含 zcode
++
++## 成功标准（可验证）
++
++1. .claude/.codex/.opencode/.zcode 四镜像目录均有 21 个 sillyspec-* 技能（含 sillyspec-flow），内容与 npm sillyspec@3.32.0 包一致
++2. .zcode/skills/sillyspec-quick/SKILL.md 去掉本地手补的退役横幅段，还原为上游原版
++3. AGENTS.md 注入段版本号刷新为 v3.32.0
++4. docs/sillyspec/ 新增活跃坑：init 技能同步映射不含 zcode
+
+diff --git a/.sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/requirements.md b/.sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/requirements.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T01:59:18.923Z
++---
++# 需求规格（Requirements）— 2026-10-08-sync-sillyspec-skills-3320
++
++## 功能需求
++
++### FR-01: .claude/.codex/.opencode/.zcode 四镜像目录均有 21 个 sillyspec-* 技能（含 sillyspec-flow），内容与 npm sillyspec@3.32.0 包一致
++
++- 必须：四个工具镜像目录下的 `sillyspec-*` 技能目录集合与内容与 npm `sillyspec@3.32.0` 包内 `.claude/skills/` 的 sillyspec 技能逐字节一致（21 个，含新增 `sillyspec-flow`）；非 sillyspec 技能（banner-design 等）保持不动。
++
++#### 场景：主路径
++
++- Given 仓库四目录当前只有 20 个 sillyspec 技能（v3.29.3 时代快照）
++- When 按 CLI 3.32.0 分发源刷新（init 同步 + .zcode 手动补拷）
++- Then 四目录 `ls | grep -c sillyspec` 均为 21，且与 `/tmp/ss3320/package/.claude/skills` 逐文件 diff 为空
++
++### FR-02: .zcode/skills/sillyspec-quick/SKILL.md 去掉本地手补的退役横幅段，还原为上游原版
++
++- 必须：`.zcode/skills/sillyspec-quick/SKILL.md` 与上游 3.32.0 包内同名文件逐字节一致；本地手补的「已退役 + thin 用法」横幅段删除（该内容已由正式技能 `sillyspec-flow` 覆盖）。
++
++#### 场景：主路径
++
++- Given .zcode 版本头部多出 31 行本地补丁段
++- When 用上游原版覆盖
++- Then `diff .zcode/skills/sillyspec-quick/SKILL.md <npm包同名文件>` 为空
++
++### FR-03: AGENTS.md 注入段版本号刷新为 v3.32.0
++
++- 必须：`AGENTS.md` 中 `<!-- SillySpec v...START -->` 注入段由 CLI 3.32.0 重新注入，版本标记为 v3.32.0，段内容与该版 CLI 输出一致；段外正文不被改动。
++
++#### 场景：主路径
++
++- Given 注入段版本停在 v3.29.3
++- When 跑 `sillyspec init`（版本感知幂等重入）
++- Then 注入段标记为 v3.32.0，`git diff AGENTS.md` 仅注入段内部变化
++
++### FR-04: docs/sillyspec/ 新增活跃坑：init 技能同步映射不含 zcode
++
++- 必须：`docs/sillyspec/` 下新增一篇活跃坑记录（frontmatter 含 title/date/status），说明 `src/init.js` 的 skillToolDirs 只含 claude/codex/openclaw/opencode、不含 zcode 的事实、影响（.zcode/skills 静默失配）与守则（手动补拷）。
++
++#### 场景：主路径
++
++- Given zcode 是 VALID_TOOLS 之一但技能复制映射漏掉它
++- When 写入坑文档
++- Then 文件存在、status: 活跃，后续上游修复后按惯例移入 finished/
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: 不适用：纯文件同步无代码路径，验收以 design「验收命令」节的实跑 diff/计数为准（四目录 vs npm 3.32.0 包逐字节 diff）
++FR-02: 不适用：同上，验收 diff 为空即过
++FR-03: 不适用：文档版本标记刷新，验收以 git diff 仅含注入段为准
++FR-04: 不适用：新增坑文档，验收以文件存在且 status: 活跃为准
+
+diff --git a/.sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/tasks.md b/.sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T01:59:18.923Z
++---
++# 任务注册表（Tasks）— 2026-10-08-sync-sillyspec-skills-3320
++
++- [x] task-01: .claude/.codex/.opencode/.zcode 四镜像目录均有 21 个 sillyspec-* 技能（含 sillyspec-flow），内容与 npm sillyspec@3.32.0 包一致
++- [x] task-02: .zcode/skills/sillyspec-quick/SKILL.md 去掉本地手补的退役横幅段，还原为上游原版
++- [x] task-03: AGENTS.md 注入段版本号刷新为 v3.32.0
++- [x] task-04: docs/sillyspec/ 新增活跃坑：init 技能同步映射不含 zcode

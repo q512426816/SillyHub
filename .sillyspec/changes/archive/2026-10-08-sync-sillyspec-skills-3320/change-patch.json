@@ -1,0 +1,90 @@
+{
+  "change": "2026-10-08-sync-sillyspec-skills-3320",
+  "baseline": "9451469cb918aaff773920933217bccb38256d6f",
+  "head": "e3a4222dcee84c1281d5e7414b11b1908724cf69",
+  "files": [
+    ".claude/commands/sillyspec/flow.md",
+    ".claude/commands/sillyspec/run-archive.md",
+    ".claude/commands/sillyspec/run-brainstorm.md",
+    ".claude/commands/sillyspec/run-execute.md",
+    ".claude/commands/sillyspec/run-plan.md",
+    ".claude/commands/sillyspec/run-quick.md",
+    ".claude/commands/sillyspec/run-verify.md",
+    ".claude/commands/sillyspec/status.md",
+    ".claude/skills/sillyspec-flow/SKILL.md",
+    ".codex/skills/sillyspec-flow/SKILL.md",
+    ".opencode/skills/sillyspec-flow/SKILL.md",
+    ".sillyspec/docs/frontend/modules/lib-menu-permissions.md",
+    ".zcode/commands/sillyspec/flow.md",
+    ".zcode/commands/sillyspec/run-archive.md",
+    ".zcode/commands/sillyspec/run-brainstorm.md",
+    ".zcode/commands/sillyspec/run-execute.md",
+    ".zcode/commands/sillyspec/run-plan.md",
+    ".zcode/commands/sillyspec/run-quick.md",
+    ".zcode/commands/sillyspec/run-verify.md",
+    ".zcode/commands/sillyspec/status.md",
+    ".zcode/skills/sillyspec-flow/SKILL.md",
+    ".zcode/skills/sillyspec-quick/SKILL.md",
+    "AGENTS.md",
+    "docs/sillyspec/init-skills-sync-no-zcode.md",
+    ".sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/design.md",
+    ".sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/proposal.md",
+    ".sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/requirements.md",
+    ".sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/tasks.md"
+  ],
+  "totals": {
+    "files": 28,
+    "additions": 945,
+    "deletions": 46
+  },
+  "savedAt": "2026-10-08T02:04:07.368Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [
+    {
+      "dir": ".claude/commands/sillyspec",
+      "files": 8
+    },
+    {
+      "dir": ".zcode/commands/sillyspec",
+      "files": 8
+    },
+    {
+      "dir": ".claude/skills/sillyspec-flow",
+      "files": 1
+    },
+    {
+      "dir": ".codex/skills/sillyspec-flow",
+      "files": 1
+    },
+    {
+      "dir": ".opencode/skills/sillyspec-flow",
+      "files": 1
+    },
+    {
+      "dir": ".zcode/skills/sillyspec-flow",
+      "files": 1
+    },
+    {
+      "dir": ".zcode/skills/sillyspec-quick",
+      "files": 1
+    }
+  ],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "f03804fb7d7d1dbf6c27094fc08054a88aec73edfe5e4c6780e1cd6d55bdc6ad",
+  "patchStatus": "ok"
+}

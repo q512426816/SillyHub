@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-sync-sillyspec-skills-3320",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e3a4222dcee84c1281d5e7414b11b1908724cf69",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "冻结审计件 change.patch 混入外来变更文件，评审锚 HEAD 实为外来提交",
+      "evidence": "patch 中 .sillyspec/docs/frontend/modules/lib-menu-permissions.md(+20/-14) 出自并行变更 2026-10-08-sessions-menu-permissions 的提交 e3a4222dc（即本评审锚 HEAD 本身）；本变更自身交付提交 282fd6b0c 仅 23 个文件且全部属本变更面（design 盲维2 的白名单 add 声明对提交面成立）。机理：flow done 以 baseline..HEAD 冻结 patch 时共享仓 HEAD 已被外来提交推进，审计面被动包含外来 diff。不影响 FR 兑现——四目录技能计数 21×4、四目录互查与 vs npm sillyspec@3.32.0 解包件 84/84 技能目录逐字节一致均已独立复验通过。",
+      "location": ".sillyspec/changes/2026-10-08-sync-sillyspec-skills-3320/change.patch:487"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "finding",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "checklistDetail": {
+    "FR三方一致": {
+      "FR-01": "兑现：.claude/.codex/.opencode/.zcode 各 21 个 sillyspec-* 技能；本人实跑 diff -rq 四目录 vs /tmp/ss3320/package/.claude/skills 共 84/84 技能目录逐字节一致（ALL-FOUR-MATCH-NPM-3320 复现）。测试绑定「不适用：纯文件同步」属实——交付提交 282fd6b0c 全部为静态 .md 文件，无 src/test 代码路径。",
+      "FR-02": "兑现：.zcode/skills/sillyspec-quick/SKILL.md 与上游 3.32.0 同名文件 diff 为空（独立复验）；patch 删除的正是本地手补退役横幅段（-31/+1）。",
+      "FR-03": "兑现：AGENTS.md:15 注入段标记 v3.32.0；patch 中 AGENTS.md 仅 1 行变化（版本行 d7ee6f6f6→f826f10e8），符合「仅注入段内部变化」。",
+      "FR-04": "兑现：docs/sillyspec/init-skills-sync-no-zcode.md 存在，frontmatter 含 title/date/status，「status: 活跃（工具缺陷待修；守则可先行）」grep 命中；内容覆盖双层缺口（detectTools 无 zcode 分支 + skillToolDirs 无映射）、.gitignore 复合坑与手动补拷守则。"
+    },
+    "盲维四问真实性": {
+      "乱序": "相符：纯静态文件同步无事件流，init 版本感知幂等重入，作答成立。",
+      "并发": "作答真实（提交白名单确实避开了外来文件，282fd6b0c 文件面干净），但并发后果在冻结件层面实际发生——patch 混入外来提交的 lib-menu-permissions.md（见 P2 finding）。",
+      "切换": "相符：init 幂等可重跑；时序分离有实证（282fd6b0c 于 10:03 提交在先，flow done 冻结在后）。",
+      "作用域": "相符：init 在主仓根目录跑，产物仅本仓库路径，无跨仓分裂。"
+    },
+    "披露边界裁决": [
+      "「.zcode 手动补拷绕过 CLI 缺口」：可接受——CLI 3.32.0 skillToolDirs 确无 zcode 映射（坑文档留证），手动补拷是唯一路径且结果已验逐字节一致，坑已按 CLAUDE.md 规则 15 留档待上游修复。",
+      "「测试绑定不适用」：可接受——变更面 100% 静态文档/技能镜像，无可执行代码路径；验收以实跑 diff/计数替代，本人已全部独立复跑复现。",
+      "「.zcode 整目录 gitignore 需 git add -f」：可接受且必要——新增 .zcode 文件实际已入提交（282fd6b0c 含 6 个 .zcode 新文件），守则实操有效。",
+      "其余：无声明边界。"
+    ],
+    "防护声明核对": "「manifest 版本是内容 SHA，文件变了版本自动变」与 diff 事实一致：交付提交不含 backend 任何文件，manifest 生成逻辑未被触碰，无硬编码版本号需要同步，声明自洽无反证。",
+    "生成物同步": "确认：无类型/契约文件改动（无 api-types.ts / openapi.json / 后端 schema 面），不适用。"
+  },
+  "reviewedAt": "2026-10-08T10:07:35+08:00"
+}

@@ -190,3 +190,4 @@
 - lib-llm-providers|FR|需求|承接 → [fr/lib-llm-providers.md](fr/lib-llm-providers.md)
 - auto-sillyspec|sillyspec|FR|需求|承接 → [fr/auto-sillyspec.md](fr/auto-sillyspec.md)
 - auto-backend|backend|FR|需求|承接 → [fr/auto-backend.md](fr/auto-backend.md)
+- auto-zcode|zcode|FR|需求|承接 → [fr/auto-zcode.md](fr/auto-zcode.md)

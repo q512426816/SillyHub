@@ -1,0 +1,28 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  刷新仓库内嵌 SillySpec 技能到 CLI 3.32.0——平台预置技能缺新增的 sillyspec-flow，.zcode 的 sillyspec-quick 被本地手补分叉，AGENTS.md 注入段版本号停在 v3.29.3
+  成功标准：
+  - .claude/.codex/.opencode/.zcode 四镜像目录均有 21 个 sillyspec-* 技能（含 sillyspec-flow），内容与 npm sillyspec@3.32.0 包一致
+  - .zcode/skills/sillyspec-quick/SKILL.md 去掉本地手补的退役横幅段，还原为上游原版
+  - AGENTS.md 注入段版本号刷新为 v3.32.0
+  - docs/sillyspec/ 新增活跃坑：init 技能同步映射不含 zcode
+autopilot: true
+baseline_commit: 9451469cb918aaff773920933217bccb38256d6f
+updatedAt: '2026-10-08T02:08:14.341Z'
+baseline_sha256: 687f44e564a21cd4bbe1f34c8277e2dd266ad54a65ae2631ac2aebd75bb77f58
+autopilot_ticked: 4
+gate_summary: 'test: —｜lint: —｜门文件 23 个'
+

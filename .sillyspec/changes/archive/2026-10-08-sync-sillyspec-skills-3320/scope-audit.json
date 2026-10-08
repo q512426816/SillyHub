@@ -1,0 +1,165 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "9451469cb918aaff773920933217bccb38256d6f",
+  "totals": {
+    "files": 24,
+    "additions": 797,
+    "deletions": 46
+  },
+  "rows": [
+    {
+      "path": ".claude/commands/sillyspec/flow.md",
+      "additions": 39,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".claude/commands/sillyspec/run-archive.md",
+      "additions": 27,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".claude/commands/sillyspec/run-brainstorm.md",
+      "additions": 34,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".claude/commands/sillyspec/run-execute.md",
+      "additions": 30,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".claude/commands/sillyspec/run-plan.md",
+      "additions": 28,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".claude/commands/sillyspec/run-quick.md",
+      "additions": 21,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".claude/commands/sillyspec/run-verify.md",
+      "additions": 30,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".claude/commands/sillyspec/status.md",
+      "additions": 28,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".claude/skills/sillyspec-flow/SKILL.md",
+      "additions": 61,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".codex/skills/sillyspec-flow/SKILL.md",
+      "additions": 61,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".opencode/skills/sillyspec-flow/SKILL.md",
+      "additions": 61,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/lib-menu-permissions.md",
+      "additions": 20,
+      "deletions": 14,
+      "kind": "modified"
+    },
+    {
+      "path": ".zcode/commands/sillyspec/flow.md",
+      "additions": 39,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".zcode/commands/sillyspec/run-archive.md",
+      "additions": 27,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".zcode/commands/sillyspec/run-brainstorm.md",
+      "additions": 34,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".zcode/commands/sillyspec/run-execute.md",
+      "additions": 30,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".zcode/commands/sillyspec/run-plan.md",
+      "additions": 28,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".zcode/commands/sillyspec/run-quick.md",
+      "additions": 21,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".zcode/commands/sillyspec/run-verify.md",
+      "additions": 30,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".zcode/commands/sillyspec/status.md",
+      "additions": 28,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".zcode/skills/sillyspec-flow/SKILL.md",
+      "additions": 61,
+      "deletions": 0,
+      "kind": "new"
+    },
+    {
+      "path": ".zcode/skills/sillyspec-quick/SKILL.md",
+      "additions": 1,
+      "deletions": 31,
+      "kind": "modified"
+    },
+    {
+      "path": "AGENTS.md",
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified"
+    },
+    {
+      "path": "docs/sillyspec/init-skills-sync-no-zcode.md",
+      "additions": 57,
+      "deletions": 0,
+      "kind": "new"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "f03804fb7d7d1dbf6c27094fc08054a88aec73edfe5e4c6780e1cd6d55bdc6ad",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T02:04:07.368Z"
+}
