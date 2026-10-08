@@ -1,0 +1,13 @@
+{"ts":1791424525734,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791424543348,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791424554468,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/lib/menu-permissions.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791424565014,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/lib/__tests__/menu-permissions.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791424698718,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/__tests__/admin-role-permission-picker-tree.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791424846350,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791424846350,"kind":"task-done","stage":"tasks","detail":"checked 0→4","provisional":true}
+{"ts":1791424850153,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：.claude/commands/、.claude/skills/sillyspec-flow/、.codex/skills/sillyspec-flow/、.opencode/skills/sillyspec-flow/、frontend/src/components/__tests__/admin-role-permission-picker-tree.test.tsx、gitignore——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791424859865,"kind":"commit","stage":null,"detail":"0c4f107ba","provisional":true}
+{"ts":1791424883050,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791424912818,"kind":"gate-run","stage":"verify","detail":"门实测 passed（5.2s） · 20261008020151","provisional":true}
+{"ts":1791424919784,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：gitignore——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791424955543,"kind":"commit","stage":null,"detail":"086033da0","provisional":true}

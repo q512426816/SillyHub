@@ -1,0 +1,45 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "9451469cb918aaff773920933217bccb38256d6f",
+  "totals": {
+    "files": 3,
+    "additions": 50,
+    "deletions": 16
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/__tests__/admin-role-permission-picker-tree.test.tsx",
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/menu-permissions.test.ts",
+      "additions": 33,
+      "deletions": 14,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/menu-permissions.ts",
+      "additions": 14,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "f495bdcc8c60d947d1223ea8978629885559a596abb9a5f5e013a4fc4ce8db7f",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T02:02:43.942Z"
+}

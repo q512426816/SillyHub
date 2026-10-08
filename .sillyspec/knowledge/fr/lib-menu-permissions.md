@@ -264,3 +264,79 @@
 - 场景：默认场景 — Given 模板表（is_preset seed 预置 5-7 个 + 用户自存）；When 用户从模板快速创建或把现有 server 存为模板；Then 模板为明文 server_config（无 secret）；从带 secret 的 server 存模板时 secret 键丢弃并提示
 全文：.sillyspec/changes/archive/2026-09-10-mcp-central-registry/requirements.md#FR-09
 最近确认：8267d9887
+
+## FR-lib-menu-permissions-030 sessions 菜单 permissions 补齐为 agent_session:read / task:run_agent / daemon:borrow / runtime:admin 四项
+变更：2026-10-08-sessions-menu-permissions
+状态：active
+摘要：主路径；菜单可见性按任一命中放宽
+全文：.sillyspec/changes/archive/2026-10-08-sessions-menu-permissions/requirements.md#FR-01
+最近确认：086033da03918b7d38e93ce425e9e555073e43e6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-sessions-menu-permissions:flow:测试绑定FR-01
+  tests: frontend/src/lib/__tests__/menu-permissions.test.ts「sessions 菜单：agent 组 /sessions + 会话页实际权限四项门控（补齐 task:run_agent / daemon:borrow / runtime:admin）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-sessions-menu-permissions
+  status: active
+
+## FR-lib-menu-permissions-031 角色管理勾选器「智能体会话」卡片可勾选上述全部权限
+变更：2026-10-08-sessions-menu-permissions
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-sessions-menu-permissions/requirements.md#FR-02
+最近确认：086033da03918b7d38e93ce425e9e555073e43e6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-sessions-menu-permissions:flow:测试绑定FR-02
+  tests: frontend/src/lib/__tests__/menu-permissions.test.ts「所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 72」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-sessions-menu-permissions
+  status: active
+
+## FR-lib-menu-permissions-032 测试镜像常量 BACKEND_PERMISSION_KEYS 与后端 72 项枚举对齐（补 daemon:borrow / knowledge:write / ppm:problem-change:read），计数断言同步
+变更：2026-10-08-sessions-menu-permissions
+状态：active
+摘要：镜像护栏
+全文：.sillyspec/changes/archive/2026-10-08-sessions-menu-permissions/requirements.md#FR-03
+最近确认：086033da03918b7d38e93ce425e9e555073e43e6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-sessions-menu-permissions:flow:测试绑定FR-03
+  tests: frontend/src/lib/__tests__/menu-permissions.test.ts「所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 72」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-sessions-menu-permissions
+  status: active
+
+## FR-lib-menu-permissions-033 menu-permissions 相关测试通过，前端 tsc/lint 无回归
+变更：2026-10-08-sessions-menu-permissions
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-sessions-menu-permissions/requirements.md#FR-04
+最近确认：086033da03918b7d38e93ce425e9e555073e43e6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-sessions-menu-permissions:flow:测试绑定FR-04
+  tests: frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/permission.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-sessions-menu-permissions
+  status: active

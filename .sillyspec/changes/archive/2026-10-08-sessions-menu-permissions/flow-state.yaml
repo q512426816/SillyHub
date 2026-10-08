@@ -3,6 +3,12 @@ legacy_fallback: false
 substeps:
   artifacts: done
   ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -22,7 +28,7 @@ input: >-
   - menu-permissions 相关测试通过，前端 tsc/lint 无回归
 autopilot: true
 baseline_commit: 9451469cb918aaff773920933217bccb38256d6f
-updatedAt: '2026-10-08T02:02:01.341Z'
+updatedAt: '2026-10-08T02:02:45.476Z'
 baseline_sha256: 30e5f4cdd9964b9a46e4e853b5d6907c86cbc131b77a68dadb4dcb11b4431967
 allow_batch_tick: true
 gate_summary: >-

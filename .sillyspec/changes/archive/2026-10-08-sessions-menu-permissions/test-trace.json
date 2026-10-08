@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-sessions-menu-permissions",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-08-sessions-menu-permissions:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/lib/__tests__/menu-permissions.test.ts「sessions 菜单：agent 组 /sessions + 会话页实际权限四项门控（补齐 task:run_agent / daemon:borrow / runtime:admin）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-sessions-menu-permissions"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-08-sessions-menu-permissions:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/lib/__tests__/menu-permissions.test.ts「所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 72」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-sessions-menu-permissions"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-08-sessions-menu-permissions:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/lib/__tests__/menu-permissions.test.ts「所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 72」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-sessions-menu-permissions"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-08-sessions-menu-permissions:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/lib/__tests__/menu-permissions.test.ts",
+        "frontend/src/lib/__tests__/permission.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-sessions-menu-permissions"
+    }
+  ]
+}
