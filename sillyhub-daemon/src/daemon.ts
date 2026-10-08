@@ -7130,9 +7130,11 @@ export class Daemon {
       const depth = typeof params.depth === 'string' || typeof params.depth === 'number' ? params.depth : undefined;
       const search = typeof params.search === 'string' ? params.search : undefined;
       const limit = typeof params.limit === 'string' || typeof params.limit === 'number' ? params.limit : undefined;
+      // dump 专属旗标（2026-10-09 task-02 接线补）：layout 必须 true，注册层透传给 handler 校验
+      const layout = params.layout === true ? true : undefined;
       // root 键：design RPC 契约用 root（governance 先例 root_path 兼容双收）
       const rootPath = normalizeRootPathParam(params.root ?? params.root_path);
-      return gov.graph(workspaceId, { sub, anchor, anchor2, edges, depth, search, limit }, rootPath);
+      return gov.graph(workspaceId, { sub, anchor, anchor2, edges, depth, search, limit, layout }, rootPath);
     });
   }
 

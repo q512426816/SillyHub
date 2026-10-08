@@ -2,7 +2,8 @@
 
 /**
  * GraphCanvas — 知识图谱自绘画布（task-06 / 2026-10-08-platform-knowledge-graph
- * / FR-06 / D-003@v1）。
+ * / FR-06 / D-003@v1；full 模式 task-05 / 2026-10-09-knowledge-graph-fullmap /
+ * FR-04 / FR-05 / D-002@v1）。
  *
  * 依据：
  *   - 归档原型 prototype-knowledge-graph.html 的 step()/draw()/交互段生产直译：
@@ -11,21 +12,27 @@
  *     标签分级（缩放阈值/选中/hover/高亮内，26 字符截断，字号随缩放补偿）、
  *     边三档虚实（strong 实线 / medium 长虚 / weak 点虚）；
  *   - design Phase 3：力场仅切片 ≤FORCE_NODE_LIMIT 节点启用，超限确定性静态
- *     降级（类型分环同心圆等角分布，不启 rAF 力场）；mode "lite" 为总览簇
- *     气泡 + 代表节点静态渲染（liteClusterLayout，D-008@v2）；
+ *     降级（类型分环同心圆等角分布，不启 rAF 力场）；mode "full" 为全图 dump
+ *     静态星空——节点按 CLI 预计算 x/y 直接摆放（不 seedSpiral 不步进力场，
+ *     engine='full'，与 FORCE_NODE_LIMIT 语义正交：全图节点>200 恒静态）。
+ *     lite 总览簇气泡 UI 已移除（2026-10-09-knowledge-graph-fullmap task-05，
+ *     full 全图取代其语义；liteClusterLayout 纯函数保留供复用）；
+ *   - full 态性能护栏（原型 HTML 同值）：缩放 k<0.5 跳过边绘制只画节点
+ *     （shallDrawEdges）；标签分级只在大半径类型（module/project/doc）或
+ *     k>1.35 或 hover/选中时出现（原型 HTML:396 同值）；
  *   - 主题铁律（D-003）：节点 10 类型色 = themes[theme].color 组合（brand 阶 +
  *     semantic + slate），组件级 CSS 变量 --kg-node-0..9 注入 + useThemeStore
  *     订阅换肤（commit-graph.tsx lanePalette 先例），本文件零硬编码 hex；
- *   - 力场/静态/lite 布局/拾取/适配均为具名导出纯函数（task-09 单测消费面）。
+ *   - 力场/静态/全图构造/布局/拾取/适配均为具名导出纯函数（单测消费面）。
  *
- * 消费方（page.tsx，task-07）注意：nodes/edges/clusters 传引用稳定的数据
- * （useMemo）——identity 变化即视为新切片重摆布局（查询驱动的预期语义）。
+ * 消费方（page.tsx）注意：nodes/edges 传引用稳定的数据（useMemo）——identity
+ * 变化即视为新切片重摆布局（查询驱动的预期语义）。
  */
 
 import { useEffect, useMemo, useRef } from "react";
 import type { CSSProperties } from "react";
 
-import type { GraphCluster, GraphEdge, GraphNodeRef } from "@/lib/knowledge";
+import type { GraphEdge, GraphNodeRef } from "@/lib/knowledge";
 import { useThemeStore } from "@/stores/theme";
 import { themes, type ThemeName } from "@/styles/themes";
 
@@ -61,6 +68,8 @@ const GOLDEN_ANGLE = 2.399;
 /** 标签显示缩放阈值（切片模式）与截断长度。 */
 const LABEL_ZOOM_THRESHOLD = 0.55;
 const LABEL_MAX_CHARS = 26;
+/** full 态标签高缩放阈值（原型 HTML:396 同值；低于此只画大半径类型标签）。 */
+export const FULL_LABEL_ZOOM_THRESHOLD = 1.35;
 
 /** 节点 10 类型（色板/半径映射序，与 CLI 图引擎节点类型一一对应）。 */
 export const NODE_TYPE_ORDER = [
@@ -329,6 +338,47 @@ function nodeTypeOrderValue(type: string): number {
   return i >= 0 ? i : NODE_TYPE_ORDER.length;
 }
 
+// ── full 模式（全图 dump 静态星空，task-05 / 2026-10-09-knowledge-graph-fullmap）──
+
+/** 画布节点输入：slice 传 GraphNodeRef（无坐标，画布摆位）；full 传 dump 节点（带预计算 x/y）。 */
+export type CanvasNodeInput = GraphNodeRef & { x?: number; y?: number };
+
+/**
+ * full 模式仿真节点构造：直接消费 dump 节点自带 x/y（px/py 同值初始化——
+ * 零初始速度，不 seedSpiral 不步进力场；rAF 循环 engine='full' 不调
+ * stepForceLayout，节点坐标恒等于输入）。缺坐标节点按 (0,0) 归一。
+ */
+export function fullSimNodes(nodes: ReadonlyArray<CanvasNodeInput>): SimNode[] {
+  return nodes.map((n) => toSimNode(n, n.x ?? 0, n.y ?? 0));
+}
+
+/** full 态边绘制缩放下限（原型 dump 星空同值）。 */
+export const FULL_EDGE_ZOOM_THRESHOLD = 0.5;
+
+/**
+ * 边绘制护栏（full 态性能，原型同值）：缩放 k≥0.5 才画边，低于只画节点——
+ * 千级边在远视野下的绘制开销远超信息量。slice 态不受此护栏约束。
+ */
+export function shallDrawEdges(k: number): boolean {
+  return k >= FULL_EDGE_ZOOM_THRESHOLD;
+}
+
+/** full 态常显标签的大半径类型集（原型 HTML:396 同值）。 */
+export const FULL_LABEL_TYPES: ReadonlySet<string> = new Set([
+  "module",
+  "project",
+  "doc",
+]);
+
+/**
+ * full 态标签分级谓词（原型 HTML:396 同值）：大半径类型（module/project/doc）
+ * 恒显；其余类型仅 k>1.35 放大后显示。hover/选中由 drawNodeShape 叠加，
+ * 不进本谓词。
+ */
+export function shallShowFullLabel(type: string, k: number): boolean {
+  return FULL_LABEL_TYPES.has(type) || k > FULL_LABEL_ZOOM_THRESHOLD;
+}
+
 /** lite 簇输入（GraphCluster 结构兼容；representatives 为度数 top-5）。 */
 export interface LiteClusterInput {
   key: string;
@@ -356,6 +406,10 @@ export interface LiteClusterPlacement {
  * lite 簇摆放（总览 lite，D-008@v2）：簇按 count 降序（同数按 key 升序）沿
  * 大环等角摆放，气泡半径随节点数开方增长；簇内代表节点在内圈等角分布——
  * 全确定性。R-04：原型未覆盖的新面，纯函数导出交单测兜底。
+ *
+ * 【保留标注】lite UI 已移除（2026-10-09-knowledge-graph-fullmap task-05，
+ * full 全图模式取代总览簇气泡语义），本布局纯函数与单测保留供复用——
+ * 确定性多簇气泡摆放的独立可复用件，不随 UI 分支消亡。
  */
 export function liteClusterLayout(
   clusters: ReadonlyArray<LiteClusterInput>,
@@ -495,25 +549,30 @@ export interface GraphHighlight {
 }
 
 export interface GraphCanvasProps {
-  /** 切片节点（GraphNodeRef 生成类型；label 空串回退显示 id）。 */
-  nodes: ReadonlyArray<GraphNodeRef>;
-  /** 切片边（strength 驱动线型与弹簧档）。 */
+  /**
+   * 节点输入（CanvasNodeInput；label 空串回退显示 id）——slice 传切片 ref
+   * （无坐标），full 传 dump 节点（x/y 预计算坐标，fullSimNodes 消费）。
+   */
+  nodes: ReadonlyArray<CanvasNodeInput>;
+  /** 边（strength 驱动线型与弹簧档；full 态 k<0.5 不绘制——shallDrawEdges）。 */
   edges: ReadonlyArray<GraphEdge>;
-  /** slice（默认，查询切片）/ lite（总览簇气泡，D-008@v2）。 */
-  mode?: "slice" | "lite";
-  /** lite 模式簇数据（summary.clusters；slice 模式忽略）。 */
-  clusters?: ReadonlyArray<GraphCluster>;
+  /**
+   * slice（默认，查询切片力场）/ full（全图 dump 静态星空，engine='full'
+   * 不步进力场）。lite 总览模式已移除（2026-10-09-knowledge-graph-fullmap
+   * task-05，full 取代其语义）。
+   */
+  mode?: "slice" | "full";
   /** 选中节点 id（选中环 + 标签常显）。 */
   selectedId?: string | null;
   /** 警示节点 id 集（orphans 命中红色警示环）。 */
   warnIds?: ReadonlySet<string>;
   /** 高亮集（非 null 时非高亮元素压暗：边 0.06 / 节点 0.1）。 */
   highlight?: GraphHighlight | null;
-  /** 节点点击（lite 模式为代表节点；null=点空白由调用方决定是否清选）。 */
+  /** 节点点击（full 模式=下钻锚点；null=点空白由调用方决定是否清选）。 */
   onSelect?: (id: string | null) => void;
-  /** 布局引擎回调（数据重建时上报：force/static/lite + 节点数，mode-chip 数据源）。 */
+  /** 布局引擎回调（数据重建时上报：force/static/full + 节点数，mode-chip 数据源）。 */
   onLayoutMode?: (info: {
-    engine: "force" | "static" | "lite";
+    engine: "force" | "static" | "full";
     nodeCount: number;
   }) => void;
   /** 递增触发重新适配视口（工具栏「适配」按钮等）。 */
@@ -532,9 +591,6 @@ interface CanvasColors {
   warnRing: string;
   nodeBorder: string;
   label: string;
-  bubbleFill: string;
-  bubbleBorder: string;
-  badge: string;
 }
 
 function canvasColors(theme: ThemeName): CanvasColors {
@@ -549,9 +605,6 @@ function canvasColors(theme: ThemeName): CanvasColors {
     warnRing: c.semantic.error,
     nodeBorder: c.card,
     label: c.slate[700],
-    bubbleFill: c.brand[50],
-    bubbleBorder: c.brand[200],
-    badge: c.slate[700],
   };
 }
 
@@ -590,7 +643,6 @@ export function GraphCanvas({
   nodes,
   edges,
   mode = "slice",
-  clusters,
   selectedId = null,
   warnIds,
   highlight = null,
@@ -619,13 +671,10 @@ export function GraphCanvas({
   const simRef = useRef<SimNode[]>([]);
   const edgeSimRef = useRef<SimEdge[]>([]);
   const byIdRef = useRef<Map<string, SimNode>>(new Map());
-  const liteRef = useRef<LiteClusterPlacement[]>([]);
-  const liteNodesRef = useRef<SimNode[]>([]);
-  const engineRef = useRef<"force" | "static" | "lite">("force");
+  const engineRef = useRef<"force" | "static" | "full">("force");
   const viewRef = useRef<ViewBox>({ x: 0, y: 0, k: 1 });
   const sizeRef = useRef({ w: 0, h: 0 });
   const hoverRef = useRef<string | null>(null);
-  const hoverBubbleRef = useRef(-1);
   const dragRef = useRef<SimNode | null>(null);
   const panRef = useRef<{ x: number; y: number } | null>(null);
   const dirtyRef = useRef(true);
@@ -648,33 +697,26 @@ export function GraphCanvas({
     dirtyRef.current = true;
   });
 
-  // 数据重建（identity 变化=新切片）：slice 黄金角螺旋起步 / >200 静态降级 /
-  // lite 簇摆放，随后 fitView 适配。
+  // 数据重建（identity 变化=新切片）：full 消费自带 x/y 静态摆放 / slice 黄金角
+  // 螺旋起步 / >200 静态降级，随后 fitView 适配。
   useEffect(() => {
     const w = sizeRef.current.w || 800;
     const h = sizeRef.current.h || 600;
-    if (mode === "lite") {
-      const placements = liteClusterLayout(clusters ?? []);
-      liteRef.current = placements;
-      liteNodesRef.current = placements.flatMap((p) =>
-        p.reps.map((r) => {
-          const rep = (clusters ?? []).find(
-            (c) => c.key === p.key,
-          )?.representatives.find((x) => x.id === r.id);
-          return toSimNode(
-            {
-              id: r.id,
-              type: rep?.type ?? "",
-              label: rep?.label ?? "",
-            },
-            r.x,
-            r.y,
-          );
-        }),
-      );
-      engineRef.current = "lite";
-      onLayoutMode?.({ engine: "lite", nodeCount: liteNodesRef.current.length });
-      viewRef.current = fitView(liteBbox(placements), w, h);
+    edgeSimRef.current = edges.map((e) => ({
+      s: e.s,
+      t: e.t,
+      type: e.type,
+      strength: e.strength,
+    }));
+    if (mode === "full") {
+      // 全图 dump 静态星空：节点坐标恒等于输入（不 seedSpiral 不步进力场，
+      // engine='full'——rAF 循环仅 force 引擎步进）。
+      const sim = fullSimNodes(nodes);
+      byIdRef.current = new Map(sim.map((n) => [n.id, n] as const));
+      simRef.current = sim;
+      engineRef.current = "full";
+      onLayoutMode?.({ engine: "full", nodeCount: sim.length });
+      viewRef.current = fitView(graphBbox(sim), w, h);
       dirtyRef.current = true;
       return;
     }
@@ -684,12 +726,6 @@ export function GraphCanvas({
     seedSpiral(sim, w / 2, h / 2, sim.length);
     forceTickRef.current = 0;
     userTouchedRef.current = false;
-    edgeSimRef.current = edges.map((e) => ({
-      s: e.s,
-      t: e.t,
-      type: e.type,
-      strength: e.strength,
-    }));
     byIdRef.current = new Map(sim.map((n) => [n.id, n] as const));
     const engine: "force" | "static" =
       sim.length > FORCE_NODE_LIMIT ? "static" : "force";
@@ -700,7 +736,7 @@ export function GraphCanvas({
     viewRef.current = fitView(graphBbox(sim), w, h);
     dirtyRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, edges, mode, clusters, fitSignal]);
+  }, [nodes, edges, mode, fitSignal]);
 
   // 挂载：测量 + rAF 循环 + 非被动滚轮（缩放需 preventDefault）。
   useEffect(() => {
@@ -724,11 +760,7 @@ export function GraphCanvas({
     const refit = () => {
       const { w, h } = sizeRef.current;
       if (w === 0 || h === 0) return;
-      if (engineRef.current === "lite") {
-        viewRef.current = fitView(liteBbox(liteRef.current), w, h);
-      } else {
-        viewRef.current = fitView(graphBbox(simRef.current), w, h);
-      }
+      viewRef.current = fitView(graphBbox(simRef.current), w, h);
       dirtyRef.current = true;
     };
 
@@ -760,8 +792,12 @@ export function GraphCanvas({
       ctx.strokeStyle = c.nodeBorder;
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      // 标签分级：缩放阈值 / 选中 / hover / 高亮内（lite 与切片同阈值）
-      const showLbl = k > LABEL_ZOOM_THRESHOLD || isSel || isHov || inHl;
+      // 标签分级（原型同源）：切片 = 缩放阈值/选中/hover/高亮内；full = 大半径
+      // 类型（module/project/doc）恒显，其余 k>1.35 或选中/hover（HTML:396 同值）。
+      const showLbl =
+        engineRef.current === "full"
+          ? shallShowFullLabel(n.type, k) || isSel || isHov
+          : k > LABEL_ZOOM_THRESHOLD || isSel || isHov || inHl;
       if (showLbl) {
         ctx.font = `${isSel || isHov ? 600 : 400} ${Math.max(
           10,
@@ -791,69 +827,36 @@ export function GraphCanvas({
       ctx.translate(v.x, v.y);
       ctx.scale(v.k, v.k);
 
-      if (engineRef.current === "lite") {
-        // 簇气泡：背景色块 + 计数徽标（hover 提示「度数前 5」口径）
-        for (const cl of liteRef.current) {
-          const hov = liteRef.current[hoverBubbleRef.current] === cl;
-          ctx.globalAlpha = 1;
-          ctx.beginPath();
-          ctx.arc(cl.x, cl.y, cl.radius, 0, 7);
-          ctx.fillStyle = c.bubbleFill;
-          ctx.fill();
-          ctx.strokeStyle = hov ? c.edgeHl : c.bubbleBorder;
-          ctx.lineWidth = hov ? 1.8 : 1.2;
-          ctx.stroke();
-          ctx.textAlign = "center";
-          ctx.font = `600 ${Math.max(
-            11,
-            11 / Math.sqrt(v.k),
-          )}px ${FONT_STACK}`;
-          ctx.fillStyle = c.badge;
-          ctx.fillText(String(cl.count), cl.x, cl.y - cl.radius - 7);
-          ctx.font = `400 ${Math.max(10, 10 / Math.sqrt(v.k))}px ${FONT_STACK}`;
-          ctx.fillStyle = c.label;
-          ctx.fillText(cl.label, cl.x, cl.y + cl.radius + 14);
-          if (hov) {
-            ctx.fillText(
-              `本簇 ${cl.count} 节点 · 展示度数前 5`,
-              cl.x,
-              cl.y - cl.radius - 22,
-            );
+      // 边（三档虚实 + 高亮 brand 变粗）。full 态性能护栏：k<0.5 跳过边绘制
+      // 只画节点（shallDrawEdges，原型 dump 星空同值）。
+      if (shallDrawEdges(v.k)) {
+        for (const e of edgeSimRef.current) {
+          const a = byIdRef.current.get(e.s);
+          const b = byIdRef.current.get(e.t);
+          if (!a || !b) continue;
+          const inHl =
+            !hl || !hl.edgeKeys || hl.edgeKeys.has(graphEdgeKey(e.s, e.t, e.type));
+          ctx.globalAlpha = dim && !inHl ? 0.06 : 0.55;
+          const st = strengthOf(e.strength);
+          const { dash, width } = edgeDash(st);
+          ctx.strokeStyle =
+            st === "strong"
+              ? c.edgeStrong
+              : st === "medium"
+                ? c.edgeMedium
+                : c.edgeWeak;
+          ctx.lineWidth = width;
+          ctx.setLineDash(dash);
+          if (hl && inHl) {
+            ctx.strokeStyle = c.edgeHl;
+            ctx.lineWidth = 2.2;
+            ctx.globalAlpha = 0.95;
           }
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
         }
-        for (const n of liteNodesRef.current) drawNodeShape(n, c, v.k);
-        ctx.restore();
-        ctx.globalAlpha = 1;
-        return;
-      }
-
-      // 边（三档虚实 + 高亮 brand 变粗）
-      for (const e of edgeSimRef.current) {
-        const a = byIdRef.current.get(e.s);
-        const b = byIdRef.current.get(e.t);
-        if (!a || !b) continue;
-        const inHl =
-          !hl || !hl.edgeKeys || hl.edgeKeys.has(graphEdgeKey(e.s, e.t, e.type));
-        ctx.globalAlpha = dim && !inHl ? 0.06 : 0.55;
-        const st = strengthOf(e.strength);
-        const { dash, width } = edgeDash(st);
-        ctx.strokeStyle =
-          st === "strong"
-            ? c.edgeStrong
-            : st === "medium"
-              ? c.edgeMedium
-              : c.edgeWeak;
-        ctx.lineWidth = width;
-        ctx.setLineDash(dash);
-        if (hl && inHl) {
-          ctx.strokeStyle = c.edgeHl;
-          ctx.lineWidth = 2.2;
-          ctx.globalAlpha = 0.95;
-        }
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
       }
       ctx.setLineDash([]);
       for (const n of simRef.current) drawNodeShape(n, c, v.k);
@@ -863,7 +866,7 @@ export function GraphCanvas({
 
     const loop = () => {
       raf = requestAnimationFrame(loop);
-      // 力场仅 force 引擎步进（static/lite 不启力场——task-06 验收线）
+      // 力场仅 force 引擎步进（static/full 不启力场——full 坐标恒等于 dump 输入）
       if (
         engineRef.current === "force" &&
         sizeRef.current.w > 0 &&
@@ -934,9 +937,7 @@ export function GraphCanvas({
       x: (cx - viewRef.current.x) / viewRef.current.k,
       y: (cy - viewRef.current.y) / viewRef.current.k,
     };
-    const pool =
-      engineRef.current === "lite" ? liteNodesRef.current : simRef.current;
-    const hit = pickNode(pool, p.x, p.y, viewRef.current.k);
+    const hit = pickNode(simRef.current, p.x, p.y, viewRef.current.k);
     if (hit) {
       dragRef.current = hit;
       hit.drag = true;
@@ -976,26 +977,11 @@ export function GraphCanvas({
       dirtyRef.current = true;
       return;
     }
-    // hover：lite 模式先探簇气泡，其次代表节点；切片模式探节点
+    // hover：探节点
     const p = {
       x: (cx - viewRef.current.x) / viewRef.current.k,
       y: (cy - viewRef.current.y) / viewRef.current.k,
     };
-    if (engineRef.current === "lite") {
-      let bubble = -1;
-      liteRef.current.forEach((cl, i) => {
-        if (Math.hypot(cl.x - p.x, cl.y - p.y) < cl.radius) bubble = i;
-      });
-      const hit = pickNode(liteNodesRef.current, p.x, p.y, viewRef.current.k);
-      const nextHover = hit?.id ?? null;
-      if (nextHover !== hoverRef.current || bubble !== hoverBubbleRef.current) {
-        hoverRef.current = nextHover;
-        hoverBubbleRef.current = bubble;
-        dirtyRef.current = true;
-      }
-      canvas.style.cursor = hit ? "pointer" : "grab";
-      return;
-    }
     const hit = pickNode(simRef.current, p.x, p.y, viewRef.current.k);
     const nextHover = hit?.id ?? null;
     if (nextHover !== hoverRef.current) {
@@ -1024,14 +1010,9 @@ export function GraphCanvas({
       x: (e.clientX - rect.left - viewRef.current.x) / viewRef.current.k,
       y: (e.clientY - rect.top - viewRef.current.y) / viewRef.current.k,
     };
-    const pool =
-      engineRef.current === "lite" ? liteNodesRef.current : simRef.current;
-    if (!pickNode(pool, p.x, p.y, viewRef.current.k)) {
+    if (!pickNode(simRef.current, p.x, p.y, viewRef.current.k)) {
       const { w, h } = sizeRef.current;
-      viewRef.current =
-        engineRef.current === "lite"
-          ? fitView(liteBbox(liteRef.current), w, h)
-          : fitView(graphBbox(simRef.current), w, h);
+      viewRef.current = fitView(graphBbox(simRef.current), w, h);
       dirtyRef.current = true;
     }
   };
@@ -1056,20 +1037,4 @@ export function GraphCanvas({
       />
     </div>
   );
-}
-
-/** lite 包围盒（含气泡半径与簇标签留白）。 */
-function liteBbox(placements: ReadonlyArray<LiteClusterPlacement>): BBox {
-  let x0 = Infinity;
-  let y0 = Infinity;
-  let x1 = -Infinity;
-  let y1 = -Infinity;
-  for (const cl of placements) {
-    x0 = Math.min(x0, cl.x - cl.radius);
-    y0 = Math.min(y0, cl.y - cl.radius - 28);
-    x1 = Math.max(x1, cl.x + cl.radius);
-    y1 = Math.max(y1, cl.y + cl.radius + 22);
-  }
-  if (!isFinite(x0)) return { x0: 0, y0: 0, x1: 0, y1: 0 };
-  return { x0, y0, x1, y1 };
 }

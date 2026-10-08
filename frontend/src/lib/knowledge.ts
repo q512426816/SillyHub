@@ -57,6 +57,13 @@ export type GraphNodesOut = components["schemas"]["GraphEnvelope_GraphNodesData_
 export type GraphReason = NonNullable<GraphOverviewOut["reason"]>;
 export type GraphSub =
   operations["get_knowledge_graph_query_api_workspaces__workspace_id__knowledge_graph_query_get"]["parameters"]["query"]["sub"];
+// 全图 dump DTO（task-04 / 2026-10-09-knowledge-graph-fullmap / D-002@v1；后端
+// schema.py GraphDump* 为真相源，生成类型零手写）。节点带 CLI 预计算确定性
+// 布局坐标（x/y），stats 与 summary 同源聚合。
+export type GraphDumpNode = components["schemas"]["GraphDumpNode"];
+export type GraphDumpData = components["schemas"]["GraphDumpData"];
+export type GraphDumpOut =
+  components["schemas"]["GraphEnvelope_GraphDumpData_"];
 
 /**
  * filename 路径段编码：按 `/` 分段 encodeURIComponent 拼回，不整串编码。
@@ -441,5 +448,24 @@ export async function getKnowledgeGraphNodes(
   if (limit !== undefined) qs.set("limit", String(limit));
   return apiFetch<GraphNodesOut>(
     `/api/workspaces/${workspaceId}/knowledge/graph/nodes?${qs.toString()}`,
+  );
+}
+
+/**
+ * 全图 dump（task-04 / 2026-10-09-knowledge-graph-fullmap / FR-03 / FR-04 /
+ * D-002@v1）：GET /knowledge/graph/dump。
+ *
+ * CLI 离线预计算坐标的全量节点/边/聚合一次性下发（daemon 不裁剪），后端手动
+ * gzip 压缩传输（浏览器 fetch 原生透明解压）。全量回包可达 MB 级——GET 缺省
+ * 30s 超时不够，显式 timeoutMs 60s（大回包先例：仅此端点放宽）。HTTP 200 恒回
+ * 信封：available=false（reason=upgrade_required 等）时 data=null，调用方按
+ * available+reason 分支回退既有链路不弹错。
+ */
+export async function getKnowledgeGraphDump(
+  workspaceId: string,
+): Promise<GraphDumpOut> {
+  return apiFetch<GraphDumpOut>(
+    `/api/workspaces/${workspaceId}/knowledge/graph/dump`,
+    { timeoutMs: 60_000 },
   );
 }
