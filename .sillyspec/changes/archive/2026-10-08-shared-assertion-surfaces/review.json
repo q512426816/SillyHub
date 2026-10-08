@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-shared-assertion-surfaces",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e7787cadba68c5b51b50c7aaf6c461a4caac849c",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02/任务面写「四个契约源码处」实际交付五处（previewers 桶为知识条目⑤的补强）",
+      "evidence": "input 成功标准措辞为四处，实现补了 previewers/index.ts 第五处——交付超集非缺口，条目与源码注释五处齐备（grep 共享断言面 每文件 2 行命中）",
+      "location": ".sillyspec/changes/2026-10-08-shared-assertion-surfaces/requirements.md:17"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "n/a",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-09T01:05:00+08:00"
+}

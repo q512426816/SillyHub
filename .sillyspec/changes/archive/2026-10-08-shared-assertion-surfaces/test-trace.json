@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-shared-assertion-surfaces",
+  "rows": [
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-08-shared-assertion-surfaces:flow:测试绑定FR-03",
+      "tests": [
+        "backend/tests/test_align_platform_change_events_migration.py",
+        "sillyhub-daemon/tests/provider-adapter-registry.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-shared-assertion-surfaces"
+    }
+  ]
+}

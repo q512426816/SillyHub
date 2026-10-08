@@ -603,3 +603,51 @@
   confirmed_at: null
   source_change: 2026-09-30-breadcrumb-dedupe-zh
   status: active
+
+## FR-components-shared-041 testing-gotchas.md 新增「共享断言面」条目，六面齐备（契约源/钉子测试/动作三列），INDEX.md 对应关键词行挂载
+变更：2026-10-08-shared-assertion-surfaces
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 六面契约各有跨文件钉子 / When 登记条目+索引落地 / When 后续 flow start 或 INDEX 查询命中关键词 / Then 提醒可见。
+全文：.sillyspec/changes/archive/2026-10-08-shared-assertion-surfaces/requirements.md#FR-01
+最近确认：e7787cadba68c5b51b50c7aaf6c461a4caac849c
+
+## FR-components-shared-042 四个契约源码处各加一行同步提醒注释，指向具体钉子测试文件
+变更：2026-10-08-shared-assertion-surfaces
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 开发者编辑契约源码 / When 注释在场 / Then 钉子测试文件名当场可见。
+全文：.sillyspec/changes/archive/2026-10-08-shared-assertion-surfaces/requirements.md#FR-02
+最近确认：e7787cadba68c5b51b50c7aaf6c461a4caac849c
+
+## FR-components-shared-043 三端静态门零错（backend ruff/mypy、daemon tsc、frontend tsc/eslint），钉子测试复跑全绿（证注释零影响）
+变更：2026-10-08-shared-assertion-surfaces
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 五文件仅注释改动 / When 静态门与钉子测试复跑 / Then 全部通过（实证：backend ruff/format/mypy 0+锚 7 绿；daemo
+全文：.sillyspec/changes/archive/2026-10-08-shared-assertion-surfaces/requirements.md#FR-03
+最近确认：e7787cadba68c5b51b50c7aaf6c461a4caac849c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-shared-assertion-surfaces:flow:测试绑定FR-03
+  tests: backend/tests/test_align_platform_change_events_migration.py | sillyhub-daemon/tests/provider-adapter-registry.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-shared-assertion-surfaces
+  status: active
+
+## FR-components-shared-044 推送后五 workflow 全绿
+变更：2026-10-08-shared-assertion-surfaces
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 修复推送 / When 各 workflow 完成 / Then 全部 success。
+全文：.sillyspec/changes/archive/2026-10-08-shared-assertion-surfaces/requirements.md#FR-04
+最近确认：e7787cadba68c5b51b50c7aaf6c461a4caac849c

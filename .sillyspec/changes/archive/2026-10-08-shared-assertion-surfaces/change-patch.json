@@ -1,0 +1,92 @@
+{
+  "change": "2026-10-08-shared-assertion-surfaces",
+  "baseline": "6fc86d7eda6dc0809dc18720d43066782df37775",
+  "head": "e7787cadba68c5b51b50c7aaf6c461a4caac849c",
+  "files": [
+    ".sillyspec/changes/2026-10-08-shared-assertion-surfaces/design.md",
+    ".sillyspec/changes/2026-10-08-shared-assertion-surfaces/flow-state.yaml",
+    ".sillyspec/changes/2026-10-08-shared-assertion-surfaces/proposal.md",
+    ".sillyspec/changes/2026-10-08-shared-assertion-surfaces/requirements.md",
+    ".sillyspec/changes/2026-10-08-shared-assertion-surfaces/tasks.md",
+    "backend/app/modules/llm_provider/schema.py",
+    "frontend/src/components/files/previewers/index.ts",
+    "frontend/src/components/workspace-tabs.tsx",
+    "frontend/src/lib/provider-caps.ts",
+    "sillyhub-daemon/src/daemon.ts"
+  ],
+  "totals": {
+    "files": 10,
+    "additions": 179,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-08T17:22:16.273Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "llm_provider",
+      "files": 1,
+      "doc": "docs/backend/modules/llm_provider.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "llm_provider",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/llm_provider.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "a6f4236ec4db1f410435e43a9a582cf8ce2fea2e32b71fb92e3cd8462bb2fdc3",
+  "patchStatus": "ok"
+}

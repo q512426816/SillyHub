@@ -1,0 +1,253 @@
+diff --git a/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/flow-state.yaml b/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/flow-state.yaml
+new file mode 100644
+index 000000000..8cf033bda
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/flow-state.yaml
+@@ -0,0 +1,28 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  共享断言面登记（两轮 CI 清偿的根因收敛）：2026-10-07/08 两轮 CI 补红共 14 个失败用例，其中 9 个属同一模式——生产契约变更时只更新了自己变更内的测试，漏了散落在其它文件钉住同一契约的断言（迁移链尾锚 /
++  daemon 心跳平铺参长 / 前端 TABS 数量钉 / caps 全对象 toEqual / previewers 枚举 mock / backend
++  词表对账正则六面）。本次把这些共享断言面显性登记：①knowledge/testing-gotchas.md 新增条目逐面登记契约源→钉子测试→变更动作，INDEX.md 加关键词索引（flow start 知识注入与子代理 INDEX
++  查询可命中）②四个契约源码处加一行同步提醒注释（daemon.ts 心跳尾参块 / workspace-tabs.tsx TABS / provider-caps.ts 接口 / llm_provider/schema.py
++  agent_kinds 词表）。纯注释与知识库文档，零行为改动。
++
++
++  成功标准：
++
++  - testing-gotchas.md 新增「共享断言面」条目，六面齐备（契约源/钉子测试/动作三列），INDEX.md 对应关键词行挂载
++
++  - 四个契约源码处各加一行同步提醒注释，指向具体钉子测试文件
++
++  - 三端静态门零错（backend ruff/mypy、daemon tsc、frontend tsc/eslint），钉子测试复跑全绿（证注释零影响）
++
++  - 推送后五 workflow 全绿
++autopilot: true
++baseline_commit: 6fc86d7eda6dc0809dc18720d43066782df37775
++updatedAt: '2026-10-08T17:15:36.585Z'
++baseline_sha256: 8216a1b33de5c9a949f0f466cfba70af009c370e750247353ee265a4892b1b9f
++
+diff --git a/backend/app/modules/llm_provider/schema.py b/backend/app/modules/llm_provider/schema.py
+index 1641f848e..4860d7ced 100644
+--- a/backend/app/modules/llm_provider/schema.py
++++ b/backend/app/modules/llm_provider/schema.py
+@@ -49,6 +49,9 @@ class LlmProviderCreate(BaseModel):
+     # change 2026-10-06-provider-multi-agent-kind（D-004）：单值改引擎集合——一条凭证
+     # 可服务多个引擎，至少一个（min_length=1，无默认值，必须显式传）；保序去重
+     # （["claude","claude"] 归一为 ["claude"]，validator 见下）。
++    # 共享断言面：本字段名/声明形态（复数 list Literal）被 daemon 源读取对账正则
++    # 锚定——改词表或形态须同步 sillyhub-daemon/tests/provider-adapter-registry.
++    # test.ts 的 readBackendAgentKindVocab（testing-gotchas「共享断言面」⑥）。
+     agent_kinds: list[Literal["claude", "pi", "codex"]] = Field(min_length=1)
+     models: list[ProviderModelEntry] = []
+     base_url: str | None = None
+diff --git a/frontend/src/components/files/previewers/index.ts b/frontend/src/components/files/previewers/index.ts
+index 539b6065e..229c717c6 100644
+--- a/frontend/src/components/files/previewers/index.ts
++++ b/frontend/src/components/files/previewers/index.ts
+@@ -1,5 +1,9 @@
+ /**
+  * previewers 统一出口：PreviewerProps 类型 + 各渲染器组件。
++ *
++ * 共享断言面：新增导出须同一变更内补齐枚举式 vi.mock("../previewers") 的
++ * 桩——onlyoffice-preview.test.tsx 与 file-preview-modal.test.tsx 两处，缺
++ * 导出整套件收集炸（testing-gotchas「共享断言面」⑤）。
+  */
+ 
+ export interface PreviewerProps {
+diff --git a/frontend/src/components/workspace-tabs.tsx b/frontend/src/components/workspace-tabs.tsx
+index 84455326a..2e78d20f3 100644
+--- a/frontend/src/components/workspace-tabs.tsx
++++ b/frontend/src/components/workspace-tabs.tsx
+@@ -5,6 +5,9 @@ import { usePathname } from "next/navigation";
+ 
+ import { cn } from "@/lib/utils";
+ 
++// 共享断言面：增删/移动页签须同一变更内同步钉子测试——git-log-page.test.tsx
++// 钉 TABS 数量（toHaveLength(N)）与「Git 日志末位」，workspace-tabs.test.tsx
++// 钉嵌套页签最长匹配高亮（testing-gotchas「共享断言面」③）。
+ const TABS = [
+   { key: "overview", label: "概览", path: "" },
+   { key: "changes", label: "变更", path: "/changes" },
+diff --git a/frontend/src/lib/provider-caps.ts b/frontend/src/lib/provider-caps.ts
+index ae2cb8cf9..8d7f970ea 100644
+--- a/frontend/src/lib/provider-caps.ts
++++ b/frontend/src/lib/provider-caps.ts
+@@ -24,6 +24,9 @@
+  */
+ 
+ /** provider 能力矩阵（16 键：14 个 boolean + dialog / sessionFork 两 string 枚举，缺省默认拒绝）。 */
++// 共享断言面：本接口加键须同一变更内同步 pre-session-picker.test.tsx 两处
++// 全对象 toEqual（cursor 查表值 / 未知引擎回退值各一处，逐键补齐——该测试
++// 注释自载历次补键记录；testing-gotchas「共享断言面」④）。
+ export interface ProviderCaps {
+   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
+   resume: boolean;
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index f5b6e3eee..e52376d13 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -5707,6 +5707,10 @@ export class Daemon {
+         // 第 11 参（2026-09-30-tool-report task-02 / FR-01）：本机持久 machineId。
+         // 首拍经下方 _ensureMachineId 懒读取（单飞）；读取失败/未完成 → undefined
+         //（键不出现，本拍不带，下一拍收敛）。已缓存则直传（运行期恒定）。
++        // 共享断言面：本调用平铺参长被四处 length 钉测试锚定——加尾参须同步
++        // N→N+1：daemon-heartbeat-pending / daemon-heartbeat-sillyspec /
++        // sillyspec-platform-command(6 处) / integration/selfupdate-scenarios(2 处)
++        //（testing-gotchas「共享断言面」②）。
+         this._machineId ?? undefined,
+       );
+       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
+diff --git a/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/design.md b/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/design.md
+new file mode 100644
+index 000000000..8c4e2b2f4
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/design.md
+@@ -0,0 +1,38 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T17:15:36.561Z
++---
++# 设计记录（Design Record）— 2026-10-08-shared-assertion-surfaces
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++两轮 CI 清偿复盘：14 个失败用例中 9 个同模式——生产契约变更只更新了本变更内测试，漏了散落在其它文件钉住同一契约的断言（六面：迁移链尾锚/daemon 心跳参长/前端 TABS 数量/caps 全对象/previewers 枚举 mock/backend 词表对账正则）。方案是把这些「共享断言面」显性登记：①knowledge/testing-gotchas.md 新增条目逐面登记（契约源→钉子测试→动作），INDEX.md 挂关键词索引——flow start 知识注入与子代理 INDEX 查询可命中，这是工具链原生提醒通道；②五个契约源码处加一行同步提醒注释（schema.py/daemon.ts/workspace-tabs.tsx/provider-caps.ts/previewers/index.ts），动手改契约的人当场可见。选注释+知识库而非自动生成清单脚本：登记一次成本低、命中面即改契约现场与 flow start 两处，自动方案（AST 扫描钉子）复杂度不成比例。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无——五个源码文件仅加注释（零行为改动），其余为知识库文档（testing-gotchas.md 条目 + INDEX.md 索引行）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用——文档与注释登记，无事件序参与。
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用——注释行追加在既有注释块内，无共享可变状态；知识库文件为追加式条目（本仓惯例）。
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++不适用——无运行时行为。
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不适用——主仓内登记；worktree 内开发时读 worktree 源码（注释随文件走，天然同步）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：清单自身腐化（新增共享断言面不登记、钉子测试移动不更新条目）——缓解：条目末尾写明「新面按同款登记」的口径，且知识条目进 distill 链可被后续 knowledge 命令校验。放弃方案：CI 内自动扫描钉子断言生成清单（AST/grep 解析 toHaveLength/toEqual 钉子反查契约）——跨语言三端解析成本高且误报难消，先人工登记验证命中价值再谈自动化。
+diff --git a/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/proposal.md b/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/proposal.md
+new file mode 100644
+index 000000000..16eae807e
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/proposal.md
+@@ -0,0 +1,30 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T17:15:36.561Z
++---
++# 提案书（Proposal）— 2026-10-08-shared-assertion-surfaces
++
++## 动机
++
++任务原话转写：共享断言面登记（两轮 CI 清偿的根因收敛）：2026-10-07/08 两轮 CI 补红共 14 个失败用例，其中 9 个属同一模式——生产契约变更时只更新了自己变更内的测试，漏了散落在其它文件钉住同一契约的断言（迁移链尾锚 / daemon 心跳平铺参长 / 前端 TABS 数量钉 / caps 全对象 toEqual / previewers 枚举 mock / backend 词表对账正则六面）。本次把这些共享断言面显性登记：①knowledge/testing-gotchas.md 新增条目逐面登记契约源→钉子测试→变更动作，INDEX.md 加关键词索引（flow start 知识注入与子代理 INDEX 查询可命中）②四个契约源码处加一行同步提醒注释（daemon.ts 心跳尾参块 / workspace-tabs.tsx TABS / provider-caps.ts 接口 / llm_provider/schema.py agent_kinds 词表）。纯注释与知识库文档，零行为改动。
++
++成功标准：
++- testing-gotchas.md 新增「共享断言面」条目，六面齐备（契约源/钉子测试/动作三列），INDEX.md 对应关键词行挂载
++- 四个契约源码处各加一行同步提醒注释，指向具体钉子测试文件
++- 三端静态门零错（backend ruff/mypy、daemon tsc、frontend tsc/eslint），钉子测试复跑全绿（证注释零影响）
++- 推送后五 workflow 全绿
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. testing-gotchas.md 新增「共享断言面」条目，六面齐备（契约源/钉子测试/动作三列），INDEX.md 对应关键词行挂载
++2. 四个契约源码处各加一行同步提醒注释，指向具体钉子测试文件
++3. 三端静态门零错（backend ruff/mypy、daemon tsc、frontend tsc/eslint），钉子测试复跑全绿（证注释零影响）
++4. 推送后五 workflow 全绿
++
++## 成功标准（可验证）
++
++1. testing-gotchas.md 新增「共享断言面」条目，六面齐备（契约源/钉子测试/动作三列），INDEX.md 对应关键词行挂载
++2. 四个契约源码处各加一行同步提醒注释，指向具体钉子测试文件
++3. 三端静态门零错（backend ruff/mypy、daemon tsc、frontend tsc/eslint），钉子测试复跑全绿（证注释零影响）
++4. 推送后五 workflow 全绿
+diff --git a/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/requirements.md b/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/requirements.md
+new file mode 100644
+index 000000000..7326a5bd9
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/requirements.md
+@@ -0,0 +1,46 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T17:15:36.561Z
++---
++# 需求规格（Requirements）— 2026-10-08-shared-assertion-surfaces
++
++## 功能需求
++
++### FR-01: testing-gotchas.md 新增「共享断言面」条目，六面齐备（契约源/钉子测试/动作三列），INDEX.md 对应关键词行挂载
++
++- testing-gotchas.md 必须 新增「共享断言面」条目且六面齐备（迁移锚/心跳参长/TABS 数量/caps 全对象/previewers mock/词表对账，每面含契约源+钉子测试+动作），INDEX.md 必须 挂对应关键词索引行。
++
++#### 场景：主路径
++
++Given 六面契约各有跨文件钉子 / When 登记条目+索引落地 / When 后续 flow start 或 INDEX 查询命中关键词 / Then 提醒可见。
++
++### FR-02: 四个契约源码处各加一行同步提醒注释，指向具体钉子测试文件
++
++- 五个契约源码处（schema.py/daemon.ts/workspace-tabs.tsx/provider-caps.ts/previewers/index.ts）必须 各有同步提醒注释，指向具体钉子测试文件与知识条目锚；注释 禁止 改变任何行为。
++
++#### 场景：主路径
++
++Given 开发者编辑契约源码 / When 注释在场 / Then 钉子测试文件名当场可见。
++
++### FR-03: 三端静态门零错（backend ruff/mypy、daemon tsc、frontend tsc/eslint），钉子测试复跑全绿（证注释零影响）
++
++- 三端静态门必须 零错，被注释触达的钉子测试（迁移锚/provider-adapter-registry/git-log TABS/workspace-tabs/pre-session-picker/onlyoffice-preview）复跑必须 全绿。
++
++#### 场景：主路径
++
++Given 五文件仅注释改动 / When 静态门与钉子测试复跑 / Then 全部通过（实证：backend ruff/format/mypy 0+锚 7 绿；daemon tsc 0+registry 8 绿；frontend tsc/eslint 0+4 文件 45 绿）。
++
++### FR-04: 推送后五 workflow 全绿
++
++- 推送后五个 workflow（backend-ci/frontend-ci/daemon-ci/e2e-ci/scan-drift）必须 全绿（按路径过滤触发者以实跑为准）。
++
++#### 场景：主路径
++
++Given 修复推送 / When 各 workflow 完成 / Then 全部 success。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: 不适用：文档登记面（条目在场性与索引行已人工核，无测试断言价值）
++FR-02: 不适用：注释零影响面（行为无改动，由 FR-03 静态门+钉子复跑代证）
++FR-03: backend/tests/test_align_platform_change_events_migration.py（7 绿）+ sillyhub-daemon/tests/provider-adapter-registry.test.ts（8 绿）+ frontend git-log-page/workspace-tabs/pre-session-picker/onlyoffice-preview 四文件（45 绿）
++FR-04: 不适用：CI 门（五 workflow 全绿以推送后 GitHub Actions 实跑为准，盯到全绿）
+diff --git a/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/tasks.md b/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/tasks.md
+new file mode 100644
+index 000000000..a6c8d6639
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-shared-assertion-surfaces/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T17:15:36.561Z
++---
++# 任务注册表（Tasks）— 2026-10-08-shared-assertion-surfaces
++
++- [x] task-01: testing-gotchas.md 新增「共享断言面」条目，六面齐备（契约源/钉子测试/动作三列），INDEX.md 对应关键词行挂载
++- [x] task-02: 四个契约源码处各加一行同步提醒注释，指向具体钉子测试文件
++- [x] task-03: 三端静态门零错（backend ruff/mypy、daemon tsc、frontend tsc/eslint），钉子测试复跑全绿（证注释零影响）
++- [x] task-04: 推送后五 workflow 全绿

@@ -1,0 +1,51 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "6fc86d7eda6dc0809dc18720d43066782df37775",
+  "totals": {
+    "files": 5,
+    "additions": 17,
+    "deletions": 0
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/llm_provider/schema.py",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified"
+    },
+    {
+      "path": "frontend/src/components/files/previewers/index.ts",
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified"
+    },
+    {
+      "path": "frontend/src/components/workspace-tabs.tsx",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified"
+    },
+    {
+      "path": "frontend/src/lib/provider-caps.ts",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "a6f4236ec4db1f410435e43a9a582cf8ce2fea2e32b71fb92e3cd8462bb2fdc3",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T17:22:16.273Z"
+}
