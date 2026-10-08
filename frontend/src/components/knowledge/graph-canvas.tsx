@@ -466,9 +466,9 @@ export function edgeDash(
 }
 
 /** 标签截断（>26 字符截 25 + 省略号，原型 draw 同款）。 */
-export function truncateLabel(label: string): string {
-  return label.length > LABEL_MAX_CHARS
-    ? label.slice(0, LABEL_MAX_CHARS - 1) + "…"
+export function truncateLabel(label: string, maxChars = LABEL_MAX_CHARS): string {
+  return label.length > maxChars
+    ? label.slice(0, maxChars - 1) + "…"
     : label;
 }
 
@@ -565,11 +565,13 @@ function toSimNode(n: GraphNodeRef, x: number, y: number): SimNode {
 }
 
 /** 黄金角螺旋初始摆放（原型切片装载直译；center 为画布中心世界坐标）。 */
-function seedSpiral(nodes: SimNode[], cx: number, cy: number): void {
+function seedSpiral(nodes: SimNode[], cx: number, cy: number, count = nodes.length): void {
+  // 半径自适应：≤10 节点用大半径（散开），随节点数递增回落原型值
+  const spread = count <= 10 ? 1.9 : count <= 30 ? 1.35 : 1;
   nodes.forEach((n, i) => {
     const a = i * GOLDEN_ANGLE;
-    n.x = cx + Math.cos(a) * (120 + (i % 5) * 70);
-    n.y = cy + Math.sin(a) * (90 + (i % 4) * 60);
+    n.x = cx + Math.cos(a) * (120 + (i % 5) * 70) * spread;
+    n.y = cy + Math.sin(a) * (90 + (i % 4) * 60) * spread;
     n.px = n.x;
     n.py = n.y;
   });
@@ -618,6 +620,9 @@ export function GraphCanvas({
   const dragRef = useRef<SimNode | null>(null);
   const panRef = useRef<{ x: number; y: number } | null>(null);
   const dirtyRef = useRef(true);
+  // 力场收敛跟随（2026-10-08 用户实证修）：tick 计数 + 用户交互即停标记
+  const forceTickRef = useRef(0);
+  const userTouchedRef = useRef(false);
 
   // 每渲染同步 prop 面到 ref（rAF/draw 消费，避免闭包过期）。
   const colorsRef = useRef(colors);
@@ -665,7 +670,11 @@ export function GraphCanvas({
       return;
     }
     const sim = nodes.map((n) => toSimNode(n, 0, 0));
-    seedSpiral(sim, w / 2, h / 2);
+    // 小图（无边/少节点）初始散布更开：螺旋半径按节点数自适应（原型固定
+    // 120+ 偏小，4 个孤儿挤一团——实证修）
+    seedSpiral(sim, w / 2, h / 2, sim.length);
+    forceTickRef.current = 0;
+    userTouchedRef.current = false;
     edgeSimRef.current = edges.map((e) => ({
       s: e.s,
       t: e.t,
@@ -756,7 +765,8 @@ export function GraphCanvas({
         } else {
           ctx.fillStyle = c.label;
         }
-        ctx.fillText(truncateLabel(n.label), n.x, n.y - n.r - 5);
+        // 小图放宽截断（≤30 节点 46 字符——长锚点 id 全显，实证修）
+        ctx.fillText(truncateLabel(n.label, simRef.current.length <= 30 ? 46 : LABEL_MAX_CHARS), n.x, n.y - n.r - 5);
       }
     };
 
@@ -856,6 +866,20 @@ export function GraphCanvas({
           height: sizeRef.current.h,
         });
         dirtyRef.current = true;
+        // 力场收敛跟随：数据到达后前 6 秒按衰减节奏自动重新适配视口
+        // （fitView 只在数据瞬间执行一次，节点被力场从螺旋初始位推开后
+        // 视口不跟随 → 节点漂出视野/挤一角大片留白——2026-10-08 用户实证）。
+        // 用户一旦交互（拖拽/缩放）即停跟随，避免抢操作。
+        forceTickRef.current += 1;
+        const t = forceTickRef.current;
+        const refitAt = [90, 180, 270, 360];
+        if (
+          !userTouchedRef.current &&
+          refitAt.includes(t) &&
+          simRef.current.length > 0
+        ) {
+          viewRef.current = fitView(graphBbox(simRef.current), sizeRef.current.w, sizeRef.current.h);
+        }
       }
       if (!dirtyRef.current) return;
       dirtyRef.current = false;
@@ -864,6 +888,7 @@ export function GraphCanvas({
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      userTouchedRef.current = true;
       const rect = canvas.getBoundingClientRect();
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
