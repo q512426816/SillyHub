@@ -29,8 +29,10 @@ describe("AdminRolePermissionPicker 左树右权 (task-03 / FR-02/03/04)", () =>
     // 第一个 menu 标签 + 0/n 选中数可见(左树)。
     const labels = screen.getAllByText(firstMenu.menuLabel);
     expect(labels.length).toBeGreaterThan(0);
+    // getAllBy（2026-10-08-sessions-menu-permissions 起 sessions 菜单同为 4 权限，
+    // 0/4 不再唯一——断言语义是「首菜单计数器已渲染」而非全局唯一）。
     const cntRegex = new RegExp(`^0/${firstMenu.permissions.length}$`);
-    expect(screen.getByText(cntRegex)).toBeInTheDocument();
+    expect(screen.getAllByText(cntRegex).length).toBeGreaterThan(0);
   });
 
   it("默认选第一个 menu → 右面板显其权限(非空)", () => {

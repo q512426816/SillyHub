@@ -244,6 +244,14 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     // 即可见）改为独立 agent_session:read 权限（任一命中即可见），可在角色管理按
     // 角色分配/收回；存量角色可见性由后端种子迁移保现状。会话列表后端仍按
     // user_id 隔离。
+    // 2026-10-08-sessions-menu-permissions：补齐会话页实际依赖的其余权限——
+    // 全部 /api/daemon/sessions* 端点（列表/创建/发消息/删除/归档/置顶/改名/
+    // 导出/群聊/SSE/运行流）经 TaskRunAgentUser 需 task:run_agent（此前不挂在
+    // 任何菜单卡上，角色勾选器 UI 配不了）；无自有 daemon 的业务人员借用会话
+    // 需 daemon:borrow（borrow_resolver / inject_gates 借用闸）；新建会话
+    // 机器·智能体下拉数据源 GET /api/daemon/machines 需 runtime:admin。可见性
+    // 仍为任一命中即可见（与 runtime/approvals 多权限菜单同口径；跨菜单重复
+    // 挂载有 change:approve 双卡先例，勾选器两卡控制同一 key 计数联动）。
     section: "agent",
     menuKey: "sessions",
     menuLabel: "智能体会话",
@@ -251,7 +259,12 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/sessions",
     absolute: true,
     matchPattern: "/sessions",
-    permissions: [{ key: "agent_session:read", name: "智能体会话查看" }],
+    permissions: [
+      { key: "agent_session:read", name: "智能体会话查看" },
+      { key: "task:run_agent", name: "会话运行" },
+      { key: "daemon:borrow", name: "借用守护进程" },
+      { key: "runtime:admin", name: "守护进程机器查看" },
+    ],
   },
 
   // ── config 配置中心（4 条，含新增 llm-providers；runtimes 自 system 移入，D-006）

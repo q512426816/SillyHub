@@ -4,23 +4,25 @@ import type { MenuSection } from "../menu-permissions";
 import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
 
 /**
- * 后端 Permission 枚举镜像常量（69 项）。
+ * 后端 Permission 枚举镜像常量（72 项）。
  *
- * 与 `backend/app/modules/auth/permissions.py` 的 `Permission` StrEnum 保持同步。
+ * 与 `backend/app/modules/auth/permissions.py` 的 Permission StrEnum 保持同步。
  * 若后端扩/删枚举，需同时更新本常量；用例 5 会在漂移时失败提示。
  *
  * 分组顺序与后端一致：
  * - Platform (8, 含 2026-06-18 ql-004/005 新增的 4 个管理子菜单独立 admin 权限
  *   + 2026-07-29-sidebar-menu-restructure 新增 llm_provider:read)
  * - Workspace (4)
- * - Workspace 子菜单独立 read (6, 2026-06-18 ql-003 新增)
+ * - Workspace 子菜单独立 read/write (7, 2026-06-18 ql-003 新增 6
+ *   + knowledge:write——镜像曾漏补，2026-10-08-sessions-menu-permissions 对齐)
  * - Change (5)
  * - Task (6)
+ * - Daemon borrow (1, 镜像曾漏补，同上对齐)
  * - Code (4)
  * - Deploy (3)
  * - Tool (4)
  * - Admin (7)
- * - PPM (8, change 2026-07-20-ppm-permission-simplify task-04 精简：删 16 个 write/delete/export/assign 摆设动作)
+ * - PPM (18, change 2026-07-20-ppm-permission-simplify task-04 精简：删 16 个 write/delete/export/assign 摆设动作；problem-change:read 镜像曾漏补)
  * - 菜单读权限 + 菜单管理门控 (5, 2026-09-18-web-menu-management task-01 新增)
  */
 const BACKEND_PERMISSION_KEYS = [
@@ -39,12 +41,14 @@ const BACKEND_PERMISSION_KEYS = [
   "workspace:write",
   "workspace:admin",
   "workspace:member:manage",
-  // Workspace 子菜单独立 read (6, 2026-06-18 ql-003 新增)
+  // Workspace 子菜单独立 read (7, 2026-06-18 ql-003 新增 6 + 2026-09-17
+  // knowledge-precipitation task-02 新增 knowledge:write——镜像曾漏补)
   "component:read",
   "topology:read",
   "scan-docs:read",
   "runtime:read",
   "knowledge:read",
+  "knowledge:write",
   "incident:read",
   // Change (5)
   "change:create",
@@ -59,6 +63,8 @@ const BACKEND_PERMISSION_KEYS = [
   "task:run_agent",
   "task:cancel",
   "task:approve",
+  // Daemon borrow (1, 2026-07-25-daemon-borrow-for-business task-03——镜像曾漏补)
+  "daemon:borrow",
   // Code (4)
   "code:read",
   "code:write",
@@ -81,7 +87,8 @@ const BACKEND_PERMISSION_KEYS = [
   "organization:write",
   "role:read",
   "role:write",
-  // PPM 项目与问题管理 (17, 已删问题变更 + 新增 weekly-plan:view)
+  // PPM 项目与问题管理 (18, 已删 16 个摆设动作 key + 新增 weekly-plan:view；
+  // problem-change:read 后端一直在、镜像曾漏补——2026-10-08-sessions-menu-permissions 对齐)
   "ppm:project:read",
   "ppm:customer:read",
   "ppm:plan:read",
@@ -90,7 +97,7 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:work-hour:read",
   "ppm:work-hour:stat",
   "ppm:kanban:view",
-  // ── 菜单专属权限（13 菜单各独立 key；plan/problem/task:read 3 旧 key 悬空保留）──
+  // ── 菜单专属权限（14 菜单各独立 key；plan/problem/task:read 3 旧 key 悬空保留）──
   "ppm:workbench:view",
   "ppm:project-member:read",
   "ppm:project-stakeholder:read",
@@ -98,6 +105,7 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:plan-node:read",
   "ppm:milestone-detail:read",
   "ppm:problem-list:read",
+  "ppm:problem-change:read",
   "ppm:task-plan:read",
   // 实施计划汇总(weekly-plan 汇总视图)
   "ppm:weekly-plan:view",
@@ -220,7 +228,9 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     Object.entries(EXPECTED).forEach(([menuKey, permKey]) => {
       const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === menuKey);
       expect(g, `missing menu ${menuKey}`).toBeDefined();
-      expect(g!.permissions.map((p) => p.key)).toEqual([permKey]);
+      // toContain（非 toEqual）：sessions 2026-10-08 起补齐会话页实际权限
+      // 共 4 项，read key 仍为首项门控主 key；其余 3 菜单仍单元素。
+      expect(g!.permissions.map((p) => p.key)).toContain(permKey);
     });
   });
 
@@ -241,12 +251,13 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 69", () => {
+  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 72", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
-    // 64 (原) + 5 (2026-09-18-web-menu-management task-01 新增菜单读权限 + menu:admin) = 69
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(69);
-    expect(valid.size).toBe(69);
+    // 69 (原) + 3 (2026-10-08-sessions-menu-permissions 对齐后端枚举补漏：
+    // daemon:borrow / knowledge:write / ppm:problem-change:read) = 72
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(72);
+    expect(valid.size).toBe(72);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {
@@ -382,7 +393,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     ]);
   });
 
-  it("sessions 菜单：agent 组 /sessions + agent_session:read 门控（task-08 FR-01 权限化）", () => {
+  it("sessions 菜单：agent 组 /sessions + 会话页实际权限四项门控（2026-10-08 补齐 task:run_agent / daemon:borrow / runtime:admin）", () => {
     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "sessions");
     expect(g).toBeDefined();
     expect(g!.section).toBe("agent");
@@ -391,9 +402,17 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.absolute).toBe(true);
     expect(g!.matchPattern).toBe("/sessions");
     // 2026-09-18-web-menu-management FR-01：permissions 由 []（登录即可见）改为
-    // 独立 agent_session:read；会话列表后端仍按 user_id 隔离
+    // 独立 agent_session:read；会话列表后端仍按 user_id 隔离。
+    // 2026-10-08-sessions-menu-permissions：补齐会话页实际依赖——全部
+    // /api/daemon/sessions* 端点（TaskRunAgentUser）需 task:run_agent（此前
+    // 不挂任何菜单卡，角色勾选器配不了）；业务人员借用会话需 daemon:borrow
+    // （borrow_resolver / inject_gates）；机器下拉 GET /api/daemon/machines
+    // 需 runtime:admin。可见性语义仍为任一命中即可见（canSeeMenu）。
     expect(g!.permissions).toEqual([
       { key: "agent_session:read", name: "智能体会话查看" },
+      { key: "task:run_agent", name: "会话运行" },
+      { key: "daemon:borrow", name: "借用守护进程" },
+      { key: "runtime:admin", name: "守护进程机器查看" },
     ]);
   });
 
