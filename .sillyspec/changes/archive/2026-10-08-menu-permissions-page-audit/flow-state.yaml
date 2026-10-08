@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -21,6 +29,14 @@ input: >-
   - tsc 与改动文件 eslint 零新增报错
 autopilot: true
 baseline_commit: 724a25b282dc1c6d85d26da1eb7f8b772a30ae47
-updatedAt: '2026-10-08T02:13:50.108Z'
+updatedAt: '2026-10-08T02:19:08.340Z'
 baseline_sha256: f0c004e8430832bb1c59fe8c34035f8622c92371cecdee684348db56759115c7
+allow_batch_tick: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx2)+fr(2)（2.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008021857\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（8.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008021857\test-result.json｜门文件
+  4 个
 

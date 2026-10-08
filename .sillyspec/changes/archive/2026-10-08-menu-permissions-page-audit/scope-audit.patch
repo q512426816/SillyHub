@@ -1,0 +1,424 @@
+diff --git a/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/flow-state.yaml b/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/flow-state.yaml
+new file mode 100644
+index 000000000..f30c4b220
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/flow-state.yaml
+@@ -0,0 +1,26 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  全站 38 菜单逐页对账：菜单卡权限与页面实际接口鉴权不匹配的还有 7 处（components 缺 workspace:read、changes 缺 task:read、knowledge 缺 knowledge:write、mcp
++  缺 settings:admin、approvals 缺 task:read+task:run_agent、audit 缺 change:read、incidents 缺
++  deploy:staging），统一补齐使角色管理勾选器可按页面真实需要配置。
++
++
++  成功标准：
++
++  - 上述 7 个菜单卡 permissions 各自补齐缺口权限（既有 key 不删、门控主 key 保持首位）
++
++  - 每个新增 key 有后端端点消费依据（router 文件级引用）
++
++  - menu-permissions 相关测试（含 6 子菜单 workspace:read 断言、changes/audit 用例）同步更新并全绿
++
++  - tsc 与改动文件 eslint 零新增报错
++autopilot: true
++baseline_commit: 724a25b282dc1c6d85d26da1eb7f8b772a30ae47
++updatedAt: '2026-10-08T02:13:50.108Z'
++baseline_sha256: f0c004e8430832bb1c59fe8c34035f8622c92371cecdee684348db56759115c7
++
+diff --git a/.sillyspec/docs/frontend/modules/lib-menu-permissions.md b/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
+index 724f3dd10..9890e9dd0 100644
+--- a/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
++++ b/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
+@@ -22,12 +22,14 @@ created_at: 2026-08-18 01:45:00
+ 
+ 各 section 构成：
+ - **workspace**（8 项）：工作区首页（/workspaces，absolute）、组件、拓扑、变更中心、扫描文档、运行时、知识库、发布。
+-  - 子菜单均有独立 read 权限（component:read / topology:read / scan-docs:read / knowledge:read 等），不共用 workspace:read。
++  - 子菜单均有独立 read 权限（component:read / topology:read / scan-docs:read / knowledge:read 等），不共用 workspace:read 作兜底；但卡片可含页面实际所需的其他 key（2026-10-08-page-audit：components 卡含 workspace:read——列表端点鉴权所需；changes 卡含 task:read——变更任务子页所需；knowledge 卡含 knowledge:write——写按钮所需）。
+ - **agent**（4 项）：技能管理（/settings/skills）、MCP 资产库（/settings/mcp）、智能体档案（/agent-profiles）、智能体会话（/sessions），全 absolute。
+   - 四菜单 2026-09-18-web-menu-management 起各挂独立 read 权限（skill:read / mcp:read / agent_profile:read / agent_session:read），进角色勾选器。
+   - 智能体会话 2026-10-08-sessions-menu-permissions 起补齐会话页实际权限共 4 项：agent_session:read（门控主 key）+ task:run_agent（全部 /api/daemon/sessions* 端点）+ daemon:borrow（借用会话）+ runtime:admin（机器下拉 /api/daemon/machines）——多权限菜单任一命中即可见，跨菜单重复挂载（runtime:admin 同挂 config 守护进程运行时）有 change:approve 双卡先例。
++  - MCP 资产库 2026-10-08-page-audit 起补 settings:admin（平台库写端点 mcp_registry settings_admin_check；读与我的库任意登录用户可用）。
+ - **config**（4 项）：我的供应商（llm_provider:read，sidebar-menu-restructure 新增）、API 密钥（api_key:admin）、Git 身份（git_identity:admin）、守护进程运行时（runtime:admin，自 system 移入，D-006）。
+-- **governance**（3 项）：审批中心（task:approve / change:approve）、审计中心（platform:audit:read）、事件（incident:read）。
++- **governance**（3 项）：审批中心（task:approve / change:approve / task:read / task:run_agent）、审计中心（platform:audit:read / change:read）、事件（incident:read / deploy:staging）。
++  - 2026-10-08-page-audit：审批中心补 task:read（agent-sessions / dialogs 列表端点）+ task:run_agent（会话权限面板 daemon 端点族）；审计中心补 change:read（工作区审计日志端点 CHANGE_READ；platform:audit:read 零端点消费保留存量）；事件补 deploy:staging（上报端点鉴权）。
+ - **system**（5 项）：用户、组织、角色（/admin/*）、设置（settings:admin）、菜单管理（/admin/menus，menu:admin，2026-09-18 新增）。
+ - **ppm**（14 项）：全部 absolute 指向 /ppm/*，每菜单独立专属 key（ppm:workbench:view / ppm:project:read / ppm:kanban:view / ppm:weekly-plan:view 等）。
+   - 项目成员、里程碑明细带 navHidden（二级页面，由父页跳转进入）。
+@@ -49,9 +51,10 @@ created_at: 2026-08-18 01:45:00
+ ## 注意事项
+ - `icon` 字段经排查（sidebar-menu-restructure task-04）在 app-shell/picker/permission 均无消费者，新增菜单可填占位 emoji。
+ - 写错权限 key = 该菜单永远不可见；改菜单结构需同步 `lib-permission` 判定、app-shell 渲染（MENU_ICON_MAP 按 href）、页面路由三处。
+-- 菜单 permissions 数组同时服务两个消费面：canSeeMenu 可见性（任一命中）与 AdminRolePermissionPicker 可配面——往菜单补权限会同步放宽可见性，页面实际依赖的权限应挂全（否则勾选器配不了，如 sessions 补齐前的 task:run_agent）。
++- 菜单 permissions 数组同时服务两个消费面：canSeeMenu 可见性（任一命中）与 AdminRolePermissionPicker 可配面——往菜单补权限会同步放宽可见性，页面实际依赖的权限应挂全（否则勾选器配不了，如 sessions 补齐前的 task:run_agent；2026-10-08-page-audit 批量修了 components/changes/knowledge/mcp/approvals/audit/incidents 七处同类缺口）。
+ - 测试镜像常量 `BACKEND_PERMISSION_KEYS`（menu-permissions.test.ts）须与后端枚举逐项同步（现 72 项），后端扩删权限时两处一起改。
+ - 管理类菜单多为单一 admin 权限（api_key:admin / git_identity:admin / runtime:admin / settings:admin），平台超管自动通过。
++- 零端点消费的悬空 key（component:read / platform:audit:read / task:approve、code:* / tool:* / task:cancel 等）保留在卡上或目录中属已知债——清理需独立变更评审（涉及存量角色可见性与可配性）；PPM 的 ppm:plan:read / ppm:problem:read / ppm:task:read / ppm:problem-change:read 为 D-002 决策故意悬空。
+ 
+ ## 人工备注
+ 
+diff --git a/frontend/src/lib/__tests__/menu-permissions.test.ts b/frontend/src/lib/__tests__/menu-permissions.test.ts
+index 5b449a198..b271fde77 100644
+--- a/frontend/src/lib/__tests__/menu-permissions.test.ts
++++ b/frontend/src/lib/__tests__/menu-permissions.test.ts
+@@ -280,8 +280,11 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+       expect(g, `missing menu ${menuKey}`).toBeDefined();
+       const keys = g!.permissions.map((p) => p.key);
+       expect(keys).toContain(permKey);
+-      // 不应再用 workspace:read 兜底
+-      expect(keys).not.toContain("workspace:read");
++      // 不应再用 workspace:read 兜底——components 例外（2026-10-08 补齐页面列表
++      // 端点实际所需 workspace:read，非兜底而是必需）。
++      if (menuKey !== "components") {
++        expect(keys).not.toContain("workspace:read");
++      }
+     });
+   });
+ 
+@@ -373,8 +376,13 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     expect(g!.absolute).toBe(true);
+     expect(g!.matchPattern).toBe("/settings/mcp");
+     // 2026-09-18-web-menu-management FR-01：改挂独立 mcp:read（去 pickerHidden 进勾选器）；
+-    // 库读写仍由 API 层权限矩阵控制（非 admin 平台库写 403）
+-    expect(g!.permissions).toEqual([{ key: "mcp:read", name: "MCP 查看" }]);
++    // 库读写仍由 API 层权限矩阵控制（非 admin 平台库写 403）。
++    // 2026-10-08-menu-permissions-page-audit：补 settings:admin（平台库写端点
++    // mcp_registry settings_admin_check），平台库管理员角色在此卡可配。
++    expect(g!.permissions).toEqual([
++      { key: "mcp:read", name: "MCP 查看" },
++      { key: "settings:admin", name: "平台库管理" },
++    ]);
+     expect(g!.pickerHidden).toBeFalsy();
+   });
+ 
+@@ -450,14 +458,14 @@ describe("用户列明菜单的 permissions 精确匹配", () => {
+     expect(keysOf("roles")).toEqual(["role:read", "role:write"].sort());
+   });
+ 
+-  it("changes = change:create/read/update/approve/archive", () => {
++  it("changes = change:create/read/update/approve/archive + task:read（2026-10-08 补齐变更任务子页所需）", () => {
+     expect(keysOf("changes")).toEqual(
+-      ["change:approve", "change:archive", "change:create", "change:read", "change:update"].sort(),
++      ["change:approve", "change:archive", "change:create", "change:read", "change:update", "task:read"].sort(),
+     );
+   });
+ 
+-  it("audit = platform:audit:read", () => {
+-    expect(keysOf("audit")).toEqual(["platform:audit:read"]);
++  it("audit = platform:audit:read + change:read（2026-10-08 补齐：工作区审计日志端点鉴权 change:read，platform:audit:read 零端点消费保留）", () => {
++    expect(keysOf("audit")).toEqual(["change:read", "platform:audit:read"].sort());
+   });
+ 
+   it("releases = deploy:staging/production/rollback", () => {
+diff --git a/frontend/src/lib/menu-permissions.ts b/frontend/src/lib/menu-permissions.ts
+index f1501548a..f1f86c836 100644
+--- a/frontend/src/lib/menu-permissions.ts
++++ b/frontend/src/lib/menu-permissions.ts
+@@ -117,7 +117,14 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     icon: "\u{1F4E6}",
+     href: "components",
+     matchPattern: "/components",
+-    permissions: [{ key: "component:read", name: "组件查看" }],
++    // 2026-10-08-menu-permissions-page-audit：补 workspace:read——组件列表端点
++    // GET /api/workspaces/{ws}/components（workspace/router.py list_components）
++    // 鉴权 workspace:read，此前只挂 component:read 的用户看得到菜单但页面 403；
++    // component:read 无后端端点消费，保留为菜单门控主 key。
++    permissions: [
++      { key: "component:read", name: "组件查看" },
++      { key: "workspace:read", name: "工作区查看" },
++    ],
+   },
+   {
+     section: "workspace",
+@@ -135,12 +142,16 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     icon: "\u{1F504}",
+     href: "changes",
+     matchPattern: "/changes",
++    // 2026-10-08-menu-permissions-page-audit：补 task:read——变更任务列表/看板/
++    // 详情子页（GET /api/workspaces/{ws}/tasks/{tid}、/changes/{cid}/tasks/board、
++    // /tasks/reparse，task/router.py 全部 require TASK_READ）。
+     permissions: [
+       { key: "change:create", name: "变更创建" },
+       { key: "change:read", name: "变更查看" },
+       { key: "change:update", name: "变更更新" },
+       { key: "change:approve", name: "变更审批" },
+       { key: "change:archive", name: "变更归档" },
++      { key: "task:read", name: "任务查看" },
+     ],
+   },
+   {
+@@ -172,7 +183,14 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     icon: "\u{1F4DA}",
+     href: "knowledge",
+     matchPattern: "/knowledge",
+-    permissions: [{ key: "knowledge:read", name: "知识查看" }],
++    // 2026-10-08-menu-permissions-page-audit：补 knowledge:write——知识库写端点
++    // 8 处 require KNOWLEDGE_WRITE（knowledge/router.py），页面有写按钮（2026-09-17
++    // knowledge-precipitation task-05 权限驱动）。此前 knowledge:write 不挂任何
++    // 菜单卡，角色勾选器配不了。
++    permissions: [
++      { key: "knowledge:read", name: "知识查看" },
++      { key: "knowledge:write", name: "知识编辑" },
++    ],
+   },
+   {
+     section: "workspace",
+@@ -219,7 +237,15 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     href: "/settings/mcp",
+     absolute: true,
+     matchPattern: "/settings/mcp",
+-    permissions: [{ key: "mcp:read", name: "MCP 查看" }],
++    // 后端读与我的库操作任意登录用户可用地（mcp_registry CurrentUser），菜单挂
++    // mcp:read 作可见性门控。
++    // 2026-10-08-menu-permissions-page-audit：补 settings:admin——平台库写端点
++    // （mcp_registry/router.py settings_admin_check 直调 require_permission_any
++    // (SETTINGS_ADMIN)）此前只能在「设置」卡配置，平台库管理员角色在此卡补齐。
++    permissions: [
++      { key: "mcp:read", name: "MCP 查看" },
++      { key: "settings:admin", name: "平台库管理" },
++    ],
+   },
+   {
+     // 2026-08-04-agent-profile-ui-redesign task-05 新增（D-001/D-007）：智能体档案
+@@ -325,9 +351,16 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     icon: "✅",
+     href: "approvals",
+     matchPattern: "/approvals",
++    // 2026-10-08-menu-permissions-page-audit：补 task:read + task:run_agent——
++    // 审批页除批/拒（tool_gateway change:approve）外还拉 agent 会话列表与待处理
++    // 对话框（agent/router /workspaces/{ws}/agent-sessions、/dialogs 均 TASK_READ）
++    // 与会话权限面板（daemon 会话端点族 task:run_agent）。task:approve 无后端
++    // 端点消费，保留存量不删。
+     permissions: [
+       { key: "task:approve", name: "任务审批" },
+       { key: "change:approve", name: "变更审批" },
++      { key: "task:read", name: "任务查看" },
++      { key: "task:run_agent", name: "会话运行" },
+     ],
+   },
+   {
+@@ -337,12 +370,18 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     icon: "\u{1F4DC}",
+     href: "audit",
+     matchPattern: "/audit",
++    // 2026-10-08-menu-permissions-page-audit：补 change:read——工作区审计日志
++    // GET /api/workspaces/{ws}/audit（workflow/router.py list_audit_logs）鉴权
++    // CHANGE_READ，此前持 platform:audit:read 看得到菜单但页面 403、持 change:read
++    // 打得开页面却看不到菜单（双向错位）。platform:audit:read 无后端端点消费
++    // （死目录 key），保留存量配置不删。
+     permissions: [
+       {
+         key: "platform:audit:read",
+         name: "平台审计读取",
+         description: "跨工作空间的平台级审计日志访问",
+       },
++      { key: "change:read", name: "变更查看" },
+     ],
+   },
+   {
+@@ -352,7 +391,13 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     icon: "\u{1F6A8}",
+     href: "incidents",
+     matchPattern: "/incidents",
+-    permissions: [{ key: "incident:read", name: "事件查看" }],
++    // 2026-10-08-menu-permissions-page-audit：补 deploy:staging——事件上报
++    // POST /api/workspaces/{ws}/incidents（incident/router.py）鉴权
++    // DEPLOY_STAGING（发布关联事件口径），页面上报按钮需要。
++    permissions: [
++      { key: "incident:read", name: "事件查看" },
++      { key: "deploy:staging", name: "事件上报" },
++    ],
+   },
+ 
+   // ── system 系统管理（5 条：用户/组织/角色/设置/菜单）──────────
+diff --git a/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/design.md b/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/design.md
+new file mode 100644
+index 000000000..8339fe3b7
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/design.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:13:50.083Z
++---
++# 设计记录（Design Record）— 2026-10-08-menu-permissions-page-audit
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++问题：2026-10-08-sessions-menu-permissions 修完 sessions 后，全站 38 菜单逐页对账发现另外 7 个菜单卡存在同类「页面实际接口鉴权与菜单卡权限不匹配」——页面需要的权限没挂卡（勾选器配不了或菜单可见性错位）：components（列表端点要 workspace:read）、changes（任务子页要 task:read）、knowledge（写按钮要 knowledge:write）、mcp（平台库写要 settings:admin）、approvals（agent-sessions/dialogs 列表要 task:read、权限面板要 task:run_agent）、audit（审计日志端点要 change:read，platform:audit:read 零消费）、incidents（上报按钮要 deploy:staging）。
++
++方案：与 sessions 变更同款纯数据面补齐——只改 menu-permissions.ts 7 个菜单卡的 permissions 数组（既有 key 不删、门控主 key 保持首位）+ 同步测试断言。勾选器/菜单显隐/菜单管理页均消费同一数据源，改一处全生效。可见性语义仍为任一命中即可见，跨卡重复挂载（workspace:read/task:read/settings:admin/task:run_agent/change:read/deploy:staging 均已在其它卡）有 change:approve 等先例。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- 无后端改动、无 API/DTO 变化（api-types.ts 无需再生成）。
++- 前端数据契约：7 个 MenuPermissionGroup.permissions 数组各扩 1~2 项；key 均已在 Permission 联合类型中。
++- 行为变化（可见性任一命中放宽）：workspace:read 持有者新增可见「项目组组件」；task:read 持有者新增可见「变更中心」「审批中心」；knowledge:write 持有者新增可见「知识库」；settings:admin 持有者新增可见「MCP 资产库」；task:run_agent 持有者新增可见「审批中心」；change:read 持有者新增可见「审计中心」（修正反向错位：此前 platform:audit:read 持有者看得到菜单但页面 403）；deploy:staging 持有者新增可见「事件」。均为页面真实可用人群。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   不适用——静态常量数组，无事件/流输入。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   不适用——前端构建期常量，运行时只读；角色保存走既有端点，不动写路径。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   不适用——注册表模块加载时固化，无中途状态。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不会——canSeeMenu 只看用户权限集合交集，无 per-workspace 分叉；权限 key 为平台级字符串。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：可见性放宽面（workspace:read 持有者见组件菜单等）——评估可接受，这些用户对页面真实可用，且菜单可见≠数据可见（端点仍按鉴权矩阵）。次要：audit 卡保留零消费的 platform:audit:read 可能继续误导——保留理由是不删存量 key（存量角色已勾配置依赖它维持可见），其死目录属性在代码注释中言明。
++
++试过但放弃的方案：① 移除各卡上零消费的既有 key（component:read / platform:audit:read / task:approve）——放弃：会让这些 key 在勾选器不可配（彻底死掉），且存量角色可见性可能缩；本变更聚焦补齐而非清理，死目录清理应走独立变更评审。② 后端把 component:read 接进列表端点鉴权——放弃：动后端鉴权影响存量角色（developer 只有 workspace:read+task:run_agent，会 403），远超本变更诉求。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/lib/menu-permissions.ts | 7 菜单卡 permissions 补齐 + 注释依据 |
++| 修改 | frontend/src/lib/__tests__/menu-permissions.test.ts | changes/audit 用例更新；6 子菜单用例 components 豁免 workspace:read 断言 |
+diff --git a/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/proposal.md b/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/proposal.md
+new file mode 100644
+index 000000000..ec61b301a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/proposal.md
+@@ -0,0 +1,30 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:13:50.083Z
++---
++# 提案书（Proposal）— 2026-10-08-menu-permissions-page-audit
++
++## 动机
++
++任务原话转写：全站 38 菜单逐页对账：菜单卡权限与页面实际接口鉴权不匹配的还有 7 处（components 缺 workspace:read、changes 缺 task:read、knowledge 缺 knowledge:write、mcp 缺 settings:admin、approvals 缺 task:read+task:run_agent、audit 缺 change:read、incidents 缺 deploy:staging），统一补齐使角色管理勾选器可按页面真实需要配置。
++
++成功标准：
++- 上述 7 个菜单卡 permissions 各自补齐缺口权限（既有 key 不删、门控主 key 保持首位）
++- 每个新增 key 有后端端点消费依据（router 文件级引用）
++- menu-permissions 相关测试（含 6 子菜单 workspace:read 断言、changes/audit 用例）同步更新并全绿
++- tsc 与改动文件 eslint 零新增报错
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. 上述 7 个菜单卡 permissions 各自补齐缺口权限（既有 key 不删、门控主 key 保持首位）
++2. 每个新增 key 有后端端点消费依据（router 文件级引用）
++3. menu-permissions 相关测试（含 6 子菜单 workspace:read 断言、changes/audit 用例）同步更新并全绿
++4. tsc 与改动文件 eslint 零新增报错
++
++## 成功标准（可验证）
++
++1. 上述 7 个菜单卡 permissions 各自补齐缺口权限（既有 key 不删、门控主 key 保持首位）
++2. 每个新增 key 有后端端点消费依据（router 文件级引用）
++3. menu-permissions 相关测试（含 6 子菜单 workspace:read 断言、changes/audit 用例）同步更新并全绿
++4. tsc 与改动文件 eslint 零新增报错
+diff --git a/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/requirements.md b/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/requirements.md
+new file mode 100644
+index 000000000..b8dc15242
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/requirements.md
+@@ -0,0 +1,67 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:13:50.083Z
++---
++# 需求规格（Requirements）— 2026-10-08-menu-permissions-page-audit
++
++## 功能需求
++
++### FR-01: 上述 7 个菜单卡 permissions 各自补齐缺口权限（既有 key 不删、门控主 key 保持首位）
++
++- 菜单注册表（frontend/src/lib/menu-permissions.ts）中以下 7 个菜单卡的 permissions 必须补齐页面实际所需权限，既有 key 禁止删除，原首位门控主 key 必须保持首位：
++  - components：+ workspace:read（列表端点 GET /api/workspaces/{ws}/components 鉴权 workspace:read；component:read 无后端消费、保留为门控 key）
++  - changes：+ task:read（变更任务列表/看板/详情子页 GET /api/workspaces/{ws}/tasks*、/changes/{cid}/tasks/board 鉴权 task:read）
++  - knowledge：+ knowledge:write（写端点 8 处 require KNOWLEDGE_WRITE，页面有写按钮）
++  - mcp：+ settings:admin（平台库写端点 mcp_registry settings_admin_check）
++  - approvals：+ task:read（agent-sessions 列表 /workspaces/{ws}/agent-sessions、dialogs 列表 /workspaces/{ws}/dialogs 鉴权 task:read）+ task:run_agent（会话权限面板消费的 daemon 会话端点族）
++  - audit：+ change:read（工作区审计日志 GET /workspaces/{ws}/audit 鉴权 change:read；platform:audit:read 无后端端点消费、保留）
++  - incidents：+ deploy:staging（上报事件 POST /api/workspaces/{ws}/incidents 鉴权 deploy:staging）
++
++#### 场景：主路径
++
++- Given 菜单注册表已加载
++- When 读取上述 7 个菜单的 permissions
++- Then 每卡包含原有全部 key（首位不变）+ 上表新增 key
++
++#### 场景：可见性放宽
++
++- Given 某 role 仅持 change:read（无 platform:audit:read）
++- When 侧边栏渲染
++- Then 审计中心菜单可见（任一命中语义；此前持 platform:audit:read 看得到但页面 403、持 change:read 打得开但看不到菜单的双向错位修正）
++
++### FR-02: 每个新增 key 有后端端点消费依据（router 文件级引用）
++
++- FR-01 每个新增 permission key 必须在 backend/app/modules/**/router*.py 存在至少一处 require_permission/require_permission_any 引用（workspace:read→workspace/router.py:312/451 等；task:read→task/router.py:39/66/81、agent/router.py:193/421/485/517；knowledge:write→knowledge/router.py 8 处；settings:admin→mcp_registry/router.py:68；task:run_agent→daemon/router/__init__.py:119；change:read→workflow/router.py:37/51；deploy:staging→incident/router.py:71），代码注释中必须落对应依据。
++
++#### 场景：主路径
++
++- Given 本变更 diff
++- When 检查 menu-permissions.ts 各新增项注释
++- Then 每项引用了后端 router 端点文件
++
++### FR-03: menu-permissions 相关测试（含 6 子菜单 workspace:read 断言、changes/audit 用例）同步更新并全绿
++
++- frontend/src/lib/__tests__/menu-permissions.test.ts 必须同步：changes 用例加 task:read、audit 用例加 change:read、「6 个子菜单有独立 read 权限」用例对 components 的 not.toContain("workspace:read") 断言必须改为豁免（components 卡现含页面所需 workspace:read）。全部相关用例必须通过。
++
++#### 场景：主路径
++
++- Given 测试已更新
++- When 运行 menu-permissions / permission / 勾选器 / app-shell / menu-overrides 相关测试
++- Then 全部通过
++
++### FR-04: tsc 与改动文件 eslint 零新增报错
++
++- frontend tsc --noEmit 必须零输出；改动文件 eslint 必须零 error（存量 warning 不新增）。禁止跑全量测试。
++
++#### 场景：主路径
++
++- Given 变更代码完成
++- When pnpm typecheck + eslint 改动文件
++- Then 无新增报错
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/lib/__tests__/menu-permissions.test.ts「changes = change:create/read/update/approve/archive + task:read（2026-10-08 补齐）」+「audit = platform:audit:read + change:read（2026-10-08 补齐）」等注册表用例
++FR-02: 不适用：静态注释依据（后端 router 引用已在 FR-01 正文锚定），无独立测试面
++FR-03: frontend/src/lib/__tests__/menu-permissions.test.ts「6 个子菜单有独立 read 权限（不再共用 workspace:read）」（components 豁免断言）
++FR-04: frontend/src/lib/__tests__/menu-permissions.test.ts + frontend/src/lib/__tests__/permission.test.ts 全文件（tsc/eslint 为命令面验证）
+diff --git a/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/tasks.md b/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/tasks.md
+new file mode 100644
+index 000000000..f21fcf1ce
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-menu-permissions-page-audit/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:13:50.083Z
++---
++# 任务注册表（Tasks）— 2026-10-08-menu-permissions-page-audit
++
++- [x] task-01: 上述 7 个菜单卡 permissions 各自补齐缺口权限（既有 key 不删、门控主 key 保持首位）——menu-permissions.ts：components+workspace:read、changes+task:read、knowledge+knowledge:write、mcp+settings:admin、approvals+task:read+task:run_agent、audit+change:read、incidents+deploy:staging——验证：menu-permissions.test.ts 注册表用例绿
++- [x] task-02: 每个新增 key 有后端端点消费依据（router 文件级引用）——各菜单卡注释已落：workspace/router.py list_components、task/router.py TASK_READ、knowledge/router.py 8 处 WRITE、mcp_registry/router.py settings_admin_check、agent/router agent-sessions+dialogs、workflow/router.py list_audit_logs CHANGE_READ、incident/router.py DEPLOY_STAGING——验证：本行即记录（静态注释）
++- [x] task-03: menu-permissions 相关测试同步更新并全绿——changes/audit 用例加新 key、mcp 用例加 settings:admin、6 子菜单用例 components 豁免 workspace:read 断言——验证：5 测试文件 96 用例全绿
++- [x] task-04: tsc 与改动文件 eslint 零新增报错——pnpm typecheck 零输出、eslint 两改动文件 0 error 0 warning——验证：本行即记录

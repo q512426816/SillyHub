@@ -1,0 +1,45 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "724a25b282dc1c6d85d26da1eb7f8b772a30ae47",
+  "totals": {
+    "files": 3,
+    "additions": 71,
+    "deletions": 15
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/frontend/modules/lib-menu-permissions.md",
+      "additions": 6,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/menu-permissions.test.ts",
+      "additions": 16,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/menu-permissions.ts",
+      "additions": 49,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "c8f378d5b6aa47e7a4cc1cd6b1a6e213c43d151c8aeab001ff57b2c96509ced8",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T02:19:06.830Z"
+}

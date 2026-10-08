@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-menu-permissions-page-audit",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-08-menu-permissions-page-audit:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/lib/__tests__/menu-permissions.test.ts「changes = change:create/read/update/approve/archive + task:read（2026-10-08 补齐）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-menu-permissions-page-audit"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-08-menu-permissions-page-audit:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/lib/__tests__/menu-permissions.test.ts「6 个子菜单有独立 read 权限（不再共用 workspace:read）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-menu-permissions-page-audit"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-08-menu-permissions-page-audit:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/lib/__tests__/menu-permissions.test.ts",
+        "frontend/src/lib/__tests__/permission.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-menu-permissions-page-audit"
+    }
+  ]
+}

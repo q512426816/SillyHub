@@ -1,0 +1,11 @@
+{"ts":1791425686273,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791425703788,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791425711334,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/lib/menu-permissions.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791425767713,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/lib/__tests__/menu-permissions.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791425874675,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791425874675,"kind":"task-done","stage":"tasks","detail":"checked 0→4","provisional":true}
+{"ts":1791425907934,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/Dockerfile——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791425924484,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/Dockerfile——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791425927804,"kind":"commit","stage":null,"detail":"efb2d6870","provisional":true}
+{"ts":1791425934616,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/Dockerfile、sillyspec/changes/2026-10-08-menu-permissions-page-audit/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791425937786,"kind":"gate-run","stage":"verify","detail":"门实测 passed（2.3s） · 20261008021857","provisional":true}

@@ -340,3 +340,67 @@
   confirmed_at: null
   source_change: 2026-10-08-sessions-menu-permissions
   status: active
+
+## FR-lib-menu-permissions-034 上述 7 个菜单卡 permissions 各自补齐缺口权限（既有 key 不删、门控主 key 保持首位）
+变更：2026-10-08-menu-permissions-page-audit
+状态：active
+摘要：主路径；可见性放宽
+全文：.sillyspec/changes/archive/2026-10-08-menu-permissions-page-audit/requirements.md#FR-01
+最近确认：efb2d687031517958ef5e09ff49c697137b6363f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-menu-permissions-page-audit:flow:测试绑定FR-01
+  tests: frontend/src/lib/__tests__/menu-permissions.test.ts「changes = change:create/read/update/approve/archive + task:read（2026-10-08 补齐）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-menu-permissions-page-audit
+  status: active
+
+## FR-lib-menu-permissions-035 每个新增 key 有后端端点消费依据（router 文件级引用）
+变更：2026-10-08-menu-permissions-page-audit
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-menu-permissions-page-audit/requirements.md#FR-02
+最近确认：efb2d687031517958ef5e09ff49c697137b6363f
+
+## FR-lib-menu-permissions-036 menu-permissions 相关测试（含 6 子菜单 workspace:read 断言、changes/audit 用例）同步更新并全绿
+变更：2026-10-08-menu-permissions-page-audit
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-menu-permissions-page-audit/requirements.md#FR-03
+最近确认：efb2d687031517958ef5e09ff49c697137b6363f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-menu-permissions-page-audit:flow:测试绑定FR-03
+  tests: frontend/src/lib/__tests__/menu-permissions.test.ts「6 个子菜单有独立 read 权限（不再共用 workspace:read）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-menu-permissions-page-audit
+  status: active
+
+## FR-lib-menu-permissions-037 tsc 与改动文件 eslint 零新增报错
+变更：2026-10-08-menu-permissions-page-audit
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-menu-permissions-page-audit/requirements.md#FR-04
+最近确认：efb2d687031517958ef5e09ff49c697137b6363f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-menu-permissions-page-audit:flow:测试绑定FR-04
+  tests: frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/permission.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-menu-permissions-page-audit
+  status: active
