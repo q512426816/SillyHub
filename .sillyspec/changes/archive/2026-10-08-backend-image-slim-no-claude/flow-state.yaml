@@ -1,0 +1,39 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  backend 镜像瘦身——claude/sillyspec 二进制是 server-local 遗物（D-007 已删该模式、placement.py 注明 Daemon-Only、backend exec 只有
+  git：config.py COMMIT_SHA 回退 + diff_collector），执行全在宿主 daemon；镜像真正需要的是技能文件（manifest/bundle 分发枢纽）+ git + python。删
+  claude-code 安装、node/npm/npx/node_modules 进 runtime、entrypoint 的 .claude settings 生成与插件同步、compose 的 claude-data 挂载与
+  CLAUDE_CODE_VERSION/NPM_CONFIG_CACHE；技能仍从 sillyspec 包 COPY 并焙 package.json 版本件供回显
+
+  成功标准：
+
+  - backend/Dockerfile：npm install 不装 claude-code；runtime 不再 COPY node/npm/node_modules 与 ln 二进制；sillyspec 包
+  package.json 焙为 /app/sillyspec-package.json
+
+  - docker-entrypoint.sh：删 settings.json 生成块与 claude 插件同步块与 .claude skills 软链；保留 git config 与 /data 初始化
+
+  - deploy/docker-compose.yml：backend 删 claude-data 卷挂载、NPM_CONFIG_CACHE env、CLAUDE_CODE_VERSION build arg
+
+  - build-and-save.sh 版本回显改读 /app/sillyspec-package.json；本地重建后 health ok、技能 21 含 flow、manifest 正常、容器内无
+  node/claude/sillyspec 可执行、镜像体积较前显著下降（报告前后 SIZE）
+
+  - /daemon/* 分发端点与 daemon bundle COPY 不受影响（test_daemon_dist 相关面绿）
+autopilot: true
+baseline_commit: 706ea3b1aaab5e58abebf85a5bb137e179eac268
+updatedAt: '2026-10-08T03:23:30.342Z'
+baseline_sha256: bc9bd2e403f0c1b0b4f9e9bbac352f8dead7ef712bee151f81cee34bef68da50
+gate_summary: 'test: —｜lint: —｜门文件 6 个'
+

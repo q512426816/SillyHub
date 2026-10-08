@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-backend-image-slim-no-claude",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "85c8704a7625dafd3a4092285ea9d629d4b3eb6a",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "deploy/.env.example 仍保留已退役变量模板（CLAUDE_CODE_VERSION/CLAUDE_PLUGIN_*/CLAUDE_SYNC_*）",
+      "evidence": "被跟踪的 env 模板未被本变更触及：CLAUDE_CODE_VERSION 构建 arg 已从 compose 删除、entrypoint 不再消费 CLAUDE_PLUGIN_*/CLAUDE_SYNC_*，模板行对容器全为惰性，但会误导新部署照抄无效配置；FR-03 只声明不动 gitignored 的 deploy/.env，未覆盖此被跟踪模板文件。",
+      "location": "deploy/.env.example:79"
+    },
+    {
+      "severity": "P3",
+      "title": "config.py skills_bundle_dir 注释的理由陈述已过期（卷遮盖/entrypoint 软链/claude 均已不存在）",
+      "evidence": "注释称『不放 /app/.claude/skills/——该路径被 claude-data named volume 遮盖…entrypoint 软链给 claude』，而本变更已删除 claude-data 卷挂载与 entrypoint 软链、容器内无 claude；结论（默认 /app/sillyspec-skills）仍正确且成为镜像唯一技能载荷，但依据注释与新事实不符（CLAUDE.md 规则 18：注释与实现不一致需及时修正）。",
+      "location": "backend/app/core/config.py:100"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01 措辞『无 ln 符号链』字面过宽，Dockerfile 仍保留 entrypoint 别名 ln",
+      "evidence": "退役的 npm/npx/claude/sillyspec 四条符号链确已删除，但 Dockerfile:135 的 `ln -sf /app/docker-entrypoint.sh /usr/local/bin/sillyhub-backend-entrypoint`（先于本变更存在、与退役二进制无关）按字面读与 FR 矛盾；实现符合 FR 意图，属规格措辞精度问题而非实现缺陷。",
+      "location": "backend/Dockerfile:135"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-08T03:20:18Z"
+}

@@ -1740,3 +1740,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：765f4e7b684aa63c7d98653aa6b3e89af1057321
 理由：最大风险：线上（crrcdt）存量角色持有死键的行被删——零功能影响（无端点消费），角色列表显示权限数变少属预期收敛；PPM 角色不涉任何删除键（PPM 18 键全保留）。次要风险：种子迁移编辑只影响新环境（已应用环境不重跑），存量靠清理迁移收敛，两路径已在 ppm-permission-simplify 先例验证。 试过但放弃的方案：① 给 code:* / tool:* 接消费端点（代码评审流 / 工具 RBAC 门控）——放弃：属新功能立项不是清理，且会话 canUseTool 审批已是现行机制；② 只隐藏不删（卡片摘掉、枚举保留）——放弃：枚举残留仍进 OpenAPI 契约与角色校验域，"配了没用"的混乱只是换个形态；③ 顺带删 PermissionGroup（后端零消费）——放弃：与权限键删除耦合扩散测试面，留待独立清理。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-08-backend-image-slim-no-claude
+锚点：未记录
+最近确认：55ea8ab01ec9a279e1210a8b4423eec60a50a642
+理由：最大风险：证据面有盲区——若存在 grep 未覆盖的运行时 claude/node 依赖（如未来新代码 spawn），容器将直接 FileNotFoundError。缓解：唯二 exec 点已逐行核实为 git；diff_collector 的 FileNotFoundError 分支本就按零 diff 降级不炸；变更后本地重建全链路验证 + 服务器部署后复验。放弃方案：①保留 node 只删 claude——放弃理由：node+npm+node_modules 占大头（claude 二进制本身不大，大头是其 node_modules），半删收益减半且留「半个遗物」心智负担；②只注释不删除（防御性保留）——放弃理由：镜像层一旦保留就会被后人当成可用能力写代码，遗物越藏越深；③compose 保留 claude-data 挂载以防万一——放弃理由：卷挂载会遮盖 /app/.claude 目录语义，与「容器内无 claude」的新事实矛盾。

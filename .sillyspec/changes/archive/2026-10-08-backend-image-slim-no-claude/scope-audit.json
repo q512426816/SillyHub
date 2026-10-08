@@ -1,0 +1,63 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "706ea3b1aaab5e58abebf85a5bb137e179eac268",
+  "totals": {
+    "files": 7,
+    "additions": 59,
+    "deletions": 182
+  },
+  "rows": [
+    {
+      "path": ".zcode/skills/sillyhub-docker-deploy/SKILL.md",
+      "additions": 14,
+      "deletions": 42,
+      "kind": "modified"
+    },
+    {
+      "path": "backend/Dockerfile",
+      "additions": 18,
+      "deletions": 25,
+      "kind": "modified"
+    },
+    {
+      "path": "backend/app/core/config.py",
+      "additions": 3,
+      "deletions": 2,
+      "kind": "modified"
+    },
+    {
+      "path": "backend/docker-entrypoint.sh",
+      "additions": 9,
+      "deletions": 99,
+      "kind": "modified"
+    },
+    {
+      "path": "deploy/.env.example",
+      "additions": 4,
+      "deletions": 7,
+      "kind": "modified"
+    },
+    {
+      "path": "deploy/docker-compose.yml",
+      "additions": 8,
+      "deletions": 6,
+      "kind": "modified"
+    },
+    {
+      "path": "deploy/scripts/build-and-save.sh",
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "ac9354045d2654685831e8fa2b7b6473514ebcb70b3e604794c236f3524c99c5",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T03:21:34.524Z"
+}

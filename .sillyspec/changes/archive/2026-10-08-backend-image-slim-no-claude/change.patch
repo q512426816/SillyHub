@@ -1,0 +1,669 @@
+diff --git a/.zcode/skills/sillyhub-docker-deploy/SKILL.md b/.zcode/skills/sillyhub-docker-deploy/SKILL.md
+index 1cc8575f7..5796fe995 100644
+--- a/.zcode/skills/sillyhub-docker-deploy/SKILL.md
++++ b/.zcode/skills/sillyhub-docker-deploy/SKILL.md
+@@ -10,11 +10,9 @@ description: 用于把当前 SillyHub / multi-agent-platform 项目部署到本
+ 把当前仓库用 `deploy/docker-compose.yml` 启动为完整服务栈：
+ 
+ - frontend: Next.js
+-- backend: FastAPI
++- backend: FastAPI（python API + 静态分发：技能 manifest/bundle、daemon bundle；agent 执行在宿主 daemon，容器内无 claude/node 二进制——2026-10-08 瘦身）
+ - postgres
+ - redis
+-- Claude Code CLI in the backend container
+-- SillySpec CLI in the backend container
+ 
+ 默认优先保留用户已有本机进程。如果 `3000` 或 `8000` 已被占用，改用 `3001` / `8001`，不要直接杀进程。
+ 
+@@ -115,16 +113,14 @@ CORS_ALLOWED_ORIGINS=["http://localhost:3001","http://<LAN_IP>:3001"]
+ 
+ ## 代码侧部署兼容性
+ 
+-后端镜像必须内置 agent 运行依赖。检查 `backend/Dockerfile`：
++后端镜像职责 = python API + 静态分发（技能 manifest/bundle、daemon bundle）；agent 执行全在宿主 daemon（2026-10-08 起 claude/node 二进制已随 server-local 遗物清出镜像，见 thin 2026-10-08-backend-image-slim-no-claude）。检查 `backend/Dockerfile`：
+ 
+-- 使用 Node runtime stage 安装 Claude Code 与 SillySpec：
++- Node runtime stage 仅安装 SillySpec（npm 包，技能源；SILLYSPEC_VERSION 空 → 取最新 + SILLYSPEC_REFRESH 时间戳爆破缓存，填值 → pin）：
+   ```bash
+-  # CLAUDE_CODE_VERSION 写死；SILLYSPEC_VERSION 空 → 取最新，填值 → pin。
+-  npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION}
++  npm install -g sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION}
+   ```
+-- runtime stage 复制 `node`、`npm`、`npx`、`claude`、`sillyspec` 和 `/usr/local/lib/node_modules`。
+-- runtime apt 依赖包含 `git`，agent worktree 和 CLI 调用会用到。
+-- `HOME=/app`，并确保 `/app/.claude`、`/app/.cache`、`/app/.config`、`/tmp/.npm` 对 `app` 用户可写。
++- 技能与版本件从 sillyspec 包 COPY：`/app/sillyspec-skills/`（manifest/bundle 端点读）+ `/app/sillyspec-package.json`（无 node 环境的版本回显锚点）；runtime 无 node/npm/claude/sillyspec 二进制。
++- runtime apt 依赖包含 `git`（COMMIT_SHA 回退探测与 diff 收集 exec 它）。
+ - runtime stage 接收 `ARG COMMIT_SHA` 并 `ENV COMMIT_SHA=${COMMIT_SHA:-}`，让 `/api/health` 的 `commit_sha` 反映镜像版本（backend build context 是 `backend/`、不含仓库 `.git`，必须由 build arg 注入，否则恒为 `unknown`）。
+ 
+ 检查 `deploy/docker-compose.yml` 的 backend.build：
+@@ -138,25 +134,23 @@ backend:
+     additional_contexts:
+       daemon: ../sillyhub-daemon
+     args:
+-      CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.158}
+       SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-}   # 空 = 取最新
++      SILLYSPEC_REFRESH: ${SILLYSPEC_REFRESH:-}   # 时间戳爆破 npm 层缓存（打包脚本自动导出）
+       COMMIT_SHA: ${COMMIT_SHA:-}                 # 启动前 export，见「启动」节
+   env_file:
+     - .env
+   environment:
+     HOME: /app
+-    NPM_CONFIG_CACHE: /tmp/.npm
+ ```
+ 
+ > 版本号以 `deploy/docker-compose.yml` 实际 build args 为准，本文档中的数字仅为示例，可能滞后。
+ >
+ > **daemon 一键安装分发**：backend 通过 `additional_contexts: daemon` 把宿主机预构建的 `sillyhub-daemon/build/bundle/sillyhub-daemon.js` 与 `scripts/install.sh` 拷进镜像 `/app/daemon-dist/`，再由 3 个公开端点（无 `/api` 前缀）`GET /daemon/install.sh`、`GET /daemon/latest.json`、`GET /daemon/latest/sillyhub-daemon.js` 提供，使 `curl <SERVER>/daemon/install.sh | bash` 可用。daemon 代码改动后须重跑 `pnpm bundle` 再重建 backend。
+ 
+-后端容器应通过 `backend/docker-entrypoint.sh` 在启动时生成 `/app/.claude/settings.json`，不要把真实 `ANTHROPIC_AUTH_TOKEN` 写进已跟踪的 `.claude/settings.json`。本地真实值只放在 gitignored 的 `deploy/.env`。
+-Claude Code 相关变量要通过 `env_file: .env` 注入 backend 容器，避免宿主机 shell 里已有的 `ANTHROPIC_*` 变量覆盖 Docker 配置。
+-`/app/.claude` 应挂载到 `claude-data` volume，以保留官方 plugin marketplace 和已安装插件缓存。
++2026-10-08 起：容器内无 claude、无 `.claude/settings.json` 生成、无 claude-data 卷挂载——`.env` 里的 `ANTHROPIC_*`/`CLAUDE_*` 行对容器为惰性变量（agent 凭据走宿主 daemon 自身配置，不经容器）。
++
++（以下 Claude Code 容器配置已退役，2026-10-08 容器内无 claude，仅作历史参考；agent 模型配置走宿主 daemon 侧：）
+ 
+-推荐的 Docker 内 Claude Code 配置：
+ 
+ ```env
+ ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic
+@@ -166,10 +160,6 @@ ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.2
+ ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.2
+ ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.2
+ CLAUDE_CODE_MODEL=opus
+-CLAUDE_PLUGIN_FRONTEND_DESIGN_ENABLED=true
+-CLAUDE_PLUGIN_PLAYWRIGHT_ENABLED=true
+-CLAUDE_SYNC_OFFICIAL_PLUGINS_ON_START=true
+-CLAUDE_SKIP_DANGEROUS_MODE_PERMISSION_PROMPT=true
+ ```
+ 
+ 如果前端容器里 `/api/*` 代理到 `localhost:8000` 报 `ECONNREFUSED`，检查并修正：
+@@ -298,14 +288,14 @@ curl -fsSI http://<LAN_IP>:3001
+ - `multi-agent-platform-postgres-1`
+ - `multi-agent-platform-redis-1`
+ 
+-验证后端容器内 agent CLI：
++验证后端容器基础工具与 sillyspec 版本件（2026-10-08 起容器内无 node/claude/sillyspec 二进制）：
+ 
+ ```bash
+ docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend sh -lc \
+-  'node --version && npm --version && git --version && claude --version && sillyspec --version'
++  'git --version && curl --version | head -1 && cat /app/sillyspec-package.json | grep -m1 version'
+ ```
+ 
+-> `sillyspec --version` 反映实际装入版本（`.env` 不设 `SILLYSPEC_VERSION` = 取最新；需固定则回填版本号并重建）。
++> `/app/sillyspec-package.json` 的 version 反映构建时装入的 sillyspec 版本（技能随同包走；`.env` 不设 `SILLYSPEC_VERSION` = 取最新；需固定则回填版本号并重建）。
+ 
+ 验证 daemon 一键安装分发（`curl <SERVER>/daemon/install.sh | bash` 依赖的公开端点，无 `/api` 前缀）：
+ 
+@@ -325,25 +315,7 @@ curl -fsS http://127.0.0.1:8001/daemon/install.sh | bash -n && echo SYNTAX_OK
+ - `commit_sha` 为 `unknown` → 启动前未 `export COMMIT_SHA`（见「启动」节）。**注意：本机（Windows）按上文豁免故意不传，`unknown` 是稳定性权衡的预期结果，非缺陷。**
+ - 任一 `/daemon/*` 返回 `404` → daemon bundle 没构建进镜像，回「启动」节先 `pnpm bundle` 再 `--build --force-recreate` 重建 backend
+ 
+-验证 Docker 内 Claude Code settings，输出时必须遮蔽 token：
+-
+-```bash
+-docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend python - <<'PY'
+-import json
+-from pathlib import Path
+-settings = json.loads(Path('/app/.claude/settings.json').read_text())
+-if settings.get('env', {}).get('ANTHROPIC_AUTH_TOKEN'):
+-    settings['env']['ANTHROPIC_AUTH_TOKEN'] = '<set>'
+-print(json.dumps(settings, indent=2, ensure_ascii=False))
+-PY
+-```
+-
+-还要确认 Claude Code 所需 token 是已注入状态，但不要打印真实值：
+-
+-```bash
+-docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend sh -lc \
+-  'test -n "$ANTHROPIC_AUTH_TOKEN" && echo ANTHROPIC_AUTH_TOKEN=set || echo ANTHROPIC_AUTH_TOKEN=missing'
+-```
++（已退役，2026-10-08 起容器内无 claude、无 /app/.claude/settings.json——agent 凭据与模型配置在宿主 daemon 侧管理，本节验证不再适用。）
+ 
+ 防火墙检查（局域网访问不通时）：
+ 
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index faf4350a3..8def684c4 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -7,13 +7,14 @@ ARG PYTHON_VERSION=3.12
+ # 用 node:sqlite 内置模块（engines 硬要求 Node >=22.13），Node 20 下容器内任何
+ # sillyspec 命令直接 ERR_UNKNOWN_BUILTIN_MODULE 崩溃，与镜像内 3.32.0 技能包不配套。
+ ARG NODE_VERSION=22
+-ARG CLAUDE_CODE_VERSION=2.1.158
+-# 空 → npm install -g sillyspec 取最新；填值 → pin 到该版本（compose build arg 可覆盖）。
++# 2026-10-08（thin 2026-10-08-backend-image-slim-no-claude）：claude-code 安装退役——
++# agent 执行全在宿主 daemon（D-007 删 server-local 模式后单一 daemon-client），容器内
++# backend exec 只有 git（config.py COMMIT_SHA 回退 + diff_collector），claude/sillyspec
++# 二进制与 .claude settings/插件同步均为遗物。本 stage 仅产出 sillyspec 包（技能源 + 版本件）。
+ ARG SILLYSPEC_VERSION=""
+ 
+ FROM node:${NODE_VERSION}-slim AS node-tools
+ 
+-ARG CLAUDE_CODE_VERSION
+ ARG SILLYSPEC_VERSION
+ # 2026-10-08（thin 2026-10-08-backend-skills-follow-cli）：缓存爆破阀——SILLYSPEC_VERSION 留空
+ # （取 npm latest）时本层缓存会冻结在首次构建的版本上（容器 3.26.0 vs latest 3.32.0 实证）。
+@@ -21,7 +22,7 @@ ARG SILLYSPEC_VERSION
+ ARG SILLYSPEC_REFRESH=""
+ 
+ RUN echo "npm layer refresh token: ${SILLYSPEC_REFRESH:-cached}" \
+- && npm install --registry=https://registry.npmmirror.com -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION} \
++ && npm install --registry=https://registry.npmmirror.com -g sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION} \
+  && npm cache clean --force
+ 
+ FROM python:${PYTHON_VERSION}-slim AS builder
+@@ -51,20 +52,18 @@ COPY . .
+ 
+ FROM python:${PYTHON_VERSION}-slim AS runtime
+ 
+-ARG CLAUDE_CODE_VERSION
+-ARG SILLYSPEC_VERSION
+ # Git commit SHA injected at build time (build arg → ENV) so the health
+ # endpoint reports the exact image version without relying on a .git dir
+ # (the build context is backend/, which does not contain the repo .git).
+ # Empty default keeps the runtime `git rev-parse` fallback working locally.
+ ARG COMMIT_SHA=""
+ 
++# 2026-10-08（thin 2026-10-08-backend-image-slim-no-claude）：CLAUDE_CODE_VERSION/
++# SILLYSPEC_VERSION 的 ENV 烘焙随二进制退役一并删除（backend 无读者）；NPM_CONFIG_CACHE
++# 同 retire（容器内已无 npm）。保留 HOME=/app（应用运行主目录）。
+ ENV PYTHONDONTWRITEBYTECODE=1 \
+     PYTHONUNBUFFERED=1 \
+     HOME=/app \
+-    NPM_CONFIG_CACHE=/tmp/.npm \
+-    CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
+-    SILLYSPEC_VERSION=${SILLYSPEC_VERSION} \
+     COMMIT_SHA=${COMMIT_SHA:-} \
+     PATH="/opt/venv/bin:${PATH}"
+ 
+@@ -92,14 +91,9 @@ RUN find /etc/apt -type f \( -name 'sources.list' -o -name '*.sources' \) \
+ 
+ WORKDIR /app
+ 
+-COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
+-COPY --from=node-tools /usr/local/lib/node_modules /usr/local/lib/node_modules
+-
+-RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+- && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+- && ln -sf ../lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe /usr/local/bin/claude \
+- && ln -sf ../lib/node_modules/sillyspec/bin/sillyspec.js /usr/local/bin/sillyspec
+-
++# 2026-10-08（thin 2026-10-08-backend-image-slim-no-claude）：runtime 不再携带 node/
++# npm/npx/claude/sillyspec 二进制与 node_modules——agent 执行全在宿主 daemon，容器只做
++# API/分发（技能文件如下方 COPY；daemon bundle 走静态分发）。瘦身约数百 MB。
+ COPY --from=builder /opt/venv /opt/venv
+ COPY --from=builder /build /app
+ 
+@@ -119,23 +113,22 @@ COPY --from=daemon scripts/install.sh /app/daemon-dist/install.sh
+ # task-04（DG-02）：Windows PowerShell 安装脚本，偏好 CRLF 换行（与 install.sh 的 LF 相反）。
+ COPY --from=daemon scripts/install.ps1 /app/daemon-dist/install.ps1
+ 
+-# 2026-07-07-daemon-skill-execution task-07：sillyspec skills 进镜像（server-local 模式
+-# 容器内 claude 自带 skills 调 /sillyspec-* 跑 stage 流程，不经 daemon skill-manager 同步）。
++# 2026-07-07-daemon-skill-execution task-07：sillyspec skills 进镜像。
+ # 2026-10-08（thin 2026-10-08-backend-skills-follow-cli）：技能源从仓库 .claude/skills 快照
+ # （additional_contexts "skills"，构建时固定、与容器 CLI 可能错位）改为已安装 sillyspec 包
+ # 自带 .claude/skills——同包同版 lockstep，CLI 随 SILLYSPEC_REFRESH 拉 latest 时技能自动同版，
+ # 平台侧永不错位。仓库技能目录仍服务本地工具面（ZCode/Claude CLI），由 sillyspec init 刷新。
+-# COPY 到 /app/sillyspec-skills/（非 volume 路径）而非 /app/.claude/skills/——后者被
+-# claude-data named volume 遮盖（volume 9h 前创建无 skills/，不会重拷镜像内容）。
+-# docker-entrypoint.sh 启动时软链 /app/.claude/skills → /app/sillyspec-skills 让 claude 找到；
+-# backend skills_bundle_dir config 默认 /app/sillyspec-skills 供 manifest/bundle 端点读。
++# 2026-10-08（thin 2026-10-08-backend-image-slim-no-claude）：容器内无 sillyspec 可执行后，
++# 本目录是镜像唯一的技能载荷——skills_bundle_dir 默认 /app/sillyspec-skills 供 manifest/bundle
++# 端点读；package.json 焰为版本件（build-and-save.sh 回显用，无 node 也能查）。
+ COPY --from=node-tools /usr/local/lib/node_modules/sillyspec/.claude/skills /app/sillyspec-skills/
++COPY --from=node-tools /usr/local/lib/node_modules/sillyspec/package.json /app/sillyspec-package.json
+ 
+ # task-04（DG-02）：install.ps1 兜底转 CRLF——PowerShell 偏好 CRLF，与 install.sh 去 CR（LF）相反。
+ # 源文件已 CRLF 则幂等无副作用；被 git 在镜像构建前转成 LF 则此处修复回来。注意不并入上面的
+ # `sed 's/\r$//' install.sh`（那行明确只列 install.sh + entrypoint，bash 要 LF）。
+-RUN mkdir -p /app/.cache /app/.config /app/.claude /tmp/.npm /data/spec-workspaces \
+- && chown -R app:app /app /tmp/.npm /data/spec-workspaces \
++RUN mkdir -p /app/.cache /app/.config /data/spec-workspaces \
++ && chown -R app:app /app /data/spec-workspaces \
+  && sed -i 's/\r$//' /app/docker-entrypoint.sh /app/daemon-dist/install.sh \
+  && chmod +x /app/docker-entrypoint.sh \
+  && sed -i 's/$/\r/' /app/daemon-dist/install.ps1 \
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index fab1604d1..00b587165 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -97,8 +97,9 @@ class Settings(BaseSettings):
+ 
+     # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。
+     # 镜像内路径由 Dockerfile COPY → /app/sillyspec-skills/（task-07）。
+-    # 不放 /app/.claude/skills/——该路径被 claude-data named volume 遮盖（volume 早于
+-    # skills COPY 创建，不会重拷镜像内容），改放非 volume 路径，entrypoint 软链给 claude。
++    # 2026-10-08-backend-image-slim-no-claude：历史上不放 /app/.claude/skills/ 是因
++    # claude-data 卷遮盖 + entrypoint 软链给容器内 claude——两者均已随容器内 claude
++    # 退役；现在本路径是镜像唯一的技能分发载荷（manifest/bundle 端点读），路径不变。
+     # 测试经 monkeypatch 覆盖 skills_bundle_service.get_settings 指向 tmp_path。
+     skills_bundle_dir: Path = Field(
+         default=Path("/app/sillyspec-skills"),
+diff --git a/backend/docker-entrypoint.sh b/backend/docker-entrypoint.sh
+index d2b3bbb47..802a040a5 100644
+--- a/backend/docker-entrypoint.sh
++++ b/backend/docker-entrypoint.sh
+@@ -1,106 +1,16 @@
+ #!/bin/sh
+ set -eu
+ 
+-mkdir -p "${HOME:-/app}/.claude"
++# 2026-10-08（thin 2026-10-08-backend-image-slim-no-claude）：容器内 claude 退役——
++# .claude 目录初始化、skills 软链、settings.json 生成（ANTHROPIC_*/CLAUDE_* env 注入）、
++# claude 插件市场同步全部删除（server-local 模式遗物；agent 执行在宿主 daemon，
++# 其 claude/sillyspec 由 daemon install 自行管理）。容器只剩 python API + 静态分发。
+ mkdir -p /data/spec-workspaces
+-# 2026-07-07-daemon-skill-execution task-07：把镜像内 /app/sillyspec-skills/ 软链到
+-# /app/.claude/skills（claude-data volume 挂在 /app/.claude 遮盖镜像 COPY 内容，
+-# 故镜像把 skills 放非 volume 路径 /app/sillyspec-skills，启动时软链进 volume）。
+-# 幂等：每次启动确保软链存在（容器重启不影响，volume 里软链可能被清）。
+-if [ -d /app/sillyspec-skills ] && [ ! -e "${HOME:-/app}/.claude/skills" ]; then
+-  ln -s /app/sillyspec-skills "${HOME:-/app}/.claude/skills"
+-fi
+-# ql-20260904-027（修正轮）：删除 chown -R /data/spec-workspaces——容器以 USER app
+-# 运行（Dockerfile L132），chown 在任何挂载形态下都不可能成功：bind mount（本机
+-# 与阿里云的实际形态）属主恒 root 且 EPERM（2>/dev/null || true 把 6.7 万文件
+-# 的逐文件失败全吞掉，纯耗 114s/次阻塞 alembic）；named volume 场景的属主已由
+-# Dockerfile L117-118 构建期 chown 覆盖（首次挂载继承镜像目录属主）。bind 场景
+-# 的可写性由宿主目录权限保证（Docker Desktop 宽松映射 / 阿里云 HOST_PATH_PREFIX=/tmp 1777）。
+-
+-python - <<'PY'
+-import json
+-import os
+-from pathlib import Path
+-
+-
+-def enabled(name: str, default: bool = True) -> bool:
+-    value = os.environ.get(name)
+-    if value is None:
+-        return default
+-    return value.strip().lower() in {"1", "true", "yes", "on"}
+-
+-
+-home = Path(os.environ.get("HOME", "/app"))
+-settings_path = home / ".claude" / "settings.json"
+-
+-env_keys = [
+-    "ANTHROPIC_BASE_URL",
+-    "API_TIMEOUT_MS",
+-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+-    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+-    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+-    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+-    "ANTHROPIC_AUTH_TOKEN",
+-]
+-
+-settings = {
+-    "env": {key: os.environ[key] for key in env_keys if os.environ.get(key)},
+-    "model": os.environ.get("CLAUDE_CODE_MODEL", "opus"),
+-    "enabledPlugins": {
+-        "frontend-design@claude-plugins-official": enabled("CLAUDE_PLUGIN_FRONTEND_DESIGN_ENABLED"),
+-        "playwright@claude-plugins-official": enabled("CLAUDE_PLUGIN_PLAYWRIGHT_ENABLED"),
+-    },
+-    "extraKnownMarketplaces": {
+-        "claude-plugins-official": {
+-            "source": {
+-                "source": "github",
+-                "repo": "anthropics/claude-plugins-official",
+-            }
+-        }
+-    },
+-    "skipDangerousModePermissionPrompt": enabled("CLAUDE_SKIP_DANGEROUS_MODE_PERMISSION_PROMPT"),
+-    "hooks": {
+-        "PreToolUse": [
+-            {
+-                "matcher": "Write|Edit|MultiEdit",
+-                "hooks": [
+-                    {
+-                        "type": "command",
+-                        "command": "python /app/hooks/scan_write_guard.py",
+-                        "timeout": 5,
+-                    }
+-                ],
+-            }
+-        ],
+-    },
+-}
+-
+-settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+-settings_path.chmod(0o600)
+-PY
+-
+-is_enabled() {
+-  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+-    1|true|yes|on) return 0 ;;
+-    *) return 1 ;;
+-  esac
+-}
+-
+-if is_enabled "${CLAUDE_SYNC_OFFICIAL_PLUGINS_ON_START:-true}"; then
+-  claude plugin marketplace add anthropics/claude-plugins-official --scope user >/dev/null 2>&1 \
+-    || claude plugin marketplace update claude-plugins-official >/dev/null 2>&1 \
+-    || echo "warning: unable to sync claude-plugins-official marketplace" >&2
+-
+-  if is_enabled "${CLAUDE_PLUGIN_FRONTEND_DESIGN_ENABLED:-true}"; then
+-    claude plugin install frontend-design@claude-plugins-official --scope user >/dev/null 2>&1 \
+-      || echo "warning: unable to install frontend-design@claude-plugins-official" >&2
+-  fi
+-
+-  if is_enabled "${CLAUDE_PLUGIN_PLAYWRIGHT_ENABLED:-true}"; then
+-    claude plugin install playwright@claude-plugins-official --scope user >/dev/null 2>&1 \
+-      || echo "warning: unable to install playwright@claude-plugins-official" >&2
+-  fi
+-fi
++# ql-20260904-027（修正轮）：不做 chown -R /data/spec-workspaces——容器以 USER app
++# 运行，chown 在任何挂载形态下都不可能成功：bind mount（本机与阿里云的实际形态）
++# 属主恒 root 且 EPERM，纯耗时阻塞 alembic；named volume 场景的属主已由 Dockerfile
++# 构建期 chown 覆盖（首次挂载继承镜像目录属主）。bind 场景的可写性由宿主目录权限
++# 保证（Docker Desktop 宽松映射 / 阿里云 HOST_PATH_PREFIX=/tmp 1777）。
+ 
+ # Allow git operations on bind-mounted host directories
+ git config --global --add safe.directory '*' 2>/dev/null || true
+diff --git a/deploy/.env.example b/deploy/.env.example
+index b1a0ad9e3..35fe78262 100644
+--- a/deploy/.env.example
++++ b/deploy/.env.example
+@@ -75,11 +75,12 @@ MINIO_ROOT_PASSWORD=
+ SPEC_DATA_HOST_DIR=C:/data/spec-workspaces
+ 
+ # Agent CLI versions baked into the backend image.
+-# CLAUDE_CODE_VERSION 写死；SILLYSPEC_VERSION 留空=取最新，填值=pin。
+-CLAUDE_CODE_VERSION=2.1.158
++# 2026-10-08-backend-image-slim-no-claude：CLAUDE_CODE_VERSION 退役（镜像不装 claude-code）。
++# SILLYSPEC_VERSION 留空=取最新（打包脚本时间戳爆破缓存自动跟 latest），填值=pin（应急回滚）。
+ SILLYSPEC_VERSION=
+ 
+-# Claude Code runtime settings for the backend container
++# 2026-10-08-backend-image-slim-no-claude：以下 ANTHROPIC_*/CLAUDE_* 对容器为惰性变量
++# （容器内无 claude；agent 凭据/模型配置走宿主 daemon 侧），仅作历史参考保留。
+ ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic
+ API_TIMEOUT_MS=3000000
+ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+@@ -88,10 +89,6 @@ ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.2
+ ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.2
+ ANTHROPIC_AUTH_TOKEN=
+ CLAUDE_CODE_MODEL=opus
+-CLAUDE_PLUGIN_FRONTEND_DESIGN_ENABLED=true
+-CLAUDE_PLUGIN_PLAYWRIGHT_ENABLED=true
+-CLAUDE_SYNC_OFFICIAL_PLUGINS_ON_START=true
+-CLAUDE_SKIP_DANGEROUS_MODE_PERMISSION_PROMPT=true
+ 
+ # Auth bootstrap (task-04a)
+ # If set, backend will create/reuse this admin on startup.
+diff --git a/deploy/docker-compose.yml b/deploy/docker-compose.yml
+index 1b46edb26..148d7f0d5 100644
+--- a/deploy/docker-compose.yml
++++ b/deploy/docker-compose.yml
+@@ -73,7 +73,8 @@ services:
+       additional_contexts:
+         daemon: ../sillyhub-daemon
+       args:
+-        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.241}
++        # 2026-10-08-backend-image-slim-no-claude：CLAUDE_CODE_VERSION 退役（镜像不装
++        # claude-code）；.env 残留同名行为惰性，无需清理。
+         # 空 → 取最新 sillyspec；填值 → pin（应急回滚口，日常留空走自动）。
+         SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-}
+         # 缓存爆破阀（时间戳）：打包脚本每次导出新值强制 npm 层真拉 latest；
+@@ -103,7 +104,9 @@ services:
+       # see spec documents written by the backend. Override host path via
+       # SPEC_DATA_HOST_DIR in .env (see deploy/.env.example).
+       - "${SPEC_DATA_HOST_DIR:-C:/data/spec-workspaces}:/data/spec-workspaces"
+-      - claude-data:/app/.claude
++      # 2026-10-08-backend-image-slim-no-claude：claude-data 卷挂载退役——容器内已无
++      # claude（server-local 遗物，agent 执行在宿主 daemon）；named volume 数据仍在
++      # 宿主磁盘，仅不再挂入。
+     environment:
+       # Prefix that rewrites host-style paths into container mount paths.
+       HOST_PATH_PREFIX: ${HOST_PATH_PREFIX:-C:/Users/qinyi/IdeaProjects}
+@@ -140,9 +143,9 @@ services:
+       WORKTREE_BASE_DIR: /data/sillyspec-workspaces
+       SPEC_DATA_ROOT: /data/spec-workspaces
+       HOME: /app
+-      NPM_CONFIG_CACHE: /tmp/.npm
+-      # Claude Code agent configuration is loaded from deploy/.env via env_file
+-      # so host-level ANTHROPIC_* variables do not override the Docker settings.
++      # 2026-10-08-backend-image-slim-no-claude：NPM_CONFIG_CACHE 退役（容器内已无 npm）。
++      # 容器内已无 claude，deploy/.env 的 ANTHROPIC_*/CLAUDE_* 行对容器为惰性变量
++      # （daemon 侧凭据不受影响，走 daemon install 自身配置）。
+     ports:
+       - "${BACKEND_PORT:-8000}:8000"
+     # Run migrations before serving so a fresh stack always lands on head.
+@@ -293,5 +296,4 @@ volumes:
+   redisdata:
+   litellm-db-data:
+   worktree-data:
+-  claude-data:
+   minio-data:
+diff --git a/deploy/scripts/build-and-save.sh b/deploy/scripts/build-and-save.sh
+index 1efaf617e..78ee7e6c6 100644
+--- a/deploy/scripts/build-and-save.sh
++++ b/deploy/scripts/build-and-save.sh
+@@ -55,7 +55,9 @@ OUT="$DEPLOY_DIR/images.tar.gz"
+ docker save multi-agent-platform-backend:latest multi-agent-platform-frontend:latest \
+   | gzip > "$OUT"
+ echo "    产出: $OUT ($(du -h "$OUT" | cut -f1))"
+-echo "    镜像内 sillyspec 版本: $(docker run --rm --entrypoint sh multi-agent-platform-backend:latest -c 'sillyspec --version 2>/dev/null' || echo 查询失败)"
++# 2026-10-08-backend-image-slim-no-claude：容器内已无 sillyspec 可执行，版本回显改读
++# 构建期焙入的 /app/sillyspec-package.json（node-tools 阶段 npm 实际装到的版本）。
++echo "    镜像内 sillyspec 版本: $(docker run --rm --entrypoint grep multi-agent-platform-backend:latest -o '\"version\": \"[^\"]*\"' /app/sillyspec-package.json | head -1 | cut -d'\"' -f4 || echo 查询失败)"
+ echo ""
+ echo "    镜像 COMMIT_SHA=$COMMIT_SHA（health 端点将回显此值；运行时不再空覆盖）"
+ echo ""
+diff --git a/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/design.md b/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/design.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:10:03.162Z
++---
++# 设计记录（Design Record）— 2026-10-08-backend-image-slim-no-claude
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++backend 镜像自 server-local 时代起携带 claude-code + node 全家桶 + entrypoint 的 .claude settings 生成与插件市场同步；2026-07-10 D-007 删除 server-local 模式后这些全是遗物（证据：placement.py:316 注明 SERVER subprocess backend removed / Daemon-Only；backend/app 全量 grep 无 claude/node/sillyspec 子进程 spawn，唯二 exec 是 git——config.py:570 COMMIT_SHA 回退与 diff_collector.py:124/153 git diff；无 /app/.claude/settings.json 读者）。容器真正的运行职责：python API + 静态分发（技能 manifest/bundle、daemon bundle）。
++
++方案：node-tools 阶段 npm 只装 sillyspec（技能源）；runtime 删 node/npm/npx/claude/sillyspec 二进制与 node_modules COPY 及 ln 块，新增 package.json 焙入 /app/sillyspec-package.json（无 node 环境下的版本回显锚点）；entrypoint 删 settings.json 生成块/插件同步块/.claude 软链（保留 git config 与 /data 初始化）；compose 删 claude-data 卷挂载与声明、NPM_CONFIG_CACHE、CLAUDE_CODE_VERSION build arg；build-and-save.sh 版本回显改读焙入件。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无 Python/TS 代码接口变化，API 端点行为零变化。可见变化全在镜像/容器层：镜像体积显著缩小；容器内不再有 node/npm/npx/claude/sillyspec 可执行（排障需用 python/git/curl/sh）；/app/.claude 不再初始化（claude-data 卷不再挂载，宿主数据保留）；.env 的 CLAUDE_CODE_VERSION/ANTHROPIC_*/CLAUDE_PLUGIN_* 等行对容器变惰性（daemon 侧凭据链路不受影响）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立——纯静态镜像内容变更，无事件流；「容器内无人用这些二进制」的证据是全量 grep（backend/app）而非运行时探测，构建即固化。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   变更时共享仓有并行会话脏文件，提交用显式 pathspec（backend/Dockerfile、backend/docker-entrypoint.sh、deploy/docker-compose.yml、deploy/scripts/build-and-save.sh、.zcode skill 文档）；claude-data 卷移除只影响新容器，卷数据宿主留存。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   在途 agent 会话不受影响（执行在宿主 daemon，与容器无涉）；容器重建后 /api/health 与分发端点照常；回滚走既有 backup tag 机制。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   只影响本仓 backend 镜像；服务器走 load 镜像同源；宿主 daemon 安装链（/daemon/install.sh）分发的是 COPY 进镜像的静态 bundle，与容器内二进制无关。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：证据面有盲区——若存在 grep 未覆盖的运行时 claude/node 依赖（如未来新代码 spawn），容器将直接 FileNotFoundError。缓解：唯二 exec 点已逐行核实为 git；diff_collector 的 FileNotFoundError 分支本就按零 diff 降级不炸；变更后本地重建全链路验证 + 服务器部署后复验。放弃方案：①保留 node 只删 claude——放弃理由：node+npm+node_modules 占大头（claude 二进制本身不大，大头是其 node_modules），半删收益减半且留「半个遗物」心智负担；②只注释不删除（防御性保留）——放弃理由：镜像层一旦保留就会被后人当成可用能力写代码，遗物越藏越深；③compose 保留 claude-data 挂载以防万一——放弃理由：卷挂载会遮盖 /app/.claude 目录语义，与「容器内无 claude」的新事实矛盾。
++
++## 验收命令（FR-01..04 对账，实跑为准）
++
++```bash
++bash -n deploy/scripts/build-and-save.sh && docker compose --env-file deploy/.env -f deploy/docker-compose.yml config >/dev/null
++grep -c "claude-code\|CLAUDE_CODE_VERSION" backend/Dockerfile   # 期望 0（注释中 claude-code 字样除外，人工审）
++SILLYSPEC_REFRESH=$(date +%s) docker compose --env-file deploy/.env -f deploy/docker-compose.yml up --build --force-recreate -d backend
++# 容器内：which node npm claude sillyspec（全空）/ ls /app/sillyspec-skills | grep -c ^sillyspec-（21 含 flow）
++# /api/health ok / manifest has-flow=True / docker images SIZE 对比
++cd backend && python -m pytest tests/test_daemon_dist.py -q
++```
+
+diff --git a/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/proposal.md b/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/proposal.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:10:03.162Z
++---
++# 提案书（Proposal）— 2026-10-08-backend-image-slim-no-claude
++
++## 动机
++
++任务原话转写：backend 镜像瘦身——claude/sillyspec 二进制是 server-local 遗物（D-007 已删该模式、placement.py 注明 Daemon-Only、backend exec 只有 git：config.py COMMIT_SHA 回退 + diff_collector），执行全在宿主 daemon；镜像真正需要的是技能文件（manifest/bundle 分发枢纽）+ git + python。删 claude-code 安装、node/npm/npx/node_modules 进 runtime、entrypoint 的 .claude settings 生成与插件同步、compose 的 claude-data 挂载与 CLAUDE_CODE_VERSION/NPM_CONFIG_CACHE；技能仍从 sillyspec 包 COPY 并焙 package.json 版本件供回显
++成功标准：
++- backend/Dockerfile：npm install 不装 claude-code；runtime 不再 COPY node/npm/node_modules 与 ln 二进制；sillyspec 包 package.json 焙为 /app/sillyspec-package.json
++- docker-entrypoint.sh：删 settings.json 生成块与 claude 插件同步块与 .claude skills 软链；保留 git config 与 /data 初始化
++- deploy/docker-compose.yml：backend 删 claude-data 卷挂载、NPM_CONFIG_CACHE env、CLAUDE_CODE_VERSION build arg
++- build-and-save.sh 版本回显改读 /app/sillyspec-package.json；本地重建后 health ok、技能 21 含 flow、manifest 正常、容器内无 node/claude/sillyspec 可执行、镜像体积较前显著下降（报告前后 SIZE）
++- /daemon/* 分发端点与 daemon bundle COPY 不受影响（test_daemon_dist 相关面绿）
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. backend/Dockerfile：npm install 不装 claude-code；runtime 不再 COPY node/npm/node_modules 与 ln 二进制；sillyspec 包 package.json 焙为 /app/sillyspec-package.json
++2. docker-entrypoint.sh：删 settings.json 生成块与 claude 插件同步块与 .claude skills 软链；保留 git config 与 /data 初始化
++3. deploy/docker-compose.yml：backend 删 claude-data 卷挂载、NPM_CONFIG_CACHE env、CLAUDE_CODE_VERSION build arg
++4. build-and-save.sh 版本回显改读 /app/sillyspec-package.json；本地重建后 health ok、技能 21 含 flow、manifest 正常、容器内无 node/claude/sillyspec 可执行、镜像体积较前显著下降（报告前后 SIZE）
++5. /daemon/* 分发端点与 daemon bundle COPY 不受影响（test_daemon_dist 相关面绿）
++
++## 成功标准（可验证）
++
++1. backend/Dockerfile：npm install 不装 claude-code；runtime 不再 COPY node/npm/node_modules 与 ln 二进制；sillyspec 包 package.json 焙为 /app/sillyspec-package.json
++2. docker-entrypoint.sh：删 settings.json 生成块与 claude 插件同步块与 .claude skills 软链；保留 git config 与 /data 初始化
++3. deploy/docker-compose.yml：backend 删 claude-data 卷挂载、NPM_CONFIG_CACHE env、CLAUDE_CODE_VERSION build arg
++4. build-and-save.sh 版本回显改读 /app/sillyspec-package.json；本地重建后 health ok、技能 21 含 flow、manifest 正常、容器内无 node/claude/sillyspec 可执行、镜像体积较前显著下降（报告前后 SIZE）
++5. /daemon/* 分发端点与 daemon bundle COPY 不受影响（test_daemon_dist 相关面绿）
+
+diff --git a/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/requirements.md b/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/requirements.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:10:03.162Z
++---
++# 需求规格（Requirements）— 2026-10-08-backend-image-slim-no-claude
++
++## 功能需求
++
++### FR-01: backend/Dockerfile：npm install 不装 claude-code；runtime 不再 COPY node/npm/node_modules 与 ln 二进制；sillyspec 包 package.json 焙为 /app/sillyspec-package.json
++
++- 必须：node-tools 阶段 `npm install -g` 仅装 sillyspec（无 @anthropic-ai/claude-code）；runtime 阶段无 node/npm/npx/claude/sillyspec 二进制与 node_modules COPY、无 ln 符号链；`COPY --from=node-tools .../sillyspec/package.json /app/sillyspec-package.json` 存在；runtime ENV 删 CLAUDE_CODE_VERSION/SILLYSPEC_VERSION/NPM_CONFIG_CACHE（无读者）。
++
++#### 场景：主路径
++
++- Given 原镜像携带 claude-code + node 全家桶（server-local 遗物）
++- When 重建镜像
++- Then 容器内 `which node claude sillyspec npm` 全部为空；/app/sillyspec-skills 技能 21 个照常
++
++### FR-02: docker-entrypoint.sh：删 settings.json 生成块与 claude 插件同步块与 .claude skills 软链；保留 git config 与 /data 初始化
++
++- 必须：entrypoint 仅保留 `mkdir -p /data/spec-workspaces`、`git config --global --add safe.directory '*'`、`exec "$@"`；无 python settings.json 块、无 is_enabled/claude plugin 块、无 .claude 软链。
++
++#### 场景：主路径
++
++- Given 原 entrypoint 生成 /app/.claude/settings.json 并同步插件市场
++- When 新 entrypoint 启动容器
++- Then 启动直接到 alembic + uvicorn（无 claude 调用；backend 无 settings.json 读者已核）
++
++### FR-03: deploy/docker-compose.yml：backend 删 claude-data 卷挂载、NPM_CONFIG_CACHE env、CLAUDE_CODE_VERSION build arg
++
++- 必须：backend volumes 无 `claude-data:/app/.claude`；顶层 volumes 声明无 claude-data；environment 无 NPM_CONFIG_CACHE；build args 无 CLAUDE_CODE_VERSION。.env 残留 CLAUDE_CODE_VERSION/ANTHROPIC_*/CLAUDE_* 行为惰性（无消费者），不动。
++
++#### 场景：主路径
++
++- Given claude-data 卷只被 backend 挂载（grep 全文件唯一）
++- When 移除挂载与声明
++- Then `docker compose config` 通过；named volume 数据留宿主磁盘不受影响
++
++### FR-04: build-and-save.sh 版本回显改读 /app/sillyspec-package.json；本地重建后 health ok、技能 21 含 flow、manifest 正常、容器内无 node/claude/sillyspec 可执行、镜像体积较前显著下降（报告前后 SIZE）；/daemon/* 分发端点与 daemon bundle COPY 不受影响
++
++- 必须：脚本回显用 `--entrypoint grep ... /app/sillyspec-package.json`；本地重建后容器 `/api/health` ok、`ls /app/sillyspec-skills | grep -c '^sillyspec-'`=21 含 flow、manifest has-flow=True、`which node npm claude sillyspec` 全空、`docker images` SIZE 较改前记录值下降；`COPY --from=daemon` 各行零变化，backend/tests/test_daemon_dist.py 绿。
++
++#### 场景：主路径
++
++- Given 改前镜像 SIZE 已记录
++- When SILLYSPEC_REFRESH 重建 + --force-recreate
++- Then 全部验证点通过且体积下降
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: 不适用：Dockerfile 静态改动，验收以 grep 源行 + 重建后容器内 which 全空为准
++FR-02: 不适用：entrypoint 静态改动，验收以 grep + 容器正常启动（alembic→uvicorn）为准
++FR-03: 不适用：compose 静态改动，验收以 docker compose config 解析通过为准
++FR-04: 不适用：构建编排与容器运行时，验收以 test_daemon_dist 实跑 + 容器内实跑命令为准
+
+diff --git a/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/review.json.superseded-20261008T032126 b/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/review.json.superseded-20261008T032126
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/review.json.superseded-20261008T032126
+@@ -0,0 +1,34 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-08-backend-image-slim-no-claude",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "85c8704a7625dafd3a4092285ea9d629d4b3eb6a",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "deploy/.env.example 仍保留已退役变量模板（CLAUDE_CODE_VERSION/CLAUDE_PLUGIN_*/CLAUDE_SYNC_*）",
++      "evidence": "被跟踪的 env 模板未被本变更触及：CLAUDE_CODE_VERSION 构建 arg 已从 compose 删除、entrypoint 不再消费 CLAUDE_PLUGIN_*/CLAUDE_SYNC_*，模板行对容器全为惰性，但会误导新部署照抄无效配置；FR-03 只声明不动 gitignored 的 deploy/.env，未覆盖此被跟踪模板文件。",
++      "location": "deploy/.env.example:79"
++    },
++    {
++      "severity": "P3",
++      "title": "config.py skills_bundle_dir 注释的理由陈述已过期（卷遮盖/entrypoint 软链/claude 均已不存在）",
++      "evidence": "注释称『不放 /app/.claude/skills/——该路径被 claude-data named volume 遮盖…entrypoint 软链给 claude』，而本变更已删除 claude-data 卷挂载与 entrypoint 软链、容器内无 claude；结论（默认 /app/sillyspec-skills）仍正确且成为镜像唯一技能载荷，但依据注释与新事实不符（CLAUDE.md 规则 18：注释与实现不一致需及时修正）。",
++      "location": "backend/app/core/config.py:100"
++    },
++    {
++      "severity": "P3",
++      "title": "FR-01 措辞『无 ln 符号链』字面过宽，Dockerfile 仍保留 entrypoint 别名 ln",
++      "evidence": "退役的 npm/npx/claude/sillyspec 四条符号链确已删除，但 Dockerfile:135 的 `ln -sf /app/docker-entrypoint.sh /usr/local/bin/sillyhub-backend-entrypoint`（先于本变更存在、与退役二进制无关）按字面读与 FR 矛盾；实现符合 FR 意图，属规格措辞精度问题而非实现缺陷。",
++      "location": "backend/Dockerfile:135"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "reviewedAt": "2026-10-08T03:20:18Z"
++}
+
+diff --git a/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/tasks.md b/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-image-slim-no-claude/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:10:03.162Z
++---
++# 任务注册表（Tasks）— 2026-10-08-backend-image-slim-no-claude
++
++- [x] task-01: backend/Dockerfile：npm install 不装 claude-code；runtime 不再 COPY node/npm/node_modules 与 ln 二进制；sillyspec 包 package.json 焙为 /app/sillyspec-package.json
++- [x] task-02: docker-entrypoint.sh：删 settings.json 生成块与 claude 插件同步块与 .claude skills 软链；保留 git config 与 /data 初始化
++- [x] task-03: deploy/docker-compose.yml：backend 删 claude-data 卷挂载、NPM_CONFIG_CACHE env、CLAUDE_CODE_VERSION build arg
++- [x] task-04: build-and-save.sh 版本回显改读 /app/sillyspec-package.json；本地重建后 health ok、技能 21 含 flow、manifest 正常、容器内无 node/claude/sillyspec 可执行、镜像体积较前显著下降（报告前后 SIZE）
++- [x] task-05: /daemon/* 分发端点与 daemon bundle COPY 不受影响（test_daemon_dist 相关面绿）

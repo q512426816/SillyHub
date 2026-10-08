@@ -1687,3 +1687,31 @@
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-08-backend-skills-follow-cli/requirements.md#FR-04
 最近确认：c1970cd37f0338f3a3b122bf3638e649e515f18f
+
+## FR-build-117 backend/Dockerfile：npm install 不装 claude-code；runtime 不再 COPY node/npm/node_modules 与 ln 二进制；sillyspec 包 package.json 焙为 /app/sillyspec-package.json
+变更：2026-10-08-backend-image-slim-no-claude
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-image-slim-no-claude/requirements.md#FR-01
+最近确认：55ea8ab01ec9a279e1210a8b4423eec60a50a642
+
+## FR-build-118 docker-entrypoint.sh：删 settings.json 生成块与 claude 插件同步块与 .claude skills 软链；保留 git config 与 /data 初始化
+变更：2026-10-08-backend-image-slim-no-claude
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-image-slim-no-claude/requirements.md#FR-02
+最近确认：55ea8ab01ec9a279e1210a8b4423eec60a50a642
+
+## FR-build-119 deploy/docker-compose.yml：backend 删 claude-data 卷挂载、NPM_CONFIG_CACHE env、CLAUDE_CODE_VERSION build arg
+变更：2026-10-08-backend-image-slim-no-claude
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-image-slim-no-claude/requirements.md#FR-03
+最近确认：55ea8ab01ec9a279e1210a8b4423eec60a50a642
+
+## FR-build-120 build-and-save.sh 版本回显改读 /app/sillyspec-package.json；本地重建后 health ok、技能 21 含 flow、manifest 正常、容器内无 node/claude/sillyspec 可执行、镜像体积较前显著下降（报告前后 SIZE）；/daemon/* 分发端点与 daemon bundle COPY 不受影响
+变更：2026-10-08-backend-image-slim-no-claude
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-image-slim-no-claude/requirements.md#FR-04
+最近确认：55ea8ab01ec9a279e1210a8b4423eec60a50a642

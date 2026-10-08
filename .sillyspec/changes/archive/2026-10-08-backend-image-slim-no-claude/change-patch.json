@@ -1,0 +1,86 @@
+{
+  "change": "2026-10-08-backend-image-slim-no-claude",
+  "baseline": "706ea3b1aaab5e58abebf85a5bb137e179eac268",
+  "head": "55ea8ab01ec9a279e1210a8b4423eec60a50a642",
+  "files": [
+    ".zcode/skills/sillyhub-docker-deploy/SKILL.md",
+    "backend/Dockerfile",
+    "backend/app/core/config.py",
+    "backend/docker-entrypoint.sh",
+    "deploy/.env.example",
+    "deploy/docker-compose.yml",
+    "deploy/scripts/build-and-save.sh",
+    ".sillyspec/changes/2026-10-08-backend-image-slim-no-claude/design.md",
+    ".sillyspec/changes/2026-10-08-backend-image-slim-no-claude/proposal.md",
+    ".sillyspec/changes/2026-10-08-backend-image-slim-no-claude/requirements.md",
+    ".sillyspec/changes/2026-10-08-backend-image-slim-no-claude/review.json.superseded-20261008T032126",
+    ".sillyspec/changes/2026-10-08-backend-image-slim-no-claude/tasks.md"
+  ],
+  "totals": {
+    "files": 12,
+    "additions": 244,
+    "deletions": 182
+  },
+  "savedAt": "2026-10-08T03:21:34.524Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/backend/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "build",
+      "files": 1,
+      "doc": "docs/backend/modules/build.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "deploy",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "build",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/build.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [
+    {
+      "dir": ".zcode/skills/sillyhub-docker-deploy",
+      "files": 1
+    }
+  ],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "patchSha256": "ac9354045d2654685831e8fa2b7b6473514ebcb70b3e604794c236f3524c99c5",
+  "patchStatus": "ok"
+}
