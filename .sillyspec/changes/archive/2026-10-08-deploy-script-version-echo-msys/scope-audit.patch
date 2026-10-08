@@ -1,0 +1,141 @@
+diff --git a/deploy/scripts/build-and-save.sh b/deploy/scripts/build-and-save.sh
+index 78ee7e6c6..fe374ff0c 100644
+--- a/deploy/scripts/build-and-save.sh
++++ b/deploy/scripts/build-and-save.sh
+@@ -57,7 +57,8 @@ docker save multi-agent-platform-backend:latest multi-agent-platform-frontend:la
+ echo "    产出: $OUT ($(du -h "$OUT" | cut -f1))"
+ # 2026-10-08-backend-image-slim-no-claude：容器内已无 sillyspec 可执行，版本回显改读
+ # 构建期焙入的 /app/sillyspec-package.json（node-tools 阶段 npm 实际装到的版本）。
+-echo "    镜像内 sillyspec 版本: $(docker run --rm --entrypoint grep multi-agent-platform-backend:latest -o '\"version\": \"[^\"]*\"' /app/sillyspec-package.json | head -1 | cut -d'\"' -f4 || echo 查询失败)"
++# 注意必须经 sh -c 间接传路径——Git Bash/MSYS 会把裸 /app/... 参数改写成 Windows 路径。
++echo "    镜像内 sillyspec 版本: $(docker run --rm --entrypoint sh multi-agent-platform-backend:latest -c 'grep -m1 -o "\"version\"[: ]*\"[^\"]*\"" /app/sillyspec-package.json | cut -d"\"" -f4' 2>/dev/null || echo 查询失败)"
+ echo ""
+ echo "    镜像 COMMIT_SHA=$COMMIT_SHA（health 端点将回显此值；运行时不再空覆盖）"
+ echo ""
+diff --git a/.sillyspec/changes/2026-10-08-deploy-script-version-echo-msys/design.md b/.sillyspec/changes/2026-10-08-deploy-script-version-echo-msys/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-deploy-script-version-echo-msys/design.md
+@@ -0,0 +1,41 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:29:51.019Z
++---
++# 设计记录（Design Record）— 2026-10-08-deploy-script-version-echo-msys
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++build-and-save.sh 的版本回显用 `docker run --entrypoint grep … /app/sillyspec-package.json` 直传路径参数，Git Bash/MSYS 把裸 /app/... 改写成 C:/Program Files/Git/app/... 导致查询失败。改为 `--entrypoint sh … -c '…'` 把路径包进引号字符串内（MSYS 只改写以 / 开头的参数本身），grep 模式放宽 `"version"[: ]*"` 兼容两种 JSON 排版。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无接口变化；仅打包脚本一行回显命令的传参形态（行为：Git Bash 下从「查询失败」变为正确输出版本号；Linux/macOS 不受影响）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立——脚本单线程顺序执行，回显是最后一步（失败已被 || 兜底不中断）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   共享仓并行会话存在，提交用显式 pathspec（仅 deploy/scripts/build-and-save.sh）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   回显失败有 || echo 兜底，不影响 tar 产物与退出码（已实证：上一次打包查询失败但 exit 0、tar 完好并成功部署）。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   只改本地打包脚本一行，无跨仓影响。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++风险极低（一行 shell）；放弃方案：MSYS_NO_PATHCONV=1 前缀——放弃理由：需按平台条件设置，比 sh -c 包裹更绕且仅 Git Bash 语义。
+
+diff --git a/.sillyspec/changes/2026-10-08-deploy-script-version-echo-msys/proposal.md b/.sillyspec/changes/2026-10-08-deploy-script-version-echo-msys/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-deploy-script-version-echo-msys/proposal.md
+@@ -0,0 +1,23 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:29:51.019Z
++---
++# 提案书（Proposal）— 2026-10-08-deploy-script-version-echo-msys
++
++## 动机
++
++任务原话转写：build-and-save.sh 版本回显在 Git Bash 下查询失败——docker run 裸 /app/... 路径参数被 MSYS 改写成 Windows 路径（C:/Program Files/Git/app/...），改经 sh -c 间接传路径并兼容 version 冒号后无空格形态
++成功标准：
++- 回显命令经 sh -c 传路径（MSYS 安全），grep 模式兼容 "version": 与 "version":两种形态
++- 本地实跑 docker run 回显 3.32.1 成功
++
++## 变更范围
++
++按成功标准机械推导，共 2 条验收面：
++1. 回显命令经 sh -c 传路径（MSYS 安全），grep 模式兼容 "version": 与 "version":两种形态
++2. 本地实跑 docker run 回显 3.32.1 成功
++
++## 成功标准（可验证）
++
++1. 回显命令经 sh -c 传路径（MSYS 安全），grep 模式兼容 "version": 与 "version":两种形态
++2. 本地实跑 docker run 回显 3.32.1 成功
+
+diff --git a/.sillyspec/changes/2026-10-08-deploy-script-version-echo-msys/requirements.md b/.sillyspec/changes/2026-10-08-deploy-script-version-echo-msys/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-deploy-script-version-echo-msys/requirements.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:29:51.019Z
++---
++# 需求规格（Requirements）— 2026-10-08-deploy-script-version-echo-msys
++
++## 功能需求
++
++### FR-01: 回显命令经 sh -c 传路径（MSYS 安全），grep 模式兼容 "version": 与 "version":两种形态
++
++- 必须：回显经 docker run --entrypoint sh … -c 间接传路径（裸 /app/... 参数在 Git Bash/MSYS 下会被改写为 Windows 路径导致 cat/grep 找不到文件）；grep 模式 `"version"[: ]*"[^"]*"` 兼容冒号后有/无空格。
++
++#### 场景：主路径
++
++- Given 焙入的 /app/sillyspec-package.json
++- When Git Bash 打包跑到版本回显行
++- Then 输出「镜像内 sillyspec 版本: 3.32.1」而非「查询失败」
++
++### FR-02: 本地实跑 docker run 回显 3.32.1 成功
++
++- 必须：回显经 docker run --entrypoint sh … -c 间接传路径（裸 /app/... 参数在 Git Bash/MSYS 下会被改写为 Windows 路径导致 cat/grep 找不到文件）；grep 模式 `"version"[: ]*"[^"]*"` 兼容冒号后有/无空格。
++
++#### 场景：主路径
++
++- Given 焙入的 /app/sillyspec-package.json
++- When Git Bash 打包跑到版本回显行
++- Then 输出「镜像内 sillyspec 版本: 3.32.1」而非「查询失败」
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: 不适用：构建脚本一行传参形态修复，验收以 bash -n + 本地 docker run 实跑回显为准
++FR-02: 不适用：同上，本地实跑回显 3.32.1 即验收
+
+diff --git a/.sillyspec/changes/2026-10-08-deploy-script-version-echo-msys/tasks.md b/.sillyspec/changes/2026-10-08-deploy-script-version-echo-msys/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-deploy-script-version-echo-msys/tasks.md
+@@ -0,0 +1,8 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:29:51.019Z
++---
++# 任务注册表（Tasks）— 2026-10-08-deploy-script-version-echo-msys
++
++- [x] task-01: 回显命令经 sh -c 传路径（MSYS 安全），grep 模式兼容 "version": 与 "version":两种形态
++- [x] task-02: 本地实跑 docker run 回显 3.32.1 成功

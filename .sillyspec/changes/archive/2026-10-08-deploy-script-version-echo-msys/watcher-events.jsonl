@@ -1,0 +1,11 @@
+{"ts":1791430194269,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1791430207567,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791430214362,"kind":"commit","stage":null,"detail":"dd5599d26","provisional":true}
+{"ts":1791430224340,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791430229566,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791430229876,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791430231003,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791430231003,"kind":"task-done","stage":"tasks","detail":"checked 0→2","provisional":true}
+{"ts":1791430231003,"kind":"commit","stage":null,"detail":"9d2702ffe","provisional":true}
+{"ts":1791430244515,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791430244515,"kind":"commit","stage":null,"detail":"45240ef8b","provisional":true}

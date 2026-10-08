@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-deploy-script-version-echo-msys",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "9d2702ffe7792c8eb8f80479e756d3cec1b60d96",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "「查询失败」兜底仅覆盖 docker run 层失败，容器内文件缺失时回显空串而非失败提示（既有行为沿用，非本次回归）",
+      "evidence": "sh -c 内管道以 cut 收尾，/app/sillyspec-package.json 缺失或 grep 无匹配时管道退出码仍为 0，|| echo 查询失败不触发，输出为「镜像内 sillyspec 版本: 」空值；仅 docker run 自身失败（如镜像不存在）才回显「查询失败」。修复前实现（管道同样以 cut 结尾）行为相同，故非本次引入，且 FR 验收面（Git Bash 实跑回显 3.32.1）不受影响，不阻塞。",
+      "location": "deploy/scripts/build-and-save.sh:61"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-08T11:32:08+08:00"
+}

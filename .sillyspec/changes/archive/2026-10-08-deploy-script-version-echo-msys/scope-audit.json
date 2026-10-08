@@ -1,0 +1,27 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "9b92d8182d134e883b4820fcc7dd4c7723628e14",
+  "totals": {
+    "files": 1,
+    "additions": 2,
+    "deletions": 1
+  },
+  "rows": [
+    {
+      "path": "deploy/scripts/build-and-save.sh",
+      "additions": 2,
+      "deletions": 1,
+      "kind": "modified"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "02d367eef231baffff202329d695ec3b75bbe64d3ef5acc9c20a7792efd29e95",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T03:30:43.784Z"
+}
