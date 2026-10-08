@@ -1,0 +1,29 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "9ddbd32eb24c2ab730e5f07bc4ec26ca0d8fb144",
+  "totals": {
+    "files": 1,
+    "additions": 5625,
+    "deletions": 1591
+  },
+  "rows": [
+    {
+      "path": "sillyhub-daemon/src/api-types.ts",
+      "additions": 5625,
+      "deletions": 1591,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "55ddfde4916b429d2bab13801f3db712066a6237866a1a876bf7cda01edfffa2",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T17:55:09.265Z"
+}
