@@ -1,0 +1,34 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  backend 镜像 Node 20 跑不了 sillyspec 3.32.0——node:sqlite 内置模块需 Node >=22.13（CLI engines 硬要求），容器内任何 sillyspec
+  命令直接崩，平台技能包（3.32.0 含 flow 协议）与容器 CLI 不配套；把 backend/Dockerfile 的 NODE_VERSION 从 20 升到 22
+
+  成功标准：
+
+  - backend/Dockerfile NODE_VERSION=22，构建注释说明 sillyspec >=3.30 对 node:sqlite 的依赖
+
+  - 重建后容器内 sillyspec --version 为 3.32.0 且 flow 子命令不再报 node:sqlite 崩溃
+
+  - 容器内 /app/sillyspec-skills 仍为 21 个技能、/api/health ok
+
+  - 不改 apt 包集合与其它层语义
+autopilot: true
+baseline_commit: 724a25b282dc1c6d85d26da1eb7f8b772a30ae47
+updatedAt: '2026-10-08T02:25:47.788Z'
+baseline_sha256: bb864ad7bb9b72f0574ad17981c111818879211bf4f34676741a9bf70e819955
+autopilot_ticked: 4
+gate_summary: 'test: —｜lint: —｜门文件 1 个'
+

@@ -1,0 +1,208 @@
+diff --git a/.sillyspec/docs/frontend/modules/lib-menu-permissions.md b/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
+index 724f3dd10..9890e9dd0 100644
+--- a/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
++++ b/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
+@@ -22,12 +22,14 @@ created_at: 2026-08-18 01:45:00
+ 
+ 各 section 构成：
+ - **workspace**（8 项）：工作区首页（/workspaces，absolute）、组件、拓扑、变更中心、扫描文档、运行时、知识库、发布。
+-  - 子菜单均有独立 read 权限（component:read / topology:read / scan-docs:read / knowledge:read 等），不共用 workspace:read。
++  - 子菜单均有独立 read 权限（component:read / topology:read / scan-docs:read / knowledge:read 等），不共用 workspace:read 作兜底；但卡片可含页面实际所需的其他 key（2026-10-08-page-audit：components 卡含 workspace:read——列表端点鉴权所需；changes 卡含 task:read——变更任务子页所需；knowledge 卡含 knowledge:write——写按钮所需）。
+ - **agent**（4 项）：技能管理（/settings/skills）、MCP 资产库（/settings/mcp）、智能体档案（/agent-profiles）、智能体会话（/sessions），全 absolute。
+   - 四菜单 2026-09-18-web-menu-management 起各挂独立 read 权限（skill:read / mcp:read / agent_profile:read / agent_session:read），进角色勾选器。
+   - 智能体会话 2026-10-08-sessions-menu-permissions 起补齐会话页实际权限共 4 项：agent_session:read（门控主 key）+ task:run_agent（全部 /api/daemon/sessions* 端点）+ daemon:borrow（借用会话）+ runtime:admin（机器下拉 /api/daemon/machines）——多权限菜单任一命中即可见，跨菜单重复挂载（runtime:admin 同挂 config 守护进程运行时）有 change:approve 双卡先例。
++  - MCP 资产库 2026-10-08-page-audit 起补 settings:admin（平台库写端点 mcp_registry settings_admin_check；读与我的库任意登录用户可用）。
+ - **config**（4 项）：我的供应商（llm_provider:read，sidebar-menu-restructure 新增）、API 密钥（api_key:admin）、Git 身份（git_identity:admin）、守护进程运行时（runtime:admin，自 system 移入，D-006）。
+-- **governance**（3 项）：审批中心（task:approve / change:approve）、审计中心（platform:audit:read）、事件（incident:read）。
++- **governance**（3 项）：审批中心（task:approve / change:approve / task:read / task:run_agent）、审计中心（platform:audit:read / change:read）、事件（incident:read / deploy:staging）。
++  - 2026-10-08-page-audit：审批中心补 task:read（agent-sessions / dialogs 列表端点）+ task:run_agent（会话权限面板 daemon 端点族）；审计中心补 change:read（工作区审计日志端点 CHANGE_READ；platform:audit:read 零端点消费保留存量）；事件补 deploy:staging（上报端点鉴权）。
+ - **system**（5 项）：用户、组织、角色（/admin/*）、设置（settings:admin）、菜单管理（/admin/menus，menu:admin，2026-09-18 新增）。
+ - **ppm**（14 项）：全部 absolute 指向 /ppm/*，每菜单独立专属 key（ppm:workbench:view / ppm:project:read / ppm:kanban:view / ppm:weekly-plan:view 等）。
+   - 项目成员、里程碑明细带 navHidden（二级页面，由父页跳转进入）。
+@@ -49,9 +51,10 @@ created_at: 2026-08-18 01:45:00
+ ## 注意事项
+ - `icon` 字段经排查（sidebar-menu-restructure task-04）在 app-shell/picker/permission 均无消费者，新增菜单可填占位 emoji。
+ - 写错权限 key = 该菜单永远不可见；改菜单结构需同步 `lib-permission` 判定、app-shell 渲染（MENU_ICON_MAP 按 href）、页面路由三处。
+-- 菜单 permissions 数组同时服务两个消费面：canSeeMenu 可见性（任一命中）与 AdminRolePermissionPicker 可配面——往菜单补权限会同步放宽可见性，页面实际依赖的权限应挂全（否则勾选器配不了，如 sessions 补齐前的 task:run_agent）。
++- 菜单 permissions 数组同时服务两个消费面：canSeeMenu 可见性（任一命中）与 AdminRolePermissionPicker 可配面——往菜单补权限会同步放宽可见性，页面实际依赖的权限应挂全（否则勾选器配不了，如 sessions 补齐前的 task:run_agent；2026-10-08-page-audit 批量修了 components/changes/knowledge/mcp/approvals/audit/incidents 七处同类缺口）。
+ - 测试镜像常量 `BACKEND_PERMISSION_KEYS`（menu-permissions.test.ts）须与后端枚举逐项同步（现 72 项），后端扩删权限时两处一起改。
+ - 管理类菜单多为单一 admin 权限（api_key:admin / git_identity:admin / runtime:admin / settings:admin），平台超管自动通过。
++- 零端点消费的悬空 key（component:read / platform:audit:read / task:approve、code:* / tool:* / task:cancel 等）保留在卡上或目录中属已知债——清理需独立变更评审（涉及存量角色可见性与可配性）；PPM 的 ppm:plan:read / ppm:problem:read / ppm:task:read / ppm:problem-change:read 为 D-002 决策故意悬空。
+ 
+ ## 人工备注
+ 
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index 66bd93835..c91ddc5cc 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -3,7 +3,10 @@
+ # Stage 2: copy the venv + source into a slim runtime.
+ 
+ ARG PYTHON_VERSION=3.12
+-ARG NODE_VERSION=20
++# 2026-10-08（thin 2026-10-08-backend-node22-for-sillyspec332）：20 → 22——sillyspec >=3.30
++# 用 node:sqlite 内置模块（engines 硬要求 Node >=22.13），Node 20 下容器内任何
++# sillyspec 命令直接 ERR_UNKNOWN_BUILTIN_MODULE 崩溃，与镜像内 3.32.0 技能包不配套。
++ARG NODE_VERSION=22
+ ARG CLAUDE_CODE_VERSION=2.1.158
+ # 空 → npm install -g sillyspec 取最新；填值 → pin 到该版本（compose build arg 可覆盖）。
+ ARG SILLYSPEC_VERSION=""
+diff --git a/.sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/design.md b/.sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:18:03.314Z
++---
++# 设计记录（Design Record）— 2026-10-08-backend-node22-for-sillyspec332
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++backend 镜像 node-tools stage 用 `node:${NODE_VERSION}-slim`，原 NODE_VERSION=20；sillyspec 3.32.0（engines 要求 Node >=22.13.0）用 `node:sqlite` 内置模块存进度库，Node 20 下容器内任何 sillyspec 命令直接 `ERR_UNKNOWN_BUILTIN_MODULE` 崩溃——平台技能包已刷到 3.32.0（含 flow 协议），容器 CLI 必须同版才能配套。
++
++方案：`backend/Dockerfile` 一行 `ARG NODE_VERSION=20 → 22`（node:22-slim LTS，当前 22.x ≥ 22.13 满足 engines），附注释说明依赖缘由。node-tools stage 换 base 全量重建（npm 装 claude-code+sillyspec）；runtime stage 本变更不动任何 ARG 值（SILLYSPEC_VERSION 已在 deploy/.env pin 3.32.0），apt 层缓存命中不重跑。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无 Python/TS 代码接口变化。可见变化仅容器运行时：`node --version` 20→22（npm/claude/sillyspec 二进制同批换新），容器内 `sillyspec` 命令从「启动即崩」变为可用（3.32.0，含 flow 子命令）。apt 包集合、venv、daemon 分发物、skills COPY 语义零变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立——镜像构建是确定性单线程产物，Node 22 对既有 node 代码向后兼容（claude-code 2.1.158 engines >=18；daemon bundle 纯 JS 无 native 依赖）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   构建期无共享写面；runtime 期容器单实例。变更时 `git status` 已知外来 menu-permissions 脏文件，提交用显式 pathspec（backend/Dockerfile）隔离。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   容器重建时在途会话由平台自身生命周期管理（与历次 backend 重建一致）；sillyspec 进度库在 worktree/宿主侧不在容器内，重建无状态损失。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   只影响本仓 backend 镜像；宿主 daemon 与远程部署是独立 CLI 安装面，不受容器内 Node 版本影响。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：node:22-slim 与既有层交互（如 npm 路径结构变化致 ln -sf 失效）——node 官方镜像 npm-cli.js 路径多年稳定，构建本身即验证（失败即暴露，本次实跑通过）。放弃方案：①回退 SILLYSPEC_VERSION pin 到 3.29.x（Node 20 可跑）——放弃理由：技能包已 3.32.0，CLI 落后会再次制造本次要修的「指引与技能不配套」，且 node:sqlite 是 DB 引擎长期依赖，绕不过；②容器内热修 npm install（不进镜像）——放弃理由：容器重建即丢，违反镜像即真相。
+
+diff --git a/.sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/proposal.md b/.sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:18:03.314Z
++---
++# 提案书（Proposal）— 2026-10-08-backend-node22-for-sillyspec332
++
++## 动机
++
++任务原话转写：backend 镜像 Node 20 跑不了 sillyspec 3.32.0——node:sqlite 内置模块需 Node >=22.13（CLI engines 硬要求），容器内任何 sillyspec 命令直接崩，平台技能包（3.32.0 含 flow 协议）与容器 CLI 不配套；把 backend/Dockerfile 的 NODE_VERSION 从 20 升到 22
++成功标准：
++- backend/Dockerfile NODE_VERSION=22，构建注释说明 sillyspec >=3.30 对 node:sqlite 的依赖
++- 重建后容器内 sillyspec --version 为 3.32.0 且 flow 子命令不再报 node:sqlite 崩溃
++- 容器内 /app/sillyspec-skills 仍为 21 个技能、/api/health ok
++- 不改 apt 包集合与其它层语义
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. backend/Dockerfile NODE_VERSION=22，构建注释说明 sillyspec >=3.30 对 node:sqlite 的依赖
++2. 重建后容器内 sillyspec --version 为 3.32.0 且 flow 子命令不再报 node:sqlite 崩溃
++3. 容器内 /app/sillyspec-skills 仍为 21 个技能、/api/health ok
++4. 不改 apt 包集合与其它层语义
++
++## 成功标准（可验证）
++
++1. backend/Dockerfile NODE_VERSION=22，构建注释说明 sillyspec >=3.30 对 node:sqlite 的依赖
++2. 重建后容器内 sillyspec --version 为 3.32.0 且 flow 子命令不再报 node:sqlite 崩溃
++3. 容器内 /app/sillyspec-skills 仍为 21 个技能、/api/health ok
++4. 不改 apt 包集合与其它层语义
+
+diff --git a/.sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/requirements.md b/.sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/requirements.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:18:03.314Z
++---
++# 需求规格（Requirements）— 2026-10-08-backend-node22-for-sillyspec332
++
++## 功能需求
++
++### FR-01: backend/Dockerfile NODE_VERSION=22，构建注释说明 sillyspec >=3.30 对 node:sqlite 的依赖
++
++- 必须：`backend/Dockerfile` 中 `ARG NODE_VERSION` 默认值为 22，且注释含缘由（sillyspec >=3.30 依赖 node:sqlite、engines 要求 Node >=22.13、Node 20 崩溃现象）。
++
++#### 场景：主路径
++
++- Given Dockerfile 原 `ARG NODE_VERSION=20`
++- When 改为 22 并附缘由注释
++- Then `grep "ARG NODE_VERSION=22" backend/Dockerfile` 命中且其上方注释含 node:sqlite 说明
++
++### FR-02: 重建后容器内 sillyspec --version 为 3.32.0 且 flow 子命令不再报 node:sqlite 崩溃
++
++- 必须：重建 backend 镜像并 --force-recreate 后，容器内 `sillyspec --version` 输出 3.32.0，`sillyspec flow`（或任一需读库的子命令）不再出现 `No such built-in module: node:sqlite`。
++
++#### 场景：主路径
++
++- Given Node 20 镜像内 sillyspec 3.32.0 启动即崩
++- When 换 node:22-slim 重建
++- Then `sillyspec --version`=3.32.0 且 flow 子命令正常输出（无 ERR_UNKNOWN_BUILTIN_MODULE）
++
++### FR-03: 容器内 /app/sillyspec-skills 仍为 21 个技能、/api/health ok
++
++- 必须：重建后 `ls /app/sillyspec-skills | grep -c '^sillyspec-'` 为 21（含 sillyspec-flow），`/api/health` 返回 status ok。
++
++#### 场景：主路径
++
++- Given 上一变更已把技能刷到 21 个
++- When 本变更重建镜像
++- Then 技能面不受影响（21 个），服务健康
++
++### FR-04: 不改 apt 包集合与其它层语义
++
++- 禁止：本变更 diff 不得触及 apt 换源/包集合（Dockerfile 78-83 行语义）、venv 构建、daemon 分发 COPY、skills COPY；仅 NODE_VERSION 行及其注释允许变化。
++
++#### 场景：主路径
++
++- Given 上一提交刚稳定 apt 源（sjtu https）
++- When 本变更 diff 审查
++- Then 仅 NODE_VERSION 常量与注释变化，其余层零 diff
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: 不适用：Dockerfile 常量改动无单测面，验收以 grep + diff 范围审查为准（design FR-04 场景）
++FR-02: 不适用：容器运行时行为，验收以重建后容器内实跑命令为准（成功标准即命令输出）
++FR-03: 不适用：容器运行时清点，验收以容器内 ls 计数 + /api/health 实跑为准
++FR-04: 不适用：diff 范围约束，验收以 git diff 逐行审查为准
+
+diff --git a/.sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/tasks.md b/.sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:18:03.314Z
++---
++# 任务注册表（Tasks）— 2026-10-08-backend-node22-for-sillyspec332
++
++- [x] task-01: backend/Dockerfile NODE_VERSION=22，构建注释说明 sillyspec >=3.30 对 node:sqlite 的依赖
++- [x] task-02: 重建后容器内 sillyspec --version 为 3.32.0 且 flow 子命令不再报 node:sqlite 崩溃
++- [x] task-03: 容器内 /app/sillyspec-skills 仍为 21 个技能、/api/health ok
++- [x] task-04: 不改 apt 包集合与其它层语义

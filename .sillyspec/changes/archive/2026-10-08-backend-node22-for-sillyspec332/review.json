@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-backend-node22-for-sillyspec332",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "f7eeb237e90fa48bd4da92409503176dd6ef99a4",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "冻结件 change.patch 范围大于交付提交，含外来变更 diff（已披露，非未披露越界）",
+      "evidence": "change.patch 除 backend/Dockerfile 外还包含 .sillyspec/docs/frontend/modules/lib-menu-permissions.md 的外来 diff（属并行变更 2026-10-08-page-audit / sessions-menu-permissions）及本变更四件套新增文件；实际交付提交 f7eeb237e 经 git show --stat 核实仅 backend/Dockerfile（+4/-1），与 design 盲维2「外来 menu-permissions 脏文件、提交用显式 pathspec 隔离」的披露一致，隔离已生效。留痕提示：patch 冻结件语义为「冻结时工作区全量 diff」，读档时勿据 patch 推断提交范围。",
+      "location": ".sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/change.patch:1-33"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-08T02:24:49Z",
+  "checklistDetail": {
+    "frConsistency": {
+      "FR-01": "一致：git show f7eeb237e -- backend/Dockerfile 唯一 hunk @@ -3,7 +3,10 @@，-ARG NODE_VERSION=20 替换为 3 行缘由注释（含 node:sqlite、engines >=22.13、Node 20 崩溃现象）+ ARG NODE_VERSION=22；工作区该文件干净（status --porcelain 为空），HEAD 即交付态。",
+      "FR-02": "一致：评审人独立实测运行中容器 multi-agent-platform-backend-1——node --version=v22.23.3（≥22.13 满足 engines）、sillyspec --version=3.32.0 正常输出、node -e \"require('node:sqlite')\" 加载成功（仅 experimental warning），崩溃根因消除。",
+      "FR-03": "一致：容器内 ls /app/sillyspec-skills | grep -c '^sillyspec-' = 21；docker exec curl 127.0.0.1:8000/api/health 返回 status:ok / db:ok / redis:ok。",
+      "FR-04": "一致：提交 diff 仅触及 NODE_VERSION 行及其注释，apt 换源/包集合（现 Dockerfile 81-86 行，位于 python:3.12-slim runtime stage）、venv 构建、daemon 分发 COPY、skills COPY 零 diff。",
+      "testBindingNotApplicable": "属实：本仓库无 Dockerfile 常量单测面（pytest/vitest 均无法导入 Dockerfile）；FR-02/03 为容器运行时行为，验收即实跑命令，本次评审已独立复现实跑；FR-04 为 diff 范围约束，已用 git show 逐行复核。四条「不适用」均成立。"
+    },
+    "blindDimensions": "四问均与「镜像 base 升级」性质相符且机制真实：乱序=确定性单线程构建+Node 22 向后兼容（claude-code engines >=18、daemon 纯 JS）；并发=构建期无共享写面+外来脏文件经 pathspec 隔离（已核实提交仅含 Dockerfile）；切换=平台自身生命周期管理重建、sillyspec 进度库在宿主侧不在容器内；作用域=NODE_VERSION 唯一消费点是 node-tools stage FROM（Dockerfile:14），宿主/远程 CLI 安装面不受影响。",
+    "disclosedBoundaries": [
+      { "item": "放弃①回退 SILLYSPEC_VERSION pin 到 3.29.x", "ruling": "可接受", "reason": "技能包已刷 3.32.0，CLI 回退会复现「指引与技能不配套」，且 node:sqlite 是 sillyspec DB 引擎的长期依赖，绕不过；升 Node 是正向解。" },
+      { "item": "放弃②容器内热修 npm install（不进镜像）", "ruling": "可接受", "reason": "临时补丁重建即丢，违反镜像即真相；与仓库部署惯例一致。" },
+      { "item": "未声明边界", "ruling": "无声明边界", "reason": "排查潜在未披露风险均不成立：node-tools stage 无 apt 面（base 发行版漂移无影响面）、npm-cli.js 路径风险已在 design 声明且被成功构建证伪、deploy/.env 属 gitignored 本地配置（check-ignore 确认）且 compose 传参链完整（deploy/docker-compose.yml:80）。" }
+    ],
+    "guardClaims": {
+      "aptCacheHit": "与 diff/结构一致：apt 层位于 python:3.12-slim runtime stage（Dockerfile:81-86），不消费 NODE_VERSION，该 stage 前序层零变化，缓存键不变，命中不重跑成立。",
+      "buildAsVerification": "与实测一致：构建成功且容器运行（ln -sf 目标均可用——sillyspec/claude 二进制响应正常），FR-02/03 运行时验收由评审人独立复测通过。"
+    },
+    "generatedArtifacts": "确认无生成物需同步：变更仅触及 backend/Dockerfile，无 Python/TS 接口与 OpenAPI schema 变化，api-types.ts / openapi.json 不适用（CLAUDE.md 规则 21 触发条件不成立）。"
+  }
+}

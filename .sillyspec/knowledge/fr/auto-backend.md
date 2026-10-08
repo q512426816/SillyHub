@@ -29,3 +29,31 @@ created_at: 2026-10-08T01:35:36.843Z
 摘要：收口
 全文：.sillyspec/changes/archive/2026-10-08-backend-dockerfile-apt-mirror-sjtu/requirements.md#FR-03
 最近确认：d304aefe57ac5e79cc74c094f21d1760d3e5ac5f
+
+## FR-auto-backend-121 backend/Dockerfile NODE_VERSION=22，构建注释说明 sillyspec >=3.30 对 node:sqlite 的依赖
+变更：2026-10-08-backend-node22-for-sillyspec332
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-node22-for-sillyspec332/requirements.md#FR-01
+最近确认：f7eeb237e90fa48bd4da92409503176dd6ef99a4
+
+## FR-auto-backend-122 重建后容器内 sillyspec --version 为 3.32.0 且 flow 子命令不再报 node:sqlite 崩溃
+变更：2026-10-08-backend-node22-for-sillyspec332
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-node22-for-sillyspec332/requirements.md#FR-02
+最近确认：f7eeb237e90fa48bd4da92409503176dd6ef99a4
+
+## FR-auto-backend-123 容器内 /app/sillyspec-skills 仍为 21 个技能、/api/health ok
+变更：2026-10-08-backend-node22-for-sillyspec332
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-node22-for-sillyspec332/requirements.md#FR-03
+最近确认：f7eeb237e90fa48bd4da92409503176dd6ef99a4
+
+## FR-auto-backend-124 不改 apt 包集合与其它层语义
+变更：2026-10-08-backend-node22-for-sillyspec332
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-node22-for-sillyspec332/requirements.md#FR-04
+最近确认：f7eeb237e90fa48bd4da92409503176dd6ef99a4

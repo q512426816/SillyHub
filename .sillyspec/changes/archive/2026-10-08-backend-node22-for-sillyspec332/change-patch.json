@@ -1,0 +1,46 @@
+{
+  "change": "2026-10-08-backend-node22-for-sillyspec332",
+  "baseline": "724a25b282dc1c6d85d26da1eb7f8b772a30ae47",
+  "head": "f7eeb237e90fa48bd4da92409503176dd6ef99a4",
+  "files": [
+    ".sillyspec/docs/frontend/modules/lib-menu-permissions.md",
+    "backend/Dockerfile",
+    ".sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/design.md",
+    ".sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/proposal.md",
+    ".sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/requirements.md",
+    ".sillyspec/changes/2026-10-08-backend-node22-for-sillyspec332/tasks.md"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 146,
+    "deletions": 4
+  },
+  "savedAt": "2026-10-08T02:21:37.769Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "build",
+      "files": 1,
+      "doc": "docs/backend/modules/build.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "5682d5aa1c17dab0d9f3d74f028ca1766199c9cced44f0198ce1e45a09443680",
+  "patchStatus": "ok"
+}
