@@ -1,0 +1,53 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "2b4aa20d87b6cb462cd709ec2d6b461fb7ffdee4",
+  "totals": {
+    "files": 4,
+    "additions": 569,
+    "deletions": 32
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/agent/service.py",
+      "additions": 137,
+      "deletions": 21,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+      "additions": 34,
+      "deletions": 11,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/tests/modules/agent/test_stale_run_cleanup_liveness.py",
+      "additions": 154,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/tests/modules/daemon/test_close_interactive_run_retroactive.py",
+      "additions": 244,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "8962cc63b03068006a80375391cf6a29df1d8f3c5997cd918ac91c7de8557da7",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T04:26:00.633Z"
+}

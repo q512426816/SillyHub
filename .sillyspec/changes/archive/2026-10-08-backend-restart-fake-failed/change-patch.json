@@ -1,0 +1,72 @@
+{
+  "change": "2026-10-08-backend-restart-fake-failed",
+  "baseline": "2b4aa20d87b6cb462cd709ec2d6b461fb7ffdee4",
+  "head": "89a7e9a42c4d0438ccccf1c85a4297cf19d04226",
+  "files": [
+    ".sillyspec/changes/2026-10-08-backend-restart-fake-failed/design.md",
+    ".sillyspec/changes/2026-10-08-backend-restart-fake-failed/flow-state.yaml",
+    ".sillyspec/changes/2026-10-08-backend-restart-fake-failed/proposal.md",
+    ".sillyspec/changes/2026-10-08-backend-restart-fake-failed/requirements.md",
+    ".sillyspec/changes/2026-10-08-backend-restart-fake-failed/tasks.md",
+    "backend/app/modules/agent/service.py",
+    "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+    "backend/tests/modules/agent/test_stale_run_cleanup_liveness.py",
+    "backend/tests/modules/daemon/test_close_interactive_run_retroactive.py",
+    ".sillyspec/changes/2026-10-08-backend-restart-fake-failed/review.json"
+  ],
+  "totals": {
+    "files": 10,
+    "additions": 826,
+    "deletions": 32
+  },
+  "savedAt": "2026-10-08T04:26:00.633Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "patchSha256": "8962cc63b03068006a80375391cf6a29df1d8f3c5997cd918ac91c7de8557da7",
+  "patchStatus": "ok"
+}

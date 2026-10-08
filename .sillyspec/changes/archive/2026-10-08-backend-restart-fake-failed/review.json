@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-backend-restart-fake-failed",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "89a7e9a42c4d0438ccccf1c85a4297cf19d04226",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok——已修复（原 P2）：反序丢更新窗口（迟到成功结果先经 close_interactive_run 落 completed、清理快照盲写打回 failed）由写前守卫消除——FOR UPDATE 重读位于 restore/kill 两分支之前（service.py 清理循环体顶部），非 running 即记 stale_run_cleanup_skipped_concurrent_terminal 放弃。成功迟到回正/失败迟到拒收/日志迟到更活跃三个方向判断维持成立。",
+    "并发": "ok——已修复（原 P2）：populate_existing=True 刷新 identity map 防缓存快照属性 + with_for_update 行锁重读，与 close_interactive_run 的 FOR UPDATE 收口双向串行化——任意交错要么守卫见终态放弃、要么清理先落 failed+SRI 由 FR-02 回正，均收敛，设计「收敛」声明现已成立。close 路径行锁、复扫独立 session 声明继续属实。新增用例 test_cleanup_skips_run_closed_concurrently_after_snapshot（钩子模拟并发收口穿插，断言 completed 不被打回 failed）实跑通过：tests/modules/agent/test_stale_run_cleanup_liveness.py 4 passed。边界已裁决：可接受——SQLite 测试库写入串行、无死锁面。",
+    "切换": "ok——已修复（原 P3）：error_detail.reason 改为『no daemon activity within grace window (startup cleanup / deferred recheck)』、finished_by 改 stale_run_cleanup，复扫链场景文案不再误指后端重启。error_code 枚举名 SERVICE_RESTART_INTERRUPTED 保留是刻意取舍（FR-02 回正门的匹配键 + 前端映射依赖，改动即破坏回正路径），语义由 reason 补正——裁决可接受。既有裁决维持：复扫任务随进程消亡/启动幂等接管、_on_background_task_done 兜底在位、「测试直调 impl 不触发调度」披露边界维持可接受（建议后续补调度链用例）。",
+    "作用域": "ok——边界已裁决：可接受。活性检测按 run_id 查日志（ix_agent_run_logs_run_timestamp 索引在位）、回正按 run 行锁判定，不跨会话/工作区；多实例各自复扫叠加的竞态面随 P2 守卫一并消除。"
+  },
+  "reviewedAt": "2026-10-08T04:25:35Z"
+}

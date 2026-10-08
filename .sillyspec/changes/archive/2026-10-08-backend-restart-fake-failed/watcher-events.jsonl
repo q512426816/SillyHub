@@ -1,0 +1,19 @@
+{"ts":1791432196524,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791432225847,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791432239057,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791432721823,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791432721823,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1791432728658,"kind":"commit","stage":null,"detail":"9f1f974c4","provisional":true}
+{"ts":1791432732089,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791432732089,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true}
+{"ts":1791432741994,"kind":"commit","stage":null,"detail":"8cfc1f2e8","provisional":true}
+{"ts":1791432745420,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791432745420,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1791432752120,"kind":"commit","stage":null,"detail":"3f0a79a3a","provisional":true}
+{"ts":1791432778274,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791432784871,"kind":"commit","stage":null,"detail":"f2be2b63f","provisional":true}
+{"ts":1791432788529,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-08-backend-restart-fake-failed/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791432846467,"kind":"gate-run","stage":"verify","detail":"门实测 passed（60.4s） · 20261008041406","provisional":true}
+{"ts":1791433408536,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791433454026,"kind":"commit","stage":null,"detail":"89a7e9a42","provisional":true}
+{"ts":1791433454233,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-08-backend-restart-fake-failed/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}

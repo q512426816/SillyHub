@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-backend-restart-fake-failed",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-08-backend-restart-fake-failed:flow:测试绑定FR-01",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py「test_cleanup_skips_run_with_recent_daemon_activity」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-backend-restart-fake-failed"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-08-backend-restart-fake-failed:flow:测试绑定FR-01",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py「test_cleanup_fails_run_with_stale_activity」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-backend-restart-fake-failed"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-08-backend-restart-fake-failed:flow:测试绑定FR-01",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py「test_cleanup_fails_run_without_logs」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-backend-restart-fake-failed"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-08-backend-restart-fake-failed:flow:测试绑定FR-02",
+      "tests": [
+        "test/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py「test_late_success_result_rehabilates_service_restart_interrupted_run」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-backend-restart-fake-failed"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-08-backend-restart-fake-failed:flow:测试绑定FR-02",
+      "tests": [
+        "test/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py「test_other_terminal_results_stay_noop」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-backend-restart-fake-failed"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-08-backend-restart-fake-failed:flow:测试绑定FR-03",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py",
+        "test/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py「全文件用例集」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-backend-restart-fake-failed"
+    }
+  ]
+}

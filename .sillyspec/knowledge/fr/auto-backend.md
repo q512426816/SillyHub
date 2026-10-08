@@ -57,3 +57,60 @@ created_at: 2026-10-08T01:35:36.843Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-08-backend-node22-for-sillyspec332/requirements.md#FR-04
 最近确认：f7eeb237e90fa48bd4da92409503176dd6ef99a4
+
+## FR-auto-backend-125 后端重启清理时，近期仍有 daemon 上报的运行轮不再被判死，等真终态
+变更：2026-10-08-backend-restart-fake-failed
+状态：active
+摘要：近期有上报的运行轮不判死；上报停滞性超过宽限的轮照常清理；无日志行的运行轮照常清理
+全文：.sillyspec/changes/archive/2026-10-08-backend-restart-fake-failed/requirements.md#FR-01
+最近确认：89a7e9a42c4d0438ccccf1c85a4297cf19d04226
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-backend-restart-fake-failed:flow:测试绑定FR-01
+  tests: test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py「test_cleanup_fails_run_without_logs」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-backend-restart-fake-failed
+  status: active
+
+## FR-auto-backend-126 被误标 SERVICE_RESTART_INTERRUPTED 的轮收到 daemon 迟到的成功结果后能回正为 completed
+变更：2026-10-08-backend-restart-fake-failed
+状态：active
+摘要：误杀轮收到迟到成功结果回正；其余终态重复上报仍拒收
+全文：.sillyspec/changes/archive/2026-10-08-backend-restart-fake-failed/requirements.md#FR-02
+最近确认：89a7e9a42c4d0438ccccf1c85a4297cf19d04226
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-backend-restart-fake-failed:flow:测试绑定FR-02
+  tests: test/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py「test_other_terminal_results_stay_noop」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-backend-restart-fake-failed
+  status: active
+
+## FR-auto-backend-127 补充对应用例覆盖上述两条路径
+变更：2026-10-08-backend-restart-fake-failed
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-restart-fake-failed/requirements.md#FR-03
+最近确认：89a7e9a42c4d0438ccccf1c85a4297cf19d04226
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-backend-restart-fake-failed:flow:测试绑定FR-03
+  tests: test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py | test/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py「全文件用例集」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-backend-restart-fake-failed
+  status: active

@@ -1,0 +1,966 @@
+diff --git a/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/flow-state.yaml b/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/flow-state.yaml
+new file mode 100644
+index 000000000..25ac37ad7
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/flow-state.yaml
+@@ -0,0 +1,25 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  后端重启会把正在运行的轮误标为 SERVICE_RESTART_INTERRUPTED 失败（_cleanup_stale_runs_impl 只看数据库状态不探测 daemon 活性），且 daemon 迟到的成功结果被
++  interactive_run_close_already_terminal 拒收无法回正，UI 永远显示假失败。
++
++  成功标准：
++
++  - 后端重启清理时，近期仍有 daemon 上报的运行轮不再被判死，等真终态
++
++  - 被误标 SERVICE_RESTART_INTERRUPTED 的轮收到 daemon 迟到的成功结果后能回正为 completed
++
++  - 补充对应用例覆盖上述两条路径
++autopilot: false
++baseline_commit: 2b4aa20d87b6cb462cd709ec2d6b461fb7ffdee4
++updatedAt: '2026-10-08T04:04:04.859Z'
++baseline_sha256: a0f8f299cb2c4efeba6b07678b5266f9ff5ffefd9f34b9caca219666d41b674b
++spec_approved: true
++spec_approved_at: '2026-10-08T04:04:04.857Z'
++spec_approved_by: anon@DESKTOP-HJ0AM09
++
+diff --git a/backend/app/modules/agent/service.py b/backend/app/modules/agent/service.py
+index d2a859857..59af3c09a 100644
+--- a/backend/app/modules/agent/service.py
++++ b/backend/app/modules/agent/service.py
+@@ -8,11 +8,11 @@ import logging
+ import os
+ import uuid
+ from collections.abc import AsyncGenerator, Awaitable, Callable
+-from datetime import UTC, datetime
++from datetime import UTC, datetime, timedelta
+ from pathlib import Path
+ from typing import TYPE_CHECKING
+ 
+-from sqlalchemy import select
++from sqlalchemy import func, select
+ from sqlalchemy.ext.asyncio import AsyncSession
+ from sqlmodel import col
+ 
+@@ -1420,8 +1420,22 @@ class AgentService:
+ 
+         Called during service startup to mark any runs that were
+         running when the service restarted as failed.
++
++        2026-10-08-backend-restart-fake-failed / FR-01：清理后有跳过（仍有近期
++        活跃上报的 running 轮）时，fire 延迟复扫链兜底——daemon 真死时日志停止
++        老化，复扫在宽限期后判 failed，防永卡 running。
+         """
+-        return await _cleanup_stale_runs_impl(self._session)
++        cleaned = await _cleanup_stale_runs_impl(self._session)
++        if await _has_recently_active_running_runs(self._session):
++            task = asyncio.create_task(_recheck_stale_runs_loop())
++            # 对齐 _fire_background_task 模式：强引用防 GC + done 回调收异常。
++            AgentService._background_tasks.add(task)
++            task.add_done_callback(AgentService._on_background_task_done)
++            log.info(
++                "stale_run_recheck_scheduled",
++                grace_seconds=int(STALE_RUN_ACTIVE_GRACE.total_seconds()),
++            )
++        return cleaned
+ 
+     # ------------------------------------------------------------------
+     # Stage dispatch (change-level, not task-level)
+@@ -2393,6 +2407,12 @@ class AgentService:
+         await self._session.commit()
+ 
+ 
++# 2026-10-08-backend-restart-fake-failed / FR-01：启动清理的日志活性宽限窗——
++# run 最新 agent_run_logs.timestamp 距今 ≤ 此窗视为 daemon 仍在执行（部署重启
++# 期间 daemon 上报中断通常 <2 分钟，10 分钟留足余量），跳过判死等真终态。
++STALE_RUN_ACTIVE_GRACE = timedelta(minutes=10)
++
++
+ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
+     """Scan for stale running-state AgentRuns and mark them as failed.
+ 
+@@ -2400,6 +2420,13 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
+     but database records may still show status='running'.  This function
+     marks them as failed so they don't appear stuck forever.
+ 
++    2026-10-08-backend-restart-fake-failed / FR-01：判死前先做日志活性检
++    测——run 的 agent_run_logs 最新 timestamp 距今不超过宽限窗（该列口径=
++    后端收到 daemon 上报的时刻，即「daemon 还在报」的信号）说明 daemon 仍
++    在实际执行该轮（典型场景：部署重启后端容器，本机 daemon 并未中断），
++    此时跳过判死保持 running，等真终态；误杀兜底交给 cleanup_stale_runs
++    安排的延迟复扫（daemon 真死时日志停止老化，复扫再判 failed）。
++
+     Returns:
+         Number of stale runs cleaned up.
+     """
+@@ -2413,41 +2440,130 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
+     # ql-20260815-003：late import 防 agent ↔ daemon 循环依赖（daemon.service 引 agent 模型）。
+     from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
+ 
++    cleaned = 0
+     for run in stale_runs:
++        # 写前 FOR UPDATE 重读（评审 P2）：快照读与落库之间可能有并发收口——
++        # daemon 迟到成功结果经 close_interactive_run 行锁收口把 run 置
++        # completed，此处若按快照盲写会把它覆盖回 failed，复刻本变更要修的
++        # 永久假失败（复扫链每 10 分钟重跑本函数，窗口 recurring）。非
++        # running 即放弃（迟到结果已收口，等 FR-02/正常路径语义生效）。
++        # populate_existing：identity map 已缓存快照属性，强制从行重填才能
++        # 看见并发会话已提交的终态（对齐 _close_verify_and_load 行锁读语义）。
++        locked_run = (
++            await session.execute(
++                select(AgentRun)
++                .where(AgentRun.id == run.id)
++                .with_for_update()
++                .execution_options(populate_existing=True)
++            )
++        ).scalar_one_or_none()
++        if locked_run is None or locked_run.status != "running":
++            log.info(
++                "stale_run_cleanup_skipped_concurrent_terminal",
++                run_id=str(run.id),
++                current_status=None if locked_run is None else locked_run.status,
++            )
++            continue
+         # If metadata was already written (agent actually finished but commit
+         # was lost during restart), restore as completed instead of failed.
+-        if (run.num_turns or 0) > 0 and run.exit_code is not None and run.exit_code >= 0:
+-            run.status = "completed" if run.exit_code == 0 else "failed"
+-            run.finished_at = run.finished_at or now
++        if (
++            (locked_run.num_turns or 0) > 0
++            and locked_run.exit_code is not None
++            and locked_run.exit_code >= 0
++        ):
++            locked_run.status = "completed" if locked_run.exit_code == 0 else "failed"
++            locked_run.finished_at = locked_run.finished_at or now
+             log.info(
+                 "stale_run_restored_from_metadata",
+-                run_id=str(run.id),
+-                exit_code=run.exit_code,
++                run_id=str(locked_run.id),
++                exit_code=locked_run.exit_code,
+             )
+         else:
+-            run.status = "failed"
+-            run.finished_at = now
+-            run.exit_code = -1
+-            run.output_redacted = "Run interrupted: service restarted while agent was running."
++            last_log_at = (
++                await session.execute(
++                    select(func.max(AgentRunLog.timestamp)).where(
++                        AgentRunLog.run_id == locked_run.id
++                    )
++                )
++            ).scalar_one_or_none()
++            if last_log_at is not None:
++                # SQLite 测试库读回 naive datetime（生产 PG 为 aware）；该列值
++                # 一律来自 now(UTC) 写入，naive 视作 UTC 补齐后再比较。
++                if last_log_at.tzinfo is None:
++                    last_log_at = last_log_at.replace(tzinfo=UTC)
++                if now - last_log_at <= STALE_RUN_ACTIVE_GRACE:
++                    log.info(
++                        "stale_run_cleanup_deferred_active",
++                        run_id=str(locked_run.id),
++                        last_log_age_seconds=int((now - last_log_at).total_seconds()),
++                    )
++                    continue
++            locked_run.status = "failed"
++            locked_run.finished_at = now
++            locked_run.exit_code = -1
++            locked_run.output_redacted = (
++                "Run interrupted: service restarted while agent was running."
++            )
+             # 2026-09-15-background-task-permission-lockout（FR-04）：补结构化错误码——
+             # 线上实证重启终态化的 run 无 error_code/error_detail，出现「无声失败」
+             # 无从分辨（与模型/平台故障混同）。completed 恢复分支不写（run 实际
+-            # 已正常完成，重启只是丢 commit，非错误）。
+-            run.error_code = "SERVICE_RESTART_INTERRUPTED"
+-            run.error_detail = {
+-                "reason": "backend service restarted while run was active",
+-                "finished_by": "startup_cleanup",
++            # 已正常完成，重启只是丢 commit，非错误）。reason 兼顾复扫链场景
++            # （评审 P3）：清理不只发生在后端重启，延迟复扫发现 daemon 停止
++            # 上报同样走此分支，文案按实际成因（宽限窗内无上报）描述。
++            locked_run.error_code = "SERVICE_RESTART_INTERRUPTED"
++            locked_run.error_detail = {
++                "reason": "no daemon activity within grace window (startup cleanup / deferred recheck)",
++                "finished_by": "stale_run_cleanup",
+             }
+-            log.warning("stale_run_cleaned", run_id=str(run.id))
+-        session.add(run)
++            log.warning("stale_run_cleaned", run_id=str(locked_run.id))
++        session.add(locked_run)
+ 
+         # ql-20260815-003：run 终止后其 pending AskUserQuestion 卡成孤儿（agent
+         # 已不在等待答案），置 cancelled 防用户点出 no active run 报错。completed
+         # 恢复分支同样作废——dialog 未答说明 agent 实际没走完应答链路。
+-        await cancel_pending_dialogs_for_run(session, run.id)
++        await cancel_pending_dialogs_for_run(session, locked_run.id)
++        cleaned += 1
+ 
+     await session.commit()
+-    return len(stale_runs)
++    return cleaned
++
++
++async def _has_recently_active_running_runs(session: AsyncSession) -> bool:
++    """复查：是否仍有 running 轮在宽限窗内被 daemon 上报（日志 recency 判定）。"""
++    now = datetime.now(UTC)
++    run_ids = list(
++        (await session.execute(select(AgentRun.id).where(col(AgentRun.status) == "running")))
++        .scalars()
++        .all()
++    )
++    for run_id in run_ids:
++        last_log_at = (
++            await session.execute(
++                select(func.max(AgentRunLog.timestamp)).where(AgentRunLog.run_id == run_id)
++            )
++        ).scalar_one_or_none()
++        if last_log_at is None:
++            continue
++        if last_log_at.tzinfo is None:
++            last_log_at = last_log_at.replace(tzinfo=UTC)
++        if now - last_log_at <= STALE_RUN_ACTIVE_GRACE:
++            return True
++    return False
++
++
++async def _recheck_stale_runs_loop() -> None:
++    """延迟复扫链（FR-01 兜底）：睡满宽限窗重跑清理，直到无活跃上报的 running 轮。
++
++    启动清理跳过了近期活跃的轮——若 daemon 随后真死，日志停止老化，本循环在
++    下一次复扫把它们判 failed，防永卡 running；若轮正常收口或新轮持续活跃，
++    复扫自然跳过/续排。每轮自查自收敛：无活跃 running 轮即退出。
++    """
++    while True:
++        await asyncio.sleep(STALE_RUN_ACTIVE_GRACE.total_seconds())
++        async with get_session_factory()() as session:
++            await _cleanup_stale_runs_impl(session)
++            if not await _has_recently_active_running_runs(session):
++                return
+ 
+ 
+ def redact_agent_output(text: str) -> str:
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index 1e45cb1c4..251066dcb 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -72,17 +72,40 @@ async def close_interactive_run(
+     )
+     # Idempotent: already terminal → no-op return (daemon retry safety).
+     if agent_run.status in TERMINAL_TURN_STATUSES:
+-        _rsvc.log.info(
+-            "interactive_run_close_already_terminal",
+-            lease_id=str(lease_id),
+-            agent_run_id=str(agent_run.id),
+-            status=agent_run.status,
+-        )
+-        # 已持 FOR UPDATE 行锁：rollback 释放（无写入可回滚），refresh 重取
+-        # 属性供响应序列化读取（rollback 会过期 ORM 实例属性）。
+-        await svc._session.rollback()
+-        await svc._session.refresh(agent_run)
+-        return agent_run
++        # 2026-10-08-backend-restart-fake-failed / FR-02：重启误杀回正——启动
++        # 清理（_cleanup_stale_runs_impl）只看 DB 状态，会把仍在 daemon 上实际
++        # 执行的轮判成 failed + SERVICE_RESTART_INTERRUPTED；daemon 跑完后迟到
++        # 的成功结果原先被这里 no-op 拒收，UI 永远显示假失败（线上实证：会话
++        # 968e58be，2026-10-08 11:28 部署重启误杀、11:34 迟到成功被拒）。唯一
++        # 例外：误杀标记 + 本次上报成功 → 清掉误杀残留（error_code/error_detail/
++        # 兜底文案）后落入正常收口流程，回正 completed 并重发终态事件；其余终态
++        # 情形维持 no-op 拒收（幂等语义不变，失败/打断迟到不回正）。
++        if (
++            agent_run.status == "failed"
++            and agent_run.error_code == "SERVICE_RESTART_INTERRUPTED"
++            and status == "success"
++            and not is_error
++        ):
++            _rsvc.log.info(
++                "interactive_run_close_retroactive_success",
++                lease_id=str(lease_id),
++                agent_run_id=str(agent_run.id),
++            )
++            agent_run.error_code = None
++            agent_run.error_detail = None
++            agent_run.output_redacted = None
++        else:
++            _rsvc.log.info(
++                "interactive_run_close_already_terminal",
++                lease_id=str(lease_id),
++                agent_run_id=str(agent_run.id),
++                status=agent_run.status,
++            )
++            # 已持 FOR UPDATE 行锁：rollback 释放（无写入可回滚），refresh 重取
++            # 属性供响应序列化读取（rollback 会过期 ORM 实例属性）。
++            await svc._session.rollback()
++            await svc._session.refresh(agent_run)
++            return agent_run
+     now = datetime.now(UTC)
+     await _close_apply_terminal(
+         svc,
+diff --git a/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py b/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py
+new file mode 100644
+index 000000000..b3f3c258c
+--- /dev/null
++++ b/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py
+@@ -0,0 +1,154 @@
++"""2026-10-08-backend-restart-fake-failed / FR-01：启动清理的日志活性检测。
++
++线上实证（会话 968e58be，2026-10-08 11:28）：部署重启后端容器时
++``_cleanup_stale_runs_impl`` 只看 DB status='running'，把仍在 daemon 上实际
++执行的轮判成 failed + SERVICE_RESTART_INTERRUPTED；daemon 6 分钟后跑完的迟到
++成功结果又被终态守卫拒收，UI 永远假失败。
++
++本文件验证清理前的 recency 门（design §做法概述防线一）：
++- 近期（≤ STALE_RUN_ACTIVE_GRACE）有 daemon 上报的 running 轮 → 跳过判死保持
++  running，等真终态；
++- 上报停滞超宽限 / 无日志行的 running 轮 → 沿用既有判死（防永卡 running）。
++
++fixture 模式参考 ``backend/tests/modules/daemon/lease/test_complete_lease_stage_writeback.py``
++（real-DB + 直接构造模型行）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime, timedelta
++from unittest.mock import AsyncMock, patch
++
++import pytest
++from sqlalchemy import update
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentRunLog
++from app.modules.agent.service import STALE_RUN_ACTIVE_GRACE, _cleanup_stale_runs_impl
++
++
++def _make_running_run() -> AgentRun:
++    return AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="claude",
++        model="claude-sonnet-4",
++        status="running",
++        spec_strategy="interactive",
++    )
++
++
++async def _add_log(db_session: AsyncSession, run_id: uuid.UUID, age: timedelta) -> None:
++    db_session.add(
++        AgentRunLog(
++            run_id=run_id,
++            channel="stdout",
++            timestamp=datetime.now(UTC) - age,
++            content_redacted="[TOOL_USE] bash: echo hi",
++        )
++    )
++    await db_session.commit()
++
++
++@pytest.mark.asyncio
++async def test_cleanup_skips_run_with_recent_daemon_activity(
++    db_session: AsyncSession,
++) -> None:
++    """最新日志距今 3 分钟（daemon 仍在上报）→ 跳过判死，保持 running。"""
++    run = _make_running_run()
++    db_session.add(run)
++    await db_session.commit()
++    await _add_log(db_session, run.id, timedelta(minutes=3))
++
++    cleaned = await _cleanup_stale_runs_impl(db_session)
++
++    assert cleaned == 0
++    refreshed = await db_session.get(AgentRun, run.id)
++    assert refreshed is not None
++    assert refreshed.status == "running"
++    assert refreshed.error_code is None
++    assert refreshed.exit_code is None
++    assert refreshed.finished_at is None
++
++
++@pytest.mark.asyncio
++async def test_cleanup_fails_run_with_stale_activity(db_session: AsyncSession) -> None:
++    """最新日志距今超宽限窗（daemon 实际已死）→ 沿用既有判死。"""
++    run = _make_running_run()
++    db_session.add(run)
++    await db_session.commit()
++    await _add_log(db_session, run.id, STALE_RUN_ACTIVE_GRACE + timedelta(minutes=20))
++
++    cleaned = await _cleanup_stale_runs_impl(db_session)
++
++    assert cleaned == 1
++    refreshed = await db_session.get(AgentRun, run.id)
++    assert refreshed is not None
++    assert refreshed.status == "failed"
++    assert refreshed.error_code == "SERVICE_RESTART_INTERRUPTED"
++    assert refreshed.exit_code == -1
++    assert refreshed.finished_at is not None
++
++
++@pytest.mark.asyncio
++async def test_cleanup_fails_run_without_logs(db_session: AsyncSession) -> None:
++    """无任何日志行（活性检测无信号）→ 不得阻塞清理，沿用既有判死。"""
++    run = _make_running_run()
++    db_session.add(run)
++    await db_session.commit()
++
++    cleaned = await _cleanup_stale_runs_impl(db_session)
++
++    assert cleaned == 1
++    refreshed = await db_session.get(AgentRun, run.id)
++    assert refreshed is not None
++    assert refreshed.status == "failed"
++    assert refreshed.error_code == "SERVICE_RESTART_INTERRUPTED"
++
++
++@pytest.mark.asyncio
++async def test_cleanup_skips_run_closed_concurrently_after_snapshot(
++    db_session: AsyncSession,
++) -> None:
++    """评审 P2 守卫：快照后、写入前被并发收口置终态的轮不被覆盖回 failed。
++
++    模拟：处理 run_a 的收尾钩子（cancel_pending_dialogs_for_run）恰在 run_b
++    写入前把 run_b 置 completed——生产里对应 daemon 迟到成功结果经
++    close_interactive_run 行锁收口抢先落库。守卫（写前 FOR UPDATE 重读）
++    必须放弃 run_b，不盲写覆盖。
++    """
++    run_a = _make_running_run()
++    run_b = _make_running_run()
++    db_session.add_all([run_a, run_b])
++    await db_session.commit()
++    # 两轮日志均已停滞超宽限 → 快照判定都该清理
++    await _add_log(db_session, run_a.id, STALE_RUN_ACTIVE_GRACE + timedelta(minutes=20))
++    await _add_log(db_session, run_b.id, STALE_RUN_ACTIVE_GRACE + timedelta(minutes=20))
++
++    async def _close_run_b_mid_loop(session: AsyncSession, run_id: uuid.UUID) -> None:
++        if run_id == run_a.id:
++            await session.execute(
++                update(AgentRun)
++                .where(AgentRun.id == run_b.id)
++                .values(status="completed", exit_code=0)
++            )
++
++    with (
++        patch(
++            "app.modules.daemon.permission_service.cancel_pending_dialogs_for_run",
++            new=AsyncMock(side_effect=_close_run_b_mid_loop),
++        ),
++    ):
++        cleaned = await _cleanup_stale_runs_impl(db_session)
++
++    assert cleaned == 1
++    refreshed_a = await db_session.get(AgentRun, run_a.id)
++    refreshed_b = await db_session.get(AgentRun, run_b.id)
++    assert refreshed_a is not None
++    assert refreshed_a.status == "failed"
++    assert refreshed_a.error_code == "SERVICE_RESTART_INTERRUPTED"
++    # 并发收口的 completed 不被快照盲写覆盖回 failed
++    assert refreshed_b is not None
++    assert refreshed_b.status == "completed"
++    assert refreshed_b.error_code is None
+diff --git a/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py b/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py
+new file mode 100644
+index 000000000..f472c7395
+--- /dev/null
++++ b/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py
+@@ -0,0 +1,244 @@
++"""2026-10-08-backend-restart-fake-failed / FR-02：误杀轮迟到成功结果回正。
++
++线上实证（会话 968e58be）：启动清理把仍在 daemon 上执行的轮误标 failed +
++SERVICE_RESTART_INTERRUPTED 后，daemon 跑完 POST 成功结果被
++``close_interactive_run`` 终态守卫（interactive_run_close_already_terminal）
++no-op 拒收，UI 永远假失败。
++
++本文件验证终态守卫的唯一例外（design §做法概述防线二）：
++- failed + SERVICE_RESTART_INTERRUPTED + 迟到成功 → 清误杀残留后走正常收口，
++  回正 completed（终态事件重发，usage/summary 落库）；
++- 其余终态（completed、failed+interactive_failed）重复上报 → 维持 no-op 拒收，
++  不重复触发收口钩子（幂等回归保护）。
++
++fixture 模式参考 ``backend/tests/modules/daemon/lease/test_complete_lease_stage_writeback.py``
++（real-DB + facade mock 隔离跨子域回调）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from types import SimpleNamespace
++from unittest.mock import AsyncMock, MagicMock
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentSession
++from app.modules.auth.model import User
++from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
++from app.modules.daemon.run_sync.service.close_run_steps import close_interactive_run
++
++_CLAIM_TOKEN = "test-claim-token"
++
++
++async def _create_user(db_session: AsyncSession) -> uuid.UUID:
++    user = User(
++        id=uuid.uuid4(),
++        email=f"retro-{uuid.uuid4().hex[:6]}@example.com",
++        password_hash="x",
++        display_name="retro-test",
++        status="active",
++    )
++    db_session.add(user)
++    await db_session.commit()
++    return user.id
++
++
++async def _create_runtime(db_session: AsyncSession, user_id: uuid.UUID) -> DaemonRuntime:
++    runtime = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        name="retro-test-runtime",
++        provider="claude",
++        status="online",
++    )
++    db_session.add(runtime)
++    await db_session.commit()
++    return runtime
++
++
++async def _create_session_and_lease(
++    db_session: AsyncSession, runtime: DaemonRuntime
++) -> tuple[uuid.UUID, DaemonTaskLease]:
++    """多轮 interactive 会话 + 绑定该会话的 claimed lease（kind=interactive）。"""
++    session = AgentSession(
++        id=uuid.uuid4(),
++        user_id=runtime.user_id,
++        runtime_id=runtime.id,
++        provider="claude",
++        status="active",
++        origin="chat",
++    )
++    db_session.add(session)
++    await db_session.commit()
++
++    lease = DaemonTaskLease(
++        id=uuid.uuid4(),
++        runtime_id=runtime.id,
++        kind="interactive",
++        status="claimed",
++        metadata_={
++            "claim_token": _CLAIM_TOKEN,
++            "session_id": str(session.id),
++        },
++    )
++    db_session.add(lease)
++    await db_session.commit()
++    return session.id, lease
++
++
++def _make_svc(db_session: AsyncSession, session_id: uuid.UUID) -> MagicMock:
++    """最小 svc 面：lease 鉴权放行 + 跨子域回调（gate/群钩子/事件发布）隔离。
++
++    lease 鉴权 mock 返回轻量 stub（close 路径只读 metadata_）——no-op 分支的
++    rollback 会过期 session 里全部 ORM 实例，mock 若持有 ORM lease 行，第二次
++    调用读 metadata_ 会触发同步惰性加载（MissingGreenlet）。
++    """
++    lease_stub = SimpleNamespace(
++        metadata_={"claim_token": _CLAIM_TOKEN, "session_id": str(session_id)}
++    )
++    svc = MagicMock()
++    svc._session = db_session
++    svc._facade._get_lease_and_verify_token = AsyncMock(return_value=lease_stub)
++    svc._facade._publish_session_event = AsyncMock(return_value=None)
++    svc._gate_applicable = AsyncMock(return_value=False)
++    svc._is_gate_rejected_first_failure = AsyncMock(return_value=False)
++    svc._fire_background_task = MagicMock()
++    return svc
++
++
++async def _make_run(
++    db_session: AsyncSession,
++    *,
++    agent_session_id: uuid.UUID,
++    status: str,
++    error_code: str | None,
++) -> AgentRun:
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="claude",
++        model="claude-sonnet-4",
++        status=status,
++        spec_strategy="interactive",
++        agent_session_id=agent_session_id,
++        change_id=None,
++        error_code=error_code,
++        exit_code=-1 if status == "failed" else 0,
++        output_redacted="Run interrupted: service restarted while agent was running."
++        if status == "failed"
++        else None,
++    )
++    db_session.add(run)
++    await db_session.commit()
++    await db_session.refresh(run)
++    return run
++
++
++@pytest.mark.asyncio
++async def test_late_success_result_rehabilates_service_restart_interrupted_run(
++    db_session: AsyncSession,
++) -> None:
++    """误杀轮（failed+SERVICE_RESTART_INTERRUPTED）收到迟到成功结果 → 回正 completed。"""
++    user_id = await _create_user(db_session)
++    runtime = await _create_runtime(db_session, user_id)
++    session_id, lease = await _create_session_and_lease(db_session, runtime)
++    run = await _make_run(
++        db_session,
++        agent_session_id=session_id,
++        status="failed",
++        error_code="SERVICE_RESTART_INTERRUPTED",
++    )
++    svc = _make_svc(db_session, session_id)
++
++    result = await close_interactive_run(
++        svc,
++        lease_id=lease.id,
++        run_id=run.id,
++        claim_token=_CLAIM_TOKEN,
++        status="success",
++        is_error=False,
++        input_tokens=132772,
++        output_tokens=38259,
++        result_summary="修复完成：轮次导航指向标记已实现并通过测试",
++    )
++
++    assert result.status == "completed"
++    assert result.exit_code == 0
++    # 误杀残留全部清除
++    assert result.error_code is None
++    assert result.error_detail is None
++    assert "Run interrupted" not in (result.output_redacted or "")
++    # 迟到结果携带的 usage / 摘要正常落库
++    assert result.input_tokens == 132772
++    assert result.output_tokens == 38259
++    assert result.finished_at is not None
++    assert "轮次导航" in (result.output_redacted or "")
++    # 终态事件重发（前端轮徽标从失败收敛为完成）
++    svc._facade._publish_session_event.assert_awaited()
++
++    refreshed = await db_session.get(AgentRun, run.id)
++    assert refreshed is not None
++    assert refreshed.status == "completed"
++    assert refreshed.error_code is None
++
++
++@pytest.mark.asyncio
++async def test_other_terminal_results_stay_noop(db_session: AsyncSession) -> None:
++    """非误杀终态（completed / failed+interactive_failed）重复上报 → 维持拒收。"""
++    user_id = await _create_user(db_session)
++    runtime = await _create_runtime(db_session, user_id)
++    session_id, lease = await _create_session_and_lease(db_session, runtime)
++
++    completed_run = await _make_run(
++        db_session,
++        agent_session_id=session_id,
++        status="completed",
++        error_code=None,
++    )
++    genuinely_failed_run = await _make_run(
++        db_session,
++        agent_session_id=session_id,
++        status="failed",
++        error_code="interactive_failed",
++    )
++    svc = _make_svc(db_session, session_id)
++
++    # no-op 分支的 rollback 会过期 session 里全部 ORM 实例，循环内再取
++    # lease.id / run.id 会触发同步惰性加载（MissingGreenlet）——标量先提。
++    lease_id = lease.id
++    cases = [
++        (
++            completed_run.id,
++            completed_run.status,
++            completed_run.error_code,
++            completed_run.output_redacted,
++        ),
++        (
++            genuinely_failed_run.id,
++            genuinely_failed_run.status,
++            genuinely_failed_run.error_code,
++            genuinely_failed_run.output_redacted,
++        ),
++    ]
++    for run_id, expected_status, expected_error_code, summary_before in cases:
++        result = await close_interactive_run(
++            svc,
++            lease_id=lease_id,
++            run_id=run_id,
++            claim_token=_CLAIM_TOKEN,
++            status="success",
++            is_error=False,
++            input_tokens=1,
++            output_tokens=1,
++            result_summary="duplicate retry payload",
++        )
++        # no-op：终态与既有字段原样保留，不被重复上报改写
++        assert result.status == expected_status
++        assert result.error_code == expected_error_code
++        assert result.input_tokens != 1
++        assert result.output_redacted == summary_before
++
++    # no-op 路径不发任何会话事件（不重复触发前端收敛）
++    svc._facade._publish_session_event.assert_not_awaited()
+diff --git a/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/design.md b/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/design.md
+new file mode 100644
+index 000000000..542118189
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/design.md
+@@ -0,0 +1,98 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:57:52.316Z
++---
++# 设计记录（Design Record）— 2026-10-08-backend-restart-fake-failed
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++线上实证（会话 968e58be，2026-10-08 11:28）：部署重启后端容器时，启动清理
++`_cleanup_stale_runs_impl` 只看 DB `status='running'` 就把仍在 daemon 上实际执行的轮判成
++failed + SERVICE_RESTART_INTERRUPTED；daemon 6 分钟后跑完并 POST 成功结果，被
++`close_interactive_run` 的终态幂等守卫（`interactive_run_close_already_terminal`）no-op 拒收，
++UI 永远显示假失败。修两处，互为防线：
++
++1. **事前防误杀**（`backend/app/modules/agent/service.py`）：清理前查该 run 的
++   `agent_run_logs` 最新 `timestamp`（该列口径=后端收到上报时刻，正是"daemon 还在报"的信
++   号；有 `ix_agent_run_logs_run_timestamp` 联合索引）。距今 ≤ 宽限窗 10 分钟 → 跳过判死
++   保持 running；`AgentService.cleanup_stale_runs` 发现跳过项后 fire 一个延迟复扫后台任务
++   （睡满宽限窗再查一次，日志停止老化才判 failed），防止 daemon 真死时永卡 running。
++   宽限窗覆盖典型部署窗口（容器切换期间 daemon 上报中断通常 <2 分钟，10 分钟留足余量）。
++2. **事后能回正**（`backend/app/modules/daemon/run_sync/service/close_run_steps.py`）：终态
++   守卫放行唯一例外——run 为 failed + `error_code=SERVICE_RESTART_INTERRUPTED` 且本次上报
++   `status=success, is_error=false` 时，清掉误杀残留（error_code/error_detail/output_redacted
++   兜底文案）后落入正常收口流程（`_close_apply_terminal` 落 completed + usage/summary、
++   `_close_flip_session` 翻会话、post-commit 钩子重发 turn_completed 事件，前端实时收敛）。
++
++迟到的失败结果不回正（不在本变更范围）：status 本就 failed，展示与语义一致，维持拒收。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `AgentService.cleanup_stale_runs()` 对外签名不变，返回值语义微调：仅统计实际判死数量
++  （跳过项不计数，`main.py` 既有 count 日志行为兼容）。
++- `_cleanup_stale_runs_impl(session)` 内部函数签名不变，新增行为：recent-log 活性检测跳过
++  （新增模块常量 `STALE_RUN_ACTIVE_GRACE = timedelta(minutes=10)` 承载宽限窗）；配套新增
++  模块级 helper `_has_recently_active_running_runs` / `_recheck_stale_runs_loop`（延迟复扫
++  链，仅由 `cleanup_stale_runs` 在跳过发生时调度，测试直调 impl 不触发调度）。
++- `close_interactive_run(...)` 公共签名与 HTTP 契约不变（200 + run 快照）；唯一行为变化是
++  上述误杀+迟到成功的例外路径从 no-op 变为重放收口。
++- daemon / 前端零改动：daemon 本就会重试上报结果（本变更让后端能接住）；前端读 run 终态
++  与 turn_completed 事件，回正后自然显示完成。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | backend/app/modules/agent/service.py | `_cleanup_stale_runs_impl` 加 recent-log 活性检测跳过 + `STALE_RUN_ACTIVE_GRACE` 常量；`cleanup_stale_runs` 跳过项 fire 延迟复扫后台任务（`_fire_background_task` 强引用防 GC 模式） |
++| 修改 | backend/app/modules/daemon/run_sync/service/close_run_steps.py | `close_interactive_run` 终态守卫加 SERVICE_RESTART_INTERRUPTED + 迟到成功例外，清残留后走正常收口 |
++| 新增 | backend/tests/modules/agent/test_stale_run_cleanup_liveness.py | FR-01 三用例：近期上报跳过 / 停滞清理 / 无日志清理 |
++| 新增 | backend/tests/modules/daemon/test_close_interactive_run_retroactive.py | FR-02 两用例：误杀回正 / 其余终态仍 no-op |
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   设计核心就是迟到到达——成功迟到被回正；失败/打断迟到维持拒收（status 语义已一致）。
++   复扫与迟到结果竞态：若复扫先把活跃轮判死（日志恰好停满宽限）、随后成功结果到达，
++   恰好落入 FR-02 回正路径，闭环自愈。日志迟到（daemon 断线缓冲后补报）只会让
++   timestamp 更新，方向是"更活跃、更不判死"，安全。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   `close_interactive_run` 全程持该 run 的 FOR UPDATE 行锁，回正分支在同一锁内判定+写入，
++   与其它并发收口串行化；复扫后台任务用独立 session（`get_session_factory`），写前同样走
++   `_cleanup_stale_runs_impl` 的逐 run 更新，与迟到结果竞态最坏情况同上——先误判后回正，
++   收敛。评审 P2 加固：清理循环对每个 run 写前 FOR UPDATE 重读（populate_existing 刷新
++   identity map 缓存），快照后已被并发收口置终态（如迟到成功结果落 completed）的轮直接
++   放弃、不盲写覆盖，消除「复扫把 completed 打回 failed」的反序窗口。SQLite 测试库下
++   写入天然串行，无死锁面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   复扫任务睡在 asyncio 里，后端再次重启时任务随进程消亡，新一次启动清理重新接管（幂
++   等）；任务异常由 `_on_background_task_done` 记日志，不复活不重试（下次重启兜底）。回
++   正路径重放 `_close_post_commit` 钩子：auto-recover 只对 failed 生效（回正后是
++   completed，no-op）、gate/borrow/排队派发按 completed 语义走，均为正确行为而非重复副
++   作用。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   活性检测按 run_id 查日志、回正按 run 行锁判定，均不跨会话/工作区；多 daemon 多实例
++   场景下每轮 run 唯一归属一个 daemon 的上报流，日志 recency 就是该 daemon 的活性，
++   无串台。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：宽限窗选小了误杀仍发生（长安静期轮被复扫判死）——但此时 FR-02 兜底回正，最坏
++结果是徽标先失败后自动变回完成；窗选大了 daemon 真死时 UI 多挂一会儿"运行中"（10 分钟上
++限，可接受）。放弃的方案：(a) 启动清理时探测 daemon WS 在线状态——backend 重启瞬间
++daemon 往往尚未重连（实证重启后 41 秒才恢复上报），启动时点探测必假阴性，且"daemon 在线"
++≠"该轮还在跑"，信号弱于日志 recency；(b) 迟到结果一律允许重放终态——会破坏既有幂等语义
++（失败轮被重复 result 触发重复 auto-recover/事件），风险面大，收窄到误杀标记+成功这一种
++组合。
+diff --git a/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/proposal.md b/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/proposal.md
+new file mode 100644
+index 000000000..48883cf4b
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/proposal.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:57:52.316Z
++---
++# 提案书（Proposal）— 2026-10-08-backend-restart-fake-failed
++
++## 动机
++
++任务原话转写：后端重启会把正在运行的轮误标为 SERVICE_RESTART_INTERRUPTED 失败（_cleanup_stale_runs_impl 只看数据库状态不探测 daemon 活性），且 daemon 迟到的成功结果被 interactive_run_close_already_terminal 拒收无法回正，UI 永远显示假失败。
++成功标准：
++- 后端重启清理时，近期仍有 daemon 上报的运行轮不再被判死，等真终态
++- 被误标 SERVICE_RESTART_INTERRUPTED 的轮收到 daemon 迟到的成功结果后能回正为 completed
++- 补充对应用例覆盖上述两条路径
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. 后端重启清理时，近期仍有 daemon 上报的运行轮不再被判死，等真终态
++2. 被误标 SERVICE_RESTART_INTERRUPTED 的轮收到 daemon 迟到的成功结果后能回正为 completed
++3. 补充对应用例覆盖上述两条路径
++
++## 成功标准（可验证）
++
++1. 后端重启清理时，近期仍有 daemon 上报的运行轮不再被判死，等真终态
++2. 被误标 SERVICE_RESTART_INTERRUPTED 的轮收到 daemon 迟到的成功结果后能回正为 completed
++3. 补充对应用例覆盖上述两条路径
+diff --git a/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/requirements.md b/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/requirements.md
+new file mode 100644
+index 000000000..15729f7f5
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/requirements.md
+@@ -0,0 +1,74 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:57:52.316Z
++---
++# 需求规格（Requirements）— 2026-10-08-backend-restart-fake-failed
++
++## 功能需求
++
++### FR-01: 后端重启清理时，近期仍有 daemon 上报的运行轮不再被判死，等真终态
++
++- 启动清理（`_cleanup_stale_runs_impl`）在把 running 轮判为 failed 前**必须**先查该轮
++  `agent_run_logs` 的最新 `timestamp`：若距今不超过活性宽限窗（10 分钟），**必须**跳过判死、
++  保持 running，并安排一次延迟复扫（宽限期后再查，日志停止老化才判 failed），把误杀窗口从
++  「后端重启瞬间」推迟到「daemon 真正停止上报超过宽限期」。
++
++#### 场景：近期有上报的运行轮不判死
++
++- Given 后端重启，DB 中有 running 轮且其最新日志距今 3 分钟（daemon 仍在执行并持续上报）
++- When 启动清理执行
++- Then 该轮保持 running（不写 failed / SERVICE_RESTART_INTERRUPTED），记录跳过日志，
++  并安排延迟复扫；复扫时若日志已停止老化超宽限才判 failed
++
++#### 场景：上报停滞性超过宽限的轮照常清理
++
++- Given 后端重启，DB 中有 running 轮但其最新日志距今 30 分钟（daemon 实际已死）
++- When 启动清理执行
++- Then 沿用既有行为判 failed + SERVICE_RESTART_INTERRUPTED（防止永卡 running）
++
++#### 场景：无日志行的运行轮照常清理
++
++- Given 后端重启，DB 中有 running 轮且无任何 agent_run_logs 行（派发后未产出日志）
++- When 启动清理执行
++- Then 沿用既有行为判 failed（活性检测无信号时不得阻塞清理）
++
++### FR-02: 被误标 SERVICE_RESTART_INTERRUPTED 的轮收到 daemon 迟到的成功结果后能回正为 completed
++
++- `close_interactive_run` 的终态幂等守卫**必须**放行一种例外：run 已终态 failed 且
++  `error_code=SERVICE_RESTART_INTERRUPTED`（重启误杀标记）、本次上报为成功
++  （`status=success` 且 `is_error=false`）时，**必须**按正常收口流程重放终态把 run 回正为
++  completed（清掉误杀的 error_code/error_detail/兜底文案，重发终态事件），UI 不再显示假失败。
++  其余已终态情形**必须**维持现状 no-op 拒收（幂等安全不变）。
++
++#### 场景：误杀轮收到迟到成功结果回正
++
++- Given run 已被启动清理标 failed + SERVICE_RESTART_INTERRUPTED（daemon 实际仍在跑）
++- When daemon 跑完后 POST 轮结果（status=success, is_error=false）
++- Then run 回正为 completed、exit_code=0、error_code/error_detail 清空，
++  会话/轮终态事件重发，前端轮徽标显示完成
++
++#### 场景：其余终态重复上报仍拒收
++
++- Given run 已终态（含 failed+interactive_failed、completed 等非误杀标记情形）
++- When daemon 重试 POST 同一轮结果（任意 status）
++- Then 维持既有 no-op 幂等返回，不重复触发收口钩子（回归保护）
++
++### FR-03: 补充对应用例覆盖上述两条路径
++
++- **必须**以 real-DB 用例覆盖 FR-01（近期上报跳过 / 停滞清理 / 无日志清理）与 FR-02
++  （误杀回正 / 其余终态仍拒收）两条路径，随实现同仓提交。
++
++#### 场景：主路径
++
++- Given 实现合入
++- When 跑本变更新增测试文件
++- Then 全部用例绿，且不破坏既有相关测试
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py「test_cleanup_skips_run_with_recent_daemon_activity」
++FR-01: test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py「test_cleanup_fails_run_with_stale_activity」
++FR-01: test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py「test_cleanup_fails_run_without_logs」
++FR-02: test/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py「test_late_success_result_rehabilates_service_restart_interrupted_run」
++FR-02: test/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py「test_other_terminal_results_stay_noop」
++FR-03: test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py + test/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py「全文件用例集」
+diff --git a/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/tasks.md b/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/tasks.md
+new file mode 100644
+index 000000000..3d8bf03ff
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:57:52.316Z
++---
++# 任务注册表（Tasks）— 2026-10-08-backend-restart-fake-failed
++
++- [x] task-01: `_cleanup_stale_runs_impl` 加 recent-log 活性检测（≤10 分钟宽限跳过判死）+ `cleanup_stale_runs` 延迟复扫后台任务；验证：test_stale_run_cleanup_liveness.py 三用例绿（近期跳过 / 停滞清理 / 无日志清理）
++- [x] task-02: `close_interactive_run` 终态守卫放行「SERVICE_RESTART_INTERRUPTED + 迟到成功」例外，清误杀残留走正常收口；验证：test_close_interactive_run_retroactive.py 两用例绿（回正 / 其余终态仍 no-op）
++- [x] task-03: 两测试文件补齐用例并与实现一起提交，跑相关测试全绿（含既有 lease/close 相关测试不回归）
+diff --git a/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/review.json b/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/review.json
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-restart-fake-failed/review.json
+@@ -0,0 +1,15 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-08-backend-restart-fake-failed",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "89a7e9a42c4d0438ccccf1c85a4297cf19d04226",
++  "findings": [],
++  "dimensionNotes": {
++    "乱序": "ok——已修复（原 P2）：反序丢更新窗口（迟到成功结果先经 close_interactive_run 落 completed、清理快照盲写打回 failed）由写前守卫消除——FOR UPDATE 重读位于 restore/kill 两分支之前（service.py 清理循环体顶部），非 running 即记 stale_run_cleanup_skipped_concurrent_terminal 放弃。成功迟到回正/失败迟到拒收/日志迟到更活跃三个方向判断维持成立。",
++    "并发": "ok——已修复（原 P2）：populate_existing=True 刷新 identity map 防缓存快照属性 + with_for_update 行锁重读，与 close_interactive_run 的 FOR UPDATE 收口双向串行化——任意交错要么守卫见终态放弃、要么清理先落 failed+SRI 由 FR-02 回正，均收敛，设计「收敛」声明现已成立。close 路径行锁、复扫独立 session 声明继续属实。新增用例 test_cleanup_skips_run_closed_concurrently_after_snapshot（钩子模拟并发收口穿插，断言 completed 不被打回 failed）实跑通过：tests/modules/agent/test_stale_run_cleanup_liveness.py 4 passed。边界已裁决：可接受——SQLite 测试库写入串行、无死锁面。",
++    "切换": "ok——已修复（原 P3）：error_detail.reason 改为『no daemon activity within grace window (startup cleanup / deferred recheck)』、finished_by 改 stale_run_cleanup，复扫链场景文案不再误指后端重启。error_code 枚举名 SERVICE_RESTART_INTERRUPTED 保留是刻意取舍（FR-02 回正门的匹配键 + 前端映射依赖，改动即破坏回正路径），语义由 reason 补正——裁决可接受。既有裁决维持：复扫任务随进程消亡/启动幂等接管、_on_background_task_done 兜底在位、「测试直调 impl 不触发调度」披露边界维持可接受（建议后续补调度链用例）。",
++    "作用域": "ok——边界已裁决：可接受。活性检测按 run_id 查日志（ix_agent_run_logs_run_timestamp 索引在位）、回正按 run 行锁判定，不跨会话/工作区；多实例各自复扫叠加的竞态面随 P2 守卫一并消除。"
++  },
++  "reviewedAt": "2026-10-08T04:25:35Z"
++}
