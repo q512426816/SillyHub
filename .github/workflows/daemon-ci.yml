@@ -8,10 +8,12 @@ on:
   push:
     paths:
       - "sillyhub-daemon/**"
+      - "backend/openapi.json"
       - ".github/workflows/daemon-ci.yml"
   pull_request:
     paths:
       - "sillyhub-daemon/**"
+      - "backend/openapi.json"
       - ".github/workflows/daemon-ci.yml"
   workflow_dispatch:
 
@@ -39,6 +41,13 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # api-types 漂移守门（2026-10-09 风险审查后续）：daemon 生成物长期落后
+      # backend/openapi.json（RBAC 72→58 死键残留实证）而无人发现——重生成后
+      # git diff --exit-code，漂移即红。前置：后端 schema 改动须在同一变更内
+      # 跑 daemon `pnpm gen:types` 提交生成物（对齐前端 pnpm gen:types 纪律）。
+      - name: api-types drift check
+        run: pnpm gen:types:check
 
       - name: Typecheck
         run: pnpm typecheck

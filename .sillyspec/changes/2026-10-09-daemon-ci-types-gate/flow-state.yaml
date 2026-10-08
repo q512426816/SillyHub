@@ -1,0 +1,23 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：2026-10-09 风险审查发现 sillyhub-daemon/src/api-types.ts 落后 backend/openapi.json 多轮契约（RBAC 72→58 死键残留 + 知识图谱端点缺失）而 CI
+  无任何守门——gen:types:check 脚本已存在（重生成 + git diff --exit-code）但 daemon-ci.yml 未接，类型债会静默复发。
+
+
+  成功标准：
+
+  - daemon-ci.yml 在 Install 后、Typecheck 前新增「api-types drift check」步骤跑 pnpm gen:types:check
+
+  - 守门语义正确：仓库生成物与 openapi.json 不一致时 CI 红（exit 1），一致时零影响
+
+  - 当前仓库实测该步骤绿（刚重生成过，diff 干净）
+autopilot: true
+baseline_commit: ef7bdd6f738c3b8f75298e48507942ed60630991
+updatedAt: '2026-10-08T23:41:47.423Z'
+baseline_sha256: 2bf237e140f83526f9ed8be2a9d077fd2a1b89b517e2e38811e71d6a8ddc8f6c
+
