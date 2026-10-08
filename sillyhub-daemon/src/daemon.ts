@@ -5707,6 +5707,10 @@ export class Daemon {
         // 第 11 参（2026-09-30-tool-report task-02 / FR-01）：本机持久 machineId。
         // 首拍经下方 _ensureMachineId 懒读取（单飞）；读取失败/未完成 → undefined
         //（键不出现，本拍不带，下一拍收敛）。已缓存则直传（运行期恒定）。
+        // 共享断言面：本调用平铺参长被四处 length 钉测试锚定——加尾参须同步
+        // N→N+1：daemon-heartbeat-pending / daemon-heartbeat-sillyspec /
+        // sillyspec-platform-command(6 处) / integration/selfupdate-scenarios(2 处)
+        //（testing-gotchas「共享断言面」②）。
         this._machineId ?? undefined,
       );
       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。

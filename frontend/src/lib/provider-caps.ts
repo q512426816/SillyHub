@@ -24,6 +24,9 @@
  */
 
 /** provider 能力矩阵（16 键：14 个 boolean + dialog / sessionFork 两 string 枚举，缺省默认拒绝）。 */
+// 共享断言面：本接口加键须同一变更内同步 pre-session-picker.test.tsx 两处
+// 全对象 toEqual（cursor 查表值 / 未知引擎回退值各一处，逐键补齐——该测试
+// 注释自载历次补键记录；testing-gotchas「共享断言面」④）。
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;

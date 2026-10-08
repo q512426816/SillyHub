@@ -113,6 +113,7 @@
 - 前端测试|menu|permission|重复 key|querybylabeltext|picker → [MENU_PERMISSION_GROUPS 重复 key](testing-gotchas.md#前端menu_permission_groups-跨-menu-重复-permissionkey-致-querybylabeltext-失败)
 - antd|datepicker|dayjs|locale|中文|日历表头 → [antd v5 DatePicker dayjs locale](testing-gotchas.md#前端antd-v5-datepicker-周几日历表头显示英文仅-configprovider-locale-不够)
 - antd|autoletterspacing|中文按钮|getbyrole|字间空格 → [antd v5 autoLetterSpacing 字间空格](testing-gotchas.md#前端antd-v5-两字中文按钮-autoletterspacing-致-dom-字间空格getbyrole-匹配失败)
+- 共享断言面|钉子测试|链尾锚|心跳参数|TABS 数量|caps 全对象|previewers mock|词表对账 → [共享断言面：改契约必须同步钉子测试](testing-gotchas.md#共享断言面改契约必须同步钉子测试跨文件钉子清单)
 - markdown-text|next/dynamic|ssr:false|jsdom|null|getbytext → [MarkdownText jsdom 渲染 null](testing-gotchas.md#前端markdowntext-用-nextdynamic-ssrfalsejsdom-测试同步-render-得-null)
 - cleanup_stale_runtimes|list_machines|心跳|online|offline|造数 → [后端：daemon 列表测试造 status 必须符合 cleanup_stale_runtimes 不变量（online ⟺ 心跳<45s）](testing-gotchas.md#后端daemon-列表测试造-status-必须符合-cleanup_stale_runtimes-不变量online--心跳45s)
 - 限流|429|login|跨用例|预存|create_access_token → [后端：auth login 限流跨用例累计致 admin 套件偶发 429（预存，非回归）](testing-gotchas.md#后端auth-login-限流跨用例累计致-admin-套件偶发-429预存非回归)

@@ -49,6 +49,9 @@ class LlmProviderCreate(BaseModel):
     # change 2026-10-06-provider-multi-agent-kind（D-004）：单值改引擎集合——一条凭证
     # 可服务多个引擎，至少一个（min_length=1，无默认值，必须显式传）；保序去重
     # （["claude","claude"] 归一为 ["claude"]，validator 见下）。
+    # 共享断言面：本字段名/声明形态（复数 list Literal）被 daemon 源读取对账正则
+    # 锚定——改词表或形态须同步 sillyhub-daemon/tests/provider-adapter-registry.
+    # test.ts 的 readBackendAgentKindVocab（testing-gotchas「共享断言面」⑥）。
     agent_kinds: list[Literal["claude", "pi", "codex"]] = Field(min_length=1)
     models: list[ProviderModelEntry] = []
     base_url: str | None = None

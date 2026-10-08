@@ -1,5 +1,9 @@
 /**
  * previewers 统一出口：PreviewerProps 类型 + 各渲染器组件。
+ *
+ * 共享断言面：新增导出须同一变更内补齐枚举式 vi.mock("../previewers") 的
+ * 桩——onlyoffice-preview.test.tsx 与 file-preview-modal.test.tsx 两处，缺
+ * 导出整套件收集炸（testing-gotchas「共享断言面」⑤）。
  */
 
 export interface PreviewerProps {

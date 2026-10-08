@@ -5,6 +5,9 @@ import { usePathname } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 
+// 共享断言面：增删/移动页签须同一变更内同步钉子测试——git-log-page.test.tsx
+// 钉 TABS 数量（toHaveLength(N)）与「Git 日志末位」，workspace-tabs.test.tsx
+// 钉嵌套页签最长匹配高亮（testing-gotchas「共享断言面」③）。
 const TABS = [
   { key: "overview", label: "概览", path: "" },
   { key: "changes", label: "变更", path: "/changes" },

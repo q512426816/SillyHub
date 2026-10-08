@@ -103,3 +103,15 @@ sillyhub-daemon 的 vitest.config.ts include 仅 `tests/**/*.test.ts`——src �
 - (2) curl `-d '<多行 JSON>'` 在 Git Bash 单引号内含中文/换行时报 `There was an error parsing the body`。规避：JSON 写文件后 `-d @<绝对路径>`。
 - (3) 本地无 PG 时起 dev 后端：SQLite URL + SECRET_KEY 环境变量注入（.env 只在主仓 backend/ 下，worktree 缺失）；全量 alembic 链在 SQLite 跑不通（PG 专属 EXTENSION 语句），用 `import app.main` 后 `BaseModel.metadata.create_all`（根 conftest 同款 model 注册链）。
 - 来源：2026-09-23-change-events-channel task-08
+
+## 共享断言面：改契约必须同步钉子测试（跨文件钉子清单）
+
+- 背景：2026-10-07/08 两轮 CI 清偿共 14 个失败用例，9 个同模式——生产契约变更时只更新了本变更内的测试，漏了散落在**其它文件**钉住同一契约的断言。改下列契约源时，同一变更内必须同步对应钉子测试，否则 CI 补红：
+- ① **alembic 新迁移**（backend/migrations/versions/ 加文件）→ 链尾锚测试 `backend/tests/test_align_platform_change_events_migration.py::test_file_exists_and_single_head_chain` 钉 head 常量，**每个新迁移前移一行**（测试注释自载约定；2026-10-06/10-08 两次漏跟实证）。
+- ② **daemon 心跳加参**（sillyhub-daemon/src/daemon.ts `_sendHeartbeatOnce` 平铺传参）→ length 钉四文件：`tests/daemon-heartbeat-pending.test.ts`、`tests/daemon-heartbeat-sillyspec.test.ts`、`tests/sillyspec-platform-command.test.ts`（6 处）、`tests/integration/selfupdate-scenarios.test.ts`（2 处）——**加尾参后全部 N→N+1**（d6fabf408 machine-id 后两文件漏跟实证）。
+- ③ **WorkspaceTabs 增删页签**（frontend/src/components/workspace-tabs.tsx TABS 数组）→ 数量钉 `src/components/git-log/__tests__/git-log-page.test.tsx`（toHaveLength(N)+「Git 日志末位」），另 workspace-tabs.test.tsx 高亮用例按 path 校验（e8da254ce 知识图谱页签漏跟实证）。
+- ④ **provider caps 加键**（frontend/src/lib/provider-caps.ts ProviderCaps 接口+查表）→ 全对象 toEqual 钉 `src/components/sessions/__tests__/pre-session-picker.test.tsx` 两处（cursor/未知回退），**每键同步补齐**（测试注释自载历次补键记录；b8afd807c 误删 multimodal 实证）。
+- ⑤ **previewers 桶文件加导出**（frontend/src/components/files/previewers.tsx）→ 枚举式 vi.mock 钉 `src/components/files/__tests__/onlyoffice-preview.test.tsx` 与 `file-preview-modal.test.tsx`，**缺导出整套件收集炸**（fa799e68b JsonlPreviewer 漏跟实证；桶注释自载约定）。
+- ⑥ **backend 词表/字段形态变更**（backend/app/modules/llm_provider/schema.py agent_kinds 等）→ daemon 源读取对账 `sillyhub-daemon/tests/provider-adapter-registry.test.ts` 的正则锚按声明形态匹配，**改字段名/形状须同步正则**（单数→复数 list Literal 漂移实证）；同类：daemon CI 的 backend 源锚测试（api_format 词表常量）。
+- 通用口径：契约源码处已加一行「同步提醒」注释指向钉子测试（①在测试内自载、②③④⑤⑥在源码），本条目作总索引；新出现的共享断言面按同款登记（条目+源码注释）。
+- 来源：2026-10-08-shared-assertion-surfaces（2026-10-07-ci-failures-sweep / 2026-10-08-ci-sweep-2 两轮复盘收敛）

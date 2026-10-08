@@ -1,0 +1,28 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  共享断言面登记（两轮 CI 清偿的根因收敛）：2026-10-07/08 两轮 CI 补红共 14 个失败用例，其中 9 个属同一模式——生产契约变更时只更新了自己变更内的测试，漏了散落在其它文件钉住同一契约的断言（迁移链尾锚 /
+  daemon 心跳平铺参长 / 前端 TABS 数量钉 / caps 全对象 toEqual / previewers 枚举 mock / backend
+  词表对账正则六面）。本次把这些共享断言面显性登记：①knowledge/testing-gotchas.md 新增条目逐面登记契约源→钉子测试→变更动作，INDEX.md 加关键词索引（flow start 知识注入与子代理 INDEX
+  查询可命中）②四个契约源码处加一行同步提醒注释（daemon.ts 心跳尾参块 / workspace-tabs.tsx TABS / provider-caps.ts 接口 / llm_provider/schema.py
+  agent_kinds 词表）。纯注释与知识库文档，零行为改动。
+
+
+  成功标准：
+
+  - testing-gotchas.md 新增「共享断言面」条目，六面齐备（契约源/钉子测试/动作三列），INDEX.md 对应关键词行挂载
+
+  - 四个契约源码处各加一行同步提醒注释，指向具体钉子测试文件
+
+  - 三端静态门零错（backend ruff/mypy、daemon tsc、frontend tsc/eslint），钉子测试复跑全绿（证注释零影响）
+
+  - 推送后五 workflow 全绿
+autopilot: true
+baseline_commit: 6fc86d7eda6dc0809dc18720d43066782df37775
+updatedAt: '2026-10-08T17:15:36.585Z'
+baseline_sha256: 8216a1b33de5c9a949f0f466cfba70af009c370e750247353ee265a4892b1b9f
+
