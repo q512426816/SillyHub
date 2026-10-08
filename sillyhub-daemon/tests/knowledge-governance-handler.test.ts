@@ -196,6 +196,24 @@ describe('knowledge.graph', () => {
     expect(sillyspecCmd).not.toHaveBeenCalled();
   });
 
+  it('②b 反斜杠样本全拒（2026-10-09 审查加固：结尾 \\ 转义闭合引号吞旗标，先红后绿钉住）', async () => {
+    const { handler, sillyspecCmd } = mk({ ok: true, stdout: GRAPH_OK(), stderr: '', timedOut: false });
+    // 尾反斜杠=引号转义形态；中缀/开头反斜杠一并拒（黑名单字符级判定）
+    const backslash = ['anchor\\', 'a\\b', '\\FR-1'];
+    for (const bad of backslash) {
+      await expect(handler.graph('ws-1', { sub: 'neighbors', anchor: bad }, 'C:/repo/x')).rejects.toMatchObject({
+        code: 'validation_rejected',
+      });
+      await expect(
+        handler.graph('ws-1', { sub: 'path', anchor: 'FR-core-engine-001', anchor2: bad }, 'C:/repo/x'),
+      ).rejects.toMatchObject({ code: 'validation_rejected' });
+      await expect(handler.graph('ws-1', { sub: 'nodes', search: bad }, 'C:/repo/x')).rejects.toMatchObject({
+        code: 'validation_rejected',
+      });
+    }
+    expect(sillyspecCmd).not.toHaveBeenCalled();
+  });
+
   it('③ 正常节点 id 样本全放行（/#:@/路径/FR/change 名）+ cwd=仓库根', async () => {
     const cwds: string[] = [];
     const { handler, sillyspecCmd } = mk({ ok: true, stdout: GRAPH_OK({ nodes: [] }), stderr: '', timedOut: false }, cwds);

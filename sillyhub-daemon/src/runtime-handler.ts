@@ -412,11 +412,14 @@ const KNOWLEDGE_GRAPH_EDGES = new Set([
 
 /**
  * graph 自由串黑名单：先例 ROOT_PATH_METACHAR_RE 全集（"'`$&|;<>() %^ + \n\r\0
- * ——注意空格与反引号都在集合内）外加 \t。命中即 validation_rejected；正常节点
- * id 字符集（/ # : @ - _ . 与中文，实测样本 decision:decisions/x.md#D-1@v1、
- * src/foo.js、FR-core-engine-001、2026-10-08-x）零冲突放行。
+ * ——注意空格与反引号都在集合内）外加 \t 与 \（2026-10-09 审查加固：反斜杠
+ * 结尾的锚点会转义拼串的闭合引号，POSIX shell 下吞并后续旗标进锚点参数——
+ * 分隔符均已在集合内故无注入面，补 \ 杜绝参数粘连）。命中即
+ * validation_rejected；正常节点 id 字符集（/ # : @ - _ . 与中文，实测样本
+ * decision:decisions/x.md#D-1@v1、src/foo.js、FR-core-engine-001、
+ * 2026-10-08-x）零冲突放行。
  */
-const GRAPH_TEXT_BLACKLIST_RE = /["'`$&|;<>() %^\n\r\0\t]/;
+const GRAPH_TEXT_BLACKLIST_RE = /["'`$&|;<>() %^\n\r\0\t\\]/;
 
 /** graph 自由串消毒（anchor/anchor2/search 三参数同函数）：命中黑名单拒（D-001@v2）。 */
 function sanitizeGraphText(name: string, v: string): string {
