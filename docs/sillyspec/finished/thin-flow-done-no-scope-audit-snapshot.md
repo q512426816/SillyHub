@@ -65,3 +65,26 @@ thin/heavy 两通道留痕互补缺失，正好各缺一半：
   为「无冻结对账记录，见沉淀资产」而不是逐行「计划未动」；
 - 平台侧（backend/assets.py）：`_read_patch_meta` 加 scope-audit.json 回退
   （totals + rows[].path 投影即可），让厚变更的归档留档 patch 块也有数。
+
+## 处置记录（2026-10-08）
+
+三向修复方向**全部落地**（坑同日由并行会话修复，本日复核验证）：
+
+1. **写侧（CLI，已提交）**：`2026-10-07-unify-close-trace`——`flow done` 经共用
+   `writeCloseTraceArtifacts` 一次写齐四件（change.patch + change-patch.json +
+   scope-audit.json + scope-audit.patch，sha256 双套同锚）；thin 快照带 `closedBy: 'flow
+   done'` 通道标注，回放不误标 execute --done。
+2. **读侧（CLI，已提交 `901aa239`）**：`2026-10-07-scope-audit-thin-patch-replay`——
+   settled 快照缺失时回读 change-patch.json 冻结件出真实三态（文件集过
+   filterDeliverableFiles、行数按冻结 patch 分段统计、三态按 design 清单同款判定、
+   跨仓维持 ⊘ 形态），**存量归档 thin 立即受益**，不再落「计划未动 0/0」失真链。
+3. **平台侧（backend，并行会话工作树在途）**：`2026-10-07-assets-patch-scope-audit-fallback`
+   ——assets.py `_read_patch_meta` 缺 change-patch.json 时回退 scope-audit.json
+   （totals/patchStatus 投影 + scope-audit.patch 点开）——厚变更归档留档 patch 块有数。
+
+**测试证据**：CLI `test/scope-audit-thin-patch-replay.test.mjs` 4/4（含存量归档回放）；
+平台 `app/modules/change/tests/test_assets.py` 28 passed（含「厚流程形态归档只落
+scope-audit 件」回退用例）——本日复跑双绿。UI 三态降权建议未单独实现（读侧回放已让
+降级路径基本不可达，剩余为极端形态：快照与冻结件双缺——note 自述已覆盖）。
+
+归档（CLI 两向已提交；平台侧改动在并行会话工作树，随其变更收口）。
