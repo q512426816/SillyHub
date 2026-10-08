@@ -1,0 +1,467 @@
+diff --git a/.claude/skills/sillyhub-docker-deploy/SKILL.md b/.claude/skills/sillyhub-docker-deploy/SKILL.md
+index 1cc8575f7..5796fe995 100644
+--- a/.claude/skills/sillyhub-docker-deploy/SKILL.md
++++ b/.claude/skills/sillyhub-docker-deploy/SKILL.md
+@@ -10,11 +10,9 @@ description: 用于把当前 SillyHub / multi-agent-platform 项目部署到本
+ 把当前仓库用 `deploy/docker-compose.yml` 启动为完整服务栈：
+ 
+ - frontend: Next.js
+-- backend: FastAPI
++- backend: FastAPI（python API + 静态分发：技能 manifest/bundle、daemon bundle；agent 执行在宿主 daemon，容器内无 claude/node 二进制——2026-10-08 瘦身）
+ - postgres
+ - redis
+-- Claude Code CLI in the backend container
+-- SillySpec CLI in the backend container
+ 
+ 默认优先保留用户已有本机进程。如果 `3000` 或 `8000` 已被占用，改用 `3001` / `8001`，不要直接杀进程。
+ 
+@@ -115,16 +113,14 @@ CORS_ALLOWED_ORIGINS=["http://localhost:3001","http://<LAN_IP>:3001"]
+ 
+ ## 代码侧部署兼容性
+ 
+-后端镜像必须内置 agent 运行依赖。检查 `backend/Dockerfile`：
++后端镜像职责 = python API + 静态分发（技能 manifest/bundle、daemon bundle）；agent 执行全在宿主 daemon（2026-10-08 起 claude/node 二进制已随 server-local 遗物清出镜像，见 thin 2026-10-08-backend-image-slim-no-claude）。检查 `backend/Dockerfile`：
+ 
+-- 使用 Node runtime stage 安装 Claude Code 与 SillySpec：
++- Node runtime stage 仅安装 SillySpec（npm 包，技能源；SILLYSPEC_VERSION 空 → 取最新 + SILLYSPEC_REFRESH 时间戳爆破缓存，填值 → pin）：
+   ```bash
+-  # CLAUDE_CODE_VERSION 写死；SILLYSPEC_VERSION 空 → 取最新，填值 → pin。
+-  npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION}
++  npm install -g sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION}
+   ```
+-- runtime stage 复制 `node`、`npm`、`npx`、`claude`、`sillyspec` 和 `/usr/local/lib/node_modules`。
+-- runtime apt 依赖包含 `git`，agent worktree 和 CLI 调用会用到。
+-- `HOME=/app`，并确保 `/app/.claude`、`/app/.cache`、`/app/.config`、`/tmp/.npm` 对 `app` 用户可写。
++- 技能与版本件从 sillyspec 包 COPY：`/app/sillyspec-skills/`（manifest/bundle 端点读）+ `/app/sillyspec-package.json`（无 node 环境的版本回显锚点）；runtime 无 node/npm/claude/sillyspec 二进制。
++- runtime apt 依赖包含 `git`（COMMIT_SHA 回退探测与 diff 收集 exec 它）。
+ - runtime stage 接收 `ARG COMMIT_SHA` 并 `ENV COMMIT_SHA=${COMMIT_SHA:-}`，让 `/api/health` 的 `commit_sha` 反映镜像版本（backend build context 是 `backend/`、不含仓库 `.git`，必须由 build arg 注入，否则恒为 `unknown`）。
+ 
+ 检查 `deploy/docker-compose.yml` 的 backend.build：
+@@ -138,25 +134,23 @@ backend:
+     additional_contexts:
+       daemon: ../sillyhub-daemon
+     args:
+-      CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.158}
+       SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-}   # 空 = 取最新
++      SILLYSPEC_REFRESH: ${SILLYSPEC_REFRESH:-}   # 时间戳爆破 npm 层缓存（打包脚本自动导出）
+       COMMIT_SHA: ${COMMIT_SHA:-}                 # 启动前 export，见「启动」节
+   env_file:
+     - .env
+   environment:
+     HOME: /app
+-    NPM_CONFIG_CACHE: /tmp/.npm
+ ```
+ 
+ > 版本号以 `deploy/docker-compose.yml` 实际 build args 为准，本文档中的数字仅为示例，可能滞后。
+ >
+ > **daemon 一键安装分发**：backend 通过 `additional_contexts: daemon` 把宿主机预构建的 `sillyhub-daemon/build/bundle/sillyhub-daemon.js` 与 `scripts/install.sh` 拷进镜像 `/app/daemon-dist/`，再由 3 个公开端点（无 `/api` 前缀）`GET /daemon/install.sh`、`GET /daemon/latest.json`、`GET /daemon/latest/sillyhub-daemon.js` 提供，使 `curl <SERVER>/daemon/install.sh | bash` 可用。daemon 代码改动后须重跑 `pnpm bundle` 再重建 backend。
+ 
+-后端容器应通过 `backend/docker-entrypoint.sh` 在启动时生成 `/app/.claude/settings.json`，不要把真实 `ANTHROPIC_AUTH_TOKEN` 写进已跟踪的 `.claude/settings.json`。本地真实值只放在 gitignored 的 `deploy/.env`。
+-Claude Code 相关变量要通过 `env_file: .env` 注入 backend 容器，避免宿主机 shell 里已有的 `ANTHROPIC_*` 变量覆盖 Docker 配置。
+-`/app/.claude` 应挂载到 `claude-data` volume，以保留官方 plugin marketplace 和已安装插件缓存。
++2026-10-08 起：容器内无 claude、无 `.claude/settings.json` 生成、无 claude-data 卷挂载——`.env` 里的 `ANTHROPIC_*`/`CLAUDE_*` 行对容器为惰性变量（agent 凭据走宿主 daemon 自身配置，不经容器）。
++
++（以下 Claude Code 容器配置已退役，2026-10-08 容器内无 claude，仅作历史参考；agent 模型配置走宿主 daemon 侧：）
+ 
+-推荐的 Docker 内 Claude Code 配置：
+ 
+ ```env
+ ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic
+@@ -166,10 +160,6 @@ ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.2
+ ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.2
+ ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.2
+ CLAUDE_CODE_MODEL=opus
+-CLAUDE_PLUGIN_FRONTEND_DESIGN_ENABLED=true
+-CLAUDE_PLUGIN_PLAYWRIGHT_ENABLED=true
+-CLAUDE_SYNC_OFFICIAL_PLUGINS_ON_START=true
+-CLAUDE_SKIP_DANGEROUS_MODE_PERMISSION_PROMPT=true
+ ```
+ 
+ 如果前端容器里 `/api/*` 代理到 `localhost:8000` 报 `ECONNREFUSED`，检查并修正：
+@@ -298,14 +288,14 @@ curl -fsSI http://<LAN_IP>:3001
+ - `multi-agent-platform-postgres-1`
+ - `multi-agent-platform-redis-1`
+ 
+-验证后端容器内 agent CLI：
++验证后端容器基础工具与 sillyspec 版本件（2026-10-08 起容器内无 node/claude/sillyspec 二进制）：
+ 
+ ```bash
+ docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend sh -lc \
+-  'node --version && npm --version && git --version && claude --version && sillyspec --version'
++  'git --version && curl --version | head -1 && cat /app/sillyspec-package.json | grep -m1 version'
+ ```
+ 
+-> `sillyspec --version` 反映实际装入版本（`.env` 不设 `SILLYSPEC_VERSION` = 取最新；需固定则回填版本号并重建）。
++> `/app/sillyspec-package.json` 的 version 反映构建时装入的 sillyspec 版本（技能随同包走；`.env` 不设 `SILLYSPEC_VERSION` = 取最新；需固定则回填版本号并重建）。
+ 
+ 验证 daemon 一键安装分发（`curl <SERVER>/daemon/install.sh | bash` 依赖的公开端点，无 `/api` 前缀）：
+ 
+@@ -325,25 +315,7 @@ curl -fsS http://127.0.0.1:8001/daemon/install.sh | bash -n && echo SYNTAX_OK
+ - `commit_sha` 为 `unknown` → 启动前未 `export COMMIT_SHA`（见「启动」节）。**注意：本机（Windows）按上文豁免故意不传，`unknown` 是稳定性权衡的预期结果，非缺陷。**
+ - 任一 `/daemon/*` 返回 `404` → daemon bundle 没构建进镜像，回「启动」节先 `pnpm bundle` 再 `--build --force-recreate` 重建 backend
+ 
+-验证 Docker 内 Claude Code settings，输出时必须遮蔽 token：
+-
+-```bash
+-docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend python - <<'PY'
+-import json
+-from pathlib import Path
+-settings = json.loads(Path('/app/.claude/settings.json').read_text())
+-if settings.get('env', {}).get('ANTHROPIC_AUTH_TOKEN'):
+-    settings['env']['ANTHROPIC_AUTH_TOKEN'] = '<set>'
+-print(json.dumps(settings, indent=2, ensure_ascii=False))
+-PY
+-```
+-
+-还要确认 Claude Code 所需 token 是已注入状态，但不要打印真实值：
+-
+-```bash
+-docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend sh -lc \
+-  'test -n "$ANTHROPIC_AUTH_TOKEN" && echo ANTHROPIC_AUTH_TOKEN=set || echo ANTHROPIC_AUTH_TOKEN=missing'
+-```
++（已退役，2026-10-08 起容器内无 claude、无 /app/.claude/settings.json——agent 凭据与模型配置在宿主 daemon 侧管理，本节验证不再适用。）
+ 
+ 防火墙检查（局域网访问不通时）：
+ 
+diff --git a/.codex/skills/sillyhub-docker-deploy/SKILL.md b/.codex/skills/sillyhub-docker-deploy/SKILL.md
+index 1cc8575f7..5796fe995 100644
+--- a/.codex/skills/sillyhub-docker-deploy/SKILL.md
++++ b/.codex/skills/sillyhub-docker-deploy/SKILL.md
+@@ -10,11 +10,9 @@ description: 用于把当前 SillyHub / multi-agent-platform 项目部署到本
+ 把当前仓库用 `deploy/docker-compose.yml` 启动为完整服务栈：
+ 
+ - frontend: Next.js
+-- backend: FastAPI
++- backend: FastAPI（python API + 静态分发：技能 manifest/bundle、daemon bundle；agent 执行在宿主 daemon，容器内无 claude/node 二进制——2026-10-08 瘦身）
+ - postgres
+ - redis
+-- Claude Code CLI in the backend container
+-- SillySpec CLI in the backend container
+ 
+ 默认优先保留用户已有本机进程。如果 `3000` 或 `8000` 已被占用，改用 `3001` / `8001`，不要直接杀进程。
+ 
+@@ -115,16 +113,14 @@ CORS_ALLOWED_ORIGINS=["http://localhost:3001","http://<LAN_IP>:3001"]
+ 
+ ## 代码侧部署兼容性
+ 
+-后端镜像必须内置 agent 运行依赖。检查 `backend/Dockerfile`：
++后端镜像职责 = python API + 静态分发（技能 manifest/bundle、daemon bundle）；agent 执行全在宿主 daemon（2026-10-08 起 claude/node 二进制已随 server-local 遗物清出镜像，见 thin 2026-10-08-backend-image-slim-no-claude）。检查 `backend/Dockerfile`：
+ 
+-- 使用 Node runtime stage 安装 Claude Code 与 SillySpec：
++- Node runtime stage 仅安装 SillySpec（npm 包，技能源；SILLYSPEC_VERSION 空 → 取最新 + SILLYSPEC_REFRESH 时间戳爆破缓存，填值 → pin）：
+   ```bash
+-  # CLAUDE_CODE_VERSION 写死；SILLYSPEC_VERSION 空 → 取最新，填值 → pin。
+-  npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION}
++  npm install -g sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION}
+   ```
+-- runtime stage 复制 `node`、`npm`、`npx`、`claude`、`sillyspec` 和 `/usr/local/lib/node_modules`。
+-- runtime apt 依赖包含 `git`，agent worktree 和 CLI 调用会用到。
+-- `HOME=/app`，并确保 `/app/.claude`、`/app/.cache`、`/app/.config`、`/tmp/.npm` 对 `app` 用户可写。
++- 技能与版本件从 sillyspec 包 COPY：`/app/sillyspec-skills/`（manifest/bundle 端点读）+ `/app/sillyspec-package.json`（无 node 环境的版本回显锚点）；runtime 无 node/npm/claude/sillyspec 二进制。
++- runtime apt 依赖包含 `git`（COMMIT_SHA 回退探测与 diff 收集 exec 它）。
+ - runtime stage 接收 `ARG COMMIT_SHA` 并 `ENV COMMIT_SHA=${COMMIT_SHA:-}`，让 `/api/health` 的 `commit_sha` 反映镜像版本（backend build context 是 `backend/`、不含仓库 `.git`，必须由 build arg 注入，否则恒为 `unknown`）。
+ 
+ 检查 `deploy/docker-compose.yml` 的 backend.build：
+@@ -138,25 +134,23 @@ backend:
+     additional_contexts:
+       daemon: ../sillyhub-daemon
+     args:
+-      CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.158}
+       SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-}   # 空 = 取最新
++      SILLYSPEC_REFRESH: ${SILLYSPEC_REFRESH:-}   # 时间戳爆破 npm 层缓存（打包脚本自动导出）
+       COMMIT_SHA: ${COMMIT_SHA:-}                 # 启动前 export，见「启动」节
+   env_file:
+     - .env
+   environment:
+     HOME: /app
+-    NPM_CONFIG_CACHE: /tmp/.npm
+ ```
+ 
+ > 版本号以 `deploy/docker-compose.yml` 实际 build args 为准，本文档中的数字仅为示例，可能滞后。
+ >
+ > **daemon 一键安装分发**：backend 通过 `additional_contexts: daemon` 把宿主机预构建的 `sillyhub-daemon/build/bundle/sillyhub-daemon.js` 与 `scripts/install.sh` 拷进镜像 `/app/daemon-dist/`，再由 3 个公开端点（无 `/api` 前缀）`GET /daemon/install.sh`、`GET /daemon/latest.json`、`GET /daemon/latest/sillyhub-daemon.js` 提供，使 `curl <SERVER>/daemon/install.sh | bash` 可用。daemon 代码改动后须重跑 `pnpm bundle` 再重建 backend。
+ 
+-后端容器应通过 `backend/docker-entrypoint.sh` 在启动时生成 `/app/.claude/settings.json`，不要把真实 `ANTHROPIC_AUTH_TOKEN` 写进已跟踪的 `.claude/settings.json`。本地真实值只放在 gitignored 的 `deploy/.env`。
+-Claude Code 相关变量要通过 `env_file: .env` 注入 backend 容器，避免宿主机 shell 里已有的 `ANTHROPIC_*` 变量覆盖 Docker 配置。
+-`/app/.claude` 应挂载到 `claude-data` volume，以保留官方 plugin marketplace 和已安装插件缓存。
++2026-10-08 起：容器内无 claude、无 `.claude/settings.json` 生成、无 claude-data 卷挂载——`.env` 里的 `ANTHROPIC_*`/`CLAUDE_*` 行对容器为惰性变量（agent 凭据走宿主 daemon 自身配置，不经容器）。
++
++（以下 Claude Code 容器配置已退役，2026-10-08 容器内无 claude，仅作历史参考；agent 模型配置走宿主 daemon 侧：）
+ 
+-推荐的 Docker 内 Claude Code 配置：
+ 
+ ```env
+ ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic
+@@ -166,10 +160,6 @@ ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.2
+ ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.2
+ ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.2
+ CLAUDE_CODE_MODEL=opus
+-CLAUDE_PLUGIN_FRONTEND_DESIGN_ENABLED=true
+-CLAUDE_PLUGIN_PLAYWRIGHT_ENABLED=true
+-CLAUDE_SYNC_OFFICIAL_PLUGINS_ON_START=true
+-CLAUDE_SKIP_DANGEROUS_MODE_PERMISSION_PROMPT=true
+ ```
+ 
+ 如果前端容器里 `/api/*` 代理到 `localhost:8000` 报 `ECONNREFUSED`，检查并修正：
+@@ -298,14 +288,14 @@ curl -fsSI http://<LAN_IP>:3001
+ - `multi-agent-platform-postgres-1`
+ - `multi-agent-platform-redis-1`
+ 
+-验证后端容器内 agent CLI：
++验证后端容器基础工具与 sillyspec 版本件（2026-10-08 起容器内无 node/claude/sillyspec 二进制）：
+ 
+ ```bash
+ docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend sh -lc \
+-  'node --version && npm --version && git --version && claude --version && sillyspec --version'
++  'git --version && curl --version | head -1 && cat /app/sillyspec-package.json | grep -m1 version'
+ ```
+ 
+-> `sillyspec --version` 反映实际装入版本（`.env` 不设 `SILLYSPEC_VERSION` = 取最新；需固定则回填版本号并重建）。
++> `/app/sillyspec-package.json` 的 version 反映构建时装入的 sillyspec 版本（技能随同包走；`.env` 不设 `SILLYSPEC_VERSION` = 取最新；需固定则回填版本号并重建）。
+ 
+ 验证 daemon 一键安装分发（`curl <SERVER>/daemon/install.sh | bash` 依赖的公开端点，无 `/api` 前缀）：
+ 
+@@ -325,25 +315,7 @@ curl -fsS http://127.0.0.1:8001/daemon/install.sh | bash -n && echo SYNTAX_OK
+ - `commit_sha` 为 `unknown` → 启动前未 `export COMMIT_SHA`（见「启动」节）。**注意：本机（Windows）按上文豁免故意不传，`unknown` 是稳定性权衡的预期结果，非缺陷。**
+ - 任一 `/daemon/*` 返回 `404` → daemon bundle 没构建进镜像，回「启动」节先 `pnpm bundle` 再 `--build --force-recreate` 重建 backend
+ 
+-验证 Docker 内 Claude Code settings，输出时必须遮蔽 token：
+-
+-```bash
+-docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend python - <<'PY'
+-import json
+-from pathlib import Path
+-settings = json.loads(Path('/app/.claude/settings.json').read_text())
+-if settings.get('env', {}).get('ANTHROPIC_AUTH_TOKEN'):
+-    settings['env']['ANTHROPIC_AUTH_TOKEN'] = '<set>'
+-print(json.dumps(settings, indent=2, ensure_ascii=False))
+-PY
+-```
+-
+-还要确认 Claude Code 所需 token 是已注入状态，但不要打印真实值：
+-
+-```bash
+-docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend sh -lc \
+-  'test -n "$ANTHROPIC_AUTH_TOKEN" && echo ANTHROPIC_AUTH_TOKEN=set || echo ANTHROPIC_AUTH_TOKEN=missing'
+-```
++（已退役，2026-10-08 起容器内无 claude、无 /app/.claude/settings.json——agent 凭据与模型配置在宿主 daemon 侧管理，本节验证不再适用。）
+ 
+ 防火墙检查（局域网访问不通时）：
+ 
+diff --git a/.sillyspec/changes/2026-10-09-msys-fonts-guard/flow-state.yaml b/.sillyspec/changes/2026-10-09-msys-fonts-guard/flow-state.yaml
+new file mode 100644
+index 000000000..a779d20a8
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-msys-fonts-guard/flow-state.yaml
+@@ -0,0 +1,25 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  动机：24 小时风险审查实证 deploy/scripts/onlyoffice-restore-fonts.sh 两处 docker exec 裸 POSIX
++  绝对路径参数（/usr/share/fonts/truetype/founder、/office-cn）在 Git Bash/MSYS 下被改写成 Windows 路径致脚本中断——同文件 L41-42/L49 已带
++  MSYS_NO_PATHCONV=1 前缀，仅 43-46 漏加（9d2702ffe 只修了 build-and-save.sh 一处同类问题）；另有 .claude/.codex 两份 sillyhub-docker-deploy
++  技能文档副本仍指导已退役的 claude-data 卷挂载与容器内 claude --version 验证（85c8704a7 只同步了 .zcode 副本，md5 实证漂移）。
++
++
++  成功标准：
++
++  - onlyoffice-restore-fonts.sh 两处 tar 解包 docker exec 与同文件既有调用一致带 MSYS_NO_PATHCONV=1，Git Bash 下路径参数不再被 MSYS 改写
++
++  - .claude/skills/sillyhub-docker-deploy/SKILL.md 与 .codex 副本同步为 .zcode 现行版内容（claude-data 卷/claude --version 等退役面描述消除）
++
++  - shell 语法门通过（bash -n），无其它回归面（脚本其余行零改动）
++autopilot: true
++baseline_commit: 7af8f14025eb323c39a6ec9573cc91fa633b5023
++updatedAt: '2026-10-08T17:51:46.306Z'
++baseline_sha256: 6f0edfe91c5839a56219a1de365dff87de13f563445b8da9cbc33c38b4b5f1f2
++
+diff --git a/.sillyspec/docs/frontend/modules/lib-knowledge.md b/.sillyspec/docs/frontend/modules/lib-knowledge.md
+index de2c2c408..2814bde0c 100644
+--- a/.sillyspec/docs/frontend/modules/lib-knowledge.md
++++ b/.sillyspec/docs/frontend/modules/lib-knowledge.md
+@@ -42,4 +42,7 @@ list 返回 { items, total } 包装；get 按文件名定位（非 id）
+ - 新增图查询数据面：`getKnowledgeGraphQuery(wsId, sub, {anchor,anchor2,edges,depth})` / `getKnowledgeGraphOverview()` / `getKnowledgeGraphNodes(wsId, search, limit?)` 三函数 + 16 个 Graph data 分型与三信封类型导出（全取 `components["schemas"]` 生成类型，GraphReason/GraphSub 从信封 reason 字段与 operations 参数提取零手写）。
+ - 消费方：知识图谱页（app/.../knowledge/graph/page.tsx）与 OpsDashboard 图维度卡；锚点补全走 nodes 端点 debounce 300ms 静默降级。
+ 
++### 2026-10-09-frontend-risk-fixes 增量
++- 图谱请求显式超时：`getKnowledgeGraphOverview` timeoutMs=200s（服务端三连 RPC 最坏 180s）、`getKnowledgeGraphQuery` timeoutMs=90s（单 RPC 60s）——不再吃 apiFetch GET 缺省 30s（大仓恒超时实证）；`getKnowledgeGraphNodes` 维持缺省（补全迟答无价值）。lib 层测试 `__tests__/knowledge-graph-timeout.test.ts` 钉住。
++
+ <!-- MANUAL_NOTES_END -->
+diff --git a/deploy/scripts/onlyoffice-restore-fonts.sh b/deploy/scripts/onlyoffice-restore-fonts.sh
+index 0fe3f1009..0b40a308e 100644
+--- a/deploy/scripts/onlyoffice-restore-fonts.sh
++++ b/deploy/scripts/onlyoffice-restore-fonts.sh
+@@ -40,10 +40,13 @@ done
+ echo "==> 安装字体到 $CONTAINER ..."
+ MSYS_NO_PATHCONV=1 docker exec -u root "$CONTAINER" mkdir -p \
+   /usr/share/fonts/truetype/founder /usr/share/fonts/truetype/office-cn
++# tar -C 的容器内绝对路径同样要 MSYS_NO_PATHCONV 守卫（Git Bash 下裸 /usr/...
++# 会被改写成 C:/Program Files/Git/usr/...，容器内找不到目录即 set -e 中断）——
++# 与上方 mkdir / 下方 fc-cache 同款（2026-10-09 风险审查补齐，9d2702ffe 同类）。
+ tar -C "$FONT_DIR/founder" -cf - . |
+-  docker exec -i "$CONTAINER" tar -C /usr/share/fonts/truetype/founder -xf -
++  MSYS_NO_PATHCONV=1 docker exec -i "$CONTAINER" tar -C /usr/share/fonts/truetype/founder -xf -
+ tar -C "$FONT_DIR/office-cn" -cf - . |
+-  docker exec -i "$CONTAINER" tar -C /usr/share/fonts/truetype/office-cn -xf -
++  MSYS_NO_PATHCONV=1 docker exec -i "$CONTAINER" tar -C /usr/share/fonts/truetype/office-cn -xf -
+ 
+ echo "==> 重建 fontconfig 缓存 ..."
+ MSYS_NO_PATHCONV=1 docker exec -u root "$CONTAINER" fc-cache -f >/dev/null 2>&1
+diff --git a/.sillyspec/changes/2026-10-09-msys-fonts-guard/design.md b/.sillyspec/changes/2026-10-09-msys-fonts-guard/design.md
+new file mode 100644
+index 000000000..bd655199e
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-msys-fonts-guard/design.md
+@@ -0,0 +1,51 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T17:51:46.012Z
++---
++# 设计记录（Design Record）— 2026-10-09-msys-fonts-guard
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++两处独立小改：(1) `deploy/scripts/onlyoffice-restore-fonts.sh` 的两行字体解包 `docker exec -i ... tar -C /usr/share/fonts/truetype/...` 补 `MSYS_NO_PATHCONV=1` 前缀——与同文件 mkdir（L41-42）与 fc-cache（L49）既有守卫形态完全一致，作者本知此坑仅这两行漏加（2026-10-09 风险审查实证；9d2702ffe 修 build-and-save.sh 时未覆盖此处）；补一行注释说明动机。(2) `.claude/skills/sillyhub-docker-deploy/SKILL.md` 与 `.codex/` 同名副本整文同步为 `.zcode` 现行版（cp 逐字拷贝）——85c8704a7 镜像瘦身只更新了 .zcode 副本，另两副本仍指导已退役的 claude-data 卷挂载与容器内 `claude --version` 验证（md5 实证漂移，最后改动 2026-08-13）。选整文 cp 而非逐段手改：三副本本就互为镜像，逐字一致可被 diff -q 验证，不引入转录错误。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `deploy/scripts/onlyoffice-restore-fonts.sh`：调用形态变化——两处 docker exec 增加 `MSYS_NO_PATHCONV=1` 环境前缀（该变量仅 MSYS 运行时识别，Linux 服务器上执行零影响）；脚本用法/参数/行为语义零变化。
++- `.claude/skills/sillyhub-docker-deploy/SKILL.md`、`.codex/skills/sillyhub-docker-deploy/SKILL.md`：正文内容同步（frontmatter 未动，diff 从正文 L10 起）；对 AI 工具是文档面，无代码契约。
++- 后端 / 前端 / daemon 代码：零改动。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用：脚本顺序执行 + 管道两段（tar 产流 → docker 消费流），守卫前缀只改参数改写行为不改管道时序；文档同步无事件面。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用：脚本自身无锁/共享文件面（字体目录在容器内，脚本调用约定单次执行）；文档副本为 git 管理的静态文件。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全：脚本中断语义保持既有 `set -euo pipefail`（任一步失败即停，字体索引重建可重跑幂等）；守卫前缀不改变失败传播。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不适用：脚本作用于单机单容器（容器名参数化），MSYS_NO_PATHCONV 是进程级环境前缀只影响该命令行；文档同步是仓库内三副本。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：无自动化测试钉住脚本行为（运维脚本无测试面），守卫正确性靠 bash -n + 与同文件既有守卫形态的目视一致性；真实解包验证留待下次字体恢复实操（容器重建后场景）。文档整文拷贝的风险是若 .zcode 版自身有误则三副本同错——但 .zcode 版是 85c8704a7 变更同步过的现行真相，方向上优于两份 2026-08-13 旧版。试过放弃：(a) 在脚本头部统一 export MSYS_NO_PATHCONV=1——放弃，作用域大于必要（会影响脚本内一切命令的路径转换，包括可能的宿主路径场景），同文件既有惯例是逐命令前缀；(b) 只更新漂移段落——放弃，逐段手改引入转录风险且不可 diff -q 验证。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | deploy/scripts/onlyoffice-restore-fonts.sh | 两处 docker exec tar 补 MSYS_NO_PATHCONV=1 + 注释 |
++| 修改 | .claude/skills/sillyhub-docker-deploy/SKILL.md | 同步 .zcode 现行版 |
++| 修改 | .codex/skills/sillyhub-docker-deploy/SKILL.md | 同步 .zcode 现行版 |
+diff --git a/.sillyspec/changes/2026-10-09-msys-fonts-guard/proposal.md b/.sillyspec/changes/2026-10-09-msys-fonts-guard/proposal.md
+new file mode 100644
+index 000000000..2703e66c2
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-msys-fonts-guard/proposal.md
+@@ -0,0 +1,27 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T17:51:46.012Z
++---
++# 提案书（Proposal）— 2026-10-09-msys-fonts-guard
++
++## 动机
++
++任务原话转写：动机：24 小时风险审查实证 deploy/scripts/onlyoffice-restore-fonts.sh 两处 docker exec 裸 POSIX 绝对路径参数（/usr/share/fonts/truetype/founder、/office-cn）在 Git Bash/MSYS 下被改写成 Windows 路径致脚本中断——同文件 L41-42/L49 已带 MSYS_NO_PATHCONV=1 前缀，仅 43-46 漏加（9d2702ffe 只修了 build-and-save.sh 一处同类问题）；另有 .claude/.codex 两份 sillyhub-docker-deploy 技能文档副本仍指导已退役的 claude-data 卷挂载与容器内 claude --version 验证（85c8704a7 只同步了 .zcode 副本，md5 实证漂移）。
++
++成功标准：
++- onlyoffice-restore-fonts.sh 两处 tar 解包 docker exec 与同文件既有调用一致带 MSYS_NO_PATHCONV=1，Git Bash 下路径参数不再被 MSYS 改写
++- .claude/skills/sillyhub-docker-deploy/SKILL.md 与 .codex 副本同步为 .zcode 现行版内容（claude-data 卷/claude --version 等退役面描述消除）
++- shell 语法门通过（bash -n），无其它回归面（脚本其余行零改动）
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. onlyoffice-restore-fonts.sh 两处 tar 解包 docker exec 与同文件既有调用一致带 MSYS_NO_PATHCONV=1，Git Bash 下路径参数不再被 MSYS 改写
++2. .claude/skills/sillyhub-docker-deploy/SKILL.md 与 .codex 副本同步为 .zcode 现行版内容（claude-data 卷/claude --version 等退役面描述消除）
++3. shell 语法门通过（bash -n），无其它回归面（脚本其余行零改动）
++
++## 成功标准（可验证）
++
++1. onlyoffice-restore-fonts.sh 两处 tar 解包 docker exec 与同文件既有调用一致带 MSYS_NO_PATHCONV=1，Git Bash 下路径参数不再被 MSYS 改写
++2. .claude/skills/sillyhub-docker-deploy/SKILL.md 与 .codex 副本同步为 .zcode 现行版内容（claude-data 卷/claude --version 等退役面描述消除）
++3. shell 语法门通过（bash -n），无其它回归面（脚本其余行零改动）
+diff --git a/.sillyspec/changes/2026-10-09-msys-fonts-guard/requirements.md b/.sillyspec/changes/2026-10-09-msys-fonts-guard/requirements.md
+new file mode 100644
+index 000000000..449c0ca2a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-msys-fonts-guard/requirements.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T17:51:46.012Z
++---
++# 需求规格（Requirements）— 2026-10-09-msys-fonts-guard
++
++## 功能需求
++
++### FR-01: onlyoffice-restore-fonts.sh 两处 tar 解包 docker exec 与同文件既有调用一致带 MSYS_NO_PATHCONV=1，Git Bash 下路径参数不再被 MSYS 改写
++
++- `deploy/scripts/onlyoffice-restore-fonts.sh` 的两处字体解包 `docker exec -i ... tar -C /usr/share/fonts/truetype/...` 必须带 `MSYS_NO_PATHCONV=1` 前缀（与同文件 mkdir/fc-cache 既有调用一致）；裸 POSIX 绝对路径参数禁止出现在无守卫的 docker 调用中。
++
++#### 场景：Git Bash 下字体恢复不再中断
++
++- Given Windows Git Bash 执行本脚本（头注释声明的用法形态）
++- When 运行到字体解包两行
++- Then `/usr/share/fonts/truetype/founder`、`/office-cn` 参数原样传入容器（不被 MSYS 改写成 `C:/Program Files/Git/usr/...`），tar 正常解包，脚本不因 `set -euo pipefail` 中断
++
++### FR-02: .claude/skills/sillyhub-docker-deploy/SKILL.md 与 .codex 副本同步为 .zcode 现行版内容（claude-data 卷/claude --version 等退役面描述消除）
++
++- `.claude/skills/sillyhub-docker-deploy/SKILL.md` 与 `.codex/skills/sillyhub-docker-deploy/SKILL.md` 的正文必须与 `.zcode` 现行版逐字一致（85c8704a7 只同步了 .zcode 副本的漏更），按旧文档操作不得再指导已退役的 claude-data 卷挂载或容器内 `claude --version` 验证。
++
++#### 场景：三副本一致
++
++- Given 85c8704a7 镜像瘦身后 .zcode 副本已更新、另两副本仍为 2026-08-13 旧版（md5 实证漂移）
++- When 同步拷贝
++- Then 三副本 md5 一致，旧版中「Claude Code CLI in the backend container」「claude-data 卷挂载」「claude --version 验证」等退役面描述不再出现
++
++### FR-03: shell 语法门通过（bash -n），无其它回归面（脚本其余行零改动）
++
++- 修改后的脚本必须通过 `bash -n` 语法门，且除两处守卫前缀与说明注释外脚本其余行必须零改动。
++
++#### 场景：最小改动面
++
++- Given 补丁应用后
++- When `bash -n deploy/scripts/onlyoffice-restore-fonts.sh` 与 `git diff` 检视
++- Then 语法门通过，diff 仅含两行守卫前缀 + 注释块 + 两份文档副本同步
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: 不适用：运维脚本无自动化测试面——以 bash -n 语法门 + diff 检视（守卫前缀与同文件 L41-49 既有形态一致）为验证；实测受容器环境限制留给下次字体恢复实操
++FR-02: 不适用：纯文档同步——以三副本 diff -q 一致性检查为验证（已实测 SYNCED）
++FR-03: test/deploy/scripts/onlyoffice-restore-fonts.sh「bash -n 语法门通过（已实测 SYNTAX-OK）」
+diff --git a/.sillyspec/changes/2026-10-09-msys-fonts-guard/tasks.md b/.sillyspec/changes/2026-10-09-msys-fonts-guard/tasks.md
+new file mode 100644
+index 000000000..176c7e388
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-msys-fonts-guard/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T17:51:46.012Z
++---
++# 任务注册表（Tasks）— 2026-10-09-msys-fonts-guard
++
++- [x] task-01: onlyoffice-restore-fonts.sh 两处 tar 解包 docker exec 与同文件既有调用一致带 MSYS_NO_PATHCONV=1，Git Bash 下路径参数不再被 MSYS 改写
++- [x] task-02: .claude/skills/sillyhub-docker-deploy/SKILL.md 与 .codex 副本同步为 .zcode 现行版内容（claude-data 卷/claude --version 等退役面描述消除）
++- [x] task-03: shell 语法门通过（bash -n），无其它回归面（脚本其余行零改动）

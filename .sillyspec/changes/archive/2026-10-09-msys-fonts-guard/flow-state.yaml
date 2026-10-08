@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -20,6 +28,7 @@ input: >-
   - shell 语法门通过（bash -n），无其它回归面（脚本其余行零改动）
 autopilot: true
 baseline_commit: 7af8f14025eb323c39a6ec9573cc91fa633b5023
-updatedAt: '2026-10-08T17:51:46.306Z'
+updatedAt: '2026-10-08T17:53:23.550Z'
 baseline_sha256: 6f0edfe91c5839a56219a1de365dff87de13f563445b8da9cbc33c38b4b5f1f2
+gate_summary: 'test: —｜lint: —｜门文件 4 个'
 

@@ -1,0 +1,53 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "7af8f14025eb323c39a6ec9573cc91fa633b5023",
+  "totals": {
+    "files": 4,
+    "additions": 36,
+    "deletions": 86
+  },
+  "rows": [
+    {
+      "path": ".claude/skills/sillyhub-docker-deploy/SKILL.md",
+      "additions": 14,
+      "deletions": 42,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": ".codex/skills/sillyhub-docker-deploy/SKILL.md",
+      "additions": 14,
+      "deletions": 42,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/lib-knowledge.md",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "deploy/scripts/onlyoffice-restore-fonts.sh",
+      "additions": 5,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "eeec465220e127ce77f21d79bfad3d011bc7d03b981b30c5ee8935409c368588",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T17:53:22.125Z"
+}

@@ -1,0 +1,51 @@
+{
+  "change": "2026-10-09-msys-fonts-guard",
+  "baseline": "7af8f14025eb323c39a6ec9573cc91fa633b5023",
+  "head": "f8f068a1fa86fad636f25df52ea68838e7b1c73b",
+  "files": [
+    ".claude/skills/sillyhub-docker-deploy/SKILL.md",
+    ".codex/skills/sillyhub-docker-deploy/SKILL.md",
+    ".sillyspec/changes/2026-10-09-msys-fonts-guard/design.md",
+    ".sillyspec/changes/2026-10-09-msys-fonts-guard/flow-state.yaml",
+    ".sillyspec/changes/2026-10-09-msys-fonts-guard/proposal.md",
+    ".sillyspec/changes/2026-10-09-msys-fonts-guard/requirements.md",
+    ".sillyspec/changes/2026-10-09-msys-fonts-guard/tasks.md",
+    ".sillyspec/docs/frontend/modules/lib-knowledge.md",
+    "deploy/scripts/onlyoffice-restore-fonts.sh"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 194,
+    "deletions": 86
+  },
+  "savedAt": "2026-10-08T17:53:22.125Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "deploy",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [
+    {
+      "dir": ".claude/skills/sillyhub-docker-deploy",
+      "files": 1
+    },
+    {
+      "dir": ".codex/skills/sillyhub-docker-deploy",
+      "files": 1
+    }
+  ],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "eeec465220e127ce77f21d79bfad3d011bc7d03b981b30c5ee8935409c368588",
+  "patchStatus": "ok"
+}
