@@ -72,17 +72,40 @@ async def close_interactive_run(
     )
     # Idempotent: already terminal → no-op return (daemon retry safety).
     if agent_run.status in TERMINAL_TURN_STATUSES:
-        _rsvc.log.info(
-            "interactive_run_close_already_terminal",
-            lease_id=str(lease_id),
-            agent_run_id=str(agent_run.id),
-            status=agent_run.status,
-        )
-        # 已持 FOR UPDATE 行锁：rollback 释放（无写入可回滚），refresh 重取
-        # 属性供响应序列化读取（rollback 会过期 ORM 实例属性）。
-        await svc._session.rollback()
-        await svc._session.refresh(agent_run)
-        return agent_run
+        # 2026-10-08-backend-restart-fake-failed / FR-02：重启误杀回正——启动
+        # 清理（_cleanup_stale_runs_impl）只看 DB 状态，会把仍在 daemon 上实际
+        # 执行的轮判成 failed + SERVICE_RESTART_INTERRUPTED；daemon 跑完后迟到
+        # 的成功结果原先被这里 no-op 拒收，UI 永远显示假失败（线上实证：会话
+        # 968e58be，2026-10-08 11:28 部署重启误杀、11:34 迟到成功被拒）。唯一
+        # 例外：误杀标记 + 本次上报成功 → 清掉误杀残留（error_code/error_detail/
+        # 兜底文案）后落入正常收口流程，回正 completed 并重发终态事件；其余终态
+        # 情形维持 no-op 拒收（幂等语义不变，失败/打断迟到不回正）。
+        if (
+            agent_run.status == "failed"
+            and agent_run.error_code == "SERVICE_RESTART_INTERRUPTED"
+            and status == "success"
+            and not is_error
+        ):
+            _rsvc.log.info(
+                "interactive_run_close_retroactive_success",
+                lease_id=str(lease_id),
+                agent_run_id=str(agent_run.id),
+            )
+            agent_run.error_code = None
+            agent_run.error_detail = None
+            agent_run.output_redacted = None
+        else:
+            _rsvc.log.info(
+                "interactive_run_close_already_terminal",
+                lease_id=str(lease_id),
+                agent_run_id=str(agent_run.id),
+                status=agent_run.status,
+            )
+            # 已持 FOR UPDATE 行锁：rollback 释放（无写入可回滚），refresh 重取
+            # 属性供响应序列化读取（rollback 会过期 ORM 实例属性）。
+            await svc._session.rollback()
+            await svc._session.refresh(agent_run)
+            return agent_run
     now = datetime.now(UTC)
     await _close_apply_terminal(
         svc,
