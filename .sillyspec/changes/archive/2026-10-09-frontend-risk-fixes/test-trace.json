@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-frontend-risk-fixes",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-frontend-risk-fixes:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx「条目详情 fetch 失败 → 内容区就近错误态 + 重试恢复（不再永久加载占位）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-frontend-risk-fixes"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-frontend-risk-fixes:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「剪贴板不可用（不安全上下文 clipboard=undefined）→ 失败反馈，不再假成功」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-frontend-risk-fixes"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-frontend-risk-fixes:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「复制成功 → 成功提示按真实结果出现」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-frontend-risk-fixes"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-frontend-risk-fixes:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts「overview 显式 200s（三连 RPC 最坏 180s + 余量），不吃 GET 缺省 30s」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-frontend-risk-fixes"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-frontend-risk-fixes:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts「query 显式 90s（单 RPC 60s + 余量）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-frontend-risk-fixes"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-frontend-risk-fixes:flow:测试绑定FR-04",
+      "tests": [
+        "test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「用户交互置位（滚轮缩放/指针按下拖拽双源）后一律停跟随，refit 不再抢视口」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-frontend-risk-fixes"
+    }
+  ]
+}

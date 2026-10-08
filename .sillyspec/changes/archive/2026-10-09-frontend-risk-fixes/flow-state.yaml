@@ -1,0 +1,43 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：24 小时风险审查实证前端四处高置信缺陷——知识库页 fetch 失败后内容区永久「正在加载」（323faef56 回归，错误分支只设页顶错误条不恢复内容）、锚点复制在不安全上下文假成功（navigator.clipboard
+  可选链吞错 + message.success 无条件弹，4393ae1ae）、图谱 overview 三连 RPC 服务端最坏 180s vs 前端 GET 缺省 30s abort 大仓恒走错误分支（e8da254ce）、图谱
+  re-fit「用户交互即停跟随」只在滚轮置位拖拽不停（fa016a4b4 与提交声明不符）。
+
+
+  成功标准：
+
+  - 知识库页选择 fetch 失败时内容区显示可判定的错误态（不再永久「正在加载」占位），后续重新选择可恢复
+
+  - 锚点复制按真实结果反馈：复制成功才提示成功，clipboard 不可用/失败提示失败（对齐 governance-cards copyPrompt 既有范式）
+
+  - 知识图谱 overview 与 query 请求前端超时对齐服务端 RPC 预算（显式 timeoutMs ≥ 服务端最坏情形），大仓不再恒超时
+
+  - 图谱画布 pointer 按下（拖拽/平移）与滚轮同样置位用户交互标记，自动 re-fit 跟随即停（兑现提交声明「拖拽/缩放即停」）
+
+  - 既有相关面测试保持绿；四处修复各有用例钉住（先红后绿或行为断言）
+autopilot: true
+baseline_commit: 1548a5f49b45f9590b2f75c438d5e2cc7658976f
+updatedAt: '2026-10-08T17:51:07.039Z'
+baseline_sha256: 048ccca5edb429881edf50e4ce5fcc7f393ba180c952cd1c979d05d08067ce47
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx7)+fr(3)（22.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008174657\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（10.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008174657\test-result.json｜门文件
+  8 个
+

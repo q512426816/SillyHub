@@ -1,0 +1,547 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+index f22350ec5..6567ea6e1 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+@@ -421,6 +421,34 @@ describe("知识库页（task-03 zone 分组树）", () => {
+     expect(screen.queryByTestId("entry-card-list")).not.toBeInTheDocument();
+   });
+ 
++  it("条目详情 fetch 失败 → 内容区就近错误态 + 重试恢复（不再永久加载占位）", async () => {
++    // 2026-10-09 风险审查（323faef56 回归）：selectEntry 中间态切断后 catch 只设
++    // 页顶 pageError，内容区无限期停在「正在加载」占位（错误条与内容区相隔整个
++    // 运营面板，无重试出口）。
++    mockGet.mockRejectedValueOnce(new Error("boom"));
++    mockGet.mockResolvedValue(
++      entry({
++        filename: "conventions.md",
++        path: ".sillyspec/knowledge/conventions.md",
++        title: "约定",
++        content: "# 你好",
++      }),
++    );
++    renderPage();
++    await waitForTree(["知识手册", "conventions.md"]);
++
++    fireEvent.click(closestAntdTreeNodeWrapper(screen.getByText("conventions.md"))!);
++    await waitFor(() => expect(mockGet).toHaveBeenCalledWith(WS, "conventions.md"));
++    // 失败 → 内容区错误分支出现，加载占位消失（非 ApiError 走通用文案）。
++    expect(await screen.findByTestId("entry-error")).toHaveTextContent("加载文档失败");
++    expect(screen.queryByTestId("entry-loading")).not.toBeInTheDocument();
++
++    // 重试 → 同文件重发 selectEntry，成功后正常渲染条目卡。
++    fireEvent.click(screen.getByRole("button", { name: "重试" }));
++    expect(await screen.findByTestId("entry-card-list")).toBeInTheDocument();
++    expect(screen.queryByTestId("entry-error")).not.toBeInTheDocument();
++  });
++
+   it("树栏默认 280px，拖动把手调宽并写入 localStorage 记忆", async () => {
+     renderPage();
+     await waitForTree(["知识手册", "INDEX.md"]);
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+index a6b80c136..02abb4fd9 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+@@ -297,6 +297,13 @@ export default function KnowledgePage({ params }: Props) {
+   const [viewMode, setViewMode] = useState<"cards" | "raw">("cards");
+   const [loading, setLoading] = useState(true);
+   const [pageError, setPageError] = useState<string | null>(null);
++  /**
++   * 条目内容区错误态（2026-10-09 风险审查）：selectEntry 中间态切断后 fetch
++   * 失败，原实现只设页顶 pageError，内容区停在「正在加载」占位无出口（错误
++   * 条与内容区相隔整个运营面板）。entryError 驱动内容区就近的错误分支 +
++   * 重试入口；新一次选择即清除。
++   */
++  const [entryError, setEntryError] = useState<string | null>(null);
+   // task-05 写入口态：沉淀弹层开关 + 条目编辑开关。
+   const [precipitateOpen, setPrecipitateOpen] = useState(false);
+   const [distillHistoryOpen, setDistillHistoryOpen] = useState(false);
+@@ -374,6 +381,7 @@ export default function KnowledgePage({ params }: Props) {
+       // 是旧文件的，产生错配闪烁（INDEX 名 + 无路由行内容 →「0 条路由」幻象；
+       // 手册名 + INDEX 内容 → 路由行被当小节卡渲染的「新样式一闪」）。
+       setSelectedContent(null);
++      setEntryError(null);
+       setEditing(false);
+       setViewMode("cards");
+       getKnowledge(workspaceId, filename)
+@@ -407,7 +415,11 @@ export default function KnowledgePage({ params }: Props) {
+         })
+         .catch((err) => {
+           if (seq !== selectSeqRef.current) return; // 过期响应的错误同样丢弃
+-          setPageError(err instanceof ApiError ? err.message : "加载文档失败");
++          const text = err instanceof ApiError ? err.message : "加载文档失败";
++          setPageError(text);
++          // 内容区就近错误分支（见 entryError 声明注释）——不再永久停在
++          // 「正在加载」占位。
++          setEntryError(text);
+         });
+     },
+     [workspaceId],
+@@ -591,6 +603,25 @@ export default function KnowledgePage({ params }: Props) {
+               <div className="py-12 text-center text-xs text-muted-foreground">
+                 选择左侧文档查看内容。
+               </div>
++            ) : entryError !== null ? (
++              /* 条目加载失败态（2026-10-09）：fetch 失败不再永久停在加载占位——
++                 就近展示错误与重试（重试=对当前文件重发 selectEntry，seq 守卫
++                 天然覆盖）。 */
++              <div
++                className="flex flex-col items-center gap-3 py-12 text-center"
++                data-testid="entry-error"
++              >
++                <div className="text-xs text-destructive">
++                  {entryError}（{selectedFilename}）
++                </div>
++                <Button
++                  variant="outline"
++                  size="sm"
++                  onClick={() => selectedFilename && selectEntry(selectedFilename)}
++                >
++                  重试
++                </Button>
++              </div>
+             ) : selectedContent === null ? (
+               /* 加载态（2026-10-08）：selectEntry 已清旧内容，fetch 返回前显示加载
+                  占位而非错配渲染（见 selectEntry 中间态切断注释）。 */
+diff --git a/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx b/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
+index a467c4bbf..fd2da5ce0 100644
+--- a/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
+@@ -433,6 +433,31 @@ describe("卡片头锚点复制（FR-02 / D-003，原型 panel-c 🔗）", () =>
+     fireEvent.click(btn);
+     expect(writeText).toHaveBeenCalledWith("generated/demo.md");
+   });
++
++  it("剪贴板不可用（不安全上下文 clipboard=undefined）→ 失败反馈，不再假成功", async () => {
++    // 2026-10-09 风险审查（4393ae1ae）：http 非 localhost 下 navigator.clipboard
++    // 为 undefined，原可选链 + 无条件 message.success 让「已复制」成为假成功。
++    Object.defineProperty(navigator, "clipboard", {
++      value: undefined,
++      configurable: true,
++    });
++
++    renderList({ filename: "conventions.md", zone: "top", content: MANUAL_CONTENT });
++    fireEvent.click(screen.getAllByTestId("anchor-copy-btn")[0]!);
++    expect(await screen.findByText("复制失败：剪贴板不可用")).toBeInTheDocument();
++    expect(screen.queryByText("锚点已复制")).not.toBeInTheDocument();
++  });
++
++  it("复制成功 → 成功提示按真实结果出现", async () => {
++    Object.defineProperty(navigator, "clipboard", {
++      value: { writeText: vi.fn().mockResolvedValue(undefined) },
++      configurable: true,
++    });
++
++    renderList({ filename: "conventions.md", zone: "top", content: MANUAL_CONTENT });
++    fireEvent.click(screen.getAllByTestId("anchor-copy-btn")[0]!);
++    expect(await screen.findByText("锚点已复制")).toBeInTheDocument();
++  });
+ });
+ 
+ describe("决策形态渲染（zone=decisions）", () => {
+diff --git a/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts b/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts
+index 390314494..cf61c3008 100644
+--- a/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts
++++ b/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts
+@@ -27,6 +27,7 @@ import {
+   graphBbox,
+   liteClusterLayout,
+   pickNode,
++  shouldAutoRefit,
+   staticLayout,
+   stepForceLayout,
+   type LiteClusterInput,
+@@ -299,3 +300,24 @@ describe("edgeDash（边三档线型）", () => {
+     expect(edgeDash("foo")).toEqual({ dash: [], width: 1.6 });
+   });
+ });
++
++// ── shouldAutoRefit：力场收敛自动 re-fit 跟随判定（2026-10-09 风险审查）──────
++
++describe("shouldAutoRefit（自动 re-fit 跟随判定）", () => {
++  it("未交互：仅 90/180/270/360 tick 重适配视口，其余 tick 不动", () => {
++    expect(shouldAutoRefit(89, false)).toBe(false);
++    expect(shouldAutoRefit(90, false)).toBe(true);
++    expect(shouldAutoRefit(180, false)).toBe(true);
++    expect(shouldAutoRefit(270, false)).toBe(true);
++    expect(shouldAutoRefit(360, false)).toBe(true);
++    expect(shouldAutoRefit(361, false)).toBe(false);
++  });
++
++  it("用户交互置位（滚轮缩放/指针按下拖拽双源）后一律停跟随，refit 不再抢视口", () => {
++    // 2026-10-09：原实现只 onWheel 置位，拖拽/平移不停跟随（数据到达后前
++    // 360 tick 内 refit 把视口拽回，与「拖拽/缩放即停」声明不符）。
++    for (const t of [90, 180, 270, 360]) {
++      expect(shouldAutoRefit(t, true)).toBe(false);
++    }
++  });
++});
+diff --git a/frontend/src/components/knowledge/entry-card-list.tsx b/frontend/src/components/knowledge/entry-card-list.tsx
+index 4d2e6616b..f7e6f67e6 100644
+--- a/frontend/src/components/knowledge/entry-card-list.tsx
++++ b/frontend/src/components/knowledge/entry-card-list.tsx
+@@ -394,19 +394,26 @@ function UseBadge({ count, title }: { count: number; title: string }) {
+   );
+ }
+ 
+-/** 复制全文路径（jsdom/旧浏览器无 clipboard 时静默失败，路径文本仍可见）。 */
+-async function copyText(text: string): Promise<void> {
++/**
++ * 复制文本：返回是否真写入剪贴板——不安全上下文（http 非 localhost）下
++ * ``navigator.clipboard`` 为 undefined、权限拒绝/焦点丢失时 writeText 抛错，
++ * 一律 false（2026-10-09 风险审查：原 void+可选链形态让假成功提示成为可能）。
++ * 全文路径等「本体已是可见文本」的调用方仍可忽略返回值静默降级。
++ */
++async function copyText(text: string): Promise<boolean> {
+   try {
+-    await navigator.clipboard?.writeText(text);
++    await navigator.clipboard.writeText(text);
++    return true;
+   } catch {
+-    // 忽略——链接本体已是可见文本。
++    return false;
+   }
+ }
+ 
+ /**
+  * 锚点复制图标（FR-02 / D-003，原型 panel-c 卡片头 🔗）：点击复制锚点定位串
+- * （manual=``文件#slug``；SingleCard=裸文件名，Grill CC-02），antd message 成功
+- * 提示（经 <AntApp> 注入走主题）；交互对齐 DecisionCard「全文 ↗」复制先例。
++ * （manual=``文件#slug``；SingleCard=裸文件名，Grill CC-02），antd message 按
++ * 真实复制结果反馈（经 <AntApp> 注入走主题；对齐 governance-cards copyPrompt
++ * 范式——剪贴板不可用时不再弹「已复制」假成功）。
+  */
+ function AnchorCopyButton({ anchor }: { anchor: string }) {
+   const { message } = AntdApp.useApp();
+@@ -417,8 +424,10 @@ function AnchorCopyButton({ anchor }: { anchor: string }) {
+       aria-label={`复制锚点 ${anchor}`}
+       title={`锚点定位（点击复制）：${anchor}`}
+       onClick={() => {
+-        void copyText(anchor);
+-        void message.success("锚点已复制");
++        void copyText(anchor).then((copied) => {
++          if (copied) void message.success("锚点已复制");
++          else void message.error("复制失败：剪贴板不可用");
++        });
+       }}
+       className="shrink-0 rounded px-1 text-[11px] leading-4 text-brand-600/70 transition-colors hover:bg-brand-100 hover:text-brand-700"
+     >
+diff --git a/frontend/src/components/knowledge/graph-canvas.tsx b/frontend/src/components/knowledge/graph-canvas.tsx
+index dfc3e7a46..fee5935e0 100644
+--- a/frontend/src/components/knowledge/graph-canvas.tsx
++++ b/frontend/src/components/knowledge/graph-canvas.tsx
+@@ -436,6 +436,15 @@ export function graphBbox(nodes: ReadonlyArray<SimNode>): BBox {
+   return { x0, y0, x1, y1 };
+ }
+ 
++/**
++ * 自动 re-fit 判定（2026-10-09 提取供测试）：数据到达后前 6 秒在
++ * 90/180/270/360 tick 上自动重适配视口；用户已交互（滚轮缩放或指针按下
++ * 拖拽/平移，双源置位 userTouched）后一律不再抢视口。
++ */
++export function shouldAutoRefit(tick: number, userTouched: boolean): boolean {
++  return !userTouched && [90, 180, 270, 360].includes(tick);
++}
++
+ /** 视口适配（原型 fitView 直译）：缩放夹 [0.08,2]、pad 60、居中。 */
+ export function fitView(bbox: BBox, w: number, h: number): ViewBox {
+   const pad = 60;
+@@ -869,13 +878,10 @@ export function GraphCanvas({
+         // 力场收敛跟随：数据到达后前 6 秒按衰减节奏自动重新适配视口
+         // （fitView 只在数据瞬间执行一次，节点被力场从螺旋初始位推开后
+         // 视口不跟随 → 节点漂出视野/挤一角大片留白——2026-10-08 用户实证）。
+-        // 用户一旦交互（拖拽/缩放）即停跟随，避免抢操作。
++        // 用户一旦交互（拖拽/缩放，滚轮与指针按下双源置位）即停跟随，避免抢操作。
+         forceTickRef.current += 1;
+-        const t = forceTickRef.current;
+-        const refitAt = [90, 180, 270, 360];
+         if (
+-          !userTouchedRef.current &&
+-          refitAt.includes(t) &&
++          shouldAutoRefit(forceTickRef.current, userTouchedRef.current) &&
+           simRef.current.length > 0
+         ) {
+           viewRef.current = fitView(graphBbox(simRef.current), sizeRef.current.w, sizeRef.current.h);
+@@ -917,6 +923,10 @@ export function GraphCanvas({
+   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+     const canvas = canvasRef.current;
+     if (!canvas) return;
++    // 任何指针按下（拖节点/平移/点选）都算用户交互——与滚轮同款置位停自动
++    // re-fit 跟随（2026-10-09 风险审查：原实现只 onWheel 置位，数据到达后
++    // 前 360 tick 内拖拽会被 refit 抢回视口，与「拖拽/缩放即停」声明不符）。
++    userTouchedRef.current = true;
+     const rect = canvas.getBoundingClientRect();
+     const cx = e.clientX - rect.left;
+     const cy = e.clientY - rect.top;
+diff --git a/frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts b/frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts
+new file mode 100644
+index 000000000..e1f56705e
+--- /dev/null
++++ b/frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts
+@@ -0,0 +1,40 @@
++/**
++ * 知识图谱请求超时对齐（2026-10-09 风险审查 / e8da254ce 后续修复）。
++ *
++ * 背景：backend GRAPH_RPC_TIMEOUT=60s——overview 内部按序发 summary→orphans→
++ * dangling 三 RPC（最坏 180s），query 单 RPC（最坏 60s）；apiFetch 对 GET 缺省
++ * 30s abort，大仓全量建图累计超 30s 时前端恒先于服务端判死 abort → 图谱页
++ * 整页降级「暂不可用」（reason=rpc_error 错误分支）。本文件钉住两个请求的
++ * 显式 timeoutMs 预算，防回归到缺省 30s。
++ */
++
++import { beforeEach, describe, expect, it, vi } from "vitest";
++
++const apiFetchMock = vi.hoisted(() => vi.fn());
++vi.mock("@/lib/api", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("@/lib/api")>();
++  return { ...actual, apiFetch: apiFetchMock };
++});
++
++import { getKnowledgeGraphOverview, getKnowledgeGraphQuery } from "@/lib/knowledge";
++
++describe("知识图谱请求超时对齐服务端 RPC 预算", () => {
++  beforeEach(() => {
++    apiFetchMock.mockReset();
++    apiFetchMock.mockResolvedValue({ available: false, reason: "rpc_error", data: null });
++  });
++
++  it("overview 显式 200s（三连 RPC 最坏 180s + 余量），不吃 GET 缺省 30s", async () => {
++    await getKnowledgeGraphOverview("ws-1");
++    expect(apiFetchMock).toHaveBeenCalledTimes(1);
++    const options = apiFetchMock.mock.calls[0]![1] as { timeoutMs?: number } | undefined;
++    expect(options?.timeoutMs).toBe(200_000);
++  });
++
++  it("query 显式 90s（单 RPC 60s + 余量）", async () => {
++    await getKnowledgeGraphQuery("ws-1", "neighbors", { anchor: "conventions.md" });
++    expect(apiFetchMock).toHaveBeenCalledTimes(1);
++    const options = apiFetchMock.mock.calls[0]![1] as { timeoutMs?: number } | undefined;
++    expect(options?.timeoutMs).toBe(90_000);
++  });
++});
+diff --git a/frontend/src/lib/knowledge.ts b/frontend/src/lib/knowledge.ts
+index e70fd7e7f..755594917 100644
+--- a/frontend/src/lib/knowledge.ts
++++ b/frontend/src/lib/knowledge.ts
+@@ -396,8 +396,11 @@ export async function getKnowledgeGraphQuery(
+   if (params?.anchor2 !== undefined) qs.set("anchor2", params.anchor2);
+   if (params?.edges !== undefined) qs.set("edges", params.edges);
+   if (params?.depth !== undefined) qs.set("depth", String(params.depth));
++  // 超时对齐服务端 RPC 预算（2026-10-09 风险审查）：backend GRAPH_RPC_TIMEOUT=60s，
++  // apiFetch GET 缺省 30s 会先于服务端判死 abort，大仓慢查询恒走错误分支。
+   return apiFetch<GraphQueryOut>(
+     `/api/workspaces/${workspaceId}/knowledge/graph/query?${qs.toString()}`,
++    { timeoutMs: 90_000 },
+   );
+ }
+ 
+@@ -412,8 +415,13 @@ export async function getKnowledgeGraphQuery(
+ export async function getKnowledgeGraphOverview(
+   workspaceId: string,
+ ): Promise<GraphOverviewOut> {
++  // 超时对齐服务端 RPC 预算（2026-10-09 风险审查）：overview 内部按序发
++  // summary→orphans→dangling 三 RPC（各 GRAPH_RPC_TIMEOUT=60s，最坏 180s），
++  // apiFetch GET 缺省 30s 在大仓（全量建图秒级-分钟级）恒先 abort → 整页
++  // 降级「暂不可用」；显式 200s 留超时余量，让服务端逐条容错语义生效。
+   return apiFetch<GraphOverviewOut>(
+     `/api/workspaces/${workspaceId}/knowledge/graph/overview`,
++    { timeoutMs: 200_000 },
+   );
+ }
+diff --git a/.sillyspec/changes/2026-10-09-frontend-risk-fixes/design.md b/.sillyspec/changes/2026-10-09-frontend-risk-fixes/design.md
+new file mode 100644
+index 000000000..6538b7319
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-frontend-risk-fixes/design.md
+@@ -0,0 +1,58 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T17:38:11.159Z
++---
++# 设计记录（Design Record）— 2026-10-09-frontend-risk-fixes
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++四处独立小修，全部来自 2026-10-09 风险审查的高置信发现：(1) `knowledge/page.tsx` 新增 `entryError` 内容区错误态——selectEntry 失败分支就近渲染错误文案 + 重试按钮（重试=对当前文件重发 selectEntry，seq 守卫天然覆盖），修复 323faef56「中间态切断」引入的永久加载占位回归；(2) `entry-card-list.tsx` 的 `copyText` 改返回 boolean（去掉可选链，clipboard undefined 时 writeText 访问抛错进 catch 返回 false），AnchorCopyButton 按真实结果 success/error 提示，对齐 governance-cards copyPrompt 范式；(3) `knowledge.ts` 的 overview/query 两个请求显式传 `timeoutMs`（200s/90s）对齐服务端 GRAPH_RPC_TIMEOUT=60s×1 或 ×3 的最坏预算，不再吃 apiFetch GET 缺省 30s；(4) `graph-canvas.tsx` 的 `onPointerDown` 置位 `userTouchedRef`（与 onWheel 双源），并把 re-fit 判定提取为导出纯函数 `shouldAutoRefit(tick, userTouched)` 供测试钉住语义。选择就地最小修复而非重构：四处均为一两处点的行为缺陷，无接口面变化。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `frontend/src/components/knowledge/entry-card-list.tsx`：模块内私有 `copyText(text): Promise<boolean>`（原 void）；AnchorCopyButton 点击反馈从无条件成功改为按结果 success/error。无对外导出变化。
++- `frontend/src/components/knowledge/graph-canvas.tsx`：新导出纯函数 `shouldAutoRefit(tick, userTouched)`（effect 内原内联判定改调它）；`onPointerDown` 新增置位行为。既有导出零变化。
++- `frontend/src/lib/knowledge.ts`：`getKnowledgeGraphOverview`/`getKnowledgeGraphQuery` 内部 apiFetch options 增加 `timeoutMs`（200_000/90_000）；签名零变化。
++- `frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx`：新增组件内 state `entryError` 与内容区 `entry-error` 分支（data-testid 契约新增）；props 零变化。
++- HTTP 端点 / 后端 / api-types：零变化（纯前端行为修复，无 schema 触达，不需 gen:types）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++成立。entryError 与既有 seq 守卫正交：过期响应（含其错误）仍被丢弃，entryError 只由最新 seq 的失败置位，新一次选择即清；图谱超时只改 abort 时点不改响应处理序。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不涉及并发写面——四处均为纯前端单会话交互态/UI 反馈/请求配置；copyText 无共享态，shouldAutoRefit 为纯函数。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全。entryError 随组件卸载销毁；重试走同一 selectEntry 通道不产生叠加请求外的新生命周期；timeoutMs 只延长等待，页面卸载时 query 取消语义（AbortController 外部 signal 合并）不变；userTouchedRef 是画布实例内 ref，数据重建 effect 复位行为保持原样（fitSignal 语义未动）。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会。四处均无跨工作区共享态；entryError/timeoutMs/shouldAutoRefit 作用域都在单组件或单请求工厂内。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：overview 等待最长 200s——期间 UI 无中间反馈（react-query isLoading 态），用户可能重复刷新；属既有 UX 债非本变更引入，后续可加进度提示。次风险：copyText 去掉可选链后，jsdom/旧浏览器上 clipboard 缺失路径从「静默 no-op」变为「失败提示」——全文路径复制（fulltext-link）调用方仍忽略返回值静默降级（本体是可见文本），锚点复制从假成功变真失败提示，方向正确。试过放弃：(a) 渲染级测试钉 onPointerDown 置位——放弃，jsdom 无 canvas 2D 上下文，rAF 循环 effect 早退不可观测，改为提取 shouldAutoRefit 纯函数 + 双源置位一行接线（仓库 graph-canvas.test 纯函数惯例）；(b) 后端并发化 overview 三 RPC 缩短总预算——放弃，RPC 客户端并发安全性未证且超出本变更（前端风险收口）范围。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx | entryError 状态 + 内容区错误分支 + 重试 |
++| 修改 | frontend/src/components/knowledge/entry-card-list.tsx | copyText 返回 boolean + 锚点复制按结果反馈 |
++| 修改 | frontend/src/components/knowledge/graph-canvas.tsx | onPointerDown 置位 userTouched + shouldAutoRefit 提取 |
++| 修改 | frontend/src/lib/knowledge.ts | overview/query 显式 timeoutMs 200s/90s |
++| 修改 | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | 失败态 + 重试用例 |
++| 修改 | frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx | 剪贴板失败/成功反馈用例 ×2 |
++| 修改 | frontend/src/components/knowledge/__tests__/graph-canvas.test.ts | shouldAutoRefit 用例 ×2 |
++| 新增 | frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts | 超时对齐用例 ×2 |
+diff --git a/.sillyspec/changes/2026-10-09-frontend-risk-fixes/requirements.md b/.sillyspec/changes/2026-10-09-frontend-risk-fixes/requirements.md
+new file mode 100644
+index 000000000..f8f66a782
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-frontend-risk-fixes/requirements.md
+@@ -0,0 +1,73 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T17:38:11.159Z
++---
++# 需求规格（Requirements）— 2026-10-09-frontend-risk-fixes
++
++## 功能需求
++
++### FR-01: 知识库页选择 fetch 失败时内容区显示可判定的错误态（不再永久「正在加载」占位），后续重新选择可恢复
++
++- 知识库页条目详情 fetch 失败时，内容区必须进入就近错误分支（`entry-error`，含错误文案与重试入口），禁止停留在「正在加载」占位；新一次选择或重试必须清除错误态并正常恢复渲染。
++
++#### 场景：fetch 失败 → 错误态 → 重试恢复
++
++- Given 用户点选文件后 getKnowledge 拒绝（非 ApiError 走通用文案）
++- When 失败落地
++- Then 内容区显示 `entry-error`（含「加载文档失败」文案与文件名）、`entry-loading` 消失；点击「重试」重发 selectEntry，成功后条目卡渲染且 `entry-error` 消失
++
++### FR-02: 锚点复制按真实结果反馈：复制成功才提示成功，clipboard 不可用/失败提示失败（对齐 governance-cards copyPrompt 既有范式）
++
++- 锚点复制按钮的提示必须以 `copyText` 的真实结果为准：返回真才 `message.success`；clipboard 为 undefined（不安全上下文）或 writeText 抛错时必须 `message.error` 失败文案，禁止无条件假成功。
++
++#### 场景：不安全上下文
++
++- Given http 非 localhost 下 `navigator.clipboard === undefined`
++- When 点击锚点复制按钮
++- Then 出现「复制失败：剪贴板不可用」，不出现「锚点已复制」
++
++#### 场景：复制成功
++
++- Given clipboard.writeText 正常 resolve
++- When 点击锚点复制按钮
++- Then 出现「锚点已复制」
++
++### FR-03: 知识图谱 overview 与 query 请求前端超时对齐服务端 RPC 预算（显式 timeoutMs ≥ 服务端最坏情形），大仓不再恒超时
++
++- `getKnowledgeGraphOverview` 必须显式传 `timeoutMs=200_000`（三连 RPC 最坏 180s + 余量）、`getKnowledgeGraphQuery` 必须显式传 `timeoutMs=90_000`（单 RPC 60s + 余量），禁止回落 apiFetch GET 缺省 30s。
++
++#### 场景：大仓慢查询不再前端先死
++
++- Given overview 服务端耗时 40s（> 30s 缺省、< 180s 最坏）
++- When 前端发起请求
++- Then 客户端不 abort，服务端逐条容错语义生效（reason 分支而非恒 rpc_error 降级）
++
++### FR-04: 图谱画布 pointer 按下（拖拽/平移）与滚轮同样置位用户交互标记，自动 re-fit 跟随即停（兑现提交声明「拖拽/缩放即停」）
++
++- 图谱画布 `onPointerDown` 必须与 `onWheel` 同样置位 `userTouchedRef`（自动 re-fit 判定 `shouldAutoRefit` 一律返回 false），禁止仅滚轮置位导致拖拽被 refit 抢回视口。
++
++#### 场景：数据到达后拖拽不被抢视口
++
++- Given 力场收敛期（前 360 tick 内）用户 pointer 按下拖节点/平移
++- When 90/180/270/360 tick 到点
++- Then `shouldAutoRefit` 判 false，fitView 不执行（视口不被拽回）
++
++### FR-05: 既有相关面测试保持绿；四处修复各有用例钉住（先红后绿或行为断言）
++
++- 本变更必须保持四个相关测试文件既有用例全绿（entry-card-list / graph-canvas / knowledge-page / 新增 knowledge-graph-timeout），且四处修复各有新用例断言行为。
++
++#### 场景：相关面双绿
++
++- Given 实现完成
++- When 运行四个测试文件
++- Then 全部通过（本次实测 entry-card-list 25 + graph-canvas 22 + knowledge-page 27 + knowledge-graph-timeout 2 = 76 绿，tsc 0 error、eslint 0 error）
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx「条目详情 fetch 失败 → 内容区就近错误态 + 重试恢复（不再永久加载占位）」
++FR-02: test/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「剪贴板不可用（不安全上下文 clipboard=undefined）→ 失败反馈，不再假成功」
++FR-02: test/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「复制成功 → 成功提示按真实结果出现」
++FR-03: test/frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts「overview 显式 200s（三连 RPC 最坏 180s + 余量），不吃 GET 缺省 30s」
++FR-03: test/frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts「query 显式 90s（单 RPC 60s + 余量）」
++FR-04: test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「用户交互置位（滚轮缩放/指针按下拖拽双源）后一律停跟随，refit 不再抢视口」
++FR-05: test/frontend 四文件既有用例全绿「entry-card-list 25 + graph-canvas 22 + knowledge-page 27 + knowledge-graph-timeout 2」
+diff --git a/.sillyspec/changes/2026-10-09-frontend-risk-fixes/tasks.md b/.sillyspec/changes/2026-10-09-frontend-risk-fixes/tasks.md
+new file mode 100644
+index 000000000..c30532b8a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-frontend-risk-fixes/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T17:38:11.159Z
++---
++# 任务注册表（Tasks）— 2026-10-09-frontend-risk-fixes
++
++- [x] task-01: 知识库页选择 fetch 失败时内容区显示可判定的错误态（不再永久「正在加载」占位），后续重新选择可恢复
++- [x] task-02: 锚点复制按真实结果反馈：复制成功才提示成功，clipboard 不可用/失败提示失败（对齐 governance-cards copyPrompt 既有范式）
++- [x] task-03: 知识图谱 overview 与 query 请求前端超时对齐服务端 RPC 预算（显式 timeoutMs ≥ 服务端最坏情形），大仓不再恒超时
++- [x] task-04: 图谱画布 pointer 按下（拖拽/平移）与滚轮同样置位用户交互标记，自动 re-fit 跟随即停（兑现提交声明「拖拽/缩放即停」）
++- [x] task-05: 既有相关面测试保持绿；四处修复各有用例钉住（先红后绿或行为断言）
+diff --git a/.sillyspec/changes/2026-10-09-frontend-risk-fixes/proposal.md b/.sillyspec/changes/2026-10-09-frontend-risk-fixes/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-frontend-risk-fixes/proposal.md
+@@ -0,0 +1,33 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T17:38:11.159Z
++---
++# 提案书（Proposal）— 2026-10-09-frontend-risk-fixes
++
++## 动机
++
++任务原话转写：动机：24 小时风险审查实证前端四处高置信缺陷——知识库页 fetch 失败后内容区永久「正在加载」（323faef56 回归，错误分支只设页顶错误条不恢复内容）、锚点复制在不安全上下文假成功（navigator.clipboard 可选链吞错 + message.success 无条件弹，4393ae1ae）、图谱 overview 三连 RPC 服务端最坏 180s vs 前端 GET 缺省 30s abort 大仓恒走错误分支（e8da254ce）、图谱 re-fit「用户交互即停跟随」只在滚轮置位拖拽不停（fa016a4b4 与提交声明不符）。
++
++成功标准：
++- 知识库页选择 fetch 失败时内容区显示可判定的错误态（不再永久「正在加载」占位），后续重新选择可恢复
++- 锚点复制按真实结果反馈：复制成功才提示成功，clipboard 不可用/失败提示失败（对齐 governance-cards copyPrompt 既有范式）
++- 知识图谱 overview 与 query 请求前端超时对齐服务端 RPC 预算（显式 timeoutMs ≥ 服务端最坏情形），大仓不再恒超时
++- 图谱画布 pointer 按下（拖拽/平移）与滚轮同样置位用户交互标记，自动 re-fit 跟随即停（兑现提交声明「拖拽/缩放即停」）
++- 既有相关面测试保持绿；四处修复各有用例钉住（先红后绿或行为断言）
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. 知识库页选择 fetch 失败时内容区显示可判定的错误态（不再永久「正在加载」占位），后续重新选择可恢复
++2. 锚点复制按真实结果反馈：复制成功才提示成功，clipboard 不可用/失败提示失败（对齐 governance-cards copyPrompt 既有范式）
++3. 知识图谱 overview 与 query 请求前端超时对齐服务端 RPC 预算（显式 timeoutMs ≥ 服务端最坏情形），大仓不再恒超时
++4. 图谱画布 pointer 按下（拖拽/平移）与滚轮同样置位用户交互标记，自动 re-fit 跟随即停（兑现提交声明「拖拽/缩放即停」）
++5. 既有相关面测试保持绿；四处修复各有用例钉住（先红后绿或行为断言）
++
++## 成功标准（可验证）
++
++1. 知识库页选择 fetch 失败时内容区显示可判定的错误态（不再永久「正在加载」占位），后续重新选择可恢复
++2. 锚点复制按真实结果反馈：复制成功才提示成功，clipboard 不可用/失败提示失败（对齐 governance-cards copyPrompt 既有范式）
++3. 知识图谱 overview 与 query 请求前端超时对齐服务端 RPC 预算（显式 timeoutMs ≥ 服务端最坏情形），大仓不再恒超时
++4. 图谱画布 pointer 按下（拖拽/平移）与滚轮同样置位用户交互标记，自动 re-fit 跟随即停（兑现提交声明「拖拽/缩放即停」）
++5. 既有相关面测试保持绿；四处修复各有用例钉住（先红后绿或行为断言）

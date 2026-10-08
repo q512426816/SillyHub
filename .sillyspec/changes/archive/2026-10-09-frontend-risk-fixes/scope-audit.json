@@ -1,0 +1,85 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "1548a5f49b45f9590b2f75c438d5e2cc7658976f",
+  "totals": {
+    "files": 8,
+    "additions": 187,
+    "deletions": 14
+  },
+  "rows": [
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx",
+      "additions": 28,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx",
+      "additions": 32,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx",
+      "additions": 25,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/graph-canvas.test.ts",
+      "additions": 22,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/entry-card-list.tsx",
+      "additions": 17,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/graph-canvas.tsx",
+      "additions": 15,
+      "deletions": 5,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts",
+      "additions": 40,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/knowledge.ts",
+      "additions": 8,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "ab6ab824f38480b00b0370152cc909a1a49e657b061080b7a771c19e7eab5d39",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T17:47:09.162Z"
+}

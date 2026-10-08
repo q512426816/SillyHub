@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-frontend-risk-fixes",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "9f996f692b6c018f7db14109def4af2e137fb1e5",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok｜边界已裁决：可接受——seq 守卫对过期错误同样丢弃（page.tsx:417），新一次选择即清 entryError（page.tsx:384），设计声明与代码一致；timeoutMs 只改 abort 时点不改响应处理序",
+    "并发": "ok——四处均无共享可变态：copyText/shouldAutoRefit 为纯函数（entry-card-list.tsx:403、graph-canvas.tsx:444），entryError 为组件局部 state（page.tsx:306），timeoutMs 逐请求传入（api.ts:113 解构）",
+    "切换": "ok｜边界已裁决：可接受——entryError 随组件卸载销毁；apiFetch 外部 signal 与超时 AbortController 合并语义保留（api.ts:158-169、206），页面卸载取消不受影响；userTouchedRef 数据重建 effect 复位原样（graph-canvas.tsx:685-686，patch 未触碰该行）；overview 最长 200s 等待期间 UI 无中间反馈属既有 UX 债、非本变更引入",
+    "作用域": "ok——无跨工作区共享态：knowledge.ts 两个函数按参数 workspaceId 逐请求发 fetch（knowledge.ts:403、424），entryError/userTouchedRef 均为单组件实例内；边界已裁决：可接受——fulltext-link 复制仍静默降级（链接本体可见文本）与后端并发化 overview 放弃均属显式取舍"
+  },
+  "boundaryAdjudications": [
+    {
+      "boundary": "overview 等待最长 200s 期间 UI 无中间反馈（react-query isLoading），用户可能重复刷新（design 风险段：既有 UX 债非本变更引入）",
+      "verdict": "可接受",
+      "reason": "超时对齐消除了更严重的大仓恒 30s 前端先死问题（api.ts:150-151 GET 缺省 30s 实证）；无中间反馈为既有行为，无数据正确性风险"
+    },
+    {
+      "boundary": "copyText 去掉可选链后，全文路径复制（fulltext-link）调用方仍忽略返回值静默降级（本体是可见文本）",
+      "verdict": "可接受",
+      "reason": "fulltext 路径在 UI 上本身可见可手动复制，静默降级无信息损失；被点名的锚点复制路径已按真实结果反馈（entry-card-list.tsx:427-430）"
+    },
+    {
+      "boundary": "渲染级测试钉 onPointerDown 置位不可行（jsdom 无 canvas 2D 上下文，rAF effect 早退），改为提取 shouldAutoRefit 纯函数 + 双源置位一行接线",
+      "verdict": "可接受",
+      "reason": "jsdom 限制属实（graph-canvas.tsx:710-711 getContext(\"2d\") 为 null 即 return）；判定语义由 graph-canvas.test.ts「双源置位后一律停跟随」用例钉住，接线为单行赋值（graph-canvas.tsx:929）可静态检视"
+    },
+    {
+      "boundary": "放弃后端并发化 overview 三 RPC 缩短总预算（RPC 客户端并发安全性未证，超出本变更前端风险收口范围）",
+      "verdict": "可接受",
+      "reason": "串行最坏 180s 已被显式 200s timeoutMs 覆盖（knowledge.ts:424），后端改造属独立变更"
+    }
+  ],
+  "verificationNotes": {
+    "FR一致性": "四条 FR 实现与测试绑定全部核实：FR-01 entryError 状态/entry-error 分支/重试（page.tsx:306、384、416-422、606-615）+ knowledge-page.test 用例断言 entry-error 与重试恢复；FR-02 copyText 返回 boolean 无可选链（entry-card-list.tsx:403-406）+ 失败/成功双用例；FR-03 timeoutMs 90_000/200_000（knowledge.ts:403、424）+ 新测试文件断言 options.timeoutMs，apiFetch 确认支持该选项（api.ts:104、150-151）；FR-04 onPointerDown 与 onWheel 双源置位（graph-canvas.tsx:897、929）+ shouldAutoRefit 导出（:444）并被 effect 调用（:884）",
+    "FR-05实测": "本评审实跑四个测试文件：4 files / 76 tests 全绿（entry-card-list 25 + graph-canvas 22 + knowledge-page 27 + knowledge-graph-timeout 2），与需求声称一致；tsc --noEmit 退出码 0；eslint 未独立复跑（无预算），不构成否决项",
+    "冻结面与HEAD": "change.patch 与提交 87d7a91dc+9f996f692 的代码面一致；唯一差异为 patch 含 proposal.md 新增而两提交未含（纯 sillyspec 文档，无代码影响）；frontend/ 工作区干净，无落后 HEAD 的代码漂移",
+    "生成物同步": "diff 仅触前端 4 实现 + 4 测试文件，无 schema/api-types 触达，design「不需 gen:types」声明属实"
+  },
+  "reviewedAt": "2026-10-09T01:55:00+08:00"
+}

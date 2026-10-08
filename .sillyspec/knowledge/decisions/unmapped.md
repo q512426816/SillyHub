@@ -1796,3 +1796,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：ef3fca11264f031c7ef95c05eb7da475e76cbb81
 理由：最大风险：daemon 活性门放过的「在线 daemon + 永久静默轮」会一直被追踪不判死——有意取舍（对齐 patrol 判死段语义：在线 daemon 的轮不判死，归属用户取消/会话超时面）；若需硬上限可后续迭代加最长追踪时长。次风险：`_run_daemon_alive` 的 lease 倒序首见语义在 lease 频繁重建时可能解析到无 runtime_id 的新 pending lease 而返回 None——None 走 recency 判死，方向与原实现一致不放大。试过放弃：(a) 复扫判死面保持全局仅加活性门——放弃，启动后新开轮每 10 分钟进判死面本身就是审查实证缺陷源；(b) 循环异常无限重试——放弃，持久故障下无限日志噪音且违背有界退避要求。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-09-frontend-risk-fixes
+锚点：未记录
+最近确认：9f996f692b6c018f7db14109def4af2e137fb1e5
+理由：最大风险：overview 等待最长 200s——期间 UI 无中间反馈（react-query isLoading 态），用户可能重复刷新；属既有 UX 债非本变更引入，后续可加进度提示。次风险：copyText 去掉可选链后，jsdom/旧浏览器上 clipboard 缺失路径从「静默 no-op」变为「失败提示」——全文路径复制（fulltext-link）调用方仍忽略返回值静默降级（本体是可见文本），锚点复制从假成功变真失败提示，方向正确。试过放弃：(a) 渲染级测试钉 onPointerDown 置位——放弃，jsdom 无 canvas 2D 上下文，rAF 循环 effect 早退不可观测，改为提取 shouldAutoRefit 纯函数 + 双源置位一行接线（仓库 graph-canvas.test 纯函数惯例）；(b) 后端并发化 overview 三 RPC 缩短总预算——放弃，RPC 客户端并发安全性未证且超出本变更（前端风险收口）范围。

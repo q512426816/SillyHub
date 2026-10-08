@@ -238,3 +238,86 @@ created_at: 2026-09-27T10:13:08.181Z
 - 场景：默认场景 — Given 系统就绪；When 显式 pathspec 提交；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-governance-rpc-actions/requirements.md#FR-11
 最近确认：3306460582a64242091b32ebee63a85f1b071444
+
+## FR-lib-knowledge-017 知识库页选择 fetch 失败时内容区显示可判定的错误态（不再永久「正在加载」占位），后续重新选择可恢复
+变更：2026-10-09-frontend-risk-fixes
+状态：active
+摘要：fetch 失败 → 错误态 → 重试恢复
+全文：.sillyspec/changes/archive/2026-10-09-frontend-risk-fixes/requirements.md#FR-01
+最近确认：9f996f692b6c018f7db14109def4af2e137fb1e5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-frontend-risk-fixes:flow:测试绑定FR-01
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx「条目详情 fetch 失败 → 内容区就近错误态 + 重试恢复（不再永久加载占位）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-frontend-risk-fixes
+  status: active
+
+## FR-lib-knowledge-018 锚点复制按真实结果反馈：复制成功才提示成功，clipboard 不可用/失败提示失败（对齐 governance-cards copyPrompt 既有范式）
+变更：2026-10-09-frontend-risk-fixes
+状态：active
+摘要：不安全上下文；复制成功
+全文：.sillyspec/changes/archive/2026-10-09-frontend-risk-fixes/requirements.md#FR-02
+最近确认：9f996f692b6c018f7db14109def4af2e137fb1e5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-frontend-risk-fixes:flow:测试绑定FR-02
+  tests: test/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「复制成功 → 成功提示按真实结果出现」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-frontend-risk-fixes
+  status: active
+
+## FR-lib-knowledge-019 知识图谱 overview 与 query 请求前端超时对齐服务端 RPC 预算（显式 timeoutMs ≥ 服务端最坏情形），大仓不再恒超时
+变更：2026-10-09-frontend-risk-fixes
+状态：active
+摘要：大仓慢查询不再前端先死
+全文：.sillyspec/changes/archive/2026-10-09-frontend-risk-fixes/requirements.md#FR-03
+最近确认：9f996f692b6c018f7db14109def4af2e137fb1e5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-frontend-risk-fixes:flow:测试绑定FR-03
+  tests: test/frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts「query 显式 90s（单 RPC 60s + 余量）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-frontend-risk-fixes
+  status: active
+
+## FR-lib-knowledge-020 图谱画布 pointer 按下（拖拽/平移）与滚轮同样置位用户交互标记，自动 re-fit 跟随即停（兑现提交声明「拖拽/缩放即停」）
+变更：2026-10-09-frontend-risk-fixes
+状态：active
+摘要：数据到达后拖拽不被抢视口
+全文：.sillyspec/changes/archive/2026-10-09-frontend-risk-fixes/requirements.md#FR-04
+最近确认：9f996f692b6c018f7db14109def4af2e137fb1e5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-frontend-risk-fixes:flow:测试绑定FR-04
+  tests: test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「用户交互置位（滚轮缩放/指针按下拖拽双源）后一律停跟随，refit 不再抢视口」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-frontend-risk-fixes
+  status: active
+
+## FR-lib-knowledge-021 既有相关面测试保持绿；四处修复各有用例钉住（先红后绿或行为断言）
+变更：2026-10-09-frontend-risk-fixes
+状态：active
+摘要：相关面双绿
+全文：.sillyspec/changes/archive/2026-10-09-frontend-risk-fixes/requirements.md#FR-05
+最近确认：9f996f692b6c018f7db14109def4af2e137fb1e5
