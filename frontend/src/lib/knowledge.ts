@@ -396,8 +396,11 @@ export async function getKnowledgeGraphQuery(
   if (params?.anchor2 !== undefined) qs.set("anchor2", params.anchor2);
   if (params?.edges !== undefined) qs.set("edges", params.edges);
   if (params?.depth !== undefined) qs.set("depth", String(params.depth));
+  // 超时对齐服务端 RPC 预算（2026-10-09 风险审查）：backend GRAPH_RPC_TIMEOUT=60s，
+  // apiFetch GET 缺省 30s 会先于服务端判死 abort，大仓慢查询恒走错误分支。
   return apiFetch<GraphQueryOut>(
     `/api/workspaces/${workspaceId}/knowledge/graph/query?${qs.toString()}`,
+    { timeoutMs: 90_000 },
   );
 }
 
@@ -412,8 +415,13 @@ export async function getKnowledgeGraphQuery(
 export async function getKnowledgeGraphOverview(
   workspaceId: string,
 ): Promise<GraphOverviewOut> {
+  // 超时对齐服务端 RPC 预算（2026-10-09 风险审查）：overview 内部按序发
+  // summary→orphans→dangling 三 RPC（各 GRAPH_RPC_TIMEOUT=60s，最坏 180s），
+  // apiFetch GET 缺省 30s 在大仓（全量建图秒级-分钟级）恒先 abort → 整页
+  // 降级「暂不可用」；显式 200s 留超时余量，让服务端逐条容错语义生效。
   return apiFetch<GraphOverviewOut>(
     `/api/workspaces/${workspaceId}/knowledge/graph/overview`,
+    { timeoutMs: 200_000 },
   );
 }
 

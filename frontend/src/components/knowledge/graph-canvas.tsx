@@ -436,6 +436,15 @@ export function graphBbox(nodes: ReadonlyArray<SimNode>): BBox {
   return { x0, y0, x1, y1 };
 }
 
+/**
+ * 自动 re-fit 判定（2026-10-09 提取供测试）：数据到达后前 6 秒在
+ * 90/180/270/360 tick 上自动重适配视口；用户已交互（滚轮缩放或指针按下
+ * 拖拽/平移，双源置位 userTouched）后一律不再抢视口。
+ */
+export function shouldAutoRefit(tick: number, userTouched: boolean): boolean {
+  return !userTouched && [90, 180, 270, 360].includes(tick);
+}
+
 /** 视口适配（原型 fitView 直译）：缩放夹 [0.08,2]、pad 60、居中。 */
 export function fitView(bbox: BBox, w: number, h: number): ViewBox {
   const pad = 60;
@@ -869,13 +878,10 @@ export function GraphCanvas({
         // 力场收敛跟随：数据到达后前 6 秒按衰减节奏自动重新适配视口
         // （fitView 只在数据瞬间执行一次，节点被力场从螺旋初始位推开后
         // 视口不跟随 → 节点漂出视野/挤一角大片留白——2026-10-08 用户实证）。
-        // 用户一旦交互（拖拽/缩放）即停跟随，避免抢操作。
+        // 用户一旦交互（拖拽/缩放，滚轮与指针按下双源置位）即停跟随，避免抢操作。
         forceTickRef.current += 1;
-        const t = forceTickRef.current;
-        const refitAt = [90, 180, 270, 360];
         if (
-          !userTouchedRef.current &&
-          refitAt.includes(t) &&
+          shouldAutoRefit(forceTickRef.current, userTouchedRef.current) &&
           simRef.current.length > 0
         ) {
           viewRef.current = fitView(graphBbox(simRef.current), sizeRef.current.w, sizeRef.current.h);
@@ -917,6 +923,10 @@ export function GraphCanvas({
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    // 任何指针按下（拖节点/平移/点选）都算用户交互——与滚轮同款置位停自动
+    // re-fit 跟随（2026-10-09 风险审查：原实现只 onWheel 置位，数据到达后
+    // 前 360 tick 内拖拽会被 refit 抢回视口，与「拖拽/缩放即停」声明不符）。
+    userTouchedRef.current = true;
     const rect = canvas.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;

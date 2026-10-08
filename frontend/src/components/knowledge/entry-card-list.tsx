@@ -394,19 +394,26 @@ function UseBadge({ count, title }: { count: number; title: string }) {
   );
 }
 
-/** 复制全文路径（jsdom/旧浏览器无 clipboard 时静默失败，路径文本仍可见）。 */
-async function copyText(text: string): Promise<void> {
+/**
+ * 复制文本：返回是否真写入剪贴板——不安全上下文（http 非 localhost）下
+ * ``navigator.clipboard`` 为 undefined、权限拒绝/焦点丢失时 writeText 抛错，
+ * 一律 false（2026-10-09 风险审查：原 void+可选链形态让假成功提示成为可能）。
+ * 全文路径等「本体已是可见文本」的调用方仍可忽略返回值静默降级。
+ */
+async function copyText(text: string): Promise<boolean> {
   try {
-    await navigator.clipboard?.writeText(text);
+    await navigator.clipboard.writeText(text);
+    return true;
   } catch {
-    // 忽略——链接本体已是可见文本。
+    return false;
   }
 }
 
 /**
  * 锚点复制图标（FR-02 / D-003，原型 panel-c 卡片头 🔗）：点击复制锚点定位串
- * （manual=``文件#slug``；SingleCard=裸文件名，Grill CC-02），antd message 成功
- * 提示（经 <AntApp> 注入走主题）；交互对齐 DecisionCard「全文 ↗」复制先例。
+ * （manual=``文件#slug``；SingleCard=裸文件名，Grill CC-02），antd message 按
+ * 真实复制结果反馈（经 <AntApp> 注入走主题；对齐 governance-cards copyPrompt
+ * 范式——剪贴板不可用时不再弹「已复制」假成功）。
  */
 function AnchorCopyButton({ anchor }: { anchor: string }) {
   const { message } = AntdApp.useApp();
@@ -417,8 +424,10 @@ function AnchorCopyButton({ anchor }: { anchor: string }) {
       aria-label={`复制锚点 ${anchor}`}
       title={`锚点定位（点击复制）：${anchor}`}
       onClick={() => {
-        void copyText(anchor);
-        void message.success("锚点已复制");
+        void copyText(anchor).then((copied) => {
+          if (copied) void message.success("锚点已复制");
+          else void message.error("复制失败：剪贴板不可用");
+        });
       }}
       className="shrink-0 rounded px-1 text-[11px] leading-4 text-brand-600/70 transition-colors hover:bg-brand-100 hover:text-brand-700"
     >

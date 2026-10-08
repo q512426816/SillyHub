@@ -297,6 +297,13 @@ export default function KnowledgePage({ params }: Props) {
   const [viewMode, setViewMode] = useState<"cards" | "raw">("cards");
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
+  /**
+   * 条目内容区错误态（2026-10-09 风险审查）：selectEntry 中间态切断后 fetch
+   * 失败，原实现只设页顶 pageError，内容区停在「正在加载」占位无出口（错误
+   * 条与内容区相隔整个运营面板）。entryError 驱动内容区就近的错误分支 +
+   * 重试入口；新一次选择即清除。
+   */
+  const [entryError, setEntryError] = useState<string | null>(null);
   // task-05 写入口态：沉淀弹层开关 + 条目编辑开关。
   const [precipitateOpen, setPrecipitateOpen] = useState(false);
   const [distillHistoryOpen, setDistillHistoryOpen] = useState(false);
@@ -374,6 +381,7 @@ export default function KnowledgePage({ params }: Props) {
       // 是旧文件的，产生错配闪烁（INDEX 名 + 无路由行内容 →「0 条路由」幻象；
       // 手册名 + INDEX 内容 → 路由行被当小节卡渲染的「新样式一闪」）。
       setSelectedContent(null);
+      setEntryError(null);
       setEditing(false);
       setViewMode("cards");
       getKnowledge(workspaceId, filename)
@@ -407,7 +415,11 @@ export default function KnowledgePage({ params }: Props) {
         })
         .catch((err) => {
           if (seq !== selectSeqRef.current) return; // 过期响应的错误同样丢弃
-          setPageError(err instanceof ApiError ? err.message : "加载文档失败");
+          const text = err instanceof ApiError ? err.message : "加载文档失败";
+          setPageError(text);
+          // 内容区就近错误分支（见 entryError 声明注释）——不再永久停在
+          // 「正在加载」占位。
+          setEntryError(text);
         });
     },
     [workspaceId],
@@ -590,6 +602,25 @@ export default function KnowledgePage({ params }: Props) {
             {selectedFilename === null ? (
               <div className="py-12 text-center text-xs text-muted-foreground">
                 选择左侧文档查看内容。
+              </div>
+            ) : entryError !== null ? (
+              /* 条目加载失败态（2026-10-09）：fetch 失败不再永久停在加载占位——
+                 就近展示错误与重试（重试=对当前文件重发 selectEntry，seq 守卫
+                 天然覆盖）。 */
+              <div
+                className="flex flex-col items-center gap-3 py-12 text-center"
+                data-testid="entry-error"
+              >
+                <div className="text-xs text-destructive">
+                  {entryError}（{selectedFilename}）
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => selectedFilename && selectEntry(selectedFilename)}
+                >
+                  重试
+                </Button>
               </div>
             ) : selectedContent === null ? (
               /* 加载态（2026-10-08）：selectEntry 已清旧内容，fetch 返回前显示加载
