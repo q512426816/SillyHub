@@ -368,6 +368,18 @@ export interface paths {
          *     change 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增
          *     ``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——
          *     ``?type=`` 等值匹配表达不了 NULL，语义互斥。
+         *
+         *     change 2026-09-14-workspace-drag-sort（task-02 / FR-03）：两分支均透传
+         *     ``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序
+         *     （每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。
+         *
+         *     ql-20260917-007：非管理员分支先看**平台级授权**（``user_roles``）——与
+         *     ``has_permission`` 段 2、通知广播收件人查找（``list_user_ids_with_permission``
+         *     段 2）三处口径对齐（原修复「列表看不到工作区，却能收到其通知、点进其
+         *     内容」的割裂）。2026-09-20-workspace-member-visibility：平台级
+         *     ``workspace:read`` 不再授予全量可见（纯功能入口语义，D-001@v1），三处
+         *     同步收窄；平台级仅 ``platform:admin`` 全量，其余维持
+         *     ``allowed_workspace_ids`` 工作区级限定。
          */
         get: operations["list_workspaces_api_workspaces_get"];
         put?: never;
@@ -399,9 +411,18 @@ export interface paths {
          *     3 条固定查询替代原逐 ws 4 条；条目组装与单 ws 路径共享函数，口径单一来源）
          *     + ``probe_workspace_git_mode``（task-02 三态探测）组装。
          *
-         *     只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC
-         *     失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id
-         *     跳过不报错（与 collect_scope 无效 id 跳过同语义）。
+         *     探测本身不改工作区生命周期状态（design §7.5；唯一写例外见下——repo_url
+         *     回填，ql-20260919-001 勘误：原「只读无状态变化」表述与回填副作用矛盾）；
+         *     每次调用实时探测不缓存（R-02）；探测 RPC 失败/未绑 daemon 归 ``unknown``
+         *     不抛 5xx（fail-safe）。查无行的 workspace_id 跳过不报错（与 collect_scope
+         *     无效 id 跳过同语义）。
+         *
+         *     ql-20260918-012（工作区 Git 地址识别）：响应新增 ``repo_url``——git 态
+         *     工作区经 ``delegate.git_remote_url`` 读 ``git remote -v`` 首个 fetch 行，
+         *     并在识别成功且与 DB 不同时**回填** ``workspace.repo_url``（本端点唯一的
+         *     写副作用，仅此一列；§7.5 的「不改生命周期状态」语义不变）。已识别
+         *     （repo_url 非空）直接回 DB 值不再发第二次 RPC——首次识别后本端点 RPC
+         *     开销回到基线；无 remote / RPC 失败归 None 不抛（下次 probe 重试）。
          */
         post: operations["probe_workspaces_api_workspaces_probe_post"];
         delete?: never;
@@ -468,6 +489,35 @@ export interface paths {
         get: operations["list_my_bindings_endpoint_api_workspaces_my_bindings_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move Workspace
+         * @description 拖拽排序移动工作区（task-02 / FR-02，change 2026-09-14-workspace-drag-sort）。
+         *
+         *     顺序按 user_id 持久化（每人一套，D-001@v1）；锚点三选一校验在
+         *     ``WorkspaceMoveRequest``（422 HTTP_422_MOVE_ANCHOR_CONFLICT，中文文案）。
+         *     鉴权对齐 list 端点现状（require_permission_any(WORKSPACE_READ)）；非平台
+         *     管理员行级可见校验 workspace_id ∈ allowed_workspace_ids（复用 list 端点既有
+         *     模式），不可见 403 HTTP_403_PERMISSION_DENIED；管理员 allowed_ids=None 全量。
+         *     排序/backfill/锚点解析全在 service.move_workspace（task-03，签名钉死不自增
+         *     参数），本层只做契约接线；响应 ``rank`` 供前端 floor(rank/page_size) 换算
+         *     目标页（R-07）。
+         */
+        post: operations["move_workspace_api_workspaces__workspace_id__move_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1760,6 +1810,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Change Assets
+         * @description 变更沉淀资产聚合（2026-09-25-change-precipitated-assets / D-001@v1 方案 a）。
+         *
+         *     按变更名解析 spec 树镜像：knowledge/fr + knowledge/decisions 的归属条目、
+         *     归档目录 test-trace/change-patch/delta 容错读取；逐项 fail-open（单项失败
+         *     降级为空，不影响其它组）。不存在/跨工作区由 service 抛 ``ChangeNotFound``
+         *     （404 resource-hiding，对齐 usage 端点口径）。
+         */
+        get: operations["get_change_assets_api_workspaces__workspace_id__changes__change_id__assets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Change Timeline
+         * @description 变更合成时间线聚合（2026-09-26-change-real-timeline / FR-01）。
+         *
+         *     复刻 CLI ``sillyspec watcher timeline`` 三源合成：事件轴
+         *     （platform_change_events 正序 + requirements 工件 created_at 诞生锚）、
+         *     任务面（tasks.md 行 × 提交锚推断）、脚注统计。thin 轻量变更 steps 恒空
+         *     的主线叙事由本端点承载；events 恒 provisional（红线 D-004：只展示不
+         *     消费）。git 提交标题经 daemon best-effort 反查，失败降级仅哈希。不存
+         *     在/跨工作区抛 ``ChangeNotFound``（对齐 assets 端点口径）。
+         */
+        get: operations["get_change_timeline_api_workspaces__workspace_id__changes__change_id__timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/assets/patch-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Change Patch File
+         * @description 归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。
+         *
+         *     卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch``（缺件回退
+         *     ``scope-audit.patch``——厚流程归档只落快照留档）并切出该文件的 diff 段——冻结
+         *     在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，两者不可互替）。
+         *     ``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
+         *     绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
+         *     不抛 404（读不到留档是展示面降级，不是资源不存在）。
+         */
+        get: operations["get_change_patch_file_api_workspaces__workspace_id__changes__change_id__assets_patch_file_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/changes/{change_id}/files/content": {
         parameters: {
             query?: never;
@@ -2281,6 +2410,27 @@ export interface paths {
         };
         /** List Scan Docs */
         get: operations["list_scan_docs_api_workspaces__workspace_id__scan_docs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/scan-docs/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scan Docs Stats
+         * @description 扫描文档运营指标：覆盖率（七件套+模块两级，8 周趋势）/陈旧（90 天）/
+         *     每项目密度/近 30 天更新/最近更新榜 + docs-inject 注入频次（D-003@v1）。
+         */
+        get: operations["get_scan_docs_stats_api_workspaces__workspace_id__scan_docs_stats_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5681,6 +5831,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export Sessions
+         * @description 导出选中的会话（chat=Markdown 对话 / full=JSON+附件 zip；FR-01 / FR-02）。
+         *
+         *     响应矩阵由服务层决定（``SessionExportResult``）：chat×单会话 =
+         *     ``text/markdown`` 单 .md；chat×多会话 与 full×任一 = ``application/zip``。
+         *     下载文件名走 RFC 5987（``_rfc5987_filename`` 返回完整头值，含
+         *     ``attachment;`` 前缀与 ASCII 回退，中文文件名浏览器优先解码 filename*）。
+         *
+         *     权限逐会话对齐详情端点口径（owner + 软删 404 → 群参与者探测，任一不可
+         *     访问整包 404 不做部分成功）；跨用户 / 已软删 / 群非成员均 404 不泄露
+         *     存在性，full 档附件总量超 512MB 返回 413 提示分批导出——两者均经全局
+         *     AppError handler 自动映射，端点不捕获。
+         */
+        post: operations["export_sessions_api_daemon_sessions_export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}": {
         parameters: {
             query?: never;
@@ -5709,6 +5889,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fork Session
+         * @description Fork a new session B from a past run of session A (task-05 / FR-01~04).
+         *
+         *     2026-09-22-session-fork-continuation task-05：在源会话 ``at_run_id`` 轮之后
+         *     分叉——B 经既有 create 链落库（origin='fork'+fork 三件套+快照继承，A 零
+         *     字段改动 D-005）。错误语义（design §接口定义）：404 会话/run 不存在或不
+         *     属于该会话；409 run 进行中；422 caps sessionFork=none / native 档锚点缺失
+         *     （文案提示可退种子档）。校验与 D-012 mode 分派（claude resume_at / pi
+         *     rpc_fork·clone / codex seed）归 service fork.py，本端点仅路由映射。
+         */
+        post: operations["fork_session_api_daemon_sessions__session_id__fork_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/takeover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Takeover Session Endpoint
+         * @description Take over a dormant tool_report session by forking a new session (D-006@v1).
+         *
+         *     2026-09-30-tool-report-activation-wrong-machine task-04：未激活本地 Agent
+         *     会话首条消息 = 分叉式接手——原机四级钉定匹配（machineId → hostname →
+         *     allowed_roots 唯一 → 409 中文不换机，D-002@v1）、harness 分档（claude-code/
+         *     codex native 档 lease 携带 resume_session_id 回原引擎会话；其余 handoff 档
+         *     桩，交接文档归 task-05）、经 create 链落 fork 形态新会话（fork_of=源会话，
+         *     源会话零 run → fork_at_run_id/engine_fork_anchor NULL）。源会话保持只读
+         *     （status/turn_count/lease/runtime 零写）。校验与匹配归 service takeover.py。
+         */
+        post: operations["takeover_session_endpoint_api_daemon_sessions__session_id__takeover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/reset-tool-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Tool Report Session Endpoint
+         * @description Reset a legacy-activated tool_report session back to dormant (task-06 / FR-05).
+         *
+         *     2026-09-30-tool-report-activation-wrong-machine task-06：存量被旧懒激活路径
+         *     钉死在错误机器的会话一键回滚——status=pending / turn_count=0 / runtime 与
+         *     lease 清空（失败 run 行保留审计），前端回放主体恢复，可重新 takeover。
+         *     守卫与回滚归 service helpers.reset_tool_report_session（running 拒绝等）。
+         */
+        post: operations["reset_tool_report_session_endpoint_api_daemon_sessions__session_id__reset_tool_report_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/inject": {
         parameters: {
             query?: never;
@@ -5723,6 +5983,84 @@ export interface paths {
          * @description Append a new turn run to an active interactive session (FR-02).
          */
         post: operations["inject_session_api_daemon_sessions__session_id__inject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/compact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compact Session
+         * @description Context compaction for a session, dual-dispatched by engine (FR-02).
+         *
+         *     2026-09-14-session-ctx-compact task-02：三校验（归属/活跃 + caps compact
+         *     键 + turn 空闲）归 compact 服务；claude → 复用 inject 服务发 "/compact"
+         *     轮（D-003@v3），pi/codex → ws RPC "session_compact" 结构化回执
+         *     （D-003@v3）。``custom_instructions`` 为 NG-06 v1 预留字段，本版本接收
+         *     不透传（design §接口定义），空体 ``{}`` 合法。
+         */
+        post: operations["compact_session_api_daemon_sessions__session_id__compact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/thinking-levels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Thinking Levels
+         * @description List the engine's available thinking levels for a session (FR-04).
+         *
+         *     2026-09-14-session-thinking-level task-05：三校验（归属/活跃 + caps
+         *     thinking_level 键）归 thinking_level 服务；ws RPC ``session_get_thinking_
+         *     levels``（task-03 daemon 契约按名对接）回执映射 ``{levels, current}``——
+         *     levels 按当前模型动态，current 为引擎侧现值（可空）。RPC 失败走 AppError
+         *     上抛（离线/超时 504、RemoteError 502 升级提示），不 200 假数据。
+         */
+        get: operations["get_session_thinking_levels_api_daemon_sessions__session_id__thinking_levels_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/thinking-level": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Session Thinking Level
+         * @description Switch the session's thinking level (FR-05).
+         *
+         *     2026-09-14-session-thinking-level task-05：三校验 + 七档词表校验（400）+
+         *     忙轮守卫（D-002「仅空闲」）归 thinking_level 服务；ws RPC
+         *     ``session_set_thinking_level`` 回执映射 ``{ok, error}``——RPC 失败/旧
+         *     daemon method_not_found 映射结构化 error（HTTP 200），调用方可修复的
+         *     失败不抛 5xx。
+         */
+        post: operations["set_session_thinking_level_api_daemon_sessions__session_id__thinking_level_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5831,10 +6169,14 @@ export interface paths {
         put?: never;
         /**
          * Dispatch Now Session Queue Entry
-         * @description 立即发送排队消息（2026-08-31-session-queue-ux FR-05 / D-001）。
+         * @description 立即发送排队消息（2026-08-31-session-queue-ux FR-05 / D-001；task-06
+         *     2026-09-18-single-chat-steering FR-03 三态）。
          *
-         *     条目置队首；忙=打断当前轮（interrupt 接力派发，``interrupted=true``），
-         *     空闲=当场派发（``interrupted=false``，条目可能已删行）；非 active 409。
+         *     条目置队首；忙轮且 provider 支持引导（caps steering=true、条目不带
+         *     轮边界维度）→ mid-turn 注入活跃轮（``dispatch_mode="steered"``，不打断
+         *     当前轮）；忙轮但不可引导 → 打断当前轮接力派发（``dispatch_mode=
+         *     "interrupted"``，``interrupted=true``）；空闲 → 当场派发
+         *     （``dispatch_mode="dispatched"``，条目可能已删行）；非 active 409。
          */
         post: operations["dispatch_now_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__dispatch_now_post"];
         delete?: never;
@@ -6094,10 +6436,10 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Cancel Scheduled Message
-         * @description Cancel a pending scheduled message (non-pending → 409, terminal no-revert).
+         * Delete Scheduled Message
+         * @description Delete a scheduled message (pending → cancel kept on record, terminal → row removed).
          */
-        delete: operations["cancel_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete"];
+        delete: operations["delete_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -6154,8 +6496,53 @@ export interface paths {
          *     ``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与其它
          *     session 读端点同一道闸门。查询内联在此（service.py 非本任务 allowed_path），
          *     与 get_session_detail 的 run 查询同款。
+         *
+         *     2026-09-27-session-fast-replay task-02 / FR-03：runs 瘦身 + gzip——
+         *
+         *     - ``agent_profile_snapshot`` 剥离 ``system_prompt`` 键（浅拷贝 dict.pop，
+         *       不动库数据）：前端实证仅消费 name/provider/model 等轻键，system_prompt
+         *       原文（可达数 KB/轮 × 500 轮）是 runs payload 膨胀主因；其余字段语义
+         *       零变化（design 接口契约④「结构不变仅去键」）。
+         *     - 响应走 gzip（抄本文件 /logs 的 gzip 路径：Accept-Encoding 协商 + 1KB
+         *       阈值 + 线程池压缩，长会话 500 轮 × JSON 文本压缩比 ~10x）。返回
+         *       ``Response`` 直写（response_model 仅保留 openapi 文档面，FastAPI 对
+         *       Response 返回值跳过再序列化，行为与 /logs 一致）。
          */
         get: operations["list_session_runs_api_daemon_sessions__session_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/turn-outline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Turn Outline
+         * @description Return the full turn outline of an owned session (task-01 / FR-01).
+         *
+         *     一次响应返回该会话**全部**轮次摘要（无 500 条截断，runs 端点的截断由本
+         *     端点接管全量导航职责）：每轮含 run_id / seq（created_at 升序 1 起）/
+         *     status / 起止时间 / error_code / sender_name / engine_anchor /
+         *     auto_resume_of / tokens 轻列，以及 prompt_summary（首条 user_input 前 60 字）
+         *     与 answer_summary（首条非空 stdout 前 120 字）。归属 / 存在性复用
+         *     ``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与
+         *     runs / logs 端点同一道闸门；查询内联在此（service.py 非本任务
+         *     allowed_path，对齐 list_session_runs 先例）。空会话返回 total_turns=0 +
+         *     空 items（不报错）。
+         *
+         *     缓存：进程内 LRU（键=session_id，容量 128），指纹 =（runs 总数, max(run.
+         *     created_at), max(log.timestamp), max(log.id)）——命中零重算直接回缓存值；
+         *     每请求仍先过归属闸门（缓存的是会话数据投影，不是授权结论）。
+         */
+        get: operations["get_session_turn_outline_api_daemon_sessions__session_id__turn_outline_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6216,8 +6603,57 @@ export interface paths {
          *     （语义见各 Query description）；缺省时调用形态与原端点逐字节等价
          *     （after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读
          *     放行普通群成员读 logs，见 get_group_accessible_session）。
+         *
+         *     2026-09-16-logs-cursor-tiebreaker / D-001@v1：``before_id``——与
+         *     ``before`` 组合的复合游标 id tiebreaker（``(ts < before) OR (ts ==
+         *     before AND id < before_id)``），同 timestamp 批次向上翻页在批内逐页
+         *     可达且边界零重叠；缺省时行为与原 ``<=`` 游标逐字节等价（旧客户端零
+         *     回归）。``before_id`` 仅作为 ``before`` 的 tiebreaker 存在，无锚点
+         *     timestamp 无消费语义——单独传（无 ``before``）422 fail-explicit，
+         *     不静默忽略（参数组合 422 写法对齐 session_team.py:420-436 /
+         *     machines.py:488-494 先例）。
+         *
+         *     2026-09-27-session-fast-replay task-02 / FR-02：``run_id`` 单轮直达 +
+         *     ``slim`` 精简模式——
+         *
+         *     - ``run_id``：命中校验（run 存在且 ``agent_session_id`` 匹配，否则 404
+         *       资源隐藏），只返回该 run 全部日志（timestamp,id 升序，上限 2000 条），
+         *       供前端「未加载轮直达跳转」单次往返取整轮（替代 40ms interval 逐页
+         *       循环）；与 ``before``/``after`` 游标互斥（同传 422 fail-explicit），
+         *       可与 ``q``/``limit`` 组合（在单轮内收窄）；
+         *     - ``slim``：tool 通道（channel=tool_call）content_redacted 超 2000 字符
+         *       截断到 2000 并置 ``content_truncated=true``（AgentRunLogEntry 新可选
+         *       字段，旧路径不置恒 None，旧调用方零变化）；截断条目需全文走新增单条
+         *       端点 GET /sessions/{session_id}/logs/{log_id}。落库原文不动（slim 是
+         *       传输层语义，审计 / 导出全文照旧）。
          */
         get: operations["get_session_logs_api_daemon_sessions__session_id__logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/logs/{log_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Log Entry
+         * @description Return one full log entry of an owned session (task-02 / FR-02 / FR-07).
+         *
+         *     slim 模式的按需全文消费端点：截断条目（content_truncated=true）展开时单条
+         *     拉取渲染，非截断条目零额外请求。归属闸门与 runs / logs 同款
+         *     （``get_agent_session``，missing / 跨用户 / 软删均 404 不泄露存在性）；
+         *     行级命中校验经 log → run → session 链（``AgentRun.agent_session_id`` 匹配，
+         *     防跨会话读），日志不存在或不属于该会话同样 404。只读端点，无状态交互。
+         */
+        get: operations["get_session_log_entry_api_daemon_sessions__session_id__logs__log_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7253,6 +7689,324 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/knowledge/propose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Knowledge
+         * @description 手工录入知识候选（落 knowledge/proposed/<slug>.md）。
+         */
+        post: operations["propose_knowledge_api_workspaces__workspace_id__knowledge_propose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/entries/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Knowledge Entry
+         * @description 编辑知识条目正文（decisions zone 由归档流程维护，返回 422）。
+         */
+        patch: operations["update_knowledge_entry_api_workspaces__workspace_id__knowledge_entries__filename__patch"];
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/proposed/{filename}/preview-merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Merge Knowledge
+         * @description 合并预览（dry-run 不落盘）：将追加的段落文本与 INDEX 路由行。
+         */
+        post: operations["preview_merge_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__preview_merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/proposed/{filename}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merge Knowledge
+         * @description 执行两段式合并（段一 updates 无冲突才段二删候选）。
+         */
+        post: operations["merge_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/proposed/{filename}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Knowledge
+         * @description 拒绝候选（单段 delete，入 spec-backups 备份区）。
+         */
+        post: operations["reject_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/distill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispatch Distill
+         * @description 派发蒸馏任务（源校验 + mode 分流：resume 续接 / fresh 新建蒸馏会话）。
+         */
+        post: operations["dispatch_distill_api_workspaces__workspace_id__knowledge_distill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/distill/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Distill Tasks
+         * @description 该工作区的蒸馏任务列表（按 created_at 倒序，仅 knowledge-distill 类）。
+         */
+        get: operations["list_distill_tasks_api_workspaces__workspace_id__knowledge_distill_tasks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/distill/quick-entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Distill Quick Entries
+         * @description quicklog 条目级 ql 列表（quick-2dba0118：quick 蒸馏源多选单位）。
+         *
+         *     quicklog 是单文件多条目形态（QUICKLOG-*.md 内 ``## <ql-id>`` 节），
+         *     ``GET /quicklog`` 的文件级列表不适用于逐条勾选——本端点投影
+         *     ``parse_quick_entries`` 条目视图（ref/title/date，按 ref 倒序最新在前），
+         *     供沉淀弹层 quick 源选择器消费。**注册序铁律**：必须保持在下方
+         *     ``GET /knowledge/{filename:path}`` 通配之前（文件首注释同款）。
+         */
+        get: operations["list_distill_quick_entries_api_workspaces__workspace_id__knowledge_distill_quick_entries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/hits/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Knowledge Hits
+         * @description daemon 增量上行知识命中遥测（jsonl 行数组，行 sha256 幂等去重）。
+         *
+         *     鉴权与 ``POST /spec-workspace/sync`` 同款 WORKSPACE_WRITE（daemon 经
+         *     hub-client 自带用户身份上行，design 自审钉死的 postSpecSync 先例）；
+         *     body 的 ``daemon_local_id`` 原样落库不 FK（数据层留归属）。
+         */
+        post: operations["ingest_knowledge_hits_api_workspaces__workspace_id__knowledge_hits_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Stats
+         * @description 知识运营指标：覆盖率(+8周趋势)/死条目(90天)/密度/生效速度 + 使用率榜。
+         */
+        get: operations["get_knowledge_stats_api_workspaces__workspace_id__knowledge_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/graph/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Graph Query
+         * @description 图查询五视图（neighbors/path/impact/orphans/dangling；summary/nodes 直通）。
+         *
+         *     ``sub`` 七值 Literal（daemon 白名单同集），非法值 422；``depth`` 钳 1-3、
+         *     ``anchor``/``anchor2`` 自由串（daemon 侧黑名单消毒，拒绝回 invalid_input）。
+         */
+        get: operations["get_knowledge_graph_query_api_workspaces__workspace_id__knowledge_graph_query_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/graph/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Graph Overview
+         * @description 总览 lite：summary 分布+簇代表（clusters 固定 50）与孤儿/悬空计数，三 RPC 逐条容错。
+         */
+        get: operations["get_knowledge_graph_overview_api_workspaces__workspace_id__knowledge_graph_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/graph/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Graph Nodes
+         * @description 节点搜索（锚点自动补全数据源；不可用时 data=None，前端静默禁用补全）。
+         */
+        get: operations["get_knowledge_graph_nodes_api_workspaces__workspace_id__knowledge_graph_nodes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/governance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Governance
+         * @description 知识治理信号：三类超阈才见人（安静即健康态）——知识 tab 信号卡数据源。
+         *
+         *     v2 RPC 优先：用户已绑定 daemon 时直采 CLI digest（单源真相），回退本地计算。
+         */
+        get: operations["get_knowledge_governance_api_workspaces__workspace_id__knowledge_governance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/governance/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Knowledge Governance Action
+         * @description 治理动作执行（信号卡按钮端）：经绑定 daemon 白名单执行 CLI 机械动作。
+         *
+         *     kind 白名单在 daemon 侧硬编码（repair-paths / redomain）；未绑定/离线时
+         *     由 runtime 侧错误族映射（502/404/504）。
+         */
+        post: operations["post_knowledge_governance_action_api_workspaces__workspace_id__knowledge_governance_actions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/knowledge/{filename}": {
         parameters: {
             query?: never;
@@ -7260,7 +8014,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Knowledge */
+        /**
+         * Get Knowledge
+         * @description 单条读取。
+         *
+         *     task-04（task-01 遗留的跨目录 get HTTP 化）：``{filename}`` 改 ``:path``
+         *     通配——filename 已扩展为含子目录段（如 ``decisions/daemon.md``），单段参数
+         *     无法命中斜杠路径。前端编码按段 ``encodeURIComponent`` 拼 ``/``。
+         */
         get: operations["get_knowledge_api_workspaces__workspace_id__knowledge__filename__get"];
         put?: never;
         post?: never;
@@ -10278,6 +11039,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/menu-overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Menu Overrides
+         * @description 全量菜单覆盖（menu_key 升序）。仅需认证：内容为全局显示配置，无敏感
+         *     信息（R-06）；FR-05 下发端点，导航侧所有登录用户消费。
+         */
+        get: operations["list_menu_overrides_api_menu_overrides_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/menu-overrides/{menu_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Upsert Menu Override
+         * @description 按 menu_key 建行或整行覆盖写（``None`` = 清除该维度回代码默认）。
+         *     label/sort_order 校验与 ``menu_override.upserted`` 审计在 service 层。
+         */
+        put: operations["upsert_menu_override_api_menu_overrides__menu_key__put"];
+        post?: never;
+        /**
+         * Delete Menu Override
+         * @description 按 menu_key 整行删除（该菜单全部恢复默认）。行不存在时幂等 204，
+         *     ``menu_override.deleted`` 审计在 service 层。
+         */
+        delete: operations["delete_menu_override_api_menu_overrides__menu_key__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/spec-workspace": {
         parameters: {
             query?: never;
@@ -10490,6 +11298,52 @@ export interface paths {
          *     background task.
          */
         post: operations["bootstrap_spec_workspace_api_workspaces__workspace_id__spec_bootstrap_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/spec-workspace/manifest-heal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Heal Manifest Tombstones
+         * @description 人工拍板恢复 platform_deleted 墓碑行（冤案修复通道）。
+         *
+         *     2026-09-25 生产实证：4 个旧归档文件被墓碑无条件拒收、resolve --keep-local
+         *     永久卡死，无任何业务路径清除墓碑。本端点显式 paths 单文件粒度 heal
+         *     （platform_deleted→False、exists→True、version 不动），并同步关闭开放的
+         *     spec-sync 冲突行。非墓碑行跳过（幂等重放安全）。
+         */
+        post: operations["heal_manifest_tombstones_api_workspaces__workspace_id__spec_workspace_manifest_heal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/spec-workspace/consistency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Spec Consistency
+         * @description 镜像磁盘树 × manifest 行对账：disk_only / manifest_ghost（幽灵行）/
+         *     tombstoned_on_disk 三类分歧 + 计数——镜像损坏直接可见（此前靠手写脚本）。
+         */
+        get: operations["get_spec_consistency_api_workspaces__workspace_id__spec_workspace_consistency_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -10793,6 +11647,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/changes/{name}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Change Events
+         * @description GET 变更旁路观测事件（ts 正序增量，前端面板消费端点）。
+         *
+         *     鉴权读 scope（``require_platform_sync``：shpsync_ token 绑定 workspace 收件箱；
+         *     JWT/shk_live_ CHANGE_READ 并集——变更详情页面板走 JWT 会话即此通道，X-003）。
+         *     ``since`` 严格大于（字典序）；无 since 回最新 200 条（反转后仍正序，Grill
+         *     X-001）。零业务判定（D-004）：原值透传纯读取，不触发任何流程动作。
+         */
+        get: operations["list_change_events_api_changes__name__events_get"];
+        put?: never;
+        /**
+         * Push Change Event
+         * @description POST 单条变更旁路观测事件（sillyspec watcher/哨兵推送，恒 provisional）。
+         *
+         *     鉴权同 spec-sync 推送（``require_platform_sync_write``，仅 shpsync_ token，
+         *     D-001@v1；无凭据 401 / JWT·shk_live_ 403）；workspace_id 恒由 token 派生，
+         *     body 不含也不接受 workspace 字段（extra=ignore）。
+         *
+         *     语义恒 200（watcher best-effort 推送，任意 2xx 即成功）：幂等去重（D-002：
+         *     事件 id 优先回退 ts+rule，重复推 ``deduplicated=true`` 不增行）+ 上限保护
+         *     （D-003：单变更 >5000 截断最旧 ``truncated=N``，不拒绝）。
+         *
+         *     红线 D-004@v1：零业务判定——append-only 落库即止，provisional 原值透传，
+         *     不触发任何流程动作（无状态机/审批/通知联动）。
+         */
+        post: operations["push_change_event_api_changes__name__events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agent-logs": {
         parameters: {
             query?: never;
@@ -10936,8 +11830,12 @@ export interface paths {
          *     调 ``host_fs.read_agent_log_messages {path, format, beforeSeq?}``（task-02
          *     契约，默认 30s 传输预算）：daemon 全量读文件本地解析后只回 KB 级归一化消息
          *     （FR-02，替代 content 端点 256KB 原文尾部口径）。外层 daemon 返回 camelCase
-         *     （``totalSegments``/``skippedLines``）→ 本端点转换层落 snake_case；messages
-         *     内层逐字段已对齐（design §7.1）无需改名。
+         *     （``totalSegments``/``skippedLines``/``totalUsage``）→ 本端点转换层落
+         *     snake_case；messages 内层逐字段已对齐（design §7.1）无需改名——新可选字段
+         *     sender/turn_id/model/duration_ms/usage 与 total_usage（task-08 / FR-03 /
+         *     D-004@v1）同口径：messages 内 snake_case 原样递归校验（usage 子对象
+         *     camelCase 键由 schema ``validation_alias`` 对齐），外层 ``totalUsage`` 仅做
+         *     key 映射，零改写语义；老 daemon / 早退分支不携带即缺省 None。
          *
          *     status 四值（parsed/unsupported/parse_error/too_large）**一律 200 透传**——
          *     「RPC 成功≠解析成功」，unsupported/parse_error/too_large 由前端判断回落原文
@@ -11139,6 +12037,7 @@ export interface components {
             change_key?: string | null;
             /** Quick Id */
             quick_id?: string | null;
+            machine?: components["schemas"]["AgentLogMachineBlock"] | null;
         };
         /**
          * AgentLogListItem
@@ -11190,6 +12089,10 @@ export interface components {
             scan_run_id?: string | null;
             /** Pushed At */
             pushed_at?: string | null;
+            /** Reported Machine Id */
+            reported_machine_id?: string | null;
+            /** Reported Machine Name */
+            reported_machine_name?: string | null;
             /** Agent Session Id */
             agent_session_id?: string | null;
             /**
@@ -11222,6 +12125,22 @@ export interface components {
         AgentLogListResponse: {
             /** Items */
             items?: components["schemas"]["AgentLogListItem"][];
+        };
+        /**
+         * AgentLogMachineBlock
+         * @description 协议 v2 entry 级 machine 块（docs/platform-agent-log-protocol.md §machine）。
+         *
+         *     定义于 AgentLogEntry 之后但其字段类型引用（Pydantic v2 前向引用在模块加载
+         *     完成时自动 rebuild）。两键均可空但至少一键非空才有意义（双空等价缺块，
+         *     service 层跳过快照写入）；``machine_id``=上报方持久 machineId
+         *     （~/.sillyhub/daemon/machine-id 同源），``hostname``=上报方主机名（匹配
+         *     daemon_runtimes.name）。
+         */
+        AgentLogMachineBlock: {
+            /** Machine Id */
+            machine_id?: string | null;
+            /** Hostname */
+            hostname?: string | null;
         };
         /**
          * AgentLogMessageItem
@@ -11281,16 +12200,60 @@ export interface components {
              * @description 所属行 completedAt 原文
              */
             ts?: string | null;
+            /**
+             * Sender
+             * @description user_input 段发言者（human=真人气泡 / system_event=系统事件中性行；缺省视为 human）
+             */
+            sender?: ("human" | "system_event") | null;
+            /**
+             * Turn Id
+             * @description 轮次标识（zcode turnId / cursor 轮号 / claude-code 会话内轮序）
+             */
+            turn_id?: string | null;
+            /**
+             * Model
+             * @description 产出该段的模型 id（如 GLM-5.3；无数据源缺省）
+             */
+            model?: string | null;
+            /**
+             * Duration Ms
+             * @description 该次模型调用耗时毫秒（附着到其产出的全部段）
+             */
+            duration_ms?: number | null;
+            /** @description 该次调用 token 用量五项（daemon camelCase 键经 alias 对齐；无数据源缺省） */
+            usage?: components["schemas"]["AgentLogMessageUsage"] | null;
+        };
+        /**
+         * AgentLogMessageUsage
+         * @description 单条消息 usage 五项 token 计数（2026-09-19-tool-report-session-replay task-08）。
+         *
+         *     对齐 daemon ``NormalizedLogMessage.usage``（parse-zcode-model-io.ts，键为
+         *     camelCase ``inputTokens`` 等）——schema 侧 snake_case 落 API 契约，daemon
+         *     原文 camelCase 经 ``validation_alias`` 双名对齐（平台侧 snake_case 构造亦可）。
+         *     子项可 null：daemon 侧形状漂移逐项缺省，不伪造。``extra=ignore`` 与
+         *     AgentLogMessageItem 同款宽松。
+         */
+        AgentLogMessageUsage: {
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /** Total Tokens */
+            total_tokens?: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens?: number | null;
+            /** Cache Write Tokens */
+            cache_write_tokens?: number | null;
         };
         /**
          * AgentLogMessagesResponse
          * @description GET /agent-logs/{entry_id}/messages 200 响应（design §7.2）。
          *
          *     daemon 侧 ``host_fs.read_agent_log_messages`` 外层 camelCase
-         *     （``totalSegments``/``skippedLines``）→ router 转换层落 snake_case；messages
-         *     内层逐字段已对齐无需改名。status 四值一律 200 透传——「RPC 成功≠解析成功」：
-         *     unsupported/parse_error/too_large 由前端判断回落原文端点（D-003@v1），backend
-         *     零解析零改写（D-001@v1）。
+         *     （``totalSegments``/``skippedLines``/``totalUsage``）→ router 转换层落
+         *     snake_case；messages 内层逐字段已对齐无需改名。status 四值一律 200 透传——
+         *     「RPC 成功≠解析成功」：unsupported/parse_error/too_large 由前端判断回落原文
+         *     端点（D-003@v1），backend 零解析零改写（D-001@v1）。
          */
         AgentLogMessagesResponse: {
             /**
@@ -11319,6 +12282,8 @@ export interface components {
              * @description 解析中跳过的坏行数
              */
             skipped_lines: number;
+            /** @description 全会话累计 token 用量四项（daemon 解析器按调用去重求和；无数据源缺省） */
+            total_usage?: components["schemas"]["AgentLogTotalUsage"] | null;
         };
         /**
          * AgentLogPushOk
@@ -11437,6 +12402,29 @@ export interface components {
         AgentLogStatesPush: {
             /** Entries */
             entries: components["schemas"]["AgentLogStateEntry"][];
+        };
+        /**
+         * AgentLogTotalUsage
+         * @description 全会话累计 token 用量四项（2026-09-19-tool-report-session-replay task-08）。
+         *
+         *     对齐 daemon ``AgentLogMessagesResult.totalUsage``（registry.ts，键为 camelCase
+         *     ``inputTokens`` 等）——四项口径与 daemon 一致**无 ``total_tokens``**（daemon
+         *     侧累计即不产出该项）；daemon 原文 camelCase 经 ``validation_alias`` 双名对齐。
+         *     老 daemon / 早退分支（unsupported/parse_error/too_large）不携带即整项 None。
+         *
+         *     2026-10-02-change-center-token-usage task-02：新增第二消费方——usage_ingest
+         *     摄取任务复用同一 alias 对齐链，把 totalUsage 落 platform_agent_logs 快照五列
+         *     （cacheWriteTokens → usage_cache_write_tokens）；DTO 字段集不变。
+         */
+        AgentLogTotalUsage: {
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens?: number | null;
+            /** Cache Write Tokens */
+            cache_write_tokens?: number | null;
         };
         /**
          * AgentProfileAggregatedItem
@@ -11715,6 +12703,8 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             } | null;
+            /** Content Truncated */
+            content_truncated?: boolean | null;
         };
         /** AgentRunResponse */
         AgentRunResponse: {
@@ -11909,6 +12899,12 @@ export interface components {
              * @default 0
              */
             tree_depth: number;
+            /** Fork Of Session Id */
+            fork_of_session_id?: string | null;
+            /** Fork At Run Id */
+            fork_at_run_id?: string | null;
+            /** Engine Fork Anchor */
+            engine_fork_anchor?: string | null;
         };
         /**
          * AgentSessionTaskRead
@@ -12629,6 +13625,48 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * ChangeAssetsRead
+         * @description 变更沉淀资产聚合（GET /changes/{cid}/assets）。
+         *
+         *     逐项 fail-open（design 兼容策略）：单项解析失败降级为空，不影响其它组；
+         *     ``archived=False``（在途变更）时目录件不读取，前端按此渲染引导空态。
+         */
+        ChangeAssetsRead: {
+            /** Change Key */
+            change_key: string;
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+            /** Fr Entries */
+            fr_entries?: components["schemas"]["ChangeFrEntry"][];
+            /** Decisions */
+            decisions?: components["schemas"]["ChangeDecisionEntry"][];
+            /** Knowledge Touch */
+            knowledge_touch?: components["schemas"]["ChangeKnowledgeTouch"][];
+            /** Touched Modules */
+            touched_modules?: components["schemas"]["ChangeTouchedModule"][];
+            /** Test Rows */
+            test_rows?: components["schemas"]["ChangeTestRow"][];
+            patch?: components["schemas"]["ChangePatchMeta"] | null;
+            delta?: components["schemas"]["ChangeDeltaMeta"] | null;
+        };
+        /**
+         * ChangeDecisionEntry
+         * @description 决策蒸馏条目（knowledge/decisions 域文件内归属本变更的节）。
+         */
+        ChangeDecisionEntry: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Status */
+            status?: string | null;
+            /** File */
+            file: string;
+        };
+        /**
          * ChangeDeleteResponse
          * @description DELETE /changes/{cid} 响应（task-06 / design §11，FR-05a）。
          *
@@ -12643,6 +13681,18 @@ export interface components {
             backup_dir: string;
             /** File Count */
             file_count: number;
+        };
+        /**
+         * ChangeDeltaMeta
+         * @description 归档 delta 摘要（delta.md 标题行 + Before/Delta 段行数）。
+         */
+        ChangeDeltaMeta: {
+            /** Headline */
+            headline?: string | null;
+            /** Before Lines */
+            before_lines?: number | null;
+            /** Delta Lines */
+            delta_lines?: number | null;
         };
         /** ChangeDocMatrix */
         ChangeDocMatrix: {
@@ -12670,6 +13720,97 @@ export interface components {
             status: string | null;
             /** Last Modified At */
             last_modified_at: string | null;
+        };
+        /**
+         * ChangeEventItem
+         * @description GET /changes/{name}/events 单条事件（task-02，snake_case 原样 X-06）。
+         */
+        ChangeEventItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Rule */
+            rule: string;
+            /** Severity */
+            severity: string;
+            /** Provisional */
+            provisional: boolean;
+            /** Detail */
+            detail: string | null;
+            /** Ts */
+            ts: string;
+        };
+        /**
+         * ChangeEventListResponse
+         * @description GET /changes/{name}/events 200 响应（ts 正序；since 严格大于增量）。
+         */
+        ChangeEventListResponse: {
+            /** Change Name */
+            change_name: string;
+            /** Count */
+            count: number;
+            /** Items */
+            items?: components["schemas"]["ChangeEventItem"][];
+        };
+        /**
+         * ChangeEventPushOk
+         * @description POST /changes/{name}/events 200 响应（恒 200，幂等/截断语义由计数表达）。
+         */
+        ChangeEventPushOk: {
+            /** Change Name */
+            change_name: string;
+            /**
+             * Stored
+             * @description 本条是否新写入（False=去重命中）
+             */
+            stored: boolean;
+            /**
+             * Deduplicated
+             * @description True=同去重键已存在，未新增行
+             */
+            deduplicated: boolean;
+            /**
+             * Truncated
+             * @description 因上限截断删除的最旧行数
+             * @default 0
+             */
+            truncated: number;
+        };
+        /**
+         * ChangeEventPushRequest
+         * @description POST /changes/{name}/events 请求（sillyspec watcher 推送，恒 provisional）。
+         *
+         *     单事件 JSON（kind/rule/severity/provisional/detail/ts[/id]）。``id`` 可选——
+         *     去重键首选（缺失回退 ``ts+'|'+rule``，D-002）；``severity``/``provisional``
+         *     缺省 info/true（schema 兜底，落库原值透传）。**不含也不接受 workspace 字段**
+         *     ——workspace_id 恒由 shpsync_ token 派生（body 出现被 extra=ignore 吞掉，
+         *     与 quicklog-entries 同款宽松口径：CLI 字段演进不破推送）。
+         */
+        ChangeEventPushRequest: {
+            /** Id */
+            id?: string | null;
+            /** Kind */
+            kind: string;
+            /** Rule */
+            rule: string;
+            /**
+             * Severity
+             * @default info
+             */
+            severity: string;
+            /**
+             * Provisional
+             * @default true
+             */
+            provisional: boolean;
+            /** Detail */
+            detail?: string | null;
+            /** Ts */
+            ts: string;
         };
         /** ChangeFileContent */
         ChangeFileContent: {
@@ -12720,6 +13861,36 @@ export interface components {
             /** Task Id */
             task_id?: string | null;
         };
+        /**
+         * ChangeFrEntry
+         * @description FR 索引条目（knowledge/fr 域文件内归属本变更的节）。
+         */
+        ChangeFrEntry: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Status */
+            status?: string | null;
+            /** File */
+            file: string;
+        };
+        /**
+         * ChangeKnowledgeTouch
+         * @description 知识触达条目（2026-09-26-change-asset-transparency / FR-01）。
+         *
+         *     本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查
+         *     （flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准
+         *     不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。
+         */
+        ChangeKnowledgeTouch: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** File */
+            file: string;
+        };
         /** ChangeList */
         ChangeList: {
             /** Items */
@@ -12764,6 +13935,55 @@ export interface components {
             new_password: string;
         };
         /**
+         * ChangePatchFileRead
+         * @description 归档留档单文件 diff 切片（GET /changes/{cid}/assets/patch-file）。
+         *
+         *     展示面 fail-open：``change.patch``（缺件回退 ``scope-audit.patch``）缺失、
+         *     文件不在留档内、切片超上限一律以 ``note``/``truncated`` 说明而非报错
+         *     （读不到留档不是变更详情的错误面）。
+         */
+        ChangePatchFileRead: {
+            /** Path */
+            path: string;
+            /** Diff */
+            diff?: string | null;
+            /** Note */
+            note?: string | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
+         * ChangePatchMeta
+         * @description patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。
+         *
+         *     ``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 的清单投影
+         *     按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面
+         *     列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退
+         *     形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。
+         */
+        ChangePatchMeta: {
+            /** Files */
+            files?: number | null;
+            /** Additions */
+            additions?: number | null;
+            /** Deletions */
+            deletions?: number | null;
+            /** Patch Status */
+            patch_status?: string | null;
+            /** Saved At */
+            saved_at?: string | null;
+            /** File List */
+            file_list?: string[];
+            /**
+             * Files Truncated
+             * @default false
+             */
+            files_truncated: boolean;
+        };
+        /**
          * ChangeProcessReq
          * @description 变更请求 — 复制当前版本为草稿新版本,旧版本归档。
          */
@@ -12791,6 +14011,8 @@ export interface components {
             change_key: string;
             /** Title */
             title: string | null;
+            /** Description */
+            description?: string | null;
             /** Status */
             status: string;
             /** Location */
@@ -12902,12 +14124,19 @@ export interface components {
             change_key: string;
             /** Title */
             title: string | null;
+            /** Description */
+            description?: string | null;
             /** Status */
             status: string;
             /** Location */
             location: string;
             /** Change Type */
             change_type: string | null;
+            /**
+             * Is Thin
+             * @default false
+             */
+            is_thin: boolean;
             /** Affected Components */
             affected_components: string[];
             /** Owner Id */
@@ -12926,6 +14155,64 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * ChangeTestRow
+         * @description 测试绑定行（归档变更目录 test-trace.json 的 row 原样投影）。
+         *
+         *     ``raw_binding``（2026-09-26-assets-test-binding-raw-text）是该行锚点在归档
+         *     requirements.md「AGENT:测试绑定FR-XX」槽的手写原文——test-trace 摘录会把
+         *     ``::用例`` 后缀截断成纯文件路径，原文承载用例级锚点与描述文字，聚合时
+         *     一并带出供前端展示；槽缺失/解析失败 → None（fail-open，不影响其余字段）。
+         */
+        ChangeTestRow: {
+            /** Row Id */
+            row_id: string;
+            /** Anchor */
+            anchor?: string | null;
+            /** Tests */
+            tests?: string[];
+            /** State */
+            state?: string | null;
+            /** Raw Binding */
+            raw_binding?: string | null;
+        };
+        /**
+         * ChangeTimelineRead
+         * @description 变更合成时间线聚合（GET /changes/{cid}/timeline）。
+         *
+         *     ``born_at`` 来自 requirements.md frontmatter created_at（工件元数据补位，
+         *     watcher 后拉起时事件流缺诞生事件）；events 恒 provisional（观测语义，
+         *     红线 D-004 延续：只展示不消费）。
+         */
+        ChangeTimelineRead: {
+            /** Change Key */
+            change_key: string;
+            /** Born At */
+            born_at?: string | null;
+            /** Events */
+            events?: components["schemas"]["TimelineEvent"][];
+            /** Tasks */
+            tasks?: components["schemas"]["TimelineTask"][];
+            stats?: components["schemas"]["TimelineStats"];
+        };
+        /**
+         * ChangeTouchedModule
+         * @description 模块触达条目（FR-02）——交付文件清单 × 镜像模块图匹配的模块。
+         *
+         *     ``name`` 从模块 doc 首行 h1 提取（conventions 模块卡规范），失败回退
+         *     模块 id；``doc`` 是镜像内相对路径（docs/<项目>/modules/…，explorer 预览
+         *     侧行以此为锚点打开仓库文件）。
+         */
+        ChangeTouchedModule: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Project */
+            project: string;
+            /** Doc */
+            doc?: string | null;
         };
         /**
          * ChangeUsageRead
@@ -13161,6 +14448,16 @@ export interface components {
             captcha_id: string;
         };
         /**
+         * ConsistencyDivergenceItem
+         * @description 单条分歧（path 为 spec_root 相对 POSIX 路径）。
+         */
+        ConsistencyDivergenceItem: {
+            /** Path */
+            path: string;
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
          * ControlCommandItem
          * @description 补拉返回的单条控制指令（task-04 provides 契约：id/kind/payload/created_at）。
          *
@@ -13258,6 +14555,36 @@ export interface components {
             attempt: number;
             /** Message */
             message?: string | null;
+        };
+        /** CoverageOut */
+        CoverageOut: {
+            /** Used Entries */
+            used_entries: number;
+            /** Total Entries */
+            total_entries: number;
+            /**
+             * Routable Entries
+             * @default 0
+             */
+            routable_entries: number;
+            /**
+             * Routable Used Entries
+             * @default 0
+             */
+            routable_used_entries: number;
+            /** Trend */
+            trend: components["schemas"]["CoverageTrendPoint"][];
+        };
+        /**
+         * CoverageTrendPoint
+         * @description 覆盖率趋势单点：week=周末 ISO 日期；pct=该时点覆盖率（分子按
+         *     occurred_at<=周末重算，分母恒为当前条目总数——「覆盖长出来」口径）。
+         */
+        CoverageTrendPoint: {
+            /** Week */
+            week: string;
+            /** Pct */
+            pct: number;
         };
         /**
          * CustomSkillCreate
@@ -13501,6 +14828,8 @@ export interface components {
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
             /** Spec Cache */
             spec_cache?: components["schemas"]["DaemonHeartbeatSpecCacheItem"][];
+            /** Machine Id */
+            machine_id?: string | null;
         };
         /**
          * DaemonHeartbeatResponse
@@ -14259,6 +15588,37 @@ export interface components {
             latest_build_id: string;
         };
         /**
+         * DeadEntryOut
+         * @description 死条目（90 天零命中或从未命中；锚点形态输出可定位）。
+         */
+        DeadEntryOut: {
+            /** Anchor */
+            anchor: string;
+            /** Last Hit At */
+            last_hit_at?: string | null;
+        };
+        /**
+         * DensityOut
+         * @description 每任务命中密度：总注入锚点数（inject 行 matched_anchors 长度和）÷ 任务数
+         *     （inject 行 change_name 去重；fr-inject 行不进分母仅其锚点计数——口径注记）。
+         */
+        DensityOut: {
+            /** Per Task Avg */
+            per_task_avg: number;
+            /** Trend */
+            trend: components["schemas"]["DensityTrendPoint"][];
+        };
+        /**
+         * DensityTrendPoint
+         * @description 密度趋势单点：该周窗口内每任务注入锚点数。
+         */
+        DensityTrendPoint: {
+            /** Week */
+            week: string;
+            /** Per Task Avg */
+            per_task_avg: number;
+        };
+        /**
          * DirEntry
          * @description A single directory entry returned by the daemon list_dir RPC.
          */
@@ -14335,6 +15695,116 @@ export interface components {
             target_workspace_id?: string | null;
         };
         /**
+         * DistillDispatchIn
+         * @description POST /knowledge/distill 请求体（派发蒸馏任务）。
+         *
+         *     ``source_ref``：会话源为 session_id（UUID 字符串，单条）；变更源为
+         *     change_key（单条）；快速修复源为 ql 自然键短码（ql-YYYYMMDD-NNN-后缀），
+         *     单条 ql 体量小故来源**多选**（list[str]，D-010②）——注意 quicklog 是单文件
+         *     多条目形态，ref 指向 QUICKLOG-*.md 内的 ``## <ql-id>`` 节而非独立文件
+         *     （quick-2dba0118 校验/指引同步改为条目级）。
+         *     ``mode``：会话源可选 ``resume``（原会话续接，D-009——进行中直接 inject、
+         *     已结束 reopen+inject，引擎/状态不满足自动降级 fresh 并记降级原因）；
+         *     ``fresh`` 为默认（零回归），change/quick 强制走 fresh。
+         *     fresh 配置字段（D-010③，复用 create_session 双入口）：
+         *     ``runtime_id`` 钉机器（优先于 ``agent_type``/provider）、``agent_type``
+         *     （provider）、``agent_profile_id``、``model``；quick-2dba0118 补
+         *     ``llm_provider_id``（会话级 LLM 供应商，None=不指定回落本机/工作区默认，
+         *     「和会话新建一样」——透传 create_session 写 lease metadata）。
+         */
+        DistillDispatchIn: {
+            /**
+             * Source Type
+             * @enum {string}
+             */
+            source_type: "session" | "change" | "quick";
+            /** Source Ref */
+            source_ref: string | string[];
+            /** Focus */
+            focus?: string | null;
+            /**
+             * Mode
+             * @default fresh
+             * @enum {string}
+             */
+            mode: "resume" | "fresh";
+            /** Runtime Id */
+            runtime_id?: string | null;
+            /** Agent Type */
+            agent_type?: string | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+        };
+        /**
+         * DistillQuickEntryList
+         * @description GET /knowledge/distill/quick-entries 响应（最新在前，按 ref 倒序）。
+         */
+        DistillQuickEntryList: {
+            /** Items */
+            items: components["schemas"]["DistillQuickEntryOut"][];
+        };
+        /**
+         * DistillQuickEntryOut
+         * @description GET /knowledge/distill/quick-entries 单条 ql 条目（quick-2dba0118 三修之一）。
+         *
+         *     quicklog 真实形态是单文件多条目（QUICKLOG-*.md 内 ``## <ql-id> | 日期 | 标题``
+         *     节），蒸馏 quick 源的多选单位是**条目**而非文件——本 DTO 投影 parser.
+         *     parse_quick_entries 的条目级视图（弹层选择器数据源 + dispatch 源校验同根）。
+         */
+        DistillQuickEntryOut: {
+            /** Ref */
+            ref: string;
+            /** Title */
+            title: string;
+            /** Date */
+            date: string;
+        };
+        /**
+         * DistillTaskRead
+         * @description 蒸馏任务条（AgentRun 与 metadata_ 投影；dispatch 响应复用同形状）。
+         *
+         *     ``agent_session_id``：蒸馏实际执行的 AgentSession（D-009/D-010——resume
+         *     为续接的原会话、fresh 为 create_session 新建的蒸馏会话），供知识库侧
+         *     跳转；后台离线兜底失败时无会话为 null。
+         *     ``merged_to``：合并后知识点位置（``目标文件#小节标题`` 双键，D-010①
+         *     反链，防锚点漂移）；未合并=null。
+         *     ``mode``：实际执行形态（resume 请求被降级守卫改写时为 ``fresh``）。
+         *     ``degraded_reason``：resume 降级原因（未降级=null）。
+         */
+        DistillTaskRead: {
+            /**
+             * Agent Run Id
+             * Format: uuid
+             */
+            agent_run_id: string;
+            /** Source Type */
+            source_type: string;
+            /** Source Ref */
+            source_ref: string;
+            /** Status */
+            status: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Mode
+             * @default fresh
+             */
+            mode: string;
+            /** Agent Session Id */
+            agent_session_id?: string | null;
+            /** Merged To */
+            merged_to?: string | null;
+            /** Degraded Reason */
+            degraded_reason?: string | null;
+        };
+        /**
          * DocumentsSyncOk
          * @description POST documents 200 响应（CLI 不读 body，任意 2xx 即可，synced 供人工核对）。
          */
@@ -14365,6 +15835,16 @@ export interface components {
              * @description True=启用进 bundle，False=停用
              */
             enabled: boolean;
+        };
+        /**
+         * EntryCountItem
+         * @description 文件级使用计数（锚点前缀文件名计数和，文件级 🔥 徽标数据源）。
+         */
+        EntryCountItem: {
+            /** File */
+            file: string;
+            /** Count */
+            count: number;
         };
         /**
          * ExecutePlanReq
@@ -14486,7 +15966,7 @@ export interface components {
             stage_dispatch?: boolean | null;
             /**
              * Provider Config
-             * @description 用户默认 LLM 供应商配置。含 agent_kind/base_url/api_key(明文)/auth_field/model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create 阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。
+             * @description 用户默认 LLM 供应商配置。agent_kind 恒为会话引擎值(D-005)；model/default_fallback_model 两键同值=会话所选??主模型派生、model_role_mappings 由条目折算、models 为原始列表(D-001)。含 base_url/api_key(明文)/auth_field/model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create 阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。
              */
             provider_config?: {
                 [key: string]: unknown;
@@ -14714,6 +16194,17 @@ export interface components {
             size: number;
             /** Description */
             description?: string | null;
+        };
+        /**
+         * FreshnessOut
+         * @description 新知识生效速度：近 30 天新增条目数（条目首见=frontmatter created_at 优先/
+         *     hits 首见兜底）与其中已被命中数。
+         */
+        FreshnessOut: {
+            /** Recent New */
+            recent_new: number;
+            /** Recent Used */
+            recent_used: number;
         };
         /** GitIdentityCreate */
         GitIdentityCreate: {
@@ -15212,6 +16703,349 @@ export interface components {
              */
             timestamp: string;
         };
+        /** GovernanceActionIn */
+        GovernanceActionIn: {
+            /** Kind */
+            kind: string;
+            /** From Domain */
+            from_domain?: string | null;
+            /** To Domain */
+            to_domain?: string | null;
+        };
+        /** GovernanceActionOut */
+        GovernanceActionOut: {
+            /** Output */
+            output: string;
+        };
+        /**
+         * GovernanceOut
+         * @description v2（2026-09-27-governance-rpc-actions）：source 标数据源（daemon-rpc=CLI 单源
+         *     直采，local=回退计算）；actions_available 标本端可否执行动作（RPC 直采时 True）。
+         */
+        GovernanceOut: {
+            /** Healthy */
+            healthy: boolean;
+            /** Signals */
+            signals: components["schemas"]["GovernanceSignalOut"][];
+            /** Totals */
+            totals: {
+                [key: string]: number;
+            };
+            /**
+             * Source
+             * @default local
+             */
+            source: string;
+            /**
+             * Actions Available
+             * @default false
+             */
+            actions_available: boolean;
+        };
+        /** GovernanceSignalOut */
+        GovernanceSignalOut: {
+            /** Kind */
+            kind: string;
+            /** Title */
+            title: string;
+            /** Count */
+            count: number;
+            /** Detail */
+            detail: string;
+            /** Suggestion */
+            suggestion: string;
+        };
+        /**
+         * GraphCluster
+         * @description summary 簇（key=类型:域；representatives=度数 top-5）。
+         */
+        GraphCluster: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Count */
+            count: number;
+            /** Representatives */
+            representatives: components["schemas"]["GraphNodeRef"][];
+        };
+        /**
+         * GraphDanglingData
+         * @description dangling 查询数据：items 由 daemon 裁剪 top-50，count 保留原值。
+         */
+        GraphDanglingData: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["GraphDanglingItem"][];
+        };
+        /**
+         * GraphDanglingItem
+         * @description 悬空清单条（id=引用方节点、type=边型、kind=强度档、detail=缺失目标路径）。
+         */
+        GraphDanglingItem: {
+            /** Id */
+            id: string;
+            /** Type */
+            type: string;
+            /** Kind */
+            kind: string;
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * GraphDecisionRef
+         * @description impact 决策/FR 引用（CLI 实际形状：id/type/status，status=decision 状态位）。
+         */
+        GraphDecisionRef: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default
+             */
+            type: string;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+        };
+        /**
+         * GraphEdge
+         * @description 边（s→t 定方向；strength=strong/medium/weak 三档，前端线型派生依据）。
+         */
+        GraphEdge: {
+            /** S */
+            s: string;
+            /** T */
+            t: string;
+            /** Type */
+            type: string;
+            /**
+             * Strength
+             * @default
+             */
+            strength: string;
+        };
+        /** GraphEnvelope[GraphNodesData] */
+        GraphEnvelope_GraphNodesData_: {
+            /** Available */
+            available: boolean;
+            /** Reason */
+            reason?: ("unbound" | "offline" | "timeout" | "upgrade_required" | "invalid_input" | "rpc_error") | null;
+            /**
+             * Source
+             * @default daemon-rpc
+             * @constant
+             */
+            source: "daemon-rpc";
+            data?: components["schemas"]["GraphNodesData"] | null;
+        };
+        /** GraphEnvelope[GraphOverviewData] */
+        GraphEnvelope_GraphOverviewData_: {
+            /** Available */
+            available: boolean;
+            /** Reason */
+            reason?: ("unbound" | "offline" | "timeout" | "upgrade_required" | "invalid_input" | "rpc_error") | null;
+            /**
+             * Source
+             * @default daemon-rpc
+             * @constant
+             */
+            source: "daemon-rpc";
+            data?: components["schemas"]["GraphOverviewData"] | null;
+        };
+        /** GraphEnvelope[Union[GraphNeighborsData, GraphPathData, GraphImpactData, GraphOrphansData, GraphDanglingData, GraphSummary, GraphNodesData]] */
+        GraphEnvelope_Union_GraphNeighborsData__GraphPathData__GraphImpactData__GraphOrphansData__GraphDanglingData__GraphSummary__GraphNodesData__: {
+            /** Available */
+            available: boolean;
+            /** Reason */
+            reason?: ("unbound" | "offline" | "timeout" | "upgrade_required" | "invalid_input" | "rpc_error") | null;
+            /**
+             * Source
+             * @default daemon-rpc
+             * @constant
+             */
+            source: "daemon-rpc";
+            /** Data */
+            data?: components["schemas"]["GraphNeighborsData"] | components["schemas"]["GraphPathData"] | components["schemas"]["GraphImpactData"] | components["schemas"]["GraphOrphansData"] | components["schemas"]["GraphDanglingData"] | components["schemas"]["GraphSummary"] | components["schemas"]["GraphNodesData"] | null;
+        };
+        /**
+         * GraphHop
+         * @description path 单跳（与 GraphEdge 同构减 strength；CLI hops 即此形状）。
+         */
+        GraphHop: {
+            /** S */
+            s: string;
+            /** T */
+            t: string;
+            /** Type */
+            type: string;
+        };
+        /**
+         * GraphImpactData
+         * @description impact 查询数据：强边闭包（深度≤2 + supersedes/module-dep 传递例外）。
+         *
+         *     ``closure`` 为闭包节点 id 数组（CLI 实际形状，非 GraphNodeRef——见 graph.py
+         *     模块注释偏差说明）；``modules`` 为 module: 前缀节点 id。
+         */
+        GraphImpactData: {
+            /** Key */
+            key: string;
+            /** Closure */
+            closure: string[];
+            /** Modules */
+            modules: string[];
+            /** Decisions And Frs */
+            decisions_and_frs: components["schemas"]["GraphDecisionRef"][];
+            /** Rejected Reachable */
+            rejected_reachable: components["schemas"]["GraphRejectedRef"][];
+        };
+        /**
+         * GraphNeighborsData
+         * @description neighbors 查询数据：邻域节点 + 边（含起点；dir/edge_type 由前端从 edges 派生）。
+         */
+        GraphNeighborsData: {
+            /** Anchor */
+            anchor: string;
+            /** Nodes */
+            nodes: components["schemas"]["GraphNodeRef"][];
+            /** Edges */
+            edges: components["schemas"]["GraphEdge"][];
+        };
+        /**
+         * GraphNodeRef
+         * @description 节点引用（id/type/label；label 缺省空串由前端回退显示 id）。
+         */
+        GraphNodeRef: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default
+             */
+            type: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+        };
+        /**
+         * GraphNodesData
+         * @description nodes 搜索数据（锚点自动补全数据源；不可用时 None 由信封 reason 承载）。
+         */
+        GraphNodesData: {
+            /** Nodes */
+            nodes?: components["schemas"]["GraphNodeRef"][] | null;
+        };
+        /**
+         * GraphOrphanItem
+         * @description 孤儿清单条（kind=zero-degree / entry-no-route-no-strong 两类）。
+         */
+        GraphOrphanItem: {
+            /** Id */
+            id: string;
+            /** Type */
+            type: string;
+            /** Kind */
+            kind: string;
+        };
+        /**
+         * GraphOrphansData
+         * @description orphans 查询数据：items 由 daemon 裁剪 top-50，count 保留原值。
+         */
+        GraphOrphansData: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["GraphOrphanItem"][];
+        };
+        /**
+         * GraphOverviewData
+         * @description overview 组装数据：summary→orphans→dangling 三 RPC 逐条容错——子块失败仅置
+         *     None（旧 CLI summary 缺失→lite 隐藏、计数缺失→前端显示「—」），全失败整信封降级。
+         */
+        GraphOverviewData: {
+            summary?: components["schemas"]["GraphSummary"] | null;
+            /** Orphans Count */
+            orphans_count?: number | null;
+            /** Dangling Count */
+            dangling_count?: number | null;
+        };
+        /**
+         * GraphPathData
+         * @description path 查询数据：强边子集寻路结果（不可达 found=false + reason 文案需展示）。
+         *
+         *     ``from_`` 因 Python 保留字以 alias ``from`` 序列化（请求/响应 JSON 键均为 from）。
+         */
+        GraphPathData: {
+            /** From */
+            from: string;
+            /** To */
+            to: string;
+            /** Found */
+            found: boolean;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /**
+             * Hop Count
+             * @default 0
+             */
+            hop_count: number;
+            /** Hops */
+            hops: components["schemas"]["GraphHop"][];
+        };
+        /**
+         * GraphRejectedRef
+         * @description impact 防复潮可达项（CLI 实际形状：id/title/reason，reason 截断 80 字符）。
+         */
+        GraphRejectedRef: {
+            /** Id */
+            id: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * GraphSummary
+         * @description 全图 lite 聚合（CLI byType/byEdge 归一为 by_type/by_edge；四计数与 doctor 同源）。
+         */
+        GraphSummary: {
+            /** Nodes */
+            nodes: number;
+            /** Edges */
+            edges: number;
+            /** By Type */
+            by_type: {
+                [key: string]: number;
+            };
+            /** By Edge */
+            by_edge: {
+                [key: string]: number;
+            };
+            /** Orphans */
+            orphans: number;
+            /** Module Doc Gaps */
+            module_doc_gaps: number;
+            /** Changelog Danglings */
+            changelog_danglings: number;
+            /** Dangling Refs */
+            dangling_refs: number;
+            /** Clusters */
+            clusters: components["schemas"]["GraphCluster"][];
+        };
         /**
          * GroupChatCreate
          * @description ``POST /api/group-chats`` 建群体（design §6.1）。
@@ -15255,6 +17089,18 @@ export interface components {
              * @default 20
              */
             context_window: number;
+            /**
+             * Consensus Mode
+             * @description 汇总收口模式开关（默认关）
+             * @default false
+             */
+            consensus_mode: boolean;
+            /**
+             * Consensus Timeout Seconds
+             * @description 汇总收口超时秒数（60~3600，默认 600——超时强制收口并标注未响应者，D-004）
+             * @default 600
+             */
+            consensus_timeout_seconds: number;
             /** User Members */
             user_members?: components["schemas"]["GroupMemberUserCreate"][];
             /** Agent Members */
@@ -15295,6 +17141,10 @@ export interface components {
             cross_mention_depth: number;
             /** Context Window */
             context_window: number;
+            /** Consensus Mode */
+            consensus_mode: boolean;
+            /** Consensus Timeout Seconds */
+            consensus_timeout_seconds: number;
             /**
              * Created At
              * Format: date-time
@@ -15353,6 +17203,10 @@ export interface components {
             cross_mention_depth: number;
             /** Context Window */
             context_window: number;
+            /** Consensus Mode */
+            consensus_mode: boolean;
+            /** Consensus Timeout Seconds */
+            consensus_timeout_seconds: number;
             /**
              * Created At
              * Format: date-time
@@ -15401,6 +17255,12 @@ export interface components {
          *     最新一行 ts（无消息 None，未读排序数据源）与本成员未读数
          *     （``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则
          *     ts > 位点；cap 99+）。
+         *
+         *     ``visible_workspace_ids``（2026-09-13-session-group-ux-fixes D-003）：群
+         *     可见工作区集合 = 直接归属 ``workspace_id`` ∪ 项目关联工作区
+         *     （``PpmProjectWorkspace`` M:N，批量单查，去重）——群列表可见性判定的
+         *     单一源，前端桌面/移动列表过滤消费（旧缓存无该字段时 ``?? [workspace_id]``
+         *     兜底退化现状行为）。
          */
         GroupChatListItemRead: {
             /**
@@ -15430,6 +17290,10 @@ export interface components {
             cross_mention_depth: number;
             /** Context Window */
             context_window: number;
+            /** Consensus Mode */
+            consensus_mode: boolean;
+            /** Consensus Timeout Seconds */
+            consensus_timeout_seconds: number;
             /**
              * Created At
              * Format: date-time
@@ -15462,6 +17326,11 @@ export interface components {
             last_mention?: {
                 [key: string]: string;
             } | null;
+            /**
+             * Visible Workspace Ids
+             * @default []
+             */
+            visible_workspace_ids: string[];
         };
         /**
          * GroupChatPinnedRead
@@ -15527,6 +17396,10 @@ export interface components {
             cross_mention_depth: number;
             /** Context Window */
             context_window: number;
+            /** Consensus Mode */
+            consensus_mode: boolean;
+            /** Consensus Timeout Seconds */
+            consensus_timeout_seconds: number;
             /**
              * Created At
              * Format: date-time
@@ -15560,6 +17433,10 @@ export interface components {
             cross_mention_depth?: number | null;
             /** Context Window */
             context_window?: number | null;
+            /** Consensus Mode */
+            consensus_mode?: boolean | null;
+            /** Consensus Timeout Seconds */
+            consensus_timeout_seconds?: number | null;
             /**
              * Settings Json
              * @description 群扩展设置；None=不改。支持 guardrails 子键（互@护栏群级覆盖）与 typing_preview 顶层键（typing 草稿预览开关，默认关）
@@ -15904,6 +17781,8 @@ export interface components {
             mid_turn: boolean;
             /** Error */
             error?: string | null;
+            /** Consensus Role */
+            consensus_role?: string | null;
         };
         /**
          * GroupMemberUpdate
@@ -15979,6 +17858,8 @@ export interface components {
             mention_all: boolean;
             /** Triggered */
             triggered?: components["schemas"]["GroupMemberTriggerRead"][];
+            /** Consensus Task Id */
+            consensus_task_id?: string | null;
         };
         /**
          * GroupMessageSendRequest
@@ -16080,6 +17961,36 @@ export interface components {
             server_time: string;
             /** Environment */
             environment: string;
+        };
+        /**
+         * HitsBatchIn
+         * @description POST /knowledge/hits/batch 请求体。
+         *
+         *     ``lines``：原始 jsonl 行数组（逐行 json.loads + sha256 幂等，**不做**预先
+         *     解包——行级原样转发保证多端 line_hash 一致）；``daemon_local_id``：daemon
+         *     实例 id，原样落库不 FK（数据层留归属，design 非目标「按人视图」后续用）。
+         */
+        HitsBatchIn: {
+            /** Daemon Local Id */
+            daemon_local_id?: string | null;
+            /** Lines */
+            lines: string[];
+        };
+        /**
+         * HitsBatchOut
+         * @description batch 接收结果计数。
+         *
+         *     ``ingested``：新落库行数；``skipped_bad``：json.loads 解析失败的坏行数；
+         *     ``duplicates``：撞 (workspace_id, line_hash) 唯一约束跳过的行数（含同批
+         *     重复与重报）。
+         */
+        HitsBatchOut: {
+            /** Ingested */
+            ingested: number;
+            /** Skipped Bad */
+            skipped_bad: number;
+            /** Duplicates */
+            duplicates: number;
         };
         /** HumanTestRequest */
         HumanTestRequest: {
@@ -16330,6 +18241,8 @@ export interface components {
          * @description A single knowledge file entry.
          */
         KnowledgeEntry: {
+            /** Zone */
+            zone: string;
             /** Filename */
             filename: string;
             /** Path */
@@ -16340,6 +18253,8 @@ export interface components {
             content?: string | null;
             /** Last Modified At */
             last_modified_at?: string | null;
+            /** Use Count */
+            use_count?: number | null;
         };
         /** KnowledgeList */
         KnowledgeList: {
@@ -16347,6 +18262,94 @@ export interface components {
             items: components["schemas"]["KnowledgeEntry"][];
             /** Total */
             total: number;
+        };
+        /**
+         * KnowledgeMergeIn
+         * @description 合并请求体（preview-merge / merge 共用）。
+         *
+         *     ``target_file`` 限定三类 INDEX 映射文件（known-issues.md / patterns.md /
+         *     conventions.md，D-007@v1）；``keywords`` 由审核人在表单人工填写（不做自动
+         *     派生，design 约束），用于生成 INDEX.md 路由行 ``- 关键词|关键词 → [标题](…)``。
+         */
+        KnowledgeMergeIn: {
+            /** Target File */
+            target_file: string;
+            /** Section Title */
+            section_title: string;
+            /** Keywords */
+            keywords: string[];
+        };
+        /**
+         * KnowledgeMergeResult
+         * @description merge 执行结果（两段式合并终态）。
+         */
+        KnowledgeMergeResult: {
+            /** Merged */
+            merged: boolean;
+            /** Target File */
+            target_file: string;
+            /** Section Title */
+            section_title: string;
+            /** Index Line */
+            index_line: string;
+            /** Section Appended */
+            section_appended: boolean;
+            /** Index Updated */
+            index_updated: boolean;
+        };
+        /**
+         * KnowledgeProposeIn
+         * @description POST /knowledge/propose 请求体（手工录入候选）。
+         */
+        KnowledgeProposeIn: {
+            /** Title */
+            title: string;
+            /**
+             * Category
+             * @default uncategorized
+             */
+            category: string;
+            /**
+             * Body
+             * @default
+             */
+            body: string;
+            /** Tags */
+            tags?: string[];
+        };
+        /**
+         * KnowledgeStatsOut
+         * @description GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。
+         *
+         *     2026-09-25-knowledge-stats-layering 增：orphan_anchors（失效命中单列，
+         *     按命中次数降序）与 data_until（数据截止时间 = 使用计数行最大 occurred_at；
+         *     零命中为 None——上行断流时面板据此显式展示「数据截至 X」）。
+         */
+        KnowledgeStatsOut: {
+            coverage: components["schemas"]["CoverageOut"];
+            /** Dead Entries */
+            dead_entries: components["schemas"]["DeadEntryOut"][];
+            density: components["schemas"]["DensityOut"];
+            freshness: components["schemas"]["FreshnessOut"];
+            /** Usage Board */
+            usage_board: components["schemas"]["UsageBoardItem"][];
+            /** Entry Counts */
+            entry_counts: components["schemas"]["EntryCountItem"][];
+            /**
+             * Orphan Anchors
+             * @default []
+             */
+            orphan_anchors: components["schemas"]["OrphanAnchorOut"][];
+            /** Data Until */
+            data_until?: string | null;
+        };
+        /**
+         * KnowledgeUpdateIn
+         * @description PATCH /knowledge/entries/{filename} 请求体（整文件正文替换）。
+         */
+        KnowledgeUpdateIn: {
+            /** Content */
+            content: string;
         };
         /**
          * LeaseClaimRequest
@@ -16595,18 +18598,17 @@ export interface components {
         LlmProviderCreate: {
             /** Name */
             name: string;
+            /** Agent Kinds */
+            agent_kinds: ("claude" | "pi" | "codex")[];
             /**
-             * Agent Kind
-             * @default claude
-             * @enum {string}
+             * Models
+             * @default []
              */
-            agent_kind: "claude" | "pi" | "codex";
+            models: components["schemas"]["ProviderModelEntry"][];
             /** Base Url */
             base_url?: string | null;
             /** Api Key */
             api_key?: string | null;
-            /** Model */
-            model?: string | null;
             /** Notes */
             notes?: string | null;
             /** Website Url */
@@ -16622,12 +18624,6 @@ export interface components {
              * @enum {string}
              */
             api_format: "anthropic" | "openai_chat";
-            /** Model Role Mappings */
-            model_role_mappings?: {
-                [key: string]: unknown;
-            } | null;
-            /** Default Fallback Model */
-            default_fallback_model?: string | null;
             /** Extra Env */
             extra_env?: {
                 [key: string]: unknown;
@@ -16641,8 +18637,6 @@ export interface components {
              * @default false
              */
             is_default: boolean;
-            /** Multimodal */
-            multimodal?: string | null;
         };
         /** LlmProviderList */
         LlmProviderList: {
@@ -16704,12 +18698,12 @@ export interface components {
             user_id: string;
             /** Name */
             name: string;
-            /** Agent Kind */
-            agent_kind: string;
+            /** Agent Kinds */
+            agent_kinds: string[];
+            /** Models */
+            models: components["schemas"]["ProviderModelEntry"][];
             /** Base Url */
             base_url: string | null;
-            /** Model */
-            model: string | null;
             /** Notes */
             notes: string | null;
             /** Website Url */
@@ -16718,12 +18712,6 @@ export interface components {
             auth_field: string;
             /** Api Format */
             api_format: string;
-            /** Model Role Mappings */
-            model_role_mappings: {
-                [key: string]: unknown;
-            } | null;
-            /** Default Fallback Model */
-            default_fallback_model: string | null;
             /** Extra Env */
             extra_env: {
                 [key: string]: unknown;
@@ -16736,11 +18724,6 @@ export interface components {
             is_default: boolean;
             /** Api Key Masked */
             api_key_masked?: string | null;
-            /**
-             * Multimodal
-             * @default auto
-             */
-            multimodal: string;
             /**
              * Created At
              * Format: date-time
@@ -16760,8 +18743,6 @@ export interface components {
             base_url?: string | null;
             /** Api Key */
             api_key?: string | null;
-            /** Model */
-            model?: string | null;
             /** Notes */
             notes?: string | null;
             /** Website Url */
@@ -16770,12 +18751,10 @@ export interface components {
             auth_field?: string | null;
             /** Api Format */
             api_format?: ("anthropic" | "openai_chat") | null;
-            /** Model Role Mappings */
-            model_role_mappings?: {
-                [key: string]: unknown;
-            } | null;
-            /** Default Fallback Model */
-            default_fallback_model?: string | null;
+            /** Agent Kinds */
+            agent_kinds?: ("claude" | "pi" | "codex")[] | null;
+            /** Models */
+            models?: components["schemas"]["ProviderModelEntry"][] | null;
             /** Extra Env */
             extra_env?: {
                 [key: string]: unknown;
@@ -16786,8 +18765,6 @@ export interface components {
             } | null;
             /** Is Default */
             is_default?: boolean | null;
-            /** Multimodal */
-            multimodal?: string | null;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -16955,6 +18932,27 @@ export interface components {
             error?: string | null;
             /** Since */
             since?: string | null;
+        };
+        /**
+         * ManifestHealIn
+         * @description POST /spec-workspace/manifest-heal 请求体。
+         *
+         *     2026-09-26-manifest-heal-endpoint：显式文件清单（人工拍板单位=单文件，
+         *     不接受前缀批量——防误清整目录墓碑）。
+         */
+        ManifestHealIn: {
+            /** Paths */
+            paths: string[];
+        };
+        /**
+         * ManifestHealOut
+         * @description heal 回执：治愈清单 + 跳过清单（非墓碑行幂等重放安全）。
+         */
+        ManifestHealOut: {
+            /** Healed */
+            healed: string[];
+            /** Skipped */
+            skipped: string[];
         };
         /**
          * McpBindingCreate
@@ -17583,6 +19581,74 @@ export interface components {
             /** Init Synced Spec Version */
             init_synced_spec_version: number | null;
         };
+        /**
+         * MenuOverrideListResponse
+         * @description GET 列表响应包装（仓库 list 响应惯例：顶层 ``items`` 字段）。
+         */
+        MenuOverrideListResponse: {
+            /** Items */
+            items: components["schemas"]["MenuOverrideRead"][];
+        };
+        /**
+         * MenuOverrideRead
+         * @description 单条菜单覆盖（读响应；全局生效，无 role/user 维度，D-002@v1）。
+         *
+         *     对外字段名为 ``label``，映射模型列 ``MenuOverride.label_override``
+         *     （service 层组装时改名，from_attributes 不自动命中需显式构造）。
+         */
+        MenuOverrideRead: {
+            /** Menu Key */
+            menu_key: string;
+            /** Label */
+            label: string | null;
+            /** Sort Order */
+            sort_order: number | null;
+            /** Hidden */
+            hidden: boolean;
+        };
+        /**
+         * MenuOverrideUpsert
+         * @description Body of ``PUT /api/menu-overrides/{menu_key}``。
+         *
+         *     三字段全可空：``None`` = 清除该维度覆盖、回退代码默认。label 1–30 字符、
+         *     sort_order 0–999；未知字段拒收（extra=forbid）。
+         */
+        MenuOverrideUpsert: {
+            /** Label */
+            label?: string | null;
+            /** Sort Order */
+            sort_order?: number | null;
+            /** Hidden */
+            hidden?: boolean | null;
+        };
+        /**
+         * MergePreviewOut
+         * @description 合并预览（dry-run，不落盘）：将追加的段落文本与 INDEX 路由行。
+         *
+         *     ``section_skipped`` / ``index_line_skipped``：dupRe 幂等守卫命中（目标已含
+         *     同名 ``##`` 小节 / INDEX 已含同锚点路由行）时对应动作将被跳过。
+         */
+        MergePreviewOut: {
+            /** Section Text */
+            section_text: string;
+            /** Index Line */
+            index_line: string;
+            /**
+             * Section Skipped
+             * @default false
+             */
+            section_skipped: boolean;
+            /**
+             * Index Line Skipped
+             * @default false
+             */
+            index_line_skipped: boolean;
+            /**
+             * Target Will Create
+             * @default false
+             */
+            target_will_create: boolean;
+        };
         /** MissionArtifactResponse */
         MissionArtifactResponse: {
             /**
@@ -17724,6 +19790,8 @@ export interface components {
             hint?: string | null;
             /** Raw */
             raw?: string | null;
+            /** Reset At */
+            reset_at?: string | null;
         };
         /**
          * ModelErrorType
@@ -17988,6 +20056,21 @@ export interface components {
             parent_id?: string | null;
             /** Sort Order */
             sort_order?: number | null;
+        };
+        /**
+         * OrphanAnchorOut
+         * @description 失效命中（幽灵锚）：解析后仍不对应任何当前条目的命中锚点。
+         *
+         *     2026-09-25-knowledge-stats-layering：与正常榜单分开单列——「没人用」与
+         *     「锚点对不上」（知识面换代/标题漂移）是两类完全不同的信号，混排误导。
+         */
+        OrphanAnchorOut: {
+            /** Anchor */
+            anchor: string;
+            /** Total */
+            total: number;
+            /** Last Hit */
+            last_hit?: string | null;
         };
         /**
          * PageContextCreateBlock
@@ -18315,7 +20398,7 @@ export interface components {
          * Permission
          * @enum {string}
          */
-        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "daemon:borrow" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view";
+        Permission: "platform:admin" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "daemon:borrow" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
         /**
          * PermissionResponseRead
          * @description REST response body for POST /sessions/{id}/permissions/{req}/response.
@@ -20036,6 +22119,34 @@ export interface components {
             notify_session: boolean;
         };
         /**
+         * ProviderModelEntry
+         * @description 模型条目（change 2026-10-06-provider-model-list / D-001/D-002）。
+         *
+         *     一条模型的自包含配置：多模态三态（auto=按模型名启发式，D-03）+ 可选 Claude
+         *     角色标记（可多标，同角色多条时注入取首条）+ one_m（1M 上下文勾选，daemon
+         *     消费面拼 [1m] 后缀语义不变）。
+         */
+        ProviderModelEntry: {
+            /** Name */
+            name: string;
+            /**
+             * Multimodal
+             * @default auto
+             * @enum {string}
+             */
+            multimodal: "auto" | "true" | "false";
+            /**
+             * Roles
+             * @default []
+             */
+            roles: ("sonnet" | "opus" | "fable" | "haiku")[];
+            /**
+             * One M
+             * @default false
+             */
+            one_m: boolean;
+        };
+        /**
          * ProviderModelUsageRead
          * @description 用量统计的 供应商×模型 分组行（FR-04-1）。
          *
@@ -20669,12 +22780,26 @@ export interface components {
         /**
          * QueueDispatchNowResponse
          * @description POST /api/daemon/sessions/{id}/queue/{entry_id}/dispatch-now 响应体
-         *     （FR-05 / D-001）。
+         *     （FR-05 / D-001；task-06 2026-09-18-single-chat-steering FR-03 扩三态）。
          *
-         *     ``interrupted=True``=已打断活跃轮（run 终态钩子接力派发队首=本条）；
-         *     ``False``=空闲当场派发（条目可能已删行，前端以 SSE/load 收敛，R-04）。
+         *     ``dispatch_mode``（service 层由 mid_turn/interrupted 派生，design B3——
+         *     复用 SessionDispatchResult.mid_turn，不新建平行服务层字段）：
+         *     - ``"steered"``：provider 支持引导（caps steering=true）且忙轮，条目已
+         *       mid-turn 注入活跃 run（不 interrupt，留痕挂活跃 run）；
+         *     - ``"interrupted"``：维持现状 interrupt 打断接力派发（不支持引导 /
+         *       带切换维度条目 / 续跑条目）；
+         *     - ``"dispatched"``：空闲当场派发（条目可能已删行，前端以 SSE/load
+         *       收敛，R-04）。
+         *
+         *     ``interrupted=True`` 保留兼容不删（= ``dispatch_mode=="interrupted"``；
+         *     前端 use-message-queue.ts:22 现不消费该字段，破坏面小，R-06）。
          */
         QueueDispatchNowResponse: {
+            /**
+             * Dispatch Mode
+             * @enum {string}
+             */
+            dispatch_mode: "steered" | "interrupted" | "dispatched";
             /** Interrupted */
             interrupted: boolean;
         };
@@ -21487,6 +23612,98 @@ export interface components {
             doc_type?: string | null;
         };
         /**
+         * ScanDocsCoverageOut
+         * @description 覆盖率两级口径：七件套 + 模块文档（综合百分比由前端用分子分母计算）。
+         */
+        ScanDocsCoverageOut: {
+            /** Std Have */
+            std_have: number;
+            /** Std Expected */
+            std_expected: number;
+            /** Module Have */
+            module_have: number;
+            /** Module Expected */
+            module_expected: number;
+            /** Trend */
+            trend: components["schemas"]["ScanDocsTrendPoint"][];
+        };
+        /** ScanDocsDensityOut */
+        ScanDocsDensityOut: {
+            /** Per Project Avg */
+            per_project_avg: number;
+        };
+        /** ScanDocsFreshnessOut */
+        ScanDocsFreshnessOut: {
+            /** Recent Updated */
+            recent_updated: number;
+            /** Total */
+            total: number;
+        };
+        /** ScanDocsInjectionBoardItem */
+        ScanDocsInjectionBoardItem: {
+            /** Path */
+            path: string;
+            /** Hits 30D */
+            hits_30d: number;
+        };
+        /**
+         * ScanDocsInjectionOut
+         * @description CLI 模块上下文注入频次（docs-inject 遥测行聚合，D-003@v1）。
+         */
+        ScanDocsInjectionOut: {
+            /** Total 30D */
+            total_30d: number;
+            /** Docs Hit 30D */
+            docs_hit_30d: number;
+            /** Board */
+            board: components["schemas"]["ScanDocsInjectionBoardItem"][];
+        };
+        /** ScanDocsRecentBoardItem */
+        ScanDocsRecentBoardItem: {
+            /** Path */
+            path: string;
+            /** Doc Type */
+            doc_type: string;
+            /**
+             * Last Modified At
+             * Format: date-time
+             */
+            last_modified_at: string;
+        };
+        /**
+         * ScanDocsStaleDocOut
+         * @description 陈旧清单单行（last_modified_at 为空 = 未知时间）。
+         */
+        ScanDocsStaleDocOut: {
+            /** Path */
+            path: string;
+            /** Doc Type */
+            doc_type: string;
+            /** Last Modified At */
+            last_modified_at?: string | null;
+        };
+        /** ScanDocsStatsOut */
+        ScanDocsStatsOut: {
+            coverage: components["schemas"]["ScanDocsCoverageOut"];
+            /** Stale Docs */
+            stale_docs: components["schemas"]["ScanDocsStaleDocOut"][];
+            density: components["schemas"]["ScanDocsDensityOut"];
+            freshness: components["schemas"]["ScanDocsFreshnessOut"];
+            /** Recent Board */
+            recent_board: components["schemas"]["ScanDocsRecentBoardItem"][];
+            injection: components["schemas"]["ScanDocsInjectionOut"];
+        };
+        /**
+         * ScanDocsTrendPoint
+         * @description 覆盖率卡内趋势的单周桶。
+         */
+        ScanDocsTrendPoint: {
+            /** Week */
+            week: string;
+            /** Updated */
+            updated: number;
+        };
+        /**
          * ScanGenerateRequest
          * @description Request body for ``POST /api/workspaces/scan-generate``.
          */
@@ -21615,6 +23832,8 @@ export interface components {
             error_code?: string | null;
             /** Error Message */
             error_message?: string | null;
+            /** Origin */
+            origin?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -21626,11 +23845,79 @@ export interface components {
             cancelled_at?: string | null;
         };
         /**
+         * ScopeAuditRepo
+         * @description 跨仓对账 per-repo 汇总条目（信封级 repos[] 单项）。
+         *
+         *     ``key`` 为仓标识（'main' 或 local.yaml repos 注册 key，main 条目始终
+         *     首位）；``anchor``/``anchor_label`` 为该仓锚点档（label 扁平冗余一份，
+         *     供表尾汇总行直取）；``degraded``/``degraded_reason`` 为降级标记与原因
+         *     （仓未注册/路径不可达/git 不可用等，degraded 仓该组行退 ⊘ 形态）。
+         *     producer = daemon RPC 投影 repos[]，consumer = 前端按仓分组卡
+         *     （gen:types 经 task-03）。
+         */
+        ScopeAuditRepo: {
+            /** Key */
+            key: string;
+            anchor?: components["schemas"]["ScopeAuditRepoAnchor"];
+            /** Anchor Label */
+            anchor_label?: string | null;
+            totals?: components["schemas"]["ScopeAuditRepoTotals"];
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded: boolean;
+            /** Degraded Reason */
+            degraded_reason?: string | null;
+        };
+        /**
+         * ScopeAuditRepoAnchor
+         * @description 仓库对账锚点档（锚点分级 A/B/C/degraded 的统一描述）。
+         *
+         *     ``source`` 为档位标识（reviews-range / head~1-window /
+         *     head-uncommitted-window / degraded，main 条目为 main-<form> 主仓锚
+         *     包装）；``base``/``head`` 为该仓 diff 区间 commit（B/C 档与 degraded
+         *     档为 None）；``label`` 为人类可读档位描述（表尾汇总行直接用）。
+         *     全字段缺省 None——daemon 缺键/非法形态时防御构造不炸。
+         */
+        ScopeAuditRepoAnchor: {
+            /** Source */
+            source?: string | null;
+            /** Base */
+            base?: string | null;
+            /** Head */
+            head?: string | null;
+            /** Label */
+            label?: string | null;
+        };
+        /**
+         * ScopeAuditRepoTotals
+         * @description 仓库行合计与三态计数（仅计该仓行；全 int|None——B/C 降级档行数
+         *     不可得时 additions/deletions 为 None，不计入合计）。
+         */
+        ScopeAuditRepoTotals: {
+            /** Files */
+            files?: number | null;
+            /** Additions */
+            additions?: number | null;
+            /** Deletions */
+            deletions?: number | null;
+            /** Planned */
+            planned?: number | null;
+            /** Unplanned */
+            unplanned?: number | null;
+            /** Untouched */
+            untouched?: number | null;
+        };
+        /**
          * ScopeAuditResponse
          * @description 对账表（daemon sillyspec_scope_audit RPC 透传投影）。
          *
          *     ok=false 时 degraded_reason 带原因（quick 会话不存在等），rows 为空。
          *     truncated：rows 超 500 被 daemon 侧截断。
+         *     ``repos``（契约 v2，2026-09-20-scope-audit-cross-repo-platform）：仅当
+         *     计划侧含跨仓条目且非预执行形态时 daemon 才输出；单仓变更/旧 daemon/
+         *     无 repos 键 → 空列表回退（零回归）。
          */
         ScopeAuditResponse: {
             /** Change */
@@ -21660,6 +23947,8 @@ export interface components {
              * @default false
              */
             truncated: boolean;
+            /** Repos */
+            repos?: components["schemas"]["ScopeAuditRepo"][];
         };
         /**
          * ScopeAuditRow
@@ -21687,6 +23976,8 @@ export interface components {
             declared?: boolean | null;
             /** Attribution */
             attribution?: string | null;
+            /** Cross Repo */
+            cross_repo?: string | null;
         };
         /** ScopeAuditTotals */
         ScopeAuditTotals: {
@@ -21774,6 +24065,50 @@ export interface components {
             /** Enabled */
             enabled: boolean;
         };
+        /**
+         * SessionCompactRequest
+         * @description POST /api/daemon/sessions/{id}/compact 请求体（FR-02 / D-003@v3）。
+         *
+         *     2026-09-14-session-ctx-compact task-02：``custom_instructions`` 为 NG-06 v1
+         *     预留字段——本版本**接收但不透传**（claude 分路 slash 通道不携参，pi/codex
+         *     分路 RPC params 仅 session_id），预留可避免后续版本启用时 API 契约 break。
+         *     全字段可选，空体 ``{}`` 合法。
+         */
+        SessionCompactRequest: {
+            /** Custom Instructions */
+            custom_instructions?: string | null;
+        };
+        /**
+         * SessionCompactResponse
+         * @description POST /api/daemon/sessions/{id}/compact 响应体（FR-02 / D-004@v1 三分型）。
+         *
+         *     三路字段并集，除 ``accepted`` / ``provider`` 外全部可选（哪路携带哪路字段）：
+         *
+         *     - claude 分路（inject 复用，D-003@v3）：``run_id`` / ``queued``——压缩轮即
+         *       普通 inject 轮（prompt="/compact"，原生建 run 入会话流，daemon 零改动）；
+         *     - pi/codex 分路（ws RPC 结构化回执）：``tokens_before`` /
+         *       ``estimated_tokens_after``（daemon CompactResult 的 camelCase 键映射）；
+         *     - 失败/竞态映射：``error``——claude 锁内竞态（DaemonSessionTurnConflict，
+         *       复审 P1-1）与 pi/codex RPC 三异常（Offline/Timeout/RemoteError）均映射
+         *       结构化 error 文案返回 200，不抛 5xx（DaemonRpcConflict 除外，走既有
+         *       AppError 兜底）。
+         */
+        SessionCompactResponse: {
+            /** Accepted */
+            accepted: boolean;
+            /** Provider */
+            provider: string;
+            /** Run Id */
+            run_id?: string | null;
+            /** Queued */
+            queued?: boolean | null;
+            /** Tokens Before */
+            tokens_before?: number | null;
+            /** Estimated Tokens After */
+            estimated_tokens_after?: number | null;
+            /** Error */
+            error?: string | null;
+        };
         /** SessionControlResponse */
         SessionControlResponse: {
             /**
@@ -21817,6 +24152,8 @@ export interface components {
             llm_provider_id?: string | null;
             /** Model */
             model?: string | null;
+            /** Thinking Level */
+            thinking_level?: string | null;
             /**
              * Manual Approval
              * @default true
@@ -21940,6 +24277,86 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * SessionExportRequest
+         * @description POST /api/daemon/sessions/export 请求体（2026-09-14-session-export task-01 / FR-01 / D-002@v1）。
+         *
+         *     会话导出请求 DTO：``session_ids`` 1~50 个 UUID（0 个 / 51 个 → 422）+
+         *     ``tier`` 双档 Literal（chat=Markdown 对话、full=JSON+附件 zip）。producer=
+         *     本 schema → FastAPI OpenAPI → 前端 ``pnpm gen:types`` → consumer=
+         *     ``api-types.ts``（具名产源，字段名/形状不得增删改）。
+         *
+         *     去重与档位语义不在本层做：ids 去重保序归端点层（task-03），服务层收
+         *     原生参数不 import 本模型（task-02）——本层只做 min/max 与 Literal 约束。
+         */
+        SessionExportRequest: {
+            /** Session Ids */
+            session_ids: string[];
+            /**
+             * Tier
+             * @enum {string}
+             */
+            tier: "chat" | "full";
+        };
+        /**
+         * SessionForkLineage
+         * @description ``SessionForkResponse.lineage`` 溯源块（FR-05 前端 lineage-block 数据源）。
+         */
+        SessionForkLineage: {
+            /**
+             * Source Session Id
+             * Format: uuid
+             */
+            source_session_id: string;
+            /** Source Title */
+            source_title: string;
+            /** At Run Seq */
+            at_run_seq: number;
+        };
+        /**
+         * SessionForkRequest
+         * @description POST /api/daemon/sessions/{id}/fork 请求体。
+         *
+         *     ``at_run_id``：分叉锚轮（「分叉自此轮之后」）；``title``：B 会话可选标题
+         *     （strip 后非空且 ≤255，service 层统一出口校验对齐 rename 口径）。
+         */
+        SessionForkRequest: {
+            /**
+             * At Run Id
+             * Format: uuid
+             */
+            at_run_id: string;
+            /** Title */
+            title?: string | null;
+        };
+        /**
+         * SessionForkResponse
+         * @description POST /api/daemon/sessions/{id}/fork 响应（design §接口定义）。
+         *
+         *     ``tier``：'native'（引擎真截断：claude resume_at / pi rpc_fork / pi clone）
+         *     | 'seed'（codex 前情转述，有损）。错误语义：404 会话/run 不存在或不属于
+         *     该会话；409 run 进行中；422 caps sessionFork=none 或 native 档锚点缺失。
+         */
+        SessionForkResponse: {
+            /**
+             * Forked Session Id
+             * Format: uuid
+             */
+            forked_session_id: string;
+            /**
+             * Lease Id
+             * Format: uuid
+             */
+            lease_id: string;
+            /** Run Id */
+            run_id?: string | null;
+            /**
+             * Tier
+             * @enum {string}
+             */
+            tier: "native" | "seed";
+            lineage: components["schemas"]["SessionForkLineage"];
+        };
+        /**
          * SessionInjectRequest
          * @description POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。
          *
@@ -21990,6 +24407,13 @@ export interface components {
          * SessionInjectResponse
          * @description ql-20260825-011：``queued=True`` 时消息进服务端排队（run_id 为 None），
          *     run 终态后自动派发；``queued=False`` 为既有即时派发语义。
+         *
+         *     task-05（2026-09-18-single-chat-steering / FR-01）：``steered=True`` 表示
+         *     忙轮消息经 busy_strategy="inject" 中途注入了**当前活跃轮**（steering）——
+         *     映射 service 层 ``SessionDispatchResult.mid_turn``（``_inject_mid_turn_into_
+         *     run`` 置 True，不新建平行字段），此时 run_id 为活跃 run（非新建）、
+         *     queued=False；排队/降级（provider 不支持）/空闲新建轮恒 False。前端
+         *     「引导中」态消费（task-07）。
          */
         SessionInjectResponse: {
             /**
@@ -22008,6 +24432,11 @@ export interface components {
             queued: boolean;
             /** Queue Entry Id */
             queue_entry_id?: string | null;
+            /**
+             * Steered
+             * @default false
+             */
+            steered: boolean;
         };
         /**
          * SessionQueueEntry
@@ -22036,6 +24465,8 @@ export interface components {
             error_msg?: string | null;
             /** Position */
             position: number;
+            /** Origin */
+            origin?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -22120,6 +24551,29 @@ export interface components {
             status: string;
         };
         /**
+         * SessionResetToolReportResponse
+         * @description POST /api/daemon/sessions/{id}/reset-tool-report 响应（task-06 / FR-05）。
+         *
+         *     错误语义：404 会话不存在；409 非 tool_report / 已是未激活 / 有 running run。
+         */
+        SessionResetToolReportResponse: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "pending";
+            /**
+             * Cleared Runs
+             * @description 该会话累计 run 数（行保留审计，仅计数）
+             */
+            cleared_runs: number;
+        };
+        /**
          * SessionRunRead
          * @description GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。
          *
@@ -22134,6 +24588,9 @@ export interface components {
          *         渲染每轮 whoLine（历史不跟随会话当前配置）；
          *       - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run
          *         写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；
+         *       - ``cache_read_tokens`` / ``cache_creation_tokens``（quick ql-20260912-003-4506）
+         *         ：daemon 关单同批写入的 prompt cache 两维，供前端轮次历史行独立展示
+         *         四维用量；无缓存引擎（codex / pi）/ 老 run 行为 None；
          *       - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该
          *         run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，
          *         close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /
@@ -22185,10 +24642,16 @@ export interface components {
             input_tokens?: number | null;
             /** Output Tokens */
             output_tokens?: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens?: number | null;
+            /** Cache Creation Tokens */
+            cache_creation_tokens?: number | null;
             /** Ctx Tokens */
             ctx_tokens?: number | null;
             /** Failure Summary */
             failure_summary?: string | null;
+            /** Engine Anchor */
+            engine_anchor?: string | null;
         };
         /**
          * SessionRuntimeRequest
@@ -22226,6 +24689,112 @@ export interface components {
             daemon_local_id: string;
         };
         /**
+         * SessionTakeoverRequest
+         * @description POST /api/daemon/sessions/{id}/takeover 请求体（tool_report 接手，D-006@v1）。
+         *
+         *     ``prompt`` 必填（首条消息即接手轮首 prompt；handoff 档 task-05 起前缀交接
+         *     文档）；``provider``/``agent_profile_id``/``llm_provider_id`` 仅 handoff 档
+         *     重选有意义（引擎须 ∈ 原机 runtime 支持集合，service 校验；native 档忽略
+         *     ——引擎跟随源会话 harness）。
+         */
+        SessionTakeoverRequest: {
+            /** Prompt */
+            prompt: string;
+            /** Provider */
+            provider?: string | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+        };
+        /**
+         * SessionTakeoverResponse
+         * @description POST /api/daemon/sessions/{id}/takeover 响应（design §接口定义）。
+         *
+         *     ``session_id``：新接手会话（origin='fork'，fork_of=源 tool_report 会话）；
+         *     ``tier``：'native'（resume 原引擎会话）| 'handoff'（交接文档新会话）；
+         *     ``handoff_doc``：handoff 档是否含交接文档（False=读取降级普通新会话）。
+         *     错误语义：404 会话不存在；409 非 tool_report/已激活/原机离线（中文含机器
+         *     名）；422 handoff 引擎重选不属原机支持集合。
+         */
+        SessionTakeoverResponse: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Lease Id
+             * Format: uuid
+             */
+            lease_id: string;
+            /**
+             * Tier
+             * @enum {string}
+             */
+            tier: "native" | "handoff";
+            /**
+             * Handoff Doc
+             * @description False=交接文档缺失降级普通新会话
+             */
+            handoff_doc: boolean;
+        };
+        /**
+         * SessionThinkingLevelRequest
+         * @description POST /api/daemon/sessions/{id}/thinking-level 请求体（FR-05 / design §接口定义）。
+         *
+         *     ``level`` 取七档词表（backend VALID_THINKING_LEVELS 镜像常量）；非法档
+         *     400（服务层校验，错误文案带合法档位清单）。
+         */
+        SessionThinkingLevelRequest: {
+            /** Level */
+            level: string;
+        };
+        /**
+         * SessionThinkingLevelResponse
+         * @description POST /api/daemon/sessions/{id}/thinking-level 响应体（FR-05 / design §接口定义）。
+         *
+         *     daemon RPC ``session_set_thinking_level`` 回执映射：``ok=False`` 时
+         *     ``error`` 携带结构化文案（旧 daemon method_not_found →「daemon 未支持
+         *     思考级别，请升级 daemon」；离线/超时/业务错误各有中文文案），HTTP 恒 200
+         *     （照 compact 口径：调用方可修复的失败不抛 5xx）。
+         *     ql-20260917-008：``queued=True`` = 忙轮覆盖式暂存（pending_thinking_level），
+         *     本轮结束后由 run 终态钩子应用——前端据此提示「本轮结束后生效」。
+         */
+        SessionThinkingLevelResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Error */
+            error?: string | null;
+            /**
+             * Queued
+             * @default false
+             */
+            queued: boolean;
+        };
+        /**
+         * SessionThinkingLevelsResponse
+         * @description GET /api/daemon/sessions/{id}/thinking-levels 响应体（FR-04 / design §接口定义）。
+         *
+         *     2026-09-14-session-thinking-level task-05：daemon RPC
+         *     ``session_get_thinking_levels`` 回执映射——``levels`` 按当前模型动态
+         *     （pi get_available_thinking_levels；claude supportedModels 过滤；codex
+         *     静态档），``current`` 为引擎侧现值（SDK 不暴露现值的引擎回 None，
+         *     可空）。无 ``error`` 字段：RPC 失败（离线/超时/旧 daemon RemoteError）
+         *     走 AppError 上抛（服务层 thinking_level.py 三异常映射），不 200 假数据。
+         */
+        SessionThinkingLevelsResponse: {
+            /** Levels */
+            levels: string[];
+            /** Current */
+            current?: string | null;
+        };
+        /**
          * SessionTitleUpdateRequest
          * @description PATCH /api/daemon/sessions/{id}/title 请求体（task-02 / FR-03）。
          *
@@ -22237,6 +24806,26 @@ export interface components {
         SessionTitleUpdateRequest: {
             /** Title */
             title: string;
+        };
+        /**
+         * SessionTurnOutlineRead
+         * @description turn-outline 响应体（FR-01）：session_id + 总轮数 + 全量轮次摘要列表。
+         *
+         *     空会话返回 ``total_turns=0`` + 空 ``items``（不报错，D-003 空态口径）。
+         */
+        SessionTurnOutlineRead: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Total Turns */
+            total_turns: number;
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["TurnOutlineItemRead"][];
         };
         /**
          * SessionUsageModelItemRead
@@ -22950,6 +25539,25 @@ export interface components {
             details_json?: string | null;
         };
         /**
+         * SpecConsistencyOut
+         * @description GET /spec-workspace/consistency：镜像磁盘树 × manifest 行对账。
+         *
+         *     四类分歧 + 计数汇总；disk_only/manifest_ghost 是镜像损坏的直接证据
+         *     （2026-09-25 生产实证：c84182bc 缺 13 文件、b97 缺整个 generated/）。
+         */
+        SpecConsistencyOut: {
+            /** Disk Only */
+            disk_only: components["schemas"]["ConsistencyDivergenceItem"][];
+            /** Manifest Ghost */
+            manifest_ghost: components["schemas"]["ConsistencyDivergenceItem"][];
+            /** Tombstoned On Disk */
+            tombstoned_on_disk: components["schemas"]["ConsistencyDivergenceItem"][];
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+        };
+        /**
          * SpecIncrementalSyncRequest
          * @description Request body for the incremental sync endpoint (design §7).
          *
@@ -22989,6 +25597,23 @@ export interface components {
             server_versions?: {
                 [key: string]: number;
             } | null;
+            /**
+             * Applied Ops
+             * @default 0
+             */
+            applied_ops: number;
+            /**
+             * Skipped Conflict
+             * @default 0
+             */
+            skipped_conflict: number;
+            /**
+             * Skipped Tombstone
+             * @default 0
+             */
+            skipped_tombstone: number;
+            /** Platform Deleted */
+            platform_deleted?: string[];
         };
         /**
          * SpecManifestFileEntry
@@ -23077,6 +25702,10 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Last Writer */
+            last_writer?: string | null;
+            /** Last Writer At */
+            last_writer_at?: string | null;
         };
         /**
          * SpecWorkspaceUpdate
@@ -24095,6 +26724,95 @@ export interface components {
             name?: string | null;
         };
         /**
+         * TimelineEvent
+         * @description 事件轴单条（platform_change_events 正序投影 + 提交标题增强）。
+         *
+         *     ``label`` 机器值（kind 或 detail 原文）；中文标签与图标由前端映射（对齐
+         *     CLI watcher timeline 语义）；``commit_title`` 仅 kind=commit 且 git 窗口
+         *     命中时有值（daemon 降级 → None，前端只显哈希）。
+         */
+        TimelineEvent: {
+            /** Ts */
+            ts: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /**
+             * Rule
+             * @default
+             */
+            rule: string;
+            /**
+             * Severity
+             * @default info
+             */
+            severity: string;
+            /**
+             * Provisional
+             * @default true
+             */
+            provisional: boolean;
+            /** Commit Title */
+            commit_title?: string | null;
+        };
+        /**
+         * TimelineStats
+         * @description 脚注统计（纯计算：墙钟=首末事件差，观测盲窗下不冒充完整历史）。
+         */
+        TimelineStats: {
+            /**
+             * Event Count
+             * @default 0
+             */
+            event_count: number;
+            /**
+             * Commit Count
+             * @default 0
+             */
+            commit_count: number;
+            /**
+             * Checked
+             * @default 0
+             */
+            checked: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /** Wall Clock S */
+            wall_clock_s?: number | null;
+        };
+        /**
+         * TimelineTask
+         * @description 任务面单行（tasks.md 任务行 × 提交锚推断）。
+         *
+         *     ``commit_sha`` 是「消息含 task-NN token」的最新窗口提交短哈希（CLI 同款
+         *     顺序推断口径，无匹配 → None）。``time`` 是翻格顺序推断的勾选时刻
+         *     （2026-09-27-timeline-task-time：task-done 事件 ``checked N→M`` 游标衔接
+         *     赋值——中段断裂停止推断、尾部未勾不标断裂，CLI ``inferFlipTimes`` 同款
+         *     语义；观测起点前的首勾/断裂后 → None，前端按 ? 展示）。
+         */
+        TimelineTask: {
+            /** Id */
+            id: string;
+            /**
+             * Checked
+             * @default false
+             */
+            checked: boolean;
+            /**
+             * Desc
+             * @default
+             */
+            desc: string;
+            /** Commit Sha */
+            commit_sha?: string | null;
+            /** Time */
+            time?: string | null;
+        };
+        /**
          * TokenPair
          * @description Issued on login + refresh.
          */
@@ -24381,6 +27099,55 @@ export interface components {
             agent_dispatch?: components["schemas"]["TransitionDispatchResponse"] | null;
         };
         /**
+         * TurnOutlineItemRead
+         * @description turn-outline 单轮摘要项（FR-01）。
+         *
+         *     轻列字段直映 ``AgentRun`` 既有列（**不含** agent_profile_snapshot /
+         *     error_detail 大 JSON，design 做法概述①「轻列」）；``auto_resume_of`` 从
+         *     ``AgentRun.metadata_`` 的 ``{"auto_resume_of": "<源 run id>"}` 抽出（续跑轮
+         *     徽标数据源，普通轮 None）；``prompt_summary`` / ``answer_summary`` 为窗口
+         *     函数抽出的每 run 首条 channel=user_input / 首条非空 channel=stdout 日志的
+         *     截断文本（后端日志通道实际枚举 user_input/stdout/tool_call/stderr，无
+         *     "reply" 通道——assistant 文本即 stdout，见 sdk_pipeline._channel_from_event_type），
+         *     无对应日志的行为 None（不伪造）。
+         */
+        TurnOutlineItemRead: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Seq */
+            seq: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Status */
+            status: string;
+            /** Error Code */
+            error_code?: string | null;
+            /** Sender Name */
+            sender_name?: string | null;
+            /** Engine Anchor */
+            engine_anchor?: string | null;
+            /** Auto Resume Of */
+            auto_resume_of?: string | null;
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /** Prompt Summary */
+            prompt_summary?: string | null;
+            /** Answer Summary */
+            answer_summary?: string | null;
+        };
+        /**
          * UnreadCountResponse
          * @description 未读数（铃铛徽标轮询/首载）。
          */
@@ -24404,6 +27171,28 @@ export interface components {
             avatar?: string | null;
         };
         /**
+         * UsageBoardItem
+         * @description 使用率榜单条（全量按 per_task 降序，前端 % 格式显示 D-008@v3）。
+         *
+         *     ``per_task``：条目命中次数 ÷ 条目存在期任务数（条目首见后 inject 行
+         *     change 去重；分母 0 视为 1 防炸）；``task_count``：命中过该锚点的去重任务数
+         *     （inject+fr-inject 行）。
+         */
+        UsageBoardItem: {
+            /** Anchor */
+            anchor: string;
+            /** Per Task */
+            per_task: number;
+            /** Total */
+            total: number;
+            /** Task Count */
+            task_count: number;
+            /** First Hit */
+            first_hit?: string | null;
+            /** Last Hit */
+            last_hit?: string | null;
+        };
+        /**
          * UsageByModelItemRead
          * @description 分模型用量明细项（ChangeUsageRead.by_model 列表行）。
          *
@@ -24412,6 +27201,10 @@ export interface components {
          *     「未记录」桶）。数据流：producer = change/usage_service.py
          *     ChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =
          *     前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。
+         *
+         *     2026-10-02-change-center-token-usage task-03：新增第三桶「本地 CLI」
+         *     （usage_service._LOCAL_CLI_MODEL）——本地 CLI 会话快照四维（api_requests
+         *     恒 0，排序按数值参与不特殊置位）；前端按桶名渲染绿阶 tag。DTO 字段集不变。
          */
         UsageByModelItemRead: {
             /** Model */
@@ -25425,6 +28218,39 @@ export interface components {
             is_current_user: boolean;
         };
         /**
+         * WorkspaceMoveRequest
+         * @description Request body for ``POST /api/workspaces/{workspace_id}/move``。
+         *
+         *     锚点三选一（D-013@v1）：``after_id`` / ``before_id`` / ``to`` 恰好携带一个
+         *     ——同缺、同传多个或 ``after_id == before_id`` 同值均 422
+         *     ``HTTP_422_MOVE_ANCHOR_CONFLICT``。无 null 置顶语义（Grill F-03：pydantic
+         *     无法区分缺省与 null，置顶场景由「移动到…」弹窗的页首锚点表达）。
+         */
+        WorkspaceMoveRequest: {
+            /** After Id */
+            after_id?: string | null;
+            /** Before Id */
+            before_id?: string | null;
+            /** To */
+            to?: ("next_page_head" | "prev_page_tail") | null;
+            /**
+             * Page Size
+             * @default 12
+             */
+            page_size: number;
+        };
+        /**
+         * WorkspaceMoveResponse
+         * @description Response body for ``POST /api/workspaces/{workspace_id}/move``（*Response 后缀惯例，Grill F-10）。
+         */
+        WorkspaceMoveResponse: {
+            workspace: components["schemas"]["WorkspaceRead"];
+            /** Rebalanced */
+            rebalanced: boolean;
+            /** Rank */
+            rank: number;
+        };
+        /**
          * WorkspaceProbeItem
          * @description 单工作区探测结果项（``POST /api/workspaces/probe`` 响应元素）。
          *
@@ -25433,6 +28259,10 @@ export interface components {
          *     - ``daemon_name``：任一成员 binding daemon 的 ``display_alias or hostname``
          *       （未绑/daemon 行缺失 → None）。
          *     - ``daemon_online``：该 binding daemon 的在线态。
+         *     - ``repo_url``（ql-20260918-012 工作区 Git 地址识别）：git 态工作区的远程
+         *       仓库地址（``git remote -v`` 首个 fetch 行）。已识别（DB repo_url 非空）
+         *       直接回 DB 值不再发 RPC；未识别的 git 态实时读取并回填 DB；direct/
+         *       unknown 态为 None。
          */
         WorkspaceProbeItem: {
             /**
@@ -25449,6 +28279,8 @@ export interface components {
             daemon_name?: string | null;
             /** Daemon Online */
             daemon_online: boolean;
+            /** Repo Url */
+            repo_url?: string | null;
         };
         /**
          * WorkspaceProbeRequest
@@ -25940,6 +28772,16 @@ export interface components {
              * @default 0
              */
             reparsed_changes: number;
+            /**
+             * Landed Files
+             * @default 0
+             */
+            landed_files: number;
+            /**
+             * Skipped Files
+             * @default 0
+             */
+            skipped_files: number;
         };
         /** ReviewResponse */
         app__modules__workflow__schema__ReviewResponse: {
@@ -26586,6 +29428,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemberBindingView"][];
+                };
+            };
+        };
+    };
+    move_workspace_api_workspaces__workspace_id__move_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMoveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMoveResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -28826,6 +31703,105 @@ export interface operations {
             };
         };
     };
+    get_change_assets_api_workspaces__workspace_id__changes__change_id__assets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeAssetsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_change_timeline_api_workspaces__workspace_id__changes__change_id__timeline_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeTimelineRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_change_patch_file_api_workspaces__workspace_id__changes__change_id__assets_patch_file_get: {
+        parameters: {
+            query: {
+                /** @description 变更目录相对文件路径（如 src/flow.js） */
+                path: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangePatchFileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_change_file_content_api_workspaces__workspace_id__changes__change_id__files_content_get: {
         parameters: {
             query: {
@@ -29749,6 +32725,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScanDocList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scan_docs_stats_api_workspaces__workspace_id__scan_docs_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanDocsStatsOut"];
                 };
             };
             /** @description Validation Error */
@@ -35173,6 +38180,39 @@ export interface operations {
             };
         };
     };
+    export_sessions_api_daemon_sessions_export_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionExportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_session_detail_api_daemon_sessions__session_id__get: {
         parameters: {
             query?: never;
@@ -35233,6 +38273,107 @@ export interface operations {
             };
         };
     };
+    fork_session_api_daemon_sessions__session_id__fork_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionForkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionForkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    takeover_session_endpoint_api_daemon_sessions__session_id__takeover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionTakeoverRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionTakeoverResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_tool_report_session_endpoint_api_daemon_sessions__session_id__reset_tool_report_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResetToolReportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     inject_session_api_daemon_sessions__session_id__inject_post: {
         parameters: {
             query?: never;
@@ -35255,6 +38396,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionInjectResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compact_session_api_daemon_sessions__session_id__compact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionCompactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionCompactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_thinking_levels_api_daemon_sessions__session_id__thinking_levels_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionThinkingLevelsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_session_thinking_level_api_daemon_sessions__session_id__thinking_level_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionThinkingLevelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionThinkingLevelResponse"];
                 };
             };
             /** @description Validation Error */
@@ -35842,7 +39084,7 @@ export interface operations {
             };
         };
     };
-    cancel_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete: {
+    delete_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -35934,6 +39176,37 @@ export interface operations {
             };
         };
     };
+    get_session_turn_outline_api_daemon_sessions__session_id__turn_outline_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionTurnOutlineRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_session_tasks_api_daemon_sessions__session_id__tasks_get: {
         parameters: {
             query?: never;
@@ -35972,10 +39245,16 @@ export interface operations {
                 after?: string | null;
                 /** @description 向上加载游标（ISO timestamp，群聊体验 quick）：只返回 timestamp 严格更早的日志；与 limit 组合取「游标之前的最新 N 条」升序返回 */
                 before?: string | null;
-                /** @description 内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before 组合 */
+                /** @description 与 before 组合的复合游标 id tiebreaker（2026-09-16-logs-cursor-tiebreaker）：同 timestamp 批次逐页可达；仅与 before 同时传，单独传 before_id 而无 before 将 422 */
+                before_id?: string | null;
+                /** @description 单轮直达（2026-09-27-session-fast-replay）：只返回该 run 的日志（timestamp,id 升序，上限 2000 条）；run 不存在或不属于该会话 404；与 before/after 游标互斥（同传 422） */
+                run_id?: string | null;
+                /** @description 内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before/run_id 组合 */
                 q?: string | null;
                 /** @description 最新 N 条语义（群聊体验 quick）：按 timestamp desc 取 N 再反转升序返回；无 before=全量最新 N，有 before=游标之前最新 N。缺省=全量（服务层上限 5000，维持既有行为） */
                 limit?: number | null;
+                /** @description 精简模式（2026-09-27-session-fast-replay）：tool 通道（tool_call）content_redacted 超 2000 字符截断到 2000 并置 content_truncated=true；需全文走 GET /sessions/{id}/logs/{log_id}。缺省 false 行为零变化 */
+                slim?: boolean;
             };
             header?: never;
             path: {
@@ -35992,6 +39271,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_log_entry_api_daemon_sessions__session_id__logs__log_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                log_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunLogEntry"];
                 };
             };
             /** @description Validation Error */
@@ -37861,6 +41172,510 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    propose_knowledge_api_workspaces__workspace_id__knowledge_propose_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeProposeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_knowledge_entry_api_workspaces__workspace_id__knowledge_entries__filename__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_merge_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__preview_merge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeMergeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergePreviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__merge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeMergeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeMergeResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dispatch_distill_api_workspaces__workspace_id__knowledge_distill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DistillDispatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DistillTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_distill_tasks_api_workspaces__workspace_id__knowledge_distill_tasks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DistillTaskRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_distill_quick_entries_api_workspaces__workspace_id__knowledge_distill_quick_entries_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DistillQuickEntryList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_knowledge_hits_api_workspaces__workspace_id__knowledge_hits_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HitsBatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HitsBatchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_stats_api_workspaces__workspace_id__knowledge_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeStatsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_graph_query_api_workspaces__workspace_id__knowledge_graph_query_get: {
+        parameters: {
+            query: {
+                sub: "summary" | "nodes" | "neighbors" | "path" | "impact" | "orphans" | "dangling";
+                anchor?: string | null;
+                anchor2?: string | null;
+                edges?: string | null;
+                depth?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphEnvelope_Union_GraphNeighborsData__GraphPathData__GraphImpactData__GraphOrphansData__GraphDanglingData__GraphSummary__GraphNodesData__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_graph_overview_api_workspaces__workspace_id__knowledge_graph_overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphEnvelope_GraphOverviewData_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_graph_nodes_api_workspaces__workspace_id__knowledge_graph_nodes_get: {
+        parameters: {
+            query: {
+                search: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphEnvelope_GraphNodesData_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_governance_api_workspaces__workspace_id__knowledge_governance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GovernanceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_knowledge_governance_action_api_workspaces__workspace_id__knowledge_governance_actions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GovernanceActionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GovernanceActionOut"];
                 };
             };
             /** @description Validation Error */
@@ -44625,6 +48440,90 @@ export interface operations {
             };
         };
     };
+    list_menu_overrides_api_menu_overrides_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuOverrideListResponse"];
+                };
+            };
+        };
+    };
+    upsert_menu_override_api_menu_overrides__menu_key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                menu_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuOverrideUpsert"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuOverrideRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_menu_override_api_menu_overrides__menu_key__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                menu_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_spec_workspace_api_workspaces__workspace_id__spec_workspace_get: {
         parameters: {
             query?: never;
@@ -44911,6 +48810,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpecBootstrapRunStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    heal_manifest_tombstones_api_workspaces__workspace_id__spec_workspace_manifest_heal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManifestHealIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManifestHealOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_spec_consistency_api_workspaces__workspace_id__spec_workspace_consistency_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecConsistencyOut"];
                 };
             };
             /** @description Validation Error */
@@ -45277,6 +49242,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuicklogPushOk"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_change_events_api_changes__name__events_get: {
+        parameters: {
+            query?: {
+                /** @description 增量游标：只回 ts 严格大于该值的事件（ISO 8601 UTC） */
+                since?: string | null;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeEventListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_change_event_api_changes__name__events_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeEventPushRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeEventPushOk"];
                 };
             };
             /** @description Validation Error */
