@@ -1,0 +1,107 @@
+{
+  "change": "2026-10-08-rbac-dead-permissions-cleanup",
+  "baseline": "e4cc5e0c6be37a1f97cffb686d01b36181f50a17",
+  "head": "c1970cd37f0338f3a3b122bf3638e649e515f18f",
+  "files": [
+    ".claude/skills/sillyspec-quick/SKILL.md",
+    ".sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/design.md",
+    ".sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/flow-state.yaml",
+    ".sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/proposal.md",
+    ".sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/requirements.md",
+    ".sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/tasks.md",
+    ".sillyspec/docs/frontend/modules/lib-menu-permissions.md",
+    "backend/app/modules/auth/permissions.py",
+    "backend/migrations/versions/202605280900_create_auth_and_rbac.py",
+    "backend/migrations/versions/20261008100000_drop_dead_rbac_permissions.py",
+    "backend/openapi.json",
+    "backend/tests/modules/admin/test_roles_router.py",
+    "backend/tests/modules/auth/test_business_member_role.py",
+    "backend/tests/modules/auth/test_permissions.py",
+    "backend/tests/modules/test_permission_cache.py",
+    "backend/tests/modules/workspace/test_members_service_business_member.py",
+    "frontend/src/app/(dashboard)/admin/roles/page.tsx",
+    "frontend/src/lib/__tests__/menu-permissions.test.ts",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/menu-permissions.ts"
+  ],
+  "totals": {
+    "files": 20,
+    "additions": 544,
+    "deletions": 299
+  },
+  "savedAt": "2026-10-08T02:52:37.618Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "auth",
+      "files": 1,
+      "doc": "docs/backend/modules/auth.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "migrations",
+      "files": 2,
+      "doc": "docs/backend/modules/migrations.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 9,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "auth",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/auth.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "admin",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/admin.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [
+    {
+      "dir": ".claude/skills/sillyspec-quick",
+      "files": 1
+    }
+  ],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "c6563557e0ce045ddaaa166114fa3a5346b14ec0789395b4146f549e68ada233",
+  "patchStatus": "ok"
+}

@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -24,6 +32,14 @@ input: >-
   - 后端 auth/roles 相关测试与前端 menu-permissions 测试同步更新全绿，ruff/mypy/tsc/eslint 零新增报错
 autopilot: true
 baseline_commit: e4cc5e0c6be37a1f97cffb686d01b36181f50a17
-updatedAt: '2026-10-08T02:31:02.716Z'
+updatedAt: '2026-10-08T02:56:36.343Z'
 baseline_sha256: e15d8135f1c0e182ea8199790fef41d6913efe90e9834c4a6401c273ba40722d
+allow_batch_tick: true
+gate_summary: >-
+  test: passed ← module[]+deps(py25+jsx16)+fr(33)（128.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008025228\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008025228\test-result.json｜门文件
+  15 个
 

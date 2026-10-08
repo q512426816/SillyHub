@@ -1,0 +1,17 @@
+{"ts":1791426699481,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791426719431,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791426726414,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/auth/permissions.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791426858837,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/migrations/versions/20261008100000_drop_dead_rbac_permissions.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791427123576,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/Dockerfile——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791427153572,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：deploy/docker-compose.yml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791427160317,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：deploy/scripts/build-and-save.sh——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791427362004,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/openapi.json——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791427367392,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/agent/provider_caps.py、frontend/src/lib/api-types.ts、frontend/src/lib/provider-caps.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791427419308,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/Dockerfile——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791427783402,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791427783402,"kind":"task-done","stage":"tasks","detail":"checked 0→5","provisional":true}
+{"ts":1791427793554,"kind":"commit","stage":null,"detail":"fa9470347","provisional":true}
+{"ts":1791427810217,"kind":"commit","stage":null,"detail":"c1970cd37","provisional":true}
+{"ts":1791427820478,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791427948992,"kind":"gate-run","stage":"verify","detail":"门实测 passed（128.5s） · 20261008025228","provisional":true}
+{"ts":1791428090899,"kind":"commit","stage":null,"detail":"765f4e7b6","provisional":true}

@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-rbac-dead-permissions-cleanup",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-08-rbac-dead-permissions-cleanup:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/modules/auth/test_permissions.py「test_permission_count_is_58」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-rbac-dead-permissions-cleanup"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-08-rbac-dead-permissions-cleanup:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/lib/__tests__/menu-permissions.test.ts「changes = change:create/read/approve/archive + task:read/create/assign（2026-10-08 清理版）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-rbac-dead-permissions-cleanup"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-08-rbac-dead-permissions-cleanup:flow:测试绑定FR-03",
+      "tests": [
+        "backend/tests/modules/auth/test_permissions.py「test_drop_dead_rbac_migration_upgrade_deletes_and_downgrade_replants」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-rbac-dead-permissions-cleanup"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-08-rbac-dead-permissions-cleanup:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/lib/__tests__/menu-permissions.test.ts「所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 58」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-rbac-dead-permissions-cleanup"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-08-rbac-dead-permissions-cleanup:flow:测试绑定FR-05",
+      "tests": [
+        "backend/tests/modules/auth/test_permissions.py",
+        "frontend/src/lib/__tests__/menu-permissions.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-08-rbac-dead-permissions-cleanup"
+    }
+  ]
+}

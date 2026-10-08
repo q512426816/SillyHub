@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-rbac-dead-permissions-cleanup",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c1970cd37f0338f3a3b122bf3638e649e515f18f",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "冻结 diff 夹带未声明文件删除：.claude/skills/sillyspec-quick/SKILL.md（116 行）",
+      "evidence": "git show --stat HEAD 与 change.patch 首段均含该删除，但 design.md 文件变更清单（13 条）无此条目；从语义看属姊妹变更 2026-10-08-backend-skills-follow-cli（镜像技能源改从 sillyspec 包取）的收尾，混入本 RBAC 提交，代码事实唯一来源因此包含界外内容",
+      "location": ".claude/skills/sillyspec-quick/SKILL.md:1 (deleted; change.patch:1-123; HEAD c1970cd37 stat)"
+    },
+    {
+      "severity": "P3",
+      "title": "生成物 openapi.json / api-types.ts 捆绑非本变更的描述漂移",
+      "evidence": "两文件 diff 中 Get Change Patch File / ChangePatchFileRead / ChangePatchMeta 描述新增『缺件回退 scope-audit.patch』措辞，源自并行的 change-detail-assets 后端 docstring，gen:types 在含他变更改动的树上重生成时被动带入；Permission 枚举联合本身干净（58、零死键残留，已用 openapi.json 解析复核）",
+      "location": "backend/openapi.json:4638-39998; frontend/src/lib/api-types.ts:1873-13910"
+    },
+    {
+      "severity": "P3",
+      "title": "workspace_owner 系统种子缺 task:read（先在状态，非本变更引入）",
+      "evidence": "精简后种子含 workspace:read/write/admin/member:manage + change:create/read/approve/archive + task:create/assign/run_agent + deploy:staging，唯独无 task:read——patch 对 202605280900 的删除行中不含 task:read，即原种子本就未播；本变更只精简不扩充，符合 FR-03 边界，记录备查",
+      "location": "backend/migrations/versions/202605280900_create_auth_and_rbac.py:48-65"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-05『测试全绿 + 静态检查零新增』未独立复跑（静态核verified：测试存在且断言正确）",
+      "evidence": "只读纪律下未执行 pytest/vitest/tsc；已静态核实绑定测试真实存在且断言与 FR 逐条对应（count_is_58 / group_has_six_members / dead_permissions_removed_from_catalog / drop_dead 迁移回放含幂等重跑与角色缺失 no-op 断言 / 前端镜像 58 唯一性断言）；task-05 声称 92+96 绿为变更自报",
+      "location": "backend/tests/modules/auth/test_permissions.py:359-436; frontend/src/lib/__tests__/menu-permissions.test.ts:237-250"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-08T10:55:54+08:00"
+}

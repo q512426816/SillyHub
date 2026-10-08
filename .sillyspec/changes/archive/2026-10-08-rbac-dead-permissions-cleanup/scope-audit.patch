@@ -1,0 +1,1406 @@
+diff --git a/.claude/skills/sillyspec-quick/SKILL.md b/.claude/skills/sillyspec-quick/SKILL.md
+deleted file mode 100644
+index 4a82e633e..000000000
+--- a/.claude/skills/sillyspec-quick/SKILL.md
++++ /dev/null
+@@ -1,116 +0,0 @@
+----
+-name: sillyspec:quick
+-description: 用于明确、低风险、范围很小的直接任务。适合用户说"直接改、快速修、顺手调整、改个文案、修个小 bug、更新一个文件、不要完整流程"。跳过 brainstorm/plan，但仍按 sillyspec quick 流程执行。
+----
+-
+-## 何时使用
+-
+-- 明确、低风险、范围小的直接修改：改文案、修小 bug、更新单个文件
+-- 用户说"直接改、快速修、顺手调整、不要完整流程"
+-- brainstorm 判定 `scale=small` 的变更：带 design.md 进 quick（`sillyspec run quick --linked-changes <变更名>`），design 当背景
+-- 跳过 brainstorm/plan，但仍走 quick 的 3 步流程（理解任务 → 实现 → 自检提交）
+-
+-## 多变更说明（quick 特殊，务必注意）
+-
+-quick 阶段的 `--change` 语义是「关联变更」**且会触发步骤重置**，**不要用 `--change` 来指定关联变更**。多活跃变更时改用：
+-
+-- `--linked-changes none`：不关联，仅记 QUICKLOG（CLI 启动时写入）
+-- `--linked-changes a,b`：显式关联到变更 a、b
+-- `--non-interactive`：CI/脚本环境，默认不关联（避免交互 prompt 崩溃）
+-
+-首次 `sillyspec run quick` 选定的关联会持久化到 `.runtime/quick-sessions/<quick-session-id>/guard.json`（每个 quick 会话独立，多会话并发不互覆盖），后续 `--done` 自动复用，**不会重复弹交互 prompt**。
+-
+-## 步骤生命周期（所有阶段通用）
+-
+-> `sillyspec quick` 是 `sillyspec run quick` 的顶层别名，两者等价。
+-
+-```bash
+-sillyspec run quick                            # 输出当前步骤 prompt（首次会记录 baseline）
+-sillyspec run quick --done --output "摘要"     # 完成当前步骤
+-sillyspec run quick --status                   # 查看阶段进度
+-sillyspec run quick --skip                     # 跳过可选步骤
+-sillyspec run quick --reset                    # 重置阶段（从头开始）
+-sillyspec run quick --reopen --from-step N     # 重新打开已完成阶段修订（N=序号或名称）
+-```
+-
+-### 已有进行中会话的恢复（sessionId）
+-
+-`sillyspec run quick` / `run quick --done` / `--status` **不带 `--change` 时，是启动一个新 quick 会话**（CLI 分配新 `quick-<hash>` + 新 ql-ID，QUICKLOG 追加「进行中」条目），不是恢复正在进行的旧会话。多会话并发或中断恢复时，必须带上启动时 CLI 打印的 sessionId：
+-
+-```bash
+-sillyspec run quick --change quick-<hash>        # 恢复查看该会话当前 step prompt
+-sillyspec run quick --done --change quick-<hash> --output "…"  # 完成该会话步骤
+-```
+-
+-- 这里的 `--change quick-<hash>` 是「恢复到该 CLI 生成的 session」，与下方 `--linked-changes` 的关联业务变更语义不同：想关联真实业务变更才用 `--linked-changes`。
+-- 误启动的空壳会话：`sillyspec run quick --cancel --change quick-<hash>` 一键取消（QUICKLOG 条目翻「已取消」+ tasks.md 挂载行移除 + 会话目录清理 + db 行注销；已完成/已勾选的拒绝取消）。
+-
+-## 通用参数（所有阶段适用）
+-
+-| 参数 | 说明 |
+-|---|---|
+-| `--spec-dir <path>` | 指定规范目录（默认 `<项目>/.sillyspec`） |
+-| `--input "<一句话任务描述>"` | 通用参数，**quick 启动时强烈建议带**：作为 QUICKLOG 条目标题，条目从第一分钟即语义可读。不带则落「(quick 任务)」占位标题——平台「快速修复」列表默认隐藏进行中的占位条目，语义标题要到最终 `--done` 才回填（关联变更有 proposal/design 标题时可自动提取，免传） |
+-| `--non-interactive` | CI/脚本下禁用交互式 prompt |
+-| `--interactive` | 强制交互（即便 stdin 非 TTY） |
+-| `--skip-approval` | 跳过阶段转换/审批检查（不能跳产物校验 gate——review.json/文档产物硬校验仍在） |
+-
+-## quick 特有参数
+-
+-| 参数 | 说明 |
+-|---|---|
+-| `--linked-changes none\|a,b` | **显式关联变更（取代 `--change`，推荐）**。none=不关联，a,b=关联列表 |
+-| `--files a.js,b.js` | 显式声明本次允许修改的文件（边界保护 + 声明即归属：多 agent 并发仓防他者窗口文件混入 QUICKLOG 文件行，未声明窗口文件进「审计：」行追溯；**他向亦然**——其他 active 会话已声明的文件在你的 `--done` 审计中自动剔除归该会话，不再误拦、无需 `--force-baseline`）。**中途可追加**：发现要改声明外文件（如新写的测试）时，带新增文件恢复会话即并入边界（追加不替换）——`sillyspec run quick --files <新增> --change <sessionId>`；不带 `--files` 恢复则边界原样保留 |
+-| `--file-notes "p::注 \|\| p::注"` | quick `--done` 用：QUICKLOG「文件：」行落盘为多行带括注 bullet（省事后手改文件行）。格式 `path::括注`，`\|\|` 分隔多条；**只随 step3 --done 同命令传**（CLI 短进程，step1/step2 传无效，不带到 step3） |
+-| `--allow-new` | 允许新增文件（默认禁止，防意外创建） |
+-| `--allow-delete` | 允许删除文件（默认 fail-closed，删除是破坏性操作；确认删除带此 flag 显式解锁） |
+-| `--force-baseline` | 允许覆盖 baseline 受保护文件 / 压制 `.sillyspec/` 危险判定（危险，慎用） |
+-| `--confirm` | ⚠️ 仅打印变更概览，**不解锁 blocked**（blocked 仍 exit 1）。真正解锁用 `--force-baseline`/`--allow-new`/`--allow-delete` |
+-
+-## 审计与并发变更（`--done` 边界审计）
+-
+-`--done` 收尾时对比 step1 baseline 与当前 `git status`，拦「危险文件 / 新增文件 / 覆盖 baseline」。要点：
+-
+-- **并发其他会话的 `.sillyspec/changes/<非关联变更>/` 不再被本 quick 拦截**。quick 自己没有 `changes/` 目录，该路径下非关联内容视为并发会话的工作，整体放行（确定性审计无法区分「并发工作」与「本 quick 偷建变更」，后者这类意图软判定留给 sillyhub）。
+-- **其他 active 会话已声明的文件自动豁免（`--files` 的他向语义）**。多 agent 并发时，并行 quick 会话 `--files` 显式声明的文件（如它的 `daemon/router.py`）出现在你的窗口内（它在你启动后改的、不在你的 baseline）——`--done` 审计自动剔除归该会话边界管，不再判危险 BLOCK、无需 `--force-baseline`。放行可见：输出 🔗 软警告逐文件列归属会话；若确系你的改动，恢复会话时 `--files` 追加声明；超 7 天未收尾的僵尸会话声明自动失效（`sillyspec run quick --cancel --change <他者会话ID>` 清理）。豁免只认他者**显式声明**——未声明的他者文件照旧走各门判定（漏声明的补 `--files`，危险文件仍需 `--force-baseline`）。
+-- **关联变更的文件仍走审计**：reverse-sync 改自己关联变更的 `design.md` 会被拦，需 `--force-baseline` 显式确认。
+-- **baseline 折叠目录前缀匹配**：step1 启动时整片 `changes/` 未跟踪会被 git 折叠成 `?? .sillyspec/changes/`（带尾斜杠 token）；审计时若该目录下文件被并发会话跟踪而展开成文件级路径，按尾斜杠 token 前缀放行其下所有文件，不误判。
+-- **同文件并发 warn（advisory，不阻断）**：step1 启动时若你的某个 `allowedFile` 已在他者脏文件列表里（他者也改了这文件），--done 时 CLI 会比对当前内容 hash 与启动时录入的 hash——不一致（你也改了它）即判「同文件并发」并 warn：整文件 pathspec 提交会夹带他者 hunk。warn 给出分离指引（`git add -p <file>` 交互选你自己的 hunk，或 `git diff <file> > mine.patch` 编辑后 `git apply --cached mine.patch` 再 commit）。这**不阻断** --done（你可能有意整文件提交），看 warn 后自行决定是否分离。
+-- **`--confirm` ≠ 解锁**：它只打印概览。blocked 时真正解锁的是 `--force-baseline`（压制 `.sillyspec/` 危险判定 + baseline 覆盖）/`--allow-new`（放行新增）/`--allow-delete`（放行删除，删除是破坏性操作默认 fail-closed，须显式 opt-in），三者可在 step1 或 `--done` 传，都生效。
+-
+-## 典型用法
+-
+-```bash
+-# 推荐启动：带一句话语义标题（QUICKLOG/平台快速修复列表进行中即可见可读）
+-sillyspec run quick --input "修复登录限流 INCR 计数误清" --linked-changes none --files src/auth.ts
+-
+-# 单变更项目，直接开始
+-sillyspec run quick
+-
+-# 多变更项目，显式不关联
+-sillyspec run quick --linked-changes none
+-
+-# 多变更项目，关联到指定变更
+-sillyspec run quick --linked-changes 2026-07-03-add-login
+-
+-# CI/脚本（非交互，避免 prompt 崩溃）
+-sillyspec run quick --non-interactive
+-sillyspec run quick --done --linked-changes none --output "修复手机号校验"
+-
+-# 限定修改文件范围
+-sillyspec run quick --files src/phone.ts,src/phone.test.ts
+-```
+-
+-## 铁律
+-
+-- **必须用 exec 工具（shell）执行 CLI，不要自己编造流程**
+-- quick 直接在主工作区改代码（不创建 worktree），范围必须小且明确
+-- 完成后立即 `--done`，不跳过
+-- QUICKLOG 记录的**骨架由 CLI 接管**：启动时 CLI 自动分配 ql-ID 并在 `.sillyspec/quicklog/QUICKLOG-<user>.md` 写「进行中」条目（含关联变更 tasks.md），`--done` 时 CLI 自动翻「已完成」+ 勾选 task + 回填文件路径。ql-ID 分配/状态/task 你无需手写，只需用注入的 `<quicklog-id>` 在模块文档变更索引引用
+-- **QUICKLOG 落盘已结构化（`--done` 后按需核对，多数无需手改）**：CLI 已落盘结构化条目——标题从 `--output` 的「需求：」自动提取、正文四字段自动分行、文件行用 `--file-notes` 时为多行带括注。`--done` 后只需核对：标题弱才改（禁留 `(quick 任务)` 占位）；没用 `--file-notes` 时文件行是单行、可事后补括注（参照同文件早期丰富条目）；正文 `需求：`/`根因：`/`方案：`/`结果：` 四段按需充实（禁只留一段「结果：」）。一条 quick = 一条独立 ql，不追加到旧条目
+-- **收尾顺序（模块文档在 `--done` 前，QUICKLOG 在 `--done` 后，别记混）**：① 命中模块→改模块文档→`git add`；② `sillyspec run quick --done --change <id> --output "四字段" [--file-notes "..."]`（CLI 自动翻完成 + 勾 task + 落盘 QUICKLOG 标题/文件/正文；若 `--linked-changes` 关联的真实变更其 tasks.md 已全部勾选**且该变更未进入完整流程**（进度库阶段停在 brainstorm 及之前），CLI 会自动将其归档到 `changes/archive/`；已走到 plan/execute/verify/archive 的变更不自动归档（tasks.md 全勾不等于流程收尾），须走原流程收尾）；③ 核对 QUICKLOG 标题（CLI 已从「需求：」提取并截断，写成短标题则无需改）→若改了再 `git add`
+-- **最后一步 `--done` 必须给全四字段**（逐项一句话）：🔧 **推荐四参数形式**（CLI 自动合成结构化模板，无格式事故面）：`--done --change <id> --req "一句语义化短标题" --cause "为什么改" --solution "怎么改的" --result "验证结果"`。兼容旧形式 `--output "需求：… 根因：… 方案：… 结果：…"`（手拼须懂截断规则、禁嵌套全角冒号，缺字段被拒 exit 1）。这是 QUICKLOG「结果：」归档的唯一来源。**`--req` 写一句语义化短标题**（写「改了什么」，如「登录限流修复——INCR 计数误清」）——CLI 把它提取为 QUICKLOG 条目标题，截到首个标点、超 80 字截断；写完整需求长句会被截成语义不完整的状语前半段，需求背景放 `--cause`/`--solution`。前两个 step 的 `--output` 是中间摘要，不用此模板
+-- **禁止**在没有运行 CLI 的情况下自行决定流程
+-
+-## 用户指令
+-$ARGUMENTS
+diff --git a/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/flow-state.yaml b/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/flow-state.yaml
+new file mode 100644
+index 000000000..fa55d7125
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/flow-state.yaml
+@@ -0,0 +1,29 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  RBAC 目录清理：14
++  个零端点消费的死权限（code:*×4、tool:*×4、task:cancel、task:approve、platform:audit:read、platform:billing、component:read、change:update）从枚举/菜单卡/种子删除，task:create
++  与 task:assign（有真实端点）挂到变更中心卡使其可配；新增迁移清理存量 role_permissions 死行（含从未入枚举的 component:write/admin）。
++
++
++  成功标准：
++
++  - 后端 Permission 枚举 72→58，删除的 14 键在 backend/app 与 sillyhub-daemon 零非测试引用（已核）
++
++  - 前端 4 菜单卡同步（components→仅 workspace:read、changes 删 change:update 加 task:create/assign、approvals 删 task:approve、audit→仅
++  change:read），角色页标签映射同步
++
++  - 种子迁移 SYSTEM_ROLES 精简 + 新增存量清理迁移（downgrade 对称回植 platform_admin，仿 20260720_drop_ppm_op 先例）
++
++  - pnpm gen:types 重生成 api-types（Permission 联合 58）并与 openapi.json 一并提交
++
++  - 后端 auth/roles 相关测试与前端 menu-permissions 测试同步更新全绿，ruff/mypy/tsc/eslint 零新增报错
++autopilot: true
++baseline_commit: e4cc5e0c6be37a1f97cffb686d01b36181f50a17
++updatedAt: '2026-10-08T02:31:02.716Z'
++baseline_sha256: e15d8135f1c0e182ea8199790fef41d6913efe90e9834c4a6401c273ba40722d
++
+diff --git a/.sillyspec/docs/frontend/modules/lib-menu-permissions.md b/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
+index 9890e9dd0..9df28f77a 100644
+--- a/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
++++ b/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
+@@ -18,18 +18,18 @@ created_at: 2026-08-18 01:45:00
+   - `navHidden?` — 二级页面不在侧边栏渲染（路由仍可达、active 匹配保留），如 ppm 项目成员/里程碑明细。
+ - `MENU_SECTION_ORDER` — 渲染顺序：workspace → agent → config → governance → ppm → system。
+ - `MENU_SECTION_LABEL` — section 中文标题（工作区/智能体/配置中心/协作治理/系统管理/项目管理）。
+-- 类型 `PermissionItem`（key/name/description?）：key 必须命中后端 Permission 枚举（`backend/app/modules/auth/permissions.py`，经 OpenAPI 生成联合类型，漂移编译期暴露）。
++- 类型 `PermissionItem`（key/name/description?）：key 必须命中后端 Permission 枚举（`backend/app/modules/auth/permissions.py`，经 OpenAPI 生成联合类型，漂移编译期暴露；2026-10-08-rbac-dead-permissions-cleanup 起目录 58 项——删 14 个零端点消费死键 code:*/tool:*/task:cancel/task:approve/platform:audit:read/platform:billing/component:read/change:update，存量行迁移 20261008100000 清理）。
+ 
+ 各 section 构成：
+ - **workspace**（8 项）：工作区首页（/workspaces，absolute）、组件、拓扑、变更中心、扫描文档、运行时、知识库、发布。
+-  - 子菜单均有独立 read 权限（component:read / topology:read / scan-docs:read / knowledge:read 等），不共用 workspace:read 作兜底；但卡片可含页面实际所需的其他 key（2026-10-08-page-audit：components 卡含 workspace:read——列表端点鉴权所需；changes 卡含 task:read——变更任务子页所需；knowledge 卡含 knowledge:write——写按钮所需）。
++  - 子菜单均有独立 read 权限（topology:read / scan-docs:read / knowledge:read 等），不共用 workspace:read 作兜底；但卡片可含页面实际所需的其他 key（2026-10-08-page-audit + rbac-dead-permissions-cleanup：components 卡收敛为 [workspace:read]（component:read 死键删除，列表端点鉴权即 workspace:read）；changes 卡含 task:read/create/assign（任务子页 + 任务 API；change:update 死键删除）；knowledge 卡含 knowledge:write（写按钮））。
+ - **agent**（4 项）：技能管理（/settings/skills）、MCP 资产库（/settings/mcp）、智能体档案（/agent-profiles）、智能体会话（/sessions），全 absolute。
+   - 四菜单 2026-09-18-web-menu-management 起各挂独立 read 权限（skill:read / mcp:read / agent_profile:read / agent_session:read），进角色勾选器。
+   - 智能体会话 2026-10-08-sessions-menu-permissions 起补齐会话页实际权限共 4 项：agent_session:read（门控主 key）+ task:run_agent（全部 /api/daemon/sessions* 端点）+ daemon:borrow（借用会话）+ runtime:admin（机器下拉 /api/daemon/machines）——多权限菜单任一命中即可见，跨菜单重复挂载（runtime:admin 同挂 config 守护进程运行时）有 change:approve 双卡先例。
+   - MCP 资产库 2026-10-08-page-audit 起补 settings:admin（平台库写端点 mcp_registry settings_admin_check；读与我的库任意登录用户可用）。
+ - **config**（4 项）：我的供应商（llm_provider:read，sidebar-menu-restructure 新增）、API 密钥（api_key:admin）、Git 身份（git_identity:admin）、守护进程运行时（runtime:admin，自 system 移入，D-006）。
+-- **governance**（3 项）：审批中心（task:approve / change:approve / task:read / task:run_agent）、审计中心（platform:audit:read / change:read）、事件（incident:read / deploy:staging）。
+-  - 2026-10-08-page-audit：审批中心补 task:read（agent-sessions / dialogs 列表端点）+ task:run_agent（会话权限面板 daemon 端点族）；审计中心补 change:read（工作区审计日志端点 CHANGE_READ；platform:audit:read 零端点消费保留存量）；事件补 deploy:staging（上报端点鉴权）。
++- **governance**（3 项）：审批中心（change:approve / task:read / task:run_agent）、审计中心（change:read）、事件（incident:read / deploy:staging）。
++  - 2026-10-08-page-audit：审批中心补 task:read（agent-sessions / dialogs 列表端点）+ task:run_agent（会话权限面板 daemon 端点族）；审计中心补 change:read（工作区审计日志端点 CHANGE_READ）；事件补 deploy:staging（上报端点鉴权）。rbac-dead-permissions-cleanup：task:approve / platform:audit:read 死键删除，两卡收敛为页面真实所需。
+ - **system**（5 项）：用户、组织、角色（/admin/*）、设置（settings:admin）、菜单管理（/admin/menus，menu:admin，2026-09-18 新增）。
+ - **ppm**（14 项）：全部 absolute 指向 /ppm/*，每菜单独立专属 key（ppm:workbench:view / ppm:project:read / ppm:kanban:view / ppm:weekly-plan:view 等）。
+   - 项目成员、里程碑明细带 navHidden（二级页面，由父页跳转进入）。
+@@ -52,9 +52,9 @@ created_at: 2026-08-18 01:45:00
+ - `icon` 字段经排查（sidebar-menu-restructure task-04）在 app-shell/picker/permission 均无消费者，新增菜单可填占位 emoji。
+ - 写错权限 key = 该菜单永远不可见；改菜单结构需同步 `lib-permission` 判定、app-shell 渲染（MENU_ICON_MAP 按 href）、页面路由三处。
+ - 菜单 permissions 数组同时服务两个消费面：canSeeMenu 可见性（任一命中）与 AdminRolePermissionPicker 可配面——往菜单补权限会同步放宽可见性，页面实际依赖的权限应挂全（否则勾选器配不了，如 sessions 补齐前的 task:run_agent；2026-10-08-page-audit 批量修了 components/changes/knowledge/mcp/approvals/audit/incidents 七处同类缺口）。
+-- 测试镜像常量 `BACKEND_PERMISSION_KEYS`（menu-permissions.test.ts）须与后端枚举逐项同步（现 72 项），后端扩删权限时两处一起改。
++- 测试镜像常量 `BACKEND_PERMISSION_KEYS`（menu-permissions.test.ts）须与后端枚举逐项同步（现 58 项），后端扩删权限时两处一起改。
+ - 管理类菜单多为单一 admin 权限（api_key:admin / git_identity:admin / runtime:admin / settings:admin），平台超管自动通过。
+-- 零端点消费的悬空 key（component:read / platform:audit:read / task:approve、code:* / tool:* / task:cancel 等）保留在卡上或目录中属已知债——清理需独立变更评审（涉及存量角色可见性与可配性）；PPM 的 ppm:plan:read / ppm:problem:read / ppm:task:read / ppm:problem-change:read 为 D-002 决策故意悬空。
++- 2026-10-08-rbac-dead-permissions-cleanup 已清理 14 个零端点消费死键（卡上 4 个 + 目录 10 个），存量授权行由迁移 20261008100000 删除；仍有意保留的纯门控 key（llm_provider:read / skill:read / mcp:read / agent_profile:read / agent_session:read）无端点但驱动菜单显隐，属设计而非悬空；PPM 的 ppm:plan:read / ppm:problem:read / ppm:task:read / ppm:problem-change:read 为 D-002 决策故意悬空。
+ 
+ ## 人工备注
+ 
+diff --git a/backend/app/modules/auth/permissions.py b/backend/app/modules/auth/permissions.py
+index cf9ab0f7e..098ccec8b 100644
+--- a/backend/app/modules/auth/permissions.py
++++ b/backend/app/modules/auth/permissions.py
+@@ -1,10 +1,16 @@
+ """Static permission catalogue.
+ 
+-Mirrors ``references/16-rbac.md`` §2 + ``2026-06-16-admin-org-role-center``
+-design §8.4. Keep this list in sync with the seed data in migration
+-``202605280900_create_auth_and_rbac.py`` and the admin org/role bootstrap
+-in ``auth.seed``: anything missing here is unreachable from the API layer
+-regardless of what the DB grants.
++Historically mirrored ``references/16-rbac.md`` §2 + various change
++designs（2026-06-16-admin-org-role-center §8.4 等）。Keep this list in sync
++with the seed data in migration ``202605280900_create_auth_and_rbac.py``
++and the admin org/role bootstrap in ``auth.seed``: anything missing here
++is unreachable from the API layer regardless of what the DB grants.
++
++2026-10-08-rbac-dead-permissions-cleanup：删除 14 个零端点消费的死权限
++（code:*×4 / tool:*×4 / task:cancel / task:approve / platform:audit:read /
++platform:billing / component:read / change:update——2026-05-25 bootstrap
++设计的代码评审/工具门控残留，平台演进为 git 网关 + 会话 canUseTool 审批后
++从未接线）。存量授权行由迁移 202610081000 清理。
+ """
+ 
+ from __future__ import annotations
+@@ -25,7 +31,6 @@ class PermissionGroup(StrEnum):
+     WORKSPACE = "workspace"
+     AGENT = "agent"
+     CHANGE = "change"
+-    AUDIT = "audit"
+     # PPM (项目与问题管理) 平台级业务域 — change 2026-06-20-ppm-module-migration
+     # task-02 / design §6/§7。前端菜单按 PPM 折叠展示。
+     PPM = "ppm"
+@@ -34,8 +39,6 @@ class PermissionGroup(StrEnum):
+ class Permission(StrEnum):
+     # ── Platform ────────────────────────────────────────────
+     PLATFORM_ADMIN = "platform:admin"
+-    PLATFORM_BILLING = "platform:billing"
+-    PLATFORM_AUDIT_READ = "platform:audit:read"
+ 
+     # ── Platform 子菜单独立管理权限 ──────────────────────────
+     # 用于前端 menu 显隐粒度化：每个 management/system 子菜单有独立 admin 权限，
+@@ -61,7 +64,8 @@ class Permission(StrEnum):
+     # 用于前端 menu 显隐粒度化：每个 overview/management 子菜单有独立 read 权限，
+     # 避免所有菜单共用 workspace:read 致 picker 重复展示。
+     # 后端 router 各自 require 对应权限。
+-    COMPONENT_READ = "component:read"
++    # 2026-10-08-rbac-dead-permissions-cleanup：component:read 删除（零端点
++    # 消费——组件列表端点鉴权 workspace:read，ql-003 接线意图从未落地）。
+     TOPOLOGY_READ = "topology:read"
+     SCAN_DOCS_READ = "scan-docs:read"
+     RUNTIME_READ = "runtime:read"
+@@ -73,19 +77,20 @@ class Permission(StrEnum):
+     INCIDENT_READ = "incident:read"
+ 
+     # ── Change ──────────────────────────────────────────────
++    # 2026-10-08-rbac-dead-permissions-cleanup：change:update 删除（零端点
++    # 消费——变更编辑端点走 CHANGE_CREATE + owner 判定）。
+     CHANGE_CREATE = "change:create"
+     CHANGE_READ = "change:read"
+-    CHANGE_UPDATE = "change:update"
+     CHANGE_APPROVE = "change:approve"
+     CHANGE_ARCHIVE = "change:archive"
+ 
+     # ── Task ────────────────────────────────────────────────
++    # 2026-10-08-rbac-dead-permissions-cleanup：task:cancel / task:approve
++    # 删除（零端点消费——审批走 tool_gateway change:approve，取消无端点）。
+     TASK_READ = "task:read"
+     TASK_CREATE = "task:create"
+     TASK_ASSIGN = "task:assign"
+     TASK_RUN_AGENT = "task:run_agent"
+-    TASK_CANCEL = "task:cancel"
+-    TASK_APPROVE = "task:approve"
+ 
+     # ── Daemon borrow（业务/管理人员借用开发人员 daemon）──────────────────
+     # change 2026-07-25-daemon-borrow-for-business task-03 / D-006@v2。
+@@ -95,23 +100,11 @@ class Permission(StrEnum):
+     # 借用端点、不改 agent 端点鉴权（design §5 Phase 2）。
+     DAEMON_BORROW = "daemon:borrow"
+ 
+-    # ── Code ────────────────────────────────────────────────
+-    CODE_READ = "code:read"
+-    CODE_WRITE = "code:write"
+-    CODE_REVIEW = "code:review"
+-    CODE_MERGE = "code:merge"
+-
+     # ── Deploy ──────────────────────────────────────────────
+     DEPLOY_STAGING = "deploy:staging"
+     DEPLOY_PRODUCTION = "deploy:production"
+     DEPLOY_ROLLBACK = "deploy:rollback"
+ 
+-    # ── Tool ────────────────────────────────────────────────
+-    TOOL_SHELL_EXEC = "tool:shell_exec"
+-    TOOL_NETWORK = "tool:network"
+-    TOOL_DATABASE = "tool:database"
+-    TOOL_SECRET_READ = "tool:secret:read"
+-
+     # ── Admin (user / organization / role management) ───────
+     # Mirrors design §8.4 — added in change 2026-06-16-admin-org-role-center.
+     USER_READ = "user:read"
+@@ -185,14 +178,11 @@ class Permission(StrEnum):
+     def group(self) -> PermissionGroup:
+         """Resolve the logical group for UI rendering.
+ 
+-        Mirrors design §5.3. ``platform:audit:read`` is the lone AUDIT
+-        special case; everything else keys off the ``<prefix>:`` portion
+-        of the value.
++        Mirrors design §5.3. ``runtime`` 同时存在 workspace:read（子菜单）与
++        platform:admin（菜单管理），无法仅靠前缀区分，按完整 value 单独判定。
++        2026-10-08-rbac-dead-permissions-cleanup：platform:audit:read 死键删除
++        后 AUDIT 组随之移除，特判分支一并清理。
+         """
+-        if self is Permission.PLATFORM_AUDIT_READ:
+-            return PermissionGroup.AUDIT
+-        # runtime 同时存在 workspace:read（子菜单）与 platform:admin（菜单管理），
+-        # 无法仅靠前缀区分，按完整 value 单独判定。
+         if self is Permission.RUNTIME_READ:
+             return PermissionGroup.WORKSPACE
+         if self is Permission.RUNTIME_ADMIN:
+diff --git a/backend/migrations/versions/202605280900_create_auth_and_rbac.py b/backend/migrations/versions/202605280900_create_auth_and_rbac.py
+index 5d6756e3c..5f00f615e 100644
+--- a/backend/migrations/versions/202605280900_create_auth_and_rbac.py
++++ b/backend/migrations/versions/202605280900_create_auth_and_rbac.py
+@@ -26,6 +26,11 @@ depends_on: str | Sequence[str] | None = None
+ # Mirrors references/16-rbac.md §3 (system roles) + §2 (permission strings).
+ # Permission strings are duplicated here on purpose: migrations must stay
+ # importable without pulling in app.* (e.g. when generating offline SQL).
++#
++# 2026-10-08-rbac-dead-permissions-cleanup：播种清单精简——删除零端点消费的
++# 死权限字符串（component:read/write/admin、change:update、task:cancel、
++# task:approve、code:read/write/review；component:write/admin 从未入枚举）。
++# 仅影响新环境从头 seed；已部署环境存量行由迁移 202610081000 清理。
+ 
+ SYSTEM_ROLES: list[dict[str, object]] = [
+     {
+@@ -43,22 +48,13 @@ SYSTEM_ROLES: list[dict[str, object]] = [
+             "workspace:write",
+             "workspace:admin",
+             "workspace:member:manage",
+-            "component:read",
+-            "component:write",
+-            "component:admin",
+             "change:create",
+             "change:read",
+-            "change:update",
+             "change:approve",
+             "change:archive",
+             "task:create",
+             "task:assign",
+             "task:run_agent",
+-            "task:cancel",
+-            "task:approve",
+-            "code:read",
+-            "code:write",
+-            "code:review",
+             "deploy:staging",
+         ],
+     },
+@@ -68,11 +64,8 @@ SYSTEM_ROLES: list[dict[str, object]] = [
+         "description": "负责工作区内的一个或多个组件。",
+         "permissions": [
+             "workspace:read",
+-            "component:read",
+-            "component:write",
+             "change:read",
+             "task:assign",
+-            "code:review",
+         ],
+     },
+     {
+@@ -81,11 +74,8 @@ SYSTEM_ROLES: list[dict[str, object]] = [
+         "description": "日常贡献者。",
+         "permissions": [
+             "workspace:read",
+-            "component:read",
+             "change:read",
+             "task:run_agent",
+-            "code:read",
+-            "code:write",
+         ],
+     },
+     {
+@@ -95,8 +85,6 @@ SYSTEM_ROLES: list[dict[str, object]] = [
+         "permissions": [
+             "workspace:read",
+             "change:read",
+-            "code:read",
+-            "code:review",
+         ],
+     },
+     {
+@@ -106,7 +94,6 @@ SYSTEM_ROLES: list[dict[str, object]] = [
+         "permissions": [
+             "workspace:read",
+             "change:read",
+-            "code:read",
+             "task:run_agent",
+         ],
+     },
+@@ -116,7 +103,6 @@ SYSTEM_ROLES: list[dict[str, object]] = [
+         "description": "工作区只读访问。",
+         "permissions": [
+             "workspace:read",
+-            "component:read",
+             "change:read",
+         ],
+     },
+diff --git a/backend/migrations/versions/20261008100000_drop_dead_rbac_permissions.py b/backend/migrations/versions/20261008100000_drop_dead_rbac_permissions.py
+new file mode 100644
+index 000000000..62a695d2f
+--- /dev/null
++++ b/backend/migrations/versions/20261008100000_drop_dead_rbac_permissions.py
+@@ -0,0 +1,120 @@
++"""drop dead rbac permissions
++
++Revision ID: 20261008100000
++Revises: 20261006200000
++Create Date: 2026-10-08 10:00:00.000000
++
++清理零端点消费的 RBAC 死权限授权行（change 2026-10-08-rbac-dead-permissions-cleanup）。
++
++背景：全站菜单权限对账发现 14 个 Permission 枚举成员在后端（含
++sillyhub-daemon）零非测试引用——code:*×4 / tool:*×4 为 2026-05-25 bootstrap
++参考设计的代码评审/工具门控残留（平台演进为 git 网关 + 会话 canUseTool
++审批后从未接线）；task:cancel / task:approve / platform:audit:read /
++platform:billing / component:read / change:update 为意图未接线或功能未建。
++枚举已同步删除（permissions.py，72→58）。
++
++本迁移从 ``role_permissions`` 删除 16 个死字符串的全量行：上述 14 键 +
++``component:write`` / ``component:admin``（种子 202605280900 播种过、但从未
++进入 Permission 枚举的残留）。种子迁移 SYSTEM_ROLES 已同步精简，新环境从头
++seed 不再产生死行；本迁移面向已部署环境存量收敛（仿 20260720_drop_ppm_op
++先例）。
++
++权限字符串硬编码于本文件（沿用旧迁移离线生成 SQL 风格，不 import app.*），
++避开 PG/SQLite 方言差异（不用 ON CONFLICT）。downgrade 对称回植全部 16 个
++字符串到 ``platform_admin`` 角色（幂等，参照 202607041000_seed_ppm_permissions
++的 SELECT-已绑定-再-bulk_insert 风格；自定义角色的历史授予不可恢复，回植
++以系统种子形态为基准）。
++"""
++
++from __future__ import annotations
++
++from typing import Sequence
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "20261008100000"
++down_revision: str | None = "20261006200000"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++
++# 被清理的 16 个死权限字符串（14 个已删枚举成员 + 2 个从未入枚举的种子残留）。
++# 迁移内硬编码，不 import app.* —— 见模块 docstring 说明。
++DROPPED_DEAD_PERMISSIONS: list[str] = [
++    # Code（bootstrap 设计残留，零端点消费）
++    "code:read",
++    "code:write",
++    "code:review",
++    "code:merge",
++    # Tool（同上——工具门控现行机制为会话 canUseTool 审批）
++    "tool:shell_exec",
++    "tool:network",
++    "tool:database",
++    "tool:secret:read",
++    # Task 死动作（审批走 change:approve；取消无端点）
++    "task:cancel",
++    "task:approve",
++    # Platform 死键（平台审计端点实际鉴权 change:read；计费未建）
++    "platform:audit:read",
++    "platform:billing",
++    # 组件/变更死键（组件列表端点鉴权 workspace:read；变更编辑走 create+owner）
++    "component:read",
++    "change:update",
++    # 从未进入 Permission 枚举的种子残留（202605280900 workspace_owner 播种）
++    "component:write",
++    "component:admin",
++]
++
++
++def upgrade() -> None:
++    """删除 16 个死权限字符串的全部授权行（标准 SQL，PG/SQLite 通用）。"""
++    placeholders = ", ".join(f":p{i}" for i in range(len(DROPPED_DEAD_PERMISSIONS)))
++    params = {f"p{i}": perm for i, perm in enumerate(DROPPED_DEAD_PERMISSIONS)}
++    op.execute(
++        sa.text(f"DELETE FROM role_permissions WHERE permission IN ({placeholders})").bindparams(
++            **params
++        )
++    )
++
++
++def downgrade() -> None:
++    """对称回植 16 个死权限字符串到 platform_admin 角色（幂等）。
++
++    幂等实现参照 ``202607041000_seed_ppm_permissions.upgrade``：先取
++    platform_admin 角色 id（系统内置，缺失则跳过避免外键违约），再 SELECT
++    已绑定的权限集合，仅 bulk_insert 缺失项。
++    """
++    # 通用 sa.Uuid(as_uuid=False)（非 postgresql.UUID）：SQLite 回放测试里
++    # SELECT 返回 hex 字符串、PG 专用类型/binds 需 UUID 对象，两端不兼容；
++    # as_uuid=False 双向按字符串处理，SQLite 直存、PG 驱动自动转 uuid 列。
++    role_perms_table = sa.table(
++        "role_permissions",
++        sa.column("role_id", sa.Uuid(as_uuid=False)),
++        sa.column("permission", sa.String),
++    )
++    bind = op.get_bind()
++
++    role_id_row = bind.execute(
++        sa.text("SELECT id FROM roles WHERE key = 'platform_admin' LIMIT 1")
++    ).fetchone()
++    if role_id_row is None:
++        return
++    role_id = role_id_row[0]
++
++    existing = {
++        row[0]
++        for row in bind.execute(
++            sa.text("SELECT permission FROM role_permissions WHERE role_id = :rid").bindparams(
++                rid=role_id
++            )
++        )
++    }
++
++    new_rows = [
++        {"role_id": role_id, "permission": perm}
++        for perm in DROPPED_DEAD_PERMISSIONS
++        if perm not in existing
++    ]
++    if new_rows:
++        op.bulk_insert(role_perms_table, new_rows)
+diff --git a/backend/openapi.json b/backend/openapi.json
+index ebe6c95e9..3fed9cd1f 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -4638,7 +4638,7 @@
+           "change"
+         ],
+         "summary": "Get Change Patch File",
+-        "description": "归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。\n\n卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch`` 并切出该\n文件的 diff 段——冻结在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，\n两者不可互替）。``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/\n绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，\n不抛 404（读不到留档是展示面降级，不是资源不存在）。",
++        "description": "归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。\n\n卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch``（缺件回退\n``scope-audit.patch``——厚流程归档只落快照留档）并切出该文件的 diff 段——冻结\n在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，两者不可互替）。\n``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/\n绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，\n不抛 404（读不到留档是展示面降级，不是资源不存在）。",
+         "operationId": "get_change_patch_file_api_workspaces__workspace_id__changes__change_id__assets_patch_file_get",
+         "parameters": [
+           {
+@@ -39918,7 +39918,7 @@
+           "path"
+         ],
+         "title": "ChangePatchFileRead",
+-        "description": "归档留档单文件 diff 切片（GET /changes/{cid}/assets/patch-file）。\n\n展示面 fail-open：``change.patch`` 缺失、文件不在 patch 内、切片超上限一律以\n``note``/``truncated`` 说明而非报错（读不到留档不是变更详情的错误面）。"
++        "description": "归档留档单文件 diff 切片（GET /changes/{cid}/assets/patch-file）。\n\n展示面 fail-open：``change.patch``（缺件回退 ``scope-audit.patch``）缺失、\n文件不在留档内、切片超上限一律以 ``note``/``truncated`` 说明而非报错\n（读不到留档不是变更详情的错误面）。"
+       },
+       "ChangePatchMeta": {
+         "properties": {
+@@ -39992,7 +39992,7 @@
+         },
+         "type": "object",
+         "title": "ChangePatchMeta",
+-        "description": "patch 留档统计（change-patch.json 的 totals + files 投影；无留档 → 整体 None）。\n\n``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 是同一 JSON\n``files`` 数组的清单投影（2026-09-25-change-detail-assets-usability / FR-04 起\n供卡面列出具体改动面），超上限时 ``files_truncated=True`` 显式标注。"
++        "description": "patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。\n\n``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 的清单投影\n按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面\n列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退\n形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。"
+       },
+       "ChangeProcessReq": {
+         "properties": {
+@@ -53993,8 +53993,6 @@
+         "type": "string",
+         "enum": [
+           "platform:admin",
+-          "platform:billing",
+-          "platform:audit:read",
+           "settings:admin",
+           "api_key:admin",
+           "runtime:admin",
+@@ -54004,7 +54002,6 @@
+           "workspace:write",
+           "workspace:admin",
+           "workspace:member:manage",
+-          "component:read",
+           "topology:read",
+           "scan-docs:read",
+           "runtime:read",
+@@ -54013,27 +54010,16 @@
+           "incident:read",
+           "change:create",
+           "change:read",
+-          "change:update",
+           "change:approve",
+           "change:archive",
+           "task:read",
+           "task:create",
+           "task:assign",
+           "task:run_agent",
+-          "task:cancel",
+-          "task:approve",
+           "daemon:borrow",
+-          "code:read",
+-          "code:write",
+-          "code:review",
+-          "code:merge",
+           "deploy:staging",
+           "deploy:production",
+           "deploy:rollback",
+-          "tool:shell_exec",
+-          "tool:network",
+-          "tool:database",
+-          "tool:secret:read",
+           "user:read",
+           "user:write",
+           "user:login:manage",
+diff --git a/backend/tests/modules/admin/test_roles_router.py b/backend/tests/modules/admin/test_roles_router.py
+index 10a15e467..705cd4189 100644
+--- a/backend/tests/modules/admin/test_roles_router.py
++++ b/backend/tests/modules/admin/test_roles_router.py
+@@ -69,7 +69,7 @@ async def test_create_role_success(client: AsyncClient, auth_headers):
+         "description": "Read + review",
+         "permission_keys": [
+             Permission.TASK_READ.value,
+-            Permission.CODE_REVIEW.value,
++            Permission.DEPLOY_PRODUCTION.value,
+         ],
+     }
+     resp = await client.post("/api/admin/roles", json=payload, headers=auth_headers)
+@@ -79,7 +79,7 @@ async def test_create_role_success(client: AsyncClient, auth_headers):
+     assert data["is_system"] is False
+     assert data["is_active"] is True
+     assert sorted(data["permissions"]) == sorted(
+-        [Permission.TASK_READ.value, Permission.CODE_REVIEW.value]
++        [Permission.TASK_READ.value, Permission.DEPLOY_PRODUCTION.value]
+     )
+     assert data["user_count"] == 0
+ 
+@@ -149,7 +149,7 @@ async def test_update_role_replaces_permissions(client: AsyncClient, auth_header
+             "name": "Dev Updated",
+             "permission_keys": [
+                 Permission.TASK_READ.value,
+-                Permission.CODE_WRITE.value,
++                Permission.DEPLOY_ROLLBACK.value,
+             ],
+         },
+         headers=auth_headers,
+@@ -158,7 +158,7 @@ async def test_update_role_replaces_permissions(client: AsyncClient, auth_header
+     data = resp.json()
+     assert data["name"] == "Dev Updated"
+     assert sorted(data["permissions"]) == sorted(
+-        [Permission.TASK_READ.value, Permission.CODE_WRITE.value]
++        [Permission.TASK_READ.value, Permission.DEPLOY_ROLLBACK.value]
+     )
+ 
+     bound_count = (
+diff --git a/backend/tests/modules/auth/test_business_member_role.py b/backend/tests/modules/auth/test_business_member_role.py
+index 88870b145..2db57fb52 100644
+--- a/backend/tests/modules/auth/test_business_member_role.py
++++ b/backend/tests/modules/auth/test_business_member_role.py
+@@ -77,7 +77,7 @@ def test_business_member_seed_constant_contents() -> None:
+     assert "daemon:borrow" in perms
+     assert "workspace:read" in perms
+     # 不带全量 agent / code 写权限——business_member 无自有 daemon，仅触发+借用
+-    assert "code:write" not in perms
++    assert "deploy:production" not in perms
+     assert "workspace:write" not in perms
+     assert "workspace:admin" not in perms
+ 
+diff --git a/backend/tests/modules/auth/test_permissions.py b/backend/tests/modules/auth/test_permissions.py
+index 48da9e7fa..e65275ab3 100644
+--- a/backend/tests/modules/auth/test_permissions.py
++++ b/backend/tests/modules/auth/test_permissions.py
+@@ -27,40 +27,27 @@ def test_permission_group_is_str_enum() -> None:
+     assert issubclass(PermissionGroup, StrEnum)
+ 
+ 
+-def test_permission_group_has_seven_members() -> None:
++def test_permission_group_has_six_members() -> None:
+     members = list(PermissionGroup)
+-    assert len(members) == 7
++    assert len(members) == 6
+     expected = {
+         PermissionGroup.PLATFORM,
+         PermissionGroup.ADMIN,
+         PermissionGroup.WORKSPACE,
+         PermissionGroup.AGENT,
+         PermissionGroup.CHANGE,
+-        PermissionGroup.AUDIT,
+         PermissionGroup.PPM,
+     }
+     assert set(members) == expected
+ 
+ 
+-def test_permission_count_is_72() -> None:
+-    """46 历史 + 17 PPM_* 菜单/读 + daemon:borrow + llm_provider:read + weekly-plan = 66。
+-
+-    cbd258eb/1f5e6ebe 菜单 unique-key 扩容回升到 63；change
+-    2026-07-25-daemon-borrow-for-business task-03 / D-006@v2 再加
+-    ``DAEMON_BORROW``（业务人员借用开发人员 daemon 回退授权）→ 64；
+-    change 2026-07-29-sidebar-menu-restructure task-01 / D-002@v1 再加
+-    ``LLM_PROVIDER_READ``（前端「我的供应商」菜单显隐 + 角色分配）→ 65；
+-    change 2026-07-30-sidebar-menu-restructure task-06 / ql-20260730-005 再加
+-    ``PPM_WEEKLY_PLAN_VIEW``（实施计划汇总独立菜单权限）→ 66；
+-    change 2026-09-17-knowledge-precipitation task-02 / FR-02 再加
+-    ``KNOWLEDGE_WRITE``（知识库写权限，管理员/owner 播种走 migration
+-    20260917104400）→ 67；
+-    change 2026-09-18-web-menu-management task-01 / FR-01 再加
+-    ``SKILL_READ``/``MCP_READ``/``AGENT_PROFILE_READ``/``AGENT_SESSION_READ``
+-    （4 个常显菜单独立读权限，task-03 种子迁移授全部现存角色保现状可见）
+-    与 ``MENU_ADMIN``（菜单管理页 /admin/menus 与覆盖写端点门控）→ 72。
++def test_permission_count_is_58() -> None:
++    """72 历史 + 增量见前注；2026-10-08-rbac-dead-permissions-cleanup 删除
++    14 个零端点消费死权限（code:*×4 / tool:*×4 / task:cancel / task:approve /
++    platform:audit:read / platform:billing / component:read / change:update，
++    AUDIT 组随 platform:audit:read 移除）→ 58。
+     """
+-    assert len(list(Permission)) == 72
++    assert len(list(Permission)) == 58
+ 
+ 
+ @pytest.mark.parametrize(
+@@ -74,10 +61,7 @@ def test_permission_count_is_72() -> None:
+         (Permission.ORGANIZATION_WRITE, PermissionGroup.ADMIN),
+         (Permission.ROLE_READ, PermissionGroup.ADMIN),
+         (Permission.ROLE_WRITE, PermissionGroup.ADMIN),
+-        # Historical platform — audit special-case
+-        (Permission.PLATFORM_AUDIT_READ, PermissionGroup.AUDIT),
+         (Permission.PLATFORM_ADMIN, PermissionGroup.PLATFORM),
+-        (Permission.PLATFORM_BILLING, PermissionGroup.PLATFORM),
+         # ql-004: platform management submenu admin perms
+         (Permission.SETTINGS_ADMIN, PermissionGroup.PLATFORM),
+         (Permission.API_KEY_ADMIN, PermissionGroup.PLATFORM),
+@@ -85,7 +69,7 @@ def test_permission_count_is_72() -> None:
+         # ql-005: git_identity admin perm
+         (Permission.GIT_IDENTITY_ADMIN, PermissionGroup.PLATFORM),
+         # ql-003: workspace submenu independent read perms
+-        (Permission.COMPONENT_READ, PermissionGroup.WORKSPACE),
++        # （2026-10-08-rbac-dead-permissions-cleanup：component:read 删除）
+         (Permission.TOPOLOGY_READ, PermissionGroup.WORKSPACE),
+         (Permission.SCAN_DOCS_READ, PermissionGroup.WORKSPACE),
+         (Permission.RUNTIME_READ, PermissionGroup.WORKSPACE),
+@@ -99,10 +83,8 @@ def test_permission_count_is_72() -> None:
+         (Permission.WORKSPACE_ADMIN, PermissionGroup.WORKSPACE),
+         # Change
+         (Permission.CHANGE_CREATE, PermissionGroup.CHANGE),
+-        # Agent (task/code/tool/deploy)
++        # Agent (task/deploy；2026-10-08 清理删 code:*/tool:* 死键)
+         (Permission.TASK_READ, PermissionGroup.AGENT),
+-        (Permission.CODE_REVIEW, PermissionGroup.AGENT),
+-        (Permission.TOOL_NETWORK, PermissionGroup.AGENT),
+         (Permission.DEPLOY_PRODUCTION, PermissionGroup.AGENT),
+         # task-03: daemon 前缀归 AGENT 组（业务借用回退授权）
+         (Permission.DAEMON_BORROW, PermissionGroup.AGENT),
+@@ -140,13 +122,38 @@ def test_new_permission_string_values() -> None:
+ 
+ 
+ def test_existing_permission_string_values_unchanged() -> None:
+-    """Sanity: historical 25 entries retain their original string values."""
++    """Sanity: historical entries retain their original string values."""
+     assert Permission.PLATFORM_ADMIN.value == "platform:admin"
+     assert Permission.WORKSPACE_ADMIN.value == "workspace:admin"
+     assert Permission.CHANGE_CREATE.value == "change:create"
+     assert Permission.TASK_RUN_AGENT.value == "task:run_agent"
+     assert Permission.DEPLOY_ROLLBACK.value == "deploy:rollback"
+-    assert Permission.TOOL_SECRET_READ.value == "tool:secret:read"
++
++
++def test_dead_permissions_removed_from_catalog() -> None:
++    """2026-10-08-rbac-dead-permissions-cleanup：14 个零端点消费死键出目录。
++
++    删除后这些字符串不得再以 Permission 成员存在（角色写路径 list[Permission]
++    校验域随之收窄；存量授权行由迁移 20261008100000 清理）。
++    """
++    values = {p.value for p in Permission}
++    for dead in (
++        "code:read",
++        "code:write",
++        "code:review",
++        "code:merge",
++        "tool:shell_exec",
++        "tool:network",
++        "tool:database",
++        "tool:secret:read",
++        "task:cancel",
++        "task:approve",
++        "platform:audit:read",
++        "platform:billing",
++        "component:read",
++        "change:update",
++    ):
++        assert dead not in values
+ 
+ 
+ def test_daemon_borrow_permission_value() -> None:
+@@ -352,3 +359,78 @@ def test_knowledge_write_migration_downgrade_deletes_rows_keeps_roles() -> None:
+             mod.downgrade()
+         assert conn.execute(sa.text("SELECT COUNT(*) FROM role_permissions")).scalar() == 0
+         assert conn.execute(sa.text("SELECT COUNT(*) FROM roles")).scalar() == 0
++
++
++# ---------------------------------------------------------------------------
++# 2026-10-08-rbac-dead-permissions-cleanup：死权限授权行清理迁移
++# （20261008100000_drop_dead_rbac_permissions）。范式沿用上方
++# knowledge_write 迁移测试：MigrationContext + Operations 在 SQLite 内存库
++# 上回放真实 upgrade()/downgrade()。
++# ---------------------------------------------------------------------------
++
++DROP_DEAD_REVISION_ID = "20261008100000"
++
++
++def _load_drop_dead_migration():
++    """按 revision ID 在文件名里匹配导入迁移模块（borrow-shared 测试范式）。"""
++    backend_root = Path(__file__).resolve().parent.parent.parent.parent
++    versions_dir = backend_root / "migrations" / "versions"
++    for f in os.listdir(str(versions_dir)):
++        if f.endswith(".py") and DROP_DEAD_REVISION_ID in f and f != "__init__.py":
++            return importlib.import_module(f"migrations.versions.{f[:-3]}")
++    raise ImportError(f"No migration found for revision {DROP_DEAD_REVISION_ID}")
++
++
++def test_drop_dead_rbac_migration_metadata() -> None:
++    mod = _load_drop_dead_migration()
++    assert mod.revision == DROP_DEAD_REVISION_ID
++    assert mod.down_revision == "20261006200000"
++    assert len(mod.DROPPED_DEAD_PERMISSIONS) == 16
++    # 16 字符串互不重复
++    assert len(set(mod.DROPPED_DEAD_PERMISSIONS)) == 16
++
++
++def test_drop_dead_rbac_migration_upgrade_deletes_and_downgrade_replants() -> None:
++    """upgrade 删 16 死字符串全量行（其它权限保留，幂等）；downgrade 对称
++    回植 platform_admin 各 1 行（其它角色不回植，角色缺失安全 no-op）。"""
++    mod = _load_drop_dead_migration()
++    engine = sa.create_engine("sqlite:///:memory:")
++    with engine.begin() as conn:
++        _bootstrap_roles_tables_sqlite(conn)
++        admin_id = _seed_role(conn, "platform_admin", ["platform:admin", "code:read"])
++        owner_id = _seed_role(
++            conn, "workspace_owner", ["workspace:read", "task:approve", "component:admin"]
++        )
++
++        ctx = MigrationContext.configure(conn)
++        with Operations.context(ctx):
++            mod.upgrade()
++            # 幂等：重跑不抛
++            mod.upgrade()
++
++        def perms_of(rid) -> set[str]:
++            stmt = sa.text(
++                "SELECT permission FROM role_permissions WHERE role_id = :rid"
++            ).bindparams(rid=rid)
++            return {r[0] for r in conn.execute(stmt)}
++
++        # 死行全删、存活权限保留
++        assert perms_of(admin_id) == {"platform:admin"}
++        assert perms_of(owner_id) == {"workspace:read"}
++
++        with Operations.context(ctx):
++            mod.downgrade()
++
++        # 回植：platform_admin 持全部 16 键各 1 行（含原有 platform:admin）
++        admin_perms = perms_of(admin_id)
++        assert admin_perms == {"platform:admin", *mod.DROPPED_DEAD_PERMISSIONS}
++        assert len(admin_perms) == 17
++        # 其它角色不回植
++        assert perms_of(owner_id) == {"workspace:read"}
++
++        # 角色表缺失时 downgrade 安全 no-op
++        conn.execute(sa.text("DELETE FROM role_permissions"))
++        conn.execute(sa.text("DELETE FROM roles"))
++        with Operations.context(ctx):
++            mod.downgrade()
++        assert conn.execute(sa.text("SELECT COUNT(*) FROM role_permissions")).scalar() == 0
+diff --git a/backend/tests/modules/test_permission_cache.py b/backend/tests/modules/test_permission_cache.py
+index ac387afc8..4a743e8b1 100644
+--- a/backend/tests/modules/test_permission_cache.py
++++ b/backend/tests/modules/test_permission_cache.py
+@@ -131,7 +131,7 @@ async def test_permissions_roundtrip_all_scopes(monkeypatch: pytest.MonkeyPatch)
+     ws_id = uuid.uuid4()
+     plat = {"platform:admin", "user:read"}
+     all_perms = {"workspace:read", "change:create"}
+-    ws_perms = {"code:read", "task:read"}
++    ws_perms = {"deploy:staging", "task:read"}
+ 
+     await set_cached_permissions(uid, plat, scope="platform")
+     await set_cached_permissions(uid, all_perms, scope="all")
+diff --git a/backend/tests/modules/workspace/test_members_service_business_member.py b/backend/tests/modules/workspace/test_members_service_business_member.py
+index bea9693a1..d838c6608 100644
+--- a/backend/tests/modules/workspace/test_members_service_business_member.py
++++ b/backend/tests/modules/workspace/test_members_service_business_member.py
+@@ -8,7 +8,7 @@ Change 2026-07-25-daemon-borrow-for-business task-03 / FR-03 / D-006@v2：
+      ``invalidate_all_permissions``（R-05：grant 后清缓存，首次借用不被旧缓存挡）；
+   3. 端到端 RBAC 链：被授 business_member 的用户在该工作空间内
+      ``has_permission(DAEMON_BORROW)`` / ``has_permission(TASK_RUN_AGENT)`` 为 True，
+-     且不越权拿到 WORKSPACE_WRITE / CODE_WRITE（business_member 无写权限）。
++     且不越权拿到 WORKSPACE_WRITE / DEPLOY_PRODUCTION（business_member 无部署权限）。
+ 
+ 测试范式照抄 ``tests/modules/test_permission_cache.py``：``_FakeRedis`` 内存替身 +
+ ``monkeypatch.setattr("app.core.permission_cache.get_redis", ...)``。
+@@ -211,7 +211,7 @@ async def test_business_member_rbac_chain_grants_borrow_and_run_agent(
+ ) -> None:
+     """被授 business_member 的用户在该 ws 内 has_permission 返回:
+     DAEMON_BORROW=True / TASK_RUN_AGENT=True（FR-03 触发端点 + 借用回退授权），
+-    WORKSPACE_WRITE=False / CODE_WRITE=False（不越权，business_member 无写权限）。
++    WORKSPACE_WRITE=False / DEPLOY_PRODUCTION=False（不越权，business_member 无部署权限）。
+     """
+     # 用 _FakeRedis 替身，避免 has_permission 命中真实 Redis（降级噪声 + 慢）。
+     fake_redis = _FakeRedis()
+@@ -269,7 +269,7 @@ async def test_business_member_rbac_chain_grants_borrow_and_run_agent(
+         await has_permission(
+             db_session,
+             user=user,
+-            permission=Permission.CODE_WRITE,
++            permission=Permission.DEPLOY_PRODUCTION,
+             workspace_id=ws.id,
+         )
+         is False
+diff --git a/frontend/src/app/(dashboard)/admin/roles/page.tsx b/frontend/src/app/(dashboard)/admin/roles/page.tsx
+index 83bb18867..842e1de9b 100644
+--- a/frontend/src/app/(dashboard)/admin/roles/page.tsx
++++ b/frontend/src/app/(dashboard)/admin/roles/page.tsx
+@@ -373,11 +373,10 @@ const PERMISSION_NAME_MAP: Record<string, string> = {
+     ),
+   ),
+   // ql-20260801-002：系统/旧权限 key（不在 picker 可选范围,menu-permissions 无定义）补中文 fallback。
+-  "component:admin": "组件管理",
+-  "component:write": "组件编辑",
++  // 2026-10-08-rbac-dead-permissions-cleanup：component:admin/write、
++  // platform:billing 死键删除（迁移 20261008100000 清存量行），fallback 移除。
+   "daemon:borrow": "daemon 借用",
+   "platform:admin": "平台管理",
+-  "platform:billing": "平台计费",
+   "ppm:plan:read": "计划查看",
+   "ppm:problem-change:read": "问题变更查看",
+   "ppm:problem:read": "问题查看",
+diff --git a/frontend/src/lib/__tests__/menu-permissions.test.ts b/frontend/src/lib/__tests__/menu-permissions.test.ts
+index b271fde77..d75e894fb 100644
+--- a/frontend/src/lib/__tests__/menu-permissions.test.ts
++++ b/frontend/src/lib/__tests__/menu-permissions.test.ts
+@@ -4,7 +4,7 @@ import type { MenuSection } from "../menu-permissions";
+ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
+ 
+ /**
+- * 后端 Permission 枚举镜像常量（72 项）。
++ * 后端 Permission 枚举镜像常量（58 项）。
+  *
+  * 与 `backend/app/modules/auth/permissions.py` 的 Permission StrEnum 保持同步。
+  * 若后端扩/删枚举，需同时更新本常量；用例 5 会在漂移时失败提示。
+@@ -16,12 +16,11 @@ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
+  * - Workspace 子菜单独立 read/write (7, 2026-06-18 ql-003 新增 6
+  *   + knowledge:write——镜像曾漏补，2026-10-08-sessions-menu-permissions 对齐)
+  * - Change (5)
+- * - Task (6)
++ * - Task (4, 2026-10-08-rbac-dead-permissions-cleanup 删 task:cancel/task:approve)
+  * - Daemon borrow (1, 镜像曾漏补，同上对齐)
+- * - Code (4)
+  * - Deploy (3)
+- * - Tool (4)
+  * - Admin (7)
++ * （Code×4 / Tool×4 死键已随 2026-10-08-rbac-dead-permissions-cleanup 删除）
+  * - PPM (18, change 2026-07-20-ppm-permission-simplify task-04 精简：删 16 个 write/delete/export/assign 摆设动作；problem-change:read 镜像曾漏补)
+  * - 菜单读权限 + 菜单管理门控 (5, 2026-09-18-web-menu-management task-01 新增)
+  */
+@@ -29,8 +28,6 @@ const BACKEND_PERMISSION_KEYS = [
+   // Platform (8, ql-004 新增 3 个管理子菜单 admin + ql-005 新增 git_identity:admin
+   // + 2026-07-29-sidebar-menu-restructure 新增 llm_provider:read)
+   "platform:admin",
+-  "platform:billing",
+-  "platform:audit:read",
+   "settings:admin",
+   "api_key:admin",
+   "runtime:admin",
+@@ -43,7 +40,6 @@ const BACKEND_PERMISSION_KEYS = [
+   "workspace:member:manage",
+   // Workspace 子菜单独立 read (7, 2026-06-18 ql-003 新增 6 + 2026-09-17
+   // knowledge-precipitation task-02 新增 knowledge:write——镜像曾漏补)
+-  "component:read",
+   "topology:read",
+   "scan-docs:read",
+   "runtime:read",
+@@ -53,32 +49,19 @@ const BACKEND_PERMISSION_KEYS = [
+   // Change (5)
+   "change:create",
+   "change:read",
+-  "change:update",
+   "change:approve",
+   "change:archive",
+-  // Task (6)
++  // Task (4, 2026-10-08-rbac-dead-permissions-cleanup 删 task:cancel/task:approve)
+   "task:read",
+   "task:create",
+   "task:assign",
+   "task:run_agent",
+-  "task:cancel",
+-  "task:approve",
+   // Daemon borrow (1, 2026-07-25-daemon-borrow-for-business task-03——镜像曾漏补)
+   "daemon:borrow",
+-  // Code (4)
+-  "code:read",
+-  "code:write",
+-  "code:review",
+-  "code:merge",
+   // Deploy (3)
+   "deploy:staging",
+   "deploy:production",
+   "deploy:rollback",
+-  // Tool (4)
+-  "tool:shell_exec",
+-  "tool:network",
+-  "tool:database",
+-  "tool:secret:read",
+   // Admin (7)
+   "user:read",
+   "user:write",
+@@ -251,13 +234,14 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     });
+   });
+ 
+-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 72", () => {
++  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 58", () => {
+     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
+     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
+-    // 69 (原) + 3 (2026-10-08-sessions-menu-permissions 对齐后端枚举补漏：
+-    // daemon:borrow / knowledge:write / ppm:problem-change:read) = 72
+-    expect(BACKEND_PERMISSION_KEYS.length).toBe(72);
+-    expect(valid.size).toBe(72);
++    // 72 (峰值) - 14 (2026-10-08-rbac-dead-permissions-cleanup 删除零端点
++    // 消费死键：code:*×4 / tool:*×4 / task:cancel / task:approve /
++    // platform:audit:read / platform:billing / component:read / change:update) = 58
++    expect(BACKEND_PERMISSION_KEYS.length).toBe(58);
++    expect(valid.size).toBe(58);
+ 
+     MENU_PERMISSION_GROUPS.forEach((g) => {
+       g.permissions.forEach((p) => {
+@@ -266,9 +250,11 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     });
+   });
+ 
+-  it("6 个子菜单有独立 read 权限（不再共用 workspace:read）", () => {
++  it("5 个子菜单有独立 read 权限（不再共用 workspace:read）", () => {
++    // 2026-10-08-rbac-dead-permissions-cleanup：components 的 component:read
++    // 死键删除后卡片收敛为 [workspace:read]（组件列表端点鉴权即
++    // workspace:read），退出本清单——独立 read key 剩 5 个。
+     const EXPECTED: Record<string, string> = {
+-      components: "component:read",
+       topology: "topology:read",
+       "scan-docs": "scan-docs:read",
+       runtime: "runtime:read",
+@@ -280,11 +266,8 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+       expect(g, `missing menu ${menuKey}`).toBeDefined();
+       const keys = g!.permissions.map((p) => p.key);
+       expect(keys).toContain(permKey);
+-      // 不应再用 workspace:read 兜底——components 例外（2026-10-08 补齐页面列表
+-      // 端点实际所需 workspace:read，非兜底而是必需）。
+-      if (menuKey !== "components") {
+-        expect(keys).not.toContain("workspace:read");
+-      }
++      // 不应再用 workspace:read 兜底
++      expect(keys).not.toContain("workspace:read");
+     });
+   });
+ 
+@@ -458,14 +441,14 @@ describe("用户列明菜单的 permissions 精确匹配", () => {
+     expect(keysOf("roles")).toEqual(["role:read", "role:write"].sort());
+   });
+ 
+-  it("changes = change:create/read/update/approve/archive + task:read（2026-10-08 补齐变更任务子页所需）", () => {
++  it("changes = change:create/read/approve/archive + task:read/create/assign（2026-10-08 清理版：change:update 死键删除，活权限 task:create/assign 挂卡）", () => {
+     expect(keysOf("changes")).toEqual(
+-      ["change:approve", "change:archive", "change:create", "change:read", "change:update", "task:read"].sort(),
++      ["change:approve", "change:archive", "change:create", "change:read", "task:read", "task:create", "task:assign"].sort(),
+     );
+   });
+ 
+-  it("audit = platform:audit:read + change:read（2026-10-08 补齐：工作区审计日志端点鉴权 change:read，platform:audit:read 零端点消费保留）", () => {
+-    expect(keysOf("audit")).toEqual(["change:read", "platform:audit:read"].sort());
++  it("audit = change:read（2026-10-08 清理版：platform:audit:read 死键删除，审计日志端点鉴权 change:read）", () => {
++    expect(keysOf("audit")).toEqual(["change:read"]);
+   });
+ 
+   it("releases = deploy:staging/production/rollback", () => {
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index f2498cf2c..dcfcb46f3 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -1873,9 +1873,10 @@ export interface paths {
+          * Get Change Patch File
+          * @description 归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。
+          *
+-         *     卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch`` 并切出该
+-         *     文件的 diff 段——冻结在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，
+-         *     两者不可互替）。``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
++         *     卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch``（缺件回退
++         *     ``scope-audit.patch``——厚流程归档只落快照留档）并切出该文件的 diff 段——冻结
++         *     在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，两者不可互替）。
++         *     ``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
+          *     绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
+          *     不抛 404（读不到留档是展示面降级，不是资源不存在）。
+          */
+@@ -13874,8 +13875,9 @@ export interface components {
+          * ChangePatchFileRead
+          * @description 归档留档单文件 diff 切片（GET /changes/{cid}/assets/patch-file）。
+          *
+-         *     展示面 fail-open：``change.patch`` 缺失、文件不在 patch 内、切片超上限一律以
+-         *     ``note``/``truncated`` 说明而非报错（读不到留档不是变更详情的错误面）。
++         *     展示面 fail-open：``change.patch``（缺件回退 ``scope-audit.patch``）缺失、
++         *     文件不在留档内、切片超上限一律以 ``note``/``truncated`` 说明而非报错
++         *     （读不到留档不是变更详情的错误面）。
+          */
+         ChangePatchFileRead: {
+             /** Path */
+@@ -13892,11 +13894,12 @@ export interface components {
+         };
+         /**
+          * ChangePatchMeta
+-         * @description patch 留档统计（change-patch.json 的 totals + files 投影；无留档 → 整体 None）。
++         * @description patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。
+          *
+-         *     ``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 是同一 JSON
+-         *     ``files`` 数组的清单投影（2026-09-25-change-detail-assets-usability / FR-04 起
+-         *     供卡面列出具体改动面），超上限时 ``files_truncated=True`` 显式标注。
++         *     ``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 的清单投影
++         *     按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面
++         *     列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退
++         *     形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。
+          */
+         ChangePatchMeta: {
+             /** Files */
+@@ -20041,7 +20044,7 @@ export interface components {
+          * Permission
+          * @enum {string}
+          */
+-        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "daemon:borrow" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
++        Permission: "platform:admin" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "daemon:borrow" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
+         /**
+          * PermissionResponseRead
+          * @description REST response body for POST /sessions/{id}/permissions/{req}/response.
+diff --git a/frontend/src/lib/menu-permissions.ts b/frontend/src/lib/menu-permissions.ts
+index f1f86c836..e9781412d 100644
+--- a/frontend/src/lib/menu-permissions.ts
++++ b/frontend/src/lib/menu-permissions.ts
+@@ -119,12 +119,10 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     matchPattern: "/components",
+     // 2026-10-08-menu-permissions-page-audit：补 workspace:read——组件列表端点
+     // GET /api/workspaces/{ws}/components（workspace/router.py list_components）
+-    // 鉴权 workspace:read，此前只挂 component:read 的用户看得到菜单但页面 403；
+-    // component:read 无后端端点消费，保留为菜单门控主 key。
+-    permissions: [
+-      { key: "component:read", name: "组件查看" },
+-      { key: "workspace:read", name: "工作区查看" },
+-    ],
++    // 鉴权 workspace:read。
++    // 2026-10-08-rbac-dead-permissions-cleanup：component:read 死键删除（零端点
++    // 消费，ql-003 接线意图从未落地），卡片收敛为页面真实所需。
++    permissions: [{ key: "workspace:read", name: "组件查看" }],
+   },
+   {
+     section: "workspace",
+@@ -145,13 +143,18 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     // 2026-10-08-menu-permissions-page-audit：补 task:read——变更任务列表/看板/
+     // 详情子页（GET /api/workspaces/{ws}/tasks/{tid}、/changes/{cid}/tasks/board、
+     // /tasks/reparse，task/router.py 全部 require TASK_READ）。
++    // 2026-10-08-rbac-dead-permissions-cleanup：change:update 死键删除（变更
++    // 编辑端点走 CHANGE_CREATE + owner 判定，零消费）；补活权限 task:create
++    // （POST /api/workspaces/{ws}/tasks）与 task:assign（POST .../tasks/{tid}/
++    // transition）——有真实端点但无页面按钮（API 面），挂本卡使其可配。
+     permissions: [
+       { key: "change:create", name: "变更创建" },
+       { key: "change:read", name: "变更查看" },
+-      { key: "change:update", name: "变更更新" },
+       { key: "change:approve", name: "变更审批" },
+       { key: "change:archive", name: "变更归档" },
+       { key: "task:read", name: "任务查看" },
++      { key: "task:create", name: "任务创建" },
++      { key: "task:assign", name: "任务转派" },
+     ],
+   },
+   {
+@@ -354,10 +357,10 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     // 2026-10-08-menu-permissions-page-audit：补 task:read + task:run_agent——
+     // 审批页除批/拒（tool_gateway change:approve）外还拉 agent 会话列表与待处理
+     // 对话框（agent/router /workspaces/{ws}/agent-sessions、/dialogs 均 TASK_READ）
+-    // 与会话权限面板（daemon 会话端点族 task:run_agent）。task:approve 无后端
+-    // 端点消费，保留存量不删。
++    // 与会话权限面板（daemon 会话端点族 task:run_agent）。
++    // 2026-10-08-rbac-dead-permissions-cleanup：task:approve 死键删除（零端点
++    // 消费——审批动作实际鉴权 change:approve）。
+     permissions: [
+-      { key: "task:approve", name: "任务审批" },
+       { key: "change:approve", name: "变更审批" },
+       { key: "task:read", name: "任务查看" },
+       { key: "task:run_agent", name: "会话运行" },
+@@ -372,17 +375,11 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     matchPattern: "/audit",
+     // 2026-10-08-menu-permissions-page-audit：补 change:read——工作区审计日志
+     // GET /api/workspaces/{ws}/audit（workflow/router.py list_audit_logs）鉴权
+-    // CHANGE_READ，此前持 platform:audit:read 看得到菜单但页面 403、持 change:read
+-    // 打得开页面却看不到菜单（双向错位）。platform:audit:read 无后端端点消费
+-    // （死目录 key），保留存量配置不删。
+-    permissions: [
+-      {
+-        key: "platform:audit:read",
+-        name: "平台审计读取",
+-        description: "跨工作空间的平台级审计日志访问",
+-      },
+-      { key: "change:read", name: "变更查看" },
+-    ],
++    // CHANGE_READ，此前持 platform:audit:read 看得到菜单但页面 403、持
++    // change:read 打得开页面却看不到菜单（双向错位）。
++    // 2026-10-08-rbac-dead-permissions-cleanup：platform:audit:read 死键删除
++    // （全后端零端点消费），卡片收敛为页面真实所需。
++    permissions: [{ key: "change:read", name: "审计查看" }],
+   },
+   {
+     section: "governance",
+diff --git a/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/design.md b/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/design.md
+new file mode 100644
+index 000000000..488ed7c4c
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/design.md
+@@ -0,0 +1,67 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:31:02.682Z
++---
++# 设计记录（Design Record）— 2026-10-08-rbac-dead-permissions-cleanup
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++问题：全站菜单权限对账（2026-10-08 前两变更）后，后端 Permission 目录仍有 14 个零端点消费的死权限——code:*×4 与 tool:*×4 是 2026-05-25 bootstrap 参考设计的代码评审/工具门控残留（平台演进为 git 网关与会话 canUseTool 审批，从未接线）；task:cancel / task:approve / platform:audit:read / platform:billing / component:read / change:update 属意图未接线或功能从未建。其中 4 个挂在菜单卡上误导配置（task:approve / platform:audit:read / component:read / change:update），其余不在任何卡上配不了也无处可用。另有 task:create / task:assign 两个活权限（POST /tasks 与 transition 端点消费）不挂卡配不了。
++
++方案：枚举删 14 键（72→58）+ 前端 4 菜单卡同步（删死键；changes 卡补 task:create/task:assign 使活权限可配）+ 种子迁移 SYSTEM_ROLES 精简（新环境不再播种死行）+ 新增存量清理迁移（删 role_permissions 死行，含从未入枚举的 component:write/admin 共 16 字符串；downgrade 对称回植 platform_admin，仿 20260720_drop_ppm_op 先例）+ pnpm gen:types 重生成契约。保留设计性纯门控键（llm_provider:read / skill:read / mcp:read / agent_profile:read / agent_session:read）与 PPM 全部键（已上线，D-002 悬空决策）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- 无端点增删、无鉴权行为变化（删除的键本就零消费，端点鉴权矩阵不动）。
++- OpenAPI 契约：Permission 联合 72→58（RoleCreate/RoleUpdate.permission_keys 校验域缩），api-types.ts 随 gen:types 重生成并连同 backend/openapi.json 提交。
++- 角色读写：写路径 list[Permission] 校验照旧（删键后旧客户端发死键 422，未上线可接受）；读路径 raw 字符串照旧，存量死行由迁移清除。
++- 前端菜单卡：components→[workspace:read]；changes→[change:create/read/approve/archive + task:read/create/assign]；approvals→[change:approve, task:read, task:run_agent]；audit→[change:read]。可见性随卡片收窄（死键持有者本就打不开页面）。
++- DB：role_permissions 删 16 个死字符串的全部行；roles 本体不动。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   不适用——静态枚举 + 一次性迁移，无事件/流输入。权限缓存（permission_cache）在部署重启后重建，迁移先于流量。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   迁移 DELETE 为幂等单语句，多实例部署按 alembic 单写者惯例串行；运行期无并发写面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   安全——删除的键零消费，进行中请求不依赖；迁移中断可重跑（DELETE 幂等）。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不会——role_permissions 为平台级表，删除按 permission 字符串全局收敛，无工作区分叉；sillyhub-daemon 零引用（已核）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：线上（crrcdt）存量角色持有死键的行被删——零功能影响（无端点消费），角色列表显示权限数变少属预期收敛；PPM 角色不涉任何删除键（PPM 18 键全保留）。次要风险：种子迁移编辑只影响新环境（已应用环境不重跑），存量靠清理迁移收敛，两路径已在 ppm-permission-simplify 先例验证。
++
++试过但放弃的方案：① 给 code:* / tool:* 接消费端点（代码评审流 / 工具 RBAC 门控）——放弃：属新功能立项不是清理，且会话 canUseTool 审批已是现行机制；② 只隐藏不删（卡片摘掉、枚举保留）——放弃：枚举残留仍进 OpenAPI 契约与角色校验域，"配了没用"的混乱只是换个形态；③ 顺带删 PermissionGroup（后端零消费）——放弃：与权限键删除耦合扩散测试面，留待独立清理。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | backend/app/modules/auth/permissions.py | 删 14 成员 + AUDIT 组成员与特判 + 注释 |
++| 修改 | backend/migrations/versions/202605280900_create_auth_and_rbac.py | SYSTEM_ROLES 播种清单精简 |
++| 新增 | backend/migrations/versions/202610081000_drop_dead_rbac_permissions.py | 存量死行清理（16 字符串），downgrade 回植 |
++| 修改 | backend/tests/modules/auth/test_permissions.py | 计数 58、组成员 6、参数化与字面量用例删项 |
++| 修改 | backend/tests/modules/admin/test_roles_router.py | CODE_REVIEW/CODE_WRITE 夹具换存活键 |
++| 修改 | backend/tests/modules/workspace/test_members_service_business_member.py | CODE_WRITE 负断言换存活键 |
++| 修改 | backend/tests/modules/auth/test_business_member_role.py | "code:write" not in 断言换存活键 |
++| 修改 | backend/tests/modules/test_permission_cache.py | 假数据 code:read 换存活键 |
++| 修改 | frontend/src/lib/menu-permissions.ts | 4 菜单卡同步 |
++| 修改 | frontend/src/lib/__tests__/menu-permissions.test.ts | 镜像 58 + 卡片断言 + 6→5 子菜单 |
++| 修改 | frontend/src/app/(dashboard)/admin/roles/page.tsx | 标签映射删 3 死键 fallback |
++| 生成 | frontend/src/lib/api-types.ts + backend/openapi.json | pnpm gen:types |
++| 修改 | .sillyspec/docs/frontend/modules/lib-menu-permissions.md | 模块卡同步 |
+diff --git a/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/proposal.md b/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/proposal.md
+new file mode 100644
+index 000000000..3ef33d956
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/proposal.md
+@@ -0,0 +1,33 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:31:02.682Z
++---
++# 提案书（Proposal）— 2026-10-08-rbac-dead-permissions-cleanup
++
++## 动机
++
++任务原话转写：RBAC 目录清理：14 个零端点消费的死权限（code:*×4、tool:*×4、task:cancel、task:approve、platform:audit:read、platform:billing、component:read、change:update）从枚举/菜单卡/种子删除，task:create 与 task:assign（有真实端点）挂到变更中心卡使其可配；新增迁移清理存量 role_permissions 死行（含从未入枚举的 component:write/admin）。
++
++成功标准：
++- 后端 Permission 枚举 72→58，删除的 14 键在 backend/app 与 sillyhub-daemon 零非测试引用（已核）
++- 前端 4 菜单卡同步（components→仅 workspace:read、changes 删 change:update 加 task:create/assign、approvals 删 task:approve、audit→仅 change:read），角色页标签映射同步
++- 种子迁移 SYSTEM_ROLES 精简 + 新增存量清理迁移（downgrade 对称回植 platform_admin，仿 20260720_drop_ppm_op 先例）
++- pnpm gen:types 重生成 api-types（Permission 联合 58）并与 openapi.json 一并提交
++- 后端 auth/roles 相关测试与前端 menu-permissions 测试同步更新全绿，ruff/mypy/tsc/eslint 零新增报错
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. 后端 Permission 枚举 72→58，删除的 14 键在 backend/app 与 sillyhub-daemon 零非测试引用（已核）
++2. 前端 4 菜单卡同步（components→仅 workspace:read、changes 删 change:update 加 task:create/assign、approvals 删 task:approve、audit→仅 change:read），角色页标签映射同步
++3. 种子迁移 SYSTEM_ROLES 精简 + 新增存量清理迁移（downgrade 对称回植 platform_admin，仿 20260720_drop_ppm_op 先例）
++4. pnpm gen:types 重生成 api-types（Permission 联合 58）并与 openapi.json 一并提交
++5. 后端 auth/roles 相关测试与前端 menu-permissions 测试同步更新全绿，ruff/mypy/tsc/eslint 零新增报错
++
++## 成功标准（可验证）
++
++1. 后端 Permission 枚举 72→58，删除的 14 键在 backend/app 与 sillyhub-daemon 零非测试引用（已核）
++2. 前端 4 菜单卡同步（components→仅 workspace:read、changes 删 change:update 加 task:create/assign、approvals 删 task:approve、audit→仅 change:read），角色页标签映射同步
++3. 种子迁移 SYSTEM_ROLES 精简 + 新增存量清理迁移（downgrade 对称回植 platform_admin，仿 20260720_drop_ppm_op 先例）
++4. pnpm gen:types 重生成 api-types（Permission 联合 58）并与 openapi.json 一并提交
++5. 后端 auth/roles 相关测试与前端 menu-permissions 测试同步更新全绿，ruff/mypy/tsc/eslint 零新增报错
+diff --git a/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/requirements.md b/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/requirements.md
+new file mode 100644
+index 000000000..25e8214b1
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/requirements.md
+@@ -0,0 +1,65 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:31:02.682Z
++---
++# 需求规格（Requirements）— 2026-10-08-rbac-dead-permissions-cleanup
++
++## 功能需求
++
++### FR-01: 删除 14 个零端点消费的死权限（枚举 72→58）
++
++- backend Permission 枚举必须删除以下 14 个成员（均已核实 backend/app 与 sillyhub-daemon 零非测试引用）：code:read / code:write / code:review / code:merge、tool:shell_exec / tool:network / tool:database / tool:secret:read、task:cancel、task:approve、platform:audit:read、platform:billing、component:read、change:update。PermissionGroup.AUDIT 成员及其特判分支必须随 platform:audit:read 一并删除（组成员 7→6）。设计性纯门控键（llm_provider:read / skill:read / mcp:read / agent_profile:read / agent_session:read）与 PPM 全部 18 键必须保留。
++
++#### 场景：主路径
++
++- Given 变更后枚举
++- When len(list(Permission))
++- Then === 58
++
++### FR-02: 活权限 task:create / task:assign 挂变更中心卡
++
++- task:create（POST /api/workspaces/{ws}/tasks）与 task:assign（POST .../tasks/{tid}/transition）有真实端点消费，必须挂到 changes 菜单卡使其可配（注释注明 API 面、暂无页面按钮）。
++
++#### 场景：主路径
++
++- Given 角色管理勾选器
++- When 打开「变更中心」卡
++- Then 可勾选 task:create / task:assign
++
++### FR-03: 存量数据清理迁移（16 死字符串）
++
++- 新增迁移必须从 role_permissions 删除 16 个字符串的全量行（FR-01 的 14 键 + 从未入枚举的 component:write / component:admin 种子残留）；downgrade 必须对称回植 platform_admin（幂等，仿 20260720_drop_ppm_op 先例）；种子迁移 202605280900 的 SYSTEM_ROLES 必须同步精简使新环境不再播种死行。roles 本体与其它权限行禁止变动。
++
++#### 场景：存量收敛
++
++- Given 已部署环境 role_permissions 含 code:read 行
++- When 迁移 upgrade
++- Then 该行删除、同角色其它权限保留；downgrade 后 platform_admin 持有全部 16 键各 1 行
++
++### FR-04: 前端菜单卡与角色页同步
++
++- menu-permissions.ts 四卡必须同步：components→[workspace:read]、changes→[change:create/read/approve/archive + task:read + task:create + task:assign]（删 change:update）、approvals 删 task:approve、audit→[change:read]（删 platform:audit:read）；admin/roles 页 PERMISSION_NAME_MAP 必须删除 platform:billing / component:admin / component:write 三条 fallback；pnpm gen:types 必须重生成 api-types.ts（Permission 联合 58）并连同 backend/openapi.json 提交。
++
++#### 场景：主路径
++
++- Given 前端构建
++- When 编译 menu-permissions.ts
++- Then 删除键不再被引用、类型检查通过
++
++### FR-05: 测试同步全绿 + 静态检查零新增
++
++- 后端 test_permissions.py（计数/组成员/参数化/字面量）、test_roles_router.py、test_members_service_business_member.py、test_business_member_role.py、test_permission_cache.py 的死键夹具必须换存活键；前端镜像常量 72→58 与卡片断言必须同步。相关测试必须全绿；ruff / mypy / tsc / eslint（改动文件）零新增报错。禁止跑全量测试。
++
++#### 场景：主路径
++
++- Given 全部修改完成
++- When 跑上述前后端测试与静态检查
++- Then 全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/tests/modules/auth/test_permissions.py「test_permission_count_is_58」+「test_permission_group_has_six_members」
++FR-02: frontend/src/lib/__tests__/menu-permissions.test.ts「changes = change:create/read/approve/archive + task:read/create/assign（2026-10-08 清理版）」
++FR-03: backend/tests/modules/auth/test_permissions.py「test_drop_dead_rbac_migration_upgrade_deletes_and_downgrade_replants」（新迁移 SQLite 回放，仿 knowledge_write 迁移测试范式）
++FR-04: frontend/src/lib/__tests__/menu-permissions.test.ts「所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 58」+ tsc 编译面
++FR-05: backend/tests/modules/auth/test_permissions.py 全文件 + frontend/src/lib/__tests__/menu-permissions.test.ts 全文件
+diff --git a/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/tasks.md b/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/tasks.md
+new file mode 100644
+index 000000000..f0b783714
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:31:02.682Z
++---
++# 任务注册表（Tasks）— 2026-10-08-rbac-dead-permissions-cleanup
++
++- [x] task-01: 后端 Permission 枚举 72→58（permissions.py 删 14 死成员 + AUDIT 组与特判 + docstring；全量扫描脚本核实 backend/app 与 sillyhub-daemon 零非测试引用）——验证：test_permissions.py「count_is_58」「dead_permissions_removed」绿
++- [x] task-02: 前端 4 菜单卡同步（components→[workspace:read]、changes 删 change:update 加 task:create/assign、approvals 删 task:approve、audit→[change:read]）+ 角色页标签映射删 3 死键 fallback——验证：menu-permissions.test.ts changes/audit/components 用例绿
++- [x] task-03: 种子迁移 202605280900 SYSTEM_ROLES 精简 + 新迁移 20261008100000（16 死字符串 DELETE；downgrade 对称回植 platform_admin，sa.Uuid(as_uuid=False) 兼容 SQLite 回放）——验证：test_drop_dead_rbac_migration_* 回放测试绿
++- [x] task-04: pnpm gen:types 重生成（api-types Permission 联合 58、死键零残留、openapi.json 同步刷新）——验证：node 解析联合数 === 58 且 contains 死键 === false
++- [x] task-05: 测试同步全绿（后端 permissions 47 + business_member/permission_cache/roles_router/business_member_members 共 92 过；前端 96 过）+ ruff/ruff format/mypy 993 文件 0 issue + tsc 零输出 + eslint 0 error——验证：本行即记录

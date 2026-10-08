@@ -2238,3 +2238,98 @@
 - 场景：默认场景 — Given 迁移执行；Then [model] + [default_fallback_model] + 4 槽值去重折算成列表（多模态标 auto、角色归并、one_m 透传、display
 全文：.sillyspec/changes/archive/2026-10-06-provider-model-list/requirements.md#FR-05
 最近确认：965f15b80
+
+## FR-lib-api-106 删除 14 个零端点消费的死权限（枚举 72→58）
+变更：2026-10-08-rbac-dead-permissions-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-rbac-dead-permissions-cleanup/requirements.md#FR-01
+最近确认：765f4e7b684aa63c7d98653aa6b3e89af1057321
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-rbac-dead-permissions-cleanup:flow:测试绑定FR-01
+  tests: backend/tests/modules/auth/test_permissions.py「test_permission_count_is_58」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-rbac-dead-permissions-cleanup
+  status: active
+
+## FR-lib-api-107 活权限 task:create / task:assign 挂变更中心卡
+变更：2026-10-08-rbac-dead-permissions-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-rbac-dead-permissions-cleanup/requirements.md#FR-02
+最近确认：765f4e7b684aa63c7d98653aa6b3e89af1057321
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-rbac-dead-permissions-cleanup:flow:测试绑定FR-02
+  tests: frontend/src/lib/__tests__/menu-permissions.test.ts「changes = change:create/read/approve/archive + task:read/create/assign（2026-10-08 清理版）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-rbac-dead-permissions-cleanup
+  status: active
+
+## FR-lib-api-108 存量数据清理迁移（16 死字符串）
+变更：2026-10-08-rbac-dead-permissions-cleanup
+状态：active
+摘要：存量收敛
+全文：.sillyspec/changes/archive/2026-10-08-rbac-dead-permissions-cleanup/requirements.md#FR-03
+最近确认：765f4e7b684aa63c7d98653aa6b3e89af1057321
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-rbac-dead-permissions-cleanup:flow:测试绑定FR-03
+  tests: backend/tests/modules/auth/test_permissions.py「test_drop_dead_rbac_migration_upgrade_deletes_and_downgrade_replants」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-rbac-dead-permissions-cleanup
+  status: active
+
+## FR-lib-api-109 前端菜单卡与角色页同步
+变更：2026-10-08-rbac-dead-permissions-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-rbac-dead-permissions-cleanup/requirements.md#FR-04
+最近确认：765f4e7b684aa63c7d98653aa6b3e89af1057321
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-rbac-dead-permissions-cleanup:flow:测试绑定FR-04
+  tests: frontend/src/lib/__tests__/menu-permissions.test.ts「所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 58」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-rbac-dead-permissions-cleanup
+  status: active
+
+## FR-lib-api-110 测试同步全绿 + 静态检查零新增
+变更：2026-10-08-rbac-dead-permissions-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-rbac-dead-permissions-cleanup/requirements.md#FR-05
+最近确认：765f4e7b684aa63c7d98653aa6b3e89af1057321
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-08-rbac-dead-permissions-cleanup:flow:测试绑定FR-05
+  tests: backend/tests/modules/auth/test_permissions.py | frontend/src/lib/__tests__/menu-permissions.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-08-rbac-dead-permissions-cleanup
+  status: active
