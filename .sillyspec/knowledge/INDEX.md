@@ -192,3 +192,4 @@
 - auto-backend|backend|FR|需求|承接 → [fr/auto-backend.md](fr/auto-backend.md)
 - auto-zcode|zcode|FR|需求|承接 → [fr/auto-zcode.md](fr/auto-zcode.md)
 - auto-deploy|deploy|FR|需求|承接 → [fr/auto-deploy.md](fr/auto-deploy.md)
+- auto-frontend|frontend|FR|需求|承接 → [fr/auto-frontend.md](fr/auto-frontend.md)

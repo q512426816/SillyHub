@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-turn-nav-hover-mark",
+  "reviewer": "inline-self（环境无已注册子代理，主会话按任务书检查单代行；冻结件 change.patch 与工作区实态已逐块核对）",
+  "verdict": "PASS",
+  "reviewedAgainst": "45240ef8baaa17b5f1cb4c03bc262ee0a4244a9e",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "expanded 进依赖使 pin 展开瞬间补滚一次 active 行——触发面扩展已在 design 声明，裁可接受",
+      "evidence": "turn-nav-list.tsx 滚动联动 effect 依赖 [activeTurnKey, hoverTurnKey, expanded]：pin 展开（鼠标在把手无指向）时 focusKey 落到 activeTurnKey，滚 active 刻度+行各一次。FR-03 承诺『不抢既有 active 联动语义之外的新滚动』——本次未新增滚动方式/参数（仍 block:nearest 同选择器），仅扩展既有联动的触发时机，且为『悬停展开瞬间 hoverTurnKey 已就位但自身未变需补跑』的必要代价，design.md 已声明该边界。",
+      "location": "frontend/src/components/sessions/turn-nav-list.tsx:262-283"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——mouseenter 同步时序派发、无异步数据参与；React 同 tick 多 setState 末值生效，指向恒为最后进入元素（design 作答与代码一致）",
+    "并发": "ok——hoverTurnKey 单组件实例本地 useState，无跨组件共享与外部存储，无并发写面",
+    "切换": "ok——会话切换 entries 更换时残留旧 key 无命中行（data-hovered 渲染按 key 相等判定）自然无标记；timer 挂既有 clearTimers 卸载清理链路",
+    "作用域": "ok——纯组件内部 state 不外溢，page/dialog 多实例互不串台；测试双 render 实例用例佐证"
+  },
+  "reviewedAt": "2026-10-08T03:42:10.000Z"
+}

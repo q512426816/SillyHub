@@ -1,0 +1,490 @@
+diff --git a/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/flow-state.yaml b/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/flow-state.yaml
+new file mode 100644
+index 000000000..458c855af
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/flow-state.yaml
+@@ -0,0 +1,22 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: |-
++  轮次导航窄轨横条悬停展开浮层后，浮层未标记鼠标当前指向的轮次，用户无法建立横条与轮次的对应关系（密集刻度时完全靠猜），需在浮层内实时标记指向行并与 active 高亮区分。
++  成功标准：
++  - 悬停窄轨刻度展开浮层后，浮层内当前指向的轮次行有可见指向标记（与 activeTurnKey 当前轮高亮视觉区分）
++  - 指向标记随鼠标在刻度间/浮层行间移动实时跟随更新
++  - 浮层内指向行超出可视区时自动滚入（block:nearest，不抢既有 active 联动语义之外的新滚动）
++  - 鼠标移开组件后指向标记清除，既有展开/收起/pin/跳转/aria 行为零回归
++  - turn-nav-list 组件单测覆盖上述新行为且既有用例全绿
++autopilot: true
++baseline_commit: 85c8704a7625dafd3a4092285ea9d629d4b3eb6a
++updatedAt: '2026-10-08T03:22:46.844Z'
++baseline_sha256: 2d723132fd9cc21c54c59437a4f3194a2ac42ecbc4201d838a706d81241dc90e
++spec_approved: true
++spec_approved_at: '2026-10-08T03:22:46.346Z'
++spec_approved_by: anon@DESKTOP-HJ0AM09
++
+diff --git a/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx b/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
+index 3eb70c6a7..c525179b3 100644
+--- a/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
++++ b/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
+@@ -353,3 +353,115 @@ describe("TurnNavList 长列表防卡", () => {
+     expect(longRow.style.containIntrinsicSize).toBe("44px");
+   });
+ });
++
++// ── 5. 浮层指向标记（2026-10-08-turn-nav-hover-mark：悬停横条 → 浮层内
++//    标记指向轮，与 active 高亮区分；实时跟随 / 滚入 / 收起点清除） ────────
++
++describe("TurnNavList 浮层指向标记", () => {
++  it("悬停刻度：浮层指向行 data-hovered + ring 描边；与 active 当前轮高亮视觉区分", () => {
++    // active=第1轮（底色高亮 + aria-current），指向第2轮——两语义并存不互覆。
++    const { container } = renderNav(FIXTURES, { activeTurnKey: "run-1" });
++    pinOpen(container);
++    fireEvent.mouseEnter(getTicks(container)[1]!);
++    const rows = getFlyoutRows(container);
++    const hovered = rows[1]!;
++    const activeRow = rows[0]!;
++    expect(hovered).toHaveAttribute("data-hovered", "true");
++    expect(hovered.className).toContain("ring-inset");
++    expect(activeRow).not.toHaveAttribute("data-hovered");
++    // active 行保持既有底色高亮与 aria-current（描边=我在指它，底色=聊天停在哪轮；
++    // 断 ring-inset 而非 ring-brand-400——后者是 focus-visible:ring-brand-400 子串，
++    // 全部行常驻，不唯一）。
++    expect(activeRow).toHaveAttribute("aria-current", "true");
++    expect(activeRow.className).toContain("bg-muted/60");
++    expect(activeRow.className).not.toContain("ring-inset");
++  });
++
++  it("指向实时跟随：刻度间滑动切换；鼠标移入浮层行同步指向", () => {
++    const { container } = renderNav(FIXTURES);
++    pinOpen(container);
++    const ticks = getTicks(container);
++    fireEvent.mouseEnter(ticks[1]!);
++    fireEvent.mouseEnter(ticks[2]!); // 沿刻度滑到第 3 轮
++    let rows = getFlyoutRows(container);
++    expect(rows[2]).toHaveAttribute("data-hovered", "true");
++    expect(rows[1]).not.toHaveAttribute("data-hovered");
++
++    // 鼠标移入浮层第 1 行 → 指向同步（单一指向态，不并存双标记）。
++    fireEvent.mouseEnter(rows[0]!);
++    rows = getFlyoutRows(container);
++    expect(rows[0]).toHaveAttribute("data-hovered", "true");
++    expect(rows[2]).not.toHaveAttribute("data-hovered");
++  });
++
++  it("指向行滚入可视区（指向优先 scrollIntoView block:nearest）；指向清除后回落 active 联动", () => {
++    const scrollSpy = Element.prototype.scrollIntoView as Mock;
++    const { container } = renderNav(FIXTURES, { activeTurnKey: "run-1" });
++    pinOpen(container);
++    scrollSpy.mockClear();
++    fireEvent.mouseEnter(getTicks(container)[2]!); // 指向 run-3
++    // run-3 命中窄轨刻度 + 浮层行两个元素，均 block:nearest 滚入。
++    expect(scrollSpy).toHaveBeenCalledTimes(2);
++    expect(scrollSpy).toHaveBeenCalledWith({ block: "nearest" });
++
++    // 指向清除（移开组件防抖到点）→ 回落 active（run-1）联动：pin 锁定浮层保持
++    // 展开（既有语义），run-1 刻度 + 浮层行两元素均 block:nearest 滚入。
++    scrollSpy.mockClear();
++    fireEvent.mouseLeave(
++      within(container).getByTestId("turn-nav-column"),
++    );
++    act(() => vi.advanceTimersByTime(250));
++    expect(scrollSpy).toHaveBeenCalledTimes(2);
++    expect(scrollSpy).toHaveBeenCalledWith({ block: "nearest" });
++    expect(scrollSpy.mock.instances[0]).toBe(getTicks(container)[0]);
++  });
++
++  it("移开组件 250ms 到点清指向：浮层收起且重展开无残留标记", () => {
++    const { container } = renderNav(FIXTURES);
++    const column = within(container).getByTestId("turn-nav-column");
++    fireEvent.mouseEnter(column);
++    act(() => vi.advanceTimersByTime(350)); // 悬停展开
++    fireEvent.mouseEnter(getTicks(container)[1]!);
++    expect(getFlyoutRows(container)[1]).toHaveAttribute("data-hovered", "true");
++
++    fireEvent.mouseLeave(column);
++    act(() => vi.advanceTimersByTime(250)); // 收起 + 清指向
++    expect(within(container).queryByTestId("turn-nav-flyout")).toBeNull();
++    pinOpen(container); // 重新展开（pin）无残留
++    for (const row of getFlyoutRows(container)) {
++      expect(row).not.toHaveAttribute("data-hovered");
++    }
++  });
++
++  it("行跳转收起与外部 pointerdown 收起同步清指向", () => {
++    // 悬停展开态点行：非 pin 选完即收，指向一并清。
++    const a = renderNav(FIXTURES);
++    const colA = within(a.container).getByTestId("turn-nav-column");
++    fireEvent.mouseEnter(colA);
++    act(() => vi.advanceTimersByTime(350));
++    fireEvent.mouseEnter(getTicks(a.container)[1]!);
++    fireEvent.click(getFlyoutRows(a.container)[1]!);
++    expect(
++      within(a.container).queryByTestId("turn-nav-flyout"),
++    ).toBeNull();
++    pinOpen(a.container);
++    for (const row of getFlyoutRows(a.container)) {
++      expect(row).not.toHaveAttribute("data-hovered");
++    }
++    a.unmount();
++
++    // pin 展开态：指向后点组件外部收起，指向一并清。
++    const b = renderNav(FIXTURES);
++    pinOpen(b.container);
++    fireEvent.mouseEnter(getTicks(b.container)[2]!);
++    expect(getFlyoutRows(b.container)[2]).toHaveAttribute("data-hovered", "true");
++    fireEvent.pointerDown(document.body);
++    expect(
++      within(b.container).queryByTestId("turn-nav-flyout"),
++    ).toBeNull();
++    pinOpen(b.container);
++    for (const row of getFlyoutRows(b.container)) {
++      expect(row).not.toHaveAttribute("data-hovered");
++    }
++  });
++});
+diff --git a/frontend/src/components/sessions/turn-nav-list.tsx b/frontend/src/components/sessions/turn-nav-list.tsx
+index 6ddfe543b..6bb6f5889 100644
+--- a/frontend/src/components/sessions/turn-nav-list.tsx
++++ b/frontend/src/components/sessions/turn-nav-list.tsx
+@@ -19,6 +19,12 @@
+  * 请求、不操作聊天区 DOM/滚动（active 联动仅滚自身轨内）。短会话 <3 轮整条隐藏
+  * （ql-20260909-005 既有口径）。颜色全走主题语义类（brand/muted-foreground 阶，
+  * 随 html data-theme 换肤），零硬编码；antd 不用。
++ *
++ * 2026-10-08-turn-nav-hover-mark：浮层指向标记——hoverTurnKey 本地视觉态记录
++ * 「鼠标当前指向的轮次」（窄轨刻度与浮层行 onMouseEnter 双源写入，最后进入者
++ * 生效），浮层内该行加 ring 描边（与 activeTurnKey 当前轮的底色高亮正交区分：
++ * 描边=我在指它，底色=聊天停在哪轮）；滚动联动指向优先（hover 清除回落 active）；
++ * 组件移开 250ms 收起、pin 切换、外部 pointerdown、行跳转四个收起点同步清指向。
+  */
+ 
+ import { useCallback, useEffect, useRef, useState } from "react";
+@@ -134,6 +140,10 @@ export default function TurnNavList({
+   /** 展开态：悬停（防抖）或 pin（把手点击锁定，触屏主通道）。 */
+   const [pinned, setPinned] = useState(false);
+   const [hoverOpen, setHoverOpen] = useState(false);
++  /** 浮层指向标记（2026-10-08-turn-nav-hover-mark）：鼠标当前指向的轮次 key——
++   *  窄轨刻度与浮层行 onMouseEnter 双源写入；四个收起点清除（见 handleLeave /
++   *  togglePin / 外部 pointerdown / handleRowJump）。纯视觉态，不影响跳转语义。 */
++  const [hoverTurnKey, setHoverTurnKey] = useState<string | null>(null);
+   const openTimerRef = useRef<number | null>(null);
+   const closeTimerRef = useRef<number | null>(null);
+ 
+@@ -163,6 +173,7 @@ export default function TurnNavList({
+         clearTimers();
+         setPinned(false);
+         setHoverOpen(false);
++        setHoverTurnKey(null);
+       }
+     };
+     document.addEventListener("pointerdown", onDocPointerDown);
+@@ -193,6 +204,8 @@ export default function TurnNavList({
+       closeTimerRef.current = window.setTimeout(() => {
+         closeTimerRef.current = null;
+         setHoverOpen(false);
++        // 鼠标已离开组件（防抖到点确认非路过间隙）——指向标记一并清除。
++        setHoverTurnKey(null);
+       }, CLOSE_DELAY_MS);
+     }
+   }, []);
+@@ -201,6 +214,7 @@ export default function TurnNavList({
+   const togglePin = useCallback(() => {
+     clearTimers();
+     setHoverOpen(false);
++    setHoverTurnKey(null);
+     setPinned((v) => !v);
+   }, [clearTimers]);
+ 
+@@ -210,6 +224,7 @@ export default function TurnNavList({
+       if (!pinned) {
+         clearTimers();
+         setHoverOpen(false);
++        setHoverTurnKey(null);
+       }
+       onJump(entry);
+     },
+@@ -229,17 +244,22 @@ export default function TurnNavList({
+       return;
+     }
+     const root = rootRef.current;
+-    if (!activeTurnKey || !root) return;
+-    // 评审 medium 修复：窄轨刻度与浮层行共用 [data-turn-key]——两者都滚入各自
+-    // 可视区（浮层展开时行随 active 联动，与行式列时代行为对齐）。
++    // 2026-10-08-turn-nav-hover-mark：指向优先——hoverTurnKey 存在时滚指向行
++    //（刻度 hover 触发展开后指向行滚入浮层可视区），清除后回落既有 active 联动。
++    // expanded 进依赖：悬停防抖展开的瞬间 hoverTurnKey 已就位但自身未变，补跑
++    // 一次把浮层内指向行滚入（pin 展开时同理滚一次 active 行，行为兼容）。
++    const focusKey = hoverTurnKey ?? activeTurnKey;
++    if (!focusKey || !root) return;
++    // 评审 medium 修复（2026-09-28）：窄轨刻度与浮层行共用 [data-turn-key]——两者都
++    // 滚入各自可视区（浮层展开时行随 active 联动，与行式列时代行为对齐）。
+     for (const row of root.querySelectorAll(
+-      `[data-turn-key="${CSS.escape(activeTurnKey)}"]`,
++      `[data-turn-key="${CSS.escape(focusKey)}"]`,
+     )) {
+       if (typeof row.scrollIntoView === "function") {
+         row.scrollIntoView({ block: "nearest" });
+       }
+     }
+-  }, [activeTurnKey]);
++  }, [activeTurnKey, hoverTurnKey, expanded]);
+ 
+   // 短会话隐藏（early return 在全部 hooks 之后，React 规则）。
+   if (entries.length < MIN_ENTRIES) return null;
+@@ -299,6 +319,7 @@ export default function TurnNavList({
+                 aria-label={buildAriaLabel(entry)}
+                 aria-current={isActive ? "true" : undefined}
+                 title={buildAriaLabel(entry)}
++                onMouseEnter={() => setHoverTurnKey(entry.key)}
+                 onClick={() => onJump(entry)}
+                 onKeyDown={(e) => {
+                   if (e.key === "Enter") {
+@@ -367,6 +388,8 @@ export default function TurnNavList({
+                   data-testid="turn-nav-row"
+                   aria-label={buildAriaLabel(entry)}
+                   aria-current={isActive ? "true" : undefined}
++                  data-hovered={entry.key === hoverTurnKey ? "true" : undefined}
++                  onMouseEnter={() => setHoverTurnKey(entry.key)}
+                   onClick={() => handleRowJump(entry)}
+                   onKeyDown={(e) => {
+                     if (e.key === "Enter") {
+@@ -380,6 +403,11 @@ export default function TurnNavList({
+                     isActive
+                       ? "bg-muted/60 shadow-[inset_2px_0_0_0_var(--color-brand-600)]"
+                       : "hover:bg-muted/50",
++                    // 2026-10-08-turn-nav-hover-mark：指向行 ring 描边（与 active
++                    // 底色高亮正交——同行叠加两语义并存：描边=我在指它，底色+左线=
++                    // 聊天当前停在哪轮）。仅描边不加底色，防与 hover:bg 同型打架。
++                    entry.key === hoverTurnKey &&
++                      "ring-1 ring-inset ring-brand-400",
+                     // 长列表：固定行高（≥40px 命中区）+ content-visibility 跳出
+                     // 视口的行免渲染（FR-06 >200 轮防卡）。
+                     longList && "h-[44px] justify-center overflow-hidden",
+diff --git a/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/design.md b/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/design.md
+new file mode 100644
+index 000000000..887db2671
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/design.md
+@@ -0,0 +1,52 @@
++---
++author: admin2
++created_at: 2026-10-08T03:19:39.993Z
++---
++# 设计记录（Design Record）— 2026-10-08-turn-nav-hover-mark
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++问题根因：`TurnNavList`（frontend/src/components/sessions/turn-nav-list.tsx）浮层行高亮只由 `activeTurnKey`（聊天滚动联动当前轮）驱动，鼠标悬浮窄轨刻度（横条）展开浮层后，浮层内没有任何「鼠标正指向哪一轮」的标记——刻度本身不带轮号，用户无法建立横条与浮层行的对应关系。
++
++方案：组件内新增 `hoverTurnKey` 本地 state（纯视觉态，props 契约不动）。窄轨刻度 button 与浮层行 button 均挂 `onMouseEnter` 写入该 key（单一指向源，最后进入者生效）；浮层行渲染命中时加细 ring 描边（`ring-1 ring-inset ring-brand-400` + `data-hovered` 测试锚点）——ring 描边与 active 行的底色高亮（`bg-muted/60` + inset brand 竖线）正交，同行叠加不冲突，语义上「描边=我在指它、底色=聊天当前停在哪轮」。滚动联动 effect 扩为指向优先（`hoverTurnKey ?? activeTurnKey`，`expanded` 进依赖让悬停展开瞬间补滚一次），指向清除后自动回落既有 active 联动。清除点收口在四个既有收起/离开路径：组件 mouseleave 的 250ms 防抖回调、pin 切换、组件外 pointerdown 收起、浮层行跳转收起。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `TurnNavListProps` 不变（entries / activeTurnKey / loadingEarlier / onJump）——消费方 session-panel-page 零改动。
++- 无后端 / API / 类型生成变化。
++- DOM 面：浮层行新增 `data-hovered="true"` 属性（仅测试锚点，无 aria 语义——hover 是瞬时视觉态，读屏可达性由刻度/行自身的 aria-label 与 aria-current 承担，语义不变）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   鼠标 enter 事件按真实交互时序同步派发，无异步数据参与；React 对同一 tick 内多次 setState 以最后写入为准，指向恒为「最后进入的刻度/行」，假设成立。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   `hoverTurnKey` 是单组件实例的本地 useState，无跨组件共享、无外部存储，不存在并发写面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   会话切换导致 entries 更换时，残留的旧 key 在新列表中无命中行 → 自然无标记，无副作用；组件卸载 state 随之销毁；250ms 收起防抖回调挂在既有 timer 清理链路上（clearTimers 卸载清理），无泄漏 setState。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   纯组件内部 state 不外溢，跨工作区 / 跨会话 / 多实例（page 与 dialog 各自挂载的 TurnNavList）互不串台。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：指向 ring 与浮层行既有 `hover:bg-muted/50` 底色叠加的视觉密度——选择仅 ring 描边不加底色，二者正交叠加不糊（token 均为主题语义阶，随 data-theme 换肤）。放弃方案：①指向行加底色（与 active 行 `bg-muted/60` 底色同型，视觉冲突辨识度差）；②刻度上挂原生 title/tooltip 显示轮号（>60 轮密集态刻度仅 6px 高命中差，且不满足「浮层卡片标记指向轮」的需求本体）；③浮层行高亮直接复用 active 同款样式（「我在指」与「聊天停在哪」两语义混同，正是本 bug 的认知混淆点）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/components/sessions/turn-nav-list.tsx | hoverTurnKey state + 刻度/行 onMouseEnter + 浮层行 ring 指向标记 + 滚动联动指向优先 + 收起点清指向 |
++| 修改 | frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx | 新增 FR-01～04 用例（标记渲染区分 / 实时跟随 / 滚入 / 清除与零回归） |
+diff --git a/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/proposal.md b/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/proposal.md
+new file mode 100644
+index 000000000..fc49cc9cb
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/proposal.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:19:39.993Z
++---
++# 提案书（Proposal）— 2026-10-08-turn-nav-hover-mark
++
++## 动机
++
++任务原话转写：轮次导航窄轨横条悬停展开浮层后，浮层未标记鼠标当前指向的轮次，用户无法建立横条与轮次的对应关系（密集刻度时完全靠猜），需在浮层内实时标记指向行并与 active 高亮区分。
++成功标准：
++- 悬停窄轨刻度展开浮层后，浮层内当前指向的轮次行有可见指向标记（与 activeTurnKey 当前轮高亮视觉区分）
++- 指向标记随鼠标在刻度间/浮层行间移动实时跟随更新
++- 浮层内指向行超出可视区时自动滚入（block:nearest，不抢既有 active 联动语义之外的新滚动）
++- 鼠标移开组件后指向标记清除，既有展开/收起/pin/跳转/aria 行为零回归
++- turn-nav-list 组件单测覆盖上述新行为且既有用例全绿
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. 悬停窄轨刻度展开浮层后，浮层内当前指向的轮次行有可见指向标记（与 activeTurnKey 当前轮高亮视觉区分）
++2. 指向标记随鼠标在刻度间/浮层行间移动实时跟随更新
++3. 浮层内指向行超出可视区时自动滚入（block:nearest，不抢既有 active 联动语义之外的新滚动）
++4. 鼠标移开组件后指向标记清除，既有展开/收起/pin/跳转/aria 行为零回归
++5. turn-nav-list 组件单测覆盖上述新行为且既有用例全绿
++
++## 成功标准（可验证）
++
++1. 悬停窄轨刻度展开浮层后，浮层内当前指向的轮次行有可见指向标记（与 activeTurnKey 当前轮高亮视觉区分）
++2. 指向标记随鼠标在刻度间/浮层行间移动实时跟随更新
++3. 浮层内指向行超出可视区时自动滚入（block:nearest，不抢既有 active 联动语义之外的新滚动）
++4. 鼠标移开组件后指向标记清除，既有展开/收起/pin/跳转/aria 行为零回归
++5. turn-nav-list 组件单测覆盖上述新行为且既有用例全绿
+diff --git a/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/requirements.md b/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/requirements.md
+new file mode 100644
+index 000000000..0d04800bb
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/requirements.md
+@@ -0,0 +1,77 @@
++---
++author: admin2
++created_at: 2026-10-08T03:19:39.993Z
++---
++# 需求规格（Requirements）— 2026-10-08-turn-nav-hover-mark
++
++## 功能需求
++
++### FR-01: 悬停窄轨刻度展开浮层后，浮层内当前指向的轮次行有可见指向标记（与 activeTurnKey 当前轮高亮视觉区分）
++
++轮次导航浮层展开时，若鼠标正悬浮在窄轨某刻度上，浮层内该刻度对应的轮次行必须渲染可见指向标记；指向标记必须与 activeTurnKey 当前轮高亮（底色 + 左侧 brand 竖线）视觉区分——采用细 ring 描边（`ring-1 ring-inset ring-brand-400`），与底色高亮正交叠加不冲突。
++
++#### 场景：悬停刻度看浮层标记
++
++- Given：≥3 轮会话，轮次导航浮层已展开（悬停防抖或 pin）
++- When：鼠标悬浮窄轨第 N 轮刻度（横条）
++- Then：浮层内第 N 轮行出现 ring 指向标记，其余行无该标记
++
++#### 场景：指向行与当前轮同行
++
++- Given：activeTurnKey 指向第 1 轮（行有底色高亮 + aria-current）
++- When：鼠标悬浮第 1 轮刻度
++- Then：第 1 轮行底色高亮保持，同时叠加 ring 指向标记，两者不互相覆盖
++
++### FR-02: 指向标记随鼠标在刻度间/浮层行间移动实时跟随更新
++
++指向标记必须实时跟随鼠标：鼠标沿窄轨刻度滑动时，标记行随最后进入的刻度切换；鼠标移入浮层某行时，指向同步到该行（浮层行与刻度同为指向源，单一指向态不并存双标记）。
++
++#### 场景：刻度滑动跟随
++
++- Given：浮层展开，鼠标悬浮第 2 轮刻度（第 2 行有标记）
++- When：鼠标滑到第 3 轮刻度
++- Then：标记从第 2 行移到第 3 行
++
++#### 场景：浮层行同步
++
++- Given：浮层展开，标记在第 2 行（来自刻度悬停）
++- When：鼠标移入浮层第 1 行
++- Then：标记同步到第 1 行
++
++### FR-03: 浮层内指向行超出可视区时自动滚入（block:nearest，不抢既有 active 联动语义之外的新滚动）
++
++滚动联动必须扩展为指向优先：hoverTurnKey 存在时滚入指向行，清除后回落既有 activeTurnKey 联动（block:nearest，jsdom 无实现时静默跳过）；不引入其它新滚动行为。
++
++#### 场景：长会话指向滚入
++
++- Given：>200 轮长会话浮层展开，指向行在滚动视口外
++- When：鼠标悬浮对应刻度
++- Then：浮层该行 scrollIntoView(block:"nearest") 滚入可视区
++
++### FR-04: 鼠标移开组件后指向标记清除，既有展开/收起/pin/跳转/aria 行为零回归
++
++鼠标移开组件（250ms 收起防抖到点）后指向标记必须清除；pin 切换、点击组件外部收起、浮层行跳转收起三个既有收起点必须同步清除指向。既有展开/收起防抖、pin 锁定、刻度与行点击跳转、aria-label/aria-current/aria-expanded 行为零回归。
++
++#### 场景：移开清除
++
++- Given：浮层展开且标记在第 2 行
++- When：鼠标移出组件根，250ms 防抖到点
++- Then：浮层收起，指向态清空（再次展开无残留标记）
++
++### FR-05: turn-nav-list 组件单测覆盖上述新行为且既有用例全绿
++
++组件单测必须覆盖 FR-01～FR-04 各行为（标记渲染与区分、实时跟随、滚入、清除），且既有全部用例保持通过。
++
++#### 场景：测试全绿
++
++- Given：turn-nav-list.test.tsx 含新增用例
++- When：vitest run 该测试文件
++- Then：新增与既有用例全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`）
++
++FR-01: test/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「悬停刻度展开浮层后浮层内指向行有可见指向标记（与 active 高亮区分）」
++FR-02: test/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「指向标记随刻度滑动与浮层行 hover 实时跟随」
++FR-03: test/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「指向行滚入可视区（scrollIntoView block:nearest，指向优先回落 active）」
++FR-04: test/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「移开组件防抖到点清指向；收起点同步清除；既有行为零回归」
++FR-05: test/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「turn-nav-list 既有用例全绿（vitest run 全文件）」
+diff --git a/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/tasks.md b/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/tasks.md
+new file mode 100644
+index 000000000..2a9f44fe3
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T03:19:39.993Z
++---
++# 任务注册表（Tasks）— 2026-10-08-turn-nav-hover-mark
++
++- [x] task-01: turn-nav-list.tsx 新增 hoverTurnKey state，窄轨刻度与浮层行挂 onMouseEnter 写入（浮层行渲染 isHovered 时加 ring-1 ring-inset ring-brand-400 + data-hovered）——验证：tsc 编译过 + 既有用例绿
++- [x] task-02: 四个收起点同步清指向（组件 mouseleave 250ms 防抖回调 / togglePin / 组件外 pointerdown / 行跳转收起）——验证：新增清除用例断言重展开无残留标记
++- [x] task-03: 滚动联动 effect 扩为指向优先（hoverTurnKey ?? activeTurnKey，block:nearest），指向清除回落 active——验证：单测断言 scrollIntoView 调用
++- [x] task-04: 新增 FR-01/02 用例（指向标记渲染与 active 区分、刻度滑动跟随、浮层行同步）——验证：vitest run 新用例绿
++- [x] task-05: vitest run 全测试文件 + 该文件 eslint，既有用例零回归——验证：全绿 + 0 error
+diff --git a/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/visual-evidence.md b/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/visual-evidence.md
+new file mode 100644
+index 000000000..71e4ff1d6
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-turn-nav-hover-mark/visual-evidence.md
+@@ -0,0 +1,22 @@
++# 视觉证据（visual-evidence）— 2026-10-08-turn-nav-hover-mark
++
++## 变更性质
++
++既有组件（TurnNavList 轮次导航）的交互状态补充：悬停窄轨刻度（横条）时，浮层内给对应轮次行加「指向标记」。非新页面 / 非新形态 / 非布局改版——浮层结构、行内容、active 高亮样式零改动，仅新增一个条件类（ring 描边）与 hover 事件接线。
++
++## 视觉方案与 token 依据
++
++- 指向标记：`ring-1 ring-inset ring-brand-400`（细描边）。
++  - token 先例：同文件浮层行既有 `focus-visible:ring-1 focus-visible:ring-brand-400`（键盘焦点描边，2026-09-28 形态引入）——本变更复用同 token 阶，视觉语言一致。
++  - 与 active 高亮的区分：active 行 = `bg-muted/60` 底色 + `shadow-[inset_2px_0_0_0_var(--color-brand-600)]` 左竖线（既有）；指向行 = ring 描边。两语义正交可叠加（指向行恰好也是 active 行时，描边 + 底色并存），仅描边不加底色，避免与行既有 `hover:bg-muted/50` 同型打架。
++  - 多主题：brand-* 语义阶随 `html data-theme` 换肤（themes.ts 单源），零硬编码色值，符合前端样式铁律。
++
++## 验证方式
++
++- 渲染对照采用组件级 DOM 断言（jsdom 无法呈现描边像素，实页截图对本变更无增量信息——改动是纯条件类叠加，样式 token 全部为既有先例类）：
++  - `turn-nav-list.test.tsx`「悬停刻度：浮层指向行 data-hovered + ring 描边；与 active 当前轮高亮视觉区分」：断言指向行 className 含 `ring-inset`、active 行含 `bg-muted/60` 且不含 `ring-inset`（用 `ring-inset` 而非 `ring-brand-400` 作判据——后者是全部行常驻的 `focus-visible:ring-brand-400` 子串，不唯一）。
++  - 19/19 用例全绿（14 既有 + 5 新增），既有视觉行为（active 高亮 / hover 底色 / pin / 收起）零回归。
++
++## 降级裁决
++
++无降级——实现与方案一致，无结构收敛 / 范围缩小 / 样式统一级偏离。

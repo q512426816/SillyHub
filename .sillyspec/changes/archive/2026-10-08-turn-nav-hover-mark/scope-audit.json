@@ -1,0 +1,37 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "85c8704a7625dafd3a4092285ea9d629d4b3eb6a",
+  "totals": {
+    "files": 2,
+    "additions": 145,
+    "deletions": 5
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx",
+      "additions": 112,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/sessions/turn-nav-list.tsx",
+      "additions": 33,
+      "deletions": 5,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "a4583007cac2ba3bd084a049376a50c7cb9609fdcefb148f217f7174d449ae1d",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T03:31:52.027Z"
+}
