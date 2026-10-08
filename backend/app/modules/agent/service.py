@@ -31,6 +31,7 @@ from app.modules.agent.coordinator import ExecutionCoordinatorService
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
 from app.modules.agent.schema import AgentRunResponse, ToolFailureStats
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.session_events import publish_sessions_changed
 from app.modules.task.model import Task
 from app.modules.workspace.model import AgentRunWorkspace, TaskWorkspace, Workspace
@@ -1424,16 +1425,22 @@ class AgentService:
         2026-10-08-backend-restart-fake-failed / FR-01：清理后有跳过（仍有近期
         活跃上报的 running 轮）时，fire 延迟复扫链兜底——daemon 真死时日志停止
         老化，复扫在宽限期后判 failed，防永卡 running。
+
+        2026-10-09-stale-recheck-scope：追踪面收窄为「启动清理时点被宽限跳过
+        的 run_id 快照」（``_deferred_run_ids``）——原「全系统任意活跃轮」条件
+        会把启动后新开的轮也卷进常驻判死面（审查实证误杀源）。
         """
         cleaned = await _cleanup_stale_runs_impl(self._session)
-        if await _has_recently_active_running_runs(self._session):
-            task = asyncio.create_task(_recheck_stale_runs_loop())
+        deferred = await _deferred_run_ids(self._session)
+        if deferred:
+            task = asyncio.create_task(_recheck_stale_runs_loop(deferred))
             # 对齐 _fire_background_task 模式：强引用防 GC + done 回调收异常。
             AgentService._background_tasks.add(task)
             task.add_done_callback(AgentService._on_background_task_done)
             log.info(
                 "stale_run_recheck_scheduled",
                 grace_seconds=int(STALE_RUN_ACTIVE_GRACE.total_seconds()),
+                tracked_runs=len(deferred),
             )
         return cleaned
 
@@ -2413,6 +2420,42 @@ class AgentService:
 STALE_RUN_ACTIVE_GRACE = timedelta(minutes=10)
 
 
+def _as_utc(value: datetime) -> datetime:
+    """把 naive datetime 视作 UTC 归一（SQLite DateTime 列 round-trip 丢 tzinfo）。"""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+
+
+def _mark_stale_run_failed(run: AgentRun, now: datetime) -> None:
+    """把 running 轮终态化为 SERVICE_RESTART_INTERRUPTED failed（启动清理/复扫共用）。
+
+    字段语义与 2026-10-08-backend-restart-fake-failed 保持一致：error_code 是
+    FR-02 迟到成功回正例外条件的匹配键（close_run_steps 终态守卫），reason 文案
+    兼顾启动清理与延迟复扫两种成因。
+    """
+    run.status = "failed"
+    run.finished_at = now
+    run.exit_code = -1
+    run.output_redacted = "Run interrupted: service restarted while agent was running."
+    # 2026-09-15-background-task-permission-lockout（FR-04）：补结构化错误码——
+    # 线上实证重启终态化的 run 无 error_code/error_detail，出现「无声失败」
+    # 无从分辨（与模型/平台故障混同）。completed 恢复分支不写（run 实际
+    # 已正常完成，重启只是丢 commit，非错误）。
+    run.error_code = "SERVICE_RESTART_INTERRUPTED"
+    run.error_detail = {
+        "reason": "no daemon activity within grace window (startup cleanup / deferred recheck)",
+        "finished_by": "stale_run_cleanup",
+    }
+
+
+async def _last_run_log_at(session: AsyncSession, run_id: uuid.UUID) -> datetime | None:
+    """run 最新一条日志的时刻（无日志 → None）。"""
+    return (
+        await session.execute(
+            select(func.max(AgentRunLog.timestamp)).where(AgentRunLog.run_id == run_id)
+        )
+    ).scalar_one_or_none()
+
+
 async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
     """Scan for stale running-state AgentRuns and mark them as failed.
 
@@ -2426,6 +2469,11 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
     在实际执行该轮（典型场景：部署重启后端容器，本机 daemon 并未中断），
     此时跳过判死保持 running，等真终态；误杀兜底交给 cleanup_stale_runs
     安排的延迟复扫（daemon 真死时日志停止老化，复扫再判 failed）。
+
+    2026-10-09-stale-recheck-scope：锁粒度收窄——recency 判定移到 FOR UPDATE
+    之前（日志新鲜的活跃轮零锁面），行锁只加在确定要终态化（元数据恢复或
+    判死）的轮上，且逐轮 commit 即时释放（原实现锁全部 running 行直至循环
+    末统一提交，与 daemon 收口路径形成周期性锁竞争）。
 
     Returns:
         Number of stale runs cleaned up.
@@ -2442,11 +2490,31 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
 
     cleaned = 0
     for run in stale_runs:
+        # 无锁预判（2026-10-09 锁粒度收窄）：
+        # - 快照元数据完整（agent 实际跑完、重启只丢了 commit）→ 需行锁走恢复
+        #   分支（该分支本身要写终态）；元数据完整是单调事实，快照值可安全预筛。
+        # - 元数据不完整且日志新鲜 → 纯跳过（活跃轮零锁面，daemon 并发收口
+        #   不被行锁阻塞）。
+        # - 其余（日志停滞/无日志）→ 行锁判死。
+        snapshot_metadata_complete = (
+            (run.num_turns or 0) > 0 and run.exit_code is not None and run.exit_code >= 0
+        )
+        if not snapshot_metadata_complete:
+            last_log_at = await _last_run_log_at(session, run.id)
+            # SQLite 测试库读回 naive datetime（生产 PG 为 aware）；该列值
+            # 一律来自 now(UTC) 写入，naive 视作 UTC 补齐后再比较。
+            if last_log_at is not None and now - _as_utc(last_log_at) <= STALE_RUN_ACTIVE_GRACE:
+                log.info(
+                    "stale_run_cleanup_deferred_active",
+                    run_id=str(run.id),
+                    last_log_age_seconds=int((now - _as_utc(last_log_at)).total_seconds()),
+                )
+                continue
         # 写前 FOR UPDATE 重读（评审 P2）：快照读与落库之间可能有并发收口——
         # daemon 迟到成功结果经 close_interactive_run 行锁收口把 run 置
         # completed，此处若按快照盲写会把它覆盖回 failed，复刻本变更要修的
-        # 永久假失败（复扫链每 10 分钟重跑本函数，窗口 recurring）。非
-        # running 即放弃（迟到结果已收口，等 FR-02/正常路径语义生效）。
+        # 永久假失败。非 running 即放弃（迟到结果已收口，等 FR-02/正常路径
+        # 语义生效）。
         # populate_existing：identity map 已缓存快照属性，强制从行重填才能
         # 看见并发会话已提交的终态（对齐 _close_verify_and_load 行锁读语义）。
         locked_run = (
@@ -2479,42 +2547,7 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
                 exit_code=locked_run.exit_code,
             )
         else:
-            last_log_at = (
-                await session.execute(
-                    select(func.max(AgentRunLog.timestamp)).where(
-                        AgentRunLog.run_id == locked_run.id
-                    )
-                )
-            ).scalar_one_or_none()
-            if last_log_at is not None:
-                # SQLite 测试库读回 naive datetime（生产 PG 为 aware）；该列值
-                # 一律来自 now(UTC) 写入，naive 视作 UTC 补齐后再比较。
-                if last_log_at.tzinfo is None:
-                    last_log_at = last_log_at.replace(tzinfo=UTC)
-                if now - last_log_at <= STALE_RUN_ACTIVE_GRACE:
-                    log.info(
-                        "stale_run_cleanup_deferred_active",
-                        run_id=str(locked_run.id),
-                        last_log_age_seconds=int((now - last_log_at).total_seconds()),
-                    )
-                    continue
-            locked_run.status = "failed"
-            locked_run.finished_at = now
-            locked_run.exit_code = -1
-            locked_run.output_redacted = (
-                "Run interrupted: service restarted while agent was running."
-            )
-            # 2026-09-15-background-task-permission-lockout（FR-04）：补结构化错误码——
-            # 线上实证重启终态化的 run 无 error_code/error_detail，出现「无声失败」
-            # 无从分辨（与模型/平台故障混同）。completed 恢复分支不写（run 实际
-            # 已正常完成，重启只是丢 commit，非错误）。reason 兼顾复扫链场景
-            # （评审 P3）：清理不只发生在后端重启，延迟复扫发现 daemon 停止
-            # 上报同样走此分支，文案按实际成因（宽限窗内无上报）描述。
-            locked_run.error_code = "SERVICE_RESTART_INTERRUPTED"
-            locked_run.error_detail = {
-                "reason": "no daemon activity within grace window (startup cleanup / deferred recheck)",
-                "finished_by": "stale_run_cleanup",
-            }
+            _mark_stale_run_failed(locked_run, now)
             log.warning("stale_run_cleaned", run_id=str(locked_run.id))
         session.add(locked_run)
 
@@ -2523,47 +2556,165 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
         # 恢复分支同样作废——dialog 未答说明 agent 实际没走完应答链路。
         await cancel_pending_dialogs_for_run(session, locked_run.id)
         cleaned += 1
+        # 逐轮提交（2026-10-09）：行锁即时释放，不再跨轮持锁到循环末。
+        await session.commit()
 
-    await session.commit()
     return cleaned
 
 
-async def _has_recently_active_running_runs(session: AsyncSession) -> bool:
-    """复查：是否仍有 running 轮在宽限窗内被 daemon 上报（日志 recency 判定）。"""
+async def _deferred_run_ids(session: AsyncSession) -> list[uuid.UUID]:
+    """启动清理的宽限跳过项：running 轮中最新日志距今 ≤ 宽限窗的 run_id 列表。
+
+    2026-10-09-stale-recheck-scope：复扫链的追踪集合在此一次快照（启动时点），
+    启动后新开的轮永不进入判死面。单 group-by 查询取全量 running 轮的最新
+    日志时刻（替代原 ``_has_recently_active_running_runs`` 的逐 run N+1）。
+    """
     now = datetime.now(UTC)
-    run_ids = list(
-        (await session.execute(select(AgentRun.id).where(col(AgentRun.status) == "running")))
-        .scalars()
-        .all()
-    )
-    for run_id in run_ids:
-        last_log_at = (
-            await session.execute(
-                select(func.max(AgentRunLog.timestamp)).where(AgentRunLog.run_id == run_id)
-            )
-        ).scalar_one_or_none()
+    rows = (
+        await session.execute(
+            select(AgentRunLog.run_id, func.max(AgentRunLog.timestamp))
+            .join(AgentRun, AgentRun.id == AgentRunLog.run_id)
+            .where(col(AgentRun.status) == "running")
+            .group_by(AgentRunLog.run_id)
+        )
+    ).all()
+    deferred: list[uuid.UUID] = []
+    for run_id, last_log_at in rows:
         if last_log_at is None:
             continue
-        if last_log_at.tzinfo is None:
-            last_log_at = last_log_at.replace(tzinfo=UTC)
-        if now - last_log_at <= STALE_RUN_ACTIVE_GRACE:
-            return True
-    return False
+        if now - _as_utc(last_log_at) <= STALE_RUN_ACTIVE_GRACE:
+            deferred.append(run_id)
+    return deferred
 
 
-async def _recheck_stale_runs_loop() -> None:
-    """延迟复扫链（FR-01 兜底）：睡满宽限窗重跑清理，直到无活跃上报的 running 轮。
+async def _run_daemon_alive(session: AsyncSession, run_id: uuid.UUID) -> bool | None:
+    """复扫判死的 daemon 活性门（对齐 patrol 判死段双条件语义）。
 
-    启动清理跳过了近期活跃的轮——若 daemon 随后真死，日志停止老化，本循环在
-    下一次复扫把它们判 failed，防永卡 running；若轮正常收口或新轮持续活跃，
-    复扫自然跳过/续排。每轮自查自收敛：无活跃 running 轮即退出。
+    链路：run 最新 lease（``updated_at`` 倒序首见即定，同 patrol
+    ``_resolve_run_daemons_bulk`` 单条语义——最新 lease 无 runtime_id 即断链，
+    不回退老 lease）→ runtime → daemon 实例。返回：
+
+    - True：daemon status=online，或 last_heartbeat_at 在宽限窗内（含
+      last_heartbeat_at 为 None——patrol 同款保守跳过）；
+    - False：daemon 明确非 online 且心跳停滞超宽限窗；
+    - None：链路不可解析（无 lease / 无 runtime / 无实例）——调用方退回纯
+      日志 recency 语义，不因解析失败缩小 FR-01 防永卡兜底。
     """
-    while True:
+    runtime_id = (
+        await session.execute(
+            select(DaemonTaskLease.runtime_id)
+            .where(DaemonTaskLease.agent_run_id == run_id)
+            .order_by(DaemonTaskLease.updated_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if runtime_id is None:
+        return None
+    instance_id = (
+        await session.execute(
+            select(DaemonRuntime.daemon_instance_id).where(DaemonRuntime.id == runtime_id)
+        )
+    ).scalar_one_or_none()
+    if instance_id is None:
+        return None
+    daemon = (
+        await session.execute(select(DaemonInstance).where(DaemonInstance.id == instance_id))
+    ).scalar_one_or_none()
+    if daemon is None:
+        return None
+    if daemon.status == "online" or daemon.last_heartbeat_at is None:
+        return True
+    return datetime.now(UTC) - _as_utc(daemon.last_heartbeat_at) <= STALE_RUN_ACTIVE_GRACE
+
+
+async def _recheck_deferred_runs(session: AsyncSession, tracked: set[uuid.UUID]) -> set[uuid.UUID]:
+    """单轮复扫：对仍 running 的追踪项做「日志 recency → daemon 活性 → 锁定重读」三级判。
+
+    - 已非 running（正常收口/其它路径终态化）→ 出列停止追踪；
+    - 日志宽限窗内（daemon 仍在报）→ 保持追踪；
+    - 日志停滞 + daemon 活性门 True（健康 daemon 上的长静默轮：等待用户
+      应答/长工具调用）→ 不判死，保持追踪等真终态；
+    - 日志停滞 + 活性门 False/None（daemon 确死或链路不可解析）→ 行锁重读
+      后判死（None 退回纯 recency 语义，防永卡兜底不缩小）。
+    """
+    # ql-20260815-003：late import 防 agent ↔ daemon 循环依赖（daemon.service 引 agent 模型）。
+    from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
+
+    now = datetime.now(UTC)
+    still_tracked: set[uuid.UUID] = set()
+    for run_id in tracked:
+        status = (
+            await session.execute(select(AgentRun.status).where(AgentRun.id == run_id))
+        ).scalar_one_or_none()
+        if status != "running":
+            continue
+        last_log_at = await _last_run_log_at(session, run_id)
+        if last_log_at is not None and now - _as_utc(last_log_at) <= STALE_RUN_ACTIVE_GRACE:
+            still_tracked.add(run_id)
+            continue
+        daemon_alive = await _run_daemon_alive(session, run_id)
+        if daemon_alive is True:
+            log.info("stale_run_recheck_daemon_alive", run_id=str(run_id))
+            still_tracked.add(run_id)
+            continue
+        # 判死路径：先无锁判定已过，仅此处 FOR UPDATE 重读（锁粒度收窄）。
+        locked_run = (
+            await session.execute(
+                select(AgentRun)
+                .where(AgentRun.id == run_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if locked_run is None or locked_run.status != "running":
+            continue
+        _mark_stale_run_failed(locked_run, now)
+        session.add(locked_run)
+        await cancel_pending_dialogs_for_run(session, locked_run.id)
+        await session.commit()
+        log.warning(
+            "stale_run_recheck_cleaned",
+            run_id=str(locked_run.id),
+            daemon_alive=daemon_alive,
+        )
+    return still_tracked
+
+
+# 复扫链连续失败放弃上限：单次迭代异常不终止整链（逐迭代捕获记日志），连续
+# 达到该值才 log.error 放弃——原实现任一 DB 抖动即永久失效，跳过项将永卡
+# running 到下次重启（2026-10-09 审查实证）。
+_RECHECK_MAX_CONSECUTIVE_ERRORS = 5
+
+
+async def _recheck_stale_runs_loop(deferred_run_ids: list[uuid.UUID]) -> None:
+    """延迟复扫链（FR-01 兜底）：只追踪启动清理的宽限跳过项，集合清空即退出。
+
+    睡满宽限窗复扫一轮（``_recheck_deferred_runs``）：正常收口的项自动出列；
+    daemon 死亡且日志停滞的项判 failed；daemon 仍在线/仍在上报的项保持追踪
+    等真终态。2026-10-09-stale-recheck-scope 两处收窄：追踪面=启动快照（新
+    开轮不进判死面，长期僵尸归还 patrol）；判死前叠加 daemon 活性门。单次
+    迭代异常不终止整链（连续失败超 ``_RECHECK_MAX_CONSECUTIVE_ERRORS`` 才
+    放弃留 error 痕）。
+    """
+    tracked = set(deferred_run_ids)
+    consecutive_errors = 0
+    while tracked:
         await asyncio.sleep(STALE_RUN_ACTIVE_GRACE.total_seconds())
-        async with get_session_factory()() as session:
-            await _cleanup_stale_runs_impl(session)
-            if not await _has_recently_active_running_runs(session):
+        try:
+            async with get_session_factory()() as session:
+                tracked = await _recheck_deferred_runs(session, tracked)
+            consecutive_errors = 0
+        except Exception:
+            consecutive_errors += 1
+            log.exception(
+                "stale_run_recheck_iteration_failed",
+                remaining=len(tracked),
+                consecutive_errors=consecutive_errors,
+            )
+            if consecutive_errors >= _RECHECK_MAX_CONSECUTIVE_ERRORS:
+                log.error("stale_run_recheck_gave_up", remaining=len(tracked))
                 return
+    log.info("stale_run_recheck_completed")
 
 
 def redact_agent_output(text: str) -> str:
