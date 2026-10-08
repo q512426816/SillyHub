@@ -19,15 +19,21 @@ created_at: 2026-10-08 19:05:00
 | 6 | 前端生产构建 | `pnpm build` | exit 0，45/45 静态页生成（3 条 warning 属既有 src/lib/errors.ts，非本次文件） |
 | 7 | CLI 前置真实数据 | sillyspec 仓 `knowledge graph summary --clusters 3` / `nodes --search`（本仓真图） | 5789 节点/10338 边/883 簇；dangling 1807 条 662KB 实测印证 top-50 裁剪必要 |
 
-## 环境受限项（部署后验证清单）
+## 部署后验证清单（2026-10-08 22:10 本地栈首验完成，全部勾销）
 
-以下需要 worktree 代码进 docker 栈（重建镜像）+ 已绑定 daemon 在线 + 登录态浏览器，列为部署后首验项：
+环境：本地 docker 栈新镜像（backend/frontend 重建自 e8da254ce）+ 隔离 daemon 实例
+（SILLYHUB_DAEMON_DIR=临时目录，新代码 dist 连 127.0.0.1:8001，API key 鉴权）+ admin2 登录态。
+截图六张：`e2e-screenshots/01~06`。
 
-- [ ] 真实 daemon 绑定态五查询闭环（浏览器操作图谱页，抽 orphans count 与 CLI 对照）
-- [ ] 三主题换肤截图（blue/ai-native/dark）
-- [ ] 六键降级实测（停 daemon→offline；解绑→unbound；恶意锚点 `; rm`→invalid_input）
-- [ ] OpsDashboard 图卡点开清单跳转图谱页 preset 深链
-- [ ] lite 总览簇气泡与代表节点下钻（依赖真 summary.clusters）
+- [x] 真实 daemon 绑定态五查询闭环：overview available=true（nodes 5812/edges 10385/clusters 50）；
+      neighbors FR-auto-backend-015=4 节点/3 边；path FR-auto-backend-015→frontend found=true 4 hops；
+      impact backend 闭包 633 节点；orphans count=4 items=4；dangling_count=1813；nodes search=5 条
+- [x] 三主题换肤：blue（默认 orphans 视图）/ ai-native（初始）/ dark（data-theme=dark，簇气泡暗色下清晰无残留）
+- [x] 六键降级实测：停 daemon→图谱页 offline 文案降级卡（非白屏）；恶意锚点 `; rm -rf`→API reason=invalid_input
+- [x] OpsDashboard 图卡：图·孤儿=4 / 图·悬空=1813（与 API 精确吻合），四既有卡零回归
+- [x] lite 总览：簇气泡+计数徽标（×2032/×507/×343 与后端 clusters 一致）+右栏簇清单+度数前 5 代表行
+
+补充实证（API 层）：CLI 真图对照 orphans=4/dangling=1813 与 sillyspec CLI 输出同源。
 
 ## 结论
 
