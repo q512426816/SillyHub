@@ -22,9 +22,20 @@ import {
   EntryCardList,
   parseDecisionEntries,
   parseEntrySections,
+  parseFrontmatterMeta,
   parseIndexRoutes,
   slugifyAnchor,
 } from "@/components/knowledge/entry-card-list";
+
+// MarkdownText stub（2026-09-23-md-card-render task-02）：CardMarkdown → MarkdownText
+// 内部 next/dynamic（ssr:false）在 jsdom 同步渲染 null（testing-gotchas 收录）——
+// stub 直接渲染 content 原文，正文文本断言照常命中；md 元素级渲染由
+// ui/markdown-text.test.tsx 与 card-markdown.test.tsx 各自保障。
+vi.mock("@/components/ui/markdown-text", () => ({
+  MarkdownText: ({ content }: { content: string }) => (
+    <div data-testid="md-stub">{content}</div>
+  ),
+}));
 
 afterEach(() => {
   cleanup();
@@ -281,8 +292,17 @@ describe("detectEntryCardForm（形态分发）", () => {
 
 // ── 渲染 ────────────────────────────────────────────────────────────────────
 
+// 包 <AntdApp>：AnchorCopyButton 的 message 成功提示经 App.useApp() 注入，
+// 无 provider 时 message 为 undefined（antd v6，实测 message.success is not
+// a function）——生产环境由全局 AntdProviders 提供该上下文，测试对齐。
+import { App as AntdApp } from "antd";
+
 function renderList(p: Parameters<typeof EntryCardList>[0]) {
-  return render(<EntryCardList {...p} />);
+  return render(
+    <AntdApp>
+      <EntryCardList {...p} />
+    </AntdApp>,
+  );
 }
 
 describe("手册形态渲染（zone=top 非 INDEX）", () => {
@@ -302,6 +322,14 @@ describe("手册形态渲染（zone=top 非 INDEX）", () => {
     expect(cards).toHaveLength(3);
     expect(screen.getByText("SillySpec 文档驱动开发流程")).toBeInTheDocument();
     expect(screen.getByText("monorepo 根无统一命令，必须 cd 到对应子项目。")).toBeInTheDocument();
+    // task-02（2026-09-23-md-card-render）：卡片头视觉重构——品牌色条 + brand-50
+    // 头底 + brand-700 标题 + 🔗 复制按钮；data-entry-anchor 锚点契约原样保留。
+    expect(cards[0]!.className).toContain("border-l-brand-600");
+    const head = cards[0]!.querySelector("div.bg-brand-50");
+    expect(head).not.toBeNull();
+    expect(head?.querySelector("h4")?.className).toContain("text-brand-700");
+    expect(screen.getAllByTestId("anchor-copy-btn")).toHaveLength(3);
+    expect(cards[0]).toHaveAttribute("data-entry-anchor", "conventions.md#sillyspec-文档驱动开发流程");
     // 头部元信息：文件名 + 条数 + 文件级徽标 🔥 214。
     expect(screen.getByText(/📄 conventions\.md · 3 条/)).toBeInTheDocument();
     expect(screen.getAllByTestId("entry-use-badge").map((b) => b.textContent)).toContain("🔥 214");
@@ -315,6 +343,95 @@ describe("手册形态渲染（zone=top 非 INDEX）", () => {
   it("无 ## 小节的手册文件兜底单卡", () => {
     renderList({ filename: "empty.md", zone: "top", content: "# 只有标题\n\n正文" });
     expect(screen.getByTestId("single-entry-card")).toBeInTheDocument();
+  });
+
+  it("限高 flex-col 容器下卡片不被压缩裁切（2026-10-08 部署验收回归）", () => {
+    // 页面容器为 max-h + overflow-y-auto 的 flex-col：overflow-hidden 的 flex 子项
+    // 自动最小高度归零（CSS 规范）会被均匀压缩致正文裁切——卡片必须 shrink-0，
+    // 超出走容器滚动（jsdom 不算布局，以类名锁定修复点，同卡片头类名断言口径）。
+    render(
+      <div className="flex max-h-[10px] flex-col overflow-y-auto">
+        <EntryCardList filename="conventions.md" zone="top" content={MANUAL_CONTENT} />
+      </div>,
+    );
+    expect(screen.getAllByTestId("manual-section-card")[0]!.className).toContain("shrink-0");
+    cleanup();
+    render(
+      <div className="flex max-h-[10px] flex-col overflow-y-auto">
+        <EntryCardList filename="generated/demo.md" zone="generated" content={GENERATED_CONTENT} />
+      </div>,
+    );
+    expect(screen.getByTestId("single-entry-card").className).toContain("shrink-0");
+  });
+});
+
+// ── task-02（2026-09-23-md-card-render）：frontmatter 元信息条 + 锚点复制 ──────
+
+describe("parseFrontmatterMeta（FR-03 纯函数）", () => {
+  it("提取 author 与 created_at（含引号剥离）；无 frontmatter / 缺字段 / 未闭合 → null", () => {
+    expect(parseFrontmatterMeta(MANUAL_CONTENT)).toEqual({
+      author: "qinyi",
+      createdAt: "2026-06-23 02:00:00",
+    });
+    expect(parseFrontmatterMeta('# 无 frontmatter\n\n正文')).toEqual({
+      author: null,
+      createdAt: null,
+    });
+    expect(parseFrontmatterMeta('---\nauthor: "quoted"\n未闭合')).toEqual({
+      author: null,
+      createdAt: null,
+    });
+    expect(parseFrontmatterMeta('---\nauthor: only-author\n---\n正文')).toEqual({
+      author: "only-author",
+      createdAt: null,
+    });
+  });
+});
+
+describe("frontmatter 元信息条渲染（FR-03：显示与降级）", () => {
+  it("manual 每张小节卡头部下方显示「✍ 作者 · 日期 收录」", () => {
+    renderList({ filename: "conventions.md", zone: "top", content: MANUAL_CONTENT });
+    const metas = screen.getAllByTestId("frontmatter-meta");
+    expect(metas).toHaveLength(3); // 3 张小节卡各一条（文件级 frontmatter）
+    expect(metas[0]).toHaveTextContent("✍ qinyi · 2026-06-23 收录");
+  });
+
+  it("无 frontmatter 的文件整条隐藏（降级不渲染空行）", () => {
+    renderList({
+      filename: "generated/demo.md",
+      zone: "generated",
+      content: GENERATED_CONTENT,
+    });
+    expect(screen.getByTestId("single-entry-card")).toBeInTheDocument();
+    expect(screen.queryByTestId("frontmatter-meta")).not.toBeInTheDocument();
+  });
+});
+
+describe("卡片头锚点复制（FR-02 / D-003，原型 panel-c 🔗）", () => {
+  it("manual 卡复制串 = 文件#slug；SingleCard 复制串 = 裸文件名（Grill CC-02）", () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+      writable: true, // 不锁死——后续用例经 Object.assign 覆盖（既有 FR 用例写法）
+    });
+
+    renderList({ filename: "conventions.md", zone: "top", content: MANUAL_CONTENT });
+    fireEvent.click(screen.getAllByTestId("anchor-copy-btn")[0]!);
+    expect(writeText).toHaveBeenCalledWith("conventions.md#sillyspec-文档驱动开发流程");
+
+    cleanup();
+    writeText.mockClear();
+
+    renderList({
+      filename: "generated/demo.md",
+      zone: "generated",
+      content: GENERATED_CONTENT,
+    });
+    const btn = screen.getByTestId("anchor-copy-btn");
+    expect(btn).toHaveAttribute("title", "锚点定位（点击复制）：generated/demo.md");
+    fireEvent.click(btn);
+    expect(writeText).toHaveBeenCalledWith("generated/demo.md");
   });
 });
 

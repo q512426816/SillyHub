@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-23-md-card-render",
+  "appliedAt": "2026-10-08T03:04:29.538Z",
+  "baseHash": "ce08f8ae7194bd05be50f99933721dba33023d29",
+  "files": [
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+      "sha256": "66fc31897bc2495267ae10f4c8f243c6a098dcacec4c4f5bd2b9cdba60121bd7"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/card-markdown.test.tsx",
+      "sha256": "f206ca9bc5c6383c7a7879500f3cb4a43cd35b37c762f11c303b4cf14b127e90"
+    },
+    {
+      "path": "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx",
+      "sha256": "4b68c66ec1183bebd6a76c74d032ddf6ca27029e05c95015e4942d27b239d545"
+    },
+    {
+      "path": "frontend/src/components/knowledge/card-markdown.tsx",
+      "sha256": "497ba41c9c31fec730cdb56e6c16f2ab101b90f1650a5d5a9191d4307fef5ad0"
+    },
+    {
+      "path": "frontend/src/components/knowledge/entry-card-list.tsx",
+      "sha256": "e31b53f9e0081593e6feb3b2717c40a0009c98a800911b7c2e8bbd6d7c01b365"
+    }
+  ]
+}

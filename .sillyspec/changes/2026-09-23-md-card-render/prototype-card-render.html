@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>md 卡片渲染方案原型对比 — 2026-09-23-md-card-render</title>
+<style>
+/* ============ 主题变量（对齐 frontend/src/styles/themes.ts 双主题铁律） ============ */
+:root, html[data-theme="light"] {
+  --bg: #f8fafc; --card: #ffffff; --fg: #0f172a; --muted-fg: #64748b;
+  --border: #e2e8f0; --brand-50: #eff6ff; --brand-100: #dbeafe; --brand-600: #2563eb;
+  --brand-700: #1d4ed8; --primary: #2563eb; --muted: #f1f5f9;
+  --code-bg: #f1f5f9; --table-head: #f8fafc; --danger: #dc2626;
+}
+html[data-theme="ai-native"] {
+  --bg: #faf9fc; --card: #ffffff; --fg: #18122b; --muted-fg: #6b6785;
+  --border: #e8e4f2; --brand-50: #f3efff; --brand-100: #e9e2ff; --brand-600: #7c3aed;
+  --brand-700: #6d28d9; --primary: #7c3aed; --muted: #f2f0f8;
+  --code-bg: #eceafc; --table-head: #f6f4fc; --danger: #dc2626;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.6;
+}
+
+/* ============ 原型控制区（非页面内容，方案切换工具条） ============ */
+.proto-bar {
+  position: sticky; top: 0; z-index: 50; background: #0f172a; color: #e2e8f0;
+  padding: 10px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25);
+}
+.proto-bar .proto-title { font-weight: 600; font-size: 13px; }
+.proto-bar .proto-sub { font-size: 11px; color: #94a3b8; }
+.tab-group { display: flex; gap: 6px; margin-left: 8px; }
+.proto-tab {
+  border: 1px solid #334155; background: #1e293b; color: #cbd5e1; cursor: pointer;
+  padding: 5px 14px; border-radius: 6px; font-size: 12.5px; transition: all .15s;
+}
+.proto-tab:hover { border-color: #64748b; }
+.proto-tab.active { background: var(--brand-600); border-color: var(--brand-600); color: #fff; font-weight: 600; }
+.theme-btn {
+  margin-left: auto; border: 1px solid #334155; background: #1e293b; color: #cbd5e1;
+  padding: 5px 12px; border-radius: 6px; font-size: 12px; cursor: pointer;
+}
+
+/* ============ 方案说明条 ============ */
+.scheme-note {
+  display: none; margin: 14px auto 0; max-width: 860px; padding: 12px 16px;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--card);
+  font-size: 12.5px; color: var(--muted-fg);
+}
+.scheme-note.show { display: block; }
+.scheme-note b { color: var(--fg); }
+.scheme-note .tagline { display: inline-block; margin-right: 8px; padding: 1px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.tag-a { background: #fef3c7; color: #92400e; }
+.tag-b { background: #dcfce7; color: #166534; }
+.tag-c { background: #e0e7ff; color: #3730a3; }
+html[data-theme="ai-native"] .tag-b { background: #f3efff; color: #6d28d9; }
+
+/* ============ 页面模拟区 ============ */
+.page-frame { max-width: 860px; margin: 16px auto 60px; padding: 0 12px; }
+.list-head {
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px;
+  font-size: 13px;
+}
+.list-head .fname { font-weight: 600; }
+.list-head .cnt { color: var(--muted-fg); font-size: 12px; }
+.use-badge {
+  margin-left: auto; font-size: 11px; padding: 1px 8px; border-radius: 10px;
+  background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa;
+}
+html[data-theme="ai-native"] .use-badge { background: #f3efff; color: #6d28d9; border-color: #ddd3fb; }
+
+/* ============ 卡片（对齐 entry-card-list.tsx 现有视觉） ============ */
+.entry-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; margin-bottom: 10px;
+}
+.card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.card-title { font-size: 13px; font-weight: 600; }
+.card-fire { font-size: 11px; color: #c2410c; }
+
+/* ---- 卡片正文 = MarkdownText compact 模拟（方案 A/B/C 共用基底） ---- */
+.md-body { font-size: 12px; line-height: 1.65; color: var(--fg); }
+.md-body p { margin: 6px 0; }
+.md-body p:first-child { margin-top: 0; }
+.md-body p:last-child { margin-bottom: 0; }
+.md-body strong { font-weight: 600; }
+.md-body ul { margin: 6px 0; padding-left: 18px; list-style: disc; }
+.md-body li { margin: 2px 0; }
+.md-body code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px; background: var(--code-bg); border-radius: 4px; padding: 1px 5px;
+  word-break: break-all;
+}
+.md-body table { border-collapse: collapse; width: 100%; font-size: 11.5px; margin: 8px 0; }
+.md-body th, .md-body td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; vertical-align: top; }
+.md-body th { background: var(--table-head); font-weight: 600; white-space: nowrap; }
+.md-body td code { white-space: nowrap; }
+.md-body em { font-style: normal; color: var(--muted-fg); }
+
+/* ---- 方案差异 ---- */
+/* A：直换无适配——宽表格溢出卡片（演示适配遗漏风险） */
+.panel-a .md-body table { width: max-content; }
+.panel-a .entry-card { overflow: visible; }
+.proto-alert {
+  display: none; margin: 0 0 10px; padding: 8px 12px; border-radius: 6px; font-size: 12px;
+  border: 1px dashed #fca5a5; background: #fef2f2; color: #b91c1c;
+}
+.panel-a .proto-alert { display: block; }
+/* B：表格横向滚动适配 */
+.panel-b .table-scroll { overflow-x: auto; margin: 8px 0; }
+.panel-b .table-scroll table { margin: 0; }
+
+/* C：B 基础上的视觉重构 */
+.panel-c .entry-card { padding: 0; overflow: hidden; border-left: 3px solid var(--brand-600); }
+.panel-c .card-head {
+  padding: 9px 14px; background: var(--brand-50); border-bottom: 1px solid var(--border); margin-bottom: 0;
+}
+.panel-c .card-title { color: var(--brand-700); }
+.panel-c .anchor-ico {
+  margin-left: auto; color: var(--brand-600); font-size: 13px; text-decoration: none; opacity: .55;
+}
+.panel-c .anchor-ico:hover { opacity: 1; }
+.panel-c .card-meta {
+  display: flex; gap: 10px; padding: 5px 14px; font-size: 11px; color: var(--muted-fg);
+  border-bottom: 1px dashed var(--border); background: var(--card);
+}
+.panel-c .card-body-wrap { padding: 10px 14px; }
+.panel-c .md-body table { border-radius: 6px; overflow: hidden; }
+.panel-c .md-body th { background: var(--brand-50); color: var(--brand-700); }
+
+/* 面板显隐 */
+.proto-panel { display: none; }
+.proto-panel.show { display: block; }
+
+.footer-note { max-width: 860px; margin: 0 auto 40px; padding: 0 12px; font-size: 11.5px; color: var(--muted-fg); }
+.footer-note code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 10.5px; }
+</style>
+</head>
+<body>
+
+<!-- 原型控制条 -->
+<div class="proto-bar">
+  <div>
+    <div class="proto-title">md 卡片渲染 · 三方案原型对比</div>
+    <div class="proto-sub">演示数据：.sillyspec/knowledge/conventions.md 真实内容（卡片按 H2 小节拆分，一小节一卡）</div>
+  </div>
+  <div class="tab-group">
+    <button class="proto-tab active" data-panel="a">方案 A · 直接替换</button>
+    <button class="proto-tab" data-panel="b">方案 B · 薄包装组件</button>
+    <button class="proto-tab" data-panel="c">方案 C · 视觉重构</button>
+  </div>
+  <button class="theme-btn" id="themeBtn">🎨 切换主题（light / ai-native）</button>
+</div>
+
+<div class="page-frame">
+
+  <!-- 方案说明 -->
+  <div class="scheme-note show" id="note-a">
+    <span class="tagline tag-a">方案 A</span>
+    <b>4 处纯文本节点直接换成 MarkdownText 组件。</b>
+    diff 最小，但表格横向滚动、字号对齐等卡片适配需要在 4 处分别手写——本原型演示的是「直换、未做适配」的自然效果：<b style="color:var(--danger)">注意下方宽表格已溢出卡片边界</b>（真实页面中卡片列更窄，溢出更明显）。认真补齐 4 处样式后效果可追平方案 B，但后续每改一处样式都要同步 4 个地方，易漏易漂移。
+  </div>
+  <div class="scheme-note" id="note-b">
+    <span class="tagline tag-b">方案 B（推荐）</span>
+    <b>新建约 20 行的 CardMarkdown 薄壳组件（包 MarkdownText + 卡片场景适配），4 处统一调用。</b>
+    正文正常渲染 md（标题 / 加粗 / 列表 / 行内代码 / 表格 / 代码块全部生效），<b>宽表格在卡片内横向滚动</b>（下方可滚动查看被截断的列），字号统一、行距对齐。适配集中一处，后续其它卡片场景（变更文件预览、会话附件卡）可复用，测试单点覆盖渲染 + 安全过滤。
+  </div>
+  <div class="scheme-note" id="note-c">
+    <span class="tagline tag-c">方案 C</span>
+    <b>方案 B 的全部效果 + 卡片视觉重构。</b>
+    卡片头加品牌色条与锚点链接图标、小节元信息条（作者 / 创建时间，来自 frontmatter）、表头品牌色卡片化。视觉最完整，但超出本次已确认的需求范围（你此前已确认只做渲染改造），验收面与回归风险更大，工期也更长。
+  </div>
+
+  <!-- 列表头（模拟现有 EntryCardList 列表头） -->
+  <div class="list-head">
+    <span>📄</span><span class="fname">conventions.md</span>
+    <span class="cnt">· 11 条</span>
+    <span class="use-badge">🔥 本周高频引用</span>
+  </div>
+
+  <!-- ================= 方案 A 面板 ================= -->
+  <div class="proto-panel panel-a show" id="panel-a">
+    <div class="proto-alert">⚠ 演示：方案 A 直换后未做表格适配，下方「子项目构建」卡片的宽表格已溢出卡片边界（横向撑破布局）。</div>
+
+    <div class="entry-card">
+      <div class="card-head"><span class="card-title">SillySpec 文档驱动开发流程</span><span class="card-fire">🔥</span></div>
+      <div class="md-body">
+        <ul>
+          <li><strong>执行顺序：文档 → 读现有代码 → 写测试 → 写实现 → 跑测试 → 验收</strong></li>
+          <li>禁止无文档改代码、禁止先写代码再补文档</li>
+          <li>新功能/大改动走完整流程：<code>sillyspec run brainstorm</code> → plan → execute → verify</li>
+          <li>小修复/小调整：<code>sillyspec run quick</code></li>
+          <li>修改代码前必须说明依据的文档路径；实现完成后对照文档验收</li>
+          <li>提交被 hook 拦截时禁止跳过，必须解决问题再提交</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="entry-card">
+      <div class="card-head"><span class="card-title">子项目构建 / 测试 / lint 命令</span><span class="card-fire">🔥</span></div>
+      <div class="md-body">
+        <p>monorepo 根无统一命令，必须 cd 到对应子项目：</p>
+        <table>
+          <thead><tr><th>子项目</th><th>技术栈</th><th>test</th><th>lint</th></tr></thead>
+          <tbody>
+            <tr><td>backend</td><td>FastAPI + uv</td><td><code>cd backend && uv run pytest</code></td><td><code>cd backend && uv run ruff check .</code></td></tr>
+            <tr><td>frontend</td><td>Next.js + pnpm</td><td><code>cd frontend && pnpm test</code></td><td><code>cd frontend && pnpm lint</code></td></tr>
+            <tr><td>sillyhub-daemon</td><td>Node + pnpm (ESM)</td><td><code>cd sillyhub-daemon && pnpm test</code></td><td><code>cd sillyhub-daemon && pnpm lint</code></td></tr>
+          </tbody>
+        </table>
+        <p>frontend/daemon 构建用 <code>pnpm build</code>；backend（Python）无独立 build 步骤。</p>
+      </div>
+    </div>
+
+    <div class="entry-card">
+      <div class="card-head"><span class="card-title">backend Python 工程约定（model.py 单数 / ruff 配置）</span></div>
+      <div class="md-body">
+        <ul>
+          <li><strong>文件名单数</strong>：SQLModel 数据模型文件名是 <code>model.py</code>（非 <code>models.py</code>），与 router.py / service.py 同级；找模型类 grep <code>model.py</code> 而非 <code>models.py</code>。</li>
+          <li><strong>ruff 配置</strong>（<code>backend/pyproject.toml</code>）：<code>line-length = 100</code></li>
+          <li>提交前格式化：<code>cd backend && uv run ruff format .</code></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="entry-card">
+      <div class="card-head"><span class="card-title">模块卡片 H1 用中文名（module-id）</span></div>
+      <div class="md-body">
+        <p>平台（SillyHub）文档列表按 markdown 首个 H1 提取 title 展示（backend scan_docs parser._extract_title）。模块卡片 H1 必须写「# 中文短名（module-id）」全角括号格式（如 <code># 变更中心（change）</code>），不能只写英文 module-id——否则平台文档列表显示一墙英文代号不可读。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 方案 B 面板 ================= -->
+  <div class="proto-panel panel-b" id="panel-b">
+    <div class="entry-card">
+      <div class="card-head"><span class="card-title">SillySpec 文档驱动开发流程</span><span class="card-fire">🔥</span></div>
+      <div class="md-body">
+        <ul>
+          <li><strong>执行顺序：文档 → 读现有代码 → 写测试 → 写实现 → 跑测试 → 验收</strong></li>
+          <li>禁止无文档改代码、禁止先写代码再补文档</li>
+          <li>新功能/大改动走完整流程：<code>sillyspec run brainstorm</code> → plan → execute → verify</li>
+          <li>小修复/小调整：<code>sillyspec run quick</code></li>
+          <li>修改代码前必须说明依据的文档路径；实现完成后对照文档验收</li>
+          <li>提交被 hook 拦截时禁止跳过，必须解决问题再提交</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="entry-card">
+      <div class="card-head"><span class="card-title">子项目构建 / 测试 / lint 命令</span><span class="card-fire">🔥</span></div>
+      <div class="md-body">
+        <p>monorepo 根无统一命令，必须 cd 到对应子项目：</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>子项目</th><th>技术栈</th><th>test</th><th>lint</th></tr></thead>
+            <tbody>
+              <tr><td>backend</td><td>FastAPI + uv</td><td><code>cd backend && uv run pytest</code></td><td><code>cd backend && uv run ruff check .</code></td></tr>
+              <tr><td>frontend</td><td>Next.js + pnpm</td><td><code>cd frontend && pnpm test</code></td><td><code>cd frontend && pnpm lint</code></td></tr>
+              <tr><td>sillyhub-daemon</td><td>Node + pnpm (ESM)</td><td><code>cd sillyhub-daemon && pnpm test</code></td><td><code>cd sillyhub-daemon && pnpm lint</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>frontend/daemon 构建用 <code>pnpm build</code>；backend（Python）无独立 build 步骤。</p>
+      </div>
+    </div>
+
+    <div class="entry-card">
+      <div class="card-head"><span class="card-title">backend Python 工程约定（model.py 单数 / ruff 配置）</span></div>
+      <div class="md-body">
+        <ul>
+          <li><strong>文件名单数</strong>：SQLModel 数据模型文件名是 <code>model.py</code>（非 <code>models.py</code>），与 router.py / service.py 同级；找模型类 grep <code>model.py</code> 而非 <code>models.py</code>。</li>
+          <li><strong>ruff 配置</strong>（<code>backend/pyproject.toml</code>）：<code>line-length = 100</code></li>
+          <li>提交前格式化：<code>cd backend && uv run ruff format .</code></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="entry-card">
+      <div class="card-head"><span class="card-title">模块卡片 H1 用中文名（module-id）</span></div>
+      <div class="md-body">
+        <p>平台（SillyHub）文档列表按 markdown 首个 H1 提取 title 展示（backend scan_docs parser._extract_title）。模块卡片 H1 必须写「# 中文短名（module-id）」全角括号格式（如 <code># 变更中心（change）</code>），不能只写英文 module-id——否则平台文档列表显示一墙英文代号不可读。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 方案 C 面板 ================= -->
+  <div class="proto-panel panel-c" id="panel-c">
+    <div class="entry-card">
+      <div class="card-head">
+        <span class="card-title">SillySpec 文档驱动开发流程</span><span class="card-fire">🔥</span>
+        <a class="anchor-ico" href="#" title="锚点链接（点击复制小节定位）">🔗</a>
+      </div>
+      <div class="card-meta"><span>✍ qinyi</span><span>· 2026-06-23 收录</span><span>· 条目热度 🔥 12</span></div>
+      <div class="card-body-wrap">
+        <div class="md-body">
+          <ul>
+            <li><strong>执行顺序：文档 → 读现有代码 → 写测试 → 写实现 → 跑测试 → 验收</strong></li>
+            <li>禁止无文档改代码、禁止先写代码再补文档</li>
+            <li>新功能/大改动走完整流程：<code>sillyspec run brainstorm</code> → plan → execute → verify</li>
+            <li>小修复/小调整：<code>sillyspec run quick</code></li>
+            <li>修改代码前必须说明依据的文档路径；实现完成后对照文档验收</li>
+            <li>提交被 hook 拦截时禁止跳过，必须解决问题再提交</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="entry-card">
+      <div class="card-head">
+        <span class="card-title">子项目构建 / 测试 / lint 命令</span><span class="card-fire">🔥</span>
+        <a class="anchor-ico" href="#" title="锚点链接（点击复制小节定位）">🔗</a>
+      </div>
+      <div class="card-meta"><span>✍ qinyi</span><span>· 2026-06-23 收录</span><span>· 条目热度 🔥 8</span></div>
+      <div class="card-body-wrap">
+        <div class="md-body">
+          <p>monorepo 根无统一命令，必须 cd 到对应子项目：</p>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>子项目</th><th>技术栈</th><th>test</th><th>lint</th></tr></thead>
+              <tbody>
+                <tr><td>backend</td><td>FastAPI + uv</td><td><code>cd backend && uv run pytest</code></td><td><code>cd backend && uv run ruff check .</code></td></tr>
+                <tr><td>frontend</td><td>Next.js + pnpm</td><td><code>cd frontend && pnpm test</code></td><td><code>cd frontend && pnpm lint</code></td></tr>
+                <tr><td>sillyhub-daemon</td><td>Node + pnpm (ESM)</td><td><code>cd sillyhub-daemon && pnpm test</code></td><td><code>cd sillyhub-daemon && pnpm lint</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>frontend/daemon 构建用 <code>pnpm build</code>；backend（Python）无独立 build 步骤。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="entry-card">
+      <div class="card-head">
+        <span class="card-title">backend Python 工程约定（model.py 单数 / ruff 配置）</span>
+        <a class="anchor-ico" href="#" title="锚点链接（点击复制小节定位）">🔗</a>
+      </div>
+      <div class="card-meta"><span>✍ qinyi</span><span>· 2026-06-23 收录</span></div>
+      <div class="card-body-wrap">
+        <div class="md-body">
+          <ul>
+            <li><strong>文件名单数</strong>：SQLModel 数据模型文件名是 <code>model.py</code>（非 <code>models.py</code>），与 router.py / service.py 同级；找模型类 grep <code>model.py</code> 而非 <code>models.py</code>。</li>
+            <li><strong>ruff 配置</strong>（<code>backend/pyproject.toml</code>）：<code>line-length = 100</code></li>
+            <li>提交前格式化：<code>cd backend && uv run ruff format .</code></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="entry-card">
+      <div class="card-head">
+        <span class="card-title">模块卡片 H1 用中文名（module-id）</span>
+        <a class="anchor-ico" href="#" title="锚点链接（点击复制小节定位）">🔗</a>
+      </div>
+      <div class="card-meta"><span>✍ qinyi</span><span>· 2026-08-18 收录</span></div>
+      <div class="card-body-wrap">
+        <div class="md-body">
+          <p>平台（SillyHub）文档列表按 markdown 首个 H1 提取 title 展示（backend scan_docs parser._extract_title）。模块卡片 H1 必须写「# 中文短名（module-id）」全角括号格式（如 <code># 变更中心（change）</code>），不能只写英文 module-id——否则平台文档列表显示一墙英文代号不可读。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    原型说明：静态 HTML 模拟渲染效果，卡片内容取自 <code>.sillyspec/knowledge/conventions.md</code> 真实小节（原型取 4 个代表性小节，实际页面拆 11 张卡）。
+    方案 A/B/C 的表格、列表、行内代码均为渲染后效果；当前「卡片」页的真实效果是纯文本显示 <code>#</code>、<code>**</code>、<code>|表格|</code> 原文（即本变更要解决的问题）。
+    右上角可切换 light / ai-native 双主题。
+  </div>
+</div>
+
+<script>
+// 方案 tab 切换
+document.querySelectorAll('.proto-tab').forEach(function (tab) {
+  tab.addEventListener('click', function () {
+    document.querySelectorAll('.proto-tab').forEach(function (t) { t.classList.remove('active'); });
+    tab.classList.add('active');
+    var key = tab.dataset.panel;
+    document.querySelectorAll('.proto-panel').forEach(function (p) { p.classList.remove('show'); });
+    document.getElementById('panel-' + key).classList.add('show');
+    document.querySelectorAll('.scheme-note').forEach(function (n) { n.classList.remove('show'); });
+    document.getElementById('note-' + key).classList.add('show');
+  });
+});
+// 主题切换（模拟 html data-theme 换肤）
+document.getElementById('themeBtn').addEventListener('click', function () {
+  var html = document.documentElement;
+  html.dataset.theme = html.dataset.theme === 'light' ? 'ai-native' : 'light';
+});
+</script>
+</body>
+</html>

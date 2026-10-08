@@ -238,17 +238,20 @@ describe("scan-docs 首屏提速与人类可读视图（ql-20260921-003）", () 
     );
     await waitFor(() => expect(screen.getByText("架构文档")).toBeInTheDocument());
 
-    // 默认卡片视图：EntryCardList 渲染手册小节卡，原文（md-preview）不出现。
+    // 默认卡片视图：EntryCardList 渲染手册小节卡；卡片正文经 CardMarkdown →
+    // MarkdownText 渲染（2026-09-23-md-card-render 起 md-preview 出现在卡片内，
+    // dynamic 异步挂载故 waitFor）。
     const cardList = await waitFor(() => screen.getByTestId("entry-card-list"));
     expect(cardList).toHaveAttribute("data-form", "manual");
     expect(screen.getByText("模块划分")).toBeInTheDocument();
-    expect(screen.queryByTestId("md-preview")).toBeNull();
+    await waitFor(() =>
+      expect(screen.getAllByTestId("md-preview").length).toBeGreaterThan(0),
+    );
 
-    // 切到原文 tab：md 阅读视图出现（MarkdownText 是 dynamic 异步组件，waitFor），
-    // 卡片消失。
+    // 切到原文 tab：整页 md 阅读视图成为唯一 md-preview，卡片消失。
     fireEvent.click(screen.getByTestId("view-tab-raw"));
-    await waitFor(() => expect(screen.getByTestId("md-preview")).toBeInTheDocument());
-    expect(screen.queryByTestId("entry-card-list")).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId("entry-card-list")).toBeNull());
+    await waitFor(() => expect(screen.getAllByTestId("md-preview")).toHaveLength(1));
 
     // 切回卡片 tab。
     fireEvent.click(screen.getByTestId("view-tab-cards"));

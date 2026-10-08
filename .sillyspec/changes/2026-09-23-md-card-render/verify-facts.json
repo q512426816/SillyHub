@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-23-md-card-render",
+  "generatedAt": "2026-10-08T03:09:41.347Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-23-md-card-render",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 1
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-23-md-card-render",
+      "metrics": {
+        "tasks": 2,
+        "hasTest": 2
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-23-md-card-render",
+      "metrics": {
+        "backendEndpoints": 627,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-23-md-card-render",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-09-23-md-card-render",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-09-23-md-card-render",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-09-23-md-card-render",
+      "metrics": {
+        "checkedFiles": 3,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 1,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "FR-02/FR-04 视觉与交互手动验收：两页卡片模式对照原型 panel-c（浏览器实测色条/头底/锚点复制 toast/双主题换肤/INDEX 路由行锚点跳转）——jsdom 无法覆盖真实视觉与主题变量",
+        "condition": "部署后（或 dev server）打开 /workspaces/<id>/scan-docs 与 /knowledge，选 conventions.md 对照 `.sillyspec/changes/2026-09-23-md-card-render/prototype-card-render.html` panel-c；切 blue/ai-native 主题各看一遍；点 INDEX 路由行验证卡片滚动定位",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "consumerHints": {},
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(jsx3)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-08T03:12:39.259Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

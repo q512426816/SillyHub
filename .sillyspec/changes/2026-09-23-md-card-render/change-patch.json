@@ -1,0 +1,21 @@
+{
+  "change": "2026-09-23-md-card-render",
+  "baseline": "head-uncommitted-window",
+  "head": "ce08f8ae7194bd05be50f99933721dba33023d29",
+  "files": [
+    "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+    "frontend/src/components/knowledge/__tests__/card-markdown.test.tsx",
+    "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx",
+    "frontend/src/components/knowledge/card-markdown.tsx",
+    "frontend/src/components/knowledge/entry-card-list.tsx"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 354,
+    "deletions": 32
+  },
+  "savedAt": "2026-10-08T03:07:42.130Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "patchSha256": "1f6569e3826b1582540ad83708c29ee30677ebc109c719b13dacb25f07bac0d6",
+  "patchStatus": "ok"
+}

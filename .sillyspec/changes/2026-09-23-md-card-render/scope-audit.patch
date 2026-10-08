@@ -1,0 +1,543 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
+index cf2a2bc9e..fb1881b28 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
+@@ -238,17 +238,20 @@ describe("scan-docs 首屏提速与人类可读视图（ql-20260921-003）", ()
+     );
+     await waitFor(() => expect(screen.getByText("架构文档")).toBeInTheDocument());
+ 
+-    // 默认卡片视图：EntryCardList 渲染手册小节卡，原文（md-preview）不出现。
++    // 默认卡片视图：EntryCardList 渲染手册小节卡；卡片正文经 CardMarkdown →
++    // MarkdownText 渲染（2026-09-23-md-card-render 起 md-preview 出现在卡片内，
++    // dynamic 异步挂载故 waitFor）。
+     const cardList = await waitFor(() => screen.getByTestId("entry-card-list"));
+     expect(cardList).toHaveAttribute("data-form", "manual");
+     expect(screen.getByText("模块划分")).toBeInTheDocument();
+-    expect(screen.queryByTestId("md-preview")).toBeNull();
++    await waitFor(() =>
++      expect(screen.getAllByTestId("md-preview").length).toBeGreaterThan(0),
++    );
+ 
+-    // 切到原文 tab：md 阅读视图出现（MarkdownText 是 dynamic 异步组件，waitFor），
+-    // 卡片消失。
++    // 切到原文 tab：整页 md 阅读视图成为唯一 md-preview，卡片消失。
+     fireEvent.click(screen.getByTestId("view-tab-raw"));
+-    await waitFor(() => expect(screen.getByTestId("md-preview")).toBeInTheDocument());
+-    expect(screen.queryByTestId("entry-card-list")).toBeNull();
++    await waitFor(() => expect(screen.queryByTestId("entry-card-list")).toBeNull());
++    await waitFor(() => expect(screen.getAllByTestId("md-preview")).toHaveLength(1));
+ 
+     // 切回卡片 tab。
+     fireEvent.click(screen.getByTestId("view-tab-cards"));
+diff --git a/frontend/src/components/knowledge/__tests__/card-markdown.test.tsx b/frontend/src/components/knowledge/__tests__/card-markdown.test.tsx
+new file mode 100644
+index 000000000..1a8c30b9f
+--- /dev/null
++++ b/frontend/src/components/knowledge/__tests__/card-markdown.test.tsx
+@@ -0,0 +1,71 @@
++// task-01（2026-09-23-md-card-render / FR-01 / FR-02 / D-002 / D-003）：CardMarkdown
++// 卡片场景渲染薄壳单测（行为规格，design §总体方案 Phase 1）。
++//
++// 覆盖：
++//   1. 委托——content 原文转发给 MarkdownText 且固定 size=compact（继承统一
++//      rehype-sanitize，不透传 rehypePlugins、不新开渲染路径——安全红线）；
++//   2. 降级——空 content 返回 null（与 EntryCardList 旧 `{body ? ... : null}` 等价）；
++//   3. 卡片适配——外层容器横向滚动（overflow-x-auto，宽表格不撑破窄卡片）、
++//      表格字号对齐 11.5px、表头品牌色（brand-50 底 + brand-700 字，双主题换肤）；
++//   4. className 透传合并（cn）。
++//
++// 测试纪律：MarkdownText stub 化——其内部 next/dynamic（ssr:false）在 jsdom
++// 同步渲染 null（.sillyspec/knowledge/testing-gotchas.md 收录，先例
++// daemon/__tests__/team-task-block.test.tsx:42-50 同款坑）；md 元素级渲染行为由
++// ui/markdown-text.test.tsx 既有测试保障，本文件只测 CardMarkdown 的包装职责，
++// 不重复测渲染引擎（行为 vs 实现：包装重构后本文件不应失败）。
++
++import { describe, it, expect, vi } from "vitest";
++import { render, screen } from "@testing-library/react";
++
++import { CardMarkdown } from "../card-markdown";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({
++    content,
++    size,
++  }: {
++    content: string;
++    size?: string;
++  }) => (
++    <div data-testid="mt-stub" data-size={size}>
++      {content}
++    </div>
++  ),
++}));
++
++describe("CardMarkdown 卡片场景渲染薄壳（task-01 / FR-01 / D-003）", () => {
++  it("content 原文委托 MarkdownText 渲染，固定 compact 档", () => {
++    const md = "**加粗** 与 `code` 混排正文";
++    const { container } = render(<CardMarkdown content={md} />);
++    const stub = screen.getByTestId("mt-stub");
++    expect(stub).toBeInTheDocument();
++    expect(stub).toHaveTextContent(md);
++    expect(stub).toHaveAttribute("data-size", "compact");
++    // 委托而非复制：组件本身不解析 md（无 table/th 节点，渲染归 MarkdownText）
++    expect(container.querySelector("table")).toBeNull();
++  });
++
++  it("空 content 返回 null（与 EntryCardList 旧空值分支等价）", () => {
++    const { container } = render(<CardMarkdown content="" />);
++    expect(container.firstChild).toBeNull();
++  });
++
++  it("容器携带卡片适配类：横向滚动 + 表格字号 11.5px + 表头品牌色", () => {
++    render(<CardMarkdown content="正文" />);
++    const wrap = screen.getByTestId("mt-stub").parentElement;
++    expect(wrap).not.toBeNull();
++    expect(wrap?.className).toContain("overflow-x-auto");
++    expect(wrap?.className).toContain("[&_.wmde-markdown_table]:!text-[11.5px]");
++    expect(wrap?.className).toContain("[&_.wmde-markdown_th]:!bg-brand-50");
++    expect(wrap?.className).toContain("[&_.wmde-markdown_th]:!text-brand-700");
++  });
++
++  it("className 透传经 cn 合并进容器", () => {
++    render(<CardMarkdown content="正文" className="mt-1.5 text-muted-foreground" />);
++    const wrap = screen.getByTestId("mt-stub").parentElement;
++    expect(wrap?.className).toContain("mt-1.5");
++    expect(wrap?.className).toContain("text-muted-foreground");
++    expect(wrap?.className).toContain("overflow-x-auto"); // 合并不覆盖内置适配
++  });
++});
+diff --git a/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx b/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
+index 2ae040c8f..6a98dbce4 100644
+--- a/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
+@@ -22,10 +22,21 @@ import {
+   EntryCardList,
+   parseDecisionEntries,
+   parseEntrySections,
++  parseFrontmatterMeta,
+   parseIndexRoutes,
+   slugifyAnchor,
+ } from "@/components/knowledge/entry-card-list";
+ 
++// MarkdownText stub（2026-09-23-md-card-render task-02）：CardMarkdown → MarkdownText
++// 内部 next/dynamic（ssr:false）在 jsdom 同步渲染 null（testing-gotchas 收录）——
++// stub 直接渲染 content 原文，正文文本断言照常命中；md 元素级渲染由
++// ui/markdown-text.test.tsx 与 card-markdown.test.tsx 各自保障。
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="md-stub">{content}</div>
++  ),
++}));
++
+ afterEach(() => {
+   cleanup();
+ });
+@@ -281,8 +292,17 @@ describe("detectEntryCardForm（形态分发）", () => {
+ 
+ // ── 渲染 ────────────────────────────────────────────────────────────────────
+ 
++// 包 <AntdApp>：AnchorCopyButton 的 message 成功提示经 App.useApp() 注入，
++// 无 provider 时 message 为 undefined（antd v6，实测 message.success is not
++// a function）——生产环境由全局 AntdProviders 提供该上下文，测试对齐。
++import { App as AntdApp } from "antd";
++
+ function renderList(p: Parameters<typeof EntryCardList>[0]) {
+-  return render(<EntryCardList {...p} />);
++  return render(
++    <AntdApp>
++      <EntryCardList {...p} />
++    </AntdApp>,
++  );
+ }
+ 
+ describe("手册形态渲染（zone=top 非 INDEX）", () => {
+@@ -302,6 +322,14 @@ describe("手册形态渲染（zone=top 非 INDEX）", () => {
+     expect(cards).toHaveLength(3);
+     expect(screen.getByText("SillySpec 文档驱动开发流程")).toBeInTheDocument();
+     expect(screen.getByText("monorepo 根无统一命令，必须 cd 到对应子项目。")).toBeInTheDocument();
++    // task-02（2026-09-23-md-card-render）：卡片头视觉重构——品牌色条 + brand-50
++    // 头底 + brand-700 标题 + 🔗 复制按钮；data-entry-anchor 锚点契约原样保留。
++    expect(cards[0]!.className).toContain("border-l-brand-600");
++    const head = cards[0]!.querySelector("div.bg-brand-50");
++    expect(head).not.toBeNull();
++    expect(head?.querySelector("h4")?.className).toContain("text-brand-700");
++    expect(screen.getAllByTestId("anchor-copy-btn")).toHaveLength(3);
++    expect(cards[0]).toHaveAttribute("data-entry-anchor", "conventions.md#sillyspec-文档驱动开发流程");
+     // 头部元信息：文件名 + 条数 + 文件级徽标 🔥 214。
+     expect(screen.getByText(/📄 conventions\.md · 3 条/)).toBeInTheDocument();
+     expect(screen.getAllByTestId("entry-use-badge").map((b) => b.textContent)).toContain("🔥 214");
+@@ -318,6 +346,76 @@ describe("手册形态渲染（zone=top 非 INDEX）", () => {
+   });
+ });
+ 
++// ── task-02（2026-09-23-md-card-render）：frontmatter 元信息条 + 锚点复制 ──────
++
++describe("parseFrontmatterMeta（FR-03 纯函数）", () => {
++  it("提取 author 与 created_at（含引号剥离）；无 frontmatter / 缺字段 / 未闭合 → null", () => {
++    expect(parseFrontmatterMeta(MANUAL_CONTENT)).toEqual({
++      author: "qinyi",
++      createdAt: "2026-06-23 02:00:00",
++    });
++    expect(parseFrontmatterMeta('# 无 frontmatter\n\n正文')).toEqual({
++      author: null,
++      createdAt: null,
++    });
++    expect(parseFrontmatterMeta('---\nauthor: "quoted"\n未闭合')).toEqual({
++      author: null,
++      createdAt: null,
++    });
++    expect(parseFrontmatterMeta('---\nauthor: only-author\n---\n正文')).toEqual({
++      author: "only-author",
++      createdAt: null,
++    });
++  });
++});
++
++describe("frontmatter 元信息条渲染（FR-03：显示与降级）", () => {
++  it("manual 每张小节卡头部下方显示「✍ 作者 · 日期 收录」", () => {
++    renderList({ filename: "conventions.md", zone: "top", content: MANUAL_CONTENT });
++    const metas = screen.getAllByTestId("frontmatter-meta");
++    expect(metas).toHaveLength(3); // 3 张小节卡各一条（文件级 frontmatter）
++    expect(metas[0]).toHaveTextContent("✍ qinyi · 2026-06-23 收录");
++  });
++
++  it("无 frontmatter 的文件整条隐藏（降级不渲染空行）", () => {
++    renderList({
++      filename: "generated/demo.md",
++      zone: "generated",
++      content: GENERATED_CONTENT,
++    });
++    expect(screen.getByTestId("single-entry-card")).toBeInTheDocument();
++    expect(screen.queryByTestId("frontmatter-meta")).not.toBeInTheDocument();
++  });
++});
++
++describe("卡片头锚点复制（FR-02 / D-003，原型 panel-c 🔗）", () => {
++  it("manual 卡复制串 = 文件#slug；SingleCard 复制串 = 裸文件名（Grill CC-02）", () => {
++    const writeText = vi.fn();
++    Object.defineProperty(navigator, "clipboard", {
++      value: { writeText },
++      configurable: true,
++      writable: true, // 不锁死——后续用例经 Object.assign 覆盖（既有 FR 用例写法）
++    });
++
++    renderList({ filename: "conventions.md", zone: "top", content: MANUAL_CONTENT });
++    fireEvent.click(screen.getAllByTestId("anchor-copy-btn")[0]!);
++    expect(writeText).toHaveBeenCalledWith("conventions.md#sillyspec-文档驱动开发流程");
++
++    cleanup();
++    writeText.mockClear();
++
++    renderList({
++      filename: "generated/demo.md",
++      zone: "generated",
++      content: GENERATED_CONTENT,
++    });
++    const btn = screen.getByTestId("anchor-copy-btn");
++    expect(btn).toHaveAttribute("title", "锚点定位（点击复制）：generated/demo.md");
++    fireEvent.click(btn);
++    expect(writeText).toHaveBeenCalledWith("generated/demo.md");
++  });
++});
++
+ describe("决策形态渲染（zone=decisions）", () => {
+   it("rejected 置顶 + 防复潮横幅；active/implemented 保持原文序；状态 pill 映射", () => {
+     renderList({
+diff --git a/frontend/src/components/knowledge/card-markdown.tsx b/frontend/src/components/knowledge/card-markdown.tsx
+new file mode 100644
+index 000000000..76b0398fd
+--- /dev/null
++++ b/frontend/src/components/knowledge/card-markdown.tsx
+@@ -0,0 +1,45 @@
++"use client";
++
++import { MarkdownText } from "@/components/ui/markdown-text";
++import { cn } from "@/lib/utils";
++
++/**
++ * CardMarkdown —— 知识库/扫描文档卡片场景的 markdown 渲染薄壳
++ * （2026-09-23-md-card-render / FR-01 / FR-02 / D-002 / D-003）。
++ *
++ * 包装既有 MarkdownText（compact 档），集中三类卡片场景适配（entry-card-list
++ * 4 处正文统一接入，勿在调用点散写样式）：
++ * - 宽表格横向滚动（外层 overflow-x-auto），不撑破窄卡片容器；
++ * - 表格按内容取宽 + 字号对齐卡片元信息行（11.5px）；
++ * - 表头品牌色（brand-50 底 + brand-700 字，brand-* 语义阶随 html
++ *   data-theme 双主题换肤，禁硬编码 hex——FRONTEND_PAGE_STYLE §0.5）。
++ *
++ * 安全：渲染经 MarkdownText 内置 rehype-sanitize 统一过滤——卡片内容源自
++ * daemon 上报的扫描文档/知识库（不可信内容红线，契约见 markdown-text.tsx
++ * MARKDOWN_SANITIZE_SCHEMA 注释）；本组件不透传 rehypePlugins、不新开渲染路径。
++ *
++ * 使用示例：`<CardMarkdown content={section.body} className="mt-1.5" />`
++ */
++export interface CardMarkdownProps {
++  /** Markdown 文本内容（卡片正文片段） */
++  content: string;
++  /** 外层容器 className（cn 合并透传） */
++  className?: string;
++}
++
++const CARD_MD_CLASS = cn(
++  "min-w-0 overflow-x-auto",
++  "[&_.wmde-markdown_table]:!w-max [&_.wmde-markdown_table]:!text-[11.5px]",
++  "[&_.wmde-markdown_th]:!bg-brand-50 [&_.wmde-markdown_th]:!text-brand-700",
++);
++
++export function CardMarkdown({ content, className }: CardMarkdownProps) {
++  if (!content) {
++    return null;
++  }
++  return (
++    <div className={cn(CARD_MD_CLASS, className)}>
++      <MarkdownText content={content} size="compact" />
++    </div>
++  );
++}
+diff --git a/frontend/src/components/knowledge/entry-card-list.tsx b/frontend/src/components/knowledge/entry-card-list.tsx
+index 71551cb64..0481442d7 100644
+--- a/frontend/src/components/knowledge/entry-card-list.tsx
++++ b/frontend/src/components/knowledge/entry-card-list.tsx
+@@ -6,7 +6,7 @@
+  *
+  * 单组件配置化承载三形态（约束：禁三套重复实现），按 zone + filename 分发：
+  *   - manual（手册，zone=top 非 INDEX.md）：## 小节 → 逐条正文卡（标题 + 正文
+- *     markdown 纯文本）+ 条目级 🔥 徽标（锚点 `文件#slug` 对齐 hits）；
++ *     markdown 渲染）+ 条目级 🔥 徽标（锚点 `文件#slug` 对齐 hits）；
+  *   - structured（决策/FR，zone∈{decisions,fr}）：## 条目（`## D-xxx@vN : 标题`
+  *     / `## FR-域-NNN 标题`）+ 字段行 → 结构化卡（ID mono 徽标 + 状态 pill +
+  *     字段行网格 + 理由/摘要高亮块 + 取代链条带 + 测试绑定机器块紧凑行——注释
+@@ -37,6 +37,9 @@
+ 
+ import { useState } from "react";
+ 
++import { App as AntdApp } from "antd";
++
++import { CardMarkdown } from "@/components/knowledge/card-markdown";
+ import { cn } from "@/lib/utils";
+ 
+ // ── 公共解析 ────────────────────────────────────────────────────────────────
+@@ -51,6 +54,36 @@ function stripFrontmatter(content: string): string {
+   return content;
+ }
+ 
++/** frontmatter 元信息（卡片头元信息条数据源；字段缺失为 null）。 */
++export interface FrontmatterMeta {
++  author: string | null;
++  createdAt: string | null;
++}
++
++/**
++ * 解析首行 `---` 围栏 frontmatter 的 author / created_at（卡片头元信息条，
++ * 2026-09-23-md-card-render / FR-03 / D-003）。无 frontmatter / 字段缺失 →
++ * 对应字段 null（元信息条整体隐藏，不渲染空行不抛错）；created_at 原样返回
++ * （显示层截前 10 位日期，兼容 `2026-06-23 02:00:00` 与 ISO 两种形态）。
++ * 独立新增——stripFrontmatter 签名与其调用点不动（Grill CC-07 收窄方案）。
++ */
++export function parseFrontmatterMeta(content: string): FrontmatterMeta {
++  const lines = content.split("\n");
++  if ((lines[0] ?? "").trim() !== "---") return { author: null, createdAt: null };
++  const end = lines.findIndex((line, i) => i > 0 && line.trim() === "---");
++  if (end < 0) return { author: null, createdAt: null };
++  let author: string | null = null;
++  let createdAt: string | null = null;
++  for (const line of lines.slice(1, end)) {
++    const m = line.match(/^([A-Za-z_]+):\s*(.*)$/);
++    if (!m) continue;
++    const value = m[2]!.trim().replace(/^["']|["']$/g, "");
++    if (m[1] === "author" && value) author = value;
++    else if (m[1] === "created_at" && value) createdAt = value;
++  }
++  return { author, createdAt };
++}
++
+ /** 恰两级的 `## ` 小节头（`### ` 因第三字符非空白不匹配，parser 同款）。 */
+ const H2_RE = /^##\s+(.+?)\s*$/;
+ 
+@@ -370,6 +403,44 @@ async function copyText(text: string): Promise<void> {
+   }
+ }
+ 
++/**
++ * 锚点复制图标（FR-02 / D-003，原型 panel-c 卡片头 🔗）：点击复制锚点定位串
++ * （manual=``文件#slug``；SingleCard=裸文件名，Grill CC-02），antd message 成功
++ * 提示（经 <AntApp> 注入走主题）；交互对齐 DecisionCard「全文 ↗」复制先例。
++ */
++function AnchorCopyButton({ anchor }: { anchor: string }) {
++  const { message } = AntdApp.useApp();
++  return (
++    <button
++      type="button"
++      data-testid="anchor-copy-btn"
++      aria-label={`复制锚点 ${anchor}`}
++      title={`锚点定位（点击复制）：${anchor}`}
++      onClick={() => {
++        void copyText(anchor);
++        void message.success("锚点已复制");
++      }}
++      className="shrink-0 rounded px-1 text-[11px] leading-4 text-brand-600/70 transition-colors hover:bg-brand-100 hover:text-brand-700"
++    >
++      🔗
++    </button>
++  );
++}
++
++/**
++ * frontmatter 元信息行（FR-03）：显示「✍ 作者 · 日期 收录」；author/createdAt
++ * 任一缺失整条隐藏（降级不渲染空行，兼容策略）。
++ */
++function FrontmatterMetaLine({ meta }: { meta: FrontmatterMeta | null }) {
++  if (!meta?.author || !meta.createdAt) return null;
++  const date = meta.createdAt.slice(0, 10);
++  return (
++    <div data-testid="frontmatter-meta" className="px-2.5 pt-1.5 text-[10.5px] text-muted-foreground/80">
++      ✍ {meta.author} · {date} 收录
++    </div>
++  );
++}
++
+ /** 依据决策域推导：当前文件（fr/<域>.md 或 decisions/<域>.md）→ decisions/<域>.md。 */
+ function decisionsFileFor(filename: string): string {
+   const base = filename.split("/").pop() ?? filename;
+@@ -475,15 +546,14 @@ function DecisionCard({
+           ) : null}
+ 
+           {entry.reason ? (
+-            <div className="mt-1.5 whitespace-pre-wrap break-words rounded bg-brand-50 px-2 py-1.5 text-[11.5px] leading-relaxed">
+-              {entry.reason}
+-            </div>
++            <CardMarkdown
++              content={entry.reason}
++              className="mt-1.5 rounded bg-brand-50 px-2 py-1.5 leading-relaxed"
++            />
+           ) : null}
+ 
+           {entry.body ? (
+-            <p className="mt-1.5 whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-muted-foreground">
+-              {entry.body}
+-            </p>
++            <CardMarkdown content={entry.body} className="mt-1.5 text-muted-foreground" />
+           ) : null}
+ 
+           {entry.testBindings.length > 0 ? (
+@@ -552,6 +622,9 @@ export function EntryCardList({
+   className,
+ }: EntryCardListProps) {
+   const form = detectEntryCardForm(filename, zone);
++  // frontmatter 元信息（FR-03）：顶层解析一次向 manual/SingleCard 各卡传递；
++  // 缺失时 FrontmatterMetaLine 整条降级隐藏。
++  const meta = parseFrontmatterMeta(content);
+ 
+   // ── manual：## 小节逐条正文卡 ──
+   const sections = form === "manual" ? parseEntrySections(content, filename) : [];
+@@ -618,25 +691,31 @@ export function EntryCardList({
+                 key={s.anchor}
+                 data-testid="manual-section-card"
+                 data-entry-anchor={s.anchor}
+-                className="rounded-md border border-border/60 p-2.5 transition-colors hover:border-brand-400"
++                className="overflow-hidden rounded-md border border-border/60 border-l-[3px] border-l-brand-600 transition-colors hover:border-brand-400"
+               >
+-                <div className="flex flex-wrap items-center gap-2">
+-                  <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold">{s.title}</h4>
++                <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-brand-50 px-2.5 py-1.5">
++                  <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold text-brand-700">{s.title}</h4>
+                   {n !== undefined && n > 0 ? (
+                     <UseBadge count={n} title={`条目命中 ${n} 次（${s.anchor}）`} />
+                   ) : null}
++                  <AnchorCopyButton anchor={s.anchor} />
+                 </div>
++                <FrontmatterMetaLine meta={meta} />
+                 {s.body ? (
+-                  <p className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
+-                    {s.body}
+-                  </p>
++                  <CardMarkdown content={s.body} className="px-2.5 pb-2.5 pt-1.5 text-muted-foreground" />
+                 ) : null}
+               </article>
+             );
+           })
+         ) : (
+-          // 无 ## 小节的手册文件兜底：整文件单卡（正文纯文本）。
+-          <SingleCard title={filename} body={stripFrontmatter(content).trim()} count={fileAnchorCount} />
++          // 无 ## 小节的手册文件兜底：整文件单卡（正文 markdown 渲染）。
++          <SingleCard
++            title={filename}
++            body={stripFrontmatter(content).trim()}
++            count={fileAnchorCount}
++            anchor={filename}
++            meta={meta}
++          />
+         )
+       ) : null}
+ 
+@@ -652,7 +731,13 @@ export function EntryCardList({
+             />
+           ))
+         ) : (
+-          <SingleCard title={filename} body={stripFrontmatter(content).trim()} count={fileAnchorCount} />
++          <SingleCard
++            title={filename}
++            body={stripFrontmatter(content).trim()}
++            count={fileAnchorCount}
++            anchor={filename}
++            meta={meta}
++          />
+         )
+       ) : null}
+ 
+@@ -693,26 +778,46 @@ export function EntryCardList({
+       ) : null}
+ 
+       {form === "single" ? (
+-        <SingleCard title={h1 ?? filename} body={singleBody} count={fileAnchorCount} />
++        <SingleCard title={h1 ?? filename} body={singleBody} count={fileAnchorCount} anchor={filename} meta={meta} />
+       ) : null}
+     </div>
+   );
+ }
+ 
+-/** 单条目大卡（generated / 无小节兜底；H1 标题 + 正文）。 */
+-function SingleCard({ title, body, count }: { title: string; body: string; count?: number }) {
++/**
++ * 单条目大卡（generated / 无小节兜底；H1 标题 + 正文 markdown 渲染）。
++ * 卡片头与 manual 小节卡同款重构（FR-02 / D-003，原型 panel-c）：品牌色条 +
++ * brand-50 头底 + brand-700 标题 + 🔗 复制（裸文件名，Grill CC-02）+ 元信息行。
++ */
++function SingleCard({
++  title,
++  body,
++  count,
++  anchor,
++  meta,
++}: {
++  title: string;
++  body: string;
++  count?: number;
++  /** 🔗 复制串：裸文件名（与锚点跳转的文件级口径一致）。 */
++  anchor: string;
++  meta: FrontmatterMeta | null;
++}) {
+   return (
+-    <article data-testid="single-entry-card" className="rounded-md border border-border/60 p-2.5">
+-      <div className="flex flex-wrap items-center gap-2">
+-        <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold">{title}</h4>
++    <article
++      data-testid="single-entry-card"
++      className="overflow-hidden rounded-md border border-border/60 border-l-[3px] border-l-brand-600 transition-colors hover:border-brand-400"
++    >
++      <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-brand-50 px-2.5 py-1.5">
++        <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold text-brand-700">{title}</h4>
+         {count !== undefined && count > 0 ? (
+           <UseBadge count={count} title={`文件级命中 ${count} 次`} />
+         ) : null}
++        <AnchorCopyButton anchor={anchor} />
+       </div>
++      <FrontmatterMetaLine meta={meta} />
+       {body ? (
+-        <p className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
+-          {body}
+-        </p>
++        <CardMarkdown content={body} className="px-2.5 pb-2.5 pt-1.5 text-muted-foreground" />
+       ) : null}
+     </article>
+   );
