@@ -691,7 +691,10 @@ export function EntryCardList({
                 key={s.anchor}
                 data-testid="manual-section-card"
                 data-entry-anchor={s.anchor}
-                className="overflow-hidden rounded-md border border-border/60 border-l-[3px] border-l-brand-600 transition-colors hover:border-brand-400"
+                // shrink-0 必需：页面容器为限高 flex-col（max-h-70vh），overflow-hidden 的
+                // flex 子项自动最小高度归零（CSS 规范），卡片会被均匀压缩致正文裁切
+                // （2026-10-08 部署验收实证）——shrink-0 恢复「超出走容器滚动」原语义。
+                className="shrink-0 overflow-hidden rounded-md border border-border/60 border-l-[3px] border-l-brand-600 transition-colors hover:border-brand-400"
               >
                 <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-brand-50 px-2.5 py-1.5">
                   <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold text-brand-700">{s.title}</h4>
@@ -806,7 +809,8 @@ function SingleCard({
   return (
     <article
       data-testid="single-entry-card"
-      className="overflow-hidden rounded-md border border-border/60 border-l-[3px] border-l-brand-600 transition-colors hover:border-brand-400"
+      // shrink-0 同 manual 卡：防限高 flex-col 容器压缩裁切（见 manual 卡注释）。
+      className="shrink-0 overflow-hidden rounded-md border border-border/60 border-l-[3px] border-l-brand-600 transition-colors hover:border-brand-400"
     >
       <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-brand-50 px-2.5 py-1.5">
         <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold text-brand-700">{title}</h4>

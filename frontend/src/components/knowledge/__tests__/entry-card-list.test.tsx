@@ -344,6 +344,25 @@ describe("手册形态渲染（zone=top 非 INDEX）", () => {
     renderList({ filename: "empty.md", zone: "top", content: "# 只有标题\n\n正文" });
     expect(screen.getByTestId("single-entry-card")).toBeInTheDocument();
   });
+
+  it("限高 flex-col 容器下卡片不被压缩裁切（2026-10-08 部署验收回归）", () => {
+    // 页面容器为 max-h + overflow-y-auto 的 flex-col：overflow-hidden 的 flex 子项
+    // 自动最小高度归零（CSS 规范）会被均匀压缩致正文裁切——卡片必须 shrink-0，
+    // 超出走容器滚动（jsdom 不算布局，以类名锁定修复点，同卡片头类名断言口径）。
+    render(
+      <div className="flex max-h-[10px] flex-col overflow-y-auto">
+        <EntryCardList filename="conventions.md" zone="top" content={MANUAL_CONTENT} />
+      </div>,
+    );
+    expect(screen.getAllByTestId("manual-section-card")[0]!.className).toContain("shrink-0");
+    cleanup();
+    render(
+      <div className="flex max-h-[10px] flex-col overflow-y-auto">
+        <EntryCardList filename="generated/demo.md" zone="generated" content={GENERATED_CONTENT} />
+      </div>,
+    );
+    expect(screen.getByTestId("single-entry-card").className).toContain("shrink-0");
+  });
 });
 
 // ── task-02（2026-09-23-md-card-render）：frontmatter 元信息条 + 锚点复制 ──────
