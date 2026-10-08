@@ -1,0 +1,22 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  PATCH /llm-providers 显式 models=null 违反 schema 声明的 None=不动 契约，None 进入 setattr 撞 models NOT NULL 列返回 500（与 44eb2e5c9 修复的
+  agent_kinds 同型，b8afd807c 合入的 models 列漏配同款防护）
+
+  成功标准：
+
+  - service.update() 对 models 做显式 None-pop，与 agent_kinds 既有防护同款对齐
+
+  - PATCH body models=null 不再 500，原模型列表保持不变（补回归测试覆盖）
+
+  - 本模块相关测试文件全绿
+autopilot: true
+baseline_commit: ce08f8ae7194bd05be50f99933721dba33023d29
+updatedAt: '2026-10-08T00:37:24.581Z'
+baseline_sha256: ec9d1b8da158ba569bf65c5d7d4e00ce91fa8c99f75bc1a74b44be89016d337c
+

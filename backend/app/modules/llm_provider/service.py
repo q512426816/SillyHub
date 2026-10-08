@@ -252,6 +252,13 @@ class LlmProviderService:
         if updates.get("agent_kinds") is None:
             updates.pop("agent_kinds", None)
 
+        # 2026-10-08 followup：models 显式 None = 不动（schema 注释契约「None=不动；
+        # 非 None 时整表替换」）——不 pop 时 None 经 setattr 落列：SQLite 下 JSON 绑定
+        # 序列化为字符串 'null' 静默写坏行（读回 None，LlmProviderRead 序列化 → 列表
+        # 端点 500），NOT NULL 违反态同理；与 agent_kinds/api_key 同款 None-pop 收敛。
+        if updates.get("models") is None:
+            updates.pop("models", None)
+
         # task-05（FR-04 / D-012；D-005 升级集合级）：pi × openai_chat 禁配 Update
         # 侧取行**合并**后判——agent_kinds / api_format 均可选（None=不动），生效组合
         # = 本次显式值 ?? 行现值；勾集含 pi 且生效格式为 openai_chat 即拒（与 Create

@@ -190,6 +190,36 @@ class TestMultiKindUpdateSemantics:
         reread = await svc.get(row.id, user_id)
         assert reread.agent_kinds == ["claude", "codex"]
 
+    @pytest.mark.asyncio
+    async def test_explicit_null_models_is_noop(self, db_session: AsyncSession) -> None:
+        """显式 models=None（openapi 契约 anyOf 允许 null）= 不动（2026-10-08 followup）。
+
+        与 agent_kinds None-pop 同型：不 pop None 时 setattr 落列——实测 SQLite 下
+        JSON 绑定把 None 序列化成字符串 'null' 静默写坏行（读回 None，Read 序列化
+        500），PG 侧撞 models NOT NULL 列（model.py Column(JSON, nullable=False)）。
+        顺带断言非 None 列表仍整表替换，防本防护误伤「显式清空/替换」语义（清空传 []）。
+        """
+        user_id = await _create_user(db_session, label="mk7")
+        svc = LlmProviderService(db_session)
+        row = await svc.create(
+            user_id,
+            LlmProviderCreate(
+                name="md-null",
+                agent_kinds=["claude"],
+                models=[{"name": "m-a", "roles": ["sonnet"]}],
+            ),
+        )
+        updated = await svc.update(row.id, user_id, LlmProviderUpdate(models=None))
+        assert [e["name"] for e in updated.models] == ["m-a"]
+        reread = await svc.get(row.id, user_id)
+        assert [e["name"] for e in reread.models] == ["m-a"]
+        replaced = await svc.update(
+            row.id,
+            user_id,
+            LlmProviderUpdate(models=[{"name": "m-b"}]),
+        )
+        assert [e["name"] for e in replaced.models] == ["m-b"]
+
 
 def _all_rows(user_id: uuid.UUID):
     from sqlalchemy import select
