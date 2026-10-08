@@ -3,7 +3,10 @@
 # Stage 2: copy the venv + source into a slim runtime.
 
 ARG PYTHON_VERSION=3.12
-ARG NODE_VERSION=20
+# 2026-10-08（thin 2026-10-08-backend-node22-for-sillyspec332）：20 → 22——sillyspec >=3.30
+# 用 node:sqlite 内置模块（engines 硬要求 Node >=22.13），Node 20 下容器内任何
+# sillyspec 命令直接 ERR_UNKNOWN_BUILTIN_MODULE 崩溃，与镜像内 3.32.0 技能包不配套。
+ARG NODE_VERSION=22
 ARG CLAUDE_CODE_VERSION=2.1.158
 # 空 → npm install -g sillyspec 取最新；填值 → pin 到该版本（compose build arg 可覆盖）。
 ARG SILLYSPEC_VERSION=""
