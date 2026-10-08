@@ -1,0 +1,61 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "ce08f8ae7194bd05be50f99933721dba33023d29",
+  "totals": {
+    "files": 5,
+    "additions": 114,
+    "deletions": 0
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/backend/modules/change.changelog.md",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/llm_provider/service.py",
+      "additions": 7,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py",
+      "additions": 29,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md",
+      "additions": 23,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/thin-done-src-commit-order-and-attribution-paren.md",
+      "additions": 52,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "8833d572e229b7912ded2e6fd399407449183d0768b34305edd16365a0d4e42a",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T00:58:46.187Z"
+}

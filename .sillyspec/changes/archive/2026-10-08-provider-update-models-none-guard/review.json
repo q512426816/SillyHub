@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-provider-update-models-none-guard",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "7a62308f1e8e7c5c225c3ded30c927edf71df23d",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "回归用例 docstring 保留先红前的预判机制（IntegrityError），与 design/tasks 实测机制（SQLite 静默写坏行）不一致",
+      "evidence": "docstring 写「不 pop None 时 setattr 撞 models NOT NULL 列 → commit IntegrityError」，但 design.md/tasks.md 自记实测为 SQLite JSON 绑定把 None 序列化成字符串 'null' 静默写坏（NOT NULL 不拦，先红时表现 TypeError 而非 IntegrityError；PG 才有 SQL NULL 撞 NOT NULL 形态）；service.py:255-258 防护注释已按实测双形态写准而测试 docstring 未同步，违反 CLAUDE.md 规则 18「注释与实现不一致是万恶之源」的口径，纯文档偏差、无功能风险。",
+      "location": "backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py:197-199"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a——design 答「不适用」属实：单请求内同步字典操作，diff 无事件序/迟到到达参与面",
+    "并发": "ok——边界已裁决：可接受（pop 作用于本地 updates 字典副本，只改 null 语义、不引入锁/事务变更；两个并发 PATCH 最后提交者胜为既有语义，本变更无新增窗口，与 agent_kinds 防护同位同险）",
+    "切换": "ok——边界已裁决：可接受（pop 位于 setattr 循环与 commit 之前，models=null 永不进写路径；中途异常路径与既有完全一致，无残留半更新态新增面）",
+    "作用域": "ok——边界已裁决：可接受（归属校验沿用 self.get(provider_id, user_id)（service.py:245），跨用户 404/403，不涉及跨工作区/多实例串台）"
+  },
+  "reviewedAt": "2026-10-08T09:02:35+08:00"
+}

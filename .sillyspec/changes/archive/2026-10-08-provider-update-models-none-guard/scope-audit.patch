@@ -1,0 +1,343 @@
+diff --git a/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/flow-state.yaml b/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/flow-state.yaml
+new file mode 100644
+index 000000000..f4620dac7
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/flow-state.yaml
+@@ -0,0 +1,22 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  PATCH /llm-providers 显式 models=null 违反 schema 声明的 None=不动 契约，None 进入 setattr 撞 models NOT NULL 列返回 500（与 44eb2e5c9 修复的
++  agent_kinds 同型，b8afd807c 合入的 models 列漏配同款防护）
++
++  成功标准：
++
++  - service.update() 对 models 做显式 None-pop，与 agent_kinds 既有防护同款对齐
++
++  - PATCH body models=null 不再 500，原模型列表保持不变（补回归测试覆盖）
++
++  - 本模块相关测试文件全绿
++autopilot: true
++baseline_commit: ce08f8ae7194bd05be50f99933721dba33023d29
++updatedAt: '2026-10-08T00:37:24.581Z'
++baseline_sha256: ec9d1b8da158ba569bf65c5d7d4e00ce91fa8c99f75bc1a74b44be89016d337c
++
+diff --git a/.sillyspec/docs/backend/modules/change.changelog.md b/.sillyspec/docs/backend/modules/change.changelog.md
+index b929306fd..a18c5d00c 100644
+--- a/.sillyspec/docs/backend/modules/change.changelog.md
++++ b/.sillyspec/docs/backend/modules/change.changelog.md
+@@ -13,3 +13,6 @@ created_at: 2026-08-29 22:56:30
+ 
+ ## 2026-09-27 — 模块触达 doc 路径越界守卫（thin 2026-09-27-audit-followup-hardening）
+ - assets.py 新增 `_safe_module_doc`：模块图 `_module-map.yaml` 的 doc 值属工作区镜像内容，未归一化直拼 `docs/<project> / doc` 可越出项目 docs 根读宿主文件（读面仅 h1 首行回显，低 severity）。越界形态（POSIX 绝对含 `//` UNC、Windows 盘符含 drive-relative、反斜杠归一后判、`..` 段）整条丢弃 → 不读盘、ChangeTouchedModule.doc=None（前端不放预览 chip）、模块名回退 id；正常相对 doc 零回归。测试：test_assets 22 绿（新 traversal 用例红→绿闭环，三形态 + 正常回归）。
++
++## 2026-10-07 — 归档留档缺件回退（thin 2026-10-07-assets-patch-scope-audit-fallback）
++- assets.py 读侧回退补镜像缺口（docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md）：`_read_patch_meta` 缺 change-patch.json 时回退读 scope-audit.json（totals/patchStatus/savedAt 同构直取，file_list 从 rows[].path 投影）——厚流程归档「归档留档」patch 块不再整块缺失；`_read_patch_file_diff` 缺 change.patch 回退切 scope-audit.patch（note 指名实际留档）。两份并存 change-patch.json 优先，thin 形态零变化；DTO/前端零改动。测试：test_assets 28 绿（新增 4：快照回退投影/切片回退/双缺 fail-open/并存优先级）。
+diff --git a/backend/app/modules/llm_provider/service.py b/backend/app/modules/llm_provider/service.py
+index 45b8724de..1ac603ef7 100644
+--- a/backend/app/modules/llm_provider/service.py
++++ b/backend/app/modules/llm_provider/service.py
+@@ -252,6 +252,13 @@ class LlmProviderService:
+         if updates.get("agent_kinds") is None:
+             updates.pop("agent_kinds", None)
+ 
++        # 2026-10-08 followup：models 显式 None = 不动（schema 注释契约「None=不动；
++        # 非 None 时整表替换」）——不 pop 时 None 经 setattr 落列：SQLite 下 JSON 绑定
++        # 序列化为字符串 'null' 静默写坏行（读回 None，LlmProviderRead 序列化 → 列表
++        # 端点 500），NOT NULL 违反态同理；与 agent_kinds/api_key 同款 None-pop 收敛。
++        if updates.get("models") is None:
++            updates.pop("models", None)
++
+         # task-05（FR-04 / D-012；D-005 升级集合级）：pi × openai_chat 禁配 Update
+         # 侧取行**合并**后判——agent_kinds / api_format 均可选（None=不动），生效组合
+         # = 本次显式值 ?? 行现值；勾集含 pi 且生效格式为 openai_chat 即拒（与 Create
+diff --git a/backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py b/backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py
+index 6c3931861..8eacb6d60 100644
+--- a/backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py
++++ b/backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py
+@@ -190,6 +190,35 @@ class TestMultiKindUpdateSemantics:
+         reread = await svc.get(row.id, user_id)
+         assert reread.agent_kinds == ["claude", "codex"]
+ 
++    @pytest.mark.asyncio
++    async def test_explicit_null_models_is_noop(self, db_session: AsyncSession) -> None:
++        """显式 models=None（openapi 契约 anyOf 允许 null）= 不动（2026-10-08 followup）。
++
++        与 agent_kinds None-pop 同型：不 pop None 时 setattr 撞 models NOT NULL 列
++        （model.py Column(JSON, nullable=False)）→ commit IntegrityError。顺带断言
++        非 None 列表仍整表替换，防本防护误伤「显式清空/替换」语义（清空传 []）。
++        """
++        user_id = await _create_user(db_session, label="mk7")
++        svc = LlmProviderService(db_session)
++        row = await svc.create(
++            user_id,
++            LlmProviderCreate(
++                name="md-null",
++                agent_kinds=["claude"],
++                models=[{"name": "m-a", "roles": ["sonnet"]}],
++            ),
++        )
++        updated = await svc.update(row.id, user_id, LlmProviderUpdate(models=None))
++        assert [e["name"] for e in updated.models] == ["m-a"]
++        reread = await svc.get(row.id, user_id)
++        assert [e["name"] for e in reread.models] == ["m-a"]
++        replaced = await svc.update(
++            row.id,
++            user_id,
++            LlmProviderUpdate(models=[{"name": "m-b"}]),
++        )
++        assert [e["name"] for e in replaced.models] == ["m-b"]
++
+ 
+ def _all_rows(user_id: uuid.UUID):
+     from sqlalchemy import select
+diff --git a/docs/sillyspec/thin-flow-done-no-scope-audit-snapshot.md b/docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md
+similarity index 72%
+rename from docs/sillyspec/thin-flow-done-no-scope-audit-snapshot.md
+rename to docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md
+index 8f9451ed7..650aab8ca 100644
+--- a/docs/sillyspec/thin-flow-done-no-scope-audit-snapshot.md
++++ b/docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md
+@@ -65,3 +65,26 @@ thin/heavy 两通道留痕互补缺失，正好各缺一半：
+   为「无冻结对账记录，见沉淀资产」而不是逐行「计划未动」；
+ - 平台侧（backend/assets.py）：`_read_patch_meta` 加 scope-audit.json 回退
+   （totals + rows[].path 投影即可），让厚变更的归档留档 patch 块也有数。
++
++## 处置记录（2026-10-08）
++
++三向修复方向**全部落地**（坑同日由并行会话修复，本日复核验证）：
++
++1. **写侧（CLI，已提交）**：`2026-10-07-unify-close-trace`——`flow done` 经共用
++   `writeCloseTraceArtifacts` 一次写齐四件（change.patch + change-patch.json +
++   scope-audit.json + scope-audit.patch，sha256 双套同锚）；thin 快照带 `closedBy: 'flow
++   done'` 通道标注，回放不误标 execute --done。
++2. **读侧（CLI，已提交 `901aa239`）**：`2026-10-07-scope-audit-thin-patch-replay`——
++   settled 快照缺失时回读 change-patch.json 冻结件出真实三态（文件集过
++   filterDeliverableFiles、行数按冻结 patch 分段统计、三态按 design 清单同款判定、
++   跨仓维持 ⊘ 形态），**存量归档 thin 立即受益**，不再落「计划未动 0/0」失真链。
++3. **平台侧（backend，并行会话工作树在途）**：`2026-10-07-assets-patch-scope-audit-fallback`
++   ——assets.py `_read_patch_meta` 缺 change-patch.json 时回退 scope-audit.json
++   （totals/patchStatus 投影 + scope-audit.patch 点开）——厚变更归档留档 patch 块有数。
++
++**测试证据**：CLI `test/scope-audit-thin-patch-replay.test.mjs` 4/4（含存量归档回放）；
++平台 `app/modules/change/tests/test_assets.py` 28 passed（含「厚流程形态归档只落
++scope-audit 件」回退用例）——本日复跑双绿。UI 三态降权建议未单独实现（读侧回放已让
++降级路径基本不可达，剩余为极端形态：快照与冻结件双缺——note 自述已覆盖）。
++
++归档（CLI 两向已提交；平台侧改动在并行会话工作树，随其变更收口）。
+diff --git a/docs/sillyspec/thin-done-src-commit-order-and-attribution-paren.md b/docs/sillyspec/thin-done-src-commit-order-and-attribution-paren.md
+new file mode 100644
+index 000000000..37cfffde1
+--- /dev/null
++++ b/docs/sillyspec/thin-done-src-commit-order-and-attribution-paren.md
+@@ -0,0 +1,52 @@
++---
++title: thin flow done 两个收尾坑——src 未提交不入冻结面且归档后无重冻结入口；提交归属只认半角括号
++date: 2026-10-08
++status: 活跃（工具缺陷待修；守则可先行）
++source: 2026-10-07-assets-patch-scope-audit-fallback 活体——autopilot 单跑 flow done 后发现冻结 patch 只含 9 个并行会话文件+4 个规格件，本变更 4 个 src 文件全部缺席
++---
++
++# thin 收尾冻结面 × 提交归属解析两个坑
++
++> 一句话守则：**thin 收口前先把 src 提交掉（提交信息带半角括号变更名
++> `(YYYY-MM-DD-<名>)`），再跑 `flow done`；flow done 一旦跑到归档子步，
++> 重冻结入口即关闭。**
++
++## 坑一：src 未提交 → 不入冻结面；autopilot 单跑到底 → 归档后无重冻结入口
++
++- `collectFreezeFiles`（flow-parity.js）：共享主仓里**未提交** dirty 交付面
++  不入冻结面（无法归属，只警告"三选一：①接受缺口 ②重跑 flow done
++  --freeze-dirty ③worktree"）；只有 committed 面与 `.sillyspec/` 本变更目录
++  工作树件入冻。
++- 但 autopilot/单跑 flow done 会**同一次跑完 patch→…→archive→events 全部
++  子步**——警告里的选项②"重跑 flow done --freeze-dirty"在同次归档后已不可
++  达（flow done 只认活跃目录 flow-state.yaml，归档即拒收）。
++- 实测损失：冻结 change.patch/change-patch.json/scope-audit.* 全部缺本变更
++  src，却吸入 baseline..HEAD 窗口内并行会话（ci-sweep 系列）的 9 个已提交
++  测试文件。
++- 修复路径（协议重入，已验证可用）：
++  1. 先 `git commit` 本变更 src（信息带半角括号变更名，见坑二）；
++  2. 归档目录 `mv` 回 `.sillyspec/changes/<名>/`；
++  3. flow-state.yaml 手工复位 `archive:`/`events:` 两个子步标记为空；
++  4. 重跑 `sillyspec flow done --change <名>`——patch 子步的漂移检测
++     （detectPatchDrift：freezeHead..HEAD 含本变更交付提交）自动重冻结 +
++     隔离旧 review + 重归档。
++- 工具侧修复建议：① flow done 在 dirty 警告出现时**不进入 archive 子步**
++  （停在半态等 --freeze-dirty/接受缺口 的显式选择）；或 ② 提供 `flow done
++  --change <已归档名> --refreeze` 的归档态重入口（漂移机制本就支持重建）。
++
++## 坑二：提交归属解析只认半角括号——全角（）惯例下 drift/归属双失灵
++
++- `parseChangeNamesFromSubject`（foreign-declared.js）正则
++  `/\((\d{4}-\d{2}-\d{2}-[A-Za-z0-9._-]+)\)/g` 只匹配**半角** `(...)`。
++- 本仓提交惯例（含工具自己输出的示例）常写全角 `（thin 2026-10-07-xxx；…）`
++  ——解析为空集 → detectPatchDrift 判无本变更交付（不触发重冻结）、
++  buildCommitAttribution 全部落 unknown（归属面失真但不炸）。
++- 守则：交付提交信息里变更名一律用**半角括号**尾缀 `(2026-10-08-<名>)`。
++- 工具侧修复建议：正则兼容全角括号 `（…）` 与 `（thin <名>…）` 形态。
++
++## 关联
++
++- 上游缺陷（thin 不落快照/厚不冻 patch 的镜像缺口）已由工具双轨统一
++  （2026-10-07-unify-close-trace）+ 平台读回退（2026-10-07-assets-patch-
++  scope-audit-fallback）收口，记录在 finished/thin-flow-done-no-scope-audit-
++  snapshot.md；本文件是收尾链上的两个新坑。
+diff --git a/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/design.md b/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/design.md
+new file mode 100644
+index 000000000..eb87cbc37
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/design.md
+@@ -0,0 +1,52 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T00:36:19.669Z
++---
++# 设计记录（Design Record）— 2026-10-08-provider-update-models-none-guard
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++在 `service.update()` 的 updates 弹出区（agent_kinds None-pop 之后、setattr 循环之前）补同款 models None-pop。依据：`schema.py::LlmProviderUpdate.models` 注释已声明契约「None=不动；非 None 时整表替换」（b8afd807c 引入列时声明），但实现漏配——`44eb2e5c9` 已为 agent_kinds 修复同型故障，b8afd807c 晚于其 7 小时合入 models 列却未带上同款防护。
++
++实测故障机制（比预判更隐蔽，task-01 先红时 SQL 追踪确认）：`setattr(row, "models", None)` 后 ORM flush 在 SQLite 上把 Python None 经 JSON 绑定序列化为**字符串 `'null'`** 写入（`UPDATE llm_providers SET models='null'`，非 SQL NULL），NOT NULL 约束不拦——PATCH 返回 200、行被静默写坏；读回 `row.models is None`，`LlmProviderRead.models: list[ProviderModelEntry]` 序列化 None → 该用户 GET /api/llm-providers 列表端点 500（比写路径报错更晚暴露）。PostgreSQL 侧两种形态（SQL NULL 撞 NOT NULL 500 / JSON null 同样静默写坏）均由同一 None-pop 收敛。最小改动：一行防护 + 一条回归用例；不改列定义、不动迁移、不动前端（`formToUpdate` 恒发数组，UI 面本就不触发）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `LlmProviderService.update(provider_id, user_id, data)`：显式 `models=None` 从「setattr → SQLite 静默写坏行（JSON 'null' 字符串）/ PG NOT NULL 500 → 后续列表端点 500」收敛为「不动原列表」，与 agent_kinds / api_key 的 None=不动语义对齐。
++- HTTP `PATCH /api/llm-providers/{id}`：body 携带 `"models": null` 时行不变且成功返回；非 None 列表仍整表替换（既有语义不动）。
++- schema / 路由 / 迁移 / 前端：零改动。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   不适用——单请求内同步处理，无事件序参与。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   与 agent_kinds 防护同位同险；两个并发 PATCH（一个 models=null、一个 models=[新列表]）按既有行级最后提交者胜，本变更不新增窗口（pop 只改变 null 的语义，不引入锁）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   pop 发生在 setattr 循环前，异常路径与既有完全一致；models=null 永不进写路径。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   归属校验沿用 `self.get(provider_id, user_id)`，不涉及跨工作区/多实例串台。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：防护误伤「显式清空/替换列表」语义——已排除：清空应传 `[]`（非 None），防护只拦 None，回归用例内双断言钉死。放弃的方案：schema 层 validator 拒收 models=None——会使 openapi anyOf null 契约与字段注释「None=不动」双双失真，且与 api_key/agent_kinds 既有 None-pop 惯例不一致，不采用。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | backend/app/modules/llm_provider/service.py | update() 补 models 显式 None-pop（一行防护+注释） |
++| 修改 | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | 新增 test_explicit_null_models_is_noop 回归用例（noop + 整表替换不误伤双断言） |
+diff --git a/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/proposal.md b/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/proposal.md
+new file mode 100644
+index 000000000..47beb52b2
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/proposal.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T00:36:19.669Z
++---
++# 提案书（Proposal）— 2026-10-08-provider-update-models-none-guard
++
++## 动机
++
++任务原话转写：PATCH /llm-providers 显式 models=null 违反 schema 声明的 None=不动 契约，None 进入 setattr 撞 models NOT NULL 列返回 500（与 44eb2e5c9 修复的 agent_kinds 同型，b8afd807c 合入的 models 列漏配同款防护）
++成功标准：
++- service.update() 对 models 做显式 None-pop，与 agent_kinds 既有防护同款对齐
++- PATCH body models=null 不再 500，原模型列表保持不变（补回归测试覆盖）
++- 本模块相关测试文件全绿
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. service.update() 对 models 做显式 None-pop，与 agent_kinds 既有防护同款对齐
++2. PATCH body models=null 不再 500，原模型列表保持不变（补回归测试覆盖）
++3. 本模块相关测试文件全绿
++
++## 成功标准（可验证）
++
++1. service.update() 对 models 做显式 None-pop，与 agent_kinds 既有防护同款对齐
++2. PATCH body models=null 不再 500，原模型列表保持不变（补回归测试覆盖）
++3. 本模块相关测试文件全绿
+diff --git a/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/requirements.md b/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/requirements.md
+new file mode 100644
+index 000000000..cb00c5caf
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/requirements.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T00:36:19.669Z
++---
++# 需求规格（Requirements）— 2026-10-08-provider-update-models-none-guard
++
++## 功能需求
++
++### FR-01: service.update() 对 models 做显式 None-pop，与 agent_kinds 既有防护同款对齐
++
++- `LlmProviderService.update()` 收到显式 `models=None`（openapi 契约 anyOf 允许 null）时**必须**按「不动」处理（从 updates 字典弹出），**禁止**让 None 进入 setattr 写到 NOT NULL 列（`model.py::LlmProvider.models` 为 `Column(JSON, nullable=False)`）。
++
++#### 场景：显式 null 更新
++
++- Given：某用户已有一行 provider，models 含条目 m-a
++- When：`svc.update(id, user_id, LlmProviderUpdate(models=None))`
++- Then：更新正常返回（无 IntegrityError），行 models 保持原列表不变
++
++### FR-02: PATCH body models=null 不再 500，原模型列表保持不变（补回归测试覆盖）
++
++- 显式 `models=None` 的 noop 语义**必须**有回归测试覆盖；同用例**必须**顺带断言非 None 列表仍整表替换（防护只拦 None，不得误伤 `[]` 清空/替换语义）。
++
++#### 场景：回归用例双断言
++
++- Given：test_agent_kinds_multi.py 既有 agent_kinds None-pop 用例同款夹具（`_create_user` + service 直调）
++- When：先 `LlmProviderUpdate(models=None)` 再 `LlmProviderUpdate(models=[新列表])`
++- Then：第一次后 models 原样（含重读持久层），第二次后整表替换为新列表
++
++### FR-03: 本模块相关测试文件全绿
++
++- 本变更触碰的测试文件（test_agent_kinds_multi.py）**必须**全绿；全量测试留给 CI（`.claude/CLAUDE.md` 规则 0）。
++
++#### 场景：相关面验证
++
++- Given：仅改动 llm_provider service.py 与该测试文件
++- When：运行该测试文件全量用例
++- Then：全部通过，无回归
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py「TestMultiKindUpdateSemantics::test_explicit_null_models_is_noop」
++FR-02: backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py「TestMultiKindUpdateSemantics::test_explicit_null_models_is_noop」
++FR-03: backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py「全文件」
+diff --git a/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/tasks.md b/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/tasks.md
+new file mode 100644
+index 000000000..a857e0076
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-provider-update-models-none-guard/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T00:36:19.670Z
++---
++# 任务注册表（Tasks）— 2026-10-08-provider-update-models-none-guard
++
++- [x] task-01: 写回归测试 test_explicit_null_models_is_noop（显式 models=None 不动原列表 + 非 None 列表仍整表替换双断言）——验证：修复前单跑该用例，应因 NOT NULL IntegrityError 挂掉（先红）✅ 实测先红（TypeError: updated.models 为 None——SQLite 下 JSON 绑定把 None 序列化成字符串 'null' 静默写坏行，见 design 机制修正）
++- [x] task-02: service.update() 补 models 显式 None-pop（对齐 agent_kinds 既有防护位）——验证：同用例单跑转绿 ✅ 1 passed
++- [x] task-03: 相关面回归——验证：pytest 跑 test_agent_kinds_multi.py 全文件绿（全量留 CI）✅ 7 passed + 顺带 test_llm_provider.py 41 passed + ruff/mypy 0 error

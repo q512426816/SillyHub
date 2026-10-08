@@ -1684,3 +1684,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：ce08f8ae7194bd05be50f99933721dba33023d29
 理由：最大风险：file_list 语义按通道不同——change-patch.json 的 files 数组含 .sillyspec/ 规格工件，scope-audit.json 的 rows 只含对账表行。展示口径随之不同（各自的真实冻结 面），可接受；未来若要求统一需 CLI 侧统一留痕（第 3 层根治）。试过但放弃：在 assets 层实时重算 git diff 补数——引入实时窗口漂移，违背「归档留档冻结在收尾时点」 的既有语义。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-08-provider-update-models-none-guard
+锚点：未记录
+最近确认：87e292759e4934ec73c9c92152c38de97610509e
+理由：最大风险：防护误伤「显式清空/替换列表」语义——已排除：清空应传 `[]`（非 None），防护只拦 None，回归用例内双断言钉死。放弃的方案：schema 层 validator 拒收 models=None——会使 openapi anyOf null 契约与字段注释「None=不动」双双失真，且与 api_key/agent_kinds 既有 None-pop 惯例不一致，不采用。
