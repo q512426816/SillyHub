@@ -10,11 +10,9 @@ description: 用于把当前 SillyHub / multi-agent-platform 项目部署到本�
 把当前仓库用 `deploy/docker-compose.yml` 启动为完整服务栈：
 
 - frontend: Next.js
-- backend: FastAPI
+- backend: FastAPI（python API + 静态分发：技能 manifest/bundle、daemon bundle；agent 执行在宿主 daemon，容器内无 claude/node 二进制——2026-10-08 瘦身）
 - postgres
 - redis
-- Claude Code CLI in the backend container
-- SillySpec CLI in the backend container
 
 默认优先保留用户已有本机进程。如果 `3000` 或 `8000` 已被占用，改用 `3001` / `8001`，不要直接杀进程。
 
@@ -115,16 +113,14 @@ CORS_ALLOWED_ORIGINS=["http://localhost:3001","http://<LAN_IP>:3001"]
 
 ## 代码侧部署兼容性
 
-后端镜像必须内置 agent 运行依赖。检查 `backend/Dockerfile`：
+后端镜像职责 = python API + 静态分发（技能 manifest/bundle、daemon bundle）；agent 执行全在宿主 daemon（2026-10-08 起 claude/node 二进制已随 server-local 遗物清出镜像，见 thin 2026-10-08-backend-image-slim-no-claude）。检查 `backend/Dockerfile`：
 
-- 使用 Node runtime stage 安装 Claude Code 与 SillySpec：
+- Node runtime stage 仅安装 SillySpec（npm 包，技能源；SILLYSPEC_VERSION 空 → 取最新 + SILLYSPEC_REFRESH 时间戳爆破缓存，填值 → pin）：
   ```bash
-  # CLAUDE_CODE_VERSION 写死；SILLYSPEC_VERSION 空 → 取最新，填值 → pin。
-  npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION}
+  npm install -g sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION}
   ```
-- runtime stage 复制 `node`、`npm`、`npx`、`claude`、`sillyspec` 和 `/usr/local/lib/node_modules`。
-- runtime apt 依赖包含 `git`，agent worktree 和 CLI 调用会用到。
-- `HOME=/app`，并确保 `/app/.claude`、`/app/.cache`、`/app/.config`、`/tmp/.npm` 对 `app` 用户可写。
+- 技能与版本件从 sillyspec 包 COPY：`/app/sillyspec-skills/`（manifest/bundle 端点读）+ `/app/sillyspec-package.json`（无 node 环境的版本回显锚点）；runtime 无 node/npm/claude/sillyspec 二进制。
+- runtime apt 依赖包含 `git`（COMMIT_SHA 回退探测与 diff 收集 exec 它）。
 - runtime stage 接收 `ARG COMMIT_SHA` 并 `ENV COMMIT_SHA=${COMMIT_SHA:-}`，让 `/api/health` 的 `commit_sha` 反映镜像版本（backend build context 是 `backend/`、不含仓库 `.git`，必须由 build arg 注入，否则恒为 `unknown`）。
 
 检查 `deploy/docker-compose.yml` 的 backend.build：
@@ -138,25 +134,23 @@ backend:
     additional_contexts:
       daemon: ../sillyhub-daemon
     args:
-      CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.158}
       SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-}   # 空 = 取最新
+      SILLYSPEC_REFRESH: ${SILLYSPEC_REFRESH:-}   # 时间戳爆破 npm 层缓存（打包脚本自动导出）
       COMMIT_SHA: ${COMMIT_SHA:-}                 # 启动前 export，见「启动」节
   env_file:
     - .env
   environment:
     HOME: /app
-    NPM_CONFIG_CACHE: /tmp/.npm
 ```
 
 > 版本号以 `deploy/docker-compose.yml` 实际 build args 为准，本文档中的数字仅为示例，可能滞后。
 >
 > **daemon 一键安装分发**：backend 通过 `additional_contexts: daemon` 把宿主机预构建的 `sillyhub-daemon/build/bundle/sillyhub-daemon.js` 与 `scripts/install.sh` 拷进镜像 `/app/daemon-dist/`，再由 3 个公开端点（无 `/api` 前缀）`GET /daemon/install.sh`、`GET /daemon/latest.json`、`GET /daemon/latest/sillyhub-daemon.js` 提供，使 `curl <SERVER>/daemon/install.sh | bash` 可用。daemon 代码改动后须重跑 `pnpm bundle` 再重建 backend。
 
-后端容器应通过 `backend/docker-entrypoint.sh` 在启动时生成 `/app/.claude/settings.json`，不要把真实 `ANTHROPIC_AUTH_TOKEN` 写进已跟踪的 `.claude/settings.json`。本地真实值只放在 gitignored 的 `deploy/.env`。
-Claude Code 相关变量要通过 `env_file: .env` 注入 backend 容器，避免宿主机 shell 里已有的 `ANTHROPIC_*` 变量覆盖 Docker 配置。
-`/app/.claude` 应挂载到 `claude-data` volume，以保留官方 plugin marketplace 和已安装插件缓存。
+2026-10-08 起：容器内无 claude、无 `.claude/settings.json` 生成、无 claude-data 卷挂载——`.env` 里的 `ANTHROPIC_*`/`CLAUDE_*` 行对容器为惰性变量（agent 凭据走宿主 daemon 自身配置，不经容器）。
 
-推荐的 Docker 内 Claude Code 配置：
+（以下 Claude Code 容器配置已退役，2026-10-08 容器内无 claude，仅作历史参考；agent 模型配置走宿主 daemon 侧：）
+
 
 ```env
 ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic
@@ -166,10 +160,6 @@ ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.2
 ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.2
 ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.2
 CLAUDE_CODE_MODEL=opus
-CLAUDE_PLUGIN_FRONTEND_DESIGN_ENABLED=true
-CLAUDE_PLUGIN_PLAYWRIGHT_ENABLED=true
-CLAUDE_SYNC_OFFICIAL_PLUGINS_ON_START=true
-CLAUDE_SKIP_DANGEROUS_MODE_PERMISSION_PROMPT=true
 ```
 
 如果前端容器里 `/api/*` 代理到 `localhost:8000` 报 `ECONNREFUSED`，检查并修正：
@@ -298,14 +288,14 @@ curl -fsSI http://<LAN_IP>:3001
 - `multi-agent-platform-postgres-1`
 - `multi-agent-platform-redis-1`
 
-验证后端容器内 agent CLI：
+验证后端容器基础工具与 sillyspec 版本件（2026-10-08 起容器内无 node/claude/sillyspec 二进制）：
 
 ```bash
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend sh -lc \
-  'node --version && npm --version && git --version && claude --version && sillyspec --version'
+  'git --version && curl --version | head -1 && cat /app/sillyspec-package.json | grep -m1 version'
 ```
 
-> `sillyspec --version` 反映实际装入版本（`.env` 不设 `SILLYSPEC_VERSION` = 取最新；需固定则回填版本号并重建）。
+> `/app/sillyspec-package.json` 的 version 反映构建时装入的 sillyspec 版本（技能随同包走；`.env` 不设 `SILLYSPEC_VERSION` = 取最新；需固定则回填版本号并重建）。
 
 验证 daemon 一键安装分发（`curl <SERVER>/daemon/install.sh | bash` 依赖的公开端点，无 `/api` 前缀）：
 
@@ -325,25 +315,7 @@ curl -fsS http://127.0.0.1:8001/daemon/install.sh | bash -n && echo SYNTAX_OK
 - `commit_sha` 为 `unknown` → 启动前未 `export COMMIT_SHA`（见「启动」节）。**注意：本机（Windows）按上文豁免故意不传，`unknown` 是稳定性权衡的预期结果，非缺陷。**
 - 任一 `/daemon/*` 返回 `404` → daemon bundle 没构建进镜像，回「启动」节先 `pnpm bundle` 再 `--build --force-recreate` 重建 backend
 
-验证 Docker 内 Claude Code settings，输出时必须遮蔽 token：
-
-```bash
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend python - <<'PY'
-import json
-from pathlib import Path
-settings = json.loads(Path('/app/.claude/settings.json').read_text())
-if settings.get('env', {}).get('ANTHROPIC_AUTH_TOKEN'):
-    settings['env']['ANTHROPIC_AUTH_TOKEN'] = '<set>'
-print(json.dumps(settings, indent=2, ensure_ascii=False))
-PY
-```
-
-还要确认 Claude Code 所需 token 是已注入状态，但不要打印真实值：
-
-```bash
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend sh -lc \
-  'test -n "$ANTHROPIC_AUTH_TOKEN" && echo ANTHROPIC_AUTH_TOKEN=set || echo ANTHROPIC_AUTH_TOKEN=missing'
-```
+（已退役，2026-10-08 起容器内无 claude、无 /app/.claude/settings.json——agent 凭据与模型配置在宿主 daemon 侧管理，本节验证不再适用。）
 
 防火墙检查（局域网访问不通时）：
 

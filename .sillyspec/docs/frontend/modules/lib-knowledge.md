@@ -42,4 +42,7 @@ list 返回 { items, total } 包装；get 按文件名定位（非 id）
 - 新增图查询数据面：`getKnowledgeGraphQuery(wsId, sub, {anchor,anchor2,edges,depth})` / `getKnowledgeGraphOverview()` / `getKnowledgeGraphNodes(wsId, search, limit?)` 三函数 + 16 个 Graph data 分型与三信封类型导出（全取 `components["schemas"]` 生成类型，GraphReason/GraphSub 从信封 reason 字段与 operations 参数提取零手写）。
 - 消费方：知识图谱页（app/.../knowledge/graph/page.tsx）与 OpsDashboard 图维度卡；锚点补全走 nodes 端点 debounce 300ms 静默降级。
 
+### 2026-10-09-frontend-risk-fixes 增量
+- 图谱请求显式超时：`getKnowledgeGraphOverview` timeoutMs=200s（服务端三连 RPC 最坏 180s）、`getKnowledgeGraphQuery` timeoutMs=90s（单 RPC 60s）——不再吃 apiFetch GET 缺省 30s（大仓恒超时实证）；`getKnowledgeGraphNodes` 维持缺省（补全迟答无价值）。lib 层测试 `__tests__/knowledge-graph-timeout.test.ts` 钉住。
+
 <!-- MANUAL_NOTES_END -->

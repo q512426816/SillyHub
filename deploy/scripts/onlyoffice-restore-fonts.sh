@@ -40,10 +40,13 @@ done
 echo "==> 安装字体到 $CONTAINER ..."
 MSYS_NO_PATHCONV=1 docker exec -u root "$CONTAINER" mkdir -p \
   /usr/share/fonts/truetype/founder /usr/share/fonts/truetype/office-cn
+# tar -C 的容器内绝对路径同样要 MSYS_NO_PATHCONV 守卫（Git Bash 下裸 /usr/...
+# 会被改写成 C:/Program Files/Git/usr/...，容器内找不到目录即 set -e 中断）——
+# 与上方 mkdir / 下方 fc-cache 同款（2026-10-09 风险审查补齐，9d2702ffe 同类）。
 tar -C "$FONT_DIR/founder" -cf - . |
-  docker exec -i "$CONTAINER" tar -C /usr/share/fonts/truetype/founder -xf -
+  MSYS_NO_PATHCONV=1 docker exec -i "$CONTAINER" tar -C /usr/share/fonts/truetype/founder -xf -
 tar -C "$FONT_DIR/office-cn" -cf - . |
-  docker exec -i "$CONTAINER" tar -C /usr/share/fonts/truetype/office-cn -xf -
+  MSYS_NO_PATHCONV=1 docker exec -i "$CONTAINER" tar -C /usr/share/fonts/truetype/office-cn -xf -
 
 echo "==> 重建 fontconfig 缓存 ..."
 MSYS_NO_PATHCONV=1 docker exec -u root "$CONTAINER" fc-cache -f >/dev/null 2>&1
