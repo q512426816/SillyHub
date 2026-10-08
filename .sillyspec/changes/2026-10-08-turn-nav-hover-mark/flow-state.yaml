@@ -1,0 +1,22 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  轮次导航窄轨横条悬停展开浮层后，浮层未标记鼠标当前指向的轮次，用户无法建立横条与轮次的对应关系（密集刻度时完全靠猜），需在浮层内实时标记指向行并与 active 高亮区分。
+  成功标准：
+  - 悬停窄轨刻度展开浮层后，浮层内当前指向的轮次行有可见指向标记（与 activeTurnKey 当前轮高亮视觉区分）
+  - 指向标记随鼠标在刻度间/浮层行间移动实时跟随更新
+  - 浮层内指向行超出可视区时自动滚入（block:nearest，不抢既有 active 联动语义之外的新滚动）
+  - 鼠标移开组件后指向标记清除，既有展开/收起/pin/跳转/aria 行为零回归
+  - turn-nav-list 组件单测覆盖上述新行为且既有用例全绿
+autopilot: true
+baseline_commit: 85c8704a7625dafd3a4092285ea9d629d4b3eb6a
+updatedAt: '2026-10-08T03:22:46.844Z'
+baseline_sha256: 2d723132fd9cc21c54c59437a4f3194a2ac42ecbc4201d838a706d81241dc90e
+spec_approved: true
+spec_approved_at: '2026-10-08T03:22:46.346Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+
