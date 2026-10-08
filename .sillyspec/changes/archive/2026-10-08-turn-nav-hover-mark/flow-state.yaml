@@ -7,6 +7,8 @@ substeps:
   review: done
   probes: done
   distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -20,7 +22,7 @@ input: |-
   - turn-nav-list 组件单测覆盖上述新行为且既有用例全绿
 autopilot: true
 baseline_commit: 85c8704a7625dafd3a4092285ea9d629d4b3eb6a
-updatedAt: '2026-10-08T03:33:17.460Z'
+updatedAt: '2026-10-08T03:33:18.552Z'
 baseline_sha256: 2d723132fd9cc21c54c59437a4f3194a2ac42ecbc4201d838a706d81241dc90e
 spec_approved: true
 spec_approved_at: '2026-10-08T03:22:46.346Z'
