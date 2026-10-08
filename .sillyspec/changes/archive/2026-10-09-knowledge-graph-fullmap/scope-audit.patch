@@ -1,0 +1,2596 @@
+diff --git a/backend/app/modules/knowledge/graph.py b/backend/app/modules/knowledge/graph.py
+index 8957a0e05..40dc9a3e4 100644
+--- a/backend/app/modules/knowledge/graph.py
++++ b/backend/app/modules/knowledge/graph.py
+@@ -21,6 +21,12 @@ CLI JSON → DTO 归一化（D-007@v1），按 sillyspec@3.32.1 src/knowledge-gr
+ - ``path``：from/to 在 CLI ``query`` 子对象内；hops 即 ``{s,t,type}`` 直传。
+ - overview 的 summary RPC 固定带 ``clusters: 50``（真图 883 簇，平台 lite 画布
+   摆不下——Phase 0 契约「daemon/平台侧调 summary 固定传 --clusters 50」）。
++- ``dump``（2026-10-09-knowledge-graph-fullmap task-03）：``{ok, nodes:[{id,
++  type,label,x,y}], edges, stats}``——nodes 在 GraphNodeRef 基础上带预计算布局
++  坐标 x/y（Math.round 整数值，DTO float 承载）；stats 与 summary 同源，复用
++  _norm_summary 归一。异常映射区别：``cli_feature_missing:dump`` 显式分支归
++  upgrade_required（旧 CLI 版本态，Grill F-02），区别于其余 cli_feature_missing:*
++  子探测类的 rpc_error 兜底。
+ """
+ 
+ from __future__ import annotations
+@@ -35,6 +41,8 @@ from app.modules.knowledge.schema import (
+     GraphDanglingData,
+     GraphDanglingItem,
+     GraphDecisionRef,
++    GraphDumpData,
++    GraphDumpNode,
+     GraphEdge,
+     GraphEnvelope,
+     GraphHop,
+@@ -56,7 +64,7 @@ GRAPH_RPC_TIMEOUT = 60
+ OVERVIEW_CLUSTERS_LIMIT = 50
+ 
+ 
+-def _map_reason(exc: Exception) -> str:
++def _map_reason(exc: Exception, feature: str | None = None) -> str:
+     """异常族 → reason 六稳定键（D-001@v2 映射表）。
+ 
+     RuntimeNotBound→unbound；DaemonRuntimeOffline→offline；DaemonRpcTimeout 或
+@@ -65,6 +73,11 @@ def _map_reason(exc: Exception) -> str:
+     （消毒拒绝）→invalid_input；其余（internal / DaemonRpcConflict / 未知 code，
+     含 cli_feature_missing:* 子探测类——该态在 overview 由 summary 子块单独吸收）
+     →rpc_error。
++
++    ``feature``（dump 端点传 ``"dump"``）：``cli_feature_missing:<feature>`` 显式
++    分支归 upgrade_required（2026-10-09-knowledge-graph-fullmap / Grill F-02——
++    端点主子命令缺失=旧 CLI 版本态，与 cli_subcommand_missing 同键），区别于其余
++    cli_feature_missing:* 子探测类的 rpc_error 兜底；None 时无此分支（既有行为）。
+     """
+     from app.modules.daemon.ws_hub import (
+         DaemonRpcRemoteError,
+@@ -85,6 +98,8 @@ def _map_reason(exc: Exception) -> str:
+             return "timeout"
+         if code in ("method_unregistered", "cli_subcommand_missing"):
+             return "upgrade_required"
++        if feature is not None and code == f"cli_feature_missing:{feature}":
++            return "upgrade_required"
+         if code == "validation_rejected":
+             return "invalid_input"
+     return "rpc_error"
+@@ -98,6 +113,12 @@ def _as_int(value: Any, default: int = 0) -> int:
+     return value if isinstance(value, int) and not isinstance(value, bool) else default
+ 
+ 
++def _as_float(value: Any, default: float = 0.0) -> float:
++    if isinstance(value, (int, float)) and not isinstance(value, bool):
++        return float(value)
++    return default
++
++
+ def _as_str(value: Any) -> str:
+     return value if isinstance(value, str) else ""
+ 
+@@ -120,21 +141,26 @@ def _node_ref(item: Any) -> GraphNodeRef:
+     return GraphNodeRef(id="", type="", label="")
+ 
+ 
++def _edges_of(graph: dict[str, Any]) -> list[GraphEdge]:
++    """CLI ``edges`` 数组 → GraphEdge 列表（neighbors/dump 共用形状直传）。"""
++    return [
++        GraphEdge(
++            s=_as_str(e.get("s")),
++            t=_as_str(e.get("t")),
++            type=_as_str(e.get("type")),
++            strength=_as_str(e.get("strength")),
++        )
++        for e in _as_list(graph.get("edges"))
++        if isinstance(e, dict)
++    ]
++
++
+ def _norm_neighbors(graph: dict[str, Any], anchor: str | None) -> GraphNeighborsData:
+     query = _query_of(graph)
+     return GraphNeighborsData(
+         anchor=_as_str(query.get("key")) or _as_str(graph.get("anchor")) or _as_str(anchor),
+         nodes=[_node_ref(n) for n in _as_list(graph.get("nodes"))],
+-        edges=[
+-            GraphEdge(
+-                s=_as_str(e.get("s")),
+-                t=_as_str(e.get("t")),
+-                type=_as_str(e.get("type")),
+-                strength=_as_str(e.get("strength")),
+-            )
+-            for e in _as_list(graph.get("edges"))
+-            if isinstance(e, dict)
+-        ],
++        edges=_edges_of(graph),
+     )
+ 
+ 
+@@ -270,6 +296,29 @@ def _norm_nodes(graph: dict[str, Any]) -> GraphNodesData:
+     return GraphNodesData(nodes=[_node_ref(n) for n in _as_list(graph.get("nodes"))])
+ 
+ 
++def _dump_node(item: Any) -> GraphDumpNode:
++    """CLI dump 节点 → GraphDumpNode（GraphNodeRef 归一同款 + x/y 坐标）。"""
++    if isinstance(item, dict):
++        return GraphDumpNode(
++            id=_as_str(item.get("id")),
++            type=_as_str(item.get("type")),
++            label=_as_str(item.get("label")) or _as_str(item.get("title")),
++            x=_as_float(item.get("x")),
++            y=_as_float(item.get("y")),
++        )
++    return GraphDumpNode(id="", type="", label="", x=0.0, y=0.0)
++
++
++def _norm_dump(graph: dict[str, Any]) -> GraphDumpData:
++    # CLI dump 形状：{ok, nodes:[{id,type,label,x,y}], edges, stats}——stats 与
++    # summary 同源（嵌套 stats 子对象，_norm_summary 兼容），nodes/edges 全量不裁剪。
++    return GraphDumpData(
++        nodes=[_dump_node(n) for n in _as_list(graph.get("nodes"))],
++        edges=_edges_of(graph),
++        stats=_norm_summary(graph),
++    )
++
++
+ def _count_of(graph: dict[str, Any]) -> int:
+     """overview 计数：orphans/dangling RPC 的 count（保真原值）；无 count 回退清单长。"""
+     for key in ("count",):
+@@ -289,12 +338,17 @@ class KnowledgeGraphService:
+         self._session = session
+ 
+     async def _rpc(
+-        self, workspace_id: uuid.UUID, user_id: uuid.UUID, params: dict[str, Any]
++        self,
++        workspace_id: uuid.UUID,
++        user_id: uuid.UUID,
++        params: dict[str, Any],
++        feature: str | None = None,
+     ) -> tuple[bool, str | None, dict[str, Any] | None]:
+         """单次 knowledge.graph RPC：返回 ``(available, reason, graph 数据)``。
+ 
+         懒导入与 governance_signals 同款（避免 router 导入链早绑 ws_hub 单例）；
+-        异常族全部收敛为六键 reason，不向端点抛错（HTTP 200 恒信封）。
++        异常族全部收敛为六键 reason，不向端点抛错（HTTP 200 恒信封）。``feature``
++        透传 _map_reason 的 cli_feature_missing:<feature> 显式分支（dump 用）。
+         """
+         try:
+             from app.modules.daemon.ws_hub import get_daemon_ws_hub
+@@ -315,7 +369,7 @@ class KnowledgeGraphService:
+                 timeout=GRAPH_RPC_TIMEOUT,
+             )
+         except Exception as exc:  # 六键映射（含 _resolve_binding 的 RuntimeNotBound）
+-            return False, _map_reason(exc), None
++            return False, _map_reason(exc, feature), None
+         graph = resp.get("graph") if isinstance(resp, dict) else None
+         if not isinstance(graph, dict):
+             # daemon 回包不含 graph 对象——网关级坏包，按 rpc_error 兜底。
+@@ -396,3 +450,17 @@ class KnowledgeGraphService:
+         if not available or graph is None:
+             return GraphEnvelope(available=False, reason=reason, data=None)
+         return GraphEnvelope(available=True, reason=None, data=_norm_nodes(graph))
++
++    async def dump(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> GraphEnvelope:
++        """全图 dump（星空总览数据源，2026-10-09-knowledge-graph-fullmap task-03）。
++
++        单 RPC（sub=dump + layout=true 必带——坐标由 CLI 离线预计算，D-002@v1）；
++        不可用态沿六键，``cli_feature_missing:dump``（旧 CLI 无 dump 子命令）显式
++        归 upgrade_required（Grill F-02），前端据此隐藏全图胶囊回退 orphans。
++        """
++        available, reason, graph = await self._rpc(
++            workspace_id, user_id, {"sub": "dump", "layout": True}, feature="dump"
++        )
++        if not available or graph is None:
++            return GraphEnvelope(available=False, reason=reason, data=None)
++        return GraphEnvelope(available=True, reason=None, data=_norm_dump(graph))
+diff --git a/backend/app/modules/knowledge/router.py b/backend/app/modules/knowledge/router.py
+index e967e4a48..e87b0e003 100644
+--- a/backend/app/modules/knowledge/router.py
++++ b/backend/app/modules/knowledge/router.py
+@@ -2,10 +2,12 @@
+ 
+ from __future__ import annotations
+ 
++import gzip
++import json
+ import uuid
+ from typing import Annotated
+ 
+-from fastapi import APIRouter, Depends, Query, status
++from fastapi import APIRouter, Depends, Query, Response, status
+ from pydantic import BaseModel
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+@@ -21,6 +23,7 @@ from app.modules.knowledge.schema import (
+     DistillQuickEntryList,
+     DistillQuickEntryOut,
+     DistillTaskRead,
++    GraphDumpOut,
+     GraphNodesOut,
+     GraphOverviewOut,
+     GraphQueryOut,
+@@ -256,8 +259,9 @@ async def get_knowledge_stats(
+ 
+ # ── 知识图谱端点（2026-10-08-platform-knowledge-graph task-02 / D-001@v2）────────
+ #
+-# 字面量路由注册序铁律（文件首注释同款）：/knowledge/graph/* 三端点必须在下方
+-# GET /knowledge/{filename:path} 通配之前，否则 graph/query 被当作 filename=
++# 字面量路由注册序铁律（文件首注释同款）：/knowledge/graph/* 四端点（query/
++# overview/nodes + 2026-10-09-knowledge-graph-fullmap task-03 的 dump）必须在
++# 下方 GET /knowledge/{filename:path} 通配之前，否则 graph/query 被当作 filename=
+ # "graph/query" 吞掉。RPC 直采单源真相（无本地回退）：不可用态 HTTP 200 恒回
+ # available=false + reason 六稳定键信封，前端按 reason 分支不弹错。
+ 
+@@ -314,6 +318,34 @@ async def get_knowledge_graph_nodes(
+     return await service.nodes(workspace_id, user.id, search, limit=limit)
+ 
+ 
++@router.get("/knowledge/graph/dump", response_model=GraphDumpOut)
++async def get_knowledge_graph_dump(
++    workspace_id: uuid.UUID,
++    session: SessionDep,
++    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
++) -> Response:
++    """全图 dump（星空总览数据源）：CLI 离线预计算坐标的全量 nodes/edges/stats。
++
++    **手动 gzip 压缩**（2026-10-09-knowledge-graph-fullmap task-03 / Grill F-00：
++    禁止全站 GZipMiddleware——SSE 流经压缩中间件有 zlib 缓冲致事件批量延迟
++    风险，压缩面仅限本端点）：信封 JSON 化（ensure_ascii=False 紧凑分隔符）后
++    ``gzip.compress``，``Content-Encoding: gzip`` 响应头（浏览器 fetch 透明解压）；
++    **无条件压缩**（不可用 data=None 小包同构处理，一致性优先）；``Vary`` 标注
++    缓存按 Accept-Encoding 区分。旧 CLI（cli_feature_missing:dump）恒 200 信封
++    reason=upgrade_required，前端隐藏全图胶囊回退 orphans。
++    """
++    service = KnowledgeGraphService(session)
++    envelope = await service.dump(workspace_id, user.id)
++    payload = json.dumps(
++        envelope.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":")
++    )
++    return Response(
++        content=gzip.compress(payload.encode("utf-8")),
++        media_type="application/json",
++        headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
++    )
++
++
+ # ── 治理信号（2026-09-27-knowledge-governance-cards 三层治理②层平台出口）──────
+ # 字面量路由必须在下方 GET /knowledge/{filename:path} 通配之前（声明顺序铁律，
+ # 同 /knowledge/stats 先例）。从已同步 spec 内容根直接计算——rot 待复核/收件箱
+diff --git a/backend/app/modules/knowledge/schema.py b/backend/app/modules/knowledge/schema.py
+index ebd713f67..985d041f1 100644
+--- a/backend/app/modules/knowledge/schema.py
++++ b/backend/app/modules/knowledge/schema.py
+@@ -359,7 +359,8 @@ class KnowledgeStatsOut(BaseModel):
+ 
+ # ── 知识图谱 DTO（change 2026-10-08-platform-knowledge-graph task-02 / D-001@v2）─
+ #
+-# 图查询三端点（graph/query、graph/overview、graph/nodes）统一信封：HTTP 200 恒
++# 图查询端点（graph/query、graph/overview、graph/nodes + 2026-10-09-
++# knowledge-graph-fullmap task-03 的 graph/dump）统一信封：HTTP 200 恒
+ # 回信封，不可用态由 reason 六稳定键承载（unbound/offline/timeout/upgrade_
+ # required/invalid_input/rpc_error），前端按 available+reason 分支不弹错。数据面
+ # 经 daemon RPC 直采 CLI ``sillyspec knowledge graph <sub> --json`` 单源真相
+@@ -538,6 +539,32 @@ class GraphNodesData(BaseModel):
+     nodes: list[GraphNodeRef] | None = None
+ 
+ 
++# ── 全图 dump DTO（2026-10-09-knowledge-graph-fullmap task-03 / D-002@v1）────────
++#
++# GET /knowledge/graph/dump 数据面：CLI 离线预计算坐标的全量节点/边/聚合（daemon
++# 不裁剪——全量是设计目的，D-003@v1 现算不落盘）。端点内手动 gzip 压缩传输
++# （Grill F-00：压缩面仅限本端点，禁全站 GZipMiddleware）。
++
++
++class GraphDumpNode(BaseModel):
++    """全图节点：GraphNodeRef + CLI 预计算确定性布局坐标（x/y，Math.round 整数值
++    传输为 float）。"""
++
++    id: str
++    type: str = ""
++    label: str = ""
++    x: float = 0.0
++    y: float = 0.0
++
++
++class GraphDumpData(BaseModel):
++    """dump 数据：nodes（含坐标）/edges/stats（与 summary 同源聚合，复用归一）。"""
++
++    nodes: list[GraphDumpNode]
++    edges: list[GraphEdge]
++    stats: GraphSummary
++
++
+ #: query 端点 data 按 sub 分型的联合（五查询主链路 + summary/nodes 直通）。
+ GraphQueryData = (
+     GraphNeighborsData
+@@ -551,3 +578,4 @@ GraphQueryData = (
+ GraphQueryOut = GraphEnvelope[GraphQueryData]
+ GraphOverviewOut = GraphEnvelope[GraphOverviewData]
+ GraphNodesOut = GraphEnvelope[GraphNodesData]
++GraphDumpOut = GraphEnvelope[GraphDumpData]
+diff --git a/backend/app/modules/knowledge/tests/test_graph.py b/backend/app/modules/knowledge/tests/test_graph.py
+index bf7793a60..e4936e83e 100644
+--- a/backend/app/modules/knowledge/tests/test_graph.py
++++ b/backend/app/modules/knowledge/tests/test_graph.py
+@@ -1,7 +1,8 @@
+-"""知识图谱三端点（change 2026-10-08-platform-knowledge-graph task-02/task-03）。
++"""知识图谱三端点（change 2026-10-08-platform-knowledge-graph task-02/task-03）
+++ dump 端点组（2026-10-09-knowledge-graph-fullmap task-03）。
+ 
+-GET /workspaces/{ws}/knowledge/graph/{query,overview,nodes} 的 RPC mock 全分支测试
+-（范式复用 test_governance.py 的 _FakeHub + monkeypatch _resolve_binding /
++GET /workspaces/{ws}/knowledge/graph/{query,overview,nodes,dump} 的 RPC mock 全分支
++测试（范式复用 test_governance.py 的 _FakeHub + monkeypatch _resolve_binding /
+ resolve_root_path_for_daemon 恒等——不发真 RPC）：
+ 
+ - 五查询 happy path：CLI ``--json`` 实际形状（sillyspec@3.32.1 knowledge-graph.js）
+@@ -13,9 +14,14 @@ resolve_root_path_for_daemon 恒等——不发真 RPC）：
+   DaemonRpcConflict 兜底）；
+ - overview 三 RPC 逐条容错组合（summary 单独降级 / orphans 单独降级 / 全失败按
+   首错误整信封降级）；
+-- 路由序（字面量不被 {filename:path} 通配吞）/ 权限 403 / nodes 透传 / 参数 422。
++- 路由序（字面量不被 {filename:path} 通配吞）/ 权限 403 / nodes 透传 / 参数 422；
++- dump 组：手动 gzip（Content-Encoding 头 + httpx 透明解压可还原=真 gzip 钉）、
++  大 payload（>100KB）压缩生效（spy gzip.compress 入/出字节）、压缩面未外溢
++  反例（既有小端点无 Content-Encoding 头，Grill F-00）、cli_feature_missing:dump
++  →upgrade_required 显式分支（区别 cli_feature_missing:* 其它值的 rpc_error 兜底）。
+ """
+ 
++import gzip
+ import shutil
+ import uuid
+ from pathlib import Path
+@@ -136,6 +142,66 @@ _CLI_NODES = {
+     ],
+ }
+ 
++# dump 形状（2026-10-09-knowledge-graph-fullmap task-03，CLI 离线预计算坐标）：
++# {ok, nodes:[{id,type,label,x,y}], edges, stats}——stats 与 summary 同源（复用
++# _CLI_SUMMARY 的 stats 断言 byType→by_type 归一在 dump 链路同样生效）。
++_CLI_DUMP = {
++    "ok": True,
++    "query": {"sub": "dump", "layout": True},
++    "nodes": [
++        # x/y 为 CLI Math.round 整数值（int 进 float DTO 承载）
++        {"id": "module:backend", "type": "module", "label": "backend", "x": 120, "y": -50},
++        {
++            "id": "knowledge/fr/core.md#FR-core-001",
++            "type": "fr",
++            "label": "FR-core-001",
++            "x": 300.5,
++            "y": 88.25,
++        },
++    ],
++    "edges": [
++        {
++            "s": "changes/2026-10-09-fullmap/design.md",
++            "t": "knowledge/fr/core.md#FR-core-001",
++            "type": "describes",
++            "strength": "medium",
++        },
++        {
++            "s": "decisions/daemon.md#D-001",
++            "t": "knowledge/fr/core.md#FR-core-001",
++            "type": "supersedes",
++            "strength": "strong",
++        },
++    ],
++    "stats": _CLI_SUMMARY["stats"],
++}
++
++
++def _big_dump_graph(node_count: int = 1600) -> dict:
++    """>100KB 大 payload mock（确定性生成：重复 id 模式压缩率高，gzip 比断言稳）。"""
++    nodes = [
++        {
++            "id": f"knowledge/gen/file-{i // 50:04d}.md#FR-gen-{i:05d}",
++            "type": "fr",
++            "label": f"FR-gen-{i:05d}·全图节点",
++            "x": float((i * 37) % 5000),
++            "y": float((i * 53) % 5000),
++        }
++        for i in range(node_count)
++    ]
++    edges = [
++        {"s": nodes[i]["id"], "t": nodes[i + 1]["id"], "type": "describes", "strength": "strong"}
++        for i in range(node_count - 1)
++    ]
++    return {
++        "ok": True,
++        "query": {"sub": "dump", "layout": True},
++        "nodes": nodes,
++        "edges": edges,
++        "stats": _CLI_SUMMARY["stats"],
++    }
++
++
+ _BY_SUB = {
+     "neighbors": _CLI_NEIGHBORS,
+     "path": _CLI_PATH,
+@@ -665,3 +731,194 @@ async def test_graph_query_param_validation_422(client, db_session, tmp_path, au
+         base + "/knowledge/graph/nodes", params={"search": "x", "limit": 0}, headers=auth_headers
+     )
+     assert resp.status_code == 422
++
++
++# ── ⑦ dump 端点组（2026-10-09-knowledge-graph-fullmap task-03 / Grill F-00）────
++#
++# 端点手动 gzip（无全站中间件）：httpx 对 Content-Encoding: gzip 响应透明解压——
++# ``resp.json()`` 成功即证明 body 真为 gzip（非 gzip body 配该头会在解压时抛错），
++# 配合 ``content-encoding`` 头断言双钉；压缩「生效」的量化断言用 spy gzip.compress
++# 记录入/出字节数。
++
++
++async def test_graph_dump_happy_path_gzip_envelope(
++    client, db_session, tmp_path, auth_headers, monkeypatch
++) -> None:
++    """dump happy：Content-Encoding=gzip + 解压后信封 data.nodes 逐字段（含 x/y）。"""
++    hub = _mock_graph(monkeypatch, lambda m, p: {"graph": _CLI_DUMP})
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers)
++    resp = await client.get(
++        f"/api/workspaces/{ws['ws_id']}/knowledge/graph/dump", headers=auth_headers
++    )
++    assert resp.status_code == 200, resp.text
++    # 恒带压缩头（无条件压缩语义，Grill F-00：压缩面仅限本端点）
++    assert resp.headers["content-encoding"] == "gzip"
++    assert resp.headers["vary"] == "Accept-Encoding"
++    assert resp.headers["content-type"].startswith("application/json")
++    body = resp.json()  # httpx 透明解压；成功即 body 真为 gzip
++    assert body["available"] is True
++    assert body["reason"] is None
++    assert body["source"] == "daemon-rpc"
++    data = body["data"]
++    # nodes 逐字段：int 坐标 → float 承载；label/type/id 直传
++    assert data["nodes"][0] == {
++        "id": "module:backend",
++        "type": "module",
++        "label": "backend",
++        "x": 120.0,
++        "y": -50.0,
++    }
++    assert data["nodes"][1] == {
++        "id": "knowledge/fr/core.md#FR-core-001",
++        "type": "fr",
++        "label": "FR-core-001",
++        "x": 300.5,
++        "y": 88.25,
++    }
++    assert data["edges"] == [
++        {
++            "s": "changes/2026-10-09-fullmap/design.md",
++            "t": "knowledge/fr/core.md#FR-core-001",
++            "type": "describes",
++            "strength": "medium",
++        },
++        {
++            "s": "decisions/daemon.md#D-001",
++            "t": "knowledge/fr/core.md#FR-core-001",
++            "type": "supersedes",
++            "strength": "strong",
++        },
++    ]
++    # stats 与 summary 同源归一（byType→by_type 在 dump 链路同样生效）
++    assert data["stats"]["by_type"] == {"fr": 5, "decision": 4}
++    assert data["stats"]["by_edge"] == {"describes": 8, "supersedes": 2}
++    assert data["stats"]["nodes"] == 12
++    assert data["stats"]["clusters"][0]["key"] == "fr:core"
++    # 单 RPC 契约（sub=dump + layout=true 必带）
++    assert len(hub.calls) == 1
++    method, params = hub.calls[0]
++    assert method == "knowledge.graph"
++    assert params["sub"] == "dump"
++    assert params["layout"] is True
++    assert params["root"] == "/repo/graph"
++    assert params["workspace_id"] == ws["ws_id"]
++
++
++async def test_graph_dump_large_payload_compression_effective(
++    client, db_session, tmp_path, auth_headers, monkeypatch
++) -> None:
++    """>100KB 大 payload：压缩真实生效（spy 入/出字节，出 < 入/2）且解压可还原。"""
++    sizes: list[tuple[int, int]] = []
++    orig_compress = gzip.compress
++
++    def _spy_compress(data, *args, **kwargs):
++        out = orig_compress(data, *args, **kwargs)
++        sizes.append((len(data), len(out)))
++        return out
++
++    monkeypatch.setattr(gzip, "compress", _spy_compress)
++    big = _big_dump_graph()
++    _mock_graph(monkeypatch, lambda m, p: {"graph": big})
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers)
++    resp = await client.get(
++        f"/api/workspaces/{ws['ws_id']}/knowledge/graph/dump", headers=auth_headers
++    )
++    assert resp.status_code == 200, resp.text
++    assert resp.headers["content-encoding"] == "gzip"
++    # 端点内单次压缩：入参 >100KB（真实全图量级），出参 < 入参/2（确定性重复
++    # id 模式 gzip 压缩比远高于此，断言留足余量防版本抖动）。
++    assert len(sizes) == 1
++    raw_len, wire_len = sizes[0]
++    assert raw_len > 100 * 1024, raw_len
++    assert wire_len * 2 < raw_len, (wire_len, raw_len)
++    # 解压可还原：节点/边数量与首末 id 逐点核对
++    body = resp.json()
++    assert body["available"] is True
++    data = body["data"]
++    assert len(data["nodes"]) == len(big["nodes"])
++    assert len(data["edges"]) == len(big["edges"])
++    assert data["nodes"][0]["id"] == big["nodes"][0]["id"]
++    assert data["nodes"][-1]["id"] == big["nodes"][-1]["id"]
++    assert data["nodes"][0]["x"] == 0.0  # (0*37)%5000 确定性坐标透传
++
++
++async def test_graph_dump_existing_endpoints_no_content_encoding(
++    client, db_session, tmp_path, auth_headers
++) -> None:
++    """压缩面未外溢反例（Grill F-00）：既有小端点响应无 Content-Encoding 头——
++    不加全站 GZipMiddleware 的零回归钉（SSE 面同理由此中间件缺席而不受影响）。"""
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers)
++    # 全局小端点
++    resp = await client.get("/api/health")
++    assert resp.status_code == 200, resp.text
++    assert "content-encoding" not in resp.headers
++    # 既有 knowledge 端点（stats，2026-09-20 交付）
++    resp = await client.get(f"/api/workspaces/{ws['ws_id']}/knowledge/stats", headers=auth_headers)
++    assert resp.status_code == 200, resp.text
++    assert "content-encoding" not in resp.headers
++    # 既有 graph 端点（query，未绑定自然态恒 200 信封）——同族小包不压缩对照
++    resp = await client.get(
++        f"/api/workspaces/{ws['ws_id']}/knowledge/graph/query",
++        params={"sub": "orphans"},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    assert "content-encoding" not in resp.headers
++
++
++async def test_graph_dump_cli_feature_missing_upgrade_required(
++    client, db_session, tmp_path, auth_headers, monkeypatch
++) -> None:
++    """cli_feature_missing:dump 显式分支 → upgrade_required（区别 rpc_error 兜底）；
++    不可用小包信封同构走 gzip。"""
++    from app.modules.daemon.ws_hub import DaemonRpcRemoteError
++
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers)
++    url = f"/api/workspaces/{ws['ws_id']}/knowledge/graph/dump"
++
++    _mock_graph(
++        monkeypatch,
++        _raise(
++            DaemonRpcRemoteError({"code": "cli_feature_missing:dump", "message": "旧 CLI 无 dump"})
++        ),
++    )
++    resp = await client.get(url, headers=auth_headers)
++    assert resp.status_code == 200, resp.text
++    assert resp.headers["content-encoding"] == "gzip"  # data=None 小包也同构压缩
++    assert resp.json() == {
++        "available": False,
++        "reason": "upgrade_required",
++        "source": "daemon-rpc",
++        "data": None,
++    }
++
++    # 对照：非本端点 feature 的 cli_feature_missing:* 仍走 rpc_error 兜底
++    # （显式分支按 feature 域生效，非整族翻键）
++    _mock_graph(
++        monkeypatch,
++        _raise(
++            DaemonRpcRemoteError({"code": "cli_feature_missing:summary", "message": "子探测类"})
++        ),
++    )
++    resp = await client.get(url, headers=auth_headers)
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["reason"] == "rpc_error"
++
++
++async def test_graph_dump_route_order_and_permission(
++    client, db_session, tmp_path, auth_headers
++) -> None:
++    """路由序：dump 200 信封（被 {filename:path} 通配吞则 get_knowledge 404）；
++    无 KNOWLEDGE_READ 普通用户 403。未绑定自然态信封也恒带压缩头。"""
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers)
++    url = f"/api/workspaces/{ws['ws_id']}/knowledge/graph/dump"
++    resp = await client.get(url, headers=auth_headers)
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert set(body) == {"available", "reason", "source", "data"}
++    assert body["source"] == "daemon-rpc"
++    assert resp.headers["content-encoding"] == "gzip"
++
++    headers = await _plain_user_headers(db_session)
++    resp = await client.get(url, headers=headers)
++    assert resp.status_code == 403, resp.text
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 398f2b4a3..0f21fa866 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -20775,6 +20775,50 @@
+         }
+       }
+     },
++    "/api/workspaces/{workspace_id}/knowledge/graph/dump": {
++      "get": {
++        "tags": [
++          "knowledge"
++        ],
++        "summary": "Get Knowledge Graph Dump",
++        "description": "全图 dump（星空总览数据源）：CLI 离线预计算坐标的全量 nodes/edges/stats。\n\n**手动 gzip 压缩**（2026-10-09-knowledge-graph-fullmap task-03 / Grill F-00：\n禁止全站 GZipMiddleware——SSE 流经压缩中间件有 zlib 缓冲致事件批量延迟\n风险，压缩面仅限本端点）：信封 JSON 化（ensure_ascii=False 紧凑分隔符）后\n``gzip.compress``，``Content-Encoding: gzip`` 响应头（浏览器 fetch 透明解压）；\n**无条件压缩**（不可用 data=None 小包同构处理，一致性优先）；``Vary`` 标注\n缓存按 Accept-Encoding 区分。旧 CLI（cli_feature_missing:dump）恒 200 信封\nreason=upgrade_required，前端隐藏全图胶囊回退 orphans。",
++        "operationId": "get_knowledge_graph_dump_api_workspaces__workspace_id__knowledge_graph_dump_get",
++        "parameters": [
++          {
++            "name": "workspace_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Workspace Id"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/GraphEnvelope_GraphDumpData_"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/workspaces/{workspace_id}/knowledge/governance": {
+       "get": {
+         "tags": [
+@@ -46830,6 +46874,69 @@
+         "title": "GraphDecisionRef",
+         "description": "impact 决策/FR 引用（CLI 实际形状：id/type/status，status=decision 状态位）。"
+       },
++      "GraphDumpData": {
++        "properties": {
++          "nodes": {
++            "items": {
++              "$ref": "#/components/schemas/GraphDumpNode"
++            },
++            "type": "array",
++            "title": "Nodes"
++          },
++          "edges": {
++            "items": {
++              "$ref": "#/components/schemas/GraphEdge"
++            },
++            "type": "array",
++            "title": "Edges"
++          },
++          "stats": {
++            "$ref": "#/components/schemas/GraphSummary"
++          }
++        },
++        "type": "object",
++        "required": [
++          "nodes",
++          "edges",
++          "stats"
++        ],
++        "title": "GraphDumpData",
++        "description": "dump 数据：nodes（含坐标）/edges/stats（与 summary 同源聚合，复用归一）。"
++      },
++      "GraphDumpNode": {
++        "properties": {
++          "id": {
++            "type": "string",
++            "title": "Id"
++          },
++          "type": {
++            "type": "string",
++            "title": "Type",
++            "default": ""
++          },
++          "label": {
++            "type": "string",
++            "title": "Label",
++            "default": ""
++          },
++          "x": {
++            "type": "number",
++            "title": "X",
++            "default": 0.0
++          },
++          "y": {
++            "type": "number",
++            "title": "Y",
++            "default": 0.0
++          }
++        },
++        "type": "object",
++        "required": [
++          "id"
++        ],
++        "title": "GraphDumpNode",
++        "description": "全图节点：GraphNodeRef + CLI 预计算确定性布局坐标（x/y，Math.round 整数值\n传输为 float）。"
++      },
+       "GraphEdge": {
+         "properties": {
+           "s": {
+@@ -46859,6 +46966,54 @@
+         "title": "GraphEdge",
+         "description": "边（s→t 定方向；strength=strong/medium/weak 三档，前端线型派生依据）。"
+       },
++      "GraphEnvelope_GraphDumpData_": {
++        "properties": {
++          "available": {
++            "type": "boolean",
++            "title": "Available"
++          },
++          "reason": {
++            "anyOf": [
++              {
++                "type": "string",
++                "enum": [
++                  "unbound",
++                  "offline",
++                  "timeout",
++                  "upgrade_required",
++                  "invalid_input",
++                  "rpc_error"
++                ]
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Reason"
++          },
++          "source": {
++            "type": "string",
++            "const": "daemon-rpc",
++            "title": "Source",
++            "default": "daemon-rpc"
++          },
++          "data": {
++            "anyOf": [
++              {
++                "$ref": "#/components/schemas/GraphDumpData"
++              },
++              {
++                "type": "null"
++              }
++            ]
++          }
++        },
++        "type": "object",
++        "required": [
++          "available"
++        ],
++        "title": "GraphEnvelope[GraphDumpData]"
++      },
+       "GraphEnvelope_GraphNodesData_": {
+         "properties": {
+           "available": {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx
+index 4dd1e2252..37d0fac30 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx
+@@ -3,25 +3,30 @@
+ /**
+  * 知识图谱页（/workspaces/[id]/knowledge/graph）——task-07 /
+  * 2026-10-08-platform-knowledge-graph / FR-05 / FR-06 / D-002@v1 / D-003@v1 /
+- * D-006@v1 / D-008@v2。
++ * D-006@v1 / D-008@v2；全图默认视图 task-06 / 2026-10-09-knowledge-graph-fullmap /
++ * FR-04 / D-001@v1 / D-002@v1。
+  *
+  * 三栏直译归档原型（sillyspec 仓 archive/2026-10-08-knowledge-graph/
+- * prototype-knowledge-graph.html）+ lite 数据面扩展（原型未覆盖新面，R-04）：
++ * prototype-knowledge-graph.html）+ 全图 dump 数据面（task-06 新面）：
+  *
+- *   - 左 300px：数据面胶囊（总览 lite / 查询切片——D-008@v2 状态机：执行查询或
+- *     点代表节点自动切切片，胶囊手动回 lite；summary=null 旧 CLI 时 lite 胶囊
+- *     隐藏）+ 查询表单（sub 七值默认 orphans / anchor·anchor2 补全输入 /
+- *     edges all+16 型 / depth 1-3）+ 等价 CLI 提示条（黑底等宽动态拼）+
+- *     预置演示六胶囊 + 图例（节点 10 类型与边 16 型三档点击高亮）；
+- *   - 中：GraphCanvas（task-06）+ mode-chip（查询标题 · 引擎 · 节点数）；
+- *   - 右 340px 三 tab：节点详情（色点/类型 chip/按边型分组出入邻居，行点击跳选；
+- *     entry 类节点深链 /knowledge?file=&anchor=，page.tsx:274-279 惯例）/
+- *     查询结果（ok/warn 左条结果卡；path 不可达 reason + 强边寻路注记；
+- *     orphans/dangling top-50 清单 + count 口径）/ 使用说明简版。
++ *   - 左 300px：数据面胶囊（全图 / 查询切片——dump 可用即全图，点全图节点
++ *     自动下钻切切片，胶囊手动回全图；dump 不可用（upgrade_required 等）→
++ *     全图胶囊隐藏）+ 查询表单（sub 七值默认 orphans / anchor·anchor2 补全
++ *     输入 / edges all+16 型 / depth 1-3）+ 等价 CLI 提示条（黑底等宽动态拼，
++ *     全图态为 dump 命令）+ 预置演示六胶囊 + 图例（节点 10 类型与边 16 型
++ *     三档点击高亮）；
++ *   - 中：GraphCanvas（full=全图静态星空：dump 预计算坐标不跑力场 /
++ *     slice=力场切片）+ mode-chip（全图态「全图 N 节点 · 静态」）；
++ *   - 右 340px 三 tab：节点详情（色点/类型 chip/按边型分组出入邻居，行点击
++ *     跳选；entry 类节点深链 /knowledge?file=&anchor=，page.tsx:274-279 惯例）/
++ *     查询结果（full 态=图统计卡：dump.stats 节点/边/类型分布/四计数 +「点击
++ *     节点下钻」提示；切片态=ok/warn 左条结果卡，path 不可达 reason + 强边
++ *     寻路注记，orphans/dangling top-50 清单 + count 口径）/ 使用说明简版。
+  *
+- * 默认视图（D-006）：overview 可用即自动发起 orphans（warn 红环 + 右栏孤儿清单
+- * + mode-chip「orphans · 孤儿节点」）；?preset=orphans|dangling 深链（ops 图卡
+- * 清单行跳转目标）按 preset 发起。
++ * 默认视图（task-06）：dump 可用即进全图星空（D-002@v1）；不可用（reason=
++ * upgrade_required / available=false / 请求失败）→ 回退既有 orphans 默认链
++ * （D-006）；?preset=orphans|dangling 深链（ops 图卡清单行跳转目标）按 preset
++ * 发起，显式深链优先于全图默认。
+  *
+  * unavailable（D-001@v2 六稳定键）：全页降级卡复用 ops-dashboard 的
+  * graphReasonText 六键文案；unbound 附「去绑定」入口（runtime 页）；
+@@ -52,6 +57,7 @@ import {
+ import { graphReasonText } from "@/components/knowledge/ops-dashboard";
+ import { buttonVariants, Button } from "@/components/ui/button";
+ import {
++  getKnowledgeGraphDump,
+   getKnowledgeGraphNodes,
+   getKnowledgeGraphOverview,
+   getKnowledgeGraphQuery,
+@@ -61,6 +67,7 @@ import {
+   type GraphSub,
+ } from "@/lib/knowledge";
+ import {
++  knowledgeGraphDumpQueryKey,
+   knowledgeGraphNodesQueryKey,
+   knowledgeGraphOverviewQueryKey,
+   knowledgeGraphQueryKey,
+@@ -188,12 +195,12 @@ const DEFAULT_QUERY: GraphQueryState = {
+ /** active=null 时的占位查询键（enabled=false 恒不发起）。 */
+ const GRAPH_QUERY_NONE_KEY = ["knowledgeGraph", "query", "none"] as const;
+ 
+-// ── 稳定空常量（GraphCanvas 以 nodes/edges/clusters 的 identity 变化判定新切片）──
++// ── 稳定空常量（GraphCanvas 以 nodes/edges 的 identity 变化判定新切片）──────
+ const EMPTY_NODES: GraphNodeRef[] = [];
+ const EMPTY_EDGES: GraphEdge[] = [];
+ const EMPTY_SET: ReadonlySet<string> = new Set();
+ 
+-/** 画布切片视图（lite 模式不用；warnIds=orphans/dangling 红环集）。 */
++/** 画布切片视图（full 模式不用；warnIds=orphans/dangling 红环集）。 */
+ interface SliceView {
+   nodes: GraphNodeRef[];
+   edges: GraphEdge[];
+@@ -451,26 +458,46 @@ export default function KnowledgeGraphPage({ params }: Props) {
+   /** 图例/详情色点：themes.ts 单一源（GraphCanvas 注入同一组 CSS 变量）。 */
+   const palette = useMemo(() => nodePalette(theme), [theme]);
+ 
+-  // ── 数据链：overview（lite 数据面 + 页面可用性门）与查询切片 ──────────────
++  // ── 数据链：overview（页面可用性门）/ dump（全图数据面）/ 查询切片 ──────────
+   const overviewQ = useQuery({
+     queryKey: knowledgeGraphOverviewQueryKey(workspaceId),
+     queryFn: () => getKnowledgeGraphOverview(workspaceId),
+   });
+-  const overviewData = overviewQ.data?.available ? overviewQ.data.data ?? null : null;
+-  const summary = overviewData?.summary ?? null;
++
++  // 全图 dump（task-06 / D-002@v1）：overview 可用才发起（不可用整页降级，
++  // dump 无意义）；全量回包重 → staleTime 5 分钟（60s 请求超时在 lib 侧）。
++  const dumpQ = useQuery({
++    queryKey: knowledgeGraphDumpQueryKey(workspaceId),
++    queryFn: () => getKnowledgeGraphDump(workspaceId),
++    enabled: overviewQ.data?.available === true,
++    staleTime: 5 * 60_000,
++  });
++  const dumpData = dumpQ.data?.available ? dumpQ.data.data ?? null : null;
++  /** 全图可用（available=true 且有数据）；失败/不可用回退 orphans 默认链。 */
++  const dumpAvailable = dumpData != null;
++  /** 全图节点/边（identity 稳定——GraphCanvas 据此判定新数据面）。 */
++  const dumpNodes = useMemo(
++    () => dumpData?.nodes ?? EMPTY_NODES,
++    [dumpData],
++  );
++  const dumpEdges = useMemo(
++    () => dumpData?.edges ?? EMPTY_EDGES,
++    [dumpData],
++  );
++  const dumpStats = dumpData?.stats ?? null;
+ 
+   const [draft, setDraft] = useState<GraphQueryState>(DEFAULT_QUERY);
+   /** 已执行查询（null=未发起；发起即切切片模式）。 */
+   const [active, setActive] = useState<GraphQueryState | null>(null);
+-  /** lite ↔ 切片状态机（D-008@v2）：查询/点代表→slice；胶囊手动→lite。 */
+-  const [dataMode, setDataMode] = useState<"lite" | "slice">("slice");
++  /** 全图 ↔ 切片状态机（task-06）：查询/点全图节点→slice；胶囊手动→full。 */
++  const [dataMode, setDataMode] = useState<"full" | "slice">("slice");
+   const [selectedId, setSelectedId] = useState<string | null>(null);
+   const [rightTab, setRightTab] = useState<"detail" | "result" | "help">("result");
+   const [legendNodeType, setLegendNodeType] = useState<string | null>(null);
+   const [legendEdgeType, setLegendEdgeType] = useState<string | null>(null);
+   const [fitSignal, setFitSignal] = useState(0);
+   const [layoutInfo, setLayoutInfo] = useState<{
+-    engine: "force" | "static" | "lite";
++    engine: "force" | "static" | "full";
+     nodeCount: number;
+   } | null>(null);
+ 
+@@ -485,7 +512,7 @@ export default function KnowledgeGraphPage({ params }: Props) {
+     setRightTab("result");
+   }, []);
+ 
+-  /** lite 代表节点下钻：以该节点为锚点发起 neighbors（D-008@v2 状态机）。 */
++  /** 全图节点下钻：以该节点为锚点发起 neighbors（切切片，task-06 状态机）。 */
+   const runNeighbors = useCallback(
+     (anchor: string) => {
+       runQuery({ ...DEFAULT_QUERY, sub: "neighbors", anchor });
+@@ -493,18 +520,26 @@ export default function KnowledgeGraphPage({ params }: Props) {
+     [runQuery],
+   );
+ 
+-  // 默认视图（D-006）：overview 可用即自动发起（?preset=dangling 深链优先，
+-  // 缺省 orphans）——只在首次可用落定时执行一次（bootstrappedRef 守卫）。
++  // 默认视图（task-06 / D-002@v1）：overview 可用且 dump 定局后执行一次
++  //（bootstrappedRef 守卫）——?preset 深链优先（ops 图卡清单行显式意图）；
++  // dump 可用 → 全图星空；不可用（upgrade_required / available=false / 失败）
++  // → 回退既有 orphans 默认链（D-006）。
+   const bootstrappedRef = useRef(false);
+   useEffect(() => {
+     if (bootstrappedRef.current || !overviewQ.data?.available) return;
++    if (dumpQ.isPending) return; // 等 dump 定局再决定首视图
+     bootstrappedRef.current = true;
+     const preset = searchParams.get("preset");
++    if (!preset && dumpAvailable) {
++      setDataMode("full");
++      setRightTab("result");
++      return;
++    }
+     const sub: GraphSub = preset === "dangling" ? "dangling" : "orphans";
+     runQuery({ ...DEFAULT_QUERY, sub });
+     // runQuery 稳定（setState-only）；searchParams 仅首载消费一次。
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [overviewQ.data, runQuery]);
++  }, [overviewQ.data, dumpQ.isPending, dumpAvailable, runQuery]);
+ 
+   // ── 查询切片数据链（active 进 key；norm 参数与 key 同源）─────────────────
+   const activeParams = useMemo(() => {
+@@ -547,7 +582,6 @@ export default function KnowledgeGraphPage({ params }: Props) {
+     [activeParams, queryQ.data],
+   );
+   const nodeMap = useMemo(() => new Map(slice.nodes.map((n) => [n.id, n] as const)), [slice]);
+-  const clusters = useMemo(() => summary?.clusters ?? [], [summary]);
+ 
+   // ── 高亮集：选中一跳邻域 ∪ 图例节点类型 ∪ 图例边型（原型语义合并）────────
+   const highlight = useMemo(() => {
+@@ -599,10 +633,10 @@ export default function KnowledgeGraphPage({ params }: Props) {
+     return [...groups.values()];
+   }, [selectedId, slice]);
+ 
+-  /** 画布节点选择：lite 模式代表节点=下钻 neighbors；切片模式=选中看详情。 */
++  /** 画布节点选择：全图模式=下钻 neighbors（切切片）；切片模式=选中看详情。 */
+   const handleCanvasSelect = useCallback(
+     (id: string | null) => {
+-      if (dataMode === "lite") {
++      if (dataMode === "full") {
+         if (id) runNeighbors(id);
+         return;
+       }
+@@ -612,8 +646,9 @@ export default function KnowledgeGraphPage({ params }: Props) {
+     [dataMode, runNeighbors],
+   );
+ 
+-  const goLite = useCallback(() => {
+-    setDataMode("lite");
++  /** 胶囊手动回全图（状态机钉死：只有胶囊回全图）。 */
++  const goFull = useCallback(() => {
++    setDataMode("full");
+     setSelectedId(null);
+     setLegendNodeType(null);
+     setLegendEdgeType(null);
+@@ -621,20 +656,27 @@ export default function KnowledgeGraphPage({ params }: Props) {
+   }, []);
+ 
+   const engineText =
+-    layoutInfo?.engine === "static"
++    layoutInfo?.engine === "static" || layoutInfo?.engine === "full"
+       ? "静态布局"
+-      : layoutInfo?.engine === "lite"
+-        ? "lite 总览"
+-        : "力场";
++      : "力场";
++  /** 全图 by_type 分布前几行（stats 卡类型分布，count 降序 top-6）。 */
++  const byTypeRows = useMemo(() => {
++    if (!dumpStats) return [];
++    return Object.entries(dumpStats.by_type ?? {})
++      .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
++      .slice(0, 6);
++  }, [dumpStats]);
+   const chipText =
+-    dataMode === "lite"
+-      ? `总览 lite · ${clusters.length} 簇 · 代表为度数前 5`
++    dataMode === "full"
++      ? `全图 ${dumpStats ? dumpStats.nodes : 0} 节点 · 静态`
+       : `${active ? subTitle(active) : "查询切片"}${
+           layoutInfo ? ` · ${layoutInfo.nodeCount} 节点 · ${engineText}` : ""
+         }`;
+ 
+-  // CLI 提示条（黑底等宽，动态拼当前 draft；非缺省旗标才出现）。
++  // CLI 提示条（黑底等宽，动态拼当前 draft；非缺省旗标才出现）。全图态为
++  // dump 命令（等价 CLI 语义：本页全图 = CLI dump --layout 产物）。
+   const cliCommand = useMemo(() => {
++    if (dataMode === "full") return "sillyspec knowledge graph dump --layout";
+     const parts = ["sillyspec", "knowledge", "graph", draft.sub];
+     if (draft.anchor.trim()) parts.push(`"${draft.anchor.trim()}"`);
+     if (draft.sub === "path" && draft.anchor2.trim()) parts.push(`"${draft.anchor2.trim()}"`);
+@@ -642,7 +684,7 @@ export default function KnowledgeGraphPage({ params }: Props) {
+     if (draft.depth !== 1) parts.push(`--depth ${draft.depth}`);
+     parts.push("--json");
+     return parts.join(" ");
+-  }, [draft]);
++  }, [dataMode, draft]);
+ 
+   const canRun = !(SUB_NEEDS_ANCHOR.has(draft.sub) && draft.anchor.trim() === "");
+   const runDraft = useCallback(() => {
+@@ -709,7 +751,7 @@ export default function KnowledgeGraphPage({ params }: Props) {
+     );
+   }
+ 
+-  const lite = dataMode === "lite";
++  const full = dataMode === "full";
+   const queryEnvelope = queryQ.data;
+ 
+   return (
+@@ -741,37 +783,37 @@ export default function KnowledgeGraphPage({ params }: Props) {
+       <div className="flex min-h-[560px] flex-col gap-3 lg:h-[calc(100vh-235px)] lg:flex-row">
+         {/* ── 左栏 300px：数据面 / 查询表单 / 预置演示 / 图例 ── */}
+         <div className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto lg:w-[300px]">
+-          {/* 数据面胶囊（D-008@v2 状态机；summary=null 旧 CLI 时 lite 胶囊隐藏） */}
++          {/* 数据面胶囊（task-06 状态机；dump 不可用→全图胶囊隐藏，回退切片链） */}
+           <div className="rounded-lg border border-border bg-card p-3 shadow-sm">
+             <div className="mb-2 flex items-baseline justify-between">
+               <span className="text-xs font-bold">🗂 数据面</span>
+               <span className="text-[10px] text-muted-foreground/70">daemon-rpc 单源</span>
+             </div>
+             <div className="flex gap-1.5" role="group" aria-label="数据面模式">
+-              {summary ? (
++              {dumpAvailable ? (
+                 <button
+                   type="button"
+-                  data-testid="mode-capsule-lite"
+-                  aria-pressed={lite}
+-                  onClick={goLite}
++                  data-testid="mode-capsule-full"
++                  aria-pressed={full}
++                  onClick={goFull}
+                   className={cn(
+                     "rounded-full border px-2.5 py-1 text-[11px] transition-colors",
+-                    lite
++                    full
+                       ? "border-brand-400 bg-brand-50 font-semibold text-brand-700"
+                       : "border-border text-muted-foreground hover:border-brand-300 hover:text-brand-700",
+                   )}
+                 >
+-                  总览 lite
++                  全图
+                 </button>
+               ) : null}
+               <button
+                 type="button"
+                 data-testid="mode-capsule-slice"
+-                aria-pressed={!lite}
++                aria-pressed={!full}
+                 onClick={() => setDataMode("slice")}
+                 className={cn(
+                   "rounded-full border px-2.5 py-1 text-[11px] transition-colors",
+-                  !lite
++                  !full
+                     ? "border-brand-400 bg-brand-50 font-semibold text-brand-700"
+                     : "border-border text-muted-foreground hover:border-brand-300 hover:text-brand-700",
+                 )}
+@@ -780,8 +822,8 @@ export default function KnowledgeGraphPage({ params }: Props) {
+               </button>
+             </div>
+             <p className="mt-2 text-[10.5px] leading-4 text-muted-foreground/80">
+-              {lite
+-                ? `全图 ${summary ? `${summary.nodes} 节点 · ${summary.edges} 边` : ""}——簇气泡代表节点为度数前 5，点击代表下钻 neighbors`
++              {full
++                ? `全图 ${dumpStats ? `${dumpStats.nodes} 节点 · ${dumpStats.edges} 边` : ""}——CLI 预计算坐标静态星空，点击节点下钻 neighbors`
+                 : "切片查询驱动 · 力场上限 200 节点，超限确定性静态布局"}
+             </p>
+           </div>
+@@ -1026,13 +1068,12 @@ export default function KnowledgeGraphPage({ params }: Props) {
+         <div className="relative min-h-[420px] flex-1 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+           <GraphCanvas
+             className="absolute inset-0"
+-            nodes={lite ? EMPTY_NODES : slice.nodes}
+-            edges={lite ? EMPTY_EDGES : slice.edges}
+-            mode={lite ? "lite" : "slice"}
+-            clusters={lite ? clusters : undefined}
++            nodes={full ? dumpNodes : slice.nodes}
++            edges={full ? dumpEdges : slice.edges}
++            mode={full ? "full" : "slice"}
+             selectedId={selectedId}
+-            warnIds={slice.warnIds}
+-            highlight={highlight}
++            warnIds={full ? EMPTY_SET : slice.warnIds}
++            highlight={full ? null : highlight}
+             onSelect={handleCanvasSelect}
+             onLayoutMode={setLayoutInfo}
+             fitSignal={fitSignal}
+@@ -1059,7 +1100,9 @@ export default function KnowledgeGraphPage({ params }: Props) {
+             ) : null}
+           </div>
+           <p className="pointer-events-none absolute bottom-2 right-3 text-[10px] text-muted-foreground/60">
+-            拖拽平移 · 滚轮缩放 · 点击节点看详情 · 拖动节点扰动力场
++            {full
++              ? "拖拽平移 · 滚轮缩放 · 点击节点下钻 · 远视野自动隐藏边线"
++              : "拖拽平移 · 滚轮缩放 · 点击节点看详情 · 拖动节点扰动力场"}
+           </p>
+         </div>
+ 
+@@ -1208,14 +1251,16 @@ export default function KnowledgeGraphPage({ params }: Props) {
+                 <div>
+                   <p className="font-semibold text-foreground">数据面两模式</p>
+                   <p>
+-                    「总览 lite」＝全图簇气泡总览（代表节点为度数前 5，点击代表下钻
+-                    neighbors）；「查询切片」＝查询驱动力场切片，&gt;200 节点自动确定性静态布局。
++                    「全图」＝dump 静态星空（CLI 预计算坐标不跑力场，点击节点下钻
++                    neighbors；远视野自动隐藏边线）；「查询切片」＝查询驱动力场切片，
++                    &gt;200 节点自动确定性静态布局。
+                   </p>
+                 </div>
+                 <div>
+-                  <p className="font-semibold text-foreground">默认视图与治理</p>
++                  <p className="font-semibold text-foreground">默认视图与回退</p>
+                   <p>
+-                    进入页面自动执行 orphans——孤儿条目红环警示，右栏「查询结果」为
++                    进入页面默认加载全图 dump；daemon/CLI 版本过旧（upgrade_required）
++                    时回退自动执行 orphans——孤儿条目红环警示，右栏「查询结果」为
+                     top-50 清单；完整治理走 CLI（等价命令见左栏提示条）。
+                   </p>
+                 </div>
+@@ -1235,61 +1280,56 @@ export default function KnowledgeGraphPage({ params }: Props) {
+                 </div>
+               </div>
+             ) : (
+-              /* ── 查询结果 tab（lite 总览面板 / 切片查询结果卡）── */
+-              lite ? (
+-                summary ? (
+-                  <div>
+-                    <div className="text-sm font-semibold">全图 lite 总览</div>
+-                    <p className="mt-1 font-mono text-[10.5px] text-muted-foreground">
+-                      {summary.nodes} 节点 · {summary.edges} 边 · 孤儿 {summary.orphans} ·
+-                      悬空引用 {summary.dangling_refs}
++              /* ── 查询结果 tab（full 图统计卡 / 切片查询结果卡）── */
++              full ? (
++                dumpStats ? (
++                  <div data-testid="full-stats">
++                    <div data-testid="result-title" className="text-sm font-semibold">
++                      全图 · {dumpStats.nodes} 节点 · {dumpStats.edges} 边
++                    </div>
++                    <p className="mt-1 text-[10.5px] leading-4 text-muted-foreground">
++                      CLI 预计算坐标静态星空（dump --layout 同源）
+                     </p>
+-                    <div className="mt-2.5 space-y-2.5">
+-                      {clusters.map((c) => (
+-                        <div
+-                          key={c.key}
+-                          data-testid="lite-cluster"
+-                          className="rounded-md border border-border/60 p-2"
+-                        >
+-                          <div className="flex items-baseline justify-between gap-2">
+-                            <span
+-                              className="min-w-0 truncate text-[11px] font-semibold"
+-                              title={`${c.key} · ${c.label}`}
++                    <div className="mt-2.5 space-y-1.5 rounded-md border border-border/60 p-2">
++                      <div className="text-[11px] font-semibold">治理四计数</div>
++                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
++                        <span>孤儿 {dumpStats.orphans}</span>
++                        <span>模块文档缺口 {dumpStats.module_doc_gaps}</span>
++                        <span>changelog 悬空 {dumpStats.changelog_danglings}</span>
++                        <span>悬空引用 {dumpStats.dangling_refs}</span>
++                      </div>
++                    </div>
++                    {byTypeRows.length > 0 ? (
++                      <div className="mt-2 rounded-md border border-border/60 p-2">
++                        <div className="text-[11px] font-semibold">节点类型分布（前几）</div>
++                        <div className="mt-1 space-y-0.5">
++                          {byTypeRows.map(([type, count]) => (
++                            <div
++                              key={type}
++                              data-testid="full-stats-bytype"
++                              className="flex items-center gap-2 text-[10.5px]"
+                             >
+-                              {c.label || c.key}
+-                            </span>
+-                            <span className="shrink-0 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold text-brand-700">
+-                              {c.count} 节点
+-                            </span>
+-                          </div>
+-                          <div className="mt-1.5 flex flex-wrap gap-1">
+-                            {c.representatives.map((rep) => (
+-                              <button
+-                                key={rep.id}
+-                                type="button"
+-                                data-testid="lite-rep-row"
+-                                title={`${rep.id}——点击以该节点发起 neighbors`}
+-                                onClick={() => runNeighbors(rep.id)}
+-                                className="flex items-center gap-1 rounded-full border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:border-brand-400 hover:bg-brand-50/60 hover:text-brand-700"
+-                              >
+-                                <span
+-                                  aria-hidden
+-                                  className="h-1.5 w-1.5 rounded-full"
+-                                  style={{
+-                                    backgroundColor: palette[nodeTypeIndex(rep.type ?? "")],
+-                                  }}
+-                                />
+-                                {rep.label || rep.id}
+-                              </button>
+-                            ))}
+-                          </div>
++                              <span
++                                aria-hidden
++                                className="h-2 w-2 shrink-0 rounded-full"
++                                style={{
++                                  backgroundColor: palette[nodeTypeIndex(type)],
++                                }}
++                              />
++                              <span className="font-mono">{type}</span>
++                              <span className="ml-auto text-muted-foreground">{count}</span>
++                            </div>
++                          ))}
+                         </div>
+-                      ))}
+-                    </div>
++                      </div>
++                    ) : null}
++                    <p className="mt-2.5 text-[10.5px] leading-4 text-muted-foreground">
++                      点击画布节点，下钻该节点 neighbors 一跳切片。
++                    </p>
+                   </div>
+                 ) : (
+                   <p className="py-8 text-center text-[11px] text-muted-foreground">
+-                    总览 lite 不可用（旧 CLI）。
++                    全图数据不可用（旧 daemon / CLI）。
+                   </p>
+                 )
+               ) : !active ? (
+diff --git a/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts b/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts
+index 390314494..af5aa4930 100644
+--- a/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts
++++ b/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts
+@@ -1,10 +1,11 @@
+ /**
+  * GraphCanvas 纯函数单测（task-09 / 2026-10-08-platform-knowledge-graph /
+- * FR-06 / D-003@v1）。
++ * FR-06 / D-003@v1；full 模式组 task-05 / 2026-10-09-knowledge-graph-fullmap /
++ * FR-04 / FR-05）。
+  *
+  * jsdom 无 canvas 2D 上下文，画布交互（缩放/平移/拾取回调/rAF 循环）不可测
+- * ——以力场/静态/lite 布局/拾取/适配具名导出纯函数覆盖（commit-graph.tsx
+- * 先例，见 task-06 头注释「task-09 单测消费面」）：
++ * ——以力场/静态/全图构造/布局/拾取/适配具名导出纯函数覆盖（commit-graph.tsx
++ * 先例，见组件头注释「单测消费面」）：
+  *
+  *   - stepForceLayout：两节点弹簧距离多步快进趋近自然长（远/近双起点）+
+  *     NaN 坐标自愈（中心 160 圆环复位）；
+@@ -12,8 +13,15 @@
+  *   - fitView：包围盒居中 + 缩放上下夹 [0.08, 2]；
+  *   - staticLayout：>200（201 节点）降级判定口径 + 同输入同输出确定性 +
+  *     同类型同环摆放；
+- *   - liteClusterLayout：count 降序/key 升序钉死 + 乱序输入同输出 +
+- *     气泡半径下限 56 与代表节点簇内摆放；
++ *   - fullSimNodes：全图 dump 静态构造——节点坐标恒等于输入（px/py 同值零
++ *     初速；组件侧 engine='full' 时 rAF 循环仅 force 引擎步进，本组以构造
++ *     函数输出钉死该不变量）+ fitView(graphBbox) 全图包围盒适配；
++ *   - shallDrawEdges / shallShowFullLabel：full 态性能护栏与标签分级谓词
++ *     （原型 HTML:396 同值：k≥0.5 画边；module/project/doc 恒显标签，其余
++ *     k>1.35）；
++ *   - liteClusterLayout（纯函数保留性断言）：lite UI 已移除（task-05），布局
++ *     纯函数保留供复用——count 降序/key 升序钉死 + 乱序输入同输出 + 气泡半径
++ *     下限 56 与代表节点簇内摆放继续成立；
+  *   - edgeDash：strong/medium/weak 三档线型映射（未知档归 strong）。
+  */
+ 
+@@ -24,11 +32,18 @@ import {
+   edgeDash,
+   fitView,
+   FORCE_NODE_LIMIT,
++  FULL_EDGE_ZOOM_THRESHOLD,
++  FULL_LABEL_TYPES,
++  FULL_LABEL_ZOOM_THRESHOLD,
++  fullSimNodes,
+   graphBbox,
+   liteClusterLayout,
+   pickNode,
++  shallDrawEdges,
++  shallShowFullLabel,
+   staticLayout,
+   stepForceLayout,
++  type CanvasNodeInput,
+   type LiteClusterInput,
+   type SimEdge,
+   type SimNode,
+@@ -241,9 +256,99 @@ describe("staticLayout（确定性静态降级布局）", () => {
+   });
+ });
+ 
+-// ── liteClusterLayout：簇摆放确定性 ────────────────────────────────────────
++// ── fullSimNodes：全图静态构造（坐标恒等于输入）+ fitView 包围盒 ────────────
+ 
+-describe("liteClusterLayout（lite 簇摆放，D-008@v2）", () => {
++describe("fullSimNodes（full 模式静态构造，task-05）", () => {
++  /** dump 形状节点（GraphDumpNode 同形：id/type/label + 预计算 x/y）。 */
++  const dumpNodes: CanvasNodeInput[] = [
++    { id: "frontend", type: "module", label: "frontend", x: -640, y: 320 },
++    { id: "FR-core-engine-001", type: "fr", label: "FR", x: 128, y: -256 },
++    { id: "decision:d.md#D-002@v1", type: "decision", label: "D-002@v1", x: 384, y: 640 },
++    { id: "frontend/src/lib/knowledge.ts", type: "file", label: "knowledge.ts", x: 0, y: 0 },
++  ];
++
++  it("full 模式节点坐标恒等于输入（不跑力场）：x/y 逐节点等于 dump 值，px/py 同值零初速", () => {
++    const sim = fullSimNodes(dumpNodes);
++    expect(sim).toHaveLength(dumpNodes.length);
++    for (let i = 0; i < dumpNodes.length; i++) {
++      const n = sim[i]!;
++      const src = dumpNodes[i]!;
++      // 坐标恒等于输入——full 引擎不 seedSpiral、rAF 循环不步进力场
++      //（engine='full' 不满足 stepForceLayout 的 force 引擎门槛）。
++      expect(n.x).toBe(src.x);
++      expect(n.y).toBe(src.y);
++      // px/py 同值初始化：零初始速度，即使误进步进也不会自行漂移。
++      expect(n.px).toBe(src.x);
++      expect(n.py).toBe(src.y);
++      expect(n.drag).toBe(false);
++      expect(n.mx).toBeNull();
++      expect(n.my).toBeNull();
++    }
++  });
++
++  it("缺坐标节点（slice 形态 ref）按 (0,0) 归一，不抛错", () => {
++    const sim = fullSimNodes([{ id: "a", type: "file", label: "a" }]);
++    expect(sim[0]!.x).toBe(0);
++    expect(sim[0]!.y).toBe(0);
++    expect(sim[0]!.px).toBe(0);
++    expect(sim[0]!.py).toBe(0);
++  });
++
++  it("full fitView 包围盒：graphBbox 圈出 dump 坐标域，fitView 几何居中（不触缩放夹）", () => {
++    const sim = fullSimNodes(dumpNodes);
++    const box = graphBbox(sim);
++    expect(box).toEqual({ x0: -640, y0: -256, x1: 384, y1: 640 });
++    const v = fitView(box, 800, 600);
++    // 高度向约束（含 pad 60）：k = min(800/1084, 600/956) ≈ 0.628，不触 [0.08,2] 夹。
++    const k = Math.min(2, Math.max(0.08, Math.min(800 / (384 - -640 + 60), 600 / (640 - -256 + 60))));
++    expect(v.k).toBeCloseTo(k, 10);
++    expect(v.x).toBeCloseTo(800 / 2 - ((box.x0 + box.x1) / 2) * k, 10);
++    expect(v.y).toBeCloseTo(600 / 2 - ((box.y0 + box.y1) / 2) * k, 10);
++  });
++});
++
++// ── shallDrawEdges：full 态边绘制护栏 ─────────────────────────────────────
++
++describe("shallDrawEdges（full 态边绘制护栏，k≥0.5）", () => {
++  it("阈值钉死：FULL_EDGE_ZOOM_THRESHOLD=0.5（原型 dump 星空同值）", () => {
++    expect(FULL_EDGE_ZOOM_THRESHOLD).toBe(0.5);
++  });
++
++  it("(0.4)=false / (0.5)=true / (1)=true（含边界值含等于）", () => {
++    expect(shallDrawEdges(0.4)).toBe(false);
++    expect(shallDrawEdges(0.5)).toBe(true);
++    expect(shallDrawEdges(1)).toBe(true);
++    // 边界外延：更小恒 false、更大恒 true。
++    expect(shallDrawEdges(0.08)).toBe(false);
++    expect(shallDrawEdges(2)).toBe(true);
++  });
++});
++
++// ── shallShowFullLabel：full 态标签分级谓词 ────────────────────────────────
++
++describe("shallShowFullLabel（full 态标签分级，原型 HTML:396 同值）", () => {
++  it("大半径类型集钉死：module/project/doc 恒显（任意缩放）", () => {
++    expect([...FULL_LABEL_TYPES].sort()).toEqual(["doc", "module", "project"]);
++    expect(FULL_LABEL_ZOOM_THRESHOLD).toBe(1.35);
++    expect(shallShowFullLabel("module", 0.08)).toBe(true);
++    expect(shallShowFullLabel("project", 0.08)).toBe(true);
++    expect(shallShowFullLabel("doc", 0.08)).toBe(true);
++  });
++
++  it("其余类型 k>1.35 才显：1.35 恰好不显（严格大于），1.36 显", () => {
++    expect(shallShowFullLabel("file", 1.35)).toBe(false);
++    expect(shallShowFullLabel("file", 1.36)).toBe(true);
++    expect(shallShowFullLabel("entry", 0.5)).toBe(false);
++    expect(shallShowFullLabel("fr", 1)).toBe(false);
++    // 未知类型同普通类型（不进大半径集）。
++    expect(shallShowFullLabel("", 2)).toBe(true);
++    expect(shallShowFullLabel("ql", 1.4)).toBe(true);
++  });
++});
++
++// ── liteClusterLayout：纯函数保留性断言（lite UI 已移除，布局函数保留供复用）──
++
++describe("liteClusterLayout（lite 簇摆放，D-008@v2；lite UI 已移除 task-05，纯函数保留）", () => {
+   const clusters: LiteClusterInput[] = [
+     { key: "b", label: "B 簇", count: 5, representatives: [{ id: "rb1" }, { id: "rb2" }] },
+     { key: "a", label: "A 簇", count: 5, representatives: [{ id: "ra1" }] },
+diff --git a/frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx b/frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx
+index 80103f74d..f5cf8b0d3 100644
+--- a/frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx
+@@ -1,23 +1,27 @@
+ /**
+  * 知识图谱页测试（task-09 / 2026-10-08-platform-knowledge-graph / FR-05 / FR-06 /
+- * D-006@v1 / D-008@v2）。
++ * D-006@v1 / D-008@v2；全图默认视图组 task-06 / 2026-10-09-knowledge-graph-fullmap /
++ * FR-04 / D-001@v1 / D-002@v1）。
+  *
+  * 覆盖（task 卡 acceptance）：
+  * 1. 三态：isPending 骨架 / unavailable 六键全文案（unbound 附绑定入口 href）/
+- *    可用态渲染——首载自动发起 orphans 默认查询（D-006），top-50 清单 + count
+- *    口径 + mode-chip「orphans · 孤儿节点」；
+- * 2. lite↔切片状态机（D-008@v2 钉死）：胶囊手动切 lite（簇卡 + 代表行）→
+- *    点代表自动切切片并以该节点发起 neighbors → 胶囊再回 lite；
+- * 3. 锚点补全不可用（旧 CLI 信封 unavailable）→ 静默禁用（无候选无报错，
++ *    可用态默认加载 dump 渲染全图（不发 orphans）——mode-chip「全图 N 节点 ·
++ *    静态」+ 右栏图统计卡（四计数/类型分布）+ 胶囊两态 + CLI 提示条 dump 命令；
++ * 2. 回退链（task-06）：dump upgrade_required / available=false → 全图胶囊
++ *    隐藏 + 自动回退既有 orphans 默认链（top-50 清单 + count 口径）；
++ * 3. 全图↔切片状态机：点全图节点 → 切切片并以该节点 id 发起 neighbors →
++ *    胶囊手动回全图；
++ * 4. 锚点补全不可用（旧 CLI 信封 unavailable）→ 静默禁用（无候选无报错，
+  *    D-005@v1 能力探测）；
+- * 4. ?preset=dangling 深链首载按 preset 发起（ops 图卡清单行跳转目标）；
+- * 5. entry 节点「在知识库打开」深链 href（?file=&anchor= 惯例）+ path 不可达
+- *    reason 文案与强边寻路注记；summary=null 时 lite 胶囊隐藏主链路不受阻。
++ * 5. ?preset=dangling 深链首载按 preset 发起（显式深链优先于全图默认；ops
++ *    图卡清单行跳转目标）；entry 节点「在知识库打开」深链 href（?file=&anchor=
++ *    惯例）+ path 不可达 reason 文案与强边寻路注记。
+  *
+- * 惯例（仿 ops-dashboard.test.tsx）：@/lib/knowledge 图三函数 hoisted mock +
++ * 惯例（仿 ops-dashboard.test.tsx）：@/lib/knowledge 图四函数 hoisted mock +
+  * QueryClientProvider retry:false/gcTime:0；next/navigation 走 navState 可覆写
+- * （knowledge-page.test 同款）。画布交互（缩放/拾取）不可测面由
+- * graph-canvas.test.ts 纯函数覆盖。
++ *（knowledge-page.test 同款）。GraphCanvas 以轻量 stub 替身（保留 graph-canvas
++ * testid + 每节点一个代理按钮触发 onSelect + data-mode 暴露当前模式）——画布
++ * 内部力场/绘制由 graph-canvas.test.ts 纯函数覆盖，本文件只测页面状态机。
+  */
+ 
+ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+@@ -28,14 +32,41 @@ const mocks = vi.hoisted(() => ({
+   getKnowledgeGraphOverview: vi.fn(),
+   getKnowledgeGraphQuery: vi.fn(),
+   getKnowledgeGraphNodes: vi.fn(),
++  getKnowledgeGraphDump: vi.fn(),
+ }));
+ vi.mock("@/lib/knowledge", async (importOriginal) => ({
+   ...(await importOriginal<typeof import("@/lib/knowledge")>()),
+   getKnowledgeGraphOverview: mocks.getKnowledgeGraphOverview,
+   getKnowledgeGraphQuery: mocks.getKnowledgeGraphQuery,
+   getKnowledgeGraphNodes: mocks.getKnowledgeGraphNodes,
++  getKnowledgeGraphDump: mocks.getKnowledgeGraphDump,
+ }));
+ 
++// GraphCanvas 替身：jsdom 无 canvas 2D 上下文，节点点击经代理按钮走 onSelect
++//（页面状态机消费面）；data-mode 暴露当前模式供全图/切片断言。纯函数导出
++//（NODE_TYPE_ORDER/edgeDash 等）保持原模块真身（importOriginal 展开）。
++vi.mock("@/components/knowledge/graph-canvas", async (importOriginal) => {
++  const original =
++    await importOriginal<typeof import("@/components/knowledge/graph-canvas")>();
++  const GraphCanvasStub = (props: {
++    nodes: ReadonlyArray<{ id: string }>;
++    mode?: string;
++    onSelect?: (id: string | null) => void;
++  }) => (
++    <div data-testid="graph-canvas" data-mode={props.mode ?? "slice"}>
++      {props.nodes.map((n) => (
++        <button
++          key={n.id}
++          type="button"
++          data-testid={`canvas-node-${n.id}`}
++          onClick={() => props.onSelect?.(n.id)}
++        />
++      ))}
++    </div>
++  );
++  return { ...original, GraphCanvas: GraphCanvasStub };
++});
++
+ // useSearchParams 经 navState 可覆写（?preset= 深链用例）；usePathname 供
+ // 可能挂载的链接组件消费。
+ const navState = vi.hoisted(() => ({
+@@ -163,6 +194,56 @@ const danglingEnvelope = {
+   },
+ };
+ 
++/** dump 信封（task-06）：stats 与 summary 同源聚合；节点带 CLI 预计算 x/y。 */
++function dumpEnvelope(p: { available?: boolean; reason?: string | null } = {}) {
++  const available = p.available ?? true;
++  return {
++    available,
++    reason: p.reason ?? null,
++    source: "daemon-rpc",
++    data: available
++      ? {
++          nodes: [
++            { id: "frontend", type: "module", label: "frontend", x: -320.0, y: 160.0 },
++            {
++              id: "frontend/src/lib/knowledge.ts",
++              type: "file",
++              label: "knowledge.ts",
++              x: 64.0,
++              y: -128.0,
++            },
++            {
++              id: "decision:decisions/daemon.md#D-001@v1",
++              type: "decision",
++              label: "D-001@v1",
++              x: 192.0,
++              y: 320.0,
++            },
++          ],
++          edges: [
++            {
++              s: "frontend/src/lib/knowledge.ts",
++              t: "frontend",
++              type: "module-files",
++              strength: "strong",
++            },
++          ],
++          stats: {
++            nodes: 4628,
++            edges: 8210,
++            by_type: { file: 4000, entry: 420, decision: 120, fr: 88 },
++            by_edge: { anchors: 900, route: 260 },
++            orphans: 1807,
++            module_doc_gaps: 3,
++            changelog_danglings: 5,
++            dangling_refs: 7,
++            clusters: [],
++          },
++        }
++      : null,
++  };
++}
++
+ const pathUnreachableEnvelope = {
+   available: true,
+   reason: null,
+@@ -194,6 +275,7 @@ beforeEach(() => {
+     defaultOptions: { queries: { retry: false, gcTime: 0 } },
+   });
+   mocks.getKnowledgeGraphOverview.mockResolvedValue(overviewEnvelope());
++  mocks.getKnowledgeGraphDump.mockResolvedValue(dumpEnvelope());
+   mocks.getKnowledgeGraphQuery.mockImplementation(
+     async (_ws: string, sub: string, _params?: unknown) => {
+       if (sub === "neighbors") return neighborsEnvelope;
+@@ -257,9 +339,44 @@ describe("页面三态（D-001@v2 / D-006@v1）", () => {
+     );
+   });
+ 
+-  it("可用态：首载自动发起 orphans 默认查询（D-006）+ top-50 清单 + count 口径 + mode-chip", async () => {
++  it("可用态：首载加载 dump 渲染全图（task-06 / D-002@v1）——不发 orphans + 统计卡 + 胶囊两态 + dump 命令", async () => {
++    renderPage();
++    await waitFor(() => expect(mocks.getKnowledgeGraphDump).toHaveBeenCalledWith(WS));
++    // 全图为默认视图：不触发 orphans 回退查询。
++    expect(mocks.getKnowledgeGraphQuery).not.toHaveBeenCalled();
++    // 画布处于 full 模式（stub 暴露 data-mode）。
++    expect(await screen.findByTestId("graph-canvas")).toHaveAttribute("data-mode", "full");
++    // mode-chip「全图 N 节点 · 静态」。
++    expect(screen.getByTestId("graph-mode-chip")).toHaveTextContent("全图 4628 节点 · 静态");
++    // 右栏图统计卡：节点/边总量 + 治理四计数 + 类型分布（by_type 降序前几）。
++    expect(screen.getByTestId("result-title")).toHaveTextContent("全图 · 4628 节点 · 8210 边");
++    const stats = screen.getByTestId("full-stats");
++    expect(stats).toHaveTextContent("孤儿 1807");
++    expect(stats).toHaveTextContent("模块文档缺口 3");
++    expect(stats).toHaveTextContent("changelog 悬空 5");
++    expect(stats).toHaveTextContent("悬空引用 7");
++    const byType = within(stats).getAllByTestId("full-stats-bytype");
++    expect(byType).toHaveLength(4); // fixture 四类型（top-6 截断内全显）
++    expect(byType[0]).toHaveTextContent("file"); // count 降序
++    expect(within(stats).getByText(/点击画布节点/)).toBeInTheDocument();
++    // 胶囊两态：全图按下、查询切片待选。
++    expect(screen.getByTestId("mode-capsule-full")).toHaveAttribute("aria-pressed", "true");
++    expect(screen.getByTestId("mode-capsule-slice")).toHaveAttribute("aria-pressed", "false");
++    // 等价 CLI 提示条 full 态为 dump 命令。
++    expect(screen.getByTestId("cli-hint")).toHaveTextContent(
++      "sillyspec knowledge graph dump --layout",
++    );
++    // 图例：节点 10 类型 + 边 16 型三档。
++    expect(screen.getAllByTestId(/^legend-node-/)).toHaveLength(10);
++    expect(screen.getAllByTestId(/^legend-edge-/)).toHaveLength(16);
++  });
++
++  it("dump 不可用（upgrade_required）→ 全图胶囊隐藏 + 回退既有 orphans 默认链（D-006）", async () => {
++    mocks.getKnowledgeGraphDump.mockResolvedValue(
++      dumpEnvelope({ available: false, reason: "upgrade_required" }),
++    );
+     renderPage();
+-    // 缺省参数（edges=all/depth=1 → 不传，走 CLI 缺省）。
++    // 回退链：自动发起 orphans（缺省参数——edges=all/depth=1 不传走 CLI 缺省）。
+     await waitFor(() =>
+       expect(mocks.getKnowledgeGraphQuery).toHaveBeenCalledWith(WS, "orphans", {
+         anchor: undefined,
+@@ -268,52 +385,35 @@ describe("页面三态（D-001@v2 / D-006@v1）", () => {
+         depth: undefined,
+       }),
+     );
++    // top-50 清单 + count 口径（count 1807 > items 50）。
+     expect(await screen.findByTestId("result-title")).toHaveTextContent("orphans · 1807 个孤儿");
+-    // top-50 清单渲染 + count 口径（count 1807 > items 50）。
+     expect(screen.getAllByTestId("orphan-row")).toHaveLength(50);
+     expect(screen.getByTestId("result-count-note")).toHaveTextContent("共 1807 条");
+     expect(screen.getByTestId("result-count-note")).toHaveTextContent("top-50");
+-    // mode-chip 钉死「orphans · 孤儿节点」+ 引擎信息。
+     expect(screen.getByTestId("graph-mode-chip")).toHaveTextContent("orphans · 孤儿节点");
+-    expect(screen.getByTestId("graph-mode-chip")).toHaveTextContent("力场");
+-    // 数据面 lite 胶囊（summary 非空）与查询切片胶囊齐备。
+-    expect(screen.getByTestId("mode-capsule-lite")).toBeInTheDocument();
+-    expect(screen.getByTestId("mode-capsule-slice")).toBeInTheDocument();
+-    // 等价 CLI 提示条（黑底等宽动态拼）。
+-    expect(screen.getByTestId("cli-hint")).toHaveTextContent(
+-      "sillyspec knowledge graph orphans --json",
+-    );
+-    // 图例：节点 10 类型 + 边 16 型三档。
+-    expect(screen.getAllByTestId(/^legend-node-/)).toHaveLength(10);
+-    expect(screen.getAllByTestId(/^legend-edge-/)).toHaveLength(16);
++    // 全图胶囊隐藏（dump 不可用），切片胶囊独占且按下。
++    expect(screen.queryByTestId("mode-capsule-full")).not.toBeInTheDocument();
++    expect(screen.getByTestId("mode-capsule-slice")).toHaveAttribute("aria-pressed", "true");
+   });
+ 
+-  it("summary=null（旧 CLI）→ lite 胶囊隐藏，orphans 主链路不受阻", async () => {
++  it("overview summary=null（旧 CLI）→ 全图主链路不受阻（dump 独立于 overview summary）", async () => {
+     mocks.getKnowledgeGraphOverview.mockResolvedValue(overviewEnvelope({ summary: null }));
+     renderPage();
+-    expect(await screen.findAllByTestId("orphan-row")).toHaveLength(50);
+-    expect(screen.queryByTestId("mode-capsule-lite")).not.toBeInTheDocument();
+-    expect(screen.getByTestId("mode-capsule-slice")).toBeInTheDocument();
++    expect(await screen.findByTestId("full-stats")).toBeInTheDocument();
++    expect(screen.getByTestId("mode-capsule-full")).toBeInTheDocument();
++    expect(mocks.getKnowledgeGraphQuery).not.toHaveBeenCalled();
+   });
+ });
+ 
+-// ── lite ↔ 切片状态机 ───────────────────────────────────────────────────────
++// ── 全图 ↔ 切片状态机 ───────────────────────────────────────────────────────
+ 
+-describe("lite↔切片状态机（D-008@v2）", () => {
+-  it("胶囊切 lite（簇卡+代表行）→ 点代表切切片并以其为锚点发起 neighbors → 胶囊回 lite", async () => {
++describe("全图↔切片状态机（task-06）", () => {
++  it("点全图节点 → 切切片并以该节点为锚点发起 neighbors → 胶囊手动回全图", async () => {
+     renderPage();
+-    await screen.findAllByTestId("orphan-row");
+-
+-    // 手动切 lite：查询结果 tab 呈 lite 总览（簇卡 + 代表行），清单消失。
+-    fireEvent.click(screen.getByTestId("mode-capsule-lite"));
+-    expect(await screen.findAllByTestId("lite-cluster")).toHaveLength(2);
+-    const reps = screen.getAllByTestId("lite-rep-row");
+-    expect(reps).toHaveLength(2);
+-    expect(screen.getByTestId("graph-mode-chip")).toHaveTextContent("总览 lite");
+-    expect(screen.queryAllByTestId("orphan-row")).toHaveLength(0);
+-
+-    // 点代表 → 自动切切片 + neighbors 以该节点为锚点发起。
+-    fireEvent.click(reps[0]!);
++    await screen.findByTestId("full-stats");
++
++    // 点全图节点（stub 代理按钮）→ 自动切切片 + neighbors 以该节点 id 为锚点发起。
++    fireEvent.click(screen.getByTestId("canvas-node-frontend/src/lib/knowledge.ts"));
+     await waitFor(() =>
+       expect(mocks.getKnowledgeGraphQuery).toHaveBeenLastCalledWith(
+         WS,
+@@ -324,11 +424,15 @@ describe("lite↔切片状态机（D-008@v2）", () => {
+     expect(await screen.findByTestId("result-title")).toHaveTextContent(
+       "neighbors · knowledge.ts",
+     );
+-    expect(screen.queryByTestId("lite-cluster")).not.toBeInTheDocument();
+-
+-    // 胶囊手动回 lite（状态机钉死：只有胶囊回 lite）。
+-    fireEvent.click(screen.getByTestId("mode-capsule-lite"));
+-    expect(await screen.findAllByTestId("lite-cluster")).toHaveLength(2);
++    expect(screen.getByTestId("graph-canvas")).toHaveAttribute("data-mode", "slice");
++    expect(screen.getByTestId("mode-capsule-full")).toHaveAttribute("aria-pressed", "false");
++    expect(screen.getByTestId("mode-capsule-slice")).toHaveAttribute("aria-pressed", "true");
++
++    // 胶囊手动回全图（状态机钉死：只有胶囊回全图）。
++    fireEvent.click(screen.getByTestId("mode-capsule-full"));
++    expect(await screen.findByTestId("full-stats")).toBeInTheDocument();
++    expect(screen.getByTestId("graph-canvas")).toHaveAttribute("data-mode", "full");
++    expect(screen.getByTestId("graph-mode-chip")).toHaveTextContent("全图 4628 节点 · 静态");
+   });
+ });
+ 
+@@ -337,7 +441,7 @@ describe("lite↔切片状态机（D-008@v2）", () => {
+ describe("锚点自动补全（D-005@v1）", () => {
+   it("补全端点 unavailable（旧 CLI）→ 静默禁用：无候选下拉、无报错、页面不受阻", async () => {
+     renderPage();
+-    await screen.findAllByTestId("orphan-row");
++    await screen.findByTestId("full-stats");
+     mocks.getKnowledgeGraphNodes.mockResolvedValue({
+       available: false,
+       reason: "upgrade_required",
+@@ -382,6 +486,8 @@ describe("深链与查询面", () => {
+   });
+ 
+   it("entry 节点：点孤儿清单行选中 → 详情 tab「在知识库打开」深链 ?file=&anchor=", async () => {
++    // 显式 orphans 深链（全图为默认视图，孤儿清单需显式 preset 进切片）。
++    navState.searchParams = new URLSearchParams("preset=orphans");
+     renderPage();
+     const rows = await screen.findAllByTestId("orphan-row");
+     fireEvent.click(rows[0]!); // known-issues.md#docker-fix（entry）
+@@ -398,7 +504,7 @@ describe("深链与查询面", () => {
+ 
+   it("path 预置演示：不可达 → reason 文案 + 强边子集寻路注记", async () => {
+     renderPage();
+-    await screen.findAllByTestId("orphan-row");
++    await screen.findByTestId("full-stats");
+     const presetBtn = screen
+       .getAllByTestId("preset-btn")
+       .find((el) => el.textContent?.includes("path"));
+diff --git a/frontend/src/components/knowledge/graph-canvas.tsx b/frontend/src/components/knowledge/graph-canvas.tsx
+index dfc3e7a46..977d72066 100644
+--- a/frontend/src/components/knowledge/graph-canvas.tsx
++++ b/frontend/src/components/knowledge/graph-canvas.tsx
+@@ -2,7 +2,8 @@
+ 
+ /**
+  * GraphCanvas — 知识图谱自绘画布（task-06 / 2026-10-08-platform-knowledge-graph
+- * / FR-06 / D-003@v1）。
++ * / FR-06 / D-003@v1；full 模式 task-05 / 2026-10-09-knowledge-graph-fullmap /
++ * FR-04 / FR-05 / D-002@v1）。
+  *
+  * 依据：
+  *   - 归档原型 prototype-knowledge-graph.html 的 step()/draw()/交互段生产直译：
+@@ -11,21 +12,27 @@
+  *     标签分级（缩放阈值/选中/hover/高亮内，26 字符截断，字号随缩放补偿）、
+  *     边三档虚实（strong 实线 / medium 长虚 / weak 点虚）；
+  *   - design Phase 3：力场仅切片 ≤FORCE_NODE_LIMIT 节点启用，超限确定性静态
+- *     降级（类型分环同心圆等角分布，不启 rAF 力场）；mode "lite" 为总览簇
+- *     气泡 + 代表节点静态渲染（liteClusterLayout，D-008@v2）；
++ *     降级（类型分环同心圆等角分布，不启 rAF 力场）；mode "full" 为全图 dump
++ *     静态星空——节点按 CLI 预计算 x/y 直接摆放（不 seedSpiral 不步进力场，
++ *     engine='full'，与 FORCE_NODE_LIMIT 语义正交：全图节点>200 恒静态）。
++ *     lite 总览簇气泡 UI 已移除（2026-10-09-knowledge-graph-fullmap task-05，
++ *     full 全图取代其语义；liteClusterLayout 纯函数保留供复用）；
++ *   - full 态性能护栏（原型 HTML 同值）：缩放 k<0.5 跳过边绘制只画节点
++ *     （shallDrawEdges）；标签分级只在大半径类型（module/project/doc）或
++ *     k>1.35 或 hover/选中时出现（原型 HTML:396 同值）；
+  *   - 主题铁律（D-003）：节点 10 类型色 = themes[theme].color 组合（brand 阶 +
+  *     semantic + slate），组件级 CSS 变量 --kg-node-0..9 注入 + useThemeStore
+  *     订阅换肤（commit-graph.tsx lanePalette 先例），本文件零硬编码 hex；
+- *   - 力场/静态/lite 布局/拾取/适配均为具名导出纯函数（task-09 单测消费面）。
++ *   - 力场/静态/全图构造/布局/拾取/适配均为具名导出纯函数（单测消费面）。
+  *
+- * 消费方（page.tsx，task-07）注意：nodes/edges/clusters 传引用稳定的数据
+- * （useMemo）——identity 变化即视为新切片重摆布局（查询驱动的预期语义）。
++ * 消费方（page.tsx）注意：nodes/edges 传引用稳定的数据（useMemo）——identity
++ * 变化即视为新切片重摆布局（查询驱动的预期语义）。
+  */
+ 
+ import { useEffect, useMemo, useRef } from "react";
+ import type { CSSProperties } from "react";
+ 
+-import type { GraphCluster, GraphEdge, GraphNodeRef } from "@/lib/knowledge";
++import type { GraphEdge, GraphNodeRef } from "@/lib/knowledge";
+ import { useThemeStore } from "@/stores/theme";
+ import { themes, type ThemeName } from "@/styles/themes";
+ 
+@@ -61,6 +68,8 @@ const GOLDEN_ANGLE = 2.399;
+ /** 标签显示缩放阈值（切片模式）与截断长度。 */
+ const LABEL_ZOOM_THRESHOLD = 0.55;
+ const LABEL_MAX_CHARS = 26;
++/** full 态标签高缩放阈值（原型 HTML:396 同值；低于此只画大半径类型标签）。 */
++export const FULL_LABEL_ZOOM_THRESHOLD = 1.35;
+ 
+ /** 节点 10 类型（色板/半径映射序，与 CLI 图引擎节点类型一一对应）。 */
+ export const NODE_TYPE_ORDER = [
+@@ -329,6 +338,47 @@ function nodeTypeOrderValue(type: string): number {
+   return i >= 0 ? i : NODE_TYPE_ORDER.length;
+ }
+ 
++// ── full 模式（全图 dump 静态星空，task-05 / 2026-10-09-knowledge-graph-fullmap）──
++
++/** 画布节点输入：slice 传 GraphNodeRef（无坐标，画布摆位）；full 传 dump 节点（带预计算 x/y）。 */
++export type CanvasNodeInput = GraphNodeRef & { x?: number; y?: number };
++
++/**
++ * full 模式仿真节点构造：直接消费 dump 节点自带 x/y（px/py 同值初始化——
++ * 零初始速度，不 seedSpiral 不步进力场；rAF 循环 engine='full' 不调
++ * stepForceLayout，节点坐标恒等于输入）。缺坐标节点按 (0,0) 归一。
++ */
++export function fullSimNodes(nodes: ReadonlyArray<CanvasNodeInput>): SimNode[] {
++  return nodes.map((n) => toSimNode(n, n.x ?? 0, n.y ?? 0));
++}
++
++/** full 态边绘制缩放下限（原型 dump 星空同值）。 */
++export const FULL_EDGE_ZOOM_THRESHOLD = 0.5;
++
++/**
++ * 边绘制护栏（full 态性能，原型同值）：缩放 k≥0.5 才画边，低于只画节点——
++ * 千级边在远视野下的绘制开销远超信息量。slice 态不受此护栏约束。
++ */
++export function shallDrawEdges(k: number): boolean {
++  return k >= FULL_EDGE_ZOOM_THRESHOLD;
++}
++
++/** full 态常显标签的大半径类型集（原型 HTML:396 同值）。 */
++export const FULL_LABEL_TYPES: ReadonlySet<string> = new Set([
++  "module",
++  "project",
++  "doc",
++]);
++
++/**
++ * full 态标签分级谓词（原型 HTML:396 同值）：大半径类型（module/project/doc）
++ * 恒显；其余类型仅 k>1.35 放大后显示。hover/选中由 drawNodeShape 叠加，
++ * 不进本谓词。
++ */
++export function shallShowFullLabel(type: string, k: number): boolean {
++  return FULL_LABEL_TYPES.has(type) || k > FULL_LABEL_ZOOM_THRESHOLD;
++}
++
+ /** lite 簇输入（GraphCluster 结构兼容；representatives 为度数 top-5）。 */
+ export interface LiteClusterInput {
+   key: string;
+@@ -356,6 +406,10 @@ export interface LiteClusterPlacement {
+  * lite 簇摆放（总览 lite，D-008@v2）：簇按 count 降序（同数按 key 升序）沿
+  * 大环等角摆放，气泡半径随节点数开方增长；簇内代表节点在内圈等角分布——
+  * 全确定性。R-04：原型未覆盖的新面，纯函数导出交单测兜底。
++ *
++ * 【保留标注】lite UI 已移除（2026-10-09-knowledge-graph-fullmap task-05，
++ * full 全图模式取代总览簇气泡语义），本布局纯函数与单测保留供复用——
++ * 确定性多簇气泡摆放的独立可复用件，不随 UI 分支消亡。
+  */
+ export function liteClusterLayout(
+   clusters: ReadonlyArray<LiteClusterInput>,
+@@ -486,25 +540,30 @@ export interface GraphHighlight {
+ }
+ 
+ export interface GraphCanvasProps {
+-  /** 切片节点（GraphNodeRef 生成类型；label 空串回退显示 id）。 */
+-  nodes: ReadonlyArray<GraphNodeRef>;
+-  /** 切片边（strength 驱动线型与弹簧档）。 */
++  /**
++   * 节点输入（CanvasNodeInput；label 空串回退显示 id）——slice 传切片 ref
++   * （无坐标），full 传 dump 节点（x/y 预计算坐标，fullSimNodes 消费）。
++   */
++  nodes: ReadonlyArray<CanvasNodeInput>;
++  /** 边（strength 驱动线型与弹簧档；full 态 k<0.5 不绘制——shallDrawEdges）。 */
+   edges: ReadonlyArray<GraphEdge>;
+-  /** slice（默认，查询切片）/ lite（总览簇气泡，D-008@v2）。 */
+-  mode?: "slice" | "lite";
+-  /** lite 模式簇数据（summary.clusters；slice 模式忽略）。 */
+-  clusters?: ReadonlyArray<GraphCluster>;
++  /**
++   * slice（默认，查询切片力场）/ full（全图 dump 静态星空，engine='full'
++   * 不步进力场）。lite 总览模式已移除（2026-10-09-knowledge-graph-fullmap
++   * task-05，full 取代其语义）。
++   */
++  mode?: "slice" | "full";
+   /** 选中节点 id（选中环 + 标签常显）。 */
+   selectedId?: string | null;
+   /** 警示节点 id 集（orphans 命中红色警示环）。 */
+   warnIds?: ReadonlySet<string>;
+   /** 高亮集（非 null 时非高亮元素压暗：边 0.06 / 节点 0.1）。 */
+   highlight?: GraphHighlight | null;
+-  /** 节点点击（lite 模式为代表节点；null=点空白由调用方决定是否清选）。 */
++  /** 节点点击（full 模式=下钻锚点；null=点空白由调用方决定是否清选）。 */
+   onSelect?: (id: string | null) => void;
+-  /** 布局引擎回调（数据重建时上报：force/static/lite + 节点数，mode-chip 数据源）。 */
++  /** 布局引擎回调（数据重建时上报：force/static/full + 节点数，mode-chip 数据源）。 */
+   onLayoutMode?: (info: {
+-    engine: "force" | "static" | "lite";
++    engine: "force" | "static" | "full";
+     nodeCount: number;
+   }) => void;
+   /** 递增触发重新适配视口（工具栏「适配」按钮等）。 */
+@@ -523,9 +582,6 @@ interface CanvasColors {
+   warnRing: string;
+   nodeBorder: string;
+   label: string;
+-  bubbleFill: string;
+-  bubbleBorder: string;
+-  badge: string;
+ }
+ 
+ function canvasColors(theme: ThemeName): CanvasColors {
+@@ -540,9 +596,6 @@ function canvasColors(theme: ThemeName): CanvasColors {
+     warnRing: c.semantic.error,
+     nodeBorder: c.card,
+     label: c.slate[700],
+-    bubbleFill: c.brand[50],
+-    bubbleBorder: c.brand[200],
+-    badge: c.slate[700],
+   };
+ }
+ 
+@@ -581,7 +634,6 @@ export function GraphCanvas({
+   nodes,
+   edges,
+   mode = "slice",
+-  clusters,
+   selectedId = null,
+   warnIds,
+   highlight = null,
+@@ -610,13 +662,10 @@ export function GraphCanvas({
+   const simRef = useRef<SimNode[]>([]);
+   const edgeSimRef = useRef<SimEdge[]>([]);
+   const byIdRef = useRef<Map<string, SimNode>>(new Map());
+-  const liteRef = useRef<LiteClusterPlacement[]>([]);
+-  const liteNodesRef = useRef<SimNode[]>([]);
+-  const engineRef = useRef<"force" | "static" | "lite">("force");
++  const engineRef = useRef<"force" | "static" | "full">("force");
+   const viewRef = useRef<ViewBox>({ x: 0, y: 0, k: 1 });
+   const sizeRef = useRef({ w: 0, h: 0 });
+   const hoverRef = useRef<string | null>(null);
+-  const hoverBubbleRef = useRef(-1);
+   const dragRef = useRef<SimNode | null>(null);
+   const panRef = useRef<{ x: number; y: number } | null>(null);
+   const dirtyRef = useRef(true);
+@@ -639,33 +688,26 @@ export function GraphCanvas({
+     dirtyRef.current = true;
+   });
+ 
+-  // 数据重建（identity 变化=新切片）：slice 黄金角螺旋起步 / >200 静态降级 /
+-  // lite 簇摆放，随后 fitView 适配。
++  // 数据重建（identity 变化=新切片）：full 消费自带 x/y 静态摆放 / slice 黄金角
++  // 螺旋起步 / >200 静态降级，随后 fitView 适配。
+   useEffect(() => {
+     const w = sizeRef.current.w || 800;
+     const h = sizeRef.current.h || 600;
+-    if (mode === "lite") {
+-      const placements = liteClusterLayout(clusters ?? []);
+-      liteRef.current = placements;
+-      liteNodesRef.current = placements.flatMap((p) =>
+-        p.reps.map((r) => {
+-          const rep = (clusters ?? []).find(
+-            (c) => c.key === p.key,
+-          )?.representatives.find((x) => x.id === r.id);
+-          return toSimNode(
+-            {
+-              id: r.id,
+-              type: rep?.type ?? "",
+-              label: rep?.label ?? "",
+-            },
+-            r.x,
+-            r.y,
+-          );
+-        }),
+-      );
+-      engineRef.current = "lite";
+-      onLayoutMode?.({ engine: "lite", nodeCount: liteNodesRef.current.length });
+-      viewRef.current = fitView(liteBbox(placements), w, h);
++    edgeSimRef.current = edges.map((e) => ({
++      s: e.s,
++      t: e.t,
++      type: e.type,
++      strength: e.strength,
++    }));
++    if (mode === "full") {
++      // 全图 dump 静态星空：节点坐标恒等于输入（不 seedSpiral 不步进力场，
++      // engine='full'——rAF 循环仅 force 引擎步进）。
++      const sim = fullSimNodes(nodes);
++      byIdRef.current = new Map(sim.map((n) => [n.id, n] as const));
++      simRef.current = sim;
++      engineRef.current = "full";
++      onLayoutMode?.({ engine: "full", nodeCount: sim.length });
++      viewRef.current = fitView(graphBbox(sim), w, h);
+       dirtyRef.current = true;
+       return;
+     }
+@@ -675,12 +717,6 @@ export function GraphCanvas({
+     seedSpiral(sim, w / 2, h / 2, sim.length);
+     forceTickRef.current = 0;
+     userTouchedRef.current = false;
+-    edgeSimRef.current = edges.map((e) => ({
+-      s: e.s,
+-      t: e.t,
+-      type: e.type,
+-      strength: e.strength,
+-    }));
+     byIdRef.current = new Map(sim.map((n) => [n.id, n] as const));
+     const engine: "force" | "static" =
+       sim.length > FORCE_NODE_LIMIT ? "static" : "force";
+@@ -691,7 +727,7 @@ export function GraphCanvas({
+     viewRef.current = fitView(graphBbox(sim), w, h);
+     dirtyRef.current = true;
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [nodes, edges, mode, clusters, fitSignal]);
++  }, [nodes, edges, mode, fitSignal]);
+ 
+   // 挂载：测量 + rAF 循环 + 非被动滚轮（缩放需 preventDefault）。
+   useEffect(() => {
+@@ -715,11 +751,7 @@ export function GraphCanvas({
+     const refit = () => {
+       const { w, h } = sizeRef.current;
+       if (w === 0 || h === 0) return;
+-      if (engineRef.current === "lite") {
+-        viewRef.current = fitView(liteBbox(liteRef.current), w, h);
+-      } else {
+-        viewRef.current = fitView(graphBbox(simRef.current), w, h);
+-      }
++      viewRef.current = fitView(graphBbox(simRef.current), w, h);
+       dirtyRef.current = true;
+     };
+ 
+@@ -751,8 +783,12 @@ export function GraphCanvas({
+       ctx.strokeStyle = c.nodeBorder;
+       ctx.lineWidth = 1.5;
+       ctx.stroke();
+-      // 标签分级：缩放阈值 / 选中 / hover / 高亮内（lite 与切片同阈值）
+-      const showLbl = k > LABEL_ZOOM_THRESHOLD || isSel || isHov || inHl;
++      // 标签分级（原型同源）：切片 = 缩放阈值/选中/hover/高亮内；full = 大半径
++      // 类型（module/project/doc）恒显，其余 k>1.35 或选中/hover（HTML:396 同值）。
++      const showLbl =
++        engineRef.current === "full"
++          ? shallShowFullLabel(n.type, k) || isSel || isHov
++          : k > LABEL_ZOOM_THRESHOLD || isSel || isHov || inHl;
+       if (showLbl) {
+         ctx.font = `${isSel || isHov ? 600 : 400} ${Math.max(
+           10,
+@@ -782,69 +818,36 @@ export function GraphCanvas({
+       ctx.translate(v.x, v.y);
+       ctx.scale(v.k, v.k);
+ 
+-      if (engineRef.current === "lite") {
+-        // 簇气泡：背景色块 + 计数徽标（hover 提示「度数前 5」口径）
+-        for (const cl of liteRef.current) {
+-          const hov = liteRef.current[hoverBubbleRef.current] === cl;
+-          ctx.globalAlpha = 1;
++      // 边（三档虚实 + 高亮 brand 变粗）。full 态性能护栏：k<0.5 跳过边绘制
++      // 只画节点（shallDrawEdges，原型 dump 星空同值）。
++      if (shallDrawEdges(v.k)) {
++        for (const e of edgeSimRef.current) {
++          const a = byIdRef.current.get(e.s);
++          const b = byIdRef.current.get(e.t);
++          if (!a || !b) continue;
++          const inHl =
++            !hl || !hl.edgeKeys || hl.edgeKeys.has(graphEdgeKey(e.s, e.t, e.type));
++          ctx.globalAlpha = dim && !inHl ? 0.06 : 0.55;
++          const st = strengthOf(e.strength);
++          const { dash, width } = edgeDash(st);
++          ctx.strokeStyle =
++            st === "strong"
++              ? c.edgeStrong
++              : st === "medium"
++                ? c.edgeMedium
++                : c.edgeWeak;
++          ctx.lineWidth = width;
++          ctx.setLineDash(dash);
++          if (hl && inHl) {
++            ctx.strokeStyle = c.edgeHl;
++            ctx.lineWidth = 2.2;
++            ctx.globalAlpha = 0.95;
++          }
+           ctx.beginPath();
+-          ctx.arc(cl.x, cl.y, cl.radius, 0, 7);
+-          ctx.fillStyle = c.bubbleFill;
+-          ctx.fill();
+-          ctx.strokeStyle = hov ? c.edgeHl : c.bubbleBorder;
+-          ctx.lineWidth = hov ? 1.8 : 1.2;
++          ctx.moveTo(a.x, a.y);
++          ctx.lineTo(b.x, b.y);
+           ctx.stroke();
+-          ctx.textAlign = "center";
+-          ctx.font = `600 ${Math.max(
+-            11,
+-            11 / Math.sqrt(v.k),
+-          )}px ${FONT_STACK}`;
+-          ctx.fillStyle = c.badge;
+-          ctx.fillText(String(cl.count), cl.x, cl.y - cl.radius - 7);
+-          ctx.font = `400 ${Math.max(10, 10 / Math.sqrt(v.k))}px ${FONT_STACK}`;
+-          ctx.fillStyle = c.label;
+-          ctx.fillText(cl.label, cl.x, cl.y + cl.radius + 14);
+-          if (hov) {
+-            ctx.fillText(
+-              `本簇 ${cl.count} 节点 · 展示度数前 5`,
+-              cl.x,
+-              cl.y - cl.radius - 22,
+-            );
+-          }
+         }
+-        for (const n of liteNodesRef.current) drawNodeShape(n, c, v.k);
+-        ctx.restore();
+-        ctx.globalAlpha = 1;
+-        return;
+-      }
+-
+-      // 边（三档虚实 + 高亮 brand 变粗）
+-      for (const e of edgeSimRef.current) {
+-        const a = byIdRef.current.get(e.s);
+-        const b = byIdRef.current.get(e.t);
+-        if (!a || !b) continue;
+-        const inHl =
+-          !hl || !hl.edgeKeys || hl.edgeKeys.has(graphEdgeKey(e.s, e.t, e.type));
+-        ctx.globalAlpha = dim && !inHl ? 0.06 : 0.55;
+-        const st = strengthOf(e.strength);
+-        const { dash, width } = edgeDash(st);
+-        ctx.strokeStyle =
+-          st === "strong"
+-            ? c.edgeStrong
+-            : st === "medium"
+-              ? c.edgeMedium
+-              : c.edgeWeak;
+-        ctx.lineWidth = width;
+-        ctx.setLineDash(dash);
+-        if (hl && inHl) {
+-          ctx.strokeStyle = c.edgeHl;
+-          ctx.lineWidth = 2.2;
+-          ctx.globalAlpha = 0.95;
+-        }
+-        ctx.beginPath();
+-        ctx.moveTo(a.x, a.y);
+-        ctx.lineTo(b.x, b.y);
+-        ctx.stroke();
+       }
+       ctx.setLineDash([]);
+       for (const n of simRef.current) drawNodeShape(n, c, v.k);
+@@ -854,7 +857,7 @@ export function GraphCanvas({
+ 
+     const loop = () => {
+       raf = requestAnimationFrame(loop);
+-      // 力场仅 force 引擎步进（static/lite 不启力场——task-06 验收线）
++      // 力场仅 force 引擎步进（static/full 不启力场——full 坐标恒等于 dump 输入）
+       if (
+         engineRef.current === "force" &&
+         sizeRef.current.w > 0 &&
+@@ -924,9 +927,7 @@ export function GraphCanvas({
+       x: (cx - viewRef.current.x) / viewRef.current.k,
+       y: (cy - viewRef.current.y) / viewRef.current.k,
+     };
+-    const pool =
+-      engineRef.current === "lite" ? liteNodesRef.current : simRef.current;
+-    const hit = pickNode(pool, p.x, p.y, viewRef.current.k);
++    const hit = pickNode(simRef.current, p.x, p.y, viewRef.current.k);
+     if (hit) {
+       dragRef.current = hit;
+       hit.drag = true;
+@@ -966,26 +967,11 @@ export function GraphCanvas({
+       dirtyRef.current = true;
+       return;
+     }
+-    // hover：lite 模式先探簇气泡，其次代表节点；切片模式探节点
++    // hover：探节点
+     const p = {
+       x: (cx - viewRef.current.x) / viewRef.current.k,
+       y: (cy - viewRef.current.y) / viewRef.current.k,
+     };
+-    if (engineRef.current === "lite") {
+-      let bubble = -1;
+-      liteRef.current.forEach((cl, i) => {
+-        if (Math.hypot(cl.x - p.x, cl.y - p.y) < cl.radius) bubble = i;
+-      });
+-      const hit = pickNode(liteNodesRef.current, p.x, p.y, viewRef.current.k);
+-      const nextHover = hit?.id ?? null;
+-      if (nextHover !== hoverRef.current || bubble !== hoverBubbleRef.current) {
+-        hoverRef.current = nextHover;
+-        hoverBubbleRef.current = bubble;
+-        dirtyRef.current = true;
+-      }
+-      canvas.style.cursor = hit ? "pointer" : "grab";
+-      return;
+-    }
+     const hit = pickNode(simRef.current, p.x, p.y, viewRef.current.k);
+     const nextHover = hit?.id ?? null;
+     if (nextHover !== hoverRef.current) {
+@@ -1014,14 +1000,9 @@ export function GraphCanvas({
+       x: (e.clientX - rect.left - viewRef.current.x) / viewRef.current.k,
+       y: (e.clientY - rect.top - viewRef.current.y) / viewRef.current.k,
+     };
+-    const pool =
+-      engineRef.current === "lite" ? liteNodesRef.current : simRef.current;
+-    if (!pickNode(pool, p.x, p.y, viewRef.current.k)) {
++    if (!pickNode(simRef.current, p.x, p.y, viewRef.current.k)) {
+       const { w, h } = sizeRef.current;
+-      viewRef.current =
+-        engineRef.current === "lite"
+-          ? fitView(liteBbox(liteRef.current), w, h)
+-          : fitView(graphBbox(simRef.current), w, h);
++      viewRef.current = fitView(graphBbox(simRef.current), w, h);
+       dirtyRef.current = true;
+     }
+   };
+@@ -1047,19 +1028,3 @@ export function GraphCanvas({
+     </div>
+   );
+ }
+-
+-/** lite 包围盒（含气泡半径与簇标签留白）。 */
+-function liteBbox(placements: ReadonlyArray<LiteClusterPlacement>): BBox {
+-  let x0 = Infinity;
+-  let y0 = Infinity;
+-  let x1 = -Infinity;
+-  let y1 = -Infinity;
+-  for (const cl of placements) {
+-    x0 = Math.min(x0, cl.x - cl.radius);
+-    y0 = Math.min(y0, cl.y - cl.radius - 28);
+-    x1 = Math.max(x1, cl.x + cl.radius);
+-    y1 = Math.max(y1, cl.y + cl.radius + 22);
+-  }
+-  if (!isFinite(x0)) return { x0: 0, y0: 0, x1: 0, y1: 0 };
+-  return { x0, y0, x1, y1 };
+-}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index b5af0133f..1affd61f7 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -7962,6 +7962,34 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/knowledge/graph/dump": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Knowledge Graph Dump
++         * @description 全图 dump（星空总览数据源）：CLI 离线预计算坐标的全量 nodes/edges/stats。
++         *
++         *     **手动 gzip 压缩**（2026-10-09-knowledge-graph-fullmap task-03 / Grill F-00：
++         *     禁止全站 GZipMiddleware——SSE 流经压缩中间件有 zlib 缓冲致事件批量延迟
++         *     风险，压缩面仅限本端点）：信封 JSON 化（ensure_ascii=False 紧凑分隔符）后
++         *     ``gzip.compress``，``Content-Encoding: gzip`` 响应头（浏览器 fetch 透明解压）；
++         *     **无条件压缩**（不可用 data=None 小包同构处理，一致性优先）；``Vary`` 标注
++         *     缓存按 Accept-Encoding 区分。旧 CLI（cli_feature_missing:dump）恒 200 信封
++         *     reason=upgrade_required，前端隐藏全图胶囊回退 orphans。
++         */
++        get: operations["get_knowledge_graph_dump_api_workspaces__workspace_id__knowledge_graph_dump_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/knowledge/governance": {
+         parameters: {
+             query?: never;
+@@ -16811,6 +16839,46 @@ export interface components {
+              */
+             status: string;
+         };
++        /**
++         * GraphDumpData
++         * @description dump 数据：nodes（含坐标）/edges/stats（与 summary 同源聚合，复用归一）。
++         */
++        GraphDumpData: {
++            /** Nodes */
++            nodes: components["schemas"]["GraphDumpNode"][];
++            /** Edges */
++            edges: components["schemas"]["GraphEdge"][];
++            stats: components["schemas"]["GraphSummary"];
++        };
++        /**
++         * GraphDumpNode
++         * @description 全图节点：GraphNodeRef + CLI 预计算确定性布局坐标（x/y，Math.round 整数值
++         *     传输为 float）。
++         */
++        GraphDumpNode: {
++            /** Id */
++            id: string;
++            /**
++             * Type
++             * @default
++             */
++            type: string;
++            /**
++             * Label
++             * @default
++             */
++            label: string;
++            /**
++             * X
++             * @default 0
++             */
++            x: number;
++            /**
++             * Y
++             * @default 0
++             */
++            y: number;
++        };
+         /**
+          * GraphEdge
+          * @description 边（s→t 定方向；strength=strong/medium/weak 三档，前端线型派生依据）。
+@@ -16828,6 +16896,20 @@ export interface components {
+              */
+             strength: string;
+         };
++        /** GraphEnvelope[GraphDumpData] */
++        GraphEnvelope_GraphDumpData_: {
++            /** Available */
++            available: boolean;
++            /** Reason */
++            reason?: ("unbound" | "offline" | "timeout" | "upgrade_required" | "invalid_input" | "rpc_error") | null;
++            /**
++             * Source
++             * @default daemon-rpc
++             * @constant
++             */
++            source: "daemon-rpc";
++            data?: components["schemas"]["GraphDumpData"] | null;
++        };
+         /** GraphEnvelope[GraphNodesData] */
+         GraphEnvelope_GraphNodesData_: {
+             /** Available */
+@@ -41623,6 +41705,37 @@ export interface operations {
+             };
+         };
+     };
++    get_knowledge_graph_dump_api_workspaces__workspace_id__knowledge_graph_dump_get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["GraphEnvelope_GraphDumpData_"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_knowledge_governance_api_workspaces__workspace_id__knowledge_governance_get: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/knowledge.ts b/frontend/src/lib/knowledge.ts
+index e70fd7e7f..061bbec8c 100644
+--- a/frontend/src/lib/knowledge.ts
++++ b/frontend/src/lib/knowledge.ts
+@@ -57,6 +57,13 @@ export type GraphNodesOut = components["schemas"]["GraphEnvelope_GraphNodesData_
+ export type GraphReason = NonNullable<GraphOverviewOut["reason"]>;
+ export type GraphSub =
+   operations["get_knowledge_graph_query_api_workspaces__workspace_id__knowledge_graph_query_get"]["parameters"]["query"]["sub"];
++// 全图 dump DTO（task-04 / 2026-10-09-knowledge-graph-fullmap / D-002@v1；后端
++// schema.py GraphDump* 为真相源，生成类型零手写）。节点带 CLI 预计算确定性
++// 布局坐标（x/y），stats 与 summary 同源聚合。
++export type GraphDumpNode = components["schemas"]["GraphDumpNode"];
++export type GraphDumpData = components["schemas"]["GraphDumpData"];
++export type GraphDumpOut =
++  components["schemas"]["GraphEnvelope_GraphDumpData_"];
+ 
+ /**
+  * filename 路径段编码：按 `/` 分段 encodeURIComponent 拼回，不整串编码。
+@@ -435,3 +442,22 @@ export async function getKnowledgeGraphNodes(
+     `/api/workspaces/${workspaceId}/knowledge/graph/nodes?${qs.toString()}`,
+   );
+ }
++
++/**
++ * 全图 dump（task-04 / 2026-10-09-knowledge-graph-fullmap / FR-03 / FR-04 /
++ * D-002@v1）：GET /knowledge/graph/dump。
++ *
++ * CLI 离线预计算坐标的全量节点/边/聚合一次性下发（daemon 不裁剪），后端手动
++ * gzip 压缩传输（浏览器 fetch 原生透明解压）。全量回包可达 MB 级——GET 缺省
++ * 30s 超时不够，显式 timeoutMs 60s（大回包先例：仅此端点放宽）。HTTP 200 恒回
++ * 信封：available=false（reason=upgrade_required 等）时 data=null，调用方按
++ * available+reason 分支回退既有链路不弹错。
++ */
++export async function getKnowledgeGraphDump(
++  workspaceId: string,
++): Promise<GraphDumpOut> {
++  return apiFetch<GraphDumpOut>(
++    `/api/workspaces/${workspaceId}/knowledge/graph/dump`,
++    { timeoutMs: 60_000 },
++  );
++}
+diff --git a/frontend/src/lib/query-keys.ts b/frontend/src/lib/query-keys.ts
+index 154a3af3b..837037ffa 100644
+--- a/frontend/src/lib/query-keys.ts
++++ b/frontend/src/lib/query-keys.ts
+@@ -129,8 +129,12 @@ export const queryKeys = {
+   // 2026-10-08-platform-knowledge-graph task-05：知识图谱三键（集中工厂惯例，
+   // 凡影响查询结果的变量都进 key）。overview 键被图谱页（page.tsx）与
+   // ops-dashboard 图卡共用——同键共享缓存零额外请求（D-004@v1）。
++  // 2026-10-09-knowledge-graph-fullmap task-04：dump 键加入 all 桶——全图
++  // 数据面与查询切片同族，后续失效入口 queryKeys.knowledgeGraph.dump。
+   knowledgeGraph: {
+     all: ["knowledgeGraph"] as const,
++    dump: (workspaceId: string) =>
++      ["knowledgeGraph", "dump", workspaceId] as const,
+   },
+ } as const;
+ 
+@@ -170,3 +174,12 @@ export function knowledgeGraphNodesQueryKey(
+ ) {
+   return ["knowledgeGraph", "nodes", workspaceId, search] as const;
+ }
++
++/**
++ * 全图 dump 键（2026-10-09-knowledge-graph-fullmap task-04；图谱页全图数据面
++ * 消费，staleTime 5min——全量回包重）。与 queryKeys.knowledgeGraph.dump 同一
++ * 结构（useQuery 用本函数，mutation 失效走 queryKeys 入口）。
++ */
++export function knowledgeGraphDumpQueryKey(workspaceId: string) {
++  return ["knowledgeGraph", "dump", workspaceId] as const;
++}
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index f5b6e3eee..22428eb22 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -7126,9 +7126,11 @@ export class Daemon {
+       const depth = typeof params.depth === 'string' || typeof params.depth === 'number' ? params.depth : undefined;
+       const search = typeof params.search === 'string' ? params.search : undefined;
+       const limit = typeof params.limit === 'string' || typeof params.limit === 'number' ? params.limit : undefined;
++      // dump 专属旗标（2026-10-09 task-02 接线补）：layout 必须 true，注册层透传给 handler 校验
++      const layout = params.layout === true ? true : undefined;
+       // root 键：design RPC 契约用 root（governance 先例 root_path 兼容双收）
+       const rootPath = normalizeRootPathParam(params.root ?? params.root_path);
+-      return gov.graph(workspaceId, { sub, anchor, anchor2, edges, depth, search, limit }, rootPath);
++      return gov.graph(workspaceId, { sub, anchor, anchor2, edges, depth, search, limit, layout }, rootPath);
+     });
+   }
+ 
+diff --git a/sillyhub-daemon/src/runtime-handler.ts b/sillyhub-daemon/src/runtime-handler.ts
+index 7a0fc1bc7..c69047aa0 100644
+--- a/sillyhub-daemon/src/runtime-handler.ts
++++ b/sillyhub-daemon/src/runtime-handler.ts
+@@ -394,7 +394,11 @@ const KNOWLEDGE_ROOT_ANOMALY_RE = /[\0\r\n<>|"?*]/;
+ // （anchor/anchor2/search）共用一个黑名单正则——三者都进 shell:true 命令串
+ // （锚点是 CLI 位置参数，实测 usage `[锚点...]` 非旗标），引号本身在黑名单内，
+ // 拼串引号包裹即杜绝逃逸（R-01 注入面）。旧 CLI 三态细分回码见 graph 方法注释。
+-const KNOWLEDGE_GRAPH_SUBS = new Set(['summary', 'nodes', 'neighbors', 'path', 'impact', 'orphans', 'dangling']);
++// 2026-10-09-knowledge-graph-fullmap task-02 加 dump（全图导出，FR-02/D-002@v1）：
++// layout 必须 true（false/缺省 validation_rejected）、拼串固定 `dump --layout --json`
++//（无锚点无 search——dump 无自由串入参，注入消毒面零新增）、回包全量透传
++//（旁路 orphans/dangling top-50 清单裁剪）。
++const KNOWLEDGE_GRAPH_SUBS = new Set(['summary', 'nodes', 'neighbors', 'path', 'impact', 'orphans', 'dangling', 'dump']);
+ 
+ /**
+  * --edges 值白名单：CLI knowledge-graph.js EDGE_STRENGTH 键集的硬拷贝（16 边型，
+@@ -529,10 +533,13 @@ export class KnowledgeGovernanceHandler {
+ 
+   /**
+    * knowledge.graph：平台图查询唯一 daemon 出口（2026-10-08-platform-knowledge-graph
+-   * task-01，FR-04/D-001@v2/D-005@v1）。七子命令白名单 → `sillyspec knowledge graph
+-   * <sub> "<anchor>" ["<anchor2>"] --json`（锚点=CLI 位置参数，引号在黑名单内杜绝
++   * task-01，FR-04/D-001@v2/D-005@v1；2026-10-09-knowledge-graph-fullmap task-02 加
++   * dump，FR-02/D-002@v1）。八子命令白名单 → `sillyspec knowledge graph <sub>
++   * "<anchor>" ["<anchor2>"] --json`（锚点=CLI 位置参数，引号在黑名单内杜绝
+    * 逃逸）；edges 值白名单 16 边型∪{all}；depth 钳 1-3；limit 钳 1-50；search ≤200；
+-   * summary 固定 `--clusters 50`（缺省全量簇——本仓实测 883 簇）。
++   * summary 固定 `--clusters 50`（缺省全量簇——本仓实测 883 簇）；dump 拼串固定
++   * `dump --layout --json`（layout 必须 true，无锚点无 search）且回包全量透传
++   * （旁路清单裁剪）。
+    *
+    * 回码契约（D-001@v2 三态细分）：消毒/校验拒绝 → validation_rejected（backend 译
+    * invalid_input）；CLI 全无 graph（stdout 含 'knowledge <' 或 unknown_subcommand，
+@@ -554,6 +561,7 @@ export class KnowledgeGovernanceHandler {
+       depth?: number | string;
+       search?: string;
+       limit?: number | string;
++      layout?: boolean;
+     },
+     rootPath?: string,
+   ): Promise<{ graph: unknown }> {
+@@ -563,6 +571,11 @@ export class KnowledgeGovernanceHandler {
+     if (!KNOWLEDGE_GRAPH_SUBS.has(sub)) {
+       throw new RpcError('validation_rejected', `graph subcommand not allowed: ${JSON.stringify(sub)}`);
+     }
++    // dump 专属旗标校验（task-02，D-002@v1）：dump 是全图导出（--layout 携布局
++    // 信息），layout 必须 true——false/缺省一律 validation_rejected 且不 spawn。
++    if (sub === 'dump' && query.layout !== true) {
++      throw new RpcError('validation_rejected', 'dump requires --layout');
++    }
+     // 三自由串同函数消毒（R-01）：anchor/anchor2 位置参数、search 旗标值。
+     const anchors: string[] = [];
+     if (query.anchor !== undefined && query.anchor !== '') {
+@@ -590,7 +603,12 @@ export class KnowledgeGovernanceHandler {
+     const limit = clampGraphInt('limit', query.limit, 1, 50);
+     if (limit !== undefined) flags.push(`--limit ${limit}`);
+     if (sub === 'summary') flags.push('--clusters 50');
+-    const cmd = ['sillyspec knowledge graph', sub, ...anchors.map((a) => `"${a}"`), ...flags, '--json'].join(' ');
++    // dump 拼串固定（task-02）：`dump --layout --json` 无锚点无 search——dump 无
++    // 自由串入参（constraints：注入消毒面不新增参数），上方 anchor/search 消毒对
++    // dump 只是防御性先行拒绝（恶意串到不了拼串）；其余子命令维持既有拼装零变化。
++    const cmd = sub === 'dump'
++      ? 'sillyspec knowledge graph dump --layout --json'
++      : ['sillyspec knowledge graph', sub, ...anchors.map((a) => `"${a}"`), ...flags, '--json'].join(' ');
+ 
+     const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
+     const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root);
+@@ -613,8 +631,14 @@ export class KnowledgeGovernanceHandler {
+       if (probe) throw probe;
+       throw new RpcError('internal', 'graph output is not valid CLI JSON envelope');
+     }
++    // dump 回包旁路裁剪（task-02）：全图导出的语义本位是完整清单，orphans/dangling
++    // 键全量透传——top-50 截断只属于同名单命令子（下方 sub 严格等值分支），dump
++    // 提前 return 不入裁剪路径；防 WS 大帧由调用侧（backend 分页/落盘）负责。
++    if (sub === 'dump') {
++      return { graph: j };
++    }
+     // 清单裁剪（design Phase 1：本仓 dangling 实测 1807 条/675KB——orphans/dangling
+-    // items 截 top-50、count 保真，防 WS 大帧与前端千行清单；完整治理走 CLI/doctor。
++    // items 截 top-50、count 保真，防 WS 大帧与前端千行清单；完整治理走 CLI/doctor）。
+     if (sub === 'orphans' && Array.isArray(j.orphans)) {
+       j.orphans = (j.orphans as unknown[]).slice(0, 50);
+     }
+diff --git a/sillyhub-daemon/tests/knowledge-governance-handler.test.ts b/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
+index 200351a9a..ecfe960f3 100644
+--- a/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
++++ b/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
+@@ -12,6 +12,9 @@
+  * cli_feature_missing:summary|nodes；method_unregistered 是 daemon 未注册 handler
+  * 的平台侧场景、非 handler 能抛，由 daemon.ts 注册 + _dispatchRpc 保证——此处仅
+  * 注释说明，不造用例）、ok:false 信封→internal、清单 top-50 截断 count 保真。
++ * 2026-10-09-knowledge-graph-fullmap task-02：dump 用例组——白名单放行 + 拼串
++ * 全字面断言（`dump --layout --json`，无锚点无 search）、layout=false 与缺省拒
++ * 且不 spawn、大回包（>1000 items）全量透传（旁路 orphans/dangling top-50 裁剪）。
+  * sillyspecCmd 与 rootsProvider 全注入（不发真子进程）——RuntimeHandler 测试范式。
+  */
+ import { describe, expect, it, vi } from 'vitest';
+@@ -365,6 +368,53 @@ describe('knowledge.graph', () => {
+     expect(rs.count).toBe(4);
+   });
+ 
++  // ── dump 用例组（2026-10-09-knowledge-graph-fullmap task-02，FR-02/D-002@v1）──
++
++  it('⑩ dump 白名单放行：拼串全字面 `dump --layout --json`（无锚点无 search）+ cwd=仓库根', async () => {
++    const cwds: string[] = [];
++    const stdout = GRAPH_OK({ query: { sub: 'dump', layout: true }, nodes: [], edges: [], orphans: [], dangling: [] });
++    const { handler, sillyspecCmd } = mk({ ok: true, stdout, stderr: '', timedOut: false }, cwds);
++    const r = await handler.graph('ws-1', { sub: 'dump', layout: true }, 'C:/repo/x');
++    expect((r.graph as { ok: boolean }).ok).toBe(true);
++    expect(sillyspecCmd).toHaveBeenCalledOnce();
++    expect(String(sillyspecCmd.mock.calls[0]?.[0])).toBe('sillyspec knowledge graph dump --layout --json');
++    expect(cwds[0]).toBe('C:/repo/x');
++    // 杂入参数不进拼串（dump 无自由串入参——anchor/search/edges 等被消毒后丢弃）
++    await handler.graph('ws-1', { sub: 'dump', layout: true, anchor: 'FR-core-engine-001', search: 'x' }, 'C:/repo/x');
++    expect(String(sillyspecCmd.mock.calls[1]?.[0])).toBe('sillyspec knowledge graph dump --layout --json');
++  });
++
++  it('⑩ dump layout=false / 缺省 → validation_rejected 且不 spawn', async () => {
++    const { handler, sillyspecCmd } = mk({ ok: true, stdout: GRAPH_OK(), stderr: '', timedOut: false });
++    await expect(handler.graph('ws-1', { sub: 'dump', layout: false }, 'C:/repo/x')).rejects.toMatchObject({
++      code: 'validation_rejected',
++    });
++    await expect(handler.graph('ws-1', { sub: 'dump' }, 'C:/repo/x')).rejects.toMatchObject({
++      code: 'validation_rejected',
++    });
++    expect(sillyspecCmd).not.toHaveBeenCalled();
++  });
++
++  it('⑩ dump 回包 >1000 items 全量透传（旁路 orphans/dangling top-50 裁剪，count 保真）', async () => {
++    const bigDump = JSON.stringify({
++      ok: true,
++      query: { sub: 'dump', layout: true },
++      count: 1807,
++      orphans: Array.from({ length: 1200 }, (_, i) => ({ id: `decision:decisions/x.md#D-${i}@v1`, type: 'decision' })),
++      dangling: Array.from({ length: 1100 }, (_, i) => ({ id: `doc:refs/x-${i}.md`, type: 'doc' })),
++    });
++    const { handler } = mk({ ok: true, stdout: bigDump, stderr: '', timedOut: false });
++    const r = (await handler.graph('ws-1', { sub: 'dump', layout: true }, 'C:/repo/x')).graph as {
++      count: number;
++      orphans: { id: string }[];
++      dangling: { id: string }[];
++    };
++    expect(r.orphans).toHaveLength(1200);
++    expect(r.orphans[1199]?.id).toBe('decision:decisions/x.md#D-1199@v1');
++    expect(r.dangling).toHaveLength(1100);
++    expect(r.count).toBe(1807);
++  });
++
+   it('root 防线复用：越界/缺省 → forbidden 且不 spawn（digest 同款两道防线）', async () => {
+     const { handler, sillyspecCmd } = mk({ ok: true, stdout: GRAPH_OK(), stderr: '', timedOut: false });
+     await expect(handler.graph('ws-1', { sub: 'summary' }, 'D:/outside/repo')).rejects.toMatchObject({

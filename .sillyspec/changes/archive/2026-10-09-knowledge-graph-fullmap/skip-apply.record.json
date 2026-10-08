@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-knowledge-graph-fullmap",
+  "flag": "--skip-apply",
+  "skippedAt": "2026-10-08T18:11:18.476Z",
+  "deliverableCount": 3,
+  "deliverableFiles": [
+    "frontend/src/components/knowledge/graph-canvas.tsx",
+    "frontend/src/lib/knowledge.ts",
+    "sillyhub-daemon/src/daemon.ts"
+  ],
+  "note": "归档时显式跳过未 apply 交付面检查（--skip-apply）：交付物未确认进主仓，本记录随归档包留存供审计"
+}

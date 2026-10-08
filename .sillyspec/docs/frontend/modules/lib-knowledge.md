@@ -45,4 +45,8 @@ list 返回 { items, total } 包装；get 按文件名定位（非 id）
 ### 2026-10-09-frontend-risk-fixes 增量
 - 图谱请求显式超时：`getKnowledgeGraphOverview` timeoutMs=200s（服务端三连 RPC 最坏 180s）、`getKnowledgeGraphQuery` timeoutMs=90s（单 RPC 60s）——不再吃 apiFetch GET 缺省 30s（大仓恒超时实证）；`getKnowledgeGraphNodes` 维持缺省（补全迟答无价值）。lib 层测试 `__tests__/knowledge-graph-timeout.test.ts` 钉住。
 
+
+### 2026-10-09-knowledge-graph-fullmap 增量
+- 新增 `getKnowledgeGraphDump(wsId)`（GET dump 端点，timeoutMs 60_000 大回包）+ GraphDump* 生成类型导出；消费方=图谱页全图模式（useQuery staleTime 5min）。
+
 <!-- MANUAL_NOTES_END -->

@@ -1,0 +1,31 @@
+{
+  "change": "2026-10-09-knowledge-graph-fullmap",
+  "baseline": "6fc86d7eda6dc0809dc18720d43066782df37775",
+  "head": "1548a5f49b45f9590b2f75c438d5e2cc7658976f",
+  "files": [
+    "backend/app/modules/knowledge/graph.py",
+    "backend/app/modules/knowledge/router.py",
+    "backend/app/modules/knowledge/schema.py",
+    "backend/app/modules/knowledge/tests/test_graph.py",
+    "backend/openapi.json",
+    "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx",
+    "frontend/src/components/knowledge/__tests__/graph-canvas.test.ts",
+    "frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx",
+    "frontend/src/components/knowledge/graph-canvas.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/knowledge.ts",
+    "frontend/src/lib/query-keys.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/runtime-handler.ts",
+    "sillyhub-daemon/tests/knowledge-governance-handler.test.ts"
+  ],
+  "totals": {
+    "files": 15,
+    "additions": 1354,
+    "deletions": 370
+  },
+  "savedAt": "2026-10-08T17:44:33.064Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "patchSha256": "e8beba963a0eb036846d943791a64b3167d447fba9ddfd6fc30fa63dfdb7fa11",
+  "patchStatus": "ok"
+}

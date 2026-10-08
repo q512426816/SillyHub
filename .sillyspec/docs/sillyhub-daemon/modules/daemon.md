@@ -100,4 +100,8 @@ RPC handler 注册: list_dir / host_fs.* / get_spec_bundle
 ### 2026-10-08-platform-knowledge-graph 增量
 - knowledge.action 注册后追加 `knowledge.graph` RPC 注册：params 归一（sub/anchor/anchor2/edges 限 string、depth/limit 收 string|number、root_path 过 normalizeRootPathParam 且 **root 键双收**——design RPC 契约用 root，governance 先例 root_path 兼容）；转发 KnowledgeGovernanceHandler.graph。
 
+
+### 2026-10-09-knowledge-graph-fullmap 增量
+- knowledge.graph 注册层补 layout 旗标透传（dump 子命令专属，params.layout===true 才传——2026-10-09 接线缝隙修复）。
+
 <!-- MANUAL_NOTES_END -->

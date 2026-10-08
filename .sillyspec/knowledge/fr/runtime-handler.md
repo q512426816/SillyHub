@@ -311,3 +311,115 @@ created_at: 2026-10-08T11:44:49.977Z
 - 场景：默认场景 — Given Phase 0（sillyspec 仓 summary/nodes）未交付或 CLI 未升级；When 平台侧调用 overview/nodes；Then daemon 回 cli_feature_missing:<sub> → summary=None / nodes 信封 unavailable，前端隐藏 li
 全文：.sillyspec/changes/archive/2026-10-08-platform-knowledge-graph/requirements.md#FR-08
 最近确认：537f2ed0e
+
+## FR-runtime-handler-009 CLI dump 子命令
+变更：2026-10-09-knowledge-graph-fullmap
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given specRoot 全图（本仓真图 5812 节点量级）；When `sillyspec knowledge graph dump --layout --json`；Then 输出 `{ok, nodes:[{id,type,label,x,y}], edges:[{s,t,type,strength}], stats}`；坐标 MU
+全文：.sillyspec/changes/archive/2026-10-09-knowledge-graph-fullmap/requirements.md#FR-01
+最近确认：3a04f370e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-knowledge-graph-fullmap:task-07:acc-0-9ee4d2ad
+  tests: backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/daemon/tests/test_build_claim_payload.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_pending_update_upsert.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_compact_endpoint.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_readiness.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/daemon/tests/test_session_suspend.py | backend/app/modules/daemon/tests/test_worker_redispatch.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_governance.py | backend/app/modules/knowledge/tests/test_graph.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_blocked_notify.py | backend/app/modules/platform_sync/tests/test_agent_log_states_push.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/daemon/__tests__/machine-card-pending.test.tsx | frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx | frontend/src/components/knowledge/__tests__/governance-cards.test.tsx | frontend/src/components/knowledge/__tests__/graph-canvas.test.ts | frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/hooks/__tests__/use-session-liveness.test.ts | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/liveness/discovery.test.ts | sillyhub-daemon/tests/agent-log/liveness/registry.test.ts | sillyhub-daemon/tests/agent-log/liveness/tailer.test.ts | sillyhub-daemon/tests/daemon-hits-periodic-lifecycle.test.ts | sillyhub-daemon/tests/daemon-selfupdate-orchestrator.test.ts | sillyhub-daemon/tests/disk-probe-pending.test.ts | sillyhub-daemon/tests/integration/worker-resume.test.ts | sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts | sillyhub-daemon/tests/interactive/daemon-notify-session-ready.test.ts | sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts | sillyhub-daemon/tests/knowledge-governance-handler.test.ts | sillyhub-daemon/tests/knowledge-hits-periodic.test.ts | sillyhub-daemon/tests/knowledge-hits-upload.test.ts | sillyhub-daemon/tests/sillyspec-platform-command.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-knowledge-graph-fullmap
+  status: active
+
+## FR-runtime-handler-010 daemon dump 白名单
+变更：2026-10-09-knowledge-graph-fullmap
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given daemon 收到 knowledge.graph RPC sub=dump；Then 白名单 MUST 放行 dump；layout MUST 为 true（false/缺省回 validation_rejected）；回包 MUST 全量不裁剪
+全文：.sillyspec/changes/archive/2026-10-09-knowledge-graph-fullmap/requirements.md#FR-02
+最近确认：3a04f370e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-knowledge-graph-fullmap:task-02:acc-0-841e275c
+  tests: sillyhub-daemon/tests/knowledge-governance-handler.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-knowledge-graph-fullmap
+  status: active
+
+## FR-runtime-handler-011 backend dump 端点与压缩
+变更：2026-10-09-knowledge-graph-fullmap
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 可用态；When `GET /api/workspaces/{ws}/knowledge/graph/dump`（KNOWLEDGE_READ，注册在 {filename:pat；Then 信封六键同族，data={nodes,edges,stats}；GZipMiddleware(minimum_size=1024) 全站启用，带 Accept-
+全文：.sillyspec/changes/archive/2026-10-09-knowledge-graph-fullmap/requirements.md#FR-03
+最近确认：3a04f370e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-knowledge-graph-fullmap:task-03:acc-0-3bb39675
+  tests: backend/app/modules/knowledge/tests/test_graph.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-knowledge-graph-fullmap
+  status: active
+- row: 2026-10-09-knowledge-graph-fullmap:task-04:acc-0-e5e7d02a
+  tests: frontend/src/components/knowledge/__tests__/graph-canvas.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-knowledge-graph-fullmap
+  status: active
+
+## FR-runtime-handler-012 前端默认全图与下钻
+变更：2026-10-09-knowledge-graph-fullmap
+状态：active
+摘要：默认场景；lite 移除
+场景正文：
+- 场景：默认场景 — Given 图谱页可用态且 dump 在场 dump 不可用（cli_feature_missing:dump 或旧 daemon）；When 首载；Then 默认加载 dump 并静态渲染全图星空（不启力场；k<0.5 不画边；标签只在大半径类型或 k>1.35）；点任意节点 MUST 切「查询切片」模式并以该节点发
+- 场景：lite 移除 — Given 任意态；Then lite 渲染分支与胶囊 MUST 移除；liteClusterLayout 纯函数及其单测保留（无 UI 引用，注释标注保留原因）
+全文：.sillyspec/changes/archive/2026-10-09-knowledge-graph-fullmap/requirements.md#FR-04
+最近确认：3a04f370e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-knowledge-graph-fullmap:task-05:acc-0-3be54a60
+  tests: frontend/src/components/knowledge/__tests__/graph-canvas.test.ts | frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-knowledge-graph-fullmap
+  status: active
+- row: 2026-10-09-knowledge-graph-fullmap:task-06:acc-0-7fe20191
+  tests: frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-knowledge-graph-fullmap
+  status: active
+
+## FR-runtime-handler-013 全图渲染性能
+变更：2026-10-09-knowledge-graph-fullmap
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 5812 节点静态全图；When 缩放平移交互；Then 帧渲染 MUST 无力场计算（恒静态）；边绘制按缩放阈值裁剪；交互帧脏标记重绘；肉眼流畅（无逐帧全量重算）
+全文：.sillyspec/changes/archive/2026-10-09-knowledge-graph-fullmap/requirements.md#FR-05
+最近确认：3a04f370e
