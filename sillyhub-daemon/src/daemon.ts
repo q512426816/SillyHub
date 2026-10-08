@@ -7110,6 +7110,26 @@ export class Daemon {
       const rootPath = normalizeRootPathParam(params.root_path);
       return gov.action(workspaceId, kind, { from, to }, rootPath);
     });
+
+    // ── knowledge.graph（2026-10-08-platform-knowledge-graph task-01）───────────
+    // 平台图查询唯一出口（七子命令/三自由串消毒/钳制/旧 CLI 三态探测全在 handler）。
+    // params 归一同款：非字符串/数字归 undefined = 不拼旗标；root_path 经
+    // normalizeRootPathParam；handler 抛 RpcError（validation_rejected/
+    // cli_subcommand_missing/cli_feature_missing:<sub>/timeout/internal）由
+    // _dispatchRpc 原样回填。
+    ws.registerRpcHandler('knowledge.graph', async (params) => {
+      const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      const sub = typeof params.sub === 'string' ? params.sub : '';
+      const anchor = typeof params.anchor === 'string' ? params.anchor : undefined;
+      const anchor2 = typeof params.anchor2 === 'string' ? params.anchor2 : undefined;
+      const edges = typeof params.edges === 'string' ? params.edges : undefined;
+      const depth = typeof params.depth === 'string' || typeof params.depth === 'number' ? params.depth : undefined;
+      const search = typeof params.search === 'string' ? params.search : undefined;
+      const limit = typeof params.limit === 'string' || typeof params.limit === 'number' ? params.limit : undefined;
+      // root 键：design RPC 契约用 root（governance 先例 root_path 兼容双收）
+      const rootPath = normalizeRootPathParam(params.root ?? params.root_path);
+      return gov.graph(workspaceId, { sub, anchor, anchor2, edges, depth, search, limit }, rootPath);
+    });
   }
 
   private _closeWsClient(): void {

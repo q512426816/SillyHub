@@ -389,6 +389,58 @@ const KNOWLEDGE_DOMAIN_RE = /^[a-z0-9-]+$/;
 const KNOWLEDGE_ACTION_KINDS = new Set(['repair-paths', 'redomain']);
 const KNOWLEDGE_ROOT_ANOMALY_RE = /[\0\r\n<>|"?*]/;
 
+// ── knowledge graph 查询（2026-10-08-platform-knowledge-graph task-01，FR-04）──
+// 平台图查询唯一 daemon 出口：digest/action 同款结构扩展。消毒面三自由串
+// （anchor/anchor2/search）共用一个黑名单正则——三者都进 shell:true 命令串
+// （锚点是 CLI 位置参数，实测 usage `[锚点...]` 非旗标），引号本身在黑名单内，
+// 拼串引号包裹即杜绝逃逸（R-01 注入面）。旧 CLI 三态细分回码见 graph 方法注释。
+const KNOWLEDGE_GRAPH_SUBS = new Set(['summary', 'nodes', 'neighbors', 'path', 'impact', 'orphans', 'dangling']);
+
+/**
+ * --edges 值白名单：CLI knowledge-graph.js EDGE_STRENGTH 键集的硬拷贝（16 边型，
+ * 2026-10-08 实测）∪ {all}（neighbors 缺省即 all）。CLI 加边型时此处同步硬拷贝。
+ */
+const KNOWLEDGE_GRAPH_EDGES = new Set([
+  'module-dep', 'module-files', 'anchors', 'supersedes', 'from-change', 'belongs-module',
+  'deliverables', 'change-modules', 'test-binding', 'describes', 'changelog-of',
+  'changelog-entry', 'doc-refs', 'scan-refs', 'route', 'entry-link', 'all',
+]);
+
+/**
+ * graph 自由串黑名单：先例 ROOT_PATH_METACHAR_RE 全集（"'`$&|;<>() %^ + \n\r\0
+ * ——注意空格与反引号都在集合内）外加 \t。命中即 validation_rejected；正常节点
+ * id 字符集（/ # : @ - _ . 与中文，实测样本 decision:decisions/x.md#D-1@v1、
+ * src/foo.js、FR-core-engine-001、2026-10-08-x）零冲突放行。
+ */
+const GRAPH_TEXT_BLACKLIST_RE = /["'`$&|;<>() %^\n\r\0\t]/;
+
+/** graph 自由串消毒（anchor/anchor2/search 三参数同函数）：命中黑名单拒（D-001@v2）。 */
+function sanitizeGraphText(name: string, v: string): string {
+  if (GRAPH_TEXT_BLACKLIST_RE.test(v)) {
+    throw new RpcError('validation_rejected', `graph ${name} contains forbidden characters: ${JSON.stringify(v)}`);
+  }
+  return v;
+}
+
+/**
+ * graph 数值旗标钳制：parseInt 后夹 [min,max]（越界钳不拒——depth 0/4 → 1/3、
+ * limit 0/99 → 1/50）；NaN（非数字串）拒 validation_rejected；缺省/空 → undefined
+ * = 不拼旗标（走 CLI 缺省）。
+ */
+function clampGraphInt(
+  name: string,
+  v: number | string | undefined,
+  min: number,
+  max: number,
+): number | undefined {
+  if (v === undefined || v === '') return undefined;
+  const n = parseInt(String(v), 10);
+  if (!Number.isInteger(n)) {
+    throw new RpcError('validation_rejected', `graph ${name} must be an integer: ${JSON.stringify(v)}`);
+  }
+  return Math.min(max, Math.max(min, n));
+}
+
 export class KnowledgeGovernanceHandler {
   /** allowed_roots 白名单来源（containment 第二道校验）；缺省空数组 → 一律拒。 */
   private readonly _rootsProvider: () => string[];
@@ -473,5 +525,139 @@ export class KnowledgeGovernanceHandler {
       throw new RpcError('internal', `action failed: ${output}`);
     }
     return { output };
+  }
+
+  /**
+   * knowledge.graph：平台图查询唯一 daemon 出口（2026-10-08-platform-knowledge-graph
+   * task-01，FR-04/D-001@v2/D-005@v1）。七子命令白名单 → `sillyspec knowledge graph
+   * <sub> "<anchor>" ["<anchor2>"] --json`（锚点=CLI 位置参数，引号在黑名单内杜绝
+   * 逃逸）；edges 值白名单 16 边型∪{all}；depth 钳 1-3；limit 钳 1-50；search ≤200；
+   * summary 固定 `--clusters 50`（缺省全量簇——本仓实测 883 簇）。
+   *
+   * 回码契约（D-001@v2 三态细分）：消毒/校验拒绝 → validation_rejected（backend 译
+   * invalid_input）；CLI 全无 graph（stdout 含 'knowledge <' 或 unknown_subcommand，
+   * digest 先例同款文本探测）→ cli_subcommand_missing；CLI 有 graph 但缺
+   * summary/nodes（后发子命令，graph_usage 信封 echo subcommand 或 usage 列表无
+   * 该子命令）→ `cli_feature_missing:<sub>`（backend 前两者均译 upgrade_required）；
+   * timedOut → timeout；其余（含 CLI 参数类 ok:false 信封 anchor_required/
+   * node_not_found 等）→ internal。**method_unregistered 不是本 handler 能抛的**——
+   * 那是 daemon 未注册 knowledge.graph 的平台侧场景（旧 daemon，由 _dispatchRpc 对
+   * 未注册 method 回 method_not_found，backend 侧译 upgrade_required）。
+   */
+  async graph(
+    workspaceId: string,
+    query: {
+      sub?: string;
+      anchor?: string;
+      anchor2?: string;
+      edges?: string;
+      depth?: number | string;
+      search?: string;
+      limit?: number | string;
+    },
+    rootPath?: string,
+  ): Promise<{ graph: unknown }> {
+    void workspaceId; // 签名与 digest/action 对称（CLI 以 cwd=root 定位仓库，不用 id）
+    const root = this._guardRoot(rootPath);
+    const sub = String(query.sub ?? '');
+    if (!KNOWLEDGE_GRAPH_SUBS.has(sub)) {
+      throw new RpcError('validation_rejected', `graph subcommand not allowed: ${JSON.stringify(sub)}`);
+    }
+    // 三自由串同函数消毒（R-01）：anchor/anchor2 位置参数、search 旗标值。
+    const anchors: string[] = [];
+    if (query.anchor !== undefined && query.anchor !== '') {
+      anchors.push(sanitizeGraphText('anchor', query.anchor));
+    }
+    if (query.anchor2 !== undefined && query.anchor2 !== '') {
+      anchors.push(sanitizeGraphText('anchor2', query.anchor2));
+    }
+    const flags: string[] = [];
+    if (query.edges !== undefined && query.edges !== '') {
+      if (!KNOWLEDGE_GRAPH_EDGES.has(query.edges)) {
+        throw new RpcError('validation_rejected', `graph edges not allowed: ${JSON.stringify(query.edges)}`);
+      }
+      flags.push(`--edges ${query.edges}`);
+    }
+    const depth = clampGraphInt('depth', query.depth, 1, 3);
+    if (depth !== undefined) flags.push(`--depth ${depth}`);
+    if (query.search !== undefined && query.search !== '') {
+      const search = sanitizeGraphText('search', query.search);
+      if (search.length > 200) {
+        throw new RpcError('validation_rejected', `graph search too long (${search.length} > 200)`);
+      }
+      flags.push(`--search "${search}"`);
+    }
+    const limit = clampGraphInt('limit', query.limit, 1, 50);
+    if (limit !== undefined) flags.push(`--limit ${limit}`);
+    if (sub === 'summary') flags.push('--clusters 50');
+    const cmd = ['sillyspec knowledge graph', sub, ...anchors.map((a) => `"${a}"`), ...flags, '--json'].join(' ');
+
+    const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
+    const r = await run(cmd, SILLYSPEC_TIMEOUT_MS, root);
+    if (!r.ok) {
+      const probe = this._probeGraphOldCli(r.stdout, sub);
+      if (probe) throw probe;
+      if (r.timedOut) throw new RpcError('timeout', `graph ${sub} timed out (${SILLYSPEC_TIMEOUT_MS}ms)`);
+      throw new RpcError('internal', `graph ${sub} failed: ${`${r.stdout}\n${r.stderr}`.trim().slice(0, 500)}`);
+    }
+    let j: Record<string, unknown> | undefined;
+    try {
+      j = JSON.parse(r.stdout) as Record<string, unknown>;
+    } catch {
+      j = undefined;
+    }
+    if (!j || j.ok !== true) {
+      // 实测 graph_usage/anchor_required 以 exit 0 + ok:false 信封出现——成功路径
+      // ok!==true 也走三态探测（cli_subcommand_missing / cli_feature_missing:<sub>）。
+      const probe = this._probeGraphOldCli(r.stdout, sub);
+      if (probe) throw probe;
+      throw new RpcError('internal', 'graph output is not valid CLI JSON envelope');
+    }
+    // 清单裁剪（design Phase 1：本仓 dangling 实测 1807 条/675KB——orphans/dangling
+    // items 截 top-50、count 保真，防 WS 大帧与前端千行清单；完整治理走 CLI/doctor。
+    if (sub === 'orphans' && Array.isArray(j.orphans)) {
+      j.orphans = (j.orphans as unknown[]).slice(0, 50);
+    }
+    if (sub === 'dangling' && Array.isArray(j.dangling)) {
+      j.dangling = (j.dangling as unknown[]).slice(0, 50);
+    }
+    return { graph: j };
+  }
+
+  /**
+   * 旧 CLI 三态探测（D-001@v2）：①全无 graph 子命令 → cli_subcommand_missing
+   * （stdout 文本含 'knowledge <' usage 或 unknown_subcommand——digest 先例：旧 CLI
+   * 子命令缺失走 usage 文本探测，且信封形态 code=unknown_subcommand 同认）；
+   * ②有 graph 缺 summary/nodes（后发子命令）→ cli_feature_missing:<sub>——graph_usage
+   * 信封 echo subcommand=<sub>，或 usage 列表不含 <sub>（输出无该子命令痕迹）。
+   * 第三态 method_unregistered 是 daemon 未注册 handler 的平台侧场景，非 daemon 能抛
+   * （见 graph 方法注释）。返回 undefined = 非旧 CLI 形态，走 timeout/internal 兜底。
+   */
+  private _probeGraphOldCli(stdout: string, sub: string): RpcError | undefined {
+    let err: { code?: unknown; subcommand?: unknown; usage?: unknown } | undefined;
+    try {
+      const parsed: unknown = JSON.parse(stdout);
+      if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+        const e = (parsed as { error?: unknown }).error;
+        if (e && typeof e === 'object') err = e as typeof err;
+      }
+    } catch {
+      // 非信封文本输出（旧 CLI usage 直出）——走文本探测。
+    }
+    const errCode = err?.code;
+    if (stdout.includes('knowledge <') || stdout.includes('unknown_subcommand') || errCode === 'unknown_subcommand') {
+      return new RpcError('cli_subcommand_missing', 'sillyspec knowledge graph not supported; upgrade sillyspec');
+    }
+    if ((sub === 'summary' || sub === 'nodes') && (errCode === 'graph_usage' || stdout.includes('graph_usage'))) {
+      const echoed = err?.subcommand === sub;
+      const usage = typeof err?.usage === 'string' ? err.usage : stdout;
+      if (echoed || !usage.includes(sub)) {
+        return new RpcError(
+          `cli_feature_missing:${sub}`,
+          `sillyspec knowledge graph ${sub} not supported; upgrade sillyspec`,
+        );
+      }
+    }
+    return undefined;
   }
 }

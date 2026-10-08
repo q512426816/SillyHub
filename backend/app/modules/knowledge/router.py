@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,12 +14,17 @@ from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.knowledge.distill import DistillDispatchService
+from app.modules.knowledge.graph import KnowledgeGraphService
 from app.modules.knowledge.hits import HitsService
 from app.modules.knowledge.schema import (
     DistillDispatchIn,
     DistillQuickEntryList,
     DistillQuickEntryOut,
     DistillTaskRead,
+    GraphNodesOut,
+    GraphOverviewOut,
+    GraphQueryOut,
+    GraphSub,
     HitsBatchIn,
     HitsBatchOut,
     KnowledgeEntry,
@@ -247,6 +252,66 @@ async def get_knowledge_stats(
     """知识运营指标：覆盖率(+8周趋势)/死条目(90天)/密度/生效速度 + 使用率榜。"""
     service = HitsService(session)
     return await service.stats(workspace_id)
+
+
+# ── 知识图谱端点（2026-10-08-platform-knowledge-graph task-02 / D-001@v2）────────
+#
+# 字面量路由注册序铁律（文件首注释同款）：/knowledge/graph/* 三端点必须在下方
+# GET /knowledge/{filename:path} 通配之前，否则 graph/query 被当作 filename=
+# "graph/query" 吞掉。RPC 直采单源真相（无本地回退）：不可用态 HTTP 200 恒回
+# available=false + reason 六稳定键信封，前端按 reason 分支不弹错。
+
+
+@router.get("/knowledge/graph/query", response_model=GraphQueryOut)
+async def get_knowledge_graph_query(
+    workspace_id: uuid.UUID,
+    sub: GraphSub,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
+    anchor: str | None = Query(default=None, max_length=300),
+    anchor2: str | None = Query(default=None, max_length=300),
+    edges: str | None = Query(default=None, max_length=64),
+    depth: int = Query(default=1, ge=1, le=3),
+) -> GraphQueryOut:
+    """图查询五视图（neighbors/path/impact/orphans/dangling；summary/nodes 直通）。
+
+    ``sub`` 七值 Literal（daemon 白名单同集），非法值 422；``depth`` 钳 1-3、
+    ``anchor``/``anchor2`` 自由串（daemon 侧黑名单消毒，拒绝回 invalid_input）。
+    """
+    service = KnowledgeGraphService(session)
+    return await service.query(
+        workspace_id,
+        user.id,
+        sub,
+        anchor=anchor,
+        anchor2=anchor2,
+        edges=edges,
+        depth=depth,
+    )
+
+
+@router.get("/knowledge/graph/overview", response_model=GraphOverviewOut)
+async def get_knowledge_graph_overview(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
+) -> GraphOverviewOut:
+    """总览 lite：summary 分布+簇代表（clusters 固定 50）与孤儿/悬空计数，三 RPC 逐条容错。"""
+    service = KnowledgeGraphService(session)
+    return await service.overview(workspace_id, user.id)
+
+
+@router.get("/knowledge/graph/nodes", response_model=GraphNodesOut)
+async def get_knowledge_graph_nodes(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
+    search: Annotated[str, Query(min_length=1, max_length=200)],
+    limit: int = Query(default=20, ge=1, le=50),
+) -> GraphNodesOut:
+    """节点搜索（锚点自动补全数据源；不可用时 data=None，前端静默禁用补全）。"""
+    service = KnowledgeGraphService(session)
+    return await service.nodes(workspace_id, user.id, search, limit=limit)
 
 
 # ── 治理信号（2026-09-27-knowledge-governance-cards 三层治理②层平台出口）──────

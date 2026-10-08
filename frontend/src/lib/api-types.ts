@@ -7899,6 +7899,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/knowledge/graph/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Graph Query
+         * @description 图查询五视图（neighbors/path/impact/orphans/dangling；summary/nodes 直通）。
+         *
+         *     ``sub`` 七值 Literal（daemon 白名单同集），非法值 422；``depth`` 钳 1-3、
+         *     ``anchor``/``anchor2`` 自由串（daemon 侧黑名单消毒，拒绝回 invalid_input）。
+         */
+        get: operations["get_knowledge_graph_query_api_workspaces__workspace_id__knowledge_graph_query_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/graph/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Graph Overview
+         * @description 总览 lite：summary 分布+簇代表（clusters 固定 50）与孤儿/悬空计数，三 RPC 逐条容错。
+         */
+        get: operations["get_knowledge_graph_overview_api_workspaces__workspace_id__knowledge_graph_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/graph/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Knowledge Graph Nodes
+         * @description 节点搜索（锚点自动补全数据源；不可用时 data=None，前端静默禁用补全）。
+         */
+        get: operations["get_knowledge_graph_nodes_api_workspaces__workspace_id__knowledge_graph_nodes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/knowledge/governance": {
         parameters: {
             query?: never;
@@ -16691,6 +16754,297 @@ export interface components {
             detail: string;
             /** Suggestion */
             suggestion: string;
+        };
+        /**
+         * GraphCluster
+         * @description summary 簇（key=类型:域；representatives=度数 top-5）。
+         */
+        GraphCluster: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Count */
+            count: number;
+            /** Representatives */
+            representatives: components["schemas"]["GraphNodeRef"][];
+        };
+        /**
+         * GraphDanglingData
+         * @description dangling 查询数据：items 由 daemon 裁剪 top-50，count 保留原值。
+         */
+        GraphDanglingData: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["GraphDanglingItem"][];
+        };
+        /**
+         * GraphDanglingItem
+         * @description 悬空清单条（id=引用方节点、type=边型、kind=强度档、detail=缺失目标路径）。
+         */
+        GraphDanglingItem: {
+            /** Id */
+            id: string;
+            /** Type */
+            type: string;
+            /** Kind */
+            kind: string;
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * GraphDecisionRef
+         * @description impact 决策/FR 引用（CLI 实际形状：id/type/status，status=decision 状态位）。
+         */
+        GraphDecisionRef: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default
+             */
+            type: string;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+        };
+        /**
+         * GraphEdge
+         * @description 边（s→t 定方向；strength=strong/medium/weak 三档，前端线型派生依据）。
+         */
+        GraphEdge: {
+            /** S */
+            s: string;
+            /** T */
+            t: string;
+            /** Type */
+            type: string;
+            /**
+             * Strength
+             * @default
+             */
+            strength: string;
+        };
+        /** GraphEnvelope[GraphNodesData] */
+        GraphEnvelope_GraphNodesData_: {
+            /** Available */
+            available: boolean;
+            /** Reason */
+            reason?: ("unbound" | "offline" | "timeout" | "upgrade_required" | "invalid_input" | "rpc_error") | null;
+            /**
+             * Source
+             * @default daemon-rpc
+             * @constant
+             */
+            source: "daemon-rpc";
+            data?: components["schemas"]["GraphNodesData"] | null;
+        };
+        /** GraphEnvelope[GraphOverviewData] */
+        GraphEnvelope_GraphOverviewData_: {
+            /** Available */
+            available: boolean;
+            /** Reason */
+            reason?: ("unbound" | "offline" | "timeout" | "upgrade_required" | "invalid_input" | "rpc_error") | null;
+            /**
+             * Source
+             * @default daemon-rpc
+             * @constant
+             */
+            source: "daemon-rpc";
+            data?: components["schemas"]["GraphOverviewData"] | null;
+        };
+        /** GraphEnvelope[Union[GraphNeighborsData, GraphPathData, GraphImpactData, GraphOrphansData, GraphDanglingData, GraphSummary, GraphNodesData]] */
+        GraphEnvelope_Union_GraphNeighborsData__GraphPathData__GraphImpactData__GraphOrphansData__GraphDanglingData__GraphSummary__GraphNodesData__: {
+            /** Available */
+            available: boolean;
+            /** Reason */
+            reason?: ("unbound" | "offline" | "timeout" | "upgrade_required" | "invalid_input" | "rpc_error") | null;
+            /**
+             * Source
+             * @default daemon-rpc
+             * @constant
+             */
+            source: "daemon-rpc";
+            /** Data */
+            data?: components["schemas"]["GraphNeighborsData"] | components["schemas"]["GraphPathData"] | components["schemas"]["GraphImpactData"] | components["schemas"]["GraphOrphansData"] | components["schemas"]["GraphDanglingData"] | components["schemas"]["GraphSummary"] | components["schemas"]["GraphNodesData"] | null;
+        };
+        /**
+         * GraphHop
+         * @description path 单跳（与 GraphEdge 同构减 strength；CLI hops 即此形状）。
+         */
+        GraphHop: {
+            /** S */
+            s: string;
+            /** T */
+            t: string;
+            /** Type */
+            type: string;
+        };
+        /**
+         * GraphImpactData
+         * @description impact 查询数据：强边闭包（深度≤2 + supersedes/module-dep 传递例外）。
+         *
+         *     ``closure`` 为闭包节点 id 数组（CLI 实际形状，非 GraphNodeRef——见 graph.py
+         *     模块注释偏差说明）；``modules`` 为 module: 前缀节点 id。
+         */
+        GraphImpactData: {
+            /** Key */
+            key: string;
+            /** Closure */
+            closure: string[];
+            /** Modules */
+            modules: string[];
+            /** Decisions And Frs */
+            decisions_and_frs: components["schemas"]["GraphDecisionRef"][];
+            /** Rejected Reachable */
+            rejected_reachable: components["schemas"]["GraphRejectedRef"][];
+        };
+        /**
+         * GraphNeighborsData
+         * @description neighbors 查询数据：邻域节点 + 边（含起点；dir/edge_type 由前端从 edges 派生）。
+         */
+        GraphNeighborsData: {
+            /** Anchor */
+            anchor: string;
+            /** Nodes */
+            nodes: components["schemas"]["GraphNodeRef"][];
+            /** Edges */
+            edges: components["schemas"]["GraphEdge"][];
+        };
+        /**
+         * GraphNodeRef
+         * @description 节点引用（id/type/label；label 缺省空串由前端回退显示 id）。
+         */
+        GraphNodeRef: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default
+             */
+            type: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+        };
+        /**
+         * GraphNodesData
+         * @description nodes 搜索数据（锚点自动补全数据源；不可用时 None 由信封 reason 承载）。
+         */
+        GraphNodesData: {
+            /** Nodes */
+            nodes?: components["schemas"]["GraphNodeRef"][] | null;
+        };
+        /**
+         * GraphOrphanItem
+         * @description 孤儿清单条（kind=zero-degree / entry-no-route-no-strong 两类）。
+         */
+        GraphOrphanItem: {
+            /** Id */
+            id: string;
+            /** Type */
+            type: string;
+            /** Kind */
+            kind: string;
+        };
+        /**
+         * GraphOrphansData
+         * @description orphans 查询数据：items 由 daemon 裁剪 top-50，count 保留原值。
+         */
+        GraphOrphansData: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["GraphOrphanItem"][];
+        };
+        /**
+         * GraphOverviewData
+         * @description overview 组装数据：summary→orphans→dangling 三 RPC 逐条容错——子块失败仅置
+         *     None（旧 CLI summary 缺失→lite 隐藏、计数缺失→前端显示「—」），全失败整信封降级。
+         */
+        GraphOverviewData: {
+            summary?: components["schemas"]["GraphSummary"] | null;
+            /** Orphans Count */
+            orphans_count?: number | null;
+            /** Dangling Count */
+            dangling_count?: number | null;
+        };
+        /**
+         * GraphPathData
+         * @description path 查询数据：强边子集寻路结果（不可达 found=false + reason 文案需展示）。
+         *
+         *     ``from_`` 因 Python 保留字以 alias ``from`` 序列化（请求/响应 JSON 键均为 from）。
+         */
+        GraphPathData: {
+            /** From */
+            from: string;
+            /** To */
+            to: string;
+            /** Found */
+            found: boolean;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /**
+             * Hop Count
+             * @default 0
+             */
+            hop_count: number;
+            /** Hops */
+            hops: components["schemas"]["GraphHop"][];
+        };
+        /**
+         * GraphRejectedRef
+         * @description impact 防复潮可达项（CLI 实际形状：id/title/reason，reason 截断 80 字符）。
+         */
+        GraphRejectedRef: {
+            /** Id */
+            id: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * GraphSummary
+         * @description 全图 lite 聚合（CLI byType/byEdge 归一为 by_type/by_edge；四计数与 doctor 同源）。
+         */
+        GraphSummary: {
+            /** Nodes */
+            nodes: number;
+            /** Edges */
+            edges: number;
+            /** By Type */
+            by_type: {
+                [key: string]: number;
+            };
+            /** By Edge */
+            by_edge: {
+                [key: string]: number;
+            };
+            /** Orphans */
+            orphans: number;
+            /** Module Doc Gaps */
+            module_doc_gaps: number;
+            /** Changelog Danglings */
+            changelog_danglings: number;
+            /** Dangling Refs */
+            dangling_refs: number;
+            /** Clusters */
+            clusters: components["schemas"]["GraphCluster"][];
         };
         /**
          * GroupChatCreate
@@ -41154,6 +41508,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeStatsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_graph_query_api_workspaces__workspace_id__knowledge_graph_query_get: {
+        parameters: {
+            query: {
+                sub: "summary" | "nodes" | "neighbors" | "path" | "impact" | "orphans" | "dangling";
+                anchor?: string | null;
+                anchor2?: string | null;
+                edges?: string | null;
+                depth?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphEnvelope_Union_GraphNeighborsData__GraphPathData__GraphImpactData__GraphOrphansData__GraphDanglingData__GraphSummary__GraphNodesData__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_graph_overview_api_workspaces__workspace_id__knowledge_graph_overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphEnvelope_GraphOverviewData_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_graph_nodes_api_workspaces__workspace_id__knowledge_graph_nodes_get: {
+        parameters: {
+            query: {
+                search: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphEnvelope_GraphNodesData_"];
                 };
             };
             /** @description Validation Error */

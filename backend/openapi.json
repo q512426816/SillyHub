@@ -20539,6 +20539,242 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/knowledge/graph/query": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Get Knowledge Graph Query",
+        "description": "图查询五视图（neighbors/path/impact/orphans/dangling；summary/nodes 直通）。\n\n``sub`` 七值 Literal（daemon 白名单同集），非法值 422；``depth`` 钳 1-3、\n``anchor``/``anchor2`` 自由串（daemon 侧黑名单消毒，拒绝回 invalid_input）。",
+        "operationId": "get_knowledge_graph_query_api_workspaces__workspace_id__knowledge_graph_query_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "sub",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "summary",
+                "nodes",
+                "neighbors",
+                "path",
+                "impact",
+                "orphans",
+                "dangling"
+              ],
+              "type": "string",
+              "title": "Sub"
+            }
+          },
+          {
+            "name": "anchor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Anchor"
+            }
+          },
+          {
+            "name": "anchor2",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Anchor2"
+            }
+          },
+          {
+            "name": "edges",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Edges"
+            }
+          },
+          {
+            "name": "depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 3,
+              "minimum": 1,
+              "default": 1,
+              "title": "Depth"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphEnvelope_Union_GraphNeighborsData__GraphPathData__GraphImpactData__GraphOrphansData__GraphDanglingData__GraphSummary__GraphNodesData__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/knowledge/graph/overview": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Get Knowledge Graph Overview",
+        "description": "总览 lite：summary 分布+簇代表（clusters 固定 50）与孤儿/悬空计数，三 RPC 逐条容错。",
+        "operationId": "get_knowledge_graph_overview_api_workspaces__workspace_id__knowledge_graph_overview_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphEnvelope_GraphOverviewData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/knowledge/graph/nodes": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Get Knowledge Graph Nodes",
+        "description": "节点搜索（锚点自动补全数据源；不可用时 data=None，前端静默禁用补全）。",
+        "operationId": "get_knowledge_graph_nodes_api_workspaces__workspace_id__knowledge_graph_nodes_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Search"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphEnvelope_GraphNodesData_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/knowledge/governance": {
       "get": {
         "tags": [
@@ -46486,6 +46722,664 @@
           "suggestion"
         ],
         "title": "GovernanceSignalOut"
+      },
+      "GraphCluster": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "representatives": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNodeRef"
+            },
+            "type": "array",
+            "title": "Representatives"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "count",
+          "representatives"
+        ],
+        "title": "GraphCluster",
+        "description": "summary 簇（key=类型:域；representatives=度数 top-5）。"
+      },
+      "GraphDanglingData": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GraphDanglingItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "GraphDanglingData",
+        "description": "dangling 查询数据：items 由 daemon 裁剪 top-50，count 保留原值。"
+      },
+      "GraphDanglingItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "kind",
+          "detail"
+        ],
+        "title": "GraphDanglingItem",
+        "description": "悬空清单条（id=引用方节点、type=边型、kind=强度档、detail=缺失目标路径）。"
+      },
+      "GraphDecisionRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": ""
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "GraphDecisionRef",
+        "description": "impact 决策/FR 引用（CLI 实际形状：id/type/status，status=decision 状态位）。"
+      },
+      "GraphEdge": {
+        "properties": {
+          "s": {
+            "type": "string",
+            "title": "S"
+          },
+          "t": {
+            "type": "string",
+            "title": "T"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "strength": {
+            "type": "string",
+            "title": "Strength",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "s",
+          "t",
+          "type"
+        ],
+        "title": "GraphEdge",
+        "description": "边（s→t 定方向；strength=strong/medium/weak 三档，前端线型派生依据）。"
+      },
+      "GraphEnvelope_GraphNodesData_": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "unbound",
+                  "offline",
+                  "timeout",
+                  "upgrade_required",
+                  "invalid_input",
+                  "rpc_error"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "source": {
+            "type": "string",
+            "const": "daemon-rpc",
+            "title": "Source",
+            "default": "daemon-rpc"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphNodesData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "GraphEnvelope[GraphNodesData]"
+      },
+      "GraphEnvelope_GraphOverviewData_": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "unbound",
+                  "offline",
+                  "timeout",
+                  "upgrade_required",
+                  "invalid_input",
+                  "rpc_error"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "source": {
+            "type": "string",
+            "const": "daemon-rpc",
+            "title": "Source",
+            "default": "daemon-rpc"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphOverviewData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "GraphEnvelope[GraphOverviewData]"
+      },
+      "GraphEnvelope_Union_GraphNeighborsData__GraphPathData__GraphImpactData__GraphOrphansData__GraphDanglingData__GraphSummary__GraphNodesData__": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "unbound",
+                  "offline",
+                  "timeout",
+                  "upgrade_required",
+                  "invalid_input",
+                  "rpc_error"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "source": {
+            "type": "string",
+            "const": "daemon-rpc",
+            "title": "Source",
+            "default": "daemon-rpc"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphNeighborsData"
+              },
+              {
+                "$ref": "#/components/schemas/GraphPathData"
+              },
+              {
+                "$ref": "#/components/schemas/GraphImpactData"
+              },
+              {
+                "$ref": "#/components/schemas/GraphOrphansData"
+              },
+              {
+                "$ref": "#/components/schemas/GraphDanglingData"
+              },
+              {
+                "$ref": "#/components/schemas/GraphSummary"
+              },
+              {
+                "$ref": "#/components/schemas/GraphNodesData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "GraphEnvelope[Union[GraphNeighborsData, GraphPathData, GraphImpactData, GraphOrphansData, GraphDanglingData, GraphSummary, GraphNodesData]]"
+      },
+      "GraphHop": {
+        "properties": {
+          "s": {
+            "type": "string",
+            "title": "S"
+          },
+          "t": {
+            "type": "string",
+            "title": "T"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "s",
+          "t",
+          "type"
+        ],
+        "title": "GraphHop",
+        "description": "path 单跳（与 GraphEdge 同构减 strength；CLI hops 即此形状）。"
+      },
+      "GraphImpactData": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "closure": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Closure"
+          },
+          "modules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Modules"
+          },
+          "decisions_and_frs": {
+            "items": {
+              "$ref": "#/components/schemas/GraphDecisionRef"
+            },
+            "type": "array",
+            "title": "Decisions And Frs"
+          },
+          "rejected_reachable": {
+            "items": {
+              "$ref": "#/components/schemas/GraphRejectedRef"
+            },
+            "type": "array",
+            "title": "Rejected Reachable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "closure",
+          "modules",
+          "decisions_and_frs",
+          "rejected_reachable"
+        ],
+        "title": "GraphImpactData",
+        "description": "impact 查询数据：强边闭包（深度≤2 + supersedes/module-dep 传递例外）。\n\n``closure`` 为闭包节点 id 数组（CLI 实际形状，非 GraphNodeRef——见 graph.py\n模块注释偏差说明）；``modules`` 为 module: 前缀节点 id。"
+      },
+      "GraphNeighborsData": {
+        "properties": {
+          "anchor": {
+            "type": "string",
+            "title": "Anchor"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNodeRef"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "type": "array",
+            "title": "Edges"
+          }
+        },
+        "type": "object",
+        "required": [
+          "anchor",
+          "nodes",
+          "edges"
+        ],
+        "title": "GraphNeighborsData",
+        "description": "neighbors 查询数据：邻域节点 + 边（含起点；dir/edge_type 由前端从 edges 派生）。"
+      },
+      "GraphNodeRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": ""
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "GraphNodeRef",
+        "description": "节点引用（id/type/label；label 缺省空串由前端回退显示 id）。"
+      },
+      "GraphNodesData": {
+        "properties": {
+          "nodes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/GraphNodeRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nodes"
+          }
+        },
+        "type": "object",
+        "title": "GraphNodesData",
+        "description": "nodes 搜索数据（锚点自动补全数据源；不可用时 None 由信封 reason 承载）。"
+      },
+      "GraphOrphanItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "kind"
+        ],
+        "title": "GraphOrphanItem",
+        "description": "孤儿清单条（kind=zero-degree / entry-no-route-no-strong 两类）。"
+      },
+      "GraphOrphansData": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GraphOrphanItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "GraphOrphansData",
+        "description": "orphans 查询数据：items 由 daemon 裁剪 top-50，count 保留原值。"
+      },
+      "GraphOverviewData": {
+        "properties": {
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "orphans_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orphans Count"
+          },
+          "dangling_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dangling Count"
+          }
+        },
+        "type": "object",
+        "title": "GraphOverviewData",
+        "description": "overview 组装数据：summary→orphans→dangling 三 RPC 逐条容错——子块失败仅置\nNone（旧 CLI summary 缺失→lite 隐藏、计数缺失→前端显示「—」），全失败整信封降级。"
+      },
+      "GraphPathData": {
+        "properties": {
+          "from": {
+            "type": "string",
+            "title": "From"
+          },
+          "to": {
+            "type": "string",
+            "title": "To"
+          },
+          "found": {
+            "type": "boolean",
+            "title": "Found"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          },
+          "hop_count": {
+            "type": "integer",
+            "title": "Hop Count",
+            "default": 0
+          },
+          "hops": {
+            "items": {
+              "$ref": "#/components/schemas/GraphHop"
+            },
+            "type": "array",
+            "title": "Hops"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "found",
+          "hops"
+        ],
+        "title": "GraphPathData",
+        "description": "path 查询数据：强边子集寻路结果（不可达 found=false + reason 文案需展示）。\n\n``from_`` 因 Python 保留字以 alias ``from`` 序列化（请求/响应 JSON 键均为 from）。"
+      },
+      "GraphRejectedRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "GraphRejectedRef",
+        "description": "impact 防复潮可达项（CLI 实际形状：id/title/reason，reason 截断 80 字符）。"
+      },
+      "GraphSummary": {
+        "properties": {
+          "nodes": {
+            "type": "integer",
+            "title": "Nodes"
+          },
+          "edges": {
+            "type": "integer",
+            "title": "Edges"
+          },
+          "by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Type"
+          },
+          "by_edge": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Edge"
+          },
+          "orphans": {
+            "type": "integer",
+            "title": "Orphans"
+          },
+          "module_doc_gaps": {
+            "type": "integer",
+            "title": "Module Doc Gaps"
+          },
+          "changelog_danglings": {
+            "type": "integer",
+            "title": "Changelog Danglings"
+          },
+          "dangling_refs": {
+            "type": "integer",
+            "title": "Dangling Refs"
+          },
+          "clusters": {
+            "items": {
+              "$ref": "#/components/schemas/GraphCluster"
+            },
+            "type": "array",
+            "title": "Clusters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges",
+          "by_type",
+          "by_edge",
+          "orphans",
+          "module_doc_gaps",
+          "changelog_danglings",
+          "dangling_refs",
+          "clusters"
+        ],
+        "title": "GraphSummary",
+        "description": "全图 lite 聚合（CLI byType/byEdge 归一为 by_type/by_edge；四计数与 doctor 同源）。"
       },
       "GroupChatCreate": {
         "properties": {

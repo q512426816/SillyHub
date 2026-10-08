@@ -17,13 +17,32 @@
  *     （无命中「从未」）——清理/合并动作人工（design 非目标，仅清单引导）。
  *   - 主题铁律：brand-* 语义阶（stroke 走 currentColor 随主题换色）、
  *     阴影/边框/文字全主题 token；中文文案。
+ *   - 图维度卡（2026-10-08-platform-knowledge-graph task-08 / FR-07 / D-004@v1）：
+ *     「图·孤儿」「图·悬空」两子卡挂指标网格（既有四卡零改动）——overview 计数
+ *     与图谱页同 key 共享缓存；点开清单懒加载 query 端点 items top-50，行点击
+ *     深链 /knowledge/graph?preset=…；available=false 按 reason 六键文案分支，
+ *     计数 null 渲染「—」（overview 子块独立容错，D-001@v2）。
  */
 
 import { useState } from "react";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
 import { cn } from "@/lib/utils";
-import { getKnowledgeStats, type KnowledgeStatsOut } from "@/lib/knowledge";
+import {
+  getKnowledgeGraphOverview,
+  getKnowledgeGraphQuery,
+  getKnowledgeStats,
+  type GraphDanglingItem,
+  type GraphOrphanItem,
+  type GraphOverviewData,
+  type GraphQueryOut,
+  type KnowledgeStatsOut,
+} from "@/lib/knowledge";
+import {
+  knowledgeGraphOverviewQueryKey,
+  knowledgeGraphQueryKey,
+} from "@/lib/query-keys";
 
 /**
  * stats 查询键（distillTasksQueryKey 同款「就地常量导出」惯例——后续条目
@@ -73,6 +92,167 @@ function deadLastHitText(lastHitAt: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? "从未" : d.toLocaleDateString("zh-CN");
 }
 
+/**
+ * 知识图不可用文案（task-08 / D-001@v2 六稳定键分支）：unbound 绑定引导 /
+ * offline·timeout 稍后再试 / upgrade_required 升级提示 / invalid_input 输入
+ * 错误 / rpc_error 服务异常——HTTP 200 恒信封不弹错，卡位按 reason 呈引导。
+ */
+export function graphReasonText(reason: string | null | undefined): string {
+  switch (reason) {
+    case "unbound":
+      return "未绑定 daemon 运行时——绑定后可查看知识图完整性";
+    case "offline":
+      return "daemon 离线，稍后再试";
+    case "timeout":
+      return "知识图查询超时，稍后再试";
+    case "upgrade_required":
+      return "daemon 或 sillyspec CLI 版本过旧，升级后可查看";
+    case "invalid_input":
+      return "查询参数有误";
+    case "rpc_error":
+      return "知识图服务异常，稍后再试";
+    default:
+      return "知识图暂不可用";
+  }
+}
+
+/** 信封 data → 孤儿清单（运行时防御：旧后端/异常形状回退空数组）。 */
+function asOrphanItems(data: GraphQueryOut["data"]): GraphOrphanItem[] {
+  if (!data || !("items" in data) || !Array.isArray(data.items)) return [];
+  return data.items as GraphOrphanItem[];
+}
+
+/** 信封 data → 悬空清单（运行时防御同上）。 */
+function asDanglingItems(data: GraphQueryOut["data"]): GraphDanglingItem[] {
+  if (!data || !("items" in data) || !Array.isArray(data.items)) return [];
+  return data.items as GraphDanglingItem[];
+}
+
+/** 图维度子卡（task-08 / D-004@v1）：口径小注「知识图完整性」，主数值警示色；
+ * 不可用态（加载/错误/available=false）降级为占位文案卡（版位占住不跳动）。 */
+function GraphMetricCard({
+  testId,
+  label,
+  count,
+  open,
+  onToggle,
+  unavailableText,
+}: {
+  testId: string;
+  label: string;
+  count: number | null;
+  open: boolean;
+  onToggle: () => void;
+  unavailableText: string | null;
+}) {
+  if (unavailableText != null) {
+    return (
+      <div
+        data-testid={testId}
+        className="rounded-md border border-border/60 p-2.5"
+      >
+        <div className="text-[11px] text-muted-foreground">
+          {label}{" "}
+          <span className="text-[10px] text-muted-foreground/70">
+            知识图完整性
+          </span>
+        </div>
+        <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
+          {unavailableText}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      onClick={onToggle}
+      aria-expanded={open}
+      className="rounded-md border border-border/60 p-2.5 text-left transition-colors hover:border-brand-400"
+    >
+      <div className="text-[11px] text-muted-foreground">
+        {label}{" "}
+        <span className="text-[10px] text-muted-foreground/70">
+          知识图完整性
+        </span>
+      </div>
+      <div className="text-[22px] font-bold leading-7 text-warning">
+        {count == null ? "—" : `${count} 条`}
+      </div>
+      <div className="text-[10.5px] text-muted-foreground/70">
+        {open ? "收起清单 ↑" : "点开清单 → 知识图谱 ↓"}
+      </div>
+    </button>
+  );
+}
+
+/** 图维度清单面板：行=锚点+kind（悬空含缺失目标 title），点击深链图谱页对应
+ * preset 查询；清单数据走 query 端点 items top-50（overview 只回计数）。 */
+function GraphListPanel({
+  workspaceId,
+  preset,
+  pending,
+  error,
+  reason,
+  items,
+}: {
+  workspaceId: string;
+  preset: "orphans" | "dangling";
+  pending: boolean;
+  error: boolean;
+  reason: string | null;
+  items: ReadonlyArray<{ id: string; kind: string; detail?: string }>;
+}) {
+  const href = `/workspaces/${workspaceId}/knowledge/graph?preset=${preset}`;
+  return (
+    <div
+      data-testid={`graph-${preset}-panel`}
+      className="mt-2.5 max-h-44 overflow-y-auto rounded-md border border-border/60 bg-muted/30 p-1.5"
+    >
+      {pending ? (
+        <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
+          清单加载中…
+        </p>
+      ) : error ? (
+        <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
+          清单加载失败，稍后再试。
+        </p>
+      ) : reason ? (
+        <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
+          {reason}
+        </p>
+      ) : items.length === 0 ? (
+        <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
+          {preset === "orphans"
+            ? "没有孤儿节点——零度/无强边条目为空。"
+            : "没有悬空引用——变更日志/文档引用全部可解析。"}
+        </p>
+      ) : (
+        items.map((item) => (
+          <Link
+            key={`${item.id}:${item.kind}`}
+            data-testid={`graph-${preset}-row`}
+            href={href}
+            title={item.detail || item.id}
+            className="flex items-center gap-2 border-b border-border/40 px-2 py-1 text-[11px] last:border-b-0 hover:bg-brand-50/60"
+          >
+            <span
+              className="min-w-0 flex-1 truncate font-mono text-brand-700"
+              title={item.id}
+            >
+              {item.id}
+            </span>
+            <span className="shrink-0 text-muted-foreground/80">
+              {item.kind}
+            </span>
+          </Link>
+        ))
+      )}
+    </div>
+  );
+}
+
 export interface OpsDashboardProps {
   workspaceId: string;
   className?: string;
@@ -87,6 +267,24 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
   const [deadOpen, setDeadOpen] = useState(false);
   // 失效命中（幽灵锚）清单开关（2026-09-25-knowledge-stats-layering）。
   const [orphanOpen, setOrphanOpen] = useState(false);
+  // ── 知识图维度卡（task-08 / D-004@v1）：overview 计数与图谱页同 key 共享
+  // 缓存（零额外请求）；清单点开才拉 query 端点 items top-50（懒加载）。
+  const graphOverviewQ = useQuery({
+    queryKey: knowledgeGraphOverviewQueryKey(workspaceId),
+    queryFn: () => getKnowledgeGraphOverview(workspaceId),
+  });
+  const [graphOrphanOpen, setGraphOrphanOpen] = useState(false);
+  const [graphDanglingOpen, setGraphDanglingOpen] = useState(false);
+  const graphOrphansQ = useQuery({
+    queryKey: knowledgeGraphQueryKey(workspaceId, "orphans"),
+    queryFn: () => getKnowledgeGraphQuery(workspaceId, "orphans"),
+    enabled: graphOrphanOpen,
+  });
+  const graphDanglingQ = useQuery({
+    queryKey: knowledgeGraphQueryKey(workspaceId, "dangling"),
+    queryFn: () => getKnowledgeGraphQuery(workspaceId, "dangling"),
+    enabled: graphDanglingOpen,
+  });
 
   const rootCls = cn("flex flex-col gap-3 lg:grid lg:grid-cols-3", className);
 
@@ -143,6 +341,28 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
   // 榜排序（防御性重排：后端已按 per_task 降序，前端不信任传输序）。
   const board = [...usage_board].sort((a, b) => b.per_task - a.per_task);
   const points = trendPoints(coverage.trend);
+
+  // ── 图维度三态派生（overview 信封，D-001@v2）：加载/错误/available=false →
+  // 卡位文案分支（reason 六键）；available=true → 计数（子块失败 null → 「—」）。
+  const graphUnavailableText = graphOverviewQ.isPending
+    ? "知识图数据加载中…"
+    : graphOverviewQ.isError
+      ? "知识图数据暂不可用，稍后再试。"
+      : !graphOverviewQ.data?.available
+        ? graphReasonText(graphOverviewQ.data?.reason)
+        : null;
+  const graphOverviewData: GraphOverviewData | null =
+    graphUnavailableText == null ? (graphOverviewQ.data?.data ?? null) : null;
+  const graphOrphansCount = graphOverviewData?.orphans_count ?? null;
+  const graphDanglingCount = graphOverviewData?.dangling_count ?? null;
+  const orphanListReason =
+    graphOrphansQ.data && !graphOrphansQ.data.available
+      ? graphReasonText(graphOrphansQ.data.reason)
+      : null;
+  const danglingListReason =
+    graphDanglingQ.data && !graphDanglingQ.data.available
+      ? graphReasonText(graphDanglingQ.data.reason)
+      : null;
 
   return (
     <div data-testid="ops-dashboard" className={rootCls}>
@@ -260,6 +480,26 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
               新增条目已被使用——沉淀质量
             </div>
           </div>
+
+          {/* 图·孤儿卡（task-08 / D-004@v1）：零度/无强边孤儿计数，清单深链图谱页 */}
+          <GraphMetricCard
+            testId="metric-graph-orphans"
+            label="图·孤儿"
+            count={graphOrphansCount}
+            open={graphOrphanOpen}
+            onToggle={() => setGraphOrphanOpen((v) => !v)}
+            unavailableText={graphUnavailableText}
+          />
+
+          {/* 图·悬空卡：变更日志/文档引用缺失目标计数，清单深链图谱页 */}
+          <GraphMetricCard
+            testId="metric-graph-dangling"
+            label="图·悬空"
+            count={graphDanglingCount}
+            open={graphDanglingOpen}
+            onToggle={() => setGraphDanglingOpen((v) => !v)}
+            unavailableText={graphUnavailableText}
+          />
         </div>
 
         {/* 死条目内嵌清单（开合态；全量滚动，锚点截断 + 最后命中时间/从未） */}
@@ -335,6 +575,29 @@ export function OpsDashboard({ workspaceId, className }: OpsDashboardProps) {
               </div>
             ) : null}
           </>
+        ) : null}
+
+        {/* 图维度清单面板（task-08）：行=锚点+kind，点击深链图谱页对应 preset
+            查询（与图谱页同 query key，切片数据共享缓存）；仅可用态展开 */}
+        {graphOrphanOpen && graphUnavailableText == null ? (
+          <GraphListPanel
+            workspaceId={workspaceId}
+            preset="orphans"
+            pending={graphOrphansQ.isPending}
+            error={graphOrphansQ.isError}
+            reason={orphanListReason}
+            items={asOrphanItems(graphOrphansQ.data?.data)}
+          />
+        ) : null}
+        {graphDanglingOpen && graphUnavailableText == null ? (
+          <GraphListPanel
+            workspaceId={workspaceId}
+            preset="dangling"
+            pending={graphDanglingQ.isPending}
+            error={graphDanglingQ.isError}
+            reason={danglingListReason}
+            items={asDanglingItems(graphDanglingQ.data?.data)}
+          />
         ) : null}
       </div>
 

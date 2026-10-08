@@ -8,6 +8,10 @@
  *   - task-04 卡片 acceptance：四指标渲染与 mock 一致且死条目清单开合；
  *     榜按 per_task 降序且 % 格式阈值正确（0.0325 展示 3.25%、0.254 展示
  *     25.4%——D-008@v3 原文例值）；无数据空态与错误态不白屏。
+ *   - 图维度卡三态（task-09 / 2026-10-08-platform-knowledge-graph 扩展 /
+ *     FR-07 / D-004@v1）：正常计数 + 点开清单行深链 ?preset=；unavailable
+ *     reason 六键引导文案；子块失败计数 null → 「—」。既有四卡断言零回归
+ *     （图 overview/query 端点一并 mock，测试环境不再打真实 fetch）。
  *
  * 惯例（仿 distill-task-bar.test.tsx）：@/lib/knowledge 部分 mock
  * （vi.hoisted + importActual）+ QueryClientProvider retry:false/gcTime:0。
@@ -23,10 +27,16 @@ import {
 } from "@/components/knowledge/ops-dashboard";
 import type { KnowledgeStatsOut } from "@/lib/knowledge";
 
-const mocks = vi.hoisted(() => ({ getKnowledgeStats: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  getKnowledgeStats: vi.fn(),
+  getKnowledgeGraphOverview: vi.fn(),
+  getKnowledgeGraphQuery: vi.fn(),
+}));
 vi.mock("@/lib/knowledge", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/knowledge")>()),
   getKnowledgeStats: mocks.getKnowledgeStats,
+  getKnowledgeGraphOverview: mocks.getKnowledgeGraphOverview,
+  getKnowledgeGraphQuery: mocks.getKnowledgeGraphQuery,
 }));
 
 const WS = "ws-1";
@@ -95,6 +105,60 @@ function stats(p: Partial<KnowledgeStatsOut> = {}): KnowledgeStatsOut {
 
 let queryClient: QueryClient;
 
+/** 图 overview 信封 fixture（缺省可用 + 计数 3/5；summary 子块测试不依赖）。 */
+function graphOverview(p: {
+  available?: boolean;
+  reason?: string | null;
+  orphans_count?: number | null;
+  dangling_count?: number | null;
+} = {}) {
+  const available = p.available ?? true;
+  return {
+    available,
+    reason: p.reason ?? null,
+    source: "daemon-rpc",
+    data: available
+      ? {
+          summary: null,
+          // null（子块失败）与缺省 3/5 是两个语义——显式区分，不用 ??。
+          orphans_count: p.orphans_count !== undefined ? p.orphans_count : 3,
+          dangling_count: p.dangling_count !== undefined ? p.dangling_count : 5,
+        }
+      : null,
+  };
+}
+
+/** 图 orphans 清单 fixture（query 端点懒加载，点开清单才消费）。 */
+function graphOrphansQuery() {
+  return {
+    available: true,
+    reason: null,
+    source: "daemon-rpc",
+    data: {
+      count: 3,
+      items: [
+        { id: "entry:uncategorized.md#老坑", type: "entry", kind: "zero-degree" },
+        { id: "generated/runtime.md#死条目", type: "entry", kind: "entry-no-route-no-strong" },
+      ],
+    },
+  };
+}
+
+/** 图 dangling 清单 fixture。 */
+function graphDanglingQuery() {
+  return {
+    available: true,
+    reason: null,
+    source: "daemon-rpc",
+    data: {
+      count: 5,
+      items: [
+        { id: "doc:card:frontend", type: "doc-refs", kind: "medium", detail: "backend/build.sh" },
+      ],
+    },
+  };
+}
+
 function renderDashboard() {
   return render(
     <QueryClientProvider client={queryClient}>
@@ -108,6 +172,13 @@ beforeEach(() => {
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
+  // 图维度卡数据源缺省 mock（可用 + 计数 3/5）——既有四卡用例在图卡就绪
+  // 环境下跑（零回归口径），图卡专属三态在下方 describe 内覆写。
+  mocks.getKnowledgeGraphOverview.mockResolvedValue(graphOverview());
+  mocks.getKnowledgeGraphQuery.mockImplementation(
+    async (_ws: string, sub: string) =>
+      sub === "dangling" ? graphDanglingQuery() : graphOrphansQuery(),
+  );
 });
 
 afterEach(() => {
@@ -187,7 +258,7 @@ describe("死条目内嵌清单开合", () => {
     expect(screen.queryByTestId("dead-entries-panel")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("metric-dead"));
-    const panel = screen.getByTestId("dead-entries-panel");
+    screen.getByTestId("dead-entries-panel");
     const rows = screen.getAllByTestId("dead-entry-row");
     expect(rows).toHaveLength(2);
     // 有最后命中 → 本地化日期（含年份）；无命中 → 「从未」。
@@ -277,5 +348,88 @@ describe("三态：空态 / 错误态（不白屏）", () => {
     expect(screen.getByTestId("ops-dashboard-error")).toHaveTextContent(
       "运营指标加载失败",
     );
+  });
+});
+
+describe("图维度卡三态（task-09 扩展 / FR-07 / D-004@v1）", () => {
+  it("可用态：孤儿/悬空计数 + 点开清单懒加载 + 行深链 ?preset=（既有四卡同帧零回归）", async () => {
+    mocks.getKnowledgeStats.mockResolvedValue(stats());
+    renderDashboard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("metric-graph-orphans")).toBeInTheDocument(),
+    );
+    // 图卡计数与 mock 一致（口径小注「知识图完整性」）。
+    expect(screen.getByTestId("metric-graph-orphans")).toHaveTextContent("图·孤儿");
+    expect(screen.getByTestId("metric-graph-orphans")).toHaveTextContent("3 条");
+    expect(screen.getByTestId("metric-graph-dangling")).toHaveTextContent("5 条");
+
+    // 既有四卡同帧零回归（图卡加入指标网格后原断言口径不变）。
+    expect(screen.getByTestId("metric-coverage")).toHaveTextContent("78%");
+    expect(screen.getByTestId("metric-dead")).toHaveTextContent("2 条");
+    expect(screen.getByTestId("metric-density")).toHaveTextContent("4.2");
+    expect(screen.getByTestId("metric-freshness")).toHaveTextContent("5/12");
+
+    // 点开孤儿清单：懒加载 query 端点（此前零调用）+ 清单行深链图谱页 preset。
+    expect(mocks.getKnowledgeGraphQuery).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("metric-graph-orphans"));
+    const panel = await screen.findByTestId("graph-orphans-panel");
+    // 面板先以 pending 态挂载，清单行经懒加载落定。
+    const rows = await within(panel).findAllByTestId("graph-orphans-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("entry:uncategorized.md#老坑");
+    expect(rows[0]).toHaveAttribute(
+      "href",
+      `/workspaces/${WS}/knowledge/graph?preset=orphans`,
+    );
+    expect(rows[1]).toHaveAttribute(
+      "href",
+      `/workspaces/${WS}/knowledge/graph?preset=orphans`,
+    );
+    expect(mocks.getKnowledgeGraphQuery).toHaveBeenCalledWith(WS, "orphans");
+
+    // 悬空清单同款（行含 kind 档与缺失目标）。
+    fireEvent.click(screen.getByTestId("metric-graph-dangling"));
+    const dpanel = await screen.findByTestId("graph-dangling-panel");
+    const drows = await within(dpanel).findAllByTestId("graph-dangling-row");
+    expect(drows).toHaveLength(1);
+    expect(drows[0]).toHaveTextContent("doc:card:frontend");
+    expect(drows[0]).toHaveAttribute(
+      "href",
+      `/workspaces/${WS}/knowledge/graph?preset=dangling`,
+    );
+  });
+
+  it("unavailable：reason=unbound → 六键引导文案占卡（无计数、无清单）", async () => {
+    mocks.getKnowledgeStats.mockResolvedValue(stats());
+    mocks.getKnowledgeGraphOverview.mockResolvedValue(
+      graphOverview({ available: false, reason: "unbound" }),
+    );
+    renderDashboard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("metric-graph-orphans")).toHaveTextContent(
+        "未绑定 daemon 运行时——绑定后可查看知识图完整性",
+      ),
+    );
+    expect(screen.getByTestId("metric-graph-dangling")).toHaveTextContent(
+      "未绑定 daemon 运行时——绑定后可查看知识图完整性",
+    );
+    // 不可用不渲染计数与清单入口（点开也不拉清单）。
+    expect(screen.queryByText("3 条")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("graph-orphans-panel")).not.toBeInTheDocument();
+  });
+
+  it("子块失败计数 null → 「—」（overview 逐块容错，D-001@v2）", async () => {
+    mocks.getKnowledgeStats.mockResolvedValue(stats());
+    mocks.getKnowledgeGraphOverview.mockResolvedValue(
+      graphOverview({ orphans_count: null, dangling_count: null }),
+    );
+    renderDashboard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("metric-graph-orphans")).toHaveTextContent("—"),
+    );
+    expect(screen.getByTestId("metric-graph-dangling")).toHaveTextContent("—");
   });
 });

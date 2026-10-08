@@ -436,7 +436,7 @@ function makeFakeWs(): {
 }
 
 describe('daemon._registerRuntimeRpcHandler 注册器', () => {
-  it('六方法名逐字对齐（runtime.* 四键 design §6.1 + knowledge.* 两键 2026-09-27-governance-rpc-actions design「daemon RPC」节）；params 归一转发 RuntimeHandler', async () => {
+  it('七方法名逐字对齐（runtime.* 四键 design §6.1 + knowledge.* 三键 governance-rpc-actions·platform-knowledge-graph design「daemon RPC」节）；params 归一转发 RuntimeHandler', async () => {
     const daemon = Object.create(Daemon.prototype) as unknown as {
       _config: { runtime_id: string };
       _logger: { warn: ReturnType<typeof vi.fn> };
@@ -479,6 +479,7 @@ describe('daemon._registerRuntimeRpcHandler 注册器', () => {
     expect([...ws.methods.keys()].sort()).toEqual([
       'knowledge.action',
       'knowledge.digest',
+      'knowledge.graph',
       'runtime.list_artifacts',
       'runtime.read_artifact',
       'runtime.read_progress',

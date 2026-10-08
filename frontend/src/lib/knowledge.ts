@@ -2,7 +2,7 @@
  * Knowledge & Quicklog API client. Mirrors backend/app/modules/knowledge/schema.py.
  */
 import { apiFetch } from "@/lib/api";
-import type { components } from "@/lib/api-types";
+import type { components, operations } from "@/lib/api-types";
 
 // 类型从 OpenAPI 自动生成（@/lib/api-types，由 scripts/gen-api-types.mjs 产出），
 // 消除手写类型漂移。后端 schema 来源：backend/app/modules/knowledge/schema.py。
@@ -26,6 +26,37 @@ export type DistillQuickEntryList = components["schemas"]["DistillQuickEntryList
 // 运营指标 DTO（task-04 / 2026-09-20-knowledge-effect-panel 消费，task-01 交付
 // 的生成类型）。
 export type KnowledgeStatsOut = components["schemas"]["KnowledgeStatsOut"];
+
+// ── 知识图谱 DTO（task-05 / 2026-10-08-platform-knowledge-graph；后端三端点
+// schema.py 为真相源，本组全部取自生成类型零手写）──────────────────────────────
+// data 分型（五查询主链路 + summary/nodes 直通 + overview 组装）。
+export type GraphNodeRef = components["schemas"]["GraphNodeRef"];
+export type GraphEdge = components["schemas"]["GraphEdge"];
+export type GraphHop = components["schemas"]["GraphHop"];
+export type GraphNeighborsData = components["schemas"]["GraphNeighborsData"];
+export type GraphPathData = components["schemas"]["GraphPathData"];
+export type GraphDecisionRef = components["schemas"]["GraphDecisionRef"];
+export type GraphRejectedRef = components["schemas"]["GraphRejectedRef"];
+export type GraphImpactData = components["schemas"]["GraphImpactData"];
+export type GraphOrphanItem = components["schemas"]["GraphOrphanItem"];
+export type GraphOrphansData = components["schemas"]["GraphOrphansData"];
+export type GraphDanglingItem = components["schemas"]["GraphDanglingItem"];
+export type GraphDanglingData = components["schemas"]["GraphDanglingData"];
+export type GraphCluster = components["schemas"]["GraphCluster"];
+export type GraphSummary = components["schemas"]["GraphSummary"];
+export type GraphOverviewData = components["schemas"]["GraphOverviewData"];
+export type GraphNodesData = components["schemas"]["GraphNodesData"];
+// 三端点响应信封（data 按 sub 分型联合 / overview / nodes）。
+export type GraphQueryOut =
+  components["schemas"]["GraphEnvelope_Union_GraphNeighborsData__GraphPathData__GraphImpactData__GraphOrphansData__GraphDanglingData__GraphSummary__GraphNodesData__"];
+export type GraphOverviewOut =
+  components["schemas"]["GraphEnvelope_GraphOverviewData_"];
+export type GraphNodesOut = components["schemas"]["GraphEnvelope_GraphNodesData_"];
+// reason 六稳定键与 sub 七值——后端是 Literal 别名（无独立 schema），从生成
+// 信封 / 生成 operations 参数提取，保持零手写单一源。
+export type GraphReason = NonNullable<GraphOverviewOut["reason"]>;
+export type GraphSub =
+  operations["get_knowledge_graph_query_api_workspaces__workspace_id__knowledge_graph_query_get"]["parameters"]["query"]["sub"];
 
 /**
  * filename 路径段编码：按 `/` 分段 encodeURIComponent 拼回，不整串编码。
@@ -330,5 +361,77 @@ export async function postKnowledgeGovernanceAction(
   return apiFetch<{ output: string }>(
     `/api/workspaces/${workspaceId}/knowledge/governance/actions`,
     { method: "POST", json: body },
+  );
+}
+
+/**
+ * 知识图查询（task-05 / 2026-10-08-platform-knowledge-graph / FR-01 / D-001@v2 /
+ * D-007@v1）：GET /knowledge/graph/query。
+ *
+ * 五查询主链路（neighbors/path/impact/orphans/dangling）+ summary/nodes 兜底
+ * 直通，数据经 daemon RPC 直采 CLI 单源真相（无本地回退）。HTTP 200 恒回信封：
+ * available=false 时 data=null + reason 六稳定键，调用方按 available+reason
+ * 分支不弹错；data 按 sub 分型（GraphNeighborsData 等联合），调用方收窄。
+ * anchor/anchor2 走查询串编码（URLSearchParams 按段转义，`/` 含 %2F 对查询
+ * 参数合法——与 encodeKnowledgeFilename 的路径段编码是两个面）。
+ */
+export interface KnowledgeGraphQueryParams {
+  /** 锚点（neighbors/path 起点等；path 终点用 anchor2）。 */
+  anchor?: string;
+  /** path 查询终点。 */
+  anchor2?: string;
+  /** 边型过滤（枚举 ∪ all；缺省 all）。 */
+  edges?: string;
+  /** 遍历深度，钳 1-3（缺省 1）。 */
+  depth?: number;
+}
+
+export async function getKnowledgeGraphQuery(
+  workspaceId: string,
+  sub: GraphSub,
+  params?: KnowledgeGraphQueryParams,
+): Promise<GraphQueryOut> {
+  const qs = new URLSearchParams({ sub });
+  if (params?.anchor !== undefined) qs.set("anchor", params.anchor);
+  if (params?.anchor2 !== undefined) qs.set("anchor2", params.anchor2);
+  if (params?.edges !== undefined) qs.set("edges", params.edges);
+  if (params?.depth !== undefined) qs.set("depth", String(params.depth));
+  return apiFetch<GraphQueryOut>(
+    `/api/workspaces/${workspaceId}/knowledge/graph/query?${qs.toString()}`,
+  );
+}
+
+/**
+ * 知识图总览（task-05 / D-008@v2）：GET /knowledge/graph/overview。
+ *
+ * 后端内部按序发 summary→orphans→dangling 三 RPC 逐条容错：summary 子块失败
+ * 仅置 null（旧 CLI，前端 lite 面隐藏）；orphans/dangling_count 子块失败置
+ * null（前端显示「—」）；全失败整信封 available=false（reason 分支）。图卡
+ * （ops-dashboard）与图谱页共用同一 query key 共享缓存。
+ */
+export async function getKnowledgeGraphOverview(
+  workspaceId: string,
+): Promise<GraphOverviewOut> {
+  return apiFetch<GraphOverviewOut>(
+    `/api/workspaces/${workspaceId}/knowledge/graph/overview`,
+  );
+}
+
+/**
+ * 知识图节点搜索（task-05 / D-005@v1）：GET /knowledge/graph/nodes。
+ *
+ * 锚点自动补全数据源（id/label 不区分大小写包含匹配）；旧 CLI 时信封
+ * unavailable（data=null），调用方静默禁用补全不阻塞自由输入。search 后端
+ * 校验 1-200 字符、limit 钳 1-50（缺省 20）。
+ */
+export async function getKnowledgeGraphNodes(
+  workspaceId: string,
+  search: string,
+  limit?: number,
+): Promise<GraphNodesOut> {
+  const qs = new URLSearchParams({ search });
+  if (limit !== undefined) qs.set("limit", String(limit));
+  return apiFetch<GraphNodesOut>(
+    `/api/workspaces/${workspaceId}/knowledge/graph/nodes?${qs.toString()}`,
   );
 }

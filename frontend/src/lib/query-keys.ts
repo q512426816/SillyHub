@@ -13,6 +13,7 @@ import type {
 } from "@/lib/daemon";
 import type { McpRegistryListParams } from "@/lib/api/mcp-registry";
 import type { NotificationListParams } from "@/lib/notifications";
+import type { GraphSub } from "@/lib/knowledge";
 
 export const queryKeys = {
   agentRuns: {
@@ -125,4 +126,47 @@ export const queryKeys = {
       ["notifications", "list", params] as const,
     unreadCount: ["notifications", "unreadCount"] as const,
   },
+  // 2026-10-08-platform-knowledge-graph task-05：知识图谱三键（集中工厂惯例，
+  // 凡影响查询结果的变量都进 key）。overview 键被图谱页（page.tsx）与
+  // ops-dashboard 图卡共用——同键共享缓存零额外请求（D-004@v1）。
+  knowledgeGraph: {
+    all: ["knowledgeGraph"] as const,
+  },
 } as const;
+
+/**
+ * 图查询键（sub/anchor/anchor2/edges/depth 全量进键；可选参 undefined 归一
+ * null 防分叉键，agentLogs.list 同款惯例）。
+ */
+export function knowledgeGraphQueryKey(
+  workspaceId: string,
+  sub: GraphSub,
+  anchor?: string,
+  anchor2?: string,
+  edges?: string,
+  depth?: number,
+) {
+  return [
+    "knowledgeGraph",
+    "query",
+    workspaceId,
+    sub,
+    anchor ?? null,
+    anchor2 ?? null,
+    edges ?? null,
+    depth ?? null,
+  ] as const;
+}
+
+/** 图总览键（图谱页 lite 模式与 ops-dashboard 图卡共享缓存）。 */
+export function knowledgeGraphOverviewQueryKey(workspaceId: string) {
+  return ["knowledgeGraph", "overview", workspaceId] as const;
+}
+
+/** 图节点搜索键（锚点自动补全数据源；search 进键，debounce 换键停旧启新）。 */
+export function knowledgeGraphNodesQueryKey(
+  workspaceId: string,
+  search: string,
+) {
+  return ["knowledgeGraph", "nodes", workspaceId, search] as const;
+}

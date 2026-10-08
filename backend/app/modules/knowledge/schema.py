@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class KnowledgeEntry(BaseModel):
@@ -355,3 +355,199 @@ class KnowledgeStatsOut(BaseModel):
     entry_counts: list[EntryCountItem]
     orphan_anchors: list[OrphanAnchorOut] = []
     data_until: datetime | None = None
+
+
+# ── 知识图谱 DTO（change 2026-10-08-platform-knowledge-graph task-02 / D-001@v2）─
+#
+# 图查询三端点（graph/query、graph/overview、graph/nodes）统一信封：HTTP 200 恒
+# 回信封，不可用态由 reason 六稳定键承载（unbound/offline/timeout/upgrade_
+# required/invalid_input/rpc_error），前端按 available+reason 分支不弹错。数据面
+# 经 daemon RPC 直采 CLI ``sillyspec knowledge graph <sub> --json`` 单源真相
+# （无本地回退）；CLI JSON → DTO 的键归一化（byType→by_type、orphans/dangling
+# 数组→items、impact 内层键按 CLI 实际形状）在 graph.py，与 design 接口定义的
+# 假设差异见 graph.py 模块注释。
+
+#: 不可用原因六稳定键（D-001@v2）：绑定引导/稍后再试/超时/升级提示/输入错误/服务异常。
+GraphReason = Literal[
+    "unbound", "offline", "timeout", "upgrade_required", "invalid_input", "rpc_error"
+]
+
+#: 图查询子命令全集（与 daemon 白名单 / CLI 子命令一一对应；query 端点七值 Literal，
+#: 其中 neighbors/path/impact/orphans/dangling 为五查询主链路，summary/nodes 兜底直通）。
+GraphSub = Literal["summary", "nodes", "neighbors", "path", "impact", "orphans", "dangling"]
+
+
+class GraphEnvelope[T](BaseModel):
+    """图端点统一信封（泛型 data 分型）。
+
+    ``available=false`` 时 ``data=None`` 且 ``reason`` 为六键之一；``source`` 恒
+    ``daemon-rpc``（RPC 直采单源，无本地回退——与治理卡 v2 的 source 标同语义）。
+    """
+
+    available: bool
+    reason: GraphReason | None = None
+    source: Literal["daemon-rpc"] = "daemon-rpc"
+    data: T | None = None
+
+
+class GraphNodeRef(BaseModel):
+    """节点引用（id/type/label；label 缺省空串由前端回退显示 id）。"""
+
+    id: str
+    type: str = ""
+    label: str = ""
+
+
+class GraphEdge(BaseModel):
+    """边（s→t 定方向；strength=strong/medium/weak 三档，前端线型派生依据）。"""
+
+    s: str
+    t: str
+    type: str
+    strength: str = ""
+
+
+class GraphHop(BaseModel):
+    """path 单跳（与 GraphEdge 同构减 strength；CLI hops 即此形状）。"""
+
+    s: str
+    t: str
+    type: str
+
+
+class GraphNeighborsData(BaseModel):
+    """neighbors 查询数据：邻域节点 + 边（含起点；dir/edge_type 由前端从 edges 派生）。"""
+
+    anchor: str
+    nodes: list[GraphNodeRef]
+    edges: list[GraphEdge]
+
+
+class GraphPathData(BaseModel):
+    """path 查询数据：强边子集寻路结果（不可达 found=false + reason 文案需展示）。
+
+    ``from_`` 因 Python 保留字以 alias ``from`` 序列化（请求/响应 JSON 键均为 from）。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_: str = Field(alias="from")
+    to: str
+    found: bool
+    reason: str = ""
+    hop_count: int = 0
+    hops: list[GraphHop]
+
+
+class GraphDecisionRef(BaseModel):
+    """impact 决策/FR 引用（CLI 实际形状：id/type/status，status=decision 状态位）。"""
+
+    id: str
+    type: str = ""
+    status: str = ""
+
+
+class GraphRejectedRef(BaseModel):
+    """impact 防复潮可达项（CLI 实际形状：id/title/reason，reason 截断 80 字符）。"""
+
+    id: str
+    title: str = ""
+    reason: str = ""
+
+
+class GraphImpactData(BaseModel):
+    """impact 查询数据：强边闭包（深度≤2 + supersedes/module-dep 传递例外）。
+
+    ``closure`` 为闭包节点 id 数组（CLI 实际形状，非 GraphNodeRef——见 graph.py
+    模块注释偏差说明）；``modules`` 为 module: 前缀节点 id。
+    """
+
+    key: str
+    closure: list[str]
+    modules: list[str]
+    decisions_and_frs: list[GraphDecisionRef]
+    rejected_reachable: list[GraphRejectedRef]
+
+
+class GraphOrphanItem(BaseModel):
+    """孤儿清单条（kind=zero-degree / entry-no-route-no-strong 两类）。"""
+
+    id: str
+    type: str
+    kind: str
+
+
+class GraphOrphansData(BaseModel):
+    """orphans 查询数据：items 由 daemon 裁剪 top-50，count 保留原值。"""
+
+    count: int
+    items: list[GraphOrphanItem]
+
+
+class GraphDanglingItem(BaseModel):
+    """悬空清单条（id=引用方节点、type=边型、kind=强度档、detail=缺失目标路径）。"""
+
+    id: str
+    type: str
+    kind: str
+    detail: str
+
+
+class GraphDanglingData(BaseModel):
+    """dangling 查询数据：items 由 daemon 裁剪 top-50，count 保留原值。"""
+
+    count: int
+    items: list[GraphDanglingItem]
+
+
+class GraphCluster(BaseModel):
+    """summary 簇（key=类型:域；representatives=度数 top-5）。"""
+
+    key: str
+    label: str
+    count: int
+    representatives: list[GraphNodeRef]
+
+
+class GraphSummary(BaseModel):
+    """全图 lite 聚合（CLI byType/byEdge 归一为 by_type/by_edge；四计数与 doctor 同源）。"""
+
+    nodes: int
+    edges: int
+    by_type: dict[str, int]
+    by_edge: dict[str, int]
+    orphans: int
+    module_doc_gaps: int
+    changelog_danglings: int
+    dangling_refs: int
+    clusters: list[GraphCluster]
+
+
+class GraphOverviewData(BaseModel):
+    """overview 组装数据：summary→orphans→dangling 三 RPC 逐条容错——子块失败仅置
+    None（旧 CLI summary 缺失→lite 隐藏、计数缺失→前端显示「—」），全失败整信封降级。"""
+
+    summary: GraphSummary | None = None
+    orphans_count: int | None = None
+    dangling_count: int | None = None
+
+
+class GraphNodesData(BaseModel):
+    """nodes 搜索数据（锚点自动补全数据源；不可用时 None 由信封 reason 承载）。"""
+
+    nodes: list[GraphNodeRef] | None = None
+
+
+#: query 端点 data 按 sub 分型的联合（五查询主链路 + summary/nodes 直通）。
+GraphQueryData = (
+    GraphNeighborsData
+    | GraphPathData
+    | GraphImpactData
+    | GraphOrphansData
+    | GraphDanglingData
+    | GraphSummary
+    | GraphNodesData
+)
+GraphQueryOut = GraphEnvelope[GraphQueryData]
+GraphOverviewOut = GraphEnvelope[GraphOverviewData]
+GraphNodesOut = GraphEnvelope[GraphNodesData]
