@@ -1,0 +1,42 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：24 小时风险审查实证复扫链三缺陷——while True 常驻判死不限于启动跳过项且不看 daemon 活性（可误杀健康静默轮，数据丢失面）、循环体无异常处理（一次 DB 抖动整链永久死亡、跳过项永卡 running）、先
+  FOR UPDATE 后判活性且循环末统一提交（每 10 分钟周期性行锁竞争挤占 daemon 收口）。
+
+
+  成功标准：
+
+  - 复扫链只追踪启动清理时因日志新鲜而跳过的轮，启动后新开的轮不再进入复扫判死面
+
+  - 复扫判死前叠加 daemon 活性守卫：daemon 在线或心跳宽限窗内则保持 running 继续追踪（对齐 patrol 判死段双条件语义），run→daemon 链路不可解析时退回纯日志 recency 语义
+
+  - 复扫循环单次迭代异常不再终止整链：逐迭代捕获记日志，连续失败超上限才放弃并留 error 痕迹
+
+  - 行锁收窄：启动清理与复扫都先无锁判日志活性，仅对确定要判死的轮 FOR UPDATE 重读，并逐轮提交即时释放锁
+
+  - 既有 liveness/错误码/并发收口守卫用例保持绿；新增复扫范围、daemon 活性、循环韧性用例先红后绿
+autopilot: true
+baseline_commit: e7787cadba68c5b51b50c7aaf6c461a4caac849c
+updatedAt: '2026-10-08T17:37:34.995Z'
+baseline_sha256: b3a8e5cb80506b747349a44227c00e9aa97d4eae54163de64606d1c2f36496a4
+gate_summary: >-
+  test: passed ← module[]+deps(py27)+fr(2)（95.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008173157\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（19.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008173157\test-result.json｜门文件
+  2 个
+

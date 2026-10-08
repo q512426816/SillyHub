@@ -144,3 +144,98 @@ created_at: 2026-10-08T01:35:36.843Z
 - 场景：主路径 — Given versions 目录含 20261008100000（down_revision=20261006200000）/ When test_file_exists
 全文：.sillyspec/changes/archive/2026-10-08-ci-sweep-2-migration-anchor/requirements.md#FR-02
 最近确认：efb85fc566889705e304026f05380aacc58d77b2
+
+## FR-auto-backend-130 复扫链只追踪启动清理时因日志新鲜而跳过的轮，启动后新开的轮不再进入复扫判死面
+变更：2026-10-09-stale-recheck-scope
+状态：active
+摘要：启动后新开的静默轮不被复扫波及；追踪项正常收口后自动出列
+全文：.sillyspec/changes/archive/2026-10-09-stale-recheck-scope/requirements.md#FR-01
+最近确认：ef3fca11264f031c7ef95c05eb7da475e76cbb81
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-stale-recheck-scope:flow:测试绑定FR-01
+  tests: test/backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_ignores_new_silent_run_outside_tracked_set」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-stale-recheck-scope
+  status: active
+
+## FR-auto-backend-131 复扫判死前叠加 daemon 活性守卫：daemon 在线或心跳宽限窗内则保持 running 继续追踪（对齐 patrol 判死段双条件语义），run→daemon 链路不可解析时退回纯日志 recency 语义
+变更：2026-10-09-stale-recheck-scope
+状态：active
+摘要：daemon 在线的长静默轮不被误杀；daemon 死亡且日志停滞的追踪轮被判死；链路不可解析退回 recency 语义
+全文：.sillyspec/changes/archive/2026-10-09-stale-recheck-scope/requirements.md#FR-02
+最近确认：ef3fca11264f031c7ef95c05eb7da475e76cbb81
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-stale-recheck-scope:flow:测试绑定FR-02
+  tests: test/backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_unresolvable_daemon_falls_back_to_recency」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-stale-recheck-scope
+  status: active
+
+## FR-auto-backend-132 复扫循环单次迭代异常不再终止整链：逐迭代捕获记日志，连续失败超上限才放弃并留 error 痕迹
+变更：2026-10-09-stale-recheck-scope
+状态：active
+摘要：单次 DB 抖动后链继续工作；连续失败超限放弃留痕
+全文：.sillyspec/changes/archive/2026-10-09-stale-recheck-scope/requirements.md#FR-03
+最近确认：ef3fca11264f031c7ef95c05eb7da475e76cbb81
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-stale-recheck-scope:flow:测试绑定FR-03
+  tests: test/backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_loop_gives_up_after_consecutive_errors」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-stale-recheck-scope
+  status: active
+
+## FR-auto-backend-133 行锁收窄：启动清理与复扫都先无锁判日志活性，仅对确定要判死的轮 FOR UPDATE 重读，并逐轮提交即时释放锁
+变更：2026-10-09-stale-recheck-scope
+状态：active
+摘要：活跃轮在清理全程不被加行锁；并发收口守卫语义保持
+全文：.sillyspec/changes/archive/2026-10-09-stale-recheck-scope/requirements.md#FR-04
+最近确认：ef3fca11264f031c7ef95c05eb7da475e76cbb81
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-stale-recheck-scope:flow:测试绑定FR-04
+  tests: test/backend/tests/modules/agent/test_stale_run_recheck.py「test_cleanup_skips_recent_run_without_lock」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-stale-recheck-scope
+  status: active
+
+## FR-auto-backend-134 既有 liveness/错误码/并发收口守卫用例保持绿；新增复扫范围、daemon 活性、循环韧性用例先红后绿
+变更：2026-10-09-stale-recheck-scope
+状态：active
+摘要：回归面与新增面双绿
+全文：.sillyspec/changes/archive/2026-10-09-stale-recheck-scope/requirements.md#FR-05
+最近确认：ef3fca11264f031c7ef95c05eb7da475e76cbb81
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-stale-recheck-scope:flow:测试绑定FR-05
+  tests: test/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py「既有用例全绿」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-stale-recheck-scope
+  status: active

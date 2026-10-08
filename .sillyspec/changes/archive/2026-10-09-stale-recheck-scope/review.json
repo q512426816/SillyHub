@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-stale-recheck-scope",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "ef3fca11264f031c7ef95c05eb7da475e76cbb81",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "设计文档声称新增用例 ×9，实际为 8 个",
+      "evidence": "design.md 文件变更清单写「新用例 ×9」（提交 d7c5fe2fd 同称 ×9），但实测 pytest 三文件 14 passed = liveness 4 + error_code 2 + 新文件 8，新文件 test_stale_run_recheck.py 仅有 8 个测试函数；纯文档计数失实，不影响行为",
+      "location": ".sillyspec/changes/2026-10-09-stale-recheck-scope/design.md:53"
+    },
+    {
+      "severity": "P3",
+      "title": "先判后锁引入毫秒级残余 TOCTOU：预判与 FOR UPDATE 重读之间 daemon 恢复上报不会被发现",
+      "evidence": "_recheck_deferred_runs 的 recency 预判（service.py:2649）与 daemon 活性门（:2655）之后才加 FOR UPDATE（:2658-2664），行锁重读仅校验 status!=running（:2667）不复查日志/活性——若 daemon 恰在预判后、加锁前的窗口（约 4-5 次查询往返，毫秒级）恢复写日志（轮仍 running），该轮被误判 failed；原实现判活在锁后无此窗口。窗口极窄（每 10 分钟一轮 × 毫秒级 ≈ 0.01% 量级）且误杀后迟到成功仍可经 close_run_steps.py:85 回正，属 FR-04 强制判活前移的固有残余",
+      "location": "backend/app/modules/agent/service.py:2643-2671"
+    },
+    {
+      "severity": "P3",
+      "title": "两处声明场景的测试断言缺口：收口自动出列无直接用例、判死场景未断言对话框取消",
+      "evidence": "FR-01 场景「追踪项正常收口后自动出列」（requirements.md:19-23）由 service.py:2647-2650 的 status!=running → continue 实现，但新测试无一构造已终态追踪轮直接钉该路径；FR-02 判死场景声称「pending 对话框被取消」（requirements.md:39），test_recheck_kills_silent_run_with_dead_daemon 只断言 failed/error_code/exit_code，未断言对话框取消（代码 :2673 确有调用 cancel_pending_dialogs_for_run）",
+      "location": "backend/tests/modules/agent/test_stale_run_recheck.py:178"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "finding",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "boundaryRulings": [
+    {
+      "boundary": "在线 daemon 的永久静默轮一直被追踪不判死，归属用户取消/会话超时面（design 风险段）",
+      "ruling": "可接受",
+      "reason": "与 patrol 判死段双条件语义实质对齐（patrol.py:556-560 同款 status==online or last_heartbeat_at is None 即不动），误杀健康静默轮的代价高于永卡 running；硬上限留后续迭代合理"
+    },
+    {
+      "boundary": "_run_daemon_alive lease updated_at 倒序首见即定、最新 lease 无 runtime_id 即断链返回 None（不回退老 lease）",
+      "ruling": "可接受",
+      "reason": "与 patrol _resolve_run_daemons_bulk 首见即定语义逐字一致（patrol.py:1312-1313），None→recency 判死方向与原实现相同，不产生新误杀面"
+    },
+    {
+      "boundary": "链路不可解析退回纯日志 recency 判死（与 patrol 断链跳过不判死不同）",
+      "ruling": "可接受",
+      "reason": "recheck 职责是防永卡兜底，若断链即不判死会重现永卡 running、违反 FR-01 兜底承诺；FR-02 显式要求此语义且有三态测试钉死"
+    },
+    {
+      "boundary": "last_heartbeat_at 为 None 视作存活（保守跳过）",
+      "ruling": "可接受",
+      "reason": "patrol 判死段同款保守方向（patrol.py:557），宁可保运行不误杀"
+    },
+    {
+      "boundary": "多实例部署下各自追踪各自启动快照（当前无多实例形态）",
+      "ruling": "可接受",
+      "reason": "排期点唯一（startup lifespan）保证单进程单链；判写经 FOR UPDATE 重读 + status 校验幂等，声明形态不存在且不放大风险"
+    }
+  ],
+  "verification": {
+    "fr01": "兑现：_deferred_run_ids 启动快照（service.py:1434,2565）+ 循环只吃该集合（:2699-2705）；新开轮创建时无日志天然不入集合；绑定测试 test_recheck_ignores_new_silent_run_outside_tracked_set 存在且断言未追踪轮保持 running/error_code None",
+    "fr02": "兑现：_run_daemon_alive 三态（service.py:2590-2628）+ 判死门（:2655-2657）；三个绑定测试（online 放行/dead 判死/断链退回）均存在且断言到位（对话框取消断言缺口见 P3 finding）",
+    "fr03": "兑现：逐迭代 try/except + log.exception 含 remaining/consecutive（service.py:2707-2713）、_RECHECK_MAX_CONSECUTIVE_ERRORS=5（:2686）、log.error 放弃（:2715）；两个绑定测试断言 2 次尝试续链、恰 5 次放弃",
+    "fr04": "兑现：启动清理无锁预判（service.py:2493-2516）、复扫三级预判后仅判死路径加锁（:2643-2665）、逐轮 commit（:2560,:2674）、锁后 status 守卫保留；绑定测试 test_cleanup_skips_recent_run_without_lock 断言全程仅 1 次 FOR UPDATE 且活跃轮保持 running，liveness:111 并发收口守卫用例存在",
+    "fr05": "实测通过：pytest 三文件 14 passed（新增 8 + liveness 4 + error_code 2）；「先红后绿」由构造成立（新用例直接引用旧实现不存在的 _deferred_run_ids/_recheck_deferred_runs/_run_daemon_alive，旧实现必 AttributeError 红）",
+    "protectionClaims": "防护声明全部实证：FOR UPDATE 重读+status 校验双路径保留（service.py:2550 附近与 :2667）；SERVICE_RESTART_INTERRUPTED 迟到成功回正匹配键守卫存在（close_run_steps.py:85）；_background_tasks 强引用防 GC（service.py:1437-1439）",
+    "artifactsSync": "接口契约声称 HTTP/daemon 协议/DB schema 零变化属实：diff 仅 service.py + 新测试文件，无 schema/契约文件变更；工作区两文件对 HEAD（ef3fca1）无 diff，patch 冻结面与 HEAD 一致"
+  },
+  "reviewedAt": "2026-10-08T17:37:00Z"
+}

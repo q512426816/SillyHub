@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-stale-recheck-scope",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-stale-recheck-scope:flow:测试绑定FR-01",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_ignores_new_silent_run_outside_tracked_set」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-stale-recheck-scope"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-stale-recheck-scope:flow:测试绑定FR-02",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_pardons_run_with_online_daemon」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-stale-recheck-scope"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-stale-recheck-scope:flow:测试绑定FR-02",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_kills_silent_run_with_dead_daemon」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-stale-recheck-scope"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-stale-recheck-scope:flow:测试绑定FR-02",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_unresolvable_daemon_falls_back_to_recency」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-stale-recheck-scope"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-stale-recheck-scope:flow:测试绑定FR-03",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_loop_survives_transient_error」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-stale-recheck-scope"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-stale-recheck-scope:flow:测试绑定FR-03",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_loop_gives_up_after_consecutive_errors」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-stale-recheck-scope"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-stale-recheck-scope:flow:测试绑定FR-04",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py「test_cleanup_skips_run_closed_concurrently_after_snapshot」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-stale-recheck-scope"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-stale-recheck-scope:flow:测试绑定FR-04",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_recheck.py「test_cleanup_skips_recent_run_without_lock」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-stale-recheck-scope"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-09-stale-recheck-scope:flow:测试绑定FR-05",
+      "tests": [
+        "test/backend/tests/modules/agent/test_stale_run_cleanup_liveness.py「既有 4 用例全绿」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-stale-recheck-scope"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-09-stale-recheck-scope:flow:测试绑定FR-05",
+      "tests": [
+        "test/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py「既有用例全绿」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-stale-recheck-scope"
+    }
+  ]
+}

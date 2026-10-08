@@ -1,0 +1,37 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "e7787cadba68c5b51b50c7aaf6c461a4caac849c",
+  "totals": {
+    "files": 2,
+    "additions": 519,
+    "deletions": 66
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/agent/service.py",
+      "additions": 217,
+      "deletions": 66,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/tests/modules/agent/test_stale_run_recheck.py",
+      "additions": 302,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "cb89b45141f6cfdf0dc2e0c7a06c5c652e0140abc0361a6cee4da3a117b8ed35",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T17:32:18.141Z"
+}
