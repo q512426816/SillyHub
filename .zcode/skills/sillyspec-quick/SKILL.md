@@ -3,37 +3,7 @@ name: sillyspec:quick
 description: 用于明确、低风险、范围很小的直接任务。适合用户说"直接改、快速修、顺手调整、改个文案、修个小 bug、更新一个文件、不要完整流程"。跳过 brainstorm/plan，但仍按 sillyspec quick 流程执行。
 ---
 
-> ⚠️ **已退役（存量收尾 only）**——quick 通道自 SillySpec CLI 3.30.0 起**不再产生新工作**：轻量变更（thin）已转正为缺省小修复通道，`flow.mode` 缺省 thin、`run quick` 仅作存量会话的收尾入口（与 CLI `run/stage.js` 退役横幅同义）。**新的小修复不要用本技能**，改走下方「轻量变更（thin）用法」；只有恢复/收尾**已存在的** quick 会话（`quick-<hash>` sessionId）时才用本技能。
-
-## 轻量变更（thin）用法 —— 新的小修复走这里
-
-2 调用协议（`sillyspec flow start` → 干活 → `sillyspec flow done`）：
-
-```bash
-# 调用 1/2：启动（--input 过门格式是硬约束，见下）
-sillyspec flow start --change <变更名> --input "<多行需求文本>"
-
-# 干活：改代码 + 写测试；顺手填 design.md 四节 AGENT 槽与 requirements 测试绑定槽
-#（每处至少一行，「不适用：<理由>」也算答——空槽会让 flow done 失败）
-
-# 调用 2/2：收口（归档自动完成，无需其它命令）
-sillyspec flow done --change <变更名>
-```
-
-**`--input` 过门格式（清晰度门，格式错 exit 2）**：多行文本 = 动机一行 + 独立节头行「成功标准：」+ 每行一条 `- <标准>` 列表行。**禁止单行内联**（`成功标准：xxx` 写在同一行恒被拒）：
-
-```
-修复登录按钮在移动端点击无响应的问题
-成功标准：
-- 移动端点击登录按钮可正常提交
-- 桌面端行为不回归
-```
-
-**`flow done` 语义**：中间态 exit 1 属正常（空槽拒收 / 实测失败自动升厚），修复问题后**重跑同命令**即断点续；实测失败 = 整单失败（fail-closed）。成功后变更自动转入归档区。
-
-（上游技能模板尚未跟上 thin 转正，本段为本地补齐——工具缺口已在上游代码修复，留档见 `docs/sillyspec/finished/thin-flow-quick-retirement.md`。）
-
-## 何时使用（仅存量 quick 会话收尾）
+## 何时使用
 
 - 明确、低风险、范围小的直接修改：改文案、修小 bug、更新单个文件
 - 用户说"直接改、快速修、顺手调整、不要完整流程"
