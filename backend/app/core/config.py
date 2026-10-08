@@ -97,8 +97,9 @@ class Settings(BaseSettings):
 
     # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。
     # 镜像内路径由 Dockerfile COPY → /app/sillyspec-skills/（task-07）。
-    # 不放 /app/.claude/skills/——该路径被 claude-data named volume 遮盖（volume 早于
-    # skills COPY 创建，不会重拷镜像内容），改放非 volume 路径，entrypoint 软链给 claude。
+    # 2026-10-08-backend-image-slim-no-claude：历史上不放 /app/.claude/skills/ 是因
+    # claude-data 卷遮盖 + entrypoint 软链给容器内 claude——两者均已随容器内 claude
+    # 退役；现在本路径是镜像唯一的技能分发载荷（manifest/bundle 端点读），路径不变。
     # 测试经 monkeypatch 覆盖 skills_bundle_service.get_settings 指向 tmp_path。
     skills_bundle_dir: Path = Field(
         default=Path("/app/sillyspec-skills"),
