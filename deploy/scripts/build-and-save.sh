@@ -57,7 +57,8 @@ docker save multi-agent-platform-backend:latest multi-agent-platform-frontend:la
 echo "    产出: $OUT ($(du -h "$OUT" | cut -f1))"
 # 2026-10-08-backend-image-slim-no-claude：容器内已无 sillyspec 可执行，版本回显改读
 # 构建期焙入的 /app/sillyspec-package.json（node-tools 阶段 npm 实际装到的版本）。
-echo "    镜像内 sillyspec 版本: $(docker run --rm --entrypoint grep multi-agent-platform-backend:latest -o '\"version\": \"[^\"]*\"' /app/sillyspec-package.json | head -1 | cut -d'\"' -f4 || echo 查询失败)"
+# 注意必须经 sh -c 间接传路径——Git Bash/MSYS 会把裸 /app/... 参数改写成 Windows 路径。
+echo "    镜像内 sillyspec 版本: $(docker run --rm --entrypoint sh multi-agent-platform-backend:latest -c 'grep -m1 -o "\"version\"[: ]*\"[^\"]*\"" /app/sillyspec-package.json | cut -d"\"" -f4' 2>/dev/null || echo 查询失败)"
 echo ""
 echo "    镜像 COMMIT_SHA=$COMMIT_SHA（health 端点将回显此值；运行时不再空覆盖）"
 echo ""
