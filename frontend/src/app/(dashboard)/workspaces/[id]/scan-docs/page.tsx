@@ -155,17 +155,16 @@ function toAntdNodes(nodes: TreeNode[]): DataNode[] {
 }
 
 /** 文档树：antd Tree 受控（默认展开项目层、搜索结果全展开；点目录行展开/收起
- *  ql-20260821-015；点文件行拉详情回调）。 */
+ *  ql-20260821-015；点文件行上报 docId，详情拉取与竞态守卫在主组件 requestDoc）。 */
 function DocTree({
   tree,
-  workspaceId,
-  onSelect,
+  requestDoc,
   selectedPath,
   expandAll,
 }: {
   tree: TreeNode[];
-  workspaceId: string;
-  onSelect: (_doc: ScanDocRead) => void;
+  /** 点文件行回调（主组件 fetch + 过期响应守卫后 selectDoc）。 */
+  requestDoc: (_docId: string) => void;
   selectedPath: string | null;
   /** 搜索过滤态：结果集小，全部摊开便于点选（否则默认只展开项目层）。 */
   expandAll: boolean;
@@ -187,7 +186,7 @@ function DocTree({
     if (!info.node.isLeaf) return;
     const doc = docIndex.get(String(info.node.key));
     if (!doc) return;
-    void getScanDoc(workspaceId, doc.id).then(onSelect).catch(() => {});
+    requestDoc(doc.id);
   };
 
   return (
@@ -328,6 +327,27 @@ export default function ScanDocsPage({ params }: Props) {
     setViewMode("cards");
   }, []);
 
+  /**
+   * 过期响应守卫（2026-10-08 md-card-render 验收修复，与知识库页同款）：树点击与
+   * 卡片跳转都会拉详情，快速连续选择时先发出的请求晚到会把旧文档覆盖进新选择
+   * （INDEX 名 + 别的文档内容错配幻象）——seq 只接受最新一次请求的响应。
+   */
+  const docSeqRef = useRef(0);
+
+  /** 树点击拉详情（fetch 上提到主组件统一守卫；子组件只报 docId）。 */
+  const requestDoc = useCallback(
+    (docId: string) => {
+      const seq = ++docSeqRef.current;
+      void getScanDoc(workspaceId, docId)
+        .then((doc) => {
+          if (seq !== docSeqRef.current) return; // 晚到的过期响应，丢弃
+          selectDoc(doc);
+        })
+        .catch(() => {});
+    },
+    [workspaceId, selectDoc],
+  );
+
   /** 卡片视图跳转（INDEX 路由行）：在当前文档列表里解析目标文件，命中则拉详情
    *  选中并滚到锚点小节卡（锚点选择器与知识库 EntryCardList 同域）；查无静默
    *  忽略（目标可能不在 docs 树，如指向 knowledge 域的相对路径）。 */
@@ -338,8 +358,10 @@ export default function ScanDocsPage({ params }: Props) {
         return p === file || p.endsWith(`/${file}`);
       });
       if (!target) return;
+      const seq = ++docSeqRef.current;
       void getScanDoc(workspaceId, target.id)
         .then((doc) => {
+          if (seq !== docSeqRef.current) return; // 过期响应丢弃（同 requestDoc）
           selectDoc(doc);
           if (anchor) {
             const display = stripPathPrefix(doc.path);
@@ -452,8 +474,7 @@ export default function ScanDocsPage({ params }: Props) {
                 <TreeBox className="max-h-[calc(100vh-260px)]">
                   <DocTree
                     tree={tree}
-                    workspaceId={workspaceId}
-                    onSelect={selectDoc}
+                    requestDoc={requestDoc}
                     selectedPath={selectedDoc?.path ?? null}
                     expandAll={!!debouncedQ}
                   />

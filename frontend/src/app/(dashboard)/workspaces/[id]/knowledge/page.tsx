@@ -356,14 +356,24 @@ export default function KnowledgePage({ params }: Props) {
     setExpandedKeys(collectDirPaths(tree));
   }, [tree]);
 
-  /** 选中并加载某个知识条目（树选择 onSelectTree 与 D-010① 反链跳转共用）。 */
+  /**
+   * 选中并加载某个知识条目（树选择 onSelectTree 与 D-010① 反链跳转共用）。
+   *
+   * 过期响应守卫（2026-10-08 md-card-render 验收修复）：快速连续选择两个文件时，
+   * 先发出的请求若晚到，会把旧文件 content 覆盖进新选文件名下（INDEX.md 名配上
+   * 无路由行的别文件内容 →「INDEX 无可点路由行」幻象；手册内容被当 INDEX 解析
+   * 同族错配）——seq 序号只接受最新一次选择的响应。
+   */
+  const selectSeqRef = useRef(0);
   const selectEntry = useCallback(
     (filename: string, anchor?: string) => {
+      const seq = ++selectSeqRef.current;
       setSelectedFilename(filename);
       setEditing(false);
       setViewMode("cards");
       getKnowledge(workspaceId, filename)
         .then((entry) => {
+          if (seq !== selectSeqRef.current) return; // 晚到的过期响应，丢弃
           setSelectedContent(entry.content ?? null);
           setSelectedTitle(entry.title ?? entry.filename);
           setSelectedZone(zoneOf(entry));
@@ -391,6 +401,7 @@ export default function KnowledgePage({ params }: Props) {
           }
         })
         .catch((err) => {
+          if (seq !== selectSeqRef.current) return; // 过期响应的错误同样丢弃
           setPageError(err instanceof ApiError ? err.message : "加载文档失败");
         });
     },
