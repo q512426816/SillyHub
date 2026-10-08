@@ -103,3 +103,124 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-08-turn-nav-hover-mark
   status: active
+
+## FR-auto-frontend-128 卡片正文 markdown 渲染
+变更：2026-09-23-md-card-render
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given scan-docs 或 knowledge 页选中一份含表格/列表/加粗/行内代码的 md 文档；When 切换到「卡片」视图；Then 每张小节卡/单卡的正文按 markdown 正常渲染（表格 th/td、列表、加粗、行内 code 生效），且渲染**必须**经统一 rehype-saniti
+全文：.sillyspec/changes/archive/2026-09-23-md-card-render/requirements.md#FR-01
+最近确认：322c55edd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-09-23-md-card-render:task-01:acc-0-5268d069
+  tests: frontend/src/components/knowledge/__tests__/card-markdown.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-23-md-card-render
+  status: active
+- row: 2026-09-23-md-card-render:task-01:acc-1-b237c25a
+  tests: frontend/src/components/knowledge/__tests__/card-markdown.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-23-md-card-render
+  status: active
+- row: 2026-09-23-md-card-render:task-01:acc-2-c1042aed
+  tests: frontend/src/components/knowledge/__tests__/card-markdown.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-23-md-card-render
+  status: active
+- row: 2026-09-23-md-card-render:task-01:acc-3-ef076ca2
+  tests: frontend/src/components/knowledge/__tests__/card-markdown.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-23-md-card-render
+  status: active
+- row: 2026-09-23-md-card-render:task-02:acc-0-42de4f98
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx | frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-23-md-card-render
+  status: active
+- row: 2026-09-23-md-card-render:task-02:acc-1-2e486057
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx | frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-23-md-card-render
+  status: active
+- row: 2026-09-23-md-card-render:task-02:acc-2-f1575d52
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx | frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-23-md-card-render
+  status: active
+- row: 2026-09-23-md-card-render:task-02:acc-3-45b95137
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx | frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-23-md-card-render
+  status: active
+- row: 2026-09-23-md-card-render:task-02:acc-4-539d3b5a
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx | frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-09-23-md-card-render
+  status: active
+
+## FR-auto-frontend-129 卡片头视觉重构（manual 小节卡与 SingleCard）
+变更：2026-09-23-md-card-render
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 卡片视图渲染一张小节卡或整文件单卡；When 卡片展示；Then 卡片左侧**必须**有 3px 品牌色条（brand-600 语义阶）、头部为 brand-50 底色带、小节标题 brand-700 加粗、右侧**必须**有
+全文：.sillyspec/changes/archive/2026-09-23-md-card-render/requirements.md#FR-02
+最近确认：322c55edd
+
+## FR-auto-frontend-130 frontmatter 元信息条（含降级）
+变更：2026-09-23-md-card-render
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 文档含 frontmatter（author / created_at 字段）；When 卡片头渲染；Then 头部下方显示一行小字元信息（✍ 作者 · 收录时间）；frontmatter 缺失或字段缺失时该行**必须**整体隐藏，**禁止**渲染空行、**禁止**抛错；
+全文：.sillyspec/changes/archive/2026-09-23-md-card-render/requirements.md#FR-03
+最近确认：322c55edd
+
+## FR-auto-frontend-131 既有交互零回归
+变更：2026-09-23-md-card-render
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 卡片模式完成改造；When ① 从知识库 INDEX 路由行点击跳转目标条目锚点；② 顶栏切换 blue / ai-native 主题；Then ① 页面**必须**滚动定位到目标卡片（data-entry-anchor + scrollIntoView 保留有效）；② 品牌色条/表头色/头底色**必须*
+全文：.sillyspec/changes/archive/2026-09-23-md-card-render/requirements.md#FR-04
+最近确认：322c55edd

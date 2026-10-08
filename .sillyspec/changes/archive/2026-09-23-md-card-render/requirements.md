@@ -52,7 +52,7 @@ Then ① 页面**必须**滚动定位到目标卡片（data-entry-anchor + scrol
 
 ## 测试绑定（每条 FR 至少一行：`FR-NN: test/路径「用例名」`；不适用要写理由；flow done 空行拒收）
 
-FR-01: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-02: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-03: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-04: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-01: frontend/src/components/knowledge/__tests__/card-markdown.test.tsx「content 原文委托 MarkdownText 渲染，固定 compact 档」+ frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「手册形态渲染」（正文经渲染链断言）
+FR-02: frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「手册形态渲染」（卡片头色条/头底/标题色/🔗 断言块）+ frontend/src/components/knowledge/__tests__/card-markdown.test.tsx「容器携带卡片适配类」
+FR-03: frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「parseFrontmatterMeta（FR-03 纯函数）」+「frontmatter 元信息条渲染（FR-03：显示与降级）」
+FR-04: frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「手册形态渲染」（data-entry-anchor 属性断言）+「卡片头锚点复制（FR-02 / D-03）」（双主题为 brand-* 类名结构性保证，真实视觉留部署后手动验收——见 verify-result.md 移交项）

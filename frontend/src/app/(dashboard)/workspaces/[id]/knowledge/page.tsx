@@ -356,14 +356,29 @@ export default function KnowledgePage({ params }: Props) {
     setExpandedKeys(collectDirPaths(tree));
   }, [tree]);
 
-  /** 选中并加载某个知识条目（树选择 onSelectTree 与 D-010① 反链跳转共用）。 */
+  /**
+   * 选中并加载某个知识条目（树选择 onSelectTree 与 D-010① 反链跳转共用）。
+   *
+   * 过期响应守卫（2026-10-08 md-card-render 验收修复）：快速连续选择两个文件时，
+   * 先发出的请求若晚到，会把旧文件 content 覆盖进新选文件名下（INDEX.md 名配上
+   * 无路由行的别文件内容 →「INDEX 无可点路由行」幻象；手册内容被当 INDEX 解析
+   * 同族错配）——seq 序号只接受最新一次选择的响应。
+   */
+  const selectSeqRef = useRef(0);
   const selectEntry = useCallback(
     (filename: string, anchor?: string) => {
+      const seq = ++selectSeqRef.current;
       setSelectedFilename(filename);
+      // 中间态切断（2026-10-08 验收修复）：立即清旧内容——否则 fetch 期间用
+      // 「新文件名 + 旧文件内容」渲染 EntryCardList，形态按新文件名分发而内容
+      // 是旧文件的，产生错配闪烁（INDEX 名 + 无路由行内容 →「0 条路由」幻象；
+      // 手册名 + INDEX 内容 → 路由行被当小节卡渲染的「新样式一闪」）。
+      setSelectedContent(null);
       setEditing(false);
       setViewMode("cards");
       getKnowledge(workspaceId, filename)
         .then((entry) => {
+          if (seq !== selectSeqRef.current) return; // 晚到的过期响应，丢弃
           setSelectedContent(entry.content ?? null);
           setSelectedTitle(entry.title ?? entry.filename);
           setSelectedZone(zoneOf(entry));
@@ -391,6 +406,7 @@ export default function KnowledgePage({ params }: Props) {
           }
         })
         .catch((err) => {
+          if (seq !== selectSeqRef.current) return; // 过期响应的错误同样丢弃
           setPageError(err instanceof ApiError ? err.message : "加载文档失败");
         });
     },
@@ -571,9 +587,15 @@ export default function KnowledgePage({ params }: Props) {
             />
           </div>
           <SectionCard className="min-w-0 flex-1">
-            {selectedFilename === null || selectedContent === null ? (
+            {selectedFilename === null ? (
               <div className="py-12 text-center text-xs text-muted-foreground">
                 选择左侧文档查看内容。
+              </div>
+            ) : selectedContent === null ? (
+              /* 加载态（2026-10-08）：selectEntry 已清旧内容，fetch 返回前显示加载
+                 占位而非错配渲染（见 selectEntry 中间态切断注释）。 */
+              <div className="py-12 text-center text-xs text-muted-foreground" data-testid="entry-loading">
+                正在加载 {selectedFilename}…
               </div>
             ) : (
               <div className="space-y-3">

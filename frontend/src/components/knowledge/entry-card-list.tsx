@@ -448,16 +448,18 @@ function decisionsFileFor(filename: string): string {
   return `decisions/${domain}.md`;
 }
 
-/** 结构化卡（决策/FR 共用，原型 .entry-card .ec-* 结构）。 */
+/** 结构化卡（决策/FR 共用，原型 .entry-card .ec-* 结构；2026-10-08 验收扩展：套用 manual 同款卡片头——色条+头底+🔗+元信息行，保留 ID/状态 pill/字段网格等功能元素）。 */
 function DecisionCard({
   entry,
   filename,
   entryCount,
+  meta,
   onJumpToEntry,
 }: {
   entry: DecisionEntry;
   filename: string;
   entryCount?: number;
+  meta: FrontmatterMeta | null;
   onJumpToEntry?: (filename: string, anchor?: string) => void;
 }) {
   const superseded = entry.status === "superseded";
@@ -496,12 +498,13 @@ function DecisionCard({
       // （``文件#锚``），锚取条目 id（``FR-cli-entry-075`` / ``D-001@v1``）——与沉淀
       // 资产卡 href 的 anchor 参数同一取值。
       data-entry-anchor={entry.id ? `${filename}#${entry.id}` : undefined}
+      // shrink-0 防限高 flex-col 压缩（同 manual 卡）；overflow-hidden 裁头部底色圆角。
       className={cn(
-        "rounded-md border border-border/60 p-2.5 transition-colors hover:border-brand-400",
+        "shrink-0 overflow-hidden rounded-md border border-border/60 border-l-[3px] border-l-brand-600 p-2.5 transition-colors hover:border-brand-400",
         superseded && "border-border/40 bg-muted/40 opacity-60",
       )}
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="-mx-2.5 -mt-2.5 mb-0 flex flex-wrap items-center gap-2 border-b border-border/60 bg-brand-50 px-2.5 py-1.5">
         {entry.id ? (
           <span className="font-mono text-[11px] font-bold text-brand-700">{entry.id}</span>
         ) : null}
@@ -523,7 +526,9 @@ function DecisionCard({
             {expanded ? "收起 ▲" : "展开 ▼"}
           </button>
         ) : null}
+        {entry.id ? <AnchorCopyButton anchor={`${filename}#${entry.id}`} /> : null}
       </div>
+      <FrontmatterMetaLine meta={meta} />
 
       {/* 取代链条带（原型 .ec-chain）：superseded 折叠态也保留——取代关系即其身份 */}
       {chain ? (
@@ -730,6 +735,7 @@ export function EntryCardList({
               entry={e}
               filename={filename}
               entryCount={fileAnchorCount}
+              meta={meta}
               onJumpToEntry={onJumpToEntry}
             />
           ))
@@ -747,11 +753,20 @@ export function EntryCardList({
       {form === "index" ? (
         routes.length > 0 ? (
           categories.map((cat) => (
-            <section key={cat} data-testid="index-category" data-category={cat}>
-              <h4 className="px-1 pb-1 pt-0.5 text-[10.5px] font-semibold tracking-wide text-muted-foreground/80">
-                {cat}
-              </h4>
-              <div className="flex flex-col">
+            <article
+              key={cat}
+              data-testid="index-category"
+              data-category={cat}
+              // INDEX 分组卡片化（2026-10-08 验收扩展）：与 manual 卡同款卡片头——
+              // 每个分类一张卡（紫条 + brand-50 头 + 分组名 + 🔗），路由行为卡内
+              // 可点导航（交互与 testid 不变，结构升级为统一卡片语言）。
+              className="shrink-0 overflow-hidden rounded-md border border-border/60 border-l-[3px] border-l-brand-600 transition-colors hover:border-brand-400"
+            >
+              <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-brand-50 px-2.5 py-1.5">
+                <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold text-brand-700">{cat}</h4>
+                <AnchorCopyButton anchor={`${filename}#${slugifyAnchor(cat)}`} />
+              </div>
+              <div className="flex flex-col px-1.5 py-1">
                 {routes
                   .filter((r) => r.category === cat)
                   .map((r) => (
@@ -773,7 +788,7 @@ export function EntryCardList({
                     </button>
                   ))}
               </div>
-            </section>
+            </article>
           ))
         ) : (
           <p className="px-1 py-2 text-xs text-muted-foreground">INDEX 无可点路由行。</p>
