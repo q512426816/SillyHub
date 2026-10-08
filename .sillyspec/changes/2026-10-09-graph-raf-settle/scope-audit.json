@@ -1,0 +1,37 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "9918b30bd71e4f30153ee7a4e6beac20183fac45",
+  "totals": {
+    "files": 2,
+    "additions": 119,
+    "deletions": 0
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/knowledge/__tests__/graph-canvas.test.ts",
+      "additions": 68,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/knowledge/graph-canvas.tsx",
+      "additions": 51,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "b737c0c44fdfcd022d5ee745260139c83340c83981abac50d50e28c305b631e0",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T23:49:18.233Z"
+}

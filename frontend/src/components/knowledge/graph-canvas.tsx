@@ -293,6 +293,29 @@ export function stepForceLayout(
   }
 }
 
+/** 力场收敛判定阈值（世界系像素/帧）：全节点位移低于此值视为静止。 */
+export const FORCE_SETTLE_EPSILON = 0.25;
+/** 收敛判定的连续帧数守卫：弹簧系统在转折点会瞬时零速，单帧判定会误判。 */
+export const FORCE_SETTLE_FRAMES = 30;
+
+/**
+ * 力场收敛判定（2026-10-09 提取供测试）：stepForceLayout 是 Verlet 积分，
+ * 步后 ``x - px`` 即本帧位移——全节点（含 NaN 防御）位移和低于阈值即静止。
+ * 收敛后调用方停步进，页面不再恒耗 CPU（原实现无截止，≤200 节点每帧 O(n²)）。
+ */
+export function forceSettled(
+  nodes: SimNode[],
+  maxDisp: number = FORCE_SETTLE_EPSILON,
+): boolean {
+  for (const n of nodes) {
+    if (!isFinite(n.x) || !isFinite(n.y) || !isFinite(n.px) || !isFinite(n.py)) {
+      return false;
+    }
+    if (Math.abs(n.x - n.px) + Math.abs(n.y - n.py) > maxDisp) return false;
+  }
+  return true;
+}
+
 /** 静态降级分环基数/间距（>200 节点确定性同心圆）。 */
 export const STATIC_RING_BASE = 130;
 export const STATIC_RING_GAP = 120;
@@ -681,6 +704,10 @@ export function GraphCanvas({
   // 力场收敛跟随（2026-10-08 用户实证修）：tick 计数 + 用户交互即停标记
   const forceTickRef = useRef(0);
   const userTouchedRef = useRef(false);
+  // 力场收敛截止（2026-10-09）：连续 FORCE_SETTLE_FRAMES 帧全节点位移低于阈值
+  // 判静止并停步进——原实现无截止，布局静止后仍每帧 O(n²) 步进 + 重绘恒耗 CPU。
+  const forceLiveRef = useRef(true);
+  const forceSettledFramesRef = useRef(0);
 
   // 每渲染同步 prop 面到 ref（rAF/draw 消费，避免闭包过期）。
   const colorsRef = useRef(colors);
@@ -726,6 +753,9 @@ export function GraphCanvas({
     seedSpiral(sim, w / 2, h / 2, sim.length);
     forceTickRef.current = 0;
     userTouchedRef.current = false;
+    // 新数据重启力场演化（收敛截止状态随数据重建复位）。
+    forceLiveRef.current = true;
+    forceSettledFramesRef.current = 0;
     byIdRef.current = new Map(sim.map((n) => [n.id, n] as const));
     const engine: "force" | "static" =
       sim.length > FORCE_NODE_LIMIT ? "static" : "force";
@@ -869,6 +899,7 @@ export function GraphCanvas({
       // 力场仅 force 引擎步进（static/full 不启力场——full 坐标恒等于 dump 输入）
       if (
         engineRef.current === "force" &&
+        forceLiveRef.current &&
         sizeRef.current.w > 0 &&
         simRef.current.length > 0 &&
         simRef.current.length <= FORCE_NODE_LIMIT
@@ -878,6 +909,27 @@ export function GraphCanvas({
           height: sizeRef.current.h,
         });
         dirtyRef.current = true;
+        // 力场收敛截止（2026-10-09）：连续 FORCE_SETTLE_FRAMES 帧全节点位移
+        // 低于阈值判静止，停步进省 CPU（原实现无截止恒耗）；定格时若用户
+        // 未交互做一次终局 fitView，承接收敛跟随语义（tick 随停不再推进）。
+        // 拖拽活跃守卫（评审 P1）：被拖节点在步内钉死在指针处（x=mx 且 px=x）
+        // 位移恒零——按住不动约 0.5s 会误判收敛停步进，而 mx/my 的唯一施加点
+        // 就在力场步内，停了节点即冻结不跟指针；拖拽期间禁止判静止。
+        if (dragRef.current === null && forceSettled(simRef.current)) {
+          forceSettledFramesRef.current += 1;
+          if (forceSettledFramesRef.current >= FORCE_SETTLE_FRAMES) {
+            forceLiveRef.current = false;
+            if (!userTouchedRef.current && simRef.current.length > 0) {
+              viewRef.current = fitView(
+                graphBbox(simRef.current),
+                sizeRef.current.w,
+                sizeRef.current.h,
+              );
+            }
+          }
+        } else {
+          forceSettledFramesRef.current = 0;
+        }
         // 力场收敛跟随：数据到达后前 6 秒按衰减节奏自动重新适配视口
         // （fitView 只在数据瞬间执行一次，节点被力场从螺旋初始位推开后
         // 视口不跟随 → 节点漂出视野/挤一角大片留白——2026-10-08 用户实证）。
@@ -944,6 +996,10 @@ export function GraphCanvas({
       hit.mx = p.x;
       hit.my = p.y;
       onSelectRef.current?.(hit.id);
+      // 拖节点重启力场（2026-10-09 收敛截止配套）：布局已静止时用户重排节点，
+      // 松手后需要重新演化收敛（平移/缩放是纯视口操作，不重启）。
+      forceLiveRef.current = true;
+      forceSettledFramesRef.current = 0;
     } else {
       panRef.current = { x: e.clientX, y: e.clientY };
     }

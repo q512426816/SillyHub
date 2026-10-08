@@ -32,15 +32,19 @@ import {
   edgeDash,
   fitView,
   FORCE_NODE_LIMIT,
+  FORCE_SETTLE_EPSILON,
+  FORCE_SETTLE_FRAMES,
   FULL_EDGE_ZOOM_THRESHOLD,
   FULL_LABEL_TYPES,
   FULL_LABEL_ZOOM_THRESHOLD,
+  forceSettled,
   fullSimNodes,
   graphBbox,
   liteClusterLayout,
   pickNode,
   shallDrawEdges,
   shallShowFullLabel,
+  shouldAutoRefit,
   staticLayout,
   stepForceLayout,
   type CanvasNodeInput,
@@ -402,5 +406,72 @@ describe("edgeDash（边三档线型）", () => {
   it("未知/空强度归 strong（结构边缺省档）", () => {
     expect(edgeDash("")).toEqual({ dash: [], width: 1.6 });
     expect(edgeDash("foo")).toEqual({ dash: [], width: 1.6 });
+  });
+});
+
+// ── shouldAutoRefit：力场收敛自动 re-fit 跟随判定（2026-10-09 风险审查）──────
+// （用例恢复：2026-10-09-frontend-risk-fixes 引入，knowledge-graph-fullmap
+// 重写本文件时丢失——组件函数仍在（graph-canvas.tsx shouldAutoRefit），钉回。）
+
+describe("shouldAutoRefit（自动 re-fit 跟随判定）", () => {
+  it("未交互：仅 90/180/270/360 tick 重适配视口，其余 tick 不动", () => {
+    expect(shouldAutoRefit(89, false)).toBe(false);
+    expect(shouldAutoRefit(90, false)).toBe(true);
+    expect(shouldAutoRefit(180, false)).toBe(true);
+    expect(shouldAutoRefit(270, false)).toBe(true);
+    expect(shouldAutoRefit(360, false)).toBe(true);
+    expect(shouldAutoRefit(361, false)).toBe(false);
+  });
+
+  it("用户交互置位（滚轮缩放/指针按下拖拽双源）后一律停跟随，refit 不再抢视口", () => {
+    for (const t of [90, 180, 270, 360]) {
+      expect(shouldAutoRefit(t, true)).toBe(false);
+    }
+  });
+});
+
+// ── forceSettled：力场收敛截止判定（2026-10-09-graph-raf-settle）─────────────
+
+describe("forceSettled（力场收敛判定）", () => {
+  it("全节点位移为零（x==px）判静止；单节点位移超阈值判未静止", () => {
+    const a = simNode({ id: "a", x: 10, y: 20 });
+    expect(forceSettled([a])).toBe(true);
+    const moved = simNode({ id: "b", x: 100, y: 0 });
+    moved.px = 95; // 步后位移 5px > 阈值
+    expect(forceSettled([a, moved])).toBe(false);
+  });
+
+  it("阈值参数生效：位移恰在阈值内/外两态；NaN 坐标防御性判未静止", () => {
+    const n = simNode({ id: "n", x: 100, y: 100 });
+    n.px = 99.9; // 位移 0.1
+    expect(forceSettled([n], 0.05)).toBe(false);
+    expect(forceSettled([n], 0.5)).toBe(true);
+    expect(forceSettled([n])).toBe(true); // 缺省 FORCE_SETTLE_EPSILON=0.25 > 0.1
+    const bad = simNode({ id: "bad", x: NaN, y: 0 });
+    expect(forceSettled([bad])).toBe(false);
+    const badPrev = simNode({ id: "bad-prev", x: 100, y: 0 });
+    badPrev.px = NaN; // 速度载体 NaN 同样防御（评审 P3：NaN>x 恒 false 缝隙）
+    expect(forceSettled([badPrev])).toBe(false);
+  });
+
+  it("收敛帧数守卫常量：连续帧数 ≥30（转折点零速误判防线）", () => {
+    expect(FORCE_SETTLE_FRAMES).toBeGreaterThanOrEqual(30);
+    expect(FORCE_SETTLE_EPSILON).toBeGreaterThan(0);
+  });
+
+  it("与真实积分器联测：两节点弹簧系统步进至收敛（无截止恒耗场景可判停）", () => {
+    const a = simNode({ id: "a", x: 0, y: 0 });
+    const b = simNode({ id: "b", x: 300, y: 0 });
+    const es = [edge("a", "b")];
+    const view = { width: 800, height: 600 };
+    stepForceLayout([a, b], es, 1, view);
+    // 弹簧伸展初期位移显著，不得误判静止（否则连续帧守卫也救不回）。
+    expect(forceSettled([a, b])).toBe(false);
+    let settled = false;
+    for (let i = 0; i < 6000 && !settled; i++) {
+      stepForceLayout([a, b], es, 1, view);
+      settled = forceSettled([a, b]);
+    }
+    expect(settled).toBe(true);
   });
 });

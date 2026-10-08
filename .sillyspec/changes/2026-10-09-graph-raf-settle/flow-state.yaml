@@ -1,0 +1,38 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：24 小时风险审查实证 graph-canvas.tsx 力场 rAF 循环无收敛截止——force 引擎 ≤200 节点时每帧 O(n²) 步进 + 恒置 dirty 重绘，页面开着恒耗 CPU（n≤200 上限封顶约 2
+  万对/帧），布局早已静止仍在烧。
+
+
+  成功标准：
+
+  - 力场收敛后停止 stepForceLayout 步进（连续 FORCE_SETTLE_FRAMES 帧全节点位移低于 FORCE_SETTLE_EPSILON 判收敛，转折点零速误判由连续帧守卫）
+
+  - 收敛定格时若用户未交互，做一次终局 fitView（承接收敛跟随语义，tick 计数随之停止不缺帧）
+
+  - 数据重建与用户拖拽节点都重启力场（新布局重新演化、拖放后重收敛）
+
+  - 判定提取为导出纯函数 forceSettled 供测试；与真实积分器联测（步进至收敛）
+
+  - 既有 graph-canvas 测试全绿，tsc/eslint 0
+autopilot: true
+baseline_commit: 9918b30bd71e4f30153ee7a4e6beac20183fac45
+updatedAt: '2026-10-08T23:49:18.235Z'
+baseline_sha256: 9b1468eb073ee4cc3384532392242849d5361d9cccd9366e233e3dd12edc612c
+autopilot_ticked: 4
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（2.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008234909\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261008234909\test-result.json｜门文件
+  3 个
+
